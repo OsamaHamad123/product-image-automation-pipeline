@@ -1,0 +1,25 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.ipynb_checkpoints/
+
+# Virtual Environments
+.venv/
+venv/
+ENV/
+env/
+
+# Project Specific Heavy Directories
+clip_model/
+temp/
+
+# HTML Response Dumps
+*.html
+
+# Secrets and Credentials
+.env
+credentials.json
+boulevard-a50a0-30a73e572083.json
+email_service _accountt.txt
