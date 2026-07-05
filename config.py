@@ -34,10 +34,14 @@ DRIVE_FOLDER_ID = os.getenv("DRIVE_FOLDER_ID", "")
 
 # 3. إعدادات البحث عن الصور (Google Image Search)
 # للحصول على نتائج دقيقة ورسمية، أدخل بيانات Google Custom Search API أدناه.
-GOOGLE_SEARCH_API_KEY = os.getenv("GOOGLE_SEARCH_API_KEY", "")
-GOOGLE_SEARCH_CX = os.getenv("GOOGLE_SEARCH_CX", "")
+# يدعم النظام إدخال عدة مفاتيح مفصولة بفاصلة (,) للتدوير التلقائي عند نفاد الحصة (Quota Rotation).
+GOOGLE_SEARCH_API_KEYS = [k.strip() for k in os.getenv("GOOGLE_SEARCH_API_KEY", "").split(",") if k.strip()]
+GOOGLE_SEARCH_CX_LIST = [c.strip() for c in os.getenv("GOOGLE_SEARCH_CX", "").split(",") if c.strip()]
 
-# إذا كانت بيانات Google غير متوفرة، سيقوم النظام تلقائياً بالاعتماد على DuckDuckGo للبحث
+GOOGLE_SEARCH_API_KEY = GOOGLE_SEARCH_API_KEYS[0] if GOOGLE_SEARCH_API_KEYS else ""
+GOOGLE_SEARCH_CX = GOOGLE_SEARCH_CX_LIST[0] if GOOGLE_SEARCH_CX_LIST else ""
+
+# إذا كانت بيانات Google غير متوفرة، سيقوم النظام تلقائياً بالاعتماد على محركات البحث الهجينة
 USE_FALLBACK_SEARCH = True
 
 # 4. إعدادات معالجة الصور وتحجيمها
@@ -48,7 +52,7 @@ IMAGE_TARGET_SIZE = (800, 800)
 # "none" -> تخطي إزالة الخلفية والقيام بالتحجيم فقط (مفيد للاختبار السريع)
 # "rembg" -> استخدام مكتبة rembg المحلية المجانية تماماً (تتطلب تثبيت pip install rembg)
 # "remove_bg_api" -> استخدام خدمة remove.bg السحابية (تتطلب إدخال مفتاح API أدناه)
-BG_REMOVAL_METHOD = "rembg"
+BG_REMOVAL_METHOD = "none"
 
 # مفتاح API الخاص بخدمة remove.bg (مطلوب فقط إذا اخترت "remove_bg_api")
 REMOVE_BG_API_KEY = os.getenv("REMOVE_BG_API_KEY", "")
@@ -68,11 +72,51 @@ CLOUDINARY_BG_REMOVAL = True
 CLOUDINARY_TARGET_SIZE = (800, 800)
 
 # الحد الأدنى لأبعاد الصورة المقبولة (لتجنب المصغرات والصور منخفضة الجودة)
-MIN_IMAGE_WIDTH = 500
-MIN_IMAGE_HEIGHT = 500
+MIN_IMAGE_WIDTH = 100
+MIN_IMAGE_HEIGHT = 100
+ENABLE_ASPECT_RATIO_CHECK = True
+MIN_ASPECT_RATIO = 0.4
+MAX_ASPECT_RATIO = 2.5
+
 
 # إعدادات تحسين الجودة سحابياً عبر Cloudinary
 CLOUDINARY_AUTO_QUALITY = True  # تفعيل الضغط والتحسين التلقائي للحجم (q_auto)
 CLOUDINARY_AUTO_FORMAT = True   # تفعيل تحويل الصيغة التلقائي للأسرع للويب (f_auto)
-CLOUDINARY_AI_ENHANCE = True    # تفعيل تحسين الألوان والتعريض والتباين الذكي (e_enhance)
-CLOUDINARY_SHARPEN = 100        # قوة حدة الصورة (e_sharpen) لتوضيح التفاصيل (0 للإيقاف)
+CLOUDINARY_AI_ENHANCE = False    # إيقاف تحسين الألوان السحابي التلقائي لمنع التشويه والألوان الفاقعة
+CLOUDINARY_SHARPEN = 0          # قوة حدة الصورة سحابياً (0 للإيقاف، تم التخفيض لمنع بكسلة الصورة وتشويه النصوص)
+
+# 7. إعدادات تخطي أو استبدال الصور
+# إذا كان True، سيقوم النظام بالبحث عن الصور وتحديثها حتى لو كانت الخلية تحتوي على رابط سابق.
+# إذا كان False، سيتم تخطي أي صف يحتوي بالفعل على رابط صورة لتوفير الموارد.
+FORCE_OVERWRITE_IMAGES = False
+
+# 8. إعدادات التحقق المتقدم للبحث والصور
+# مفتاح API الخاص بـ Gemini (من Google AI Studio) للتحقق البصري المتقدم
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+ENABLE_GEMINI_VISION = True
+ENABLE_LOCAL_OCR = False
+STRICT_BRAND_MATCH = os.getenv("STRICT_BRAND_MATCH", "True").lower() == "true"
+
+
+# نطاقات المواقع الإماراتية الموثوقة للتجارة الإلكترونية لتحديد نطاق البحث المبدئي
+TRUSTED_UAE_DOMAINS = ["kibsons.com", "carrefouruae.com", "luluhypermarket.com", "noon.com", "amazon.ae"]
+
+# 9. إعدادات الترقيات المتقدمة (البروكسي والتنبيهات)
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "7974160066:AAFdgG1HZuu_822sCTwzYDNmk_-ZnebKrYc")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
+PROXY_URL = os.getenv("PROXY_URL", "")
+
+# تتبع استهلاك الـ API محلياً في الذاكرة
+METRICS = {
+    "gemini_api_calls": 0,
+    "cloudinary_uploads": 0,
+    "successful_runs": 0,
+    "failed_runs": 0
+}
+
+# 10. إعدادات تسريع الأداء وتحسين الكفاءة للبحث
+MAX_PARALLEL_DOWNLOADS = 4      # عدد التنزيلات المتوازية للصور المرشحة
+SEARCH_CACHE_ENABLED = True     # تفعيل التخزين المؤقت لنتائج محرك البحث لمنع التكرار
+SEARCH_CACHE_TTL = 86400        # عمر التخزين المؤقت للبحث (24 ساعة بالثواني)
+
+

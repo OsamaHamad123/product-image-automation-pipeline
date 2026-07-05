@@ -52,17 +52,36 @@ def run_automation_pipeline():
         print(f"🔄 معالجة المنتج ({i}/{len(products)}): [{name}] (البراند: {brand}) | صف رقم {row_num}")
         print("-" * 50)
         
-        # تخطي المنتجات التي تحتوي بالفعل على رابط لتوفير استهلاك الـ API والوقت
-        if existing_link:
+        # تخطي المنتجات التي تحتوي بالفعل على رابط لتوفير استهلاك الـ API والوقت (إلا إذا تم تفعيل فرض الكتابة فوقها)
+        if existing_link and not config.FORCE_OVERWRITE_IMAGES:
             print(f"⏭️ تخطي: المنتج يحتوي بالفعل على رابط صورة: {existing_link}")
             skipped_count += 1
             continue
             
         # أ. البحث عن أفضل صورة (مع تقييم الصلة والدقة)
-        best_image = image_search.search_best_product_image(query, name, brand)
+        product_name_ar = prod.get("product_name_ar", "")
+        brand_ar = prod.get("brand_ar", "")
+        best_image = image_search.search_best_product_image(
+            query, 
+            name, 
+            brand, 
+            product_name_ar=product_name_ar, 
+            brand_ar=brand_ar,
+            barcode=prod.get("barcode", ""),
+            category=prod.get("category", ""),
+            origin=prod.get("origin", "")
+        )
         if not best_image:
             print(f"⚠️ تخطي: لم نعثر على صورة مناسبة للمنتج '{name}'")
             failed_count += 1
+            # إشعار Telegram بالفشل
+            msg = (
+                f"<b>⚠️ فشل أتمتة منتج!</b>\n\n"
+                f"📦 <b>المنتج:</b> {name}\n"
+                f"🏷️ <b>الماركة:</b> {brand}\n"
+                f"❌ <b>السبب:</b> لم يتم العثور على أي صورة تطابق معايير القبول والجودة البصرية."
+            )
+            image_processor.send_telegram_notification(msg)
             continue
             
         image_url = best_image["url"]
@@ -73,16 +92,48 @@ def run_automation_pipeline():
         if not processed_image_path or not os.path.exists(processed_image_path):
             print(f"⚠️ فشل في تحميل أو معالجة الصورة محلياً للمنتج '{name}'")
             failed_count += 1
+            # إشعار Telegram بالفشل
+            msg = (
+                f"<b>⚠️ فشل أتمتة منتج!</b>\n\n"
+                f"📦 <b>المنتج:</b> {name}\n"
+                f"🏷️ <b>الماركة:</b> {brand}\n"
+                f"❌ <b>السبب:</b> فشل تحميل الصورة المرشحة أو فشل عزل الخلفية وتنعيم الحواف."
+            )
+            image_processor.send_telegram_notification(msg)
             continue
             
-        # ج. رفع الصورة المعالجة محلياً إلى Cloudinary وتوليد الرابط الآمن
+        # ج. استخراج البيانات الوصفية (القيم الغذائية والمكونات والوصف التسويقي والتصنيفات) أولاً لتنظيم المجلدات سحابياً
+        metadata = image_processor.extract_metadata_from_image(processed_image_path, name, brand)
+        
+        folder = "products"
+        tags = []
+        if metadata:
+            google_sheets.update_product_metadata(worksheet, row_num, metadata)
+            
+            # بناء هيكلية المجلدات بناءً على تصنيف الويب المستخرج
+            cat1 = metadata.get("category_l1_en", "").strip().lower().replace(" ", "_").replace("&", "and")
+            cat2 = metadata.get("category_l2_en", "").strip().lower().replace(" ", "_").replace("&", "and")
+            if cat1:
+                if cat2:
+                    folder = f"products/{cat1}/{cat2}"
+                else:
+                    folder = f"products/{cat1}"
+                    
+            # تحويل الوسوم لقائمة
+            tags_str = metadata.get("tags_en", "")
+            if tags_str:
+                tags = [t.strip() for t in tags_str.split(",") if t.strip()]
+                
+        # د. رفع الصورة المعالجة محلياً إلى Cloudinary وتوليد الرابط الآمن بالمجلد والوسوم المستهدفة
         image_link = cloudinary_storage.upload_product_image_to_cloudinary(
             processed_image_path, 
             name, 
-            brand
+            brand,
+            folder=folder,
+            tags=tags
         )
         
-        # د. تنظيف ملف الصورة المعالجة من المجلد المؤقت
+        # هـ. تنظيف ملف الصورة المعالجة من المجلد المؤقت
         try:
             if os.path.exists(processed_image_path):
                 os.remove(processed_image_path)
@@ -105,9 +156,27 @@ def run_automation_pipeline():
         if update_success:
             print(f"🎉 تم تحديث بيانات الصف {row_num} بنجاح بالرابط الجديد!")
             success_count += 1
+            # إشعار Telegram بالنجاح
+            msg = (
+                f"<b>🎉 تم أتمتة منتج جديد بنجاح!</b>\n\n"
+                f"📦 <b>المنتج:</b> {name}\n"
+                f"🏷️ <b>الماركة:</b> {brand}\n"
+                f"📂 <b>المجلد:</b> <code>{folder}</code>\n"
+                f"🏷️ <b>الوسوم:</b> {metadata.get('tags_ar', '') if metadata else ''}\n"
+                f"🔗 <a href='{image_link}'>رابط الصورة النهائي</a>"
+            )
+            image_processor.send_telegram_notification(msg)
         else:
             print(f"⚠️ فشل كتابة الرابط في الشيت للصف {row_num}")
             failed_count += 1
+            # إشعار Telegram بالفشل
+            msg = (
+                f"<b>⚠️ فشل أتمتة منتج!</b>\n\n"
+                f"📦 <b>المنتج:</b> {name}\n"
+                f"🏷️ <b>الماركة:</b> {brand}\n"
+                f"❌ <b>السبب:</b> فشل كتابة وتحديث الرابط الجديد داخل ورقة Google Sheets."
+            )
+            image_processor.send_telegram_notification(msg)
             
     print("\n" + "=" * 60)
     print("🏁 انتهت عملية الأتمتة بنجاح!")
