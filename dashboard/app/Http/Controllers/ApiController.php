@@ -46,15 +46,19 @@ class ApiController extends Controller
             }
 
             $file = $request->file('file');
-            
+
+            // تجميع جميع حقول النموذج بما فيها معايير التحجيم ولون الخلفية
+            $formFields = $request->only([
+                'row_number', 'product_name', 'brand', 'barcode',
+                'target_width', 'target_height', 'padding_ratio', 'bg_color', 'upscale'
+            ]);
+
             // إرسال الطلب لـ Flask مع إرفاق الملف كـ Multipart
-            $response = Http::attach(
-                'file', 
-                file_get_contents($file->getPathname()), 
+            $response = Http::timeout(120)->attach(
+                'file',
+                file_get_contents($file->getPathname()),
                 $file->getClientOriginalName()
-            )->post("{$this->flaskUrl}/api/upload_manual_image", $request->only([
-                'row_number', 'product_name', 'brand', 'barcode'
-            ]));
+            )->post("{$this->flaskUrl}/api/upload_manual_image", $formFields);
 
             return response()->json($response->json(), $response->status());
         } catch (\Exception $e) {
@@ -68,11 +72,23 @@ class ApiController extends Controller
     public function logs()
     {
         try {
-            $response = Http::get("{$this->flaskUrl}/api/logs");
-            return response()->json($response->json(), $response->status());
+            $response = Http::timeout(3)->get("{$this->flaskUrl}/api/logs");
+            return response()->json($response->json(), $response->status())
+                ->header('Cache-Control', 'no-store');
         } catch (\Exception $e) {
-            return response()->json(['error' => $e->getMessage()], 500);
+            // إرجاع مصفوفة فارغة بدلاً من خطأ كامل عند تعطل Flask
+            return response()->json(['logs' => []], 200)
+                ->header('Cache-Control', 'no-store');
         }
+    }
+
+    /**
+     * مسح كاش قائمة المنتجات لإجبار التحديث من Google Sheets
+     */
+    public function clearProductsCache()
+    {
+        \Cache::forget('products_json_v1');
+        return response()->json(['status' => 'success', 'message' => 'Products cache cleared']);
     }
 
     /**

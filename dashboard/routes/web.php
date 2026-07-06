@@ -10,6 +10,7 @@ Route::get('/catalog', [ProductController::class, 'catalog'])->name('dashboard.c
 
 // خدمات البيانات الداخلية لـ AJAX
 Route::get('/api/products-json', [ProductController::class, 'getProductsJson']);
+Route::post('/api/clear-products-cache', [ApiController::class, 'clearProductsCache']);
 
 // بروكسي للاتصال بالبايثون
 Route::post('/api/search', [ApiController::class, 'search']);
@@ -20,3 +21,4 @@ Route::post('/api/run_all', [ApiController::class, 'runAll']);
 Route::post('/api/run-all', [ApiController::class, 'runAll']);
 Route::get('/api/batch_status', [ApiController::class, 'batchStatus']);
 Route::get('/api/batch-status', [ApiController::class, 'batchStatus']);
+

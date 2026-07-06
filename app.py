@@ -852,7 +852,7 @@ def api_upload_manual_image():
         
         print(f"\n[Flask API] Manual drag-drop image uploaded for Row {row_number} - File size: {os.path.getsize(raw_path)} bytes")
         
-        # 1. تشغيل الفرز والقص التلقائي والظلال (Image Beautification)
+        # 1. اقتصاص ذكي بالذكاء الاصطناعي إن وُجد مربع محيط بالمنتج
         import image_processor
         box = image_processor.get_product_bounding_box(raw_path, product_name, brand)
         if box:
@@ -865,27 +865,19 @@ def api_upload_manual_image():
                     pass
                 os.rename(cropped_path, raw_path)
                 
+        # 2. إزالة الخلفية فقط - التحجيم والقص والتوسيط يتم سحابياً عبر Cloudinary
         nobg_path = os.path.join("temp", f"nobg_{safe_name}.png")
         if not image_processor.remove_background(raw_path, nobg_path):
             nobg_path = raw_path
             
-        final_path = os.path.join("temp", f"final_{safe_name}.png")
-        if not image_processor.resize_and_pad_image(nobg_path, final_path):
-            final_path = nobg_path
-            
+        # 3. تحسين طفيف للجودة قبل الرفع بدون resize_and_pad محلي
         temp_enhanced = os.path.join("temp", f"enhanced_{safe_name}.png")
-        if image_processor.enhance_image_quality(final_path, temp_enhanced):
+        final_path = nobg_path
+        if image_processor.enhance_image_quality(nobg_path, temp_enhanced):
             try:
-                if os.path.exists(final_path):
-                    os.remove(final_path)
-                os.rename(temp_enhanced, final_path)
+                final_path = temp_enhanced
             except Exception:
                 pass
-                
-        # تحسين الجودة بالتكبير الفائق بالذكاء الاصطناعي
-        upscale = request.form.get('upscale', 'true') == 'true'
-        if upscale:
-            upscale_image(final_path, scale=2)
             
         # 2. استخراج الميتاداتا
         metadata = image_processor.extract_metadata_from_image(final_path, product_name, brand)

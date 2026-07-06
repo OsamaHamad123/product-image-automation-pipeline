@@ -508,8 +508,15 @@
     <div class="sidebar-panel">
         <div class="sidebar-header">
             <h3><i class="fas fa-file-spreadsheet"></i> منتجات الشيت</h3>
-            <span id="sheetProductCount" class="score-badge">0</span>
+            <div style="display:flex; align-items:center; gap:0.5rem;">
+                <i id="cacheIndicator" class="fas fa-bolt" title="⚡ من الكاش" style="font-size:0.8rem; color:var(--accent-cyan); cursor:help;"></i>
+                <span id="sheetProductCount" class="score-badge">0</span>
+                <button id="refreshBtn" onclick="refreshProducts()" title="تحديث من Google Sheets مباشرة" style="background:none; border:1px solid var(--panel-border); color:var(--text-secondary); border-radius:6px; padding:3px 8px; cursor:pointer; font-size:0.8rem; transition:all 0.2s;" onmouseover="this.style.color='var(--accent-cyan)'" onmouseout="this.style.color='var(--text-secondary)'">
+                    <i class="fas fa-sync-alt"></i>
+                </button>
+            </div>
         </div>
+
         
         <div class="sidebar-search-container">
             <i class="fas fa-search"></i>
@@ -815,21 +822,44 @@
         initTaxonomyDropdowns();
     });
 
-    // جلب قائمة المنتجات
-    async function loadProducts() {
+    // جلب قائمة المنتجات (مع كاش 60 ثانية في السيرفر)
+    async function loadProducts(forceRefresh = false) {
         const productList = document.getElementById('productList');
+        productList.innerHTML = '<p style="text-align:center; color:var(--text-secondary); padding:2rem;"><i class="fas fa-spinner fa-spin"></i> جاري تحميل المنتجات...</p>';
         try {
+            if (forceRefresh) {
+                // مسح كاش السيرفر أولاً لإجبار التحديث من Google Sheets
+                await fetch('/api/clear-products-cache', {
+                    method: 'POST',
+                    headers: { 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content }
+                });
+            }
             const res = await fetch('/api/products-json');
             const data = await res.json();
+            const fromCache = res.headers.get('X-Cache') === 'HIT';
             if (data.status === 'success') {
                 currentProducts = data.products;
                 updateKPIStats();
                 renderProductList();
+                // إظهار مؤشر الكاش
+                const cacheIndicator = document.getElementById('cacheIndicator');
+                if (cacheIndicator) {
+                    cacheIndicator.title = fromCache ? '⚡ من الكاش (60 ث)' : '🔄 بيانات حية من Google Sheets';
+                    cacheIndicator.style.color = fromCache ? 'var(--accent-cyan)' : 'var(--success)';
+                }
             }
         } catch (err) {
             console.error(err);
             productList.innerHTML = '<p style="color: var(--danger); text-align: center; padding: 2rem;">فشل جلب المنتجات. تأكد من تشغيل Flask.</p>';
         }
+    }
+
+    // تحديث قسري من Google Sheets مع مسح الكاش
+    async function refreshProducts() {
+        const btn = document.getElementById('refreshBtn');
+        if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>'; }
+        await loadProducts(true);
+        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-sync-alt"></i>'; }
     }
 
     // تفريغ إحصائيات عداد الكروت الجانبية

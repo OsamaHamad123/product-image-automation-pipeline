@@ -503,24 +503,21 @@ def enhance_image_quality(image_path, output_path):
 
 def process_product_image(image_url, product_name, brand):
     """
-    المعالج الشامل لصورة المنتج: تحميل، إزالة خلفية، تحجيم.
-    يرجع مسار ملف الصورة المعالجة النهائي.
+    تحميل الصورة وإزالة خلفيتها فقط - التحجيم والقص والتوسيط يتم سحابياً عبر Cloudinary.
+    يرجع مسار ملف الصورة بخلفية شفافة جاهزة للرفع.
     """
-    # إنشاء مجلد مؤقت للعمليات داخل بيئة العمل
     os.makedirs("temp", exist_ok=True)
     
-    # تنظيف اسم الملف
     safe_name = f"{product_name}_{brand}".replace("/", "_").replace("\\", "_").replace(":", "_").replace(" ", "_")
     
-    raw_path = os.path.join("temp", f"raw_{safe_name}.png")
+    raw_path  = os.path.join("temp", f"raw_{safe_name}.png")
     nobg_path = os.path.join("temp", f"nobg_{safe_name}.png")
-    final_path = os.path.join("temp", f"final_{safe_name}.png")
     
-    # 1. تنزيل الصورة
+    # 1. تنزيل الصورة الأصلية
     if not download_image(image_url, raw_path):
         return None
         
-    # 1.5. الاقتصاص الذكي بالذكاء الاصطناعي إذا تم العثور على مربع محيط بالمنتج
+    # 2. الاقتصاص الذكي بالذكاء الاصطناعي إذا تم العثور على مربع محيط بالمنتج
     box = get_product_bounding_box(raw_path, product_name, brand)
     if box:
         cropped_path = os.path.join("temp", f"cropped_{safe_name}.png")
@@ -532,35 +529,29 @@ def process_product_image(image_url, product_name, brand):
                 pass
             os.rename(cropped_path, raw_path)
         
-    # 2. إزالة الخلفية
+    # 3. إزالة الخلفية فقط - التحجيم والقص يتم سحابياً عبر Cloudinary
     if not remove_background(raw_path, nobg_path):
-        # في حال الفشل نستخدم الصورة الخام كمصدر للخطوة التالية
+        # في حال فشل إزالة الخلفية نستخدم الصورة الخام
         nobg_path = raw_path
         
-    # 3. التحجيم الديناميكي والتوسيط
-    if not resize_and_pad_image(nobg_path, final_path):
-        return None
-        
-    # 4. التجميل التوليدي والحد البصري وإزالة العلامات المائية الهامشية
+    # 4. تحسين طفيف للجودة (حدة الحواف) قبل الرفع
     temp_enhanced = os.path.join("temp", f"enhanced_{safe_name}.png")
-    if enhance_image_quality(final_path, temp_enhanced):
+    final_path = nobg_path
+    if enhance_image_quality(nobg_path, temp_enhanced):
         try:
-            if os.path.exists(final_path):
-                os.remove(final_path)
-            os.rename(temp_enhanced, final_path)
+            final_path = temp_enhanced
         except Exception:
             pass
         
-    # تنظيف الملفات المؤقتة غير الضرورية لتوفير المساحة
+    # تنظيف الملف الخام المؤقت إن لم يكن هو المخرج النهائي
     try:
-        if os.path.exists(raw_path) and raw_path != nobg_path:
+        if os.path.exists(raw_path) and raw_path != final_path and raw_path != nobg_path:
             os.remove(raw_path)
-        if os.path.exists(nobg_path) and nobg_path != final_path:
-            os.remove(nobg_path)
     except Exception:
         pass
         
     return final_path
+
 
 def send_telegram_notification(text):
     """

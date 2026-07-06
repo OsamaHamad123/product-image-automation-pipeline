@@ -79,7 +79,19 @@ class ProductController extends Controller
     public function getProductsJson()
     {
         try {
-            $response = Http::get("{$this->flaskUrl}/api/products");
+            // كاش 60 ثانية لتجنب الاتصال المتكرر البطيء بـ Google Sheets API
+            $cacheKey = 'products_json_v1';
+            $cachedProducts = \Cache::get($cacheKey);
+
+            if ($cachedProducts !== null) {
+                return response()->json([
+                    'status'   => 'success',
+                    'products' => $cachedProducts,
+                    'cached'   => true
+                ])->header('X-Cache', 'HIT');
+            }
+
+            $response = Http::timeout(20)->get("{$this->flaskUrl}/api/products");
             if (!$response->successful()) {
                 return response()->json(['error' => 'Failed to load products from Flask'], 500);
             }
@@ -112,10 +124,14 @@ class ProductController extends Controller
                 }
             }
 
+            // حفظ النتيجة في الكاش لمدة 60 ثانية
+            \Cache::put($cacheKey, $products, 60);
+
             return response()->json([
-                'status' => 'success',
-                'products' => $products
-            ]);
+                'status'   => 'success',
+                'products' => $products,
+                'cached'   => false
+            ])->header('X-Cache', 'MISS');
         } catch (\Exception $e) {
             return response()->json(['error' => $e->getMessage()], 500);
         }
