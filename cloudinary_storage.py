@@ -15,10 +15,10 @@ cloudinary.config(
     secure = True
 )
 
-def upload_product_image_to_cloudinary(local_path, product_name, brand, folder=None, tags=None):
+def upload_product_image_to_cloudinary(local_path, product_name, brand, folder=None, tags=None,
+                                         target_width=800, target_height=800, padding_ratio=0.85, bg_color="ffffff"):
     """
-    رفع الصورة المعالجة محلياً (المزال خلفيتها ومحجمة بدقة Lanczos) إلى Cloudinary،
-    ثم تطبيق تحسينات الألوان والحدة وتجاوز كاش الـ CDN بالنسخة الصحيحة.
+    رفع الصورة المعالجة محلياً إلى Cloudinary مع بناء تحويلات ديناميكية فورية للحجم والتوسيط وهوامش الأمان ولون الخلفية سحابياً.
     """
     if not os.path.exists(local_path):
         print(f"❌ خطأ: ملف الصورة المحلي غير موجود في المسار: {local_path}")
@@ -50,8 +50,30 @@ def upload_product_image_to_cloudinary(local_path, product_name, brand, folder=N
         # رفع الصورة المحلية
         response = cloudinary.uploader.upload(local_path, **upload_options)
         
-        # إنشاء رابط التحويل الديناميكي
-        transformation = []
+        # إنشاء رابط التحويل الديناميكي المستند لخيارات المستخدم سحابياً
+        # حساب أبعاد المنتج الداخلية بناءً على هامش الأمان المطلوب
+        inner_w = int(target_width  * padding_ratio)
+        inner_h = int(target_height * padding_ratio)
+        
+        transformation = [
+            # 1. إزالة أي هوامش شفافة/بيضاء فارغة زائدة حول المنتج
+            {"crop": "trim"},
+            # 2. تحجيم المنتج ليتناسب ضمن مساحة الـ inner بالبكسل مع الحفاظ على النسبة (c_fit)
+            {"width": inner_w, "height": inner_h, "crop": "fit"}
+        ]
+        
+        # 3. توسيط المنتج وإكمال canvas الأبعاد المستهدفة مع لون الخلفية المحدد (c_pad)
+        pad_transformation = {
+            "width": target_width, 
+            "height": target_height, 
+            "crop": "pad"
+        }
+        if bg_color and bg_color.lower() != "transparent":
+            clean_bg = bg_color.lstrip('#')
+            pad_transformation["background"] = f"rgb:{clean_bg}"
+            
+        transformation.append(pad_transformation)
+
         
         # أ. تحسين الألوان والتباين بالذكاء الاصطناعي (e_enhance)
         if config.CLOUDINARY_AI_ENHANCE:

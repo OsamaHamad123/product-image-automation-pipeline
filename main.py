@@ -4,10 +4,12 @@
 import os
 import sys
 import config
+print = config.log_runner
 import google_sheets
 import image_search
 import image_processor
 import cloudinary_storage
+import local_cache_db
 
 def run_automation_pipeline():
     """
@@ -72,7 +74,7 @@ def run_automation_pipeline():
             origin=prod.get("origin", "")
         )
         if not best_image:
-            print(f"⚠️ تخطي: لم نعثر على صورة مناسبة للمنتج '{name}'")
+            config.log_and_fail(prod.get("barcode"), name, brand, "لم يتم العثور على أي صورة تطابق معايير القبول والجودة البصرية.")
             failed_count += 1
             # إشعار Telegram بالفشل
             msg = (
@@ -84,13 +86,36 @@ def run_automation_pipeline():
             image_processor.send_telegram_notification(msg)
             continue
             
+        # تحقق من التخزين المحلي الذكي لتسريع المعالجة
+        if best_image.get("source") == "sqlite_cache":
+            print(f"⚡ [Local Cache Hit] استرجاع فوري للمنتج '{name}' من الكاش المحلي!")
+            image_link = best_image["url"]
+            metadata = best_image.get("metadata")
+            if metadata:
+                google_sheets.update_product_metadata(worksheet, row_num, metadata)
+            update_success = google_sheets.update_image_link(worksheet, row_num, link_column_index, image_link)
+            if update_success:
+                print(f"🎉 تم تحديث بيانات الصف {row_num} بنجاح من الكاش المحلي!")
+                success_count += 1
+                # إشعار تليجرام بالنجاح الفوري
+                msg = (
+                    f"<b>🎉 تم أتمتة منتج جديد بنجاح (من الكاش المحلي)!</b>\n\n"
+                    f"📦 <b>المنتج:</b> {name}\n"
+                    f"🏷️ <b>الماركة:</b> {brand}\n"
+                    f"🔗 <a href='{image_link}'>رابط الصورة النهائي</a>"
+                )
+                image_processor.send_telegram_notification(msg)
+            else:
+                failed_count += 1
+            continue
+
         image_url = best_image["url"]
         print(f"🔗 الصورة المختارة للتحميل: {image_url}")
         
         # ب. تحميل ومعالجة الصورة محلياً (إزالة الخلفية والتحجيم بدقة عالية)
         processed_image_path = image_processor.process_product_image(image_url, name, brand)
         if not processed_image_path or not os.path.exists(processed_image_path):
-            print(f"⚠️ فشل في تحميل أو معالجة الصورة محلياً للمنتج '{name}'")
+            config.log_and_fail(prod.get("barcode"), name, brand, "فشل تحميل الصورة المرشحة أو فشل عزل الخلفية وتنعيم الحواف.")
             failed_count += 1
             # إشعار Telegram بالفشل
             msg = (
@@ -141,21 +166,41 @@ def run_automation_pipeline():
             pass
             
         if not image_link:
-            print(f"⚠️ فشل رفع الصورة المعالجة إلى Cloudinary للمنتج '{name}'")
+            config.log_and_fail(prod.get("barcode"), name, brand, "فشل رفع الصورة المعالجة إلى Cloudinary.")
             failed_count += 1
             continue
             
+        # إضافة بادئة المراجعة الرمادية إذا تطلب الأمر لتنبيه لوحة العرض
+        image_link_for_sheets = f"needs_review:{image_link}" if best_image.get("needs_review") else image_link
+
         # ج. تحديث الشيت بالرابط الجديد
         update_success = google_sheets.update_image_link(
             worksheet, 
             row_num, 
             link_column_index, 
-            image_link
+            image_link_for_sheets
         )
         
         if update_success:
             print(f"🎉 تم تحديث بيانات الصف {row_num} بنجاح بالرابط الجديد!")
             success_count += 1
+            
+            # حفظ في الكاش المحلي للتسجيل والـ Deduplication
+            try:
+                import local_cache_db
+                local_cache_db.save_product_resolution(
+                    prod.get("barcode", ""),
+                    name,
+                    brand,
+                    image_url,
+                    image_link,
+                    best_image.get("clip_score", 0.0),
+                    metadata,
+                    best_image.get("clip_embedding")
+                )
+            except Exception as e:
+                print(f"⚠️ خطأ أثناء حفظ السجل في الكاش: {e}")
+                
             # إشعار Telegram بالنجاح
             msg = (
                 f"<b>🎉 تم أتمتة منتج جديد بنجاح!</b>\n\n"

@@ -7,6 +7,7 @@ import tempfile
 import requests
 import urllib.parse
 import config
+print = config.log_runner
 
 # متغيرات جلوبال لتحميل نموذج CLIP مرة واحدة فقط وتوفير الذاكرة والوقت
 _clip_model = None
@@ -25,7 +26,7 @@ def get_clip_model():
                 print("⏳ جاري تحميل نموذج الذكاء الاصطناعي CLIP محلياً للفحص البصري...")
                 from transformers import CLIPProcessor, CLIPModel
                 import torch
-                _clip_model = CLIPModel.from_pretrained(local_dir)
+                _clip_model = CLIPModel.from_pretrained(local_dir).to('cpu')
                 _clip_processor = CLIPProcessor.from_pretrained(local_dir)
                 print("✅ تم تحميل نموذج CLIP بنجاح!")
             except Exception as e:
@@ -94,6 +95,215 @@ def is_image_real_product(image_path):
     except Exception as e:
         print(f"⚠️ خطأ أثناء فحص الصورة بـ CLIP: {e}")
         return True
+
+def check_image_relevance_via_clip(image_path, brand, product_name):
+    """
+    مقارنة الصورة مباشرة مع اسم المنتج النصي للتأكد من التطابق الدلالي بدقة عالية باستخدام تجميع الاستعلامات (Prompt Ensembling).
+    """
+    model, processor = get_clip_model()
+    if model is None or processor is None:
+        return 1.0, None  # كخيار احتياطي إذا لم يكن النموذج متوفراً
+        
+    try:
+        from PIL import Image
+        import torch
+        
+        image = Image.open(image_path).convert("RGB")
+        
+        # تجميع استعلامات نصية متعددة (Prompt Ensembling)
+        prompts = [
+            f"a product packaging of {brand} {product_name}",
+            f"a photo of {brand} {product_name} packaging box, bottle, or bag",
+            f"packaged {brand} {product_name} commercial product item",
+            f"a retail packaged product photo of {brand} {product_name}"
+        ]
+        
+        inputs = processor(text=prompts, images=image, return_tensors="pt", padding=True)
+        with torch.no_grad():
+            outputs = model(**inputs)
+            
+        # استخراج وتطبيع متجهات الخصائص
+        image_features = outputs.image_embeds
+        text_features = outputs.text_embeds
+        
+        image_features = image_features / image_features.norm(dim=-1, keepdim=True)
+        text_features = text_features / text_features.norm(dim=-1, keepdim=True)
+        
+        # حساب التشابه الجيبي لكل جملة وصفية ثم أخذ المتوسط
+        similarities = (image_features @ text_features.T).squeeze(0)
+        avg_similarity = similarities.mean().item()
+        
+        # تحويل المتجه لقائمة بايثون عادية (512 float)
+        image_embedding = image_features.squeeze(0).tolist()
+        
+        print(f"🤖 [CLIP Ensemble Check] درجة التطابق المتوسطة مع عبوات '{brand} {product_name}': {avg_similarity:.4f}")
+        return avg_similarity, image_embedding
+    except Exception as e:
+        print(f"⚠️ خطأ أثناء حساب تطابق النص المجمع بـ CLIP: {e}")
+        return 1.0, None
+
+def find_semantic_cache_match(product_name, brand, threshold=0.92):
+    """
+    مقارنة دلالية للمنتج الحالي مع أسماء المنتجات المخزنة في SQLite باستخدام المتجهات النصية لـ CLIP للتخطي الفوري للبحث.
+    """
+    try:
+        import local_cache_db
+        import torch
+        import json
+        import sqlite3
+        
+        # 1. جلب كافة المنتجات المسجلة بكود الكاش
+        if not os.path.exists(local_cache_db.DB_PATH):
+            return None
+            
+        conn = sqlite3.connect(local_cache_db.DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("SELECT product_name, brand, cloudinary_url, clip_score, metadata_json FROM resolved_products")
+        rows = cursor.fetchall()
+        conn.close()
+        
+        if not rows:
+            return None
+            
+        # 2. حساب متجه الاستعلام النصي باستخدام CLIP
+        model, processor = get_clip_model()
+        if model is None or processor is None:
+            return None
+            
+        query_prompt = f"a product packaging of {brand} {product_name}"
+        cached_prompts = [f"a product packaging of {row['brand']} {row['product_name']}" for row in rows]
+        
+        # ترميز الاستعلام وكافة المنتجات المخزنة دفعة واحدة في مصفوفة مدمجة
+        all_texts = [query_prompt] + cached_prompts
+        inputs = processor(text=all_texts, return_tensors="pt", padding=True)
+        with torch.no_grad():
+            text_features = model.get_text_features(**inputs)
+            
+        # تطبيع المتجهات النصية رياضياً
+        text_features = text_features / text_features.norm(dim=-1, keepdim=True)
+        query_vector = text_features[0]
+        cached_vectors = text_features[1:]
+        
+        # 3. حساب تشابه جيب التمام مع كافة المتجهات النصية للمنتجات
+        best_match = None
+        max_similarity = -1.0
+        
+        for idx, row in enumerate(rows):
+            emb = cached_vectors[idx]
+            similarity = torch.dot(query_vector, emb).item()
+            
+            if similarity > max_similarity:
+                max_similarity = similarity
+                best_match = row
+                
+        if max_similarity >= threshold and best_match:
+            print(f"⚡ [CLIP Vector Cache Hit] تم العثور على تطابق دلالي ذكي بنسبة {max_similarity:.2%} مع منتج الكاش: '{best_match['brand']} {best_match['product_name']}'")
+            metadata = {}
+            if best_match["metadata_json"]:
+                try:
+                    metadata = json.loads(best_match["metadata_json"])
+                except Exception:
+                    pass
+            return {
+                "url": best_match["cloudinary_url"],
+                "clip_score": best_match["clip_score"],
+                "metadata": metadata,
+                "semantic_similarity": max_similarity
+            }
+            
+    except Exception as e:
+        print(f"⚠️ [CLIP Vector Cache Error] فشل الاستعلام الدلالي عن الكاش: {e}")
+        
+    return None
+
+
+
+
+def validate_image_via_gemini_vision(image_path, product_name, brand):
+    """
+    استخدام Gemini Vision للتحقق البصري السريع والمؤكد من تطابق الصورة مع البراند والمنتج المطلوبين.
+    """
+    if not config.GEMINI_API_KEY or not config.ENABLE_GEMINI_PRE_VALIDATION:
+        return True
+        
+    try:
+        from PIL import Image
+        import base64
+        import io
+        
+        with Image.open(image_path) as img:
+            if img.mode != "RGB":
+                img = img.convert("RGB")
+            img.thumbnail((300, 300))  # تصغير الحجم جداً لتوفير الباندويث والتكلفة
+            buffer = io.BytesIO()
+            img.save(buffer, format="JPEG", quality=70)
+            img_data = base64.b64encode(buffer.getvalue()).decode("utf-8")
+            
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key={config.GEMINI_API_KEY}"
+        
+        prompt = (
+            f"You are a catalog validation assistant.\n"
+            f"Analyze the image and verify if it shows a commercial packaged product from the brand '{brand}' representing '{product_name}'.\n"
+            f"Perform strict attribute validation checks:\n"
+            f"1. Brand check: Must match '{brand}' or its verified synonyms/subsidiaries. Reject if it is a competitor brand (e.g., Almarai instead of Meliha, Mai Dubai instead of Masafi, etc.).\n"
+            f"2. Flavor/Type check: If the target '{product_name}' mentions a specific flavor or type (e.g., 'Chocolate', 'Strawberry', 'Full Cream', 'Low Fat'), the package in the image MUST match this flavor/type. If the image shows a mismatch (e.g., target is Chocolate, image is Strawberry), set 'valid' to false.\n"
+            f"3. Size/Volume check: Check if the product size/volume matches the target name. If the target is a single small pack (e.g., '180ml') and the image shows a large 1L bottle or a bulk box, reject it. If size is not clearly readable or is close enough, you can accept it but explain in reason.\n"
+            f"Reply strictly in JSON format matching this schema:\n"
+            f'{{\n'
+            f'  "valid": true or false,\n'
+            f'  "reason": "brief explanation in English explaining any mismatch or confirmation"\n'
+            f'}}'
+        )
+        
+        payload = {
+            "contents": [
+                {
+                    "parts": [
+                        {"text": prompt},
+                        {
+                            "inlineData": {
+                                "mimeType": "image/jpeg",
+                                "data": img_data
+                            }
+                        }
+                    ]
+                }
+            ],
+            "generationConfig": {
+                "responseMimeType": "application/json"
+            }
+        }
+        
+        headers = {"Content-Type": "application/json"}
+        print(f"🤖 [Gemini Pre-Validation] جاري التحقق البصري الدقيق من المنتج...")
+        
+        # تحديث عداد المكالمات
+        if hasattr(config, "METRICS") and "gemini_api_calls" in config.METRICS:
+            config.METRICS["gemini_api_calls"] += 1
+            
+        response = requests.post(url, headers=headers, json=payload, timeout=15)
+        if response.status_code == 200:
+            import json
+            res_data = response.json()
+            text_response = res_data['candidates'][0]['content']['parts'][0]['text'].strip()
+            if text_response.startswith("```json"):
+                text_response = text_response[7:]
+            elif text_response.startswith("```"):
+                text_response = text_response[3:]
+            if text_response.endswith("```"):
+                text_response = text_response[:-3]
+            text_response = text_response.strip()
+            
+            result = json.loads(text_response)
+            is_valid = result.get("valid", False)
+            reason = result.get("reason", "")
+            print(f"🤖 [Gemini Pre-Validation] النتيجة: {'مقبول ✅' if is_valid else 'مرفوض ❌'} | السبب: {reason}")
+            return is_valid
+    except Exception as e:
+        print(f"⚠️ خطأ أثناء التحقق المسبق بـ Gemini Vision: {e}")
+        
+    return True  # إذا فشل الاتصال بالـ API نقبله كاحتياط
 
 def yandex_image_search(query):
     """
@@ -257,25 +467,37 @@ def is_image_accessible(url):
         pass
     return False
 
+def clean_product_name_for_search(name):
+    """
+    تنظيف اسم المنتج من الأحجام والوحدات والصيغ الخاصة لزيادة فرص العثور عليه
+    """
+    # إزالة الأوزان والأحجام الشائعة
+    cleaned = re.sub(r'\b\d+(?:\.\d+)?\s*(?:ml|l|g|kg|pcs|pack|ltr|gm|oz|ozs|milliliter|liter|gram|kilogram|مل|لتر|جرام|جم|كجم|حبة)\b', '', name, flags=re.IGNORECASE)
+    # إزالة الأقواس الفارغة أو علامات الترقيم الزائدة
+    cleaned = re.sub(r'\s*[\(\[].*?[\)\]]', '', cleaned)
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+    return cleaned
+
 def get_fallback_query(product_name):
     """
     توليد استعلام بحث بديل يركز على شكل المنتج التجاري (مثل علبة، كرتونة، كيس)
     بدلاً من المكونات الخام لمنع جلب صور طبيعية غير ملائمة للمتجر.
     """
-    name_lower = product_name.lower()
+    cleaned_name = clean_product_name_for_search(product_name)
+    name_lower = cleaned_name.lower()
     
     if "milk" in name_lower:
-        if "180ml" in name_lower or "200ml" in name_lower or "250ml" in name_lower:
-            return f"{product_name} carton"
-        return f"{product_name} bottle"
+        if "carton" in name_lower or any(x in product_name.lower() for x in ["180ml", "200ml", "250ml"]):
+            return f"{cleaned_name} carton"
+        return f"{cleaned_name} bottle"
     elif "flour" in name_lower:
-        return f"{product_name} bag"
+        return f"{cleaned_name} bag"
     elif "laban" in name_lower:
-        return f"{product_name} bottle"
+        return f"{cleaned_name} bottle"
     elif "kefir" in name_lower or "yogurt" in name_lower:
-        return f"{product_name} bottle"
+        return f"{cleaned_name} bottle"
         
-    return f"{product_name} product"
+    return f"{cleaned_name} product"
 
 def evaluate_and_choose_best_image(results, product_name, brand, requires_brand_match=False, trace=None, step_name="البحث الأساسي", query=None, brand_mappings=None):
     """
@@ -289,14 +511,18 @@ def evaluate_and_choose_best_image(results, product_name, brand, requires_brand_
     
     # الحصول على المرادفات الخاصة بالبراند المعني لضمان مطابقة صارمة ذكية ودقيقة
     synonyms = [brand_lower]
+    excluded_competitors = []
     if brand_mappings:
         # البحث عن البراند المعني في جدول المرادفات
         for k, mapping in brand_mappings.items():
             if k == brand_lower or mapping.get("brand", "").lower().strip() == brand_lower:
                 synonyms.extend([s.lower().strip() for s in mapping.get("synonyms", [])])
+                if config.FILTER_COMPETITORS:
+                    excluded_competitors.extend([c.lower().strip() for c in mapping.get("excluded_competitors", [])])
                 
     # إزالة التكرارات والفارغ
     synonyms = list(set([s for s in synonyms if s]))
+    excluded_competitors = list(set([c for c in excluded_competitors if c]))
     
     candidates = []
     
@@ -350,6 +576,24 @@ def evaluate_and_choose_best_image(results, product_name, brand, requires_brand_
                     break
                     
         if is_cartoon_or_illustration:
+            candidates.append({
+                "url": item['url'],
+                "title": item.get('title', ''),
+                "status": "rejected",
+                "scores": {"relevance_score": 0, "is_uae_source": is_uae_source},
+                "reasons": reasons
+            })
+            continue
+            
+        # 2.5. check competitor brand match
+        has_competitor_match = False
+        if excluded_competitors:
+            for competitor in excluded_competitors:
+                if competitor and (competitor in url_lower or competitor in title_lower):
+                    has_competitor_match = True
+                    reasons.append(f"تطابق مع منافس مستبعد: '{competitor}'")
+                    break
+        if has_competitor_match:
             candidates.append({
                 "url": item['url'],
                 "title": item.get('title', ''),
@@ -426,32 +670,91 @@ def evaluate_and_choose_best_image(results, product_name, brand, requires_brand_
     chosen_item = None
     chosen_relevance = 0
     
-    # فحص الروابط بالترتيب واختيار أول رابط يمكن الوصول إليه ويجتاز فحص CLIP الذكي
+    # فحص الروابط بالترتيب واختيار أول رابط يمكن الوصول إليه ويجتاز الفحوصات المتقدمة
     for r in scored_results:
         item = r['item']
         c_idx = r['candidate_index']
         reasons = candidates[c_idx]['reasons']
         
         if is_image_accessible(item['url']):
-            # تحميل مؤقت للصورة للتحقق منها بواسطة نموذج CLIP
+            # تحميل مؤقت للصورة للتحقق منها بواسطة نماذج الفحص
             temp_img = download_temp_image(item['url'])
             if temp_img:
                 is_real = is_image_real_product(temp_img)
+                if not is_real:
+                    reasons.append("مستبعدة: تم رفض الصورة بواسطة نموذج CLIP (تبدو كرتونية أو غير واقعية)")
+                    try:
+                        os.remove(temp_img)
+                    except Exception:
+                        pass
+                    continue
+                
+                # الفحص الدلالي المطور بـ CLIP
+                relevance_score_clip, clip_embedding = check_image_relevance_via_clip(temp_img, brand, product_name)
+                is_relevant = relevance_score_clip >= config.CLIP_RELEVANCE_THRESHOLD
+                is_grey_zone = False
+                
+                if not is_relevant:
+                    if relevance_score_clip >= getattr(config, "CLIP_GREY_ZONE_THRESHOLD", 0.18):
+                        is_grey_zone = True
+                    else:
+                        reasons.append(f"مستبعدة: درجة المطابقة الدلالية منخفضة ({relevance_score_clip:.4f} < {config.CLIP_RELEVANCE_THRESHOLD})")
+                        try:
+                            os.remove(temp_img)
+                        except Exception:
+                            pass
+                        continue
+                        
+                # كشف التكرار البصري المحلي لمنع رفع نفس الصورة لمنتجين مختلفين
+                try:
+                    import local_cache_db
+                    duplicate = local_cache_db.find_visual_duplicate(clip_embedding, threshold=0.96)
+                    if duplicate and duplicate["product_name"].lower() != product_name.lower():
+                        print(f"⚠️ [Visual Duplicate] الصورة مكررة بصرياً مع منتج آخر: '{duplicate['product_name']}'")
+                        reasons.append(f"مستبعدة: كشف تكرار بصري متطابق مع منتج آخر ({duplicate['product_name']})")
+                        try:
+                            os.remove(temp_img)
+                        except Exception:
+                            pass
+                        continue
+                except Exception as e:
+                    print(f"⚠️ خطأ أثناء فحص التكرار البصري في الكاش: {e}")
+                
+                # الفحص الذكي بـ Gemini Vision
+                is_valid_gemini = validate_image_via_gemini_vision(temp_img, product_name, brand)
+                if not is_valid_gemini:
+                    reasons.append("مستبعدة: تم رفض المطابقة البصرية عبر Gemini Vision (براند/منتج خاطئ)")
+                    try:
+                        os.remove(temp_img)
+                    except Exception:
+                        pass
+                    continue
+                
+                # مقبولة بنجاح (سواء بالقبول المباشر أو المراجعة لاحقاً)
+                if is_grey_zone:
+                    reasons.append(f"مراجعة: درجة المطابقة متوسطة في المنطقة الرمادية (CLIP Similarity: {relevance_score_clip:.4f})")
+                    candidates[c_idx]['status'] = 'accepted'
+                    chosen_item = item
+                    chosen_item['needs_review'] = True
+                    chosen_item['clip_score'] = relevance_score_clip
+                    chosen_item['clip_embedding'] = clip_embedding
+                    chosen_relevance = r['relevance_score']
+                else:
+                    reasons.append(f"مقبولة: تم التحقق من واقعية وجودة ومطابقة المنتج (CLIP Similarity: {relevance_score_clip:.4f})")
+                    candidates[c_idx]['status'] = 'accepted'
+                    chosen_item = item
+                    chosen_item['clip_score'] = relevance_score_clip
+                    chosen_item['clip_embedding'] = clip_embedding
+                    chosen_relevance = r['relevance_score']
+                    
                 try:
                     os.remove(temp_img)
                 except Exception:
                     pass
-                if is_real:
-                    reasons.append("مقبولة: الرابط متاح وتم التحقق من واقعية المنتج بنموذج CLIP")
-                    candidates[c_idx]['status'] = 'accepted'
-                    chosen_item = item
-                    chosen_relevance = r['relevance_score']
-                    break
-                else:
-                    reasons.append("مستبعدة: تم رفض الصورة بواسطة نموذج CLIP (تبدو كرتونية أو غير واقعية)")
+                break
             else:
                 # إذا تعذر تحميلها مؤقتاً للفحص، نقبل الصورة كخيار افتراضي
-                reasons.append("مقبولة: الرابط متاح (تخطي فحص CLIP لتعذر تحميل الملف المؤقت)")
+                reasons.append("مقبولة: الرابط متاح (تخطي الفحوصات لتعذر تحميل الملف المؤقت)")
                 candidates[c_idx]['status'] = 'accepted'
                 chosen_item = item
                 chosen_relevance = r['relevance_score']
@@ -485,6 +788,61 @@ def evaluate_and_choose_best_image(results, product_name, brand, requires_brand_
         })
     return item, r['relevance_score']
 
+def expand_query_via_gemini(product_name, brand):
+    """
+    استخدام Gemini لإنشاء 3 جمل بحث محسنة ومختلفة لزيادة فرص العثور على صورة المنتج الصحيحة.
+    """
+    if not config.GEMINI_API_KEY:
+        return [f"{brand} {product_name}".strip()]
+        
+    try:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={config.GEMINI_API_KEY}"
+        
+        prompt = (
+            f"You are a shopping search optimization assistant.\n"
+            f"Generate 3 diverse search engine queries for finding product images of: Brand: '{brand}' and Product Name: '{product_name}'.\n"
+            f"Requirements:\n"
+            f"1. Query 1: standard brand and product name in English.\n"
+            f"2. Query 2: optimized shopping search string in English with 'packaging' or 'product pack' appended.\n"
+            f"3. Query 3: optimized search string in Arabic containing the translated brand and product name.\n"
+            f"Return strictly a JSON array of strings containing exactly 3 queries, like:\n"
+            f'["query 1", "query 2", "query 3"]'
+        )
+        
+        payload = {
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {"responseMimeType": "application/json"}
+        }
+        headers = {"Content-Type": "application/json"}
+        
+        if hasattr(config, "METRICS") and "gemini_api_calls" in config.METRICS:
+            config.METRICS["gemini_api_calls"] += 1
+            
+        res = requests.post(url, headers=headers, json=payload, timeout=8)
+        if res.status_code == 200:
+            import json
+            res_data = res.json()
+            text = res_data['candidates'][0]['content']['parts'][0]['text'].strip()
+            if text.startswith("```json"):
+                text = text[7:]
+            elif text.startswith("```"):
+                text = text[3:]
+            if text.endswith("```"):
+                text = text[:-3]
+            text = text.strip()
+            queries = json.loads(text)
+            if isinstance(queries, list) and len(queries) >= 1:
+                print(f"🤖 [Gemini Query Expansion] الاستعلامات المولدة: {queries}")
+                return [q.strip() for q in queries if q.strip()]
+    except Exception as e:
+        print(f"⚠️ خطأ أثناء توليد الاستعلامات عبر Gemini: {e}")
+        
+    return [
+        f"{brand} {product_name}".strip(),
+        f"{brand} {product_name} packaging".strip(),
+        f"{brand} {product_name}".strip()
+    ]
+
 def search_best_product_image(query, product_name, brand, **kwargs):
     """
     البحث واختيار الصورة الأمثل للمنتج، مع تطبيق خطة بديلة للبحث العام
@@ -493,6 +851,44 @@ def search_best_product_image(query, product_name, brand, **kwargs):
     trace = kwargs.get('trace')
     strict_brand_match = kwargs.get('strict_brand_match')
     brand_mappings = kwargs.get('brand_mappings')
+    barcode = kwargs.get('barcode', '')
+    
+    # 0. الاستعلام من قاعدة البيانات المحلية الكاش كخطوة أولى فائقة السرعة
+    try:
+        import local_cache_db
+        cached = local_cache_db.get_cached_product(barcode=barcode, product_name=product_name, brand=brand)
+        if cached:
+            print(f"⚡ [SQLite Cache Hit] العثور على حل مخزن محلياً لـ '{product_name}'")
+            return {
+                "url": cached["cloudinary_url"],
+                "title": "مسترجع من الكاش المحلي",
+                "width": 800,
+                "height": 800,
+                "clip_score": cached["clip_score"],
+                "metadata": cached["metadata"],
+                "source": "sqlite_cache"
+            }
+    except Exception as e:
+        print(f"⚠️ خطأ أثناء قراءة الكاش المحلي: {e}")
+        
+    # 0.أ. الاستعلام الدلالي الذكي عبر المتجهات (Vector Semantic Search) كخطوة ثانية فائقة السرعة
+    try:
+        semantic_cached = find_semantic_cache_match(product_name, brand, threshold=0.82)
+        if semantic_cached:
+            print(f"⚡ [CLIP Vector Cache Hit] العثور على حل دلالي مخزن لـ '{product_name}'")
+            config.METRICS["semantic_cache_savings"] += 1
+            return {
+                "url": semantic_cached["url"],
+                "title": "مسترجع دلالياً من الكاش المحلي",
+                "width": 800,
+                "height": 800,
+                "clip_score": semantic_cached["clip_score"],
+                "metadata": semantic_cached["metadata"],
+                "source": "sqlite_cache",
+                "semantic_similarity": semantic_cached.get("semantic_similarity")
+            }
+    except Exception as e:
+        print(f"⚠️ خطأ أثناء البحث الدلالي في الكاش: {e}")
     
     # افتراضياً، نقوم بتفعيل المطابقة الصارمة إذا كان البراند مدخلاً لمنع خلط المنتجات مع المنافسين
     if strict_brand_match is None and brand:
@@ -508,33 +904,57 @@ def search_best_product_image(query, product_name, brand, **kwargs):
         except Exception as e:
             print(f"⚠️ فشل جلب مرادفات البراندات في محرك البحث: {e}")
             
-    results = []
+    # 0. البحث بالباركود كخيار أول فائق الدقة
+    barcode = kwargs.get('barcode', '')
+    if barcode and str(barcode).strip():
+        barcode_clean = str(barcode).strip()
+        print(f"🔍 جاري البحث المخصص باستخدام الباركود للمنتج: '{barcode_clean}'...")
+        
+        barcode_results = []
+        if config.GOOGLE_SEARCH_API_KEY and config.GOOGLE_SEARCH_CX:
+            barcode_results = google_image_search(barcode_clean)
+        if not barcode_results:
+            barcode_results = yandex_image_search(barcode_clean)
+        if not barcode_results and config.USE_FALLBACK_SEARCH:
+            barcode_results = bing_image_search(barcode_clean)
+            
+        if barcode_results:
+            best_image, brand_score = evaluate_and_choose_best_image(
+                barcode_results, product_name, brand, requires_brand_match=True, trace=trace, 
+                step_name="البحث بالباركود والبراند", query=barcode_clean, brand_mappings=brand_mappings
+            )
+            if best_image:
+                print(f"🎯 تم العثور على صورة المنتج المطابقة بنجاح عبر الباركود: {best_image['title']}")
+                return best_image
+        print(f"ℹ️ لم يتم العثور على صورة مطابقة عبر الباركود. الانتقال للبحث النصي الأساسي...")
+        
+        
+    # 1. البحث باستخدام الاستعلامات الموسعة بالذكاء الاصطناعي
+    queries = expand_query_via_gemini(product_name, brand)
     
-    # 1. البحث الأساسي بالاسم والبراند معاً
-    print(f"🔍 جاري البحث الأساسي للمنتج: '{query}'...")
-    
-    # أ. تجربة Google Custom Search أولاً
-    if config.GOOGLE_SEARCH_API_KEY and config.GOOGLE_SEARCH_CX:
-        results = google_image_search(query)
-        
-    # ب. تجربة Yandex كخيار بديل قوي
-    if not results:
-        results = yandex_image_search(query)
-        
-    # ج. تجربة Bing كخيار ثالث
-    if not results and config.USE_FALLBACK_SEARCH:
-        results = bing_image_search(query)
-        
-    # التحقق من ملاءمة نتائج البحث الأساسي
     best_image = None
     brand_score = 0
+    all_primary_results = []
     
-    if results:
-        # نقوم بالتقييم ونشترط مطابقة البراند (لنتأكد من أننا حصلنا على صورة البراند الحقيقية)
-        best_image, brand_score = evaluate_and_choose_best_image(
-            results, product_name, brand, requires_brand_match=True, trace=trace, 
-            step_name="البحث الأساسي بالبراند", query=query, brand_mappings=brand_mappings
-        )
+    for q_idx, q in enumerate(queries, start=1):
+        print(f"🔍 [Gemini Query {q_idx}/3] جاري البحث بالاستعلام المحسن: '{q}'...")
+        q_results = []
+        if config.GOOGLE_SEARCH_API_KEY and config.GOOGLE_SEARCH_CX:
+            q_results = google_image_search(q)
+        if not q_results:
+            q_results = yandex_image_search(q)
+        if not q_results and config.USE_FALLBACK_SEARCH:
+            q_results = bing_image_search(q)
+            
+        if q_results:
+            all_primary_results.extend(q_results)
+            best_image, brand_score = evaluate_and_choose_best_image(
+                q_results, product_name, brand, requires_brand_match=True, trace=trace, 
+                step_name=f"البحث بالاستعلام المحسن {q_idx}", query=q, brand_mappings=brand_mappings
+            )
+            if best_image:
+                print(f"🎯 تم العثور على صورة مقبولة باستخدام الاستعلام المحسن: '{q}'")
+                break
         
     # 2. خطة البحث البديل (Generic Fallback Search)
     # إذا لم نجد صورة مطابقة للبراند (brand_score = 0)، فهذا يعني أن البراند غير مفهرس.
@@ -578,13 +998,13 @@ def search_best_product_image(query, product_name, brand, **kwargs):
         return best_image
         
     # إذا فشل كل شيء، نأخذ أول صورة من البحث الأساسي كخيار أخير جداً
-    if results:
+    if all_primary_results:
         # إذا كانت المطابقة الصارمة مفعلة، لا يجب أن نأخذ أي صورة عشوائية لم تطابق البراند
         if strict_brand_match and brand:
             print("ℹ️ تم تفعيل المطابقة الصارمة للبراند. تخطي أخذ أي صورة لم تطابق البراند كخيار أخير.")
             return None
         print("⚠️ تحذير: لم نجد صورة براند مطابقة ولا صورة عامة مثالية. اختيار أول نتيجة بحث أساسي كخيار أخير.")
-        return results[0]
+        return all_primary_results[0]
         
     print(f"❌ فشل العثور على أي صورة للمنتج '{product_name}'")
     return None

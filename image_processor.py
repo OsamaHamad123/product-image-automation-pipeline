@@ -313,13 +313,14 @@ def remove_background(input_path, output_path):
             print(f"❌ خطأ أثناء نسخ الصورة الشفافة: {e}")
             return False
 
-    # 2. تحقق مما إذا كانت الخلفية بيضاء صلبة، ونقوم بإزالتها بـ Flood-fill غير مدمر لحماية المنتج من القص الزائد
-    print("⏳ جاري فحص الصورة للكشف عن خلفية بيضاء صلبة...")
-    if remove_white_background_floodfill(input_path, output_path, thresh=30):
-        print("✅ تم إزالة الخلفية البيضاء الخارجية بنجاح باستخدام خوارزمية Flood-fill المخصصة للمنتجات!")
-        return True
-
     method = config.BG_REMOVAL_METHOD.lower()
+
+    # 2. تحقق مما إذا كانت الخلفية بيضاء صلبة، ونقوم بإزالتها بـ Flood-fill كخيار مجاني سريع فقط عند إيقاف rembg
+    if method == "none":
+        print("⏳ جاري فحص الصورة للكشف عن خلفية بيضاء صلبة...")
+        if remove_white_background_floodfill(input_path, output_path, thresh=30):
+            print("✅ تم إزالة الخلفية البيضاء الخارجية بنجاح باستخدام خوارزمية Flood-fill!")
+            return True
     
     if method == "none":
         # تخطي إزالة الخلفية
@@ -410,7 +411,7 @@ def resize_and_pad_image(input_path, output_path, target_size=None, background_c
             
             alpha = img.getchannel('A')
             # تطبيق تمويه خفيف جداً لجعل الحواف ناعمة ومنع القص الخشن دون التضحية بدقة ونصوص العبوة
-            alpha_feathered = alpha.filter(ImageFilter.GaussianBlur(radius=0.4))
+            alpha_feathered = alpha.filter(ImageFilter.GaussianBlur(radius=0.8))
             img.putalpha(alpha_feathered)
             
             # --- ب. إنشاء ظل ساقط ناعم (Soft Drop Shadow) ---

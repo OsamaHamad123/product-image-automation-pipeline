@@ -124,6 +124,13 @@ def get_products(worksheet):
             
             # قراءة الرابط الحالي إذا كان العمود موجوداً وبه قيمة
             existing_link = row[link_idx].strip() if link_idx < len(row) else ""
+            
+            needs_review = False
+            needs_review_url = ""
+            if existing_link.startswith("needs_review:"):
+                needs_review = True
+                needs_review_url = existing_link.replace("needs_review:", "").strip()
+                existing_link = "" # نعتبر الرابط الرئيسي فارغاً ليظهر في طابور الأتمتة والمراجعة
 
             # نقوم فقط بمعالجة الصفوف التي تحتوي على اسم منتج على الأقل
             if product_name:
@@ -139,6 +146,8 @@ def get_products(worksheet):
                     "category": category,
                     "origin": origin,
                     "existing_image_link": existing_link,
+                    "needs_review": needs_review,
+                    "needs_review_url": needs_review_url,
                     "search_query": f"{product_name} {brand}".strip()
                 })
         
