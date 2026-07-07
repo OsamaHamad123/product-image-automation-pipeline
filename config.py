@@ -50,15 +50,16 @@ IMAGE_TARGET_SIZE = (800, 800)
 
 # خيار إزالة خلفية الصورة. الخيارات المتاحة:
 # "none" -> تخطي إزالة الخلفية والقيام بالتحجيم فقط (مفيد للاختبار السريع)
+# "bria_rmbg" -> استخدام نموذج Bria RMBG 1.4 المحلي المجاني وفائق الدقة (مستحسن)
 # "rembg" -> استخدام مكتبة rembg المحلية المجانية تماماً (تتطلب تثبيت pip install rembg)
 # "remove_bg_api" -> استخدام خدمة remove.bg السحابية (تتطلب إدخال مفتاح API أدناه)
-BG_REMOVAL_METHOD = "rembg"
+BG_REMOVAL_METHOD = "bria_rmbg"
 
 # مفتاح API الخاص بخدمة remove.bg (مطلوب فقط إذا اخترت "remove_bg_api")
 REMOVE_BG_API_KEY = os.getenv("REMOVE_BG_API_KEY", "")
 
 # 5. ملف اعتمادات Google Service Account
-CREDENTIALS_FILE = os.getenv("CREDENTIALS_FILE", "credentials.json")
+CREDENTIALS_FILE = os.getenv("CREDENTIALS_FILE", os.path.join(os.path.dirname(os.path.abspath(__file__)), "credentials.json"))
 
 # 6. إعدادات Cloudinary
 CLOUDINARY_CLOUD_NAME = os.getenv("CLOUDINARY_CLOUD_NAME", "")
@@ -80,10 +81,12 @@ MAX_ASPECT_RATIO = 2.5
 
 
 # إعدادات تحسين الجودة سحابياً عبر Cloudinary
+CLOUDINARY_QUALITY = "auto:best" # درجة جودة الضغط سحابياً (مثل auto أو auto:best أو auto:good للمحافظة على أقصى دقة)
 CLOUDINARY_AUTO_QUALITY = True  # تفعيل الضغط والتحسين التلقائي للحجم (q_auto)
 CLOUDINARY_AUTO_FORMAT = True   # تفعيل تحويل الصيغة التلقائي للأسرع للويب (f_auto)
 CLOUDINARY_AI_ENHANCE = False    # إيقاف تحسين الألوان السحابي التلقائي لمنع التشويه والألوان الفاقعة
-CLOUDINARY_SHARPEN = 0          # قوة حدة الصورة سحابياً (0 للإيقاف، تم التخفيض لمنع بكسلة الصورة وتشويه النصوص)
+CLOUDINARY_SHARPEN = 20          # قوة حدة الصورة سحابياً (0 للإيقاف، تم استخدام 20 لإبراز تفاصيل النصوص دون التسبب بتشويه)
+CLOUDINARY_TRIM_TOLERANCE = 5  # سماحية الاقتصاص لـ Cloudinary لمنع قص حواف المنتجات اللامعة أو الدائرية (0-100)
 
 # 7. إعدادات تخطي أو استبدال الصور
 # إذا كان True، سيقوم النظام بالبحث عن الصور وتحديثها حتى لو كانت الخلية تحتوي على رابط سابق.
@@ -102,7 +105,14 @@ CLIP_RELEVANCE_THRESHOLD = float(os.getenv("CLIP_RELEVANCE_THRESHOLD", "0.22"))
 CLIP_GREY_ZONE_THRESHOLD = float(os.getenv("CLIP_GREY_ZONE_THRESHOLD", "0.18"))
 ENABLE_GEMINI_PRE_VALIDATION = os.getenv("ENABLE_GEMINI_PRE_VALIDATION", "True").lower() == "true"
 FILTER_COMPETITORS = os.getenv("FILTER_COMPETITORS", "True").lower() == "true"
+# إعدادات النماذج المحلية للتحقق البصري المطور (Hugging Face Models)
+SIGLIP_MODEL_ID = "google/siglip-base-patch16-224"
+BLIP_MODEL_ID = "Salesforce/blip-image-captioning-base"
+MOONDREAM_MODEL_ID = "vikhyatk/moondream2"
 
+USE_SIGLIP_SEMANTIC_CHECK = True
+USE_BLIP_CAPTION_CHECK = True
+USE_MOONDREAM_CHECK = False  # يمكن تفعيله يدوياً لتشغيل Moondream2 في الفرز الحتمي النهائي
 
 # نطاقات المواقع الإماراتية الموثوقة للتجارة الإلكترونية لتحديد نطاق البحث المبدئي
 TRUSTED_UAE_DOMAINS = ["kibsons.com", "carrefouruae.com", "luluhypermarket.com", "noon.com", "amazon.ae"]

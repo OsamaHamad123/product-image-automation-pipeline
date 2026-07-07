@@ -15,7 +15,8 @@ class ApiController extends Controller
     public function search(Request $request)
     {
         try {
-            $response = Http::post("{$this->flaskUrl}/api/search", $request->all());
+            set_time_limit(120);
+            $response = Http::timeout(120)->post("{$this->flaskUrl}/api/search", $request->all());
             return response()->json($response->json(), $response->status());
         } catch (\Exception $e) {
             return response()->json(['error' => $e->getMessage()], 500);
@@ -28,7 +29,8 @@ class ApiController extends Controller
     public function selectImage(Request $request)
     {
         try {
-            $response = Http::post("{$this->flaskUrl}/api/select_image", $request->all());
+            set_time_limit(120);
+            $response = Http::timeout(120)->post("{$this->flaskUrl}/api/select_image", $request->all());
             return response()->json($response->json(), $response->status());
         } catch (\Exception $e) {
             return response()->json(['error' => $e->getMessage()], 500);
@@ -41,6 +43,7 @@ class ApiController extends Controller
     public function uploadManualImage(Request $request)
     {
         try {
+            set_time_limit(120);
             if (!$request->hasFile('file')) {
                 return response()->json(['error' => 'No file uploaded'], 400);
             }
@@ -112,6 +115,104 @@ class ApiController extends Controller
         try {
             $response = Http::get("{$this->flaskUrl}/api/batch_status");
             return response()->json($response->json(), $response->status());
+        } catch (\Exception $e) {
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * بروكسي لجلب الصور الخارجية وتخطي حظر الـ Hotlinking
+     */
+    public function imageProxy(Request $request)
+    {
+        $url = $request->query('url');
+        if (!$url) {
+            return response('Missing URL', 400);
+        }
+        try {
+            set_time_limit(60);
+            $response = Http::withHeaders([
+                'User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            ])->timeout(10)->get($url);
+            
+            if ($response->successful()) {
+                return response($response->body(), 200)
+                    ->header('Content-Type', $response->header('Content-Type') ?: 'image/jpeg');
+            } else {
+                return response('Error fetching image', $response->status());
+            }
+        } catch (\Exception $e) {
+            return response('Error: ' . $e->getMessage(), 500);
+        }
+    }
+
+    /**
+     * التحقق من حالة المنفذ 5000 (Flask) والمنفذ 8000 (Laravel) محلياً
+     */
+    public function systemStatus()
+    {
+        $flaskOnline = false;
+        try {
+            $response = Http::timeout(2)->get("{$this->flaskUrl}/");
+            if ($response->successful()) {
+                $flaskOnline = true;
+            }
+        } catch (\Exception $e) {
+            $flaskOnline = false;
+        }
+
+        return response()->json([
+            'laravel_server' => 'online',
+            'flask_server' => $flaskOnline ? 'online' : 'offline',
+            'local_cache_db' => file_exists(base_path('../local_cache.db')) ? 'active' : 'empty_cleared',
+            'search_cache' => file_exists(base_path('../search_cache.json')) ? 'active' : 'missing'
+        ]);
+    }
+
+    /**
+     * تشغيل خادم Flask بالخلفية
+     */
+    public function startFlask()
+    {
+        try {
+            $pythonPath = 'C:\\Users\\OsamaHamad\\AppData\\Local\\Programs\\Python\\Python314\\python.exe';
+            $scriptPath = base_path('../app.py');
+
+            if (!file_exists($pythonPath)) {
+                $pythonPath = 'python';
+            }
+
+            pclose(popen("start /B {$pythonPath} {$scriptPath} > nul 2>&1", "r"));
+
+            return response()->json(['status' => 'success', 'message' => 'Flask backend startup command sent successfully.']);
+        } catch (\Exception $e) {
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * إيقاف خادم Flask عبر إنهاء العملية المفتوحة على المنفذ 5000
+     */
+    public function stopFlask()
+    {
+        try {
+            $output = [];
+            exec("netstat -ano | findstr :5000", $output);
+            
+            $killed = 0;
+            foreach ($output as $line) {
+                $parts = preg_split('/\s+/', trim($line));
+                $pid = end($parts);
+                if (is_numeric($pid) && $pid > 0) {
+                    exec("taskkill /F /PID {$pid}");
+                    $killed++;
+                }
+            }
+
+            return response()->json([
+                'status' => 'success',
+                'message' => "Flask stopped. Terminated {$killed} active process connection(s)."
+            ]);
         } catch (\Exception $e) {
             return response()->json(['error' => $e->getMessage()], 500);
         }

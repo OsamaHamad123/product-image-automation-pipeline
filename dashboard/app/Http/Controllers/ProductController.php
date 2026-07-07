@@ -121,6 +121,8 @@ class ProductController extends Controller
                 // دمج تفاصيل الكاش
                 if ($barcode && isset($resolved[$barcode])) {
                     $prod['cached_image'] = $resolved[$barcode]->cloudinary_url;
+                    $prod['clip_score'] = $resolved[$barcode]->clip_score;
+                    $prod['resolved_at'] = $resolved[$barcode]->resolved_at ? $resolved[$barcode]->resolved_at->toIso8601String() : null;
                 }
             }
 

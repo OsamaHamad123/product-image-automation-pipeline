@@ -7,11 +7,202 @@ import tempfile
 import requests
 import urllib.parse
 import config
+import asyncio
+import io
+import aiohttp
+from PIL import Image
+
 print = config.log_runner
 
 # متغيرات جلوبال لتحميل نموذج CLIP مرة واحدة فقط وتوفير الذاكرة والوقت
 _clip_model = None
 _clip_processor = None
+
+MAX_FILE_SIZE = 4 * 1024 * 1024      # 4 ميجابايت كحد أقصى للصور
+MIN_FILE_SIZE = 10 * 1024            # 10 كيلوبايت كحد أدنى
+SUPPORTED_MIME_TYPES = (
+    "image/jpeg",
+    "image/jpg",
+    "image/png",
+    "image/webp"
+)
+
+SPOOFED_BROWSER_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Connection": "keep-alive"
+}
+
+async def stream_and_validate_target(session, image_url, connection_timeout_seconds=8):
+    """
+    تستقبل جلسة العمل النشطة وتنفذ عملية تحقق متدفقة من ترويسات الاستجابة
+    في طلب اتصال مفرد لتفادي عمليات المصافحة المتكررة غير الضرورية للشبكة.
+    """
+    client_timeout = aiohttp.ClientTimeout(total=connection_timeout_seconds)
+    try:
+        async with session.get(
+            image_url,
+            headers=SPOOFED_BROWSER_HEADERS,
+            timeout=client_timeout,
+            allow_redirects=True
+        ) as http_response:
+            if http_response.status != 200:
+                return image_url, None, f"REJECTED_STATUS_{http_response.status}"
+            
+            response_headers = http_response.headers
+            detected_content_type = response_headers.get("Content-Type", "").lower().strip()
+            detected_content_length = response_headers.get("Content-Length")
+            
+            # التحقق الفوري من نوع الملف
+            if not any(mime in detected_content_type for mime in SUPPORTED_MIME_TYPES):
+                return image_url, None, f"UNSUPPORTED_MIME_TYPE_{detected_content_type}"
+            
+            # فحص حجم البيانات الأولي
+            if detected_content_length is not None:
+                try:
+                    file_size_bytes = int(detected_content_length)
+                    if file_size_bytes > MAX_FILE_SIZE:
+                        return image_url, None, f"FILE_SIZE_EXCEEDS_LIMIT_{file_size_bytes}"
+                    if file_size_bytes < MIN_FILE_SIZE:
+                        return image_url, None, f"FILE_SIZE_BELOW_MINIMUM_{file_size_bytes}"
+                except ValueError:
+                    pass
+            
+            # القراءة التدريجية المتدفقة لضمان تصفية الأحجام الزائدة ديناميكياً
+            downloaded_bytes_accumulator = bytearray()
+            accumulated_size_counter = 0
+            
+            async for data_chunk in http_response.content.iter_chunked(65536):
+                accumulated_size_counter += len(data_chunk)
+                if accumulated_size_counter > MAX_FILE_SIZE:
+                    return image_url, None, "DYNAMIC_STREAM_ABORT_OVERSIZE"
+                downloaded_bytes_accumulator.extend(data_chunk)
+            
+            final_payload_size = len(downloaded_bytes_accumulator)
+            if final_payload_size < MIN_FILE_SIZE:
+                return image_url, None, f"FINAL_DOWNLOAD_SIZE_TOO_SMALL_{final_payload_size}"
+                
+            return image_url, bytes(downloaded_bytes_accumulator), "VERIFICATION_SUCCESS"
+    except asyncio.TimeoutError:
+        return image_url, None, "TIMEOUT_EXPIRED"
+    except Exception as e:
+        return image_url, None, f"PIPELINE_ERROR_{str(e)}"
+
+async def execute_batch_processing(url_collection):
+    """
+    تدير عمليات التنفيذ المتوازي باستعمال موصلات مقابس محسنة
+    تضمن تعظيم معدلات تدفق تجميع البيانات دون التسبب في إحباط اتصالات الشبكة.
+    """
+    optimized_network_connector = aiohttp.TCPConnector(
+        limit=150,
+        limit_per_host=10,
+        ttl_dns_cache=300
+    )
+    execution_results = {}
+    async with aiohttp.ClientSession(connector=optimized_network_connector) as http_client_session:
+        active_pipeline_tasks = [
+            asyncio.create_task(stream_and_validate_target(http_client_session, url)) 
+            for url in url_collection
+        ]
+        batch_responses = await asyncio.gather(*active_pipeline_tasks, return_exceptions=False)
+        for url, binary_data, processing_status in batch_responses:
+            if binary_data is not None:
+                try:
+                    # التحقق من سلامة البنية الداخلية للصورة بالذاكرة
+                    memory_stream = io.BytesIO(binary_data)
+                    with Image.open(memory_stream) as validated_pil_image:
+                        validated_pil_image.verify()
+                    execution_results[url] = (binary_data, "VERIFICATION_SUCCESS")
+                except Exception as file_corruption_err:
+                    execution_results[url] = (None, f"IMAGE_CORRUPT_OR_UNREADABLE_{str(file_corruption_err)}")
+            else:
+                execution_results[url] = (None, processing_status)
+    return execution_results
+
+def extract_sizes(text):
+    """
+    استخراج الأحجام والأوزان والوحدات من النص وتوحيدها للمقارنة الرقمية.
+    مثال: "Milk 1L" -> {'sizes': [(1000.0, 'ml')], 'packs': []}
+    """
+    if not text:
+        return {"sizes": [], "packs": []}
+    text = text.lower()
+    
+    # 1. استخراج الأبعاد والأحجام المعتادة (مل، لتر، جرام، كجم)
+    # يدعم الصيغ مثل: 180ml, 1l, 500g, 1kg, 1.5 l, 1.5litre, 200 gm, 1.5ltr
+    pattern = r'\b(\d+(?:\.\d+)?)\s*(ml|l|g|gm|kg|ltr|litre|grams|kilograms)\b'
+    matches = re.findall(pattern, text)
+    
+    # 2. استخراج العبوات المتعددة (Packs) مثل: x6, pack of 6, 6pcs, 6s
+    pack_pattern = r'\b(?:pack\s+of\s+|x\s*)(\d+)\b|\b(\d+)\s*(?:pcs|s|pack|packs)\b'
+    pack_matches = re.findall(pack_pattern, text)
+    
+    sizes = []
+    for val, unit in matches:
+        try:
+            val = float(val)
+            # توحيد الوحدات السائلة إلى ml
+            if unit in ['ml']:
+                unit = 'ml'
+            elif unit in ['l', 'ltr', 'litre']:
+                val *= 1000.0
+                unit = 'ml'
+            # توحيد الوحدات الجافة إلى g
+            elif unit in ['g', 'gm', 'grams']:
+                unit = 'g'
+            elif unit in ['kg', 'kilograms']:
+                val *= 1000.0
+                unit = 'g'
+            sizes.append((val, unit))
+        except ValueError:
+            continue
+            
+    packs = []
+    for m1, m2 in pack_matches:
+        p_val = m1 or m2
+        if p_val:
+            try:
+                packs.append(int(p_val))
+            except ValueError:
+                continue
+                
+    return {"sizes": sizes, "packs": packs}
+
+def check_volume_clash(target_name, candidate_title, candidate_url=""):
+    """
+    التحقق مما إذا كان هناك تعارض صريح في الحجم أو الوزن بين المنتج المطلوب والصورة المرشحة.
+    يرجع (True, reason) في حال وجود تعارض، و(False, "") إذا كانت متوافقة أو غير محددة.
+    """
+    target_data = extract_sizes(target_name)
+    candidate_text = (candidate_title or "") + " " + (candidate_url or "")
+    candidate_data = extract_sizes(candidate_text)
+    
+    # إذا لم يتم تحديد الحجم في الاسم المستهدف، فلا يوجد تعارض مؤكد
+    if not target_data["sizes"]:
+        return False, ""
+        
+    # مقارنة الأحجام المكتشفة
+    for t_val, t_unit in target_data["sizes"]:
+        for c_val, c_unit in candidate_data["sizes"]:
+            if t_unit == c_unit:
+                # إذا اختلفت القيم الرقمية بنسبة تزيد عن 20%
+                ratio = max(t_val, c_val) / min(t_val, c_val) if min(t_val, c_val) > 0 else 1.0
+                if ratio > 1.2:
+                    unit_name = "مل" if t_unit == "ml" else "جرام"
+                    t_display = f"{t_val/1000:.1f} لتر" if (t_unit == "ml" and t_val >= 1000) else f"{t_val:.0f} {unit_name}"
+                    c_display = f"{c_val/1000:.1f} لتر" if (c_unit == "ml" and c_val >= 1000) else f"{c_val:.0f} {unit_name}"
+                    return True, f"تعارض في الحجم/الوزن: المطلوب ({t_display}) والموجود بالصورة ({c_display})"
+                    
+    # مقارنة العبوات المتعددة (Packs) إذا كانت محددة بوضوح في الطرفين
+    if target_data["packs"] and candidate_data["packs"]:
+        t_pack = target_data["packs"][0]
+        c_pack = candidate_data["packs"][0]
+        if t_pack != c_pack:
+            return True, f"تعارض في عدد العبوات: المطلوب ({t_pack} حبة) والموجود بالصورة ({c_pack} حبة)"
+            
+    return False, ""
+
 
 def get_clip_model():
     """
@@ -34,6 +225,168 @@ def get_clip_model():
         else:
             print("ℹ️ نموذج CLIP المحلي غير متوفر أو لم يكتمل تنزيله بعد. سيتم تخطي الفحص الذكي.")
     return _clip_model, _clip_processor
+
+_siglip_model = None
+_siglip_processor = None
+_blip_model = None
+_blip_processor = None
+
+def get_siglip_model():
+    """
+    تحميل نموذج SigLIP محلياً وبشكل كسول (Lazy Loading).
+    """
+    global _siglip_model, _siglip_processor
+    if _siglip_model is None:
+        try:
+            print("⏳ جاري تحميل نموذج SigLIP للتحقق الدقيق من العلامة التجارية محلياً...")
+            from transformers import AutoProcessor, AutoModel
+            import torch
+            model_id = config.SIGLIP_MODEL_ID
+            _siglip_model = AutoModel.from_pretrained(model_id).to('cpu')
+            _siglip_processor = AutoProcessor.from_pretrained(model_id)
+            print("✅ تم تحميل نموذج SigLIP بنجاح!")
+        except Exception as e:
+            print(f"⚠️ فشل تحميل نموذج SigLIP: {e}")
+    return _siglip_model, _siglip_processor
+
+def get_blip_model():
+    """
+    تحميل نموذج BLIP التوليدي محلياً وبشكل كسول (Lazy Loading).
+    """
+    global _blip_model, _blip_processor
+    if _blip_model is None:
+        try:
+            print("⏳ جاري تحميل نموذج BLIP لإنشاء تسميات وأوصاف الصور محلياً...")
+            from transformers import BlipProcessor, BlipForConditionalGeneration
+            import torch
+            model_id = config.BLIP_MODEL_ID
+            _blip_model = BlipForConditionalGeneration.from_pretrained(model_id).to('cpu')
+            _blip_processor = BlipProcessor.from_pretrained(model_id)
+            print("✅ تم تحميل نموذج BLIP بنجاح!")
+        except Exception as e:
+            print(f"⚠️ فشل تحميل نموذج BLIP: {e}")
+    return _blip_model, _blip_processor
+
+def check_image_relevance_via_siglip(pil_image, brand, product_name):
+    """
+    مقارنة الصورة مباشرة مع اسم المنتج النصي للتأكد من التطابق الدلالي بدقة عالية باستخدام SigLIP.
+    """
+    model, processor = get_siglip_model()
+    if model is None or processor is None:
+        return 1.0, None
+        
+    try:
+        import torch
+        prompts = [
+            f"a product packaging of {brand} {product_name}",
+            f"a photo of {brand} {product_name} packaging box, bottle, or bag",
+            f"packaging label of {brand} {product_name}"
+        ]
+        
+        inputs = processor(text=prompts, images=pil_image, return_tensors="pt", padding=True)
+        with torch.no_grad():
+            outputs = model(**inputs)
+            
+        logits_per_image = outputs.logits_per_image
+        probs = logits_per_image.sigmoid()
+        
+        mean_score = torch.mean(probs).item()
+        print(f"🤖 تحليل SigLIP لصلة الصورة بـ '{brand} {product_name}': {mean_score:.4f}")
+        return mean_score, None
+    except Exception as e:
+        print(f"⚠️ خطأ أثناء فحص الصورة بـ SigLIP: {e}")
+        return 1.0, None
+
+def generate_image_caption_via_blip(pil_image):
+    """
+    توليد وصف نصي حر لمكونات الصورة باستخدام نموذج BLIP.
+    """
+    model, processor = get_blip_model()
+    if model is None or processor is None:
+        return ""
+        
+    try:
+        import torch
+        inputs = processor(images=pil_image, return_tensors="pt")
+        with torch.no_grad():
+            out = model.generate(**inputs)
+        caption = processor.decode(out[0], skip_special_tokens=True)
+        print(f"🤖 [BLIP Image Captioning] الوصف المولد: '{caption}'")
+        return caption
+    except Exception as e:
+        print(f"⚠️ خطأ أثناء توليد وصف الصورة بـ BLIP: {e}")
+        return ""
+
+def verify_brand_alignment_via_caption(caption, brand, product_name):
+    """
+    التحقق من تطابق العلامة التجارية والمنتج دلالياً بناءً على الوصف المولد من BLIP لمنع الخلط بين الماركات.
+    """
+    if not caption or not brand:
+        return True
+        
+    caption_lower = caption.lower()
+    brand_lower = brand.lower()
+    
+    known_competitors = ["lays", "doritos", "pringles", "zwan", "ajmi", "nestle", "al ain", "sadia", "almarai", "nivea", "dove"]
+    for comp in known_competitors:
+        if comp in caption_lower and comp != brand_lower and brand_lower in known_competitors:
+            print(f"❌ [BLIP Brand Conflict Detected] تعارض براند: الصورة لـ '{comp}' والمنتج المطلوب لـ '{brand}'")
+            return False
+            
+    return True
+
+_moondream_model = None
+_moondream_tokenizer = None
+
+def get_moondream_model():
+    """
+    تحميل نموذج Moondream2 محلياً وبشكل كسول (Lazy Loading).
+    """
+    global _moondream_model, _moondream_tokenizer
+    if _moondream_model is None:
+        try:
+            print("⏳ جاري تحميل نموذج Moondream2 للفرز القاطع النهائي محلياً...")
+            from transformers import AutoModelForCausalLM, AutoTokenizer
+            model_id = config.MOONDREAM_MODEL_ID
+            _moondream_model = AutoModelForCausalLM.from_pretrained(
+                model_id, 
+                trust_remote_code=True,
+                revision="2024-08-02"
+            ).to('cpu')
+            _moondream_tokenizer = AutoTokenizer.from_pretrained(model_id)
+            print("✅ تم تحميل نموذج Moondream2 بنجاح!")
+        except Exception as e:
+            print(f"⚠️ فشل تحميل نموذج Moondream2: {e}")
+    return _moondream_model, _moondream_tokenizer
+
+def verify_image_via_moondream(pil_image, brand, product_name):
+    """
+    التحقق الحتمي النهائي باستخدام Moondream2 للإجابة عن الأسئلة الدلالية الثلاثة.
+    """
+    model, tokenizer = get_moondream_model()
+    if model is None or tokenizer is None:
+        return True
+        
+    try:
+        q1 = "Is this image a physical, packaged product box, bag, can or pouch? Answer yes or no."
+        ans1 = model.answer_question(pil_image, q1, tokenizer).strip().lower()
+        print(f"🤖 [Moondream2] Q: {q1} | A: {ans1}")
+        if "no" in ans1 and "yes" not in ans1:
+            print("❌ [Moondream2 Validation Failed] الصورة ليست لمنتج معبأ/مغلف مادي.")
+            return False
+            
+        if brand:
+            q2 = f"Is the brand name or logo of '{brand}' visible on the packaging label? Answer yes or no."
+            ans2 = model.answer_question(pil_image, q2, tokenizer).strip().lower()
+            print(f"🤖 [Moondream2] Q: {q2} | A: {ans2}")
+            if "no" in ans2 and "yes" not in ans2:
+                print(f"❌ [Moondream2 Validation Failed] اسم العلامة التجارية '{brand}' غير ظاهر على الكانفاس.")
+                return False
+                
+        return True
+    except Exception as e:
+        print(f"⚠️ خطأ أثناء التحقق بـ Moondream2: {e}")
+        return True
 
 def download_temp_image(url):
     """
@@ -190,6 +543,29 @@ def find_semantic_cache_match(product_name, brand, threshold=0.92):
         max_similarity = -1.0
         
         for idx, row in enumerate(rows):
+            # 1. التحقق من تطابق البراند بنسبة 100% لتفادي خلط المنتجات
+            row_brand = row["brand"] or ""
+            query_brand = brand or ""
+            if row_brand.lower().strip() != query_brand.lower().strip():
+                continue
+                
+            # 2. التحقق من توافق الكلمات المفتاحية الأساسية للمنتج لمنع الخلط بين النكهات/الأنواع
+            n1 = product_name.lower()
+            n2 = (row["product_name"] or "").lower()
+            
+            # منع الخلط بين الكلمات الدلالية المتعارضة
+            conflicting_keywords = [
+                "chocolate", "strawberry", "vanilla", "laban", "milk", "water", "juice", 
+                "atta", "flour", "oil", "rice", "sugar", "salt", "tea", "coffee", "yogurt"
+            ]
+            conflict_detected = False
+            for kw in conflicting_keywords:
+                if (kw in n1 and kw not in n2) or (kw in n2 and kw not in n1):
+                    conflict_detected = True
+                    break
+            if conflict_detected:
+                continue
+                
             emb = cached_vectors[idx]
             similarity = torch.dot(query_vector, emb).item()
             
@@ -307,8 +683,13 @@ def validate_image_via_gemini_vision(image_path, product_name, brand):
 
 def yandex_image_search(query):
     """
-    البحث عن صور باستخدام محرك بحث Yandex (بديل مجاني قوي جداً وغير محدود).
+    البحث عن صور باستخدام محرك بحث Yandex مع محاكاة كاملة لمتصفح Chrome بـ curl_cffi لتجنب الـ CAPTCHA.
     """
+    try:
+        from curl_cffi import requests as c_requests
+    except ImportError:
+        c_requests = requests
+        
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Accept-Language': 'en-US,en;q=0.9',
@@ -317,7 +698,11 @@ def yandex_image_search(query):
     url = f"https://yandex.com/images/search?text={urllib.parse.quote(query)}"
     
     try:
-        res = requests.get(url, headers=headers, timeout=10)
+        if hasattr(c_requests, "get") and "impersonate" in c_requests.get.__code__.co_varnames:
+            res = c_requests.get(url, headers=headers, impersonate="chrome", timeout=10)
+        else:
+            res = c_requests.get(url, headers=headers, timeout=10)
+            
         if res.status_code != 200:
             print(f"⚠️ خطأ أثناء الاتصال بـ Yandex (كود الاستجابة {res.status_code})")
             return []
@@ -327,17 +712,12 @@ def yandex_image_search(query):
             return []
             
         import html
-        import json
-        
         decoded = html.unescape(res.text)
-        
-        # البحث عن روابط الصور الأصلية والبيانات المرافقة لها
         matches = re.finditer(r'"origUrl"\s*:\s*"([^"]+)"', decoded)
         results = []
         
         for match in matches:
             url_str = match.group(1)
-            # استخراج كتلة النصوص المحيطة لاستخراج الدقة والعنوان
             start = max(0, match.start() - 300)
             end = min(len(decoded), match.end() + 300)
             chunk = decoded[start:end]
@@ -364,24 +744,33 @@ def yandex_image_search(query):
 
 def bing_image_search(query):
     """
-    البحث عن صور باستخدام محرك بحث Bing (بديل مجاني ممتاز لا يتطلب مفاتيح).
+    البحث عن صور باستخدام محرك بحث Bing مع محاكاة كاملة لمتصفح Chrome بـ curl_cffi لتجنب الحظر.
     """
+    try:
+        from curl_cffi import requests as c_requests
+    except ImportError:
+        c_requests = requests
+        
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept-Language': 'en-US,en;q=0.9'
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8'
     }
     url = 'https://www.bing.com/images/search'
     params = {'q': query}
     
     try:
-        res = requests.get(url, headers=headers, params=params, timeout=10)
+        if hasattr(c_requests, "get") and "impersonate" in c_requests.get.__code__.co_varnames:
+            res = c_requests.get(url, headers=headers, params=params, impersonate="chrome", timeout=10)
+        else:
+            res = c_requests.get(url, headers=headers, params=params, timeout=10)
+            
         if res.status_code != 200:
             print(f"⚠️ خطأ أثناء الاتصال بـ Bing (كود الاستجابة {res.status_code})")
             return []
             
         import html
         import json
-        
         decoded = html.unescape(res.text)
         pattern = r'class="iusc"[^>]+?m="({[^}]+?})".*?exph=(\d+).*?expw=(\d+)'
         matches = re.finditer(pattern, decoded, re.DOTALL)
@@ -406,18 +795,122 @@ def bing_image_search(query):
                     })
             except Exception:
                 pass
-                
         return results
     except Exception as e:
         print(f"⚠️ خطأ أثناء البحث في Bing: {e}")
         return []
 
+def duckduckgo_image_search(query):
+    """
+    البحث عن صور باستخدام مكتبة duckduckgo_search المجانية.
+    """
+    try:
+        from duckduckgo_search import DDGS
+        results = []
+        with DDGS() as ddgs:
+            # استخدام تابع images المدمج مع عوامل تصفية قياسية للمنتجات
+            ddgs_generator = ddgs.images(
+                keywords=query,
+                region="wt-wt",
+                safesearch="off",
+                size="Medium"
+            )
+            count = 0
+            for item in ddgs_generator:
+                results.append({
+                    'url': item.get('image'),
+                    'width': int(item.get('width', 800)),
+                    'height': int(item.get('height', 800)),
+                    'title': item.get('title', query)
+                })
+                count += 1
+                if count >= 15:
+                    break
+        return results
+    except Exception as e:
+        print(f"⚠️ خطأ أثناء البحث في DuckDuckGo: {e}")
+        return []
+
+def google_image_search_free(query):
+    """
+    البحث عن صور في Google بدون واجهة برمجة تطبيقات مدفوعة وبشكل متخفٍ بالكامل.
+    """
+    try:
+        from curl_cffi import requests as c_requests
+    except ImportError:
+        c_requests = requests
+        
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Connection': 'keep-alive'
+        }
+        url = f"https://www.google.com/search?q={urllib.parse.quote(query)}&tbm=isch"
+        
+        if hasattr(c_requests, "get") and "impersonate" in c_requests.get.__code__.co_varnames:
+            res = c_requests.get(url, headers=headers, impersonate="chrome", timeout=10)
+        else:
+            res = c_requests.get(url, headers=headers, timeout=10)
+            
+        if res.status_code != 200:
+            return []
+            
+        # استخراج مصفوفات الصور من AF_initDataCallback
+        import json
+        pattern = r"AF_initDataCallback\s*\(\s*\{.*?key:\s*'ds:1'.*?data:\s*(.*?)\}\s*\)\s*;"
+        match = re.search(pattern, res.text, re.DOTALL)
+        results = []
+        
+        if match:
+            try:
+                data_str = match.group(1).strip()
+                if data_str.endswith(","):
+                    data_str = data_str[:-1]
+                data = json.loads(data_str)
+                
+                # استخراج الروابط من المصفوفات المتداخلة برمجياً
+                def extract_img_nodes(lst):
+                    for item in lst:
+                        if isinstance(item, list):
+                            extract_img_nodes(item)
+                        elif isinstance(item, str):
+                            if item.startswith("http") and any(item.lower().endswith(ext) for ext in [".jpg", ".jpeg", ".png", ".webp"]):
+                                results.append({
+                                    'url': item,
+                                    'width': 800,
+                                    'height': 800,
+                                    'title': query
+                                })
+                extract_img_nodes(data)
+            except Exception:
+                pass
+                
+        # خيار بديل سريع بالبحث المباشر عن روابط imgurl
+        if not results:
+            matches = re.findall(r'imgurl=(http[^&]+)', res.text)
+            for m in matches:
+                url_str = urllib.parse.unquote(m)
+                results.append({
+                    'url': url_str,
+                    'width': 800,
+                    'height': 800,
+                    'title': query
+                })
+                
+        return results[:15]
+    except Exception as e:
+        print(f"⚠️ خطأ أثناء البحث في Google (بدون مفتاح): {e}")
+        return []
+
 def google_image_search(query):
     """
-    البحث عن صور باستخدام Google Custom Search API الرسمي.
+    البحث عن صور باستخدام Google Custom Search API الرسمي، مع تراجع تلقائي للنسخة المجانية في حال غياب المفاتيح.
     """
     if not config.GOOGLE_SEARCH_API_KEY or not config.GOOGLE_SEARCH_CX:
-        return []
+        # التراجع التلقائي للنسخة المجانية
+        return google_image_search_free(query)
         
     url = "https://www.googleapis.com/customsearch/v1"
     params = {
@@ -431,7 +924,7 @@ def google_image_search(query):
     try:
         res = requests.get(url, params=params, timeout=5)
         if res.status_code != 200:
-            return []
+            return google_image_search_free(query)
             
         data = res.json()
         results = []
@@ -445,7 +938,7 @@ def google_image_search(query):
             })
         return results
     except Exception:
-        return []
+        return google_image_search_free(query)
 
 def is_image_accessible(url):
     """
@@ -603,6 +1096,19 @@ def evaluate_and_choose_best_image(results, product_name, brand, requires_brand_
             })
             continue
             
+        # 2.7. check size/volume clash (Stage 2: Volume and Unit Validation)
+        has_clash, clash_reason = check_volume_clash(product_name, item.get('title', ''), item['url'])
+        if has_clash:
+            reasons.append(clash_reason)
+            candidates.append({
+                "url": item['url'],
+                "title": item.get('title', ''),
+                "status": "rejected",
+                "scores": {"relevance_score": 0, "is_uae_source": is_uae_source},
+                "reasons": reasons
+            })
+            continue
+            
         # 3. relevance score
         # A. brand check
         if synonyms:
@@ -670,97 +1176,137 @@ def evaluate_and_choose_best_image(results, product_name, brand, requires_brand_
     chosen_item = None
     chosen_relevance = 0
     
+    # 1. التنزيل المتوازي والتحقق من الترويسات والصلاحية (Parallel Download & Header Validation)
+    urls_to_fetch = [r['item']['url'] for r in scored_results]
+    print(f"⏳ [Parallel Download] جاري فحص وتنزيل {len(urls_to_fetch)} صورة مرشحة بالتوازي...")
+    
+    try:
+        import nest_asyncio
+        nest_asyncio.apply()
+    except Exception:
+        pass
+        
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+    batch_data = loop.run_until_complete(execute_batch_processing(urls_to_fetch))
+    
     # فحص الروابط بالترتيب واختيار أول رابط يمكن الوصول إليه ويجتاز الفحوصات المتقدمة
     for r in scored_results:
         item = r['item']
         c_idx = r['candidate_index']
         reasons = candidates[c_idx]['reasons']
         
-        if is_image_accessible(item['url']):
-            # تحميل مؤقت للصورة للتحقق منها بواسطة نماذج الفحص
-            temp_img = download_temp_image(item['url'])
-            if temp_img:
-                is_real = is_image_real_product(temp_img)
-                if not is_real:
-                    reasons.append("مستبعدة: تم رفض الصورة بواسطة نموذج CLIP (تبدو كرتونية أو غير واقعية)")
-                    try:
-                        os.remove(temp_img)
-                    except Exception:
-                        pass
+        url = item['url']
+        binary_data, status_msg = batch_data.get(url, (None, "FAILED_DOWNLOAD"))
+        
+        if binary_data is None:
+            reasons.append(f"مستبعدة: فشل التحميل المتوازي أو التحقق من الحجم/النوع ({status_msg})")
+            continue
+            
+        try:
+            # فتح الصورة مباشرة في الذاكرة لتجنب استهلاك القرص
+            pil_img = Image.open(io.BytesIO(binary_data)).convert("RGB")
+            
+            # الفحص الدلالي المطور بـ SigLIP أو CLIP
+            clip_embedding = None
+            if config.USE_SIGLIP_SEMANTIC_CHECK:
+                relevance_score_clip, _ = check_image_relevance_via_siglip(pil_img, brand, product_name)
+            else:
+                # تراجع لـ CLIP القديم في الذاكرة
+                model, processor = get_clip_model()
+                if model is not None and processor is not None:
+                    import torch
+                    inputs = processor(text=[f"a packaging of {brand} {product_name}"], images=pil_img, return_tensors="pt", padding=True)
+                    with torch.no_grad():
+                        outputs = model(**inputs)
+                    relevance_score_clip = outputs.logits_per_image.item() / 100.0
+                else:
+                    relevance_score_clip = 1.0
+            
+            # حساب ترميز CLIP للفحص البصري للمكررات
+            model, processor = get_clip_model()
+            if model is not None and processor is not None:
+                import torch
+                inputs = processor(images=pil_img, return_tensors="pt")
+                with torch.no_grad():
+                    clip_embedding = model.get_image_features(**inputs).cpu().numpy()[0].tolist()
+            
+            # التحقق من عتبة الصلة
+            is_relevant = relevance_score_clip >= config.CLIP_RELEVANCE_THRESHOLD
+            is_grey_zone = False
+            
+            if not is_relevant:
+                if relevance_score_clip >= getattr(config, "CLIP_GREY_ZONE_THRESHOLD", 0.18):
+                    is_grey_zone = True
+                else:
+                    reasons.append(f"مستبعدة: درجة المطابقة الدلالية منخفضة ({relevance_score_clip:.4f} < {config.CLIP_RELEVANCE_THRESHOLD})")
                     continue
-                
-                # الفحص الدلالي المطور بـ CLIP
-                relevance_score_clip, clip_embedding = check_image_relevance_via_clip(temp_img, brand, product_name)
-                is_relevant = relevance_score_clip >= config.CLIP_RELEVANCE_THRESHOLD
-                is_grey_zone = False
-                
-                if not is_relevant:
-                    if relevance_score_clip >= getattr(config, "CLIP_GREY_ZONE_THRESHOLD", 0.18):
-                        is_grey_zone = True
-                    else:
-                        reasons.append(f"مستبعدة: درجة المطابقة الدلالية منخفضة ({relevance_score_clip:.4f} < {config.CLIP_RELEVANCE_THRESHOLD})")
-                        try:
-                            os.remove(temp_img)
-                        except Exception:
-                            pass
-                        continue
-                        
-                # كشف التكرار البصري المحلي لمنع رفع نفس الصورة لمنتجين مختلفين
+                    
+            # التحقق التلقائي بـ BLIP لكشف تعارض الماركات
+            if config.USE_BLIP_CAPTION_CHECK:
+                caption = generate_image_caption_via_blip(pil_img)
+                if not verify_brand_alignment_via_caption(caption, brand, product_name):
+                    reasons.append("مستبعدة: تم كشف تعارض صريح في العلامة التجارية عبر BLIP")
+                    continue
+                    
+            # التحقق التلقائي بـ Moondream2 في الفرز الحتمي النهائي
+            if config.USE_MOONDREAM_CHECK:
+                if not verify_image_via_moondream(pil_img, brand, product_name):
+                    reasons.append("مستبعدة: تم رفض الصورة بواسطة نموذج Moondream2 لعدم مطابقة الشروط")
+                    continue
+            
+            # كشف التكرار البصري المحلي لمنع رفع نفس الصورة لمنتجين مختلفين
+            if clip_embedding:
                 try:
                     import local_cache_db
                     duplicate = local_cache_db.find_visual_duplicate(clip_embedding, threshold=0.96)
                     if duplicate and duplicate["product_name"].lower() != product_name.lower():
                         print(f"⚠️ [Visual Duplicate] الصورة مكررة بصرياً مع منتج آخر: '{duplicate['product_name']}'")
                         reasons.append(f"مستبعدة: كشف تكرار بصري متطابق مع منتج آخر ({duplicate['product_name']})")
-                        try:
-                            os.remove(temp_img)
-                        except Exception:
-                            pass
                         continue
                 except Exception as e:
                     print(f"⚠️ خطأ أثناء فحص التكرار البصري في الكاش: {e}")
+            
+            # الفحص الذكي بـ Gemini Vision (يتم حفظ الصورة مؤقتاً هنا فقط لتوفير استهلاك القرص ومكالمات الـ API)
+            fd, temp_img = tempfile.mkstemp(suffix=".jpg")
+            with os.fdopen(fd, 'wb') as f:
+                f.write(binary_data)
                 
-                # الفحص الذكي بـ Gemini Vision
-                is_valid_gemini = validate_image_via_gemini_vision(temp_img, product_name, brand)
-                if not is_valid_gemini:
-                    reasons.append("مستبعدة: تم رفض المطابقة البصرية عبر Gemini Vision (براند/منتج خاطئ)")
-                    try:
-                        os.remove(temp_img)
-                    except Exception:
-                        pass
-                    continue
+            is_valid_gemini = validate_image_via_gemini_vision(temp_img, product_name, brand)
+            try:
+                os.remove(temp_img)
+            except Exception:
+                pass
                 
-                # مقبولة بنجاح (سواء بالقبول المباشر أو المراجعة لاحقاً)
-                if is_grey_zone:
-                    reasons.append(f"مراجعة: درجة المطابقة متوسطة في المنطقة الرمادية (CLIP Similarity: {relevance_score_clip:.4f})")
-                    candidates[c_idx]['status'] = 'accepted'
-                    chosen_item = item
-                    chosen_item['needs_review'] = True
-                    chosen_item['clip_score'] = relevance_score_clip
-                    chosen_item['clip_embedding'] = clip_embedding
-                    chosen_relevance = r['relevance_score']
-                else:
-                    reasons.append(f"مقبولة: تم التحقق من واقعية وجودة ومطابقة المنتج (CLIP Similarity: {relevance_score_clip:.4f})")
-                    candidates[c_idx]['status'] = 'accepted'
-                    chosen_item = item
-                    chosen_item['clip_score'] = relevance_score_clip
-                    chosen_item['clip_embedding'] = clip_embedding
-                    chosen_relevance = r['relevance_score']
-                    
-                try:
-                    os.remove(temp_img)
-                except Exception:
-                    pass
-                break
-            else:
-                # إذا تعذر تحميلها مؤقتاً للفحص، نقبل الصورة كخيار افتراضي
-                reasons.append("مقبولة: الرابط متاح (تخطي الفحوصات لتعذر تحميل الملف المؤقت)")
+            if not is_valid_gemini:
+                reasons.append("مستبعدة: تم رفض المطابقة البصرية عبر Gemini Vision (براند/منتج خاطئ)")
+                continue
+            
+            # مقبولة بنجاح
+            if is_grey_zone:
+                reasons.append(f"مراجعة: درجة المطابقة متوسطة في المنطقة الرمادية (SigLIP/CLIP Similarity: {relevance_score_clip:.4f})")
                 candidates[c_idx]['status'] = 'accepted'
                 chosen_item = item
+                chosen_item['needs_review'] = True
+                chosen_item['clip_score'] = relevance_score_clip
+                chosen_item['clip_embedding'] = clip_embedding
                 chosen_relevance = r['relevance_score']
-                break
-        else:
-            reasons.append("مستبعدة: رابط الصورة غير صالح أو لا يمكن الوصول إليه")
+            else:
+                reasons.append(f"مقبولة: تم التحقق من واقعية وجودة ومطابقة المنتج (SigLIP/CLIP Similarity: {relevance_score_clip:.4f})")
+                candidates[c_idx]['status'] = 'accepted'
+                chosen_item = item
+                chosen_item['clip_score'] = relevance_score_clip
+                chosen_item['clip_embedding'] = clip_embedding
+                chosen_relevance = r['relevance_score']
+                
+            break
+        except Exception as e:
+            reasons.append(f"⚠️ فشل تحليل الصورة في الذاكرة: {e}")
+            continue
             
     if chosen_item:
         if trace is not None:
@@ -852,43 +1398,29 @@ def search_best_product_image(query, product_name, brand, **kwargs):
     strict_brand_match = kwargs.get('strict_brand_match')
     brand_mappings = kwargs.get('brand_mappings')
     barcode = kwargs.get('barcode', '')
+    skip_cache = kwargs.get('skip_cache', False)
     
     # 0. الاستعلام من قاعدة البيانات المحلية الكاش كخطوة أولى فائقة السرعة
-    try:
-        import local_cache_db
-        cached = local_cache_db.get_cached_product(barcode=barcode, product_name=product_name, brand=brand)
-        if cached:
-            print(f"⚡ [SQLite Cache Hit] العثور على حل مخزن محلياً لـ '{product_name}'")
-            return {
-                "url": cached["cloudinary_url"],
-                "title": "مسترجع من الكاش المحلي",
-                "width": 800,
-                "height": 800,
-                "clip_score": cached["clip_score"],
-                "metadata": cached["metadata"],
-                "source": "sqlite_cache"
-            }
-    except Exception as e:
-        print(f"⚠️ خطأ أثناء قراءة الكاش المحلي: {e}")
-        
-    # 0.أ. الاستعلام الدلالي الذكي عبر المتجهات (Vector Semantic Search) كخطوة ثانية فائقة السرعة
-    try:
-        semantic_cached = find_semantic_cache_match(product_name, brand, threshold=0.82)
-        if semantic_cached:
-            print(f"⚡ [CLIP Vector Cache Hit] العثور على حل دلالي مخزن لـ '{product_name}'")
-            config.METRICS["semantic_cache_savings"] += 1
-            return {
-                "url": semantic_cached["url"],
-                "title": "مسترجع دلالياً من الكاش المحلي",
-                "width": 800,
-                "height": 800,
-                "clip_score": semantic_cached["clip_score"],
-                "metadata": semantic_cached["metadata"],
-                "source": "sqlite_cache",
-                "semantic_similarity": semantic_cached.get("semantic_similarity")
-            }
-    except Exception as e:
-        print(f"⚠️ خطأ أثناء البحث الدلالي في الكاش: {e}")
+    if not skip_cache:
+        try:
+            import local_cache_db
+            cached = local_cache_db.get_cached_product(barcode=barcode, product_name=product_name, brand=brand)
+            if cached:
+                print(f"⚡ [SQLite Cache Hit] العثور على حل مخزن محلياً لـ '{product_name}'")
+                return {
+                    "url": cached["cloudinary_url"],
+                    "title": "مسترجع من الكاش المحلي",
+                    "width": 800,
+                    "height": 800,
+                    "clip_score": cached["clip_score"],
+                    "metadata": cached["metadata"],
+                    "source": "sqlite_cache"
+                }
+        except Exception as e:
+            print(f"⚠️ خطأ أثناء قراءة الكاش المحلي: {e}")
+            
+        # ملاحظة: تم إيقاف الاستعلام الدلالي الذكي عبر المتجهات (Semantic Vector Cache) لمنع أي خلط بين أسماء المنتجات المختلفة من نفس البراند
+        pass
     
     # افتراضياً، نقوم بتفعيل المطابقة الصارمة إذا كان البراند مدخلاً لمنع خلط المنتجات مع المنافسين
     if strict_brand_match is None and brand:
@@ -913,6 +1445,8 @@ def search_best_product_image(query, product_name, brand, **kwargs):
         barcode_results = []
         if config.GOOGLE_SEARCH_API_KEY and config.GOOGLE_SEARCH_CX:
             barcode_results = google_image_search(barcode_clean)
+        if not barcode_results:
+            barcode_results = duckduckgo_image_search(barcode_clean)
         if not barcode_results:
             barcode_results = yandex_image_search(barcode_clean)
         if not barcode_results and config.USE_FALLBACK_SEARCH:
@@ -941,6 +1475,8 @@ def search_best_product_image(query, product_name, brand, **kwargs):
         q_results = []
         if config.GOOGLE_SEARCH_API_KEY and config.GOOGLE_SEARCH_CX:
             q_results = google_image_search(q)
+        if not q_results:
+            q_results = duckduckgo_image_search(q)
         if not q_results:
             q_results = yandex_image_search(q)
         if not q_results and config.USE_FALLBACK_SEARCH:
@@ -977,9 +1513,12 @@ def search_best_product_image(query, product_name, brand, **kwargs):
         print(f"ℹ️ لم يتم العثور على صور مفهرسة للبراند '{brand}'. تم تشغيل البحث العام للمنتج: '{fallback_query}'...")
         
         fallback_results = []
-        # أ. البحث في Yandex للبحث العام
-        fallback_results = yandex_image_search(fallback_query)
-        # ب. البحث في Bing كبديل للبحث العام
+        # أ. البحث في DuckDuckGo للبحث العام
+        fallback_results = duckduckgo_image_search(fallback_query)
+        # ب. البحث في Yandex للبحث العام
+        if not fallback_results:
+            fallback_results = yandex_image_search(fallback_query)
+        # ج. البحث في Bing كبديل للبحث العام
         if not fallback_results and config.USE_FALLBACK_SEARCH:
             fallback_results = bing_image_search(fallback_query)
             

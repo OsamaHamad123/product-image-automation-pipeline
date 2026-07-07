@@ -541,7 +541,6 @@ def api_products():
         # دمج الأخطاء مع المنتجات المعادة
         for prod in products:
             barcode = prod.get("barcode", "").strip() if prod.get("barcode") else ""
-            # خطة بديلة للباركود إن لم يوجد
             alt_barcode = f"ERR_{prod.get('product_name')}_{prod.get('brand')}".replace(" ", "_")
             
             if barcode and barcode in failures:
@@ -611,14 +610,15 @@ def api_search():
     search_query = custom_query if custom_query else (f"{product_name} {brand}".strip() if brand else product_name)
     
     trace = {}
-    print(f"\n[Flask API] Localized Search query: '{search_query}' for Product: '{product_name}', Brand: '{brand}'")
+    skip_cache = bool(data.get('skip_cache', False))
+    print(f"\n[Flask API] Localized Search query: '{search_query}' for Product: '{product_name}', Brand: '{brand}' | Skip Cache: {skip_cache}")
     
     best_image = image_search.search_best_product_image(
         search_query, product_name, brand, 
         product_name_ar=product_name_ar, brand_ar=brand_ar,
         trace=trace, strict_brand_match=strict_brand_match,
         barcode=barcode, category=category, origin=origin,
-        brand_mappings=brand_mappings
+        brand_mappings=brand_mappings, skip_cache=skip_cache
     )
     
     if best_image:
@@ -977,6 +977,29 @@ def api_logs():
     سحب اللوغات الحية لخيوط العمليات الخلفية
     """
     return jsonify({'logs': config.RUNNER_LOGS})
+
+@app.route('/api/logs/stream')
+def api_logs_stream():
+    """
+    بث السجلات الحية بشكل تدفقي (Server-Sent Events) لتوفير الباندويدث وتقليل الاستعلامات
+    """
+    from flask import Response
+    def event_stream():
+        # إرسال السجلات الحالية كدفعة أولى عند الاتصال
+        initial_logs = list(config.RUNNER_LOGS)
+        yield f"data: {json.dumps({'initial': True, 'logs': initial_logs})}\n\n"
+        
+        last_idx = len(initial_logs)
+        while True:
+            current_len = len(config.RUNNER_LOGS)
+            if last_idx < current_len:
+                new_logs = config.RUNNER_LOGS[last_idx:current_len]
+                last_idx = current_len
+                for log in new_logs:
+                    yield f"data: {json.dumps({'log': log})}\n\n"
+            time.sleep(1)
+            
+    return Response(event_stream(), mimetype="text/event-stream")
 
 # ==========================================
 # 🤖 INTERACTIVE TELEGRAM BOT CONTROL SECTION

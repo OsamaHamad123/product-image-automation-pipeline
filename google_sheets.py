@@ -434,3 +434,4 @@ def extract_brand_from_start(product_name, brand_mappings):
         return words[0].strip(",.-()\"'")
         
     return ""
+

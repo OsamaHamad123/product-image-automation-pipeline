@@ -128,6 +128,49 @@
         padding-left: 0.25rem;
     }
 
+    .pagination-container {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding-top: 0.75rem;
+        border-top: 1px solid var(--panel-border);
+        font-size: 0.8rem;
+        gap: 0.5rem;
+        direction: rtl;
+    }
+
+    .pagination-btn {
+        background: var(--card-bg);
+        border: 1px solid var(--panel-border);
+        color: var(--text-secondary);
+        padding: 0.4rem 0.75rem;
+        border-radius: 6px;
+        cursor: pointer;
+        font-weight: 600;
+        font-family: inherit;
+        display: flex;
+        align-items: center;
+        gap: 0.25rem;
+        transition: all 0.15s ease;
+    }
+
+    .pagination-btn:hover:not(:disabled) {
+        border-color: var(--accent-purple);
+        color: var(--text-primary);
+        background: var(--card-bg-hover);
+    }
+
+    .pagination-btn:disabled {
+        opacity: 0.35;
+        cursor: not-allowed;
+    }
+
+    .pagination-info {
+        color: var(--text-secondary);
+        font-weight: 600;
+        font-size: 0.75rem;
+    }
+
     .product-item {
         background: var(--card-bg);
         border: 1px solid var(--panel-border);
@@ -534,6 +577,10 @@
         <div id="productList" class="product-list">
             <p style="color: var(--text-secondary); text-align: center; padding: 2rem;">جاري تحميل المنتجات...</p>
         </div>
+
+        <div id="paginationContainer" class="pagination-container" style="display: none;">
+            <!-- سيتم توليد أزرار التنقل ديناميكياً هنا -->
+        </div>
     </div>
 
     <!-- Main Work Panel -->
@@ -582,6 +629,13 @@
                                 <span>تكبير ذكي (AI Upscale)</span>
                                 <label class="switch">
                                     <input type="checkbox" id="aiUpscale" checked>
+                                    <span class="slider"></span>
+                                </label>
+                            </div>
+                            <div class="toggle-container" title="البحث مباشرة من محرك البحث وتجنب نتائج الكاش المخزنة">
+                                <span>تجاوز الكاش المحلي</span>
+                                <label class="switch">
+                                    <input type="checkbox" id="skipCache">
                                     <span class="slider"></span>
                                 </label>
                             </div>
@@ -815,6 +869,17 @@
     let currentProducts = [];
     let activeRowNumber = null;
     let currentFilterTab = 'all';
+    let currentPage = 1;
+    const itemsPerPage = 50;
+
+    // دالة لتمرير روابط الصور الخارجية عبر البروكسي الداخلي لتجاوز حماية الـ Hotlinking
+    function getImageUrl(url) {
+        if (!url) return '';
+        if (url.includes('cloudinary.com') || url.startsWith('http://127.0.0.1') || url.startsWith('localhost') || url.includes('/api/image-proxy')) {
+            return url;
+        }
+        return `/api/image-proxy?url=${encodeURIComponent(url)}`;
+    }
 
     // On load
     window.addEventListener('load', () => {
@@ -839,6 +904,7 @@
             const fromCache = res.headers.get('X-Cache') === 'HIT';
             if (data.status === 'success') {
                 currentProducts = data.products;
+                currentPage = 1;
                 updateKPIStats();
                 renderProductList();
                 // إظهار مؤشر الكاش
@@ -902,10 +968,22 @@
         
         if (filtered.length === 0) {
             productList.innerHTML = '<p style="color: var(--text-secondary); text-align: center; padding: 2rem;">لا توجد منتجات مطابقة.</p>';
+            renderPagination(0);
             return;
         }
+
+        // حساب التقسيم لصفحات
+        const totalItems = filtered.length;
+        const totalPages = Math.ceil(totalItems / itemsPerPage);
+        if (currentPage > totalPages) {
+            currentPage = totalPages || 1;
+        }
+
+        const startIndex = (currentPage - 1) * itemsPerPage;
+        const endIndex = Math.min(startIndex + itemsPerPage, totalItems);
+        const pageProducts = filtered.slice(startIndex, endIndex);
         
-        filtered.forEach(prod => {
+        pageProducts.forEach(prod => {
             const hasLink = prod.existing_image_link && prod.existing_image_link.trim() !== '';
             let linkIndicator = '';
             
@@ -930,24 +1008,77 @@
                 item.style.borderLeft = '4px solid #ff9100';
             }
             
+            let scoreBadge = '';
+            if (prod.clip_score) {
+                const scorePercent = Math.round(prod.clip_score * 100);
+                scoreBadge = `<span class="score-badge" style="background: rgba(124, 58, 237, 0.1); border: 1px solid rgba(124, 58, 237, 0.2); color: #c084fc; font-size: 0.7rem; padding: 2px 4px; border-radius: 4px; font-weight: bold; margin-right: 5px;">${scorePercent}% Match</span>`;
+            }
+
             item.innerHTML = `
                 <span class="badge-row-number" style="${prod.has_error ? 'background-color: var(--danger); color: white;' : (prod.needs_review ? 'background-color: #ff9100; color: #080c14;' : '')}">صف ${prod.row_number}</span>
                 <h4 style="margin-top: 0.5rem;">${prod.product_name}</h4>
                 <p>
                     <span>البراند: <strong>${prod.brand}</strong></span>
                     ${linkIndicator}
+                    ${scoreBadge}
                 </p>
             `;
             
             item.onclick = () => selectProduct(prod, item);
             productList.appendChild(item);
         });
+
+        renderPagination(totalItems);
     }
 
-    function filterProducts() { renderProductList(); }
+    // توليد واجهة أزرار التصفح لصفحات
+    function renderPagination(totalItems) {
+        const container = document.getElementById('paginationContainer');
+        if (!container) return;
+        
+        const totalPages = Math.ceil(totalItems / itemsPerPage);
+        if (totalPages <= 1) {
+            container.style.display = 'none';
+            return;
+        }
+        
+        container.style.display = 'flex';
+        
+        const startItem = (currentPage - 1) * itemsPerPage + 1;
+        const endItem = Math.min(currentPage * itemsPerPage, totalItems);
+        
+        container.innerHTML = `
+            <button class="pagination-btn" id="prevPageBtn" ${currentPage === 1 ? 'disabled' : ''} onclick="changePage(${currentPage - 1})">
+                <i class="fas fa-chevron-right"></i> السابق
+            </button>
+            <span class="pagination-info">
+                ${startItem}-${endItem} من ${totalItems}
+            </span>
+            <button class="pagination-btn" id="nextPageBtn" ${currentPage === totalPages ? 'disabled' : ''} onclick="changePage(${currentPage + 1})">
+                التالي <i class="fas fa-chevron-left"></i>
+            </button>
+        `;
+    }
+
+    function changePage(page) {
+        currentPage = page;
+        renderProductList();
+        
+        // تمرير القائمة لأعلى
+        const productList = document.getElementById('productList');
+        if (productList) {
+            productList.scrollTop = 0;
+        }
+    }
+
+    function filterProducts() {
+        currentPage = 1;
+        renderProductList();
+    }
 
     function setFilterTab(tabName) {
         currentFilterTab = tabName;
+        currentPage = 1;
         document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
         document.getElementById('tab-' + tabName).classList.add('active');
         renderProductList();
@@ -1102,6 +1233,7 @@
         const customQuery = document.getElementById('customQuery').value;
         const ignoreUnitClash = document.getElementById('ignoreUnitClash').checked;
         const strictBrandMatch = document.getElementById('strictBrandMatch').checked;
+        const skipCache = document.getElementById('skipCache') ? document.getElementById('skipCache').checked : false;
         
         const barcode = document.getElementById('searchForm').dataset.barcode;
         const category = document.getElementById('searchForm').dataset.category;
@@ -1126,6 +1258,7 @@
                     custom_query: customQuery,
                     ignore_unit_clash: ignoreUnitClash,
                     strict_brand_match: strictBrandMatch,
+                    skip_cache: skipCache,
                     barcode: barcode,
                     category: category,
                     origin: origin,
@@ -1188,7 +1321,7 @@
             
         card.innerHTML = `
             <div style="width: 200px; height: 200px; background: #080c14; border: 1px solid var(--panel-border); border-radius: 12px; display: flex; align-items: center; justify-content: center; padding: 0.5rem; overflow: hidden; flex-shrink: 0;">
-                <img src="${img.url}" alt="Recommended" style="max-width: 100%; max-height: 100%; object-fit: contain;" onerror="this.src='https://placehold.co/200x200?text=Error'">
+                <img src="${getImageUrl(img.url)}" alt="Recommended" style="max-width: 100%; max-height: 100%; object-fit: contain;" onerror="this.src='https://placehold.co/200x200?text=Error'">
             </div>
             <div style="flex: 1; display: flex; flex-direction: column; justify-content: space-between;">
                 <div>
@@ -1310,7 +1443,7 @@
             card.innerHTML = `
                 <div class="candidate-img-box">
                     <span class="candidate-badge ${statusClass}">${statusText}</span>
-                    <img src="${c.url}" alt="Candidate" onerror="this.src='https://placehold.co/180x180?text=Error'">
+                    <img src="${getImageUrl(c.url)}" alt="Candidate" onerror="this.src='https://placehold.co/180x180?text=Error'">
                     ${scoreTag}
                     ${uaeTag}
                 </div>

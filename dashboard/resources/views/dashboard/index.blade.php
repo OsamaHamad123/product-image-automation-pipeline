@@ -193,6 +193,47 @@
         </div>
     </div>
 </div>
+
+<!-- System Services Monitor & Auto-Start Controller -->
+<div class="glass-panel" style="margin-top: 2rem;">
+    <h3 style="font-size: 1.1rem; border-bottom: 1px solid var(--panel-border); padding-bottom: 0.75rem; margin-bottom: 1.25rem; display: flex; align-items: center; gap: 0.5rem;">
+        <i class="fas fa-server" style="color: var(--accent-purple);"></i> لوحة التحكم التلقائي وإدارة الخدمات (Auto-Start System Services)
+    </h3>
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1.5rem;">
+        <div>
+            <h4 style="font-size: 0.95rem; margin-bottom: 0.75rem; color: var(--text-primary); font-weight: bold;">حالة خوادم النظام الحية</h4>
+            <div style="display: flex; flex-direction: column; gap: 0.8rem;">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span style="color: var(--text-secondary);">خادم لوحة التحكم (Laravel):</span>
+                    <span id="status-laravel" class="score-badge" style="background: rgba(16, 185, 129, 0.1); color: var(--success); border-color: rgba(16, 185, 129, 0.2);">جاري التشغيل (Port 8000)</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span style="color: var(--text-secondary);">خادم الأتمتة الميكروي (Flask):</span>
+                    <span id="status-flask" class="score-badge" style="background: rgba(239, 68, 68, 0.1); color: var(--danger); border-color: rgba(239, 68, 68, 0.2); font-weight: bold;">جاري الفحص...</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span style="color: var(--text-secondary);">قاعدة البيانات المحلية (SQLite Cache):</span>
+                    <span id="status-db" class="score-badge" style="background: var(--input-bg); color: var(--text-secondary); font-weight: bold;">جاري الفحص...</span>
+                </div>
+            </div>
+        </div>
+        
+        <div style="display: flex; flex-direction: column; justify-content: center; gap: 0.75rem;">
+            <h4 style="font-size: 0.95rem; margin-bottom: 0.25rem; color: var(--text-primary); font-weight: bold;">إجراءات التحكم السريعة للتشغيل التلقائي</h4>
+            <div style="display: flex; gap: 1rem; width: 100%;">
+                <button class="btn" id="startFlaskBtn" onclick="controlSystem('start-flask')" style="flex: 1; background: var(--success); border-color: var(--success);">
+                    <i class="fas fa-play"></i> تشغيل خادم بايثون 🚀
+                </button>
+                <button class="btn btn-secondary" id="stopFlaskBtn" onclick="controlSystem('stop-flask')" style="flex: 1;">
+                    <i class="fas fa-stop"></i> إيقاف خادم بايثون 🛑
+                </button>
+            </div>
+            <p style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 0.25rem;">
+                * يتيح لك هذا القسم تشغيل وإعادة تهيئة خادم الخلفية (Flask Microservice) برمجياً عند توقفه دون الحاجة لفتح سطر الأوامر يدوياً.
+            </p>
+        </div>
+    </div>
+</div>
 @endsection
 
 @section('scripts')
@@ -260,10 +301,94 @@
         }
     }
 
-    // Poll batch status on load
+    // جلب حالة الخدمات والخوادم
+    async function pollSystemStatus() {
+        try {
+            const res = await fetch('/api/system/status');
+            const data = await res.json();
+            
+            const flaskEl = document.getElementById('status-flask');
+            const dbEl = document.getElementById('status-db');
+            const startBtn = document.getElementById('startFlaskBtn');
+            const stopBtn = document.getElementById('stopFlaskBtn');
+            
+            if (data.flask_server === 'online') {
+                flaskEl.innerText = 'متصل فعال (Port 5000) 🟢';
+                flaskEl.style.background = 'rgba(16, 185, 129, 0.1)';
+                flaskEl.style.color = 'var(--success)';
+                flaskEl.style.borderColor = 'rgba(16, 185, 129, 0.2)';
+                
+                startBtn.disabled = true;
+                startBtn.style.opacity = '0.5';
+                startBtn.style.cursor = 'not-allowed';
+                stopBtn.disabled = false;
+                stopBtn.style.opacity = '1';
+                stopBtn.style.cursor = 'pointer';
+            } else {
+                flaskEl.innerText = 'متوقف مغلق (Port 5000) 🔴';
+                flaskEl.style.background = 'rgba(239, 68, 68, 0.1)';
+                flaskEl.style.color = 'var(--danger)';
+                flaskEl.style.borderColor = 'rgba(239, 68, 68, 0.2)';
+                
+                startBtn.disabled = false;
+                startBtn.style.opacity = '1';
+                startBtn.style.cursor = 'pointer';
+                stopBtn.disabled = true;
+                stopBtn.style.opacity = '0.5';
+                stopBtn.style.cursor = 'not-allowed';
+            }
+            
+            if (data.local_cache_db === 'active') {
+                dbEl.innerText = 'نشطة ومحملة 💾';
+                dbEl.style.color = 'var(--accent-cyan)';
+            } else {
+                dbEl.innerText = 'فارغة / ممسوحة 🧹';
+                dbEl.style.color = 'var(--text-secondary)';
+            }
+        } catch (err) {
+            console.error("Error polling system status:", err);
+        }
+    }
+
+    // إطلاق إجراءات تشغيل/إيقاف الخدمات
+    async function controlSystem(action) {
+        const startBtn = document.getElementById('startFlaskBtn');
+        const stopBtn = document.getElementById('stopFlaskBtn');
+        
+        startBtn.disabled = true;
+        stopBtn.disabled = true;
+        
+        try {
+            const res = await fetch(`/api/system/${action}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
+                }
+            });
+            const data = await res.json();
+            if (data.status === 'success') {
+                alert(`✅ الإجراء تم بنجاح: ${data.message}`);
+            } else {
+                alert(`❌ فشل تنفيذ الإجراء: ${data.error}`);
+            }
+            setTimeout(pollSystemStatus, 2000);
+        } catch (err) {
+            console.error(err);
+            alert(`❌ فشل الاتصال بالخادم.`);
+        } finally {
+            startBtn.disabled = false;
+            stopBtn.disabled = false;
+        }
+    }
+
+    // Poll batch status and system status on load
     window.addEventListener('load', () => {
         pollBatchStatus();
         setInterval(pollBatchStatus, 3000);
+        
+        pollSystemStatus();
+        setInterval(pollSystemStatus, 5000);
     });
 </script>
 @endsection

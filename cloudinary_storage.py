@@ -25,9 +25,9 @@ def upload_product_image_to_cloudinary(local_path, product_name, brand, folder=N
         return None
 
     # تنظيف اسم الملف ليكون كمعرف عام (Public ID) نظيف وخالي من المسافات
-    clean_product_name = product_name.replace("/", "-").replace("\\", "-").replace(" ", "_")
-    clean_brand = brand.replace("/", "-").replace("\\", "-").replace(" ", "_")
-    public_id = f"{clean_product_name}+{clean_brand}"
+    clean_product_name = product_name.replace("/", "-").replace("\\", "-").replace(" ", "_").replace("+", "_")
+    clean_brand = brand.replace("/", "-").replace("\\", "-").replace(" ", "_").replace("+", "_")
+    public_id = f"{clean_product_name}_{clean_brand}"
     
     # تحديد المجلد المستهدف
     target_folder = folder if folder else "products"
@@ -55,12 +55,32 @@ def upload_product_image_to_cloudinary(local_path, product_name, brand, folder=N
         inner_w = int(target_width  * padding_ratio)
         inner_h = int(target_height * padding_ratio)
         
-        transformation = [
-            # 1. إزالة أي هوامش شفافة/بيضاء فارغة زائدة حول المنتج
-            {"crop": "trim"},
+        # التحقق برمجياً من شفافية الصورة المحلية لتطبيق الاقتصاص فقط عند وجودها
+        has_transparency = False
+        try:
+            from PIL import Image
+            with Image.open(local_path) as img:
+                if img.mode in ('RGBA', 'LA') or (img.mode == 'P' and 'transparency' in img.info):
+                    has_transparency = True
+        except Exception as e:
+            print(f"⚠️ خطأ أثناء فحص شفافية الصورة: {e}")
+
+        # تحديد تأثير القص مع السماحية المطلوبة من الإعدادات لمنع تشويه حواف المنتج
+        trim_tolerance = getattr(config, "CLOUDINARY_TRIM_TOLERANCE", 5)
+        trim_effect = f"trim:{trim_tolerance}" if trim_tolerance else "trim"
+        
+        transformation = []
+        if has_transparency:
+            # 1. إزالة أي هوامش شفافة فارغة زائدة حول المنتج بسماحية محددة
+            transformation.append({"effect": trim_effect})
+            print(f"✨ تم تطبيق الاقتصاص السحابي {trim_effect} لوجود خلفية شفافة في الصورة.")
+        else:
+            print("⚠️ الصورة لا تحتوي على خلفية شفافة. سيتم تخطي trim سحابياً والاعتماد على اقتصاص Gemini المحلي لحماية حواف المنتج.")
+            
+        transformation.append(
             # 2. تحجيم المنتج ليتناسب ضمن مساحة الـ inner بالبكسل مع الحفاظ على النسبة (c_fit)
             {"width": inner_w, "height": inner_h, "crop": "fit"}
-        ]
+        )
         
         # 3. توسيط المنتج وإكمال canvas الأبعاد المستهدفة مع لون الخلفية المحدد (c_pad)
         pad_transformation = {
@@ -84,7 +104,9 @@ def upload_product_image_to_cloudinary(local_path, product_name, brand, folder=N
             transformation.append({"effect": f"sharpen:{config.CLOUDINARY_SHARPEN}"})
             
         # ج. التحسين التلقائي للجودة والضغط (q_auto)
-        if config.CLOUDINARY_AUTO_QUALITY:
+        if getattr(config, "CLOUDINARY_QUALITY", None):
+            transformation.append({"quality": config.CLOUDINARY_QUALITY})
+        elif config.CLOUDINARY_AUTO_QUALITY:
             transformation.append({"quality": "auto"})
             
         # د. التحويل التلقائي لأفضل تنسيق متصفح للويب (f_auto)
