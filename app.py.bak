@@ -1,6 +1,7 @@
 # app.py
 from flask import Flask, request, jsonify, render_template_string
 import os
+os.environ["RUN_WITH_REDIS"] = "1"
 import sys
 import image_search
 import image_processor
@@ -1000,6 +1001,64 @@ def api_logs_stream():
             time.sleep(1)
             
     return Response(event_stream(), mimetype="text/event-stream")
+
+@app.route('/api/v1/telemetry/stream/<tenant_id>')
+def stream_telemetry_endpoint(tenant_id):
+    """
+    بث التليمتري الحية عبر Redis Pub/Sub لدعم البيئات متعددة خيوط العمل (Gunicorn)
+    """
+    from flask import Response, stream_with_context
+    import redis
+    import json
+    import time
+    
+    def register_event_stream(t_id):
+        try:
+            r = redis.Redis(host='localhost', port=6379, db=0, socket_timeout=2)
+            pubsub = r.pubsub()
+            pubsub.subscribe(f"tenant_stream:{t_id}")
+            yield "event: system_state\ndata: {\"status\": \"connected\"}\n\n"
+            
+            for message in pubsub.listen():
+                if message['type'] == 'message':
+                    raw_data = message['data'].decode('utf-8')
+                    yield f"data: {raw_data}\n\n"
+        except Exception as e:
+            # التراجع المحلي للبث العادي القائم على الذاكرة
+            print(f"⚠️ [SSE Redis Fallback] التراجع للبث العادي: {e}")
+            initial_logs = list(config.RUNNER_LOGS)
+            yield f"data: {json.dumps({'initial': True, 'log': 'Fallback mode active (No Redis)', 'pipeline_metrics': {'progress_percentage': 0, 'active_sku_id': 'Local'}, 'telemetry': {'queue_delay_seconds': 0, 'gemini_api_tokens': 0}})}\n\n"
+            last_idx = len(initial_logs)
+            while True:
+                current_len = len(config.RUNNER_LOGS)
+                if last_idx < current_len:
+                    new_logs = config.RUNNER_LOGS[last_idx:current_len]
+                    last_idx = current_len
+                    for log in new_logs:
+                        payload = {
+                            "timestamp": time.time(),
+                            "log": log,
+                            "pipeline_metrics": {
+                                "progress_percentage": 100 if "بنجاح" in log or "نجح" in log else (10 if "البدء" in log else 50),
+                                "active_sku_id": "Ingesting..."
+                            },
+                            "telemetry": {
+                                "queue_delay_seconds": 1.5,
+                                "gemini_api_tokens": config.METRICS.get("gemini_api_calls", 0) * 150
+                            }
+                        }
+                        yield f"data: {json.dumps(payload)}\n\n"
+                time.sleep(1)
+
+    response = Response(
+        stream_with_context(register_event_stream(tenant_id)),
+        mimetype="text/event-stream"
+    )
+    response.headers['X-Accel-Buffering'] = 'no'
+    response.headers['Cache-Control'] = 'no-cache'
+    response.headers['Connection'] = 'keep-alive'
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    return response
 
 # ==========================================
 # 🤖 INTERACTIVE TELEGRAM BOT CONTROL SECTION

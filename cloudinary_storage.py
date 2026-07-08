@@ -24,31 +24,51 @@ def upload_product_image_to_cloudinary(local_path, product_name, brand, folder=N
         print(f"❌ خطأ: ملف الصورة المحلي غير موجود في المسار: {local_path}")
         return None
 
-    # تنظيف اسم الملف ليكون كمعرف عام (Public ID) نظيف وخالي من المسافات
-    clean_product_name = product_name.replace("/", "-").replace("\\", "-").replace(" ", "_").replace("+", "_")
-    clean_brand = brand.replace("/", "-").replace("\\", "-").replace(" ", "_").replace("+", "_")
-    public_id = f"{clean_product_name}_{clean_brand}"
-    
+    import hashlib
+    try:
+        with open(local_path, "rb") as f:
+            file_bytes = f.read()
+        md5_hash = hashlib.md5(file_bytes).hexdigest()
+    except Exception as e:
+        print(f"⚠️ فشل حساب بصمة MD5 للملف المحلي: {e}")
+        md5_hash = product_name.replace(" ", "_")
+
     # تحديد المجلد المستهدف
     target_folder = folder if folder else "products"
     
     try:
-        print(f"📤 جاري رفع الصورة المعالجة محلياً إلى Cloudinary في المجلد '{target_folder}' باسم: '{public_id}'...")
+        print(f"📤 [Cloudinary Ingest] حساب البصمة التشفيرية (MD5: {md5_hash}). جاري التحقق والرفع...")
         
-        # إعداد خيارات الرفع وتفعيل إزالة الخلفية بالذكاء الاصطناعي سحابياً عند الطلب
+        # 1. إعداد خيارات الرفع والتحول المسبق (Eager responsive crops)
+        eager_transformations = []
+        for width in [320, 720, 1080]:
+            eager_transformations.append({
+                "width": width,
+                "crop": "scale",
+                "quality": "auto"
+            })
+            
         upload_options = {
-            "public_id": public_id,
+            "public_id": md5_hash,
             "folder": target_folder,
-            "overwrite": True
+            "overwrite": False,               # تخطي الرفع والمعالجة السحابية إذا كانت الصورة موجودة مسبقاً
+            "invalidate": True,                # تطهير كاش خوادم الـ CDN عند تحديث النسخ
+            "eager": eager_transformations,    # تجهيز المقاسات الشائعة مسبقاً على الـ CDN
+            "eager_async": True,               # معالجة مقاسات الـ Eager بشكل غير متزامن
+            "resource_type": "image"
         }
+        
         if tags:
             upload_options["tags"] = tags
             
         if config.CLOUDINARY_BG_REMOVAL:
             upload_options["background_removal"] = "cloudinary_ai"
             
-        # رفع الصورة المحلية
+        # رفع الصورة المحلية (أو استرجاع بياناتها فوراً إذا كانت مكررة)
         response = cloudinary.uploader.upload(local_path, **upload_options)
+        
+        if response.get("existing", False):
+            print(f"⚡ [Cloudinary Cache Hit] تم مطابقة الصورة تشفيرياً واسترجاعها فوراً دون إعادة معالجة (MD5: {md5_hash})")
         
         # إنشاء رابط التحويل الديناميكي المستند لخيارات المستخدم سحابياً
         # حساب أبعاد المنتج الداخلية بناءً على هامش الأمان المطلوب

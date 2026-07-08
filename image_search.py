@@ -11,6 +11,173 @@ import asyncio
 import io
 import aiohttp
 from PIL import Image
+import urllib.parse
+from bs4 import BeautifulSoup
+
+STOCKS_BLACKLIST_PAT = re.compile(
+    r"^https?://(?:[a-zA-Z0-9-]+\.)*(?:"
+    r"shutterstock|gettyimages|istockphoto|adobe|freepik|"
+    r"alamy|dreamstime|vectorstock|depositphotos|123rf"
+    r")\.[a-z]{2,6}/.*",
+    re.IGNORECASE
+)
+
+DOMAIN_AUTHORITY_MULTIPLIERS = {
+    "amazon.com": 1.5,
+    "target.com": 1.4,
+    "walmart.com": 1.4,
+    "ebay.com": 1.1,
+    "pinterest.com": 0.2,
+    "istockphoto.com": 0.0,
+}
+
+class ParallelConsensusScraper:
+    """
+    محرك البحث التوافقي المتوازي الذي يستعلم محركات متعددة معاً
+    ويقوم بتسجيل نقاط إجماع RRF Consensus وموثوقية النطاقات.
+    """
+    def __init__(self, google_key="", google_cx="", bing_key="", yandex_key=""):
+        self.google_key = google_key
+        self.google_cx = google_cx
+        self.bing_key = bing_key
+        self.yandex_key = yandex_key
+
+    def _is_blacklisted(self, url):
+        return bool(STOCKS_BLACKLIST_PAT.match(url))
+
+    def _get_domain_authority(self, url):
+        domain_match = re.search(r"https?://(?:www\.)?([^/]+)", url)
+        if domain_match:
+            domain = domain_match.group(1).lower()
+            for pattern, weight in DOMAIN_AUTHORITY_MULTIPLIERS.items():
+                if domain.endswith(pattern):
+                    return weight
+        return 1.0
+
+    async def _fetch_google(self, session, query):
+        if not self.google_key or not self.google_cx:
+            return []
+        url = "https://www.googleapis.com/customsearch/v1"
+        params = {"key": self.google_key, "cx": self.google_cx, "q": query}
+        try:
+            async with session.get(url, params=params, timeout=6) as r:
+                if r.status == 200:
+                    data = await r.json()
+                    return [item["link"] for item in data.get("items", [])]
+        except Exception:
+            pass
+        return []
+
+    async def _fetch_bing(self, session, query):
+        if not self.bing_key:
+            return []
+        url = "https://api.bing.microsoft.com/v7.0/search"
+        headers = {"Ocp-Apim-Subscription-Key": self.bing_key}
+        params = {"q": query, "count": 10}
+        try:
+            async with session.get(url, headers=headers, params=params, timeout=6) as r:
+                if r.status == 200:
+                    data = await r.json()
+                    return [item["url"] for item in data.get("webPages", {}).get("value", [])]
+        except Exception:
+            pass
+        return []
+
+    async def _fetch_yandex(self, session, query):
+        if not self.yandex_key:
+            return []
+        url = "https://yandex.com/search/xml"
+        params = {"folderid": self.yandex_key, "query": query, "filter": "moderate"}
+        try:
+            async with session.get(url, params=params, timeout=6) as r:
+                if r.status == 200:
+                    xml_content = await r.text()
+                    soup = BeautifulSoup(xml_content, "xml")
+                    return [doc.find("url").text for doc in soup.find_all("document") if doc.find("url")]
+        except Exception:
+            pass
+        return []
+
+    async def _fetch_duckduckgo(self, session, query):
+        url = "https://html.duckduckgo.com/html/"
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+        data = {"q": query}
+        try:
+            async with session.post(url, data=data, headers=headers, timeout=6) as r:
+                if r.status == 200:
+                    html_content = await r.text()
+                    soup = BeautifulSoup(html_content, "html.parser")
+                    urls = []
+                    for tag in soup.find_all("a", class_="result__url"):
+                        href = tag.get("href")
+                        if href:
+                            clean_match = re.search(r"uddg=(https?://.*)", href)
+                            urls.append(clean_match.group(1) if clean_match else href)
+                    return urls
+        except Exception:
+            pass
+        return []
+
+    async def aggregate_consensus_rankings(self, query):
+        # تصفية النصوص
+        clean_q = urllib.parse.quote(query)
+        async with aiohttp.ClientSession() as session:
+            tasks = [
+                self._fetch_google(session, clean_q),
+                self._fetch_bing(session, clean_q),
+                self._fetch_yandex(session, clean_q),
+                self._fetch_duckduckgo(session, clean_q)
+            ]
+            results = await asyncio.gather(*tasks)
+            
+        engine_outputs = {
+            "google": results[0],
+            "bing": results[1],
+            "yandex": results[2],
+            "duckduckgo": results[3]
+        }
+        
+        engine_weights = {
+            "google": 1.3,
+            "bing": 1.1,
+            "yandex": 0.9,
+            "duckduckgo": 0.7
+        }
+        
+        rrf_registry = {}
+        k = 60  # ثابت التمهيد للتسوية
+        
+        for engine_name, urls in engine_outputs.items():
+            weight = engine_weights[engine_name]
+            for idx, url in enumerate(urls):
+                if self._is_blacklisted(url):
+                    continue
+                
+                rank = idx + 1
+                reciprocal_rank = weight / (k + rank)
+                
+                if url not in rrf_registry:
+                    rrf_registry[url] = reciprocal_rank
+                else:
+                    rrf_registry[url] += reciprocal_rank
+
+        final_candidates = []
+        for url, rrf_score in rrf_registry.items():
+            da_multiplier = self._get_domain_authority(url)
+            if da_multiplier == 0.0:
+                continue
+                
+            final_candidates.append({
+                "url": url,
+                "width": 800,
+                "height": 800,
+                "title": "Consensus SERP Product Image",
+                "rrf_score": rrf_score,
+                "final_score": rrf_score * da_multiplier
+            })
+
+        final_candidates.sort(key=lambda x: x["final_score"], reverse=True)
+        return final_candidates
 
 print = config.log_runner
 
@@ -1173,9 +1340,6 @@ def evaluate_and_choose_best_image(results, product_name, brand, requires_brand_
     # الترتيب: الصلة أولاً، ثم الدقة
     scored_results.sort(key=lambda x: (x['relevance_score'], x['resolution']), reverse=True)
     
-    chosen_item = None
-    chosen_relevance = 0
-    
     # 1. التنزيل المتوازي والتحقق من الترويسات والصلاحية (Parallel Download & Header Validation)
     urls_to_fetch = [r['item']['url'] for r in scored_results]
     print(f"⏳ [Parallel Download] جاري فحص وتنزيل {len(urls_to_fetch)} صورة مرشحة بالتوازي...")
@@ -1194,6 +1358,8 @@ def evaluate_and_choose_best_image(results, product_name, brand, requires_brand_
         
     batch_data = loop.run_until_complete(execute_batch_processing(urls_to_fetch))
     
+    valid_candidates = []
+    
     # فحص الروابط بالترتيب واختيار أول رابط يمكن الوصول إليه ويجتاز الفحوصات المتقدمة
     for r in scored_results:
         item = r['item']
@@ -1211,7 +1377,21 @@ def evaluate_and_choose_best_image(results, product_name, brand, requires_brand_
             # فتح الصورة مباشرة في الذاكرة لتجنب استهلاك القرص
             pil_img = Image.open(io.BytesIO(binary_data)).convert("RGB")
             
-            # الفحص الدلالي المطور بـ SigLIP أو CLIP
+            # أ. تشغيل بوابة الفرز الرياضي غير التوليدي لجودة الصورة
+            from image_quality_gatekeeper import ImageQualityGatekeeper
+            gatekeeper = ImageQualityGatekeeper(
+                target_resolution=1600,
+                laplacian_threshold=100.0,
+                min_width=config.MIN_IMAGE_WIDTH,
+                min_height=config.MIN_IMAGE_HEIGHT
+            )
+            eval_report = gatekeeper.evaluate_image(pil_img, relevance_score_text=r['relevance_score'])
+            
+            if not eval_report["passes_gates"]:
+                reasons.append(f"مستبعدة: فشل التحقق الهندسي لجودة الصورة ({', '.join(eval_report['gate_reasons'])})")
+                continue
+                
+            # ب. الفحص الدلالي المطور بـ SigLIP أو CLIP
             clip_embedding = None
             if config.USE_SIGLIP_SEMANTIC_CHECK:
                 relevance_score_clip, _ = check_image_relevance_via_siglip(pil_img, brand, product_name)
@@ -1246,7 +1426,7 @@ def evaluate_and_choose_best_image(results, product_name, brand, requires_brand_
                     reasons.append(f"مستبعدة: درجة المطابقة الدلالية منخفضة ({relevance_score_clip:.4f} < {config.CLIP_RELEVANCE_THRESHOLD})")
                     continue
                     
-            # التحقق التلقائي بـ BLIP لكشف تعارض الماركات
+            # ج. التحقق التلقائي بـ BLIP لكشف تعارض الماركات
             if config.USE_BLIP_CAPTION_CHECK:
                 caption = generate_image_caption_via_blip(pil_img)
                 if not verify_brand_alignment_via_caption(caption, brand, product_name):
@@ -1286,28 +1466,51 @@ def evaluate_and_choose_best_image(results, product_name, brand, requires_brand_
                 reasons.append("مستبعدة: تم رفض المطابقة البصرية عبر Gemini Vision (براند/منتج خاطئ)")
                 continue
             
-            # مقبولة بنجاح
-            if is_grey_zone:
-                reasons.append(f"مراجعة: درجة المطابقة متوسطة في المنطقة الرمادية (SigLIP/CLIP Similarity: {relevance_score_clip:.4f})")
-                candidates[c_idx]['status'] = 'accepted'
-                chosen_item = item
-                chosen_item['needs_review'] = True
-                chosen_item['clip_score'] = relevance_score_clip
-                chosen_item['clip_embedding'] = clip_embedding
-                chosen_relevance = r['relevance_score']
-            else:
-                reasons.append(f"مقبولة: تم التحقق من واقعية وجودة ومطابقة المنتج (SigLIP/CLIP Similarity: {relevance_score_clip:.4f})")
-                candidates[c_idx]['status'] = 'accepted'
-                chosen_item = item
-                chosen_item['clip_score'] = relevance_score_clip
-                chosen_item['clip_embedding'] = clip_embedding
-                chosen_relevance = r['relevance_score']
-                
-            break
+            # إذا اجتازت كافة بوابات التصفية والفحوصات، يتم إضافتها للمرشحين المقبولين
+            valid_candidates.append({
+                "item": item,
+                "relevance_score": r['relevance_score'],
+                "relevance_score_clip": relevance_score_clip,
+                "clip_embedding": clip_embedding,
+                "is_grey_zone": is_grey_zone,
+                "eval_report": eval_report,
+                "c_idx": c_idx
+            })
+            
         except Exception as e:
             reasons.append(f"⚠️ فشل تحليل الصورة في الذاكرة: {e}")
             continue
-            
+
+    chosen_item = None
+    chosen_relevance = 0
+
+    if valid_candidates:
+        # ترتيب المرشحين المقبولين تنازلياً حسب النتيجة الموحدة (Unified Score)
+        valid_candidates.sort(key=lambda x: x["eval_report"]["unified_score"], reverse=True)
+        best_cand = valid_candidates[0]
+        
+        c_idx = best_cand["c_idx"]
+        reasons = candidates[c_idx]['reasons']
+        is_grey_zone = best_cand["is_grey_zone"]
+        relevance_score_clip = best_cand["relevance_score_clip"]
+        
+        if is_grey_zone:
+            reasons.append(f"مقبولة مراجعة: الصورة الحاصلة على أعلى تقييم هندسي موحد ({best_cand['eval_report']['unified_score']:.4f}) في المنطقة الرمادية (SigLIP/CLIP Similarity: {relevance_score_clip:.4f})")
+            candidates[c_idx]['status'] = 'accepted'
+            chosen_item = best_cand["item"]
+            chosen_item['needs_review'] = True
+            chosen_item['clip_score'] = relevance_score_clip
+            chosen_item['clip_embedding'] = best_cand["clip_embedding"]
+            chosen_relevance = best_cand["relevance_score"]
+        else:
+            reasons.append(f"مقبولة: الصورة الحاصلة على أعلى تقييم هندسي موحد ({best_cand['eval_report']['unified_score']:.4f}) مع مطابقة تامة وموثقة (SigLIP/CLIP Similarity: {relevance_score_clip:.4f})")
+            candidates[c_idx]['status'] = 'accepted'
+            chosen_item = best_cand["item"]
+            chosen_item['needs_review'] = False
+            chosen_item['clip_score'] = relevance_score_clip
+            chosen_item['clip_embedding'] = best_cand["clip_embedding"]
+            chosen_relevance = best_cand["relevance_score"]
+
     if chosen_item:
         if trace is not None:
             trace.setdefault('steps', []).append({
@@ -1322,7 +1525,7 @@ def evaluate_and_choose_best_image(results, product_name, brand, requires_brand_
     r = scored_results[0]
     item = r['item']
     c_idx = r['candidate_index']
-    candidates[c_idx]['reasons'].append("مقبولة: كخيار بديل أخير من نتائج التصفية")
+    candidates[c_idx]['reasons'].append("مقبولة: كخيار بديل أخير من نتائج التصفية الأولية")
     candidates[c_idx]['status'] = 'accepted'
     
     if trace is not None:
@@ -1389,6 +1592,28 @@ def expand_query_via_gemini(product_name, brand):
         f"{brand} {product_name}".strip()
     ]
 
+def run_parallel_consensus_search(query):
+    """
+    تشغيل البحث المتوازي التوافقي باستخدام ParallelConsensusScraper.
+    """
+    import asyncio
+    scraper = ParallelConsensusScraper(
+        google_key=config.GOOGLE_SEARCH_API_KEY,
+        google_cx=config.GOOGLE_SEARCH_CX,
+        bing_key=getattr(config, "BING_SEARCH_API_KEY", ""),
+        yandex_key=getattr(config, "YANDEX_FOLDER_ID", "")
+    )
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    try:
+        return loop.run_until_complete(scraper.aggregate_consensus_rankings(query))
+    except Exception as e:
+        print(f"⚠️ [Parallel Search Error] فشل البحث المتوازي التوافقي لـ '{query}': {e}")
+        return []
+
 def search_best_product_image(query, product_name, brand, **kwargs):
     """
     البحث واختيار الصورة الأمثل للمنتج، مع تطبيق خطة بديلة للبحث العام
@@ -1442,15 +1667,7 @@ def search_best_product_image(query, product_name, brand, **kwargs):
         barcode_clean = str(barcode).strip()
         print(f"🔍 جاري البحث المخصص باستخدام الباركود للمنتج: '{barcode_clean}'...")
         
-        barcode_results = []
-        if config.GOOGLE_SEARCH_API_KEY and config.GOOGLE_SEARCH_CX:
-            barcode_results = google_image_search(barcode_clean)
-        if not barcode_results:
-            barcode_results = duckduckgo_image_search(barcode_clean)
-        if not barcode_results:
-            barcode_results = yandex_image_search(barcode_clean)
-        if not barcode_results and config.USE_FALLBACK_SEARCH:
-            barcode_results = bing_image_search(barcode_clean)
+        barcode_results = run_parallel_consensus_search(barcode_clean)
             
         if barcode_results:
             best_image, brand_score = evaluate_and_choose_best_image(
@@ -1472,15 +1689,7 @@ def search_best_product_image(query, product_name, brand, **kwargs):
     
     for q_idx, q in enumerate(queries, start=1):
         print(f"🔍 [Gemini Query {q_idx}/3] جاري البحث بالاستعلام المحسن: '{q}'...")
-        q_results = []
-        if config.GOOGLE_SEARCH_API_KEY and config.GOOGLE_SEARCH_CX:
-            q_results = google_image_search(q)
-        if not q_results:
-            q_results = duckduckgo_image_search(q)
-        if not q_results:
-            q_results = yandex_image_search(q)
-        if not q_results and config.USE_FALLBACK_SEARCH:
-            q_results = bing_image_search(q)
+        q_results = run_parallel_consensus_search(q)
             
         if q_results:
             all_primary_results.extend(q_results)
@@ -1512,15 +1721,7 @@ def search_best_product_image(query, product_name, brand, **kwargs):
         fallback_query = get_fallback_query(product_name)
         print(f"ℹ️ لم يتم العثور على صور مفهرسة للبراند '{brand}'. تم تشغيل البحث العام للمنتج: '{fallback_query}'...")
         
-        fallback_results = []
-        # أ. البحث في DuckDuckGo للبحث العام
-        fallback_results = duckduckgo_image_search(fallback_query)
-        # ب. البحث في Yandex للبحث العام
-        if not fallback_results:
-            fallback_results = yandex_image_search(fallback_query)
-        # ج. البحث في Bing كبديل للبحث العام
-        if not fallback_results and config.USE_FALLBACK_SEARCH:
-            fallback_results = bing_image_search(fallback_query)
+        fallback_results = run_parallel_consensus_search(fallback_query)
             
         if fallback_results:
             # تقييم الصور العامة (بدون اشتراط مطابقة البراند) واختيار الصورة الأعلى صلة بالمنتج

@@ -179,6 +179,19 @@ def extract_metadata_from_image(image_path, product_name, brand):
             
             result = json.loads(text_response)
             if isinstance(result, dict):
+                # تصنيف المنتج دلالياً باستخدام مصنف التصنيفات الذكي المتجهي
+                try:
+                    from taxonomy_classifier import EnterpriseTaxonomyClassifier
+                    classifier = EnterpriseTaxonomyClassifier()
+                    cat_path, confidence = classifier.classify_product_title(product_name)
+                    if cat_path and " > " in cat_path:
+                        parts = cat_path.split(" > ")
+                        if len(parts) >= 1: result["category_l1_en"] = parts[0]
+                        if len(parts) >= 2: result["category_l2_en"] = parts[1]
+                        if len(parts) >= 3: result["category_l3_en"] = parts[2]
+                except Exception as ex:
+                    print(f"⚠️ خطأ أثناء تصنيف المنتج دلالياً: {ex}")
+
                 # تطبيع وتصحيح التصنيفات المحددة مع قاعدة الفهرس المعتمدة
                 normalized_cats = categories.normalize_category_path(
                     result.get("category_l1_en", ""),
@@ -880,49 +893,51 @@ def process_product_image(image_url, product_name, brand):
             print("❌ [Self-Healing Failed] فشل مسارات التراجع الشفافة. استخدام الصورة الخام الكاملة لحماية المنتج وتحويلها للمراجعة البشرية.")
             nobg_path = raw_path
 
-    # 4. تحسين طفيف للجودة (حدة الحواف) قبل الرفع
-    temp_enhanced = os.path.join("temp", f"enhanced_{safe_name}.webp")
-    final_path = nobg_path
+    # 4. تحسين الحواف وتطبيق ظلال الاستوديو الناعمة والتوسيط
+    temp_rgba = os.path.join("temp", f"rgba_{safe_name}.webp")
+    final_path = os.path.join("temp", f"final_{safe_name}.webp")
+    
     if nobg_path != raw_path:
-        if enhance_image_quality(nobg_path, temp_enhanced):
+        try:
+            from PIL import Image
+            import numpy as np
+            from edge_shadow_engine import EdgeShadowEngine
+            
+            # استخراج قناع الشفافية من الصورة المعزولة الخلفية
+            with Image.open(nobg_path) as nobg_img:
+                nobg_rgba = nobg_img.convert("RGBA")
+                alpha_channel = np.array(nobg_rgba.getchannel('A'))
+                
+            # تشغيل محرك معالجة الحواف Guided Filter
+            success_edge = EdgeShadowEngine.process_mask(raw_path, alpha_channel, temp_rgba)
+            
+            if success_edge:
+                # تطبيق ظلال الاستوديو المركبة والتوسيط
+                success_shadow = EdgeShadowEngine.apply_studio_shadows(temp_rgba, final_path, target_size=config.IMAGE_TARGET_SIZE)
+                if not success_shadow:
+                    final_path = nobg_path
+            else:
+                final_path = nobg_path
+        except Exception as e:
+            print(f"⚠️ خطأ أثناء تطبيق تنعيم الحواف والظلال: {e}")
+            final_path = nobg_path
+    else:
+        # إذا لم يتم عزل الخلفية، نستخدم الصورة الخام مباشرة
+        final_path = raw_path
+        
+    # تنظيف الملفات المؤقتة
+    for temp_f in [temp_rgba, raw_path, nobg_path]:
+        if os.path.exists(temp_f) and temp_f != final_path:
             try:
-                final_path = temp_enhanced
+                os.remove(temp_f)
             except Exception:
                 pass
-        
-    # تنظيف الملف الخام المؤقت إن لم يكن هو المخرج النهائي
-    try:
-        if os.path.exists(raw_path) and raw_path != final_path and raw_path != nobg_path:
-            os.remove(raw_path)
-    except Exception:
-        pass
-        
+                
     return final_path
 
 
 def send_telegram_notification(text):
     """
-    إرسال تنبيه فوري عبر بوت Telegram إذا تم توفير مفتاح البوت ومعرف الدردشة في الإعدادات.
+    إرسال تنبيه فوري عبر بوت Telegram (تم إيقافه بالكامل بناءً على طلب العميل).
     """
-    token = config.TELEGRAM_BOT_TOKEN
-    chat_id = config.TELEGRAM_CHAT_ID
-    if not token or not chat_id:
-        return False
-        
-    url = f"https://api.telegram.org/bot{token}/sendMessage"
-    payload = {
-        "chat_id": chat_id,
-        "text": text,
-        "parse_mode": "HTML"
-    }
-    try:
-        proxies = {"http": config.PROXY_URL, "https": config.PROXY_URL} if config.PROXY_URL else None
-        res = requests.post(url, json=payload, timeout=10, proxies=proxies)
-        if res.status_code == 200:
-            return True
-        else:
-            print(f"⚠️ فشل إرسال إشعار Telegram: {res.text}")
-            return False
-    except Exception as e:
-        print(f"⚠️ خطأ أثناء الاتصال بـ Telegram API: {e}")
-        return False
+    return False

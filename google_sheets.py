@@ -1,8 +1,38 @@
 # google_sheets.py
 # موديول للتعامل مع Google Sheets
 
+import time
+import random
 import gspread
+from gspread.exceptions import APIError
 import config
+
+def retry_gspread_on_429(max_retries=5):
+    """
+    مُزخرف (Decorator) لإعادة محاولة استدعاءات Google API عند تلقي الأخطاء 429 أو 5xx
+    باستخدام ارتداد لوغاريتمي عشوائي (Exponential Backoff with Jitter).
+    """
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            retry = 0
+            while retry <= max_retries:
+                try:
+                    return func(*args, **kwargs)
+                except APIError as e:
+                    if e.code in [429, 500, 503]:
+                        retry += 1
+                        if retry > max_retries:
+                            raise e
+                        backoff = min((2 ** retry) + random.uniform(0.1, 1.0), 32)
+                        print(f"⚠️ [Google Sheets API] تفعيل الارتداد اللوغاريتمي المحمي. إعادة محاولة {retry}/{max_retries} خلال {backoff:.2f} ثانية...")
+                        time.sleep(backoff)
+                    else:
+                        raise e
+                except Exception as e:
+                    raise e
+            return None
+        return wrapper
+    return decorator
 
 def get_sheets_client():
     """
@@ -157,6 +187,7 @@ def get_products(worksheet):
         print(f"❌ حدث خطأ أثناء قراءة المنتجات من الشيت: {e}")
         return [], -1
 
+@retry_gspread_on_429()
 def update_image_link(worksheet, row_number, link_column_index, image_link):
     """
     تحديث خلية رابط الصورة لصف منتج معين.
@@ -233,10 +264,10 @@ def get_brand_mappings(client, sheet_name_or_url):
         print(f"❌ حدث خطأ أثناء جلب مرادفات البراندات من الشيت: {e}")
         return {}
 
+@retry_gspread_on_429()
 def update_product_metadata(worksheet, row_number, metadata):
     """
-    تحديث شيت البيانات بالقيم الغذائية والمكونات والوصف التسويقي.
-    إذا لم تكن الأعمدة موجودة، يتم إنشاؤها تلقائياً.
+    تحديث شيت البيانات بالقيم الغذائية والمكونات والوصف التسويقي دفعة واحدة (Batch Update).
     """
     try:
         # 1. قراءة صف العناوين الأول
@@ -277,12 +308,21 @@ def update_product_metadata(worksheet, row_number, metadata):
                 
             col_indices[key] = found_idx
             
-        # 3. تحديث خلايا البيانات للصف المعني
+        # 3. تحديث خلايا البيانات للصف المعني عبر دفعة واحدة (Batch Transaction)
+        batch_data = []
         for key, val in metadata.items():
             if key in col_indices and val:
-                worksheet.update_cell(row_number, col_indices[key] + 1, str(val))
+                # تحويل إحداثيات الصف والعمود لصيغة A1 (مثل D2)
+                col_letter = gspread.utils.rowcol_to_a1(row_number, col_indices[key] + 1)
+                batch_data.append({
+                    "range": col_letter,
+                    "values": [[str(val)]]
+                })
                 
-        print(f"✅ تم تحديث البيانات الوصفية للمنتج بنجاح في الصف {row_number}.")
+        if batch_data:
+            worksheet.batch_update(batch_data, value_input_option="USER_ENTERED")
+                
+        print(f"✅ [Batch Update Sheets] تم تحديث {len(batch_data)} حقول وصفية للمنتج بنجاح في الصف {row_number}.")
         return True
     except Exception as e:
         print(f"❌ فشل تحديث البيانات الوصفية للمنتج في الصف {row_number}: {e}")

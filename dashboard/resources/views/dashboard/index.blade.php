@@ -194,6 +194,27 @@
     </div>
 </div>
 
+<!-- Live Telemetry Graph & Analytics -->
+<div class="glass-panel" style="margin-top: 2rem;">
+    <h3 style="font-size: 1.1rem; border-bottom: 1px solid var(--panel-border); padding-bottom: 0.75rem; margin-bottom: 1.25rem; display: flex; align-items: center; gap: 0.5rem;">
+        <i class="fas fa-chart-line" style="color: var(--accent-cyan);"></i> مراقبة مؤشرات الأداء الفورية (Live Telemetry & Cost Analysis)
+    </h3>
+    <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 1.5rem; min-height: 260px;">
+        <div style="background: rgba(0,0,0,0.1); border-radius: 8px; padding: 1rem; border: 1px solid var(--panel-border); position: relative; height: 260px;">
+            <canvas id="telemetryChart"></canvas>
+        </div>
+        <div style="background: rgba(0,0,0,0.15); border-radius: 8px; padding: 1rem; border: 1px solid var(--panel-border); max-height: 260px; overflow-y: auto; display: flex; flex-direction: column;">
+            <h4 style="font-size: 0.85rem; margin-bottom: 0.5rem; color: var(--text-primary); font-weight: bold; border-bottom: 1px solid var(--panel-border); padding-bottom: 0.25rem; display: flex; justify-content: space-between; align-items: center;">
+                <span><i class="fas fa-terminal" style="color: var(--accent-purple); margin-inline-end: 0.25rem;"></i> تدفق الأحداث المباشر (SSE)</span>
+                <span id="sse-connection-status" class="score-badge" style="font-size: 0.65rem; padding: 2px 6px; background: rgba(239, 68, 68, 0.1); color: var(--danger); border-color: rgba(239, 68, 68, 0.2);">مغلق</span>
+            </h4>
+            <div id="sse-log-container" style="font-family: 'Courier New', Courier, monospace; font-size: 0.75rem; color: var(--text-secondary); line-height: 1.4; display: flex; flex-direction: column; gap: 0.35rem; text-align: left; direction: ltr; overflow-y: auto; flex: 1;">
+                <span style="color: var(--text-secondary); font-style: italic;">بانتظار تدفق الأحداث الحية...</span>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- System Services Monitor & Auto-Start Controller -->
 <div class="glass-panel" style="margin-top: 2rem;">
     <h3 style="font-size: 1.1rem; border-bottom: 1px solid var(--panel-border); padding-bottom: 0.75rem; margin-bottom: 1.25rem; display: flex; align-items: center; gap: 0.5rem;">
@@ -237,6 +258,7 @@
 @endsection
 
 @section('scripts')
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
     // تحديث حالة الأتمتة بالخلفية
     async function pollBatchStatus() {
@@ -382,6 +404,127 @@
         }
     }
 
+    // تهيئة رسم التليمتري البياني لسرعة الطوابير والتوكنز
+    let queueTelemetryChart = null;
+
+    function initTelemetryChart() {
+        const ctx = document.getElementById('telemetryChart').getContext('2d');
+        queueTelemetryChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: 'تأخير طوابير المعالجة (ثواني)',
+                    data: [],
+                    borderColor: 'rgb(255, 99, 132)',
+                    backgroundColor: 'rgba(255, 99, 132, 0.05)',
+                    borderWidth: 2,
+                    fill: true,
+                    tension: 0.3
+                }, {
+                    label: 'استهلاك الرموز (Gemini Tokens)',
+                    data: [],
+                    borderColor: 'rgb(54, 162, 235)',
+                    backgroundColor: 'rgba(54, 162, 235, 0.05)',
+                    borderWidth: 2,
+                    fill: true,
+                    tension: 0.3
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: {
+                        grid: { color: 'rgba(255,255,255,0.05)' },
+                        ticks: { color: '#8e9bb0', font: { size: 9 } }
+                    },
+                    y: {
+                        grid: { color: 'rgba(255,255,255,0.05)' },
+                        ticks: { color: '#8e9bb0', font: { size: 9 } }
+                    }
+                },
+                plugins: {
+                    legend: {
+                        labels: { color: '#f3f4f6', font: { size: 10 } }
+                    }
+                }
+            }
+        });
+    }
+
+    // فتح اتصال البث الحي SSE مع خادم بايثون
+    function startSSEConnection() {
+        const statusEl = document.getElementById('sse-connection-status');
+        const logContainer = document.getElementById('sse-log-container');
+        
+        try {
+            const eventSource = new EventSource('http://127.0.0.1:5000/api/v1/telemetry/stream/enterprise_tenant_102');
+            
+            eventSource.onopen = () => {
+                statusEl.innerText = 'متصل فعال 🟢';
+                statusEl.style.background = 'rgba(16, 185, 129, 0.1)';
+                statusEl.style.color = 'var(--success)';
+                statusEl.style.borderColor = 'rgba(16, 185, 129, 0.2)';
+            };
+            
+            eventSource.onmessage = (event) => {
+                const payload = JSON.parse(event.data);
+                
+                // إضافة السجل في شاشة الكونسول الجانبية
+                if (payload.log) {
+                    if (logContainer.innerHTML.includes('بانتظار تدفق')) {
+                        logContainer.innerHTML = '';
+                    }
+                    const newLog = document.createElement('span');
+                    newLog.style.display = 'block';
+                    newLog.style.borderBottom = '1px solid rgba(255,255,255,0.02)';
+                    newLog.style.paddingBottom = '2px';
+                    newLog.innerText = payload.log;
+                    logContainer.appendChild(newLog);
+                    logContainer.scrollTop = logContainer.scrollHeight;
+                }
+                
+                // تحديث شريط التقدم التلقائي
+                if (payload.pipeline_metrics && payload.pipeline_metrics.progress_percentage !== undefined) {
+                    const percent = payload.pipeline_metrics.progress_percentage;
+                    const fillBar = document.getElementById('batchProgressBar');
+                    const percentText = document.getElementById('batchProgressPercent');
+                    
+                    if (fillBar) fillBar.style.width = percent + '%';
+                    if (percentText) percentText.innerText = percent + '%';
+                }
+                
+                // تحديث الرسم البياني بالقيم الجديدة
+                if (queueTelemetryChart && payload.telemetry) {
+                    const timeLabel = new Date(payload.timestamp * 1000).toLocaleTimeString();
+                    
+                    queueTelemetryChart.data.labels.push(timeLabel);
+                    queueTelemetryChart.data.datasets[0].data.push(payload.telemetry.queue_delay_seconds);
+                    queueTelemetryChart.data.datasets[1].data.push(payload.telemetry.gemini_api_tokens);
+                    
+                    // إبقاء آخر 12 عينة فقط لمنع تكدس الذاكرة للمتصفح
+                    if (queueTelemetryChart.data.labels.length > 12) {
+                        queueTelemetryChart.data.labels.shift();
+                        queueTelemetryChart.data.datasets[0].data.shift();
+                        queueTelemetryChart.data.datasets[1].data.shift();
+                    }
+                    
+                    queueTelemetryChart.update();
+                }
+            };
+            
+            eventSource.onerror = () => {
+                statusEl.innerText = 'غير متصل 🔴';
+                statusEl.style.background = 'rgba(239, 68, 68, 0.1)';
+                statusEl.style.color = 'var(--danger)';
+                statusEl.style.borderColor = 'rgba(239, 68, 68, 0.2)';
+            };
+        } catch (err) {
+            console.error("SSE Connection failed:", err);
+        }
+    }
+
     // Poll batch status and system status on load
     window.addEventListener('load', () => {
         pollBatchStatus();
@@ -389,6 +532,10 @@
         
         pollSystemStatus();
         setInterval(pollSystemStatus, 5000);
+
+        // تهيئة التليمتري والبث المباشر
+        initTelemetryChart();
+        startSSEConnection();
     });
 </script>
 @endsection
