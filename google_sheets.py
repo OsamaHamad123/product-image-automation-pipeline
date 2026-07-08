@@ -362,11 +362,38 @@ def get_products(worksheet):
         print(f"❌ حدث خطأ أثناء قراءة المنتجات من الشيت: {e}")
         return [], -1
 
+def _redis_write_behind(row_number, col_idx, value):
+    try:
+        import redis
+        import json
+        r = redis.Redis(host=config.REDIS_HOST, port=config.REDIS_PORT, db=config.REDIS_DB, socket_timeout=0.2, decode_responses=True)
+        key = f"row_{row_number}"
+        cached = r.get(f"product:data:{key}")
+        if cached:
+            payload = json.loads(cached)
+        else:
+            payload = {"row_index": row_number, "updates": {}}
+        payload["updates"][str(col_idx)] = value
+        r.set(f"product:data:{key}", json.dumps(payload))
+        r.sadd("writebehind:dirty_set", key)
+        
+        # تفريغ كاش الكتالوج لضمان التحديث في المتصفح
+        r.delete("laravel_database_laravel_cache:products_json_v1")
+        r.delete("laravel_cache:products_json_v1")
+        return True
+    except Exception as e:
+        print(f"⚠️ [Redis Write-Behind Fallback] {e}")
+        return False
+
 @retry_gspread_on_429()
 def update_image_link(worksheet, row_number, link_column_index, image_link):
     """
     تحديث خلية رابط الصورة لصف منتج معين.
     """
+    if _redis_write_behind(row_number, link_column_index, image_link):
+        print(f"⏳ [Redis Write-Behind] تمت جدولة تحديث الرابط في الصف {row_number} عبر Redis.")
+        return True
+
     global _queue, _worker
     if _queue is not None and _worker is not None:
         _queue.append_update(row_number, link_column_index, image_link)
@@ -474,7 +501,6 @@ def update_product_metadata(worksheet, row_number, metadata):
     """
     تحديث شيت البيانات بالقيم الغذائية والمكونات والوصف التسويقي دفعة واحدة (Batch Update).
     """
-    global _queue, _worker
     try:
         # 1. قراءة صف العناوين الأول
         headers = worksheet.row_values(1)
@@ -508,13 +534,49 @@ def update_product_metadata(worksheet, row_number, metadata):
             if found_idx == -1:
                 found_idx = len(headers)
                 headers.append(name)
+                try:
+                    if found_idx + 1 > worksheet.col_count:
+                        cols_to_add = (found_idx + 1) - worksheet.col_count
+                        worksheet.add_cols(cols_to_add)
+                        print(f"ℹ️ تم توسيع أعمدة الشيت بإضافة {cols_to_add} أعمدة جديدة.")
+                except Exception as ex:
+                    print(f"⚠️ فشل توسيع أعمدة الشيت تلقائياً: {ex}")
                 worksheet.update_cell(1, found_idx + 1, name)
                 header_changed = True
                 print(f"ℹ️ تم إنشاء عمود جديد '{name}' في العمود رقم {found_idx + 1}")
                 
             col_indices[key] = found_idx
             
-        # 3. تحديث خلايا البيانات للصف المعني
+        # 3. محاولة الحفظ عبر Redis Write-Behind
+        try:
+            import redis
+            import json
+            r = redis.Redis(host=config.REDIS_HOST, port=config.REDIS_PORT, db=config.REDIS_DB, socket_timeout=0.2, decode_responses=True)
+            key = f"row_{row_number}"
+            
+            cached = r.get(f"product:data:{key}")
+            if cached:
+                payload = json.loads(cached)
+            else:
+                payload = {"row_index": row_number, "updates": {}}
+                
+            for k, val in metadata.items():
+                if k in col_indices and val:
+                    payload["updates"][str(col_indices[k])] = val
+                    
+            r.set(f"product:data:{key}", json.dumps(payload))
+            r.sadd("writebehind:dirty_set", key)
+            
+            # تفريغ كاش الكتالوج
+            r.delete("laravel_database_laravel_cache:products_json_v1")
+            r.delete("laravel_cache:products_json_v1")
+            print(f"⏳ [Redis Write-Behind] تمت جدولة تحديث {len(metadata)} حقول وصفية للمنتج في الصف {row_number} عبر Redis.")
+            return True
+        except Exception as ree:
+            print(f"⚠️ [Redis Write-Behind Fallback] {ree}")
+            
+        # 4. تحديث خلايا البيانات للصف المعني (SQLite / direct fallback)
+        global _queue, _worker
         if _queue is not None and _worker is not None:
             for key, val in metadata.items():
                 if key in col_indices and val:

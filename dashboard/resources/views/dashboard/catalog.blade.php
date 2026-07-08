@@ -816,6 +816,13 @@
                                     <span class="slider"></span>
                                 </label>
                             </div>
+                            <div class="toggle-container" title="تحسين جودة وتفاصيل الصورة (وقد يسبب تغيير خفيف في الألوان)">
+                                <span>تحسين جودة الصورة (AI Enhance)</span>
+                                <label class="switch">
+                                    <input type="checkbox" id="aiEnhance">
+                                    <span class="slider"></span>
+                                </label>
+                            </div>
                             <div class="toggle-container" title="البحث مباشرة من محرك البحث وتجنب نتائج الكاش المخزنة">
                                 <span>تجاوز الكاش المحلي</span>
                                 <label class="switch">
@@ -842,6 +849,7 @@
                 <div class="form-group">
                     <label for="outputPreset" style="font-size:0.8rem; color:var(--text-secondary);">الأبعاد ونسبة العرض إلى الارتفاع</label>
                     <select id="outputPreset" onchange="applyPreset()" style="width:100%; padding:0.6rem 0.75rem; background:var(--input-bg); border:1px solid var(--panel-border); border-radius:6px; color:var(--text-primary); font-family:inherit; font-size:0.85rem;">
+                        <option value="dynamic" selected>تلقائي ذكي (Dynamic AI — يحافظ على جودة الصورة الأصلية)</option>
                         <option value="800x800">800 × 800 — مربع قياسي (بقالة، FMCG)</option>
                         <option value="1000x1000">1000 × 1000 — مربع عالي الدقة</option>
                         <option value="900x1200">900 × 1200 — عمودي (ملابس، أزياء)</option>
@@ -1065,8 +1073,70 @@
         return `/api/image-proxy?url=${encodeURIComponent(url)}`;
     }
 
+    // حفظ التغييرات تلقائياً في LocalStorage
+    function saveSettingsToLocalStorage() {
+        localStorage.setItem('ignoreUnitClash', document.getElementById('ignoreUnitClash').checked);
+        localStorage.setItem('strictBrandMatch', document.getElementById('strictBrandMatch').checked);
+        localStorage.setItem('aiUpscale', document.getElementById('aiUpscale').checked);
+        localStorage.setItem('aiEnhance', document.getElementById('aiEnhance').checked);
+        localStorage.setItem('skipCache', document.getElementById('skipCache').checked);
+        localStorage.setItem('target_width', getOutputWidth());
+        localStorage.setItem('target_height', getOutputHeight());
+        localStorage.setItem('padding_ratio', document.getElementById('paddingRatio').value);
+        localStorage.setItem('bg_color', document.getElementById('bgColor').value);
+    }
+
     // On load
     window.addEventListener('load', () => {
+        // استعادة الإعدادات المخزنة من LocalStorage إن وجدت
+        if (localStorage.getItem('ignoreUnitClash') !== null) {
+            document.getElementById('ignoreUnitClash').checked = localStorage.getItem('ignoreUnitClash') === 'true';
+        }
+        if (localStorage.getItem('strictBrandMatch') !== null) {
+            document.getElementById('strictBrandMatch').checked = localStorage.getItem('strictBrandMatch') === 'true';
+        }
+        if (localStorage.getItem('aiUpscale') !== null) {
+            document.getElementById('aiUpscale').checked = localStorage.getItem('aiUpscale') === 'true';
+        }
+        if (localStorage.getItem('aiEnhance') !== null) {
+            document.getElementById('aiEnhance').checked = localStorage.getItem('aiEnhance') === 'true';
+        }
+        if (localStorage.getItem('skipCache') !== null) {
+            document.getElementById('skipCache').checked = localStorage.getItem('skipCache') === 'true';
+        }
+        if (localStorage.getItem('padding_ratio') !== null) {
+            document.getElementById('paddingRatio').value = localStorage.getItem('padding_ratio');
+        }
+        if (localStorage.getItem('bg_color') !== null) {
+            const storedBg = localStorage.getItem('bg_color');
+            document.getElementById('bgColor').value = storedBg;
+            const bgPreset = document.getElementById('bgColorPreset');
+            if (bgPreset) {
+                // التحقق مما إذا كانت الخلفية مخصصة أو من القائمة
+                let found = false;
+                for (let i = 0; i < bgPreset.options.length; i++) {
+                    if (bgPreset.options[i].value === storedBg) {
+                        bgPreset.selectedIndex = i;
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) bgPreset.value = 'custom';
+            }
+        }
+        
+        // إضافة مستمعي الأحداث لحفظ التغييرات فوراً
+        const inputs = [
+            'ignoreUnitClash', 'strictBrandMatch', 'aiUpscale', 'aiEnhance', 'skipCache', 
+            'outputPreset', 'paddingRatio', 'bgColorPreset', 'customWidth', 'customHeight'
+        ];
+        inputs.forEach(id => {
+            const el = document.getElementById(id);
+            if (el) {
+                el.addEventListener('change', saveSettingsToLocalStorage);
+            }
+        });
+
         loadProducts();
         initTaxonomyDropdowns();
     });
@@ -1656,6 +1726,7 @@
         const l2 = document.getElementById('selectL2').value;
         const l3 = document.getElementById('selectL3').value;
         const aiUpscale = document.getElementById('aiUpscale') ? document.getElementById('aiUpscale').checked : true;
+        const aiEnhance = document.getElementById('aiEnhance') ? document.getElementById('aiEnhance').checked : false;
         const bgRemovalMethod = document.getElementById('bgRemovalMethod') ? document.getElementById('bgRemovalMethod').value : 'bria';
         
         try {
@@ -1675,6 +1746,7 @@
                     category_l2: l2,
                     category_l3: l3,
                     upscale: aiUpscale,
+                    enhance: aiEnhance,
                     bg_removal_method: bgRemovalMethod,
                     target_width:  getOutputWidth(),
                     target_height: getOutputHeight(),
@@ -1982,12 +2054,14 @@
         canvas.toBlob(async function(blob) {
             const formData = new FormData();
             const aiUpscale = document.getElementById('aiUpscale') ? document.getElementById('aiUpscale').checked : true;
+            const aiEnhance = document.getElementById('aiEnhance') ? document.getElementById('aiEnhance').checked : false;
             formData.append('file', blob, uploadFile.name);
             formData.append('row_number', row);
             formData.append('product_name', name);
             formData.append('brand', brand);
             formData.append('barcode', barcode);
             formData.append('upscale', aiUpscale ? 'true' : 'false');
+            formData.append('enhance', aiEnhance ? 'true' : 'false');
             formData.append('target_width',  getOutputWidth());
             formData.append('target_height', getOutputHeight());
             formData.append('padding_ratio', document.getElementById('paddingRatio').value);
@@ -2083,12 +2157,14 @@
 
     function getOutputWidth() {
         const preset = document.getElementById('outputPreset').value;
+        if (preset === 'dynamic') return 0;
         if (preset === 'custom') return parseInt(document.getElementById('customWidth').value) || 800;
         return parseInt(preset.split('x')[0]);
     }
 
     function getOutputHeight() {
         const preset = document.getElementById('outputPreset').value;
+        if (preset === 'dynamic') return 0;
         if (preset === 'custom') return parseInt(document.getElementById('customHeight').value) || 800;
         return parseInt(preset.split('x')[1]);
     }

@@ -139,70 +139,76 @@ class EdgeShadowEngine:
         وتوسيط المنتج وتعبئة الإطار.
         """
         try:
+            import config
             with Image.open(input_rgba_path) as img:
                 img = img.convert("RGBA")
                 
-                # 1. تغيير الحجم بشكل متناسب مع الهامش (مقياس 82% لترك مساحة كافية للظلال)
-                img.thumbnail((int(target_size[0] * 0.82), int(target_size[1] * 0.82)), Image.Resampling.LANCZOS)
+                # 1. تغيير الحجم بشكل متناسب مع الهامش
+                enable_shadows = getattr(config, 'ENABLE_STUDIO_SHADOWS', False)
+                scale = 0.88 if not enable_shadows else 0.82
+                img.thumbnail((int(target_size[0] * scale), int(target_size[1] * scale)), Image.Resampling.LANCZOS)
                 
                 alpha = img.getchannel('A')
                 
-                # --- أ. إنشاء ظل التلامس الوثيق (Contact Shadow) ---
-                # هو ظل مسطح ضيق تحت جسم المنتج مباشرة
-                contact_shadow_h = max(2, int(img.height * 0.08))
-                contact_shadow_w = int(img.width * 0.95)
-                
-                contact_shadow = Image.new("RGBA", (contact_shadow_w, contact_shadow_h), (20, 20, 20, 255))
-                # إنشاء قناع بيضاوي ناعم جداً
-                ellipse_mask = Image.new("L", (contact_shadow_w, contact_shadow_h), 0)
-                draw_cv = np.zeros((contact_shadow_h, contact_shadow_w), dtype=np.uint8)
-                cv2.ellipse(draw_cv, (contact_shadow_w//2, contact_shadow_h//2), (contact_shadow_w//2, contact_shadow_h//2), 0, 0, 360, 255, -1)
-                ellipse_mask = Image.fromarray(cv2.GaussianBlur(draw_cv, (5, 5), 0))
-                
-                contact_shadow_alpha = ellipse_mask.point(lambda p: int(p * 0.65)) # عتامة 65% للظل الملامس
-                contact_shadow.putalpha(contact_shadow_alpha)
-                
-                # --- ب. إنشاء ظل السقوط الناعم (Cast Soft Shadow) ---
-                # يمثل اتجاه الضوء الساقط بزاوية 45 درجة (يمين وأسفل)
-                cast_shadow = Image.new("RGBA", img.size, (25, 25, 25, 255))
-                cast_shadow.putalpha(alpha)
-                
-                # إزاحة وتشويه هندسي خفيف لمحاكاة زاوية الضوء
-                shadow_large = cast_shadow.resize((img.width + 16, img.height + 16), Image.Resampling.BILINEAR)
-                shadow_blurred = shadow_large.filter(ImageFilter.GaussianBlur(radius=20))
-                
-                # تخفيف الظل ليصبح ناعماً وشفافاً (عتامة 16%)
-                shadow_alpha = shadow_blurred.getchannel('A')
-                shadow_alpha = shadow_alpha.point(lambda p: int(p * 0.16))
-                shadow_blurred.putalpha(shadow_alpha)
-
                 # 2. إنشاء لوحة استوديو بيضاء بالكامل
                 studio_canvas = Image.new("RGBA", target_size, (255, 255, 255, 255))
 
-                # 3. حساب مواقع التوسيط للمنتج والظلال
+                # 3. حساب مواقع التوسيط للمنتج
                 x = (target_size[0] - img.width) // 2
                 y = (target_size[1] - img.height) // 2
                 
-                # توسيط ظل التلامس تحت أسفل الصورة مباشرة
-                cx = (target_size[0] - contact_shadow_w) // 2
-                cy = y + img.height - (contact_shadow_h // 2)
+                if enable_shadows:
+                    # --- أ. إنشاء ظل التلامس الوثيق (Contact Shadow) ---
+                    # هو ظل مسطح ضيق تحت جسم المنتج مباشرة
+                    contact_shadow_h = max(2, int(img.height * 0.08))
+                    contact_shadow_w = int(img.width * 0.95)
+                    
+                    contact_shadow = Image.new("RGBA", (contact_shadow_w, contact_shadow_h), (20, 20, 20, 255))
+                    # إنشاء قناع بيضاوي ناعم جداً
+                    ellipse_mask = Image.new("L", (contact_shadow_w, contact_shadow_h), 0)
+                    draw_cv = np.zeros((contact_shadow_h, contact_shadow_w), dtype=np.uint8)
+                    cv2.ellipse(draw_cv, (contact_shadow_w//2, contact_shadow_h//2), (contact_shadow_w//2, contact_shadow_h//2), 0, 0, 360, 255, -1)
+                    ellipse_mask = Image.fromarray(cv2.GaussianBlur(draw_cv, (5, 5), 0))
+                    
+                    contact_shadow_alpha = ellipse_mask.point(lambda p: int(p * 0.65)) # عتامة 65% للظل الملامس
+                    contact_shadow.putalpha(contact_shadow_alpha)
+                    
+                    # --- ب. إنشاء ظل السقوط الناعم (Cast Soft Shadow) ---
+                    # يمثل اتجاه الضوء الساقط بزاوية 45 درجة (يمين وأسفل)
+                    cast_shadow = Image.new("RGBA", img.size, (25, 25, 25, 255))
+                    cast_shadow.putalpha(alpha)
+                    
+                    # إزاحة وتشويه هندسي خفيف لمحاكاة زاوية الضوء
+                    shadow_large = cast_shadow.resize((img.width + 16, img.height + 16), Image.Resampling.BILINEAR)
+                    shadow_blurred = shadow_large.filter(ImageFilter.GaussianBlur(radius=20))
+                    
+                    # تخفيف الظل ليصبح ناعماً وشفافاً (عتامة 16%)
+                    shadow_alpha = shadow_blurred.getchannel('A')
+                    shadow_alpha = shadow_alpha.point(lambda p: int(p * 0.16))
+                    shadow_blurred.putalpha(shadow_alpha)
 
-                # إزاحة ظل السقوط لليمين والأسفل
-                sx = (target_size[0] - shadow_large.width) // 2 + 10
-                sy = (target_size[1] - shadow_large.height) // 2 + 18
+                    # حساب مواقع التوسيط للظلال
+                    cx = (target_size[0] - contact_shadow_w) // 2
+                    cy = y + img.height - (contact_shadow_h // 2)
+                    sx = (target_size[0] - shadow_large.width) // 2 + 10
+                    sy = (target_size[1] - shadow_large.height) // 2 + 18
 
-                # 4. دمج الطبقات بالترتيب
-                # أولاً: ظل السقوط الناعم
-                studio_canvas.paste(shadow_blurred, (sx, sy), mask=shadow_blurred)
-                # ثانياً: ظل التلامس الوثيق
-                studio_canvas.paste(contact_shadow, (cx, cy), mask=contact_shadow)
-                # ثالثاً: المنتج المعزول ذو الحواف الناعمة
+                    # دمج طبقات الظلال بالترتيب
+                    # أولاً: ظل السقوط الناعم
+                    studio_canvas.paste(shadow_blurred, (sx, sy), mask=shadow_blurred)
+                    # ثانياً: ظل التلامس الوثيق
+                    studio_canvas.paste(contact_shadow, (cx, cy), mask=contact_shadow)
+                
+                # ثالثاً: المنتج المعزول ذو الحواف الناعمة (دائماً)
                 studio_canvas.paste(img, (x, y), mask=img)
 
                 # 5. الحفظ بصيغة WebP خفيفة ومحسنة
                 studio_canvas.convert("RGB").save(output_webp_path, "WEBP", quality=85, method=4)
-                print("✅ [Studio Shadow Engine] تم دمج حواف المنتج وتطبيق ظلال استوديو تفاعلية مركبة بنجاح!")
+                if enable_shadows:
+                    print("✅ [Studio Shadow Engine] تم دمج حواف المنتج وتطبيق ظلال استوديو تفاعلية مركبة بنجاح!")
+                else:
+                    print("✅ [Studio Shadow Engine] تم دمج حواف المنتج وتوسيطه على خلفية بيضاء نقية بدون ظلال بنجاح!")
                 return True
         except Exception as e:
-            print(f"❌ [Studio Shadow Engine Error] خطأ أثناء تطبيق الظلال: {e}")
+            print(f"❌ [Studio Shadow Engine Error] خطأ أثناء تطبيق المعالجة والتوسيط: {e}")
             return False

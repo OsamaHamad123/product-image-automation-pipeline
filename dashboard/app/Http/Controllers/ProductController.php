@@ -14,21 +14,49 @@ class ProductController extends Controller
     private function runPython($action, $params = [])
     {
         try {
-            $jsonParams = json_encode($params);
-            $base64Params = base64_encode($jsonParams);
+            $routes = [
+                'get_products' => 'products',
+                'search' => 'search',
+                'select_image' => 'select-image',
+                'reject_image' => 'reject-image',
+                'upload_manual_image' => 'upload-manual-image',
+                'batch_status' => 'batch-status',
+                'batch-status' => 'batch-status'
+            ];
             
-            $cmd = "\"{$this->pythonPath}\" \"{$this->bridgePath}\" {$action} {$base64Params} 2>&1";
-            $output = shell_exec($cmd);
+            $endpoint = $routes[$action] ?? $action;
+            $url = "http://127.0.0.1:8001/api/{$endpoint}";
             
-            // Extract JSON from output if there are print statement logs before it
-            $pos = strrpos($output, '{"status":');
-            if ($pos !== false) {
-                $output = substr($output, $pos);
+            if ($action === 'get_products' || $action === 'batch_status' || $action === 'batch-status') {
+                $response = \Illuminate\Support\Facades\Http::timeout(600)->get($url);
+            } else {
+                $response = \Illuminate\Support\Facades\Http::timeout(600)->post($url, $params);
             }
             
-            return json_decode($output, true);
+            if ($response->successful()) {
+                return $response->json();
+            }
+            
+            \Log::warning("FastAPI request failed for action: {$action}, falling back to CLI. Status: " . $response->status());
+            throw new \Exception("FastAPI returned status " . $response->status());
         } catch (\Exception $e) {
-            return ['status' => 'failed', 'error' => $e->getMessage()];
+            try {
+                $jsonParams = json_encode($params);
+                $base64Params = base64_encode($jsonParams);
+                
+                // بناء الأمر والتنفيذ الفوري (التراجع للـ CLI)
+                $cmd = "\"{$this->pythonPath}\" \"{$this->bridgePath}\" {$action} {$base64Params} 2>&1";
+                $output = shell_exec($cmd);
+                
+                $pos = strrpos($output, '{"status":');
+                if ($pos !== false) {
+                    $output = substr($output, $pos);
+                }
+                
+                return json_decode($output, true) ?: ['status' => 'failed', 'error' => $output];
+            } catch (\Exception $subEx) {
+                return ['status' => 'failed', 'error' => $e->getMessage() . ' | Fallback error: ' . $subEx->getMessage()];
+            }
         }
     }
 

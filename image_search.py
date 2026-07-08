@@ -16,6 +16,26 @@ import torchvision.transforms as T
 from PIL import Image
 from bs4 import BeautifulSoup
 
+# تهيئة شجرة BK-Tree العالمية لفحص التكرارات بصرياً بفعالية
+_bktree = None
+_bktree_lock = threading.Lock()
+
+def get_bktree():
+    global _bktree
+    with _bktree_lock:
+        if _bktree is None:
+            try:
+                import image_dedup_bktree
+                import local_cache_db
+                print("⏳ [BKTree] Building BK-Tree from SQLite database for visual deduplication...")
+                _bktree = image_dedup_bktree.build_bktree_from_db(local_cache_db.DB_PATH)
+                print("✅ [BKTree] BK-Tree built successfully.")
+            except Exception as e:
+                print(f"⚠️ [BKTree Error] Failed to build BK-Tree: {e}")
+                import image_dedup_bktree
+                _bktree = image_dedup_bktree.BKTree()
+        return _bktree
+
 def run_coroutine_sync(coro):
     """
     تشغيل الكوروتين بشكل متزامن.
@@ -1565,6 +1585,31 @@ def evaluate_and_choose_best_image(results, product_name, brand, requires_brand_
         try:
             # فتح الصورة مباشرة في الذاكرة لتجنب استهلاك القرص
             pil_img = Image.open(io.BytesIO(binary_data)).convert("RGB")
+            
+            # التحقق من التكرار البصري عبر pHash و BK-Tree
+            try:
+                import image_dedup_bktree
+                img_hash = image_dedup_bktree.calculate_phash(pil_img)
+                bktree = get_bktree()
+                duplicates = bktree.search(img_hash, max_distance=5)
+                if duplicates:
+                    dup = duplicates[0]
+                    dup_meta = dup["metadata"]
+                    dup_url = dup_meta.get("cloudinary_url")
+                    if dup_url:
+                        print(f"👁️ [BK-Tree Deduplicator] كشف تكرار بصري مع منتج آخر: '{dup_meta.get('product_name')}' (مسافة: {dup['distance']}) -> إعادة استخدام رابط Cloudinary!")
+                        return {
+                            "url": dup_url,
+                            "title": item.get("title", ""),
+                            "width": item.get("width", 800),
+                            "height": item.get("height", 800),
+                            "clip_score": 1.0,
+                            "metadata": {},
+                            "source": "visual_duplicate",
+                            "perceptual_hash": str(img_hash)
+                        }, 15
+            except Exception as bke:
+                print(f"⚠️ [BK-Tree Duplicate Check Error] {bke}")
             
             # أ. تشغيل بوابة الفرز الرياضي غير التوليدي لجودة الصورة
             # حساب نتيجة الجاذبية البصرية وقيمة التماثل البصري DINOv2

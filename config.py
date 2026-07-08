@@ -88,6 +88,13 @@ CLOUDINARY_AI_ENHANCE = False    # إيقاف تحسين الألوان السح
 CLOUDINARY_SHARPEN = 20          # قوة حدة الصورة سحابياً (0 للإيقاف، تم استخدام 20 لإبراز تفاصيل النصوص دون التسبب بتشويه)
 CLOUDINARY_TRIM_TOLERANCE = 5  # سماحية الاقتصاص لـ Cloudinary لمنع قص حواف المنتجات اللامعة أو الدائرية (0-100)
 
+# إعدادات الظلال والتجاوز الذكي للخلفيات البيضاء المجهزة مسبقاً
+ENABLE_STUDIO_SHADOWS = False    # تعطيل ظلال الاستوديو لتلبية طلب العميل بعدم وجود ظلال
+BYPASS_WHITE_BACKGROUND_CHECK = True  # تخطي إزالة الخلفية والقص إذا كانت الصورة الأصلية بالفعل بخلفية بيضاء نقية وجودة عالية
+WHITE_BACKGROUND_THRESHOLD = 0.96      # النسبة المقبولة للبكسلات البيضاء على إطار الصورة (96%) للاعتبار كخلفية بيضاء
+ENABLE_IMAGE_ENHANCEMENT = False       # تعطيل تحسين/تنعيم الألوان والصور الذكائي الافتراضي لمنع بهتان الألوان وجعلها اختيارية
+
+
 # 7. إعدادات تخطي أو استبدال الصور
 # إذا كان True، سيقوم النظام بالبحث عن الصور وتحديثها حتى لو كانت الخلية تحتوي على رابط سابق.
 # إذا كان False، سيتم تخطي أي صف يحتوي بالفعل على رابط صورة لتوفير الموارد.
@@ -193,3 +200,9 @@ def log_and_fail(barcode, product_name, brand, error_message):
     except Exception as e:
         import builtins
         builtins.print(f"⚠️ خطأ أثناء حفظ سجل الفشل: {e}")
+
+# 11. إعدادات خادم Redis
+REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
+REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
+REDIS_DB = int(os.getenv("REDIS_DB", "0"))
+

@@ -214,6 +214,16 @@ def crop_image_by_box(image_path, box, output_path):
     """
     try:
         ymin, xmin, ymax, xmax = box
+        
+        # إضافة هامش أمان بنسبة 6% لمنع قطع أطراف أو حواف المنتج عند القص
+        margin_y = int((ymax - ymin) * 0.06)
+        margin_x = int((xmax - xmin) * 0.06)
+        
+        ymin = max(0, ymin - margin_y)
+        xmin = max(0, xmin - margin_x)
+        ymax = min(1000, ymax + margin_y)
+        xmax = min(1000, xmax + margin_x)
+        
         with Image.open(image_path) as img:
             width, height = img.size
             
@@ -827,7 +837,40 @@ def enhance_image_quality(image_path, output_path):
         print(f"⚠️ خطأ أثناء تجميل الصورة: {e}")
         return False
 
-def process_product_image(image_url, product_name, brand, bg_removal_method=None):
+def has_pure_white_background(image_path, threshold=0.96):
+    """
+    التحقق مما إذا كانت الصورة الأصلية تمتلك خلفية بيضاء نقية بالفعل عبر تحليل البكسلات على الإطار الخارجي.
+    """
+    try:
+        from PIL import Image
+        import numpy as np
+        with Image.open(image_path) as img:
+            img = img.convert("RGB")
+            w, h = img.size
+            if w < 400 or h < 400:
+                return False
+                
+            img_arr = np.array(img)
+            
+            # استخراج البكسلات من الحواف الأربعة
+            top = img_arr[0, :, :]
+            bottom = img_arr[-1, :, :]
+            left = img_arr[:, 0, :]
+            right = img_arr[:, -1, :]
+            
+            border_pixels = np.concatenate([top, bottom, left, right], axis=0)
+            
+            # التحقق من أن البكسلات قريبة جداً من الأبيض (R, G, B >= 248)
+            white_mask = (border_pixels[:, 0] >= 248) & (border_pixels[:, 1] >= 248) & (border_pixels[:, 2] >= 248)
+            white_ratio = np.mean(white_mask)
+            
+            print(f"📊 [White Background Check] نسبة البكسلات البيضاء على الحدود: {white_ratio:.4f} (الحد المطلوب: {threshold:.4f})")
+            return white_ratio >= threshold
+    except Exception as e:
+        print(f"⚠️ فشل فحص الخلفية البيضاء للصورة: {e}")
+        return False
+
+def process_product_image(image_url, product_name, brand, bg_removal_method=None, enhance=False, target_width=None, target_height=None):
     """
     تحميل الصورة وإزالة خلفيتها فقط - التحجيم والقص والتوسيط يتم سحابياً عبر Cloudinary.
     يرجع مسار ملف الصورة بخلفية شفافة جاهزة للرفع.
@@ -852,6 +895,50 @@ def process_product_image(image_url, product_name, brand, bg_removal_method=None
         if not download_image(image_url, raw_path):
             return None
             
+        # حساب أبعاد الصورة المستهدفة ديناميكياً إذا تم طلب الأبعاد التلقائية (Dynamic AI Size)
+        t_w = target_width
+        t_h = target_height
+        if not t_w or t_w <= 0 or not t_h or t_h <= 0:
+            try:
+                from PIL import Image
+                with Image.open(raw_path) as temp_img:
+                    orig_w, orig_h = temp_img.size
+                    max_dim = max(orig_w, orig_h)
+                    # الحفاظ على الجودة العالية للمتاجر (نطاق بين 800 و 1600 بكسل كحد أقصى)
+                    dynamic_dim = max(800, min(max_dim, 1600))
+                    t_w = dynamic_dim
+                    t_h = dynamic_dim
+                    print(f"📊 [Dynamic Size Detection] الأبعاد الديناميكية المحسوبة للمنتج: {t_w}x{t_h} (الصورة الأصلية: {orig_w}x{orig_h})")
+            except Exception as ex:
+                print(f"⚠️ فشل حساب الأبعاد ديناميكياً في المعالج: {ex}")
+                t_w = 800
+                t_h = 800
+        target_size = (t_w, t_h)
+            
+        # التحقق مما إذا كانت الصورة ذات جودة عالية وخلفية بيضاء نقية جاهزة لتخطي القص والعزل
+        if getattr(config, 'BYPASS_WHITE_BACKGROUND_CHECK', False):
+            if has_pure_white_background(raw_path, threshold=getattr(config, 'WHITE_BACKGROUND_THRESHOLD', 0.96)):
+                print("⚡ [Bypass Check] الصورة الأصلية تمتلك خلفية بيضاء نقية وجودة عالية. تخطي التقطيع والعزل والظلال!")
+                try:
+                    from PIL import Image
+                    final_path = os.path.join("temp", f"final_{safe_name}.webp")
+                    with Image.open(raw_path) as img:
+                        img = img.convert("RGBA")
+                        scale = 0.88
+                        img.thumbnail((int(target_size[0] * scale), int(target_size[1] * scale)), Image.Resampling.LANCZOS)
+                        studio_canvas = Image.new("RGBA", target_size, (255, 255, 255, 255))
+                        x = (target_size[0] - img.width) // 2
+                        y = (target_size[1] - img.height) // 2
+                        studio_canvas.paste(img, (x, y), mask=img)
+                        studio_canvas.convert("RGB").save(final_path, "WEBP", quality=85, method=4)
+                    
+                    try: os.remove(raw_path)
+                    except Exception: pass
+                    
+                    return final_path
+                except Exception as ex:
+                    print(f"⚠️ خطأ أثناء تجاوز المعالجة المباشرة: {ex} -> المتابعة للمسار العادي...")
+            
         # التحقق من وضوح الصورة وتجنب المعالجة إذا كانت مشوشة جداً
         if is_image_blurry(raw_path, threshold=40.0):
             print(f"⚠️ [Blurry Image Detected] الصورة مشوشة جداً (Laplacian Variance < 40). سيتم تخطيها.")
@@ -860,13 +947,12 @@ def process_product_image(image_url, product_name, brand, bg_removal_method=None
                     os.remove(raw_path)
             except Exception:
                 pass
-            return None
+            return "blurry"
     
-        # تنظيف التشويش والضوضاء البصرية من الصورة المجلوبة
-        denoise_image_opencv(raw_path, raw_path)
-    
-        # ترقية دقة الصورة بالذكاء الاصطناعي إذا كانت صغيرة
-        upscale_image_if_small(raw_path, target_min_size=600)
+        # تنظيف التشويش والضوضاء البصرية وترقية الأبعاد إذا كان التحسين مطلوباً
+        if enhance or getattr(config, 'ENABLE_IMAGE_ENHANCEMENT', False):
+            denoise_image_opencv(raw_path, raw_path)
+            upscale_image_if_small(raw_path, target_min_size=600)
             
         # 2. الاقتصاص الذكي بالذكاء الاصطناعي إذا تم العثور على مربع محيط بالمنتج
         box = get_product_bounding_box(raw_path, product_name, brand)
@@ -960,7 +1046,7 @@ def process_product_image(image_url, product_name, brand, bg_removal_method=None
                 
                 if success_edge:
                     # تطبيق ظلال الاستوديو المركبة والتوسيط
-                    success_shadow = EdgeShadowEngine.apply_studio_shadows(temp_rgba, final_path, target_size=config.IMAGE_TARGET_SIZE)
+                    success_shadow = EdgeShadowEngine.apply_studio_shadows(temp_rgba, final_path, target_size=target_size)
                     if not success_shadow:
                         final_path = nobg_path
                 else:
@@ -972,6 +1058,23 @@ def process_product_image(image_url, product_name, brand, bg_removal_method=None
             # إذا لم يتم عزل الخلفية، نستخدم الصورة الخام مباشرة
             final_path = raw_path
             
+        # احتساب تدقيق درجة الامتثال البصري وإشغال المنتج داخل اللوحة (Canvas Occupancy)
+        if final_path and os.path.exists(final_path):
+            try:
+                from PIL import Image
+                import numpy as np
+                with Image.open(final_path) as fin_img:
+                    fin_rgba = fin_img.convert("RGBA")
+                    fin_arr = np.array(fin_rgba)
+                    alpha = fin_arr[:, :, 3]
+                    rgb = fin_arr[:, :, :3]
+                    # نعتبر البكسل منتمياً للمنتج إذا كان غير شفاف وغير أبيض بالكامل
+                    is_product = (alpha > 10) & ((rgb[:, :, 0] < 250) | (rgb[:, :, 1] < 250) | (rgb[:, :, 2] < 250))
+                    occupancy = np.mean(is_product)
+                    print(f"📊 [Compliance Audit] نسبة مساحة المنتج المحتلة في اللوحة النهائية: {occupancy*100:.2f}% (الحد المقبول: 10% - 90%)")
+            except Exception as ex:
+                print(f"⚠️ فشل احتساب درجة الامتثال البصري للمنتج: {ex}")
+                
         # تنظيف الملفات المؤقتة
         for temp_f in [temp_rgba, raw_path, nobg_path]:
             if os.path.exists(temp_f) and temp_f != final_path:

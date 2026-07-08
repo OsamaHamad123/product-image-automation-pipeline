@@ -11,12 +11,51 @@ import image_processor
 import cloudinary_storage
 import local_cache_db
 
+def load_run_config():
+    """
+    تحميل إعدادات التشغيل الجماعي المخصصة من ملف run_config.json إن وجد لتجاوز إعدادات config.py
+    """
+    config_file = "temp/run_config.json"
+    if os.path.exists(config_file):
+        try:
+            import json
+            with open(config_file, "r", encoding="utf-8") as f:
+                overrides = json.load(f)
+                
+            if "ignoreUnitClash" in overrides:
+                config.IGNORE_UNIT_CLASH = bool(overrides["ignoreUnitClash"])
+            if "strictBrandMatch" in overrides:
+                config.STRICT_BRAND_MATCH = bool(overrides["strictBrandMatch"])
+            if "aiUpscale" in overrides:
+                config.FORCE_UPSCALING = bool(overrides["aiUpscale"])
+            if "aiEnhance" in overrides:
+                config.ENABLE_IMAGE_ENHANCEMENT = bool(overrides["aiEnhance"])
+            if "skipCache" in overrides:
+                config.SKIP_LOCAL_CACHE = bool(overrides["skipCache"])
+            if "target_width" in overrides:
+                w = int(overrides["target_width"])
+                h = int(overrides.get("target_height", 0))
+                config.IMAGE_TARGET_SIZE = (w, h)
+            if "padding_ratio" in overrides:
+                config.IMAGE_PADDING_RATIO = float(overrides["padding_ratio"])
+            if "bg_color" in overrides:
+                config.IMAGE_BG_COLOR = str(overrides["bg_color"]).strip().lstrip('#')
+            if "curation_mode" in overrides:
+                config.CURATION_MODE = bool(overrides["curation_mode"])
+                
+            print("⚙️ [Run Config] تم تحميل وتطبيق التجاوزات البرمجية من ملف run_config.json بنجاح!")
+        except Exception as e:
+            print(f"⚠️ خطأ أثناء تحميل إعدادات run_config.json: {e}")
+
 def run_automation_pipeline():
     """
     تشغيل خط الأنابيب المؤتمت لمعالجة وتحديث صور المنتجات.
     """
     lock_file = "temp/pipeline.lock"
     try:
+        # تحميل الإعدادات المخصصة للمجموعة إن وجدت
+        load_run_config()
+        
         # تهيئة طابور المزامنة غير الحاصر لـ Google Sheets
         google_sheets.init_async_queue(config.CREDENTIALS_FILE, config.SPREADSHEET_NAME_OR_URL)
         
@@ -99,7 +138,9 @@ def run_automation_pipeline():
                 metadata = best_image.get("metadata")
                 if metadata:
                     google_sheets.update_product_metadata(worksheet, row_num, metadata)
-                update_success = google_sheets.update_image_link(worksheet, row_num, link_column_index, image_link)
+                # احترام وضع المراجعة
+                image_link_for_sheets = f"needs_review:{image_link}" if getattr(config, 'CURATION_MODE', False) else image_link
+                update_success = google_sheets.update_image_link(worksheet, row_num, link_column_index, image_link_for_sheets)
                 if update_success:
                     print(f"🎉 تم تحديث بيانات الصف {row_num} بنجاح من الكاش المحلي!")
                     success_count += 1
@@ -108,12 +149,49 @@ def run_automation_pipeline():
                 else:
                     failed_count += 1
                 continue
+
+            if best_image.get("source") == "visual_duplicate":
+                print(f"👁️ [BK-Tree Deduplicator] إعادة استخدام رابط Cloudinary للمنتج المكرر بصرياً: {best_image['url']}")
+                image_link = best_image["url"]
+                metadata = best_image.get("metadata")
+                if metadata:
+                    google_sheets.update_product_metadata(worksheet, row_num, metadata)
+                # احترام وضع المراجعة
+                image_link_for_sheets = f"needs_review:{image_link}" if getattr(config, 'CURATION_MODE', False) else image_link
+                update_success = google_sheets.update_image_link(worksheet, row_num, link_column_index, image_link_for_sheets)
+                if update_success:
+                    print(f"🎉 تم تحديث بيانات الصف {row_num} بنجاح من التكرار البصري!")
+                    success_count += 1
+                    # حفظ في الكاش ليكون ضربة مباشرة المرة القادمة
+                    try:
+                        local_cache_db.save_product_resolution(
+                            prod.get("barcode", ""),
+                            name,
+                            brand,
+                            best_image.get("url"),
+                            image_link,
+                            1.0,
+                            metadata,
+                            None,
+                            perceptual_hash=best_image.get("perceptual_hash")
+                        )
+                    except Exception as e:
+                        print(f"⚠️ خطأ أثناء حفظ السجل في الكاش: {e}")
+                else:
+                    failed_count += 1
+                continue
     
             image_url = best_image["url"]
             print(f"🔗 الصورة المختارة للتحميل: {image_url}")
             
             # ب. تحميل ومعالجة الصورة محلياً (إزالة الخلفية والتحجيم بدقة عالية)
-            processed_image_path = image_processor.process_product_image(image_url, name, brand)
+            w, h = getattr(config, 'IMAGE_TARGET_SIZE', (800, 800))
+            processed_image_path = image_processor.process_product_image(
+                image_url, name, brand, 
+                enhance=getattr(config, 'ENABLE_IMAGE_ENHANCEMENT', False),
+                target_width=w,
+                target_height=h
+            )
             if not processed_image_path or not os.path.exists(processed_image_path):
                 config.log_and_fail(prod.get("barcode"), name, brand, "فشل تحميل الصورة المرشحة أو فشل عزل الخلفية وتنعيم الحواف.")
                 failed_count += 1
@@ -143,13 +221,26 @@ def run_automation_pipeline():
                 if tags_str:
                     tags = [t.strip() for t in tags_str.split(",") if t.strip()]
                     
+            # قراءة الأبعاد الفعلية للصورة الناتجة بعد معالجتها وتوسيطها (لتمريرها إلى Cloudinary)
+            try:
+                from PIL import Image
+                with Image.open(processed_image_path) as res_img:
+                    final_w, final_h = res_img.size
+            except Exception:
+                final_w = w or 800
+                final_h = h or 800
+                
             # د. رفع الصورة المعالجة محلياً إلى Cloudinary وتوليد الرابط الآمن بالمجلد والوسوم المستهدفة
             image_link = cloudinary_storage.upload_product_image_to_cloudinary(
                 processed_image_path, 
                 name, 
                 brand,
                 folder=folder,
-                tags=tags
+                tags=tags,
+                target_width=final_w,
+                target_height=final_h,
+                padding_ratio=getattr(config, 'IMAGE_PADDING_RATIO', 0.85),
+                bg_color=getattr(config, 'IMAGE_BG_COLOR', 'ffffff')
             )
             
             # هـ. تنظيف ملف الصورة المعالجة من المجلد المؤقت
@@ -165,7 +256,10 @@ def run_automation_pipeline():
                 continue
                 
             # إضافة بادئة المراجعة الرمادية إذا تطلب الأمر لتنبيه لوحة العرض
-            image_link_for_sheets = f"needs_review:{image_link}" if best_image.get("needs_review") else image_link
+            if getattr(config, 'CURATION_MODE', False):
+                image_link_for_sheets = f"needs_review:{image_link}"
+            else:
+                image_link_for_sheets = f"needs_review:{image_link}" if best_image.get("needs_review") else image_link
     
             # ج. تحديث الشيت بالرابط الجديد
             update_success = google_sheets.update_image_link(

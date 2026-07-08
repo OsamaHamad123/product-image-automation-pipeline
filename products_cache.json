@@ -1,5 +1,5 @@
 {
-  "timestamp": 1783472960.9249682,
+  "timestamp": 1783551121.7042549,
   "products": [
     {
       "row_number": 2,
@@ -156,7 +156,7 @@
       "barcode": "",
       "category": "Fresh Food",
       "origin": "Local",
-      "existing_image_link": "https://res.cloudinary.com/duuvvgniq/image/upload/c_fit,h_680,w_680/b_rgb:ffffff,c_pad,h_800,w_800/e_sharpen:20/q_auto:best/f_auto/v1783383301/products/Organic_Fresh_Milk_1L_Meliha",
+      "existing_image_link": "https://res.cloudinary.com/duuvvgniq/image/upload/c_fit,h_1020,w_1020/b_rgb:ffffff,c_pad,h_1200,w_1200/e_sharpen:20/q_auto:best/f_auto/v1783550978/products/5ab7fc996b944647195bf951662d81ae",
       "needs_review": false,
       "needs_review_url": "",
       "search_query": "Organic Fresh Milk 1L Meliha"
@@ -380,7 +380,7 @@
       "barcode": "",
       "category": "Pantry",
       "origin": "Local",
-      "existing_image_link": "https://res.cloudinary.com/duuvvgniq/image/upload/e_trim:5/c_fit,h_680,w_680/b_rgb:ffffff,c_pad,h_800,w_800/e_sharpen:20/q_auto:best/f_auto/v1783384308/products/Noor_Sunflower_Oil_1.5L_Noor",
+      "existing_image_link": "https://res.cloudinary.com/duuvvgniq/image/upload/c_fit,h_680,w_680/b_rgb:ffffff,c_pad,h_800,w_800/e_sharpen:20/q_auto:best/f_auto/v1783533575/products/pantry_snacks/spices%2C_oils_and_sauces/1e8487405168616d9f5a4a49e1078e39",
       "needs_review": false,
       "needs_review_url": "",
       "search_query": "Noor Sunflower Oil 1.5L Noor"
@@ -620,7 +620,7 @@
       "barcode": "",
       "category": "Pantry",
       "origin": "Local",
-      "existing_image_link": "https://res.cloudinary.com/duuvvgniq/image/upload/c_fit,h_680,w_680/b_rgb:ffffff,c_pad,h_800,w_800/e_sharpen:20/q_auto:best/f_auto/v1783464236/products/roastery/grain_and_rice/Jenan_Oats_500g_Jenan",
+      "existing_image_link": "https://res.cloudinary.com/duuvvgniq/image/upload/c_fit,h_680,w_680/b_rgb:ffffff,c_pad,h_800,w_800/e_sharpen:20/q_auto:best/f_auto/v1783536357/products/pantry_snacks/rice%2C_pasta_and_grains/c34965f5f2d3ec796ea3da63623d142c",
       "needs_review": false,
       "needs_review_url": "",
       "search_query": "Jenan Oats 500g Jenan"
@@ -636,7 +636,7 @@
       "barcode": "",
       "category": "Pantry",
       "origin": "Local",
-      "existing_image_link": "https://res.cloudinary.com/duuvvgniq/image/upload/e_trim:5/c_fit,h_680,w_680/b_rgb:ffffff,c_pad,h_800,w_800/e_sharpen:20/q_auto:best/f_auto/v1783385761/products/Jenan_Brown_Flour_2kg_Jenan",
+      "existing_image_link": "https://res.cloudinary.com/duuvvgniq/image/upload/c_fit,h_680,w_680/b_rgb:ffffff,c_pad,h_800,w_800/e_sharpen:20/q_auto:best/f_auto/v1783536867/products/pantry_snacks/rice%2C_pasta_and_grains/fee9be9fefdcb84b673f027194e9f0ee",
       "needs_review": false,
       "needs_review_url": "",
       "search_query": "Jenan Brown Flour 2kg Jenan"
@@ -796,7 +796,7 @@
       "barcode": "",
       "category": "",
       "origin": "",
-      "existing_image_link": "https://res.cloudinary.com/duuvvgniq/image/upload/e_trim:5/c_fit,h_680,w_680/b_rgb:ffffff,c_pad,h_800,w_800/e_sharpen:20/q_auto:best/f_auto/v1783386011/products/FARMILA_FRENCH_FRIES_9MM_1KG_FARMILA",
+      "existing_image_link": "https://res.cloudinary.com/duuvvgniq/image/upload/c_fit,h_680,w_680/b_rgb:ffffff,c_pad,h_800,w_800/e_sharpen:20/q_auto:best/f_auto/v1783537119/products/pantry_snacks/canned/ba9b1561e8789fdf8953dc808236ff1c",
       "needs_review": false,
       "needs_review_url": "",
       "search_query": "FARMILA FRENCH FRIES 9MM 1KG FARMILA"
@@ -844,7 +844,7 @@
       "barcode": "",
       "category": "",
       "origin": "",
-      "existing_image_link": "https://res.cloudinary.com/duuvvgniq/image/upload/e_trim:5/c_fit,h_680,w_680/b_rgb:ffffff,c_pad,h_800,w_800/e_sharpen:20/q_auto:best/f_auto/v1783386086/products/MCCAIN_FRENCH_FRIES_GOLDEN_LONG_750GM_MCCAIN",
+      "existing_image_link": "https://res.cloudinary.com/duuvvgniq/image/upload/c_fit,h_680,w_680/b_rgb:ffffff,c_pad,h_800,w_800/e_sharpen:20/q_auto:best/f_auto/v1783537761/products/f977e1961023f9b27d88677548e14e20",
       "needs_review": false,
       "needs_review_url": "",
       "search_query": "MCCAIN FRENCH FRIES GOLDEN LONG 750GM MCCAIN"
@@ -892,7 +892,7 @@
       "barcode": "",
       "category": "",
       "origin": "",
-      "existing_image_link": "https://res.cloudinary.com/duuvvgniq/image/upload/e_trim:5/c_fit,h_680,w_680/b_rgb:ffffff,c_pad,h_800,w_800/e_sharpen:20/q_auto:best/f_auto/v1783386145/products/SUNBULAH_FRENCH_FRIES_1KG_SUNBULAH",
+      "existing_image_link": "https://res.cloudinary.com/duuvvgniq/image/upload/c_fit,h_680,w_680/b_rgb:ffffff,c_pad,h_800,w_800/e_sharpen:20/q_auto:best/f_auto/v1783538103/products/289ef8c1039cf6045730e0fea1ac2713",
       "needs_review": false,
       "needs_review_url": "",
       "search_query": "SUNBULAH FRENCH FRIES 1KG SUNBULAH"
@@ -1676,7 +1676,7 @@
       "barcode": "",
       "category": "",
       "origin": "",
-      "existing_image_link": "",
+      "existing_image_link": "https://res.cloudinary.com/duuvvgniq/image/upload/c_fit,h_680,w_680/b_rgb:ffffff,c_pad,h_800,w_800/e_sharpen:20/q_auto:best/f_auto/v1783538651/products/fresh_food/meat_and_poultry/4f8b5bab4f3d8ea15236be76e93c0418",
       "needs_review": false,
       "needs_review_url": "",
       "search_query": "VIRGINIA WHTE MEAT TUNA IN S/F OIL 170GM VIRGINIA"
@@ -1692,7 +1692,7 @@
       "barcode": "",
       "category": "",
       "origin": "",
-      "existing_image_link": "https://res.cloudinary.com/duuvvgniq/image/upload/e_trim:5/c_fit,h_680,w_680/b_rgb:ffffff,c_pad,h_800,w_800/e_sharpen:20/q_auto:best/f_auto/v1783387567/products/ZWAN_BEEF_LUNCHEON_MEAT_850GM_ZWAN",
+      "existing_image_link": "https://res.cloudinary.com/duuvvgniq/image/upload/c_fit,h_680,w_680/b_rgb:ffffff,c_pad,h_800,w_800/e_sharpen:20/q_auto:best/f_auto/v1783539157/products/fresh_food/meat_and_chicken/bb9e63a684aaa241d560720f1793278a",
       "needs_review": false,
       "needs_review_url": "",
       "search_query": "ZWAN BEEF LUNCHEON MEAT 850GM ZWAN"
@@ -1724,7 +1724,7 @@
       "barcode": "",
       "category": "",
       "origin": "",
-      "existing_image_link": "https://res.cloudinary.com/duuvvgniq/image/upload/e_trim:5/c_fit,h_680,w_680/b_rgb:ffffff,c_pad,h_800,w_800/e_sharpen:20/q_auto:best/f_auto/v1783387642/products/ZWAN_CHICKEN_LUNCHEON_MEAT_200GM_ZWAN",
+      "existing_image_link": "https://res.cloudinary.com/duuvvgniq/image/upload/c_fit,h_1020,w_1020/b_rgb:ffffff,c_pad,h_1200,w_1200/e_sharpen:20/q_auto:best/f_auto/v1783550087/products/ae29518f3697a96627fa2e9471221b51",
       "needs_review": false,
       "needs_review_url": "",
       "search_query": "ZWAN CHICKEN LUNCHEON MEAT 200GM ZWAN"

@@ -65,6 +65,11 @@ def init_db():
             cursor.execute("ALTER TABLE resolved_products ADD COLUMN clip_embedding_json TEXT")
             print("💾 [SQLite Cache] تم إضافة عمود clip_embedding_json لجدول المتجهات بنجاح.")
             
+        # التحقق من وجود عمود perceptual_hash وإضافته إن لم يكن موجوداً (Auto-migration)
+        if "perceptual_hash" not in columns:
+            cursor.execute("ALTER TABLE resolved_products ADD COLUMN perceptual_hash TEXT")
+            print("💾 [SQLite Cache] تم إضافة عمود perceptual_hash لجدول البصمات الإدراكية بنجاح.")
+            
         # إنشاء الفهارس (Indices) لتسريع عمليات البحث والاسترجاع الفوري
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_barcode ON resolved_products(barcode)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_name_brand ON resolved_products(product_name, brand)")
@@ -134,7 +139,7 @@ def get_cached_product(barcode=None, product_name=None, brand=None):
         
     return None
 
-def save_product_resolution(barcode, product_name, brand, original_url, cloudinary_url, clip_score, metadata, clip_embedding=None):
+def save_product_resolution(barcode, product_name, brand, original_url, cloudinary_url, clip_score, metadata, clip_embedding=None, perceptual_hash=None):
     """
     حفظ أو تحديث نتيجة مطابقة منتج وصورته في قاعدة البيانات للتأكد من عدم تكراره.
     """
@@ -149,17 +154,18 @@ def save_product_resolution(barcode, product_name, brand, original_url, cloudina
         barcode_clean = str(barcode).strip() if barcode else ""
         metadata_str = json.dumps(metadata) if metadata else ""
         embedding_str = json.dumps(clip_embedding) if clip_embedding is not None else ""
+        hash_str = str(perceptual_hash) if perceptual_hash is not None else ""
         
-        # نتحقق إذا كان الباركود مسجلاً سابقاً لتحديثه بدلاً من تكرار السجل
+        # ننتحقق إذا كان الباركود مسجلاً سابقاً لتحديثه بدلاً من تكرار السجل
         if barcode_clean:
             cursor.execute("SELECT id FROM resolved_products WHERE barcode = ?", (barcode_clean,))
             existing = cursor.fetchone()
             if existing:
                 cursor.execute("""
                     UPDATE resolved_products 
-                    SET product_name = ?, brand = ?, original_url = ?, cloudinary_url = ?, clip_score = ?, metadata_json = ?, clip_embedding_json = ?, resolved_at = CURRENT_TIMESTAMP
+                    SET product_name = ?, brand = ?, original_url = ?, cloudinary_url = ?, clip_score = ?, metadata_json = ?, clip_embedding_json = ?, perceptual_hash = ?, resolved_at = CURRENT_TIMESTAMP
                     WHERE id = ?
-                """, (product_name, brand, original_url, cloudinary_url, clip_score, metadata_str, embedding_str, existing[0]))
+                """, (product_name, brand, original_url, cloudinary_url, clip_score, metadata_str, embedding_str, hash_str, existing[0]))
                 conn.commit()
                 conn.close()
                 delete_product_failure(barcode_clean)
@@ -168,9 +174,9 @@ def save_product_resolution(barcode, product_name, brand, original_url, cloudina
                 
         # إدراج سجل جديد
         cursor.execute("""
-            INSERT INTO resolved_products (barcode, product_name, brand, original_url, cloudinary_url, clip_score, metadata_json, clip_embedding_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, (barcode_clean, product_name, brand, original_url, cloudinary_url, clip_score, metadata_str, embedding_str))
+            INSERT INTO resolved_products (barcode, product_name, brand, original_url, cloudinary_url, clip_score, metadata_json, clip_embedding_json, perceptual_hash)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (barcode_clean, product_name, brand, original_url, cloudinary_url, clip_score, metadata_str, embedding_str, hash_str))
         
         conn.commit()
         conn.close()

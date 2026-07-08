@@ -324,6 +324,15 @@
                 </div>
             </div>
             
+            <!-- Curation Mode Switch -->
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem; background: rgba(255,255,255,0.02); padding: 0.75rem 1.1rem; border-radius: 8px; border: 1px solid var(--panel-border);">
+                <span style="font-size: 0.85rem; font-weight: 700; color: var(--text-secondary);"><i class="fas fa-eye" style="color: var(--accent-cyan); margin-inline-end: 0.35rem;"></i> أتمتة الفرز والمراجعة (Curation Mode)</span>
+                <label class="switch" style="margin: 0;">
+                    <input type="checkbox" id="curationMode" checked>
+                    <span class="slider"></span>
+                </label>
+            </div>
+            
             <button class="btn" id="runAllBtn" onclick="runAllAutomation()" style="width: 100%;">
                 <i class="fas fa-play"></i> تشغيل أتمتة الشيت بالكامل (Batch)
             </button>
@@ -450,10 +459,28 @@
         btn.disabled = true;
         btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> جاري التشغيل...';
         
+        // جلب التفضيلات المخزنة محلياً لتخصيص سلوك تشغيل الكل
+        const settings = {
+            ignoreUnitClash: localStorage.getItem('ignoreUnitClash') === 'true',
+            strictBrandMatch: localStorage.getItem('strictBrandMatch') !== 'false',
+            aiUpscale: localStorage.getItem('aiUpscale') !== 'false',
+            aiEnhance: localStorage.getItem('aiEnhance') === 'true',
+            skipCache: localStorage.getItem('skipCache') === 'true',
+            target_width: parseInt(localStorage.getItem('target_width')) || 0,
+            target_height: parseInt(localStorage.getItem('target_height')) || 0,
+            padding_ratio: parseFloat(localStorage.getItem('padding_ratio')) || 0.85,
+            bg_color: localStorage.getItem('bg_color') || 'ffffff',
+            curation_mode: document.getElementById('curationMode') ? document.getElementById('curationMode').checked : true
+        };
+        
         try {
             const res = await fetch('/api/run-all', { 
                 method: 'POST',
-                headers: { 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content }
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content 
+                },
+                body: JSON.stringify(settings)
             });
             const data = await res.json();
             if (data.status === 'success') {

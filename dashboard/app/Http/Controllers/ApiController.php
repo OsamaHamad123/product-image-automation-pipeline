@@ -12,27 +12,54 @@ class ApiController extends Controller
     private function runPython($action, $params = [])
     {
         try {
-            $jsonParams = json_encode($params);
-            $base64Params = base64_encode($jsonParams);
+            $routes = [
+                'get_products' => 'products',
+                'search' => 'search',
+                'select_image' => 'select-image',
+                'reject_image' => 'reject-image',
+                'upload_manual_image' => 'upload-manual-image',
+                'batch_status' => 'batch-status',
+                'batch-status' => 'batch-status'
+            ];
             
-            // بناء الأمر والتنفيذ الفوري
-            $cmd = "\"{$this->pythonPath}\" \"{$this->bridgePath}\" {$action} {$base64Params} 2>&1";
-            $output = shell_exec($cmd);
+            $endpoint = $routes[$action] ?? $action;
+            $url = "http://127.0.0.1:8001/api/{$endpoint}";
             
-            // Extract JSON from output if there are print statement logs before it
-            $pos = strrpos($output, '{"status":');
-            if ($pos !== false) {
-                $output = substr($output, $pos);
+            if ($action === 'get_products' || $action === 'batch_status' || $action === 'batch-status') {
+                $response = \Illuminate\Support\Facades\Http::timeout(600)->get($url);
+            } else {
+                $response = \Illuminate\Support\Facades\Http::timeout(600)->post($url, $params);
             }
             
-            $decoded = json_decode($output, true);
-            if ($decoded === null) {
-                \Log::error("Python CLI Bridge failed to decode: Raw Output: " . $output);
-                return ['status' => 'failed', 'error' => 'Invalid JSON output from Python bridge', 'raw' => $output];
+            if ($response->successful()) {
+                return $response->json();
             }
-            return $decoded;
+            
+            \Log::warning("FastAPI request failed for action: {$action}, falling back to CLI. Status: " . $response->status());
+            throw new \Exception("FastAPI returned status " . $response->status());
         } catch (\Exception $e) {
-            return ['status' => 'failed', 'error' => $e->getMessage()];
+            try {
+                $jsonParams = json_encode($params);
+                $base64Params = base64_encode($jsonParams);
+                
+                // بناء الأمر والتنفيذ الفوري (التراجع للـ CLI)
+                $cmd = "\"{$this->pythonPath}\" \"{$this->bridgePath}\" {$action} {$base64Params} 2>&1";
+                $output = shell_exec($cmd);
+                
+                $pos = strrpos($output, '{"status":');
+                if ($pos !== false) {
+                    $output = substr($output, $pos);
+                }
+                
+                $decoded = json_decode($output, true);
+                if ($decoded === null) {
+                    \Log::error("Python CLI Bridge fallback failed to decode: Raw Output: " . $output);
+                    return ['status' => 'failed', 'error' => 'Invalid JSON output from Python bridge', 'raw' => $output];
+                }
+                return $decoded;
+            } catch (\Exception $subEx) {
+                return ['status' => 'failed', 'error' => $e->getMessage() . ' | Fallback error: ' . $subEx->getMessage()];
+            }
         }
     }
 
@@ -105,7 +132,7 @@ class ApiController extends Controller
 
         $params = $request->only([
             'row_number', 'product_name', 'brand', 'barcode',
-            'target_width', 'target_height', 'padding_ratio', 'bg_color', 'upscale'
+            'target_width', 'target_height', 'padding_ratio', 'bg_color', 'upscale', 'enhance'
         ]);
         $params['file_path'] = $targetPath;
 
@@ -163,7 +190,7 @@ class ApiController extends Controller
     /**
      * تشغيل الأتمتة الكلية بالخلفية بدون خادم Flask
      */
-    public function runAll()
+    public function runAll(Request $request)
     {
         try {
             $scriptPath = 'f:\\automation\\main.py';
@@ -174,6 +201,10 @@ class ApiController extends Controller
             if (!file_exists($tempDir)) {
                 mkdir($tempDir, 0777, true);
             }
+            
+            // حفظ خيارات التشغيل الجماعي لتتخطى إعدادات بايثون الافتراضية
+            $configData = $request->all();
+            file_put_contents($tempDir . DIRECTORY_SEPARATOR . 'run_config.json', json_encode($configData));
             
             // مسح سجل اللوغ القديم لبدء جلسة نظيفة
             if (file_exists($logPath)) {
