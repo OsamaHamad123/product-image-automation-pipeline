@@ -1,0 +1,10 @@
+[
+    {
+        "aesthetic_score": 6.763053789100553,
+        "sharpness_brenner": 107.27335495283019,
+        "product_fill_ratio": 0.7024193548387097,
+        "background_purity": 0.0,
+        "dinov2_similarity": 0.85,
+        "human_override_approved": 1
+    }
+]
