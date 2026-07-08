@@ -15,6 +15,7 @@ Route::post('/api/clear-products-cache', [ApiController::class, 'clearProductsCa
 // بروكسي للاتصال بالبايثون
 Route::post('/api/search', [ApiController::class, 'search']);
 Route::post('/api/select_image', [ApiController::class, 'selectImage']);
+Route::post('/api/reject_image', [ApiController::class, 'rejectImage']);
 Route::post('/api/upload_manual_image', [ApiController::class, 'uploadManualImage']);
 Route::get('/api/logs', [ApiController::class, 'logs']);
 Route::get('/api/image-proxy', [ApiController::class, 'imageProxy']);

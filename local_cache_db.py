@@ -43,6 +43,21 @@ def init_db():
             )
         """)
         
+        # إنشاء جدول حفظ التغذية الراجعة للتعلم النشط
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS active_learning_feedback (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                feedback_id TEXT UNIQUE,
+                asset_id TEXT,
+                row_number INTEGER,
+                product_name TEXT,
+                brand TEXT,
+                image_url TEXT,
+                rejection_reasons TEXT,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
         # التحقق من وجود عمود clip_embedding_json وإضافته إن لم يكن موجوداً (Auto-migration)
         cursor.execute("PRAGMA table_info(resolved_products)")
         columns = [col[1] for col in cursor.fetchall()]
@@ -270,6 +285,24 @@ def get_product_failures():
     except Exception as e:
         print(f"⚠️ [SQLite Cache Error] فشل استرجاع سجلات الأخطاء: {e}")
         return {}
+
+def save_feedback(feedback_id, asset_id, row_number, product_name, brand, image_url, reasons):
+    """
+    حفظ التغذية الراجعة للتعلم النشط عند استبعاد صورة يدوياً.
+    """
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO active_learning_feedback (feedback_id, asset_id, row_number, product_name, brand, image_url, rejection_reasons)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (feedback_id, asset_id, row_number, product_name, brand, image_url, json.dumps(reasons, ensure_ascii=False)))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"⚠️ [SQLite Cache Error] فشل حفظ سجل التغذية الراجعة: {e}")
+        return False
 
 # تهيئة قاعدة البيانات تلقائياً عند استيراد الموديول للمرة الأولى
 init_db()

@@ -1,11 +1,162 @@
 # google_sheets.py
-# موديول للتعامل مع Google Sheets
+# موديول التعامل مع Google Sheets وجلب وتحديث بيانات المنتجات
 
 import time
+import os
+import json
 import random
 import gspread
+import sqlite3
+import threading
 from gspread.exceptions import APIError
+from oauth2client.service_account import ServiceAccountCredentials
 import config
+
+_queue = None
+_worker = None
+
+def clear_cache():
+    cache_dir = os.path.dirname(os.path.abspath(__file__))
+    p_cache = os.path.join(cache_dir, "products_cache.json")
+    b_cache = os.path.join(cache_dir, "brand_mappings_cache.json")
+    for f in [p_cache, b_cache]:
+        if os.path.exists(f):
+            try:
+                os.remove(f)
+                print(f"🧹 [Google Sheets Cache] Cleared cache file: {os.path.basename(f)}")
+            except Exception:
+                pass
+
+class SQLiteTransactionQueue:
+    def __init__(self, db_path):
+        self.db_path = db_path
+        self._setup_schema()
+
+    def _connect(self):
+        conn = sqlite3.connect(self.db_path)
+        conn.execute("PRAGMA journal_mode=WAL;")
+        return conn
+
+    def _setup_schema(self):
+        with self._connect() as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS sheet_updates (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    row_number INTEGER NOT NULL,
+                    col_index INTEGER NOT NULL,
+                    value TEXT NOT NULL,
+                    registered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    sync_status TEXT DEFAULT 'PENDING'
+                )
+            """)
+            conn.commit()
+
+    def append_update(self, row_number, col_index, value):
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT INTO sheet_updates (row_number, col_index, value) VALUES (?, ?, ?)",
+                (row_number, col_index, value)
+            )
+            conn.commit()
+        clear_cache()
+
+
+class GoogleSheetsBatchWorker(threading.Thread):
+    def __init__(self, queue, credentials_json_path, spreadsheet_name_or_url, sync_interval=5):
+        super().__init__()
+        self.queue = queue
+        self.creds_path = credentials_json_path
+        self.spreadsheet_name = spreadsheet_name_or_url
+        self.sync_interval = sync_interval
+        self._exit_signal = threading.Event()
+        self.daemon = True
+
+    def stop_gracefully(self):
+        self._exit_signal.set()
+
+    def run(self):
+        client = None
+        worksheet = None
+        
+        while not self._exit_signal.is_set():
+            try:
+                if client is None or worksheet is None:
+                    import google_sheets
+                    sheets_client = google_sheets.get_sheets_client()
+                    if sheets_client:
+                        client = sheets_client
+                        worksheet = google_sheets.open_worksheet(client, self.spreadsheet_name)
+                
+                if worksheet:
+                    self._synchronize_pending_records(worksheet)
+            except Exception as e:
+                print(f"⚠️ [GoogleSheetsBatchWorker Error] {e}")
+                client = None
+                worksheet = None
+                
+            self._exit_signal.wait(self.sync_interval)
+            
+        if worksheet:
+            try:
+                self._synchronize_pending_records(worksheet)
+            except Exception:
+                pass
+
+    def _synchronize_pending_records(self, worksheet):
+        conn = self.queue._connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, row_number, col_index, value FROM sheet_updates WHERE sync_status = 'PENDING' LIMIT 100"
+        )
+        rows = cursor.fetchall()
+        
+        if not rows:
+            conn.close()
+            return
+            
+        print(f"🔄 [Async Sheets Sync] Synchronizing {len(rows)} pending cell updates to Google Sheets...")
+        batch_data = []
+        row_ids = []
+        
+        for r in rows:
+            row_id, r_num, c_idx, val = r
+            row_ids.append(row_id)
+            a1_range = gspread.utils.rowcol_to_a1(r_num, c_idx + 1)
+            batch_data.append({
+                "range": a1_range,
+                "values": [[str(val)]]
+            })
+            
+        try:
+            worksheet.batch_update(batch_data, value_input_option="USER_ENTERED")
+            id_placeholders = ",".join("?" for _ in row_ids)
+            conn.execute(
+                f"UPDATE sheet_updates SET sync_status = 'SYNCED' WHERE id IN ({id_placeholders})",
+                row_ids
+            )
+            conn.commit()
+            print(f"✅ [Async Sheets Sync] Successfully synced {len(rows)} updates.")
+            clear_cache()
+        except Exception as e:
+            print(f"❌ [Async Sheets Sync Error] {e}")
+        finally:
+            conn.close()
+
+def init_async_queue(creds_path, spreadsheet_name, sync_interval=5):
+    global _queue, _worker
+    db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "local_cache.db")
+    _queue = SQLiteTransactionQueue(db_path)
+    _worker = GoogleSheetsBatchWorker(_queue, creds_path, spreadsheet_name, sync_interval)
+    _worker.start()
+    print("🚀 [Async Sheets Sync] Background batch worker started successfully.")
+
+def stop_async_queue():
+    global _worker
+    if _worker:
+        _worker.stop_gracefully()
+        _worker.join(timeout=10)
+        _worker = None
+        print("🛑 [Async Sheets Sync] Background batch worker stopped.")
 
 def retry_gspread_on_429(max_retries=5):
     """
@@ -90,6 +241,18 @@ def get_products(worksheet):
     """
     جلب جميع المنتجات من الشيت مع تحديد رقم الصف لكل منتج لتسهيل التحديث لاحقاً.
     """
+    cache_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "products_cache.json")
+    ttl = 3600
+    if os.path.exists(cache_file):
+        try:
+            with open(cache_file, "r", encoding="utf-8") as f:
+                cached = json.load(f)
+            if time.time() - cached.get("timestamp", 0) < ttl:
+                print("⚡ [Google Sheets Cache] Loaded products list from cache file.")
+                return cached["products"], cached["link_idx"]
+        except Exception as ce:
+            print(f"⚠️ [Google Sheets Cache] Failed to load cache: {ce}")
+
     try:
         rows = worksheet.get_all_values()
         if not rows or len(rows) <= 1:
@@ -181,6 +344,18 @@ def get_products(worksheet):
                     "search_query": f"{product_name} {brand}".strip()
                 })
         
+        # Save cache
+        try:
+            with open(cache_file, "w", encoding="utf-8") as f:
+                json.dump({
+                    "timestamp": time.time(),
+                    "products": products,
+                    "link_idx": link_idx
+                }, f, ensure_ascii=False, indent=2)
+            print("💾 [Google Sheets Cache] Products list cached successfully.")
+        except Exception as ce:
+            print(f"⚠️ [Google Sheets Cache] Failed to write cache: {ce}")
+
         return products, link_idx
 
     except Exception as e:
@@ -192,10 +367,17 @@ def update_image_link(worksheet, row_number, link_column_index, image_link):
     """
     تحديث خلية رابط الصورة لصف منتج معين.
     """
+    global _queue, _worker
+    if _queue is not None and _worker is not None:
+        _queue.append_update(row_number, link_column_index, image_link)
+        print(f"⏳ [Queue Sheets Update] تمت جدولة تحديث الرابط في الصف {row_number} في طابور الخلفية.")
+        return True
+        
     try:
         # gspread يعتمد على ترقيم 1-indexed للأعمدة والصفوف
         worksheet.update_cell(row_number, link_column_index + 1, image_link)
         print(f"✅ تم تحديث الرابط في الصف {row_number} بنجاح.")
+        clear_cache()
         return True
     except Exception as e:
         print(f"❌ فشل تحديث الرابط في الصف {row_number}: {e}")
@@ -206,6 +388,18 @@ def get_brand_mappings(client, sheet_name_or_url):
     جلب مرادفات البراندات والمنافسين المستبعدين من ورقة العمل 'Brands Mapping'.
     إذا لم تكن موجودة، يتم إنشاؤها تلقائياً وتعبئتها بالقيم الافتراضية.
     """
+    cache_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "brand_mappings_cache.json")
+    ttl = 300
+    if os.path.exists(cache_file):
+        try:
+            with open(cache_file, "r", encoding="utf-8") as f:
+                cached = json.load(f)
+            if time.time() - cached.get("timestamp", 0) < ttl:
+                print("⚡ [Google Sheets Cache] Loaded brand mappings from cache file.")
+                return cached["mappings"]
+        except Exception as ce:
+            print(f"⚠️ [Google Sheets Cache] Failed to load brand mappings cache: {ce}")
+
     try:
         if sheet_name_or_url.startswith("https://"):
             sh = client.open_by_url(sheet_name_or_url)
@@ -259,6 +453,17 @@ def get_brand_mappings(client, sheet_name_or_url):
                     "excluded_competitors": comps
                 }
                 
+        # Save cache
+        try:
+            with open(cache_file, "w", encoding="utf-8") as f:
+                json.dump({
+                    "timestamp": time.time(),
+                    "mappings": mappings
+                }, f, ensure_ascii=False, indent=2)
+            print("💾 [Google Sheets Cache] Brand mappings cached successfully.")
+        except Exception as ce:
+            print(f"⚠️ [Google Sheets Cache] Failed to write brand mappings cache: {ce}")
+
         return mappings
     except Exception as e:
         print(f"❌ حدث خطأ أثناء جلب مرادفات البراندات من الشيت: {e}")
@@ -269,6 +474,7 @@ def update_product_metadata(worksheet, row_number, metadata):
     """
     تحديث شيت البيانات بالقيم الغذائية والمكونات والوصف التسويقي دفعة واحدة (Batch Update).
     """
+    global _queue, _worker
     try:
         # 1. قراءة صف العناوين الأول
         headers = worksheet.row_values(1)
@@ -308,11 +514,18 @@ def update_product_metadata(worksheet, row_number, metadata):
                 
             col_indices[key] = found_idx
             
-        # 3. تحديث خلايا البيانات للصف المعني عبر دفعة واحدة (Batch Transaction)
+        # 3. تحديث خلايا البيانات للصف المعني
+        if _queue is not None and _worker is not None:
+            for key, val in metadata.items():
+                if key in col_indices and val:
+                    _queue.append_update(row_number, col_indices[key], val)
+            print(f"⏳ [Queue Sheets Update] تمت جدولة تحديث {len(metadata)} حقول وصفية للمنتج في الصف {row_number} في الخلفية.")
+            return True
+
+        # مسار الكتابة الفوري المتزامن كخيار بديل
         batch_data = []
         for key, val in metadata.items():
             if key in col_indices and val:
-                # تحويل إحداثيات الصف والعمود لصيغة A1 (مثل D2)
                 col_letter = gspread.utils.rowcol_to_a1(row_number, col_indices[key] + 1)
                 batch_data.append({
                     "range": col_letter,

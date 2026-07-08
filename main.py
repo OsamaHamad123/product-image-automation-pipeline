@@ -17,6 +17,9 @@ def run_automation_pipeline():
     """
     lock_file = "temp/pipeline.lock"
     try:
+        # تهيئة طابور المزامنة غير الحاصر لـ Google Sheets
+        google_sheets.init_async_queue(config.CREDENTIALS_FILE, config.SPREADSHEET_NAME_OR_URL)
+        
         try:
             os.makedirs("temp", exist_ok=True)
             with open(lock_file, "w") as f:
@@ -208,6 +211,7 @@ def run_automation_pipeline():
         print(f"   ❌ فشل: {failed_count}")
         print("=" * 60)
     finally:
+        google_sheets.stop_async_queue()
         try:
             if os.path.exists(lock_file):
                 os.remove(lock_file)

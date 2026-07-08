@@ -122,14 +122,21 @@ class ActiveLearningCalibrator:
         y_train = np.array(y_train)
 
         try:
+            import time
+            from sklearn.preprocessing import StandardScaler
             from sklearn.linear_model import LogisticRegression
             
-            # تدريب نموذج اللوجستك لمعايرة قيم الحدود الديناميكية تلقائياً
+            # تسوية الميزات لتفادي انحياز البيانات وتدريب نموذج اللوجستك
+            scaler = StandardScaler()
+            X_train_scaled = scaler.fit_transform(X_train)
+            
             calibration_model = LogisticRegression(class_weight='balanced')
-            calibration_model.fit(X_train, y_train)
+            calibration_model.fit(X_train_scaled, y_train)
             
             calibrated_weights = calibration_model.coef_[0].tolist()
             calibrated_intercept = float(calibration_model.intercept_[0])
+            means = scaler.mean_.tolist()
+            scales = scaler.scale_.tolist()
             
             print(f"⚙️ [Active Learning Calibration Completed] الأوزان المحسنة: {calibrated_weights}, التحيز: {calibrated_intercept:.4f}")
             
@@ -138,6 +145,8 @@ class ActiveLearningCalibrator:
                 try:
                     redis_client.set("config:gate_weights", json.dumps(calibrated_weights))
                     redis_client.set("config:gate_intercept", str(calibrated_intercept))
+                    redis_client.set("config:gate_mean", json.dumps(means))
+                    redis_client.set("config:gate_scale", json.dumps(scales))
                 except Exception as e:
                     print(f"⚠️ [Active Learning Error] فشل حفظ القيم في Redis: {e}")
                     
@@ -146,7 +155,9 @@ class ActiveLearningCalibrator:
                 json.dump({
                     "weights": calibrated_weights,
                     "intercept": calibrated_intercept,
-                    "calibrated_at": time.time() if "time" in globals() else 0.0
+                    "mean": means,
+                    "scale": scales,
+                    "calibrated_at": time.time()
                 }, f, indent=4)
                 
             return calibrated_weights, calibrated_intercept

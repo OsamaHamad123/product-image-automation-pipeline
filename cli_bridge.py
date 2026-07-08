@@ -149,7 +149,11 @@ def action_select_image(params):
     row_number = int(row_number)
     
     try:
-        processed_image_path = image_processor.process_product_image(image_url, product_name, brand)
+        # تهيئة طابور المزامنة الخلفي لـ Google Sheets
+        google_sheets.init_async_queue(config.CREDENTIALS_FILE, config.SPREADSHEET_NAME_OR_URL)
+        
+        bg_removal_method = params.get('bg_removal_method')
+        processed_image_path = image_processor.process_product_image(image_url, product_name, brand, bg_removal_method=bg_removal_method)
         if not processed_image_path or not os.path.exists(processed_image_path):
             return {'status': 'failed', 'error': 'Failed to download or process image locally'}
             
@@ -207,6 +211,61 @@ def action_select_image(params):
             bg_color=bg_color
         )
         
+        # استخراج ميزات التعلم النشط لتسجيل ردود الفعل قبل تنظيف وحذف الصورة المعالجة محلياً
+        try:
+            import cv2
+            from PIL import Image as PIL_Image
+            from aesthetics_engine import AestheticPredictor, AdvancedClarityMetrics
+            from image_quality_gatekeeper import BoundaryComplianceSegmenter
+            
+            # aesthetic score
+            predictor = AestheticPredictor()
+            with PIL_Image.open(processed_image_path) as pil_img:
+                aes_score = predictor._heuristic_aesthetic_fallback(pil_img)
+                
+            # brenner & fill & purity
+            img_cv = cv2.imread(processed_image_path)
+            gray = cv2.cvtColor(img_cv, cv2.COLOR_BGR2GRAY)
+            brenner = AdvancedClarityMetrics.compute_brenner_gradient(gray)
+            
+            segmenter = BoundaryComplianceSegmenter()
+            binary_mask, _ = segmenter.segment_foreground(img_cv)
+            bg_report = segmenter.verify_background_purity(img_cv, binary_mask)
+            purity_val = bg_report.get("purity_score", 0.85)
+            
+            h_img, w_img = img_cv.shape[:2]
+            contours, _ = cv2.findContours(binary_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            fill_val = 0.80
+            if contours:
+                c_max = max(contours, key=cv2.contourArea)
+                bx, by, bw, bh = cv2.boundingRect(c_max)
+                fill_val = (bw * bh) / (w_img * h_img)
+            
+            # تسجيل رد الفعل البشري
+            feedback_file = "human_feedback_local.json"
+            feedback_data = []
+            if os.path.exists(feedback_file):
+                try:
+                    with open(feedback_file, "r", encoding="utf-8") as f:
+                        feedback_data = json.load(f)
+                except Exception:
+                    pass
+            
+            feedback_data.append({
+                "aesthetic_score": aes_score,
+                "sharpness_brenner": brenner,
+                "product_fill_ratio": fill_val,
+                "background_purity": purity_val,
+                "dinov2_similarity": 0.85,
+                "human_override_approved": 1
+            })
+            
+            with open(feedback_file, "w", encoding="utf-8") as f:
+                json.dump(feedback_data, f, indent=4)
+            print("📝 [Active Learning Feedback] تم تسجيل رد الفعل البشري بنجاح.")
+        except Exception as e:
+            print(f"⚠️ [Active Learning Feedback Error] تعذر تسجيل رد الفعل: {e}")
+
         # تنظيف محلي
         try:
             if os.path.exists(processed_image_path):
@@ -245,6 +304,8 @@ def action_select_image(params):
         return {'status': 'failed', 'error': 'Failed to update Google Sheets link'}
     except Exception as e:
         return {'status': 'failed', 'error': str(e), 'traceback': traceback.format_exc()}
+    finally:
+        google_sheets.stop_async_queue()
 
 def action_upload_manual_image(params):
     file_path = params.get('file_path')
@@ -264,6 +325,9 @@ def action_upload_manual_image(params):
     row_number = int(row_number)
     
     try:
+        # تهيئة طابور المزامنة الخلفي لـ Google Sheets
+        google_sheets.init_async_queue(config.CREDENTIALS_FILE, config.SPREADSHEET_NAME_OR_URL)
+        
         # اقتصاص ذكي
         box = image_processor.get_product_bounding_box(file_path, product_name, brand)
         if box:
@@ -346,6 +410,55 @@ def action_upload_manual_image(params):
         return {'status': 'failed', 'error': 'Failed to update Google Sheet link'}
     except Exception as e:
         return {'status': 'failed', 'error': str(e), 'traceback': traceback.format_exc()}
+    finally:
+        google_sheets.stop_async_queue()
+
+def action_reject_image(params):
+    import uuid
+    image_url = (params.get('image_url') or '').strip()
+    product_name = (params.get('product_name') or '').strip()
+    brand = (params.get('brand') or '').strip()
+    row_number = params.get('row_number')
+    rejection_reasons = params.get('rejection_reasons') or []
+    
+    if not image_url or not product_name or not brand or not row_number:
+        return {'status': 'failed', 'error': 'Missing parameters'}
+        
+    row_number = int(row_number)
+    feedback_id = str(uuid.uuid4())
+    asset_id = image_url.split("/")[-1].split("?")[0]
+    
+    local_cache_db.save_product_failure(
+        barcode=None, 
+        product_name=product_name, 
+        brand=brand, 
+        error_message=f"مستبعدة يدوياً: {', '.join(rejection_reasons)}"
+    )
+    
+    success = local_cache_db.save_feedback(
+        feedback_id=feedback_id,
+        asset_id=asset_id,
+        row_number=row_number,
+        product_name=product_name,
+        brand=brand,
+        image_url=image_url,
+        reasons=rejection_reasons
+    )
+    
+    try:
+        google_sheets.init_async_queue(config.CREDENTIALS_FILE, config.SPREADSHEET_NAME_OR_URL)
+        sheets_client = google_sheets.get_sheets_client()
+        worksheet = google_sheets.open_worksheet(sheets_client, config.SPREADSHEET_NAME_OR_URL)
+        _, link_col_idx = google_sheets.get_products(worksheet)
+        google_sheets.update_image_link(worksheet, row_number, link_col_idx, "")
+    except Exception as e:
+        pass
+    finally:
+        google_sheets.stop_async_queue()
+        
+    if success:
+        return {'status': 'success', 'message': 'Feedback logged successfully'}
+    return {'status': 'failed', 'error': 'Failed to save feedback log to SQLite'}
 
 def main():
     if len(sys.argv) < 2:
@@ -359,7 +472,8 @@ def main():
         'get_products': action_get_products,
         'search': action_search,
         'select_image': action_select_image,
-        'upload_manual_image': action_upload_manual_image
+        'upload_manual_image': action_upload_manual_image,
+        'reject_image': action_reject_image
     }
     
     if action not in actions:

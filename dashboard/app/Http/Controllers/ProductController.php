@@ -11,9 +11,6 @@ class ProductController extends Controller
     private $pythonPath = 'C:\Users\OsamaHamad\AppData\Local\Programs\Python\Python314\python.exe';
     private $bridgePath = 'f:\automation\cli_bridge.py';
 
-    /**
-     * تشغيل Python CLI للحصول على بيانات المنتجات
-     */
     private function runPython($action, $params = [])
     {
         try {
@@ -22,6 +19,12 @@ class ProductController extends Controller
             
             $cmd = "\"{$this->pythonPath}\" \"{$this->bridgePath}\" {$action} {$base64Params} 2>&1";
             $output = shell_exec($cmd);
+            
+            // Extract JSON from output if there are print statement logs before it
+            $pos = strrpos($output, '{"status":');
+            if ($pos !== false) {
+                $output = substr($output, $pos);
+            }
             
             return json_decode($output, true);
         } catch (\Exception $e) {
@@ -60,7 +63,7 @@ class ProductController extends Controller
                 $result = $this->runPython('get_products');
                 if (isset($result['status']) && $result['status'] === 'success') {
                     $products = $result['products'];
-                    \Cache::put($cacheKey, $products, 60);
+                    \Cache::put($cacheKey, $products, 3600);
                 }
             }
 
@@ -147,7 +150,7 @@ class ProductController extends Controller
                 }
             }
 
-            \Cache::put($cacheKey, $products, 60);
+            \Cache::put($cacheKey, $products, 3600);
 
             return response()->json([
                 'status'   => 'success',

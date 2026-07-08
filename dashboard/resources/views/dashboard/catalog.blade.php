@@ -7,21 +7,24 @@
 <style>
     .layout-grid {
         display: grid;
-        grid-template-columns: 320px 1fr;
-        gap: 1.5rem;
-        height: calc(100vh - 6rem);
+        grid-template-columns: 350px 1fr;
+        gap: 2rem;
+        height: calc(100vh - 6.5rem);
     }
 
     /* Sidebar Catalog */
     .sidebar-panel {
         background: var(--panel-bg);
         border: 1px solid var(--panel-border);
-        border-radius: 8px;
-        padding: 1.25rem;
+        border-radius: var(--border-radius-md);
+        padding: 1.75rem;
         display: flex;
         flex-direction: column;
-        gap: 1rem;
+        gap: 1.5rem;
         height: 100%;
+        box-shadow: var(--shadow-md);
+        backdrop-filter: blur(25px);
+        -webkit-backdrop-filter: blur(25px);
         overflow: hidden;
     }
 
@@ -30,15 +33,15 @@
         justify-content: space-between;
         align-items: center;
         border-bottom: 1px solid var(--panel-border);
-        padding-bottom: 0.75rem;
+        padding-bottom: 1rem;
     }
 
     .sidebar-header h3 {
-        font-size: 1rem;
-        font-weight: 700;
+        font-size: 1.1rem;
+        font-weight: 800;
         display: flex;
         align-items: center;
-        gap: 0.5rem;
+        gap: 0.6rem;
         color: var(--text-primary);
     }
 
@@ -46,11 +49,11 @@
         background: var(--active-menu-bg);
         border: 1px solid var(--panel-border);
         color: var(--accent-purple);
-        padding: 0.15rem 0.5rem;
+        padding: 0.25rem 0.65rem;
         font-family: 'Outfit', sans-serif;
-        border-radius: 4px;
+        border-radius: var(--border-radius-sm);
         font-size: 0.8rem;
-        font-weight: bold;
+        font-weight: 800;
     }
 
     .sidebar-search-container {
@@ -60,63 +63,65 @@
 
     .sidebar-search-container input {
         width: 100%;
-        padding: 0.6rem 0.75rem 0.6rem 2.2rem;
+        padding: 0.75rem 1rem 0.75rem 2.5rem;
         background: var(--input-bg);
         border: 1px solid var(--panel-border);
-        border-radius: 6px;
+        border-radius: var(--border-radius-sm);
         color: var(--text-primary);
         font-family: inherit;
-        font-size: 0.85rem;
+        font-size: 0.9rem;
         outline: none;
-        transition: all 0.15s ease;
+        transition: all 0.3s;
     }
 
     .sidebar-search-container input:focus {
         border-color: var(--accent-purple);
+        box-shadow: 0 0 10px rgba(139, 92, 246, 0.2);
     }
 
     .sidebar-search-container i {
         position: absolute;
-        left: 0.75rem;
+        left: 1rem;
         top: 50%;
         transform: translateY(-50%);
         color: var(--text-secondary);
-        font-size: 0.85rem;
+        font-size: 0.95rem;
     }
 
     .tabs-nav {
         display: flex;
         flex-wrap: wrap;
-        background: var(--input-bg);
+        background: rgba(0, 0, 0, 0.15);
         border: 1px solid var(--panel-border);
-        padding: 0.2rem;
-        border-radius: 6px;
-        gap: 2px;
+        padding: 4px;
+        border-radius: var(--border-radius-sm);
+        gap: 4px;
     }
 
     .tab-btn {
         flex: 1;
-        padding: 0.4rem 0.2rem;
+        padding: 0.6rem 0.4rem;
         border: none;
         background: transparent;
         color: var(--text-secondary);
         font-family: inherit;
-        font-weight: 600;
-        font-size: 0.75rem;
-        border-radius: 4px;
+        font-weight: 800;
+        font-size: 0.8rem;
+        border-radius: 6px;
         cursor: pointer;
-        transition: all 0.15s ease;
+        transition: all 0.25s ease;
         text-align: center;
     }
 
     .tab-btn:hover {
         color: var(--text-primary);
-        background: var(--card-bg-hover);
+        background: rgba(255, 255, 255, 0.03);
     }
 
     .tab-btn.active {
-        background: var(--accent-purple);
-        color: #fff;
+        background: var(--accent-gradient);
+        color: #ffffff;
+        box-shadow: var(--shadow-sm);
     }
 
     .product-list {
@@ -124,7 +129,7 @@
         flex: 1;
         display: flex;
         flex-direction: column;
-        gap: 0.5rem;
+        gap: 0.75rem;
         padding-left: 0.25rem;
     }
 
@@ -132,32 +137,33 @@
         display: flex;
         justify-content: space-between;
         align-items: center;
-        padding-top: 0.75rem;
+        padding-top: 1rem;
         border-top: 1px solid var(--panel-border);
-        font-size: 0.8rem;
+        font-size: 0.85rem;
         gap: 0.5rem;
         direction: rtl;
     }
 
     .pagination-btn {
-        background: var(--card-bg);
+        background: var(--input-bg);
         border: 1px solid var(--panel-border);
         color: var(--text-secondary);
-        padding: 0.4rem 0.75rem;
-        border-radius: 6px;
+        padding: 0.5rem 1rem;
+        border-radius: var(--border-radius-sm);
         cursor: pointer;
-        font-weight: 600;
+        font-weight: 700;
         font-family: inherit;
         display: flex;
         align-items: center;
-        gap: 0.25rem;
-        transition: all 0.15s ease;
+        gap: 0.35rem;
+        transition: all 0.25s ease;
     }
 
     .pagination-btn:hover:not(:disabled) {
         border-color: var(--accent-purple);
         color: var(--text-primary);
         background: var(--card-bg-hover);
+        transform: translateY(-1px);
     }
 
     .pagination-btn:disabled {
@@ -167,67 +173,72 @@
 
     .pagination-info {
         color: var(--text-secondary);
-        font-weight: 600;
-        font-size: 0.75rem;
+        font-weight: bold;
+        font-size: 0.8rem;
     }
 
     .product-item {
         background: var(--card-bg);
         border: 1px solid var(--panel-border);
-        border-radius: 8px;
-        padding: 0.85rem 1rem;
+        border-radius: var(--border-radius-sm);
+        padding: 1.25rem;
         cursor: pointer;
-        transition: all 0.15s ease;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         position: relative;
     }
 
     .product-item:hover {
-        border-color: var(--accent-purple);
+        border-color: var(--panel-border-hover);
         background: var(--card-bg-hover);
+        transform: translateY(-2px);
+        box-shadow: var(--shadow-sm), 0 4px 15px rgba(139, 92, 246, 0.05);
     }
 
     .product-item.active {
         border-color: var(--accent-purple);
         background: var(--active-menu-bg);
+        box-shadow: var(--shadow-sm), 0 0 15px rgba(139, 92, 246, 0.12);
     }
 
     .product-item h4 {
-        font-size: 0.85rem;
-        font-weight: 700;
-        margin-bottom: 0.25rem;
+        font-size: 0.95rem;
+        font-weight: 800;
+        margin-bottom: 0.4rem;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
-        max-width: 230px;
+        max-width: 250px;
         color: var(--text-primary);
     }
 
     .product-item p {
-        font-size: 0.75rem;
+        font-size: 0.8rem;
         color: var(--text-secondary);
         display: flex;
         justify-content: space-between;
         align-items: center;
+        font-weight: bold;
     }
 
     .badge-row-number {
         position: absolute;
-        top: 0.4rem;
-        left: 0.4rem;
+        top: 0.5rem;
+        left: 0.5rem;
         background: var(--input-bg);
         border: 1px solid var(--panel-border);
         color: var(--text-secondary);
-        font-size: 0.7rem;
-        font-weight: 600;
-        padding: 0.05rem 0.35rem;
+        font-size: 0.75rem;
+        font-weight: 700;
+        padding: 0.1rem 0.45rem;
         border-radius: 4px;
+        font-family: 'Outfit', sans-serif;
     }
 
     /* Main curation panel */
     .curation-panel {
         display: flex;
         flex-direction: column;
-        gap: 1.25rem;
+        gap: 1.75rem;
         height: 100%;
         overflow-y: auto;
         padding-left: 0.5rem;
@@ -236,41 +247,43 @@
     .form-grid {
         display: grid;
         grid-template-columns: 2fr 1fr;
-        gap: 1.25rem;
+        gap: 1.5rem;
     }
 
     .form-group {
         display: flex;
         flex-direction: column;
-        gap: 0.4rem;
+        gap: 0.5rem;
     }
 
     .form-group label {
-        font-size: 0.8rem;
-        font-weight: 600;
+        font-size: 0.85rem;
+        font-weight: 700;
         color: var(--text-secondary);
     }
 
     .form-group input, .form-group select {
-        padding: 0.65rem 0.85rem;
+        padding: 0.75rem 1rem;
         background: var(--input-bg);
         border: 1px solid var(--panel-border);
-        border-radius: 6px;
+        border-radius: var(--border-radius-sm);
         color: var(--text-primary);
         font-family: inherit;
-        font-size: 0.85rem;
+        font-size: 0.9rem;
         outline: none;
-        transition: border-color 0.15s ease;
+        transition: all 0.3s;
     }
 
     .form-group input:focus, .form-group select:focus {
         border-color: var(--accent-purple);
+        box-shadow: 0 0 10px rgba(139, 92, 246, 0.2);
     }
 
     /* Toggles */
     .toggles-row {
         display: flex;
-        gap: 1.25rem;
+        flex-wrap: wrap;
+        gap: 1.5rem;
         align-items: center;
         height: 100%;
     }
@@ -278,20 +291,20 @@
     .toggle-container {
         display: flex;
         align-items: center;
-        gap: 0.4rem;
+        gap: 0.6rem;
     }
 
     .toggle-container span {
-        font-size: 0.8rem;
-        font-weight: 600;
+        font-size: 0.85rem;
+        font-weight: 700;
         color: var(--text-secondary);
     }
 
     .switch {
         position: relative;
         display: inline-block;
-        width: 38px;
-        height: 22px;
+        width: 44px;
+        height: 24px;
     }
 
     .switch input {
@@ -308,28 +321,29 @@
         right: 0;
         bottom: 0;
         background-color: var(--panel-border);
-        transition: .2s ease;
+        transition: .3s cubic-bezier(0.4, 0, 0.2, 1);
         border-radius: 20px;
     }
 
     .slider:before {
         position: absolute;
         content: "";
-        height: 16px;
-        width: 16px;
+        height: 18px;
+        width: 18px;
         left: 3px;
         bottom: 3px;
         background-color: white;
-        transition: .2s ease;
+        transition: .3s cubic-bezier(0.4, 0, 0.2, 1);
         border-radius: 50%;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.25);
     }
 
     input:checked + .slider {
-        background-color: var(--accent-purple);
+        background-image: var(--accent-gradient);
     }
 
     input:checked + .slider:before {
-        transform: translateX(16px);
+        transform: translateX(20px);
     }
 
     /* Loading Spinner */
@@ -338,23 +352,23 @@
         flex-direction: column;
         align-items: center;
         justify-content: center;
-        padding: 4rem 0;
+        padding: 5rem 0;
         text-align: center;
     }
 
     .spinner-box {
         position: relative;
-        width: 48px;
-        height: 48px;
-        margin-bottom: 1rem;
+        width: 52px;
+        height: 52px;
+        margin-bottom: 1.25rem;
     }
 
     .spinner-ring {
         box-sizing: border-box;
         display: block;
         position: absolute;
-        width: 48px;
-        height: 48px;
+        width: 52px;
+        height: 52px;
         border: 4px solid transparent;
         border-radius: 50%;
         animation: spin-ring 1s cubic-bezier(0.5, 0, 0.5, 1) infinite;
@@ -371,34 +385,37 @@
     /* Candidates Grid */
     .candidates-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-        gap: 1.25rem;
-        margin-top: 1.25rem;
+        grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+        gap: 1.5rem;
+        margin-top: 1.5rem;
     }
 
     .candidate-card {
         background: var(--card-bg);
         border: 1px solid var(--panel-border);
-        border-radius: 8px;
+        border-radius: var(--border-radius-md);
         overflow: hidden;
         display: flex;
         flex-direction: column;
-        transition: border-color 0.15s ease;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         position: relative;
+        box-shadow: var(--shadow-sm);
     }
 
     .candidate-card:hover {
         border-color: var(--accent-purple);
+        transform: translateY(-5px);
+        box-shadow: var(--shadow-md), 0 8px 24px rgba(139, 92, 246, 0.12);
     }
 
     .candidate-img-box {
-        height: 180px;
+        height: 200px;
         width: 100%;
         background: var(--img-box-bg);
         display: flex;
         align-items: center;
         justify-content: center;
-        padding: 1rem;
+        padding: 1.5rem;
         position: relative;
         border-bottom: 1px solid var(--panel-border);
     }
@@ -407,16 +424,21 @@
         max-height: 100%;
         max-width: 100%;
         object-fit: contain;
+        transition: transform 0.4s ease;
+    }
+
+    .candidate-card:hover .candidate-img-box img {
+        transform: scale(1.06);
     }
 
     .candidate-badge {
         position: absolute;
-        top: 0.5rem;
-        right: 0.5rem;
-        padding: 0.2rem 0.5rem;
-        border-radius: 4px;
-        font-size: 0.7rem;
-        font-weight: bold;
+        top: 0.75rem;
+        right: 0.75rem;
+        padding: 0.25rem 0.75rem;
+        border-radius: var(--border-radius-sm);
+        font-size: 0.75rem;
+        font-weight: 800;
         z-index: 5;
     }
 
@@ -433,92 +455,103 @@
 
     .candidate-score-tag {
         position: absolute;
-        bottom: 0.5rem;
-        right: 0.5rem;
+        bottom: 0.75rem;
+        right: 0.75rem;
         background: var(--input-bg);
         border: 1px solid var(--panel-border);
-        padding: 0.15rem 0.4rem;
-        border-radius: 4px;
-        font-size: 0.7rem;
-        font-weight: bold;
-        color: var(--accent-purple);
+        padding: 0.2rem 0.6rem;
+        border-radius: 6px;
+        font-size: 0.75rem;
+        font-weight: 800;
+        color: var(--accent-cyan);
+        font-family: 'Outfit', sans-serif;
     }
 
     .candidate-uae-tag {
         position: absolute;
-        bottom: 0.5rem;
-        left: 0.5rem;
+        bottom: 0.75rem;
+        left: 0.75rem;
         background: var(--success-bg);
         border: 1px solid rgba(16, 185, 129, 0.2);
-        padding: 0.15rem 0.4rem;
-        border-radius: 4px;
-        font-size: 0.7rem;
-        font-weight: bold;
+        padding: 0.2rem 0.6rem;
+        border-radius: 6px;
+        font-size: 0.75rem;
+        font-weight: 800;
         color: var(--success);
     }
 
     .candidate-info {
-        padding: 1rem;
+        padding: 1.25rem;
         display: flex;
         flex-direction: column;
-        gap: 0.5rem;
+        gap: 0.75rem;
         flex: 1;
     }
 
     .candidate-title {
-        font-weight: bold;
-        font-size: 0.8rem;
-        line-height: 1.4;
+        font-weight: 700;
+        font-size: 0.85rem;
+        line-height: 1.5;
         display: -webkit-box;
         -webkit-line-clamp: 2;
         -webkit-box-orient: vertical;
         overflow: hidden;
-        height: 2.2rem;
+        height: 2.5rem;
         color: var(--text-primary);
     }
 
     .candidate-meta {
-        font-size: 0.7rem;
+        font-size: 0.75rem;
         color: var(--text-secondary);
         display: flex;
         justify-content: space-between;
+        font-family: 'Outfit', sans-serif;
+        font-weight: 600;
     }
 
     .candidate-reasons {
-        font-size: 0.7rem;
+        font-size: 0.75rem;
         color: var(--danger);
         background: var(--danger-bg);
-        border: 1px solid rgba(239, 68, 68, 0.12);
-        padding: 0.4rem 0.6rem;
-        border-radius: 6px;
-        margin-top: 0.15rem;
+        border: 1px solid rgba(244, 63, 94, 0.15);
+        padding: 0.5rem 0.75rem;
+        border-radius: var(--border-radius-sm);
+        margin-top: 0.25rem;
+        line-height: 1.5;
+        font-weight: 700;
     }
 
     /* Accordion Logs */
     .step-accordion {
-        margin-top: 0.75rem;
+        margin-top: 1.25rem;
         display: flex;
         flex-direction: column;
-        gap: 0.5rem;
+        gap: 0.75rem;
     }
 
     .step-item {
         border: 1px solid var(--panel-border);
-        border-radius: 8px;
+        border-radius: var(--border-radius-md);
         overflow: hidden;
         background: var(--card-bg);
+        box-shadow: var(--shadow-sm);
+        transition: border-color 0.3s;
+    }
+
+    .step-item:hover {
+        border-color: var(--panel-border-hover);
     }
 
     .step-header {
         background: var(--accordion-header-bg);
-        padding: 0.75rem 1rem;
+        padding: 1rem 1.5rem;
         cursor: pointer;
         display: flex;
         justify-content: space-between;
         align-items: center;
-        font-weight: 600;
-        font-size: 0.85rem;
-        transition: background 0.15s ease;
+        font-weight: 800;
+        font-size: 0.9rem;
+        transition: all 0.2s ease;
     }
 
     .step-header:hover { 
@@ -527,9 +560,13 @@
 
     .step-body {
         background: var(--console-bg);
-        padding: 1rem;
+        padding: 1.25rem 1.5rem;
         display: none;
         border-top: 1px solid var(--panel-border);
+        font-family: 'Courier New', Courier, monospace;
+        font-size: 0.8rem;
+        line-height: 1.6;
+        color: #38edf6;
     }
 
     .step-body.active { 
@@ -537,11 +574,158 @@
     }
     
     .status-text { 
-        font-weight: bold; 
+        font-weight: 800; 
     }
     .status-text.active { color: var(--warning); }
     .status-text.success { color: var(--success); }
     .status-text.failed { color: var(--danger); }
+
+    /* Slide-to-Compare Styles */
+    .compare-container {
+        position: relative;
+        width: 320px;
+        height: 320px;
+        background: #04060e;
+        border: 1px solid var(--panel-border);
+        border-radius: var(--border-radius-md);
+        overflow: hidden;
+        user-select: none;
+        flex-shrink: 0;
+        box-shadow: var(--shadow-md);
+    }
+
+    .compare-img {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0.5rem;
+    }
+
+    .compare-img img {
+        max-width: 90%;
+        max-height: 90%;
+        object-fit: contain;
+        pointer-events: none;
+    }
+
+    /* Processed image layer sits on top, initially clipped */
+    .compare-overlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        width: 50%;
+        border-right: 2px solid var(--accent-cyan);
+    }
+
+    .compare-overlay .compare-img {
+        width: 320px; /* Lock width to container size so image doesn't scale */
+    }
+
+    .compare-handle {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: 50%;
+        width: 2px;
+        background: var(--accent-gradient);
+        box-shadow: 0 0 10px rgba(0, 242, 254, 0.8);
+        cursor: ew-resize;
+        z-index: 10;
+    }
+
+    .compare-handle:before {
+        content: "\f07d";
+        font-family: "Font Awesome 6 Free";
+        font-weight: 900;
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%) rotate(90deg);
+        width: 32px;
+        height: 32px;
+        background: var(--accent-gradient);
+        border: 2px solid #fff;
+        color: #fff;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 0.85rem;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+    }
+
+    /* Alpha Checkerboard Background */
+    .bg-checkerboard {
+        background-color: #121620 !important;
+        background-image: 
+            linear-gradient(45deg, #181d28 25%, transparent 25%), 
+            linear-gradient(-45deg, #181d28 25%, transparent 25%), 
+            linear-gradient(45deg, transparent 75%, #181d28 75%), 
+            linear-gradient(-45deg, transparent 75%, #181d28 75%) !important;
+        background-size: 20px 20px !important;
+        background-position: 0 0, 0 10px, 10px -10px, -10px 0px !important;
+    }
+
+    .bg-white {
+        background-color: #ffffff !important;
+    }
+
+    .bg-gray {
+        background-color: #f5f5f7 !important;
+    }
+
+    /* Split-Screen Workbench Grid layout */
+    .workbench-grid {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        gap: 2rem;
+        align-items: stretch;
+    }
+
+    @media (max-width: 768px) {
+        .workbench-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+
+    .feedback-reasons-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 0.65rem;
+        margin-top: 0.75rem;
+    }
+
+    .feedback-checkbox {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        font-size: 0.85rem;
+        color: var(--text-secondary);
+        cursor: pointer;
+        padding: 0.5rem 0.75rem;
+        background: rgba(255,255,255,0.02);
+        border: 1px solid var(--panel-border);
+        border-radius: var(--border-radius-sm);
+        transition: all 0.25s;
+        font-weight: 700;
+    }
+
+    .feedback-checkbox:hover {
+        background: rgba(255,255,255,0.04);
+        color: var(--text-primary);
+        border-color: var(--accent-purple);
+    }
+    .feedback-checkbox input {
+        cursor: pointer;
+    }
 </style>
 @endsection
 
@@ -1302,45 +1486,164 @@
         }
     });
 
-    // رندرة بطاقة الصورة الموصى بها كرت كبير
+    // رندرة بطاقة الصورة الموصى بها كرت كبير (Visual Curation Workbench)
     function renderRecommendedCard(img, name, brand, row) {
         const container = document.getElementById('recommendedContainer');
         container.innerHTML = '';
         
         const card = document.createElement('div');
-        card.style = "background: rgba(130, 87, 229, 0.05); border: 1.5px solid var(--accent-purple); border-radius: 16px; padding: 1.5rem; display: flex; gap: 1.5rem; align-items: center; position: relative;";
+        card.className = 'glass-panel';
+        card.style.margin = '0 0 1.5rem 0';
+        card.style.padding = '1.5rem';
         
         const scoreInfo = img.clip_score 
-            ? `<div style="font-family: 'Outfit', sans-serif; font-size: 0.9rem; margin-top: 0.5rem;">تشابه بصرى CLIP: <strong style="color: var(--accent-cyan); font-size: 1.1rem;">${img.clip_score}</strong></div>`
+            ? `<div style="font-family: 'Outfit', sans-serif; font-size: 0.9rem; margin-top: 0.25rem;">تشابه بصرى CLIP: <strong style="color: var(--accent-cyan); font-size: 1.15rem;">${img.clip_score}</strong></div>`
             : '';
             
-        const isGreyArea = img.needs_review ? `<div class="score-badge" style="background: #ff9100; color: #080c14; margin-top: 0.5rem; display: inline-block;">⚠️ منطقة رمادية - تحتاج مراجعة</div>` : '';
+        const isGreyArea = img.needs_review ? `<div class="score-badge" style="background: #ff9100; color: #080c14; margin-top: 0.5rem; display: inline-block;">⚠️ مراجعة المنطقة الرمادية</div>` : '';
         const semanticCacheBadge = img.semantic_similarity
-            ? `<div class="score-badge" style="background: linear-gradient(135deg, #00f5ff 0%, #00b0ff 100%); color: #080c14; font-weight: 900; margin-top: 0.5rem; display: inline-block;"><i class="fas fa-bolt"></i> كاش دلالي ذكي (تطابق: ${(img.semantic_similarity * 100).toFixed(1)}%)</div>`
+            ? `<div class="score-badge" style="background: linear-gradient(135deg, #00f5ff 0%, #00b0ff 100%); color: #080c14; font-weight: 900; margin-top: 0.5rem; display: inline-block;"><i class="fas fa-bolt"></i> كاش دلالي ذكي</div>`
             : '';
-            
+
+        // Generate the markup with split-screen workbench
         card.innerHTML = `
-            <div style="width: 200px; height: 200px; background: #080c14; border: 1px solid var(--panel-border); border-radius: 12px; display: flex; align-items: center; justify-content: center; padding: 0.5rem; overflow: hidden; flex-shrink: 0;">
-                <img src="${getImageUrl(img.url)}" alt="Recommended" style="max-width: 100%; max-height: 100%; object-fit: contain;" onerror="this.src='https://placehold.co/200x200?text=Error'">
-            </div>
-            <div style="flex: 1; display: flex; flex-direction: column; justify-content: space-between;">
-                <div>
-                    <span class="score-badge" style="background: linear-gradient(135deg, #00e676 0%, #00b0ff 100%); color: #080c14; font-weight: 900;"><i class="fas fa-award"></i> الصورة المرشحة للمطابقة التلقائية</span>
-                    <h3 style="font-size: 1.25rem; font-weight: 900; margin-top: 0.5rem; line-height: 1.4;">${name}</h3>
-                    <p style="color: var(--text-secondary); font-size: 0.9rem; margin-top: 0.25rem;">العلامة التجارية: <strong>${brand}</strong></p>
-                    ${scoreInfo}
-                    ${isGreyArea}
-                    ${semanticCacheBadge}
+            <div class="workbench-grid">
+                <!-- Column 1: Draggable Slide compare -->
+                <div style="display: flex; flex-direction: column; gap: 0.75rem; align-items: center;">
+                    <div class="compare-container bg-checkerboard" id="compareContainer">
+                        <!-- Layer 1 Underneath (Raw/Original image) -->
+                        <div class="compare-img">
+                            <img src="${getImageUrl(img.url)}" alt="Original Raw Source">
+                        </div>
+                        <!-- Layer 2 Overlay (Padded/Isolated view) -->
+                        <div class="compare-overlay" id="compareOverlay">
+                            <div class="compare-img">
+                                <img src="${getImageUrl(img.url)}" alt="Isolated Target Layout">
+                            </div>
+                        </div>
+                        <!-- Draggable divider handle -->
+                        <div class="compare-handle" id="compareHandle"></div>
+                    </div>
+                    <!-- Background switcher toolbar -->
+                    <div style="display: flex; gap: 0.5rem; width: 100%; justify-content: center;">
+                        <button type="button" class="btn btn-secondary" onclick="switchPreviewBg('checkerboard')" style="flex: 1; font-size: 0.75rem; padding: 0.35rem 0.5rem;"><i class="fas fa-chess-board"></i> الشفافية</button>
+                        <button type="button" class="btn btn-secondary" onclick="switchPreviewBg('white')" style="flex: 1; font-size: 0.75rem; padding: 0.35rem 0.5rem;"><i class="fas fa-square" style="color: #fff;"></i> أبيض</button>
+                        <button type="button" class="btn btn-secondary" onclick="switchPreviewBg('gray')" style="flex: 1; font-size: 0.75rem; padding: 0.35rem 0.5rem;"><i class="fas fa-square" style="color: #888;"></i> رمادي</button>
+                    </div>
                 </div>
-                <div style="margin-top: 1rem; display: flex; gap: 1rem;">
-                    <button class="btn" id="confirmImageBtn" onclick="confirmRecommendedImage('${img.url}', '${name.replace(/'/g, "\\'")}', '${brand.replace(/'/g, "\\'")}', ${row}, this)" style="flex: 1;">
-                        <i class="fas fa-check"></i> اعتمد الصورة للشيت والكاش
-                    </button>
+
+                <!-- Column 2: Control and Active Learning validation details -->
+                <div style="display: flex; flex-direction: column; justify-content: space-between;">
+                    <div>
+                        <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+                            <span class="score-badge" style="background: linear-gradient(135deg, #8b5cf6 0%, #3b82f6 100%); color: #fff;"><i class="fas fa-robot"></i> التقييم التلقائي</span>
+                            ${isGreyArea}
+                            ${semanticCacheBadge}
+                        </div>
+                        <h3 style="font-size: 1.2rem; font-weight: 800; margin-top: 0.75rem; line-height: 1.45;">${name}</h3>
+                        <p style="color: var(--text-secondary); font-size: 0.85rem; margin-top: 0.15rem;">العلامة التجارية: <strong style="color: var(--text-primary);">${brand}</strong></p>
+                        ${scoreInfo}
+                        
+                        <!-- Manual Override controls -->
+                        <div style="margin-top: 1rem; border-top: 1px solid var(--panel-border); padding-top: 0.75rem;">
+                            <label style="font-size: 0.8rem; font-weight: 600; color: var(--text-secondary); display: block; margin-bottom: 0.35rem;">خوارزمية تفريغ وعزل الخلفية:</label>
+                            <select id="bgRemovalMethod" style="padding: 0.45rem 0.75rem; background: var(--input-bg); border: 1px solid var(--panel-border); border-radius: 6px; color: var(--text-primary); font-family: inherit; font-size: 0.8rem; width: 100%;">
+                                <option value="bria">Bria RMBG v2 (ذكاء اصطناعي فائق)</option>
+                                <option value="rembg">Rembg Local (محلي افتراضي)</option>
+                                <option value="grabcut">GrabCut (قص مستطيل يدوي)</option>
+                                <option value="none">بدون عزل (استخدام الصورة كما هي)</option>
+                            </select>
+                        </div>
+
+                        <!-- Active Learning Rejection feedback -->
+                        <div style="margin-top: 0.75rem; border-top: 1px solid var(--panel-border); padding-top: 0.75rem;">
+                            <label style="font-size: 0.8rem; font-weight: 600; color: var(--text-secondary); display: block; margin-bottom: 0.35rem;">أسباب الرفض (لتدريب الذكاء الاصطناعي في حال الاستبعاد):</label>
+                            <div class="feedback-reasons-grid">
+                                <label class="feedback-checkbox">
+                                    <input type="checkbox" name="rejection_reason" value="HALO_ARTIFACT">
+                                    <span>هالة لونية متبقية</span>
+                                </label>
+                                <label class="feedback-checkbox">
+                                    <input type="checkbox" name="rejection_reason" value="BACKGROUND_BLEED">
+                                    <span>تداخل الخلفية</span>
+                                </label>
+                                <label class="feedback-checkbox">
+                                    <input type="checkbox" name="rejection_reason" value="CROP_MARGIN_CLIPPING">
+                                    <span>قص جائر بالأطراف</span>
+                                </label>
+                                <label class="feedback-checkbox">
+                                    <input type="checkbox" name="rejection_reason" value="BRAND_STYLE_MISMATCH">
+                                    <span>مخالفة هوية البراند</span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Action buttons -->
+                    <div style="display: flex; gap: 1rem; margin-top: 1.25rem; border-top: 1px solid var(--panel-border); padding-top: 1rem;">
+                        <button type="button" class="btn" id="confirmImageBtn" onclick="confirmRecommendedImage('${img.url}', '${name.replace(/'/g, "\\'")}', '${brand.replace(/'/g, "\\'")}', ${row}, this)" style="flex: 2; font-weight: 800;">
+                            <i class="fas fa-check"></i> اعتماد الصورة للشيت والرفع [A]
+                        </button>
+                        <button type="button" class="btn" onclick="rejectImage('${img.url}', '${name.replace(/'/g, "\\'")}', '${brand.replace(/'/g, "\\'")}', ${row}, this)" style="flex: 1; background: rgba(239, 68, 68, 0.08); border-color: rgba(239, 68, 68, 0.25); color: var(--danger);" onmouseover="this.style.background='var(--danger)'; this.style.color='#fff'" onmouseout="this.style.background='rgba(239, 68, 68, 0.08)'; this.style.color='var(--danger)'">
+                            <i class="fas fa-times"></i> استبعاد [X]
+                        </button>
+                    </div>
                 </div>
             </div>
         `;
         
         container.appendChild(card);
+        initSlideCompare(card);
+    }
+
+    // تهيئة شريط التمرير الانزلاقي للمقارنة
+    function initSlideCompare(card) {
+        const handle = card.querySelector('#compareHandle');
+        const overlay = card.querySelector('#compareOverlay');
+        const container = card.querySelector('#compareContainer');
+        if (!handle || !overlay || !container) return;
+        
+        let isDragging = false;
+        
+        function moveSlider(clientX) {
+            const rect = container.getBoundingClientRect();
+            let x = clientX - rect.left;
+            if (x < 0) x = 0;
+            if (x > rect.width) x = rect.width;
+            
+            const percent = (x / rect.width) * 100;
+            handle.style.left = percent + '%';
+            overlay.style.width = percent + '%';
+        }
+        
+        handle.addEventListener('mousedown', () => { isDragging = true; });
+        window.addEventListener('mouseup', () => { isDragging = false; });
+        window.addEventListener('mousemove', (e) => {
+            if (!isDragging) return;
+            moveSlider(e.clientX);
+        });
+        
+        // دعم شاشات اللمس الهواتف والتابلت
+        handle.addEventListener('touchstart', () => { isDragging = true; });
+        window.addEventListener('touchend', () => { isDragging = false; });
+        window.addEventListener('touchmove', (e) => {
+            if (!isDragging) return;
+            moveSlider(e.touches[0].clientX);
+        });
+    }
+
+    // تبديل خلفيات لوحة المعاينة
+    function switchPreviewBg(type) {
+        const compareContainer = document.getElementById('compareContainer');
+        if (!compareContainer) return;
+        compareContainer.className = 'compare-container';
+        if (type === 'checkerboard') {
+            compareContainer.classList.add('bg-checkerboard');
+        } else if (type === 'white') {
+            compareContainer.classList.add('bg-white');
+        } else if (type === 'gray') {
+            compareContainer.classList.add('bg-gray');
+        }
     }
 
     // اعتماد الصورة للشيت
@@ -1353,6 +1656,7 @@
         const l2 = document.getElementById('selectL2').value;
         const l3 = document.getElementById('selectL3').value;
         const aiUpscale = document.getElementById('aiUpscale') ? document.getElementById('aiUpscale').checked : true;
+        const bgRemovalMethod = document.getElementById('bgRemovalMethod') ? document.getElementById('bgRemovalMethod').value : 'bria';
         
         try {
             const res = await fetch('/api/select_image', {
@@ -1371,6 +1675,7 @@
                     category_l2: l2,
                     category_l3: l3,
                     upscale: aiUpscale,
+                    bg_removal_method: bgRemovalMethod,
                     target_width:  getOutputWidth(),
                     target_height: getOutputHeight(),
                     padding_ratio: parseFloat(document.getElementById('paddingRatio').value),
@@ -1386,6 +1691,51 @@
                 loadProducts();
             } else {
                 alert(`❌ فشل الرفع: ${data.error}`);
+            }
+        } catch (err) {
+            console.error(err);
+            btn.disabled = false;
+            btn.innerHTML = originalText;
+            alert('❌ خطأ اتصال بالخادم.');
+        }
+    }
+
+    // استبعاد ورفض الصورة وتسجيل التغذية الراجعة للتعلم النشط
+    async function rejectImage(url, name, brand, row, btn) {
+        const checkedReasons = Array.from(document.querySelectorAll('input[name="rejection_reason"]:checked')).map(cb => cb.value);
+        if (checkedReasons.length === 0) {
+            alert('❌ يرجى تحديد سبب واحد للرفض على الأقل لتسجيل التغذية الراجعة للتعلم النشط.');
+            return;
+        }
+        
+        const originalText = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جاري التسجيل...';
+        
+        try {
+            const res = await fetch('/api/reject_image', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
+                },
+                body: JSON.stringify({
+                    image_url: url,
+                    product_name: name,
+                    brand: brand,
+                    row_number: row,
+                    rejection_reasons: checkedReasons
+                })
+            });
+            const data = await res.json();
+            btn.disabled = false;
+            btn.innerHTML = originalText;
+            
+            if (data.status === 'success') {
+                alert('🚫 تم تسجيل الرفض وحفظ التغذية الراجعة لتدريب مصنف الذكاء الاصطناعي بنجاح!');
+                loadProducts();
+            } else {
+                alert('❌ فشل تسجيل الرفض: ' + data.error);
             }
         } catch (err) {
             console.error(err);
@@ -1742,5 +2092,68 @@
         if (preset === 'custom') return parseInt(document.getElementById('customHeight').value) || 800;
         return parseInt(preset.split('x')[1]);
     }
+
+    // مستمع اختصارات لوحة المفاتيح والفرز الحركي والسريع لزيادة الإنتاجية
+    window.addEventListener('keydown', (e) => {
+        const activeTag = document.activeElement.tagName.toLowerCase();
+        if (activeTag === 'input' || activeTag === 'textarea' || activeTag === 'select') {
+            return;
+        }
+        
+        const key = e.key.toLowerCase();
+        
+        // [A] الاعتماد السريع
+        if (key === 'a') {
+            e.preventDefault();
+            const confirmBtn = document.getElementById('confirmImageBtn');
+            if (confirmBtn && !confirmBtn.disabled) {
+                confirmBtn.click();
+            }
+        }
+        
+        // [X] الرفض السريع
+        if (key === 'x') {
+            e.preventDefault();
+            const rejectBtn = document.querySelector('button[onclick^="rejectImage"]');
+            if (rejectBtn && !rejectBtn.disabled) {
+                rejectBtn.click();
+            }
+        }
+        
+        // [Space] تخطي مؤقت والذهاب للمنتج التالي
+        if (e.key === ' ' || e.code === 'Space') {
+            e.preventDefault();
+            const activeItem = document.querySelector('.product-item.active');
+            if (activeItem) {
+                const nextItem = activeItem.nextElementSibling;
+                if (nextItem && nextItem.classList.contains('product-item')) {
+                    nextItem.click();
+                    nextItem.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                }
+            }
+        }
+        
+        // [Q] إعادة تحديث من الكواش أو الشيت
+        if (key === 'q') {
+            e.preventDefault();
+            const refreshBtn = document.getElementById('refreshBtn');
+            if (refreshBtn && !refreshBtn.disabled) {
+                refreshBtn.click();
+            }
+        }
+        
+        // مفاتيح الأرقام لاعتماد الصور المرشحة مباشرة من الشبكة (Choice Auto-Accept)
+        if (key >= '1' && key <= '9') {
+            const candidates = document.querySelectorAll('#candidatesContainer .candidate-card');
+            const idx = parseInt(key) - 1;
+            if (candidates && candidates[idx]) {
+                const actionBtn = candidates[idx].querySelector('button[onclick^="confirmRecommendedImage"]');
+                if (actionBtn && !actionBtn.disabled) {
+                    e.preventDefault();
+                    actionBtn.click();
+                }
+            }
+        }
+    });
 </script>
 @endsection

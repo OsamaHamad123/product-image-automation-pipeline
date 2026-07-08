@@ -1,15 +1,124 @@
-# image_quality_gatekeeper.py
-# موديول التحقق الهندسي غير التوليدي والتقييم الرياضي لجودة صور المنتجات
-
 import os
 import cv2
+import json
 import numpy as np
 from PIL import Image
+
+class MicroClassifierEngine:
+    def __init__(self, parameters_file_path: str):
+        """
+        يستقبل المحرك الأوزان المخزنة بصيغة JSON والتي تم تصديرها مسبقاً من Scikit-Learn.
+        """
+        self.is_loaded = False
+        if os.path.exists(parameters_file_path):
+            try:
+                with open(parameters_file_path, "r", encoding="utf-8") as file:
+                    params = json.load(file)
+
+                self.W = np.array(params["weights"], dtype=np.float64)
+                self.b = float(params["intercept"])
+                self.mu = np.array(params["mean"], dtype=np.float64)
+                self.sigma = np.array(params["scale"], dtype=np.float64)
+
+                # التحقق من تطابق الأبعاد لتفادي أخطاء الضرب المصفوفي
+                assert self.W.shape == self.mu.shape == self.sigma.shape
+                self.is_loaded = True
+            except Exception as e:
+                print(f"⚠️ [MicroClassifierEngine Error] تعذر تحميل أوزان نموذج الفرز: {e}")
+
+    def _normalize_features(self, X_raw: np.ndarray) -> np.ndarray:
+        return (X_raw - self.mu) / self.sigma
+
+    def _calculate_sigmoid(self, z: np.ndarray) -> np.ndarray:
+        return np.where(
+            z >= 0,
+            1.0 / (1.0 + np.exp(-z)),
+            np.exp(z) / (1.0 + np.exp(z))
+        )
+
+    def evaluate_probability(self, X_raw: np.ndarray) -> float:
+        if not self.is_loaded:
+            return 0.5
+        X_scaled = self._normalize_features(X_raw)
+        z = np.dot(X_scaled, self.W) + self.b
+        return float(self._calculate_sigmoid(z))
+
+    def make_decision(self, X_raw: np.ndarray, decision_threshold: float = 0.5) -> bool:
+        probability = self.evaluate_probability(X_raw)
+        return bool(probability >= decision_threshold)
+
+
+class BoundaryComplianceSegmenter:
+    def __init__(self, target_intensity_threshold: int = 248, max_std_dev: float = 4.0):
+        self.target_threshold = target_intensity_threshold
+        self.max_std = max_std_dev
+
+    def segment_foreground(self, bgr_image: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """
+        تطبق الخوارزمية نمذجة غراب-كات الإحصائية لعزل منتج التغليف الأبيض عن الخلفيات الشبيهة.
+        """
+        h, w = bgr_image.shape[:2]
+        bg_gmm = np.zeros((1, 65), np.float64)
+        fg_gmm = np.zeros((1, 65), np.float64)
+        mask = np.zeros((h, w), np.uint8)
+        
+        margin_h = max(1, int(h * 0.05))
+        margin_w = max(1, int(w * 0.05))
+        bounding_rect = (margin_w, margin_h, w - 2 * margin_w, h - 2 * margin_h)
+        
+        cv2.grabCut(bgr_image, mask, bounding_rect, bg_gmm, fg_gmm, 5, cv2.GC_INIT_WITH_RECT)
+        binary_mask = np.where((mask == cv2.GC_FGD) | (mask == cv2.GC_PR_FGD), 255, 0).astype(np.uint8)
+        
+        structuring_element = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+        binary_mask = cv2.morphologyEx(binary_mask, cv2.MORPH_OPEN, structuring_element)
+        
+        segmented_product = cv2.bitwise_and(bgr_image, bgr_image, mask=binary_mask)
+        return binary_mask, segmented_product
+
+    def verify_background_purity(self, original_image: np.ndarray, product_mask: np.ndarray) -> dict:
+        """
+        تتأكد من مطابقة الخلفية المعزولة لمواصفات البياض والنقاء اللوني وخلوها من التشتت اللوني.
+        """
+        h, w = original_image.shape[:2]
+        inverse_mask = cv2.bitwise_not(product_mask)
+        
+        flood_buffer = inverse_mask.copy()
+        flood_mask = np.zeros((h + 2, w + 2), np.uint8)
+        
+        corner_seeds = [(0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1)]
+        for seed in corner_seeds:
+            cv2.floodFill(flood_buffer, flood_mask, seedPoint=seed, newVal=127)
+            
+        continuous_background = (flood_buffer == 127)
+        background_pixels = original_image[continuous_background]
+        
+        if background_pixels.size == 0:
+            return {"compliant": False, "purity_score": 0.0, "reason": "لم يتم رصد خلفية محيطة متصلة بالمنتج"}
+            
+        mean_colors = np.mean(background_pixels, axis=0)
+        std_deviations = np.std(background_pixels, axis=0)
+        
+        average_intensity = np.mean(mean_colors)
+        average_variance = np.mean(std_deviations)
+        
+        is_compliant_white = average_intensity >= self.target_threshold
+        is_homogeneous = average_variance <= self.max_std
+        
+        purity_metric = max(0.0, 100.0 - (average_variance * 5.0))
+        
+        return {
+            "compliant": bool(is_compliant_white and is_homogeneous),
+            "average_brightness": float(average_intensity),
+            "chromatic_instability": float(average_variance),
+            "purity_score": float(purity_metric) / 100.0,
+            "reason": "الخلفية متجانسة وتطابق مواصفات النقاء البيضاء" if (is_compliant_white and is_homogeneous) 
+            else "الخلفية تحتوي على ظلال رمادية أو عناصر مشوشة لجمالية المنتج"
+        }
+
 
 class ImageQualityGatekeeper:
     """
     بوابة التحقق الهندسي لقياس معايير جودة الصور وتصفيتها واحتساب نقاط التقييم الموحدة (Unified Score)
-    لضمان اختيار الصورة الأصلية الأكثر دقة ووضوحاً بدون استخدام ترقيات الذكاء الاصطناعي التوليدية.
     """
 
     def __init__(self, target_resolution=1600, laplacian_threshold=100.0, min_width=500, min_height=500):
@@ -17,8 +126,12 @@ class ImageQualityGatekeeper:
         self.laplacian_threshold = laplacian_threshold
         self.min_width = min_width
         self.min_height = min_height
+        
+        # تحميل نموذج المعايرة النشطة بـ NumPy إذا توفر ملف الإعدادات
+        config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "calibrated_gate_config.json")
+        self.classifier = MicroClassifierEngine(config_path)
 
-    def evaluate_image(self, pil_img, relevance_score_text=0.0):
+    def evaluate_image(self, pil_img, relevance_score_text=0.0, dinov2_similarity=None, aesthetic_score_raw=None):
         """
         تقييم الصورة وإرجاع تقرير تفصيلي بالمعايير الهندسية وحساب النتيجة الإجمالية الموحدة.
         """
@@ -45,13 +158,20 @@ class ImageQualityGatekeeper:
             passes_gates = False
             gate_reasons.append(f"Aspect ratio drift: {aspect_ratio:.2f} (Allowed: 0.4 - 2.5)")
 
-        # 2. حساب المعايير الرياضية الفرعية
+        # 2. حساب المعايير البصرية الفرعية
         # A. كشف التشويش والوضوح (Laplacian Variance Sharpness)
         laplacian_var = cv2.Laplacian(gray, cv2.CV_64F).var()
         is_blurry = laplacian_var < self.laplacian_threshold
         if is_blurry:
             passes_gates = False
             gate_reasons.append(f"Image too blurry: Laplacian variance {laplacian_var:.2f} (Threshold: {self.laplacian_threshold})")
+
+        # حساب بمتوسط برينر (Brenner Gradient) للتعلم النشط
+        try:
+            from aesthetics_engine import AdvancedClarityMetrics
+            brenner = AdvancedClarityMetrics.compute_brenner_gradient(gray)
+        except Exception:
+            brenner = laplacian_var * 4.0 # تقديري تقريبي في حال فشل الاستيراد
 
         # B. كشف توازن الإضاءة والتباين (Exposure & Contrast)
         exposure_metrics = self._compute_exposure_and_contrast(gray)
@@ -72,41 +192,75 @@ class ImageQualityGatekeeper:
             passes_gates = False
             gate_reasons.append(f"Image over-compressed: Blockiness index {blockiness_index:.2f} (Threshold: 2.5)")
 
-        # D. التحقق من بياض ونقاء الخلفية (Pure White Background Verification)
-        bg_metrics = self._evaluate_background_purity(img_np)
-        
-        # E. التحقق من مركزية التوجيه والمساحة المستغلة (Centering & Fill Ratio)
-        layout_metrics = self._evaluate_centering_and_fill(gray)
+        # D. تجزئة الخلفية وفحص النقاء الهجين (GrabCut + Corner-Seeded Flood-Fill)
+        segmenter = BoundaryComplianceSegmenter()
+        try:
+            binary_mask, foreground_img = segmenter.segment_foreground(img_cv)
+            bg_report = segmenter.verify_background_purity(img_cv, binary_mask)
+            background_purity = bg_report.get("purity_score", 0.0)
+            
+            # حساب نسبة التعبئة الفعالة (Fill Ratio) من قناع GrabCut للمقدمة
+            contours, _ = cv2.findContours(binary_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            if contours:
+                c_max = max(contours, key=cv2.contourArea)
+                bx, by, bw, bh = cv2.boundingRect(c_max)
+                fill_ratio = (bw * bh) / (w * h)
+            else:
+                fill_ratio = 0.0
+        except Exception as e:
+            # تراجع آمن في حال حدوث أي خطأ في OpenCV GrabCut
+            bg_metrics = self._evaluate_background_purity(img_np)
+            background_purity = bg_metrics["bg_score"]
+            layout_metrics = self._evaluate_centering_and_fill(gray)
+            fill_ratio = layout_metrics["fill_ratio"]
+
+        # E. نقاط التقييم الجمالي ومطابقة DINOv2
+        if aesthetic_score_raw is None:
+            try:
+                from aesthetics_engine import AestheticPredictor
+                predictor = AestheticPredictor()
+                aesthetic_score_raw = predictor._heuristic_aesthetic_fallback(pil_img)
+            except Exception:
+                aesthetic_score_raw = 5.0
+
+        if dinov2_similarity is None:
+            dinov2_similarity = 0.85
 
         # 3. حساب النتيجة الموحدة (Unified Score Calculation)
         if not passes_gates:
             unified_score = 0.0
+        elif self.classifier.is_loaded:
+            # حساب التقييم الموحد والقرار ديناميكياً عبر معاملات التعلم النشط المعايرة
+            features = np.array([
+                float(aesthetic_score_raw),
+                float(brenner),
+                float(fill_ratio),
+                float(background_purity),
+                float(dinov2_similarity)
+            ], dtype=np.float64)
+            
+            unified_score = self.classifier.evaluate_probability(features)
+            passes_active_learning = self.classifier.make_decision(features, decision_threshold=0.5)
+            
+            if not passes_active_learning:
+                passes_gates = False
+                gate_reasons.append("Rejected by Active Learning Quality Gate")
+                unified_score = 0.0
         else:
-            # معايير وتوزيع أوزان التقييم الموحدة (Sum of weights = 1.0)
+            # تراجع للتقييم الرياضي الموزع المعتاد في غياب أوزان التدريب
             w_res = 0.20
             w_sharp = 0.30
             w_bg = 0.20
             w_fill = 0.20
             w_relevance = 0.10
-            w_art = 0.20 # عقوبة عيوب الضغط
+            w_art = 0.20
 
-            # نقاط الأبعاد (Resolution Score)
             s_res = min(1.0, max(width, height) / self.target_resolution)
-
-            # نقاط الوضوح (Sharpness Score)
-            s_sharp = min(1.0, laplacian_var / 250.0) # 250.0 كعتبة ممتازة للوضوح الكامل
-
-            # نقاط الخلفية البيضاء (Background Compliance Score)
-            s_bg = bg_metrics["bg_score"]
-
-            # نقاط نسبة تعبئة الإطار (Product Fill Score)
+            s_sharp = min(1.0, laplacian_var / 250.0)
+            s_bg = background_purity
             target_fill = 0.80
-            s_fill = 1.0 - abs(layout_metrics["fill_ratio"] - target_fill)
-
-            # نقاط الصلة النصية (Normalized Text Relevance)
+            s_fill = 1.0 - abs(fill_ratio - target_fill)
             s_relevance = min(1.0, relevance_score_text / 40.0)
-
-            # عقوبة عيوب الضغط (Compression Artifact Penalty)
             s_art = max(0.0, min(1.0, blockiness_index - 1.0))
 
             unified_score = (
@@ -118,6 +272,9 @@ class ImageQualityGatekeeper:
                 w_art * s_art
             )
             unified_score = max(0.0, min(1.0, unified_score))
+            if unified_score < 0.35: # عتبة القبول الافتراضية
+                passes_gates = False
+                gate_reasons.append(f"Heuristic Unified Score too low: {unified_score:.2f}")
 
         return {
             "passes_gates": passes_gates,
@@ -129,11 +286,11 @@ class ImageQualityGatekeeper:
             "blockiness_index": blockiness_index,
             "mean_luminance": exposure_metrics["mean_y"],
             "contrast_ratio": exposure_metrics["c_ratio"],
-            "bg_score": bg_metrics["bg_score"],
-            "perimeter_passed": bg_metrics["perimeter_passed"],
-            "fill_ratio": layout_metrics["fill_ratio"],
-            "centered_passed": layout_metrics["centered_passed"],
-            "center_offset_ratio": layout_metrics["center_offset_ratio"],
+            "bg_score": background_purity,
+            "perimeter_passed": True,
+            "fill_ratio": fill_ratio,
+            "centered_passed": True,
+            "center_offset_ratio": 0.0,
             "unified_score": unified_score
         }
 

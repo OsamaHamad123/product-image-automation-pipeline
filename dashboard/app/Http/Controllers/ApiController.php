@@ -9,9 +9,6 @@ class ApiController extends Controller
     private $pythonPath = 'C:\Users\OsamaHamad\AppData\Local\Programs\Python\Python314\python.exe';
     private $bridgePath = 'f:\automation\cli_bridge.py';
 
-    /**
-     * تشغيل سكربت Python ببارامترات مشفرة كـ Base64 لضمان الحماية
-     */
     private function runPython($action, $params = [])
     {
         try {
@@ -21,6 +18,12 @@ class ApiController extends Controller
             // بناء الأمر والتنفيذ الفوري
             $cmd = "\"{$this->pythonPath}\" \"{$this->bridgePath}\" {$action} {$base64Params} 2>&1";
             $output = shell_exec($cmd);
+            
+            // Extract JSON from output if there are print statement logs before it
+            $pos = strrpos($output, '{"status":');
+            if ($pos !== false) {
+                $output = substr($output, $pos);
+            }
             
             $decoded = json_decode($output, true);
             if ($decoded === null) {
@@ -57,6 +60,21 @@ class ApiController extends Controller
         
         if (isset($result['status']) && $result['status'] === 'success') {
             // تفريغ كاش الكتالوج ليعاد قراءته بالشيت المحدث
+            \Cache::forget('products_json_v1');
+            return response()->json($result, 200);
+        }
+        return response()->json($result, 500);
+    }
+
+    /**
+     * رفض واستبعاد صورة وتسجيل التغذية الراجعة
+     */
+    public function rejectImage(Request $request)
+    {
+        set_time_limit(600);
+        $result = $this->runPython('reject_image', $request->all());
+        
+        if (isset($result['status']) && $result['status'] === 'success') {
             \Cache::forget('products_json_v1');
             return response()->json($result, 200);
         }
@@ -125,12 +143,20 @@ class ApiController extends Controller
         }
     }
 
-    /**
-     * مسح الكاش
-     */
     public function clearProductsCache()
     {
         \Cache::forget('products_json_v1');
+        
+        $pCache = 'f:\\automation\\products_cache.json';
+        $bCache = 'f:\\automation\\brand_mappings_cache.json';
+        
+        if (file_exists($pCache)) {
+            @unlink($pCache);
+        }
+        if (file_exists($bCache)) {
+            @unlink($bCache);
+        }
+        
         return response()->json(['status' => 'success', 'message' => 'Products cache cleared']);
     }
 

@@ -10,9 +10,104 @@ import config
 import asyncio
 import io
 import aiohttp
+import threading
+import torch
+import torchvision.transforms as T
 from PIL import Image
-import urllib.parse
 from bs4 import BeautifulSoup
+
+def run_coroutine_sync(coro):
+    """
+    تشغيل الكوروتين بشكل متزامن.
+    إذا لم يكن هناك حلقة أحداث قيد التشغيل، يستخدم asyncio.run().
+    إذا كانت حلقة أحداث قيد التشغيل بالفعل، يتم تشغيل الكوروتين في خيط مستقل
+    باستخدام asyncio.run() لتفادي تعارض حلقة الأحداث وأخطاء aiohttp timeout.
+    """
+    try:
+        asyncio.get_running_loop()
+        result_holder = {}
+        def _target():
+            try:
+                result_holder['result'] = asyncio.run(coro)
+            except Exception as e:
+                result_holder['error'] = e
+        thread = threading.Thread(target=_target)
+        thread.start()
+        thread.join()
+        if 'error' in result_holder:
+            raise result_holder['error']
+        return result_holder.get('result')
+    except RuntimeError:
+        return asyncio.run(coro)
+
+class DINOv2EmbeddingEngine:
+    _instance = None
+    _lock = threading.Lock()
+
+    def __new__(cls, *args, **kwargs):
+        with cls._lock:
+            if cls._instance is None:
+                cls._instance = super(DINOv2EmbeddingEngine, cls).__new__(cls)
+                cls._instance._initialized = False
+            return cls._instance
+
+    def __init__(self, use_gpu_if_available: bool = True):
+        if self._initialized:
+            return
+        self.device = torch.device(
+            "cuda" if (torch.cuda.is_available() and use_gpu_if_available) else "cpu"
+        )
+        try:
+            print("⏳ [DINOv2] Loading dinov2_vits14 model...")
+            self.model = torch.hub.load("facebookresearch/dinov2", "dinov2_vits14")
+            self.model.to(self.device)
+            self.model.eval()
+            if self.device.type == "cuda":
+                self.model = self.model.half()
+                self.data_type = torch.float16
+            else:
+                self.data_type = torch.float32
+
+            self.transform = T.Compose([
+                T.Resize(224, interpolation=T.InterpolationMode.BICUBIC),
+                T.CenterCrop(224),
+                T.ToTensor(),
+                T.Normalize(
+                    mean=[0.485, 0.456, 0.406], 
+                    std=[0.229, 0.224, 0.225]
+                )
+            ])
+            self._initialized = True
+            print("✅ [DINOv2] Model loaded successfully.")
+        except Exception as e:
+            print(f"⚠️ [DINOv2 Error] Failed to load DINOv2: {e}")
+            self.model = None
+
+    def extract_features(self, pil_img: Image.Image) -> torch.Tensor:
+        if self.model is None:
+            return None
+        try:
+            if pil_img.mode != "RGB":
+                pil_img = pil_img.convert("RGB")
+            input_tensor = self.transform(pil_img).unsqueeze(0).to(self.device)
+            if self.device.type == "cuda":
+                input_tensor = input_tensor.half()
+                
+            with torch.no_grad():
+                features = self.model(input_tensor)
+                l2_norm = torch.linalg.norm(features, ord=2, dim=1, keepdim=True)
+                normalized_features = features / l2_norm
+            return normalized_features.squeeze(0).cpu()
+        except Exception as e:
+            print(f"⚠️ [DINOv2 Error] Failed to extract features: {e}")
+            return None
+
+    @staticmethod
+    def calculate_distance(embedding_a: torch.Tensor, embedding_b: torch.Tensor) -> float:
+        if embedding_a is None or embedding_b is None:
+            return 0.0
+        cosine_similarity = torch.dot(embedding_a, embedding_b)
+        return float(cosine_similarity.item())
 
 STOCKS_BLACKLIST_PAT = re.compile(
     r"^https?://(?:[a-zA-Z0-9-]+\.)*(?:"
@@ -58,75 +153,176 @@ class ParallelConsensusScraper:
         if not self.google_key or not self.google_cx:
             return []
         url = "https://www.googleapis.com/customsearch/v1"
-        params = {"key": self.google_key, "cx": self.google_cx, "q": query}
+        params = {
+            "key": self.google_key,
+            "cx": self.google_cx,
+            "q": query,
+            "searchType": "image",
+            "imgSize": "xxlarge",
+            "fileType": "jpg|png"
+        }
         try:
             async with session.get(url, params=params, timeout=6) as r:
                 if r.status == 200:
                     data = await r.json()
-                    return [item["link"] for item in data.get("items", [])]
+                    return [{
+                        "url": item["link"],
+                        "title": item.get("title", query),
+                        "width": int(item.get("image", {}).get("width", 800)),
+                        "height": int(item.get("image", {}).get("height", 800))
+                    } for item in data.get("items", [])]
         except Exception:
             pass
         return []
 
     async def _fetch_bing(self, session, query):
-        if not self.bing_key:
-            return []
-        url = "https://api.bing.microsoft.com/v7.0/search"
-        headers = {"Ocp-Apim-Subscription-Key": self.bing_key}
-        params = {"q": query, "count": 10}
+        if self.bing_key:
+            url = "https://api.bing.microsoft.com/v7.0/images/search"
+            headers = {"Ocp-Apim-Subscription-Key": self.bing_key}
+            params = {"q": query, "count": 15}
+            try:
+                async with session.get(url, headers=headers, params=params, timeout=6) as r:
+                    if r.status == 200:
+                        data = await r.json()
+                        return [{
+                            "url": item["contentUrl"],
+                            "title": item.get("name", query),
+                            "width": int(item.get("width", 800)),
+                            "height": int(item.get("height", 800))
+                        } for item in data.get("value", [])]
+            except Exception:
+                pass
+
+        # fallback: Scrape Bing Images directly using curl_cffi Chrome Impersonation
+        from curl_cffi.requests import AsyncSession
+        import json
+        encoded_query = urllib.parse.quote_plus(query)
+        url = f"https://www.bing.com/images/search?q={encoded_query}"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.5"
+        }
         try:
-            async with session.get(url, headers=headers, params=params, timeout=6) as r:
-                if r.status == 200:
-                    data = await r.json()
-                    return [item["url"] for item in data.get("webPages", {}).get("value", [])]
+            async with AsyncSession(impersonate="chrome120") as s:
+                response = await s.get(url, headers=headers, timeout=8)
+                if response.status_code == 200:
+                    soup = BeautifulSoup(response.text, "html.parser")
+                    links = soup.find_all("a", class_="iusc")
+                    results = []
+                    for link in links:
+                        m_attr = link.get("m")
+                        if m_attr:
+                            try:
+                                m_data = json.loads(m_attr)
+                                results.append({
+                                    "url": m_data["murl"],
+                                    "title": m_data.get("desc", query),
+                                    "width": int(m_data.get("w", 800)),
+                                    "height": int(m_data.get("h", 800))
+                                })
+                            except Exception:
+                                continue
+                    return results[:15]
         except Exception:
             pass
         return []
 
-    async def _fetch_yandex(self, session, query):
-        if not self.yandex_key:
-            return []
-        url = "https://yandex.com/search/xml"
-        params = {"folderid": self.yandex_key, "query": query, "filter": "moderate"}
+    async def _fetch_yandex(self, query):
+        from curl_cffi.requests import AsyncSession
+        encoded_query = urllib.parse.quote_plus(query)
+        url = f"https://yandex.com/images/search?text={encoded_query}"
+        headers = {
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.5",
+            "Host": "yandex.com",
+            "Sec-Fetch-User": "?1",
+        }
         try:
-            async with session.get(url, params=params, timeout=6) as r:
-                if r.status == 200:
-                    xml_content = await r.text()
-                    soup = BeautifulSoup(xml_content, "xml")
-                    return [doc.find("url").text for doc in soup.find_all("document") if doc.find("url")]
+            async with AsyncSession(impersonate="chrome120") as session:
+                response = await session.get(url, headers=headers, timeout=8)
+                if response.status_code != 200:
+                    return []
+                soup = BeautifulSoup(response.text, "html.parser")
+                image_urls = []
+                items = soup.find_all("div", class_=re.compile(r"serp-item"))
+                for item in items:
+                    if len(image_urls) >= 15:
+                        break
+                    data_bem = item.get("data-bem")
+                    if not data_bem:
+                        continue
+                    try:
+                        bem_json = json.loads(data_bem)
+                        serp_data = bem_json.get("serp-item", {})
+                        preview_list = serp_data.get("preview", [])
+                        if preview_list:
+                            origin_url = preview_list[0].get("origin", {}).get("url")
+                            origin_w = preview_list[0].get("origin", {}).get("w", 800)
+                            origin_h = preview_list[0].get("origin", {}).get("h", 800)
+                            if origin_url:
+                                image_urls.append({
+                                    "url": origin_url,
+                                    "title": query,
+                                    "width": int(origin_w),
+                                    "height": int(origin_h)
+                                })
+                    except Exception:
+                        continue
+                return image_urls
         except Exception:
             pass
         return []
 
-    async def _fetch_duckduckgo(self, session, query):
-        url = "https://html.duckduckgo.com/html/"
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-        data = {"q": query}
+    async def _fetch_duckduckgo(self, query):
+        from curl_cffi.requests import AsyncSession
         try:
-            async with session.post(url, data=data, headers=headers, timeout=6) as r:
-                if r.status == 200:
-                    html_content = await r.text()
-                    soup = BeautifulSoup(html_content, "html.parser")
-                    urls = []
-                    for tag in soup.find_all("a", class_="result__url"):
-                        href = tag.get("href")
-                        if href:
-                            clean_match = re.search(r"uddg=(https?://.*)", href)
-                            urls.append(clean_match.group(1) if clean_match else href)
-                    return urls
+            async with AsyncSession(impersonate="chrome120") as session:
+                encoded_query = urllib.parse.quote_plus(query)
+                url_init = f"https://duckduckgo.com/?q={encoded_query}&iax=images&ia=images"
+                headers_init = {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                }
+                response = await session.get(url_init, headers=headers_init, timeout=6)
+                if response.status_code != 200:
+                    return []
+                match = re.search(r'vqd=["\']([0-9-]+)["\']', response.text)
+                if not match:
+                    match = re.search(r'vqd\s*=\s*([0-9]+)', response.text)
+                if not match:
+                    return []
+                vqd = match.group(1)
+                
+                api_url = "https://duckduckgo.com/i.js"
+                params = {
+                    "l": "us-en",
+                    "o": "json",
+                    "q": query,
+                    "vqd": vqd,
+                    "f": ",,,",
+                    "p": "1"
+                }
+                response2 = await session.get(api_url, params=params, headers={"X-Requested-With": "XMLHttpRequest"}, timeout=6)
+                if response2.status_code == 200:
+                    payload = response2.json()
+                    results = payload.get("results", [])
+                    return [{
+                        "url": item["image"],
+                        "title": item.get("title", query),
+                        "width": int(item.get("width", 800)),
+                        "height": int(item.get("height", 800))
+                    } for item in results[:15]]
         except Exception:
             pass
         return []
 
     async def aggregate_consensus_rankings(self, query):
-        # تصفية النصوص
-        clean_q = urllib.parse.quote(query)
         async with aiohttp.ClientSession() as session:
             tasks = [
-                self._fetch_google(session, clean_q),
-                self._fetch_bing(session, clean_q),
-                self._fetch_yandex(session, clean_q),
-                self._fetch_duckduckgo(session, clean_q)
+                self._fetch_google(session, query),
+                self._fetch_bing(session, query),
+                self._fetch_yandex(query),
+                self._fetch_duckduckgo(query)
             ]
             results = await asyncio.gather(*tasks)
             
@@ -145,11 +341,12 @@ class ParallelConsensusScraper:
         }
         
         rrf_registry = {}
-        k = 60  # ثابت التمهيد للتسوية
+        k = 60
         
-        for engine_name, urls in engine_outputs.items():
+        for engine_name, candidates in engine_outputs.items():
             weight = engine_weights[engine_name]
-            for idx, url in enumerate(urls):
+            for idx, cand in enumerate(candidates):
+                url = cand["url"]
                 if self._is_blacklisted(url):
                     continue
                 
@@ -157,23 +354,27 @@ class ParallelConsensusScraper:
                 reciprocal_rank = weight / (k + rank)
                 
                 if url not in rrf_registry:
-                    rrf_registry[url] = reciprocal_rank
+                    rrf_registry[url] = {
+                        "cand": cand,
+                        "score": reciprocal_rank
+                    }
                 else:
-                    rrf_registry[url] += reciprocal_rank
+                    rrf_registry[url]["score"] += reciprocal_rank
 
         final_candidates = []
-        for url, rrf_score in rrf_registry.items():
+        for url, entry in rrf_registry.items():
             da_multiplier = self._get_domain_authority(url)
             if da_multiplier == 0.0:
                 continue
                 
+            cand = entry["cand"]
             final_candidates.append({
                 "url": url,
-                "width": 800,
-                "height": 800,
-                "title": "Consensus SERP Product Image",
-                "rrf_score": rrf_score,
-                "final_score": rrf_score * da_multiplier
+                "width": cand["width"],
+                "height": cand["height"],
+                "title": cand["title"],
+                "rrf_score": entry["score"],
+                "final_score": entry["score"] * da_multiplier
             })
 
         final_candidates.sort(key=lambda x: x["final_score"], reverse=True)
@@ -1344,19 +1545,7 @@ def evaluate_and_choose_best_image(results, product_name, brand, requires_brand_
     urls_to_fetch = [r['item']['url'] for r in scored_results]
     print(f"⏳ [Parallel Download] جاري فحص وتنزيل {len(urls_to_fetch)} صورة مرشحة بالتوازي...")
     
-    try:
-        import nest_asyncio
-        nest_asyncio.apply()
-    except Exception:
-        pass
-        
-    try:
-        loop = asyncio.get_event_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        
-    batch_data = loop.run_until_complete(execute_batch_processing(urls_to_fetch))
+    batch_data = run_coroutine_sync(execute_batch_processing(urls_to_fetch))
     
     valid_candidates = []
     
@@ -1378,6 +1567,33 @@ def evaluate_and_choose_best_image(results, product_name, brand, requires_brand_
             pil_img = Image.open(io.BytesIO(binary_data)).convert("RGB")
             
             # أ. تشغيل بوابة الفرز الرياضي غير التوليدي لجودة الصورة
+            # حساب نتيجة الجاذبية البصرية وقيمة التماثل البصري DINOv2
+            aesthetic_score_raw = 5.0
+            try:
+                from aesthetics_engine import AestheticPredictor
+                predictor = AestheticPredictor()
+                aesthetic_score_raw = predictor._heuristic_aesthetic_fallback(pil_img)
+            except Exception:
+                pass
+
+            dinov2_similarity = 0.85
+            try:
+                engine = DINOv2EmbeddingEngine()
+                cand_embedding = engine.extract_features(pil_img)
+                if cand_embedding is not None:
+                    import local_cache_db
+                    ref_prod = local_cache_db.get_cached_product(brand=brand)
+                    if ref_prod and ref_prod.get("cloudinary_url"):
+                        ref_url = ref_prod["cloudinary_url"]
+                        ref_res = requests.get(ref_url, timeout=5)
+                        if ref_res.status_code == 200:
+                            ref_pil = Image.open(io.BytesIO(ref_res.content))
+                            ref_embedding = engine.extract_features(ref_pil)
+                            if ref_embedding is not None:
+                                dinov2_similarity = engine.calculate_distance(cand_embedding, ref_embedding)
+            except Exception as e:
+                print(f"⚠️ [DINOv2 Similarity Check Error] Failed to calculate DINOv2 similarity: {e}")
+
             from image_quality_gatekeeper import ImageQualityGatekeeper
             gatekeeper = ImageQualityGatekeeper(
                 target_resolution=1600,
@@ -1385,7 +1601,12 @@ def evaluate_and_choose_best_image(results, product_name, brand, requires_brand_
                 min_width=config.MIN_IMAGE_WIDTH,
                 min_height=config.MIN_IMAGE_HEIGHT
             )
-            eval_report = gatekeeper.evaluate_image(pil_img, relevance_score_text=r['relevance_score'])
+            eval_report = gatekeeper.evaluate_image(
+                pil_img, 
+                relevance_score_text=r['relevance_score'],
+                dinov2_similarity=dinov2_similarity,
+                aesthetic_score_raw=aesthetic_score_raw
+            )
             
             if not eval_report["passes_gates"]:
                 reasons.append(f"مستبعدة: فشل التحقق الهندسي لجودة الصورة ({', '.join(eval_report['gate_reasons'])})")
@@ -1604,12 +1825,7 @@ def run_parallel_consensus_search(query):
         yandex_key=getattr(config, "YANDEX_FOLDER_ID", "")
     )
     try:
-        loop = asyncio.get_event_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-    try:
-        return loop.run_until_complete(scraper.aggregate_consensus_rankings(query))
+        return run_coroutine_sync(scraper.aggregate_consensus_rankings(query))
     except Exception as e:
         print(f"⚠️ [Parallel Search Error] فشل البحث المتوازي التوافقي لـ '{query}': {e}")
         return []

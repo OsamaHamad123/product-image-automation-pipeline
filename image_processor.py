@@ -533,6 +533,44 @@ def remove_background(input_path, output_path):
             print(f"❌ خطأ أثناء الاتصال بـ remove.bg API: {e}")
             return False
             
+    elif method == "grabcut":
+        print("⏳ [Background Removal] Running GrabCut manual segmentation locally (OpenCV)...")
+        try:
+            import cv2
+            import numpy as np
+            
+            img = cv2.imread(input_path)
+            if img is None:
+                raise ValueError("Failed to load image for GrabCut")
+                
+            mask = np.zeros(img.shape[:2], np.uint8)
+            bgdModel = np.zeros((1, 65), np.float64)
+            fgdModel = np.zeros((1, 65), np.float64)
+            
+            h, w = img.shape[:2]
+            rect = (int(w * 0.05), int(h * 0.05), int(w * 0.9), int(h * 0.9))
+            
+            cv2.grabCut(img, mask, rect, bgdModel, fgdModel, 5, cv2.GC_INIT_WITH_RECT)
+            
+            mask2 = np.where((mask==2)|(mask==0), 0, 1).astype('uint8')
+            img_rgba = cv2.cvtColor(img, cv2.COLOR_BGR2BGRA)
+            img_rgba[:, :, 3] = mask2 * 255
+            
+            cv2.imwrite(output_path, img_rgba)
+            print("✅ [Background Removal] GrabCut segmentation completed successfully!")
+            # صقل حواف الصورة وتعبئة أي فجوات شفافة داخل جسم المنتج
+            execute_high_fidelity_refinement(output_path, output_path)
+            return True
+        except Exception as e:
+            print(f"❌ [Background Removal] GrabCut segmentation failed: {e}")
+            # نسخ الملف الأصلي كبديل
+            try:
+                with Image.open(input_path) as img_pil:
+                    img_pil.save(output_path)
+                return True
+            except Exception:
+                return False
+            
     else:
         print(f"⚠️ طريقة إزالة الخلفية غير معروفة: '{method}'. سيتم تخطي الإزالة.")
         with Image.open(input_path) as img:
@@ -789,151 +827,162 @@ def enhance_image_quality(image_path, output_path):
         print(f"⚠️ خطأ أثناء تجميل الصورة: {e}")
         return False
 
-def process_product_image(image_url, product_name, brand):
+def process_product_image(image_url, product_name, brand, bg_removal_method=None):
     """
     تحميل الصورة وإزالة خلفيتها فقط - التحجيم والقص والتوسيط يتم سحابياً عبر Cloudinary.
     يرجع مسار ملف الصورة بخلفية شفافة جاهزة للرفع.
     """
-    os.makedirs("temp", exist_ok=True)
-    
-    safe_name = f"{product_name}_{brand}".replace("/", "_").replace("\\", "_").replace(":", "_").replace(" ", "_")
-    
-    raw_path  = os.path.join("temp", f"raw_{safe_name}.webp")
-    nobg_path = os.path.join("temp", f"nobg_{safe_name}.webp")
-    
-    # 1. تنزيل الصورة الأصلية
-    if not download_image(image_url, raw_path):
-        return None
+    old_bg_method = config.BG_REMOVAL_METHOD
+    if bg_removal_method:
+        mapped = bg_removal_method.lower().strip()
+        if mapped == 'bria':
+            mapped = 'bria_rmbg'
+        config.BG_REMOVAL_METHOD = mapped
+        print(f"🔧 [Manual Override] Overriding BG Removal Method to: '{config.BG_REMOVAL_METHOD}'")
         
-    # التحقق من وضوح الصورة وتجنب المعالجة إذا كانت مشوشة جداً
-    if is_image_blurry(raw_path, threshold=40.0):
-        print(f"⚠️ [Blurry Image Detected] الصورة مشوشة جداً (Laplacian Variance < 40). سيتم تخطيها.")
-        try:
-            if os.path.exists(raw_path):
-                os.remove(raw_path)
-        except Exception:
-            pass
-        return None
-
-    # تنظيف التشويش والضوضاء البصرية من الصورة المجلوبة
-    denoise_image_opencv(raw_path, raw_path)
-
-    # ترقية دقة الصورة بالذكاء الاصطناعي إذا كانت صغيرة
-    upscale_image_if_small(raw_path, target_min_size=600)
+    try:
+        os.makedirs("temp", exist_ok=True)
+    
+        safe_name = f"{product_name}_{brand}".replace("/", "_").replace("\\", "_").replace(":", "_").replace(" ", "_")
         
-    # 2. الاقتصاص الذكي بالذكاء الاصطناعي إذا تم العثور على مربع محيط بالمنتج
-    box = get_product_bounding_box(raw_path, product_name, brand)
-    if box:
-        cropped_path = os.path.join("temp", f"cropped_{safe_name}.webp")
-        if crop_image_by_box(raw_path, box, cropped_path):
+        raw_path  = os.path.join("temp", f"raw_{safe_name}.webp")
+        nobg_path = os.path.join("temp", f"nobg_{safe_name}.webp")
+        
+        # 1. تنزيل الصورة الأصلية
+        if not download_image(image_url, raw_path):
+            return None
+            
+        # التحقق من وضوح الصورة وتجنب المعالجة إذا كانت مشوشة جداً
+        if is_image_blurry(raw_path, threshold=40.0):
+            print(f"⚠️ [Blurry Image Detected] الصورة مشوشة جداً (Laplacian Variance < 40). سيتم تخطيها.")
             try:
                 if os.path.exists(raw_path):
                     os.remove(raw_path)
             except Exception:
                 pass
-            os.rename(cropped_path, raw_path)
-    else:
-        print("🔄 [Fallback Smart Crop] لم يتم العثور على مربع محيط من Gemini. جاري تشغيل الاقتصاص الذكي القائم على الأهمية البصرية...")
-        apply_saliency_smart_crop(raw_path, raw_path, 800, 800)
-        
-    # حساب مساحة المربع المحيط بالبكسل لربطه بمعايير التحقق Heuristics
-    bbox_area = None
-    if box:
-        try:
-            from PIL import Image
-            with Image.open(raw_path) as temp_img:
-                orig_w, orig_h = temp_img.size
-                ymin, xmin, ymax, xmax = box
-                pixel_w = (xmax - xmin) * orig_w / 1000.0
-                pixel_h = (ymax - ymin) * orig_h / 1000.0
-                bbox_area = pixel_w * pixel_h
-        except Exception as e:
-            print(f"⚠️ خطأ أثناء حساب مساحة المربع المحيط بالبكسل: {e}")
-
-    # 3. إزالة الخلفية وتطبيق مسار الإصلاح الذاتي (Self-Healing Failover Path)
-    success = remove_background(raw_path, nobg_path)
+            return None
     
-    # التحقق البرمجي التلقائي من جودة قناع الشفافية للمسار الأساسي
-    is_valid = success and validate_alpha_matte(nobg_path, bbox_area)
+        # تنظيف التشويش والضوضاء البصرية من الصورة المجلوبة
+        denoise_image_opencv(raw_path, raw_path)
     
-    if not is_valid:
-        # مسار التراجع (Failover): محاولة التراجع المحلي المجاني باستخدام النموذج الآخر أولاً
-        local_failover_method = "bria_rmbg" if config.BG_REMOVAL_METHOD.lower() == "rembg" else "rembg"
-        print(f"🔄 [Self-Healing Failover] القناع الأساسي لم يمر بمعايير التحقق. محاولة التراجع المحلي باستخدام نموذج '{local_failover_method}'...")
-        
-        fallback_nobg_path = os.path.join("temp", f"local_fallback_{safe_name}.webp")
-        old_method = config.BG_REMOVAL_METHOD
-        config.BG_REMOVAL_METHOD = local_failover_method
-        fallback_success = remove_background(raw_path, fallback_nobg_path)
-        config.BG_REMOVAL_METHOD = old_method
-        
-        if fallback_success and validate_alpha_matte(fallback_nobg_path, bbox_area):
-            print("✅ [Self-Healing Succeeded] مسار التراجع المحلي نجح واجتاز التحقق البرمجي!")
-            nobg_path = fallback_nobg_path
-            is_valid = True
+        # ترقية دقة الصورة بالذكاء الاصطناعي إذا كانت صغيرة
+        upscale_image_if_small(raw_path, target_min_size=600)
             
-    if not is_valid:
-        # مسار التراجع السحابي المدفوع عبر API كخيار أخير
-        print("🔄 [Self-Healing Failover] التراجع المحلي لم ينجح. محاولة التراجع السحابي المدفوع...")
-        if config.REMOVE_BG_API_KEY:
-            api_nobg_path = os.path.join("temp", f"api_fallback_{safe_name}.webp")
+        # 2. الاقتصاص الذكي بالذكاء الاصطناعي إذا تم العثور على مربع محيط بالمنتج
+        box = get_product_bounding_box(raw_path, product_name, brand)
+        if box:
+            cropped_path = os.path.join("temp", f"cropped_{safe_name}.webp")
+            if crop_image_by_box(raw_path, box, cropped_path):
+                try:
+                    if os.path.exists(raw_path):
+                        os.remove(raw_path)
+                except Exception:
+                    pass
+                os.rename(cropped_path, raw_path)
+        else:
+            print("🔄 [Fallback Smart Crop] لم يتم العثور على مربع محيط من Gemini. جاري تشغيل الاقتصاص الذكي القائم على الأهمية البصرية...")
+            apply_saliency_smart_crop(raw_path, raw_path, 800, 800)
             
-            # محاكاة إزالة الخلفية عبر API
+        # حساب مساحة المربع المحيط بالبكسل لربطه بمعايير التحقق Heuristics
+        bbox_area = None
+        if box:
+            try:
+                from PIL import Image
+                with Image.open(raw_path) as temp_img:
+                    orig_w, orig_h = temp_img.size
+                    ymin, xmin, ymax, xmax = box
+                    pixel_w = (xmax - xmin) * orig_w / 1000.0
+                    pixel_h = (ymax - ymin) * orig_h / 1000.0
+                    bbox_area = pixel_w * pixel_h
+            except Exception as e:
+                print(f"⚠️ خطأ أثناء حساب مساحة المربع المحيط بالبكسل: {e}")
+    
+        # 3. إزالة الخلفية وتطبيق مسار الإصلاح الذاتي (Self-Healing Failover Path)
+        success = remove_background(raw_path, nobg_path)
+        
+        # التحقق البرمجي التلقائي من جودة قناع الشفافية للمسار الأساسي
+        is_valid = success and validate_alpha_matte(nobg_path, bbox_area)
+        
+        if not is_valid:
+            # مسار التراجع (Failover): محاولة التراجع المحلي المجاني باستخدام النموذج الآخر أولاً
+            local_failover_method = "bria_rmbg" if config.BG_REMOVAL_METHOD.lower() == "rembg" else "rembg"
+            print(f"🔄 [Self-Healing Failover] القناع الأساسي لم يمر بمعايير التحقق. محاولة التراجع المحلي باستخدام نموذج '{local_failover_method}'...")
+            
+            fallback_nobg_path = os.path.join("temp", f"local_fallback_{safe_name}.webp")
             old_method = config.BG_REMOVAL_METHOD
-            config.BG_REMOVAL_METHOD = "remove_bg_api"
-            api_success = remove_background(raw_path, api_nobg_path)
+            config.BG_REMOVAL_METHOD = local_failover_method
+            fallback_success = remove_background(raw_path, fallback_nobg_path)
             config.BG_REMOVAL_METHOD = old_method
             
-            if api_success and validate_alpha_matte(api_nobg_path, bbox_area):
-                print("✅ [Self-Healing Succeeded] مسار التراجع السحابي نجح واجتاز التحقق البرمجي!")
-                nobg_path = api_nobg_path
+            if fallback_success and validate_alpha_matte(fallback_nobg_path, bbox_area):
+                print("✅ [Self-Healing Succeeded] مسار التراجع المحلي نجح واجتاز التحقق البرمجي!")
+                nobg_path = fallback_nobg_path
                 is_valid = True
                 
         if not is_valid:
-            print("❌ [Self-Healing Failed] فشل مسارات التراجع الشفافة. استخدام الصورة الخام الكاملة لحماية المنتج وتحويلها للمراجعة البشرية.")
-            nobg_path = raw_path
-
-    # 4. تحسين الحواف وتطبيق ظلال الاستوديو الناعمة والتوسيط
-    temp_rgba = os.path.join("temp", f"rgba_{safe_name}.webp")
-    final_path = os.path.join("temp", f"final_{safe_name}.webp")
+            # مسار التراجع السحابي المدفوع عبر API كخيار أخير
+            print("🔄 [Self-Healing Failover] التراجع المحلي لم ينجح. محاولة التراجع السحابي المدفوع...")
+            if config.REMOVE_BG_API_KEY:
+                api_nobg_path = os.path.join("temp", f"api_fallback_{safe_name}.webp")
+                
+                # محاكاة إزالة الخلفية عبر API
+                old_method = config.BG_REMOVAL_METHOD
+                config.BG_REMOVAL_METHOD = "remove_bg_api"
+                api_success = remove_background(raw_path, api_nobg_path)
+                config.BG_REMOVAL_METHOD = old_method
+                
+                if api_success and validate_alpha_matte(api_nobg_path, bbox_area):
+                    print("✅ [Self-Healing Succeeded] مسار التراجع السحابي نجح واجتاز التحقق البرمجي!")
+                    nobg_path = api_nobg_path
+                    is_valid = True
+                    
+            if not is_valid:
+                print("❌ [Self-Healing Failed] فشل مسارات التراجع الشفافة. استخدام الصورة الخام الكاملة لحماية المنتج وتحويلها للمراجعة البشرية.")
+                nobg_path = raw_path
     
-    if nobg_path != raw_path:
-        try:
-            from PIL import Image
-            import numpy as np
-            from edge_shadow_engine import EdgeShadowEngine
-            
-            # استخراج قناع الشفافية من الصورة المعزولة الخلفية
-            with Image.open(nobg_path) as nobg_img:
-                nobg_rgba = nobg_img.convert("RGBA")
-                alpha_channel = np.array(nobg_rgba.getchannel('A'))
-                
-            # تشغيل محرك معالجة الحواف Guided Filter
-            success_edge = EdgeShadowEngine.process_mask(raw_path, alpha_channel, temp_rgba)
-            
-            if success_edge:
-                # تطبيق ظلال الاستوديو المركبة والتوسيط
-                success_shadow = EdgeShadowEngine.apply_studio_shadows(temp_rgba, final_path, target_size=config.IMAGE_TARGET_SIZE)
-                if not success_shadow:
-                    final_path = nobg_path
-            else:
-                final_path = nobg_path
-        except Exception as e:
-            print(f"⚠️ خطأ أثناء تطبيق تنعيم الحواف والظلال: {e}")
-            final_path = nobg_path
-    else:
-        # إذا لم يتم عزل الخلفية، نستخدم الصورة الخام مباشرة
-        final_path = raw_path
+        # 4. تحسين الحواف وتطبيق ظلال الاستوديو الناعمة والتوسيط
+        temp_rgba = os.path.join("temp", f"rgba_{safe_name}.webp")
+        final_path = os.path.join("temp", f"final_{safe_name}.webp")
         
-    # تنظيف الملفات المؤقتة
-    for temp_f in [temp_rgba, raw_path, nobg_path]:
-        if os.path.exists(temp_f) and temp_f != final_path:
+        if nobg_path != raw_path:
             try:
-                os.remove(temp_f)
-            except Exception:
-                pass
+                from PIL import Image
+                import numpy as np
+                from edge_shadow_engine import EdgeShadowEngine
                 
-    return final_path
+                # استخراج قناع الشفافية من الصورة المعزولة الخلفية
+                with Image.open(nobg_path) as nobg_img:
+                    nobg_rgba = nobg_img.convert("RGBA")
+                    alpha_channel = np.array(nobg_rgba.getchannel('A'))
+                    
+                # تشغيل محرك معالجة الحواف Guided Filter
+                success_edge = EdgeShadowEngine.process_mask(raw_path, alpha_channel, temp_rgba)
+                
+                if success_edge:
+                    # تطبيق ظلال الاستوديو المركبة والتوسيط
+                    success_shadow = EdgeShadowEngine.apply_studio_shadows(temp_rgba, final_path, target_size=config.IMAGE_TARGET_SIZE)
+                    if not success_shadow:
+                        final_path = nobg_path
+                else:
+                    final_path = nobg_path
+            except Exception as e:
+                print(f"⚠️ خطأ أثناء تطبيق تنعيم الحواف والظلال: {e}")
+                final_path = nobg_path
+        else:
+            # إذا لم يتم عزل الخلفية، نستخدم الصورة الخام مباشرة
+            final_path = raw_path
+            
+        # تنظيف الملفات المؤقتة
+        for temp_f in [temp_rgba, raw_path, nobg_path]:
+            if os.path.exists(temp_f) and temp_f != final_path:
+                try:
+                    os.remove(temp_f)
+                except Exception:
+                    pass
+                    
+        return final_path
+    finally:
+        config.BG_REMOVAL_METHOD = old_bg_method
 
 
 def send_telegram_notification(text):
