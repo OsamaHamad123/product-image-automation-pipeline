@@ -6,8 +6,19 @@ use Illuminate\Http\Request;
 
 class ApiController extends Controller
 {
-    private $pythonPath = 'C:\Users\OsamaHamad\AppData\Local\Programs\Python\Python314\python.exe';
-    private $bridgePath = 'f:\automation\cli_bridge.py';
+    private function getPythonPath()
+    {
+        $localVenv = base_path('../.venv/Scripts/python.exe');
+        if (file_exists($localVenv)) {
+            return $localVenv;
+        }
+        return env('PYTHON_PATH', 'python');
+    }
+
+    private function getBridgePath()
+    {
+        return env('CLI_BRIDGE_PATH', base_path('../cli_bridge.py'));
+    }
 
     private function runPython($action, $params = [])
     {
@@ -42,8 +53,11 @@ class ApiController extends Controller
                 $jsonParams = json_encode($params);
                 $base64Params = base64_encode($jsonParams);
                 
+                $pythonPath = $this->getPythonPath();
+                $bridgePath = $this->getBridgePath();
+                
                 // بناء الأمر والتنفيذ الفوري (التراجع للـ CLI)
-                $cmd = "\"{$this->pythonPath}\" \"{$this->bridgePath}\" {$action} {$base64Params} 2>&1";
+                $cmd = "\"{$pythonPath}\" \"{$bridgePath}\" {$action} {$base64Params} 2>&1";
                 $output = shell_exec($cmd);
                 
                 $pos = strrpos($output, '{"status":');
