@@ -199,14 +199,28 @@ def action_select_image(params):
             if tags_str:
                 tags = [t.strip() for t in tags_str.split(",") if t.strip()]
                 
+        # قراءة الأبعاد الفعلية للصورة الناتجة بعد معالجتها وتوسيطها (لتمريرها إلى Cloudinary)
+        try:
+            from PIL import Image
+            with Image.open(processed_image_path) as res_img:
+                final_w, final_h = res_img.size
+        except Exception:
+            final_w = target_width or 800
+            final_h = target_height or 800
+            
+        if not final_w or final_w <= 0:
+            final_w = 800
+        if not final_h or final_h <= 0:
+            final_h = 800
+
         image_link = cloudinary_storage.upload_product_image_to_cloudinary(
             processed_image_path,
             product_name,
             brand,
             folder=folder,
             tags=tags,
-            target_width=target_width,
-            target_height=target_height,
+            target_width=final_w,
+            target_height=final_h,
             padding_ratio=padding_ratio,
             bg_color=bg_color
         )
@@ -371,14 +385,28 @@ def action_upload_manual_image(params):
             if tags_str:
                 tags = [t.strip() for t in tags_str.split(",") if t.strip()]
                 
+        # قراءة الأبعاد الفعلية للصورة الناتجة بعد معالجتها وتوسيطها (لتمريرها إلى Cloudinary)
+        try:
+            from PIL import Image
+            with Image.open(file_path) as res_img:
+                final_w, final_h = res_img.size
+        except Exception:
+            final_w = target_width or 800
+            final_h = target_height or 800
+            
+        if not final_w or final_w <= 0:
+            final_w = 800
+        if not final_h or final_h <= 0:
+            final_h = 800
+
         image_link = cloudinary_storage.upload_product_image_to_cloudinary(
             file_path,
             product_name,
             brand,
             folder=folder,
             tags=tags,
-            target_width=target_width,
-            target_height=target_height,
+            target_width=final_w,
+            target_height=final_h,
             padding_ratio=padding_ratio,
             bg_color=bg_color
         )

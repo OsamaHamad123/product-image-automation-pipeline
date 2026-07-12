@@ -42,9 +42,7 @@
     }
 
     .stat-card:hover {
-        border-color: var(--accent-purple);
         transform: translateY(-5px);
-        box-shadow: var(--shadow-lg), 0 10px 30px rgba(139, 92, 246, 0.1);
     }
 
     .stat-card:hover::before {
@@ -70,10 +68,10 @@
         filter: brightness(1.2);
     }
 
-    .stat-icon.total { background: rgba(139, 92, 246, 0.1); color: var(--accent-purple); border-color: rgba(139, 92, 246, 0.15); }
-    .stat-icon.success { background: var(--success-bg); color: var(--success); border-color: rgba(16, 185, 129, 0.15); }
-    .stat-icon.warning { background: var(--warning-bg); color: var(--warning); border-color: rgba(245, 158, 11, 0.15); }
-    .stat-icon.danger { background: var(--danger-bg); color: var(--danger); border-color: rgba(244, 63, 94, 0.15); }
+    .stat-icon.total { background: rgba(139, 92, 246, 0.15); color: var(--accent-purple); border-color: rgba(139, 92, 246, 0.25); }
+    .stat-icon.success { background: var(--success-bg); color: var(--success); border-color: rgba(16, 185, 129, 0.25); }
+    .stat-icon.warning { background: var(--warning-bg); color: var(--warning); border-color: rgba(245, 158, 11, 0.25); }
+    .stat-icon.danger { background: var(--danger-bg); color: var(--danger); border-color: rgba(244, 63, 94, 0.25); }
 
     .stat-details {
         position: relative;
@@ -89,14 +87,22 @@
     }
 
     .stat-details .value {
-        font-size: 2rem;
+        font-size: 2.3rem;
         font-weight: 800;
         font-family: 'Outfit', sans-serif;
         line-height: 1;
-        background: linear-gradient(135deg, var(--text-primary), var(--text-secondary));
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
+        display: inline-block;
     }
+
+    .stat-card.total .value { background: linear-gradient(135deg, #a78bfa, #00d2ff); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    .stat-card.success .value { background: linear-gradient(135deg, #34d399, #059669); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    .stat-card.warning .value { background: linear-gradient(135deg, #fbbf24, #d97706); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    .stat-card.danger .value { background: linear-gradient(135deg, #f87171, #dc2626); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+
+    .stat-card.total:hover { border-color: var(--accent-purple); box-shadow: 0 15px 45px rgba(139, 92, 246, 0.2); }
+    .stat-card.success:hover { border-color: var(--success); box-shadow: 0 15px 45px rgba(16, 185, 129, 0.2); }
+    .stat-card.warning:hover { border-color: var(--warning); box-shadow: 0 15px 45px rgba(245, 158, 11, 0.2); }
+    .stat-card.danger:hover { border-color: var(--danger); box-shadow: 0 15px 45px rgba(244, 63, 94, 0.2); }
 
     .progress-bar-container {
         background: rgba(255, 255, 255, 0.03);
@@ -222,7 +228,7 @@
 @endsection
 
 @section('content')
-<div class="glass-panel" style="padding: 1.75rem 2.25rem; margin-bottom: 1.5rem; background: linear-gradient(135deg, rgba(16, 20, 39, 0.8), rgba(16, 20, 39, 0.45)); border-color: var(--panel-border-hover);">
+<div class="glass-panel" style="padding: 1.75rem 2.25rem; margin-bottom: 1.5rem; background: var(--active-menu-bg); border-color: var(--panel-border-hover);">
     <h1 style="font-size: 1.85rem; font-weight: 900; display: flex; align-items: center; gap: 0.85rem; letter-spacing: 0.5px;">
         <i class="fas fa-chart-pie" style="background: var(--accent-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; filter: drop-shadow(0 0 6px var(--accent-purple));"></i>
         لوحة التحكم والإحصائيات
@@ -240,7 +246,7 @@
 
 <!-- Statistics Grid -->
 <div class="stats-grid">
-    <div class="stat-card">
+    <div class="stat-card total">
         <div class="stat-icon total"><i class="fas fa-file-invoice"></i></div>
         <div class="stat-details">
             <h3>إجمالي منتجات الشيت</h3>
@@ -248,27 +254,27 @@
         </div>
     </div>
     
-    <div class="stat-card">
+    <div class="stat-card success">
         <div class="stat-icon success"><i class="fas fa-check-circle"></i></div>
         <div class="stat-details">
             <h3>منتجات مكتملة (روابط)</h3>
-            <div class="value" style="color: var(--success);">{{ $linked }}</div>
+            <div class="value">{{ $linked }}</div>
         </div>
     </div>
     
-    <div class="stat-card">
+    <div class="stat-card warning">
         <div class="stat-icon warning"><i class="fas fa-exclamation-triangle"></i></div>
         <div class="stat-details">
             <h3>منتجات معلقة للمراجعة</h3>
-            <div class="value" style="color: var(--warning);">{{ $review }}</div>
+            <div class="value">{{ $review }}</div>
         </div>
     </div>
 
-    <div class="stat-card">
+    <div class="stat-card danger">
         <div class="stat-icon danger"><i class="fas fa-times-circle"></i></div>
         <div class="stat-details">
             <h3>أخطاء تقنية بـ SQLite</h3>
-            <div class="value" style="color: var(--danger);">{{ $errors }}</div>
+            <div class="value">{{ $errors }}</div>
         </div>
     </div>
 </div>
@@ -311,7 +317,7 @@
         
         <div>
             <!-- Batch Automation progress panel -->
-            <div id="batchProgressPanel" style="display: none; flex-direction: column; gap: 0.8rem; margin-bottom: 1.5rem; background: rgba(0,0,0,0.25); padding: 1.25rem; border-radius: var(--border-radius-md); border: 1px solid var(--panel-border);">
+            <div id="batchProgressPanel" style="display: none; flex-direction: column; gap: 0.8rem; margin-bottom: 1.5rem; background: var(--input-bg); padding: 1.25rem; border-radius: var(--border-radius-md); border: 1px solid var(--panel-border);">
                 <div style="display: flex; justify-content: space-between; font-size: 0.85rem; font-weight: bold; align-items: center;">
                     <span id="batchProgressText">جاري المعالجة...</span>
                     <span id="batchProgressPercent" style="color: var(--accent-purple); font-family: 'Outfit', sans-serif; font-size: 1.05rem;">0%</span>
@@ -322,10 +328,13 @@
                 <div id="batchProgressCounts" style="font-size: 0.8rem; color: var(--text-secondary); text-align: left; direction: ltr; font-family: 'Outfit', sans-serif; margin-top: 0.3rem;">
                     0 of 0 (Success: 0 | Failed: 0)
                 </div>
+                <button class="btn btn-secondary btn-sm" id="stopBatchBtn" onclick="stopBatchAutomation()" style="margin-top: 0.5rem; background: rgba(244, 63, 94, 0.1); border-color: rgba(244, 63, 94, 0.2); color: var(--danger); width: 100%;">
+                    <i class="fas fa-stop"></i> إيقاف الأتمتة فوراً 🛑
+                </button>
             </div>
             
             <!-- Curation Mode Switch -->
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem; background: rgba(255,255,255,0.02); padding: 0.75rem 1.1rem; border-radius: 8px; border: 1px solid var(--panel-border);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem; background: var(--card-bg); padding: 0.75rem 1.1rem; border-radius: 8px; border: 1px solid var(--panel-border);">
                 <span style="font-size: 0.85rem; font-weight: 700; color: var(--text-secondary);"><i class="fas fa-eye" style="color: var(--accent-cyan); margin-inline-end: 0.35rem;"></i> أتمتة الفرز والمراجعة (Curation Mode)</span>
                 <label class="switch" style="margin: 0;">
                     <input type="checkbox" id="curationMode" checked>
@@ -346,7 +355,7 @@
         <i class="fas fa-chart-line" style="color: #3b82f6;"></i> مراقبة مؤشرات الأداء الفورية (Live Telemetry)
     </h3>
     <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 1.75rem; min-height: 320px; align-items: stretch;">
-        <div style="background: rgba(5,5,8,0.45); border-radius: var(--border-radius-md); padding: 1.5rem; border: 1px solid var(--panel-border); position: relative; height: 320px;">
+        <div style="background: var(--card-bg); border-radius: var(--border-radius-md); padding: 1.5rem; border: 1px solid var(--panel-border); position: relative; height: 320px;">
             <canvas id="telemetryChart"></canvas>
         </div>
         <div class="terminal-console" style="max-height: 320px;">
@@ -391,7 +400,7 @@
                 </div>
                 <div style="display: flex; justify-content: space-between; align-items: center; padding-bottom: 0.25rem;">
                     <span style="color: var(--text-secondary); font-size: 0.9rem; font-weight: 600;">قاعدة البيانات المحلية (SQLite Cache):</span>
-                    <span id="status-db" class="score-badge" style="background: rgba(255,255,255,0.02); color: var(--text-secondary); font-weight: bold;">جاري الفحص...</span>
+                    <span id="status-db" class="score-badge" style="background: var(--card-bg); color: var(--text-secondary); font-weight: bold;">جاري الفحص...</span>
                 </div>
             </div>
         </div>
@@ -498,6 +507,44 @@
         }
     }
 
+    // إيقاف عملية الأتمتة فورياً
+    async function stopBatchAutomation() {
+        if (!confirm("⚠️ هل أنت متأكد من رغبتك في إيقاف عملية الأتمتة الكلية بالخلفية فورياً؟")) {
+            return;
+        }
+        const btn = document.getElementById('stopBatchBtn');
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جاري الإيقاف...';
+        }
+        try {
+            const res = await fetch('/api/stop-batch', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
+                }
+            });
+            const data = await res.json();
+            if (data.status === 'success') {
+                alert("🛑 تم إيقاف عملية الأتمتة الكلية بنجاح!");
+                location.reload();
+            } else {
+                alert("❌ فشل إيقاف الأتمتة: " + data.error);
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerHTML = '<i class="fas fa-stop"></i> إيقاف الأتمتة فوراً 🛑';
+                }
+            }
+        } catch (err) {
+            console.error("Error stopping batch:", err);
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-stop"></i> إيقاف الأتمتة فوراً 🛑';
+            }
+        }
+    }
+
     // جلب حالة الخدمات والخوادم
     async function pollSystemStatus() {
         try {
@@ -584,6 +631,11 @@
 
     function initTelemetryChart() {
         const ctx = document.getElementById('telemetryChart').getContext('2d');
+        const isLight = document.body.classList.contains('light-theme');
+        const gridColor = isLight ? 'rgba(0, 0, 0, 0.08)' : 'rgba(255, 255, 255, 0.05)';
+        const textColor = isLight ? '#475569' : '#8e9bb0';
+        const legendColor = isLight ? '#0f172a' : '#f3f4f6';
+
         queueTelemetryChart = new Chart(ctx, {
             type: 'line',
             data: {
@@ -611,20 +663,39 @@
                 maintainAspectRatio: false,
                 scales: {
                     x: {
-                        grid: { color: 'rgba(255,255,255,0.05)' },
-                        ticks: { color: '#8e9bb0', font: { size: 9 } }
+                        grid: { color: gridColor },
+                        ticks: { color: textColor, font: { size: 9 } }
                     },
                     y: {
-                        grid: { color: 'rgba(255,255,255,0.05)' },
-                        ticks: { color: '#8e9bb0', font: { size: 9 } }
+                        grid: { color: gridColor },
+                        ticks: { color: textColor, font: { size: 9 } }
                     }
                 },
                 plugins: {
                     legend: {
-                        labels: { color: '#f3f4f6', font: { size: 10 } }
+                        labels: { color: legendColor, font: { size: 10 } }
                     }
                 }
             }
+        });
+
+        // استماع لزر تغيير المظهر لتحديث ألوان الرسم البياني
+        document.querySelector('.theme-toggle-btn')?.addEventListener('click', () => {
+            setTimeout(() => {
+                if (queueTelemetryChart) {
+                    const activeLight = document.body.classList.contains('light-theme');
+                    const updatedGrid = activeLight ? 'rgba(0, 0, 0, 0.08)' : 'rgba(255, 255, 255, 0.05)';
+                    const updatedText = activeLight ? '#475569' : '#8e9bb0';
+                    const updatedLegend = activeLight ? '#0f172a' : '#f3f4f6';
+
+                    queueTelemetryChart.options.scales.x.grid.color = updatedGrid;
+                    queueTelemetryChart.options.scales.x.ticks.color = updatedText;
+                    queueTelemetryChart.options.scales.y.grid.color = updatedGrid;
+                    queueTelemetryChart.options.scales.y.ticks.color = updatedText;
+                    queueTelemetryChart.options.plugins.legend.labels.color = updatedLegend;
+                    queueTelemetryChart.update();
+                }
+            }, 100);
         });
     }
 

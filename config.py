@@ -67,7 +67,7 @@ CLOUDINARY_API_KEY = os.getenv("CLOUDINARY_API_KEY", "")
 CLOUDINARY_API_SECRET = os.getenv("CLOUDINARY_API_SECRET", "")
 
 # تفعيل إزالة الخلفية عبر الذكاء الاصطناعي لـ Cloudinary (يتطلب تفعيل الإضافة في حسابك)
-CLOUDINARY_BG_REMOVAL = True
+CLOUDINARY_BG_REMOVAL = False
 
 # الأبعاد المستهدفة سحابياً لإعادة الاحتواء وتوحيد الأبعاد (recontainment)
 CLOUDINARY_TARGET_SIZE = (800, 800)

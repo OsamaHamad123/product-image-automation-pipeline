@@ -58,44 +58,52 @@
 
     .sidebar-search-container {
         position: relative;
-        width: 100%;
+        margin-bottom: 1.25rem;
     }
 
     .sidebar-search-container input {
         width: 100%;
-        padding: 0.75rem 1rem 0.75rem 2.5rem;
+        padding: 0.75rem 2.5rem 0.75rem 1rem;
         background: var(--input-bg);
         border: 1px solid var(--panel-border);
-        border-radius: var(--border-radius-sm);
+        border-radius: 12px;
         color: var(--text-primary);
         font-family: inherit;
         font-size: 0.9rem;
         outline: none;
-        transition: all 0.3s;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        text-align: right;
     }
 
     .sidebar-search-container input:focus {
         border-color: var(--accent-purple);
-        box-shadow: 0 0 10px rgba(139, 92, 246, 0.2);
+        box-shadow: 0 0 15px rgba(124, 58, 237, 0.25);
     }
 
     .sidebar-search-container i {
         position: absolute;
-        left: 1rem;
+        right: 1rem;
+        left: auto;
         top: 50%;
         transform: translateY(-50%);
         color: var(--text-secondary);
         font-size: 0.95rem;
+        transition: color 0.3s;
+    }
+
+    .sidebar-search-container input:focus ~ i {
+        color: var(--accent-purple);
     }
 
     .tabs-nav {
         display: flex;
         flex-wrap: wrap;
-        background: rgba(0, 0, 0, 0.15);
+        background: var(--tabs-bg);
         border: 1px solid var(--panel-border);
         padding: 4px;
-        border-radius: var(--border-radius-sm);
+        border-radius: 12px;
         gap: 4px;
+        margin-bottom: 1rem;
     }
 
     .tab-btn {
@@ -107,21 +115,22 @@
         font-family: inherit;
         font-weight: 800;
         font-size: 0.8rem;
-        border-radius: 6px;
+        border-radius: 8px;
         cursor: pointer;
-        transition: all 0.25s ease;
+        transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
         text-align: center;
     }
 
     .tab-btn:hover {
         color: var(--text-primary);
-        background: rgba(255, 255, 255, 0.03);
+        background: rgba(255, 255, 255, 0.05);
     }
 
     .tab-btn.active {
-        background: var(--accent-gradient);
+        background: linear-gradient(135deg, var(--accent-purple) 0%, var(--accent-cyan) 100%);
         color: #ffffff;
-        box-shadow: var(--shadow-sm);
+        box-shadow: 0 4px 15px rgba(124, 58, 237, 0.3);
+        text-shadow: 0 1px 2px rgba(0,0,0,0.15);
     }
 
     .product-list {
@@ -185,20 +194,27 @@
         cursor: pointer;
         transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         position: relative;
+        border-inline-start: 4px solid transparent;
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
     }
+    .product-item.completed { border-inline-start-color: var(--success); }
+    .product-item.review { border-inline-start-color: var(--warning); }
+    .product-item.error { border-inline-start-color: var(--danger); }
+    .product-item.missing { border-inline-start-color: var(--info); }
 
     .product-item:hover {
         border-color: var(--panel-border-hover);
         background: var(--card-bg-hover);
         transform: translateY(-2px);
-        box-shadow: var(--shadow-sm), 0 4px 15px rgba(139, 92, 246, 0.05);
+        box-shadow: var(--shadow-sm), 0 4px 15px rgba(124, 58, 237, 0.05);
     }
 
-    .product-item.active {
-        border-color: var(--accent-purple);
-        background: var(--active-menu-bg);
-        box-shadow: var(--shadow-sm), 0 0 15px rgba(139, 92, 246, 0.12);
-    }
+    .product-item.completed.active { border-color: var(--success); background: var(--active-menu-bg); box-shadow: 0 0 15px rgba(16, 185, 129, 0.15); }
+    .product-item.review.active { border-color: var(--warning); background: var(--active-menu-bg); box-shadow: 0 0 15px rgba(245, 158, 11, 0.15); }
+    .product-item.error.active { border-color: var(--danger); background: var(--active-menu-bg); box-shadow: 0 0 15px rgba(244, 63, 94, 0.15); }
+    .product-item.missing.active { border-color: var(--accent-purple); background: var(--active-menu-bg); box-shadow: 0 0 15px rgba(124, 58, 237, 0.15); }
 
     .product-item h4 {
         font-size: 0.95rem;
@@ -266,24 +282,43 @@
         padding: 0.75rem 1rem;
         background: var(--input-bg);
         border: 1px solid var(--panel-border);
-        border-radius: var(--border-radius-sm);
+        border-radius: 12px;
         color: var(--text-primary);
         font-family: inherit;
         font-size: 0.9rem;
         outline: none;
-        transition: all 0.3s;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     }
 
     .form-group input:focus, .form-group select:focus {
         border-color: var(--accent-purple);
-        box-shadow: 0 0 10px rgba(139, 92, 246, 0.2);
+        box-shadow: 0 0 15px rgba(124, 58, 237, 0.2);
+        background: rgba(255, 255, 255, 0.02);
+    }
+
+    #bgColorPicker {
+        width: 38px;
+        height: 38px;
+        border-radius: 50% !important;
+        border: 2px solid var(--panel-border) !important;
+        padding: 0;
+        cursor: pointer;
+        background: none;
+        overflow: hidden;
+        transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    #bgColorPicker:hover {
+        transform: scale(1.1);
+        border-color: var(--accent-purple) !important;
+        box-shadow: 0 0 10px rgba(124, 58, 237, 0.3);
     }
 
     /* Toggles */
     .toggles-row {
         display: flex;
         flex-wrap: wrap;
-        gap: 1.5rem;
+        gap: 1rem;
         align-items: center;
         height: 100%;
     }
@@ -291,13 +326,36 @@
     .toggle-container {
         display: flex;
         align-items: center;
-        gap: 0.6rem;
+        gap: 0.75rem;
+        padding: 0.5rem 0.85rem;
+        background: rgba(255, 255, 255, 0.02);
+        border: 1px solid var(--panel-border);
+        border-radius: 12px;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        cursor: pointer;
+    }
+
+    .toggle-container:hover {
+        border-color: var(--panel-border-hover);
+        background: rgba(255, 255, 255, 0.04);
+    }
+
+    .toggle-container:has(input:checked) {
+        border-color: rgba(16, 185, 129, 0.35);
+        background: rgba(16, 185, 129, 0.04);
+        box-shadow: 0 4px 15px rgba(16, 185, 129, 0.05);
     }
 
     .toggle-container span {
         font-size: 0.85rem;
         font-weight: 700;
         color: var(--text-secondary);
+        transition: color 0.3s;
+        user-select: none;
+    }
+
+    .toggle-container:has(input:checked) span {
+        color: var(--text-primary);
     }
 
     .switch {
@@ -339,7 +397,8 @@
     }
 
     input:checked + .slider {
-        background-image: var(--accent-gradient);
+        background: linear-gradient(135deg, var(--success) 0%, #34d399 100%);
+        box-shadow: 0 0 10px rgba(16, 185, 129, 0.3);
     }
 
     input:checked + .slider:before {
@@ -406,6 +465,17 @@
         border-color: var(--accent-purple);
         transform: translateY(-5px);
         box-shadow: var(--shadow-md), 0 8px 24px rgba(139, 92, 246, 0.12);
+    }
+
+    .candidate-card.confirming-active, .glass-panel.confirming-active {
+        border-color: var(--accent-purple) !important;
+        box-shadow: 0 0 20px rgba(124, 58, 237, 0.35) !important;
+        animation: pulse-glowing-glow 1.5s infinite alternate;
+    }
+
+    @keyframes pulse-glowing-glow {
+        0% { box-shadow: 0 0 10px rgba(124, 58, 237, 0.2); }
+        100% { box-shadow: 0 0 25px rgba(124, 58, 237, 0.45); }
     }
 
     .candidate-img-box {
@@ -520,6 +590,47 @@
         line-height: 1.5;
         font-weight: 700;
     }
+
+    #dropZone.drag-over {
+        border-color: var(--accent-purple) !important;
+        background: rgba(124, 58, 237, 0.08) !important;
+        box-shadow: 0 0 15px rgba(124, 58, 237, 0.3) !important;
+    }
+
+    /* Terminal Console Window styling */
+    .terminal-console {
+        background: #04060f !important;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 16px;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        box-shadow: var(--shadow-lg);
+    }
+
+    .terminal-header {
+        background: #090c1a;
+        padding: 0.75rem 1.25rem;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        direction: rtl;
+    }
+
+    .terminal-dots {
+        display: flex;
+        gap: 6px;
+    }
+
+    .terminal-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+    }
+    .terminal-dot.red { background: #ff5f56; }
+    .terminal-dot.yellow { background: #ffbd2e; }
+    .terminal-dot.green { background: #27c93f; }
 
     /* Accordion Logs */
     .step-accordion {
@@ -711,7 +822,7 @@
         color: var(--text-secondary);
         cursor: pointer;
         padding: 0.5rem 0.75rem;
-        background: rgba(255,255,255,0.02);
+        background: var(--card-bg);
         border: 1px solid var(--panel-border);
         border-radius: var(--border-radius-sm);
         transition: all 0.25s;
@@ -719,7 +830,7 @@
     }
 
     .feedback-checkbox:hover {
-        background: rgba(255,255,255,0.04);
+        background: var(--card-bg-hover);
         color: var(--text-primary);
         border-color: var(--accent-purple);
     }
@@ -744,6 +855,9 @@
             </div>
         </div>
 
+        <button class="btn btn-secondary btn-sm" id="catalogRunAllBtn" onclick="openCatalogRunAllModal()" style="width:100%; gap:0.5rem; background: rgba(124, 58, 237, 0.1); border-color: rgba(124, 58, 237, 0.2); color: var(--accent-purple-hover); font-weight: 800;">
+            <i class="fas fa-play"></i> تشغيل أتمتة الشيت بالكامل (Batch)
+        </button>
         
         <div class="sidebar-search-container">
             <i class="fas fa-search"></i>
@@ -848,7 +962,7 @@
                 {{-- الأبعاد --}}
                 <div class="form-group">
                     <label for="outputPreset" style="font-size:0.8rem; color:var(--text-secondary);">الأبعاد ونسبة العرض إلى الارتفاع</label>
-                    <select id="outputPreset" onchange="applyPreset()" style="width:100%; padding:0.6rem 0.75rem; background:var(--input-bg); border:1px solid var(--panel-border); border-radius:6px; color:var(--text-primary); font-family:inherit; font-size:0.85rem;">
+                    <select id="outputPreset" onchange="applyPreset()" style="width:100%; font-size:0.85rem;">
                         <option value="dynamic" selected>تلقائي ذكي (Dynamic AI — يحافظ على جودة الصورة الأصلية)</option>
                         <option value="800x800">800 × 800 — مربع قياسي (بقالة، FMCG)</option>
                         <option value="1000x1000">1000 × 1000 — مربع عالي الدقة</option>
@@ -860,7 +974,7 @@
                 {{-- هامش الأمان --}}
                 <div class="form-group">
                     <label for="paddingRatio" style="font-size:0.8rem; color:var(--text-secondary);">هامش الأمان البصري (Safety Margin)</label>
-                    <select id="paddingRatio" style="width:100%; padding:0.6rem 0.75rem; background:var(--input-bg); border:1px solid var(--panel-border); border-radius:6px; color:var(--text-primary); font-family:inherit; font-size:0.85rem;">
+                    <select id="paddingRatio" style="width:100%; font-size:0.85rem;">
                         <option value="0.90">10% — هامش ضيق</option>
                         <option value="0.85" selected>15% — هامش متناسق (افتراضي)</option>
                         <option value="0.80">20% — هامش واسع</option>
@@ -871,13 +985,13 @@
                 <div class="form-group">
                     <label for="bgColor" style="font-size:0.8rem; color:var(--text-secondary);">لون خلفية Canvas</label>
                     <div style="display:flex; gap:0.5rem; align-items:center;">
-                        <select id="bgColorPreset" onchange="applyBgColor()" style="flex:1; padding:0.6rem 0.75rem; background:var(--input-bg); border:1px solid var(--panel-border); border-radius:6px; color:var(--text-primary); font-family:inherit; font-size:0.85rem;">
+                        <select id="bgColorPreset" onchange="applyBgColor()" style="flex:1; font-size:0.85rem;">
                             <option value="ffffff">أبيض (#FFFFFF)</option>
                             <option value="f5f5f7">رمادي استوديو (#F5F5F7)</option>
                             <option value="fafafa">أبيض دافئ (#FAFAFA)</option>
                             <option value="transparent">شفاف (PNG)</option>
                         </select>
-                        <input type="color" id="bgColorPicker" value="#ffffff" oninput="document.getElementById('bgColor').value = this.value.replace('#', '')" style="width:36px; height:36px; border-radius:6px; border:1px solid var(--panel-border); padding:2px; cursor:pointer; background:transparent;">
+                        <input type="color" id="bgColorPicker" value="#ffffff" oninput="document.getElementById('bgColor').value = this.value.replace('#', '')">
                     </div>
                     <input type="hidden" id="bgColor" value="ffffff">
                 </div>
@@ -927,7 +1041,7 @@
                 <div id="recommendedContainer"></div>
 
                 <!-- Drag-drop & url overrides -->
-                <div style="margin-top: 1.5rem; padding: 1.5rem; background: rgba(255, 255, 255, 0.03); border: 1px solid var(--panel-border); border-radius: 16px;">
+                <div style="margin-top: 1.5rem; padding: 1.5rem; background: var(--card-bg); border: 1px solid var(--panel-border); border-radius: 16px;">
                     <h4 style="font-size: 1rem; margin-bottom: 0.75rem; color: var(--accent-cyan); display: flex; align-items: center; gap: 0.5rem;">
                         <i class="fas fa-edit"></i> خيارات الاعتماد اليدوي (Manual Override & Upload)
                     </h4>
@@ -935,13 +1049,13 @@
                         <div>
                             <h5 style="font-size: 0.85rem; margin-bottom: 0.5rem; color: var(--text-secondary);">ضع رابط الصورة المباشر هنا:</h5>
                             <div style="display: flex; gap: 0.75rem;">
-                                <input type="text" id="manualImageUrl" placeholder="ضع رابط الصورة المباشر هنا..." style="flex: 1; padding: 0.75rem 1rem; background: rgba(8, 12, 20, 0.6); border: 1px solid var(--panel-border); border-radius: 10px; color: var(--text-primary); font-family: inherit;">
+                                <input type="text" id="manualImageUrl" placeholder="ضع رابط الصورة المباشر هنا..." style="flex: 1; padding: 0.75rem 1rem; background: var(--input-bg); border: 1px solid var(--panel-border); border-radius: 10px; color: var(--text-primary); font-family: inherit;">
                                 <button class="btn" onclick="previewManualImage()"><i class="fas fa-eye"></i> معاينة</button>
                             </div>
                         </div>
                         <div>
                             <h5 style="font-size: 0.85rem; margin-bottom: 0.5rem; color: var(--text-secondary);">أو اسحب صورة للرفع والتجميل التلقائي:</h5>
-                            <div id="dropZone" ondragover="event.preventDefault()" ondrop="handleFileDrop(event)" onclick="triggerFileInput()" style="border: 2px dashed var(--panel-border); border-radius: 12px; padding: 0.75rem 1rem; text-align: center; cursor: pointer; transition: all 0.25s; background: rgba(0, 229, 255, 0.01); display: flex; flex-direction: column; align-items: center; justify-content: center;">
+                            <div id="dropZone" ondragover="event.preventDefault(); this.classList.add('drag-over')" ondragenter="event.preventDefault(); this.classList.add('drag-over')" ondragleave="this.classList.remove('drag-over')" ondrop="this.classList.remove('drag-over'); handleFileDrop(event)" onclick="triggerFileInput()" style="border: 2px dashed var(--panel-border); border-radius: 12px; padding: 0.75rem 1rem; text-align: center; cursor: pointer; transition: all 0.25s; background: rgba(0, 229, 255, 0.01); display: flex; flex-direction: column; align-items: center; justify-content: center;">
                                 <i class="fas fa-cloud-upload-alt" style="font-size: 1.3rem; color: var(--accent-cyan); margin-bottom: 0.25rem;"></i>
                                 <p style="font-size: 0.75rem; margin: 0; color: var(--text-secondary);">اسحب وأسقط صورتك هنا أو انقر للتصفح</p>
                                 <input type="file" id="manualFileInput" onchange="handleFileSelect(event)" style="display: none;" accept="image/*">
@@ -951,7 +1065,7 @@
                 </div>
 
                 <!-- Taxonomy editing dropdowns -->
-                <div id="taxonomyEditorContainer" style="margin-top: 1.5rem; padding: 1.5rem; background: rgba(255, 255, 255, 0.03); border: 1px solid var(--panel-border); border-radius: 16px;">
+                <div id="taxonomyEditorContainer" style="margin-top: 1.5rem; padding: 1.5rem; background: var(--card-bg); border: 1px solid var(--panel-border); border-radius: 16px;">
                     <h4 style="font-size: 1rem; margin-bottom: 0.75rem; color: var(--accent-cyan); display: flex; align-items: center; gap: 0.5rem;">
                         <i class="fas fa-tags"></i> تعديل تصنيف الفئات المعتمد (Taxonomy Editor)
                     </h4>
@@ -984,13 +1098,23 @@
                 <div id="accordionContainer" class="step-accordion"></div>
 
                 <!-- Live logs Console terminal -->
-                <div class="glass-panel" style="margin-top: 2rem; background: rgba(8, 12, 20, 0.95); border: 1px solid var(--panel-border); padding: 1.5rem;">
-                    <h3 style="font-size: 1.1rem; border-bottom: 1px solid var(--panel-border); padding-bottom: 0.5rem; display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; margin-bottom: 1rem;">
-                        <span style="color: #00ff66; font-family: 'Courier New', monospace;"><i class="fas fa-terminal"></i> سجل الأتمتة المباشر (Live runner Console)</span>
-                        <button class="btn btn-secondary btn-sm" onclick="clearLiveConsoleLogs()" style="padding: 2px 8px; font-size: 0.75rem;">تفريغ السجلات</button>
-                    </h3>
-                    <div id="liveConsoleLogs" style="font-family: 'Courier New', Courier, monospace; font-size: 0.85rem; color: #00ff66; background: #080c14; padding: 1rem; border-radius: 8px; max-height: 200px; overflow-y: auto; text-align: left; direction: ltr; line-height: 1.5; border: 1px solid rgba(255,255,255,0.05);">
-                        <p style="color: var(--text-secondary);">[System] Initializing console logs listener...</p>
+                <div class="terminal-console" style="margin-top: 2rem;">
+                    <div class="terminal-header">
+                        <div class="terminal-dots">
+                            <div class="terminal-dot red"></div>
+                            <div class="terminal-dot yellow"></div>
+                            <div class="terminal-dot green"></div>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 0.75rem;">
+                            <span style="font-size: 0.85rem; color: var(--text-secondary); font-family: 'Outfit', sans-serif; font-weight: 700;">
+                                <i class="fas fa-terminal" style="color: var(--success); margin-inline-end: 0.25rem;"></i> LIVE TELEMETRY
+                            </span>
+                            <input type="text" id="terminalLogSearch" placeholder="تصفية السجلات..." oninput="filterTerminalLogs()" style="background: rgba(255,255,255,0.03); border: 1px solid var(--panel-border); border-radius: 6px; padding: 2px 8px; color: var(--text-primary); font-size: 0.75rem; width: 120px; outline: none; transition: all 0.2s;" onfocus="this.style.width='180px'; this.style.borderColor='var(--accent-purple)';" onblur="this.style.width='120px'; this.style.borderColor='var(--panel-border)';">
+                            <button class="btn btn-secondary btn-sm" onclick="clearLiveConsoleLogs()" style="padding: 2px 8px; font-size: 0.75rem; background: rgba(255,255,255,0.05);">تفريغ السجلات</button>
+                        </div>
+                    </div>
+                    <div id="liveConsoleLogs" style="font-family: 'Courier New', Courier, monospace; font-size: 0.85rem; color: #00ff66; background: #04060f; padding: 1.25rem; border-radius: 0 0 16px 16px; max-height: 200px; overflow-y: auto; text-align: left; direction: ltr; line-height: 1.5; border: 1px solid rgba(255,255,255,0.05);">
+                        <p style="color: var(--text-secondary); margin: 0;">[System] Initializing console logs listener...</p>
                     </div>
                 </div>
             </div>
@@ -998,8 +1122,56 @@
     </div>
 </div>
 
+<!-- Curation Automation Batch Progress Modal -->
+<div id="catalogRunAllModal" class="modal" style="display: none;">
+    <div class="glass-panel" style="max-width: 550px; width: 90%; padding: 2.5rem; border-radius: 24px; border: 1px solid var(--panel-border); text-align: center; margin: 10% auto; position: relative;">
+        <button onclick="closeCatalogRunAllModal()" style="position: absolute; top: 1.25rem; left: 1.25rem; background: none; border: none; color: var(--text-secondary); cursor: pointer; font-size: 1.25rem;"><i class="fas fa-times"></i></button>
+        
+        <h3 style="font-size: 1.35rem; margin-bottom: 1.5rem; display: flex; align-items: center; justify-content: center; gap: 0.65rem; color: var(--accent-purple-hover);">
+            <i class="fas fa-play-circle" style="animation: pulse-robot 2s infinite;"></i> تشغيل الأتمتة الكلية بالخلفية
+        </h3>
+        
+        <div id="modalStartOptions">
+            <p style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 1.75rem; line-height: 1.6;">
+                سيقوم النظام بتشغيل محرك المعالجة بالخلفية للبحث عن صور وتصفيتها وعزل خلفياتها تلقائياً لكافة منتجات الشيت المتبقية.
+            </p>
+            
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.75rem; background: rgba(255,255,255,0.02); padding: 0.85rem 1.25rem; border-radius: 12px; border: 1px solid var(--panel-border); text-align: right;">
+                <span style="font-size: 0.85rem; font-weight: 700; color: var(--text-secondary);"><i class="fas fa-eye" style="color: var(--accent-cyan); margin-inline-end: 0.35rem;"></i> أتمتة الفرز والمراجعة (Curation Mode)</span>
+                <label class="switch" style="margin: 0;">
+                    <input type="checkbox" id="modalCurationMode" checked>
+                    <span class="slider"></span>
+                </label>
+            </div>
+            
+            <button class="btn" onclick="startCatalogBatchAutomation()" style="width: 100%;">
+                <i class="fas fa-play"></i> إطلاق الأتمتة الآن 🚀
+            </button>
+        </div>
+
+        <div id="modalProgressSection" style="display: none; flex-direction: column; gap: 1.1rem; text-align: right;">
+            <div style="display: flex; justify-content: space-between; font-size: 0.9rem; font-weight: bold; align-items: center;">
+                <span id="modalProgressText" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 320px;">جاري التهيئة...</span>
+                <span id="modalProgressPercent" style="color: var(--accent-cyan); font-family: 'Outfit', sans-serif; font-size: 1.15rem; font-weight: 800;">0%</span>
+            </div>
+            <div class="progress-bar-container" style="height: 10px;">
+                <div id="modalProgressBar" class="progress-bar-fill"></div>
+            </div>
+            <div id="modalProgressCounts" style="font-size: 0.85rem; color: var(--text-secondary); text-align: left; direction: ltr; font-family: 'Outfit', sans-serif; font-weight: 700;">
+                0 of 0 (Success: 0 | Failed: 0)
+            </div>
+            
+            <div style="margin-top: 0.5rem; border-top: 1px solid var(--panel-border); padding-top: 1rem;">
+                <button class="btn btn-secondary" id="modalStopBtn" onclick="stopCatalogBatchAutomation()" style="width: 100%; background: rgba(244, 63, 94, 0.1); border-color: rgba(244, 63, 94, 0.2); color: var(--danger);">
+                    <i class="fas fa-stop"></i> إيقاف التشغيل فوري 🛑
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Canvas Editor Modal -->
-<div id="editorModal" class="modal" style="display: none; position: fixed; z-index: 10000; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(8, 12, 20, 0.9); backdrop-filter: blur(8px); align-items: center; justify-content: center;">
+<div id="editorModal" class="modal" style="display: none; position: fixed; z-index: 10000; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(3, 4, 10, 0.85); backdrop-filter: blur(15px); align-items: center; justify-content: center;">
     <div class="glass-panel" style="max-width: 600px; width: 90%; padding: 2rem; border-radius: 20px; border: 1px solid var(--panel-border); text-align: center; margin: 5% auto;">
         <h3 style="font-size: 1.2rem; margin-bottom: 1rem; display: flex; align-items: center; justify-content: center; gap: 0.5rem; color: var(--accent-cyan);">
             <i class="fas fa-crop-alt"></i> محرر ومعاين الصورة المرفوعة
@@ -1240,41 +1412,46 @@
         pageProducts.forEach(prod => {
             const hasLink = prod.existing_image_link && prod.existing_image_link.trim() !== '';
             let linkIndicator = '';
+            let statusClass = 'missing';
             
             if (prod.has_error) {
+                statusClass = 'error';
                 linkIndicator = `<span style="color: var(--danger); font-size: 0.8rem; font-weight: bold;" title="${prod.error_message || ''}"><i class="fas fa-exclamation-circle"></i> خطأ أتمتة ❌</span>`;
             } else if (prod.needs_review) {
-                linkIndicator = `<span style="color: #ff9100; font-size: 0.8rem; font-weight: bold;"><i class="fas fa-exclamation-triangle"></i> مراجعة معلقة ⚠️</span>`;
+                statusClass = 'review';
+                linkIndicator = `<span style="color: var(--warning); font-size: 0.8rem; font-weight: bold;"><i class="fas fa-exclamation-triangle"></i> مراجعة معلقة ⚠️</span>`;
             } else if (hasLink) {
+                statusClass = 'completed';
                 linkIndicator = `<span style="color: var(--success); font-size: 0.8rem; font-weight: bold;"><i class="fas fa-check"></i> رابط موجود</span>`;
             } else {
-                linkIndicator = `<span style="color: var(--danger); font-size: 0.8rem; font-weight: bold;"><i class="fas fa-times"></i> بدون رابط</span>`;
+                statusClass = 'missing';
+                linkIndicator = `<span style="color: var(--info); font-size: 0.8rem; font-weight: bold;"><i class="fas fa-times"></i> بدون رابط</span>`;
             }
             
             const item = document.createElement('div');
-            item.className = 'product-item';
+            item.className = `product-item ${statusClass}`;
             if (activeRowNumber === prod.row_number) item.classList.add('active');
-            
-            if (prod.has_error) {
-                item.style.borderLeft = '4px solid var(--danger)';
-                item.style.background = 'rgba(239, 68, 68, 0.02)';
-            } else if (prod.needs_review) {
-                item.style.borderLeft = '4px solid #ff9100';
-            }
             
             let scoreBadge = '';
             if (prod.clip_score) {
                 const scorePercent = Math.round(prod.clip_score * 100);
-                scoreBadge = `<span class="score-badge" style="background: rgba(124, 58, 237, 0.1); border: 1px solid rgba(124, 58, 237, 0.2); color: #c084fc; font-size: 0.7rem; padding: 2px 4px; border-radius: 4px; font-weight: bold; margin-right: 5px;">${scorePercent}% Match</span>`;
+                scoreBadge = `<span class="score-badge" style="background: rgba(124, 58, 237, 0.1); border: 1px solid rgba(124, 58, 237, 0.2); color: var(--accent-purple-hover); font-size: 0.75rem; padding: 2px 6px; border-radius: 4px; font-weight: bold; margin-inline-start: 5px;">${scorePercent}% Match</span>`;
             }
 
+            let badgeStyle = 'background-color: var(--input-bg); color: var(--text-secondary);';
+            if (prod.has_error) badgeStyle = 'background-color: var(--danger-bg); border-color: var(--danger); color: var(--danger);';
+            else if (prod.needs_review) badgeStyle = 'background-color: var(--warning-bg); border-color: var(--warning); color: var(--warning);';
+            else if (hasLink) badgeStyle = 'background-color: var(--success-bg); border-color: var(--success); color: var(--success);';
+
             item.innerHTML = `
-                <span class="badge-row-number" style="${prod.has_error ? 'background-color: var(--danger); color: white;' : (prod.needs_review ? 'background-color: #ff9100; color: #080c14;' : '')}">صف ${prod.row_number}</span>
-                <h4 style="margin-top: 0.5rem;">${prod.product_name}</h4>
-                <p>
-                    <span>البراند: <strong>${prod.brand}</strong></span>
-                    ${linkIndicator}
-                    ${scoreBadge}
+                <span class="badge-row-number" style="${badgeStyle} border: 1px solid var(--panel-border); font-weight: 800;">صف ${prod.row_number}</span>
+                <h4 style="margin-top: 0.65rem; font-size: 1rem; font-weight: 800; color: var(--text-primary); text-overflow: ellipsis; overflow: hidden; white-space: nowrap;">${prod.product_name}</h4>
+                <p style="display: flex; align-items: center; justify-content: space-between; font-size: 0.8rem; color: var(--text-secondary); font-weight: 600;">
+                    <span>البراند: <strong style="color: var(--text-primary);">${prod.brand}</strong></span>
+                    <span style="display: inline-flex; align-items: center; gap: 0.4rem;">
+                        ${linkIndicator}
+                        ${scoreBadge}
+                    </span>
                 </p>
             `;
             
@@ -1719,8 +1896,13 @@
     // اعتماد الصورة للشيت
     async function confirmRecommendedImage(url, name, brand, row, btn) {
         const originalText = btn.innerHTML;
+        const card = btn.closest('.candidate-card') || btn.closest('.glass-panel');
+        
         btn.disabled = true;
         btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جاري تحديث الصف والكاش...';
+        if (card) {
+            card.classList.add('confirming-active');
+        }
         
         const l1 = document.getElementById('selectL1').value;
         const l2 = document.getElementById('selectL2').value;
@@ -1757,6 +1939,9 @@
             const data = await res.json();
             btn.disabled = false;
             btn.innerHTML = originalText;
+            if (card) {
+                card.classList.remove('confirming-active');
+            }
             
             if (data.status === 'success') {
                 alert(`🎉 تم رفع الصورة وتحديث الصف ${row} بنجاح!`);
@@ -1768,6 +1953,9 @@
             console.error(err);
             btn.disabled = false;
             btn.innerHTML = originalText;
+            if (card) {
+                card.classList.remove('confirming-active');
+            }
             alert('❌ خطأ اتصال بالخادم.');
         }
     }
@@ -2109,6 +2297,23 @@
         }, 'image/png');
     }
 
+    // تصفية السجلات في الطرفية يدوياً
+    function filterTerminalLogs() {
+        const query = document.getElementById('terminalLogSearch').value.toLowerCase().trim();
+        const consoleDiv = document.getElementById('liveConsoleLogs');
+        if (!lastLogs || lastLogs.length === 0) return;
+        
+        consoleDiv.innerHTML = lastLogs.map(log => {
+            if (query && !log.toLowerCase().includes(query)) return null;
+            
+            let style = 'color: #00ff66;';
+            if (log.includes('❌')) style = 'color: #ef4444;';
+            if (log.includes('⚠️')) style = 'color: #ff9100;';
+            if (log.includes('⚡') || log.includes('🎉')) style = 'color: #00e5ff;';
+            return `<p style="${style} margin: 0; padding: 2px 0;">${log}</p>`;
+        }).filter(Boolean).join('');
+    }
+
     // سحب السجلات الحية بشكل دوري
     async function pollLiveLogs() {
         try {
@@ -2118,13 +2323,7 @@
                 const consoleDiv = document.getElementById('liveConsoleLogs');
                 if (JSON.stringify(data.logs) !== JSON.stringify(lastLogs)) {
                     lastLogs = data.logs;
-                    consoleDiv.innerHTML = data.logs.map(log => {
-                        let style = 'color: #00ff66;';
-                        if (log.includes('❌')) style = 'color: #ef4444;';
-                        if (log.includes('⚠️')) style = 'color: #ff9100;';
-                        if (log.includes('⚡') || log.includes('🎉')) style = 'color: #00e5ff;';
-                        return `<p style="${style} margin: 0; padding: 2px 0;">${log}</p>`;
-                    }).join('');
+                    filterTerminalLogs();
                     consoleDiv.scrollTop = consoleDiv.scrollHeight;
                 }
             }
@@ -2138,7 +2337,130 @@
         lastLogs = [];
     }
 
+    // =============================================
+    // 🤖 Curation Batch Automation controls
+    // =============================================
+    let isBatchRunning = false;
+
+    function openCatalogRunAllModal() {
+        document.getElementById('catalogRunAllModal').style.display = 'flex';
+        checkActiveBatch();
+    }
+
+    function closeCatalogRunAllModal() {
+        document.getElementById('catalogRunAllModal').style.display = 'none';
+    }
+
+    async function checkActiveBatch() {
+        try {
+            const res = await fetch('/api/batch-status');
+            const data = await res.json();
+            
+            const startOpts = document.getElementById('modalStartOptions');
+            const progSec = document.getElementById('modalProgressSection');
+            const runBtn = document.getElementById('catalogRunAllBtn');
+            
+            if (data.is_running) {
+                isBatchRunning = true;
+                startOpts.style.display = 'none';
+                progSec.style.display = 'flex';
+                
+                const percent = data.total > 0 ? Math.round((data.current / data.total) * 100) : 0;
+                document.getElementById('modalProgressPercent').innerText = percent + '%';
+                document.getElementById('modalProgressBar').style.width = percent + '%';
+                document.getElementById('modalProgressText').innerHTML = `جاري معالجة: <strong style="color: var(--accent-cyan);">${data.current_product || 'جاري البحث...'}</strong>`;
+                document.getElementById('modalProgressCounts').innerText = `${data.current} from ${data.total} (Success: ${data.success} | Failed: ${data.failed})`;
+                
+                runBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جاري الأتمتة...';
+                runBtn.style.color = 'var(--warning)';
+            } else {
+                if (isBatchRunning) {
+                    isBatchRunning = false;
+                    alert("🏁 انتهت معالجة الأتمتة الكلية بالخلفية!");
+                    loadProducts(); // Reload catalog
+                }
+                startOpts.style.display = 'block';
+                progSec.style.display = 'none';
+                
+                runBtn.innerHTML = '<i class="fas fa-play"></i> تشغيل أتمتة الشيت بالكامل (Batch)';
+                runBtn.style.color = 'var(--accent-purple-hover)';
+            }
+        } catch (err) {
+            console.error("Error checking active batch:", err);
+        }
+    }
+
+    async function startCatalogBatchAutomation() {
+        const settings = {
+            ignoreUnitClash: localStorage.getItem('ignoreUnitClash') === 'true',
+            strictBrandMatch: localStorage.getItem('strictBrandMatch') !== 'false',
+            aiUpscale: localStorage.getItem('aiUpscale') !== 'false',
+            aiEnhance: localStorage.getItem('aiEnhance') === 'true',
+            skipCache: localStorage.getItem('skipCache') === 'true',
+            target_width: getOutputWidth(),
+            target_height: getOutputHeight(),
+            padding_ratio: parseFloat(document.getElementById('paddingRatio').value) || 0.85,
+            bg_color: document.getElementById('bgColor').value,
+            curation_mode: document.getElementById('modalCurationMode') ? document.getElementById('modalCurationMode').checked : true
+        };
+        
+        try {
+            const res = await fetch('/api/run-all', { 
+                method: 'POST',
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content 
+                },
+                body: JSON.stringify(settings)
+            });
+            const data = await res.json();
+            if (data.status === 'success') {
+                isBatchRunning = true;
+                document.getElementById('modalStartOptions').style.display = 'none';
+                document.getElementById('modalProgressSection').style.display = 'flex';
+                checkActiveBatch();
+            } else {
+                alert("❌ فشل تشغيل الأتمتة: " + data.error);
+            }
+        } catch (err) {
+            console.error(err);
+        }
+    }
+
+    async function stopCatalogBatchAutomation() {
+        if (!confirm("⚠️ هل أنت متأكد من رغبتك في إيقاف عملية الأتمتة الجارية بالخلفية فورياً؟")) {
+            return;
+        }
+        const btn = document.getElementById('modalStopBtn');
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جاري الإيقاف...';
+        try {
+            const res = await fetch('/api/stop-batch', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
+                }
+            });
+            const data = await res.json();
+            if (data.status === 'success') {
+                alert("🛑 تم إيقاف عملية الأتمتة الكلية بنجاح!");
+                closeCatalogRunAllModal();
+                loadProducts();
+            } else {
+                alert("❌ فشل إيقاف الأتمتة: " + data.error);
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-stop"></i> إيقاف التشغيل فوري 🛑';
+            }
+        } catch (err) {
+            console.error("Error stopping batch:", err);
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-stop"></i> إيقاف التشغيل فوري 🛑';
+        }
+    }
+
     setInterval(pollLiveLogs, 2000);
+    setInterval(checkActiveBatch, 2500);
 
     // =============================================
     // 🎛️ Image Output Settings Helpers

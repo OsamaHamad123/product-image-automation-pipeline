@@ -226,7 +226,8 @@ class ApiController extends Controller
             }
 
             // تشغيل بايثون غير متزامن بالخلفية وإعادة توجيه المخرجات لملف Log
-            $cmd = "start /B \"\" \"{$this->pythonPath}\" -u \"{$scriptPath}\" > \"{$logPath}\" 2>&1";
+            $pythonPath = $this->getPythonPath();
+            $cmd = "start /B \"\" \"{$pythonPath}\" -u \"{$scriptPath}\" > \"{$logPath}\" 2>&1";
             pclose(popen($cmd, "r"));
             
             return response()->json(['status' => 'success', 'message' => 'Full automation pipeline started in background.']);
@@ -241,6 +242,7 @@ class ApiController extends Controller
     public function batchStatus()
     {
         $lockFile = 'f:\\automation\\temp\\pipeline.lock';
+        $progressFile = 'f:\\automation\\temp\\batch_progress.json';
         $isRunning = false;
         
         if (file_exists($lockFile)) {
@@ -255,7 +257,16 @@ class ApiController extends Controller
             }
         }
         
-        return response()->json(['is_running' => $isRunning]);
+        $response = ['is_running' => $isRunning];
+        
+        if (file_exists($progressFile)) {
+            $progressData = json_decode(file_get_contents($progressFile), true);
+            if (is_array($progressData)) {
+                $response = array_merge($response, $progressData);
+            }
+        }
+        
+        return response()->json($response);
     }
 
     /**
@@ -303,5 +314,26 @@ class ApiController extends Controller
     public function stopFlask()
     {
         return response()->json(['status' => 'success', 'message' => 'Integrated CLI Mode active. No Flask server required.']);
+    }
+
+    /**
+     * إيقاف عملية الأتمتة الكلية بالخلفية فورياً
+     */
+    public function stopBatch()
+    {
+        $lockFile = 'f:\\automation\\temp\\pipeline.lock';
+        $progressFile = 'f:\\automation\\temp\\batch_progress.json';
+        if (file_exists($lockFile)) {
+            $pid = trim(file_get_contents($lockFile));
+            if (!empty($pid) && is_numeric($pid)) {
+                shell_exec("taskkill /F /PID {$pid} 2>&1");
+                @unlink($lockFile);
+                if (file_exists($progressFile)) {
+                    @unlink($progressFile);
+                }
+                return response()->json(['status' => 'success', 'message' => 'Batch automation process terminated.']);
+            }
+        }
+        return response()->json(['status' => 'failed', 'error' => 'No active batch process found.']);
     }
 }

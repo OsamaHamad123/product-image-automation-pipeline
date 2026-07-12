@@ -47,6 +47,21 @@ def load_run_config():
         except Exception as e:
             print(f"⚠️ خطأ أثناء تحميل إعدادات run_config.json: {e}")
 
+def save_progress(current, total, success, failed, current_product=""):
+    try:
+        import json
+        os.makedirs("temp", exist_ok=True)
+        with open("temp/batch_progress.json", "w", encoding="utf-8") as f:
+            json.dump({
+                "current": current,
+                "total": total,
+                "success": success,
+                "failed": failed,
+                "current_product": current_product
+            }, f, ensure_ascii=False)
+    except Exception:
+        pass
+
 def run_automation_pipeline():
     """
     تشغيل خط الأنابيب المؤتمت لمعالجة وتحديث صور المنتجات.
@@ -93,6 +108,8 @@ def run_automation_pipeline():
         skipped_count = 0
         failed_count = 0
         
+        save_progress(0, len(products), 0, 0, "بدء التشغيل...")
+        
         # 4. معالجة كل منتج على حدة
         for i, prod in enumerate(products, start=1):
             row_num = prod["row_number"]
@@ -100,6 +117,8 @@ def run_automation_pipeline():
             brand = prod["brand"]
             query = prod["search_query"]
             existing_link = prod["existing_image_link"]
+            
+            save_progress(i, len(products), success_count, failed_count, name)
             
             print("\n" + "-" * 50)
             print(f"🔄 معالجة المنتج ({i}/{len(products)}): [{name}] (البراند: {brand}) | صف رقم {row_num}")
@@ -109,6 +128,7 @@ def run_automation_pipeline():
             if existing_link and not config.FORCE_OVERWRITE_IMAGES:
                 print(f"⏭️ تخطي: المنتج يحتوي بالفعل على رابط صورة: {existing_link}")
                 skipped_count += 1
+                save_progress(i, len(products), success_count, failed_count, f"تخطي: {name}")
                 continue
                 
             # أ. البحث عن أفضل صورة (مع تقييم الصلة والدقة)
@@ -127,6 +147,7 @@ def run_automation_pipeline():
             if not best_image:
                 config.log_and_fail(prod.get("barcode"), name, brand, "لم يتم العثور على أي صورة تطابق معايير القبول والجودة البصرية.")
                 failed_count += 1
+                save_progress(i, len(products), success_count, failed_count, f"لم يتم العثور على صورة لـ: {name}")
                 # إشعار Telegram بالفشل (ملغى برمجيًا)
                 image_processor.send_telegram_notification("")
                 continue
@@ -144,10 +165,12 @@ def run_automation_pipeline():
                 if update_success:
                     print(f"🎉 تم تحديث بيانات الصف {row_num} بنجاح من الكاش المحلي!")
                     success_count += 1
+                    save_progress(i, len(products), success_count, failed_count, f"نجاح (كاش): {name}")
                     # إشعار تليجرام بالنجاح الفوري (ملغى برمجيًا)
                     image_processor.send_telegram_notification("")
                 else:
                     failed_count += 1
+                    save_progress(i, len(products), success_count, failed_count, f"فشل كتابة الشيت: {name}")
                 continue
 
             if best_image.get("source") == "visual_duplicate":
@@ -162,6 +185,7 @@ def run_automation_pipeline():
                 if update_success:
                     print(f"🎉 تم تحديث بيانات الصف {row_num} بنجاح من التكرار البصري!")
                     success_count += 1
+                    save_progress(i, len(products), success_count, failed_count, f"نجاح (تكرار): {name}")
                     # حفظ في الكاش ليكون ضربة مباشرة المرة القادمة
                     try:
                         local_cache_db.save_product_resolution(
@@ -179,6 +203,7 @@ def run_automation_pipeline():
                         print(f"⚠️ خطأ أثناء حفظ السجل في الكاش: {e}")
                 else:
                     failed_count += 1
+                    save_progress(i, len(products), success_count, failed_count, f"فشل كتابة الشيت: {name}")
                 continue
     
             image_url = best_image["url"]
@@ -195,6 +220,7 @@ def run_automation_pipeline():
             if not processed_image_path or not os.path.exists(processed_image_path):
                 config.log_and_fail(prod.get("barcode"), name, brand, "فشل تحميل الصورة المرشحة أو فشل عزل الخلفية وتنعيم الحواف.")
                 failed_count += 1
+                save_progress(i, len(products), success_count, failed_count, f"فشل معالجة: {name}")
                 # إشعار Telegram بالفشل (ملغى برمجيًا)
                 image_processor.send_telegram_notification("")
                 continue
@@ -253,6 +279,7 @@ def run_automation_pipeline():
             if not image_link:
                 config.log_and_fail(prod.get("barcode"), name, brand, "فشل رفع الصورة المعالجة إلى Cloudinary.")
                 failed_count += 1
+                save_progress(i, len(products), success_count, failed_count, f"فشل الرفع السحابي: {name}")
                 continue
                 
             # إضافة بادئة المراجعة الرمادية إذا تطلب الأمر لتنبيه لوحة العرض
@@ -272,6 +299,7 @@ def run_automation_pipeline():
             if update_success:
                 print(f"🎉 تم تحديث بيانات الصف {row_num} بنجاح بالرابط الجديد!")
                 success_count += 1
+                save_progress(i, len(products), success_count, failed_count, f"نجاح: {name}")
                 
                 # حفظ في الكاش المحلي للتسجيل والـ Deduplication
                 try:
@@ -294,6 +322,7 @@ def run_automation_pipeline():
             else:
                 print(f"⚠️ فشل كتابة الرابط في الشيت للصف {row_num}")
                 failed_count += 1
+                save_progress(i, len(products), success_count, failed_count, f"فشل كتابة الشيت: {name}")
                 # إشعار Telegram بالفشل (ملغى برمجيًا)
                 image_processor.send_telegram_notification("")
                 
@@ -309,6 +338,9 @@ def run_automation_pipeline():
         try:
             if os.path.exists(lock_file):
                 os.remove(lock_file)
+            progress_file = "temp/batch_progress.json"
+            if os.path.exists(progress_file):
+                os.remove(progress_file)
         except Exception:
             pass
 

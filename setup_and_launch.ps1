@@ -238,10 +238,14 @@ if ($oldLaravel) {
 if (-not (Test-Path "temp")) { New-Item -ItemType Directory -Path "temp" | Out-Null }
 
 Write-Host "🚀 جاري تشغيل خادم معالجة الصور FastAPI..." -ForegroundColor Yellow
-$fastapiProcess = Start-Process -FilePath $venvPython -ArgumentList "fastapi_server.py" -WorkingDirectory $PSScriptRoot -WindowStyle Hidden -PassThru
+$fastapiOut = Join-Path $PSScriptRoot "fastapi_stdout.log"
+$fastapiErr = Join-Path $PSScriptRoot "fastapi_stderr.log"
+$fastapiProcess = Start-Process -FilePath $venvPython -ArgumentList "fastapi_server.py" -WorkingDirectory $PSScriptRoot -WindowStyle Hidden -RedirectStandardOutput $fastapiOut -RedirectStandardError $fastapiErr -PassThru
 
 Write-Host "🚀 جاري تشغيل خادم لوحة التحكم Laravel..." -ForegroundColor Yellow
-$laravelProcess = Start-Process -FilePath $phpPath -ArgumentList "dashboard/artisan serve --port=8000" -WorkingDirectory $PSScriptRoot -WindowStyle Hidden -PassThru
+$laravelOut = Join-Path $PSScriptRoot "laravel_stdout.log"
+$laravelErr = Join-Path $PSScriptRoot "laravel_stderr.log"
+$laravelProcess = Start-Process -FilePath $phpPath -ArgumentList "dashboard/artisan serve --port=8000" -WorkingDirectory $PSScriptRoot -WindowStyle Hidden -RedirectStandardOutput $laravelOut -RedirectStandardError $laravelErr -PassThru
 
 # الانتظار حتى تهيئة الخدمات
 Start-Sleep -Seconds 4

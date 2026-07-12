@@ -14,5 +14,53 @@
         "background_purity": 0.9992938600111789,
         "dinov2_similarity": 0.85,
         "human_override_approved": 1
+    },
+    {
+        "aesthetic_score": 4.2054037255849375,
+        "sharpness_brenner": 41.86880084480601,
+        "product_fill_ratio": 0.1569375,
+        "background_purity": 0.9996852387307171,
+        "dinov2_similarity": 0.85,
+        "human_override_approved": 1
+    },
+    {
+        "aesthetic_score": 10.0,
+        "sharpness_brenner": 284.0450704005006,
+        "product_fill_ratio": 0.662625,
+        "background_purity": 0.0,
+        "dinov2_similarity": 0.85,
+        "human_override_approved": 1
+    },
+    {
+        "aesthetic_score": 9.893036057013058,
+        "sharpness_brenner": 384.53080190730236,
+        "product_fill_ratio": 0.7983057625531583,
+        "background_purity": 0.0,
+        "dinov2_similarity": 0.85,
+        "human_override_approved": 1
+    },
+    {
+        "aesthetic_score": 8.433305166852712,
+        "sharpness_brenner": 255.2147610045718,
+        "product_fill_ratio": 0.5740912811923671,
+        "background_purity": 0.9995114259085001,
+        "dinov2_similarity": 0.85,
+        "human_override_approved": 1
+    },
+    {
+        "aesthetic_score": 4.0166292125115275,
+        "sharpness_brenner": 14.542370932415519,
+        "product_fill_ratio": 0.2086,
+        "background_purity": 0.9997006500151359,
+        "dinov2_similarity": 0.85,
+        "human_override_approved": 1
+    },
+    {
+        "aesthetic_score": 4.8366675619678485,
+        "sharpness_brenner": 85.69064614614615,
+        "product_fill_ratio": 0.35154,
+        "background_purity": 0.9997894257134046,
+        "dinov2_similarity": 0.85,
+        "human_override_approved": 1
     }
 ]

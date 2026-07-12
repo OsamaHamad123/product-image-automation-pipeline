@@ -21,6 +21,8 @@ Route::get('/api/logs', [ApiController::class, 'logs']);
 Route::get('/api/image-proxy', [ApiController::class, 'imageProxy']);
 Route::post('/api/run_all', [ApiController::class, 'runAll']);
 Route::post('/api/run-all', [ApiController::class, 'runAll']);
+Route::post('/api/stop-batch', [ApiController::class, 'stopBatch']);
+Route::post('/api/stop_batch', [ApiController::class, 'stopBatch']);
 Route::get('/api/batch_status', [ApiController::class, 'batchStatus']);
 Route::get('/api/batch-status', [ApiController::class, 'batchStatus']);
 

@@ -254,6 +254,11 @@ def select_product_image(req: SelectImageRequest):
         except Exception:
             final_w = req.target_width or 800
             final_h = req.target_height or 800
+            
+        if not final_w or final_w <= 0:
+            final_w = 800
+        if not final_h or final_h <= 0:
+            final_h = 800
         if processed_image_path == "blurry":
             raise HTTPException(status_code=400, detail="الصورة المختارة مشوشة جداً ومنخفضة الجودة (Blurry Image). يرجى اختيار صورة أخرى.")
             
@@ -501,6 +506,11 @@ def upload_manual_image(req: UploadManualRequest):
         except Exception:
             final_w = req.target_width or 800
             final_h = req.target_height or 800
+            
+        if not final_w or final_w <= 0:
+            final_w = 800
+        if not final_h or final_h <= 0:
+            final_h = 800
         
         if metadata:
             cat1 = metadata.get("category_l1_en", "").strip().lower().replace(" ", "_").replace("&", "and")
