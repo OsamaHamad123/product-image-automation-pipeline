@@ -1328,7 +1328,7 @@
             const res = await fetch('/api/products-json');
             const data = await res.json();
             const fromCache = res.headers.get('X-Cache') === 'HIT';
-            if (data.status === 'success') {
+            if (res.ok && data.status === 'success') {
                 currentProducts = data.products;
                 currentPage = 1;
                 updateKPIStats();
@@ -1339,10 +1339,12 @@
                     cacheIndicator.title = fromCache ? '⚡ من الكاش (60 ث)' : '🔄 بيانات حية من Google Sheets';
                     cacheIndicator.style.color = fromCache ? 'var(--accent-cyan)' : 'var(--success)';
                 }
+            } else {
+                productList.innerHTML = `<p style="color: var(--danger); text-align: center; padding: 2rem; direction: rtl;">فشل جلب المنتجات من Google Sheets.<br><small style="color: var(--gray-light); font-size: 0.85rem;">الخطأ: ${data.error || 'استجابة غير صالحة من السيرفر'}</small></p>`;
             }
         } catch (err) {
             console.error(err);
-            productList.innerHTML = '<p style="color: var(--danger); text-align: center; padding: 2rem;">فشل جلب المنتجات. تأكد من تشغيل Flask.</p>';
+            productList.innerHTML = '<p style="color: var(--danger); text-align: center; padding: 2rem; direction: rtl;">فشل الاتصال بالسيرفر. يرجى التحقق من لوحة التحكم أو التيرمينال.</p>';
         }
     }
 
