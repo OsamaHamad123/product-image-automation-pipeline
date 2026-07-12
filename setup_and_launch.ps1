@@ -42,7 +42,7 @@ if (-not $pythonCmd) {
     Write-Host ""
     Write-Host "اضغط على أي مفتاح للخروج..."
     $null = [System.Console]::ReadKey()
-    exit
+    exit 1
 }
 
 # ----------------- 2. إعداد البيئة الافتراضية لبايثون -----------------
@@ -56,7 +56,7 @@ if (-not (Test-Path $venvDir)) {
     & $pythonCmd -m venv $venvDir
     if (-not (Test-Path $venvPython)) {
         Write-Host "❌ فشل إنشاء البيئة الافتراضية!" -ForegroundColor Red
-        exit
+        exit 1
     }
     Write-Host "✅ تم إنشاء البيئة الافتراضية بنجاح." -ForegroundColor Green
 } else {
@@ -159,7 +159,7 @@ if (Test-Path $localPhpExe) {
         Write-Host ""
         Write-Host "اضغط على أي مفتاح للخروج..."
         $null = [System.Console]::ReadKey()
-        exit
+        exit 1
     }
 }
 
@@ -185,7 +185,7 @@ if (Test-Path $localComposerJar) {
         Write-Host "✅ تم تحميل Composer بنجاح." -ForegroundColor Green
     } catch {
         Write-Host "❌ فشل تحميل Composer تلقائياً!" -ForegroundColor Red
-        exit
+        exit 1
     }
 }
 
@@ -201,6 +201,23 @@ if (-not (Test-Path $vendorDir)) {
     Write-Host "✅ تم تثبيت حزم لوحة التحكم بنجاح." -ForegroundColor Green
 } else {
     Write-Host "✅ حزم لوحة التحكم مثبتة مسبقاً." -ForegroundColor Green
+}
+
+# تنظيف ملفات الكاش القديمة لضمان جلب بيانات حية وجديدة من جوجل شيت
+Write-Host "🧹 جاري تنظيف ملفات الكاش المؤقتة لضمان جلب بيانات حية من الشيت..." -ForegroundColor Yellow
+$pythonCaches = @(
+    (Join-Path $PSScriptRoot "products_cache.json"),
+    (Join-Path $PSScriptRoot "brand_mappings_cache.json"),
+    (Join-Path $PSScriptRoot "search_cache.json")
+)
+foreach ($cacheFile in $pythonCaches) {
+    if (Test-Path $cacheFile) {
+        Remove-Item $cacheFile -Force -ErrorAction SilentlyContinue
+    }
+}
+$laravelCacheDir = Join-Path $PSScriptRoot "dashboard\storage\framework\cache\data"
+if (Test-Path $laravelCacheDir) {
+    Remove-Item (Join-Path $laravelCacheDir "*") -Recurse -Force -ErrorAction SilentlyContinue
 }
 
 # ----------------- 5. تهيئة ملفات الإعدادات وقاعدة البيانات -----------------
@@ -245,14 +262,21 @@ if (-not (Test-Path $credentialsJson)) {
     }
 }
 
-# إعداد ملف .env الرئيسي للمشروع
+# إعداد وتحديث ملف .env الرئيسي للمشروع
 $rootEnv = Join-Path $PSScriptRoot ".env"
 $rootEnvExample = Join-Path $PSScriptRoot ".env.example"
 
-if (-not (Test-Path $rootEnv)) {
+if (Test-Path $rootEnv) {
+    $envContent = Get-Content $rootEnv
+    # إذا كان الملف يحتوي على قيم افتراضية مؤقتة، نقوم بتحديثه بالقيم الحقيقية المجهزة
+    if ($envContent -match "YOUR_GOOGLE_SEARCH_API_KEY" -or $envContent -match "YOUR_CLOUDINARY_CLOUD_NAME") {
+        Copy-Item $rootEnvExample $rootEnv -Force
+        Write-Host "🔄 تم تحديث ملف الإعدادات .env الرئيسي بالقيم والاتصالات المجهزة تلقائياً." -ForegroundColor Yellow
+    }
+} else {
     if (Test-Path $rootEnvExample) {
         Copy-Item $rootEnvExample $rootEnv -Force
-        Write-Host "⚙️ تم إنشاء ملف .env الرئيسي للمشروع (تذكر تعبئة مفاتيح الـ API لاحقاً)." -ForegroundColor Yellow
+        Write-Host "⚙️ تم إنشاء ملف .env الرئيسي للمشروع." -ForegroundColor Yellow
     }
 }
 
