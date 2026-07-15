@@ -26,7 +26,7 @@ def get_product_bounding_box(image_path, product_name, brand):
             img.save(buffer, format="JPEG", quality=70)
             img_data = base64.b64encode(buffer.getvalue()).decode("utf-8")
             
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key={config.GEMINI_API_KEY}"
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{config.GEMINI_MODEL}:generateContent?key={config.GEMINI_API_KEY}"
         
         prompt = (
             f"Locate the main commercial packaged product of the brand '{brand}' for '{product_name}' in this image. "
@@ -103,7 +103,7 @@ def extract_metadata_from_image(image_path, product_name, brand):
             img.save(buffer, format="JPEG", quality=80)
             img_data = base64.b64encode(buffer.getvalue()).decode("utf-8")
             
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key={config.GEMINI_API_KEY}"
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{config.GEMINI_MODEL}:generateContent?key={config.GEMINI_API_KEY}"
         
         # توليد نصوص مسارات التصنيف المعتمدة ديناميكياً لإرفاقها بالـ Prompt
         taxonomy_lines = []
@@ -541,6 +541,42 @@ def remove_background(input_path, output_path):
                 return False
         except Exception as e:
             print(f"❌ خطأ أثناء الاتصال بـ remove.bg API: {e}")
+            return False
+            
+    elif method == "photoroom":
+        print("⏳ جاري إزالة الخلفية سحابياً باستخدام 'PhotoRoom' API...")
+        if not getattr(config, "PHOTOROOM_API_KEY", None):
+            print("❌ خطأ: مفتاح PHOTOROOM_API_KEY غير موجود في config.py.")
+            return False
+            
+        try:
+            url = "https://sdk.photoroom.com/v1/segment"
+            headers = {"x-api-key": config.PHOTOROOM_API_KEY}
+            with open(input_path, 'rb') as img_file:
+                files = {'image_file': img_file}
+                # تفعيل القص التلقائي للمنتج المعزول بناءً على طلب العميل
+                data = {'format': 'png', 'crop': 'true'}
+                
+                response = requests.post(
+                    url,
+                    headers=headers,
+                    files=files,
+                    data=data,
+                    timeout=25
+                )
+                
+            if response.status_code == 200:
+                with open(output_path, 'wb') as out:
+                    out.write(response.content)
+                print("✅ تم إزالة الخلفية والقص التلقائي للهوامش عبر PhotoRoom API بنجاح!")
+                # صقل حواف الصورة وتعبئة أي فجوات شفافة داخل جسم المنتج
+                execute_high_fidelity_refinement(output_path, output_path)
+                return True
+            else:
+                print(f"❌ فشل إزالة الخلفية عبر PhotoRoom API (كود {response.status_code}): {response.text}")
+                return False
+        except Exception as e:
+            print(f"❌ خطأ أثناء الاتصال بـ PhotoRoom API: {e}")
             return False
             
     elif method == "grabcut":

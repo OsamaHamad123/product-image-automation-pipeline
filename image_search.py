@@ -11,8 +11,12 @@ import asyncio
 import io
 import aiohttp
 import threading
-import torch
-import torchvision.transforms as T
+try:
+    import torch
+    import torchvision.transforms as T
+except ImportError:
+    torch = None
+    T = None
 from PIL import Image
 from bs4 import BeautifulSoup
 
@@ -74,6 +78,10 @@ class DINOv2EmbeddingEngine:
     def __init__(self, use_gpu_if_available: bool = True):
         if self._initialized:
             return
+        if getattr(config, "DISABLE_LOCAL_AI_MODELS", False) or torch is None or T is None:
+            self.model = None
+            self._initialized = True
+            return
         self.device = torch.device(
             "cuda" if (torch.cuda.is_available() and use_gpu_if_available) else "cpu"
         )
@@ -103,7 +111,7 @@ class DINOv2EmbeddingEngine:
             print(f"⚠️ [DINOv2 Error] Failed to load DINOv2: {e}")
             self.model = None
 
-    def extract_features(self, pil_img: Image.Image) -> torch.Tensor:
+    def extract_features(self, pil_img: Image.Image) -> 'torch.Tensor':
         if self.model is None:
             return None
         try:
@@ -123,7 +131,7 @@ class DINOv2EmbeddingEngine:
             return None
 
     @staticmethod
-    def calculate_distance(embedding_a: torch.Tensor, embedding_b: torch.Tensor) -> float:
+    def calculate_distance(embedding_a: 'torch.Tensor', embedding_b: 'torch.Tensor') -> float:
         if embedding_a is None or embedding_b is None:
             return 0.0
         cosine_similarity = torch.dot(embedding_a, embedding_b)
@@ -597,6 +605,8 @@ def get_clip_model():
     تحميل نموذج CLIP محلياً وبشكل كسول (Lazy Loading) عند أول استدعاء فقط.
     """
     global _clip_model, _clip_processor
+    if getattr(config, "DISABLE_LOCAL_AI_MODELS", False):
+        return None, None
     if _clip_model is None:
         local_dir = "clip_model"
         # نتحقق أن ملف الأوزان pytorch_model.bin موجود ومكتمل
@@ -624,6 +634,8 @@ def get_siglip_model():
     تحميل نموذج SigLIP محلياً وبشكل كسول (Lazy Loading).
     """
     global _siglip_model, _siglip_processor
+    if getattr(config, "DISABLE_LOCAL_AI_MODELS", False):
+        return None, None
     if _siglip_model is None:
         try:
             print("⏳ جاري تحميل نموذج SigLIP للتحقق الدقيق من العلامة التجارية محلياً...")
@@ -642,6 +654,8 @@ def get_blip_model():
     تحميل نموذج BLIP التوليدي محلياً وبشكل كسول (Lazy Loading).
     """
     global _blip_model, _blip_processor
+    if getattr(config, "DISABLE_LOCAL_AI_MODELS", False):
+        return None, None
     if _blip_model is None:
         try:
             print("⏳ جاري تحميل نموذج BLIP لإنشاء تسميات وأوصاف الصور محلياً...")
@@ -731,6 +745,8 @@ def get_moondream_model():
     تحميل نموذج Moondream2 محلياً وبشكل كسول (Lazy Loading).
     """
     global _moondream_model, _moondream_tokenizer
+    if getattr(config, "DISABLE_LOCAL_AI_MODELS", False):
+        return None, None
     if _moondream_model is None:
         try:
             print("⏳ جاري تحميل نموذج Moondream2 للفرز القاطع النهائي محلياً...")
@@ -887,6 +903,8 @@ def find_semantic_cache_match(product_name, brand, threshold=0.92):
     """
     مقارنة دلالية للمنتج الحالي مع أسماء المنتجات المخزنة في SQLite باستخدام المتجهات النصية لـ CLIP للتخطي الفوري للبحث.
     """
+    if getattr(config, "DISABLE_LOCAL_AI_MODELS", False):
+        return None
     try:
         import local_cache_db
         import torch
@@ -1004,7 +1022,7 @@ def validate_image_via_gemini_vision(image_path, product_name, brand):
             img.save(buffer, format="JPEG", quality=70)
             img_data = base64.b64encode(buffer.getvalue()).decode("utf-8")
             
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key={config.GEMINI_API_KEY}"
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{config.GEMINI_MODEL}:generateContent?key={config.GEMINI_API_KEY}"
         
         prompt = (
             f"You are a catalog validation assistant.\n"

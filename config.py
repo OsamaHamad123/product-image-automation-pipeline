@@ -53,10 +53,14 @@ IMAGE_TARGET_SIZE = (800, 800)
 # "bria_rmbg" -> استخدام نموذج Bria RMBG 1.4 المحلي المجاني وفائق الدقة (مستحسن)
 # "rembg" -> استخدام مكتبة rembg المحلية المجانية تماماً (تتطلب تثبيت pip install rembg)
 # "remove_bg_api" -> استخدام خدمة remove.bg السحابية (تتطلب إدخال مفتاح API أدناه)
-BG_REMOVAL_METHOD = "bria_rmbg"
+# "photoroom" -> استخدام خدمة PhotoRoom السحابية لإزالة الخلفية مع القص التلقائي الاحترافي للهوامش
+BG_REMOVAL_METHOD = os.getenv("BG_REMOVAL_METHOD", "photoroom")
 
 # مفتاح API الخاص بخدمة remove.bg (مطلوب فقط إذا اخترت "remove_bg_api")
 REMOVE_BG_API_KEY = os.getenv("REMOVE_BG_API_KEY", "")
+
+# مفتاح API الخاص بخدمة PhotoRoom (مطلوب فقط إذا اخترت "photoroom")
+PHOTOROOM_API_KEY = os.getenv("PHOTOROOM_API_KEY", "")
 
 # 5. ملف اعتمادات Google Service Account
 CREDENTIALS_FILE = os.getenv("CREDENTIALS_FILE", os.path.join(os.path.dirname(os.path.abspath(__file__)), "credentials.json"))
@@ -103,6 +107,11 @@ FORCE_OVERWRITE_IMAGES = False
 # 8. إعدادات التحقق المتقدم للبحث والصور
 # مفتاح API الخاص بـ Gemini (من Google AI Studio) للتحقق البصري المتقدم
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+
+# إيقاف تحميل وتشغيل نماذج الذكاء الاصطناعي المحلية (CLIP, SigLIP, BLIP, Moondream2, DINOv2) لتوفير الذاكرة والعمل سحابياً بتكلفة منخفضة
+DISABLE_LOCAL_AI_MODELS = os.getenv("DISABLE_LOCAL_AI_MODELS", "True").lower() == "true"
+
 ENABLE_GEMINI_VISION = True
 ENABLE_LOCAL_OCR = False
 STRICT_BRAND_MATCH = os.getenv("STRICT_BRAND_MATCH", "True").lower() == "true"

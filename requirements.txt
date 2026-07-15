@@ -8,12 +8,13 @@ cloudinary
 pillow
 requests
 beautifulsoup4
-torch
-torchvision
-transformers
+# torch
+# torchvision
+# transformers
 redis
 aiohttp
 numpy
+scipy
 opencv-python
 curl-cffi
 
