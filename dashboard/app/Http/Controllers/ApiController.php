@@ -273,7 +273,7 @@ class ApiController extends Controller
         
         $pauseRequested = 0;
         try {
-            $stateRow = \DB::select("SELECT * FROM automation_state WHERE key = 'active_session' LIMIT 1");
+            $stateRow = \DB::select("SELECT * FROM automation_state WHERE `key` = 'active_session' LIMIT 1");
             if (!empty($stateRow)) {
                 $status = $stateRow[0]->status;
                 $total = $stateRow[0]->total_items;
@@ -318,7 +318,7 @@ class ApiController extends Controller
             $diff = time() - $lastUpdated;
             if ($diff > 45 || !file_exists($lockFile)) {
                 try {
-                    \DB::update("UPDATE automation_state SET status = 'idle', total_items = 0, processed_items = 0, success_count = 0, failed_count = 0, current_product_name = '', pause_requested = 0 WHERE key = 'active_session'");
+                    \DB::update("UPDATE automation_state SET status = 'idle', total_items = 0, processed_items = 0, success_count = 0, failed_count = 0, current_product_name = '', pause_requested = 0 WHERE `key` = 'active_session'");
                     $status = 'idle';
                     $total = 0;
                     $processed = 0;
@@ -352,7 +352,7 @@ class ApiController extends Controller
     public function pauseBatch()
     {
         try {
-            \DB::update("UPDATE automation_state SET pause_requested = 1 WHERE key = 'active_session'");
+            \DB::update("UPDATE automation_state SET pause_requested = 1 WHERE `key` = 'active_session'");
             return response()->json(['status' => 'success', 'message' => 'Automation paused.']);
         } catch (\Exception $e) {
             return response()->json(['error' => $e->getMessage()], 500);
@@ -365,7 +365,7 @@ class ApiController extends Controller
     public function resumeBatch()
     {
         try {
-            \DB::update("UPDATE automation_state SET pause_requested = 0 WHERE key = 'active_session'");
+            \DB::update("UPDATE automation_state SET pause_requested = 0 WHERE `key` = 'active_session'");
             return response()->json(['status' => 'success', 'message' => 'Automation resumed.']);
         } catch (\Exception $e) {
             return response()->json(['error' => $e->getMessage()], 500);
@@ -383,7 +383,7 @@ class ApiController extends Controller
             if (file_exists($lockFile)) {
                 @unlink($lockFile);
             }
-            \DB::update("UPDATE automation_state SET status = 'idle', total_items = 0, processed_items = 0, success_count = 0, failed_count = 0, current_product_name = '', pause_requested = 0 WHERE key = 'active_session'");
+            \DB::update("UPDATE automation_state SET status = 'idle', total_items = 0, processed_items = 0, success_count = 0, failed_count = 0, current_product_name = '', pause_requested = 0 WHERE `key` = 'active_session'");
             return response()->json(['status' => 'success', 'message' => 'Automation state reset successfully.']);
         } catch (\Exception $e) {
             return response()->json(['error' => $e->getMessage()], 500);
