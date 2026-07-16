@@ -1024,6 +1024,10 @@ def validate_image_via_gemini_vision(image_path, product_name, brand):
             
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{config.GEMINI_MODEL}:generateContent?key={config.GEMINI_API_KEY}"
         
+        # Check if the brand has active learning feedback for background clutter
+        import local_cache_db
+        clutter_flag = local_cache_db.get_active_learning_clutter_flag(brand)
+        
         prompt = (
             f"You are a catalog validation assistant.\n"
             f"Analyze the image and verify if it shows a commercial packaged product from the brand '{brand}' representing '{product_name}'.\n"
@@ -1031,6 +1035,17 @@ def validate_image_via_gemini_vision(image_path, product_name, brand):
             f"1. Brand check: Must match '{brand}' or its verified synonyms/subsidiaries. Reject if it is a competitor brand (e.g., Almarai instead of Meliha, Mai Dubai instead of Masafi, etc.).\n"
             f"2. Flavor/Type check: If the target '{product_name}' mentions a specific flavor or type (e.g., 'Chocolate', 'Strawberry', 'Full Cream', 'Low Fat'), the package in the image MUST match this flavor/type. If the image shows a mismatch (e.g., target is Chocolate, image is Strawberry), set 'valid' to false.\n"
             f"3. Size/Volume check: Check if the product size/volume matches the target name. If the target is a single small pack (e.g., '180ml') and the image shows a large 1L bottle or a bulk box, reject it. If size is not clearly readable or is close enough, you can accept it but explain in reason.\n"
+        )
+        
+        if clutter_flag:
+            prompt += (
+                f"4. Background/Clutter check: This brand '{brand}' has had issues with background clutter. "
+                f"You MUST strictly reject the image (set 'valid' to false) if the background is cluttered, messy, "
+                f"or not a clean product photo. Only accept clean, professional product images.\n"
+            )
+            print(f"💡 [Active Learning] تفعيل فحص تداخل الخلفية الصارم لـ Gemini Vision للبراند '{brand}' بسبب تكرار الرفض.")
+            
+        prompt += (
             f"Reply strictly in JSON format matching this schema:\n"
             f'{{\n'
             f'  "valid": true or false,\n'
@@ -1829,7 +1844,7 @@ def expand_query_via_gemini(product_name, brand):
         return [f"{brand} {product_name}".strip()]
         
     try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={config.GEMINI_API_KEY}"
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{config.GEMINI_MODEL}:generateContent?key={config.GEMINI_API_KEY}"
         
         prompt = (
             f"You are a shopping search optimization assistant.\n"

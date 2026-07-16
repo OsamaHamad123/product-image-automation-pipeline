@@ -209,6 +209,7 @@ class ApiController extends Controller
         try {
             $scriptPath = 'f:\\automation\\main.py';
             $logPath = 'f:\\automation\\temp\\pipeline.log';
+            $lockFile = 'f:\\automation\\temp\\pipeline.lock';
             
             // التأكد من تهيئة مجلد temp
             $tempDir = 'f:\\automation\\temp';
@@ -220,17 +221,24 @@ class ApiController extends Controller
             $configData = $request->all();
             file_put_contents($tempDir . DIRECTORY_SEPARATOR . 'run_config.json', json_encode($configData));
             
+            // كتابة قفل مبدئي لمنع السباق البرمجي مع الواجهة الأمامية
+            file_put_contents($lockFile, 'STARTING');
+
             // مسح سجل اللوغ القديم لبدء جلسة نظيفة
             if (file_exists($logPath)) {
                 @unlink($logPath);
             }
 
-            // تشغيل بايثون غير متزامن بالخلفية وإعادة توجيه المخرجات لملف Log
+            // تشغيل تهيئة الطابور بشكل متزامن وبسيط
             $pythonPath = $this->getPythonPath();
-            $cmd = "start /B \"\" \"{$pythonPath}\" -u \"{$scriptPath}\" > \"{$logPath}\" 2>&1";
+            $enqueueCmd = "\"{$pythonPath}\" \"{$scriptPath}\" --enqueue 2>&1";
+            shell_exec($enqueueCmd);
+
+            // تشغيل بايثون غير متزامن بالخلفية كـ Worker يسحب من الطابور
+            $cmd = "start /B \"\" \"{$pythonPath}\" -u \"{$scriptPath}\" --worker > \"{$logPath}\" 2>&1";
             pclose(popen($cmd, "r"));
             
-            return response()->json(['status' => 'success', 'message' => 'Full automation pipeline started in background.']);
+            return response()->json(['status' => 'success', 'message' => 'Full automation queue worker started in background.']);
         } catch (\Exception $e) {
             return response()->json(['error' => $e->getMessage()], 500);
         }
@@ -242,12 +250,13 @@ class ApiController extends Controller
     public function batchStatus()
     {
         $lockFile = 'f:\\automation\\temp\\pipeline.lock';
-        $progressFile = 'f:\\automation\\temp\\batch_progress.json';
         $isRunning = false;
         
         if (file_exists($lockFile)) {
             $pid = trim(file_get_contents($lockFile));
-            if (!empty($pid) && is_numeric($pid)) {
+            if ($pid === 'STARTING') {
+                $isRunning = true;
+            } elseif (!empty($pid) && is_numeric($pid)) {
                 $output = shell_exec("tasklist /FI \"PID eq {$pid}\" 2>&1");
                 if (strpos($output, $pid) !== false) {
                     $isRunning = true;
@@ -257,16 +266,43 @@ class ApiController extends Controller
             }
         }
         
-        $response = ['is_running' => $isRunning];
+        $total = 0;
+        $pending = 0;
+        $processing = 0;
+        $completed = 0;
+        $failed = 0;
+        $currentProduct = "";
         
-        if (file_exists($progressFile)) {
-            $progressData = json_decode(file_get_contents($progressFile), true);
-            if (is_array($progressData)) {
-                $response = array_merge($response, $progressData);
+        try {
+            $rows = \DB::select("SELECT status, COUNT(*) as cnt FROM automation_queue GROUP BY status");
+            foreach ($rows as $row) {
+                $status = $row->status;
+                $cnt = $row->cnt;
+                if ($status === 'pending') $pending = $cnt;
+                elseif ($status === 'processing') $processing = $cnt;
+                elseif ($status === 'completed') $completed = $cnt;
+                elseif ($status === 'failed') $failed = $cnt;
+                $total += $cnt;
             }
+            
+            $activeRow = \DB::select("SELECT product_name FROM automation_queue WHERE status = 'processing' LIMIT 1");
+            if (!empty($activeRow)) {
+                $currentProduct = $activeRow[0]->product_name;
+            }
+        } catch (\Exception $e) {
+            // Queue table not created yet or database locked
         }
         
-        return response()->json($response);
+        $response = [
+            'is_running' => $isRunning,
+            'total' => $total,
+            'current' => $completed + $failed + ($processing > 0 ? 1 : 0),
+            'success' => $completed,
+            'failed' => $failed,
+            'current_product' => $currentProduct
+        ];
+        
+        return response()->json($response)->header('Cache-Control', 'no-store');
     }
 
     /**
@@ -323,6 +359,11 @@ class ApiController extends Controller
     {
         $lockFile = 'f:\\automation\\temp\\pipeline.lock';
         $progressFile = 'f:\\automation\\temp\\batch_progress.json';
+        
+        try {
+            \DB::statement("DELETE FROM automation_queue");
+        } catch (\Exception $e) {}
+
         if (file_exists($lockFile)) {
             $pid = trim(file_get_contents($lockFile));
             if (!empty($pid) && is_numeric($pid)) {
@@ -335,5 +376,28 @@ class ApiController extends Controller
             }
         }
         return response()->json(['status' => 'failed', 'error' => 'No active batch process found.']);
+    }
+
+    /**
+     * إعادة تعيين التعلم النشط وحذف سجلات التغذية الراجعة
+     */
+    public function resetActiveLearning(Request $request)
+    {
+        try {
+            $brand = $request->input('brand');
+            
+            if ($brand) {
+                // حذف سجلات براند محدد
+                \DB::delete("DELETE FROM active_learning_feedback WHERE LOWER(brand) = ?", [strtolower(trim($brand))]);
+            } else {
+                // حذف كافة سجلات التعلم النشط
+                \DB::delete("DELETE FROM active_learning_feedback");
+            }
+            
+            \Cache::forget('products_json_v1');
+            return response()->json(['status' => 'success', 'message' => 'Active learning feedback reset successfully.']);
+        } catch (\Exception $e) {
+            return response()->json(['status' => 'failed', 'error' => $e->getMessage()], 500);
+        }
     }
 }

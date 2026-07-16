@@ -58,6 +58,23 @@ def init_db():
             )
         """)
         
+        # إنشاء جدول طابور المهام المنظم
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS automation_queue (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                row_number INTEGER UNIQUE,
+                barcode TEXT,
+                product_name TEXT NOT NULL,
+                brand TEXT,
+                search_query TEXT,
+                status TEXT DEFAULT 'pending',
+                error_message TEXT,
+                attempts INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
         # التحقق من وجود عمود clip_embedding_json وإضافته إن لم يكن موجوداً (Auto-migration)
         cursor.execute("PRAGMA table_info(resolved_products)")
         columns = [col[1] for col in cursor.fetchall()]
@@ -73,6 +90,7 @@ def init_db():
         # إنشاء الفهارس (Indices) لتسريع عمليات البحث والاسترجاع الفوري
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_barcode ON resolved_products(barcode)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_name_brand ON resolved_products(product_name, brand)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_queue_status ON automation_queue(status)")
         
         conn.commit()
         conn.close()
@@ -308,6 +326,196 @@ def save_feedback(feedback_id, asset_id, row_number, product_name, brand, image_
         return True
     except Exception as e:
         print(f"⚠️ [SQLite Cache Error] فشل حفظ سجل التغذية الراجعة: {e}")
+        return False
+
+def add_to_queue(row_number, barcode, name, brand, query):
+    """
+    إضافة منتج إلى طابور المعالجة المنظم (يتفادى التكرار)
+    """
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT OR REPLACE INTO automation_queue (row_number, barcode, product_name, brand, search_query, status, error_message, attempts, updated_at)
+            VALUES (?, ?, ?, ?, ?, 'pending', NULL, 0, CURRENT_TIMESTAMP)
+        """, (row_number, barcode, name, brand, query))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"⚠️ [SQLite Queue Error] فشل إضافة سجل للطابور: {e}")
+        return False
+
+def fetch_next_task():
+    """
+    سحب المهمة التالية المعلقة ووسمها بـ processing بشكل حاصر وآمن
+    """
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        
+        # قراءة أول سجل معلق بقفل المعاملة
+        cursor.execute("""
+            SELECT * FROM automation_queue 
+            WHERE status = 'pending' 
+            ORDER BY id ASC LIMIT 1
+        """)
+        row = cursor.fetchone()
+        
+        if row:
+            task_id = row["id"]
+            # تحديث الحالة فوراً لـ processing لمنع العمليات الأخرى من سحبه
+            cursor.execute("""
+                UPDATE automation_queue 
+                SET status = 'processing', attempts = attempts + 1, updated_at = CURRENT_TIMESTAMP 
+                WHERE id = ?
+            """, (task_id,))
+            conn.commit()
+            
+            # إعادة جلب السجل المحدث بالكامل
+            cursor.execute("SELECT * FROM automation_queue WHERE id = ?", (task_id,))
+            row_updated = cursor.fetchone()
+            conn.close()
+            return dict(row_updated)
+            
+        conn.close()
+        return None
+    except Exception as e:
+        print(f"⚠️ [SQLite Queue Error] فشل سحب المهمة التالية: {e}")
+        return None
+
+def update_task_status(task_id, status, error_message=None):
+    """
+    تحديث حالة المهمة بعد المعالجة (completed أو failed)
+    """
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE automation_queue 
+            SET status = ?, error_message = ?, updated_at = CURRENT_TIMESTAMP 
+            WHERE id = ?
+        """, (status, error_message, task_id))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"⚠️ [SQLite Queue Error] فشل تحديث حالة المهمة: {e}")
+        return False
+
+def get_queue_statistics():
+    """
+    الحصول على إحصائيات طابور المهام لعرضها على لوحة التحكم
+    """
+    try:
+        if not os.path.exists(DB_PATH):
+            return {"total": 0, "pending": 0, "processing": 0, "completed": 0, "failed": 0}
+            
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT status, COUNT(*) as cnt 
+            FROM automation_queue 
+            GROUP BY status
+        """)
+        rows = cursor.fetchall()
+        conn.close()
+        
+        stats = {"total": 0, "pending": 0, "processing": 0, "completed": 0, "failed": 0}
+        for r in rows:
+            status = r["status"]
+            cnt = r["cnt"]
+            if status in stats:
+                stats[status] = cnt
+            stats["total"] += cnt
+        return stats
+    except Exception as e:
+        print(f"⚠️ [SQLite Queue Error] فشل استرجاع إحصائيات الطابور: {e}")
+        return {"total": 0, "pending": 0, "processing": 0, "completed": 0, "failed": 0}
+
+def clear_queue():
+    """
+    تفريغ كافة سجلات طابور المعالجة للبدء من جديد
+    """
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM automation_queue")
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"⚠️ [SQLite Queue Error] فشل مسح الطابور: {e}")
+        return False
+
+def get_active_learning_padding_ratio(brand):
+    """
+    التحقق من التغذية الراجعة لبراند معين لتحديد نسبة الهامش المخصص لمنع قص الأطراف
+    """
+    if not brand or not os.path.exists(DB_PATH):
+        return None
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        # جلب أسباب الاستبعاد لهذا البراند
+        cursor.execute("""
+            SELECT rejection_reasons FROM active_learning_feedback 
+            WHERE LOWER(brand) = ?
+        """, (brand.strip().lower(),))
+        rows = cursor.fetchall()
+        conn.close()
+        
+        cropping_count = 0
+        for r in rows:
+            try:
+                reasons = json.loads(r[0]) if r[0] else []
+            except Exception:
+                reasons = []
+            # التحقق مما إذا كان السبب هو قص الأطراف
+            if any("cropping" in str(reason).lower() or "قص" in str(reason) or "margins" in str(reason).lower() for reason in reasons):
+                cropping_count += 1
+                
+        if cropping_count >= 4:
+            return 0.70  # زيادة هامش الأمان ليكون 30%
+        elif cropping_count >= 2:
+            return 0.75  # زيادة هامش الأمان ليكون 25%
+            
+        return None
+    except Exception as e:
+        print(f"⚠️ [Active Learning Error] فشل حساب هامش الأمان المخصص للبراند: {e}")
+        return None
+
+def get_active_learning_clutter_flag(brand):
+    """
+    التحقق مما إذا كان هذا البراند قد تم استبعاد صوره مسبقاً بسبب تداخل الخلفية والتشويش
+    """
+    if not brand or not os.path.exists(DB_PATH):
+        return False
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT rejection_reasons FROM active_learning_feedback 
+            WHERE LOWER(brand) = ?
+        """, (brand.strip().lower(),))
+        rows = cursor.fetchall()
+        conn.close()
+        
+        clutter_count = 0
+        for r in rows:
+            try:
+                reasons = json.loads(r[0]) if r[0] else []
+            except Exception:
+                reasons = []
+            if any("clutter" in str(reason).lower() or "تداخل" in str(reason) or "خلفية" in str(reason) or "background" in str(reason).lower() for reason in reasons):
+                clutter_count += 1
+                
+        return clutter_count >= 2
+    except Exception as e:
+        print(f"⚠️ [Active Learning Error] فشل حساب تداخل الخلفية للبراند: {e}")
         return False
 
 # تهيئة قاعدة البيانات تلقائياً عند استيراد الموديول للمرة الأولى

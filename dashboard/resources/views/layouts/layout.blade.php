@@ -446,6 +446,12 @@
                         <span>فرز واعتماد الصور</span>
                     </a>
                 </li>
+                <li class="sidebar-menu-item @yield('nav_active_learning')">
+                    <a href="{{ route('dashboard.active_learning') }}">
+                        <i class="fas fa-brain" style="width: 20px; text-align: center;"></i>
+                        <span>التعلم النشط 🧠</span>
+                    </a>
+                </li>
             </ul>
             
             <div class="sidebar-footer">

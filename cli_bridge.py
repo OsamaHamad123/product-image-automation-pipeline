@@ -152,8 +152,14 @@ def action_select_image(params):
         # تهيئة طابور المزامنة الخلفي لـ Google Sheets
         google_sheets.init_async_queue(config.CREDENTIALS_FILE, config.SPREADSHEET_NAME_OR_URL)
         
-        bg_removal_method = params.get('bg_removal_method')
-        processed_image_path = image_processor.process_product_image(image_url, product_name, brand, bg_removal_method=bg_removal_method)
+        processed_image_path = image_processor.process_product_image(
+            image_url, product_name, brand, 
+            bg_removal_method=bg_removal_method,
+            target_width=target_width,
+            target_height=target_height,
+            padding_ratio=padding_ratio,
+            bypass_heuristics=True
+        )
         if not processed_image_path or not os.path.exists(processed_image_path):
             return {'status': 'failed', 'error': 'Failed to download or process image locally'}
             

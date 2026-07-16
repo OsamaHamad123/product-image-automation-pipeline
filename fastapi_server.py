@@ -237,13 +237,14 @@ def select_product_image(req: SelectImageRequest):
     اعتماد صورة معالجة محلياً ورفعها سحابياً لـ Cloudinary وجدولة تحديث الشيت عبر Redis.
     """
     try:
-        # 1. معالجة وحذف خلفية الصورة محلياً
         processed_image_path = image_processor.process_product_image(
             req.image_url, req.product_name, req.brand, 
             bg_removal_method=req.bg_removal_method,
             enhance=req.enhance,
             target_width=req.target_width,
-            target_height=req.target_height
+            target_height=req.target_height,
+            padding_ratio=req.padding_ratio,
+            bypass_heuristics=True
         )
         
         # قراءة الأبعاد الفعلية للصورة الناتجة بعد معالجتها وتوسيطها (لتمريرها إلى Cloudinary)

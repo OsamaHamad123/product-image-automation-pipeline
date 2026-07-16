@@ -7,6 +7,8 @@ use App\Http\Controllers\ApiController;
 // صفحات لوحة التحكم
 Route::get('/', [ProductController::class, 'index'])->name('dashboard.index');
 Route::get('/catalog', [ProductController::class, 'catalog'])->name('dashboard.catalog');
+Route::get('/active-learning', [ProductController::class, 'activeLearning'])->name('dashboard.active_learning');
+Route::post('/api/active-learning/reset', [ApiController::class, 'resetActiveLearning']);
 
 // خدمات البيانات الداخلية لـ AJAX
 Route::get('/api/products-json', [ProductController::class, 'getProductsJson']);

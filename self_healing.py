@@ -25,7 +25,9 @@ class VLMQueryFallbackHandler:
         try:
             import google.generativeai as google_gemini
             google_gemini.configure(api_key=self.api_key)
-            vision_model = google_gemini.GenerativeModel('gemini-1.5-flash')
+            import config
+            model_name = getattr(config, "GEMINI_MODEL", "gemini-3.5-flash")
+            vision_model = google_gemini.GenerativeModel(model_name)
             
             prompt = """
             Analyze this product image with high precision. Output a JSON object containing:

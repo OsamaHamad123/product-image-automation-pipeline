@@ -152,11 +152,12 @@ class ProductController extends Controller
     /**
      * جلب المنتجات كـ JSON مع دمج البيانات الوصفية والحالات من SQLite
      */
-    public function getProductsJson()
+    public function getProductsJson(Request $request)
     {
         try {
             $cacheKey = 'products_json_v1';
-            $cachedProducts = \Cache::get($cacheKey);
+            $forceRefresh = $request->query('refresh') === 'true';
+            $cachedProducts = $forceRefresh ? null : \Cache::get($cacheKey);
 
             if ($cachedProducts !== null) {
                 return response()->json([
@@ -201,6 +202,78 @@ class ProductController extends Controller
             ])->header('X-Cache', 'MISS');
         } catch (\Exception $e) {
             return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * صفحة التعلم النشط والتصحيح الذاتي للأخطاء البصرية
+     */
+    public function activeLearning()
+    {
+        try {
+            $feedbackLogs = \DB::select("SELECT * FROM active_learning_feedback ORDER BY timestamp DESC");
+            
+            // تجميع الإحصائيات حسب البراند
+            $brandStats = [];
+            foreach ($feedbackLogs as $log) {
+                $brand = trim($log->brand);
+                if (empty($brand)) continue;
+                $brandKey = strtolower($brand);
+                
+                if (!isset($brandStats[$brandKey])) {
+                    $brandStats[$brandKey] = [
+                        'brand' => $brand,
+                        'total' => 0,
+                        'cropping' => 0,
+                        'clutter' => 0,
+                        'padding_ratio' => '0.85 (الافتراضي)',
+                        'clutter_check' => 'عادي',
+                        'cropping_alert' => false,
+                        'clutter_alert' => false
+                    ];
+                }
+                
+                $brandStats[$brandKey]['total']++;
+                
+                $reasons = [];
+                try {
+                    $reasons = json_decode($log->rejection_reasons, true) ?: [];
+                } catch (\Exception $ex) {}
+                
+                foreach ($reasons as $reason) {
+                    $reasonLower = strtolower($reason);
+                    if (strpos($reasonLower, 'cropping') !== false || strpos($reasonLower, 'margins') !== false) {
+                        $brandStats[$brandKey]['cropping']++;
+                    }
+                    if (strpos($reasonLower, 'clutter') !== false || strpos($reasonLower, 'background') !== false) {
+                        $brandStats[$brandKey]['clutter']++;
+                    }
+                }
+            }
+            
+            // تطبيق قواعد التصحيح الذاتي ومزامنتها مع منطق البايثون
+            foreach ($brandStats as $key => &$stats) {
+                if ($stats['cropping'] >= 4) {
+                    $stats['padding_ratio'] = '0.70 (هامش أمان واسع 30%)';
+                    $stats['cropping_alert'] = true;
+                } elseif ($stats['cropping'] >= 2) {
+                    $stats['padding_ratio'] = '0.75 (هامش أمان متناسق 25%)';
+                    $stats['cropping_alert'] = true;
+                }
+                
+                if ($stats['clutter'] >= 2) {
+                    $stats['clutter_check'] = 'صارم (فحص تداخل الخلفية مفعل)';
+                    $stats['clutter_alert'] = true;
+                }
+            }
+            
+            return view('dashboard.active_learning', compact('feedbackLogs', 'brandStats'));
+        } catch (\Exception $e) {
+            return view('dashboard.active_learning', [
+                'feedbackLogs' => [],
+                'brandStats' => [],
+                'error' => 'فشل تحميل بيانات التعلم النشط: ' . $e->getMessage()
+            ]);
         }
     }
 }

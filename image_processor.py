@@ -432,7 +432,7 @@ def validate_alpha_matte(rgba_path: str, bbox_area: float = None) -> bool:
         print(f"⚠️ فشل التحقق من جودة الشفافية برمجياً: {e}")
         return False
 
-def remove_background(input_path, output_path):
+def remove_background(input_path, output_path, target_width=None, target_height=None, padding_ratio=None):
     """
     إزالة خلفية الصورة بناءً على الطريقة المحددة في الإعدادات.
     """
@@ -472,7 +472,6 @@ def remove_background(input_path, output_path):
         print("⏳ [Background Removal] Running Bria RMBG 1.4 model locally (Hugging Face)...")
         try:
             import torch
-            from PIL import Image
             from transformers import pipeline
             
             device = 0 if torch.cuda.is_available() else -1
@@ -544,18 +543,28 @@ def remove_background(input_path, output_path):
             return False
             
     elif method == "photoroom":
-        print("⏳ جاري إزالة الخلفية سحابياً باستخدام 'PhotoRoom' API...")
+        print("⏳ جاري إزالة الخلفية سحابياً باستخدام 'PhotoRoom' Image Editing API...")
         if not getattr(config, "PHOTOROOM_API_KEY", None):
             print("❌ خطأ: مفتاح PHOTOROOM_API_KEY غير موجود في config.py.")
             return False
             
         try:
-            url = "https://sdk.photoroom.com/v1/segment"
+            url = "https://image-api.photoroom.com/v2/edit"
             headers = {"x-api-key": config.PHOTOROOM_API_KEY}
+            
+            t_w = target_width or 800
+            t_h = target_height or 800
+            p_ratio = padding_ratio or 0.85
+            p_val = (1.0 - p_ratio) / 2.0
+            
             with open(input_path, 'rb') as img_file:
-                files = {'image_file': img_file}
-                # تفعيل القص التلقائي للمنتج المعزول بناءً على طلب العميل
-                data = {'format': 'png', 'crop': 'true'}
+                files = {'imageFile': img_file}
+                # نطلب صيغة شفافة PNG، ونحدد الأبعاد المطلوبة والهامش المناسب
+                data = {
+                    'outputSize': f"{t_w}x{t_h}",
+                    'padding': f"{p_val:.3f}",
+                    'exportFormat': 'png'
+                }
                 
                 response = requests.post(
                     url,
@@ -568,7 +577,7 @@ def remove_background(input_path, output_path):
             if response.status_code == 200:
                 with open(output_path, 'wb') as out:
                     out.write(response.content)
-                print("✅ تم إزالة الخلفية والقص التلقائي للهوامش عبر PhotoRoom API بنجاح!")
+                print("✅ تم إزالة الخلفية والقص والتحجيم التلقائي سحابياً عبر PhotoRoom API بنجاح!")
                 # صقل حواف الصورة وتعبئة أي فجوات شفافة داخل جسم المنتج
                 execute_high_fidelity_refinement(output_path, output_path)
                 return True
@@ -906,7 +915,7 @@ def has_pure_white_background(image_path, threshold=0.96):
         print(f"⚠️ فشل فحص الخلفية البيضاء للصورة: {e}")
         return False
 
-def process_product_image(image_url, product_name, brand, bg_removal_method=None, enhance=False, target_width=None, target_height=None):
+def process_product_image(image_url, product_name, brand, bg_removal_method=None, enhance=False, target_width=None, target_height=None, padding_ratio=None, bypass_heuristics=False):
     """
     تحميل الصورة وإزالة خلفيتها فقط - التحجيم والقص والتوسيط يتم سحابياً عبر Cloudinary.
     يرجع مسار ملف الصورة بخلفية شفافة جاهزة للرفع.
@@ -952,7 +961,8 @@ def process_product_image(image_url, product_name, brand, bg_removal_method=None
         target_size = (t_w, t_h)
             
         # التحقق مما إذا كانت الصورة ذات جودة عالية وخلفية بيضاء نقية جاهزة لتخطي القص والعزل
-        if getattr(config, 'BYPASS_WHITE_BACKGROUND_CHECK', False):
+        # نتخطى فقط في الأوتوميشن الجماعي العادي، ولكن إذا كان هناك طلب واعتماد يدوي فلا نتخطى أبداً
+        if not bg_removal_method and getattr(config, 'BYPASS_WHITE_BACKGROUND_CHECK', False):
             if has_pure_white_background(raw_path, threshold=getattr(config, 'WHITE_BACKGROUND_THRESHOLD', 0.96)):
                 print("⚡ [Bypass Check] الصورة الأصلية تمتلك خلفية بيضاء نقية وجودة عالية. تخطي التقطيع والعزل والظلال!")
                 try:
@@ -1005,6 +1015,34 @@ def process_product_image(image_url, product_name, brand, bg_removal_method=None
             print("🔄 [Fallback Smart Crop] لم يتم العثور على مربع محيط من Gemini. جاري تشغيل الاقتصاص الذكي القائم على الأهمية البصرية...")
             apply_saliency_smart_crop(raw_path, raw_path, 800, 800)
             
+        # حساب نسبة الهامش (Padding Ratio) ديناميكياً بناءً على أبعاد الصندوق المكتشف بـ AI (Gemini) أو التغذية الراجعة
+        p_ratio = padding_ratio
+        if p_ratio is None:
+            import local_cache_db
+            learned_padding = local_cache_db.get_active_learning_padding_ratio(brand)
+            if learned_padding is not None:
+                p_ratio = learned_padding
+                print(f"💡 [Active Learning] تطبيق هامش أمان مخصص للبراند '{brand}': padding_ratio={p_ratio} بسبب تكرار الرفض لقص الأطراف.")
+            else:
+                p_ratio = 0.85
+                
+        if padding_ratio is None and box:
+            try:
+                ymin, xmin, ymax, xmax = box
+                box_w = xmax - xmin
+                box_h = ymax - ymin
+                if box_h > 0 and box_w > 0:
+                    aspect = box_w / box_h
+                    if aspect < 0.5 or aspect > 2.0:
+                        p_ratio = 0.80  # حجم أصغر قليلاً لمنع التماس القريب مع الأطراف للمنتجات الطويلة أو العريضة
+                    elif aspect < 0.3 or aspect > 3.0:
+                        p_ratio = 0.75
+                    else:
+                        p_ratio = 0.85
+                    print(f"🤖 [AI Resize Detection] نسبة الهامش المحسوبة ديناميكياً بناءً على أبعاد الصندوق: {p_ratio * 100:.1f}%")
+            except Exception as e:
+                print(f"⚠️ خطأ أثناء حساب نسبة الهامش تلقائياً: {e}")
+
         # حساب مساحة المربع المحيط بالبكسل لربطه بمعايير التحقق Heuristics
         bbox_area = None
         if box:
@@ -1020,10 +1058,10 @@ def process_product_image(image_url, product_name, brand, bg_removal_method=None
                 print(f"⚠️ خطأ أثناء حساب مساحة المربع المحيط بالبكسل: {e}")
     
         # 3. إزالة الخلفية وتطبيق مسار الإصلاح الذاتي (Self-Healing Failover Path)
-        success = remove_background(raw_path, nobg_path)
+        success = remove_background(raw_path, nobg_path, target_width=t_w, target_height=t_h, padding_ratio=p_ratio)
         
-        # التحقق البرمجي التلقائي من جودة قناع الشفافية للمسار الأساسي
-        is_valid = success and validate_alpha_matte(nobg_path, bbox_area)
+        # التحقق البرمجي التلقائي من جودة قناع الشفافية للمسار الأساسي (أو تجاوزه)
+        is_valid = success and (bypass_heuristics or validate_alpha_matte(nobg_path, bbox_area))
         
         if not is_valid:
             # مسار التراجع (Failover): محاولة التراجع المحلي المجاني باستخدام النموذج الآخر أولاً
@@ -1033,10 +1071,10 @@ def process_product_image(image_url, product_name, brand, bg_removal_method=None
             fallback_nobg_path = os.path.join("temp", f"local_fallback_{safe_name}.webp")
             old_method = config.BG_REMOVAL_METHOD
             config.BG_REMOVAL_METHOD = local_failover_method
-            fallback_success = remove_background(raw_path, fallback_nobg_path)
+            fallback_success = remove_background(raw_path, fallback_nobg_path, target_width=t_w, target_height=t_h, padding_ratio=p_ratio)
             config.BG_REMOVAL_METHOD = old_method
             
-            if fallback_success and validate_alpha_matte(fallback_nobg_path, bbox_area):
+            if fallback_success and (bypass_heuristics or validate_alpha_matte(fallback_nobg_path, bbox_area)):
                 print("✅ [Self-Healing Succeeded] مسار التراجع المحلي نجح واجتاز التحقق البرمجي!")
                 nobg_path = fallback_nobg_path
                 is_valid = True
@@ -1050,10 +1088,10 @@ def process_product_image(image_url, product_name, brand, bg_removal_method=None
                 # محاكاة إزالة الخلفية عبر API
                 old_method = config.BG_REMOVAL_METHOD
                 config.BG_REMOVAL_METHOD = "remove_bg_api"
-                api_success = remove_background(raw_path, api_nobg_path)
+                api_success = remove_background(raw_path, api_nobg_path, target_width=t_w, target_height=t_h, padding_ratio=p_ratio)
                 config.BG_REMOVAL_METHOD = old_method
                 
-                if api_success and validate_alpha_matte(api_nobg_path, bbox_area):
+                if api_success and (bypass_heuristics or validate_alpha_matte(api_nobg_path, bbox_area)):
                     print("✅ [Self-Healing Succeeded] مسار التراجع السحابي نجح واجتاز التحقق البرمجي!")
                     nobg_path = api_nobg_path
                     is_valid = True
@@ -1067,29 +1105,37 @@ def process_product_image(image_url, product_name, brand, bg_removal_method=None
         final_path = os.path.join("temp", f"final_{safe_name}.webp")
         
         if nobg_path != raw_path:
-            try:
-                from PIL import Image
-                import numpy as np
-                from edge_shadow_engine import EdgeShadowEngine
-                
-                # استخراج قناع الشفافية من الصورة المعزولة الخلفية
-                with Image.open(nobg_path) as nobg_img:
-                    nobg_rgba = nobg_img.convert("RGBA")
-                    alpha_channel = np.array(nobg_rgba.getchannel('A'))
-                    
-                # تشغيل محرك معالجة الحواف Guided Filter
-                success_edge = EdgeShadowEngine.process_mask(raw_path, alpha_channel, temp_rgba)
-                
-                if success_edge:
-                    # تطبيق ظلال الاستوديو المركبة والتوسيط
-                    success_shadow = EdgeShadowEngine.apply_studio_shadows(temp_rgba, final_path, target_size=target_size)
-                    if not success_shadow:
-                        final_path = nobg_path
-                else:
-                    final_path = nobg_path
-            except Exception as e:
-                print(f"⚠️ خطأ أثناء تطبيق تنعيم الحواف والظلال: {e}")
+            is_photoroom = (config.BG_REMOVAL_METHOD.lower() == "photoroom")
+            enable_shadows = getattr(config, 'ENABLE_STUDIO_SHADOWS', False)
+            
+            # إذا تم استخدام PhotoRoom والظلال غير مفعلة، فالصورة جاهزة ومحجمة سحابياً تماماً وبخلفية شفافة
+            if is_photoroom and not enable_shadows:
+                print("✨ الصورة تم قصها وتحجيمها وتوسيطها سحابياً بالكامل عبر PhotoRoom. تخطي معالجة الحواف والظلال المحلية.")
                 final_path = nobg_path
+            else:
+                try:
+                    from PIL import Image
+                    import numpy as np
+                    from edge_shadow_engine import EdgeShadowEngine
+                    
+                    # استخراج قناع الشفافية من الصورة المعزولة الخلفية
+                    with Image.open(nobg_path) as nobg_img:
+                        nobg_rgba = nobg_img.convert("RGBA")
+                        alpha_channel = np.array(nobg_rgba.getchannel('A'))
+                        
+                    # تشغيل محرك معالجة الحواف Guided Filter
+                    success_edge = EdgeShadowEngine.process_mask(raw_path, alpha_channel, temp_rgba)
+                    
+                    if success_edge:
+                        # تطبيق ظلال الاستوديو المركبة والتوسيط
+                        success_shadow = EdgeShadowEngine.apply_studio_shadows(temp_rgba, final_path, target_size=target_size)
+                        if not success_shadow:
+                            final_path = nobg_path
+                    else:
+                        final_path = nobg_path
+                except Exception as e:
+                    print(f"⚠️ خطأ أثناء تطبيق تنعيم الحواف والظلال: {e}")
+                    final_path = nobg_path
         else:
             # إذا لم يتم عزل الخلفية، نستخدم الصورة الخام مباشرة
             final_path = raw_path
@@ -1104,7 +1150,6 @@ def process_product_image(image_url, product_name, brand, bg_removal_method=None
                     fin_arr = np.array(fin_rgba)
                     alpha = fin_arr[:, :, 3]
                     rgb = fin_arr[:, :, :3]
-                    # نعتبر البكسل منتمياً للمنتج إذا كان غير شفاف وغير أبيض بالكامل
                     is_product = (alpha > 10) & ((rgb[:, :, 0] < 250) | (rgb[:, :, 1] < 250) | (rgb[:, :, 2] < 250))
                     occupancy = np.mean(is_product)
                     print(f"📊 [Compliance Audit] نسبة مساحة المنتج المحتلة في اللوحة النهائية: {occupancy*100:.2f}% (الحد المقبول: 10% - 90%)")

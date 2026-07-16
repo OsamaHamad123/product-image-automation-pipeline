@@ -150,8 +150,9 @@ class EdgeShadowEngine:
                 
                 alpha = img.getchannel('A')
                 
-                # 2. إنشاء لوحة استوديو بيضاء بالكامل
-                studio_canvas = Image.new("RGBA", target_size, (255, 255, 255, 255))
+                # 2. إنشاء لوحة استوديو مناسبة (شفافة إذا لم تكن هناك ظلال)
+                bg_alpha = 255 if enable_shadows else 0
+                studio_canvas = Image.new("RGBA", target_size, (255, 255, 255, bg_alpha))
 
                 # 3. حساب مواقع التوسيط للمنتج
                 x = (target_size[0] - img.width) // 2
@@ -203,11 +204,12 @@ class EdgeShadowEngine:
                 studio_canvas.paste(img, (x, y), mask=img)
 
                 # 5. الحفظ بصيغة WebP خفيفة ومحسنة
-                studio_canvas.convert("RGB").save(output_webp_path, "WEBP", quality=85, method=4)
                 if enable_shadows:
+                    studio_canvas.convert("RGB").save(output_webp_path, "WEBP", quality=85, method=4)
                     print("✅ [Studio Shadow Engine] تم دمج حواف المنتج وتطبيق ظلال استوديو تفاعلية مركبة بنجاح!")
                 else:
-                    print("✅ [Studio Shadow Engine] تم دمج حواف المنتج وتوسيطه على خلفية بيضاء نقية بدون ظلال بنجاح!")
+                    studio_canvas.save(output_webp_path, "WEBP", quality=85, method=4)
+                    print("✅ [Studio Shadow Engine] تم دمج حواف المنتج وتوسيطه على خلفية شفافة نقية بدون ظلال بنجاح!")
                 return True
         except Exception as e:
             print(f"❌ [Studio Shadow Engine Error] خطأ أثناء تطبيق المعالجة والتوسيط: {e}")

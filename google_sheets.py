@@ -639,7 +639,7 @@ def extract_brand_via_gemini(product_name):
         return ""
         
     try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key={config.GEMINI_API_KEY}"
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{config.GEMINI_MODEL}:generateContent?key={config.GEMINI_API_KEY}"
         
         prompt = (
             f"Extract the brand name (manufacturer/brand name) from this e-commerce product name: '{product_name}'.\n"

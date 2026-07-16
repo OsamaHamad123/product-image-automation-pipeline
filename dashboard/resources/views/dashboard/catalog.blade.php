@@ -883,8 +883,55 @@
 
     <!-- Main Work Panel -->
     <div class="curation-panel">
+        <!-- Batch Curation Workspace -->
+        <div id="batchCurationWorkspace" class="glass-panel" style="display: none; padding: 2rem; margin-bottom: 1.5rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--panel-border); padding-bottom: 1rem; margin-bottom: 1.5rem; direction: rtl;">
+                <h3 style="font-size: 1.3rem; font-weight: 800; display: flex; align-items: center; gap: 0.65rem; color: var(--accent-purple-hover); margin: 0;">
+                    <i class="fas fa-layer-group"></i> مساحة المراجعة والاعتماد الجماعي (Batch Curation)
+                </h3>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="closeBatchCuration()" style="padding: 0.5rem 1rem;">
+                    <i class="fas fa-arrow-right"></i> العودة للمراجعة الفردية
+                </button>
+            </div>
+
+            <!-- Global Action Bar -->
+            <div style="background: var(--input-bg); border: 1px solid var(--panel-border); padding: 1.25rem; border-radius: 16px; margin-bottom: 1.75rem; display: flex; flex-direction: column; gap: 1rem; direction: rtl;">
+                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+                    <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
+                        <button type="button" class="btn" id="batchApproveBtn" onclick="submitBatchApproval()" style="background: linear-gradient(135deg, var(--success) 0%, #34d399 100%); color: white; font-weight: 800; padding: 0.65rem 1.5rem;">
+                            <i class="fas fa-check-double"></i> اعتماد الصور المحددة دفعة واحدة 🚀
+                        </button>
+                        <button type="button" class="btn btn-secondary" id="batchRejectBtn" onclick="submitBatchRejection()" style="background: rgba(244, 63, 94, 0.1); border-color: rgba(244, 63, 94, 0.2); color: var(--danger); font-weight: bold; padding: 0.65rem 1.5rem;">
+                            <i class="fas fa-trash-alt"></i> استبعاد وتخطي الصور المحددة 🗑️
+                        </button>
+                    </div>
+                    
+                    <div style="display: flex; gap: 0.5rem; align-items: center;">
+                        <button type="button" class="btn btn-secondary btn-sm" onclick="selectAllBatch(true)" style="padding: 0.4rem 0.8rem; font-size: 0.8rem;">تحديد الكل</button>
+                        <button type="button" class="btn btn-secondary btn-sm" onclick="selectAllBatch(false)" style="padding: 0.4rem 0.8rem; font-size: 0.8rem;">إلغاء التحديد</button>
+                    </div>
+                </div>
+
+                <!-- Batch Progress bar -->
+                <div id="batchCurationProgress" style="display: none; flex-direction: column; gap: 0.5rem; border-top: 1px solid var(--panel-border); padding-top: 1rem; margin-top: 0.5rem;">
+                    <div style="display: flex; justify-content: space-between; font-size: 0.85rem; font-weight: bold;">
+                        <span id="batchCurationProgressText">جاري المعالجة الجماعية...</span>
+                        <span id="batchCurationProgressPercent" style="color: var(--accent-cyan);">0%</span>
+                    </div>
+                    <div class="progress-bar-container" style="height: 8px; background: rgba(255,255,255,0.03); border-radius: 20px; border: 1px solid var(--panel-border); overflow: hidden;">
+                        <div id="batchCurationProgressBar" class="progress-bar-fill" style="width: 0%;"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Batch Grid -->
+            <div id="batchCurationGrid" class="candidates-grid" style="grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 1.75rem;">
+                <!-- Card templates will be rendered dynamically -->
+            </div>
+        </div>
+
         <!-- Search Criteria -->
-        <div class="glass-panel" style="margin-bottom: 0;">
+        <div id="searchCriteriaWrapper" class="glass-panel" style="margin-bottom: 0;">
             <h3 style="font-size: 1.1rem; border-bottom: 1px solid var(--panel-border); padding-bottom: 0.5rem; display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1.5rem;">
                 <i class="fas fa-sliders-h"></i> معايير البحث والفرز الذكي
             </h3>
@@ -1019,9 +1066,23 @@
             </div>
 
             <!-- Placeholder -->
-            <div id="placeholder" style="text-align: center; color: var(--text-secondary); padding: 5rem 0;">
-                <i class="far fa-image" style="font-size: 3.5rem; margin-bottom: 1.5rem; opacity: 0.3; display: block;"></i>
-                اختر منتجاً من القائمة الجانبية على اليمين للتحليل، أو ادخل البيانات يدوياً للبحث الفوري وعرض تفاصيل الفحص بـ Gemini Vision و CLIP.
+            <div id="placeholder" style="text-align: center; color: var(--text-secondary); padding: 3rem 0;">
+                <i class="far fa-image" style="font-size: 3.5rem; margin-bottom: 1.5rem; opacity: 0.3; display: block; margin: 0 auto 1.5rem auto;"></i>
+                <div id="placeholderNormalText">
+                    اختر منتجاً من القائمة الجانبية على اليمين للتحليل، أو ادخل البيانات يدوياً للبحث الفوري وعرض تفاصيل الفحص بـ Gemini Vision و CLIP.
+                </div>
+                
+                <!-- Batch review alert card -->
+                <div id="batchReviewAlertCard" style="display: none; background: rgba(139, 92, 246, 0.04); border: 1px solid rgba(139, 92, 246, 0.15); border-radius: 16px; padding: 2rem; max-width: 500px; margin: 2rem auto 0 auto; flex-direction: column; align-items: center; gap: 1rem; text-align: center;">
+                    <div style="font-size: 2.2rem; color: var(--accent-purple-hover);"><i class="fas fa-exclamation-triangle"></i></div>
+                    <h4 style="font-size: 1.15rem; font-weight: 800; color: var(--text-primary); margin: 0;" id="batchReviewAlertTitle">توجد منتجات معلقة للمراجعة والتدقيق البصري</h4>
+                    <p style="font-size: 0.85rem; line-height: 1.6; color: var(--text-secondary); margin: 0;" id="batchReviewAlertText">
+                        لقد اكتشف نظام الأتمتة صوراً لهؤلاء المنتجات ولكنها بحاجة لمراجعتك وتأكيدك. يمكنك مراجعة كافة الصور واعتمادها دفعة واحدة الآن بلمح البصر!
+                    </p>
+                    <button type="button" class="btn" onclick="openBatchCuration()" style="background: linear-gradient(135deg, var(--accent-purple) 0%, var(--accent-cyan) 100%); color: white; font-weight: 800; padding: 0.65rem 1.75rem; width: 100%; border: none;">
+                        <i class="fas fa-layer-group"></i> دخول مساحة المراجعة الجماعية 🚀
+                    </button>
+                </div>
             </div>
 
             <!-- Loading Spinner -->
@@ -1235,6 +1296,7 @@
     let currentFilterTab = 'all';
     let currentPage = 1;
     const itemsPerPage = 50;
+    let lastCurrentProcessed = 0;
 
     // دالة لتمرير روابط الصور الخارجية عبر البروكسي الداخلي لتجاوز حماية الـ Hotlinking
     function getImageUrl(url) {
@@ -1318,6 +1380,7 @@
         const productList = document.getElementById('productList');
         productList.innerHTML = '<p style="text-align:center; color:var(--text-secondary); padding:2rem;"><i class="fas fa-spinner fa-spin"></i> جاري تحميل المنتجات...</p>';
         try {
+            const url = forceRefresh ? '/api/products-json?refresh=true' : '/api/products-json';
             if (forceRefresh) {
                 // مسح كاش السيرفر أولاً لإجبار التحديث من Google Sheets
                 await fetch('/api/clear-products-cache', {
@@ -1325,7 +1388,7 @@
                     headers: { 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content }
                 });
             }
-            const res = await fetch('/api/products-json');
+            const res = await fetch(url);
             const data = await res.json();
             const fromCache = res.headers.get('X-Cache') === 'HIT';
             if (res.ok && data.status === 'success') {
@@ -1333,6 +1396,13 @@
                 currentPage = 1;
                 updateKPIStats();
                 renderProductList();
+                
+                // تحديث شبكة المراجعة الجماعية إذا كانت مفتوحة
+                const workspace = document.getElementById('batchCurationWorkspace');
+                if (workspace && workspace.style.display === 'block') {
+                    renderBatchCurationGrid();
+                }
+
                 // إظهار مؤشر الكاش
                 const cacheIndicator = document.getElementById('cacheIndicator');
                 if (cacheIndicator) {
@@ -1368,6 +1438,20 @@
         
         document.getElementById('tab-review').innerHTML = `المراجعة ⚠️ <span style="background: #ff9100; color: #080c14; padding: 2px 6px; border-radius: 8px; font-size: 0.75rem; margin-right: 4px; font-weight: 900;">${review}</span>`;
         document.getElementById('tab-errors').innerHTML = `أخطاء ❌ <span style="background: var(--danger); color: white; padding: 2px 6px; border-radius: 8px; font-size: 0.75rem; margin-right: 4px; font-weight: 900;">${errors}</span>`;
+        
+        // تحديث كارت التنبيه للمراجعة الجماعية
+        const alertCard = document.getElementById('batchReviewAlertCard');
+        const placeholderText = document.getElementById('placeholderNormalText');
+        if (alertCard) {
+            if (review > 0) {
+                alertCard.style.display = 'flex';
+                document.getElementById('batchReviewAlertTitle').innerText = `توجد ${review} صور معلقة للمراجعة والتدقيق البصري ⚠️`;
+                if (placeholderText) placeholderText.style.display = 'none';
+            } else {
+                alertCard.style.display = 'none';
+                if (placeholderText) placeholderText.style.display = 'block';
+            }
+        }
     }
 
     // فلترة المنتجات بناء على التبويب المختار
@@ -1797,10 +1881,10 @@
                         <div style="margin-top: 1rem; border-top: 1px solid var(--panel-border); padding-top: 0.75rem;">
                             <label style="font-size: 0.8rem; font-weight: 600; color: var(--text-secondary); display: block; margin-bottom: 0.35rem;">خوارزمية تفريغ وعزل الخلفية:</label>
                             <select id="bgRemovalMethod" style="padding: 0.45rem 0.75rem; background: var(--input-bg); border: 1px solid var(--panel-border); border-radius: 6px; color: var(--text-primary); font-family: inherit; font-size: 0.8rem; width: 100%;">
-                                <option value="bria">Bria RMBG v2 (ذكاء اصطناعي فائق)</option>
-                                <option value="rembg">Rembg Local (محلي افتراضي)</option>
-                                <option value="grabcut">GrabCut (قص مستطيل يدوي)</option>
-                                <option value="none">بدون عزل (استخدام الصورة كما هي)</option>
+                                <option value="photoroom" selected>PhotoRoom API (عزل وقص تلقائي ذكي — سحابي)</option>
+                                <option value="remove_bg_api">Remove.bg API (عزل سحابي بديل)</option>
+                                <option value="grabcut">GrabCut Local (قص مستطيل محلي — مجاني)</option>
+                                <option value="none">بدون عزل (استخدام الصورة الأصلية كما هي)</option>
                             </select>
                         </div>
 
@@ -1911,7 +1995,7 @@
         const l3 = document.getElementById('selectL3').value;
         const aiUpscale = document.getElementById('aiUpscale') ? document.getElementById('aiUpscale').checked : true;
         const aiEnhance = document.getElementById('aiEnhance') ? document.getElementById('aiEnhance').checked : false;
-        const bgRemovalMethod = document.getElementById('bgRemovalMethod') ? document.getElementById('bgRemovalMethod').value : 'bria';
+        const bgRemovalMethod = document.getElementById('bgRemovalMethod') ? document.getElementById('bgRemovalMethod').value : 'photoroom';
         
         try {
             const res = await fetch('/api/select_image', {
@@ -1994,8 +2078,28 @@
             btn.innerHTML = originalText;
             
             if (data.status === 'success') {
-                alert('🚫 تم تسجيل الرفض وحفظ التغذية الراجعة لتدريب مصنف الذكاء الاصطناعي بنجاح!');
-                loadProducts();
+                loadProducts(); // Refresh sidebar states in background
+                
+                // Replace the recommended card with a refined query input
+                const recommendedContainer = document.getElementById('recommendedContainer');
+                if (recommendedContainer) {
+                    recommendedContainer.innerHTML = `
+                        <div style="background-color: rgba(239, 68, 68, 0.1); border: 1px solid #ef4444; color: var(--text-primary); border-radius: 16px; padding: 1.5rem; text-align: center; display: flex; flex-direction: column; gap: 1rem; margin-bottom: 1.5rem;">
+                            <div style="font-size: 1.2rem; font-weight: bold; color: var(--danger);"><i class="fas fa-times-circle"></i> تم استبعاد الصورة بنجاح وتوثيق سبب الاستبعاد.</div>
+                            <p style="font-size: 0.9rem; color: var(--text-secondary); margin: 0;">لتصحيح البحث والعثور على صورة أفضل للمنتج، يرجى كتابة استعلام بحث مخصص أدناه ثم النقر على "إعادة البحث":</p>
+                            <div style="display: flex; gap: 0.75rem; max-width: 500px; margin: 0 auto; width: 100%;">
+                                <input type="text" id="rejectionSearchQuery" value="${document.getElementById('customQuery').value || (brand + ' ' + name).trim()}" style="flex: 1; padding: 0.6rem 1rem; background: var(--input-bg); border: 1px solid var(--panel-border); border-radius: 10px; color: var(--text-primary); font-family: inherit; font-size: 0.9rem;">
+                                <button type="button" class="btn" onclick="retrySearchWithCustomQuery()" style="background: linear-gradient(135deg, var(--accent-purple) 0%, var(--accent-cyan) 100%); color: white; font-weight: bold; padding: 0.6rem 1.25rem;"><i class="fas fa-search"></i> إعادة البحث</button>
+                            </div>
+                        </div>
+                    `;
+                }
+                
+                const overallStatus = document.getElementById('overallStatus');
+                if (overallStatus) {
+                    overallStatus.innerText = 'تم الاستبعاد (في انتظار تحسين البحث)';
+                    overallStatus.className = 'status-text failed';
+                }
             } else {
                 alert('❌ فشل تسجيل الرفض: ' + data.error);
             }
@@ -2005,6 +2109,17 @@
             btn.innerHTML = originalText;
             alert('❌ خطأ اتصال بالخادم.');
         }
+    }
+
+    // دالة إعادة البحث الفوري باستعلام مخصص بعد استبعاد صورة
+    function retrySearchWithCustomQuery() {
+        const queryVal = document.getElementById('rejectionSearchQuery').value.trim();
+        if (!queryVal) {
+            alert('❌ يرجى كتابة استعلام بحث أولاً.');
+            return;
+        }
+        document.getElementById('customQuery').value = queryVal;
+        document.getElementById('submitBtn').click();
     }
 
     // رندرة شبكة الصور المرشحة المفحوصة
@@ -2353,6 +2468,265 @@
         document.getElementById('catalogRunAllModal').style.display = 'none';
     }
 
+    // =============================================
+    // 👥 Batch Curation Mode Functions
+    // =============================================
+    function openBatchCuration() {
+        const workspace = document.getElementById('batchCurationWorkspace');
+        const searchCriteria = document.getElementById('searchCriteriaWrapper');
+        const placeholder = document.getElementById('placeholder');
+        const results = document.getElementById('resultsContent');
+        const loading = document.getElementById('loading');
+
+        workspace.style.display = 'block';
+        searchCriteria.style.display = 'none';
+        placeholder.style.display = 'none';
+        results.style.display = 'none';
+        loading.style.display = 'none';
+
+        renderBatchCurationGrid();
+    }
+
+    function closeBatchCuration() {
+        document.getElementById('batchCurationWorkspace').style.display = 'none';
+        document.getElementById('searchCriteriaWrapper').style.display = 'block';
+        document.getElementById('placeholder').style.display = 'block';
+        updateKPIStats(); // This will show/hide the alert card based on current review count
+    }
+
+    function renderBatchCurationGrid() {
+        const grid = document.getElementById('batchCurationGrid');
+        grid.innerHTML = '';
+
+        const pending = currentProducts.filter(p => p.needs_review);
+        if (pending.length === 0) {
+            grid.innerHTML = '<p style="color: var(--text-secondary); text-align: center; grid-column: 1/-1; padding: 3rem; font-weight: bold;">🎉 لا توجد منتجات معلقة للمراجعة والتدقيق حالياً.</p>';
+            return;
+        }
+
+        pending.forEach(p => {
+            const card = document.createElement('div');
+            card.className = 'candidate-card';
+            card.id = `batch-card-${p.row_number}`;
+            card.style.position = 'relative';
+
+            card.innerHTML = `
+                <div class="candidate-img-box bg-checkerboard" style="height: 180px; padding: 1rem; position: relative;">
+                    <input type="checkbox" class="batch-select-checkbox" data-row="${p.row_number}" data-url="${p.needs_review_url}" data-name="${p.product_name.replace(/"/g, '&quot;')}" data-brand="${p.brand.replace(/"/g, '&quot;')}" checked style="position: absolute; top: 0.75rem; right: 0.75rem; width: 20px; height: 20px; z-index: 10; cursor: pointer;">
+                    <img src="${getImageUrl(p.needs_review_url)}" alt="Product Image" onerror="this.src='https://placehold.co/180x180?text=Error'">
+                </div>
+                <div class="candidate-info" style="padding: 1rem; display: flex; flex-direction: column; gap: 0.5rem; text-align: right; direction: rtl;">
+                    <span class="badge-row-number" style="position: static; display: inline-block; align-self: flex-start; margin-bottom: 0.25rem;">صف ${p.row_number}</span>
+                    <h4 style="font-size: 0.9rem; font-weight: 800; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; color: var(--text-primary);" title="${p.product_name}">${p.product_name}</h4>
+                    <p style="font-size: 0.75rem; color: var(--text-secondary); margin: 0; font-weight: 600;">البراند: <strong style="color: var(--text-primary);">${p.brand}</strong></p>
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="excludeBatchProduct(${p.row_number})" style="width: 100%; font-size: 0.75rem; padding: 0.35rem 0.5rem; margin-top: 0.5rem; background: rgba(239, 68, 68, 0.05); color: var(--danger); border-color: rgba(239, 68, 68, 0.15);">
+                        <i class="fas fa-times"></i> استبعاد وتخطي
+                    </button>
+                </div>
+            `;
+            grid.appendChild(card);
+        });
+    }
+
+    function selectAllBatch(val) {
+        document.querySelectorAll('.batch-select-checkbox').forEach(cb => {
+            cb.checked = val;
+            const card = cb.closest('.candidate-card');
+            if (card) {
+                card.style.opacity = val ? '1' : '0.5';
+            }
+        });
+    }
+
+    function excludeBatchProduct(rowNum) {
+        const card = document.getElementById(`batch-card-${rowNum}`);
+        const cb = card.querySelector('.batch-select-checkbox');
+        if (cb) {
+            cb.checked = false;
+            card.style.opacity = '0.4';
+        }
+    }
+
+    async function submitBatchApproval() {
+        const selectedCbs = Array.from(document.querySelectorAll('.batch-select-checkbox:checked'));
+        if (selectedCbs.length === 0) {
+            alert('❌ يرجى تحديد منتج واحد على الأقل للاعتماد.');
+            return;
+        }
+
+        if (!confirm(`هل أنت متأكد من اعتماد الصور لـ ${selectedCbs.length} منتجات دفعة واحدة؟`)) {
+            return;
+        }
+
+        const approveBtn = document.getElementById('batchApproveBtn');
+        const rejectBtn = document.getElementById('batchRejectBtn');
+        const progressDiv = document.getElementById('batchCurationProgress');
+        const progressBar = document.getElementById('batchCurationProgressBar');
+        const progressPercent = document.getElementById('batchCurationProgressPercent');
+        const progressText = document.getElementById('batchCurationProgressText');
+
+        approveBtn.disabled = true;
+        rejectBtn.disabled = true;
+        progressDiv.style.display = 'flex';
+
+        const total = selectedCbs.length;
+        let completed = 0;
+        let success = 0;
+        let failed = 0;
+
+        const w = getOutputWidth();
+        const h = getOutputHeight();
+        const paddingRatio = parseFloat(document.getElementById('paddingRatio').value);
+        const bgColor = document.getElementById('bgColor').value;
+
+        // Loop sequentially to avoid overloading Sheets/concurrency limits
+        for (const cb of selectedCbs) {
+            const row = cb.dataset.row;
+            const url = cb.dataset.url;
+            const name = cb.dataset.name;
+            const brand = cb.dataset.brand;
+
+            completed++;
+            const percent = Math.round((completed / total) * 100);
+            progressPercent.innerText = percent + '%';
+            progressBar.style.width = percent + '%';
+            progressText.innerHTML = `جاري معالجة الصف ${row} (${completed}/${total}): <strong style="color: var(--accent-cyan);">${name}</strong>`;
+
+            try {
+                const res = await fetch('/api/select_image', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
+                    },
+                    body: JSON.stringify({
+                        image_url: url,
+                        product_name: name,
+                        brand: brand,
+                        row_number: row,
+                        upscale: true,
+                        enhance: false,
+                        bg_removal_method: 'photoroom',
+                        target_width: w,
+                        target_height: h,
+                        padding_ratio: paddingRatio,
+                        bg_color: bgColor
+                    })
+                });
+                
+                const data = await res.json();
+                if (data.status === 'success') {
+                    success++;
+                    // Visual feedback
+                    const card = cb.closest('.candidate-card');
+                    if (card) {
+                        card.style.borderColor = 'var(--success)';
+                        card.style.background = 'rgba(16, 185, 129, 0.05)';
+                    }
+                } else {
+                    failed++;
+                    const card = cb.closest('.candidate-card');
+                    if (card) {
+                        card.style.borderColor = 'var(--danger)';
+                        card.style.background = 'rgba(239, 68, 68, 0.05)';
+                    }
+                }
+            } catch (err) {
+                console.error(err);
+                failed++;
+            }
+        }
+
+        progressText.innerHTML = `🏁 اكتملت المعالجة الجماعية! (نجاح: ${success} | فشل: ${failed})`;
+        alert(`🎉 تمت عملية الاعتماد الجماعي بنجاح!\nالناجحة: ${success}\nالفاشلة: ${failed}`);
+
+        approveBtn.disabled = false;
+        rejectBtn.disabled = false;
+        progressDiv.style.display = 'none';
+
+        // Reload products list from Sheets and refresh UI
+        await loadProducts(true);
+        openBatchCuration(); // Refresh the grid
+    }
+
+    async function submitBatchRejection() {
+        const selectedCbs = Array.from(document.querySelectorAll('.batch-select-checkbox:checked'));
+        if (selectedCbs.length === 0) {
+            alert('❌ يرجى تحديد منتج واحد على الأقل للاستبعاد.');
+            return;
+        }
+
+        if (!confirm(`هل أنت متأكد من استبعاد وتخطي الصور لـ ${selectedCbs.length} منتجات دفعة واحدة؟`)) {
+            return;
+        }
+
+        const approveBtn = document.getElementById('batchApproveBtn');
+        const rejectBtn = document.getElementById('batchRejectBtn');
+        const progressDiv = document.getElementById('batchCurationProgress');
+        const progressBar = document.getElementById('batchCurationProgressBar');
+        const progressPercent = document.getElementById('batchCurationProgressPercent');
+        const progressText = document.getElementById('batchCurationProgressText');
+
+        approveBtn.disabled = true;
+        rejectBtn.disabled = true;
+        progressDiv.style.display = 'flex';
+
+        const total = selectedCbs.length;
+        let completed = 0;
+        let success = 0;
+        let failed = 0;
+
+        for (const cb of selectedCbs) {
+            const row = cb.dataset.row;
+            const url = cb.dataset.url;
+            const name = cb.dataset.name;
+            const brand = cb.dataset.brand;
+
+            completed++;
+            const percent = Math.round((completed / total) * 100);
+            progressPercent.innerText = percent + '%';
+            progressBar.style.width = percent + '%';
+            progressText.innerHTML = `جاري استبعاد الصف ${row} (${completed}/${total}): <strong style="color: var(--danger);">${name}</strong>`;
+
+            try {
+                const res = await fetch('/api/reject_image', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
+                    },
+                    body: JSON.stringify({
+                        image_url: url,
+                        product_name: name,
+                        brand: brand,
+                        row_number: row,
+                        rejection_reasons: ['BRAND_STYLE_MISMATCH']
+                    })
+                });
+                
+                const data = await res.json();
+                if (data.status === 'success') {
+                    success++;
+                } else {
+                    failed++;
+                }
+            } catch (err) {
+                console.error(err);
+                failed++;
+            }
+        }
+
+        progressText.innerHTML = `🏁 اكتمل استبعاد الصور! (نجاح: ${success} | فشل: ${failed})`;
+        alert(`🛑 تمت عملية الاستبعاد بنجاح!\nالناجحة: ${success}\nالفاشلة: ${failed}`);
+
+        approveBtn.disabled = false;
+        rejectBtn.disabled = false;
+        progressDiv.style.display = 'none';
+
+        await loadProducts(true);
+        openBatchCuration();
+    }
+
     async function checkActiveBatch() {
         try {
             const res = await fetch('/api/batch-status');
@@ -2366,6 +2740,12 @@
                 isBatchRunning = true;
                 startOpts.style.display = 'none';
                 progSec.style.display = 'flex';
+                
+                // If the number of processed products has increased, reload the catalog!
+                if (data.current > lastCurrentProcessed) {
+                    lastCurrentProcessed = data.current;
+                    loadProducts(true); // reload list from Sheets bypassing cache!
+                }
                 
                 const percent = data.total > 0 ? Math.round((data.current / data.total) * 100) : 0;
                 document.getElementById('modalProgressPercent').innerText = percent + '%';
