@@ -8,9 +8,13 @@ class ApiController extends Controller
 {
     private function getPythonPath()
     {
-        $localVenv = base_path('../.venv/Scripts/python.exe');
-        if (file_exists($localVenv)) {
-            return $localVenv;
+        $winVenv = base_path('../.venv/Scripts/python.exe');
+        if (file_exists($winVenv)) {
+            return $winVenv;
+        }
+        $linuxVenv = base_path('../.venv/bin/python');
+        if (file_exists($linuxVenv)) {
+            return $linuxVenv;
         }
         return env('PYTHON_PATH', 'python');
     }
@@ -207,11 +211,12 @@ class ApiController extends Controller
     public function runAll(Request $request)
     {
         try {
-            $scriptPath = 'f:\\automation\\main.py';
-            $logPath = 'f:\\automation\\temp\\pipeline.log';
-            $lockFile = 'f:\\automation\\temp\\pipeline.lock';
+            $basePath = base_path('..');
+            $scriptPath = $basePath . DIRECTORY_SEPARATOR . 'main.py';
+            $tempDir = $basePath . DIRECTORY_SEPARATOR . 'temp';
+            $logPath = $tempDir . DIRECTORY_SEPARATOR . 'pipeline.log';
+            $lockFile = $tempDir . DIRECTORY_SEPARATOR . 'pipeline.lock';
             
-            $tempDir = 'f:\\automation\\temp';
             if (!file_exists($tempDir)) {
                 mkdir($tempDir, 0777, true);
             }
@@ -227,20 +232,25 @@ class ApiController extends Controller
 
             $pythonPath = $this->getPythonPath();
             
-            // تشغيل تهيئة الطابور ثم البايثون كـ Worker كعملية خلفية واحدة موحدة لتجنب انسداد استجابة الخادم
-            $cmd = "cmd /c cd /d f:\\automation && \"{$pythonPath}\" \"{$scriptPath}\" --enqueue > \"{$logPath}\" 2>&1 && \"{$pythonPath}\" -u \"{$scriptPath}\" --worker >> \"{$logPath}\" 2>&1";
-            
-            try {
-                if (class_exists('COM')) {
-                    $WshShell = new \COM("WScript.Shell");
-                    $WshShell->Run($cmd, 0, false);
-                } else {
-                    throw new \Exception("COM class is not loaded");
+            if (strncasecmp(PHP_OS, 'WIN', 3) === 0) {
+                // Windows background execution
+                $cmd = "cmd /c cd /d \"" . $basePath . "\" && \"" . $pythonPath . "\" \"" . $scriptPath . "\" --enqueue > \"" . $logPath . "\" 2>&1 && \"" . $pythonPath . "\" -u \"" . $scriptPath . "\" --worker >> \"" . $logPath . "\" 2>&1";
+                try {
+                    if (class_exists('COM')) {
+                        $WshShell = new \COM("WScript.Shell");
+                        $WshShell->Run($cmd, 0, false);
+                    } else {
+                        throw new \Exception("COM class is not loaded");
+                    }
+                } catch (\Throwable $ex) {
+                    $popenCmd = "start /B \"\" {$cmd}";
+                    pclose(popen($popenCmd, "r"));
                 }
-            } catch (\Throwable $ex) {
-                // تراجع تشغيلي في حال عدم تفعيل COM أو تعطلها
-                $popenCmd = "start /B \"\" {$cmd}";
-                pclose(popen($popenCmd, "r"));
+            } else {
+                // Linux background execution
+                $cmd = "cd \"" . $basePath . "\" && \"" . $pythonPath . "\" \"" . $scriptPath . "\" --enqueue > \"" . $logPath . "\" 2>&1 && \"" . $pythonPath . "\" -u \"" . $scriptPath . "\" --worker >> \"" . $logPath . "\" 2>&1";
+                $linuxCmd = "nohup " . $cmd . " > /dev/null 2>&1 &";
+                shell_exec($linuxCmd);
             }
             
             return response()->json(['status' => 'success', 'message' => 'Full automation queue worker started in background.']);
@@ -277,14 +287,26 @@ class ApiController extends Controller
             // Table not loaded yet
         }
         
-        $lockFile = 'f:\\automation\\temp\\pipeline.lock';
+        $basePath = base_path('..');
+        $lockFile = $basePath . DIRECTORY_SEPARATOR . 'temp' . DIRECTORY_SEPARATOR . 'pipeline.lock';
         $isRunning = false;
         if (file_exists($lockFile)) {
             $pid = trim(file_get_contents($lockFile));
             if (!empty($pid) && is_numeric($pid)) {
-                $output = shell_exec("tasklist /FI \"PID eq {$pid}\" 2>&1");
-                if (strpos($output, $pid) !== false && strpos(strtolower($output), 'python') !== false) {
-                    $isRunning = true;
+                if (strncasecmp(PHP_OS, 'WIN', 3) === 0) {
+                    $output = shell_exec("tasklist /FI \"PID eq {$pid}\" 2>&1");
+                    if (strpos($output, $pid) !== false && strpos(strtolower($output), 'python') !== false) {
+                        $isRunning = true;
+                    }
+                } else {
+                    if (function_exists('posix_kill')) {
+                        $isRunning = @posix_kill($pid, 0);
+                    } else {
+                        $output = shell_exec("ps -p {$pid} 2>&1");
+                        if (strpos($output, $pid) !== false) {
+                            $isRunning = true;
+                        }
+                    }
                 }
             }
         }
@@ -356,7 +378,8 @@ class ApiController extends Controller
     public function resetBatch()
     {
         try {
-            $lockFile = 'f:\\automation\\temp\\pipeline.lock';
+            $basePath = base_path('..');
+            $lockFile = $basePath . DIRECTORY_SEPARATOR . 'temp' . DIRECTORY_SEPARATOR . 'pipeline.lock';
             if (file_exists($lockFile)) {
                 @unlink($lockFile);
             }
