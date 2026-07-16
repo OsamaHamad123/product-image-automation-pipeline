@@ -187,7 +187,8 @@ class ParallelConsensusScraper:
             "q": query,
             "searchType": "image",
             "imgSize": "xxlarge",
-            "fileType": "jpg|png"
+            "fileType": "jpg|png",
+            "gl": "ae"  # توطين نتائج البحث في دولة الإمارات (UAE Localization) لضمان جلب المنتجات المحلية
         }
         try:
             async with session.get(url, params=params, timeout=6) as r:
@@ -225,7 +226,7 @@ class ParallelConsensusScraper:
         from curl_cffi.requests import AsyncSession
         import json
         encoded_query = urllib.parse.quote_plus(query)
-        url = f"https://www.bing.com/images/search?q={encoded_query}"
+        url = f"https://www.bing.com/images/search?q={encoded_query}&cc=AE"  # توطين نتائج محرك بحث بينج في الإمارات (cc=AE)
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
