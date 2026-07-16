@@ -10,6 +10,7 @@ Route::get('/catalog', [ProductController::class, 'catalog'])->name('dashboard.c
 Route::get('/active-learning', [ProductController::class, 'activeLearning'])->name('dashboard.active_learning');
 Route::get('/errors', [ProductController::class, 'errors'])->name('dashboard.errors');
 Route::get('/rich-catalog', [ProductController::class, 'richCatalog'])->name('dashboard.rich_catalog');
+Route::get('/batch-automation', [ProductController::class, 'batchAutomation'])->name('dashboard.batch_automation');
 Route::get('/api/rich-products', [ProductController::class, 'getRichProductsJson']);
 Route::post('/api/active-learning/reset', [ApiController::class, 'resetActiveLearning']);
 Route::post('/api/failures/retry', [ApiController::class, 'retryFailures']);
@@ -31,6 +32,9 @@ Route::post('/api/stop-batch', [ApiController::class, 'stopBatch']);
 Route::post('/api/stop_batch', [ApiController::class, 'stopBatch']);
 Route::get('/api/batch_status', [ApiController::class, 'batchStatus']);
 Route::get('/api/batch-status', [ApiController::class, 'batchStatus']);
+Route::post('/api/batch/pause', [ApiController::class, 'pauseBatch']);
+Route::post('/api/batch/resume', [ApiController::class, 'resumeBatch']);
+Route::post('/api/batch/reset', [ApiController::class, 'resetBatch']);
 
 // إدارة الخدمات والخوادم تلقائياً
 Route::get('/api/system/status', [ApiController::class, 'systemStatus']);

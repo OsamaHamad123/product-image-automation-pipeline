@@ -446,6 +446,12 @@
                         <span>فرز واعتماد الصور</span>
                     </a>
                 </li>
+                <li class="sidebar-menu-item @yield('nav_batch')">
+                    <a href="{{ route('dashboard.batch_automation') }}">
+                        <i class="fas fa-magic" style="width: 20px; text-align: center;"></i>
+                        <span>التحكم والأتمتة الجماعية</span>
+                    </a>
+                </li>
                 <li class="sidebar-menu-item @yield('nav_active_learning')">
                     <a href="{{ route('dashboard.active_learning') }}">
                         <i class="fas fa-brain" style="width: 20px; text-align: center;"></i>
@@ -465,6 +471,24 @@
                     </a>
                 </li>
             </ul>
+            
+            <!-- مؤشر حالة النظام المتوهج -->
+            <div id="systemStateIndicator" style="margin: 1.5rem 1rem; padding: 1rem; border-radius: 12px; background: rgba(255,255,255,0.03); border: 1px solid var(--panel-border); transition: all 0.3s ease;">
+                <div style="display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.4rem;">
+                    <span id="stateDot" class="status-dot fas fa-check-circle" style="width: 14px; height: 14px; border-radius: 50%; color: var(--success); display: inline-flex; align-items: center; justify-content: center;"></span>
+                    <span id="stateLabel" style="font-size: 0.85rem; font-weight: bold; color: var(--text-primary);">النظام خامل</span>
+                </div>
+                <div id="stateProgressContainer" style="display: none; margin-top: 0.5rem;">
+                    <div style="display: flex; justify-content: space-between; font-size: 0.75rem; color: var(--text-secondary); margin-bottom: 0.25rem;">
+                        <span id="stateProgressText">0/0 منتجات</span>
+                        <span id="statePercentText">0%</span>
+                    </div>
+                    <div style="width: 100%; height: 6px; background: rgba(0,0,0,0.3); border-radius: 3px; overflow: hidden;">
+                        <div id="stateProgressBar" style="width: 0%; height: 100%; background: var(--accent-gradient); transition: width 0.3s ease;"></div>
+                    </div>
+                    <div id="stateActiveProduct" style="font-size: 0.7rem; color: var(--text-secondary); margin-top: 0.4rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;" title=""></div>
+                </div>
+            </div>
             
             <div class="sidebar-footer">
                 <button class="theme-toggle-btn" onclick="toggleTheme()">
@@ -505,6 +529,77 @@
                 document.getElementById('themeIcon').className = 'fas fa-moon';
             }
         });
+
+        async function updateSidebarStatus() {
+            try {
+                const res = await fetch('/api/batch-status');
+                const data = await res.json();
+                
+                const dot = document.getElementById('stateDot');
+                const label = document.getElementById('stateLabel');
+                const progressContainer = document.getElementById('stateProgressContainer');
+                const panel = document.getElementById('systemStateIndicator');
+                
+                if (data.status === 'pre_caching' || data.is_running) {
+                    if (data.pause_requested === 1) {
+                        dot.style.color = 'var(--warning)';
+                        dot.className = 'status-dot fas fa-pause-circle';
+                        label.innerText = 'الأتمتة موقوفة مؤقتاً';
+                        panel.style.boxShadow = '0 0 15px rgba(245, 158, 11, 0.15)';
+                        panel.style.borderColor = 'rgba(245, 158, 11, 0.3)';
+                    } else {
+                        dot.style.color = 'var(--accent-cyan)';
+                        dot.className = 'status-dot fas fa-spinner fa-spin';
+                        label.innerText = 'جاري التحضير المسبق...';
+                        panel.style.boxShadow = '0 0 15px rgba(0, 210, 255, 0.15)';
+                        panel.style.borderColor = 'rgba(0, 210, 255, 0.3)';
+                    }
+                    
+                    progressContainer.style.display = 'block';
+                    const total = data.total || 0;
+                    const current = data.current || 0;
+                    const percent = total > 0 ? Math.round((current / total) * 100) : 0;
+                    
+                    document.getElementById('stateProgressText').innerText = `${current}/${total} منتج`;
+                    document.getElementById('statePercentText').innerText = `${percent}%`;
+                    document.getElementById('stateProgressBar').style.width = `${percent}%`;
+                    
+                    const activeP = document.getElementById('stateActiveProduct');
+                    if (data.current_product) {
+                        activeP.innerText = `المنتج: ${data.current_product}`;
+                        activeP.title = data.current_product;
+                    } else {
+                        activeP.innerText = '';
+                    }
+                } else if (data.status === 'curation_pending') {
+                    dot.style.color = 'var(--warning)';
+                    dot.className = 'status-dot fas fa-clock';
+                    label.innerText = 'بانتظار الفرز والاعتماد البشري';
+                    panel.style.boxShadow = '0 0 15px rgba(245, 158, 11, 0.15)';
+                    panel.style.borderColor = 'rgba(245, 158, 11, 0.3)';
+                    progressContainer.style.display = 'none';
+                } else if (data.status === 'ingesting') {
+                    dot.style.color = 'var(--accent-purple-hover)';
+                    dot.className = 'status-dot fas fa-circle-notch fa-spin';
+                    label.innerText = 'جاري رفع الصور والبيانات...';
+                    panel.style.boxShadow = '0 0 15px rgba(139, 92, 246, 0.15)';
+                    panel.style.borderColor = 'rgba(139, 92, 246, 0.3)';
+                    progressContainer.style.display = 'none';
+                } else {
+                    dot.style.color = 'var(--success)';
+                    dot.className = 'status-dot fas fa-check-circle';
+                    label.innerText = 'نظام الأتمتة جاهز وخامل';
+                    panel.style.boxShadow = 'none';
+                    panel.style.borderColor = 'var(--panel-border)';
+                    progressContainer.style.display = 'none';
+                }
+            } catch (e) {
+                // Ignore API errors
+            }
+        }
+        
+        setInterval(updateSidebarStatus, 4000);
+        window.addEventListener('load', updateSidebarStatus);
     </script>
     @yield('scripts')
 </body>

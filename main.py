@@ -334,12 +334,88 @@ def run_enqueue_mode():
         print(f"❌ [Enqueue Error] فشل بناء الطابور: {e}")
         sys.exit(1)
 
+def pre_cache_product_candidates(task):
+    """
+    البحث المسبق وجلب الصور المرشحة وحفظها كاش لصف المنتج لتسريع الفرز البشري لاحقاً
+    دون الكتابة لشيت جوجل أو Cloudinary.
+    """
+    name = task["product_name"]
+    brand = task["brand"]
+    query = task["search_query"] if task["search_query"] else f"{name} {brand}".strip()
+    
+    print(f"🕵️ [Pre-Cache] جاري البحث عن مرشحات بصريّة لـ: [{name}]")
+    
+    trace = {}
+    max_retries = 3
+    best_image = None
+    retry_delay = 2.0
+    
+    for attempt in range(1, max_retries + 1):
+        try:
+            best_image = image_search.search_best_product_image(
+                query, 
+                name, 
+                brand, 
+                product_name_ar=task.get("product_name_ar", ""), 
+                brand_ar=task.get("brand_ar", ""),
+                barcode=task.get("barcode", ""),
+                category=task.get("category", ""),
+                origin=task.get("origin", ""),
+                trace=trace,
+                skip_cache=True
+            )
+            if best_image:
+                break
+        except Exception as ex:
+            print(f"⚠️ [Attempt {attempt}/{max_retries}] فشل البحث للمنتج [{name}]: {ex}")
+            
+        if attempt < max_retries:
+            print(f"⏱️ الانتظار لمدة {retry_delay:.1f} ثانية قبل إعادة المحاولة...")
+            import time
+            time.sleep(retry_delay)
+            retry_delay *= 2
+    
+    candidates = []
+    seen_urls = set()
+    if best_image:
+        if best_image.get("source") in ["sqlite_cache", "visual_duplicate"]:
+            candidates.append({
+                "url": best_image["url"],
+                "title": best_image.get("title", "صورة مسترجعة من الكاش المحلي"),
+                "status": "accepted",
+                "width": best_image.get("width", 800),
+                "height": best_image.get("height", 800)
+            })
+        else:
+            if trace and 'steps' in trace:
+                for step in trace['steps']:
+                    if 'candidates' in step:
+                        for c in step['candidates']:
+                            url = c.get('url')
+                            if url and url not in seen_urls:
+                                seen_urls.add(url)
+                                candidates.append(c)
+                                
+        # حفظ المرشحات في قاعدة البيانات
+        local_cache_db.save_curation_candidates(task["row_number"], name, brand, candidates, best_image["url"])
+        local_cache_db.update_task_status(task["id"], "ready_for_review")
+        print(f"✅ [Pre-Cache] تم تجهيز {len(candidates)} صور مرشحة للصف {task['row_number']} وحفظها في الكاش بنجاح.")
+        return "success"
+    else:
+        local_cache_db.update_task_status(task["id"], "failed", "No matching images found during search")
+        print(f"❌ [Pre-Cache] لم يتم العثور على أي صورة للمنتج في الصف {task['row_number']}.")
+        return "failed"
+
 def run_worker_mode():
     """
-    تشغيل كمعالج خلفية دائم يسحب المهام من طابور SQLite
+    تشغيل كمعالج خلفية دائم يسحب المهام من طابور SQLite ويعالجها بالتوازي
     """
+    from concurrent.futures import ThreadPoolExecutor
+    import concurrent.futures
+    import threading
     import subprocess
-    lock_file = "temp/pipeline.lock" # حفاظاً على التوافق مع ApiController.php
+    
+    lock_file = "temp/pipeline.lock"
     
     # 1. منع تشغيل أكثر من وركر واحد بالتزامن
     try:
@@ -356,7 +432,6 @@ def run_worker_mode():
     except Exception:
         pass
         
-    # كتابة معرف العملية الحالي في ملف القفل
     try:
         with open(lock_file, "w") as f:
             f.write(str(os.getpid()))
@@ -364,12 +439,11 @@ def run_worker_mode():
         pass
         
     print("=" * 60)
-    print("🤖 طابور مهام الأتمتة الممنهج (SQLite Worker) قيد العمل...")
+    print("🤖 طابور مهام الأتمتة الممنهج (Parallel SQLite Worker) قيد العمل...")
     print("=" * 60)
     
     load_run_config()
     
-    # الاتصال بـ Google Sheets لفتح الجلسة
     sheets_client = google_sheets.get_sheets_client()
     if not sheets_client:
         print("❌ [Worker] فشل الاتصال بـ Google Sheets API.")
@@ -379,51 +453,93 @@ def run_worker_mode():
         print(f"❌ [Worker] لم يتم العثور على الشيت: {config.SPREADSHEET_NAME_OR_URL}")
         return
         
-    # جلب مؤشر عمود الرابط للمنتج
     _, link_column_index = google_sheets.get_products(worksheet)
-    
     google_sheets.init_async_queue(config.CREDENTIALS_FILE, config.SPREADSHEET_NAME_OR_URL)
     
-    consecutive_idle_checks = 0
+    db_lock = threading.Lock()
+    
+    # تحديث الحالة البدئية للأتمتة في قاعدة البيانات
+    stats = local_cache_db.get_queue_statistics()
+    local_cache_db.update_automation_state(
+        status='pre_caching',
+        total=stats['total'],
+        processed=stats['completed'] + stats['failed'] + stats['processing'],
+        success=stats['completed'],
+        failed=stats['failed']
+    )
+    
+    # دالة تنفيذ المهمة الفرعية في الثريد
+    def worker_task_runner(t):
+        try:
+            local_cache_db.update_automation_state(status='pre_caching', current_product=t['product_name'])
+            pre_cache_product_candidates(t)
+            
+            st = local_cache_db.get_queue_statistics()
+            local_cache_db.update_automation_state(
+                status='pre_caching',
+                processed=st['completed'] + st['failed'] + st['processing'],
+                success=st['completed'],
+                failed=st['failed']
+            )
+        except Exception as e:
+            local_cache_db.update_task_status(t["id"], "failed", f"Unexpected worker error: {str(e)}")
+            print(f"❌ [Worker Thread Error] فشل معالجة المهمة للصف {t['row_number']}: {e}")
+            st = local_cache_db.get_queue_statistics()
+            local_cache_db.update_automation_state(
+                status='pre_caching',
+                processed=st['completed'] + st['failed'] + st['processing'],
+                success=st['completed'],
+                failed=st['failed']
+            )
+            
+    # تشغيل منفذ ثريد متوازي بعدد 3 ثريدات متزامنة
+    max_workers = 3
+    active_futures = []
+    
     try:
-        while True:
-            stats = local_cache_db.get_queue_statistics()
-            task = local_cache_db.fetch_next_task()
-            
-            if not task:
-                consecutive_idle_checks += 1
-                if consecutive_idle_checks >= 5: # انتظار 5 ثوانٍ فارغة قبل الإغلاق
-                    print("🏁 الطابور فارغ. خروج الوركر بأمان وتوفير الموارد.")
-                    break
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            while True:
+                active_futures = [f for f in active_futures if not f.done()]
+                
+                # التحقق مما إذا كان هناك طلب إيقاف مؤقت نشط
+                state = local_cache_db.get_automation_state()
+                if state.get("pause_requested") == 1:
+                    time.sleep(1)
+                    continue
+                
+                if len(active_futures) < max_workers:
+                    with db_lock:
+                        task = local_cache_db.fetch_next_task()
+                        
+                    if task:
+                        print(f"🔄 [Queue] تم سحب مهمة جديدة للصف {task['row_number']} وجدولتها بالتوازي...")
+                        fut = executor.submit(worker_task_runner, task)
+                        active_futures.append(fut)
+                        continue
+                
+                if len(active_futures) == 0:
+                    stats = local_cache_db.get_queue_statistics()
+                    if stats["pending"] == 0:
+                        print("🏁 الطابور فارغ تماماً وكل المهام تم توزيعها. خروج الوركر بأمان وتوفير الموارد.")
+                        break
+                
                 time.sleep(1)
-                continue
-                
-            consecutive_idle_checks = 0
-            task_id = task["id"]
-            row_num = task["row_number"]
-            barcode = task["barcode"]
-            name = task["product_name"]
-            brand = task["brand"]
-            
-            print("\n" + "-" * 50)
-            print(f"🔄 [Queue Task] جاري معالجة: [{name}] | صف رقم {row_num}")
-            print("-" * 50)
-            
-            # تحديث ملف التقدم batch_progress.json المتوافق مع لوحة التحكم
-            processed = stats["completed"] + stats["failed"]
-            save_progress(processed + 1, stats["total"], stats["completed"], stats["failed"], name)
-            
-            # تشغيل خط الأنابيب للمنتج
-            result = process_single_product(task, worksheet, link_column_index)
-            
-            if result == "success":
-                local_cache_db.update_task_status(task_id, "completed")
-            elif result == "failed":
-                local_cache_db.update_task_status(task_id, "failed", "Verification failed or background removal failure")
-            elif result == "skipped":
-                local_cache_db.update_task_status(task_id, "completed")
-                
     finally:
+        try:
+            import sqlite3
+            conn = sqlite3.connect(local_cache_db.DB_PATH)
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM automation_queue WHERE status = 'ready_for_review'")
+            ready_count = cursor.fetchone()[0]
+            conn.close()
+            
+            if ready_count > 0:
+                local_cache_db.update_automation_state(status='curation_pending', current_product="")
+            else:
+                local_cache_db.update_automation_state(status='idle', current_product="")
+        except Exception:
+            local_cache_db.update_automation_state(status='idle', current_product="")
+
         google_sheets.stop_async_queue()
         try:
             if os.path.exists(lock_file):

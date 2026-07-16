@@ -10,6 +10,15 @@
         grid-template-columns: 350px 1fr;
         gap: 2rem;
         height: calc(100vh - 6.5rem);
+        transition: grid-template-columns 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .layout-grid.batch-mode-active {
+        grid-template-columns: 1fr;
+    }
+
+    .layout-grid.batch-mode-active .sidebar-panel {
+        display: none !important;
     }
 
     /* Sidebar Catalog */
@@ -838,24 +847,83 @@
         cursor: pointer;
     }
 
+    .curation-row-card {
+        background: var(--card-bg);
+        border: 1px solid var(--panel-border);
+        border-radius: 16px;
+        padding: 1.5rem;
+        margin-bottom: 1.5rem;
+        display: flex;
+        align-items: center;
+        gap: 1.5rem;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        direction: rtl;
+        position: relative;
+        overflow: hidden;
+        backdrop-filter: blur(15px);
+        -webkit-backdrop-filter: blur(15px);
+    }
+    
     .curation-row-card:hover {
         border-color: var(--accent-cyan) !important;
         box-shadow: 0 8px 30px rgba(0, 245, 255, 0.06);
+        transform: translateY(-2px);
     }
+    
+    .candidates-scroll-gallery {
+        flex: 1;
+        display: flex;
+        gap: 1rem;
+        overflow-x: auto;
+        padding: 0.5rem;
+        border-right: 1px solid var(--panel-border);
+        border-left: 1px solid var(--panel-border);
+        margin: 0 1rem;
+        scroll-snap-type: x mandatory;
+        scrollbar-width: thin;
+        scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
+    }
+    
+    .candidates-scroll-gallery::-webkit-scrollbar {
+        height: 6px;
+    }
+    .candidates-scroll-gallery::-webkit-scrollbar-thumb {
+        background: rgba(255, 255, 255, 0.15);
+        border-radius: 10px;
+    }
+    .candidates-scroll-gallery::-webkit-scrollbar-track {
+        background: transparent;
+    }
+    
+    .curation-thumb-card {
+        position: relative;
+        flex: 0 0 110px;
+        width: 110px;
+        height: 110px;
+        border-radius: 14px;
+        border: 2px solid var(--panel-border);
+        overflow: hidden;
+        cursor: pointer;
+        transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+        scroll-snap-align: start;
+    }
+    
     .curation-thumb-card:hover {
         border-color: var(--accent-cyan) !important;
-        transform: scale(1.03);
+        transform: scale(1.05);
     }
+    
     .curation-thumb-card.active-candidate {
         border-color: var(--accent-purple) !important;
-        box-shadow: 0 0 12px rgba(139, 92, 246, 0.4);
+        box-shadow: 0 0 15px rgba(139, 92, 246, 0.5);
+        transform: scale(1.05);
         background: rgba(139, 92, 246, 0.05);
     }
 </style>
 @endsection
 
 @section('content')
-<div class="layout-grid">
+<div class="layout-grid" id="layoutGrid">
     <!-- Sidebar: Product List -->
     <div class="sidebar-panel">
         <div class="sidebar-header">
@@ -869,9 +937,7 @@
             </div>
         </div>
 
-        <button class="btn btn-secondary btn-sm" id="catalogRunAllBtn" onclick="openCatalogRunAllModal()" style="width:100%; gap:0.5rem; background: rgba(124, 58, 237, 0.1); border-color: rgba(124, 58, 237, 0.2); color: var(--accent-purple-hover); font-weight: 800;">
-            <i class="fas fa-play"></i> تشغيل أتمتة الشيت بالكامل (Batch)
-        </button>
+
         
         <div class="sidebar-search-container">
             <i class="fas fa-search"></i>
@@ -897,52 +963,7 @@
 
     <!-- Main Work Panel -->
     <div class="curation-panel">
-        <!-- Batch Curation Workspace -->
-        <div id="batchCurationWorkspace" class="glass-panel" style="display: none; padding: 2rem; margin-bottom: 1.5rem;">
-            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--panel-border); padding-bottom: 1rem; margin-bottom: 1.5rem; direction: rtl;">
-                <h3 style="font-size: 1.3rem; font-weight: 800; display: flex; align-items: center; gap: 0.65rem; color: var(--accent-purple-hover); margin: 0;">
-                    <i class="fas fa-layer-group"></i> مساحة المراجعة والاعتماد الجماعي (Batch Curation)
-                </h3>
-                <button type="button" class="btn btn-secondary btn-sm" onclick="closeBatchCuration()" style="padding: 0.5rem 1rem;">
-                    <i class="fas fa-arrow-right"></i> العودة للمراجعة الفردية
-                </button>
-            </div>
 
-            <!-- Global Action Bar -->
-            <div style="background: var(--input-bg); border: 1px solid var(--panel-border); padding: 1.25rem; border-radius: 16px; margin-bottom: 1.75rem; display: flex; flex-direction: column; gap: 1rem; direction: rtl;">
-                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
-                    <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
-                        <button type="button" class="btn" id="batchApproveBtn" onclick="submitBatchApproval()" style="background: linear-gradient(135deg, var(--success) 0%, #34d399 100%); color: white; font-weight: 800; padding: 0.65rem 1.5rem;">
-                            <i class="fas fa-check-double"></i> اعتماد الصور المحددة دفعة واحدة 🚀
-                        </button>
-                        <button type="button" class="btn btn-secondary" id="batchRejectBtn" onclick="submitBatchRejection()" style="background: rgba(244, 63, 94, 0.1); border-color: rgba(244, 63, 94, 0.2); color: var(--danger); font-weight: bold; padding: 0.65rem 1.5rem;">
-                            <i class="fas fa-trash-alt"></i> استبعاد وتخطي الصور المحددة 🗑️
-                        </button>
-                    </div>
-                    
-                    <div style="display: flex; gap: 0.5rem; align-items: center;">
-                        <button type="button" class="btn btn-secondary btn-sm" onclick="selectAllBatch(true)" style="padding: 0.4rem 0.8rem; font-size: 0.8rem;">تحديد الكل</button>
-                        <button type="button" class="btn btn-secondary btn-sm" onclick="selectAllBatch(false)" style="padding: 0.4rem 0.8rem; font-size: 0.8rem;">إلغاء التحديد</button>
-                    </div>
-                </div>
-
-                <!-- Batch Progress bar -->
-                <div id="batchCurationProgress" style="display: none; flex-direction: column; gap: 0.5rem; border-top: 1px solid var(--panel-border); padding-top: 1rem; margin-top: 0.5rem;">
-                    <div style="display: flex; justify-content: space-between; font-size: 0.85rem; font-weight: bold;">
-                        <span id="batchCurationProgressText">جاري المعالجة الجماعية...</span>
-                        <span id="batchCurationProgressPercent" style="color: var(--accent-cyan);">0%</span>
-                    </div>
-                    <div class="progress-bar-container" style="height: 8px; background: rgba(255,255,255,0.03); border-radius: 20px; border: 1px solid var(--panel-border); overflow: hidden;">
-                        <div id="batchCurationProgressBar" class="progress-bar-fill" style="width: 0%;"></div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Batch Grid -->
-            <div id="batchCurationGrid" class="candidates-grid" style="grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 1.75rem;">
-                <!-- Card templates will be rendered dynamically -->
-            </div>
-        </div>
 
         <!-- Search Criteria -->
         <div id="searchCriteriaWrapper" class="glass-panel" style="margin-bottom: 0;">
@@ -1197,53 +1218,7 @@
     </div>
 </div>
 
-<!-- Curation Automation Batch Progress Modal -->
-<div id="catalogRunAllModal" class="modal" style="display: none;">
-    <div class="glass-panel" style="max-width: 550px; width: 90%; padding: 2.5rem; border-radius: 24px; border: 1px solid var(--panel-border); text-align: center; margin: 10% auto; position: relative;">
-        <button onclick="closeCatalogRunAllModal()" style="position: absolute; top: 1.25rem; left: 1.25rem; background: none; border: none; color: var(--text-secondary); cursor: pointer; font-size: 1.25rem;"><i class="fas fa-times"></i></button>
-        
-        <h3 style="font-size: 1.35rem; margin-bottom: 1.5rem; display: flex; align-items: center; justify-content: center; gap: 0.65rem; color: var(--accent-purple-hover);">
-            <i class="fas fa-play-circle" style="animation: pulse-robot 2s infinite;"></i> تشغيل الأتمتة الكلية بالخلفية
-        </h3>
-        
-        <div id="modalStartOptions">
-            <p style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 1.75rem; line-height: 1.6;">
-                سيقوم النظام بتشغيل محرك المعالجة بالخلفية للبحث عن صور وتصفيتها وعزل خلفياتها تلقائياً لكافة منتجات الشيت المتبقية.
-            </p>
-            
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.75rem; background: rgba(255,255,255,0.02); padding: 0.85rem 1.25rem; border-radius: 12px; border: 1px solid var(--panel-border); text-align: right;">
-                <span style="font-size: 0.85rem; font-weight: 700; color: var(--text-secondary);"><i class="fas fa-eye" style="color: var(--accent-cyan); margin-inline-end: 0.35rem;"></i> أتمتة الفرز والمراجعة (Curation Mode)</span>
-                <label class="switch" style="margin: 0;">
-                    <input type="checkbox" id="modalCurationMode" checked>
-                    <span class="slider"></span>
-                </label>
-            </div>
-            
-            <button class="btn" onclick="startCatalogBatchAutomation()" style="width: 100%;">
-                <i class="fas fa-play"></i> إطلاق الأتمتة الآن 🚀
-            </button>
-        </div>
 
-        <div id="modalProgressSection" style="display: none; flex-direction: column; gap: 1.1rem; text-align: right;">
-            <div style="display: flex; justify-content: space-between; font-size: 0.9rem; font-weight: bold; align-items: center;">
-                <span id="modalProgressText" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 320px;">جاري التهيئة...</span>
-                <span id="modalProgressPercent" style="color: var(--accent-cyan); font-family: 'Outfit', sans-serif; font-size: 1.15rem; font-weight: 800;">0%</span>
-            </div>
-            <div class="progress-bar-container" style="height: 10px;">
-                <div id="modalProgressBar" class="progress-bar-fill"></div>
-            </div>
-            <div id="modalProgressCounts" style="font-size: 0.85rem; color: var(--text-secondary); text-align: left; direction: ltr; font-family: 'Outfit', sans-serif; font-weight: 700;">
-                0 of 0 (Success: 0 | Failed: 0)
-            </div>
-            
-            <div style="margin-top: 0.5rem; border-top: 1px solid var(--panel-border); padding-top: 1rem;">
-                <button class="btn btn-secondary" id="modalStopBtn" onclick="stopCatalogBatchAutomation()" style="width: 100%; background: rgba(244, 63, 94, 0.1); border-color: rgba(244, 63, 94, 0.2); color: var(--danger);">
-                    <i class="fas fa-stop"></i> إيقاف التشغيل فوري 🛑
-                </button>
-            </div>
-        </div>
-    </div>
-</div>
 
 <!-- Canvas Editor Modal -->
 <div id="editorModal" class="modal" style="display: none; position: fixed; z-index: 10000; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(3, 4, 10, 0.85); backdrop-filter: blur(15px); align-items: center; justify-content: center;">
@@ -2491,6 +2466,7 @@
         const placeholder = document.getElementById('placeholder');
         const results = document.getElementById('resultsContent');
         const loading = document.getElementById('loading');
+        const layoutGrid = document.getElementById('layoutGrid');
 
         workspace.style.display = 'block';
         searchCriteria.style.display = 'none';
@@ -2498,14 +2474,116 @@
         results.style.display = 'none';
         loading.style.display = 'none';
 
+        if (layoutGrid) {
+            layoutGrid.classList.add('batch-mode-active');
+        }
+
         renderBatchCurationGrid();
     }
 
     function closeBatchCuration() {
+        const layoutGrid = document.getElementById('layoutGrid');
+        if (layoutGrid) {
+            layoutGrid.classList.remove('batch-mode-active');
+        }
+        
         document.getElementById('batchCurationWorkspace').style.display = 'none';
         document.getElementById('searchCriteriaWrapper').style.display = 'block';
         document.getElementById('placeholder').style.display = 'block';
         updateKPIStats(); // This will show/hide the alert card based on current review count
+    }
+
+    async function triggerInlineSearch(rowNumber) {
+        const queryInput = document.getElementById(`inline-query-${rowNumber}`);
+        const spinner = document.getElementById(`inline-spinner-${rowNumber}`);
+        if (!queryInput) return;
+        
+        const queryText = queryInput.value.trim();
+        if (!queryText) {
+            alert('الرجاء كتابة كلمات بحث صحيحة.');
+            return;
+        }
+        
+        spinner.classList.add('fa-spin');
+        
+        const p = currentProducts.find(prod => prod.row_number === rowNumber);
+        if (!p) return;
+        
+        try {
+            const res = await fetch('/api/search', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
+                },
+                body: JSON.stringify({
+                    product_name: p.product_name,
+                    brand: p.brand,
+                    custom_query: queryText,
+                    barcode: p.barcode,
+                    skip_cache: true
+                })
+            });
+            
+            const data = await res.json();
+            if (data.status === 'success' && data.selected_image) {
+                let newCandidates = [];
+                if (data.trace && data.trace.steps) {
+                    const seen = new Set();
+                    data.trace.steps.forEach(step => {
+                        if (step.candidates) {
+                            step.candidates.forEach(c => {
+                                if (c.url && !seen.has(c.url)) {
+                                    seen.add(c.url);
+                                    newCandidates.push({
+                                        image_url: c.url,
+                                        title: c.title,
+                                        clip_score: c.relevance_score || c.clip_score || 0.0,
+                                        source_domain: c.source_domain || ''
+                                    });
+                                }
+                            });
+                        }
+                    });
+                }
+                
+                if (newCandidates.length === 0) {
+                    newCandidates.push({
+                        image_url: data.selected_image.url,
+                        title: data.selected_image.title,
+                        clip_score: data.selected_image.clip_score || 0.0
+                    });
+                }
+                
+                p.curation_candidates = newCandidates;
+                
+                // Update default url on the row checkbox
+                const defaultUrl = data.selected_image.url;
+                const checkbox = document.querySelector(`.batch-select-checkbox[data-row="${rowNumber}"]`);
+                if (checkbox) {
+                    checkbox.dataset.url = defaultUrl;
+                }
+                
+                renderBatchCurationGrid();
+            } else {
+                alert('فشل البحث: لم يتم العثور على أي نتائج.');
+            }
+        } catch (err) {
+            console.error(err);
+            alert('حدث خطأ أثناء إجراء البحث.');
+        } finally {
+            spinner.classList.remove('fa-spin');
+        }
+    }
+
+    function checkTitleForAllergens(title) {
+        if (!title) return '';
+        const allergens = ['مكسرات', 'حليب', 'فول سوداني', 'قمح', 'صويا', 'سمسم', 'بيض', 'nut', 'milk', 'peanut', 'wheat', 'soy', 'sesame', 'egg'];
+        const found = allergens.filter(allg => title.toLowerCase().includes(allg));
+        if (found.length > 0) {
+            return found.join(', ');
+        }
+        return '';
     }
 
     function renderBatchCurationGrid() {
@@ -2542,34 +2620,51 @@
             const defaultUrl = selectedCandidate ? selectedCandidate.image_url : (p.needs_review_url || '');
 
             card.innerHTML = `
-                <div style="flex: 0 0 250px; display: flex; align-items: flex-start; gap: 0.75rem;">
+                <div style="flex: 0 0 300px; display: flex; align-items: flex-start; gap: 0.85rem;">
                     <input type="checkbox" class="batch-select-checkbox" data-row="${p.row_number}" data-url="${defaultUrl}" data-name="${p.product_name.replace(/"/g, '&quot;')}" data-brand="${p.brand.replace(/"/g, '&quot;')}" checked style="width: 22px; height: 22px; cursor: pointer; margin-top: 0.25rem; accent-color: var(--accent-purple);" onchange="toggleBatchRowSelect(this, ${p.row_number})">
-                    <div style="display: flex; flex-direction: column; gap: 0.35rem; width: calc(100% - 30px);">
+                    <div style="display: flex; flex-direction: column; gap: 0.35rem; width: calc(100% - 35px);">
                         <span class="badge-row-number" style="align-self: flex-start; background: rgba(139, 92, 246, 0.1); border-color: rgba(139, 92, 246, 0.2); color: var(--accent-purple-hover); font-weight: 800; font-size: 0.75rem; padding: 2px 8px; border-radius: 6px;">صف ${p.row_number}</span>
                         <h4 style="font-size: 0.95rem; font-weight: 800; margin: 0.25rem 0 0; color: var(--text-primary); text-overflow: ellipsis; overflow: hidden; white-space: nowrap;" title="${p.product_name}">${p.product_name}</h4>
                         <p style="font-size: 0.8rem; color: var(--text-secondary); margin: 0; font-weight: 600;">البراند: <strong style="color: var(--text-primary);">${p.brand}</strong></p>
+                        
+                        ${(() => {
+                            const allergens = checkTitleForAllergens(p.product_name);
+                            return allergens ? `<span style="background: rgba(244,63,94,0.12); border: 1px solid rgba(244,63,94,0.22); color: var(--danger); font-size: 0.7rem; font-weight: 800; padding: 2px 6px; border-radius: 4px; margin-top: 0.35rem; display: inline-block; align-self: flex-start;"><i class="fas fa-exclamation-triangle"></i> يحتوي: ${allergens}</span>` : '';
+                        })()}
+                        
+                        ${(p.curation_candidates && p.curation_candidates.length > 0) ? `<span style="background: rgba(0, 210, 255, 0.1); border: 1px solid rgba(0, 210, 255, 0.2); color: var(--accent-cyan); font-size: 0.7rem; font-weight: 800; padding: 2px 6px; border-radius: 4px; margin-top: 0.35rem; display: inline-block; align-self: flex-start;"><i class="fas fa-bolt"></i> جاهز للمراجعة (Cached)</span>` : ''}
+                        
+                        <div style="display: flex; align-items: center; gap: 0.35rem; margin-top: 0.5rem; width: 100%;">
+                            <input type="text" id="inline-query-${p.row_number}" value="${p.brand ? p.product_name + ' ' + p.brand : p.product_name}" style="flex: 1; font-size: 0.75rem; padding: 4px 8px; background: rgba(0,0,0,0.25); border: 1px solid var(--panel-border); color: var(--text-primary); border-radius: 6px; outline: none; width: calc(100% - 35px);">
+                            <button type="button" class="btn btn-secondary btn-sm" onclick="triggerInlineSearch(${p.row_number})" style="padding: 4px; font-size: 0.7rem; display: flex; align-items: center; justify-content: center; height: 26px; width: 26px;" title="إعادة البحث بالكلمات المكتوبة">
+                                <i class="fas fa-sync-alt" id="inline-spinner-${p.row_number}"></i>
+                            </button>
+                        </div>
                     </div>
                 </div>
 
-                <div style="flex: 1; display: flex; gap: 0.75rem; overflow-x: auto; padding: 0.5rem; border-right: 1px solid var(--panel-border); border-left: 1px solid var(--panel-border); margin: 0 0.5rem;">
+                <div class="candidates-scroll-gallery">
                     ${candidatesList.map((c, cIdx) => {
                         const isSelected = c.is_selected === 1 ? 'checked' : '';
                         const activeClass = c.is_selected === 1 ? 'active-candidate' : '';
                         const scorePercent = c.clip_score ? Math.round(c.clip_score * 100) : 0;
                         const scoreBadge = scorePercent > 0 ? `<span style="position: absolute; bottom: 4px; left: 4px; background: rgba(12, 18, 28, 0.75); border: 1px solid rgba(255,255,255,0.15); color: #00ffc4; font-size: 0.65rem; font-family: 'Outfit', sans-serif; font-weight: 900; padding: 1px 4px; border-radius: 4px;">${scorePercent}% Match</span>` : '';
                         const domainText = c.source_domain ? c.source_domain.replace('www.', '') : 'Unknown';
+                        const hasAllergen = checkTitleForAllergens(c.title || '');
+                        const allergenIcon = hasAllergen ? `<span style="position: absolute; top: 4px; left: 4px; color: #f43f5e; font-size: 0.8rem; filter: drop-shadow(0 0 4px rgba(244,63,94,0.7)); z-index: 6;" title="تحذير مسببات حساسية: ${hasAllergen}"><i class="fas fa-exclamation-triangle"></i></span>` : '';
                         
                         return `
-                            <div class="curation-thumb-card ${activeClass}" onclick="selectCurationThumb(this, ${p.row_number}, '${c.image_url.replace(/'/g, "\\'")}')" style="position: relative; flex: 0 0 100px; width: 100px; height: 100px; border-radius: 12px; border: 2px solid var(--panel-border); overflow: hidden; cursor: pointer; transition: all 0.25s ease;" title="${c.title || ''} (${domainText})">
-                                <img src="${getImageUrl(c.image_url)}" alt="Candidate image" style="width: 100%; height: 100%; object-fit: cover;" onerror="this.src='https://placehold.co/100x100?text=Error'">
-                                <input type="radio" name="batch-candidate-radio-${p.row_number}" value="${c.image_url}" ${isSelected} style="position: absolute; top: 4px; right: 4px; width: 16px; height: 16px; accent-color: var(--accent-purple); cursor: pointer; z-index: 5;" onclick="event.stopPropagation(); selectCurationThumb(this.parentElement, ${p.row_number}, '${c.image_url.replace(/'/g, "\\'")}')">
+                            <div class="curation-thumb-card ${activeClass}" onclick="selectCurationThumb(this, ${p.row_number}, '${c.image_url.replace(/'/g, "\\'")}')" style="position: relative; flex: 0 0 110px; width: 110px; height: 110px; border-radius: 14px; border: 2px solid var(--panel-border); overflow: hidden; cursor: pointer; transition: all 0.25s ease;" title="${c.title || ''} (${domainText})">
+                                <img src="${getImageUrl(c.image_url)}" alt="Candidate image" style="width: 100%; height: 100%; object-fit: cover;" onerror="this.src='https://placehold.co/110x110?text=Error'">
+                                <input type="radio" name="batch-candidate-radio-${p.row_number}" value="${c.image_url}" ${isSelected} style="position: absolute; top: 6px; right: 6px; width: 18px; height: 18px; accent-color: var(--accent-purple); cursor: pointer; z-index: 5;" onclick="event.stopPropagation(); selectCurationThumb(this.parentElement, ${p.row_number}, '${c.image_url.replace(/'/g, "\\'")}')">
                                 ${scoreBadge}
+                                ${allergenIcon}
                             </div>
                         `;
                     }).join('')}
                 </div>
 
-                <div style="flex: 0 0 150px; display: flex; flex-direction: column; gap: 0.5rem; justify-content: center; align-items: stretch;">
+                <div style="flex: 0 0 160px; display: flex; flex-direction: column; gap: 0.5rem; justify-content: center; align-items: stretch;">
                     <button type="button" class="btn btn-secondary btn-sm" onclick="toggleBatchRowExclude(${p.row_number})" id="btn-exclude-${p.row_number}" style="font-size: 0.75rem; font-weight: bold; padding: 0.45rem 0.5rem; background: rgba(239, 68, 68, 0.05); color: var(--danger); border-color: rgba(239, 68, 68, 0.15); border-radius: 10px; display: flex; align-items: center; justify-content: center; gap: 0.35rem;">
                         <i class="fas fa-times-circle"></i> <span class="btn-text">استبعاد وتخطي</span>
                     </button>
@@ -2849,122 +2944,7 @@
         openBatchCuration();
     }
 
-    async function checkActiveBatch() {
-        try {
-            const res = await fetch('/api/batch-status');
-            const data = await res.json();
-            
-            const startOpts = document.getElementById('modalStartOptions');
-            const progSec = document.getElementById('modalProgressSection');
-            const runBtn = document.getElementById('catalogRunAllBtn');
-            
-            if (data.is_running) {
-                isBatchRunning = true;
-                startOpts.style.display = 'none';
-                progSec.style.display = 'flex';
-                
-                // If the number of processed products has increased, reload the catalog!
-                if (data.current > lastCurrentProcessed) {
-                    lastCurrentProcessed = data.current;
-                    loadProducts(true); // reload list from Sheets bypassing cache!
-                }
-                
-                const percent = data.total > 0 ? Math.round((data.current / data.total) * 100) : 0;
-                document.getElementById('modalProgressPercent').innerText = percent + '%';
-                document.getElementById('modalProgressBar').style.width = percent + '%';
-                document.getElementById('modalProgressText').innerHTML = `جاري معالجة: <strong style="color: var(--accent-cyan);">${data.current_product || 'جاري البحث...'}</strong>`;
-                document.getElementById('modalProgressCounts').innerText = `${data.current} from ${data.total} (Success: ${data.success} | Failed: ${data.failed})`;
-                
-                runBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جاري الأتمتة...';
-                runBtn.style.color = 'var(--warning)';
-            } else {
-                if (isBatchRunning) {
-                    isBatchRunning = false;
-                    alert("🏁 انتهت معالجة الأتمتة الكلية بالخلفية!");
-                    loadProducts(); // Reload catalog
-                }
-                startOpts.style.display = 'block';
-                progSec.style.display = 'none';
-                
-                runBtn.innerHTML = '<i class="fas fa-play"></i> تشغيل أتمتة الشيت بالكامل (Batch)';
-                runBtn.style.color = 'var(--accent-purple-hover)';
-            }
-        } catch (err) {
-            console.error("Error checking active batch:", err);
-        }
-    }
 
-    async function startCatalogBatchAutomation() {
-        const settings = {
-            ignoreUnitClash: localStorage.getItem('ignoreUnitClash') === 'true',
-            strictBrandMatch: localStorage.getItem('strictBrandMatch') !== 'false',
-            aiUpscale: localStorage.getItem('aiUpscale') !== 'false',
-            aiEnhance: localStorage.getItem('aiEnhance') === 'true',
-            skipCache: localStorage.getItem('skipCache') === 'true',
-            target_width: getOutputWidth(),
-            target_height: getOutputHeight(),
-            padding_ratio: parseFloat(document.getElementById('paddingRatio').value) || 0.85,
-            bg_color: document.getElementById('bgColor').value,
-            curation_mode: document.getElementById('modalCurationMode') ? document.getElementById('modalCurationMode').checked : true
-        };
-        
-        try {
-            const res = await fetch('/api/run-all', { 
-                method: 'POST',
-                headers: { 
-                    'Content-Type': 'application/json',
-                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content 
-                },
-                body: JSON.stringify(settings)
-            });
-            const data = await res.json();
-            if (data.status === 'success') {
-                isBatchRunning = true;
-                document.getElementById('modalStartOptions').style.display = 'none';
-                document.getElementById('modalProgressSection').style.display = 'flex';
-                checkActiveBatch();
-            } else {
-                alert("❌ فشل تشغيل الأتمتة: " + data.error);
-            }
-        } catch (err) {
-            console.error(err);
-        }
-    }
-
-    async function stopCatalogBatchAutomation() {
-        if (!confirm("⚠️ هل أنت متأكد من رغبتك في إيقاف عملية الأتمتة الجارية بالخلفية فورياً؟")) {
-            return;
-        }
-        const btn = document.getElementById('modalStopBtn');
-        btn.disabled = true;
-        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جاري الإيقاف...';
-        try {
-            const res = await fetch('/api/stop-batch', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
-                }
-            });
-            const data = await res.json();
-            if (data.status === 'success') {
-                alert("🛑 تم إيقاف عملية الأتمتة الكلية بنجاح!");
-                closeCatalogRunAllModal();
-                loadProducts();
-            } else {
-                alert("❌ فشل إيقاف الأتمتة: " + data.error);
-                btn.disabled = false;
-                btn.innerHTML = '<i class="fas fa-stop"></i> إيقاف التشغيل فوري 🛑';
-            }
-        } catch (err) {
-            console.error("Error stopping batch:", err);
-            btn.disabled = false;
-            btn.innerHTML = '<i class="fas fa-stop"></i> إيقاف التشغيل فوري 🛑';
-        }
-    }
-
-    setInterval(pollLiveLogs, 2000);
-    setInterval(checkActiveBatch, 2500);
 
     // =============================================
     // 🎛️ Image Output Settings Helpers

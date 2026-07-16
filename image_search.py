@@ -1908,6 +1908,14 @@ def run_parallel_consensus_search(query):
     تشغيل البحث المتوازي التوافقي باستخدام ParallelConsensusScraper.
     """
     import asyncio
+    import time
+    import random
+    
+    # تأخير عشوائي ذكي لحماية الـ IP وتفادي كشف الـ CAPTCHA
+    delay = random.uniform(1.5, 4.0)
+    print(f"⏱️ [Throttling] الانتظار لمدة {delay:.2f} ثانية لحماية الـ IP...")
+    time.sleep(delay)
+    
     scraper = ParallelConsensusScraper(
         google_key=config.GOOGLE_SEARCH_API_KEY,
         google_cx=config.GOOGLE_SEARCH_CX,

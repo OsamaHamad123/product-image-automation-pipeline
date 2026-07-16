@@ -375,9 +375,9 @@
             const card = document.createElement('div');
             card.className = 'rich-card';
             
-            let meta = p.metadata_json;
+            let meta = p.metadata_json || {};
             if (typeof meta === 'string') {
-                try { meta = JSON.parse(meta); } catch (e) { meta = {}; }
+                try { meta = JSON.parse(meta) || {}; } catch (e) { meta = {}; }
             }
 
             const catText = meta.web_category_l1 || meta.category || 'غير مصنف';
@@ -411,16 +411,16 @@
         const scoreValue = document.getElementById('scoreFilter').value;
 
         const filtered = richProducts.filter(p => {
-            let meta = p.metadata_json;
+            let meta = p.metadata_json || {};
             if (typeof meta === 'string') {
-                try { meta = JSON.parse(meta); } catch (e) { meta = {}; }
+                try { meta = JSON.parse(meta) || {}; } catch (e) { meta = {}; }
             }
 
             // Text search matches name, brand, barcode, or ingredients
             const ingredientsText = (meta.ingredients || '').toLowerCase();
-            const textMatch = p.product_name.toLowerCase().includes(query) || 
-                              p.brand.toLowerCase().includes(query) || 
-                              p.barcode.toLowerCase().includes(query) ||
+            const textMatch = (p.product_name || '').toLowerCase().includes(query) || 
+                              (p.brand || '').toLowerCase().includes(query) || 
+                              (p.barcode || '').toLowerCase().includes(query) ||
                               ingredientsText.includes(query);
 
             // Category match

@@ -1,5 +1,5 @@
 {
-  "timestamp": 1784209934.3767848,
+  "timestamp": 1784227719.684651,
   "products": [
     {
       "row_number": 2,
@@ -28,7 +28,7 @@
       "barcode": "",
       "category": "",
       "origin": "",
-      "existing_image_link": "",
+      "existing_image_link": "https://res.cloudinary.com/tucmgz2y/image/upload/e_trim:5/c_fit,h_680,w_680/c_pad,h_800,w_800/e_sharpen:20/q_auto:best/f_auto/v1784218895/products/ad64886aa93a35914f429c78148667df",
       "needs_review": false,
       "needs_review_url": "",
       "search_query": "NELLARA THANJAVOOR MATTA (KURUVA) RICE 2KG NELLARA"
@@ -76,7 +76,7 @@
       "barcode": "",
       "category": "",
       "origin": "",
-      "existing_image_link": "",
+      "existing_image_link": "https://res.cloudinary.com/tucmgz2y/image/upload/e_trim:5/c_fit,h_680,w_680/c_pad,h_800,w_800/e_sharpen:20/q_auto:best/f_auto/v1784227554/products/d735334d67b7f27a7c0fbee7f922eb39",
       "needs_review": false,
       "needs_review_url": "",
       "search_query": "RUBIYA GOLD PALAKKADAN MATTA RICE 5KG RUBIYA"

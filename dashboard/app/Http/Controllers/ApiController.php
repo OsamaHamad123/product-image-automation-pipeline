@@ -227,19 +227,19 @@ class ApiController extends Controller
 
             $pythonPath = $this->getPythonPath();
             
-            // تشغيل تهيئة الطابور مع ضمان المسار الرئيسي للمشروع
-            $enqueueCmd = "cd /d f:\\automation && \"{$pythonPath}\" \"{$scriptPath}\" --enqueue 2>&1";
-            shell_exec($enqueueCmd);
-
-            // تشغيل بايثون بالخلفية كـ Worker مفصول تماماً لتفادي قتل العملية بعد انتهاء الطلب
-            $cmd = "cmd /c cd /d f:\\automation && \"{$pythonPath}\" -u \"{$scriptPath}\" --worker > \"{$logPath}\" 2>&1";
+            // تشغيل تهيئة الطابور ثم البايثون كـ Worker كعملية خلفية واحدة موحدة لتجنب انسداد استجابة الخادم
+            $cmd = "cmd /c cd /d f:\\automation && \"{$pythonPath}\" \"{$scriptPath}\" --enqueue > \"{$logPath}\" 2>&1 && \"{$pythonPath}\" -u \"{$scriptPath}\" --worker >> \"{$logPath}\" 2>&1";
             
             try {
-                $WshShell = new \COM("WScript.Shell");
-                $WshShell->Run($cmd, 0, false);
-            } catch (\Exception $ex) {
-                // تراجع تشغيلي في حال عدم تفعيل COM
-                $popenCmd = "start /B \"\" cmd /c cd /d f:\\automation && \"{$pythonPath}\" -u \"{$scriptPath}\" --worker > \"{$logPath}\" 2>&1";
+                if (class_exists('COM')) {
+                    $WshShell = new \COM("WScript.Shell");
+                    $WshShell->Run($cmd, 0, false);
+                } else {
+                    throw new \Exception("COM class is not loaded");
+                }
+            } catch (\Throwable $ex) {
+                // تراجع تشغيلي في حال عدم تفعيل COM أو تعطلها
+                $popenCmd = "start /B \"\" {$cmd}";
                 pclose(popen($popenCmd, "r"));
             }
             
@@ -254,66 +254,117 @@ class ApiController extends Controller
      */
     public function batchStatus()
     {
+        $status = 'idle';
+        $total = 0;
+        $processed = 0;
+        $success = 0;
+        $failed = 0;
+        $currentProduct = "";
+        
+        $pauseRequested = 0;
+        try {
+            $stateRow = \DB::select("SELECT * FROM automation_state WHERE key = 'active_session' LIMIT 1");
+            if (!empty($stateRow)) {
+                $status = $stateRow[0]->status;
+                $total = $stateRow[0]->total_items;
+                $processed = $stateRow[0]->processed_items;
+                $success = $stateRow[0]->success_count;
+                $failed = $stateRow[0]->failed_count;
+                $currentProduct = $stateRow[0]->current_product_name;
+                $pauseRequested = $stateRow[0]->pause_requested;
+            }
+        } catch (\Exception $e) {
+            // Table not loaded yet
+        }
+        
         $lockFile = 'f:\\automation\\temp\\pipeline.lock';
         $isRunning = false;
-        
         if (file_exists($lockFile)) {
             $pid = trim(file_get_contents($lockFile));
-            if ($pid === 'STARTING') {
-                // تصفية أوتوماتيكية للأقفال العالقة لأكثر من 30 ثانية
-                if (time() - filemtime($lockFile) > 30) {
-                    @unlink($lockFile);
-                    $isRunning = false;
-                } else {
-                    $isRunning = true;
-                }
-            } elseif (!empty($pid) && is_numeric($pid)) {
+            if (!empty($pid) && is_numeric($pid)) {
                 $output = shell_exec("tasklist /FI \"PID eq {$pid}\" 2>&1");
                 if (strpos($output, $pid) !== false && strpos(strtolower($output), 'python') !== false) {
                     $isRunning = true;
-                } else {
-                    @unlink($lockFile);
                 }
             }
         }
         
-        $total = 0;
-        $pending = 0;
-        $processing = 0;
-        $completed = 0;
-        $failed = 0;
-        $currentProduct = "";
-        
-        try {
-            $rows = \DB::select("SELECT status, COUNT(*) as cnt FROM automation_queue GROUP BY status");
-            foreach ($rows as $row) {
-                $status = $row->status;
-                $cnt = $row->cnt;
-                if ($status === 'pending') $pending = $cnt;
-                elseif ($status === 'processing') $processing = $cnt;
-                elseif ($status === 'completed') $completed = $cnt;
-                elseif ($status === 'failed') $failed = $cnt;
-                $total += $cnt;
+        // Self-healing heartbeat: If status says pre_caching but task is not running,
+        // reset database to idle if it has been inactive for more than 45 seconds or if the lock file is missing.
+        if (!$isRunning && ($status === 'pre_caching' || $status === 'running')) {
+            $lastUpdated = isset($stateRow[0]->updated_at) ? strtotime($stateRow[0]->updated_at . ' UTC') : time();
+            $diff = time() - $lastUpdated;
+            if ($diff > 45 || !file_exists($lockFile)) {
+                try {
+                    \DB::update("UPDATE automation_state SET status = 'idle', total_items = 0, processed_items = 0, success_count = 0, failed_count = 0, current_product_name = '', pause_requested = 0 WHERE key = 'active_session'");
+                    $status = 'idle';
+                    $total = 0;
+                    $processed = 0;
+                    $success = 0;
+                    $failed = 0;
+                    $currentProduct = "";
+                    $pauseRequested = 0;
+                } catch (\Exception $e) {
+                    // Ignore
+                }
             }
-            
-            $activeRow = \DB::select("SELECT product_name FROM automation_queue WHERE status = 'processing' LIMIT 1");
-            if (!empty($activeRow)) {
-                $currentProduct = $activeRow[0]->product_name;
-            }
-        } catch (\Exception $e) {
-            // Queue table not created yet or database locked
         }
         
         $response = [
             'is_running' => $isRunning,
+            'status' => $status,
             'total' => $total,
-            'current' => $completed + $failed + ($processing > 0 ? 1 : 0),
-            'success' => $completed,
+            'current' => $processed,
+            'success' => $success,
             'failed' => $failed,
-            'current_product' => $currentProduct
+            'current_product' => $currentProduct,
+            'pause_requested' => $pauseRequested
         ];
         
         return response()->json($response)->header('Cache-Control', 'no-store');
+    }
+
+    /**
+     * إيقاف الأتمتة مؤقتاً
+     */
+    public function pauseBatch()
+    {
+        try {
+            \DB::update("UPDATE automation_state SET pause_requested = 1 WHERE key = 'active_session'");
+            return response()->json(['status' => 'success', 'message' => 'Automation paused.']);
+        } catch (\Exception $e) {
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * استئناف الأتمتة
+     */
+    public function resumeBatch()
+    {
+        try {
+            \DB::update("UPDATE automation_state SET pause_requested = 0 WHERE key = 'active_session'");
+            return response()->json(['status' => 'success', 'message' => 'Automation resumed.']);
+        } catch (\Exception $e) {
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * إعادة تعيين حالة الأتمتة قسرياً للتخلص من الحالات المعلقة
+     */
+    public function resetBatch()
+    {
+        try {
+            $lockFile = 'f:\\automation\\temp\\pipeline.lock';
+            if (file_exists($lockFile)) {
+                @unlink($lockFile);
+            }
+            \DB::update("UPDATE automation_state SET status = 'idle', total_items = 0, processed_items = 0, success_count = 0, failed_count = 0, current_product_name = '', pause_requested = 0 WHERE key = 'active_session'");
+            return response()->json(['status' => 'success', 'message' => 'Automation state reset successfully.']);
+        } catch (\Exception $e) {
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
     }
 
     /**

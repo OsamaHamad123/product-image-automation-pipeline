@@ -320,6 +320,19 @@ def action_select_image(params):
                 metadata,
                 clip_embedding
             )
+            
+            # تحديث حالة المهمة كـ مكتملة في طابور الخلفية ومسح الكانديديت
+            try:
+                local_cache_db.update_task_status_by_row(row_number, "completed")
+                import sqlite3
+                conn = sqlite3.connect(local_cache_db.DB_PATH)
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM curation_candidates WHERE row_number = ?", (row_number,))
+                conn.commit()
+                conn.close()
+            except Exception as e:
+                print(f"⚠️ [SQLite Curation Cleanup Error] {e}")
+
             return {'status': 'success', 'image_link': image_link}
         return {'status': 'failed', 'error': 'Failed to update Google Sheets link'}
     except Exception as e:

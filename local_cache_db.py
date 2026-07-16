@@ -112,6 +112,28 @@ def init_db():
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_queue_status ON automation_queue(status)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_curation_row ON curation_candidates(row_number)")
         
+        # إنشاء جدول إدارة حالة الأتمتة بالخلفية
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS automation_state (
+                key TEXT PRIMARY KEY,
+                status TEXT DEFAULT 'idle',
+                total_items INTEGER DEFAULT 0,
+                processed_items INTEGER DEFAULT 0,
+                success_count INTEGER DEFAULT 0,
+                failed_count INTEGER DEFAULT 0,
+                current_product_name TEXT,
+                pause_requested INTEGER DEFAULT 0,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cursor.execute("INSERT OR IGNORE INTO automation_state (key, status) VALUES ('active_session', 'idle')")
+        
+        # التحقق من وجود عمود pause_requested وإضافته للجدول القائم (Auto-migration)
+        cursor.execute("PRAGMA table_info(automation_state)")
+        state_cols = [col[1] for col in cursor.fetchall()]
+        if "pause_requested" not in state_cols:
+            cursor.execute("ALTER TABLE automation_state ADD COLUMN pause_requested INTEGER DEFAULT 0")
+            
         conn.commit()
         conn.close()
         print("💾 [SQLite Cache] تم تهيئة قاعدة بيانات التخزين المحلي بنجاح (محدثة بالفرز والاعتماد).")
@@ -411,7 +433,7 @@ def update_task_status(task_id, status, error_message=None):
     """
     try:
         conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
+        cursor = conn.conn.cursor() if hasattr(conn, 'conn') else conn.cursor()
         cursor.execute("""
             UPDATE automation_queue 
             SET status = ?, error_message = ?, updated_at = CURRENT_TIMESTAMP 
@@ -422,6 +444,25 @@ def update_task_status(task_id, status, error_message=None):
         return True
     except Exception as e:
         print(f"⚠️ [SQLite Queue Error] فشل تحديث حالة المهمة: {e}")
+        return False
+
+def update_task_status_by_row(row_number, status, error_message=None):
+    """
+    تحديث حالة المهمة في الطابور باستخدام رقم الصف (Row Number)
+    """
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE automation_queue 
+            SET status = ?, error_message = ?, updated_at = CURRENT_TIMESTAMP 
+            WHERE row_number = ?
+        """, (status, error_message, row_number))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"⚠️ [SQLite Queue Error] فشل تحديث حالة المهمة للصف {row_number}: {e}")
         return False
 
 def get_queue_statistics():
@@ -597,6 +638,130 @@ def save_curation_candidates(row_number, product_name, brand, candidates, best_u
         print(f"💾 [Curation Database] تم حفظ المرشحات للصف {row_number} بنجاح.")
     except Exception as e:
         print(f"⚠️ [Curation Database Error] فشل حفظ مرشحات الفرز للصف {row_number}: {e}")
+
+def get_curation_candidates(row_number):
+    """
+    جلب جميع الصور المرشحة المحفوظة لصف معين.
+    """
+    if not os.path.exists(DB_PATH):
+        init_db()
+        return []
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM curation_candidates WHERE row_number = ? ORDER BY clip_score DESC", (row_number,))
+        rows = cursor.fetchall()
+        conn.close()
+        
+        candidates = []
+        for r in rows:
+            candidates.append({
+                "id": r["id"],
+                "row_number": r["row_number"],
+                "product_name": r["product_name"],
+                "brand": r["brand"],
+                "image_url": r["image_url"],
+                "title": r["title"],
+                "width": r["width"],
+                "height": r["height"],
+                "clip_score": r["clip_score"],
+                "source_domain": r["source_domain"],
+                "is_selected": r["is_selected"],
+                "status": r["status"]
+            })
+        return candidates
+    except Exception as e:
+        print(f"⚠️ [Curation Database Error] فشل جلب مرشحات الفرز للصف {row_number}: {e}")
+        return []
+
+def update_automation_state(status, total=None, processed=None, success=None, failed=None, current_product=None):
+    """
+    تحديث حالة ومؤشرات جلسة الأتمتة الجارية حالياً في SQLite.
+    """
+    if not os.path.exists(DB_PATH):
+        init_db()
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        updates = ["status = ?", "updated_at = CURRENT_TIMESTAMP"]
+        params = [status]
+        
+        if total is not None:
+            updates.append("total_items = ?")
+            params.append(total)
+        if processed is not None:
+            updates.append("processed_items = ?")
+            params.append(processed)
+        if success is not None:
+            updates.append("success_count = ?")
+            params.append(success)
+        if failed is not None:
+            updates.append("failed_count = ?")
+            params.append(failed)
+        if current_product is not None:
+            updates.append("current_product_name = ?")
+            params.append(current_product)
+            
+        params.append("active_session")
+        query = f"UPDATE automation_state SET {', '.join(updates)} WHERE key = ?"
+        cursor.execute(query, params)
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"⚠️ [SQLite State Error] فشل تحديث حالة الأتمتة: {e}")
+        return False
+
+def get_automation_state():
+    """
+    الاستعلام عن حالة الأتمتة الحالية من SQLite.
+    """
+    if not os.path.exists(DB_PATH):
+        init_db()
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM automation_state WHERE key = 'active_session'")
+        row = cursor.fetchone()
+        conn.close()
+        if row:
+            return dict(row)
+    except Exception as e:
+        print(f"⚠️ [SQLite State Error] فشل استرداد حالة الأتمتة: {e}")
+    return {"status": "idle", "total_items": 0, "processed_items": 0, "success_count": 0, "failed_count": 0, "current_product_name": "", "pause_requested": 0}
+
+def pause_automation():
+    """
+    تعيين علم طلب الإيقاف المؤقت لجلسة الأتمتة الجارية.
+    """
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("UPDATE automation_state SET pause_requested = 1 WHERE key = 'active_session'")
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"⚠️ [SQLite State Error] فشل إيقاف الأتمتة مؤقتاً: {e}")
+        return False
+
+def resume_automation():
+    """
+    إعادة استئناف جلسة الأتمتة وإلغاء علم الإيقاف.
+    """
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("UPDATE automation_state SET pause_requested = 0 WHERE key = 'active_session'")
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"⚠️ [SQLite State Error] فشل استئناف الأتمتة: {e}")
+        return False
 
 # تهيئة قاعدة البيانات تلقائياً عند استيراد الموديول للمرة الأولى
 init_db()

@@ -125,6 +125,13 @@
         <!-- Search and Action tools -->
         <div class="search-row">
             <input type="text" id="errorSearchInput" onkeyup="filterErrorTable()" placeholder="🔍 ابحث عن الخطأ بالاسم، البراند، الباركود أو رسالة الفشل...">
+            <select id="errorCategoryFilter" onchange="filterErrorTable()" style="padding: 0.75rem 1.25rem; background: var(--input-bg); border: 1px solid var(--panel-border); border-radius: 12px; color: var(--text-primary); outline: none; cursor: pointer; font-weight: bold; width: 220px;">
+                <option value="">كل الفئات والتصنيفات 🔍</option>
+                <option value="gemini">ذكاء اصطناعي وصور (Gemini / AI)</option>
+                <option value="photoroom">عزل الخلفية (PhotoRoom)</option>
+                <option value="search">محركات البحث والصور (Search / No Results)</option>
+                <option value="other">أخطاء تقنية أخرى (Other)</option>
+            </select>
             <button type="button" class="btn" id="bulkRetryBtn" onclick="retrySelectedFailures()" style="background: linear-gradient(135deg, var(--accent-purple) 0%, var(--accent-cyan) 100%); font-weight: 800;">
                 <i class="fas fa-redo-alt"></i> إعادة معالجة المنتجات المحددة 🔄
             </button>
@@ -211,12 +218,30 @@
 <script>
     function filterErrorTable() {
         const query = document.getElementById('errorSearchInput').value.toLowerCase().trim();
+        const catValue = document.getElementById('errorCategoryFilter').value;
         const rows = document.querySelectorAll('#errorTable tbody tr');
         
         rows.forEach(row => {
             const cells = Array.from(row.cells).map(c => c.innerText.toLowerCase());
+            const errMsg = (row.cells[4] ? row.cells[4].innerText : '').toLowerCase();
+            
             const textMatch = cells.some(txt => txt.includes(query));
-            row.style.display = textMatch ? '' : 'none';
+            
+            let catMatch = true;
+            if (catValue === 'gemini') {
+                catMatch = errMsg.includes('gemini') || errMsg.includes('vision') || errMsg.includes('model') || errMsg.includes('api key') || errMsg.includes('rate limit');
+            } else if (catValue === 'photoroom') {
+                catMatch = errMsg.includes('photoroom') || errMsg.includes('credit') || errMsg.includes('bg removal') || errMsg.includes('background') || errMsg.includes('removal');
+            } else if (catValue === 'search') {
+                catMatch = errMsg.includes('yandex') || errMsg.includes('bing') || errMsg.includes('search') || errMsg.includes('no results') || errMsg.includes('not found') || errMsg.includes('image');
+            } else if (catValue === 'other') {
+                const isGemini = errMsg.includes('gemini') || errMsg.includes('vision') || errMsg.includes('model') || errMsg.includes('api key') || errMsg.includes('rate limit');
+                const isPhoto = errMsg.includes('photoroom') || errMsg.includes('credit') || errMsg.includes('bg removal') || errMsg.includes('background') || errMsg.includes('removal');
+                const isSearch = errMsg.includes('yandex') || errMsg.includes('bing') || errMsg.includes('search') || errMsg.includes('no results') || errMsg.includes('not found') || errMsg.includes('image');
+                catMatch = !isGemini && !isPhoto && !isSearch;
+            }
+            
+            row.style.display = (textMatch && catMatch) ? '' : 'none';
         });
     }
 

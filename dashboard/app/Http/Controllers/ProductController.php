@@ -200,16 +200,20 @@ class ProductController extends Controller
                 $barcode = trim($prod['barcode'] ?? '');
                 $rowNum = $prod['row_number'];
                 
-                // التحقق مما إذا كان الرابط يطلب المراجعة لتأكيدها للواجهة الأمامية
-                if (strpos($prod['existing_image_link'] ?? '', 'needs_review:') !== false) {
+                // دمج المرشحات البصرية المخزنة
+                $hasCuration = isset($curationCandidates[$rowNum]) && count($curationCandidates[$rowNum]) > 0;
+                $prod['curation_candidates'] = $hasCuration 
+                    ? $curationCandidates[$rowNum]->toArray() 
+                    : [];
+
+                if ($hasCuration) {
+                    $prod['needs_review'] = true;
+                    $selected = $curationCandidates[$rowNum]->firstWhere('is_selected', 1) ?: $curationCandidates[$rowNum]->first();
+                    $prod['needs_review_url'] = $selected ? $selected->image_url : '';
+                } elseif (strpos($prod['existing_image_link'] ?? '', 'needs_review:') !== false) {
                     $prod['needs_review'] = true;
                     $prod['needs_review_url'] = str_replace('needs_review:', '', $prod['existing_image_link']);
                 }
-
-                // دمج المرشحات البصرية المخزنة
-                $prod['curation_candidates'] = isset($curationCandidates[$rowNum]) 
-                    ? $curationCandidates[$rowNum]->toArray() 
-                    : [];
 
                 if ($barcode && isset($resolved[$barcode])) {
                     $prod['cached_image'] = $resolved[$barcode]->cloudinary_url;
@@ -324,6 +328,14 @@ class ProductController extends Controller
     public function richCatalog()
     {
         return view('dashboard.rich_catalog');
+    }
+
+    /**
+     * صفحة التحكم والأتمتة الجماعية
+     */
+    public function batchAutomation()
+    {
+        return view('dashboard.batch_automation');
     }
 
     /**

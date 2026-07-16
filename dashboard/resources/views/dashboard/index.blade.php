@@ -340,12 +340,14 @@
                 <div class="progress-bar-container">
                     <div id="batchProgressBar" class="progress-bar-fill"></div>
                 </div>
-                <div id="batchProgressCounts" style="font-size: 0.8rem; color: var(--text-secondary); text-align: left; direction: ltr; font-family: 'Outfit', sans-serif; margin-top: 0.3rem;">
-                    0 of 0 (Success: 0 | Failed: 0)
+                <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem; width: 100%;">
+                    <button type="button" class="btn btn-secondary btn-sm" id="pauseResumeBatchBtn" onclick="togglePauseResumeAutomation()" style="flex: 1; background: rgba(245, 158, 11, 0.1); border-color: rgba(245, 158, 11, 0.2); color: var(--warning); font-weight: bold; border-radius: 10px;">
+                        <i class="fas fa-pause" id="pauseResumeIcon"></i> <span id="pauseResumeText">إيقاف مؤقت</span>
+                    </button>
+                    <button type="button" class="btn btn-secondary btn-sm" id="stopBatchBtn" onclick="stopBatchAutomation()" style="flex: 1; background: rgba(244, 63, 94, 0.1); border-color: rgba(244, 63, 94, 0.2); color: var(--danger); font-weight: bold; border-radius: 10px;">
+                        <i class="fas fa-stop"></i> إنهاء قسري 🛑
+                    </button>
                 </div>
-                <button class="btn btn-secondary btn-sm" id="stopBatchBtn" onclick="stopBatchAutomation()" style="margin-top: 0.5rem; background: rgba(244, 63, 94, 0.1); border-color: rgba(244, 63, 94, 0.2); color: var(--danger); width: 100%;">
-                    <i class="fas fa-stop"></i> إيقاف الأتمتة فوراً 🛑
-                </button>
             </div>
             
             <!-- Curation Mode Switch -->
@@ -474,6 +476,50 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
     // تحديث حالة الأتمتة بالخلفية
+    let isPaused = false;
+
+    async function togglePauseResumeAutomation() {
+        const btn = document.getElementById('pauseResumeBatchBtn');
+        const icon = document.getElementById('pauseResumeIcon');
+        const txt = document.getElementById('pauseResumeText');
+        
+        btn.disabled = true;
+        
+        try {
+            const url = isPaused ? '/api/batch/resume' : '/api/batch/pause';
+            const res = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
+                }
+            });
+            const data = await res.json();
+            if (data.status === 'success') {
+                isPaused = !isPaused;
+                if (isPaused) {
+                    icon.className = 'fas fa-play';
+                    txt.innerText = 'استئناف الأتمتة';
+                    btn.style.color = 'var(--success)';
+                    btn.style.background = 'rgba(16, 185, 129, 0.1)';
+                    btn.style.borderColor = 'rgba(16, 185, 129, 0.2)';
+                } else {
+                    icon.className = 'fas fa-pause';
+                    txt.innerText = 'إيقاف مؤقت';
+                    btn.style.color = 'var(--warning)';
+                    btn.style.background = 'rgba(245, 158, 11, 0.1)';
+                    btn.style.borderColor = 'rgba(245, 158, 11, 0.2)';
+                }
+            } else {
+                alert('فشل تغيير حالة الأتمتة: ' + data.error);
+            }
+        } catch (err) {
+            console.error(err);
+        } finally {
+            btn.disabled = false;
+        }
+    }
+
     async function pollBatchStatus() {
         try {
             const res = await fetch('/api/batch-status');
@@ -482,16 +528,51 @@
             const panel = document.getElementById('batchProgressPanel');
             const runBtn = document.getElementById('runAllBtn');
             
-            if (data.is_running) {
+            if (data.is_running || (data.status === 'pre_caching' && data.pause_requested === 1)) {
                 panel.style.display = 'flex';
                 const percent = data.total > 0 ? Math.round((data.current / data.total) * 100) : 0;
                 document.getElementById('batchProgressPercent').innerText = percent + '%';
                 document.getElementById('batchProgressBar').style.width = percent + '%';
-                document.getElementById('batchProgressText').innerHTML = `جاري معالجة: <strong style="color: var(--accent-cyan);">${data.current_product || 'جاري البحث...'}</strong>`;
-                document.getElementById('batchProgressCounts').innerText = `${data.current} from ${data.total} (Success: ${data.success} | Failed: ${data.failed})`;
+                
+                isPaused = (data.pause_requested === 1);
+                const pBtn = document.getElementById('pauseResumeBatchBtn');
+                const pIcon = document.getElementById('pauseResumeIcon');
+                const pTxt = document.getElementById('pauseResumeText');
+                
+                if (isPaused) {
+                    pIcon.className = 'fas fa-play';
+                    pTxt.innerText = 'استئناف الأتمتة';
+                    pBtn.style.color = 'var(--success)';
+                    pBtn.style.background = 'rgba(16, 185, 129, 0.1)';
+                    pBtn.style.borderColor = 'rgba(16, 185, 129, 0.2)';
+                    document.getElementById('batchProgressText').innerHTML = `<strong style="color: var(--warning);"><i class="fas fa-pause-circle"></i> الأتمتة موقوفة مؤقتاً</strong>`;
+                } else {
+                    pIcon.className = 'fas fa-pause';
+                    pTxt.innerText = 'إيقاف مؤقت';
+                    pBtn.style.color = 'var(--warning)';
+                    pBtn.style.background = 'rgba(245, 158, 11, 0.1)';
+                    pBtn.style.borderColor = 'rgba(245, 158, 11, 0.2)';
+                    document.getElementById('batchProgressText').innerHTML = `جاري تحضير مرشحات: <strong style="color: var(--accent-cyan);">${data.current_product || 'جاري البحث...'}</strong>`;
+                }
+                
+                document.getElementById('batchProgressCounts').innerText = `${data.current} من ${data.total} (مكتمل: ${data.success} | فشل: ${data.failed})`;
                 
                 runBtn.disabled = true;
                 runBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جاري الأتمتة بالخلفية...';
+            } else if (data.status === 'curation_pending') {
+                panel.style.display = 'flex';
+                document.getElementById('batchProgressPercent').innerText = '100%';
+                document.getElementById('batchProgressBar').style.width = '100%';
+                document.getElementById('batchProgressText').innerHTML = `<strong style="color: var(--success);"><i class="fas fa-check-circle"></i> تم الانتهاء! كافة المنتجات جاهزة للمراجعة.</strong>`;
+                document.getElementById('batchProgressCounts').innerText = `تم تحضير كافة الصور المرشحة لـ ${data.total} منتج بنجاح.`;
+                
+                runBtn.disabled = false;
+                runBtn.className = 'btn btn-secondary';
+                runBtn.style.background = 'rgba(0, 242, 254, 0.15)';
+                runBtn.style.borderColor = 'var(--accent-cyan)';
+                runBtn.style.color = 'var(--text-primary)';
+                runBtn.innerHTML = '<i class="fas fa-images"></i> الانتقال لصفحة فرز واعتماد الصور الآن';
+                runBtn.onclick = () => window.location.href = "/catalog";
             } else {
                 panel.style.display = 'none';
                 if (runBtn.disabled) {
