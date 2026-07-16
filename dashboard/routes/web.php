@@ -8,7 +8,11 @@ use App\Http\Controllers\ApiController;
 Route::get('/', [ProductController::class, 'index'])->name('dashboard.index');
 Route::get('/catalog', [ProductController::class, 'catalog'])->name('dashboard.catalog');
 Route::get('/active-learning', [ProductController::class, 'activeLearning'])->name('dashboard.active_learning');
+Route::get('/errors', [ProductController::class, 'errors'])->name('dashboard.errors');
+Route::get('/rich-catalog', [ProductController::class, 'richCatalog'])->name('dashboard.rich_catalog');
+Route::get('/api/rich-products', [ProductController::class, 'getRichProductsJson']);
 Route::post('/api/active-learning/reset', [ApiController::class, 'resetActiveLearning']);
+Route::post('/api/failures/retry', [ApiController::class, 'retryFailures']);
 
 // خدمات البيانات الداخلية لـ AJAX
 Route::get('/api/products-json', [ProductController::class, 'getProductsJson']);

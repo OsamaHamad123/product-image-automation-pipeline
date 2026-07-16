@@ -837,6 +837,20 @@
     .feedback-checkbox input {
         cursor: pointer;
     }
+
+    .curation-row-card:hover {
+        border-color: var(--accent-cyan) !important;
+        box-shadow: 0 8px 30px rgba(0, 245, 255, 0.06);
+    }
+    .curation-thumb-card:hover {
+        border-color: var(--accent-cyan) !important;
+        transform: scale(1.03);
+    }
+    .curation-thumb-card.active-candidate {
+        border-color: var(--accent-purple) !important;
+        box-shadow: 0 0 12px rgba(139, 92, 246, 0.4);
+        background: rgba(139, 92, 246, 0.05);
+    }
 </style>
 @endsection
 
@@ -2506,21 +2520,61 @@
 
         pending.forEach(p => {
             const card = document.createElement('div');
-            card.className = 'candidate-card';
+            card.className = 'curation-row-card';
             card.id = `batch-card-${p.row_number}`;
             card.style.position = 'relative';
 
+            let candidatesList = p.curation_candidates || [];
+            if (candidatesList.length === 0 && p.needs_review_url) {
+                candidatesList.push({
+                    image_url: p.needs_review_url,
+                    title: "الصورة المقترحة الافتراضية",
+                    width: 800,
+                    height: 800,
+                    clip_score: p.clip_score || 0.0,
+                    source_domain: "سحابة النظام",
+                    is_selected: 1
+                });
+            }
+
+            // Find default selected URL to set on checkbox dataset
+            const selectedCandidate = candidatesList.find(c => c.is_selected === 1) || candidatesList[0];
+            const defaultUrl = selectedCandidate ? selectedCandidate.image_url : (p.needs_review_url || '');
+
             card.innerHTML = `
-                <div class="candidate-img-box bg-checkerboard" style="height: 180px; padding: 1rem; position: relative;">
-                    <input type="checkbox" class="batch-select-checkbox" data-row="${p.row_number}" data-url="${p.needs_review_url}" data-name="${p.product_name.replace(/"/g, '&quot;')}" data-brand="${p.brand.replace(/"/g, '&quot;')}" checked style="position: absolute; top: 0.75rem; right: 0.75rem; width: 20px; height: 20px; z-index: 10; cursor: pointer;">
-                    <img src="${getImageUrl(p.needs_review_url)}" alt="Product Image" onerror="this.src='https://placehold.co/180x180?text=Error'">
+                <div style="flex: 0 0 250px; display: flex; align-items: flex-start; gap: 0.75rem;">
+                    <input type="checkbox" class="batch-select-checkbox" data-row="${p.row_number}" data-url="${defaultUrl}" data-name="${p.product_name.replace(/"/g, '&quot;')}" data-brand="${p.brand.replace(/"/g, '&quot;')}" checked style="width: 22px; height: 22px; cursor: pointer; margin-top: 0.25rem; accent-color: var(--accent-purple);" onchange="toggleBatchRowSelect(this, ${p.row_number})">
+                    <div style="display: flex; flex-direction: column; gap: 0.35rem; width: calc(100% - 30px);">
+                        <span class="badge-row-number" style="align-self: flex-start; background: rgba(139, 92, 246, 0.1); border-color: rgba(139, 92, 246, 0.2); color: var(--accent-purple-hover); font-weight: 800; font-size: 0.75rem; padding: 2px 8px; border-radius: 6px;">صف ${p.row_number}</span>
+                        <h4 style="font-size: 0.95rem; font-weight: 800; margin: 0.25rem 0 0; color: var(--text-primary); text-overflow: ellipsis; overflow: hidden; white-space: nowrap;" title="${p.product_name}">${p.product_name}</h4>
+                        <p style="font-size: 0.8rem; color: var(--text-secondary); margin: 0; font-weight: 600;">البراند: <strong style="color: var(--text-primary);">${p.brand}</strong></p>
+                    </div>
                 </div>
-                <div class="candidate-info" style="padding: 1rem; display: flex; flex-direction: column; gap: 0.5rem; text-align: right; direction: rtl;">
-                    <span class="badge-row-number" style="position: static; display: inline-block; align-self: flex-start; margin-bottom: 0.25rem;">صف ${p.row_number}</span>
-                    <h4 style="font-size: 0.9rem; font-weight: 800; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; color: var(--text-primary);" title="${p.product_name}">${p.product_name}</h4>
-                    <p style="font-size: 0.75rem; color: var(--text-secondary); margin: 0; font-weight: 600;">البراند: <strong style="color: var(--text-primary);">${p.brand}</strong></p>
-                    <button type="button" class="btn btn-secondary btn-sm" onclick="excludeBatchProduct(${p.row_number})" style="width: 100%; font-size: 0.75rem; padding: 0.35rem 0.5rem; margin-top: 0.5rem; background: rgba(239, 68, 68, 0.05); color: var(--danger); border-color: rgba(239, 68, 68, 0.15);">
-                        <i class="fas fa-times"></i> استبعاد وتخطي
+
+                <div style="flex: 1; display: flex; gap: 0.75rem; overflow-x: auto; padding: 0.5rem; border-right: 1px solid var(--panel-border); border-left: 1px solid var(--panel-border); margin: 0 0.5rem;">
+                    ${candidatesList.map((c, cIdx) => {
+                        const isSelected = c.is_selected === 1 ? 'checked' : '';
+                        const activeClass = c.is_selected === 1 ? 'active-candidate' : '';
+                        const scorePercent = c.clip_score ? Math.round(c.clip_score * 100) : 0;
+                        const scoreBadge = scorePercent > 0 ? `<span style="position: absolute; bottom: 4px; left: 4px; background: rgba(12, 18, 28, 0.75); border: 1px solid rgba(255,255,255,0.15); color: #00ffc4; font-size: 0.65rem; font-family: 'Outfit', sans-serif; font-weight: 900; padding: 1px 4px; border-radius: 4px;">${scorePercent}% Match</span>` : '';
+                        const domainText = c.source_domain ? c.source_domain.replace('www.', '') : 'Unknown';
+                        
+                        return `
+                            <div class="curation-thumb-card ${activeClass}" onclick="selectCurationThumb(this, ${p.row_number}, '${c.image_url.replace(/'/g, "\\'")}')" style="position: relative; flex: 0 0 100px; width: 100px; height: 100px; border-radius: 12px; border: 2px solid var(--panel-border); overflow: hidden; cursor: pointer; transition: all 0.25s ease;" title="${c.title || ''} (${domainText})">
+                                <img src="${getImageUrl(c.image_url)}" alt="Candidate image" style="width: 100%; height: 100%; object-fit: cover;" onerror="this.src='https://placehold.co/100x100?text=Error'">
+                                <input type="radio" name="batch-candidate-radio-${p.row_number}" value="${c.image_url}" ${isSelected} style="position: absolute; top: 4px; right: 4px; width: 16px; height: 16px; accent-color: var(--accent-purple); cursor: pointer; z-index: 5;" onclick="event.stopPropagation(); selectCurationThumb(this.parentElement, ${p.row_number}, '${c.image_url.replace(/'/g, "\\'")}')">
+                                ${scoreBadge}
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+
+                <div style="flex: 0 0 150px; display: flex; flex-direction: column; gap: 0.5rem; justify-content: center; align-items: stretch;">
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="toggleBatchRowExclude(${p.row_number})" id="btn-exclude-${p.row_number}" style="font-size: 0.75rem; font-weight: bold; padding: 0.45rem 0.5rem; background: rgba(239, 68, 68, 0.05); color: var(--danger); border-color: rgba(239, 68, 68, 0.15); border-radius: 10px; display: flex; align-items: center; justify-content: center; gap: 0.35rem;">
+                        <i class="fas fa-times-circle"></i> <span class="btn-text">استبعاد وتخطي</span>
+                    </button>
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="searchBatchProductManual(${p.row_number}, '${p.product_name.replace(/'/g, "\\'")}', '${p.brand.replace(/'/g, "\\'")}')" style="font-size: 0.75rem; font-weight: bold; padding: 0.45rem 0.5rem; border-radius: 10px; display: flex; align-items: center; justify-content: center; gap: 0.35rem;">
+                        <i class="fas fa-search"></i> بحث مخصص
                     </button>
                 </div>
             `;
@@ -2528,23 +2582,86 @@
         });
     }
 
+    function selectCurationThumb(thumbEl, rowNum, imageUrl) {
+        const card = document.getElementById(`batch-card-${rowNum}`);
+        if (!card) return;
+        
+        card.querySelectorAll('.curation-thumb-card').forEach(t => t.classList.remove('active-candidate'));
+        thumbEl.classList.add('active-candidate');
+        
+        const radio = thumbEl.querySelector('input[type="radio"]');
+        if (radio) radio.checked = true;
+        
+        const cb = card.querySelector('.batch-select-checkbox');
+        if (cb) {
+            cb.dataset.url = imageUrl;
+        }
+    }
+
+    function toggleBatchRowExclude(rowNum) {
+        const card = document.getElementById(`batch-card-${rowNum}`);
+        if (!card) return;
+        
+        const cb = card.querySelector('.batch-select-checkbox');
+        const btn = document.getElementById(`btn-exclude-${rowNum}`);
+        if (!cb || !btn) return;
+        
+        const isExcluded = cb.checked;
+        cb.checked = !isExcluded;
+        toggleBatchRowSelect(cb, rowNum);
+    }
+
+    function toggleBatchRowSelect(cb, rowNum) {
+        const card = document.getElementById(`batch-card-${rowNum}`);
+        const btn = document.getElementById(`btn-exclude-${rowNum}`);
+        if (!card || !btn) return;
+        
+        if (cb.checked) {
+            card.style.opacity = '1.0';
+            btn.innerHTML = '<i class="fas fa-times-circle"></i> <span class="btn-text">استبعاد وتخطي</span>';
+            btn.style.background = 'rgba(239, 68, 68, 0.05)';
+            btn.style.color = 'var(--danger)';
+            btn.style.borderColor = 'rgba(239, 68, 68, 0.15)';
+        } else {
+            card.style.opacity = '0.4';
+            btn.innerHTML = '<i class="fas fa-undo"></i> <span class="btn-text">إلغاء الاستبعاد</span>';
+            btn.style.background = 'rgba(16, 185, 129, 0.05)';
+            btn.style.color = 'var(--success)';
+            btn.style.borderColor = 'rgba(16, 185, 129, 0.15)';
+        }
+    }
+
+    function searchBatchProductManual(rowNum, name, brand) {
+        closeBatchCuration();
+        
+        const items = document.querySelectorAll('.product-item');
+        let matched = false;
+        items.forEach(item => {
+            if (item.onclick && item.innerHTML.includes(`صف ${rowNum}`)) {
+                item.click();
+                item.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                matched = true;
+            }
+        });
+        
+        if (!matched) {
+            document.getElementById('rowNumber').value = rowNum;
+            document.getElementById('productName').value = name;
+            document.getElementById('brand').value = brand;
+            document.getElementById('productNameAr').value = '';
+            document.getElementById('brandAr').value = '';
+            document.getElementById('customQuery').value = (brand + ' ' + name).trim();
+            activeRowNumber = rowNum;
+            document.getElementById('submitBtn').click();
+        }
+    }
+
     function selectAllBatch(val) {
         document.querySelectorAll('.batch-select-checkbox').forEach(cb => {
             cb.checked = val;
-            const card = cb.closest('.candidate-card');
-            if (card) {
-                card.style.opacity = val ? '1' : '0.5';
-            }
+            const rowNum = cb.dataset.row;
+            toggleBatchRowSelect(cb, rowNum);
         });
-    }
-
-    function excludeBatchProduct(rowNum) {
-        const card = document.getElementById(`batch-card-${rowNum}`);
-        const cb = card.querySelector('.batch-select-checkbox');
-        if (cb) {
-            cb.checked = false;
-            card.style.opacity = '0.4';
-        }
     }
 
     async function submitBatchApproval() {
@@ -2578,8 +2695,10 @@
         const h = getOutputHeight();
         const paddingRatio = parseFloat(document.getElementById('paddingRatio').value);
         const bgColor = document.getElementById('bgColor').value;
+        const bgRemovalMethod = document.getElementById('bgRemovalMethod') ? document.getElementById('bgRemovalMethod').value : 'photoroom';
+        const aiUpscale = document.getElementById('aiUpscale') ? document.getElementById('aiUpscale').checked : true;
+        const aiEnhance = document.getElementById('aiEnhance') ? document.getElementById('aiEnhance').checked : false;
 
-        // Loop sequentially to avoid overloading Sheets/concurrency limits
         for (const cb of selectedCbs) {
             const row = cb.dataset.row;
             const url = cb.dataset.url;
@@ -2604,9 +2723,9 @@
                         product_name: name,
                         brand: brand,
                         row_number: row,
-                        upscale: true,
-                        enhance: false,
-                        bg_removal_method: 'photoroom',
+                        upscale: aiUpscale,
+                        enhance: aiEnhance,
+                        bg_removal_method: bgRemovalMethod,
                         target_width: w,
                         target_height: h,
                         padding_ratio: paddingRatio,
@@ -2617,15 +2736,14 @@
                 const data = await res.json();
                 if (data.status === 'success') {
                     success++;
-                    // Visual feedback
-                    const card = cb.closest('.candidate-card');
+                    const card = cb.closest('.curation-row-card');
                     if (card) {
                         card.style.borderColor = 'var(--success)';
                         card.style.background = 'rgba(16, 185, 129, 0.05)';
                     }
                 } else {
                     failed++;
-                    const card = cb.closest('.candidate-card');
+                    const card = cb.closest('.curation-row-card');
                     if (card) {
                         card.style.borderColor = 'var(--danger)';
                         card.style.background = 'rgba(239, 68, 68, 0.05)';
@@ -2634,6 +2752,11 @@
             } catch (err) {
                 console.error(err);
                 failed++;
+                const card = cb.closest('.curation-row-card');
+                if (card) {
+                    card.style.borderColor = 'var(--danger)';
+                    card.style.background = 'rgba(239, 68, 68, 0.05)';
+                }
             }
         }
 
@@ -2644,9 +2767,8 @@
         rejectBtn.disabled = false;
         progressDiv.style.display = 'none';
 
-        // Reload products list from Sheets and refresh UI
         await loadProducts(true);
-        openBatchCuration(); // Refresh the grid
+        openBatchCuration();
     }
 
     async function submitBatchRejection() {

@@ -92,7 +92,15 @@ class ProductController extends Controller
                 'semantic_cache_savings' => round($successfulRuns * 0.3)
             ];
 
-            $estimatedCost = number_format($metrics['gemini_api_calls'] * 0.00015, 4);
+            $geminiCost = $metrics['gemini_api_calls'] * 0.0025;
+            $photoroomCost = $metrics['successful_runs'] * 0.02;
+            $cloudinaryCost = $metrics['successful_runs'] * 0.002;
+            $totalCostVal = $geminiCost + $photoroomCost + $cloudinaryCost;
+
+            $estimatedCost = number_format($totalCostVal, 4);
+            $metrics['gemini_cost'] = $geminiCost;
+            $metrics['photoroom_cost'] = $photoroomCost;
+            $metrics['cloudinary_cost'] = $cloudinaryCost;
 
             // الحصول على المنتجات لتعديل أرقام الإحصائيات الشاملة
             $products = [];
@@ -177,14 +185,31 @@ class ProductController extends Controller
             // جلب تفاصيل الكاش المحلي
             $resolved = ResolvedProduct::all()->keyBy('barcode');
 
+            // جلب مرشحات الصور المخزنة للفرز والاعتماد البصري
+            $curationCandidates = [];
+            try {
+                $curationCandidates = \DB::table('curation_candidates')
+                    ->orderBy('id', 'asc')
+                    ->get()
+                    ->groupBy('row_number');
+            } catch (\Exception $e) {
+                // Table might not exist or be empty yet
+            }
+
             foreach ($products as &$prod) {
                 $barcode = trim($prod['barcode'] ?? '');
+                $rowNum = $prod['row_number'];
                 
                 // التحقق مما إذا كان الرابط يطلب المراجعة لتأكيدها للواجهة الأمامية
                 if (strpos($prod['existing_image_link'] ?? '', 'needs_review:') !== false) {
                     $prod['needs_review'] = true;
                     $prod['needs_review_url'] = str_replace('needs_review:', '', $prod['existing_image_link']);
                 }
+
+                // دمج المرشحات البصرية المخزنة
+                $prod['curation_candidates'] = isset($curationCandidates[$rowNum]) 
+                    ? $curationCandidates[$rowNum]->toArray() 
+                    : [];
 
                 if ($barcode && isset($resolved[$barcode])) {
                     $prod['cached_image'] = $resolved[$barcode]->cloudinary_url;
@@ -202,6 +227,22 @@ class ProductController extends Controller
             ])->header('X-Cache', 'MISS');
         } catch (\Exception $e) {
             return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * صفحة سجل الأخطاء والتحذيرات للأتمتة
+     */
+    public function errors()
+    {
+        try {
+            $failures = \App\Models\ProductFailure::orderBy('failed_at', 'desc')->get();
+            return view('dashboard.errors', compact('failures'));
+        } catch (\Exception $e) {
+            return view('dashboard.errors', [
+                'failures' => collect([]),
+                'error' => 'فشل تحميل سجل الأخطاء: ' . $e->getMessage()
+            ]);
         }
     }
 
@@ -274,6 +315,30 @@ class ProductController extends Controller
                 'brandStats' => [],
                 'error' => 'فشل تحميل بيانات التعلم النشط: ' . $e->getMessage()
             ]);
+        }
+    }
+
+    /**
+     * صفحة معرض المنتجات الغني وتصفح الكتالوج بالبيانات الوصفية للذكاء الاصطناعي
+     */
+    public function richCatalog()
+    {
+        return view('dashboard.rich_catalog');
+    }
+
+    /**
+     * جلب المنتجات المكتملة ذات البيانات الوصفية كـ JSON
+     */
+    public function getRichProductsJson()
+    {
+        try {
+            $resolved = \App\Models\ResolvedProduct::orderBy('resolved_at', 'desc')->get();
+            return response()->json([
+                'status' => 'success',
+                'products' => $resolved
+            ]);
+        } catch (\Exception $e) {
+            return response()->json(['error' => $e->getMessage()], 500);
         }
     }
 }

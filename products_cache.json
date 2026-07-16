@@ -1,5 +1,5 @@
 {
-  "timestamp": 1784165545.8611608,
+  "timestamp": 1784209934.3767848,
   "products": [
     {
       "row_number": 2,
@@ -92,9 +92,9 @@
       "barcode": "",
       "category": "",
       "origin": "",
-      "existing_image_link": "",
-      "needs_review": true,
-      "needs_review_url": "https://res.cloudinary.com/tucmgz2y/image/upload/c_fit,h_680,w_680/b_rgb:ffffff,c_pad,h_800,w_800/e_sharpen:20/q_auto:best/f_auto/v1784164145/products/a89d54b8d75fd18f2374e7d731d1d53f",
+      "existing_image_link": "https://res.cloudinary.com/tucmgz2y/image/upload/e_trim:5/c_fit,h_680,w_680/c_pad,h_800,w_800/e_sharpen:20/q_auto:best/f_auto/v1784208046/products/ead7dfb616d8ca603093afe1d33b78d9",
+      "needs_review": false,
+      "needs_review_url": "",
       "search_query": "RUBIYA GOLD PALAKKADAN VADI MATTA 5 KG RUBIYA"
     },
     {
@@ -172,9 +172,9 @@
       "barcode": "",
       "category": "",
       "origin": "",
-      "existing_image_link": "",
-      "needs_review": true,
-      "needs_review_url": "https://res.cloudinary.com/tucmgz2y/image/upload/c_fit,h_680,w_680/b_rgb:ffffff,c_pad,h_800,w_800/e_sharpen:20/q_auto:best/f_auto/v1784164213/products/76b79f4f470ecb9b97807c5e7c411141",
+      "existing_image_link": "https://res.cloudinary.com/tucmgz2y/image/upload/e_trim:5/c_fit,h_680,w_680/c_pad,h_800,w_800/e_sharpen:20/q_auto:best/f_auto/v1784209338/products/pantry_snacks/rice%2C_pasta_and_grains/80f4d8b7d6641ebae8181bf6652d1765",
+      "needs_review": false,
+      "needs_review_url": "",
       "search_query": "TASTY FOOD PALAKKADAN MATTA RICE 5KG TASTY"
     },
     {
@@ -220,9 +220,9 @@
       "barcode": "",
       "category": "",
       "origin": "",
-      "existing_image_link": "",
-      "needs_review": true,
-      "needs_review_url": "https://res.cloudinary.com/tucmgz2y/image/upload/c_fit,h_680,w_680/b_rgb:ffffff,c_pad,h_800,w_800/e_sharpen:20/q_auto:best/f_auto/v1784164324/products/25ab7893e80dc70126136eb62874dae0",
+      "existing_image_link": "https://res.cloudinary.com/tucmgz2y/image/upload/e_trim:5/c_fit,h_680,w_680/c_pad,h_800,w_800/e_sharpen:20/q_auto:best/f_auto/v1784209641/products/pantry_snacks/rice%2C_pasta_and_grains/eee9d5b329625ee1ed81b06e20555dd6",
+      "needs_review": false,
+      "needs_review_url": "",
       "search_query": "MILAGROSA JASMINE RICE 5KG MILAGROSA"
     },
     {

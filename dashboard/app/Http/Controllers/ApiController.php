@@ -211,32 +211,37 @@ class ApiController extends Controller
             $logPath = 'f:\\automation\\temp\\pipeline.log';
             $lockFile = 'f:\\automation\\temp\\pipeline.lock';
             
-            // التأكد من تهيئة مجلد temp
             $tempDir = 'f:\\automation\\temp';
             if (!file_exists($tempDir)) {
                 mkdir($tempDir, 0777, true);
             }
             
-            // حفظ خيارات التشغيل الجماعي لتتخطى إعدادات بايثون الافتراضية
             $configData = $request->all();
             file_put_contents($tempDir . DIRECTORY_SEPARATOR . 'run_config.json', json_encode($configData));
             
-            // كتابة قفل مبدئي لمنع السباق البرمجي مع الواجهة الأمامية
             file_put_contents($lockFile, 'STARTING');
 
-            // مسح سجل اللوغ القديم لبدء جلسة نظيفة
             if (file_exists($logPath)) {
                 @unlink($logPath);
             }
 
-            // تشغيل تهيئة الطابور بشكل متزامن وبسيط
             $pythonPath = $this->getPythonPath();
-            $enqueueCmd = "\"{$pythonPath}\" \"{$scriptPath}\" --enqueue 2>&1";
+            
+            // تشغيل تهيئة الطابور مع ضمان المسار الرئيسي للمشروع
+            $enqueueCmd = "cd /d f:\\automation && \"{$pythonPath}\" \"{$scriptPath}\" --enqueue 2>&1";
             shell_exec($enqueueCmd);
 
-            // تشغيل بايثون غير متزامن بالخلفية كـ Worker يسحب من الطابور
-            $cmd = "start /B \"\" \"{$pythonPath}\" -u \"{$scriptPath}\" --worker > \"{$logPath}\" 2>&1";
-            pclose(popen($cmd, "r"));
+            // تشغيل بايثون بالخلفية كـ Worker مفصول تماماً لتفادي قتل العملية بعد انتهاء الطلب
+            $cmd = "cmd /c cd /d f:\\automation && \"{$pythonPath}\" -u \"{$scriptPath}\" --worker > \"{$logPath}\" 2>&1";
+            
+            try {
+                $WshShell = new \COM("WScript.Shell");
+                $WshShell->Run($cmd, 0, false);
+            } catch (\Exception $ex) {
+                // تراجع تشغيلي في حال عدم تفعيل COM
+                $popenCmd = "start /B \"\" cmd /c cd /d f:\\automation && \"{$pythonPath}\" -u \"{$scriptPath}\" --worker > \"{$logPath}\" 2>&1";
+                pclose(popen($popenCmd, "r"));
+            }
             
             return response()->json(['status' => 'success', 'message' => 'Full automation queue worker started in background.']);
         } catch (\Exception $e) {
@@ -255,10 +260,16 @@ class ApiController extends Controller
         if (file_exists($lockFile)) {
             $pid = trim(file_get_contents($lockFile));
             if ($pid === 'STARTING') {
-                $isRunning = true;
+                // تصفية أوتوماتيكية للأقفال العالقة لأكثر من 30 ثانية
+                if (time() - filemtime($lockFile) > 30) {
+                    @unlink($lockFile);
+                    $isRunning = false;
+                } else {
+                    $isRunning = true;
+                }
             } elseif (!empty($pid) && is_numeric($pid)) {
                 $output = shell_exec("tasklist /FI \"PID eq {$pid}\" 2>&1");
-                if (strpos($output, $pid) !== false) {
+                if (strpos($output, $pid) !== false && strpos(strtolower($output), 'python') !== false) {
                     $isRunning = true;
                 } else {
                     @unlink($lockFile);
@@ -334,9 +345,18 @@ class ApiController extends Controller
      */
     public function systemStatus()
     {
+        $fastapiOnline = false;
+        try {
+            $fp = @fsockopen('127.0.0.1', 8001, $errno, $errstr, 0.5);
+            if ($fp) {
+                $fastapiOnline = true;
+                fclose($fp);
+            }
+        } catch (\Exception $ex) {}
+
         return response()->json([
             'laravel_server' => 'online',
-            'flask_server' => 'integrated_cli',
+            'fastapi_server' => $fastapiOnline ? 'online' : 'offline',
             'local_cache_db' => file_exists('f:/automation/local_cache.db') ? 'active' : 'empty_cleared',
             'search_cache' => file_exists('f:/automation/search_cache.json') ? 'active' : 'missing'
         ]);
@@ -344,12 +364,12 @@ class ApiController extends Controller
 
     public function startFlask()
     {
-        return response()->json(['status' => 'success', 'message' => 'Integrated CLI Mode active. No Flask server required.']);
+        return response()->json(['status' => 'success', 'message' => 'خادم FastAPI يعمل في الخلفية على منفذ 8001 تلقائياً عبر سكربت التشغيل setup_and_launch.bat.']);
     }
 
     public function stopFlask()
     {
-        return response()->json(['status' => 'success', 'message' => 'Integrated CLI Mode active. No Flask server required.']);
+        return response()->json(['status' => 'success', 'message' => 'خادم FastAPI يعمل في الخلفية على منفذ 8001 تلقائياً عبر سكربت التشغيل setup_and_launch.bat.']);
     }
 
     /**
@@ -396,6 +416,74 @@ class ApiController extends Controller
             
             \Cache::forget('products_json_v1');
             return response()->json(['status' => 'success', 'message' => 'Active learning feedback reset successfully.']);
+        } catch (\Exception $e) {
+            return response()->json(['status' => 'failed', 'error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * إعادة تشغيل وضم المنتجات الفاشلة لطابور المعالجة
+     */
+    public function retryFailures(Request $request)
+    {
+        $barcodes = $request->input('barcodes', []);
+        if (empty($barcodes)) {
+            return response()->json(['status' => 'failed', 'error' => 'لم يتم تحديد أي رموز أخطاء لإعادة المحاولة.'], 400);
+        }
+
+        try {
+            $cacheKey = 'products_json_v1';
+            $products = \Cache::get($cacheKey);
+            if (!$products) {
+                $result = $this->runPython('get_products');
+                if (isset($result['status']) && $result['status'] === 'success') {
+                    $products = $result['products'];
+                    \Cache::put($cacheKey, $products, 3600);
+                }
+            }
+
+            if (empty($products)) {
+                return response()->json(['status' => 'failed', 'error' => 'فشل تحميل قائمة المنتجات للتأكد من أرقام الصفوف.'], 500);
+            }
+
+            $productsByBarcode = [];
+            foreach ($products as $p) {
+                $barcode = trim($p['barcode'] ?? '');
+                $altBarcode = 'ERR_' . str_replace(' ', '_', ($p['product_name'] ?? '') . '_' . ($p['brand'] ?? ''));
+                
+                if ($barcode) {
+                    $productsByBarcode[$barcode] = $p;
+                }
+                $productsByBarcode[$altBarcode] = $p;
+            }
+
+            $successCount = 0;
+            foreach ($barcodes as $b) {
+                $bClean = trim($b);
+                if (isset($productsByBarcode[$bClean])) {
+                    $p = $productsByBarcode[$bClean];
+                    $rowNum = $p['row_number'];
+                    $name = $p['product_name'];
+                    $brand = $p['brand'];
+                    $query = $p['search_query'] ?? ($brand . ' ' . $name);
+                    $barcodeVal = $p['barcode'] ?? '';
+
+                    // 1. مسح الخطأ من جدول الفشل
+                    \DB::table('product_failures')->where('barcode', $bClean)->delete();
+
+                    // 2. إعادة إدراج الصف في طابور الأتمتة
+                    \DB::statement("
+                        INSERT OR REPLACE INTO automation_queue (row_number, barcode, product_name, brand, search_query, status, error_message, attempts, updated_at)
+                        VALUES (?, ?, ?, ?, ?, 'pending', NULL, 0, CURRENT_TIMESTAMP)
+                    ", [$rowNum, $barcodeVal, $name, $brand, $query]);
+
+                    $successCount++;
+                }
+            }
+
+            \Cache::forget($cacheKey);
+
+            return response()->json(['status' => 'success', 'message' => "تم إعادة جدولة {$successCount} منتجات بنجاح في طابور الأتمتة."]);
         } catch (\Exception $e) {
             return response()->json(['status' => 'failed', 'error' => $e->getMessage()], 500);
         }

@@ -75,6 +75,25 @@ def init_db():
             )
         """)
         
+        # إنشاء جدول حفظ نتائج الصور المرشحة للفرز والاعتماد البصري
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS curation_candidates (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                row_number INTEGER NOT NULL,
+                product_name TEXT NOT NULL,
+                brand TEXT,
+                image_url TEXT NOT NULL,
+                title TEXT,
+                width INTEGER,
+                height INTEGER,
+                clip_score REAL,
+                source_domain TEXT,
+                is_selected INTEGER DEFAULT 0,
+                status TEXT DEFAULT 'pending',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
         # التحقق من وجود عمود clip_embedding_json وإضافته إن لم يكن موجوداً (Auto-migration)
         cursor.execute("PRAGMA table_info(resolved_products)")
         columns = [col[1] for col in cursor.fetchall()]
@@ -91,10 +110,11 @@ def init_db():
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_barcode ON resolved_products(barcode)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_name_brand ON resolved_products(product_name, brand)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_queue_status ON automation_queue(status)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_curation_row ON curation_candidates(row_number)")
         
         conn.commit()
         conn.close()
-        print("💾 [SQLite Cache] تم تهيئة قاعدة بيانات التخزين المحلي بنجاح.")
+        print("💾 [SQLite Cache] تم تهيئة قاعدة بيانات التخزين المحلي بنجاح (محدثة بالفرز والاعتماد).")
     except Exception as e:
         print(f"⚠️ [SQLite Cache Error] فشل تهيئة قاعدة البيانات: {e}")
 
@@ -517,6 +537,66 @@ def get_active_learning_clutter_flag(brand):
     except Exception as e:
         print(f"⚠️ [Active Learning Error] فشل حساب تداخل الخلفية للبراند: {e}")
         return False
+
+def save_curation_candidates(row_number, product_name, brand, candidates, best_url):
+    """
+    حفظ جميع الصور المرشحة لعملية الفرز والاعتماد البصري.
+    سيتم مسح أي مرشح سابق لنفس رقم الصف وحفظ المرشحات الجديدة.
+    سيتم تعليم المرشح ذو الرابط المماثل لـ best_url كـ selected تلقائياً.
+    """
+    if not os.path.exists(DB_PATH):
+        init_db()
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        # 1. مسح المرشحات السابقة لهذا الصف
+        cursor.execute("DELETE FROM curation_candidates WHERE row_number = ?", (row_number,))
+        
+        # 2. إدخال المرشحات الجديدة
+        for c in candidates:
+            url = c.get("url")
+            if not url:
+                continue
+            title = c.get("title", "")
+            width = c.get("width", 0)
+            height = c.get("height", 0)
+            
+            # extract clip score
+            clip_score = 0.0
+            if c.get("scores") and "relevance_score" in c["scores"]:
+                clip_score = float(c["scores"]["relevance_score"])
+            elif "clip_score" in c:
+                clip_score = float(c["clip_score"])
+            elif "relevance_score" in c:
+                clip_score = float(c["relevance_score"])
+                
+            # source domain
+            from urllib.parse import urlparse
+            source_domain = ""
+            try:
+                parsed_uri = urlparse(url)
+                source_domain = parsed_uri.netloc
+            except Exception:
+                pass
+                
+            is_selected = 1 if url == best_url else 0
+            status = 'pending'
+            
+            cursor.execute("""
+                INSERT INTO curation_candidates (
+                    row_number, product_name, brand, image_url, title, width, height, clip_score, source_domain, is_selected, status
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                row_number, product_name, brand, url, title, int(width or 0), int(height or 0),
+                float(clip_score or 0.0), source_domain, is_selected, status
+            ))
+            
+        conn.commit()
+        conn.close()
+        print(f"💾 [Curation Database] تم حفظ المرشحات للصف {row_number} بنجاح.")
+    except Exception as e:
+        print(f"⚠️ [Curation Database Error] فشل حفظ مرشحات الفرز للصف {row_number}: {e}")
 
 # تهيئة قاعدة البيانات تلقائياً عند استيراد الموديول للمرة الأولى
 init_db()

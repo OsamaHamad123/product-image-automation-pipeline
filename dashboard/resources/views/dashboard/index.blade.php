@@ -298,9 +298,24 @@
                 <span style="color: var(--text-secondary); font-size: 0.9rem; font-weight: 600;">عمليات وفرها الكاش الدلالي:</span>
                 <strong style="font-family: 'Outfit', sans-serif; font-size: 1.25rem; color: var(--accent-purple);"><i class="fas fa-bolt" style="margin-inline-end: 0.35rem; color: #f59e0b;"></i>{{ $metrics['semantic_cache_savings'] ?? 0 }}</strong>
             </div>
-            <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid var(--panel-border); padding-top: 1.25rem; margin-top: 0.5rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid var(--panel-border); padding-top: 1rem; margin-top: 0.5rem;">
                 <span style="color: var(--text-secondary); font-weight: bold; font-size: 0.95rem;">تكلفة الاستهلاك المقدرة:</span>
                 <strong style="font-family: 'Outfit', sans-serif; font-size: 1.5rem; color: #f97316; filter: drop-shadow(0 0 8px rgba(249, 115, 22, 0.25));">${{ $estimatedCost }} USD</strong>
+            </div>
+            <!-- تفاصيل التكلفة المقدرة -->
+            <div style="display: flex; flex-direction: column; gap: 0.45rem; background: rgba(0,0,0,0.15); padding: 0.75rem 1rem; border-radius: 10px; font-size: 0.8rem; margin-top: 0.25rem;">
+                <div style="display: flex; justify-content: space-between;">
+                    <span style="color: var(--text-secondary);">استعلامات فحص Gemini:</span>
+                    <span style="color: #06b6d4; font-family: 'Outfit', sans-serif; font-weight: 700;">${{ number_format($metrics['gemini_cost'] ?? 0, 3) }}</span>
+                </div>
+                <div style="display: flex; justify-content: space-between;">
+                    <span style="color: var(--text-secondary);">عزل خلفية PhotoRoom:</span>
+                    <span style="color: var(--danger); font-family: 'Outfit', sans-serif; font-weight: 700;">${{ number_format($metrics['photoroom_cost'] ?? 0, 3) }}</span>
+                </div>
+                <div style="display: flex; justify-content: space-between;">
+                    <span style="color: var(--text-secondary);">رفع وسائط Cloudinary:</span>
+                    <span style="color: var(--success); font-family: 'Outfit', sans-serif; font-weight: 700;">${{ number_format($metrics['cloudinary_cost'] ?? 0, 3) }}</span>
+                </div>
             </div>
         </div>
     </div>
@@ -354,24 +369,56 @@
     <h3 style="font-size: 1.15rem; font-weight: 800; border-bottom: 1px solid var(--panel-border); padding-bottom: 1rem; margin-bottom: 1.5rem; display: flex; align-items: center; gap: 0.75rem; color: var(--text-primary);">
         <i class="fas fa-chart-line" style="color: #3b82f6;"></i> مراقبة مؤشرات الأداء الفورية (Live Telemetry)
     </h3>
-    <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 1.75rem; min-height: 320px; align-items: stretch;">
-        <div style="background: var(--card-bg); border-radius: var(--border-radius-md); padding: 1.5rem; border: 1px solid var(--panel-border); position: relative; height: 320px;">
-            <canvas id="telemetryChart"></canvas>
-        </div>
-        <div class="terminal-console" style="max-height: 320px;">
-            <div class="terminal-header">
-                <span style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; font-weight: 800;">
-                    <i class="fas fa-terminal" style="color: var(--accent-cyan);"></i> تدفق الأحداث المباشر (SSE)
-                </span>
-                <span id="sse-connection-status" style="display: inline-flex; align-items: center; font-size: 0.75rem; font-weight: bold; color: var(--text-secondary);">
-                    <span class="status-dot danger" id="sse-status-dot"></span>
-                    <span id="sse-status-text">مغلق</span>
-                </span>
-            </div>
-            <div id="sse-log-container" class="terminal-body">
-                <span style="color: var(--text-secondary); font-style: italic;">بانتظار تدفق الأحداث الحية من الخادم...</span>
-            </div>
-        </div>
+    <div style="background: var(--card-bg); border-radius: var(--border-radius-md); padding: 1.5rem; border: 1px solid var(--panel-border); position: relative; height: 320px; width: 100%;">
+        <canvas id="telemetryChart"></canvas>
+    </div>
+</div>
+
+<!-- Floating Log Button -->
+<button type="button" class="btn" onclick="toggleLogDrawer()" style="position: fixed; bottom: 2rem; left: 2rem; z-index: 9999; border-radius: 50px; width: 60px; height: 60px; display: flex; align-items: center; justify-content: center; box-shadow: 0 8px 32px rgba(0, 210, 255, 0.35); font-size: 1.4rem; padding: 0; background: linear-gradient(135deg, var(--accent-purple) 0%, var(--accent-cyan) 100%); border: 1px solid rgba(255,255,255,0.15); cursor: pointer;" title="فتح سجل التشغيل المباشر">
+    <i class="fas fa-terminal"></i>
+</button>
+
+<!-- Slide-out Log Drawer -->
+<div id="logDrawer" style="position: fixed; top: 0; left: -430px; width: 420px; height: 100vh; background: rgba(5, 7, 18, 0.96); border-right: 1px solid var(--panel-border); box-shadow: var(--shadow-lg); backdrop-filter: blur(25px); -webkit-backdrop-filter: blur(25px); z-index: 10000; transition: left 0.4s cubic-bezier(0.4, 0, 0.2, 1); display: flex; flex-direction: column; direction: rtl; text-align: right;">
+    <!-- Drawer Header -->
+    <div style="padding: 1.5rem; border-bottom: 1px solid var(--panel-border); display: flex; justify-content: space-between; align-items: center;">
+        <span style="font-weight: 800; font-size: 1.15rem; color: var(--text-primary); display: flex; align-items: center; gap: 0.5rem;">
+            <i class="fas fa-terminal" style="color: var(--accent-cyan);"></i> سجلات التشغيل الحية (SSE Logs)
+        </span>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="toggleLogDrawer()" style="width: 32px; height: 32px; border-radius: 50%; padding: 0; display: flex; align-items: center; justify-content: center;">
+            <i class="fas fa-times"></i>
+        </button>
+    </div>
+
+    <!-- Log Filters & Actions -->
+    <div style="padding: 1rem; border-bottom: 1px solid var(--panel-border); display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+        <select id="logTypeFilter" onchange="filterDrawerLogs()" style="flex: 1; padding: 6px 12px; font-size: 0.8rem; background: rgba(0,0,0,0.3); border: 1px solid var(--panel-border); color: var(--text-primary); border-radius: 8px; outline: none; font-family: inherit;">
+            <option value="all">جميع السجلات</option>
+            <option value="info">معلومات (Info)</option>
+            <option value="warning">تنبيهات (Warning)</option>
+            <option value="error">أخطاء (Error)</option>
+        </select>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="downloadDrawerLogs()" style="font-size: 0.75rem; padding: 6px 12px;" title="تنزيل ملف السجل">
+            <i class="fas fa-download"></i> تنزيل
+        </button>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="clearDrawerLogs()" style="font-size: 0.75rem; padding: 6px 12px; color: var(--danger); background: rgba(244,63,94,0.05);" title="تفريغ الشاشة">
+            <i class="fas fa-trash-alt"></i> مسح
+        </button>
+    </div>
+
+    <!-- SSE Status Badge -->
+    <div style="padding: 0.65rem 1.5rem; border-bottom: 1px solid rgba(255,255,255,0.03); background: rgba(0,0,0,0.1); font-size: 0.8rem; display: flex; justify-content: space-between; align-items: center;">
+        <span style="color: var(--text-secondary); font-weight: 700;">حالة الاتصال المباشر:</span>
+        <span id="sse-connection-status" style="display: inline-flex; align-items: center; font-weight: bold; font-family: 'Tajawal';">
+            <span class="status-dot danger" id="sse-status-dot" style="margin-inline-end: 0.35rem;"></span>
+            <span id="sse-status-text" style="color: var(--text-secondary);">مغلق</span>
+        </span>
+    </div>
+
+    <!-- Logs Container -->
+    <div id="sse-log-container" style="flex: 1; overflow-y: auto; padding: 1.5rem; font-family: monospace; font-size: 0.8rem; line-height: 1.6; color: #a7f3d0; background: #030409; direction: ltr; text-align: left; scroll-behavior: smooth;">
+        <span style="color: var(--text-secondary); font-style: italic;">بانتظار تدفق الأحداث الحية من الخادم...</span>
     </div>
 </div>
 
@@ -393,8 +440,8 @@
                     </span>
                 </div>
                 <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.03); padding-bottom: 0.65rem;">
-                    <span style="color: var(--text-secondary); font-size: 0.9rem; font-weight: 600;">خادم الأتمتة الميكروي (Flask):</span>
-                    <span id="status-flask" class="score-badge" style="background: rgba(239, 68, 68, 0.08); color: var(--danger); border-color: rgba(239, 68, 68, 0.15); font-weight: bold;">
+                    <span style="color: var(--text-secondary); font-size: 0.9rem; font-weight: 600;">خادم النماذج المساعد (FastAPI):</span>
+                    <span id="status-fastapi" class="score-badge" style="background: rgba(239, 68, 68, 0.08); color: var(--danger); border-color: rgba(239, 68, 68, 0.15); font-weight: bold;">
                         <span class="status-dot danger" style="margin: 0;"></span>جاري الفحص...
                     </span>
                 </div>
@@ -409,14 +456,14 @@
             <h4 style="font-size: 0.95rem; margin-bottom: 0.35rem; color: var(--text-primary); font-weight: 800;">إجراءات التحكم السريعة للتشغيل التلقائي</h4>
             <div style="display: flex; gap: 1rem; width: 100%;">
                 <button class="btn" id="startFlaskBtn" onclick="controlSystem('start-flask')" style="flex: 1; background: var(--success); border-color: var(--success); box-shadow: 0 4px 14px 0 rgba(16, 185, 129, 0.25);">
-                    <i class="fas fa-play"></i> تشغيل خادم بايثون 🚀
+                    <i class="fas fa-play"></i> خادم بايثون المساعد 🚀
                 </button>
                 <button class="btn btn-secondary" id="stopFlaskBtn" onclick="controlSystem('stop-flask')" style="flex: 1;">
-                    <i class="fas fa-stop"></i> إيقاف خادم بايثون 🛑
+                    <i class="fas fa-info-circle"></i> تعليمات خادم النماذج
                 </button>
             </div>
             <p style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 0.5rem; line-height: 1.6;">
-                * يتيح لك هذا القسم التحكم في تشغيل وإعادة تهيئة خادم الخلفية (Flask Microservice) برمجياً عند توقفه دون الحاجة لفتح سطر الأوامر يدوياً.
+                * يعمل خادم FastAPI بالخلفية لتقديم تحسينات الصور. تتم إدارته بشكل مباشر وتلقائي بالكامل عند بدء تشغيل لوحة التحكم عبر سكربت `setup_and_launch.bat`.
             </p>
         </div>
     </div>
@@ -551,13 +598,13 @@
             const res = await fetch('/api/system/status');
             const data = await res.json();
             
-            const flaskEl = document.getElementById('status-flask');
+            const flaskEl = document.getElementById('status-fastapi');
             const dbEl = document.getElementById('status-db');
             const startBtn = document.getElementById('startFlaskBtn');
             const stopBtn = document.getElementById('stopFlaskBtn');
             
-            if (data.flask_server === 'online') {
-                flaskEl.innerHTML = '<span class="status-dot"></span>Port 5000 (فعال)';
+            if (data.fastapi_server === 'online') {
+                flaskEl.innerHTML = '<span class="status-dot"></span>Port 8001 (فعال)';
                 flaskEl.style.background = 'rgba(16, 185, 129, 0.08)';
                 flaskEl.style.color = 'var(--success)';
                 flaskEl.style.borderColor = 'rgba(16, 185, 129, 0.15)';
@@ -569,7 +616,7 @@
                 stopBtn.style.opacity = '1';
                 stopBtn.style.cursor = 'pointer';
             } else {
-                flaskEl.innerHTML = '<span class="status-dot danger"></span>Port 5000 (مغلق)';
+                flaskEl.innerHTML = '<span class="status-dot danger"></span>Port 8001 (مغلق)';
                 flaskEl.style.background = 'rgba(239, 68, 68, 0.08)';
                 flaskEl.style.color = 'var(--danger)';
                 flaskEl.style.borderColor = 'rgba(239, 68, 68, 0.15)';
@@ -699,13 +746,55 @@
         });
     }
 
+    let rawLogText = "";
+
+    function toggleLogDrawer() {
+        const drawer = document.getElementById('logDrawer');
+        if (drawer.style.left === '0px') {
+            drawer.style.left = '-430px';
+        } else {
+            drawer.style.left = '0px';
+        }
+    }
+
+    function filterDrawerLogs() {
+        const filterType = document.getElementById('logTypeFilter').value;
+        const logs = document.querySelectorAll('#sse-log-container span');
+        logs.forEach(log => {
+            if (log.dataset.severity) {
+                if (filterType === 'all' || log.dataset.severity === filterType) {
+                    log.style.display = 'block';
+                } else {
+                    log.style.display = 'none';
+                }
+            }
+        });
+    }
+
+    function downloadDrawerLogs() {
+        const blob = new Blob([rawLogText], { type: 'text/plain;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `pipeline_log_${new Date().toISOString().slice(0,10)}.txt`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }
+
+    function clearDrawerLogs() {
+        document.getElementById('sse-log-container').innerHTML = '<span style="color: var(--text-secondary); font-style: italic;">تم تفريغ السجل. بانتظار أحداث جديدة...</span>';
+        rawLogText = "";
+    }
+
     // فتح اتصال البث الحي SSE مع خادم بايثون
     function startSSEConnection() {
         const statusEl = document.getElementById('sse-connection-status');
         const logContainer = document.getElementById('sse-log-container');
         
         try {
-            const eventSource = new EventSource('http://127.0.0.1:5000/api/v1/telemetry/stream/enterprise_tenant_102');
+            const eventSource = new EventSource('http://127.0.0.1:8001/api/v1/telemetry/stream/enterprise_tenant_102');
             
             eventSource.onopen = () => {
                 const sseDot = document.getElementById('sse-status-dot');
@@ -727,12 +816,29 @@
                     if (logContainer.innerHTML.includes('بانتظار تدفق')) {
                         logContainer.innerHTML = '';
                     }
+                    rawLogText += payload.log + "\n";
                     const newLog = document.createElement('span');
                     newLog.style.display = 'block';
                     newLog.style.borderBottom = '1px solid rgba(255,255,255,0.02)';
                     newLog.style.paddingBottom = '4px';
+                    
+                    let severity = 'info';
+                    let logTextLower = payload.log.toLowerCase();
+                    if (logTextLower.includes('error') || logTextLower.includes('fail')) {
+                        severity = 'error';
+                        newLog.style.color = '#f87171'; // red
+                    } else if (logTextLower.includes('warning') || logTextLower.includes('warn')) {
+                        severity = 'warning';
+                        newLog.style.color = '#fbbf24'; // orange
+                    } else {
+                        newLog.style.color = '#a7f3d0'; // green
+                    }
+                    
+                    newLog.dataset.severity = severity;
                     newLog.innerText = payload.log;
                     logContainer.appendChild(newLog);
+                    
+                    filterDrawerLogs();
                     logContainer.scrollTop = logContainer.scrollHeight;
                 }
                 

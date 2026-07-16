@@ -81,6 +81,7 @@ def process_single_product(prod, worksheet, link_column_index):
     # أ. البحث عن أفضل صورة (مع تقييم الصلة والدقة)
     product_name_ar = prod.get("product_name_ar", "")
     brand_ar = prod.get("brand_ar", "")
+    trace = {}
     best_image = image_search.search_best_product_image(
         query, 
         name, 
@@ -89,22 +90,59 @@ def process_single_product(prod, worksheet, link_column_index):
         brand_ar=brand_ar,
         barcode=prod.get("barcode", ""),
         category=prod.get("category", ""),
-        origin=prod.get("origin", "")
+        origin=prod.get("origin", ""),
+        trace=trace
     )
     if not best_image:
         config.log_and_fail(prod.get("barcode"), name, brand, "لم يتم العثور على أي صورة تطابق معايير القبول والجودة البصرية.")
         image_processor.send_telegram_notification("")
         return "failed"
         
-    # تحقق من التخزين المحلي الذكي لتسريع المعالجة
+    # إذا تم تفعيل وضع الفرز المنسق Curation Mode
+    if getattr(config, 'CURATION_MODE', False):
+        # استخراج المرشحات الفريدة من الـ trace
+        candidates = []
+        seen_urls = set()
+        
+        # إذا تم استرجاع النتيجة من الكاش أو التكرار البصري، ننشئ له كانديديت افتراضي وحيد
+        if best_image.get("source") in ["sqlite_cache", "visual_duplicate"]:
+            candidates.append({
+                "url": best_image["url"],
+                "title": best_image.get("title", "صورة مسترجعة من الكاش المحلي"),
+                "status": "accepted",
+                "width": best_image.get("width", 800),
+                "height": best_image.get("height", 800)
+            })
+        else:
+            if trace and 'steps' in trace:
+                for step in trace['steps']:
+                    if 'candidates' in step:
+                        for c in step['candidates']:
+                            url = c.get('url')
+                            if url and url not in seen_urls:
+                                seen_urls.add(url)
+                                candidates.append(c)
+                                
+        # حفظ المرشحات في قاعدة البيانات
+        local_cache_db.save_curation_candidates(row_num, name, brand, candidates, best_image["url"])
+        
+        # تحديث الشيت بالرابط المقترح ومسبوقاً بـ needs_review:
+        image_link_for_sheets = f"needs_review:{best_image['url']}"
+        update_success = google_sheets.update_image_link(worksheet, row_num, link_column_index, image_link_for_sheets)
+        if update_success:
+            print(f"📋 [Curation Mode] تم إرسال المنتج '{name}' للمراجعة وحفظ {len(candidates)} مرشحين بصريين بنجاح.")
+            return "success"
+        else:
+            return "failed"
+
+    # تحقق من التخزين المحلي الذكي لتسريع المعالجة (في الوضع العادي للأتمتة بدون فرز)
     if best_image.get("source") == "sqlite_cache":
         print(f"⚡ [Local Cache Hit] استرجاع فوري للمنتج '{name}' من الكاش المحلي!")
         image_link = best_image["url"]
         metadata = best_image.get("metadata")
         if metadata:
             google_sheets.update_product_metadata(worksheet, row_num, metadata)
-        # احترام وضع المراجعة
-        image_link_for_sheets = f"needs_review:{image_link}" if getattr(config, 'CURATION_MODE', False) else image_link
+        image_link_for_sheets = image_link
         update_success = google_sheets.update_image_link(worksheet, row_num, link_column_index, image_link_for_sheets)
         if update_success:
             print(f"🎉 تم تحديث بيانات الصف {row_num} بنجاح من الكاش المحلي!")
@@ -118,8 +156,7 @@ def process_single_product(prod, worksheet, link_column_index):
         metadata = best_image.get("metadata")
         if metadata:
             google_sheets.update_product_metadata(worksheet, row_num, metadata)
-        # احترام وضع المراجعة
-        image_link_for_sheets = f"needs_review:{image_link}" if getattr(config, 'CURATION_MODE', False) else image_link
+        image_link_for_sheets = image_link
         update_success = google_sheets.update_image_link(worksheet, row_num, link_column_index, image_link_for_sheets)
         if update_success:
             print(f"🎉 تم تحديث بيانات الصف {row_num} بنجاح من التكرار البصري!")

@@ -216,6 +216,16 @@
     </div>
 </div>
 
+<!-- Brand Issues Analysis Chart -->
+<div class="glass-panel" style="direction: rtl; margin-bottom: 2rem;">
+    <h3 style="font-size: 1.1rem; font-weight: 800; border-bottom: 1px solid var(--panel-border); padding-bottom: 0.75rem; margin-bottom: 1.25rem; display: flex; align-items: center; gap: 0.5rem;">
+        <i class="fas fa-chart-bar" style="color: var(--accent-purple-hover);"></i> توزيع مشكلات جودة الصور المتكررة حسب البراند (Visual Analytics)
+    </h3>
+    <div style="position: relative; height: 260px; max-width: 100%;">
+        <canvas id="activeLearningChart"></canvas>
+    </div>
+</div>
+
 <!-- Main Split Layout -->
 <div style="display: grid; grid-template-columns: 1fr; gap: 2rem; direction: rtl;">
     
@@ -364,7 +374,87 @@
 @endsection
 
 @section('scripts')
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
+    // تهيئة الرسم البياني لتوزيع المشاكل البصرية
+    window.addEventListener('load', () => {
+        const brandStats = @json($brandStats);
+        const labels = Object.values(brandStats).map(b => b.brand);
+        const croppingData = Object.values(brandStats).map(b => b.cropping);
+        const clutterData = Object.values(brandStats).map(b => b.clutter);
+
+        if (labels.length === 0) {
+            const chartPanel = document.getElementById('activeLearningChart')?.closest('.glass-panel');
+            if (chartPanel) chartPanel.style.display = 'none';
+            return;
+        }
+
+        const ctx = document.getElementById('activeLearningChart').getContext('2d');
+        const isLight = document.body.classList.contains('light-theme');
+        const gridColor = isLight ? 'rgba(0, 0, 0, 0.08)' : 'rgba(255, 255, 255, 0.05)';
+        const textColor = isLight ? '#475569' : '#8e9bb0';
+        const legendColor = isLight ? '#0f172a' : '#f3f4f6';
+
+        const chart = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: labels,
+                datasets: [
+                    {
+                        label: 'قص جائر للأطراف (Cropping)',
+                        data: croppingData,
+                        backgroundColor: 'rgba(244, 63, 94, 0.65)',
+                        borderColor: 'var(--danger)',
+                        borderWidth: 1.5,
+                        borderRadius: 6
+                    },
+                    {
+                        label: 'تداخل الخلفية (Background Clutter)',
+                        data: clutterData,
+                        backgroundColor: 'rgba(245, 158, 11, 0.65)',
+                        borderColor: 'var(--warning)',
+                        borderWidth: 1.5,
+                        borderRadius: 6
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        labels: {
+                            color: legendColor,
+                            font: { family: 'Tajawal', weight: 'bold', size: 11 }
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        ticks: { color: textColor, font: { family: 'Tajawal', size: 10 } },
+                        grid: { color: gridColor }
+                    },
+                    y: {
+                        ticks: { color: textColor, font: { family: 'Outfit', size: 10 }, stepSize: 1 },
+                        grid: { color: gridColor }
+                    }
+                }
+            }
+        });
+
+        document.querySelector('.theme-toggle-btn')?.addEventListener('click', () => {
+            setTimeout(() => {
+                const activeLight = document.body.classList.contains('light-theme');
+                chart.options.scales.x.grid.color = activeLight ? 'rgba(0, 0, 0, 0.08)' : 'rgba(255, 255, 255, 0.05)';
+                chart.options.scales.x.ticks.color = activeLight ? '#475569' : '#8e9bb0';
+                chart.options.scales.y.grid.color = activeLight ? 'rgba(0, 0, 0, 0.08)' : 'rgba(255, 255, 255, 0.05)';
+                chart.options.scales.y.ticks.color = activeLight ? '#475569' : '#8e9bb0';
+                chart.options.plugins.legend.labels.color = activeLight ? '#0f172a' : '#f3f4f6';
+                chart.update();
+            }, 100);
+        });
+    });
+
     async function resetBrandLearning(brandName, key) {
         if (!confirm(`هل أنت متأكد من تصفير ذاكرة التعلم وإعادة إعدادات المعالجة الافتراضية للبراند: ${brandName}؟`)) {
             return;

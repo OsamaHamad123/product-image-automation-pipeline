@@ -452,6 +452,18 @@
                         <span>التعلم النشط 🧠</span>
                     </a>
                 </li>
+                <li class="sidebar-menu-item @yield('nav_errors')">
+                    <a href="{{ route('dashboard.errors') }}">
+                        <i class="fas fa-exclamation-triangle" style="width: 20px; text-align: center;"></i>
+                        <span>سجل الأخطاء والتحذيرات</span>
+                    </a>
+                </li>
+                <li class="sidebar-menu-item @yield('nav_rich_catalog')">
+                    <a href="{{ route('dashboard.rich_catalog') }}">
+                        <i class="fas fa-store" style="width: 20px; text-align: center;"></i>
+                        <span>معرض المنتجات الغني</span>
+                    </a>
+                </li>
             </ul>
             
             <div class="sidebar-footer">

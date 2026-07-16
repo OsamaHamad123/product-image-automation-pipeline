@@ -1470,6 +1470,8 @@ def evaluate_and_choose_best_image(results, product_name, brand, requires_brand_
                 "url": item['url'],
                 "title": item.get('title', ''),
                 "status": "rejected",
+                "width": item['width'],
+                "height": item['height'],
                 "scores": {"relevance_score": 0, "is_uae_source": is_uae_source},
                 "reasons": reasons
             })
@@ -1494,6 +1496,8 @@ def evaluate_and_choose_best_image(results, product_name, brand, requires_brand_
                 "url": item['url'],
                 "title": item.get('title', ''),
                 "status": "rejected",
+                "width": item['width'],
+                "height": item['height'],
                 "scores": {"relevance_score": 0, "is_uae_source": is_uae_source},
                 "reasons": reasons
             })
@@ -1512,6 +1516,8 @@ def evaluate_and_choose_best_image(results, product_name, brand, requires_brand_
                 "url": item['url'],
                 "title": item.get('title', ''),
                 "status": "rejected",
+                "width": item['width'],
+                "height": item['height'],
                 "scores": {"relevance_score": 0, "is_uae_source": is_uae_source},
                 "reasons": reasons
             })
@@ -1525,6 +1531,8 @@ def evaluate_and_choose_best_image(results, product_name, brand, requires_brand_
                 "url": item['url'],
                 "title": item.get('title', ''),
                 "status": "rejected",
+                "width": item['width'],
+                "height": item['height'],
                 "scores": {"relevance_score": 0, "is_uae_source": is_uae_source},
                 "reasons": reasons
             })
@@ -1557,6 +1565,8 @@ def evaluate_and_choose_best_image(results, product_name, brand, requires_brand_
                 "url": item['url'],
                 "title": item.get('title', ''),
                 "status": "rejected",
+                "width": item['width'],
+                "height": item['height'],
                 "scores": {"relevance_score": relevance_score, "is_uae_source": is_uae_source},
                 "reasons": reasons
             })
@@ -1569,6 +1579,8 @@ def evaluate_and_choose_best_image(results, product_name, brand, requires_brand_
             "url": item['url'],
             "title": item.get('title', ''),
             "status": "rejected", # default to rejected
+            "width": item['width'],
+            "height": item['height'],
             "scores": {"relevance_score": relevance_score, "is_uae_source": is_uae_source},
             "reasons": reasons
         })
