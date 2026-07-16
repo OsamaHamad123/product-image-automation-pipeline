@@ -4,17 +4,14 @@ pydantic
 gspread
 oauth2client
 google-api-python-client
+google-generativeai
 cloudinary
 pillow
 requests
 beautifulsoup4
-# torch
-# torchvision
-# transformers
 redis
 aiohttp
 numpy
 scipy
-opencv-python
+opencv-python-headless
 curl-cffi
-
