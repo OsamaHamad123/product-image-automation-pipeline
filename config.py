@@ -62,6 +62,11 @@ REMOVE_BG_API_KEY = os.getenv("REMOVE_BG_API_KEY", "")
 # مفتاح API الخاص بخدمة PhotoRoom (مطلوب فقط إذا اخترت "photoroom")
 PHOTOROOM_API_KEY = os.getenv("PHOTOROOM_API_KEY", "")
 
+# إعدادات واجهة برمجة تطبيقات إزالة الخلفية لـ PhotoRoom (v1/segment API)
+PHOTOROOM_SIZE = "full"       # دقة الصورة المستردة: preview, medium, hd, full
+PHOTOROOM_CROP = False        # قص الهوامش الشفافة الزائدة لجعل الكائن ممتداً على كامل الحدود (False لترك مساحة الحواف الأصلية)
+PHOTOROOM_DESPILL = True      # تفعيل تقنية تصحيح الحواف وإزالة تسرب الألوان من الخلفية الأصلية (Chroma key)
+
 # 5. ملف اعتمادات Google Service Account
 CREDENTIALS_FILE = os.getenv("CREDENTIALS_FILE", os.path.join(os.path.dirname(os.path.abspath(__file__)), "credentials.json"))
 

@@ -543,27 +543,28 @@ def remove_background(input_path, output_path, target_width=None, target_height=
             return False
             
     elif method == "photoroom":
-        print("⏳ جاري إزالة الخلفية سحابياً باستخدام 'PhotoRoom' Image Editing API...")
+        print("⏳ جاري إزالة الخلفية سحابياً باستخدام 'PhotoRoom' Remove Background API (v1/segment)...")
         if not getattr(config, "PHOTOROOM_API_KEY", None):
             print("❌ خطأ: مفتاح PHOTOROOM_API_KEY غير موجود في config.py.")
             return False
             
         try:
-            url = "https://image-api.photoroom.com/v2/edit"
+            url = "https://sdk.photoroom.com/v1/segment"
             headers = {"x-api-key": config.PHOTOROOM_API_KEY}
             
-            t_w = target_width or 800
-            t_h = target_height or 800
-            p_ratio = padding_ratio or 0.85
-            p_val = (1.0 - p_ratio) / 2.0
+            p_size = getattr(config, "PHOTOROOM_SIZE", "full")
+            p_crop = "true" if getattr(config, "PHOTOROOM_CROP", False) else "false"
+            p_despill = "true" if getattr(config, "PHOTOROOM_DESPILL", True) else "false"
             
             with open(input_path, 'rb') as img_file:
-                files = {'imageFile': img_file}
-                # نطلب صيغة شفافة PNG، ونحدد الأبعاد المطلوبة والهامش المناسب
+                files = {'image_file': img_file}
+                # Parameters for the v1/segment API endpoint
                 data = {
-                    'outputSize': f"{t_w}x{t_h}",
-                    'padding': f"{p_val:.3f}",
-                    'exportFormat': 'png'
+                    'format': 'png',
+                    'channels': 'rgba',
+                    'size': p_size,
+                    'crop': p_crop,
+                    'despill': p_despill
                 }
                 
                 response = requests.post(

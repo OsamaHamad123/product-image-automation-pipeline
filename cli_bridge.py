@@ -142,6 +142,7 @@ def action_select_image(params):
     target_height = int(params.get('target_height', 800))
     padding_ratio = float(params.get('padding_ratio', 0.85))
     bg_color = (params.get('bg_color') or 'ffffff').strip().lstrip('#')
+    bg_removal_method = (params.get('bg_removal_method') or 'photoroom').strip()
     
     if not image_url or not product_name or not brand or not row_number:
         return {'status': 'failed', 'error': 'Missing parameters'}

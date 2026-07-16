@@ -91,29 +91,15 @@
     .terminal-line.success { color: #10b981; }
     .terminal-line.system { color: #8b5cf6; }
 
-    /* Curation styles */
-    .candidates-scroll-gallery {
+    .candidates-grid-gallery {
         flex: 1;
         display: flex;
-        gap: 1rem;
-        overflow-x: auto;
+        flex-wrap: wrap;
+        gap: 0.85rem;
         padding: 0.5rem;
         border-right: 1px solid var(--panel-border);
         border-left: 1px solid var(--panel-border);
         margin: 0 1rem;
-        scroll-snap-type: x mandatory;
-        scrollbar-width: thin;
-        scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
-    }
-    .candidates-scroll-gallery::-webkit-scrollbar {
-        height: 6px;
-    }
-    .candidates-scroll-gallery::-webkit-scrollbar-thumb {
-        background: rgba(255, 255, 255, 0.15);
-        border-radius: 10px;
-    }
-    .candidates-scroll-gallery::-webkit-scrollbar-track {
-        background: transparent;
     }
     
     .curation-thumb-card {
@@ -126,17 +112,16 @@
         overflow: hidden;
         cursor: pointer;
         transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-        scroll-snap-align: start;
     }
     .curation-thumb-card:hover {
         border-color: var(--accent-cyan) !important;
         transform: scale(1.05);
     }
     .curation-thumb-card.active-candidate {
-        border-color: var(--accent-purple) !important;
-        box-shadow: 0 0 15px rgba(139, 92, 246, 0.5);
+        border-color: #00ffc4 !important;
+        box-shadow: 0 0 15px rgba(0, 255, 196, 0.4);
         transform: scale(1.05);
-        background: rgba(139, 92, 246, 0.05);
+        background: rgba(0, 255, 196, 0.05);
     }
     
     .curation-row-card {
@@ -184,6 +169,45 @@
             <button type="button" class="btn" id="runAllBtn" onclick="runAllAutomation()" style="background: linear-gradient(135deg, var(--accent-purple) 0%, var(--accent-cyan) 100%); font-weight: 800; padding: 0.65rem 1.5rem;">
                 <i class="fas fa-play"></i> إطلاق الأتمتة الجماعية بالخلفية
             </button>
+        </div>
+    </div>
+
+    <!-- Stats Cards Grid -->
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.5rem; margin-bottom: 0.5rem;">
+        <!-- Card 1: Queue -->
+        <div class="glass-panel" style="padding: 1.25rem; display: flex; align-items: center; gap: 1.25rem; border-color: rgba(0, 229, 255, 0.15);">
+            <div style="background: rgba(0, 229, 255, 0.1); width: 50px; height: 50px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 1.5rem; color: var(--accent-cyan);">
+                <i class="fas fa-layer-group"></i>
+            </div>
+            <div>
+                <span style="font-size: 0.8rem; color: var(--text-secondary); font-weight: bold; display: block;">المنتجات المعلقة للمراجعة</span>
+                <strong style="font-size: 1.6rem; font-weight: 900; color: var(--text-primary); font-family: 'Outfit', sans-serif;" id="statQueueCount">0</strong>
+            </div>
+        </div>
+
+        <!-- Card 2: Progress -->
+        <div class="glass-panel" style="padding: 1.25rem; display: flex; align-items: center; gap: 1.25rem; border-color: rgba(139, 92, 246, 0.15);">
+            <div style="background: rgba(139, 92, 246, 0.1); width: 50px; height: 50px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 1.5rem; color: var(--accent-purple-hover);">
+                <i class="fas fa-chart-line"></i>
+            </div>
+            <div style="flex: 1;">
+                <span style="font-size: 0.8rem; color: var(--text-secondary); font-weight: bold; display: block;">الحالة والتقدم العام</span>
+                <span style="font-size: 1.1rem; font-weight: 800; color: var(--text-primary);" id="statProgressLabel">خامل (Idle)</span>
+            </div>
+        </div>
+
+        <!-- Card 3: Failures -->
+        <div class="glass-panel" style="padding: 1.25rem; display: flex; align-items: center; gap: 1.25rem; border-color: rgba(244, 63, 94, 0.15);">
+            <div style="background: rgba(244, 63, 94, 0.1); width: 50px; height: 50px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 1.5rem; color: var(--danger);">
+                <i class="fas fa-exclamation-triangle"></i>
+            </div>
+            <div>
+                <span style="font-size: 0.8rem; color: var(--text-secondary); font-weight: bold; display: block;">الأخطاء والفشل</span>
+                <div style="display: flex; align-items: center; gap: 0.75rem;">
+                    <strong style="font-size: 1.6rem; font-weight: 900; color: var(--danger); font-family: 'Outfit', sans-serif;" id="statFailedCount">0</strong>
+                    <button type="button" class="btn btn-secondary btn-sm" id="statRetryBtn" onclick="retryFailedTasks()" style="display: none; padding: 2px 8px; font-size: 0.7rem; color: var(--warning); background: rgba(245,158,11,0.05); border-color: rgba(245,158,11,0.15);">إعادة المحاولة</button>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -527,6 +551,38 @@
         }
     }
 
+    // Retry failed pipeline tasks
+    async function retryFailedTasks() {
+        if (!confirm("هل أنت متأكد من إعادة محاولة تشغيل المهام التي فشلت؟")) {
+            return;
+        }
+        const btn = document.getElementById('statRetryBtn');
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جاري البدء...';
+        try {
+            const res = await fetch('/api/failures/retry', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
+                }
+            });
+            const data = await res.json();
+            if (data.status === 'success') {
+                alert('🎉 تم إعادة جدولة المهام الفاشلة بنجاح!');
+                location.reload();
+            } else {
+                alert('❌ فشل إعادة جدولة المهام: ' + data.error);
+                btn.disabled = false;
+                btn.innerHTML = 'إعادة المحاولة';
+            }
+        } catch (err) {
+            console.error(err);
+            btn.disabled = false;
+            btn.innerHTML = 'إعادة المحاولة';
+        }
+    }
+
     // Poll status
     async function pollBatchStatus() {
         try {
@@ -537,6 +593,15 @@
             const idle = document.getElementById('batchIdleState');
             const runBtn = document.getElementById('runAllBtn');
             
+            // Update Dashboard metrics
+            document.getElementById('statFailedCount').innerText = data.failed || 0;
+            const retryBtn = document.getElementById('statRetryBtn');
+            if (data.failed > 0) {
+                retryBtn.style.display = 'inline-block';
+            } else {
+                retryBtn.style.display = 'none';
+            }
+            
             if (data.is_running || (data.status === 'pre_caching' && data.pause_requested === 1)) {
                 panel.style.display = 'flex';
                 idle.style.display = 'none';
@@ -544,6 +609,9 @@
                 const percent = data.total > 0 ? Math.round((data.current / data.total) * 100) : 0;
                 document.getElementById('batchProgressPercent').innerText = percent + '%';
                 document.getElementById('batchProgressBar').style.width = percent + '%';
+                
+                // Update stats progress label
+                document.getElementById('statProgressLabel').innerHTML = `جاري التحضير: <strong style="color: var(--accent-cyan);">${percent}%</strong>`;
                 
                 isPaused = (data.pause_requested === 1);
                 const pBtn = document.getElementById('pauseResumeBatchBtn');
@@ -557,6 +625,7 @@
                     pBtn.style.background = 'rgba(16, 185, 129, 0.1)';
                     pBtn.style.borderColor = 'rgba(16, 185, 129, 0.2)';
                     document.getElementById('batchProgressText').innerHTML = `<strong style="color: var(--warning);"><i class="fas fa-pause-circle"></i> الأتمتة موقوفة مؤقتاً</strong>`;
+                    document.getElementById('statProgressLabel').innerHTML = `<span style="color: var(--warning); font-weight: 800;">موقوف مؤقتاً ⏸️</span>`;
                 } else {
                     pIcon.className = 'fas fa-pause';
                     pTxt.innerText = 'إيقاف مؤقت';
@@ -578,11 +647,20 @@
                     <p style="font-size: 0.85rem; font-weight: bold; margin: 0; color: var(--success);">تم التحضير المسبق لجميع المرشحات!</p>
                     <p style="font-size: 0.75rem; margin-top: 0.25rem;">المنتجات جاهزة للمراجعة بجدول الفرز بالأسفل.</p>
                 `;
+                
+                document.getElementById('statProgressLabel').innerHTML = `<span style="color: var(--success); font-weight: 800;">جاهز للفرز والاعتماد 🎯</span>`;
                 runBtn.disabled = false;
                 runBtn.innerHTML = '<i class="fas fa-play"></i> تشغيل أتمتة الشيت بالكامل (Batch)';
                 
                 // Show curation workspace
-                document.getElementById('batchCurationWorkspace').style.display = 'block';
+                const workspace = document.getElementById('batchCurationWorkspace');
+                if (workspace.style.display === 'none') {
+                    workspace.style.display = 'block';
+                    // Auto-scroll smooth to curation grid
+                    setTimeout(() => {
+                        workspace.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    }, 500);
+                }
                 fetchCurationProducts();
             } else {
                 panel.style.display = 'none';
@@ -590,6 +668,7 @@
                 runBtn.disabled = false;
                 runBtn.innerHTML = '<i class="fas fa-play"></i> تشغيل أتمتة الشيت بالكامل (Batch)';
                 document.getElementById('batchCurationWorkspace').style.display = 'none';
+                document.getElementById('statProgressLabel').innerHTML = `<span style="color: var(--text-secondary);">خامل (Idle)</span>`;
             }
         } catch (err) {
             console.error("Error polling batch status:", err);
@@ -603,6 +682,8 @@
             const data = await res.json();
             if (data.products) {
                 currentProducts = data.products;
+                const pending = currentProducts.filter(p => p.needs_review);
+                document.getElementById('statQueueCount').innerText = pending.length;
                 renderBatchCurationGrid();
             }
         } catch (err) {
@@ -626,6 +707,7 @@
         const pending = currentProducts.filter(p => p.needs_review);
         
         document.getElementById('curationPendingCount').innerText = `${pending.length} منتج بانتظار المراجعة`;
+        document.getElementById('statQueueCount').innerText = pending.length;
         
         if (pending.length === 0) {
             grid.innerHTML = '<p style="color: var(--text-secondary); text-align: center; padding: 3rem; font-weight: bold;">🎉 لا توجد منتجات معلقة للمراجعة والتدقيق حالياً.</p>';
@@ -678,7 +760,7 @@
                     </div>
                 </div>
 
-                <div class="candidates-scroll-gallery">
+                <div class="candidates-grid-gallery">
                     ${candidatesList.map((c, cIdx) => {
                         const isSelected = c.is_selected === 1 ? 'checked' : '';
                         const activeClass = c.is_selected === 1 ? 'active-candidate' : '';
@@ -687,11 +769,13 @@
                         const domainText = c.source_domain ? c.source_domain.replace('www.', '') : 'Unknown';
                         const hasAllergen = checkTitleForAllergens(c.title || '');
                         const allergenIcon = hasAllergen ? `<span style="position: absolute; top: 4px; left: 4px; color: #f43f5e; font-size: 0.8rem; filter: drop-shadow(0 0 4px rgba(244,63,94,0.7)); z-index: 6;" title="تحذير مسببات حساسية: ${hasAllergen}"><i class="fas fa-exclamation-triangle"></i></span>` : '';
+                        const checkmark = c.is_selected === 1 ? `<span class="selected-check" style="position: absolute; top: 4px; right: 4px; background: #00ffc4; color: #05080f; border-radius: 50%; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; font-size: 0.75rem; z-index: 10; box-shadow: 0 0 8px rgba(0,255,196,0.6);"><i class="fas fa-check"></i></span>` : '';
                         
                         return `
                             <div class="curation-thumb-card ${activeClass}" onclick="selectCurationThumb(this, ${p.row_number}, '${c.image_url.replace(/'/g, "\\'")}')" style="position: relative; flex: 0 0 110px; width: 110px; height: 110px; border-radius: 14px; border: 2px solid var(--panel-border); overflow: hidden; cursor: pointer; transition: all 0.25s ease;" title="${c.title || ''} (${domainText})">
                                 <img src="${getImageUrl(c.image_url)}" alt="Candidate image" style="width: 100%; height: 100%; object-fit: cover;" onerror="this.src='https://placehold.co/110x110?text=Error'">
-                                <input type="radio" name="batch-candidate-radio-${p.row_number}" value="${c.image_url}" ${isSelected} style="position: absolute; top: 6px; right: 6px; width: 18px; height: 18px; accent-color: var(--accent-purple); cursor: pointer; z-index: 5;" onclick="event.stopPropagation(); selectCurationThumb(this.parentElement, ${p.row_number}, '${c.image_url.replace(/'/g, "\\'")}')">
+                                <input type="radio" name="batch-candidate-radio-${p.row_number}" value="${c.image_url}" ${isSelected} style="display: none;">
+                                ${checkmark}
                                 ${scoreBadge}
                                 ${allergenIcon}
                             </div>
@@ -745,8 +829,21 @@
     function selectCurationThumb(thumbEl, rowNum, imageUrl) {
         const card = document.getElementById(`batch-card-${rowNum}`);
         if (!card) return;
-        card.querySelectorAll('.curation-thumb-card').forEach(t => t.classList.remove('active-candidate'));
+        
+        card.querySelectorAll('.curation-thumb-card').forEach(t => {
+            t.classList.remove('active-candidate');
+            const check = t.querySelector('.selected-check');
+            if (check) check.remove();
+        });
+        
         thumbEl.classList.add('active-candidate');
+        
+        // Add checkmark
+        const check = document.createElement('span');
+        check.className = 'selected-check';
+        check.style = "position: absolute; top: 4px; right: 4px; background: #00ffc4; color: #05080f; border-radius: 50%; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; font-size: 0.75rem; z-index: 10; box-shadow: 0 0 8px rgba(0,255,196,0.6);";
+        check.innerHTML = '<i class="fas fa-check"></i>';
+        thumbEl.appendChild(check);
         
         const radio = thumbEl.querySelector('input[type="radio"]');
         if (radio) radio.checked = true;

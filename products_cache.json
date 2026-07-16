@@ -1,5 +1,5 @@
 {
-  "timestamp": 1784227719.684651,
+  "timestamp": 1784231370.8766494,
   "products": [
     {
       "row_number": 2,
@@ -194,22 +194,6 @@
       "search_query": "PANZANI SPAGHETTI N7 GOLD 500GM PANZANI"
     },
     {
-      "row_number": 14,
-      "product_name": "A/G REAL MAYONNAISE LIGHT 887ML",
-      "product_name_ar": "",
-      "brand": "A/G",
-      "brand_ar": "",
-      "sub_sub_category": "",
-      "sub_sub_category_ar": "",
-      "barcode": "",
-      "category": "",
-      "origin": "",
-      "existing_image_link": "",
-      "needs_review": false,
-      "needs_review_url": "",
-      "search_query": "A/G REAL MAYONNAISE LIGHT 887ML A/G"
-    },
-    {
       "row_number": 15,
       "product_name": "MILAGROSA JASMINE RICE 5KG",
       "product_name_ar": "",
@@ -256,6 +240,22 @@
       "needs_review": false,
       "needs_review_url": "",
       "search_query": "ROYAL CHICKEN NUGGETS 750GM CHICKEN"
+    },
+    {
+      "row_number": 18,
+      "product_name": "A/G REAL MAYONNAISE LIGHT 887ML",
+      "product_name_ar": "",
+      "brand": "A/G",
+      "brand_ar": "",
+      "sub_sub_category": "",
+      "sub_sub_category_ar": "",
+      "barcode": "",
+      "category": "",
+      "origin": "",
+      "existing_image_link": "",
+      "needs_review": false,
+      "needs_review_url": "",
+      "search_query": "A/G REAL MAYONNAISE LIGHT 887ML A/G"
     }
   ],
   "link_idx": 32
