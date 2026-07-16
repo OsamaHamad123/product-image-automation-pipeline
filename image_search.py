@@ -223,16 +223,16 @@ class ParallelConsensusScraper:
                 pass
 
         # fallback: Scrape Bing Images directly using curl_cffi Chrome Impersonation
-        from curl_cffi.requests import AsyncSession
-        import json
-        encoded_query = urllib.parse.quote_plus(query)
-        url = f"https://www.bing.com/images/search?q={encoded_query}&cc=AE"  # توطين نتائج محرك بحث بينج في الإمارات (cc=AE)
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-            "Accept-Language": "en-US,en;q=0.5"
-        }
         try:
+            from curl_cffi.requests import AsyncSession
+            import json
+            encoded_query = urllib.parse.quote_plus(query)
+            url = f"https://www.bing.com/images/search?q={encoded_query}&cc=AE"  # توطين نتائج محرك بحث بينج في الإمارات (cc=AE)
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.5"
+            }
             async with AsyncSession(impersonate="chrome120") as s:
                 response = await s.get(url, headers=headers, timeout=8)
                 if response.status_code == 200:
@@ -253,21 +253,21 @@ class ParallelConsensusScraper:
                             except Exception:
                                 continue
                     return results[:15]
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"⚠️ [Bing Scrape Info] Cannot fallback to scraping: {e}")
         return []
 
     async def _fetch_yandex(self, query):
-        from curl_cffi.requests import AsyncSession
-        encoded_query = urllib.parse.quote_plus(query)
-        url = f"https://yandex.com/images/search?text={encoded_query}"
-        headers = {
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-            "Accept-Language": "en-US,en;q=0.5",
-            "Host": "yandex.com",
-            "Sec-Fetch-User": "?1",
-        }
         try:
+            from curl_cffi.requests import AsyncSession
+            encoded_query = urllib.parse.quote_plus(query)
+            url = f"https://yandex.com/images/search?text={encoded_query}"
+            headers = {
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.5",
+                "Host": "yandex.com",
+                "Sec-Fetch-User": "?1",
+            }
             async with AsyncSession(impersonate="chrome120") as session:
                 response = await session.get(url, headers=headers, timeout=8)
                 if response.status_code != 200:
@@ -299,13 +299,13 @@ class ParallelConsensusScraper:
                     except Exception:
                         continue
                 return image_urls
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"⚠️ [Yandex Scrape Info] Cannot fallback to scraping: {e}")
         return []
 
     async def _fetch_duckduckgo(self, query):
-        from curl_cffi.requests import AsyncSession
         try:
+            from curl_cffi.requests import AsyncSession
             async with AsyncSession(impersonate="chrome120") as session:
                 encoded_query = urllib.parse.quote_plus(query)
                 url_init = f"https://duckduckgo.com/?q={encoded_query}&iax=images&ia=images"
@@ -341,8 +341,8 @@ class ParallelConsensusScraper:
                         "width": int(item.get("width", 800)),
                         "height": int(item.get("height", 800))
                     } for item in results[:15]]
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"⚠️ [DuckDuckGo Scrape Info] Cannot fallback to scraping: {e}")
         return []
 
     async def aggregate_consensus_rankings(self, query):
