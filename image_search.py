@@ -233,7 +233,8 @@ class ParallelConsensusScraper:
                 "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
                 "Accept-Language": "en-US,en;q=0.5"
             }
-            async with AsyncSession(impersonate="chrome120") as s:
+            proxies = {"http": config.PROXY_URL, "https": config.PROXY_URL} if getattr(config, "PROXY_URL", "") else None
+            async with AsyncSession(impersonate="chrome120", proxies=proxies) as s:
                 response = await s.get(url, headers=headers, timeout=8)
                 if response.status_code == 200:
                     soup = BeautifulSoup(response.text, "html.parser")
@@ -268,7 +269,8 @@ class ParallelConsensusScraper:
                 "Host": "yandex.com",
                 "Sec-Fetch-User": "?1",
             }
-            async with AsyncSession(impersonate="chrome120") as session:
+            proxies = {"http": config.PROXY_URL, "https": config.PROXY_URL} if getattr(config, "PROXY_URL", "") else None
+            async with AsyncSession(impersonate="chrome120", proxies=proxies) as session:
                 response = await session.get(url, headers=headers, timeout=8)
                 if response.status_code != 200:
                     return []
@@ -306,7 +308,8 @@ class ParallelConsensusScraper:
     async def _fetch_duckduckgo(self, query):
         try:
             from curl_cffi.requests import AsyncSession
-            async with AsyncSession(impersonate="chrome120") as session:
+            proxies = {"http": config.PROXY_URL, "https": config.PROXY_URL} if getattr(config, "PROXY_URL", "") else None
+            async with AsyncSession(impersonate="chrome120", proxies=proxies) as session:
                 encoded_query = urllib.parse.quote_plus(query)
                 url_init = f"https://duckduckgo.com/?q={encoded_query}&iax=images&ia=images"
                 headers_init = {
