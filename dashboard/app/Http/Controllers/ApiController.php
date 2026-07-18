@@ -249,7 +249,7 @@ class ApiController extends Controller
             } else {
                 // Linux background execution
                 $cmd = "cd \"" . $basePath . "\" && \"" . $pythonPath . "\" \"" . $scriptPath . "\" --enqueue > \"" . $logPath . "\" 2>&1 && \"" . $pythonPath . "\" -u \"" . $scriptPath . "\" --worker >> \"" . $logPath . "\" 2>&1";
-                $linuxCmd = "nohup " . $cmd . " > /dev/null 2>&1 &";
+                $linuxCmd = "nohup sh -c " . escapeshellarg($cmd) . " > /dev/null 2>&1 &";
                 shell_exec($linuxCmd);
             }
             
@@ -451,17 +451,23 @@ class ApiController extends Controller
      */
     public function stopBatch()
     {
-        $lockFile = 'f:\\automation\\temp\\pipeline.lock';
-        $progressFile = 'f:\\automation\\temp\\batch_progress.json';
-        
+        $basePath = base_path('..');
+        $lockFile = $basePath . DIRECTORY_SEPARATOR . 'temp' . DIRECTORY_SEPARATOR . 'pipeline.lock';
+        $progressFile = $basePath . DIRECTORY_SEPARATOR . 'temp' . DIRECTORY_SEPARATOR . 'batch_progress.json';
+
         try {
             \DB::statement("DELETE FROM automation_queue");
+            \DB::update("UPDATE automation_state SET status = 'idle', total_items = 0, processed_items = 0, success_count = 0, failed_count = 0, current_product_name = '', pause_requested = 0 WHERE `key` = 'active_session'");
         } catch (\Exception $e) {}
 
         if (file_exists($lockFile)) {
             $pid = trim(file_get_contents($lockFile));
             if (!empty($pid) && is_numeric($pid)) {
-                shell_exec("taskkill /F /PID {$pid} 2>&1");
+                if (strncasecmp(PHP_OS, 'WIN', 3) === 0) {
+                    shell_exec("taskkill /F /PID {$pid} 2>&1");
+                } else {
+                    shell_exec("kill -9 {$pid} 2>&1");
+                }
                 @unlink($lockFile);
                 if (file_exists($progressFile)) {
                     @unlink($progressFile);
