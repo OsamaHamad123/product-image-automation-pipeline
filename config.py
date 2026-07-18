@@ -208,17 +208,68 @@ def log_runner(*args):
             # طباعة رسالة تنبيهية خفيفة مرة واحدة
             builtins.print("ℹ️ [System Notice] خادم Redis غير متصل محلياً؛ تم إيقاف محاولات البث المباشر لتسريع المعالجة.")
 
+def log_error_to_laravel(error_message, barcode=None, product_name=None, brand=None, level="ERROR"):
+    """
+    تدوين رسائل الأخطاء وتفاصيلها مباشرة في ملف سجلات لارافيل `dashboard/storage/logs/laravel.log`.
+    """
+    import threading
+    from datetime import datetime
+    
+    # تحديد مسار ملف السجلات بشكل نسبي
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    log_file_path = os.path.join(base_dir, "dashboard", "storage", "logs", "laravel.log")
+    
+    # التأكد من وجود المجلد
+    log_dir = os.path.dirname(log_file_path)
+    try:
+        os.makedirs(log_dir, exist_ok=True)
+    except Exception:
+        pass
+        
+    time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    # بناء تفاصيل المنتج إن وجدت
+    prod_details = []
+    if product_name:
+        prod_details.append(f"Product: {product_name}")
+    if brand:
+        prod_details.append(f"Brand: {brand}")
+    if barcode:
+        prod_details.append(f"Barcode: {barcode}")
+        
+    context_str = f" - [{', '.join(prod_details)}]" if prod_details else ""
+    
+    # صياغة السطر بتنسيق لارافيل
+    formatted_log = f"[{time_str}] local.{level}: Python Pipeline{context_str}: {error_message}\n"
+    
+    # استخدام قفل محلي لحماية الكتابة المتزامنة في نفس العملية
+    if not hasattr(log_error_to_laravel, "_lock"):
+        log_error_to_laravel._lock = threading.Lock()
+        
+    with log_error_to_laravel._lock:
+        try:
+            with open(log_file_path, "a", encoding="utf-8") as f:
+                f.write(formatted_log)
+        except Exception as e:
+            import builtins
+            builtins.print(f"⚠️ فشل الكتابة في ملف سجلات لارافيل: {e}")
+
 def log_and_fail(barcode, product_name, brand, error_message):
     """
     تدوين الخطأ في الكونسول وتخزينه في جدول أخطاء SQLite.
     """
     log_runner(f"❌ فشل أتمتة المنتج '{product_name}': {error_message}")
+    
+    # تدوين الفشل في ملف سجلات لارافيل
+    log_error_to_laravel(error_message, barcode=barcode, product_name=product_name, brand=brand, level="ERROR")
+    
     try:
         import local_cache_db
         local_cache_db.save_product_failure(barcode, product_name, brand, error_message)
     except Exception as e:
         import builtins
         builtins.print(f"⚠️ خطأ أثناء حفظ سجل الفشل: {e}")
+
 
 # 11. إعدادات خادم Redis
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")

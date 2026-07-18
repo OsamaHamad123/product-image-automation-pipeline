@@ -167,6 +167,7 @@ def get_products():
                 
         return {"status": "success", "products": products}
     except Exception as e:
+        config.log_error_to_laravel(f"Endpoint /api/products exception: {str(e)}", level="ERROR")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/search")
@@ -232,6 +233,13 @@ def search_product_image(req: SearchRequest):
             }
     except Exception as e:
         traceback.print_exc()
+        config.log_error_to_laravel(
+            f"Endpoint /api/search exception: {str(e)}\n{traceback.format_exc()}",
+            product_name=req.product_name,
+            brand=req.brand,
+            barcode=req.barcode,
+            level="ERROR"
+        )
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/select-image")
@@ -400,6 +408,13 @@ def select_product_image(req: SelectImageRequest):
         return {"status": "success", "image_link": image_link, "metadata": metadata}
         
     except Exception as e:
+        config.log_error_to_laravel(
+            f"Endpoint /api/select-image exception: {str(e)}",
+            product_name=req.product_name,
+            brand=req.brand,
+            barcode=req.barcode,
+            level="ERROR"
+        )
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/reject-image")
@@ -468,6 +483,12 @@ def reject_product_image(req: RejectImageRequest):
         return {"status": "success", "message": "Feedback logged and blank link scheduled in Sheets"}
         
     except Exception as e:
+        config.log_error_to_laravel(
+            f"Endpoint /api/reject-image exception: {str(e)}",
+            product_name=req.product_name,
+            brand=req.brand,
+            level="ERROR"
+        )
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/upload-manual-image")
@@ -608,6 +629,13 @@ def upload_manual_image(req: UploadManualRequest):
         return {"status": "success", "image_link": image_link, "metadata": metadata}
         
     except Exception as e:
+        config.log_error_to_laravel(
+            f"Endpoint /api/upload-manual-image exception: {str(e)}",
+            product_name=req.product_name,
+            brand=req.brand,
+            barcode=req.barcode,
+            level="ERROR"
+        )
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/v1/telemetry/stream/{tenant_id}")

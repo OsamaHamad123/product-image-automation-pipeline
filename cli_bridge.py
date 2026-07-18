@@ -337,6 +337,12 @@ def action_select_image(params):
             return {'status': 'success', 'image_link': image_link}
         return {'status': 'failed', 'error': 'Failed to update Google Sheets link'}
     except Exception as e:
+        config.log_error_to_laravel(
+            f"CLI action_select_image exception: {str(e)}\n{traceback.format_exc()}",
+            product_name=product_name,
+            brand=brand,
+            level="ERROR"
+        )
         return {'status': 'failed', 'error': str(e), 'traceback': traceback.format_exc()}
     finally:
         google_sheets.stop_async_queue()
@@ -457,6 +463,13 @@ def action_upload_manual_image(params):
             return {'status': 'success', 'image_link': image_link}
         return {'status': 'failed', 'error': 'Failed to update Google Sheet link'}
     except Exception as e:
+        config.log_error_to_laravel(
+            f"CLI action_upload_manual_image exception: {str(e)}\n{traceback.format_exc()}",
+            product_name=product_name,
+            brand=brand,
+            barcode=barcode,
+            level="ERROR"
+        )
         return {'status': 'failed', 'error': str(e), 'traceback': traceback.format_exc()}
     finally:
         google_sheets.stop_async_queue()
@@ -532,6 +545,10 @@ def main():
         result = actions[action](params)
         print(json.dumps(result))
     except Exception as e:
+        config.log_error_to_laravel(
+            f"CLI main exception for action '{action}': {str(e)}\n{traceback.format_exc()}",
+            level="ERROR"
+        )
         print(json.dumps({'status': 'failed', 'error': str(e), 'traceback': traceback.format_exc()}))
 
 if __name__ == '__main__':
