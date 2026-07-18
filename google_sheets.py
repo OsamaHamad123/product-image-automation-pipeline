@@ -49,9 +49,9 @@ class SQLiteTransactionQueue:
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS sheet_updates (
                     id INT AUTO_INCREMENT PRIMARY KEY,
-                    row_number INT NOT NULL,
-                    col_index INT NOT NULL,
-                    value TEXT NOT NULL,
+                    `row_number` INT NOT NULL,
+                    `col_index` INT NOT NULL,
+                    `value` TEXT NOT NULL,
                     registered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     sync_status VARCHAR(255) DEFAULT 'PENDING'
                 ) ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
@@ -65,7 +65,7 @@ class SQLiteTransactionQueue:
         try:
             cursor = conn.cursor()
             cursor.execute(
-                "INSERT INTO sheet_updates (row_number, col_index, value) VALUES (%s, %s, %s)",
+                "INSERT INTO sheet_updates (`row_number`, `col_index`, `value`) VALUES (%s, %s, %s)",
                 (row_number, col_index, value)
             )
             conn.commit()
@@ -121,7 +121,7 @@ class GoogleSheetsBatchWorker(threading.Thread):
         try:
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT id, row_number, col_index, value FROM sheet_updates WHERE sync_status = 'PENDING' LIMIT 100"
+                "SELECT id, `row_number`, `col_index`, `value` FROM sheet_updates WHERE sync_status = 'PENDING' LIMIT 100"
             )
             rows = cursor.fetchall()
             
