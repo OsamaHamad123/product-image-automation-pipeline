@@ -276,3 +276,9 @@ REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
 REDIS_DB = int(os.getenv("REDIS_DB", "0"))
 
+# 12. إعدادات فلاتر الأتمتة الجماعية المتقدمة
+BRAND_FILTER = ""
+ROW_FILTER = ""
+AUTO_APPROVE_THRESHOLD = 0.0 # 0.0 تعني تعطيل الاعتماد التلقائي
+
+

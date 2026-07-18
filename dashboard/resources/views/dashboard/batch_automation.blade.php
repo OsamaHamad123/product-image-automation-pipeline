@@ -257,6 +257,47 @@
                             <option value="true">تفعيل (AI Enhance)</option>
                         </select>
                     </div>
+
+                    <div class="config-card">
+                        <label for="autoApproveThreshold">حد الاعتماد التلقائي (Auto Ingest)</label>
+                        <select id="autoApproveThreshold" onchange="updatePreflightEstimates()">
+                            <option value="0.0">تعطيل الاعتماد التلقائي</option>
+                            <option value="0.98">طابق دقيق (98% فما فوق)</option>
+                            <option value="0.95">طابق مرتفع (95% فما فوق)</option>
+                            <option value="0.90">طابق مقبول (90% فما فوق)</option>
+                        </select>
+                    </div>
+
+                    <div class="config-card">
+                        <label for="brandFilter">فلترة حسب الماركة (Brand)</label>
+                        <input type="text" id="brandFilter" placeholder="مثال: Lipton" oninput="updatePreflightEstimates()">
+                    </div>
+
+                    <div class="config-card">
+                        <label for="rowFilter">فلترة حسب الصفوف (Rows)</label>
+                        <input type="text" id="rowFilter" placeholder="مثال: 5-20 أو 5,8,12" oninput="updatePreflightEstimates()">
+                    </div>
+                </div>
+
+                <!-- Pre-flight Estimates Panel -->
+                <div style="margin-top: 1.5rem; padding-top: 1.25rem; border-top: 1px solid var(--panel-border); display: flex; flex-direction: column; gap: 0.75rem;">
+                    <h4 style="font-size: 0.9rem; font-weight: 800; color: var(--accent-cyan); margin: 0; display: flex; align-items: center; gap: 0.45rem;">
+                        <i class="fas fa-calculator"></i> التقديرات والتوقعات الذكية (Pre-flight Estimates)
+                    </h4>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 1rem; margin-top: 0.25rem;">
+                        <div style="background: rgba(0,0,0,0.2); padding: 0.75rem; border-radius: 10px; border: 1px solid var(--panel-border);">
+                            <span style="font-size: 0.7rem; color: var(--text-secondary); display: block;">الصفوف المستهدفة</span>
+                            <strong id="estimateRows" style="font-size: 1.05rem; color: var(--text-primary);">0 صف</strong>
+                        </div>
+                        <div style="background: rgba(0,0,0,0.2); padding: 0.75rem; border-radius: 10px; border: 1px solid var(--panel-border);">
+                            <span style="font-size: 0.7rem; color: var(--text-secondary); display: block;">الوقت المتوقع</span>
+                            <strong id="estimateTime" style="font-size: 1.05rem; color: var(--text-primary);">0 ثانية</strong>
+                        </div>
+                        <div style="background: rgba(0,0,0,0.2); padding: 0.75rem; border-radius: 10px; border: 1px solid var(--panel-border);">
+                            <span style="font-size: 0.7rem; color: var(--text-secondary); display: block;">مكالمات Gemini المتوقعة</span>
+                            <strong id="estimateGemini" style="font-size: 1.05rem; color: var(--text-primary);">0 طلب</strong>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -480,6 +521,9 @@
             bgRemovalMethod: document.getElementById('bgRemovalMethod').value,
             aiUpscale: document.getElementById('aiUpscale').value === 'true',
             aiEnhance: document.getElementById('aiEnhance').value === 'true',
+            brand_filter: document.getElementById('brandFilter').value.trim(),
+            row_filter: document.getElementById('rowFilter').value.trim(),
+            auto_approve_threshold: parseFloat(document.getElementById('autoApproveThreshold').value),
             curation_mode: true
         };
         
@@ -685,10 +729,61 @@
                 const pending = currentProducts.filter(p => p.needs_review);
                 document.getElementById('statQueueCount').innerText = pending.length;
                 renderBatchCurationGrid();
+                updatePreflightEstimates();
             }
         } catch (err) {
             console.error(err);
         }
+    }
+
+    // Update preflight estimates based on loaded products & filters
+    function updatePreflightEstimates() {
+        if (!currentProducts || currentProducts.length === 0) return;
+        
+        let pending = currentProducts;
+        
+        // Apply brand filter
+        const brandQuery = document.getElementById('brandFilter').value.trim().toLowerCase();
+        if (brandQuery) {
+            pending = pending.filter(p => p.brand && p.brand.toLowerCase().includes(brandQuery));
+        }
+        
+        // Apply row filter
+        const rowQuery = document.getElementById('rowFilter').value.trim();
+        if (rowQuery) {
+            try {
+                let allowed = new Set();
+                const parts = rowQuery.split(',');
+                parts.forEach(part => {
+                    part = part.trim();
+                    if (part.includes('-')) {
+                        const [start, end] = part.split('-').map(Number);
+                        for (let i = start; i <= end; i++) allowed.add(i);
+                    } else {
+                        allowed.add(Number(part));
+                    }
+                });
+                pending = pending.filter(p => allowed.has(p.row_number));
+            } catch (e) {
+                console.error("Error parsing row filter for estimates", e);
+            }
+        }
+        
+        // Estimate values
+        const rowCount = pending.length;
+        const autoThresh = parseFloat(document.getElementById('autoApproveThreshold').value);
+        
+        // Time estimate: ~6 seconds per row on average
+        const estSec = rowCount * 6;
+        const estMin = Math.round(estSec / 60);
+        const estTimeText = estSec < 60 ? `${estSec} ثانية` : `${estMin} دقيقة (${estSec} ثانية)`;
+        
+        // Gemini estimate: 2 calls per row
+        const geminiCalls = rowCount * 2;
+        
+        document.getElementById('estimateRows').innerText = `${rowCount} صف`;
+        document.getElementById('estimateTime').innerText = estTimeText;
+        document.getElementById('estimateGemini').innerText = `${geminiCalls} طلب`;
     }
 
     function checkTitleForAllergens(title) {
@@ -752,9 +847,16 @@
                         ${(p.curation_candidates && p.curation_candidates.length > 0) ? `<span style="background: var(--active-menu-bg); border: 1px solid var(--panel-border); color: var(--text-primary); font-size: 0.7rem; font-weight: 800; padding: 2px 6px; border-radius: 4px; margin-top: 0.35rem; display: inline-block; align-self: flex-start;"><i class="fas fa-bolt"></i> جاهز للمراجعة (Cached)</span>` : ''}
                         
                         <div style="display: flex; align-items: center; gap: 0.35rem; margin-top: 0.5rem; width: 100%;">
-                            <input type="text" id="inline-query-${p.row_number}" value="${p.brand ? p.product_name + ' ' + p.brand : p.product_name}" style="flex: 1; font-size: 0.75rem; padding: 4px 8px; background: rgba(0,0,0,0.25); border: 1px solid var(--panel-border); color: var(--text-primary); border-radius: 6px; outline: none; width: calc(100% - 35px);">
+                            <input type="text" id="inline-query-${p.row_number}" value="${p.brand ? p.product_name + ' ' + p.brand : p.product_name}" style="flex: 1; font-size: 0.75rem; padding: 4px 8px; background: rgba(0,0,0,0.25); border: 1px solid var(--panel-border); color: var(--text-primary); border-radius: 6px; outline: none; width: calc(100% - 35px);" title="كلمات البحث">
                             <button type="button" class="btn btn-secondary btn-sm" onclick="triggerInlineSearch(${p.row_number})" style="padding: 4px; font-size: 0.7rem; display: flex; align-items: center; justify-content: center; height: 26px; width: 26px;" title="إعادة البحث بالكلمات المكتوبة">
                                 <i class="fas fa-sync-alt" id="inline-spinner-${p.row_number}"></i>
+                            </button>
+                        </div>
+                        
+                        <div style="display: flex; align-items: center; gap: 0.35rem; margin-top: 0.35rem; width: 100%;">
+                            <input type="text" id="inline-url-${p.row_number}" placeholder="أو الصق رابط صورة مخصص هنا..." style="flex: 1; font-size: 0.75rem; padding: 4px 8px; background: rgba(0,0,0,0.25); border: 1px solid var(--panel-border); color: var(--text-primary); border-radius: 6px; outline: none; width: calc(100% - 35px);">
+                            <button type="button" class="btn btn-secondary btn-sm" onclick="addCustomImageUrl(${p.row_number})" style="padding: 4px; font-size: 0.7rem; display: flex; align-items: center; justify-content: center; height: 26px; width: 26px; background: var(--active-menu-bg);" title="إضافة الرابط يدوياً">
+                                <i class="fas fa-plus"></i>
                             </button>
                         </div>
                     </div>
@@ -1033,6 +1135,48 @@
         } finally {
             spinner.classList.remove('fa-spin');
         }
+    }
+
+    function addCustomImageUrl(rowNumber) {
+        const urlInput = document.getElementById(`inline-url-${rowNumber}`);
+        if (!urlInput) return;
+        
+        const urlText = urlInput.value.trim();
+        if (!urlText || !urlText.startsWith('http')) {
+            alert('الرجاء إدخال رابط صورة صحيح يبدأ بـ http أو https.');
+            return;
+        }
+        
+        const p = currentProducts.find(prod => prod.row_number === rowNumber);
+        if (!p) return;
+        
+        if (!p.curation_candidates) {
+            p.curation_candidates = [];
+        }
+        
+        // Unselect existing candidates
+        p.curation_candidates.forEach(c => {
+            c.is_selected = 0;
+        });
+        
+        // Add new candidate at start
+        p.curation_candidates.unshift({
+            image_url: urlText,
+            title: "رابط مخصص يدوي",
+            width: 800,
+            height: 800,
+            clip_score: 1.0,
+            source_domain: "رابط مخصص",
+            is_selected: 1
+        });
+        
+        // Update checkbox URL datasets in UI
+        const cb = document.querySelector(`.batch-select-checkbox[data-row="${rowNumber}"]`);
+        if (cb) {
+            cb.dataset.url = urlText;
+        }
+        
+        renderBatchCurationGrid();
     }
 
     // On Load

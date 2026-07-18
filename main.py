@@ -43,6 +43,15 @@ def load_run_config():
                 config.IMAGE_BG_COLOR = str(overrides["bg_color"]).strip().lstrip('#')
             if "curation_mode" in overrides:
                 config.CURATION_MODE = bool(overrides["curation_mode"])
+            if "brand_filter" in overrides:
+                config.BRAND_FILTER = str(overrides["brand_filter"]).strip()
+            if "row_filter" in overrides:
+                config.ROW_FILTER = str(overrides["row_filter"]).strip()
+            if "auto_approve_threshold" in overrides:
+                try:
+                    config.AUTO_APPROVE_THRESHOLD = float(overrides["auto_approve_threshold"])
+                except ValueError:
+                    config.AUTO_APPROVE_THRESHOLD = 0.0
                 
             print("⚙️ [Run Config] تم تحميل وتطبيق التجاوزات البرمجية من ملف run_config.json بنجاح!")
         except Exception as e:
@@ -310,6 +319,24 @@ def run_enqueue_mode():
             print("⚠️ [Enqueue] لم يتم العثور على أي منتجات صالحة.")
             sys.exit(0)
             
+        # تحليل فلتر الصفوف إن وجد
+        allowed_rows = None
+        if config.ROW_FILTER:
+            allowed_rows = set()
+            try:
+                parts = config.ROW_FILTER.split(',')
+                for part in parts:
+                    part = part.strip()
+                    if '-' in part:
+                        start, end = part.split('-')
+                        allowed_rows.update(range(int(start), int(end) + 1))
+                    else:
+                        allowed_rows.add(int(part))
+                print(f"🎯 [Enqueue] تطبيق فلتر الصفوف: {sorted(list(allowed_rows))}")
+            except Exception as e:
+                print(f"⚠️ [Enqueue] خطأ في صياغة فلتر الصفوف: {e}. سيتم تجاهله.")
+                allowed_rows = None
+
         enqueued_count = 0
         for prod in products:
             row_num = prod["row_number"]
@@ -318,6 +345,15 @@ def run_enqueue_mode():
             brand = prod["brand"]
             query = prod["search_query"]
             existing_link = prod.get("existing_image_link", "")
+            
+            # تطبيق فلتر الصفوف
+            if allowed_rows is not None and row_num not in allowed_rows:
+                continue
+                
+            # تطبيق فلتر الماركة (Brand)
+            if config.BRAND_FILTER and brand:
+                if config.BRAND_FILTER.lower() not in brand.lower():
+                    continue
             
             # إذا لم يتم فرض الكتابة فوق الصور، نتجاهل الموجودة
             if existing_link and not config.FORCE_OVERWRITE_IMAGES:
@@ -334,10 +370,117 @@ def run_enqueue_mode():
         print(f"❌ [Enqueue Error] فشل بناء الطابور: {e}")
         sys.exit(1)
 
-def pre_cache_product_candidates(task):
+def auto_approve_product(task, best_image, worksheet, link_column_index):
+    """
+    اعتماد ورفع وتحديث بيانات المنتج تلقائياً سحابياً لتجاوز الفرز البشري
+    """
+    import image_processor
+    import cloudinary_storage
+    
+    name = task["product_name"]
+    brand = task["brand"]
+    row_num = task["row_number"]
+    image_url = best_image["url"]
+    
+    print(f"🚀 [Auto-Approve] جاري معالجة ورفع الصورة تلقائياً لـ [{name}] لزيادة التطابق...")
+    
+    try:
+        w, h = getattr(config, 'IMAGE_TARGET_SIZE', (800, 800))
+        processed_image_path = image_processor.process_product_image(
+            image_url, name, brand, 
+            bg_removal_method=getattr(config, 'BG_REMOVAL_METHOD', 'photoroom'),
+            target_width=w,
+            target_height=h,
+            padding_ratio=getattr(config, 'IMAGE_PADDING_RATIO', 0.85),
+            bypass_heuristics=True
+        )
+        if not processed_image_path or not os.path.exists(processed_image_path):
+            print(f"❌ [Auto-Approve] فشل معالجة الصورة محلياً لـ [{name}]")
+            return False
+            
+        if getattr(config, 'FORCE_UPSCALING', True):
+            try:
+                from PIL import Image
+                with Image.open(processed_image_path) as img:
+                    w_f, h_f = img.size
+                    img.resize((w_f*2, h_f*2), Image.Resampling.LANCZOS).save(processed_image_path)
+            except Exception:
+                pass
+                
+        # استخراج الميتاداتا
+        metadata = image_processor.extract_metadata_from_image(processed_image_path, name, brand)
+        folder = "products"
+        tags = []
+        
+        if metadata:
+            google_sheets.update_product_metadata(worksheet, row_num, metadata)
+            cat1 = (metadata.get("category_l1_en") or "").strip().lower().replace(" ", "_").replace("&", "and")
+            cat2 = (metadata.get("category_l2_en") or "").strip().lower().replace(" ", "_").replace("&", "and")
+            if cat1:
+                if cat2:
+                    folder = f"products/{cat1}/{cat2}"
+                else:
+                    folder = f"products/{cat1}"
+            tags_str = metadata.get("tags_en", "")
+            if tags_str:
+                tags = [t.strip() for t in tags_str.split(",") if t.strip()]
+                
+        try:
+            from PIL import Image
+            with Image.open(processed_image_path) as res_img:
+                final_w, final_h = res_img.size
+        except Exception:
+            final_w, final_h = w, h
+            
+        # الرفع لـ Cloudinary
+        image_link = cloudinary_storage.upload_product_image_to_cloudinary(
+            processed_image_path,
+            name,
+            brand,
+            folder=folder,
+            tags=tags,
+            target_width=final_w,
+            target_height=final_h,
+            padding_ratio=getattr(config, 'IMAGE_PADDING_RATIO', 0.85),
+            bg_color=getattr(config, 'IMAGE_BG_COLOR', 'ffffff')
+        )
+        
+        if image_link:
+            # تحديث شيت جوجل
+            update_success = google_sheets.update_image_link(worksheet, row_num, link_column_index, image_link)
+            if update_success:
+                # الحفظ في كاش قاعدة البيانات
+                local_cache_db.save_product_resolution(
+                    task.get("barcode", ""),
+                    name,
+                    brand,
+                    image_url,
+                    image_link,
+                    best_image.get("clip_score", 1.0),
+                    metadata,
+                    None,
+                    perceptual_hash=best_image.get("perceptual_hash")
+                )
+                
+                # إزالة السجل من قائمة الفشل إن وجد
+                local_cache_db.delete_product_failure(task.get("barcode", ""))
+                
+                # حذف الملف المؤقت المحلي
+                try:
+                    if os.path.exists(processed_image_path):
+                        os.remove(processed_image_path)
+                except Exception:
+                    pass
+                return True
+        return False
+    except Exception as e:
+        print(f"❌ [Auto-Approve Error] حدث خطأ أثناء الاعتماد التلقائي لـ [{name}]: {e}")
+        return False
+
+def pre_cache_product_candidates(task, worksheet=None, link_column_index=None):
     """
     البحث المسبق وجلب الصور المرشحة وحفظها كاش لصف المنتج لتسريع الفرز البشري لاحقاً
-    دون الكتابة لشيت جوجل أو Cloudinary.
+    أو اعتمادها تلقائياً إذا تجاوزت حد الجودة المطلوب.
     """
     name = task["product_name"]
     brand = task["brand"]
@@ -378,6 +521,17 @@ def pre_cache_product_candidates(task):
     candidates = []
     seen_urls = set()
     if best_image:
+        clip_score = best_image.get("clip_score", 0.0)
+        auto_thresh = getattr(config, 'AUTO_APPROVE_THRESHOLD', 0.0)
+        
+        # الاعتماد التلقائي في حال تجاوز حد الجودة والصلة
+        if auto_thresh > 0.0 and clip_score >= auto_thresh and worksheet is not None and link_column_index is not None:
+            success = auto_approve_product(task, best_image, worksheet, link_column_index)
+            if success:
+                local_cache_db.update_task_status(task["id"], "completed")
+                print(f"🎉 [Auto-Approve] تم اعتماد المنتج وتحديث الصف {task['row_number']} تلقائياً لتخطي المراجعة (نسبة المطابقة: {clip_score:.4f})")
+                return "success"
+                
         if best_image.get("source") in ["sqlite_cache", "visual_duplicate"]:
             candidates.append({
                 "url": best_image["url"],
@@ -472,7 +626,7 @@ def run_worker_mode():
     def worker_task_runner(t):
         try:
             local_cache_db.update_automation_state(status='pre_caching', current_product=t['product_name'])
-            pre_cache_product_candidates(t)
+            pre_cache_product_candidates(t, worksheet, link_column_index)
             
             st = local_cache_db.get_queue_statistics()
             local_cache_db.update_automation_state(
