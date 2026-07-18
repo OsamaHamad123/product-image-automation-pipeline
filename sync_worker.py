@@ -90,11 +90,33 @@ def run_sync_cycle(worksheet):
                 time.sleep(sleep_time)
                 retry += 1
             else:
-                print(f"❌ [Sync Worker API Error] Failed to batch update: {err}")
-                # إعادة إدراج المفاتيح لـ Set لضمان عدم ضياع التحديثات عند الفشل الكامل
+                print(f"❌ [Sync Worker API Error] Batch update failed: {err}. Retrying one-by-one to isolate errors...")
                 for key in processed_keys:
-                    r.sadd(DIRTY_SET_KEY, key)
-                raise err
+                    cached_val = r.get(f"{CACHE_PREFIX}{key}")
+                    if not cached_val:
+                        continue
+                    try:
+                        payload = json.loads(cached_val)
+                        row_index = int(payload.get("row_index"))
+                        updates = payload.get("updates", {})
+                        
+                        single_batch = []
+                        for col_idx_str, val in updates.items():
+                            col_idx = int(col_idx_str)
+                            import gspread
+                            a1_range = gspread.utils.rowcol_to_a1(row_index, col_idx + 1)
+                            single_batch.append({
+                                "range": a1_range,
+                                "values": [[str(val)]]
+                            })
+                            
+                        worksheet.batch_update(single_batch, value_input_option="USER_ENTERED")
+                        r.delete(f"{CACHE_PREFIX}{key}")
+                        print(f"✅ [Sync Worker] Successfully synced key {key} after batch failure.")
+                    except Exception as single_err:
+                        print(f"❌ [Sync Worker] Permanent sync failure for key {key}: {single_err}")
+                        r.delete(f"{CACHE_PREFIX}{key}")
+                break
 
 def main():
     # التحقق من أن خادم Redis يعمل قبل بدء الطابور

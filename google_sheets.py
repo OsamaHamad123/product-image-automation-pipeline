@@ -156,7 +156,24 @@ class GoogleSheetsBatchWorker(threading.Thread):
                 print(f"✅ [Async Sheets Sync] Successfully synced {len(rows)} updates.")
                 clear_cache()
             except Exception as e:
-                print(f"❌ [Async Sheets Sync Error] {e}")
+                print(f"❌ [Async Sheets Sync Error] Batch update failed: {e}. Retrying one-by-one to isolate errors...")
+                for r in rows:
+                    row_id = r["id"]
+                    r_num = r["row_number"]
+                    c_idx = r["col_index"]
+                    val = r["value"]
+                    
+                    try:
+                        a1_range = gspread.utils.rowcol_to_a1(r_num, c_idx + 1)
+                        worksheet.update_cell(r_num, c_idx + 1, str(val))
+                        cursor.execute("UPDATE sheet_updates SET sync_status = 'SYNCED' WHERE id = %s", (row_id,))
+                        conn.commit()
+                        print(f"✅ [Async Sheets Sync] Successfully synced row {r_num} after batch failure.")
+                    except Exception as single_e:
+                        print(f"❌ [Async Sheets Sync Error] Permanent sync failure for row {r_num}: {single_e}")
+                        cursor.execute("UPDATE sheet_updates SET sync_status = 'FAILED' WHERE id = %s", (row_id,))
+                        conn.commit()
+                clear_cache()
         finally:
             conn.close()
 

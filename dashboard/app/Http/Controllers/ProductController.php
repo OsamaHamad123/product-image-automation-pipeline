@@ -164,13 +164,28 @@ class ProductController extends Controller
     /**
      * جلب المنتجات كـ JSON مع دمج البيانات الوصفية والحالات من SQLite
      */
-    public function getProductsJson(Request $request)
+        public function getProductsJson(Request $request)
     {
         try {
             $cacheKey = 'products_json_v1';
             $forceRefresh = $request->query('refresh') === 'true';
-            $cachedProducts = $forceRefresh ? null : \Cache::get($cacheKey);
-
+            
+            // Bypass cache if background automation is active or pending curation
+            $isAutomationActive = false;
+            try {
+                $stateRow = \DB::select("SELECT status FROM automation_state WHERE `key` = 'active_session' LIMIT 1");
+                if (!empty($stateRow)) {
+                    $status = $stateRow[0]->status;
+                    if ($status === 'pre_caching' || $status === 'running' || $status === 'curation_pending') {
+                        $isAutomationActive = true;
+                    }
+                }
+            } catch (\Exception $ex) {
+                // Table not loaded yet
+            }
+            
+            $cachedProducts = ($forceRefresh || $isAutomationActive) ? null : \Cache::get($cacheKey);
+            
             if ($cachedProducts !== null) {
                 return response()->json([
                     'status'   => 'success',

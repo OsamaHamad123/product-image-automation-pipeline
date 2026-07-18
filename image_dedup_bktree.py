@@ -108,35 +108,29 @@ class BKTree:
                     
         return results
 
-# دالة مساعدة لبناء الشجرة استناداً لبيانات الكاش المحلي في SQLite
-def build_bktree_from_db(db_path: str) -> BKTree:
+# دالة مساعدة لبناء الشجرة استناداً لبيانات الكاش في MariaDB
+def build_bktree_from_db() -> BKTree:
     tree = BKTree()
-    if not os.path.exists(db_path):
-        return tree
-        
     try:
-        conn = sqlite3.connect(db_path)
-        conn.row_factory = sqlite3.Row
+        import local_cache_db
+        conn = local_cache_db.get_db_connection()
         cursor = conn.cursor()
         
-        # التحقق من وجود عمود البصمة الإدراكية في الجدول
-        cursor.execute("PRAGMA table_info(resolved_products)")
-        columns = [col[1] for col in cursor.fetchall()]
-        if "perceptual_hash" in columns:
-            cursor.execute("SELECT product_name, brand, cloudinary_url, perceptual_hash FROM resolved_products WHERE perceptual_hash IS NOT NULL AND perceptual_hash != ''")
-            rows = cursor.fetchall()
-            for row in rows:
-                try:
+        cursor.execute("SELECT product_name, brand, cloudinary_url, perceptual_hash FROM resolved_products WHERE perceptual_hash IS NOT NULL AND perceptual_hash != ''")
+        rows = cursor.fetchall()
+        for row in rows:
+            try:
+                if row.get("perceptual_hash"):
                     hash_val = int(row["perceptual_hash"])
                     tree.insert(hash_val, {
                         "product_name": row["product_name"],
                         "brand": row["brand"],
                         "cloudinary_url": row["cloudinary_url"]
                     })
-                except ValueError:
-                    pass
+            except ValueError:
+                pass
         conn.close()
     except Exception as e:
-        print(f"⚠️ [BKTree Builder Error] Failed to load from database: {e}")
+        print(f"⚠️ [BKTree Builder Error] Failed to load from MariaDB: {e}")
         
     return tree

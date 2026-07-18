@@ -30,9 +30,8 @@ def get_bktree():
         if _bktree is None:
             try:
                 import image_dedup_bktree
-                import local_cache_db
-                print("⏳ [BKTree] Building BK-Tree from SQLite database for visual deduplication...")
-                _bktree = image_dedup_bktree.build_bktree_from_db(local_cache_db.DB_PATH)
+                print("⏳ [BKTree] Building BK-Tree from MariaDB for visual deduplication...")
+                _bktree = image_dedup_bktree.build_bktree_from_db()
                 print("✅ [BKTree] BK-Tree built successfully.")
             except Exception as e:
                 print(f"⚠️ [BKTree Error] Failed to build BK-Tree: {e}")
