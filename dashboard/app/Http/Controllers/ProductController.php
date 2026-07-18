@@ -10,9 +10,13 @@ class ProductController extends Controller
 {
     private function getPythonPath()
     {
-        $localVenv = base_path('../.venv/Scripts/python.exe');
-        if (file_exists($localVenv)) {
-            return $localVenv;
+        $winVenv = base_path('../.venv/Scripts/python.exe');
+        if (file_exists($winVenv)) {
+            return $winVenv;
+        }
+        $linuxVenv = base_path('../.venv/bin/python');
+        if (file_exists($linuxVenv)) {
+            return $linuxVenv;
         }
         return env('PYTHON_PATH', 'python');
     }
