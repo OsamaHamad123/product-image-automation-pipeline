@@ -1,4 +1,4 @@
-﻿# launch_desktop.ps1
+# launch_desktop.ps1
 # نص برمجى لتشغيل النظام كـ تطبيق سطح مكتب مستقل (Desktop App) بنقرة واحدة
 # يقوم بتشغيل الخوادم بالخلفية وفتح نافذة Chrome بدون أشرطة أدوات (App Mode) وإغلاق الخوادم تلقائياً عند خروجك.
 
@@ -17,12 +17,12 @@ if ($oldFlask) {
     Stop-Process -Id $oldFlask.OwningProcess -Force -ErrorAction SilentlyContinue
 }
 
-# 2. تشغيل خادم بايثون Flask بالخلفية
-$pythonPath = "C:\Users\OsamaHamad\AppData\Local\Programs\Python\Python314\python.exe"
-$pythonProcess = Start-Process -FilePath $pythonPath -ArgumentList "app.py" -WorkingDirectory "F:\automation" -WindowStyle Hidden -PassThru
+# 2. تشغيل خادم بايثون FastAPI بالخلفية
+$pythonPath = Join-Path $PSScriptRoot ".venv\Scripts\python.exe"
+$pythonProcess = Start-Process -FilePath $pythonPath -ArgumentList "fastapi_server.py" -WorkingDirectory $PSScriptRoot -WindowStyle Hidden -PassThru
 
 # 3. تشغيل خادم لارافيل بالخلفية
-$laravelProcess = Start-Process -FilePath "php" -ArgumentList "artisan serve --port=8000" -WorkingDirectory "F:\automation\dashboard" -WindowStyle Hidden -PassThru
+$laravelProcess = Start-Process -FilePath "php" -ArgumentList "artisan serve --port=8000" -WorkingDirectory (Join-Path $PSScriptRoot "dashboard") -WindowStyle Hidden -PassThru
 
 # الانتظار لتهيئة المنافذ
 Start-Sleep -Seconds 3
