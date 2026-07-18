@@ -28,7 +28,7 @@
     .kpi-card:hover {
         transform: translateY(-5px);
         border-color: var(--accent-purple);
-        box-shadow: 0 10px 25px rgba(139, 92, 246, 0.15);
+        box-shadow: 0 10px 25px var(--btn-shadow);
     }
     
     .kpi-icon {
@@ -39,7 +39,7 @@
         align-items: center;
         justify-content: center;
         font-size: 1.5rem;
-        background: rgba(139, 92, 246, 0.1);
+        background: var(--active-menu-bg);
         color: var(--accent-purple);
         transition: all 0.3s;
     }
@@ -74,21 +74,21 @@
     }
     
     .badge-reason.cropping {
-        background: rgba(244, 63, 94, 0.1);
+        background: var(--danger-bg);
         color: var(--danger);
-        border: 1px solid rgba(244, 63, 94, 0.2);
+        border: 1px solid var(--panel-border);
     }
     
     .badge-reason.clutter {
-        background: rgba(245, 158, 11, 0.1);
+        background: var(--warning-bg);
         color: var(--warning);
-        border: 1px solid rgba(245, 158, 11, 0.2);
+        border: 1px solid var(--panel-border);
     }
     
     .badge-reason.other {
-        background: rgba(9, 180, 210, 0.1);
+        background: var(--info-bg);
         color: var(--info);
-        border: 1px solid rgba(9, 180, 210, 0.2);
+        border: 1px solid var(--panel-border);
     }
 
     .learned-rule-badge {
@@ -103,9 +103,9 @@
     }
     
     .learned-rule-badge.alert-active {
-        background: rgba(16, 185, 129, 0.1);
+        background: var(--success-bg);
         color: var(--success);
-        border-color: rgba(16, 185, 129, 0.2);
+        border-color: var(--panel-border);
         animation: pulse-border 2s infinite;
     }
     
@@ -116,8 +116,8 @@
     }
     
     @keyframes pulse-border {
-        0%, 100% { border-color: rgba(16, 185, 129, 0.2); }
-        50% { border-color: rgba(16, 185, 129, 0.6); }
+        0%, 100% { border-color: var(--panel-border); }
+        50% { border-color: var(--panel-border-hover); }
     }
 
     .table-view {
@@ -175,7 +175,7 @@
             يقوم النظام بتحليل استبعادك للصور واستخراج الأنماط المتكررة للبراندات تلقائياً لتفادي الأخطاء المستقبلية.
         </p>
     </div>
-    <button class="btn btn-secondary btn-sm" onclick="resetAllLearning()" style="background: rgba(244, 63, 94, 0.08); border-color: rgba(244, 63, 94, 0.15); color: var(--danger); font-weight: bold;">
+    <button class="btn btn-secondary btn-sm" onclick="resetAllLearning()" style="background: var(--danger-bg); border-color: var(--panel-border); color: var(--danger); font-weight: bold;">
         <i class="fas fa-trash-alt"></i> إعادة تعيين ومسح الذاكرة بالكامل 🗑️
     </button>
 </div>
@@ -192,7 +192,7 @@
     </div>
     <!-- Card 2 -->
     <div class="kpi-card">
-        <div class="kpi-icon" style="color: var(--success); background: rgba(16, 185, 129, 0.1);"><i class="fas fa-shield-alt"></i></div>
+        <div class="kpi-icon" style="color: var(--success); background: var(--success-bg);"><i class="fas fa-shield-alt"></i></div>
         <div>
             <div class="kpi-value" id="kpi-self-correcting">{{ count(array_filter($brandStats, function($b) { return $b['cropping_alert'] || $b['clutter_alert']; })) }}</div>
             <div class="kpi-label">البراندات ذاتية التصحيح</div>
@@ -200,7 +200,7 @@
     </div>
     <!-- Card 3 -->
     <div class="kpi-card">
-        <div class="kpi-icon" style="color: var(--danger); background: rgba(244, 63, 94, 0.1);"><i class="fas fa-crop-alt"></i></div>
+        <div class="kpi-icon" style="color: var(--danger); background: var(--danger-bg);"><i class="fas fa-crop-alt"></i></div>
         <div>
             <div class="kpi-value" id="kpi-crop-rules">{{ count(array_filter($brandStats, function($b) { return $b['cropping_alert']; })) }}</div>
             <div class="kpi-label">قواعد قص الحواف المفعلة</div>
@@ -208,7 +208,7 @@
     </div>
     <!-- Card 4 -->
     <div class="kpi-card">
-        <div class="kpi-icon" style="color: var(--warning); background: rgba(245, 158, 11, 0.1);"><i class="fas fa-images"></i></div>
+        <div class="kpi-icon" style="color: var(--warning); background: var(--warning-bg);"><i class="fas fa-images"></i></div>
         <div>
             <div class="kpi-value" id="kpi-clutter-rules">{{ count(array_filter($brandStats, function($b) { return $b['clutter_alert']; })) }}</div>
             <div class="kpi-label">قواعد فرز الخلفيات النشطة</div>
@@ -279,7 +279,7 @@
                                     @endif
                                 </td>
                                 <td>
-                                    <button class="btn btn-secondary btn-sm" onclick="resetBrandLearning('{{ $brand['brand'] }}', '{{ $key }}')" style="padding: 2px 8px; font-size: 0.75rem; color: var(--danger); background: rgba(244,63,94,0.02);">
+                                    <button class="btn btn-secondary btn-sm" onclick="resetBrandLearning('{{ $brand['brand'] }}', '{{ $key }}')" style="padding: 2px 8px; font-size: 0.75rem; color: var(--danger); background: var(--danger-bg);">
                                         <i class="fas fa-undo"></i> تصفير
                                     </button>
                                 </td>
@@ -394,6 +394,8 @@
         const gridColor = isLight ? 'rgba(0, 0, 0, 0.08)' : 'rgba(255, 255, 255, 0.05)';
         const textColor = isLight ? '#475569' : '#8e9bb0';
         const legendColor = isLight ? '#0f172a' : '#f3f4f6';
+        const cropColor = isLight ? 'rgba(0, 0, 0, 0.65)' : 'rgba(255, 255, 255, 0.65)';
+        const clutterColor = isLight ? 'rgba(0, 0, 0, 0.25)' : 'rgba(255, 255, 255, 0.25)';
 
         const chart = new Chart(ctx, {
             type: 'bar',
@@ -403,7 +405,7 @@
                     {
                         label: 'قص جائر للأطراف (Cropping)',
                         data: croppingData,
-                        backgroundColor: 'rgba(244, 63, 94, 0.65)',
+                        backgroundColor: cropColor,
                         borderColor: 'var(--danger)',
                         borderWidth: 1.5,
                         borderRadius: 6
@@ -411,7 +413,7 @@
                     {
                         label: 'تداخل الخلفية (Background Clutter)',
                         data: clutterData,
-                        backgroundColor: 'rgba(245, 158, 11, 0.65)',
+                        backgroundColor: clutterColor,
                         borderColor: 'var(--warning)',
                         borderWidth: 1.5,
                         borderRadius: 6
@@ -450,6 +452,8 @@
                 chart.options.scales.y.grid.color = activeLight ? 'rgba(0, 0, 0, 0.08)' : 'rgba(255, 255, 255, 0.05)';
                 chart.options.scales.y.ticks.color = activeLight ? '#475569' : '#8e9bb0';
                 chart.options.plugins.legend.labels.color = activeLight ? '#0f172a' : '#f3f4f6';
+                chart.data.datasets[0].backgroundColor = activeLight ? 'rgba(0, 0, 0, 0.65)' : 'rgba(255, 255, 255, 0.65)';
+                chart.data.datasets[1].backgroundColor = activeLight ? 'rgba(0, 0, 0, 0.25)' : 'rgba(255, 255, 255, 0.25)';
                 chart.update();
             }, 100);
         });

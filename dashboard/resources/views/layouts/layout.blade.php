@@ -13,80 +13,99 @@
     
     <style>
         :root {
-            --bg-color: #03000a;
-            --sidebar-bg: rgba(9, 11, 26, 0.65);
-            --panel-bg: rgba(14, 18, 41, 0.55);
-            --panel-border: rgba(255, 255, 255, 0.07);
-            --panel-border-hover: rgba(0, 242, 254, 0.35);
-            --accent-purple: #8b5cf6;
-            --accent-purple-hover: #a78bfa;
-            --accent-cyan: #00d2ff;
-            --accent-gradient: linear-gradient(135deg, #7c3aed 0%, #00f2fe 100%);
-            --bg-gradient: radial-gradient(at 0% 0%, rgba(124, 58, 237, 0.15) 0px, transparent 50%),
-                           radial-gradient(at 50% 0%, rgba(0, 242, 254, 0.1) 0px, transparent 50%),
-                           radial-gradient(at 100% 100%, rgba(139, 92, 246, 0.12) 0px, transparent 50%),
-                           radial-gradient(at 0% 100%, rgba(244, 63, 94, 0.06) 0px, transparent 50%);
-            --text-primary: #f8fafc;
-            --text-secondary: #94a3b8;
-            --active-menu-bg: linear-gradient(90deg, rgba(124, 58, 237, 0.18) 0%, rgba(0, 242, 254, 0.06) 100%);
-            --success: #10b981;
-            --danger: #f43f5e;
-            --warning: #f59e0b;
-            --info: #06b6d4;
-            --success-bg: rgba(16, 185, 129, 0.08);
-            --danger-bg: rgba(244, 63, 94, 0.08);
-            --warning-bg: rgba(245, 158, 11, 0.08);
-            --info-bg: rgba(6, 182, 212, 0.08);
-            --input-bg: rgba(5, 7, 18, 0.7);
-            --card-bg: rgba(16, 21, 46, 0.45);
-            --card-bg-hover: rgba(22, 28, 61, 0.65);
-            --img-box-bg: rgba(3, 4, 10, 0.85);
-            --console-bg: #030409;
-            --accordion-header-bg: rgba(18, 24, 54, 0.6);
-            --tabs-bg: rgba(0, 0, 0, 0.45);
+            /* LUXURY DARK MONOCHROME THEME */
+            --bg-color: #050505;
+            --sidebar-bg: rgba(10, 10, 10, 0.85);
+            --panel-bg: rgba(15, 15, 15, 0.7);
+            --panel-border: rgba(255, 255, 255, 0.08);
+            --panel-border-hover: rgba(255, 255, 255, 0.3);
             
-            --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.2);
-            --shadow-md: 0 10px 40px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.08);
-            --shadow-lg: 0 20px 60px rgba(0, 0, 0, 0.6), 0 0 30px rgba(124, 58, 237, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.12);
-            --border-radius-sm: 10px;
-            --border-radius-md: 16px;
-            --border-radius-lg: 24px;
+            --accent-purple: #ffffff;
+            --accent-purple-hover: #e5e5e5;
+            --accent-cyan: #737373;
+            --accent-gradient: linear-gradient(135deg, #ffffff 0%, #a3a3a3 100%);
+            --bg-gradient: radial-gradient(at 0% 0%, rgba(255, 255, 255, 0.03) 0px, transparent 50%),
+                           radial-gradient(at 100% 100%, rgba(255, 255, 255, 0.02) 0px, transparent 50%);
+                           
+            --text-primary: #ffffff;
+            --text-secondary: #a3a3a3;
+            --active-menu-bg: linear-gradient(90deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.01) 100%);
+            
+            --success: #ffffff;
+            --danger: #737373;
+            --warning: #a3a3a3;
+            --info: #737373;
+            
+            --success-bg: rgba(255, 255, 255, 0.08);
+            --danger-bg: rgba(255, 255, 255, 0.03);
+            --warning-bg: rgba(255, 255, 255, 0.05);
+            --info-bg: rgba(255, 255, 255, 0.04);
+            
+            --input-bg: rgba(0, 0, 0, 0.8);
+            --card-bg: rgba(18, 18, 18, 0.6);
+            --card-bg-hover: rgba(25, 25, 25, 0.8);
+            --img-box-bg: rgba(0, 0, 0, 0.9);
+            --console-bg: #000000;
+            --accordion-header-bg: rgba(20, 20, 20, 0.8);
+            --tabs-bg: rgba(0, 0, 0, 0.6);
+            
+            --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.5);
+            --shadow-md: 0 10px 40px rgba(0, 0, 0, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+            --shadow-lg: 0 20px 60px rgba(0, 0, 0, 0.9), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+            
+            --border-radius-sm: 8px;
+            --border-radius-md: 12px;
+            --border-radius-lg: 20px;
+            
+            --btn-text: #000000;
+            --btn-shadow: rgba(255, 255, 255, 0.1);
+            --btn-hover-shadow: rgba(255, 255, 255, 0.2);
         }
 
         body.light-theme {
-            --bg-color: #f7f9fc;
-            --sidebar-bg: rgba(255, 255, 255, 0.8);
-            --panel-bg: rgba(255, 255, 255, 0.7);
-            --panel-border: rgba(124, 58, 237, 0.12);
-            --panel-border-hover: rgba(0, 242, 254, 0.45);
-            --accent-purple: #7c3aed;
-            --accent-purple-hover: #6d28d9;
-            --accent-cyan: #0891b2;
-            --accent-gradient: linear-gradient(135deg, #7c3aed 0%, #0891b2 100%);
-            --bg-gradient: radial-gradient(at 0% 0%, rgba(124, 58, 237, 0.08) 0px, transparent 50%),
-                           radial-gradient(at 100% 100%, rgba(6, 182, 212, 0.08) 0px, transparent 50%);
-            --text-primary: #0f172a;
-            --text-secondary: #475569;
-            --active-menu-bg: linear-gradient(90deg, rgba(124, 58, 237, 0.12) 0%, rgba(0, 242, 254, 0.04) 100%);
-            --success: #10b981;
-            --danger: #f43f5e;
-            --warning: #f59e0b;
-            --info: #06b6d4;
-            --success-bg: rgba(16, 185, 129, 0.06);
-            --danger-bg: rgba(244, 63, 94, 0.06);
-            --warning-bg: rgba(245, 158, 11, 0.06);
-            --info-bg: rgba(6, 182, 212, 0.06);
-            --input-bg: rgba(255, 255, 255, 0.95);
-            --card-bg: rgba(255, 255, 255, 0.75);
-            --card-bg-hover: rgba(124, 58, 237, 0.04);
-            --img-box-bg: rgba(255, 255, 255, 0.9);
-            --console-bg: #030409;
-            --accordion-header-bg: rgba(124, 58, 237, 0.05);
-            --tabs-bg: rgba(124, 58, 237, 0.05);
+            /* LUXURY LIGHT MONOCHROME THEME */
+            --bg-color: #ffffff;
+            --sidebar-bg: rgba(250, 250, 250, 0.9);
+            --panel-bg: rgba(245, 245, 245, 0.85);
+            --panel-border: rgba(0, 0, 0, 0.08);
+            --panel-border-hover: rgba(0, 0, 0, 0.3);
             
-            --shadow-sm: 0 2px 10px rgba(124, 58, 237, 0.05);
-            --shadow-md: 0 10px 40px rgba(124, 58, 237, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.8);
-            --shadow-lg: 0 20px 60px rgba(124, 58, 237, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+            --accent-purple: #000000;
+            --accent-purple-hover: #1c1c1c;
+            --accent-cyan: #525252;
+            --accent-gradient: linear-gradient(135deg, #000000 0%, #525252 100%);
+            --bg-gradient: radial-gradient(at 0% 0%, rgba(0, 0, 0, 0.02) 0px, transparent 50%),
+                           radial-gradient(at 100% 100%, rgba(0, 0, 0, 0.01) 0px, transparent 50%);
+                           
+            --text-primary: #000000;
+            --text-secondary: #525252;
+            --active-menu-bg: linear-gradient(90deg, rgba(0, 0, 0, 0.06) 0%, rgba(0, 0, 0, 0.01) 100%);
+            
+            --success: #000000;
+            --danger: #8c8c8c;
+            --warning: #525252;
+            --info: #8c8c8c;
+
+            --success-bg: rgba(0, 0, 0, 0.06);
+            --danger-bg: rgba(0, 0, 0, 0.02);
+            --warning-bg: rgba(0, 0, 0, 0.04);
+            --info-bg: rgba(0, 0, 0, 0.03);
+            
+            --input-bg: rgba(255, 255, 255, 0.95);
+            --card-bg: rgba(248, 248, 248, 0.9);
+            --card-bg-hover: rgba(0, 0, 0, 0.03);
+            --img-box-bg: rgba(255, 255, 255, 0.95);
+            --console-bg: #f5f5f5;
+            --accordion-header-bg: rgba(0, 0, 0, 0.02);
+            --tabs-bg: rgba(0, 0, 0, 0.02);
+            
+            --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.05);
+            --shadow-md: 0 10px 40px rgba(0, 0, 0, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+            --shadow-lg: 0 20px 60px rgba(0, 0, 0, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.95);
+            
+            --btn-text: #ffffff;
+            --btn-shadow: rgba(0, 0, 0, 0.15);
+            --btn-hover-shadow: rgba(0, 0, 0, 0.25);
         }
 
         /* Scrollbar customization */
@@ -103,6 +122,10 @@
         }
         ::-webkit-scrollbar-thumb:hover {
             background: var(--accent-purple);
+        }
+
+        input[type="checkbox"], input[type="radio"] {
+            accent-color: var(--accent-purple) !important;
         }
 
         * {
@@ -163,13 +186,13 @@
             background: var(--accent-gradient);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
-            filter: drop-shadow(0 0 10px rgba(139, 92, 246, 0.45));
+            filter: drop-shadow(0 0 10px rgba(255, 255, 255, 0.25));
             animation: pulse-robot 4s ease-in-out infinite;
         }
 
         @keyframes pulse-robot {
-            0%, 100% { transform: scale(1); filter: drop-shadow(0 0 10px rgba(139, 92, 246, 0.45)); }
-            50% { transform: scale(1.08); filter: drop-shadow(0 0 18px rgba(0, 242, 254, 0.6)); }
+            0%, 100% { transform: scale(1); filter: drop-shadow(0 0 10px rgba(255, 255, 255, 0.25)); }
+            50% { transform: scale(1.08); filter: drop-shadow(0 0 18px rgba(255, 255, 255, 0.55)); }
         }
 
         .sidebar-brand h2 {
@@ -216,7 +239,7 @@
         .sidebar-menu-item.active a {
             background: var(--active-menu-bg);
             color: var(--text-primary);
-            border-color: rgba(139, 92, 246, 0.25);
+            border-color: var(--panel-border);
             box-shadow: inset -4px 0 0 var(--accent-purple), var(--shadow-sm);
         }
         
@@ -256,7 +279,7 @@
             background: var(--card-bg-hover);
             border-color: var(--accent-purple);
             transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(139, 92, 246, 0.15);
+            box-shadow: 0 4px 12px var(--btn-shadow);
         }
 
         .theme-toggle-btn i {
@@ -294,14 +317,14 @@
 
         .glass-panel:hover {
             border-color: var(--panel-border-hover);
-            box-shadow: var(--shadow-lg), 0 0 30px rgba(0, 242, 254, 0.05);
+            box-shadow: var(--shadow-lg), 0 0 20px rgba(255, 255, 255, 0.02);
         }
 
         /* Premium Buttons */
         .btn {
             background: var(--accent-gradient);
             border: 1px solid rgba(255, 255, 255, 0.08);
-            color: #fff;
+            color: var(--btn-text);
             padding: 0.75rem 1.75rem;
             font-family: inherit;
             font-weight: 800;
@@ -313,7 +336,7 @@
             align-items: center;
             justify-content: center;
             gap: 0.6rem;
-            box-shadow: 0 4px 20px rgba(124, 58, 237, 0.35);
+            box-shadow: 0 4px 20px var(--btn-shadow);
             text-decoration: none;
             position: relative;
             overflow: hidden;
@@ -336,7 +359,7 @@
 
         .btn:hover:not(:disabled) {
             transform: translateY(-3px);
-            box-shadow: 0 8px 30px rgba(124, 58, 237, 0.55), 0 0 15px rgba(0, 242, 254, 0.25);
+            box-shadow: 0 8px 30px var(--btn-hover-shadow), 0 0 15px rgba(255, 255, 255, 0.05);
             border-color: rgba(255, 255, 255, 0.15);
         }
 
@@ -355,7 +378,7 @@
             background: var(--card-bg-hover);
             border-color: var(--accent-cyan);
             color: var(--text-primary);
-            box-shadow: 0 4px 15px rgba(0, 242, 254, 0.15);
+            box-shadow: 0 4px 15px rgba(255, 255, 255, 0.05);
         }
 
         .btn-sm {

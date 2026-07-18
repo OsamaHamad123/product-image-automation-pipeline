@@ -6,7 +6,7 @@ import os
 import json
 import random
 import gspread
-import sqlite3
+import pymysql
 import threading
 from gspread.exceptions import APIError
 from oauth2client.service_account import ServiceAccountCredentials
@@ -28,37 +28,51 @@ def clear_cache():
                 pass
 
 class SQLiteTransactionQueue:
-    def __init__(self, db_path):
-        self.db_path = db_path
+    def __init__(self, db_path=None):
         self._setup_schema()
 
     def _connect(self):
-        conn = sqlite3.connect(self.db_path)
-        conn.execute("PRAGMA journal_mode=WAL;")
-        return conn
+        return pymysql.connect(
+            host=os.getenv("DB_HOST", "127.0.0.1"),
+            port=int(os.getenv("DB_PORT", "3306")),
+            user=os.getenv("DB_USERNAME", "root"),
+            password=os.getenv("DB_PASSWORD", ""),
+            database=os.getenv("DB_DATABASE", "automation_db"),
+            charset='utf8mb4',
+            cursorclass=pymysql.cursors.DictCursor
+        )
 
     def _setup_schema(self):
-        with self._connect() as conn:
-            conn.execute("""
+        conn = self._connect()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
                 CREATE TABLE IF NOT EXISTS sheet_updates (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    row_number INTEGER NOT NULL,
-                    col_index INTEGER NOT NULL,
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    row_number INT NOT NULL,
+                    col_index INT NOT NULL,
                     value TEXT NOT NULL,
                     registered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    sync_status TEXT DEFAULT 'PENDING'
-                )
+                    sync_status VARCHAR(255) DEFAULT 'PENDING'
+                ) ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
             """)
             conn.commit()
+        finally:
+            conn.close()
 
     def append_update(self, row_number, col_index, value):
-        with self._connect() as conn:
-            conn.execute(
-                "INSERT INTO sheet_updates (row_number, col_index, value) VALUES (?, ?, ?)",
+        conn = self._connect()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT INTO sheet_updates (row_number, col_index, value) VALUES (%s, %s, %s)",
                 (row_number, col_index, value)
             )
             conn.commit()
+        finally:
+            conn.close()
         clear_cache()
+
 
 
 class GoogleSheetsBatchWorker(threading.Thread):
@@ -104,48 +118,51 @@ class GoogleSheetsBatchWorker(threading.Thread):
 
     def _synchronize_pending_records(self, worksheet):
         conn = self.queue._connect()
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT id, row_number, col_index, value FROM sheet_updates WHERE sync_status = 'PENDING' LIMIT 100"
-        )
-        rows = cursor.fetchall()
-        
-        if not rows:
-            conn.close()
-            return
-            
-        print(f"🔄 [Async Sheets Sync] Synchronizing {len(rows)} pending cell updates to Google Sheets...")
-        batch_data = []
-        row_ids = []
-        
-        for r in rows:
-            row_id, r_num, c_idx, val = r
-            row_ids.append(row_id)
-            a1_range = gspread.utils.rowcol_to_a1(r_num, c_idx + 1)
-            batch_data.append({
-                "range": a1_range,
-                "values": [[str(val)]]
-            })
-            
         try:
-            worksheet.batch_update(batch_data, value_input_option="USER_ENTERED")
-            id_placeholders = ",".join("?" for _ in row_ids)
-            conn.execute(
-                f"UPDATE sheet_updates SET sync_status = 'SYNCED' WHERE id IN ({id_placeholders})",
-                row_ids
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT id, row_number, col_index, value FROM sheet_updates WHERE sync_status = 'PENDING' LIMIT 100"
             )
-            conn.commit()
-            print(f"✅ [Async Sheets Sync] Successfully synced {len(rows)} updates.")
-            clear_cache()
-        except Exception as e:
-            print(f"❌ [Async Sheets Sync Error] {e}")
+            rows = cursor.fetchall()
+            
+            if not rows:
+                return
+                
+            print(f"🔄 [Async Sheets Sync] Synchronizing {len(rows)} pending cell updates to Google Sheets...")
+            batch_data = []
+            row_ids = []
+            
+            for r in rows:
+                row_id = r["id"]
+                r_num = r["row_number"]
+                c_idx = r["col_index"]
+                val = r["value"]
+                
+                row_ids.append(row_id)
+                a1_range = gspread.utils.rowcol_to_a1(r_num, c_idx + 1)
+                batch_data.append({
+                    "range": a1_range,
+                    "values": [[str(val)]]
+                })
+                
+            try:
+                worksheet.batch_update(batch_data, value_input_option="USER_ENTERED")
+                id_placeholders = ",".join("%s" for _ in row_ids)
+                cursor.execute(
+                    f"UPDATE sheet_updates SET sync_status = 'SYNCED' WHERE id IN ({id_placeholders})",
+                    row_ids
+                )
+                conn.commit()
+                print(f"✅ [Async Sheets Sync] Successfully synced {len(rows)} updates.")
+                clear_cache()
+            except Exception as e:
+                print(f"❌ [Async Sheets Sync Error] {e}")
         finally:
             conn.close()
 
 def init_async_queue(creds_path, spreadsheet_name, sync_interval=5):
     global _queue, _worker
-    db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "local_cache.db")
-    _queue = SQLiteTransactionQueue(db_path)
+    _queue = SQLiteTransactionQueue()
     _worker = GoogleSheetsBatchWorker(_queue, creds_path, spreadsheet_name, sync_interval)
     _worker.start()
     print("🚀 [Async Sheets Sync] Background batch worker started successfully.")

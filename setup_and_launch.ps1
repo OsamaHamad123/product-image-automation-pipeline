@@ -1,4 +1,4 @@
-﻿# setup_and_launch.ps1
+# setup_and_launch.ps1
 # سكربت الإعداد والتشغيل التلقائي بنقرة واحدة لفريق إدخال البيانات
 # يقوم بالتحقق من المتطلبات وتنزيل المكونات المحمولة وتشغيل النظام وإغلاقه تلقائياً عند الانتهاء.
 
@@ -145,6 +145,7 @@ if (Test-Path $localPhpExe) {
                                    -replace ';extension=fileinfo', 'extension=fileinfo' `
                                    -replace ';extension=mbstring', 'extension=mbstring' `
                                    -replace ';extension=openssl', 'extension=openssl' `
+                                   -replace ';extension=pdo_mysql', 'extension=pdo_mysql' `
                                    -replace ';extension=pdo_sqlite', 'extension=pdo_sqlite' `
                                    -replace ';extension=sqlite3', 'extension=sqlite3' `
                                    -replace ';extension=xml', 'extension=xml' | Set-Content $iniPath
@@ -280,30 +281,37 @@ if (Test-Path $rootEnv) {
     }
 }
 
-# تحديث مسار قاعدة البيانات المطلق SQLite في ملف .env الخاص بلوحة التحكم
-$sqliteDbPath = Join-Path $PSScriptRoot "local_cache.db"
-# تحويل السلاشات لتناسب صيغة ملف التكوين
-$sqliteDbPathEscaped = $sqliteDbPath -replace '\\', '/'
-
+# تحديث مسار قاعدة البيانات المطلق SQLite في ملف .env الخاص بلوحة التحكم فقط إذا كان الاتصال هو SQLite
 if (Test-Path $dashboardEnv) {
     $envContent = Get-Content $dashboardEnv
     
-    # تحديث مسار قاعدة البيانات (مع إزالة أي علامات تعليق #) وإحاطته بعلامات تنصيص لدعم المسافات
-    if ($envContent -match 'DB_DATABASE=') {
-        $envContent = $envContent -replace '#?\s*DB_DATABASE=.*', "DB_DATABASE=`"$sqliteDbPathEscaped`""
-    } else {
-        $envContent += "DB_DATABASE=`"$sqliteDbPathEscaped`""
+    # التحقق من نوع الاتصال الحالي
+    $currentConn = ""
+    if ($envContent -match '(?mi)^\s*DB_CONNECTION\s*=\s*(\w+)') {
+        $currentConn = $Matches[1]
     }
     
-    # التأكد من تفعيل اتصال SQLite
-    if ($envContent -match 'DB_CONNECTION=') {
-        $envContent = $envContent -replace '#?\s*DB_CONNECTION=.*', "DB_CONNECTION=sqlite"
+    if ($currentConn -eq "sqlite" -or $currentConn -eq "") {
+        $sqliteDbPath = Join-Path $PSScriptRoot "local_cache.db"
+        $sqliteDbPathEscaped = $sqliteDbPath -replace '\\', '/'
+        
+        if ($envContent -match 'DB_DATABASE=') {
+            $envContent = $envContent -replace '#?\s*DB_DATABASE=.*', "DB_DATABASE=`"$sqliteDbPathEscaped`""
+        } else {
+            $envContent += "DB_DATABASE=`"$sqliteDbPathEscaped`""
+        }
+        
+        if ($envContent -match 'DB_CONNECTION=') {
+            $envContent = $envContent -replace '#?\s*DB_CONNECTION=.*', "DB_CONNECTION=sqlite"
+        } else {
+            $envContent += "DB_CONNECTION=sqlite"
+        }
+        
+        $envContent | Set-Content $dashboardEnv -Encoding UTF8
+        Write-Host "✅ تم ربط قاعدة بيانات SQLite المحلية بنجاح." -ForegroundColor Green
     } else {
-        $envContent += "DB_CONNECTION=sqlite"
+        Write-Host "ℹ️ تم الكشف عن اتصال قاعدة بيانات مخصص ($currentConn)، تم تخطي تهيئة SQLite التلقائية." -ForegroundColor Yellow
     }
-    
-    $envContent | Set-Content $dashboardEnv -Encoding UTF8
-    Write-Host "✅ تم ربط قاعدة بيانات SQLite المحلية بنجاح." -ForegroundColor Green
 }
 
 # ----------------- 6. تشغيل النظام والواجهة -----------------

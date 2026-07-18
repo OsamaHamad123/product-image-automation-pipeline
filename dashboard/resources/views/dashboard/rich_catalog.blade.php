@@ -34,7 +34,7 @@
 
     .filter-bar input:focus, .filter-bar select:focus {
         border-color: var(--accent-purple);
-        box-shadow: 0 0 15px rgba(124, 58, 237, 0.2);
+        box-shadow: 0 0 15px var(--btn-shadow);
     }
 
     .rich-grid {
@@ -58,7 +58,7 @@
     .rich-card:hover {
         transform: translateY(-6px);
         border-color: var(--accent-cyan);
-        box-shadow: 0 12px 30px rgba(0, 210, 255, 0.08);
+        box-shadow: 0 12px 30px var(--btn-shadow);
     }
 
     .rich-card-img {
@@ -95,8 +95,8 @@
         position: absolute;
         top: 12px;
         left: 12px;
-        background: rgba(16, 185, 129, 0.85);
-        color: #fff;
+        background: var(--success);
+        color: var(--btn-text);
         padding: 2px 8px;
         border-radius: 6px;
         font-size: 0.7rem;
@@ -106,9 +106,9 @@
 
     .category-badge-rich {
         align-self: flex-start;
-        background: rgba(0, 210, 255, 0.08);
-        border: 1px solid rgba(0, 210, 255, 0.15);
-        color: var(--accent-cyan);
+        background: var(--active-menu-bg);
+        border: 1px solid var(--panel-border);
+        color: var(--text-primary);
         padding: 2px 8px;
         font-size: 0.7rem;
         font-weight: 800;
@@ -153,8 +153,8 @@
     }
 
     .allergen-warning {
-        background: rgba(244, 63, 94, 0.08);
-        border: 1px solid rgba(244, 63, 94, 0.2);
+        background: var(--danger-bg);
+        border: 1px solid var(--panel-border);
         color: var(--danger);
         padding: 0.75rem 1rem;
         border-radius: 10px;
@@ -167,11 +167,11 @@
     }
 
     .bg-checkerboard-rich {
-        background-color: #0c0d14;
-        background-image: linear-gradient(45deg, #131520 25%, transparent 25%), 
-                          linear-gradient(-45deg, #131520 25%, transparent 25%), 
-                          linear-gradient(45deg, transparent 75%, #131520 75%), 
-                          linear-gradient(-45deg, transparent 75%, #131520 75%);
+        background-color: #111111;
+        background-image: linear-gradient(45deg, #222222 25%, transparent 25%), 
+                          linear-gradient(-45deg, #222222 25%, transparent 25%), 
+                          linear-gradient(45deg, transparent 75%, #222222 75%), 
+                          linear-gradient(-45deg, transparent 75%, #222222 75%);
         background-size: 20px 20px;
         background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
     }
@@ -191,7 +191,7 @@
                 تصفح المنتجات المستخلصة والمكتملة بنجاح مع استعراض كامل للقيم الغذائية والمكونات وأوصاف الذكاء الاصطناعي.
             </p>
         </div>
-        <span class="score-badge" id="catalogCount" style="background: rgba(139, 92, 246, 0.15); border-color: rgba(139, 92, 246, 0.25); color: var(--accent-purple-hover); font-size: 1rem; padding: 0.5rem 1.25rem; border-radius: 12px; font-weight: 900;">
+        <span class="score-badge" id="catalogCount" style="background: var(--active-menu-bg); border-color: var(--panel-border); color: var(--text-primary); font-size: 1rem; padding: 0.5rem 1.25rem; border-radius: 12px; font-weight: 900;">
             جاري التحميل...
         </span>
     </div>
@@ -263,7 +263,7 @@
                 <!-- Web Category -->
                 <div>
                     <span style="font-weight: 800; font-size: 0.9rem; color: var(--text-secondary); display: block; margin-bottom: 0.25rem;">التصنيف المعتمد بالمتجر:</span>
-                    <div id="modalRichCategoryText" style="background: rgba(0,210,255,0.05); border: 1px solid rgba(0,210,255,0.1); padding: 0.5rem 1rem; border-radius: 8px; font-weight: 700; color: var(--accent-cyan);"></div>
+                    <div id="modalRichCategoryText" style="background: var(--active-menu-bg); border: 1px solid var(--panel-border); padding: 0.5rem 1rem; border-radius: 8px; font-weight: 700; color: var(--text-primary);"></div>
                 </div>
 
                 <!-- Marketing Text -->

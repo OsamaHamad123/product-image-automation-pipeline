@@ -15,3 +15,5 @@ numpy
 scipy
 opencv-python-headless
 curl-cffi
+pymysql
+

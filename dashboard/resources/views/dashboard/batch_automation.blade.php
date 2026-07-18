@@ -63,16 +63,16 @@
     
     /* Terminal Console */
     .terminal-container {
-        background: #05080f;
+        background: #000000;
         border: 1px solid var(--panel-border);
         border-radius: 16px;
         font-family: 'Courier New', Courier, monospace;
-        color: #00ffc4;
+        color: #ffffff;
         padding: 1.5rem;
         height: 320px;
         overflow-y: auto;
         font-size: 0.85rem;
-        box-shadow: inset 0 0 20px rgba(0, 0, 0, 0.8), 0 4px 20px rgba(0, 255, 196, 0.03);
+        box-shadow: inset 0 0 20px rgba(0, 0, 0, 0.8), 0 4px 20px var(--btn-shadow);
         display: flex;
         flex-direction: column;
         gap: 0.35rem;
@@ -86,10 +86,10 @@
         word-break: break-all;
     }
     
-    .terminal-line.error { color: #f43f5e; }
-    .terminal-line.warning { color: #f59e0b; }
-    .terminal-line.success { color: #10b981; }
-    .terminal-line.system { color: #8b5cf6; }
+    .terminal-line.error { color: var(--danger); }
+    .terminal-line.warning { color: var(--warning); }
+    .terminal-line.success { color: var(--success); }
+    .terminal-line.system { color: var(--text-secondary); }
 
     .candidates-grid-gallery {
         flex: 1;
@@ -118,10 +118,10 @@
         transform: scale(1.05);
     }
     .curation-thumb-card.active-candidate {
-        border-color: #00ffc4 !important;
-        box-shadow: 0 0 15px rgba(0, 255, 196, 0.4);
+        border-color: var(--accent-purple) !important;
+        box-shadow: 0 0 15px var(--btn-shadow);
         transform: scale(1.05);
-        background: rgba(0, 255, 196, 0.05);
+        background: var(--active-menu-bg);
     }
     
     .curation-row-card {
@@ -163,10 +163,10 @@
         </div>
         
         <div style="display: flex; gap: 0.75rem;">
-            <button type="button" class="btn btn-secondary" onclick="resetBatchState()" style="background: rgba(244, 63, 94, 0.1); border-color: rgba(244, 63, 94, 0.2); color: var(--danger); font-weight: 800; padding: 0.65rem 1.5rem;">
+            <button type="button" class="btn btn-secondary" onclick="resetBatchState()" style="background: var(--danger-bg); border-color: var(--panel-border); color: var(--danger); font-weight: 800; padding: 0.65rem 1.5rem;">
                 <i class="fas fa-undo"></i> تصفير وإعادة تعيين الحالة 🔄
             </button>
-            <button type="button" class="btn" id="runAllBtn" onclick="runAllAutomation()" style="background: linear-gradient(135deg, var(--accent-purple) 0%, var(--accent-cyan) 100%); font-weight: 800; padding: 0.65rem 1.5rem;">
+            <button type="button" class="btn" id="runAllBtn" onclick="runAllAutomation()" style="background: var(--accent-gradient); color: var(--btn-text); font-weight: 800; padding: 0.65rem 1.5rem;">
                 <i class="fas fa-play"></i> إطلاق الأتمتة الجماعية بالخلفية
             </button>
         </div>
@@ -175,8 +175,8 @@
     <!-- Stats Cards Grid -->
     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.5rem; margin-bottom: 0.5rem;">
         <!-- Card 1: Queue -->
-        <div class="glass-panel" style="padding: 1.25rem; display: flex; align-items: center; gap: 1.25rem; border-color: rgba(0, 229, 255, 0.15);">
-            <div style="background: rgba(0, 229, 255, 0.1); width: 50px; height: 50px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 1.5rem; color: var(--accent-cyan);">
+        <div class="glass-panel" style="padding: 1.25rem; display: flex; align-items: center; gap: 1.25rem; border-color: var(--panel-border);">
+            <div style="background: var(--active-menu-bg); width: 50px; height: 50px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 1.5rem; color: var(--text-primary);">
                 <i class="fas fa-layer-group"></i>
             </div>
             <div>
@@ -186,8 +186,8 @@
         </div>
 
         <!-- Card 2: Progress -->
-        <div class="glass-panel" style="padding: 1.25rem; display: flex; align-items: center; gap: 1.25rem; border-color: rgba(139, 92, 246, 0.15);">
-            <div style="background: rgba(139, 92, 246, 0.1); width: 50px; height: 50px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 1.5rem; color: var(--accent-purple-hover);">
+        <div class="glass-panel" style="padding: 1.25rem; display: flex; align-items: center; gap: 1.25rem; border-color: var(--panel-border);">
+            <div style="background: var(--active-menu-bg); width: 50px; height: 50px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 1.5rem; color: var(--text-primary);">
                 <i class="fas fa-chart-line"></i>
             </div>
             <div style="flex: 1;">
@@ -197,15 +197,15 @@
         </div>
 
         <!-- Card 3: Failures -->
-        <div class="glass-panel" style="padding: 1.25rem; display: flex; align-items: center; gap: 1.25rem; border-color: rgba(244, 63, 94, 0.15);">
-            <div style="background: rgba(244, 63, 94, 0.1); width: 50px; height: 50px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 1.5rem; color: var(--danger);">
+        <div class="glass-panel" style="padding: 1.25rem; display: flex; align-items: center; gap: 1.25rem; border-color: var(--panel-border);">
+            <div style="background: var(--danger-bg); width: 50px; height: 50px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 1.5rem; color: var(--danger);">
                 <i class="fas fa-exclamation-triangle"></i>
             </div>
             <div>
                 <span style="font-size: 0.8rem; color: var(--text-secondary); font-weight: bold; display: block;">الأخطاء والفشل</span>
                 <div style="display: flex; align-items: center; gap: 0.75rem;">
                     <strong style="font-size: 1.6rem; font-weight: 900; color: var(--danger); font-family: 'Outfit', sans-serif;" id="statFailedCount">0</strong>
-                    <button type="button" class="btn btn-secondary btn-sm" id="statRetryBtn" onclick="retryFailedTasks()" style="display: none; padding: 2px 8px; font-size: 0.7rem; color: var(--warning); background: rgba(245,158,11,0.05); border-color: rgba(245,158,11,0.15);">إعادة المحاولة</button>
+                    <button type="button" class="btn btn-secondary btn-sm" id="statRetryBtn" onclick="retryFailedTasks()" style="display: none; padding: 2px 8px; font-size: 0.7rem; color: var(--warning); background: var(--warning-bg); border-color: var(--panel-border);">إعادة المحاولة</button>
                 </div>
             </div>
         </div>
@@ -264,7 +264,7 @@
             <div class="glass-panel" style="padding: 1.75rem;">
                 <h3 style="font-size: 1.15rem; font-weight: 800; margin-bottom: 1.25rem; display: flex; align-items: center; justify-content: space-between; color: var(--text-primary);">
                     <span style="display: flex; align-items: center; gap: 0.5rem;"><i class="fas fa-terminal" style="color: var(--accent-cyan);"></i> كونسول التشغيل والمشاهدة الحية</span>
-                    <button type="button" class="btn btn-secondary btn-sm" onclick="clearConsole()" style="font-size: 0.75rem; padding: 4px 10px; color: var(--danger); background: rgba(244,63,94,0.05);">تفريغ الشاشة</button>
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="clearConsole()" style="font-size: 0.75rem; padding: 4px 10px; color: var(--danger); background: var(--danger-bg);">تفريغ الشاشة</button>
                 </h3>
                 
                 <div class="terminal-container" id="terminalConsole">
@@ -293,10 +293,10 @@
                 </div>
                 
                 <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem; width: 100%;">
-                    <button type="button" class="btn btn-secondary btn-sm" id="pauseResumeBatchBtn" onclick="togglePauseResumeAutomation()" style="flex: 1; background: rgba(245, 158, 11, 0.1); border-color: rgba(245, 158, 11, 0.2); color: var(--warning); font-weight: bold; border-radius: 10px;">
+                    <button type="button" class="btn btn-secondary btn-sm" id="pauseResumeBatchBtn" onclick="togglePauseResumeAutomation()" style="flex: 1; background: var(--warning-bg); border-color: var(--panel-border); color: var(--warning); font-weight: bold; border-radius: 10px;">
                         <i class="fas fa-pause" id="pauseResumeIcon"></i> <span id="pauseResumeText">إيقاف مؤقت</span>
                     </button>
-                    <button type="button" class="btn btn-secondary btn-sm" id="stopBatchBtn" onclick="stopBatchAutomation()" style="flex: 1; background: rgba(244, 63, 94, 0.1); border-color: rgba(244, 63, 94, 0.2); color: var(--danger); font-weight: bold; border-radius: 10px;">
+                    <button type="button" class="btn btn-secondary btn-sm" id="stopBatchBtn" onclick="stopBatchAutomation()" style="flex: 1; background: var(--danger-bg); border-color: var(--panel-border); color: var(--danger); font-weight: bold; border-radius: 10px;">
                         <i class="fas fa-stop"></i> إنهاء قسري 🛑
                     </button>
                 </div>
@@ -323,10 +323,10 @@
         <div style="background: var(--input-bg); border: 1px solid var(--panel-border); padding: 1.25rem; border-radius: 16px; margin-bottom: 1.75rem; display: flex; flex-direction: column; gap: 1rem; direction: rtl;">
             <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
                 <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
-                    <button type="button" class="btn" id="batchApproveBtn" onclick="submitBatchApproval()" style="background: linear-gradient(135deg, var(--success) 0%, #34d399 100%); color: white; font-weight: 800; padding: 0.65rem 1.5rem;">
+                    <button type="button" class="btn" id="batchApproveBtn" onclick="submitBatchApproval()" style="background: var(--accent-gradient); color: var(--btn-text); font-weight: 800; padding: 0.65rem 1.5rem;">
                         <i class="fas fa-check-double"></i> اعتماد ورفع الصور المحددة للشيت سحابياً 🚀
                     </button>
-                    <button type="button" class="btn btn-secondary" id="batchRejectBtn" onclick="submitBatchRejection()" style="background: rgba(244, 63, 94, 0.1); border-color: rgba(244, 63, 94, 0.2); color: var(--danger); font-weight: bold; padding: 0.65rem 1.5rem;">
+                    <button type="button" class="btn btn-secondary" id="batchRejectBtn" onclick="submitBatchRejection()" style="background: var(--danger-bg); border-color: var(--panel-border); color: var(--danger); font-weight: bold; padding: 0.65rem 1.5rem;">
                         <i class="fas fa-trash-alt"></i> استبعاد وتجاهل المحدد 🗑️
                     </button>
                 </div>
@@ -419,15 +419,15 @@
                 if (isPaused) {
                     icon.className = 'fas fa-play';
                     txt.innerText = 'استئناف الأتمتة';
-                    btn.style.color = 'var(--success)';
-                    btn.style.background = 'rgba(16, 185, 129, 0.1)';
-                    btn.style.borderColor = 'rgba(16, 185, 129, 0.2)';
+                    btn.style.color = 'var(--text-primary)';
+                    btn.style.background = 'var(--success-bg)';
+                    btn.style.borderColor = 'var(--panel-border)';
                 } else {
                     icon.className = 'fas fa-pause';
                     txt.innerText = 'إيقاف مؤقت';
-                    btn.style.color = 'var(--warning)';
-                    btn.style.background = 'rgba(245, 158, 11, 0.1)';
-                    btn.style.borderColor = 'rgba(245, 158, 11, 0.2)';
+                    btn.style.color = 'var(--text-secondary)';
+                    btn.style.background = 'var(--warning-bg)';
+                    btn.style.borderColor = 'var(--panel-border)';
                 }
             } else {
                 alert('فشل تغيير حالة الأتمتة: ' + data.error);
@@ -621,17 +621,17 @@
                 if (isPaused) {
                     pIcon.className = 'fas fa-play';
                     pTxt.innerText = 'استئناف الأتمتة';
-                    pBtn.style.color = 'var(--success)';
-                    pBtn.style.background = 'rgba(16, 185, 129, 0.1)';
-                    pBtn.style.borderColor = 'rgba(16, 185, 129, 0.2)';
+                    pBtn.style.color = 'var(--text-primary)';
+                    pBtn.style.background = 'var(--success-bg)';
+                    pBtn.style.borderColor = 'var(--panel-border)';
                     document.getElementById('batchProgressText').innerHTML = `<strong style="color: var(--warning);"><i class="fas fa-pause-circle"></i> الأتمتة موقوفة مؤقتاً</strong>`;
                     document.getElementById('statProgressLabel').innerHTML = `<span style="color: var(--warning); font-weight: 800;">موقوف مؤقتاً ⏸️</span>`;
                 } else {
                     pIcon.className = 'fas fa-pause';
                     pTxt.innerText = 'إيقاف مؤقت';
-                    pBtn.style.color = 'var(--warning)';
-                    pBtn.style.background = 'rgba(245, 158, 11, 0.1)';
-                    pBtn.style.borderColor = 'rgba(245, 158, 11, 0.2)';
+                    pBtn.style.color = 'var(--text-secondary)';
+                    pBtn.style.background = 'var(--warning-bg)';
+                    pBtn.style.borderColor = 'var(--panel-border)';
                     document.getElementById('batchProgressText').innerHTML = `جاري تحضير مرشحات: <strong style="color: var(--accent-cyan);">${data.current_product || 'جاري البحث...'}</strong>`;
                 }
                 
@@ -740,16 +740,16 @@
                 <div style="flex: 0 0 300px; display: flex; align-items: flex-start; gap: 0.85rem;">
                     <input type="checkbox" class="batch-select-checkbox" data-row="${p.row_number}" data-url="${defaultUrl}" data-name="${p.product_name.replace(/"/g, '&quot;')}" data-brand="${p.brand.replace(/"/g, '&quot;')}" checked style="width: 22px; height: 22px; cursor: pointer; margin-top: 0.25rem; accent-color: var(--accent-purple);" onchange="toggleBatchRowSelect(this, ${p.row_number})">
                     <div style="display: flex; flex-direction: column; gap: 0.35rem; width: calc(100% - 35px);">
-                        <span class="badge-row-number" style="align-self: flex-start; background: rgba(139, 92, 246, 0.1); border-color: rgba(139, 92, 246, 0.2); color: var(--accent-purple-hover); font-weight: 800; font-size: 0.75rem; padding: 2px 8px; border-radius: 6px;">صف ${p.row_number}</span>
+                        <span class="badge-row-number" style="align-self: flex-start; background: var(--active-menu-bg); border-color: var(--panel-border); color: var(--text-primary); font-weight: 800; font-size: 0.75rem; padding: 2px 8px; border-radius: 6px;">صف ${p.row_number}</span>
                         <h4 style="font-size: 0.95rem; font-weight: 800; margin: 0.25rem 0 0; color: var(--text-primary); text-overflow: ellipsis; overflow: hidden; white-space: nowrap;" title="${p.product_name}">${p.product_name}</h4>
                         <p style="font-size: 0.8rem; color: var(--text-secondary); margin: 0; font-weight: 600;">البراند: <strong style="color: var(--text-primary);">${p.brand}</strong></p>
                         
                         ${(() => {
                             const allergens = checkTitleForAllergens(p.product_name);
-                            return allergens ? `<span style="background: rgba(244,63,94,0.12); border: 1px solid rgba(244,63,94,0.22); color: var(--danger); font-size: 0.7rem; font-weight: 800; padding: 2px 6px; border-radius: 4px; margin-top: 0.35rem; display: inline-block; align-self: flex-start;"><i class="fas fa-exclamation-triangle"></i> يحتوي: ${allergens}</span>` : '';
+                            return allergens ? `<span style="background: var(--danger-bg); border: 1px solid var(--panel-border); color: var(--danger); font-size: 0.7rem; font-weight: 800; padding: 2px 6px; border-radius: 4px; margin-top: 0.35rem; display: inline-block; align-self: flex-start;"><i class="fas fa-exclamation-triangle"></i> يحتوي: ${allergens}</span>` : '';
                         })()}
                         
-                        ${(p.curation_candidates && p.curation_candidates.length > 0) ? `<span style="background: rgba(0, 210, 255, 0.1); border: 1px solid rgba(0, 210, 255, 0.2); color: var(--accent-cyan); font-size: 0.7rem; font-weight: 800; padding: 2px 6px; border-radius: 4px; margin-top: 0.35rem; display: inline-block; align-self: flex-start;"><i class="fas fa-bolt"></i> جاهز للمراجعة (Cached)</span>` : ''}
+                        ${(p.curation_candidates && p.curation_candidates.length > 0) ? `<span style="background: var(--active-menu-bg); border: 1px solid var(--panel-border); color: var(--text-primary); font-size: 0.7rem; font-weight: 800; padding: 2px 6px; border-radius: 4px; margin-top: 0.35rem; display: inline-block; align-self: flex-start;"><i class="fas fa-bolt"></i> جاهز للمراجعة (Cached)</span>` : ''}
                         
                         <div style="display: flex; align-items: center; gap: 0.35rem; margin-top: 0.5rem; width: 100%;">
                             <input type="text" id="inline-query-${p.row_number}" value="${p.brand ? p.product_name + ' ' + p.brand : p.product_name}" style="flex: 1; font-size: 0.75rem; padding: 4px 8px; background: rgba(0,0,0,0.25); border: 1px solid var(--panel-border); color: var(--text-primary); border-radius: 6px; outline: none; width: calc(100% - 35px);">
@@ -759,17 +759,17 @@
                         </div>
                     </div>
                 </div>
-
+ 
                 <div class="candidates-grid-gallery">
                     ${candidatesList.map((c, cIdx) => {
                         const isSelected = c.is_selected === 1 ? 'checked' : '';
                         const activeClass = c.is_selected === 1 ? 'active-candidate' : '';
                         const scorePercent = c.clip_score ? Math.round(c.clip_score * 100) : 0;
-                        const scoreBadge = scorePercent > 0 ? `<span style="position: absolute; bottom: 4px; left: 4px; background: rgba(12, 18, 28, 0.75); border: 1px solid rgba(255,255,255,0.15); color: #00ffc4; font-size: 0.65rem; font-family: 'Outfit', sans-serif; font-weight: 900; padding: 1px 4px; border-radius: 4px;">${scorePercent}% Match</span>` : '';
+                        const scoreBadge = scorePercent > 0 ? `<span style="position: absolute; bottom: 4px; left: 4px; background: rgba(0, 0, 0, 0.75); border: 1px solid var(--panel-border); color: #ffffff; font-size: 0.65rem; font-family: 'Outfit', sans-serif; font-weight: 900; padding: 1px 4px; border-radius: 4px;">${scorePercent}% Match</span>` : '';
                         const domainText = c.source_domain ? c.source_domain.replace('www.', '') : 'Unknown';
                         const hasAllergen = checkTitleForAllergens(c.title || '');
-                        const allergenIcon = hasAllergen ? `<span style="position: absolute; top: 4px; left: 4px; color: #f43f5e; font-size: 0.8rem; filter: drop-shadow(0 0 4px rgba(244,63,94,0.7)); z-index: 6;" title="تحذير مسببات حساسية: ${hasAllergen}"><i class="fas fa-exclamation-triangle"></i></span>` : '';
-                        const checkmark = c.is_selected === 1 ? `<span class="selected-check" style="position: absolute; top: 4px; right: 4px; background: #00ffc4; color: #05080f; border-radius: 50%; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; font-size: 0.75rem; z-index: 10; box-shadow: 0 0 8px rgba(0,255,196,0.6);"><i class="fas fa-check"></i></span>` : '';
+                        const allergenIcon = hasAllergen ? `<span style="position: absolute; top: 4px; left: 4px; color: var(--danger); font-size: 0.8rem; filter: drop-shadow(0 0 4px var(--btn-shadow)); z-index: 6;" title="تحذير مسببات حساسية: ${hasAllergen}"><i class="fas fa-exclamation-triangle"></i></span>` : '';
+                        const checkmark = c.is_selected === 1 ? `<span class="selected-check" style="position: absolute; top: 4px; right: 4px; background: var(--accent-gradient); color: var(--btn-text); border-radius: 50%; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; font-size: 0.75rem; z-index: 10; box-shadow: 0 0 8px var(--btn-shadow);"><i class="fas fa-check"></i></span>` : '';
                         
                         return `
                             <div class="curation-thumb-card ${activeClass}" onclick="selectCurationThumb(this, ${p.row_number}, '${c.image_url.replace(/'/g, "\\'")}')" style="position: relative; flex: 0 0 110px; width: 110px; height: 110px; border-radius: 14px; border: 2px solid var(--panel-border); overflow: hidden; cursor: pointer; transition: all 0.25s ease;" title="${c.title || ''} (${domainText})">
@@ -782,9 +782,9 @@
                         `;
                     }).join('')}
                 </div>
-
+ 
                 <div style="flex: 0 0 160px; display: flex; flex-direction: column; gap: 0.5rem; justify-content: center; align-items: stretch;">
-                    <button type="button" class="btn btn-secondary btn-sm" onclick="toggleBatchRowExclude(${p.row_number})" id="btn-exclude-${p.row_number}" style="font-size: 0.75rem; font-weight: bold; padding: 0.45rem 0.5rem; background: rgba(239, 68, 68, 0.05); color: var(--danger); border-color: rgba(239, 68, 68, 0.15); border-radius: 10px; display: flex; align-items: center; justify-content: center; gap: 0.35rem;">
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="toggleBatchRowExclude(${p.row_number})" id="btn-exclude-${p.row_number}" style="font-size: 0.75rem; font-weight: bold; padding: 0.45rem 0.5rem; background: var(--danger-bg); color: var(--danger); border-color: var(--panel-border); border-radius: 10px; display: flex; align-items: center; justify-content: center; gap: 0.35rem;">
                         <i class="fas fa-times-circle"></i> <span class="btn-text">استبعاد وتخطي</span>
                     </button>
                 </div>
@@ -801,15 +801,15 @@
         if (cb.checked) {
             card.style.opacity = '1.0';
             btn.innerHTML = '<i class="fas fa-times-circle"></i> <span class="btn-text">استبعاد وتخطي</span>';
-            btn.style.background = 'rgba(239, 68, 68, 0.05)';
+            btn.style.background = 'var(--danger-bg)';
             btn.style.color = 'var(--danger)';
-            btn.style.borderColor = 'rgba(239, 68, 68, 0.15)';
+            btn.style.borderColor = 'var(--panel-border)';
         } else {
             card.style.opacity = '0.4';
             btn.innerHTML = '<i class="fas fa-undo"></i> <span class="btn-text">إلغاء الاستبعاد</span>';
-            btn.style.background = 'rgba(16, 185, 129, 0.05)';
+            btn.style.background = 'var(--success-bg)';
             btn.style.color = 'var(--success)';
-            btn.style.borderColor = 'rgba(16, 185, 129, 0.15)';
+            btn.style.borderColor = 'var(--panel-border)';
         }
     }
 
@@ -841,7 +841,7 @@
         // Add checkmark
         const check = document.createElement('span');
         check.className = 'selected-check';
-        check.style = "position: absolute; top: 4px; right: 4px; background: #00ffc4; color: #05080f; border-radius: 50%; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; font-size: 0.75rem; z-index: 10; box-shadow: 0 0 8px rgba(0,255,196,0.6);";
+        check.style = "position: absolute; top: 4px; right: 4px; background: var(--accent-gradient); color: var(--btn-text); border-radius: 50%; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; font-size: 0.75rem; z-index: 10; box-shadow: 0 0 8px var(--btn-shadow);";
         check.innerHTML = '<i class="fas fa-check"></i>';
         thumbEl.appendChild(check);
         
@@ -936,14 +936,14 @@
                     const card = cb.closest('.curation-row-card');
                     if (card) {
                         card.style.borderColor = 'var(--success)';
-                        card.style.background = 'rgba(16, 185, 129, 0.05)';
+                        card.style.background = 'var(--success-bg)';
                     }
                 } else {
                     failed++;
                     const card = cb.closest('.curation-row-card');
                     if (card) {
                         card.style.borderColor = 'var(--danger)';
-                        card.style.background = 'rgba(239, 68, 68, 0.05)';
+                        card.style.background = 'var(--danger-bg)';
                     }
                 }
             } catch (err) {

@@ -65,14 +65,26 @@ def test_grabcut_floodfill():
     print("✅ BoundaryComplianceSegmenter GrabCut and FloodFill executed and passed.")
 
 def test_async_sheets_queue():
-    print("\n--- 3. Testing Async Sheets Queue and SQLite WAL Queue ---")
+    print("\n--- 3. Testing Async Sheets Queue and MariaDB Queue ---")
     import google_sheets
     import config
-    import sqlite3
+    import pymysql
     
-    db_path = "local_cache.db"
-    conn = sqlite3.connect(db_path)
-    conn.execute("DROP TABLE IF EXISTS sheet_updates")
+    # Load env variables for MariaDB
+    from migrate_sqlite_to_mariadb import load_env
+    load_env()
+    
+    conn = pymysql.connect(
+        host=os.getenv("DB_HOST", "127.0.0.1"),
+        port=int(os.getenv("DB_PORT", "3306")),
+        user=os.getenv("DB_USERNAME", "root"),
+        password=os.getenv("DB_PASSWORD", ""),
+        database=os.getenv("DB_DATABASE", "automation_db"),
+        charset='utf8mb4',
+        cursorclass=pymysql.cursors.DictCursor
+    )
+    cursor = conn.cursor()
+    cursor.execute("DROP TABLE IF EXISTS sheet_updates")
     conn.commit()
     conn.close()
     
@@ -80,15 +92,23 @@ def test_async_sheets_queue():
     
     google_sheets.update_image_link(None, 9999, 5, "https://example.com/test_image.jpg")
     
-    conn = sqlite3.connect(db_path)
+    conn = pymysql.connect(
+        host=os.getenv("DB_HOST", "127.0.0.1"),
+        port=int(os.getenv("DB_PORT", "3306")),
+        user=os.getenv("DB_USERNAME", "root"),
+        password=os.getenv("DB_PASSWORD", ""),
+        database=os.getenv("DB_DATABASE", "automation_db"),
+        charset='utf8mb4',
+        cursorclass=pymysql.cursors.DictCursor
+    )
     cursor = conn.cursor()
     cursor.execute("SELECT row_number, col_index, value, sync_status FROM sheet_updates")
     row = cursor.fetchone()
-    print(f"Queued Row in SQLite: {row}")
-    assert row is not None, "Failed to queue row in SQLite database!"
-    assert row[0] == 9999, "Incorrect row number queued!"
-    assert row[2] == "https://example.com/test_image.jpg", "Incorrect value queued!"
-    print("✅ SQLite database WAL transaction queued correctly.")
+    print(f"Queued Row in MariaDB: {row}")
+    assert row is not None, "Failed to queue row in MariaDB database!"
+    assert row["row_number"] == 9999, "Incorrect row number queued!"
+    assert row["value"] == "https://example.com/test_image.jpg", "Incorrect value queued!"
+    print("✅ MariaDB database queue transaction queued correctly.")
     
     google_sheets.stop_async_queue()
     print("✅ Async Sheets Queue stopped and cleaned up.")

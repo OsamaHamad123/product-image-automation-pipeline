@@ -68,10 +68,10 @@
         filter: brightness(1.2);
     }
 
-    .stat-icon.total { background: rgba(139, 92, 246, 0.15); color: var(--accent-purple); border-color: rgba(139, 92, 246, 0.25); }
-    .stat-icon.success { background: var(--success-bg); color: var(--success); border-color: rgba(16, 185, 129, 0.25); }
-    .stat-icon.warning { background: var(--warning-bg); color: var(--warning); border-color: rgba(245, 158, 11, 0.25); }
-    .stat-icon.danger { background: var(--danger-bg); color: var(--danger); border-color: rgba(244, 63, 94, 0.25); }
+    .stat-icon.total { background: rgba(255, 255, 255, 0.08); color: var(--text-primary); border-color: var(--panel-border); }
+    .stat-icon.success { background: var(--success-bg); color: var(--success); border-color: var(--panel-border); }
+    .stat-icon.warning { background: var(--warning-bg); color: var(--warning); border-color: var(--panel-border); }
+    .stat-icon.danger { background: var(--danger-bg); color: var(--danger); border-color: var(--panel-border); }
 
     .stat-details {
         position: relative;
@@ -94,15 +94,15 @@
         display: inline-block;
     }
 
-    .stat-card.total .value { background: linear-gradient(135deg, #a78bfa, #00d2ff); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
-    .stat-card.success .value { background: linear-gradient(135deg, #34d399, #059669); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
-    .stat-card.warning .value { background: linear-gradient(135deg, #fbbf24, #d97706); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
-    .stat-card.danger .value { background: linear-gradient(135deg, #f87171, #dc2626); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    .stat-card.total .value { color: var(--text-primary); }
+    .stat-card.success .value { color: var(--success); }
+    .stat-card.warning .value { color: var(--warning); }
+    .stat-card.danger .value { color: var(--danger); }
 
-    .stat-card.total:hover { border-color: var(--accent-purple); box-shadow: 0 15px 45px rgba(139, 92, 246, 0.2); }
-    .stat-card.success:hover { border-color: var(--success); box-shadow: 0 15px 45px rgba(16, 185, 129, 0.2); }
-    .stat-card.warning:hover { border-color: var(--warning); box-shadow: 0 15px 45px rgba(245, 158, 11, 0.2); }
-    .stat-card.danger:hover { border-color: var(--danger); box-shadow: 0 15px 45px rgba(244, 63, 94, 0.2); }
+    .stat-card.total:hover { border-color: var(--accent-purple); box-shadow: 0 10px 30px rgba(255, 255, 255, 0.03); }
+    .stat-card.success:hover { border-color: var(--panel-border-hover); box-shadow: 0 10px 30px rgba(255, 255, 255, 0.03); }
+    .stat-card.warning:hover { border-color: var(--panel-border-hover); box-shadow: 0 10px 30px rgba(255, 255, 255, 0.03); }
+    .stat-card.danger:hover { border-color: var(--danger); box-shadow: 0 10px 30px rgba(239, 68, 68, 0.03); }
 
     .progress-bar-container {
         background: rgba(255, 255, 255, 0.03);
@@ -121,7 +121,7 @@
         width: 0%;
         border-radius: 20px;
         transition: width 0.8s cubic-bezier(0.16, 1, 0.3, 1);
-        box-shadow: 0 0 10px rgba(139, 92, 246, 0.4);
+        box-shadow: 0 0 10px var(--btn-shadow);
     }
 
     /* Breathing glowing status dot */
@@ -132,26 +132,26 @@
         display: inline-block;
         margin-inline-end: 0.6rem;
         background-color: var(--success);
-        box-shadow: 0 0 10px var(--success);
+        box-shadow: 0 0 10px var(--btn-shadow);
         animation: pulse-glow-green 2s infinite;
     }
     
     .status-dot.danger {
         background-color: var(--danger);
-        box-shadow: 0 0 10px var(--danger);
+        box-shadow: 0 0 10px var(--btn-shadow);
         animation: pulse-glow-red 2s infinite;
     }
 
     @keyframes pulse-glow-green {
-        0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.6); }
-        70% { box-shadow: 0 0 0 8px rgba(16, 185, 129, 0); }
-        100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+        0% { box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.5); }
+        70% { box-shadow: 0 0 0 8px rgba(255, 255, 255, 0); }
+        100% { box-shadow: 0 0 0 0 rgba(255, 255, 255, 0); }
     }
 
     @keyframes pulse-glow-red {
-        0% { box-shadow: 0 0 0 0 rgba(244, 63, 94, 0.6); }
-        70% { box-shadow: 0 0 0 8px rgba(244, 63, 94, 0); }
-        100% { box-shadow: 0 0 0 0 rgba(244, 63, 94, 0); }
+        0% { box-shadow: 0 0 0 0 rgba(115, 115, 115, 0.5); }
+        70% { box-shadow: 0 0 0 8px rgba(115, 115, 115, 0); }
+        100% { box-shadow: 0 0 0 0 rgba(115, 115, 115, 0); }
     }
 
     .score-badge {
@@ -199,21 +199,21 @@
         height: 10px;
         border-radius: 50%;
     }
-    .terminal-dot.red { background: #ff5f56; }
-    .terminal-dot.yellow { background: #ffbd2e; }
-    .terminal-dot.green { background: #27c93f; }
+    .terminal-dot.red { background: #555555; }
+    .terminal-dot.yellow { background: #888888; }
+    .terminal-dot.green { background: #bbbbbb; }
 
     .terminal-body {
         padding: 1.25rem;
         font-family: 'Courier New', Courier, monospace;
         font-size: 0.8rem;
-        color: #38edf6;
+        color: #ffffff;
         line-height: 1.6;
         overflow-y: auto;
         flex-grow: 1;
         text-align: left;
         direction: ltr;
-        background: linear-gradient(180deg, #04060f 0%, #080c1e 100%);
+        background: #000000;
     }
 
     .terminal-body span {
@@ -296,17 +296,17 @@
             </div>
             <div style="display: flex; justify-content: space-between; align-items: center;">
                 <span style="color: var(--text-secondary); font-size: 0.9rem; font-weight: 600;">عمليات وفرها الكاش الدلالي:</span>
-                <strong style="font-family: 'Outfit', sans-serif; font-size: 1.25rem; color: var(--accent-purple);"><i class="fas fa-bolt" style="margin-inline-end: 0.35rem; color: #f59e0b;"></i>{{ $metrics['semantic_cache_savings'] ?? 0 }}</strong>
+                <strong style="font-family: 'Outfit', sans-serif; font-size: 1.25rem; color: var(--accent-purple);"><i class="fas fa-bolt" style="margin-inline-end: 0.35rem; color: var(--warning);"></i>{{ $metrics['semantic_cache_savings'] ?? 0 }}</strong>
             </div>
             <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid var(--panel-border); padding-top: 1rem; margin-top: 0.5rem;">
                 <span style="color: var(--text-secondary); font-weight: bold; font-size: 0.95rem;">تكلفة الاستهلاك المقدرة:</span>
-                <strong style="font-family: 'Outfit', sans-serif; font-size: 1.5rem; color: #f97316; filter: drop-shadow(0 0 8px rgba(249, 115, 22, 0.25));">${{ $estimatedCost }} USD</strong>
+                <strong style="font-family: 'Outfit', sans-serif; font-size: 1.5rem; color: var(--text-primary); filter: drop-shadow(0 0 8px var(--btn-shadow));">${{ $estimatedCost }} USD</strong>
             </div>
             <!-- تفاصيل التكلفة المقدرة -->
-            <div style="display: flex; flex-direction: column; gap: 0.45rem; background: rgba(0,0,0,0.15); padding: 0.75rem 1rem; border-radius: 10px; font-size: 0.8rem; margin-top: 0.25rem;">
+            <div style="display: flex; flex-direction: column; gap: 0.45rem; background: rgba(0, 0, 0, 0.05); padding: 0.75rem 1rem; border-radius: 10px; font-size: 0.8rem; margin-top: 0.25rem;">
                 <div style="display: flex; justify-content: space-between;">
                     <span style="color: var(--text-secondary);">استعلامات فحص Gemini:</span>
-                    <span style="color: #06b6d4; font-family: 'Outfit', sans-serif; font-weight: 700;">${{ number_format($metrics['gemini_cost'] ?? 0, 3) }}</span>
+                    <span style="color: var(--text-primary); font-family: 'Outfit', sans-serif; font-weight: 700;">${{ number_format($metrics['gemini_cost'] ?? 0, 3) }}</span>
                 </div>
                 <div style="display: flex; justify-content: space-between;">
                     <span style="color: var(--text-secondary);">عزل خلفية PhotoRoom:</span>
@@ -341,10 +341,10 @@
                     <div id="batchProgressBar" class="progress-bar-fill"></div>
                 </div>
                 <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem; width: 100%;">
-                    <button type="button" class="btn btn-secondary btn-sm" id="pauseResumeBatchBtn" onclick="togglePauseResumeAutomation()" style="flex: 1; background: rgba(245, 158, 11, 0.1); border-color: rgba(245, 158, 11, 0.2); color: var(--warning); font-weight: bold; border-radius: 10px;">
+                    <button type="button" class="btn btn-secondary btn-sm" id="pauseResumeBatchBtn" onclick="togglePauseResumeAutomation()" style="flex: 1; background: var(--warning-bg); border-color: var(--panel-border); color: var(--warning); font-weight: bold; border-radius: 10px;">
                         <i class="fas fa-pause" id="pauseResumeIcon"></i> <span id="pauseResumeText">إيقاف مؤقت</span>
                     </button>
-                    <button type="button" class="btn btn-secondary btn-sm" id="stopBatchBtn" onclick="stopBatchAutomation()" style="flex: 1; background: rgba(244, 63, 94, 0.1); border-color: rgba(244, 63, 94, 0.2); color: var(--danger); font-weight: bold; border-radius: 10px;">
+                    <button type="button" class="btn btn-secondary btn-sm" id="stopBatchBtn" onclick="stopBatchAutomation()" style="flex: 1; background: var(--danger-bg); border-color: var(--panel-border); color: var(--danger); font-weight: bold; border-radius: 10px;">
                         <i class="fas fa-stop"></i> إنهاء قسري 🛑
                     </button>
                 </div>
@@ -369,7 +369,7 @@
 <!-- Live Telemetry Graph & Analytics -->
 <div class="glass-panel" style="margin-top: 2rem; padding: 2rem;">
     <h3 style="font-size: 1.15rem; font-weight: 800; border-bottom: 1px solid var(--panel-border); padding-bottom: 1rem; margin-bottom: 1.5rem; display: flex; align-items: center; gap: 0.75rem; color: var(--text-primary);">
-        <i class="fas fa-chart-line" style="color: #3b82f6;"></i> مراقبة مؤشرات الأداء الفورية (Live Telemetry)
+        <i class="fas fa-chart-line" style="color: var(--text-primary);"></i> مراقبة مؤشرات الأداء الفورية (Live Telemetry)
     </h3>
     <div style="background: var(--card-bg); border-radius: var(--border-radius-md); padding: 1.5rem; border: 1px solid var(--panel-border); position: relative; height: 320px; width: 100%;">
         <canvas id="telemetryChart"></canvas>
@@ -377,7 +377,7 @@
 </div>
 
 <!-- Floating Log Button -->
-<button type="button" class="btn" onclick="toggleLogDrawer()" style="position: fixed; bottom: 2rem; left: 2rem; z-index: 9999; border-radius: 50px; width: 60px; height: 60px; display: flex; align-items: center; justify-content: center; box-shadow: 0 8px 32px rgba(0, 210, 255, 0.35); font-size: 1.4rem; padding: 0; background: linear-gradient(135deg, var(--accent-purple) 0%, var(--accent-cyan) 100%); border: 1px solid rgba(255,255,255,0.15); cursor: pointer;" title="فتح سجل التشغيل المباشر">
+<button type="button" class="btn" onclick="toggleLogDrawer()" style="position: fixed; bottom: 2rem; left: 2rem; z-index: 9999; border-radius: 50px; width: 60px; height: 60px; display: flex; align-items: center; justify-content: center; box-shadow: 0 8px 32px var(--btn-hover-shadow); font-size: 1.4rem; padding: 0; background: var(--accent-gradient); border: 1px solid rgba(255,255,255,0.15); cursor: pointer;" title="فتح سجل التشغيل المباشر">
     <i class="fas fa-terminal"></i>
 </button>
 
@@ -404,7 +404,7 @@
         <button type="button" class="btn btn-secondary btn-sm" onclick="downloadDrawerLogs()" style="font-size: 0.75rem; padding: 6px 12px;" title="تنزيل ملف السجل">
             <i class="fas fa-download"></i> تنزيل
         </button>
-        <button type="button" class="btn btn-secondary btn-sm" onclick="clearDrawerLogs()" style="font-size: 0.75rem; padding: 6px 12px; color: var(--danger); background: rgba(244,63,94,0.05);" title="تفريغ الشاشة">
+        <button type="button" class="btn btn-secondary btn-sm" onclick="clearDrawerLogs()" style="font-size: 0.75rem; padding: 6px 12px; color: var(--danger); background: var(--danger-bg);" title="تفريغ الشاشة">
             <i class="fas fa-trash-alt"></i> مسح
         </button>
     </div>
@@ -419,7 +419,7 @@
     </div>
 
     <!-- Logs Container -->
-    <div id="sse-log-container" style="flex: 1; overflow-y: auto; padding: 1.5rem; font-family: monospace; font-size: 0.8rem; line-height: 1.6; color: #a7f3d0; background: #030409; direction: ltr; text-align: left; scroll-behavior: smooth;">
+    <div id="sse-log-container" style="flex: 1; overflow-y: auto; padding: 1.5rem; font-family: monospace; font-size: 0.8rem; line-height: 1.6; color: var(--text-primary); background: #000000; direction: ltr; text-align: left; scroll-behavior: smooth;">
         <span style="color: var(--text-secondary); font-style: italic;">بانتظار تدفق الأحداث الحية من الخادم...</span>
     </div>
 </div>
@@ -427,7 +427,7 @@
 <!-- System Services Monitor & Auto-Start Controller -->
 <div class="glass-panel" style="margin-top: 2rem; padding: 2rem;">
     <h3 style="font-size: 1.15rem; font-weight: 800; border-bottom: 1px solid var(--panel-border); padding-bottom: 1rem; margin-bottom: 1.5rem; display: flex; align-items: center; gap: 0.75rem; color: var(--text-primary);">
-        <i class="fas fa-server" style="color: #8b5cf6;"></i> إدارة الخدمات التشغيلية (Auto-Start Services)
+        <i class="fas fa-server" style="color: var(--text-primary);"></i> إدارة الخدمات التشغيلية (Auto-Start Services)
     </h3>
     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 2.5rem;">
         <div>
@@ -437,13 +437,13 @@
             <div style="display: flex; flex-direction: column; gap: 1rem;">
                 <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.03); padding-bottom: 0.65rem;">
                     <span style="color: var(--text-secondary); font-size: 0.9rem; font-weight: 600;">خادم لوحة التحكم (Laravel):</span>
-                    <span id="status-laravel" class="score-badge" style="background: rgba(16, 185, 129, 0.08); color: var(--success); border-color: rgba(16, 185, 129, 0.15);">
+                    <span id="status-laravel" class="score-badge" style="background: var(--success-bg); color: var(--success); border-color: var(--panel-border);">
                         <span class="status-dot" style="margin: 0;"></span>Port 8000
                     </span>
                 </div>
                 <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.03); padding-bottom: 0.65rem;">
                     <span style="color: var(--text-secondary); font-size: 0.9rem; font-weight: 600;">خادم النماذج المساعد (FastAPI):</span>
-                    <span id="status-fastapi" class="score-badge" style="background: rgba(239, 68, 68, 0.08); color: var(--danger); border-color: rgba(239, 68, 68, 0.15); font-weight: bold;">
+                    <span id="status-fastapi" class="score-badge" style="background: var(--danger-bg); color: var(--danger); border-color: var(--panel-border); font-weight: bold;">
                         <span class="status-dot danger" style="margin: 0;"></span>جاري الفحص...
                     </span>
                 </div>
@@ -457,7 +457,7 @@
         <div style="display: flex; flex-direction: column; justify-content: center; gap: 0.85rem;">
             <h4 style="font-size: 0.95rem; margin-bottom: 0.35rem; color: var(--text-primary); font-weight: 800;">إجراءات التحكم السريعة للتشغيل التلقائي</h4>
             <div style="display: flex; gap: 1rem; width: 100%;">
-                <button class="btn" id="startFlaskBtn" onclick="controlSystem('start-flask')" style="flex: 1; background: var(--success); border-color: var(--success); box-shadow: 0 4px 14px 0 rgba(16, 185, 129, 0.25);">
+                <button class="btn" id="startFlaskBtn" onclick="controlSystem('start-flask')" style="flex: 1; background: var(--accent-gradient); border-color: var(--panel-border); color: var(--btn-text); box-shadow: 0 4px 14px 0 var(--btn-shadow);">
                     <i class="fas fa-play"></i> خادم بايثون المساعد 🚀
                 </button>
                 <button class="btn btn-secondary" id="stopFlaskBtn" onclick="controlSystem('stop-flask')" style="flex: 1;">
@@ -500,15 +500,15 @@
                 if (isPaused) {
                     icon.className = 'fas fa-play';
                     txt.innerText = 'استئناف الأتمتة';
-                    btn.style.color = 'var(--success)';
-                    btn.style.background = 'rgba(16, 185, 129, 0.1)';
-                    btn.style.borderColor = 'rgba(16, 185, 129, 0.2)';
+                    btn.style.color = 'var(--text-primary)';
+                    btn.style.background = 'var(--success-bg)';
+                    btn.style.borderColor = 'var(--panel-border)';
                 } else {
                     icon.className = 'fas fa-pause';
                     txt.innerText = 'إيقاف مؤقت';
-                    btn.style.color = 'var(--warning)';
-                    btn.style.background = 'rgba(245, 158, 11, 0.1)';
-                    btn.style.borderColor = 'rgba(245, 158, 11, 0.2)';
+                    btn.style.color = 'var(--text-secondary)';
+                    btn.style.background = 'var(--warning-bg)';
+                    btn.style.borderColor = 'var(--panel-border)';
                 }
             } else {
                 alert('فشل تغيير حالة الأتمتة: ' + data.error);
@@ -542,16 +542,16 @@
                 if (isPaused) {
                     pIcon.className = 'fas fa-play';
                     pTxt.innerText = 'استئناف الأتمتة';
-                    pBtn.style.color = 'var(--success)';
-                    pBtn.style.background = 'rgba(16, 185, 129, 0.1)';
-                    pBtn.style.borderColor = 'rgba(16, 185, 129, 0.2)';
+                    pBtn.style.color = 'var(--text-primary)';
+                    pBtn.style.background = 'var(--success-bg)';
+                    pBtn.style.borderColor = 'var(--panel-border)';
                     document.getElementById('batchProgressText').innerHTML = `<strong style="color: var(--warning);"><i class="fas fa-pause-circle"></i> الأتمتة موقوفة مؤقتاً</strong>`;
                 } else {
                     pIcon.className = 'fas fa-pause';
                     pTxt.innerText = 'إيقاف مؤقت';
-                    pBtn.style.color = 'var(--warning)';
-                    pBtn.style.background = 'rgba(245, 158, 11, 0.1)';
-                    pBtn.style.borderColor = 'rgba(245, 158, 11, 0.2)';
+                    pBtn.style.color = 'var(--text-secondary)';
+                    pBtn.style.background = 'var(--warning-bg)';
+                    pBtn.style.borderColor = 'var(--panel-border)';
                     document.getElementById('batchProgressText').innerHTML = `جاري تحضير مرشحات: <strong style="color: var(--accent-cyan);">${data.current_product || 'جاري البحث...'}</strong>`;
                 }
                 
@@ -568,8 +568,8 @@
                 
                 runBtn.disabled = false;
                 runBtn.className = 'btn btn-secondary';
-                runBtn.style.background = 'rgba(0, 242, 254, 0.15)';
-                runBtn.style.borderColor = 'var(--accent-cyan)';
+                runBtn.style.background = 'var(--active-menu-bg)';
+                runBtn.style.borderColor = 'var(--panel-border)';
                 runBtn.style.color = 'var(--text-primary)';
                 runBtn.innerHTML = '<i class="fas fa-images"></i> الانتقال لصفحة فرز واعتماد الصور الآن';
                 runBtn.onclick = () => window.location.href = "/catalog";
@@ -686,9 +686,9 @@
             
             if (data.fastapi_server === 'online') {
                 flaskEl.innerHTML = '<span class="status-dot"></span>Port 8001 (فعال)';
-                flaskEl.style.background = 'rgba(16, 185, 129, 0.08)';
+                flaskEl.style.background = 'var(--success-bg)';
                 flaskEl.style.color = 'var(--success)';
-                flaskEl.style.borderColor = 'rgba(16, 185, 129, 0.15)';
+                flaskEl.style.borderColor = 'var(--panel-border)';
                 
                 startBtn.disabled = true;
                 startBtn.style.opacity = '0.5';
@@ -698,9 +698,9 @@
                 stopBtn.style.cursor = 'pointer';
             } else {
                 flaskEl.innerHTML = '<span class="status-dot danger"></span>Port 8001 (مغلق)';
-                flaskEl.style.background = 'rgba(239, 68, 68, 0.08)';
+                flaskEl.style.background = 'var(--danger-bg)';
                 flaskEl.style.color = 'var(--danger)';
-                flaskEl.style.borderColor = 'rgba(239, 68, 68, 0.15)';
+                flaskEl.style.borderColor = 'var(--panel-border)';
                 
                 startBtn.disabled = false;
                 startBtn.style.opacity = '1';
@@ -907,12 +907,12 @@
                     let logTextLower = payload.log.toLowerCase();
                     if (logTextLower.includes('error') || logTextLower.includes('fail')) {
                         severity = 'error';
-                        newLog.style.color = '#f87171'; // red
+                        newLog.style.color = 'var(--danger)';
                     } else if (logTextLower.includes('warning') || logTextLower.includes('warn')) {
                         severity = 'warning';
-                        newLog.style.color = '#fbbf24'; // orange
+                        newLog.style.color = 'var(--warning)';
                     } else {
-                        newLog.style.color = '#a7f3d0'; // green
+                        newLog.style.color = 'var(--text-primary)';
                     }
                     
                     newLog.dataset.severity = severity;

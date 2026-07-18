@@ -86,7 +86,7 @@
 
     .sidebar-search-container input:focus {
         border-color: var(--accent-purple);
-        box-shadow: 0 0 15px rgba(124, 58, 237, 0.25);
+        box-shadow: 0 0 15px var(--btn-shadow);
     }
 
     .sidebar-search-container i {
@@ -136,9 +136,9 @@
     }
 
     .tab-btn.active {
-        background: linear-gradient(135deg, var(--accent-purple) 0%, var(--accent-cyan) 100%);
-        color: #ffffff;
-        box-shadow: 0 4px 15px rgba(124, 58, 237, 0.3);
+        background: var(--accent-gradient);
+        color: var(--btn-text);
+        box-shadow: 0 4px 15px var(--btn-shadow);
         text-shadow: 0 1px 2px rgba(0,0,0,0.15);
     }
 
@@ -217,13 +217,13 @@
         border-color: var(--panel-border-hover);
         background: var(--card-bg-hover);
         transform: translateY(-2px);
-        box-shadow: var(--shadow-sm), 0 4px 15px rgba(124, 58, 237, 0.05);
+        box-shadow: var(--shadow-sm), 0 4px 15px var(--btn-shadow);
     }
 
-    .product-item.completed.active { border-color: var(--success); background: var(--active-menu-bg); box-shadow: 0 0 15px rgba(16, 185, 129, 0.15); }
-    .product-item.review.active { border-color: var(--warning); background: var(--active-menu-bg); box-shadow: 0 0 15px rgba(245, 158, 11, 0.15); }
-    .product-item.error.active { border-color: var(--danger); background: var(--active-menu-bg); box-shadow: 0 0 15px rgba(244, 63, 94, 0.15); }
-    .product-item.missing.active { border-color: var(--accent-purple); background: var(--active-menu-bg); box-shadow: 0 0 15px rgba(124, 58, 237, 0.15); }
+    .product-item.completed.active { border-color: var(--success); background: var(--active-menu-bg); box-shadow: 0 0 15px var(--btn-shadow); }
+    .product-item.review.active { border-color: var(--warning); background: var(--active-menu-bg); box-shadow: 0 0 15px var(--btn-shadow); }
+    .product-item.error.active { border-color: var(--danger); background: var(--active-menu-bg); box-shadow: 0 0 15px var(--btn-shadow); }
+    .product-item.missing.active { border-color: var(--accent-purple); background: var(--active-menu-bg); box-shadow: 0 0 15px var(--btn-shadow); }
 
     .product-item h4 {
         font-size: 0.95rem;
@@ -301,7 +301,7 @@
 
     .form-group input:focus, .form-group select:focus {
         border-color: var(--accent-purple);
-        box-shadow: 0 0 15px rgba(124, 58, 237, 0.2);
+        box-shadow: 0 0 15px var(--btn-shadow);
         background: rgba(255, 255, 255, 0.02);
     }
 
@@ -320,7 +320,7 @@
     #bgColorPicker:hover {
         transform: scale(1.1);
         border-color: var(--accent-purple) !important;
-        box-shadow: 0 0 10px rgba(124, 58, 237, 0.3);
+        box-shadow: 0 0 10px var(--btn-shadow);
     }
 
     /* Toggles */
@@ -350,9 +350,9 @@
     }
 
     .toggle-container:has(input:checked) {
-        border-color: rgba(16, 185, 129, 0.35);
-        background: rgba(16, 185, 129, 0.04);
-        box-shadow: 0 4px 15px rgba(16, 185, 129, 0.05);
+        border-color: var(--panel-border-hover);
+        background: var(--success-bg);
+        box-shadow: 0 4px 15px var(--btn-shadow);
     }
 
     .toggle-container span {
@@ -406,8 +406,8 @@
     }
 
     input:checked + .slider {
-        background: linear-gradient(135deg, var(--success) 0%, #34d399 100%);
-        box-shadow: 0 0 10px rgba(16, 185, 129, 0.3);
+        background: var(--accent-gradient);
+        box-shadow: 0 0 10px var(--btn-shadow);
     }
 
     input:checked + .slider:before {
@@ -473,18 +473,18 @@
     .candidate-card:hover {
         border-color: var(--accent-purple);
         transform: translateY(-5px);
-        box-shadow: var(--shadow-md), 0 8px 24px rgba(139, 92, 246, 0.12);
+        box-shadow: var(--shadow-md), 0 8px 24px var(--btn-shadow);
     }
 
     .candidate-card.confirming-active, .glass-panel.confirming-active {
         border-color: var(--accent-purple) !important;
-        box-shadow: 0 0 20px rgba(124, 58, 237, 0.35) !important;
+        box-shadow: 0 0 20px var(--btn-shadow) !important;
         animation: pulse-glowing-glow 1.5s infinite alternate;
     }
 
     @keyframes pulse-glowing-glow {
-        0% { box-shadow: 0 0 10px rgba(124, 58, 237, 0.2); }
-        100% { box-shadow: 0 0 25px rgba(124, 58, 237, 0.45); }
+        0% { box-shadow: 0 0 10px var(--btn-shadow); }
+        100% { box-shadow: 0 0 25px var(--btn-hover-shadow); }
     }
 
     .candidate-img-box {
@@ -523,12 +523,12 @@
 
     .candidate-badge.accepted { 
         background: var(--success-bg); 
-        border: 1px solid rgba(16, 185, 129, 0.2);
+        border: 1px solid var(--panel-border);
         color: var(--success);
     }
     .candidate-badge.rejected { 
         background: var(--danger-bg); 
-        border: 1px solid rgba(239, 68, 68, 0.2);
+        border: 1px solid var(--panel-border);
         color: var(--danger);
     }
 
@@ -551,7 +551,7 @@
         bottom: 0.75rem;
         left: 0.75rem;
         background: var(--success-bg);
-        border: 1px solid rgba(16, 185, 129, 0.2);
+        border: 1px solid var(--panel-border);
         padding: 0.2rem 0.6rem;
         border-radius: 6px;
         font-size: 0.75rem;
@@ -592,7 +592,7 @@
         font-size: 0.75rem;
         color: var(--danger);
         background: var(--danger-bg);
-        border: 1px solid rgba(244, 63, 94, 0.15);
+        border: 1px solid var(--panel-border);
         padding: 0.5rem 0.75rem;
         border-radius: var(--border-radius-sm);
         margin-top: 0.25rem;
@@ -602,14 +602,14 @@
 
     #dropZone.drag-over {
         border-color: var(--accent-purple) !important;
-        background: rgba(124, 58, 237, 0.08) !important;
-        box-shadow: 0 0 15px rgba(124, 58, 237, 0.3) !important;
+        background: var(--active-menu-bg) !important;
+        box-shadow: 0 0 15px var(--btn-shadow) !important;
     }
 
     /* Terminal Console Window styling */
     .terminal-console {
-        background: #04060f !important;
-        border: 1px solid rgba(255, 255, 255, 0.08);
+        background: #000000 !important;
+        border: 1px solid var(--panel-border);
         border-radius: 16px;
         display: flex;
         flex-direction: column;
@@ -618,9 +618,9 @@
     }
 
     .terminal-header {
-        background: #090c1a;
+        background: #0a0a0a;
         padding: 0.75rem 1.25rem;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        border-bottom: 1px solid var(--panel-border);
         display: flex;
         align-items: center;
         justify-content: space-between;
@@ -637,9 +637,9 @@
         height: 10px;
         border-radius: 50%;
     }
-    .terminal-dot.red { background: #ff5f56; }
-    .terminal-dot.yellow { background: #ffbd2e; }
-    .terminal-dot.green { background: #27c93f; }
+    .terminal-dot.red { background: #555555; }
+    .terminal-dot.yellow { background: #888888; }
+    .terminal-dot.green { background: #bbbbbb; }
 
     /* Accordion Logs */
     .step-accordion {
@@ -686,7 +686,7 @@
         font-family: 'Courier New', Courier, monospace;
         font-size: 0.8rem;
         line-height: 1.6;
-        color: #38edf6;
+        color: var(--text-primary);
     }
 
     .step-body.active { 
@@ -756,7 +756,7 @@
         left: 50%;
         width: 2px;
         background: var(--accent-gradient);
-        box-shadow: 0 0 10px rgba(0, 242, 254, 0.8);
+        box-shadow: 0 0 10px var(--btn-shadow);
         cursor: ew-resize;
         z-index: 10;
     }
@@ -784,12 +784,12 @@
 
     /* Alpha Checkerboard Background */
     .bg-checkerboard {
-        background-color: #121620 !important;
+        background-color: #111111 !important;
         background-image: 
-            linear-gradient(45deg, #181d28 25%, transparent 25%), 
-            linear-gradient(-45deg, #181d28 25%, transparent 25%), 
-            linear-gradient(45deg, transparent 75%, #181d28 75%), 
-            linear-gradient(-45deg, transparent 75%, #181d28 75%) !important;
+            linear-gradient(45deg, #222222 25%, transparent 25%), 
+            linear-gradient(-45deg, #222222 25%, transparent 25%), 
+            linear-gradient(45deg, transparent 75%, #222222 75%), 
+            linear-gradient(-45deg, transparent 75%, #222222 75%) !important;
         background-size: 20px 20px !important;
         background-position: 0 0, 0 10px, 10px -10px, -10px 0px !important;
     }
@@ -843,8 +843,15 @@
         color: var(--text-primary);
         border-color: var(--accent-purple);
     }
+    .feedback-checkbox:has(input:checked) {
+        background: var(--active-menu-bg);
+        border-color: var(--accent-purple);
+        color: var(--text-primary);
+        box-shadow: 0 0 10px var(--btn-shadow);
+    }
     .feedback-checkbox input {
         cursor: pointer;
+        accent-color: var(--accent-purple) !important;
     }
 
     .curation-row-card {
@@ -866,7 +873,7 @@
     
     .curation-row-card:hover {
         border-color: var(--accent-cyan) !important;
-        box-shadow: 0 8px 30px rgba(0, 245, 255, 0.06);
+        box-shadow: 0 8px 30px var(--btn-shadow);
         transform: translateY(-2px);
     }
     
@@ -915,9 +922,9 @@
     
     .curation-thumb-card.active-candidate {
         border-color: var(--accent-purple) !important;
-        box-shadow: 0 0 15px rgba(139, 92, 246, 0.5);
+        box-shadow: 0 0 15px var(--btn-shadow);
         transform: scale(1.05);
-        background: rgba(139, 92, 246, 0.05);
+        background: var(--active-menu-bg);
     }
 </style>
 @endsection
@@ -1108,13 +1115,13 @@
                 </div>
                 
                 <!-- Batch review alert card -->
-                <div id="batchReviewAlertCard" style="display: none; background: rgba(139, 92, 246, 0.04); border: 1px solid rgba(139, 92, 246, 0.15); border-radius: 16px; padding: 2rem; max-width: 500px; margin: 2rem auto 0 auto; flex-direction: column; align-items: center; gap: 1rem; text-align: center;">
-                    <div style="font-size: 2.2rem; color: var(--accent-purple-hover);"><i class="fas fa-exclamation-triangle"></i></div>
+                <div id="batchReviewAlertCard" style="display: none; background: var(--active-menu-bg); border: 1px solid var(--panel-border); border-radius: 16px; padding: 2rem; max-width: 500px; margin: 2rem auto 0 auto; flex-direction: column; align-items: center; gap: 1rem; text-align: center;">
+                    <div style="font-size: 2.2rem; color: var(--text-primary);"><i class="fas fa-exclamation-triangle"></i></div>
                     <h4 style="font-size: 1.15rem; font-weight: 800; color: var(--text-primary); margin: 0;" id="batchReviewAlertTitle">توجد منتجات معلقة للمراجعة والتدقيق البصري</h4>
                     <p style="font-size: 0.85rem; line-height: 1.6; color: var(--text-secondary); margin: 0;" id="batchReviewAlertText">
                         لقد اكتشف نظام الأتمتة صوراً لهؤلاء المنتجات ولكنها بحاجة لمراجعتك وتأكيدك. يمكنك مراجعة كافة الصور واعتمادها دفعة واحدة الآن بلمح البصر!
                     </p>
-                    <button type="button" class="btn" onclick="openBatchCuration()" style="background: linear-gradient(135deg, var(--accent-purple) 0%, var(--accent-cyan) 100%); color: white; font-weight: 800; padding: 0.65rem 1.75rem; width: 100%; border: none;">
+                    <button type="button" class="btn" onclick="openBatchCuration()" style="background: var(--accent-gradient); color: var(--btn-text); font-weight: 800; padding: 0.65rem 1.75rem; width: 100%; border: none;">
                         <i class="fas fa-layer-group"></i> دخول مساحة المراجعة الجماعية 🚀
                     </button>
                 </div>
@@ -1151,8 +1158,8 @@
                         </div>
                         <div>
                             <h5 style="font-size: 0.85rem; margin-bottom: 0.5rem; color: var(--text-secondary);">أو اسحب صورة للرفع والتجميل التلقائي:</h5>
-                            <div id="dropZone" ondragover="event.preventDefault(); this.classList.add('drag-over')" ondragenter="event.preventDefault(); this.classList.add('drag-over')" ondragleave="this.classList.remove('drag-over')" ondrop="this.classList.remove('drag-over'); handleFileDrop(event)" onclick="triggerFileInput()" style="border: 2px dashed var(--panel-border); border-radius: 12px; padding: 0.75rem 1rem; text-align: center; cursor: pointer; transition: all 0.25s; background: rgba(0, 229, 255, 0.01); display: flex; flex-direction: column; align-items: center; justify-content: center;">
-                                <i class="fas fa-cloud-upload-alt" style="font-size: 1.3rem; color: var(--accent-cyan); margin-bottom: 0.25rem;"></i>
+                            <div id="dropZone" ondragover="event.preventDefault(); this.classList.add('drag-over')" ondragenter="event.preventDefault(); this.classList.add('drag-over')" ondragleave="this.classList.remove('drag-over')" ondrop="this.classList.remove('drag-over'); handleFileDrop(event)" onclick="triggerFileInput()" style="border: 2px dashed var(--panel-border); border-radius: 12px; padding: 0.75rem 1rem; text-align: center; cursor: pointer; transition: all 0.25s; background: rgba(255, 255, 255, 0.01); display: flex; flex-direction: column; align-items: center; justify-content: center;">
+                                <i class="fas fa-cloud-upload-alt" style="font-size: 1.3rem; color: var(--text-secondary); margin-bottom: 0.25rem;"></i>
                                 <p style="font-size: 0.75rem; margin: 0; color: var(--text-secondary);">اسحب وأسقط صورتك هنا أو انقر للتصفح</p>
                                 <input type="file" id="manualFileInput" onchange="handleFileSelect(event)" style="display: none;" accept="image/*">
                             </div>
@@ -1209,7 +1216,7 @@
                             <button class="btn btn-secondary btn-sm" onclick="clearLiveConsoleLogs()" style="padding: 2px 8px; font-size: 0.75rem; background: rgba(255,255,255,0.05);">تفريغ السجلات</button>
                         </div>
                     </div>
-                    <div id="liveConsoleLogs" style="font-family: 'Courier New', Courier, monospace; font-size: 0.85rem; color: #00ff66; background: #04060f; padding: 1.25rem; border-radius: 0 0 16px 16px; max-height: 200px; overflow-y: auto; text-align: left; direction: ltr; line-height: 1.5; border: 1px solid rgba(255,255,255,0.05);">
+                    <div id="liveConsoleLogs" style="font-family: 'Courier New', Courier, monospace; font-size: 0.85rem; color: #ffffff; background: #000000; padding: 1.25rem; border-radius: 0 0 16px 16px; max-height: 200px; overflow-y: auto; text-align: left; direction: ltr; line-height: 1.5; border: 1px solid rgba(255,255,255,0.05);">
                         <p style="color: var(--text-secondary); margin: 0;">[System] Initializing console logs listener...</p>
                     </div>
                 </div>
@@ -1226,7 +1233,7 @@
         <h3 style="font-size: 1.2rem; margin-bottom: 1rem; display: flex; align-items: center; justify-content: center; gap: 0.5rem; color: var(--accent-cyan);">
             <i class="fas fa-crop-alt"></i> محرر ومعاين الصورة المرفوعة
         </h3>
-        <div style="background: #080c14; border-radius: 12px; padding: 1rem; margin-bottom: 1.5rem; display: flex; align-items: center; justify-content: center; min-height: 250px; border: 1px solid var(--panel-border);">
+        <div style="background: #000000; border-radius: 12px; padding: 1rem; margin-bottom: 1.5rem; display: flex; align-items: center; justify-content: center; min-height: 250px; border: 1px solid var(--panel-border);">
             <canvas id="editorCanvas" style="max-width: 100%; max-height: 350px; border-radius: 8px; box-shadow: 0 8px 30px rgba(0,0,0,0.5);"></canvas>
         </div>
         <div style="display: flex; justify-content: center; gap: 1rem; margin-bottom: 1.5rem;">
@@ -1235,7 +1242,7 @@
         </div>
         <div style="display: flex; justify-content: space-between; gap: 1rem;">
             <button class="btn btn-secondary" onclick="closeEditorModal()" style="flex: 1;">إلغاء</button>
-            <button class="btn" onclick="commitEditorUpload()" style="flex: 2; background: linear-gradient(135deg, #00e5ff 0%, #00e676 100%); color: #080c14; font-weight: 900;"><i class="fas fa-check"></i> اعتماد الرفع والتجميل التلقائي</button>
+            <button class="btn" onclick="commitEditorUpload()" style="flex: 2; background: var(--accent-gradient); color: var(--btn-text); font-weight: 900;"><i class="fas fa-check"></i> اعتماد الرفع والتجميل التلقائي</button>
         </div>
     </div>
 </div>
@@ -1425,8 +1432,8 @@
         
         document.getElementById('sheetProductCount').innerText = currentProducts.length;
         
-        document.getElementById('tab-review').innerHTML = `المراجعة ⚠️ <span style="background: #ff9100; color: #080c14; padding: 2px 6px; border-radius: 8px; font-size: 0.75rem; margin-right: 4px; font-weight: 900;">${review}</span>`;
-        document.getElementById('tab-errors').innerHTML = `أخطاء ❌ <span style="background: var(--danger); color: white; padding: 2px 6px; border-radius: 8px; font-size: 0.75rem; margin-right: 4px; font-weight: 900;">${errors}</span>`;
+        document.getElementById('tab-review').innerHTML = `المراجعة ⚠️ <span style="background: var(--warning-bg); border: 1px solid var(--panel-border); color: var(--warning); padding: 2px 6px; border-radius: 8px; font-size: 0.75rem; margin-right: 4px; font-weight: 900;">${review}</span>`;
+        document.getElementById('tab-errors').innerHTML = `أخطاء ❌ <span style="background: var(--danger-bg); border: 1px solid var(--panel-border); color: var(--danger); padding: 2px 6px; border-radius: 8px; font-size: 0.75rem; margin-right: 4px; font-weight: 900;">${errors}</span>`;
         
         // تحديث كارت التنبيه للمراجعة الجماعية
         const alertCard = document.getElementById('batchReviewAlertCard');
@@ -1510,7 +1517,7 @@
             let scoreBadge = '';
             if (prod.clip_score) {
                 const scorePercent = Math.round(prod.clip_score * 100);
-                scoreBadge = `<span class="score-badge" style="background: rgba(124, 58, 237, 0.1); border: 1px solid rgba(124, 58, 237, 0.2); color: var(--accent-purple-hover); font-size: 0.75rem; padding: 2px 6px; border-radius: 4px; font-weight: bold; margin-inline-start: 5px;">${scorePercent}% Match</span>`;
+                scoreBadge = `<span class="score-badge" style="background: var(--active-menu-bg); border: 1px solid var(--panel-border); color: var(--text-primary); font-size: 0.75rem; padding: 2px 6px; border-radius: 4px; font-weight: bold; margin-inline-start: 5px;">${scorePercent}% Match</span>`;
             }
 
             let badgeStyle = 'background-color: var(--input-bg); color: var(--text-secondary);';
@@ -1713,7 +1720,7 @@
             
             const recommendedContainer = document.getElementById('recommendedContainer');
             const warningDiv = document.createElement('div');
-            warningDiv.style = "background-color: rgba(255, 145, 0, 0.1); border: 1px solid #ff9100; color: #ff9100; border-radius: 12px; padding: 1rem; margin-bottom: 1rem; font-weight: bold;";
+            warningDiv.style = "background-color: var(--warning-bg); border: 1px solid var(--panel-border); color: var(--warning); border-radius: 12px; padding: 1rem; margin-bottom: 1rem; font-weight: bold;";
             warningDiv.innerHTML = `⚠️ تم إيقاف الصورة للمراجعة البصرية لأن تقييم مطابقتها الدلالية CLIP كان متوسطاً. يرجى مراجعة الصورة واعتمادها أو البحث عن غيرها بالزر بالأسفل.`;
             recommendedContainer.insertBefore(warningDiv, recommendedContainer.firstChild);
             
@@ -1822,9 +1829,9 @@
             ? `<div style="font-family: 'Outfit', sans-serif; font-size: 0.9rem; margin-top: 0.25rem;">تشابه بصرى CLIP: <strong style="color: var(--accent-cyan); font-size: 1.15rem;">${img.clip_score}</strong></div>`
             : '';
             
-        const isGreyArea = img.needs_review ? `<div class="score-badge" style="background: #ff9100; color: #080c14; margin-top: 0.5rem; display: inline-block;">⚠️ مراجعة المنطقة الرمادية</div>` : '';
+        const isGreyArea = img.needs_review ? `<div class="score-badge" style="background: rgba(245, 158, 11, 0.1); color: var(--warning); border: 1px solid var(--warning); margin-top: 0.5rem; display: inline-block;">⚠️ مراجعة المنطقة الرمادية</div>` : '';
         const semanticCacheBadge = img.semantic_similarity
-            ? `<div class="score-badge" style="background: linear-gradient(135deg, #00f5ff 0%, #00b0ff 100%); color: #080c14; font-weight: 900; margin-top: 0.5rem; display: inline-block;"><i class="fas fa-bolt"></i> كاش دلالي ذكي</div>`
+            ? `<div class="score-badge" style="background: var(--accent-gradient); color: var(--btn-text); font-weight: 900; margin-top: 0.5rem; display: inline-block;"><i class="fas fa-bolt"></i> كاش دلالي ذكي</div>`
             : '';
 
         // Generate the markup with split-screen workbench
@@ -1858,7 +1865,7 @@
                 <div style="display: flex; flex-direction: column; justify-content: space-between;">
                     <div>
                         <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
-                            <span class="score-badge" style="background: linear-gradient(135deg, #8b5cf6 0%, #3b82f6 100%); color: #fff;"><i class="fas fa-robot"></i> التقييم التلقائي</span>
+                            <span class="score-badge" style="background: rgba(255,255,255,0.06); color: var(--text-primary); border: 1px solid var(--panel-border);"><i class="fas fa-robot"></i> التقييم التلقائي</span>
                             ${isGreyArea}
                             ${semanticCacheBadge}
                         </div>
@@ -1906,7 +1913,7 @@
                         <button type="button" class="btn" id="confirmImageBtn" onclick="confirmRecommendedImage('${img.url}', '${name.replace(/'/g, "\\'")}', '${brand.replace(/'/g, "\\'")}', ${row}, this)" style="flex: 2; font-weight: 800;">
                             <i class="fas fa-check"></i> اعتماد الصورة للشيت والرفع [A]
                         </button>
-                        <button type="button" class="btn" onclick="rejectImage('${img.url}', '${name.replace(/'/g, "\\'")}', '${brand.replace(/'/g, "\\'")}', ${row}, this)" style="flex: 1; background: rgba(239, 68, 68, 0.08); border-color: rgba(239, 68, 68, 0.25); color: var(--danger);" onmouseover="this.style.background='var(--danger)'; this.style.color='#fff'" onmouseout="this.style.background='rgba(239, 68, 68, 0.08)'; this.style.color='var(--danger)'">
+                        <button type="button" class="btn" onclick="rejectImage('${img.url}', '${name.replace(/'/g, "\\'")}', '${brand.replace(/'/g, "\\'")}', ${row}, this)" style="flex: 1; background: var(--danger-bg); border-color: var(--panel-border); color: var(--danger);" onmouseover="this.style.background='var(--danger)'; this.style.color='var(--btn-text)'" onmouseout="this.style.background='var(--danger-bg)'; this.style.color='var(--danger)'">
                             <i class="fas fa-times"></i> استبعاد [X]
                         </button>
                     </div>
@@ -2073,12 +2080,12 @@
                 const recommendedContainer = document.getElementById('recommendedContainer');
                 if (recommendedContainer) {
                     recommendedContainer.innerHTML = `
-                        <div style="background-color: rgba(239, 68, 68, 0.1); border: 1px solid #ef4444; color: var(--text-primary); border-radius: 16px; padding: 1.5rem; text-align: center; display: flex; flex-direction: column; gap: 1rem; margin-bottom: 1.5rem;">
+                        <div style="background-color: var(--danger-bg); border: 1px solid var(--panel-border); color: var(--text-primary); border-radius: 16px; padding: 1.5rem; text-align: center; display: flex; flex-direction: column; gap: 1rem; margin-bottom: 1.5rem;">
                             <div style="font-size: 1.2rem; font-weight: bold; color: var(--danger);"><i class="fas fa-times-circle"></i> تم استبعاد الصورة بنجاح وتوثيق سبب الاستبعاد.</div>
                             <p style="font-size: 0.9rem; color: var(--text-secondary); margin: 0;">لتصحيح البحث والعثور على صورة أفضل للمنتج، يرجى كتابة استعلام بحث مخصص أدناه ثم النقر على "إعادة البحث":</p>
                             <div style="display: flex; gap: 0.75rem; max-width: 500px; margin: 0 auto; width: 100%;">
                                 <input type="text" id="rejectionSearchQuery" value="${document.getElementById('customQuery').value || (brand + ' ' + name).trim()}" style="flex: 1; padding: 0.6rem 1rem; background: var(--input-bg); border: 1px solid var(--panel-border); border-radius: 10px; color: var(--text-primary); font-family: inherit; font-size: 0.9rem;">
-                                <button type="button" class="btn" onclick="retrySearchWithCustomQuery()" style="background: linear-gradient(135deg, var(--accent-purple) 0%, var(--accent-cyan) 100%); color: white; font-weight: bold; padding: 0.6rem 1.25rem;"><i class="fas fa-search"></i> إعادة البحث</button>
+                                <button type="button" class="btn" onclick="retrySearchWithCustomQuery()" style="background: var(--accent-gradient); color: var(--btn-text); font-weight: bold; padding: 0.6rem 1.25rem;"><i class="fas fa-search"></i> إعادة البحث</button>
                             </div>
                         </div>
                     `;
@@ -2412,10 +2419,10 @@
         consoleDiv.innerHTML = lastLogs.map(log => {
             if (query && !log.toLowerCase().includes(query)) return null;
             
-            let style = 'color: #00ff66;';
-            if (log.includes('❌')) style = 'color: #ef4444;';
-            if (log.includes('⚠️')) style = 'color: #ff9100;';
-            if (log.includes('⚡') || log.includes('🎉')) style = 'color: #00e5ff;';
+            let style = 'color: var(--text-primary);';
+            if (log.includes('❌')) style = 'color: var(--danger);';
+            if (log.includes('⚠️')) style = 'color: var(--warning);';
+            if (log.includes('⚡') || log.includes('🎉')) style = 'color: var(--text-secondary);';
             return `<p style="${style} margin: 0; padding: 2px 0;">${log}</p>`;
         }).filter(Boolean).join('');
     }
@@ -2623,16 +2630,16 @@
                 <div style="flex: 0 0 300px; display: flex; align-items: flex-start; gap: 0.85rem;">
                     <input type="checkbox" class="batch-select-checkbox" data-row="${p.row_number}" data-url="${defaultUrl}" data-name="${p.product_name.replace(/"/g, '&quot;')}" data-brand="${p.brand.replace(/"/g, '&quot;')}" checked style="width: 22px; height: 22px; cursor: pointer; margin-top: 0.25rem; accent-color: var(--accent-purple);" onchange="toggleBatchRowSelect(this, ${p.row_number})">
                     <div style="display: flex; flex-direction: column; gap: 0.35rem; width: calc(100% - 35px);">
-                        <span class="badge-row-number" style="align-self: flex-start; background: rgba(139, 92, 246, 0.1); border-color: rgba(139, 92, 246, 0.2); color: var(--accent-purple-hover); font-weight: 800; font-size: 0.75rem; padding: 2px 8px; border-radius: 6px;">صف ${p.row_number}</span>
+                        <span class="badge-row-number" style="align-self: flex-start; background: var(--active-menu-bg); border-color: var(--panel-border); color: var(--text-primary); font-weight: 800; font-size: 0.75rem; padding: 2px 8px; border-radius: 6px;">صف ${p.row_number}</span>
                         <h4 style="font-size: 0.95rem; font-weight: 800; margin: 0.25rem 0 0; color: var(--text-primary); text-overflow: ellipsis; overflow: hidden; white-space: nowrap;" title="${p.product_name}">${p.product_name}</h4>
                         <p style="font-size: 0.8rem; color: var(--text-secondary); margin: 0; font-weight: 600;">البراند: <strong style="color: var(--text-primary);">${p.brand}</strong></p>
                         
                         ${(() => {
                             const allergens = checkTitleForAllergens(p.product_name);
-                            return allergens ? `<span style="background: rgba(244,63,94,0.12); border: 1px solid rgba(244,63,94,0.22); color: var(--danger); font-size: 0.7rem; font-weight: 800; padding: 2px 6px; border-radius: 4px; margin-top: 0.35rem; display: inline-block; align-self: flex-start;"><i class="fas fa-exclamation-triangle"></i> يحتوي: ${allergens}</span>` : '';
+                            return allergens ? `<span style="background: var(--danger-bg); border: 1px solid var(--panel-border); color: var(--danger); font-size: 0.7rem; font-weight: 800; padding: 2px 6px; border-radius: 4px; margin-top: 0.35rem; display: inline-block; align-self: flex-start;"><i class="fas fa-exclamation-triangle"></i> يحتوي: ${allergens}</span>` : '';
                         })()}
                         
-                        ${(p.curation_candidates && p.curation_candidates.length > 0) ? `<span style="background: rgba(0, 210, 255, 0.1); border: 1px solid rgba(0, 210, 255, 0.2); color: var(--accent-cyan); font-size: 0.7rem; font-weight: 800; padding: 2px 6px; border-radius: 4px; margin-top: 0.35rem; display: inline-block; align-self: flex-start;"><i class="fas fa-bolt"></i> جاهز للمراجعة (Cached)</span>` : ''}
+                        ${(p.curation_candidates && p.curation_candidates.length > 0) ? `<span style="background: var(--active-menu-bg); border: 1px solid var(--panel-border); color: var(--text-primary); font-size: 0.7rem; font-weight: 800; padding: 2px 6px; border-radius: 4px; margin-top: 0.35rem; display: inline-block; align-self: flex-start;"><i class="fas fa-bolt"></i> جاهز للمراجعة (Cached)</span>` : ''}
                         
                         <div style="display: flex; align-items: center; gap: 0.35rem; margin-top: 0.5rem; width: 100%;">
                             <input type="text" id="inline-query-${p.row_number}" value="${p.brand ? p.product_name + ' ' + p.brand : p.product_name}" style="flex: 1; font-size: 0.75rem; padding: 4px 8px; background: rgba(0,0,0,0.25); border: 1px solid var(--panel-border); color: var(--text-primary); border-radius: 6px; outline: none; width: calc(100% - 35px);">
@@ -2648,10 +2655,10 @@
                         const isSelected = c.is_selected === 1 ? 'checked' : '';
                         const activeClass = c.is_selected === 1 ? 'active-candidate' : '';
                         const scorePercent = c.clip_score ? Math.round(c.clip_score * 100) : 0;
-                        const scoreBadge = scorePercent > 0 ? `<span style="position: absolute; bottom: 4px; left: 4px; background: rgba(12, 18, 28, 0.75); border: 1px solid rgba(255,255,255,0.15); color: #00ffc4; font-size: 0.65rem; font-family: 'Outfit', sans-serif; font-weight: 900; padding: 1px 4px; border-radius: 4px;">${scorePercent}% Match</span>` : '';
+                        const scoreBadge = scorePercent > 0 ? `<span style="position: absolute; bottom: 4px; left: 4px; background: rgba(0, 0, 0, 0.75); border: 1px solid var(--panel-border); color: #ffffff; font-size: 0.65rem; font-family: 'Outfit', sans-serif; font-weight: 900; padding: 1px 4px; border-radius: 4px;">${scorePercent}% Match</span>` : '';
                         const domainText = c.source_domain ? c.source_domain.replace('www.', '') : 'Unknown';
                         const hasAllergen = checkTitleForAllergens(c.title || '');
-                        const allergenIcon = hasAllergen ? `<span style="position: absolute; top: 4px; left: 4px; color: #f43f5e; font-size: 0.8rem; filter: drop-shadow(0 0 4px rgba(244,63,94,0.7)); z-index: 6;" title="تحذير مسببات حساسية: ${hasAllergen}"><i class="fas fa-exclamation-triangle"></i></span>` : '';
+                        const allergenIcon = hasAllergen ? `<span style="position: absolute; top: 4px; left: 4px; color: var(--danger); font-size: 0.8rem; filter: drop-shadow(0 0 4px var(--btn-shadow)); z-index: 6;" title="تحذير مسببات حساسية: ${hasAllergen}"><i class="fas fa-exclamation-triangle"></i></span>` : '';
                         
                         return `
                             <div class="curation-thumb-card ${activeClass}" onclick="selectCurationThumb(this, ${p.row_number}, '${c.image_url.replace(/'/g, "\\'")}')" style="position: relative; flex: 0 0 110px; width: 110px; height: 110px; border-radius: 14px; border: 2px solid var(--panel-border); overflow: hidden; cursor: pointer; transition: all 0.25s ease;" title="${c.title || ''} (${domainText})">
@@ -2665,7 +2672,7 @@
                 </div>
 
                 <div style="flex: 0 0 160px; display: flex; flex-direction: column; gap: 0.5rem; justify-content: center; align-items: stretch;">
-                    <button type="button" class="btn btn-secondary btn-sm" onclick="toggleBatchRowExclude(${p.row_number})" id="btn-exclude-${p.row_number}" style="font-size: 0.75rem; font-weight: bold; padding: 0.45rem 0.5rem; background: rgba(239, 68, 68, 0.05); color: var(--danger); border-color: rgba(239, 68, 68, 0.15); border-radius: 10px; display: flex; align-items: center; justify-content: center; gap: 0.35rem;">
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="toggleBatchRowExclude(${p.row_number})" id="btn-exclude-${p.row_number}" style="font-size: 0.75rem; font-weight: bold; padding: 0.45rem 0.5rem; background: var(--danger-bg); color: var(--danger); border-color: var(--panel-border); border-radius: 10px; display: flex; align-items: center; justify-content: center; gap: 0.35rem;">
                         <i class="fas fa-times-circle"></i> <span class="btn-text">استبعاد وتخطي</span>
                     </button>
                     <button type="button" class="btn btn-secondary btn-sm" onclick="searchBatchProductManual(${p.row_number}, '${p.product_name.replace(/'/g, "\\'")}', '${p.brand.replace(/'/g, "\\'")}')" style="font-size: 0.75rem; font-weight: bold; padding: 0.45rem 0.5rem; border-radius: 10px; display: flex; align-items: center; justify-content: center; gap: 0.35rem;">
@@ -2714,15 +2721,15 @@
         if (cb.checked) {
             card.style.opacity = '1.0';
             btn.innerHTML = '<i class="fas fa-times-circle"></i> <span class="btn-text">استبعاد وتخطي</span>';
-            btn.style.background = 'rgba(239, 68, 68, 0.05)';
+            btn.style.background = 'var(--danger-bg)';
             btn.style.color = 'var(--danger)';
-            btn.style.borderColor = 'rgba(239, 68, 68, 0.15)';
+            btn.style.borderColor = 'var(--panel-border)';
         } else {
             card.style.opacity = '0.4';
             btn.innerHTML = '<i class="fas fa-undo"></i> <span class="btn-text">إلغاء الاستبعاد</span>';
-            btn.style.background = 'rgba(16, 185, 129, 0.05)';
+            btn.style.background = 'var(--success-bg)';
             btn.style.color = 'var(--success)';
-            btn.style.borderColor = 'rgba(16, 185, 129, 0.15)';
+            btn.style.borderColor = 'var(--panel-border)';
         }
     }
 
@@ -2834,14 +2841,14 @@
                     const card = cb.closest('.curation-row-card');
                     if (card) {
                         card.style.borderColor = 'var(--success)';
-                        card.style.background = 'rgba(16, 185, 129, 0.05)';
+                        card.style.background = 'var(--success-bg)';
                     }
                 } else {
                     failed++;
                     const card = cb.closest('.curation-row-card');
                     if (card) {
                         card.style.borderColor = 'var(--danger)';
-                        card.style.background = 'rgba(239, 68, 68, 0.05)';
+                        card.style.background = 'var(--danger-bg)';
                     }
                 }
             } catch (err) {

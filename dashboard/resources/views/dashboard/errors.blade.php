@@ -48,7 +48,7 @@
     }
 
     .error-message-cell:hover {
-        color: #ff788f;
+        color: var(--text-primary);
     }
 
     .search-row {
@@ -72,23 +72,23 @@
 
     .search-row input:focus {
         border-color: var(--accent-purple);
-        box-shadow: 0 0 15px rgba(124, 58, 237, 0.2);
+        box-shadow: 0 0 15px var(--btn-shadow);
     }
 
     .badge-error-row {
-        background: rgba(244, 63, 94, 0.1);
+        background: var(--danger-bg);
         color: var(--danger);
-        border: 1px solid rgba(244, 63, 94, 0.2);
+        border: 1px solid var(--panel-border);
         padding: 0.2rem 0.6rem;
         font-size: 0.75rem;
         font-weight: 800;
         border-radius: 6px;
     }
-
+ 
     .modal-body-content {
         background: var(--console-bg);
         border: 1px solid var(--panel-border);
-        color: #ef4444;
+        color: var(--danger);
         font-family: monospace;
         padding: 1.5rem;
         border-radius: 12px;
@@ -114,7 +114,7 @@
                 المنتجات التي تعذر معالجتها بسبب انقطاع الشبكة، أخطاء الـ APIs، أو شروط الجودة الفنية.
             </p>
         </div>
-        <span class="score-badge" style="background: rgba(244, 63, 94, 0.15); border-color: rgba(244, 63, 94, 0.25); color: var(--danger); font-size: 1rem; padding: 0.5rem 1.25rem; border-radius: 12px; font-weight: 900;">
+        <span class="score-badge" style="background: var(--danger-bg); border-color: var(--panel-border); color: var(--danger); font-size: 1rem; padding: 0.5rem 1.25rem; border-radius: 12px; font-weight: 900;">
             إجمالي الأخطاء: {{ count($failures) }}
         </span>
     </div>
@@ -132,20 +132,20 @@
                 <option value="search">محركات البحث والصور (Search / No Results)</option>
                 <option value="other">أخطاء تقنية أخرى (Other)</option>
             </select>
-            <button type="button" class="btn" id="bulkRetryBtn" onclick="retrySelectedFailures()" style="background: linear-gradient(135deg, var(--accent-purple) 0%, var(--accent-cyan) 100%); font-weight: 800;">
+            <button type="button" class="btn" id="bulkRetryBtn" onclick="retrySelectedFailures()" style="background: var(--accent-gradient); color: var(--btn-text); font-weight: 800;">
                 <i class="fas fa-redo-alt"></i> إعادة معالجة المنتجات المحددة 🔄
             </button>
         </div>
 
         @if(isset($error))
-            <div style="background: rgba(244, 63, 94, 0.1); border: 1px solid var(--danger); color: var(--danger); border-radius: 12px; padding: 1rem; margin-bottom: 1.5rem; font-weight: bold;">
+            <div style="background: var(--danger-bg); border: 1px solid var(--danger); color: var(--danger); border-radius: 12px; padding: 1rem; margin-bottom: 1.5rem; font-weight: bold;">
                 {{ $error }}
             </div>
         @endif
 
         @if(count($failures) === 0)
             <div style="text-align: center; padding: 4rem 2rem; color: var(--text-secondary);">
-                <i class="fas fa-check-circle" style="font-size: 4rem; color: var(--success); margin-bottom: 1.5rem; filter: drop-shadow(0 0 10px rgba(16,185,129,0.3));"></i>
+                <i class="fas fa-check-circle" style="font-size: 4rem; color: var(--success); margin-bottom: 1.5rem; filter: drop-shadow(0 0 10px var(--btn-shadow));"></i>
                 <h3 style="font-size: 1.3rem; font-weight: 800; color: var(--text-primary);">السجل نظيف تماماً! 🎉</h3>
                 <p style="font-size: 0.9rem; margin-top: 0.25rem;">لم يتم رصد أي أخطاء تقنية أو فشل في معالجة الصور حالياً.</p>
             </div>
@@ -284,7 +284,7 @@
                 const tr = document.getElementById(`row-${barcode}`);
                 if (tr) {
                     tr.style.opacity = '0.3';
-                    tr.style.background = 'rgba(16, 185, 129, 0.05)';
+                    tr.style.background = 'var(--success-bg)';
                     tr.querySelectorAll('input, button').forEach(el => el.disabled = true);
                 }
             } else {
@@ -334,7 +334,7 @@
                     const tr = document.getElementById(`row-${b}`);
                     if (tr) {
                         tr.style.opacity = '0.3';
-                        tr.style.background = 'rgba(16, 185, 129, 0.05)';
+                        tr.style.background = 'var(--success-bg)';
                         tr.querySelectorAll('input, button').forEach(el => el.disabled = true);
                         const cb = tr.querySelector('.error-select-checkbox');
                         if (cb) cb.checked = false;
