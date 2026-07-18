@@ -153,12 +153,19 @@ def action_select_image(params):
         # تهيئة طابور المزامنة الخلفي لـ Google Sheets
         google_sheets.init_async_queue(config.CREDENTIALS_FILE, config.SPREADSHEET_NAME_OR_URL)
         
+        enhance_param = params.get('enhance', False)
+        if isinstance(enhance_param, str):
+            enhance_val = (enhance_param.lower() == 'true')
+        else:
+            enhance_val = bool(enhance_param)
+            
         processed_image_path = image_processor.process_product_image(
             image_url, product_name, brand, 
             bg_removal_method=bg_removal_method,
             target_width=target_width,
             target_height=target_height,
             padding_ratio=padding_ratio,
+            enhance=enhance_val,
             bypass_heuristics=True
         )
         if not processed_image_path or not os.path.exists(processed_image_path):

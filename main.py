@@ -579,8 +579,20 @@ def run_worker_mode():
                 pid_str = f.read().strip()
             if pid_str.isdigit() and pid_str != "1" and pid_str != "STARTING":
                 pid = int(pid_str)
-                output = subprocess.check_output(f'tasklist /FI "PID eq {pid}"', shell=True).decode()
-                if str(pid) in output:
+                import platform
+                is_running = False
+                if platform.system().lower() == "windows":
+                    output = subprocess.check_output(f'tasklist /FI "PID eq {pid}"', shell=True).decode()
+                    if str(pid) in output:
+                        is_running = True
+                else:
+                    try:
+                        os.kill(pid, 0)
+                        is_running = True
+                    except OSError:
+                        is_running = False
+                        
+                if is_running:
                     print(f"⚠️ [Worker] معالج الخلفية يعمل بالفعل حالياً (PID: {pid}). خروج.")
                     sys.exit(0)
     except Exception:
