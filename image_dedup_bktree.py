@@ -46,7 +46,7 @@ def calculate_phash(image_path_or_pil) -> int:
         binary_string = "".join("1" if val > mean else "0" for val in dct_low.flatten())
         return int(binary_string, 2)
     except Exception as e:
-        print(f"⚠️ [pHash Error] Failed to calculate hash for {image_path}: {e}")
+        print(f"⚠️ [pHash Error] Failed to calculate hash for {image_path_or_pil}: {e}")
         return 0
 
 class BKTreeNode:

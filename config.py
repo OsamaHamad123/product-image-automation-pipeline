@@ -23,7 +23,7 @@ _load_env()
 
 # 1. إعدادات Google Sheets
 # يمكن وضع اسم الشيت أو الرابط الكامل له
-SPREADSHEET_NAME_OR_URL = "automation sheet"
+SPREADSHEET_NAME_OR_URL = os.getenv("SPREADSHEET_NAME_OR_URL", "automation sheet")
 
 # 2. إعدادات Google Drive
 # معرف المجلد (Folder ID) الذي سيتم رفع الصور إليه على Drive.

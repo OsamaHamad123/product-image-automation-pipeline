@@ -221,6 +221,39 @@ class ApiController extends Controller
                 mkdir($tempDir, 0777, true);
             }
             
+            // Check if already running or starting
+            if (file_exists($lockFile)) {
+                $lockContent = trim(file_get_contents($lockFile));
+                $isRunning = false;
+                if ($lockContent === 'STARTING') {
+                    $fileAge = time() - filemtime($lockFile);
+                    if ($fileAge < 300) {
+                        $isRunning = true;
+                    }
+                } elseif (!empty($lockContent) && is_numeric($lockContent)) {
+                    $pid = $lockContent;
+                    if (strncasecmp(PHP_OS, 'WIN', 3) === 0) {
+                        $output = shell_exec("tasklist /FI \"PID eq {$pid}\" 2>&1");
+                        if (strpos($output, $pid) !== false && strpos(strtolower($output), 'python') !== false) {
+                            $isRunning = true;
+                        }
+                    } else {
+                        if (function_exists('posix_kill')) {
+                            $isRunning = @posix_kill($pid, 0);
+                        } else {
+                            $output = shell_exec("ps -p {$pid} 2>&1");
+                            if (strpos($output, $pid) !== false) {
+                                $isRunning = true;
+                            }
+                        }
+                    }
+                }
+                
+                if ($isRunning) {
+                    return response()->json(['status' => 'failed', 'error' => 'عملية الأتمتة قيد التشغيل بالفعل حالياً.'], 400);
+                }
+            }
+            
             $configData = $request->all();
             file_put_contents($tempDir . DIRECTORY_SEPARATOR . 'run_config.json', json_encode($configData));
             
@@ -233,8 +266,18 @@ class ApiController extends Controller
             $pythonPath = $this->getPythonPath();
             
             if (strncasecmp(PHP_OS, 'WIN', 3) === 0) {
-                // Windows background execution
-                $cmd = "cmd /c cd /d \"" . $basePath . "\" && \"" . $pythonPath . "\" \"" . $scriptPath . "\" --enqueue > \"" . $logPath . "\" 2>&1 && \"" . $pythonPath . "\" -u \"" . $scriptPath . "\" --worker >> \"" . $logPath . "\" 2>&1";
+                // Windows background execution using a dynamically created batch file to resolve nested quote issues
+                $batContent = "@echo off\r\n";
+                $batContent .= "cd /d \"" . $basePath . "\"\r\n";
+                $batContent .= "\"" . $pythonPath . "\" \"" . $scriptPath . "\" --enqueue > \"" . $logPath . "\" 2>&1\r\n";
+                $batContent .= "if %errorlevel% equ 0 (\r\n";
+                $batContent .= "    \"" . $pythonPath . "\" -u \"" . $scriptPath . "\" --worker >> \"" . $logPath . "\" 2>&1\r\n";
+                $batContent .= ")\r\n";
+                
+                $batFile = $tempDir . DIRECTORY_SEPARATOR . 'run_pipeline.bat';
+                file_put_contents($batFile, $batContent);
+                
+                $cmd = "cmd /c \"" . $batFile . "\"";
                 try {
                     if (class_exists('COM')) {
                         $WshShell = new \COM("WScript.Shell");
@@ -291,8 +334,14 @@ class ApiController extends Controller
         $lockFile = $basePath . DIRECTORY_SEPARATOR . 'temp' . DIRECTORY_SEPARATOR . 'pipeline.lock';
         $isRunning = false;
         if (file_exists($lockFile)) {
-            $pid = trim(file_get_contents($lockFile));
-            if (!empty($pid) && is_numeric($pid)) {
+            $lockContent = trim(file_get_contents($lockFile));
+            if ($lockContent === 'STARTING') {
+                $fileAge = time() - filemtime($lockFile);
+                if ($fileAge < 300) { // Keep as running during starting phase (up to 5 mins)
+                    $isRunning = true;
+                }
+            } elseif (!empty($lockContent) && is_numeric($lockContent)) {
+                $pid = $lockContent;
                 if (strncasecmp(PHP_OS, 'WIN', 3) === 0) {
                     $output = shell_exec("tasklist /FI \"PID eq {$pid}\" 2>&1");
                     if (strpos($output, $pid) !== false && strpos(strtolower($output), 'python') !== false) {

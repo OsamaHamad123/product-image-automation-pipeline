@@ -14,6 +14,7 @@ import config
 
 _queue = None
 _worker = None
+_redis_cache_available = None
 
 def clear_cache():
     cache_dir = os.path.dirname(os.path.abspath(__file__))
@@ -397,10 +398,17 @@ def get_products(worksheet):
         return [], -1
 
 def _redis_write_behind(row_number, col_idx, value):
+    global _redis_cache_available
+    if _redis_cache_available is False:
+        return False
     try:
         import redis
         import json
         r = redis.Redis(host=config.REDIS_HOST, port=config.REDIS_PORT, db=config.REDIS_DB, socket_timeout=0.2, decode_responses=True)
+        if _redis_cache_available is None:
+            r.ping()
+            _redis_cache_available = True
+            
         key = f"row_{row_number}"
         cached = r.get(f"product:data:{key}")
         if cached:
@@ -416,7 +424,11 @@ def _redis_write_behind(row_number, col_idx, value):
         r.delete("laravel_cache:products_json_v1")
         return True
     except Exception as e:
-        print(f"⚠️ [Redis Write-Behind Fallback] {e}")
+        if _redis_cache_available is None:
+            _redis_cache_available = False
+            print("ℹ️ [google_sheets] Redis server not detected locally. Skipping Redis write-behind to avoid timeout latency.")
+        else:
+            print(f"⚠️ [Redis Write-Behind Fallback] {e}")
         return False
 
 @retry_gspread_on_429()
@@ -582,32 +594,42 @@ def update_product_metadata(worksheet, row_number, metadata):
             col_indices[key] = found_idx
             
         # 3. محاولة الحفظ عبر Redis Write-Behind
-        try:
-            import redis
-            import json
-            r = redis.Redis(host=config.REDIS_HOST, port=config.REDIS_PORT, db=config.REDIS_DB, socket_timeout=0.2, decode_responses=True)
-            key = f"row_{row_number}"
-            
-            cached = r.get(f"product:data:{key}")
-            if cached:
-                payload = json.loads(cached)
-            else:
-                payload = {"row_index": row_number, "updates": {}}
-                
-            for k, val in metadata.items():
-                if k in col_indices and val:
-                    payload["updates"][str(col_indices[k])] = val
+        global _redis_cache_available
+        if _redis_cache_available is not False:
+            try:
+                import redis
+                import json
+                r = redis.Redis(host=config.REDIS_HOST, port=config.REDIS_PORT, db=config.REDIS_DB, socket_timeout=0.2, decode_responses=True)
+                if _redis_cache_available is None:
+                    r.ping()
+                    _redis_cache_available = True
                     
-            r.set(f"product:data:{key}", json.dumps(payload))
-            r.sadd("writebehind:dirty_set", key)
-            
-            # تفريغ كاش الكتالوج
-            r.delete("laravel_database_laravel_cache:products_json_v1")
-            r.delete("laravel_cache:products_json_v1")
-            print(f"⏳ [Redis Write-Behind] تمت جدولة تحديث {len(metadata)} حقول وصفية للمنتج في الصف {row_number} عبر Redis.")
-            return True
-        except Exception as ree:
-            print(f"⚠️ [Redis Write-Behind Fallback] {ree}")
+                key = f"row_{row_number}"
+                
+                cached = r.get(f"product:data:{key}")
+                if cached:
+                    payload = json.loads(cached)
+                else:
+                    payload = {"row_index": row_number, "updates": {}}
+                    
+                for k, val in metadata.items():
+                    if k in col_indices and val:
+                        payload["updates"][str(col_indices[k])] = val
+                        
+                r.set(f"product:data:{key}", json.dumps(payload))
+                r.sadd("writebehind:dirty_set", key)
+                
+                # تفريغ كاش الكتالوج
+                r.delete("laravel_database_laravel_cache:products_json_v1")
+                r.delete("laravel_cache:products_json_v1")
+                print(f"⏳ [Redis Write-Behind] تمت جدولة تحديث {len(metadata)} حقول وصفية للمنتج في الصف {row_number} عبر Redis.")
+                return True
+            except Exception as ree:
+                if _redis_cache_available is None:
+                    _redis_cache_available = False
+                    print("ℹ️ [google_sheets] Redis server not detected locally. Skipping Redis write-behind to avoid timeout latency.")
+                else:
+                    print(f"⚠️ [Redis Write-Behind Fallback] {ree}")
             
         # 4. تحديث خلايا البيانات للصف المعني (SQLite / direct fallback)
         global _queue, _worker
