@@ -74,7 +74,7 @@ def init_db():
                 id INT AUTO_INCREMENT PRIMARY KEY,
                 feedback_id VARCHAR(255) UNIQUE,
                 asset_id VARCHAR(255) NULL,
-                row_number INT NULL,
+                `row_number` INT NULL,
                 product_name VARCHAR(255) NULL,
                 brand VARCHAR(255) NULL,
                 image_url TEXT NULL,
@@ -87,7 +87,7 @@ def init_db():
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS automation_queue (
                 id INT AUTO_INCREMENT PRIMARY KEY,
-                row_number INT UNIQUE,
+                `row_number` INT UNIQUE,
                 barcode VARCHAR(255) NULL,
                 product_name VARCHAR(255) NOT NULL,
                 brand VARCHAR(255) NULL,
@@ -104,7 +104,7 @@ def init_db():
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS curation_candidates (
                 id INT AUTO_INCREMENT PRIMARY KEY,
-                row_number INT NOT NULL,
+                `row_number` INT NOT NULL,
                 product_name VARCHAR(255) NOT NULL,
                 brand VARCHAR(255) NULL,
                 image_url TEXT NOT NULL,
@@ -162,7 +162,7 @@ def init_db():
         except Exception:
             pass
         try:
-            cursor.execute("ALTER TABLE curation_candidates ADD INDEX idx_curation_row (row_number)")
+            cursor.execute("ALTER TABLE curation_candidates ADD INDEX idx_curation_row (`row_number`)")
         except Exception:
             pass
             
@@ -376,7 +376,7 @@ def save_feedback(feedback_id, asset_id, row_number, product_name, brand, image_
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("""
-            INSERT INTO active_learning_feedback (feedback_id, asset_id, row_number, product_name, brand, image_url, rejection_reasons)
+            INSERT INTO active_learning_feedback (feedback_id, asset_id, `row_number`, product_name, brand, image_url, rejection_reasons)
             VALUES (%s, %s, %s, %s, %s, %s, %s)
         """, (feedback_id, asset_id, row_number, product_name, brand, image_url, json.dumps(reasons, ensure_ascii=False)))
         conn.commit()
@@ -394,7 +394,7 @@ def add_to_queue(row_number, barcode, name, brand, query):
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("""
-            REPLACE INTO automation_queue (row_number, barcode, product_name, brand, search_query, status, error_message, attempts, updated_at)
+            REPLACE INTO automation_queue (`row_number`, barcode, product_name, brand, search_query, status, error_message, attempts, updated_at)
             VALUES (%s, %s, %s, %s, %s, 'pending', NULL, 0, CURRENT_TIMESTAMP)
         """, (row_number, barcode, name, brand, query))
         conn.commit()
@@ -471,7 +471,7 @@ def update_task_status_by_row(row_number, status, error_message=None):
         cursor.execute("""
             UPDATE automation_queue 
             SET status = %s, error_message = %s, updated_at = CURRENT_TIMESTAMP 
-            WHERE row_number = %s
+            WHERE `row_number` = %s
         """, (status, error_message, row_number))
         conn.commit()
         conn.close()
@@ -601,7 +601,7 @@ def save_curation_candidates(row_number, product_name, brand, candidates, best_u
         cursor = conn.cursor()
         
         # 1. مسح المرشحات السابقة لهذا الصف
-        cursor.execute("DELETE FROM curation_candidates WHERE row_number = %s", (row_number,))
+        cursor.execute("DELETE FROM curation_candidates WHERE `row_number` = %s", (row_number,))
         
         # 2. إدخال المرشحات الجديدة
         for c in candidates:
@@ -635,7 +635,7 @@ def save_curation_candidates(row_number, product_name, brand, candidates, best_u
             
             cursor.execute("""
                 INSERT INTO curation_candidates (
-                    row_number, product_name, brand, image_url, title, width, height, clip_score, source_domain, is_selected, status
+                    `row_number`, product_name, brand, image_url, title, width, height, clip_score, source_domain, is_selected, status
                 ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (
                 row_number, product_name, brand, url, title, int(width or 0), int(height or 0),
@@ -655,7 +655,7 @@ def get_curation_candidates(row_number):
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM curation_candidates WHERE row_number = %s ORDER BY clip_score DESC", (row_number,))
+        cursor.execute("SELECT * FROM curation_candidates WHERE `row_number` = %s ORDER BY clip_score DESC", (row_number,))
         rows = cursor.fetchall()
         conn.close()
         
@@ -770,7 +770,7 @@ def delete_curation_candidates(row_number):
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("DELETE FROM curation_candidates WHERE row_number = %s", (row_number,))
+        cursor.execute("DELETE FROM curation_candidates WHERE `row_number` = %s", (row_number,))
         conn.commit()
         conn.close()
         return True
