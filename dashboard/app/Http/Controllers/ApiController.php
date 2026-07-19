@@ -435,7 +435,25 @@ class ApiController extends Controller
             if (file_exists($lockFile)) {
                 @unlink($lockFile);
             }
+            
+            // Clear Laravel cache
+            \Cache::forget('products_json_v1');
+            
+            // Clear python disk cache files
+            $pCache = $basePath . DIRECTORY_SEPARATOR . 'products_cache.json';
+            $bCache = $basePath . DIRECTORY_SEPARATOR . 'brand_mappings_cache.json';
+            if (file_exists($pCache)) {
+                @unlink($pCache);
+            }
+            if (file_exists($bCache)) {
+                @unlink($bCache);
+            }
+            
+            // Clear database tables and reset automation state
+            \DB::delete("DELETE FROM automation_queue");
+            \DB::delete("DELETE FROM curation_candidates");
             \DB::update("UPDATE automation_state SET status = 'idle', total_items = 0, processed_items = 0, success_count = 0, failed_count = 0, current_product_name = '', pause_requested = 0 WHERE `key` = 'active_session'");
+            
             return response()->json(['status' => 'success', 'message' => 'Automation state reset successfully.']);
         } catch (\Exception $e) {
             return response()->json(['error' => $e->getMessage()], 500);

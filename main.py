@@ -44,9 +44,11 @@ def load_run_config():
             if "curation_mode" in overrides:
                 config.CURATION_MODE = bool(overrides["curation_mode"])
             if "brand_filter" in overrides:
-                config.BRAND_FILTER = str(overrides["brand_filter"]).strip()
+                val = overrides["brand_filter"]
+                config.BRAND_FILTER = str(val).strip() if (val is not None and str(val).strip().lower() != "none") else ""
             if "row_filter" in overrides:
-                config.ROW_FILTER = str(overrides["row_filter"]).strip()
+                val = overrides["row_filter"]
+                config.ROW_FILTER = str(val).strip() if (val is not None and str(val).strip().lower() != "none") else ""
             if "auto_approve_threshold" in overrides:
                 try:
                     config.AUTO_APPROVE_THRESHOLD = float(overrides["auto_approve_threshold"])
@@ -306,6 +308,7 @@ def run_enqueue_mode():
     try:
         load_run_config()
         local_cache_db.clear_queue()
+        google_sheets.clear_cache()
         
         sheets_client = google_sheets.get_sheets_client()
         if not sheets_client:
