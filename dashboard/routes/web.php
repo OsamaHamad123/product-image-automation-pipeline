@@ -42,3 +42,13 @@ Route::get('/api/system/status', [ApiController::class, 'systemStatus']);
 Route::post('/api/system/start-flask', [ApiController::class, 'startFlask']);
 Route::post('/api/system/stop-flask', [ApiController::class, 'stopFlask']);
 
+// عرض سجلات الأتمتة المباشرة من السيرفر لتشخيص الأخطاء
+Route::get('/api/view-pipeline-log', function() {
+    $logPath = base_path('../temp/pipeline.log');
+    if (file_exists($logPath)) {
+        return response(file_get_contents($logPath), 200, ['Content-Type' => 'text/plain; charset=UTF-8']);
+    }
+    return response('Log file not found at: ' . $logPath, 404);
+});
+
+
