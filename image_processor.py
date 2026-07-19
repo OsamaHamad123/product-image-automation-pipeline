@@ -1,3 +1,5 @@
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 import os
 import requests
 import base64
@@ -265,7 +267,7 @@ def download_image(url, save_path):
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         }
         proxies = {"http": config.PROXY_URL, "https": config.PROXY_URL} if config.PROXY_URL else None
-        r = requests.get(url, headers=headers, timeout=10, stream=True, proxies=proxies)
+        r = requests.get(url, headers=headers, timeout=10, stream=True, proxies=proxies, verify=False)
         if r.status_code == 200:
             with open(save_path, 'wb') as f:
                 for chunk in r.iter_content(chunk_size=8192):

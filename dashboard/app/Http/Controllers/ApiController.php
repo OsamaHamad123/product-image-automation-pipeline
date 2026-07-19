@@ -74,6 +74,9 @@ class ApiController extends Controller
                     \Log::error("Python CLI Bridge fallback failed to decode: Raw Output: " . $output);
                     return ['status' => 'failed', 'error' => 'Invalid JSON output from Python bridge', 'raw' => $output];
                 }
+                if (isset($decoded['status']) && $decoded['status'] === 'failed') {
+                    \Log::error("Python CLI Bridge returned failure. Raw Output: " . $output);
+                }
                 return $decoded;
             } catch (\Exception $subEx) {
                 return ['status' => 'failed', 'error' => $e->getMessage() . ' | Fallback error: ' . $subEx->getMessage()];
