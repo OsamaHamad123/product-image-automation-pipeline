@@ -449,7 +449,7 @@ class ApiController extends Controller
             return response('Missing URL', 400);
         }
         try {
-            $response = \Illuminate\Support\Facades\Http::withHeaders([
+            $response = \Illuminate\Support\Facades\Http::withoutVerifying()->withHeaders([
                 'User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
             ])->timeout(10)->get($url);
             
