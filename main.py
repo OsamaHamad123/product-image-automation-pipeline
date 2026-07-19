@@ -52,6 +52,8 @@ def load_run_config():
                     config.AUTO_APPROVE_THRESHOLD = float(overrides["auto_approve_threshold"])
                 except ValueError:
                     config.AUTO_APPROVE_THRESHOLD = 0.0
+            if "forceOverwrite" in overrides:
+                config.FORCE_OVERWRITE_IMAGES = bool(overrides["forceOverwrite"])
                 
             print("⚙️ [Run Config] تم تحميل وتطبيق التجاوزات البرمجية من ملف run_config.json بنجاح!")
         except Exception as e:

@@ -533,6 +533,13 @@
                             <label for="rowFilter">فلترة حسب الصفوف (Rows)</label>
                             <input type="text" id="rowFilter" placeholder="مثال: 5-20 أو 5,8,12" oninput="updatePreflightEstimates()">
                         </div>
+                        <div class="config-card">
+                            <label for="forceOverwrite">معالجة الصور الموجودة</label>
+                            <select id="forceOverwrite" onchange="updatePreflightEstimates()">
+                                <option value="false">تخطي الصفوف التي تمتلك صوراً مسبقاً (افتراضي)</option>
+                                <option value="true">فرض إعادة المعالجة والكتابة فوق الصور</option>
+                            </select>
+                        </div>
                     </div>
                 </div>
 
