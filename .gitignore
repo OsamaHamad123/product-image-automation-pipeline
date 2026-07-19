@@ -23,3 +23,8 @@ temp/
 credentials.json
 boulevard-a50a0-30a73e572083.json
 email_service _accountt.txt
+
+# Caches
+products_cache.json
+brand_mappings_cache.json
+
