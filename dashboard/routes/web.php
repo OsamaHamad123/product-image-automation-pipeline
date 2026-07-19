@@ -51,4 +51,16 @@ Route::get('/api/view-pipeline-log', function() {
     return response('Log file not found at: ' . $logPath, 404);
 });
 
+// عرض سجلات أخطاء لارافيل لتشخيص فشل الرفع والاعتماد
+Route::get('/api/view-laravel-log', function() {
+    $logPath = storage_path('logs/laravel.log');
+    if (file_exists($logPath)) {
+        $content = file($logPath);
+        $lines = array_slice($content, -200);
+        return response(implode("", $lines), 200, ['Content-Type' => 'text/plain; charset=UTF-8']);
+    }
+    return response('Log file not found at: ' . $logPath, 404);
+});
+
+
 
