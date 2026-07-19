@@ -2147,6 +2147,8 @@
 
                     }
 
+                    appendTerminalLine('Ingestion Failed', `فشل رفع الصف ${row}: ${data.error || 'خطأ غير معروف'}`, 'error');
+
                 }
 
             } catch (err) {
@@ -2154,6 +2156,8 @@
                 console.error(err);
 
                 failed++;
+
+                appendTerminalLine('Ingestion Failed', `فشل رفع الصف ${row}: ${err.message || err}`, 'error');
 
             }
 
