@@ -941,6 +941,15 @@ def process_product_image(image_url, product_name, brand, bg_removal_method=None
         if not download_image(image_url, raw_path):
             return None
             
+        # الاحتفاظ بنسخة احتياطية خام من الصورة الأصلية قبل أي اقتصاص أو تعديل
+        raw_backup_path = os.path.join("temp", f"backup_raw_{safe_name}.webp")
+        try:
+            import shutil
+            shutil.copy2(raw_path, raw_backup_path)
+        except Exception as e:
+            print(f"⚠️ فشل حفظ نسخة احتياطية خام: {e}")
+            raw_backup_path = None
+            
         # حساب أبعاد الصورة المستهدفة ديناميكياً إذا تم طلب الأبعاد التلقائية (Dynamic AI Size)
         t_w = target_width
         t_h = target_height
@@ -1061,6 +1070,19 @@ def process_product_image(image_url, product_name, brand, bg_removal_method=None
         # 3. إزالة الخلفية وتطبيق مسار الإصلاح الذاتي (Self-Healing Failover Path)
         success = remove_background(raw_path, nobg_path, target_width=t_w, target_height=t_h, padding_ratio=p_ratio)
         
+        # إذا فشل PhotoRoom تحديداً، نرجع الصورة الخام الأصلية بدون اقتصاص أو تعديل بناء على رغبة المستخدم
+        if not success and config.BG_REMOVAL_METHOD.lower() == "photoroom":
+            print("⚠️ [PhotoRoom Failover] فشل الاتصال أو الدفع لـ PhotoRoom. سيتم رفع الصورة الخام الأصلية كما هي دون اقتصاص أو تعديل.")
+            if raw_backup_path and os.path.exists(raw_backup_path):
+                # تنظيف الملفات المؤقتة
+                for temp_f in [raw_path, nobg_path]:
+                    if os.path.exists(temp_f):
+                        try: os.remove(temp_f)
+                        except Exception: pass
+                return raw_backup_path
+            else:
+                return raw_path
+        
         # التحقق البرمجي التلقائي من جودة قناع الشفافية للمسار الأساسي (أو تجاوزه)
         is_valid = success and (bypass_heuristics or validate_alpha_matte(nobg_path, bbox_area))
         
@@ -1158,7 +1180,7 @@ def process_product_image(image_url, product_name, brand, bg_removal_method=None
                 print(f"⚠️ فشل احتساب درجة الامتثال البصري للمنتج: {ex}")
                 
         # تنظيف الملفات المؤقتة
-        for temp_f in [temp_rgba, raw_path, nobg_path]:
+        for temp_f in [temp_rgba, raw_path, nobg_path, raw_backup_path]:
             if os.path.exists(temp_f) and temp_f != final_path:
                 try:
                     os.remove(temp_f)
