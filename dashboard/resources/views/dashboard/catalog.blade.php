@@ -2698,6 +2698,20 @@
         if (cb) {
             cb.dataset.url = imageUrl;
         }
+
+        // Update local memory state so selection persists across pagination/filtering
+        if (currentProducts) {
+            const product = currentProducts.find(p => p.row_number === rowNum);
+            if (product && product.curation_candidates) {
+                product.curation_candidates.forEach(c => {
+                    if (c.image_url === imageUrl) {
+                        c.is_selected = 1;
+                    } else {
+                        c.is_selected = 0;
+                    }
+                });
+            }
+        }
     }
 
     function toggleBatchRowExclude(rowNum) {

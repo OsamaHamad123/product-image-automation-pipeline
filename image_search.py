@@ -1794,6 +1794,10 @@ def evaluate_and_choose_best_image(results, product_name, brand, requires_brand_
     chosen_relevance = 0
 
     if valid_candidates:
+        # Mark all valid candidates as accepted
+        for vc in valid_candidates:
+            candidates[vc["c_idx"]]['status'] = 'accepted'
+            
         # ترتيب المرشحين المقبولين تنازلياً حسب النتيجة الموحدة (Unified Score)
         valid_candidates.sort(key=lambda x: x["eval_report"]["unified_score"], reverse=True)
         best_cand = valid_candidates[0]

@@ -1429,9 +1429,10 @@
                     workspace.style.display = 'block';
                     // Auto switch tab to curation to show the grid immediately
                     switchTab('curation');
+                    fetchCurationProducts();
+                } else if (!currentProducts || currentProducts.length === 0) {
+                    fetchCurationProducts();
                 }
-
-                fetchCurationProducts();
 
             } else {
 
@@ -1978,6 +1979,20 @@
         const cb = card.querySelector('.batch-select-checkbox');
 
         if (cb) cb.dataset.url = imageUrl;
+
+        // Update local memory state so selection persists across pagination/filtering
+        if (currentProducts) {
+            const product = currentProducts.find(p => p.row_number === rowNum);
+            if (product && product.curation_candidates) {
+                product.curation_candidates.forEach(c => {
+                    if (c.image_url === imageUrl) {
+                        c.is_selected = 1;
+                    } else {
+                        c.is_selected = 0;
+                    }
+                });
+            }
+        }
 
     }
 

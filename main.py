@@ -133,9 +133,10 @@ def process_single_product(prod, worksheet, link_column_index):
                         for c in step['candidates']:
                             url = c.get('url')
                             if url and url not in seen_urls:
+                                if c.get('status') == 'rejected':
+                                    continue
                                 seen_urls.add(url)
                                 candidates.append(c)
-                                
         # حفظ المرشحات في قاعدة البيانات
         local_cache_db.save_curation_candidates(row_num, name, brand, candidates, best_image["url"])
         
@@ -552,9 +553,10 @@ def pre_cache_product_candidates(task, worksheet=None, link_column_index=None):
                         for c in step['candidates']:
                             url = c.get('url')
                             if url and url not in seen_urls:
+                                if c.get('status') == 'rejected':
+                                    continue
                                 seen_urls.add(url)
                                 candidates.append(c)
-                                
         # حفظ المرشحات في قاعدة البيانات
         local_cache_db.save_curation_candidates(task["row_number"], name, brand, candidates, best_image["url"])
         local_cache_db.update_task_status(task["id"], "ready_for_review")
