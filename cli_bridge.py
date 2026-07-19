@@ -144,7 +144,7 @@ def action_select_image(params):
     bg_color = (params.get('bg_color') or 'ffffff').strip().lstrip('#')
     bg_removal_method = (params.get('bg_removal_method') or 'photoroom').strip()
     
-    if not image_url or not product_name or not brand or not row_number:
+    if not image_url or not product_name or not row_number:
         return {'status': 'failed', 'error': 'Missing parameters'}
         
     row_number = int(row_number)
@@ -361,7 +361,7 @@ def action_upload_manual_image(params):
     padding_ratio = float(params.get('padding_ratio', 0.85))
     bg_color = (params.get('bg_color') or 'ffffff').strip().lstrip('#')
     
-    if not file_path or not row_number or not product_name or not brand or not os.path.exists(file_path):
+    if not file_path or not row_number or not product_name or not os.path.exists(file_path):
         return {'status': 'failed', 'error': 'Missing parameters or local file path not found'}
         
     row_number = int(row_number)
@@ -484,7 +484,7 @@ def action_reject_image(params):
     row_number = params.get('row_number')
     rejection_reasons = params.get('rejection_reasons') or []
     
-    if not image_url or not product_name or not brand or not row_number:
+    if not image_url or not product_name or not row_number:
         return {'status': 'failed', 'error': 'Missing parameters'}
         
     row_number = int(row_number)
