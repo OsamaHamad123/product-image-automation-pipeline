@@ -912,17 +912,12 @@ def find_semantic_cache_match(product_name, brand, threshold=0.92):
         import local_cache_db
         import torch
         import json
-        import sqlite3
-        
         # 1. جلب كافة المنتجات المسجلة بكود الكاش
-        if not os.path.exists(local_cache_db.DB_PATH):
-            return None
-            
-        conn = sqlite3.connect(local_cache_db.DB_PATH)
-        conn.row_factory = sqlite3.Row
+        conn = local_cache_db.get_db_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT product_name, brand, cloudinary_url, clip_score, metadata_json FROM resolved_products")
         rows = cursor.fetchall()
+        cursor.close()
         conn.close()
         
         if not rows:

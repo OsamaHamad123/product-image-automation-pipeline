@@ -363,14 +363,9 @@ def select_product_image(req: SelectImageRequest):
             
             try:
                 local_cache_db.update_task_status_by_row(req.row_number, "completed")
-                import sqlite3
-                conn = sqlite3.connect(local_cache_db.DB_PATH)
-                cursor = conn.cursor()
-                cursor.execute("DELETE FROM curation_candidates WHERE row_number = ?", (req.row_number,))
-                conn.commit()
-                conn.close()
+                local_cache_db.delete_curation_candidates(req.row_number)
             except Exception as e:
-                print(f"⚠️ [SQLite Curation Cleanup Error] {e}")
+                print(f"⚠️ [Curation Cleanup Error] {e}")
             
             # دفع البيانات إلى Redis
             cache_payload = {

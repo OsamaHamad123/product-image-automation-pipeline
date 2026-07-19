@@ -692,18 +692,13 @@ def run_worker_mode():
                 time.sleep(1)
     finally:
         try:
-            import sqlite3
-            conn = sqlite3.connect(local_cache_db.DB_PATH)
-            cursor = conn.cursor()
-            cursor.execute("SELECT COUNT(*) FROM automation_queue WHERE status = 'ready_for_review'")
-            ready_count = cursor.fetchone()[0]
-            conn.close()
-            
+            ready_count = local_cache_db.get_ready_for_review_count()
             if ready_count > 0:
                 local_cache_db.update_automation_state(status='curation_pending', current_product="")
             else:
                 local_cache_db.update_automation_state(status='idle', current_product="")
-        except Exception:
+        except Exception as e:
+            print(f"⚠️ [Worker Finally State Update Error] {e}")
             local_cache_db.update_automation_state(status='idle', current_product="")
 
         google_sheets.stop_async_queue()

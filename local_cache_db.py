@@ -763,5 +763,36 @@ def resume_automation():
         print(f"⚠️ [MariaDB State Error] فشل استئناف الأتمتة: {e}")
         return False
 
+def delete_curation_candidates(row_number):
+    """
+    مسح جميع المرشحات البصرية المخزنة لصف معين بعد اعتماده أو استبعاده.
+    """
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM curation_candidates WHERE row_number = %s", (row_number,))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"⚠️ [Curation Database Error] فشل مسح مرشحات الصف {row_number}: {e}")
+        return False
+
+def get_ready_for_review_count():
+    """
+    جلب عدد المنتجات الجاهزة للمراجعة بانتظار الاعتماد.
+    """
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) as count FROM automation_queue WHERE status = 'ready_for_review'")
+        row = cursor.fetchone()
+        conn.close()
+        if row:
+            return row['count']
+    except Exception as e:
+        print(f"⚠️ [MariaDB Queue Error] فشل حساب المهام الجاهزة للمراجعة: {e}")
+    return 0
+
 # تهيئة قاعدة البيانات تلقائياً عند استيراد الموديول للمرة الأولى
 init_db()
