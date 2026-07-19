@@ -536,8 +536,8 @@
                         <div class="config-card">
                             <label for="forceOverwrite">معالجة الصور الموجودة</label>
                             <select id="forceOverwrite" onchange="updatePreflightEstimates()">
-                                <option value="false">تخطي الصفوف التي تمتلك صوراً مسبقاً (افتراضي)</option>
-                                <option value="true">فرض إعادة المعالجة والكتابة فوق الصور</option>
+                                <option value="true" selected>فرض إعادة المعالجة والكتابة فوق الصور (افتراضي)</option>
+                                <option value="false">تخطي الصفوف التي تمتلك صوراً مسبقاً</option>
                             </select>
                         </div>
                     </div>
