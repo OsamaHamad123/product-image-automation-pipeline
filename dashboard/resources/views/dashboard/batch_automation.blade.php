@@ -1087,6 +1087,8 @@
 
             auto_approve_threshold: parseFloat(document.getElementById('autoApproveThreshold').value),
 
+            forceOverwrite: document.getElementById('forceOverwrite').value === 'true',
+
             curation_mode: true
 
         };
