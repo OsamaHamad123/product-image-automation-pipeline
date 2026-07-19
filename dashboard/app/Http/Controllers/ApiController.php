@@ -89,6 +89,7 @@ class ApiController extends Controller
      */
     public function search(Request $request)
     {
+        @ini_set('max_execution_time', 600);
         set_time_limit(600);
         $result = $this->runPython('search', $request->all());
         
@@ -103,6 +104,7 @@ class ApiController extends Controller
      */
     public function selectImage(Request $request)
     {
+        @ini_set('max_execution_time', 600);
         set_time_limit(600);
         $result = $this->runPython('select_image', $request->all());
         
@@ -119,6 +121,7 @@ class ApiController extends Controller
      */
     public function rejectImage(Request $request)
     {
+        @ini_set('max_execution_time', 600);
         set_time_limit(600);
         $result = $this->runPython('reject_image', $request->all());
         
@@ -134,6 +137,7 @@ class ApiController extends Controller
      */
     public function uploadManualImage(Request $request)
     {
+        @ini_set('max_execution_time', 600);
         set_time_limit(600);
         if (!$request->hasFile('file')) {
             return response()->json(['error' => 'No file uploaded'], 400);

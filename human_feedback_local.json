@@ -6,5 +6,13 @@
         "background_purity": 0.9954934724356967,
         "dinov2_similarity": 0.85,
         "human_override_approved": 1
+    },
+    {
+        "aesthetic_score": 9.175017512276893,
+        "sharpness_brenner": 991.40975,
+        "product_fill_ratio": 0.8103896103896104,
+        "background_purity": 0.0,
+        "dinov2_similarity": 0.85,
+        "human_override_approved": 1
     }
 ]
