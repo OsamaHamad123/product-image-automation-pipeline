@@ -372,4 +372,44 @@ class ProductController extends Controller
             return response()->json(['error' => $e->getMessage()], 500);
         }
     }
+
+    /**
+     * حساب عدد الصفوف التقديرية لبراند معين عبر كاش المنتجات
+     */
+    public function getBrandEstimateCount(Request $request)
+    {
+        try {
+            $brand = mb_strtolower(trim($request->query('brand', '')));
+            if (empty($brand)) {
+                return response()->json(['count' => 0]);
+            }
+
+            $cacheKey = 'products_json_v1';
+            $products = \Cache::get($cacheKey);
+
+            if ($products === null) {
+                $result = $this->runPython('get_products');
+                if (isset($result['status']) && $result['status'] === 'success') {
+                    $products = $result['products'];
+                    \Cache::put($cacheKey, $products, 3600);
+                }
+            }
+
+            if (empty($products)) {
+                return response()->json(['count' => 0]);
+            }
+
+            $count = 0;
+            foreach ($products as $prod) {
+                $prodBrand = mb_strtolower(trim($prod['brand'] ?? ''));
+                if (!empty($prodBrand) && mb_strpos($prodBrand, $brand) !== false) {
+                    $count++;
+                }
+            }
+
+            return response()->json(['count' => $count]);
+        } catch (\Exception $e) {
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
 }

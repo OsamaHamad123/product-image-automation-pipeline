@@ -11,6 +11,7 @@ Route::get('/active-learning', [ProductController::class, 'activeLearning'])->na
 Route::get('/errors', [ProductController::class, 'errors'])->name('dashboard.errors');
 Route::get('/rich-catalog', [ProductController::class, 'richCatalog'])->name('dashboard.rich_catalog');
 Route::get('/batch-automation', [ProductController::class, 'batchAutomation'])->name('dashboard.batch_automation');
+Route::get('/api/brand-estimate-count', [ProductController::class, 'getBrandEstimateCount']);
 Route::get('/api/rich-products', [ProductController::class, 'getRichProductsJson']);
 Route::post('/api/active-learning/reset', [ApiController::class, 'resetActiveLearning']);
 Route::post('/api/failures/retry', [ApiController::class, 'retryFailures']);
