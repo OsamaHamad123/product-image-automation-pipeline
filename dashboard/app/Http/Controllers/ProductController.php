@@ -28,6 +28,7 @@ class ProductController extends Controller
 
     private function runPython($action, $params = [])
     {
+        @set_time_limit(300);
         try {
             $routes = [
                 'get_products' => 'products',
@@ -426,6 +427,7 @@ class ProductController extends Controller
      */
     public function runDiagnosticsJson()
     {
+        @set_time_limit(180);
         try {
             $pythonPath = $this->getPythonPath();
             $scriptPath = base_path('../verify_cloud_services.py');

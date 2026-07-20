@@ -251,7 +251,7 @@ def crop_image_by_box(image_path, box, output_path):
 
 def download_image(url, save_path):
     """
-    تنزيل الصورة من الرابط وحفظها محلياً.
+    تنزيل الصورة من الرابط وحفظها محلياً باستخدام العميل المحاكي لتجاوز حظر الـ WAF.
     """
     if not (url.startswith("http://") or url.startswith("https://")):
         import shutil
@@ -263,19 +263,29 @@ def download_image(url, save_path):
             return False
             
     try:
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        }
-        proxies = {"http": config.PROXY_URL, "https": config.PROXY_URL} if config.PROXY_URL else None
-        r = requests.get(url, headers=headers, timeout=10, stream=True, proxies=proxies, verify=False)
-        if r.status_code == 200:
+        from http_client import ImpersonateClient
+        client = ImpersonateClient(use_proxy=bool(config.PROXY_URL), proxy_url=config.PROXY_URL)
+        content = client.download_image(url)
+        if content:
             with open(save_path, 'wb') as f:
-                for chunk in r.iter_content(chunk_size=8192):
-                    f.write(chunk)
+                f.write(content)
             return True
         else:
-            print(f"❌ فشل تنزيل الصورة، كود الاستجابة: {r.status_code}")
-            return False
+            # التراجع التلقائي إلى requests القياسي في حال وجود مشكلة في المكتبة
+            print("⚠️ [Fallback] محاولة التنزيل باستخدام requests القياسي...")
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            }
+            proxies = {"http": config.PROXY_URL, "https": config.PROXY_URL} if config.PROXY_URL else None
+            r = requests.get(url, headers=headers, timeout=10, stream=True, proxies=proxies, verify=False)
+            if r.status_code == 200:
+                with open(save_path, 'wb') as f:
+                    for chunk in r.iter_content(chunk_size=8192):
+                        f.write(chunk)
+                return True
+            else:
+                print(f"❌ فشل تنزيل الصورة القياسي، كود الاستجابة: {r.status_code}")
+                return False
     except Exception as e:
         print(f"❌ خطأ أثناء تنزيل الصورة: {e}")
         return False

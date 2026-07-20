@@ -1854,15 +1854,32 @@ def expand_query_via_gemini(product_name, brand):
     """
     استخدام Gemini لإنشاء 3 جمل بحث محسنة ومختلفة لزيادة فرص العثور على صورة المنتج الصحيحة.
     """
+    clean_pname = product_name.strip()
+    clean_brand = brand.strip() if brand else ""
+    
+    # تفادي تكرار اسم البراند إذا كان جزءاً من اسم المنتج بالفعل
+    if clean_brand and clean_pname.lower().startswith(clean_brand.lower()):
+        fallback_queries = [
+            clean_pname,
+            f"{clean_pname} packaging",
+            clean_pname
+        ]
+    else:
+        fallback_queries = [
+            f"{clean_brand} {clean_pname}".strip(),
+            f"{clean_brand} {clean_pname} packaging".strip(),
+            f"{clean_brand} {clean_pname}".strip()
+        ]
+
     if not config.GEMINI_API_KEY:
-        return [f"{brand} {product_name}".strip()]
+        return [fallback_queries[0]]
         
     try:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{config.GEMINI_MODEL}:generateContent?key={config.GEMINI_API_KEY}"
         
         prompt = (
             f"You are a shopping search optimization assistant.\n"
-            f"Generate 3 diverse search engine queries for finding product images of: Brand: '{brand}' and Product Name: '{product_name}'.\n"
+            f"Generate 3 diverse search engine queries for finding product images of: Brand: '{clean_brand}' and Product Name: '{clean_pname}'.\n"
             f"Requirements:\n"
             f"1. Query 1: standard brand and product name in English.\n"
             f"2. Query 2: optimized shopping search string in English with 'packaging' or 'product pack' appended.\n"
@@ -1894,16 +1911,25 @@ def expand_query_via_gemini(product_name, brand):
             text = text.strip()
             queries = json.loads(text)
             if isinstance(queries, list) and len(queries) >= 1:
-                print(f"🤖 [Gemini Query Expansion] الاستعلامات المولدة: {queries}")
-                return [q.strip() for q in queries if q.strip()]
+                # تصفية أي تكرارات براند قد ينتجها النموذج تلقائياً
+                filtered_queries = []
+                for q in queries:
+                    q = q.strip()
+                    if not q:
+                        continue
+                    if clean_brand:
+                        double_brand = f"{clean_brand} {clean_brand}".lower()
+                        if q.lower().startswith(double_brand):
+                            q = q[len(clean_brand):].strip()
+                    filtered_queries.append(q)
+                
+                if filtered_queries:
+                    print(f"🤖 [Gemini Query Expansion] الاستعلامات المولدة: {filtered_queries}")
+                    return filtered_queries
     except Exception as e:
         print(f"⚠️ خطأ أثناء توليد الاستعلامات عبر Gemini: {e}")
         
-    return [
-        f"{brand} {product_name}".strip(),
-        f"{brand} {product_name} packaging".strip(),
-        f"{brand} {product_name}".strip()
-    ]
+    return fallback_queries
 
 def run_parallel_consensus_search(query):
     """
