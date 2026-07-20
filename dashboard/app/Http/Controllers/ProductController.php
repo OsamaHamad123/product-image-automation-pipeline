@@ -412,4 +412,41 @@ class ProductController extends Controller
             return response()->json(['error' => $e->getMessage()], 500);
         }
     }
+
+    /**
+     * عرض صفحة تشخيصات وسجلات النظام
+     */
+    public function systemDiagnostics()
+    {
+        return view('dashboard.diagnostics');
+    }
+
+    /**
+     * تشغيل فحص الخدمات السحابية واسترجاع النتيجة بصيغة JSON
+     */
+    public function runDiagnosticsJson()
+    {
+        try {
+            $pythonPath = $this->getPythonPath();
+            $scriptPath = base_path('../verify_cloud_services.py');
+            $cmd = "\"{$pythonPath}\" \"{$scriptPath}\" --json 2>&1";
+            $output = shell_exec($cmd);
+            
+            $decoded = json_decode($output, true);
+            if ($decoded) {
+                return response()->json($decoded);
+            }
+            
+            return response()->json([
+                'status' => 'failed',
+                'error' => 'Invalid output from python diagnostic script',
+                'raw_output' => $output
+            ], 500);
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'failed',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
 }

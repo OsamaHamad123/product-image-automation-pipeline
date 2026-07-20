@@ -323,6 +323,25 @@ Write-Host "⏳ جاري إغلاق أي عمليات سابقة معلقة..." 
 Stop-Process -Name php -Force -ErrorAction SilentlyContinue
 Stop-Process -Name python -Force -ErrorAction SilentlyContinue
 
+# ----------------- فحص الخدمات السحابية والاشتراكات قبل البدء -----------------
+Write-Host "🚦 جاري التحقق من حالة الاشتراكات والخدمات السحابية..." -ForegroundColor Cyan
+& $venvPython verify_cloud_services.py
+if ($LASTEXITCODE -ne 0) {
+    Write-Host ""
+    Write-Host "⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️" -ForegroundColor Red
+    Write-Host " خطأ: فشل التحقق من صلاحية أو اشتراك بعض الخدمات السحابية الحيوية!" -ForegroundColor Red
+    Write-Host " يرجى الاطلاع على التفاصيل ورموز الأخطاء المعروضة بالأعلى وحلها." -ForegroundColor Red
+    Write-Host "⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️" -ForegroundColor Red
+    Write-Host ""
+    
+    $choice = Read-Host "هل تريد تشغيل خوادم الأتمتة على أي حال بالرغم من هذا الفشل؟ (Y/N)"
+    if ($choice.Trim().ToUpper() -ne "Y") {
+        Write-Host "🛑 تم إلغاء تشغيل النظام بناءً على طلبك لتصحيح الأخطاء." -ForegroundColor Yellow
+        Start-Sleep -Seconds 2
+        exit 1
+    }
+}
+
 # تأكيد وجود مجلد المؤقتات لنموذج بايثون
 if (-not (Test-Path "temp")) { New-Item -ItemType Directory -Path "temp" | Out-Null }
 

@@ -254,6 +254,27 @@ def log_error_to_laravel(error_message, barcode=None, product_name=None, brand=N
             import builtins
             builtins.print(f"⚠️ فشل الكتابة في ملف سجلات لارافيل: {e}")
 
+def send_telegram_alert(message):
+    """
+    إرسال إشعار فوري عبر بوت Telegram للمشرف
+    """
+    token = os.getenv("TELEGRAM_BOT_TOKEN", TELEGRAM_BOT_TOKEN)
+    chat_id = os.getenv("TELEGRAM_CHAT_ID", TELEGRAM_CHAT_ID)
+    if not token or not chat_id:
+        return False
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    payload = {
+        "chat_id": chat_id,
+        "text": message,
+        "parse_mode": "HTML"
+    }
+    try:
+        import requests
+        requests.post(url, json=payload, timeout=5)
+        return True
+    except Exception:
+        return False
+
 def log_and_fail(barcode, product_name, brand, error_message):
     """
     تدوين الخطأ في الكونسول وتخزينه في جدول أخطاء SQLite.
@@ -269,6 +290,20 @@ def log_and_fail(barcode, product_name, brand, error_message):
     except Exception as e:
         import builtins
         builtins.print(f"⚠️ خطأ أثناء حفظ سجل الفشل: {e}")
+
+    # إرسال إشعار تليجرام في حال وجود أخطاء متعلقة بالاشتراكات أو الحصص أو الـ APIs
+    lower_err = error_message.lower()
+    quota_keywords = ["quota", "limit", "402", "429", "unauthorized", "api_key", "expired", "exhausted", "billing", "payment", "credentials", "connection failed"]
+    if any(k in lower_err for k in quota_keywords):
+        alert_msg = (
+            f"🚨 <b>تنبيه خطأ أتمتة حرج (Subscription/API Error)</b>\n\n"
+            f"📦 <b>المنتج:</b> {product_name}\n"
+            f"🏷️ <b>الماركة:</b> {brand}\n"
+            f"🔢 <b>الباركود:</b> {barcode or 'N/A'}\n"
+            f"❌ <b>الخطأ المكتشف:</b> <code>{error_message}</code>\n\n"
+            f"💡 <i>يرجى مراجعة إعدادات الاشتراك أو مفاتيح الـ API في ملف .env لحل المشكلة.</i>"
+        )
+        send_telegram_alert(alert_msg)
 
 
 # 11. إعدادات خادم Redis

@@ -487,6 +487,12 @@
                         <span>سجل الأخطاء والتحذيرات</span>
                     </a>
                 </li>
+                <li class="sidebar-menu-item @yield('nav_diagnostics')">
+                    <a href="{{ route('dashboard.diagnostics') }}">
+                        <i class="fas fa-terminal" style="width: 20px; text-align: center;"></i>
+                        <span>تشخيصات وسجلات النظام</span>
+                    </a>
+                </li>
                 <li class="sidebar-menu-item @yield('nav_rich_catalog')">
                     <a href="{{ route('dashboard.rich_catalog') }}">
                         <i class="fas fa-store" style="width: 20px; text-align: center;"></i>
