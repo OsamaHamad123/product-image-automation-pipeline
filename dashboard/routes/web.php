@@ -16,6 +16,8 @@ Route::get('/settings', [ProductController::class, 'settings'])->name('dashboard
 Route::post('/settings', [ProductController::class, 'saveSettings'])->name('dashboard.save_settings');
 Route::get('/api/brand-estimate-count', [ProductController::class, 'getBrandEstimateCount']);
 Route::get('/api/rich-products', [ProductController::class, 'getRichProductsJson']);
+Route::post('/api/rich-products/update', [ProductController::class, 'updateRichProduct']);
+Route::get('/rich-catalog/export', [ProductController::class, 'exportRichCatalog'])->name('dashboard.rich_catalog.export');
 Route::post('/api/active-learning/reset', [ApiController::class, 'resetActiveLearning']);
 Route::post('/api/failures/retry', [ApiController::class, 'retryFailures']);
 

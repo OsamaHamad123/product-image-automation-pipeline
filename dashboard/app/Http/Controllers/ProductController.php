@@ -524,5 +524,151 @@ class ProductController extends Controller
             return redirect()->route('dashboard.settings')->with('error', 'فشل حفظ الإعدادات: ' . $e->getMessage());
         }
     }
+
+    /**
+     * تحديث بيانات المنتج الموثقة بالبيانات الغنية المعدلة يدوياً
+     */
+    public function updateRichProduct(Request $request)
+    {
+        $request->validate([
+            'barcode' => 'required',
+            'product_name' => 'required|string|max:255',
+            'brand' => 'required|string|max:255',
+            'metadata' => 'required|array'
+        ]);
+
+        try {
+            $product = \App\Models\ResolvedProduct::where('barcode', $request->input('barcode'))->first();
+            if (!$product) {
+                return response()->json([
+                    'status' => 'failed',
+                    'error' => 'المنتج غير موجود في قاعدة بيانات المنتجات الموثقة.'
+                ], 404);
+            }
+
+            $product->product_name = $request->input('product_name');
+            $product->brand = $request->input('brand');
+
+            $existingMeta = $product->metadata_json ?? [];
+            if (!is_array($existingMeta)) {
+                $existingMeta = json_decode($product->metadata_json, true) ?? [];
+            }
+            
+            $product->metadata_json = array_merge($existingMeta, $request->input('metadata'));
+            $product->save();
+
+            // Clear cache
+            \Cache::forget('products_json_v1');
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'تم تحديث بيانات المنتج الغنية بنجاح في قاعدة البيانات.'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'failed',
+                'error' => 'فشل التحديث: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * تصدير الكتالوج الموثق بصيغة CSV أو JSON
+     */
+    public function exportRichCatalog(Request $request)
+    {
+        try {
+            $format = $request->query('format', 'csv');
+            $products = \App\Models\ResolvedProduct::orderBy('resolved_at', 'desc')->get();
+
+            if ($format === 'json') {
+                $exportData = [];
+                foreach ($products as $p) {
+                    $meta = $p->metadata_json ?? [];
+                    if (!is_array($meta)) {
+                        $meta = json_decode($p->metadata_json, true) ?? [];
+                    }
+                    $exportData[] = [
+                        'barcode' => $p->barcode,
+                        'product_name' => $p->product_name,
+                        'brand' => $p->brand,
+                        'cloudinary_url' => $p->cloudinary_url,
+                        'clip_score' => $p->clip_score,
+                        'resolved_at' => $p->resolved_at ? $p->resolved_at->toIso8601String() : null,
+                        'metadata' => $meta
+                    ];
+                }
+                return response()->json($exportData, 200, [
+                    'Content-Disposition' => 'attachment; filename="rich_catalog_export.json"',
+                    'Content-Type' => 'application/json; charset=UTF-8'
+                ]);
+            }
+
+            // CSV Export
+            $headers = [
+                'Content-Type' => 'text/csv; charset=UTF-8',
+                'Content-Disposition' => 'attachment; filename="rich_catalog_export.csv"',
+                'Pragma' => 'no-cache',
+                'Cache-Control' => 'must-revalidate, post-check=0, pre-check=0',
+                'Expires' => '0'
+            ];
+
+            $callback = function() use ($products) {
+                $file = fopen('php://output', 'w');
+                // UTF-8 BOM
+                fprintf($file, chr(0xEF).chr(0xBB).chr(0xBF));
+                
+                fputcsv($file, [
+                    'الباركود (Barcode)', 
+                    'اسم المنتج (Name)', 
+                    'العلامة التجارية (Brand)', 
+                    'رابط الصورة (Image URL)', 
+                    'نسبة مطابقة الصورة (Match Score)',
+                    'التصنيف الرئيسي (Category L1)',
+                    'التصنيف الفرعي 1 (Category L2)',
+                    'التصنيف الفرعي 2 (Category L3)',
+                    'الوصف التسويقي (Marketing Description)',
+                    'المكونات (Ingredients)',
+                    'السعرات الحرارية (Calories)',
+                    'الكربوهيدرات (Carbohydrates)',
+                    'السكريات (Sugars)',
+                    'البروتين (Protein)',
+                    'الدهون (Fat)',
+                    'الملح (Salt)'
+                ]);
+
+                foreach ($products as $p) {
+                    $meta = $p->metadata_json ?? [];
+                    if (!is_array($meta)) {
+                        $meta = json_decode($p->metadata_json, true) ?? [];
+                    }
+                    
+                    fputcsv($file, [
+                        $p->barcode,
+                        $p->product_name,
+                        $p->brand,
+                        $p->cloudinary_url,
+                        $p->clip_score ? round($p->clip_score * 100) . '%' : 'N/A',
+                        $meta['web_category_l1'] ?? $meta['category'] ?? '',
+                        $meta['web_category_l2'] ?? '',
+                        $meta['web_category_l3'] ?? '',
+                        $meta['marketing_description_ar'] ?? $meta['marketing_description'] ?? '',
+                        $meta['ingredients'] ?? '',
+                        $meta['calories'] ?? '',
+                        $meta['carbohydrates'] ?? '',
+                        $meta['sugars'] ?? '',
+                        $meta['protein'] ?? '',
+                        $meta['fat_total'] ?? '',
+                        $meta['salt'] ?? ''
+                    ]);
+                }
+                fclose($file);
+            };
+
+            return response()->stream($callback, 200, $headers);
+        } catch (\Exception $e) {
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
 }
 
