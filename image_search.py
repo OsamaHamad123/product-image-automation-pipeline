@@ -326,7 +326,7 @@ class ParallelConsensusScraper:
             proxies = {"http": config.PROXY_URL, "https": config.PROXY_URL} if getattr(config, "PROXY_URL", "") else None
             async with AsyncSession(impersonate="chrome120", proxies=proxies) as session:
                 encoded_query = urllib.parse.quote_plus(query)
-                url_init = f"https://duckduckgo.com/?q={encoded_query}&iax=images&ia=images"
+                url_init = f"https://duckduckgo.com/?q={encoded_query}&kp=1&iax=images&ia=images"
                 headers_init = {
                     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
                 }
@@ -347,7 +347,8 @@ class ParallelConsensusScraper:
                     "q": query,
                     "vqd": vqd,
                     "f": ",,,",
-                    "p": "1"
+                    "p": "1",
+                    "kp": "1"
                 }
                 response2 = await session.get(api_url, params=params, headers={"X-Requested-With": "XMLHttpRequest"}, timeout=6)
                 if response2.status_code == 200:
@@ -1247,7 +1248,7 @@ def duckduckgo_image_search(query):
             ddgs_generator = ddgs.images(
                 keywords=query,
                 region="wt-wt",
-                safesearch="off",
+                safesearch="moderate",
                 size="Medium"
             )
             count = 0
@@ -1515,7 +1516,9 @@ def evaluate_and_choose_best_image(results, product_name, brand, requires_brand_
         # 2. check cartoon
         is_cartoon_or_illustration = False
         for kw in excluded_keywords:
-            if kw in url_lower or kw in title_lower:
+            # مطابقة ككلمة كاملة لتفادي الاستبعاد الخاطئ لبعض الكلمات (مثل art في start أو smart)
+            pattern = rf"(?<![a-zA-Z0-9_-]){re.escape(kw)}(?![a-zA-Z0-9_-])"
+            if re.search(pattern, url_lower) or re.search(pattern, title_lower):
                 is_cartoon_or_illustration = True
                 reasons.append(f"تطابق كلمة مستبعدة (كرتون/رسم): '{kw}'")
                 break

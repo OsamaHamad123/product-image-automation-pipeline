@@ -147,7 +147,9 @@ class GoogleSheetsBatchWorker(threading.Thread):
                 })
                 
             try:
-                worksheet.batch_update(batch_data, value_input_option="USER_ENTERED")
+                # Wrap batch_update with retries to handle 429 errors gracefully
+                retried_batch_update = retry_gspread_on_429(max_retries=5)(worksheet.batch_update)
+                retried_batch_update(batch_data, value_input_option="USER_ENTERED")
                 id_placeholders = ",".join("%s" for _ in row_ids)
                 cursor.execute(
                     f"UPDATE sheet_updates SET sync_status = 'SYNCED' WHERE id IN ({id_placeholders})",
@@ -166,7 +168,9 @@ class GoogleSheetsBatchWorker(threading.Thread):
                     
                     try:
                         a1_range = gspread.utils.rowcol_to_a1(r_num, c_idx + 1)
-                        worksheet.update_cell(r_num, c_idx + 1, str(val))
+                        # Wrap update_cell with retries to avoid rate limits during fallback
+                        retried_update_cell = retry_gspread_on_429(max_retries=5)(worksheet.update_cell)
+                        retried_update_cell(r_num, c_idx + 1, str(val))
                         cursor.execute("UPDATE sheet_updates SET sync_status = 'SYNCED' WHERE id = %s", (row_id,))
                         conn.commit()
                         print(f"✅ [Async Sheets Sync] Successfully synced row {r_num} after batch failure.")
