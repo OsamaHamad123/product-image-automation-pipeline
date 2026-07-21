@@ -132,18 +132,17 @@ def verify_photoroom():
     
     try:
         print("🔄 إرسال طلب فحص أولي لـ PhotoRoom (التحقق من حالة الاشتراك والمصادقة)...")
-        response = requests.post(url, headers=headers, timeout=10)
+        proxies = {"http": config.PROXY_URL, "https": config.PROXY_URL} if config.PROXY_URL else None
+        response = requests.post(url, headers=headers, proxies=proxies, timeout=12)
         
         if response.status_code in [400, 415]:
             print("✅ نجح فحص مفتاح PhotoRoom بنجاح والخدمة معتمدة وجاهزة.")
             return True
         elif response.status_code in [401, 403]:
             print(f"❌ فشل الاتصال بـ PhotoRoom: كود الاستجابة {response.status_code} (مفتاح الـ API غير صالح أو غير مصرح).")
-            print("💡 الحل: يرجى التحقق من صحة PHOTOROOM_API_KEY وتجديده في ملف .env")
             return False
         elif response.status_code == 402:
             print("❌ فشل الاتصال بـ PhotoRoom: كود الاستجابة 402 (انتهى اشتراك PhotoRoom أو نفد رصيد الحساب المتاح).")
-            print("💡 الحل: يرجى شحن الرصيد أو تجديد خطة الاشتراك في لوحة تحكم PhotoRoom.")
             return False
         elif response.status_code == 429:
             print("❌ فشل الاتصال بـ PhotoRoom: كود الاستجابة 429 (تم تجاوز حد الطلبات المتزامنة أو استنفاد الحصة).")
