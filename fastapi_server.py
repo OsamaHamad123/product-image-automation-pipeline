@@ -176,6 +176,7 @@ def search_product_image(req: SearchRequest):
     البحث التوافقي الذكي والتحقق الفوري مع النماذج المحملة بالذاكرة.
     """
     try:
+        config.load_db_config()
         product_name = req.product_name.strip() if req.product_name else ""
         brand = req.brand.strip() if req.brand else ""
         
@@ -248,6 +249,7 @@ def select_product_image(req: SelectImageRequest):
     اعتماد صورة معالجة محلياً ورفعها سحابياً لـ Cloudinary وجدولة تحديث الشيت عبر Redis.
     """
     try:
+        config.load_db_config()
         processed_image_path = image_processor.process_product_image(
             req.image_url, req.product_name, req.brand, 
             bg_removal_method=req.bg_removal_method,

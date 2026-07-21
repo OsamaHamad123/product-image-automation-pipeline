@@ -16,6 +16,12 @@ def load_run_config():
     """
     تحميل إعدادات التشغيل الجماعي المخصصة من ملف run_config.json إن وجد لتجاوز إعدادات config.py
     """
+    # إعادة تحميل الإعدادات والاعتمادات من قاعدة البيانات لضمان استخدام أحدث المفاتيح
+    try:
+        config.load_db_config()
+    except Exception as e:
+        print(f"⚠️ فشل تحديث الإعدادات من قاعدة البيانات: {e}")
+        
     config_file = "temp/run_config.json"
     if os.path.exists(config_file):
         try:

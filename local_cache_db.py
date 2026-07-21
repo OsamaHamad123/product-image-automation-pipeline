@@ -137,6 +137,33 @@ def init_db():
         # إدراج سجل الجلسة الافتراضي الأولي
         cursor.execute("INSERT IGNORE INTO automation_state (`key`, status) VALUES ('active_session', 'idle')")
         
+        # 7. إنشاء جدول الإعدادات العامة لحفظ مفاتيح API وبيانات الاعتماد
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS system_settings (
+                `key` VARCHAR(255) PRIMARY KEY,
+                `value` TEXT NULL,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
+        """)
+        
+        # إدراج القيم الافتراضية المبدئية من ملف .env لتجنب فقدانها
+        import config
+        default_settings = {
+            "photoroom_api_key": getattr(config, "PHOTOROOM_API_KEY", ""),
+            "gemini_api_key": getattr(config, "GEMINI_API_KEY", ""),
+            "gemini_model": getattr(config, "GEMINI_MODEL", "gemini-3.5-flash"),
+            "cloudinary_cloud_name": getattr(config, "CLOUDINARY_CLOUD_NAME", ""),
+            "cloudinary_api_key": getattr(config, "CLOUDINARY_API_KEY", ""),
+            "cloudinary_api_secret": getattr(config, "CLOUDINARY_API_SECRET", ""),
+            "google_search_api_key": os.getenv("GOOGLE_SEARCH_API_KEY", ""),
+            "google_search_cx": os.getenv("GOOGLE_SEARCH_CX", "")
+        }
+        for k, v in default_settings.items():
+            cursor.execute(
+                "INSERT IGNORE INTO system_settings (`key`, `value`) VALUES (%s, %s)",
+                (k, v)
+            )
+            
         # التحقق من وجود الأعمدة والمؤشرات وتحديث الجداول القائمة إن وجدت (Auto-migration)
         cursor.execute("SHOW COLUMNS FROM resolved_products")
         columns = [col["Field"] for col in cursor.fetchall()]

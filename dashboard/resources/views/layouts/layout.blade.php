@@ -499,6 +499,12 @@
                         <span>معرض المنتجات الغني</span>
                     </a>
                 </li>
+                <li class="sidebar-menu-item @yield('nav_settings')">
+                    <a href="{{ route('dashboard.settings') }}">
+                        <i class="fas fa-cog" style="width: 20px; text-align: center;"></i>
+                        <span>إعدادات ومفاتيح الـ API</span>
+                    </a>
+                </li>
             </ul>
             
             <!-- مؤشر حالة النظام المتوهج -->

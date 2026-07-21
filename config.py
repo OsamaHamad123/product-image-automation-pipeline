@@ -316,4 +316,71 @@ BRAND_FILTER = ""
 ROW_FILTER = ""
 AUTO_APPROVE_THRESHOLD = 0.0 # 0.0 تعني تعطيل الاعتماد التلقائي
 
+def load_db_config():
+    """
+    تحميل الإعدادات ديناميكياً من قاعدة البيانات لتجنب تعديل ملفات البيئة يدوياً.
+    """
+    import os
+    db_host = os.getenv("DB_HOST", "127.0.0.1")
+    db_port = int(os.getenv("DB_PORT", "3306"))
+    db_user = os.getenv("DB_USERNAME", "root")
+    db_pass = os.getenv("DB_PASSWORD", "")
+    db_name = os.getenv("DB_DATABASE", "automation_db")
+    
+    try:
+        import pymysql
+        conn = pymysql.connect(
+            host=db_host,
+            port=db_port,
+            user=db_user,
+            password=db_pass,
+            database=db_name,
+            charset='utf8mb4',
+            cursorclass=pymysql.cursors.DictCursor
+        )
+        cursor = conn.cursor()
+        cursor.execute("SHOW TABLES LIKE 'system_settings'")
+        if cursor.fetchone():
+            cursor.execute("SELECT `key`, `value` FROM system_settings")
+            rows = cursor.fetchall()
+            db_keys = {}
+            for r in rows:
+                db_keys[r['key']] = r['value']
+            
+            global PHOTOROOM_API_KEY, GEMINI_API_KEY, GEMINI_MODEL
+            global CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET
+            global GOOGLE_SEARCH_API_KEYS, GOOGLE_SEARCH_CX_LIST, GOOGLE_SEARCH_API_KEY, GOOGLE_SEARCH_CX
+            
+            if "photoroom_api_key" in db_keys and db_keys["photoroom_api_key"]:
+                PHOTOROOM_API_KEY = db_keys["photoroom_api_key"]
+            if "gemini_api_key" in db_keys and db_keys["gemini_api_key"]:
+                GEMINI_API_KEY = db_keys["gemini_api_key"]
+            if "gemini_model" in db_keys and db_keys["gemini_model"]:
+                GEMINI_MODEL = db_keys["gemini_model"]
+            if "cloudinary_cloud_name" in db_keys and db_keys["cloudinary_cloud_name"]:
+                CLOUDINARY_CLOUD_NAME = db_keys["cloudinary_cloud_name"]
+            if "cloudinary_api_key" in db_keys and db_keys["cloudinary_api_key"]:
+                CLOUDINARY_API_KEY = db_keys["cloudinary_api_key"]
+            if "cloudinary_api_secret" in db_keys and db_keys["cloudinary_api_secret"]:
+                CLOUDINARY_API_SECRET = db_keys["cloudinary_api_secret"]
+            if "google_search_api_key" in db_keys and db_keys["google_search_api_key"]:
+                keys = [k.strip() for k in db_keys["google_search_api_key"].split(",") if k.strip()]
+                if keys:
+                    GOOGLE_SEARCH_API_KEYS = keys
+                    GOOGLE_SEARCH_API_KEY = keys[0]
+            if "google_search_cx" in db_keys and db_keys["google_search_cx"]:
+                cxs = [c.strip() for c in db_keys["google_search_cx"].split(",") if c.strip()]
+                if cxs:
+                    GOOGLE_SEARCH_CX_LIST = cxs
+                    GOOGLE_SEARCH_CX = cxs[0]
+            
+            import builtins
+            builtins.print("⚙️ [Config Loader] تم تحميل الإعدادات وتجاوز قيم بيئة .env ديناميكياً من قاعدة البيانات.")
+        conn.close()
+    except Exception as e:
+        import builtins
+        builtins.print(f"⚠️ [Config Loader] تنبيه أثناء تحميل الإعدادات من قاعدة البيانات (قد لا تكون مهيأة بعد): {e}")
+
+load_db_config()
+
 

@@ -451,4 +451,56 @@ class ProductController extends Controller
             ], 500);
         }
     }
+
+    /**
+     * عرض صفحة إعدادات النظام ومفاتيح الـ API
+     */
+    public function settings()
+    {
+        $settingsRaw = \DB::table('system_settings')->get();
+        $settings = [];
+        foreach ($settingsRaw as $row) {
+            $settings[$row->key] = $row->value;
+        }
+
+        $keys = [
+            'photoroom_api_key', 'gemini_api_key', 'gemini_model',
+            'cloudinary_cloud_name', 'cloudinary_api_key', 'cloudinary_api_secret',
+            'google_search_api_key', 'google_search_cx'
+        ];
+        foreach ($keys as $k) {
+            if (!isset($settings[$k])) {
+                $settings[$k] = '';
+            }
+        }
+
+        return view('dashboard.settings', compact('settings'));
+    }
+
+    /**
+     * حفظ وتحديث إعدادات النظام ومفاتيح الـ API في قاعدة البيانات
+     */
+    public function saveSettings(Request $request)
+    {
+        $keys = [
+            'photoroom_api_key', 'gemini_api_key', 'gemini_model',
+            'cloudinary_cloud_name', 'cloudinary_api_key', 'cloudinary_api_secret',
+            'google_search_api_key', 'google_search_cx'
+        ];
+
+        try {
+            foreach ($keys as $k) {
+                $val = $request->input($k, '');
+                \DB::table('system_settings')->updateOrInsert(
+                    ['key' => $k],
+                    ['value' => $val, 'updated_at' => now()]
+                );
+            }
+
+            return redirect()->route('dashboard.settings')->with('success', 'تم حفظ وتحديث الإعدادات بنجاح في قاعدة البيانات.');
+        } catch (\Exception $e) {
+            return redirect()->route('dashboard.settings')->with('error', 'فشل حفظ الإعدادات: ' . $e->getMessage());
+        }
+    }
 }
+
