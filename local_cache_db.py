@@ -156,7 +156,13 @@ def init_db():
             "cloudinary_api_key": getattr(config, "CLOUDINARY_API_KEY", ""),
             "cloudinary_api_secret": getattr(config, "CLOUDINARY_API_SECRET", ""),
             "google_search_api_key": os.getenv("GOOGLE_SEARCH_API_KEY", ""),
-            "google_search_cx": os.getenv("GOOGLE_SEARCH_CX", "")
+            "google_search_cx": os.getenv("GOOGLE_SEARCH_CX", ""),
+            "clip_relevance_threshold": "0.22",
+            "clip_grey_zone_threshold": "0.18",
+            "strict_brand_match": "true",
+            "enable_gemini_pre_validation": "true",
+            "filter_competitors": "true",
+            "bypass_white_background_check": "false"
         }
         for k, v in default_settings.items():
             cursor.execute(

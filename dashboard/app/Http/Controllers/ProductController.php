@@ -471,7 +471,10 @@ class ProductController extends Controller
         $keys = [
             'photoroom_api_key', 'gemini_api_key', 'gemini_model',
             'cloudinary_cloud_name', 'cloudinary_api_key', 'cloudinary_api_secret',
-            'google_search_api_key', 'google_search_cx'
+            'google_search_api_key', 'google_search_cx',
+            'clip_relevance_threshold', 'clip_grey_zone_threshold',
+            'strict_brand_match', 'enable_gemini_pre_validation',
+            'filter_competitors', 'bypass_white_background_check'
         ];
         foreach ($keys as $k) {
             if (!isset($settings[$k])) {
@@ -490,7 +493,13 @@ class ProductController extends Controller
         $keys = [
             'photoroom_api_key', 'gemini_api_key', 'gemini_model',
             'cloudinary_cloud_name', 'cloudinary_api_key', 'cloudinary_api_secret',
-            'google_search_api_key', 'google_search_cx'
+            'google_search_api_key', 'google_search_cx',
+            'clip_relevance_threshold', 'clip_grey_zone_threshold'
+        ];
+        
+        $checkboxKeys = [
+            'strict_brand_match', 'enable_gemini_pre_validation',
+            'filter_competitors', 'bypass_white_background_check'
         ];
 
         try {
@@ -498,6 +507,14 @@ class ProductController extends Controller
                 $val = $request->input($k, '');
                 \DB::table('system_settings')->updateOrInsert(
                     ['key' => $k],
+                    ['value' => $val, 'updated_at' => now()]
+                );
+            }
+            
+            foreach ($checkboxKeys as $ck) {
+                $val = $request->has($ck) ? 'true' : 'false';
+                \DB::table('system_settings')->updateOrInsert(
+                    ['key' => $ck],
                     ['value' => $val, 'updated_at' => now()]
                 );
             }

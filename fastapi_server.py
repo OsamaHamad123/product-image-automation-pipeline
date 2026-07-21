@@ -28,7 +28,21 @@ import local_cache_db
 config._redis_available = True
 def api_log(*args):
     msg = " ".join(str(a) for a in args)
-    print(f"[FastAPI Log] {msg}")
+    import builtins
+    builtins.print(f"[FastAPI Log] {msg}")
+    
+    try:
+        from datetime import datetime
+        time_str = datetime.now().strftime("%H:%M:%S")
+        formatted = f"[{time_str}] {msg}"
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        log_file_path = os.path.join(base_dir, "temp", "pipeline.log")
+        os.makedirs(os.path.dirname(log_file_path), exist_ok=True)
+        with open(log_file_path, "a", encoding="utf-8") as f:
+            f.write(formatted + "\n")
+    except Exception:
+        pass
+
 config.log_runner = api_log
 
 @asynccontextmanager

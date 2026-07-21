@@ -29,6 +29,12 @@ return new class extends Migration
                 ['key' => 'cloudinary_api_secret', 'value' => env('CLOUDINARY_API_SECRET', '')],
                 ['key' => 'google_search_api_key', 'value' => env('GOOGLE_SEARCH_API_KEY', '')],
                 ['key' => 'google_search_cx', 'value' => env('GOOGLE_SEARCH_CX', '')],
+                ['key' => 'clip_relevance_threshold', 'value' => '0.22'],
+                ['key' => 'clip_grey_zone_threshold', 'value' => '0.18'],
+                ['key' => 'strict_brand_match', 'value' => 'true'],
+                ['key' => 'enable_gemini_pre_validation', 'value' => 'true'],
+                ['key' => 'filter_competitors', 'value' => 'true'],
+                ['key' => 'bypass_white_background_check', 'value' => 'false'],
             ];
 
             foreach ($defaultSettings as $setting) {

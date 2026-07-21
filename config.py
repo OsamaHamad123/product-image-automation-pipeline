@@ -350,6 +350,7 @@ def load_db_config():
             global PHOTOROOM_API_KEY, GEMINI_API_KEY, GEMINI_MODEL
             global CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET
             global GOOGLE_SEARCH_API_KEYS, GOOGLE_SEARCH_CX_LIST, GOOGLE_SEARCH_API_KEY, GOOGLE_SEARCH_CX
+            global CLIP_RELEVANCE_THRESHOLD, CLIP_GREY_ZONE_THRESHOLD, STRICT_BRAND_MATCH, ENABLE_GEMINI_PRE_VALIDATION, FILTER_COMPETITORS, BYPASS_WHITE_BACKGROUND_CHECK
             
             if "photoroom_api_key" in db_keys and db_keys["photoroom_api_key"]:
                 PHOTOROOM_API_KEY = db_keys["photoroom_api_key"]
@@ -373,6 +374,18 @@ def load_db_config():
                 if cxs:
                     GOOGLE_SEARCH_CX_LIST = cxs
                     GOOGLE_SEARCH_CX = cxs[0]
+            if "clip_relevance_threshold" in db_keys and db_keys["clip_relevance_threshold"]:
+                CLIP_RELEVANCE_THRESHOLD = float(db_keys["clip_relevance_threshold"])
+            if "clip_grey_zone_threshold" in db_keys and db_keys["clip_grey_zone_threshold"]:
+                CLIP_GREY_ZONE_THRESHOLD = float(db_keys["clip_grey_zone_threshold"])
+            if "strict_brand_match" in db_keys:
+                STRICT_BRAND_MATCH = db_keys["strict_brand_match"].lower() == "true"
+            if "enable_gemini_pre_validation" in db_keys:
+                ENABLE_GEMINI_PRE_VALIDATION = db_keys["enable_gemini_pre_validation"].lower() == "true"
+            if "filter_competitors" in db_keys:
+                FILTER_COMPETITORS = db_keys["filter_competitors"].lower() == "true"
+            if "bypass_white_background_check" in db_keys:
+                BYPASS_WHITE_BACKGROUND_CHECK = db_keys["bypass_white_background_check"].lower() == "true"
             
             import sys
             if "--json" not in sys.argv:

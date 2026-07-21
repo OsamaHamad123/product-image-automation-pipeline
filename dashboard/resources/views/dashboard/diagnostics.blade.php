@@ -414,6 +414,10 @@
     let updateInterval = null;
     let fullRawLogs = "";
     let systemLogsData = null; // Store validation data if checked
+    let clearCheckpoints = {
+        pipeline: 0,
+        laravel: 0
+    };
 
     // Run Diagnostics check synchronously
     async function runDiagnostics() {
@@ -536,11 +540,12 @@
         document.getElementById('tab-pipeline').className = 'console-tab' + (tab === 'pipeline' ? ' active' : '');
         document.getElementById('tab-laravel').className = 'console-tab' + (tab === 'laravel' ? ' active' : '');
         
-        clearConsoleScreen();
+        document.getElementById('consoleTerminal').innerHTML = '';
         fetchLogs();
     }
 
     function clearConsoleScreen() {
+        clearCheckpoints[activeTab] = fullRawLogs ? fullRawLogs.length : 0;
         document.getElementById('consoleTerminal').innerHTML = '';
     }
 
@@ -556,7 +561,15 @@
             if (response.status === 200) {
                 const logs = await response.text();
                 fullRawLogs = logs;
-                displayLogsInConsole(logs);
+                
+                let currentCheckpoint = clearCheckpoints[activeTab] || 0;
+                if (logs.length < currentCheckpoint) {
+                    clearCheckpoints[activeTab] = 0;
+                    currentCheckpoint = 0;
+                }
+                
+                let displayableLogs = logs.substring(currentCheckpoint);
+                displayLogsInConsole(displayableLogs);
                 
                 const now = new Date();
                 document.getElementById('logUpdateStatus').innerText = `آخر تحديث: ${now.toLocaleTimeString('ar-SA')}`;

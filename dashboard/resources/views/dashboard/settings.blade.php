@@ -218,6 +218,70 @@
 
             </div>
 
+            <!-- Section 3: AI Quality Gatekeeper & Rules (Full Width) -->
+            <div class="glass-panel" style="padding: 1.5rem; margin-top: 2rem; margin-bottom: 0;">
+                <h3 class="settings-section-title">
+                    <i class="fas fa-filter" style="color: var(--text-secondary);"></i>
+                    <span>معايير جودة الفرز ومطابقة المنتجات بالذكاء الاصطناعي (AI Quality Rules)</span>
+                </h3>
+                
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem;">
+                    <div>
+                        <!-- CLIP Relevance Threshold -->
+                        <div class="form-group">
+                            <label class="form-label" for="clip_relevance_threshold">حد صلة قرابة الصورة (CLIP Relevance Threshold)</label>
+                            <input type="number" step="0.01" min="0" max="1" id="clip_relevance_threshold" name="clip_relevance_threshold" class="form-control" value="{{ $settings['clip_relevance_threshold'] }}" required>
+                            <span class="form-help">القيمة الافتراضية 0.22. الحد الأدنى لمستوى تشابه وتطابق الصورة دلالياً مع اسم منتجك لقبولها.</span>
+                        </div>
+
+                        <!-- CLIP Grey Zone Threshold -->
+                        <div class="form-group">
+                            <label class="form-label" for="clip_grey_zone_threshold">حد المنطقة الرمادية (CLIP Grey Zone Threshold)</label>
+                            <input type="number" step="0.01" min="0" max="1" id="clip_grey_zone_threshold" name="clip_grey_zone_threshold" class="form-control" value="{{ $settings['clip_grey_zone_threshold'] }}" required>
+                            <span class="form-help">القيمة الافتراضية 0.18. الصور الأقل من هذا الحد يتم رفضها فوراً دون إرسالها لـ Gemini لتوفير التكلفة.</span>
+                        </div>
+                    </div>
+                    
+                    <div style="display: flex; flex-direction: column; gap: 1rem; justify-content: center;">
+                        <!-- Strict Brand Match Toggle -->
+                        <div style="display: flex; align-items: center; gap: 0.75rem;">
+                            <input type="checkbox" id="strict_brand_match" name="strict_brand_match" value="true" style="width: 20px; height: 20px; cursor: pointer;" {{ $settings['strict_brand_match'] === 'true' ? 'checked' : '' }}>
+                            <div>
+                                <label class="form-label" for="strict_brand_match" style="cursor: pointer; margin: 0;">تفعيل فحص مطابقة البراند الصارم (Strict Brand Match)</label>
+                                <span class="form-help" style="display: block; margin-top: 0.2rem;">يرفض الصور التي لا تظهر فيها العلامة التجارية المطلوبة بشكل صريح أو تتبع لشركات منافسة.</span>
+                            </div>
+                        </div>
+
+                        <!-- Gemini Pre-Validation Toggle -->
+                        <div style="display: flex; align-items: center; gap: 0.75rem;">
+                            <input type="checkbox" id="enable_gemini_pre_validation" name="enable_gemini_pre_validation" value="true" style="width: 20px; height: 20px; cursor: pointer;" {{ $settings['enable_gemini_pre_validation'] === 'true' ? 'checked' : '' }}>
+                            <div>
+                                <label class="form-label" for="enable_gemini_pre_validation" style="cursor: pointer; margin: 0;">تفعيل التحقق البصري الدقيق عبر Gemini Vision VLM</label>
+                                <span class="form-help" style="display: block; margin-top: 0.2rem;">يقوم بفحص النكهة، الحجم، العبوة، وتطابق تفاصيل الغلاف مع المنتج.</span>
+                            </div>
+                        </div>
+
+                        <!-- Filter Competitors Toggle -->
+                        <div style="display: flex; align-items: center; gap: 0.75rem;">
+                            <input type="checkbox" id="filter_competitors" name="filter_competitors" value="true" style="width: 20px; height: 20px; cursor: pointer;" {{ $settings['filter_competitors'] === 'true' ? 'checked' : '' }}>
+                            <div>
+                                <label class="form-label" for="filter_competitors" style="cursor: pointer; margin: 0;">فلترة المنتجات والبراندات المنافسة تلقائياً</label>
+                                <span class="form-help" style="display: block; margin-top: 0.2rem;">يتعرف على الماركات المنافسة الشهيرة ويستبعدها لمنع تداخل المنتجات.</span>
+                            </div>
+                        </div>
+
+                        <!-- Bypass White Background Check Toggle -->
+                        <div style="display: flex; align-items: center; gap: 0.75rem;">
+                            <input type="checkbox" id="bypass_white_background_check" name="bypass_white_background_check" value="true" style="width: 20px; height: 20px; cursor: pointer;" {{ $settings['bypass_white_background_check'] === 'true' ? 'checked' : '' }}>
+                            <div>
+                                <label class="form-label" for="bypass_white_background_check" style="cursor: pointer; margin: 0;">تخطي إزالة الخلفية إذا كانت بيضاء ونقية بالفعل</label>
+                                <span class="form-help" style="display: block; margin-top: 0.2rem;">يوفر استهلاك رصيد PhotoRoom للصور الجاهزة ذات الخلفية البيضاء النقية.</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <div class="action-bar">
                 <button type="submit" class="btn">
                     <i class="fas fa-save"></i>

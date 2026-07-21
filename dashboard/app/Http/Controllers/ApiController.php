@@ -26,6 +26,7 @@ class ApiController extends Controller
 
     private function runPython($action, $params = [])
     {
+        @set_time_limit(300);
         try {
             $routes = [
                 'get_products' => 'products',
