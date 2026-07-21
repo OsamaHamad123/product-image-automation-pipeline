@@ -714,10 +714,10 @@ def align_brand_via_gemini(product_name, sheet_brand):
             f"You are an e-commerce catalog data verification assistant.\n"
             f"We have a product named '{product_name}' which is classified under the brand '{sheet_brand}' in our sheet.\n"
             f"Verify if the brand '{sheet_brand}' is correct for this product.\n"
-            f"Note that data entry errors are common (e.g. assigning 'Emirates Macaroni' to 'Emirates Pofaki Cheese Corn Curls' because both start with 'Emirates', even though Pofaki is a snack curl and not macaroni).\n"
+            f"Note that data entry errors are common (e.g. assigning 'Emirates Macaroni' to 'Emirates Pofaki Cheese Corn Curls' because both start with 'Emirates').\n"
             f"Analyze the product name and decide:\n"
-            f"1. Is '{sheet_brand}' correct or a valid parent/synonym/subsidiary for '{product_name}'? (If yes, set 'is_correct' to true).\n"
-            f"2. If it is incorrect (e.g., 'Emirates Macaroni' for 'Emirates Pofaki'), set 'is_correct' to false and extract the actual correct brand name from the product name (e.g. 'Emirates Pofaki' or 'Emirates' or 'NFI').\n"
+            f"1. Is '{sheet_brand}' correct, a valid parent/subsidiary, or is the product generic/white-label (like flour, water, sugar) which can be packaged under '{sheet_brand}'? If the product title does not explicitly contain or imply a DIFFERENT competing brand, set 'is_correct' to true.\n"
+            f"2. Only set 'is_correct' to false if the product name explicitly mentions a different, competing brand name (e.g. title is 'Al Ain Water' but brand is 'Mai Dubai'). In that case, set 'is_correct' to false and extract the actual brand from the title.\n"
             f"Reply strictly in JSON format matching this schema:\n"
             f'{{\n'
             f'  "is_correct": true or false,\n'
