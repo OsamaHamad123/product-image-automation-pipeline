@@ -434,6 +434,11 @@ class ProductController extends Controller
             $cmd = "\"{$pythonPath}\" \"{$scriptPath}\" --json 2>&1";
             $output = shell_exec($cmd);
             
+            $pos = strpos($output, '{');
+            if ($pos !== false) {
+                $output = substr($output, $pos);
+            }
+            
             $decoded = json_decode($output, true);
             if ($decoded) {
                 return response()->json($decoded);

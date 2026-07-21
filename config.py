@@ -374,12 +374,16 @@ def load_db_config():
                     GOOGLE_SEARCH_CX_LIST = cxs
                     GOOGLE_SEARCH_CX = cxs[0]
             
-            import builtins
-            builtins.print("⚙️ [Config Loader] تم تحميل الإعدادات وتجاوز قيم بيئة .env ديناميكياً من قاعدة البيانات.")
+            import sys
+            if "--json" not in sys.argv:
+                import builtins
+                builtins.print("⚙️ [Config Loader] تم تحميل الإعدادات وتجاوز قيم بيئة .env ديناميكياً من قاعدة البيانات.")
         conn.close()
     except Exception as e:
-        import builtins
-        builtins.print(f"⚠️ [Config Loader] تنبيه أثناء تحميل الإعدادات من قاعدة البيانات (قد لا تكون مهيأة بعد): {e}")
+        import sys
+        if "--json" not in sys.argv:
+            import builtins
+            builtins.print(f"⚠️ [Config Loader] تنبيه أثناء تحميل الإعدادات من قاعدة البيانات (قد لا تكون مهيأة بعد): {e}")
 
 load_db_config()
 
