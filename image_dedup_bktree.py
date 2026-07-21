@@ -110,8 +110,21 @@ class PerceptualDeduplicationTree:
 
         return found_duplicates
 
+    def search(self, query_hash: int, max_distance: int = 5) -> list:
+        """Alias for query_duplicates for backward compatibility."""
+        return self.query_duplicates(query_hash=query_hash, tolerance_threshold=max_distance)
+
+    def add(self, phash_value: int, image_id: str = "", metadata: dict = None):
+        """Alias for insert_node for backward compatibility."""
+        self.insert_node(phash_value=phash_value, image_id=image_id, metadata=metadata)
+
+    def insert(self, phash_value: int, image_id: str = "", metadata: dict = None):
+        """Alias for insert_node for backward compatibility."""
+        self.insert_node(phash_value=phash_value, image_id=image_id, metadata=metadata)
+
 
 # Wrapper helper for legacy imports
 def build_bktree_from_db():
     tree = PerceptualDeduplicationTree()
     return tree
+

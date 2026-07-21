@@ -37,13 +37,15 @@ class ApiController extends Controller
                 'batch_status' => 'batch-status',
                 'batch-status' => 'batch-status',
                 'sheet-preview' => 'sheet-preview',
-                'sheet-save' => 'sheet-save'
+                'sheet-save' => 'sheet-save',
+                'enterprise_metrics' => 'dashboard-enterprise-metrics'
             ];
             
             $endpoint = $routes[$action] ?? $action;
             $url = "http://127.0.0.1:8001/api/{$endpoint}";
             
-            if ($action === 'get_products' || $action === 'batch_status' || $action === 'batch-status') {
+            if ($action === 'get_products' || $action === 'batch_status' || $action === 'batch-status' || $action === 'enterprise_metrics') {
+
                 $response = \Illuminate\Support\Facades\Http::timeout(600)->get($url);
             } else {
                 $response = \Illuminate\Support\Facades\Http::timeout(600)->post($url, $params);
@@ -670,5 +672,15 @@ class ApiController extends Controller
         }
         return response()->json($result, 500);
     }
+
+    /**
+     * استعلام مؤشرات الأنظمة المتقدمة ونقاء الكتالوج ومرصد SRE
+     */
+    public function getEnterpriseMetrics(Request $request)
+    {
+        $result = $this->runPython('enterprise_metrics', $request->all());
+        return response()->json($result, 200);
+    }
 }
+
 

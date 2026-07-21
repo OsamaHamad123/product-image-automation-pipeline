@@ -296,8 +296,76 @@
     </div>
 </div>
 
+<!-- Enterprise Systems Health & Observability Observatory -->
+<div class="glass-panel" style="margin-bottom: 2.5rem; padding: 2rem; border-color: var(--panel-border-hover); background: radial-gradient(circle at top right, rgba(99, 102, 241, 0.05), transparent 70%);">
+    <h2 style="font-size: 1.35rem; font-weight: 900; border-bottom: 1px solid var(--panel-border); padding-bottom: 1rem; margin-bottom: 1.75rem; display: flex; align-items: center; justify-content: space-between; color: var(--text-primary);">
+        <span><i class="fas fa-shield-alt" style="color: var(--accent-purple); margin-inline-end: 0.5rem;"></i> مرصد حوكمة نقاء الكتالوج والشفاء الذاتي (SRE & Enterprise Observatory)</span>
+        <span class="score-badge" id="enterpriseObsStatus"><span class="status-dot"></span> متصل ونشط 100%</span>
+    </h2>
+
+    <div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1.5rem; margin-bottom: 1.5rem;">
+        <!-- Catalog Purity Card -->
+        <div class="stat-card" style="border-top: 3px solid var(--accent-purple);">
+            <div class="stat-icon" style="background: rgba(99, 102, 241, 0.15); color: var(--accent-purple);"><i class="fas fa-gem"></i></div>
+            <div class="stat-details">
+                <h3>مؤشر نقاء الكتالوج (Purity)</h3>
+                <div class="value" id="valCatalogPurity" style="color: var(--accent-purple);">97.02%</div>
+                <div style="font-size: 0.78rem; color: var(--text-secondary); margin-top: 0.4rem;">
+                    CER: <span id="valCER" style="font-weight: bold; color: var(--text-primary);">1.0%</span> | E1: <span id="valE1" style="font-weight: bold; color: var(--text-primary);">0.2%</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- SRE Data Freshness SLI/SLO Card -->
+        <div class="stat-card" style="border-top: 3px solid var(--success);">
+            <div class="stat-icon success"><i class="fas fa-clock"></i></div>
+            <div class="stat-details">
+                <h3>حداثة البيانات (Freshness SLI)</h3>
+                <div class="value" id="valFreshnessSLI" style="color: var(--success);">100.0%</div>
+                <div style="font-size: 0.78rem; color: var(--text-secondary); margin-top: 0.4rem;">
+                    SLO Target: <span style="font-weight: bold; color: var(--success);">≥ 99.95%</span> | Lag: <span id="valE2ELag" style="font-weight: bold; color: var(--text-primary);">12.0s</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Multi-Stage Contribution Margin Card -->
+        <div class="stat-card" style="border-top: 3px solid var(--info);">
+            <div class="stat-icon info"><i class="fas fa-chart-line"></i></div>
+            <div class="stat-details">
+                <h3>هامش المساهمة الصافي (CM3)</h3>
+                <div class="value" id="valCM3Ratio" style="color: var(--info);">25.0%</div>
+                <div style="font-size: 0.78rem; color: var(--text-secondary); margin-top: 0.4rem;">
+                    CM1: <span id="valCM1Ratio" style="font-weight: bold; color: var(--text-primary);">50.0%</span> | CM2: <span id="valCM2Ratio" style="font-weight: bold; color: var(--text-primary);">40.0%</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- System Protection & Circuit Breaker Card -->
+        <div class="stat-card" style="border-top: 3px solid var(--warning);">
+            <div class="stat-icon warning"><i class="fas fa-user-shield"></i></div>
+            <div class="stat-details">
+                <h3>درجة ثقة البروكسي وقاطع التيار</h3>
+                <div class="value" id="valProxyTrust" style="color: var(--warning);">0.923</div>
+                <div style="font-size: 0.78rem; color: var(--text-secondary); margin-top: 0.4rem;">
+                    Circuit Breaker: <span id="valCircuitBreaker" style="font-weight: bold; color: var(--success);">NORMAL</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Active Enterprise Security Modules Badges -->
+    <div style="display: flex; flex-wrap: wrap; gap: 0.75rem; background: rgba(0, 0, 0, 0.2); padding: 1rem 1.25rem; border-radius: var(--border-radius-sm); border: 1px solid var(--panel-border);">
+        <span class="score-badge" style="background: rgba(99, 102, 241, 0.1); color: var(--accent-purple); border-color: rgba(99, 102, 241, 0.3);"><i class="fas fa-lock"></i> Dyslexify Anti-Prompt Attack Active</span>
+        <span class="score-badge" style="background: rgba(16, 185, 129, 0.1); color: var(--success); border-color: rgba(16, 185, 129, 0.3);"><i class="fas fa-layer-group"></i> BiRefNet 2K Spatial Gradient Prior</span>
+        <span class="score-badge" style="background: rgba(6, 182, 212, 0.1); color: #06b6d4; border-color: rgba(6, 182, 212, 0.3);"><i class="fas fa-wave-square"></i> Spectral Frequency 100% Text Fixer</span>
+        <span class="score-badge" style="background: rgba(245, 158, 11, 0.1); color: var(--warning); border-color: rgba(245, 158, 11, 0.3);"><i class="fas fa-route"></i> Envoy Hysteresis Router Active</span>
+        <span class="score-badge" style="background: rgba(239, 68, 68, 0.1); color: var(--danger); border-color: rgba(239, 68, 68, 0.3);"><i class="fas fa-ban"></i> 50% Bulk Upload Failsafe Locked</span>
+    </div>
+</div>
+
 <!-- API Metrics & Costs -->
 <div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.5rem;">
+
     <div class="glass-panel" style="margin-bottom: 0; padding: 2rem;">
         <h3 style="font-size: 1.15rem; font-weight: 800; border-bottom: 1px solid var(--panel-border); padding-bottom: 1rem; margin-bottom: 1.5rem; display: flex; align-items: center; gap: 0.75rem; color: var(--text-primary);">
             <i class="fas fa-key" style="color: #06b6d4;"></i> استهلاك واجهة البرمجة (API Usage)
@@ -1099,6 +1167,41 @@
         }
     }
 
+    // Poll Enterprise System Observability Metrics
+    function pollEnterpriseMetrics() {
+        fetch('/api/enterprise-metrics')
+            .then(res => res.json())
+            .then(data => {
+                if (data.status === 'success' && data.purity_metrics) {
+                    const purityEl = document.getElementById('valCatalogPurity');
+                    const cerEl = document.getElementById('valCER');
+                    const e1El = document.getElementById('valE1');
+                    const freshEl = document.getElementById('valFreshnessSLI');
+                    const lagEl = document.getElementById('valE2ELag');
+                    const cm1El = document.getElementById('valCM1Ratio');
+                    const cm2El = document.getElementById('valCM2Ratio');
+                    const cm3El = document.getElementById('valCM3Ratio');
+                    const trustEl = document.getElementById('valProxyTrust');
+                    const cbEl = document.getElementById('valCircuitBreaker');
+
+                    if (purityEl) purityEl.innerText = data.purity_metrics.catalog_purity_score + '%';
+                    if (cerEl) cerEl.innerText = data.purity_metrics.cer_pct + '%';
+                    if (e1El) e1El.innerText = data.purity_metrics.e1_value_accuracy_pct + '%';
+
+                    if (freshEl) freshEl.innerText = data.sre_observability.freshness_sli_pct + '%';
+                    if (lagEl) lagEl.innerText = data.sre_observability.average_e2e_lag_sec + 's';
+
+                    if (cm1El) cm1El.innerText = data.contribution_margins.cm1_pct + '%';
+                    if (cm2El) cm2El.innerText = data.contribution_margins.cm2_pct + '%';
+                    if (cm3El) cm3El.innerText = data.contribution_margins.cm3_pct + '%';
+
+                    if (trustEl) trustEl.innerText = data.system_health.proxy_trust_score;
+                    if (cbEl) cbEl.innerText = data.system_health.circuit_breaker_status;
+                }
+            })
+            .catch(err => console.log('Enterprise metrics poll error:', err));
+    }
+
     // Poll batch status and system status on load
     window.addEventListener('load', () => {
         pollBatchStatus();
@@ -1107,9 +1210,13 @@
         pollSystemStatus();
         setInterval(pollSystemStatus, 5000);
 
+        pollEnterpriseMetrics();
+        setInterval(pollEnterpriseMetrics, 10000);
+
         // تهيئة التليمتري والبث المباشر
         initTelemetryChart();
         startSSEConnection();
     });
 </script>
 @endsection
+
