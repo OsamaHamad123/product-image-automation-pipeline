@@ -1214,3 +1214,96 @@ def send_telegram_notification(text):
     إرسال تنبيه فوري عبر بوت Telegram (تم إيقافه بالكامل بناءً على طلب العميل).
     """
     return False
+
+
+def optimize_and_center_product_image(source_path: str, destination_path: str, canvas_dimension: int = 1000) -> str:
+    """
+    تحسين وتوسيط صورة المنتج وتوليد ظلال طبيعية وحفظها بصيغة WebP موحدة:
+    - بناء لوحة مربعة 1:1 بأبعاد 1000px.
+    - هامش أمان 12% (تعبئة المنتج 88%).
+    - توليد ظل واقعي ناعم ببيانات الشفافية.
+    - تصدير بضغط WebP عالي الجودة (quality=85).
+    """
+    try:
+        import numpy as np
+        import cv2
+        from PIL import Image, ImageFilter
+
+        original_image = Image.open(source_path).convert("RGBA")
+        width, height = original_image.size
+
+        # عزل المقدمة إذا لم تكن تحتوي على قناة شفافية مفعلة
+        img_np = np.array(original_image)
+        alpha = img_np[:, :, 3]
+
+        if np.all(alpha == 255):
+            # استخدام OpenCV GrabCut الخفيف كبديل محلي آمن بدون نماذج ثقيلة
+            bgr = cv2.cvtColor(img_np[:, :, :3], cv2.COLOR_RGB2BGR)
+            h, w = bgr.shape[:2]
+            mask = np.zeros((h, w), np.uint8)
+            bgdModel = np.zeros((1, 65), np.float64)
+            fgdModel = np.zeros((1, 65), np.float64)
+            rect = (max(1, int(w * 0.05)), max(1, int(h * 0.05)), int(w * 0.90), int(h * 0.90))
+            cv2.grabCut(bgr, mask, rect, bgdModel, fgdModel, 3, cv2.GC_INIT_WITH_RECT)
+            bin_mask = np.where((mask == 2) | (mask == 0), 0, 255).astype(np.uint8)
+            foreground_extracted = original_image.copy()
+            foreground_extracted.putalpha(Image.fromarray(bin_mask))
+        else:
+            foreground_extracted = original_image
+
+        # قص المربع المحيط بالمنتج
+        bounding_box = foreground_extracted.getbbox()
+        if bounding_box:
+            cropped_foreground = foreground_extracted.crop(bounding_box)
+        else:
+            cropped_foreground = foreground_extracted
+
+        crop_w, crop_h = cropped_foreground.size
+
+        # بناء اللوحة المربعة 1000x1000
+        production_canvas = Image.new("RGBA", (canvas_dimension, canvas_dimension), (255, 255, 255, 255))
+
+        # حساب الحجم بنسبة تعبئة 88% (هامش أمان 12%)
+        max_internal_size = int(canvas_dimension * 0.88)
+        scaling_ratio = min(max_internal_size / float(crop_w), max_internal_size / float(crop_h))
+        scaled_width, scaled_height = max(1, int(crop_w * scaling_ratio)), max(1, int(crop_h * scaling_ratio))
+
+        resized_product = cropped_foreground.resize((scaled_width, scaled_height), Image.Resampling.LANCZOS)
+
+        # توليد الظل الواقعي الناعم عبر قناة الشفافية
+        product_alpha = resized_product.split()[-1]
+        blur_radius = 20
+        blurred_shadow_alpha = product_alpha.filter(ImageFilter.GaussianBlur(blur_radius))
+
+        shadow_layer = Image.new("RGBA", (scaled_width, scaled_height), (40, 40, 40, 110))
+        shadow_layer.putalpha(blurred_shadow_alpha)
+
+        shadow_offset = (12, 18)
+        center_x = (canvas_dimension - scaled_width) // 2
+        center_y = (canvas_dimension - scaled_height) // 2
+
+        production_canvas.paste(
+            shadow_layer,
+            (center_x + shadow_offset[0], center_y + shadow_offset[1]),
+            shadow_layer
+        )
+        production_canvas.paste(resized_product, (center_x, center_y), resized_product)
+
+        final_rgb = production_canvas.convert("RGB")
+        os.makedirs(os.path.dirname(destination_path), exist_ok=True)
+        final_rgb.save(
+            destination_path,
+            format="WEBP",
+            quality=85,
+            method=6
+        )
+        return destination_path
+    except Exception as e:
+        print(f"⚠️ [Image Optimization Error] Fallback to raw copy: {e}")
+        try:
+            with Image.open(source_path) as img:
+                img.convert("RGB").save(destination_path, format="WEBP", quality=85)
+            return destination_path
+        except Exception:
+            return source_path
+

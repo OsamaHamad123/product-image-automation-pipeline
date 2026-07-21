@@ -1,136 +1,117 @@
 # image_dedup_bktree.py
-# موديول التجزئة الإدراكية (pHash) وشجرة Burkhard-Keller (BK-Tree) لكشف وفك تكرار الصور بصرياً بزمن قياسي
-
+# كشف التكرارات البصرية عبر التشفير الإدراكي وشجرة BK (Perceptual Hashing & BK-Trees)
 import os
-import sqlite3
 from PIL import Image
 import numpy as np
 import scipy.fftpack
 
-# حساب مسافة هامنج بين بصمتين ثنائيتين
-def hamming_distance(hash1: int, hash2: int) -> int:
-    return bin(hash1 ^ hash2).count('1')
 
-def calculate_phash(image_path_or_pil) -> int:
+def calculate_hamming_distance(hash_a: int, hash_b: int) -> int:
+    """حساب مسافة الهامينج بأعلى كفاءة عبر عمليات بيتية سريعة."""
+    return bin(hash_a ^ hash_b).count('1')
+
+
+def calculate_phash(image_input) -> int:
     """
     حساب الهاش الإدراكي (Perceptual Hash - pHash) للصور:
     1. تقليص الأبعاد لـ 32x32 رمادي.
     2. تطبيق تحويل جيب التمام المتقطع (2D DCT).
     3. أخذ المصفوفة الفرعية 8x8 للترددات المنخفضة.
-    4. مقارنة معاملات المصفوفة بمتوسط القيم لتوليد بصمة 64 بت.
+    4. استبعاد معامل DC وحساب المتوسط وتوليد بصمة 64 بت ثنائية.
     """
     try:
-        # فتح الصورة أو استخدام كائن PIL مباشرة
-        if isinstance(image_path_or_pil, str):
-            img = Image.open(image_path_or_pil)
+        if isinstance(image_input, str):
+            img = Image.open(image_input)
         else:
-            img = image_path_or_pil
-            
+            img = image_input
+
         img = img.convert('L').resize((32, 32), Image.Resampling.LANCZOS)
         img_array = np.array(img, dtype=np.float32)
-        
+
         # 2D Discrete Cosine Transform (DCT)
         dct = scipy.fftpack.dct(scipy.fftpack.dct(img_array, axis=0, norm='ortho'), axis=1, norm='ortho')
-        
-        # الاحتفاظ بالمصفوفة الطيفية 8x8 من الركن العلوي الأيسر
+
+        # أخذ العناصر 8x8 من الركن العلوي الأيسر
         dct_low = dct[0:8, 0:8]
-        
-        # استبعاد معامل DC (العنصر [0,0]) لتقليل الحساسية لمستويات الإضاءة العامة
         dct_low_no_dc = dct_low.copy()
         dct_low_no_dc[0, 0] = 0
-        
-        # حساب متوسط المعاملات
-        mean = np.mean(dct_low_no_dc)
-        
-        # توليد السلسلة الثنائية 64 بت وتحويلها لعدد صحيح
-        binary_string = "".join("1" if val > mean else "0" for val in dct_low.flatten())
+
+        mean_val = np.mean(dct_low_no_dc)
+        binary_string = "".join("1" if val > mean_val else "0" for val in dct_low.flatten())
         return int(binary_string, 2)
     except Exception as e:
-        print(f"⚠️ [pHash Error] Failed to calculate hash for {image_path_or_pil}: {e}")
+        print(f"⚠️ [pHash Error] Failed to calculate pHash: {e}")
         return 0
 
-class BKTreeNode:
-    def __init__(self, item: int, metadata: dict = None):
-        self.item = item  # البصمة العددية للهاش الإدراكي
-        self.metadata = metadata or {}  # بيانات وصفية إضافية (الاسم، البراند، رابط Cloudinary)
-        self.children = {}  # قاموس يربط مسافة هامنج بعقدة فرعية
 
-class BKTree:
+class BKNode:
+    def __init__(self, phash_value: int, image_id: str, metadata: dict = None):
+        self.phash_value = phash_value
+        self.image_id = image_id
+        self.metadata = metadata or {}
+        self.children = {}  # يربط مسافة الهامينج بالعقدة الابنة المقابلة
+
+
+class PerceptualDeduplicationTree:
+    """
+    هيكل بيانات شجرة BK (Burkhard-Keller Tree) المترية للبحث اللوغاريتمي O(log N) في بصمات pHash.
+    """
+
     def __init__(self):
         self.root = None
 
-    def insert(self, item: int, metadata: dict = None):
-        if item == 0:
+    def insert_node(self, phash_value: int, image_id: str, metadata: dict = None):
+        if phash_value == 0:
             return
         if self.root is None:
-            self.root = BKTreeNode(item, metadata)
+            self.root = BKNode(phash_value, image_id, metadata)
             return
 
-        current = self.root
+        current_node = self.root
         while True:
-            dist = hamming_distance(item, current.item)
-            if dist == 0:
-                # البصمة مكررة بالفعل، نقوم بتحديث البيانات الوصفية فقط
-                current.metadata.update(metadata or {})
+            distance = calculate_hamming_distance(current_node.phash_value, phash_value)
+            if distance == 0:
+                # تطابق إدراكي تام، الصورة مكررة بالفعل ولا يتم تكرار إدخالها
+                if metadata:
+                    current_node.metadata.update(metadata)
                 return
-            if dist in current.children:
-                current = current.children[dist]
+
+            if distance in current_node.children:
+                current_node = current_node.children[distance]
             else:
-                current.children[dist] = BKTreeNode(item, metadata)
+                current_node.children[distance] = BKNode(phash_value, image_id, metadata)
                 break
 
-    def search(self, item: int, max_distance: int = 5) -> list:
-        """
-        البحث التفرعي السريع عن مطابقات بصرية بمسافة هامنج تقل عن أو تساوي max_distance.
-        يستخدم المتباينة المثلثية لتقليص مسار الاستعلام اللوغاريتمي O(log N).
-        """
-        if self.root is None or item == 0:
+    def query_duplicates(self, query_hash: int, tolerance_threshold: int = 5) -> list:
+        if self.root is None or query_hash == 0:
             return []
 
-        results = []
-        candidates = [self.root]
-        
-        while candidates:
-            current = candidates.pop()
-            dist = hamming_distance(item, current.item)
-            
-            if dist <= max_distance:
-                results.append({
-                    "hash": current.item,
-                    "distance": dist,
-                    "metadata": current.metadata
-                })
-                
-            # فحص العقد الفرعية فقط التي تقع ضمن النطاق المسموح بالمتباينة المثلثية
-            for child_dist, child_node in current.children.items():
-                if abs(child_dist - dist) <= max_distance:
-                    candidates.append(child_node)
-                    
-        return results
+        found_duplicates = []
+        search_candidates = [self.root]
 
-# دالة مساعدة لبناء الشجرة استناداً لبيانات الكاش في MariaDB
-def build_bktree_from_db() -> BKTree:
-    tree = BKTree()
-    try:
-        import local_cache_db
-        conn = local_cache_db.get_db_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute("SELECT product_name, brand, cloudinary_url, perceptual_hash FROM resolved_products WHERE perceptual_hash IS NOT NULL AND perceptual_hash != ''")
-        rows = cursor.fetchall()
-        for row in rows:
-            try:
-                if row.get("perceptual_hash"):
-                    hash_val = int(row["perceptual_hash"])
-                    tree.insert(hash_val, {
-                        "product_name": row["product_name"],
-                        "brand": row["brand"],
-                        "cloudinary_url": row["cloudinary_url"]
-                    })
-            except ValueError:
-                pass
-        conn.close()
-    except Exception as e:
-        print(f"⚠️ [BKTree Builder Error] Failed to load from MariaDB: {e}")
-        
+        while search_candidates:
+            node = search_candidates.pop()
+            distance = calculate_hamming_distance(node.phash_value, query_hash)
+
+            if distance <= tolerance_threshold:
+                found_duplicates.append({
+                    "image_id": node.image_id,
+                    "distance": distance,
+                    "metadata": node.metadata
+                })
+
+            # تطبيق قاعدة التفاوت المثلثي لقص فروع شجرة البحث وتجنب فحص العقد غير المطابقة
+            lower_bound = max(0, distance - tolerance_threshold)
+            upper_bound = distance + tolerance_threshold
+
+            for step in range(lower_bound, upper_bound + 1):
+                if step in node.children:
+                    search_candidates.append(node.children[step])
+
+        return found_duplicates
+
+
+# Wrapper helper for legacy imports
+def build_bktree_from_db():
+    tree = PerceptualDeduplicationTree()
     return tree
