@@ -1961,6 +1961,15 @@ def search_best_product_image(query, product_name, brand, **kwargs):
     البحث واختيار الصورة الأمثل للمنتج، مع تطبيق خطة بديلة للبحث العام
     في حال لم تكن هناك صور خاصة بالبراند (لأن البراندات المحلية مثل Meliha قد لا تملك صوراً على محركات البحث).
     """
+    # 00. التحقق من مطابقة البراند وتصحيحه تلقائياً عبر Gemini ليكون موحداً في البحث والتقييم
+    if product_name and brand:
+        import google_sheets
+        aligned = google_sheets.align_brand_via_gemini(product_name, brand)
+        if aligned and aligned.lower() != brand.lower():
+            brand = aligned
+            # تحديث الاستعلام الأساسي أيضاً لتفادي استخدام البراند الخاطئ فيه
+            query = f"{product_name} {brand}".strip()
+
     trace = kwargs.get('trace')
     strict_brand_match = kwargs.get('strict_brand_match')
     brand_mappings = kwargs.get('brand_mappings')
