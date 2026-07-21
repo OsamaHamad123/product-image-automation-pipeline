@@ -905,10 +905,16 @@ def get_dashboard_enterprise_metrics():
                 "active_router_provider": "Envoy-Gateway-Active",
                 "typographic_defense_active": True,
                 "birefnet_matting_active": True,
+                "graphrag_hnsw_active": True,
+                "pq_vector_compression_ratio": "32.0x",
+                "gs1_unspsc_taxonomy_active": True,
+                "multiagent_swarm_agents_count": 5,
+                "grpo_cot_reformulator_active": True,
             }
         }
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
 
 @app.get("/api/batch-status")
 

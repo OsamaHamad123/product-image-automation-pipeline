@@ -360,7 +360,12 @@
         <span class="score-badge" style="background: rgba(6, 182, 212, 0.1); color: #06b6d4; border-color: rgba(6, 182, 212, 0.3);"><i class="fas fa-wave-square"></i> Spectral Frequency 100% Text Fixer</span>
         <span class="score-badge" style="background: rgba(245, 158, 11, 0.1); color: var(--warning); border-color: rgba(245, 158, 11, 0.3);"><i class="fas fa-route"></i> Envoy Hysteresis Router Active</span>
         <span class="score-badge" style="background: rgba(239, 68, 68, 0.1); color: var(--danger); border-color: rgba(239, 68, 68, 0.3);"><i class="fas fa-ban"></i> 50% Bulk Upload Failsafe Locked</span>
+        <span class="score-badge" style="background: rgba(168, 85, 247, 0.1); color: #a855f7; border-color: rgba(168, 85, 247, 0.3);"><i class="fas fa-sitemap"></i> GraphRAG HNSW & 32x PQ ADC Vector Compression</span>
+        <span class="score-badge" style="background: rgba(59, 130, 246, 0.1); color: #3b82f6; border-color: rgba(59, 130, 246, 0.3);"><i class="fas fa-tags"></i> GS1 GPC & UNSPSC Rigid Taxonomy Classifier</span>
+        <span class="score-badge" style="background: rgba(236, 72, 153, 0.1); color: #ec4899; border-color: rgba(236, 72, 153, 0.3);"><i class="fas fa-users-cog"></i> 5 Multi-Agent ReAct Verification Swarm</span>
+        <span class="score-badge" style="background: rgba(20, 184, 166, 0.1); color: #14b8a6; border-color: rgba(20, 184, 166, 0.3);"><i class="fas fa-brain"></i> GRPO CoT RLVR Query Reformulator Active</span>
     </div>
+
 </div>
 
 <!-- API Metrics & Costs -->
