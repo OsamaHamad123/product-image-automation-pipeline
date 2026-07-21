@@ -463,6 +463,59 @@
             <!-- Right side: Grouped Configuration Cards -->
             <div style="display: flex; flex-direction: column; gap: 1.5rem;">
                 
+                <!-- Group 0: Google Sheets Fetcher -->
+                <div class="glass-panel" style="padding: 1.5rem;">
+                    <h3 style="font-size: 1.05rem; font-weight: 800; margin-bottom: 1rem; display: flex; align-items: center; justify-content: space-between; color: var(--accent-cyan);">
+                        <span style="display: flex; align-items: center; gap: 0.5rem;"><i class="fas fa-file-excel"></i> تهيئة ومزامنة مصدر البيانات (Google Sheets)</span>
+                        <span class="score-badge" style="background: rgba(6, 182, 212, 0.1); border-color: var(--accent-cyan); color: var(--accent-cyan); font-size: 0.75rem;">نشط ⚡</span>
+                    </h3>
+                    
+                    <div style="background: rgba(0,0,0,0.15); border: 1px solid var(--panel-border); border-radius: 12px; padding: 1rem; margin-bottom: 1.25rem; font-size: 0.8rem; line-height: 1.6; color: var(--text-secondary);">
+                        <i class="fas fa-info-circle" style="color: var(--accent-cyan); margin-inline-end: 0.35rem;"></i>
+                        الرجاء مشاركة ملف الـ Google Sheet الخاص بك مع حساب الخدمة التالي كـ <strong>Editor</strong> لتمكينه من القراءة وتحديث الروابط تلقائياً:
+                        <code style="display: block; margin-top: 0.5rem; background: rgba(0,0,0,0.3); padding: 6px 12px; border-radius: 6px; font-family: monospace; color: var(--text-primary); text-align: left; direction: ltr; font-weight: bold; border: 1px solid var(--panel-border);">outomation-agent@boulevard-a50a0.iam.gserviceaccount.com</code>
+                    </div>
+                    
+                    <div style="display: flex; flex-direction: column; gap: 1rem;">
+                        <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
+                            <div style="flex: 2; min-width: 280px; display: flex; flex-direction: column; gap: 0.45rem;">
+                                <label style="font-size: 0.85rem; color: var(--text-secondary); font-weight: bold;">رابط أو اسم ملف Google Sheet</label>
+                                <input type="text" id="spreadsheetUrlOrName" placeholder="أدخل رابط جدول البيانات بالكامل..." value="{{ config('sheets.spreadsheet_name_or_url') ?? env('SPREADSHEET_NAME_OR_URL') }}" style="width: 100%; padding: 0.65rem 1rem; background: var(--input-bg); border: 1px solid var(--panel-border); border-radius: 10px; color: var(--text-primary); font-family: inherit; font-size: 0.85rem; outline: none;">
+                            </div>
+                            <div style="flex: 1; min-width: 150px; display: flex; flex-direction: column; gap: 0.45rem;">
+                                <label style="font-size: 0.85rem; color: var(--text-secondary); font-weight: bold;">اسم ورقة العمل (Tab)</label>
+                                <input type="text" id="spreadsheetTab" placeholder="مثال: Sheet1 أو المنتجات" value="{{ env('SPREADSHEET_TAB_NAME') ?: 'المنتجات' }}" style="width: 100%; padding: 0.65rem 1rem; background: var(--input-bg); border: 1px solid var(--panel-border); border-radius: 10px; color: var(--text-primary); font-family: inherit; font-size: 0.85rem; outline: none;">
+                            </div>
+                        </div>
+                        
+                        <div style="display: flex; gap: 0.75rem; justify-content: flex-end;">
+                            <button type="button" class="btn btn-secondary" id="previewSheetBtn" onclick="previewGoogleSheet()" style="font-weight: bold; padding: 0.65rem 1.25rem;">
+                                <i class="fas fa-eye"></i> معاينة وجلب البيانات 🔍
+                            </button>
+                            <button type="button" class="btn" id="saveSheetBtn" onclick="saveGoogleSheetConfig()" style="background: var(--accent-gradient); color: var(--btn-text); font-weight: bold; padding: 0.65rem 1.5rem;">
+                                <i class="fas fa-save"></i> حفظ المزامنة سحابياً 💾
+                            </button>
+                        </div>
+                        
+                        <!-- Sheet Preview Table -->
+                        <div id="sheetPreviewContainer" style="display: none; border-top: 1px solid var(--panel-border); padding-top: 1.25rem; margin-top: 0.5rem;">
+                            <h4 style="font-size: 0.85rem; color: var(--text-primary); font-weight: bold; margin: 0 0 0.75rem 0;"><i class="fas fa-table"></i> معاينة البيانات المستوردة (أول 5 صفوف):</h4>
+                            <div style="overflow-x: auto; border: 1px solid var(--panel-border); border-radius: 10px; background: rgba(0,0,0,0.2);">
+                                <table id="sheetPreviewTable" style="width: 100%; border-collapse: collapse; font-size: 0.75rem; text-align: right; direction: rtl;">
+                                    <thead>
+                                        <tr style="background: rgba(255,255,255,0.03); border-bottom: 1px solid var(--panel-border);">
+                                            <!-- dynamic headers -->
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <!-- dynamic rows -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
                 <!-- Group A: Image Processing -->
                 <div class="glass-panel" style="padding: 1.5rem;">
                     <h3 style="font-size: 1.05rem; font-weight: 800; margin-bottom: 1.25rem; display: flex; align-items: center; gap: 0.5rem; color: var(--accent-cyan);">
@@ -2827,6 +2880,131 @@
     }
 
 
+
+    // Google Sheets Fetcher & Preview Actions
+    async function previewGoogleSheet() {
+        const urlInput = document.getElementById('spreadsheetUrlOrName').value.trim();
+        const tabInput = document.getElementById('spreadsheetTab').value.trim();
+        if (!urlInput) {
+            alert('❌ يرجى إدخال رابط أو اسم ملف Google Sheet أولاً.');
+            return;
+        }
+        
+        const btn = document.getElementById('previewSheetBtn');
+        const originalText = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جاري الاتصال وجلب المعاينة...';
+        
+        const previewContainer = document.getElementById('sheetPreviewContainer');
+        previewContainer.style.display = 'none';
+        
+        try {
+            const res = await fetch('/api/sheet/preview', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
+                },
+                body: JSON.stringify({
+                    spreadsheet_url: urlInput,
+                    tab_name: tabInput
+                })
+            });
+            const data = await res.json();
+            btn.disabled = false;
+            btn.innerHTML = originalText;
+            
+            if (data.status === 'success') {
+                const table = document.getElementById('sheetPreviewTable');
+                const thead = table.querySelector('thead tr');
+                const tbody = table.querySelector('tbody');
+                
+                thead.innerHTML = '';
+                tbody.innerHTML = '';
+                
+                if (data.headers.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="100%" style="text-align:center; padding: 1rem; color:var(--text-secondary);">جدول البيانات فارغ تماماً.</td></tr>';
+                } else {
+                    // Inject headers
+                    data.headers.forEach(h => {
+                        const th = document.createElement('th');
+                        th.style = "padding: 0.55rem 0.85rem; border: 1px solid var(--panel-border); font-weight: bold; background: rgba(255,255,255,0.02);";
+                        th.innerText = h || '-';
+                        thead.appendChild(th);
+                    });
+                    
+                    // Inject rows
+                    data.rows.forEach(row => {
+                        const tr = document.createElement('tr');
+                        tr.style = "border-bottom: 1px solid rgba(255,255,255,0.03);";
+                        row.forEach(val => {
+                            const td = document.createElement('td');
+                            td.style = "padding: 0.55rem 0.85rem; border: 1px solid var(--panel-border); color: var(--text-secondary);";
+                            td.innerText = val || '';
+                            tr.appendChild(td);
+                        });
+                        tbody.appendChild(tr);
+                    });
+                }
+                previewContainer.style.display = 'block';
+                alert('✅ تم جلب ومعاينة البيانات بنجاح!');
+            } else {
+                alert('❌ فشل جلب الشيت: ' + data.error);
+            }
+        } catch (err) {
+            console.error(err);
+            btn.disabled = false;
+            btn.innerHTML = originalText;
+            alert('❌ حدث خطأ أثناء الاتصال بالخادم لجلب الشيت.');
+        }
+    }
+
+    async function saveGoogleSheetConfig() {
+        const urlInput = document.getElementById('spreadsheetUrlOrName').value.trim();
+        const tabInput = document.getElementById('spreadsheetTab').value.trim();
+        if (!urlInput) {
+            alert('❌ يرجى إدخال رابط أو اسم ملف Google Sheet أولاً.');
+            return;
+        }
+        
+        if (!confirm('⚠️ عند حفظ المزامنة، سيتم إعادة ضبط كاش المنتجات بالكامل ليعكس بيانات الملف الجديد. هل ترغب في الاستمرار؟')) {
+            return;
+        }
+        
+        const btn = document.getElementById('saveSheetBtn');
+        const originalText = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جاري الحفظ وتصفير الكاش...';
+        
+        try {
+            const res = await fetch('/api/sheet/save', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
+                },
+                body: JSON.stringify({
+                    spreadsheet_url: urlInput,
+                    tab_name: tabInput
+                })
+            });
+            const data = await res.json();
+            btn.disabled = false;
+            btn.innerHTML = originalText;
+            
+            if (data.status === 'success') {
+                alert('✅ تم حفظ إعدادات مزامنة الشيت الجديد وتحديث البيئة وتصفير الكاش بنجاح! سيتم تحديث الصفحة الآن.');
+                location.reload();
+            } else {
+                alert('❌ فشل حفظ الإعدادات: ' + data.error);
+            }
+        } catch (err) {
+            console.error(err);
+            btn.disabled = false;
+            btn.innerHTML = originalText;
+            alert('❌ خطأ في الاتصال بالخادم لحفظ الإعدادات.');
+        }
+    }
 
     // On Load
 

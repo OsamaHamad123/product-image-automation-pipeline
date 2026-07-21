@@ -531,6 +531,78 @@ def action_reject_image(params):
         return {'status': 'success', 'message': 'Feedback logged successfully'}
     return {'status': 'failed', 'error': 'Failed to save feedback log to SQLite'}
 
+def action_sheet_preview(params):
+    spreadsheet_url = params.get("spreadsheet_url", "").strip()
+    tab_name = params.get("tab_name", "").strip()
+    if not spreadsheet_url:
+        return {"status": "failed", "error": "Spreadsheet URL or name is required"}
+    try:
+        sheets_client = google_sheets.get_sheets_client()
+        if not sheets_client:
+            return {"status": "failed", "error": "Google Sheets API connection failed"}
+        
+        if spreadsheet_url.startswith("https://"):
+            sh = sheets_client.open_by_url(spreadsheet_url)
+        else:
+            sh = sheets_client.open(spreadsheet_url)
+            
+        if tab_name:
+            worksheet = sh.worksheet(tab_name)
+        else:
+            worksheet = sh.get_worksheet(0)
+            
+        if not worksheet:
+            return {"status": "failed", "error": "Worksheet not found"}
+            
+        all_values = worksheet.get_all_values()
+        if not all_values:
+            return {"status": "success", "headers": [], "rows": []}
+            
+        headers = all_values[0]
+        rows = all_values[1:6]  # أول 5 صفوف
+        
+        return {"status": "success", "headers": headers, "rows": rows}
+    except Exception as e:
+        return {"status": "failed", "error": str(e)}
+
+def action_sheet_save(params):
+    spreadsheet_url = params.get("spreadsheet_url", "").strip()
+    tab_name = params.get("tab_name", "").strip()
+    if not spreadsheet_url:
+        return {"status": "failed", "error": "Spreadsheet URL or name is required"}
+    try:
+        env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+        if os.path.exists(env_path):
+            with open(env_path, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+            
+            updated_url = False
+            updated_tab = False
+            for i, line in enumerate(lines):
+                if line.strip().startswith("SPREADSHEET_NAME_OR_URL="):
+                    lines[i] = f"SPREADSHEET_NAME_OR_URL=\"{spreadsheet_url}\"\n"
+                    updated_url = True
+                elif line.strip().startswith("SPREADSHEET_TAB_NAME="):
+                    lines[i] = f"SPREADSHEET_TAB_NAME=\"{tab_name}\"\n"
+                    updated_tab = True
+            
+            if not updated_url:
+                lines.append(f"\nSPREADSHEET_NAME_OR_URL=\"{spreadsheet_url}\"\n")
+            if not updated_tab:
+                lines.append(f"SPREADSHEET_TAB_NAME=\"{tab_name}\"\n")
+                
+            with open(env_path, "w", encoding="utf-8") as f:
+                f.writelines(lines)
+                
+        # تحديث المتغيرات في الإعدادات المباشرة أيضاً
+        config.SPREADSHEET_NAME_OR_URL = spreadsheet_url
+        config.SPREADSHEET_TAB_NAME = tab_name
+        
+        google_sheets.clear_cache()
+        return {"status": "success", "message": "Spreadsheet configuration updated successfully"}
+    except Exception as e:
+        return {"status": "failed", "error": str(e)}
+
 def main():
     if len(sys.argv) < 2:
         print(json.dumps({'status': 'failed', 'error': 'No action specified'}))
@@ -544,7 +616,9 @@ def main():
         'search': action_search,
         'select_image': action_select_image,
         'upload_manual_image': action_upload_manual_image,
-        'reject_image': action_reject_image
+        'reject_image': action_reject_image,
+        'sheet-preview': action_sheet_preview,
+        'sheet-save': action_sheet_save
     }
     
     if action not in actions:

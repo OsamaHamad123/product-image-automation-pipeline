@@ -72,6 +72,7 @@
     .stat-icon.success { background: var(--success-bg); color: var(--success); border-color: var(--panel-border); }
     .stat-icon.warning { background: var(--warning-bg); color: var(--warning); border-color: var(--panel-border); }
     .stat-icon.danger { background: var(--danger-bg); color: var(--danger); border-color: var(--panel-border); }
+    .stat-icon.info { background: var(--info-bg); color: var(--info); border-color: var(--panel-border); }
 
     .stat-details {
         position: relative;
@@ -98,11 +99,13 @@
     .stat-card.success .value { color: var(--success); }
     .stat-card.warning .value { color: var(--warning); }
     .stat-card.danger .value { color: var(--danger); }
+    .stat-card.info .value { color: var(--info); }
 
     .stat-card.total:hover { border-color: var(--accent-purple); box-shadow: 0 10px 30px rgba(255, 255, 255, 0.03); }
     .stat-card.success:hover { border-color: var(--panel-border-hover); box-shadow: 0 10px 30px rgba(255, 255, 255, 0.03); }
     .stat-card.warning:hover { border-color: var(--panel-border-hover); box-shadow: 0 10px 30px rgba(255, 255, 255, 0.03); }
     .stat-card.danger:hover { border-color: var(--danger); box-shadow: 0 10px 30px rgba(239, 68, 68, 0.03); }
+    .stat-card.info:hover { border-color: var(--info); box-shadow: 0 10px 30px rgba(6, 182, 212, 0.03); }
 
     .progress-bar-container {
         background: rgba(255, 255, 255, 0.03);
@@ -276,10 +279,18 @@
         </div>
     </div>
 
+    <div class="stat-card info">
+        <div class="stat-icon info"><i class="fas fa-hourglass-start"></i></div>
+        <div class="stat-details">
+            <h3>منتجات لم تبدأ بعد</h3>
+            <div class="value">{{ $missing }}</div>
+        </div>
+    </div>
+
     <div class="stat-card danger">
         <div class="stat-icon danger"><i class="fas fa-times-circle"></i></div>
         <div class="stat-details">
-            <h3>أخطاء تقنية بـ SQLite</h3>
+            <h3>أخطاء تقنية بـ MariaDB</h3>
             <div class="value">{{ $errors }}</div>
         </div>
     </div>
@@ -523,7 +534,7 @@
                     </span>
                 </div>
                 <div style="display: flex; justify-content: space-between; align-items: center; padding-bottom: 0.25rem;">
-                    <span style="color: var(--text-secondary); font-size: 0.9rem; font-weight: 600;">قاعدة البيانات المحلية (SQLite Cache):</span>
+                    <span style="color: var(--text-secondary); font-size: 0.9rem; font-weight: 600;">قاعدة البيانات المحلية (MariaDB Cache):</span>
                     <span id="status-db" class="score-badge" style="background: var(--card-bg); color: var(--text-secondary); font-weight: bold;">جاري الفحص...</span>
                 </div>
             </div>
@@ -533,10 +544,10 @@
             <h4 style="font-size: 0.95rem; margin-bottom: 0.35rem; color: var(--text-primary); font-weight: 800;">إجراءات التحكم السريعة للتشغيل التلقائي</h4>
             <div style="display: flex; gap: 1rem; width: 100%;">
                 <button class="btn" id="startFlaskBtn" onclick="controlSystem('start-flask')" style="flex: 1; background: var(--accent-gradient); border-color: var(--panel-border); color: var(--btn-text); box-shadow: 0 4px 14px 0 var(--btn-shadow);">
-                    <i class="fas fa-play"></i> خادم بايثون المساعد 🚀
+                    <i class="fas fa-play"></i> بدء خادم بايثون (FastAPI) 🚀
                 </button>
-                <button class="btn btn-secondary" id="stopFlaskBtn" onclick="controlSystem('stop-flask')" style="flex: 1;">
-                    <i class="fas fa-info-circle"></i> تعليمات خادم النماذج
+                <button class="btn btn-secondary" id="stopFlaskBtn" onclick="controlSystem('stop-flask')" style="flex: 1; background: var(--danger-bg); border-color: var(--panel-border); color: var(--danger);">
+                    <i class="fas fa-stop"></i> إيقاف خادم بايثون (FastAPI) 🛑
                 </button>
             </div>
             <p style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 0.5rem; line-height: 1.6;">

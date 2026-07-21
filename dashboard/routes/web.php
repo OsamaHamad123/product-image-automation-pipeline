@@ -42,6 +42,8 @@ Route::get('/api/batch-status', [ApiController::class, 'batchStatus']);
 Route::post('/api/batch/pause', [ApiController::class, 'pauseBatch']);
 Route::post('/api/batch/resume', [ApiController::class, 'resumeBatch']);
 Route::post('/api/batch/reset', [ApiController::class, 'resetBatch']);
+Route::post('/api/sheet/preview', [ApiController::class, 'previewSheet']);
+Route::post('/api/sheet/save', [ApiController::class, 'saveSheetConfig']);
 
 // إدارة الخدمات والخوادم تلقائياً
 Route::get('/api/system/status', [ApiController::class, 'systemStatus']);

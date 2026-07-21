@@ -147,6 +147,88 @@ def read_root():
         }
     }
 
+@app.post("/api/sheet-preview")
+def preview_sheet(payload: dict):
+    """
+    معاينة أول 5 صفوف من ملف Google Sheet قبل المزامنة.
+    """
+    spreadsheet_url = payload.get("spreadsheet_url", "").strip()
+    tab_name = payload.get("tab_name", "").strip()
+    if not spreadsheet_url:
+        raise HTTPException(status_code=400, detail="Spreadsheet URL or name is required")
+    try:
+        sheets_client = google_sheets.get_sheets_client()
+        if not sheets_client:
+            raise HTTPException(status_code=500, detail="Google Sheets API connection failed")
+        
+        if spreadsheet_url.startswith("https://"):
+            sh = sheets_client.open_by_url(spreadsheet_url)
+        else:
+            sh = sheets_client.open(spreadsheet_url)
+            
+        if tab_name:
+            worksheet = sh.worksheet(tab_name)
+        else:
+            worksheet = sh.get_worksheet(0)
+            
+        if not worksheet:
+            raise HTTPException(status_code=404, detail="Worksheet not found")
+            
+        all_values = worksheet.get_all_values()
+        if not all_values:
+            return {"status": "success", "headers": [], "rows": []}
+            
+        headers = all_values[0]
+        rows = all_values[1:6]  # أول 5 صفوف
+        
+        return {"status": "success", "headers": headers, "rows": rows}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/sheet-save")
+def save_sheet_config(payload: dict):
+    """
+    حفظ تهيئة الـ Google Sheet في ملف البيئة .env وإعادة تعيين الكاش.
+    """
+    spreadsheet_url = payload.get("spreadsheet_url", "").strip()
+    tab_name = payload.get("tab_name", "").strip()
+    if not spreadsheet_url:
+        raise HTTPException(status_code=400, detail="Spreadsheet URL or name is required")
+    try:
+        env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+        if os.path.exists(env_path):
+            with open(env_path, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+            
+            updated_url = False
+            updated_tab = False
+            for i, line in enumerate(lines):
+                if line.strip().startswith("SPREADSHEET_NAME_OR_URL="):
+                    lines[i] = f"SPREADSHEET_NAME_OR_URL=\"{spreadsheet_url}\"\n"
+                    updated_url = True
+                elif line.strip().startswith("SPREADSHEET_TAB_NAME="):
+                    lines[i] = f"SPREADSHEET_TAB_NAME=\"{tab_name}\"\n"
+                    updated_tab = True
+            
+            if not updated_url:
+                lines.append(f"\nSPREADSHEET_NAME_OR_URL=\"{spreadsheet_url}\"\n")
+            if not updated_tab:
+                lines.append(f"SPREADSHEET_TAB_NAME=\"{tab_name}\"\n")
+                
+            with open(env_path, "w", encoding="utf-8") as f:
+                f.writelines(lines)
+                
+        # تحديث المتغيرات في الإعدادات المباشرة أيضاً
+        config.SPREADSHEET_NAME_OR_URL = spreadsheet_url
+        config.SPREADSHEET_TAB_NAME = tab_name
+        
+        # تفريغ كاش المنتجات القديم لضمان جلب الشيت الجديد فورياً
+        google_sheets.clear_cache()
+        
+        return {"status": "success", "message": "Spreadsheet configuration updated successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/api/products")
 def get_products():
     """

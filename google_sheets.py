@@ -244,6 +244,15 @@ def open_worksheet(client, sheet_name_or_url, worksheet_index=0):
             sh = client.open_by_url(sheet_name_or_url)
         else:
             sh = client.open(sheet_name_or_url)
+            
+        tab_name = getattr(config, "SPREADSHEET_TAB_NAME", "")
+        if tab_name and worksheet_index == 0:
+            try:
+                ws = sh.worksheet(tab_name)
+                if ws:
+                    return ws
+            except Exception:
+                pass
         return sh.get_worksheet(worksheet_index)
     except Exception as e:
         print(f"❌ فشل فتح جدول البيانات '{sheet_name_or_url}': {e}")

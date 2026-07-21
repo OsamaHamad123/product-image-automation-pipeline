@@ -35,7 +35,9 @@ class ApiController extends Controller
                 'reject_image' => 'reject-image',
                 'upload_manual_image' => 'upload-manual-image',
                 'batch_status' => 'batch-status',
-                'batch-status' => 'batch-status'
+                'batch-status' => 'batch-status',
+                'sheet-preview' => 'sheet-preview',
+                'sheet-save' => 'sheet-save'
             ];
             
             $endpoint = $routes[$action] ?? $action;
@@ -643,4 +645,30 @@ class ApiController extends Controller
             return response()->json(['status' => 'failed', 'error' => $e->getMessage()], 500);
         }
     }
+
+    /**
+     * معاينة أول 5 صفوف من ملف Google Sheet المستهدف
+     */
+    public function previewSheet(Request $request)
+    {
+        $result = $this->runPython('sheet-preview', $request->all());
+        if (isset($result['status']) && $result['status'] === 'success') {
+            return response()->json($result, 200);
+        }
+        return response()->json($result, 500);
+    }
+
+    /**
+     * حفظ الإعدادات وتصفير كاش الشيت القديم
+     */
+    public function saveSheetConfig(Request $request)
+    {
+        \Cache::forget('products_json_v1');
+        $result = $this->runPython('sheet-save', $request->all());
+        if (isset($result['status']) && $result['status'] === 'success') {
+            return response()->json($result, 200);
+        }
+        return response()->json($result, 500);
+    }
 }
+

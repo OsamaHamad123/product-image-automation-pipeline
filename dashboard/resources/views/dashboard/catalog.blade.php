@@ -1101,7 +1101,7 @@
         </div>
 
         <!-- Curation workspace status -->
-        <div class="glass-panel" style="min-height: 450px;">
+        <div class="glass-panel" style="min-height: 450px;" id="curationWorkspacePanel">
             <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--panel-border); padding-bottom: 0.75rem; margin-bottom: 1.5rem;">
                 <h3 style="font-size: 1.1rem; margin: 0;"><i class="fas fa-eye"></i> نتائج الفرز والمطابقة البصرية</h3>
                 <span id="overallStatus" class="status-text active">في انتظار الإدخال</span>
@@ -1686,6 +1686,12 @@
         document.querySelectorAll('.product-item').forEach(el => el.classList.remove('active'));
         element.classList.add('active');
         
+        // إزالة أي تنبيه أخطاء أتمتة سابقة
+        const existingAlert = document.getElementById('automationErrorAlert');
+        if (existingAlert) {
+            existingAlert.remove();
+        }
+        
         document.getElementById('rowNumber').value = prod.row_number;
         document.getElementById('productName').value = prod.product_name;
         document.getElementById('brand').value = prod.brand;
@@ -1700,6 +1706,16 @@
         document.getElementById('searchForm').dataset.origin = prod.origin || '';
         
         activeRowNumber = prod.row_number;
+        
+        // إظهار بانر توضيحي لسبب فشل الأتمتة في حالة وجود خطأ
+        if (prod.has_error) {
+            const panel = document.getElementById('curationWorkspacePanel');
+            const alertDiv = document.createElement('div');
+            alertDiv.id = 'automationErrorAlert';
+            alertDiv.style = "background-color: var(--danger-bg); border: 1px solid var(--panel-border); color: var(--danger); border-radius: 12px; padding: 1.15rem; margin-bottom: 1.5rem; font-weight: bold; direction: rtl; text-align: right; line-height: 1.5;";
+            alertDiv.innerHTML = `❌ <strong>خطأ الأتمتة التلقائية بالخلفية:</strong><br><span style="font-size: 0.85rem; font-weight: normal; color: var(--text-primary); font-family: monospace; display: block; margin-top: 0.35rem;">${prod.error_message || 'لا تتوفر تفاصيل إضافية للخطأ.'}</span>`;
+            panel.insertBefore(alertDiv, panel.children[1]);
+        }
         
         if (prod.needs_review && prod.needs_review_url) {
             const overallStatus = document.getElementById('overallStatus');
@@ -1734,6 +1750,12 @@
     // إرسال استعلام الفحص البصري والبحث
     document.getElementById('searchForm').addEventListener('submit', async function(e) {
         e.preventDefault();
+        
+        // إزالة أي تنبيه أخطاء أتمتة سابقة عند بدء البحث الجديد
+        const existingAlert = document.getElementById('automationErrorAlert');
+        if (existingAlert) {
+            existingAlert.remove();
+        }
         
         const placeholder = document.getElementById('placeholder');
         const loading = document.getElementById('loading');
