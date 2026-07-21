@@ -82,6 +82,10 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+from verification_layer.presentation.verification_router import router as verification_router
+app.include_router(verification_router)
+
+
 # ----------------- نماذج البيانات Pydantic -----------------
 
 class SearchRequest(BaseModel):

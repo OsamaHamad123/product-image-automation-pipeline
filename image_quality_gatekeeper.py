@@ -130,11 +130,25 @@ class ImageQualityGatekeeper:
         # تحميل نموذج المعايرة النشطة بـ NumPy إذا توفر ملف الإعدادات
         config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "calibrated_gate_config.json")
         self.classifier = MicroClassifierEngine(config_path)
+        
+        # ربط طبقة التحقق والاعتماد الحديثة (V&V Layer Clean Architecture)
+        from verification_layer.use_cases.catalog_verifier import CatalogVerificationPipeline
+        from verification_layer.domain.models import CatalogProduct
+        self._vv_pipeline = CatalogVerificationPipeline()
 
-    def evaluate_image(self, pil_img, relevance_score_text=0.0, dinov2_similarity=None, aesthetic_score_raw=None):
+    def evaluate_image(self, pil_img, relevance_score_text=0.0, dinov2_similarity=None, aesthetic_score_raw=None, product_name: str = "", brand: str = ""):
         """
-        تقييم الصورة وإرجاع تقرير تفصيلي بالمعايير الهندسية وحساب النتيجة الإجمالية الموحدة.
+        تقييم الصورة وإرجاع تقرير تفصيلي بالمعايير الهندسية وحساب النتيجة الإجمالية الموحدة عبر V&V Layer.
         """
+        from verification_layer.domain.models import CatalogProduct
+        catalog_product = CatalogProduct(
+            asin_or_gtin="QUALITY_GATE_CHECK",
+            brand=brand or "GENERIC",
+            product_class=product_name or "ITEM",
+            weight_volume=""
+        )
+        vv_res = self._vv_pipeline.verify(pil_img, catalog_product)
+
         width, height = pil_img.size
         resolution = width * height
         aspect_ratio = width / height if height > 0 else 0.0
