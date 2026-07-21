@@ -52,8 +52,17 @@ class CatalogVerificationPipeline:
         gate_evaluations: List[GateEvaluation] = []
         rejection_reasons: List[str] = []
 
+        # Optional cylindrical label de-warping for curved packaging surfaces
+        if catalog_metadata.surface_curvature.value == "curved":
+            try:
+                from verification_layer.use_cases.cylindrical_unwarper import CylindricalUnwarper
+                image = CylindricalUnwarper.unwarp_pil(image)
+            except Exception:
+                pass
+
         # 1. Structural Resolution & Aspect Ratio Gate
         res_eval = self.resolution_gate.evaluate(image)
+
         gate_evaluations.append(res_eval)
         if not res_eval.passed:
             rejection_reasons.append(res_eval.reason)
