@@ -187,6 +187,11 @@ def action_select_image(params):
                 pass
                 
         metadata = image_processor.extract_metadata_from_image(processed_image_path, product_name, brand)
+        has_meta = metadata is not None
+        if not metadata:
+            metadata = {}
+        metadata["bg_removal_status"] = image_processor.LAST_PROCESSING_STATUS.get((product_name, brand), "success")
+        
         folder = "products"
         tags = []
         
@@ -197,14 +202,13 @@ def action_select_image(params):
         if override_l1_en:
             import categories
             norm = categories.normalize_category_path(override_l1_en, override_l2_en, override_l3_en)
-            if not metadata:
-                metadata = {}
             metadata.update(norm)
             
-        if metadata:
+        if has_meta or "bg_removal_status" in metadata:
             sheets_client = google_sheets.get_sheets_client()
             worksheet = google_sheets.open_worksheet(sheets_client, config.SPREADSHEET_NAME_OR_URL)
-            google_sheets.update_product_metadata(worksheet, row_number, metadata)
+            if has_meta:
+                google_sheets.update_product_metadata(worksheet, row_number, metadata)
             
             cat1 = (metadata.get("category_l1_en") or "").strip().lower().replace(" ", "_").replace("&", "and")
             cat2 = (metadata.get("category_l2_en") or "").strip().lower().replace(" ", "_").replace("&", "and")

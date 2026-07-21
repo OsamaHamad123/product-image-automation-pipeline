@@ -309,6 +309,11 @@ def select_product_image(req: SelectImageRequest):
                 
         # 3. استخراج البيانات الوصفية (Gemini Vision)
         metadata = image_processor.extract_metadata_from_image(processed_image_path, req.product_name, req.brand)
+        has_meta = metadata is not None
+        if not metadata:
+            metadata = {}
+        metadata["bg_removal_status"] = image_processor.LAST_PROCESSING_STATUS.get((req.product_name, req.brand), "success")
+        
         folder = "products"
         tags = []
         
@@ -316,11 +321,9 @@ def select_product_image(req: SelectImageRequest):
         if req.category_l1_en:
             import categories
             norm = categories.normalize_category_path(req.category_l1_en, req.category_l2_en, req.category_l3_en)
-            if not metadata:
-                metadata = {}
             metadata.update(norm)
             
-        if metadata:
+        if has_meta or "bg_removal_status" in metadata:
             cat1 = (metadata.get("category_l1_en") or "").strip().lower().replace(" ", "_").replace("&", "and")
             cat2 = (metadata.get("category_l2_en") or "").strip().lower().replace(" ", "_").replace("&", "and")
             if cat1:
@@ -415,7 +418,7 @@ def select_product_image(req: SelectImageRequest):
                     if worksheet:
                         _, link_col_idx = google_sheets.get_products(worksheet)
                         google_sheets.update_image_link(worksheet, req.row_number, link_col_idx, image_link)
-                        if metadata:
+                        if has_meta:
                             google_sheets.update_product_metadata(worksheet, req.row_number, metadata)
             except Exception as se:
                 print(f"❌ [Sheets Fallback Error] {se}")

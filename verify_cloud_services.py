@@ -127,31 +127,64 @@ def verify_photoroom():
         print("❌ خطأ: لم يتم تعيين مفتاح PHOTOROOM_API_KEY في ملف .env")
         return False
         
-    url = "https://sdk.photoroom.com/v1/segment"
+    proxies = {"http": config.PROXY_URL, "https": config.PROXY_URL} if config.PROXY_URL else None
+    
+    # 1. التحقق مما إذا كان مفتاح تجريبي Sandbox
+    is_sandbox = api_key.strip().lower().startswith("sandbox_")
+    if is_sandbox:
+        print("⚠️ تنبيه: يتم استخدام مفتاح تجريبي (Sandbox Key).")
+        print("💡 سيتم معالجة الصور للتجربة مجاناً ولكنها ستظهر بعلامة مائية (Watermark) ولن تستهلك رصيداً حقيقياً.")
+        
+    # 2. فحص رصيد الصور المتاحة عبر الـ API
+    account_url = "https://image-api.photoroom.com/v2/account"
     headers = {"x-api-key": api_key}
     
     try:
-        print("🔄 إرسال طلب فحص أولي لـ PhotoRoom (التحقق من حالة الاشتراك والمصادقة)...")
-        proxies = {"http": config.PROXY_URL, "https": config.PROXY_URL} if config.PROXY_URL else None
-        response = requests.post(url, headers=headers, proxies=proxies, timeout=12)
+        print("🔄 جاري التحقق من رصيد الحساب والاشتراك النشط لـ PhotoRoom...")
+        acc_response = requests.get(account_url, headers=headers, proxies=proxies, timeout=10)
         
-        if response.status_code in [400, 415]:
-            print("✅ نجح فحص مفتاح PhotoRoom بنجاح والخدمة معتمدة وجاهزة.")
+        if acc_response.status_code == 200:
+            acc_data = acc_response.json()
+            images_info = acc_data.get("images", {})
+            available = images_info.get("available", 0)
+            subscription = images_info.get("subscription", 0)
+            
+            if not is_sandbox and available <= 0:
+                print(f"❌ خطأ: مفتاح PhotoRoom صحيح ومصادق عليه، ولكنه لا يحتوي على رصيد صور متاح (الرصيد المتاح: {available} من {subscription}).")
+                print("💡 الحل: يرجى التأكد من نسخ المفتاح من مساحة العمل المدفوعة النشطة (Workspace/Space) وليس المساحة الافتراضية.")
+                return False
+                
+            print(f"✅ نجح فحص مفتاح PhotoRoom بنجاح. رصيد الصور المتاحة: {available} صور (الاشتراك الكلي: {subscription}).")
             return True
-        elif response.status_code in [401, 403]:
-            print(f"❌ فشل الاتصال بـ PhotoRoom: كود الاستجابة {response.status_code} (مفتاح الـ API غير صالح أو غير مصرح).")
+        elif acc_response.status_code in [401, 403]:
+            print(f"❌ فشل الاتصال بـ PhotoRoom: مفتاح الـ API غير صالح أو غير مصرح (كود {acc_response.status_code}).")
             return False
-        elif response.status_code == 402:
-            print("❌ فشل الاتصال بـ PhotoRoom: كود الاستجابة 402 (انتهى اشتراك PhotoRoom أو نفد رصيد الحساب المتاح).")
-            return False
-        elif response.status_code == 429:
-            print("❌ فشل الاتصال بـ PhotoRoom: كود الاستجابة 429 (تم تجاوز حد الطلبات المتزامنة أو استنفاد الحصة).")
-            return False
-        else:
-            print(f"⚠️ استجابة غير متوقعة من PhotoRoom (كود {response.status_code}): {response.text}")
+        elif acc_response.status_code == 402:
+            print("❌ فشل الاتصال بـ PhotoRoom: كود الاستجابة 402 (انتهى اشتراك PhotoRoom أو نفد رصيد الصور المتاح تماماً).")
             return False
     except Exception as e:
-        print(f"❌ حدث خطأ أثناء فحص PhotoRoom: {e}")
+        print(f"⚠️ تنبيه أثناء الاتصال بنقطة فحص رصيد PhotoRoom: {e}. محاولة استخدام الفحص الاحتياطي...")
+        
+    # 3. الفحص الاحتياطي (POST request) في حال فشل نقطة فحص الرصيد لأي سبب
+    segment_url = "https://sdk.photoroom.com/v1/segment"
+    try:
+        print("🔄 محاولة إجراء فحص أولي بديل للمصادقة...")
+        response = requests.post(segment_url, headers=headers, proxies=proxies, timeout=12)
+        
+        if response.status_code in [400, 415]:
+            print("✅ نجح فحص مفتاح PhotoRoom بنجاح عبر الفحص الاحتياطي والمصادقة صالحة.")
+            return True
+        elif response.status_code in [401, 403]:
+            print(f"❌ فشل الفحص الاحتياطي لـ PhotoRoom: كود {response.status_code} (المفتاح غير صالح).")
+            return False
+        elif response.status_code == 402:
+            print("❌ فشل الفحص الاحتياطي لـ PhotoRoom: كود 402 (الاشتراك غير مدفوع أو الرصيد نفد).")
+            return False
+        else:
+            print(f"⚠️ استجابة غير متوقعة من الفحص الاحتياطي لـ PhotoRoom (كود {response.status_code}): {response.text}")
+            return False
+    except Exception as e:
+        print(f"❌ حدث خطأ أثناء الفحص الاحتياطي لـ PhotoRoom: {e}")
         return False
 
 def verify_google_search():

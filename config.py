@@ -64,7 +64,7 @@ PHOTOROOM_API_KEY = os.getenv("PHOTOROOM_API_KEY", "")
 
 # إعدادات واجهة برمجة تطبيقات إزالة الخلفية لـ PhotoRoom (v1/segment API)
 PHOTOROOM_SIZE = "full"       # دقة الصورة المستردة: preview, medium, hd, full
-PHOTOROOM_CROP = False        # قص الهوامش الشفافة الزائدة لجعل الكائن ممتداً على كامل الحدود (False لترك مساحة الحواف الأصلية)
+PHOTOROOM_CROP = os.getenv("PHOTOROOM_CROP", "True").lower() == "true"        # قص الهوامش الشفافة الزائدة لجعل الكائن ممتداً على كامل الحدود (False لترك مساحة الحواف الأصلية)
 PHOTOROOM_DESPILL = True      # تفعيل تقنية تصحيح الحواف وإزالة تسرب الألوان من الخلفية الأصلية (Chroma key)
 
 # 5. ملف اعتمادات Google Service Account
@@ -347,13 +347,15 @@ def load_db_config():
             for r in rows:
                 db_keys[r['key']] = r['value']
             
-            global PHOTOROOM_API_KEY, GEMINI_API_KEY, GEMINI_MODEL
+            global PHOTOROOM_API_KEY, GEMINI_API_KEY, GEMINI_MODEL, PHOTOROOM_CROP
             global CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET
             global GOOGLE_SEARCH_API_KEYS, GOOGLE_SEARCH_CX_LIST, GOOGLE_SEARCH_API_KEY, GOOGLE_SEARCH_CX
             global CLIP_RELEVANCE_THRESHOLD, CLIP_GREY_ZONE_THRESHOLD, STRICT_BRAND_MATCH, ENABLE_GEMINI_PRE_VALIDATION, FILTER_COMPETITORS, BYPASS_WHITE_BACKGROUND_CHECK, PROXY_URL
             
             if "photoroom_api_key" in db_keys and db_keys["photoroom_api_key"]:
                 PHOTOROOM_API_KEY = db_keys["photoroom_api_key"]
+            if "photoroom_crop" in db_keys:
+                PHOTOROOM_CROP = db_keys["photoroom_crop"].lower() == "true"
             if "gemini_api_key" in db_keys and db_keys["gemini_api_key"]:
                 GEMINI_API_KEY = db_keys["gemini_api_key"]
             if "gemini_model" in db_keys and db_keys["gemini_model"]:

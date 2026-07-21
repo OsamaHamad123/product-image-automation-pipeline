@@ -218,9 +218,14 @@ def process_single_product(prod, worksheet, link_column_index):
     # ج. استخراج البيانات الوصفية (القيم الغذائية والمكونات والوصف التسويقي والتصنيفات) أولاً لتنظيم المجلدات سحابياً
     metadata = image_processor.extract_metadata_from_image(processed_image_path, name, brand)
     
+    has_meta = metadata is not None
+    if not metadata:
+        metadata = {}
+    metadata["bg_removal_status"] = image_processor.LAST_PROCESSING_STATUS.get((name, brand), "success")
+    
     folder = "products"
     tags = []
-    if metadata:
+    if has_meta:
         google_sheets.update_product_metadata(worksheet, row_num, metadata)
         
         # بناء هيكلية المجلدات بناءً على تصنيف الويب المستخرج
@@ -421,10 +426,15 @@ def auto_approve_product(task, best_image, worksheet, link_column_index):
                 
         # استخراج الميتاداتا
         metadata = image_processor.extract_metadata_from_image(processed_image_path, name, brand)
+        has_meta = metadata is not None
+        if not metadata:
+            metadata = {}
+        metadata["bg_removal_status"] = image_processor.LAST_PROCESSING_STATUS.get((name, brand), "success")
+        
         folder = "products"
         tags = []
         
-        if metadata:
+        if has_meta:
             google_sheets.update_product_metadata(worksheet, row_num, metadata)
             cat1 = (metadata.get("category_l1_en") or "").strip().lower().replace(" ", "_").replace("&", "and")
             cat2 = (metadata.get("category_l2_en") or "").strip().lower().replace(" ", "_").replace("&", "and")

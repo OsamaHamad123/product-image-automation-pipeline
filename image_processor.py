@@ -9,6 +9,7 @@ from PIL import Image, ImageOps
 import config
 import categories
 
+LAST_PROCESSING_STATUS = {}
 
 def get_product_bounding_box(image_path, product_name, brand):
     """
@@ -1085,6 +1086,7 @@ def process_product_image(image_url, product_name, brand, bg_removal_method=None
         # إذا فشل PhotoRoom تحديداً، نرجع الصورة الخام الأصلية بدون اقتصاص أو تعديل بناء على رغبة المستخدم
         if not success and config.BG_REMOVAL_METHOD.lower() == "photoroom":
             print("⚠️ [PhotoRoom Failover] فشل الاتصال أو الدفع لـ PhotoRoom. سيتم رفع الصورة الخام الأصلية كما هي دون اقتصاص أو تعديل.")
+            LAST_PROCESSING_STATUS[(product_name, brand)] = "failed"
             if raw_backup_path and os.path.exists(raw_backup_path):
                 # تنظيف الملفات المؤقتة
                 for temp_f in [raw_path, nobg_path]:
@@ -1134,6 +1136,9 @@ def process_product_image(image_url, product_name, brand, bg_removal_method=None
             if not is_valid:
                 print("❌ [Self-Healing Failed] فشل مسارات التراجع الشفافة. استخدام الصورة الخام الكاملة لحماية المنتج وتحويلها للمراجعة البشرية.")
                 nobg_path = raw_path
+                
+        bg_status = "success" if nobg_path != raw_path else "failed"
+        LAST_PROCESSING_STATUS[(product_name, brand)] = bg_status
     
         # 4. تحسين الحواف وتطبيق ظلال الاستوديو الناعمة والتوسيط
         temp_rgba = os.path.join("temp", f"rgba_{safe_name}.webp")

@@ -253,6 +253,11 @@
                     <img id="modalRichImg" src="" alt="Resolved image" style="max-width: 100%; max-height: 100%; object-fit: contain;">
                 </div>
                 
+                <div id="modalBgRemovalWarning" class="allergen-warning" style="display: none; padding: 0.5rem 0.75rem; margin-top: 0; font-size: 0.75rem; background: rgba(239, 68, 68, 0.1); border-color: rgba(239, 68, 68, 0.2); color: #ef4444;">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    <span>تنبيه: فشلت إزالة الخلفية لهذه الصورة وتم رفعها كصورة خام.</span>
+                </div>
+                
                 <!-- Background Toggles -->
                 <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.8rem; background: rgba(0,0,0,0.15); padding: 0.5rem 1rem; border-radius: 8px;">
                     <span style="color: var(--text-secondary); font-weight: bold;">خلفية المعاينة:</span>
@@ -461,10 +466,12 @@
                 allergenBadges += '<span title="يحتوي على مكسرات" style="cursor:help;">🥜</span> ';
             }
             const allergensHtml = allergenBadges ? `<div style="display: flex; gap: 0.25rem; font-size: 1.15rem;" class="allergen-badges-card">${allergenBadges}</div>` : '';
+            const bgRemovalFailedHtml = meta.bg_removal_status === 'failed' ? '<div style="position: absolute; bottom: 8px; left: 8px; background: rgba(239, 68, 68, 0.9); color: white; padding: 4px 8px; border-radius: 6px; font-size: 0.65rem; font-weight: bold; z-index: 10; display: flex; align-items: center; gap: 0.25rem; font-family: \'Outfit\', sans-serif;"><i class="fas fa-exclamation-triangle"></i> بدون عزل</div>' : '';
 
             card.innerHTML = `
-                <div class="rich-card-img">
+                <div class="rich-card-img" style="position: relative;">
                     ${scoreHtml}
+                    ${bgRemovalFailedHtml}
                     <img src="${p.cloudinary_url}" alt="Product Image" onerror="this.src='https://placehold.co/200x200?text=Error'">
                 </div>
                 <div class="rich-card-body">
@@ -539,6 +546,14 @@
         
         const dateStr = p.resolved_at ? new Date(p.resolved_at).toLocaleString('ar-SA') : 'غير متوفر';
         document.getElementById('modalRichDate').innerText = dateStr;
+
+        // Background removal status warning
+        const bgWarning = document.getElementById('modalBgRemovalWarning');
+        if (meta.bg_removal_status === 'failed') {
+            bgWarning.style.display = 'flex';
+        } else {
+            bgWarning.style.display = 'none';
+        }
 
         // Image
         document.getElementById('modalRichImg').src = p.cloudinary_url;
