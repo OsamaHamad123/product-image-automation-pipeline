@@ -350,7 +350,7 @@ def load_db_config():
             global PHOTOROOM_API_KEY, GEMINI_API_KEY, GEMINI_MODEL
             global CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET
             global GOOGLE_SEARCH_API_KEYS, GOOGLE_SEARCH_CX_LIST, GOOGLE_SEARCH_API_KEY, GOOGLE_SEARCH_CX
-            global CLIP_RELEVANCE_THRESHOLD, CLIP_GREY_ZONE_THRESHOLD, STRICT_BRAND_MATCH, ENABLE_GEMINI_PRE_VALIDATION, FILTER_COMPETITORS, BYPASS_WHITE_BACKGROUND_CHECK
+            global CLIP_RELEVANCE_THRESHOLD, CLIP_GREY_ZONE_THRESHOLD, STRICT_BRAND_MATCH, ENABLE_GEMINI_PRE_VALIDATION, FILTER_COMPETITORS, BYPASS_WHITE_BACKGROUND_CHECK, PROXY_URL
             
             if "photoroom_api_key" in db_keys and db_keys["photoroom_api_key"]:
                 PHOTOROOM_API_KEY = db_keys["photoroom_api_key"]
@@ -386,6 +386,8 @@ def load_db_config():
                 FILTER_COMPETITORS = db_keys["filter_competitors"].lower() == "true"
             if "bypass_white_background_check" in db_keys:
                 BYPASS_WHITE_BACKGROUND_CHECK = db_keys["bypass_white_background_check"].lower() == "true"
+            if "proxy_url" in db_keys and db_keys["proxy_url"]:
+                PROXY_URL = db_keys["proxy_url"]
             
             import sys
             if "--json" not in sys.argv:

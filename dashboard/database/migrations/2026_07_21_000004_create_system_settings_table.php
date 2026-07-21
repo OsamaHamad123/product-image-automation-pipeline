@@ -35,6 +35,7 @@ return new class extends Migration
                 ['key' => 'enable_gemini_pre_validation', 'value' => 'true'],
                 ['key' => 'filter_competitors', 'value' => 'true'],
                 ['key' => 'bypass_white_background_check', 'value' => 'false'],
+                ['key' => 'proxy_url', 'value' => env('PROXY_URL', '')],
             ];
 
             foreach ($defaultSettings as $setting) {

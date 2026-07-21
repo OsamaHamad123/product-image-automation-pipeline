@@ -213,6 +213,13 @@
                             <input type="text" id="google_search_cx" name="google_search_cx" class="form-control" value="{{ $settings['google_search_cx'] }}">
                             <span class="form-help">معرف محرك البحث المخصص من لوحة تحكم Google Programmable Search.</span>
                         </div>
+
+                        <!-- Proxy URL -->
+                        <div class="form-group">
+                            <label class="form-label" for="proxy_url">عنوان خادم البروكسي (PROXY_URL)</label>
+                            <input type="text" id="proxy_url" name="proxy_url" class="form-control" value="{{ $settings['proxy_url'] }}" placeholder="http://username:password@ip:port">
+                            <span class="form-help">يستخدم لتشفير وتمرير طلبات البحث المدمجة (Yandex و Bing و DuckDuckGo) لتجنب حظر الـ IP والـ CAPTCHA على السيرفر.</span>
+                        </div>
                     </div>
                 </div>
 

@@ -474,7 +474,8 @@ class ProductController extends Controller
             'google_search_api_key', 'google_search_cx',
             'clip_relevance_threshold', 'clip_grey_zone_threshold',
             'strict_brand_match', 'enable_gemini_pre_validation',
-            'filter_competitors', 'bypass_white_background_check'
+            'filter_competitors', 'bypass_white_background_check',
+            'proxy_url'
         ];
         foreach ($keys as $k) {
             if (!isset($settings[$k])) {
@@ -494,7 +495,8 @@ class ProductController extends Controller
             'photoroom_api_key', 'gemini_api_key', 'gemini_model',
             'cloudinary_cloud_name', 'cloudinary_api_key', 'cloudinary_api_secret',
             'google_search_api_key', 'google_search_cx',
-            'clip_relevance_threshold', 'clip_grey_zone_threshold'
+            'clip_relevance_threshold', 'clip_grey_zone_threshold',
+            'proxy_url'
         ];
         
         $checkboxKeys = [
