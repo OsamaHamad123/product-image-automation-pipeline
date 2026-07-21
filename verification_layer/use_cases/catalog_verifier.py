@@ -60,8 +60,16 @@ class CatalogVerificationPipeline:
             except Exception:
                 pass
 
+        # Apply Typographic Attack Defense to prevent text prompt injection attacks
+        try:
+            from verification_layer.use_cases.typographic_defense import TypographicAttackDefender
+            image = TypographicAttackDefender.apply_dyslexify_masking(image)
+        except Exception:
+            pass
+
         # 1. Structural Resolution & Aspect Ratio Gate
         res_eval = self.resolution_gate.evaluate(image)
+
 
         gate_evaluations.append(res_eval)
         if not res_eval.passed:
