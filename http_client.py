@@ -21,8 +21,11 @@ class ImpersonateClient:
         إجراء طلب GET متكامل بمحاكاة Chrome 120 وإعادة المحاولة عند مواجهة الخطأ 429.
         """
         # الترويسات الافتراضية المرتبة لمتصفح Chrome
+        import urllib.parse
+        host_netloc = urllib.parse.urlparse(url).netloc
+        
         default_headers = {
-            "Host": requests.compat.urlparse(url).netloc,
+            "Host": host_netloc,
             "Connection": "keep-alive",
             "sec-ch-ua": '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
             "sec-ch-ua-mobile": "?0",
