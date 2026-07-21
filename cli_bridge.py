@@ -93,8 +93,12 @@ def action_search(params):
     except Exception:
         pass
         
-    # استخراج تلقائي للبراند
-    if product_name and not brand:
+    # استخراج وتصحيح تلقائي للبراند
+    if product_name and brand:
+        aligned = google_sheets.align_brand_via_gemini(product_name, brand)
+        if aligned:
+            brand = aligned
+    elif product_name and not brand:
         extracted = google_sheets.extract_brand_from_name(product_name, brand_mappings)
         if extracted:
             brand = extracted

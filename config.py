@@ -117,7 +117,7 @@ CURATION_MODE = os.getenv("CURATION_MODE", "True").lower() == "true"
 # 8. إعدادات التحقق المتقدم للبحث والصور
 # مفتاح API الخاص بـ Gemini (من Google AI Studio) للتحقق البصري المتقدم
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")
 
 # إيقاف تحميل وتشغيل نماذج الذكاء الاصطناعي المحلية (CLIP, SigLIP, BLIP, Moondream2, DINOv2) لتوفير الذاكرة والعمل سحابياً بتكلفة منخفضة
 DISABLE_LOCAL_AI_MODELS = os.getenv("DISABLE_LOCAL_AI_MODELS", "True").lower() == "true"

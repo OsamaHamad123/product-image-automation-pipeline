@@ -682,7 +682,79 @@ def extract_brand_from_name(product_name, brand_mappings):
             if re.search(pattern, prod_name_lower) or (len(syn_lower) > 2 and syn_lower in prod_name_lower):
                 return mapping["brand"]
                     
-    return ""
+def align_brand_via_gemini(product_name, sheet_brand):
+    """
+    التحقق من تطابق البراند المسجل في الشيت مع اسم المنتج الفعلي عبر Gemini.
+    إذا كان هناك خطأ في إدخال البراند (مثل تعيين Emirates Macaroni لـ Emirates Pofaki)،
+    يقوم النموذج بتصحيحه وتفكيك الاسم بشكل صحيح.
+    """
+    import requests
+    import json
+    
+    if not config.GEMINI_API_KEY or not product_name or not sheet_brand:
+        return sheet_brand
+        
+    try:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{config.GEMINI_MODEL}:generateContent?key={config.GEMINI_API_KEY}"
+        
+        prompt = (
+            f"You are an e-commerce catalog data verification assistant.\n"
+            f"We have a product named '{product_name}' which is classified under the brand '{sheet_brand}' in our sheet.\n"
+            f"Verify if the brand '{sheet_brand}' is correct for this product.\n"
+            f"Note that data entry errors are common (e.g. assigning 'Emirates Macaroni' to 'Emirates Pofaki Cheese Corn Curls' because both start with 'Emirates', even though Pofaki is a snack curl and not macaroni).\n"
+            f"Analyze the product name and decide:\n"
+            f"1. Is '{sheet_brand}' correct or a valid parent/synonym/subsidiary for '{product_name}'? (If yes, set 'is_correct' to true).\n"
+            f"2. If it is incorrect (e.g., 'Emirates Macaroni' for 'Emirates Pofaki'), set 'is_correct' to false and extract the actual correct brand name from the product name (e.g. 'Emirates Pofaki' or 'Emirates' or 'NFI').\n"
+            f"Reply strictly in JSON format matching this schema:\n"
+            f'{{\n'
+            f'  "is_correct": true or false,\n'
+            f'  "corrected_brand": "the correct brand name"\n'
+            f'}}'
+        )
+        
+        payload = {
+            "contents": [
+                {
+                    "parts": [
+                        {"text": prompt}
+                    ]
+                }
+            ],
+            "generationConfig": {
+                "responseMimeType": "application/json"
+            }
+        }
+        
+        headers = {"Content-Type": "application/json"}
+        
+        # update API calls metric if configuration dict exists
+        if hasattr(config, "METRICS") and "gemini_api_calls" in config.METRICS:
+            config.METRICS["gemini_api_calls"] += 1
+            
+        response = requests.post(url, headers=headers, json=payload, timeout=10)
+        if response.status_code == 200:
+            res_data = response.json()
+            text_response = res_data['candidates'][0]['content']['parts'][0]['text'].strip()
+            if text_response.startswith("```json"):
+                text_response = text_response[7:]
+            elif text_response.startswith("```"):
+                text_response = text_response[3:]
+            if text_response.endswith("```"):
+                text_response = text_response[:-3]
+            text_response = text_response.strip()
+            
+            result = json.loads(text_response)
+            is_correct = result.get("is_correct", True)
+            corrected_brand = result.get("corrected_brand", sheet_brand).strip()
+            
+            if not is_correct and corrected_brand and corrected_brand.lower() != "unknown":
+                print(f"💡 [Brand Alignment] تصحيح البراند تلقائياً عبر Gemini لـ '{product_name}': من '{sheet_brand}' إلى '{corrected_brand}'")
+                return corrected_brand
+                
+    except Exception as e:
+        print(f"⚠️ خطأ أثناء تصحيح اسم البراند بـ Gemini: {e}")
+        
+    return sheet_brand
 
 def extract_brand_via_gemini(product_name):
     """

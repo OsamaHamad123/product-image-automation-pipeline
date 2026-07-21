@@ -203,7 +203,11 @@ def search_product_image(req: SearchRequest):
         except Exception:
             pass
             
-        if product_name and not brand:
+        if product_name and brand:
+            aligned = google_sheets.align_brand_via_gemini(product_name, brand)
+            if aligned:
+                brand = aligned
+        elif product_name and not brand:
             extracted = google_sheets.extract_brand_from_name(product_name, brand_mappings)
             if extracted:
                 brand = extracted

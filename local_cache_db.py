@@ -151,7 +151,7 @@ def init_db():
         default_settings = {
             "photoroom_api_key": getattr(config, "PHOTOROOM_API_KEY", ""),
             "gemini_api_key": getattr(config, "GEMINI_API_KEY", ""),
-            "gemini_model": getattr(config, "GEMINI_MODEL", "gemini-3.5-flash"),
+            "gemini_model": getattr(config, "GEMINI_MODEL", "gemini-3.1-flash-lite"),
             "cloudinary_cloud_name": getattr(config, "CLOUDINARY_CLOUD_NAME", ""),
             "cloudinary_api_key": getattr(config, "CLOUDINARY_API_KEY", ""),
             "cloudinary_api_secret": getattr(config, "CLOUDINARY_API_SECRET", ""),

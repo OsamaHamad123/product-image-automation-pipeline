@@ -26,7 +26,7 @@ class VLMQueryFallbackHandler:
             import google.generativeai as google_gemini
             google_gemini.configure(api_key=self.api_key)
             import config
-            model_name = getattr(config, "GEMINI_MODEL", "gemini-3.5-flash")
+            model_name = getattr(config, "GEMINI_MODEL", "gemini-3.1-flash-lite")
             vision_model = google_gemini.GenerativeModel(model_name)
             
             prompt = """

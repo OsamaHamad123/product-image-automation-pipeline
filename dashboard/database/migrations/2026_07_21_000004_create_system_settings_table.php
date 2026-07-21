@@ -23,7 +23,7 @@ return new class extends Migration
             $defaultSettings = [
                 ['key' => 'photoroom_api_key', 'value' => env('PHOTOROOM_API_KEY', '')],
                 ['key' => 'gemini_api_key', 'value' => env('GEMINI_API_KEY', '')],
-                ['key' => 'gemini_model', 'value' => env('GEMINI_MODEL', 'gemini-3.5-flash')],
+                ['key' => 'gemini_model', 'value' => env('GEMINI_MODEL', 'gemini-3.1-flash-lite')],
                 ['key' => 'cloudinary_cloud_name', 'value' => env('CLOUDINARY_CLOUD_NAME', '')],
                 ['key' => 'cloudinary_api_key', 'value' => env('CLOUDINARY_API_KEY', '')],
                 ['key' => 'cloudinary_api_secret', 'value' => env('CLOUDINARY_API_SECRET', '')],

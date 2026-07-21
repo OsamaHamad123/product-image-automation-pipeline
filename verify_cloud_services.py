@@ -85,7 +85,7 @@ def verify_gemini():
         print("❌ خطأ: لم يتم تعيين مفتاح GEMINI_API_KEY في ملف .env")
         return False
         
-    model = getattr(config, "GEMINI_MODEL", "gemini-3.5-flash")
+    model = getattr(config, "GEMINI_MODEL", "gemini-3.1-flash-lite")
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
     headers = {"Content-Type": "application/json"}
     
