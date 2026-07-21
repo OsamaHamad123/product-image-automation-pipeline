@@ -1,17 +1,110 @@
 # query_refiner.py
-# موديول تنظيف الأسماء وتفكيك المنتجات وتوليد استعلامات البحث المتراجعة
+# موديول تنظيف الأسماء وتفكيك المنتجات وتوليد استعلامات البحث وتصحيح العلامات التجارية بدقة عالية
 
+import os
+import json
 import re
 import unicodedata
+import requests
+import config
 
 class QueryRefiner:
     """
-    محلل ومنظف أسماء المنتجات لفلترة الكلمات غير المفيدة، واستخلاص المواصفات، وتوليد استعلامات البحث المتراجعة.
+    محلل ومنظف أسماء المنتجات لفلترة الكلمات غير المفيدة، واستخلاص المواصفات،
+    وتوليد استعلامات البحث المتراجعة بدقة عالية باستخدام Gemini والـ Regex.
     """
 
     def __init__(self, brand_vocabulary=None):
         # قائمة البراندات المعروفة لتسهيل خوارزمية Levenshtein وتصحيح الأخطاء الإملائية
         self.brand_vocabulary = brand_vocabulary or []
+
+    @staticmethod
+    def refine_product_metadata(product_name, brand, category=None):
+        """
+        تحليل أسماء المنتجات والبراندات المشوشة أو المختصرة باستخدام Gemini لاستخلاص
+        أعمدة السمات الموحدة وتصحيح اختصارات البراند (مثل A/G -> American Garden).
+        """
+        clean_pname = product_name.strip()
+        clean_brand = brand.strip() if brand else ""
+        
+        # القيم التراجعية الافتراضية في حال فشل الاتصال بالـ API أو عدم توفر المفتاح
+        fallback = {
+            "raw_brand": clean_brand,
+            "canonical_brand_en": clean_brand,
+            "canonical_brand_ar": "",
+            "brand_synonyms": [clean_brand] if clean_brand else [],
+            "product_class_en": clean_pname,
+            "product_class_ar": "",
+            "flavor_variant": "",
+            "volume_weight": "",
+            "quantity": 1,
+            "cleaned_title_en": clean_pname,
+            "cleaned_title_ar": "",
+            "optimized_search_queries": [f"{clean_brand} {clean_pname}".strip()]
+        }
+        
+        if not config.GEMINI_API_KEY:
+            return fallback
+            
+        try:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{config.GEMINI_MODEL}:generateContent?key={config.GEMINI_API_KEY}"
+            
+            prompt = (
+                f"You are an expert e-Commerce Search & AI Architect. Analyze this messy product entry:\n"
+                f"Raw Brand: '{clean_brand}'\n"
+                f"Raw Product Name: '{clean_pname}'\n"
+                f"Category context: '{category or ''}'\n\n"
+                f"Requirements:\n"
+                f"1. Resolve brand abbreviations/typos (e.g. 'A/G' or 'A.G.' to 'American Garden', 'M/P' to 'Masterpiece', 'Alali' to 'Al Alali').\n"
+                f"2. Extract generic product class in English and Arabic.\n"
+                f"3. Extract volume/weight (e.g., '800g', '1.5L') and quantity pack size (integer).\n"
+                f"4. Clean title in English and Arabic, stripping abbreviations and packaging noise.\n"
+                f"5. Generate a ranked list of 3 optimized search terms for Google/Bing Image search to retrieve product packaging images.\n\n"
+                f"Return strictly a JSON object matching this schema:\n"
+                f'{{\n'
+                f'  "raw_brand": "exact input brand",\n'
+                f'  "canonical_brand_en": "standard English brand name",\n'
+                f'  "canonical_brand_ar": "transliterated Arabic brand name",\n'
+                f'  "brand_synonyms": ["list", "of", "synonyms"],\n'
+                f'  "product_class_en": "generic class in English",\n'
+                f'  "product_class_ar": "generic class in Arabic",\n'
+                f'  "flavor_variant": "flavor/scent/model",\n'
+                f'  "volume_weight": "volume or weight with unit",\n'
+                f'  "quantity": 1,\n'
+                f'  "cleaned_title_en": "clean English title",\n'
+                f'  "cleaned_title_ar": "clean Arabic title",\n'
+                f'  "optimized_search_queries": ["query 1", "query 2", "query 3"]\n'
+                f'}}'
+            )
+            
+            payload = {
+                "contents": [{"parts": [{"text": prompt}]}],
+                "generationConfig": {"responseMimeType": "application/json"}
+            }
+            headers = {"Content-Type": "application/json"}
+            
+            if hasattr(config, "METRICS") and "gemini_api_calls" in config.METRICS:
+                config.METRICS["gemini_api_calls"] += 1
+                
+            res = requests.post(url, headers=headers, json=payload, timeout=10)
+            if res.status_code == 200:
+                res_data = res.json()
+                text = res_data['candidates'][0]['content']['parts'][0]['text'].strip()
+                if text.startswith("```json"):
+                    text = text[7:]
+                elif text.startswith("```"):
+                    text = text[3:]
+                if text.endswith("```"):
+                    text = text[:-3]
+                text = text.strip()
+                
+                data = json.loads(text)
+                if isinstance(data, dict):
+                    return data
+        except Exception as e:
+            print(f"⚠️ Error parsing product metadata via Gemini: {e}")
+            
+        return fallback
 
     def clean_title(self, raw_title):
         """
@@ -21,15 +114,12 @@ class QueryRefiner:
             return ""
             
         # 1. تطبيع النصوص (Unicode Normalization) وإزالة الرموز الخاصة كالعلامات التجارية المسجلة
-        # نستخدم NFKC للحفاظ على الحروف بمختلف اللغات وتفادي مسح الحروف العربية
         normalized = unicodedata.normalize('NFKC', raw_title)
         normalized = normalized.replace("®", "").replace("™", "").replace("©", "")
         normalized = normalized.lower().strip()
 
         # 2. إزالة باركودات التوزيع العالمية (UPC / EAN / ISBN)
-        # EAN-13 (13 رقماً) & UPC-A (12 رقماً)
         normalized = re.sub(r'\b\d{12,13}\b', '', normalized)
-        # ISBN-13
         normalized = re.sub(r'\b(978|979)-\d{1,5}-\d{1,7}-\d{1,7}-\d{1}\b', '', normalized)
 
         # 3. استخلاص وإزالة الوزن والحجم (مثل 5.3 oz, 400g, 1.5L)

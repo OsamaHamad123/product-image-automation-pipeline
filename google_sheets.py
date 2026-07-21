@@ -891,3 +891,31 @@ def extract_brand_from_start(product_name, brand_mappings):
         
     return ""
 
+def update_product_localization(worksheet, row_number, clean_title_ar, canonical_brand_ar):
+    """
+    تحديث الشيت بالاسم العربي والبراند العربي المصححين من Gemini إذا كانت أعمدتهما فارغة.
+    """
+    try:
+        headers = worksheet.row_values(1)
+        name_ar_indices = [i for i, h in enumerate(headers) if h.lower() in ["productname arabic", "product name arabic", "اسم المنتج بالعربي", "اسم المنتج عربي"]]
+        brand_ar_indices = [i for i, h in enumerate(headers) if h.lower() in ["brand arabic", "brand_arabic", "البراند بالعربي", "البراند عربي"]]
+        
+        name_ar_idx = name_ar_indices[0] if name_ar_indices else -1
+        brand_ar_idx = brand_ar_indices[0] if brand_ar_indices else -1
+        
+        # تحديث الاسم العربي
+        if name_ar_idx != -1 and clean_title_ar:
+            val = worksheet.cell(row_number, name_ar_idx + 1).value
+            if not val or not val.strip():
+                worksheet.update_cell(row_number, name_ar_idx + 1, clean_title_ar)
+                print(f"✍️ [Localization] تم تحديث اسم المنتج بالعربي في الصف {row_number}: '{clean_title_ar}'")
+                
+        # تحديث البراند العربي
+        if brand_ar_idx != -1 and canonical_brand_ar:
+            val = worksheet.cell(row_number, brand_ar_idx + 1).value
+            if not val or not val.strip():
+                worksheet.update_cell(row_number, brand_ar_idx + 1, canonical_brand_ar)
+                print(f"✍️ [Localization] تم تحديث البراند بالعربي في الصف {row_number}: '{canonical_brand_ar}'")
+    except Exception as e:
+        print(f"⚠️ فشل تحديث التعريب التلقائي في الشيت: {e}")
+

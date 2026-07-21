@@ -97,9 +97,34 @@ def process_single_product(prod, worksheet, link_column_index):
         print(f"⏭️ تخطي: المنتج يحتوي بالفعل على رابط صورة: {existing_link}")
         return "skipped"
         
-    # أ. البحث عن أفضل صورة (مع تقييم الصلة والدقة)
+    # أ. استخراج البيانات الدلالية والتعريب المسبق عبر Gemini
     product_name_ar = prod.get("product_name_ar", "")
     brand_ar = prod.get("brand_ar", "")
+    
+    try:
+        from query_refiner import QueryRefiner
+        refined = QueryRefiner.refine_product_metadata(name, brand, prod.get("category", ""))
+        
+        # تحديث المسميات المترجمة محلياً إذا لم تكن موجودة
+        if not product_name_ar and refined.get("cleaned_title_ar"):
+            product_name_ar = refined["cleaned_title_ar"]
+        if not brand_ar and refined.get("canonical_brand_ar"):
+            brand_ar = refined["canonical_brand_ar"]
+            
+        # تحديث المسميات المترجمة في الشيت مباشرة إذا كانت فارغة
+        google_sheets.update_product_localization(
+            worksheet, 
+            row_num, 
+            refined.get("cleaned_title_ar", ""), 
+            refined.get("canonical_brand_ar", "")
+        )
+        
+        # استخدام البراند والاسم المنظفين من Gemini لزيادة دقة البحث والمطابقة
+        name = refined.get("cleaned_title_en") or name
+        brand = refined.get("canonical_brand_en") or brand
+    except Exception as e:
+        print(f"⚠️ فشل المعالجة المسبقة للمنتج عبر Gemini: {e}")
+        
     trace = {}
     best_image = image_search.search_best_product_image(
         query, 
