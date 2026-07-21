@@ -24,6 +24,9 @@ from bs4 import BeautifulSoup
 _bktree = None
 _bktree_lock = threading.Lock()
 
+# تخزين ديناميكي لمرادفات البراندات المصححة والمولدة عبر Gemini
+_dynamic_brand_mappings = {}
+
 def get_bktree():
     global _bktree
     with _bktree_lock:
@@ -1461,6 +1464,11 @@ def evaluate_and_choose_best_image(results, product_name, brand, requires_brand_
     
     # الحصول على المرادفات الخاصة بالبراند المعني لضمان مطابقة صارمة ذكية ودقيقة
     synonyms = [brand_lower]
+    
+    # إضافة أي مرادفات ديناميكية تم جلبها وتصحيحها بواسطة Gemini
+    if brand_lower in _dynamic_brand_mappings:
+        synonyms.extend([s.lower().strip() for s in _dynamic_brand_mappings[brand_lower]])
+        
     excluded_competitors = []
     if brand_mappings:
         # البحث عن البراند المعني في جدول المرادفات
@@ -1892,10 +1900,12 @@ def evaluate_and_choose_best_image(results, product_name, brand, requires_brand_
 
 def expand_query_via_gemini(product_name, brand):
     """
-    استخدام Gemini لإنشاء 3 جمل بحث محسنة ومختلفة لزيادة فرص العثور على صورة المنتج الصحيحة.
+    استخدام Gemini لإنشاء 3 جمل بحث محسنة ومختلفة لزيادة فرص العثور على صورة المنتج الصحيحة،
+    مع تصحيح اختصارات البراند (مثل A/G -> American Garden) وحفظ مرادفاتها ديناميكياً.
     """
     clean_pname = product_name.strip()
     clean_brand = brand.strip() if brand else ""
+    brand_key = clean_brand.lower().strip()
     
     # تفادي تكرار اسم البراند إذا كان جزءاً من اسم المنتج بالفعل
     if clean_brand and clean_pname.lower().startswith(clean_brand.lower()):
@@ -1919,13 +1929,22 @@ def expand_query_via_gemini(product_name, brand):
         
         prompt = (
             f"You are a shopping search optimization assistant.\n"
-            f"Generate 3 diverse search engine queries for finding product images of: Brand: '{clean_brand}' and Product Name: '{clean_pname}'.\n"
+            f"Analyze the following brand and product name:\n"
+            f"Brand: '{clean_brand}'\n"
+            f"Product Name: '{clean_pname}'\n\n"
             f"Requirements:\n"
-            f"1. Query 1: standard brand and product name in English.\n"
-            f"2. Query 2: optimized shopping search string in English with 'packaging' or 'product pack' appended.\n"
-            f"3. Query 3: optimized search string in Arabic containing the translated brand and product name.\n"
-            f"Return strictly a JSON array of strings containing exactly 3 queries, like:\n"
-            f'["query 1", "query 2", "query 3"]'
+            f"1. Detect if the brand name is an abbreviation (like A/G, A.G. or other short forms) or has typos, and correct it to its full official name (e.g. 'American Garden' for 'A/G', 'Al Alali' for 'Alali').\n"
+            f"2. Extract brand synonyms including abbreviations, common misspellings, and translation to Arabic (e.g. ['American Garden', 'A/G', 'أمريكان جاردن']).\n"
+            f"3. Generate 3 diverse search engine queries for finding high-quality product images:\n"
+            f"   - Query 1: standard full brand name and cleaned product name in English.\n"
+            f"   - Query 2: English search string with 'packaging' or 'product pack' appended.\n"
+            f"   - Query 3: Arabic search string containing translated brand and product name.\n\n"
+            f"Return strictly a JSON object containing:\n"
+            f'- "corrected_brand": corrected brand string,\n'
+            f'- "synonyms": list of brand synonyms,\n'
+            f'- "queries": list of the 3 generated queries.\n\n'
+            f"Example JSON structure:\n"
+            f'{{\n  "corrected_brand": "American Garden",\n  "synonyms": ["American Garden", "A/G", "أمريكان جاردن"],\n  "queries": ["American Garden Real Mayonnaise", "American Garden Real Mayonnaise packaging", "مايونيز أمريكان جاردن"]\n}}'
         )
         
         payload = {
@@ -1949,25 +1968,32 @@ def expand_query_via_gemini(product_name, brand):
             if text.endswith("```"):
                 text = text[:-3]
             text = text.strip()
-            queries = json.loads(text)
-            if isinstance(queries, list) and len(queries) >= 1:
-                # تصفية أي تكرارات براند قد ينتجها النموذج تلقائياً
-                filtered_queries = []
-                for q in queries:
-                    q = q.strip()
-                    if not q:
-                        continue
-                    if clean_brand:
-                        double_brand = f"{clean_brand} {clean_brand}".lower()
-                        if q.lower().startswith(double_brand):
-                            q = q[len(clean_brand):].strip()
-                    filtered_queries.append(q)
+            
+            data = json.loads(text)
+            if isinstance(data, dict):
+                queries = data.get("queries", [])
+                corrected_brand = data.get("corrected_brand", clean_brand)
+                synonyms = data.get("synonyms", [])
                 
-                if filtered_queries:
-                    print(f"🤖 [Gemini Query Expansion] الاستعلامات المولدة: {filtered_queries}")
-                    return filtered_queries
+                # حفظ المرادفات ديناميكياً لتستخدمها دالة التقييم لاحقاً
+                if brand_key:
+                    all_syns = list(set([clean_brand, corrected_brand] + synonyms))
+                    _dynamic_brand_mappings[brand_key] = [s.strip() for s in all_syns if s.strip()]
+                    print(f"🤖 [Gemini Brand Resolver] {clean_brand} -> {corrected_brand} (Synonyms: {_dynamic_brand_mappings[brand_key]})")
+                
+                if isinstance(queries, list) and len(queries) >= 1:
+                    filtered_queries = []
+                    for q in queries:
+                        q = q.strip()
+                        if not q:
+                            continue
+                        filtered_queries.append(q)
+                    
+                    if filtered_queries:
+                        print(f"🤖 [Gemini Query Expansion] الاستعلامات المولدة: {filtered_queries}")
+                        return filtered_queries
     except Exception as e:
-        print(f"⚠️ خطأ أثناء توليد الاستعلامات عبر Gemini: {e}")
+        print(f"⚠️ خطأ أثناء توليد الاستعلامات وتصحيح البراند عبر Gemini: {e}")
         
     return fallback_queries
 
