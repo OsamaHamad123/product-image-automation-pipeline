@@ -177,30 +177,46 @@ class ParallelConsensusScraper:
         return 1.0
 
     async def _fetch_google(self, session, query):
-        if not self.google_key or not self.google_cx:
+        keys = getattr(config, "GOOGLE_SEARCH_API_KEYS", [])
+        cxs = getattr(config, "GOOGLE_SEARCH_CX_LIST", [])
+        
+        # التراجع للمفاتيح الافتراضية إذا لم تكن القوائم مهيأة في الإعدادات
+        if not keys and self.google_key:
+            keys = [self.google_key]
+        if not cxs and self.google_cx:
+            cxs = [self.google_cx]
+            
+        if not keys or not cxs:
             return []
+            
         url = "https://www.googleapis.com/customsearch/v1"
-        params = {
-            "key": self.google_key,
-            "cx": self.google_cx,
-            "q": query,
-            "searchType": "image",
-            "imgSize": "xxlarge",
-            "fileType": "jpg|png",
-            "gl": "ae"  # توطين نتائج البحث في دولة الإمارات (UAE Localization) لضمان جلب المنتجات المحلية
-        }
-        try:
-            async with session.get(url, params=params, timeout=6) as r:
-                if r.status == 200:
-                    data = await r.json()
-                    return [{
-                        "url": item["link"],
-                        "title": item.get("title", query),
-                        "width": int(item.get("image", {}).get("width", 800)),
-                        "height": int(item.get("image", {}).get("height", 800))
-                    } for item in data.get("items", [])]
-        except Exception:
-            pass
+        for idx, key in enumerate(keys):
+            cx = cxs[idx] if idx < len(cxs) else cxs[0]
+            params = {
+                "key": key,
+                "cx": cx,
+                "q": query,
+                "searchType": "image",
+                "imgSize": "xxlarge",
+                "fileType": "jpg|png",
+                "gl": "ae"  # توطين نتائج البحث في دولة الإمارات (UAE Localization) لضمان جلب المنتجات المحلية
+            }
+            try:
+                async with session.get(url, params=params, timeout=6) as r:
+                    if r.status == 200:
+                        data = await r.json()
+                        return [{
+                            "url": item["link"],
+                            "title": item.get("title", query),
+                            "width": int(item.get("image", {}).get("width", 800)),
+                            "height": int(item.get("image", {}).get("height", 800))
+                        } for item in data.get("items", [])]
+                    elif r.status == 429:
+                        print(f"⚠️ [Parallel Google API] Key index {idx} hit quota limit (429). Rotating...")
+                        continue
+            except Exception as e:
+                print(f"⚠️ [Parallel Google API] Exception with key index {idx}: {e}")
+                continue
         return []
 
     async def _fetch_bing(self, session, query):
@@ -529,12 +545,12 @@ def extract_sizes(text):
     text = text.lower()
     
     # 1. استخراج الأبعاد والأحجام المعتادة (مل، لتر، جرام، كجم)
-    # يدعم الصيغ مثل: 180ml, 1l, 500g, 1kg, 1.5 l, 1.5litre, 200 gm, 1.5ltr
-    pattern = r'\b(\d+(?:\.\d+)?)\s*(ml|l|g|gm|kg|ltr|litre|grams|kilograms)\b'
+    # يدعم الصيغ الإنجليزية والعربية مثل: 180ml, 1l, 500g, 1.5 لتر, 250 مل, 1 كجم
+    pattern = r'\b(\d+(?:\.\d+)?)\s*(ml|l|g|gm|kg|ltr|litre|grams|kilograms|لتر|مل|جرام|جم|كجم|كيلو|كيلوغرام)\b'
     matches = re.findall(pattern, text)
     
-    # 2. استخراج العبوات المتعددة (Packs) مثل: x6, pack of 6, 6pcs, 6s
-    pack_pattern = r'\b(?:pack\s+of\s+|x\s*)(\d+)\b|\b(\d+)\s*(?:pcs|s|pack|packs)\b'
+    # 2. استخراج العبوات المتعددة (Packs) مثل: x6, pack of 6, 6pcs, 6 حبات, 12 حبة
+    pack_pattern = r'\b(?:pack\s+of\s+|x\s*)(\d+)\b|\b(\d+)\s*(?:pcs|s|pack|packs|حبة|حبات|قطع|قطعة)\b'
     pack_matches = re.findall(pack_pattern, text)
     
     sizes = []
@@ -542,15 +558,15 @@ def extract_sizes(text):
         try:
             val = float(val)
             # توحيد الوحدات السائلة إلى ml
-            if unit in ['ml']:
+            if unit in ['ml', 'مل']:
                 unit = 'ml'
-            elif unit in ['l', 'ltr', 'litre']:
+            elif unit in ['l', 'ltr', 'litre', 'لتر']:
                 val *= 1000.0
                 unit = 'ml'
             # توحيد الوحدات الجافة إلى g
-            elif unit in ['g', 'gm', 'grams']:
+            elif unit in ['g', 'gm', 'grams', 'جرام', 'جم']:
                 unit = 'g'
-            elif unit in ['kg', 'kilograms']:
+            elif unit in ['kg', 'kilograms', 'كجم', 'كيلو', 'كيلوغرام']:
                 val *= 1000.0
                 unit = 'g'
             sizes.append((val, unit))
@@ -1325,39 +1341,60 @@ def google_image_search_free(query):
 
 def google_image_search(query):
     """
-    البحث عن صور باستخدام Google Custom Search API الرسمي، مع تراجع تلقائي للنسخة المجانية في حال غياب المفاتيح.
+    البحث عن صور باستخدام Google Custom Search API الرسمي، مع تدوير المفاتيح تلقائياً والتراجع للنسخة المجانية في حال غياب المفاتيح أو نفاد الحصة.
     """
-    if not config.GOOGLE_SEARCH_API_KEY or not config.GOOGLE_SEARCH_CX:
+    keys = getattr(config, "GOOGLE_SEARCH_API_KEYS", [])
+    cxs = getattr(config, "GOOGLE_SEARCH_CX_LIST", [])
+    
+    # التراجع لـ config الافتراضي إذا لم يتم تهيئة القوائم
+    if not keys and config.GOOGLE_SEARCH_API_KEY:
+        keys = [config.GOOGLE_SEARCH_API_KEY]
+    if not cxs and config.GOOGLE_SEARCH_CX:
+        cxs = [config.GOOGLE_SEARCH_CX]
+        
+    if not keys or not cxs:
         # التراجع التلقائي للنسخة المجانية
         return google_image_search_free(query)
         
     url = "https://www.googleapis.com/customsearch/v1"
-    params = {
-        'key': config.GOOGLE_SEARCH_API_KEY,
-        'cx': config.GOOGLE_SEARCH_CX,
-        'q': query,
-        'searchType': 'image',
-        'num': 10
-    }
     
-    try:
-        res = requests.get(url, params=params, timeout=5)
-        if res.status_code != 200:
-            return google_image_search_free(query)
+    # محاولة استخدام المفاتيح بالتتابع في حال نفاد الحصة (API Quota Rotation)
+    for idx, key in enumerate(keys):
+        cx = cxs[idx] if idx < len(cxs) else cxs[0]
+        params = {
+            'key': key,
+            'cx': cx,
+            'q': query,
+            'searchType': 'image',
+            'num': 10,
+            'gl': 'ae'
+        }
+        try:
+            res = requests.get(url, params=params, timeout=5)
+            if res.status_code == 200:
+                data = res.json()
+                results = []
+                for item in data.get('items', []):
+                    img_info = item.get('image', {})
+                    results.append({
+                        'url': item.get('link'),
+                        'width': int(img_info.get('width', 0)),
+                        'height': int(img_info.get('height', 0)),
+                        'title': item.get('title', query)
+                    })
+                return results
+            elif res.status_code == 429:
+                print(f"⚠️ [Google CSE] Key index {idx} hit rate limit/quota (429). Trying next key...")
+                continue
+            else:
+                print(f"⚠️ [Google CSE] Key index {idx} returned status {res.status_code}. Trying next key...")
+                continue
+        except Exception as e:
+            print(f"⚠️ [Google CSE] Exception with key index {idx}: {e}. Trying next key...")
+            continue
             
-        data = res.json()
-        results = []
-        for item in data.get('items', []):
-            img_info = item.get('image', {})
-            results.append({
-                'url': item.get('link'),
-                'width': int(img_info.get('width', 0)),
-                'height': int(img_info.get('height', 0)),
-                'title': item.get('title', query)
-            })
-        return results
-    except Exception:
-        return google_image_search_free(query)
+    # التراجع للبحث المجاني كخيار أخير
+    return google_image_search_free(query)
 
 def is_image_accessible(url):
     """

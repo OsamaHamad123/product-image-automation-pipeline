@@ -224,6 +224,12 @@
         from { opacity: 0; transform: translateY(4px); }
         to { opacity: 1; transform: translateY(0); }
     }
+    
+    @media (max-width: 992px) {
+        .telemetry-grid {
+            grid-template-columns: 1fr !important;
+        }
+    }
 </style>
 @endsection
 
@@ -366,13 +372,82 @@
     </div>
 </div>
 
-<!-- Live Telemetry Graph & Analytics -->
-<div class="glass-panel" style="margin-top: 2rem; padding: 2rem;">
-    <h3 style="font-size: 1.15rem; font-weight: 800; border-bottom: 1px solid var(--panel-border); padding-bottom: 1rem; margin-bottom: 1.5rem; display: flex; align-items: center; gap: 0.75rem; color: var(--text-primary);">
-        <i class="fas fa-chart-line" style="color: var(--text-primary);"></i> مراقبة مؤشرات الأداء الفورية (Live Telemetry)
-    </h3>
-    <div style="background: var(--card-bg); border-radius: var(--border-radius-md); padding: 1.5rem; border: 1px solid var(--panel-border); position: relative; height: 320px; width: 100%;">
-        <canvas id="telemetryChart"></canvas>
+<!-- Live Telemetry Graph & Analytics Grid -->
+<div class="telemetry-grid" style="display: grid; grid-template-columns: 2fr 1fr; gap: 1.5rem; margin-top: 2rem;">
+    <!-- Live Telemetry Chart -->
+    <div class="glass-panel" style="margin-bottom: 0; padding: 2rem;">
+        <h3 style="font-size: 1.15rem; font-weight: 800; border-bottom: 1px solid var(--panel-border); padding-bottom: 1rem; margin-bottom: 1.5rem; display: flex; align-items: center; gap: 0.75rem; color: var(--text-primary);">
+            <i class="fas fa-chart-line" style="color: var(--text-primary);"></i> مراقبة مؤشرات الأداء الفورية (Live Telemetry)
+        </h3>
+        <div style="background: var(--card-bg); border-radius: var(--border-radius-md); padding: 1.5rem; border: 1px solid var(--panel-border); position: relative; height: 320px; width: 100%;">
+            <canvas id="telemetryChart"></canvas>
+        </div>
+    </div>
+    
+    <!-- Real-time Cost & Speed Curation Metrics -->
+    <div class="glass-panel" style="margin-bottom: 0; padding: 2rem; display: flex; flex-direction: column; justify-content: space-between;">
+        <div>
+            <h3 style="font-size: 1.15rem; font-weight: 800; border-bottom: 1px solid var(--panel-border); padding-bottom: 1rem; margin-bottom: 1.5rem; display: flex; align-items: center; gap: 0.75rem; color: var(--text-primary);">
+                <i class="fas fa-tachometer-alt" style="color: var(--accent-purple);"></i> إحصائيات المعالجة الفورية
+            </h3>
+            
+            <div style="display: flex; flex-direction: column; gap: 1.15rem; margin-top: 1rem;">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span style="color: var(--text-secondary); font-size: 0.85rem; font-weight: 600;">سرعة المعالجة الحالية:</span>
+                    <strong id="liveThroughput" style="font-family: 'Outfit', sans-serif; font-size: 1.1rem; color: var(--success);">0.0 منتج/دقيقة</strong>
+                </div>
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span style="color: var(--text-secondary); font-size: 0.85rem; font-weight: 600;">الوقت المتبقي للاكتمال (ETA):</span>
+                    <strong id="liveETA" style="font-family: 'Outfit', sans-serif; font-size: 1.1rem; color: var(--info);">00:00:00</strong>
+                </div>
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span style="color: var(--text-secondary); font-size: 0.85rem; font-weight: 600;">معدل النجاح الإجمالي:</span>
+                    <strong style="font-family: 'Outfit', sans-serif; font-size: 1.1rem; color: var(--success);">{{ $total > 0 ? round(($linked / $total) * 100, 1) : 0 }}%</strong>
+                </div>
+            </div>
+        </div>
+        
+        <div style="border-top: 1px solid var(--panel-border); padding-top: 1.25rem; margin-top: 1.25rem;">
+            <span style="font-weight: 700; font-size: 0.85rem; color: var(--text-secondary); display: block; margin-bottom: 0.75rem;">توزيع تكلفة السحاب المقدرة:</span>
+            @php
+                $gCost = $metrics['gemini_cost'] ?? 0;
+                $prCost = $metrics['photoroom_cost'] ?? 0;
+                $cCost = $metrics['cloudinary_cost'] ?? 0;
+                $totCost = $gCost + $prCost + $cCost;
+                $gPct = $totCost > 0 ? ($gCost / $totCost) * 100 : 0;
+                $prPct = $totCost > 0 ? ($prCost / $totCost) * 100 : 0;
+                $cPct = $totCost > 0 ? ($cCost / $totCost) * 100 : 0;
+            @endphp
+            <div style="display: flex; flex-direction: column; gap: 0.6rem;">
+                <div>
+                    <div style="display: flex; justify-content: space-between; font-size: 0.7rem; color: var(--text-secondary); margin-bottom: 0.15rem;">
+                        <span>Gemini Vision</span>
+                        <span>{{ round($gPct, 1) }}%</span>
+                    </div>
+                    <div style="width: 100%; height: 6px; background: rgba(0,0,0,0.3); border-radius: 3px; overflow: hidden;">
+                        <div style="width: {{ $gPct }}%; height: 100%; background: #06b6d4;"></div>
+                    </div>
+                </div>
+                <div>
+                    <div style="display: flex; justify-content: space-between; font-size: 0.7rem; color: var(--text-secondary); margin-bottom: 0.15rem;">
+                        <span>PhotoRoom (Background)</span>
+                        <span>{{ round($prPct, 1) }}%</span>
+                    </div>
+                    <div style="width: 100%; height: 6px; background: rgba(0,0,0,0.3); border-radius: 3px; overflow: hidden;">
+                        <div style="width: {{ $prPct }}%; height: 100%; background: var(--danger);"></div>
+                    </div>
+                </div>
+                <div>
+                    <div style="display: flex; justify-content: space-between; font-size: 0.7rem; color: var(--text-secondary); margin-bottom: 0.15rem;">
+                        <span>Cloudinary Storage</span>
+                        <span>{{ round($cPct, 1) }}%</span>
+                    </div>
+                    <div style="width: 100%; height: 6px; background: rgba(0,0,0,0.3); border-radius: 3px; overflow: hidden;">
+                        <div style="width: {{ $cPct }}%; height: 100%; background: var(--success);"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -533,6 +608,51 @@
                 const percent = data.total > 0 ? Math.round((data.current / data.total) * 100) : 0;
                 document.getElementById('batchProgressPercent').innerText = percent + '%';
                 document.getElementById('batchProgressBar').style.width = percent + '%';
+                
+                // حساب سرعة المعالجة الفورية والوقت المتبقي (ETA)
+                if (data.is_running) {
+                    if (!localStorage.getItem('batch_start_time')) {
+                        localStorage.setItem('batch_start_time', Date.now());
+                        localStorage.setItem('batch_start_current', data.current);
+                    }
+                    
+                    const startTime = parseInt(localStorage.getItem('batch_start_time'));
+                    const startCurrent = parseInt(localStorage.getItem('batch_start_current'));
+                    
+                    if (startTime && !isNaN(startTime) && data.current >= startCurrent) {
+                        const elapsedSeconds = (Date.now() - startTime) / 1000;
+                        const processedCount = data.current - startCurrent;
+                        
+                        if (elapsedSeconds > 1 && processedCount > 0) {
+                            const itemsPerSecond = processedCount / elapsedSeconds;
+                            const itemsPerMinute = itemsPerSecond * 60;
+                            const liveThroughputEl = document.getElementById('liveThroughput');
+                            if (liveThroughputEl) liveThroughputEl.innerText = `${itemsPerMinute.toFixed(1)} منتج/دقيقة`;
+                            
+                            const remainingItems = data.total - data.current;
+                            if (itemsPerSecond > 0) {
+                                const etaSeconds = remainingItems / itemsPerSecond;
+                                const etaHours = Math.floor(etaSeconds / 3600);
+                                const etaMins = Math.floor((etaSeconds % 3600) / 60);
+                                const etaSecs = Math.floor(etaSeconds % 60);
+                                
+                                const pad = (num) => String(num).padStart(2, '0');
+                                const liveETAEl = document.getElementById('liveETA');
+                                if (liveETAEl) liveETAEl.innerText = `${pad(etaHours)}:${pad(etaMins)}:${pad(etaSecs)}`;
+                            } else {
+                                const liveETAEl = document.getElementById('liveETA');
+                                if (liveETAEl) liveETAEl.innerText = '--:--:--';
+                            }
+                        }
+                    }
+                } else {
+                    localStorage.removeItem('batch_start_time');
+                    localStorage.removeItem('batch_start_current');
+                    const liveThroughputEl = document.getElementById('liveThroughput');
+                    if (liveThroughputEl) liveThroughputEl.innerText = '0.0 منتج/دقيقة';
+                    const liveETAEl = document.getElementById('liveETA');
+                    if (liveETAEl) liveETAEl.innerText = '00:00:00';
+                }
                 
                 isPaused = (data.pause_requested === 1);
                 const pBtn = document.getElementById('pauseResumeBatchBtn');

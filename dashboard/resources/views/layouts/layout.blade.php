@@ -31,15 +31,15 @@
             --text-secondary: #a3a3a3;
             --active-menu-bg: linear-gradient(90deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.01) 100%);
             
-            --success: #ffffff;
-            --danger: #737373;
-            --warning: #a3a3a3;
-            --info: #737373;
+            --success: #10b981;
+            --danger: #ef4444;
+            --warning: #f59e0b;
+            --info: #06b6d4;
             
-            --success-bg: rgba(255, 255, 255, 0.08);
-            --danger-bg: rgba(255, 255, 255, 0.03);
-            --warning-bg: rgba(255, 255, 255, 0.05);
-            --info-bg: rgba(255, 255, 255, 0.04);
+            --success-bg: rgba(16, 185, 129, 0.1);
+            --danger-bg: rgba(239, 68, 68, 0.1);
+            --warning-bg: rgba(245, 158, 11, 0.1);
+            --info-bg: rgba(6, 182, 212, 0.1);
             
             --input-bg: rgba(0, 0, 0, 0.8);
             --card-bg: rgba(18, 18, 18, 0.6);
@@ -81,15 +81,15 @@
             --text-secondary: #525252;
             --active-menu-bg: linear-gradient(90deg, rgba(0, 0, 0, 0.06) 0%, rgba(0, 0, 0, 0.01) 100%);
             
-            --success: #000000;
-            --danger: #8c8c8c;
-            --warning: #525252;
-            --info: #8c8c8c;
-
-            --success-bg: rgba(0, 0, 0, 0.06);
-            --danger-bg: rgba(0, 0, 0, 0.02);
-            --warning-bg: rgba(0, 0, 0, 0.04);
-            --info-bg: rgba(0, 0, 0, 0.03);
+            --success: #059669;
+            --danger: #dc2626;
+            --warning: #d97706;
+            --info: #0891b2;
+ 
+            --success-bg: rgba(5, 150, 105, 0.08);
+            --danger-bg: rgba(220, 38, 38, 0.06);
+            --warning-bg: rgba(217, 119, 6, 0.08);
+            --info-bg: rgba(8, 145, 178, 0.07);
             
             --input-bg: rgba(255, 255, 255, 0.95);
             --card-bg: rgba(248, 248, 248, 0.9);

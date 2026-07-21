@@ -21,7 +21,8 @@ class QueryRefiner:
             return ""
             
         # 1. تطبيع النصوص (Unicode Normalization) وإزالة الرموز الخاصة كالعلامات التجارية المسجلة
-        normalized = unicodedata.normalize('NFKD', raw_title).encode('ascii', 'ignore').decode('ascii')
+        # نستخدم NFKC للحفاظ على الحروف بمختلف اللغات وتفادي مسح الحروف العربية
+        normalized = unicodedata.normalize('NFKC', raw_title)
         normalized = normalized.replace("®", "").replace("™", "").replace("©", "")
         normalized = normalized.lower().strip()
 
@@ -37,6 +38,9 @@ class QueryRefiner:
         # 4. استخلاص وإزالة تعبيرات التعبئة والتغليف (مثل Pack of 12, Pk of 6, Box of 4, Qty 10, x12)
         normalized = re.sub(r'\b(pack\s*of|pk\s*of|box\s*of|case\s*of|qty|x)\s*(\d+)\b', '', normalized)
         normalized = re.sub(r'\b(\d+)\s*(count|ct|pcs|pack|pk)\b', '', normalized)
+
+        # إزالة الرموز الخاصة غير المفيدة مع إبقاء الكلمات والأرقام بجميع اللغات والمسافات والشرطات
+        normalized = re.sub(r'[^\w\s\-\.\,\/]', ' ', normalized)
 
         # تنظيف الفراغات الزائدة
         cleaned = re.sub(r'\s+', ' ', normalized).strip()
