@@ -309,18 +309,19 @@
             </div>
         </div>
 
-        <!-- Card 5: Google Custom Search -->
-        <div class="service-card" id="card-google_search">
+
+        <!-- Card 6: Proxy Server -->
+        <div class="service-card" id="card-proxy">
             <div class="service-header">
                 <div>
-                    <h4 class="service-title">Google Custom Search</h4>
+                    <h4 class="service-title">البروكسي السكني (Proxy)</h4>
                     <span class="service-badge badge-optional">اختياري (Optional)</span>
                 </div>
-                <i class="fas fa-search" style="font-size: 1.5rem; color: #f59e0b;"></i>
+                <i class="fas fa-network-wired" style="font-size: 1.5rem; color: #a855f7;"></i>
             </div>
             <div class="service-status">
-                <span class="status-indicator status-unknown" id="ind-google_search"></span>
-                <span class="status-text text-secondary" id="text-google_search">بانتظار الفحص</span>
+                <span class="status-indicator status-unknown" id="ind-proxy"></span>
+                <span class="status-text text-secondary" id="text-proxy">بانتظار الفحص</span>
             </div>
         </div>
     </div>
@@ -427,7 +428,7 @@
         icon.className = 'fas fa-spinner fa-spin';
         
         // Reset states
-        const services = ['google_sheets', 'cloudinary', 'photoroom', 'gemini', 'google_search'];
+        const services = ['google_sheets', 'cloudinary', 'photoroom', 'gemini', 'proxy'];
         services.forEach(s => {
             const ind = document.getElementById(`ind-${s}`);
             const txt = document.getElementById(`text-${s}`);
@@ -468,6 +469,9 @@
             const txt = document.getElementById(`text-${key}`);
             const card = document.getElementById(`card-${key}`);
             
+            // If card is not in DOM (e.g. google_search card removed), skip
+            if (!card) return;
+            
             // Remove previous error buttons if any
             const prevBtn = card.querySelector('.diag-err-btn');
             if (prevBtn) prevBtn.remove();
@@ -476,24 +480,34 @@
                 ind.className = 'status-indicator status-online';
                 txt.innerText = 'يعمل بنجاح';
                 txt.className = 'status-text text-success';
+            } else if (service.status === 'disabled') {
+                ind.className = 'status-indicator status-unknown';
+                txt.innerText = 'غير مفعّل';
+                txt.className = 'status-text text-secondary';
             } else {
-                ind.className = 'status-indicator status-offline';
-                txt.innerText = 'فشل الاتصال / متوقف';
-                txt.className = 'status-text text-danger';
+                if (service.is_critical) {
+                    ind.className = 'status-indicator status-offline';
+                    txt.innerText = 'فشل الاتصال / متوقف';
+                    txt.className = 'status-text text-danger';
 
-                // Add "Show Error details" button inside card
-                const errBtn = document.createElement('button');
-                errBtn.type = 'button';
-                errBtn.className = 'btn btn-secondary btn-sm diag-err-btn';
-                errBtn.style.marginTop = '0.75rem';
-                errBtn.style.fontSize = '0.7rem';
-                errBtn.style.padding = '0.2rem 0.5rem';
-                errBtn.innerHTML = '<i class="fas fa-info-circle"></i> تفاصيل الخطأ';
-                errBtn.onclick = (e) => {
-                    e.stopPropagation();
-                    showDiagErrorModal(service.name, rawLogs);
-                };
-                card.appendChild(errBtn);
+                    // Add "Show Error details" button inside card for critical failures
+                    const errBtn = document.createElement('button');
+                    errBtn.type = 'button';
+                    errBtn.className = 'btn btn-secondary btn-sm diag-err-btn';
+                    errBtn.style.marginTop = '0.75rem';
+                    errBtn.style.fontSize = '0.7rem';
+                    errBtn.style.padding = '0.2rem 0.5rem';
+                    errBtn.innerHTML = '<i class="fas fa-info-circle"></i> تفاصيل الخطأ';
+                    errBtn.onclick = (e) => {
+                        e.stopPropagation();
+                        showDiagErrorModal(service.name, rawLogs);
+                    };
+                    card.appendChild(errBtn);
+                } else {
+                    ind.className = 'status-indicator status-unknown';
+                    txt.innerText = 'غير نشط / تجاوز الاتصال (اختياري)';
+                    txt.className = 'status-text text-secondary';
+                }
             }
         });
     }

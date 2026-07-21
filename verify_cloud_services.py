@@ -197,6 +197,32 @@ def verify_google_search():
         print(f"❌ حدث خطأ أثناء فحص Google Search: {e}")
         return False
 
+def verify_proxy():
+    print_separator("فحص اتصال البروكسي السكني")
+    proxy_url = config.PROXY_URL
+    if not proxy_url:
+        print("ℹ️ البروكسي السكني غير مفعّل (PROXY_URL فارغ).")
+        return None
+        
+    try:
+        print(f"🔄 محاولة إرسال طلب فحص اتصال عبر البروكسي... ({proxy_url[:15]}...)")
+        proxies = {"http": proxy_url, "https": proxy_url}
+        # We fetch a Yandex images text query to verify it works
+        url = "https://yandex.com/images/search?text=Nellara"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        }
+        response = requests.get(url, headers=headers, proxies=proxies, timeout=10)
+        if response.status_code == 200:
+            print("✅ نجح الاتصال بمحرك Yandex عبر البروكسي والخدمة جاهزة ومصرح لها.")
+            return True
+        else:
+            print(f"❌ فشل الاتصال عبر البروكسي: كود الاستجابة {response.status_code}")
+            return False
+    except Exception as e:
+        print(f"❌ حدث خطأ أثناء فحص اتصال البروكسي: {e}")
+        return False
+
 if __name__ == "__main__":
     if "--json" in sys.argv:
         import io
@@ -210,6 +236,7 @@ if __name__ == "__main__":
         gemini_ok = verify_gemini()
         photoroom_ok = verify_photoroom()
         search_ok = verify_google_search()
+        proxy_status = verify_proxy()
         
         # استرجاع النصوص التي طبعت في الخلفية كلوغات تفصيلية لكل خدمة
         captured_logs = sys.stdout.getvalue()
@@ -244,6 +271,11 @@ if __name__ == "__main__":
                     "name": "Google Custom Search",
                     "status": "online" if search_ok else "offline",
                     "is_critical": False
+                },
+                "proxy": {
+                    "name": "Proxy Server",
+                    "status": "online" if proxy_status is True else ("disabled" if proxy_status is None else "offline"),
+                    "is_critical": False
                 }
             },
             "raw_logs": captured_logs
@@ -260,7 +292,8 @@ if __name__ == "__main__":
         "Cloudinary CDN": verify_cloudinary(),
         "Google Gemini API": verify_gemini(),
         "PhotoRoom API": verify_photoroom(),
-        "Google Custom Search": verify_google_search()
+        "Google Custom Search": verify_google_search(),
+        "Proxy Connection": verify_proxy()
     }
     
     print("\n" + "=" * 60)
@@ -268,13 +301,15 @@ if __name__ == "__main__":
     print("=" * 60)
     all_ok = True
     for service, status in results.items():
-        if status:
-            status_str = "✅ يعمل بنجاح"
+        if status or status is None:
+            if status is None:
+                status_str = "ℹ️ غير مفعّل"
+            else:
+                status_str = "✅ يعمل بنجاح"
         else:
             status_str = "❌ فشل الاتصال / غير مهيأ"
             # فقط الخدمات الحيوية تؤدي لتعطيل التشغيل بالكامل
-            # Google Custom Search ليس حرجاً تماماً بوجود الـ Fallbacks
-            if service != "Google Custom Search":
+            if service not in ["Google Custom Search", "Proxy Connection"]:
                 all_ok = False
         print(f"- {service:22}: {status_str}")
     print("=" * 60)
