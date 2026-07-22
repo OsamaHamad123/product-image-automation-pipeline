@@ -2057,6 +2057,8 @@
                         c.is_selected = 0;
                     }
                 });
+            }
+        }
     }
 
     async function rejectAndReSearchCandidate(btn, rowNumber, imageUrl, phash) {
