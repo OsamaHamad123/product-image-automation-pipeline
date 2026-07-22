@@ -3006,24 +3006,121 @@
         }
     }
 
-    // On Load
+    // Real-Time Curation Grid Manager via Server-Sent Events (SSE)
+    class CurationGridManager {
+        constructor(sessionId, sseBaseUrl, mutateBaseUrl) {
+            this.sessionId = sessionId;
+            this.sseBaseUrl = sseBaseUrl;
+            this.mutateBaseUrl = mutateBaseUrl;
+            this.state = {
+                products: new Map(),
+                metrics: { total: 0, completed: 0, percentage: 0 }
+            };
+            this.eventSource = null;
+            this.initSseStream();
+        }
+
+        initSseStream() {
+            if (this.eventSource) {
+                this.eventSource.close();
+            }
+            const streamUrl = `${this.sseBaseUrl}/${this.sessionId}`;
+            try {
+                this.eventSource = new EventSource(streamUrl);
+                this.eventSource.addEventListener('curation_pending', (event) => {
+                    try {
+                        const productData = JSON.parse(event.data);
+                        this.ingestProduct(productData);
+                    } catch (error) {
+                        console.error("[SSE Stream] Event parse error:", error);
+                    }
+                });
+                this.eventSource.onerror = (err) => {
+                    console.warn("[SSE Stream] Reconnecting stream...", err);
+                };
+            } catch (ex) {
+                console.warn("[SSE Stream] EventSource init fallback:", ex);
+            }
+        }
+
+        ingestProduct(product) {
+            if (!product || !product.id) return;
+            if (this.state.products.has(product.id)) return;
+
+            const normalizedProduct = {
+                id: product.id,
+                title: product.title || `منتج ${product.id}`,
+                description: product.description || '',
+                status: 'pending',
+                syncStatus: 'synced',
+                rollbackData: null
+            };
+
+            this.state.products.set(product.id, normalizedProduct);
+            if (typeof fetchCurationProducts === 'function') {
+                fetchCurationProducts();
+            }
+        }
+
+        async submitCuration(productId, decision) {
+            const product = this.state.products.get(productId) || { id: productId, status: 'pending', syncStatus: 'synced' };
+            const snapshot = { ...product };
+
+            product.status = decision;
+            product.syncStatus = 'mutating';
+            product.rollbackData = snapshot;
+            this.state.products.set(productId, product);
+
+            try {
+                const response = await fetch(`${this.mutateBaseUrl}/${productId}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json',
+                        'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
+                    },
+                    body: JSON.stringify({
+                        decision: decision,
+                        session_id: this.sessionId
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Server status: ${response.status}`);
+                }
+
+                const confirmedProduct = this.state.products.get(productId);
+                if (confirmedProduct) {
+                    confirmedProduct.syncStatus = 'synced';
+                    confirmedProduct.rollbackData = null;
+                    this.state.products.set(productId, confirmedProduct);
+                }
+            } catch (error) {
+                console.error(`[Curation Mutation Error] ${productId}:`, error);
+                this.rollbackProductState(productId);
+            }
+        }
+
+        rollbackProductState(productId) {
+            const product = this.state.products.get(productId);
+            if (product && product.rollbackData) {
+                const previousState = product.rollbackData;
+                previousState.syncStatus = 'error';
+                this.state.products.set(productId, previousState);
+                console.warn(`[Curation Rollback] Reverted state for product ${productId}`);
+            }
+        }
+    }
 
     document.addEventListener("DOMContentLoaded", () => {
-
         pollBatchStatus();
-
         setInterval(pollBatchStatus, 3000);
 
-        
-
         pollLogs();
-
         setInterval(pollLogs, 2500);
 
-        
-
         fetchCurationProducts();
-
+        window.gridManager = new CurationGridManager('batch_sess_99', '/api/v1/curation/stream', '/api/v1/curation/mutate');
     });
 
 </script>

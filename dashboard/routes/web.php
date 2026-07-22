@@ -4,8 +4,10 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\ProductController;
 use App\Http\Controllers\ApiController;
 use App\Http\Controllers\CatalogHealingController;
+use App\Http\Controllers\CurationController;
 
 Route::post('/api/v1/fix-broken-image-link', [CatalogHealingController::class, 'processBrokenImage']);
+Route::post('/api/v1/curation/mutate/{productId}', [CurationController::class, 'mutate']);
 
 // صفحات لوحة التحكم
 Route::get('/', [ProductController::class, 'index'])->name('dashboard.index');

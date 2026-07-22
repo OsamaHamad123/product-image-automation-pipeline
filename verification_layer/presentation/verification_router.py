@@ -461,5 +461,32 @@ def api_nextgen_execute_sheets_delta_sync(request: ExecuteSheetsDeltaSyncRequest
     }
 
 
+@router.get("/v1/curation/stream/{session_id}")
+async def api_stream_curation_events(session_id: str, request: Request, last_event_id: Optional[str] = Header(None, alias="Last-Event-ID")):
+    from fastapi.responses import StreamingResponse
+    from verification_layer.use_cases.process_event_stream import RedisSseRepository, ProcessEventStreamUseCase
+
+    repository = RedisSseRepository()
+    use_case = ProcessEventStreamUseCase(repository)
+
+    async def sse_event_generator():
+        async for evt in use_case.execute(session_id, last_event_id):
+            if await request.is_disconnected():
+                break
+            payload_str = f"id: {evt['id']}\nevent: {evt['event']}\ndata: {evt['data']}\nretry: {evt.get('retry', 3000)}\n\n"
+            yield payload_str.encode("utf-8")
+
+    return StreamingResponse(
+        sse_event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive"
+        }
+    )
+
+
+
 
 
