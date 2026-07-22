@@ -240,3 +240,67 @@ def api_nextgen_color_fidelity(request: ColorFidelityRequest):
         "brand_decision": res.brand_decision,
         "approved": res.approved
     }
+
+
+class GTINVerifyRequest(BaseModel):
+    gtin: str
+
+
+class FullCatalogAuditRequest(BaseModel):
+    sku: str
+    title_ar: str
+    title_en: str
+    brand: str
+    image_base64: Optional[str] = None
+    capacity_l: Optional[float] = 1.5
+
+
+@router.post("/nextgen/gtin-verify")
+def api_nextgen_gtin_verify(request: GTINVerifyRequest):
+    from verification_layer.use_cases.gtin_checksum_verifier import HybridBarcodeEngine
+    is_valid = HybridBarcodeEngine.is_valid_gtin13(request.gtin)
+    return {
+        "gtin": request.gtin,
+        "is_valid_ean13": is_valid,
+        "status": "VALID_GTIN_BARCODE" if is_valid else "INVALID_GTIN_CHECKSUM"
+    }
+
+
+@router.post("/nextgen/full-catalog-audit")
+def api_nextgen_full_catalog_audit(request: FullCatalogAuditRequest):
+    from verification_layer.domain.nextgen_models import Product
+    from verification_layer.use_cases.process_catalog_audit_pipeline import ProcessCatalogAuditUseCase
+
+    if request.image_base64:
+        img_bytes = base64.b64decode(request.image_base64)
+        pil_img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+    else:
+        # Create synthetic high quality RGB test image
+        pil_img = Image.new("RGB", (200, 200), color=(255, 255, 255))
+
+    prod = Product(
+        sku=request.sku,
+        title_ar=request.title_ar,
+        title_en=request.title_en,
+        specifications={"capacity_l": request.capacity_l},
+        expected_brand=request.brand,
+        expected_colors_lab=[[53.2, 80.1, 67.2]]
+    )
+
+    audit_pipeline = ProcessCatalogAuditUseCase()
+    res = audit_pipeline.audit_image_pil(pil_img, prod)
+
+    return {
+        "success": res.success,
+        "detected_mime": res.detected_mime,
+        "colorfulness": res.colorfulness,
+        "sharpness": res.sharpness,
+        "shadow_preserved": res.shadow_preserved,
+        "is_brand_matched": res.is_brand_matched,
+        "color_delta_e_deviations": res.color_delta_e_deviations,
+        "spatial_packaging_ratio": res.spatial_packaging_ratio,
+        "aesthetic_score": res.aesthetic_score,
+        "spec_consistency_score": res.spec_consistency_score,
+        "live_metrics": res.live_metrics
+    }
+

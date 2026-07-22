@@ -25,6 +25,39 @@ class ProductBrandSpecs:
 
 
 @dataclass
+class Product:
+    sku: str
+    title_ar: str
+    title_en: str
+    specifications: Dict[str, Any]
+    expected_brand: str
+    expected_colors_lab: List[List[float]] = field(default_factory=list)
+
+
+@dataclass
+class ImageAuditResult:
+    success: bool
+    detected_mime: str
+    colorfulness: float
+    sharpness: float
+    shadow_preserved: bool
+    is_brand_matched: bool
+    color_delta_e_deviations: List[float]
+    spatial_packaging_ratio: float
+    aesthetic_score: float
+    spec_consistency_score: float
+    live_metrics: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class SearchCandidate:
+    document_id: str
+    title: str
+    score: float
+    source: str
+
+
+@dataclass
 class RRFResult:
     query: str
     candidates: List[Tuple[str, float]]
