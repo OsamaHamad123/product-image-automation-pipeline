@@ -55,7 +55,7 @@ class CurationController extends Controller
                     $pipe->ltrim($historyKey, -150, -1);
                     $pipe->expire($historyKey, 7200);
                 });
-            } catch (Exception $redisEx) {
+            } catch (\Throwable $redisEx) {
                 Log::warning("Redis Pub/Sub broadcast skipped or unreachable: " . $redisEx->getMessage());
             }
 

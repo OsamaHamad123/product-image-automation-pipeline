@@ -4,7 +4,9 @@ namespace App\Services;
 
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Redis;
+use Illuminate\Support\Facades\Cache;
 use Exception;
+use Throwable;
 
 class SelectiveSearchService
 {
@@ -22,7 +24,6 @@ class SelectiveSearchService
      * @param array $queryVector
      * @param array $rejectedItem Includes product_id, vector, and phash
      * @return array
-     * @throws Exception
      */
     public function reSearchAndExclude(string $sessionId, array $queryVector, array $rejectedItem): array
     {
@@ -31,18 +32,24 @@ class SelectiveSearchService
         $phash = $rejectedItem['phash'] ?? '0000000000000000';
 
         $cacheKey = "blacklist:{$sessionId}";
+        $itemPayload = json_encode([
+            'product_id' => $productId,
+            'phash' => $phash,
+            'vector' => $vector,
+            'timestamp' => time()
+        ]);
 
         try {
-            // Local synchronization to Redis Cache
-            Redis::sadd($cacheKey, json_encode([
-                'product_id' => $productId,
-                'phash' => $phash,
-                'vector' => $vector,
-                'timestamp' => time()
-            ]));
-            Redis::expire($cacheKey, 1800); // 30-minute session TTL
-        } catch (Exception $e) {
-            logger()->warning("Redis session blacklist write warning: " . $e->getMessage());
+            Redis::sadd($cacheKey, $itemPayload);
+            Redis::expire($cacheKey, 1800);
+        } catch (Throwable $e) {
+            try {
+                $existing = Cache::get($cacheKey, []);
+                $existing[] = json_decode($itemPayload, true);
+                Cache::put($cacheKey, $existing, 1800);
+            } catch (Throwable $cacheEx) {
+                logger()->warning("Cache fallback write warning: " . $cacheEx->getMessage());
+            }
         }
 
         try {
