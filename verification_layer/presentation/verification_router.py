@@ -413,4 +413,53 @@ def api_nextgen_catalog_visual_audit(request: CatalogVisualAuditRequest):
     return res
 
 
+class ExecuteSheetsDeltaSyncRequest(BaseModel):
+    batch_size: int = 100
+    sheet_range: str = "Catalog!A2:E"
+    events: Optional[List[Dict[str, Any]]] = None
+
+
+@router.post("/nextgen/execute-sheets-delta-sync")
+def api_nextgen_execute_sheets_delta_sync(request: ExecuteSheetsDeltaSyncRequest):
+    from verification_layer.use_cases.delta_catalog_sync import DeltaCatalogSyncUseCase
+    from verification_layer.infrastructure.google_sheets_bulk_adapter import (
+        MySQLConnectionPoolAdapter,
+        RedisWriteBehindBufferAdapter,
+        GoogleSheetsBulkGatewayAdapter
+    )
+
+    db_adapter = MySQLConnectionPoolAdapter()
+    cache_adapter = RedisWriteBehindBufferAdapter()
+    sheet_adapter = GoogleSheetsBulkGatewayAdapter()
+
+    # Seed events if provided
+    events = request.events or [
+        {"product_id": "101", "sku": "SKU-101", "title": "المنتج 101", "price": 49.99, "stock": 50},
+        {"product_id": "102", "sku": "SKU-102", "title": "المنتج 102", "price": 89.99, "stock": 25}
+    ]
+
+    for evt in events:
+        cache_adapter.push_to_events_queue(evt)
+
+    sync_use_case = DeltaCatalogSyncUseCase(
+        db_adapter=db_adapter,
+        cache_adapter=cache_adapter,
+        sheet_adapter=sheet_adapter
+    )
+
+    synced_count = sync_use_case.execute_sync_cycle(
+        batch_size=request.batch_size,
+        sheet_range=request.sheet_range
+    )
+
+    return {
+        "success": True,
+        "synced_products_count": synced_count,
+        "input_mode": "RAW",
+        "delta_hashing": "SHA-256",
+        "status": "DELTA_SYNC_COMPLETED"
+    }
+
+
+
 
