@@ -1,9 +1,10 @@
 # verification_layer/presentation/verification_router.py
 import io
 import base64
+import numpy as np
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 from PIL import Image
 
 from verification_layer.domain.models import CatalogProduct, CatalogType, SurfaceCurvature
@@ -12,14 +13,28 @@ from verification_layer.infrastructure.siglip_embedding_adapter import SigLIPVis
 from verification_layer.infrastructure.vlm_adjudicator_adapter import VLMAdjudicatorAdapter
 from verification_layer.infrastructure.yolo_logo_adapter import YOLOLogoDetectorAdapter
 
+# Next-Gen Frontiers Imports
+from verification_layer.domain.nextgen_models import LabColor, ProductBrandSpecs
+from verification_layer.use_cases.speculative_search_engine import SpeculativeSearchEngine
+from verification_layer.use_cases.multimodal_spec_audit import MultiModalSpecAuditUseCase
+from verification_layer.use_cases.spatial_packaging_density import SpatialPackagingDensityUseCase
+from verification_layer.use_cases.cavi_aesthetic_engine import CAVIAestheticEngineUseCase
+from verification_layer.use_cases.spectral_color_fidelity import SpectralColorFidelityUseCase, rgb_to_lab
+
 router = APIRouter(prefix="/api", tags=["Verification & Validation Layer"])
 
-# Instantiate single pipeline instance
+# Instantiate pipeline instances
 _pipeline = CatalogVerificationPipeline(
     visual_engine=SigLIPVisualEmbeddingAdapter(),
     vlm_adjudicator=VLMAdjudicatorAdapter(),
     logo_detector=YOLOLogoDetectorAdapter(),
 )
+
+_speculative_search = SpeculativeSearchEngine()
+_multimodal_audit = MultiModalSpecAuditUseCase()
+_spatial_density = SpatialPackagingDensityUseCase()
+_cavi_engine = CAVIAestheticEngineUseCase()
+_color_fidelity = SpectralColorFidelityUseCase()
 
 
 class VerifyCatalogRequest(BaseModel):
@@ -30,6 +45,37 @@ class VerifyCatalogRequest(BaseModel):
     weight_volume: str
     catalog_type: Optional[str] = "global_brand"
     surface_curvature: Optional[str] = "flat"
+
+
+class SpeculativeSearchRequest(BaseModel):
+    query: str
+    fallback_gtin: Optional[str] = None
+    simulate_vector_failure: Optional[bool] = False
+    simulate_lexical_failure: Optional[bool] = False
+
+
+class SpecAuditRequest(BaseModel):
+    target_spec_text: str
+    detected_text_boxes: List[Dict[str, Any]]
+    expected_box: Optional[Tuple[int, int, int, int]] = (10, 10, 200, 200)
+
+
+class PackagingDensityRequest(BaseModel):
+    image_base64: Optional[str] = None
+
+
+class CAVIAestheticRequest(BaseModel):
+    image_base64: Optional[str] = None
+
+
+class ColorFidelityRequest(BaseModel):
+    gtin: str
+    brand_name: str
+    sample_rgb: Tuple[int, int, int]
+    target_l_star: Optional[float] = 50.0
+    target_a_star: Optional[float] = 20.0
+    target_b_star: Optional[float] = -10.0
+    tolerance: Optional[float] = 3.5
 
 
 @router.post("/verify-catalog-image")
@@ -91,4 +137,106 @@ async def verify_catalog_image(request: VerifyCatalogRequest):
         if result.adjudication_report
         else None,
         "rejection_reasons": result.rejection_reasons,
+    }
+
+
+# ----------------- Next-Gen Frontiers API Endpoints -----------------
+
+@router.post("/nextgen/speculative-search")
+async def api_nextgen_speculative_search(request: SpeculativeSearchRequest):
+    res = await _speculative_search.execute_speculative_search(
+        query=request.query,
+        fallback_gtin=request.fallback_gtin,
+        fail_vector=request.simulate_vector_failure,
+        fail_lexical=request.simulate_lexical_failure
+    )
+    return {
+        "query": res.query,
+        "source": res.source,
+        "consensus_score": res.consensus_score,
+        "candidates": res.candidates,
+        "circuit_status": res.circuit_status
+    }
+
+
+@router.post("/nextgen/multimodal-spec-audit")
+def api_nextgen_multimodal_spec_audit(request: SpecAuditRequest):
+    res = _multimodal_audit.audit_spec_consistency(
+        target_spec_text=request.target_spec_text,
+        detected_text_boxes=request.detected_text_boxes,
+        expected_bounding_box=request.expected_box
+    )
+    return {
+        "spec_text": res.spec_text,
+        "text_similarity": res.text_similarity,
+        "iou_score": res.iou_score,
+        "matched_bounding_box": res.matched_bounding_box,
+        "is_consistent": res.is_consistent,
+        "status": res.status
+    }
+
+
+@router.post("/nextgen/packaging-density")
+def api_nextgen_packaging_density(request: PackagingDensityRequest):
+    if request.image_base64:
+        img_bytes = base64.b64decode(request.image_base64)
+        pil_img = Image.open(io.BytesIO(img_bytes)).convert("L")
+        np_arr = np.array(pil_img)
+        binary_mask = (np_arr > 50).astype(np.uint8)
+    else:
+        # Synthetic binary mask centered
+        binary_mask = np.zeros((100, 100), dtype=np.uint8)
+        binary_mask[20:80, 20:80] = 1
+
+    res = _spatial_density.evaluate_mask_density(binary_mask)
+    return {
+        "hull_area": res.hull_area,
+        "bbox_area": res.bbox_area,
+        "packaging_ratio": res.packaging_ratio,
+        "is_efficient": res.is_efficient,
+        "status_label": res.status_label,
+        "hull_vertex_count": res.hull_vertex_count
+    }
+
+
+@router.post("/nextgen/cavi-aesthetic")
+def api_nextgen_cavi_aesthetic(request: CAVIAestheticRequest):
+    if request.image_base64:
+        img_bytes = base64.b64decode(request.image_base64)
+        pil_img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+        rgb_arr = np.array(pil_img)
+    else:
+        # Synthetic test image
+        rgb_arr = np.random.randint(0, 255, (100, 100, 3), dtype=np.uint8)
+
+    res = _cavi_engine.evaluate_image_cavi(rgb_arr)
+    return {
+        "focus_variance": res.focus_variance,
+        "color_entropy": res.color_entropy,
+        "canvas_cleanliness": res.canvas_cleanliness,
+        "composite_cavi": res.composite_cavi,
+        "viability_rank": res.viability_rank
+    }
+
+
+@router.post("/nextgen/color-fidelity")
+def api_nextgen_color_fidelity(request: ColorFidelityRequest):
+    extracted_lab = rgb_to_lab(request.sample_rgb)
+    specs = ProductBrandSpecs(
+        gtin=request.gtin,
+        brand_name=request.brand_name,
+        target_colors=[
+            LabColor(l_star=request.target_l_star, a_star=request.target_a_star, b_star=request.target_b_star, label="Brand Standard")
+        ],
+        allowed_tolerance=request.tolerance
+    )
+
+    res = _color_fidelity.verify_brand_color_compliance(extracted_lab, specs)
+    return {
+        "gtin": res.gtin,
+        "brand_name": res.brand_name,
+        "delta_e2000": res.delta_e2000,
+        "perception_level": res.perception_level,
+        "brand_decision": res.brand_decision,
+        "approved": res.approved
     }

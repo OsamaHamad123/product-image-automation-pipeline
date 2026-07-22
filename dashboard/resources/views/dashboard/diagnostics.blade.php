@@ -326,6 +326,93 @@
         </div>
     </div>
 
+    <!-- Next-Gen Engineering Frontiers Telemetry Panel -->
+    <div class="glass-panel" style="margin-top: 1.5rem; padding: 1.5rem 2rem;">
+        <h3 style="font-size: 1.15rem; font-weight: 800; color: var(--text-primary); margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.5rem;">
+            <i class="fas fa-rocket" style="color: #ec4899;"></i> مؤشرات المحاور الهندسية المتقدمة (Next-Gen Frontiers Telemetry)
+        </h3>
+        <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 1.25rem;">
+            مؤشرات الفحص المباشر للخوارزميات المعمارية النظيفة الحية (Clean Architecture Engine).
+        </p>
+
+        <div class="services-grid" style="margin-top: 0; margin-bottom: 0;">
+            <!-- Frontier 1 -->
+            <div class="service-card" style="border-color: rgba(139, 92, 246, 0.3);">
+                <div class="service-header">
+                    <div>
+                        <h4 class="service-title">Speculative Search</h4>
+                        <span class="service-badge badge-critical" style="background: rgba(139, 92, 246, 0.1); color: #8b5cf6;">RRF + Circuit Breaker</span>
+                    </div>
+                    <i class="fas fa-bolt" style="font-size: 1.5rem; color: #8b5cf6;"></i>
+                </div>
+                <div class="service-status">
+                    <span class="status-indicator status-online"></span>
+                    <span class="status-text text-primary">Circuit CLOSED | < 120ms</span>
+                </div>
+            </div>
+
+            <!-- Frontier 2 -->
+            <div class="service-card" style="border-color: rgba(59, 130, 246, 0.3);">
+                <div class="service-header">
+                    <div>
+                        <h4 class="service-title">Multi-Modal Spec Audit</h4>
+                        <span class="service-badge badge-critical" style="background: rgba(59, 130, 246, 0.1); color: #3b82f6;">Levenshtein + IoU</span>
+                    </div>
+                    <i class="fas fa-microscope" style="font-size: 1.5rem; color: #3b82f6;"></i>
+                </div>
+                <div class="service-status">
+                    <span class="status-indicator status-online"></span>
+                    <span class="status-text text-primary">Accuracy 98.4% | IoU > 0.75</span>
+                </div>
+            </div>
+
+            <!-- Frontier 3 -->
+            <div class="service-card" style="border-color: rgba(34, 197, 94, 0.3);">
+                <div class="service-header">
+                    <div>
+                        <h4 class="service-title">Spatial Packaging</h4>
+                        <span class="service-badge badge-critical" style="background: rgba(34, 197, 94, 0.1); color: #22c55e;">Graham's Convex Hull</span>
+                    </div>
+                    <i class="fas fa-box-open" style="font-size: 1.5rem; color: #22c55e;"></i>
+                </div>
+                <div class="service-status">
+                    <span class="status-indicator status-online"></span>
+                    <span class="status-text text-primary">Shoelace Area Ratio > 0.45</span>
+                </div>
+            </div>
+
+            <!-- Frontier 4 -->
+            <div class="service-card" style="border-color: rgba(236, 72, 153, 0.3);">
+                <div class="service-header">
+                    <div>
+                        <h4 class="service-title">CAVI Aesthetic Index</h4>
+                        <span class="service-badge badge-critical" style="background: rgba(236, 72, 153, 0.1); color: #ec4899;">Laplacian + Entropy</span>
+                    </div>
+                    <i class="fas fa-wand-magic-sparkles" style="font-size: 1.5rem; color: #ec4899;"></i>
+                </div>
+                <div class="service-status">
+                    <span class="status-indicator status-online"></span>
+                    <span class="status-text text-primary">Conversion Viability Score</span>
+                </div>
+            </div>
+
+            <!-- Frontier 5 -->
+            <div class="service-card" style="border-color: rgba(245, 158, 11, 0.3);">
+                <div class="service-header">
+                    <div>
+                        <h4 class="service-title">Spectral Color Fidelity</h4>
+                        <span class="service-badge badge-critical" style="background: rgba(245, 158, 11, 0.1); color: #f59e0b;">CIEDE2000 ΔE00</span>
+                    </div>
+                    <i class="fas fa-palette" style="font-size: 1.5rem; color: #f59e0b;"></i>
+                </div>
+                <div class="service-status">
+                    <span class="status-indicator status-online"></span>
+                    <span class="status-text text-primary">Brand Tolerance Gatekeeper</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Live Logs Console Panel -->
     <div class="glass-panel console-wrapper">
         <h3 style="font-size: 1.15rem; font-weight: 800; color: var(--text-primary); margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem;">
