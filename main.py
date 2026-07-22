@@ -552,7 +552,7 @@ def pre_cache_product_candidates(task, worksheet=None, link_column_index=None):
                 category=task.get("category", ""),
                 origin=task.get("origin", ""),
                 trace=trace,
-                skip_cache=True
+                skip_cache=getattr(config, 'SKIP_LOCAL_CACHE', False)
             )
             if best_image:
                 break

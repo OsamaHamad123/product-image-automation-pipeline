@@ -593,6 +593,13 @@
                                 <option value="false">تخطي الصفوف التي تمتلك صوراً مسبقاً</option>
                             </select>
                         </div>
+                        <div class="config-card">
+                            <label for="skipCache">إعادة البحث وتجاوز الكاش</label>
+                            <select id="skipCache">
+                                <option value="false" selected>استخدام الكاش المحلي لتسريع البحث (افتراضي)</option>
+                                <option value="true">تجاوز الكاش المحلي وإجبار البحث الحي المباشر (Bypass Cache ⚡)</option>
+                            </select>
+                        </div>
                     </div>
                 </div>
 
@@ -1141,6 +1148,8 @@
             auto_approve_threshold: parseFloat(document.getElementById('autoApproveThreshold').value),
 
             forceOverwrite: document.getElementById('forceOverwrite').value === 'true',
+
+            skipCache: document.getElementById('skipCache').value === 'true',
 
             curation_mode: true
 
