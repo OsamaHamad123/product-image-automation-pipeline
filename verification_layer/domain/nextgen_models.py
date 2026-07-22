@@ -5,7 +5,53 @@ Pure Python dataclasses with zero external heavy ML dependencies.
 """
 
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import List, Tuple, Dict, Any, Optional
+
+
+class IntentType(Enum):
+    SINGLE_UNIT = "SINGLE"
+    MULTI_PACK = "BUNDLE"
+    UNKNOWN = "UNKNOWN"
+
+
+class ProxyState(Enum):
+    CLOSED = "CLOSED"
+    OPEN = "OPEN"
+    HALF_OPEN = "HALF_OPEN"
+
+
+@dataclass(frozen=True)
+class SearchQuery:
+    raw_text: str
+    cleaned_text: str
+    parsed_units: int
+    intent: IntentType
+
+
+@dataclass(frozen=True)
+class ProductVisualProfile:
+    product_id: str
+    title: str
+    is_bundle_packaging: bool
+    unit_count: int
+    aspect_ratio: float
+
+
+@dataclass
+class ProxyNode:
+    url: str
+    state: ProxyState = ProxyState.CLOSED
+    failure_count: int = 0
+    success_count: int = 0
+    last_failure_time: float = 0.0
+    latency_history: List[float] = field(default_factory=list)
+
+    @property
+    def average_latency(self) -> float:
+        if not self.latency_history:
+            return 99.0
+        return sum(self.latency_history) / len(self.latency_history)
 
 
 @dataclass(frozen=True)

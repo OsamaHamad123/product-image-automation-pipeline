@@ -341,3 +341,76 @@ async def api_fix_broken_image_link(payload: HealImageApiRequest):
     }
 
 
+class ResolveIntentRequest(BaseModel):
+    query_text: str
+
+
+class EvaluateMerchantAuthorityRequest(BaseModel):
+    page_url: str
+    image_url: str
+    json_ld_schema_str: Optional[str] = None
+
+
+class CatalogVisualAuditRequest(BaseModel):
+    user_query_text: str
+    page_url: str
+    image_url: str
+    json_ld_schema_str: Optional[str] = None
+
+
+@router.post("/nextgen/resolve-search-intent")
+def api_nextgen_resolve_search_intent(request: ResolveIntentRequest):
+    from verification_layer.use_cases.search_intent_resolver import SearchIntentResolverUseCase
+    resolver = SearchIntentResolverUseCase()
+    res = resolver.resolve_query_intent(request.query_text)
+    return {
+        "raw_text": res.raw_text,
+        "cleaned_text": res.cleaned_text,
+        "parsed_units": res.parsed_units,
+        "intent": res.intent.value
+    }
+
+
+@router.post("/nextgen/evaluate-merchant-authority")
+def api_nextgen_evaluate_merchant_authority(request: EvaluateMerchantAuthorityRequest):
+    from verification_layer.use_cases.serp_schema_extractor import SERPProductSchemaExtractor
+    extractor = SERPProductSchemaExtractor()
+    schema_data = {"completeness_score": 0.0}
+    if request.json_ld_schema_str:
+        schema_data = extractor.parse_json_ld_schema(request.json_ld_schema_str)
+
+    mas = extractor.calculate_merchant_authority(
+        page_url=request.page_url,
+        image_url=request.image_url,
+        schema_completeness=schema_data["completeness_score"]
+    )
+    return {
+        "page_url": request.page_url,
+        "image_url": request.image_url,
+        "schema_data": schema_data,
+        "merchant_authority_score": mas
+    }
+
+
+@router.post("/nextgen/catalog-visual-audit")
+def api_nextgen_catalog_visual_audit(request: CatalogVisualAuditRequest):
+    from verification_layer.use_cases.catalog_visual_audit_orchestrator import CatalogVisualAuditOrchestrator
+    orchestrator = CatalogVisualAuditOrchestrator()
+
+    # Synthetic mock PNG bytes for testing endpoint
+    import struct
+    signature = b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR'
+    dimensions = struct.pack('>II', 600, 600)
+    mock_bytes = signature + dimensions + b'\x08\x06\x00\x00\x00\x11\x22\x33\x44'
+
+    res = orchestrator.audit_serp_product_image(
+        user_query_text=request.user_query_text,
+        page_url=request.page_url,
+        image_url=request.image_url,
+        pre_fetched_bytes=mock_bytes,
+        json_ld_schema_str=request.json_ld_schema_str
+    )
+    return res
+
+
+
