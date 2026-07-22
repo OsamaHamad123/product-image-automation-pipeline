@@ -487,6 +487,51 @@ async def api_stream_curation_events(session_id: str, request: Request, last_eve
     )
 
 
+class RankFusionRequest(BaseModel):
+    dense_results: List[str] = Field(default_factory=list)
+    lexical_results: List[str] = Field(default_factory=list)
+
+
+@router.get("/v1/image-proxy")
+async def api_secure_image_proxy(url: str = Query(..., description="Target image URL to proxy safely")):
+    from fastapi.responses import Response, StreamingResponse
+    import urllib.request
+    from verification_layer.use_cases.image_proxy_service import ImageProxyService, detect_magic_bytes_mime
+
+    service = ImageProxyService()
+    try:
+        secure_url, headers = service.prepare_proxy_request(url)
+        req = urllib.request.Request(secure_url, headers=headers)
+        with urllib.request.urlopen(req, timeout=6) as resp:
+            content = resp.read()
+
+        detected_mime = detect_magic_bytes_mime(content[:32]) or "image/jpeg"
+        return Response(
+            content=content,
+            media_type=detected_mime,
+            headers={
+                "Cache-Control": "public, max-age=2592000",
+                "Access-Control-Allow-Origin": "*",
+                "X-Content-Type-Options": "nosniff"
+            }
+        )
+    except Exception as ex:
+        raise HTTPException(status_code=400, detail=f"Proxy error: {str(ex)}")
+
+
+@router.post("/v1/rank-fusion")
+def api_process_rank_fusion(request: RankFusionRequest, k: int = Query(60, ge=1)):
+    from verification_layer.use_cases.rank_fusion_service import RankFusionService
+
+    service = RankFusionService(k=k, floor_threshold=65.0)
+    result = service.evaluate_fusion(request.dense_results, request.lexical_results)
+    return {
+        "success": True,
+        **result
+    }
+
+
+
 
 
 
