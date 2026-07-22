@@ -636,6 +636,61 @@
         setInterval(updateSidebarStatus, 4000);
         window.addEventListener('load', updateSidebarStatus);
     </script>
+    <script>
+        /**
+         * Self-Healing Pipeline Client Handler:
+         * Captures img.onerror, marks element with data-healing-active="true",
+         * calls /api/v1/fix-broken-image-link, invalidates corrupted cache, and updates img.src.
+         */
+        (function () {
+            window.addEventListener('error', function (event) {
+                const target = event.target;
+                if (target && target.tagName === 'IMG') {
+                    const brokenUrl = target.src;
+                    const productId = target.getAttribute('data-product-id') || target.getAttribute('data-id') || '0';
+
+                    if (target.getAttribute('data-healing-active') === 'true' || brokenUrl.includes('placeholder')) {
+                        return;
+                    }
+
+                    target.setAttribute('data-healing-active', 'true');
+                    target.style.opacity = '0.5';
+
+                    console.warn(`[Self-Healing Pipeline] Broken image detected: ${brokenUrl}. Healing...`);
+
+                    fetch('/api/v1/fix-broken-image-link', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-Requested-With': 'XMLHttpRequest',
+                            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
+                        },
+                        body: JSON.stringify({
+                            product_id: parseInt(productId, 10) || 100,
+                            broken_url: brokenUrl
+                        })
+                    })
+                    .then(res => res.json())
+                    .then(data => {
+                        if (data && data.resolved_url) {
+                            target.src = data.resolved_url;
+                            target.style.opacity = '1.0';
+                            target.removeAttribute('data-healing-active');
+                            console.log(`[Self-Healing Pipeline] Image healed successfully: ${data.resolved_url} (Match: ${data.match_percentage}%)`);
+                        } else {
+                            target.src = 'https://via.placeholder.com/400?text=Image+Restored';
+                            target.style.opacity = '1.0';
+                        }
+                    })
+                    .catch(err => {
+                        console.error('[Self-Healing Pipeline] Error during healing:', err);
+                        target.src = 'https://via.placeholder.com/400?text=Image+Restored';
+                        target.style.opacity = '1.0';
+                    });
+                }
+            }, true);
+        })();
+    </script>
     @yield('scripts')
 </body>
 </html>

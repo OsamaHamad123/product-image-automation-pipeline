@@ -304,3 +304,40 @@ def api_nextgen_full_catalog_audit(request: FullCatalogAuditRequest):
         "live_metrics": res.live_metrics
     }
 
+
+class HealImageApiRequest(BaseModel):
+    product_id: int
+    broken_url: str
+    candidates_a: Optional[List[str]] = None
+    candidates_b: Optional[List[str]] = None
+
+
+@router.post("/v1/fix-broken-image-link")
+async def api_fix_broken_image_link(payload: HealImageApiRequest):
+    from verification_layer.use_cases.heal_image import HealImageUseCase
+    heal_uc = HealImageUseCase()
+
+    candidates_a = payload.candidates_a or [
+        f"https://images.pexels.com/photos/1000/test_product_{payload.product_id}.jpg",
+        f"https://via.placeholder.com/800/0000FF/888888.png"
+    ]
+    candidates_b = payload.candidates_b or [
+        f"https://via.placeholder.com/800/0000FF/888888.png",
+        f"https://images.pexels.com/photos/1001/alt_product_{payload.product_id}.jpg"
+    ]
+
+    result = await heal_uc.execute(
+        product_id=payload.product_id,
+        broken_url=payload.broken_url,
+        candidates_a=candidates_a,
+        candidates_b=candidates_b
+    )
+
+    return {
+        "product_id": result["product_id"],
+        "resolved_url": result["resolved_url"],
+        "match_percentage": result["match_percentage"],
+        "status": result["status"]
+    }
+
+
