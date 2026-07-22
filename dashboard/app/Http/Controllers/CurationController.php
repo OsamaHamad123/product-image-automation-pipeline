@@ -99,9 +99,103 @@ class CurationController extends Controller
 
         $res = $service->reSearchAndExclude($validated['session_id'], $queryVector, $rejectedItem);
 
+        // Invalidate products json cache
+        \Cache::forget('products_json_v1');
+
         return response()->json([
             'status' => 'success',
             'data' => $res
         ]);
+    }
+
+    /**
+     * Persist selected candidate thumb to DB & invalidate cache.
+     */
+    public function selectCandidate(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'row_number' => 'required|integer',
+            'selected_url' => 'required|string',
+        ]);
+
+        $rowNumber = $validated['row_number'];
+        $selectedUrl = $validated['selected_url'];
+
+        try {
+            if (\DB::getSchemaBuilder()->hasTable('curation_candidates')) {
+                \DB::table('curation_candidates')
+                    ->where('row_number', $rowNumber)
+                    ->update(['is_selected' => 0]);
+
+                \DB::table('curation_candidates')
+                    ->where('row_number', $rowNumber)
+                    ->where('image_url', $selectedUrl)
+                    ->update(['is_selected' => 1]);
+            }
+
+            \Cache::forget('products_json_v1');
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'تم حفظ اختيارات المرشح في قاعدة البيانات بنجاح.'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json(['status' => 'error', 'message' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Persist updated candidate list to DB & invalidate cache.
+     */
+    public function saveCandidates(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'row_number' => 'required|integer',
+            'product_name' => 'nullable|string',
+            'brand' => 'nullable|string',
+            'candidates' => 'required|array',
+        ]);
+
+        $rowNumber = $validated['row_number'];
+        $productName = $validated['product_name'] ?? 'منتج';
+        $brand = $validated['brand'] ?? '';
+        $candidates = $validated['candidates'];
+
+        try {
+            if (\DB::getSchemaBuilder()->hasTable('curation_candidates')) {
+                \DB::table('curation_candidates')->where('row_number', $rowNumber)->delete();
+
+                $rowsToInsert = [];
+                foreach ($candidates as $c) {
+                    $rowsToInsert[] = [
+                        'row_number' => $rowNumber,
+                        'product_name' => $productName,
+                        'brand' => $brand,
+                        'image_url' => $c['image_url'] ?? $c['url'] ?? '',
+                        'title' => $c['title'] ?? '',
+                        'width' => intval($c['width'] ?? 800),
+                        'height' => intval($c['height'] ?? 800),
+                        'clip_score' => floatval($c['clip_score'] ?? 0.0),
+                        'source_domain' => $c['source_domain'] ?? '',
+                        'is_selected' => intval($c['is_selected'] ?? 0),
+                        'status' => 'pending',
+                        'created_at' => now()
+                    ];
+                }
+
+                if (!empty($rowsToInsert)) {
+                    \DB::table('curation_candidates')->insert($rowsToInsert);
+                }
+            }
+
+            \Cache::forget('products_json_v1');
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'تم تحديث وحفظ المرشحات الجديدة في قاعدة البيانات بنجاح.'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json(['status' => 'error', 'message' => $e->getMessage()], 500);
+        }
     }
 }

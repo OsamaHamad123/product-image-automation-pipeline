@@ -2059,6 +2059,19 @@
                 });
             }
         }
+
+        // Persist candidate selection to DB in background
+        fetch('/api/v1/curation/select-candidate', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
+            },
+            body: JSON.stringify({
+                row_number: parseInt(rowNum, 10),
+                selected_url: imageUrl
+            })
+        }).catch(err => console.warn('[Curation Selection Persist Error]', err));
     }
 
     async function rejectAndReSearchCandidate(btn, rowNumber, imageUrl, phash) {
@@ -2440,6 +2453,8 @@
 
                 p.curation_candidates = newCandidates;
 
+                saveCandidatesToDB(rowNumber, p.product_name, p.brand, newCandidates);
+
                 renderBatchCurationGrid();
 
             } else {
@@ -2540,8 +2555,27 @@
 
         
 
+        saveCandidatesToDB(rowNumber, p.product_name, p.brand, p.curation_candidates);
+
         renderBatchCurationGrid();
 
+    }
+
+    function saveCandidatesToDB(rowNumber, productName, brand, candidates) {
+        if (!candidates || candidates.length === 0) return;
+        fetch('/api/v1/curation/save-candidates', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
+            },
+            body: JSON.stringify({
+                row_number: parseInt(rowNumber, 10),
+                product_name: productName || '',
+                brand: brand || '',
+                candidates: candidates
+            })
+        }).catch(err => console.warn('[Curation Save Candidates Error]', err));
     }
 
     // Filter changed

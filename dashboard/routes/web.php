@@ -51,6 +51,9 @@ Route::post('/api/sheet/preview', [ApiController::class, 'previewSheet']);
 Route::post('/api/sheet/save', [ApiController::class, 'saveSheetConfig']);
 Route::get('/api/enterprise-metrics', [ApiController::class, 'getEnterpriseMetrics']);
 Route::post('/api/v1/curation/reject', [CurationController::class, 'rejectAndReSearch']);
+Route::post('/api/v1/curation/select-candidate', [CurationController::class, 'selectCandidate']);
+Route::post('/api/v1/curation/save-candidates', [CurationController::class, 'saveCandidates']);
+
 
 
 
