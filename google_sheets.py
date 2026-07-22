@@ -141,15 +141,21 @@ class GoogleSheetsBatchWorker(threading.Thread):
                 
                 row_ids.append(row_id)
                 a1_range = gspread.utils.rowcol_to_a1(r_num, c_idx + 1)
+                full_range = f"'{worksheet.title}'!{a1_range}"
                 batch_data.append({
-                    "range": a1_range,
+                    "range": full_range,
                     "values": [[str(val)]]
                 })
                 
             try:
-                # Execute bulk batch update using RAW input option (5x throughput acceleration)
-                retried_batch_update = retry_gspread_on_429(max_retries=5)(worksheet.batch_update)
-                retried_batch_update(batch_data, value_input_option="RAW")
+                # Use worksheet.spreadsheet.values_batch_update for correct gspread v5/v6 multi-range update
+                body = {
+                    "valueInputOption": "RAW",
+                    "data": batch_data
+                }
+                retried_batch_update = retry_gspread_on_429(max_retries=5)(worksheet.spreadsheet.values_batch_update)
+                retried_batch_update(body)
+                
                 id_placeholders = ",".join("%s" for _ in row_ids)
                 cursor.execute(
                     f"UPDATE sheet_updates SET sync_status = 'SYNCED' WHERE id IN ({id_placeholders})",
@@ -159,7 +165,6 @@ class GoogleSheetsBatchWorker(threading.Thread):
                 print(f"✅ [Async Sheets Sync - RAW Mode] Successfully synced {len(rows)} bulk updates.")
             except Exception as e:
                 print(f"❌ [Async Sheets Sync Error] Batch RAW update failed: {e}. Preserving status for retry...")
-                # Mark as FAILED in bulk without tripping cell-by-cell rate limits
                 id_placeholders = ",".join("%s" for _ in row_ids)
                 cursor.execute(
                     f"UPDATE sheet_updates SET sync_status = 'FAILED' WHERE id IN ({id_placeholders})",
