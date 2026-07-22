@@ -122,7 +122,7 @@ class GoogleSheetsBatchWorker(threading.Thread):
         try:
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT id, `row_number`, `col_index`, `value` FROM sheet_updates WHERE sync_status = 'PENDING' LIMIT 100"
+                "SELECT id, `row_number`, `col_index`, `value` FROM sheet_updates WHERE sync_status IN ('PENDING', 'FAILED') LIMIT 100"
             )
             rows = cursor.fetchall()
             
@@ -130,8 +130,32 @@ class GoogleSheetsBatchWorker(threading.Thread):
                 return
                 
             print(f"🔄 [Async Sheets Sync] Synchronizing {len(rows)} pending cell updates to Google Sheets...")
+            ws_max_rows = worksheet.row_count
+            ws_max_cols = worksheet.col_count
+            
+            # Auto-expand worksheet bounds if reasonable
+            max_requested_row = max((r["row_number"] for r in rows), default=0)
+            max_requested_col = max((r["col_index"] + 1 for r in rows), default=0)
+            
+            if max_requested_row > ws_max_rows and max_requested_row <= 2000:
+                try:
+                    worksheet.add_rows(max_requested_row - ws_max_rows)
+                    ws_max_rows = max_requested_row
+                    print(f"ℹ️ [Google Sheets] Expanded worksheet rows to {ws_max_rows}")
+                except Exception as ex_rows:
+                    print(f"⚠️ [Google Sheets] Auto-expand rows skipped: {ex_rows}")
+                    
+            if max_requested_col > ws_max_cols and max_requested_col <= 100:
+                try:
+                    worksheet.add_cols(max_requested_col - ws_max_cols)
+                    ws_max_cols = max_requested_col
+                    print(f"ℹ️ [Google Sheets] Expanded worksheet cols to {ws_max_cols}")
+                except Exception as ex_cols:
+                    print(f"⚠️ [Google Sheets] Auto-expand cols skipped: {ex_cols}")
+
             batch_data = []
-            row_ids = []
+            valid_row_ids = []
+            invalid_row_ids = []
             
             for r in rows:
                 row_id = r["id"]
@@ -139,13 +163,29 @@ class GoogleSheetsBatchWorker(threading.Thread):
                 c_idx = r["col_index"]
                 val = r["value"]
                 
-                row_ids.append(row_id)
+                if r_num > ws_max_rows or (c_idx + 1) > ws_max_cols or r_num <= 0 or (c_idx + 1) <= 0:
+                    invalid_row_ids.append(row_id)
+                    continue
+
+                valid_row_ids.append(row_id)
                 a1_range = gspread.utils.rowcol_to_a1(r_num, c_idx + 1)
                 full_range = f"'{worksheet.title}'!{a1_range}"
                 batch_data.append({
                     "range": full_range,
                     "values": [[str(val)]]
                 })
+                
+            if invalid_row_ids:
+                id_placeholders = ",".join("%s" for _ in invalid_row_ids)
+                cursor.execute(
+                    f"UPDATE sheet_updates SET sync_status = 'SKIPPED_OUT_OF_BOUNDS' WHERE id IN ({id_placeholders})",
+                    invalid_row_ids
+                )
+                conn.commit()
+                print(f"⚠️ [Async Sheets Sync] Pruned {len(invalid_row_ids)} out-of-bounds row requests.")
+
+            if not batch_data:
+                return
                 
             try:
                 # Use worksheet.spreadsheet.values_batch_update for correct gspread v5/v6 multi-range update
@@ -156,19 +196,19 @@ class GoogleSheetsBatchWorker(threading.Thread):
                 retried_batch_update = retry_gspread_on_429(max_retries=5)(worksheet.spreadsheet.values_batch_update)
                 retried_batch_update(body)
                 
-                id_placeholders = ",".join("%s" for _ in row_ids)
+                id_placeholders = ",".join("%s" for _ in valid_row_ids)
                 cursor.execute(
                     f"UPDATE sheet_updates SET sync_status = 'SYNCED' WHERE id IN ({id_placeholders})",
-                    row_ids
+                    valid_row_ids
                 )
                 conn.commit()
-                print(f"✅ [Async Sheets Sync - RAW Mode] Successfully synced {len(rows)} bulk updates.")
+                print(f"✅ [Async Sheets Sync - RAW Mode] Successfully synced {len(valid_row_ids)} bulk updates.")
             except Exception as e:
                 print(f"❌ [Async Sheets Sync Error] Batch RAW update failed: {e}. Preserving status for retry...")
-                id_placeholders = ",".join("%s" for _ in row_ids)
+                id_placeholders = ",".join("%s" for _ in valid_row_ids)
                 cursor.execute(
                     f"UPDATE sheet_updates SET sync_status = 'FAILED' WHERE id IN ({id_placeholders})",
-                    row_ids
+                    valid_row_ids
                 )
                 conn.commit()
         finally:
