@@ -50,6 +50,8 @@ Route::post('/api/batch/reset', [ApiController::class, 'resetBatch']);
 Route::post('/api/sheet/preview', [ApiController::class, 'previewSheet']);
 Route::post('/api/sheet/save', [ApiController::class, 'saveSheetConfig']);
 Route::get('/api/enterprise-metrics', [ApiController::class, 'getEnterpriseMetrics']);
+Route::post('/api/v1/curation/reject', [CurationController::class, 'rejectAndReSearch']);
+
 
 
 // إدارة الخدمات والخوادم تلقائياً

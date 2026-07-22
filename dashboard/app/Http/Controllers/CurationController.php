@@ -76,4 +76,32 @@ class CurationController extends Controller
             ], 422);
         }
     }
+
+    /**
+     * Reject a product candidate and execute targeted re-search with Rocchio query modification.
+     */
+    public function rejectAndReSearch(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'session_id' => 'required|string',
+            'query_vector' => 'nullable|array',
+            'rejected_item' => 'required|array',
+            'rejected_item.product_id' => 'required',
+            'rejected_item.phash' => 'nullable|string',
+            'rejected_item.vector' => 'nullable|array',
+        ]);
+
+        $service = new \App\Services\SelectiveSearchService();
+        $queryVector = $validated['query_vector'] ?? array_fill(0, 512, 0.05);
+        $rejectedItem = $validated['rejected_item'];
+        $rejectedItem['vector'] = $rejectedItem['vector'] ?? array_fill(0, 512, 0.1);
+        $rejectedItem['phash'] = $rejectedItem['phash'] ?? '0000000000000000';
+
+        $res = $service->reSearchAndExclude($validated['session_id'], $queryVector, $rejectedItem);
+
+        return response()->json([
+            'status' => 'success',
+            'data' => $res
+        ]);
+    }
 }

@@ -21,6 +21,8 @@ from verification_layer.use_cases.spatial_packaging_density import SpatialPackag
 from verification_layer.use_cases.cavi_aesthetic_engine import CAVIAestheticEngineUseCase
 from verification_layer.use_cases.spectral_color_fidelity import SpectralColorFidelityUseCase, rgb_to_lab
 
+from verification_layer.use_cases.interactive_re_search_use_case import SearchContext
+
 router = APIRouter(prefix="/api", tags=["Verification & Validation Layer"])
 
 # Instantiate pipeline instances
@@ -546,6 +548,36 @@ def api_extract_visual_embeddings():
         "l2_norm": float(np.linalg.norm(vector, ord=2)),
         "vector_sample": vector[:5].tolist()
     }
+
+
+@router.post("/v1/curation/reject-and-research")
+def api_reject_and_research(context: SearchContext):
+    from verification_layer.use_cases.interactive_re_search_use_case import ReSearchUseCase, ProductCandidate
+
+    use_case = ReSearchUseCase()
+    dummy_pool = [
+        ProductCandidate(
+            product_id="cand_101",
+            score=0.96,
+            image_url="https://example.com/fresh_prod_101.jpg",
+            phash="a1b2c3d4e5f67890",
+            vector=[0.1] * 512
+        ),
+        ProductCandidate(
+            product_id=context.rejected_product_id,
+            score=0.80,
+            image_url="https://example.com/rejected_img.jpg",
+            phash=context.rejected_phash,
+            vector=context.rejected_vector
+        )
+    ]
+
+    result = use_case.execute(context, dummy_pool)
+    return {
+        "success": True,
+        **result
+    }
+
 
 
 

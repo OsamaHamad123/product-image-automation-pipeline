@@ -1898,6 +1898,10 @@
 
                                 ${checkmark}
 
+                                <button type="button" class="action-reject-btn" onclick="event.stopPropagation(); rejectAndReSearchCandidate(this, ${p.row_number}, '${c.image_url.replace(/'/g, "\\'")}', '${c.phash || '0000000000000000'}')" style="position: absolute; top: 4px; left: 4px; background: rgba(239, 68, 68, 0.85); color: #ffffff; border: none; border-radius: 50%; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; font-size: 0.65rem; cursor: pointer; z-index: 12; transition: transform 0.2s;" title="استبعاد هذه الصورة وإعادة البحث الموجه 🔄🚫">
+                                    <i class="fas fa-ban"></i>
+                                </button>
+
                                 ${scoreBadge}
 
                                 ${allergenIcon}
@@ -2053,9 +2057,61 @@
                         c.is_selected = 0;
                     }
                 });
-            }
-        }
+    }
 
+    async function rejectAndReSearchCandidate(btn, rowNumber, imageUrl, phash) {
+        const card = btn.closest('.curation-thumb-card');
+        if (!card) return;
+
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+
+        card.style.transition = 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)';
+        card.style.opacity = '0.3';
+        card.style.transform = 'scale(0.7) translateY(10px)';
+
+        try {
+            const payload = {
+                session_id: 'session_' + rowNumber,
+                query_vector: Array(512).fill(0.05),
+                rejected_item: {
+                    product_id: String(rowNumber),
+                    image_url: imageUrl,
+                    phash: phash || '0000000000000000',
+                    vector: Array(512).fill(0.1)
+                }
+            };
+
+            const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
+            const res = await fetch('/api/v1/curation/reject', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': csrfToken || '',
+                    'Accept': 'application/json'
+                },
+                body: JSON.stringify(payload)
+            });
+
+            const data = await res.json();
+            if (data.status === 'success') {
+                card.remove();
+                console.log(`[Interactive Re-Search] Candidate image rejected and excluded for row ${rowNumber}.`);
+                triggerInlineSearch(rowNumber);
+            } else {
+                card.style.opacity = '1.0';
+                card.style.transform = 'none';
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-ban"></i>';
+                alert('❌ فشل استبعاد الصورة: ' + (data.message || 'خطأ غير معروف'));
+            }
+        } catch (err) {
+            console.error(err);
+            card.style.opacity = '1.0';
+            card.style.transform = 'none';
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-ban"></i>';
+        }
     }
 
     function selectAllBatch(val) {
