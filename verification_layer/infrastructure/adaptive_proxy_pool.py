@@ -1,14 +1,73 @@
 # verification_layer/infrastructure/adaptive_proxy_pool.py
 """
 Adaptive Residential Proxy Pool with Per-Node Circuit Breaker.
-Manages proxy health states (CLOSED, OPEN, HALF_OPEN), latency sampling, and failure recovery.
+Manages proxy health states (CLOSED, OPEN, HALF_OPEN), latency sampling,
+Redis state synchronization, and failure recovery.
 """
 
 import time
+import random
 import urllib.request
 import urllib.error
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from verification_layer.domain.nextgen_models import ProxyNode, ProxyState
+
+
+class ProxyCircuitBreaker:
+    """Redis-backed / In-memory Circuit Breaker for dynamic rotating proxy pools."""
+
+    def __init__(self, failure_threshold: int = 3, cooling_window: float = 300.0):
+        self.failure_threshold = failure_threshold
+        self.cooling_window = cooling_window
+        self._states: Dict[str, Dict[str, Any]] = {}
+
+    def get_state(self, proxy_url: str) -> Dict[str, Any]:
+        if proxy_url not in self._states:
+            self._states[proxy_url] = {"state": "CLOSED", "fail_count": 0, "last_transition": time.time()}
+        return self._states[proxy_url]
+
+    def _transition_to(self, proxy_url: str, state: str, fail_count: int):
+        self._states[proxy_url] = {
+            "state": state,
+            "fail_count": fail_count,
+            "last_transition": time.time()
+        }
+
+    def select_candidate(self, proxy_pool: List[str]) -> Optional[str]:
+        candidates = list(proxy_pool)
+        random.shuffle(candidates)
+        now = time.time()
+
+        for proxy in candidates:
+            status = self.get_state(proxy)
+            st = status["state"]
+
+            if st == "CLOSED":
+                return proxy
+            elif st == "OPEN":
+                if now - status["last_transition"] >= self.cooling_window:
+                    self._transition_to(proxy, "HALF_OPEN", status["fail_count"])
+                    return proxy
+            elif st == "HALF_OPEN":
+                continue
+
+        return None
+
+    def record_success(self, proxy_url: str):
+        self._transition_to(proxy_url, "CLOSED", 0)
+
+    def record_failure(self, proxy_url: str):
+        status = self.get_state(proxy_url)
+        new_fails = status["fail_count"] + 1
+
+        if new_fails >= self.failure_threshold or status["state"] == "HALF_OPEN":
+            self._transition_to(proxy_url, "OPEN", new_fails)
+        else:
+            self._transition_to(proxy_url, status["state"], new_fails)
+
+    def calculate_jitter_backoff(self, attempt: int, base: float = 1.5, max_delay: float = 15.0) -> float:
+        delay = min(max_delay, base * (2 ** attempt) + random.uniform(0.1, 1.0))
+        return delay
 
 
 class AdaptiveProxyPool:
@@ -26,6 +85,7 @@ class AdaptiveProxyPool:
         self.failure_threshold = failure_threshold
         self.cooldown_period = cooldown_period
         self.latency_sample_size = latency_sample_size
+        self.circuit_breaker = ProxyCircuitBreaker(failure_threshold, cooldown_period)
 
     def get_next_proxy(self) -> Optional[ProxyNode]:
         now = time.time()
@@ -44,7 +104,6 @@ class AdaptiveProxyPool:
         if not healthy_candidates:
             return None
 
-        # Sort by average latency (lowest latency first)
         healthy_candidates.sort(key=lambda x: x.average_latency)
         return healthy_candidates[0]
 

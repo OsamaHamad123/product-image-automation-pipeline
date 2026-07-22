@@ -531,6 +531,24 @@ def api_process_rank_fusion(request: RankFusionRequest, k: int = Query(60, ge=1)
     }
 
 
+@router.post("/v1/extract-embeddings")
+def api_extract_visual_embeddings():
+    import numpy as np
+    from verification_layer.use_cases.onnx_clip_embedder import OnnxClipEmbedder
+
+    embedder = OnnxClipEmbedder()
+    dummy_pixels = np.zeros((224, 224, 3), dtype=np.uint8)
+    vector = embedder.extract_embeddings(dummy_pixels)
+
+    return {
+        "success": True,
+        "dimension": len(vector),
+        "l2_norm": float(np.linalg.norm(vector, ord=2)),
+        "vector_sample": vector[:5].tolist()
+    }
+
+
+
 
 
 

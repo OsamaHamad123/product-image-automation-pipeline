@@ -43,6 +43,17 @@ return [
             })(),
             'prefix' => '',
             'foreign_key_constraints' => env('DB_FOREIGN_KEYS', true),
+            'busy_timeout' => 10000,
+            'journal_mode' => 'WAL',
+            'synchronous' => 'NORMAL',
+            'after' => function ($connection) {
+                try {
+                    $pdo = $connection->getPdo();
+                    $pdo->exec("PRAGMA journal_mode = WAL;");
+                    $pdo->exec("PRAGMA busy_timeout = 10000;");
+                    $pdo->exec("PRAGMA synchronous = NORMAL;");
+                } catch (\Exception $e) {}
+            },
         ],
 
         'mysql' => [
