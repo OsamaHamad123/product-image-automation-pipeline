@@ -1,6 +1,7 @@
 # Product Image Automation Pipeline
 
 [![CI](https://github.com/OsamaHamad123/product-image-automation-pipeline/actions/workflows/ci.yml/badge.svg)](https://github.com/OsamaHamad123/product-image-automation-pipeline/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/OsamaHamad123/product-image-automation-pipeline/actions/workflows/codeql.yml/badge.svg)](https://github.com/OsamaHamad123/product-image-automation-pipeline/actions/workflows/codeql.yml)
 
 Finds, verifies and publishes a clean product photo for every SKU in a grocery e-commerce catalogue.
 
