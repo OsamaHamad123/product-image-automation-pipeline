@@ -29,6 +29,10 @@ First public release.
 
 ### Fixed
 
+- Near-duplicate detection now has something to compare against:
+  - The BK-tree is built from the hashes stored in MariaDB. Before, `build_bktree_from_db()` returned an empty tree.
+  - Every accepted image's hash is saved with the product and added to the tree.
+  - The perceptual hash no longer spends a bit on overall brightness, which was 1 for nearly every image.
 - Two verification modules that failed to import (missing `typing` names).
 - Three `async` tests were collected but never awaited. They now run under `pytest-asyncio`.
 

@@ -259,6 +259,17 @@ def get_cached_product(barcode=None, product_name=None, brand=None):
         
     return None
 
+def _remember_phash(hash_str, row_id, cloudinary_url, product_name):
+    """Adds a saved image to the in-memory duplicate index, if it has a hash."""
+    if not hash_str:
+        return
+    try:
+        import image_dedup_bktree
+        image_dedup_bktree.remember_image(hash_str, str(row_id), cloudinary_url, product_name)
+    except Exception as e:
+        print(f"⚠️ [BKTree] Could not add the saved image to the duplicate index: {e}")
+
+
 def save_product_resolution(barcode, product_name, brand, original_url, cloudinary_url, clip_score, metadata, clip_embedding=None, perceptual_hash=None):
     """
     حفظ أو تحديث نتيجة مطابقة منتج وصورته في قاعدة البيانات للتأكد من عدم تكراره.
@@ -284,6 +295,7 @@ def save_product_resolution(barcode, product_name, brand, original_url, cloudina
                 """, (product_name, brand, original_url, cloudinary_url, clip_score, metadata_str, embedding_str, hash_str, existing["id"]))
                 conn.commit()
                 conn.close()
+                _remember_phash(hash_str, existing["id"], cloudinary_url, product_name)
                 delete_product_failure(barcode_clean)
                 print(f"💾 [MariaDB Cache] تم تحديث بيانات الباركود الكاش بنجاح: {barcode_clean}")
                 return True
@@ -293,9 +305,11 @@ def save_product_resolution(barcode, product_name, brand, original_url, cloudina
             INSERT INTO resolved_products (barcode, product_name, brand, original_url, cloudinary_url, clip_score, metadata_json, clip_embedding_json, perceptual_hash)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
         """, (barcode_clean, product_name, brand, original_url, cloudinary_url, clip_score, metadata_str, embedding_str, hash_str))
+        new_id = cursor.lastrowid
         
         conn.commit()
         conn.close()
+        _remember_phash(hash_str, new_id, cloudinary_url, product_name)
         delete_product_failure(barcode_clean)
         print(f"💾 [MariaDB Cache] تم حفظ الصورة والبيانات الكاش لـ: '{product_name}'")
         return True
