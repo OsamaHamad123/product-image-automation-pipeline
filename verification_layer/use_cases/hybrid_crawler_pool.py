@@ -2,7 +2,7 @@
 import asyncio
 import time
 from dataclasses import dataclass, field
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Tuple
 
 
 class CircuitBreakerTripped(Exception):
