@@ -28,3 +28,9 @@ email_service _accountt.txt
 products_cache.json
 brand_mappings_cache.json
 
+
+# Runtime data and logs (created locally by the pipeline and launchers)
+*.log
+local_cache.db
+search_cache.json
+human_feedback_local.json

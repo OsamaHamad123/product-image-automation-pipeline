@@ -145,7 +145,7 @@ USE_MOONDREAM_CHECK = False  # يمكن تفعيله يدوياً لتشغيل M
 TRUSTED_UAE_DOMAINS = ["kibsons.com", "carrefouruae.com", "luluhypermarket.com", "noon.com", "amazon.ae"]
 
 # 9. إعدادات الترقيات المتقدمة (البروكسي والتنبيهات)
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "7974160066:AAFdgG1HZuu_822sCTwzYDNmk_-ZnebKrYc")
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 PROXY_URL = os.getenv("PROXY_URL", "")
 
