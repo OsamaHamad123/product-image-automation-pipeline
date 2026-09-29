@@ -7,7 +7,7 @@ with INT8 quantization and L2-normalized 512-dimensional vector output.
 
 from abc import ABC, abstractmethod
 import numpy as np
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Any
 
 
 class ImageEmbedderInterface(ABC):
