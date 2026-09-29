@@ -1,5 +1,7 @@
 # Product Image Automation Pipeline
 
+[![CI](https://github.com/OsamaHamad123/product-image-automation-pipeline/actions/workflows/ci.yml/badge.svg)](https://github.com/OsamaHamad123/product-image-automation-pipeline/actions/workflows/ci.yml)
+
 Finds, verifies and publishes a clean product photo for every SKU in a grocery e-commerce catalogue.
 
 Data-entry staff used to search for each product image by hand, then clean it up and upload it. This pipeline does that work. It reads SKUs from a Google Sheet and finds candidate images. It checks the candidates with Gemini Vision, removes the background, normalises the result to 800×800 on white and drops duplicates. It then uploads the image to Cloudinary or Google Drive and writes the link back to the sheet. A Laravel dashboard lets staff review the picks and override them.
@@ -104,8 +106,8 @@ All secrets come from environment variables. The full list is in [`.env.example`
 ## Tests
 
 ```bash
-pip install pytest
-pytest tests
+pip install -r requirements-dev.txt
+pytest
 ```
 
-Some tests call live services (image search, Google APIs, Redis) and are skipped or fail when those services can't be reached.
+The two task-queue tests in `tests/test_automation_flow.py` need a MariaDB server; they use the same `DB_*` variables as the app (root with no password on `127.0.0.1` by default). Tests that call live image sources tolerate the network being unavailable. CI runs the whole suite on every push and pull request, with MariaDB as a service container.
