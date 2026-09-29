@@ -21,26 +21,14 @@ from PIL import Image
 from bs4 import BeautifulSoup
 
 # تهيئة شجرة BK-Tree العالمية لفحص التكرارات بصرياً بفعالية
-_bktree = None
-_bktree_lock = threading.Lock()
 
 # تخزين ديناميكي لمرادفات البراندات المصححة والمولدة عبر Gemini
 _dynamic_brand_mappings = {}
 
 def get_bktree():
-    global _bktree
-    with _bktree_lock:
-        if _bktree is None:
-            try:
-                import image_dedup_bktree
-                print("⏳ [BKTree] Building BK-Tree from MariaDB for visual deduplication...")
-                _bktree = image_dedup_bktree.build_bktree_from_db()
-                print("✅ [BKTree] BK-Tree built successfully.")
-            except Exception as e:
-                print(f"⚠️ [BKTree Error] Failed to build BK-Tree: {e}")
-                import image_dedup_bktree
-                _bktree = image_dedup_bktree.BKTree()
-        return _bktree
+    # One tree per process, shared with local_cache_db so saved images join it.
+    import image_dedup_bktree
+    return image_dedup_bktree.get_shared_tree()
 
 def run_coroutine_sync(coro):
     """
@@ -1678,9 +1666,11 @@ def evaluate_and_choose_best_image(results, product_name, brand, requires_brand_
             pil_img = Image.open(io.BytesIO(binary_data)).convert("RGB")
             
             # التحقق من التكرار البصري عبر pHash و BK-Tree
+            candidate_phash = None
             try:
                 import image_dedup_bktree
                 img_hash = image_dedup_bktree.calculate_phash(pil_img)
+                candidate_phash = img_hash or None
                 bktree = get_bktree()
                 duplicates = bktree.search(img_hash, max_distance=5)
                 if duplicates:
@@ -1831,7 +1821,8 @@ def evaluate_and_choose_best_image(results, product_name, brand, requires_brand_
                 "clip_embedding": clip_embedding,
                 "is_grey_zone": is_grey_zone,
                 "eval_report": eval_report,
-                "c_idx": c_idx
+                "c_idx": c_idx,
+                "perceptual_hash": candidate_phash
             })
             
         except Exception as e:
@@ -1871,6 +1862,9 @@ def evaluate_and_choose_best_image(results, product_name, brand, requires_brand_
             chosen_item['clip_score'] = relevance_score_clip
             chosen_item['clip_embedding'] = best_cand["clip_embedding"]
             chosen_relevance = best_cand["relevance_score"]
+        # Saved with the product, so later candidates are checked against it.
+        if best_cand.get("perceptual_hash"):
+            chosen_item['perceptual_hash'] = str(best_cand["perceptual_hash"])
 
     if chosen_item:
         if trace is not None:
