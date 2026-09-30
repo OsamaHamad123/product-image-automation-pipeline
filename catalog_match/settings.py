@@ -8,6 +8,7 @@ Importing config is optional: tests run without it or without a database.
 
 from __future__ import annotations
 
+import datetime as _dt
 import os
 from typing import Any, List
 
@@ -103,3 +104,29 @@ def proxy_url() -> str:
 def output_canvas_size() -> int:
     size = get("OUTPUT_CANVAS_SIZE")
     return size if size and size > 0 else DEFAULTS["OUTPUT_CANVAS_SIZE"]
+
+
+def enable_bing_html_fallback() -> bool:
+    return bool(get("ENABLE_BING_HTML_FALLBACK"))
+
+
+def google_search_api_keys() -> List[str]:
+    """Legacy CSE keys. config.py names the list GOOGLE_SEARCH_API_KEYS but .env uses GOOGLE_SEARCH_API_KEY."""
+    return get("GOOGLE_SEARCH_API_KEYS") or as_list(os.getenv("GOOGLE_SEARCH_API_KEY"))
+
+
+def google_search_cx_list() -> List[str]:
+    return get("GOOGLE_SEARCH_CX_LIST") or as_list(os.getenv("GOOGLE_SEARCH_CX"))
+
+
+def cse_sunset_date() -> _dt.date:
+    """Last day the legacy Google CSE adapter may run (inclusive)."""
+    value = get("CSE_SUNSET_DATE")
+    if isinstance(value, _dt.datetime):
+        return value.date()
+    if isinstance(value, _dt.date):
+        return value
+    try:
+        return _dt.date.fromisoformat(str(value).strip())
+    except ValueError:
+        return _dt.date.fromisoformat(DEFAULTS["CSE_SUNSET_DATE"])
