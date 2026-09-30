@@ -866,6 +866,8 @@
     let queueTelemetryChart = null;
 
     function initTelemetryChart() {
+        // Chart.js يأتي من CDN: بدون إنترنت لا يجب أن يوقف باقي تهيئة الصفحة (مثل تحديث السجلات)
+        if (typeof Chart === 'undefined') return;
         const ctx = document.getElementById('telemetryChart').getContext('2d');
         const isLight = document.body.classList.contains('light-theme');
         const gridColor = isLight ? 'rgba(0, 0, 0, 0.08)' : 'rgba(255, 255, 255, 0.05)';
