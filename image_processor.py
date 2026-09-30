@@ -1,1220 +1,855 @@
-import urllib3
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-import os
-import requests
+# image_processor.py
+# معالجة صورة المنتج المعتمدة وتحويلها إلى لوحة نشر نهائية:
+# تحميل (أو قراءة من مخزن المرشحات) -> تصحيح اتجاه EXIF -> اقتصاص Gemini اختياري ومتحقق منه
+# -> عزل الخلفية بالطريقة الممررة كمعامل -> تركيب على لوحة بيضاء معتمة ثابتة الأبعاد (افتراضياً 800x800).
+#
+# المبادئ الملزمة:
+# - فشل عزل الخلفية يعيد isolated=False مع رمز خطأ، ولا يعيد الصورة الخام أبداً كأنها نجاح.
+# - لا يتم تعديل config.BG_REMOVAL_METHOD إطلاقاً (الطريقة تمرر كمعامل).
+# - كل المعالجة في الذاكرة؛ الملف الوحيد المكتوب هو اللوحة النهائية باسم uuid داخل مجلد tempfile.mkdtemp().
+# - لا يوجد اقتصاص مربع تلقائي، ولا فحص ضبابية، ولا ملء للثقوب، ولا مسح للأطراف.
+
 import base64
-import json
+import glob
+import hashlib
 import io
-from PIL import Image, ImageOps
-import config
+import json
+import logging
+import os
+import re
+import shutil
+import tempfile
+import types
+import uuid
+from dataclasses import dataclass
+from typing import List, Optional, Tuple
+
+import requests
+from PIL import Image, ImageEnhance, ImageOps
+
 import categories
+import config
+from catalog_match import settings
+from edge_shadow_engine import (
+    CANVAS_FILL_RATIO,
+    EdgeShadowEngine,
+    alpha_bbox,
+    compose_on_white_canvas,
+)
 
-LAST_PROCESSING_STATUS = {}
+logger = logging.getLogger(__name__)
 
-def get_product_bounding_box(image_path, product_name, brand):
+# حدود المصادر
+MAX_DOWNLOAD_BYTES = 15 * 1024 * 1024
+MAX_LOCAL_BYTES = 40 * 1024 * 1024
+# أقصى ضلع لصورة العمل المرسلة لمزوّد العزل (المخرج النهائي 800 افتراضياً فلا فائدة من أكبر)
+MAX_WORK_SIDE = 3000
+MAX_CANVAS_SIDE = 4000
+MIN_CANVAS_SIDE = 64
+# صندوق Gemini يُقبل فقط إذا غطى بين 5% و100% من الصورة
+BOX_MIN_AREA_FRACTION = 0.05
+BOX_MARGIN_FRACTION = 0.06
+# الصورة تعتبر معزولة مسبقاً فقط إذا كان أكثر من 5% من بكسلات إطارها شفافاً
+TRANSPARENT_BORDER_MIN_RATIO = 0.05
+TRANSPARENT_ALPHA_MAX = 32
+METADATA_IMAGE_SIDE = 1024
+
+PHOTOROOM_URL = "https://sdk.photoroom.com/v1/segment"
+PHOTOROOM_TIMEOUT = 30
+REMOVE_BG_URL = "https://api.remove.bg/v1.0/removebg"
+REMOVE_BG_TIMEOUT = 30
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+
+_ALLOWED_FORMATS = {"JPEG", "PNG", "WEBP", "GIF", "BMP", "TIFF", "MPO", "AVIF", "HEIF"}
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+_METHOD_ALIASES = {
+    "bria": "bria_rmbg",
+    "removebg": "remove_bg_api",
+    "remove.bg": "remove_bg_api",
+    "remove_bg": "remove_bg_api",
+    "no": "none",
+    "off": "none",
+}
+
+
+@dataclass
+class ProcessResult:
     """
-    استخدام Gemini Vision لتحديد المربع المحيط بالمنتج (Bounding Box) بصيغة [ymin, xmin, ymax, xmax].
-    الإحداثيات تكون نسبية من 0 إلى 1000.
+    نتيجة معالجة صورة للنشر.
+    path: مسار لوحة PNG النهائية (None عند أي فشل؛ لا يوجد ملف قابل للنشر).
+    isolated: True فقط إذا تم عزل المنتج عن خلفيته فعلاً.
+    provider: photoroom | remove_bg_api | grabcut | rembg | source_alpha | none | ...
+    error: رمز خطأ واضح (مثل photoroom_402، download_not_image) أو None.
+    width/height: أبعاد اللوحة النهائية (0 عند الفشل).
     """
-    if not config.GEMINI_API_KEY:
-        return None
-        
-    try:
-        # قراءة الصورة وضغطها لتفادي payloads الكبيرة
-        with Image.open(image_path) as img:
-            if img.mode != "RGB":
-                img = img.convert("RGB")
-            img.thumbnail((400, 400))
-            buffer = io.BytesIO()
-            img.save(buffer, format="JPEG", quality=70)
-            img_data = base64.b64encode(buffer.getvalue()).decode("utf-8")
-            
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{config.GEMINI_MODEL}:generateContent?key={config.GEMINI_API_KEY}"
-        
-        prompt = (
-            f"Locate the main commercial packaged product of the brand '{brand}' for '{product_name}' in this image. "
-            f"Return the single bounding box enclosing ONLY the product package (carton, bottle, tub, bag). "
-            f"The bounding box should be returned as normalized coordinates [ymin, xmin, ymax, xmax] "
-            f"where 0 represents the top/left edge and 1000 represents the bottom/right edge of the image. "
-            f"Reply strictly in JSON format matching this schema:\n"
-            f'{{"box": [ymin, xmin, ymax, xmax]}}'
-        )
-        
-        payload = {
-            "contents": [
-                {
-                    "parts": [
-                        {"text": prompt},
-                        {
-                            "inlineData": {
-                                "mimeType": "image/jpeg",
-                                "data": img_data
-                            }
-                        }
-                    ]
-                }
-            ],
-            "generationConfig": {
-                "responseMimeType": "application/json"
-            }
-        }
-        
-        headers = {"Content-Type": "application/json"}
-        print(f"🤖 جاري تحديد موقع المنتج بصرياً عبر Gemini 3.5 Vision...")
-        config.METRICS["gemini_api_calls"] += 1
-        response = requests.post(url, headers=headers, json=payload, timeout=15)
-        
-        if response.status_code == 200:
-            res_data = response.json()
-            text_response = res_data['candidates'][0]['content']['parts'][0]['text']
-            text = text_response.strip()
-            if text.startswith("```json"):
-                text = text[7:]
-            elif text.startswith("```"):
-                text = text[3:]
-            if text.endswith("```"):
-                text = text[:-3]
-            text = text.strip()
-            result = json.loads(text)
-            box = result.get("box")
-            if isinstance(box, list) and len(box) == 4:
-                ymin, xmin, ymax, xmax = box
-                if all(0 <= v <= 1000 for v in [ymin, xmin, ymax, xmax]) and (ymax > ymin) and (xmax > xmin):
-                    print(f"🎯 تم تحديد موقع المنتج: [ymin={ymin}, xmin={xmin}, ymax={ymax}, xmax={xmax}]")
-                    return box
-        else:
-            print(f"⚠️ فشل استدعاء Gemini API لتحديد موقع المنتج (كود {response.status_code}): {response.text}")
-    except Exception as e:
-        print(f"⚠️ خطأ أثناء تحديد موقع المنتج بـ Gemini: {e}")
-        
-    return None
 
-def extract_metadata_from_image(image_path, product_name, brand):
-    """
-    استخدام Gemini Vision لتحليل العبوة واستخراج السعرات الحرارية، المكونات، والوصف التسويقي الثنائي والتصنيفات المطبقة.
-    """
-    if not config.GEMINI_API_KEY:
-        return None
-        
-    try:
-        # قراءة الصورة وضغطها
-        with Image.open(image_path) as img:
-            if img.mode != "RGB":
-                img = img.convert("RGB")
-            img.thumbnail((500, 500))  # دقة أعلى قليلاً للقراءة الدقيقة للنصوص
-            buffer = io.BytesIO()
-            img.save(buffer, format="JPEG", quality=80)
-            img_data = base64.b64encode(buffer.getvalue()).decode("utf-8")
-            
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{config.GEMINI_MODEL}:generateContent?key={config.GEMINI_API_KEY}"
-        
-        # توليد نصوص مسارات التصنيف المعتمدة ديناميكياً لإرفاقها بالـ Prompt
-        taxonomy_lines = []
-        for l1_en, l1_data in categories.CATEGORIES.items():
-            l1_ar = l1_data["ar"]
-            for l2_en, l2_data in l1_data["subs"].items():
-                l2_ar = l2_data["ar"]
-                for l3_en, l3_ar in l2_data["sub_subs"].items():
-                    taxonomy_lines.append(f"- {l1_en} ({l1_ar}) > {l2_en} ({l2_ar}) > {l3_en} ({l3_ar})")
-        taxonomy_str = "\n".join(taxonomy_lines)
-
-        prompt = (
-            f"You are an expert e-commerce catalog manager. Analyze the product package image for '{brand} - {product_name}'.\n"
-            f"Tasks:\n"
-            f"1. Extract the Nutrition Facts (e.g. calories, fat, protein, carbs, sugar) printed on the label and summarize them as a concise English text summary.\n"
-            f"2. Extract the complete Ingredients List and clearly list any allergens (e.g., contains gluten, dairy, or nuts).\n"
-            f"3. Write a compelling e-commerce marketing description for the product in English.\n"
-            f"4. Write a compelling e-commerce marketing description for the product in Arabic.\n"
-            f"5. Automatically categorize the product into a 3-level hierarchy (L1 Category, L2 Category, L3 Category) strictly choosing from the predefined taxonomy list below.\n"
-            f"   Predefined Taxonomy Paths:\n{taxonomy_str}\n\n"
-            f"6. Generate 3 to 6 smart tags/attributes for the product (e.g., Organic, Low Fat, Gluten-Free) in both English and Arabic (as comma-separated strings).\n\n"
-            f"Reply strictly in JSON format matching this schema:\n"
-            f'{{\n'
-            f'  "nutrition": "Nutrition Facts summary text (e.g. Calories 150, Fat 5g, Carbs 20g, Protein 3g per 100g)",\n'
-            f'  "ingredients": "Ingredients list (e.g. wheat flour, sugar, salt. Allergens: contains gluten)",\n'
-            f'  "description_en": "a compelling e-commerce description in English",\n'
-            f'  "description_ar": "وصف تسويقي جذاب ومقنع للمنتج باللغة العربية",\n'
-            f'  "category_l1_en": "Must be the exact English L1 Category name from the chosen path in the taxonomy",\n'
-            f'  "category_l2_en": "Must be the exact English L2 Category name from the chosen path in the taxonomy",\n'
-            f'  "category_l3_en": "Must be the exact English L3 Category name from the chosen path in the taxonomy",\n'
-            f'  "category_l1_ar": "Must be the exact Arabic L1 Category name from the chosen path in the taxonomy",\n'
-            f'  "category_l2_ar": "Must be the exact Arabic L2 Category name from the chosen path in the taxonomy",\n'
-            f'  "category_l3_ar": "Must be the exact Arabic L3 Category name from the chosen path in the taxonomy",\n'
-            f'  "tags_en": "Tag1, Tag2, Tag3",\n'
-            f'  "tags_ar": "وسم1, وسم2, وسم3"\n'
-            f'}}'
-        )
-        
-        payload = {
-            "contents": [
-                {
-                    "parts": [
-                        {"text": prompt},
-                        {
-                            "inlineData": {
-                                "mimeType": "image/jpeg",
-                                "data": img_data
-                            }
-                        }
-                    ]
-                }
-            ],
-            "generationConfig": {
-                "responseMimeType": "application/json"
-            }
-        }
-        
-        headers = {"Content-Type": "application/json"}
-        print(f"🤖 جاري استخراج السعرات والبيانات التسويقية من الصورة عبر Gemini 3.5 Vision...")
-        config.METRICS["gemini_api_calls"] += 1
-        response = requests.post(url, headers=headers, json=payload, timeout=60)
-        
-        if response.status_code == 200:
-            res_data = response.json()
-            text_response = res_data['candidates'][0]['content']['parts'][0]['text'].strip()
-            if text_response.startswith("```json"):
-                text_response = text_response[7:]
-            elif text_response.startswith("```"):
-                text_response = text_response[3:]
-            if text_response.endswith("```"):
-                text_response = text_response[:-3]
-            text_response = text_response.strip()
-            
-            result = json.loads(text_response)
-            if isinstance(result, dict):
-                # تصنيف المنتج دلالياً باستخدام مصنف التصنيفات الذكي المتجهي
-                try:
-                    from taxonomy_classifier import EnterpriseTaxonomyClassifier
-                    classifier = EnterpriseTaxonomyClassifier()
-                    cat_path, confidence = classifier.classify_product_title(product_name)
-                    if cat_path and " > " in cat_path:
-                        parts = cat_path.split(" > ")
-                        if len(parts) >= 1: result["category_l1_en"] = parts[0]
-                        if len(parts) >= 2: result["category_l2_en"] = parts[1]
-                        if len(parts) >= 3: result["category_l3_en"] = parts[2]
-                except Exception as ex:
-                    print(f"⚠️ خطأ أثناء تصنيف المنتج دلالياً: {ex}")
-
-                # تطبيع وتصحيح التصنيفات المحددة مع قاعدة الفهرس المعتمدة
-                normalized_cats = categories.normalize_category_path(
-                    result.get("category_l1_en", ""),
-                    result.get("category_l2_en", ""),
-                    result.get("category_l3_en", "")
-                )
-                result.update(normalized_cats)
-                print("🎯 تم استخراج السعرات والبيانات التسويقية وتطبيع التصنيفات بنجاح!")
-                return result
-        else:
-            print(f"⚠️ فشل استدعاء Gemini API لاستخراج البيانات الوصفية (كود {response.status_code}): {response.text}")
-    except Exception as e:
-        print(f"⚠️ خطأ أثناء استخراج البيانات الوصفية من الصورة بـ Gemini: {e}")
-        
-    return None
-
-def crop_image_by_box(image_path, box, output_path):
-    """
-    اقتصاص الصورة بناءً على المربع المحدد بالإحداثيات النسبية [ymin, xmin, ymax, xmax] (من 0 إلى 1000).
-    """
-    try:
-        ymin, xmin, ymax, xmax = box
-        
-        # إضافة هامش أمان بنسبة 6% لمنع قطع أطراف أو حواف المنتج عند القص
-        margin_y = int((ymax - ymin) * 0.06)
-        margin_x = int((xmax - xmin) * 0.06)
-        
-        ymin = max(0, ymin - margin_y)
-        xmin = max(0, xmin - margin_x)
-        ymax = min(1000, ymax + margin_y)
-        xmax = min(1000, xmax + margin_x)
-        
-        with Image.open(image_path) as img:
-            width, height = img.size
-            
-            # تحويل الإحداثيات النسبية (0-1000) إلى بكسلات فعلية
-            left = int((xmin / 1000) * width)
-            top = int((ymin / 1000) * height)
-            right = int((xmax / 1000) * width)
-            bottom = int((ymax / 1000) * height)
-            
-            # التأكد من عدم تجاوز الحدود
-            left = max(0, min(left, width - 1))
-            top = max(0, min(top, height - 1))
-            right = max(left + 1, min(right, width))
-            bottom = max(top + 1, min(bottom, height))
-            
-            cropped = img.crop((left, top, right, bottom))
-            cropped.save(output_path)
-            print(f"✂️ تم اقتصاص المنتج بنجاح وحفظه في: {output_path}")
-            return True
-    except Exception as e:
-        print(f"❌ خطأ أثناء اقتصاص الصورة: {e}")
-        return False
-
-def download_image(url, save_path):
-    """
-    تنزيل الصورة من الرابط وحفظها محلياً باستخدام العميل المحاكي لتجاوز حظر الـ WAF.
-    """
-    if not (url.startswith("http://") or url.startswith("https://")):
-        import shutil
-        try:
-            shutil.copy(url, save_path)
-            return True
-        except Exception as e:
-            print(f"❌ خطأ أثناء نسخ الملف المحلي: {e}")
-            return False
-            
-    try:
-        from http_client import ImpersonateClient
-        client = ImpersonateClient(use_proxy=bool(config.PROXY_URL), proxy_url=config.PROXY_URL)
-        content = client.download_image(url)
-        if content:
-            with open(save_path, 'wb') as f:
-                f.write(content)
-            return True
-        else:
-            # التراجع التلقائي إلى requests القياسي في حال وجود مشكلة في المكتبة
-            print("⚠️ [Fallback] محاولة التنزيل باستخدام requests القياسي...")
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-            }
-            proxies = {"http": config.PROXY_URL, "https": config.PROXY_URL} if config.PROXY_URL else None
-            r = requests.get(url, headers=headers, timeout=10, stream=True, proxies=proxies, verify=False)
-            if r.status_code == 200:
-                with open(save_path, 'wb') as f:
-                    for chunk in r.iter_content(chunk_size=8192):
-                        f.write(chunk)
-                return True
-            else:
-                print(f"❌ فشل تنزيل الصورة القياسي، كود الاستجابة: {r.status_code}")
-                return False
-    except Exception as e:
-        print(f"❌ خطأ أثناء تنزيل الصورة: {e}")
-        return False
-
-def is_background_already_removed(image_path):
-    """
-    التحقق مما إذا كانت الصورة تحتوي بالفعل على خلفية مزالة (شفافة).
-    """
-    try:
-        with Image.open(image_path) as img:
-            # إذا كان نظام الألوان يدعم الشفافية
-            if img.mode in ('RGBA', 'LA') or (img.mode == 'P' and 'transparency' in img.info):
-                alpha = img.convert('RGBA').split()[-1]
-                min_alpha, max_alpha = alpha.getextrema()
-                # إذا وجدنا بكسل واحد على الأقل شفاف (ألفا أقل من 255)
-                if min_alpha < 255:
-                    return True
-    except Exception:
-        pass
-    return False
-
-def remove_white_background_floodfill(input_path, output_path, thresh=30):
-    """
-    إزالة الخلفية البيضاء باستخدام خوارزمية Flood-fill من الزوايا الأربعة.
-    ترجع True إذا نجح الملء وعثر على زوايا بيضاء، وFalse خلاف ذلك.
-    """
-    try:
-        from PIL import ImageDraw
-        img = Image.open(input_path).convert("RGBA")
-        width, height = img.size
-        corners = [(0, 0), (width - 1, 0), (0, height - 1), (width - 1, height - 1)]
-        
-        filled = False
-        for cx, cy in corners:
-            pixel = img.getpixel((cx, cy))
-            # إذا كان لون الزاوية قريب من الأبيض (أكبر من 240)
-            if pixel[0] > 240 and pixel[1] > 240 and pixel[2] > 240:
-                ImageDraw.floodfill(img, (cx, cy), (0, 0, 0, 0), thresh=thresh)
-                filled = True
-                
-        if filled:
-            img.save(output_path, "PNG")
-            return True
-    except Exception as e:
-        print(f"⚠️ خطأ أثناء إزالة الخلفية البيضاء بـ floodfill: {e}")
-    return False
-
-def execute_high_fidelity_refinement(
-    image_path: str, 
-    output_path: str, 
-    guided_radius: int = 4, 
-    guided_eps: float = 1e-5
-) -> bool:
-    """
-    تقوم بدمج عزل فجوات الشفافية الداخلية للمنتج برمجياً وصقل الحواف
-    باستخدام الفلتر الموجه Guided Filter لمنع هالات الحواف الداكنة.
-    """
-    try:
-        import cv2
-        import numpy as np
-        from scipy import ndimage
-        
-        # قراءة الصورة مع جميع القنوات
-        src = cv2.imread(image_path, cv2.IMREAD_UNCHANGED)
-        if src is None:
-            raise FileNotFoundError(f"فشل قراءة الصورة من المسار: {image_path}")
-            
-        if src.shape[2] < 4:
-            # إذا لم تكن هناك قناة شفافية، احفظ الصورة كما هي
-            cv2.imwrite(output_path, src)
-            return True
-
-        # استخراج قنوات الألوان وقناة الشفافية
-        b, g, r, raw_alpha = cv2.split(src)
-        rgb_guidance = cv2.merge([b, g, r])
-
-        # 1. إعداد قناع ثنائي وتعبئة الفجوات داخل حدود المنتج
-        _, binary_mask = cv2.threshold(raw_alpha, 1, 255, cv2.THRESH_BINARY)
-        normalized_binary = (binary_mask / 255).astype(np.int32)
-        filled_structure = ndimage.binary_fill_holes(normalized_binary)
-        filled_mask = (filled_structure.astype(np.uint8)) * 255
-
-        # تحديد الفجوات المعبأة وإضافتها لقناة الشفافية الأصلية
-        internal_holes = cv2.subtract(filled_mask, binary_mask)
-        restored_alpha = cv2.bitwise_or(raw_alpha, internal_holes)
-
-        # 2. تطبيق تصفية الحواف الموجهة (Guided Filter)
-        try:
-            from cv2.ximgproc import guidedFilter
-            refined_alpha = guidedFilter(
-                guide=rgb_guidance,
-                src=restored_alpha,
-                radius=guided_radius,
-                eps=guided_eps
-            )
-        except ImportError:
-            # تراجع آمن عند غياب cv2.ximgproc (استخدام فلتر ثنائي لتنعيم الحواف)
-            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-            closed_alpha = cv2.morphologyEx(restored_alpha, cv2.MORPH_CLOSE, kernel)
-            refined_alpha = cv2.bilateralFilter(closed_alpha, d=5, sigmaColor=75, sigmaSpace=75)
-
-        # التأكد من بقاء قيم الشفافية في النطاق الصحيح
-        refined_alpha = np.clip(refined_alpha, 0, 255).astype(np.uint8)
-
-        # دمج وحفظ الصورة النهائية
-        refined_rgba = cv2.merge([b, g, r, refined_alpha])
-        cv2.imwrite(output_path, refined_rgba)
-        print("✅ [High-Fidelity Refinement] تم صقل الحواف وتعبئة الثقوب بنجاح!")
-        return True
-    except Exception as e:
-        print(f"⚠️ فشل صقل حواف الصورة وتعبئة فجواتها: {e}")
-        return False
-
-def validate_alpha_matte(rgba_path: str, bbox_area: float = None) -> bool:
-    """
-    التحقق البرمجي التلقائي من جودة قناع الشفافية لمنع عزل الأجزاء الخاطئة أو مسح المنتجات.
-    يعتمد على معيارين أساسيين:
-    1. عتبة الكتلة الأمامية (Mass Sparing): لمنع اختفاء أجزاء المنتج بالكامل (0.08 < R_mass < 0.95).
-    2. عتبة تسريب الحواف (Canvas Boundary Leakage): للتحقق من عدم وجود خلفية متبقية على أطراف الكانفاس (L_edge < 0.05).
-    """
-    try:
-        import cv2
-        import numpy as np
-        
-        img = cv2.imread(rgba_path, cv2.IMREAD_UNCHANGED)
-        if img is None or img.shape[2] < 4:
-            print("⚠️ [Validation] الصورة لا تحتوي على قناة شفافية صالحة للتحقق.")
-            return False
-
-        _, _, _, alpha = cv2.split(img)
-        h, w = alpha.shape
-        total_canvas_pixels = h * w
-
-        # 1. التحقق من بقاء كتلة المنتج (Mass Sparing Check)
-        foreground_pixels = np.sum(alpha > 0)
-        mass_ratio = foreground_pixels / bbox_area if (bbox_area and bbox_area > 0) else foreground_pixels / total_canvas_pixels
-        print(f"📊 [Validation Heuristics] Mass Ratio: {mass_ratio:.4f}")
-        if mass_ratio < 0.08 or mass_ratio > 0.95:
-            print("❌ [Validation Heuristics Failed] نسبة كتلة المنتج خارج الحدود المقبولة.")
-            return False
-
-        # 2. التحقق من تسريب الحواف الخارجية (Boundary Leakage Check)
-        border_mask = np.ones((h, w), dtype=np.uint8)
-        border_mask[4:-4, 4:-4] = 0  # عزل إطار بعرض 4 بكسل على أطراف الصورة
-        border_active_pixels = np.sum(cv2.bitwise_and(alpha, alpha, mask=border_mask) > 5)
-        total_border_pixels = total_canvas_pixels - (h-8)*(w-8)
-        leakage_ratio = border_active_pixels / total_border_pixels
-        print(f"📊 [Validation Heuristics] Boundary Edge Leakage: {leakage_ratio:.4f}")
-        if leakage_ratio > 0.05:
-            print("❌ [Validation Heuristics Failed] تسريب بقايا الخلفية على أطراف الكانفاس أعلى من 5%.")
-            return False
-
-        print("✅ [Validation Heuristics Passed] تم اجتياز التحقق من جودة قناع الشفافية بنجاح!")
-        return True
-    except Exception as e:
-        print(f"⚠️ فشل التحقق من جودة الشفافية برمجياً: {e}")
-        return False
-
-def remove_background(input_path, output_path, target_width=None, target_height=None, padding_ratio=None):
-    """
-    إزالة خلفية الصورة بناءً على الطريقة المحددة في الإعدادات.
-    """
-    # 1. تحقق مما إذا كانت الخلفية مزالة أصلاً (شفافة) لتخطي معالجة rembg وحماية جودة الصورة
-    if is_background_already_removed(input_path):
-        print("ℹ️ الصورة تحتوي بالفعل على خلفية شفافة (مزالة). سيتم تخطي عملية القص لحمايتها وتوفير الوقت.")
-        try:
-            with Image.open(input_path) as img:
-                img.save(output_path)
-            return True
-        except Exception as e:
-            print(f"❌ خطأ أثناء نسخ الصورة الشفافة: {e}")
-            return False
-
-    method = config.BG_REMOVAL_METHOD.lower()
-
-    # 2. تحقق مما إذا كانت الخلفية بيضاء صلبة، ونقوم بإزالتها بـ Flood-fill كخيار مجاني سريع فقط عند إيقاف rembg
-    if method == "none":
-        print("⏳ جاري فحص الصورة للكشف عن خلفية بيضاء صلبة...")
-        if remove_white_background_floodfill(input_path, output_path, thresh=30):
-            print("✅ تم إزالة الخلفية البيضاء الخارجية بنجاح باستخدام خوارزمية Flood-fill!")
-            return True
-    
-    if method == "none":
-        # تخطي إزالة الخلفية
-        print("ℹ️ تخطي إزالة الخلفية بناءً على الإعدادات (BG_REMOVAL_METHOD = 'none').")
-        # نسخ الملف الأصلي إلى مسار المخرج
-        try:
-            with Image.open(input_path) as img:
-                img.save(output_path)
-            return True
-        except Exception as e:
-            print(f"❌ خطأ أثناء نسخ الصورة الأصلية: {e}")
-            return False
-            
-    elif method == "bria_rmbg":
-        print("⏳ [Background Removal] Running Bria RMBG 1.4 model locally (Hugging Face)...")
-        try:
-            import torch
-            from transformers import pipeline
-            
-            device = 0 if torch.cuda.is_available() else -1
-            pipe = pipeline("image-segmentation", model="briaai/RMBG-1.4", trust_remote_code=True, device=device)
-            
-            img = Image.open(input_path).convert("RGB")
-            nobg_img = pipe(img)
-            nobg_img.save(output_path, "PNG")
-            print("✅ [Background Removal] Bria RMBG 1.4 completed successfully!")
-            # صقل حواف الصورة وتعبئة أي فجوات شفافة داخل جسم المنتج
-            execute_high_fidelity_refinement(output_path, output_path)
-            return True
-        except Exception as e:
-            print(f"❌ [Background Removal] Bria RMBG 1.4 failed: {e}")
-            return False
-
-    elif method == "rembg":
-        print("⏳ جاري إزالة الخلفية محلياً باستخدام مكتبة 'rembg' ونموذج 'isnet-general-use' الاحترافي...")
-        try:
-            from rembg import remove, new_session
-            # استخدام نموذج IS-Net الاحترافي للقص الدقيق للمنتجات التجارية
-            session = new_session("isnet-general-use")
-            with open(input_path, 'rb') as i:
-                input_data = i.read()
-                output_data = remove(input_data, session=session)
-            with open(output_path, 'wb') as o:
-                o.write(output_data)
-            print("✅ تم إزالة الخلفية محلياً بنجاح باستخدام نموذج IS-Net!")
-            # صقل حواف الصورة وتعبئة أي فجوات شفافة داخل جسم المنتج
-            execute_high_fidelity_refinement(output_path, output_path)
-            return True
-        except ImportError:
-            print("❌ خطأ: مكتبة 'rembg' غير مثبتة. يرجى تثبيتها باستخدام الأمر: pip install rembg")
-            print("💡 سيتم تخطي إزالة الخلفية لهذه الصورة.")
-            # نسخ الملف كبديل
-            with Image.open(input_path) as img:
-                img.save(output_path)
-            return True
-        except Exception as e:
-            print(f"❌ حدث خطأ أثناء إزالة الخلفية محلياً: {e}")
-            return False
-            
-    elif method == "remove_bg_api":
-        print("⏳ جاري إزالة الخلفية سحابياً باستخدام 'remove.bg' API...")
-        if not config.REMOVE_BG_API_KEY:
-            print("❌ خطأ: مفتاح REMOVE_BG_API_KEY غير موجود في config.py.")
-            return False
-            
-        try:
-            response = requests.post(
-                'https://api.remove.bg/v1.0/removebg',
-                files={'image_file': open(input_path, 'rb')},
-                data={'size': 'auto'},
-                headers={'X-Api-Key': config.REMOVE_BG_API_KEY},
-                timeout=15
-            )
-            if response.status_code == requests.codes.ok:
-                with open(output_path, 'wb') as out:
-                    out.write(response.content)
-                print("✅ تم إزالة الخلفية عبر API بنجاح!")
-                # صقل حواف الصورة وتعبئة أي فجوات شفافة داخل جسم المنتج
-                execute_high_fidelity_refinement(output_path, output_path)
-                return True
-            else:
-                print(f"❌ فشل إزالة الخلفية عبر API: {response.text}")
-                return False
-        except Exception as e:
-            print(f"❌ خطأ أثناء الاتصال بـ remove.bg API: {e}")
-            return False
-            
-    elif method == "photoroom":
-        print("⏳ جاري إزالة الخلفية سحابياً باستخدام 'PhotoRoom' Remove Background API (v1/segment)...")
-        if not getattr(config, "PHOTOROOM_API_KEY", None):
-            print("❌ خطأ: مفتاح PHOTOROOM_API_KEY غير موجود في config.py.")
-            return False
-            
-        try:
-            url = "https://sdk.photoroom.com/v1/segment"
-            headers = {"x-api-key": config.PHOTOROOM_API_KEY}
-            
-            p_size = getattr(config, "PHOTOROOM_SIZE", "full")
-            p_crop = "true" if getattr(config, "PHOTOROOM_CROP", False) else "false"
-            p_despill = "true" if getattr(config, "PHOTOROOM_DESPILL", True) else "false"
-            
-            with open(input_path, 'rb') as img_file:
-                files = {'image_file': img_file}
-                # Parameters for the v1/segment API endpoint
-                data = {
-                    'format': 'png',
-                    'channels': 'rgba',
-                    'size': p_size,
-                    'crop': p_crop,
-                    'despill': p_despill
-                }
-                
-                response = requests.post(
-                    url,
-                    headers=headers,
-                    files=files,
-                    data=data,
-                    timeout=25
-                )
-                
-            if response.status_code == 200:
-                with open(output_path, 'wb') as out:
-                    out.write(response.content)
-                print("✅ تم إزالة الخلفية والقص والتحجيم التلقائي سحابياً عبر PhotoRoom API بنجاح!")
-                # صقل حواف الصورة وتعبئة أي فجوات شفافة داخل جسم المنتج
-                execute_high_fidelity_refinement(output_path, output_path)
-                return True
-            else:
-                print(f"❌ فشل إزالة الخلفية عبر PhotoRoom API (كود {response.status_code}): {response.text}")
-                return False
-        except Exception as e:
-            print(f"❌ خطأ أثناء الاتصال بـ PhotoRoom API: {e}")
-            return False
-            
-    elif method == "grabcut":
-        print("⏳ [Background Removal] Running GrabCut manual segmentation locally (OpenCV)...")
-        try:
-            import cv2
-            import numpy as np
-            
-            img = cv2.imread(input_path)
-            if img is None:
-                raise ValueError("Failed to load image for GrabCut")
-                
-            mask = np.zeros(img.shape[:2], np.uint8)
-            bgdModel = np.zeros((1, 65), np.float64)
-            fgdModel = np.zeros((1, 65), np.float64)
-            
-            h, w = img.shape[:2]
-            rect = (int(w * 0.05), int(h * 0.05), int(w * 0.9), int(h * 0.9))
-            
-            cv2.grabCut(img, mask, rect, bgdModel, fgdModel, 5, cv2.GC_INIT_WITH_RECT)
-            
-            mask2 = np.where((mask==2)|(mask==0), 0, 1).astype('uint8')
-            img_rgba = cv2.cvtColor(img, cv2.COLOR_BGR2BGRA)
-            img_rgba[:, :, 3] = mask2 * 255
-            
-            cv2.imwrite(output_path, img_rgba)
-            print("✅ [Background Removal] GrabCut segmentation completed successfully!")
-            # صقل حواف الصورة وتعبئة أي فجوات شفافة داخل جسم المنتج
-            execute_high_fidelity_refinement(output_path, output_path)
-            return True
-        except Exception as e:
-            print(f"❌ [Background Removal] GrabCut segmentation failed: {e}")
-            # نسخ الملف الأصلي كبديل
-            try:
-                with Image.open(input_path) as img_pil:
-                    img_pil.save(output_path)
-                return True
-            except Exception:
-                return False
-            
-    else:
-        print(f"⚠️ طريقة إزالة الخلفية غير معروفة: '{method}'. سيتم تخطي الإزالة.")
-        with Image.open(input_path) as img:
-            img.save(output_path)
-        return True
-
-def resize_and_pad_image(input_path, output_path, target_size=None, background_color=(255, 255, 255, 255)):
-    """
-    تغيير حجم الصورة بشكل ديناميكي وتوسيطها داخل مساحة بالأبعاد المطلوبة (مثلاً 800×800) مع الحفاظ على التناسب،
-    مع تطبيق تنعيم الحواف (Edge Feathering) وإضافة ظل ساقط طبيعي وناعم (Drop Shadow).
-    """
-    if target_size is None:
-        target_size = config.IMAGE_TARGET_SIZE
-        
-    print(f"⏳ جاري تحجيم وتجهيز الصورة بالأبعاد: {target_size[0]}x{target_size[1]} مع إضافة ظل وتنعيم الحواف...")
-    try:
-        from PIL import ImageFilter
-        
-        # 1. فتح الصورة الأصلية وتحويلها لنظام RGBA لدعم الشفافية والظلال
-        with Image.open(input_path) as img:
-            img = img.convert("RGBA")
-            
-            # 2. تغيير حجم الصورة مع الحفاظ على التناسب (مقياس 85% لتوفير هامش كافي للظل)
-            img.thumbnail((int(target_size[0] * 0.85), int(target_size[1] * 0.85)), Image.Resampling.LANCZOS)
-            
-            alpha = img.getchannel('A')
-            # تطبيق تمويه خفيف جداً لجعل الحواف ناعمة ومنع القص الخشن دون التضحية بدقة ونصوص العبوة
-            alpha_feathered = alpha.filter(ImageFilter.GaussianBlur(radius=0.8))
-            img.putalpha(alpha_feathered)
-            
-            # --- ب. إنشاء ظل ساقط ناعم (Soft Drop Shadow) ---
-            # إنشاء قناع ظل بلون رمادي داكن
-            shadow = Image.new("RGBA", img.size, (20, 20, 20, 255))
-            shadow.putalpha(alpha_feathered)
-            
-            # تكبير وتنعيم الظل للحصول على انسيابية طبيعية
-            shadow_large = shadow.resize((img.width + 12, img.height + 12), Image.Resampling.BILINEAR)
-            shadow_blurred = shadow_large.filter(ImageFilter.GaussianBlur(radius=15))
-            
-            # تخفيف شفافية الظل ليصبح طبيعياً وغير مزعج (عتامة بنسبة 22%)
-            shadow_alpha = shadow_blurred.getchannel('A')
-            shadow_alpha = shadow_alpha.point(lambda p: int(p * 0.22))
-            shadow_blurred.putalpha(shadow_alpha)
-            
-            # 3. إنشاء لوحة خلفية جديدة بالحجم المستهدف والألوان المطلوبة (خلفية بيضاء افتراضياً)
-            new_img = Image.new("RGBA", target_size, background_color)
-            
-            # 4. حساب مواقع اللصق لتوسيط المنتج والظل
-            x = (target_size[0] - img.width) // 2
-            y = (target_size[1] - img.height) // 2
-            
-            # إزاحة الظل للأسفل واليمين لمحاكاة إضاءة استوديو متناسقة
-            sx = (target_size[0] - shadow_large.width) // 2 + 3
-            sy = (target_size[1] - shadow_large.height) // 2 + 12
-            
-            # 5. لصق قناع الظل أولاً
-            new_img.paste(shadow_blurred, (sx, sy), mask=shadow_blurred)
-            
-            # 6. لصق الصورة الممهدة فوق قناع الظل مباشرة
-            new_img.paste(img, (x, y), mask=img)
-            
-            # 7. حفظ الصورة النهائية
-            new_img.save(output_path, "WEBP", quality=85, method=4)
-            
-        print("✅ تم إعادة تحجيم وتوسيط الصورة وتطبيق تأثيرات الظل وتنعيم الحواف بنجاح!")
-        return True
-        
-    except Exception as e:
-        print(f"❌ خطأ أثناء معالجة تأثيرات الصورة: {e}")
-        return False
-
-def upscale_image_if_small(image_path: str, target_min_size: int = 600):
-    """
-    ترقية دقة الصورة رياضياً باستخدام فلتر Lanczos عالي الجودة إذا كانت أبعادها صغيرة،
-    بدون استخدام نماذج الذكاء الاصطناعي التوليدية لمنع التشويه البصري.
-    """
-    from PIL import Image
-    try:
-        with Image.open(image_path) as img:
-            w, h = img.size
-            if w < target_min_size or h < target_min_size:
-                # حساب أبعاد الترقية بمعدل 2x
-                new_w = w * 2
-                new_h = h * 2
-                print(f"🔄 [Resize Lanczos] أبعاد الصورة ({w}x{h}) أقل من الحد الأدنى ({target_min_size}). جاري الترقية الرياضية إلى ({new_w}x{new_h})...")
-                
-                # استخدام Lanczos لإعادة التحجيم
-                resized_img = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
-                resized_img.save(image_path)
-                print(f"✅ [Resize Lanczos] تم ترقية الصورة رياضياً بنجاح.")
-    except Exception as e:
-        print(f"⚠️ خطأ أثناء معالجة ترقية دقة الصورة رياضياً: {e}")
-
-def is_image_blurry(image_path: str, threshold: float = 40.0) -> bool:
-    """
-    قياس تباين اللابلاسيان لتقييم وضوح الصورة وفلترة الصور المشوشة.
-    """
-    import cv2
-    try:
-        img = cv2.imread(image_path)
-        if img is None:
-            print("⚠️ [Blur Check] لا يمكن قراءة الصورة أو ملف تالف.")
-            return True
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        laplacian_var = cv2.Laplacian(gray, cv2.CV_64F).var()
-        print(f"📊 [Blur Check] Laplacian Variance: {laplacian_var:.4f}")
-        return laplacian_var < threshold
-    except Exception as e:
-        print(f"⚠️ خطأ أثناء فحص تشويش الصورة: {e}")
-        return False
-
-def denoise_image_opencv(image_path: str, output_path: str):
-    """
-    إزالة التشويش والضوضاء البصرية باستخدام خوارزمية Fast Non-Local Means.
-    """
-    import cv2
-    try:
-        img = cv2.imread(image_path)
-        if img is None:
-            return
-        # حماية قناة الشفافية إن وجدت
-        if len(img.shape) == 3 and img.shape[2] == 4:
-            b, g, r, a = cv2.split(img)
-            rgb = cv2.merge([b, g, r])
-            denoised_rgb = cv2.fastNlMeansDenoisingColored(rgb, None, h=10, hColor=10, templateWindowSize=7, searchWindowSize=21)
-            denoised = cv2.merge([denoised_rgb, a])
-        else:
-            denoised = cv2.fastNlMeansDenoisingColored(img, None, h=10, hColor=10, templateWindowSize=7, searchWindowSize=21)
-        cv2.imwrite(output_path, denoised)
-        print("✅ [Denoising] تم تنظيف الصورة وإزالة التشويش بنجاح!")
-    except Exception as e:
-        print(f"⚠️ خطأ أثناء تنظيف الصورة من التشويش: {e}")
+    path: Optional[str]
+    isolated: bool
+    provider: str
+    error: Optional[str] = None
+    width: int = 0
+    height: int = 0
 
 
+# ---------------------------------------------------------------------------
+# توافق مع المستدعين القدامى
+# ---------------------------------------------------------------------------
 
-def apply_saliency_smart_crop(image_path: str, output_path: str, target_width: int, target_height: int):
-    """
-    حساب خريطة الأهمية البصرية واقتصاص الصورة بنسبة 1:1 حول المنتج.
-    تتراجع تلقائياً لتصفية الحواف (Canny Edge Detection) في حال عدم توفر مكتبة saliency في OpenCV.
-    """
-    import cv2
-    import numpy as np
-    try:
-        img = cv2.imread(image_path, cv2.IMREAD_UNCHANGED)
-        if img is None:
-            return
-        h_orig, w_orig = img.shape[:2]
-        
-        threshold_map = None
-        # 1. محاولة حساب الأهمية البصرية (تتطلب opencv-contrib-python)
-        try:
-            saliency = cv2.saliency.StaticSaliencySpectralResidual_create()
-            success, saliency_map = saliency.computeSaliency(img)
-            if success:
-                saliency_map = (saliency_map * 255).astype(np.uint8)
-                _, threshold_map = cv2.threshold(saliency_map, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-        except (AttributeError, Exception):
-            pass
-            
-        # 2. مسار التراجع التلقائي باستخدام كشف الحواف التقليدي (Canny) المتوفر دائماً
-        if threshold_map is None:
-            print("⚠️ [Smart Crop Fallback] حزمة cv2.saliency غير متوفرة. استخدام كشف الحواف Canny كبديل مجاني محلي...")
-            # تحويل الصورة إلى تدرج الرمادي
-            if len(img.shape) == 3 and img.shape[2] >= 3:
-                gray = cv2.cvtColor(img[:, :, :3], cv2.COLOR_BGR2GRAY)
-            else:
-                gray = img
-            
-            # تقليل الضوضاء
-            blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-            # كشف الحواف
-            edges = cv2.Canny(blurred, 50, 150)
-            # توسيع الحواف قليلاً لسد الفجوات
-            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
-            threshold_map = cv2.dilate(edges, kernel, iterations=1)
-        
-        # 3. إيجاد الكنتور الأكبر لتحديد موقع المنتج
-        contours, _ = cv2.findContours(threshold_map, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        if contours:
-            largest_contour = max(contours, key=cv2.contourArea)
-            x, y, w, h = cv2.boundingRect(largest_contour)
-            
-            center_x = x + (w // 2)
-            center_y = y + (h // 2)
-            
-            # تحديد نافذة القص بنسبة التناسب المستهدفة
-            target_ratio = target_width / target_height
-            if w_orig / h_orig > target_ratio:
-                crop_h = h_orig
-                crop_w = int(h_orig * target_ratio)
-            else:
-                crop_w = w_orig
-                crop_h = int(w_orig / target_ratio)
-                
-            x_start = max(0, min(center_x - (crop_w // 2), w_orig - crop_w))
-            y_start = max(0, min(center_y - (crop_h // 2), h_orig - crop_h))
-            
-            cropped = img[y_start:y_start + crop_h, x_start:x_start + crop_w]
-            
-            # التحجيم النهائي
-            final_img = cv2.resize(cropped, (target_width, target_height), interpolation=cv2.INTER_LANCZOS4)
-            cv2.imwrite(output_path, final_img)
-            print("✂️ [Smart Crop] تم الاقتصاص الذكي بنجاح حول الكائن الرئيسي!")
-        else:
-            # تراجع عادي في حال عدم وجود حدود واضحة
-            cv2.imwrite(output_path, img)
-            print("⚠️ [Smart Crop] لم يتم العثور على كنتور، حفظ الصورة الأصلية كما هي.")
-    except Exception as e:
-        print(f"⚠️ خطأ أثناء تطبيق الاقتصاص الذكي (Saliency/Canny): {e}")
-
-def enhance_image_quality(image_path, output_path):
-    """
-    تجميل وتحسين جودة صورة المنتج:
-    1. زيادة التباين (Contrast) لإبراز تفاصيل وألوان العبوة.
-    2. زيادة حدة النصوص والخطوط بفلتر الشحذ (Sharpness).
-    3. تنظيف وتصفية البكسلات المشوشة والعلامات المائية المتواجدة في الأطراف أو الزوايا.
-    """
-    try:
-        from PIL import Image, ImageEnhance, ImageFilter
-        
-        with Image.open(image_path) as img:
-            if img.mode != "RGBA":
-                img = img.convert("RGBA")
-                
-            width, height = img.size
-            margin_w = int(width * 0.05)
-            margin_h = int(height * 0.05)
-            
-            pixels = img.load()
-            
-            # تنظيف الهوامش والأطراف من أي بكسلات أو علامات مائية معزولة
-            for x in range(width):
-                for y in range(height):
-                    if x < margin_w or x > (width - margin_w) or y < margin_h or y > (height - margin_h):
-                        r, g, b, a = pixels[x, y]
-                        if a > 0:
-                            pixels[x, y] = (255, 255, 255, 0)
-                            
-            # تعزيز التباين والألوان والحدة
-            enhancer_contrast = ImageEnhance.Contrast(img)
-            img = enhancer_contrast.enhance(1.15)
-            
-            enhancer_color = ImageEnhance.Color(img)
-            img = enhancer_color.enhance(1.10)
-            
-            img = img.filter(ImageFilter.SHARPEN)
-            enhancer_sharpness = ImageEnhance.Sharpness(img)
-            img = enhancer_sharpness.enhance(1.20)
-            
-            img.save(output_path, "WEBP", quality=85, method=4)
-            print("✨ [تجميل الصورة] تم تحسين الألوان وتصفية الأطراف بنجاح!")
-            return True
-    except Exception as e:
-        print(f"⚠️ خطأ أثناء تجميل الصورة: {e}")
-        return False
-
-def has_pure_white_background(image_path, threshold=0.96):
-    """
-    التحقق مما إذا كانت الصورة الأصلية تمتلك خلفية بيضاء نقية بالفعل عبر تحليل البكسلات على الإطار الخارجي.
-    """
-    try:
-        from PIL import Image
-        import numpy as np
-        with Image.open(image_path) as img:
-            img = img.convert("RGB")
-            w, h = img.size
-            if w < 400 or h < 400:
-                return False
-                
-            img_arr = np.array(img)
-            
-            # استخراج البكسلات من الحواف الأربعة
-            top = img_arr[0, :, :]
-            bottom = img_arr[-1, :, :]
-            left = img_arr[:, 0, :]
-            right = img_arr[:, -1, :]
-            
-            border_pixels = np.concatenate([top, bottom, left, right], axis=0)
-            
-            # التحقق من أن البكسلات قريبة جداً من الأبيض (R, G, B >= 248)
-            white_mask = (border_pixels[:, 0] >= 248) & (border_pixels[:, 1] >= 248) & (border_pixels[:, 2] >= 248)
-            white_ratio = np.mean(white_mask)
-            
-            print(f"📊 [White Background Check] نسبة البكسلات البيضاء على الحدود: {white_ratio:.4f} (الحد المطلوب: {threshold:.4f})")
-            return white_ratio >= threshold
-    except Exception as e:
-        print(f"⚠️ فشل فحص الخلفية البيضاء للصورة: {e}")
-        return False
-
-def process_product_image(image_url, product_name, brand, bg_removal_method=None, enhance=False, target_width=None, target_height=None, padding_ratio=None, bypass_heuristics=False):
-    """
-    تحميل الصورة وإزالة خلفيتها فقط - التحجيم والقص والتوسيط يتم سحابياً عبر Cloudinary.
-    يرجع مسار ملف الصورة بخلفية شفافة جاهزة للرفع.
-    """
-    old_bg_method = config.BG_REMOVAL_METHOD
-    if bg_removal_method:
-        mapped = bg_removal_method.lower().strip()
-        if mapped == 'bria':
-            mapped = 'bria_rmbg'
-        config.BG_REMOVAL_METHOD = mapped
-        print(f"🔧 [Manual Override] Overriding BG Removal Method to: '{config.BG_REMOVAL_METHOD}'")
-        
-    try:
-        os.makedirs("temp", exist_ok=True)
-    
-        safe_name = f"{product_name}_{brand}".replace("/", "_").replace("\\", "_").replace(":", "_").replace(" ", "_")
-        
-        raw_path  = os.path.join("temp", f"raw_{safe_name}.webp")
-        nobg_path = os.path.join("temp", f"nobg_{safe_name}.webp")
-        
-        # 1. تنزيل الصورة الأصلية
-        if not download_image(image_url, raw_path):
-            return None
-            
-        # الاحتفاظ بنسخة احتياطية خام من الصورة الأصلية قبل أي اقتصاص أو تعديل
-        raw_backup_path = os.path.join("temp", f"backup_raw_{safe_name}.webp")
-        try:
-            import shutil
-            shutil.copy2(raw_path, raw_backup_path)
-        except Exception as e:
-            print(f"⚠️ فشل حفظ نسخة احتياطية خام: {e}")
-            raw_backup_path = None
-            
-        # حساب أبعاد الصورة المستهدفة ديناميكياً إذا تم طلب الأبعاد التلقائية (Dynamic AI Size)
-        t_w = target_width
-        t_h = target_height
-        if not t_w or t_w <= 0 or not t_h or t_h <= 0:
-            try:
-                from PIL import Image
-                with Image.open(raw_path) as temp_img:
-                    orig_w, orig_h = temp_img.size
-                    max_dim = max(orig_w, orig_h)
-                    # الحفاظ على الجودة العالية للمتاجر (نطاق بين 800 و 1600 بكسل كحد أقصى)
-                    dynamic_dim = max(800, min(max_dim, 1600))
-                    t_w = dynamic_dim
-                    t_h = dynamic_dim
-                    print(f"📊 [Dynamic Size Detection] الأبعاد الديناميكية المحسوبة للمنتج: {t_w}x{t_h} (الصورة الأصلية: {orig_w}x{orig_h})")
-            except Exception as ex:
-                print(f"⚠️ فشل حساب الأبعاد ديناميكياً في المعالج: {ex}")
-                t_w = 800
-                t_h = 800
-        target_size = (t_w, t_h)
-            
-        # التحقق مما إذا كانت الصورة ذات جودة عالية وخلفية بيضاء نقية جاهزة لتخطي القص والعزل
-        # نتخطى فقط في الأوتوميشن الجماعي العادي، ولكن إذا كان هناك طلب واعتماد يدوي فلا نتخطى أبداً
-        if not bg_removal_method and getattr(config, 'BYPASS_WHITE_BACKGROUND_CHECK', False):
-            if has_pure_white_background(raw_path, threshold=getattr(config, 'WHITE_BACKGROUND_THRESHOLD', 0.96)):
-                print("⚡ [Bypass Check] الصورة الأصلية تمتلك خلفية بيضاء نقية وجودة عالية. تخطي التقطيع والعزل والظلال!")
-                try:
-                    from PIL import Image
-                    final_path = os.path.join("temp", f"final_{safe_name}.webp")
-                    with Image.open(raw_path) as img:
-                        img = img.convert("RGBA")
-                        scale = 0.88
-                        img.thumbnail((int(target_size[0] * scale), int(target_size[1] * scale)), Image.Resampling.LANCZOS)
-                        studio_canvas = Image.new("RGBA", target_size, (255, 255, 255, 255))
-                        x = (target_size[0] - img.width) // 2
-                        y = (target_size[1] - img.height) // 2
-                        studio_canvas.paste(img, (x, y), mask=img)
-                        studio_canvas.convert("RGB").save(final_path, "WEBP", quality=85, method=4)
-                    
-                    try: os.remove(raw_path)
-                    except Exception: pass
-                    
-                    return final_path
-                except Exception as ex:
-                    print(f"⚠️ خطأ أثناء تجاوز المعالجة المباشرة: {ex} -> المتابعة للمسار العادي...")
-            
-        # التحقق من وضوح الصورة وتجنب المعالجة إذا كانت مشوشة جداً
-        if is_image_blurry(raw_path, threshold=40.0):
-            print(f"⚠️ [Blurry Image Detected] الصورة مشوشة جداً (Laplacian Variance < 40). سيتم تخطيها.")
-            try:
-                if os.path.exists(raw_path):
-                    os.remove(raw_path)
-            except Exception:
-                pass
-            return "blurry"
-    
-        # تنظيف التشويش والضوضاء البصرية وترقية الأبعاد إذا كان التحسين مطلوباً
-        if enhance or getattr(config, 'ENABLE_IMAGE_ENHANCEMENT', False):
-            denoise_image_opencv(raw_path, raw_path)
-            upscale_image_if_small(raw_path, target_min_size=600)
-            
-        # 2. الاقتصاص الذكي بالذكاء الاصطناعي إذا تم العثور على مربع محيط بالمنتج
-        box = get_product_bounding_box(raw_path, product_name, brand)
-        if box:
-            cropped_path = os.path.join("temp", f"cropped_{safe_name}.webp")
-            if crop_image_by_box(raw_path, box, cropped_path):
-                try:
-                    if os.path.exists(raw_path):
-                        os.remove(raw_path)
-                except Exception:
-                    pass
-                os.rename(cropped_path, raw_path)
-        else:
-            print("🔄 [Fallback Smart Crop] لم يتم العثور على مربع محيط من Gemini. جاري تشغيل الاقتصاص الذكي القائم على الأهمية البصرية...")
-            apply_saliency_smart_crop(raw_path, raw_path, 800, 800)
-            
-        # حساب نسبة الهامش (Padding Ratio) ديناميكياً بناءً على أبعاد الصندوق المكتشف بـ AI (Gemini) أو التغذية الراجعة
-        p_ratio = padding_ratio
-        if p_ratio is None:
-            import local_cache_db
-            learned_padding = local_cache_db.get_active_learning_padding_ratio(brand)
-            if learned_padding is not None:
-                p_ratio = learned_padding
-                print(f"💡 [Active Learning] تطبيق هامش أمان مخصص للبراند '{brand}': padding_ratio={p_ratio} بسبب تكرار الرفض لقص الأطراف.")
-            else:
-                p_ratio = 0.85
-                
-        if padding_ratio is None and box:
-            try:
-                ymin, xmin, ymax, xmax = box
-                box_w = xmax - xmin
-                box_h = ymax - ymin
-                if box_h > 0 and box_w > 0:
-                    aspect = box_w / box_h
-                    if aspect < 0.5 or aspect > 2.0:
-                        p_ratio = 0.80  # حجم أصغر قليلاً لمنع التماس القريب مع الأطراف للمنتجات الطويلة أو العريضة
-                    elif aspect < 0.3 or aspect > 3.0:
-                        p_ratio = 0.75
-                    else:
-                        p_ratio = 0.85
-                    print(f"🤖 [AI Resize Detection] نسبة الهامش المحسوبة ديناميكياً بناءً على أبعاد الصندوق: {p_ratio * 100:.1f}%")
-            except Exception as e:
-                print(f"⚠️ خطأ أثناء حساب نسبة الهامش تلقائياً: {e}")
-
-        # حساب مساحة المربع المحيط بالبكسل لربطه بمعايير التحقق Heuristics
-        bbox_area = None
-        if box:
-            try:
-                from PIL import Image
-                with Image.open(raw_path) as temp_img:
-                    orig_w, orig_h = temp_img.size
-                    ymin, xmin, ymax, xmax = box
-                    pixel_w = (xmax - xmin) * orig_w / 1000.0
-                    pixel_h = (ymax - ymin) * orig_h / 1000.0
-                    bbox_area = pixel_w * pixel_h
-            except Exception as e:
-                print(f"⚠️ خطأ أثناء حساب مساحة المربع المحيط بالبكسل: {e}")
-    
-        # 3. إزالة الخلفية وتطبيق مسار الإصلاح الذاتي (Self-Healing Failover Path)
-        success = remove_background(raw_path, nobg_path, target_width=t_w, target_height=t_h, padding_ratio=p_ratio)
-        
-        # إذا فشل PhotoRoom تحديداً، نرجع الصورة الخام الأصلية بدون اقتصاص أو تعديل بناء على رغبة المستخدم
-        if not success and config.BG_REMOVAL_METHOD.lower() == "photoroom":
-            print("⚠️ [PhotoRoom Failover] فشل الاتصال أو الدفع لـ PhotoRoom. سيتم رفع الصورة الخام الأصلية كما هي دون اقتصاص أو تعديل.")
-            LAST_PROCESSING_STATUS[(product_name, brand)] = "failed"
-            if raw_backup_path and os.path.exists(raw_backup_path):
-                # تنظيف الملفات المؤقتة
-                for temp_f in [raw_path, nobg_path]:
-                    if os.path.exists(temp_f):
-                        try: os.remove(temp_f)
-                        except Exception: pass
-                return raw_backup_path
-            else:
-                return raw_path
-        
-        # التحقق البرمجي التلقائي من جودة قناع الشفافية للمسار الأساسي (أو تجاوزه)
-        is_valid = success and (bypass_heuristics or validate_alpha_matte(nobg_path, bbox_area))
-        
-        if not is_valid:
-            # مسار التراجع (Failover): محاولة التراجع المحلي المجاني باستخدام النموذج الآخر أولاً
-            local_failover_method = "bria_rmbg" if config.BG_REMOVAL_METHOD.lower() == "rembg" else "rembg"
-            print(f"🔄 [Self-Healing Failover] القناع الأساسي لم يمر بمعايير التحقق. محاولة التراجع المحلي باستخدام نموذج '{local_failover_method}'...")
-            
-            fallback_nobg_path = os.path.join("temp", f"local_fallback_{safe_name}.webp")
-            old_method = config.BG_REMOVAL_METHOD
-            config.BG_REMOVAL_METHOD = local_failover_method
-            fallback_success = remove_background(raw_path, fallback_nobg_path, target_width=t_w, target_height=t_h, padding_ratio=p_ratio)
-            config.BG_REMOVAL_METHOD = old_method
-            
-            if fallback_success and (bypass_heuristics or validate_alpha_matte(fallback_nobg_path, bbox_area)):
-                print("✅ [Self-Healing Succeeded] مسار التراجع المحلي نجح واجتاز التحقق البرمجي!")
-                nobg_path = fallback_nobg_path
-                is_valid = True
-                
-        if not is_valid:
-            # مسار التراجع السحابي المدفوع عبر API كخيار أخير
-            print("🔄 [Self-Healing Failover] التراجع المحلي لم ينجح. محاولة التراجع السحابي المدفوع...")
-            if config.REMOVE_BG_API_KEY:
-                api_nobg_path = os.path.join("temp", f"api_fallback_{safe_name}.webp")
-                
-                # محاكاة إزالة الخلفية عبر API
-                old_method = config.BG_REMOVAL_METHOD
-                config.BG_REMOVAL_METHOD = "remove_bg_api"
-                api_success = remove_background(raw_path, api_nobg_path, target_width=t_w, target_height=t_h, padding_ratio=p_ratio)
-                config.BG_REMOVAL_METHOD = old_method
-                
-                if api_success and (bypass_heuristics or validate_alpha_matte(api_nobg_path, bbox_area)):
-                    print("✅ [Self-Healing Succeeded] مسار التراجع السحابي نجح واجتاز التحقق البرمجي!")
-                    nobg_path = api_nobg_path
-                    is_valid = True
-                    
-            if not is_valid:
-                print("❌ [Self-Healing Failed] فشل مسارات التراجع الشفافة. استخدام الصورة الخام الكاملة لحماية المنتج وتحويلها للمراجعة البشرية.")
-                nobg_path = raw_path
-                
-        bg_status = "success" if nobg_path != raw_path else "failed"
-        LAST_PROCESSING_STATUS[(product_name, brand)] = bg_status
-    
-        # 4. تحسين الحواف وتطبيق ظلال الاستوديو الناعمة والتوسيط
-        temp_rgba = os.path.join("temp", f"rgba_{safe_name}.webp")
-        final_path = os.path.join("temp", f"final_{safe_name}.webp")
-        
-        if nobg_path != raw_path:
-            is_photoroom = (config.BG_REMOVAL_METHOD.lower() == "photoroom")
-            enable_shadows = getattr(config, 'ENABLE_STUDIO_SHADOWS', False)
-            
-            # إذا تم استخدام PhotoRoom والظلال غير مفعلة، فالصورة جاهزة ومحجمة سحابياً تماماً وبخلفية شفافة
-            if is_photoroom and not enable_shadows:
-                print("✨ الصورة تم قصها وتحجيمها وتوسيطها سحابياً بالكامل عبر PhotoRoom. تخطي معالجة الحواف والظلال المحلية.")
-                final_path = nobg_path
-            else:
-                try:
-                    from PIL import Image
-                    import numpy as np
-                    from edge_shadow_engine import EdgeShadowEngine
-                    
-                    # استخراج قناع الشفافية من الصورة المعزولة الخلفية
-                    with Image.open(nobg_path) as nobg_img:
-                        nobg_rgba = nobg_img.convert("RGBA")
-                        alpha_channel = np.array(nobg_rgba.getchannel('A'))
-                        
-                    # تشغيل محرك معالجة الحواف Guided Filter
-                    success_edge = EdgeShadowEngine.process_mask(raw_path, alpha_channel, temp_rgba)
-                    
-                    if success_edge:
-                        # تطبيق ظلال الاستوديو المركبة والتوسيط
-                        success_shadow = EdgeShadowEngine.apply_studio_shadows(temp_rgba, final_path, target_size=target_size)
-                        if not success_shadow:
-                            final_path = nobg_path
-                    else:
-                        final_path = nobg_path
-                except Exception as e:
-                    print(f"⚠️ خطأ أثناء تطبيق تنعيم الحواف والظلال: {e}")
-                    final_path = nobg_path
-        else:
-            # إذا لم يتم عزل الخلفية، نستخدم الصورة الخام مباشرة
-            final_path = raw_path
-            
-        # احتساب تدقيق درجة الامتثال البصري وإشغال المنتج داخل اللوحة (Canvas Occupancy)
-        if final_path and os.path.exists(final_path):
-            try:
-                from PIL import Image
-                import numpy as np
-                with Image.open(final_path) as fin_img:
-                    fin_rgba = fin_img.convert("RGBA")
-                    fin_arr = np.array(fin_rgba)
-                    alpha = fin_arr[:, :, 3]
-                    rgb = fin_arr[:, :, :3]
-                    is_product = (alpha > 10) & ((rgb[:, :, 0] < 250) | (rgb[:, :, 1] < 250) | (rgb[:, :, 2] < 250))
-                    occupancy = np.mean(is_product)
-                    print(f"📊 [Compliance Audit] نسبة مساحة المنتج المحتلة في اللوحة النهائية: {occupancy*100:.2f}% (الحد المقبول: 10% - 90%)")
-            except Exception as ex:
-                print(f"⚠️ فشل احتساب درجة الامتثال البصري للمنتج: {ex}")
-                
-        # تنظيف الملفات المؤقتة
-        for temp_f in [temp_rgba, raw_path, nobg_path, raw_backup_path]:
-            if os.path.exists(temp_f) and temp_f != final_path:
-                try:
-                    os.remove(temp_f)
-                except Exception:
-                    pass
-                    
-        return final_path
-    finally:
-        config.BG_REMOVAL_METHOD = old_bg_method
+def __getattr__(name):
+    # كان LAST_PROCESSING_STATUS قاموساً عاماً قابلاً للتعديل تتشاركه الطلبات المتزامنة.
+    # تم حذفه؛ المصدر الصحيح لحالة العزل هو ProcessResult.isolated / .error.
+    # نعيد قاموساً فارغاً للقراءة فقط كي لا ينكسر المستدعون الحاليون قبل إعادة ربطهم.
+    if name == "LAST_PROCESSING_STATUS":
+        logger.warning("LAST_PROCESSING_STATUS محذوف؛ استخدم process_product_image_result().isolated")
+        return types.MappingProxyType({})
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def send_telegram_notification(text):
-    """
-    إرسال تنبيه فوري عبر بوت Telegram (تم إيقافه بالكامل بناءً على طلب العميل).
-    """
+    """تنبيهات Telegram متوقفة بناءً على طلب العميل (دالة فارغة للتوافق)."""
     return False
 
+
+# ---------------------------------------------------------------------------
+# أدوات عامة
+# ---------------------------------------------------------------------------
+
+def _normalise_method(bg_method) -> str:
+    """يوحّد اسم طريقة العزل؛ عند غيابها نقرأ الإعداد الافتراضي دون تعديله."""
+
+    def _clean(value) -> str:
+        name = str(value or "").strip().lower()
+        return _METHOD_ALIASES.get(name, name)
+
+    method = _clean(bg_method)
+    if not method:
+        method = _clean(getattr(config, "BG_REMOVAL_METHOD", "photoroom"))
+    return method or "photoroom"
+
+
+def _resolve_canvas_size(target_width, target_height) -> Tuple[int, int]:
+    """0 أو None أو 'dynamic' تعني OUTPUT_CANVAS_SIZE (افتراضياً 800) كمربع."""
+
+    def _as_int(value) -> int:
+        if value is None:
+            return 0
+        if isinstance(value, str):
+            value = value.strip().lower()
+            if not value or value in ("dynamic", "auto"):
+                return 0
+        try:
+            return int(float(value))
+        except (TypeError, ValueError):
+            return 0
+
+    w, h = _as_int(target_width), _as_int(target_height)
+    if w <= 0 and h <= 0:
+        side = settings.output_canvas_size()
+        w = h = side
+    elif w <= 0:
+        w = h
+    elif h <= 0:
+        h = w
+    w = max(MIN_CANVAS_SIDE, min(MAX_CANVAS_SIDE, w))
+    h = max(MIN_CANVAS_SIDE, min(MAX_CANVAS_SIDE, h))
+    return w, h
+
+
+def _to_rgb_or_rgba(img: Image.Image) -> Image.Image:
+    has_alpha = img.mode in ("RGBA", "LA", "PA", "RGBa", "La") or "transparency" in img.info
+    return img.convert("RGBA") if has_alpha else img.convert("RGB")
+
+
+def _decode_image(data: bytes) -> Tuple[Optional[Image.Image], Optional[str]]:
+    """يتحقق من أن البيانات صورة نقطية حقيقية ويعيدها بعد تصحيح اتجاه EXIF."""
+    if not data:
+        return None, "not_image"
+    try:
+        with Image.open(io.BytesIO(data)) as probe:
+            fmt = (probe.format or "").upper()
+            probe.verify()
+        if fmt not in _ALLOWED_FORMATS:
+            return None, "not_image"
+        img = Image.open(io.BytesIO(data))
+        img.load()
+        try:
+            img = ImageOps.exif_transpose(img)
+        except Exception:  # noqa: BLE001 - بيانات EXIF تالفة لا تجعل الصورة غير صالحة
+            logger.info("تعذر قراءة اتجاه EXIF؛ سيتم استخدام الصورة كما خُزّنت")
+        img = _to_rgb_or_rgba(img)
+        if img.width < 1 or img.height < 1:
+            return None, "not_image"
+        return img, None
+    except Image.DecompressionBombError:
+        return None, "image_too_large"
+    except Exception:  # noqa: BLE001 - أي فشل في فك الترميز يعني أنها ليست صورة صالحة
+        return None, "not_image"
+
+
+def has_meaningful_transparency(img: Image.Image) -> bool:
+    """True إذا كان أكثر من 5% من بكسلات إطار الصورة شفافاً (خلفية مزالة فعلاً)."""
+    if img.mode != "RGBA":
+        return False
+    import numpy as np
+
+    alpha = np.asarray(img.getchannel("A"))
+    border = np.concatenate([alpha[0, :], alpha[-1, :], alpha[:, 0], alpha[:, -1]])
+    if border.size == 0:
+        return False
+    return float((border <= TRANSPARENT_ALPHA_MAX).mean()) > TRANSPARENT_BORDER_MIN_RATIO
+
+
+def is_background_already_removed(image_path) -> bool:
+    """واجهة توافقية: فحص ملف على القرص بنفس قاعدة الـ 5% من بكسلات الإطار."""
+    try:
+        with open(image_path, "rb") as fh:
+            img, _ = _decode_image(fh.read())
+        return bool(img is not None and has_meaningful_transparency(img))
+    except OSError:
+        return False
+
+
+def _limit_work_size(img: Image.Image) -> Image.Image:
+    if max(img.size) <= MAX_WORK_SIDE:
+        return img
+    img = img.copy()
+    img.thumbnail((MAX_WORK_SIDE, MAX_WORK_SIDE), Image.Resampling.LANCZOS)
+    return img
+
+
+def _encode_for_upload(img: Image.Image) -> Tuple[bytes, str, str]:
+    """ترميز صورة العمل لإرسالها لمزوّد العزل: PNG إذا كانت بشفافية، وإلا JPEG بجودة 95."""
+    buf = io.BytesIO()
+    if img.mode == "RGBA":
+        img.save(buf, format="PNG")
+        return buf.getvalue(), "image/png", "image.png"
+    img.convert("RGB").save(buf, format="JPEG", quality=95)
+    return buf.getvalue(), "image/jpeg", "image.jpg"
+
+
+def _decode_cutout(data: bytes) -> Optional[Image.Image]:
+    try:
+        img = Image.open(io.BytesIO(data))
+        img.load()
+        return img.convert("RGBA")
+    except Exception:  # noqa: BLE001
+        return None
+
+
+# ---------------------------------------------------------------------------
+# مصدر الصورة: مخزن المرشحات أو التنزيل أو ملف محلي
+# ---------------------------------------------------------------------------
+
+def _load_from_candidate_store(candidate_sha256) -> Optional[bytes]:
+    sha = str(candidate_sha256 or "").strip().lower()
+    if not _SHA256_RE.match(sha):
+        return None
+    store = settings.candidate_store_dir()
+    if not store or not os.path.isdir(store):
+        return None
+    matches = sorted(glob.glob(os.path.join(glob.escape(store), sha + ".*")))
+    exact = os.path.join(store, sha)
+    if os.path.isfile(exact):
+        matches.insert(0, exact)
+    for path in matches:
+        try:
+            with open(path, "rb") as fh:
+                data = fh.read(MAX_LOCAL_BYTES + 1)
+        except OSError:
+            continue
+        if len(data) > MAX_LOCAL_BYTES:
+            continue
+        if hashlib.sha256(data).hexdigest() == sha:
+            return data
+        logger.warning("ملف مخزن المرشحات لا يطابق بصمته sha256 وسيتم تجاهله: %s", path)
+    return None
+
+
+def _download_bytes(url: str) -> Tuple[Optional[bytes], Optional[str]]:
+    from http_client import ImpersonateClient
+
+    proxy = settings.proxy_url()
+    client = ImpersonateClient(use_proxy=bool(proxy), proxy_url=proxy or None)
+    fetched = client.fetch_image(url, timeout=15, max_bytes=MAX_DOWNLOAD_BYTES)
+    if fetched.content is None:
+        return None, f"download_{fetched.error or 'failed'}"
+    return fetched.content, None
+
+
+def _load_source(image_url_or_path, candidate_sha256=None) -> Tuple[Optional[bytes], Optional[str], str]:
+    """يعيد (البيانات، رمز الخطأ، نوع المصدر: candidate|download|local)."""
+    data = _load_from_candidate_store(candidate_sha256) if candidate_sha256 else None
+    if data is not None:
+        return data, None, "candidate"
+
+    source = str(image_url_or_path or "").strip()
+    if not source:
+        return None, "source_missing", "local"
+    lowered = source.lower()
+    if lowered.startswith(("http://", "https://")):
+        data, err = _download_bytes(source)
+        return data, err, "download"
+    if "://" in source or lowered.startswith("data:"):
+        return None, "download_bad_scheme", "download"
+    if not os.path.isfile(source):
+        return None, "source_not_found", "local"
+    try:
+        if os.path.getsize(source) > MAX_LOCAL_BYTES:
+            return None, "source_too_large", "local"
+        with open(source, "rb") as fh:
+            return fh.read(), None, "local"
+    except OSError:
+        return None, "source_unreadable", "local"
+
+
+# ---------------------------------------------------------------------------
+# تحديد موقع المنتج عبر Gemini (اختياري ومتحقق منه)
+# ---------------------------------------------------------------------------
+
+def _parse_box(text: str) -> Optional[List[float]]:
+    text = (text or "").strip()
+    if text.startswith("```"):
+        text = text.strip("`")
+        if text.lower().startswith("json"):
+            text = text[4:]
+    try:
+        result = json.loads(text.strip())
+    except (TypeError, ValueError):
+        return None
+    if isinstance(result, list) and result and isinstance(result[0], dict):
+        result = result[0]
+    if isinstance(result, dict):
+        box = result.get("box", result.get("box_2d"))
+    else:
+        box = result
+    if isinstance(box, list) and len(box) == 4 and all(isinstance(v, (int, float)) for v in box):
+        return [float(v) for v in box]
+    return None
+
+
+def _sane_box(box) -> bool:
+    """[ymin, xmin, ymax, xmax] بمقياس 0-1000 ومساحة بين 5% و100% من الصورة."""
+    if not isinstance(box, (list, tuple)) or len(box) != 4:
+        return False
+    try:
+        ymin, xmin, ymax, xmax = (float(v) for v in box)
+    except (TypeError, ValueError):
+        return False
+    if not all(0 <= v <= 1000 for v in (ymin, xmin, ymax, xmax)):
+        return False
+    if ymax <= ymin or xmax <= xmin:
+        return False
+    area = (ymax - ymin) * (xmax - xmin) / 1_000_000.0
+    return BOX_MIN_AREA_FRACTION <= area <= 1.0
+
+
+def _locate_product_box(img: Image.Image, product_name, brand) -> Optional[List[float]]:
+    """يطلب من Gemini صندوق المنتج الرئيسي. يعيد None عند غياب المفتاح أو أي خطأ."""
+    api_key = settings.gemini_api_key()
+    if not api_key:
+        return None
+    try:
+        thumb = img.convert("RGB")
+        thumb.thumbnail((400, 400))
+        buf = io.BytesIO()
+        thumb.save(buf, format="JPEG", quality=80)
+        prompt = (
+            f"Locate the main commercial packaged product of the brand '{brand}' for '{product_name}' in this image. "
+            "Return the single bounding box enclosing ONLY that product package (carton, bottle, tub, bag), "
+            "including its cap and base. Coordinates are [ymin, xmin, ymax, xmax] normalised to 0-1000. "
+            'Reply strictly as JSON: {"box": [ymin, xmin, ymax, xmax]}'
+        )
+        payload = {
+            "contents": [{"parts": [
+                {"text": prompt},
+                {"inlineData": {"mimeType": "image/jpeg", "data": base64.b64encode(buf.getvalue()).decode("ascii")}},
+            ]}],
+            "generationConfig": {"responseMimeType": "application/json"},
+        }
+        _count_gemini_call()
+        response = requests.post(
+            GEMINI_URL.format(model=settings.gemini_model()),
+            headers={"Content-Type": "application/json", "x-goog-api-key": api_key},
+            json=payload,
+            timeout=15,
+        )
+        if response.status_code != 200:
+            logger.warning("فشل تحديد موقع المنتج عبر Gemini (كود %s)", response.status_code)
+            return None
+        text = response.json()["candidates"][0]["content"]["parts"][0]["text"]
+        return _parse_box(text)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("خطأ أثناء تحديد موقع المنتج عبر Gemini: %s", exc)
+        return None
+
+
+def _crop_to_box(img: Image.Image, box, margin: float = BOX_MARGIN_FRACTION) -> Image.Image:
+    ymin, xmin, ymax, xmax = (float(v) for v in box)
+    my = (ymax - ymin) * margin
+    mx = (xmax - xmin) * margin
+    ymin, xmin = max(0.0, ymin - my), max(0.0, xmin - mx)
+    ymax, xmax = min(1000.0, ymax + my), min(1000.0, xmax + mx)
+    w, h = img.size
+    left = max(0, min(int(xmin / 1000.0 * w), w - 1))
+    top = max(0, min(int(ymin / 1000.0 * h), h - 1))
+    right = max(left + 1, min(int(round(xmax / 1000.0 * w)), w))
+    bottom = max(top + 1, min(int(round(ymax / 1000.0 * h)), h))
+    return img.crop((left, top, right, bottom))
+
+
+def get_product_bounding_box(image_path, product_name, brand):
+    """واجهة توافقية: صندوق Gemini لملف على القرص، فقط إذا اجتاز فحص المعقولية."""
+    try:
+        with open(image_path, "rb") as fh:
+            img, _ = _decode_image(fh.read())
+    except OSError:
+        return None
+    if img is None:
+        return None
+    box = _locate_product_box(img, product_name, brand)
+    return box if _sane_box(box) else None
+
+
+def crop_image_by_box(image_path, box, output_path):
+    """واجهة توافقية: اقتصاص ملف حسب صندوق Gemini (مع هامش 6%) وحفظه بدون فقد."""
+    if not _sane_box(box):
+        return False
+    try:
+        with open(image_path, "rb") as fh:
+            img, _ = _decode_image(fh.read())
+        if img is None:
+            return False
+        _save_lossless(_crop_to_box(img, box), output_path)
+        return True
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("خطأ أثناء اقتصاص الصورة: %s", exc)
+        return False
+
+
+def _save_lossless(img: Image.Image, output_path: str) -> None:
+    ext = os.path.splitext(str(output_path))[1].lower()
+    if ext == ".webp":
+        img.save(output_path, format="WEBP", lossless=True)
+    elif ext in (".jpg", ".jpeg"):
+        img.convert("RGB").save(output_path, format="JPEG", quality=95)
+    else:
+        img.save(output_path, format="PNG")
+
+
+# ---------------------------------------------------------------------------
+# مزوّدو عزل الخلفية: كل دالة تعيد (صورة RGBA، None) أو (None، رمز خطأ)
+# ---------------------------------------------------------------------------
+
+def _isolate_photoroom(img: Image.Image):
+    api_key = str(getattr(config, "PHOTOROOM_API_KEY", "") or "").strip()
+    if not api_key:
+        return None, "photoroom_no_key"
+    data, mime, filename = _encode_for_upload(img)
+    form = {
+        "format": "png",
+        "channels": "rgba",
+        "size": str(getattr(config, "PHOTOROOM_SIZE", "full") or "full"),
+        "crop": "true" if getattr(config, "PHOTOROOM_CROP", False) else "false",
+        "despill": "true" if getattr(config, "PHOTOROOM_DESPILL", True) else "false",
+    }
+    try:
+        response = requests.post(
+            PHOTOROOM_URL,
+            headers={"x-api-key": api_key},
+            files={"image_file": (filename, data, mime)},
+            data=form,
+            timeout=PHOTOROOM_TIMEOUT,
+        )
+    except requests.exceptions.Timeout:
+        return None, "photoroom_timeout"
+    except requests.exceptions.RequestException as exc:
+        logger.warning("تعذر الاتصال بـ PhotoRoom: %s", exc)
+        return None, "photoroom_connection_error"
+    if response.status_code != 200:
+        logger.warning("فشل PhotoRoom (كود %s)", response.status_code)
+        return None, f"photoroom_{response.status_code}"
+    cutout = _decode_cutout(response.content)
+    if cutout is None:
+        return None, "photoroom_bad_output"
+    return cutout, None
+
+
+def _isolate_remove_bg(img: Image.Image):
+    api_key = str(getattr(config, "REMOVE_BG_API_KEY", "") or "").strip()
+    if not api_key:
+        return None, "removebg_no_key"
+    data, mime, filename = _encode_for_upload(img)
+    try:
+        response = requests.post(
+            REMOVE_BG_URL,
+            headers={"X-Api-Key": api_key},
+            files={"image_file": (filename, data, mime)},
+            data={"size": "auto", "format": "png"},
+            timeout=REMOVE_BG_TIMEOUT,
+        )
+    except requests.exceptions.Timeout:
+        return None, "removebg_timeout"
+    except requests.exceptions.RequestException as exc:
+        logger.warning("تعذر الاتصال بـ remove.bg: %s", exc)
+        return None, "removebg_connection_error"
+    if response.status_code != 200:
+        logger.warning("فشل remove.bg (كود %s)", response.status_code)
+        return None, f"removebg_{response.status_code}"
+    cutout = _decode_cutout(response.content)
+    if cutout is None:
+        return None, "removebg_bad_output"
+    return cutout, None
+
+
+def _isolate_grabcut(img: Image.Image):
+    """عزل محلي بخوارزمية GrabCut على مصفوفة في الذاكرة (لا مسارات ملفات لـ OpenCV)."""
+    try:
+        import cv2
+        import numpy as np
+
+        rgb = img.convert("RGB")
+        work = rgb.copy()
+        work.thumbnail((1024, 1024), Image.Resampling.LANCZOS)
+        bgr = cv2.cvtColor(np.asarray(work), cv2.COLOR_RGB2BGR)
+        h, w = bgr.shape[:2]
+        mask = np.zeros((h, w), np.uint8)
+        rect = (int(w * 0.05), int(h * 0.05), max(1, int(w * 0.9)), max(1, int(h * 0.9)))
+        bgd_model = np.zeros((1, 65), np.float64)
+        fgd_model = np.zeros((1, 65), np.float64)
+        cv2.grabCut(bgr, mask, rect, bgd_model, fgd_model, 5, cv2.GC_INIT_WITH_RECT)
+        fg = np.where((mask == cv2.GC_FGD) | (mask == cv2.GC_PR_FGD), 255, 0).astype(np.uint8)
+        if not fg.any():
+            return None, "grabcut_empty"
+        alpha = Image.fromarray(fg)
+        if alpha.size != rgb.size:
+            alpha = alpha.resize(rgb.size, Image.Resampling.BILINEAR)
+        cutout = rgb.convert("RGBA")
+        cutout.putalpha(alpha)
+        return cutout, None
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("فشل العزل بـ GrabCut: %s", exc)
+        return None, "grabcut_failed"
+
+
+def _isolate_rembg(img: Image.Image):
+    try:
+        from rembg import new_session, remove
+    except ImportError:
+        return None, "rembg_not_installed"
+    try:
+        data, _, _ = _encode_for_upload(img)
+        output = remove(data, session=new_session("isnet-general-use"))
+        cutout = _decode_cutout(output if isinstance(output, (bytes, bytearray)) else b"")
+        if cutout is None and isinstance(output, Image.Image):
+            cutout = output.convert("RGBA")
+        if cutout is None:
+            return None, "rembg_bad_output"
+        return cutout, None
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("فشل العزل بـ rembg: %s", exc)
+        return None, "rembg_failed"
+
+
+def _isolate(img: Image.Image, method: str):
+    """يستدعي مزوّد العزل المطلوب. الطرق غير المدعومة تفشل بوضوح ولا تنسخ الأصل أبداً."""
+    if method == "photoroom":
+        return _isolate_photoroom(img)
+    if method == "remove_bg_api":
+        return _isolate_remove_bg(img)
+    if method == "grabcut":
+        return _isolate_grabcut(img)
+    if method == "rembg":
+        return _isolate_rembg(img)
+    if method == "bria_rmbg":
+        # نموذج Bria يتطلب torch وترخيصه غير تجاري؛ غير مدعوم في هذا المسار
+        return None, "bria_rmbg_unsupported"
+    return None, "unknown_bg_method"
+
+
+def _enhance_rgb(rgba: Image.Image) -> Image.Image:
+    """تحسين خفيف للتباين والألوان على قنوات RGB فقط (قناة الشفافية لا تتغير)."""
+    rgba = rgba.convert("RGBA")
+    alpha = rgba.getchannel("A")
+    rgb = rgba.convert("RGB")
+    rgb = ImageEnhance.Contrast(rgb).enhance(1.08)
+    rgb = ImageEnhance.Color(rgb).enhance(1.05)
+    out = rgb.convert("RGBA")
+    out.putalpha(alpha)
+    return out
+
+
+def _count_gemini_call() -> None:
+    try:
+        config.METRICS["gemini_api_calls"] += 1
+    except Exception:  # noqa: BLE001
+        pass
+
+
+# ---------------------------------------------------------------------------
+# الواجهة الرئيسية
+# ---------------------------------------------------------------------------
+
+def process_product_image_result(image_url_or_path, product_name, brand, target_width=0, target_height=0,
+                                 bg_method=None, candidate_sha256=None, enhance=False) -> ProcessResult:
+    """
+    يحوّل صورة المنتج المعتمدة إلى لوحة نشر نهائية: PNG بخلفية بيضاء معتمة RGB بالأبعاد المطلوبة
+    (0 أو 'dynamic' = OUTPUT_CANVAS_SIZE، افتراضياً 800x800) والمنتج يملأ 88% وموسّط.
+    لا يرفع استثناءات: كل فشل يعود كـ ProcessResult(path=None, isolated=False, error=<رمز>).
+    """
+    method = _normalise_method(bg_method)
+    try:
+        canvas_size = _resolve_canvas_size(target_width, target_height)
+
+        data, error, origin = _load_source(image_url_or_path, candidate_sha256)
+        if data is None:
+            logger.warning("تعذر الحصول على الصورة المصدر: %s", error)
+            return ProcessResult(None, False, method, error)
+
+        img, error = _decode_image(data)
+        if img is None:
+            code = {"download": "download_", "candidate": "candidate_"}.get(origin, "source_") + error
+            logger.warning("المصدر ليس صورة صالحة: %s", code)
+            return ProcessResult(None, False, method, code)
+        img = _limit_work_size(img)
+
+        if method == "none":
+            # 'none' تعني فعلاً بدون عزل: الصورة كما هي (بعد تصحيح الاتجاه) على اللوحة، ولا ندّعي العزل أبداً
+            cutout, provider, isolated = img.convert("RGBA"), "none", False
+        elif has_meaningful_transparency(img):
+            # الخلفية مزالة مسبقاً في المصدر؛ لا حاجة لاستدعاء مزوّد مدفوع
+            cutout, provider, isolated = img, "source_alpha", True
+        else:
+            box = _locate_product_box(img, product_name, brand)
+            if box is not None and _sane_box(box):
+                img = _crop_to_box(img, box)
+            elif box is not None:
+                logger.info("تم تجاهل صندوق Gemini غير المعقول: %s", box)
+            cutout, error = _isolate(img, method)
+            if cutout is None:
+                logger.warning("فشل عزل الخلفية بطريقة %s: %s", method, error)
+                return ProcessResult(None, False, method, error)
+            provider, isolated = method, True
+
+        cutout = EdgeShadowEngine.process_mask(cutout)
+        if alpha_bbox(cutout) is None:
+            return ProcessResult(None, False, provider, f"{provider}_empty_cutout")
+        if enhance:
+            cutout = _enhance_rgb(cutout)
+
+        if getattr(config, "ENABLE_STUDIO_SHADOWS", False):
+            canvas = EdgeShadowEngine.apply_studio_shadows(cutout, canvas_size)
+        else:
+            canvas = compose_on_white_canvas(cutout, canvas_size, CANVAS_FILL_RATIO)
+
+        job_dir = tempfile.mkdtemp(prefix="imgproc_")
+        out_path = os.path.join(job_dir, f"{uuid.uuid4().hex}.png")
+        canvas.save(out_path, format="PNG")
+        return ProcessResult(out_path, isolated, provider, None, canvas.width, canvas.height)
+    except Exception as exc:  # noqa: BLE001 - لا نسمح لأي خطأ غير متوقع بأن يصبح نشراً صامتاً
+        logger.exception("خطأ غير متوقع أثناء معالجة الصورة: %s", exc)
+        return ProcessResult(None, False, method, "processing_failed")
+
+
+def cleanup_processed_image(path) -> None:
+    """يحذف لوحة المعالجة ومجلدها المؤقت بعد الرفع."""
+    if not path:
+        return
+    try:
+        if os.path.isfile(path):
+            os.remove(path)
+        parent = os.path.dirname(path)
+        if os.path.basename(parent).startswith("imgproc_") and not os.listdir(parent):
+            shutil.rmtree(parent, ignore_errors=True)
+    except OSError:
+        pass
+
+
+def process_product_image(image_url, product_name, brand, bg_removal_method=None, enhance=False,
+                          target_width=None, target_height=None, padding_ratio=None, bypass_heuristics=False):
+    """
+    واجهة توافقية للمستدعين الحاليين: تعيد مسار اللوحة النهائية أو None.
+    عند فشل العزل تعيد None (فشل مغلق) ولا تعيد الصورة الخام أبداً.
+    padding_ratio و bypass_heuristics لم يعد لهما أثر (الإشغال ثابت 88%).
+    """
+    result = process_product_image_result(
+        image_url, product_name, brand,
+        target_width=target_width or 0,
+        target_height=target_height or 0,
+        bg_method=bg_removal_method,
+        enhance=bool(enhance),
+    )
+    if result.path is None:
+        logger.warning("لم يتم إنتاج صورة قابلة للنشر لـ '%s': %s", product_name, result.error)
+    return result.path
+
+
+def remove_background(input_path, output_path, target_width=None, target_height=None, padding_ratio=None,
+                      bg_method=None):
+    """
+    واجهة توافقية: تعزل خلفية ملف وتحفظ النتيجة PNG شفافة.
+    تعيد True فقط عند عزل حقيقي؛ عند الفشل أو الطريقة 'none' تعيد False ولا تكتب نسخة من الأصل.
+    """
+    try:
+        with open(input_path, "rb") as fh:
+            img, _ = _decode_image(fh.read())
+    except OSError:
+        return False
+    if img is None:
+        return False
+    method = _normalise_method(bg_method)
+    if method == "none":
+        return False
+    if has_meaningful_transparency(img):
+        img.save(output_path, format="PNG")
+        return True
+    cutout, error = _isolate(_limit_work_size(img), method)
+    if cutout is None:
+        logger.warning("فشل عزل الخلفية (%s): %s", method, error)
+        return False
+    EdgeShadowEngine.process_mask(cutout).save(output_path, format="PNG")
+    return True
+
+
+def enhance_image_quality(image_path, output_path):
+    """
+    تحسين خفيف للتباين والألوان على قنوات RGB فقط وبعمليات متجهة.
+    (تم حذف حلقة مسح الأطراف التي كانت تقص 5% من كل جانب من المنتج.)
+    """
+    try:
+        with open(image_path, "rb") as fh:
+            img, _ = _decode_image(fh.read())
+        if img is None:
+            return False
+        _save_lossless(_enhance_rgb(img), output_path)
+        return True
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("خطأ أثناء تحسين الصورة: %s", exc)
+        return False
+
+
+# ---------------------------------------------------------------------------
+# استخراج البيانات الوصفية
+# ---------------------------------------------------------------------------
+
+_NULL_STRINGS = {"", "null", "none", "n/a", "na", "not visible", "not legible", "unknown", "-"}
+_NULLABLE_FIELDS = ("nutrition", "ingredients", "tags_en", "tags_ar", "description_en", "description_ar")
+
+
+def build_metadata_prompt(product_name, brand) -> str:
+    """نص الطلب لاستخراج البيانات الوصفية؛ يمنع اختلاق القيم الغذائية والمكونات."""
+    taxonomy_lines = []
+    for l1_en, l1_data in categories.CATEGORIES.items():
+        for l2_en, l2_data in l1_data["subs"].items():
+            for l3_en, l3_ar in l2_data["sub_subs"].items():
+                taxonomy_lines.append(
+                    f"- {l1_en} ({l1_data['ar']}) > {l2_en} ({l2_data['ar']}) > {l3_en} ({l3_ar})")
+    taxonomy_str = "\n".join(taxonomy_lines)
+    return (
+        f"You are an e-commerce catalog assistant. Analyse this product package image for '{brand} - {product_name}'.\n"
+        "Honesty rules (mandatory):\n"
+        "- Report nutrition facts, ingredients and allergens ONLY if that text is clearly legible in THIS image.\n"
+        "- If it is not legible (for example the panel is on another side of the pack, too small or blurred), "
+        "return null for that field. Never guess, estimate, or use typical values for this kind of product.\n"
+        "- The marketing descriptions must not state nutrition values, ingredients, allergens or health claims "
+        "unless they are legible in the image.\n"
+        "Tasks:\n"
+        "1. nutrition: the Nutrition Facts exactly as printed (keep the printed basis, e.g. per serving or per 100 ml), "
+        "as a short English summary, or null.\n"
+        "2. ingredients: the ingredients list and any allergen statement exactly as printed, or null.\n"
+        "3. description_en: a short, factual e-commerce description in English.\n"
+        "4. description_ar: the same description in Arabic.\n"
+        "5. A 3-level category path (L1 > L2 > L3) chosen strictly from this taxonomy:\n"
+        f"{taxonomy_str}\n"
+        "6. tags_en / tags_ar: 3 to 6 comma-separated attributes that are printed on the pack or obvious from the "
+        "product type, in English and Arabic, or null.\n\n"
+        "Reply strictly as JSON with exactly these keys. Use JSON null (not a string) for any value you cannot "
+        "read from the image:\n"
+        "{\n"
+        '  "nutrition": string or null,\n'
+        '  "ingredients": string or null,\n'
+        '  "description_en": string or null,\n'
+        '  "description_ar": string or null,\n'
+        '  "category_l1_en": string, "category_l2_en": string, "category_l3_en": string,\n'
+        '  "category_l1_ar": string, "category_l2_ar": string, "category_l3_ar": string,\n'
+        '  "tags_en": string or null,\n'
+        '  "tags_ar": string or null\n'
+        "}"
+    )
+
+
+def _clean_metadata(result: dict) -> dict:
+    for key in _NULLABLE_FIELDS:
+        value = result.get(key)
+        if value is None:
+            continue
+        if not isinstance(value, str) or value.strip().lower() in _NULL_STRINGS:
+            result[key] = None
+        else:
+            result[key] = value.strip()
+    return result
+
+
+def extract_metadata_from_image(image_path, product_name, brand):
+    """
+    استخراج القيم الغذائية والمكونات (فقط إن كانت مقروءة) والوصف والتصنيفات عبر Gemini.
+    تُرسل الصورة بدقة 1024 بكسل. يعيد dict أو None.
+    """
+    api_key = settings.gemini_api_key()
+    if not api_key:
+        return None
+    try:
+        with open(image_path, "rb") as fh:
+            img, _ = _decode_image(fh.read())
+        if img is None:
+            return None
+        if img.mode == "RGBA":
+            flat = Image.new("RGB", img.size, (255, 255, 255))
+            flat.paste(img, mask=img.getchannel("A"))
+            img = flat
+        img.thumbnail((METADATA_IMAGE_SIDE, METADATA_IMAGE_SIDE), Image.Resampling.LANCZOS)
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=90)
+
+        payload = {
+            "contents": [{"parts": [
+                {"text": build_metadata_prompt(product_name, brand)},
+                {"inlineData": {"mimeType": "image/jpeg", "data": base64.b64encode(buf.getvalue()).decode("ascii")}},
+            ]}],
+            "generationConfig": {"responseMimeType": "application/json"},
+        }
+        _count_gemini_call()
+        response = requests.post(
+            GEMINI_URL.format(model=settings.gemini_model()),
+            headers={"Content-Type": "application/json", "x-goog-api-key": api_key},
+            json=payload,
+            timeout=60,
+        )
+        if response.status_code != 200:
+            logger.warning("فشل استخراج البيانات الوصفية عبر Gemini (كود %s)", response.status_code)
+            return None
+        text = response.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+        if text.startswith("```"):
+            text = text.strip("`")
+            if text.lower().startswith("json"):
+                text = text[4:]
+        result = json.loads(text.strip())
+        if not isinstance(result, dict):
+            return None
+        result = _clean_metadata(result)
+        result.update(categories.normalize_category_path(
+            result.get("category_l1_en") or "",
+            result.get("category_l2_en") or "",
+            result.get("category_l3_en") or "",
+        ))
+        return result
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("خطأ أثناء استخراج البيانات الوصفية عبر Gemini: %s", exc)
+        return None
+
+
+# ---------------------------------------------------------------------------
+# دالة قديمة مؤجل حذفها (راجع قرار التأجيل في الخطة؛ مستخدمة في الاختبارات فقط)
+# ---------------------------------------------------------------------------
 
 def optimize_and_center_product_image(source_path: str, destination_path: str, canvas_dimension: int = 1000) -> str:
     """
@@ -1227,10 +862,9 @@ def optimize_and_center_product_image(source_path: str, destination_path: str, c
     try:
         import numpy as np
         import cv2
-        from PIL import Image, ImageFilter
+        from PIL import ImageFilter
 
         original_image = Image.open(source_path).convert("RGBA")
-        width, height = original_image.size
 
         # عزل المقدمة إذا لم تكن تحتوي على قناة شفافية مفعلة
         img_np = np.array(original_image)
@@ -1299,11 +933,10 @@ def optimize_and_center_product_image(source_path: str, destination_path: str, c
         )
         return destination_path
     except Exception as e:
-        print(f"⚠️ [Image Optimization Error] Fallback to raw copy: {e}")
+        logger.warning("[Image Optimization Error] Fallback to raw copy: %s", e)
         try:
             with Image.open(source_path) as img:
                 img.convert("RGB").save(destination_path, format="WEBP", quality=85)
             return destination_path
         except Exception:
             return source_path
-
