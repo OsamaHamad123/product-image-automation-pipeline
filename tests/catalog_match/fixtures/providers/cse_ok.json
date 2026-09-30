@@ -1,0 +1,70 @@
+{
+  "kind": "customsearch#search",
+  "url": {
+    "type": "application/json",
+    "template": "https://www.googleapis.com/customsearch/v1?q={searchTerms}&num={count?}&start={startIndex?}&searchType={searchType?}&gl={gl?}&cr={cr?}&cx={cx?}&key={key?}&alt=json"
+  },
+  "queries": {
+    "request": [
+      {
+        "title": "Google Custom Search - Almarai Fresh Milk Full Fat 1L",
+        "totalResults": "2140",
+        "searchTerms": "Almarai Fresh Milk Full Fat 1L",
+        "count": 10,
+        "startIndex": 1,
+        "gl": "ae",
+        "cr": "countryAE",
+        "cx": "test-cx",
+        "searchType": "image"
+      }
+    ]
+  },
+  "searchInformation": {
+    "searchTime": 0.31,
+    "formattedSearchTime": "0.31",
+    "totalResults": "2140",
+    "formattedTotalResults": "2,140"
+  },
+  "items": [
+    {
+      "kind": "customsearch#result",
+      "title": "Almarai Fresh Milk Full Fat 1L | Carrefour UAE",
+      "htmlTitle": "<b>Almarai Fresh Milk Full Fat 1L</b> | Carrefour UAE",
+      "link": "https://cdn.mafrservices.com/sys-master-root/h9a/h1c/51234567890014/12345_main.jpg",
+      "displayLink": "www.carrefouruae.com",
+      "snippet": "Almarai Fresh Milk Full Fat 1L | Carrefour UAE",
+      "htmlSnippet": "<b>Almarai Fresh Milk Full Fat 1L</b> | Carrefour UAE",
+      "mime": "image/jpeg",
+      "fileFormat": "image/jpeg",
+      "image": {
+        "contextLink": "https://www.carrefouruae.com/mafuae/en/fresh-milk/almarai-fresh-milk-full-fat-1l/p/12345",
+        "height": 1200,
+        "width": 1200,
+        "byteSize": 94512,
+        "thumbnailLink": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQcse1",
+        "thumbnailHeight": 150,
+        "thumbnailWidth": 150
+      }
+    },
+    {
+      "kind": "customsearch#result",
+      "title": "Almarai Fresh Milk Full Fat 2L - Talabat",
+      "htmlTitle": "<b>Almarai Fresh Milk Full Fat</b> 2L - Talabat",
+      "link": "https://images.deliveryhero.io/image/talabat-nv/almarai-full-fat-2l.jpg",
+      "displayLink": "www.talabat.com",
+      "snippet": "Almarai Fresh Milk Full Fat 2L",
+      "htmlSnippet": "<b>Almarai Fresh Milk Full Fat</b> 2L",
+      "mime": "image/jpeg",
+      "fileFormat": "image/jpeg",
+      "image": {
+        "contextLink": "https://www.talabat.com/uae/grocery/almarai-fresh-milk-full-fat-2l",
+        "height": 640,
+        "width": 640,
+        "byteSize": 51200,
+        "thumbnailLink": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQcse2",
+        "thumbnailHeight": 137,
+        "thumbnailWidth": 137
+      }
+    }
+  ]
+}
