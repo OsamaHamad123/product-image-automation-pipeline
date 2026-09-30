@@ -638,64 +638,26 @@
     </script>
     <script>
         /**
-         * Self-Healing Pipeline Client Handler:
-         * Captures img.onerror, marks element with data-healing-active="true",
-         * calls /api/v1/fix-broken-image-link, invalidates corrupted cache, and updates img.src.
+         * معالج الصور المعطلة: يعرض بديلاً محايداً "الصورة غير متاحة" بدلاً من أي
+         * استبدال تلقائي للصورة (لا يوجد "شفاء ذاتي" يغيّر صورة المنتج دون مراجعة بشرية).
          */
         (function () {
+            const UNAVAILABLE_SRC = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(
+                '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200">' +
+                '<rect width="200" height="200" fill="#e5e7eb"/>' +
+                '<text x="100" y="96" font-family="sans-serif" font-size="14" text-anchor="middle" fill="#6b7280">Image unavailable</text>' +
+                '<text x="100" y="118" font-family="sans-serif" font-size="14" text-anchor="middle" fill="#6b7280">الصورة غير متاحة</text>' +
+                '</svg>'
+            );
             window.addEventListener('error', function (event) {
                 const target = event.target;
-                if (target && target.tagName === 'IMG') {
-                    if (!target.hasAttribute('data-proxy-attempted')) {
-                        target.setAttribute('data-proxy-attempted', 'true');
-                        const originalUrl = target.getAttribute('src') || '';
-                        if (originalUrl && !originalUrl.includes('/api/v1/image-proxy') && !originalUrl.startsWith('data:')) {
-                            console.warn(`[SmartEcomImageEngine] Hotlink/CORS blocked image: ${originalUrl}. Rerouting to /api/v1/image-proxy...`);
-                            target.src = `/api/v1/image-proxy?url=${encodeURIComponent(originalUrl)}`;
-                            return;
-                        }
-                    }
-
-                    if (!target.hasAttribute('data-healing-active')) {
-                        const brokenUrl = target.src;
-                        const productId = target.getAttribute('data-product-id') || target.getAttribute('data-id') || '0';
-
-                        target.setAttribute('data-healing-active', 'true');
-                        target.style.opacity = '0.5';
-
-                        console.warn(`[Self-Healing Pipeline] Broken image detected: ${brokenUrl}. Healing...`);
-
-                        fetch('/api/v1/fix-broken-image-link', {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json',
-                                'X-Requested-With': 'XMLHttpRequest',
-                                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
-                            },
-                            body: JSON.stringify({
-                                product_id: parseInt(productId, 10) || 100,
-                                broken_url: brokenUrl
-                            })
-                        })
-                        .then(res => res.json())
-                        .then(data => {
-                            if (data && data.resolved_url) {
-                                target.src = data.resolved_url;
-                                target.style.opacity = '1.0';
-                                target.removeAttribute('data-healing-active');
-                                console.log(`[Self-Healing Pipeline] Image healed successfully: ${data.resolved_url} (Match: ${data.match_percentage}%)`);
-                            } else {
-                                target.src = 'https://via.placeholder.com/400?text=Product+Image';
-                                target.style.opacity = '1.0';
-                            }
-                        })
-                        .catch(err => {
-                            console.error('[Self-Healing Pipeline] Error during healing:', err);
-                            target.src = 'https://via.placeholder.com/400?text=Product+Image';
-                            target.style.opacity = '1.0';
-                        });
-                    }
-                }
+                if (!target || target.tagName !== 'IMG') return;
+                if (target.hasAttribute('data-unavailable')) return;
+                const src = target.getAttribute('src') || '';
+                if (src.startsWith('data:')) return;
+                target.setAttribute('data-unavailable', 'true');
+                target.setAttribute('title', 'الصورة غير متاحة (تعذر تحميلها)');
+                target.src = UNAVAILABLE_SRC;
             }, true);
         })();
     </script>

@@ -3,11 +3,7 @@
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\ProductController;
 use App\Http\Controllers\ApiController;
-use App\Http\Controllers\CatalogHealingController;
 use App\Http\Controllers\CurationController;
-
-Route::post('/api/v1/fix-broken-image-link', [CatalogHealingController::class, 'processBrokenImage']);
-Route::post('/api/v1/curation/mutate/{productId}', [CurationController::class, 'mutate']);
 
 // صفحات لوحة التحكم
 Route::get('/', [ProductController::class, 'index'])->name('dashboard.index');
@@ -31,7 +27,7 @@ Route::get('/api/products-json', [ProductController::class, 'getProductsJson']);
 Route::post('/api/clear-products-cache', [ApiController::class, 'clearProductsCache']);
 Route::post('/api/system/run-diagnostics', [ProductController::class, 'runDiagnosticsJson']);
 
-// بروكسي للاتصال بالبايثون
+// جسر بايثون (cli_bridge.py مباشرة، بدون خادم FastAPI)
 Route::post('/api/search', [ApiController::class, 'search']);
 Route::post('/api/select_image', [ApiController::class, 'selectImage']);
 Route::post('/api/reject_image', [ApiController::class, 'rejectImage']);
@@ -49,18 +45,14 @@ Route::post('/api/batch/resume', [ApiController::class, 'resumeBatch']);
 Route::post('/api/batch/reset', [ApiController::class, 'resetBatch']);
 Route::post('/api/sheet/preview', [ApiController::class, 'previewSheet']);
 Route::post('/api/sheet/save', [ApiController::class, 'saveSheetConfig']);
-Route::get('/api/enterprise-metrics', [ApiController::class, 'getEnterpriseMetrics']);
+
+// المراجعة البشرية للمرشحين (الرفض يعيد البحث فعلياً عبر cli_bridge.reject_image)
 Route::post('/api/v1/curation/reject', [CurationController::class, 'rejectAndReSearch']);
 Route::post('/api/v1/curation/select-candidate', [CurationController::class, 'selectCandidate']);
 Route::post('/api/v1/curation/save-candidates', [CurationController::class, 'saveCandidates']);
 
-
-
-
-// إدارة الخدمات والخوادم تلقائياً
+// حالة جسر بايثون وقاعدة البيانات
 Route::get('/api/system/status', [ApiController::class, 'systemStatus']);
-Route::post('/api/system/start-flask', [ApiController::class, 'startFlask']);
-Route::post('/api/system/stop-flask', [ApiController::class, 'stopFlask']);
 
 // عرض سجلات الأتمتة المباشرة من السيرفر لتشخيص الأخطاء
 Route::get('/api/view-pipeline-log', function() {
@@ -81,6 +73,3 @@ Route::get('/api/view-laravel-log', function() {
     }
     return response('Log file not found at: ' . $logPath, 404);
 });
-
-
-

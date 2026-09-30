@@ -3,109 +3,80 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use App\Models\ResolvedProduct;
 use App\Models\ProductFailure;
+use App\Services\PythonBridge;
+use App\Services\QueueStats;
+use App\Services\CandidateMatcher;
 
 class ProductController extends Controller
 {
+    /** مفاتيح الإعدادات السرية: لا تُطبع أبداً في الصفحة، وتُعرض آخر 4 أحرف فقط. */
+    private const SECRET_SETTING_KEYS = [
+        'photoroom_api_key', 'gemini_api_key', 'cloudinary_api_key', 'cloudinary_api_secret',
+        'google_search_api_key', 'serper_api_key', 'proxy_url'
+    ];
+
+    private const TEXT_SETTING_KEYS = [
+        'gemini_model', 'cloudinary_cloud_name', 'google_search_cx',
+        'search_engine', 'auto_publish_brands'
+    ];
+
+    private const CHECKBOX_SETTING_KEYS = [
+        'strict_brand_match', 'auto_publish_enabled',
+        // مفاتيح محرك البحث القديم v1 فقط (للتراجع المؤقت)
+        'enable_gemini_pre_validation', 'filter_competitors', 'bypass_white_background_check'
+    ];
+
+    /** نماذج Gemini المدعومة حالياً (النماذج المتقاعدة أزيلت من القائمة). */
+    public const SUPPORTED_GEMINI_MODELS = [
+        'gemini-3.1-flash-lite' => 'gemini-3.1-flash-lite (الافتراضي: اقتصادي ومناسب للتحقق البصري)',
+        'gemini-3.5-flash' => 'gemini-3.5-flash (أدق وأبطأ وأعلى تكلفة)',
+    ];
+
     private function getPythonPath()
     {
-        $winVenv = base_path('../.venv/Scripts/python.exe');
-        if (file_exists($winVenv)) {
-            return $winVenv;
-        }
-        $linuxVenv = base_path('../.venv/bin/python');
-        if (file_exists($linuxVenv)) {
-            return $linuxVenv;
-        }
-        return env('PYTHON_PATH', 'python');
-    }
-
-    private function getBridgePath()
-    {
-        return env('CLI_BRIDGE_PATH', base_path('../cli_bridge.py'));
-    }
-
-    private function runPython($action, $params = [])
-    {
-        @set_time_limit(300);
-        try {
-            $routes = [
-                'get_products' => 'products',
-                'search' => 'search',
-                'select_image' => 'select-image',
-                'reject_image' => 'reject-image',
-                'upload_manual_image' => 'upload-manual-image',
-                'batch_status' => 'batch-status',
-                'batch-status' => 'batch-status'
-            ];
-            
-            $endpoint = $routes[$action] ?? $action;
-            $url = "http://127.0.0.1:8001/api/{$endpoint}";
-            
-            if ($action === 'get_products' || $action === 'batch_status' || $action === 'batch-status') {
-                $response = \Illuminate\Support\Facades\Http::timeout(600)->get($url);
-            } else {
-                $response = \Illuminate\Support\Facades\Http::timeout(600)->post($url, $params);
-            }
-            
-            if ($response->successful()) {
-                return $response->json();
-            }
-            
-            \Log::warning("FastAPI request failed for action: {$action}, falling back to CLI. Status: " . $response->status());
-            throw new \Exception("FastAPI returned status " . $response->status());
-        } catch (\Exception $e) {
-            try {
-                $jsonParams = json_encode($params);
-                $base64Params = base64_encode($jsonParams);
-                
-                $pythonPath = $this->getPythonPath();
-                $bridgePath = $this->getBridgePath();
-                
-                // بناء الأمر والتنفيذ الفوري (التراجع للـ CLI)
-                $cmd = "\"{$pythonPath}\" \"{$bridgePath}\" {$action} {$base64Params} 2>&1";
-                $output = shell_exec($cmd);
-                
-                $pos = strrpos($output, '{"status":');
-                if ($pos !== false) {
-                    $output = substr($output, $pos);
-                }
-                
-                return json_decode($output, true) ?: ['status' => 'failed', 'error' => $output];
-            } catch (\Exception $subEx) {
-                return ['status' => 'failed', 'error' => $e->getMessage() . ' | Fallback error: ' . $subEx->getMessage()];
-            }
-        }
+        return PythonBridge::pythonPath();
     }
 
     /**
-     * عرض الصفحة الرئيسية للوحة التحكم والإحصائيات
+     * تنفيذ أوامر جسر بايثون مباشرة عبر سطر الأوامر (cli_bridge.py) بترميز UTF-8.
+     */
+    private function runPython($action, $params = [])
+    {
+        return PythonBridge::run($action, $params);
+    }
+
+    /**
+     * عرض الصفحة الرئيسية للوحة التحكم والإحصائيات.
+     * كل الأرقام هنا عدادات حقيقية من قاعدة البيانات والشيت؛ لا توجد تقديرات أو ثوابت مختلقة.
      */
     public function index()
     {
         try {
-            $successfulRuns = ResolvedProduct::count();
             $failedRuns = ProductFailure::count();
 
-            // إحصائيات مبنية على بيانات كاش SQLite مباشرة وبسرعة فائقة
-            $metrics = [
-                'gemini_api_calls' => ($successfulRuns * 2) + $failedRuns,
-                'cloudinary_uploads' => $successfulRuns,
-                'failed_runs' => $failedRuns,
-                'successful_runs' => $successfulRuns,
-                'semantic_cache_savings' => round($successfulRuns * 0.3)
-            ];
+            // عدادات الاعتماد الحقيقية من resolved_products حسب حالة التحقق
+            $resolvedByStatus = [];
+            try {
+                if (Schema::hasColumn('resolved_products', 'verification_status')) {
+                    $rows = DB::table('resolved_products')
+                        ->select('verification_status', DB::raw('COUNT(*) AS n'))
+                        ->groupBy('verification_status')
+                        ->get();
+                    foreach ($rows as $r) {
+                        $resolvedByStatus[(string) ($r->verification_status ?? 'legacy')] = (int) $r->n;
+                    }
+                } else {
+                    $resolvedByStatus['legacy'] = ResolvedProduct::count();
+                }
+            } catch (\Throwable $e) {
+                $resolvedByStatus = [];
+            }
 
-            $geminiCost = $metrics['gemini_api_calls'] * 0.0025;
-            $photoroomCost = $metrics['successful_runs'] * 0.02;
-            $cloudinaryCost = $metrics['successful_runs'] * 0.002;
-            $totalCostVal = $geminiCost + $photoroomCost + $cloudinaryCost;
-
-            $estimatedCost = number_format($totalCostVal, 4);
-            $metrics['gemini_cost'] = $geminiCost;
-            $metrics['photoroom_cost'] = $photoroomCost;
-            $metrics['cloudinary_cost'] = $cloudinaryCost;
+            $queueCounters = QueueStats::counters();
 
             // الحصول على المنتجات لتعديل أرقام الإحصائيات الشاملة
             $products = [];
@@ -143,11 +114,11 @@ class ProductController extends Controller
             $missing = max(0, $total - $linked - $review - $errors);
             $percentage = $total > 0 ? round(($linked / $total) * 100) : 0;
 
-            return view('dashboard.index', compact('metrics', 'estimatedCost', 'total', 'linked', 'review', 'errors', 'missing', 'percentage'));
+            return view('dashboard.index', compact('resolvedByStatus', 'queueCounters', 'total', 'linked', 'review', 'errors', 'missing', 'percentage'));
         } catch (\Exception $e) {
             return view('dashboard.index', [
-                'metrics' => ['gemini_api_calls' => 0, 'cloudinary_uploads' => 0],
-                'estimatedCost' => '0.0000',
+                'resolvedByStatus' => [],
+                'queueCounters' => ['by_status' => [], 'by_failure_code' => []],
                 'total' => 0, 'linked' => 0, 'review' => 0, 'errors' => 0, 'missing' => 0, 'percentage' => 0,
                 'error' => 'حدث خطأ أثناء تحميل الإحصائيات: ' . $e->getMessage()
             ]);
@@ -202,45 +173,45 @@ class ProductController extends Controller
 
             $products = $result['products'];
 
-            // جلب تفاصيل الكاش المحلي
-            $resolved = ResolvedProduct::all()->keyBy('barcode');
-
-            // جلب مرشحات الصور المخزنة للفرز والاعتماد البصري
-            $curationCandidates = [];
+            // جلب تفاصيل الكاش المحلي (الاعتمادات الملغاة superseded لا تعرض)
+            $resolvedQuery = ResolvedProduct::query();
             try {
-                $curationCandidates = \DB::table('curation_candidates')
+                if (Schema::hasColumn('resolved_products', 'verification_status')) {
+                    $resolvedQuery->where(function ($q) {
+                        $q->whereNull('verification_status')->orWhere('verification_status', '<>', 'superseded');
+                    });
+                }
+            } catch (\Throwable $e) {
+                // جدول بدون أعمدة الهوية بعد
+            }
+            $resolved = $resolvedQuery->orderBy('id')->get()->keyBy('barcode');
+
+            // جلب مرشحات الصور المخزنة للفرز والاعتماد البصري.
+            // الربط بالمنتج يتم عبر sku_key (وليس رقم الصف الذي يتغير عند تعديل الشيت)،
+            // مع الرجوع لرقم الصف فقط للمرشحات القديمة التي لا تملك sku_key،
+            // وتعرض فقط مرشحات آخر تشغيل (run_id) لكل sku_key.
+            $candidateRows = [];
+            try {
+                $candidateRows = DB::table('curation_candidates')
                     ->orderBy('id', 'asc')
                     ->get()
-                    ->groupBy('row_number');
+                    ->map(fn ($r) => (array) $r)
+                    ->all();
             } catch (\Exception $e) {
                 // Table might not exist or be empty yet
             }
 
+            $products = CandidateMatcher::attach($products, $candidateRows);
+
             foreach ($products as &$prod) {
                 $barcode = trim($prod['barcode'] ?? '');
-                $rowNum = $prod['row_number'];
-                
-                // دمج المرشحات البصرية المخزنة
-                $hasCuration = isset($curationCandidates[$rowNum]) && count($curationCandidates[$rowNum]) > 0;
-                $prod['curation_candidates'] = $hasCuration 
-                    ? $curationCandidates[$rowNum]->toArray() 
-                    : [];
-
-                if ($hasCuration) {
-                    $prod['needs_review'] = true;
-                    $selected = $curationCandidates[$rowNum]->firstWhere('is_selected', 1) ?: $curationCandidates[$rowNum]->first();
-                    $prod['needs_review_url'] = $selected ? $selected->image_url : '';
-                } elseif (strpos($prod['existing_image_link'] ?? '', 'needs_review:') !== false) {
-                    $prod['needs_review'] = true;
-                    $prod['needs_review_url'] = str_replace('needs_review:', '', $prod['existing_image_link']);
-                }
-
                 if ($barcode && isset($resolved[$barcode])) {
                     $prod['cached_image'] = $resolved[$barcode]->cloudinary_url;
-                    $prod['clip_score'] = $resolved[$barcode]->clip_score;
+                    $prod['verification_status'] = $resolved[$barcode]->verification_status ?? 'legacy';
                     $prod['resolved_at'] = $resolved[$barcode]->resolved_at ? $resolved[$barcode]->resolved_at->toIso8601String() : null;
                 }
             }
+            unset($prod);
 
             \Cache::put($cacheKey, $products, 3600);
 
@@ -458,70 +429,110 @@ class ProductController extends Controller
     }
 
     /**
-     * عرض صفحة إعدادات النظام ومفاتيح الـ API
+     * إخفاء القيمة السرية: تعرض آخر 4 أحرف فقط.
      */
-    public function settings()
+    public static function maskSecret(?string $value): string
     {
-        $settingsRaw = \DB::table('system_settings')->get();
-        $settings = [];
-        foreach ($settingsRaw as $row) {
-            $settings[$row->key] = $row->value;
+        $value = (string) $value;
+        if ($value === '') {
+            return '';
         }
-
-        $keys = [
-            'photoroom_api_key', 'gemini_api_key', 'gemini_model',
-            'cloudinary_cloud_name', 'cloudinary_api_key', 'cloudinary_api_secret',
-            'google_search_api_key', 'google_search_cx',
-            'clip_relevance_threshold', 'clip_grey_zone_threshold',
-            'strict_brand_match', 'enable_gemini_pre_validation',
-            'filter_competitors', 'bypass_white_background_check',
-            'proxy_url'
-        ];
-        foreach ($keys as $k) {
-            if (!isset($settings[$k])) {
-                $settings[$k] = '';
-            }
+        if (mb_strlen($value) <= 4) {
+            return '••••';
         }
-
-        return view('dashboard.settings', compact('settings'));
+        return '••••' . mb_substr($value, -4);
     }
 
     /**
-     * حفظ وتحديث إعدادات النظام ومفاتيح الـ API في قاعدة البيانات
+     * عرض صفحة إعدادات النظام ومفاتيح الـ API.
+     * المفاتيح السرية لا تطبع في الصفحة أبداً؛ تعرض مقنّعة (آخر 4 أحرف) ويترك الحقل فارغاً.
+     */
+    public function settings()
+    {
+        $settingsRaw = DB::table('system_settings')->get();
+        $stored = [];
+        foreach ($settingsRaw as $row) {
+            $stored[$row->key] = $row->value;
+        }
+
+        $settings = [];
+        foreach (array_merge(self::TEXT_SETTING_KEYS, self::CHECKBOX_SETTING_KEYS) as $k) {
+            $settings[$k] = $stored[$k] ?? '';
+        }
+        if ($settings['search_engine'] === '') {
+            $settings['search_engine'] = 'v2';
+        }
+        if ($settings['gemini_model'] === '') {
+            $settings['gemini_model'] = 'gemini-3.1-flash-lite';
+        }
+
+        $masked = [];
+        foreach (self::SECRET_SETTING_KEYS as $k) {
+            $masked[$k] = self::maskSecret($stored[$k] ?? '');
+        }
+
+        $geminiModels = self::SUPPORTED_GEMINI_MODELS;
+
+        return view('dashboard.settings', compact('settings', 'masked', 'geminiModels'));
+    }
+
+    /**
+     * حفظ وتحديث إعدادات النظام ومفاتيح الـ API في قاعدة البيانات.
+     * حقل سري فارغ يعني "إبقاء القيمة الحالية" حتى لا يُكتب القناع فوق المفتاح الحقيقي.
      */
     public function saveSettings(Request $request)
     {
-        $keys = [
-            'photoroom_api_key', 'gemini_api_key', 'gemini_model',
-            'cloudinary_cloud_name', 'cloudinary_api_key', 'cloudinary_api_secret',
-            'google_search_api_key', 'google_search_cx',
-            'clip_relevance_threshold', 'clip_grey_zone_threshold',
-            'proxy_url'
-        ];
-        
-        $checkboxKeys = [
-            'strict_brand_match', 'enable_gemini_pre_validation',
-            'filter_competitors', 'bypass_white_background_check'
-        ];
+        $warnings = [];
 
         try {
-            foreach ($keys as $k) {
-                $val = $request->input($k, '');
-                \DB::table('system_settings')->updateOrInsert(
+            foreach (self::SECRET_SETTING_KEYS as $k) {
+                $val = trim((string) $request->input($k, ''));
+                $clear = $request->boolean('clear_' . $k);
+                if ($val === '' && !$clear) {
+                    continue;
+                }
+                if (strpos($val, '••••') === 0) {
+                    // قناع أعيد إرساله بالخطأ: لا نكتبه فوق المفتاح
+                    continue;
+                }
+                DB::table('system_settings')->updateOrInsert(
+                    ['key' => $k],
+                    ['value' => $clear ? '' : $val, 'updated_at' => now()]
+                );
+            }
+
+            foreach (self::TEXT_SETTING_KEYS as $k) {
+                $val = trim((string) $request->input($k, ''));
+                if ($k === 'search_engine' && !in_array($val, ['v2', 'v1'], true)) {
+                    $val = 'v2';
+                }
+                if ($k === 'gemini_model' && !array_key_exists($val, self::SUPPORTED_GEMINI_MODELS)) {
+                    $warnings[] = "نموذج Gemini '{$val}' غير مدعوم؛ لم يتم تغيير النموذج المحفوظ.";
+                    continue;
+                }
+                if ($k === 'auto_publish_brands') {
+                    $brands = array_filter(array_map('trim', explode(',', $val)), fn ($b) => $b !== '');
+                    $val = implode(', ', array_unique($brands));
+                }
+                DB::table('system_settings')->updateOrInsert(
                     ['key' => $k],
                     ['value' => $val, 'updated_at' => now()]
                 );
             }
-            
-            foreach ($checkboxKeys as $ck) {
+
+            foreach (self::CHECKBOX_SETTING_KEYS as $ck) {
                 $val = $request->has($ck) ? 'true' : 'false';
-                \DB::table('system_settings')->updateOrInsert(
+                DB::table('system_settings')->updateOrInsert(
                     ['key' => $ck],
                     ['value' => $val, 'updated_at' => now()]
                 );
             }
 
-            return redirect()->route('dashboard.settings')->with('success', 'تم حفظ وتحديث الإعدادات بنجاح في قاعدة البيانات.');
+            $message = 'تم حفظ وتحديث الإعدادات بنجاح في قاعدة البيانات.';
+            if (!empty($warnings)) {
+                $message .= ' ' . implode(' ', $warnings);
+            }
+            return redirect()->route('dashboard.settings')->with('success', $message);
         } catch (\Exception $e) {
             return redirect()->route('dashboard.settings')->with('error', 'فشل حفظ الإعدادات: ' . $e->getMessage());
         }
@@ -595,7 +606,7 @@ class ProductController extends Controller
                         'product_name' => $p->product_name,
                         'brand' => $p->brand,
                         'cloudinary_url' => $p->cloudinary_url,
-                        'clip_score' => $p->clip_score,
+                        'verification_status' => $p->verification_status ?? 'legacy',
                         'resolved_at' => $p->resolved_at ? $p->resolved_at->toIso8601String() : null,
                         'metadata' => $meta
                     ];
@@ -625,7 +636,7 @@ class ProductController extends Controller
                     'اسم المنتج (Name)', 
                     'العلامة التجارية (Brand)', 
                     'رابط الصورة (Image URL)', 
-                    'نسبة مطابقة الصورة (Match Score)',
+                    'حالة التحقق (Verification status)',
                     'التصنيف الرئيسي (Category L1)',
                     'التصنيف الفرعي 1 (Category L2)',
                     'التصنيف الفرعي 2 (Category L3)',
@@ -650,7 +661,7 @@ class ProductController extends Controller
                         $p->product_name,
                         $p->brand,
                         $p->cloudinary_url,
-                        $p->clip_score ? round($p->clip_score * 100) . '%' : 'N/A',
+                        $p->verification_status ?? 'legacy',
                         $meta['web_category_l1'] ?? $meta['category'] ?? '',
                         $meta['web_category_l2'] ?? '',
                         $meta['web_category_l3'] ?? '',

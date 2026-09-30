@@ -296,120 +296,91 @@
     </div>
 </div>
 
-<!-- Enterprise Systems Health & Observability Observatory -->
-<div class="glass-panel" style="margin-bottom: 2.5rem; padding: 2rem; border-color: var(--panel-border-hover); background: radial-gradient(circle at top right, rgba(99, 102, 241, 0.05), transparent 70%);">
+<!-- عدادات الأتمتة الحقيقية من جدول automation_queue -->
+@php
+    $qs = $queueCounters['by_status'] ?? [];
+    $qCodes = $queueCounters['by_failure_code'] ?? [];
+@endphp
+<div class="glass-panel" style="margin-bottom: 2.5rem; padding: 2rem; border-color: var(--panel-border-hover);">
     <h2 style="font-size: 1.35rem; font-weight: 900; border-bottom: 1px solid var(--panel-border); padding-bottom: 1rem; margin-bottom: 1.75rem; display: flex; align-items: center; justify-content: space-between; color: var(--text-primary);">
-        <span><i class="fas fa-shield-alt" style="color: var(--accent-purple); margin-inline-end: 0.5rem;"></i> مرصد حوكمة نقاء الكتالوج والشفاء الذاتي (SRE & Enterprise Observatory)</span>
-        <span class="score-badge" id="enterpriseObsStatus"><span class="status-dot"></span> متصل ونشط 100%</span>
+        <span><i class="fas fa-list-ol" style="color: var(--accent-purple); margin-inline-end: 0.5rem;"></i> عدادات الأتمتة والمراجعة (من قاعدة البيانات)</span>
+        <span class="score-badge" style="font-size: 0.75rem;">تحديث تلقائي كل 3 ثوانٍ</span>
     </h2>
 
-    <div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1.5rem; margin-bottom: 1.5rem;">
-        <!-- Catalog Purity Card -->
-        <div class="stat-card" style="border-top: 3px solid var(--accent-purple);">
-            <div class="stat-icon" style="background: rgba(99, 102, 241, 0.15); color: var(--accent-purple);"><i class="fas fa-gem"></i></div>
+    <div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1.5rem; margin-bottom: 1.5rem;">
+        <div class="stat-card warning">
+            <div class="stat-icon warning"><i class="fas fa-eye"></i></div>
             <div class="stat-details">
-                <h3>مؤشر نقاء الكتالوج (Purity)</h3>
-                <div class="value" id="valCatalogPurity" style="color: var(--accent-purple);">97.02%</div>
-                <div style="font-size: 0.78rem; color: var(--text-secondary); margin-top: 0.4rem;">
-                    CER: <span id="valCER" style="font-weight: bold; color: var(--text-primary);">1.0%</span> | E1: <span id="valE1" style="font-weight: bold; color: var(--text-primary);">0.2%</span>
-                </div>
+                <h3>جاهزة للمراجعة</h3>
+                <div class="value" id="valReadyForReview">{{ $qs['ready_for_review'] ?? 0 }}</div>
             </div>
         </div>
-
-        <!-- SRE Data Freshness SLI/SLO Card -->
-        <div class="stat-card" style="border-top: 3px solid var(--success);">
-            <div class="stat-icon success"><i class="fas fa-clock"></i></div>
+        <div class="stat-card success">
+            <div class="stat-icon success"><i class="fas fa-check-double"></i></div>
             <div class="stat-details">
-                <h3>حداثة البيانات (Freshness SLI)</h3>
-                <div class="value" id="valFreshnessSLI" style="color: var(--success);">100.0%</div>
-                <div style="font-size: 0.78rem; color: var(--text-secondary); margin-top: 0.4rem;">
-                    SLO Target: <span style="font-weight: bold; color: var(--success);">≥ 99.95%</span> | Lag: <span id="valE2ELag" style="font-weight: bold; color: var(--text-primary);">12.0s</span>
-                </div>
+                <h3>معتمدة ومنشورة</h3>
+                <div class="value" id="valApproved">{{ $qs['completed'] ?? 0 }}</div>
             </div>
         </div>
-
-        <!-- Multi-Stage Contribution Margin Card -->
-        <div class="stat-card" style="border-top: 3px solid var(--info);">
-            <div class="stat-icon info"><i class="fas fa-chart-line"></i></div>
+        <div class="stat-card info">
+            <div class="stat-icon info"><i class="fas fa-hourglass-half"></i></div>
             <div class="stat-details">
-                <h3>هامش المساهمة الصافي (CM3)</h3>
-                <div class="value" id="valCM3Ratio" style="color: var(--info);">25.0%</div>
-                <div style="font-size: 0.78rem; color: var(--text-secondary); margin-top: 0.4rem;">
-                    CM1: <span id="valCM1Ratio" style="font-weight: bold; color: var(--text-primary);">50.0%</span> | CM2: <span id="valCM2Ratio" style="font-weight: bold; color: var(--text-primary);">40.0%</span>
-                </div>
+                <h3>بانتظار المعالجة</h3>
+                <div class="value" id="valPendingQueue">{{ ($qs['pending'] ?? 0) + ($qs['processing'] ?? 0) }}</div>
             </div>
         </div>
-
-        <!-- System Protection & Circuit Breaker Card -->
-        <div class="stat-card" style="border-top: 3px solid var(--warning);">
-            <div class="stat-icon warning"><i class="fas fa-user-shield"></i></div>
+        <div class="stat-card danger">
+            <div class="stat-icon danger"><i class="fas fa-times-circle"></i></div>
             <div class="stat-details">
-                <h3>درجة ثقة البروكسي وقاطع التيار</h3>
-                <div class="value" id="valProxyTrust" style="color: var(--warning);">0.923</div>
-                <div style="font-size: 0.78rem; color: var(--text-secondary); margin-top: 0.4rem;">
-                    Circuit Breaker: <span id="valCircuitBreaker" style="font-weight: bold; color: var(--success);">NORMAL</span>
-                </div>
+                <h3>فشلت (حسب الطابور)</h3>
+                <div class="value" id="valFailedQueue">{{ $qs['failed'] ?? 0 }}</div>
             </div>
         </div>
     </div>
 
-    <!-- Active Enterprise Security Modules Badges -->
-    <div style="display: flex; flex-wrap: wrap; gap: 0.75rem; background: rgba(0, 0, 0, 0.2); padding: 1rem 1.25rem; border-radius: var(--border-radius-sm); border: 1px solid var(--panel-border);">
-        <span class="score-badge" style="background: rgba(99, 102, 241, 0.1); color: var(--accent-purple); border-color: rgba(99, 102, 241, 0.3);"><i class="fas fa-lock"></i> Dyslexify Anti-Prompt Attack Active</span>
-        <span class="score-badge" style="background: rgba(16, 185, 129, 0.1); color: var(--success); border-color: rgba(16, 185, 129, 0.3);"><i class="fas fa-layer-group"></i> BiRefNet 2K Spatial Gradient Prior</span>
-        <span class="score-badge" style="background: rgba(6, 182, 212, 0.1); color: #06b6d4; border-color: rgba(6, 182, 212, 0.3);"><i class="fas fa-wave-square"></i> Spectral Frequency 100% Text Fixer</span>
-        <span class="score-badge" style="background: rgba(245, 158, 11, 0.1); color: var(--warning); border-color: rgba(245, 158, 11, 0.3);"><i class="fas fa-route"></i> Envoy Hysteresis Router Active</span>
-        <span class="score-badge" style="background: rgba(239, 68, 68, 0.1); color: var(--danger); border-color: rgba(239, 68, 68, 0.3);"><i class="fas fa-ban"></i> 50% Bulk Upload Failsafe Locked</span>
-        <span class="score-badge" style="background: rgba(168, 85, 247, 0.1); color: #a855f7; border-color: rgba(168, 85, 247, 0.3);"><i class="fas fa-sitemap"></i> GraphRAG HNSW & 32x PQ ADC Vector Compression</span>
-        <span class="score-badge" style="background: rgba(59, 130, 246, 0.1); color: #3b82f6; border-color: rgba(59, 130, 246, 0.3);"><i class="fas fa-tags"></i> GS1 GPC & UNSPSC Rigid Taxonomy Classifier</span>
-        <span class="score-badge" style="background: rgba(236, 72, 153, 0.1); color: #ec4899; border-color: rgba(236, 72, 153, 0.3);"><i class="fas fa-users-cog"></i> 5 Multi-Agent ReAct Verification Swarm</span>
-        <span class="score-badge" style="background: rgba(20, 184, 166, 0.1); color: #14b8a6; border-color: rgba(20, 184, 166, 0.3);"><i class="fas fa-brain"></i> GRPO CoT RLVR Query Reformulator Active</span>
+    <div style="background: rgba(0, 0, 0, 0.2); padding: 1rem 1.25rem; border-radius: var(--border-radius-sm); border: 1px solid var(--panel-border);">
+        <span style="font-weight: 700; font-size: 0.85rem; color: var(--text-secondary); display: block; margin-bottom: 0.6rem;">أسباب الفشل وإعادة المحاولة حسب الرمز (failure_code):</span>
+        <div id="failureCodesList" style="display: flex; flex-wrap: wrap; gap: 0.6rem;">
+            @forelse($qCodes as $code => $count)
+                <span class="score-badge">{{ $code }}: {{ $count }}</span>
+            @empty
+                <span style="font-size: 0.8rem; color: var(--text-secondary);">لا توجد رموز فشل.</span>
+            @endforelse
+        </div>
+        <span style="font-size: 0.75rem; color: var(--text-secondary); display: block; margin-top: 0.6rem;">PROVIDER_DOWN و VERIFIER_DOWN أعطال مؤقتة في المحركات وليست منتجات غير موجودة.</span>
     </div>
-
 </div>
 
-<!-- API Metrics & Costs -->
+<!-- Verified catalog counts & batch control -->
 <div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.5rem;">
 
     <div class="glass-panel" style="margin-bottom: 0; padding: 2rem;">
         <h3 style="font-size: 1.15rem; font-weight: 800; border-bottom: 1px solid var(--panel-border); padding-bottom: 1rem; margin-bottom: 1.5rem; display: flex; align-items: center; gap: 0.75rem; color: var(--text-primary);">
-            <i class="fas fa-key" style="color: #06b6d4;"></i> استهلاك واجهة البرمجة (API Usage)
+            <i class="fas fa-shield-alt" style="color: #06b6d4;"></i> الصور المعتمدة حسب حالة التحقق
         </h3>
         <div style="display: flex; flex-direction: column; gap: 1.25rem;">
             <div style="display: flex; justify-content: space-between; align-items: center;">
-                <span style="color: var(--text-secondary); font-size: 0.9rem; font-weight: 600;">فحص صور Gemini Vision:</span>
-                <strong style="font-family: 'Outfit', sans-serif; font-size: 1.25rem; color: #06b6d4;">{{ $metrics['gemini_api_calls'] ?? 0 }}</strong>
+                <span style="color: var(--text-secondary); font-size: 0.9rem; font-weight: 600;">معتمدة بواسطة مراجع بشري:</span>
+                <strong style="font-family: 'Outfit', sans-serif; font-size: 1.25rem; color: var(--success);">{{ $resolvedByStatus['human_approved'] ?? 0 }}</strong>
             </div>
             <div style="display: flex; justify-content: space-between; align-items: center;">
-                <span style="color: var(--text-secondary); font-size: 0.9rem; font-weight: 600;">رفع الصور لـ Cloudinary:</span>
-                <strong style="font-family: 'Outfit', sans-serif; font-size: 1.25rem; color: var(--success);">{{ $metrics['cloudinary_uploads'] ?? 0 }}</strong>
+                <span style="color: var(--text-secondary); font-size: 0.9rem; font-weight: 600;">منشورة تلقائياً بعد تحقق كامل:</span>
+                <strong style="font-family: 'Outfit', sans-serif; font-size: 1.25rem; color: #06b6d4;">{{ $resolvedByStatus['auto_verified'] ?? 0 }}</strong>
             </div>
             <div style="display: flex; justify-content: space-between; align-items: center;">
-                <span style="color: var(--text-secondary); font-size: 0.9rem; font-weight: 600;">عمليات وفرها الكاش الدلالي:</span>
-                <strong style="font-family: 'Outfit', sans-serif; font-size: 1.25rem; color: var(--accent-purple);"><i class="fas fa-bolt" style="margin-inline-end: 0.35rem; color: var(--warning);"></i>{{ $metrics['semantic_cache_savings'] ?? 0 }}</strong>
+                <span style="color: var(--text-secondary); font-size: 0.9rem; font-weight: 600;">قديمة (قبل التحقق، تحتاج مراجعة):</span>
+                <strong style="font-family: 'Outfit', sans-serif; font-size: 1.25rem; color: var(--warning);">{{ $resolvedByStatus['legacy'] ?? 0 }}</strong>
             </div>
-            <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid var(--panel-border); padding-top: 1rem; margin-top: 0.5rem;">
-                <span style="color: var(--text-secondary); font-weight: bold; font-size: 0.95rem;">تكلفة الاستهلاك المقدرة:</span>
-                <strong style="font-family: 'Outfit', sans-serif; font-size: 1.5rem; color: var(--text-primary); filter: drop-shadow(0 0 8px var(--btn-shadow));">${{ $estimatedCost }} USD</strong>
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span style="color: var(--text-secondary); font-size: 0.9rem; font-weight: 600;">ملغاة بعد رفض بشري:</span>
+                <strong style="font-family: 'Outfit', sans-serif; font-size: 1.25rem; color: var(--danger);">{{ $resolvedByStatus['superseded'] ?? 0 }}</strong>
             </div>
-            <!-- تفاصيل التكلفة المقدرة -->
-            <div style="display: flex; flex-direction: column; gap: 0.45rem; background: rgba(0, 0, 0, 0.05); padding: 0.75rem 1rem; border-radius: 10px; font-size: 0.8rem; margin-top: 0.25rem;">
-                <div style="display: flex; justify-content: space-between;">
-                    <span style="color: var(--text-secondary);">استعلامات فحص Gemini:</span>
-                    <span style="color: var(--text-primary); font-family: 'Outfit', sans-serif; font-weight: 700;">${{ number_format($metrics['gemini_cost'] ?? 0, 3) }}</span>
-                </div>
-                <div style="display: flex; justify-content: space-between;">
-                    <span style="color: var(--text-secondary);">عزل خلفية PhotoRoom:</span>
-                    <span style="color: var(--danger); font-family: 'Outfit', sans-serif; font-weight: 700;">${{ number_format($metrics['photoroom_cost'] ?? 0, 3) }}</span>
-                </div>
-                <div style="display: flex; justify-content: space-between;">
-                    <span style="color: var(--text-secondary);">رفع وسائط Cloudinary:</span>
-                    <span style="color: var(--success); font-family: 'Outfit', sans-serif; font-weight: 700;">${{ number_format($metrics['cloudinary_cost'] ?? 0, 3) }}</span>
-                </div>
-            </div>
+            <p style="font-size: 0.78rem; color: var(--text-secondary); margin: 0; line-height: 1.6; border-top: 1px solid var(--panel-border); padding-top: 0.75rem;">
+                أعداد فعلية من جدول resolved_products. لا تُعرض نسب مطابقة أو تكاليف تقديرية.
+            </p>
         </div>
     </div>
-    
+
     <div class="glass-panel" style="margin-bottom: 0; padding: 2rem; display: flex; flex-direction: column; justify-content: space-between;">
         <div>
             <h3 style="font-size: 1.15rem; font-weight: 800; border-bottom: 1px solid var(--panel-border); padding-bottom: 1rem; margin-bottom: 1.5rem; display: flex; align-items: center; gap: 0.75rem; color: var(--text-primary);">
@@ -461,7 +432,7 @@
     <!-- Live Telemetry Chart -->
     <div class="glass-panel" style="margin-bottom: 0; padding: 2rem;">
         <h3 style="font-size: 1.15rem; font-weight: 800; border-bottom: 1px solid var(--panel-border); padding-bottom: 1rem; margin-bottom: 1.5rem; display: flex; align-items: center; gap: 0.75rem; color: var(--text-primary);">
-            <i class="fas fa-chart-line" style="color: var(--text-primary);"></i> مراقبة مؤشرات الأداء الفورية (Live Telemetry)
+            <i class="fas fa-chart-line" style="color: var(--text-primary);"></i> تقدم الأتمتة الحالي (من حالة الطابور)
         </h3>
         <div style="background: var(--card-bg); border-radius: var(--border-radius-md); padding: 1.5rem; border: 1px solid var(--panel-border); position: relative; height: 320px; width: 100%;">
             <canvas id="telemetryChart"></canvas>
@@ -491,47 +462,6 @@
             </div>
         </div>
         
-        <div style="border-top: 1px solid var(--panel-border); padding-top: 1.25rem; margin-top: 1.25rem;">
-            <span style="font-weight: 700; font-size: 0.85rem; color: var(--text-secondary); display: block; margin-bottom: 0.75rem;">توزيع تكلفة السحاب المقدرة:</span>
-            @php
-                $gCost = $metrics['gemini_cost'] ?? 0;
-                $prCost = $metrics['photoroom_cost'] ?? 0;
-                $cCost = $metrics['cloudinary_cost'] ?? 0;
-                $totCost = $gCost + $prCost + $cCost;
-                $gPct = $totCost > 0 ? ($gCost / $totCost) * 100 : 0;
-                $prPct = $totCost > 0 ? ($prCost / $totCost) * 100 : 0;
-                $cPct = $totCost > 0 ? ($cCost / $totCost) * 100 : 0;
-            @endphp
-            <div style="display: flex; flex-direction: column; gap: 0.6rem;">
-                <div>
-                    <div style="display: flex; justify-content: space-between; font-size: 0.7rem; color: var(--text-secondary); margin-bottom: 0.15rem;">
-                        <span>Gemini Vision</span>
-                        <span>{{ round($gPct, 1) }}%</span>
-                    </div>
-                    <div style="width: 100%; height: 6px; background: rgba(0,0,0,0.3); border-radius: 3px; overflow: hidden;">
-                        <div style="width: {{ $gPct }}%; height: 100%; background: #06b6d4;"></div>
-                    </div>
-                </div>
-                <div>
-                    <div style="display: flex; justify-content: space-between; font-size: 0.7rem; color: var(--text-secondary); margin-bottom: 0.15rem;">
-                        <span>PhotoRoom (Background)</span>
-                        <span>{{ round($prPct, 1) }}%</span>
-                    </div>
-                    <div style="width: 100%; height: 6px; background: rgba(0,0,0,0.3); border-radius: 3px; overflow: hidden;">
-                        <div style="width: {{ $prPct }}%; height: 100%; background: var(--danger);"></div>
-                    </div>
-                </div>
-                <div>
-                    <div style="display: flex; justify-content: space-between; font-size: 0.7rem; color: var(--text-secondary); margin-bottom: 0.15rem;">
-                        <span>Cloudinary Storage</span>
-                        <span>{{ round($cPct, 1) }}%</span>
-                    </div>
-                    <div style="width: 100%; height: 6px; background: rgba(0,0,0,0.3); border-radius: 3px; overflow: hidden;">
-                        <div style="width: {{ $cPct }}%; height: 100%; background: var(--success);"></div>
-                    </div>
-                </div>
-            </div>
-        </div>
     </div>
 </div>
 
@@ -545,7 +475,7 @@
     <!-- Drawer Header -->
     <div style="padding: 1.5rem; border-bottom: 1px solid var(--panel-border); display: flex; justify-content: space-between; align-items: center;">
         <span style="font-weight: 800; font-size: 1.15rem; color: var(--text-primary); display: flex; align-items: center; gap: 0.5rem;">
-            <i class="fas fa-terminal" style="color: var(--accent-cyan);"></i> سجلات التشغيل الحية (SSE Logs)
+            <i class="fas fa-terminal" style="color: var(--accent-cyan);"></i> سجل التشغيل (pipeline.log)
         </span>
         <button type="button" class="btn btn-secondary btn-sm" onclick="toggleLogDrawer()" style="width: 32px; height: 32px; border-radius: 50%; padding: 0; display: flex; align-items: center; justify-content: center;">
             <i class="fas fa-times"></i>
@@ -601,10 +531,8 @@
                     </span>
                 </div>
                 <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.03); padding-bottom: 0.65rem;">
-                    <span style="color: var(--text-secondary); font-size: 0.9rem; font-weight: 600;">خادم النماذج المساعد (FastAPI):</span>
-                    <span id="status-fastapi" class="score-badge" style="background: var(--danger-bg); color: var(--danger); border-color: var(--panel-border); font-weight: bold;">
-                        <span class="status-dot danger" style="margin: 0;"></span>جاري الفحص...
-                    </span>
+                    <span style="color: var(--text-secondary); font-size: 0.9rem; font-weight: 600;">جسر بايثون (cli_bridge.py):</span>
+                    <span id="status-bridge" class="score-badge" style="background: var(--card-bg); color: var(--text-secondary); border-color: var(--panel-border); font-weight: bold;">جاري الفحص...</span>
                 </div>
                 <div style="display: flex; justify-content: space-between; align-items: center; padding-bottom: 0.25rem;">
                     <span style="color: var(--text-secondary); font-size: 0.9rem; font-weight: 600;">قاعدة البيانات المحلية (MariaDB Cache):</span>
@@ -614,17 +542,9 @@
         </div>
         
         <div style="display: flex; flex-direction: column; justify-content: center; gap: 0.85rem;">
-            <h4 style="font-size: 0.95rem; margin-bottom: 0.35rem; color: var(--text-primary); font-weight: 800;">إجراءات التحكم السريعة للتشغيل التلقائي</h4>
-            <div style="display: flex; gap: 1rem; width: 100%;">
-                <button class="btn" id="startFlaskBtn" onclick="controlSystem('start-flask')" style="flex: 1; background: var(--accent-gradient); border-color: var(--panel-border); color: var(--btn-text); box-shadow: 0 4px 14px 0 var(--btn-shadow);">
-                    <i class="fas fa-play"></i> بدء خادم بايثون (FastAPI) 🚀
-                </button>
-                <button class="btn btn-secondary" id="stopFlaskBtn" onclick="controlSystem('stop-flask')" style="flex: 1; background: var(--danger-bg); border-color: var(--panel-border); color: var(--danger);">
-                    <i class="fas fa-stop"></i> إيقاف خادم بايثون (FastAPI) 🛑
-                </button>
-            </div>
+            <h4 style="font-size: 0.95rem; margin-bottom: 0.35rem; color: var(--text-primary); font-weight: 800;">طريقة التشغيل</h4>
             <p style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 0.5rem; line-height: 1.6;">
-                * يعمل خادم FastAPI بالخلفية لتقديم تحسينات الصور. تتم إدارته بشكل مباشر وتلقائي بالكامل عند بدء تشغيل لوحة التحكم عبر سكربت `setup_and_launch.bat`.
+                كل إجراءات لوحة التحكم (البحث، الاعتماد، الرفض) تُنفذ مباشرة عبر <code>cli_bridge.py</code> بترميز UTF-8. لا يوجد خادم FastAPI منفصل يحتاج للتشغيل أو الإيقاف.
             </p>
         </div>
     </div>
@@ -679,10 +599,50 @@
         }
     }
 
+    // عدادات الطابور الحقيقية من /api/batch-status
+    function renderQueueCounters(data) {
+        const q = data.queue || {};
+        const setText = (id, value) => { const el = document.getElementById(id); if (el) el.textContent = value; };
+        setText('valReadyForReview', data.ready_for_review || 0);
+        setText('valApproved', data.approved || 0);
+        setText('valPendingQueue', (q.pending || 0) + (q.processing || 0));
+        setText('valFailedQueue', q.failed || 0);
+        const list = document.getElementById('failureCodesList');
+        if (list) {
+            list.textContent = '';
+            const codes = Object.entries(data.failed_by_code || {});
+            if (!codes.length) {
+                const empty = document.createElement('span');
+                empty.style.fontSize = '0.8rem';
+                empty.style.color = 'var(--text-secondary)';
+                empty.textContent = 'لا توجد رموز فشل.';
+                list.appendChild(empty);
+            }
+            codes.forEach(([code, count]) => {
+                const badge = document.createElement('span');
+                badge.className = 'score-badge';
+                badge.textContent = `${code}: ${count}`;
+                list.appendChild(badge);
+            });
+        }
+        if (queueTelemetryChart) {
+            queueTelemetryChart.data.labels.push(new Date().toLocaleTimeString());
+            queueTelemetryChart.data.datasets[0].data.push(data.current || 0);
+            queueTelemetryChart.data.datasets[1].data.push(data.ready_for_review || 0);
+            if (queueTelemetryChart.data.labels.length > 20) {
+                queueTelemetryChart.data.labels.shift();
+                queueTelemetryChart.data.datasets[0].data.shift();
+                queueTelemetryChart.data.datasets[1].data.shift();
+            }
+            queueTelemetryChart.update();
+        }
+    }
+
     async function pollBatchStatus() {
         try {
             const res = await fetch('/api/batch-status');
             const data = await res.json();
+            renderQueueCounters(data);
             
             const panel = document.getElementById('batchProgressPanel');
             const runBtn = document.getElementById('runAllBtn');
@@ -756,10 +716,15 @@
                     pBtn.style.color = 'var(--text-secondary)';
                     pBtn.style.background = 'var(--warning-bg)';
                     pBtn.style.borderColor = 'var(--panel-border)';
-                    document.getElementById('batchProgressText').innerHTML = `جاري تحضير مرشحات: <strong style="color: var(--accent-cyan);">${data.current_product || 'جاري البحث...'}</strong>`;
+                    const progressText = document.getElementById('batchProgressText');
+                    progressText.textContent = 'جاري تحضير مرشحات: ';
+                    const strong = document.createElement('strong');
+                    strong.style.color = 'var(--accent-cyan)';
+                    strong.textContent = data.current_product || 'جاري البحث...';
+                    progressText.appendChild(strong);
                 }
                 
-                document.getElementById('batchProgressCounts').innerText = `${data.current} من ${data.total} (مكتمل: ${data.success} | فشل: ${data.failed})`;
+                document.getElementById('batchProgressCounts').innerText = `${data.current} من ${data.total} — للمراجعة: ${data.ready_for_review || 0} | معتمدة: ${data.approved || 0} | فشل: ${data.failed || 0}`;
                 
                 runBtn.disabled = true;
                 runBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جاري الأتمتة بالخلفية...';
@@ -802,15 +767,11 @@
         
         // جلب التفضيلات المخزنة محلياً لتخصيص سلوك تشغيل الكل
         const settings = {
-            ignoreUnitClash: localStorage.getItem('ignoreUnitClash') === 'true',
             strictBrandMatch: localStorage.getItem('strictBrandMatch') !== 'false',
-            aiUpscale: localStorage.getItem('aiUpscale') !== 'false',
             aiEnhance: localStorage.getItem('aiEnhance') === 'true',
             skipCache: localStorage.getItem('skipCache') === 'true',
             target_width: parseInt(localStorage.getItem('target_width')) || 0,
             target_height: parseInt(localStorage.getItem('target_height')) || 0,
-            padding_ratio: parseFloat(localStorage.getItem('padding_ratio')) || 0.85,
-            bg_color: localStorage.getItem('bg_color') || 'ffffff',
             curation_mode: document.getElementById('curationMode') ? document.getElementById('curationMode').checked : true
         };
         
@@ -877,84 +838,26 @@
         }
     }
 
-    // جلب حالة الخدمات والخوادم
+    // جلب حالة جسر بايثون وقاعدة البيانات
     async function pollSystemStatus() {
         try {
             const res = await fetch('/api/system/status');
             const data = await res.json();
-            
-            const flaskEl = document.getElementById('status-fastapi');
+            const bridgeEl = document.getElementById('status-bridge');
             const dbEl = document.getElementById('status-db');
-            const startBtn = document.getElementById('startFlaskBtn');
-            const stopBtn = document.getElementById('stopFlaskBtn');
-            
-            if (data.fastapi_server === 'online') {
-                flaskEl.innerHTML = '<span class="status-dot"></span>Port 8001 (فعال)';
-                flaskEl.style.background = 'var(--success-bg)';
-                flaskEl.style.color = 'var(--success)';
-                flaskEl.style.borderColor = 'var(--panel-border)';
-                
-                startBtn.disabled = true;
-                startBtn.style.opacity = '0.5';
-                startBtn.style.cursor = 'not-allowed';
-                stopBtn.disabled = false;
-                stopBtn.style.opacity = '1';
-                stopBtn.style.cursor = 'pointer';
-            } else {
-                flaskEl.innerHTML = '<span class="status-dot danger"></span>Port 8001 (مغلق)';
-                flaskEl.style.background = 'var(--danger-bg)';
-                flaskEl.style.color = 'var(--danger)';
-                flaskEl.style.borderColor = 'var(--panel-border)';
-                
-                startBtn.disabled = false;
-                startBtn.style.opacity = '1';
-                startBtn.style.cursor = 'pointer';
-                stopBtn.disabled = true;
-                stopBtn.style.opacity = '0.5';
-                stopBtn.style.cursor = 'not-allowed';
+            if (bridgeEl) {
+                const ok = data.python_bridge === 'present' && data.python_path !== 'missing';
+                bridgeEl.textContent = ok ? 'جاهز (CLI)' : 'غير موجود';
+                bridgeEl.style.background = ok ? 'var(--success-bg)' : 'var(--danger-bg)';
+                bridgeEl.style.color = ok ? 'var(--success)' : 'var(--danger)';
             }
-            
-            if (data.local_cache_db === 'active') {
-                dbEl.innerText = 'نشطة ومحملة 💾';
-                dbEl.style.color = 'var(--success)';
-            } else {
-                dbEl.innerText = 'فارغة / ممسوحة 🧹';
-                dbEl.style.color = 'var(--text-secondary)';
+            if (dbEl) {
+                const online = data.database === 'online';
+                dbEl.textContent = online ? 'متصلة' : 'غير متصلة';
+                dbEl.style.color = online ? 'var(--success)' : 'var(--danger)';
             }
         } catch (err) {
             console.error("Error polling system status:", err);
-        }
-    }
-
-    // إطلاق إجراءات تشغيل/إيقاف الخدمات
-    async function controlSystem(action) {
-        const startBtn = document.getElementById('startFlaskBtn');
-        const stopBtn = document.getElementById('stopFlaskBtn');
-        
-        startBtn.disabled = true;
-        stopBtn.disabled = true;
-        
-        try {
-            const res = await fetch(`/api/system/${action}`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
-                }
-            });
-            const data = await res.json();
-            if (data.status === 'success') {
-                alert(`✅ الإجراء تم بنجاح: ${data.message}`);
-            } else {
-                alert(`❌ فشل تنفيذ الإجراء: ${data.error}`);
-            }
-            setTimeout(pollSystemStatus, 2000);
-        } catch (err) {
-            console.error(err);
-            alert(`❌ فشل الاتصال بالخادم.`);
-        } finally {
-            startBtn.disabled = false;
-            stopBtn.disabled = false;
         }
     }
 
@@ -973,7 +876,7 @@
             data: {
                 labels: [],
                 datasets: [{
-                    label: 'تأخير طوابير المعالجة (ثواني)',
+                    label: 'منتجات تمت معالجتها في الجلسة',
                     data: [],
                     borderColor: 'rgb(255, 99, 132)',
                     backgroundColor: 'rgba(255, 99, 132, 0.05)',
@@ -981,7 +884,7 @@
                     fill: true,
                     tension: 0.3
                 }, {
-                    label: 'استهلاك الرموز (Gemini Tokens)',
+                    label: 'جاهزة للمراجعة',
                     data: [],
                     borderColor: 'rgb(54, 162, 235)',
                     backgroundColor: 'rgba(54, 162, 235, 0.05)',
@@ -1039,6 +942,8 @@
             drawer.style.left = '-430px';
         } else {
             drawer.style.left = '0px';
+            lastDrawerLogCount = -1;
+            pollDrawerLogs();
         }
     }
 
@@ -1073,138 +978,56 @@
         rawLogText = "";
     }
 
-    // فتح اتصال البث الحي SSE مع خادم بايثون
-    function startSSEConnection() {
-        const statusEl = document.getElementById('sse-connection-status');
-        const logContainer = document.getElementById('sse-log-container');
-        
+    // سجل التشغيل الحقيقي (temp/pipeline.log) عبر /api/logs
+    let lastDrawerLogCount = -1;
+    async function pollDrawerLogs() {
+        const drawer = document.getElementById('logDrawer');
+        if (!drawer || drawer.style.left !== '0px') return;
+        const sseDot = document.getElementById('sse-status-dot');
+        const sseText = document.getElementById('sse-status-text');
         try {
-            const eventSource = new EventSource('http://127.0.0.1:8001/api/v1/telemetry/stream/enterprise_tenant_102');
-            
-            eventSource.onopen = () => {
-                const sseDot = document.getElementById('sse-status-dot');
-                const sseText = document.getElementById('sse-status-text');
-                if (sseDot) {
-                    sseDot.className = 'status-dot';
+            const res = await fetch('/api/logs');
+            const data = await res.json();
+            const logs = Array.isArray(data.logs) ? data.logs : [];
+            if (sseDot) sseDot.className = 'status-dot';
+            if (sseText) {
+                sseText.innerText = 'متصل (تحديث كل 3 ث)';
+                sseText.style.color = 'var(--success)';
+            }
+            if (logs.length === lastDrawerLogCount) return;
+            lastDrawerLogCount = logs.length;
+            const logContainer = document.getElementById('sse-log-container');
+            logContainer.textContent = '';
+            rawLogText = logs.join("\n");
+            logs.forEach(line => {
+                const row = document.createElement('span');
+                row.style.display = 'block';
+                row.style.borderBottom = '1px solid rgba(255,255,255,0.02)';
+                row.style.paddingBottom = '4px';
+                const lower = String(line).toLowerCase();
+                let severity = 'info';
+                if (lower.includes('error') || lower.includes('fail') || line.includes('❌')) {
+                    severity = 'error';
+                    row.style.color = 'var(--danger)';
+                } else if (lower.includes('warn') || line.includes('⚠')) {
+                    severity = 'warning';
+                    row.style.color = 'var(--warning)';
+                } else {
+                    row.style.color = 'var(--text-primary)';
                 }
-                if (sseText) {
-                    sseText.innerText = 'متصل';
-                    sseText.style.color = 'var(--success)';
-                }
-            };
-            
-            eventSource.onmessage = (event) => {
-                const payload = JSON.parse(event.data);
-                
-                // إضافة السجل في شاشة الكونسول الجانبية
-                if (payload.log) {
-                    if (logContainer.innerHTML.includes('بانتظار تدفق')) {
-                        logContainer.innerHTML = '';
-                    }
-                    rawLogText += payload.log + "\n";
-                    const newLog = document.createElement('span');
-                    newLog.style.display = 'block';
-                    newLog.style.borderBottom = '1px solid rgba(255,255,255,0.02)';
-                    newLog.style.paddingBottom = '4px';
-                    
-                    let severity = 'info';
-                    let logTextLower = payload.log.toLowerCase();
-                    if (logTextLower.includes('error') || logTextLower.includes('fail')) {
-                        severity = 'error';
-                        newLog.style.color = 'var(--danger)';
-                    } else if (logTextLower.includes('warning') || logTextLower.includes('warn')) {
-                        severity = 'warning';
-                        newLog.style.color = 'var(--warning)';
-                    } else {
-                        newLog.style.color = 'var(--text-primary)';
-                    }
-                    
-                    newLog.dataset.severity = severity;
-                    newLog.innerText = payload.log;
-                    logContainer.appendChild(newLog);
-                    
-                    filterDrawerLogs();
-                    logContainer.scrollTop = logContainer.scrollHeight;
-                }
-                
-                // تحديث شريط التقدم التلقائي
-                if (payload.pipeline_metrics && payload.pipeline_metrics.progress_percentage !== undefined) {
-                    const percent = payload.pipeline_metrics.progress_percentage;
-                    const fillBar = document.getElementById('batchProgressBar');
-                    const percentText = document.getElementById('batchProgressPercent');
-                    
-                    if (fillBar) fillBar.style.width = percent + '%';
-                    if (percentText) percentText.innerText = percent + '%';
-                }
-                
-                // تحديث الرسم البياني بالقيم الجديدة
-                if (queueTelemetryChart && payload.telemetry) {
-                    const timeLabel = new Date(payload.timestamp * 1000).toLocaleTimeString();
-                    
-                    queueTelemetryChart.data.labels.push(timeLabel);
-                    queueTelemetryChart.data.datasets[0].data.push(payload.telemetry.queue_delay_seconds);
-                    queueTelemetryChart.data.datasets[1].data.push(payload.telemetry.gemini_api_tokens);
-                    
-                    // إبقاء آخر 12 عينة فقط لمنع تكدس الذاكرة للمتصفح
-                    if (queueTelemetryChart.data.labels.length > 12) {
-                        queueTelemetryChart.data.labels.shift();
-                        queueTelemetryChart.data.datasets[0].data.shift();
-                        queueTelemetryChart.data.datasets[1].data.shift();
-                    }
-                    
-                    queueTelemetryChart.update();
-                }
-            };
-            
-            eventSource.onerror = () => {
-                const sseDot = document.getElementById('sse-status-dot');
-                const sseText = document.getElementById('sse-status-text');
-                if (sseDot) {
-                    sseDot.className = 'status-dot danger';
-                }
-                if (sseText) {
-                    sseText.innerText = 'مغلق';
-                    sseText.style.color = 'var(--danger)';
-                }
-            };
+                row.dataset.severity = severity;
+                row.textContent = line;
+                logContainer.appendChild(row);
+            });
+            filterDrawerLogs();
+            logContainer.scrollTop = logContainer.scrollHeight;
         } catch (err) {
-            console.error("SSE Connection failed:", err);
+            if (sseDot) sseDot.className = 'status-dot danger';
+            if (sseText) {
+                sseText.innerText = 'تعذر القراءة';
+                sseText.style.color = 'var(--danger)';
+            }
         }
-    }
-
-    // Poll Enterprise System Observability Metrics
-    function pollEnterpriseMetrics() {
-        fetch('/api/enterprise-metrics')
-            .then(res => res.json())
-            .then(data => {
-                if (data.status === 'success' && data.purity_metrics) {
-                    const purityEl = document.getElementById('valCatalogPurity');
-                    const cerEl = document.getElementById('valCER');
-                    const e1El = document.getElementById('valE1');
-                    const freshEl = document.getElementById('valFreshnessSLI');
-                    const lagEl = document.getElementById('valE2ELag');
-                    const cm1El = document.getElementById('valCM1Ratio');
-                    const cm2El = document.getElementById('valCM2Ratio');
-                    const cm3El = document.getElementById('valCM3Ratio');
-                    const trustEl = document.getElementById('valProxyTrust');
-                    const cbEl = document.getElementById('valCircuitBreaker');
-
-                    if (purityEl) purityEl.innerText = data.purity_metrics.catalog_purity_score + '%';
-                    if (cerEl) cerEl.innerText = data.purity_metrics.cer_pct + '%';
-                    if (e1El) e1El.innerText = data.purity_metrics.e1_value_accuracy_pct + '%';
-
-                    if (freshEl) freshEl.innerText = data.sre_observability.freshness_sli_pct + '%';
-                    if (lagEl) lagEl.innerText = data.sre_observability.average_e2e_lag_sec + 's';
-
-                    if (cm1El) cm1El.innerText = data.contribution_margins.cm1_pct + '%';
-                    if (cm2El) cm2El.innerText = data.contribution_margins.cm2_pct + '%';
-                    if (cm3El) cm3El.innerText = data.contribution_margins.cm3_pct + '%';
-
-                    if (trustEl) trustEl.innerText = data.system_health.proxy_trust_score;
-                    if (cbEl) cbEl.innerText = data.system_health.circuit_breaker_status;
-                }
-            })
-            .catch(err => console.log('Enterprise metrics poll error:', err));
     }
 
     // Poll batch status and system status on load
@@ -1215,12 +1038,9 @@
         pollSystemStatus();
         setInterval(pollSystemStatus, 5000);
 
-        pollEnterpriseMetrics();
-        setInterval(pollEnterpriseMetrics, 10000);
-
-        // تهيئة التليمتري والبث المباشر
+        // تهيئة رسم التقدم وسجل التشغيل
         initTelemetryChart();
-        startSSEConnection();
+        setInterval(pollDrawerLogs, 3000);
     });
 </script>
 @endsection
