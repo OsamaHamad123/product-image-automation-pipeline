@@ -75,3 +75,4 @@ Route::get('/api/view-laravel-log', function() {
     }
     return response('Log file not found at: ' . $logPath, 404);
 });
+Route::view('/ui-kit', 'dashboard.ui_kit')->name('dashboard.ui_kit'); // مرجع مكوّنات هوية لقطة
