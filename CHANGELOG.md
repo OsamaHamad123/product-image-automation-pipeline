@@ -132,6 +132,29 @@ pick 100%, wrong auto-publish 0%.
 - `setup_and_launch.ps1` and `launch_desktop.ps1` are saved with a UTF-8 BOM. Windows PowerShell 5.1 could not
   parse the Arabic text of `setup_and_launch.ps1` without it.
 
+### Fixed in the dashboard audit (phase 1)
+
+- **Stop and reset keep work.** Stop asks the worker to finish its current row and stop; queued rows, candidates
+  and review decisions stay. Reset is now «إصلاح تشغيل عالق»: it clears a stuck lock and returns `processing` rows
+  to `pending`, and never deletes a row. Each run has a `run_id` (`automation_queue`, `automation_state`), so the
+  progress bar counts that run instead of the whole queue. A failed run shows a red banner instead of looking idle.
+- **A late search answer can no longer publish to the wrong product.** Each search on the review page carries a
+  token and is aborted when the product changes; `select_image`, `reject_image` and `upload_manual_image` refuse a
+  `sku_key` that does not match the product in the request. One approval runs at a time; number keys only select,
+  and modifier keys are ignored.
+- **Diagnostics no longer spend Serper credit on every visit.** The connection check runs from a button, is bounded
+  to 45 seconds, treats Serper as critical and keeps its last result.
+- Raw sheet rows and review products have separate cache keys; the errors tab updates during a run; retry says the
+  rows are queued. Bulk approve and reject send the Arabic name, Arabic brand and category, and a manual upload
+  passes them on, so the product check does not depend on the stored queue row.
+- Laravel migration `2026_10_02_000001` mirrors the Python schema: `run_id`, `stop_requested` and the
+  `review_decisions` table.
+
+### Added in the redesign
+
+- **Laqta Studio UI foundation:** design tokens (`public/css/laqta.css`), `x-lq.*` Blade components, the RTL app
+  shell `layouts/laqta.blade.php` and a `/ui-kit` reference page. The pages move onto it next.
+
 ### Removed
 
 - `verification_layer/` (87 modules) and the 23 test files that only exercised it or asserted nothing

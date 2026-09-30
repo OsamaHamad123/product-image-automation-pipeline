@@ -100,6 +100,7 @@ class ApiController extends Controller
         // اللوحة البيضاء ثابتة (88%)؛ لا نمرر خيارات الهامش أو اللون أو التكبير لأنها لم تعد مستخدمة
         $params = $request->only([
             'row_number', 'product_name', 'brand', 'barcode', 'sku_key',
+            'size', 'product_name_ar', 'brand_ar', 'category',
             'target_width', 'target_height', 'enhance', 'search_decision'
         ]);
         $params['file_path'] = $targetPath;
