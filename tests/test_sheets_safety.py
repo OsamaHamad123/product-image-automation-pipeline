@@ -121,9 +121,10 @@ SHEET = [
 ]
 
 
-def _outbox_row(id_, row, value, barcode=None, name=None, attempts=0, col_name="Drive Image Link", col_index=3):
+def _outbox_row(id_, row, value, barcode=None, name=None, attempts=0, col_name="Drive Image Link", col_index=3,
+                size=None, brand=None):
     return {"id": id_, "row_number": row, "col_index": col_index, "value": value, "col_name": col_name,
-            "key_barcode": barcode, "key_name": name, "attempts": attempts}
+            "key_barcode": barcode, "key_name": name, "key_size": size, "key_brand": brand, "attempts": attempts}
 
 
 def _outbox_responder(pending, lock_free=True):
@@ -491,3 +492,82 @@ def test_sync_worker_parks_a_permanently_failing_key(gs):
         sync_worker.run_sync_cycle(ws, r)
     assert "row_99" not in r.smembers("writebehind:dirty_set")
     assert "row_99" in r.smembers("writebehind:dead")
+
+
+# ---------------------------------------------------------------------------
+# same-name siblings without a barcode: size and brand are part of the row identity
+# ---------------------------------------------------------------------------
+
+SIBLINGS = [
+    ["Product Name", "Brand", "Size", "Drive Image Link"],
+    ["Fresh Milk", "Almarai", "1L", ""],          # row 2
+    ["Fresh Milk", "Almarai", "2L", ""],          # row 3
+    ["Fresh Milk", "Al Rawabi", "2L", ""],        # row 4
+]
+
+
+def test_identity_without_barcode_compares_size_and_brand(gs):
+    ws = FakeWorksheet(SIBLINGS)
+    one_litre = gs._expectation(None, "Fresh Milk", "1L", "Almarai")
+    almarai_2l = gs._expectation(None, "Fresh Milk", "2L", "Almarai")
+    conflicts = gs.find_record_conflicts(ws, {
+        "shifted_size": (3, one_litre),              # stale row number: the 1L write lands on the 2L sibling
+        "shifted_brand": (4, almarai_2l),            # same name and size, other brand
+        "ok": (2, gs._expectation(None, " fresh  MILK", "1 l", "ALMARAI")),   # whitespace/case do not matter
+        "name_only": (3, gs._expectation(None, "Fresh Milk")),                # legacy expectation still accepted
+    })
+    assert set(conflicts) == {"shifted_size", "shifted_brand"}
+    assert "size mismatch" in conflicts["shifted_size"] and "brand mismatch" in conflicts["shifted_brand"]
+
+    # a sheet without Size/Brand columns falls back to the name alone instead of refusing every write
+    no_cols = FakeWorksheet([["Product Name", "Drive Image Link"], ["Fresh Milk", ""]])
+    assert gs.find_record_conflicts(no_cols, {"w": (2, one_litre)}) == {}
+
+
+def test_outbox_sibling_write_with_stale_row_is_a_conflict(gs, fake_connection):
+    ws = FakeWorksheet(SIBLINGS)
+    stale = _outbox_row(1, 3, "https://res/milk-1l.png", name="Fresh Milk", size="1L", brand="Almarai")
+    good = _outbox_row(2, 3, "https://res/milk-2l.png", name="Fresh Milk", size="2L", brand="Almarai")
+    status = _final_status(_flush(gs, ws, [stale, good], fake_connection))
+    # the sibling's write is neither superseded by nor lent the verdict of the correct write
+    assert status[1] == "CONFLICT" and status[2] == "SYNCED"
+    written = [(d["range"], d["values"][0][0]) for body in ws.sent_bodies for d in body["data"]]
+    assert written == [("'Products'!D3", "https://res/milk-2l.png")]
+
+
+def test_writes_carry_size_and_brand_to_outbox_and_redis(gs, monkeypatch):
+    import sync_worker
+
+    ws = FakeWorksheet(SIBLINGS)
+    queue = RecordingQueue()
+    monkeypatch.setattr(gs, "_queue", queue)
+    monkeypatch.setattr(gs, "_worker", object())
+    monkeypatch.setattr(gs, "_get_redis", lambda: None)
+    assert gs.update_image_link(ws, 3, 3, "https://res/milk-1l.png", product_name="Fresh Milk",
+                                size="1L", brand="Almarai") is True
+    (_, kwargs), = queue.appended
+    assert (kwargs["key_name"], kwargs["key_size"], kwargs["key_brand"]) == ("Fresh Milk", "1L", "Almarai")
+
+    r = FakeRedis(heartbeat=True)
+    monkeypatch.setattr(gs, "_get_redis", lambda: r)
+    sent = []
+    ws.batch_update = lambda data, value_input_option=None: sent.append(data)
+    assert gs.update_image_link(ws, 3, 3, "https://res/milk-1l.png", product_name="Fresh Milk",
+                                size="1L", brand="Almarai") is True
+    assert json.loads(r.kv["product:data:row_3"])["expect"] == {"name": "Fresh Milk", "size": "1L",
+                                                                "brand": "Almarai"}
+    assert sync_worker.run_sync_cycle(ws, r) == 0          # row 3 is the 2L sibling: parked, not written
+    assert "row_3" in r.smembers("writebehind:conflicts") and sent == []
+
+
+def test_outbox_schema_stores_size_and_brand(gs, fake_connection):
+    conn = fake_connection(lambda sql, params: None)
+    queue = gs.SQLiteTransactionQueue.__new__(gs.SQLiteTransactionQueue)
+    queue._connect = lambda: conn
+    queue._setup_schema()
+    queue.append_update(3, 3, "https://res/milk-1l.png", col_name="Drive Image Link", key_name="Fresh Milk",
+                        key_size="1L", key_brand="Almarai")
+    ddl = " ".join(sql for sql, _ in conn.executed)
+    assert "ADD COLUMN IF NOT EXISTS key_size" in ddl and "ADD COLUMN IF NOT EXISTS key_brand" in ddl
+    sql, params = conn.executed[-1]
+    assert sql.startswith("INSERT INTO sheet_updates") and params[-2:] == ("1L", "Almarai")

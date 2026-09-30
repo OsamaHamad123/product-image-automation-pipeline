@@ -229,6 +229,35 @@ def test_auto_approve_not_isolated_is_not_cached(offline, monkeypatch, tmp_path)
     assert cached == []
 
 
+def test_auto_approve_writes_with_size_and_brand_identity(offline, monkeypatch, tmp_path):
+    """Without a barcode, the sheet write carries the row's size and brand so a stale row number that
+    now points at a same-name sibling (other size or brand) is refused at flush time."""
+    import main
+    import local_cache_db
+    import google_sheets
+    import cloudinary_storage
+    import image_processor
+    from PIL import Image
+
+    canvas = tmp_path / "canvas.png"
+    Image.new("RGB", (800, 800), "white").save(canvas)
+    monkeypatch.setattr(image_processor, "process_product_image_result",
+                        lambda *a, **k: image_processor.ProcessResult(str(canvas), True, "none", None, 800, 800))
+    monkeypatch.setattr(image_processor, "extract_metadata_from_image", lambda *a, **k: {"description_en": "Milk"})
+    monkeypatch.setattr(cloudinary_storage, "upload_product_image_to_cloudinary", lambda *a, **k: "https://res/x.png")
+    links, metas = [], []
+    monkeypatch.setattr(google_sheets, "update_image_link", lambda ws, row, col, value, **k: links.append(k) or True)
+    monkeypatch.setattr(google_sheets, "update_product_metadata", lambda ws, row, md, **k: metas.append(k) or True)
+    monkeypatch.setattr(local_cache_db, "save_product_resolution", lambda *a, **k: True)
+    monkeypatch.setattr(local_cache_db, "delete_product_failure", lambda *a, **k: True)
+
+    status = main.auto_approve_product(_task(size="180ml"), _best("AUTO_PUBLISH"), object(), 5, sku_key="sku-laban-up")
+
+    assert status == "published"
+    expected = {"barcode": "", "product_name": "Laban Up Strawberry 180ml", "size": "180ml", "brand": "Al Rawabi"}
+    assert links == [expected] and metas == [expected]
+
+
 def test_enqueue_validates_filter_before_touching_queue(offline, monkeypatch):
     import main
     import config

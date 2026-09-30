@@ -329,13 +329,27 @@ def get_products(worksheet):
 # هوية الصفوف (للتحقق قبل الكتابة)
 # ---------------------------------------------------------------------------
 
-def _expectation(barcode=None, product_name=None):
+def _expectation(barcode=None, product_name=None, size=None, brand=None):
+    """
+    هوية المنتج المتوقع في الصف. الحجم والبراند يُخزنان مع الاسم: بدون باركود، شقيقان بنفس الاسم
+    (1L و 2L، أو نفس الاسم لبراندين) في صفين متجاورين يتميزان بهما فقط.
+    """
     expect = {}
-    if barcode and str(barcode).strip():
-        expect["barcode"] = str(barcode).strip()
-    if product_name and str(product_name).strip():
-        expect["name"] = str(product_name).strip()
+    for key, value in (("barcode", barcode), ("name", product_name), ("size", size), ("brand", brand)):
+        if value and str(value).strip():
+            expect[key] = str(value).strip()
     return expect or None
+
+
+def _norm_size(value):
+    return re.sub(r"\s+", "", unicodedata.normalize("NFKC", str(value or "")).casefold())
+
+
+def _outbox_keys(expect):
+    """أعمدة الهوية في طابور MariaDB لتوقع معين."""
+    expect = expect or {}
+    return {"key_barcode": expect.get("barcode"), "key_name": expect.get("name"),
+            "key_size": expect.get("size"), "key_brand": expect.get("brand")}
 
 
 def _read_column_cells(worksheet, col_idx, rows):
@@ -355,10 +369,11 @@ def _read_column_cells(worksheet, col_idx, rows):
 
 def find_record_conflicts(worksheet, records, headers=None):
     """
-    records: {record_id: (row_number, {'barcode': ..., 'name': ...})}.
+    records: {record_id: (row_number, {'barcode': ..., 'name': ..., 'size': ..., 'brand': ...})}.
     يعيد {record_id: سبب} لكل سجل لا يطابق عمود المفتاح في صفه هويته هو. التحقق لكل سجل على حدة:
     سجلان لمنتجين مختلفين على نفس رقم الصف (رقم صف قديم) لا يأخذ أحدهما حكم الآخر.
-    الباركود هو المفتاح عند توفره (في التوقع وفي الشيت)، وإلا الاسم.
+    الباركود هو المفتاح عند توفره (في التوقع وفي الشيت)، وإلا الاسم مع الحجم والبراند (كل منهما
+    يُقارن إذا كان في التوقع وكان عموده موجوداً في الشيت).
     """
     records = {k: (row, e) for k, (row, e) in (records or {}).items() if e}
     if not records:
@@ -377,11 +392,21 @@ def find_record_conflicts(worksheet, records, headers=None):
             if _norm_barcode(actual.get(row)) != _norm_barcode(e["barcode"]):
                 conflicts[k] = f"barcode mismatch: sheet has {actual.get(row)!r}, expected {e['barcode']!r}"
     if name_ids:
-        actual = _read_column_cells(worksheet, cols["name"], sorted({records[k][0] for k in name_ids}))
+        name_rows = sorted({records[k][0] for k in name_ids})
+        actual = _read_column_cells(worksheet, cols["name"], name_rows)
         for k in name_ids:
             row, e = records[k]
             if _norm_name(actual.get(row)) != _norm_name(e["name"]):
                 conflicts[k] = f"name mismatch: sheet has {actual.get(row)!r}, expected {e['name']!r}"
+        for field, norm in (("size", _norm_size), ("brand", _norm_name)):
+            ids = [k for k in name_ids if k not in conflicts and records[k][1].get(field) and cols[field] != -1]
+            if not ids:
+                continue
+            actual = _read_column_cells(worksheet, cols[field], sorted({records[k][0] for k in ids}))
+            for k in ids:
+                row, e = records[k]
+                if norm(actual.get(row)) != norm(e[field]):
+                    conflicts[k] = f"{field} mismatch: sheet has {actual.get(row)!r}, expected {e[field]!r}"
     for k in records:
         if k not in barcode_ids and k not in name_ids:
             conflicts[k] = "no key column in sheet to verify row identity"
@@ -436,6 +461,8 @@ class SQLiteTransactionQueue:
                 "ALTER TABLE sheet_updates ADD COLUMN IF NOT EXISTS col_name VARCHAR(255) NULL",
                 "ALTER TABLE sheet_updates ADD COLUMN IF NOT EXISTS key_barcode VARCHAR(255) NULL",
                 "ALTER TABLE sheet_updates ADD COLUMN IF NOT EXISTS key_name VARCHAR(512) NULL",
+                "ALTER TABLE sheet_updates ADD COLUMN IF NOT EXISTS key_size VARCHAR(255) NULL",
+                "ALTER TABLE sheet_updates ADD COLUMN IF NOT EXISTS key_brand VARCHAR(255) NULL",
                 "ALTER TABLE sheet_updates ADD COLUMN IF NOT EXISTS attempts INT NOT NULL DEFAULT 0",
                 "ALTER TABLE sheet_updates ADD COLUMN IF NOT EXISTS last_error TEXT NULL",
                 "ALTER TABLE sheet_updates ADD INDEX IF NOT EXISTS idx_sheet_updates_status (sync_status)",
@@ -445,14 +472,16 @@ class SQLiteTransactionQueue:
         finally:
             conn.close()
 
-    def append_update(self, row_number, col_index, value, col_name=None, key_barcode=None, key_name=None):
+    def append_update(self, row_number, col_index, value, col_name=None, key_barcode=None, key_name=None,
+                      key_size=None, key_brand=None):
         conn = self._connect()
         try:
             cursor = conn.cursor()
             cursor.execute(
-                "INSERT INTO sheet_updates (`row_number`, `col_index`, `value`, col_name, key_barcode, key_name) "
-                "VALUES (%s, %s, %s, %s, %s, %s)",
-                (row_number, col_index, "" if value is None else str(value), col_name, key_barcode, key_name)
+                "INSERT INTO sheet_updates (`row_number`, `col_index`, `value`, col_name, key_barcode, key_name, "
+                "key_size, key_brand) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                (row_number, col_index, "" if value is None else str(value), col_name, key_barcode, key_name,
+                 key_size, key_brand)
             )
             conn.commit()
         finally:
@@ -543,7 +572,8 @@ class GoogleSheetsBatchWorker(threading.Thread):
     def _flush_locked(self, worksheet, conn, cursor):
         """Body of one flush; the caller holds the outbox lock and closes the connection."""
         cursor.execute(
-            "SELECT id, `row_number`, `col_index`, `value`, col_name, key_barcode, key_name, attempts "
+            "SELECT id, `row_number`, `col_index`, `value`, col_name, key_barcode, key_name, key_size, key_brand, "
+            "attempts "
             "FROM sheet_updates WHERE sync_status IN ('PENDING', 'FAILED') ORDER BY id LIMIT %s",
             (OUTBOX_BATCH,),
         )
@@ -556,7 +586,8 @@ class GoogleSheetsBatchWorker(threading.Thread):
         latest = {}
         for r in rows:
             cell_key = (r["row_number"], (r.get("col_name") or "").strip().casefold() or r["col_index"],
-                        _norm_barcode(r.get("key_barcode")), _norm_name(r.get("key_name")))
+                        _norm_barcode(r.get("key_barcode")), _norm_name(r.get("key_name")),
+                        _norm_size(r.get("key_size")), _norm_name(r.get("key_brand")))
             if cell_key not in latest or r["id"] > latest[cell_key]["id"]:
                 latest[cell_key] = r
         keep_ids = {r["id"] for r in latest.values()}
@@ -586,7 +617,7 @@ class GoogleSheetsBatchWorker(threading.Thread):
 
         records = {}
         for r, _ in targets:
-            expect = _expectation(r.get("key_barcode"), r.get("key_name"))
+            expect = _expectation(r.get("key_barcode"), r.get("key_name"), r.get("key_size"), r.get("key_brand"))
             if expect:
                 records[r["id"]] = (r["row_number"], expect)
         record_conflicts = find_record_conflicts(worksheet, records, headers=headers) if records else {}
@@ -772,13 +803,15 @@ def _header_name(worksheet, col_idx):
 
 
 @retry_gspread_on_429()
-def update_image_link(worksheet, row_number, link_column_index, image_link, barcode=None, product_name=None):
+def update_image_link(worksheet, row_number, link_column_index, image_link, barcode=None, product_name=None,
+                      size=None, brand=None):
     """
-    تحديث خلية رابط الصورة لصف منتج. barcode/product_name هوية المنتج المتوقع في هذا الصف:
+    تحديث خلية رابط الصورة لصف منتج. barcode/product_name/size/brand هوية المنتج المتوقع في هذا الصف
+    (قيم خلايا الشيت نفسها):
     عند التفريغ يُعاد التحقق منها، وأي اختلاف يُسجل CONFLICT ولا يُكتب.
     أخطاء APIError تُرفع كي يعمل مُزخرف إعادة المحاولة.
     """
-    expect = _expectation(barcode, product_name)
+    expect = _expectation(barcode, product_name, size, brand)
     try:
         if _redis_write_behind(row_number, {link_column_index: image_link}, expect):
             logger.info("[Redis Write-Behind] جدولة رابط الصف %s.", row_number)
@@ -786,8 +819,7 @@ def update_image_link(worksheet, row_number, link_column_index, image_link, barc
 
         if _queue is not None and _worker is not None:
             _queue.append_update(row_number, link_column_index, image_link,
-                                 col_name=_header_name(worksheet, link_column_index),
-                                 key_barcode=(expect or {}).get("barcode"), key_name=(expect or {}).get("name"))
+                                 col_name=_header_name(worksheet, link_column_index), **_outbox_keys(expect))
             logger.info("[Sheets Outbox] جدولة رابط الصف %s.", row_number)
             return True
 
@@ -823,11 +855,12 @@ _METADATA_COLUMNS = {
 
 
 @retry_gspread_on_429()
-def update_product_metadata(worksheet, row_number, metadata, barcode=None, product_name=None):
+def update_product_metadata(worksheet, row_number, metadata, barcode=None, product_name=None,
+                            size=None, brand=None):
     """
     تحديث أعمدة البيانات الوصفية لصف (ينشئ العناوين الناقصة). نفس قواعد الهوية والطابور مثل update_image_link.
     """
-    expect = _expectation(barcode, product_name)
+    expect = _expectation(barcode, product_name, size, brand)
     try:
         headers = _worksheet_headers(worksheet, fresh=True)
         normalized = [normalize_header(h) for h in headers]
@@ -857,8 +890,7 @@ def update_product_metadata(worksheet, row_number, metadata, barcode=None, produ
 
         if _queue is not None and _worker is not None:
             for col, value in updates.items():
-                _queue.append_update(row_number, col, value, col_name=headers[col],
-                                     key_barcode=(expect or {}).get("barcode"), key_name=(expect or {}).get("name"))
+                _queue.append_update(row_number, col, value, col_name=headers[col], **_outbox_keys(expect))
             return True
 
         if expect:

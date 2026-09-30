@@ -362,7 +362,7 @@ def action_select_image(params):
             bg_method=_text(params, 'bg_removal_method') or None,
             target=(int(params.get('target_width') or 0), int(params.get('target_height') or 0)),
             category_override={k: _text(params, k) for k in ('category_l1_en', 'category_l2_en', 'category_l3_en')},
-            enhance=_as_bool(params.get('enhance', False)),
+            enhance=_as_bool(params.get('enhance', False)), key_size=_text(params, 'size') or None,
         )
         if res["status"] == "failed":
             return {'status': 'failed', 'error': res.get('error'), 'isolated': res.get('isolated', False)}
@@ -418,7 +418,7 @@ def action_upload_manual_image(params):
             bg_method=_text(params, 'bg_removal_method') or None,
             target=(int(params.get('target_width') or 0), int(params.get('target_height') or 0)),
             category_override={k: _text(params, k) for k in ('category_l1_en', 'category_l2_en', 'category_l3_en')},
-            enhance=_as_bool(params.get('enhance', False)),
+            enhance=_as_bool(params.get('enhance', False)), key_size=_text(params, 'size') or None,
         )
         try:
             os.remove(file_path)
@@ -558,7 +558,7 @@ def action_reject_image(params):
             if _cell_holds(current, image_url):
                 sheet_cleared = bool(google_sheets.update_image_link(
                     worksheet, row_number, link_column_index, "", barcode=barcode or None,
-                    product_name=product_name or None))
+                    product_name=product_name or None, size=_text(params, 'size') or None))
     except Exception as e:
         sheet_error = str(e)
         logger.warning("تعذر تحديث الشيت بعد الرفض: %s", e)

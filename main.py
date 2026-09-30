@@ -259,9 +259,11 @@ def _folder_and_tags(metadata):
 
 def publish_image(image_url, name, brand, row_number, worksheet, link_column_index, *, barcode="",
                   candidate_sha256=None, bg_method=None, target=(0, 0), category_override=None,
-                  enhance=False, force_review=False):
+                  enhance=False, force_review=False, key_size=None, key_brand=None):
     """
     معالجة الصورة المعتمدة إلى لوحة النشر النهائية ورفعها وكتابة رابطها في الشيت.
+    key_size/key_brand: خلايا الحجم والبراند في الشيت لهذا المنتج، تُضاف إلى هوية الصف المتحقق منها
+    قبل الكتابة (بدون باركود تميز الشقيقين بنفس الاسم).
     لا تكبير لاحق: اللوحة من image_processor نهائية. البيانات الوصفية تُكتب في الشيت فقط بعد نجاح الرفع.
     الحالة: 'published' (معزولة وليست للمراجعة) | 'needs_review' (رابط ببادئة needs_review:) | 'failed'.
     """
@@ -303,12 +305,12 @@ def publish_image(image_url, name, brand, row_number, worksheet, link_column_ind
 
     review = force_review or not result.isolated
     sheet_value = f"needs_review:{link}" if review else link
-    if not google_sheets.update_image_link(worksheet, row_number, link_column_index, sheet_value,
-                                           barcode=barcode, product_name=name):
+    identity = {"barcode": barcode, "product_name": name, "size": key_size, "brand": key_brand}
+    if not google_sheets.update_image_link(worksheet, row_number, link_column_index, sheet_value, **identity):
         return dict(base, status="failed", error="sheet_write_failed", link=link)
     if metadata:
         try:
-            google_sheets.update_product_metadata(worksheet, row_number, metadata, barcode=barcode, product_name=name)
+            google_sheets.update_product_metadata(worksheet, row_number, metadata, **identity)
         except Exception as e:
             print(f"تنبيه: تعذر كتابة البيانات الوصفية للصف {row_number}: {e}")
     return dict(base, status="needs_review" if review else "published", link=link, sheet_value=sheet_value)
@@ -330,6 +332,7 @@ def auto_approve_product(task, best_image, worksheet, link_column_index, sku_key
         res = publish_image(
             best_image["url"], name, brand, task["row_number"], worksheet, link_column_index,
             barcode=barcode, candidate_sha256=best_image.get("content_sha256"),
+            key_size=task_payload(task).get("size"), key_brand=brand,
             bg_method=getattr(config, "BG_REMOVAL_METHOD", None),
             target=getattr(config, "IMAGE_TARGET_SIZE", (0, 0)),
         )
@@ -512,14 +515,14 @@ def process_single_product(prod, worksheet, link_column_index, brand_mappings=No
             print(f"الصف {row_num}: لا يوجد مرشح مؤكد ({best.get('decision')}); المرشحات محفوظة للمراجعة.")
             return "success"
         ok = google_sheets.update_image_link(worksheet, row_num, link_column_index, f"needs_review:{best['url']}",
-                                             barcode=barcode, product_name=name)
+                                             barcode=barcode, product_name=name, size=payload["size"], brand=brand)
         return "success" if ok else "failed"
 
     decision = best.get("decision")
     if best.get("source") == "sqlite_cache":
         value = f"needs_review:{best['url']}" if best.get("needs_review", True) else best["url"]
         ok = google_sheets.update_image_link(worksheet, row_num, link_column_index, value,
-                                             barcode=barcode, product_name=name)
+                                             barcode=barcode, product_name=name, size=payload["size"], brand=brand)
         return "success" if ok else "failed"
 
     res = publish_image(best["url"], name, brand, row_num, worksheet, link_column_index, barcode=barcode,
@@ -527,7 +530,7 @@ def process_single_product(prod, worksheet, link_column_index, brand_mappings=No
                         bg_method=getattr(config, "BG_REMOVAL_METHOD", None),
                         target=getattr(config, "IMAGE_TARGET_SIZE", (0, 0)),
                         enhance=getattr(config, 'ENABLE_IMAGE_ENHANCEMENT', False),
-                        force_review=decision != "AUTO_PUBLISH")
+                        force_review=decision != "AUTO_PUBLISH", key_size=payload["size"], key_brand=brand)
     if res["status"] == "failed":
         config.log_and_fail(barcode, name, brand, f"فشل النشر: {res.get('error')}")
         return "failed"
