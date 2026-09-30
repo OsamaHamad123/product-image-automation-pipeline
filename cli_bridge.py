@@ -378,12 +378,31 @@ def _is_cache_hit(candidate):
     return evidence.get("source") == "cache" or "cache_hit" in (candidate.get("reasons") or [])
 
 
+# ما عرضته شاشة الكتالوج للمراجع (بحث مباشر لا تُحفظ مرشحاته): القرار وحالة الصورة التي تصرف بها
+_VIEW_DECISIONS = ("AUTO_PUBLISH", "REVIEW_PRESELECTED", "REVIEW_UNSELECTED")
+
+
+def _reviewer_view(params, action):
+    """
+    (engine_decision, was_preselected) كما عرضتهما شاشة الكتالوج (search_decision و candidate_status)، أو None
+    عندما لم ترسل الشاشة قراراً معروفاً أو كانت الصورة من الكاش (اعتماد بشري سابق وليس اختيار المحرك).
+    """
+    decision = _text(params, 'search_decision')
+    if decision not in _VIEW_DECISIONS or _as_bool(params.get('candidate_cache_hit', False)):
+        return None
+    if action == "manual_upload":
+        return decision, False
+    status = _text(params, 'candidate_status')
+    return decision, (status == "preselected") if status else None
+
+
 def _record_review(action, params, row_number, sku_key, image_url=None, reason_code=None, approval=None):
     """
     يسجل قرار المراجع في review_decisions (دليل فتح النشر الآلي لكل براند). يُستدعى قبل حذف مرشحات المنتج:
     ما عرضه المحرك يُقرأ منها. قرار البحث يُعرف فقط عندما تكون الصورة بين المرشحات المحفوظة (أو عند الرفع
     اليدوي بدلها): REVIEW_PRESELECTED إن كان بينها اختيار مسبق، وإلا REVIEW_UNSELECTED. شاشة الكتالوج تبحث
-    مباشرة ولا تحفظ مرشحاتها، فيبقى القرار غير معروف (None)، وكذلك مرشح الكاش (_is_cache_hit). approval: الحل
+    مباشرة ولا تحفظ مرشحاتها، فترسل ما عرضته (search_decision و candidate_status، انظر _reviewer_view) ويُعتمد
+    بدل المحفوظ؛ دون ذلك يبقى القرار غير معروف (None)، وكذلك مرشح الكاش (_is_cache_hit). approval: الحل
     المعتمد الذي يستهدفه الرفض؛
     رفض صورة نُشرت تلقائياً هو رفض لاختيار المحرك (AUTO_PUBLISH).
     أي خطأ هنا يُسجل في السجل ولا يغير نتيجة الإجراء.
@@ -400,6 +419,12 @@ def _record_review(action, params, row_number, sku_key, image_url=None, reason_c
             was_preselected = acted.get("status") == "preselected"
         elif action == "manual_upload":
             was_preselected = False
+        view = _reviewer_view(params, action)
+        if view is not None:
+            # شاشة الكتالوج ترسل ما رآه المراجع فعلاً؛ قد يختلف عن آخر تشغيل محفوظ للعامل على نفس الصنف
+            decision, was_preselected = view
+            acted = {"identity_tier": _text(params, 'identity_tier') or None,
+                     "vlm": {"decision": _text(params, 'vlm_decision') or None}, "page_url": _text(params, 'page_url')}
         if approval and approval.get("verification_status") == "auto_verified":
             decision, was_preselected = "AUTO_PUBLISH", True
         acted = acted or {}

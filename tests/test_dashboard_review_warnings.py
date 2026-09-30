@@ -86,3 +86,13 @@ def test_warning_sentences(path, tmp_path):
     assert "مواقع التواصل" in out["social_media"]
     assert out["foreign_store"].startswith("الصورة من متجر خارج الإمارات")
     assert out["mystery_code"] == "mystery_code"          # unknown codes are shown raw
+
+
+def test_catalog_page_sends_the_reviewers_view_with_approve_reject_and_upload():
+    page = (ROOT / "dashboard/resources/views/dashboard/catalog.blade.php").read_text(encoding="utf-8")
+    assert "function reviewedCandidateView(" in page
+    assert page.count("...reviewedCandidateView(") == 2            # approve and reject
+    assert "formData.append('search_decision'" in page            # manual upload
+    assert "dataset.searchDecision = String(data.decision" in page
+    api = (ROOT / "dashboard/app/Http/Controllers/ApiController.php").read_text(encoding="utf-8")
+    assert "'search_decision'" in api                             # the upload whitelist forwards it

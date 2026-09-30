@@ -1996,6 +1996,8 @@
             brand_ar: document.getElementById('brandAr').value,
             barcode: form.dataset.barcode || '',
             sku_key: form.dataset.skuKey || '',
+            // قرار البحث المعروض الآن (يُسجل مع قرار المراجع في review_decisions)
+            search_decision: form.dataset.searchDecision || '',
             category: form.dataset.category || '',
             // هوية الحجم والفئة الفرعية والمنشأ تُرسل دائماً: لا نعتمد على وجود صف في الطابور
             size: form.dataset.size || '',
@@ -2096,6 +2098,7 @@
         if (data.sku_key) {
             document.getElementById('searchForm').dataset.skuKey = data.sku_key;
         }
+        document.getElementById('searchForm').dataset.searchDecision = String(data.decision || '');
         showResultsWorkspace();
         const candidates = collectCandidates(data);
         renderOutcomeBanner(data, candidates.length, extraNote);
@@ -2148,6 +2151,7 @@
         const form = document.getElementById('searchForm');
         form.dataset.barcode = prod.barcode || '';
         form.dataset.skuKey = prod.sku_key || '';
+        form.dataset.searchDecision = '';
         form.dataset.category = prod.category || '';
         form.dataset.origin = prod.origin || '';
         form.dataset.size = prod.size || '';
@@ -2192,6 +2196,7 @@
             } else {
                 note = 'لا يوجد مرشح مؤكد المطابقة: اختر يدوياً من المرشحين أدناه أو اضغط البحث لإعادة البحث.';
             }
+            form.dataset.searchDecision = prod.preselected ? 'REVIEW_PRESELECTED' : 'REVIEW_UNSELECTED';
             renderOutcomeBanner({ status: 'review', decision: prod.preselected ? 'REVIEW_PRESELECTED' : 'REVIEW_UNSELECTED',
                                   selected_image: prod.needs_review_url ? { url: prod.needs_review_url } : null },
                                 stored.length, note);
@@ -2361,6 +2366,18 @@
         box.style.display = box.childNodes.length ? 'block' : 'none';
     }
 
+    // ما رآه المراجع عن الصورة التي يعتمدها أو يرفضها: يُحسب به دليل دقة الاختيار المسبق لكل براند
+    function reviewedCandidateView(c, ctx) {
+        const cacheHit = c.reasons.includes('cache_hit') || c.source === 'cache' || (c.evidence && c.evidence.source === 'cache');
+        return {
+            search_decision: ctx.search_decision,
+            candidate_status: c.status,
+            candidate_cache_hit: cacheHit,
+            identity_tier: c.identity_tier === null ? '' : String(c.identity_tier),
+            vlm_decision: (c.vlm && c.vlm.decision) ? String(c.vlm.decision) : ''
+        };
+    }
+
     // اعتماد صورة: يرسل الباركود و sku_key والتصنيف بمفاتيح category_l*_en
     async function approveCandidate(candidate, btn) {
         const c = normalizeCandidate(candidate);
@@ -2398,6 +2415,7 @@
                     barcode: ctx.barcode,
                     sku_key: ctx.sku_key,
                     size: ctx.size,
+                    ...reviewedCandidateView(c, ctx),
                     category_l1_en: document.getElementById('selectL1').value,
                     category_l2_en: document.getElementById('selectL2').value,
                     category_l3_en: document.getElementById('selectL3').value,
@@ -2489,6 +2507,7 @@
                     sku_key: ctx.sku_key,
                     reason_code: reasonCode,
                     rejection_reasons: [reasonCode],
+                    ...reviewedCandidateView(candidate, ctx),
                     research: research,
                     product_name_ar: ctx.product_name_ar,
                     brand_ar: ctx.brand_ar,
@@ -2805,6 +2824,7 @@
             formData.append('brand', brand);
             formData.append('barcode', barcode);
             formData.append('sku_key', document.getElementById('searchForm').dataset.skuKey || '');
+            formData.append('search_decision', document.getElementById('searchForm').dataset.searchDecision || '');
             formData.append('enhance', aiEnhance ? 'true' : 'false');
             formData.append('target_width',  getOutputWidth());
             formData.append('target_height', getOutputHeight());

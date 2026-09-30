@@ -589,3 +589,54 @@ def test_stats_from_real_reviews(db, sheet):
     assert brands[BRAND]["top_reject_reasons"] == [("WRONG_SIZE", 1)]
     assert (brands[BRAND_B]["prechecked"], brands[BRAND_B]["accepted"]) == (1, 1)
     assert stats["domains"] == [{"domain": "luluhypermarket.com", "approved": 1, "rejected": 1}]
+
+
+# ---------------------------------------------------------------------------
+# The catalog page sends what the reviewer saw of a live search (integration of the review work)
+# ---------------------------------------------------------------------------
+
+LIVE = {"search_decision": "REVIEW_PRESELECTED", "candidate_status": "preselected", "candidate_cache_hit": False,
+        "identity_tier": "1", "vlm_decision": "MATCH"}
+
+
+def test_catalog_approval_of_the_live_precheck_counts(recorder):
+    cli_bridge, events, state = recorder
+    state["candidates"] = []
+    cli_bridge.action_select_image(_approve_params("https://www.carrefouruae.com/img/live.jpg",
+                                                   page_url="https://www.carrefouruae.com/mafuae/en/p/9", **LIVE))
+    (action, row), = _reviews(events)
+    assert (row["engine_decision"], row["was_preselected"]) == ("REVIEW_PRESELECTED", True)
+    assert (row["identity_tier"], row["vlm_decision"], row["page_domain"]) == ("1", "MATCH", "carrefouruae.com")
+
+
+def test_what_the_reviewer_saw_wins_over_an_older_stored_run(recorder):
+    # The stored worker run pre-checked PRE_URL and listed OTHER_URL as a plain candidate. A newer live search
+    # on the catalog page pre-checked OTHER_URL, and the reviewer approved it: that is an accepted pre-check.
+    cli_bridge, events, state = recorder
+    cli_bridge.action_select_image(_approve_params(OTHER_URL, **LIVE))
+    (action, row), = _reviews(events)
+    assert (row["engine_decision"], row["was_preselected"]) == ("REVIEW_PRESELECTED", True)
+    assert (row["identity_tier"], row["vlm_decision"]) == ("1", "MATCH")
+
+
+def test_catalog_rejection_and_upload_use_the_live_view(recorder, tmp_path):
+    cli_bridge, events, state = recorder
+    state["candidates"] = []
+    cli_bridge.action_reject_image(_reject_params("https://www.carrefouruae.com/img/live.jpg", **LIVE))
+    cli_bridge.action_upload_manual_image(_upload_params(tmp_path, search_decision="REVIEW_UNSELECTED"))
+    (a1, reject), (a2, upload) = _reviews(events)
+    assert (a1, reject["engine_decision"], reject["was_preselected"]) == ("rejected", "REVIEW_PRESELECTED", True)
+    assert (a2, upload["engine_decision"], upload["was_preselected"]) == ("manual_upload", "REVIEW_UNSELECTED", False)
+
+
+@pytest.mark.parametrize("view", [
+    dict(LIVE, candidate_cache_hit=True),       # a cached earlier approval, not the engine's pick
+    dict(LIVE, search_decision="NOT_A_DECISION"),
+    dict(LIVE, search_decision=""),
+])
+def test_a_cache_hit_or_unknown_decision_from_the_page_is_not_evidence(recorder, view):
+    cli_bridge, events, state = recorder
+    state["candidates"] = []
+    cli_bridge.action_select_image(_approve_params("https://www.carrefouruae.com/img/live.jpg", **view))
+    (action, row), = _reviews(events)
+    assert (row["engine_decision"], row["was_preselected"]) == (None, None)
