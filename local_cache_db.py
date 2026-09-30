@@ -370,6 +370,17 @@ def get_cached_product(barcode=None, product_name=None, brand=None, sku_key=None
         return None
 
 
+def _remember_phash(hash_str, row_id, cloudinary_url, product_name):
+    """Adds a saved image to the in-memory duplicate index, if it has a hash."""
+    if not hash_str or row_id is None:
+        return
+    try:
+        import image_dedup_bktree
+        image_dedup_bktree.remember_image(hash_str, str(row_id), cloudinary_url, product_name)
+    except Exception as e:
+        logger.warning("[BKTree] Could not add the saved image to the duplicate index: %s", e)
+
+
 def save_product_resolution(barcode, product_name, brand, original_url, cloudinary_url, clip_score=None,
                             metadata=None, clip_embedding=None, perceptual_hash=None,
                             verification_status="legacy", approved_by=None, sku_key=None):
@@ -413,6 +424,7 @@ def save_product_resolution(barcode, product_name, brand, original_url, cloudina
                         sku_key = %s, verification_status = %s, approved_by = %s, resolved_at = CURRENT_TIMESTAMP
                     WHERE id = %s
                 """, values + (existing[0],))
+                saved_id = existing[0]
                 older = existing[1:]
                 if older:
                     placeholders = ",".join("%s" for _ in older)
@@ -427,12 +439,14 @@ def save_product_resolution(barcode, product_name, brand, original_url, cloudina
                         verification_status, approved_by)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """, values)
+                saved_id = cursor.lastrowid
             conn.commit()
         finally:
             _close(conn)
     except Exception as e:
         logger.warning("[MariaDB Cache] فشل حفظ الحل المعتمد لـ '%s': %s", product_name, e)
         return False
+    _remember_phash(hash_str, saved_id, cloudinary_url, product_name)
     if verification_status in SERVABLE_STATUSES:
         delete_product_failure(barcode_raw or f"ERR_{product_name}_{brand}".replace(" ", "_"))
     return True

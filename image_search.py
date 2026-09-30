@@ -24,26 +24,14 @@ from bs4 import BeautifulSoup
 logger = logging.getLogger(__name__)
 
 # تهيئة شجرة BK-Tree العالمية لفحص التكرارات بصرياً بفعالية
-_bktree = None
-_bktree_lock = threading.Lock()
 
 # تخزين ديناميكي لمرادفات البراندات المصححة والمولدة عبر Gemini
 _dynamic_brand_mappings = {}
 
 def get_bktree():
-    global _bktree
-    with _bktree_lock:
-        if _bktree is None:
-            try:
-                import image_dedup_bktree
-                print("⏳ [BKTree] Building BK-Tree from MariaDB for visual deduplication...")
-                _bktree = image_dedup_bktree.build_bktree_from_db()
-                print("✅ [BKTree] BK-Tree built successfully.")
-            except Exception as e:
-                print(f"⚠️ [BKTree Error] Failed to build BK-Tree: {e}")
-                import image_dedup_bktree
-                _bktree = image_dedup_bktree.BKTree()
-        return _bktree
+    # One tree per process, shared with local_cache_db so saved images join it.
+    import image_dedup_bktree
+    return image_dedup_bktree.get_shared_tree()
 
 def run_coroutine_sync(coro):
     """
@@ -1601,7 +1589,13 @@ def evaluate_and_choose_best_image(results, product_name, brand, requires_brand_
             r['fallback_ok'] = True
 
             # ملاحظة: تم حذف استبدال الإجابة بصورة Cloudinary لمنتج آخر عبر BK-Tree (visual_duplicate)
-            # لأنه يخلط بين نكهات وأحجام المنتج نفسه (D13).
+            # لأنه يخلط بين نكهات وأحجام المنتج نفسه (D13). البصمة تُحسب فقط لتُحفظ مع المنتج المعتمد.
+            candidate_phash = None
+            try:
+                import image_dedup_bktree
+                candidate_phash = image_dedup_bktree.calculate_phash(pil_img) or None
+            except Exception as bke:
+                logger.warning("[pHash] تعذر حساب البصمة: %s", bke)
 
             # أ. تشغيل بوابة الفرز الرياضي غير التوليدي لجودة الصورة
             # حساب نتيجة الجاذبية البصرية وقيمة التماثل البصري DINOv2
@@ -1740,7 +1734,8 @@ def evaluate_and_choose_best_image(results, product_name, brand, requires_brand_
                 "clip_embedding": clip_embedding,
                 "is_grey_zone": is_grey_zone,
                 "eval_report": eval_report,
-                "c_idx": c_idx
+                "c_idx": c_idx,
+                "perceptual_hash": candidate_phash
             })
             
         except Exception as e:
@@ -1789,6 +1784,9 @@ def evaluate_and_choose_best_image(results, product_name, brand, requires_brand_
         chosen_item['clip_score'] = relevance_score_clip  # None عند غياب نموذج SigLIP/CLIP
         chosen_item['clip_embedding'] = best_cand["clip_embedding"]
         chosen_relevance = best_cand["relevance_score"]
+        # Saved with the product, so later candidates are checked against it.
+        if best_cand.get("perceptual_hash"):
+            chosen_item['perceptual_hash'] = str(best_cand["perceptual_hash"])
 
     if chosen_item:
         _record_trace()

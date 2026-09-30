@@ -71,6 +71,10 @@ core was rebuilt and wired into the queue, the dashboard actions and the sheet w
   payloads in `fastapi_server.py`; CLIP embedding and "active learning" JSON logging on approval.
 - Settings `AUTO_APPROVE_THRESHOLD`, `IGNORE_UNIT_CLASH`, `USE_FALLBACK_SEARCH`, `SEARCH_CACHE_*`,
   `MAX_PARALLEL_DOWNLOADS`, `DRIVE_FOLDER_ID`.
+- The v1 "visual duplicate" shortcut that answered a search with another product's Cloudinary image when the
+  pHash was within 5 bits. Flavour and size variants share packaging, so it handed out the wrong variant. The
+  shared BK-tree (1.0.0 fix) is still built and filled with every saved image's hash; nothing substitutes answers
+  from it.
 
 ### Corrections to 1.0.0
 
@@ -105,6 +109,10 @@ First public release.
 
 ### Fixed
 
+- Near-duplicate detection now has something to compare against:
+  - The BK-tree is built from the hashes stored in MariaDB. Before, `build_bktree_from_db()` returned an empty tree.
+  - Every accepted image's hash is saved with the product and added to the tree.
+  - The perceptual hash no longer spends a bit on overall brightness, which was 1 for nearly every image.
 - Two verification modules that failed to import (missing `typing` names).
 - Three `async` tests were collected but never awaited. They now run under `pytest-asyncio`.
 

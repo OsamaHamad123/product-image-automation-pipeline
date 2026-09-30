@@ -1,6 +1,7 @@
 # image_dedup_bktree.py
 # كشف التكرارات البصرية عبر التشفير الإدراكي وشجرة BK (Perceptual Hashing & BK-Trees)
 import os
+import threading
 from PIL import Image
 import numpy as np
 import scipy.fftpack
@@ -17,7 +18,12 @@ def calculate_phash(image_input) -> int:
     1. تقليص الأبعاد لـ 32x32 رمادي.
     2. تطبيق تحويل جيب التمام المتقطع (2D DCT).
     3. أخذ المصفوفة الفرعية 8x8 للترددات المنخفضة.
-    4. استبعاد معامل DC وحساب المتوسط وتوليد بصمة 64 بت ثنائية.
+    4. استبعاد معامل DC وحساب المتوسط وتوليد بصمة من 63 بت.
+
+    The DC coefficient is the image's average brightness. It is left out of the
+    bits as well as the mean: it is almost always far above the mean of the AC
+    terms, so as a bit it was 1 for nearly every image and told images apart
+    not at all.
     """
     try:
         if isinstance(image_input, str):
@@ -31,13 +37,11 @@ def calculate_phash(image_input) -> int:
         # 2D Discrete Cosine Transform (DCT)
         dct = scipy.fftpack.dct(scipy.fftpack.dct(img_array, axis=0, norm='ortho'), axis=1, norm='ortho')
 
-        # أخذ العناصر 8x8 من الركن العلوي الأيسر
-        dct_low = dct[0:8, 0:8]
-        dct_low_no_dc = dct_low.copy()
-        dct_low_no_dc[0, 0] = 0
+        # أخذ العناصر 8x8 من الركن العلوي الأيسر، بدون معامل DC
+        ac_terms = dct[0:8, 0:8].flatten()[1:]
 
-        mean_val = np.mean(dct_low_no_dc)
-        binary_string = "".join("1" if val > mean_val else "0" for val in dct_low.flatten())
+        mean_val = np.mean(ac_terms)
+        binary_string = "".join("1" if val > mean_val else "0" for val in ac_terms)
         return int(binary_string, 2)
     except Exception as e:
         print(f"⚠️ [pHash Error] Failed to calculate pHash: {e}")
@@ -123,8 +127,70 @@ class PerceptualDeduplicationTree:
         self.insert_node(phash_value=phash_value, image_id=image_id, metadata=metadata)
 
 
-# Wrapper helper for legacy imports
 def build_bktree_from_db():
+    """
+    Builds the tree from every resolved product that has a stored hash, so a new
+    candidate is compared against the whole catalogue, not only against images
+    seen since the process started. If the database cannot be read, the tree
+    starts empty and fills as products are saved.
+    """
     tree = PerceptualDeduplicationTree()
+    try:
+        import local_cache_db
+
+        conn = local_cache_db.get_db_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT id, product_name, cloudinary_url, perceptual_hash FROM resolved_products "
+                "WHERE perceptual_hash IS NOT NULL AND perceptual_hash <> ''"
+            )
+            rows = cursor.fetchall()
+        finally:
+            conn.close()
+    except Exception as e:
+        print(f"⚠️ [BKTree] Could not load hashes from MariaDB, starting empty: {e}")
+        return tree
+
+    for row in rows:
+        try:
+            phash_value = int(row["perceptual_hash"])
+        except (TypeError, ValueError):
+            continue
+        tree.insert_node(
+            phash_value,
+            str(row["id"]),
+            {"cloudinary_url": row["cloudinary_url"], "product_name": row["product_name"]},
+        )
     return tree
+
+
+_shared_tree = None
+_shared_tree_lock = threading.Lock()
+
+
+def get_shared_tree() -> PerceptualDeduplicationTree:
+    """The process-wide tree, built from MariaDB on first use."""
+    global _shared_tree
+    with _shared_tree_lock:
+        if _shared_tree is None:
+            _shared_tree = build_bktree_from_db()
+        return _shared_tree
+
+
+def remember_image(phash_value, image_id: str, cloudinary_url: str, product_name: str):
+    """
+    Adds a newly saved image to the shared tree, so the next product in the same
+    run is checked against it. Does nothing until the tree has been built: the
+    first build reads this row from the database anyway.
+    """
+    try:
+        phash_int = int(phash_value)
+    except (TypeError, ValueError):
+        return
+    with _shared_tree_lock:
+        if _shared_tree is not None:
+            _shared_tree.insert_node(
+                phash_int, image_id, {"cloudinary_url": cloudinary_url, "product_name": product_name}
+            )
 
