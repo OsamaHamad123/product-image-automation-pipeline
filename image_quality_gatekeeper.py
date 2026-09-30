@@ -130,24 +130,24 @@ class ImageQualityGatekeeper:
         # تحميل نموذج المعايرة النشطة بـ NumPy إذا توفر ملف الإعدادات
         config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "calibrated_gate_config.json")
         self.classifier = MicroClassifierEngine(config_path)
-        
-        # ربط طبقة التحقق والاعتماد الحديثة (V&V Layer Clean Architecture)
-        from verification_layer.use_cases.catalog_verifier import CatalogVerificationPipeline
-        from verification_layer.domain.models import CatalogProduct
-        self._vv_pipeline = CatalogVerificationPipeline()
+        # ملاحظة: تمت إزالة ربط طبقة verification_layer لأن نتيجتها كانت تُهمَل ولا تؤثر في القرار (D5/D13).
 
     def evaluate_image(self, pil_img, relevance_score_text=0.0, dinov2_similarity=None, aesthetic_score_raw=None, product_name: str = "", brand: str = ""):
         """
-        تقييم الصورة وإرجاع تقرير تفصيلي بالمعايير الهندسية وحساب النتيجة الإجمالية الموحدة عبر V&V Layer.
+        تقييم الصورة وإرجاع تقرير تفصيلي بالمعايير الهندسية وحساب النتيجة الإجمالية الموحدة.
+
+        البوابات الصلبة الوحيدة: الأبعاد الدنيا ونسبة العرض للارتفاع (0.4 - 2.5).
+        التعريض الضوئي والتباين والوضوح (Laplacian) والتكتل ونتيجة التقييم الموحدة أصبحت
+        معايير ناعمة: تُسجَّل قيمها في التقرير (soft_flags) ولا ترفض الصورة، لأن الخلفية البيضاء
+        هي الشكل المطلوب لصورة المنتج وليست عيباً (D5).
         """
-        from verification_layer.domain.models import CatalogProduct
-        catalog_product = CatalogProduct(
-            asin_or_gtin="QUALITY_GATE_CHECK",
-            brand=brand or "GENERIC",
-            product_class=product_name or "ITEM",
-            weight_volume=""
-        )
-        vv_res = self._vv_pipeline.verify(pil_img, catalog_product)
+        # الدمج على خلفية بيضاء للصور الشفافة، والتحويل لـ RGB لأي نمط آخر (CMYK / L / P)
+        if pil_img.mode in ("RGBA", "LA", "PA") or (pil_img.mode == "P" and "transparency" in pil_img.info):
+            rgba = pil_img.convert("RGBA")
+            white_canvas = Image.new("RGBA", rgba.size, (255, 255, 255, 255))
+            pil_img = Image.alpha_composite(white_canvas, rgba).convert("RGB")
+        elif pil_img.mode != "RGB":
+            pil_img = pil_img.convert("RGB")
 
         width, height = pil_img.size
         resolution = width * height
@@ -172,13 +172,16 @@ class ImageQualityGatekeeper:
             passes_gates = False
             gate_reasons.append(f"Aspect ratio drift: {aspect_ratio:.2f} (Allowed: 0.4 - 2.5)")
 
-        # 2. حساب المعايير البصرية الفرعية
+        # 2. حساب المعايير البصرية الفرعية (معايير ناعمة: تُسجَّل ولا ترفض الصورة)
+        soft_flags = []
+
         # A. كشف التشويش والوضوح (Laplacian Variance Sharpness)
+        # ملاحظة: تباين Laplacian للإطار كاملاً ينخفض كلما زادت الدقة (57 عند 800px و11 عند 1500px)
+        # لذلك لم يعد بوابة صلبة.
         laplacian_var = cv2.Laplacian(gray, cv2.CV_64F).var()
-        is_blurry = laplacian_var < self.laplacian_threshold
+        is_blurry = bool(laplacian_var < self.laplacian_threshold)
         if is_blurry:
-            passes_gates = False
-            gate_reasons.append(f"Image too blurry: Laplacian variance {laplacian_var:.2f} (Threshold: {self.laplacian_threshold})")
+            soft_flags.append(f"blurry (Laplacian variance {laplacian_var:.2f} < {self.laplacian_threshold})")
 
         # حساب بمتوسط برينر (Brenner Gradient) للتعلم النشط
         try:
@@ -187,46 +190,27 @@ class ImageQualityGatekeeper:
         except Exception:
             brenner = laplacian_var * 4.0 # تقديري تقريبي في حال فشل الاستيراد
 
-        # B. كشف توازن الإضاءة والتباين (Exposure & Contrast)
+        # B. كشف توازن الإضاءة والتباين (Exposure & Contrast) - ناعم: الخلفية البيضاء ليست عيباً
         exposure_metrics = self._compute_exposure_and_contrast(gray)
         if exposure_metrics["is_underexposed"]:
-            passes_gates = False
-            gate_reasons.append("Image underexposed")
+            soft_flags.append("underexposed")
         if exposure_metrics["is_overexposed"]:
-            passes_gates = False
-            gate_reasons.append("Image overexposed")
+            soft_flags.append("overexposed")
         if exposure_metrics["is_low_contrast"]:
-            passes_gates = False
-            gate_reasons.append("Low contrast detected")
+            soft_flags.append("low_contrast")
 
-        # C. كشف عيوب الضغط وفقدان التفاصيل (Blockiness Index)
+        # C. كشف عيوب الضغط وفقدان التفاصيل (Blockiness Index) - ناعم
         blockiness_index = self._compute_blockiness(gray)
-        is_over_compressed = blockiness_index >= 2.5
+        is_over_compressed = bool(blockiness_index >= 2.5)
         if is_over_compressed:
-            passes_gates = False
-            gate_reasons.append(f"Image over-compressed: Blockiness index {blockiness_index:.2f} (Threshold: 2.5)")
+            soft_flags.append(f"over_compressed (blockiness {blockiness_index:.2f})")
 
-        # D. تجزئة الخلفية وفحص النقاء الهجين (GrabCut + Corner-Seeded Flood-Fill)
-        segmenter = BoundaryComplianceSegmenter()
-        try:
-            binary_mask, foreground_img = segmenter.segment_foreground(img_cv)
-            bg_report = segmenter.verify_background_purity(img_cv, binary_mask)
-            background_purity = bg_report.get("purity_score", 0.0)
-            
-            # حساب نسبة التعبئة الفعالة (Fill Ratio) من قناع GrabCut للمقدمة
-            contours, _ = cv2.findContours(binary_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            if contours:
-                c_max = max(contours, key=cv2.contourArea)
-                bx, by, bw, bh = cv2.boundingRect(c_max)
-                fill_ratio = (bw * bh) / (w * h)
-            else:
-                fill_ratio = 0.0
-        except Exception as e:
-            # تراجع آمن في حال حدوث أي خطأ في OpenCV GrabCut
-            bg_metrics = self._evaluate_background_purity(img_np)
-            background_purity = bg_metrics["bg_score"]
-            layout_metrics = self._evaluate_centering_and_fill(gray)
-            fill_ratio = layout_metrics["fill_ratio"]
+        # D. نقاء الخلفية ونسبة التعبئة عبر فحص الإطار الخارجي (Perimeter Sampling)
+        # تمت إزالة تجزئة GrabCut: نتيجتها كانت تُهمَل بخطأ NameError وتستغرق 1-7 ثوانٍ لكل صورة.
+        bg_metrics = self._evaluate_background_purity(img_np)
+        background_purity = bg_metrics["bg_score"]
+        layout_metrics = self._evaluate_centering_and_fill(gray)
+        fill_ratio = layout_metrics["fill_ratio"]
 
         # E. نقاط التقييم الجمالي ومطابقة DINOv2
         if aesthetic_score_raw is None:
@@ -240,11 +224,11 @@ class ImageQualityGatekeeper:
         if dinov2_similarity is None:
             dinov2_similarity = 0.85
 
-        # 3. حساب النتيجة الموحدة (Unified Score Calculation)
+        # 3. حساب النتيجة الموحدة (Unified Score Calculation) - للترتيب فقط، دون عتبة رفض
         if not passes_gates:
             unified_score = 0.0
         elif self.classifier.is_loaded:
-            # حساب التقييم الموحد والقرار ديناميكياً عبر معاملات التعلم النشط المعايرة
+            # حساب التقييم الموحد ديناميكياً عبر معاملات التعلم النشط المعايرة
             features = np.array([
                 float(aesthetic_score_raw),
                 float(brenner),
@@ -252,14 +236,10 @@ class ImageQualityGatekeeper:
                 float(background_purity),
                 float(dinov2_similarity)
             ], dtype=np.float64)
-            
+
             unified_score = self.classifier.evaluate_probability(features)
-            passes_active_learning = self.classifier.make_decision(features, decision_threshold=0.5)
-            
-            if not passes_active_learning:
-                passes_gates = False
-                gate_reasons.append("Rejected by Active Learning Quality Gate")
-                unified_score = 0.0
+            if not self.classifier.make_decision(features, decision_threshold=0.5):
+                soft_flags.append("below_active_learning_threshold")
         else:
             # تراجع للتقييم الرياضي الموزع المعتاد في غياب أوزان التدريب
             w_res = 0.20
@@ -286,25 +266,30 @@ class ImageQualityGatekeeper:
                 w_art * s_art
             )
             unified_score = max(0.0, min(1.0, unified_score))
-            if unified_score < 0.35: # عتبة القبول الافتراضية
-                passes_gates = False
-                gate_reasons.append(f"Heuristic Unified Score too low: {unified_score:.2f}")
+            if unified_score < 0.35:
+                soft_flags.append(f"low_unified_score ({unified_score:.2f})")
 
         return {
             "passes_gates": passes_gates,
             "gate_reasons": gate_reasons,
+            "soft_flags": soft_flags,
             "width": width,
             "height": height,
             "aspect_ratio": aspect_ratio,
             "laplacian_var": laplacian_var,
+            "is_blurry": is_blurry,
             "blockiness_index": blockiness_index,
+            "is_over_compressed": is_over_compressed,
             "mean_luminance": exposure_metrics["mean_y"],
             "contrast_ratio": exposure_metrics["c_ratio"],
+            "is_underexposed": bool(exposure_metrics["is_underexposed"]),
+            "is_overexposed": bool(exposure_metrics["is_overexposed"]),
+            "is_low_contrast": bool(exposure_metrics["is_low_contrast"]),
             "bg_score": background_purity,
-            "perimeter_passed": True,
+            "perimeter_passed": bool(bg_metrics["perimeter_passed"]),
             "fill_ratio": fill_ratio,
-            "centered_passed": True,
-            "center_offset_ratio": 0.0,
+            "centered_passed": bool(layout_metrics["centered_passed"]),
+            "center_offset_ratio": layout_metrics["center_offset_ratio"],
             "unified_score": unified_score
         }
 

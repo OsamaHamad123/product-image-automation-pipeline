@@ -1,0 +1,91 @@
+{
+  "version": 1,
+  "_doc": "Mutually exclusive variant groups (axes). Each value lists English and Arabic phrases; phrases are matched on whole tokens after catalog_match.text_norm normalisation, longest phrase first. 'unmarked' lists the values that do NOT make a candidate suspicious when the target SKU does not state that axis (e.g. a retailer title adding 'Full Fat' to 'Almarai Fresh Milk').",
+  "axes": {
+    "fat": {
+      "unmarked": ["full"],
+      "values": {
+        "full": ["full fat", "full cream", "whole milk", "كامل الدسم", "دسم كامل"],
+        "low": ["low fat", "light", "lite", "reduced fat", "half fat", "semi skimmed", "semi skim", "قليل الدسم", "خفيف الدسم", "نصف دسم", "قليله الدسم", "لايت"],
+        "skimmed": ["skimmed", "skim", "fat free", "non fat", "nonfat", "zero fat", "0% fat", "no fat", "خالي الدسم", "منزوع الدسم", "خالي من الدسم", "بدون دسم", "منزوعه الدسم", "خاليه الدسم", "خاليه من الدسم"]
+      }
+    },
+    "sugar": {
+      "unmarked": ["regular"],
+      "values": {
+        "zero": ["zero", "zero sugar", "sugar free", "no sugar", "no added sugar", "without sugar", "unsweetened", "diet", "0% sugar", "بدون سكر", "خالي من السكر", "خاليه من السكر", "بدون سكر مضاف", "بدون اضافة سكر", "زيرو", "دايت"],
+        "regular": ["regular", "عادي"]
+      }
+    },
+    "caffeine": {
+      "unmarked": [],
+      "values": {
+        "decaf": ["decaf", "decaffeinated", "caffeine free", "منزوع الكافيين", "منزوعه الكافيين", "خالي من الكافيين", "خاليه من الكافيين", "بدون كافيين", "ديكاف"]
+      }
+    },
+    "form": {
+      "unmarked": ["powder", "long_life", "fresh", "frozen"],
+      "values": {
+        "powder": ["powder", "powdered", "بودره", "مسحوق"],
+        "long_life": ["uht", "long life", "longlife", "طويل الاجل", "طويل الامد"],
+        "fresh": ["fresh", "طازج", "طازه"],
+        "frozen": ["frozen", "مجمد", "مثلج"]
+      }
+    },
+    "flavour": {
+      "unmarked": ["plain", "cheese", "honey", "almond", "coconut", "salted"],
+      "values": {
+        "plain": ["plain", "unflavoured", "unflavored", "ساده", "بدون نكهه"],
+        "strawberry": ["strawberry", "strawberries", "فراوله"],
+        "mango": ["mango", "مانجو", "مانجا", "منجا"],
+        "chocolate": ["chocolate", "choco", "شوكولاته", "شوكولا", "شيكولاته", "شوكولاتا"],
+        "vanilla": ["vanilla", "فانيلا", "فانيليا"],
+        "banana": ["banana", "موز"],
+        "orange": ["orange", "برتقال"],
+        "apple": ["apple", "تفاح"],
+        "grape": ["grape", "grapes", "عنب"],
+        "pineapple": ["pineapple", "اناناس"],
+        "lemon": ["lemon", "ليمون"],
+        "lime": ["lime", "ليم"],
+        "mint": ["mint", "نعناع"],
+        "peach": ["peach", "خوخ", "دراق"],
+        "apricot": ["apricot", "مشمش"],
+        "guava": ["guava", "جوافه"],
+        "pomegranate": ["pomegranate", "رمان"],
+        "cherry": ["cherry", "كرز"],
+        "blueberry": ["blueberry", "blueberries", "توت ازرق"],
+        "raspberry": ["raspberry", "توت العليق"],
+        "cranberry": ["cranberry", "توت بري"],
+        "mixed_berry": ["mixed berry", "mixed berries", "berry mix", "توت مشكل"],
+        "blackcurrant": ["blackcurrant", "black currant", "كشمش"],
+        "watermelon": ["watermelon", "بطيخ"],
+        "melon": ["melon", "شمام"],
+        "kiwi": ["kiwi", "كيوي"],
+        "passion_fruit": ["passion fruit", "passionfruit", "باشن فروت"],
+        "mixed_fruit": ["mixed fruit", "fruit cocktail", "cocktail", "كوكتيل", "فواكه مشكله"],
+        "tangerine": ["tangerine", "mandarin", "يوسفي", "يوسف افندي"],
+        "grapefruit": ["grapefruit", "جريب فروت"],
+        "lychee": ["lychee", "litchi", "ليتشي"],
+        "carrot": ["carrot", "جزر"],
+        "coconut": ["coconut", "جوز الهند"],
+        "caramel": ["caramel", "كراميل"],
+        "hazelnut": ["hazelnut", "بندق"],
+        "pistachio": ["pistachio", "فستق"],
+        "almond": ["almond", "لوز"],
+        "honey": ["honey", "عسل"],
+        "mocha": ["mocha", "موكا"],
+        "cookies_cream": ["cookies cream", "cookies and cream", "cookies n cream"],
+        "cheese": ["cheese", "cheddar", "جبن", "جبنه"],
+        "chili": ["chili", "chilli", "spicy", "حار"],
+        "bbq": ["bbq", "barbecue", "barbeque", "باربكيو"],
+        "salt_vinegar": ["salt vinegar", "salt and vinegar", "ملح وخل"],
+        "sour_cream_onion": ["sour cream onion", "sour cream and onion", "cream onion"],
+        "salted": ["salted", "مملح"],
+        "ginger": ["ginger", "زنجبيل"],
+        "cinnamon": ["cinnamon", "قرفه"],
+        "cardamom": ["cardamom", "هيل"],
+        "saffron": ["saffron", "زعفران"]
+      }
+    }
+  }
+}
