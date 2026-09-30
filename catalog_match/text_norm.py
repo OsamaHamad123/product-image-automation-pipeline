@@ -199,6 +199,36 @@ def url_host(url: Optional[str]) -> str:
     return host[4:] if host.startswith("www.") else host
 
 
+# Country sections of a UAE retailer's site: '/saudi-en/' (noon), '/en-kw/' (Lulu), '/kuwait/' (talabat).
+_UAE_MARKETS = frozenset({"ae", "uae"})
+_FOREIGN_MARKETS = frozenset({
+    "sa", "ksa", "saudi", "kw", "kuwait", "qa", "qatar", "om", "oman", "bh", "bahrain", "eg", "egypt",
+    "jo", "jordan", "in", "india", "pk", "pakistan",
+})
+_LOCALE_WORDS = frozenset({"en", "ar"})
+
+
+def store_market(page_url: Optional[str]) -> str:
+    """'uae', 'foreign' or '' from the country section of a store page ('/saudi-en/', '/en-ae/', '/kuwait/').
+
+    A leading language-only segment is skipped: talabat's Arabic pages are '/ar/kuwait/...'.
+    """
+    try:
+        path = _split_url(str(page_url or "").strip()).path
+    except ValueError:
+        return ""
+    for seg in [seg for seg in path.lower().split("/") if seg][:2]:
+        parts = [p for p in re.split(r"[-_]", seg) if p]
+        if not parts or len(parts) > 2 or not all(p in _UAE_MARKETS | _FOREIGN_MARKETS | _LOCALE_WORDS
+                                                  for p in parts):
+            return ""     # a product slug, not a country section
+        if not _FOREIGN_MARKETS.isdisjoint(parts):
+            return "foreign"
+        if not _UAE_MARKETS.isdisjoint(parts):
+            return "uae"
+    return ""
+
+
 def _decode(path: str) -> str:
     for _ in range(2):  # also undo one level of double encoding ('%2520')
         if not _PERCENT_ESC_RE.search(path):

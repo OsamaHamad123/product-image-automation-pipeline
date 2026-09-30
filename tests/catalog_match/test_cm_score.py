@@ -499,3 +499,25 @@ def test_rank_key_order_within_a_tier():
     ordered = rank(scored + [(rejected, score_candidate(spec, rejected))], {rejected.image_url: 1.0})
     assert ordered[-1][0] is rejected
     assert rank_key(twin_b, scored[1][1]) < rank_key(twin_a, scored[0][1])
+
+
+# -- a UAE store's other-country section is not a UAE page (review of the live-run fixes) ----------
+
+@pytest.mark.parametrize("page,expected_tier,trust_name", [
+    ("https://www.noon.com/uae-en/almarai-full-fat-milk-1l/N123/p/", 1, "uae_retailer"),
+    ("https://www.noon.com/saudi-en/almarai-full-fat-milk-1l/N123/p/", 2, "other_retail"),
+    ("https://www.talabat.com/ar/kuwait/grocery/almarai-full-fat-milk-1l", 2, "other_retail"),
+    ("https://www.luluhypermarket.com/en-kw/almarai-full-fat-milk-1l/p/123", 2, "other_retail"),
+])
+def test_other_country_section_of_a_uae_store_is_not_tier1(page, expected_tier, trust_name):
+    from catalog_match.identity import build_sku_spec
+    from catalog_match.models import Candidate
+    from catalog_match.score import score_candidate
+
+    spec = build_sku_spec({"name": "Almarai Full Fat Milk 1L", "brand": "Almarai"},
+                          {"almarai": {"brand": "Almarai", "synonyms": ["Almarai"]}})
+    cand = Candidate(image_url="https://f.nooncdn.com/p/pzsku/Z1/45/1.jpg", page_url=page,
+                     title="Almarai Full Fat Milk 1L", page_title="Almarai Full Fat Milk 1L", provider="serper")
+    score = score_candidate(spec, cand)
+    assert score.tier == expected_tier
+    assert score.matched["source_class"] == trust_name

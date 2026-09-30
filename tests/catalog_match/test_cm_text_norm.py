@@ -108,3 +108,17 @@ def test_tokens_and_hosts():
     assert url_host("https://WWW.Noon.com/uae-en/x") == "noon.com"
     assert url_host("carrefouruae.com/mafuae/en/x") == "carrefouruae.com"
     assert url_key("https://www.Shop.ae/img/A.jpg?w=300") == url_key("http://shop.ae/img/a.jpg")
+
+
+def test_store_market_reads_the_country_section_of_a_store_page():
+    from catalog_match.text_norm import store_market
+
+    assert store_market("https://www.noon.com/uae-en/some-product/N1/p/") == "uae"
+    assert store_market("https://www.noon.com/saudi-en/some-product/N1/p/") == "foreign"
+    assert store_market("https://www.luluhypermarket.com/en-kw/milk/p/1") == "foreign"
+    assert store_market("https://www.talabat.com/ar/kuwait/grocery/x") == "foreign"
+    assert store_market("https://www.talabat.com/ar/uae/grocery/x") == "uae"
+    # a product slug is not a country section, even when it contains a country word
+    assert store_market("https://www.carrefouruae.com/mafuae/en/saudi-coffee-250g/p/1") == ""
+    assert store_market("https://www.amazon.ae/dp/B0TEST") == ""
+    assert store_market("") == "" and store_market(None) == ""

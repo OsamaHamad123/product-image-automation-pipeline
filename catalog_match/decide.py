@@ -63,7 +63,7 @@ from __future__ import annotations
 import logging
 import re
 from typing import Dict, Iterable, List, Optional, Sequence, Set, Union
-from urllib.parse import unquote, urlsplit
+from urllib.parse import unquote
 
 from . import quality as quality_mod
 from . import settings
@@ -75,7 +75,7 @@ from .models import (
 )
 from .score import page_host, trusted_domains
 from .sizes import compare, parse_sizes, product_size
-from .text_norm import domain_matches, normalize, phrase_in, url_host, url_path_text
+from .text_norm import domain_matches, normalize, phrase_in, store_market, url_host, url_path_text
 
 logger = logging.getLogger(__name__)
 
@@ -113,13 +113,6 @@ _SOCIAL_DOMAINS = ("x.com", "fb.com", "t.co", "redd.it", "threads.net")
 _FOREIGN_TLDS = frozenset({"kw", "sa", "qa", "om", "bh", "in", "pk", "eg", "jo"})
 # 'other_retail' stores (trusted_domains.json) that are UAE stores without an .ae domain.
 _UAE_DOTCOM_STORES = ("westzone.com", "instashop.com")
-# Country sections of a UAE retailer's site: '/saudi-en/' (noon), '/en-kw/' (Lulu), '/kuwait/' (talabat).
-_UAE_MARKETS = frozenset({"ae", "uae"})
-_FOREIGN_MARKETS = frozenset({
-    "sa", "ksa", "saudi", "kw", "kuwait", "qa", "qatar", "om", "oman", "bh", "bahrain", "eg", "egypt",
-    "jo", "jordan", "in", "india", "pk", "pakistan",
-})
-_LOCALE_WORDS = frozenset({"en", "ar"})
 
 
 # ---------------------------------------------------------------------------
@@ -303,27 +296,6 @@ def _social_host(host: str) -> bool:
     return domain_matches(host, _SOCIAL_DOMAINS) or not _SOCIAL_LABELS.isdisjoint(host.split(".")[:-1])
 
 
-def _path_market(page_url: str) -> str:
-    """'uae', 'foreign' or '' from the country section of a store page ('/saudi-en/', '/en-ae/', '/kuwait/').
-
-    A leading language-only segment is skipped: talabat's Arabic pages are '/ar/kuwait/...'.
-    """
-    try:
-        path = urlsplit(page_url or "").path
-    except ValueError:
-        return ""
-    for seg in [seg for seg in path.lower().split("/") if seg][:2]:
-        parts = [p for p in re.split(r"[-_]", seg) if p]
-        if not parts or len(parts) > 2 or not all(p in _UAE_MARKETS | _FOREIGN_MARKETS | _LOCALE_WORDS
-                                                  for p in parts):
-            return ""     # a product slug, not a country section
-        if not _FOREIGN_MARKETS.isdisjoint(parts):
-            return "foreign"
-        if not _UAE_MARKETS.isdisjoint(parts):
-            return "uae"
-    return ""
-
-
 def _foreign_store(spec: SkuSpec, cand: Candidate) -> bool:
     """True when the page is a store outside the UAE (the pack may differ from the UAE one)."""
     host = page_host(cand) or url_host(cand.image_url)
@@ -331,7 +303,7 @@ def _foreign_store(spec: SkuSpec, cand: Candidate) -> bool:
         return False
     data = trusted_domains()
     if domain_matches(host, data.get("uae_retailers", [])):
-        return _path_market(cand.page_url) == "foreign"
+        return store_market(cand.page_url) == "foreign"
     if host.endswith(".ae") or domain_matches(host, _UAE_DOTCOM_STORES):
         return False
     if host.rsplit(".", 1)[-1] in _FOREIGN_TLDS:

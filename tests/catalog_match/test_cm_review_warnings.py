@@ -290,11 +290,12 @@ def test_warnings_never_change_the_winner_or_the_decision(monkeypatch):
 def test_route_stays_idempotent_with_warnings():
     cand = milk(image_url="https://img.example.com/WhatsApp%20Image%202025.jpeg",
                 page_url="https://www.noon.com/saudi-en/almarai-full-fat-milk-1l/N1/p/")
-    winner = rc(MILK, cand, reading("UNSURE"), size=(300, 300))
+    # A noon /saudi-en/ page is not a UAE retailer page (tier 2), so the pick needs a verified MATCH.
+    winner = rc(MILK, cand, reading("MATCH"), size=(300, 300))
     first = decide.route(MILK, [winner], OK, HEALTHY, set())
     snapshot = list(winner.reasons)
-    assert warns(winner) == ["warn:vlm_unsure", "warn:low_resolution", "warn:chat_or_screenshot",
-                             "warn:foreign_store"]
+    assert first.winner is winner
+    assert warns(winner) == ["warn:low_resolution", "warn:chat_or_screenshot", "warn:foreign_store"]
     second = decide.route(MILK, first.ranked, OK, HEALTHY, set())
     assert winner.reasons == snapshot and second.decision == first.decision
 

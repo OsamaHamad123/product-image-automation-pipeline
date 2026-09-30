@@ -67,7 +67,7 @@ from .gtin import normalize_gtin
 from .models import Candidate, CandidateScore, SkuSpec
 from .sizes import compare, compare_pack, parse_sizes
 from .text_norm import (
-    any_phrase_in, domain_matches, is_arabic, match_string, tokens, url_host, url_path_text,
+    any_phrase_in, domain_matches, is_arabic, match_string, store_market, tokens, url_host, url_path_text,
 )
 
 logger = logging.getLogger(__name__)
@@ -232,6 +232,9 @@ def source_trust(spec: SkuSpec, cand: Candidate) -> Tuple[int, str]:
     if host and domain_matches(host, spec.official_domains):
         return TRUST_OFFICIAL, TRUST_NAMES[TRUST_OFFICIAL]
     if host and domain_matches(host, data.get("uae_retailers", [])):
+        # The same store's other-country section ('/saudi-en/', '/en-kw/') sells the foreign pack.
+        if store_market(cand.page_url) == "foreign":
+            return TRUST_OTHER_RETAIL, TRUST_NAMES[TRUST_OTHER_RETAIL]
         return TRUST_UAE_RETAILER, TRUST_NAMES[TRUST_UAE_RETAILER]
     if (host and domain_matches(host, data.get("structured", []))) or (
         (cand.provider or "").lower() in set(data.get("structured_providers", []))
