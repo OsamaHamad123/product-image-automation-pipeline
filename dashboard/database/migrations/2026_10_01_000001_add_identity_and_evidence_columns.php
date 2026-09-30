@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\Schema;
  * - automation_queue: sku_key, payload_json, worker_id, lease_until, failure_code, trace_json
  * - curation_candidates: sku_key, run_id, status, reasons_json, evidence_json, vlm_json,
  *   content_sha256, identity_tier، وتحويل title إلى TEXT
+ * - curation_candidates.page_url و automation_state.notice
  * - resolved_products: sku_key, verification_status, approved_by
  * - جدول rejected_images لقرارات الرفض البشرية
  * كل إضافة محمية بـ hasColumn/hasTable لأن بايثون قد يكون أضاف العمود نفسه مسبقاً.
@@ -49,6 +50,12 @@ return new class extends Migration
             'vlm_json' => fn (Blueprint $t) => $t->longText('vlm_json')->nullable(),
             'content_sha256' => fn (Blueprint $t) => $t->string('content_sha256', 64)->nullable(),
             'identity_tier' => fn (Blueprint $t) => $t->unsignedTinyInteger('identity_tier')->nullable(),
+            'page_url' => fn (Blueprint $t) => $t->text('page_url')->nullable(),
+        ]);
+
+        // رسالة حالة العامل (فحص نموذج Gemini / انقطاع المزودين) كما يكتبها main.py
+        $this->addMissing('automation_state', [
+            'notice' => fn (Blueprint $t) => $t->string('notice', 255)->nullable(),
         ]);
 
         // عناوين صفحات المنتجات تتجاوز 255 حرفاً وكانت تُسقط حفظ الصف كاملاً (WF-M6)
@@ -90,7 +97,8 @@ return new class extends Migration
 
         $drops = [
             'automation_queue' => ['sku_key', 'payload_json', 'worker_id', 'lease_until', 'failure_code', 'trace_json'],
-            'curation_candidates' => ['sku_key', 'run_id', 'reasons_json', 'evidence_json', 'vlm_json', 'content_sha256', 'identity_tier'],
+            'curation_candidates' => ['sku_key', 'run_id', 'reasons_json', 'evidence_json', 'vlm_json', 'content_sha256', 'identity_tier', 'page_url'],
+            'automation_state' => ['notice'],
             'resolved_products' => ['sku_key', 'verification_status', 'approved_by'],
         ];
         foreach ($drops as $table => $columns) {

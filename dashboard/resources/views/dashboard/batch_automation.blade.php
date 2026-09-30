@@ -1549,6 +1549,7 @@
         box.textContent = `للمراجعة: ${data.ready_for_review || 0} | معتمدة: ${data.approved || 0} | بانتظار: ${q.pending || 0} | فشل: ${q.failed || 0}`;
         const codes = Object.entries(data.failed_by_code || {});
         codesBox.textContent = codes.length ? codes.map(([code, n]) => `${code}: ${n}`).join(' | ') : 'لا توجد رموز فشل';
+        if (data.notice) codesBox.textContent += ` | تنبيه العامل: ${data.notice}`;
     }
 
     // Fetch review candidates

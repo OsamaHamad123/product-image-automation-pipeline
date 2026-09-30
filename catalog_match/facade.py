@@ -105,6 +105,15 @@ def evidence(rc: RankedCandidate) -> Dict[str, Any]:
     """Identity evidence chips for the review UI (GTIN, brand, size, variant, source)."""
     score = rc.score
     matched = dict(score.matched or {}) if score is not None else {}
+    variants_matched = list(matched.get("variants") or [])
+    variant_conflict = score is not None and any(
+        str(r).startswith("variant_conflict") for r in tuple(score.hard_reject) + tuple(score.conflicts))
+    if variant_conflict:
+        variant_status = "conflict"
+    elif variants_matched:
+        variant_status = "match"
+    else:
+        variant_status = "unknown"
     return _json_safe({
         "tier": score.tier if score is not None else None,
         "gtin": matched.get("gtin"),
@@ -112,7 +121,10 @@ def evidence(rc: RankedCandidate) -> Dict[str, Any]:
         "brand_fields": matched.get("brand_fields"),
         "size": score.size_status if score is not None else "unknown",
         "pack": matched.get("pack"),
-        "variants_matched": matched.get("variants") or [],
+        "variants_matched": variants_matched,
+        # the review UI's Variant chip reads variant_status / variants
+        "variant_status": variant_status,
+        "variants": variants_matched,
         "variants_found": matched.get("variants_found") or {},
         "coverage": matched.get("coverage"),
         "source_class": matched.get("source_class"),

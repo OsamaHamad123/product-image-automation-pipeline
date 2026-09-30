@@ -477,12 +477,16 @@ def process_single_product(prod, worksheet, link_column_index, brand_mappings=No
         config.log_and_fail(barcode, name, brand, f"{code}: لم يتم العثور على صورة مقبولة.")
         return "failed"
 
-    if getattr(config, 'CURATION_MODE', False):
+    # REVIEW_UNSELECTED (url=None): لا يوجد اختيار مسبق؛ تُحفظ المرشحات للمراجعة ولا يُنشر ولا يُكتب شيء في الشيت
+    if getattr(config, 'CURATION_MODE', False) or not best.get("url"):
         candidates = collect_candidates(best, trace)
         if not local_cache_db.save_curation_candidates(row_num, name, brand, candidates, best.get("url"),
                                                        sku_key=sku_key, run_id=uuid.uuid4().hex[:16]):
             config.log_and_fail(barcode, name, brand, "CANDIDATE_SAVE_FAILED: تعذر حفظ المرشحات.")
             return "failed"
+        if not best.get("url"):
+            print(f"الصف {row_num}: لا يوجد مرشح مؤكد ({best.get('decision')}); المرشحات محفوظة للمراجعة.")
+            return "success"
         ok = google_sheets.update_image_link(worksheet, row_num, link_column_index, f"needs_review:{best['url']}",
                                              barcode=barcode, product_name=name)
         return "success" if ok else "failed"

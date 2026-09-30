@@ -128,7 +128,23 @@ def action_get_products(params):
     except Exception as e:
         return {'status': 'failed', 'error': str(e)}
     failures = local_cache_db.get_product_failures()
+    # sku_key لكل منتج (نفس حساب الطابور) حتى تربط لوحة التحكم المرشحات بالمنتج وليس برقم الصف
+    brand_mappings = _load_brand_mappings() if products else {}
+    pipeline = _pipeline() if products else None
+    if products:
+        try:
+            from catalog_match.brand_index import BrandIndex
+            brand_mappings = BrandIndex.from_mappings(brand_mappings)   # يُبنى مرة واحدة لكل الصفوف
+        except Exception as e:
+            logger.warning("تعذر بناء فهرس البراندات: %s", e)
     for prod in products:
+        try:
+            prod["sku_key"] = pipeline.compute_sku_key(pipeline.sku_row(
+                prod.get("product_name"), prod.get("brand"), prod.get("barcode"), {
+                    "name_ar": prod.get("product_name_ar", ""), "brand_ar": prod.get("brand_ar", ""),
+                    "category": prod.get("category", ""), "size": prod.get("size", "")}), brand_mappings)
+        except Exception as e:
+            logger.warning("تعذر حساب sku_key للصف %s: %s", prod.get("row_number"), e)
         barcode = (prod.get("barcode") or "").strip()
         alt_barcode = f"ERR_{prod.get('product_name')}_{prod.get('brand')}".replace(" ", "_")
         failure = failures.get(barcode) if barcode else None

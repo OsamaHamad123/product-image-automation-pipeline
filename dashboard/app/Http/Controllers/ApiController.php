@@ -271,6 +271,7 @@ class ApiController extends Controller
         $currentProduct = "";
         
         $pauseRequested = 0;
+        $notice = '';
         try {
             $stateRow = \DB::select("SELECT * FROM automation_state WHERE `key` = 'active_session' LIMIT 1");
             if (!empty($stateRow)) {
@@ -281,6 +282,7 @@ class ApiController extends Controller
                 $failed = $stateRow[0]->failed_count;
                 $currentProduct = $stateRow[0]->current_product_name;
                 $pauseRequested = $stateRow[0]->pause_requested;
+                $notice = (string) ($stateRow[0]->notice ?? '');
             }
         } catch (\Exception $e) {
             // Table not loaded yet
@@ -353,6 +355,8 @@ class ApiController extends Controller
             'ready_for_review' => $counters['by_status']['ready_for_review'] ?? 0,
             'approved' => $counters['by_status']['completed'] ?? 0,
             'failed_by_code' => $counters['by_failure_code'],
+            // حالة المحقق/المزودين كما يكتبها العامل (مثلاً نموذج Gemini غير متاح)
+            'notice' => $notice,
         ];
         
         return response()->json($response)->header('Cache-Control', 'no-store');
