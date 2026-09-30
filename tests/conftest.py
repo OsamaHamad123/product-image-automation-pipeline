@@ -117,3 +117,17 @@ class FakeConnection:
 def fake_connection():
     """The FakeConnection class: FakeConnection(responder) records every executed statement."""
     return FakeConnection
+
+
+@pytest.fixture(autouse=True)
+def _reset_learned_provider_state():
+    """Providers learn per-process facts from live answers (a free Serper plan refuses site:, a CSE key gets
+    403). Tests must not leak that learning into each other."""
+    yield
+    try:
+        from catalog_match.providers.cse_legacy import CseLegacyProvider
+        from catalog_match.providers.serper import SerperImagesProvider
+    except Exception:  # pragma: no cover - catalog_match not importable
+        return
+    SerperImagesProvider.operators_blocked = False
+    CseLegacyProvider.disabled_reason = None

@@ -176,3 +176,51 @@ def test_one_structured_log_line_and_no_print(caplog, capsys):
     assert "provider=serper" in lines[0] and "status=ok" in lines[0]
     assert "count=4" in lines[0] and "latency_ms=" in lines[0]
     assert capsys.readouterr().out == ""
+
+
+class SequenceSession:
+    """Answers each post with the next response, recording the query sent."""
+
+    def __init__(self, *responses):
+        self.responses = list(responses)
+        self.queries = []
+
+    def post(self, url, **kwargs):
+        self.queries.append(kwargs["json"]["q"])
+        return self.responses.pop(0)
+
+
+NOT_ALLOWED = FakeResponse(400, text='{"message":"Query pattern not allowed for free accounts","statusCode":400}')
+SITE_QUERY = "Almarai Fresh Milk Full Fat 1L (site:carrefouruae.com OR site:noon.com)"
+
+
+def test_free_plan_site_query_falls_back_to_a_plain_uae_query():
+    session = SequenceSession(NOT_ALLOWED, FakeResponse(200, load("serper_images_ok.json")))
+    res = provider(session).search(SITE_QUERY, "en", SPEC)
+    assert res.status == "ok" and res.candidates
+    assert session.queries == [SITE_QUERY, "Almarai Fresh Milk Full Fat 1L UAE"]
+
+
+def test_once_refused_site_queries_are_sent_plain_without_a_wasted_call():
+    first = SequenceSession(NOT_ALLOWED, FakeResponse(200, load("serper_images_ok.json")))
+    provider(first).search(SITE_QUERY, "en", SPEC)
+    later = SequenceSession(FakeResponse(200, load("serper_images_ok.json")))
+    provider(later).search("Al Rawabi Laban 180ml (site:noon.com OR site:amazon.ae)", "en", SPEC)
+    assert later.queries == ["Al Rawabi Laban 180ml UAE"]
+
+
+def test_other_400s_are_not_treated_as_the_free_plan_limit():
+    session = SequenceSession(FakeResponse(400, text='{"message":"Not enough credits"}'))
+    res = provider(session).search(SITE_QUERY, "en", SPEC)
+    assert res.status == "quota" and session.queries == [SITE_QUERY]
+    assert SerperImagesProvider.operators_blocked is False
+
+
+def test_amazon_overlay_modifiers_are_stripped_from_image_urls():
+    body = {"images": [{"imageUrl": "https://m.media-amazon.com/images/I/71Q2ZbQf6xL._BO30,255,255,255_UF900,850_SR1910,1000,0,C_ZJPHNwbGFj,500,300,420,420,0,0_PIRIOFOUR-medium,BottomLeft,30,-20_QL100_.jpg",
+                        "link": "https://www.amazon.ae/dp/B0", "title": "Ashoka Asli Plain Paratha 400g", "position": 1},
+                       {"imageUrl": "https://f.nooncdn.com/p/pnsku/N1/45/_/1/abc.jpg?format=avif&width=240",
+                        "link": "https://www.noon.com/p/1", "title": "x", "position": 2}]}
+    res = provider(SequenceSession(FakeResponse(200, body))).search("q", "en", SPEC)
+    assert [c.image_url for c in res.candidates] == ["https://m.media-amazon.com/images/I/71Q2ZbQf6xL.jpg",
+                                                     "https://f.nooncdn.com/p/pnsku/N1/45/_/1/abc.jpg"]

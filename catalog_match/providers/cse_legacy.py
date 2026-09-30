@@ -46,6 +46,9 @@ class CseLegacyProvider(BaseProvider):
     rate_per_min = 60.0
     burst = 3
     timeout = 10.0
+    # Set once per process when every key is refused with 403 (Custom Search API not enabled for the
+    # project, or the key restricted): create() then returns None, so later SKUs stop paying the round trip.
+    disabled_reason: Optional[str] = None
 
     def __init__(self, api_keys: Sequence[str], cx_list: Sequence[str], today: Optional[_dt.date] = None,
                  sunset: Optional[_dt.date] = None, session: Any = None, bucket: Any = None,
@@ -65,7 +68,7 @@ class CseLegacyProvider(BaseProvider):
         """The provider, or None when no key is configured or the sunset date has passed."""
         keys = settings.google_search_api_keys() if api_keys is None else list(api_keys)
         cxs = settings.google_search_cx_list() if cx_list is None else list(cx_list)
-        if not cse_allowed(keys, cxs, today, sunset):
+        if not cse_allowed(keys, cxs, today, sunset) or cls.disabled_reason:
             return None
         return cls(keys, cxs, today=today, sunset=sunset, **kwargs)
 
@@ -86,6 +89,7 @@ class CseLegacyProvider(BaseProvider):
             raise RuntimeError("Google CSE is past CSE_SUNSET_DATE")
         http = self._session or requests
         last: Optional[ProviderHTTPError] = None
+        statuses: List[int] = []
         for idx, key in enumerate(self.api_keys):
             cx = self.cx_list[idx] if idx < len(self.cx_list) else self.cx_list[0]
             resp = http.get(CSE_URL, params=self.params_for(query, hl, key, cx), timeout=self.timeout)
@@ -94,8 +98,13 @@ class CseLegacyProvider(BaseProvider):
             body = response_text(resp)
             logger.warning("cse_legacy: key #%d http_status=%s body=%r", idx, resp.status_code, body[:500])
             last = ProviderHTTPError(resp.status_code, body)
+            statuses.append(resp.status_code)
             if resp.status_code not in _ROTATE_ON:
                 break
+        if statuses and len(statuses) == len(self.api_keys) and all(s == 403 for s in statuses):
+            CseLegacyProvider.disabled_reason = "http_403"
+            logger.warning("cse_legacy: every key was refused with 403 (Custom Search API not enabled for the "
+                           "project, or the key is restricted); Google CSE is skipped for the rest of this run")
         raise last or ProviderHTTPError(0, "no key tried")
 
 

@@ -21,6 +21,8 @@ from typing import Any, List, Optional
 from ..models import Candidate, ProviderResult, SkuSpec
 from .. import ratelimit
 from ..text_norm import url_host
+import re
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 logger = logging.getLogger("catalog_match.providers")
 
@@ -63,6 +65,36 @@ def to_int(value: Any) -> Optional[int]:
     except (TypeError, ValueError):
         return None
     return n if n > 0 else None
+
+
+_AMAZON_IMAGE_HOSTS = ("media-amazon.com", "ssl-images-amazon.com", "images-amazon.com")
+# /images/I/<id>.<modifiers>.<ext>: the modifiers resize the image and can draw overlays onto it
+# (star rating, review count, "Amazon's Choice" badges), e.g. ._BO30,255,255,255_..._PIRIOFOUR-medium..._.jpg
+_AMAZON_MODIFIED = re.compile(r"^(/images/[IG]/[^/.]+)\.[^/]+\.(jpe?g|png|gif|webp)$", re.I)
+# Query parameters that only ask a retailer CDN for a smaller or re-encoded copy.
+_RESIZE_PARAMS = {
+    "nooncdn.com": {"width", "height", "format", "quality"},
+    "mafrservices.com": {"im"},              # Carrefour UAE (Akamai Image Manager policies)
+}
+
+
+def canonical_image_url(url: str) -> str:
+    """The original, unmodified image behind a retailer CDN URL (unknown hosts are returned unchanged)."""
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return url
+    host = (parts.hostname or "").lower()
+    if any(host == h or host.endswith("." + h) for h in _AMAZON_IMAGE_HOSTS):
+        m = _AMAZON_MODIFIED.match(parts.path)
+        if m:
+            return urlunsplit((parts.scheme, parts.netloc, f"{m.group(1)}.{m.group(2)}", "", ""))
+        return url
+    for suffix, params in _RESIZE_PARAMS.items():
+        if host == suffix or host.endswith("." + suffix):
+            kept = [(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True) if k.lower() not in params]
+            return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(kept), parts.fragment))
+    return url
 
 
 def page_domain(page_url: str, domain: str = "", image_url: str = "") -> str:
@@ -109,7 +141,8 @@ class BaseProvider:
         """Stamp provider identity on every candidate; a scraped source is never sanctioned."""
         out = []
         for c in cands:
-            out.append(replace(c, provider=self.name, sanctioned=bool(self.sanctioned and c.sanctioned)))
+            out.append(replace(c, image_url=canonical_image_url(c.image_url), provider=self.name,
+                               sanctioned=bool(self.sanctioned and c.sanctioned)))
         return out
 
     # ----------------------------------------------------------------- public

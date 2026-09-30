@@ -2,8 +2,15 @@
 
 HttpFetcher.fetch(cands, spec) -> list[FetchedImage]
     * takes the first 8 candidates (the caller passes them in pre-download rank order)
-      and downloads them in parallel on a pool of 6 threads with `requests`;
-    * timeout 10 s; one retry on a timeout or a 5xx, no other retries;
+      and downloads them in parallel on a pool of 6 threads;
+    * the client is curl_cffi with a Chrome TLS fingerprint when it is installed (retailer CDNs
+      behind Akamai/Cloudflare, e.g. Lulu, stall plain Python clients until they time out),
+      else `requests`;
+    * the first attempt is always direct. At most one more attempt: after a timeout, a 5xx or a
+      connection error, and also after a 403/429 when a proxy is configured. That second attempt
+      goes through PROXY_URL when one is set (it is a fallback, never the only route: a slow
+      proxy must not fail every download);
+    * timeout 10 s per attempt;
     * body size window 3 KB .. 15 MB;
     * Accept 'image/avif,image/webp,image/png,image/jpeg;q=0.9,*/*;q=0.5' and
       Referer = candidate.page_url when there is one (many CDNs block hotlinks);
@@ -33,6 +40,11 @@ from typing import List, Optional, Tuple
 import requests
 from PIL import Image, ImageOps, UnidentifiedImageError
 
+try:  # browser TLS fingerprint; a hard dependency in requirements.txt, optional here
+    from curl_cffi import requests as _curl_requests
+except Exception:  # pragma: no cover - depends on the environment
+    _curl_requests = None
+
 from . import settings
 from .models import Candidate, FetchedImage, SkuSpec
 
@@ -43,6 +55,7 @@ USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 )
+IMPERSONATE = "chrome"
 MAX_FETCH = 8
 WORKERS = 6
 TIMEOUT_S = 10.0
@@ -66,12 +79,19 @@ def _store_dir(explicit: Optional[str]) -> Path:
     return path
 
 
-class _Retry(Exception):
-    """Internal: the attempt failed in a way that earns the single retry."""
+def _is_timeout(exc: BaseException) -> bool:
+    text = f"{type(exc).__name__} {exc}".lower()
+    return "timeout" in text or "timed out" in text
 
-    def __init__(self, error: str):
-        super().__init__(error)
-        self.error = error
+
+def _retryable(error: Optional[str]) -> bool:
+    """Transient failures: the one extra attempt may succeed."""
+    return error in ("timeout", "connection_error") or bool(error and error.startswith("http_5"))
+
+
+def _blocked(error: Optional[str]) -> bool:
+    """The source refused this client; only a different route (the proxy) can help."""
+    return error in ("http_403", "http_429")
 
 
 class HttpFetcher:
@@ -109,29 +129,29 @@ class HttpFetcher:
             headers["Referer"] = cand.page_url
         return headers
 
-    def _get(self, url: str, headers: dict):
-        getter = self.session.get if self.session is not None else requests.get
-        proxy = settings.proxy_url()
-        kwargs = {"headers": headers, "timeout": self.timeout, "stream": True, "allow_redirects": True}
+    def _get(self, url: str, headers: dict, proxy: Optional[str] = None):
+        kwargs = {"headers": dict(headers), "timeout": self.timeout, "stream": True, "allow_redirects": True}
+        if self.session is not None:
+            getter = self.session.get
+        elif _curl_requests is not None:
+            getter = _curl_requests.get
+            kwargs["impersonate"] = IMPERSONATE
+            kwargs["headers"].pop("User-Agent", None)   # the impersonated browser sends its own, matching the TLS fingerprint
+        else:
+            getter = requests.get
         if proxy:
             kwargs["proxies"] = {"http": proxy, "https": proxy}
         return getter(url, **kwargs)
 
-    def _download(self, url: str, headers: dict) -> Tuple[Optional[bytes], Optional[str], str]:
-        """(body, error, content_type) for one attempt; raises _Retry for timeout / 5xx."""
+    def _download(self, url: str, headers: dict, proxy: Optional[str] = None) -> Tuple[Optional[bytes], Optional[str], str]:
+        """(body, error, content_type) for one attempt. Never raises."""
         try:
-            resp = self._get(url, headers)
-        except requests.Timeout:
-            raise _Retry("timeout")
-        except requests.RequestException as exc:
-            if "timed out" in str(exc).lower():
-                raise _Retry("timeout")
-            logger.debug("fetch %s: %s", url, exc)
-            return None, "connection_error", ""
+            resp = self._get(url, headers, proxy)
+        except Exception as exc:
+            logger.debug("fetch %s%s: %s", url, " via proxy" if proxy else "", type(exc).__name__)
+            return None, "timeout" if _is_timeout(exc) else "connection_error", ""
         try:
             status = int(getattr(resp, "status_code", 0) or 0)
-            if status >= 500:
-                raise _Retry(f"http_{status}")
             if status != 200:
                 return None, f"http_{status}", ""
             headers_in = getattr(resp, "headers", None) or {}
@@ -151,12 +171,8 @@ class HttpFetcher:
                     buf.extend(chunk)
                     if len(buf) > self.max_bytes:
                         return None, "too_large", ctype
-            except requests.Timeout:
-                raise _Retry("timeout")
-            except requests.RequestException as exc:
-                if "timed out" in str(exc).lower():
-                    raise _Retry("timeout")
-                return None, "connection_error", ctype
+            except Exception as exc:
+                return None, "timeout" if _is_timeout(exc) else "connection_error", ctype
             return bytes(buf), None, ctype
         finally:
             close = getattr(resp, "close", None)
@@ -171,18 +187,11 @@ class HttpFetcher:
         if not url.lower().startswith(("http://", "https://")):
             return FetchedImage(candidate=cand, ok=False, error="bad_url")
         headers = self._headers(cand)
-        body: Optional[bytes] = None
-        error: Optional[str] = None
-        ctype = ""
-        for attempt in (1, 2):
-            try:
-                body, error, ctype = self._download(url, headers)
-                break
-            except _Retry as retry:
-                error = retry.error
-                if attempt == 2:
-                    body = None
-                logger.debug("fetch %s: %s (attempt %d)", url, retry.error, attempt)
+        proxy = settings.proxy_url() or None
+        body, error, ctype = self._download(url, headers)
+        if body is None and (_retryable(error) or (proxy and _blocked(error))):
+            logger.debug("fetch %s: %s, retrying%s", url, error, " via proxy" if proxy else "")
+            body, error, ctype = self._download(url, headers, proxy)
         if body is None:
             return FetchedImage(candidate=cand, ok=False, error=error or "error")
         return self._decode_and_store(cand, body, ctype)

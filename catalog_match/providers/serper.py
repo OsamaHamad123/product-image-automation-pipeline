@@ -11,6 +11,7 @@ Every image keeps the page evidence Google returned with it:
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, List, Optional
 
 import requests
@@ -23,6 +24,23 @@ logger = logging.getLogger(__name__)
 
 SERPER_IMAGES_URL = "https://google.serper.dev/images"
 
+# Free Serper accounts answer 400 "Query pattern not allowed for free accounts" to site:/OR queries.
+_SITE_CLAUSE = re.compile(r"\(?\s*site:\S+(?:\s+OR\s+site:\S+)*\s*\)?", re.I)
+
+
+def has_site_operators(query: str) -> bool:
+    return bool(re.search(r"(?i)\bsite:", query or ""))
+
+
+def without_site_operators(query: str) -> str:
+    """The query with its site:/OR clause replaced by a plain 'UAE' hint (still aimed at UAE retailer pages)."""
+    plain = re.sub(r"\s+", " ", _SITE_CLAUSE.sub(" ", query or "")).strip()
+    return plain if re.search(r"(?i)\buae\b", plain) else f"{plain} UAE".strip()
+
+
+def _pattern_not_allowed(status: int, body: str) -> bool:
+    return status == 400 and "not allowed" in (body or "").lower()
+
 
 class SerperImagesProvider(BaseProvider):
     name = "serper"
@@ -30,6 +48,8 @@ class SerperImagesProvider(BaseProvider):
     rate_per_min = 120.0
     burst = 5
     timeout = 15.0
+    # Learned once per process: this account refuses site: operators, so send the plain form directly.
+    operators_blocked = False
 
     def __init__(self, api_key: Optional[str] = None, session: Any = None, bucket: Any = None,
                  timeout: Optional[float] = None, num: int = 20, gl: str = "ae") -> None:
@@ -49,18 +69,30 @@ class SerperImagesProvider(BaseProvider):
             return "quota"
         return "error"
 
-    def _search(self, query: str, hl: str, spec: SkuSpec) -> List[Candidate]:
-        key = self.api_key()
-        if not key:
-            raise RuntimeError("no SERPER_API_KEY configured")
+    def _post(self, key: str, query: str, hl: str):
         payload = {"q": query, "gl": self.gl, "hl": hl or "en", "num": self.num}
         http = self._session or requests
-        resp = http.post(
+        return http.post(
             SERPER_IMAGES_URL,
             headers={"X-API-KEY": key, "Content-Type": "application/json"},
             json=payload,
             timeout=self.timeout,
         )
+
+    def _search(self, query: str, hl: str, spec: SkuSpec) -> List[Candidate]:
+        key = self.api_key()
+        if not key:
+            raise RuntimeError("no SERPER_API_KEY configured")
+        if SerperImagesProvider.operators_blocked and has_site_operators(query):
+            query = without_site_operators(query)
+        resp = self._post(key, query, hl)
+        if resp.status_code != 200 and has_site_operators(query) \
+                and _pattern_not_allowed(resp.status_code, response_text(resp)):
+            SerperImagesProvider.operators_blocked = True
+            logger.warning("serper: this account does not allow site: operators (free plan); "
+                           "retailer-scoped queries are sent without them from now on")
+            query = without_site_operators(query)
+            resp = self._post(key, query, hl)
         if resp.status_code != 200:
             raise ProviderHTTPError(resp.status_code, response_text(resp))
         data = resp.json()

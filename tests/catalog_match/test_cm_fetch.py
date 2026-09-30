@@ -77,7 +77,9 @@ class FakeRequests:
 def fake(monkeypatch):
     def install(routes):
         f = FakeRequests(routes)
+        monkeypatch.setattr(fetch_mod, "_curl_requests", None)      # plain requests path
         monkeypatch.setattr(fetch_mod.requests, "get", f.get)
+        monkeypatch.setattr(fetch_mod.settings, "proxy_url", lambda: "")
         return f
     return install
 
@@ -218,3 +220,74 @@ def test_phash_distance():
     assert phash_distance("ffff000000000000", "ffff000000000001") == 1
     assert phash_distance(None, "00") is None
     assert phash_distance("zz", "00") is None
+
+
+# ---------------------------------------------------------------------------
+# Routes: direct first, the proxy only as the second attempt; browser fingerprint
+# ---------------------------------------------------------------------------
+
+PROXY = "http://user:pw@proxy.example:8080"
+
+
+def test_proxy_is_a_fallback_not_the_only_route(fake, tmp_path, monkeypatch):
+    body = _jpeg()
+    f = fake({
+        "https://a.ae/ok.jpg": [FakeResponse(200, body)],
+        "https://a.ae/slow.jpg": [requests.Timeout("read timed out"), FakeResponse(200, _jpeg(seed=1))],
+    })
+    monkeypatch.setattr(fetch_mod.settings, "proxy_url", lambda: PROXY)
+    ok, slow = HttpFetcher(store_dir=str(tmp_path)).fetch([_cand("https://a.ae/ok.jpg"), _cand("https://a.ae/slow.jpg")], None)
+    assert ok.ok and slow.ok
+    assert "proxies" not in f.calls_for("https://a.ae/ok.jpg")[0]          # a working direct download never uses the proxy
+    first, second = f.calls_for("https://a.ae/slow.jpg")
+    assert "proxies" not in first and second["proxies"] == {"http": PROXY, "https": PROXY}
+
+
+def test_403_is_retried_through_the_proxy_only_when_one_is_configured(fake, tmp_path, monkeypatch):
+    f = fake({"https://a.ae/geo.jpg": [FakeResponse(403, b"forbidden", "text/html"), FakeResponse(200, _jpeg())]})
+    monkeypatch.setattr(fetch_mod.settings, "proxy_url", lambda: PROXY)
+    [res] = HttpFetcher(store_dir=str(tmp_path)).fetch([_cand("https://a.ae/geo.jpg")], None)
+    assert res.ok
+    assert [("proxies" in kw) for kw in f.calls_for("https://a.ae/geo.jpg")] == [False, True]
+
+
+def test_connection_error_is_retried_once(fake, tmp_path):
+    f = fake({"https://a.ae/reset.jpg": [requests.ConnectionError("reset"), FakeResponse(200, _jpeg())]})
+    [res] = HttpFetcher(store_dir=str(tmp_path)).fetch([_cand("https://a.ae/reset.jpg")], None)
+    assert res.ok and len(f.calls_for("https://a.ae/reset.jpg")) == 2
+
+
+def test_curl_cffi_impersonates_a_browser(monkeypatch, tmp_path):
+    body = _jpeg()
+    seen = []
+
+    class FakeCurl:
+        @staticmethod
+        def get(url, **kwargs):
+            seen.append(kwargs)
+            return FakeResponse(200, body)
+
+    monkeypatch.setattr(fetch_mod, "_curl_requests", FakeCurl)
+    monkeypatch.setattr(fetch_mod.requests, "get", lambda *a, **k: pytest.fail("requests used although curl_cffi is available"))
+    monkeypatch.setattr(fetch_mod.settings, "proxy_url", lambda: "")
+    page = "https://www.luluhypermarket.com/en-ae/p/123"
+    [res] = HttpFetcher(store_dir=str(tmp_path)).fetch([_cand("https://cdn.lulu.ae/p.jpg", page)], None)
+    assert res.ok
+    assert seen[0]["impersonate"] == "chrome"
+    assert "User-Agent" not in seen[0]["headers"]          # the browser profile sends its own, matching its TLS fingerprint
+    assert seen[0]["headers"]["Referer"] == page
+
+
+def test_curl_cffi_timeout_is_classified(monkeypatch, tmp_path):
+    class CurlTimeout(Exception):
+        pass
+
+    class FakeCurl:
+        @staticmethod
+        def get(url, **kwargs):
+            raise CurlTimeout("Failed to perform, curl: (28) Operation timed out after 10001 milliseconds")
+
+    monkeypatch.setattr(fetch_mod, "_curl_requests", FakeCurl)
+    monkeypatch.setattr(fetch_mod.settings, "proxy_url", lambda: "")
+    [res] = HttpFetcher(store_dir=str(tmp_path)).fetch([_cand("https://a.ae/t.jpg")], None)
+    assert res.ok is False and res.error == "timeout"

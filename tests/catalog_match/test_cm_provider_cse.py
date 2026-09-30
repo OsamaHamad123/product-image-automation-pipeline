@@ -133,3 +133,20 @@ def test_all_keys_exhausted_is_quota_and_400_is_error(caplog):
         res = make(session).search("q", "en", SPEC)
     assert res.status == "error" and res.http_status == 400
     assert any("API key not valid" in r.getMessage() for r in caplog.records)
+
+
+def test_403_on_every_key_disables_cse_for_the_rest_of_the_run(caplog):
+    denied = '{"error": {"code": 403, "message": "This project does not have the access to Custom Search JSON API."}}'
+    session = FakeSession(FakeResponse(403, text=denied), FakeResponse(403, text=denied))
+    with caplog.at_level(logging.WARNING):
+        res = make(session, keys=("a", "b")).search("q", "en", SPEC)
+    assert res.status == "error" and res.http_status == 403
+    assert make(FakeSession()) is None                      # later SKUs skip CSE entirely
+    assert any("skipped for the rest of this run" in r.getMessage() for r in caplog.records)
+
+
+def test_one_key_403_while_another_works_keeps_cse():
+    session = FakeSession(FakeResponse(403, text="denied"), FakeResponse(200, ok_body()))
+    res = make(session, keys=("a", "b")).search("q", "en", SPEC)
+    assert res.status == "ok"
+    assert make(FakeSession()) is not None
