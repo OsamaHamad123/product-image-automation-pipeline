@@ -64,6 +64,7 @@ logger = _bridge_logger
 
 MAX_RESPONSE_CANDIDATES = 8
 SELECTABLE_DECISIONS = ("AUTO_PUBLISH", "REVIEW_PRESELECTED")
+WARNING_PREFIX = "warn:"   # تحذيرات المراجعة التي يضيفها decide.route للصورة المرشحة
 REASON_ALIASES = {"BRAND_STYLE_MISMATCH": "WRONG_BRAND"}   # الكود القديم في واجهة الكتالوج
 
 
@@ -179,13 +180,19 @@ def _serialize_candidate(c):
             domain = urlparse(page_url or url).netloc
         except Exception:
             domain = ""
+    reasons = list(c.get("reasons") or [])
+    # رموز التحذير بلا البادئة 'warn:' حتى لا تحلل الواجهة الأسباب بنفسها
+    warnings = c.get("warnings")
+    if not isinstance(warnings, list):
+        warnings = [str(r)[len(WARNING_PREFIX):] for r in reasons if str(r).startswith(WARNING_PREFIX)]
     return {
         "url": url,
         "title": c.get("title") or "",
         "page_url": page_url,
         "domain": domain,
         "status": c.get("status") or "eligible",
-        "reasons": list(c.get("reasons") or []),
+        "reasons": reasons,
+        "warnings": [str(w) for w in warnings],
         "evidence": c.get("evidence") or {},
         "vlm": c.get("vlm"),
         "scores": c.get("scores") or {},
@@ -232,7 +239,8 @@ def action_search(params, brand_mappings=None):
     """
     بحث تفاعلي لمنتج واحد. الاستجابة (عقد ثابت للوحة التحكم):
     {status: success|review|not_found|provider_down|error, decision, failure_code, selected_image,
-     candidates (أفضل 8 مع status/reasons/evidence/vlm/scores), provider_health, sku_key, trace}
+     candidates (أفضل 8 مع status/reasons/warnings/evidence/vlm/scores), provider_health, sku_key, trace}
+    warnings: رموز تحذير المراجعة للصورة المرشحة (مثل foreign_store) ليتحقق منها المراجع قبل الاعتماد.
     """
     pipeline = _pipeline()
     product_name = _text(params, 'product_name')

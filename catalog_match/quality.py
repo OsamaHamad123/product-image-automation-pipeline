@@ -13,6 +13,9 @@ There is deliberately NO exposure, whole-frame Laplacian, contrast, blockiness o
 GrabCut gate: a white background is the target look of a packshot, and the
 Laplacian variance of a sharp photo falls as its resolution rises.
 
+Review warning (never a reject): low_resolution(width, height) is True when the short
+side is below 500 px; decide.route flags such a pick 'warn:low_resolution'.
+
 Soft features (tie-break only, never a reject):
     white_border_ratio  share of the outer band that is white
     fill_ratio          foreground bounding box area / frame area
@@ -42,6 +45,7 @@ logger = logging.getLogger(__name__)
 
 MEASURE_LONG_SIDE = 512
 MIN_SHORT_SIDE = 250
+LOW_RES_SHORT_SIDE = 500          # below this a pick carries a review warning (not a gate)
 ASPECT_MIN, ASPECT_MAX = 0.25, 4.0
 FG_MIN, FG_MAX = 0.03, 0.98
 WHITE_LEVEL = 245                 # min(R,G,B) >= 245 is background white
@@ -164,6 +168,13 @@ def _white_border_ratio(rgb: np.ndarray) -> float:
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
+def low_resolution(width: Optional[int], height: Optional[int]) -> bool:
+    """True when both sides are known and the short side is below LOW_RES_SHORT_SIDE."""
+    if not width or not height:
+        return False
+    return min(width, height) < LOW_RES_SHORT_SIDE
+
 
 def assess(pil_img: Image.Image) -> QualityReport:
     """Measure one decoded image. Never raises; an unreadable image is a hard fail."""

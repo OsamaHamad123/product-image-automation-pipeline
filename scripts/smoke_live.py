@@ -7,8 +7,8 @@ Usage (on the machine with the keys, from the repository root):
 
 For every row it prints the planned queries, the health of each provider call,
 the top-5 candidates with their identity evidence, the VLM verdicts, the final
-decision, and the estimated cost of the run. Use it on ~30 rows before switching
-the live sheet to SEARCH_ENGINE=v2 (evaluation layer 4).
+decision, the pick's review warnings, and the estimated cost of the run. Use it
+on ~30 rows before switching the live sheet to SEARCH_ENGINE=v2 (evaluation layer 4).
 
 This replaces scripts/verify_image_search.py, which counted "any image
 returned" as success.
@@ -238,15 +238,19 @@ def run_row(row, mappings, identity, pipeline, providers_mod, verify_mod, serp_c
             "queries": list(outcome.queries), "provider_calls": calls, "decision": outcome.decision,
             "failure_code": outcome.failure_code,
             "winner": outcome.winner.candidate.image_url if outcome.winner else None, "winner_detail": winner,
+            "warnings": winner["warnings"] if winner else [],
             "top": top, "reject_counts": dict(outcome.reject_counts), "vlm_calls": verifier.calls,
             "serp_calls": serp_calls, "cost_usd": round(cost, 4), "seconds": round(seconds, 1)}
 
 
 def _describe(rc, position):
+    from catalog_match.decide import warning_codes
+
     v = rc.verdict
     return {
-        "rank": position, "status": rc.status, "reasons": list(rc.reasons), "provider": rc.candidate.provider,
-        "domain": rc.candidate.domain, "title": rc.candidate.title or rc.candidate.page_title,
+        "rank": position, "status": rc.status, "reasons": list(rc.reasons), "warnings": warning_codes(rc.reasons),
+        "provider": rc.candidate.provider, "domain": rc.candidate.domain,
+        "title": rc.candidate.title or rc.candidate.page_title,
         "image_url": rc.candidate.image_url, "page_url": rc.candidate.page_url, "evidence": _evidence(rc),
         "vlm": None if v is None else {"decision": v.decision, "view": v.view, "brand": v.brand_text,
                                        "variant": v.variant_text, "size": v.size_text},
@@ -280,6 +284,10 @@ def print_row(r):
         print("  pick (ranked below the top 5):")
         _print_candidate(detail)
     print(f"  DECISION {r['decision']} {r['failure_code'] or ''} -> {r['winner'] or '-'}")
+    warnings = (detail or {}).get("warnings") or []
+    if warnings:
+        # decide.route's review warnings: what the reviewer must double-check before approving the pick
+        print(f"  WARNINGS {' '.join(warnings)}")
     print(f"  cost ~${r['cost_usd']:.4f} ({r['serp_calls']} SERP queries, {r['vlm_calls']} VLM calls), {r['seconds']}s")
 
 

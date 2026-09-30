@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "_doc": "Mutually exclusive variant groups (axes). Each value lists English and Arabic phrases; phrases are matched on whole tokens after catalog_match.text_norm normalisation, longest phrase first. 'unmarked' lists the values that do NOT make a candidate suspicious when the target SKU does not state that axis (e.g. a retailer title adding 'Full Fat' to 'Almarai Fresh Milk'). 'soft_groups' lists sets of values of one axis that describe closely related but distinct lines (Diet vs Zero Sugar vs Sugar Free): a difference inside one set is a soft conflict (never tier 1, never auto-publish) instead of a hard reject, because retailers word the same line differently. The form axis has no unmarked values: fresh, long-life, frozen and powder are different SKUs, so a candidate stating a form the SKU does not state is capped below tier 1. The medium axis is the oil or liquid a product is packed in or made of (tuna in sunflower oil vs olive oil vs water; sunflower vs corn oil): different SKUs, so it has no unmarked value. 'contexts' names token sets; an axis's 'context_values' ({context: {value: [phrases]}}) are matched only when the text, or the SKU the text is compared with, contains a token of that context. 'White' is a meat grade on a tuna can and a colour anywhere else; 'water' is the packing medium of tuna and the product itself for a bottle. At equal phrase length a context-bound phrase wins ('light' on a tuna can is the meat grade, not low fat).",
+  "_doc": "Mutually exclusive variant groups (axes). Each value lists English and Arabic phrases; phrases are matched on whole tokens after catalog_match.text_norm normalisation, longest phrase first. 'unmarked' lists the values that do NOT make a candidate suspicious when the target SKU does not state that axis (e.g. a retailer title adding 'Full Fat' to 'Almarai Fresh Milk'). 'soft_groups' lists sets of values of one axis that describe closely related but distinct lines (Diet vs Zero Sugar vs Sugar Free): a difference inside one set is a soft conflict (never tier 1, never auto-publish) instead of a hard reject, because retailers word the same line differently. The form axis has no unmarked values: fresh, long-life, frozen and powder are different SKUs, so a candidate stating a form the SKU does not state is capped below tier 1. The medium axis is the oil or liquid a product is packed in or made of (tuna in sunflower oil vs olive oil vs water; sunflower vs corn oil): different SKUs, so it has no unmarked value. 'contexts' names token sets; an axis's 'context_values' ({context: {value: [phrases]}}) are matched only when the text, or the SKU the text is compared with, contains a token of that context. 'White' is a meat grade on a tuna can and a colour anywhere else; 'water' is the packing medium of tuna and the product itself for a bottle. At equal phrase length a context-bound phrase wins ('light' on a tuna can is the meat grade, not low fat). 'fries_cut' (thin, crinkle, steak, ...) and 'cheese_form' (shredded, sliced, ...) are context-bound the same way: 'thin' is a cut only next to fries or potato, 'block' a form only next to cheese. Their default forms (straight-cut fries, a cheese block) are unmarked.",
   "contexts": {
     "canned_fish": [
       "tuna",
@@ -14,6 +14,35 @@
       "سردين",
       "mackerel",
       "ماكريل"
+    ],
+    "fries": [
+      "fries",
+      "chips",
+      "potato",
+      "potatoes",
+      "بطاطس",
+      "بطاطا",
+      "فرايز",
+      "شيبس"
+    ],
+    "cheese": [
+      "cheese",
+      "mozzarella",
+      "cheddar",
+      "parmesan",
+      "halloumi",
+      "gouda",
+      "edam",
+      "emmental",
+      "جبن",
+      "جبنه",
+      "موزاريلا",
+      "موزريلا",
+      "موتزاريلا",
+      "شيدر",
+      "شيدار",
+      "بارميزان",
+      "حلوم"
     ]
   },
   "axes": {
@@ -535,6 +564,123 @@
             "رقائق",
             "مفتت",
             "مفتته"
+          ]
+        }
+      }
+    },
+    "fries_cut": {
+      "_doc": "How potatoes are cut (fries, chips). Straight cut is what 'French Fries' means without a word more, so it is unmarked; thin and shoestring are close lines of one brand (soft).",
+      "unmarked": [
+        "straight"
+      ],
+      "soft_groups": [
+        [
+          "thin",
+          "shoestring"
+        ]
+      ],
+      "values": {},
+      "context_values": {
+        "fries": {
+          "straight": [
+            "straight",
+            "straight cut",
+            "regular cut",
+            "مستقيم",
+            "مستقيمه"
+          ],
+          "thin": [
+            "thin",
+            "thin cut",
+            "رفيع",
+            "رفيعه"
+          ],
+          "shoestring": [
+            "shoestring",
+            "shoestrings",
+            "shoe string",
+            "matchstick",
+            "matchsticks"
+          ],
+          "crinkle": [
+            "crinkle",
+            "crinkles",
+            "crinkle cut",
+            "crinkled",
+            "wavy",
+            "ridged",
+            "مموج",
+            "مموجه",
+            "متعرج",
+            "متعرجه"
+          ],
+          "steak": [
+            "steak",
+            "steak cut",
+            "steakhouse",
+            "thick",
+            "thick cut",
+            "سميك",
+            "سميكه"
+          ],
+          "wedges": [
+            "wedge",
+            "wedges",
+            "ودجز"
+          ],
+          "curly": [
+            "curly",
+            "curly cut",
+            "كيرلي"
+          ]
+        }
+      }
+    },
+    "cheese_form": {
+      "_doc": "The form cheese is sold in. A block is the plain form (unmarked); shredded and grated are worded interchangeably by retailers (soft).",
+      "unmarked": [
+        "block"
+      ],
+      "soft_groups": [
+        [
+          "shredded",
+          "grated"
+        ]
+      ],
+      "values": {},
+      "context_values": {
+        "cheese": {
+          "block": [
+            "block",
+            "blocks",
+            "قالب",
+            "بلوك"
+          ],
+          "shredded": [
+            "shredded",
+            "shred",
+            "مبشور",
+            "مبشوره",
+            "مبروش",
+            "مبروشه"
+          ],
+          "grated": [
+            "grated",
+            "مطحون",
+            "مطحونه"
+          ],
+          "sliced": [
+            "sliced",
+            "slices",
+            "slice",
+            "مشرح",
+            "مشرحه",
+            "سلايس"
+          ],
+          "string": [
+            "string",
+            "strings",
+            "خيوط"
           ]
         }
       }

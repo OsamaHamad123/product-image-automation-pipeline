@@ -21,8 +21,10 @@ outcome_to_legacy(outcome, trace=None) -> dict | None
         trace['outcome'] = {decision, failure_code, provider_health, queries, sku_key, ...}
     and one trace['steps'] entry, {'step_name', 'name', 'query', 'results_count',
     'candidates': [...]}, whose candidates carry url, title, page_url, domain, width,
-    height, status, reasons, evidence, vlm and scores {identity_score, quality_score,
-    relevance_score}, so the existing UI and save_curation_candidates keep working.
+    height, status, reasons, warnings, evidence, vlm and scores {identity_score,
+    quality_score, relevance_score}, so the existing UI and save_curation_candidates
+    keep working. warnings are the review warning codes of the pick (decide.route's
+    'warn:' reasons without the prefix, e.g. 'foreign_store'); [] for the others.
 """
 
 from __future__ import annotations
@@ -31,6 +33,7 @@ import dataclasses
 import logging
 from typing import Any, Dict, List, Mapping, Optional
 
+from .decide import warning_codes
 from .models import RankedCandidate, SearchOutcome
 
 logger = logging.getLogger(__name__)
@@ -161,6 +164,7 @@ def serialise_candidate(rc: RankedCandidate) -> Dict[str, Any]:
         "height": height,
         "status": rc.status,
         "reasons": [str(r) for r in rc.reasons],
+        "warnings": warning_codes(rc.reasons),
         "evidence": evidence(rc),
         "vlm": vlm_payload(rc),
         "quality": _json_safe(rc.quality) if rc.quality is not None else None,

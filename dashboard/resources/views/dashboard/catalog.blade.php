@@ -619,6 +619,23 @@
         color: var(--text-secondary);
         background: var(--input-bg);
     }
+    /* تحذيرات المراجعة على الصورة المرشحة: نقاط يتحقق منها المراجع قبل الاعتماد */
+    .review-warnings {
+        font-size: 0.8rem;
+        color: var(--warning);
+        background: var(--warning-bg);
+        border: 1px solid var(--warning);
+        padding: 0.55rem 0.75rem;
+        border-radius: var(--border-radius-sm);
+        line-height: 1.6;
+        font-weight: 800;
+        direction: rtl;
+        text-align: right;
+    }
+    .review-warnings strong {
+        display: block;
+        margin-bottom: 0.2rem;
+    }
     .evidence-chips {
         display: flex;
         flex-wrap: wrap;
@@ -1805,18 +1822,70 @@
         VERIFIER_DOWN: 'التحقق البصري غير متاح'
     };
 
+    // تحذيرات المراجعة (warnings في استجابة البحث): جملة عربية لكل رمز، والرمز غير المعروف يُعرض كما هو
+    const REVIEW_WARNING_LABELS = {
+        sheet_silent: 'الشيت ما حدد النوع',
+        vlm_unsure: 'Gemini غير متأكد من المطابقة',
+        low_resolution: 'صورة منخفضة الدقة (أقل من 500 بكسل)',
+        chat_or_screenshot: 'صورة من واتساب أو لقطة شاشة',
+        social_media: 'الصورة من مواقع التواصل الاجتماعي',
+        foreign_store: 'الصورة من متجر خارج الإمارات (قد تختلف العبوة)'
+    };
+
+    const VARIANT_AXIS_LABELS = {
+        fries_cut: 'طريقة التقطيع',
+        cheese_form: 'شكل الجبن',
+        fat: 'نسبة الدسم',
+        sugar: 'السكر',
+        caffeine: 'الكافيين',
+        form: 'الشكل',
+        medium: 'الزيت أو الماء',
+        flavour: 'النكهة',
+        tuna_meat: 'نوع لحم التونة',
+        tuna_cut: 'تقطيع التونة'
+    };
+
+    function warningText(code) {
+        code = String(code || '');
+        const sep = code.indexOf(':');
+        const name = sep >= 0 ? code.slice(0, sep) : code;
+        const detail = sep >= 0 ? code.slice(sep + 1) : '';
+        if (name === 'sheet_silent' && detail) {
+            // sheet_silent:<axis>=<value>
+            const eq = detail.indexOf('=');
+            const axis = eq >= 0 ? detail.slice(0, eq) : '';
+            const value = (eq >= 0 ? detail.slice(eq + 1) : detail).split('+').join(' / ');
+            const label = VARIANT_AXIS_LABELS[axis] ? `الشيت ما حدد ${VARIANT_AXIS_LABELS[axis]}` : REVIEW_WARNING_LABELS.sheet_silent;
+            return `${label}: ${value}`;
+        }
+        return REVIEW_WARNING_LABELS[name] || code;
+    }
+
+    function renderWarnings(c) {
+        if (!c.warnings || !c.warnings.length) return null;
+        return el('div', { className: 'review-warnings', role: 'alert' }, [
+            el('strong', { text: '⚠️ تحقق من هذه النقاط قبل الاعتماد:' }),
+            ...c.warnings.map(w => el('div', { text: '• ' + warningText(w) }))
+        ]);
+    }
+
     function normalizeCandidate(c) {
         c = c || {};
         const ev = (c.evidence && typeof c.evidence === 'object' && !Array.isArray(c.evidence)) ? c.evidence : {};
         let reasons = c.reasons;
         if (!Array.isArray(reasons)) reasons = reasons ? [String(reasons)] : [];
+        reasons = reasons.map(r => String(r));
+        // استجابة البحث ترسل warnings جاهزة؛ صفوف curation_candidates المحفوظة تحمل الأسباب فقط (warn:<code>)
+        const warnings = Array.isArray(c.warnings) ? c.warnings.map(w => String(w))
+            : reasons.filter(r => r.startsWith('warn:')).map(r => r.slice(5));
         return {
             url: String(c.url || c.image_url || ''),
             title: String(c.title || c.page_title || ev.page_title || ev.title || ''),
             page_url: String(c.page_url || ev.page_url || ''),
             domain: String(c.domain || c.source_domain || ev.domain || ''),
             status: String(c.status || 'eligible'),
-            reasons: reasons.map(r => String(r)),
+            reasons: reasons,
+            warnings: warnings,
             evidence: ev,
             conflicts: Array.isArray(c.conflicts) ? c.conflicts : [],
             vlm: (c.vlm && typeof c.vlm === 'object') ? c.vlm : null,
@@ -2255,6 +2324,7 @@
                     'المنتج: ', el('strong', { style: 'color: var(--text-primary);', text: ctx.product_name }),
                     ' — البراند: ', el('strong', { style: 'color: var(--text-primary);', text: ctx.brand })
                 ]),
+                renderWarnings(c),
                 renderEvidenceChips(c),
                 renderVlm(c),
                 renderReasons(c),
@@ -2533,6 +2603,7 @@
 
         card.appendChild(el('div', { className: 'candidate-info' }, [
             el('div', { className: 'candidate-title', title: c.title, text: c.title || 'بدون عنوان' }),
+            renderWarnings(c),
             renderEvidenceChips(c),
             renderVlm(c),
             meta,

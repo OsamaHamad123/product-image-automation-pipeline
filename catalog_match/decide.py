@@ -42,22 +42,40 @@ others are 'eligible' or 'rejected' (with reasons) or stay 'excluded' when the
 pipeline removed them as reviewer negatives. A candidate whose download failed,
 whose image failed a hard quality gate or whose verdict is MISMATCH is never
 preselected.
+
+Review warnings ('warn:<code>' reasons on the winner) tell the reviewer what to
+double-check before approving. They never change the winner or the decision.
+    sheet_silent:<axis>=<value>  the listing text (title, page title, the product's own
+                                 slug) or the label reading states a marked variant on
+                                 an axis the SKU does not state ('thin' fries, 'shredded')
+    vlm_unsure                   pre-checked without a MATCH (tier 1, UNSURE or UNKNOWN)
+    low_resolution               the downloaded image's short side is below 500 px
+    chat_or_screenshot           the image file is a chat or screenshot export
+                                 ('WhatsApp Image ...', 'IMG-20251014-WA0003', 'Screenshot')
+    social_media                 the image or page host is a social network
+    foreign_store                the page is a store outside the UAE: a non-UAE country
+                                 TLD, a non-UAE retailer, or a UAE retailer's other-country
+                                 section ('noon.com/saudi-en/'); never the brand's own site
 """
 
 from __future__ import annotations
 
 import logging
+import re
 from typing import Dict, Iterable, List, Optional, Sequence, Set, Union
+from urllib.parse import unquote, urlsplit
 
+from . import quality as quality_mod
 from . import settings
 from . import variants as variants_mod
 from .gtin import same_gtin
 from .models import (
-    ProviderHealth, ProviderResult, RankedCandidate, SearchOutcome, Size, SkuSpec,
+    Candidate, ProviderHealth, ProviderResult, RankedCandidate, SearchOutcome, Size, SkuSpec,
     VerificationResult,
 )
+from .score import page_host, trusted_domains
 from .sizes import compare, parse_sizes, product_size
-from .text_norm import normalize, phrase_in
+from .text_norm import domain_matches, normalize, phrase_in, url_host, url_path_text
 
 logger = logging.getLogger(__name__)
 
@@ -65,8 +83,43 @@ LOOKUP_PROVIDERS = frozenset({"off", "open_food_facts", "openfoodfacts"})
 DOWN_STATUSES = frozenset({"error", "quota", "blocked"})
 MATCH, MISMATCH, UNSURE, UNKNOWN = "MATCH", "MISMATCH", "UNSURE", "UNKNOWN"
 
+WARN_PREFIX = "warn:"
+# Every review warning code (the dashboard maps each one to an Arabic sentence).
+WARNING_CODES = ("sheet_silent", "vlm_unsure", "low_resolution", "chat_or_screenshot", "social_media",
+                 "foreign_store")
+
 # Reason prefixes written by route(); recomputed on every call so route() is idempotent.
-_ROUTE_PREFIXES = ("hard:", "download:", "quality:", "vlm:", "preselected:", "auto_blocked:", "auto_publish")
+_ROUTE_PREFIXES = ("hard:", "download:", "quality:", "vlm:", "preselected:", "auto_blocked:", "auto_publish",
+                   WARN_PREFIX)
+
+# File names that chat apps and screenshot tools give exported images.
+_CHAT_OR_SCREENSHOT_RE = re.compile(
+    r"whats\s*app[\s_-]*image"                      # WhatsApp Image 2025-10-14 at 10.07.41 AM.jpeg
+    r"|(?<![a-z])img[-_]\d{8}[-_]wa\d+"             # IMG-20251014-WA0003.jpg (WhatsApp on Android)
+    r"|screen[\s_-]*shot"                           # Screenshot_20251014.png, Screen Shot 2025-10-14 at ...
+    r"|(?<![a-z])signal[-_]\d{4}-\d{2}-\d{2}"       # signal-2025-10-14-100741.jpeg
+    r"|(?<![a-z])photo_\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}"    # photo_2025-10-14_10-07-41.jpg (Telegram)
+    r"|صور[ةه][\s_-]*واتساب"                        # صورة واتساب بتاريخ 2025-10-14 ... (WhatsApp in Arabic)
+    r"|لقط[ةه][\s_-]*شاش[ةه]",                      # لقطة شاشة 2025-10-14 ... (screenshot in Arabic)
+    re.IGNORECASE,
+)
+# Social networks and their image CDNs, matched on one host label ('i.pinimg.com', 'pinterest.co.uk').
+_SOCIAL_LABELS = frozenset({
+    "instagram", "cdninstagram", "facebook", "fbcdn", "fbsbx", "tiktok", "tiktokcdn", "tiktokcdn-us",
+    "pinterest", "pinimg", "twitter", "twimg", "snapchat", "reddit", "redditmedia", "youtube", "ytimg",
+})
+_SOCIAL_DOMAINS = ("x.com", "fb.com", "t.co", "redd.it", "threads.net")
+# Country TLDs of the other markets the catalogue's products are also sold in.
+_FOREIGN_TLDS = frozenset({"kw", "sa", "qa", "om", "bh", "in", "pk", "eg", "jo"})
+# 'other_retail' stores (trusted_domains.json) that are UAE stores without an .ae domain.
+_UAE_DOTCOM_STORES = ("westzone.com", "instashop.com")
+# Country sections of a UAE retailer's site: '/saudi-en/' (noon), '/en-kw/' (Lulu), '/kuwait/' (talabat).
+_UAE_MARKETS = frozenset({"ae", "uae"})
+_FOREIGN_MARKETS = frozenset({
+    "sa", "ksa", "saudi", "kw", "kuwait", "qa", "qatar", "om", "oman", "bh", "bahrain", "eg", "egypt",
+    "jo", "jordan", "in", "india", "pk", "pakistan",
+})
+_LOCALE_WORDS = frozenset({"en", "ar"})
 
 
 # ---------------------------------------------------------------------------
@@ -220,6 +273,95 @@ def _reset(rc: RankedCandidate) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Review warnings
+# ---------------------------------------------------------------------------
+
+def _sheet_silent(spec: SkuSpec, rc: RankedCandidate) -> List[str]:
+    """'sheet_silent:<axis>=<value>' for each marked variant the pick states and the SKU does not."""
+    cand = rc.candidate
+    context = variants_mod.spec_context(spec)
+    # The product's own slug segment only: department breadcrumbs ('/fresh-food/') are not the product.
+    texts = (cand.title, cand.page_title, url_path_text(cand.page_url, product_segment=True),
+             rc.verdict.variant_text if rc.verdict is not None else "")
+    found = variants_mod.merge(*(variants_mod.extract_variants(t, context) for t in texts))
+    unmarked = variants_mod.lexicon().unmarked
+    out = []
+    for axis in sorted(variants_mod.unstated_marked(spec.variants, found)):
+        marked = variants_mod.values_of(found[axis]) - unmarked.get(axis, set())
+        out.append(f"sheet_silent:{axis}={variants_mod.SEP.join(sorted(marked))}")
+    return out
+
+
+def _chat_or_screenshot(image_url: str) -> bool:
+    text = unquote(unquote(image_url or "")).replace("+", " ")
+    return _CHAT_OR_SCREENSHOT_RE.search(text) is not None
+
+
+def _social_host(host: str) -> bool:
+    if not host:
+        return False
+    return domain_matches(host, _SOCIAL_DOMAINS) or not _SOCIAL_LABELS.isdisjoint(host.split(".")[:-1])
+
+
+def _path_market(page_url: str) -> str:
+    """'uae', 'foreign' or '' from the country section of a store page ('/saudi-en/', '/en-ae/', '/kuwait/').
+
+    A leading language-only segment is skipped: talabat's Arabic pages are '/ar/kuwait/...'.
+    """
+    try:
+        path = urlsplit(page_url or "").path
+    except ValueError:
+        return ""
+    for seg in [seg for seg in path.lower().split("/") if seg][:2]:
+        parts = [p for p in re.split(r"[-_]", seg) if p]
+        if not parts or len(parts) > 2 or not all(p in _UAE_MARKETS | _FOREIGN_MARKETS | _LOCALE_WORDS
+                                                  for p in parts):
+            return ""     # a product slug, not a country section
+        if not _FOREIGN_MARKETS.isdisjoint(parts):
+            return "foreign"
+        if not _UAE_MARKETS.isdisjoint(parts):
+            return "uae"
+    return ""
+
+
+def _foreign_store(spec: SkuSpec, cand: Candidate) -> bool:
+    """True when the page is a store outside the UAE (the pack may differ from the UAE one)."""
+    host = page_host(cand) or url_host(cand.image_url)
+    if not host or domain_matches(host, spec.official_domains):
+        return False
+    data = trusted_domains()
+    if domain_matches(host, data.get("uae_retailers", [])):
+        return _path_market(cand.page_url) == "foreign"
+    if host.endswith(".ae") or domain_matches(host, _UAE_DOTCOM_STORES):
+        return False
+    if host.rsplit(".", 1)[-1] in _FOREIGN_TLDS:
+        return True
+    return domain_matches(host, data.get("other_retail", []))
+
+
+def review_warnings(spec: SkuSpec, rc: RankedCandidate) -> List[str]:
+    """Warning codes for a pre-checked candidate: what the reviewer should double-check first."""
+    cand = rc.candidate
+    out = _sheet_silent(spec, rc)
+    if _decision_of(rc) != MATCH:
+        out.append("vlm_unsure")
+    if rc.fetched is not None and rc.fetched.ok and quality_mod.low_resolution(rc.fetched.width, rc.fetched.height):
+        out.append("low_resolution")
+    if _chat_or_screenshot(cand.image_url):
+        out.append("chat_or_screenshot")
+    if _social_host(url_host(cand.image_url)) or _social_host(page_host(cand)):
+        out.append("social_media")
+    if _foreign_store(spec, cand):
+        out.append("foreign_store")
+    return out
+
+
+def warning_codes(reasons: Iterable[str]) -> List[str]:
+    """The warning codes (without 'warn:') among a candidate's reasons."""
+    return [str(r)[len(WARN_PREFIX):] for r in reasons or () if str(r).startswith(WARN_PREFIX)]
+
+
+# ---------------------------------------------------------------------------
 # Routing
 # ---------------------------------------------------------------------------
 
@@ -362,5 +504,8 @@ def route(spec: SkuSpec, ranked: Sequence[RankedCandidate],
     else:
         outcome.decision = "AUTO_PUBLISH"
         winner.reasons.append("auto_publish")
-    logger.info("route %s: %s winner=%s", spec.sku_key, outcome.decision, winner.candidate.image_url)
+    warnings = review_warnings(spec, winner)
+    winner.reasons.extend(WARN_PREFIX + w for w in warnings)
+    logger.info("route %s: %s winner=%s warnings=%s", spec.sku_key, outcome.decision, winner.candidate.image_url,
+                ",".join(warnings) or "-")
     return outcome

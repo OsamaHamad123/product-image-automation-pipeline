@@ -294,6 +294,32 @@
 
     }
 
+    /* تحذيرات المراجعة على الصورة المرشحة: نقاط يتحقق منها المراجع قبل الاعتماد */
+
+    .review-warnings {
+
+        font-size: 0.72rem;
+
+        font-weight: 800;
+
+        line-height: 1.55;
+
+        color: var(--warning);
+
+        background: var(--warning-bg);
+
+        border: 1px solid var(--warning);
+
+        border-radius: 6px;
+
+        padding: 4px 8px;
+
+        direction: rtl;
+
+        text-align: right;
+
+    }
+
 </style>
 
 @endsection
@@ -1765,12 +1791,64 @@
         pending: { text: 'قيد المراجعة', color: 'var(--panel-border)' }
     };
 
+    // تحذيرات المراجعة (warnings في استجابة البحث): جملة عربية لكل رمز، والرمز غير المعروف يُعرض كما هو
+    const REVIEW_WARNING_LABELS = {
+        sheet_silent: 'الشيت ما حدد النوع',
+        vlm_unsure: 'Gemini غير متأكد من المطابقة',
+        low_resolution: 'صورة منخفضة الدقة (أقل من 500 بكسل)',
+        chat_or_screenshot: 'صورة من واتساب أو لقطة شاشة',
+        social_media: 'الصورة من مواقع التواصل الاجتماعي',
+        foreign_store: 'الصورة من متجر خارج الإمارات (قد تختلف العبوة)'
+    };
+
+    const VARIANT_AXIS_LABELS = {
+        fries_cut: 'طريقة التقطيع',
+        cheese_form: 'شكل الجبن',
+        fat: 'نسبة الدسم',
+        sugar: 'السكر',
+        caffeine: 'الكافيين',
+        form: 'الشكل',
+        medium: 'الزيت أو الماء',
+        flavour: 'النكهة',
+        tuna_meat: 'نوع لحم التونة',
+        tuna_cut: 'تقطيع التونة'
+    };
+
+    function warningText(code) {
+        code = String(code || '');
+        const sep = code.indexOf(':');
+        const name = sep >= 0 ? code.slice(0, sep) : code;
+        const detail = sep >= 0 ? code.slice(sep + 1) : '';
+        if (name === 'sheet_silent' && detail) {
+            // sheet_silent:<axis>=<value>
+            const eq = detail.indexOf('=');
+            const axis = eq >= 0 ? detail.slice(0, eq) : '';
+            const value = (eq >= 0 ? detail.slice(eq + 1) : detail).split('+').join(' / ');
+            const label = VARIANT_AXIS_LABELS[axis] ? `الشيت ما حدد ${VARIANT_AXIS_LABELS[axis]}` : REVIEW_WARNING_LABELS.sheet_silent;
+            return `${label}: ${value}`;
+        }
+        return REVIEW_WARNING_LABELS[name] || code;
+    }
+
+    // تنبيه الصف: تحذيرات الصورة المختارة، ليتحقق منها المراجع قبل الاعتماد الجماعي
+    function rowWarningsEl(c) {
+        if (!c || !c.warnings || !c.warnings.length) return null;
+        return el('div', { className: 'review-warnings row-warnings', role: 'alert' }, [
+            el('div', { text: '⚠️ تحقق قبل الاعتماد:' }),
+            ...c.warnings.map(w => el('div', { text: '• ' + warningText(w) }))
+        ]);
+    }
+
     // مرشح موحد من أي مصدر: جدول curation_candidates أو استجابة البحث
     function normalizeCurationCandidate(c) {
         c = c || {};
         const ev = (c.evidence && typeof c.evidence === 'object' && !Array.isArray(c.evidence)) ? c.evidence : {};
         let reasons = c.reasons;
         if (!Array.isArray(reasons)) reasons = reasons ? [String(reasons)] : [];
+        reasons = reasons.map(r => String(r));
+        // استجابة البحث ترسل warnings جاهزة؛ صفوف curation_candidates المحفوظة تحمل الأسباب فقط (warn:<code>)
+        const warnings = Array.isArray(c.warnings) ? c.warnings.map(w => String(w))
+            : reasons.filter(r => r.startsWith('warn:')).map(r => r.slice(5));
         const status = String(c.status || 'pending');
         // لا يُحدد مرشح إلا إذا حدده النظام (preselected) أو المراجع صراحة
         const isSelected = (c.is_selected === undefined || c.is_selected === null)
@@ -1782,7 +1860,8 @@
             page_url: String(c.page_url || ev.page_url || ''),
             source_domain: String(c.source_domain || c.domain || ev.domain || ''),
             status: status,
-            reasons: reasons.map(r => String(r)),
+            reasons: reasons,
+            warnings: warnings,
             evidence: ev,
             vlm: (c.vlm && typeof c.vlm === 'object') ? c.vlm : null,
             width: c.width || null,
@@ -1847,6 +1926,7 @@
             const read = [c.vlm.brand_text, c.vlm.variant_text, c.vlm.size_text].filter(Boolean).join(' / ');
             lines.push(`VLM: ${c.vlm.decision || 'UNKNOWN'}${read ? ' — ' + read : ''}`);
         }
+        (c.warnings || []).forEach(w => lines.push('⚠️ ' + warningText(w)));
         if (c.reasons.length) lines.push('الأسباب: ' + c.reasons.join(' | '));
         return lines.join('\n');
     }
@@ -1886,6 +1966,11 @@
             thumb.appendChild(el('span', { title: `تحذير مسببات حساسية: ${allergen}`,
                                            style: 'position: absolute; top: 28px; left: 6px; color: var(--danger); font-size: 0.8rem; z-index: 6;' },
                                  [el('i', { className: 'fas fa-exclamation-triangle' })]));
+        }
+        if (c.warnings && c.warnings.length) {
+            thumb.appendChild(el('span', { className: 'thumb-warning', title: c.warnings.map(warningText).join('\n'),
+                                           style: 'position: absolute; top: 28px; right: 6px; background: var(--warning-bg); color: var(--warning); border: 1px solid var(--warning); border-radius: 6px; font-size: 0.65rem; font-weight: 900; padding: 0 4px; z-index: 6;',
+                                           text: `⚠ ${c.warnings.length}` }));
         }
         thumb.appendChild(el('span', {
             style: 'position: absolute; bottom: 0; left: 0; right: 0; background: rgba(0, 0, 0, 0.72); color: #ffffff; font-size: 0.6rem; font-weight: 800; padding: 1px 4px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: ltr;',
@@ -1953,6 +2038,7 @@
                                      style: 'background: var(--danger-bg); border: 1px solid var(--panel-border); color: var(--danger); font-size: 0.7rem; font-weight: 800; padding: 2px 6px; border-radius: 4px; align-self: flex-start;' }) : null,
             el('span', { text: stateText, className: 'row-state',
                          style: `border: 1px solid var(--panel-border); color: ${stateColor}; font-size: 0.7rem; font-weight: 800; padding: 2px 6px; border-radius: 4px; align-self: flex-start;` }),
+            rowWarningsEl(selected),
             el('div', { style: 'display: flex; align-items: center; gap: 0.35rem; margin-top: 0.5rem; width: 100%;' }, [
                 queryInput,
                 el('button', { type: 'button', className: 'btn btn-secondary btn-sm', title: 'إعادة البحث بالكلمات المكتوبة', style: smallBtn,
@@ -2083,6 +2169,11 @@
         if (state) {
             const chosen = product ? selectedCandidateOf(product) : null;
             state.textContent = (chosen && chosen.status === 'preselected') ? 'مرشح موثق مختار مسبقاً (غير منشور)' : 'مختار بواسطة المراجع';
+            // تحذيرات الصورة المختارة الآن بدل تحذيرات الاختيار السابق
+            const oldWarnings = card.querySelector('.row-warnings');
+            if (oldWarnings) oldWarnings.remove();
+            const warningsEl = rowWarningsEl(chosen);
+            if (warningsEl) state.after(warningsEl);
         }
 
         fetch('/api/v1/curation/select-candidate', {
