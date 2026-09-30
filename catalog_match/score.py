@@ -71,6 +71,7 @@ TEXT_FIELDS = ("title", "page_title")                      # hard size / pack ev
 VARIANT_HARD_FIELDS = ("title", "page_title", "page_slug")  # hard variant evidence
 COMPETITOR_FIELDS = ("title", "page_title", "page_slug", "image_file")
 URL_FIELDS = ("page_slug", "image_file")
+DEPARTMENT_AXES = ("form",)   # variant axes retailers also use as department names in page URLs
 IDENTITY_FIELDS = ("title", "page_title", "page_slug", "image_file")
 
 
@@ -384,7 +385,14 @@ def score_candidate(spec: SkuSpec, cand: Candidate, negatives=None) -> Candidate
             matched_axes.append(axis)
     unstated: List[str] = []
     for name in VARIANT_HARD_FIELDS:
-        for axis in variants_mod.unstated_marked(spec.variants, found_variants[name]):
+        found = found_variants[name]
+        if name == "page_slug":
+            # Retailers name departments after a form ('/fresh-food/' holds water, juice and laban):
+            # an unstated form counts from the product's own slug segment, not the breadcrumbs.
+            own = variants_mod.extract_variants(url_path_text(cand.page_url, product_segment=True))
+            found = {axis: value for axis, value in found.items() if axis not in DEPARTMENT_AXES}
+            found.update({axis: value for axis, value in own.items() if axis in DEPARTMENT_AXES})
+        for axis in variants_mod.unstated_marked(spec.variants, found):
             if axis not in unstated:
                 unstated.append(axis)
     for axis in unstated:

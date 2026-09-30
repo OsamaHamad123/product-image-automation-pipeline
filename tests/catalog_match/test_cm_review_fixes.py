@@ -197,6 +197,22 @@ def test_unstated_form_is_never_tier1():
     assert "variant_conflict:form" in tier(fresh, "Almarai Long Life Full Fat Milk 1L").hard_reject
 
 
+def test_department_breadcrumb_is_not_an_unstated_form():
+    """Carrefour files dairy, juice and water under '/fresh-food/': that department name is not the
+    listing claiming a fresh product line, so it must not cap an otherwise exact listing at tier 2."""
+    page = "https://www.carrefouruae.com/mafuae/en/fresh-food/{}/p/988596"
+    lacnor = spec_of("Lacnor Essentials Full Cream Milk 1L", "Lacnor")
+    sc = tier(lacnor, "Lacnor Essentials Full Cream Milk 1L",
+              page_url=page.format("lacnor-essentials-full-cream-milk-1l"))
+    assert sc.tier == 1 and not any(c.startswith("unstated_variant") for c in sc.conflicts), sc.conflicts
+    # the form stated by the listing itself still caps: in the title ...
+    milk = spec_of("Almarai Full Fat Milk 1L", "Almarai")
+    assert tier(milk, "Almarai Full Fat Fresh Milk 1L", page_url=page.format("almarai-full-fat-fresh-milk-1l")).tier == 2
+    # ... or only in the product's own slug segment
+    sc = tier(milk, "Almarai Full Fat Milk 1L", page_url=page.format("almarai-full-fat-long-life-milk-1l"))
+    assert sc.tier == 2 and "unstated_variant:form" in sc.conflicts
+
+
 # ---------------------------------------------------------------------------
 # classify decides from verbatim readings (D6)
 # ---------------------------------------------------------------------------

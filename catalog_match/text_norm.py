@@ -207,7 +207,7 @@ def _decode(path: str) -> str:
     return path
 
 
-def url_path_text(url: Optional[str], filename_only: bool = False) -> str:
+def url_path_text(url: Optional[str], filename_only: bool = False, product_segment: bool = False) -> str:
     """Turn a URL path into plain words for evidence matching.
 
     Scheme, host, query string and fragment are dropped; the path is
@@ -215,7 +215,9 @@ def url_path_text(url: Optional[str], filename_only: bool = False) -> str:
     before a unit are joined ('1-5l' -> '1.5 l'); '-', '_', '+', '/', '%' and
     non-decimal '.' become spaces. With filename_only=True only the last path
     segment is used (image CDN directories such as 'images/' or 'wp-content/uploads'
-    carry no product evidence).
+    carry no product evidence). With product_segment=True only the segment with the
+    most words is used (the last one on a tie): the product's own slug, without the
+    locale and department breadcrumbs around it ('/mafuae/en/fresh-food/<slug>/p/1').
     """
     if not url:
         return ""
@@ -229,6 +231,10 @@ def url_path_text(url: Optional[str], filename_only: bool = False) -> str:
         return ""
     if filename_only:
         segments = segments[-1:]
+    elif product_segment:
+        best = max(range(len(segments)),
+                   key=lambda i: (len([w for w in _URL_SEP_RE.split(segments[i]) if w]), i))
+        segments = [segments[best]]
     last = segments[-1]
     if "." in last:
         stem, ext = last.rsplit(".", 1)
