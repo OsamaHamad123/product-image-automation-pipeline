@@ -22,7 +22,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Tuple
 
 EVAL_DIR = Path(__file__).resolve().parent
 REPO_ROOT = EVAL_DIR.parent.parent
@@ -46,7 +46,11 @@ BASELINE_PATH = FIXTURES / "baseline_v1.json"
 HOTFIXED_BASELINE_PATH = FIXTURES / "baseline_v1_hotfixed.json"
 
 ENGINES = ("v1", "v2")
-SCENARIOS = ("normal", "gemini_down")
+# vlm_noisy: the cassette with the recorded misreads of VLM_NOISY_PATH laid over it (see load_cassette)
+SCENARIOS = ("normal", "gemini_down", "vlm_noisy")
+PROVIDER_SETS = runners.PROVIDER_SETS
+VLM_NOISY_PATH = FIXTURES / "vlm_noisy.json"
+ADVERSARIAL_PATH = FIXTURES / "adversarial_skus.json"
 
 # Source files whose behaviour the v1 baseline records. When any of them
 # changes (for example the v1 rollback hot-fixes), the live v1 run is no
@@ -70,6 +74,85 @@ def load_golden(path: Optional[os.PathLike] = None) -> Dict[str, Any]:
 
 def load_cassette(path: Optional[os.PathLike] = None) -> Dict[str, Any]:
     return _read_json(Path(path or CASSETTE_PATH))
+
+
+def overlay_readings(cassette: Mapping[str, Any], readings: Mapping[str, Mapping[str, Mapping[str, Any]]]
+                     ) -> Dict[str, Any]:
+    """A copy of the cassette with {sku_id: {cand_id: {field: value}}} merged into its verdicts."""
+    out = json.loads(json.dumps(cassette))
+    verdicts = out.setdefault("verdicts", {})
+    for sku_id, per_cand in readings.items():
+        for cand_id, fields in per_cand.items():
+            verdicts.setdefault(sku_id, {}).setdefault(cand_id, {}).update(fields)
+    return out
+
+
+def noisy_cassette(cassette: Mapping[str, Any], path: Optional[os.PathLike] = None) -> Dict[str, Any]:
+    """The 'vlm_noisy' scenario: the recorded readings with the misreads of vlm_noisy.json laid over them."""
+    return overlay_readings(cassette, _read_json(Path(path or VLM_NOISY_PATH))["misreads"])
+
+
+def correct_absent(golden: Mapping[str, Any], cassette: Mapping[str, Any]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """(set, cassette): every golden SKU that has a correct candidate, with its correct_exact candidates removed.
+
+    Nothing correct is left, so any auto-publish is wrong: what the identity rules (D4) and the
+    routing (D10) must hold when the right listing is simply not on the web. The cassette
+    carries the same readings under the derived SKU ids.
+    """
+    skus, readings = [], {}
+    for sku in golden["skus"]:
+        if sku["no_correct_candidate"]:
+            continue
+        derived = json.loads(json.dumps(sku))
+        derived["id"] = sku["id"] + "~no-correct"
+        derived["named_case"] = None
+        derived["expected_v2"] = None
+        derived["no_correct_candidate"] = True
+        derived["candidates"] = [c for c in derived["candidates"] if c["label"] != "correct_exact"]
+        skus.append(derived)
+        readings[derived["id"]] = dict(cassette.get("verdicts", {}).get(sku["id"], {}))
+    return {"skus": skus}, overlay_readings({k: v for k, v in cassette.items() if k != "verdicts"}, readings)
+
+
+def load_adversarial(path: Optional[os.PathLike] = None, golden: Optional[Mapping[str, Any]] = None,
+                     cassette: Optional[Mapping[str, Any]] = None) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """(golden-shaped set, cassette) of the adversarial cases in adversarial_skus.json.
+
+    Each case starts from a golden SKU ('base'), drops candidates ('drop'), overrides SKU
+    fields ('set') and candidate fields ('candidates', labels included, each with its reason)
+    and the recorded model readings ('readings': the VLM misreads the case is about). The
+    committed golden_skus.json / vlm_cassette.json stay untouched (the v1 baseline pins them).
+    """
+    golden = golden or load_golden()
+    cassette = cassette or load_cassette()
+    doc = _read_json(Path(path or ADVERSARIAL_PATH))
+    by_id = {s["id"]: s for s in golden["skus"]}
+    skus, readings = [], {}
+    for case in doc["cases"]:
+        base = by_id[case["base"]]
+        sku = json.loads(json.dumps(base))
+        sku.update(case.get("set", {}))
+        sku["id"] = case["id"]
+        sku["stratum"] = "adversarial"
+        sku["named_case"] = None
+        sku["expected_v2"] = case["expected_v2"]
+        sku["adversarial_rule"] = case["rule"]
+        dropped = set(case.get("drop", []))
+        unknown = (dropped | set(case.get("candidates", {})) | set(case.get("readings", {}))) - {
+            c["id"] for c in base["candidates"]}
+        if unknown:
+            raise ValueError(f"adversarial case {case['id']}: unknown candidate ids {sorted(unknown)}")
+        sku["candidates"] = [c for c in sku["candidates"] if c["id"] not in dropped]
+        for c in sku["candidates"]:
+            c.update({k: v for k, v in case.get("candidates", {}).get(c["id"], {}).items() if k != "why"})
+        sku["no_correct_candidate"] = not any(c["label"] == "correct_exact" for c in sku["candidates"])
+        skus.append(sku)
+        base_readings = cassette.get("verdicts", {}).get(case["base"], {})
+        readings[sku["id"]] = {c["id"]: dict(base_readings.get(c["id"], {}),
+                                             **{k: v for k, v in case.get("readings", {}).get(c["id"], {}).items()
+                                                if k != "why"})
+                               for c in sku["candidates"] if c["id"] in base_readings}
+    return {"skus": skus}, overlay_readings({k: v for k, v in cassette.items() if k != "verdicts"}, readings)
 
 
 def load_mappings(path: Optional[os.PathLike] = None) -> Dict[str, Any]:
@@ -120,18 +203,32 @@ def git_commit() -> Optional[str]:
 def run_all(engine: str = "v1", scenario: str = "normal", *, golden: Optional[Mapping[str, Any]] = None,
             cassette: Optional[Mapping[str, Any]] = None, mappings: Optional[Dict[str, Any]] = None,
             sku_ids: Optional[Iterable[str]] = None,
-            progress: Optional[Callable[[int, int, metrics.Outcome], None]] = None) -> Dict[str, Any]:
-    """Replay every golden SKU through one engine with the network blocked; return a report dict."""
+            progress: Optional[Callable[[int, int, metrics.Outcome], None]] = None,
+            provider_set: str = "serper") -> Dict[str, Any]:
+    """Replay every golden SKU through one engine with the network blocked; return a report dict.
+
+    provider_set ("serper" | "bing_only") picks the production provider set v2 runs with.
+    The 'vlm_noisy' scenario lays vlm_noisy.json over the cassette (the committed one
+    unless a cassette is passed) and then replays like 'normal'.
+    """
     if engine not in ENGINES:
         raise ValueError(f"engine must be one of {ENGINES}")
     if scenario not in SCENARIOS:
         raise ValueError(f"scenario must be one of {SCENARIOS}")
+    if provider_set not in PROVIDER_SETS:
+        raise ValueError(f"provider_set must be one of {PROVIDER_SETS}")
     golden = golden or load_golden()
     cassette = cassette or load_cassette()
+    if scenario == "vlm_noisy":
+        cassette = noisy_cassette(cassette)
     mappings = mappings if mappings is not None else load_mappings()
     wanted = set(sku_ids) if sku_ids else None
     skus = [s for s in golden["skus"] if wanted is None or s["id"] in wanted]
-    run_one = runners.run_legacy if engine == "v1" else runners.run_v2
+    if engine == "v1":
+        run_one = runners.run_legacy
+    else:
+        def run_one(sku, cassette, scenario, mappings):  # type: ignore[no-untyped-def]
+            return runners.run_v2(sku, cassette, scenario=scenario, mappings=mappings, provider_set=provider_set)
 
     outcomes: List[metrics.Outcome] = []
     attempts: List[str] = []
@@ -148,6 +245,7 @@ def run_all(engine: str = "v1", scenario: str = "normal", *, golden: Optional[Ma
     report = {
         "engine": engine,
         "scenario": scenario,
+        "provider_set": provider_set if engine == "v2" else None,
         "generated_at": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"),
         "seconds": round(seconds, 2),
         "n_skus": len(skus),

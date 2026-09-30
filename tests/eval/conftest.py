@@ -90,12 +90,12 @@ def baseline() -> Dict[str, Any]:
     return harness.load_baseline()
 
 
-def timed_run(engine: str, scenario: str = "normal") -> Tuple[Dict[str, Any], float, List[str]]:
+def timed_run(engine: str, scenario: str = "normal", **kwargs: Any) -> Tuple[Dict[str, Any], float, List[str]]:
     """harness.run_all under the socket block; returns (report, seconds, blocked attempts)."""
     with pytest.MonkeyPatch.context() as mp:
         attempts = install_socket_block(mp)
         t0 = time.perf_counter()
-        report = harness.run_all(engine, scenario)
+        report = harness.run_all(engine, scenario, **kwargs)
         seconds = time.perf_counter() - t0
     return report, seconds, attempts
 
@@ -108,7 +108,7 @@ def legacy_run() -> Tuple[Dict[str, Any], float, List[str]]:
 
 @pytest.fixture(scope="session")
 def v2_run() -> Tuple[Dict[str, Any], float, List[str]]:
-    """catalog_match over the golden set, auto-publish enabled for every brand (skips until it exists)."""
+    """catalog_match over the golden set, auto-publish enabled for every brand."""
     return timed_run("v2")
 
 
@@ -116,3 +116,37 @@ def v2_run() -> Tuple[Dict[str, Any], float, List[str]]:
 def v2_gemini_down_run() -> Tuple[Dict[str, Any], float, List[str]]:
     """catalog_match with the verifier returning UNKNOWN for every image."""
     return timed_run("v2", "gemini_down")
+
+
+@pytest.fixture(scope="session")
+def v2_noisy_run() -> Tuple[Dict[str, Any], float, List[str]]:
+    """catalog_match with the recorded model misreads of vlm_noisy.json."""
+    return timed_run("v2", "vlm_noisy")
+
+
+@pytest.fixture(scope="session")
+def v2_bing_only_run() -> Tuple[Dict[str, Any], float, List[str]]:
+    """catalog_match with the no-key provider set: Bing HTML as the only search source."""
+    return timed_run("v2", provider_set="bing_only")
+
+
+@pytest.fixture(scope="session")
+def adversarial() -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    return harness.load_adversarial()
+
+
+@pytest.fixture(scope="session")
+def v2_adversarial_run(adversarial) -> Tuple[Dict[str, Any], float, List[str]]:
+    """catalog_match over the adversarial cases (adversarial_skus.json)."""
+    adv, cassette = adversarial
+    return timed_run("v2", golden=adv, cassette=cassette)
+
+
+@pytest.fixture(scope="session")
+def v2_absent_runs(golden, cassette) -> Dict[str, Tuple[Dict[str, Any], float, List[str]]]:
+    """catalog_match over every golden SKU with its correct candidates removed: recorded and noisy readings."""
+    out = {}
+    for name, readings in (("normal", cassette), ("vlm_noisy", harness.noisy_cassette(cassette))):
+        absent, absent_cassette = harness.correct_absent(golden, readings)
+        out[name] = timed_run("v2", golden=absent, cassette=absent_cassette)
+    return out

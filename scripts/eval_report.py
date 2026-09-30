@@ -5,11 +5,17 @@ Usage (from the repository root):
     python scripts/eval_report.py --engine v1
     python scripts/eval_report.py --engine v2
     python scripts/eval_report.py --engine v2 --scenario gemini_down
+    python scripts/eval_report.py --engine v2 --scenario vlm_noisy      # recorded model misreads of siblings
+    python scripts/eval_report.py --engine v2 --provider-set bing_only  # no sanctioned search key (Bing only)
     python scripts/eval_report.py --engine v1 --write-baseline      # refresh tests/eval/fixtures/baseline_v1.json
     python scripts/eval_report.py --engine v1 --write-hotfixed-baseline   # refresh baseline_v1_hotfixed.json
     python scripts/eval_report.py --stored original                # print a stored baseline (original|hotfixed)
-    python scripts/eval_report.py --engine v2 --golden tests/eval/fixtures/recorded/2026-10-02/golden_skus.json \
-        --cassette tests/eval/fixtures/recorded/2026-10-02/vlm_cassette.json
+    python scripts/eval_report.py --engine v2 --golden tests/eval/fixtures/recorded/2026-10-02/golden_skus.json
+
+A --golden set is replayed with the vlm_cassette.json and brand_mappings.json stored next to
+it (the recorder writes both: the Brands Mapping tab at recording time), unless --cassette /
+--mappings name other files. Falling back to the committed fixture files for a recorded set
+would score real SKUs against hand-written fixture synonyms and readings.
 
 No network, API key or database is used: providers answer from the fixture,
 images are generated (or read from recorded blobs) and the vision model answers
@@ -41,7 +47,8 @@ def _pct(value):
 
 def print_report(report, golden, baseline=None):
     m = report["metrics"]
-    print(f"\nEngine {report['engine']} | scenario {report['scenario']} | {report['n_skus']} SKUs | "
+    print(f"\nEngine {report['engine']} | scenario {report['scenario']} | providers {report.get('provider_set') or '-'} | "
+          f"{report['n_skus']} SKUs | "
           f"{report['seconds']:.1f}s | network attempts: {len(report['network_attempts'])}")
     print()
     print(harness.stratum_table(m))
@@ -105,6 +112,21 @@ def print_stored(stored, which):
         print(f"    {count:4d}  {rule}{flag}")
 
 
+def companion_paths(golden, cassette=None, mappings=None):
+    """(cassette, mappings) for a --golden set: explicit paths win, then the files next to the set.
+
+    None means the committed fixture. A recorded set keeps vlm_cassette.json and brand_mappings.json
+    (the sheet's Brands Mapping at recording time) next to golden_skus.json.
+    """
+    if golden:
+        folder = os.path.dirname(os.path.abspath(golden))
+        if not cassette and os.path.exists(os.path.join(folder, "vlm_cassette.json")):
+            cassette = os.path.join(folder, "vlm_cassette.json")
+        if not mappings and os.path.exists(os.path.join(folder, "brand_mappings.json")):
+            mappings = os.path.join(folder, "brand_mappings.json")
+    return cassette, mappings
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--engine", choices=harness.ENGINES, default="v2")
@@ -118,9 +140,13 @@ def main(argv=None):
                         help="print a stored v1 baseline's metric table instead of running an engine")
     parser.add_argument("--force", action="store_true",
                         help="with --write-baseline: overwrite even though the legacy code has changed")
+    parser.add_argument("--provider-set", choices=harness.PROVIDER_SETS, default="serper",
+                        help="v2 provider set: serper (Serper + OFF + Bing fallback) or bing_only (no sanctioned key)")
     parser.add_argument("--golden", help="golden_skus.json to replay (default: the committed fixture)")
-    parser.add_argument("--cassette", help="vlm_cassette.json to replay (default: the committed fixture)")
-    parser.add_argument("--mappings", help="brand_mappings.json (default: the committed fixture)")
+    parser.add_argument("--cassette", help="vlm_cassette.json to replay (default: the one next to --golden, "
+                                           "else the committed fixture)")
+    parser.add_argument("--mappings", help="brand_mappings.json (default: the one next to --golden, else the "
+                                           "committed fixture)")
     parser.add_argument("--sku", action="append", help="only this SKU id (repeatable)")
     parser.add_argument("--out", help="where to write the JSON report (default: temp folder)")
     parser.add_argument("--json", action="store_true", help="print the metrics as JSON instead of tables")
@@ -149,23 +175,20 @@ def main(argv=None):
                          "baseline would overwrite the 'before' record with hot-fixed numbers. Re-record from a "
                          "checkout of the baseline's legacy_commit, or pass --force if that is really intended.")
 
+    cassette_path, mappings_path = companion_paths(args.golden, args.cassette, args.mappings)
     golden = harness.load_golden(args.golden)
-    cassette = harness.load_cassette(args.cassette)
-    mappings = harness.load_mappings(args.mappings)
+    cassette = harness.load_cassette(cassette_path)
+    mappings = harness.load_mappings(mappings_path)
+    if args.golden:
+        print(f"replaying {args.golden} with cassette {cassette_path or harness.CASSETTE_PATH} and brand mappings "
+              f"{mappings_path or harness.MAPPINGS_PATH}")
 
     def progress(i, n, outcome):
         if args.verbose:
             log.info("%d/%d %s -> %s %s", i, n, outcome.sku_id, outcome.decision, outcome.chosen_id or "")
 
-    try:
-        report = harness.run_all(args.engine, args.scenario, golden=golden, cassette=cassette, mappings=mappings,
-                                 sku_ids=args.sku, progress=progress)
-    except Exception as exc:
-        # pytest.importorskip raises its Skipped exception while catalog_match.pipeline does not exist yet
-        if type(exc).__name__ == "Skipped":
-            print(f"engine {args.engine} is not available yet: {exc}")
-            return 2
-        raise
+    report = harness.run_all(args.engine, args.scenario, golden=golden, cassette=cassette, mappings=mappings,
+                             sku_ids=args.sku, progress=progress, provider_set=args.provider_set)
     path = harness.write_report(report, args.out)
 
     try:

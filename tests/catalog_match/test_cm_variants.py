@@ -101,3 +101,37 @@ def test_unstated_marked():
     assert unstated_marked({}, extract_variants("Almarai Full Fat Milk")) == []
     assert unstated_marked({}, extract_variants("Almarai Laban Plain")) == []
     assert unstated_marked({"fat": "full"}, extract_variants("Almarai Low Fat Milk")) == []
+
+
+def test_packing_medium_is_an_exclusive_axis():
+    """Tuna in sunflower oil vs olive oil vs water (and sunflower vs corn oil) are different SKUs.
+
+    Before the 'medium' axis a Lulu 'Tuna Chunks in Olive Oil 170g' listing whose photo the model
+    misread as sunflower oil scored tier 1 for 'Al Alali Tuna Chunks in Sunflower Oil 170g' and was
+    auto-published when the sunflower-oil listings were missing.
+    """
+    sunflower = extract_variants("Al Alali Tuna Chunks in Sunflower Oil 170g")
+    assert sunflower == {"medium": "sunflower_oil"}
+    assert extract_variants("تونة العلالي قطع في زيت دوار الشمس 170 جم") == sunflower
+    assert conflicts(sunflower, extract_variants("Al Alali Tuna Chunks in Olive Oil 170g")) == ["medium"]
+    assert conflicts(sunflower, extract_variants("Tuna Chunks in Water")) == ["medium"]
+    assert conflicts(extract_variants("Carrefour Sunflower Oil 1.5L"), extract_variants("Carrefour Corn Oil 1.5L")) \
+        == ["medium"]
+    assert unstated_marked({}, extract_variants("Tuna in Brine 185g")) == ["medium"]
+    # plain water products state no packing medium
+    assert extract_variants("Al Ain Water 500ml") == {} and extract_variants("Masafi Drinking Water 1.5L") == {}
+
+
+def test_olive_oil_tin_is_rejected_for_a_sunflower_oil_sku():
+    from catalog_match.identity import build_sku_spec
+    from catalog_match.models import Candidate
+    from catalog_match.score import score_candidate
+
+    spec = build_sku_spec({"name": "Al Alali Tuna Chunks in Sunflower Oil 170g", "brand": "Al Alali"}, {})
+    olive = Candidate(image_url="https://www.luluhypermarket.com/medias/8280556-01.jpg",
+                      page_url="https://www.luluhypermarket.com/en-ae/al-alali-tuna-chunks-olive-oil-170g/p/8280556",
+                      page_title="Al Alali Tuna Chunks in Olive Oil 170g Online at Best Price | Lulu UAE",
+                      title="Al Alali Tuna Chunks in Olive Oil 170g Online at Best Price | Lulu UAE",
+                      domain="luluhypermarket.com", provider="serper", sanctioned=True)
+    score = score_candidate(spec, olive)
+    assert score.tier is None and "variant_conflict:medium" in score.hard_reject

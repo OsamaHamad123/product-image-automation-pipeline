@@ -1,7 +1,7 @@
 """Replay one golden SKU through an engine, fully offline.
 
 run_legacy(sku, cassette)  drives the unmodified v1 code, image_search.search_best_product_image.
-run_v2(sku, cassette)      drives catalog_match.pipeline.find_product_image (skips until it exists).
+run_v2(sku, cassette)      drives catalog_match.pipeline.find_product_image with the production provider set.
 
 Both return a metrics.Outcome. Nothing here touches the network, a database
 or an API key: providers answer from the fixture, downloads come from
@@ -12,8 +12,19 @@ Replay rules shared by both engines
 * A provider returns the SKU's candidates whose surfaced_by includes the kind
   of the query: "gtin" when the query carries the SKU's barcode, else "text".
   A site: query only returns candidates from the listed domains.
+* surfaced_by may instead name query ids ("Q1".."Q4", "R1", "R2", "custom"): such a
+  candidate is returned only for those queries of the v2 plan. Recorded sets
+  (scripts/eval_record.py) store it that way, so a v2 replay measures the query
+  plan, the early stop and the relaxations instead of serving the whole pool to
+  every query.
+* v2 fixture providers only answer a text query that is about the SKU (it shares
+  a brand or name word with the sheet row); an unrelated query returns nothing.
 * The same pool therefore reaches v1 and v2; Open Food Facts ("off")
   candidates only reach v2, because v1 has no such source.
+* v2 runs with the provider set production builds (provider_set): "serper" is
+  Serper primary + Open Food Facts + Bing HTML as fallback-only (plus the legacy
+  CSE adapter when the SKU has cse_legacy candidates); "bing_only" is the no-key
+  setup, Bing HTML as the sole (unsanctioned) search source + Open Food Facts.
 * Serper candidates are fed to v1 as its Google engine (title and real size),
   Bing candidates through v1's own Bing mapping: title = m["desc"] or the
   query when "desc" is missing, and a reported size of 800x800.
@@ -142,13 +153,55 @@ def _host(url: str) -> str:
     return (m.group(1).lower() if m else "").replace("www.", "")
 
 
-def surfaced(sku: Mapping[str, Any], provider: str, query: str) -> List[Mapping[str, Any]]:
-    """Candidates a provider returns for a query, in the provider's rank order."""
+QUERY_IDS = frozenset({"Q1", "Q2", "Q3", "Q4", "R1", "R2", "custom"})
+
+
+def _norm_tokens(text: str) -> List[str]:
+    """Clitic-stripped, normalised tokens (catalog_match.text_norm when present)."""
+    try:
+        from catalog_match.text_norm import tokens
+        return list(tokens(text, strip_clitics=True))
+    except ImportError:  # pragma: no cover - catalog_match is part of the repository
+        return re.findall(r"\w+", (text or "").lower())
+
+
+def _content_tokens(text: str) -> set:
+    return {t for t in _norm_tokens(text) if len(t) >= 2 and not any(ch.isdigit() for ch in t)}
+
+
+def query_mentions_sku(query: str, sku: Mapping[str, Any]) -> bool:
+    """True when a text query shares a brand or name word with the sheet row (site: scopes ignored)."""
+    words = _content_tokens(re.sub(r"site:\S+|\bOR\b", " ", query or ""))
+    row = " ".join(str(sku.get(k) or "") for k in ("brand", "brand_ar", "name_en", "name_ar"))
+    return bool(words & _content_tokens(row))
+
+
+def surfaced(sku: Mapping[str, Any], provider: str, query: str, query_id: Optional[str] = None,
+             relevant_only: bool = False) -> List[Mapping[str, Any]]:
+    """Candidates a provider returns for a query, in the provider's rank order.
+
+    query_id is the v2 plan id of the query (None for the v1 replay). A candidate whose
+    surfaced_by names query ids is returned only for those ids; without an id the ids
+    stand for their kind (Q4 is the GTIN query, the others are text). relevant_only
+    drops every candidate for a text query that is not about the SKU.
+    """
     kind = query_kind(query, sku)
+    if relevant_only and kind == "text" and not query_mentions_sku(query, sku):
+        return []
     sites = site_domains(query)
     out = []
     for cand in sku.get("candidates", []):
-        if cand.get("provider") != provider or kind not in cand.get("surfaced_by", ["text"]):
+        if cand.get("provider") != provider:
+            continue
+        tags = set(cand.get("surfaced_by", ["text"]))
+        ids = tags & QUERY_IDS
+        if ids:
+            if query_id is not None:
+                if query_id not in ids:
+                    continue
+            elif kind not in {("gtin" if i == "Q4" else "text") for i in ids} | (tags - QUERY_IDS):
+                continue
+        elif kind not in tags:
             continue
         if sites:
             hosts = {cand.get("domain", ""), _host(cand.get("page_url", "")), _host(cand.get("image_url", ""))}
@@ -556,34 +609,65 @@ def _legacy_outcome(sku, index, result, trace, error, queries, calls, seconds) -
 # ---------------------------------------------------------------------------
 
 def _v2_modules():
-    """catalog_match stages; pytest skips the caller until the pipeline exists (WP-4)."""
-    import pytest
+    """catalog_match stages. Imported directly: a broken v2 import must fail the gate, not skip it."""
+    import importlib
 
-    pipeline = pytest.importorskip("catalog_match.pipeline")
-    identity = pytest.importorskip("catalog_match.identity")
-    from catalog_match import models
-    return pipeline, identity, models
+    return tuple(importlib.import_module(f"catalog_match.{name}") for name in ("pipeline", "identity", "models"))
 
 
-def _to_candidate(models: Any, cand: Mapping[str, Any]) -> Any:
+# Search providers a fixture candidate may name -> sanctioned (D7). "off" is the GTIN lookup.
+SEARCH_PROVIDERS = {"serper": True, "cse_legacy": True, "bing_html": False}
+LOOKUP_PROVIDER = "off"
+PROVIDER_SETS = ("serper", "bing_only")
+
+
+def _to_candidate(models: Any, cand: Mapping[str, Any], as_provider: Optional[str] = None) -> Any:
+    """models.Candidate for a fixture candidate; as_provider re-serves it as another provider's result."""
+    provider = as_provider or cand["provider"]
+    as_bing = provider == "bing_html"
     return models.Candidate(
         image_url=cand["image_url"], page_url=cand.get("page_url", ""), page_title=cand.get("page_title", ""),
         title=cand.get("title", ""), snippet=cand.get("snippet", ""), domain=cand.get("domain", ""),
-        width=cand.get("width"), height=cand.get("height"), provider=cand["provider"], query_id="",
-        rank=int(cand.get("rank", 0)), gtin_on_page=cand.get("gtin_on_page"),
-        sanctioned=cand["provider"] != "bing_html")
+        width=None if as_bing else cand.get("width"), height=None if as_bing else cand.get("height"),
+        provider=provider, query_id="", rank=int(cand.get("rank", 0)), gtin_on_page=cand.get("gtin_on_page"),
+        sanctioned=SEARCH_PROVIDERS.get(provider, provider == LOOKUP_PROVIDER))
 
 
 class FixtureProvider:
-    """models.Provider backed by the fixture: returns the candidates a query would surface."""
+    """models.Provider backed by the fixture: returns the candidates a query would surface.
 
-    def __init__(self, models: Any, sku: Mapping[str, Any], name: str, sanctioned: bool):
+    serve lists the fixture provider names this provider answers with (default: its own
+    name); the "bing_only" set lets Bing answer with the Serper listings as well, re-shaped
+    as Bing results (unsanctioned, no dimensions), so the no-key setup has a real pool.
+    """
+
+    def __init__(self, models: Any, sku: Mapping[str, Any], name: str, sanctioned: bool, fallback: bool = False,
+                 serve: Optional[Sequence[str]] = None):
         self.models, self.sku, self.name, self.sanctioned = models, sku, name, sanctioned
+        self.fallback = bool(fallback)
+        self.serve = tuple(serve or (name,))
         self.calls: List[Tuple[str, str]] = []
+        self._plan_key: Any = None
+        self._plan: Dict[str, str] = {}
+
+    def query_id(self, query: str, spec: Any) -> Optional[str]:
+        """The v2 plan id of a query text (Q1..Q4, R1, R2), 'custom' for any other text."""
+        if not isinstance(spec, self.models.SkuSpec):
+            return None
+        if self._plan_key is not spec:
+            from catalog_match.query_plan import build_queries, relaxations
+            self._plan = {}
+            for q in list(build_queries(spec)) + list(relaxations(spec)):
+                self._plan.setdefault(" ".join(q.text.split()), q.query_id)
+            self._plan_key = spec
+        return self._plan.get(" ".join((query or "").split()), "custom")
 
     def search(self, query: str, hl: str, spec: Any) -> Any:
         self.calls.append((query, hl))
-        cands = [_to_candidate(self.models, c) for c in surfaced(self.sku, self.name, query)]
+        qid = self.query_id(query, spec)
+        rows = [c for src in self.serve for c in surfaced(self.sku, src, query, query_id=qid, relevant_only=True)]
+        rows.sort(key=lambda c: (int(c.get("rank", 0)), c["provider"] != self.name, c["id"]))
+        cands = [_to_candidate(self.models, c, as_provider=self.name) for c in rows]
         return self.models.ProviderResult(provider=self.name, status="ok" if cands else "empty", http_status=200,
                                           latency_ms=0, candidates=cands)
 
@@ -703,6 +787,9 @@ def _real_make_verdict() -> Optional[Callable[..., Any]]:
 class CassetteVerifier:
     """models.Verifier answering from vlm_cassette.json; the 'gemini_down' scenario returns unknown.
 
+    Any other scenario ('normal', 'vlm_noisy') answers from the cassette it is given: the
+    harness overlays the recorded misreads of fixtures/vlm_noisy.json for 'vlm_noisy'.
+
     The recorded readings are turned into a verdict by catalog_match.verify.make_verdict (the
     same code that decides for a live Gemini reply), so the replay measures the real D6 rules;
     decide_verdict() above is only the fallback before verify.py exists.
@@ -795,15 +882,44 @@ def _call_with_supported(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> A
     return fn(*args, **{k: v for k, v in kwargs.items() if k in params})
 
 
+def build_providers(models: Any, sku: Mapping[str, Any], provider_set: str = "serper") -> List[Any]:
+    """The fixture providers for one SKU, shaped like catalog_match.providers.default_providers().
+
+    "serper":    Serper (primary) + Open Food Facts + the legacy CSE adapter when the SKU has
+                 cse_legacy candidates + Bing HTML as fallback-only (it runs only when every
+                 sanctioned provider is down), i.e. a SERPER_API_KEY with ENABLE_BING_HTML_FALLBACK.
+    "bing_only": Open Food Facts + Bing HTML as the sole search source (no sanctioned key, the
+                 owner's setup per D7); Bing answers with the Bing and Serper listings of the
+                 fixture, re-shaped as unsanctioned Bing results.
+    A candidate from a provider the replay does not know fails loudly instead of vanishing.
+    """
+    names = {c.get("provider") for c in sku.get("candidates", [])}
+    unknown = sorted(str(n) for n in names - set(SEARCH_PROVIDERS) - {LOOKUP_PROVIDER})
+    if unknown:
+        raise ValueError(f"{sku.get('id')}: candidates from unknown provider(s) {unknown}; "
+                         f"the replay knows {sorted(SEARCH_PROVIDERS)} and {LOOKUP_PROVIDER!r}")
+    off = FixtureOffProvider(models, sku)
+    if provider_set == "serper":
+        providers: List[Any] = [FixtureProvider(models, sku, "serper", True), off]
+        if "cse_legacy" in names:
+            providers.append(FixtureProvider(models, sku, "cse_legacy", True))
+        providers.append(FixtureProvider(models, sku, "bing_html", False, fallback=True))
+        return providers
+    if provider_set == "bing_only":
+        return [off, FixtureProvider(models, sku, "bing_html", False,
+                                     serve=("bing_html",) + tuple(n for n in SEARCH_PROVIDERS if n != "bing_html"))]
+    raise ValueError(f"provider_set must be one of {PROVIDER_SETS}, not {provider_set!r}")
+
+
 def run_v2(sku: Mapping[str, Any], cassette: Mapping[str, Any], scenario: str = "normal",
-           mappings: Optional[Dict[str, Any]] = None, auto_publish: bool = True) -> Outcome:
+           mappings: Optional[Dict[str, Any]] = None, auto_publish: bool = True,
+           provider_set: str = "serper") -> Outcome:
     """Run catalog_match for one fixture SKU with fixture providers, fetcher and cassette verifier."""
     pipeline, identity, models = _v2_modules()
     mappings = mappings if mappings is not None else load_mappings()
     index = UrlIndex(sku)
-    serper = FixtureProvider(models, sku, "serper", True)
-    bing = FixtureProvider(models, sku, "bing_html", False)
-    off = FixtureOffProvider(models, sku)
+    providers = build_providers(models, sku, provider_set)
+    search_providers = [p for p in providers if getattr(p, "kind", "search") == "search"]
     fetcher = FixtureFetcher(models, sku)
     verifier = CassetteVerifier(models, sku, cassette, scenario)
     brand_index = None
@@ -819,14 +935,14 @@ def run_v2(sku: Mapping[str, Any], cassette: Mapping[str, Any], scenario: str = 
     with _v2_settings(auto_publish):
         try:
             spec = _call_with_supported(identity.build_sku_spec, sku_row(sku), mappings)
-            outcome = _call_with_supported(pipeline.find_product_image, spec, providers=[serper, bing, off],
+            outcome = _call_with_supported(pipeline.find_product_image, spec, providers=providers,
                                            fetcher=fetcher, verifier=verifier, brand_index=brand_index)
         except Exception as exc:
             log.exception("v2 pipeline crashed for %s", sku["id"])
             error = f"{type(exc).__name__}: {exc}"
     seconds = time.perf_counter() - t0
 
-    provider_calls = {"serper": len(serper.calls), "bing_html": len(bing.calls)}
+    provider_calls = {p.name: len(p.calls) for p in search_providers}
     if error is not None or outcome is None:
         return Outcome(sku_id=sku["id"], engine="v2", decision=metrics.ERROR, error=error, status="error",
                        provider_calls=provider_calls, vlm_calls=verifier.calls, seconds=round(seconds, 3))

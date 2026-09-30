@@ -17,8 +17,6 @@ from typing import Any, Dict, List
 
 import pytest
 
-pytest.importorskip("catalog_match.pipeline")
-
 import cli_bridge  # noqa: E402
 import config  # noqa: E402
 import image_search  # noqa: E402
@@ -67,9 +65,7 @@ def wired(monkeypatch, golden_by_id, cassette, mappings):
         sku = golden_by_id[sku_id]
         models = runners._v2_modules()[2]
         state["doubles"] = dict(
-            providers=[runners.FixtureProvider(models, sku, "serper", True),
-                       runners.FixtureProvider(models, sku, "bing_html", False),
-                       runners.FixtureOffProvider(models, sku)],
+            providers=runners.build_providers(models, sku),
             fetcher=runners.FixtureFetcher(models, sku),
             verifier=runners.CassetteVerifier(models, sku, cassette, "normal"),
         )

@@ -7,7 +7,11 @@ Run on the owner's machine, which has the Serper and Gemini keys. It is never ru
 
 What it does per sheet row (the sheet is only read, never written):
   1. builds the SKU spec and the deterministic query plan (catalog_match.identity / query_plan);
-  2. runs every configured provider for every planned query and saves what they returned;
+  2. runs every configured provider for every planned query AND the relaxations R1/R2 (no early stop,
+     so the replay can decide itself when to stop) and saves what they returned. Each candidate keeps
+     the ids of the queries that returned it (surfaced_by: "Q1".."Q4", "R1", "R2"; "gtin" for the
+     Open Food Facts lookup), and the replay serves a candidate only to those queries: a recorded set
+     measures the query plan, the early stop and the relaxations, not a merged pool;
   3. downloads the candidates (catalog_match.fetch) and stores each image once, by sha256, in blobs/;
   4. asks the real verifier (catalog_match.verify) about the downloaded images, 4 per call, and
      stores its readings in the cassette schema.
@@ -21,9 +25,10 @@ Output folder tests/eval/fixtures/recorded/<date>/:
 
 Staff labels each candidate with one of: correct_exact, wrong_variant, wrong_size, wrong_pack, wrong_brand,
 wrong_product, not_packshot, unusable (curation is_selected is never used as a label). --import-labels then
-writes the labels into golden_skus.json, and the set replays offline with:
+writes the labels into golden_skus.json, and the set replays offline (with the vlm_cassette.json and the
+brand_mappings.json recorded next to it) with:
 
-    python scripts/eval_report.py --engine v2 --golden <dir>/golden_skus.json --cassette <dir>/vlm_cassette.json
+    python scripts/eval_report.py --engine v2 --golden <dir>/golden_skus.json
 """
 
 import argparse
@@ -58,11 +63,6 @@ def _sku_id(row, spec):
     return f"rec-{row['row_number']:05d}-{(spec.sku_key or 'nokey')[:16]}"
 
 
-def _query_kind(planned):
-    qid = getattr(planned, "query_id", "")
-    return "gtin" if qid == "Q4" else "text"
-
-
 def _blob(data, out_dir):
     from PIL import Image
     import io
@@ -91,17 +91,18 @@ def record_row(row, mappings, stages, out_dir, provider_log):
                                                                  "category", "size")}, mappings)
     sku_id = _sku_id(row, spec)
     providers = providers_mod.default_providers()
-    planned = query_plan.build_queries(spec)
-    found = {}                                   # image_url -> candidate dict
+    # the whole plan and both relaxations, so the replay can apply its own early stop and relax rules
+    planned = list(query_plan.build_queries(spec)) + list(query_plan.relaxations(spec))
+    found = {}                                   # image_url -> candidate dict (first provider that returned it)
     order = []
 
-    def add(cand, kind):
+    def add(cand, tag):
         key = cand.image_url
         if key not in found:
-            found[key] = {"cand": cand, "kinds": {kind}}
+            found[key] = {"cand": cand, "kinds": {tag}}
             order.append(key)
         else:
-            found[key]["kinds"].add(kind)
+            found[key]["kinds"].add(tag)
 
     for provider in providers:
         if hasattr(provider, "lookup"):
@@ -120,7 +121,7 @@ def record_row(row, mappings, stages, out_dir, provider_log):
                                  "status": result.status, "http_status": result.http_status,
                                  "latency_ms": result.latency_ms, "error": result.error, "count": len(result.candidates)})
             for cand in result.candidates:
-                add(cand, _query_kind(q))
+                add(cand, q.query_id)
 
     cands = [found[k]["cand"] for k in order]
     fetcher = fetch_mod.HttpFetcher()
