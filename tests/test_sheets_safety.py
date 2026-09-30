@@ -126,8 +126,18 @@ def _outbox_row(id_, row, value, barcode=None, name=None, attempts=0, col_name="
             "key_barcode": barcode, "key_name": name, "attempts": attempts}
 
 
-def _flush(gs, ws, pending, fake_connection):
-    conn = fake_connection(lambda sql, params: pending if sql.startswith("SELECT") else None)
+def _outbox_responder(pending, lock_free=True):
+    def respond(sql, params):
+        if "GET_LOCK" in sql:
+            return [{"got": 1 if lock_free else 0}]
+        if "RELEASE_LOCK" in sql:
+            return [{"released": 1}]
+        return pending if sql.startswith("SELECT") else None
+    return respond
+
+
+def _flush(gs, ws, pending, fake_connection, lock_free=True):
+    conn = fake_connection(_outbox_responder(pending, lock_free))
 
     class Queue:
         def _connect(self):
@@ -159,8 +169,10 @@ def test_outbox_identity_and_isolation(gs, fake_connection):
     ]
     conn = _flush(gs, ws, pending, fake_connection)
 
-    select_sql = conn.executed[0][0]
+    assert "GET_LOCK" in conn.executed[0][0]
+    select_sql = conn.executed[1][0]
     assert "ORDER BY id" in select_sql
+    assert "RELEASE_LOCK" in conn.executed[-1][0]
     status = _final_status(conn)
     assert status[2] == "CONFLICT"
     assert status[1] == "SYNCED" and status[3] == "SYNCED"
@@ -200,6 +212,28 @@ def test_outbox_poison_row_does_not_block_others_and_dies(gs, fake_connection):
     pending = [_outbox_row(2, 3, "https://res/laban.png", barcode="6281007000035", attempts=4)]
     status = _final_status(_flush(gs, ws, pending, fake_connection))
     assert status[2] == ("DEAD", 5)
+
+
+def test_outbox_identity_is_checked_per_write(gs, fake_connection):
+    """Row 3 now holds Almarai Laban. A stale write for another product at row 3 must not ride on the
+    verdict of the correct write, in either order."""
+    ws = FakeWorksheet(SHEET)
+    for stale_first in (True, False):
+        ws.sent_bodies.clear()
+        stale = _outbox_row(1 if stale_first else 2, 3, "https://res/masafi.png", barcode="6291003000013")
+        good = _outbox_row(2 if stale_first else 1, 3, "https://res/laban.png", barcode="6281007000035")
+        status = _final_status(_flush(gs, ws, [stale, good], fake_connection))
+        assert status[stale["id"]] == "CONFLICT" and status[good["id"]] == "SYNCED"
+        written = [(d["range"], d["values"][0][0]) for body in ws.sent_bodies for d in body["data"]]
+        assert written == [("'Products'!D3", "https://res/laban.png")]
+
+
+def test_outbox_single_flusher(gs, fake_connection):
+    """A process that cannot take the flush lock sends nothing (a delayed flusher cannot erase a newer value)."""
+    ws = FakeWorksheet(SHEET)
+    conn = _flush(gs, ws, [_outbox_row(1, 2, "", barcode="6281007000028")], fake_connection, lock_free=False)
+    assert ws.sent_bodies == []
+    assert not any("FROM sheet_updates" in s for s, _ in conn.executed)
 
 
 # ---------------------------------------------------------------------------
@@ -293,6 +327,14 @@ class FakeRedis:
     def smove(self, src, dst, member):
         self.srem(src, member)
         self.sadd(dst, member)
+
+    def hincrby(self, key, field, amount=1):
+        h = self.kv.setdefault(key, {})
+        h[field] = int(h.get(field, 0)) + amount
+        return h[field]
+
+    def hdel(self, key, field):
+        self.kv.get(key, {}).pop(field, None)
 
 
 class RecordingQueue:
@@ -390,3 +432,62 @@ def test_sync_worker_keeps_key_when_write_fails_and_refuses_conflicts(gs):
     assert sync_worker.run_sync_cycle(ws, r) == 0
     assert "row_2" in r.smembers("writebehind:dirty_set") and "product:data:row_2" in r.kv
     assert "row_3" in r.smembers("writebehind:conflicts") and "row_3" not in r.smembers("writebehind:dirty_set")
+
+
+def test_sync_worker_conflict_payload_is_not_merged_into_the_next_write(gs, monkeypatch):
+    """A conflicted payload for another product must not ride on a later, correct write to that row."""
+    import sync_worker
+    r = FakeRedis(heartbeat=True)
+    monkeypatch.setattr(gs, "_get_redis", lambda: r)
+    ws = FakeWorksheet(SHEET)             # row 3 holds Almarai Laban (6281007000035)
+    sent = []
+    ws.batch_update = lambda data, value_input_option=None: sent.append(data)
+    assert gs._redis_write_behind(3, {3: "https://res/masafi.png", 5: "Water (Masafi)"}, {"barcode": "6291003000013"})
+    assert sync_worker.run_sync_cycle(ws, r) == 0                     # identity conflict, nothing written
+    assert "row_3" in r.smembers("writebehind:conflicts")
+    # the reviewer now publishes the product that really is in row 3
+    assert gs._redis_write_behind(3, {3: "https://res/laban.png"}, {"barcode": "6281007000035"})
+    assert sync_worker.run_sync_cycle(ws, r) == 1
+    cells = {d["range"]: d["values"][0][0] for batch in sent for d in batch}
+    assert cells == {"D3": "https://res/laban.png"}
+
+
+def test_redis_write_behind_refuses_to_merge_other_identity(gs, monkeypatch):
+    r = FakeRedis(heartbeat=True)
+    monkeypatch.setattr(gs, "_get_redis", lambda: r)
+    assert gs._redis_write_behind(3, {3: "https://res/a.png"}, {"barcode": "6291003000013"})
+    assert gs._redis_write_behind(3, {3: "https://res/b.png"}, {"barcode": "6281007000035"}) is False
+
+
+def test_sync_worker_keeps_an_update_that_arrived_during_the_write(gs):
+    import sync_worker
+    r = FakeRedis()
+    r.sadd("writebehind:dirty_set", "row_2")
+    r.set("product:data:row_2", json.dumps({"row_index": 2, "updates": {"3": "https://res/a.png"}}))
+    ws = FakeWorksheet(SHEET)
+
+    def write_and_race(data, value_input_option=None):
+        # metadata for the same row lands while the link is being written
+        r.set("product:data:row_2", json.dumps({"row_index": 2, "updates": {"3": "https://res/a.png", "4": "desc"}}))
+
+    ws.batch_update = write_and_race
+    sync_worker.run_sync_cycle(ws, r)
+    assert "row_2" in r.smembers("writebehind:dirty_set")
+    assert json.loads(r.kv["product:data:row_2"])["updates"]["4"] == "desc"
+
+
+def test_sync_worker_parks_a_permanently_failing_key(gs):
+    import sync_worker
+    r = FakeRedis()
+    r.sadd("writebehind:dirty_set", "row_99")
+    r.set("product:data:row_99", json.dumps({"row_index": 99, "updates": {"3": "x"}}))
+    ws = FakeWorksheet(SHEET)
+
+    def boom(data, value_input_option=None):
+        raise RuntimeError("400 range exceeds grid limits")
+
+    ws.batch_update = boom
+    for _ in range(sync_worker.MAX_KEY_ATTEMPTS):
+        sync_worker.run_sync_cycle(ws, r)
+    assert "row_99" not in r.smembers("writebehind:dirty_set")
+    assert "row_99" in r.smembers("writebehind:dead")

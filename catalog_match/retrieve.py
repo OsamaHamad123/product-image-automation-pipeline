@@ -35,7 +35,7 @@ from dataclasses import dataclass, field, replace
 from typing import Callable, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 from urllib.parse import parse_qsl, unquote, urlencode, urlsplit
 
-from .gtin import normalize_gtin
+from .gtin import is_global_gtin
 from .models import Candidate, PlannedQuery, ProviderResult, RetrievalResult, SkuSpec
 from .query_plan import build_queries, relaxations
 
@@ -178,7 +178,7 @@ class CandidatePool:
 # ---------------------------------------------------------------------------
 
 def _valid_gtin(spec: SkuSpec) -> bool:
-    return bool(spec.gtin) and normalize_gtin(spec.gtin)[1] == "ok"
+    return bool(spec.gtin) and is_global_gtin(spec.gtin)
 
 
 class Retriever:
@@ -380,12 +380,21 @@ def retrieve(spec: SkuSpec, providers: Sequence, custom_query: Optional[str] = N
 # Helpers for callers
 # ---------------------------------------------------------------------------
 
+LOOKUP_PROVIDER_NAMES = frozenset({"off", "open_food_facts", "openfoodfacts"})
+
+
 def t1_early_stop(spec: SkuSpec, negatives=None) -> EarlyStop:
-    """early_stop callable: True once the pool holds a tier-1 candidate (score.py)."""
+    """early_stop callable: True once a web-search candidate in the pool is tier 1 (score.py).
+
+    A GTIN-lookup record (Open Food Facts) never stops the search on its own: its photo is
+    often a user snapshot and its data can be wrong, while the retailer packshot the next
+    query would find is usually better evidence.
+    """
     from .score import has_tier1
 
     def _stop(pool: List[Candidate]) -> bool:
-        return has_tier1(spec, pool, negatives)
+        web = [c for c in pool if (c.provider or "").lower() not in LOOKUP_PROVIDER_NAMES]
+        return has_tier1(spec, web, negatives)
 
     return _stop
 

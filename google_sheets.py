@@ -353,36 +353,48 @@ def _read_column_cells(worksheet, col_idx, rows):
     return out
 
 
-def find_identity_conflicts(worksheet, expectations, headers=None):
+def find_record_conflicts(worksheet, records, headers=None):
     """
-    expectations: {row_number: {'barcode': ..., 'name': ...}}.
-    يعيد {row_number: سبب} للصفوف التي لا يطابق عمود المفتاح فيها الهوية المخزنة.
+    records: {record_id: (row_number, {'barcode': ..., 'name': ...})}.
+    يعيد {record_id: سبب} لكل سجل لا يطابق عمود المفتاح في صفه هويته هو. التحقق لكل سجل على حدة:
+    سجلان لمنتجين مختلفين على نفس رقم الصف (رقم صف قديم) لا يأخذ أحدهما حكم الآخر.
     الباركود هو المفتاح عند توفره (في التوقع وفي الشيت)، وإلا الاسم.
     """
-    expectations = {r: e for r, e in (expectations or {}).items() if e}
-    if not expectations:
+    records = {k: (row, e) for k, (row, e) in (records or {}).items() if e}
+    if not records:
         return {}
     if headers is None:
         headers = _worksheet_headers(worksheet, fresh=True)
     cols = resolve_columns(headers)
-    rows = sorted(expectations)
-    barcode_rows = [r for r in rows if expectations[r].get("barcode") and cols["barcode"] != -1]
-    name_rows = [r for r in rows if r not in barcode_rows and expectations[r].get("name") and cols["name"] != -1]
+    barcode_ids = [k for k, (_, e) in records.items() if e.get("barcode") and cols["barcode"] != -1]
+    name_ids = [k for k, (_, e) in records.items()
+                if k not in barcode_ids and e.get("name") and cols["name"] != -1]
     conflicts = {}
-    if barcode_rows:
-        actual = _read_column_cells(worksheet, cols["barcode"], barcode_rows)
-        for r in barcode_rows:
-            if _norm_barcode(actual.get(r)) != _norm_barcode(expectations[r]["barcode"]):
-                conflicts[r] = f"barcode mismatch: sheet has {actual.get(r)!r}, expected {expectations[r]['barcode']!r}"
-    if name_rows:
-        actual = _read_column_cells(worksheet, cols["name"], name_rows)
-        for r in name_rows:
-            if _norm_name(actual.get(r)) != _norm_name(expectations[r]["name"]):
-                conflicts[r] = f"name mismatch: sheet has {actual.get(r)!r}, expected {expectations[r]['name']!r}"
-    unverifiable = [r for r in rows if r not in barcode_rows and r not in name_rows]
-    for r in unverifiable:
-        conflicts[r] = "no key column in sheet to verify row identity"
+    if barcode_ids:
+        actual = _read_column_cells(worksheet, cols["barcode"], sorted({records[k][0] for k in barcode_ids}))
+        for k in barcode_ids:
+            row, e = records[k]
+            if _norm_barcode(actual.get(row)) != _norm_barcode(e["barcode"]):
+                conflicts[k] = f"barcode mismatch: sheet has {actual.get(row)!r}, expected {e['barcode']!r}"
+    if name_ids:
+        actual = _read_column_cells(worksheet, cols["name"], sorted({records[k][0] for k in name_ids}))
+        for k in name_ids:
+            row, e = records[k]
+            if _norm_name(actual.get(row)) != _norm_name(e["name"]):
+                conflicts[k] = f"name mismatch: sheet has {actual.get(row)!r}, expected {e['name']!r}"
+    for k in records:
+        if k not in barcode_ids and k not in name_ids:
+            conflicts[k] = "no key column in sheet to verify row identity"
     return conflicts
+
+
+def find_identity_conflicts(worksheet, expectations, headers=None):
+    """
+    expectations: {row_number: {'barcode': ..., 'name': ...}}.
+    يعيد {row_number: سبب} للصفوف التي لا يطابق عمود المفتاح فيها الهوية المخزنة.
+    """
+    records = {r: (r, e) for r, e in (expectations or {}).items() if e}
+    return find_record_conflicts(worksheet, records, headers=headers)
 
 
 # ---------------------------------------------------------------------------
@@ -448,6 +460,11 @@ class SQLiteTransactionQueue:
         clear_cache()
 
 
+def _outbox_lock_name():
+    """اسم قفل المُفرِّغ؛ يتضمن اسم قاعدة البيانات لأن أقفال MariaDB على مستوى الخادم كله."""
+    return f"sheet_outbox_flush:{os.getenv('DB_DATABASE', 'automation_db')}"[:64]
+
+
 def _set_status(cursor, ids, status, error=None):
     if not ids:
         return
@@ -487,118 +504,149 @@ class GoogleSheetsBatchWorker(threading.Thread):
             self._exit_signal.wait(self.sync_interval)
         if worksheet:
             try:
-                self._synchronize_pending_records(worksheet)
+                # التفريغ الأخير ينتظر القفل قليلاً كي لا تبقى كتابات هذه العملية معلقة بلا مُفرِّغ
+                self._synchronize_pending_records(worksheet, lock_timeout=30)
             except Exception as e:
                 logger.warning("[GoogleSheetsBatchWorker] فشل التفريغ الأخير: %s", e)
 
-    def _synchronize_pending_records(self, worksheet):
+    def _synchronize_pending_records(self, worksheet, lock_timeout=0):
         """
         تفريغ طابور الكتابة:
-        1. قراءة الصفوف المعلقة بالترتيب (ORDER BY id) ودمج التكرارات على نفس الخلية (الأحدث يفوز).
-        2. تحديد عمود الهدف باسم العنوان الآن، والتحقق من هوية كل صف بقراءة عمود المفتاح (CONFLICT عند الاختلاف).
+        0. قفل MariaDB مسمى (GET_LOCK) يجعل المُفرِّغ واحداً في كل لحظة عبر كل العمليات (العامل وكل استدعاء
+           cli_bridge)؛ وإلا قد يرسل مُفرِّغ متأخر قيمة قديمة بعد أن كتب آخر القيمة الأحدث فيمحوها.
+           من لم يحصل على القفل يتخطى هذه الدورة (الصفوف تبقى PENDING لمن يملكه).
+        1. قراءة الصفوف المعلقة بالترتيب (ORDER BY id) ودمج التكرارات على نفس الخلية ولنفس الهوية المتوقعة
+           فقط (الأحدث يفوز)؛ سجلات بهويات مختلفة تُفحص كل منها على حدة.
+        2. تحديد عمود الهدف باسم العنوان الآن، والتحقق من هوية كل سجل بقراءة عمود المفتاح (CONFLICT عند الاختلاف).
         3. إرسال دفعة واحدة؛ عند فشلها نعيد المحاولة صفاً صفاً كي لا يوقف صف معطوب البقية.
            كل فشل فردي يزيد attempts ويحفظ last_error، وبعد 5 محاولات تصبح الحالة DEAD.
         """
         conn = self.queue._connect()
+        lock_name = _outbox_lock_name()
+        locked = False
         try:
             cursor = conn.cursor()
-            cursor.execute(
-                "SELECT id, `row_number`, `col_index`, `value`, col_name, key_barcode, key_name, attempts "
-                "FROM sheet_updates WHERE sync_status IN ('PENDING', 'FAILED') ORDER BY id LIMIT %s",
-                (OUTBOX_BATCH,),
-            )
-            rows = list(cursor.fetchall())
-            if not rows:
+            cursor.execute("SELECT GET_LOCK(%s, %s) AS got", (lock_name, int(lock_timeout)))
+            locked = bool((cursor.fetchone() or {}).get("got"))
+            if not locked:
+                logger.debug("[Sheets Outbox] مُفرِّغ آخر يعمل الآن؛ تخطي هذه الدورة.")
                 return
-
-            # 1. الأحدث لكل خلية (صف، عمود) يفوز؛ الأقدم يصبح SUPERSEDED
-            latest = {}
-            for r in rows:
-                cell_key = (r["row_number"], (r.get("col_name") or "").strip().casefold() or r["col_index"])
-                if cell_key not in latest or r["id"] > latest[cell_key]["id"]:
-                    latest[cell_key] = r
-            keep_ids = {r["id"] for r in latest.values()}
-            superseded = [r["id"] for r in rows if r["id"] not in keep_ids]
-            _set_status(cursor, superseded, "SUPERSEDED")
-            rows = sorted(latest.values(), key=lambda r: r["id"])
-
-            # 2. العمود بالاسم الآن + التحقق من الهوية
-            headers = worksheet.row_values(1)
-            normalized_headers = [normalize_header(h) for h in headers]
-            ws_max_rows = worksheet.row_count
-            targets = []
-            conflicts = {}
-            out_of_bounds = []
-            for r in rows:
-                col = r["col_index"]
-                if r.get("col_name"):
-                    wanted = normalize_header(r["col_name"])
-                    if wanted not in normalized_headers:
-                        conflicts[r["id"]] = f"column '{r['col_name']}' not found in sheet headers"
-                        continue
-                    col = normalized_headers.index(wanted)
-                if r["row_number"] <= 1 or col < 0 or r["row_number"] > ws_max_rows:
-                    out_of_bounds.append(r["id"])
-                    continue
-                targets.append((r, col))
-
-            expectations = {}
-            for r, _ in targets:
-                expect = _expectation(r.get("key_barcode"), r.get("key_name"))
-                if expect:
-                    expectations[r["row_number"]] = expect
-            row_conflicts = find_identity_conflicts(worksheet, expectations, headers=headers) if expectations else {}
-            ready = []
-            for r, col in targets:
-                reason = row_conflicts.get(r["row_number"])
-                if reason and _expectation(r.get("key_barcode"), r.get("key_name")):
-                    conflicts[r["id"]] = reason
-                else:
-                    ready.append((r, col))
-
-            for rid, reason in conflicts.items():
-                _set_status(cursor, [rid], "CONFLICT", reason[:1000])
-                logger.warning("[Sheets Outbox] CONFLICT للتحديث %s: %s", rid, reason)
-            _set_status(cursor, out_of_bounds, "SKIPPED_OUT_OF_BOUNDS")
-            conn.commit()
-            if not ready:
-                return
-
-            def body_for(items):
-                return {
-                    "valueInputOption": "RAW",
-                    "data": [{
-                        "range": f"'{worksheet.title}'!{gspread.utils.rowcol_to_a1(r['row_number'], col + 1)}",
-                        "values": [[str(r['value'])]],
-                    } for r, col in items],
-                }
-
-            send = retry_gspread_on_429(max_retries=5)(worksheet.spreadsheet.values_batch_update)
-            try:
-                send(body_for(ready))
-                _set_status(cursor, [r["id"] for r, _ in ready], "SYNCED")
-                conn.commit()
-                logger.info("[Sheets Outbox] تمت مزامنة %s خلية.", len(ready))
-                return
-            except Exception as e:
-                logger.warning("[Sheets Outbox] فشل الإرسال الجماعي (%s)؛ إعادة المحاولة صفاً صفاً.", e)
-
-            for r, col in ready:
-                try:
-                    send(body_for([(r, col)]))
-                    _set_status(cursor, [r["id"]], "SYNCED")
-                except Exception as e:
-                    attempts = int(r.get("attempts") or 0) + 1
-                    status = "DEAD" if attempts >= MAX_OUTBOX_ATTEMPTS else "FAILED"
-                    cursor.execute(
-                        "UPDATE sheet_updates SET attempts = %s, last_error = %s, sync_status = %s WHERE id = %s",
-                        (attempts, str(e)[:1000], status, r["id"]),
-                    )
-                    logger.warning("[Sheets Outbox] فشل التحديث %s (المحاولة %s): %s", r["id"], attempts, e)
-                conn.commit()
-            clear_cache()
+            self._flush_locked(worksheet, conn, cursor)
         finally:
+            if locked:
+                try:
+                    conn.cursor().execute("SELECT RELEASE_LOCK(%s) AS released", (lock_name,))
+                except Exception:
+                    pass
             conn.close()
+
+    def _flush_locked(self, worksheet, conn, cursor):
+        """Body of one flush; the caller holds the outbox lock and closes the connection."""
+        cursor.execute(
+            "SELECT id, `row_number`, `col_index`, `value`, col_name, key_barcode, key_name, attempts "
+            "FROM sheet_updates WHERE sync_status IN ('PENDING', 'FAILED') ORDER BY id LIMIT %s",
+            (OUTBOX_BATCH,),
+        )
+        rows = list(cursor.fetchall())
+        if not rows:
+            return
+
+        # 1. الأحدث لكل خلية (صف، عمود) ولنفس الهوية المتوقعة يفوز؛ الأقدم يصبح SUPERSEDED.
+        #    كتابة لمنتج آخر على نفس رقم الصف (رقم صف قديم) لا تُلغي كتابة المنتج الصحيح ولا العكس.
+        latest = {}
+        for r in rows:
+            cell_key = (r["row_number"], (r.get("col_name") or "").strip().casefold() or r["col_index"],
+                        _norm_barcode(r.get("key_barcode")), _norm_name(r.get("key_name")))
+            if cell_key not in latest or r["id"] > latest[cell_key]["id"]:
+                latest[cell_key] = r
+        keep_ids = {r["id"] for r in latest.values()}
+        superseded = [r["id"] for r in rows if r["id"] not in keep_ids]
+        _set_status(cursor, superseded, "SUPERSEDED")
+        rows = sorted(latest.values(), key=lambda r: r["id"])
+
+        # 2. العمود بالاسم الآن + التحقق من الهوية
+        headers = worksheet.row_values(1)
+        normalized_headers = [normalize_header(h) for h in headers]
+        ws_max_rows = worksheet.row_count
+        targets = []
+        conflicts = {}
+        out_of_bounds = []
+        for r in rows:
+            col = r["col_index"]
+            if r.get("col_name"):
+                wanted = normalize_header(r["col_name"])
+                if wanted not in normalized_headers:
+                    conflicts[r["id"]] = f"column '{r['col_name']}' not found in sheet headers"
+                    continue
+                col = normalized_headers.index(wanted)
+            if r["row_number"] <= 1 or col < 0 or r["row_number"] > ws_max_rows:
+                out_of_bounds.append(r["id"])
+                continue
+            targets.append((r, col))
+
+        records = {}
+        for r, _ in targets:
+            expect = _expectation(r.get("key_barcode"), r.get("key_name"))
+            if expect:
+                records[r["id"]] = (r["row_number"], expect)
+        record_conflicts = find_record_conflicts(worksheet, records, headers=headers) if records else {}
+        ready = []
+        for r, col in targets:
+            reason = record_conflicts.get(r["id"])
+            if reason:
+                conflicts[r["id"]] = reason
+            else:
+                ready.append((r, col))
+        # بعد التحقق: خلية واحدة تُكتب مرة واحدة فقط (الأحدث)
+        newest = {}
+        for r, col in ready:
+            if (r["row_number"], col) not in newest or r["id"] > newest[(r["row_number"], col)][0]["id"]:
+                newest[(r["row_number"], col)] = (r, col)
+        dup_ids = [r["id"] for r, col in ready if newest[(r["row_number"], col)][0] is not r]
+        _set_status(cursor, dup_ids, "SUPERSEDED")
+        ready = sorted(newest.values(), key=lambda item: item[0]["id"])
+
+        for rid, reason in conflicts.items():
+            _set_status(cursor, [rid], "CONFLICT", reason[:1000])
+            logger.warning("[Sheets Outbox] CONFLICT للتحديث %s: %s", rid, reason)
+        _set_status(cursor, out_of_bounds, "SKIPPED_OUT_OF_BOUNDS")
+        conn.commit()
+        if not ready:
+            return
+
+        def body_for(items):
+            return {
+                "valueInputOption": "RAW",
+                "data": [{
+                    "range": f"'{worksheet.title}'!{gspread.utils.rowcol_to_a1(r['row_number'], col + 1)}",
+                    "values": [[str(r['value'])]],
+                } for r, col in items],
+            }
+
+        send = retry_gspread_on_429(max_retries=5)(worksheet.spreadsheet.values_batch_update)
+        try:
+            send(body_for(ready))
+            _set_status(cursor, [r["id"] for r, _ in ready], "SYNCED")
+            conn.commit()
+            logger.info("[Sheets Outbox] تمت مزامنة %s خلية.", len(ready))
+            return
+        except Exception as e:
+            logger.warning("[Sheets Outbox] فشل الإرسال الجماعي (%s)؛ إعادة المحاولة صفاً صفاً.", e)
+
+        for r, col in ready:
+            try:
+                send(body_for([(r, col)]))
+                _set_status(cursor, [r["id"]], "SYNCED")
+            except Exception as e:
+                attempts = int(r.get("attempts") or 0) + 1
+                status = "DEAD" if attempts >= MAX_OUTBOX_ATTEMPTS else "FAILED"
+                cursor.execute(
+                    "UPDATE sheet_updates SET attempts = %s, last_error = %s, sync_status = %s WHERE id = %s",
+                    (attempts, str(e)[:1000], status, r["id"]),
+                )
+                logger.warning("[Sheets Outbox] فشل التحديث %s (المحاولة %s): %s", r["id"], attempts, e)
+            conn.commit()
+        clear_cache()
 
 
 def init_async_queue(creds_path, spreadsheet_name, sync_interval=5):
@@ -643,6 +691,51 @@ def _get_redis():
         return None
 
 
+def _merged_payload(cached, row_number, updates, expect):
+    """الحمولة بعد الدمج، أو None إذا تعذر الدمج بأمان (صيغة غير معروفة أو هوية مختلفة)."""
+    payload = json.loads(cached) if cached else {"row_index": row_number, "updates": {}}
+    if not isinstance(payload, dict) or not isinstance(payload.get("updates"), dict):
+        logger.warning("[Redis Write-Behind] صيغة غير معروفة للصف %s؛ استخدام طابور MariaDB.", row_number)
+        return None
+    if cached and (payload.get("expect") or None) != (expect or None):
+        # حمولة معلقة لمنتج آخر على نفس رقم الصف: لا ندمج (وإلا كُتبت قيمها بهوية المنتج الجديد)
+        logger.warning("[Redis Write-Behind] حمولة الصف %s تخص هوية أخرى؛ استخدام طابور MariaDB.", row_number)
+        return None
+    payload["row_index"] = row_number
+    for col, value in updates.items():
+        payload["updates"][str(col)] = value
+    if expect:
+        payload["expect"] = expect
+    return json.dumps(payload, ensure_ascii=False)
+
+
+def _redis_merge_payload(r, key, row_number, updates, expect):
+    """دمج ذري (WATCH/MULTI) لتحديثات الصف في حمولته؛ يعيد False ليُستخدم طابور MariaDB."""
+    cache_key = f"{CACHE_PREFIX}{key}"
+    if getattr(r, "pipeline", None) is None:
+        merged = _merged_payload(r.get(cache_key), row_number, updates, expect)
+        if merged is None:
+            return False
+        r.set(cache_key, merged)
+        return True
+    import redis
+    for _ in range(5):
+        with r.pipeline() as p:
+            try:
+                p.watch(cache_key)
+                merged = _merged_payload(p.get(cache_key), row_number, updates, expect)
+                if merged is None:
+                    p.unwatch()
+                    return False
+                p.multi()
+                p.set(cache_key, merged)
+                p.execute()
+                return True
+            except redis.WatchError:
+                continue
+    return False
+
+
 def _redis_write_behind(row_number, updates, expect=None):
     """
     جدولة تحديثات صف عبر Redis بالصيغة {'row_index', 'updates': {col: value}, 'expect': {...}}.
@@ -655,18 +748,8 @@ def _redis_write_behind(row_number, updates, expect=None):
         if not r.exists(HEARTBEAT_KEY):
             return False
         key = f"row_{row_number}"
-        cached = r.get(f"{CACHE_PREFIX}{key}")
-        payload = json.loads(cached) if cached else {"row_index": row_number, "updates": {}}
-        if not isinstance(payload, dict) or not isinstance(payload.get("updates"), dict):
-            # صيغة غير معروفة: لا نكتب فوقها
-            logger.warning("[Redis Write-Behind] صيغة غير معروفة للمفتاح %s؛ استخدام طابور MariaDB.", key)
+        if not _redis_merge_payload(r, key, row_number, updates, expect):
             return False
-        payload["row_index"] = row_number
-        for col, value in updates.items():
-            payload["updates"][str(col)] = value
-        if expect:
-            payload["expect"] = expect
-        r.set(f"{CACHE_PREFIX}{key}", json.dumps(payload, ensure_ascii=False))
         r.sadd(DIRTY_SET_KEY, key)
         r.delete("laravel_database_laravel_cache:products_json_v1")
         r.delete("laravel_cache:products_json_v1")

@@ -86,3 +86,26 @@ def same_gtin(a, b) -> Optional[bool]:
     if ga is None or gb is None:
         return None
     return ga == gb
+
+
+def is_restricted(gtin14: Optional[str]) -> bool:
+    """True for GS1 restricted-circulation numbers (in-store / company-internal codes).
+
+    GTIN-13 prefixes 020-029, 040-049 and 200-299 (variable-measure and in-store codes,
+    GTIN-12 '2...' and '4...' included) and RCN-8 codes starting 0 or 2 are only unique
+    inside one company, so they identify nothing on the open web (Open Food Facts, Q4).
+    """
+    if not gtin14 or len(gtin14) != 14 or not gtin14.isdigit():
+        return False
+    if gtin14.startswith("000000"):                    # a GTIN-8 zero-padded to 14 digits
+        return gtin14[6] in "02"
+    if gtin14[0] != "0":
+        return False                                   # GTIN-14 with a packaging indicator
+    g13 = gtin14[1:]
+    return g13[:2] in ("02", "04") or g13[0] == "2"
+
+
+def is_global_gtin(raw) -> bool:
+    """A valid GTIN that is also globally unique (not a restricted-circulation number)."""
+    gtin14, status = normalize_gtin(raw)
+    return status == "ok" and not is_restricted(gtin14)

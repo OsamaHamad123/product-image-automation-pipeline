@@ -289,6 +289,22 @@ def init_db():
 _SERVABLE_SQL = "verification_status IN ('human_approved','auto_verified')"
 
 
+def _cache_barcode(barcode):
+    """
+    الباركود كما يُستخدم مفتاحاً للكاش: النص المنظف فقط عندما يكون GTIN صالحاً (رقم تحقق سليم).
+    خلايا مثل 'N/A' و'-' و'0' و'6.29E+12' تشترك فيها منتجات مختلفة، فلا تُستخدم للبحث أو التحديث أبداً.
+    """
+    text = str(barcode).strip() if barcode is not None else ""
+    if not text:
+        return ""
+    try:
+        from catalog_match.gtin import normalize_gtin
+        _gtin14, status = normalize_gtin(text)
+    except Exception:
+        return ""
+    return text if status == "ok" else ""
+
+
 def _cache_row_to_dict(row):
     metadata = {}
     if row.get("metadata_json"):
@@ -313,11 +329,12 @@ def get_cached_product(barcode=None, product_name=None, brand=None, sku_key=None
     """
     الاستعلام من الكاش. لا يخدم إلا الحلول المعتمدة (human_approved / auto_verified).
     - بـ sku_key أولاً إن مُرر.
-    - عند وجود باركود: بحث صارم بالباركود فقط، ولا رجوع للاسم أبداً.
-    - بدون باركود ولا sku_key: مطابقة دقيقة للاسم والبراند.
+    - عند وجود باركود GTIN صالح: بحث صارم بالباركود فقط، ولا رجوع للاسم أبداً.
+      الباركود غير الصالح ('N/A' أو '0' أو '6.29E+12') لا يُستخدم مفتاحاً أبداً: قد تشترك فيه منتجات مختلفة.
+    - بدون باركود صالح ولا sku_key: مطابقة دقيقة للاسم والبراند.
     خطأ القراءة يُعامل كعدم وجود (None) ويُسجل.
     """
-    barcode_clean = str(barcode).strip() if barcode is not None else ""
+    barcode_clean = _cache_barcode(barcode)
     sku_clean = str(sku_key).strip() if sku_key else ""
     try:
         conn = get_db_connection()
@@ -362,7 +379,8 @@ def save_product_resolution(barcode, product_name, brand, original_url, cloudina
     """
     if verification_status not in VERIFICATION_STATUSES:
         raise ValueError(f"verification_status غير صالح: {verification_status!r}")
-    barcode_clean = str(barcode).strip() if barcode else ""
+    barcode_raw = str(barcode).strip() if barcode else ""
+    barcode_clean = _cache_barcode(barcode)   # مفتاح المطابقة: GTIN صالح فقط
     sku_clean = str(sku_key).strip() if sku_key else ""
     metadata_str = json.dumps(metadata, ensure_ascii=False) if metadata else ""
     embedding_str = json.dumps(clip_embedding) if clip_embedding is not None else ""
@@ -385,7 +403,7 @@ def save_product_resolution(barcode, product_name, brand, original_url, cloudina
                     tuple(params),
                 )
                 existing = [r["id"] for r in cursor.fetchall()]
-            values = (barcode_clean, product_name, brand, original_url, cloudinary_url, clip_score,
+            values = (barcode_raw, product_name, brand, original_url, cloudinary_url, clip_score,
                       metadata_str, embedding_str, hash_str, sku_clean or None, verification_status, approved_by)
             if existing:
                 cursor.execute("""
@@ -416,7 +434,7 @@ def save_product_resolution(barcode, product_name, brand, original_url, cloudina
         logger.warning("[MariaDB Cache] فشل حفظ الحل المعتمد لـ '%s': %s", product_name, e)
         return False
     if verification_status in SERVABLE_STATUSES:
-        delete_product_failure(barcode_clean or f"ERR_{product_name}_{brand}".replace(" ", "_"))
+        delete_product_failure(barcode_raw or f"ERR_{product_name}_{brand}".replace(" ", "_"))
     return True
 
 
@@ -429,9 +447,10 @@ def supersede_resolution(sku_key, barcode=None):
     if sku_key:
         clauses.append("sku_key = %s")
         params.append(str(sku_key).strip())
-    if barcode and str(barcode).strip():
+    barcode_clean = _cache_barcode(barcode)
+    if barcode_clean:
         clauses.append("barcode = %s")
-        params.append(str(barcode).strip())
+        params.append(barcode_clean)
     if not clauses:
         return 0
     try:
@@ -702,6 +721,9 @@ def add_to_queue(row_number, barcode, name, brand, query, payload=None, sku_key=
     return True
 
 
+CLAIMABLE_SQL = "(status='pending' OR (status='processing' AND (lease_until IS NULL OR lease_until<NOW())))"
+
+
 def new_claim_id(worker_id=None):
     base = worker_id or f"{socket.gethostname()[:20]}:{os.getpid()}"
     return f"{base}#{uuid.uuid4().hex[:12]}"[:64]
@@ -714,15 +736,16 @@ def fetch_next_task(worker_id=None):
     أخطاء قاعدة البيانات تُرفع (لا تتحول إلى None).
     """
     claim_id = new_claim_id(worker_id)
-    claimable = "(status='pending' OR (status='processing' AND lease_until<NOW()))"
+    # حجز بلا lease_until (صفوف تركها الإصدار القديم في 'processing' عند إيقافه) يُعامل كمنتهٍ،
+    # وإلا لن يُسحب أبداً ويبقى count_open_tasks أكبر من صفر فلا ينتهي العامل.
+    claimable = CLAIMABLE_SQL
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
         cursor.execute(
             "UPDATE automation_queue SET status='processing', worker_id=%s, "
             f"lease_until=NOW() + INTERVAL {LEASE_MINUTES} MINUTE, attempts=attempts+1, updated_at=CURRENT_TIMESTAMP "
-            "WHERE id=(SELECT id FROM (SELECT id FROM automation_queue WHERE "
-            "status='pending' OR (status='processing' AND lease_until<NOW()) ORDER BY id LIMIT 1) t) "
+            f"WHERE id=(SELECT id FROM (SELECT id FROM automation_queue WHERE {claimable} ORDER BY id LIMIT 1) t) "
             f"AND {claimable}",
             (claim_id,),
         )
@@ -732,6 +755,29 @@ def fetch_next_task(worker_id=None):
     finally:
         _close(conn)
     return dict(row) if row else None
+
+
+def is_claim_held(task_id, claim_id):
+    """
+    هل ما زال الصف محجوزاً بمعرف السحب هذا (status='processing' و worker_id=claim_id)؟
+    بدون claim_id (استدعاء خارج العامل) تعيد True. خطأ القراءة يعيد True ويُسجل: تحديث الحالة
+    اللاحق يتحقق من الملكية مرة أخرى.
+    """
+    if not claim_id:
+        return True
+    try:
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT id FROM automation_queue WHERE id = %s AND worker_id = %s AND status = 'processing'",
+                           (task_id, claim_id))
+            row = cursor.fetchone()
+        finally:
+            _close(conn)
+        return row is not None
+    except Exception as e:
+        logger.warning("[MariaDB Queue] تعذر التحقق من حجز المهمة %s: %s", task_id, e)
+        return True
 
 
 def get_task_by_row(row_number):
@@ -759,39 +805,57 @@ def _trace_to_json(trace):
         return None
 
 
-def update_task_status(task_id, status, error_message=None, failure_code=None, trace=None):
-    """تحديث حالة المهمة بعد المعالجة، مع رمز الفشل والـ trace، وتحرير الحجز."""
+def update_task_status(task_id, status, error_message=None, failure_code=None, trace=None, claim_id=None):
+    """
+    تحديث حالة المهمة بعد المعالجة، مع رمز الفشل والـ trace، وتحرير الحجز.
+    claim_id (معرف السحب من fetch_next_task): عند تمريره لا يُحدَّث الصف إلا إذا كان ما زال محجوزاً بهذا
+    المعرف وفي حالة 'processing'؛ فلا تكتب نتيجة العامل فوق اعتماد بشري تم أثناء المعالجة أو فوق حجز
+    أعيد سحبه بعد انتهائه. تعيد False إن لم يعد الحجز ملكاً للعامل.
+    """
+    sql = """
+        UPDATE automation_queue
+        SET status = %s, error_message = %s, failure_code = %s,
+            trace_json = COALESCE(%s, trace_json), lease_until = NULL, updated_at = CURRENT_TIMESTAMP
+        WHERE id = %s
+    """
+    params = (status, error_message, failure_code, _trace_to_json(trace), task_id)
+    if claim_id:
+        sql += " AND worker_id = %s AND status = 'processing'"
+        params += (claim_id,)
     try:
         conn = get_db_connection()
         try:
             cursor = conn.cursor()
-            cursor.execute("""
-                UPDATE automation_queue
-                SET status = %s, error_message = %s, failure_code = %s,
-                    trace_json = COALESCE(%s, trace_json), lease_until = NULL, updated_at = CURRENT_TIMESTAMP
-                WHERE id = %s
-            """, (status, error_message, failure_code, _trace_to_json(trace), task_id))
+            cursor.execute(sql, params)
+            affected = cursor.rowcount
             conn.commit()
         finally:
             _close(conn)
+        if claim_id and not affected:
+            logger.warning("[MariaDB Queue] المهمة %s لم تعد محجوزة بـ %s؛ لم تُكتب الحالة %s", task_id, claim_id, status)
+            return False
         return True
     except Exception as e:
         logger.warning("[MariaDB Queue] فشل تحديث حالة المهمة %s: %s", task_id, e)
         return False
 
 
-def update_task_status_by_row(row_number, status, error_message=None, failure_code=None):
-    """تحديث حالة المهمة باستخدام رقم صف الشيت."""
+def update_task_status_by_row(row_number, status, error_message=None, failure_code=None, sku_key=None):
+    """
+    تحديث حالة المهمة لمنتج: بـ sku_key عند تمريره (فلا يتأثر منتج آخر انتقل إلى رقم الصف نفسه
+    بعد تعديل الشيت)، وبرقم الصف فقط للصفوف القديمة بلا sku_key.
+    """
+    clause, params = _row_or_sku_clause(row_number, sku_key)
     try:
         conn = get_db_connection()
         try:
             cursor = conn.cursor()
-            cursor.execute("""
+            cursor.execute(f"""
                 UPDATE automation_queue
                 SET status = %s, error_message = %s, failure_code = %s, lease_until = NULL,
                     updated_at = CURRENT_TIMESTAMP
-                WHERE `row_number` = %s
-            """, (status, error_message, failure_code, row_number))
+                WHERE {clause}
+            """, (status, error_message, failure_code) + params)
             conn.commit()
         finally:
             _close(conn)
@@ -961,15 +1025,16 @@ def _loads(value, default):
         return default
 
 
-def get_curation_candidates(row_number):
-    """جلب المرشحات المحفوظة لصف معين (المختار مسبقاً أولاً)."""
+def get_curation_candidates(row_number, sku_key=None):
+    """جلب المرشحات المحفوظة لمنتج (المختار مسبقاً أولاً): بـ sku_key عند تمريره، وإلا برقم الصف."""
+    clause, params = _row_or_sku_clause(row_number, sku_key)
     try:
         conn = get_db_connection()
         try:
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT * FROM curation_candidates WHERE `row_number` = %s ORDER BY is_selected DESC, id ASC",
-                (row_number,),
+                f"SELECT * FROM curation_candidates WHERE {clause} ORDER BY is_selected DESC, id ASC",
+                params,
             )
             rows = cursor.fetchall()
         finally:
@@ -1004,13 +1069,24 @@ def get_curation_candidates(row_number):
         return []
 
 
-def delete_curation_candidates(row_number):
-    """مسح كل مرشحات صف معين بعد اعتماده أو رفضه."""
+def _row_or_sku_clause(row_number, sku_key):
+    """
+    شرط يحدد صفوف منتج واحد: بـ sku_key عند توفره (أرقام الصفوف تتغير عند تعديل الشيت)،
+    وبرقم الصف فقط للصفوف القديمة بلا sku_key.
+    """
+    if sku_key:
+        return "(sku_key = %s OR (sku_key IS NULL AND `row_number` = %s))", (str(sku_key).strip(), row_number)
+    return "`row_number` = %s", (row_number,)
+
+
+def delete_curation_candidates(row_number, sku_key=None):
+    """مسح كل مرشحات منتج بعد اعتماده أو رفضه (بـ sku_key عند توفره، وإلا برقم الصف)."""
+    clause, params = _row_or_sku_clause(row_number, sku_key)
     try:
         conn = get_db_connection()
         try:
             cursor = conn.cursor()
-            cursor.execute("DELETE FROM curation_candidates WHERE `row_number` = %s", (row_number,))
+            cursor.execute(f"DELETE FROM curation_candidates WHERE {clause}", params)
             conn.commit()
         finally:
             _close(conn)

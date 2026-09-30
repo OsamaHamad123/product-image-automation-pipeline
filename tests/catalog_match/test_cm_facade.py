@@ -26,7 +26,7 @@ from catalog_match.score import score_candidate
 from catalog_match.verify import make_verdict
 
 MAPPINGS = {"almarai": {"brand": "Almarai", "synonyms": ["المراعي"], "excluded_competitors": ["Al Ain"]}}
-NAME, BRAND = "Almarai Full Fat Milk 1L", "Almarai"
+NAME, BRAND = "Almarai Full Fat Fresh Milk 1L", "Almarai"
 SPEC = build_sku_spec({"name": NAME, "brand": BRAND}, MAPPINGS)
 PACKSHOT = Candidate(image_url="https://cdn.mafrservices.com/108596_main.jpg",
                      page_url="https://www.carrefouruae.com/mafuae/en/almarai-full-fat-fresh-milk-1l/p/108596",
@@ -108,7 +108,8 @@ def test_v2_returns_legacy_dict_with_decision(monkeypatch, _v2):
     assert list(kwargs["exclude_phashes"]) == ["00ff00ff00ff00ff"]
     _v2.assert_not_called()
     google_sheets.get_brand_mappings.assert_called_once()     # mappings were not passed: loaded once
-    local_cache_db.get_cached_product.assert_called_once()
+    # staff steering (custom query / exclusions) must run the search, never serve the cache
+    local_cache_db.get_cached_product.assert_not_called()
 
 
 def test_v2_trace_candidates_carry_status_reasons_evidence_scores(monkeypatch):
@@ -263,3 +264,22 @@ def test_auto_publish_is_the_only_no_review_result():
     result = facade.outcome_to_legacy(out)
     assert result["needs_review"] is False and result["decision"] == "AUTO_PUBLISH" and result["preselect"]
     assert len(result["candidates"]) <= facade.LEGACY_TOP_N
+
+
+@pytest.mark.parametrize("steer", [{"custom_query": "almarai red cap"}, {"exclude_urls": ["https://x/y.jpg"]},
+                                   {"exclude_phashes": ["00ff00ff00ff00ff"]}])
+def test_v2_steering_bypasses_cache(monkeypatch, steer):
+    local_cache_db.get_cached_product.return_value = {"cloudinary_url": "https://res.cloudinary.com/x/1.png"}
+    find = mock.Mock(return_value=preselected_outcome())
+    monkeypatch.setattr(pipeline, "find_product_image", find)
+    result = image_search.search_best_product_image(NAME, NAME, BRAND, barcode="6281007000000", **steer)
+    local_cache_db.get_cached_product.assert_not_called()
+    find.assert_called_once()
+    assert result["source"] == "serper"
+
+
+def test_v2_invalid_barcode_is_not_a_cache_key(monkeypatch):
+    local_cache_db.get_cached_product.return_value = None
+    monkeypatch.setattr(pipeline, "find_product_image", mock.Mock(return_value=preselected_outcome()))
+    image_search.search_best_product_image(NAME, NAME, BRAND, barcode="6.29E+12")
+    assert local_cache_db.get_cached_product.call_args.kwargs["barcode"] == ""

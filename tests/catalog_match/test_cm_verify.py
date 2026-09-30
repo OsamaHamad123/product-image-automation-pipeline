@@ -168,11 +168,12 @@ def test_code_decides(monkeypatch, laban):
 
 
 @pytest.mark.parametrize("fields,expected", [
-    ({"brand_match": "yes", "view": "front_packshot", "variant_match": "unsure", "size_match": "unsure",
-      "size_text": ""}, "MATCH"),
+    # D6: nothing readable confirms the size, so the flags alone never make a MATCH
+    ({"brand_match": "yes", "brand_text": "Al Rawabi", "view": "front_packshot", "variant_match": "unsure",
+      "size_match": "unsure", "size_text": ""}, "UNSURE"),
     ({"brand_match": "unsure", "view": "front_packshot", "variant_match": "yes", "size_match": "yes"}, "UNSURE"),
     ({"brand_match": "no", "view": "front_packshot", "variant_match": "yes", "size_match": "yes"}, "MISMATCH"),
-    ({"brand_match": "yes", "view": "banner", "variant_match": "yes", "size_match": "yes"}, "UNSURE"),
+    ({"brand_match": "yes", "view": "banner", "variant_match": "yes", "size_match": "yes"}, "MISMATCH"),
     ({"brand_match": True, "view": "front_packshot", "variant_match": "yes", "size_match": "yes"}, "UNSURE"),
     ({"brand_match": "yes", "view": "front_packshot", "variant_match": "yes", "size_match": "yes",
       "size_text": "6 x 180 ml"}, "MISMATCH"),     # pack conflict read from the printed size
@@ -180,8 +181,8 @@ def test_code_decides(monkeypatch, laban):
       "size_text": "200 ml"}, "MISMATCH"),          # 180 vs 200 ml is beyond the 3 % tolerance
     ({"brand_match": "yes", "view": "front_packshot", "variant_match": "yes", "size_match": "yes",
       "size_text": "180 g"}, "UNSURE"),             # parsed, but not a volume
-    ({"brand_match": "yes", "view": "front_packshot", "variant_match": "yes", "size_match": "yes",
-      "size_text": "١٨٠ مل"}, "MATCH"),             # Arabic digits and unit
+    ({"brand_match": "yes", "brand_text": "الروابي", "view": "front_packshot", "variant_match": "yes",
+      "size_match": "yes", "size_text": "١٨٠ مل"}, "MATCH"),             # Arabic digits, unit and brand
 ])
 def test_make_verdict_rules(laban, fields, expected):
     assert make_verdict(laban, 0, fields).decision == expected

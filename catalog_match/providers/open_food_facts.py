@@ -17,7 +17,7 @@ from typing import Any, List, Optional
 
 import requests
 
-from ..gtin import gtin13, normalize_gtin
+from ..gtin import gtin13, is_restricted, normalize_gtin
 from ..models import Candidate, ProviderResult, SkuSpec
 from .base import BaseProvider, ProviderEmpty, ProviderHTTPError, response_text
 
@@ -74,7 +74,8 @@ def _valid_gtin(spec: SkuSpec) -> Optional[str]:
     if not spec.gtin:
         return None
     gtin14, status = normalize_gtin(spec.gtin)
-    return gtin14 if status == "ok" else None
+    # In-store / restricted-circulation codes are not global: another product owns them on OFF.
+    return gtin14 if status == "ok" and not is_restricted(gtin14) else None
 
 
 def parse_product(data: Any, gtin14: str) -> List[Candidate]:

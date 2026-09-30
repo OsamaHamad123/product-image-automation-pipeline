@@ -133,6 +133,14 @@ def test_contracts():
         assert "run_fastapi.bat" not in text, launcher.name
 
 
+def test_catalog_reject_sends_the_candidate_bytes():
+    """The catalog stores no curation rows, so the reject must carry the sha for the bridge's pHash."""
+    catalog = read(VIEWS / "dashboard" / "catalog.blade.php")
+    body = catalog[catalog.index("async function submitReject"):]
+    body = body[:body.index("JSON.stringify(") + 2000]
+    assert "candidate_sha256: candidate.content_sha256" in body
+
+
 def test_fake_flows_removed():
     for path in (
         CONTROLLERS / "CatalogHealingController.php",
@@ -320,6 +328,35 @@ echo json_encode([
         None,               # all zero
         "00000096385074",   # valid GTIN-8
     ]
+
+
+@pytest.mark.skipif(PHP is None, reason="php is not installed")
+def test_candidate_matcher_falls_back_when_the_key_differs():
+    """The worker stored candidates under another sku_key (brand mapping changed or failed to load):
+    same row + same product name still attaches them; another product at that row never does."""
+    matcher = str(SERVICES / "CandidateMatcher.php").replace("\\", "/")
+    products = [
+        {"row_number": 12, "product_name": "Al Marai Fresh Milk Full Fat 1L", "barcode": "",
+         "sku_key": "7cdf131b51639759"},
+        {"row_number": 13, "product_name": "Tomato Paste 400g", "barcode": "", "sku_key": "1111111111111111"},
+    ]
+    rows = [
+        {"id": 1, "row_number": 12, "product_name": "Al Marai Fresh Milk Full Fat 1L", "image_url": "m1.jpg",
+         "sku_key": "4b5431eb5edc585c", "run_id": "r1", "is_selected": 1, "status": "preselected"},
+        {"id": 2, "row_number": 13, "product_name": "Basmati Rice 5kg", "image_url": "decoy.jpg",
+         "sku_key": "2222222222222222", "run_id": "r2", "is_selected": 1, "status": "preselected"},
+    ]
+    script = f"""<?php
+require '{matcher}';
+use App\\Services\\CandidateMatcher;
+$products = json_decode({json.dumps(json.dumps(products))}, true);
+$rows = json_decode({json.dumps(json.dumps(rows))}, true);
+echo json_encode(CandidateMatcher::attach($products, $rows));
+"""
+    out = {p["row_number"]: p for p in _run_php(script)}
+    assert [c["image_url"] for c in out[12]["curation_candidates"]] == ["m1.jpg"]
+    assert out[12]["needs_review"] is True and out[12]["needs_review_url"] == "m1.jpg"
+    assert out[13]["curation_candidates"] == [] and not out[13].get("needs_review_url")
 
 
 @pytest.mark.skipif(PHP is None, reason="php is not installed")

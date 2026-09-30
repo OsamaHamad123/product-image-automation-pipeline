@@ -21,7 +21,9 @@ Decisions
     REVIEW_UNSELECTED   candidates exist but none qualifies; nothing is pre-checked.
     NOT_FOUND           providers were healthy and nothing survived the hard filters:
                         failure_code NO_RESULTS (empty pool) or ALL_CONFLICTED.
-    PROVIDER_DOWN       nothing survived and every search provider is error/quota/blocked.
+    PROVIDER_DOWN       nothing survived and every search provider is error/quota/blocked,
+                        or the pool is empty and the main query (custom or Q1) was
+                        answered by no provider (later 'empty' answers do not count).
 
 failure_code on review decisions
     VERIFIER_DOWN       verification unknown (or not run) while verifiable candidates
@@ -48,7 +50,7 @@ from .models import (
     VerificationResult,
 )
 from .sizes import compare, parse_sizes, product_size
-from .text_norm import normalize
+from .text_norm import normalize, phrase_in
 
 logger = logging.getLogger(__name__)
 
@@ -100,6 +102,23 @@ def providers_down(health: Sequence[ProviderHealth]) -> bool:
     return all(all(s in DOWN_STATUSES for s in statuses) for statuses in by_provider.values())
 
 
+MAIN_QUERY_IDS = ("custom", "Q1")
+
+
+def main_query_down(health: Sequence[ProviderHealth]) -> bool:
+    """True when the main query (the staff custom query, else Q1) got no answer from any provider.
+
+    Later queries that answered 'empty' do not prove the product is missing when the
+    query most likely to find it never ran: that is an outage (retryable), not NOT_FOUND.
+    """
+    search = [h for h in health if (h.provider or "").lower() not in LOOKUP_PROVIDERS]
+    if not search:
+        return False
+    main_id = next((h.query_id for h in search if h.query_id in MAIN_QUERY_IDS), search[0].query_id)
+    statuses = [(h.status or "").lower() for h in search if h.query_id == main_id]
+    return bool(statuses) and all(s in DOWN_STATUSES for s in statuses)
+
+
 def auto_publish_allowed(spec: SkuSpec) -> bool:
     """AUTO_PUBLISH_ENABLED and the brand (or 'category:<name>') is allow-listed, or '*'."""
     if not settings.auto_publish_enabled():
@@ -132,19 +151,29 @@ def _printed_size(text: str) -> Optional[Size]:
     return ps if isinstance(ps, Size) else None
 
 
-def identity_conflict(a: RankedCandidate, b: RankedCandidate) -> Optional[str]:
+def _sub_brands_read(spec: Optional[SkuSpec], brand_text: str) -> Set[str]:
+    if spec is None or not brand_text:
+        return set()
+    phrases = tuple(spec.required_brands) + tuple(spec.sibling_brands)
+    return {p for p in phrases if phrase_in(p, brand_text)}
+
+
+def identity_conflict(a: RankedCandidate, b: RankedCandidate, spec: Optional[SkuSpec] = None) -> Optional[str]:
     """Why two MATCH candidates cannot show the same SKU, or None when they agree."""
     va, vb = a.verdict, b.verdict
     if va is None or vb is None:
         return None
+    ba, bb = _sub_brands_read(spec, va.brand_text), _sub_brands_read(spec, vb.brand_text)
+    if ba and bb and ba.isdisjoint(bb):
+        return "brand"
     sa, sb = _printed_size(va.size_text), _printed_size(vb.size_text)
     if sa is not None and sb is not None and sa.dimension == sb.dimension:
         if compare(sa, [sb]) == "conflict":
             return "size"
         if (sa.pack_count or 1) != (sb.pack_count or 1):
             return "pack"
-    axes = variants_mod.conflicts(variants_mod.extract_variants(va.variant_text),
-                                  variants_mod.extract_variants(vb.variant_text))
+    pa, pb = variants_mod.extract_variants(va.variant_text), variants_mod.extract_variants(vb.variant_text)
+    axes = variants_mod.conflicts(pa, pb) or variants_mod.soft_conflicts(pa, pb)
     if axes:
         return f"variant:{axes[0]}"
     if va.pack_count and vb.pack_count and va.pack_count != vb.pack_count:
@@ -224,7 +253,7 @@ def route(spec: SkuSpec, ranked: Sequence[RankedCandidate],
 
     # -- nothing survived the hard filters -------------------------------------
     if not survivors:
-        if providers_down(health_list):
+        if providers_down(health_list) or (not ranked and main_query_down(health_list)):
             outcome.decision, outcome.failure_code = "PROVIDER_DOWN", "PROVIDER_DOWN"
         else:
             outcome.decision = "NOT_FOUND"
@@ -284,7 +313,7 @@ def route(spec: SkuSpec, ranked: Sequence[RankedCandidate],
             continue
         if _decision_of(other) != MATCH:
             continue
-        clash = identity_conflict(winner, other)
+        clash = identity_conflict(winner, other, spec)
         if clash:
             blockers.append(f"conflicting_match:{clash}")
             break

@@ -289,21 +289,52 @@ def action_search(params, brand_mappings=None):
 # select_image (اعتماد بشري)
 # ---------------------------------------------------------------------------
 
+def _same_product_task(task, sku_key, product_name):
+    """
+    هل صف الطابور عند رقم الصف هذا هو نفس المنتج المطلوب؟ أرقام الصفوف تتغير عند تعديل الشيت،
+    لذلك يُطابق بـ sku_key، وإلا بالاسم. صف طابور لمنتج آخر يُتجاهل تماماً.
+    """
+    if not task:
+        return False
+    task_sku = (task.get("sku_key") or "").strip()
+    if sku_key and task_sku:
+        return task_sku == sku_key
+    task_name = " ".join((task.get("product_name") or "").lower().split())
+    name = " ".join((product_name or "").lower().split())
+    return bool(task_name) and task_name == name
+
+
 def _identity_problem(params, row_number):
-    """يتحقق من sku_key والباركود المطلوبين. يعيد (sku_key, barcode, خطأ أو None)."""
+    """
+    يتحقق من sku_key والباركود المطلوبين. يعيد (sku_key, barcode, خطأ أو None).
+    الباركود لا يُقارن بنسخة الطابور القديمة: الكتابة في الشيت تتحقق من هوية الصف الحي عند التنفيذ،
+    وتصحيح المالك للباركود لا يجب أن يمنع الاعتماد.
+    """
     sku_key = _text(params, 'sku_key')
     barcode = _text(params, 'barcode')
     task = local_cache_db.get_task_by_row(row_number)
-    if task:
+    if _same_product_task(task, sku_key, _text(params, 'product_name')):
         known_barcode = (task.get("barcode") or "").strip()
         if known_barcode and not barcode:
             return sku_key, barcode, "barcode is required for this row (the sheet has one)"
-        if known_barcode and barcode and known_barcode != barcode:
-            return sku_key, barcode, "barcode does not match the queued row; refresh the page"
         sku_key = sku_key or (task.get("sku_key") or "")
     if not sku_key:
         return sku_key, barcode, "sku_key is required"
     return sku_key, barcode, None
+
+
+def _candidate_sha(params, row_number, sku_key, image_url):
+    """
+    بصمة بايتات المرشح التي تم التحقق منها. الواجهة ترسل candidate_sha256 (والاسم القديم content_sha256)؛
+    عند غيابهما تُؤخذ من مرشحات هذا المنتج المحفوظة لنفس الرابط.
+    """
+    sha = _text(params, 'candidate_sha256') or _text(params, 'content_sha256')
+    if sha:
+        return sha
+    for c in local_cache_db.get_curation_candidates(row_number, sku_key=sku_key or None):
+        if c.get("image_url") == image_url and c.get("content_sha256"):
+            return c["content_sha256"]
+    return None
 
 
 def action_select_image(params):
@@ -327,7 +358,7 @@ def action_select_image(params):
         link_column_index = google_sheets.find_link_column(worksheet)
         res = pipeline.publish_image(
             image_url, product_name, brand, row_number, worksheet, link_column_index,
-            barcode=barcode, candidate_sha256=_text(params, 'content_sha256') or None,
+            barcode=barcode, candidate_sha256=_candidate_sha(params, row_number, sku_key, image_url),
             bg_method=_text(params, 'bg_removal_method') or None,
             target=(int(params.get('target_width') or 0), int(params.get('target_height') or 0)),
             category_override={k: _text(params, k) for k in ('category_l1_en', 'category_l2_en', 'category_l3_en')},
@@ -340,8 +371,8 @@ def action_select_image(params):
             barcode, product_name, brand, image_url, res["link"], None, res.get("metadata"),
             verification_status="human_approved", approved_by="human", sku_key=sku_key,
         )
-        local_cache_db.update_task_status_by_row(row_number, "completed")
-        local_cache_db.delete_curation_candidates(row_number)
+        local_cache_db.update_task_status_by_row(row_number, "completed", sku_key=sku_key)
+        local_cache_db.delete_curation_candidates(row_number, sku_key=sku_key)
         response = {'status': 'success', 'image_link': res["link"], 'sheet_value': res["sheet_value"],
                     'isolated': res["isolated"], 'provider': res.get("provider"), 'sku_key': sku_key}
         if not res["isolated"]:
@@ -399,8 +430,8 @@ def action_upload_manual_image(params):
             barcode, product_name, brand, "manual_upload", res["link"], None, res.get("metadata"),
             verification_status="human_approved", approved_by="human_upload", sku_key=sku_key,
         )
-        local_cache_db.update_task_status_by_row(row_number, "completed")
-        local_cache_db.delete_curation_candidates(row_number)
+        local_cache_db.update_task_status_by_row(row_number, "completed", sku_key=sku_key)
+        local_cache_db.delete_curation_candidates(row_number, sku_key=sku_key)
         response = {'status': 'success', 'image_link': res["link"], 'sheet_value': res["sheet_value"],
                     'isolated': res["isolated"], 'sku_key': sku_key}
         if not res["isolated"]:
@@ -419,29 +450,44 @@ def action_upload_manual_image(params):
 # reject_image (رفض بشري يغيّر النتائج المستقبلية)
 # ---------------------------------------------------------------------------
 
-def _candidate_phash(row_number, image_url):
-    """pHash للمرشح المرفوض إذا كانت بايتاته في مخزن المرشحات. يعيد (phash, page_url)."""
-    for c in local_cache_db.get_curation_candidates(row_number):
+def _phash_of_stored(sha):
+    """pHash لبايتات مرشح محفوظة في مخزن المرشحات (أو None)."""
+    if not sha:
+        return None
+    data = image_processor._load_from_candidate_store(sha)
+    if not data:
+        return None
+    try:
+        import io
+        from PIL import Image
+        from catalog_match.fetch import phash_hex
+        with Image.open(io.BytesIO(data)) as img:
+            img.load()
+            return phash_hex(img.convert("RGB"))
+    except Exception as e:
+        logger.warning("تعذر حساب pHash للمرشح المرفوض: %s", e)
+        return None
+
+
+def _candidate_phash(row_number, image_url, params=None, sku_key=None):
+    """
+    pHash للمرشح المرفوض ورابط صفحته. يعيد (phash, page_url).
+    المصادر بالترتيب: phash المرسل، ثم بصمة البايتات المرسلة (candidate_sha256/content_sha256) من مخزن
+    المرشحات مباشرة (شاشة الكتالوج لا تحفظ نتائجها في curation_candidates)، ثم مرشحات المنتج المحفوظة.
+    """
+    params = params or {}
+    page_url = _text(params, 'page_url') or None
+    sent_phash = _text(params, 'phash')
+    if sent_phash:
+        return sent_phash, page_url
+    phash = _phash_of_stored(_text(params, 'candidate_sha256') or _text(params, 'content_sha256'))
+    if phash:
+        return phash, page_url
+    for c in local_cache_db.get_curation_candidates(row_number, sku_key=sku_key or None):
         if c.get("image_url") != image_url:
             continue
-        page_url = c.get("page_url")
-        sha = c.get("content_sha256")
-        if not sha:
-            return None, page_url
-        data = image_processor._load_from_candidate_store(sha)
-        if not data:
-            return None, page_url
-        try:
-            import io
-            from PIL import Image
-            from catalog_match.fetch import phash_hex
-            with Image.open(io.BytesIO(data)) as img:
-                img.load()
-                return phash_hex(img.convert("RGB")), page_url
-        except Exception as e:
-            logger.warning("تعذر حساب pHash للمرشح المرفوض: %s", e)
-            return None, page_url
-    return None, None
+        return _phash_of_stored(c.get("content_sha256")), c.get("page_url") or page_url
+    return None, page_url
 
 
 def _cell_holds(value, image_url):
@@ -480,14 +526,22 @@ def action_reject_image(params):
         sku_key = _pipeline().compute_sku_key({"name": product_name, "brand": brand, "barcode": barcode},
                                               brand_mappings)
 
-    phash, page_url = _candidate_phash(row_number, image_url)
+    phash, page_url = _candidate_phash(row_number, image_url, params, sku_key)
     if not local_cache_db.add_rejected_image(sku_key, image_url, page_url=page_url or _text(params, 'page_url') or None,
                                              phash=phash, reason_code=reason_code):
         return {'status': 'error', 'error': 'could not record the rejection'}
-    superseded = local_cache_db.supersede_resolution(sku_key, barcode=barcode or None)
-    local_cache_db.delete_curation_candidates(row_number)
-    local_cache_db.update_task_status_by_row(row_number, "pending", f"rejected by reviewer: {reason_code}",
-                                             failure_code="REJECTED")
+    # رفض مرشح آخر لمنتج معتمد بشرياً لا يُلغي الاعتماد ولا يعيد الصف للطابور (وإلا قد ينشر العامل
+    # تلقائياً فوق الرابط المعتمد). يُلغى الاعتماد فقط إذا كانت الصورة المرفوضة هي الصورة المعتمدة.
+    approved = local_cache_db.get_cached_product(sku_key=sku_key)
+    targets_approval = bool(approved) and image_url in (approved.get("original_url"), approved.get("cloudinary_url"))
+    keep_approval = bool(approved) and approved.get("verification_status") == "human_approved" and not targets_approval
+    superseded = 0
+    if not keep_approval:
+        superseded = local_cache_db.supersede_resolution(sku_key, barcode=barcode or None)
+    local_cache_db.delete_curation_candidates(row_number, sku_key=sku_key)
+    if not keep_approval:
+        local_cache_db.update_task_status_by_row(row_number, "pending", f"rejected by reviewer: {reason_code}",
+                                                 failure_code="REJECTED", sku_key=sku_key)
     local_cache_db.save_feedback(str(uuid.uuid4()), image_url.split("/")[-1].split("?")[0], row_number,
                                  product_name, brand, image_url, [reason_code])
 
@@ -512,8 +566,14 @@ def action_reject_image(params):
         if queue_started:
             google_sheets.stop_async_queue()
 
+    if keep_approval and sheet_cleared:
+        # الخلية كانت تحمل الصورة المرفوضة: الاعتماد السابق لم يعد منشوراً، فيُلغى ويعاد الصف للطابور
+        superseded = local_cache_db.supersede_resolution(sku_key, barcode=barcode or None)
+        local_cache_db.update_task_status_by_row(row_number, "pending", f"rejected by reviewer: {reason_code}",
+                                                 failure_code="REJECTED", sku_key=sku_key)
+        keep_approval = False
     rejection = {'sku_key': sku_key, 'reason_code': reason_code, 'phash': phash, 'sheet_cleared': sheet_cleared,
-                 'superseded': superseded, 'sheet_error': sheet_error}
+                 'superseded': superseded, 'sheet_error': sheet_error, 'approval_kept': keep_approval}
     if _as_bool(params.get('research', False)):
         search_params = dict(params, sku_key=sku_key, skip_cache=True,
                              exclude_urls=_merge_urls(params.get('exclude_urls'), [image_url]))

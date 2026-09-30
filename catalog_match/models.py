@@ -24,6 +24,7 @@ class Size:
     unit_text: str
     pack_count: Optional[int] = None
     source_field: str = ""
+    pieces: Optional[int] = None    # 'N pcs' next to a net mass: pieces in one unit OR a pack (unknown)
 
     def canonical(self) -> str:
         """Stable text form used in sku_key and query building, e.g. '1000ml', '6x180ml'."""
@@ -55,6 +56,8 @@ class SkuSpec:
     class_tokens: Tuple[str, ...] = ()        # product-type words, e.g. ('fresh', 'milk')
     category: str = ""
     sku_key: str = ""
+    required_brands: Tuple[str, ...] = ()     # sub-brand the SKU names ('nido'); tier 1 needs it in evidence
+    sibling_brands: Tuple[str, ...] = ()      # the family's other sub-brands ('everyday', 'nesquik')
 
     def __hash__(self) -> int:  # dict field makes the generated hash unusable
         return hash(self.sku_key or (self.raw_name, self.brand_raw))

@@ -4,8 +4,13 @@ parse_sizes(text, source_field) -> list[Size]
     Grammar (English and Arabic, on normalised text):
       'N x Q unit', 'NxQunit', 'N cans x Q unit'  -> pack N of Q
       'Q unit x N'                                 -> pack N of Q
-      'Q unit' + '(pack of N)' / 'N pcs' / 'N pack' / "N's" anywhere -> pack N of Q
+      'Q unit' + '(pack of N)' / 'N pack' / "N's" / 'twin pack' / 'N+M free' -> pack N of Q
+      'Q ml' + 'N pcs'                             -> pack N of Q (volume)
+      'Q g' + 'N pcs'                              -> Q with pieces=N (pieces in one box or a
+                                                      pack: compare_pack calls it ambiguous)
       'N pcs' / 'N bags' ... with no measured size -> a count
+      '1/2 kg', '½ L', '1 1/2 kg'                  -> fractions
+      '2.5-3 kg'                                   -> a range: two sizes, so 'ambiguous'
     Decimals use '.' or ','; ',ddd' is a thousands separator.
     Numbers that are nutrient amounts ('10g fibre', 'per 100g', '30g per serving')
     are ignored.
@@ -22,6 +27,7 @@ from __future__ import annotations
 
 import logging
 import re
+from dataclasses import replace
 from typing import Iterable, List, Optional, Sequence, Tuple, Union
 
 from .models import Size
@@ -84,13 +90,32 @@ _MULTI_B = re.compile(
 )
 _SINGLE = re.compile(_START + r"(?P<q>" + _NUM + r")\s*(?P<u>" + _UNIT + r")" + _END)
 
-# Pack indicators: they multiply a measured size ('pack of 6', '6 pcs', "6's").
+# Pack indicators: they multiply a measured size ('pack of 6', '6 pack', "6's").
 _PACK = re.compile(
     r"pack\s*of\s*(?P<a>\d{1,3})(?!\d)"
-    r"|" + _START + r"(?P<b>\d{1,3})\s*[-]?\s*(?:pcs|pc|pieces|piece|packs|pack|pk|pkt)" + _END
+    r"|" + _START + r"(?P<b>\d{1,3})\s*[-]?\s*(?:packs|pack|pk|pkt)" + _END
     + r"|" + _START + r"(?P<c>\d{1,3})['’]?s" + _END
-    + r"|" + _START + r"(?P<d>\d{1,3})\s*(?:حبات|حبه|قطع|قطعه|عبوات|عبوه)" + _END
+    + r"|" + _START + r"(?P<d>\d{1,3})\s*(?:عبوات|عبوه)" + _END
     + r"|(?:عبوه|علبه)\s*(?:من|فيها)?\s*(?P<e>\d{1,3})" + r"(?!\d)"
+)
+# Piece indicators ('16 pcs', '16 pieces'). With a volume they are a pack ('Laban 180ml
+# 6 pcs'); with a net MASS they usually count the pieces inside one box ('Ferrero Rocher
+# 16 pcs 200g'), so they are kept as Size.pieces and compared as ambiguous, never as a pack.
+_PIECES = re.compile(
+    _START + r"(?P<a>\d{1,3})\s*[-]?\s*(?:pcs|pc|pieces|piece)" + _END
+    + r"|" + _START + r"(?P<b>\d{1,3})\s*(?:حبات|حبه|قطع|قطعه)" + _END
+)
+# Worded packs ('twin pack') and bonus packs ('4+1 free' is 5 units).
+_WORD_PACK = re.compile(r"(?<![^\W\d_])(?P<w>twin|double|triple)\s*[-]?\s*pack" + _END)
+_WORD_PACK_N = {"twin": 2, "double": 2, "triple": 3}
+_PLUS_FREE = re.compile(_START + r"(?P<a>\d{1,2})\s*\+\s*(?P<b>\d{1,2})\s*(?:free|مجانا|مجاني)" + _END)
+
+# Fractions ('1/2 kg', NFKC turns '½' into '1⁄2') and ranges ('2.5-3 kg') before a unit.
+_FRACTION_RE = re.compile(
+    _START + r"(?:(?P<w>\d{1,3})\s+)?(?P<n>\d{1,2})\s*[/⁄]\s*(?P<d>\d{1,2})(?=\s*" + _UNIT + _END + ")"
+)
+_RANGE_RE = re.compile(
+    _START + r"(?P<a>" + _NUM + r")\s*[-–]\s*(?P<b>" + _NUM + r")\s*(?P<u>" + _UNIT + r")" + _END
 )
 _PACK_WORD_RE = re.compile(r"pack|pcs|pc\b|piece|pk|حب|قطع|عبو|علب")
 # Content counts: the product itself is counted ('100 tea bags', '30 capsules').
@@ -152,11 +177,26 @@ def _is_nutrient(t: str, start: int, end: int, size: Size) -> bool:
     return False
 
 
+def _fraction(m: "re.Match[str]") -> str:
+    num, den = int(m.group("n")), int(m.group("d"))
+    if den == 0 or num >= den:
+        return m.group(0)
+    value = int(m.group("w") or 0) + num / den
+    return f"{value:g}"
+
+
+def _prepare(t: str) -> str:
+    """Rewrite fractions to decimals and 'a-b unit' ranges to two sizes (so the text is ambiguous)."""
+    t = _FRACTION_RE.sub(_fraction, t)
+    return _RANGE_RE.sub(lambda m: f"{m.group('a')} {m.group('u')} / {m.group('b')} {m.group('u')}", t)
+
+
 def parse_sizes(text: Optional[str], source_field: str = "") -> List[Size]:
     """Parse every net-content statement in one evidence field."""
     t = normalize(text)
     if not t or not any(ch.isdigit() for ch in t):
         return []
+    t = _prepare(t)
     taken: List[Tuple[int, int]] = []
     found: List[Tuple[int, Size]] = []
 
@@ -181,26 +221,40 @@ def parse_sizes(text: Optional[str], source_field: str = "") -> List[Size]:
             continue
         found.append((m.start(), size))
 
-    packs: List[Tuple[int, int, str]] = []
-    for m in _PACK.finditer(t):
-        if _overlaps(m.span(), taken):
-            continue
-        n = next(int(g) for g in m.groups() if g)
-        packs.append((m.start(), n, m.group(0)))
+    packs: List[Tuple[int, int, str, str]] = []          # (start, n, raw text, 'pack' | 'pieces')
+    for rx, kind in ((_PACK, "pack"), (_PIECES, "pieces")):
+        for m in rx.finditer(t):
+            if _overlaps(m.span(), taken):
+                continue
+            n = next(int(g) for g in m.groups() if g)
+            packs.append((m.start(), n, m.group(0), kind))
+    for m in _WORD_PACK.finditer(t):
+        packs.append((m.start(), _WORD_PACK_N[m.group("w")], m.group(0), "pack"))
+    for m in _PLUS_FREE.finditer(t):
+        packs.append((m.start(), int(m.group("a")) + int(m.group("b")), f"pack {m.group(0)}", "pack"))
 
     sizes = [s for _, s in sorted(found, key=lambda x: x[0])]
     if sizes:
-        distinct_packs = {n for _, n, _ in packs if n > 1}
-        if len(distinct_packs) == 1:
-            n = distinct_packs.pop()
-            sizes = [
-                Size(s.dimension, s.base_value, s.unit_text, n, s.source_field) if not s.pack_count else s
-                for s in sizes
-            ]
-        return sizes
+        pack_ns = {n for _, n, _, kind in packs if n > 1 and kind == "pack"}
+        piece_ns = {n for _, n, _, kind in packs if n > 1 and kind == "pieces"}
+        out: List[Size] = []
+        for s in sizes:
+            if s.pack_count:
+                out.append(s)
+            elif s.dimension == "mass":
+                if len(pack_ns) == 1:
+                    out.append(replace(s, pack_count=next(iter(pack_ns))))
+                elif not pack_ns and len(piece_ns) == 1:
+                    out.append(replace(s, pieces=next(iter(piece_ns))))
+                else:
+                    out.append(s)
+            else:
+                both = pack_ns | piece_ns
+                out.append(replace(s, pack_count=next(iter(both))) if len(both) == 1 else s)
+        return out
 
     counts: List[Size] = []
-    for _, n, raw in packs:
+    for _, n, raw, _kind in packs:
         if n > 0:
             counts.append(Size("count", float(n), raw.strip(), None, source_field))
     for m in _CONTENT_COUNT.finditer(t):
@@ -262,11 +316,17 @@ def compare(target: Optional[Size], found: Sequence[Size], tol: float = DEFAULT_
     return "match" if _same_value(groups[0].base_value, target.base_value, tol) else "conflict"
 
 
-def compare_pack(target_pack: Optional[int], found: Sequence[Size]) -> str:
-    """Compare pack counts. A missing target pack means a single unit."""
+def compare_pack(target_pack: Optional[int], found: Sequence[Size], target_pieces: Optional[int] = None) -> str:
+    """Compare pack counts. A missing target pack means a single unit.
+
+    target_pieces is the SKU's own 'N pcs' next to a net mass ('Kinder Bueno 43g 6 pcs'):
+    one box of N pieces or an N-pack, so the same wording matches, a single unit or an
+    N-pack is ambiguous (review, never a hard reject) and any other pack conflicts.
+    """
     target_n = target_pack if target_pack and target_pack > 1 else 1
     explicit = set()
     loose = False
+    pieces = set()
     for s in found:
         if s.dimension == "count":
             if is_pack_count(s) and s.base_value >= 1:
@@ -276,8 +336,17 @@ def compare_pack(target_pack: Optional[int], found: Sequence[Size]) -> str:
             explicit.add(s.pack_count)
         else:
             loose = True
+            if getattr(s, "pieces", None):
+                pieces.add(s.pieces)
+    if target_n == 1 and target_pieces and target_pieces > 1:
+        if explicit - {1, target_pieces}:
+            return "conflict"
+        if not explicit and pieces == {target_pieces}:
+            return "match"
+        return AMBIGUOUS
     if not explicit:
-        return "unknown"
+        # '16 pcs 200g': pieces inside one box, or a 16-pack? Never a conflict, never a match.
+        return AMBIGUOUS if pieces else "unknown"
     if target_n > 1:
         if explicit == {target_n}:
             return "match"

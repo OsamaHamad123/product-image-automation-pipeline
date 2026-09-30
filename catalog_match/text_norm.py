@@ -62,6 +62,7 @@ _WS_RE = re.compile(r"\s+")
 _TOKEN_RE = re.compile(r"\d+(?:\.\d+)?|[^\W\d_]+")
 
 _ARABIC_RE = re.compile("[؀-ۿ]")
+_POSSESSIVE_RE = re.compile(r"(?<=[^\W\d_])['’‘`´]s(?![^\W\d_])")
 
 # Proclitics, longest first. A prefix is stripped only when >= 3 chars remain.
 _CLITICS = ("وال", "بال", "كال", "فال", "لل", "ال", "و", "ب", "ل")
@@ -113,8 +114,12 @@ def strip_arabic_clitics(token: str) -> str:
 
 
 def tokens(text: Optional[str], strip_clitics: bool = False) -> List[str]:
-    """Split normalised text into word tokens; digits and letters are split apart."""
-    toks = _TOKEN_RE.findall(normalize(text))
+    """Split normalised text into word tokens; digits and letters are split apart.
+
+    A possessive "'s" is folded into its word ("Lay's" -> 'lays', "Kellogg's" ->
+    'kelloggs') so the common unpunctuated spelling matches on both sides.
+    """
+    toks = _TOKEN_RE.findall(_POSSESSIVE_RE.sub("s", normalize(text)))
     if strip_clitics:
         toks = [strip_arabic_clitics(t) for t in toks]
     return toks

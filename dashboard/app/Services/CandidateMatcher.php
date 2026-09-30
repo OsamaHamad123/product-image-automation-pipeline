@@ -104,6 +104,19 @@ final class CandidateMatcher
         return count($keys) === 1 ? array_key_first($keys) : null;
     }
 
+    /** Keyed rows at the product's row whose product name matches and that share one sku_key. */
+    private static function sameNameRows(array $product, array $keyedRowsAtRow): array
+    {
+        $name = self::norm($product['product_name'] ?? '');
+        if ($name === '') {
+            return [];
+        }
+        $matches = array_values(array_filter($keyedRowsAtRow,
+            fn ($r) => self::norm($r['product_name'] ?? '') === $name));
+        $keys = array_unique(array_map(fn ($r) => trim((string) ($r['sku_key'] ?? '')), $matches));
+        return count($keys) === 1 ? $matches : [];
+    }
+
     /** Keep only the rows of the most recent run (the run_id of the highest id). */
     public static function latestRun(array $rows): array
     {
@@ -173,9 +186,17 @@ final class CandidateMatcher
                 $prod['sku_key'] = $key;
             }
 
-            $rows = ($key !== null && !empty($bySku[$key]))
-                ? self::latestRun($bySku[$key])
-                : self::latestRun($legacyByRow[$rowNum] ?? []);
+            if ($key !== null && !empty($bySku[$key])) {
+                $rows = self::latestRun($bySku[$key]);
+            } else {
+                // No rows under this key (the key was computed differently when the worker stored
+                // them): fall back to keyed rows at the same row with the same product name, then
+                // to legacy rows. An empty list would silently hide pre-cached candidates.
+                $rows = self::latestRun(self::sameNameRows($prod, $keyedByRow[$rowNum] ?? []));
+                if (empty($rows)) {
+                    $rows = self::latestRun($legacyByRow[$rowNum] ?? []);
+                }
+            }
             $candidates = array_map([self::class, 'present'], $rows);
             $prod['curation_candidates'] = $candidates;
 

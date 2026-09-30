@@ -6,25 +6,29 @@ build_sku_spec(row, brand_mappings, size_text=None)
 
 * raw_name is kept exactly as the sheet has it; nothing here rewrites it.
 * brand goes through the reverse brand index (mapped / sheet_raw / none).
-* size comes from the size column when it parses to one size, else from the name.
+* size is the size column merged with the name (see _pick_size): a pack stated only
+  in the name, or a measure stated only in the name, is never dropped.
 * class_tokens are the product-type words left after removing brand, size,
   variant and stop words ('Almarai Full Fat Milk 1L' -> ('milk',)).
 * sku_key is the GTIN-14 when the barcode is valid, otherwise
-  sha1(norm brand | norm raw name | size canonical)[:16].
+  sha1(norm sheet brand | norm raw name | size canonical)[:16]. The sheet brand is
+  the raw brand cell (or the Arabic brand cell), never the mapping-derived canonical
+  brand, so the key is stable when the Brands Mapping sheet changes or fails to load.
 """
 
 from __future__ import annotations
 
 import hashlib
 import logging
-from typing import Any, List, Mapping, Optional, Sequence, Set, Tuple
+from dataclasses import replace
+from typing import Any, List, Mapping, Optional, Sequence, Set, Tuple, Union
 
 from . import variants as variants_mod
 from .brand_index import BrandIndex, BrandResolution, build_index
 from .gtin import normalize_gtin
 from .models import Size, SkuSpec
-from .sizes import is_pack_count, parse_sizes, product_size
-from .text_norm import normalize, strip_arabic_clitics, tokens
+from .sizes import compare, is_pack_count, parse_sizes, product_size
+from .text_norm import match_key, normalize, strip_arabic_clitics, tokens
 
 logger = logging.getLogger(__name__)
 
@@ -61,16 +65,55 @@ def _first(row: Mapping[str, Any], *keys: str) -> str:
     return ""
 
 
+def _one_size(text: Optional[str], source: str) -> Union[Size, None, str]:
+    return product_size(parse_sizes(text, source)) if text else None
+
+
 def _pick_size(size_text: Optional[str], name: str, name_ar: str) -> Optional[Size]:
-    for text, source in ((size_text, "sheet_size"), (name, "name"), (name_ar, "name_ar")):
-        if not text:
-            continue
-        ps = product_size(parse_sizes(text, source))
+    """The SKU's size: the size column merged with what the name says.
+
+    The size column often holds only the per-unit size ('330ml') while the name
+    carries the pack ('Pepsi Cola Can 330ml x 6'), or only a count ('6 pcs') while the
+    name carries the measure ('Almarai Milk 1L x 6'). Dropping either half makes the
+    correct multipack a hard reject and the single unit tier 1, so they are merged:
+      * column measured, no pack + name states the same measure with a pack -> column + pack;
+      * column is a pack count ('6 pcs') + name states a measure -> name measure x count;
+      * column and name measured in different dimensions -> the name wins;
+      * otherwise the column wins; with no usable column, the English then Arabic name.
+    """
+    col = _one_size(size_text, "sheet_size")
+    if col is not None and not isinstance(col, Size):
+        logger.debug("sheet_size states several sizes (%r); using the name", size_text)
+        col = None
+    name_size: Optional[Size] = None
+    for text, source in ((name, "name"), (name_ar, "name_ar")):
+        ps = _one_size(text, source)
         if isinstance(ps, Size):
-            return ps
+            name_size = ps
+            break
         if ps is not None:
             logger.debug("%s states several sizes (%r); trying the next field", source, text)
-    return None
+    if col is None:
+        return name_size
+    if name_size is None:
+        return col
+    col_measured = col.dimension in ("volume", "mass")
+    name_measured = name_size.dimension in ("volume", "mass")
+    if col_measured and name_measured:
+        if col.dimension != name_size.dimension:
+            return name_size
+        if (not col.pack_count and name_size.pack_count
+                and compare(col, [name_size]) == "match"):
+            return replace(col, pack_count=name_size.pack_count)
+        return col
+    if col_measured and is_pack_count(name_size) and name_size.base_value > 1 and not col.pack_count:
+        return replace(col, pack_count=int(name_size.base_value))       # name says '6 pcs' only
+    if is_pack_count(col) and col.base_value > 1 and name_measured:
+        n = int(col.base_value)
+        if not name_size.pack_count or name_size.pack_count == n:
+            return replace(name_size, pack_count=n)
+        return name_size
+    return col
 
 
 def _pack_count(size: Optional[Size]) -> Optional[int]:
@@ -148,7 +191,11 @@ def build_sku_spec(row: Mapping[str, Any], brand_mappings=None, size_text: Optio
         brand_words |= _token_set(phrase or "")
     class_tokens = _class_tokens((raw_name, name_ar), brand_words)
 
-    brand_for_key = res.canonical or brand_raw
+    # The key must not depend on the Brands Mapping sheet: editing it (or failing to load
+    # it) would orphan approvals, rejections and queued review rows. Use the sheet's own
+    # brand cell (English, else Arabic), normalised inside make_sku_key.
+    # Spaces and punctuation are dropped so 'Al Marai' / 'Al-Marai' / 'Almarai' share a key.
+    brand_for_key = match_key(brand_raw or brand_ar_row).replace(" ", "")
     return SkuSpec(
         raw_name=raw_name,
         name_ar=name_ar,
@@ -168,4 +215,6 @@ def build_sku_spec(row: Mapping[str, Any], brand_mappings=None, size_text: Optio
         class_tokens=class_tokens,
         category=category,
         sku_key=make_sku_key(gtin14, brand_for_key, raw_name, size),
+        required_brands=tuple(res.required),
+        sibling_brands=tuple(res.siblings),
     )

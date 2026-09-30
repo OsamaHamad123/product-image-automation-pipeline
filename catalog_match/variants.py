@@ -10,6 +10,9 @@ Rules used by scoring:
   value sets share nothing. An axis the target does not state never conflicts, so
   'Almarai Fresh Milk' accepts a 'Full Fat' listing, and a missing flavour is never
   read as 'plain' ('plain' conflicts with a flavour only when the target says plain).
+* soft_conflicts(target, found): disjoint values inside one lexicon 'soft group'
+  (Diet vs Zero Sugar vs Sugar Free); scoring keeps these out of tier 1 without a
+  hard reject, since retailers word the same line differently.
 * matched_axes(target, found): axes whose value sets are identical.
 * unstated_marked(target, found): axes the target does not state where the
   candidate states a 'marked' value (low fat, diet, decaf, a flavour). Scoring uses
@@ -37,9 +40,11 @@ class _Lexicon:
         # (phrase tokens, axis, value), longest phrase first
         entries: List[Tuple[Tuple[str, ...], str, str]] = []
         self.unmarked: Dict[str, Set[str]] = {}
+        self.soft_groups: Dict[str, List[Set[str]]] = {}
         self.axes: Tuple[str, ...] = tuple(raw.get("axes", {}).keys())
         for axis, spec in raw.get("axes", {}).items():
             self.unmarked[axis] = set(spec.get("unmarked", []))
+            self.soft_groups[axis] = [set(g) for g in spec.get("soft_groups", [])]
             for value, phrases in spec.get("values", {}).items():
                 for phrase in phrases:
                     toks = tuple(tokens(phrase, strip_clitics=True))
@@ -113,14 +118,36 @@ def merge(*variant_dicts: Mapping[str, str]) -> Dict[str, str]:
     return {axis: _join(vals) for axis, vals in per_axis.items() if vals}
 
 
+def _soft_pair(axis: str, tvals: Set[str], fvals: Set[str]) -> bool:
+    """True when every stated value on both sides lies in one soft group of the axis."""
+    for group in lexicon().soft_groups.get(axis, []):
+        if tvals <= group and fvals <= group:
+            return True
+    return False
+
+
 def conflicts(target: Mapping[str, str], found: Mapping[str, str]) -> List[str]:
-    """Axes stated on both sides whose value sets are disjoint."""
+    """Axes stated on both sides whose value sets are disjoint (hard conflicts only)."""
     out = []
     for axis, tval in (target or {}).items():
         fval = (found or {}).get(axis)
         if not fval or not tval:
             continue
-        if values_of(tval).isdisjoint(values_of(fval)):
+        tv, fv = values_of(tval), values_of(fval)
+        if tv.isdisjoint(fv) and not _soft_pair(axis, tv, fv):
+            out.append(axis)
+    return out
+
+
+def soft_conflicts(target: Mapping[str, str], found: Mapping[str, str]) -> List[str]:
+    """Axes whose disjoint values are closely related lines (Diet vs Zero Sugar): never tier 1."""
+    out = []
+    for axis, tval in (target or {}).items():
+        fval = (found or {}).get(axis)
+        if not fval or not tval:
+            continue
+        tv, fv = values_of(tval), values_of(fval)
+        if tv.isdisjoint(fv) and _soft_pair(axis, tv, fv):
             out.append(axis)
     return out
 

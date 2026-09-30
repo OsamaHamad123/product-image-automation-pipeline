@@ -20,12 +20,19 @@ Hard rejects (tier None):
     reviewer_negative       the image URL was rejected by a reviewer before
 
 Soft conflicts cap the tier at 2: a size or pack conflict found only in a URL
-(url_only_size_conflict), a variant conflict found only in the image filename, and
-a 'marked' variant the SKU does not state (low fat / diet / decaf / a flavour).
+(url_only_size_conflict), a variant conflict found only in the image filename, a
+'marked' variant the SKU does not state (low fat / diet / decaf / a flavour / a
+form such as fresh or long-life), a closely related variant line (Diet vs Zero
+Sugar), a pack the title leaves ambiguous for a single-unit SKU ('16 pcs 200g'),
+and a missing sub-brand the SKU names (parent-brand-only evidence).
+
+Brand evidence ignores store-name title segments ('- Shop on Carrefour UAE'), so a
+private-label SKU never matches another brand through the retailer's name.
 
 Tiers:
-    1  GTIN match, or brand + size + every specified variant matched with class
-       coverage >= 0.5 on a brand-official, UAE-retailer or structured page
+    1  GTIN match with brand or class-coverage corroboration, or brand + size +
+       every specified variant matched with class coverage >= 0.5 on a
+       brand-official, UAE-retailer or structured page
     2  brand matched (or GTIN matched), no hard conflict
     3  no brand evidence, no hard conflict
 
@@ -39,6 +46,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple
@@ -48,7 +56,7 @@ from .gtin import normalize_gtin
 from .models import Candidate, CandidateScore, SkuSpec
 from .sizes import compare, compare_pack, parse_sizes
 from .text_norm import (
-    any_phrase_in, domain_matches, is_arabic, tokens, url_host, url_key, url_path_text,
+    any_phrase_in, domain_matches, is_arabic, match_string, tokens, url_host, url_path_text,
 )
 
 logger = logging.getLogger(__name__)
@@ -85,6 +93,53 @@ def evidence_fields(cand: Candidate) -> Dict[str, str]:
         "page_slug": url_path_text(cand.page_url),
         "image_file": url_path_text(cand.image_url, filename_only=True),
     }
+
+
+_SEGMENT_SPLIT_RE = re.compile(r"\s+[-–—|:·•]\s+|\s*[|·•]\s*")
+
+
+@lru_cache(maxsize=1)
+def _retailer_vocab() -> Tuple[Tuple[str, ...], frozenset]:
+    data = trusted_domains()
+    names = tuple(sorted({match_string(n) for n in data.get("retailer_names", []) if match_string(n)},
+                         key=len, reverse=True))
+    filler = frozenset(match_string(w) for w in data.get("site_filler", []) if match_string(w))
+    return names, filler
+
+
+def _site_only(segment: str) -> bool:
+    """True when a title segment is only a store name plus filler ('Shop on Carrefour UAE')."""
+    names, filler = _retailer_vocab()
+    text = " " + match_string(segment) + " "
+    found = False
+    for name in names:
+        needle = " " + name + " "
+        if needle in text:
+            found = True
+            text = text.replace(needle, " ")
+    if not found:
+        return False
+    return all(tok in filler for tok in text.split())
+
+
+_TRAILING_SITE_RE = re.compile(r"\s+(?:online\s+)?(?:at|on|from|in)\s+(?P<rest>[^|]*)$")
+
+
+def strip_site_suffix(text: str) -> str:
+    """Drop store-name segments ('- Shop on Carrefour UAE', '| Lulu UAE', 'at Amazon.ae') from a title.
+
+    Used for brand evidence only: a retailer's own name in every listing title must
+    not count as the brand of a private-label SKU (brand 'Carrefour'), nor as a
+    competitor of the target brand.
+    """
+    if not text:
+        return ""
+    kept = [seg for seg in _SEGMENT_SPLIT_RE.split(text) if seg and not _site_only(seg)]
+    out = " - ".join(kept)
+    m = _TRAILING_SITE_RE.search(out)
+    if m and _site_only(m.group("rest")):
+        out = out[:m.start()]
+    return out
 
 
 def page_host(cand: Candidate) -> str:
@@ -141,7 +196,10 @@ def _negative_urls(negatives) -> Set[str]:
         urls = [negatives]
     else:
         urls = list(negatives)
-    return {url_key(u) for u in urls if u}
+    # The same key the candidate pool uses: an extension-less endpoint keeps its
+    # identifying query ('/_next/image?url=...'), so one rejection never hides other images.
+    from .retrieve import norm_image_url
+    return {norm_image_url(u) for u in urls if u}
 
 
 def _stem(tok: str) -> str:
@@ -184,19 +242,39 @@ def score_candidate(spec: SkuSpec, cand: Candidate, negatives=None) -> Candidate
     soft_cap = False
 
     # --- brand -----------------------------------------------------------
+    # Store-name suffixes ('- Shop on Carrefour UAE') are not brand evidence.
+    brand_texts = dict(fields)
+    for name in ("title", "page_title", "snippet"):
+        brand_texts[name] = strip_site_suffix(fields[name])
     brand_fields: Dict[str, str] = {}
     for name in IDENTITY_FIELDS + ("snippet",):
-        hit = any_phrase_in(spec.match_brands, fields[name]) if spec.match_brands else None
+        hit = any_phrase_in(spec.match_brands, brand_texts[name]) if spec.match_brands else None
         if hit:
             brand_fields[name] = hit
     brand_ok = any(name in brand_fields for name in IDENTITY_FIELDS)
     if spec.match_brands and not brand_fields:
         for name in COMPETITOR_FIELDS:
-            comp = any_phrase_in(spec.competitors, fields[name])
+            comp = any_phrase_in(spec.competitors, brand_texts[name])
             if comp:
                 hard.append("competitor_brand")
                 conflicts.append(f"competitor_brand:{name}:{comp}")
                 break
+    # A SKU that names a sub-brand ('Nido') needs that sub-brand: parent-only evidence
+    # ('Nestle') caps at tier 2, and a sibling sub-brand ('Nestle Everyday') is another product.
+    sub_brand_ok = True
+    if spec.required_brands:
+        sub_brand_ok = any(any_phrase_in(spec.required_brands, brand_texts[n]) for n in IDENTITY_FIELDS)
+        if not sub_brand_ok:
+            for name in COMPETITOR_FIELDS:
+                sib = any_phrase_in(spec.sibling_brands, brand_texts[name]) if spec.sibling_brands else None
+                if sib:
+                    if "competitor_brand" not in hard:
+                        hard.append("competitor_brand")
+                    conflicts.append(f"sibling_sub_brand:{name}:{sib}")
+                    break
+            if brand_ok:
+                conflicts.append("sub_brand_missing")
+                soft_cap = True
 
     # --- GTIN ------------------------------------------------------------
     gtin_state: Optional[str] = None
@@ -223,7 +301,8 @@ def score_candidate(spec: SkuSpec, cand: Candidate, negatives=None) -> Candidate
             if spec.size is not None:
                 size_by_field[name] = compare(spec.size, found)
             if check_pack:
-                pack_by_field[name] = compare_pack(spec.pack_count, found)
+                pack_by_field[name] = compare_pack(spec.pack_count, found,
+                                                   spec.size.pieces if spec.size is not None else None)
     text_sizes = [size_by_field.get(f) for f in TEXT_FIELDS if f in size_by_field]
     url_sizes = [size_by_field.get(f) for f in URL_FIELDS if f in size_by_field]
     text_packs = [pack_by_field.get(f) for f in TEXT_FIELDS if f in pack_by_field]
@@ -275,6 +354,10 @@ def score_candidate(spec: SkuSpec, cand: Candidate, negatives=None) -> Candidate
         pack_status = "ambiguous"
     else:
         pack_status = "unknown"
+    if check_pack and not spec.pack_count and "ambiguous" in text_packs:
+        # a single-unit SKU against '16 pcs 200g' or a '330ml / 6 x 330ml' listing: not proven
+        conflicts.append("pack_ambiguous")
+        soft_cap = True
 
     # --- variants --------------------------------------------------------
     found_variants = {name: variants_mod.extract_variants(fields[name]) for name in IDENTITY_FIELDS}
@@ -288,6 +371,10 @@ def score_candidate(spec: SkuSpec, cand: Candidate, negatives=None) -> Candidate
     for axis in variants_mod.conflicts(spec.variants, found_variants["image_file"]):
         if axis not in hard_axes:
             conflicts.append(f"image_variant_conflict:{axis}")
+            soft_cap = True
+    for name in IDENTITY_FIELDS:
+        for axis in variants_mod.soft_conflicts(spec.variants, found_variants[name]):
+            conflicts.append(f"soft_variant_conflict:{axis}:{name}")   # Diet vs Zero Sugar
             soft_cap = True
     matched_axes: List[str] = []
     for axis in spec.variants:
@@ -312,8 +399,10 @@ def score_candidate(spec: SkuSpec, cand: Candidate, negatives=None) -> Candidate
         hard.append("stock_or_clipart")
         conflicts.append(f"stock_or_clipart:{stock_hit}")
     neg = _negative_urls(negatives)
-    if neg and url_key(cand.image_url) in neg:
-        hard.append("reviewer_negative")
+    if neg:
+        from .retrieve import norm_image_url
+        if norm_image_url(cand.image_url) in neg:
+            hard.append("reviewer_negative")
 
     coverage = class_coverage(spec, fields)
 
@@ -326,7 +415,10 @@ def score_candidate(spec: SkuSpec, cand: Candidate, negatives=None) -> Candidate
     if hard:
         tier: Optional[int] = None
     else:
-        t1 = gtin_ok or (brand_ok and size_ok and variants_ok and coverage >= COVERAGE_T1 and trusted_page)
+        # A GTIN match alone (an Open Food Facts record) is tier 1 only with brand or
+        # product-type corroboration: records can be wrong, and in-store codes are reused.
+        gtin_t1 = gtin_ok and (brand_ok or coverage >= COVERAGE_T1)
+        t1 = gtin_t1 or (brand_ok and size_ok and variants_ok and coverage >= COVERAGE_T1 and trusted_page)
         if t1 and not soft_cap:
             tier = 1
         elif brand_ok or gtin_ok:

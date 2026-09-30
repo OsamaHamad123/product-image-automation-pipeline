@@ -2403,6 +2403,7 @@
                     row_number: ctx.row_number,
                     image_url: candidate.url,
                     page_url: candidate.page_url,
+                    candidate_sha256: candidate.content_sha256 || null,
                     product_name: ctx.product_name,
                     brand: ctx.brand,
                     barcode: ctx.barcode,

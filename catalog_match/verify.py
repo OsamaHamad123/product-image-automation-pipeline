@@ -46,7 +46,9 @@ from . import settings
 from .fetch import load_image
 from .gtin import gtin13
 from .models import FetchedImage, SkuSpec, VerificationResult, VlmImageVerdict
+from . import variants as variants_mod
 from .sizes import compare, compare_pack, parse_sizes
+from .text_norm import any_phrase_in
 
 logger = logging.getLogger(__name__)
 
@@ -193,26 +195,81 @@ def size_agreement(spec: SkuSpec, size_text: str) -> str:
         return "other_dimension"
     if state != "match":
         return state
-    if spec.size.dimension != "count" and compare_pack(spec.pack_count, found) == "conflict":
+    if spec.size.dimension != "count" and compare_pack(spec.pack_count, found, spec.size.pieces) == "conflict":
         return "conflict"
     return "match"
 
 
+REJECT_VIEWS = ("banner", "not_product", "multi_product")
+
+
+def _brand_reading(spec: SkuSpec, brand_text: str) -> str:
+    """'target' | 'other' | 'unknown' for the verbatim brand the model read."""
+    if not brand_text:
+        return "unknown"
+    target = any_phrase_in(spec.match_brands, brand_text) if spec.match_brands else None
+    if spec.required_brands:
+        if any_phrase_in(spec.required_brands, brand_text):
+            return "target"
+        if spec.sibling_brands and any_phrase_in(spec.sibling_brands, brand_text):
+            return "other"            # 'Nestle Everyday' read for a Nido SKU
+        return "unknown"              # parent brand only: the sub-brand is not confirmed
+    if target:
+        return "target"
+    if spec.competitors and any_phrase_in(spec.competitors, brand_text):
+        return "other"
+    return "unknown"
+
+
 def classify(spec: SkuSpec, verdict: VlmImageVerdict) -> str:
-    """MATCH / MISMATCH / UNSURE from the model's readings. Never trusts an overall verdict."""
+    """MATCH / MISMATCH / UNSURE decided from the model's VERBATIM readings (decision D6).
+
+    The yes/no/unsure flags can only make the result worse, never better:
+      * any 'no', a printed size / pack that conflicts, a printed brand that is another
+        brand (or a sibling sub-brand), a printed variant that conflicts with the SKU, or a
+        banner / not_product / multi_product view  -> MISMATCH;
+      * MATCH needs a front packshot, brand_match 'yes' with the brand (and the sub-brand
+        the SKU names) readable in brand_text, a printed size that re-parses to the SKU
+        size (and pack) when the SKU states one, and variant_match 'yes' with no
+        conflicting printed variant when the SKU states variants; anything short of that
+        is UNSURE (review, never auto-publish).
+    """
     if "no" in (verdict.brand_match, verdict.variant_match, verdict.size_match):
         return MISMATCH
     size_state = size_agreement(spec, verdict.size_text)
     if size_state == "conflict":
         return MISMATCH
+    brand_state = _brand_reading(spec, verdict.brand_text)
+    if brand_state == "other":
+        return MISMATCH
+    printed_variants = variants_mod.extract_variants(verdict.variant_text)
+    if variants_mod.conflicts(spec.variants, printed_variants):
+        return MISMATCH
+    if verdict.view in REJECT_VIEWS:
+        # a multipack SKU may legitimately be read as 'several products'
+        multipack = (spec.pack_count or 1) > 1
+        return UNSURE if (multipack and verdict.view == "multi_product") else MISMATCH
     if verdict.brand_match != "yes" or verdict.view != "front_packshot":
         return UNSURE
-    if size_state not in ("match", "unknown"):
+    if spec.match_brands and brand_state != "target":
+        return UNSURE
+    if variants_mod.soft_conflicts(spec.variants, printed_variants):
+        return UNSURE
+    if spec.variants and verdict.variant_match != "yes":
+        return UNSURE
+    counted = spec.size is not None and spec.size.dimension == "count"
+    if spec.size is not None and size_state != "match":
+        return UNSURE
+    if spec.size is None and size_state not in ("match", "unknown"):
         return UNSURE
     target_pack = spec.pack_count or 1
-    counted = spec.size is not None and spec.size.dimension == "count"
     if verdict.pack_count is not None and not counted and verdict.pack_count != target_pack:
         return UNSURE
+    if target_pack > 1 and not counted:
+        # a multipack needs pack evidence: the printed count or an 'N x Q' size
+        printed_pack = compare_pack(spec.pack_count, parse_sizes(verdict.size_text, "vlm"))
+        if verdict.pack_count != target_pack and printed_pack != "match":
+            return UNSURE
     return MATCH
 
 
@@ -257,6 +314,12 @@ def build_prompt(spec: SkuSpec, n_images: int) -> str:
         f"- Name (sheet): {spec.raw_name or '(none)'}",
         f"- Arabic name: {spec.name_ar or '(none)'}",
         f"- Brand: {brand}; Arabic brand: {spec.brand_ar or '(none)'}; accepted brand/sub-brand names: {aliases}",
+    ]
+    if spec.required_brands:
+        lines.append(f"- Sub-brand that MUST be printed: {', '.join(spec.required_brands)}. The parent brand alone "
+                     "is not enough, and another sub-brand of the same company is a DIFFERENT product "
+                     f"({', '.join(spec.sibling_brands) or 'none listed'}): answer brand_match 'no' for those.")
+    lines += [
         f"- Product type words: {', '.join(spec.class_tokens) or '(none)'}",
         f"- Variant: {_describe_variants(spec)}",
         f"- Net size per unit: {size}; pack: {pack}",
@@ -267,7 +330,8 @@ def build_prompt(spec: SkuSpec, n_images: int) -> str:
         "- brand_text, variant_text, size_text: copy the printed words verbatim ('' when not readable). "
         "size_text is the printed net content, e.g. '180 ml', '1 L', '6 x 330 ml', '2.25 kg'.",
         "- pack_count: number of units in the pack shown, or null when unknown.",
-        "- view: front_packshot = one product, front label facing the camera, plain background; "
+        "- view: front_packshot = one product (or one shrink-wrapped multipack), front label facing the "
+        "camera, plain background; "
         "other_side = one product seen from the back or side; lifestyle = product in a scene, hand or table; "
         "multi_product = several products or a shelf; banner = advertising graphic or promo text; "
         "not_product = no packaged product.",
@@ -499,6 +563,7 @@ class GeminiVerifier:
 
         verdicts = [VlmImageVerdict(index=i, decision=UNKNOWN) for i in range(n)]
         seen = set()
+        labelled = []
         for order, entry in enumerate(data["images"]):
             if not isinstance(entry, dict):
                 continue
@@ -506,8 +571,12 @@ class GeminiVerifier:
             if isinstance(label, bool) or not isinstance(label, int):
                 label = order + 1
             if not 1 <= label <= len(slots) or label in seen:
-                continue
+                # A 0-based or out-of-range label (or a repeated one) means the model's
+                # numbering is not ours: readings could land on the wrong image. Fail closed.
+                return self._fail(n, "schema_error:image_index", 1)
             seen.add(label)
+            labelled.append((label, entry))
+        for label, entry in labelled:
             pos = slots[label - 1]
             verdicts[pos] = make_verdict(spec, pos, entry)
         if not seen:

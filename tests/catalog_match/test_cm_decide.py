@@ -193,10 +193,18 @@ def test_all_providers_blocked_is_provider_down():
     out = decide.route(SPEC, [], None, [ProviderHealth("serper", "empty", 200), ProviderHealth("bing_html", "blocked")],
                        set())
     assert (out.decision, out.failure_code) == ("NOT_FOUND", "NO_RESULTS")
-    # A provider that failed on one query but answered another is healthy.
+    # The main query (Q1) was never answered: later 'empty' answers do not prove the product
+    # is missing, so this is a retryable outage, not a product failure.
     out = decide.route(SPEC, [], None, [ProviderHealth("serper", "error", 500, query_id="Q1"),
                                         ProviderHealth("serper", "empty", 200, query_id="Q2")], set())
+    assert out.decision == "PROVIDER_DOWN"
+    # Q1 answered 'empty' and a later query failed: a real NOT_FOUND.
+    out = decide.route(SPEC, [], None, [ProviderHealth("serper", "empty", 200, query_id="Q1"),
+                                        ProviderHealth("serper", "error", 500, query_id="Q2")], set())
     assert out.decision == "NOT_FOUND"
+    # A staff custom query that errored is the main query too.
+    out = decide.route(SPEC, [], None, [ProviderHealth("serper", "error", 503, query_id="custom")], set())
+    assert out.decision == "PROVIDER_DOWN"
 
 
 def test_relaxed_query_winner_never_auto_publishes(monkeypatch):

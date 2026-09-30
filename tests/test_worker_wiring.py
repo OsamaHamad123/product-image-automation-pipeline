@@ -18,7 +18,7 @@ def wiring(offline, monkeypatch):
 
     rec = {"status": [], "failures": [], "saved": [], "sleeps": [], "auto": []}
     monkeypatch.setattr(local_cache_db, "update_task_status",
-                        lambda task_id, status, error_message=None, failure_code=None, trace=None:
+                        lambda task_id, status, error_message=None, failure_code=None, trace=None, claim_id=None:
                         rec["status"].append({"id": task_id, "status": status, "error": error_message,
                                               "failure_code": failure_code, "trace": trace}) or True)
     monkeypatch.setattr(local_cache_db, "save_product_failure",
@@ -282,3 +282,50 @@ def test_enqueue_payload_and_final_links(offline, monkeypatch):
                                  "sub_category": "Laban", "origin": "UAE", "size": "180ml"}
     assert kwargs["sku_key"] and len(kwargs["sku_key"]) == 16
     assert kwargs["reprocess"] is False
+
+
+def test_auto_publish_never_overwrites_a_human_approval(wiring, monkeypatch):
+    """A re-queued row whose SKU has a human-approved image goes to review, not AUTO_PUBLISH."""
+    main, local_cache_db, rec = wiring
+    import image_search
+    monkeypatch.setattr(local_cache_db, "get_cached_product",
+                        lambda **k: {"cloudinary_url": "https://res/human.png", "verification_status": "human_approved"}
+                        if k.get("sku_key") == "sku-laban-up" else None)
+    monkeypatch.setattr(image_search, "search_best_product_image",
+                        _search_returning([(_best("AUTO_PUBLISH"), {"decision": "AUTO_PUBLISH"})], []))
+    main.pre_cache_product_candidates(_task(), worksheet=object(), link_column_index=5, sleep=lambda s: None)
+    assert rec["auto"] == []
+    assert rec["status"][-1]["status"] == "ready_for_review"
+
+
+def test_lost_claim_discards_worker_result(wiring, monkeypatch):
+    """A reviewer approved the row while the worker searched: no candidate replacement, no status write."""
+    main, local_cache_db, rec = wiring
+    import image_search
+    monkeypatch.setattr(local_cache_db, "is_claim_held", lambda task_id, claim_id: claim_id != "w1#lost")
+    monkeypatch.setattr(image_search, "search_best_product_image",
+                        _search_returning([(_best("AUTO_PUBLISH"), {"decision": "AUTO_PUBLISH"})], []))
+    task = dict(_task(), worker_id="w1#lost")
+    main.pre_cache_product_candidates(task, worksheet=object(), link_column_index=5, sleep=lambda s: None)
+    assert rec["auto"] == [] and rec["saved"] == [] and rec["status"] == []
+
+
+def test_llm_localisation_never_feeds_search_identity(wiring, monkeypatch):
+    """QueryRefiner output is written back to the sheet only; search gets the sheet's own Arabic fields."""
+    main, _, rec = wiring
+    import config
+    import google_sheets
+    import image_search
+    import query_refiner
+    written = []
+    monkeypatch.setattr(query_refiner.QueryRefiner, "refine_product_metadata",
+                        staticmethod(lambda *a, **k: {"cleaned_title_ar": "حليب المراعي", "canonical_brand_ar": "المراعي"}))
+    monkeypatch.setattr(google_sheets, "update_product_localization", lambda *a, **k: written.append(a) or True)
+    monkeypatch.setattr(config, "log_and_fail", lambda *a, **k: None, raising=False)
+    calls = []
+    monkeypatch.setattr(image_search, "search_best_product_image",
+                        _search_returning([(None, {"decision": "NOT_FOUND", "failure_code": "NO_RESULTS"})], calls))
+    prod = {"row_number": 9, "product_name": "Fresh Laban 1L", "brand": "Unmapped Dairy", "barcode": ""}
+    main.process_single_product(prod, object(), 5)
+    assert written and written[0][2] == "حليب المراعي"                 # localisation still written back
+    assert calls and calls[0]["product_name_ar"] == "" and calls[0]["brand_ar"] == ""

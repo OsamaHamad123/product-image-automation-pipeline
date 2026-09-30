@@ -348,6 +348,23 @@ def auto_approve_product(task, best_image, worksheet, link_column_index, sku_key
     return res["status"]
 
 
+def _has_human_approval(sku_key):
+    """هل للـ SKU حل معتمد بشرياً في الكاش؟ (خطأ القراءة يُعامل كنعم: الأمان أولاً، فلا نشر تلقائي)."""
+    if not sku_key:
+        return False
+    try:
+        cached = local_cache_db.get_cached_product(sku_key=sku_key)
+    except Exception:
+        return True
+    return bool(cached) and cached.get("verification_status") == "human_approved"
+
+
+def _finish_task(task, status, error_message=None, failure_code=None, trace=None):
+    """تحديث حالة مهمة سحبها هذا العامل؛ لا يكتب فوق صف اعتمده مراجع أثناء المعالجة (ملكية الحجز)."""
+    return local_cache_db.update_task_status(task["id"], status, error_message, failure_code=failure_code,
+                                             trace=trace, claim_id=task.get("worker_id") or None)
+
+
 def pre_cache_product_candidates(task, worksheet=None, link_column_index=None, brand_mappings=None,
                                  sleep=time.sleep):
     """
@@ -386,26 +403,35 @@ def pre_cache_product_candidates(task, worksheet=None, link_column_index=None, b
     if best is None:
         if state == "provider_down":
             # انقطاع المزودين ليس فشلاً للمنتج: يعود الصف للانتظار ولا يُسجل في product_failures
-            local_cache_db.update_task_status(task["id"], "pending", "Search providers unavailable",
-                                              failure_code="PROVIDER_DOWN", trace=trace)
+            _finish_task(task, "pending", "Search providers unavailable",
+                         failure_code="PROVIDER_DOWN", trace=trace)
             return "provider_down"
         if state == "error":
             code, message = "SEARCH_ERROR", error or "search raised an exception"
         else:
             code = _outcome(trace).get("failure_code") or "NO_RESULTS"
             message = f"No acceptable image found ({code})"
-        local_cache_db.update_task_status(task["id"], "failed", message, failure_code=code, trace=trace)
+        _finish_task(task, "failed", message, failure_code=code, trace=trace)
         local_cache_db.save_product_failure(barcode, name, brand, f"{code}: {message}")
         print(f"[Pre-Cache] لا توجد صورة للصف {row_number}: {code}")
         return "failed"
 
+    if not local_cache_db.is_claim_held(task["id"], task.get("worker_id")):
+        # مراجع اعتمد/رفض هذا الصف أثناء البحث، أو أعيد سحبه: لا نستبدل مرشحاته ولا ننشر فوقه
+        print(f"[Pre-Cache] الصف {row_number} لم يعد محجوزاً لهذا العامل؛ تُهمل النتيجة.")
+        return "success"
+
     decision = best.get("decision")
+    if decision == "AUTO_PUBLISH" and _has_human_approval(sku_key):
+        # لا يُنشر تلقائياً فوق صورة اعتمدها مراجع: تُعرض النتيجة للمراجعة فقط
+        print(f"[Auto-Publish] الصف {row_number} له اعتماد بشري سابق؛ يحال للمراجعة بدل النشر التلقائي.")
+        decision = "REVIEW_PRESELECTED"
     if (decision == "AUTO_PUBLISH" and best.get("source") != "sqlite_cache"
             and worksheet is not None and link_column_index is not None):
         status = auto_approve_product(task, best, worksheet, link_column_index, sku_key=sku_key)
         if status == "published":
-            local_cache_db.update_task_status(task["id"], "completed", failure_code=None,
-                                              trace={"outcome": _outcome(trace)})
+            _finish_task(task, "completed", failure_code=None,
+                         trace={"outcome": _outcome(trace)})
             print(f"[Auto-Publish] تم نشر الصف {row_number} تلقائياً (قرار AUTO_PUBLISH).")
             return "success"
 
@@ -413,11 +439,11 @@ def pre_cache_product_candidates(task, worksheet=None, link_column_index=None, b
     saved = local_cache_db.save_curation_candidates(
         row_number, name, brand, candidates, best.get("url"), sku_key=sku_key, run_id=uuid.uuid4().hex[:16])
     if not saved:
-        local_cache_db.update_task_status(task["id"], "failed", "Could not save review candidates",
-                                          failure_code="CANDIDATE_SAVE_FAILED", trace=trace)
+        _finish_task(task, "failed", "Could not save review candidates",
+                     failure_code="CANDIDATE_SAVE_FAILED", trace=trace)
         return "failed"
-    local_cache_db.update_task_status(task["id"], "ready_for_review", None,
-                                      failure_code=best.get("failure_code"), trace={"outcome": _outcome(trace)})
+    _finish_task(task, "ready_for_review", None,
+                 failure_code=best.get("failure_code"), trace={"outcome": _outcome(trace)})
     print(f"[Pre-Cache] {len(candidates)} مرشح للصف {row_number} (القرار: {decision or 'v1'}).")
     return "success"
 
@@ -439,15 +465,13 @@ def process_single_product(prod, worksheet, link_column_index, brand_mappings=No
         print(f"تخطي الصف {row_num}: يحتوي بالفعل على رابط صورة نهائي.")
         return "skipped"
 
+    # الاسم/البراند العربي للبحث يأتيان من الشيت فقط. ناتج QueryRefiner (تخمين نموذج لغوي) يُكتب في الشيت
+    # للتعريب ولا يدخل هوية البحث أبداً (D8/D9): وإلا صار تخمين البراند العربي 'mapped' وقابلاً للنشر التلقائي.
     product_name_ar = prod.get("product_name_ar", "")
     brand_ar = prod.get("brand_ar", "")
     try:
         from query_refiner import QueryRefiner
         refined = QueryRefiner.refine_product_metadata(name, brand, prod.get("category", ""))
-        if not product_name_ar and refined.get("cleaned_title_ar"):
-            product_name_ar = refined["cleaned_title_ar"]
-        if not brand_ar and refined.get("canonical_brand_ar"):
-            brand_ar = refined["canonical_brand_ar"]
         google_sheets.update_product_localization(worksheet, row_num, refined.get("cleaned_title_ar", ""),
                                                   refined.get("canonical_brand_ar", ""))
     except Exception as e:
@@ -702,8 +726,7 @@ def run_worker_mode():
                 local_cache_db.update_automation_state(status="pre_caching", current_product=t["product_name"])
                 result = pre_cache_product_candidates(t, worksheet, link_column_index, brand_mappings)
             except Exception as e:
-                local_cache_db.update_task_status(t["id"], "failed", f"Unexpected worker error: {e}",
-                                                  failure_code="WORKER_ERROR")
+                _finish_task(t, "failed", f"Unexpected worker error: {e}", failure_code="WORKER_ERROR")
                 print(f"[Worker Thread Error] الصف {t['row_number']}: {e}")
                 result = "failed"
             with lock:

@@ -1977,12 +1977,17 @@ def search_best_product_image_v2(query, product_name, brand, **kwargs):
     trace = kwargs.get("trace")
     row = facade.to_sku_row(product_name, brand, kwargs)
 
-    # 0. الكاش المحلي أولاً (مطابقة صارمة بالباركود عند وجوده)
-    if not kwargs.get("skip_cache"):
+    # 0. الكاش المحلي أولاً (مطابقة صارمة بالباركود عند وجوده).
+    # لا يُستشار الكاش عندما يوجّه الموظف البحث (استعلام مخصص أو صور مستبعدة): التوجيه يجب أن يُنفَّذ (D8).
+    steering = bool((kwargs.get("custom_query") or "").strip() or kwargs.get("exclude_urls")
+                    or kwargs.get("exclude_phashes"))
+    if not kwargs.get("skip_cache") and not steering:
         try:
             key_spec = identity.build_sku_spec(row, kwargs.get("brand_mappings") or None,
                                                size_text=kwargs.get("size_text") or None)
-            cached = _cached_result_v2(row["barcode"], row["name"], row["brand"], key_spec.sku_key, trace)
+            # الباركود غير الصالح ('N/A' / '6.29E+12') لا يصلح مفتاحاً: يُمرَّر فارغاً
+            cache_barcode = row["barcode"] if key_spec.gtin_status == "ok" else ""
+            cached = _cached_result_v2(cache_barcode, row["name"], row["brand"], key_spec.sku_key, trace)
             if cached:
                 logger.info("v2: local cache hit for %r", product_name)
                 return cached

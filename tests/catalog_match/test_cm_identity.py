@@ -126,7 +126,7 @@ def test_sku_key_rules():
     a = build_sku_spec({"name": "Almarai Fresh Milk 1L", "brand": "Almarai"}, MAPPINGS)
     b = build_sku_spec({"name": "Almarai Fresh Milk 1L", "brand": "Al Marai"}, MAPPINGS)
     c = build_sku_spec({"name": "Almarai Fresh Milk 1L", "brand": "Almarai"}, BrandIndex.from_mappings(MAPPINGS))
-    assert a.sku_key == b.sku_key == c.sku_key               # canonical brand, not the spelling
+    assert a.sku_key == b.sku_key == c.sku_key               # compact sheet spelling, not the mapping
     d = build_sku_spec({"name": "Almarai Fresh Milk 1L", "brand": "Almarai", "barcode": "123"}, MAPPINGS)
     assert d.gtin is None and d.gtin_status == "bad_length" and d.sku_key == a.sku_key
     e = build_sku_spec({"name": "Almarai Fresh Milk 1L Low Fat", "brand": "Almarai"}, MAPPINGS)
@@ -134,3 +134,14 @@ def test_sku_key_rules():
     # no mappings at all still works
     f = build_sku_spec({"name": "Almarai Fresh Milk 1L", "brand": "Almarai", "category": "Dairy"}, None)
     assert f.brand_conf == "sheet_raw" and f.category == "Dairy" and f.competitors == ()
+
+
+def test_sku_key_does_not_depend_on_the_brand_mapping():
+    """Editing (or failing to load) the Brands Mapping sheet must not orphan approvals and rejections."""
+    row = {"name": "Fresh Laban 1L", "brand": "Al Marai"}
+    assert build_sku_spec(row, MAPPINGS).sku_key == build_sku_spec(row, {}).sku_key
+    ar = {"name": "Fresh Laban 1L", "brand": "المراعي"}
+    before = {"almarai": {"brand": "Almarai", "synonyms": ["Al Marai"]}}
+    after = {"almarai": {"brand": "Almarai", "synonyms": ["Al Marai", "المراعي"]}}
+    assert build_sku_spec(ar, before).brand_conf != build_sku_spec(ar, after).brand_conf
+    assert build_sku_spec(ar, before).sku_key == build_sku_spec(ar, after).sku_key

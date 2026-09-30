@@ -29,7 +29,7 @@ from dataclasses import dataclass
 from typing import Iterable, List, Optional, Sequence, Set, Tuple
 
 from . import variants as variants_mod
-from .gtin import normalize_gtin
+from .gtin import is_restricted, normalize_gtin
 from .models import PlannedQuery, Size, SkuSpec
 from .sizes import parse_sizes
 from .text_norm import alnum_len, tokens
@@ -317,7 +317,7 @@ def build_queries(spec: SkuSpec, custom_query: Optional[str] = None) -> List[Pla
 
     gtin14, status = normalize_gtin(spec.gtin) if spec.gtin else (None, "missing")
     brand_q4 = english_brand(spec) or arabic_brand(spec)
-    if status == "ok" and gtin14 and brand_q4:
+    if status == "ok" and gtin14 and brand_q4 and not is_restricted(gtin14):
         plan.append(PlannedQuery(query_id="Q4", text=f'"{brand_q4}" {display_gtin(gtin14)}',
                                  hl="ar" if _lang_of(brand_q4) == "ar" else "en"))
 

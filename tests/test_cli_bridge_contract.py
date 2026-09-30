@@ -244,3 +244,36 @@ def test_select_upload_failure_writes_nothing(select_env, monkeypatch):
     result = bridge.action_select_image(dict(SELECT_PARAMS))
     assert result["status"] == "failed"
     assert not any(e[0] in ("link", "metadata_write", "resolution") for e in events)
+
+
+def test_select_uses_the_ui_candidate_sha256(select_env):
+    """The dashboards post candidate_sha256: the verified bytes must be published, not a re-download."""
+    bridge, events, state = select_env
+    params = dict(SELECT_PARAMS)
+    params["candidate_sha256"] = params.pop("content_sha256")
+    assert bridge.action_select_image(params)["status"] == "success"
+    assert events[0] == ("process", V2_RESULT["url"], "ab" * 32)
+
+
+def test_select_ignores_a_queue_row_of_another_product(select_env, monkeypatch):
+    """After a sheet row shift the queue row at that number belongs to another product; it neither blocks
+    the approval nor is the product whose queue row / candidates get cleaned up."""
+    bridge, events, state = select_env
+    import local_cache_db
+    cleaned = []
+    monkeypatch.setattr(local_cache_db, "get_task_by_row",
+                        lambda row: {"barcode": "6291003000013", "sku_key": "06291003000013", "product_name": "Masafi"})
+    monkeypatch.setattr(local_cache_db, "update_task_status_by_row", lambda *a, **k: cleaned.append(("status", a, k)))
+    monkeypatch.setattr(local_cache_db, "delete_curation_candidates", lambda *a, **k: cleaned.append(("delete", a, k)))
+    result = bridge.action_select_image(dict(SELECT_PARAMS))
+    assert result["status"] == "success"
+    assert all(k["sku_key"] == "06281007000028" for _, _, k in cleaned) and len(cleaned) == 2
+
+
+def test_select_after_owner_fixed_the_barcode(select_env, monkeypatch):
+    """The queue still holds the old (corrupt) barcode of the same product: approval is not refused."""
+    bridge, events, state = select_env
+    import local_cache_db
+    monkeypatch.setattr(local_cache_db, "get_task_by_row",
+                        lambda row: {"barcode": "6.28E+12", "sku_key": "06281007000028", "product_name": "Fresh Milk"})
+    assert bridge.action_select_image(dict(SELECT_PARAMS))["status"] == "success"

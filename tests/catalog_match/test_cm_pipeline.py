@@ -23,7 +23,7 @@ MAPPINGS = {
     "almarai": {"brand": "Almarai", "synonyms": ["المراعي", "Al Marai"],
                 "excluded_competitors": ["Al Ain", "Nada"], "official_domains": ["almarai.com"]},
 }
-ROW = {"name": "Almarai Full Fat Milk 1L", "brand": "Almarai", "category": "Dairy",
+ROW = {"name": "Almarai Full Fat Fresh Milk 1L", "brand": "Almarai", "category": "Dairy",
        "barcode": "6281007000000"}
 SPEC = build_sku_spec(ROW, MAPPINGS)
 
@@ -205,7 +205,7 @@ def test_no_first_hit_auto_publish_when_enabled(monkeypatch):
 
 
 def test_rejects_never_preselected():
-    t1_failed = cand(1, "Almarai Full Fat Milk 1L | Carrefour UAE",
+    t1_failed = cand(1, "Almarai Full Fat Fresh Milk 1L | Carrefour UAE",
                      "https://www.carrefouruae.com/mafuae/en/almarai-full-fat-milk-1l/p/1")
     t1_ok = cand(2, "Almarai Full Fat Fresh Milk 1L - Lulu UAE",
                  "https://www.luluhypermarket.com/en-ae/almarai-full-fat-fresh-milk-1l/p/2")

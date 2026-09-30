@@ -16,6 +16,10 @@ matching (it merges real competitors such as Al Rawabi / Al Rabie).
 match_brands holds the phrases used to find the brand in evidence text: the
 canonical name and synonyms with >= 3 letters/digits, plus the sub-brands that
 appear in the product name (sheet brand 'Nestle', name 'Nido ...' -> 'nido').
+When the SKU names a sub-brand, `required` holds it (parent-only evidence such as
+'Nestle' is then not enough for tier 1) and `siblings` holds the family's other
+sub-brands ('Everyday', 'Nesquik'), which count as other brands when the required
+sub-brand is absent.
 Short synonyms ('A/G', 'AG') can resolve a sheet brand but never match evidence.
 """
 
@@ -90,6 +94,8 @@ class BrandResolution:
     conf: str = "none"                       # 'mapped' | 'sheet_raw' | 'none'
     brand_ar: str = ""                       # first Arabic spelling in the mapping, if any
     family: Tuple[str, ...] = field(default=())   # every normalised phrase of the resolved brand
+    required: Tuple[str, ...] = ()           # sub-brand(s) the SKU names: evidence must show one for tier 1
+    siblings: Tuple[str, ...] = ()           # the family's OTHER sub-brands (competitors when required is absent)
 
 
 class BrandIndex:
@@ -217,14 +223,22 @@ class BrandIndex:
         for p in (entry.canonical,) + entry.synonyms:
             if _matchable(p):
                 phrases.append(norm_phrase(p))
+        required: List[str] = []
         for sub in entry.sub_brands:
             if sub in forced_sub or any(phrase_in(sub, n) for n in names):
                 if _matchable(sub):
-                    phrases.append(norm_phrase(sub))
+                    required.append(norm_phrase(sub))
         for sub in forced_sub:
             if _matchable(sub):
-                phrases.append(norm_phrase(sub))
+                required.append(norm_phrase(sub))
+        required = [r for r in dict.fromkeys(required) if r]
+        phrases.extend(required)
         match_brands = tuple(dict.fromkeys(p for p in phrases if p))
+        siblings = tuple(dict.fromkeys(
+            norm_phrase(s) for s in entry.sub_brands
+            if _matchable(s) and norm_phrase(s) and norm_phrase(s) not in required
+            and not any(phrase_in(s, r) or phrase_in(r, s) for r in required)
+        )) if required else ()
         family = tuple(dict.fromkeys(norm_phrase(p) for p in entry.phrases() if norm_phrase(p)))
         competitors = [norm_phrase(c) for c in entry.competitors] + list(self._known)
         comp = _other_brands(competitors, family)
@@ -237,6 +251,8 @@ class BrandIndex:
             conf="mapped",
             brand_ar=brand_ar,
             family=family,
+            required=tuple(required),
+            siblings=siblings,
         )
 
     def _unmapped(self, brand: str) -> BrandResolution:

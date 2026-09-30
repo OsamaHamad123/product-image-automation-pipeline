@@ -9,7 +9,7 @@ import pytest
 
 ROWS = (910001, 910002, 910003)
 SKU = "wp5-test-sku-0001"
-GTIN_SKU = "06281007000028"
+GTIN_SKU = "06281007000024"
 
 
 @pytest.fixture
@@ -24,7 +24,7 @@ def db(mariadb_or_skip):
             cur.execute("DELETE FROM curation_candidates WHERE `row_number` IN (%s, %s, %s)", ROWS)
             cur.execute("DELETE FROM rejected_images WHERE sku_key IN (%s, %s)", (SKU, GTIN_SKU))
             cur.execute("DELETE FROM resolved_products WHERE sku_key IN (%s, %s) OR barcode = %s",
-                        (SKU, GTIN_SKU, "6281007000028"))
+                        (SKU, GTIN_SKU, "6281007000024"))
             conn.commit()
         finally:
             conn.close()
@@ -70,12 +70,12 @@ def test_pause_resume_mechanics(db):
 
 
 def test_enqueue_upsert_keeps_review_rows(db):
-    db.add_to_queue(ROWS[0], "6281007000028", "Fresh Milk 1L", "Almarai", "q",
+    db.add_to_queue(ROWS[0], "6281007000024", "Fresh Milk 1L", "Almarai", "q",
                     payload={"name_ar": "حليب طازج"}, sku_key=SKU)
     db.update_task_status(_queue_rows(db)[ROWS[0]]["id"], "ready_for_review", failure_code="VERIFIER_DOWN")
 
     # Re-enqueueing the same product must not reset the reviewer's row ...
-    db.add_to_queue(ROWS[0], "6281007000028", "Fresh Milk 1L", "Almarai", "q",
+    db.add_to_queue(ROWS[0], "6281007000024", "Fresh Milk 1L", "Almarai", "q",
                     payload={"name_ar": "حليب طازج كامل الدسم"}, sku_key=SKU)
     row = _queue_rows(db)[ROWS[0]]
     assert row["status"] == "ready_for_review"
@@ -83,7 +83,7 @@ def test_enqueue_upsert_keeps_review_rows(db):
     assert "كامل الدسم" in row["payload_json"]          # ... but the payload is refreshed
 
     # ... unless reprocess is requested ...
-    db.add_to_queue(ROWS[0], "6281007000028", "Fresh Milk 1L", "Almarai", "q", sku_key=SKU, reprocess=True)
+    db.add_to_queue(ROWS[0], "6281007000024", "Fresh Milk 1L", "Almarai", "q", sku_key=SKU, reprocess=True)
     assert _queue_rows(db)[ROWS[0]]["status"] == "pending"
 
     # ... or a different product now sits in that sheet row.
@@ -129,22 +129,22 @@ def test_claim_is_exclusive_and_leased(db):
 
 
 def test_cache_serves_only_verified_and_is_barcode_strict(db):
-    assert db.save_product_resolution("6281007000028", "Fresh Milk", "Almarai", "https://src/1.jpg",
+    assert db.save_product_resolution("6281007000024", "Fresh Milk", "Almarai", "https://src/1.jpg",
                                       "https://res.cloudinary.com/x/1.png", None, {"a": 1},
                                       verification_status="legacy", sku_key=GTIN_SKU)
-    assert db.get_cached_product("6281007000028", "Fresh Milk", "Almarai") is None      # legacy is never served
+    assert db.get_cached_product("6281007000024", "Fresh Milk", "Almarai") is None      # legacy is never served
 
-    assert db.save_product_resolution("6281007000028", "Fresh Milk", "Almarai", "https://src/1.jpg",
+    assert db.save_product_resolution("6281007000024", "Fresh Milk", "Almarai", "https://src/1.jpg",
                                       "https://res.cloudinary.com/x/2.png", None, {"a": 1},
                                       verification_status="human_approved", approved_by="human", sku_key=GTIN_SKU)
-    hit = db.get_cached_product("6281007000028", "Fresh Milk", "Almarai")
+    hit = db.get_cached_product("6281007000024", "Fresh Milk", "Almarai")
     assert hit["cloudinary_url"].endswith("2.png") and hit["verification_status"] == "human_approved"
 
     # A sibling with another barcode but the same name gets nothing (no name fallback).
-    assert db.get_cached_product("6281007000035", "Fresh Milk", "Almarai") is None
+    assert db.get_cached_product("6281007000031", "Fresh Milk", "Almarai") is None
 
     assert db.supersede_resolution(GTIN_SKU) == 1
-    assert db.get_cached_product("6281007000028", "Fresh Milk", "Almarai") is None
+    assert db.get_cached_product("6281007000024", "Fresh Milk", "Almarai") is None
 
 
 def test_rejections_roundtrip(db):

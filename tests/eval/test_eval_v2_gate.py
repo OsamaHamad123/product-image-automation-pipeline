@@ -11,7 +11,7 @@ plan's and are not to be softened:
     quality-rule kills of correct_exact == 0
     false NOT_FOUND                     <= 0.05
     every named regression case has its expected decision class
-    verifier down (gemini_down)         -> 0 auto picks
+    verifier down (gemini_down)         -> 0 auto picks, preselect precision >= 0.85
     per SKU                             <= 4 provider queries, <= 2 verifier calls
 """
 
@@ -115,6 +115,9 @@ def test_v2_gate(v2_run, v2_gemini_down_run, baseline, labels, golden):
     check(dm["n_error"] == 0, "gemini_down engine errors: " + "; ".join(
         f"{o['sku_id']}: {o['error']}" for o in down["outcomes"] if o["error"]))
     check(dm["n_auto"] == 0, f"gemini_down: {dm['n_auto']} auto picks while the verifier is down")
+    # With the verifier down, text evidence alone decides the pre-checked pick: it must meet the same bar.
+    check(dm["n_preselected"] == 0 or dm["preselect_precision"] >= 0.85,
+          f"gemini_down: preselect precision {dm['preselect_precision']} < 0.85")
     check(not down_blocked and not down["network_attempts"], "gemini_down run tried the network")
     problems += ["gemini_down " + p for p in _budget_problems(down)]
 

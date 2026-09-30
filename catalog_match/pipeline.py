@@ -6,7 +6,8 @@ find_product_image(spec, *, providers=None, fetcher=None, verifier=None,
 
 Steps
     1. retrieve   pooled retrieval over the query plan (or the staff custom query);
-                  early stop as soon as the pool holds a tier-1 candidate.
+                  early stop as soon as a web-search candidate is tier 1 (an Open
+                  Food Facts record alone never stops the search).
     2. score      every pooled candidate with score.score_candidate.
     3. relax      R1/R2 into the same pool, only when no candidate is tier 1 or 2
                   and there is no custom query (relaxed winners are capped at review).
@@ -36,8 +37,8 @@ from .models import (
     Candidate, CandidateScore, FetchedImage, RankedCandidate, SearchOutcome, SkuSpec,
     VerificationResult, VlmImageVerdict,
 )
-from .retrieve import Retriever
-from .score import has_tier1, rank, score_candidate
+from .retrieve import Retriever, t1_early_stop
+from .score import rank, score_candidate
 
 logger = logging.getLogger(__name__)
 
@@ -232,7 +233,7 @@ def find_product_image(spec: Union[SkuSpec, Mapping[str, Any]], *, providers: Op
 
     # 1. retrieve (early stop on tier 1)
     retriever = Retriever(spec, providers, exclude_urls=exclude_urls, max_queries=MAX_QUERIES,
-                          early_stop=lambda pool: has_tier1(spec, pool, negatives))
+                          early_stop=t1_early_stop(spec, negatives))
     retrieval = retriever.run(custom)
 
     # 2. score
