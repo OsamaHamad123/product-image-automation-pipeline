@@ -420,29 +420,29 @@
 
 
 
-        <!-- Card 4: Quality Breakdown -->
+        <!-- Card 4: real queue counters (automation_queue) -->
 
         <div class="glass-panel" style="padding: 1.25rem; display: flex; align-items: center; gap: 1.25rem; border-color: var(--panel-border);">
 
             <div style="background: var(--active-menu-bg); width: 50px; height: 50px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 1.5rem; color: var(--accent-cyan);">
 
-                <i class="fas fa-percentage"></i>
+                <i class="fas fa-list-ol"></i>
 
             </div>
 
             <div style="flex: 1;">
 
-                <span style="font-size: 0.8rem; color: var(--text-secondary); font-weight: bold; display: block;">توزيع جودة المرشحات</span>
+                <span style="font-size: 0.8rem; color: var(--text-secondary); font-weight: bold; display: block;">عدادات الطابور (من قاعدة البيانات)</span>
 
-                <span id="statQualityText" style="font-size: 0.8rem; font-weight: 800; color: var(--text-primary); display: block; margin-top: 0.15rem; direction: ltr; text-align: right;">Excellent: 0 | Med: 0 | Weak: 0</span>
+                <span id="statQueueCounters" style="font-size: 0.8rem; font-weight: 800; color: var(--text-primary); display: block; margin-top: 0.15rem;">للمراجعة: 0 | معتمدة: 0 | فشل: 0</span>
+
+                <span id="statFailureCodes" style="font-size: 0.72rem; color: var(--text-secondary); display: block; margin-top: 0.15rem; direction: ltr; text-align: right;">لا توجد رموز فشل</span>
 
             </div>
 
         </div>
 
     </div>
-
-    
 
     <!-- Tabs Navigation -->
     <div class="glass-panel" style="padding: 0.5rem; display: flex; gap: 0.5rem; margin-bottom: 2rem; border-radius: 14px; direction: rtl; border-color: var(--panel-border);">
@@ -523,18 +523,14 @@
                     </h3>
                     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem;">
                         <div class="config-card">
-                            <label for="bgColor">لون الخلفية المستهدف</label>
-                            <input type="text" id="bgColor" value="ffffff" placeholder="مثال: ffffff">
-                        </div>
-                        <div class="config-card">
-                            <label for="paddingRatio">نسبة الهامش (Padding)</label>
-                            <input type="number" id="paddingRatio" value="0.85" step="0.05" min="0.5" max="0.95">
+                            <label>اللوحة النهائية</label>
+                            <p style="font-size: 0.8rem; color: var(--text-primary); margin: 0; line-height: 1.6;">800 × 800 بخلفية بيضاء معتمة، والمنتج كاملاً يملأ 88% وموسّط.</p>
                         </div>
                         <div class="config-card">
                             <label for="bgRemovalMethod">مزيل الخلفية</label>
                             <select id="bgRemovalMethod">
                                 <option value="photoroom">PhotoRoom AI</option>
-                                <option value="none">بدون عزل (تعديل الأبعاد فقط)</option>
+                                <option value="none">بدون عزل (يُكتب الرابط بعلامة needs_review)</option>
                             </select>
                         </div>
                     </div>
@@ -546,13 +542,6 @@
                         <i class="fas fa-brain"></i> تحسينات الذكاء الاصطناعي (AI)
                     </h3>
                     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem;">
-                        <div class="config-card">
-                            <label for="aiUpscale">ترقية الدقة (AI Upscale)</label>
-                            <select id="aiUpscale">
-                                <option value="true">تفعيل (AI Upscale)</option>
-                                <option value="false">تعطيل</option>
-                            </select>
-                        </div>
                         <div class="config-card">
                             <label for="aiEnhance">تحسين الألوان (AI Enhance)</label>
                             <select id="aiEnhance">
@@ -570,13 +559,16 @@
                     </h3>
                     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem;">
                         <div class="config-card">
-                            <label for="autoApproveThreshold">حد الاعتماد التلقائي (Auto Ingest)</label>
-                            <select id="autoApproveThreshold" onchange="updatePreflightEstimates()">
-                                <option value="0.0">تعطيل الاعتماد التلقائي</option>
-                                <option value="0.98">طابق دقيق (98% فما فوق)</option>
-                                <option value="0.95">طابق مرتفع (95% فما فوق)</option>
-                                <option value="0.90">طابق مقبول (90% فما فوق)</option>
-                            </select>
+                            <label for="autoPublishEnabled">النشر التلقائي (الموثق فقط)</label>
+                            <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.8rem; color: var(--text-primary); cursor: pointer;">
+                                <input type="checkbox" id="autoPublishEnabled" style="width: 18px; height: 18px;">
+                                Auto-publish (verified only, off)
+                            </label>
+                            <span style="font-size: 0.72rem; color: var(--text-secondary); line-height: 1.5;">معطل افتراضياً. عند تفعيله يُنشر فقط ما تحقق بالكامل (GTIN أو براند+حجم+نوع، وتحقق بصري MATCH، ومصدر معتمد) للبراندات المسموح بها أدناه؛ كل ما عدا ذلك يذهب للمراجعة.</span>
+                        </div>
+                        <div class="config-card">
+                            <label for="autoPublishBrands">البراندات المسموح نشرها تلقائياً</label>
+                            <input type="text" id="autoPublishBrands" placeholder="مثال: Almarai, Al Rawabi">
                         </div>
                         <div class="config-card">
                             <label for="brandFilter">فلترة حسب الماركة (Brand)</label>
@@ -589,8 +581,8 @@
                         <div class="config-card">
                             <label for="forceOverwrite">معالجة الصور الموجودة</label>
                             <select id="forceOverwrite" onchange="updatePreflightEstimates()">
-                                <option value="true" selected>فرض إعادة المعالجة والكتابة فوق الصور (افتراضي)</option>
-                                <option value="false">تخطي الصفوف التي تمتلك صوراً مسبقاً</option>
+                                <option value="false" selected>تخطي الصفوف التي تمتلك صوراً مسبقاً (افتراضي)</option>
+                                <option value="true">فرض إعادة المعالجة والكتابة فوق الصور</option>
                             </select>
                         </div>
                         <div class="config-card">
@@ -618,7 +610,7 @@
                             <strong id="estimateTime" style="font-size: 1.05rem; color: var(--text-primary);">0 ثانية</strong>
                         </div>
                         <div style="background: rgba(0,0,0,0.2); padding: 0.75rem; border-radius: 10px; border: 1px solid var(--panel-border);">
-                            <span style="font-size: 0.7rem; color: var(--text-secondary); display: block; margin-bottom: 0.25rem;">مكالمات Gemini المتوقعة</span>
+                            <span style="font-size: 0.7rem; color: var(--text-secondary); display: block; margin-bottom: 0.25rem;">حد أقصى لطلبات التحقق البصري (2 لكل منتج)</span>
                             <strong id="estimateGemini" style="font-size: 1.05rem; color: var(--text-primary);">0 طلب</strong>
                         </div>
                     </div>
@@ -713,7 +705,7 @@
 
                     <button type="button" class="btn btn-secondary" id="batchRejectBtn" onclick="submitBatchRejection()" style="background: var(--danger-bg); border-color: var(--panel-border); color: var(--danger); font-weight: bold; padding: 0.65rem 1.5rem;">
 
-                        <i class="fas fa-trash-alt"></i> استبعاد وتجاهل المحدد 🗑️
+                        <i class="fas fa-trash-alt"></i> رفض المحدد بسبب...
 
                     </button>
 
@@ -733,7 +725,7 @@
 
                     <button type="button" class="btn btn-secondary btn-sm" onclick="selectAllBatch(false)" style="padding: 0.4rem 0.8rem; font-size: 0.8rem;">إلغاء التحديد</button>
 
-                    <button type="button" class="btn btn-secondary btn-sm" onclick="selectHighMatchBatch()" style="padding: 0.4rem 0.8rem; font-size: 0.8rem; background: rgba(46,204,113,0.15); color: #2ecc71; border-color: var(--panel-border);">تحديد مطابقة >= 95%</button>
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="selectPreselectedBatch()" style="padding: 0.4rem 0.8rem; font-size: 0.8rem; background: rgba(46,204,113,0.15); color: #2ecc71; border-color: var(--panel-border);">تحديد المرشحين الموثقين مسبقاً فقط</button>
 
                 </div>
 
@@ -755,17 +747,17 @@
 
                 <div>
 
-                    <label style="font-size: 0.75rem; color: var(--text-secondary); display: block; margin-bottom: 0.25rem; font-weight: 800;">تصفية جودة الصورة</label>
+                    <label style="font-size: 0.75rem; color: var(--text-secondary); display: block; margin-bottom: 0.25rem; font-weight: 800;">تصفية حسب حالة المرشح</label>
 
                     <select id="curationQualityFilter" onchange="onCurationFilterChange()" style="width: 100%; font-size: 0.8rem; padding: 6px; background: rgba(0,0,0,0.25); border: 1px solid var(--panel-border); color: var(--text-primary); border-radius: 8px; outline: none; height: 32px;">
 
-                        <option value="all">كل الدرجات</option>
+                        <option value="all">كل المنتجات</option>
 
-                        <option value="excellent">مطابقة ممتازة (>= 95%)</option>
+                        <option value="preselected">مرشح موثق مختار مسبقاً</option>
 
-                        <option value="medium">مطابقة متوسطة (90-95%)</option>
+                        <option value="unselected">بدون مرشح مختار</option>
 
-                        <option value="weak">مطابقة ضعيفة (< 90%)</option>
+                        <option value="empty">بدون مرشحين</option>
 
                     </select>
 
@@ -865,6 +857,27 @@
 
 </div>
 
+<!-- Reject Reason Modal (single thumb or bulk) -->
+<div id="batchRejectModal" style="display: none; position: fixed; z-index: 10001; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(3, 4, 10, 0.85); backdrop-filter: blur(15px); align-items: center; justify-content: center;">
+    <div class="glass-panel" style="max-width: 560px; width: 92%; padding: 2rem; border-radius: 20px; border: 1px solid var(--panel-border); margin: 5% auto; direction: rtl;">
+        <h3 id="batchRejectTitle" style="font-size: 1.1rem; margin-bottom: 0.75rem; color: var(--danger);">سبب الرفض</h3>
+        <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 1rem;">اختر السبب الأدق. تُستبعد الصورة من عمليات البحث القادمة لهذا المنتج.</p>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;">
+            <label style="display: flex; gap: 0.4rem; align-items: center; font-size: 0.8rem; cursor: pointer;"><input type="radio" name="batch_reject_reason_code" value="WRONG_PRODUCT"> منتج مختلف (WRONG_PRODUCT)</label>
+            <label style="display: flex; gap: 0.4rem; align-items: center; font-size: 0.8rem; cursor: pointer;"><input type="radio" name="batch_reject_reason_code" value="WRONG_BRAND"> براند خاطئ (WRONG_BRAND)</label>
+            <label style="display: flex; gap: 0.4rem; align-items: center; font-size: 0.8rem; cursor: pointer;"><input type="radio" name="batch_reject_reason_code" value="WRONG_VARIANT"> نكهة/نوع خاطئ (WRONG_VARIANT)</label>
+            <label style="display: flex; gap: 0.4rem; align-items: center; font-size: 0.8rem; cursor: pointer;"><input type="radio" name="batch_reject_reason_code" value="WRONG_SIZE"> حجم خاطئ (WRONG_SIZE)</label>
+            <label style="display: flex; gap: 0.4rem; align-items: center; font-size: 0.8rem; cursor: pointer;"><input type="radio" name="batch_reject_reason_code" value="WRONG_PACK"> عدد العبوة خاطئ (WRONG_PACK)</label>
+            <label style="display: flex; gap: 0.4rem; align-items: center; font-size: 0.8rem; cursor: pointer;"><input type="radio" name="batch_reject_reason_code" value="NOT_PACKSHOT"> ليست صورة أمامية (NOT_PACKSHOT)</label>
+            <label style="display: flex; gap: 0.4rem; align-items: center; font-size: 0.8rem; cursor: pointer;"><input type="radio" name="batch_reject_reason_code" value="LOW_QUALITY"> جودة رديئة (LOW_QUALITY)</label>
+        </div>
+        <div style="display: flex; gap: 1rem; margin-top: 1.5rem;">
+            <button type="button" class="btn btn-secondary" onclick="closeBatchRejectModal()" style="flex: 1;">إلغاء</button>
+            <button type="button" class="btn" id="batchRejectConfirmBtn" onclick="confirmBatchReject()" style="flex: 2; background: var(--danger); color: #ffffff; font-weight: 900;">تأكيد الرفض</button>
+        </div>
+    </div>
+</div>
+
 @endsection
 
 @section('scripts')
@@ -923,13 +936,13 @@
 
         if (!url) return '';
 
-        if (url.startsWith('http://') || url.startsWith('https://')) {
+        if (/^https?:\/\//i.test(url)) {
 
             return `/api/image-proxy?url=${encodeURIComponent(url)}`;
 
         }
 
-        return url;
+        return '';
 
     }
 
@@ -1131,13 +1144,7 @@
 
         const settings = {
 
-            bgColor: document.getElementById('bgColor').value,
-
-            padding_ratio: parseFloat(document.getElementById('paddingRatio').value),
-
             bgRemovalMethod: document.getElementById('bgRemovalMethod').value,
-
-            aiUpscale: document.getElementById('aiUpscale').value === 'true',
 
             aiEnhance: document.getElementById('aiEnhance').value === 'true',
 
@@ -1145,7 +1152,10 @@
 
             row_filter: document.getElementById('rowFilter').value.trim(),
 
-            auto_approve_threshold: parseFloat(document.getElementById('autoApproveThreshold').value),
+            // النشر التلقائي معطل افتراضياً ولا يشمل إلا الموثق بالكامل للبراندات المسموح بها
+            auto_publish_enabled: document.getElementById('autoPublishEnabled').checked,
+
+            auto_publish_brands: document.getElementById('autoPublishBrands').value.trim(),
 
             forceOverwrite: document.getElementById('forceOverwrite').value === 'true',
 
@@ -1155,7 +1165,7 @@
 
         };
 
-        
+
 
         try {
 
@@ -1313,7 +1323,9 @@
 
                     'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
 
-                }
+                },
+
+                body: JSON.stringify({ all: true })
 
             });
 
@@ -1370,6 +1382,8 @@
             // Update Dashboard metrics
 
             document.getElementById('statFailedCount').innerText = data.failed || 0;
+
+            renderQueueCounters(data);
 
             const retryBtn = document.getElementById('statRetryBtn');
 
@@ -1445,13 +1459,15 @@
 
                     pBtn.style.borderColor = 'var(--panel-border)';
 
-                    document.getElementById('batchProgressText').innerHTML = `جاري تحضير مرشحات: <strong style="color: var(--accent-cyan);">${data.current_product || 'جاري البحث...'}</strong>`;
+                    const progressText = document.getElementById('batchProgressText');
+                    progressText.textContent = 'جاري تحضير مرشحات: ';
+                    progressText.appendChild(el('strong', { style: 'color: var(--accent-cyan);', text: data.current_product || 'جاري البحث...' }));
 
                 }
 
                 
 
-                document.getElementById('batchProgressCounts').innerText = `${data.current} من ${data.total} (مكتمل: ${data.success} | فشل: ${data.failed})`;
+                document.getElementById('batchProgressCounts').innerText = `${data.current} من ${data.total} — للمراجعة: ${data.ready_for_review || 0} | معتمدة: ${data.approved || 0} | فشل: ${data.failed || 0}`;
 
                 
 
@@ -1524,6 +1540,17 @@
 
     }
 
+    // عدادات الطابور الحقيقية (للمراجعة / معتمدة / فشل حسب الرمز) من /api/batch-status
+    function renderQueueCounters(data) {
+        const box = document.getElementById('statQueueCounters');
+        const codesBox = document.getElementById('statFailureCodes');
+        if (!box || !codesBox) return;
+        const q = data.queue || {};
+        box.textContent = `للمراجعة: ${data.ready_for_review || 0} | معتمدة: ${data.approved || 0} | بانتظار: ${q.pending || 0} | فشل: ${q.failed || 0}`;
+        const codes = Object.entries(data.failed_by_code || {});
+        codesBox.textContent = codes.length ? codes.map(([code, n]) => `${code}: ${n}`).join(' | ') : 'لا توجد رموز فشل';
+    }
+
     // Fetch review candidates
 
     async function fetchCurationProducts() {
@@ -1545,32 +1572,6 @@
                 const pending = currentProducts.filter(p => p.needs_review);
 
                 document.getElementById('statQueueCount').innerText = pending.length;
-
-                
-
-                let excellentCount = 0;
-
-                let mediumCount = 0;
-
-                let weakCount = 0;
-
-                
-
-                pending.forEach(p => {
-
-                    const score = p.clip_score || 0.0;
-
-                    if (score >= 0.95) excellentCount++;
-
-                    else if (score >= 0.90) mediumCount++;
-
-                    else weakCount++;
-
-                });
-
-                
-
-                document.getElementById('statQualityText').innerText = `Excellent: ${excellentCount} | Med: ${mediumCount} | Weak: ${weakCount}`;
 
                 
 
@@ -1660,7 +1661,6 @@
 
         const rowCount = pending.length;
 
-        const autoThresh = parseFloat(document.getElementById('autoApproveThreshold').value);
 
         
 
@@ -1706,873 +1706,750 @@
 
     }
 
-    function renderBatchCurationGrid() {
-
-        const grid = document.getElementById('batchCurationGrid');
-
-        grid.innerHTML = '';
-
-        
-
-        const totalPending = currentProducts.filter(p => p.needs_review).length;
-
-        document.getElementById('curationPendingCount').innerText = `${totalPending} منتج بانتظار المراجعة`;
-
-        document.getElementById('statQueueCount').innerText = totalPending;
-
-        
-
-        if (filteredProducts.length === 0) {
-
-            grid.innerHTML = '<p style="color: var(--text-secondary); text-align: center; padding: 3rem; font-weight: bold;">🎉 لا توجد نتائج مطابقة لخيارات الفلترة الحالية.</p>';
-
-            document.getElementById('curationPageInfo').innerText = "صفحة 0 من 0";
-
-            return;
-
-        }
-
-
-
-        // Paginate slice
-
-        const maxPage = Math.ceil(filteredProducts.length / pageSize) || 1;
-
-        if (currentPage > maxPage) currentPage = maxPage;
-
-        
-
-        document.getElementById('curationPageInfo').innerText = `صفحة ${currentPage} من ${maxPage}`;
-
-        
-
-        const start = (currentPage - 1) * pageSize;
-
-        const end = start + pageSize;
-
-        const pageItems = filteredProducts.slice(start, end);
-
-        
-
-        pageItems.forEach((p, index) => {
-
-            const card = document.createElement('div');
-
-            card.className = 'curation-row-card';
-
-            if (index === focusedCardIndex) {
-
-                card.className += ' focused-card';
-
-            }
-
-            card.id = `batch-card-${p.row_number}`;
-
-            card.style.position = 'relative';
-
-
-
-            let candidatesList = p.curation_candidates || [];
-
-            if (candidatesList.length === 0 && p.needs_review_url) {
-
-                candidatesList.push({
-
-                    image_url: p.needs_review_url,
-
-                    title: "الصورة المقترحة الافتراضية",
-
-                    width: 800,
-
-                    height: 800,
-
-                    clip_score: p.clip_score || 0.0,
-
-                    source_domain: "سحابة النظام",
-
-                    is_selected: 1
-
-                });
-
-            }
-
-
-
-            const selectedCandidate = candidatesList.find(c => c.is_selected === 1) || candidatesList[0];
-
-            const defaultUrl = selectedCandidate ? selectedCandidate.image_url : (p.needs_review_url || '');
-
-
-
-            card.innerHTML = `
-
-                <div style="flex: 0 0 300px; display: flex; align-items: flex-start; gap: 0.85rem;">
-
-                    <input type="checkbox" class="batch-select-checkbox" data-row="${p.row_number}" data-url="${defaultUrl}" data-name="${p.product_name.replace(/"/g, '&quot;')}" data-brand="${p.brand.replace(/"/g, '&quot;')}" checked style="width: 22px; height: 22px; cursor: pointer; margin-top: 0.25rem; accent-color: var(--accent-purple);" onchange="toggleBatchRowSelect(this, ${p.row_number})">
-
-                    <div style="display: flex; flex-direction: column; gap: 0.35rem; width: calc(100% - 35px);">
-
-                        <span class="badge-row-number" style="align-self: flex-start; background: var(--active-menu-bg); border-color: var(--panel-border); color: var(--text-primary); font-weight: 800; font-size: 0.75rem; padding: 2px 8px; border-radius: 6px;">صف ${p.row_number}</span>
-
-                        <h4 style="font-size: 0.95rem; font-weight: 800; margin: 0.25rem 0 0; color: var(--text-primary); text-overflow: ellipsis; overflow: hidden; white-space: nowrap;" title="${p.product_name}">${p.product_name}</h4>
-
-                        <p style="font-size: 0.8rem; color: var(--text-secondary); margin: 0; font-weight: 600;">البراند: <strong style="color: var(--text-primary);">${p.brand}</strong></p>
-
-                        
-
-                        ${(() => {
-
-                            const allergens = checkTitleForAllergens(p.product_name);
-
-                            return allergens ? `<span style="background: var(--danger-bg); border: 1px solid var(--panel-border); color: var(--danger); font-size: 0.7rem; font-weight: 800; padding: 2px 6px; border-radius: 4px; margin-top: 0.35rem; display: inline-block; align-self: flex-start;"><i class="fas fa-exclamation-triangle"></i> يحتوي: ${allergens}</span>` : '';
-
-                        })()}
-
-                        
-
-                        ${(p.curation_candidates && p.curation_candidates.length > 0) ? `<span style="background: var(--active-menu-bg); border: 1px solid var(--panel-border); color: var(--text-primary); font-size: 0.7rem; font-weight: 800; padding: 2px 6px; border-radius: 4px; margin-top: 0.35rem; display: inline-block; align-self: flex-start;"><i class="fas fa-bolt"></i> جاهز للمراجعة (Cached)</span>` : ''}
-
-                        
-
-                        <div style="display: flex; align-items: center; gap: 0.35rem; margin-top: 0.5rem; width: 100%;">
-
-                            <input type="text" id="inline-query-${p.row_number}" value="${p.brand ? p.product_name + ' ' + p.brand : p.product_name}" style="flex: 1; font-size: 0.75rem; padding: 4px 8px; background: rgba(0,0,0,0.25); border: 1px solid var(--panel-border); color: var(--text-primary); border-radius: 6px; outline: none; width: calc(100% - 35px);" title="كلمات البحث">
-
-                            <button type="button" class="btn btn-secondary btn-sm" onclick="triggerInlineSearch(${p.row_number})" style="padding: 4px; font-size: 0.7rem; display: flex; align-items: center; justify-content: center; height: 26px; width: 26px;" title="إعادة البحث بالكلمات المكتوبة">
-
-                                <i class="fas fa-sync-alt" id="inline-spinner-${p.row_number}"></i>
-
-                            </button>
-
-                        </div>
-
-                        
-
-                        <div style="display: flex; align-items: center; gap: 0.35rem; margin-top: 0.35rem; width: 100%;">
-
-                            <input type="text" id="inline-url-${p.row_number}" placeholder="أو الصق رابط صورة مخصص هنا..." style="flex: 1; font-size: 0.75rem; padding: 4px 8px; background: rgba(0,0,0,0.25); border: 1px solid var(--panel-border); color: var(--text-primary); border-radius: 6px; outline: none; width: calc(100% - 35px);">
-
-                            <button type="button" class="btn btn-secondary btn-sm" onclick="addCustomImageUrl(${p.row_number})" style="padding: 4px; font-size: 0.7rem; display: flex; align-items: center; justify-content: center; height: 26px; width: 26px; background: var(--active-menu-bg);" title="إضافة الرابط يدوياً">
-
-                                <i class="fas fa-plus"></i>
-
-                            </button>
-
-                        </div>
-
-                    </div>
-
-                </div>
-
-
-
-                <div class="candidates-grid-gallery">
-
-                    ${candidatesList.map((c, cIdx) => {
-
-                        const isSelected = c.is_selected === 1 ? 'checked' : '';
-
-                        const activeClass = c.is_selected === 1 ? 'active-candidate' : '';
-
-                        const scorePercent = c.clip_score ? Math.round(c.clip_score * 100) : 0;
-
-                        const scoreBadge = scorePercent > 0 ? `<span style="position: absolute; bottom: 4px; left: 4px; background: rgba(0, 0, 0, 0.75); border: 1px solid var(--panel-border); color: #ffffff; font-size: 0.65rem; font-family: 'Outfit', sans-serif; font-weight: 900; padding: 1px 4px; border-radius: 4px;">${scorePercent}% Match</span>` : '';
-
-                        const domainText = c.source_domain ? c.source_domain.replace('www.', '') : 'Unknown';
-
-                        const hasAllergen = checkTitleForAllergens(c.title || '');
-
-                        const allergenIcon = hasAllergen ? `<span style="position: absolute; top: 4px; left: 4px; color: var(--danger); font-size: 0.8rem; filter: drop-shadow(0 0 4px var(--btn-shadow)); z-index: 6;" title="تحذير مسببات حساسية: ${hasAllergen}"><i class="fas fa-exclamation-triangle"></i></span>` : '';
-
-                        const checkmark = c.is_selected === 1 ? `<span class="selected-check" style="position: absolute; top: 4px; right: 4px; background: var(--accent-gradient); color: var(--btn-text); border-radius: 50%; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; font-size: 0.75rem; z-index: 10; box-shadow: 0 0 8px var(--btn-shadow);"><i class="fas fa-check"></i></span>` : '';
-
-                        
-
-                        return `
-
-                            <div class="curation-thumb-card ${activeClass}" onclick="selectCurationThumb(this, ${p.row_number}, '${c.image_url.replace(/'/g, "\\'")}')" style="position: relative; flex: 0 0 110px; width: 110px; height: 110px; border-radius: 14px; border: 2px solid var(--panel-border); overflow: hidden; cursor: pointer; transition: all 0.25s ease;" title="${c.title || ''} (${domainText})">
-
-                                <img src="${getImageUrl(c.image_url)}" alt="Candidate image" style="width: 100%; height: 100%; object-fit: cover;" onerror="this.src='https://placehold.co/110x110?text=Error'">
-
-                                <input type="radio" name="batch-candidate-radio-${p.row_number}" value="${c.image_url}" ${isSelected} style="display: none;">
-
-                                ${checkmark}
-
-                                <button type="button" class="action-reject-btn" onclick="event.stopPropagation(); rejectAndReSearchCandidate(this, ${p.row_number}, '${c.image_url.replace(/'/g, "\\'")}', '${c.phash || '0000000000000000'}')" style="position: absolute; top: 4px; left: 4px; background: rgba(239, 68, 68, 0.85); color: #ffffff; border: none; border-radius: 50%; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; font-size: 0.65rem; cursor: pointer; z-index: 12; transition: transform 0.2s;" title="استبعاد هذه الصورة وإعادة البحث الموجه 🔄🚫">
-                                    <i class="fas fa-ban"></i>
-                                </button>
-
-                                ${scoreBadge}
-
-                                ${allergenIcon}
-
-                            </div>
-
-                        `;
-
-                    }).join('')}
-
-                </div>
-
-
-
-                <div style="flex: 0 0 160px; display: flex; flex-direction: column; gap: 0.5rem; justify-content: center; align-items: stretch;">
-
-                    <button type="button" class="btn btn-secondary btn-sm" onclick="toggleBatchRowExclude(${p.row_number})" id="btn-exclude-${p.row_number}" style="font-size: 0.75rem; font-weight: bold; padding: 0.45rem 0.5rem; background: var(--danger-bg); color: var(--danger); border-color: var(--panel-border); border-radius: 10px; display: flex; align-items: center; justify-content: center; gap: 0.35rem;">
-
-                        <i class="fas fa-times-circle"></i> <span class="btn-text">استبعاد وتخطي</span>
-
-                    </button>
-
-                </div>
-
-            `;
-
-            grid.appendChild(card);
-
-        });
-
+    // =============================================
+    // أدوات بناء آمنة: عناوين وروابط الويب تُعرض عبر textContent وخصائص data-*
+    // =============================================
+    function escapeHtml(value) {
+        return String(value === undefined || value === null ? '' : value)
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     }
 
+    function el(tag, props = {}, children = []) {
+        const node = document.createElement(tag);
+        for (const [key, value] of Object.entries(props || {})) {
+            if (value === undefined || value === null || value === false) continue;
+            if (key === 'text') node.textContent = String(value);
+            else if (key === 'className') node.className = value;
+            else if (key === 'style') node.style.cssText = value;
+            else if (key === 'dataset') Object.assign(node.dataset, value);
+            else if (key.startsWith('on') && typeof value === 'function') node.addEventListener(key.slice(2), value);
+            else node.setAttribute(key, String(value));
+        }
+        (Array.isArray(children) ? children : [children]).forEach(child => {
+            if (child === null || child === undefined || child === false) return;
+            node.appendChild(typeof child === 'string' ? document.createTextNode(child) : child);
+        });
+        return node;
+    }
 
+    function safeHttpUrl(url) {
+        try {
+            const u = new URL(String(url || ''), window.location.origin);
+            return (u.protocol === 'http:' || u.protocol === 'https:') ? u.href : '';
+        } catch (e) {
+            return '';
+        }
+    }
 
-    function toggleBatchRowSelect(cb, rowNum) {
+    function hostOf(url) {
+        try {
+            return new URL(String(url || '')).hostname.replace(/^www\./, '');
+        } catch (e) {
+            return '';
+        }
+    }
 
-        const card = document.getElementById(`batch-card-${rowNum}`);
+    function csrfToken() {
+        return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+    }
 
-        const btn = document.getElementById(`btn-exclude-${rowNum}`);
+    const THUMB_STATUS = {
+        preselected: { text: 'مرشح مسبق', color: 'var(--success)' },
+        eligible: { text: 'مؤهل', color: 'var(--warning)' },
+        accepted: { text: 'مقبول (قديم)', color: 'var(--warning)' },
+        rejected: { text: 'مستبعد', color: 'var(--danger)' },
+        excluded: { text: 'رفض سابق', color: 'var(--danger)' },
+        manual: { text: 'يدوي', color: 'var(--accent-cyan)' },
+        pending: { text: 'قيد المراجعة', color: 'var(--panel-border)' }
+    };
 
-        if (!card || !btn) return;
+    // مرشح موحد من أي مصدر: جدول curation_candidates أو استجابة البحث
+    function normalizeCurationCandidate(c) {
+        c = c || {};
+        const ev = (c.evidence && typeof c.evidence === 'object' && !Array.isArray(c.evidence)) ? c.evidence : {};
+        let reasons = c.reasons;
+        if (!Array.isArray(reasons)) reasons = reasons ? [String(reasons)] : [];
+        const status = String(c.status || 'pending');
+        // لا يُحدد مرشح إلا إذا حدده النظام (preselected) أو المراجع صراحة
+        const isSelected = (c.is_selected === undefined || c.is_selected === null)
+            ? (status === 'preselected' ? 1 : 0)
+            : (parseInt(c.is_selected, 10) === 1 ? 1 : 0);
+        return {
+            image_url: String(c.image_url || c.url || ''),
+            title: String(c.title || c.page_title || ev.page_title || ''),
+            page_url: String(c.page_url || ev.page_url || ''),
+            source_domain: String(c.source_domain || c.domain || ev.domain || ''),
+            status: status,
+            reasons: reasons.map(r => String(r)),
+            evidence: ev,
+            vlm: (c.vlm && typeof c.vlm === 'object') ? c.vlm : null,
+            width: c.width || null,
+            height: c.height || null,
+            identity_tier: c.identity_tier || null,
+            content_sha256: c.content_sha256 || null,
+            is_selected: isSelected
+        };
+    }
 
-        
+    // مرشحو استجابة البحث: candidates حسب عقد cli_bridge، أو خطوات التتبع للمحرك القديم
+    function candidatesFromSearchResponse(data) {
+        let list = [];
+        if (data && Array.isArray(data.candidates) && data.candidates.length) {
+            list = data.candidates;
+        } else if (data && data.trace && Array.isArray(data.trace.steps)) {
+            data.trace.steps.forEach(step => (step.candidates || []).forEach(c => list.push(c)));
+        }
+        const seen = new Set();
+        return list.map(normalizeCurationCandidate).filter(c => {
+            if (!c.image_url || seen.has(c.image_url)) return false;
+            seen.add(c.image_url);
+            return true;
+        });
+    }
 
-        if (cb.checked) {
+    function selectedCandidateOf(p) {
+        return (p.curation_candidates || []).find(c => parseInt(c.is_selected, 10) === 1) || null;
+    }
 
-            card.style.opacity = '1.0';
+    function evidenceMark(value, conflict) {
+        if (conflict) return '✗';
+        if (value === true || value === 'match' || value === 'yes') return '✓';
+        if (value === false || value === 'conflict' || value === 'no') return '✗';
+        if (Array.isArray(value)) return value.length ? '✓' : '?';
+        if (typeof value === 'string' && value && !['unknown', 'unsure', 'ambiguous', 'none'].includes(value.toLowerCase())) return '✓';
+        return '?';
+    }
 
-            btn.innerHTML = '<i class="fas fa-times-circle"></i> <span class="btn-text">استبعاد وتخطي</span>';
+    // ملخص الأدلة المختصر أسفل الصورة المصغرة: GTIN / Brand / Size / Variant
+    function evidenceSummary(c) {
+        const ev = c.evidence || {};
+        const conflicts = [].concat(ev.conflicts || [], ev.hard_reject || []).map(x => String(x).toLowerCase());
+        const has = (w) => conflicts.some(x => x.includes(w));
+        const parts = [];
+        const gtin = ev.gtin_match !== undefined ? ev.gtin_match : ev.gtin;
+        if ((gtin !== undefined && gtin !== null && gtin !== '') || has('gtin')) parts.push('GTIN' + evidenceMark(gtin, has('gtin')));
+        parts.push('B' + evidenceMark(ev.brand_match !== undefined ? ev.brand_match : ev.brand, has('brand') || has('competitor')));
+        parts.push('S' + evidenceMark(ev.size_status !== undefined ? ev.size_status : (ev.size_match !== undefined ? ev.size_match : ev.size), has('size') || has('pack')));
+        parts.push('V' + evidenceMark(ev.variant_status !== undefined ? ev.variant_status : (ev.variant_match !== undefined ? ev.variant_match : ev.variants), has('variant')));
+        return parts.join(' ');
+    }
 
-            btn.style.background = 'var(--danger-bg)';
+    function thumbTooltip(c) {
+        const lines = [];
+        if (c.title) lines.push(c.title);
+        const domain = c.source_domain || hostOf(c.page_url) || hostOf(c.image_url);
+        if (domain) lines.push(domain);
+        lines.push('الأدلة: ' + evidenceSummary(c));
+        if (c.vlm) {
+            const read = [c.vlm.brand_text, c.vlm.variant_text, c.vlm.size_text].filter(Boolean).join(' / ');
+            lines.push(`VLM: ${c.vlm.decision || 'UNKNOWN'}${read ? ' — ' + read : ''}`);
+        }
+        if (c.reasons.length) lines.push('الأسباب: ' + c.reasons.join(' | '));
+        return lines.join('\n');
+    }
 
-            btn.style.color = 'var(--danger)';
+    function checkmarkEl() {
+        return el('span', {
+            className: 'selected-check',
+            style: 'position: absolute; top: 4px; right: 4px; background: var(--accent-gradient); color: var(--btn-text); border-radius: 50%; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; font-size: 0.75rem; z-index: 10; box-shadow: 0 0 8px var(--btn-shadow);'
+        }, [el('i', { className: 'fas fa-check' })]);
+    }
 
-            btn.style.borderColor = 'var(--panel-border)';
+    function buildThumb(p, rowNum, c) {
+        const st = THUMB_STATUS[c.status] || { text: c.status, color: 'var(--panel-border)' };
+        const thumb = el('div', {
+            className: 'curation-thumb-card' + (c.is_selected === 1 ? ' active-candidate' : ''),
+            dataset: { url: c.image_url, status: c.status },
+            title: thumbTooltip(c),
+            style: `position: relative; flex: 0 0 110px; width: 110px; height: 110px; border-radius: 14px; border: 2px solid ${st.color}; overflow: hidden; cursor: pointer; transition: all 0.25s ease;`
+        });
+        thumb.addEventListener('click', () => selectCurationThumb(thumb, rowNum, c.image_url));
+        thumb.appendChild(el('img', { src: getImageUrl(c.image_url), alt: 'Candidate image', loading: 'lazy', referrerpolicy: 'no-referrer',
+                                      style: 'width: 100%; height: 100%; object-fit: cover;' }));
+        if (c.is_selected === 1) thumb.appendChild(checkmarkEl());
 
-        } else {
+        const rejectBtn = el('button', {
+            type: 'button', className: 'action-reject-btn', title: 'رفض هذه الصورة بسبب محدد وإعادة البحث',
+            style: 'position: absolute; top: 4px; left: 4px; background: rgba(239, 68, 68, 0.85); color: #ffffff; border: none; border-radius: 50%; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; font-size: 0.65rem; cursor: pointer; z-index: 12; transition: transform 0.2s;'
+        }, [el('i', { className: 'fas fa-ban' })]);
+        rejectBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            openBatchRejectModal({ mode: 'single', rowNum: rowNum, imageUrl: c.image_url, button: rejectBtn });
+        });
+        thumb.appendChild(rejectBtn);
 
-            card.style.opacity = '0.4';
+        const allergen = checkTitleForAllergens(c.title || '');
+        if (allergen) {
+            thumb.appendChild(el('span', { title: `تحذير مسببات حساسية: ${allergen}`,
+                                           style: 'position: absolute; top: 28px; left: 6px; color: var(--danger); font-size: 0.8rem; z-index: 6;' },
+                                 [el('i', { className: 'fas fa-exclamation-triangle' })]));
+        }
+        thumb.appendChild(el('span', {
+            style: 'position: absolute; bottom: 0; left: 0; right: 0; background: rgba(0, 0, 0, 0.72); color: #ffffff; font-size: 0.6rem; font-weight: 800; padding: 1px 4px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: ltr;',
+            text: `${st.text} · ${evidenceSummary(c)}`
+        }));
+        return thumb;
+    }
 
-            btn.innerHTML = '<i class="fas fa-undo"></i> <span class="btn-text">إلغاء الاستبعاد</span>';
+    function buildCurationRow(p, index) {
+        const rowNum = parseInt(p.row_number, 10);
+        let candidatesList = (p.curation_candidates || []).map(normalizeCurationCandidate).filter(c => c.image_url);
+        if (candidatesList.length === 0 && p.needs_review_url) {
+            candidatesList.push(normalizeCurationCandidate({
+                image_url: p.needs_review_url, title: 'رابط الشيت المعلّم needs_review', status: 'pending', is_selected: 0
+            }));
+        }
+        p.curation_candidates = candidatesList;
+        const selected = selectedCandidateOf(p);
+        // الصف يُحدد مسبقاً فقط عندما يكون المرشح المختار بحالة preselected (أو بعد اختيار المراجع)
+        const defaultChecked = !!selected && selected.status === 'preselected';
 
-            btn.style.background = 'var(--success-bg)';
+        const card = el('div', { className: 'curation-row-card' + (index === focusedCardIndex ? ' focused-card' : ''),
+                                 id: `batch-card-${rowNum}`, style: 'position: relative;' });
 
-            btn.style.color = 'var(--success)';
+        const checkbox = el('input', { type: 'checkbox', className: 'batch-select-checkbox',
+                                       dataset: { row: String(rowNum), url: selected ? selected.image_url : '' },
+                                       style: 'width: 22px; height: 22px; cursor: pointer; margin-top: 0.25rem; accent-color: var(--accent-purple);' });
+        checkbox.checked = (p._checked !== undefined) ? (p._checked && !!selected) : defaultChecked;
+        checkbox.addEventListener('change', () => {
+            if (checkbox.checked && !checkbox.dataset.url) {
+                checkbox.checked = false;
+                alert('اختر صورة من المرشحين أولاً.');
+            }
+            p._checked = checkbox.checked;
+            toggleBatchRowSelect(checkbox, rowNum);
+        });
 
-            btn.style.borderColor = 'var(--panel-border)';
-
+        let stateText = 'لا يوجد مرشح مؤكد — اختر صورة يدوياً';
+        let stateColor = 'var(--warning)';
+        if (selected && selected.status === 'preselected') {
+            stateText = 'مرشح موثق مختار مسبقاً (غير منشور)';
+            stateColor = 'var(--success)';
+        } else if (selected) {
+            stateText = 'مختار بواسطة المراجع';
+            stateColor = 'var(--accent-cyan)';
         }
 
+        const queryInput = el('input', { type: 'text', id: `inline-query-${rowNum}`, title: 'كلمات البحث',
+            style: 'flex: 1; font-size: 0.75rem; padding: 4px 8px; background: rgba(0,0,0,0.25); border: 1px solid var(--panel-border); color: var(--text-primary); border-radius: 6px; outline: none; width: calc(100% - 35px);' });
+        queryInput.value = p._query || (p.brand ? `${p.product_name} ${p.brand}` : (p.product_name || ''));
+        queryInput.addEventListener('input', () => { p._query = queryInput.value; });
+        const urlInput = el('input', { type: 'text', id: `inline-url-${rowNum}`, placeholder: 'أو الصق رابط صورة مخصص هنا...',
+            style: 'flex: 1; font-size: 0.75rem; padding: 4px 8px; background: rgba(0,0,0,0.25); border: 1px solid var(--panel-border); color: var(--text-primary); border-radius: 6px; outline: none; width: calc(100% - 35px);' });
+        const smallBtn = 'padding: 4px; font-size: 0.7rem; display: flex; align-items: center; justify-content: center; height: 26px; width: 26px;';
+
+        const allergens = checkTitleForAllergens(p.product_name);
+        const info = el('div', { style: 'display: flex; flex-direction: column; gap: 0.35rem; width: calc(100% - 35px);' }, [
+            el('span', { className: 'badge-row-number', text: `صف ${rowNum}`,
+                         style: 'align-self: flex-start; background: var(--active-menu-bg); border-color: var(--panel-border); color: var(--text-primary); font-weight: 800; font-size: 0.75rem; padding: 2px 8px; border-radius: 6px;' }),
+            el('h4', { title: p.product_name || '', text: p.product_name || '',
+                       style: 'font-size: 0.95rem; font-weight: 800; margin: 0.25rem 0 0; color: var(--text-primary); text-overflow: ellipsis; overflow: hidden; white-space: nowrap;' }),
+            el('p', { style: 'font-size: 0.8rem; color: var(--text-secondary); margin: 0; font-weight: 600;' },
+               ['البراند: ', el('strong', { style: 'color: var(--text-primary);', text: p.brand || '' })]),
+            allergens ? el('span', { text: `⚠ يحتوي: ${allergens}`,
+                                     style: 'background: var(--danger-bg); border: 1px solid var(--panel-border); color: var(--danger); font-size: 0.7rem; font-weight: 800; padding: 2px 6px; border-radius: 4px; align-self: flex-start;' }) : null,
+            el('span', { text: stateText, className: 'row-state',
+                         style: `border: 1px solid var(--panel-border); color: ${stateColor}; font-size: 0.7rem; font-weight: 800; padding: 2px 6px; border-radius: 4px; align-self: flex-start;` }),
+            el('div', { style: 'display: flex; align-items: center; gap: 0.35rem; margin-top: 0.5rem; width: 100%;' }, [
+                queryInput,
+                el('button', { type: 'button', className: 'btn btn-secondary btn-sm', title: 'إعادة البحث بالكلمات المكتوبة', style: smallBtn,
+                               onclick: () => triggerInlineSearch(rowNum) },
+                   [el('i', { className: 'fas fa-sync-alt', id: `inline-spinner-${rowNum}` })])
+            ]),
+            el('div', { style: 'display: flex; align-items: center; gap: 0.35rem; margin-top: 0.35rem; width: 100%;' }, [
+                urlInput,
+                el('button', { type: 'button', className: 'btn btn-secondary btn-sm', title: 'إضافة الرابط يدوياً', style: smallBtn + ' background: var(--active-menu-bg);',
+                               onclick: () => addCustomImageUrl(rowNum) },
+                   [el('i', { className: 'fas fa-plus' })])
+            ])
+        ]);
+
+        const gallery = el('div', { className: 'candidates-grid-gallery' });
+        if (candidatesList.length === 0) {
+            gallery.appendChild(el('p', { style: 'color: var(--text-secondary); font-size: 0.8rem; margin: auto;', text: 'لا يوجد مرشحون لهذا المنتج. أعد البحث باستعلام مخصص أو الصق رابطاً.' }));
+        }
+        candidatesList.forEach(c => gallery.appendChild(buildThumb(p, rowNum, c)));
+
+        const excludeBtn = el('button', { type: 'button', className: 'btn btn-secondary btn-sm', id: `btn-exclude-${rowNum}`,
+                                          style: 'font-size: 0.75rem; font-weight: bold; padding: 0.45rem 0.5rem; border-radius: 10px; display: flex; align-items: center; justify-content: center; gap: 0.35rem;',
+                                          onclick: () => toggleBatchRowExclude(rowNum) });
+
+        card.appendChild(el('div', { style: 'flex: 0 0 300px; display: flex; align-items: flex-start; gap: 0.85rem;' }, [checkbox, info]));
+        card.appendChild(gallery);
+        card.appendChild(el('div', { style: 'flex: 0 0 160px; display: flex; flex-direction: column; gap: 0.5rem; justify-content: center; align-items: stretch;' }, [excludeBtn]));
+        return card;
+    }
+
+    function renderBatchCurationGrid() {
+        const grid = document.getElementById('batchCurationGrid');
+        grid.textContent = '';
+
+        const totalPending = currentProducts.filter(p => p.needs_review).length;
+        document.getElementById('curationPendingCount').innerText = `${totalPending} منتج بانتظار المراجعة`;
+        document.getElementById('statQueueCount').innerText = totalPending;
+
+        if (filteredProducts.length === 0) {
+            grid.appendChild(el('p', { style: 'color: var(--text-secondary); text-align: center; padding: 3rem; font-weight: bold;', text: 'لا توجد نتائج مطابقة لخيارات الفلترة الحالية.' }));
+            document.getElementById('curationPageInfo').innerText = 'صفحة 0 من 0';
+            return;
+        }
+
+        const maxPage = Math.ceil(filteredProducts.length / pageSize) || 1;
+        if (currentPage > maxPage) currentPage = maxPage;
+        document.getElementById('curationPageInfo').innerText = `صفحة ${currentPage} من ${maxPage}`;
+
+        const start = (currentPage - 1) * pageSize;
+        const pageItems = filteredProducts.slice(start, start + pageSize);
+        pageItems.forEach((p, index) => {
+            const row = buildCurationRow(p, index);
+            grid.appendChild(row);
+            // الحالة البصرية للصف تُضبط بعد إضافته للصفحة
+            const cb = row.querySelector('.batch-select-checkbox');
+            if (cb) toggleBatchRowSelect(cb, parseInt(p.row_number, 10));
+        });
+    }
+
+    function toggleBatchRowSelect(cb, rowNum) {
+        const card = document.getElementById(`batch-card-${rowNum}`);
+        const btn = document.getElementById(`btn-exclude-${rowNum}`);
+        if (!card || !btn) return;
+        btn.textContent = '';
+        if (cb.checked) {
+            card.style.opacity = '1.0';
+            btn.appendChild(el('i', { className: 'fas fa-times-circle' }));
+            btn.appendChild(el('span', { className: 'btn-text', text: ' استبعاد من الاعتماد' }));
+            btn.style.background = 'var(--danger-bg)';
+            btn.style.color = 'var(--danger)';
+        } else if (!cb.dataset.url) {
+            card.style.opacity = '1.0';
+            btn.appendChild(el('span', { className: 'btn-text', text: 'اختر صورة للاعتماد' }));
+            btn.style.background = 'var(--input-bg)';
+            btn.style.color = 'var(--text-secondary)';
+        } else {
+            card.style.opacity = '0.55';
+            btn.appendChild(el('i', { className: 'fas fa-undo' }));
+            btn.appendChild(el('span', { className: 'btn-text', text: ' تحديد للاعتماد' }));
+            btn.style.background = 'var(--success-bg)';
+            btn.style.color = 'var(--success)';
+        }
+        btn.style.borderColor = 'var(--panel-border)';
     }
 
     function toggleBatchRowExclude(rowNum) {
-
+        rowNum = parseInt(rowNum, 10);
         const card = document.getElementById(`batch-card-${rowNum}`);
-
         if (!card) return;
-
-        
-
         const cb = card.querySelector('.batch-select-checkbox');
-
-        const btn = document.getElementById(`btn-exclude-${rowNum}`);
-
-        if (!cb || !btn) return;
-
-        
-
-        const isExcluded = cb.checked;
-
-        cb.checked = !isExcluded;
-
+        if (!cb) return;
+        if (!cb.checked && !cb.dataset.url) {
+            alert('اختر صورة من المرشحين أولاً.');
+            return;
+        }
+        cb.checked = !cb.checked;
+        const product = currentProducts.find(p => parseInt(p.row_number, 10) === rowNum);
+        if (product) product._checked = cb.checked;
         toggleBatchRowSelect(cb, rowNum);
-
     }
 
+    // اختيار المراجع لصورة: يحدد الصف للاعتماد ويحفظ الاختيار في قاعدة البيانات
     function selectCurationThumb(thumbEl, rowNum, imageUrl) {
-
         const card = document.getElementById(`batch-card-${rowNum}`);
-
         if (!card) return;
 
-        
-
         card.querySelectorAll('.curation-thumb-card').forEach(t => {
-
             t.classList.remove('active-candidate');
-
             const check = t.querySelector('.selected-check');
-
             if (check) check.remove();
-
         });
-
-        
-
         thumbEl.classList.add('active-candidate');
+        thumbEl.appendChild(checkmarkEl());
 
-        
-
-        // Add checkmark
-
-        const check = document.createElement('span');
-
-        check.className = 'selected-check';
-
-        check.style = "position: absolute; top: 4px; right: 4px; background: var(--accent-gradient); color: var(--btn-text); border-radius: 50%; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; font-size: 0.75rem; z-index: 10; box-shadow: 0 0 8px var(--btn-shadow);";
-
-        check.innerHTML = '<i class="fas fa-check"></i>';
-
-        thumbEl.appendChild(check);
-
-        
-
-        const radio = thumbEl.querySelector('input[type="radio"]');
-
-        if (radio) radio.checked = true;
-
-        
-
-        const cb = card.querySelector('.batch-select-checkbox');
-
-        if (cb) cb.dataset.url = imageUrl;
-
-        // Update local memory state so selection persists across pagination/filtering
-        if (currentProducts) {
-            const product = currentProducts.find(p => p.row_number === rowNum);
-            if (product && product.curation_candidates) {
-                product.curation_candidates.forEach(c => {
-                    if (c.image_url === imageUrl) {
-                        c.is_selected = 1;
-                    } else {
-                        c.is_selected = 0;
-                    }
-                });
-            }
+        const product = currentProducts.find(p => parseInt(p.row_number, 10) === rowNum);
+        if (product && product.curation_candidates) {
+            product.curation_candidates.forEach(c => { c.is_selected = (c.image_url === imageUrl) ? 1 : 0; });
+            product._checked = true;
         }
 
-        // Persist candidate selection to DB in background
+        const cb = card.querySelector('.batch-select-checkbox');
+        if (cb) {
+            cb.dataset.url = imageUrl;
+            cb.checked = true;
+            toggleBatchRowSelect(cb, rowNum);
+        }
+        const state = card.querySelector('.row-state');
+        if (state) {
+            const chosen = product ? selectedCandidateOf(product) : null;
+            state.textContent = (chosen && chosen.status === 'preselected') ? 'مرشح موثق مختار مسبقاً (غير منشور)' : 'مختار بواسطة المراجع';
+        }
+
         fetch('/api/v1/curation/select-candidate', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
-            },
-            body: JSON.stringify({
-                row_number: parseInt(rowNum, 10),
-                selected_url: imageUrl
-            })
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrfToken() },
+            body: JSON.stringify({ row_number: rowNum, selected_url: imageUrl, sku_key: product ? (product.sku_key || '') : '' })
         }).catch(err => console.warn('[Curation Selection Persist Error]', err));
     }
 
-    async function rejectAndReSearchCandidate(btn, rowNumber, imageUrl, phash) {
-        const card = btn.closest('.curation-thumb-card');
-        if (!card) return;
+    // =============================================
+    // الرفض بسبب محدد (صورة واحدة مع إعادة بحث حقيقية، أو جماعي)
+    // =============================================
+    let batchRejectContext = null;
 
-        btn.disabled = true;
-        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+    function openBatchRejectModal(context) {
+        batchRejectContext = context;
+        document.querySelectorAll('input[name="batch_reject_reason_code"]').forEach(r => { r.checked = false; });
+        document.getElementById('batchRejectTitle').textContent = context.mode === 'single'
+            ? `رفض صورة للصف ${context.rowNum} ثم إعادة البحث مع استبعادها`
+            : `رفض الصور المحددة (${context.count} صف)`;
+        document.getElementById('batchRejectModal').style.display = 'flex';
+    }
 
-        card.style.transition = 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)';
-        card.style.opacity = '0.3';
-        card.style.transform = 'scale(0.7) translateY(10px)';
+    function closeBatchRejectModal() {
+        document.getElementById('batchRejectModal').style.display = 'none';
+        batchRejectContext = null;
+    }
+
+    function confirmBatchReject() {
+        const checked = document.querySelector('input[name="batch_reject_reason_code"]:checked');
+        if (!checked) {
+            alert('❌ يرجى اختيار سبب الرفض.');
+            return;
+        }
+        const context = batchRejectContext;
+        closeBatchRejectModal();
+        if (!context) return;
+        if (context.mode === 'single') {
+            rejectAndReSearchCandidate(context.button, context.rowNum, context.imageUrl, checked.value);
+        } else {
+            runBatchRejection(checked.value);
+        }
+    }
+
+    async function rejectAndReSearchCandidate(btn, rowNumber, imageUrl, reasonCode) {
+        const p = currentProducts.find(prod => parseInt(prod.row_number, 10) === rowNumber);
+        if (!p) return;
+        const card = btn ? btn.closest('.curation-thumb-card') : null;
+        if (btn) btn.disabled = true;
+        if (card) card.style.opacity = '0.3';
+        const queryInput = document.getElementById(`inline-query-${rowNumber}`);
 
         try {
-            const payload = {
-                session_id: 'session_' + rowNumber,
-                query_vector: Array(512).fill(0.05),
-                rejected_item: {
-                    product_id: String(rowNumber),
-                    image_url: imageUrl,
-                    phash: phash || '0000000000000000',
-                    vector: Array(512).fill(0.1)
-                }
-            };
-
-            const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
             const res = await fetch('/api/v1/curation/reject', {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRF-TOKEN': csrfToken || '',
-                    'Accept': 'application/json'
-                },
-                body: JSON.stringify(payload)
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrfToken(), 'Accept': 'application/json' },
+                body: JSON.stringify({
+                    row_number: rowNumber,
+                    image_url: imageUrl,
+                    reason_code: reasonCode,
+                    product_name: p.product_name || '',
+                    brand: p.brand || '',
+                    barcode: p.barcode || '',
+                    sku_key: p.sku_key || '',
+                    product_name_ar: p.product_name_ar || '',
+                    brand_ar: p.brand_ar || '',
+                    category: p.category || '',
+                    custom_query: queryInput ? queryInput.value.trim() : ''
+                })
             });
-
-            const data = await res.json();
-            if (data.status === 'success') {
-                card.remove();
-                console.log(`[Interactive Re-Search] Candidate image rejected and excluded for row ${rowNumber}.`);
-                triggerInlineSearch(rowNumber);
-            } else {
-                card.style.opacity = '1.0';
-                card.style.transform = 'none';
-                btn.disabled = false;
-                btn.innerHTML = '<i class="fas fa-ban"></i>';
-                alert('❌ فشل استبعاد الصورة: ' + (data.message || 'خطأ غير معروف'));
+            let data;
+            try {
+                data = await res.json();
+            } catch (parseErr) {
+                data = { status: 'error', error: `HTTP ${res.status}` };
             }
+            if (data.status === 'error' || data.status === 'failed' || data.errors) {
+                if (card) card.style.opacity = '1.0';
+                alert('❌ فشل رفض الصورة: ' + (data.error || data.message || 'خطأ غير معروف'));
+                return;
+            }
+            appendTerminalLine('Reject', `تم رفض صورة للصف ${rowNumber} (${reasonCode}) وإعادة البحث مع استبعادها.`, 'warning');
+            if (data.sku_key) p.sku_key = data.sku_key;
+            const fresh = candidatesFromSearchResponse(data).filter(c => c.image_url !== imageUrl);
+            if (data.status === 'provider_down') {
+                alert('⚠️ تم تسجيل الرفض، لكن محركات البحث غير متاحة حالياً لإعادة البحث. أعد المحاولة لاحقاً.');
+            } else if (!fresh.length) {
+                alert('تم تسجيل الرفض. لم يُعثر على مرشحين بديلين لهذا المنتج؛ جرّب استعلاماً مخصصاً أو الصق رابطاً.');
+            }
+            p.curation_candidates = fresh.length ? fresh : (p.curation_candidates || []).filter(c => c.image_url !== imageUrl);
+            p._checked = undefined;
+            if (fresh.length) saveCandidatesToDB(rowNumber, p, p.curation_candidates);
+            renderBatchCurationGrid();
         } catch (err) {
             console.error(err);
-            card.style.opacity = '1.0';
-            card.style.transform = 'none';
-            btn.disabled = false;
-            btn.innerHTML = '<i class="fas fa-ban"></i>';
+            if (card) card.style.opacity = '1.0';
+            alert('❌ خطأ اتصال بالخادم.');
+        } finally {
+            if (btn && btn.isConnected) btn.disabled = false;
         }
     }
 
     function selectAllBatch(val) {
-
         document.querySelectorAll('.batch-select-checkbox').forEach(cb => {
-
-            cb.checked = val;
-
-            const rowNum = cb.dataset.row;
-
+            cb.checked = val && !!cb.dataset.url;
+            const rowNum = parseInt(cb.dataset.row, 10);
+            const product = currentProducts.find(p => parseInt(p.row_number, 10) === rowNum);
+            if (product) product._checked = cb.checked;
             toggleBatchRowSelect(cb, rowNum);
-
         });
-
     }
 
-    // Submit approvals to Google Sheets + Cloudinary
-
+    // اعتماد جماعي: يرسل الباركود و sku_key لكل صف (مفاتيح الهوية وليس رقم الصف فقط)
     async function submitBatchApproval() {
-
-        const selectedCbs = Array.from(document.querySelectorAll('.batch-select-checkbox:checked'));
-
+        const selectedCbs = Array.from(document.querySelectorAll('.batch-select-checkbox:checked')).filter(cb => cb.dataset.url);
         if (selectedCbs.length === 0) {
-
-            alert('❌ يرجى تحديد منتج واحد على الأقل للاعتماد.');
-
+            alert('❌ يرجى تحديد منتج واحد على الأقل له صورة مختارة للاعتماد.');
             return;
-
         }
-
         if (!confirm(`هل أنت متأكد من اعتماد ورفع الصور لـ ${selectedCbs.length} منتجات دفعة واحدة؟`)) {
-
             return;
-
         }
 
         const approveBtn = document.getElementById('batchApproveBtn');
-
         const rejectBtn = document.getElementById('batchRejectBtn');
-
         const progressDiv = document.getElementById('batchCurationProgress');
-
         const progressBar = document.getElementById('batchCurationProgressBar');
-
         const progressPercent = document.getElementById('batchCurationProgressPercent');
-
         approveBtn.disabled = true;
-
         rejectBtn.disabled = true;
-
         progressDiv.style.display = 'flex';
 
         const total = selectedCbs.length;
-
         let completed = 0;
-
         let success = 0;
-
         let failed = 0;
-
-        const w = 800; // Target output dimensions
-
-        const h = 800;
-
-        const paddingRatio = parseFloat(document.getElementById('paddingRatio').value);
-
-        const bgColor = document.getElementById('bgColor').value;
-
         const bgRemovalMethod = document.getElementById('bgRemovalMethod').value;
-
-        const aiUpscale = document.getElementById('aiUpscale').value === 'true';
-
         const aiEnhance = document.getElementById('aiEnhance').value === 'true';
 
         for (const cb of selectedCbs) {
-
-            const row = cb.dataset.row;
-
+            const row = parseInt(cb.dataset.row, 10);
             const url = cb.dataset.url;
-
-            const name = cb.dataset.name;
-
-            const brand = cb.dataset.brand;
+            const p = currentProducts.find(prod => parseInt(prod.row_number, 10) === row) || {};
+            const chosen = (p.curation_candidates || []).find(c => c.image_url === url) || {};
 
             completed++;
-
             const percent = Math.round((completed / total) * 100);
-
             progressPercent.innerText = percent + '%';
-
             progressBar.style.width = percent + '%';
-
-            
-
-            appendTerminalLine('Ingestion', `جاري رفع الصف ${row}: ${name}...`, 'system');
+            appendTerminalLine('Ingestion', `جاري رفع الصف ${row}: ${p.product_name || ''}...`, 'system');
 
             try {
-
                 const res = await fetch('/api/select_image', {
-
                     method: 'POST',
-
-                    headers: {
-
-                        'Content-Type': 'application/json',
-
-                        'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
-
-                    },
-
+                    headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrfToken() },
                     body: JSON.stringify({
-
                         image_url: url,
-
-                        product_name: name,
-
-                        brand: brand,
-
+                        page_url: chosen.page_url || '',
+                        candidate_sha256: chosen.content_sha256 || null,
+                        product_name: p.product_name || '',
+                        brand: p.brand || '',
                         row_number: row,
-
-                        upscale: aiUpscale,
-
+                        barcode: p.barcode || '',
+                        sku_key: p.sku_key || '',
                         enhance: aiEnhance,
-
                         bg_removal_method: bgRemovalMethod,
-
-                        target_width: w,
-
-                        target_height: h,
-
-                        padding_ratio: paddingRatio,
-
-                        bg_color: bgColor
-
+                        target_width: 0,
+                        target_height: 0
                     })
-
                 });
-
-                
-
-                const data = await res.json();
-
-                if (data.status === 'success') {
-
-                    success++;
-
-                    const card = cb.closest('.curation-row-card');
-
-                    if (card) {
-
-                        card.style.borderColor = 'var(--success)';
-
-                        card.style.background = 'var(--success-bg)';
-
-                    }
-
-                } else {
-
-                    failed++;
-
-                    const card = cb.closest('.curation-row-card');
-
-                    if (card) {
-
-                        card.style.borderColor = 'var(--danger)';
-
-                        card.style.background = 'var(--danger-bg)';
-
-                    }
-
-                    appendTerminalLine('Ingestion Failed', `فشل رفع الصف ${row}: ${data.error || 'خطأ غير معروف'}`, 'error');
-
+                let data;
+                try {
+                    data = await res.json();
+                } catch (parseErr) {
+                    data = { status: 'error', error: `HTTP ${res.status}` };
                 }
-
+                const card = cb.closest('.curation-row-card');
+                if (data.status === 'success') {
+                    success++;
+                    if (card) {
+                        card.style.borderColor = 'var(--success)';
+                        card.style.background = 'var(--success-bg)';
+                    }
+                    if (data.warning === 'background_not_removed') {
+                        appendTerminalLine('Ingestion', `الصف ${row}: لم تتم إزالة الخلفية؛ كُتب الرابط بعلامة needs_review.`, 'warning');
+                    }
+                } else {
+                    failed++;
+                    if (card) {
+                        card.style.borderColor = 'var(--danger)';
+                        card.style.background = 'var(--danger-bg)';
+                    }
+                    appendTerminalLine('Ingestion Failed', `فشل رفع الصف ${row}: ${data.error || 'خطأ غير معروف'}`, 'error');
+                }
             } catch (err) {
-
                 console.error(err);
-
                 failed++;
-
                 appendTerminalLine('Ingestion Failed', `فشل رفع الصف ${row}: ${err.message || err}`, 'error');
-
             }
-
         }
 
         approveBtn.disabled = false;
-
         rejectBtn.disabled = false;
-
         progressDiv.style.display = 'none';
-
-        
-
         appendTerminalLine('Ingestion Finished', `اكتمل الرفع. نجاح: ${success} | فشل: ${failed}`, 'success');
-
-        alert(`🎉 اكتملت المعالجة الجماعية. نجاح: ${success} | فشل: ${failed}`);
-
+        alert(`اكتملت المعالجة الجماعية. نجاح: ${success} | فشل: ${failed}`);
         fetchCurationProducts();
-
     }
 
-    async function triggerInlineSearch(rowNumber) {
-
-        const queryInput = document.getElementById(`inline-query-${rowNumber}`);
-
-        const spinner = document.getElementById(`inline-spinner-${rowNumber}`);
-
-        if (!queryInput) return;
-
-        
-
-        const queryText = queryInput.value.trim();
-
-        if (!queryText) {
-
-            alert('الرجاء كتابة كلمات بحث صحيحة.');
-
+    // رفض جماعي بسبب يختاره المراجع (لا يوجد سبب مثبت في الكود)
+    function submitBatchRejection() {
+        const selectedCbs = Array.from(document.querySelectorAll('.batch-select-checkbox:checked')).filter(cb => cb.dataset.url);
+        if (selectedCbs.length === 0) {
+            alert('❌ يرجى تحديد منتج واحد على الأقل له صورة مختارة للرفض.');
             return;
+        }
+        openBatchRejectModal({ mode: 'bulk', count: selectedCbs.length });
+    }
 
+    async function runBatchRejection(reasonCode) {
+        const selectedCbs = Array.from(document.querySelectorAll('.batch-select-checkbox:checked')).filter(cb => cb.dataset.url);
+        if (selectedCbs.length === 0) return;
+        const approveBtn = document.getElementById('batchApproveBtn');
+        const rejectBtn = document.getElementById('batchRejectBtn');
+        approveBtn.disabled = true;
+        rejectBtn.disabled = true;
+        let success = 0;
+        let failed = 0;
+
+        for (const cb of selectedCbs) {
+            const row = parseInt(cb.dataset.row, 10);
+            const p = currentProducts.find(prod => parseInt(prod.row_number, 10) === row) || {};
+            try {
+                const res = await fetch('/api/reject_image', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrfToken() },
+                    body: JSON.stringify({
+                        row_number: row,
+                        image_url: cb.dataset.url,
+                        product_name: p.product_name || '',
+                        brand: p.brand || '',
+                        barcode: p.barcode || '',
+                        sku_key: p.sku_key || '',
+                        reason_code: reasonCode,
+                        rejection_reasons: [reasonCode],
+                        research: false
+                    })
+                });
+                let data;
+                try {
+                    data = await res.json();
+                } catch (parseErr) {
+                    data = { status: 'error', error: `HTTP ${res.status}` };
+                }
+                if (data.status === 'error' || data.status === 'failed') {
+                    failed++;
+                    appendTerminalLine('Reject Failed', `فشل رفض الصف ${row}: ${data.error || 'خطأ غير معروف'}`, 'error');
+                } else {
+                    success++;
+                }
+            } catch (err) {
+                console.error(err);
+                failed++;
+            }
         }
 
-        
+        approveBtn.disabled = false;
+        rejectBtn.disabled = false;
+        appendTerminalLine('Reject', `اكتمل الرفض (${reasonCode}). نجاح: ${success} | فشل: ${failed}`, 'warning');
+        alert(`تم الرفض (${reasonCode}). نجاح: ${success} | فشل: ${failed}`);
+        fetchCurationProducts();
+    }
 
-        spinner.classList.add('fa-spin');
-
-        const p = currentProducts.find(prod => prod.row_number === rowNumber);
-
+    // إعادة البحث لصف واحد: تُعرض كل الحالات (review / not_found / provider_down) بصدق
+    async function triggerInlineSearch(rowNumber) {
+        const queryInput = document.getElementById(`inline-query-${rowNumber}`);
+        const spinner = document.getElementById(`inline-spinner-${rowNumber}`);
+        if (!queryInput) return;
+        const queryText = queryInput.value.trim();
+        if (!queryText) {
+            alert('الرجاء كتابة كلمات بحث صحيحة.');
+            return;
+        }
+        const p = currentProducts.find(prod => parseInt(prod.row_number, 10) === rowNumber);
         if (!p) return;
-
-        
+        if (spinner) spinner.classList.add('fa-spin');
 
         try {
-
             const res = await fetch('/api/search', {
-
                 method: 'POST',
-
-                headers: {
-
-                    'Content-Type': 'application/json',
-
-                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
-
-                },
-
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrfToken() },
                 body: JSON.stringify({
-
-                    product_name: p.product_name,
-
-                    brand: p.brand,
-
+                    product_name: p.product_name || '',
+                    brand: p.brand || '',
+                    product_name_ar: p.product_name_ar || '',
+                    brand_ar: p.brand_ar || '',
+                    category: p.category || '',
                     custom_query: queryText,
-
-                    barcode: p.barcode,
-
+                    barcode: p.barcode || '',
+                    sku_key: p.sku_key || '',
+                    row_number: rowNumber,
                     skip_cache: true
-
                 })
-
             });
-
-            
-
-            const data = await res.json();
-
-            if (data.status === 'success' && data.selected_image) {
-
-                let newCandidates = [];
-
-                if (data.trace && data.trace.steps) {
-
-                    const seen = new Set();
-
-                    data.trace.steps.forEach(step => {
-
-                        if (step.candidates) {
-
-                            step.candidates.forEach(c => {
-
-                                if (c.url && !seen.has(c.url)) {
-
-                                    seen.add(c.url);
-
-                                    newCandidates.push({
-
-                                        image_url: c.url,
-
-                                        title: c.title,
-
-                                        clip_score: c.relevance_score || c.clip_score || 0.0,
-
-                                        source_domain: c.source_domain || ''
-
-                                    });
-
-                                }
-
-                            });
-
-                        }
-
-                    });
-
-                }
-
-                
-
-                if (newCandidates.length === 0) {
-
-                    newCandidates.push({
-
-                        image_url: data.selected_image.url,
-
-                        title: data.selected_image.title,
-
-                        clip_score: data.selected_image.clip_score || 0.0
-
-                    });
-
-                }
-
-                
-
-                p.curation_candidates = newCandidates;
-
-                saveCandidatesToDB(rowNumber, p.product_name, p.brand, newCandidates);
-
-                renderBatchCurationGrid();
-
-            } else {
-
-                alert('فشل البحث: لم يتم العثور على أي نتائج.');
-
+            let data;
+            try {
+                data = await res.json();
+            } catch (parseErr) {
+                data = { status: 'error', error: `HTTP ${res.status}` };
             }
+            if (data.sku_key) p.sku_key = data.sku_key;
 
+            if (data.status === 'provider_down') {
+                alert('⚠️ محركات البحث غير متاحة حالياً (engines unavailable). لم تتغير المرشحات؛ أعد المحاولة لاحقاً.');
+                return;
+            }
+            if (data.status === 'error' || data.status === 'failed') {
+                alert('❌ فشل البحث: ' + (data.error || 'خطأ غير معروف'));
+                return;
+            }
+            const fresh = candidatesFromSearchResponse(data);
+            if (!fresh.length) {
+                alert(data.status === 'not_found' ? 'لم يتم العثور على منتج مطابق لهذا الاستعلام.' : 'لم تُرجع عملية البحث أي مرشحين.');
+                return;
+            }
+            p.curation_candidates = fresh;
+            p._checked = undefined;
+            saveCandidatesToDB(rowNumber, p, fresh);
+            renderBatchCurationGrid();
         } catch (err) {
-
             console.error(err);
-
             alert('حدث خطأ أثناء إجراء البحث.');
-
         } finally {
-
-            spinner.classList.remove('fa-spin');
-
+            if (spinner) spinner.classList.remove('fa-spin');
         }
-
     }
 
+    // رابط يدوي يلصقه المراجع: اختيار بشري صريح
     function addCustomImageUrl(rowNumber) {
-
         const urlInput = document.getElementById(`inline-url-${rowNumber}`);
-
         if (!urlInput) return;
-
-        
-
         const urlText = urlInput.value.trim();
-
-        if (!urlText || !urlText.startsWith('http')) {
-
+        if (!safeHttpUrl(urlText) || !/^https?:\/\//i.test(urlText)) {
             alert('الرجاء إدخال رابط صورة صحيح يبدأ بـ http أو https.');
-
             return;
-
         }
-
-        
-
-        const p = currentProducts.find(prod => prod.row_number === rowNumber);
-
+        const p = currentProducts.find(prod => parseInt(prod.row_number, 10) === rowNumber);
         if (!p) return;
-
-        
-
-        if (!p.curation_candidates) {
-
-            p.curation_candidates = [];
-
-        }
-
-        
-
-        // Unselect existing candidates
-
-        p.curation_candidates.forEach(c => {
-
-            c.is_selected = 0;
-
-        });
-
-        
-
-        // Add new candidate at start
-
-        p.curation_candidates.unshift({
-
-            image_url: urlText,
-
-            title: "رابط مخصص يدوي",
-
-            width: 800,
-
-            height: 800,
-
-            clip_score: 1.0,
-
-            source_domain: "رابط مخصص",
-
-            is_selected: 1
-
-        });
-
-        
-
-        // Update checkbox URL datasets in UI
-
-        const cb = document.querySelector(`.batch-select-checkbox[data-row="${rowNumber}"]`);
-
-        if (cb) {
-
-            cb.dataset.url = urlText;
-
-        }
-
-        
-
-        saveCandidatesToDB(rowNumber, p.product_name, p.brand, p.curation_candidates);
-
+        const list = (p.curation_candidates || []).map(normalizeCurationCandidate);
+        list.forEach(c => { c.is_selected = 0; });
+        list.unshift(normalizeCurationCandidate({
+            image_url: urlText, title: 'رابط مخصص يدوي', status: 'manual', is_selected: 1, source_domain: hostOf(urlText)
+        }));
+        p.curation_candidates = list;
+        p._checked = true;
+        saveCandidatesToDB(rowNumber, p, list);
         renderBatchCurationGrid();
-
     }
 
-    function saveCandidatesToDB(rowNumber, productName, brand, candidates) {
+    function saveCandidatesToDB(rowNumber, product, candidates) {
         if (!candidates || candidates.length === 0) return;
         fetch('/api/v1/curation/save-candidates', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
-            },
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrfToken() },
             body: JSON.stringify({
                 row_number: parseInt(rowNumber, 10),
-                product_name: productName || '',
-                brand: brand || '',
+                product_name: product.product_name || '',
+                brand: product.brand || '',
+                sku_key: product.sku_key || '',
                 candidates: candidates
             })
         }).catch(err => console.warn('[Curation Save Candidates Error]', err));
@@ -2608,21 +2485,21 @@
 
         
 
-        // 2. Quality filter
+        // 2. Candidate status filter (preselected / unselected / empty)
 
-        const quality = document.getElementById('curationQualityFilter').value;
+        const statusFilter = document.getElementById('curationQualityFilter').value;
 
-        if (quality === 'excellent') {
+        if (statusFilter === 'preselected') {
 
-            pending = pending.filter(p => (p.clip_score || 0.0) >= 0.95);
+            pending = pending.filter(p => (p.curation_candidates || []).some(c => parseInt(c.is_selected, 10) === 1 && c.status === 'preselected'));
 
-        } else if (quality === 'medium') {
+        } else if (statusFilter === 'unselected') {
 
-            pending = pending.filter(p => (p.clip_score || 0.0) >= 0.90 && (p.clip_score || 0.0) < 0.95);
+            pending = pending.filter(p => (p.curation_candidates || []).length > 0 && !(p.curation_candidates || []).some(c => parseInt(c.is_selected, 10) === 1));
 
-        } else if (quality === 'weak') {
+        } else if (statusFilter === 'empty') {
 
-            pending = pending.filter(p => (p.clip_score || 0.0) < 0.90);
+            pending = pending.filter(p => (p.curation_candidates || []).length === 0);
 
         }
 
@@ -2724,35 +2601,22 @@
 
     
 
-    // Select candidates above 95% CLIP match
-
-    function selectHighMatchBatch() {
-
+    // تحديد الصفوف التي رشّح لها النظام مرشحاً موثقاً فقط
+    function selectPreselectedBatch() {
         filteredProducts.forEach(p => {
-
-            const score = p.clip_score || 0.0;
-
-            const card = document.getElementById(`batch-card-${p.row_number}`);
-
-            if (card) {
-
-                const cb = card.querySelector('.batch-select-checkbox');
-
-                if (cb) {
-
-                    cb.checked = (score >= 0.95);
-
-                    toggleBatchRowSelect(cb, p.row_number);
-
-                }
-
-            }
-
+            const rowNum = parseInt(p.row_number, 10);
+            const card = document.getElementById(`batch-card-${rowNum}`);
+            if (!card) return;
+            const cb = card.querySelector('.batch-select-checkbox');
+            if (!cb) return;
+            const chosen = selectedCandidateOf(p);
+            cb.checked = !!chosen && chosen.status === 'preselected' && !!cb.dataset.url;
+            p._checked = cb.checked;
+            toggleBatchRowSelect(cb, rowNum);
         });
-
     }
 
-    
+
 
     // Export curation list to CSV file
 
@@ -2770,33 +2634,15 @@
 
         let csvContent = "\ufeff"; // BOM for UTF-8
 
-        csvContent += "الصف,اسم المنتج,البراند,الباركود,نسبة المطابقة (CLIP),الصورة المختارة\n";
+        csvContent += "الصف,اسم المنتج,البراند,الباركود,حالة المرشح المختار,الصورة المختارة\n";
 
         
 
         filteredProducts.forEach(p => {
 
-            let selectedUrl = "";
-
-            const card = document.getElementById(`batch-card-${p.row_number}`);
-
-            if (card) {
-
-                const active = card.querySelector('.curation-thumb-card.active-candidate input[type="radio"]');
-
-                if (active) selectedUrl = active.value;
-
-            }
-
-            if (!selectedUrl) {
-
-                const candidates = p.curation_candidates || [];
-
-                selectedUrl = candidates.length > 0 ? candidates[0].image_url : (p.needs_review_url || "");
-
-            }
-
-            
+            const chosen = selectedCandidateOf(p);
+            const selectedUrl = chosen ? chosen.image_url : "";
+            const chosenStatus = chosen ? chosen.status : "none";
 
             const nameClean = (p.product_name || "").replace(/"/g, '""');
 
@@ -2806,7 +2652,7 @@
 
             
 
-            csvContent += `${p.row_number},"${nameClean}","${brandClean}","${barcodeClean}",${(p.clip_score || 0.0).toFixed(4)},"${selectedUrl}"\n`;
+            csvContent += `${p.row_number},"${nameClean}","${brandClean}","${barcodeClean}","${chosenStatus}","${String(selectedUrl).replace(/"/g, '""')}"\n`;
 
         });
 
@@ -3107,112 +2953,6 @@
         }
     }
 
-    // Real-Time Curation Grid Manager via Server-Sent Events (SSE)
-    class CurationGridManager {
-        constructor(sessionId, sseBaseUrl, mutateBaseUrl) {
-            this.sessionId = sessionId;
-            this.sseBaseUrl = sseBaseUrl;
-            this.mutateBaseUrl = mutateBaseUrl;
-            this.state = {
-                products: new Map(),
-                metrics: { total: 0, completed: 0, percentage: 0 }
-            };
-            this.eventSource = null;
-            this.initSseStream();
-        }
-
-        initSseStream() {
-            if (this.eventSource) {
-                this.eventSource.close();
-            }
-            const streamUrl = `${this.sseBaseUrl}/${this.sessionId}`;
-            try {
-                this.eventSource = new EventSource(streamUrl);
-                this.eventSource.addEventListener('curation_pending', (event) => {
-                    try {
-                        const productData = JSON.parse(event.data);
-                        this.ingestProduct(productData);
-                    } catch (error) {
-                        console.error("[SSE Stream] Event parse error:", error);
-                    }
-                });
-                this.eventSource.onerror = (err) => {
-                    console.warn("[SSE Stream] Reconnecting stream...", err);
-                };
-            } catch (ex) {
-                console.warn("[SSE Stream] EventSource init fallback:", ex);
-            }
-        }
-
-        ingestProduct(product) {
-            if (!product || !product.id) return;
-            if (this.state.products.has(product.id)) return;
-
-            const normalizedProduct = {
-                id: product.id,
-                title: product.title || `منتج ${product.id}`,
-                description: product.description || '',
-                status: 'pending',
-                syncStatus: 'synced',
-                rollbackData: null
-            };
-
-            this.state.products.set(product.id, normalizedProduct);
-            if (typeof fetchCurationProducts === 'function') {
-                fetchCurationProducts();
-            }
-        }
-
-        async submitCuration(productId, decision) {
-            const product = this.state.products.get(productId) || { id: productId, status: 'pending', syncStatus: 'synced' };
-            const snapshot = { ...product };
-
-            product.status = decision;
-            product.syncStatus = 'mutating';
-            product.rollbackData = snapshot;
-            this.state.products.set(productId, product);
-
-            try {
-                const response = await fetch(`${this.mutateBaseUrl}/${productId}`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Accept': 'application/json',
-                        'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
-                    },
-                    body: JSON.stringify({
-                        decision: decision,
-                        session_id: this.sessionId
-                    })
-                });
-
-                if (!response.ok) {
-                    throw new Error(`Server status: ${response.status}`);
-                }
-
-                const confirmedProduct = this.state.products.get(productId);
-                if (confirmedProduct) {
-                    confirmedProduct.syncStatus = 'synced';
-                    confirmedProduct.rollbackData = null;
-                    this.state.products.set(productId, confirmedProduct);
-                }
-            } catch (error) {
-                console.error(`[Curation Mutation Error] ${productId}:`, error);
-                this.rollbackProductState(productId);
-            }
-        }
-
-        rollbackProductState(productId) {
-            const product = this.state.products.get(productId);
-            if (product && product.rollbackData) {
-                const previousState = product.rollbackData;
-                previousState.syncStatus = 'error';
-                this.state.products.set(productId, previousState);
-                console.warn(`[Curation Rollback] Reverted state for product ${productId}`);
-            }
-        }
-    }
-
     document.addEventListener("DOMContentLoaded", () => {
         pollBatchStatus();
         setInterval(pollBatchStatus, 3000);
@@ -3221,7 +2961,6 @@
         setInterval(pollLogs, 2500);
 
         fetchCurationProducts();
-        window.gridManager = new CurationGridManager('batch_sess_99', '/api/v1/curation/stream', '/api/v1/curation/mutate');
     });
 
 </script>

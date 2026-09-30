@@ -5,107 +5,62 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Redis;
-use Illuminate\Support\Facades\Log;
-use Exception;
+use Illuminate\Support\Facades\Schema;
+use App\Services\PythonBridge;
 
 class CurationController extends Controller
 {
-    /**
-     * معالجة تحديثات المراجعة البشرية وإرسال التغفيل والحدث إلى Redis Pub/Sub.
-     */
-    public function mutate(Request $request, string $productId): JsonResponse
-    {
-        $validated = $request->validate([
-            'decision' => 'required|in:approved,rejected',
-            'session_id' => 'required|string',
-        ]);
-
-        $decision = $validated['decision'];
-        $sessionId = $validated['session_id'];
-
-        try {
-            // 1. تحديث قاعدة بيانات الكتالوج المركزية في Laravel
-            if (DB::getSchemaBuilder()->hasTable('products')) {
-                DB::table('products')
-                    ->where('id', $productId)
-                    ->update([
-                        'status' => $decision,
-                        'updated_at' => now()
-                    ]);
-            }
-
-            // 2. إعداد الحدث وتأمين البث عبر Redis Pub/Sub و Redis List
-            $eventPayload = [
-                'event_id' => 'evt_' . bin2hex(random_bytes(8)),
-                'event_type' => 'curation_pending',
-                'id' => (string)$productId,
-                'status' => $decision,
-                'timestamp' => microtime(true)
-            ];
-
-            $jsonPayload = json_encode($eventPayload);
-            $channel = "curation:channel:{$sessionId}";
-            $historyKey = "curation:history:{$sessionId}";
-
-            try {
-                Redis::publish($channel, $jsonPayload);
-                Redis::pipeline(function ($pipe) use ($historyKey, $jsonPayload) {
-                    $pipe->rpush($historyKey, $jsonPayload);
-                    $pipe->ltrim($historyKey, -150, -1);
-                    $pipe->expire($historyKey, 7200);
-                });
-            } catch (\Throwable $redisEx) {
-                Log::warning("Redis Pub/Sub broadcast skipped or unreachable: " . $redisEx->getMessage());
-            }
-
-            return response()->json([
-                'status' => 'success',
-                'message' => 'تم تسجيل القرار البشري وبث التحديثات للمنظومة بنجاح.',
-                'data' => [
-                    'id' => $productId,
-                    'status' => $decision
-                ]
-            ], 200);
-
-        } catch (Exception $e) {
-            Log::error("Curation mutation error for product {$productId}: " . $e->getMessage());
-            return response()->json([
-                'status' => 'error',
-                'message' => $e->getMessage()
-            ], 422);
-        }
-    }
+    /** رموز أسباب الرفض (هوية المنتج أولاً) — نفس القائمة المعتمدة في cli_bridge (D11). */
+    public const REASON_CODES = [
+        'WRONG_PRODUCT', 'WRONG_BRAND', 'WRONG_VARIANT', 'WRONG_SIZE', 'WRONG_PACK',
+        'NOT_PACKSHOT', 'LOW_QUALITY',
+        // رموز تجميلية قديمة ما زالت مقبولة
+        'HALO_ARTIFACT', 'BACKGROUND_BLEED', 'CROP_MARGIN_CLIPPING',
+    ];
 
     /**
-     * Reject a product candidate and execute targeted re-search with Rocchio query modification.
+     * رفض صورة مرشحة بسبب محدد وإعادة البحث الفعلي مع استبعادها.
+     * يستدعي cli_bridge.reject_image مباشرة (research=true) ويعيد حالته الحقيقية كما هي.
      */
     public function rejectAndReSearch(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'session_id' => 'required|string',
-            'query_vector' => 'nullable|array',
-            'rejected_item' => 'required|array',
-            'rejected_item.product_id' => 'required',
-            'rejected_item.phash' => 'nullable|string',
-            'rejected_item.vector' => 'nullable|array',
+            'row_number' => 'required|integer',
+            'image_url' => 'required|string',
+            'reason_code' => 'required|string|in:' . implode(',', self::REASON_CODES),
+            'product_name' => 'nullable|string',
+            'brand' => 'nullable|string',
+            'barcode' => 'nullable|string',
+            'sku_key' => 'nullable|string',
+            'product_name_ar' => 'nullable|string',
+            'brand_ar' => 'nullable|string',
+            'category' => 'nullable|string',
+            'custom_query' => 'nullable|string',
         ]);
 
-        $service = new \App\Services\SelectiveSearchService();
-        $queryVector = $validated['query_vector'] ?? array_fill(0, 512, 0.05);
-        $rejectedItem = $validated['rejected_item'];
-        $rejectedItem['vector'] = $rejectedItem['vector'] ?? array_fill(0, 512, 0.1);
-        $rejectedItem['phash'] = $rejectedItem['phash'] ?? '0000000000000000';
+        $params = [
+            'row_number' => (int) $validated['row_number'],
+            'image_url' => $validated['image_url'],
+            'product_name' => $validated['product_name'] ?? '',
+            'brand' => $validated['brand'] ?? '',
+            'barcode' => $validated['barcode'] ?? '',
+            'sku_key' => $validated['sku_key'] ?? '',
+            'reason_code' => $validated['reason_code'],
+            'research' => true,
+            'product_name_ar' => $validated['product_name_ar'] ?? '',
+            'brand_ar' => $validated['brand_ar'] ?? '',
+            'category' => $validated['category'] ?? '',
+            'custom_query' => $validated['custom_query'] ?? '',
+            'skip_cache' => true,
+        ];
 
-        $res = $service->reSearchAndExclude($validated['session_id'], $queryVector, $rejectedItem);
+        $result = PythonBridge::run('reject_image', $params);
 
-        // Invalidate products json cache
-        \Cache::forget('products_json_v1');
+        if (!PythonBridge::isError($result)) {
+            \Cache::forget('products_json_v1');
+        }
 
-        return response()->json([
-            'status' => 'success',
-            'data' => $res
-        ]);
+        return response()->json($result, PythonBridge::httpStatus($result));
     }
 
     /**
@@ -116,19 +71,25 @@ class CurationController extends Controller
         $validated = $request->validate([
             'row_number' => 'required|integer',
             'selected_url' => 'required|string',
+            'sku_key' => 'nullable|string',
         ]);
 
         $rowNumber = $validated['row_number'];
         $selectedUrl = $validated['selected_url'];
+        $skuKey = trim((string) ($validated['sku_key'] ?? ''));
 
         try {
-            if (\DB::getSchemaBuilder()->hasTable('curation_candidates')) {
-                \DB::table('curation_candidates')
-                    ->where('row_number', $rowNumber)
-                    ->update(['is_selected' => 0]);
+            if (Schema::hasTable('curation_candidates')) {
+                $scope = function ($q) use ($rowNumber, $skuKey) {
+                    if ($skuKey !== '' && Schema::hasColumn('curation_candidates', 'sku_key')) {
+                        $q->where('sku_key', $skuKey);
+                    } else {
+                        $q->where('row_number', $rowNumber);
+                    }
+                };
 
-                \DB::table('curation_candidates')
-                    ->where('row_number', $rowNumber)
+                DB::table('curation_candidates')->where($scope)->update(['is_selected' => 0]);
+                DB::table('curation_candidates')->where($scope)
                     ->where('image_url', $selectedUrl)
                     ->update(['is_selected' => 1]);
             }
@@ -146,6 +107,8 @@ class CurationController extends Controller
 
     /**
      * Persist updated candidate list to DB & invalidate cache.
+     * يحفظ الحالة والأسباب والأدلة لكل مرشح، ولا يحدد أي مرشح مسبقاً إلا إذا كانت حالته preselected
+     * أو اختاره المراجع بنفسه.
      */
     public function saveCandidates(Request $request): JsonResponse
     {
@@ -153,39 +116,77 @@ class CurationController extends Controller
             'row_number' => 'required|integer',
             'product_name' => 'nullable|string',
             'brand' => 'nullable|string',
+            'sku_key' => 'nullable|string',
             'candidates' => 'required|array',
         ]);
 
         $rowNumber = $validated['row_number'];
         $productName = $validated['product_name'] ?? 'منتج';
         $brand = $validated['brand'] ?? '';
+        $skuKey = trim((string) ($validated['sku_key'] ?? ''));
         $candidates = $validated['candidates'];
 
         try {
-            if (\DB::getSchemaBuilder()->hasTable('curation_candidates')) {
-                \DB::table('curation_candidates')->where('row_number', $rowNumber)->delete();
+            if (Schema::hasTable('curation_candidates')) {
+                $columns = array_flip(Schema::getColumnListing('curation_candidates'));
+                $hasSku = isset($columns['sku_key']);
+                $runId = 'ui-' . date('YmdHis') . '-' . bin2hex(random_bytes(4));
 
                 $rowsToInsert = [];
                 foreach ($candidates as $c) {
-                    $rowsToInsert[] = [
+                    if (!is_array($c)) {
+                        continue;
+                    }
+                    $status = (string) ($c['status'] ?? 'pending');
+                    $isSelected = array_key_exists('is_selected', $c)
+                        ? (int) $c['is_selected']
+                        : ($status === 'preselected' ? 1 : 0);
+                    $row = [
                         'row_number' => $rowNumber,
                         'product_name' => $productName,
                         'brand' => $brand,
-                        'image_url' => $c['image_url'] ?? $c['url'] ?? '',
-                        'title' => $c['title'] ?? '',
-                        'width' => intval($c['width'] ?? 800),
-                        'height' => intval($c['height'] ?? 800),
-                        'clip_score' => floatval($c['clip_score'] ?? 0.0),
-                        'source_domain' => $c['source_domain'] ?? '',
-                        'is_selected' => intval($c['is_selected'] ?? 0),
-                        'status' => 'pending',
-                        'created_at' => now()
+                        'image_url' => (string) ($c['image_url'] ?? $c['url'] ?? ''),
+                        // title قد يتجاوز 255 حرفاً في الجداول القديمة
+                        'title' => mb_substr((string) ($c['title'] ?? ''), 0, 250),
+                        'width' => isset($c['width']) && is_numeric($c['width']) ? (int) $c['width'] : null,
+                        'height' => isset($c['height']) && is_numeric($c['height']) ? (int) $c['height'] : null,
+                        'source_domain' => mb_substr((string) ($c['source_domain'] ?? $c['domain'] ?? ''), 0, 250),
+                        'is_selected' => $isSelected === 1 ? 1 : 0,
+                        'status' => mb_substr($status, 0, 32),
+                        'created_at' => now(),
                     ];
+                    if ($row['image_url'] === '') {
+                        continue;
+                    }
+                    $optional = [
+                        'sku_key' => $skuKey !== '' ? $skuKey : null,
+                        'run_id' => $runId,
+                        'reasons_json' => json_encode($c['reasons'] ?? [], JSON_UNESCAPED_UNICODE),
+                        'evidence_json' => json_encode($c['evidence'] ?? new \stdClass(), JSON_UNESCAPED_UNICODE),
+                        'vlm_json' => isset($c['vlm']) ? json_encode($c['vlm'], JSON_UNESCAPED_UNICODE) : null,
+                        'identity_tier' => isset($c['identity_tier']) && is_numeric($c['identity_tier']) ? (int) $c['identity_tier'] : null,
+                        'content_sha256' => isset($c['content_sha256']) ? mb_substr((string) $c['content_sha256'], 0, 64) : null,
+                    ];
+                    foreach ($optional as $col => $value) {
+                        if (isset($columns[$col])) {
+                            $row[$col] = $value;
+                        }
+                    }
+                    $rowsToInsert[] = $row;
                 }
 
-                if (!empty($rowsToInsert)) {
-                    \DB::table('curation_candidates')->insert($rowsToInsert);
-                }
+                DB::transaction(function () use ($rowNumber, $skuKey, $hasSku, $rowsToInsert) {
+                    DB::table('curation_candidates')->where(function ($q) use ($rowNumber, $skuKey, $hasSku) {
+                        $q->where('row_number', $rowNumber);
+                        if ($hasSku && $skuKey !== '') {
+                            $q->orWhere('sku_key', $skuKey);
+                        }
+                    })->delete();
+
+                    if (!empty($rowsToInsert)) {
+                        DB::table('curation_candidates')->insert($rowsToInsert);
+                    }
+                });
             }
 
             \Cache::forget('products_json_v1');

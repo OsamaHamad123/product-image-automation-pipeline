@@ -600,6 +600,98 @@
         font-weight: 700;
     }
 
+    .candidate-badge.eligible {
+        background: var(--warning-bg);
+        border: 1px solid var(--panel-border);
+        color: var(--warning);
+    }
+    .candidate-badge-inline {
+        padding: 0.2rem 0.65rem;
+        border-radius: var(--border-radius-sm);
+        font-size: 0.75rem;
+        font-weight: 800;
+        border: 1px solid var(--panel-border);
+    }
+    .candidate-badge-inline.accepted { background: var(--success-bg); color: var(--success); }
+    .candidate-badge-inline.eligible { background: var(--warning-bg); color: var(--warning); }
+    .candidate-badge-inline.rejected { background: var(--danger-bg); color: var(--danger); }
+    .candidate-reasons.neutral {
+        color: var(--text-secondary);
+        background: var(--input-bg);
+    }
+    .evidence-chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.35rem;
+    }
+    .evidence-chip {
+        font-size: 0.7rem;
+        font-weight: 800;
+        padding: 2px 7px;
+        border-radius: 6px;
+        border: 1px solid var(--panel-border);
+        font-family: 'Outfit', sans-serif;
+        unicode-bidi: isolate;
+    }
+    .evidence-chip.ok { background: var(--success-bg); color: var(--success); }
+    .evidence-chip.bad { background: var(--danger-bg); color: var(--danger); }
+    .evidence-chip.unknown { background: var(--input-bg); color: var(--text-secondary); }
+    .evidence-chip.neutral { background: var(--active-menu-bg); color: var(--text-primary); }
+    .vlm-read {
+        font-size: 0.75rem;
+        color: var(--text-secondary);
+        line-height: 1.5;
+    }
+    .candidate-actions {
+        display: flex;
+        gap: 0.5rem;
+        margin-top: auto;
+    }
+    .candidate-actions .btn {
+        flex: 1;
+        font-weight: bold;
+    }
+    .outcome-banner {
+        border: 1px solid var(--panel-border);
+        border-radius: 12px;
+        padding: 1rem 1.15rem;
+        margin-bottom: 1.25rem;
+        font-weight: bold;
+        line-height: 1.6;
+    }
+    .outcome-banner.success { background: var(--success-bg); color: var(--success); }
+    .outcome-banner.warning { background: var(--warning-bg); color: var(--warning); }
+    .outcome-banner.danger { background: var(--danger-bg); color: var(--danger); }
+    .outcome-banner.info { background: var(--active-menu-bg); color: var(--text-primary); }
+    .outcome-banner .banner-detail {
+        display: block;
+        font-weight: normal;
+        font-size: 0.8rem;
+        color: var(--text-primary);
+        margin-top: 0.35rem;
+    }
+    .provider-health {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.35rem;
+        margin-top: 0.5rem;
+    }
+    .recommended-image-box {
+        background: #ffffff;
+        border: 1px solid var(--panel-border);
+        border-radius: 12px;
+        height: 320px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 1rem;
+    }
+    .recommended-image-box img {
+        max-width: 100%;
+        max-height: 100%;
+        object-fit: contain;
+    }
+
     #dropZone.drag-over {
         border-color: var(--accent-purple) !important;
         background: var(--active-menu-bg) !important;
@@ -999,23 +1091,9 @@
                     <div class="form-group" style="justify-content: flex-end;">
                         <div class="toggles-row">
                             <div class="toggle-container">
-                                <span>تخطي تعارض الأحجام</span>
-                                <label class="switch">
-                                    <input type="checkbox" id="ignoreUnitClash">
-                                    <span class="slider"></span>
-                                </label>
-                            </div>
-                            <div class="toggle-container">
                                 <span>مطابقة البراند الصارمة</span>
                                 <label class="switch">
                                     <input type="checkbox" id="strictBrandMatch" checked>
-                                    <span class="slider"></span>
-                                </label>
-                            </div>
-                            <div class="toggle-container">
-                                <span>تكبير ذكي (AI Upscale)</span>
-                                <label class="switch">
-                                    <input type="checkbox" id="aiUpscale" checked>
                                     <span class="slider"></span>
                                 </label>
                             </div>
@@ -1052,37 +1130,19 @@
                 <div class="form-group">
                     <label for="outputPreset" style="font-size:0.8rem; color:var(--text-secondary);">الأبعاد ونسبة العرض إلى الارتفاع</label>
                     <select id="outputPreset" onchange="applyPreset()" style="width:100%; font-size:0.85rem;">
-                        <option value="dynamic" selected>تلقائي ذكي (Dynamic AI — يحافظ على جودة الصورة الأصلية)</option>
-                        <option value="800x800">800 × 800 — مربع قياسي (بقالة، FMCG)</option>
+                        <option value="dynamic" selected>800 × 800 — المقاس القياسي المعتمد (افتراضي)</option>
                         <option value="1000x1000">1000 × 1000 — مربع عالي الدقة</option>
                         <option value="900x1200">900 × 1200 — عمودي (ملابس، أزياء)</option>
                         <option value="1200x900">1200 × 900 — أفقي (أجهزة، إلكترونيات)</option>
                         <option value="custom">مخصص...</option>
                     </select>
                 </div>
-                {{-- هامش الأمان --}}
-                <div class="form-group">
-                    <label for="paddingRatio" style="font-size:0.8rem; color:var(--text-secondary);">هامش الأمان البصري (Safety Margin)</label>
-                    <select id="paddingRatio" style="width:100%; font-size:0.85rem;">
-                        <option value="0.90">10% — هامش ضيق</option>
-                        <option value="0.85" selected>15% — هامش متناسق (افتراضي)</option>
-                        <option value="0.80">20% — هامش واسع</option>
-                        <option value="0.75">25% — هامش فضفاض (للمنتجات الطولية)</option>
-                    </select>
-                </div>
-                {{-- لون الخلفية --}}
-                <div class="form-group">
-                    <label for="bgColor" style="font-size:0.8rem; color:var(--text-secondary);">لون خلفية Canvas</label>
-                    <div style="display:flex; gap:0.5rem; align-items:center;">
-                        <select id="bgColorPreset" onchange="applyBgColor()" style="flex:1; font-size:0.85rem;">
-                            <option value="ffffff">أبيض (#FFFFFF)</option>
-                            <option value="f5f5f7">رمادي استوديو (#F5F5F7)</option>
-                            <option value="fafafa">أبيض دافئ (#FAFAFA)</option>
-                            <option value="transparent">شفاف (PNG)</option>
-                        </select>
-                        <input type="color" id="bgColorPicker" value="#ffffff" oninput="document.getElementById('bgColor').value = this.value.replace('#', '')">
-                    </div>
-                    <input type="hidden" id="bgColor" value="ffffff">
+                {{-- اللوحة النهائية ثابتة: خلفية بيضاء معتمة والمنتج يملأ 88% وموسّط --}}
+                <div class="form-group" style="grid-column: span 2;">
+                    <label style="font-size:0.8rem; color:var(--text-secondary);">اللوحة النهائية</label>
+                    <p style="font-size:0.8rem; color:var(--text-primary); margin:0; line-height:1.6;">
+                        خلفية بيضاء معتمة دائماً، والمنتج كاملاً دون قص يملأ 88% من اللوحة وموسّط، وبالاتجاه الصحيح.
+                    </p>
                 </div>
                 {{-- الأبعاد المخصصة --}}
                 <div id="customDimBox" style="display:none; grid-column: 1 / -1;">
@@ -1111,7 +1171,7 @@
             <div id="placeholder" style="text-align: center; color: var(--text-secondary); padding: 3rem 0;">
                 <i class="far fa-image" style="font-size: 3.5rem; margin-bottom: 1.5rem; opacity: 0.3; display: block; margin: 0 auto 1.5rem auto;"></i>
                 <div id="placeholderNormalText">
-                    اختر منتجاً من القائمة الجانبية على اليمين للتحليل، أو ادخل البيانات يدوياً للبحث الفوري وعرض تفاصيل الفحص بـ Gemini Vision و CLIP.
+                    اختر منتجاً من القائمة الجانبية على اليمين للتحليل، أو ادخل البيانات يدوياً للبحث الفوري وعرض أدلة المطابقة (الباركود، البراند، الحجم، النوع) ونتيجة التحقق البصري.
                 </div>
                 
                 <!-- Batch review alert card -->
@@ -1121,9 +1181,9 @@
                     <p style="font-size: 0.85rem; line-height: 1.6; color: var(--text-secondary); margin: 0;" id="batchReviewAlertText">
                         لقد اكتشف نظام الأتمتة صوراً لهؤلاء المنتجات ولكنها بحاجة لمراجعتك وتأكيدك. يمكنك مراجعة كافة الصور واعتمادها دفعة واحدة الآن بلمح البصر!
                     </p>
-                    <button type="button" class="btn" onclick="openBatchCuration()" style="background: var(--accent-gradient); color: var(--btn-text); font-weight: 800; padding: 0.65rem 1.75rem; width: 100%; border: none;">
-                        <i class="fas fa-layer-group"></i> دخول مساحة المراجعة الجماعية 🚀
-                    </button>
+                    <a href="{{ route('dashboard.batch_automation') }}" class="btn" style="background: var(--accent-gradient); color: var(--btn-text); font-weight: 800; padding: 0.65rem 1.75rem; width: 100%; border: none; text-align: center; text-decoration: none;">
+                        <i class="fas fa-layer-group"></i> دخول مساحة المراجعة الجماعية
+                    </a>
                 </div>
             </div>
 
@@ -1134,13 +1194,16 @@
                     <div class="spinner-ring"></div>
                     <div class="spinner-ring"></div>
                 </div>
-                <p style="font-weight: 700; font-size: 1.1rem; margin-bottom: 0.25rem;">جاري جلب وتقييم الصور بالذكاء الاصطناعي...</p>
-                <p id="loadingDetails" style="font-size: 0.85rem; color: var(--text-secondary);">يرجى الانتظار، قنوات الفحص البصري بـ Gemini و CLIP مفعلة...</p>
+                <p style="font-weight: 700; font-size: 1.1rem; margin-bottom: 0.25rem;">جاري البحث عن صورة المنتج والتحقق منها...</p>
+                <p id="loadingDetails" style="font-size: 0.85rem; color: var(--text-secondary);">يرجى الانتظار: جلب المرشحين من محركات البحث، مطابقة الهوية، ثم التحقق البصري...</p>
             </div>
 
             <!-- Results Workspace -->
             <div id="resultsContent" style="display: none;">
-                <!-- Recommended Image Card -->
+                <!-- Outcome banner: success / review / not_found / provider_down / error -->
+                <div id="outcomeBanner"></div>
+
+                <!-- Recommended Image Card (only when the pipeline selected one) -->
                 <div id="recommendedContainer"></div>
 
                 <!-- Drag-drop & url overrides -->
@@ -1227,6 +1290,33 @@
 
 
 
+<!-- Reject Reason Modal -->
+<div id="rejectReasonModal" class="modal" style="display: none; position: fixed; z-index: 10001; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(3, 4, 10, 0.85); backdrop-filter: blur(15px); align-items: center; justify-content: center;">
+    <div class="glass-panel" style="max-width: 560px; width: 92%; padding: 2rem; border-radius: 20px; border: 1px solid var(--panel-border); margin: 5% auto;">
+        <h3 style="font-size: 1.15rem; margin-bottom: 0.5rem; color: var(--danger); display: flex; align-items: center; gap: 0.5rem;">
+            <i class="fas fa-ban"></i> سبب رفض الصورة
+        </h3>
+        <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.25rem;">اختر السبب الأدق. تُستبعد الصورة من عمليات البحث القادمة لهذا المنتج.</p>
+        <p id="rejectModalUrl" style="font-size: 0.75rem; color: var(--text-primary); margin-bottom: 1rem; word-break: break-all;"></p>
+        <div class="feedback-reasons-grid" id="rejectReasonOptions">
+            <label class="feedback-checkbox"><input type="radio" name="reject_reason_code" value="WRONG_PRODUCT"><span>منتج مختلف تماماً (WRONG_PRODUCT)</span></label>
+            <label class="feedback-checkbox"><input type="radio" name="reject_reason_code" value="WRONG_BRAND"><span>علامة تجارية خاطئة (WRONG_BRAND)</span></label>
+            <label class="feedback-checkbox"><input type="radio" name="reject_reason_code" value="WRONG_VARIANT"><span>نكهة / نوع خاطئ (WRONG_VARIANT)</span></label>
+            <label class="feedback-checkbox"><input type="radio" name="reject_reason_code" value="WRONG_SIZE"><span>حجم / وزن خاطئ (WRONG_SIZE)</span></label>
+            <label class="feedback-checkbox"><input type="radio" name="reject_reason_code" value="WRONG_PACK"><span>عدد العبوة خاطئ (WRONG_PACK)</span></label>
+            <label class="feedback-checkbox"><input type="radio" name="reject_reason_code" value="NOT_PACKSHOT"><span>ليست صورة المنتج الأمامية (NOT_PACKSHOT)</span></label>
+            <label class="feedback-checkbox"><input type="radio" name="reject_reason_code" value="LOW_QUALITY"><span>جودة رديئة (LOW_QUALITY)</span></label>
+        </div>
+        <label style="display: flex; align-items: center; gap: 0.5rem; margin-top: 1rem; font-size: 0.85rem; color: var(--text-primary); cursor: pointer;">
+            <input type="checkbox" id="rejectResearch" checked style="width: 18px; height: 18px;"> إعادة البحث فوراً مع استبعاد هذه الصورة
+        </label>
+        <div style="display: flex; justify-content: space-between; gap: 1rem; margin-top: 1.5rem;">
+            <button type="button" class="btn btn-secondary" onclick="closeRejectModal()" style="flex: 1;">إلغاء</button>
+            <button type="button" class="btn" id="rejectConfirmBtn" onclick="submitReject()" style="flex: 2; background: var(--danger); color: #ffffff; font-weight: 900;">تأكيد الرفض</button>
+        </div>
+    </div>
+</div>
+
 <!-- Canvas Editor Modal -->
 <div id="editorModal" class="modal" style="display: none; position: fixed; z-index: 10000; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(3, 4, 10, 0.85); backdrop-filter: blur(15px); align-items: center; justify-content: center;">
     <div class="glass-panel" style="max-width: 600px; width: 90%; padding: 2rem; border-radius: 20px; border: 1px solid var(--panel-border); text-align: center; margin: 5% auto;">
@@ -1295,38 +1385,31 @@
     let lastCurrentProcessed = 0;
 
     // دالة لتمرير روابط الصور الخارجية عبر البروكسي الداخلي لتجاوز حماية الـ Hotlinking
+    // (http/https فقط؛ أي رابط آخر لا يُعرض)
     function getImageUrl(url) {
         if (!url) return '';
-        if (url.includes('cloudinary.com') || url.startsWith('http://127.0.0.1') || url.startsWith('localhost') || url.includes('/api/image-proxy')) {
-            return url;
+        const safe = safeHttpUrl(url);
+        if (!safe) return '';
+        if (safe.startsWith(window.location.origin + '/') || /^https:\/\/res\.cloudinary\.com\//.test(safe)) {
+            return safe;
         }
-        return `/api/image-proxy?url=${encodeURIComponent(url)}`;
+        return `/api/image-proxy?url=${encodeURIComponent(safe)}`;
     }
 
     // حفظ التغييرات تلقائياً في LocalStorage
     function saveSettingsToLocalStorage() {
-        localStorage.setItem('ignoreUnitClash', document.getElementById('ignoreUnitClash').checked);
         localStorage.setItem('strictBrandMatch', document.getElementById('strictBrandMatch').checked);
-        localStorage.setItem('aiUpscale', document.getElementById('aiUpscale').checked);
         localStorage.setItem('aiEnhance', document.getElementById('aiEnhance').checked);
         localStorage.setItem('skipCache', document.getElementById('skipCache').checked);
         localStorage.setItem('target_width', getOutputWidth());
         localStorage.setItem('target_height', getOutputHeight());
-        localStorage.setItem('padding_ratio', document.getElementById('paddingRatio').value);
-        localStorage.setItem('bg_color', document.getElementById('bgColor').value);
     }
 
     // On load
     window.addEventListener('load', () => {
         // استعادة الإعدادات المخزنة من LocalStorage إن وجدت
-        if (localStorage.getItem('ignoreUnitClash') !== null) {
-            document.getElementById('ignoreUnitClash').checked = localStorage.getItem('ignoreUnitClash') === 'true';
-        }
         if (localStorage.getItem('strictBrandMatch') !== null) {
             document.getElementById('strictBrandMatch').checked = localStorage.getItem('strictBrandMatch') === 'true';
-        }
-        if (localStorage.getItem('aiUpscale') !== null) {
-            document.getElementById('aiUpscale').checked = localStorage.getItem('aiUpscale') === 'true';
         }
         if (localStorage.getItem('aiEnhance') !== null) {
             document.getElementById('aiEnhance').checked = localStorage.getItem('aiEnhance') === 'true';
@@ -1334,36 +1417,19 @@
         if (localStorage.getItem('skipCache') !== null) {
             document.getElementById('skipCache').checked = localStorage.getItem('skipCache') === 'true';
         }
-        if (localStorage.getItem('padding_ratio') !== null) {
-            document.getElementById('paddingRatio').value = localStorage.getItem('padding_ratio');
-        }
-        if (localStorage.getItem('bg_color') !== null) {
-            const storedBg = localStorage.getItem('bg_color');
-            document.getElementById('bgColor').value = storedBg;
-            const bgPreset = document.getElementById('bgColorPreset');
-            if (bgPreset) {
-                // التحقق مما إذا كانت الخلفية مخصصة أو من القائمة
-                let found = false;
-                for (let i = 0; i < bgPreset.options.length; i++) {
-                    if (bgPreset.options[i].value === storedBg) {
-                        bgPreset.selectedIndex = i;
-                        found = true;
-                        break;
-                    }
-                }
-                if (!found) bgPreset.value = 'custom';
-            }
-        }
-        
+
         // إضافة مستمعي الأحداث لحفظ التغييرات فوراً
-        const inputs = [
-            'ignoreUnitClash', 'strictBrandMatch', 'aiUpscale', 'aiEnhance', 'skipCache', 
-            'outputPreset', 'paddingRatio', 'bgColorPreset', 'customWidth', 'customHeight'
-        ];
+        const inputs = ['strictBrandMatch', 'aiEnhance', 'skipCache', 'outputPreset', 'customWidth', 'customHeight'];
         inputs.forEach(id => {
             const el = document.getElementById(id);
             if (el) {
                 el.addEventListener('change', saveSettingsToLocalStorage);
+            }
+        });
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && document.getElementById('rejectReasonModal').style.display === 'flex') {
+                closeRejectModal();
             }
         });
 
@@ -1393,12 +1459,6 @@
                 updateKPIStats();
                 renderProductList();
                 
-                // تحديث شبكة المراجعة الجماعية إذا كانت مفتوحة
-                const workspace = document.getElementById('batchCurationWorkspace');
-                if (workspace && workspace.style.display === 'block') {
-                    renderBatchCurationGrid();
-                }
-
                 // إظهار مؤشر الكاش
                 const cacheIndicator = document.getElementById('cacheIndicator');
                 if (cacheIndicator) {
@@ -1406,7 +1466,7 @@
                     cacheIndicator.style.color = fromCache ? 'var(--accent-cyan)' : 'var(--success)';
                 }
             } else {
-                productList.innerHTML = `<p style="color: var(--danger); text-align: center; padding: 2rem; direction: rtl;">فشل جلب المنتجات من Google Sheets.<br><small style="color: var(--gray-light); font-size: 0.85rem;">الخطأ: ${data.error || 'استجابة غير صالحة من السيرفر'}</small></p>`;
+                productList.innerHTML = `<p style="color: var(--danger); text-align: center; padding: 2rem; direction: rtl;">فشل جلب المنتجات من Google Sheets.<br><small style="color: var(--gray-light); font-size: 0.85rem;">الخطأ: ${escapeHtml(data.error || 'استجابة غير صالحة من السيرفر')}</small></p>`;
             }
         } catch (err) {
             console.error(err);
@@ -1498,7 +1558,7 @@
             
             if (prod.has_error) {
                 statusClass = 'error';
-                linkIndicator = `<span style="color: var(--danger); font-size: 0.8rem; font-weight: bold;" title="${prod.error_message || ''}"><i class="fas fa-exclamation-circle"></i> خطأ أتمتة ❌</span>`;
+                linkIndicator = `<span style="color: var(--danger); font-size: 0.8rem; font-weight: bold;" title="${escapeHtml(prod.error_message || '')}"><i class="fas fa-exclamation-circle"></i> خطأ أتمتة ❌</span>`;
             } else if (prod.needs_review) {
                 statusClass = 'review';
                 linkIndicator = `<span style="color: var(--warning); font-size: 0.8rem; font-weight: bold;"><i class="fas fa-exclamation-triangle"></i> مراجعة معلقة ⚠️</span>`;
@@ -1514,10 +1574,10 @@
             item.className = `product-item ${statusClass}`;
             if (activeRowNumber === prod.row_number) item.classList.add('active');
             
+            // لا نسب مطابقة مختلقة: فقط شارة "مرشح مسبق" عندما اختار النظام مرشحاً موثقاً
             let scoreBadge = '';
-            if (prod.clip_score) {
-                const scorePercent = Math.round(prod.clip_score * 100);
-                scoreBadge = `<span class="score-badge" style="background: var(--active-menu-bg); border: 1px solid var(--panel-border); color: var(--text-primary); font-size: 0.75rem; padding: 2px 6px; border-radius: 4px; font-weight: bold; margin-inline-start: 5px;">${scorePercent}% Match</span>`;
+            if (prod.preselected) {
+                scoreBadge = `<span class="score-badge" style="background: var(--active-menu-bg); border: 1px solid var(--panel-border); color: var(--text-primary); font-size: 0.7rem; padding: 2px 6px; border-radius: 4px; font-weight: bold; margin-inline-start: 5px;">مرشح مسبق</span>`;
             }
 
             let badgeStyle = 'background-color: var(--input-bg); color: var(--text-secondary);';
@@ -1527,9 +1587,9 @@
 
             item.innerHTML = `
                 <span class="badge-row-number" style="${badgeStyle} border: 1px solid var(--panel-border); font-weight: 800;">صف ${prod.row_number}</span>
-                <h4 style="margin-top: 0.65rem; font-size: 1rem; font-weight: 800; color: var(--text-primary); text-overflow: ellipsis; overflow: hidden; white-space: nowrap;">${prod.product_name}</h4>
+                <h4 style="margin-top: 0.65rem; font-size: 1rem; font-weight: 800; color: var(--text-primary); text-overflow: ellipsis; overflow: hidden; white-space: nowrap;">${escapeHtml(prod.product_name)}</h4>
                 <p style="display: flex; align-items: center; justify-content: space-between; font-size: 0.8rem; color: var(--text-secondary); font-weight: 600;">
-                    <span>البراند: <strong style="color: var(--text-primary);">${prod.brand}</strong></span>
+                    <span>البراند: <strong style="color: var(--text-primary);">${escapeHtml(prod.brand)}</strong></span>
                     <span style="display: inline-flex; align-items: center; gap: 0.4rem;">
                         ${linkIndicator}
                         ${scoreBadge}
@@ -1681,105 +1741,415 @@
         return list[0] || "";
     }
 
+    // =============================================
+    // أدوات بناء الواجهة بأمان: بيانات الويب (العناوين والروابط) تُعرض عبر textContent
+    // وخصائص data-* ومستمعي الأحداث، وليس عبر innerHTML أو onclick مضمّن.
+    // =============================================
+    function escapeHtml(value) {
+        return String(value === undefined || value === null ? '' : value)
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
+    function el(tag, props = {}, children = []) {
+        const node = document.createElement(tag);
+        for (const [key, value] of Object.entries(props || {})) {
+            if (value === undefined || value === null || value === false) continue;
+            if (key === 'text') node.textContent = String(value);
+            else if (key === 'className') node.className = value;
+            else if (key === 'style') node.style.cssText = value;
+            else if (key === 'dataset') Object.assign(node.dataset, value);
+            else if (key.startsWith('on') && typeof value === 'function') node.addEventListener(key.slice(2), value);
+            else node.setAttribute(key, String(value));
+        }
+        (Array.isArray(children) ? children : [children]).forEach(child => {
+            if (child === null || child === undefined || child === false) return;
+            node.appendChild(typeof child === 'string' ? document.createTextNode(child) : child);
+        });
+        return node;
+    }
+
+    function safeHttpUrl(url) {
+        try {
+            const u = new URL(String(url || ''), window.location.origin);
+            return (u.protocol === 'http:' || u.protocol === 'https:') ? u.href : '';
+        } catch (e) {
+            return '';
+        }
+    }
+
+    function hostOf(url) {
+        try {
+            return new URL(String(url || '')).hostname.replace(/^www\./, '');
+        } catch (e) {
+            return '';
+        }
+    }
+
+    const CANDIDATE_STATUS_LABELS = {
+        preselected: { text: 'مرشحة مسبقاً ✓', cls: 'accepted' },
+        eligible: { text: 'مؤهلة — تحتاج مراجعة', cls: 'eligible' },
+        rejected: { text: 'مستبعدة آلياً', cls: 'rejected' },
+        excluded: { text: 'مستبعدة (رفض سابق)', cls: 'rejected' },
+        accepted: { text: 'مقبولة (المحرك القديم)', cls: 'eligible' },
+        unverified_fallback: { text: 'غير موثقة', cls: 'rejected' },
+        pending: { text: 'بانتظار المراجعة', cls: 'eligible' }
+    };
+
+    const DECISION_LABELS = {
+        AUTO_PUBLISH: 'مطابقة موثقة بالكامل (نشر تلقائي مسموح)',
+        REVIEW_PRESELECTED: 'مراجعة: مرشح موثق مختار مسبقاً',
+        REVIEW_UNSELECTED: 'مراجعة: لا يوجد مرشح مؤكد',
+        NOT_FOUND: 'لا يوجد منتج مطابق',
+        PROVIDER_DOWN: 'محركات البحث غير متاحة',
+        VERIFIER_DOWN: 'التحقق البصري غير متاح'
+    };
+
+    function normalizeCandidate(c) {
+        c = c || {};
+        const ev = (c.evidence && typeof c.evidence === 'object' && !Array.isArray(c.evidence)) ? c.evidence : {};
+        let reasons = c.reasons;
+        if (!Array.isArray(reasons)) reasons = reasons ? [String(reasons)] : [];
+        return {
+            url: String(c.url || c.image_url || ''),
+            title: String(c.title || c.page_title || ev.page_title || ev.title || ''),
+            page_url: String(c.page_url || ev.page_url || ''),
+            domain: String(c.domain || c.source_domain || ev.domain || ''),
+            status: String(c.status || 'eligible'),
+            reasons: reasons.map(r => String(r)),
+            evidence: ev,
+            conflicts: Array.isArray(c.conflicts) ? c.conflicts : [],
+            vlm: (c.vlm && typeof c.vlm === 'object') ? c.vlm : null,
+            width: c.width || null,
+            height: c.height || null,
+            identity_tier: c.identity_tier || ev.tier || (c.scores && c.scores.tier) || null,
+            content_sha256: c.content_sha256 || ev.content_sha256 || null,
+            source: String(c.source || '')
+        };
+    }
+
+    // مرشحو الاستجابة: candidates حسب عقد cli_bridge، أو خطوات التتبع للمحرك القديم
+    function collectCandidates(data) {
+        let list = [];
+        if (data && Array.isArray(data.candidates) && data.candidates.length) {
+            list = data.candidates;
+        } else if (data && data.trace && Array.isArray(data.trace.steps)) {
+            data.trace.steps.forEach(step => (step.candidates || []).forEach(c => list.push(c)));
+        }
+        const seen = new Set();
+        return list.map(normalizeCandidate).filter(c => {
+            if (!c.url || seen.has(c.url)) return false;
+            seen.add(c.url);
+            return true;
+        });
+    }
+
+    function triState(value) {
+        if (value === true || value === 1) return true;
+        if (value === false || value === 0) return false;
+        if (Array.isArray(value)) return value.length > 0 ? true : null;
+        if (typeof value === 'string') {
+            const v = value.trim().toLowerCase();
+            if (['match', 'yes', 'ok', 'true', 'matched'].includes(v)) return true;
+            if (['conflict', 'no', 'mismatch', 'false'].includes(v)) return false;
+            if (v === '' || ['unknown', 'unsure', 'ambiguous', 'none', 'n/a', 'missing'].includes(v)) return null;
+            return true;
+        }
+        return null;
+    }
+
+    function evidenceChip(label, state, detail) {
+        const mark = state === true ? '✓' : (state === false ? '✗' : '?');
+        const cls = state === true ? 'ok' : (state === false ? 'bad' : 'unknown');
+        const shown = (detail !== undefined && detail !== null && typeof detail !== 'object' && String(detail) !== '' && typeof detail !== 'boolean')
+            ? `${label} ${mark} ${detail}` : `${label} ${mark}`;
+        return el('span', { className: `evidence-chip ${cls}`, text: shown });
+    }
+
+    // شرائح الأدلة: GTIN / البراند / الحجم / النوع / نطاق الصفحة / مستوى الهوية
+    function renderEvidenceChips(c) {
+        const ev = c.evidence || {};
+        const conflicts = [].concat(ev.conflicts || [], ev.hard_reject || [], c.conflicts || []).map(x => String(x).toLowerCase());
+        const hasConflict = (word) => conflicts.some(x => x.includes(word));
+        const wrap = el('div', { className: 'evidence-chips' });
+
+        const gtin = ev.gtin_match !== undefined ? ev.gtin_match : ev.gtin;
+        if ((gtin !== undefined && gtin !== null && gtin !== '') || hasConflict('gtin')) {
+            wrap.appendChild(evidenceChip('GTIN', hasConflict('gtin') ? false : triState(gtin)));
+        }
+        const brand = ev.brand_match !== undefined ? ev.brand_match : ev.brand;
+        wrap.appendChild(evidenceChip('Brand', (hasConflict('brand') || hasConflict('competitor')) ? false : triState(brand),
+            typeof brand === 'string' ? brand : null));
+        const size = ev.size_status !== undefined ? ev.size_status : (ev.size_match !== undefined ? ev.size_match : ev.size);
+        wrap.appendChild(evidenceChip('Size', (hasConflict('size') || hasConflict('pack')) ? false : triState(size),
+            (typeof ev.size === 'string' && ev.size_status !== undefined) ? ev.size : null));
+        const variant = ev.variant_status !== undefined ? ev.variant_status : (ev.variant_match !== undefined ? ev.variant_match : ev.variants);
+        wrap.appendChild(evidenceChip('Variant', hasConflict('variant') ? false : triState(variant),
+            Array.isArray(ev.variants) && ev.variants.length ? ev.variants.join(', ') : null));
+
+        const domain = c.domain || hostOf(c.page_url) || hostOf(c.url);
+        if (domain) wrap.appendChild(el('span', { className: 'evidence-chip neutral', text: domain }));
+        if (c.identity_tier) wrap.appendChild(el('span', { className: 'evidence-chip neutral', text: `T${c.identity_tier}` }));
+        return wrap;
+    }
+
+    // النص الذي قرأه نموذج الرؤية فعلياً من الصورة (وليس نسبة مختلقة)
+    function renderVlm(c) {
+        const v = c.vlm;
+        if (!v) return null;
+        const parts = [];
+        if (v.brand_text) parts.push(`البراند: ${v.brand_text}`);
+        if (v.variant_text) parts.push(`النوع: ${v.variant_text}`);
+        if (v.size_text) parts.push(`الحجم: ${v.size_text}`);
+        if (v.pack_count) parts.push(`العدد: ${v.pack_count}`);
+        if (v.view) parts.push(`الزاوية: ${v.view}`);
+        return el('div', { className: 'vlm-read', title: 'النص الذي قرأه نموذج الرؤية من الصورة' }, [
+            el('strong', { text: `VLM: ${v.decision || 'UNKNOWN'}` }),
+            parts.length ? el('span', { text: ' — ' + parts.join(' | ') }) : null
+        ]);
+    }
+
+    function renderReasons(c) {
+        if (!c.reasons.length) return null;
+        const negative = c.status === 'rejected' || c.status === 'excluded';
+        return el('div', { className: 'candidate-reasons' + (negative ? '' : ' neutral') },
+            c.reasons.map(r => el('div', { text: '• ' + r })));
+    }
+
+    // بيانات المنتج الحالي المطلوبة للاعتماد والرفض
+    function currentProductContext() {
+        const form = document.getElementById('searchForm');
+        return {
+            row_number: document.getElementById('rowNumber').value,
+            product_name: document.getElementById('productName').value,
+            brand: document.getElementById('brand').value,
+            product_name_ar: document.getElementById('productNameAr').value,
+            brand_ar: document.getElementById('brandAr').value,
+            barcode: form.dataset.barcode || '',
+            sku_key: form.dataset.skuKey || '',
+            category: form.dataset.category || ''
+        };
+    }
+
+    function showResultsWorkspace() {
+        document.getElementById('placeholder').style.display = 'none';
+        document.getElementById('loading').style.display = 'none';
+        document.getElementById('resultsContent').style.display = 'block';
+    }
+
+    function setOverallStatus(text, cls) {
+        const overallStatus = document.getElementById('overallStatus');
+        overallStatus.textContent = text;
+        overallStatus.className = 'status-text ' + cls;
+    }
+
+    function renderProviderHealth(health) {
+        let items = [];
+        if (Array.isArray(health)) items = health;
+        else if (health && typeof health === 'object') {
+            items = Object.entries(health).map(([name, v]) => (v && typeof v === 'object') ? Object.assign({ provider: name }, v) : { provider: name, status: v });
+        }
+        if (!items.length) return null;
+        return el('div', { className: 'provider-health' }, items.map(h => {
+            const status = String(h.status || 'unknown');
+            const cls = status === 'ok' ? 'ok' : (status === 'empty' ? 'unknown' : 'bad');
+            const name = String(h.provider || h.name || 'engine');
+            const code = h.http_status ? ` (${h.http_status})` : '';
+            return el('span', { className: `evidence-chip ${cls}`, text: `${name}: ${status}${code}` });
+        }));
+    }
+
+    // لافتة نتيجة البحث لكل حالة: success / review / not_found / provider_down / error
+    function renderOutcomeBanner(data, candidateCount, extraNote) {
+        const container = document.getElementById('outcomeBanner');
+        container.textContent = '';
+        const status = String((data && data.status) || 'error');
+        const decision = String((data && data.decision) || '');
+        let cls = 'info';
+        let title = '';
+        let detail = '';
+
+        if (status === 'provider_down' || decision === 'PROVIDER_DOWN') {
+            cls = 'danger';
+            title = '⚠️ محركات البحث غير متاحة حالياً (engines unavailable)';
+            detail = 'هذه ليست نتيجة "غير موجود": لم تصل محركات البحث للنتائج (حصة منتهية، مفتاح غير صالح، أو حظر). أعد المحاولة لاحقاً.';
+        } else if (decision === 'VERIFIER_DOWN') {
+            cls = 'warning';
+            title = '⚠️ التحقق البصري (Gemini) غير متاح — لا يوجد أي اعتماد تلقائي';
+            detail = 'راجع المرشحين يدوياً باستخدام الأدلة النصية أدناه.';
+        } else if (status === 'success' && decision === 'AUTO_PUBLISH') {
+            cls = 'success';
+            title = '✅ مطابقة موثقة بالكامل (GTIN/البراند/الحجم/النوع + تحقق بصري)';
+            detail = 'راجع الصورة ثم اعتمدها للنشر.';
+        } else if (status === 'success') {
+            cls = 'success';
+            title = '✅ تم العثور على صورة';
+        } else if (status === 'review' && decision !== 'REVIEW_UNSELECTED' && data && data.selected_image) {
+            cls = 'warning';
+            title = '🔎 مراجعة مطلوبة: رشّح النظام صورة موثقة مسبقاً';
+            detail = 'الصورة المرشحة لم تُنشر بعد. تأكد من الأدلة قبل الاعتماد أو اختر مرشحاً آخر.';
+        } else if (status === 'review') {
+            cls = 'warning';
+            title = '🔎 مراجعة مطلوبة: لا يوجد مرشح مؤكد المطابقة';
+            detail = 'لم يُختر أي مرشح مسبقاً. اختر يدوياً من المرشحين أدناه، أو عدّل الاستعلام المخصص وأعد البحث.';
+        } else if (status === 'not_found') {
+            cls = 'info';
+            title = '🔍 لم يتم العثور على منتج مطابق (محركات البحث تعمل)';
+            detail = 'جرّب استعلاماً مخصصاً (اسم عربي، حجم، أو موقع متجر) أو ارفع صورة يدوياً.';
+        } else {
+            cls = 'danger';
+            title = '❌ فشل تنفيذ البحث';
+            detail = String((data && (data.error || data.message)) || 'خطأ غير معروف من جسر بايثون.');
+        }
+
+        const banner = el('div', { className: `outcome-banner ${cls}`, dataset: { status: status } }, [
+            el('div', { text: title }),
+            detail ? el('span', { className: 'banner-detail', text: detail }) : null,
+            extraNote ? el('span', { className: 'banner-detail', text: extraNote }) : null
+        ]);
+        const facts = [];
+        if (decision) facts.push(`القرار: ${DECISION_LABELS[decision] || decision}`);
+        if (data && data.failure_code) facts.push(`رمز السبب: ${data.failure_code}`);
+        facts.push(`عدد المرشحين: ${candidateCount}`);
+        banner.appendChild(el('span', { className: 'banner-detail', text: facts.join(' | ') }));
+        const health = renderProviderHealth(data && data.provider_health);
+        if (health) banner.appendChild(health);
+        container.appendChild(banner);
+    }
+
+    // عرض استجابة البحث لكل الحالات (وليس فقط عند النجاح)
+    function renderSearchResponse(data, extraNote) {
+        data = data || {};
+        if (data.sku_key) {
+            document.getElementById('searchForm').dataset.skuKey = data.sku_key;
+        }
+        showResultsWorkspace();
+        const candidates = collectCandidates(data);
+        renderOutcomeBanner(data, candidates.length, extraNote);
+
+        const recommendedContainer = document.getElementById('recommendedContainer');
+        recommendedContainer.textContent = '';
+        if (data.selected_image && (data.selected_image.url || data.selected_image.image_url)) {
+            const selected = normalizeCandidate(data.selected_image);
+            const fromList = candidates.find(c => c.url === selected.url);
+            const merged = fromList ? Object.assign({}, fromList, { source: selected.source || fromList.source }) : selected;
+            renderRecommendedCard(merged, { decision: data.decision || '' });
+        }
+        renderCandidatesGrid(candidates);
+        renderAccordionTrace(data.trace);
+
+        const meta = data.selected_image && data.selected_image.metadata;
+        if (meta) {
+            preselectTaxonomy(meta.category_l1_en, meta.category_l2_en, meta.category_l3_en);
+        } else {
+            initTaxonomyDropdowns();
+        }
+
+        const status = String(data.status || 'error');
+        if (status === 'success') setOverallStatus('تم العثور على صورة موثقة', 'success');
+        else if (status === 'review') setOverallStatus('بانتظار المراجعة البشرية', 'active');
+        else if (status === 'not_found') setOverallStatus('لا يوجد منتج مطابق', 'failed');
+        else if (status === 'provider_down') setOverallStatus('محركات البحث غير متاحة', 'failed');
+        else setOverallStatus('فشل البحث', 'failed');
+    }
+
     // عند اختيار منتج من القائمة الجانبية
     function selectProduct(prod, element) {
         document.querySelectorAll('.product-item').forEach(el => el.classList.remove('active'));
         element.classList.add('active');
-        
+
         // إزالة أي تنبيه أخطاء أتمتة سابقة
         const existingAlert = document.getElementById('automationErrorAlert');
         if (existingAlert) {
             existingAlert.remove();
         }
-        
+
         document.getElementById('rowNumber').value = prod.row_number;
-        document.getElementById('productName').value = prod.product_name;
-        document.getElementById('brand').value = prod.brand;
+        document.getElementById('productName').value = prod.product_name || '';
+        document.getElementById('brand').value = prod.brand || '';
         document.getElementById('productNameAr').value = prod.product_name_ar || '';
         document.getElementById('brandAr').value = prod.brand_ar || '';
         document.getElementById('customQuery').value = prod.search_query || '';
-        document.getElementById('ignoreUnitClash').checked = false;
         document.getElementById('manualImageUrl').value = '';
-        
-        document.getElementById('searchForm').dataset.barcode = prod.barcode || '';
-        document.getElementById('searchForm').dataset.category = prod.category || '';
-        document.getElementById('searchForm').dataset.origin = prod.origin || '';
-        
+
+        const form = document.getElementById('searchForm');
+        form.dataset.barcode = prod.barcode || '';
+        form.dataset.skuKey = prod.sku_key || '';
+        form.dataset.category = prod.category || '';
+        form.dataset.origin = prod.origin || '';
+
         activeRowNumber = prod.row_number;
-        
+
         // إظهار بانر توضيحي لسبب فشل الأتمتة في حالة وجود خطأ
         if (prod.has_error) {
             const panel = document.getElementById('curationWorkspacePanel');
-            const alertDiv = document.createElement('div');
-            alertDiv.id = 'automationErrorAlert';
-            alertDiv.style = "background-color: var(--danger-bg); border: 1px solid var(--panel-border); color: var(--danger); border-radius: 12px; padding: 1.15rem; margin-bottom: 1.5rem; font-weight: bold; direction: rtl; text-align: right; line-height: 1.5;";
-            alertDiv.innerHTML = `❌ <strong>خطأ الأتمتة التلقائية بالخلفية:</strong><br><span style="font-size: 0.85rem; font-weight: normal; color: var(--text-primary); font-family: monospace; display: block; margin-top: 0.35rem;">${prod.error_message || 'لا تتوفر تفاصيل إضافية للخطأ.'}</span>`;
+            const alertDiv = el('div', {
+                id: 'automationErrorAlert',
+                style: 'background-color: var(--danger-bg); border: 1px solid var(--panel-border); color: var(--danger); border-radius: 12px; padding: 1.15rem; margin-bottom: 1.5rem; font-weight: bold; direction: rtl; text-align: right; line-height: 1.5;'
+            }, [
+                el('strong', { text: '❌ خطأ الأتمتة التلقائية بالخلفية:' }),
+                el('span', {
+                    style: 'font-size: 0.85rem; font-weight: normal; color: var(--text-primary); font-family: monospace; display: block; margin-top: 0.35rem;',
+                    text: prod.error_message || 'لا تتوفر تفاصيل إضافية للخطأ.'
+                })
+            ]);
             panel.insertBefore(alertDiv, panel.children[1]);
         }
-        
-        if (prod.needs_review && prod.needs_review_url) {
-            const overallStatus = document.getElementById('overallStatus');
-            overallStatus.innerText = 'مراجعة معلقة لصور المنطقة الرمادية';
-            overallStatus.className = 'status-text active';
-            document.getElementById('placeholder').style.display = 'none';
-            document.getElementById('loading').style.display = 'none';
-            document.getElementById('resultsContent').style.display = 'block';
-            
-            const imgObj = {
-                url: prod.needs_review_url,
-                title: "الصورة المقترحة في الفحص التلقائي (المنطقة الرمادية)",
-                width: 800,
-                height: 800
-            };
-            renderRecommendedCard(imgObj, prod.product_name, prod.brand, prod.row_number);
-            initTaxonomyDropdowns();
-            
+
+        const stored = (prod.curation_candidates || []).map(normalizeCandidate).filter(c => c.url);
+        if (prod.needs_review && (stored.length || prod.needs_review_url)) {
+            showResultsWorkspace();
+            setOverallStatus('بانتظار المراجعة البشرية', 'active');
+
             const recommendedContainer = document.getElementById('recommendedContainer');
-            const warningDiv = document.createElement('div');
-            warningDiv.style = "background-color: var(--warning-bg); border: 1px solid var(--panel-border); color: var(--warning); border-radius: 12px; padding: 1rem; margin-bottom: 1rem; font-weight: bold;";
-            warningDiv.innerHTML = `⚠️ تم إيقاف الصورة للمراجعة البصرية لأن تقييم مطابقتها الدلالية CLIP كان متوسطاً. يرجى مراجعة الصورة واعتمادها أو البحث عن غيرها بالزر بالأسفل.`;
-            recommendedContainer.insertBefore(warningDiv, recommendedContainer.firstChild);
-            
-            document.getElementById('candidatesContainer').innerHTML = '<p style="color: var(--text-secondary); text-align: center; padding: 2rem;">اضغط على زر البحث بالأسفل للاستعلام يدوياً وجلب صور بديلة.</p>';
-            document.getElementById('accordionContainer').innerHTML = '';
+            recommendedContainer.textContent = '';
+            let note;
+            if (prod.needs_review_url) {
+                const selected = stored.find(c => c.url === prod.needs_review_url) || normalizeCandidate({
+                    url: prod.needs_review_url,
+                    status: prod.preselected ? 'preselected' : 'pending',
+                    title: 'الرابط المعلّم بـ needs_review في الشيت'
+                });
+                renderRecommendedCard(selected, { decision: prod.preselected ? 'REVIEW_PRESELECTED' : '' });
+                note = prod.preselected
+                    ? 'رشّح النظام هذه الصورة من مرشحين موثقين، ولم تُنشر بعد. راجع الأدلة واعتمدها أو اختر غيرها.'
+                    : 'الرابط في الشيت معلّم needs_review (لم يُراجع بعد أو لم تتم إزالة الخلفية). راجعه قبل الاعتماد.';
+            } else {
+                note = 'لا يوجد مرشح مؤكد المطابقة: اختر يدوياً من المرشحين أدناه أو اضغط البحث لإعادة البحث.';
+            }
+            renderOutcomeBanner({ status: 'review', decision: prod.preselected ? 'REVIEW_PRESELECTED' : 'REVIEW_UNSELECTED',
+                                  selected_image: prod.needs_review_url ? { url: prod.needs_review_url } : null },
+                                stored.length, note);
+            renderCandidatesGrid(stored);
+            renderAccordionTrace(null);
+            initTaxonomyDropdowns();
         } else {
             document.getElementById('submitBtn').click();
         }
     }
 
-    // إرسال استعلام الفحص البصري والبحث
+    // إرسال استعلام البحث (يرسل الاسم والبراند بالعربية والفئة والاستعلام المخصص)
     document.getElementById('searchForm').addEventListener('submit', async function(e) {
         e.preventDefault();
-        
+
         // إزالة أي تنبيه أخطاء أتمتة سابقة عند بدء البحث الجديد
         const existingAlert = document.getElementById('automationErrorAlert');
         if (existingAlert) {
             existingAlert.remove();
         }
-        
+
         const placeholder = document.getElementById('placeholder');
         const loading = document.getElementById('loading');
         const resultsContent = document.getElementById('resultsContent');
-        const overallStatus = document.getElementById('overallStatus');
-        
-        const row = document.getElementById('rowNumber').value;
-        const name = document.getElementById('productName').value;
-        const brand = document.getElementById('brand').value;
-        const customQuery = document.getElementById('customQuery').value;
-        const ignoreUnitClash = document.getElementById('ignoreUnitClash').checked;
+        const ctx = currentProductContext();
         const strictBrandMatch = document.getElementById('strictBrandMatch').checked;
         const skipCache = document.getElementById('skipCache') ? document.getElementById('skipCache').checked : false;
-        
-        const barcode = document.getElementById('searchForm').dataset.barcode;
-        const category = document.getElementById('searchForm').dataset.category;
-        const origin = document.getElementById('searchForm').dataset.origin;
-        
+
         placeholder.style.display = 'none';
         resultsContent.style.display = 'none';
         loading.style.display = 'flex';
-        overallStatus.innerText = 'جاري المعالجة...';
-        overallStatus.className = 'status-text active';
-        
+        setOverallStatus('جاري المعالجة...', 'active');
+
         try {
             const res = await fetch('/api/search', {
                 method: 'POST',
@@ -1788,233 +2158,151 @@
                     'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
                 },
                 body: JSON.stringify({
-                    product_name: name,
-                    brand: brand,
-                    custom_query: customQuery,
-                    ignore_unit_clash: ignoreUnitClash,
+                    product_name: ctx.product_name,
+                    brand: ctx.brand,
+                    product_name_ar: ctx.product_name_ar,
+                    brand_ar: ctx.brand_ar,
+                    category: ctx.category,
+                    custom_query: document.getElementById('customQuery').value,
                     strict_brand_match: strictBrandMatch,
                     skip_cache: skipCache,
-                    barcode: barcode,
-                    category: category,
-                    origin: origin,
-                    row_number: row
+                    barcode: ctx.barcode,
+                    sku_key: ctx.sku_key,
+                    origin: document.getElementById('searchForm').dataset.origin || '',
+                    row_number: ctx.row_number
                 })
             });
-            const data = await res.json();
-            loading.style.display = 'none';
-            
-            if (data.status === 'success' && data.selected_image) {
-                resultsContent.style.display = 'block';
-                overallStatus.innerText = 'تم المطابقة والعثور على صورة';
-                overallStatus.className = 'status-text success';
-                
-                renderRecommendedCard(data.selected_image, name, data.brand || brand, row);
-                renderCandidatesGrid(data.trace, name, data.brand || brand, row);
-                renderAccordionTrace(data.trace);
-                
-                // Preselect Taxonomy from AI extraction
-                if (data.selected_image.metadata) {
-                    preselectTaxonomy(
-                        data.selected_image.metadata.category_l1_en,
-                        data.selected_image.metadata.category_l2_en,
-                        data.selected_image.metadata.category_l3_en
-                    );
-                } else {
-                    initTaxonomyDropdowns();
-                }
-            } else {
-                overallStatus.innerText = 'فشل العثور على صورة مناسبة';
-                overallStatus.className = 'status-text failed';
-                alert('⚠️ لم يتم العثور على صورة تطابق معايير القبول والجودة البصرية للبراند.');
-                placeholder.style.display = 'block';
+            let data;
+            try {
+                data = await res.json();
+            } catch (parseErr) {
+                data = { status: 'error', error: `استجابة غير صالحة من الخادم (HTTP ${res.status})` };
             }
+            loading.style.display = 'none';
+            renderSearchResponse(data);
         } catch (err) {
             console.error(err);
             loading.style.display = 'none';
             placeholder.style.display = 'block';
-            overallStatus.innerText = 'خطأ اتصال';
-            overallStatus.className = 'status-text failed';
+            setOverallStatus('خطأ اتصال', 'failed');
         }
     });
 
-    // رندرة بطاقة الصورة الموصى بها كرت كبير (Visual Curation Workbench)
-    function renderRecommendedCard(img, name, brand, row) {
+    // بطاقة الصورة المرشحة: تعرض الصورة الأصلية ومصدرها وأدلتها. المعاينة بعد المعالجة
+    // (عزل الخلفية على لوحة بيضاء) تظهر فقط بعد نجاح الاعتماد.
+    function renderRecommendedCard(candidate, meta = {}) {
+        const c = normalizeCandidate(candidate);
+        const ctx = currentProductContext();
         const container = document.getElementById('recommendedContainer');
-        container.innerHTML = '';
-        
-        const card = document.createElement('div');
-        card.className = 'glass-panel';
-        card.style.margin = '0 0 1.5rem 0';
-        card.style.padding = '1.5rem';
-        
-        const scoreInfo = img.clip_score 
-            ? `<div style="font-family: 'Outfit', sans-serif; font-size: 0.9rem; margin-top: 0.25rem;">تشابه بصرى CLIP: <strong style="color: var(--accent-cyan); font-size: 1.15rem;">${img.clip_score}</strong></div>`
-            : '';
-            
-        const isGreyArea = img.needs_review ? `<div class="score-badge" style="background: rgba(245, 158, 11, 0.1); color: var(--warning); border: 1px solid var(--warning); margin-top: 0.5rem; display: inline-block;">⚠️ مراجعة المنطقة الرمادية</div>` : '';
-        const semanticCacheBadge = img.semantic_similarity
-            ? `<div class="score-badge" style="background: var(--accent-gradient); color: var(--btn-text); font-weight: 900; margin-top: 0.5rem; display: inline-block;"><i class="fas fa-bolt"></i> كاش دلالي ذكي</div>`
-            : '';
+        container.textContent = '';
 
-        // Generate the markup with split-screen workbench
-        card.innerHTML = `
-            <div class="workbench-grid">
-                <!-- Column 1: Draggable Slide compare -->
-                <div style="display: flex; flex-direction: column; gap: 0.75rem; align-items: center;">
-                    <div class="compare-container bg-checkerboard" id="compareContainer">
-                        <!-- Layer 1 Underneath (Raw/Original image) -->
-                        <div class="compare-img">
-                            <img src="${getImageUrl(img.url)}" alt="Original Raw Source">
-                        </div>
-                        <!-- Layer 2 Overlay (Padded/Isolated view) -->
-                        <div class="compare-overlay" id="compareOverlay">
-                            <div class="compare-img">
-                                <img src="${getImageUrl(img.url)}" alt="Isolated Target Layout">
-                            </div>
-                        </div>
-                        <!-- Draggable divider handle -->
-                        <div class="compare-handle" id="compareHandle"></div>
-                    </div>
-                    <!-- Background switcher toolbar -->
-                    <div style="display: flex; gap: 0.5rem; width: 100%; justify-content: center;">
-                        <button type="button" class="btn btn-secondary" onclick="switchPreviewBg('checkerboard')" style="flex: 1; font-size: 0.75rem; padding: 0.35rem 0.5rem;"><i class="fas fa-chess-board"></i> الشفافية</button>
-                        <button type="button" class="btn btn-secondary" onclick="switchPreviewBg('white')" style="flex: 1; font-size: 0.75rem; padding: 0.35rem 0.5rem;"><i class="fas fa-square" style="color: #fff;"></i> أبيض</button>
-                        <button type="button" class="btn btn-secondary" onclick="switchPreviewBg('gray')" style="flex: 1; font-size: 0.75rem; padding: 0.35rem 0.5rem;"><i class="fas fa-square" style="color: #888;"></i> رمادي</button>
-                    </div>
-                </div>
+        const card = el('div', { className: 'glass-panel recommended-card', style: 'margin: 0 0 1.5rem 0; padding: 1.5rem;', dataset: { url: c.url } });
+        const grid = el('div', { className: 'workbench-grid' });
 
-                <!-- Column 2: Control and Active Learning validation details -->
-                <div style="display: flex; flex-direction: column; justify-content: space-between;">
-                    <div>
-                        <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
-                            <span class="score-badge" style="background: rgba(255,255,255,0.06); color: var(--text-primary); border: 1px solid var(--panel-border);"><i class="fas fa-robot"></i> التقييم التلقائي</span>
-                            ${isGreyArea}
-                            ${semanticCacheBadge}
-                        </div>
-                        <h3 style="font-size: 1.2rem; font-weight: 800; margin-top: 0.75rem; line-height: 1.45;">${name}</h3>
-                        <p style="color: var(--text-secondary); font-size: 0.85rem; margin-top: 0.15rem;">العلامة التجارية: <strong style="color: var(--text-primary);">${brand}</strong></p>
-                        ${scoreInfo}
-                        
-                        <!-- Manual Override controls -->
-                        <div style="margin-top: 1rem; border-top: 1px solid var(--panel-border); padding-top: 0.75rem;">
-                            <label style="font-size: 0.8rem; font-weight: 600; color: var(--text-secondary); display: block; margin-bottom: 0.35rem;">خوارزمية تفريغ وعزل الخلفية:</label>
-                            <select id="bgRemovalMethod" style="padding: 0.45rem 0.75rem; background: var(--input-bg); border: 1px solid var(--panel-border); border-radius: 6px; color: var(--text-primary); font-family: inherit; font-size: 0.8rem; width: 100%;">
-                                <option value="photoroom" selected>PhotoRoom API (عزل وقص تلقائي ذكي — سحابي)</option>
-                                <option value="remove_bg_api">Remove.bg API (عزل سحابي بديل)</option>
-                                <option value="grabcut">GrabCut Local (قص مستطيل محلي — مجاني)</option>
-                                <option value="none">بدون عزل (استخدام الصورة الأصلية كما هي)</option>
-                            </select>
-                        </div>
+        // العمود 1: الصورة الأصلية + مكان المعاينة بعد المعالجة
+        const imageCol = el('div', { style: 'display: flex; flex-direction: column; gap: 0.75rem;' }, [
+            el('div', { className: 'recommended-image-box' }, [
+                el('img', { src: getImageUrl(c.url), alt: 'Source image', referrerpolicy: 'no-referrer' })
+            ]),
+            el('div', { className: 'form-help', style: 'font-size: 0.75rem; color: var(--text-secondary); text-align: center;',
+                        text: 'الصورة الأصلية من المصدر. عزل الخلفية ووضعها على لوحة بيضاء يتم عند الاعتماد، وتظهر النتيجة هنا بعده.' }),
+            el('div', { className: 'processed-preview', style: 'display: none;' })
+        ]);
 
-                        <!-- Active Learning Rejection feedback -->
-                        <div style="margin-top: 0.75rem; border-top: 1px solid var(--panel-border); padding-top: 0.75rem;">
-                            <label style="font-size: 0.8rem; font-weight: 600; color: var(--text-secondary); display: block; margin-bottom: 0.35rem;">أسباب الرفض (لتدريب الذكاء الاصطناعي في حال الاستبعاد):</label>
-                            <div class="feedback-reasons-grid">
-                                <label class="feedback-checkbox">
-                                    <input type="checkbox" name="rejection_reason" value="HALO_ARTIFACT">
-                                    <span>هالة لونية متبقية</span>
-                                </label>
-                                <label class="feedback-checkbox">
-                                    <input type="checkbox" name="rejection_reason" value="BACKGROUND_BLEED">
-                                    <span>تداخل الخلفية</span>
-                                </label>
-                                <label class="feedback-checkbox">
-                                    <input type="checkbox" name="rejection_reason" value="CROP_MARGIN_CLIPPING">
-                                    <span>قص جائر بالأطراف</span>
-                                </label>
-                                <label class="feedback-checkbox">
-                                    <input type="checkbox" name="rejection_reason" value="BRAND_STYLE_MISMATCH">
-                                    <span>مخالفة هوية البراند</span>
-                                </label>
-                            </div>
-                        </div>
-                    </div>
+        // العمود 2: المصدر والأدلة والتحكم
+        const provenance = el('div', { style: 'display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;' });
+        const st = CANDIDATE_STATUS_LABELS[c.status] || { text: c.status, cls: 'eligible' };
+        provenance.appendChild(el('span', { className: `candidate-badge-inline ${st.cls}`, text: st.text }));
+        if (meta.decision) provenance.appendChild(el('span', { className: 'evidence-chip neutral', text: DECISION_LABELS[meta.decision] || meta.decision }));
+        const src = c.source.toLowerCase();
+        if (src.includes('cache')) {
+            provenance.appendChild(el('span', { className: 'evidence-chip unknown', text: 'المصدر: كاش اعتماد سابق' }));
+        } else if (src === 'manual') {
+            provenance.appendChild(el('span', { className: 'evidence-chip unknown', text: 'المصدر: رابط يدوي' }));
+        }
+        const domain = c.domain || hostOf(c.page_url) || hostOf(c.url);
+        if (domain) provenance.appendChild(el('span', { className: 'evidence-chip neutral', text: `النطاق: ${domain}` }));
+        const pageLink = safeHttpUrl(c.page_url);
 
-                    <!-- Action buttons -->
-                    <div style="display: flex; gap: 1rem; margin-top: 1.25rem; border-top: 1px solid var(--panel-border); padding-top: 1rem;">
-                        <button type="button" class="btn" id="confirmImageBtn" onclick="confirmRecommendedImage('${img.url}', '${name.replace(/'/g, "\\'")}', '${brand.replace(/'/g, "\\'")}', ${row}, this)" style="flex: 2; font-weight: 800;">
-                            <i class="fas fa-check"></i> اعتماد الصورة للشيت والرفع [A]
-                        </button>
-                        <button type="button" class="btn" onclick="rejectImage('${img.url}', '${name.replace(/'/g, "\\'")}', '${brand.replace(/'/g, "\\'")}', ${row}, this)" style="flex: 1; background: var(--danger-bg); border-color: var(--panel-border); color: var(--danger);" onmouseover="this.style.background='var(--danger)'; this.style.color='var(--btn-text)'" onmouseout="this.style.background='var(--danger-bg)'; this.style.color='var(--danger)'">
-                            <i class="fas fa-times"></i> استبعاد [X]
-                        </button>
-                    </div>
-                </div>
-            </div>
-        `;
-        
+        const methodSelect = el('select', { id: 'bgRemovalMethod', style: 'padding: 0.45rem 0.75rem; background: var(--input-bg); border: 1px solid var(--panel-border); border-radius: 6px; color: var(--text-primary); font-family: inherit; font-size: 0.8rem; width: 100%;' }, [
+            el('option', { value: 'photoroom', selected: 'selected', text: 'PhotoRoom API (عزل سحابي — الافتراضي)' }),
+            el('option', { value: 'remove_bg_api', text: 'Remove.bg API (عزل سحابي بديل)' }),
+            el('option', { value: 'grabcut', text: 'GrabCut Local (عزل محلي تقريبي)' }),
+            el('option', { value: 'none', text: 'بدون عزل (يُكتب الرابط بعلامة needs_review)' })
+        ]);
+
+        const approveBtn = el('button', { type: 'button', className: 'btn', id: 'confirmImageBtn', style: 'flex: 2; font-weight: 800;',
+                                          onclick: (e) => approveCandidate(c, e.currentTarget) },
+                              [el('i', { className: 'fas fa-check' }), ' اعتماد الصورة للشيت والرفع [A]']);
+        const rejectBtn = el('button', { type: 'button', className: 'btn', id: 'rejectImageBtn',
+                                         style: 'flex: 1; background: var(--danger-bg); border-color: var(--panel-border); color: var(--danger);',
+                                         onclick: () => openRejectModal(c) },
+                             [el('i', { className: 'fas fa-times' }), ' رفض [X]']);
+
+        const infoCol = el('div', { style: 'display: flex; flex-direction: column; justify-content: space-between; gap: 0.75rem;' }, [
+            el('div', { style: 'display: flex; flex-direction: column; gap: 0.6rem;' }, [
+                provenance,
+                el('h3', { style: 'font-size: 1.1rem; font-weight: 800; line-height: 1.45; margin: 0;', text: c.title || 'بدون عنوان' }),
+                el('p', { style: 'color: var(--text-secondary); font-size: 0.85rem; margin: 0;' }, [
+                    'المنتج: ', el('strong', { style: 'color: var(--text-primary);', text: ctx.product_name }),
+                    ' — البراند: ', el('strong', { style: 'color: var(--text-primary);', text: ctx.brand })
+                ]),
+                renderEvidenceChips(c),
+                renderVlm(c),
+                renderReasons(c),
+                pageLink ? el('a', { href: pageLink, target: '_blank', rel: 'noopener noreferrer', style: 'font-size: 0.8rem; color: var(--accent-cyan);', text: 'فتح صفحة المصدر ↗' }) : null,
+                el('div', { style: 'margin-top: 0.5rem; border-top: 1px solid var(--panel-border); padding-top: 0.75rem;' }, [
+                    el('label', { for: 'bgRemovalMethod', style: 'font-size: 0.8rem; font-weight: 600; color: var(--text-secondary); display: block; margin-bottom: 0.35rem;', text: 'طريقة عزل الخلفية:' }),
+                    methodSelect
+                ])
+            ]),
+            el('div', { style: 'display: flex; gap: 1rem; border-top: 1px solid var(--panel-border); padding-top: 1rem;' }, [approveBtn, rejectBtn])
+        ]);
+
+        grid.appendChild(imageCol);
+        grid.appendChild(infoCol);
+        card.appendChild(grid);
         container.appendChild(card);
-        initSlideCompare(card);
+        return card;
     }
 
-    // تهيئة شريط التمرير الانزلاقي للمقارنة
-    function initSlideCompare(card) {
-        const handle = card.querySelector('#compareHandle');
-        const overlay = card.querySelector('#compareOverlay');
-        const container = card.querySelector('#compareContainer');
-        if (!handle || !overlay || !container) return;
-        
-        let isDragging = false;
-        
-        function moveSlider(clientX) {
-            const rect = container.getBoundingClientRect();
-            let x = clientX - rect.left;
-            if (x < 0) x = 0;
-            if (x > rect.width) x = rect.width;
-            
-            const percent = (x / rect.width) * 100;
-            handle.style.left = percent + '%';
-            overlay.style.width = percent + '%';
+    // عرض الصورة بعد المعالجة (من رابط Cloudinary الذي أعاده الاعتماد)
+    function showProcessedPreview(card, data) {
+        if (!card) return;
+        const box = card.querySelector('.processed-preview');
+        if (!box) return;
+        box.textContent = '';
+        const link = String(data.image_link || data.cloudinary_url || '').replace(/^needs_review:/, '');
+        if (link) {
+            box.appendChild(el('div', { style: 'font-size: 0.8rem; font-weight: 800; color: var(--success);', text: 'المعاينة بعد المعالجة (المنشورة):' }));
+            box.appendChild(el('div', { className: 'recommended-image-box' }, [el('img', { src: getImageUrl(link), alt: 'Processed image' })]));
         }
-        
-        handle.addEventListener('mousedown', () => { isDragging = true; });
-        window.addEventListener('mouseup', () => { isDragging = false; });
-        window.addEventListener('mousemove', (e) => {
-            if (!isDragging) return;
-            moveSlider(e.clientX);
-        });
-        
-        // دعم شاشات اللمس الهواتف والتابلت
-        handle.addEventListener('touchstart', () => { isDragging = true; });
-        window.addEventListener('touchend', () => { isDragging = false; });
-        window.addEventListener('touchmove', (e) => {
-            if (!isDragging) return;
-            moveSlider(e.touches[0].clientX);
-        });
+        if (data.warning === 'background_not_removed' || String(data.image_link || '').startsWith('needs_review:')) {
+            box.appendChild(el('div', { className: 'outcome-banner warning', text: '⚠️ لم تتم إزالة الخلفية: كُتب الرابط في الشيت بعلامة needs_review ليراجع لاحقاً.' }));
+        }
+        box.style.display = box.childNodes.length ? 'block' : 'none';
     }
 
-    // تبديل خلفيات لوحة المعاينة
-    function switchPreviewBg(type) {
-        const compareContainer = document.getElementById('compareContainer');
-        if (!compareContainer) return;
-        compareContainer.className = 'compare-container';
-        if (type === 'checkerboard') {
-            compareContainer.classList.add('bg-checkerboard');
-        } else if (type === 'white') {
-            compareContainer.classList.add('bg-white');
-        } else if (type === 'gray') {
-            compareContainer.classList.add('bg-gray');
+    // اعتماد صورة: يرسل الباركود و sku_key والتصنيف بمفاتيح category_l*_en
+    async function approveCandidate(candidate, btn) {
+        const c = normalizeCandidate(candidate);
+        const ctx = currentProductContext();
+        if (!ctx.row_number) {
+            alert('يرجى اختيار منتج من الشيت أولاً.');
+            return;
         }
-    }
-
-    // اعتماد الصورة للشيت
-    async function confirmRecommendedImage(url, name, brand, row, btn) {
-        const originalText = btn.innerHTML;
-        const card = btn.closest('.candidate-card') || btn.closest('.glass-panel');
-        
-        btn.disabled = true;
-        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جاري تحديث الصف والكاش...';
-        if (card) {
-            card.classList.add('confirming-active');
+        if ((c.status === 'rejected' || c.status === 'excluded') &&
+            !confirm(`هذه الصورة مستبعدة آلياً:\n${c.reasons.join('\n') || c.status}\n\nهل أنت متأكد من اعتمادها يدوياً؟`)) {
+            return;
         }
-        
-        const l1 = document.getElementById('selectL1').value;
-        const l2 = document.getElementById('selectL2').value;
-        const l3 = document.getElementById('selectL3').value;
-        const aiUpscale = document.getElementById('aiUpscale') ? document.getElementById('aiUpscale').checked : true;
+        const originalHtml = btn ? btn.innerHTML : '';
+        if (btn) {
+            btn.disabled = true;
+            btn.textContent = 'جاري المعالجة والرفع...';
+        }
+        const methodEl = document.getElementById('bgRemovalMethod');
         const aiEnhance = document.getElementById('aiEnhance') ? document.getElementById('aiEnhance').checked : false;
-        const bgRemovalMethod = document.getElementById('bgRemovalMethod') ? document.getElementById('bgRemovalMethod').value : 'photoroom';
-        
+
         try {
             const res = await fetch('/api/select_image', {
                 method: 'POST',
@@ -2023,59 +2311,87 @@
                     'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
                 },
                 body: JSON.stringify({
-                    image_url: url,
-                    product_name: name,
-                    brand: brand,
-                    row_number: row,
-                    barcode: document.getElementById('searchForm').dataset.barcode,
-                    category_l1: l1,
-                    category_l2: l2,
-                    category_l3: l3,
-                    upscale: aiUpscale,
+                    image_url: c.url,
+                    page_url: c.page_url,
+                    candidate_sha256: c.content_sha256,
+                    product_name: ctx.product_name,
+                    brand: ctx.brand,
+                    row_number: ctx.row_number,
+                    barcode: ctx.barcode,
+                    sku_key: ctx.sku_key,
+                    category_l1_en: document.getElementById('selectL1').value,
+                    category_l2_en: document.getElementById('selectL2').value,
+                    category_l3_en: document.getElementById('selectL3').value,
                     enhance: aiEnhance,
-                    bg_removal_method: bgRemovalMethod,
-                    target_width:  getOutputWidth(),
-                    target_height: getOutputHeight(),
-                    padding_ratio: parseFloat(document.getElementById('paddingRatio').value),
-                    bg_color:      document.getElementById('bgColor').value
+                    bg_removal_method: methodEl ? methodEl.value : 'photoroom',
+                    target_width: getOutputWidth(),
+                    target_height: getOutputHeight()
                 })
             });
-            const data = await res.json();
-            btn.disabled = false;
-            btn.innerHTML = originalText;
-            if (card) {
-                card.classList.remove('confirming-active');
+            let data;
+            try {
+                data = await res.json();
+            } catch (parseErr) {
+                data = { status: 'error', error: `استجابة غير صالحة من الخادم (HTTP ${res.status})` };
             }
-            
+
             if (data.status === 'success') {
-                alert(`🎉 تم رفع الصورة وتحديث الصف ${row} بنجاح!`);
+                const card = renderRecommendedCard(c, { decision: '' });
+                showProcessedPreview(card, data);
+                setOverallStatus('تم الاعتماد والرفع', 'success');
+                alert(`🎉 تم رفع الصورة وتحديث الصف ${ctx.row_number} بنجاح!`);
                 loadProducts();
             } else {
-                alert(`❌ فشل الرفع: ${data.error}`);
+                alert(`❌ فشل الاعتماد: ${data.error || data.message || 'خطأ غير معروف'}`);
             }
         } catch (err) {
             console.error(err);
-            btn.disabled = false;
-            btn.innerHTML = originalText;
-            if (card) {
-                card.classList.remove('confirming-active');
-            }
             alert('❌ خطأ اتصال بالخادم.');
+        } finally {
+            if (btn && btn.isConnected) {
+                btn.disabled = false;
+                btn.innerHTML = originalHtml;
+            }
         }
     }
 
-    // استبعاد ورفض الصورة وتسجيل التغذية الراجعة للتعلم النشط
-    async function rejectImage(url, name, brand, row, btn) {
-        const checkedReasons = Array.from(document.querySelectorAll('input[name="rejection_reason"]:checked')).map(cb => cb.value);
-        if (checkedReasons.length === 0) {
-            alert('❌ يرجى تحديد سبب واحد للرفض على الأقل لتسجيل التغذية الراجعة للتعلم النشط.');
+    // =============================================
+    // نافذة سبب الرفض (رموز الهوية: WRONG_PRODUCT / WRONG_BRAND / WRONG_VARIANT ...)
+    // =============================================
+    let pendingRejectCandidate = null;
+
+    function openRejectModal(candidate) {
+        const ctx = currentProductContext();
+        if (!ctx.row_number) {
+            alert('يرجى اختيار منتج من الشيت أولاً.');
             return;
         }
-        
-        const originalText = btn.innerHTML;
+        pendingRejectCandidate = normalizeCandidate(candidate);
+        document.querySelectorAll('input[name="reject_reason_code"]').forEach(r => { r.checked = false; });
+        document.getElementById('rejectModalUrl').textContent = pendingRejectCandidate.title || pendingRejectCandidate.url;
+        document.getElementById('rejectReasonModal').style.display = 'flex';
+    }
+
+    function closeRejectModal() {
+        document.getElementById('rejectReasonModal').style.display = 'none';
+        pendingRejectCandidate = null;
+    }
+
+    async function submitReject() {
+        const candidate = pendingRejectCandidate;
+        if (!candidate) return;
+        const checked = document.querySelector('input[name="reject_reason_code"]:checked');
+        if (!checked) {
+            alert('❌ يرجى اختيار سبب الرفض.');
+            return;
+        }
+        const reasonCode = checked.value;
+        const research = document.getElementById('rejectResearch').checked;
+        const ctx = currentProductContext();
+        const btn = document.getElementById('rejectConfirmBtn');
         btn.disabled = true;
-        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جاري التسجيل...';
-        
+        btn.textContent = research ? 'جاري الرفض وإعادة البحث...' : 'جاري التسجيل...';
+
         try {
             const res = await fetch('/api/reject_image', {
                 method: 'POST',
@@ -2084,49 +2400,70 @@
                     'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
                 },
                 body: JSON.stringify({
-                    image_url: url,
-                    product_name: name,
-                    brand: brand,
-                    row_number: row,
-                    rejection_reasons: checkedReasons
+                    row_number: ctx.row_number,
+                    image_url: candidate.url,
+                    page_url: candidate.page_url,
+                    product_name: ctx.product_name,
+                    brand: ctx.brand,
+                    barcode: ctx.barcode,
+                    sku_key: ctx.sku_key,
+                    reason_code: reasonCode,
+                    rejection_reasons: [reasonCode],
+                    research: research,
+                    product_name_ar: ctx.product_name_ar,
+                    brand_ar: ctx.brand_ar,
+                    category: ctx.category,
+                    custom_query: document.getElementById('customQuery').value
                 })
             });
-            const data = await res.json();
-            btn.disabled = false;
-            btn.innerHTML = originalText;
-            
-            if (data.status === 'success') {
-                loadProducts(); // Refresh sidebar states in background
-                
-                // Replace the recommended card with a refined query input
-                const recommendedContainer = document.getElementById('recommendedContainer');
-                if (recommendedContainer) {
-                    recommendedContainer.innerHTML = `
-                        <div style="background-color: var(--danger-bg); border: 1px solid var(--panel-border); color: var(--text-primary); border-radius: 16px; padding: 1.5rem; text-align: center; display: flex; flex-direction: column; gap: 1rem; margin-bottom: 1.5rem;">
-                            <div style="font-size: 1.2rem; font-weight: bold; color: var(--danger);"><i class="fas fa-times-circle"></i> تم استبعاد الصورة بنجاح وتوثيق سبب الاستبعاد.</div>
-                            <p style="font-size: 0.9rem; color: var(--text-secondary); margin: 0;">لتصحيح البحث والعثور على صورة أفضل للمنتج، يرجى كتابة استعلام بحث مخصص أدناه ثم النقر على "إعادة البحث":</p>
-                            <div style="display: flex; gap: 0.75rem; max-width: 500px; margin: 0 auto; width: 100%;">
-                                <input type="text" id="rejectionSearchQuery" value="${document.getElementById('customQuery').value || (brand + ' ' + name).trim()}" style="flex: 1; padding: 0.6rem 1rem; background: var(--input-bg); border: 1px solid var(--panel-border); border-radius: 10px; color: var(--text-primary); font-family: inherit; font-size: 0.9rem;">
-                                <button type="button" class="btn" onclick="retrySearchWithCustomQuery()" style="background: var(--accent-gradient); color: var(--btn-text); font-weight: bold; padding: 0.6rem 1.25rem;"><i class="fas fa-search"></i> إعادة البحث</button>
-                            </div>
-                        </div>
-                    `;
-                }
-                
-                const overallStatus = document.getElementById('overallStatus');
-                if (overallStatus) {
-                    overallStatus.innerText = 'تم الاستبعاد (في انتظار تحسين البحث)';
-                    overallStatus.className = 'status-text failed';
-                }
+            let data;
+            try {
+                data = await res.json();
+            } catch (parseErr) {
+                data = { status: 'error', error: `استجابة غير صالحة من الخادم (HTTP ${res.status})` };
+            }
+            if (data.status === 'error' || data.status === 'failed') {
+                alert('❌ فشل تسجيل الرفض: ' + (data.error || data.message || 'خطأ غير معروف'));
+                return;
+            }
+            closeRejectModal();
+            loadProducts(); // تحديث حالة القائمة الجانبية بالخلفية
+
+            const note = `تم رفض الصورة (${reasonCode}) واستبعادها من عمليات البحث القادمة لهذا المنتج.`;
+            if (research && (Array.isArray(data.candidates) || data.decision)) {
+                renderSearchResponse(data, note);
             } else {
-                alert('❌ فشل تسجيل الرفض: ' + data.error);
+                showRejectedState(note);
             }
         } catch (err) {
             console.error(err);
-            btn.disabled = false;
-            btn.innerHTML = originalText;
             alert('❌ خطأ اتصال بالخادم.');
+        } finally {
+            btn.disabled = false;
+            btn.textContent = 'تأكيد الرفض';
         }
+    }
+
+    // بعد الرفض بدون إعادة بحث: حقل استعلام مخصص لإعادة البحث
+    function showRejectedState(note) {
+        const ctx = currentProductContext();
+        const recommendedContainer = document.getElementById('recommendedContainer');
+        recommendedContainer.textContent = '';
+        const queryInput = el('input', { type: 'text', id: 'rejectionSearchQuery',
+            style: 'flex: 1; padding: 0.6rem 1rem; background: var(--input-bg); border: 1px solid var(--panel-border); border-radius: 10px; color: var(--text-primary); font-family: inherit; font-size: 0.9rem;' });
+        queryInput.value = document.getElementById('customQuery').value || (ctx.brand + ' ' + ctx.product_name).trim();
+        recommendedContainer.appendChild(el('div', {
+            style: 'background-color: var(--danger-bg); border: 1px solid var(--panel-border); color: var(--text-primary); border-radius: 16px; padding: 1.5rem; text-align: center; display: flex; flex-direction: column; gap: 1rem; margin-bottom: 1.5rem;'
+        }, [
+            el('div', { style: 'font-size: 1.1rem; font-weight: bold; color: var(--danger);', text: note }),
+            el('p', { style: 'font-size: 0.9rem; color: var(--text-secondary); margin: 0;', text: 'لتصحيح البحث اكتب استعلاماً مخصصاً ثم اضغط "إعادة البحث":' }),
+            el('div', { style: 'display: flex; gap: 0.75rem; max-width: 500px; margin: 0 auto; width: 100%;' }, [
+                queryInput,
+                el('button', { type: 'button', className: 'btn', style: 'background: var(--accent-gradient); color: var(--btn-text); font-weight: bold; padding: 0.6rem 1.25rem;',
+                               onclick: retrySearchWithCustomQuery, text: 'إعادة البحث' })
+            ])
+        ]));
+        setOverallStatus('تم الرفض (في انتظار تحسين البحث)', 'failed');
     }
 
     // دالة إعادة البحث الفوري باستعلام مخصص بعد استبعاد صورة
@@ -2140,97 +2477,75 @@
         document.getElementById('submitBtn').click();
     }
 
-    // رندرة شبكة الصور المرشحة المفحوصة
-    function renderCandidatesGrid(trace, productName, brand, rowNumber) {
-        const container = document.getElementById('candidatesContainer');
-        container.innerHTML = '';
-        
-        let allCandidates = [];
-        let seenUrls = new Set();
-        
-        if (trace && trace.steps) {
-            trace.steps.forEach(step => {
-                if (step.candidates) {
-                    step.candidates.forEach(c => {
-                        if (!seenUrls.has(c.url)) {
-                            seenUrls.add(c.url);
-                            allCandidates.push(c);
-                        }
-                    });
-                }
-            });
-        }
-        
-        if (allCandidates.length === 0) {
-            container.innerHTML = '<p style="color: var(--text-secondary); grid-column: 1/-1; text-align: center; padding: 2rem;">لا توجد صور مرشحة مفحوصة.</p>';
-            return;
-        }
-        
-        allCandidates.forEach(c => {
-            const card = document.createElement('div');
-            card.className = 'candidate-card';
-            
-            const statusClass = c.status === 'accepted' ? 'accepted' : 'rejected';
-            const statusText = c.status === 'accepted' ? 'مقبولة تلقائياً' : 'مستبعدة تلقائياً';
-            const scoreTag = c.scores && c.scores.relevance_score !== undefined 
-                ? `<div class="candidate-score-tag">صلة: ${c.scores.relevance_score}</div>` 
-                : '';
-            const uaeTag = c.scores && c.scores.is_uae_source 
-                ? `<div class="candidate-uae-tag">العمارات 🇦🇪</div>` 
-                : '';
-            const reasonsText = c.reasons && c.reasons.length > 0 
-                ? `<div class="candidate-reasons">${c.reasons.map(r => `• ${r}`).join('<br>')}</div>` 
-                : '';
-            const actionButton = rowNumber 
-                ? `<button class="btn btn-secondary btn-sm" style="width: 100%; font-weight: bold; margin-top: 0.5rem;" onclick="confirmRecommendedImage('${c.url}', '${productName.replace(/'/g, "\\'")}', '${brand.replace(/'/g, "\\'")}', ${rowNumber}, this)">🎯 اعتمد يدوياً</button>` 
-                : '';
-            
-            card.innerHTML = `
-                <div class="candidate-img-box">
-                    <span class="candidate-badge ${statusClass}">${statusText}</span>
-                    <img src="${getImageUrl(c.url)}" alt="Candidate" onerror="this.src='https://placehold.co/180x180?text=Error'">
-                    ${scoreTag}
-                    ${uaeTag}
-                </div>
-                <div class="candidate-info">
-                    <div class="candidate-title" title="${c.title || ''}">${c.title || 'بدون عنوان'}</div>
-                    <div class="candidate-meta">
-                        <span>الأبعاد: <strong>${c.width}x${c.height}</strong></span>
-                    </div>
-                    ${reasonsText}
-                    ${actionButton}
-                </div>
-            `;
-            container.appendChild(card);
-        });
+    // شبكة المرشحين: كل مرشح يعرض حالته وأسبابه وأدلته وما قرأه نموذج الرؤية
+    function buildCandidateCard(c, idx) {
+        const st = CANDIDATE_STATUS_LABELS[c.status] || { text: c.status, cls: 'eligible' };
+        const card = el('div', { className: 'candidate-card', dataset: { url: c.url, status: c.status } });
+        card.appendChild(el('div', { className: 'candidate-img-box' }, [
+            el('span', { className: `candidate-badge ${st.cls}`, text: st.text }),
+            el('img', { src: getImageUrl(c.url), alt: 'Candidate', loading: 'lazy', referrerpolicy: 'no-referrer' })
+        ]));
+        const meta = el('div', { className: 'candidate-meta' });
+        if (c.width && c.height) meta.appendChild(el('span', { text: `${c.width}×${c.height}` }));
+        const pageLink = safeHttpUrl(c.page_url);
+        if (pageLink) meta.appendChild(el('a', { href: pageLink, target: '_blank', rel: 'noopener noreferrer', style: 'color: var(--accent-cyan);', text: 'صفحة المصدر ↗' }));
+
+        card.appendChild(el('div', { className: 'candidate-info' }, [
+            el('div', { className: 'candidate-title', title: c.title, text: c.title || 'بدون عنوان' }),
+            renderEvidenceChips(c),
+            renderVlm(c),
+            meta,
+            renderReasons(c),
+            el('div', { className: 'candidate-actions' }, [
+                el('button', { type: 'button', className: 'btn btn-secondary btn-sm js-approve-candidate',
+                               onclick: (e) => approveCandidate(c, e.currentTarget), text: `🎯 اعتماد [${idx + 1}]` }),
+                el('button', { type: 'button', className: 'btn btn-secondary btn-sm js-reject-candidate',
+                               style: 'color: var(--danger);', onclick: () => openRejectModal(c), text: '🚫 رفض' })
+            ])
+        ]));
+        return card;
     }
 
-    // رندرة أكورديون سجل الخطوات التتبع
-    function renderAccordionTrace(trace) {
-        const container = document.getElementById('accordionContainer');
-        container.innerHTML = '';
-        
-        if (!trace || !trace.steps) {
-            container.innerHTML = '<p style="color: var(--text-secondary); text-align: center;">لا يوجد سجل تتبع متاح.</p>';
+    function renderCandidatesGrid(candidates) {
+        const container = document.getElementById('candidatesContainer');
+        container.textContent = '';
+        if (!candidates || candidates.length === 0) {
+            container.appendChild(el('p', { style: 'color: var(--text-secondary); grid-column: 1/-1; text-align: center; padding: 2rem;',
+                                            text: 'لا توجد صور مرشحة لهذا البحث.' }));
             return;
         }
-        
-        trace.steps.forEach((step, idx) => {
-            const item = document.createElement('div');
-            item.className = 'step-item';
-            
-            const resultsCount = step.results_count !== undefined ? step.results_count : (step.candidates ? step.candidates.length : 0);
-            
-            item.innerHTML = `
-                <div class="step-header" onclick="toggleAccordionItem(this)">
-                    <span>الخطوة ${idx + 1}: ${step.name} (${resultsCount} نتائج)</span>
-                    <i class="fas fa-chevron-down"></i>
-                </div>
-                <div class="step-body">
-                    <pre style="color: var(--accent-cyan); font-size: 0.8rem; overflow-x: auto; font-family: monospace; white-space: pre-wrap; direction: ltr; text-align: left;">${JSON.stringify(step, null, 2)}</pre>
-                </div>
-            `;
-            container.appendChild(item);
+        candidates.forEach((c, idx) => container.appendChild(buildCandidateCard(c, idx)));
+    }
+
+    // رندرة أكورديون سجل التتبع (نص فقط عبر textContent)
+    function renderAccordionTrace(trace) {
+        const container = document.getElementById('accordionContainer');
+        container.textContent = '';
+        if (!trace || typeof trace !== 'object' || Object.keys(trace).length === 0) {
+            container.appendChild(el('p', { style: 'color: var(--text-secondary); text-align: center;', text: 'لا يوجد سجل تتبع متاح.' }));
+            return;
+        }
+        const items = [];
+        if (Array.isArray(trace.steps)) {
+            trace.steps.forEach((step, idx) => {
+                const count = step.results_count !== undefined ? step.results_count : (step.candidates ? step.candidates.length : 0);
+                items.push({ title: `الخطوة ${idx + 1}: ${step.name || step.query || ''} (${count} نتائج)`, body: step });
+            });
+        }
+        const rest = Object.assign({}, trace);
+        delete rest.steps;
+        if (Object.keys(rest).length) {
+            items.unshift({ title: 'ملخص التتبع (الاستعلامات، صحة المحركات، النتيجة)', body: rest });
+        }
+        items.forEach(item => {
+            const header = el('div', { className: 'step-header', onclick: (e) => toggleAccordionItem(e.currentTarget) }, [
+                el('span', { text: item.title }), el('i', { className: 'fas fa-chevron-down' })
+            ]);
+            const body = el('div', { className: 'step-body' }, [
+                el('pre', { style: 'color: var(--accent-cyan); font-size: 0.8rem; overflow-x: auto; font-family: monospace; white-space: pre-wrap; direction: ltr; text-align: left;',
+                            text: JSON.stringify(item.body, null, 2) })
+            ]);
+            container.appendChild(el('div', { className: 'step-item' }, [header, body]));
         });
     }
 
@@ -2252,17 +2567,12 @@
             alert('يرجى إدخال رابط الصورة أولاً.');
             return;
         }
-        const name = document.getElementById('productName').value;
-        const brand = document.getElementById('brand').value;
-        const row = document.getElementById('rowNumber').value;
-        
-        const tempImgObj = {
-            url: url,
-            title: "صورة مدخلة يدوياً بواسطة المستخدم",
-            width: "Unknown",
-            height: "Unknown"
-        };
-        renderRecommendedCard(tempImgObj, name, brand, row);
+        if (!safeHttpUrl(url)) {
+            alert('يرجى إدخال رابط يبدأ بـ http أو https.');
+            return;
+        }
+        showResultsWorkspace();
+        renderRecommendedCard({ url: url, title: 'صورة مدخلة يدوياً بواسطة المستخدم', status: 'pending', source: 'manual' }, {});
     }
 
     // ==========================================
@@ -2376,19 +2686,16 @@
         const canvas = document.getElementById('editorCanvas');
         canvas.toBlob(async function(blob) {
             const formData = new FormData();
-            const aiUpscale = document.getElementById('aiUpscale') ? document.getElementById('aiUpscale').checked : true;
             const aiEnhance = document.getElementById('aiEnhance') ? document.getElementById('aiEnhance').checked : false;
-            formData.append('file', blob, uploadFile.name);
+            formData.append('file', blob, 'manual_upload.png');
             formData.append('row_number', row);
             formData.append('product_name', name);
             formData.append('brand', brand);
             formData.append('barcode', barcode);
-            formData.append('upscale', aiUpscale ? 'true' : 'false');
+            formData.append('sku_key', document.getElementById('searchForm').dataset.skuKey || '');
             formData.append('enhance', aiEnhance ? 'true' : 'false');
             formData.append('target_width',  getOutputWidth());
             formData.append('target_height', getOutputHeight());
-            formData.append('padding_ratio', document.getElementById('paddingRatio').value);
-            formData.append('bg_color',      document.getElementById('bgColor').value);
             
             closeEditorModal();
             
@@ -2396,7 +2703,7 @@
             document.getElementById('resultsContent').style.display = 'none';
             const loading = document.getElementById('loading');
             loading.style.display = 'flex';
-            document.getElementById('loadingDetails').innerText = 'جاري عزل خلفية الصورة المرفوعة، تحجيمها وتطبيق الظلال سحابياً...';
+            document.getElementById('loadingDetails').innerText = 'جاري عزل خلفية الصورة المرفوعة ووضعها على اللوحة البيضاء...';
             
             try {
                 const res = await fetch('/api/upload_manual_image', {
@@ -2409,15 +2716,10 @@
                     alert('🎉 تم معالجة ورفع الصورة وتحديث الشيت بنجاح!');
                     loadProducts();
                     
-                    const imgObj = {
-                        url: data.image_link,
-                        title: "الصورة المرفوعة والمعالجة يدوياً",
-                        width: 800,
-                        height: 800
-                    };
-                    document.getElementById('loading').style.display = 'none';
-                    document.getElementById('resultsContent').style.display = 'block';
-                    renderRecommendedCard(imgObj, name, brand, row);
+                    showResultsWorkspace();
+                    const card = renderRecommendedCard({ url: String(data.image_link || '').replace(/^needs_review:/, ''),
+                                                         title: 'الصورة المرفوعة والمعالجة يدوياً', status: 'pending', source: 'manual' }, {});
+                    showProcessedPreview(card, data);
                 } else {
                     alert('❌ فشل معالجة الصورة: ' + (data.error || 'خطأ غير معروف'));
                     document.getElementById('loading').style.display = 'none';
@@ -2445,7 +2747,7 @@
             if (log.includes('❌')) style = 'color: var(--danger);';
             if (log.includes('⚠️')) style = 'color: var(--warning);';
             if (log.includes('⚡') || log.includes('🎉')) style = 'color: var(--text-secondary);';
-            return `<p style="${style} margin: 0; padding: 2px 0;">${log}</p>`;
+            return `<p style="${style} margin: 0; padding: 2px 0;">${escapeHtml(log)}</p>`;
         }).filter(Boolean).join('');
     }
 
@@ -2473,535 +2775,12 @@
     }
 
     // =============================================
-    // 🤖 Curation Batch Automation controls
-    // =============================================
-    let isBatchRunning = false;
-
-    function openCatalogRunAllModal() {
-        document.getElementById('catalogRunAllModal').style.display = 'flex';
-        checkActiveBatch();
-    }
-
-    function closeCatalogRunAllModal() {
-        document.getElementById('catalogRunAllModal').style.display = 'none';
-    }
-
-    // =============================================
-    // 👥 Batch Curation Mode Functions
-    // =============================================
-    function openBatchCuration() {
-        const workspace = document.getElementById('batchCurationWorkspace');
-        const searchCriteria = document.getElementById('searchCriteriaWrapper');
-        const placeholder = document.getElementById('placeholder');
-        const results = document.getElementById('resultsContent');
-        const loading = document.getElementById('loading');
-        const layoutGrid = document.getElementById('layoutGrid');
-
-        workspace.style.display = 'block';
-        searchCriteria.style.display = 'none';
-        placeholder.style.display = 'none';
-        results.style.display = 'none';
-        loading.style.display = 'none';
-
-        if (layoutGrid) {
-            layoutGrid.classList.add('batch-mode-active');
-        }
-
-        renderBatchCurationGrid();
-    }
-
-    function closeBatchCuration() {
-        const layoutGrid = document.getElementById('layoutGrid');
-        if (layoutGrid) {
-            layoutGrid.classList.remove('batch-mode-active');
-        }
-        
-        document.getElementById('batchCurationWorkspace').style.display = 'none';
-        document.getElementById('searchCriteriaWrapper').style.display = 'block';
-        document.getElementById('placeholder').style.display = 'block';
-        updateKPIStats(); // This will show/hide the alert card based on current review count
-    }
-
-    async function triggerInlineSearch(rowNumber) {
-        const queryInput = document.getElementById(`inline-query-${rowNumber}`);
-        const spinner = document.getElementById(`inline-spinner-${rowNumber}`);
-        if (!queryInput) return;
-        
-        const queryText = queryInput.value.trim();
-        if (!queryText) {
-            alert('الرجاء كتابة كلمات بحث صحيحة.');
-            return;
-        }
-        
-        spinner.classList.add('fa-spin');
-        
-        const p = currentProducts.find(prod => prod.row_number === rowNumber);
-        if (!p) return;
-        
-        try {
-            const res = await fetch('/api/search', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
-                },
-                body: JSON.stringify({
-                    product_name: p.product_name,
-                    brand: p.brand,
-                    custom_query: queryText,
-                    barcode: p.barcode,
-                    skip_cache: true
-                })
-            });
-            
-            const data = await res.json();
-            if (data.status === 'success' && data.selected_image) {
-                let newCandidates = [];
-                if (data.trace && data.trace.steps) {
-                    const seen = new Set();
-                    data.trace.steps.forEach(step => {
-                        if (step.candidates) {
-                            step.candidates.forEach(c => {
-                                if (c.url && !seen.has(c.url)) {
-                                    seen.add(c.url);
-                                    newCandidates.push({
-                                        image_url: c.url,
-                                        title: c.title,
-                                        clip_score: c.relevance_score || c.clip_score || 0.0,
-                                        source_domain: c.source_domain || ''
-                                    });
-                                }
-                            });
-                        }
-                    });
-                }
-                
-                if (newCandidates.length === 0) {
-                    newCandidates.push({
-                        image_url: data.selected_image.url,
-                        title: data.selected_image.title,
-                        clip_score: data.selected_image.clip_score || 0.0
-                    });
-                }
-                
-                p.curation_candidates = newCandidates;
-                
-                // Update default url on the row checkbox
-                const defaultUrl = data.selected_image.url;
-                const checkbox = document.querySelector(`.batch-select-checkbox[data-row="${rowNumber}"]`);
-                if (checkbox) {
-                    checkbox.dataset.url = defaultUrl;
-                }
-                
-                renderBatchCurationGrid();
-            } else {
-                alert('فشل البحث: لم يتم العثور على أي نتائج.');
-            }
-        } catch (err) {
-            console.error(err);
-            alert('حدث خطأ أثناء إجراء البحث.');
-        } finally {
-            spinner.classList.remove('fa-spin');
-        }
-    }
-
-    function checkTitleForAllergens(title) {
-        if (!title) return '';
-        const allergens = ['مكسرات', 'حليب', 'فول سوداني', 'قمح', 'صويا', 'سمسم', 'بيض', 'nut', 'milk', 'peanut', 'wheat', 'soy', 'sesame', 'egg'];
-        const found = allergens.filter(allg => title.toLowerCase().includes(allg));
-        if (found.length > 0) {
-            return found.join(', ');
-        }
-        return '';
-    }
-
-    function renderBatchCurationGrid() {
-        const grid = document.getElementById('batchCurationGrid');
-        grid.innerHTML = '';
-
-        const pending = currentProducts.filter(p => p.needs_review);
-        if (pending.length === 0) {
-            grid.innerHTML = '<p style="color: var(--text-secondary); text-align: center; grid-column: 1/-1; padding: 3rem; font-weight: bold;">🎉 لا توجد منتجات معلقة للمراجعة والتدقيق حالياً.</p>';
-            return;
-        }
-
-        pending.forEach(p => {
-            const card = document.createElement('div');
-            card.className = 'curation-row-card';
-            card.id = `batch-card-${p.row_number}`;
-            card.style.position = 'relative';
-
-            let candidatesList = p.curation_candidates || [];
-            if (candidatesList.length === 0 && p.needs_review_url) {
-                candidatesList.push({
-                    image_url: p.needs_review_url,
-                    title: "الصورة المقترحة الافتراضية",
-                    width: 800,
-                    height: 800,
-                    clip_score: p.clip_score || 0.0,
-                    source_domain: "سحابة النظام",
-                    is_selected: 1
-                });
-            }
-
-            // Find default selected URL to set on checkbox dataset
-            const selectedCandidate = candidatesList.find(c => c.is_selected === 1) || candidatesList[0];
-            const defaultUrl = selectedCandidate ? selectedCandidate.image_url : (p.needs_review_url || '');
-
-            card.innerHTML = `
-                <div style="flex: 0 0 300px; display: flex; align-items: flex-start; gap: 0.85rem;">
-                    <input type="checkbox" class="batch-select-checkbox" data-row="${p.row_number}" data-url="${defaultUrl}" data-name="${p.product_name.replace(/"/g, '&quot;')}" data-brand="${p.brand.replace(/"/g, '&quot;')}" checked style="width: 22px; height: 22px; cursor: pointer; margin-top: 0.25rem; accent-color: var(--accent-purple);" onchange="toggleBatchRowSelect(this, ${p.row_number})">
-                    <div style="display: flex; flex-direction: column; gap: 0.35rem; width: calc(100% - 35px);">
-                        <span class="badge-row-number" style="align-self: flex-start; background: var(--active-menu-bg); border-color: var(--panel-border); color: var(--text-primary); font-weight: 800; font-size: 0.75rem; padding: 2px 8px; border-radius: 6px;">صف ${p.row_number}</span>
-                        <h4 style="font-size: 0.95rem; font-weight: 800; margin: 0.25rem 0 0; color: var(--text-primary); text-overflow: ellipsis; overflow: hidden; white-space: nowrap;" title="${p.product_name}">${p.product_name}</h4>
-                        <p style="font-size: 0.8rem; color: var(--text-secondary); margin: 0; font-weight: 600;">البراند: <strong style="color: var(--text-primary);">${p.brand}</strong></p>
-                        
-                        ${(() => {
-                            const allergens = checkTitleForAllergens(p.product_name);
-                            return allergens ? `<span style="background: var(--danger-bg); border: 1px solid var(--panel-border); color: var(--danger); font-size: 0.7rem; font-weight: 800; padding: 2px 6px; border-radius: 4px; margin-top: 0.35rem; display: inline-block; align-self: flex-start;"><i class="fas fa-exclamation-triangle"></i> يحتوي: ${allergens}</span>` : '';
-                        })()}
-                        
-                        ${(p.curation_candidates && p.curation_candidates.length > 0) ? `<span style="background: var(--active-menu-bg); border: 1px solid var(--panel-border); color: var(--text-primary); font-size: 0.7rem; font-weight: 800; padding: 2px 6px; border-radius: 4px; margin-top: 0.35rem; display: inline-block; align-self: flex-start;"><i class="fas fa-bolt"></i> جاهز للمراجعة (Cached)</span>` : ''}
-                        
-                        <div style="display: flex; align-items: center; gap: 0.35rem; margin-top: 0.5rem; width: 100%;">
-                            <input type="text" id="inline-query-${p.row_number}" value="${p.brand ? p.product_name + ' ' + p.brand : p.product_name}" style="flex: 1; font-size: 0.75rem; padding: 4px 8px; background: rgba(0,0,0,0.25); border: 1px solid var(--panel-border); color: var(--text-primary); border-radius: 6px; outline: none; width: calc(100% - 35px);">
-                            <button type="button" class="btn btn-secondary btn-sm" onclick="triggerInlineSearch(${p.row_number})" style="padding: 4px; font-size: 0.7rem; display: flex; align-items: center; justify-content: center; height: 26px; width: 26px;" title="إعادة البحث بالكلمات المكتوبة">
-                                <i class="fas fa-sync-alt" id="inline-spinner-${p.row_number}"></i>
-                            </button>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="candidates-scroll-gallery">
-                    ${candidatesList.map((c, cIdx) => {
-                        const isSelected = c.is_selected === 1 ? 'checked' : '';
-                        const activeClass = c.is_selected === 1 ? 'active-candidate' : '';
-                        const scorePercent = c.clip_score ? Math.round(c.clip_score * 100) : 0;
-                        const scoreBadge = scorePercent > 0 ? `<span style="position: absolute; bottom: 4px; left: 4px; background: rgba(0, 0, 0, 0.75); border: 1px solid var(--panel-border); color: #ffffff; font-size: 0.65rem; font-family: 'Outfit', sans-serif; font-weight: 900; padding: 1px 4px; border-radius: 4px;">${scorePercent}% Match</span>` : '';
-                        const domainText = c.source_domain ? c.source_domain.replace('www.', '') : 'Unknown';
-                        const hasAllergen = checkTitleForAllergens(c.title || '');
-                        const allergenIcon = hasAllergen ? `<span style="position: absolute; top: 4px; left: 4px; color: var(--danger); font-size: 0.8rem; filter: drop-shadow(0 0 4px var(--btn-shadow)); z-index: 6;" title="تحذير مسببات حساسية: ${hasAllergen}"><i class="fas fa-exclamation-triangle"></i></span>` : '';
-                        
-                        return `
-                            <div class="curation-thumb-card ${activeClass}" onclick="selectCurationThumb(this, ${p.row_number}, '${c.image_url.replace(/'/g, "\\'")}')" style="position: relative; flex: 0 0 110px; width: 110px; height: 110px; border-radius: 14px; border: 2px solid var(--panel-border); overflow: hidden; cursor: pointer; transition: all 0.25s ease;" title="${c.title || ''} (${domainText})">
-                                <img src="${getImageUrl(c.image_url)}" alt="Candidate image" style="width: 100%; height: 100%; object-fit: cover;" onerror="this.src='https://placehold.co/110x110?text=Error'">
-                                <input type="radio" name="batch-candidate-radio-${p.row_number}" value="${c.image_url}" ${isSelected} style="position: absolute; top: 6px; right: 6px; width: 18px; height: 18px; accent-color: var(--accent-purple); cursor: pointer; z-index: 5;" onclick="event.stopPropagation(); selectCurationThumb(this.parentElement, ${p.row_number}, '${c.image_url.replace(/'/g, "\\'")}')">
-                                ${scoreBadge}
-                                ${allergenIcon}
-                            </div>
-                        `;
-                    }).join('')}
-                </div>
-
-                <div style="flex: 0 0 160px; display: flex; flex-direction: column; gap: 0.5rem; justify-content: center; align-items: stretch;">
-                    <button type="button" class="btn btn-secondary btn-sm" onclick="toggleBatchRowExclude(${p.row_number})" id="btn-exclude-${p.row_number}" style="font-size: 0.75rem; font-weight: bold; padding: 0.45rem 0.5rem; background: var(--danger-bg); color: var(--danger); border-color: var(--panel-border); border-radius: 10px; display: flex; align-items: center; justify-content: center; gap: 0.35rem;">
-                        <i class="fas fa-times-circle"></i> <span class="btn-text">استبعاد وتخطي</span>
-                    </button>
-                    <button type="button" class="btn btn-secondary btn-sm" onclick="searchBatchProductManual(${p.row_number}, '${p.product_name.replace(/'/g, "\\'")}', '${p.brand.replace(/'/g, "\\'")}')" style="font-size: 0.75rem; font-weight: bold; padding: 0.45rem 0.5rem; border-radius: 10px; display: flex; align-items: center; justify-content: center; gap: 0.35rem;">
-                        <i class="fas fa-search"></i> بحث مخصص
-                    </button>
-                </div>
-            `;
-            grid.appendChild(card);
-        });
-    }
-
-    function selectCurationThumb(thumbEl, rowNum, imageUrl) {
-        const card = document.getElementById(`batch-card-${rowNum}`);
-        if (!card) return;
-        
-        card.querySelectorAll('.curation-thumb-card').forEach(t => t.classList.remove('active-candidate'));
-        thumbEl.classList.add('active-candidate');
-        
-        const radio = thumbEl.querySelector('input[type="radio"]');
-        if (radio) radio.checked = true;
-        
-        const cb = card.querySelector('.batch-select-checkbox');
-        if (cb) {
-            cb.dataset.url = imageUrl;
-        }
-
-        // Update local memory state so selection persists across pagination/filtering
-        if (currentProducts) {
-            const product = currentProducts.find(p => p.row_number === rowNum);
-            if (product && product.curation_candidates) {
-                product.curation_candidates.forEach(c => {
-                    if (c.image_url === imageUrl) {
-                        c.is_selected = 1;
-                    } else {
-                        c.is_selected = 0;
-                    }
-                });
-            }
-        }
-    }
-
-    function toggleBatchRowExclude(rowNum) {
-        const card = document.getElementById(`batch-card-${rowNum}`);
-        if (!card) return;
-        
-        const cb = card.querySelector('.batch-select-checkbox');
-        const btn = document.getElementById(`btn-exclude-${rowNum}`);
-        if (!cb || !btn) return;
-        
-        const isExcluded = cb.checked;
-        cb.checked = !isExcluded;
-        toggleBatchRowSelect(cb, rowNum);
-    }
-
-    function toggleBatchRowSelect(cb, rowNum) {
-        const card = document.getElementById(`batch-card-${rowNum}`);
-        const btn = document.getElementById(`btn-exclude-${rowNum}`);
-        if (!card || !btn) return;
-        
-        if (cb.checked) {
-            card.style.opacity = '1.0';
-            btn.innerHTML = '<i class="fas fa-times-circle"></i> <span class="btn-text">استبعاد وتخطي</span>';
-            btn.style.background = 'var(--danger-bg)';
-            btn.style.color = 'var(--danger)';
-            btn.style.borderColor = 'var(--panel-border)';
-        } else {
-            card.style.opacity = '0.4';
-            btn.innerHTML = '<i class="fas fa-undo"></i> <span class="btn-text">إلغاء الاستبعاد</span>';
-            btn.style.background = 'var(--success-bg)';
-            btn.style.color = 'var(--success)';
-            btn.style.borderColor = 'var(--panel-border)';
-        }
-    }
-
-    function searchBatchProductManual(rowNum, name, brand) {
-        closeBatchCuration();
-        
-        const items = document.querySelectorAll('.product-item');
-        let matched = false;
-        items.forEach(item => {
-            if (item.onclick && item.innerHTML.includes(`صف ${rowNum}`)) {
-                item.click();
-                item.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                matched = true;
-            }
-        });
-        
-        if (!matched) {
-            document.getElementById('rowNumber').value = rowNum;
-            document.getElementById('productName').value = name;
-            document.getElementById('brand').value = brand;
-            document.getElementById('productNameAr').value = '';
-            document.getElementById('brandAr').value = '';
-            document.getElementById('customQuery').value = (brand + ' ' + name).trim();
-            activeRowNumber = rowNum;
-            document.getElementById('submitBtn').click();
-        }
-    }
-
-    function selectAllBatch(val) {
-        document.querySelectorAll('.batch-select-checkbox').forEach(cb => {
-            cb.checked = val;
-            const rowNum = cb.dataset.row;
-            toggleBatchRowSelect(cb, rowNum);
-        });
-    }
-
-    async function submitBatchApproval() {
-        const selectedCbs = Array.from(document.querySelectorAll('.batch-select-checkbox:checked'));
-        if (selectedCbs.length === 0) {
-            alert('❌ يرجى تحديد منتج واحد على الأقل للاعتماد.');
-            return;
-        }
-
-        if (!confirm(`هل أنت متأكد من اعتماد الصور لـ ${selectedCbs.length} منتجات دفعة واحدة؟`)) {
-            return;
-        }
-
-        const approveBtn = document.getElementById('batchApproveBtn');
-        const rejectBtn = document.getElementById('batchRejectBtn');
-        const progressDiv = document.getElementById('batchCurationProgress');
-        const progressBar = document.getElementById('batchCurationProgressBar');
-        const progressPercent = document.getElementById('batchCurationProgressPercent');
-        const progressText = document.getElementById('batchCurationProgressText');
-
-        approveBtn.disabled = true;
-        rejectBtn.disabled = true;
-        progressDiv.style.display = 'flex';
-
-        const total = selectedCbs.length;
-        let completed = 0;
-        let success = 0;
-        let failed = 0;
-
-        const w = getOutputWidth();
-        const h = getOutputHeight();
-        const paddingRatio = parseFloat(document.getElementById('paddingRatio').value);
-        const bgColor = document.getElementById('bgColor').value;
-        const bgRemovalMethod = document.getElementById('bgRemovalMethod') ? document.getElementById('bgRemovalMethod').value : 'photoroom';
-        const aiUpscale = document.getElementById('aiUpscale') ? document.getElementById('aiUpscale').checked : true;
-        const aiEnhance = document.getElementById('aiEnhance') ? document.getElementById('aiEnhance').checked : false;
-
-        for (const cb of selectedCbs) {
-            const row = cb.dataset.row;
-            const url = cb.dataset.url;
-            const name = cb.dataset.name;
-            const brand = cb.dataset.brand;
-
-            completed++;
-            const percent = Math.round((completed / total) * 100);
-            progressPercent.innerText = percent + '%';
-            progressBar.style.width = percent + '%';
-            progressText.innerHTML = `جاري معالجة الصف ${row} (${completed}/${total}): <strong style="color: var(--accent-cyan);">${name}</strong>`;
-
-            try {
-                const res = await fetch('/api/select_image', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
-                    },
-                    body: JSON.stringify({
-                        image_url: url,
-                        product_name: name,
-                        brand: brand,
-                        row_number: row,
-                        upscale: aiUpscale,
-                        enhance: aiEnhance,
-                        bg_removal_method: bgRemovalMethod,
-                        target_width: w,
-                        target_height: h,
-                        padding_ratio: paddingRatio,
-                        bg_color: bgColor
-                    })
-                });
-                
-                const data = await res.json();
-                if (data.status === 'success') {
-                    success++;
-                    const card = cb.closest('.curation-row-card');
-                    if (card) {
-                        card.style.borderColor = 'var(--success)';
-                        card.style.background = 'var(--success-bg)';
-                    }
-                } else {
-                    failed++;
-                    const card = cb.closest('.curation-row-card');
-                    if (card) {
-                        card.style.borderColor = 'var(--danger)';
-                        card.style.background = 'var(--danger-bg)';
-                    }
-                }
-            } catch (err) {
-                console.error(err);
-                failed++;
-                const card = cb.closest('.curation-row-card');
-                if (card) {
-                    card.style.borderColor = 'var(--danger)';
-                    card.style.background = 'rgba(239, 68, 68, 0.05)';
-                }
-            }
-        }
-
-        progressText.innerHTML = `🏁 اكتملت المعالجة الجماعية! (نجاح: ${success} | فشل: ${failed})`;
-        alert(`🎉 تمت عملية الاعتماد الجماعي بنجاح!\nالناجحة: ${success}\nالفاشلة: ${failed}`);
-
-        approveBtn.disabled = false;
-        rejectBtn.disabled = false;
-        progressDiv.style.display = 'none';
-
-        await loadProducts(true);
-        openBatchCuration();
-    }
-
-    async function submitBatchRejection() {
-        const selectedCbs = Array.from(document.querySelectorAll('.batch-select-checkbox:checked'));
-        if (selectedCbs.length === 0) {
-            alert('❌ يرجى تحديد منتج واحد على الأقل للاستبعاد.');
-            return;
-        }
-
-        if (!confirm(`هل أنت متأكد من استبعاد وتخطي الصور لـ ${selectedCbs.length} منتجات دفعة واحدة؟`)) {
-            return;
-        }
-
-        const approveBtn = document.getElementById('batchApproveBtn');
-        const rejectBtn = document.getElementById('batchRejectBtn');
-        const progressDiv = document.getElementById('batchCurationProgress');
-        const progressBar = document.getElementById('batchCurationProgressBar');
-        const progressPercent = document.getElementById('batchCurationProgressPercent');
-        const progressText = document.getElementById('batchCurationProgressText');
-
-        approveBtn.disabled = true;
-        rejectBtn.disabled = true;
-        progressDiv.style.display = 'flex';
-
-        const total = selectedCbs.length;
-        let completed = 0;
-        let success = 0;
-        let failed = 0;
-
-        for (const cb of selectedCbs) {
-            const row = cb.dataset.row;
-            const url = cb.dataset.url;
-            const name = cb.dataset.name;
-            const brand = cb.dataset.brand;
-
-            completed++;
-            const percent = Math.round((completed / total) * 100);
-            progressPercent.innerText = percent + '%';
-            progressBar.style.width = percent + '%';
-            progressText.innerHTML = `جاري استبعاد الصف ${row} (${completed}/${total}): <strong style="color: var(--danger);">${name}</strong>`;
-
-            try {
-                const res = await fetch('/api/reject_image', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
-                    },
-                    body: JSON.stringify({
-                        image_url: url,
-                        product_name: name,
-                        brand: brand,
-                        row_number: row,
-                        rejection_reasons: ['BRAND_STYLE_MISMATCH']
-                    })
-                });
-                
-                const data = await res.json();
-                if (data.status === 'success') {
-                    success++;
-                } else {
-                    failed++;
-                }
-            } catch (err) {
-                console.error(err);
-                failed++;
-            }
-        }
-
-        progressText.innerHTML = `🏁 اكتمل استبعاد الصور! (نجاح: ${success} | فشل: ${failed})`;
-        alert(`🛑 تمت عملية الاستبعاد بنجاح!\nالناجحة: ${success}\nالفاشلة: ${failed}`);
-
-        approveBtn.disabled = false;
-        rejectBtn.disabled = false;
-        progressDiv.style.display = 'none';
-
-        await loadProducts(true);
-        openBatchCuration();
-    }
-
-
-
-    // =============================================
     // 🎛️ Image Output Settings Helpers
     // =============================================
     function applyPreset() {
         const preset = document.getElementById('outputPreset').value;
         const box = document.getElementById('customDimBox');
         box.style.display = preset === 'custom' ? 'block' : 'none';
-    }
-
-    function applyBgColor() {
-        const val = document.getElementById('bgColorPreset').value;
-        document.getElementById('bgColor').value = val;
-        document.getElementById('bgColorPicker').value = val === 'transparent' ? '#ffffff' : ('#' + val);
     }
 
     function getOutputWidth() {
@@ -3024,6 +2803,9 @@
         if (activeTag === 'input' || activeTag === 'textarea' || activeTag === 'select') {
             return;
         }
+        if (document.getElementById('rejectReasonModal').style.display === 'flex') {
+            return;
+        }
         
         const key = e.key.toLowerCase();
         
@@ -3039,7 +2821,7 @@
         // [X] الرفض السريع
         if (key === 'x') {
             e.preventDefault();
-            const rejectBtn = document.querySelector('button[onclick^="rejectImage"]');
+            const rejectBtn = document.getElementById('rejectImageBtn');
             if (rejectBtn && !rejectBtn.disabled) {
                 rejectBtn.click();
             }
@@ -3072,7 +2854,7 @@
             const candidates = document.querySelectorAll('#candidatesContainer .candidate-card');
             const idx = parseInt(key) - 1;
             if (candidates && candidates[idx]) {
-                const actionBtn = candidates[idx].querySelector('button[onclick^="confirmRecommendedImage"]');
+                const actionBtn = candidates[idx].querySelector('.js-approve-candidate');
                 if (actionBtn && !actionBtn.disabled) {
                     e.preventDefault();
                     actionBtn.click();
