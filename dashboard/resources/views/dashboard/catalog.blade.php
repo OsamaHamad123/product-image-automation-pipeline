@@ -1927,7 +1927,11 @@
             brand_ar: document.getElementById('brandAr').value,
             barcode: form.dataset.barcode || '',
             sku_key: form.dataset.skuKey || '',
-            category: form.dataset.category || ''
+            category: form.dataset.category || '',
+            // هوية الحجم والفئة الفرعية والمنشأ تُرسل دائماً: لا نعتمد على وجود صف في الطابور
+            size: form.dataset.size || '',
+            sub_category: form.dataset.subCategory || '',
+            origin: form.dataset.origin || ''
         };
     }
 
@@ -2077,6 +2081,8 @@
         form.dataset.skuKey = prod.sku_key || '';
         form.dataset.category = prod.category || '';
         form.dataset.origin = prod.origin || '';
+        form.dataset.size = prod.size || '';
+        form.dataset.subCategory = prod.sub_category || '';
 
         activeRowNumber = prod.row_number;
 
@@ -2168,7 +2174,9 @@
                     skip_cache: skipCache,
                     barcode: ctx.barcode,
                     sku_key: ctx.sku_key,
-                    origin: document.getElementById('searchForm').dataset.origin || '',
+                    size: ctx.size,
+                    sub_category: ctx.sub_category,
+                    origin: ctx.origin,
                     row_number: ctx.row_number
                 })
             });
@@ -2319,6 +2327,7 @@
                     row_number: ctx.row_number,
                     barcode: ctx.barcode,
                     sku_key: ctx.sku_key,
+                    size: ctx.size,
                     category_l1_en: document.getElementById('selectL1').value,
                     category_l2_en: document.getElementById('selectL2').value,
                     category_l3_en: document.getElementById('selectL3').value,
@@ -2414,6 +2423,9 @@
                     product_name_ar: ctx.product_name_ar,
                     brand_ar: ctx.brand_ar,
                     category: ctx.category,
+                    size: ctx.size,
+                    sub_category: ctx.sub_category,
+                    origin: ctx.origin,
                     custom_query: document.getElementById('customQuery').value
                 })
             });
@@ -2428,6 +2440,10 @@
                 return;
             }
             closeRejectModal();
+            if (research) {
+                // الرفض حذف مرشحات المنتج المحفوظة؛ نحفظ المرشحين الجدد كي يبقى المنتج في تبويب المراجعة
+                await persistResearchCandidates(ctx, data, candidate.url);
+            }
             loadProducts(); // تحديث حالة القائمة الجانبية بالخلفية
 
             const note = `تم رفض الصورة (${reasonCode}) واستبعادها من عمليات البحث القادمة لهذا المنتج.`;
@@ -2442,6 +2458,30 @@
         } finally {
             btn.disabled = false;
             btn.textContent = 'تأكيد الرفض';
+        }
+    }
+
+    // حفظ مرشحي إعادة البحث بعد الرفض (مع page_url والطبقة) في curation_candidates
+    async function persistResearchCandidates(ctx, data, rejectedUrl) {
+        const fresh = collectCandidates(data).filter(c => c.url !== rejectedUrl);
+        if (!fresh.length) return;
+        try {
+            await fetch('/api/v1/curation/save-candidates', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
+                },
+                body: JSON.stringify({
+                    row_number: parseInt(ctx.row_number, 10),
+                    product_name: ctx.product_name,
+                    brand: ctx.brand,
+                    sku_key: data.sku_key || ctx.sku_key,
+                    candidates: fresh
+                })
+            });
+        } catch (err) {
+            console.warn('[Curation Save Candidates Error]', err);
         }
     }
 

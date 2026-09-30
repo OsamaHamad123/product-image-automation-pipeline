@@ -1787,8 +1787,9 @@
             vlm: (c.vlm && typeof c.vlm === 'object') ? c.vlm : null,
             width: c.width || null,
             height: c.height || null,
-            identity_tier: c.identity_tier || null,
-            content_sha256: c.content_sha256 || null,
+            // الجسر يرسل الطبقة داخل evidence.tier؛ الجدول يحفظها في identity_tier
+            identity_tier: c.identity_tier || ev.tier || (c.scores && c.scores.tier) || null,
+            content_sha256: c.content_sha256 || ev.content_sha256 || null,
             is_selected: isSelected
         };
     }
@@ -2149,6 +2150,9 @@
                     product_name_ar: p.product_name_ar || '',
                     brand_ar: p.brand_ar || '',
                     category: p.category || '',
+                    size: p.size || '',
+                    sub_category: p.sub_category || '',
+                    origin: p.origin || '',
                     custom_query: queryInput ? queryInput.value.trim() : ''
                 })
             });
@@ -2246,6 +2250,7 @@
                         row_number: row,
                         barcode: p.barcode || '',
                         sku_key: p.sku_key || '',
+                        size: p.size || '',
                         enhance: aiEnhance,
                         bg_removal_method: bgRemovalMethod,
                         target_width: 0,
@@ -2325,6 +2330,7 @@
                         brand: p.brand || '',
                         barcode: p.barcode || '',
                         sku_key: p.sku_key || '',
+                        size: p.size || '',
                         reason_code: reasonCode,
                         rejection_reasons: [reasonCode],
                         research: false
@@ -2379,6 +2385,9 @@
                     product_name_ar: p.product_name_ar || '',
                     brand_ar: p.brand_ar || '',
                     category: p.category || '',
+                    size: p.size || '',
+                    sub_category: p.sub_category || '',
+                    origin: p.origin || '',
                     custom_query: queryText,
                     barcode: p.barcode || '',
                     sku_key: p.sku_key || '',

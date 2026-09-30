@@ -6,6 +6,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use App\Services\CandidateRow;
 use App\Services\PythonBridge;
 
 class CurationController extends Controller
@@ -35,6 +36,9 @@ class CurationController extends Controller
             'product_name_ar' => 'nullable|string',
             'brand_ar' => 'nullable|string',
             'category' => 'nullable|string',
+            'size' => 'nullable|string',
+            'sub_category' => 'nullable|string',
+            'origin' => 'nullable|string',
             'custom_query' => 'nullable|string',
         ]);
 
@@ -50,6 +54,10 @@ class CurationController extends Controller
             'product_name_ar' => $validated['product_name_ar'] ?? '',
             'brand_ar' => $validated['brand_ar'] ?? '',
             'category' => $validated['category'] ?? '',
+            // هوية الحجم تُرسل دائماً: الجسر لا يستعيدها إلا من صف طابور قد لا يوجد
+            'size' => $validated['size'] ?? '',
+            'sub_category' => $validated['sub_category'] ?? '',
+            'origin' => $validated['origin'] ?? '',
             'custom_query' => $validated['custom_query'] ?? '',
             'skip_cache' => true,
         ];
@@ -158,15 +166,8 @@ class CurationController extends Controller
                     if ($row['image_url'] === '') {
                         continue;
                     }
-                    $optional = [
-                        'sku_key' => $skuKey !== '' ? $skuKey : null,
-                        'run_id' => $runId,
-                        'reasons_json' => json_encode($c['reasons'] ?? [], JSON_UNESCAPED_UNICODE),
-                        'evidence_json' => json_encode($c['evidence'] ?? new \stdClass(), JSON_UNESCAPED_UNICODE),
-                        'vlm_json' => isset($c['vlm']) ? json_encode($c['vlm'], JSON_UNESCAPED_UNICODE) : null,
-                        'identity_tier' => isset($c['identity_tier']) && is_numeric($c['identity_tier']) ? (int) $c['identity_tier'] : null,
-                        'content_sha256' => isset($c['content_sha256']) ? mb_substr((string) $c['content_sha256'], 0, 64) : null,
-                    ];
+                    // page_url والطبقة (evidence.tier) تُحفظ كما يحفظها كاتب بايثون
+                    $optional = CandidateRow::optionalColumns($c, $skuKey, $runId);
                     foreach ($optional as $col => $value) {
                         if (isset($columns[$col])) {
                             $row[$col] = $value;

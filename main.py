@@ -42,6 +42,16 @@ MAX_DB_OUTAGE_SECONDS = 600
 MAX_SAVED_CANDIDATES = 20
 
 
+SUPPORTED_BG_METHODS = ("photoroom", "remove_bg_api", "grabcut", "rembg", "none")
+
+
+def _supported_bg_method(value):
+    """طريقة العزل المختارة في صفحة الدفعات بعد توحيد اسمها، أو None إن لم تكن مدعومة."""
+    name = str(value or "").strip().lower()
+    name = getattr(image_processor, "_METHOD_ALIASES", {}).get(name, name)
+    return name if name in SUPPORTED_BG_METHODS else None
+
+
 def load_run_config():
     """
     تحميل إعدادات التشغيل الجماعي من temp/run_config.json إن وجد لتجاوز إعدادات config.py.
@@ -70,6 +80,13 @@ def load_run_config():
             config.IMAGE_TARGET_SIZE = (w, h)
         if "bg_color" in overrides:
             config.IMAGE_BG_COLOR = str(overrides["bg_color"]).strip().lstrip('#')
+        for key in ("bgRemovalMethod", "bg_removal_method"):
+            if key in overrides:
+                method = _supported_bg_method(overrides[key])
+                if method:
+                    config.BG_REMOVAL_METHOD = method
+                else:
+                    print(f"تنبيه: طريقة عزل الخلفية '{overrides[key]}' غير مدعومة وتم تجاهلها.")
         if "curation_mode" in overrides:
             config.CURATION_MODE = bool(overrides["curation_mode"])
         if "brand_filter" in overrides:

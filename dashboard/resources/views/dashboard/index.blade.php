@@ -401,6 +401,7 @@
                 <div class="progress-bar-container">
                     <div id="batchProgressBar" class="progress-bar-fill"></div>
                 </div>
+                <div id="batchProgressCounts" style="font-size: 0.8rem; color: var(--text-secondary);"></div>
                 <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem; width: 100%;">
                     <button type="button" class="btn btn-secondary btn-sm" id="pauseResumeBatchBtn" onclick="togglePauseResumeAutomation()" style="flex: 1; background: var(--warning-bg); border-color: var(--panel-border); color: var(--warning); font-weight: bold; border-radius: 10px;">
                         <i class="fas fa-pause" id="pauseResumeIcon"></i> <span id="pauseResumeText">إيقاف مؤقت</span>

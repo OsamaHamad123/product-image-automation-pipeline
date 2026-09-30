@@ -239,6 +239,8 @@ def action_search(params, brand_mappings=None):
     brand_ar = _text(params, 'brand_ar') or payload.get('brand_ar', '')
     category = _text(params, 'category') or payload.get('category', '')
     size = _text(params, 'size') or payload.get('size', '')
+    sub_category = _text(params, 'sub_category') or payload.get('sub_category', '')
+    origin = _text(params, 'origin') or payload.get('origin', '')
     barcode = _text(params, 'barcode')
 
     if brand_mappings is None:
@@ -257,7 +259,7 @@ def action_search(params, brand_mappings=None):
         best = image_search.search_best_product_image(
             query, product_name, brand,
             product_name_ar=name_ar, brand_ar=brand_ar, barcode=barcode, category=category,
-            sub_category=payload.get('sub_category', ''), size_text=size, origin=payload.get('origin', ''),
+            sub_category=sub_category, size_text=size, origin=origin,
             custom_query=custom_query, exclude_urls=exclude_urls, exclude_phashes=list(rejected_phashes),
             skip_cache=_as_bool(params.get('skip_cache', False)), brand_mappings=brand_mappings, trace=trace,
         )
