@@ -277,3 +277,45 @@ def test_select_after_owner_fixed_the_barcode(select_env, monkeypatch):
     monkeypatch.setattr(local_cache_db, "get_task_by_row",
                         lambda row: {"barcode": "6.28E+12", "sku_key": "06281007000028", "product_name": "Fresh Milk"})
     assert bridge.action_select_image(dict(SELECT_PARAMS))["status"] == "success"
+
+
+# ---------------------------------------------------------------------------
+# Error payloads never carry exception text (fastapi_server returns them over HTTP)
+# ---------------------------------------------------------------------------
+
+SECRET = "db-password-in-a-traceback"
+
+
+def _boom(*a, **k):
+    raise RuntimeError(SECRET)
+
+
+def test_search_error_hides_exception_text(bridge, monkeypatch):
+    import image_search
+    monkeypatch.setattr(image_search, "search_best_product_image", _boom)
+    result = bridge.action_search({"product_name": "Almarai Fresh Milk 1L", "brand": "Almarai"})
+    assert result["status"] == "error" and result["failure_code"] == "SEARCH_ERROR"
+    assert SECRET not in json.dumps(result, ensure_ascii=False)
+
+
+def test_sheet_actions_hide_exception_text(bridge, monkeypatch):
+    import google_sheets
+    monkeypatch.setattr(google_sheets, "get_sheets_client", _boom)
+    monkeypatch.setattr(bridge, "_open_sheet", _boom)
+    for result in (bridge.action_sheet_preview({"spreadsheet_url": "https://docs.google.com/x"}),
+                   bridge.action_get_products({})):
+        assert result["status"] == "failed" and result["error"]
+        assert SECRET not in json.dumps(result, ensure_ascii=False)
+
+
+def test_main_hides_exception_text(bridge, monkeypatch, capsys):
+    monkeypatch.setitem(bridge.ACTIONS, "search", _boom)
+    monkeypatch.setattr(bridge.config, "log_error_to_laravel", lambda *a, **k: None)
+    _, out = _run_main(bridge, capsys, "search", {"product_name": "x"})
+    assert json.loads(out)["status"] == "error"
+    assert SECRET not in out
+
+
+def test_log_values_stay_on_one_line():
+    import google_sheets
+    assert google_sheets._one_line("sheet\r\nFAKE LOG LINE\nx\ry") == "sheet FAKE LOG LINE x y"

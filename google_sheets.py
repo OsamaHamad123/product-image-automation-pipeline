@@ -197,6 +197,11 @@ def get_sheets_client():
         return None
 
 
+def _one_line(value):
+    """نص آمن لسطر سجل واحد: قيم يدخلها المستخدم لا يجوز أن تزوّر أسطر سجل جديدة."""
+    return str(value).replace("\r\n", " ").replace("\n", " ").replace("\r", " ")
+
+
 def _open_spreadsheet(client, sheet_name_or_url):
     if str(sheet_name_or_url).startswith("https://"):
         return client.open_by_url(sheet_name_or_url)
@@ -211,7 +216,7 @@ def open_worksheet(client, sheet_name_or_url, worksheet_index=0):
     try:
         sh = _open_spreadsheet(client, sheet_name_or_url)
     except Exception as e:
-        logger.error("فشل فتح جدول البيانات '%s': %s", sheet_name_or_url, e)
+        logger.error("فشل فتح جدول البيانات '%s': %s", _one_line(sheet_name_or_url), e)
         return None
     tab_name = (getattr(config, "SPREADSHEET_TAB_NAME", "") or "").strip()
     if tab_name and worksheet_index == 0:

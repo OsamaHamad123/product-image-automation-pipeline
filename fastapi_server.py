@@ -95,6 +95,7 @@ def _dump(model):
 
 
 def _or_500(result):
+    # رسائل cli_bridge ثابتة ولا تحمل نص الاستثناء؛ تفاصيله في temp/search.log وصفحة الأخطاء.
     if result.get("status") in ("failed", "error"):
         raise HTTPException(status_code=500, detail=result.get("error") or "failed")
     return result

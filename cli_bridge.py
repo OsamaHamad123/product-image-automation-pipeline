@@ -97,6 +97,16 @@ def _as_bool(value):
     return bool(value)
 
 
+def _failure(status, message, context):
+    """
+    حمولة خطأ برسالة ثابتة فقط: نص الاستثناء والـ traceback يذهبان إلى السجل (temp/search.log)
+    ولا يُعادان أبداً في الاستجابة، لأن fastapi_server يمرر هذه الحمولة لعملاء HTTP.
+    يجب استدعاؤها من داخل كتلة except.
+    """
+    logger.exception("%s", context)
+    return {'status': status, 'error': message}
+
+
 def _load_brand_mappings():
     try:
         client = google_sheets.get_sheets_client()
@@ -125,8 +135,9 @@ def action_get_products(params):
     try:
         worksheet = _open_sheet()
         products, _ = google_sheets.get_products(worksheet)
-    except Exception as e:
-        return {'status': 'failed', 'error': str(e)}
+    except Exception:
+        return _failure('failed', "Could not read the Google Sheet. Check the spreadsheet URL and tab, and that it "
+                                  "is shared with the service account (details in temp/search.log).", "get_products failed")
     failures = local_cache_db.get_product_failures()
     # sku_key لكل منتج (نفس حساب الطابور) حتى تربط لوحة التحكم المرشحات بالمنتج وليس برقم الصف
     brand_mappings = _load_brand_mappings() if products else {}
@@ -263,9 +274,10 @@ def action_search(params, brand_mappings=None):
             custom_query=custom_query, exclude_urls=exclude_urls, exclude_phashes=list(rejected_phashes),
             skip_cache=_as_bool(params.get('skip_cache', False)), brand_mappings=brand_mappings, trace=trace,
         )
-    except Exception as e:
+    except Exception:
         logger.exception("search failed for %s", product_name)
-        return {'status': 'error', 'error': f"{type(e).__name__}: {e}", 'decision': None, 'failure_code': 'SEARCH_ERROR',
+        return {'status': 'error', 'error': "Search failed (details in temp/search.log).", 'decision': None,
+                'failure_code': 'SEARCH_ERROR',
                 'selected_image': None, 'candidates': [], 'provider_health': [], 'sku_key': sku_key, 'trace': trace}
 
     outcome = trace.get('outcome') if isinstance(trace.get('outcome'), dict) else {}
@@ -383,7 +395,7 @@ def action_select_image(params):
     except Exception as e:
         config.log_error_to_laravel(f"CLI action_select_image exception: {e}\n{traceback.format_exc()}",
                                     product_name=product_name, brand=brand, barcode=barcode, level="ERROR")
-        return {'status': 'failed', 'error': str(e)}
+        return {'status': 'failed', 'error': "Publishing the image failed (details on the Errors page)."}
     finally:
         if queue_started:
             google_sheets.stop_async_queue()
@@ -442,7 +454,7 @@ def action_upload_manual_image(params):
     except Exception as e:
         config.log_error_to_laravel(f"CLI action_upload_manual_image exception: {e}\n{traceback.format_exc()}",
                                     product_name=product_name, brand=brand, barcode=barcode, level="ERROR")
-        return {'status': 'failed', 'error': str(e)}
+        return {'status': 'failed', 'error': "Uploading the image failed (details on the Errors page)."}
     finally:
         if queue_started:
             google_sheets.stop_async_queue()
@@ -561,9 +573,9 @@ def action_reject_image(params):
                 sheet_cleared = bool(google_sheets.update_image_link(
                     worksheet, row_number, link_column_index, "", barcode=barcode or None,
                     product_name=product_name or None, size=_text(params, 'size') or None))
-    except Exception as e:
-        sheet_error = str(e)
-        logger.warning("تعذر تحديث الشيت بعد الرفض: %s", e)
+    except Exception:
+        sheet_error = "Could not update the sheet cell (details in temp/search.log)."
+        logger.exception("تعذر تحديث الشيت بعد الرفض")
     finally:
         if queue_started:
             google_sheets.stop_async_queue()
@@ -606,8 +618,9 @@ def action_sheet_preview(params):
             return {"status": "success", "headers": [], "rows": [], "columns": {}}
         return {"status": "success", "headers": all_values[0], "rows": all_values[1:6],
                 "columns": google_sheets.resolve_columns(all_values[0])}
-    except Exception as e:
-        return {"status": "failed", "error": str(e)}
+    except Exception:
+        return _failure("failed", "Could not open the spreadsheet. Check the URL or name and that it is shared with "
+                                  "the service account (details in temp/search.log).", "sheet_preview failed")
 
 
 def action_sheet_save(params):
@@ -638,8 +651,9 @@ def action_sheet_save(params):
         config.SPREADSHEET_TAB_NAME = tab_name
         google_sheets.clear_cache()
         return {"status": "success", "message": "Spreadsheet configuration updated successfully"}
-    except Exception as e:
-        return {"status": "failed", "error": str(e)}
+    except Exception:
+        return _failure("failed", "Could not save the spreadsheet settings (details in temp/search.log).",
+                        "sheet_save failed")
 
 
 ACTIONS = {
@@ -697,7 +711,7 @@ def main(argv=None):
             except Exception as e:
                 config.log_error_to_laravel(f"CLI main exception for action '{argv[1]}': {e}\n{traceback.format_exc()}",
                                             level="ERROR")
-                result = {'status': 'error', 'error': str(e)}
+                result = {'status': 'error', 'error': "The action failed (details on the Errors page)."}
     finally:
         os.chdir(previous_cwd)
         logging.getLogger().removeHandler(handler)
