@@ -1,216 +1,176 @@
 # edge_shadow_engine.py
-# موديول تنعيم حواف التقطيع وتوليد ظلال الاستوديو المركبة (Guided Filtering & Studio Shadows)
+# تركيب المنتج المعزول على لوحة بيضاء ثابتة الأبعاد (مع ظلال استوديو اختيارية).
+#
+# المبادئ:
+# - نستخدم مخرجات مزوّد العزل (RGBA) كما هي: لا نعيد بناء الصورة من ألوان الصورة الخام،
+#   ولا نملأ الثقوب الداخلية (مقابض العبوات تبقى شفافة فتظهر بيضاء على اللوحة).
+# - اللوحة النهائية دائماً RGB معتمة بيضاء بالأبعاد المطلوبة، والمنتج (حدود قناة الشفافية)
+#   محجّم ليملأ 88% من الضلع المقيِّد وموسّط.
 
-import cv2
+import logging
+from typing import Optional, Tuple, Union
+
 import numpy as np
-from PIL import Image, ImageFilter, ImageOps
+from PIL import Image, ImageDraw, ImageFilter
+
+logger = logging.getLogger(__name__)
+
+# نسبة إشغال المنتج من اللوحة (هامش 6% من كل جهة)
+CANVAS_FILL_RATIO = 0.88
+# بكسلات بشفافية أقل من هذا الحد لا تدخل في حساب حدود المنتج (ضباب الحواف)
+ALPHA_BBOX_THRESHOLD = 8
+WHITE_RGBA = (255, 255, 255, 255)
+
+ImageLike = Union[str, Image.Image]
+
+
+def _as_rgba(image: ImageLike) -> Image.Image:
+    """يفتح مساراً أو يستخدم صورة PIL ويعيد نسخة RGBA محمّلة في الذاكرة."""
+    if isinstance(image, Image.Image):
+        return image.convert("RGBA")
+    with Image.open(image) as img:
+        img.load()
+        return img.convert("RGBA")
+
+
+def alpha_bbox(rgba: Image.Image, threshold: int = ALPHA_BBOX_THRESHOLD) -> Optional[Tuple[int, int, int, int]]:
+    """حدود المنتج (left, top, right, bottom) من قناة الشفافية، أو None إذا كانت الصورة فارغة."""
+    alpha = np.asarray(rgba.getchannel("A"))
+    ys, xs = np.nonzero(alpha > threshold)
+    if ys.size == 0:
+        return None
+    return int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1
+
+
+def fit_cutout(cutout: ImageLike, canvas_size: Tuple[int, int],
+               fill: float = CANVAS_FILL_RATIO) -> Tuple[Image.Image, Tuple[int, int]]:
+    """
+    يقص المنتج على حدود الشفافية ويحجّمه ليملأ fill من اللوحة مع الحفاظ على التناسب.
+    يعيد (صورة RGBA المحجّمة، موضع اللصق الموسّط). يرفع ValueError('empty_cutout') إذا لم يوجد منتج.
+    """
+    rgba = _as_rgba(cutout)
+    box = alpha_bbox(rgba)
+    if box is None:
+        raise ValueError("empty_cutout")
+    product = rgba.crop(box)
+
+    canvas_w, canvas_h = int(canvas_size[0]), int(canvas_size[1])
+    max_w = max(1, int(canvas_w * fill))
+    max_h = max(1, int(canvas_h * fill))
+    scale = min(max_w / product.width, max_h / product.height)
+    new_w = min(max_w, max(1, int(round(product.width * scale))))
+    new_h = min(max_h, max(1, int(round(product.height * scale))))
+    if (new_w, new_h) != product.size:
+        # Pillow يحجّم RGBA بقيم مضروبة مسبقاً بالشفافية، فلا تتسرب ألوان البكسلات الشفافة إلى الحواف
+        product = product.resize((new_w, new_h), Image.Resampling.LANCZOS)
+    x = (canvas_w - new_w) // 2
+    y = (canvas_h - new_h) // 2
+    return product, (x, y)
+
+
+def compose_on_white_canvas(cutout: ImageLike, canvas_size: Tuple[int, int],
+                            fill: float = CANVAS_FILL_RATIO) -> Image.Image:
+    """يركّب المنتج المعزول على لوحة بيضاء معتمة ويعيد صورة RGB بالأبعاد المطلوبة تماماً."""
+    product, (x, y) = fit_cutout(cutout, canvas_size, fill)
+    canvas = Image.new("RGBA", (int(canvas_size[0]), int(canvas_size[1])), WHITE_RGBA)
+    canvas.alpha_composite(product, (x, y))
+    return canvas.convert("RGB")
+
 
 class EdgeShadowEngine:
     """
-    محرك التحقق الرياضي وإصلاح حواف التقطيع وتوليد ظلال استوديو ناعمة وتفاعلية.
+    أدوات ما بعد العزل: تنظيف نقاط القناع المعزولة الصغيرة، وتوليد ظلال استوديو اختيارية
+    على نفس اللوحة البيضاء الثابتة.
     """
 
     @staticmethod
-    def guided_filter(I, p, r=4, eps=1e-3):
+    def clean_alpha_matte_via_cca(alpha_mask: np.ndarray, min_noise_area: int = 25) -> np.ndarray:
         """
-        تطبيق فلتر التوجيه لكايمينغ هي (Kaiming He's Guided Filter) لمطابقة قناع التقطيع
-        مع حواف الصورة الأصلية بدقة متناهية.
+        يزيل المكونات المتصلة الصغيرة جداً (نقاط متناثرة) من قناع الشفافية دون لمس المكون الرئيسي
+        أو ملء أي ثقب داخلي.
         """
-        I = I.astype(np.float64) / 255.0
-        p = p.astype(np.float64) / 255.0
+        import cv2
 
-        # حساب المتوسطات
-        mean_I = cv2.boxFilter(I, cv2.CV_64F, (r, r))
-        mean_p = cv2.boxFilter(p, cv2.CV_64F, (r, r))
-        mean_Ip = cv2.boxFilter(I * p, cv2.CV_64F, (r, r))
-        
-        # التباين المشترك
-        cov_Ip = mean_Ip - mean_I * mean_p
-        
-        # تباين الإشارة المرشدة
-        mean_II = cv2.boxFilter(I * I, cv2.CV_64F, (r, r))
-        var_I = mean_II - mean_I * mean_I
+        alpha = np.ascontiguousarray(alpha_mask, dtype=np.uint8)
+        _, thresh = cv2.threshold(alpha, 15, 255, cv2.THRESH_BINARY)
+        num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(thresh, connectivity=8)
+        if num_labels <= 2:
+            return alpha
 
-        # معامل التحويل الخطي a و b
-        a = cov_Ip / (var_I + eps)
-        b = mean_p - a * mean_I
-
-        # تنعيم المعاملات بالمتوسط المحلي
-        mean_a = cv2.boxFilter(a, cv2.CV_64F, (r, r))
-        mean_b = cv2.boxFilter(b, cv2.CV_64F, (r, r))
-
-        # القناع النهائي النظيف
-        q = mean_a * I + mean_b
-        return (np.clip(q, 0.0, 1.0) * 255.0).astype(np.uint8)
-
-    @staticmethod
-    def clean_alpha_matte_via_cca(alpha_mask, min_noise_area=25):
-        """
-        تطبيق Connected Component Analysis (CCA) لإزالة الجزيئات المعزولة من القناع (Orphans).
-        """
-        # تحويل القناع لنوع ثنائي
-        _, thresh = cv2.threshold(alpha_mask, 15, 255, cv2.THRESH_BINARY)
-        
-        # تحليل المكونات المتصلة 8-Connectivity
-        num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(thresh, connectivity=8)
-        if num_labels <= 1:
-            return alpha_mask
-
-        # المكون الأكبر مساحة (وهو جسم المنتج الرئيسي باستثناء الخلفية)
         sizes = stats[:, cv2.CC_STAT_AREA]
-        
-        # نجد ترتيب المكونات ونترك الخلفية (المكون 0 غالباً الأكبر مساحة بالخلفيات)
-        # لذا نبحث عن أكبر مكون بعد الخلفية
-        main_label = 1
-        max_size = 0
-        for i in range(1, num_labels):
-            if sizes[i] > max_size:
-                max_size = sizes[i]
-                main_label = i
-
-        # تنظيف أي أجزاء صغيرة طائرة وعزلها
-        cleaned_alpha = alpha_mask.copy()
-        for i in range(1, num_labels):
-            if i != main_label:
-                # إذا كانت المساحة صغيرة جداً، نعتبرها تشويه ونلغيها
-                if sizes[i] <= min_noise_area:
-                    cleaned_alpha[labels == i] = 0
-                    
-        return cleaned_alpha
-
-    @staticmethod
-    def smooth_edges_morphology(alpha_mask, radius=3):
-        """
-        تطبيق عمليات التآكل والتمدد المورفولوجي وتنعيم الحواف بالـ Gaussian.
-        """
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (radius, radius))
-        eroded = cv2.erode(alpha_mask, kernel)
-        dilated = cv2.dilate(alpha_mask, kernel)
-        
-        # إيجاد حافة التباين
-        boundary = cv2.subtract(dilated, eroded)
-        
-        # تنعيم الحدود فقط لمنع القص الحاد
-        smoothed = alpha_mask.copy()
-        blur = cv2.GaussianBlur(alpha_mask, (radius*2+1, radius*2+1), 0)
-        
-        # تطبيق التنعيم على الحواف
-        smoothed[boundary > 0] = blur[boundary > 0]
-        return smoothed
+        main_label = 1 + int(np.argmax(sizes[1:]))
+        # جدول بحث متجه بدل حلقة على كل مكون (قد تكون آلاف النقاط)
+        drop = sizes <= min_noise_area
+        drop[0] = False
+        drop[main_label] = False
+        if not drop.any():
+            return alpha
+        cleaned = alpha.copy()
+        cleaned[drop[labels]] = 0
+        return cleaned
 
     @classmethod
-    def process_mask(cls, original_rgb_path, raw_alpha_mask, target_path):
+    def process_mask(cls, provider_rgba: ImageLike, target_path: Optional[str] = None) -> Image.Image:
         """
-        معالجة القناع بالكامل ودمجه مع الصورة الأصلية لإنتاج صورة شفافة عالية الدقة والنعومة.
+        يعيد مخرجات مزوّد العزل كما هي (ألوانه وقناعه) بعد إزالة النقاط المعزولة الصغيرة فقط.
+        لا يعيد بناء الصورة من الألوان الخام ولا يملأ الثقوب.
         """
-        original_img = cv2.imread(original_rgb_path)
-        if original_img is None:
-            return False
-
-        # قراءة القناع كصورة تدرج رمادي
-        if isinstance(raw_alpha_mask, str):
-            alpha = cv2.imread(raw_alpha_mask, cv2.IMREAD_GRAYSCALE)
-        else:
-            alpha = raw_alpha_mask
-            
-        if alpha is None:
-            return False
-
-        # 1. إزالة الأجزاء المعزولة CCA
-        alpha_cleaned = cls.clean_alpha_matte_via_cca(alpha)
-
-        # 2. تنعيم الحواف ومطابقتها بفلتر التوجيه Guided Filter
-        gray_guidance = cv2.cvtColor(original_img, cv2.COLOR_BGR2GRAY)
-        alpha_refined = cls.guided_filter(gray_guidance, alpha_cleaned)
-
-        # 3. معالجة مورفولوجية خفيفة للتنعيم النهائي
-        alpha_final = cls.smooth_edges_morphology(alpha_refined)
-
-        # 4. دمج القناع مع الصورة كصورة شفافة RGBA
-        b, g, r = cv2.split(original_img)
-        rgba = cv2.merge([b, g, r, alpha_final])
-        cv2.imwrite(target_path, rgba)
-        return True
+        rgba = _as_rgba(provider_rgba)
+        alpha = np.asarray(rgba.getchannel("A"))
+        foreground = int(np.count_nonzero(alpha > 15))
+        # الحد الأدنى نسبي لحجم المنتج: 0.1% من البكسلات الأمامية أو 25 بكسل
+        min_area = max(25, int(foreground * 0.001))
+        cleaned = cls.clean_alpha_matte_via_cca(alpha, min_noise_area=min_area)
+        if not np.array_equal(cleaned, alpha):
+            rgba = rgba.copy()
+            rgba.putalpha(Image.fromarray(cleaned))
+        if target_path:
+            rgba.save(target_path, "PNG")
+        return rgba
 
     @classmethod
-    def apply_studio_shadows(cls, input_rgba_path, output_webp_path, target_size=(800, 800)):
+    def apply_studio_shadows(cls, cutout: ImageLike, target_size: Tuple[int, int] = (800, 800),
+                             output_path: Optional[str] = None) -> Image.Image:
         """
-        تطبيق الظلال الاستوديو التفاعلية المركبة (ظل تلامس + ظل سقوط 45 درجة)
-        وتوسيط المنتج وتعبئة الإطار.
+        نفس اللوحة البيضاء الثابتة (نفس الأبعاد ونفس إشغال 88% والتوسيط) مع ظل تلامس
+        وظل سقوط ناعمين تحت المنتج. تُستخدم فقط عند تفعيل ENABLE_STUDIO_SHADOWS.
         """
-        try:
-            import config
-            with Image.open(input_rgba_path) as img:
-                img = img.convert("RGBA")
-                
-                # 1. تغيير الحجم بشكل متناسب مع الهامش
-                enable_shadows = getattr(config, 'ENABLE_STUDIO_SHADOWS', False)
-                scale = 0.88 if not enable_shadows else 0.82
-                img.thumbnail((int(target_size[0] * scale), int(target_size[1] * scale)), Image.Resampling.LANCZOS)
-                
-                alpha = img.getchannel('A')
-                
-                # 2. إنشاء لوحة استوديو مناسبة (شفافة إذا لم تكن هناك ظلال)
-                bg_alpha = 255 if enable_shadows else 0
-                studio_canvas = Image.new("RGBA", target_size, (255, 255, 255, bg_alpha))
+        canvas_w, canvas_h = int(target_size[0]), int(target_size[1])
+        product, (x, y) = fit_cutout(cutout, (canvas_w, canvas_h))
+        alpha = product.getchannel("A")
 
-                # 3. حساب مواقع التوسيط للمنتج
-                x = (target_size[0] - img.width) // 2
-                y = (target_size[1] - img.height) // 2
-                
-                if enable_shadows:
-                    # --- أ. إنشاء ظل التلامس الوثيق (Contact Shadow) ---
-                    # هو ظل مسطح ضيق تحت جسم المنتج مباشرة
-                    contact_shadow_h = max(2, int(img.height * 0.08))
-                    contact_shadow_w = int(img.width * 0.95)
-                    
-                    contact_shadow = Image.new("RGBA", (contact_shadow_w, contact_shadow_h), (20, 20, 20, 255))
-                    # إنشاء قناع بيضاوي ناعم جداً
-                    ellipse_mask = Image.new("L", (contact_shadow_w, contact_shadow_h), 0)
-                    draw_cv = np.zeros((contact_shadow_h, contact_shadow_w), dtype=np.uint8)
-                    cv2.ellipse(draw_cv, (contact_shadow_w//2, contact_shadow_h//2), (contact_shadow_w//2, contact_shadow_h//2), 0, 0, 360, 255, -1)
-                    ellipse_mask = Image.fromarray(cv2.GaussianBlur(draw_cv, (5, 5), 0))
-                    
-                    contact_shadow_alpha = ellipse_mask.point(lambda p: int(p * 0.65)) # عتامة 65% للظل الملامس
-                    contact_shadow.putalpha(contact_shadow_alpha)
-                    
-                    # --- ب. إنشاء ظل السقوط الناعم (Cast Soft Shadow) ---
-                    # يمثل اتجاه الضوء الساقط بزاوية 45 درجة (يمين وأسفل)
-                    cast_shadow = Image.new("RGBA", img.size, (25, 25, 25, 255))
-                    cast_shadow.putalpha(alpha)
-                    
-                    # إزاحة وتشويه هندسي خفيف لمحاكاة زاوية الضوء
-                    shadow_large = cast_shadow.resize((img.width + 16, img.height + 16), Image.Resampling.BILINEAR)
-                    shadow_blurred = shadow_large.filter(ImageFilter.GaussianBlur(radius=20))
-                    
-                    # تخفيف الظل ليصبح ناعماً وشفافاً (عتامة 16%)
-                    shadow_alpha = shadow_blurred.getchannel('A')
-                    shadow_alpha = shadow_alpha.point(lambda p: int(p * 0.16))
-                    shadow_blurred.putalpha(shadow_alpha)
+        canvas = Image.new("RGBA", (canvas_w, canvas_h), WHITE_RGBA)
 
-                    # حساب مواقع التوسيط للظلال
-                    cx = (target_size[0] - contact_shadow_w) // 2
-                    cy = y + img.height - (contact_shadow_h // 2)
-                    sx = (target_size[0] - shadow_large.width) // 2 + 10
-                    sy = (target_size[1] - shadow_large.height) // 2 + 18
+        # ظل السقوط: صورة ظلية للمنتج مموهة بعتامة 16% ومزاحة للأسفل واليمين
+        cast = Image.new("RGBA", product.size, (25, 25, 25, 255))
+        cast.putalpha(alpha.point(lambda p: int(p * 0.16)))
+        pad = 24
+        cast_layer = Image.new("RGBA", (product.width + 2 * pad, product.height + 2 * pad), (0, 0, 0, 0))
+        cast_layer.paste(cast, (pad, pad))
+        cast_layer = cast_layer.filter(ImageFilter.GaussianBlur(radius=12))
+        canvas.alpha_composite(cast_layer, _clip_dest(canvas, cast_layer, x - pad + 8, y - pad + 12))
 
-                    # دمج طبقات الظلال بالترتيب
-                    # أولاً: ظل السقوط الناعم
-                    studio_canvas.paste(shadow_blurred, (sx, sy), mask=shadow_blurred)
-                    # ثانياً: ظل التلامس الوثيق
-                    studio_canvas.paste(contact_shadow, (cx, cy), mask=contact_shadow)
-                
-                # ثالثاً: المنتج المعزول ذو الحواف الناعمة (دائماً)
-                studio_canvas.paste(img, (x, y), mask=img)
+        # ظل التلامس: قطع ناقص ناعم عند قاعدة المنتج
+        contact_w = max(2, int(product.width * 0.9))
+        contact_h = max(2, int(product.height * 0.06))
+        ellipse = Image.new("L", (contact_w + 16, contact_h + 16), 0)
+        ImageDraw.Draw(ellipse).ellipse((8, 8, 8 + contact_w, 8 + contact_h), fill=int(255 * 0.5))
+        ellipse = ellipse.filter(ImageFilter.GaussianBlur(radius=4))
+        contact = Image.new("RGBA", ellipse.size, (20, 20, 20, 255))
+        contact.putalpha(ellipse)
+        cx = (canvas_w - ellipse.width) // 2
+        cy = y + product.height - ellipse.height // 2
+        canvas.alpha_composite(contact, _clip_dest(canvas, contact, cx, cy))
 
-                # 5. الحفظ بصيغة WebP خفيفة ومحسنة
-                if enable_shadows:
-                    studio_canvas.convert("RGB").save(output_webp_path, "WEBP", quality=85, method=4)
-                    print("✅ [Studio Shadow Engine] تم دمج حواف المنتج وتطبيق ظلال استوديو تفاعلية مركبة بنجاح!")
-                else:
-                    studio_canvas.save(output_webp_path, "WEBP", quality=85, method=4)
-                    print("✅ [Studio Shadow Engine] تم دمج حواف المنتج وتوسيطه على خلفية شفافة نقية بدون ظلال بنجاح!")
-                return True
-        except Exception as e:
-            print(f"❌ [Studio Shadow Engine Error] خطأ أثناء تطبيق المعالجة والتوسيط: {e}")
-            return False
+        canvas.alpha_composite(product, (x, y))
+        result = canvas.convert("RGB")
+        if output_path:
+            result.save(output_path, "PNG")
+        return result
+
+
+def _clip_dest(canvas: Image.Image, layer: Image.Image, x: int, y: int) -> Tuple[int, int]:
+    """alpha_composite لا يقبل إحداثيات سالبة؛ نحصر موضع الطبقة داخل اللوحة."""
+    x = max(0, min(int(x), max(0, canvas.width - layer.width)))
+    y = max(0, min(int(y), max(0, canvas.height - layer.height)))
+    return x, y

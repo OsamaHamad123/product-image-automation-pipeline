@@ -1,12 +1,40 @@
 # local_cache_db.py
-# موديول التخزين المحلي الذكي باستخدام قاعدة بيانات MariaDB لتسريع المطابقة ومنع تكرار البحث
+# موديول التخزين المحلي في MariaDB: طابور المهام، مرشحات المراجعة، كاش الحلول المعتمدة، ورفض المراجعين.
+#
+# القواعد (D11):
+# - الكاش يخدم فقط الحلول بحالة human_approved أو auto_verified، ويعتمد على sku_key،
+#   وعند وجود باركود لا يوجد أي رجوع للمطابقة بالاسم (منع إعطاء صورة منتج شقيق).
+# - رفض المراجع يُسجل في rejected_images (الرابط + pHash) ويُمرر للبحث كاستبعادات.
+# - سحب المهام من الطابور ذري (UPDATE واحد مع lease) ولا تُبتلع أخطاء قاعدة البيانات.
+
+import json
+import logging
+import os
+import socket
+import uuid
 
 import pymysql
-import os
-import json
-from datetime import datetime
 
-# إعداد الاتصال باستخدام المتغيرات البيئية
+logger = logging.getLogger(__name__)
+
+# حالات الحل المعتمد في resolved_products
+SERVABLE_STATUSES = ("human_approved", "auto_verified")
+VERIFICATION_STATUSES = ("human_approved", "auto_verified", "superseded", "legacy")
+
+# أكواد الرفض (D11) + الأكواد التجميلية القديمة الثلاثة
+IDENTITY_REASON_CODES = (
+    "WRONG_PRODUCT", "WRONG_BRAND", "WRONG_VARIANT", "WRONG_SIZE", "WRONG_PACK",
+    "NOT_PACKSHOT", "LOW_QUALITY",
+)
+COSMETIC_REASON_CODES = ("HALO_ARTIFACT", "BACKGROUND_BLEED", "CROP_MARGIN_CLIPPING")
+REJECT_REASON_CODES = IDENTITY_REASON_CODES + COSMETIC_REASON_CODES
+
+# مدة الحجز (lease) للمهمة المسحوبة قبل أن تصبح قابلة للسحب مجدداً
+LEASE_MINUTES = 15
+MAX_TITLE_CHARS = 250
+
+
+# إعداد الاتصال باستخدام المتغيرات البيئية (تُقرأ عند كل اتصال حتى تعمل الاختبارات على automation_test)
 def get_db_connection():
     return pymysql.connect(
         host=os.getenv("DB_HOST", "127.0.0.1"),
@@ -18,29 +46,91 @@ def get_db_connection():
         cursorclass=pymysql.cursors.DictCursor
     )
 
+
+def _close(conn):
+    try:
+        conn.close()
+    except Exception:
+        pass
+
+
+def url_norm(url):
+    """الصيغة المقارنة لرابط الصورة (المضيف + المسار، بدون www والاستعلام)."""
+    if not url:
+        return ""
+    try:
+        from catalog_match.text_norm import url_key
+        return url_key(url)[:768]
+    except Exception:
+        return str(url).strip().lower()[:768]
+
+
+# ---------------------------------------------------------------------------
+# المخطط (Schema) — كل التعديلات Idempotent عبر ADD COLUMN IF NOT EXISTS (MariaDB)
+# ---------------------------------------------------------------------------
+
+_SCHEMA_MIGRATIONS = [
+    # resolved_products
+    "ALTER TABLE resolved_products ADD COLUMN IF NOT EXISTS clip_embedding_json TEXT NULL",
+    "ALTER TABLE resolved_products ADD COLUMN IF NOT EXISTS perceptual_hash VARCHAR(255) NULL",
+    "ALTER TABLE resolved_products ADD COLUMN IF NOT EXISTS sku_key VARCHAR(64) NULL",
+    "ALTER TABLE resolved_products ADD COLUMN IF NOT EXISTS verification_status "
+    "ENUM('human_approved','auto_verified','superseded','legacy') NOT NULL DEFAULT 'legacy'",
+    "ALTER TABLE resolved_products ADD COLUMN IF NOT EXISTS approved_by VARCHAR(64) NULL",
+    "ALTER TABLE resolved_products ADD INDEX IF NOT EXISTS idx_barcode (barcode)",
+    "ALTER TABLE resolved_products ADD INDEX IF NOT EXISTS idx_name_brand (product_name, brand)",
+    "ALTER TABLE resolved_products ADD INDEX IF NOT EXISTS idx_resolved_sku (sku_key)",
+    # automation_queue
+    "ALTER TABLE automation_queue ADD COLUMN IF NOT EXISTS sku_key VARCHAR(64) NULL",
+    "ALTER TABLE automation_queue ADD COLUMN IF NOT EXISTS payload_json LONGTEXT NULL",
+    "ALTER TABLE automation_queue ADD COLUMN IF NOT EXISTS worker_id VARCHAR(64) NULL",
+    "ALTER TABLE automation_queue ADD COLUMN IF NOT EXISTS lease_until DATETIME NULL",
+    "ALTER TABLE automation_queue ADD COLUMN IF NOT EXISTS failure_code VARCHAR(32) NULL",
+    "ALTER TABLE automation_queue ADD COLUMN IF NOT EXISTS trace_json LONGTEXT NULL",
+    "ALTER TABLE automation_queue ADD INDEX IF NOT EXISTS idx_queue_status (status)",
+    "ALTER TABLE automation_queue ADD INDEX IF NOT EXISTS idx_queue_worker (worker_id)",
+    "ALTER TABLE automation_queue ADD INDEX IF NOT EXISTS idx_queue_sku (sku_key)",
+    # curation_candidates
+    "ALTER TABLE curation_candidates MODIFY COLUMN title TEXT NULL",
+    "ALTER TABLE curation_candidates ADD COLUMN IF NOT EXISTS sku_key VARCHAR(64) NULL",
+    "ALTER TABLE curation_candidates ADD COLUMN IF NOT EXISTS run_id VARCHAR(64) NULL",
+    "ALTER TABLE curation_candidates ADD COLUMN IF NOT EXISTS reasons_json LONGTEXT NULL",
+    "ALTER TABLE curation_candidates ADD COLUMN IF NOT EXISTS evidence_json LONGTEXT NULL",
+    "ALTER TABLE curation_candidates ADD COLUMN IF NOT EXISTS vlm_json LONGTEXT NULL",
+    "ALTER TABLE curation_candidates ADD COLUMN IF NOT EXISTS content_sha256 VARCHAR(64) NULL",
+    "ALTER TABLE curation_candidates ADD COLUMN IF NOT EXISTS identity_tier VARCHAR(8) NULL",
+    "ALTER TABLE curation_candidates ADD COLUMN IF NOT EXISTS page_url TEXT NULL",
+    "ALTER TABLE curation_candidates ADD INDEX IF NOT EXISTS idx_curation_row (`row_number`)",
+    "ALTER TABLE curation_candidates ADD INDEX IF NOT EXISTS idx_curation_sku (sku_key)",
+    # automation_state: رسالة تنبيه مرئية للوحة التحكم (مثل عدم توفر نموذج Gemini)
+    "ALTER TABLE automation_state ADD COLUMN IF NOT EXISTS notice VARCHAR(255) NULL",
+]
+
+
 def init_db():
     """
-    إنشاء قاعدة البيانات وجداولها الأساسية إذا لم تكن موجودة.
+    إنشاء قاعدة البيانات وجداولها إن لم تكن موجودة وتطبيق الترقيات بشكل Idempotent.
+    تعيد True عند النجاح و False عند الفشل (لا ترفع استثناء كي لا يفشل الاستيراد عند غياب MariaDB).
     """
     try:
-        # الاتصال بخادم MySQL/MariaDB دون تحديد قاعدة البيانات لإنشائها أولاً إن لم تكن موجودة
+        # الاتصال بخادم MariaDB دون تحديد قاعدة البيانات لإنشائها أولاً إن لم تكن موجودة
         conn = pymysql.connect(
             host=os.getenv("DB_HOST", "127.0.0.1"),
             port=int(os.getenv("DB_PORT", "3306")),
             user=os.getenv("DB_USERNAME", "root"),
-            password=os.getenv("DB_PASSWORD", "")
+            password=os.getenv("DB_PASSWORD", ""),
+            connect_timeout=5,
         )
         cursor = conn.cursor()
         db_name = os.getenv("DB_DATABASE", "automation_db")
-        cursor.execute(f"CREATE DATABASE IF NOT EXISTS {db_name} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
+        cursor.execute(f"CREATE DATABASE IF NOT EXISTS `{db_name}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
         conn.commit()
         conn.close()
 
-        # الاتصال بقاعدة البيانات الخاصة بالتطبيق
         conn = get_db_connection()
         cursor = conn.cursor()
-        
-        # 1. إنشاء جدول حفظ نتائج مطابقة المنتجات وصورها سحابياً مع البيانات الوصفية
+
+        # 1. نتائج المطابقة المعتمدة (الكاش)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS resolved_products (
                 id INT AUTO_INCREMENT PRIMARY KEY,
@@ -56,8 +146,8 @@ def init_db():
                 resolved_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
             ) ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
         """)
-        
-        # 2. إنشاء جدول تتبع وإدارة أخطاء الأتمتة التقنية
+
+        # 2. أخطاء المنتجات (فشل حقيقي في المنتج؛ انقطاع المزودين لا يُسجل هنا)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS product_failures (
                 barcode VARCHAR(255) PRIMARY KEY,
@@ -67,8 +157,8 @@ def init_db():
                 failed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             ) ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
         """)
-        
-        # 3. إنشاء جدول حفظ التغذية الراجعة للتعلم النشط
+
+        # 3. سجل ملاحظات المراجعين (تعرضه صفحة التعلم النشط في لوحة التحكم)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS active_learning_feedback (
                 id INT AUTO_INCREMENT PRIMARY KEY,
@@ -82,8 +172,8 @@ def init_db():
                 timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             ) ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
         """)
-        
-        # 4. إنشاء جدول طابور المهام المنظم
+
+        # 4. طابور المهام
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS automation_queue (
                 id INT AUTO_INCREMENT PRIMARY KEY,
@@ -99,8 +189,8 @@ def init_db():
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
             ) ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
         """)
-        
-        # 5. إنشاء جدول حفظ نتائج الصور المرشحة للفرز والاعتماد البصري
+
+        # 5. المرشحات المعروضة على المراجع
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS curation_candidates (
                 id INT AUTO_INCREMENT PRIMARY KEY,
@@ -108,7 +198,7 @@ def init_db():
                 product_name VARCHAR(255) NOT NULL,
                 brand VARCHAR(255) NULL,
                 image_url TEXT NOT NULL,
-                title VARCHAR(255) NULL,
+                title TEXT NULL,
                 width INT NULL,
                 height INT NULL,
                 clip_score DOUBLE NULL,
@@ -118,8 +208,8 @@ def init_db():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             ) ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
         """)
-        
-        # 6. إنشاء جدول إدارة حالة الأتمتة بالخلفية
+
+        # 6. حالة جلسة الأتمتة
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS automation_state (
                 `key` VARCHAR(255) PRIMARY KEY,
@@ -133,11 +223,9 @@ def init_db():
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
             ) ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
         """)
-        
-        # إدراج سجل الجلسة الافتراضي الأولي
         cursor.execute("INSERT IGNORE INTO automation_state (`key`, status) VALUES ('active_session', 'idle')")
-        
-        # 7. إنشاء جدول الإعدادات العامة لحفظ مفاتيح API وبيانات الاعتماد
+
+        # 7. الإعدادات العامة (مفاتيح API وبيانات الاعتماد)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS system_settings (
                 `key` VARCHAR(255) PRIMARY KEY,
@@ -145,8 +233,23 @@ def init_db():
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
             ) ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
         """)
-        
-        # إدراج القيم الافتراضية المبدئية من ملف .env لتجنب فقدانها
+
+        # 8. رفض المراجعين (D11): روابط وبصمات pHash مستبعدة لكل SKU
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS rejected_images (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                sku_key VARCHAR(64) NOT NULL,
+                url_norm VARCHAR(768) NULL,
+                original_url TEXT NULL,
+                page_url TEXT NULL,
+                phash VARCHAR(32) NULL,
+                reason_code VARCHAR(32) NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                INDEX idx_rejected_sku (sku_key)
+            ) ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
+        """)
+
+        # القيم الافتراضية المبدئية من ملف .env (INSERT IGNORE لا يغير القيم الموجودة)
         import config
         default_settings = {
             "photoroom_api_key": getattr(config, "PHOTOROOM_API_KEY", ""),
@@ -157,544 +260,723 @@ def init_db():
             "cloudinary_api_secret": getattr(config, "CLOUDINARY_API_SECRET", ""),
             "google_search_api_key": os.getenv("GOOGLE_SEARCH_API_KEY", ""),
             "google_search_cx": os.getenv("GOOGLE_SEARCH_CX", ""),
-            "clip_relevance_threshold": "0.22",
-            "clip_grey_zone_threshold": "0.18",
+            "serper_api_key": getattr(config, "SERPER_API_KEY", ""),
+            "search_engine": getattr(config, "SEARCH_ENGINE", "v2"),
+            "auto_publish_enabled": "false",
+            "auto_publish_brands": "",
+            "output_canvas_size": str(getattr(config, "OUTPUT_CANVAS_SIZE", 800)),
             "strict_brand_match": "true",
-            "enable_gemini_pre_validation": "true",
-            "filter_competitors": "true",
-            "bypass_white_background_check": "false"
         }
         for k, v in default_settings.items():
-            cursor.execute(
-                "INSERT IGNORE INTO system_settings (`key`, `value`) VALUES (%s, %s)",
-                (k, v)
-            )
-            
-        # التحقق من وجود الأعمدة والمؤشرات وتحديث الجداول القائمة إن وجدت (Auto-migration)
-        cursor.execute("SHOW COLUMNS FROM resolved_products")
-        columns = [col["Field"] for col in cursor.fetchall()]
-        if "clip_embedding_json" not in columns:
-            cursor.execute("ALTER TABLE resolved_products ADD COLUMN clip_embedding_json TEXT")
-            print("💾 [MariaDB Cache] تم إضافة عمود clip_embedding_json لجدول المتجهات بنجاح.")
-            
-        if "perceptual_hash" not in columns:
-            cursor.execute("ALTER TABLE resolved_products ADD COLUMN perceptual_hash VARCHAR(255)")
-            print("💾 [MariaDB Cache] تم إضافة عمود perceptual_hash لجدول البصمات بنجاح.")
-            
-        # إنشاء الفهارس (Indices) لتسريع عمليات البحث والاسترجاع الفوري
-        try:
-            cursor.execute("ALTER TABLE resolved_products ADD INDEX idx_barcode (barcode)")
-        except Exception:
-            pass
-        try:
-            cursor.execute("ALTER TABLE resolved_products ADD INDEX idx_name_brand (product_name, brand)")
-        except Exception:
-            pass
-        try:
-            cursor.execute("ALTER TABLE automation_queue ADD INDEX idx_queue_status (status)")
-        except Exception:
-            pass
-        try:
-            cursor.execute("ALTER TABLE curation_candidates ADD INDEX idx_curation_row (`row_number`)")
-        except Exception:
-            pass
-            
+            cursor.execute("INSERT IGNORE INTO system_settings (`key`, `value`) VALUES (%s, %s)", (k, v))
+
+        for stmt in _SCHEMA_MIGRATIONS:
+            cursor.execute(stmt)
+
         conn.commit()
         conn.close()
-        print("💾 [MariaDB Cache] تم تهيئة قاعدة بيانات التخزين المحلي بنجاح (محدثة بالفرز والاعتماد).")
-    except Exception as e:
-        print(f"⚠️ [MariaDB Cache Error] فشل تهيئة قاعدة البيانات: {e}")
-
-def get_cached_product(barcode=None, product_name=None, brand=None):
-    """
-    الاستعلام من قاعدة البيانات المحلية باستخدام الباركود أو الاسم والبراند.
-    """
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        row = None
-        
-        # 1. الاستعلام بالباركود أولاً كمعيار دقيق ومطلق
-        if barcode and str(barcode).strip():
-            barcode_clean = str(barcode).strip()
-            cursor.execute(
-                "SELECT * FROM resolved_products WHERE barcode = %s ORDER BY resolved_at DESC LIMIT 1",
-                (barcode_clean,)
-            )
-            row = cursor.fetchone()
-            
-        # 2. الاستعلام بالاسم والبراند كخطة بديلة عند غياب الباركود
-        if not row and product_name:
-            name_clean = product_name.strip().lower()
-            brand_clean = brand.strip().lower() if brand else ""
-            
-            # بحث دقيق متجاهلاً حالة الأحرف
-            cursor.execute(
-                "SELECT * FROM resolved_products WHERE LOWER(product_name) = %s AND LOWER(brand) = %s ORDER BY resolved_at DESC LIMIT 1",
-                (name_clean, brand_clean)
-            )
-            row = cursor.fetchone()
-            
-        conn.close()
-        
-        if row:
-            metadata = {}
-            if row["metadata_json"]:
-                try:
-                    metadata = json.loads(row["metadata_json"])
-                except Exception:
-                    pass
-            
-            return {
-                "cloudinary_url": row["cloudinary_url"],
-                "original_url": row["original_url"],
-                "clip_score": row["clip_score"],
-                "metadata": metadata,
-                "source": "mariadb_cache"
-            }
-            
-    except Exception as e:
-        print(f"⚠️ [MariaDB Cache Error] خطأ أثناء القراءة من الكاش: {e}")
-        
-    return None
-
-def save_product_resolution(barcode, product_name, brand, original_url, cloudinary_url, clip_score, metadata, clip_embedding=None, perceptual_hash=None):
-    """
-    حفظ أو تحديث نتيجة مطابقة منتج وصورته في قاعدة البيانات للتأكد من عدم تكراره.
-    """
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        barcode_clean = str(barcode).strip() if barcode else ""
-        metadata_str = json.dumps(metadata) if metadata else ""
-        embedding_str = json.dumps(clip_embedding) if clip_embedding is not None else ""
-        hash_str = str(perceptual_hash) if perceptual_hash is not None else ""
-        
-        # نتحقق إذا كان الباركود مسجلاً سابقاً لتحديثه بدلاً من تكرار السجل
-        if barcode_clean:
-            cursor.execute("SELECT id FROM resolved_products WHERE barcode = %s", (barcode_clean,))
-            existing = cursor.fetchone()
-            if existing:
-                cursor.execute("""
-                    UPDATE resolved_products 
-                    SET product_name = %s, brand = %s, original_url = %s, cloudinary_url = %s, clip_score = %s, metadata_json = %s, clip_embedding_json = %s, perceptual_hash = %s, resolved_at = CURRENT_TIMESTAMP
-                    WHERE id = %s
-                """, (product_name, brand, original_url, cloudinary_url, clip_score, metadata_str, embedding_str, hash_str, existing["id"]))
-                conn.commit()
-                conn.close()
-                delete_product_failure(barcode_clean)
-                print(f"💾 [MariaDB Cache] تم تحديث بيانات الباركود الكاش بنجاح: {barcode_clean}")
-                return True
-                
-        # إدراج سجل جديد
-        cursor.execute("""
-            INSERT INTO resolved_products (barcode, product_name, brand, original_url, cloudinary_url, clip_score, metadata_json, clip_embedding_json, perceptual_hash)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-        """, (barcode_clean, product_name, brand, original_url, cloudinary_url, clip_score, metadata_str, embedding_str, hash_str))
-        
-        conn.commit()
-        conn.close()
-        delete_product_failure(barcode_clean)
-        print(f"💾 [MariaDB Cache] تم حفظ الصورة والبيانات الكاش لـ: '{product_name}'")
+        logger.info("[MariaDB] تم تهيئة/ترقية قاعدة البيانات '%s' بنجاح.", db_name)
         return True
     except Exception as e:
-        print(f"⚠️ [MariaDB Cache Error] فشل حفظ السجل في الكاش: {e}")
+        logger.warning("[MariaDB] فشل تهيئة قاعدة البيانات: %s", e)
         return False
+
+
+# ---------------------------------------------------------------------------
+# الكاش (resolved_products)
+# ---------------------------------------------------------------------------
+
+_SERVABLE_SQL = "verification_status IN ('human_approved','auto_verified')"
+
+
+def _cache_row_to_dict(row):
+    metadata = {}
+    if row.get("metadata_json"):
+        try:
+            metadata = json.loads(row["metadata_json"])
+        except Exception:
+            metadata = {}
+    return {
+        "cloudinary_url": row["cloudinary_url"],
+        "original_url": row.get("original_url"),
+        "clip_score": row.get("clip_score"),
+        "metadata": metadata,
+        "sku_key": row.get("sku_key"),
+        "verification_status": row.get("verification_status"),
+        "approved_by": row.get("approved_by"),
+        "perceptual_hash": row.get("perceptual_hash"),
+        "source": "mariadb_cache",
+    }
+
+
+def get_cached_product(barcode=None, product_name=None, brand=None, sku_key=None):
+    """
+    الاستعلام من الكاش. لا يخدم إلا الحلول المعتمدة (human_approved / auto_verified).
+    - بـ sku_key أولاً إن مُرر.
+    - عند وجود باركود: بحث صارم بالباركود فقط، ولا رجوع للاسم أبداً.
+    - بدون باركود ولا sku_key: مطابقة دقيقة للاسم والبراند.
+    خطأ القراءة يُعامل كعدم وجود (None) ويُسجل.
+    """
+    barcode_clean = str(barcode).strip() if barcode is not None else ""
+    sku_clean = str(sku_key).strip() if sku_key else ""
+    try:
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            row = None
+            if sku_clean:
+                cursor.execute(
+                    f"SELECT * FROM resolved_products WHERE sku_key = %s AND {_SERVABLE_SQL} "
+                    "ORDER BY resolved_at DESC, id DESC LIMIT 1",
+                    (sku_clean,),
+                )
+                row = cursor.fetchone()
+            if row is None and barcode_clean:
+                cursor.execute(
+                    f"SELECT * FROM resolved_products WHERE barcode = %s AND {_SERVABLE_SQL} "
+                    "ORDER BY resolved_at DESC, id DESC LIMIT 1",
+                    (barcode_clean,),
+                )
+                row = cursor.fetchone()
+            elif row is None and not sku_clean and product_name:
+                cursor.execute(
+                    f"SELECT * FROM resolved_products WHERE LOWER(product_name) = %s AND LOWER(brand) = %s "
+                    f"AND {_SERVABLE_SQL} ORDER BY resolved_at DESC, id DESC LIMIT 1",
+                    (product_name.strip().lower(), (brand or "").strip().lower()),
+                )
+                row = cursor.fetchone()
+        finally:
+            _close(conn)
+        return _cache_row_to_dict(row) if row else None
+    except Exception as e:
+        logger.warning("[MariaDB Cache] خطأ أثناء القراءة من الكاش: %s", e)
+        return None
+
+
+def save_product_resolution(barcode, product_name, brand, original_url, cloudinary_url, clip_score=None,
+                            metadata=None, clip_embedding=None, perceptual_hash=None,
+                            verification_status="legacy", approved_by=None, sku_key=None):
+    """
+    حفظ أو تحديث الحل المعتمد لمنتج (Upsert بـ sku_key، أو بالباركود إن لم يوجد sku_key).
+    أحدث سجل مطابق يُحدّث، وأي سجلات مطابقة أخرى تصبح superseded.
+    """
+    if verification_status not in VERIFICATION_STATUSES:
+        raise ValueError(f"verification_status غير صالح: {verification_status!r}")
+    barcode_clean = str(barcode).strip() if barcode else ""
+    sku_clean = str(sku_key).strip() if sku_key else ""
+    metadata_str = json.dumps(metadata, ensure_ascii=False) if metadata else ""
+    embedding_str = json.dumps(clip_embedding) if clip_embedding is not None else ""
+    hash_str = str(perceptual_hash) if perceptual_hash is not None else ""
+    try:
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            clauses, params = [], []
+            if sku_clean:
+                clauses.append("sku_key = %s")
+                params.append(sku_clean)
+            if barcode_clean:
+                clauses.append("barcode = %s")
+                params.append(barcode_clean)
+            existing = []
+            if clauses:
+                cursor.execute(
+                    f"SELECT id FROM resolved_products WHERE {' OR '.join(clauses)} ORDER BY id DESC",
+                    tuple(params),
+                )
+                existing = [r["id"] for r in cursor.fetchall()]
+            values = (barcode_clean, product_name, brand, original_url, cloudinary_url, clip_score,
+                      metadata_str, embedding_str, hash_str, sku_clean or None, verification_status, approved_by)
+            if existing:
+                cursor.execute("""
+                    UPDATE resolved_products
+                    SET barcode = %s, product_name = %s, brand = %s, original_url = %s, cloudinary_url = %s,
+                        clip_score = %s, metadata_json = %s, clip_embedding_json = %s, perceptual_hash = %s,
+                        sku_key = %s, verification_status = %s, approved_by = %s, resolved_at = CURRENT_TIMESTAMP
+                    WHERE id = %s
+                """, values + (existing[0],))
+                older = existing[1:]
+                if older:
+                    placeholders = ",".join("%s" for _ in older)
+                    cursor.execute(
+                        f"UPDATE resolved_products SET verification_status = 'superseded' WHERE id IN ({placeholders})",
+                        tuple(older),
+                    )
+            else:
+                cursor.execute("""
+                    INSERT INTO resolved_products (barcode, product_name, brand, original_url, cloudinary_url,
+                        clip_score, metadata_json, clip_embedding_json, perceptual_hash, sku_key,
+                        verification_status, approved_by)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """, values)
+            conn.commit()
+        finally:
+            _close(conn)
+    except Exception as e:
+        logger.warning("[MariaDB Cache] فشل حفظ الحل المعتمد لـ '%s': %s", product_name, e)
+        return False
+    if verification_status in SERVABLE_STATUSES:
+        delete_product_failure(barcode_clean or f"ERR_{product_name}_{brand}".replace(" ", "_"))
+    return True
+
+
+def supersede_resolution(sku_key, barcode=None):
+    """
+    وسم كل الحلول السابقة لهذا الـ SKU (أو لهذا الباركود) بأنها superseded كي لا يعيدها الكاش.
+    تعيد عدد السجلات المتأثرة، أو None عند خطأ قاعدة البيانات.
+    """
+    clauses, params = [], []
+    if sku_key:
+        clauses.append("sku_key = %s")
+        params.append(str(sku_key).strip())
+    if barcode and str(barcode).strip():
+        clauses.append("barcode = %s")
+        params.append(str(barcode).strip())
+    if not clauses:
+        return 0
+    try:
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                f"UPDATE resolved_products SET verification_status = 'superseded' "
+                f"WHERE ({' OR '.join(clauses)}) AND verification_status <> 'superseded'",
+                tuple(params),
+            )
+            affected = cursor.rowcount
+            conn.commit()
+            return affected
+        finally:
+            _close(conn)
+    except Exception as e:
+        logger.warning("[MariaDB Cache] فشل إلغاء الحل السابق لـ %s: %s", sku_key, e)
+        return None
+
 
 def find_visual_duplicate(target_embedding, threshold=0.96):
     """
-    البحث في قاعدة البيانات المحلية عن أي منتج مسجل يحمل صورة مشابهة بصرياً بنسبة كبيرة
-    لتجنب خلط الصور المكررة لمنتجات مختلفة.
+    (مسار v1 فقط) البحث عن منتج مسجل بمتجه بصري مشابه جداً. لا يُستخدم في v2.
     """
     if target_embedding is None or not isinstance(target_embedding, list) or len(target_embedding) == 0:
         return None
-        
     try:
         conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        # جلب كافة المنتجات التي تحتوي على بصمة متجهة
-        cursor.execute("SELECT product_name, brand, clip_embedding_json, cloudinary_url FROM resolved_products WHERE clip_embedding_json IS NOT NULL AND clip_embedding_json != ''")
-        rows = cursor.fetchall()
-        conn.close()
-        
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT product_name, brand, clip_embedding_json, cloudinary_url FROM resolved_products "
+                "WHERE clip_embedding_json IS NOT NULL AND clip_embedding_json != '' AND " + _SERVABLE_SQL
+            )
+            rows = cursor.fetchall()
+        finally:
+            _close(conn)
         for row in rows:
             try:
                 emb = json.loads(row["clip_embedding_json"])
                 if isinstance(emb, list) and len(emb) == len(target_embedding):
-                    # حساب التشابه الجيبي (Cosine Similarity)
-                    dot_product = sum(x * y for x, y in zip(target_embedding, emb))
-                    norm_v1 = sum(x**2 for x in target_embedding) ** 0.5
-                    norm_v2 = sum(x**2 for x in emb) ** 0.5
-                    similarity = dot_product / (norm_v1 * norm_v2) if (norm_v1 * norm_v2) > 0 else 0.0
-                    
-                    if similarity >= threshold:
-                        print(f"👁️ [Visual Duplicate Detector] تم كشف تكرار بصري مع منتج آخر: '{row['product_name']}' (التطابق البصري: {similarity:.4f})")
-                        return {
-                            "product_name": row["product_name"],
-                            "brand": row["brand"],
-                            "cloudinary_url": row["cloudinary_url"],
-                            "similarity": similarity
-                        }
+                    dot = sum(x * y for x, y in zip(target_embedding, emb))
+                    n1 = sum(x ** 2 for x in target_embedding) ** 0.5
+                    n2 = sum(x ** 2 for x in emb) ** 0.5
+                    sim = dot / (n1 * n2) if (n1 * n2) > 0 else 0.0
+                    if sim >= threshold:
+                        return {"product_name": row["product_name"], "brand": row["brand"],
+                                "cloudinary_url": row["cloudinary_url"], "similarity": sim}
             except Exception:
                 pass
     except Exception as e:
-        print(f"⚠️ [MariaDB Cache Error] خطأ أثناء كشف التكرار البصري: {e}")
-        
+        logger.warning("[MariaDB Cache] خطأ أثناء كشف التكرار البصري: %s", e)
     return None
 
-def save_product_failure(barcode, product_name, brand, error_message):
-    """
-    تسجيل فشل الأتمتة لمنتج معين لتتبعه في طابور الأخطاء.
-    """
+
+# ---------------------------------------------------------------------------
+# رفض المراجعين (rejected_images)
+# ---------------------------------------------------------------------------
+
+def add_rejected_image(sku_key, url, page_url=None, phash=None, reason_code="WRONG_PRODUCT"):
+    """تسجيل صورة رفضها المراجع لهذا الـ SKU. تعيد True عند النجاح."""
+    if not sku_key or not url:
+        raise ValueError("sku_key و url مطلوبان لتسجيل الرفض")
+    if reason_code not in REJECT_REASON_CODES:
+        raise ValueError(f"reason_code غير صالح: {reason_code!r}")
     try:
         conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT INTO rejected_images (sku_key, url_norm, original_url, page_url, phash, reason_code) "
+                "VALUES (%s, %s, %s, %s, %s, %s)",
+                (str(sku_key).strip(), url_norm(url), url, page_url or None, phash or None, reason_code),
+            )
+            conn.commit()
+            return True
+        finally:
+            _close(conn)
+    except Exception as e:
+        logger.warning("[MariaDB] فشل تسجيل الصورة المرفوضة للـ SKU %s: %s", sku_key, e)
+        return False
+
+
+def get_rejections(sku_key):
+    """
+    إرجاع (الروابط المرفوضة، بصمات pHash المرفوضة) لهذا الـ SKU لتمريرها للبحث كاستبعادات.
+    الأكواد التجميلية القديمة (هالة، تسرب خلفية، قص حواف) تخص المعالجة لا هوية الصورة، فلا تُستبعد بها المصادر.
+    أخطاء قاعدة البيانات تُرفع (لا نبحث بصمت دون الاستبعادات).
+    """
+    if not sku_key:
+        return [], []
+    conn = get_db_connection()
+    try:
         cursor = conn.cursor()
-        barcode_clean = str(barcode).strip() if barcode else ""
-        if not barcode_clean:
-            # استخدام اسم المنتج والماركة كباركود بديل إذا لم يكن متوفراً
-            barcode_clean = f"ERR_{product_name}_{brand}".replace(" ", "_")
-        cursor.execute("""
-            REPLACE INTO product_failures (barcode, product_name, brand, error_message, failed_at)
-            VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)
-        """, (barcode_clean, product_name, brand, error_message))
-        conn.commit()
-        conn.close()
+        placeholders = ",".join("%s" for _ in COSMETIC_REASON_CODES)
+        cursor.execute(
+            f"SELECT original_url, phash FROM rejected_images WHERE sku_key = %s "
+            f"AND reason_code NOT IN ({placeholders}) ORDER BY id",
+            (str(sku_key).strip(),) + COSMETIC_REASON_CODES,
+        )
+        rows = cursor.fetchall()
+    finally:
+        _close(conn)
+    urls, phashes = [], []
+    for r in rows:
+        if r.get("original_url") and r["original_url"] not in urls:
+            urls.append(r["original_url"])
+        if r.get("phash") and r["phash"] not in phashes:
+            phashes.append(r["phash"])
+    return urls, phashes
+
+
+# ---------------------------------------------------------------------------
+# أخطاء المنتجات والملاحظات
+# ---------------------------------------------------------------------------
+
+def save_product_failure(barcode, product_name, brand, error_message):
+    """تسجيل فشل منتج حقيقي (لا تُسجل هنا انقطاعات المزودين)."""
+    try:
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            barcode_clean = str(barcode).strip() if barcode else ""
+            if not barcode_clean:
+                barcode_clean = f"ERR_{product_name}_{brand}".replace(" ", "_")
+            cursor.execute("""
+                REPLACE INTO product_failures (barcode, product_name, brand, error_message, failed_at)
+                VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)
+            """, (barcode_clean[:255], product_name, brand, error_message))
+            conn.commit()
+        finally:
+            _close(conn)
         return True
     except Exception as e:
-        print(f"⚠️ [MariaDB Cache Error] فشل حفظ سجل الخطأ: {e}")
+        logger.warning("[MariaDB] فشل حفظ سجل الخطأ: %s", e)
         return False
+
 
 def delete_product_failure(barcode):
-    """
-    حذف سجل الفشل عند نجاح مطابقة المنتج لاحقاً.
-    """
+    """حذف سجل الفشل عند نجاح مطابقة المنتج لاحقاً."""
     try:
         conn = get_db_connection()
-        cursor = conn.cursor()
-        barcode_clean = str(barcode).strip() if barcode else ""
-        cursor.execute("DELETE FROM product_failures WHERE barcode = %s", (barcode_clean,))
-        # فحص إضافي بالاسم والبراند إذا لم يكن هناك باركود
-        if barcode_clean.startswith("ERR_"):
-            cursor.execute("DELETE FROM product_failures WHERE barcode LIKE %s", (barcode_clean + "%",))
-        conn.commit()
-        conn.close()
+        try:
+            cursor = conn.cursor()
+            barcode_clean = str(barcode).strip() if barcode else ""
+            cursor.execute("DELETE FROM product_failures WHERE barcode = %s", (barcode_clean,))
+            if barcode_clean.startswith("ERR_"):
+                cursor.execute("DELETE FROM product_failures WHERE barcode LIKE %s", (barcode_clean + "%",))
+            conn.commit()
+        finally:
+            _close(conn)
         return True
     except Exception as e:
-        print(f"⚠️ [MariaDB Cache Error] فشل حذف سجل الخطأ: {e}")
+        logger.warning("[MariaDB] فشل حذف سجل الخطأ: %s", e)
         return False
+
 
 def get_product_failures():
-    """
-    استرجاع قائمة بكافة المنتجات الفاشلة كـ dict.
-    """
+    """استرجاع كافة المنتجات الفاشلة كـ dict."""
     try:
         conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM product_failures")
-        rows = cursor.fetchall()
-        conn.close()
-        return {row["barcode"]: {"error_message": row["error_message"], "failed_at": row["failed_at"]} for row in rows if row["barcode"]}
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM product_failures")
+            rows = cursor.fetchall()
+        finally:
+            _close(conn)
+        return {row["barcode"]: {"error_message": row["error_message"], "failed_at": row["failed_at"]}
+                for row in rows if row["barcode"]}
     except Exception as e:
-        print(f"⚠️ [MariaDB Cache Error] فشل استرجاع سجلات الأخطاء: {e}")
+        logger.warning("[MariaDB] فشل استرجاع سجلات الأخطاء: %s", e)
         return {}
 
+
 def save_feedback(feedback_id, asset_id, row_number, product_name, brand, image_url, reasons):
-    """
-    حفظ التغذية الراجعة للتعلم النشط عند استبعاد صورة يدوياً.
-    """
+    """حفظ ملاحظة المراجع (تعرضها صفحة التعلم النشط في لوحة التحكم)."""
     try:
         conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("""
-            INSERT INTO active_learning_feedback (feedback_id, asset_id, `row_number`, product_name, brand, image_url, rejection_reasons)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
-        """, (feedback_id, asset_id, row_number, product_name, brand, image_url, json.dumps(reasons, ensure_ascii=False)))
-        conn.commit()
-        conn.close()
-        return True
-    except Exception as e:
-        print(f"⚠️ [MariaDB Cache Error] فشل حفظ سجل التغذية الراجعة: {e}")
-        return False
-
-def add_to_queue(row_number, barcode, name, brand, query):
-    """
-    إضافة منتج إلى طابور المعالجة المنظم (يتفادى التكرار)
-    """
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("""
-            REPLACE INTO automation_queue (`row_number`, barcode, product_name, brand, search_query, status, error_message, attempts, updated_at)
-            VALUES (%s, %s, %s, %s, %s, 'pending', NULL, 0, CURRENT_TIMESTAMP)
-        """, (row_number, barcode, name, brand, query))
-        conn.commit()
-        conn.close()
-        return True
-    except Exception as e:
-        print(f"⚠️ [MariaDB Queue Error] فشل إضافة سجل للطابور: {e}")
-        return False
-
-def fetch_next_task():
-    """
-    سحب المهمة التالية المعلقة ووسمها بـ processing بشكل حاصر وآمن
-    """
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        # قراءة أول سجل معلق بقفل المعاملة
-        cursor.execute("""
-            SELECT * FROM automation_queue 
-            WHERE status = 'pending' 
-            ORDER BY id ASC LIMIT 1
-        """)
-        row = cursor.fetchone()
-        
-        if row:
-            task_id = row["id"]
-            # تحديث الحالة فوراً لـ processing لمنع العمليات الأخرى من سحبه
+        try:
+            cursor = conn.cursor()
             cursor.execute("""
-                UPDATE automation_queue 
-                SET status = 'processing', attempts = attempts + 1, updated_at = CURRENT_TIMESTAMP 
-                WHERE id = %s
-            """, (task_id,))
+                INSERT INTO active_learning_feedback (feedback_id, asset_id, `row_number`, product_name, brand, image_url, rejection_reasons)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """, (feedback_id, asset_id, row_number, product_name, brand, image_url, json.dumps(reasons, ensure_ascii=False)))
             conn.commit()
-            
-            # إعادة جلب السجل المحدث بالكامل
-            cursor.execute("SELECT * FROM automation_queue WHERE id = %s", (task_id,))
-            row_updated = cursor.fetchone()
-            conn.close()
-            return dict(row_updated)
-            
-        conn.close()
-        return None
-    except Exception as e:
-        print(f"⚠️ [MariaDB Queue Error] فشل سحب المهمة التالية: {e}")
-        return None
-
-def update_task_status(task_id, status, error_message=None):
-    """
-    تحديث حالة المهمة بعد المعالجة (completed أو failed)
-    """
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("""
-            UPDATE automation_queue 
-            SET status = %s, error_message = %s, updated_at = CURRENT_TIMESTAMP 
-            WHERE id = %s
-        """, (status, error_message, task_id))
-        conn.commit()
-        conn.close()
+        finally:
+            _close(conn)
         return True
     except Exception as e:
-        print(f"⚠️ [MariaDB Queue Error] فشل تحديث حالة المهمة: {e}")
+        logger.warning("[MariaDB] فشل حفظ سجل الملاحظات: %s", e)
         return False
 
-def update_task_status_by_row(row_number, status, error_message=None):
-    """
-    تحديث حالة المهمة في طابور المعالجة باستخدام رقم الصف (Row Number)
-    """
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("""
-            UPDATE automation_queue 
-            SET status = %s, error_message = %s, updated_at = CURRENT_TIMESTAMP 
-            WHERE `row_number` = %s
-        """, (status, error_message, row_number))
-        conn.commit()
-        conn.close()
-        return True
-    except Exception as e:
-        print(f"⚠️ [MariaDB Queue Error] فشل تحديث حالة المهمة للصف {row_number}: {e}")
-        return False
-
-def get_queue_statistics():
-    """
-    الحصول على إحصائيات طابور المهام لعرضها على لوحة التحكم
-    """
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            SELECT status, COUNT(*) as cnt 
-            FROM automation_queue 
-            GROUP BY status
-        """)
-        rows = cursor.fetchall()
-        conn.close()
-        
-        stats = {"total": 0, "pending": 0, "processing": 0, "completed": 0, "failed": 0}
-        for r in rows:
-            status = r["status"]
-            cnt = r["cnt"]
-            if status in stats:
-                stats[status] = cnt
-            stats["total"] += cnt
-        return stats
-    except Exception as e:
-        print(f"⚠️ [MariaDB Queue Error] فشل استرجاع إحصائيات الطابور: {e}")
-        return {"total": 0, "pending": 0, "processing": 0, "completed": 0, "failed": 0}
-
-def clear_queue():
-    """
-    تفريغ كافة سجلات طابور المعالجة للبدء من جديد
-    """
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM automation_queue")
-        conn.commit()
-        conn.close()
-        return True
-    except Exception as e:
-        print(f"⚠️ [MariaDB Queue Error] فشل مسح الطابور: {e}")
-        return False
-
-def get_active_learning_padding_ratio(brand):
-    """
-    التحقق من التغذية الراجعة لبراند معين لتحديد نسبة الهامش المخصص لمنع قص الأطراف
-    """
-    if not brand:
-        return None
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        # جلب أسباب الاستبعاد لهذا البراند
-        cursor.execute("""
-            SELECT rejection_reasons FROM active_learning_feedback 
-            WHERE LOWER(brand) = %s
-        """, (brand.strip().lower(),))
-        rows = cursor.fetchall()
-        conn.close()
-        
-        cropping_count = 0
-        for r in rows:
-            try:
-                reasons = json.loads(r["rejection_reasons"]) if r["rejection_reasons"] else []
-            except Exception:
-                reasons = []
-            # التحقق مما إذا كان السبب هو قص الأطراف
-            if any("cropping" in str(reason).lower() or "قص" in str(reason) or "margins" in str(reason).lower() for reason in reasons):
-                cropping_count += 1
-                
-        if cropping_count >= 4:
-            return 0.70  # زيادة هامش الأمان ليكون 30%
-        elif cropping_count >= 2:
-            return 0.75  # زيادة هامش الأمان ليكون 25%
-            
-        return None
-    except Exception as e:
-        print(f"⚠️ [Active Learning Error] فشل حساب هامش الأمان المخصص للبراند: {e}")
-        return None
 
 def get_active_learning_clutter_flag(brand):
     """
-    التحقق مما إذا كان هذا البراند قد تم استبعاد صوره مسبقاً بسبب تداخل الخلفية والتشويش
+    (مسار v1 فقط) هل رُفضت صور هذا البراند مرتين على الأقل بسبب تداخل الخلفية؟
     """
     if not brand:
         return False
     try:
         conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT rejection_reasons FROM active_learning_feedback 
-            WHERE LOWER(brand) = %s
-        """, (brand.strip().lower(),))
-        rows = cursor.fetchall()
-        conn.close()
-        
-        clutter_count = 0
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT rejection_reasons FROM active_learning_feedback WHERE LOWER(brand) = %s",
+                           (brand.strip().lower(),))
+            rows = cursor.fetchall()
+        finally:
+            _close(conn)
+        count = 0
         for r in rows:
-            try:
-                reasons = json.loads(r["rejection_reasons"]) if r["rejection_reasons"] else []
-            except Exception:
-                reasons = []
-            if any("clutter" in str(reason).lower() or "تداخل" in str(reason) or "خلفية" in str(reason) or "background" in str(reason).lower() for reason in reasons):
-                clutter_count += 1
-                
-        return clutter_count >= 2
+            reasons = _loads(r.get("rejection_reasons"), [])
+            if any("clutter" in str(x).lower() or "background" in str(x).lower() or "تداخل" in str(x)
+                   or "خلفية" in str(x) for x in reasons):
+                count += 1
+        return count >= 2
     except Exception as e:
-        print(f"⚠️ [Active Learning Error] فشل حساب تداخل الخلفية للبراند: {e}")
+        logger.warning("[Active Learning] فشل حساب تداخل الخلفية للبراند: %s", e)
         return False
 
-def save_curation_candidates(row_number, product_name, brand, candidates, best_url):
+
+# ---------------------------------------------------------------------------
+# طابور المهام (automation_queue)
+# ---------------------------------------------------------------------------
+
+def add_to_queue(row_number, barcode, name, brand, query, payload=None, sku_key=None, reprocess=False):
     """
-    حفظ جميع الصور المرشحة لعملية الفرز والاعتماد البصري.
-    سيتم مسح أي مرشح سابق لنفس رقم الصف وحفظ المرشحات الجديدة.
-    سيتم تعليم المرشح ذو الرابط المماثل لـ best_url كـ selected تلقائياً.
+    إضافة/تحديث صف في الطابور (Upsert على row_number).
+    لا يعيد أبداً ضبط صف جاهز للمراجعة أو مكتمل (ولا صف قيد المعالجة بحجز ساري) إلا إذا reprocess=True
+    أو تغيّر المنتج في هذا الصف (sku_key مختلف). تعيد True عند النجاح وترفع أخطاء قاعدة البيانات.
     """
+    payload_json = json.dumps(payload, ensure_ascii=False) if payload is not None else None
+    # ملاحظة: في ON DUPLICATE KEY UPDATE تُقيّم الإسنادات بالترتيب ويرى كل إسناد القيم المحدثة قبله؛
+    # لذلك تأتي الأعمدة المعتمدة على الحالة القديمة أولاً، ثم status، ثم أعمدة الهوية.
+    # نفس المنتج: نفس sku_key، أو صف قديم بلا sku_key (قبل الترقية) بنفس الاسم
+    keep = ("(%s = 0 AND (sku_key <=> VALUES(sku_key) OR (sku_key IS NULL AND product_name <=> VALUES(product_name))) AND ("
+            "status IN ('ready_for_review','completed') "
+            "OR (status = 'processing' AND lease_until IS NOT NULL AND lease_until >= NOW())))")
+    sql = f"""
+        INSERT INTO automation_queue (`row_number`, barcode, product_name, brand, search_query, status,
+                                      error_message, attempts, sku_key, payload_json, failure_code, updated_at)
+        VALUES (%s, %s, %s, %s, %s, 'pending', NULL, 0, %s, %s, NULL, CURRENT_TIMESTAMP)
+        ON DUPLICATE KEY UPDATE
+            error_message = IF({keep}, error_message, NULL),
+            attempts = IF({keep}, attempts, 0),
+            failure_code = IF({keep}, failure_code, NULL),
+            trace_json = IF({keep}, trace_json, NULL),
+            worker_id = IF({keep}, worker_id, NULL),
+            lease_until = IF({keep}, lease_until, NULL),
+            status = IF({keep}, status, 'pending'),
+            barcode = VALUES(barcode),
+            product_name = VALUES(product_name),
+            brand = VALUES(brand),
+            search_query = VALUES(search_query),
+            sku_key = VALUES(sku_key),
+            payload_json = VALUES(payload_json),
+            updated_at = CURRENT_TIMESTAMP
+    """
+    flag = 1 if reprocess else 0
+    params = (row_number, barcode, name, brand, query, sku_key, payload_json) + (flag,) * 7
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(sql, params)
+        conn.commit()
+    finally:
+        _close(conn)
+    return True
+
+
+def new_claim_id(worker_id=None):
+    base = worker_id or f"{socket.gethostname()[:20]}:{os.getpid()}"
+    return f"{base}#{uuid.uuid4().hex[:12]}"[:64]
+
+
+def fetch_next_task(worker_id=None):
+    """
+    سحب ذري للمهمة التالية: UPDATE واحد يحجز الصف (pending، أو processing انتهى حجزه) بمعرف سحب فريد،
+    ثم SELECT بذلك المعرف. شرط الحالة يتكرر في الـ WHERE الخارجي كي يفشل المتسابق الثاني بدل أن يسرق الصف.
+    أخطاء قاعدة البيانات تُرفع (لا تتحول إلى None).
+    """
+    claim_id = new_claim_id(worker_id)
+    claimable = "(status='pending' OR (status='processing' AND lease_until<NOW()))"
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE automation_queue SET status='processing', worker_id=%s, "
+            f"lease_until=NOW() + INTERVAL {LEASE_MINUTES} MINUTE, attempts=attempts+1, updated_at=CURRENT_TIMESTAMP "
+            "WHERE id=(SELECT id FROM (SELECT id FROM automation_queue WHERE "
+            "status='pending' OR (status='processing' AND lease_until<NOW()) ORDER BY id LIMIT 1) t) "
+            f"AND {claimable}",
+            (claim_id,),
+        )
+        conn.commit()
+        cursor.execute("SELECT * FROM automation_queue WHERE worker_id = %s LIMIT 1", (claim_id,))
+        row = cursor.fetchone()
+    finally:
+        _close(conn)
+    return dict(row) if row else None
+
+
+def get_task_by_row(row_number):
+    """صف الطابور لرقم صف الشيت (أو None). أخطاء قاعدة البيانات تُسجل وتعيد None."""
     try:
         conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM automation_queue WHERE `row_number` = %s", (row_number,))
+            row = cursor.fetchone()
+        finally:
+            _close(conn)
+        return dict(row) if row else None
+    except Exception as e:
+        logger.warning("[MariaDB Queue] فشل قراءة صف الطابور %s: %s", row_number, e)
+        return None
+
+
+def _trace_to_json(trace):
+    if trace is None:
+        return None
+    try:
+        return json.dumps(trace, ensure_ascii=False, default=str)
+    except Exception:
+        return None
+
+
+def update_task_status(task_id, status, error_message=None, failure_code=None, trace=None):
+    """تحديث حالة المهمة بعد المعالجة، مع رمز الفشل والـ trace، وتحرير الحجز."""
+    try:
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE automation_queue
+                SET status = %s, error_message = %s, failure_code = %s,
+                    trace_json = COALESCE(%s, trace_json), lease_until = NULL, updated_at = CURRENT_TIMESTAMP
+                WHERE id = %s
+            """, (status, error_message, failure_code, _trace_to_json(trace), task_id))
+            conn.commit()
+        finally:
+            _close(conn)
+        return True
+    except Exception as e:
+        logger.warning("[MariaDB Queue] فشل تحديث حالة المهمة %s: %s", task_id, e)
+        return False
+
+
+def update_task_status_by_row(row_number, status, error_message=None, failure_code=None):
+    """تحديث حالة المهمة باستخدام رقم صف الشيت."""
+    try:
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE automation_queue
+                SET status = %s, error_message = %s, failure_code = %s, lease_until = NULL,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE `row_number` = %s
+            """, (status, error_message, failure_code, row_number))
+            conn.commit()
+        finally:
+            _close(conn)
+        return True
+    except Exception as e:
+        logger.warning("[MariaDB Queue] فشل تحديث حالة المهمة للصف %s: %s", row_number, e)
+        return False
+
+
+def get_queue_statistics():
+    """إحصائيات الطابور حسب الحالة (تشمل ready_for_review). أخطاء قاعدة البيانات تُرفع."""
+    conn = get_db_connection()
+    try:
         cursor = conn.cursor()
-        
-        # 1. مسح المرشحات السابقة لهذا الصف
+        cursor.execute("SELECT status, COUNT(*) AS cnt FROM automation_queue GROUP BY status")
+        rows = cursor.fetchall()
+    finally:
+        _close(conn)
+    stats = {"total": 0, "pending": 0, "processing": 0, "ready_for_review": 0, "completed": 0, "failed": 0}
+    for r in rows:
+        status = r["status"] or "unknown"
+        stats[status] = stats.get(status, 0) + int(r["cnt"])
+        stats["total"] += int(r["cnt"])
+    return stats
+
+
+def count_open_tasks():
+    """عدد المهام المفتوحة (pending أو processing) بـ COUNT(*) موثوق. أخطاء قاعدة البيانات تُرفع."""
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) AS cnt FROM automation_queue WHERE status IN ('pending','processing')")
+        row = cursor.fetchone()
+    finally:
+        _close(conn)
+    return int(row["cnt"])
+
+
+def clear_queue():
+    """تفريغ الطابور بالكامل (زر إعادة الضبط في لوحة التحكم فقط؛ الإدراج لا يستدعيه)."""
+    try:
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM automation_queue")
+            conn.commit()
+        finally:
+            _close(conn)
+        return True
+    except Exception as e:
+        logger.warning("[MariaDB Queue] فشل مسح الطابور: %s", e)
+        return False
+
+
+def get_ready_for_review_count():
+    """عدد المنتجات الجاهزة للمراجعة."""
+    try:
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) AS count FROM automation_queue WHERE status = 'ready_for_review'")
+            row = cursor.fetchone()
+        finally:
+            _close(conn)
+        if row:
+            return row['count']
+    except Exception as e:
+        logger.warning("[MariaDB Queue] فشل حساب المهام الجاهزة للمراجعة: %s", e)
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# مرشحات المراجعة (curation_candidates)
+# ---------------------------------------------------------------------------
+
+def _json_or_none(value):
+    if value is None or value == "" or value == [] or value == {}:
+        return None
+    try:
+        return json.dumps(value, ensure_ascii=False, default=str)
+    except Exception:
+        return None
+
+
+def _candidate_score(c):
+    scores = c.get("scores") or {}
+    for value in (scores.get("identity_score"), scores.get("relevance_score"), c.get("relevance_score")):
+        if isinstance(value, (int, float)):
+            return float(value)
+    return None
+
+
+def _as_int(value):
+    try:
+        return int(value) if value not in (None, "") else None
+    except (TypeError, ValueError):
+        return None
+
+
+def save_curation_candidates(row_number, product_name, brand, candidates, best_url=None, sku_key=None, run_id=None):
+    """
+    استبدال مرشحات الصف بمرشحات التشغيل الحالي في معاملة واحدة.
+    تُحفظ الحالة والأسباب والأدلة وقراءة VLM لكل مرشح. is_selected=1 فقط للحالة 'preselected'
+    (best_url لم يعد يحدد الاختيار المسبق). تعيد True عند النجاح و False عند أي خطأ (مع التراجع).
+    """
+    run_id = run_id or uuid.uuid4().hex[:16]
+    try:
+        conn = get_db_connection()
+    except Exception as e:
+        logger.warning("[Curation] تعذر الاتصال لحفظ مرشحات الصف %s: %s", row_number, e)
+        return False
+    try:
+        cursor = conn.cursor()
         cursor.execute("DELETE FROM curation_candidates WHERE `row_number` = %s", (row_number,))
-        
-        # 2. إدخال المرشحات الجديدة
-        for c in candidates:
-            url = c.get("url")
-            if not url:
+        seen = set()
+        for c in candidates or []:
+            url = (c.get("url") or c.get("image_url") or "").strip()
+            if not url or url in seen:
                 continue
-            title = c.get("title", "")
-            width = c.get("width", 0)
-            height = c.get("height", 0)
-            
-            # extract clip score
-            clip_score = 0.0
-            if c.get("scores") and "relevance_score" in c["scores"]:
-                clip_score = float(c["scores"]["relevance_score"])
-            elif "clip_score" in c:
-                clip_score = float(c["clip_score"])
-            elif "relevance_score" in c:
-                clip_score = float(c["relevance_score"])
-                
-            # source domain
-            from urllib.parse import urlparse
-            source_domain = ""
-            try:
-                parsed_uri = urlparse(url)
-                source_domain = parsed_uri.netloc
-            except Exception:
-                pass
-                
-            is_selected = 1 if url == best_url else 0
-            status = 'pending'
-            
+            seen.add(url)
+            status = str(c.get("status") or "eligible")
+            title = str(c.get("title") or c.get("page_title") or "")[:MAX_TITLE_CHARS]
+            page_url = c.get("page_url") or None
+            domain = c.get("domain") or ""
+            if not domain:
+                try:
+                    from urllib.parse import urlparse
+                    domain = urlparse(page_url or url).netloc
+                except Exception:
+                    domain = ""
+            evidence = c.get("evidence")
+            tier = c.get("identity_tier") or c.get("tier")
+            if tier is None and isinstance(evidence, dict):
+                tier = evidence.get("tier")
             cursor.execute("""
                 INSERT INTO curation_candidates (
-                    `row_number`, product_name, brand, image_url, title, width, height, clip_score, source_domain, is_selected, status
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    `row_number`, product_name, brand, image_url, title, width, height, clip_score, source_domain,
+                    is_selected, status, sku_key, run_id, reasons_json, evidence_json, vlm_json, content_sha256,
+                    identity_tier, page_url
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (
-                row_number, product_name, brand, url, title, int(width or 0), int(height or 0),
-                float(clip_score or 0.0), source_domain, is_selected, status
+                row_number, product_name, brand, url, title, _as_int(c.get("width")), _as_int(c.get("height")),
+                _candidate_score(c), str(domain)[:255], 1 if status == "preselected" else 0, status[:255],
+                sku_key, run_id, _json_or_none(c.get("reasons")), _json_or_none(evidence),
+                _json_or_none(c.get("vlm")), c.get("content_sha256") or None,
+                (str(tier)[:8] if tier is not None else None), page_url,
             ))
-            
         conn.commit()
-        conn.close()
-        print(f"💾 [Curation Database] تم حفظ المرشحات للصف {row_number} بنجاح.")
+        return True
     except Exception as e:
-        print(f"⚠️ [Curation Database Error] فشل حفظ مرشحات الفرز للصف {row_number}: {e}")
+        logger.warning("[Curation] فشل حفظ مرشحات الصف %s: %s", row_number, e)
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        return False
+    finally:
+        _close(conn)
+
+
+def _loads(value, default):
+    if not value:
+        return default
+    try:
+        return json.loads(value)
+    except Exception:
+        return default
+
 
 def get_curation_candidates(row_number):
-    """
-    جلب جميع الصور المرشحة المحفوظة لصف معين.
-    """
+    """جلب المرشحات المحفوظة لصف معين (المختار مسبقاً أولاً)."""
     try:
         conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM curation_candidates WHERE `row_number` = %s ORDER BY clip_score DESC", (row_number,))
-        rows = cursor.fetchall()
-        conn.close()
-        
-        candidates = []
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM curation_candidates WHERE `row_number` = %s ORDER BY is_selected DESC, id ASC",
+                (row_number,),
+            )
+            rows = cursor.fetchall()
+        finally:
+            _close(conn)
+        out = []
         for r in rows:
-            candidates.append({
+            out.append({
                 "id": r["id"],
                 "row_number": r["row_number"],
                 "product_name": r["product_name"],
@@ -703,129 +985,113 @@ def get_curation_candidates(row_number):
                 "title": r["title"],
                 "width": r["width"],
                 "height": r["height"],
-                "clip_score": r["clip_score"],
+                "clip_score": r.get("clip_score"),
                 "source_domain": r["source_domain"],
                 "is_selected": r["is_selected"],
-                "status": r["status"]
+                "status": r["status"],
+                "sku_key": r.get("sku_key"),
+                "run_id": r.get("run_id"),
+                "reasons": _loads(r.get("reasons_json"), []),
+                "evidence": _loads(r.get("evidence_json"), {}),
+                "vlm": _loads(r.get("vlm_json"), None),
+                "content_sha256": r.get("content_sha256"),
+                "identity_tier": r.get("identity_tier"),
+                "page_url": r.get("page_url"),
             })
-        return candidates
+        return out
     except Exception as e:
-        print(f"⚠️ [Curation Database Error] فشل جلب مرشحات الفرز للصف {row_number}: {e}")
+        logger.warning("[Curation] فشل جلب مرشحات الصف %s: %s", row_number, e)
         return []
 
-def update_automation_state(status, total=None, processed=None, success=None, failed=None, current_product=None):
-    """
-    تحديث حالة ومؤشرات جلسة الأتمتة الجارية حالياً في قاعدة البيانات.
-    """
+
+def delete_curation_candidates(row_number):
+    """مسح كل مرشحات صف معين بعد اعتماده أو رفضه."""
     try:
         conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        updates = ["status = %s", "updated_at = CURRENT_TIMESTAMP"]
-        params = [status]
-        
-        if total is not None:
-            updates.append("total_items = %s")
-            params.append(total)
-        if processed is not None:
-            updates.append("processed_items = %s")
-            params.append(processed)
-        if success is not None:
-            updates.append("success_count = %s")
-            params.append(success)
-        if failed is not None:
-            updates.append("failed_count = %s")
-            params.append(failed)
-        if current_product is not None:
-            updates.append("current_product_name = %s")
-            params.append(current_product)
-            
-        params.append("active_session")
-        query = f"UPDATE automation_state SET {', '.join(updates)} WHERE `key` = %s"
-        cursor.execute(query, params)
-        conn.commit()
-        conn.close()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM curation_candidates WHERE `row_number` = %s", (row_number,))
+            conn.commit()
+        finally:
+            _close(conn)
         return True
     except Exception as e:
-        print(f"⚠️ [MariaDB State Error] فشل تحديث حالة الأتمتة: {e}")
+        logger.warning("[Curation] فشل مسح مرشحات الصف %s: %s", row_number, e)
         return False
 
-def get_automation_state():
-    """
-    الاستعلام عن حالة الأتمتة الحالية من قاعدة البيانات.
-    """
+
+# ---------------------------------------------------------------------------
+# حالة جلسة الأتمتة (automation_state)
+# ---------------------------------------------------------------------------
+
+def update_automation_state(status, total=None, processed=None, success=None, failed=None,
+                            current_product=None, notice=None):
+    """تحديث حالة ومؤشرات جلسة الأتمتة الجارية."""
     try:
         conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM automation_state WHERE `key` = 'active_session'")
-        row = cursor.fetchone()
-        conn.close()
+        try:
+            cursor = conn.cursor()
+            updates = ["status = %s", "updated_at = CURRENT_TIMESTAMP"]
+            params = [status]
+            for column, value in (("total_items", total), ("processed_items", processed),
+                                  ("success_count", success), ("failed_count", failed),
+                                  ("current_product_name", current_product), ("notice", notice)):
+                if value is not None:
+                    updates.append(f"{column} = %s")
+                    params.append(value[:255] if isinstance(value, str) else value)
+            params.append("active_session")
+            cursor.execute(f"UPDATE automation_state SET {', '.join(updates)} WHERE `key` = %s", params)
+            conn.commit()
+        finally:
+            _close(conn)
+        return True
+    except Exception as e:
+        logger.warning("[MariaDB State] فشل تحديث حالة الأتمتة: %s", e)
+        return False
+
+
+def get_automation_state():
+    """الاستعلام عن حالة الأتمتة الحالية."""
+    try:
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM automation_state WHERE `key` = 'active_session'")
+            row = cursor.fetchone()
+        finally:
+            _close(conn)
         if row:
             return dict(row)
     except Exception as e:
-        print(f"⚠️ [MariaDB State Error] فشل استرداد حالة الأتمتة: {e}")
-    return {"status": "idle", "total_items": 0, "processed_items": 0, "success_count": 0, "failed_count": 0, "current_product_name": "", "pause_requested": 0}
+        logger.warning("[MariaDB State] فشل استرداد حالة الأتمتة: %s", e)
+    return {"status": "idle", "total_items": 0, "processed_items": 0, "success_count": 0, "failed_count": 0,
+            "current_product_name": "", "pause_requested": 0}
+
+
+def _set_pause(value):
+    try:
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("UPDATE automation_state SET pause_requested = %s WHERE `key` = 'active_session'", (value,))
+            conn.commit()
+        finally:
+            _close(conn)
+        return True
+    except Exception as e:
+        logger.warning("[MariaDB State] فشل تعديل علم الإيقاف المؤقت: %s", e)
+        return False
+
 
 def pause_automation():
-    """
-    تعيين علم طلب الإيقاف المؤقت لجلسة الأتمتة الجارية.
-    """
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("UPDATE automation_state SET pause_requested = 1 WHERE `key` = 'active_session'")
-        conn.commit()
-        conn.close()
-        return True
-    except Exception as e:
-        print(f"⚠️ [MariaDB State Error] فشل إيقاف الأتمتة مؤقتاً: {e}")
-        return False
+    """تعيين علم طلب الإيقاف المؤقت."""
+    return _set_pause(1)
+
 
 def resume_automation():
-    """
-    إعادة استئناف جلسة الأتمتة وإلغاء علم الإيقاف.
-    """
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("UPDATE automation_state SET pause_requested = 0 WHERE `key` = 'active_session'")
-        conn.commit()
-        conn.close()
-        return True
-    except Exception as e:
-        print(f"⚠️ [MariaDB State Error] فشل استئناف الأتمتة: {e}")
-        return False
+    """إلغاء علم الإيقاف المؤقت."""
+    return _set_pause(0)
 
-def delete_curation_candidates(row_number):
-    """
-    مسح جميع المرشحات البصرية المخزنة لصف معين بعد اعتماده أو استبعاده.
-    """
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM curation_candidates WHERE `row_number` = %s", (row_number,))
-        conn.commit()
-        conn.close()
-        return True
-    except Exception as e:
-        print(f"⚠️ [Curation Database Error] فشل مسح مرشحات الصف {row_number}: {e}")
-        return False
-
-def get_ready_for_review_count():
-    """
-    جلب عدد المنتجات الجاهزة للمراجعة بانتظار الاعتماد.
-    """
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT COUNT(*) as count FROM automation_queue WHERE status = 'ready_for_review'")
-        row = cursor.fetchone()
-        conn.close()
-        if row:
-            return row['count']
-    except Exception as e:
-        print(f"⚠️ [MariaDB Queue Error] فشل حساب المهام الجاهزة للمراجعة: {e}")
-    return 0
 
 # تهيئة قاعدة البيانات تلقائياً عند استيراد الموديول للمرة الأولى
 init_db()

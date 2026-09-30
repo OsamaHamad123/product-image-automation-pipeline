@@ -1,8 +1,32 @@
 # main.py
-# السكربت الرئيسي لتشغيل وإدارة نظام الأتمتة بالكامل
+# السكربت الرئيسي لتشغيل نظام الأتمتة: بناء الطابور (--enqueue)، عامل البحث المسبق (--worker)،
+# والوضع التسلسلي القديم (بدون وسيط).
+#
+# القرارات الملزمة هنا (D10/D11/D14):
+# - النشر التلقائي فقط عندما يكون قرار البحث AUTO_PUBLISH (لا عتبات clip_score)، وأبداً لنتيجة من الكاش.
+# - إعادة المحاولة فقط عند PROVIDER_DOWN أو استثناء؛ "لا نتيجة" نظيفة لا تُعاد.
+# - رفض المراجعين (روابط + pHash) يُمرر للبحث كاستبعادات لكل SKU.
+# - اللوحة المنشورة 800x800 بيضاء من image_processor بدون أي تكبير لاحق؛ إذا لم تُعزل الخلفية
+#   يُكتب الرابط ببادئة needs_review: ولا يُخزن كحل معتمد.
 
+import json
 import os
 import sys
+import time
+import uuid
+
+
+def _reconfigure_stdout():
+    # نوافذ: مخرجات الكونسول المحولة قد تكون cp1256/cp1252؛ نضمن UTF-8 قبل أي طباعة عربية أو رموز
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
+
+_reconfigure_stdout()
+
 import config
 print = config.log_runner
 import google_sheets
@@ -10,831 +34,792 @@ import image_search
 import image_processor
 import cloudinary_storage
 import local_cache_db
-import time
+
+MAX_SEARCH_ATTEMPTS = 3
+RETRY_BASE_DELAY = 2.0
+MAX_PROVIDER_DOWN_STREAK = 5
+MAX_DB_OUTAGE_SECONDS = 600
+MAX_SAVED_CANDIDATES = 20
+
 
 def load_run_config():
     """
-    تحميل إعدادات التشغيل الجماعي المخصصة من ملف run_config.json إن وجد لتجاوز إعدادات config.py
+    تحميل إعدادات التشغيل الجماعي من temp/run_config.json إن وجد لتجاوز إعدادات config.py.
     """
-    # إعادة تحميل الإعدادات والاعتمادات من قاعدة البيانات لضمان استخدام أحدث المفاتيح
     try:
         config.load_db_config()
     except Exception as e:
-        print(f"⚠️ فشل تحديث الإعدادات من قاعدة البيانات: {e}")
-        
+        print(f"تنبيه: فشل تحديث الإعدادات من قاعدة البيانات: {e}")
+
     config_file = "temp/run_config.json"
-    if os.path.exists(config_file):
-        try:
-            import json
-            with open(config_file, "r", encoding="utf-8") as f:
-                overrides = json.load(f)
-                
-            if "ignoreUnitClash" in overrides:
-                config.IGNORE_UNIT_CLASH = bool(overrides["ignoreUnitClash"])
-            if "strictBrandMatch" in overrides:
-                config.STRICT_BRAND_MATCH = bool(overrides["strictBrandMatch"])
-            if "aiUpscale" in overrides:
-                config.FORCE_UPSCALING = bool(overrides["aiUpscale"])
-            if "aiEnhance" in overrides:
-                config.ENABLE_IMAGE_ENHANCEMENT = bool(overrides["aiEnhance"])
-            if "skipCache" in overrides:
-                config.SKIP_LOCAL_CACHE = bool(overrides["skipCache"])
-            if "target_width" in overrides:
-                w = int(overrides["target_width"])
-                h = int(overrides.get("target_height", 0))
-                config.IMAGE_TARGET_SIZE = (w, h)
-            if "padding_ratio" in overrides:
-                config.IMAGE_PADDING_RATIO = float(overrides["padding_ratio"])
-            if "bg_color" in overrides:
-                config.IMAGE_BG_COLOR = str(overrides["bg_color"]).strip().lstrip('#')
-            if "curation_mode" in overrides:
-                config.CURATION_MODE = bool(overrides["curation_mode"])
-            if "brand_filter" in overrides:
-                val = overrides["brand_filter"]
-                config.BRAND_FILTER = str(val).strip() if (val is not None and str(val).strip().lower() != "none") else ""
-            if "row_filter" in overrides:
-                val = overrides["row_filter"]
-                config.ROW_FILTER = str(val).strip() if (val is not None and str(val).strip().lower() != "none") else ""
-            if "auto_approve_threshold" in overrides:
-                try:
-                    config.AUTO_APPROVE_THRESHOLD = float(overrides["auto_approve_threshold"])
-                except ValueError:
-                    config.AUTO_APPROVE_THRESHOLD = 0.0
-            if "forceOverwrite" in overrides:
-                config.FORCE_OVERWRITE_IMAGES = bool(overrides["forceOverwrite"])
-                
-            print("⚙️ [Run Config] تم تحميل وتطبيق التجاوزات البرمجية من ملف run_config.json بنجاح!")
-        except Exception as e:
-            print(f"⚠️ خطأ أثناء تحميل إعدادات run_config.json: {e}")
+    if not os.path.exists(config_file):
+        return
+    try:
+        with open(config_file, "r", encoding="utf-8") as f:
+            overrides = json.load(f)
+
+        if "strictBrandMatch" in overrides:
+            config.STRICT_BRAND_MATCH = bool(overrides["strictBrandMatch"])
+        if "aiEnhance" in overrides:
+            config.ENABLE_IMAGE_ENHANCEMENT = bool(overrides["aiEnhance"])
+        if "skipCache" in overrides:
+            config.SKIP_LOCAL_CACHE = bool(overrides["skipCache"])
+        if "target_width" in overrides:
+            w = int(overrides["target_width"] or 0)
+            h = int(overrides.get("target_height", 0) or 0)
+            config.IMAGE_TARGET_SIZE = (w, h)
+        if "bg_color" in overrides:
+            config.IMAGE_BG_COLOR = str(overrides["bg_color"]).strip().lstrip('#')
+        if "curation_mode" in overrides:
+            config.CURATION_MODE = bool(overrides["curation_mode"])
+        if "brand_filter" in overrides:
+            val = overrides["brand_filter"]
+            config.BRAND_FILTER = str(val).strip() if (val is not None and str(val).strip().lower() != "none") else ""
+        if "row_filter" in overrides:
+            val = overrides["row_filter"]
+            config.ROW_FILTER = str(val).strip() if (val is not None and str(val).strip().lower() != "none") else ""
+        for key in ("forceOverwrite", "reprocess"):
+            if key in overrides:
+                config.FORCE_OVERWRITE_IMAGES = bool(overrides[key])
+        for key in ("auto_publish_enabled", "autoPublish"):
+            if key in overrides:
+                config.AUTO_PUBLISH_ENABLED = bool(overrides[key])
+        if "auto_publish_brands" in overrides:
+            val = overrides["auto_publish_brands"]
+            items = val if isinstance(val, (list, tuple)) else str(val or "").split(",")
+            config.AUTO_PUBLISH_BRANDS = [str(b).strip() for b in items if str(b).strip()]
+        for retired in ("ignoreUnitClash", "auto_approve_threshold", "aiUpscale", "padding_ratio"):
+            if retired in overrides:
+                print(f"تنبيه: الخيار '{retired}' في run_config.json لم يعد مدعوماً وتم تجاهله.")
+        print("[Run Config] تم تطبيق التجاوزات من run_config.json.")
+    except Exception as e:
+        print(f"تنبيه: خطأ أثناء تحميل run_config.json: {e}")
+
 
 def save_progress(current, total, success, failed, current_product=""):
     try:
-        import json
         os.makedirs("temp", exist_ok=True)
         with open("temp/batch_progress.json", "w", encoding="utf-8") as f:
-            json.dump({
-                "current": current,
-                "total": total,
-                "success": success,
-                "failed": failed,
-                "current_product": current_product
-            }, f, ensure_ascii=False)
+            json.dump({"current": current, "total": total, "success": success, "failed": failed,
+                       "current_product": current_product}, f, ensure_ascii=False)
     except Exception:
         pass
 
-def process_single_product(prod, worksheet, link_column_index):
+
+# ---------------------------------------------------------------------------
+# أدوات مشتركة
+# ---------------------------------------------------------------------------
+
+def parse_row_filter(text):
+    """'2-5, 9' -> {2,3,4,5,9}. فارغ -> None. صيغة خاطئة -> ValueError."""
+    text = (text or "").strip()
+    if not text:
+        return None
+    allowed = set()
+    for part in text.split(','):
+        part = part.strip()
+        if not part:
+            continue
+        if '-' in part:
+            start, end = part.split('-', 1)
+            start, end = int(start), int(end)
+            if end < start:
+                raise ValueError(f"نطاق صفوف مقلوب: {part}")
+            allowed.update(range(start, end + 1))
+        else:
+            allowed.add(int(part))
+    if not allowed:
+        raise ValueError(f"فلتر صفوف فارغ: {text!r}")
+    return allowed
+
+
+def task_payload(task):
+    """حمولة الصف الكاملة (name_ar, brand_ar, category, size...) المخزنة في الطابور."""
+    raw = task.get("payload_json")
+    if isinstance(raw, dict):
+        return raw
+    if not raw:
+        return {}
+    try:
+        value = json.loads(raw)
+        return value if isinstance(value, dict) else {}
+    except Exception:
+        return {}
+
+
+def sku_row(name, brand, barcode, payload):
+    return {
+        "name": name or "",
+        "brand": brand or "",
+        "barcode": barcode or "",
+        "name_ar": payload.get("name_ar", ""),
+        "brand_ar": payload.get("brand_ar", ""),
+        "category": payload.get("category", ""),
+        "size": payload.get("size", ""),
+    }
+
+
+def compute_sku_key(row, brand_mappings=None):
+    """sku_key الموحد (GTIN-14 أو بصمة البراند|الاسم|الحجم) عبر catalog_match.identity."""
+    from catalog_match.identity import build_sku_spec
+    return build_sku_spec(row, brand_mappings).sku_key
+
+
+def default_query(name, brand):
+    return f"{name or ''} {brand or ''}".strip()
+
+
+def custom_query_for(query, name, brand):
+    """الاستعلام المخصص يُمرر فقط إذا اختلف عن الاستعلام الافتراضي (الاسم + البراند)."""
+    q = " ".join(str(query or "").split())
+    if not q or q == " ".join(default_query(name, brand).split()):
+        return None
+    return q
+
+
+def collect_candidates(best, trace, limit=MAX_SAVED_CANDIDATES):
+    """المرشحات التي تُعرض على المراجع، مع الحالة والأسباب والأدلة كما أعادها البحث."""
+    if best.get("source") == "sqlite_cache":
+        preselected = best.get("decision") == "REVIEW_PRESELECTED" or bool(best.get("preselect"))
+        return [{
+            "url": best["url"],
+            "title": best.get("title") or "cached approval",
+            "status": "preselected" if preselected else "eligible",
+            "width": best.get("width"),
+            "height": best.get("height"),
+            "reasons": ["cache_hit"],
+            "evidence": {"source": "cache", "original_url": best.get("original_url")},
+        }]
+
+    cands = best.get("candidates")
+    if not cands:
+        cands, seen = [], set()
+        for step in (trace or {}).get("steps", []) or []:
+            for c in step.get("candidates", []) or []:
+                url = c.get("url")
+                if url and url not in seen:
+                    seen.add(url)
+                    cands.append(c)
+    out = [dict(c) for c in cands if isinstance(c, dict) and (c.get("url") or c.get("image_url"))]
+    if best.get("preselect") and not any(c.get("status") == "preselected" for c in out):
+        for c in out:
+            if c.get("url") == best.get("url"):
+                c["status"] = "preselected"
+                break
+    return out[:limit]
+
+
+def _outcome(trace):
+    outcome = (trace or {}).get("outcome")
+    return outcome if isinstance(outcome, dict) else {}
+
+
+def _is_provider_down(best, trace):
+    outcome = _outcome(trace)
+    return best is None and "PROVIDER_DOWN" in (outcome.get("failure_code"), outcome.get("decision"))
+
+
+def search_with_retry(query, name, brand, search_kwargs, sleep=time.sleep,
+                      max_attempts=MAX_SEARCH_ATTEMPTS, base_delay=RETRY_BASE_DELAY):
     """
-    معالجة منتج فردي بالكامل وتحديث الشيت وحفظه بالكاش
+    البحث مع إعادة المحاولة فقط عند PROVIDER_DOWN أو استثناء (بحد أقصى 3 مع ارتداد).
+    كل محاولة تحصل على trace جديد. تعيد (best, trace, state, error) حيث state: ok | provider_down | error.
+    """
+    delay = base_delay
+    trace, state, error = {}, "ok", None
+    for attempt in range(1, max_attempts + 1):
+        trace = {}
+        try:
+            best = image_search.search_best_product_image(query, name, brand, trace=trace, **search_kwargs)
+        except Exception as ex:
+            state, error = "error", f"{type(ex).__name__}: {ex}"
+            print(f"[Attempt {attempt}/{max_attempts}] فشل البحث للمنتج [{name}]: {error}")
+        else:
+            if not _is_provider_down(best, trace):
+                return best, trace, "ok", None
+            state, error = "provider_down", "all search providers unavailable"
+            print(f"[Attempt {attempt}/{max_attempts}] محركات البحث غير متاحة للمنتج [{name}].")
+        if attempt < max_attempts:
+            sleep(delay)
+            delay *= 2
+    return None, trace, state, error
+
+
+def _folder_and_tags(metadata):
+    folder, tags = "products", []
+    cat1 = (metadata.get("category_l1_en") or "").strip().lower().replace(" ", "_").replace("&", "and")
+    cat2 = (metadata.get("category_l2_en") or "").strip().lower().replace(" ", "_").replace("&", "and")
+    if cat1:
+        folder = f"products/{cat1}/{cat2}" if cat2 else f"products/{cat1}"
+    tags_str = metadata.get("tags_en") or ""
+    if tags_str:
+        tags = [t.strip() for t in str(tags_str).split(",") if t.strip()]
+    return folder, tags
+
+
+def publish_image(image_url, name, brand, row_number, worksheet, link_column_index, *, barcode="",
+                  candidate_sha256=None, bg_method=None, target=(0, 0), category_override=None,
+                  enhance=False, force_review=False):
+    """
+    معالجة الصورة المعتمدة إلى لوحة النشر النهائية ورفعها وكتابة رابطها في الشيت.
+    لا تكبير لاحق: اللوحة من image_processor نهائية. البيانات الوصفية تُكتب في الشيت فقط بعد نجاح الرفع.
+    الحالة: 'published' (معزولة وليست للمراجعة) | 'needs_review' (رابط ببادئة needs_review:) | 'failed'.
+    """
+    w, h = target or (0, 0)
+    result = image_processor.process_product_image_result(
+        image_url, name, brand, target_width=w or 0, target_height=h or 0,
+        bg_method=bg_method, candidate_sha256=candidate_sha256, enhance=bool(enhance),
+    )
+    if not result.path:
+        return {"status": "failed", "error": result.error or "processing_failed", "isolated": False,
+                "provider": result.provider}
+
+    metadata = {}
+    try:
+        try:
+            metadata = image_processor.extract_metadata_from_image(result.path, name, brand) or {}
+        except Exception as e:
+            print(f"تنبيه: تعذر استخراج البيانات الوصفية لـ [{name}]: {e}")
+            metadata = {}
+        override = category_override or {}
+        if (override.get("category_l1_en") or "").strip():
+            import categories
+            metadata.update(categories.normalize_category_path(
+                override.get("category_l1_en", "").strip(),
+                (override.get("category_l2_en") or "").strip(),
+                (override.get("category_l3_en") or "").strip()))
+        folder, tags = _folder_and_tags(metadata)
+        link = cloudinary_storage.upload_product_image_to_cloudinary(
+            result.path, name, brand, folder=folder, tags=tags,
+            target_width=result.width, target_height=result.height,
+        )
+    finally:
+        image_processor.cleanup_processed_image(result.path)
+
+    base = {"isolated": bool(result.isolated), "provider": result.provider, "metadata": metadata,
+            "width": result.width, "height": result.height}
+    if not link:
+        return dict(base, status="failed", error="upload_failed")
+
+    review = force_review or not result.isolated
+    sheet_value = f"needs_review:{link}" if review else link
+    if not google_sheets.update_image_link(worksheet, row_number, link_column_index, sheet_value,
+                                           barcode=barcode, product_name=name):
+        return dict(base, status="failed", error="sheet_write_failed", link=link)
+    if metadata:
+        try:
+            google_sheets.update_product_metadata(worksheet, row_number, metadata, barcode=barcode, product_name=name)
+        except Exception as e:
+            print(f"تنبيه: تعذر كتابة البيانات الوصفية للصف {row_number}: {e}")
+    return dict(base, status="needs_review" if review else "published", link=link, sheet_value=sheet_value)
+
+
+# ---------------------------------------------------------------------------
+# الاعتماد التلقائي والبحث المسبق
+# ---------------------------------------------------------------------------
+
+def auto_approve_product(task, best_image, worksheet, link_column_index, sku_key=None):
+    """
+    نشر نتيجة AUTO_PUBLISH مباشرة. تعيد 'published' أو 'needs_review' (الخلفية لم تُعزل) أو 'failed'.
+    الحل يُخزن auto_verified فقط عند النشر الفعلي بلوحة معزولة.
+    """
+    name = task["product_name"]
+    brand = task.get("brand") or ""
+    barcode = task.get("barcode") or ""
+    try:
+        res = publish_image(
+            best_image["url"], name, brand, task["row_number"], worksheet, link_column_index,
+            barcode=barcode, candidate_sha256=best_image.get("content_sha256"),
+            bg_method=getattr(config, "BG_REMOVAL_METHOD", None),
+            target=getattr(config, "IMAGE_TARGET_SIZE", (0, 0)),
+        )
+    except Exception as e:
+        print(f"[Auto-Publish Error] فشل النشر التلقائي لـ [{name}]: {e}")
+        return "failed"
+    if res["status"] == "published":
+        local_cache_db.save_product_resolution(
+            barcode, name, brand, best_image["url"], res["link"], None, res.get("metadata"),
+            perceptual_hash=best_image.get("phash"), verification_status="auto_verified",
+            approved_by="auto", sku_key=sku_key,
+        )
+        local_cache_db.delete_product_failure(barcode)
+    elif res["status"] == "failed":
+        print(f"[Auto-Publish] تعذر النشر لـ [{name}] ({res.get('error')}); يحال للمراجعة.")
+    return res["status"]
+
+
+def pre_cache_product_candidates(task, worksheet=None, link_column_index=None, brand_mappings=None,
+                                 sleep=time.sleep):
+    """
+    البحث المسبق لمهمة من الطابور وحفظ مرشحاتها للمراجعة، أو نشرها إذا كان القرار AUTO_PUBLISH.
+    تعيد 'success' | 'failed' | 'provider_down'.
+    """
+    name = task["product_name"]
+    brand = task.get("brand") or ""
+    barcode = task.get("barcode") or ""
+    row_number = task["row_number"]
+    payload = task_payload(task)
+    sku_key = task.get("sku_key") or payload.get("sku_key") or compute_sku_key(
+        sku_row(name, brand, barcode, payload), brand_mappings)
+    query = (task.get("search_query") or "").strip() or default_query(name, brand)
+
+    exclude_urls, exclude_phashes = local_cache_db.get_rejections(sku_key)
+    search_kwargs = {
+        "product_name_ar": payload.get("name_ar", ""),
+        "brand_ar": payload.get("brand_ar", ""),
+        "barcode": barcode,
+        "category": payload.get("category", ""),
+        "sub_category": payload.get("sub_category", ""),
+        "size_text": payload.get("size", ""),
+        "origin": payload.get("origin", ""),
+        "custom_query": custom_query_for(query, name, brand),
+        "exclude_urls": list(exclude_urls),
+        "exclude_phashes": list(exclude_phashes),
+        "skip_cache": bool(getattr(config, "SKIP_LOCAL_CACHE", False)),
+    }
+    if brand_mappings:
+        search_kwargs["brand_mappings"] = brand_mappings
+
+    print(f"[Pre-Cache] البحث عن مرشحات لـ [{name}] (SKU {sku_key})")
+    best, trace, state, error = search_with_retry(query, name, brand, search_kwargs, sleep=sleep)
+
+    if best is None:
+        if state == "provider_down":
+            # انقطاع المزودين ليس فشلاً للمنتج: يعود الصف للانتظار ولا يُسجل في product_failures
+            local_cache_db.update_task_status(task["id"], "pending", "Search providers unavailable",
+                                              failure_code="PROVIDER_DOWN", trace=trace)
+            return "provider_down"
+        if state == "error":
+            code, message = "SEARCH_ERROR", error or "search raised an exception"
+        else:
+            code = _outcome(trace).get("failure_code") or "NO_RESULTS"
+            message = f"No acceptable image found ({code})"
+        local_cache_db.update_task_status(task["id"], "failed", message, failure_code=code, trace=trace)
+        local_cache_db.save_product_failure(barcode, name, brand, f"{code}: {message}")
+        print(f"[Pre-Cache] لا توجد صورة للصف {row_number}: {code}")
+        return "failed"
+
+    decision = best.get("decision")
+    if (decision == "AUTO_PUBLISH" and best.get("source") != "sqlite_cache"
+            and worksheet is not None and link_column_index is not None):
+        status = auto_approve_product(task, best, worksheet, link_column_index, sku_key=sku_key)
+        if status == "published":
+            local_cache_db.update_task_status(task["id"], "completed", failure_code=None,
+                                              trace={"outcome": _outcome(trace)})
+            print(f"[Auto-Publish] تم نشر الصف {row_number} تلقائياً (قرار AUTO_PUBLISH).")
+            return "success"
+
+    candidates = collect_candidates(best, trace)
+    saved = local_cache_db.save_curation_candidates(
+        row_number, name, brand, candidates, best.get("url"), sku_key=sku_key, run_id=uuid.uuid4().hex[:16])
+    if not saved:
+        local_cache_db.update_task_status(task["id"], "failed", "Could not save review candidates",
+                                          failure_code="CANDIDATE_SAVE_FAILED", trace=trace)
+        return "failed"
+    local_cache_db.update_task_status(task["id"], "ready_for_review", None,
+                                      failure_code=best.get("failure_code"), trace={"outcome": _outcome(trace)})
+    print(f"[Pre-Cache] {len(candidates)} مرشح للصف {row_number} (القرار: {decision or 'v1'}).")
+    return "success"
+
+
+# ---------------------------------------------------------------------------
+# الوضع التسلسلي القديم (بدون طابور)
+# ---------------------------------------------------------------------------
+
+def process_single_product(prod, worksheet, link_column_index, brand_mappings=None):
+    """
+    معالجة منتج واحد مباشرة (الوضع القديم). الاسم والبراند يُمرران كما هما في الشيت؛
+    QueryRefiner يُستخدم فقط لكتابة الاسم/البراند العربي الناقص في الشيت.
     """
     row_num = prod["row_number"]
     name = prod["product_name"]
-    brand = prod["brand"]
-    query = prod["search_query"]
-    existing_link = prod.get("existing_image_link", "")
-
-    # تخطي المنتجات التي تحتوي بالفعل على رابط لتوفير استهلاك الـ API والوقت (إلا إذا تم تفعيل فرض الكتابة فوقها)
-    if existing_link and not config.FORCE_OVERWRITE_IMAGES:
-        print(f"⏭️ تخطي: المنتج يحتوي بالفعل على رابط صورة: {existing_link}")
+    brand = prod.get("brand") or ""
+    barcode = prod.get("barcode") or ""
+    if prod.get("existing_image_link") and not config.FORCE_OVERWRITE_IMAGES:
+        print(f"تخطي الصف {row_num}: يحتوي بالفعل على رابط صورة نهائي.")
         return "skipped"
-        
-    # أ. استخراج البيانات الدلالية والتعريب المسبق عبر Gemini
+
     product_name_ar = prod.get("product_name_ar", "")
     brand_ar = prod.get("brand_ar", "")
-    
     try:
         from query_refiner import QueryRefiner
         refined = QueryRefiner.refine_product_metadata(name, brand, prod.get("category", ""))
-        
-        # تحديث المسميات المترجمة محلياً إذا لم تكن موجودة
         if not product_name_ar and refined.get("cleaned_title_ar"):
             product_name_ar = refined["cleaned_title_ar"]
         if not brand_ar and refined.get("canonical_brand_ar"):
             brand_ar = refined["canonical_brand_ar"]
-            
-        # تحديث المسميات المترجمة في الشيت مباشرة إذا كانت فارغة
-        google_sheets.update_product_localization(
-            worksheet, 
-            row_num, 
-            refined.get("cleaned_title_ar", ""), 
-            refined.get("canonical_brand_ar", "")
-        )
-        
-        # استخدام البراند والاسم المنظفين من Gemini لزيادة دقة البحث والمطابقة
-        name = refined.get("cleaned_title_en") or name
-        brand = refined.get("canonical_brand_en") or brand
+        google_sheets.update_product_localization(worksheet, row_num, refined.get("cleaned_title_ar", ""),
+                                                  refined.get("canonical_brand_ar", ""))
     except Exception as e:
-        print(f"⚠️ فشل المعالجة المسبقة للمنتج عبر Gemini: {e}")
-        
-    trace = {}
-    best_image = image_search.search_best_product_image(
-        query, 
-        name, 
-        brand, 
-        product_name_ar=product_name_ar, 
-        brand_ar=brand_ar,
-        barcode=prod.get("barcode", ""),
-        category=prod.get("category", ""),
-        origin=prod.get("origin", ""),
-        trace=trace
-    )
-    if not best_image:
-        config.log_and_fail(prod.get("barcode"), name, brand, "لم يتم العثور على أي صورة تطابق معايير القبول والجودة البصرية.")
-        image_processor.send_telegram_notification("")
+        print(f"تنبيه: فشل التعريب المسبق عبر Gemini: {e}")
+
+    payload = {"name_ar": product_name_ar, "brand_ar": brand_ar, "category": prod.get("category", ""),
+               "sub_category": prod.get("sub_category", ""), "origin": prod.get("origin", ""),
+               "size": prod.get("size", "")}
+    sku_key = compute_sku_key(sku_row(name, brand, barcode, payload), brand_mappings)
+    exclude_urls, exclude_phashes = local_cache_db.get_rejections(sku_key)
+    query = default_query(name, brand)
+    search_kwargs = {
+        "product_name_ar": product_name_ar, "brand_ar": brand_ar, "barcode": barcode,
+        "category": payload["category"], "sub_category": payload["sub_category"],
+        "size_text": payload["size"], "origin": payload["origin"],
+        "exclude_urls": exclude_urls, "exclude_phashes": exclude_phashes,
+        "skip_cache": bool(getattr(config, "SKIP_LOCAL_CACHE", False)),
+    }
+    if brand_mappings:
+        search_kwargs["brand_mappings"] = brand_mappings
+    best, trace, state, error = search_with_retry(query, name, brand, search_kwargs)
+    if not best:
+        if state == "provider_down":
+            print(f"محركات البحث غير متاحة؛ الصف {row_num} لم يُعالج.")
+            return "failed"
+        code = "SEARCH_ERROR" if state == "error" else (_outcome(trace).get("failure_code") or "NO_RESULTS")
+        config.log_and_fail(barcode, name, brand, f"{code}: لم يتم العثور على صورة مقبولة.")
         return "failed"
-        
-    # إذا تم تفعيل وضع الفرز المنسق Curation Mode
+
     if getattr(config, 'CURATION_MODE', False):
-        # استخراج المرشحات الفريدة من الـ trace
-        candidates = []
-        seen_urls = set()
-        
-        # إذا تم استرجاع النتيجة من الكاش أو التكرار البصري، ننشئ له كانديديت افتراضي وحيد
-        if best_image.get("source") in ["sqlite_cache", "visual_duplicate"]:
-            candidates.append({
-                "url": best_image["url"],
-                "title": best_image.get("title", "صورة مسترجعة من الكاش المحلي"),
-                "status": "accepted",
-                "width": best_image.get("width", 800),
-                "height": best_image.get("height", 800)
-            })
-        else:
-            if trace and 'steps' in trace:
-                for step in trace['steps']:
-                    if 'candidates' in step:
-                        for c in step['candidates']:
-                            url = c.get('url')
-                            if url and url not in seen_urls:
-                                if c.get('status') == 'rejected':
-                                    continue
-                                seen_urls.add(url)
-                                candidates.append(c)
-        # حفظ المرشحات في قاعدة البيانات
-        local_cache_db.save_curation_candidates(row_num, name, brand, candidates, best_image["url"])
-        
-        # تحديث الشيت بالرابط المقترح ومسبوقاً بـ needs_review:
-        image_link_for_sheets = f"needs_review:{best_image['url']}"
-        update_success = google_sheets.update_image_link(worksheet, row_num, link_column_index, image_link_for_sheets)
-        if update_success:
-            print(f"📋 [Curation Mode] تم إرسال المنتج '{name}' للمراجعة وحفظ {len(candidates)} مرشحين بصريين بنجاح.")
-            return "success"
-        else:
+        candidates = collect_candidates(best, trace)
+        if not local_cache_db.save_curation_candidates(row_num, name, brand, candidates, best.get("url"),
+                                                       sku_key=sku_key, run_id=uuid.uuid4().hex[:16]):
+            config.log_and_fail(barcode, name, brand, "CANDIDATE_SAVE_FAILED: تعذر حفظ المرشحات.")
             return "failed"
+        ok = google_sheets.update_image_link(worksheet, row_num, link_column_index, f"needs_review:{best['url']}",
+                                             barcode=barcode, product_name=name)
+        return "success" if ok else "failed"
 
-    # تحقق من التخزين المحلي الذكي لتسريع المعالجة (في الوضع العادي للأتمتة بدون فرز)
-    if best_image.get("source") == "sqlite_cache":
-        print(f"⚡ [Local Cache Hit] استرجاع فوري للمنتج '{name}' من الكاش المحلي!")
-        image_link = best_image["url"]
-        metadata = best_image.get("metadata")
-        if metadata:
-            google_sheets.update_product_metadata(worksheet, row_num, metadata)
-        image_link_for_sheets = image_link
-        update_success = google_sheets.update_image_link(worksheet, row_num, link_column_index, image_link_for_sheets)
-        if update_success:
-            print(f"🎉 تم تحديث بيانات الصف {row_num} بنجاح من الكاش المحلي!")
-            return "success"
-        else:
-            return "failed"
+    decision = best.get("decision")
+    if best.get("source") == "sqlite_cache":
+        value = f"needs_review:{best['url']}" if best.get("needs_review", True) else best["url"]
+        ok = google_sheets.update_image_link(worksheet, row_num, link_column_index, value,
+                                             barcode=barcode, product_name=name)
+        return "success" if ok else "failed"
 
-    if best_image.get("source") == "visual_duplicate":
-        print(f"👁️ [BK-Tree Deduplicator] إعادة استخدام رابط Cloudinary للمنتج المكرر بصرياً: {best_image['url']}")
-        image_link = best_image["url"]
-        metadata = best_image.get("metadata")
-        if metadata:
-            google_sheets.update_product_metadata(worksheet, row_num, metadata)
-        image_link_for_sheets = image_link
-        update_success = google_sheets.update_image_link(worksheet, row_num, link_column_index, image_link_for_sheets)
-        if update_success:
-            print(f"🎉 تم تحديث بيانات الصف {row_num} بنجاح من التكرار البصري!")
-            # حفظ في الكاش ليكون ضربة مباشرة المرة القادمة
-            try:
-                local_cache_db.save_product_resolution(
-                    prod.get("barcode", ""),
-                    name,
-                    brand,
-                    best_image.get("url"),
-                    image_link,
-                    1.0,
-                    metadata,
-                    None,
-                    perceptual_hash=best_image.get("perceptual_hash")
-                )
-            except Exception as e:
-                print(f"⚠️ خطأ أثناء حفظ السجل في الكاش: {e}")
-            return "success"
-        else:
-            return "failed"
-
-    image_url = best_image["url"]
-    print(f"🔗 الصورة المختارة للتحميل: {image_url}")
-    
-    # ب. تحميل ومعالجة الصورة محلياً (إزالة الخلفية والتحجيم بدقة عالية)
-    w, h = getattr(config, 'IMAGE_TARGET_SIZE', (800, 800))
-    processed_image_path = image_processor.process_product_image(
-        image_url, name, brand, 
-        enhance=getattr(config, 'ENABLE_IMAGE_ENHANCEMENT', False),
-        target_width=w,
-        target_height=h
-    )
-    if not processed_image_path or not os.path.exists(processed_image_path):
-        config.log_and_fail(prod.get("barcode"), name, brand, "فشل تحميل الصورة المرشحة أو فشل عزل الخلفية وتنعيم الحواف.")
-        image_processor.send_telegram_notification("")
+    res = publish_image(best["url"], name, brand, row_num, worksheet, link_column_index, barcode=barcode,
+                        candidate_sha256=best.get("content_sha256"),
+                        bg_method=getattr(config, "BG_REMOVAL_METHOD", None),
+                        target=getattr(config, "IMAGE_TARGET_SIZE", (0, 0)),
+                        enhance=getattr(config, 'ENABLE_IMAGE_ENHANCEMENT', False),
+                        force_review=decision != "AUTO_PUBLISH")
+    if res["status"] == "failed":
+        config.log_and_fail(barcode, name, brand, f"فشل النشر: {res.get('error')}")
         return "failed"
-        
-    # ج. استخراج البيانات الوصفية (القيم الغذائية والمكونات والوصف التسويقي والتصنيفات) أولاً لتنظيم المجلدات سحابياً
-    metadata = image_processor.extract_metadata_from_image(processed_image_path, name, brand)
-    
-    has_meta = metadata is not None
-    if not metadata:
-        metadata = {}
-    metadata["bg_removal_status"] = image_processor.LAST_PROCESSING_STATUS.get((name, brand), "success")
-    
-    folder = "products"
-    tags = []
-    if has_meta:
-        google_sheets.update_product_metadata(worksheet, row_num, metadata)
-        
-        # بناء هيكلية المجلدات بناءً على تصنيف الويب المستخرج
-        cat1 = metadata.get("category_l1_en", "").strip().lower().replace(" ", "_").replace("&", "and")
-        cat2 = metadata.get("category_l2_en", "").strip().lower().replace(" ", "_").replace("&", "and")
-        if cat1:
-            if cat2:
-                folder = f"products/{cat1}/{cat2}"
-            else:
-                folder = f"products/{cat1}"
-                
-        # تحويل الوسوم لقائمة
-        tags_str = metadata.get("tags_en", "")
-        if tags_str:
-            tags = [t.strip() for t in tags_str.split(",") if t.strip()]
-            
-    # قراءة الأبعاد الفعلية للصورة الناتجة بعد معالجتها وتوسيطها (لتمريرها إلى Cloudinary)
-    try:
-        from PIL import Image
-        with Image.open(processed_image_path) as res_img:
-            final_w, final_h = res_img.size
-    except Exception:
-        final_w = w or 800
-        final_h = h or 800
-        
-    # د. رفع الصورة المعالجة محلياً إلى Cloudinary وتوليد الرابط الآمن بالمجلد والوسوم المستهدفة
-    image_link = cloudinary_storage.upload_product_image_to_cloudinary(
-        processed_image_path, 
-        name, 
-        brand,
-        folder=folder,
-        tags=tags,
-        target_width=final_w,
-        target_height=final_h,
-        padding_ratio=getattr(config, 'IMAGE_PADDING_RATIO', 0.85),
-        bg_color=getattr(config, 'IMAGE_BG_COLOR', 'ffffff')
-    )
-    
-    # هـ. تنظيف ملف الصورة المعالجة من المجلد المؤقت
-    try:
-        if os.path.exists(processed_image_path):
-            os.remove(processed_image_path)
-    except Exception:
-        pass
-        
-    if not image_link:
-        config.log_and_fail(prod.get("barcode"), name, brand, "فشل رفع الصورة المعالجة إلى Cloudinary.")
-        return "failed"
-        
-    # إضافة بادئة المراجعة الرمادية إذا تطلب الأمر لتنبيه لوحة العرض
-    if getattr(config, 'CURATION_MODE', False):
-        image_link_for_sheets = f"needs_review:{image_link}"
-    else:
-        image_link_for_sheets = f"needs_review:{image_link}" if best_image.get("needs_review") else image_link
+    if res["status"] == "published":
+        local_cache_db.save_product_resolution(
+            barcode, name, brand, best["url"], res["link"], None, res.get("metadata"),
+            verification_status="auto_verified", approved_by="auto", sku_key=sku_key)
+    return "success"
 
-    # ج. تحديث الشيت بالرابط الجديد
-    update_success = google_sheets.update_image_link(
-        worksheet, 
-        row_num, 
-        link_column_index, 
-        image_link_for_sheets
-    )
-    
-    if update_success:
-        print(f"🎉 تم تحديث بيانات الصف {row_num} بنجاح بالرابط الجديد!")
-        # حفظ في الكاش المحلي للتسجيل والـ Deduplication
-        try:
-            local_cache_db.save_product_resolution(
-                prod.get("barcode", ""),
-                name,
-                brand,
-                image_url,
-                image_link,
-                best_image.get("clip_score", 0.0),
-                metadata,
-                best_image.get("clip_embedding")
-            )
-        except Exception as e:
-            print(f"⚠️ خطأ أثناء حفظ السجل في الكاش: {e}")
-            
-        image_processor.send_telegram_notification("")
-        return "success"
-    else:
-        print(f"⚠️ فشل كتابة الرابط في الشيت للصف {row_num}")
-        image_processor.send_telegram_notification("")
-        return "failed"
+
+# ---------------------------------------------------------------------------
+# بناء الطابور
+# ---------------------------------------------------------------------------
 
 def run_enqueue_mode():
     """
-    قراءة شيت جوجل وتعبئة طابور SQLite بالمهام ثم الخروج
+    قراءة الشيت وإضافة الصفوف للطابور (Upsert). يتم التحقق من الاتصال وعناوين الأعمدة والفلاتر
+    قبل لمس الطابور، ولا تُمسح صفوف المراجعة أبداً.
     """
     try:
         load_run_config()
-        local_cache_db.clear_queue()
         google_sheets.clear_cache()
-        
+        allowed_rows = parse_row_filter(config.ROW_FILTER)
+
         sheets_client = google_sheets.get_sheets_client()
         if not sheets_client:
-            print("❌ [Enqueue] فشل الاتصال بـ Google Sheets API.")
+            print("[Enqueue] فشل الاتصال بـ Google Sheets API.")
             sys.exit(1)
         worksheet = google_sheets.open_worksheet(sheets_client, config.SPREADSHEET_NAME_OR_URL)
         if not worksheet:
-            print(f"❌ [Enqueue] لم يتم العثور على الشيت: {config.SPREADSHEET_NAME_OR_URL}")
+            print(f"[Enqueue] لم يتم العثور على الشيت: {config.SPREADSHEET_NAME_OR_URL}")
             sys.exit(1)
-            
         products, _ = google_sheets.get_products(worksheet)
         if not products:
-            print("⚠️ [Enqueue] لم يتم العثور على أي منتجات صالحة.")
+            print("[Enqueue] لم يتم العثور على أي منتجات صالحة.")
             sys.exit(0)
-            
-        # تحليل فلتر الصفوف إن وجد
-        allowed_rows = None
-        if config.ROW_FILTER:
-            allowed_rows = set()
-            try:
-                parts = config.ROW_FILTER.split(',')
-                for part in parts:
-                    part = part.strip()
-                    if '-' in part:
-                        start, end = part.split('-')
-                        allowed_rows.update(range(int(start), int(end) + 1))
-                    else:
-                        allowed_rows.add(int(part))
-                print(f"🎯 [Enqueue] تطبيق فلتر الصفوف: {sorted(list(allowed_rows))}")
-            except Exception as e:
-                print(f"⚠️ [Enqueue] خطأ في صياغة فلتر الصفوف: {e}. سيتم تجاهله.")
-                allowed_rows = None
-
-        enqueued_count = 0
-        for prod in products:
-            row_num = prod["row_number"]
-            barcode = prod.get("barcode", "")
-            name = prod["product_name"]
-            brand = prod["brand"]
-            query = prod["search_query"]
-            existing_link = prod.get("existing_image_link", "")
-            
-            # تطبيق فلتر الصفوف
-            if allowed_rows is not None and row_num not in allowed_rows:
-                continue
-                
-            # تطبيق فلتر الماركة (Brand)
-            if config.BRAND_FILTER and brand:
-                if config.BRAND_FILTER.lower() not in brand.lower():
-                    continue
-            
-            # إذا لم يتم فرض الكتابة فوق الصور، نتجاهل الموجودة
-            if existing_link and not config.FORCE_OVERWRITE_IMAGES:
-                continue
-                
-            local_cache_db.add_to_queue(row_num, barcode, name, brand, query)
-            enqueued_count += 1
-            
-        print(f"📋 [Enqueue] تم إدخال {enqueued_count} منتج في طابور المعالجة بنجاح.")
-        
-        # تهيئة إحصائيات مبدئية لكي تراها الواجهة فوراً
-        local_cache_db.get_queue_statistics()
+        brand_mappings = google_sheets.get_brand_mappings(sheets_client, config.SPREADSHEET_NAME_OR_URL)
+    except SystemExit:
+        raise
     except Exception as e:
-        print(f"❌ [Enqueue Error] فشل بناء الطابور: {e}")
+        print(f"[Enqueue Error] الإعداد غير صالح؛ لم يتم تعديل الطابور: {e}")
         sys.exit(1)
 
-def auto_approve_product(task, best_image, worksheet, link_column_index):
-    """
-    اعتماد ورفع وتحديث بيانات المنتج تلقائياً سحابياً لتجاوز الفرز البشري
-    """
-    import image_processor
-    import cloudinary_storage
-    
-    name = task["product_name"]
-    brand = task["brand"]
-    row_num = task["row_number"]
-    image_url = best_image["url"]
-    
-    print(f"🚀 [Auto-Approve] جاري معالجة ورفع الصورة تلقائياً لـ [{name}] لزيادة التطابق...")
-    
+    reprocess = bool(getattr(config, "FORCE_OVERWRITE_IMAGES", False))
+    brand_filter = (config.BRAND_FILTER or "").lower()
+    enqueued = skipped_final = 0
     try:
-        w, h = getattr(config, 'IMAGE_TARGET_SIZE', (800, 800))
-        processed_image_path = image_processor.process_product_image(
-            image_url, name, brand, 
-            bg_removal_method=getattr(config, 'BG_REMOVAL_METHOD', 'photoroom'),
-            target_width=w,
-            target_height=h,
-            padding_ratio=getattr(config, 'IMAGE_PADDING_RATIO', 0.85),
-            bypass_heuristics=True
-        )
-        if not processed_image_path or not os.path.exists(processed_image_path):
-            print(f"❌ [Auto-Approve] فشل معالجة الصورة محلياً لـ [{name}]")
-            return False
-            
-        if getattr(config, 'FORCE_UPSCALING', True):
-            try:
-                from PIL import Image
-                with Image.open(processed_image_path) as img:
-                    w_f, h_f = img.size
-                    img.resize((w_f*2, h_f*2), Image.Resampling.LANCZOS).save(processed_image_path)
-            except Exception:
-                pass
-                
-        # استخراج الميتاداتا
-        metadata = image_processor.extract_metadata_from_image(processed_image_path, name, brand)
-        has_meta = metadata is not None
-        if not metadata:
-            metadata = {}
-        metadata["bg_removal_status"] = image_processor.LAST_PROCESSING_STATUS.get((name, brand), "success")
-        
-        folder = "products"
-        tags = []
-        
-        if has_meta:
-            google_sheets.update_product_metadata(worksheet, row_num, metadata)
-            cat1 = (metadata.get("category_l1_en") or "").strip().lower().replace(" ", "_").replace("&", "and")
-            cat2 = (metadata.get("category_l2_en") or "").strip().lower().replace(" ", "_").replace("&", "and")
-            if cat1:
-                if cat2:
-                    folder = f"products/{cat1}/{cat2}"
-                else:
-                    folder = f"products/{cat1}"
-            tags_str = metadata.get("tags_en", "")
-            if tags_str:
-                tags = [t.strip() for t in tags_str.split(",") if t.strip()]
-                
-        try:
-            from PIL import Image
-            with Image.open(processed_image_path) as res_img:
-                final_w, final_h = res_img.size
-        except Exception:
-            final_w, final_h = w, h
-            
-        # الرفع لـ Cloudinary
-        image_link = cloudinary_storage.upload_product_image_to_cloudinary(
-            processed_image_path,
-            name,
-            brand,
-            folder=folder,
-            tags=tags,
-            target_width=final_w,
-            target_height=final_h,
-            padding_ratio=getattr(config, 'IMAGE_PADDING_RATIO', 0.85),
-            bg_color=getattr(config, 'IMAGE_BG_COLOR', 'ffffff')
-        )
-        
-        if image_link:
-            # تحديث شيت جوجل
-            update_success = google_sheets.update_image_link(worksheet, row_num, link_column_index, image_link)
-            if update_success:
-                # الحفظ في كاش قاعدة البيانات
-                local_cache_db.save_product_resolution(
-                    task.get("barcode", ""),
-                    name,
-                    brand,
-                    image_url,
-                    image_link,
-                    best_image.get("clip_score", 1.0),
-                    metadata,
-                    None,
-                    perceptual_hash=best_image.get("perceptual_hash")
-                )
-                
-                # إزالة السجل من قائمة الفشل إن وجد
-                local_cache_db.delete_product_failure(task.get("barcode", ""))
-                
-                # حذف الملف المؤقت المحلي
-                try:
-                    if os.path.exists(processed_image_path):
-                        os.remove(processed_image_path)
-                except Exception:
-                    pass
-                return True
-        return False
+        for prod in products:
+            row_num = prod["row_number"]
+            name = prod["product_name"]
+            brand = prod.get("brand") or ""
+            if allowed_rows is not None and row_num not in allowed_rows:
+                continue
+            if brand_filter and brand_filter not in brand.lower():
+                continue
+            if prod.get("existing_image_link") and not reprocess:
+                skipped_final += 1
+                continue
+            payload = {
+                "name_ar": prod.get("product_name_ar", ""),
+                "brand_ar": prod.get("brand_ar", ""),
+                "category": prod.get("category", ""),
+                "sub_category": prod.get("sub_category", ""),
+                "origin": prod.get("origin", ""),
+                "size": prod.get("size", ""),
+            }
+            barcode = prod.get("barcode", "")
+            sku_key = compute_sku_key(sku_row(name, brand, barcode, payload), brand_mappings)
+            local_cache_db.add_to_queue(row_num, barcode, name, brand, prod.get("search_query") or default_query(name, brand),
+                                        payload=payload, sku_key=sku_key, reprocess=reprocess)
+            enqueued += 1
+        print(f"[Enqueue] {enqueued} صف في الطابور؛ {skipped_final} صف تم تخطيه لأن رابطه نهائي.")
+        local_cache_db.get_queue_statistics()
     except Exception as e:
-        print(f"❌ [Auto-Approve Error] حدث خطأ أثناء الاعتماد التلقائي لـ [{name}]: {e}")
+        print(f"[Enqueue Error] فشل بناء الطابور: {e}")
+        sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
+# عامل الخلفية
+# ---------------------------------------------------------------------------
+
+def check_verifier():
+    """فحص توفر نموذج Gemini عند بدء العامل؛ يعيد نص تنبيه للوحة التحكم أو '' إذا كان متاحاً."""
+    try:
+        from catalog_match import settings as cm_settings
+        from catalog_match import verify as cm_verify
+        if not cm_settings.gemini_api_key():
+            return "VERIFIER_NOT_CONFIGURED: no Gemini key, every result goes to human review"
+        check = cm_verify.check_model_available()
+        if not check:
+            return f"VERIFIER_UNAVAILABLE: {check.status} ({check.model}); every result goes to human review"
+        return ""
+    except Exception as e:
+        return f"VERIFIER_CHECK_FAILED: {type(e).__name__}"
+
+
+def _refresh_state(status, **extra):
+    try:
+        stats = local_cache_db.get_queue_statistics()
+    except Exception as e:
+        print(f"تنبيه: تعذر قراءة إحصائيات الطابور: {e}")
+        local_cache_db.update_automation_state(status=status, **extra)
+        return
+    local_cache_db.update_automation_state(
+        status=status,
+        total=stats["total"],
+        processed=stats["completed"] + stats["failed"] + stats["ready_for_review"],
+        success=stats["completed"] + stats["ready_for_review"],
+        failed=stats["failed"],
+        **extra,
+    )
+
+
+def _another_worker_running(lock_file):
+    import subprocess
+    if not os.path.exists(lock_file):
+        return False
+    try:
+        with open(lock_file, "r") as f:
+            pid_str = f.read().strip()
+        if not pid_str.isdigit() or pid_str == "1" or int(pid_str) == os.getpid():
+            return False
+        pid = int(pid_str)
+        import platform
+        if platform.system().lower() == "windows":
+            output = subprocess.check_output(f'tasklist /FI "PID eq {pid}"', shell=True).decode(errors="replace")
+            return str(pid) in output
+        try:
+            os.kill(pid, 0)
+            return True
+        except OSError:
+            return False
+    except Exception:
         return False
 
-def pre_cache_product_candidates(task, worksheet=None, link_column_index=None):
-    """
-    البحث المسبق وجلب الصور المرشحة وحفظها كاش لصف المنتج لتسريع الفرز البشري لاحقاً
-    أو اعتمادها تلقائياً إذا تجاوزت حد الجودة المطلوب.
-    """
-    name = task["product_name"]
-    brand = task["brand"]
-    query = task["search_query"] if task["search_query"] else f"{name} {brand}".strip()
-    
-    print(f"🕵️ [Pre-Cache] جاري البحث عن مرشحات بصريّة لـ: [{name}]")
-    
-    trace = {}
-    max_retries = 3
-    best_image = None
-    retry_delay = 2.0
-    
-    for attempt in range(1, max_retries + 1):
-        try:
-            best_image = image_search.search_best_product_image(
-                query, 
-                name, 
-                brand, 
-                product_name_ar=task.get("product_name_ar", ""), 
-                brand_ar=task.get("brand_ar", ""),
-                barcode=task.get("barcode", ""),
-                category=task.get("category", ""),
-                origin=task.get("origin", ""),
-                trace=trace,
-                skip_cache=getattr(config, 'SKIP_LOCAL_CACHE', False)
-            )
-            if best_image:
-                break
-        except Exception as ex:
-            print(f"⚠️ [Attempt {attempt}/{max_retries}] فشل البحث للمنتج [{name}]: {ex}")
-            
-        if attempt < max_retries:
-            print(f"⏱️ الانتظار لمدة {retry_delay:.1f} ثانية قبل إعادة المحاولة...")
-            import time
-            time.sleep(retry_delay)
-            retry_delay *= 2
-    
-    candidates = []
-    seen_urls = set()
-    if best_image:
-        clip_score = best_image.get("clip_score", 0.0)
-        auto_thresh = getattr(config, 'AUTO_APPROVE_THRESHOLD', 0.0)
-        
-        # الاعتماد التلقائي في حال تجاوز حد الجودة والصلة
-        if auto_thresh > 0.0 and clip_score >= auto_thresh and worksheet is not None and link_column_index is not None:
-            success = auto_approve_product(task, best_image, worksheet, link_column_index)
-            if success:
-                local_cache_db.update_task_status(task["id"], "completed")
-                print(f"🎉 [Auto-Approve] تم اعتماد المنتج وتحديث الصف {task['row_number']} تلقائياً لتخطي المراجعة (نسبة المطابقة: {clip_score:.4f})")
-                return "success"
-                
-        if best_image.get("source") in ["sqlite_cache", "visual_duplicate"]:
-            candidates.append({
-                "url": best_image["url"],
-                "title": best_image.get("title", "صورة مسترجعة من الكاش المحلي"),
-                "status": "accepted",
-                "width": best_image.get("width", 800),
-                "height": best_image.get("height", 800)
-            })
-        else:
-            if trace and 'steps' in trace:
-                for step in trace['steps']:
-                    if 'candidates' in step:
-                        for c in step['candidates']:
-                            url = c.get('url')
-                            if url and url not in seen_urls:
-                                if c.get('status') == 'rejected':
-                                    continue
-                                seen_urls.add(url)
-                                candidates.append(c)
-        # حفظ المرشحات في قاعدة البيانات
-        local_cache_db.save_curation_candidates(task["row_number"], name, brand, candidates, best_image["url"])
-        local_cache_db.update_task_status(task["id"], "ready_for_review")
-        print(f"✅ [Pre-Cache] تم تجهيز {len(candidates)} صور مرشحة للصف {task['row_number']} وحفظها في الكاش بنجاح.")
-        return "success"
-    else:
-        local_cache_db.update_task_status(task["id"], "failed", "No matching images found during search")
-        print(f"❌ [Pre-Cache] لم يتم العثور على أي صورة للمنتج في الصف {task['row_number']}.")
-        return "failed"
 
 def run_worker_mode():
     """
-    تشغيل كمعالج خلفية دائم يسحب المهام من طابور SQLite ويعالجها بالتوازي
+    عامل الخلفية: يسحب المهام ذرياً ويعالجها بالتوازي (3 خيوط).
+    يخرج فقط عندما ينجح COUNT(*) للمهام المفتوحة ويعيد 0، أو عند توقف المزودين (5 مهام متتالية PROVIDER_DOWN).
     """
     from concurrent.futures import ThreadPoolExecutor
-    import concurrent.futures
     import threading
-    import subprocess
-    
+
     lock_file = "temp/pipeline.lock"
-    
-    # 1. منع تشغيل أكثر من وركر واحد بالتزامن
-    try:
-        os.makedirs("temp", exist_ok=True)
-        if os.path.exists(lock_file):
-            with open(lock_file, "r") as f:
-                pid_str = f.read().strip()
-            if pid_str.isdigit() and pid_str != "1" and pid_str != "STARTING":
-                pid = int(pid_str)
-                import platform
-                is_running = False
-                if platform.system().lower() == "windows":
-                    output = subprocess.check_output(f'tasklist /FI "PID eq {pid}"', shell=True).decode()
-                    if str(pid) in output:
-                        is_running = True
-                else:
-                    try:
-                        os.kill(pid, 0)
-                        is_running = True
-                    except OSError:
-                        is_running = False
-                        
-                if is_running:
-                    print(f"⚠️ [Worker] معالج الخلفية يعمل بالفعل حالياً (PID: {pid}). خروج.")
-                    sys.exit(0)
-    except Exception:
-        pass
-        
+    os.makedirs("temp", exist_ok=True)
+    if _another_worker_running(lock_file):
+        print("[Worker] معالج الخلفية يعمل بالفعل. خروج.")
+        sys.exit(0)
     try:
         with open(lock_file, "w") as f:
             f.write(str(os.getpid()))
     except Exception:
         pass
-        
+
     print("=" * 60)
-    print("🤖 طابور مهام الأتمتة الممنهج (Parallel SQLite Worker) قيد العمل...")
+    print("عامل البحث المسبق (Worker) قيد العمل...")
     print("=" * 60)
-    
+
     load_run_config()
-    
-    sheets_client = google_sheets.get_sheets_client()
-    if not sheets_client:
-        print("❌ [Worker] فشل الاتصال بـ Google Sheets API.")
-        return
-    worksheet = google_sheets.open_worksheet(sheets_client, config.SPREADSHEET_NAME_OR_URL)
-    if not worksheet:
-        print(f"❌ [Worker] لم يتم العثور على الشيت: {config.SPREADSHEET_NAME_OR_URL}")
-        return
-        
-    _, link_column_index = google_sheets.get_products(worksheet)
-    google_sheets.init_async_queue(config.CREDENTIALS_FILE, config.SPREADSHEET_NAME_OR_URL)
-    
-    db_lock = threading.Lock()
-    
-    # تحديث الحالة البدئية للأتمتة في قاعدة البيانات
-    stats = local_cache_db.get_queue_statistics()
-    local_cache_db.update_automation_state(
-        status='pre_caching',
-        total=stats['total'],
-        processed=stats['completed'] + stats['failed'] + stats['processing'],
-        success=stats['completed'],
-        failed=stats['failed']
-    )
-    
-    # دالة تنفيذ المهمة الفرعية في الثريد
-    def worker_task_runner(t):
-        try:
-            local_cache_db.update_automation_state(status='pre_caching', current_product=t['product_name'])
-            pre_cache_product_candidates(t, worksheet, link_column_index)
-            
-            st = local_cache_db.get_queue_statistics()
-            local_cache_db.update_automation_state(
-                status='pre_caching',
-                processed=st['completed'] + st['failed'] + st['processing'],
-                success=st['completed'],
-                failed=st['failed']
-            )
-        except Exception as e:
-            local_cache_db.update_task_status(t["id"], "failed", f"Unexpected worker error: {str(e)}")
-            print(f"❌ [Worker Thread Error] فشل معالجة المهمة للصف {t['row_number']}: {e}")
-            st = local_cache_db.get_queue_statistics()
-            local_cache_db.update_automation_state(
-                status='pre_caching',
-                processed=st['completed'] + st['failed'] + st['processing'],
-                success=st['completed'],
-                failed=st['failed']
-            )
-            
-    # تشغيل منفذ ثريد متوازي بعدد 3 ثريدات متزامنة
-    max_workers = 3
-    active_futures = []
-    
+    local_cache_db.resume_automation()   # علم الإيقاف المؤقت القديم لا يمنع تشغيلاً جديداً
+    notice = check_verifier()
+    if notice:
+        print(f"[Worker] {notice}")
+
+    stop_reason = None
+    queue_started = False
     try:
+        sheets_client = google_sheets.get_sheets_client()
+        if not sheets_client:
+            stop_reason = "sheets_unavailable"
+            local_cache_db.update_automation_state(status="error", notice="SHEETS_UNAVAILABLE: Google Sheets connection failed")
+            return
+        try:
+            worksheet = google_sheets.open_worksheet(sheets_client, config.SPREADSHEET_NAME_OR_URL)
+            if not worksheet:
+                raise google_sheets.SheetConfigError(f"sheet not found: {config.SPREADSHEET_NAME_OR_URL}")
+            link_column_index = google_sheets.find_link_column(worksheet)
+        except Exception as e:
+            stop_reason = "sheet_config"
+            local_cache_db.update_automation_state(status="error", notice=f"SHEET_CONFIG: {e}")
+            print(f"[Worker] {e}")
+            return
+        brand_mappings = google_sheets.get_brand_mappings(sheets_client, config.SPREADSHEET_NAME_OR_URL)
+        google_sheets.init_async_queue(config.CREDENTIALS_FILE, config.SPREADSHEET_NAME_OR_URL)
+        queue_started = True
+        _refresh_state("pre_caching", notice=notice)
+
+        worker_id = local_cache_db.new_claim_id().split("#")[0]
+        lock = threading.Lock()
+        counters = {"provider_down_streak": 0}
+
+        def runner(t):
+            try:
+                local_cache_db.update_automation_state(status="pre_caching", current_product=t["product_name"])
+                result = pre_cache_product_candidates(t, worksheet, link_column_index, brand_mappings)
+            except Exception as e:
+                local_cache_db.update_task_status(t["id"], "failed", f"Unexpected worker error: {e}",
+                                                  failure_code="WORKER_ERROR")
+                print(f"[Worker Thread Error] الصف {t['row_number']}: {e}")
+                result = "failed"
+            with lock:
+                counters["provider_down_streak"] = counters["provider_down_streak"] + 1 if result == "provider_down" else 0
+            _refresh_state("pre_caching")
+
+        max_workers = 3
+        active = []
+        db_outage_since = None
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             while True:
-                active_futures = [f for f in active_futures if not f.done()]
-                
-                # التحقق مما إذا كان هناك طلب إيقاف مؤقت نشط
-                state = local_cache_db.get_automation_state()
-                if state.get("pause_requested") == 1:
-                    time.sleep(1)
-                    continue
-                
-                if len(active_futures) < max_workers:
-                    with db_lock:
-                        task = local_cache_db.fetch_next_task()
-                        
-                    if task:
-                        print(f"🔄 [Queue] تم سحب مهمة جديدة للصف {task['row_number']} وجدولتها بالتوازي...")
-                        fut = executor.submit(worker_task_runner, task)
-                        active_futures.append(fut)
+                active = [f for f in active if not f.done()]
+                with lock:
+                    streak = counters["provider_down_streak"]
+                if streak >= MAX_PROVIDER_DOWN_STREAK:
+                    stop_reason = "provider_down"
+                    print("[Worker] محركات البحث غير متاحة لعدة منتجات متتالية؛ إيقاف العامل وإبقاء الصفوف في الانتظار.")
+                    break
+                try:
+                    if local_cache_db.get_automation_state().get("pause_requested") == 1:
+                        time.sleep(1)
                         continue
-                
-                if len(active_futures) == 0:
-                    stats = local_cache_db.get_queue_statistics()
-                    if stats["pending"] == 0:
-                        print("🏁 الطابور فارغ تماماً وكل المهام تم توزيعها. خروج الوركر بأمان وتوفير الموارد.")
+                    if len(active) < max_workers:
+                        task = local_cache_db.fetch_next_task(worker_id)
+                        if task:
+                            print(f"[Queue] سحب مهمة الصف {task['row_number']}.")
+                            active.append(executor.submit(runner, task))
+                            db_outage_since = None
+                            continue
+                    if not active and local_cache_db.count_open_tasks() == 0:
+                        print("[Worker] الطابور فارغ؛ خروج العامل.")
                         break
-                
+                    db_outage_since = None
+                except Exception as e:
+                    # خطأ قاعدة البيانات ليس "طابوراً فارغاً": ننتظر ونعيد المحاولة
+                    db_outage_since = db_outage_since or time.time()
+                    print(f"[Worker] خطأ في قاعدة البيانات: {e}")
+                    if time.time() - db_outage_since > MAX_DB_OUTAGE_SECONDS and not active:
+                        stop_reason = "db_unavailable"
+                        break
+                    time.sleep(5)
+                    continue
                 time.sleep(1)
     finally:
         try:
-            ready_count = local_cache_db.get_ready_for_review_count()
-            if ready_count > 0:
-                local_cache_db.update_automation_state(status='curation_pending', current_product="")
+            if stop_reason == "provider_down":
+                local_cache_db.update_automation_state(
+                    status="provider_down", current_product="",
+                    notice="PROVIDER_DOWN: search providers unavailable; remaining rows stay pending")
+            elif stop_reason in ("sheets_unavailable", "sheet_config"):
+                pass
+            elif local_cache_db.get_ready_for_review_count() > 0:
+                local_cache_db.update_automation_state(status="curation_pending", current_product="")
             else:
-                local_cache_db.update_automation_state(status='idle', current_product="")
+                local_cache_db.update_automation_state(status="idle", current_product="")
         except Exception as e:
-            print(f"⚠️ [Worker Finally State Update Error] {e}")
-            local_cache_db.update_automation_state(status='idle', current_product="")
+            print(f"[Worker] تعذر تحديث الحالة النهائية: {e}")
+        if queue_started:
+            google_sheets.stop_async_queue()
+        for path in (lock_file, "temp/batch_progress.json"):
+            try:
+                if os.path.exists(path):
+                    os.remove(path)
+            except Exception:
+                pass
 
-        google_sheets.stop_async_queue()
-        try:
-            if os.path.exists(lock_file):
-                os.remove(lock_file)
-            progress_file = "temp/batch_progress.json"
-            if os.path.exists(progress_file):
-                os.remove(progress_file)
-        except Exception:
-            pass
 
 def run_automation_pipeline():
-    """
-    التشغيل التسلسلي القديم الافتراضي
-    """
+    """التشغيل التسلسلي القديم (بدون طابور)."""
     lock_file = "temp/pipeline.lock"
     try:
         load_run_config()
         google_sheets.init_async_queue(config.CREDENTIALS_FILE, config.SPREADSHEET_NAME_OR_URL)
-        
         try:
             os.makedirs("temp", exist_ok=True)
             with open(lock_file, "w") as f:
                 f.write(str(os.getpid()))
         except Exception:
             pass
-            
-        print("=" * 60)
-        print("🤖 نظام معالجة ورفع صور المنتجات التلقائي")
-        print("=" * 60)
-        
+
         sheets_client = google_sheets.get_sheets_client()
         if not sheets_client:
-            print("❌ فشل الاتصال بـ Google Sheets API.")
+            print("فشل الاتصال بـ Google Sheets API.")
             return
-            
         worksheet = google_sheets.open_worksheet(sheets_client, config.SPREADSHEET_NAME_OR_URL)
         if not worksheet:
-            print(f"❌ لم يتم العثور على ورقة العمل أو فتحها: {config.SPREADSHEET_NAME_OR_URL}")
+            print(f"لم يتم العثور على ورقة العمل: {config.SPREADSHEET_NAME_OR_URL}")
             return
-            
         products, link_column_index = google_sheets.get_products(worksheet)
         if not products:
-            print("⚠️ لم يتم العثور على أي منتجات صالحة للمعالجة.")
+            print("لم يتم العثور على أي منتجات صالحة للمعالجة.")
             return
-            
-        print(f"📋 تم العثور على {len(products)} منتج جاهز للفحص.")
-        
-        success_count = 0
-        skipped_count = 0
-        failed_count = 0
-        
+        brand_mappings = google_sheets.get_brand_mappings(sheets_client, config.SPREADSHEET_NAME_OR_URL)
+
+        success_count = skipped_count = failed_count = 0
         save_progress(0, len(products), 0, 0, "بدء التشغيل...")
-        
         for i, prod in enumerate(products, start=1):
-            name = prod["product_name"]
-            save_progress(i, len(products), success_count, failed_count, name)
-            
-            print("\n" + "-" * 50)
-            print(f"🔄 معالجة المنتج ({i}/{len(products)}): [{name}]")
-            print("-" * 50)
-            
-            result = process_single_product(prod, worksheet, link_column_index)
+            save_progress(i, len(products), success_count, failed_count, prod["product_name"])
+            print(f"معالجة المنتج ({i}/{len(products)}): [{prod['product_name']}]")
+            try:
+                result = process_single_product(prod, worksheet, link_column_index, brand_mappings)
+            except Exception as e:
+                print(f"خطأ غير متوقع في الصف {prod['row_number']}: {e}")
+                result = "failed"
             if result == "success":
                 success_count += 1
             elif result == "failed":
                 failed_count += 1
             elif result == "skipped":
                 skipped_count += 1
-                
-        print("\n" + "=" * 60)
-        print("🏁 انتهت عملية الأتمتة بنجاح!")
-        print(f"📊 الخلاصة:")
-        print(f"   ✅ ناجح: {success_count}")
-        print(f"   ⏭️ تم تخطيه (يحتوي على رابط): {skipped_count}")
-        print(f"   ❌ فشل: {failed_count}")
-        print("=" * 60)
+        print(f"انتهت المعالجة: ناجح {success_count}، متخطى {skipped_count}، فاشل {failed_count}.")
     finally:
         google_sheets.stop_async_queue()
-        try:
-            if os.path.exists(lock_file):
-                os.remove(lock_file)
-            progress_file = "temp/batch_progress.json"
-            if os.path.exists(progress_file):
-                os.remove(progress_file)
-        except Exception:
-            pass
+        for path in (lock_file, "temp/batch_progress.json"):
+            try:
+                if os.path.exists(path):
+                    os.remove(path)
+            except Exception:
+                pass
+
 
 if __name__ == "__main__":
     if "--enqueue" in sys.argv:
