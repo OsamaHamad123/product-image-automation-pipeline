@@ -326,11 +326,47 @@ def _same_product_task(task, sku_key, product_name):
     return bool(task_name) and task_name == name
 
 
+# sku_key المرسل لمنتج غير الذي تصفه حقول الطلب (نتيجة بحث لمنتج آخر وصلت متأخرة، أو صفحة قديمة): لا يُكتب شيء
+PRODUCT_CHANGED_ERROR = "المنتج تغيّر أثناء المراجعة؛ افتحه من جديد"
+
+# حقول حمولة الطابور في مفتاح الصف (main.sku_row): (اسم الحقل في الطلب، اسمه في الحمولة)
+_KEY_PAYLOAD_FIELDS = (("product_name_ar", "name_ar"), ("brand_ar", "brand_ar"), ("category", "category"),
+                       ("size", "size"))
+
+
+def _request_sku_key(params, task=None):
+    """
+    sku_key لحقول المنتج في الطلب بنفس حساب مفتاح صف الشيت عند بناء الطابور
+    (main.compute_sku_key(main.sku_row(...))، والمفتاح لا يعتمد على شيت مرادفات البراندات).
+    الاسم والبراند والباركود من الطلب دائماً. الحقل الغائب تماماً من الطلب (صفحة الدفعات لا ترسل الاسم والبراند
+    بالعربية، ورفع الصورة لا يمرر الحجم) يؤخذ من حمولة صف الطابور task، ويمرره المستدعي فقط إن كان لنفس المنتج.
+    """
+    pipeline = _pipeline()
+    stored = pipeline.task_payload(task) if task else {}
+    payload = {key: (_text(params, sent) if sent in params else str(stored.get(key) or "").strip())
+               for sent, key in _KEY_PAYLOAD_FIELDS}
+    return pipeline.compute_sku_key(pipeline.sku_row(
+        _text(params, 'product_name'), _text(params, 'brand'), _text(params, 'barcode'), payload))
+
+
+def _product_changed(params, task):
+    """
+    هل sku_key المرسل لمنتج آخر غير الذي تصفه حقول الطلب (الاسم والبراند والباركود والحجم)؟ يُعاد حسابه من الحقول
+    ويقارن. طلب بلا sku_key أو بلا اسم منتج لا يحمل هوية للمقارنة. task: صف الطابور عند رقم الصف (أو None).
+    """
+    sku_key = _text(params, 'sku_key')
+    product_name = _text(params, 'product_name')
+    if not sku_key or not product_name:
+        return False
+    same = _same_product_task(task, sku_key, product_name)
+    return _request_sku_key(params, task if same else None) != sku_key
+
+
 def _identity_problem(params, row_number):
     """
     يتحقق من sku_key والباركود المطلوبين. يعيد (sku_key, barcode, خطأ أو None).
     الباركود لا يُقارن بنسخة الطابور القديمة: الكتابة في الشيت تتحقق من هوية الصف الحي عند التنفيذ،
-    وتصحيح المالك للباركود لا يجب أن يمنع الاعتماد.
+    وتصحيح المالك للباركود لا يجب أن يمنع الاعتماد. sku_key المرسل يجب أن يطابق حقول المنتج المرسلة معه.
     """
     sku_key = _text(params, 'sku_key')
     barcode = _text(params, 'barcode')
@@ -342,6 +378,8 @@ def _identity_problem(params, row_number):
         sku_key = sku_key or (task.get("sku_key") or "")
     if not sku_key:
         return sku_key, barcode, "sku_key is required"
+    if _product_changed(params, task):
+        return sku_key, barcode, PRODUCT_CHANGED_ERROR
     return sku_key, barcode, None
 
 
@@ -507,11 +545,13 @@ def action_upload_manual_image(params):
     if not file_path or not row_number or not product_name or not os.path.exists(file_path):
         return {'status': 'failed', 'error': 'Missing parameters or local file path not found'}
     row_number = int(row_number)
+    task = local_cache_db.get_task_by_row(row_number)
+    if _product_changed(params, task):
+        return {'status': 'failed', 'error': PRODUCT_CHANGED_ERROR}
 
     pipeline = _pipeline()
     sku_key = _text(params, 'sku_key')
     if not sku_key:
-        task = local_cache_db.get_task_by_row(row_number)
         sku_key = (task or {}).get("sku_key") or pipeline.compute_sku_key(
             {"name": product_name, "brand": brand, "barcode": barcode}, _load_brand_mappings())
     queue_started = False
@@ -621,11 +661,13 @@ def action_reject_image(params):
         return {'status': 'error', 'error': f"invalid reason_code {reason_code!r}",
                 'allowed': list(local_cache_db.REJECT_REASON_CODES)}
     row_number = int(row_number)
+    task = local_cache_db.get_task_by_row(row_number)
+    if _product_changed(params, task):
+        return {'status': 'error', 'error': PRODUCT_CHANGED_ERROR}
 
     brand_mappings = None
     sku_key = _text(params, 'sku_key')
     if not sku_key:
-        task = local_cache_db.get_task_by_row(row_number)
         sku_key = (task or {}).get("sku_key") or ""
     if not sku_key:
         if not product_name:

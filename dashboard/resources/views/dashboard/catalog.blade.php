@@ -1985,7 +1985,101 @@
             c.reasons.map(r => el('div', { text: '• ' + r })));
     }
 
-    // بيانات المنتج الحالي المطلوبة للاعتماد والرفض
+    // =============================================
+    // ربط النتائج بالمنتج الذي بُحث له: كل بحث يحمل رمزاً والمنتج (الصف و sku_key)، واستجابة منتج لم يعد مفتوحاً
+    // تُهمل فلا تلمس النموذج ولا النتائج. الاعتماد والرفض والرفع ترسل هوية المنتج المربوط بالنتائج كما في الشيت،
+    // وليس حقول النموذج التي قد يعدلها المراجع للبحث.
+    // =============================================
+    let openProduct = null;          // هوية المنتج المفتوح (لقطة من صف الشيت عند فتحه)
+    let searchSeq = 0;               // رمز أحدث بحث
+    let searchController = null;
+    let approvalInFlight = false;    // اعتماد أو رفع جارٍ: كل أزرار الاعتماد معطلة
+    let highlightedCandidate = -1;   // المرشح المحدد بمفاتيح الأرقام
+
+    function productIdentity(prod) {
+        return {
+            row_number: String(prod.row_number === undefined || prod.row_number === null ? '' : prod.row_number),
+            product_name: prod.product_name || '',
+            brand: prod.brand || '',
+            product_name_ar: prod.product_name_ar || '',
+            brand_ar: prod.brand_ar || '',
+            barcode: prod.barcode || '',
+            sku_key: prod.sku_key || '',
+            category: prod.category || '',
+            size: prod.size || '',
+            sub_category: prod.sub_category || '',
+            origin: prod.origin || ''
+        };
+    }
+
+    // هل ما زال هذا المنتج هو المفتوح؟ (الصف و sku_key والاسم كما في الشيت)
+    function isOpenProduct(target) {
+        return !!(target && openProduct) && target.row_number === openProduct.row_number
+            && target.sku_key === openProduct.sku_key && target.product_name === openProduct.product_name;
+    }
+
+    // نسخة من هوية المنتج المفتوح تُربط بها نتائج عرض واحد (مع قرار البحث الذي عرضته)
+    function bindToOpenProduct(extra) {
+        return openProduct ? Object.assign({}, openProduct, extra || {}) : null;
+    }
+
+    // إلغاء البحث الجاري: استجابته، إن وصلت، تُهمل
+    function cancelPendingSearch() {
+        searchSeq++;
+        if (searchController) {
+            searchController.abort();
+            searchController = null;
+        }
+    }
+
+    // إزالة نتائج المنتج السابق وأزرارها
+    function clearResults() {
+        highlightedCandidate = -1;
+        ['outcomeBanner', 'recommendedContainer', 'candidatesContainer', 'accordionContainer'].forEach(id => {
+            document.getElementById(id).textContent = '';
+        });
+        document.getElementById('resultsContent').style.display = 'none';
+    }
+
+    // أثناء الاعتماد تتعطل كل أزرار الاعتماد في الصفحة؛ بعده تعود إلا المقفلة بعد اعتماد ناجح
+    function setApproveControlsDisabled(disabled) {
+        document.querySelectorAll('#confirmImageBtn, .js-approve-candidate').forEach(b => {
+            b.disabled = disabled || b.dataset.locked === '1';
+        });
+    }
+
+    // بعد اعتماد ناجح: الصورة المعتمدة تُعلَّم، وباقي أزرار الاعتماد تُقفل حتى بحث جديد أو فتح المنتج من جديد
+    function lockApproveControls(approvedUrl) {
+        document.querySelectorAll('#candidatesContainer .candidate-card').forEach(card => {
+            const btn = card.querySelector('.js-approve-candidate');
+            if (btn && approvedUrl && card.dataset.url === approvedUrl) {
+                btn.replaceWith(el('span', { className: 'candidate-badge-inline accepted', text: 'تم الاعتماد ✓' }));
+            }
+        });
+        document.querySelectorAll('#confirmImageBtn, .js-approve-candidate').forEach(b => {
+            b.dataset.locked = '1';
+            b.disabled = true;
+            b.title = 'اعتُمدت صورة لهذا المنتج. لاعتماد صورة أخرى اضغط "ابدأ الفحص البصري والبحث الذكي" لبحث جديد، أو افتح المنتج من القائمة مرة أخرى.';
+        });
+    }
+
+    // مفاتيح الأرقام تحدد مرشحاً من الشبكة فقط؛ الاعتماد بـ A أو Enter
+    function highlightCandidate(idx) {
+        const cards = document.querySelectorAll('#candidatesContainer .candidate-card');
+        if (!cards[idx]) return false;
+        cards.forEach((card, i) => card.classList.toggle('confirming-active', i === idx));
+        highlightedCandidate = idx;
+        cards[idx].scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        return true;
+    }
+
+    // صورة جديدة في البطاقة الرئيسية: يُلغى التحديد بالأرقام فيعتمد A الصورة المعروضة وليس مرشحاً حُدد قبلها
+    function clearHighlight() {
+        highlightedCandidate = -1;
+        document.querySelectorAll('#candidatesContainer .candidate-card').forEach(card => card.classList.remove('confirming-active'));
+    }
+
+    // بيانات النموذج الحالية (يرسلها البحث؛ قد يعدل المراجع الاسم والبراند لتحسين البحث)
     function currentProductContext() {
         const form = document.getElementById('searchForm');
         return {
@@ -2092,13 +2186,19 @@
         container.appendChild(banner);
     }
 
-    // عرض استجابة البحث لكل الحالات (وليس فقط عند النجاح)
-    function renderSearchResponse(data, extraNote) {
+    // عرض استجابة البحث لكل الحالات (وليس فقط عند النجاح). target: المنتج الذي طُلب له البحث (أو null لبحث
+    // حر بلا منتج من الشيت)؛ استجابة منتج لم يعد مفتوحاً لا تُعرض ولا تلمس النموذج
+    function renderSearchResponse(data, extraNote, target) {
         data = data || {};
-        if (data.sku_key) {
-            document.getElementById('searchForm').dataset.skuKey = data.sku_key;
+        if (target ? !isOpenProduct(target) : !!openProduct) return;
+        const form = document.getElementById('searchForm');
+        if (openProduct && data.sku_key && !openProduct.sku_key) {
+            // المنتج بلا sku_key في القائمة: يؤخذ من استجابة البحث له
+            openProduct.sku_key = String(data.sku_key);
+            form.dataset.skuKey = openProduct.sku_key;
         }
-        document.getElementById('searchForm').dataset.searchDecision = String(data.decision || '');
+        form.dataset.searchDecision = String(data.decision || '');
+        const bound = bindToOpenProduct({ search_decision: String(data.decision || '') });
         showResultsWorkspace();
         const candidates = collectCandidates(data);
         renderOutcomeBanner(data, candidates.length, extraNote);
@@ -2109,9 +2209,9 @@
             const selected = normalizeCandidate(data.selected_image);
             const fromList = candidates.find(c => c.url === selected.url);
             const merged = fromList ? Object.assign({}, fromList, { source: selected.source || fromList.source }) : selected;
-            renderRecommendedCard(merged, { decision: data.decision || '' });
+            renderRecommendedCard(merged, { decision: data.decision || '' }, bound);
         }
-        renderCandidatesGrid(candidates);
+        renderCandidatesGrid(candidates, bound);
         renderAccordionTrace(data.trace);
 
         const meta = data.selected_image && data.selected_image.metadata;
@@ -2133,6 +2233,11 @@
     function selectProduct(prod, element) {
         document.querySelectorAll('.product-item').forEach(el => el.classList.remove('active'));
         element.classList.add('active');
+
+        // المنتج السابق: يُلغى بحثه الجاري وتُزال نتائجه وأزرارها قبل عرض المنتج الجديد
+        cancelPendingSearch();
+        closeRejectModal();
+        clearResults();
 
         // إزالة أي تنبيه أخطاء أتمتة سابقة
         const existingAlert = document.getElementById('automationErrorAlert');
@@ -2158,6 +2263,7 @@
         form.dataset.subCategory = prod.sub_category || '';
 
         activeRowNumber = prod.row_number;
+        openProduct = productIdentity(prod);
 
         // إظهار بانر توضيحي لسبب فشل الأتمتة في حالة وجود خطأ
         if (prod.has_error) {
@@ -2183,29 +2289,73 @@
             const recommendedContainer = document.getElementById('recommendedContainer');
             recommendedContainer.textContent = '';
             let note;
+            form.dataset.searchDecision = prod.preselected ? 'REVIEW_PRESELECTED' : 'REVIEW_UNSELECTED';
+            const target = bindToOpenProduct({ search_decision: form.dataset.searchDecision });
             if (prod.needs_review_url) {
                 const selected = stored.find(c => c.url === prod.needs_review_url) || normalizeCandidate({
                     url: prod.needs_review_url,
                     status: prod.preselected ? 'preselected' : 'pending',
                     title: 'الرابط المعلّم بـ needs_review في الشيت'
                 });
-                renderRecommendedCard(selected, { decision: prod.preselected ? 'REVIEW_PRESELECTED' : '' });
+                renderRecommendedCard(selected, { decision: prod.preselected ? 'REVIEW_PRESELECTED' : '' }, target);
                 note = prod.preselected
                     ? 'رشّح النظام هذه الصورة من مرشحين موثقين، ولم تُنشر بعد. راجع الأدلة واعتمدها أو اختر غيرها.'
                     : 'الرابط في الشيت معلّم needs_review (لم يُراجع بعد أو لم تتم إزالة الخلفية). راجعه قبل الاعتماد.';
             } else {
                 note = 'لا يوجد مرشح مؤكد المطابقة: اختر يدوياً من المرشحين أدناه أو اضغط البحث لإعادة البحث.';
             }
-            form.dataset.searchDecision = prod.preselected ? 'REVIEW_PRESELECTED' : 'REVIEW_UNSELECTED';
             renderOutcomeBanner({ status: 'review', decision: prod.preselected ? 'REVIEW_PRESELECTED' : 'REVIEW_UNSELECTED',
                                   selected_image: prod.needs_review_url ? { url: prod.needs_review_url } : null },
                                 stored.length, note);
-            renderCandidatesGrid(stored);
+            renderCandidatesGrid(stored, target);
             renderAccordionTrace(null);
             initTaxonomyDropdowns();
+        } else if (String(prod.existing_image_link || '').trim() !== '') {
+            showCurrentSheetImage(prod);
         } else {
             document.getElementById('submitBtn').click();
         }
+    }
+
+    // منتج له صورة نهائية في الشيت: تُعرض الصورة الحالية بلا بحث تلقائي (البحث يستهلك رصيد المحركات)،
+    // وزر "إعادة البحث" لمن أراد صورة بديلة
+    function showCurrentSheetImage(prod) {
+        const link = String(prod.existing_image_link || '').trim();
+        const shown = safeHttpUrl(link);
+        showResultsWorkspace();
+        document.getElementById('searchForm').dataset.searchDecision = '';
+        document.getElementById('outcomeBanner').appendChild(el('div', { className: 'outcome-banner success', dataset: { status: 'completed' } }, [
+            el('div', { text: '✅ لهذا المنتج صورة نهائية في الشيت' }),
+            el('span', { className: 'banner-detail', text: 'لم يُجرَ بحث تلقائي. اضغط "إعادة البحث" إذا أردت البحث عن صورة بديلة (كل بحث يستهلك من رصيد محركات البحث).' })
+        ]));
+        document.getElementById('recommendedContainer').appendChild(el('div', {
+            className: 'glass-panel recommended-card', id: 'currentSheetImageCard', style: 'margin: 0 0 1.5rem 0; padding: 1.5rem;'
+        }, [
+            el('div', { className: 'workbench-grid' }, [
+                el('div', { className: 'recommended-image-box' }, [
+                    shown ? el('img', { src: getImageUrl(shown), alt: 'Current sheet image', referrerpolicy: 'no-referrer' })
+                          : el('span', { text: 'الرابط في الشيت ليس رابط صورة يمكن عرضه.' })
+                ]),
+                el('div', { style: 'display: flex; flex-direction: column; gap: 0.75rem;' }, [
+                    el('h3', { style: 'font-size: 1.1rem; font-weight: 800; margin: 0;', text: 'الصورة الحالية في الشيت' }),
+                    el('p', { style: 'color: var(--text-secondary); font-size: 0.85rem; margin: 0;' }, [
+                        'المنتج: ', el('strong', { style: 'color: var(--text-primary);', text: prod.product_name || '' }),
+                        ' — البراند: ', el('strong', { style: 'color: var(--text-primary);', text: prod.brand || '' })
+                    ]),
+                    shown ? el('a', { href: shown, target: '_blank', rel: 'noopener noreferrer', style: 'font-size: 0.8rem; color: var(--accent-cyan); word-break: break-all;', text: link }) : null,
+                    el('button', { type: 'button', className: 'btn', id: 'researchCompletedBtn', style: 'font-weight: 800;',
+                                   onclick: () => document.getElementById('submitBtn').click() },
+                       [el('i', { className: 'fas fa-search' }), ' إعادة البحث'])
+                ])
+            ])
+        ]));
+        document.getElementById('candidatesContainer').appendChild(el('p', {
+            style: 'color: var(--text-secondary); grid-column: 1/-1; text-align: center; padding: 2rem;',
+            text: 'لم يُجرَ بحث لهذا المنتج. اضغط "إعادة البحث" لعرض صور مرشحة.'
+        }));
+        renderAccordionTrace(null);
+        initTaxonomyDropdowns();
+        setOverallStatus('له صورة نهائية في الشيت', 'success');
     }
 
     // إرسال استعلام البحث (يرسل الاسم والبراند بالعربية والفئة والاستعلام المخصص)
@@ -2225,6 +2375,14 @@
         const strictBrandMatch = document.getElementById('strictBrandMatch').checked;
         const skipCache = document.getElementById('skipCache') ? document.getElementById('skipCache').checked : false;
 
+        // بحث جديد يلغي السابق. الاستجابة تُقبل فقط إن كان رمزها الأحدث وما زال منتجها (الصف و sku_key) مفتوحاً
+        cancelPendingSearch();
+        const token = searchSeq;
+        const target = openProduct ? Object.assign({}, openProduct) : null;
+        const controller = new AbortController();
+        searchController = controller;
+        const isCurrent = () => token === searchSeq && (target ? isOpenProduct(target) : !openProduct);
+
         placeholder.style.display = 'none';
         resultsContent.style.display = 'none';
         loading.style.display = 'flex';
@@ -2233,6 +2391,7 @@
         try {
             const res = await fetch('/api/search', {
                 method: 'POST',
+                signal: controller.signal,
                 headers: {
                     'Content-Type': 'application/json',
                     'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
@@ -2260,9 +2419,13 @@
             } catch (parseErr) {
                 data = { status: 'error', error: `استجابة غير صالحة من الخادم (HTTP ${res.status})` };
             }
+            if (!isCurrent()) return;    // فُتح منتج آخر أو بدأ بحث أحدث: لا تلمس النموذج ولا النتائج
+            searchController = null;
             loading.style.display = 'none';
-            renderSearchResponse(data);
+            renderSearchResponse(data, undefined, target);
         } catch (err) {
+            if (!isCurrent()) return;    // بحث أُلغي (AbortError) أو لمنتج لم يعد مفتوحاً
+            searchController = null;
             console.error(err);
             loading.style.display = 'none';
             placeholder.style.display = 'block';
@@ -2272,9 +2435,10 @@
 
     // بطاقة الصورة المرشحة: تعرض الصورة الأصلية ومصدرها وأدلتها. المعاينة بعد المعالجة
     // (عزل الخلفية على لوحة بيضاء) تظهر فقط بعد نجاح الاعتماد.
-    function renderRecommendedCard(candidate, meta = {}) {
+    // target: المنتج الذي تعود له الصورة (يُرسل مع الاعتماد والرفض)؛ meta.approved: اعتُمدت فلا زر اعتماد
+    function renderRecommendedCard(candidate, meta = {}, target = null) {
         const c = normalizeCandidate(candidate);
-        const ctx = currentProductContext();
+        const ctx = target || currentProductContext();
         const container = document.getElementById('recommendedContainer');
         container.textContent = '';
 
@@ -2313,12 +2477,14 @@
             el('option', { value: 'none', text: 'بدون عزل (يُكتب الرابط بعلامة needs_review)' })
         ]);
 
-        const approveBtn = el('button', { type: 'button', className: 'btn', id: 'confirmImageBtn', style: 'flex: 2; font-weight: 800;',
-                                          onclick: (e) => approveCandidate(c, e.currentTarget) },
-                              [el('i', { className: 'fas fa-check' }), ' اعتماد الصورة للشيت والرفع [A]']);
+        const approveBtn = meta.approved
+            ? el('span', { className: 'candidate-badge-inline accepted', id: 'approvedImageBadge', style: 'flex: 2; font-weight: 800; text-align: center; padding: 0.6rem;', text: 'تم الاعتماد ✓' })
+            : el('button', { type: 'button', className: 'btn', id: 'confirmImageBtn', style: 'flex: 2; font-weight: 800;',
+                             disabled: approvalInFlight, onclick: (e) => approveCandidate(c, target, e.currentTarget) },
+                 [el('i', { className: 'fas fa-check' }), ' اعتماد الصورة للشيت والرفع [A]']);
         const rejectBtn = el('button', { type: 'button', className: 'btn', id: 'rejectImageBtn',
                                          style: 'flex: 1; background: var(--danger-bg); border-color: var(--panel-border); color: var(--danger);',
-                                         onclick: () => openRejectModal(c) },
+                                         onclick: () => openRejectModal(c, target) },
                              [el('i', { className: 'fas fa-times' }), ' رفض [X]']);
 
         const infoCol = el('div', { style: 'display: flex; flex-direction: column; justify-content: space-between; gap: 0.75rem;' }, [
@@ -2378,25 +2544,29 @@
         };
     }
 
-    // اعتماد صورة: يرسل الباركود و sku_key والتصنيف بمفاتيح category_l*_en
-    async function approveCandidate(candidate, btn) {
+    // اعتماد صورة: يرسل هوية المنتج الذي وُجدت له الصورة (target) مع الباركود و sku_key والتصنيف بمفاتيح category_l*_en.
+    // أثناء الاعتماد تتعطل كل أزرار الاعتماد ومفاتيحها؛ بعد النجاح لا زر اعتماد لهذه النتائج (لا نشر مرتين)
+    async function approveCandidate(candidate, target, btn) {
         const c = normalizeCandidate(candidate);
-        const ctx = currentProductContext();
-        if (!ctx.row_number) {
+        const ctx = target;
+        if (!ctx || !ctx.row_number) {
             alert('يرجى اختيار منتج من الشيت أولاً.');
             return;
         }
+        if (approvalInFlight) return;
         if ((c.status === 'rejected' || c.status === 'excluded') &&
             !confirm(`هذه الصورة مستبعدة آلياً:\n${c.reasons.join('\n') || c.status}\n\nهل أنت متأكد من اعتمادها يدوياً؟`)) {
             return;
         }
+        approvalInFlight = true;
+        setApproveControlsDisabled(true);
         const originalHtml = btn ? btn.innerHTML : '';
         if (btn) {
-            btn.disabled = true;
             btn.textContent = 'جاري المعالجة والرفع...';
         }
         const methodEl = document.getElementById('bgRemovalMethod');
         const aiEnhance = document.getElementById('aiEnhance') ? document.getElementById('aiEnhance').checked : false;
+        let approved = false;
 
         try {
             const res = await fetch('/api/select_image', {
@@ -2415,6 +2585,9 @@
                     barcode: ctx.barcode,
                     sku_key: ctx.sku_key,
                     size: ctx.size,
+                    product_name_ar: ctx.product_name_ar,
+                    brand_ar: ctx.brand_ar,
+                    category: ctx.category,
                     ...reviewedCandidateView(c, ctx),
                     category_l1_en: document.getElementById('selectL1').value,
                     category_l2_en: document.getElementById('selectL2').value,
@@ -2433,9 +2606,17 @@
             }
 
             if (data.status === 'success') {
-                const card = renderRecommendedCard(c, { decision: '' });
-                showProcessedPreview(card, data);
-                setOverallStatus('تم الاعتماد والرفع', 'success');
+                approved = true;
+                if (isOpenProduct(ctx)) {
+                    // المنتج ما زال مفتوحاً: البطاقة تُظهر "تم الاعتماد ✓" بلا زر اعتماد، وتُقفل باقي الأزرار.
+                    // بحث بدأ قبل انتهاء الاعتماد يُلغى: نتيجته لا تعيد أزرار اعتماد فوق الصورة المعتمدة
+                    cancelPendingSearch();
+                    showResultsWorkspace();
+                    lockApproveControls(c.url);
+                    const card = renderRecommendedCard(c, { decision: '', approved: true }, ctx);
+                    showProcessedPreview(card, data);
+                    setOverallStatus('تم الاعتماد والرفع', 'success');
+                }
                 alert(`🎉 تم رفع الصورة وتحديث الصف ${ctx.row_number} بنجاح!`);
                 loadProducts();
             } else {
@@ -2445,8 +2626,9 @@
             console.error(err);
             alert('❌ خطأ اتصال بالخادم.');
         } finally {
-            if (btn && btn.isConnected) {
-                btn.disabled = false;
+            approvalInFlight = false;
+            setApproveControlsDisabled(false);
+            if (!approved && btn && btn.isConnected) {
                 btn.innerHTML = originalHtml;
             }
         }
@@ -2456,14 +2638,15 @@
     // نافذة سبب الرفض (رموز الهوية: WRONG_PRODUCT / WRONG_BRAND / WRONG_VARIANT ...)
     // =============================================
     let pendingRejectCandidate = null;
+    let pendingRejectTarget = null;     // المنتج الذي تعود له الصورة المرفوضة
 
-    function openRejectModal(candidate) {
-        const ctx = currentProductContext();
-        if (!ctx.row_number) {
+    function openRejectModal(candidate, target) {
+        if (!target || !target.row_number) {
             alert('يرجى اختيار منتج من الشيت أولاً.');
             return;
         }
         pendingRejectCandidate = normalizeCandidate(candidate);
+        pendingRejectTarget = target;
         document.querySelectorAll('input[name="reject_reason_code"]').forEach(r => { r.checked = false; });
         document.getElementById('rejectModalUrl').textContent = pendingRejectCandidate.title || pendingRejectCandidate.url;
         document.getElementById('rejectReasonModal').style.display = 'flex';
@@ -2472,11 +2655,13 @@
     function closeRejectModal() {
         document.getElementById('rejectReasonModal').style.display = 'none';
         pendingRejectCandidate = null;
+        pendingRejectTarget = null;
     }
 
     async function submitReject() {
         const candidate = pendingRejectCandidate;
-        if (!candidate) return;
+        const ctx = pendingRejectTarget;
+        if (!candidate || !ctx) return;
         const checked = document.querySelector('input[name="reject_reason_code"]:checked');
         if (!checked) {
             alert('❌ يرجى اختيار سبب الرفض.');
@@ -2484,10 +2669,12 @@
         }
         const reasonCode = checked.value;
         const research = document.getElementById('rejectResearch').checked;
-        const ctx = currentProductContext();
         const btn = document.getElementById('rejectConfirmBtn');
         btn.disabled = true;
         btn.textContent = research ? 'جاري الرفض وإعادة البحث...' : 'جاري التسجيل...';
+        // الرفض مع إعادة البحث بحث جديد: يلغي البحث الجاري ويحمل رمزاً. بحث أحدث أو اعتماد ناجح بعده يسقط عرض نتيجته
+        if (research) cancelPendingSearch();
+        const token = searchSeq;
 
         try {
             const res = await fetch('/api/reject_image', {
@@ -2534,10 +2721,12 @@
                 await persistResearchCandidates(ctx, data, candidate.url);
             }
             loadProducts(); // تحديث حالة القائمة الجانبية بالخلفية
+            // فُتح منتج آخر، أو بدأ بعد الرفض بحث أحدث أو نجح اعتماد: الرفض سُجّل، ولا يتغير ما يعرضه المراجع
+            if (!isOpenProduct(ctx) || token !== searchSeq) return;
 
             const note = `تم رفض الصورة (${reasonCode}) واستبعادها من عمليات البحث القادمة لهذا المنتج.`;
             if (research && (Array.isArray(data.candidates) || data.decision)) {
-                renderSearchResponse(data, note);
+                renderSearchResponse(data, note, ctx);
             } else {
                 showRejectedState(note);
             }
@@ -2607,8 +2796,9 @@
         document.getElementById('submitBtn').click();
     }
 
-    // شبكة المرشحين: كل مرشح يعرض حالته وأسبابه وأدلته وما قرأه نموذج الرؤية
-    function buildCandidateCard(c, idx) {
+    // شبكة المرشحين: كل مرشح يعرض حالته وأسبابه وأدلته وما قرأه نموذج الرؤية.
+    // target: المنتج الذي وُجدت له المرشحات (هويته تُرسل مع الاعتماد والرفض)
+    function buildCandidateCard(c, idx, target) {
         const st = CANDIDATE_STATUS_LABELS[c.status] || { text: c.status, cls: 'eligible' };
         const card = el('div', { className: 'candidate-card', dataset: { url: c.url, status: c.status } });
         card.appendChild(el('div', { className: 'candidate-img-box' }, [
@@ -2616,6 +2806,7 @@
             el('img', { src: getImageUrl(c.url), alt: 'Candidate', loading: 'lazy', referrerpolicy: 'no-referrer' })
         ]));
         const meta = el('div', { className: 'candidate-meta' });
+        if (idx < 9) meta.appendChild(el('span', { title: `اضغط ${idx + 1} لتحديد هذه الصورة، ثم A أو Enter لاعتمادها`, text: `[${idx + 1}]` }));
         if (c.width && c.height) meta.appendChild(el('span', { text: `${c.width}×${c.height}` }));
         const pageLink = safeHttpUrl(c.page_url);
         if (pageLink) meta.appendChild(el('a', { href: pageLink, target: '_blank', rel: 'noopener noreferrer', style: 'color: var(--accent-cyan);', text: 'صفحة المصدر ↗' }));
@@ -2628,24 +2819,25 @@
             meta,
             renderReasons(c),
             el('div', { className: 'candidate-actions' }, [
-                el('button', { type: 'button', className: 'btn btn-secondary btn-sm js-approve-candidate',
-                               onclick: (e) => approveCandidate(c, e.currentTarget), text: `🎯 اعتماد [${idx + 1}]` }),
+                el('button', { type: 'button', className: 'btn btn-secondary btn-sm js-approve-candidate', disabled: approvalInFlight,
+                               onclick: (e) => approveCandidate(c, target, e.currentTarget), text: '🎯 اعتماد' }),
                 el('button', { type: 'button', className: 'btn btn-secondary btn-sm js-reject-candidate',
-                               style: 'color: var(--danger);', onclick: () => openRejectModal(c), text: '🚫 رفض' })
+                               style: 'color: var(--danger);', onclick: () => openRejectModal(c, target), text: '🚫 رفض' })
             ])
         ]));
         return card;
     }
 
-    function renderCandidatesGrid(candidates) {
+    function renderCandidatesGrid(candidates, target = null) {
         const container = document.getElementById('candidatesContainer');
         container.textContent = '';
+        highlightedCandidate = -1;
         if (!candidates || candidates.length === 0) {
             container.appendChild(el('p', { style: 'color: var(--text-secondary); grid-column: 1/-1; text-align: center; padding: 2rem;',
                                             text: 'لا توجد صور مرشحة لهذا البحث.' }));
             return;
         }
-        candidates.forEach((c, idx) => container.appendChild(buildCandidateCard(c, idx)));
+        candidates.forEach((c, idx) => container.appendChild(buildCandidateCard(c, idx, target)));
     }
 
     // رندرة أكورديون سجل التتبع (نص فقط عبر textContent)
@@ -2703,7 +2895,9 @@
             return;
         }
         showResultsWorkspace();
-        renderRecommendedCard({ url: url, title: 'صورة مدخلة يدوياً بواسطة المستخدم', status: 'pending', source: 'manual' }, {});
+        clearHighlight();
+        const target = bindToOpenProduct({ search_decision: document.getElementById('searchForm').dataset.searchDecision || '' });
+        renderRecommendedCard({ url: url, title: 'صورة مدخلة يدوياً بواسطة المستخدم', status: 'pending', source: 'manual' }, {}, target);
     }
 
     // ==========================================
@@ -2800,44 +2994,52 @@
         document.getElementById('manualFileInput').value = '';
     }
 
-    // اعتماد رفع الصورة المصححة Canvas
+    // اعتماد رفع الصورة المصححة Canvas: تُرفع على المنتج المفتوح بهويته كما في الشيت. الرفع نشر مثل الاعتماد:
+    // أثناءه تتعطل أزرار الاعتماد، وبعده لا زر اعتماد على الصورة المرفوعة
     async function commitEditorUpload() {
         if (!uploadFile) return;
-        
-        const row = document.getElementById('rowNumber').value;
-        const name = document.getElementById('productName').value;
-        const brand = document.getElementById('brand').value;
-        const barcode = document.getElementById('searchForm').dataset.barcode || '';
-        
-        if (!row) {
+
+        const ctx = bindToOpenProduct({ search_decision: document.getElementById('searchForm').dataset.searchDecision || '' });
+        if (!ctx || !ctx.row_number) {
             alert('يرجى اختيار منتج من الشيت أولاً للرفع عليه.');
             return;
         }
-        
+        if (approvalInFlight) {
+            alert('يوجد اعتماد جارٍ لصورة أخرى. انتظر حتى ينتهي ثم ارفع الصورة.');
+            return;
+        }
+        approvalInFlight = true;
+        setApproveControlsDisabled(true);
+
         const canvas = document.getElementById('editorCanvas');
         canvas.toBlob(async function(blob) {
-            const formData = new FormData();
-            const aiEnhance = document.getElementById('aiEnhance') ? document.getElementById('aiEnhance').checked : false;
-            formData.append('file', blob, 'manual_upload.png');
-            formData.append('row_number', row);
-            formData.append('product_name', name);
-            formData.append('brand', brand);
-            formData.append('barcode', barcode);
-            formData.append('sku_key', document.getElementById('searchForm').dataset.skuKey || '');
-            formData.append('search_decision', document.getElementById('searchForm').dataset.searchDecision || '');
-            formData.append('enhance', aiEnhance ? 'true' : 'false');
-            formData.append('target_width',  getOutputWidth());
-            formData.append('target_height', getOutputHeight());
-            
-            closeEditorModal();
-            
-            document.getElementById('placeholder').style.display = 'none';
-            document.getElementById('resultsContent').style.display = 'none';
             const loading = document.getElementById('loading');
-            loading.style.display = 'flex';
-            document.getElementById('loadingDetails').innerText = 'جاري عزل خلفية الصورة المرفوعة ووضعها على اللوحة البيضاء...';
-            
             try {
+                const formData = new FormData();
+                const aiEnhance = document.getElementById('aiEnhance') ? document.getElementById('aiEnhance').checked : false;
+                formData.append('file', blob, 'manual_upload.png');
+                formData.append('row_number', ctx.row_number);
+                formData.append('product_name', ctx.product_name);
+                formData.append('brand', ctx.brand);
+                formData.append('barcode', ctx.barcode);
+                formData.append('sku_key', ctx.sku_key);
+                formData.append('search_decision', ctx.search_decision);
+                // الحجم والاسم والبراند بالعربية يدخلون في sku_key الذي يتحقق منه الجسر
+                formData.append('size', ctx.size);
+                formData.append('product_name_ar', ctx.product_name_ar);
+                formData.append('brand_ar', ctx.brand_ar);
+                formData.append('category', ctx.category);
+                formData.append('enhance', aiEnhance ? 'true' : 'false');
+                formData.append('target_width',  getOutputWidth());
+                formData.append('target_height', getOutputHeight());
+
+                closeEditorModal();
+
+                document.getElementById('placeholder').style.display = 'none';
+                document.getElementById('resultsContent').style.display = 'none';
+                loading.style.display = 'flex';
+                document.getElementById('loadingDetails').innerText = 'جاري عزل خلفية الصورة المرفوعة ووضعها على اللوحة البيضاء...';
+
                 const res = await fetch('/api/upload_manual_image', {
                     method: 'POST',
                     headers: { 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content },
@@ -2845,23 +3047,34 @@
                 });
                 const data = await res.json();
                 if (data.status === 'success') {
-                    alert('🎉 تم معالجة ورفع الصورة وتحديث الشيت بنجاح!');
+                    if (isOpenProduct(ctx)) {
+                        cancelPendingSearch();      // بحث جارٍ لنفس المنتج لا يعيد أزرار اعتماد فوق الصورة المرفوعة
+                        showResultsWorkspace();
+                        lockApproveControls('');
+                        const card = renderRecommendedCard({ url: String(data.image_link || '').replace(/^needs_review:/, ''),
+                                                             title: 'الصورة المرفوعة والمعالجة يدوياً', status: 'pending', source: 'manual' },
+                                                           { approved: true }, ctx);
+                        showProcessedPreview(card, data);
+                    }
+                    alert(`🎉 تم معالجة ورفع الصورة وتحديث الصف ${ctx.row_number} بنجاح!`);
                     loadProducts();
-                    
-                    showResultsWorkspace();
-                    const card = renderRecommendedCard({ url: String(data.image_link || '').replace(/^needs_review:/, ''),
-                                                         title: 'الصورة المرفوعة والمعالجة يدوياً', status: 'pending', source: 'manual' }, {});
-                    showProcessedPreview(card, data);
                 } else {
                     alert('❌ فشل معالجة الصورة: ' + (data.error || 'خطأ غير معروف'));
-                    document.getElementById('loading').style.display = 'none';
-                    document.getElementById('placeholder').style.display = 'block';
+                    if (isOpenProduct(ctx)) {
+                        loading.style.display = 'none';
+                        document.getElementById('placeholder').style.display = 'block';
+                    }
                 }
             } catch (err) {
                 console.error(err);
                 alert('❌ حدث خطأ أثناء الاتصال بالخادم.');
-                document.getElementById('loading').style.display = 'none';
-                document.getElementById('placeholder').style.display = 'block';
+                if (isOpenProduct(ctx)) {
+                    loading.style.display = 'none';
+                    document.getElementById('placeholder').style.display = 'block';
+                }
+            } finally {
+                approvalInFlight = false;
+                setApproveControlsDisabled(false);
             }
         }, 'image/png');
     }
@@ -2938,13 +3151,29 @@
         if (document.getElementById('rejectReasonModal').style.display === 'flex') {
             return;
         }
-        
+        // نافذة محرر الرفع مفتوحة: اختصارات الاعتماد لا تصل للصورة التي خلفها
+        if (document.getElementById('editorModal').style.display === 'flex') {
+            return;
+        }
+        // اختصارات المتصفح (Ctrl/Cmd+A لتحديد النص، Ctrl+1 للتبويب...) ليست اعتماداً ولا تحديداً
+        if (e.ctrlKey || e.metaKey || e.altKey) {
+            return;
+        }
+        // النتائج مخفية (بحث جارٍ أو فشل البحث أو الرفع): لا اعتماد ولا تحديد ولا رفض لصورة لا يراها المراجع
+        const resultsHidden = document.getElementById('resultsContent').style.display === 'none';
+
         const key = e.key.toLowerCase();
-        
-        // [A] الاعتماد السريع
-        if (key === 'a') {
+
+        // [A] اعتماد الصورة المحددة بالأرقام، وإلا الصورة المرشحة في البطاقة الرئيسية. [Enter] يعتمد المحددة بالأرقام فقط
+        if (key === 'a' || e.key === 'Enter') {
+            // Enter على زر أو رابط يفعّله المتصفح نفسه؛ لا نضيف فوقه اعتماداً
+            if (e.key === 'Enter' && (activeTag === 'button' || activeTag === 'a')) return;
+            const cards = document.querySelectorAll('#candidatesContainer .candidate-card');
+            const chosen = highlightedCandidate >= 0 ? cards[highlightedCandidate] : null;
+            if (e.key === 'Enter' && !chosen) return;
             e.preventDefault();
-            const confirmBtn = document.getElementById('confirmImageBtn');
+            if (approvalInFlight || resultsHidden) return;
+            const confirmBtn = chosen ? chosen.querySelector('.js-approve-candidate') : document.getElementById('confirmImageBtn');
             if (confirmBtn && !confirmBtn.disabled) {
                 confirmBtn.click();
             }
@@ -2953,6 +3182,7 @@
         // [X] الرفض السريع
         if (key === 'x') {
             e.preventDefault();
+            if (resultsHidden) return;
             const rejectBtn = document.getElementById('rejectImageBtn');
             if (rejectBtn && !rejectBtn.disabled) {
                 rejectBtn.click();
@@ -2981,16 +3211,10 @@
             }
         }
         
-        // مفاتيح الأرقام لاعتماد الصور المرشحة مباشرة من الشبكة (Choice Auto-Accept)
-        if (key >= '1' && key <= '9') {
-            const candidates = document.querySelectorAll('#candidatesContainer .candidate-card');
-            const idx = parseInt(key) - 1;
-            if (candidates && candidates[idx]) {
-                const actionBtn = candidates[idx].querySelector('.js-approve-candidate');
-                if (actionBtn && !actionBtn.disabled) {
-                    e.preventDefault();
-                    actionBtn.click();
-                }
+        // مفاتيح الأرقام تحدد صورة من الشبكة فقط ولا تعتمدها؛ الاعتماد بـ A أو Enter
+        if (key.length === 1 && key >= '1' && key <= '9' && !resultsHidden) {
+            if (highlightCandidate(parseInt(key, 10) - 1)) {
+                e.preventDefault();
             }
         }
     });
