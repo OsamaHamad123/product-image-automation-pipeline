@@ -12,12 +12,18 @@ A staff custom_query REPLACES the plan: it is the only query, with query_id 'cus
 relaxations(spec) -> [R1 (variant words dropped), R2 (size dropped)], flagged relaxed.
 
 Name words are the sheet name's own words, in order, with every spelling of the
-target brand removed (the brand is written exactly once, as a prefix) and, when the
+target brand removed (the brand is written exactly once, as a prefix; a spelling
+glued or split differently, 'ALALALI' for 'AL ALALI', is the same brand) and, when the
 SKU has a size, every size / pack expression removed (the size is appended once as
 a normalised token such as '1L', '330ml' or '24x330ml'). Sub-brands and alternate
-spellings that are not the canonical brand ('Nido' for Nestle) are kept. The bare
-GTIN is never a query on its own: a valid GTIN goes to the Open Food Facts lookup
-and, with the brand, to Q4.
+spellings that are not the canonical brand ('Nido' for Nestle) are kept. In an English
+name the remaining words have known sheet shorthand written out for the search engine
+('S/F OIL' -> 'SUNFLOWER OIL', 'L/MEAT' -> 'LIGHT MEAT'; catalog_match.abbreviations);
+the Arabic Q2 and a custom query are never rewritten. The English brand loses stray
+punctuation ('SUPER T/' -> 'SUPER T', 'SUPER/T' -> 'SUPER T') but never gains letters:
+'SUP/T' is written 'SUP T', and naming it 'Super T' is the Brands Mapping sheet's job.
+The bare GTIN is never a query on its own: a valid GTIN goes to the Open Food Facts
+lookup and, with the brand, to Q4.
 """
 
 from __future__ import annotations
@@ -28,6 +34,7 @@ import unicodedata
 from dataclasses import dataclass
 from typing import Iterable, List, Optional, Sequence, Set, Tuple
 
+from . import abbreviations
 from . import variants as variants_mod
 from .gtin import is_restricted, normalize_gtin
 from .models import PlannedQuery, Size, SkuSpec
@@ -45,6 +52,8 @@ _EDGE_PUNCT = ".:-_'\"`"
 _LATIN_RE = re.compile(r"[A-Za-z]")
 _ARABIC_RE = re.compile("[؀-ۿ]")
 _DIGITS_ONLY_RE = re.compile(r"[\d\s\-\"'.]+")
+_BRAND_EDGE_PUNCT = _EDGE_PUNCT + "/\\|,;*#"           # 'SUPER T/' -> 'SUPER T'
+_BRAND_SLASH_RE = re.compile(r"(?<=[^\W\d_])\s*/\s*(?=[^\W\d_])")   # 'SUPER/T' -> 'SUPER T'; '24/7' kept
 
 # Pack indicators removed together with the size (the size token re-states the pack).
 _PACK_UNITS = {"pcs", "pc", "pieces", "piece", "pack", "packs", "pk", "pkt", "s",
@@ -101,6 +110,22 @@ def _mark_phrase(words: Sequence[_Word], phrase: str, marks: Set[int]) -> None:
             i += 1
 
 
+def _mark_joined(words: Sequence[_Word], phrase: str, marks: Set[int]) -> None:
+    """Mark whole words that spell the phrase with other word breaks ('ALALALI' for 'AL ALALI', and back)."""
+    target = _compact(phrase)
+    if not target:
+        return
+    for start in range(len(words)):
+        joined = ""
+        for end in range(start, len(words)):
+            joined += "".join(words[end].keys)
+            if not target.startswith(joined):
+                break
+            if joined == target:
+                marks.update(range(start, end + 1))
+                break
+
+
 def _mark_packs(words: Sequence[_Word], marks: Set[int]) -> None:
     """Mark 'pack of N', 'N pcs', "N's" (and Arabic 'N حبات') expressions."""
     flat = _flat(words)
@@ -117,10 +142,15 @@ def _mark_packs(words: Sequence[_Word], marks: Set[int]) -> None:
 # ---------------------------------------------------------------------------
 
 def english_brand(spec: SkuSpec) -> str:
-    """The Latin-script brand written in English queries ('' when none is known)."""
+    """The Latin-script brand written in English queries ('' when none is known).
+
+    Stray sheet punctuation is dropped ('SUPER T/' -> 'SUPER T') and a slash between
+    letters becomes a space, as every search engine reads it ('SUPER/T' -> 'SUPER T',
+    'SUP/T' -> 'SUP T'). Letters are never added or changed.
+    """
     for phrase in (spec.brand_canonical, spec.brand_raw) + tuple(spec.match_brands):
         if phrase and _has_latin(phrase) and not _has_arabic(phrase) and alnum_len(phrase) >= 2:
-            return " ".join(phrase.split())
+            return " ".join(_BRAND_SLASH_RE.sub(" ", phrase).split()).strip(_BRAND_EDGE_PUNCT + " ")
     return ""
 
 
@@ -226,16 +256,47 @@ class _NameParts:
         return any(i not in drop for i in range(len(self.words)))
 
 
+def _expand_shorthand(words: List[_Word], removed: Set[int], context: str) -> Tuple[List[_Word], Set[int]]:
+    """The words with sheet shorthand written out ('S/F OIL' -> 'SUNFLOWER OIL').
+
+    Brand and size words are never rewritten, and a shorthand phrase never spans them.
+    """
+    out: List[_Word] = []
+    out_removed: Set[int] = set()
+    run: List[_Word] = []
+
+    def flush() -> None:
+        text = " ".join(w.text for w in run)
+        expanded = abbreviations.expand(text, context)
+        out.extend(run if expanded == text else _words(expanded))
+        run.clear()
+
+    for i, w in enumerate(words):
+        if i in removed:
+            flush()
+            out_removed.add(len(out))
+            out.append(w)
+        else:
+            run.append(w)
+    flush()
+    return out, out_removed
+
+
 def _analyse(spec: SkuSpec, name: str, brand: str, spellings: Sequence[str], lang: str) -> _NameParts:
     words = _words(name)
     removed: Set[int] = set()
     for phrase in spellings:
         _mark_phrase(words, phrase, removed)
+        _mark_joined(words, phrase, removed)
     if spec.size is not None:
         for found in parse_sizes(name, "query"):
             _mark_phrase(words, found.unit_text, removed)
         _mark_packs(words, removed)
-    var_keys = variants_mod.variant_tokens(name, variants_mod.spec_context(spec))
+    context = variants_mod.spec_context(spec)
+    if lang == "en":
+        words, removed = _expand_shorthand(words, removed, context)
+    # The lexicon reads the shorthand and its written-out words alike ('S/F OIL', 'Sunflower Oil').
+    var_keys = variants_mod.variant_tokens(" ".join(w.text for w in words), context)
     variant_idx = {
         i for i, w in enumerate(words)
         if i not in removed and var_keys and all(k in var_keys for k in w.keys)

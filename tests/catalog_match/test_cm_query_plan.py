@@ -3,18 +3,22 @@
 Specs are built by the real identity.build_sku_spec from sheet-like rows.
 """
 
+import json
 import re
 import socket
+from pathlib import Path
 
 import pytest
 
+from catalog_match.abbreviations import expand
 from catalog_match.gtin import gtin13
 from catalog_match.identity import build_sku_spec
 from catalog_match.query_plan import (
-    MAX_PLANNED_QUERIES, RETAILER_SITES, build_queries, display_gtin, relaxations, size_token,
+    MAX_PLANNED_QUERIES, RETAILER_SITES, build_queries, display_gtin, english_brand, relaxations, size_token,
 )
 from catalog_match.sizes import parse_sizes, product_size
 from catalog_match.text_norm import tokens
+from catalog_match.variants import spec_context
 
 
 @pytest.fixture(autouse=True)
@@ -237,3 +241,139 @@ def test_size_token_and_display_gtin_forms():
     assert display_gtin("06281007035224") == "6281007035224"   # EAN-13
     assert display_gtin("00012345678905") == "012345678905"    # UPC-A
     assert display_gtin("00000096385074") == "96385074"        # EAN-8
+
+
+# -- live run 2026-09-30: sheet shorthand the search engine does not read -------------------------
+
+def test_sheet_shorthand_is_written_out_in_q1_q3_and_relaxations():
+    spec = spec_for(name="VIRGINIA L/MEAT TUNA S/F OIL 170GM", brand="VIRGINIA")
+    plan = {q.query_id: q.text for q in build_queries(spec) + relaxations(spec)}
+    assert plan["Q1"] == "VIRGINIA LIGHT MEAT TUNA SUNFLOWER OIL 170g"
+    assert plan["Q3"].startswith(plan["Q1"] + " (site:")
+    assert plan["R1"] == "VIRGINIA TUNA 170g"                          # the written-out variant words drop
+    assert plan["R2"] == "VIRGINIA LIGHT MEAT TUNA SUNFLOWER OIL"
+    # Identity is not rewritten: it reads the shorthand through the variant lexicon.
+    assert spec.raw_name == "VIRGINIA L/MEAT TUNA S/F OIL 170GM"
+    assert spec.variants == {"tuna_meat": "light", "medium": "sunflower_oil"}
+
+    veg = spec_for(name="MUKALLA WHITE TUNA WITH VEG 185GM", brand="MUKALLA")
+    plan = {q.query_id: q.text for q in build_queries(veg) + relaxations(veg)}
+    assert plan["Q1"] == "MUKALLA WHITE TUNA WITH VEGETABLES 185g"
+    assert plan["R1"] == "MUKALLA TUNA WITH VEGETABLES 185g"           # vegetables are no packing oil
+    oil = build_queries(spec_for(name="GOLDEN PRIZE TUNA VEG OIL 185GM", brand="GOLDEN PRIZE"))[0]
+    assert oil.text == "GOLDEN PRIZE TUNA VEGETABLE OIL 185g"
+
+
+def test_arabic_queries_and_the_custom_query_are_not_rewritten():
+    spec = spec_for(name="GOLDEN PRIZE TUNA VEG OIL 185GM", name_ar="تونة جولدن برايز VEG OIL 185 جم",
+                    brand="GOLDEN PRIZE")
+    q2 = [q for q in build_queries(spec) if q.query_id == "Q2"][0]
+    assert q2.text == "GOLDEN PRIZE تونة جولدن برايز VEG OIL 185 غرام"
+
+    arabic_name = build_queries(spec_for(name="تونة فرجينيا L/MEAT 170 جم", brand="VIRGINIA"))[0]
+    assert arabic_name.hl == "ar" and "L/MEAT" in arabic_name.text
+
+    custom = "VIRGINIA L/MEAT TUNA S/F OIL 170GM"
+    assert [q.text for q in build_queries(spec, custom_query=custom)] == [custom]
+
+
+def test_brand_loses_stray_punctuation_but_never_gains_letters():
+    cases = [
+        ("SUPER T SOLID TUNA SALT WATER 3X185GM", "SUPER T/", "SUPER T", "SUPER T SOLID TUNA SALT WATER 3x185g"),
+        ("SUPER/T TUNA SOYBEAN OIL 185GM", "SUPER/T", "SUPER T", "SUPER T TUNA SOYBEAN OIL 185g"),
+        ("SUP/T WT/MEAT SOLID TUNA 185GM", "SUP/T", "SUP T", "SUP T WHITE MEAT SOLID TUNA 185g"),
+    ]
+    for name, cell, brand, q1 in cases:
+        spec = spec_for(name=name, brand=cell, barcode=VALID_EAN)
+        assert english_brand(spec) == brand
+        plan = {q.query_id: q.text for q in build_queries(spec) + relaxations(spec)}
+        assert plan["Q1"] == q1
+        assert plan["Q4"] == f'"{brand}" {VALID_EAN}'
+        for text in plan.values():
+            assert "/" not in search_terms(text), text
+    # 'SUP' is never written out as 'SUPER': naming the brand is the Brands Mapping sheet's job.
+    sup = build_queries(spec_for(name="SUP/T WT/MEAT SOLID TUNA 185GM", brand="SUP/T"))
+    assert all(count_token(q.text, "super") == 0 for q in sup)
+    # Punctuation that belongs to the brand stays.
+    kelloggs = build_queries(spec_for(name="Kellogg's Corn Flakes 500g", brand="Kellogg's,"))[0]
+    assert kelloggs.text == "Kellogg's Corn Flakes 500g"
+    coke = build_queries(spec_for(name="Coca-Cola Zero 330ml", brand="Coca-Cola/"))[0]
+    assert coke.text == "Coca-Cola Zero 330ml"
+
+
+def test_brand_glued_or_split_in_the_name_is_written_once():
+    glued = build_queries(spec_for(name="ALALALI FANCY TUNA WATER 85GM", brand="AL ALALI"))[0]
+    assert glued.text == "AL ALALI FANCY TUNA WATER 85g"
+    split = build_queries(spec_for(name="SUN TOP ORANGE JUICE 250ML", brand="SUNTOP"))[0]
+    assert split.text == "SUNTOP ORANGE JUICE 250ml"
+    # A word that only starts like the brand is another word.
+    other = build_queries(spec_for(name="SUN TOPPING 250ML", brand="SUNTOP"))[0]
+    assert other.text == "SUNTOP SUN TOPPING 250ml"
+
+
+LIVE_ROWS = Path(__file__).resolve().parent / "fixtures" / "live_rows_2026_09_30.json"
+# Q1 of every live row whose search text changed, and of two that must not (W/S is ambiguous, a typo stays).
+LIVE_Q1 = {
+    3: "BARTS TRADITON FRIES 1kg",
+    20: "AL ALALI FANCY TUNA SUNFLOWER OIL 85g",
+    21: "AL ALALI FANCY TUNA WATER 85g",
+    22: "AL ALALI WHITE TUNA SUNFLOWER OIL 85g",
+    23: "AL ALALI WHITE TUNA WATER 170g",
+    24: "AL ALALI WHITE TUNA WATER 85g",
+    35: "GOLDEN PRIZE TUNA VEGETABLE OIL 185g",
+    40: "LORENA TUNA CHUNK W/S 185g",
+    42: "MUKALLA WHITE TUNA WITH VEGETABLES 185g",
+    45: "RIO MARIE TUNA SUNFLOWER OIL 3x70g",
+    49: "SUP T WHITE MEAT SOLID TUNA 185g",
+    50: "SUPER T SOLID TUNA SALT WATER 3x185g",
+    51: "SUPER T SOLID TUNA SUNFLOWER OIL 3x185g",
+    52: "SUPER T TUNA SOYBEAN OIL 185g",
+    57: "VIRGINIA LIGHT MEAT TUNA SUNFLOWER OIL 170g",
+    58: "VIRGINIA LIGHT MEAT TUNA WATER 170g",
+    60: "VIRGINIA WHITE TUNA SUNFLOWER OIL 170g",
+}
+# Shorthand of the live rows that search engines do not read.
+LIVE_SHORTHAND = ("s f", "sunfl", "sun oil", "veg", "l meat", "lt meat", "w meat", "wt meat")
+
+
+def brand_count(text, brand):
+    """How often the brand is written, however its words are glued or split ('AL ALALI', 'ALALALI')."""
+    target = "".join(tokens(brand, strip_clitics=True))
+    toks = tokens(search_terms(text), strip_clitics=True)
+    count = 0
+    for i in range(len(toks)):
+        joined = ""
+        for tok in toks[i:]:
+            joined += tok
+            if len(joined) >= len(target):
+                break
+        count += joined == target
+    return count
+
+
+def test_live_rows_give_search_text_without_shorthand():
+    rows = json.loads(LIVE_ROWS.read_text(encoding="utf-8"))["rows"]
+    assert len(rows) == 60
+    for row in rows:
+        spec = build_sku_spec({"name": row["name"], "brand": row["brand"]}, {})
+        plan = build_queries(spec) + relaxations(spec)
+        q1 = plan[0]
+        where = (row["row"], q1.text)
+        assert q1.query_id == "Q1" and q1.hl == "en", where
+        if row["row"] in LIVE_Q1:
+            assert q1.text == LIVE_Q1[row["row"]], where
+        # No known shorthand is left.
+        assert expand(q1.text, spec_context(spec)) == q1.text, where
+        assert not [s for s in LIVE_SHORTHAND if count_phrase(q1.text, s)], where
+        # The brand is written exactly once, first and without stray punctuation, in every query.
+        brand = english_brand(spec)
+        assert brand and q1.text.startswith(brand + " ") and "/" not in brand, where
+        for q in plan:
+            assert brand_count(q.text, brand) == 1, (row["row"], q)
+        # The size is written at most once, and it is the SKU's size.
+        stated = parse_sizes(q1.text)
+        assert len(stated) <= 1, where
+        if spec.size is not None:
+            assert len(stated) == 1, where
+            assert (stated[0].dimension, stated[0].base_value, stated[0].pack_count) == (
+                spec.size.dimension, spec.size.base_value, spec.size.pack_count), where
