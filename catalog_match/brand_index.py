@@ -21,19 +21,27 @@ When the SKU names a sub-brand, `required` holds it (parent-only evidence such a
 sub-brands ('Everyday', 'Nesquik'), which count as other brands when the required
 sub-brand is absent.
 Short synonyms ('A/G', 'AG') can resolve a sheet brand but never match evidence.
+
+is_generic_brand(phrase) is True for a brand that is also an everyday listing word
+('Freshly', 'Family', 'Golden Prize'): every significant token is in
+data/common_words.json. score.py trusts such a brand's hit only where a brand stands.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass, field
-from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from functools import lru_cache
+from pathlib import Path
+from typing import Dict, FrozenSet, Iterable, List, Mapping, Optional, Sequence, Tuple
 
-from .text_norm import alnum_len, is_arabic, match_key, norm_phrase, normalize, phrase_in, tokens
+from .text_norm import alnum_len, is_arabic, match_key, match_string, norm_phrase, normalize, phrase_in, tokens
 
 logger = logging.getLogger(__name__)
 
 MIN_MATCH_ALNUM = 3
+COMMON_WORDS_PATH = Path(__file__).resolve().parent / "data" / "common_words.json"
 
 
 def _as_list(value) -> List[str]:
@@ -71,6 +79,37 @@ def _compact(key: str) -> str:
 
 def _matchable(phrase: str) -> bool:
     return alnum_len(phrase) >= MIN_MATCH_ALNUM
+
+
+@lru_cache(maxsize=1)
+def _common_words() -> Tuple[FrozenSet[str], FrozenSet[str]]:
+    """(common listing words, ignored tokens) of data/common_words.json, match-normalised."""
+    with open(COMMON_WORDS_PATH, "r", encoding="utf-8") as fh:
+        data = json.load(fh)
+    words = frozenset(match_string(w) for w in data.get("words", []) if match_string(w))
+    ignored = frozenset(match_string(w) for w in data.get("ignored", []) if match_string(w))
+    return words, ignored
+
+
+def _common(tok: str, words: FrozenSet[str]) -> bool:
+    # a plural 's' is folded the way score.py folds evidence tokens ('farms' -> 'farm')
+    return tok in words or (len(tok) > 3 and tok.endswith("s") and not tok.endswith("ss") and tok[:-1] in words)
+
+
+@lru_cache(maxsize=4096)
+def is_generic_brand(phrase: Optional[str]) -> bool:
+    """True when every significant token of a brand phrase is a common listing word.
+
+    'Freshly', 'Family', 'Golden Prize', 'Super T', 'Al Fresh' are generic; 'Almarai',
+    'Al Rawabi', 'American Garden', 'Mr John', '7 Up' and any Arabic phrase are not.
+    Single letters and the 'ignored' articles / honorifics are not significant; a number
+    or an Arabic word always is, and is never common. A phrase with no significant token
+    is not generic.
+    """
+    words, ignored = _common_words()
+    significant = [t for t in tokens(phrase, strip_clitics=True)
+                   if t not in ignored and not (len(t) == 1 and t.isalpha())]
+    return bool(significant) and all(_common(t, words) for t in significant)
 
 
 @dataclass(frozen=True)

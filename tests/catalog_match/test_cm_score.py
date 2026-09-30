@@ -359,6 +359,97 @@ def test_source_trust_order():
 
 
 # ---------------------------------------------------------------------------
+# Brands that are also common words (live run 2026-09-30, row 34 'FRESHLY')
+# ---------------------------------------------------------------------------
+
+FRESHLY = build_sku_spec({"name": "FRESHLY CHICKEN SHAWARMA 350GM", "brand": "FRESHLY"}, {})
+FAMILY = build_sku_spec({"name": "FAMILY LIGHT TUNA BRINE 185GM", "brand": "FAMILY"}, {})
+CARREFOUR_PAGE = "https://www.carrefouruae.com/mafuae/en/p/1"
+
+
+def listing(title, page_url=CARREFOUR_PAGE, image_url="https://cdn.example.com/p/1.jpg", **kw):
+    return cand(image_url, title=title, page_title=title, page_url=page_url, **kw)
+
+
+def position_conflicts(sc):
+    return [c for c in sc.conflicts if c.startswith("generic_brand_position:")]
+
+
+@pytest.mark.parametrize("spec, title, page_url", [
+    (FRESHLY, "Freshly Chicken Shawarma 350g - Carrefour UAE", CARREFOUR_PAGE),
+    (FRESHLY, "Buy Freshly Chicken Shawarma 350g Online | Lulu UAE", "https://www.luluhypermarket.com/en-ae/p/2"),
+    (FAMILY, "Family Light Meat Tuna in Brine 185g : Amazon.ae: Grocery", "https://www.amazon.ae/dp/B0C1"),
+    (FAMILY, "Light Meat Tuna in Brine 185g", "https://www.carrefouruae.com/family-light-meat-tuna-brine-185g/p/123"),
+])
+def test_common_word_brand_where_a_brand_stands_is_tier1(spec, title, page_url):
+    sc = score_candidate(spec, listing(title, page_url))
+    assert sc.tier == 1
+    assert position_conflicts(sc) == []
+
+
+def test_common_word_brand_elsewhere_keeps_the_brand_but_not_tier1():
+    # row 34: other brands' listings carry 'freshly' as a word; only the brand position differs
+    for title in ("Seara Chicken Shawarma 350g, freshly prepared - Carrefour UAE",
+                  "Zingo Chicken Shawarma 350g | Freshly made in the UAE | Lulu UAE"):
+        sc = score_candidate(FRESHLY, listing(title))
+        assert sc.tier == 2 and sc.matched["brand"] is True and sc.hard_reject == ()
+        assert position_conflicts(sc) == ["generic_brand_position:title", "generic_brand_position:page_title"]
+    frozen = score_candidate(FRESHLY, listing("Seara Chicken Shawarma 350g Freshly Frozen"))
+    assert frozen.tier == 2 and "generic_brand_position:title" in frozen.conflicts
+    # a slug that does not open with the brand, and the image filename, are no brand position either
+    slug = score_candidate(FRESHLY, listing(
+        "Chicken Shawarma 350g", "https://www.carrefouruae.com/mafuae/en/chicken-shawarma-350g-freshly-prepared/p/9"))
+    assert slug.tier == 2 and position_conflicts(slug) == ["generic_brand_position:page_slug"]
+    image = score_candidate(FRESHLY, listing("Chicken Shawarma 350g",
+                                             image_url="https://cdn.example.com/chicken-shawarma-freshly-350g.jpg"))
+    assert image.tier == 2 and position_conflicts(image) == ["generic_brand_position:image_file"]
+    # control: the same text opened by the brand is tier 1
+    assert score_candidate(FRESHLY, listing("Freshly Chicken Shawarma 350g, freshly prepared - Carrefour UAE")).tier == 1
+
+
+def test_common_word_brand_on_its_official_domain_is_tier1():
+    spec = build_sku_spec({"name": "FRESHLY CHICKEN SHAWARMA 350GM", "brand": "Freshly"},
+                          {"freshly": {"brand": "Freshly", "official_domains": ["freshly-foods.ae"]}})
+    title = "Chicken Shawarma 350g - freshly made by Freshly"
+    assert score_candidate(spec, listing(title, "https://www.freshly-foods.ae/products/chicken-shawarma")).tier == 1
+    assert score_candidate(spec, listing(title)).tier == 2          # the same text on a retailer page
+
+
+def test_common_word_brand_that_is_also_a_store_name():
+    # 'Target' is a store name: the brand is tried before store names are skipped
+    target = build_sku_spec({"name": "TARGET CHICKEN LUNCHEON 340GM", "brand": "TARGET"}, {})
+    for title in ("Target Chicken Luncheon 340g - Carrefour UAE", "Buy Target Chicken Luncheon 340g Online | Lulu UAE"):
+        sc = score_candidate(target, listing(title))
+        assert sc.tier == 1 and position_conflicts(sc) == [], title
+
+
+def test_distinctive_phrase_of_a_common_word_brand_counts_anywhere():
+    spec = build_sku_spec({"name": "FAMILY SKIPJACK CHUNKS 185GM", "brand": "FAMILY"},
+                          {"family": {"brand": "Family", "synonyms": ["فاميلي"]}})
+    assert score_candidate(spec, listing("Skipjack Tuna Chunks 185g - Family")).tier == 2
+    assert score_candidate(spec, listing("Skipjack Tuna Chunks 185g - Family فاميلي")).tier == 1
+
+
+def test_common_word_out_of_place_does_not_corroborate_a_gtin():
+    spec = build_sku_spec({"name": "FRESHLY CHICKEN SHAWARMA 350GM", "brand": "FRESHLY",
+                           "barcode": "6297000611365"}, {})
+    record = dict(provider="off", gtin_on_page="6297000611365",
+                  page_url="https://world.openfoodfacts.org/product/6297000611365")
+    # the product words still corroborate the GTIN match ...
+    covered = score_candidate(spec, listing("Seara Chicken Shawarma 350 g, freshly prepared", **record))
+    assert covered.tier == 1 and covered.matched["gtin"] == "match"
+    # ... a common word out of place does not
+    bare = score_candidate(spec, listing("Seara Snack, freshly packed", **record))
+    assert bare.tier == 2 and bare.matched["gtin"] == "match" and bare.matched["brand"] is True
+
+
+def test_distinctive_brand_is_full_evidence_anywhere():
+    spec = spec_for("Almarai Full Fat Milk 1L", "Almarai")
+    sc = score_candidate(spec, listing("Full Fat Milk 1L from Almarai", "https://www.noon.com/uae-en/full-fat-milk-1l/N1/p"))
+    assert sc.tier == 1 and position_conflicts(sc) == []
+
+
+# ---------------------------------------------------------------------------
 # Ranking (D4 lexicographic key)
 # ---------------------------------------------------------------------------
 

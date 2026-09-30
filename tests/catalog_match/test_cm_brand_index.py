@@ -1,11 +1,15 @@
 """catalog_match.brand_index: reverse synonym index from the Brands Mapping sheet (D9, SRC-10, MISS-5)."""
 
+import json
 import socket
+from pathlib import Path
 
 import pytest
 
-from catalog_match.brand_index import BrandIndex, build_index
-from catalog_match.text_norm import normalize
+from catalog_match.brand_index import COMMON_WORDS_PATH, BrandIndex, build_index, is_generic_brand
+from catalog_match.text_norm import normalize, tokens
+
+LIVE_ROWS = Path(__file__).resolve().parent / "fixtures" / "live_rows_2026_09_30.json"
 
 
 @pytest.fixture(autouse=True)
@@ -144,3 +148,49 @@ def test_mapping_shapes():
     assert "president" in idx.resolve("Kiri").competitors
     assert build_index(None).resolve("Kiri").conf == "sheet_raw"
     assert build_index(idx) is idx
+
+
+# ---------------------------------------------------------------------------
+# Brands that are also common words (live run 2026-09-30, row 34 'FRESHLY')
+# ---------------------------------------------------------------------------
+
+# The brand cells of the 60 live rows that are everyday listing words.
+LIVE_GENERIC = {"FRESHLY", "FAMILY", "TARGET", "GOLDEN PRIZE", "TASTY FOOD", "KITCHEN TREASURE", "GREEN FARM",
+                "ROYAL ARM", "DOUBLE HORSE", "AMERICAN GOLD", "AMERICAN LIGHT", "JOYS", "SUPER T/", "SUPER/T"}
+
+
+def test_live_row_brands_that_are_common_words():
+    rows = json.loads(LIVE_ROWS.read_text(encoding="utf-8"))["rows"]
+    generic = {r["brand"] for r in rows if is_generic_brand(r["brand"])}
+    assert generic == LIVE_GENERIC
+    # the match phrase a SKU carries is classified like the raw cell
+    assert is_generic_brand("super t") and not is_generic_brand("sup t")
+
+
+@pytest.mark.parametrize("phrase", [
+    "Freshly", "FAMILY", "Golden Prize", "Joys",
+    "Green Farms",                 # a plural is folded: 'farms' counts as 'farm'
+    "Super T", "SUPER/T",          # a single letter is not significant
+    "Al Fresh", "The Family",      # nor are articles and honorifics
+])
+def test_generic_brand_phrases(phrase):
+    assert is_generic_brand(phrase)
+
+
+@pytest.mark.parametrize("phrase", [
+    "Almarai", "Al Rawabi", "McCain", "Lipton", "Nirapara", "Sunbulah", "American Garden", "Al Ain Farms",
+    "Mr John",                     # 'mr' is not significant, and a given name is not a listing word
+    "7 Up",                        # a number is significant and never common
+    "فريشلي",                      # nor is an Arabic word
+    "Mr", "", None,                # nothing significant: not generic
+])
+def test_distinctive_brand_phrases(phrase):
+    assert not is_generic_brand(phrase)
+
+
+def test_common_words_file_is_one_normalised_token_per_entry():
+    data = json.loads(COMMON_WORDS_PATH.read_text(encoding="utf-8"))
+    assert data["_doc"]
+    for word in data["words"] + data["ignored"]:
+        assert tokens(word) == [word], word
+    assert not set(data["words"]) & set(data["ignored"])

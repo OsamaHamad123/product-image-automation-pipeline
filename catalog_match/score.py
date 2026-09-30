@@ -29,10 +29,20 @@ and a missing sub-brand the SKU names (parent-brand-only evidence).
 Brand evidence ignores store-name title segments ('- Shop on Carrefour UAE'), so a
 private-label SKU never matches another brand through the retailer's name.
 
+A brand that is also an everyday listing word (brand_index.is_generic_brand: 'Freshly',
+'Family', 'Golden Prize') turns up in other brands' listings ('Seara Chicken Shawarma
+350g, freshly prepared'). Its hit is full brand evidence only where a brand stands: at
+the start of the product part of the title or page title (after 'Buy' / 'Shop' and store
+names), at the start of the page slug's product segment, or on the brand's official
+domain. A hit anywhere else keeps the brand match (tier 2, conflict
+generic_brand_position:<field>) but neither makes tier 1 nor corroborates a GTIN match.
+Distinctive brands are not affected.
+
 Tiers:
     1  GTIN match with brand or class-coverage corroboration, or brand + size +
        every specified variant matched with class coverage >= 0.5 on a
-       brand-official, UAE-retailer or structured page
+       brand-official, UAE-retailer or structured page (a common-word brand only
+       where a brand stands)
     2  brand matched (or GTIN matched), no hard conflict
     3  no brand evidence, no hard conflict
 
@@ -52,6 +62,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple
 
 from . import variants as variants_mod
+from .brand_index import is_generic_brand
 from .gtin import normalize_gtin
 from .models import Candidate, CandidateScore, SkuSpec
 from .sizes import compare, compare_pack, parse_sizes
@@ -141,6 +152,65 @@ def strip_site_suffix(text: str) -> str:
     if m and _site_only(m.group("rest")):
         out = out[:m.start()]
     return out
+
+
+def _brand_leads(phrases: Sequence[str], text: str) -> Optional[bool]:
+    """Does a brand phrase open `text` once leading store names and filler ('Buy', 'Shop on
+    Carrefour') are skipped? None when the text holds nothing but such words.
+
+    The phrase is tried before a store name is skipped, so a brand that is also a store
+    name ('Target') still opens its own listing.
+    """
+    names, filler = _retailer_vocab()
+    keys = [k for k in (match_string(p) for p in phrases) if k]
+    rest = match_string(text)
+    while rest:
+        if any(rest == k or rest.startswith(k + " ") for k in keys):
+            return True
+        store = next((n for n in names if rest == n or rest.startswith(n + " ")), None)
+        if store:
+            rest = rest[len(store):].lstrip()
+            continue
+        word, _, rest = rest.partition(" ")
+        if word not in filler:
+            return False
+    return None
+
+
+def _brand_opens_title(phrases: Sequence[str], text: str) -> bool:
+    """True when a brand phrase opens the product part of a title: its first segment that is
+    more than store names and filler ('Buy Freshly Chicken Shawarma 350g Online | Lulu UAE')."""
+    for segment in _SEGMENT_SPLIT_RE.split(text or ""):
+        lead = _brand_leads(phrases, segment)
+        if lead is not None:
+            return lead
+    return False
+
+
+def _generic_brand_weak_fields(spec: SkuSpec, cand: Candidate, brand_texts: Mapping[str, str]) -> List[str]:
+    """Identity fields whose only brand evidence is a common-word brand out of a brand position.
+
+    Empty when every brand phrase of the SKU is distinctive, or when some field shows a
+    distinctive phrase anywhere or a common-word phrase where a brand stands (see the
+    module docstring). The caller handles the brand's official domain.
+    """
+    generic = [p for p in spec.match_brands if is_generic_brand(p)]
+    if not generic:
+        return []
+    distinctive = [p for p in spec.match_brands if p not in generic]
+    weak: List[str] = []
+    for name in IDENTITY_FIELDS:
+        text = brand_texts[name]
+        if distinctive and any_phrase_in(distinctive, text):
+            return []
+        if not any_phrase_in(generic, text):
+            continue
+        if name in TEXT_FIELDS and _brand_opens_title(generic, text):
+            return []
+        if name == "page_slug" and _brand_leads(generic, url_path_text(cand.page_url, product_segment=True)):
+            return []
+        weak.append(name)
+    return weak
 
 
 def page_host(cand: Candidate) -> str:
@@ -413,6 +483,15 @@ def score_candidate(spec: SkuSpec, cand: Candidate, negatives=None) -> Candidate
         if norm_image_url(cand.image_url) in neg:
             hard.append("reviewer_negative")
 
+    # --- common-word brand position --------------------------------------
+    # 'freshly' in '... 350g, freshly prepared' is not the brand Freshly: out of a brand
+    # position (and off the official domain) the hit keeps brand_ok but never makes tier 1.
+    generic_weak: List[str] = []
+    if brand_ok and trust != TRUST_OFFICIAL:
+        generic_weak = _generic_brand_weak_fields(spec, cand, brand_texts)
+    conflicts.extend(f"generic_brand_position:{name}" for name in generic_weak)
+    brand_t1 = brand_ok and not generic_weak
+
     coverage = class_coverage(spec, fields)
 
     # --- tier ------------------------------------------------------------
@@ -426,8 +505,8 @@ def score_candidate(spec: SkuSpec, cand: Candidate, negatives=None) -> Candidate
     else:
         # A GTIN match alone (an Open Food Facts record) is tier 1 only with brand or
         # product-type corroboration: records can be wrong, and in-store codes are reused.
-        gtin_t1 = gtin_ok and (brand_ok or coverage >= COVERAGE_T1)
-        t1 = gtin_t1 or (brand_ok and size_ok and variants_ok and coverage >= COVERAGE_T1 and trusted_page)
+        gtin_t1 = gtin_ok and (brand_t1 or coverage >= COVERAGE_T1)
+        t1 = gtin_t1 or (brand_t1 and size_ok and variants_ok and coverage >= COVERAGE_T1 and trusted_page)
         if t1 and not soft_cap:
             tier = 1
         elif brand_ok or gtin_ok:
