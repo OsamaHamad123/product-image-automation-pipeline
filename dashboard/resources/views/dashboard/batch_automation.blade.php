@@ -354,9 +354,9 @@
 
         <div style="display: flex; gap: 0.75rem;">
 
-            <button type="button" class="btn btn-secondary" onclick="resetBatchState()" style="background: var(--danger-bg); border-color: var(--panel-border); color: var(--danger); font-weight: 800; padding: 0.65rem 1.5rem;">
+            <button type="button" class="btn btn-secondary" id="resetBatchBtn" onclick="resetBatchState()" title="للحالة العالقة فقط (مثلاً: اللوحة تعرض «قيد التشغيل» ولا شيء يعمل): يوقف أي عامل ما زال يعمل، ويحذف ملف القفل والتقدم، ويعيد الصفوف العالقة إلى الانتظار. لا يحذف أي منتج أو مرشح أو قرار مراجعة." style="background: var(--danger-bg); border-color: var(--panel-border); color: var(--danger); font-weight: 800; padding: 0.65rem 1.5rem;">
 
-                <i class="fas fa-undo"></i> تصفير وإعادة تعيين الحالة 🔄
+                <i class="fas fa-wrench"></i> إصلاح تشغيل عالق
 
             </button>
 
@@ -369,6 +369,9 @@
         </div>
 
     </div>
+
+    <!-- خطأ التشغيل أو تنبيه العامل بالعربية (data.alert من /api/batch-status)، ظاهر فوق التبويبين -->
+    <div id="batchStateAlert" role="alert" style="display: none; padding: 1rem 1.5rem; border-radius: 14px; background: var(--danger-bg); border: 1px solid var(--danger); color: var(--danger); font-size: 0.9rem; font-weight: 800; line-height: 1.7; direction: rtl;"></div>
 
     <!-- Stats Cards Grid -->
 
@@ -668,8 +671,8 @@
                             <button type="button" class="btn btn-secondary btn-sm" id="pauseResumeBatchBtn" onclick="togglePauseResumeAutomation()" style="flex: 1; background: var(--warning-bg); border-color: var(--panel-border); color: var(--warning); font-weight: bold; border-radius: 10px;">
                                 <i class="fas fa-pause" id="pauseResumeIcon"></i> <span id="pauseResumeText">إيقاف مؤقت</span>
                             </button>
-                            <button type="button" class="btn btn-secondary btn-sm" id="stopBatchBtn" onclick="stopBatchAutomation()" style="flex: 1; background: var(--danger-bg); border-color: var(--panel-border); color: var(--danger); font-weight: bold; border-radius: 10px;">
-                                <i class="fas fa-stop"></i> إنهاء قسري 🛑
+                            <button type="button" class="btn btn-secondary btn-sm" id="stopBatchBtn" onclick="stopBatchAutomation()" title="يوقف العامل ويعيد الصفوف قيد المعالجة إلى الانتظار؛ لا يحذف أي صف" style="flex: 1; background: var(--danger-bg); border-color: var(--panel-border); color: var(--danger); font-weight: bold; border-radius: 10px;">
+                                <i class="fas fa-stop"></i> إيقاف التشغيل 🛑
                             </button>
                         </div>
                     </div>
@@ -929,6 +932,37 @@
     let filteredProducts = [];
 
     let focusedCardIndex = -1; // For keyboard shortcut navigation
+
+    // اعتماد أو رفض جماعي جارٍ: كل أزرار الاعتماد والرفض واختيار الصور واختصارات لوحة المفاتيح معطلة حتى ينتهي
+    let reviewBusy = false;
+
+    // صفوف اعتُمدت ورُفعت في هذه الجلسة (رقم الصف + sku_key): لا تُعتمد مرة ثانية حتى لو عادت للشبكة
+    const approvedRowKeys = new Set();
+
+    function rowKey(p) {
+        return `${parseInt(p.row_number, 10)}|${p.sku_key || ''}`;
+    }
+
+    function setReviewBusy(busy) {
+        reviewBusy = busy;
+        ['batchApproveBtn', 'batchRejectBtn', 'batchRejectConfirmBtn'].forEach(id => {
+            const b = document.getElementById(id);
+            if (b) b.disabled = busy;
+        });
+        const grid = document.getElementById('batchCurationGrid');
+        if (grid) {
+            grid.style.pointerEvents = busy ? 'none' : '';
+            grid.style.opacity = busy ? '0.85' : '';
+        }
+        document.querySelectorAll('.batch-select-checkbox').forEach(cb => { cb.disabled = busy || approvedRowKeys.has(cb.dataset.key); });
+        document.querySelectorAll('.action-reject-btn').forEach(b => { b.disabled = busy; });
+    }
+
+    // اختصارات شبكة المراجعة تعمل في تبويب المراجعة فقط
+    function reviewTabActive() {
+        const tab = document.getElementById('tabContentCuration');
+        return !!tab && tab.style.display !== 'none';
+    }
     
     // Switch between Automation dashboard and Curation workspace tabs
     function switchTab(tabId) {
@@ -972,11 +1006,18 @@
 
     }
 
-    // Force Reset Batch state
+    // «إصلاح تشغيل عالق»: يمسح حالة التشغيل العالقة فقط ولا يحذف أي عمل مراجعة (ApiController::resetBatch)
+    const RESET_CONFIRM_TEXT = "إصلاح تشغيل عالق (استخدمه فقط إذا بقيت اللوحة على «قيد التشغيل» ولا شيء يتقدم، أو بقي خطأ قديم ظاهراً):\n" +
+        "• يُوقف أي عامل ما زال يعمل في الخلفية.\n" +
+        "• يحذف ملف القفل وعدادات التقدم والتنبيه الأحمر، ويلغي الإيقاف المؤقت.\n" +
+        "• تعود الصفوف العالقة في «قيد المعالجة» إلى الانتظار.\n" +
+        "• يُعاد تحميل قائمة المنتجات من الشيت.\n" +
+        "• لا يُحذف أي منتج جاهز للمراجعة أو معتمد أو فاشل، ولا أي مرشح أو قرار مراجعة.\n\n" +
+        "هل تريد المتابعة؟";
 
     async function resetBatchState() {
 
-        if (!confirm("⚠️ هل أنت متأكد من رغبتك في تصفير وإعادة تعيين حالة الأتمتة بالكامل؟ سيتم إيقاف أي عمليات معلقة وتصفير الإحصائيات.")) {
+        if (!confirm(RESET_CONFIRM_TEXT)) {
 
             return;
 
@@ -1002,13 +1043,13 @@
 
             if (data.status === 'success') {
 
-                alert("🔄 تم تصفير وإعادة تعيين الحالة بنجاح.");
+                alert("🔧 " + (data.message || "تم إصلاح حالة التشغيل، ولم يُحذف أي صف."));
 
                 location.reload();
 
             } else {
 
-                alert("❌ فشل تصفير الحالة: " + data.error);
+                alert("❌ فشل إصلاح حالة التشغيل: " + (data.error || 'خطأ غير معروف'));
 
             }
 
@@ -1100,11 +1141,16 @@
 
     }
 
-    // Stop batch
+    // إيقاف التشغيل بأمان: لا يُحذف أي صف (ApiController::stopBatch ثم run_control stop)
+    const STOP_CONFIRM_TEXT = "إيقاف التشغيل:\n" +
+        "• يتوقف العامل الآن، وإن كان التشغيل ما زال يقرأ الشيت فيتوقف قبل معالجة أي منتج.\n" +
+        "• تعود الصفوف التي كانت قيد المعالجة إلى الانتظار لتُعالج في التشغيل القادم.\n" +
+        "• لا يُحذف أي صف: المنتجات الجاهزة للمراجعة والمعتمدة والفاشلة تبقى كما هي.\n\n" +
+        "هل تريد الإيقاف؟";
 
     async function stopBatchAutomation() {
 
-        if (!confirm("⚠️ هل أنت متأكد من رغبتك في إيقاف عملية الأتمتة الكلية بالخلفية فورياً؟")) {
+        if (!confirm(STOP_CONFIRM_TEXT)) {
 
             return;
 
@@ -1130,17 +1176,19 @@
 
             if (data.status === 'success') {
 
-                alert("🛑 تم إيقاف الأتمتة وإلغاء خيوط المعالجة بنجاح.");
+                appendTerminalLine('System', data.message || 'تم إيقاف التشغيل.', 'warning');
 
-                location.reload();
+                alert("🛑 " + (data.message || "تم إيقاف التشغيل، ولم يُحذف أي صف."));
+
+                pollBatchStatus();
 
             } else {
 
-                alert("❌ فشل إيقاف الأتمتة: " + data.error);
+                alert("❌ فشل إيقاف التشغيل: " + (data.error || 'خطأ غير معروف'));
 
                 btn.disabled = false;
 
-                btn.innerHTML = '<i class="fas fa-stop"></i> إنهاء قسري 🛑';
+                btn.innerHTML = '<i class="fas fa-stop"></i> إيقاف التشغيل 🛑';
 
             }
 
@@ -1150,7 +1198,7 @@
 
             btn.disabled = false;
 
-            btn.innerHTML = '<i class="fas fa-stop"></i> إنهاء قسري 🛑';
+            btn.innerHTML = '<i class="fas fa-stop"></i> إيقاف التشغيل 🛑';
 
         }
 
@@ -1220,6 +1268,9 @@
                 document.getElementById('batchProgressPanel').style.display = 'flex';
 
                 logOffset = 0;
+
+                // تشغيل ينتهي قبل الاستعلام التالي (مثلاً فشل قراءة الشيت) يُعامل كنهاية تشغيل أيضاً
+                lastRunPhase = 'starting';
 
                 appendTerminalLine('System', '⚙️ تم تشغيل ملف تهيئة المهام وإطلاق الوركر بنجاح!', 'system');
 
@@ -1387,6 +1438,51 @@
 
     // Poll status
 
+    // مراحل التشغيل كما يحسبها الخادم (data.phase): starting | running | paused | stopping | error | review | idle
+    const ACTIVE_PHASES = ['starting', 'running', 'paused', 'stopping'];
+
+    let lastRunPhase = null;
+
+    // انتهى تشغيل والصفحة مفتوحة: من مرحلة نشطة إلى مراجعة أو خامل أو خطأ
+    function runJustFinished(previous, phase) {
+        return ACTIVE_PHASES.includes(previous) && !ACTIVE_PHASES.includes(phase);
+    }
+
+    // نهاية التشغيل: تحديث شبكة المراجعة دائماً، والانتقال لتبويبها (إلا خطأ لم يترك شيئاً للمراجعة)
+    function onRunFinished(data) {
+        document.getElementById('batchCurationWorkspace').style.display = 'block';
+        // دائماً من قاعدة البيانات: تشغيل انتهى بخطأ أو بانقطاع المزودين أو بلا منتجات للمراجعة يترك الحالة خارج
+        // التشغيل والمراجعة، فيعيد الخادم الكاش المحفوظ عند فتح الصفحة (بلا المنتجات التي وصلت للمراجعة للتو)
+        fetchCurationProducts(true);
+        if (data.phase !== 'error' || (data.ready_for_review || 0) > 0) {
+            switchTab('curation');
+        }
+        appendTerminalLine('System', data.phase_text || 'انتهى التشغيل.', data.phase === 'error' ? 'error' : 'success');
+    }
+
+    // الشريط الأحمر: خطأ التشغيل أو تنبيه العامل كما يصوغه الخادم بالعربية (data.alert)
+    function renderStateAlert(data) {
+        const box = document.getElementById('batchStateAlert');
+        if (!box) return;
+        box.textContent = data.alert ? '⚠️ ' + data.alert : '';
+        box.style.display = data.alert ? 'block' : 'none';
+    }
+
+    // بطاقة التتبع عندما لا يوجد تشغيل: مراجعة / خطأ / خامل، بنص الخادم
+    function renderIdleState(data) {
+        const idle = document.getElementById('batchIdleState');
+        const looks = {
+            review: { icon: 'fas fa-check-circle', color: 'var(--success)', hint: 'المنتجات جاهزة في تبويب «فرز واعتماد الصور الجاهزة».' },
+            error: { icon: 'fas fa-exclamation-circle', color: 'var(--danger)', hint: 'السبب في الشريط الأحمر أعلى الصفحة. أصلحه ثم أطلق تشغيلاً جديداً.' },
+            idle: { icon: 'fas fa-check-circle', color: 'var(--success)', hint: 'قم بتهيئة الخيارات بالأعلى واضغط إطلاق لبدء أتمتة الشيت.' }
+        };
+        const look = looks[data.phase] || looks.idle;
+        idle.textContent = '';
+        idle.appendChild(el('i', { className: look.icon, style: `font-size: 2.5rem; color: ${look.color}; margin-bottom: 0.75rem;` }));
+        idle.appendChild(el('p', { style: `font-size: 0.85rem; font-weight: bold; margin: 0; color: ${look.color};`, text: data.phase_text || '' }));
+        idle.appendChild(el('p', { style: 'font-size: 0.75rem; margin-top: 0.25rem;', text: look.hint }));
+    }
+
     async function pollBatchStatus() {
 
         try {
@@ -1403,17 +1499,26 @@
 
             const runBtn = document.getElementById('runAllBtn');
 
+            const phase = data.phase || 'idle';
+
+            // تقدم التشغيل الحالي فقط (صفوف run_id)، وليس الطابور كله
+            const run = data.run || {};
+
+            const q = data.queue || {};
+
             
 
-            // Update Dashboard metrics
+            // Update Dashboard metrics (بطاقة الأخطاء لكل الطابور)
 
-            document.getElementById('statFailedCount').innerText = data.failed || 0;
+            document.getElementById('statFailedCount').innerText = q.failed || 0;
 
             renderQueueCounters(data);
 
+            renderStateAlert(data);
+
             const retryBtn = document.getElementById('statRetryBtn');
 
-            if (data.failed > 0) {
+            if ((q.failed || 0) > 0) {
 
                 retryBtn.style.display = 'inline-block';
 
@@ -1425,7 +1530,7 @@
 
             
 
-            if (data.is_running || (data.status === 'pre_caching' && data.pause_requested === 1)) {
+            if (ACTIVE_PHASES.includes(phase)) {
 
                 panel.style.display = 'flex';
 
@@ -1433,27 +1538,35 @@
 
                 
 
-                const percent = data.total > 0 ? Math.round((data.current / data.total) * 100) : 0;
+                // أثناء قراءة الشيت لا تُعرض أرقام التشغيل السابق
+                const percent = run.total > 0 ? Math.round((run.processed / run.total) * 100) : 0;
 
-                document.getElementById('batchProgressPercent').innerText = percent + '%';
+                document.getElementById('batchProgressPercent').innerText = phase === 'starting' ? '—' : percent + '%';
 
-                document.getElementById('batchProgressBar').style.width = percent + '%';
+                document.getElementById('batchProgressBar').style.width = (phase === 'starting' ? 0 : percent) + '%';
 
                 
 
                 // Update stats progress label
 
-                document.getElementById('statProgressLabel').innerHTML = `جاري التحضير: <strong style="color: var(--accent-cyan);">${percent}%</strong>`;
+                if (phase === 'starting') {
+                    document.getElementById('statProgressLabel').innerHTML = `<span style="color: var(--accent-cyan); font-weight: 800;">جاري قراءة الشيت…</span>`;
+                } else {
+                    document.getElementById('statProgressLabel').innerHTML = `جاري التحضير: <strong style="color: var(--accent-cyan);">${percent}%</strong>`;
+                }
 
                 
 
-                isPaused = (data.pause_requested === 1);
+                isPaused = (phase === 'paused');
 
                 const pBtn = document.getElementById('pauseResumeBatchBtn');
 
                 const pIcon = document.getElementById('pauseResumeIcon');
 
                 const pTxt = document.getElementById('pauseResumeText');
+
+                // الإيقاف المؤقت يخص العامل: لا معنى له أثناء قراءة الشيت أو الإيقاف
+                pBtn.disabled = phase === 'starting' || phase === 'stopping';
 
                 
 
@@ -1486,14 +1599,24 @@
                     pBtn.style.borderColor = 'var(--panel-border)';
 
                     const progressText = document.getElementById('batchProgressText');
-                    progressText.textContent = 'جاري تحضير مرشحات: ';
-                    progressText.appendChild(el('strong', { style: 'color: var(--accent-cyan);', text: data.current_product || 'جاري البحث...' }));
+                    if (phase === 'running') {
+                        progressText.textContent = 'جاري تحضير مرشحات: ';
+                        progressText.appendChild(el('strong', { style: 'color: var(--accent-cyan);', text: data.current_product || 'جاري البحث...' }));
+                    } else {
+                        progressText.textContent = data.phase_text || '';
+                    }
 
                 }
 
                 
 
-                document.getElementById('batchProgressCounts').innerText = `${data.current} من ${data.total} — للمراجعة: ${data.ready_for_review || 0} | معتمدة: ${data.approved || 0} | فشل: ${data.failed || 0}`;
+                document.getElementById('batchProgressCounts').innerText = phase === 'starting' ? '' :
+                    `${run.processed || 0} من ${run.total || 0} في هذا التشغيل — للمراجعة: ${run.ready_for_review || 0} | معتمدة: ${run.completed || 0} | فشل: ${run.failed || 0} | بانتظار: ${(run.pending || 0) + (run.processing || 0)}`;
+
+                const stopBtn = document.getElementById('stopBatchBtn');
+                const stopping = phase === 'stopping' || data.stop_requested === 1;
+                stopBtn.disabled = stopping;
+                stopBtn.innerHTML = stopping ? '<i class="fas fa-spinner fa-spin"></i> طلب الإيقاف مسجل' : '<i class="fas fa-stop"></i> إيقاف التشغيل 🛑';
 
                 
 
@@ -1501,62 +1624,38 @@
 
                 runBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جاري الأتمتة بالخلفية...';
 
-            } else if (data.status === 'curation_pending') {
-
-                panel.style.display = 'none';
-
-                idle.style.display = 'block';
-
-                idle.innerHTML = `
-
-                    <i class="fas fa-check-circle" style="font-size: 2.5rem; color: var(--success); margin-bottom: 0.75rem;"></i>
-
-                    <p style="font-size: 0.85rem; font-weight: bold; margin: 0; color: var(--success);">تم التحضير المسبق لجميع المرشحات!</p>
-
-                    <p style="font-size: 0.75rem; margin-top: 0.25rem;">المنتجات جاهزة للمراجعة بجدول الفرز بالأسفل.</p>
-
-                `;
-
-                
-
-                document.getElementById('statProgressLabel').innerHTML = `<span style="color: var(--success); font-weight: 800;">جاهز للفرز والاعتماد 🎯</span>`;
-
-                runBtn.disabled = false;
-
-                runBtn.innerHTML = '<i class="fas fa-play"></i> تشغيل أتمتة الشيت بالكامل (Batch)';
-
-                
-
-                // Show curation workspace
-                const workspace = document.getElementById('batchCurationWorkspace');
-                if (workspace.style.display === 'none') {
-                    workspace.style.display = 'block';
-                    // Auto switch tab to curation to show the grid immediately
-                    switchTab('curation');
-                    fetchCurationProducts();
-                } else if (!currentProducts || currentProducts.length === 0) {
-                    fetchCurationProducts();
-                }
-
             } else {
 
                 panel.style.display = 'none';
 
                 idle.style.display = 'block';
 
+                renderIdleState(data);
+
                 runBtn.disabled = false;
 
                 runBtn.innerHTML = '<i class="fas fa-play"></i> تشغيل أتمتة الشيت بالكامل (Batch)';
 
-                if (currentProducts && currentProducts.length > 0) {
-                    document.getElementById('batchCurationWorkspace').style.display = 'block';
+                const workspace = document.getElementById('batchCurationWorkspace');
+
+                if (phase === 'review') {
+                    document.getElementById('statProgressLabel').innerHTML = `<span style="color: var(--success); font-weight: 800;">جاهز للفرز والاعتماد 🎯</span>`;
+                    workspace.style.display = 'block';
+                    // فتح الصفحة ومنتجات بانتظار المراجعة: تبويب المراجعة مباشرة
+                    if (lastRunPhase === null) switchTab('curation');
                 } else {
-                    document.getElementById('batchCurationWorkspace').style.display = 'none';
+                    // لا يُخفى إذا فُتح تبويب المراجعة قبل وصول المنتجات (رابط ?tab=review)
+                    if (currentProducts && currentProducts.length > 0) workspace.style.display = 'block';
+                    document.getElementById('statProgressLabel').innerHTML = phase === 'error'
+                        ? `<span style="color: var(--danger); font-weight: 800;">توقف بسبب خطأ</span>`
+                        : `<span style="color: var(--text-secondary);">خامل: لا شيء بانتظار المراجعة</span>`;
                 }
 
-                document.getElementById('statProgressLabel').innerHTML = `<span style="color: var(--text-secondary);">خامل (Idle)</span>`;
-
             }
+
+            if (runJustFinished(lastRunPhase, phase)) onRunFinished(data);
+
+            lastRunPhase = phase;
 
         } catch (err) {
 
@@ -1580,11 +1679,12 @@
 
     // Fetch review candidates
 
-    async function fetchCurationProducts() {
+    // fresh: تجاوز كاش المنتجات في الخادم (ساعة كاملة)؛ الخادم يتجاوزه وحده فقط أثناء التشغيل أو بانتظار المراجعة
+    async function fetchCurationProducts(fresh = false) {
 
         try {
 
-            const res = await fetch('/api/products-json');
+            const res = await fetch(fresh ? '/api/products-json?refresh=true' : '/api/products-json');
 
             const data = await res.json();
 
@@ -1995,11 +2095,20 @@
         const card = el('div', { className: 'curation-row-card' + (index === focusedCardIndex ? ' focused-card' : ''),
                                  id: `batch-card-${rowNum}`, style: 'position: relative;' });
 
+        const approved = approvedRowKeys.has(rowKey(p));
         const checkbox = el('input', { type: 'checkbox', className: 'batch-select-checkbox',
-                                       dataset: { row: String(rowNum), url: selected ? selected.image_url : '' },
+                                       dataset: { row: String(rowNum), url: selected ? selected.image_url : '', key: rowKey(p) },
                                        style: 'width: 22px; height: 22px; cursor: pointer; margin-top: 0.25rem; accent-color: var(--accent-purple);' });
         checkbox.checked = (p._checked !== undefined) ? (p._checked && !!selected) : defaultChecked;
+        if (approved || reviewBusy) {
+            checkbox.checked = checkbox.checked && !approved;
+            checkbox.disabled = true;
+        }
         checkbox.addEventListener('change', () => {
+            if (reviewBusy || approved) {
+                checkbox.checked = !checkbox.checked;
+                return;
+            }
             if (checkbox.checked && !checkbox.dataset.url) {
                 checkbox.checked = false;
                 alert('اختر صورة من المرشحين أولاً.');
@@ -2010,7 +2119,10 @@
 
         let stateText = 'لا يوجد مرشح مؤكد — اختر صورة يدوياً';
         let stateColor = 'var(--warning)';
-        if (selected && selected.status === 'preselected') {
+        if (approved) {
+            stateText = 'تم اعتماده ورفعه في هذه الجلسة';
+            stateColor = 'var(--success)';
+        } else if (selected && selected.status === 'preselected') {
             stateText = 'مرشح موثق مختار مسبقاً (غير منشور)';
             stateColor = 'var(--success)';
         } else if (selected) {
@@ -2125,11 +2237,12 @@
     }
 
     function toggleBatchRowExclude(rowNum) {
+        if (reviewBusy) return;
         rowNum = parseInt(rowNum, 10);
         const card = document.getElementById(`batch-card-${rowNum}`);
         if (!card) return;
         const cb = card.querySelector('.batch-select-checkbox');
-        if (!cb) return;
+        if (!cb || cb.disabled) return;
         if (!cb.checked && !cb.dataset.url) {
             alert('اختر صورة من المرشحين أولاً.');
             return;
@@ -2142,6 +2255,7 @@
 
     // اختيار المراجع لصورة: يحدد الصف للاعتماد ويحفظ الاختيار في قاعدة البيانات
     function selectCurationThumb(thumbEl, rowNum, imageUrl) {
+        if (reviewBusy) return;
         const card = document.getElementById(`batch-card-${rowNum}`);
         if (!card) return;
 
@@ -2189,6 +2303,7 @@
     let batchRejectContext = null;
 
     function openBatchRejectModal(context) {
+        if (reviewBusy) return;
         batchRejectContext = context;
         document.querySelectorAll('input[name="batch_reject_reason_code"]').forEach(r => { r.checked = false; });
         document.getElementById('batchRejectTitle').textContent = context.mode === 'single'
@@ -2203,6 +2318,7 @@
     }
 
     function confirmBatchReject() {
+        if (reviewBusy) return;
         const checked = document.querySelector('input[name="batch_reject_reason_code"]:checked');
         if (!checked) {
             alert('❌ يرجى اختيار سبب الرفض.');
@@ -2219,6 +2335,7 @@
     }
 
     async function rejectAndReSearchCandidate(btn, rowNumber, imageUrl, reasonCode) {
+        if (reviewBusy) return;
         const p = currentProducts.find(prod => parseInt(prod.row_number, 10) === rowNumber);
         if (!p) return;
         const card = btn ? btn.closest('.curation-thumb-card') : null;
@@ -2280,8 +2397,9 @@
     }
 
     function selectAllBatch(val) {
+        if (reviewBusy) return;
         document.querySelectorAll('.batch-select-checkbox').forEach(cb => {
-            cb.checked = val && !!cb.dataset.url;
+            cb.checked = val && !!cb.dataset.url && !cb.disabled;
             const rowNum = parseInt(cb.dataset.row, 10);
             const product = currentProducts.find(p => parseInt(p.row_number, 10) === rowNum);
             if (product) product._checked = cb.checked;
@@ -2289,9 +2407,13 @@
         });
     }
 
-    // اعتماد جماعي: يرسل الباركود و sku_key لكل صف (مفاتيح الهوية وليس رقم الصف فقط)
+    // اعتماد جماعي: يرسل الباركود و sku_key لكل صف (مفاتيح الهوية وليس رقم الصف فقط).
+    // أثناء التنفيذ تُعطل كل أزرار الاعتماد والرفض والاختصارات (setReviewBusy)، ويتقدم الشريط بعد انتهاء
+    // طلب كل صف فقط، والصف المعتمد لا يُعتمد مرة ثانية (approvedRowKeys).
     async function submitBatchApproval() {
-        const selectedCbs = Array.from(document.querySelectorAll('.batch-select-checkbox:checked')).filter(cb => cb.dataset.url);
+        if (reviewBusy) return;
+        const selectedCbs = Array.from(document.querySelectorAll('.batch-select-checkbox:checked'))
+            .filter(cb => cb.dataset.url && !approvedRowKeys.has(cb.dataset.key));
         if (selectedCbs.length === 0) {
             alert('❌ يرجى تحديد منتج واحد على الأقل له صورة مختارة للاعتماد.');
             return;
@@ -2300,13 +2422,13 @@
             return;
         }
 
-        const approveBtn = document.getElementById('batchApproveBtn');
-        const rejectBtn = document.getElementById('batchRejectBtn');
         const progressDiv = document.getElementById('batchCurationProgress');
         const progressBar = document.getElementById('batchCurationProgressBar');
         const progressPercent = document.getElementById('batchCurationProgressPercent');
-        approveBtn.disabled = true;
-        rejectBtn.disabled = true;
+        const progressText = document.getElementById('batchCurationProgressText');
+        setReviewBusy(true);
+        progressPercent.innerText = '0%';
+        progressBar.style.width = '0%';
         progressDiv.style.display = 'flex';
 
         const total = selectedCbs.length;
@@ -2316,72 +2438,82 @@
         const bgRemovalMethod = document.getElementById('bgRemovalMethod').value;
         const aiEnhance = document.getElementById('aiEnhance').value === 'true';
 
-        for (const cb of selectedCbs) {
-            const row = parseInt(cb.dataset.row, 10);
-            const url = cb.dataset.url;
-            const p = currentProducts.find(prod => parseInt(prod.row_number, 10) === row) || {};
-            const chosen = (p.curation_candidates || []).find(c => c.image_url === url) || {};
+        try {
+            for (const cb of selectedCbs) {
+                const row = parseInt(cb.dataset.row, 10);
+                const url = cb.dataset.url;
+                const key = cb.dataset.key;
+                const p = currentProducts.find(prod => parseInt(prod.row_number, 10) === row) || {};
+                const chosen = (p.curation_candidates || []).find(c => c.image_url === url) || {};
 
-            completed++;
-            const percent = Math.round((completed / total) * 100);
-            progressPercent.innerText = percent + '%';
-            progressBar.style.width = percent + '%';
-            appendTerminalLine('Ingestion', `جاري رفع الصف ${row}: ${p.product_name || ''}...`, 'system');
+                progressText.innerText = `جاري رفع الصف ${row} (${completed + 1} من ${total})...`;
+                appendTerminalLine('Ingestion', `جاري رفع الصف ${row}: ${p.product_name || ''}...`, 'system');
 
-            try {
-                const res = await fetch('/api/select_image', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrfToken() },
-                    body: JSON.stringify({
-                        image_url: url,
-                        page_url: chosen.page_url || '',
-                        candidate_sha256: chosen.content_sha256 || null,
-                        product_name: p.product_name || '',
-                        brand: p.brand || '',
-                        row_number: row,
-                        barcode: p.barcode || '',
-                        sku_key: p.sku_key || '',
-                        size: p.size || '',
-                        enhance: aiEnhance,
-                        bg_removal_method: bgRemovalMethod,
-                        target_width: 0,
-                        target_height: 0
-                    })
-                });
-                let data;
                 try {
-                    data = await res.json();
-                } catch (parseErr) {
-                    data = { status: 'error', error: `HTTP ${res.status}` };
-                }
-                const card = cb.closest('.curation-row-card');
-                if (data.status === 'success') {
-                    success++;
-                    if (card) {
-                        card.style.borderColor = 'var(--success)';
-                        card.style.background = 'var(--success-bg)';
+                    const res = await fetch('/api/select_image', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrfToken() },
+                        body: JSON.stringify({
+                            image_url: url,
+                            page_url: chosen.page_url || '',
+                            candidate_sha256: chosen.content_sha256 || null,
+                            product_name: p.product_name || '',
+                            brand: p.brand || '',
+                            row_number: row,
+                            barcode: p.barcode || '',
+                            sku_key: p.sku_key || '',
+                            size: p.size || '',
+                            enhance: aiEnhance,
+                            bg_removal_method: bgRemovalMethod,
+                            target_width: 0,
+                            target_height: 0
+                        })
+                    });
+                    let data;
+                    try {
+                        data = await res.json();
+                    } catch (parseErr) {
+                        data = { status: 'error', error: `HTTP ${res.status}` };
                     }
-                    if (data.warning === 'background_not_removed') {
-                        appendTerminalLine('Ingestion', `الصف ${row}: لم تتم إزالة الخلفية؛ كُتب الرابط بعلامة needs_review.`, 'warning');
+                    const card = cb.closest('.curation-row-card');
+                    if (data.status === 'success') {
+                        success++;
+                        // الصف المعتمد يخرج من التحديد ولا يمكن اعتماده مرة ثانية في هذه الجلسة
+                        approvedRowKeys.add(key);
+                        cb.checked = false;
+                        cb.disabled = true;
+                        p._checked = false;
+                        if (card) {
+                            card.style.borderColor = 'var(--success)';
+                            card.style.background = 'var(--success-bg)';
+                        }
+                        if (data.warning === 'background_not_removed') {
+                            appendTerminalLine('Ingestion', `الصف ${row}: لم تتم إزالة الخلفية؛ كُتب الرابط بعلامة needs_review.`, 'warning');
+                        }
+                    } else {
+                        failed++;
+                        if (card) {
+                            card.style.borderColor = 'var(--danger)';
+                            card.style.background = 'var(--danger-bg)';
+                        }
+                        appendTerminalLine('Ingestion Failed', `فشل رفع الصف ${row}: ${data.error || 'خطأ غير معروف'}`, 'error');
                     }
-                } else {
+                } catch (err) {
+                    console.error(err);
                     failed++;
-                    if (card) {
-                        card.style.borderColor = 'var(--danger)';
-                        card.style.background = 'var(--danger-bg)';
-                    }
-                    appendTerminalLine('Ingestion Failed', `فشل رفع الصف ${row}: ${data.error || 'خطأ غير معروف'}`, 'error');
+                    appendTerminalLine('Ingestion Failed', `فشل رفع الصف ${row}: ${err.message || err}`, 'error');
+                } finally {
+                    // الشريط يتقدم بعد انتهاء طلب الصف فقط
+                    completed++;
+                    const percent = Math.round((completed / total) * 100);
+                    progressPercent.innerText = percent + '%';
+                    progressBar.style.width = percent + '%';
                 }
-            } catch (err) {
-                console.error(err);
-                failed++;
-                appendTerminalLine('Ingestion Failed', `فشل رفع الصف ${row}: ${err.message || err}`, 'error');
             }
+        } finally {
+            setReviewBusy(false);
+            progressDiv.style.display = 'none';
         }
-
-        approveBtn.disabled = false;
-        rejectBtn.disabled = false;
-        progressDiv.style.display = 'none';
         appendTerminalLine('Ingestion Finished', `اكتمل الرفع. نجاح: ${success} | فشل: ${failed}`, 'success');
         alert(`اكتملت المعالجة الجماعية. نجاح: ${success} | فشل: ${failed}`);
         fetchCurationProducts();
@@ -2389,6 +2521,7 @@
 
     // رفض جماعي بسبب يختاره المراجع (لا يوجد سبب مثبت في الكود)
     function submitBatchRejection() {
+        if (reviewBusy) return;
         const selectedCbs = Array.from(document.querySelectorAll('.batch-select-checkbox:checked')).filter(cb => cb.dataset.url);
         if (selectedCbs.length === 0) {
             alert('❌ يرجى تحديد منتج واحد على الأقل له صورة مختارة للرفض.');
@@ -2398,55 +2531,54 @@
     }
 
     async function runBatchRejection(reasonCode) {
+        if (reviewBusy) return;
         const selectedCbs = Array.from(document.querySelectorAll('.batch-select-checkbox:checked')).filter(cb => cb.dataset.url);
         if (selectedCbs.length === 0) return;
-        const approveBtn = document.getElementById('batchApproveBtn');
-        const rejectBtn = document.getElementById('batchRejectBtn');
-        approveBtn.disabled = true;
-        rejectBtn.disabled = true;
+        setReviewBusy(true);
         let success = 0;
         let failed = 0;
 
-        for (const cb of selectedCbs) {
-            const row = parseInt(cb.dataset.row, 10);
-            const p = currentProducts.find(prod => parseInt(prod.row_number, 10) === row) || {};
-            try {
-                const res = await fetch('/api/reject_image', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrfToken() },
-                    body: JSON.stringify({
-                        row_number: row,
-                        image_url: cb.dataset.url,
-                        product_name: p.product_name || '',
-                        brand: p.brand || '',
-                        barcode: p.barcode || '',
-                        sku_key: p.sku_key || '',
-                        size: p.size || '',
-                        reason_code: reasonCode,
-                        rejection_reasons: [reasonCode],
-                        research: false
-                    })
-                });
-                let data;
+        try {
+            for (const cb of selectedCbs) {
+                const row = parseInt(cb.dataset.row, 10);
+                const p = currentProducts.find(prod => parseInt(prod.row_number, 10) === row) || {};
                 try {
-                    data = await res.json();
-                } catch (parseErr) {
-                    data = { status: 'error', error: `HTTP ${res.status}` };
-                }
-                if (data.status === 'error' || data.status === 'failed') {
+                    const res = await fetch('/api/reject_image', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrfToken() },
+                        body: JSON.stringify({
+                            row_number: row,
+                            image_url: cb.dataset.url,
+                            product_name: p.product_name || '',
+                            brand: p.brand || '',
+                            barcode: p.barcode || '',
+                            sku_key: p.sku_key || '',
+                            size: p.size || '',
+                            reason_code: reasonCode,
+                            rejection_reasons: [reasonCode],
+                            research: false
+                        })
+                    });
+                    let data;
+                    try {
+                        data = await res.json();
+                    } catch (parseErr) {
+                        data = { status: 'error', error: `HTTP ${res.status}` };
+                    }
+                    if (data.status === 'error' || data.status === 'failed') {
+                        failed++;
+                        appendTerminalLine('Reject Failed', `فشل رفض الصف ${row}: ${data.error || 'خطأ غير معروف'}`, 'error');
+                    } else {
+                        success++;
+                    }
+                } catch (err) {
+                    console.error(err);
                     failed++;
-                    appendTerminalLine('Reject Failed', `فشل رفض الصف ${row}: ${data.error || 'خطأ غير معروف'}`, 'error');
-                } else {
-                    success++;
                 }
-            } catch (err) {
-                console.error(err);
-                failed++;
             }
+        } finally {
+            setReviewBusy(false);
         }
-
-        approveBtn.disabled = false;
-        rejectBtn.disabled = false;
         appendTerminalLine('Reject', `اكتمل الرفض (${reasonCode}). نجاح: ${success} | فشل: ${failed}`, 'warning');
         alert(`تم الرفض (${reasonCode}). نجاح: ${success} | فشل: ${failed}`);
         fetchCurationProducts();
@@ -2454,6 +2586,7 @@
 
     // إعادة البحث لصف واحد: تُعرض كل الحالات (review / not_found / provider_down) بصدق
     async function triggerInlineSearch(rowNumber) {
+        if (reviewBusy) return;
         const queryInput = document.getElementById(`inline-query-${rowNumber}`);
         const spinner = document.getElementById(`inline-spinner-${rowNumber}`);
         if (!queryInput) return;
@@ -2521,6 +2654,7 @@
 
     // رابط يدوي يلصقه المراجع: اختيار بشري صريح
     function addCustomImageUrl(rowNumber) {
+        if (reviewBusy) return;
         const urlInput = document.getElementById(`inline-url-${rowNumber}`);
         if (!urlInput) return;
         const urlText = urlInput.value.trim();
@@ -2704,6 +2838,7 @@
 
     // تحديد الصفوف التي رشّح لها النظام مرشحاً موثقاً فقط
     function selectPreselectedBatch() {
+        if (reviewBusy) return;
         filteredProducts.forEach(p => {
             const rowNum = parseInt(p.row_number, 10);
             const card = document.getElementById(`batch-card-${rowNum}`);
@@ -2711,7 +2846,7 @@
             const cb = card.querySelector('.batch-select-checkbox');
             if (!cb) return;
             const chosen = selectedCandidateOf(p);
-            cb.checked = !!chosen && chosen.status === 'preselected' && !!cb.dataset.url;
+            cb.checked = !!chosen && chosen.status === 'preselected' && !!cb.dataset.url && !cb.disabled;
             p._checked = cb.checked;
             toggleBatchRowSelect(cb, rowNum);
         });
@@ -2790,6 +2925,12 @@
         const workspace = document.getElementById('batchCurationWorkspace');
 
         if (!workspace || workspace.style.display === 'none' || filteredProducts.length === 0) return;
+
+        // لا اختصارات في تبويب التشغيل والتحكم، ولا أثناء اعتماد أو رفض جماعي، ولا ونافذة سبب الرفض مفتوحة
+
+        const rejectModal = document.getElementById('batchRejectModal');
+
+        if (!reviewTabActive() || reviewBusy || (rejectModal && rejectModal.style.display === 'flex')) return;
 
         
 
@@ -3055,6 +3196,12 @@
     }
 
     document.addEventListener("DOMContentLoaded", () => {
+        // رابط «فتح تبويب فرز واعتماد الصور» من الصفحة الرئيسية: /batch-automation?tab=review
+        if (new URLSearchParams(window.location.search).get('tab') === 'review') {
+            document.getElementById('batchCurationWorkspace').style.display = 'block';
+            switchTab('curation');
+        }
+
         pollBatchStatus();
         setInterval(pollBatchStatus, 3000);
 

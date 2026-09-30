@@ -123,6 +123,10 @@ def run():
         return 0
     pin_nightly_settings(main, config)
     _hold_lock()
+    # A new run, like the dashboard's run button: a stop or pause request left over from an earlier run must not
+    # stop tonight's worker, and the dashboard shows 'reading the sheet' instead of the last run's numbers.
+    if not local_cache_db.prepare_run():
+        say("could not reset the run state in the database; continuing (the enqueue reports database errors)")
     try:
         say("enqueue: reading the sheet")
         main.run_enqueue_mode()

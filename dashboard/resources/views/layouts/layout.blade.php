@@ -574,9 +574,19 @@
                 const label = document.getElementById('stateLabel');
                 const progressContainer = document.getElementById('stateProgressContainer');
                 const panel = document.getElementById('systemStateIndicator');
-                
-                if (data.status === 'pre_caching' || data.is_running) {
-                    if (data.pause_requested === 1) {
+                // الحالة يحسبها الخادم (phase): starting | running | paused | stopping | error | review | idle
+                const phase = data.phase || 'idle';
+                panel.title = data.alert || data.phase_text || '';
+
+                if (phase === 'starting' || phase === 'stopping') {
+                    dot.style.color = 'var(--accent-cyan)';
+                    dot.className = 'status-dot fas fa-spinner fa-spin';
+                    label.innerText = phase === 'starting' ? 'جاري قراءة الشيت وتجهيز الطابور…' : 'جاري إيقاف التشغيل…';
+                    panel.style.boxShadow = '0 0 15px rgba(0, 210, 255, 0.15)';
+                    panel.style.borderColor = 'rgba(0, 210, 255, 0.3)';
+                    progressContainer.style.display = 'none';
+                } else if (phase === 'running' || phase === 'paused') {
+                    if (phase === 'paused') {
                         dot.style.color = 'var(--warning)';
                         dot.className = 'status-dot fas fa-pause-circle';
                         label.innerText = 'الأتمتة موقوفة مؤقتاً';
@@ -589,10 +599,12 @@
                         panel.style.boxShadow = '0 0 15px rgba(0, 210, 255, 0.15)';
                         panel.style.borderColor = 'rgba(0, 210, 255, 0.3)';
                     }
-                    
+
                     progressContainer.style.display = 'block';
-                    const total = data.total || 0;
-                    const current = data.current || 0;
+                    // تقدم التشغيل الحالي فقط (وليس الطابور كله)
+                    const run = data.run || {};
+                    const total = run.total || 0;
+                    const current = run.processed || 0;
                     const percent = total > 0 ? Math.round((current / total) * 100) : 0;
                     
                     document.getElementById('stateProgressText').innerText = `${current}/${total} منتج`;
@@ -606,24 +618,25 @@
                     } else {
                         activeP.innerText = '';
                     }
-                } else if (data.status === 'curation_pending') {
+                } else if (phase === 'error') {
+                    // خطأ أو انقطاع المزودين: حالة حمراء، ولا تُعرض كحالة خمول أبداً
+                    dot.style.color = 'var(--danger)';
+                    dot.className = 'status-dot fas fa-exclamation-circle';
+                    label.innerText = 'توقف التشغيل بسبب خطأ';
+                    panel.style.boxShadow = '0 0 15px rgba(239, 68, 68, 0.2)';
+                    panel.style.borderColor = 'var(--danger)';
+                    progressContainer.style.display = 'none';
+                } else if (phase === 'review') {
                     dot.style.color = 'var(--warning)';
                     dot.className = 'status-dot fas fa-clock';
-                    label.innerText = 'بانتظار الفرز والاعتماد البشري';
+                    label.innerText = `بانتظار الفرز والاعتماد البشري (${data.ready_for_review || 0})`;
                     panel.style.boxShadow = '0 0 15px rgba(245, 158, 11, 0.15)';
                     panel.style.borderColor = 'rgba(245, 158, 11, 0.3)';
-                    progressContainer.style.display = 'none';
-                } else if (data.status === 'ingesting') {
-                    dot.style.color = 'var(--accent-purple-hover)';
-                    dot.className = 'status-dot fas fa-circle-notch fa-spin';
-                    label.innerText = 'جاري رفع الصور والبيانات...';
-                    panel.style.boxShadow = '0 0 15px rgba(139, 92, 246, 0.15)';
-                    panel.style.borderColor = 'rgba(139, 92, 246, 0.3)';
                     progressContainer.style.display = 'none';
                 } else {
                     dot.style.color = 'var(--success)';
                     dot.className = 'status-dot fas fa-check-circle';
-                    label.innerText = 'نظام الأتمتة جاهز وخامل';
+                    label.innerText = 'جاهز: لا توجد منتجات بانتظار المراجعة';
                     panel.style.boxShadow = 'none';
                     panel.style.borderColor = 'var(--panel-border)';
                     progressContainer.style.display = 'none';

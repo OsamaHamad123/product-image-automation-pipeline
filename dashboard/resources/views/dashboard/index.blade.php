@@ -392,6 +392,9 @@
         </div>
         
         <div>
+            <!-- خطأ التشغيل أو تنبيه العامل بالعربية (data.alert من /api/batch-status) -->
+            <div id="batchStateAlert" role="alert" style="display: none; margin-bottom: 1rem; padding: 0.85rem 1rem; border-radius: var(--border-radius-sm); background: var(--danger-bg); border: 1px solid var(--danger); color: var(--danger); font-size: 0.85rem; font-weight: 800; line-height: 1.6;"></div>
+            <p id="batchPhaseNote" style="font-size: 0.85rem; color: var(--text-secondary); margin: 0 0 1rem 0; font-weight: 700;"></p>
             <!-- Batch Automation progress panel -->
             <div id="batchProgressPanel" style="display: none; flex-direction: column; gap: 0.8rem; margin-bottom: 1.5rem; background: var(--input-bg); padding: 1.25rem; border-radius: var(--border-radius-md); border: 1px solid var(--panel-border);">
                 <div style="display: flex; justify-content: space-between; font-size: 0.85rem; font-weight: bold; align-items: center;">
@@ -406,8 +409,8 @@
                     <button type="button" class="btn btn-secondary btn-sm" id="pauseResumeBatchBtn" onclick="togglePauseResumeAutomation()" style="flex: 1; background: var(--warning-bg); border-color: var(--panel-border); color: var(--warning); font-weight: bold; border-radius: 10px;">
                         <i class="fas fa-pause" id="pauseResumeIcon"></i> <span id="pauseResumeText">إيقاف مؤقت</span>
                     </button>
-                    <button type="button" class="btn btn-secondary btn-sm" id="stopBatchBtn" onclick="stopBatchAutomation()" style="flex: 1; background: var(--danger-bg); border-color: var(--panel-border); color: var(--danger); font-weight: bold; border-radius: 10px;">
-                        <i class="fas fa-stop"></i> إنهاء قسري 🛑
+                    <button type="button" class="btn btn-secondary btn-sm" id="stopBatchBtn" onclick="stopBatchAutomation()" title="يوقف العامل ويعيد الصفوف قيد المعالجة إلى الانتظار؛ لا يحذف أي صف" style="flex: 1; background: var(--danger-bg); border-color: var(--panel-border); color: var(--danger); font-weight: bold; border-radius: 10px;">
+                        <i class="fas fa-stop"></i> إيقاف التشغيل 🛑
                     </button>
                 </div>
             </div>
@@ -639,70 +642,103 @@
         }
     }
 
+    // الشريط الأحمر: خطأ التشغيل أو تنبيه العامل كما يصوغه الخادم بالعربية (data.alert)
+    function renderStateAlert(data) {
+        const box = document.getElementById('batchStateAlert');
+        if (!box) return;
+        box.textContent = data.alert ? '⚠️ ' + data.alert : '';
+        box.style.display = data.alert ? 'block' : 'none';
+    }
+
+    // زر التشغيل: run (تشغيل جديد) | busy (تشغيل جارٍ) | review (فتح تبويب المراجعة في صفحة الأتمتة مباشرة)
+    function setRunButton(mode) {
+        const runBtn = document.getElementById('runAllBtn');
+        runBtn.disabled = mode === 'busy';
+        runBtn.className = mode === 'review' ? 'btn btn-secondary' : 'btn';
+        runBtn.style.background = mode === 'review' ? 'var(--active-menu-bg)' : '';
+        runBtn.style.borderColor = mode === 'review' ? 'var(--panel-border)' : '';
+        runBtn.style.color = mode === 'review' ? 'var(--text-primary)' : '';
+        if (mode === 'busy') {
+            runBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جاري الأتمتة بالخلفية...';
+        } else if (mode === 'review') {
+            runBtn.innerHTML = '<i class="fas fa-images"></i> فتح تبويب فرز واعتماد الصور الآن';
+            runBtn.onclick = () => window.location.href = "/batch-automation?tab=review";
+        } else {
+            runBtn.innerHTML = '<i class="fas fa-play"></i> تشغيل أتمتة الشيت بالكامل (Batch)';
+            runBtn.onclick = runAllAutomation;
+        }
+    }
+
+    // سرعة المعالجة والوقت المتبقي من تقدم التشغيل الحالي فقط (run)؛ القياس يبدأ من جديد لكل تشغيل
+    function updateRunEta(run) {
+        const key = String(run.run_id || '');
+        if (localStorage.getItem('batch_start_run') !== key || !localStorage.getItem('batch_start_time')) {
+            localStorage.setItem('batch_start_run', key);
+            localStorage.setItem('batch_start_time', Date.now());
+            localStorage.setItem('batch_start_current', run.processed || 0);
+        }
+        const startTime = parseInt(localStorage.getItem('batch_start_time'));
+        const startCurrent = parseInt(localStorage.getItem('batch_start_current'));
+        const current = run.processed || 0;
+        if (!startTime || isNaN(startTime) || current < startCurrent) return;
+        const elapsedSeconds = (Date.now() - startTime) / 1000;
+        const processedCount = current - startCurrent;
+        if (elapsedSeconds <= 1 || processedCount <= 0) return;
+        const itemsPerSecond = processedCount / elapsedSeconds;
+        const liveThroughputEl = document.getElementById('liveThroughput');
+        if (liveThroughputEl) liveThroughputEl.innerText = `${(itemsPerSecond * 60).toFixed(1)} منتج/دقيقة`;
+        const etaSeconds = Math.max(0, (run.total || 0) - current) / itemsPerSecond;
+        const pad = (num) => String(num).padStart(2, '0');
+        const liveETAEl = document.getElementById('liveETA');
+        if (liveETAEl) liveETAEl.innerText = `${pad(Math.floor(etaSeconds / 3600))}:${pad(Math.floor((etaSeconds % 3600) / 60))}:${pad(Math.floor(etaSeconds % 60))}`;
+    }
+
+    function resetRunEta() {
+        localStorage.removeItem('batch_start_run');
+        localStorage.removeItem('batch_start_time');
+        localStorage.removeItem('batch_start_current');
+        const liveThroughputEl = document.getElementById('liveThroughput');
+        if (liveThroughputEl) liveThroughputEl.innerText = '0.0 منتج/دقيقة';
+        const liveETAEl = document.getElementById('liveETA');
+        if (liveETAEl) liveETAEl.innerText = '00:00:00';
+    }
+
+    // مراحل التشغيل كما يحسبها الخادم (data.phase)
+    const ACTIVE_PHASES = ['starting', 'running', 'paused', 'stopping'];
+    let lastRunPhase = null;
+
     async function pollBatchStatus() {
         try {
             const res = await fetch('/api/batch-status');
             const data = await res.json();
             renderQueueCounters(data);
+            renderStateAlert(data);
             
             const panel = document.getElementById('batchProgressPanel');
-            const runBtn = document.getElementById('runAllBtn');
+            const phase = data.phase || 'idle';
+            const run = data.run || {};
+            const note = document.getElementById('batchPhaseNote');
+            if (note) note.textContent = ACTIVE_PHASES.includes(phase) ? '' : (data.phase_text || '');
             
-            if (data.is_running || (data.status === 'pre_caching' && data.pause_requested === 1)) {
+            if (ACTIVE_PHASES.includes(phase)) {
                 panel.style.display = 'flex';
-                const percent = data.total > 0 ? Math.round((data.current / data.total) * 100) : 0;
-                document.getElementById('batchProgressPercent').innerText = percent + '%';
-                document.getElementById('batchProgressBar').style.width = percent + '%';
-                
-                // حساب سرعة المعالجة الفورية والوقت المتبقي (ETA)
-                if (data.is_running) {
-                    if (!localStorage.getItem('batch_start_time')) {
-                        localStorage.setItem('batch_start_time', Date.now());
-                        localStorage.setItem('batch_start_current', data.current);
-                    }
-                    
-                    const startTime = parseInt(localStorage.getItem('batch_start_time'));
-                    const startCurrent = parseInt(localStorage.getItem('batch_start_current'));
-                    
-                    if (startTime && !isNaN(startTime) && data.current >= startCurrent) {
-                        const elapsedSeconds = (Date.now() - startTime) / 1000;
-                        const processedCount = data.current - startCurrent;
-                        
-                        if (elapsedSeconds > 1 && processedCount > 0) {
-                            const itemsPerSecond = processedCount / elapsedSeconds;
-                            const itemsPerMinute = itemsPerSecond * 60;
-                            const liveThroughputEl = document.getElementById('liveThroughput');
-                            if (liveThroughputEl) liveThroughputEl.innerText = `${itemsPerMinute.toFixed(1)} منتج/دقيقة`;
-                            
-                            const remainingItems = data.total - data.current;
-                            if (itemsPerSecond > 0) {
-                                const etaSeconds = remainingItems / itemsPerSecond;
-                                const etaHours = Math.floor(etaSeconds / 3600);
-                                const etaMins = Math.floor((etaSeconds % 3600) / 60);
-                                const etaSecs = Math.floor(etaSeconds % 60);
-                                
-                                const pad = (num) => String(num).padStart(2, '0');
-                                const liveETAEl = document.getElementById('liveETA');
-                                if (liveETAEl) liveETAEl.innerText = `${pad(etaHours)}:${pad(etaMins)}:${pad(etaSecs)}`;
-                            } else {
-                                const liveETAEl = document.getElementById('liveETA');
-                                if (liveETAEl) liveETAEl.innerText = '--:--:--';
-                            }
-                        }
-                    }
+                // التقدم من صفوف هذا التشغيل فقط؛ أثناء قراءة الشيت لا تُعرض أرقام التشغيل السابق
+                const percent = run.total > 0 ? Math.round((run.processed / run.total) * 100) : 0;
+                document.getElementById('batchProgressPercent').innerText = phase === 'starting' ? '—' : percent + '%';
+                document.getElementById('batchProgressBar').style.width = (phase === 'starting' ? 0 : percent) + '%';
+                if (phase === 'running') {
+                    updateRunEta(run);
                 } else {
-                    localStorage.removeItem('batch_start_time');
-                    localStorage.removeItem('batch_start_current');
-                    const liveThroughputEl = document.getElementById('liveThroughput');
-                    if (liveThroughputEl) liveThroughputEl.innerText = '0.0 منتج/دقيقة';
-                    const liveETAEl = document.getElementById('liveETA');
-                    if (liveETAEl) liveETAEl.innerText = '00:00:00';
+                    resetRunEta();
                 }
                 
-                isPaused = (data.pause_requested === 1);
+                isPaused = (phase === 'paused');
                 const pBtn = document.getElementById('pauseResumeBatchBtn');
                 const pIcon = document.getElementById('pauseResumeIcon');
                 const pTxt = document.getElementById('pauseResumeText');
+                // الإيقاف المؤقت يخص العامل: لا معنى له أثناء قراءة الشيت أو الإيقاف
+                pBtn.disabled = phase === 'starting' || phase === 'stopping';
+                const progressText = document.getElementById('batchProgressText');
                 
                 if (isPaused) {
                     pIcon.className = 'fas fa-play';
@@ -710,47 +746,49 @@
                     pBtn.style.color = 'var(--text-primary)';
                     pBtn.style.background = 'var(--success-bg)';
                     pBtn.style.borderColor = 'var(--panel-border)';
-                    document.getElementById('batchProgressText').innerHTML = `<strong style="color: var(--warning);"><i class="fas fa-pause-circle"></i> الأتمتة موقوفة مؤقتاً</strong>`;
+                    progressText.innerHTML = `<strong style="color: var(--warning);"><i class="fas fa-pause-circle"></i> الأتمتة موقوفة مؤقتاً</strong>`;
                 } else {
                     pIcon.className = 'fas fa-pause';
                     pTxt.innerText = 'إيقاف مؤقت';
                     pBtn.style.color = 'var(--text-secondary)';
                     pBtn.style.background = 'var(--warning-bg)';
                     pBtn.style.borderColor = 'var(--panel-border)';
-                    const progressText = document.getElementById('batchProgressText');
-                    progressText.textContent = 'جاري تحضير مرشحات: ';
-                    const strong = document.createElement('strong');
-                    strong.style.color = 'var(--accent-cyan)';
-                    strong.textContent = data.current_product || 'جاري البحث...';
-                    progressText.appendChild(strong);
+                    if (phase === 'running') {
+                        progressText.textContent = 'جاري تحضير مرشحات: ';
+                        const strong = document.createElement('strong');
+                        strong.style.color = 'var(--accent-cyan)';
+                        strong.textContent = data.current_product || 'جاري البحث...';
+                        progressText.appendChild(strong);
+                    } else {
+                        progressText.textContent = data.phase_text || '';
+                    }
                 }
                 
-                document.getElementById('batchProgressCounts').innerText = `${data.current} من ${data.total} — للمراجعة: ${data.ready_for_review || 0} | معتمدة: ${data.approved || 0} | فشل: ${data.failed || 0}`;
+                document.getElementById('batchProgressCounts').innerText = phase === 'starting' ? '' :
+                    `${run.processed || 0} من ${run.total || 0} في هذا التشغيل — للمراجعة: ${run.ready_for_review || 0} | معتمدة: ${run.completed || 0} | فشل: ${run.failed || 0} | بانتظار: ${(run.pending || 0) + (run.processing || 0)}`;
                 
-                runBtn.disabled = true;
-                runBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جاري الأتمتة بالخلفية...';
-            } else if (data.status === 'curation_pending') {
+                const stopBtn = document.getElementById('stopBatchBtn');
+                const stopping = phase === 'stopping' || data.stop_requested === 1;
+                stopBtn.disabled = stopping;
+                stopBtn.innerHTML = stopping ? '<i class="fas fa-spinner fa-spin"></i> طلب الإيقاف مسجل' : '<i class="fas fa-stop"></i> إيقاف التشغيل 🛑';
+                setRunButton('busy');
+            } else if (phase === 'review') {
+                resetRunEta();
                 panel.style.display = 'flex';
                 document.getElementById('batchProgressPercent').innerText = '100%';
                 document.getElementById('batchProgressBar').style.width = '100%';
-                document.getElementById('batchProgressText').innerHTML = `<strong style="color: var(--success);"><i class="fas fa-check-circle"></i> تم الانتهاء! كافة المنتجات جاهزة للمراجعة.</strong>`;
-                document.getElementById('batchProgressCounts').innerText = `تم تحضير كافة الصور المرشحة لـ ${data.total} منتج بنجاح.`;
-                
-                runBtn.disabled = false;
-                runBtn.className = 'btn btn-secondary';
-                runBtn.style.background = 'var(--active-menu-bg)';
-                runBtn.style.borderColor = 'var(--panel-border)';
-                runBtn.style.color = 'var(--text-primary)';
-                runBtn.innerHTML = '<i class="fas fa-images"></i> الانتقال لصفحة فرز واعتماد الصور الآن';
-                runBtn.onclick = () => window.location.href = "/catalog";
+                document.getElementById('batchProgressText').innerHTML = `<strong style="color: var(--success);"><i class="fas fa-check-circle"></i> انتهى التحضير: منتجات جاهزة للمراجعة.</strong>`;
+                document.getElementById('batchProgressCounts').innerText = `${data.ready_for_review || 0} منتج بانتظار المراجعة في تبويب الفرز والاعتماد.`;
+                setRunButton('review');
             } else {
+                resetRunEta();
                 panel.style.display = 'none';
-                if (runBtn.disabled) {
-                    runBtn.disabled = false;
-                    runBtn.innerHTML = '<i class="fas fa-play"></i> تشغيل أتمتة الشيت بالكامل (Batch)';
+                setRunButton('run');
+                if (ACTIVE_PHASES.includes(lastRunPhase)) {
                     location.reload(); // Refresh to update statistics
                 }
             }
+            lastRunPhase = phase;
         } catch (err) {
             console.error("Error polling batch status:", err);
         }
@@ -801,9 +839,15 @@
         }
     }
 
-    // إيقاف عملية الأتمتة فورياً
+    // إيقاف التشغيل بأمان: لا يُحذف أي صف (ApiController::stopBatch ثم run_control stop)
+    const STOP_CONFIRM_TEXT = "إيقاف التشغيل:\n" +
+        "• يتوقف العامل الآن، وإن كان التشغيل ما زال يقرأ الشيت فيتوقف قبل معالجة أي منتج.\n" +
+        "• تعود الصفوف التي كانت قيد المعالجة إلى الانتظار لتُعالج في التشغيل القادم.\n" +
+        "• لا يُحذف أي صف: المنتجات الجاهزة للمراجعة والمعتمدة والفاشلة تبقى كما هي.\n\n" +
+        "هل تريد الإيقاف؟";
+
     async function stopBatchAutomation() {
-        if (!confirm("⚠️ هل أنت متأكد من رغبتك في إيقاف عملية الأتمتة الكلية بالخلفية فورياً؟")) {
+        if (!confirm(STOP_CONFIRM_TEXT)) {
             return;
         }
         const btn = document.getElementById('stopBatchBtn');
@@ -821,20 +865,20 @@
             });
             const data = await res.json();
             if (data.status === 'success') {
-                alert("🛑 تم إيقاف عملية الأتمتة الكلية بنجاح!");
-                location.reload();
+                alert("🛑 " + (data.message || "تم إيقاف التشغيل، ولم يُحذف أي صف."));
+                pollBatchStatus();
             } else {
-                alert("❌ فشل إيقاف الأتمتة: " + data.error);
+                alert("❌ فشل إيقاف التشغيل: " + (data.error || 'خطأ غير معروف'));
                 if (btn) {
                     btn.disabled = false;
-                    btn.innerHTML = '<i class="fas fa-stop"></i> إيقاف الأتمتة فوراً 🛑';
+                    btn.innerHTML = '<i class="fas fa-stop"></i> إيقاف التشغيل 🛑';
                 }
             }
         } catch (err) {
             console.error("Error stopping batch:", err);
             if (btn) {
                 btn.disabled = false;
-                btn.innerHTML = '<i class="fas fa-stop"></i> إيقاف الأتمتة فوراً 🛑';
+                btn.innerHTML = '<i class="fas fa-stop"></i> إيقاف التشغيل 🛑';
             }
         }
     }

@@ -400,7 +400,8 @@ def test_bridge_action_hides_database_errors(bridge, monkeypatch, capsys):
 def test_bridge_action_is_last_in_the_table():
     import cli_bridge
 
-    assert list(cli_bridge.ACTIONS)[-1] == "ops_health"
+    # ops_health was appended to the table; the run_control action (run start / stop / reset) was appended after it
+    assert list(cli_bridge.ACTIONS)[-2:] == ["ops_health", "run_control"]
     assert cli_bridge.ACTIONS["ops_health"] is cli_bridge.action_ops_health
 
 

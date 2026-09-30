@@ -784,6 +784,88 @@ def action_ops_health(params):
     return dict({"status": "success"}, **report)
 
 
+# ---------------------------------------------------------------------------
+# run_control (قراءة/كتابة): تشغيل جديد، إيقاف، إصلاح تشغيل عالق — لا يُحذف أي صف أبداً
+# ---------------------------------------------------------------------------
+
+# حالة عامل الخلفية كما رأتها لوحة التحكم (ApiController): العملية تُنهى في PHP لأنها تحتاج نظام التشغيل
+RUN_CONTROL_WORKERS = ("starting", "running", "killed", "none")
+
+
+def _kept_rows_text(queue):
+    return (f"لم يُحذف أي صف: {queue.get('ready_for_review', 0)} منتج بانتظار المراجعة، "
+            f"{queue.get('pending', 0)} صف في الانتظار، {queue.get('completed', 0)} معتمد، "
+            f"{queue.get('failed', 0)} فاشل.")
+
+
+def _stop_message(worker, result):
+    kept = _kept_rows_text(result["queue"])
+    if worker == "starting":
+        return ("سُجل طلب الإيقاف: التشغيل ما زال يقرأ الشيت، وسيتوقف العامل فور بدئه قبل معالجة أي منتج. "
+                "لم يُحذف أي صف.")
+    if worker == "running":
+        return ("سُجل طلب الإيقاف: سيتوقف العامل بعد إنهاء المنتجات الجارية، وتبقى باقي الصفوف في الانتظار. "
+                "لم يُحذف أي صف.")
+    released = result["released"]
+    if worker == "killed":
+        return (f"تم إيقاف التشغيل. أُعيد {released} صف كان قيد المعالجة إلى الانتظار ليُعالج في التشغيل القادم. "
+                + kept)
+    if released:
+        return f"لم يكن هناك تشغيل نشط. أُعيد {released} صف عالق في «قيد المعالجة» إلى الانتظار. " + kept
+    return "لم يكن هناك تشغيل نشط لإيقافه، ولم يتغير أي صف."
+
+
+def _reset_message(worker, result):
+    parts = [f"تم إصلاح حالة التشغيل: حُذف ملف القفل، ومُسح التقدم والتنبيه والإيقاف المؤقت، وأُعيد "
+             f"{result['released']} صف من «قيد المعالجة» إلى الانتظار."]
+    if worker == "killed":
+        parts.append("وأُنهي العامل الذي كان ما زال يعمل.")
+    elif worker == "starting":
+        parts.append("وسُجل طلب إيقاف للتشغيل الذي كان يقرأ الشيت كي لا يبدأ المعالجة.")
+    elif worker == "running":
+        parts.append("وسُجل طلب إيقاف للعامل الذي تعذر إنهاؤه، فيتوقف بعد المنتجات الجارية.")
+    parts.append(_kept_rows_text(result["queue"]))
+    return " ".join(parts)
+
+
+def action_run_control(params):
+    """
+    التحكم في تشغيل الأتمتة من لوحة التحكم (local_cache_db). op:
+    - start: قبل إطلاق تشغيل جديد (prepare_run): حالة 'starting' بلا أرقام التشغيل السابق، وإلغاء طلبي
+      الإيقاف والإيقاف المؤقت القديمين.
+    - stop: زر «إيقاف التشغيل» (stop_run). worker: starting | running (العامل لم يبدأ أو ما زال حياً: طلب إيقاف
+      يلتزم به) أو killed | none (أُنهي أو لم يكن يعمل: الصفوف قيد المعالجة تعود للانتظار وتُضبط الحالة).
+    - reset: زر «إصلاح تشغيل عالق» (reset_run). worker=starting | running يسجل طلب إيقاف للإدراج الذي قد يكون
+      ما زال يعمل أو للعامل الذي لم يُنهَ.
+    لا يحذف أي صف أو مرشح أو قرار مراجعة. الاستجابة: {status, op, message (عربية), released, stop_requested,
+    state, queue}.
+    """
+    op = _text(params, 'op')
+    worker = _text(params, 'worker') or "none"
+    if op not in ("start", "stop", "reset"):
+        return {'status': 'error', 'error': f"invalid op {op!r}", 'allowed': ["start", "stop", "reset"]}
+    if worker not in RUN_CONTROL_WORKERS:
+        return {'status': 'error', 'error': f"invalid worker {worker!r}", 'allowed': list(RUN_CONTROL_WORKERS)}
+    if op == "start":
+        if not local_cache_db.prepare_run():
+            return {'status': 'failed', 'op': op,
+                    'error': "تعذر تجهيز التشغيل في قاعدة البيانات؛ لم يبدأ أي تشغيل (التفاصيل في temp/search.log)."}
+        return {'status': 'success', 'op': op, 'message': "تم تجهيز تشغيل جديد."}
+    worker_active = worker in ("starting", "running")
+    try:
+        if op == "stop":
+            result = local_cache_db.stop_run(worker_active=worker_active)
+            message = _stop_message(worker, result)
+        else:
+            result = local_cache_db.reset_run(worker_active=worker_active)
+            message = _reset_message(worker, result)
+    except Exception:
+        return _failure('failed', "تعذر تعديل حالة التشغيل في قاعدة البيانات؛ لم يتغير أي صف "
+                                  "(التفاصيل في temp/search.log).", f"run_control {op} failed")
+    return {'status': 'success', 'op': op, 'message': message, 'released': result['released'],
+            'stop_requested': result['stop_requested'], 'state': result['status'], 'queue': result['queue']}
+
+
 ACTIONS = {
     'get_products': action_get_products,
     'search': action_search,
@@ -794,6 +876,7 @@ ACTIONS = {
     'sheet-preview': action_sheet_preview,
     'sheet-save': action_sheet_save,
     'ops_health': action_ops_health,
+    'run_control': action_run_control,
 }
 
 

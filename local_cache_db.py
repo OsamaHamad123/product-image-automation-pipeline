@@ -89,9 +89,12 @@ _SCHEMA_MIGRATIONS = [
     "ALTER TABLE automation_queue ADD COLUMN IF NOT EXISTS lease_until DATETIME NULL",
     "ALTER TABLE automation_queue ADD COLUMN IF NOT EXISTS failure_code VARCHAR(32) NULL",
     "ALTER TABLE automation_queue ADD COLUMN IF NOT EXISTS trace_json LONGTEXT NULL",
+    # التشغيل الذي يعالج الصف (begin_run): تقدم التشغيل يُحسب من صفوفه فقط وليس من الطابور كله
+    "ALTER TABLE automation_queue ADD COLUMN IF NOT EXISTS run_id VARCHAR(64) NULL",
     "ALTER TABLE automation_queue ADD INDEX IF NOT EXISTS idx_queue_status (status)",
     "ALTER TABLE automation_queue ADD INDEX IF NOT EXISTS idx_queue_worker (worker_id)",
     "ALTER TABLE automation_queue ADD INDEX IF NOT EXISTS idx_queue_sku (sku_key)",
+    "ALTER TABLE automation_queue ADD INDEX IF NOT EXISTS idx_queue_run (run_id)",
     # curation_candidates
     "ALTER TABLE curation_candidates MODIFY COLUMN title TEXT NULL",
     "ALTER TABLE curation_candidates ADD COLUMN IF NOT EXISTS sku_key VARCHAR(64) NULL",
@@ -106,6 +109,9 @@ _SCHEMA_MIGRATIONS = [
     "ALTER TABLE curation_candidates ADD INDEX IF NOT EXISTS idx_curation_sku (sku_key)",
     # automation_state: رسالة تنبيه مرئية للوحة التحكم (مثل عدم توفر نموذج Gemini)
     "ALTER TABLE automation_state ADD COLUMN IF NOT EXISTS notice VARCHAR(255) NULL",
+    # automation_state: التشغيل الحالي، وطلب الإيقاف من لوحة التحكم (يلتزم به العامل بين المنتجات أو عند بدئه)
+    "ALTER TABLE automation_state ADD COLUMN IF NOT EXISTS run_id VARCHAR(64) NULL",
+    "ALTER TABLE automation_state ADD COLUMN IF NOT EXISTS stop_requested INT DEFAULT 0",
 ]
 
 
@@ -1118,10 +1124,19 @@ def update_task_status(task_id, status, error_message=None, failure_code=None, t
         return False
 
 
+# حالة «بانتظار المراجعة» تنتهي عندما لا يبقى أي صف جاهز للمراجعة (اعتمد المراجع أو رفض آخر صف)
+_SETTLE_REVIEW_SQL = (
+    "UPDATE automation_state SET status = 'idle', current_product_name = '' "
+    "WHERE `key` = 'active_session' AND status = 'curation_pending' "
+    "AND NOT EXISTS (SELECT 1 FROM automation_queue WHERE status = 'ready_for_review')"
+)
+
+
 def update_task_status_by_row(row_number, status, error_message=None, failure_code=None, sku_key=None):
     """
     تحديث حالة المهمة لمنتج: بـ sku_key عند تمريره (فلا يتأثر منتج آخر انتقل إلى رقم الصف نفسه
     بعد تعديل الشيت)، وبرقم الصف فقط للصفوف القديمة بلا sku_key.
+    قرارات المراجع (اعتماد / رفض / رفع يدوي) تمر من هنا: إذا لم يبق صف جاهز للمراجعة تصبح الحالة خاملة.
     """
     clause, params = _row_or_sku_clause(row_number, sku_key)
     try:
@@ -1134,6 +1149,7 @@ def update_task_status_by_row(row_number, status, error_message=None, failure_co
                     updated_at = CURRENT_TIMESTAMP
                 WHERE {clause}
             """, (status, error_message, failure_code) + params)
+            cursor.execute(_SETTLE_REVIEW_SQL)
             conn.commit()
         finally:
             _close(conn)
@@ -1379,8 +1395,8 @@ def delete_curation_candidates(row_number, sku_key=None):
 # ---------------------------------------------------------------------------
 
 def update_automation_state(status, total=None, processed=None, success=None, failed=None,
-                            current_product=None, notice=None):
-    """تحديث حالة ومؤشرات جلسة الأتمتة الجارية."""
+                            current_product=None, notice=None, stop_requested=None):
+    """تحديث حالة ومؤشرات جلسة الأتمتة الجارية. stop_requested=0 عند نهاية تشغيل: طلب إيقاف لم يعد له تشغيل."""
     try:
         conn = get_db_connection()
         try:
@@ -1389,7 +1405,8 @@ def update_automation_state(status, total=None, processed=None, success=None, fa
             params = [status]
             for column, value in (("total_items", total), ("processed_items", processed),
                                   ("success_count", success), ("failed_count", failed),
-                                  ("current_product_name", current_product), ("notice", notice)):
+                                  ("current_product_name", current_product), ("notice", notice),
+                                  ("stop_requested", stop_requested)):
                 if value is not None:
                     updates.append(f"{column} = %s")
                     params.append(value[:255] if isinstance(value, str) else value)
@@ -1445,6 +1462,168 @@ def pause_automation():
 def resume_automation():
     """إلغاء علم الإيقاف المؤقت."""
     return _set_pause(0)
+
+
+# ---------------------------------------------------------------------------
+# التحكم في التشغيل (تشغيل جديد، إيقاف، إصلاح تشغيل عالق) — cli_bridge run_control والتشغيل الليلي.
+# لا يُحذف أي صف أو مرشح أو قرار مراجعة هنا أبداً: الإيقاف يعيد الصفوف قيد المعالجة إلى الانتظار فقط.
+# ---------------------------------------------------------------------------
+
+def new_run_id():
+    return uuid.uuid4().hex[:16]
+
+
+def prepare_run():
+    """
+    قبل كل تشغيل جديد (زر التشغيل في اللوحة، والتشغيل الليلي): الحالة 'starting' بلا أرقام التشغيل السابق
+    (run_id فارغ حتى ينتهي الإدراج)، ويُلغى طلب الإيقاف والإيقاف المؤقت القديمان والتنبيه السابق.
+    يُستدعى قبل بدء الإدراج، فطلب إيقاف يصل أثناء قراءة الشيت لا يُمسح. تعيد True، أو False عند خطأ قاعدة البيانات.
+    """
+    try:
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE automation_state SET status = 'starting', stop_requested = 0, pause_requested = 0, "
+                "run_id = NULL, notice = NULL, current_product_name = '', total_items = 0, processed_items = 0, "
+                "success_count = 0, failed_count = 0, updated_at = CURRENT_TIMESTAMP WHERE `key` = 'active_session'"
+            )
+            conn.commit()
+        finally:
+            _close(conn)
+        return True
+    except Exception as e:
+        logger.warning("[MariaDB State] فشل تجهيز التشغيل الجديد: %s", e)
+        return False
+
+
+def begin_run(run_id):
+    """
+    نهاية الإدراج: كل صف مفتوح (pending أو processing) سيعالجه العامل في هذا التشغيل فيحمل run_id، وهذا يشمل
+    الصفوف التي أعاد الإدراج ضبطها وأي صف بقي في الانتظار من تشغيل سابق. الصفوف الجاهزة للمراجعة أو المعتمدة
+    التي أبقاها الإدراج كما هي ليست عمل هذا التشغيل، فلا تُحسب في تقدمه (وإلا بدأ التقدم من نسبة عالية).
+    يسجل run_id وعدد صفوفه في automation_state. تعيد عدد الصفوف، أو None عند خطأ قاعدة البيانات (يُسجل).
+    """
+    try:
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("UPDATE automation_queue SET run_id = %s WHERE status IN ('pending','processing')",
+                           (run_id,))
+            cursor.execute("SELECT COUNT(*) AS cnt FROM automation_queue WHERE run_id = %s", (run_id,))
+            total = int(cursor.fetchone()["cnt"])
+            cursor.execute(
+                "UPDATE automation_state SET run_id = %s, total_items = %s, processed_items = 0, success_count = 0, "
+                "failed_count = 0, updated_at = CURRENT_TIMESTAMP WHERE `key` = 'active_session'",
+                (run_id, total),
+            )
+            conn.commit()
+        finally:
+            _close(conn)
+        return total
+    except Exception as e:
+        logger.warning("[MariaDB State] فشل تسجيل التشغيل %s: %s", run_id, e)
+        return None
+
+
+def _status_counts(cursor, where="", params=()):
+    cursor.execute(f"SELECT status, COUNT(*) AS cnt FROM automation_queue {where} GROUP BY status", params)
+    stats = {"total": 0, "pending": 0, "processing": 0, "ready_for_review": 0, "completed": 0, "failed": 0}
+    for r in cursor.fetchall():
+        status = r["status"] or "unknown"
+        stats[status] = stats.get(status, 0) + int(r["cnt"])
+        stats["total"] += int(r["cnt"])
+    return stats
+
+
+def get_run_statistics(run_id):
+    """
+    عدادات صفوف تشغيل واحد (run_id) حسب الحالة، مع processed = جاهز للمراجعة + مكتمل + فاشل.
+    أخطاء قاعدة البيانات تُرفع.
+    """
+    conn = get_db_connection()
+    try:
+        stats = _status_counts(conn.cursor(), "WHERE run_id = %s", (run_id,))
+    finally:
+        _close(conn)
+    stats["processed"] = stats["ready_for_review"] + stats["completed"] + stats["failed"]
+    stats["run_id"] = run_id
+    return stats
+
+
+def _release_processing(cursor):
+    """الصفوف العالقة في 'processing' (عامل أُنهي أو توقف) تعود إلى 'pending' بلا حجز؛ تعيد عددها."""
+    cursor.execute(
+        "UPDATE automation_queue SET status = 'pending', worker_id = NULL, lease_until = NULL, "
+        "updated_at = CURRENT_TIMESTAMP WHERE status = 'processing'"
+    )
+    return cursor.rowcount
+
+
+def _settled_status(cursor):
+    """الحالة بعد انتهاء التشغيل: بانتظار المراجعة إن بقي صف جاهز للمراجعة، وإلا خامل."""
+    cursor.execute("SELECT COUNT(*) AS cnt FROM automation_queue WHERE status = 'ready_for_review'")
+    return "curation_pending" if int(cursor.fetchone()["cnt"]) > 0 else "idle"
+
+
+def _run_control_result(cursor, released, stop_requested):
+    cursor.execute("SELECT status FROM automation_state WHERE `key` = 'active_session'")
+    row = cursor.fetchone() or {}
+    return {"released": released, "stop_requested": bool(stop_requested), "status": row.get("status"),
+            "queue": _status_counts(cursor)}
+
+
+def stop_run(worker_active=False):
+    """
+    زر «إيقاف التشغيل». لا يُحذف أي صف: الجاهز للمراجعة والمعتمد والفاشل والمنتظر يبقى كما هو مع مرشحاته.
+    - worker_active=True (الإدراج ما زال يقرأ الشيت ولا عامل بعد، أو العامل ما زال حياً): يُسجل طلب إيقاف
+      يلتزم به العامل بين المنتجات، أو عند بدئه قبل معالجة أي منتج؛ الحالة لا تتغير.
+    - worker_active=False (أُنهي العامل أو لم يكن يعمل): الصفوف في 'processing' تعود إلى 'pending'، ويُلغى طلبا
+      الإيقاف والإيقاف المؤقت، والحالة: بانتظار المراجعة إن بقي صف جاهز، وإلا خامل. التنبيه يبقى كما هو.
+    تعيد {released, stop_requested, status, queue}. أخطاء قاعدة البيانات تُرفع.
+    """
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        released = 0
+        if worker_active:
+            cursor.execute("UPDATE automation_state SET stop_requested = 1 WHERE `key` = 'active_session'")
+        else:
+            released = _release_processing(cursor)
+            cursor.execute(
+                "UPDATE automation_state SET status = %s, stop_requested = 0, pause_requested = 0, "
+                "current_product_name = '', updated_at = CURRENT_TIMESTAMP WHERE `key` = 'active_session'",
+                (_settled_status(cursor),),
+            )
+        conn.commit()
+        return _run_control_result(cursor, released, worker_active)
+    finally:
+        _close(conn)
+
+
+def reset_run(worker_active=False):
+    """
+    زر «إصلاح تشغيل عالق»: يمسح حالة التشغيل العالقة فقط، ولا يحذف أي صف ولا يلمس curation_candidates
+    ولا review_decisions ولا rejected_images ولا resolved_products. الصفوف في 'processing' تعود إلى 'pending'،
+    ويُلغى الإيقاف المؤقت، ويُمسح التقدم (run_id والعدادات) والمنتج الحالي والتنبيه، والحالة: بانتظار المراجعة
+    إن بقي صف جاهز، وإلا خامل. worker_active=True: قد يكون الإدراج ما زال يقرأ الشيت أو بقي عامل حياً، فيُسجل طلب
+    إيقاف كي لا يبدأ المعالجة أو يتوقف بعد المنتجات الجارية؛ وإلا يُلغى طلب الإيقاف. تعيد
+    {released, stop_requested, status, queue}. أخطاء قاعدة البيانات تُرفع.
+    """
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        released = _release_processing(cursor)
+        cursor.execute(
+            "UPDATE automation_state SET status = %s, stop_requested = %s, pause_requested = 0, run_id = NULL, "
+            "notice = NULL, current_product_name = '', total_items = 0, processed_items = 0, success_count = 0, "
+            "failed_count = 0, updated_at = CURRENT_TIMESTAMP WHERE `key` = 'active_session'",
+            (_settled_status(cursor), 1 if worker_active else 0),
+        )
+        conn.commit()
+        return _run_control_result(cursor, released, worker_active)
+    finally:
+        _close(conn)
 
 
 # تهيئة قاعدة البيانات تلقائياً عند استيراد الموديول للمرة الأولى

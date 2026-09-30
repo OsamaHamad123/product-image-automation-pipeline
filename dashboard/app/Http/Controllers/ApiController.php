@@ -170,43 +170,28 @@ class ApiController extends Controller
             if (!file_exists($tempDir)) {
                 mkdir($tempDir, 0777, true);
             }
-            
+
             // Check if already running or starting
-            if (file_exists($lockFile)) {
-                $lockContent = trim(file_get_contents($lockFile));
-                $isRunning = false;
-                if ($lockContent === 'STARTING') {
-                    $fileAge = time() - filemtime($lockFile);
-                    if ($fileAge < 300) {
-                        $isRunning = true;
-                    }
-                } elseif (!empty($lockContent) && is_numeric($lockContent)) {
-                    $pid = $lockContent;
-                    if (strncasecmp(PHP_OS, 'WIN', 3) === 0) {
-                        $output = shell_exec("tasklist /FI \"PID eq {$pid}\" 2>&1");
-                        if (strpos($output, $pid) !== false && strpos(strtolower($output), 'python') !== false) {
-                            $isRunning = true;
-                        }
-                    } else {
-                        if (function_exists('posix_kill')) {
-                            $isRunning = @posix_kill($pid, 0);
-                        } else {
-                            $output = shell_exec("ps -p {$pid} 2>&1");
-                            if (strpos($output, $pid) !== false) {
-                                $isRunning = true;
-                            }
-                        }
-                    }
-                }
-                
-                if ($isRunning) {
-                    return response()->json(['status' => 'failed', 'error' => 'عملية الأتمتة قيد التشغيل بالفعل حالياً.'], 400);
-                }
+            if ($this->pipelineProcess()['state'] !== 'none') {
+                return response()->json(['status' => 'failed', 'error' => 'عملية الأتمتة قيد التشغيل بالفعل حالياً.'], 400);
             }
-            
+
             $configData = $request->all();
             file_put_contents($tempDir . DIRECTORY_SEPARATOR . 'run_config.json', json_encode($configData));
-            
+
+            // تشغيل جديد: حالة 'starting' بلا أرقام التشغيل السابق، ويُلغى طلب إيقاف أو إيقاف مؤقت قديم.
+            // يتم قبل كتابة قفل 'STARTING': زر الإيقاف لا يظهر إلا مع القفل، فطلب إيقاف يصل بعده (أثناء قراءة
+            // الشيت) لا يمسحه هذا التجهيز ويلتزم به العامل. لو كُتب القفل أولاً لمسح التجهيز (1-3 ثوانٍ) طلب إيقاف
+            // ضُغط خلالها، وقالت اللوحة «سُجل طلب الإيقاف» ثم استمر التشغيل.
+            $prepared = $this->runPython('run_control', ['op' => 'start']);
+            if (($prepared['status'] ?? '') !== 'success') {
+                return response()->json(['status' => 'failed', 'error' => $prepared['error'] ?? 'تعذر تجهيز التشغيل؛ لم يبدأ أي تشغيل.'], 500);
+            }
+            // تشغيل بدأ من مكان آخر (التشغيل الليلي أو تبويب آخر) أثناء التجهيز
+            if ($this->pipelineProcess()['state'] !== 'none') {
+                return response()->json(['status' => 'failed', 'error' => 'عملية الأتمتة قيد التشغيل بالفعل حالياً.'], 400);
+            }
+
             file_put_contents($lockFile, 'STARTING');
 
             if (file_exists($logPath)) {
@@ -259,78 +244,121 @@ class ApiController extends Controller
     }
 
     /**
-     * مراقبة حالة الأتمتة في الخلفية باستخدام ملف الـ Lock للعملية (PID Lock)
+     * حالة عامل الخلفية من ملف القفل temp/pipeline.lock:
+     * starting = كتبت لوحة التحكم 'STARTING' والإدراج يقرأ الشيت (حتى 5 دقائق)، running = PID حي،
+     * none = لا قفل، أو قفل قديم، أو عملية انتهت.
+     */
+    private function pipelineProcess(): array
+    {
+        $lockFile = $this->automationPath('temp/pipeline.lock');
+        $process = ['state' => 'none', 'pid' => null, 'lock' => $lockFile, 'lock_exists' => file_exists($lockFile)];
+        if (!$process['lock_exists']) {
+            return $process;
+        }
+        $lockContent = trim((string) @file_get_contents($lockFile));
+        if ($lockContent === 'STARTING') {
+            if (time() - filemtime($lockFile) < 300) {
+                $process['state'] = 'starting';
+            }
+        } elseif ($lockContent !== '' && ctype_digit($lockContent)) {
+            $process['pid'] = $lockContent;
+            if ($this->processAlive($lockContent)) {
+                $process['state'] = 'running';
+            }
+        }
+        return $process;
+    }
+
+    private function processAlive(string $pid): bool
+    {
+        if (strncasecmp(PHP_OS, 'WIN', 3) === 0) {
+            $output = (string) shell_exec("tasklist /FI \"PID eq {$pid}\" 2>&1");
+            return strpos($output, $pid) !== false && strpos(strtolower($output), 'python') !== false;
+        }
+        if (function_exists('posix_kill')) {
+            if (!@posix_kill((int) $pid, 0)) {
+                return false;
+            }
+            // عملية أُنهيت ولم يحصدها أبوها بعد (zombie) ليست حية؛ وإلا عُدّ العامل المُنهى «تعذر إنهاؤه»
+            // فبقيت صفوفه في «قيد المعالجة» وبقي طلب إيقاف معلق وقفل بلا عامل
+            $stat = @file_get_contents("/proc/{$pid}/stat");
+            return !(is_string($stat) && preg_match('/\)\s+Z\s/', $stat));
+        }
+        $output = (string) shell_exec("ps -p {$pid} 2>&1");
+        return strpos($output, $pid) !== false;
+    }
+
+    /**
+     * يُنهي عامل الخلفية الحي (كما كان زر الإيقاف يفعل) ويعيد وصفه لإجراء run_control:
+     * starting (الإدراج يقرأ الشيت ولا PID بعد) | running (بقي حياً بعد الإنهاء) | killed | none.
+     */
+    private function terminateWorker(array $process): string
+    {
+        if ($process['state'] === 'starting') {
+            return 'starting';
+        }
+        if ($process['state'] !== 'running') {
+            return 'none';
+        }
+        if (strncasecmp(PHP_OS, 'WIN', 3) === 0) {
+            shell_exec("taskkill /F /PID {$process['pid']} 2>&1");
+        } else {
+            shell_exec("kill -9 {$process['pid']} 2>&1");
+        }
+        // الإنهاء قد يأخذ لحظة (taskkill، أو أب يحصد العملية متأخراً): حتى 1.5 ثانية قبل الحكم بأنه بقي حياً
+        for ($i = 0; $i < 5; $i++) {
+            usleep(300000);
+            if (!$this->processAlive($process['pid'])) {
+                return 'killed';
+            }
+        }
+        return 'running';
+    }
+
+    private function removeRunFiles(array $process): void
+    {
+        foreach ([$process['lock'], $this->automationPath('temp/batch_progress.json')] as $path) {
+            if (file_exists($path)) {
+                @unlink($path);
+            }
+        }
+    }
+
+    /**
+     * مراقبة حالة الأتمتة في الخلفية باستخدام ملف الـ Lock للعملية (PID Lock).
+     * phase / phase_text / alert تحسبها QueueStats لكل الصفحات؛ run هو تقدم التشغيل الحالي فقط
+     * (صفوف run_id)، و queue عدادات الطابور كله.
      */
     public function batchStatus()
     {
-        $status = 'idle';
-        $total = 0;
-        $processed = 0;
-        $success = 0;
-        $failed = 0;
-        $currentProduct = "";
-        
-        $pauseRequested = 0;
-        $notice = '';
+        $state = null;
         try {
             $stateRow = \DB::select("SELECT * FROM automation_state WHERE `key` = 'active_session' LIMIT 1");
-            if (!empty($stateRow)) {
-                $status = $stateRow[0]->status;
-                $total = $stateRow[0]->total_items;
-                $processed = $stateRow[0]->processed_items;
-                $success = $stateRow[0]->success_count;
-                $failed = $stateRow[0]->failed_count;
-                $currentProduct = $stateRow[0]->current_product_name;
-                $pauseRequested = $stateRow[0]->pause_requested;
-                $notice = (string) ($stateRow[0]->notice ?? '');
-            }
+            $state = $stateRow[0] ?? null;
         } catch (\Exception $e) {
             // Table not loaded yet
         }
-        
-        $basePath = base_path('..');
-        $lockFile = $basePath . DIRECTORY_SEPARATOR . 'temp' . DIRECTORY_SEPARATOR . 'pipeline.lock';
-        $isRunning = false;
-        if (file_exists($lockFile)) {
-            $lockContent = trim(file_get_contents($lockFile));
-            if ($lockContent === 'STARTING') {
-                $fileAge = time() - filemtime($lockFile);
-                if ($fileAge < 300) { // Keep as running during starting phase (up to 5 mins)
-                    $isRunning = true;
-                }
-            } elseif (!empty($lockContent) && is_numeric($lockContent)) {
-                $pid = $lockContent;
-                if (strncasecmp(PHP_OS, 'WIN', 3) === 0) {
-                    $output = shell_exec("tasklist /FI \"PID eq {$pid}\" 2>&1");
-                    if (strpos($output, $pid) !== false && strpos(strtolower($output), 'python') !== false) {
-                        $isRunning = true;
-                    }
-                } else {
-                    if (function_exists('posix_kill')) {
-                        $isRunning = @posix_kill($pid, 0);
-                    } else {
-                        $output = shell_exec("ps -p {$pid} 2>&1");
-                        if (strpos($output, $pid) !== false) {
-                            $isRunning = true;
-                        }
-                    }
-                }
-            }
-        }
-        
-        // Self-healing heartbeat: If status says pre_caching but task is not running,
-        // reset database to idle if it has been inactive for more than 45 seconds or if the lock file is missing.
-        if (!$isRunning && ($status === 'pre_caching' || $status === 'running')) {
-            $lastUpdated = isset($stateRow[0]->updated_at) ? strtotime($stateRow[0]->updated_at . ' UTC') : time();
+        $status = (string) ($state->status ?? 'idle');
+        $currentProduct = (string) ($state->current_product_name ?? '');
+        $pauseRequested = (int) ($state->pause_requested ?? 0);
+        $stopRequested = (int) ($state->stop_requested ?? 0);
+        $notice = (string) ($state->notice ?? '');
+
+        $process = $this->pipelineProcess();
+        $isRunning = $process['state'] !== 'none';
+        $counters = QueueStats::counters();
+        $readyForReview = (int) ($counters['by_status']['ready_for_review'] ?? 0);
+
+        // Self-healing heartbeat: If status says a run is active but no worker is running,
+        // settle it (review or idle) if it has been inactive for more than 45 seconds or if the lock file is missing.
+        if (!$isRunning && in_array($status, ['pre_caching', 'running', 'starting'], true)) {
+            $lastUpdated = isset($state->updated_at) ? strtotime($state->updated_at . ' UTC') : time();
             $diff = time() - $lastUpdated;
-            if ($diff > 45 || !file_exists($lockFile)) {
+            if ($diff > 45 || !$process['lock_exists']) {
+                $settled = $readyForReview > 0 ? 'curation_pending' : 'idle';
                 try {
-                    \DB::update("UPDATE automation_state SET status = 'idle', total_items = 0, processed_items = 0, success_count = 0, failed_count = 0, current_product_name = '', pause_requested = 0 WHERE `key` = 'active_session'");
-                    $status = 'idle';
-                    $total = 0;
-                    $processed = 0;
-                    $success = 0;
-                    $failed = 0;
+                    \DB::update("UPDATE automation_state SET status = ?, total_items = 0, processed_items = 0, success_count = 0, failed_count = 0, current_product_name = '', pause_requested = 0 WHERE `key` = 'active_session'", [$settled]);
+                    $status = $settled;
                     $currentProduct = "";
                     $pauseRequested = 0;
                 } catch (\Exception $e) {
@@ -338,27 +366,43 @@ class ApiController extends Controller
                 }
             }
         }
-        
-        $counters = QueueStats::counters();
+
+        // تقدم التشغيل الحالي فقط؛ بدون run_id (عامل شُغل يدوياً) أرقام العامل كما كتبها
+        $run = QueueStats::run($state->run_id ?? null);
+        $success = $run ? $run['ready_for_review'] + $run['completed'] : (int) ($state->success_count ?? 0);
+        if ($run === null) {
+            $run = QueueStats::runTotals(null, []);
+            $run['total'] = (int) ($state->total_items ?? 0);
+            $run['processed'] = (int) ($state->processed_items ?? 0);
+            $run['failed'] = (int) ($state->failed_count ?? 0);
+        }
+        $phase = QueueStats::runPhase($process['state'], $status, $pauseRequested, $stopRequested, $readyForReview);
 
         $response = [
             'is_running' => $isRunning,
+            // starting | running | paused | stopping | error | review | idle
+            'phase' => $phase,
+            'phase_text' => QueueStats::phaseText($phase, $stopRequested, $readyForReview),
+            // الشريط الأحمر: خطأ التشغيل أو التنبيه بالعربية (فارغ إن لم يوجد)
+            'alert' => QueueStats::alertText($status, $notice, $isRunning),
             'status' => $status,
-            'total' => $total,
-            'current' => $processed,
+            'stop_requested' => $stopRequested,
+            'run' => $run,
+            'total' => $run['total'],
+            'current' => $run['processed'],
             'success' => $success,
-            'failed' => $failed,
+            'failed' => $run['failed'],
             'current_product' => $currentProduct,
             'pause_requested' => $pauseRequested,
             // عدادات حقيقية من جدول automation_queue: حسب الحالة وحسب رمز الفشل
             'queue' => $counters['by_status'],
-            'ready_for_review' => $counters['by_status']['ready_for_review'] ?? 0,
+            'ready_for_review' => $readyForReview,
             'approved' => $counters['by_status']['completed'] ?? 0,
             'failed_by_code' => $counters['by_failure_code'],
             // حالة المحقق/المزودين كما يكتبها العامل (مثلاً نموذج Gemini غير متاح)
             'notice' => $notice,
         ];
-        
+
         return response()->json($response)->header('Cache-Control', 'no-store');
     }
 
@@ -389,20 +433,23 @@ class ApiController extends Controller
     }
 
     /**
-     * إعادة تعيين حالة الأتمتة قسرياً للتخلص من الحالات المعلقة
+     * «إصلاح تشغيل عالق»: يمسح حالة التشغيل العالقة فقط ولا يحذف أي عمل مراجعة.
+     * يُنهي عاملاً ما زال حياً (وإلا يبقى يعمل واللوحة تظن أنه متوقف)، ويحذف ملف القفل وملف التقدم،
+     * ثم run_control reset: الصفوف في 'processing' تعود إلى 'pending'، ويُمسح التقدم والتنبيه والإيقاف المؤقت.
+     * لا يحذف أي صف من automation_queue ولا curation_candidates ولا review_decisions ولا rejected_images
+     * ولا resolved_products. لا يوجد زر «تفريغ الطابور»: الإدراج التالي يحدّث الصفوف من الشيت (Upsert).
      */
     public function resetBatch()
     {
         try {
             $basePath = base_path('..');
-            $lockFile = $basePath . DIRECTORY_SEPARATOR . 'temp' . DIRECTORY_SEPARATOR . 'pipeline.lock';
-            if (file_exists($lockFile)) {
-                @unlink($lockFile);
-            }
-            
+            $process = $this->pipelineProcess();
+            $worker = $this->terminateWorker($process);
+            $this->removeRunFiles($process);
+
             // Clear Laravel cache
             \Cache::forget('products_json_v1');
-            
+
             // Clear python disk cache files
             $pCache = $basePath . DIRECTORY_SEPARATOR . 'products_cache.json';
             $bCache = $basePath . DIRECTORY_SEPARATOR . 'brand_mappings_cache.json';
@@ -412,13 +459,12 @@ class ApiController extends Controller
             if (file_exists($bCache)) {
                 @unlink($bCache);
             }
-            
-            // Clear database tables and reset automation state
-            \DB::delete("DELETE FROM automation_queue");
-            \DB::delete("DELETE FROM curation_candidates");
-            \DB::update("UPDATE automation_state SET status = 'idle', total_items = 0, processed_items = 0, success_count = 0, failed_count = 0, current_product_name = '', pause_requested = 0 WHERE `key` = 'active_session'");
-            
-            return response()->json(['status' => 'success', 'message' => 'Automation state reset successfully.']);
+
+            $result = $this->runPython('run_control', ['op' => 'reset', 'worker' => $worker]);
+            if (($result['status'] ?? '') !== 'success') {
+                return response()->json(['status' => 'failed', 'error' => $result['error'] ?? 'تعذر إصلاح حالة التشغيل.'], 500);
+            }
+            return response()->json($result + ['worker' => $worker]);
         } catch (\Exception $e) {
             return response()->json(['error' => $e->getMessage()], 500);
         }
@@ -490,35 +536,24 @@ class ApiController extends Controller
     }
 
     /**
-     * إيقاف عملية الأتمتة الكلية بالخلفية فورياً
+     * «إيقاف التشغيل» بأمان، ولا يُحذف أي صف:
+     * - الإدراج ما زال يقرأ الشيت (القفل 'STARTING'، لا PID بعد): يُسجل طلب إيقاف يلتزم به العامل فور بدئه.
+     * - عامل حي: يُنهى كما كان، وتعود صفوفه قيد المعالجة إلى الانتظار (إن بقي حياً يلتزم بطلب الإيقاف بين المنتجات).
+     * - لا تشغيل: قفل قديم يُحذف والصفوف العالقة في 'processing' تعود إلى الانتظار.
+     * كل صف آخر (جاهز للمراجعة، معتمد، فاشل، في الانتظار) يبقى كما هو. الرسالة العربية من run_control.
      */
     public function stopBatch()
     {
-        $basePath = base_path('..');
-        $lockFile = $basePath . DIRECTORY_SEPARATOR . 'temp' . DIRECTORY_SEPARATOR . 'pipeline.lock';
-        $progressFile = $basePath . DIRECTORY_SEPARATOR . 'temp' . DIRECTORY_SEPARATOR . 'batch_progress.json';
-
-        try {
-            \DB::statement("DELETE FROM automation_queue");
-            \DB::update("UPDATE automation_state SET status = 'idle', total_items = 0, processed_items = 0, success_count = 0, failed_count = 0, current_product_name = '', pause_requested = 0 WHERE `key` = 'active_session'");
-        } catch (\Exception $e) {}
-
-        if (file_exists($lockFile)) {
-            $pid = trim(file_get_contents($lockFile));
-            if (!empty($pid) && is_numeric($pid)) {
-                if (strncasecmp(PHP_OS, 'WIN', 3) === 0) {
-                    shell_exec("taskkill /F /PID {$pid} 2>&1");
-                } else {
-                    shell_exec("kill -9 {$pid} 2>&1");
-                }
-                @unlink($lockFile);
-                if (file_exists($progressFile)) {
-                    @unlink($progressFile);
-                }
-                return response()->json(['status' => 'success', 'message' => 'Batch automation process terminated.']);
-            }
+        $process = $this->pipelineProcess();
+        $worker = $this->terminateWorker($process);
+        if (in_array($worker, ['killed', 'none'], true)) {
+            $this->removeRunFiles($process);
         }
-        return response()->json(['status' => 'failed', 'error' => 'No active batch process found.']);
+        $result = $this->runPython('run_control', ['op' => 'stop', 'worker' => $worker]);
+        if (($result['status'] ?? '') !== 'success') {
+            return response()->json(['status' => 'failed', 'error' => $result['error'] ?? 'تعذر إيقاف التشغيل.'], 500);
+        }
+        return response()->json($result + ['worker' => $worker]);
     }
 
     /**
