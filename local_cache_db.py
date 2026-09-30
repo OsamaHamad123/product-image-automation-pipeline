@@ -9,9 +9,11 @@
 
 import json
 import logging
+import math
 import os
 import socket
 import uuid
+from collections import Counter
 
 import pymysql
 
@@ -246,6 +248,29 @@ def init_db():
                 reason_code VARCHAR(32) NOT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 INDEX idx_rejected_sku (sku_key)
+            ) ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
+        """)
+
+        # 9. قرارات المراجعين: صف لكل اعتماد أو رفض أو رفع يدوي مع ما عرضه المحرك (دليل فتح النشر الآلي)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS review_decisions (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                action VARCHAR(16) NOT NULL,
+                sku_key VARCHAR(64) NULL,
+                `row_number` INT NULL,
+                brand VARCHAR(255) NULL,
+                product_name VARCHAR(255) NULL,
+                image_url TEXT NULL,
+                page_domain VARCHAR(255) NULL,
+                identity_tier VARCHAR(8) NULL,
+                engine_decision VARCHAR(32) NULL,
+                was_preselected TINYINT(1) NULL,
+                vlm_decision VARCHAR(16) NULL,
+                reason_code VARCHAR(32) NULL,
+                INDEX idx_review_sku (sku_key),
+                INDEX idx_review_brand (brand),
+                INDEX idx_review_created (created_at)
             ) ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
         """)
 
@@ -684,6 +709,245 @@ def get_active_learning_clutter_flag(brand):
     except Exception as e:
         logger.warning("[Active Learning] فشل حساب تداخل الخلفية للبراند: %s", e)
         return False
+
+
+# ---------------------------------------------------------------------------
+# قرارات المراجعين (review_decisions): دليل فتح النشر الآلي لكل براند
+# ---------------------------------------------------------------------------
+
+REVIEW_ACTIONS = ("approved", "rejected", "manual_upload")
+# قرارات البحث التي يختار فيها المحرك صورة مسبقاً (نفس PICK_DECISIONS في catalog_match.facade)
+PICK_DECISIONS = ("AUTO_PUBLISH", "REVIEW_PRESELECTED")
+# يجهز براند للنشر الآلي عندما يُراجع 30 اختياراً مسبقاً على الأقل ويبلغ الحد الأدنى لفاصل ويلسون (95%)
+# لنسبة قبولها 98%. عملياً: مع قبول كل الاختيارات يلزم 189 مراجعة لبلوغ 98%.
+AUTO_PUBLISH_MIN_REVIEWED = 30
+AUTO_PUBLISH_MIN_LOWER_BOUND = 0.98
+WILSON_Z = 1.96
+TOP_REJECT_REASONS = 3
+_REVIEWS_NEEDED_CAP = 100000
+
+
+def _clip(value, limit):
+    text = str(value).strip() if value is not None else ""
+    return text[:limit] or None
+
+
+def add_review_decision(action, sku_key=None, row_number=None, brand=None, product_name=None, image_url=None,
+                        page_domain=None, identity_tier=None, engine_decision=None, was_preselected=None,
+                        vlm_decision=None, reason_code=None):
+    """
+    تسجيل قرار مراجع واحد (approved | rejected | manual_upload). was_preselected: هل الصورة هي التي اختارها
+    المحرك مسبقاً (None عند عدم المعرفة). أخطاء قاعدة البيانات تُرفع؛ cli_bridge يلتقطها كي لا يتعطل الاعتماد.
+    """
+    if action not in REVIEW_ACTIONS:
+        raise ValueError(f"action غير صالح: {action!r}")
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO review_decisions (action, sku_key, `row_number`, brand, product_name, image_url, page_domain,
+                                          identity_tier, engine_decision, was_preselected, vlm_decision, reason_code)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """, (
+            action, _clip(sku_key, 64), _as_int(row_number), _clip(brand, 255), _clip(product_name, 255),
+            image_url or None, _clip(page_domain, 255), _clip(identity_tier, 8), _clip(engine_decision, 32),
+            None if was_preselected is None else int(bool(was_preselected)), _clip(vlm_decision, 16),
+            _clip(reason_code, 32),
+        ))
+        conn.commit()
+    finally:
+        _close(conn)
+    return True
+
+
+def get_review_decisions():
+    """كل قرارات المراجعين بالترتيب الزمني (مدخل review_stats). أخطاء قاعدة البيانات تُرفع."""
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, created_at, action, sku_key, `row_number`, brand, product_name, image_url, page_domain, "
+            "identity_tier, engine_decision, was_preselected, vlm_decision, reason_code "
+            "FROM review_decisions ORDER BY created_at, id"
+        )
+        rows = cursor.fetchall()
+    finally:
+        _close(conn)
+    return [dict(r) for r in rows]
+
+
+def wilson_lower_bound(successes, n, z=WILSON_Z):
+    """الحد الأدنى لفاصل ويلسون لنسبة ثنائية (نفس صيغة tests/eval/metrics.py). None عندما n = 0."""
+    if n <= 0:
+        return None
+    p = successes / n
+    z2 = z * z
+    centre = p + z2 / (2 * n)
+    margin = z * math.sqrt(p * (1 - p) / n + z2 / (4 * n * n))
+    return (centre - margin) / (1 + z2 / n)
+
+
+def brand_status(prechecked, accepted):
+    """ready | low_precision (الدقة نفسها أقل من العتبة) | needs_reviews."""
+    lower = wilson_lower_bound(accepted, prechecked)
+    if prechecked >= AUTO_PUBLISH_MIN_REVIEWED and lower >= AUTO_PUBLISH_MIN_LOWER_BOUND:
+        return "ready"
+    if prechecked >= AUTO_PUBLISH_MIN_REVIEWED and accepted / prechecked < AUTO_PUBLISH_MIN_LOWER_BOUND:
+        return "low_precision"
+    return "needs_reviews"
+
+
+def reviews_needed(prechecked, accepted):
+    """
+    أقل عدد اختيارات مسبقة مراجعة يجهز عنده البراند إذا قُبلت كل الاختيارات القادمة
+    (None إذا تجاوز _REVIEWS_NEEDED_CAP). الحد الأدنى يزداد مع كل قبول، فيكفي بحث ثنائي.
+    """
+    failures = prechecked - accepted
+
+    def ready_at(n):
+        return wilson_lower_bound(n - failures, n) >= AUTO_PUBLISH_MIN_LOWER_BOUND
+
+    low, high = max(prechecked, AUTO_PUBLISH_MIN_REVIEWED), _REVIEWS_NEEDED_CAP
+    if not ready_at(high):
+        return None
+    while low < high:
+        mid = (low + high) // 2
+        if ready_at(mid):
+            high = mid
+        else:
+            low = mid + 1
+    return low
+
+
+def _brand_key(brand):
+    try:
+        from catalog_match.text_norm import normalize
+        return normalize(brand)
+    except Exception:
+        return " ".join(str(brand or "").lower().split())
+
+
+def _listable_brand(brand):
+    """
+    هل يُكتب البراند مدخلاً واحداً في AUTO_PUBLISH_BRANDS؟ الإعداد مفصول بفواصل، و'*' يفتح كل البراندات،
+    و'category:' يفتح فئة كاملة (catalog_match.decide.auto_publish_allowed). براند بلا اسم أو بهذه الصيغ
+    لا يجهز ولا يُقترح أبداً: لصقه يفتح النشر الآلي لبراندات لم تُراجع.
+    """
+    text = str(brand or "").strip()
+    return bool(text) and "," not in text and text != "*" and not text.lower().startswith("category:")
+
+
+def _precheck_verdict(rows):
+    """
+    حكم المراجع على اختيار المحرك المسبق لـ SKU واحد (صفوفه بالترتيب الزمني):
+    False إذا رُفضت صورة مختارة مسبقاً، أو اعتُمدت صورة أخرى (أو رُفعت يدوياً) بينما عرض المحرك اختياراً مسبقاً؛
+    True إذا اعتُمدت الصورة المختارة مسبقاً؛ None إذا لم يحكم المراجع على اختيار مسبق.
+    رفض لاحق لرابط اعتُمد كاختيار مسبق يُعد رفضاً للاختيار المسبق حتى لو لم تُعرف حالته عند الرفض.
+    """
+    prechecked = {url_norm(r.get("image_url")) for r in rows if r.get("was_preselected") == 1 and r.get("image_url")}
+    verdict = None
+    for r in rows:
+        flag = r.get("was_preselected")
+        on_precheck = flag == 1 or (flag is None and bool(r.get("image_url"))
+                                    and url_norm(r.get("image_url")) in prechecked)
+        action = r.get("action")
+        if action == "rejected" and on_precheck:
+            return False
+        if action == "approved" and on_precheck:
+            verdict = True
+        elif action in ("approved", "manual_upload") and flag == 0 and r.get("engine_decision") in PICK_DECISIONS:
+            return False
+    return verdict
+
+
+def _ratio(num, den):
+    return None if den == 0 else num / den
+
+
+def _lower_bound(accepted, prechecked):
+    """wilson_lower_bound بلا ضجيج الفاصلة العائمة تحت الصفر (0 من 5 تعطي -3e-17)."""
+    lower = wilson_lower_bound(accepted, prechecked)
+    return None if lower is None else max(0.0, lower)
+
+
+def review_stats(rows):
+    """
+    إحصائيات قرارات المراجعين (دالة نقية على صفوف review_decisions):
+    - brands: لكل براند المنتجات المراجعة (SKU)، والاختيارات المسبقة المراجعة (prechecked)، والمقبول منها،
+      والدقة، والحد الأدنى لفاصل ويلسون 95%، والحالة (brand_status)، وعدد المراجعات اللازم، وأكثر أسباب الرفض.
+    - domains: الاعتمادات والرفض لكل نطاق صفحة.
+    - overall، والبراندات الجاهزة، وقيمة AUTO_PUBLISH_BRANDS المقترحة (لا تُكتب في أي إعداد).
+    الحكم على الاختيار المسبق يُحسب مرة واحدة لكل SKU (_precheck_verdict)؛ البراند يُجمع بـ normalize كما يطابقه
+    catalog_match.decide.auto_publish_allowed.
+    """
+    rows = sorted((dict(r) for r in rows or []), key=lambda r: (str(r.get("created_at") or ""), r.get("id") or 0))
+    by_sku = {}
+    for r in rows:
+        sku = (r.get("sku_key") or "").strip() or f"row:{r.get('row_number')}"
+        by_sku.setdefault(sku, []).append(r)
+
+    brands = {}
+    for sku_rows in by_sku.values():
+        brand = next((r["brand"].strip() for r in reversed(sku_rows) if (r.get("brand") or "").strip()), "")
+        entry = brands.setdefault(_brand_key(brand), {"brand": brand, "reviewed_skus": 0, "prechecked": 0,
+                                                      "accepted": 0, "reasons": Counter()})
+        entry["brand"] = entry["brand"] or brand
+        entry["reviewed_skus"] += 1
+        verdict = _precheck_verdict(sku_rows)
+        if verdict is not None:
+            entry["prechecked"] += 1
+            entry["accepted"] += int(verdict)
+        entry["reasons"].update(r["reason_code"] for r in sku_rows
+                                if r.get("action") == "rejected" and r.get("reason_code"))
+
+    brand_rows = []
+    for key, entry in brands.items():
+        prechecked, accepted = entry["prechecked"], entry["accepted"]
+        listable = bool(key) and _listable_brand(entry["brand"])
+        status = brand_status(prechecked, accepted) if listable else "needs_reviews"
+        brand_rows.append({
+            "brand": entry["brand"],
+            "reviewed_skus": entry["reviewed_skus"],
+            "prechecked": prechecked,
+            "accepted": accepted,
+            "precision": _ratio(accepted, prechecked),
+            "lower_bound": _lower_bound(accepted, prechecked),
+            "status": status,
+            "reviews_needed": reviews_needed(prechecked, accepted) if listable else None,
+            "top_reject_reasons": sorted(entry["reasons"].items(), key=lambda kv: (-kv[1], kv[0]))[:TOP_REJECT_REASONS],
+        })
+    brand_rows.sort(key=lambda b: (-b["prechecked"], -b["reviewed_skus"], _brand_key(b["brand"])))
+
+    domains = {}
+    for r in rows:
+        domain = (r.get("page_domain") or "").strip().lower()
+        if domain and r.get("action") in ("approved", "rejected"):
+            domains.setdefault(domain, {"domain": domain, "approved": 0, "rejected": 0})[r["action"]] += 1
+    domain_rows = sorted(domains.values(), key=lambda d: (-(d["approved"] + d["rejected"]), d["domain"]))
+
+    actions = Counter(r.get("action") for r in rows)
+    prechecked = sum(b["prechecked"] for b in brand_rows)
+    accepted = sum(b["accepted"] for b in brand_rows)
+    ready = sorted((b["brand"] for b in brand_rows if b["status"] == "ready"), key=_brand_key)
+    return {
+        "thresholds": {"min_reviewed": AUTO_PUBLISH_MIN_REVIEWED, "min_lower_bound": AUTO_PUBLISH_MIN_LOWER_BOUND,
+                       "perfect_record_reviews": reviews_needed(0, 0)},
+        "overall": {
+            "actions": len(rows),
+            "approved": actions["approved"],
+            "rejected": actions["rejected"],
+            "manual_upload": actions["manual_upload"],
+            "reviewed_skus": len(by_sku),
+            "prechecked": prechecked,
+            "accepted": accepted,
+            "precision": _ratio(accepted, prechecked),
+            "lower_bound": _lower_bound(accepted, prechecked),
+        },
+        "brands": brand_rows,
+        "domains": domain_rows,
+        "ready_brands": ready,
+        "suggested_auto_publish_brands": ", ".join(ready),
+    }
 
 
 # ---------------------------------------------------------------------------

@@ -359,6 +359,65 @@ def _candidate_sha(params, row_number, sku_key, image_url):
     return None
 
 
+def _page_domain(candidate, params):
+    """نطاق الصفحة التي جاءت منها الصورة: من أدلة المرشح أو مصدره المحفوظ، وإلا من page_url المرسل."""
+    for value in ((candidate.get("evidence") or {}).get("page_domain"), candidate.get("source_domain")):
+        host = str(value or "").strip().lower()
+        if host:
+            return host[4:] if host.startswith("www.") else host
+    from catalog_match.text_norm import url_host
+    return url_host(_text(params, 'page_url') or candidate.get("page_url") or "") or None
+
+
+def _is_cache_hit(candidate):
+    """
+    مرشح الكاش (main.collect_candidates): حل معتمد سابق يُعرض مجدداً بحالة preselected. ليس اختيار المحرك
+    ولا يُنشر تلقائياً أبداً، فلا يُحسب دليلاً على دقة الاختيار المسبق.
+    """
+    evidence = candidate.get("evidence") if isinstance(candidate.get("evidence"), dict) else {}
+    return evidence.get("source") == "cache" or "cache_hit" in (candidate.get("reasons") or [])
+
+
+def _record_review(action, params, row_number, sku_key, image_url=None, reason_code=None, approval=None):
+    """
+    يسجل قرار المراجع في review_decisions (دليل فتح النشر الآلي لكل براند). يُستدعى قبل حذف مرشحات المنتج:
+    ما عرضه المحرك يُقرأ منها. قرار البحث يُعرف فقط عندما تكون الصورة بين المرشحات المحفوظة (أو عند الرفع
+    اليدوي بدلها): REVIEW_PRESELECTED إن كان بينها اختيار مسبق، وإلا REVIEW_UNSELECTED. شاشة الكتالوج تبحث
+    مباشرة ولا تحفظ مرشحاتها، فيبقى القرار غير معروف (None)، وكذلك مرشح الكاش (_is_cache_hit). approval: الحل
+    المعتمد الذي يستهدفه الرفض؛
+    رفض صورة نُشرت تلقائياً هو رفض لاختيار المحرك (AUTO_PUBLISH).
+    أي خطأ هنا يُسجل في السجل ولا يغير نتيجة الإجراء.
+    """
+    try:
+        stored = local_cache_db.get_curation_candidates(row_number, sku_key=sku_key or None)
+        candidates = [c for c in stored if not _is_cache_hit(c)]      # ما اختاره المحرك فقط
+        acted = next((c for c in candidates if image_url and c.get("image_url") == image_url), None)
+        decision = was_preselected = None
+        if candidates and (acted is not None or action == "manual_upload"):
+            has_precheck = any(c.get("status") == "preselected" for c in candidates)
+            decision = "REVIEW_PRESELECTED" if has_precheck else "REVIEW_UNSELECTED"
+        if acted is not None:
+            was_preselected = acted.get("status") == "preselected"
+        elif action == "manual_upload":
+            was_preselected = False
+        if approval and approval.get("verification_status") == "auto_verified":
+            decision, was_preselected = "AUTO_PUBLISH", True
+        acted = acted or {}
+        first = stored[0] if stored else {}
+        vlm = acted.get("vlm") if isinstance(acted.get("vlm"), dict) else {}
+        local_cache_db.add_review_decision(
+            action, sku_key=sku_key, row_number=row_number,
+            brand=_text(params, 'brand') or first.get("brand"),
+            product_name=_text(params, 'product_name') or first.get("product_name"),
+            image_url=image_url, page_domain=_page_domain(acted, params),
+            identity_tier=acted.get("identity_tier") or (acted.get("evidence") or {}).get("tier"),
+            engine_decision=decision, was_preselected=was_preselected, vlm_decision=vlm.get("decision"),
+            reason_code=reason_code,
+        )
+    except Exception:
+        logger.exception("تعذر تسجيل قرار المراجع (%s) للصف %s", action, row_number)
+
+
 def action_select_image(params):
     image_url = _text(params, 'image_url')
     product_name = _text(params, 'product_name')
@@ -394,6 +453,7 @@ def action_select_image(params):
             verification_status="human_approved", approved_by="human", sku_key=sku_key,
         )
         local_cache_db.update_task_status_by_row(row_number, "completed", sku_key=sku_key)
+        _record_review("approved", params, row_number, sku_key, image_url)
         local_cache_db.delete_curation_candidates(row_number, sku_key=sku_key)
         response = {'status': 'success', 'image_link': res["link"], 'sheet_value': res["sheet_value"],
                     'isolated': res["isolated"], 'provider': res.get("provider"), 'sku_key': sku_key}
@@ -453,6 +513,7 @@ def action_upload_manual_image(params):
             verification_status="human_approved", approved_by="human_upload", sku_key=sku_key,
         )
         local_cache_db.update_task_status_by_row(row_number, "completed", sku_key=sku_key)
+        _record_review("manual_upload", params, row_number, sku_key)
         local_cache_db.delete_curation_candidates(row_number, sku_key=sku_key)
         response = {'status': 'success', 'image_link': res["link"], 'sheet_value': res["sheet_value"],
                     'isolated': res["isolated"], 'sku_key': sku_key}
@@ -557,6 +618,8 @@ def action_reject_image(params):
     approved = local_cache_db.get_cached_product(sku_key=sku_key)
     targets_approval = bool(approved) and image_url in (approved.get("original_url"), approved.get("cloudinary_url"))
     keep_approval = bool(approved) and approved.get("verification_status") == "human_approved" and not targets_approval
+    _record_review("rejected", params, row_number, sku_key, image_url, reason_code=reason_code,
+                   approval=approved if targets_approval else None)
     superseded = 0
     if not keep_approval:
         superseded = local_cache_db.supersede_resolution(sku_key, barcode=barcode or None)
@@ -603,6 +666,23 @@ def action_reject_image(params):
         response['rejection'] = rejection
         return response
     return dict({'status': 'success'}, **rejection)
+
+
+# ---------------------------------------------------------------------------
+# review_stats (قراءة فقط: دليل النشر الآلي من قرارات المراجعين)
+# ---------------------------------------------------------------------------
+
+def action_review_stats(params):
+    """
+    دقة الاختيار المسبق لكل براند ونطاق من review_decisions (local_cache_db.review_stats، نفس حساب
+    scripts/review_stats.py). لا يغير أي إعداد.
+    """
+    try:
+        rows = local_cache_db.get_review_decisions()
+    except Exception:
+        return _failure('failed', "Could not read the review decisions (details in temp/search.log).",
+                        "review_stats failed")
+    return dict({'status': 'success'}, **local_cache_db.review_stats(rows))
 
 
 # ---------------------------------------------------------------------------
@@ -670,6 +750,7 @@ ACTIONS = {
     'select_image': action_select_image,
     'upload_manual_image': action_upload_manual_image,
     'reject_image': action_reject_image,
+    'review_stats': action_review_stats,
     'sheet-preview': action_sheet_preview,
     'sheet-save': action_sheet_save,
 }

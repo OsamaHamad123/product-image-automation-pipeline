@@ -242,75 +242,33 @@ class ProductController extends Controller
     }
 
     /**
-     * صفحة التعلم النشط والتصحيح الذاتي للأخطاء البصرية
+     * صفحة التعلم من المراجعين: دقة الاختيار المسبق لكل براند ونطاق من قرارات المراجعين الحقيقية
+     * (إجراء cli_bridge review_stats، نفس حساب scripts/review_stats.py)، وسجل الرفض الأخير.
+     * لا توجد قواعد تصحيح ذاتي لكل براند: لا يقرأ أي كود بايثون هامشاً أو فحص خلفية من هذه الصفحة.
      */
     public function activeLearning()
     {
+        $errors = [];
+        $feedbackLogs = [];
         try {
-            $feedbackLogs = \DB::select("SELECT * FROM active_learning_feedback ORDER BY timestamp DESC");
-            
-            // تجميع الإحصائيات حسب البراند
-            $brandStats = [];
-            foreach ($feedbackLogs as $log) {
-                $brand = trim($log->brand);
-                if (empty($brand)) continue;
-                $brandKey = strtolower($brand);
-                
-                if (!isset($brandStats[$brandKey])) {
-                    $brandStats[$brandKey] = [
-                        'brand' => $brand,
-                        'total' => 0,
-                        'cropping' => 0,
-                        'clutter' => 0,
-                        'padding_ratio' => '0.85 (الافتراضي)',
-                        'clutter_check' => 'عادي',
-                        'cropping_alert' => false,
-                        'clutter_alert' => false
-                    ];
-                }
-                
-                $brandStats[$brandKey]['total']++;
-                
-                $reasons = [];
-                try {
-                    $reasons = json_decode($log->rejection_reasons, true) ?: [];
-                } catch (\Exception $ex) {}
-                
-                foreach ($reasons as $reason) {
-                    $reasonLower = strtolower($reason);
-                    if (strpos($reasonLower, 'cropping') !== false || strpos($reasonLower, 'margins') !== false) {
-                        $brandStats[$brandKey]['cropping']++;
-                    }
-                    if (strpos($reasonLower, 'clutter') !== false || strpos($reasonLower, 'background') !== false) {
-                        $brandStats[$brandKey]['clutter']++;
-                    }
-                }
-            }
-            
-            // تطبيق قواعد التصحيح الذاتي ومزامنتها مع منطق البايثون
-            foreach ($brandStats as $key => &$stats) {
-                if ($stats['cropping'] >= 4) {
-                    $stats['padding_ratio'] = '0.70 (هامش أمان واسع 30%)';
-                    $stats['cropping_alert'] = true;
-                } elseif ($stats['cropping'] >= 2) {
-                    $stats['padding_ratio'] = '0.75 (هامش أمان متناسق 25%)';
-                    $stats['cropping_alert'] = true;
-                }
-                
-                if ($stats['clutter'] >= 2) {
-                    $stats['clutter_check'] = 'صارم (فحص تداخل الخلفية مفعل)';
-                    $stats['clutter_alert'] = true;
-                }
-            }
-            
-            return view('dashboard.active_learning', compact('feedbackLogs', 'brandStats'));
+            $feedbackLogs = DB::select("SELECT * FROM active_learning_feedback ORDER BY timestamp DESC");
         } catch (\Exception $e) {
-            return view('dashboard.active_learning', [
-                'feedbackLogs' => [],
-                'brandStats' => [],
-                'error' => 'فشل تحميل بيانات التعلم النشط: ' . $e->getMessage()
-            ]);
+            $errors[] = 'فشل تحميل سجل الرفض: ' . $e->getMessage();
         }
+
+        $reviewStats = null;
+        $result = $this->runPython('review_stats');
+        if (($result['status'] ?? '') === 'success') {
+            $reviewStats = $result;
+        } else {
+            $errors[] = 'تعذر حساب إحصائيات المراجعة: ' . ($result['error'] ?? 'خطأ غير معروف');
+        }
+
+        $data = compact('feedbackLogs', 'reviewStats');
+        if (!empty($errors)) {
+            $data['error'] = implode(' ', $errors);
+        }
+        return view('dashboard.active_learning', $data);
     }
 
     /**
