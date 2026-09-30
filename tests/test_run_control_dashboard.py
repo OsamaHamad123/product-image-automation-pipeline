@@ -16,6 +16,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
+from blade_scripts import inline_scripts
 
 ROOT = Path(__file__).resolve().parents[1]
 DASH = ROOT / "dashboard"
@@ -291,7 +292,7 @@ function setDisplay(ids) { Object.entries(ids).forEach(([id, d]) => { document.g
 
 
 def _page_script(path: Path, index: int = -1) -> str:
-    blocks = re.findall(r"<script>(.*?)</script>", read(path), re.DOTALL)
+    blocks = inline_scripts(read(path))
     return re.sub(r"\{\{.*?\}\}", "''", blocks[index])
 
 

@@ -19,6 +19,7 @@ from pathlib import Path
 import pytest
 
 import verify_cloud_services as vcs
+from blade_scripts import inline_scripts
 
 ROOT = Path(__file__).resolve().parents[1]
 DASH = ROOT / "dashboard"
@@ -260,7 +261,7 @@ globalThis.alert = () => {};
 
 
 def _run_page(stored, after=""):
-    blocks = re.findall(r"<script>(.*?)</script>", read(DIAG_VIEW), re.DOTALL)
+    blocks = inline_scripts(read(DIAG_VIEW))
     script = re.sub(r"\{\{.*?\}\}", "''", blocks[-1])
     js = PAGE_HARNESS + script + f"""
 el('lastDiagnosticsData').dataset.result = {json.dumps(json.dumps(stored, ensure_ascii=False))};

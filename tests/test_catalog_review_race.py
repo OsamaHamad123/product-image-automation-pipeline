@@ -18,6 +18,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from blade_scripts import inline_scripts
 
 ROOT = Path(__file__).resolve().parents[1]
 VIEW = ROOT / "dashboard" / "resources" / "views" / "dashboard" / "catalog.blade.php"
@@ -31,7 +32,7 @@ APPROVED = "تم الاعتماد ✓"
 def _page():
     text = VIEW.read_text(encoding="utf-8")
     markup = text[text.index("@section('content')"):text.index("@section('scripts')")]
-    script = re.findall(r"<script>(.*?)</script>", text, re.DOTALL)[-1]
+    script = inline_scripts(text)[-1]
     script = re.sub(r"\{\{.*?\}\}", "''", script)
     static = [{"tag": tag, "id": ident} for tag, ident in re.findall(r'<([a-z][a-z0-9]*)\b[^>]*\bid="([^"]+)"', markup)]
     radios = re.findall(r'<input type="radio" name="([^"]+)" value="([^"]+)"', markup)

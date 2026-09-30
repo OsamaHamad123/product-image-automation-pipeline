@@ -11,6 +11,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from blade_scripts import inline_scripts
 
 ROOT = Path(__file__).resolve().parents[1]
 DASH = ROOT / "dashboard"
@@ -43,7 +44,7 @@ def test_retry_texts_do_not_promise_an_immediate_run():
 
 @pytest.mark.skipif(NODE is None, reason="node is not installed")
 def test_single_retry_shows_the_servers_queue_message():
-    script = re.findall(r"<script>(.*?)</script>", read(ERRORS_VIEW), re.DOTALL)[-1]
+    script = inline_scripts(read(ERRORS_VIEW))[-1]
     message = "أُضيفت المنتجات إلى طابور الأتمتة (العدد: 1)، ولا تبدأ معالجتها من هنا"
     js = """
 const alerts = [];

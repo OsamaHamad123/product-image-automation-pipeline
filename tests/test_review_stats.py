@@ -15,6 +15,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from blade_scripts import inline_scripts
 
 ROOT = Path(__file__).resolve().parents[1]
 DASH = ROOT / "dashboard"
@@ -425,7 +426,7 @@ def test_review_stats_is_a_valid_bridge_action():
 
 @pytest.mark.skipif(NODE is None, reason="node is not installed")
 def test_page_inline_js_parses(tmp_path):
-    blocks = re.findall(r"<script>(.*?)</script>", PAGE.read_text(encoding="utf-8"), re.DOTALL)
+    blocks = inline_scripts(PAGE.read_text(encoding="utf-8"))
     assert blocks
     for i, block in enumerate(blocks):
         js = tmp_path / f"active_learning_{i}.js"

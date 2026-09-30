@@ -14,6 +14,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
+from blade_scripts import inline_scripts
 
 ROOT = Path(__file__).resolve().parents[1]
 DASH = ROOT / "dashboard"
@@ -275,7 +276,7 @@ def test_layout_loads_only_google_fonts_and_local_css():
 
 
 def _script_blocks(path: Path):
-    blocks = re.findall(r"<script>(.*?)</script>", read(path), re.DOTALL)
+    blocks = inline_scripts(read(path))
     assert blocks, f"no inline <script> block found in {path.name}"
     # Blade echo tags are replaced by a string literal, as they would be after rendering.
     return [re.sub(r"\{\{.*?\}\}", "''", block) for block in blocks]

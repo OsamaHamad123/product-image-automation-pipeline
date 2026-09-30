@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 import ops_health
+from blade_scripts import inline_scripts
 
 ROOT = Path(__file__).resolve().parents[1]
 DASH = ROOT / "dashboard"
@@ -62,7 +63,7 @@ def test_view_loads_the_panel():
 
 def _render(report, window="24h"):
     """Run the diagnostics page script under node with a stub DOM; return the panel's HTML and note text."""
-    blocks = re.findall(r"<script>(.*?)</script>", read(VIEW), re.DOTALL)
+    blocks = inline_scripts(read(VIEW))
     script = re.sub(r"\{\{.*?\}\}", "''", blocks[-1])
     harness = """
 const elements = {};

@@ -1,5 +1,6 @@
 """verify_cloud_services: the key checker the launcher and the diagnostics page run (offline, requests mocked)."""
 
+import re
 from pathlib import Path
 
 import pytest
@@ -121,4 +122,5 @@ def test_proxy_credentials_are_never_printed(monkeypatch, capsys):
     assert vcs.verify_proxy() is False
     out = capsys.readouterr().out
     assert "s3cretpass" not in out and "staffuser" not in out
-    assert "proxy.example.com:8080" in out   # the host is still shown, so the owner knows which proxy failed
+    # the host is still shown, so the owner knows which proxy failed
+    assert re.search(r"\bproxy\.example\.com:8080\b", out)
