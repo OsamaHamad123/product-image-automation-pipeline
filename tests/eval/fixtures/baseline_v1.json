@@ -1,0 +1,2012 @@
+{
+ "description": "Legacy v1 (image_search.search_best_product_image) replayed offline on the golden fixtures before any fix. Aggregate metrics and what v1 did per SKU, kept as data so the 'before' state stays on record after v1 is hot-fixed. Regenerate only with: python scripts/eval_report.py --engine v1 --write-baseline (from a checkout of legacy_commit when v1 has changed since).",
+ "engine": "v1",
+ "scenario": "normal",
+ "generated_at": "2026-09-30T03:30:04+00:00",
+ "legacy_commit": "f6dc2d89a42dd281be3c9795cc772b88a0cd166d",
+ "legacy_fingerprint": {
+  "sha256": "0a0fac65b6571b6e1482024955a5ce6904f92686e625eef142d9e12a4fbdded8",
+  "files": {
+   "image_search.py": "19c7b5c151f639f3e0646663ec0a66996a1cc6b40017259ec2004ee1decdf80c",
+   "image_quality_gatekeeper.py": "91de63ef771fd16ddec8b893fdf3fc4cc82883baf19802a1a39b8088187a9641",
+   "aesthetics_engine.py": "44ef473504f85f09c5703826d4b5862ebd7a8741b54714ca904fea3048608dbd",
+   "image_dedup_bktree.py": "85151c12ce239c388baa752b6d598f3b11acdfecab1437c31cb44a03bf50fcc7"
+  }
+ },
+ "fixture_fingerprint": {
+  "sha256": "9e8ea2e6fefecfd0ad7ff57d48d72097b3c76e404710b0fb71276a3409562514",
+  "files": {
+   "golden_skus.json": "cd8e3e1dacc501e039a5bbf03bef2710be9be5a5605863a33fa4a3c3489a1ac8",
+   "vlm_cassette.json": "8ff8c89bee15f05bf8d4da224518433cf9c4709ec7c06589c58f48996ccef256",
+   "brand_mappings.json": "f02702337e15b0bc44ee09b71d05877949929c01ab60a5aec78e8d0c187ddc5f",
+   "imagegen.py": "1116f4007c3026146248c90169e72a68d66d4994b468cec4029271e78bddddd3"
+  }
+ },
+ "n_skus": 63,
+ "metrics": {
+  "n_skus": 63,
+  "n_with_correct": 58,
+  "n_auto": 58,
+  "n_auto_correct": 23,
+  "n_auto_wrong": 35,
+  "n_preselected": 0,
+  "n_preselected_correct": 0,
+  "n_correct_pick": 23,
+  "n_review": 0,
+  "n_not_found": 5,
+  "n_false_not_found": 4,
+  "n_provider_down": 0,
+  "n_error": 0,
+  "auto_accept_precision": 0.3966,
+  "auto_precision_wilson_lower": 0.2809,
+  "wrong_auto_rate": 0.5556,
+  "correct_pick_rate": 0.3966,
+  "preselect_precision": null,
+  "review_rate": 0.0,
+  "not_found_rate": 0.0794,
+  "false_not_found_rate": 0.069,
+  "pool_recall": 0.9828,
+  "kill_attribution": {
+   "Image overexposed": 55,
+   "Image too blurry": 28,
+   "brand_mismatch": 14,
+   "competitor_substring": 4
+  },
+  "quality_kills_on_correct": 83,
+  "decisions": {
+   "AUTO_PUBLISH": 58,
+   "NOT_FOUND": 5
+  },
+  "vlm_calls_mean": 0.5238,
+  "vlm_calls_max": 2,
+  "provider_calls_max": {
+   "bing": 2,
+   "google": 2
+  },
+  "distinct_queries_max": 2,
+  "per_stratum": {
+   "abbreviation": {
+    "n_skus": 3,
+    "n_with_correct": 3,
+    "n_auto": 1,
+    "n_preselected": 0,
+    "auto_accept_precision": 0.0,
+    "wrong_auto_rate": 0.3333,
+    "correct_pick_rate": 0.0,
+    "preselect_precision": null,
+    "review_rate": 0.0,
+    "not_found_rate": 0.6667,
+    "false_not_found_rate": 0.6667,
+    "pool_recall": 1.0
+   },
+   "arabic_only": {
+    "n_skus": 5,
+    "n_with_correct": 5,
+    "n_auto": 3,
+    "n_preselected": 0,
+    "auto_accept_precision": 1.0,
+    "wrong_auto_rate": 0.0,
+    "correct_pick_rate": 0.6,
+    "preselect_precision": null,
+    "review_rate": 0.0,
+    "not_found_rate": 0.4,
+    "false_not_found_rate": 0.4,
+    "pool_recall": 1.0
+   },
+   "barcode_edge": {
+    "n_skus": 4,
+    "n_with_correct": 4,
+    "n_auto": 4,
+    "n_preselected": 0,
+    "auto_accept_precision": 0.75,
+    "wrong_auto_rate": 0.25,
+    "correct_pick_rate": 0.75,
+    "preselect_precision": null,
+    "review_rate": 0.0,
+    "not_found_rate": 0.0,
+    "false_not_found_rate": 0.0,
+    "pool_recall": 1.0
+   },
+   "dairy_variants": {
+    "n_skus": 13,
+    "n_with_correct": 12,
+    "n_auto": 13,
+    "n_preselected": 0,
+    "auto_accept_precision": 0.3077,
+    "wrong_auto_rate": 0.6923,
+    "correct_pick_rate": 0.3333,
+    "preselect_precision": null,
+    "review_rate": 0.0,
+    "not_found_rate": 0.0,
+    "false_not_found_rate": 0.0,
+    "pool_recall": 0.9167
+   },
+   "image_quality": {
+    "n_skus": 5,
+    "n_with_correct": 5,
+    "n_auto": 5,
+    "n_preselected": 0,
+    "auto_accept_precision": 0.0,
+    "wrong_auto_rate": 1.0,
+    "correct_pick_rate": 0.0,
+    "preselect_precision": null,
+    "review_rate": 0.0,
+    "not_found_rate": 0.0,
+    "false_not_found_rate": 0.0,
+    "pool_recall": 1.0
+   },
+   "juice_variants": {
+    "n_skus": 5,
+    "n_with_correct": 5,
+    "n_auto": 5,
+    "n_preselected": 0,
+    "auto_accept_precision": 0.4,
+    "wrong_auto_rate": 0.6,
+    "correct_pick_rate": 0.4,
+    "preselect_precision": null,
+    "review_rate": 0.0,
+    "not_found_rate": 0.0,
+    "false_not_found_rate": 0.0,
+    "pool_recall": 1.0
+   },
+   "multipack": {
+    "n_skus": 5,
+    "n_with_correct": 5,
+    "n_auto": 5,
+    "n_preselected": 0,
+    "auto_accept_precision": 0.4,
+    "wrong_auto_rate": 0.6,
+    "correct_pick_rate": 0.4,
+    "preselect_precision": null,
+    "review_rate": 0.0,
+    "not_found_rate": 0.0,
+    "false_not_found_rate": 0.0,
+    "pool_recall": 1.0
+   },
+   "no_web_image": {
+    "n_skus": 4,
+    "n_with_correct": 0,
+    "n_auto": 3,
+    "n_preselected": 0,
+    "auto_accept_precision": 0.0,
+    "wrong_auto_rate": 0.75,
+    "correct_pick_rate": null,
+    "preselect_precision": null,
+    "review_rate": 0.0,
+    "not_found_rate": 0.25,
+    "false_not_found_rate": null,
+    "pool_recall": null
+   },
+   "pantry": {
+    "n_skus": 8,
+    "n_with_correct": 8,
+    "n_auto": 8,
+    "n_preselected": 0,
+    "auto_accept_precision": 0.625,
+    "wrong_auto_rate": 0.375,
+    "correct_pick_rate": 0.625,
+    "preselect_precision": null,
+    "review_rate": 0.0,
+    "not_found_rate": 0.0,
+    "false_not_found_rate": 0.0,
+    "pool_recall": 1.0
+   },
+   "parent_brand": {
+    "n_skus": 5,
+    "n_with_correct": 5,
+    "n_auto": 5,
+    "n_preselected": 0,
+    "auto_accept_precision": 0.2,
+    "wrong_auto_rate": 0.8,
+    "correct_pick_rate": 0.2,
+    "preselect_precision": null,
+    "review_rate": 0.0,
+    "not_found_rate": 0.0,
+    "false_not_found_rate": 0.0,
+    "pool_recall": 1.0
+   },
+   "private_label": {
+    "n_skus": 3,
+    "n_with_correct": 3,
+    "n_auto": 3,
+    "n_preselected": 0,
+    "auto_accept_precision": 0.3333,
+    "wrong_auto_rate": 0.6667,
+    "correct_pick_rate": 0.3333,
+    "preselect_precision": null,
+    "review_rate": 0.0,
+    "not_found_rate": 0.0,
+    "false_not_found_rate": 0.0,
+    "pool_recall": 1.0
+   },
+   "water": {
+    "n_skus": 3,
+    "n_with_correct": 3,
+    "n_auto": 3,
+    "n_preselected": 0,
+    "auto_accept_precision": 0.6667,
+    "wrong_auto_rate": 0.3333,
+    "correct_pick_rate": 0.6667,
+    "preselect_precision": null,
+    "review_rate": 0.0,
+    "not_found_rate": 0.0,
+    "false_not_found_rate": 0.0,
+    "pool_recall": 1.0
+   }
+  }
+ },
+ "per_sku": {
+  "uae-001-almarai-full-fat-milk-1l": {
+   "decision": "AUTO_PUBLISH",
+   "status": "last_resort",
+   "chosen_id": "c5",
+   "chosen_label": "not_packshot",
+   "auto": true,
+   "needs_review": false,
+   "kills": {
+    "c6": [
+     "size_clash"
+    ]
+   },
+   "queries": [
+    "6281007000000"
+   ]
+  },
+  "uae-019-almarai-fresh-milk-full-fat-2-85l": {
+   "decision": "AUTO_PUBLISH",
+   "status": "accepted",
+   "chosen_id": "c6",
+   "chosen_label": "not_packshot",
+   "auto": true,
+   "needs_review": false,
+   "kills": {
+    "c5": [
+     "size_clash"
+    ],
+    "c1": [
+     "competitor_substring"
+    ],
+    "c4": [
+     "competitor_substring"
+    ],
+    "c2": [
+     "size_clash"
+    ],
+    "c3": [
+     "Image overexposed"
+    ]
+   },
+   "queries": [
+    "Almarai Fresh Milk Full Fat 2.85L"
+   ]
+  },
+  "uae-002-almarai-fresh-milk-low-fat-1l": {
+   "decision": "AUTO_PUBLISH",
+   "status": "accepted",
+   "chosen_id": "c5",
+   "chosen_label": "not_packshot",
+   "auto": true,
+   "needs_review": false,
+   "kills": {
+    "c1": [
+     "Image overexposed"
+    ],
+    "c4": [
+     "size_clash"
+    ],
+    "c2": [
+     "Image overexposed",
+     "Image too blurry"
+    ],
+    "c3": [
+     "Image overexposed",
+     "Image too blurry"
+    ]
+   },
+   "queries": [
+    "Almarai Fresh Milk Low Fat 1L"
+   ]
+  },
+  "uae-003-almarai-laban-full-fat-1l": {
+   "decision": "AUTO_PUBLISH",
+   "status": "accepted",
+   "chosen_id": "c5",
+   "chosen_label": "not_packshot",
+   "auto": true,
+   "needs_review": false,
+   "kills": {
+    "c4": [
+     "size_clash"
+    ],
+    "c6": [
+     "Image overexposed"
+    ],
+    "c3": [
+     "Image overexposed"
+    ],
+    "c2": [
+     "Image overexposed",
+     "Image too blurry"
+    ],
+    "c1": [
+     "Image overexposed",
+     "Image too blurry"
+    ]
+   },
+   "queries": [
+    "Almarai Laban Full Fat 1L"
+   ]
+  },
+  "uae-004-almarai-strawberry-milk-180ml": {
+   "decision": "AUTO_PUBLISH",
+   "status": "last_resort",
+   "chosen_id": "c1",
+   "chosen_label": "correct_exact",
+   "auto": true,
+   "needs_review": false,
+   "kills": {
+    "c6": [
+     "brand_mismatch"
+    ],
+    "c4": [
+     "size_clash"
+    ],
+    "c2": [
+     "Image overexposed"
+    ],
+    "c3": [
+     "Image overexposed"
+    ],
+    "c5": [
+     "Image overexposed"
+    ]
+   },
+   "queries": [
+    "Almarai Strawberry Flavoured Milk 180ml"
+   ]
+  },
+  "uae-005-al-rawabi-laban-up-180ml": {
+   "decision": "AUTO_PUBLISH",
+   "status": "accepted",
+   "chosen_id": "c4",
+   "chosen_label": "not_packshot",
+   "auto": true,
+   "needs_review": false,
+   "kills": {
+    "c3": [
+     "size_clash"
+    ],
+    "c5": [
+     "Image overexposed",
+     "Image too blurry"
+    ],
+    "c1": [
+     "Image overexposed",
+     "Image too blurry"
+    ],
+    "c6": [
+     "Image overexposed"
+    ],
+    "c2": [
+     "brand_mismatch"
+    ]
+   },
+   "queries": [
+    "Al Rawabi Laban Up 180ml"
+   ]
+  },
+  "uae-006-al-rawabi-fresh-milk-full-fat-2l": {
+   "decision": "AUTO_PUBLISH",
+   "status": "last_resort",
+   "chosen_id": "c5",
+   "chosen_label": "wrong_pack",
+   "auto": true,
+   "needs_review": false,
+   "kills": {
+    "c4": [
+     "competitor_substring"
+    ],
+    "c2": [
+     "Image overexposed"
+    ],
+    "c1": [
+     "Image overexposed",
+     "Image too blurry"
+    ],
+    "c3": [
+     "Image overexposed",
+     "Image too blurry"
+    ]
+   },
+   "queries": [
+    "Al Rawabi Fresh Milk Full Fat 2L"
+   ]
+  },
+  "uae-007-al-ain-farms-full-cream-milk-1l": {
+   "decision": "AUTO_PUBLISH",
+   "status": "accepted",
+   "chosen_id": "c5",
+   "chosen_label": "not_packshot",
+   "auto": true,
+   "needs_review": false,
+   "kills": {
+    "c4": [
+     "size_clash"
+    ],
+    "c6": [
+     "Image overexposed",
+     "Image too blurry"
+    ],
+    "c2": [
+     "Image overexposed",
+     "Image too blurry"
+    ],
+    "c3": [
+     "size_clash"
+    ],
+    "c1": [
+     "Image overexposed",
+     "Image too blurry"
+    ]
+   },
+   "queries": [
+    "Al Ain Farms Fresh Milk Full Cream 1L"
+   ]
+  },
+  "uae-008-lacnor-full-cream-milk-1l": {
+   "decision": "AUTO_PUBLISH",
+   "status": "accepted",
+   "chosen_id": "c6",
+   "chosen_label": "not_packshot",
+   "auto": true,
+   "needs_review": false,
+   "kills": {
+    "c4": [
+     "size_clash"
+    ],
+    "c2": [
+     "Image overexposed"
+    ],
+    "c3": [
+     "Image overexposed",
+     "Image too blurry"
+    ],
+    "c1": [
+     "Image overexposed",
+     "Image too blurry"
+    ],
+    "c5": [
+     "Image overexposed"
+    ]
+   },
+   "queries": [
+    "Lacnor Essentials Full Cream Milk 1L"
+   ]
+  },
+  "uae-009-marmum-fresh-milk-full-cream-1l": {
+   "decision": "AUTO_PUBLISH",
+   "status": "last_resort",
+   "chosen_id": "c4",
+   "chosen_label": "correct_exact",
+   "auto": true,
+   "needs_review": false,
+   "kills": {
+    "c5": [
+     "Image overexposed"
+    ],
+    "c3": [
+     "size_clash"
+    ],
+    "c1": [
+     "Image overexposed"
+    ],
+    "c2": [
+     "Image overexposed",
+     "Image too blurry"
+    ]
+   },
+   "queries": [
+    "Marmum Fresh Milk Full Cream 1L"
+   ]
+  },
+  "uae-010-meliha-long-life-organic-milk-180ml": {
+   "decision": "AUTO_PUBLISH",
+   "status": "last_resort",
+   "chosen_id": "c1",
+   "chosen_label": "correct_exact",
+   "auto": true,
+   "needs_review": false,
+   "kills": {
+    "c5": [
+     "competitor_substring"
+    ],
+    "c2": [
+     "Image overexposed"
+    ],
+    "c4": [
+     "Image overexposed",
+     "Image too blurry"
+    ],
+    "c6": [
+     "Image overexposed"
+    ],
+    "c3": [
+     "size_clash"
+    ]
+   },
+   "queries": [
+    "Meliha Long Life Organic Milk 180ml"
+   ]
+  },
+  "uae-011-meliha-chocolate-milk-180ml": {
+   "decision": "AUTO_PUBLISH",
+   "status": "accepted",
+   "chosen_id": "c4",
+   "chosen_label": "not_packshot",
+   "auto": true,
+   "needs_review": false,
+   "kills": {
+    "c5": [
+     "Image overexposed",
+     "Image too blurry"
+    ],
+    "c3": [
+     "brand_mismatch"
+    ],
+    "c1": [
+     "Image overexposed",
+     "Image too blurry"
+    ],
+    "c2": [
+     "Image overexposed",
+     "Image too blurry"
+    ],
+    "c6": [
+     "Image overexposed"
+    ]
+   },
+   "queries": [
+    "Meliha Chocolate Milk 180ml"
+   ]
+  },
+  "uae-012-nada-greek-yoghurt-plain-160g": {
+   "decision": "AUTO_PUBLISH",
+   "status": "last_resort",
+   "chosen_id": "c4",
+   "chosen_label": "wrong_pack",
+   "auto": true,
+   "needs_review": false,
+   "kills": {
+    "c5": [
+     "Image overexposed"
+    ],
+    "c1": [
+     "Image overexposed"
+    ],
+    "c2": [
+     "Image overexposed"
+    ],
+    "c3": [
+     "competitor_substring"
+    ]
+   },
+   "queries": [
+    "Nada Greek Yoghurt Plain 160g"
+   ]
+  },
+  "uae-013-baladna-fresh-milk-low-fat-1l": {
+   "decision": "AUTO_PUBLISH",
+   "status": "accepted",
+   "chosen_id": "c6",
+   "chosen_label": "not_packshot",
+   "auto": true,
+   "needs_review": false,
+   "kills": {
+    "c3": [
+     "size_clash"
+    ],
+    "c1": [
+     "Image overexposed",
+     "Image too blurry"
+    ],
+    "c5": [
+     "Image overexposed"
+    ],
+    "c2": [
+     "Image overexposed",
+     "Image too blurry"
+    ],
+    "c4": [
+     "Image overexposed"
+    ]
+   },
+   "queries": [
+    "Baladna Fresh Milk Low Fat 1L"
+   ]
+  },
+  "uae-014-almarai-orange-juice-nas-1l": {
+   "decision": "AUTO_PUBLISH",
+   "status": "accepted",
+   "chosen_id": "c7",
+   "chosen_label": "not_packshot",
+   "auto": true,
+   "needs_review": false,
+   "kills": {
+    "c4": [
+     "size_clash"
+    ],
+    "c3": [
+     "Image overexposed",
+     "Image too blurry"
+    ],
+    "c1": [
+     "Image overexposed",
+     "Image too blurry"
+    ],
+    "c2": [
+     "Image overexposed"
+    ],
+    "c6": [
+     "Image overexposed"
+    ]
+   },
+   "queries": [
+    "Almarai Orange Juice No Added Sugar 1L"
+   ]
+  },
+  "uae-015-tang-orange-powder-375g": {
+   "decision": "AUTO_PUBLISH",
+   "status": "accepted",
+   "chosen_id": "c6",
+   "chosen_label": "not_packshot",
+   "auto": true,
+   "needs_review": false,
+   "kills": {
+    "c4": [
+     "Image overexposed",
+     "Image too blurry"
+    ],
+    "c2": [
+     "Image overexposed"
+    ],
+    "c1": [
+     "Image overexposed",
+     "Image too blurry"
+    ],
+    "c5": [
+     "size_clash"
+    ],
+    "c3": [
+     "size_clash"
+    ]
+   },
+   "queries": [
+    "Tang Orange Instant Powder Drink 375g"
+   ]
+  },
+  "uae-016-masafi-orange-juice-1l": {
+   "decision": "AUTO_PUBLISH",
+   "status": "last_resort",
+   "chosen_id": "c1",
+   "chosen_label": "correct_exact",
+   "auto": true,
+   "needs_review": false,
+   "kills": {
+    "c5": [
+     "competitor_substring"
+    ],
+    "c3": [
+     "Image overexposed",
+     "Image too blurry"
+    ],
+    "c4": [
+     "competitor_substring"
+    ],
+    "c2": [
+     "Image overexposed",
+     "Image too blurry"
+    ],
+    "c6": [
+     "size_clash"
+    ]
+   },
+   "queries": [
+    "Masafi Orange Juice 1L"
+   ]
+  },
+  "uae-017-lacnor-mango-juice-180ml": {
+   "decision": "AUTO_PUBLISH",
+   "status": "last_resort",
+   "chosen_id": "c6",
+   "chosen_label": "correct_exact",
+   "auto": true,
+   "needs_review": false,
+   "kills": {
+    "c4": [
+     "Image overexposed",
+     "Image too blurry"
+    ],
+    "c1": [
+     "Image overexposed"
+    ],
+    "c5": [
+     "download_failed"
+    ],
+    "c2": [
+     "Image overexposed"
+    ],
+    "c3": [
+     "size_clash"
+    ]
+   },
+   "queries": [
+    "Lacnor Essentials Mango Juice 180ml"
+   ]
+  },
+  "uae-018-rani-float-orange-240ml": {
+   "decision": "AUTO_PUBLISH",
+   "status": "accepted",
+   "chosen_id": "c6",
+   "chosen_label": "not_packshot",
+   "auto": true,
+   "needs_review": false,
+   "kills": {
+    "c4": [
+     "Image overexposed",
+     "Image too blurry"
+    ],
+    "c1": [
+     "Image overexposed",
+     "Image too blurry"
+    ],
+    "c5": [
+     "size_clash"
+    ],
+    "c3": [
+     "Image overexposed",
+     "Image too blurry"
+    ],
+    "c2": [
+     "Image overexposed"
+    ]
+   },
+   "queries": [
+    "Rani Float Orange Juice 240ml"
+   ]
+  },
+  "uae-020-masafi-water-1-5l": {
+   "decision": "AUTO_PUBLISH",
+   "status": "last_resort",
+   "chosen_id": "c7",
+   "chosen_label": "correct_exact",
+   "auto": true,
+   "needs_review": false,
+   "kills": {
+    "c5": [
+     "Image overexposed",
+     "Image too blurry"
+    ],
+    "c3": [
+     "size_clash"
+    ],
+    "c4": [
+     "competitor_substring"
+    ],
+    "c1": [
+     "competitor_substring"
+    ],
+    "c2": [
+     "Image overexposed"
+    ],
+    "c6": [
+     "Image overexposed",
+     "Image too blurry"
+    ]
+   },
+   "queries": [
+    "Masafi Water 1.5L"
+   ]
+  },
+  "uae-021-mai-dubai-drinking-water-500ml": {
+   "decision": "AUTO_PUBLISH",
+   "status": "last_resort",
+   "chosen_id": "c5",
+   "chosen_label": "correct_exact",
+   "auto": true,
+   "needs_review": false,
+   "kills": {},
+   "queries": [
+    "6297000611365"
+   ]
+  },
+  "uae-022-al-ain-water-500ml": {
+   "decision": "AUTO_PUBLISH",
+   "status": "last_resort",
+   "chosen_id": "c2",
+   "chosen_label": "wrong_pack",
+   "auto": true,
+   "needs_review": false,
+   "kills": {
+    "c5": [
+     "size_clash"
+    ],
+    "c4": [
+     "Image overexposed",
+     "Image too blurry"
+    ],
+    "c1": [
+     "Image overexposed",
+     "Image too blurry"
+    ],
+    "c3": [
+     "Image overexposed",
+     "Image too blurry"
+    ]
+   },
+   "queries": [
+    "6291100110025",
+    "Al Ain Water 500ml"
+   ]
+  },
+  "uae-023-arwa-water-1-5l": {
+   "decision": "AUTO_PUBLISH",
+   "status": "accepted",
+   "chosen_id": "c5",
+   "chosen_label": "not_packshot",
+   "auto": true,
+   "needs_review": false,
+   "kills": {
+    "c4": [
+     "competitor_substring"
+    ],
+    "c3": [
+     "Image overexposed",
+     "Image too blurry"
+    ],
+    "c1": [
+     "Image overexposed",
+     "Image too blurry"
+    ],
+    "c2": [
+     "size_clash"
+    ],
+    "c6": [
+     "Image overexposed",
+     "Image too blurry"
+    ]
+   },
+   "queries": [
+    "Arwa Drinking Water 1.5L"
+   ]
+  },
+  "uae-024-ag-mayonnaise-473ml": {
+   "decision": "NOT_FOUND",
+   "status": "none",
+   "chosen_id": null,
+   "chosen_label": null,
+   "auto": false,
+   "needs_review": true,
+   "kills": {
+    "c5": [
+     "size_clash"
+    ],
+    "c2": [
+     "brand_mismatch"
+    ],
+    "c3": [
+     "brand_mismatch"
+    ],
+    "c4": [
+     "brand_mismatch"
+    ],
+    "c1": [
+     "brand_mismatch"
+    ]
+   },
+   "queries": [
+    "A/G Mayonnaise 473ml"
+   ]
+  },
+  "uae-025-ag-tomato-ketchup-28oz": {
+   "decision": "NOT_FOUND",
+   "status": "none",
+   "chosen_id": null,
+   "chosen_label": null,
+   "auto": false,
+   "needs_review": true,
+   "kills": {
+    "c7": [
+     "brand_mismatch"
+    ],
+    "c5": [
+     "brand_mismatch"
+    ],
+    "c4": [
+     "brand_mismatch"
+    ],
+    "c1": [
+     "brand_mismatch"
+    ],
+    "c2": [
+     "brand_mismatch"
+    ],
+    "c3": [
+     "brand_mismatch"
+    ],
+    "c6": [
+     "brand_mismatch"
+    ]
+   },
+   "queries": [
+    "070844000122",
+    "A/G Tomato Ketchup 28oz"
+   ]
+  },
+  "uae-026-kdd-mango-nectar-250ml": {
+   "decision": "AUTO_PUBLISH",
+   "status": "accepted",
+   "chosen_id": "c6",
+   "chosen_label": "not_packshot",
+   "auto": true,
+   "needs_review": false,
+   "kills": {
+    "c4": [
+     "Image overexposed",
+     "Image too blurry"
+    ],
+    "c2": [
+     "Image overexposed"
+    ],
+    "c1": [
+     "Image overexposed",
+     "Image too blurry"
+    ],
+    "c3": [
+     "size_clash"
+    ],
+    "c5": [
+     "competitor_substring"
+    ]
+   },
+   "queries": [
+    "KDD Mango Nectar 250ml"
+   ]
+  },
+  "uae-027-nido-fortified-2-25kg": {
+   "decision": "AUTO_PUBLISH",
+   "status": "accepted",
+   "chosen_id": "c5",
+   "chosen_label": "not_packshot",
+   "auto": true,
+   "needs_review": false,
+   "kills": {
+    "c4": [
+     "size_clash"
+    ],
+    "c2": [
+     "brand_mismatch"
+    ],
+    "c1": [
+     "brand_mismatch"
+    ],
+    "c6": [
+     "brand_mismatch"
+    ],
+    "c3": [
+     "size_clash"
+    ],
+    "c7": [
+     "Image overexposed"
+    ]
+   },
+   "queries": [
+    "Nestle Nido Fortified Full Cream Milk Powder 2.25kg"
+   ]
+  },
+  "uae-028-kitkat-4-finger-41-5g": {
+   "decision": "AUTO_PUBLISH",
+   "status": "last_resort",
+   "chosen_id": "c1",
+   "chosen_label": "correct_exact",
+   "auto": true,
+   "needs_review": false,
+   "kills": {
+    "c4": [
+     "brand_mismatch"
+    ],
+    "c3": [
+     "brand_mismatch"
+    ],
+    "c2": [
+     "brand_mismatch"
+    ],
+    "c5": [
+     "size_clash"
+    ],
+    "c6": [
+     "brand_mismatch"
+    ]
+   },
+   "queries": [
+    "Nestle KitKat 4 Finger Milk Chocolate 41.5g"
+   ]
+  },
+  "uae-029-lays-salted-170g": {
+   "decision": "AUTO_PUBLISH",
+   "status": "accepted",
+   "chosen_id": "c6",
+   "chosen_label": "not_packshot",
+   "auto": true,
+   "needs_review": false,
+   "kills": {
+    "c4": [
+     "brand_mismatch"
+    ],
+    "c1": [
+     "brand_mismatch"
+    ],
+    "c3": [
+     "size_clash"
+    ],
+    "c5": [
+     "size_clash"
+    ],
+    "c2": [
+     "brand_mismatch"
+    ]
+   },
+   "queries": [
+    "PepsiCo Lay's Salted Potato Chips 170g"
+   ]
+  },
+  "uae-030-oreo-original-38g": {
+   "decision": "AUTO_PUBLISH",
+   "status": "accepted",
+   "chosen_id": "c6",
+   "chosen_label": "not_packshot",
+   "auto": true,
+   "needs_review": false,
+   "kills": {
+    "c4": [
+     "brand_mismatch"
+    ],
+    "c2": [
+     "brand_mismatch"
+    ],
+    "c5": [
+     "size_clash"
+    ],
+    "c1": [
+     "brand_mismatch"
+    ],
+    "c3": [
+     "brand_mismatch"
+    ]
+   },
+   "queries": [
+    "Mondelez Oreo Original Chocolate Sandwich Cookies 38g"
+   ]
+  },
+  "uae-031-nescafe-classic-200g": {
+   "decision": "AUTO_PUBLISH",
+   "status": "accepted",
+   "chosen_id": "c6",
+   "chosen_label": "not_packshot",
+   "auto": true,
+   "needs_review": false,
+   "kills": {
+    "c4": [
+     "Image overexposed",
+     "Image too blurry"
+    ],
+    "c3": [
+     "size_clash"
+    ],
+    "c2": [
+     "Image overexposed"
+    ],
+    "c1": [
+     "Image overexposed"
+    ],
+    "c5": [
+     "Image overexposed"
+    ]
+   },
+   "queries": [
+    "Nescafe Classic Instant Coffee 200g"
+   ]
+  },
+  "uae-032-pepsi-2-25l": {
+   "decision": "AUTO_PUBLISH",
+   "status": "accepted",
+   "chosen_id": "c7",
+   "chosen_label": "not_packshot",
+   "auto": true,
+   "needs_review": false,
+   "kills": {
+    "c4": [
+     "Image overexposed",
+     "Image too blurry"
+    ],
+    "c1": [
+     "Image overexposed",
+     "Image too blurry"
+    ],
+    "c3": [
+     "Image overexposed",
+     "Image too blurry"
+    ],
+    "c5": [
+     "competitor_substring"
+    ],
+    "c2": [
+     "Image overexposed"
+    ],
+    "c6": [
+     "Image overexposed",
+     "Image too blurry"
+    ]
+   },
+   "queries": [
+    "Pepsi Cola Bottle 2.25L"
+   ]
+  },
+  "uae-033-al-rawabi-laban-6x180ml": {
+   "decision": "AUTO_PUBLISH",
+   "status": "last_resort",
+   "chosen_id": "c5",
+   "chosen_label": "correct_exact",
+   "auto": true,
+   "needs_review": false,
+   "kills": {
+    "c4": [
+     "Image overexposed",
+     "Image too blurry"
+    ],
+    "c1": [
+     "Image overexposed"
+    ],
+    "c2": [
+     "Image overexposed"
+    ],
+    "c3": [
+     "size_clash"
+    ],
+    "c6": [
+     "competitor_substring"
+    ]
+   },
+   "queries": [
+    "Al Rawabi Laban 6 x 180ml"
+   ]
+  },
+  "uae-034-mai-dubai-water-24x500ml": {
+   "decision": "AUTO_PUBLISH",
+   "status": "last_resort",
+   "chosen_id": "c2",
+   "chosen_label": "wrong_pack",
+   "auto": true,
+   "needs_review": false,
+   "kills": {
+    "c4": [
+     "size_clash"
+    ],
+    "c6": [
+     "competitor_substring"
+    ],
+    "c5": [
+     "competitor_substring"
+    ],
+    "c3": [
+     "Image overexposed"
+    ],
+    "c1": [
+     "Image overexposed",
+     "Image too blurry"
+    ]
+   },
+   "queries": [
+    "Mai Dubai Water 24 x 500ml"
+   ]
+  },
+  "uae-035-coca-cola-can-6x330ml": {
+   "decision": "AUTO_PUBLISH",
+   "status": "accepted",
+   "chosen_id": "c6",
+   "chosen_label": "not_packshot",
+   "auto": true,
+   "needs_review": false,
+   "kills": {
+    "c4": [
+     "Image overexposed",
+     "Image too blurry"
+    ],
+    "c1": [
+     "Image overexposed"
+    ],
+    "c5": [
+     "competitor_substring"
+    ],
+    "c2": [
+     "Image overexposed"
+    ],
+    "c3": [
+     "Image overexposed",
+     "Image too blurry"
+    ]
+   },
+   "queries": [
+    "Coca-Cola Regular Can 6 x 330ml"
+   ]
+  },
+  "uae-036-indomie-chicken-75g": {
+   "decision": "AUTO_PUBLISH",
+   "status": "last_resort",
+   "chosen_id": "c1",
+   "chosen_label": "correct_exact",
+   "auto": true,
+   "needs_review": false,
+   "kills": {
+    "c4": [
+     "Image overexposed",
+     "Image too blurry"
+    ],
+    "c5": [
+     "Image overexposed"
+    ],
+    "c3": [
+     "Image overexposed"
+    ],
+    "c2": [
+     "Image overexposed"
+    ],
+    "c7": [
+     "brand_mismatch"
+    ],
+    "c6": [
+     "Image overexposed"
+    ]
+   },
+   "queries": [
+    "Indomie Chicken Flavour Instant Noodles 75g"
+   ]
+  },
+  "uae-037-arabic-only-almarai-milk-2l": {
+   "decision": "AUTO_PUBLISH",
+   "status": "last_resort",
+   "chosen_id": "c2",
+   "chosen_label": "correct_exact",
+   "auto": true,
+   "needs_review": false,
+   "kills": {
+    "c5": [
+     "brand_mismatch"
+    ],
+    "c4": [
+     "brand_mismatch"
+    ],
+    "c3": [
+     "size_clash"
+    ],
+    "c1": [
+     "brand_mismatch"
+    ],
+    "c6": [
+     "brand_mismatch"
+    ]
+   },
+   "queries": [
+    "المراعي حليب المراعي طازج كامل الدسم 2 لتر"
+   ]
+  },
+  "uae-038-arabic-only-almarai-labneh-400g": {
+   "decision": "AUTO_PUBLISH",
+   "status": "last_resort",
+   "chosen_id": "c5",
+   "chosen_label": "correct_exact",
+   "auto": true,
+   "needs_review": false,
+   "kills": {
+    "c4": [
+     "Image overexposed",
+     "Image too blurry"
+    ],
+    "c6": [
+     "gemini_rejected"
+    ],
+    "c1": [
+     "Image overexposed",
+     "Image too blurry"
+    ],
+    "c3": [
+     "Image overexposed"
+    ],
+    "c2": [
+     "Image overexposed"
+    ]
+   },
+   "queries": [
+    "لبنة المراعي كاملة الدسم 400 غ"
+   ]
+  },
+  "uae-039-arabic-brand-al-rawabi-low-fat-1l": {
+   "decision": "NOT_FOUND",
+   "status": "none",
+   "chosen_id": null,
+   "chosen_label": null,
+   "auto": false,
+   "needs_review": true,
+   "kills": {
+    "c5": [
+     "size_clash"
+    ],
+    "c3": [
+     "brand_mismatch"
+    ],
+    "c2": [
+     "brand_mismatch"
+    ],
+    "c1": [
+     "brand_mismatch"
+    ],
+    "c6": [
+     "brand_mismatch"
+    ],
+    "c4": [
+     "brand_mismatch"
+    ]
+   },
+   "queries": [
+    "الروابي Fresh Milk Low Fat 1L"
+   ]
+  },
+  "uae-040-al-marai-greek-yoghurt-150g": {
+   "decision": "NOT_FOUND",
+   "status": "none",
+   "chosen_id": null,
+   "chosen_label": null,
+   "auto": false,
+   "needs_review": true,
+   "kills": {
+    "c4": [
+     "brand_mismatch"
+    ],
+    "c5": [
+     "brand_mismatch"
+    ],
+    "c2": [
+     "brand_mismatch"
+    ],
+    "c3": [
+     "brand_mismatch"
+    ],
+    "c1": [
+     "brand_mismatch"
+    ]
+   },
+   "queries": [
+    "Al Marai Greek Style Yoghurt Plain 150g"
+   ]
+  },
+  "uae-041-arabic-only-al-foah-khalas-dates-1kg": {
+   "decision": "AUTO_PUBLISH",
+   "status": "last_resort",
+   "chosen_id": "c5",
+   "chosen_label": "correct_exact",
+   "auto": true,
+   "needs_review": false,
+   "kills": {
+    "c4": [
+     "Image overexposed",
+     "Image too blurry"
+    ],
+    "c3": [
+     "size_clash"
+    ],
+    "c1": [
+     "Image overexposed",
+     "Image too blurry"
+    ],
+    "c2": [
+     "Image overexposed"
+    ]
+   },
+   "queries": [
+    "تمر خلاص الفوعة 1 كجم"
+   ]
+  },
+  "uae-043-invalid-barcode-lacnor-orange-180ml": {
+   "decision": "AUTO_PUBLISH",
+   "status": "last_resort",
+   "chosen_id": "c1",
+   "chosen_label": "correct_exact",
+   "auto": true,
+   "needs_review": false,
+   "kills": {
+    "c4": [
+     "brand_mismatch"
+    ],
+    "c5": [
+     "Image overexposed",
+     "Image too blurry"
+    ],
+    "c2": [
+     "Image overexposed"
+    ],
+    "c3": [
+     "size_clash"
+    ],
+    "c6": [
+     "Image overexposed"
+    ]
+   },
+   "queries": [
+    "6.29E+12",
+    "Lacnor Essentials Orange Juice 180ml"
+   ]
+  },
+  "uae-044-bad-check-digit-nutella-400g": {
+   "decision": "AUTO_PUBLISH",
+   "status": "accepted",
+   "chosen_id": "c6",
+   "chosen_label": "not_packshot",
+   "auto": true,
+   "needs_review": false,
+   "kills": {
+    "c5": [
+     "brand_mismatch"
+    ],
+    "c4": [
+     "size_clash"
+    ],
+    "c1": [
+     "Image overexposed"
+    ],
+    "c3": [
+     "size_clash"
+    ],
+    "c2": [
+     "Image overexposed"
+    ]
+   },
+   "queries": [
+    "8000500310428",
+    "Nutella Hazelnut Spread 400g"
+   ]
+  },
+  "uae-045-valid-gtin-al-wadi-hummus-380g": {
+   "decision": "AUTO_PUBLISH",
+   "status": "last_resort",
+   "chosen_id": "c2",
+   "chosen_label": "correct_exact",
+   "auto": true,
+   "needs_review": false,
+   "kills": {
+    "c5": [
+     "competitor_substring"
+    ],
+    "c3": [
+     "size_clash"
+    ],
+    "c4": [
+     "Image overexposed",
+     "Image too blurry"
+    ]
+   },
+   "queries": [
+    "5285000390121",
+    "Al Wadi Al Akhdar Hummus Tahina 380g"
+   ]
+  },
+  "uae-046-barcode-spaces-galaxy-36g": {
+   "decision": "AUTO_PUBLISH",
+   "status": "last_resort",
+   "chosen_id": "c6",
+   "chosen_label": "correct_exact",
+   "auto": true,
+   "needs_review": false,
+   "kills": {},
+   "queries": [
+    "5000159461122"
+   ]
+  },
+  "uae-048-carrefour-full-cream-milk-1l": {
+   "decision": "AUTO_PUBLISH",
+   "status": "accepted",
+   "chosen_id": "c6",
+   "chosen_label": "not_packshot",
+   "auto": true,
+   "needs_review": false,
+   "kills": {
+    "c2": [
+     "Image overexposed",
+     "Image too blurry"
+    ],
+    "c1": [
+     "Image overexposed",
+     "Image too blurry"
+    ],
+    "c4": [
+     "size_clash"
+    ],
+    "c5": [
+     "brand_mismatch"
+    ],
+    "c3": [
+     "Image overexposed",
+     "Image too blurry"
+    ]
+   },
+   "queries": [
+    "Carrefour Full Cream Milk 1L"
+   ]
+  },
+  "uae-049-lulu-basmati-rice-5kg": {
+   "decision": "AUTO_PUBLISH",
+   "status": "last_resort",
+   "chosen_id": "c1",
+   "chosen_label": "correct_exact",
+   "auto": true,
+   "needs_review": false,
+   "kills": {
+    "c6": [
+     "Image overexposed",
+     "Image too blurry"
+    ],
+    "c3": [
+     "size_clash"
+    ],
+    "c5": [
+     "Image overexposed",
+     "Image too blurry"
+    ],
+    "c2": [
+     "Image overexposed",
+     "Image too blurry"
+    ],
+    "c4": [
+     "brand_mismatch"
+    ]
+   },
+   "queries": [
+    "Lulu Premium Basmati Rice 5kg"
+   ]
+  },
+  "uae-050-carrefour-sunflower-oil-1-5l": {
+   "decision": "AUTO_PUBLISH",
+   "status": "accepted",
+   "chosen_id": "c6",
+   "chosen_label": "not_packshot",
+   "auto": true,
+   "needs_review": false,
+   "kills": {
+    "c1": [
+     "Image overexposed",
+     "Image too blurry"
+    ],
+    "c2": [
+     "Image overexposed",
+     "Image too blurry"
+    ],
+    "c4": [
+     "brand_mismatch"
+    ],
+    "c3": [
+     "size_clash"
+    ],
+    "c5": [
+     "size_clash"
+    ]
+   },
+   "queries": [
+    "Carrefour Sunflower Oil 1.5L"
+   ]
+  },
+  "uae-051-no-correct-al-jadeed-arabic-bread": {
+   "decision": "AUTO_PUBLISH",
+   "status": "accepted",
+   "chosen_id": "c5",
+   "chosen_label": "not_packshot",
+   "auto": true,
+   "needs_review": false,
+   "kills": {
+    "c2": [
+     "competitor_substring"
+    ],
+    "c3": [
+     "brand_mismatch"
+    ],
+    "c1": [
+     "competitor_substring"
+    ],
+    "c4": [
+     "Image overexposed"
+    ]
+   },
+   "queries": [
+    "Al Jadeed Bakery Arabic Bread Large 6 pcs"
+   ]
+  },
+  "uae-052-no-results-healthy-farms-eggs-30": {
+   "decision": "NOT_FOUND",
+   "status": "none",
+   "chosen_id": null,
+   "chosen_label": null,
+   "auto": false,
+   "needs_review": true,
+   "kills": {},
+   "queries": [
+    "Healthy Farms Fresh Eggs 30 pcs"
+   ]
+  },
+  "uae-053-no-correct-emirates-bio-farm-kale": {
+   "decision": "AUTO_PUBLISH",
+   "status": "accepted",
+   "chosen_id": "c4",
+   "chosen_label": "not_packshot",
+   "auto": true,
+   "needs_review": false,
+   "kills": {
+    "c5": [
+     "size_clash"
+    ],
+    "c1": [
+     "brand_mismatch"
+    ],
+    "c3": [
+     "excluded_domain"
+    ]
+   },
+   "queries": [
+    "Emirates Bio Farm Organic Kale 250g"
+   ]
+  },
+  "uae-054-no-usable-koita-organic-laban-1l": {
+   "decision": "AUTO_PUBLISH",
+   "status": "last_resort",
+   "chosen_id": "c3",
+   "chosen_label": "unusable",
+   "auto": true,
+   "needs_review": false,
+   "kills": {
+    "c2": [
+     "download_failed"
+    ],
+    "c1": [
+     "download_failed"
+    ],
+    "c4": [
+     "Image overexposed",
+     "Image too blurry"
+    ],
+    "c5": [
+     "competitor_substring"
+    ],
+    "c6": [
+     "download_failed"
+    ]
+   },
+   "queries": [
+    "Koita Organic Full Fat Laban 1L"
+   ]
+  },
+  "uae-055-al-rawabi-fresh-milk-full-fat-1l": {
+   "decision": "AUTO_PUBLISH",
+   "status": "accepted",
+   "chosen_id": "c3",
+   "chosen_label": "not_packshot",
+   "auto": true,
+   "needs_review": false,
+   "kills": {
+    "c4": [
+     "Image overexposed"
+    ],
+    "c6": [
+     "Image overexposed"
+    ],
+    "c2": [
+     "gemini_rejected"
+    ],
+    "c5": [
+     "size_clash"
+    ],
+    "c1": [
+     "Image overexposed",
+     "Image too blurry"
+    ]
+   },
+   "queries": [
+    "Al Rawabi Fresh Milk Full Fat 1L"
+   ]
+  },
+  "uae-057-puck-cream-cheese-500g": {
+   "decision": "AUTO_PUBLISH",
+   "status": "accepted",
+   "chosen_id": "c6",
+   "chosen_label": "not_packshot",
+   "auto": true,
+   "needs_review": false,
+   "kills": {
+    "c5": [
+     "Image overexposed",
+     "Image too blurry"
+    ],
+    "c2": [
+     "Image overexposed"
+    ],
+    "c4": [
+     "Image overexposed",
+     "Image too blurry"
+    ],
+    "c3": [
+     "size_clash"
+    ]
+   },
+   "queries": [
+    "Puck Cream Cheese Spread 500g"
+   ]
+  },
+  "uae-060-tilda-pure-basmati-rice-5kg": {
+   "decision": "AUTO_PUBLISH",
+   "status": "accepted",
+   "chosen_id": "c2",
+   "chosen_label": "not_packshot",
+   "auto": true,
+   "needs_review": false,
+   "kills": {
+    "c6": [
+     "competitor_substring"
+    ],
+    "c4": [
+     "size_clash"
+    ],
+    "c1": [
+     "Image overexposed",
+     "Image too blurry"
+    ],
+    "c5": [
+     "Image overexposed"
+    ],
+    "c3": [
+     "size_clash"
+    ],
+    "c7": [
+     "Image overexposed"
+    ]
+   },
+   "queries": [
+    "Tilda Pure Basmati Rice 5kg"
+   ]
+  },
+  "uae-061-saba-sanabel-chakki-atta-5kg": {
+   "decision": "AUTO_PUBLISH",
+   "status": "last_resort",
+   "chosen_id": "c1",
+   "chosen_label": "correct_exact",
+   "auto": true,
+   "needs_review": false,
+   "kills": {
+    "c4": [
+     "Image overexposed",
+     "Image too blurry"
+    ],
+    "c6": [
+     "Image overexposed"
+    ],
+    "c5": [
+     "competitor_substring"
+    ],
+    "c3": [
+     "brand_mismatch"
+    ],
+    "c2": [
+     "size_clash"
+    ]
+   },
+   "queries": [
+    "Saba Sanabel Chakki Fresh Atta 5kg"
+   ]
+  },
+  "uae-062-lipton-yellow-label-100-bags": {
+   "decision": "AUTO_PUBLISH",
+   "status": "last_resort",
+   "chosen_id": "c1",
+   "chosen_label": "correct_exact",
+   "auto": true,
+   "needs_review": false,
+   "kills": {
+    "c4": [
+     "Image overexposed",
+     "Image too blurry"
+    ],
+    "c3": [
+     "Image overexposed",
+     "Image too blurry"
+    ],
+    "c5": [
+     "competitor_substring"
+    ],
+    "c2": [
+     "Image overexposed"
+    ],
+    "c6": [
+     "Image overexposed"
+    ]
+   },
+   "queries": [
+    "Lipton Yellow Label Black Tea 100 Tea Bags"
+   ]
+  },
+  "uae-063-kelloggs-corn-flakes-500g": {
+   "decision": "AUTO_PUBLISH",
+   "status": "accepted",
+   "chosen_id": "c6",
+   "chosen_label": "not_packshot",
+   "auto": true,
+   "needs_review": false,
+   "kills": {
+    "c4": [
+     "size_clash"
+    ],
+    "c5": [
+     "Image overexposed"
+    ],
+    "c7": [
+     "Image overexposed",
+     "Image too blurry"
+    ],
+    "c3": [
+     "Image overexposed",
+     "Image too blurry"
+    ],
+    "c1": [
+     "Image overexposed"
+    ],
+    "c2": [
+     "size_clash"
+    ]
+   },
+   "queries": [
+    "Kellogg's Corn Flakes 500g"
+   ]
+  },
+  "uae-064-al-alali-tuna-sunflower-170g": {
+   "decision": "AUTO_PUBLISH",
+   "status": "last_resort",
+   "chosen_id": "c1",
+   "chosen_label": "correct_exact",
+   "auto": true,
+   "needs_review": false,
+   "kills": {
+    "c4": [
+     "Image overexposed",
+     "Image too blurry"
+    ],
+    "c3": [
+     "Image overexposed",
+     "Image too blurry"
+    ],
+    "c2": [
+     "Image overexposed"
+    ],
+    "c5": [
+     "competitor_substring"
+    ],
+    "c6": [
+     "Image overexposed"
+    ]
+   },
+   "queries": [
+    "Al Alali Tuna Chunks in Sunflower Oil 170g"
+   ]
+  },
+  "uae-065-almarai-long-life-milk-full-fat-1l": {
+   "decision": "AUTO_PUBLISH",
+   "status": "last_resort",
+   "chosen_id": "c5",
+   "chosen_label": "correct_exact",
+   "auto": true,
+   "needs_review": false,
+   "kills": {
+    "c4": [
+     "Image overexposed",
+     "Image too blurry"
+    ],
+    "c1": [
+     "Image overexposed",
+     "Image too blurry"
+    ],
+    "c6": [
+     "size_clash"
+    ],
+    "c2": [
+     "Image overexposed"
+    ],
+    "c3": [
+     "Image overexposed",
+     "Image too blurry"
+    ]
+   },
+   "queries": [
+    "Almarai Long Life Milk Full Fat 1L"
+   ]
+  },
+  "uae-066-ferrero-rocher-t16-200g": {
+   "decision": "AUTO_PUBLISH",
+   "status": "accepted",
+   "chosen_id": "c5",
+   "chosen_label": "not_packshot",
+   "auto": true,
+   "needs_review": false,
+   "kills": {
+    "c4": [
+     "competitor_substring"
+    ],
+    "c2": [
+     "size_clash"
+    ],
+    "c3": [
+     "size_clash"
+    ],
+    "c1": [
+     "Image overexposed",
+     "Image too blurry"
+    ]
+   },
+   "queries": [
+    "Ferrero Rocher Chocolate T16 200g"
+   ]
+  },
+  "uae-068-unmapped-brand-americana-nuggets-400g": {
+   "decision": "AUTO_PUBLISH",
+   "status": "last_resort",
+   "chosen_id": "c1",
+   "chosen_label": "correct_exact",
+   "auto": true,
+   "needs_review": false,
+   "kills": {
+    "c4": [
+     "brand_mismatch"
+    ],
+    "c2": [
+     "size_clash"
+    ],
+    "c3": [
+     "Image overexposed",
+     "Image too blurry"
+    ],
+    "c5": [
+     "Image overexposed"
+    ]
+   },
+   "queries": [
+    "Americana Breaded Chicken Nuggets 400g"
+   ]
+  },
+  "uae-067-zwan-chicken-luncheon-200g": {
+   "decision": "AUTO_PUBLISH",
+   "status": "last_resort",
+   "chosen_id": "c1",
+   "chosen_label": "correct_exact",
+   "auto": true,
+   "needs_review": false,
+   "kills": {
+    "c4": [
+     "size_clash"
+    ],
+    "c5": [
+     "competitor_substring"
+    ],
+    "c2": [
+     "Image overexposed"
+    ],
+    "c3": [
+     "Image overexposed"
+    ]
+   },
+   "queries": [
+    "Zwan Chicken Luncheon Meat 200g"
+   ]
+  }
+ }
+}

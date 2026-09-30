@@ -1,0 +1,243 @@
+"""Run a whole golden set through one engine and write a JSON report.
+
+    report = run_all("v1")                  # legacy search, offline
+    report = run_all("v2", "gemini_down")   # catalog_match with the verifier down
+    path = write_report(report)             # <tmp>/image_search_eval/<engine>-<scenario>-<stamp>.json
+
+A report holds the per-SKU outcomes, the metrics from metrics.compute and the
+network attempts the run made (it must make none). baseline_v1.json is a
+trimmed report of the legacy engine, written once by
+scripts/eval_report.py --engine v1 --write-baseline.
+"""
+
+from __future__ import annotations
+
+import datetime as _dt
+import hashlib
+import json
+import logging
+import os
+import subprocess
+import sys
+import tempfile
+import time
+from pathlib import Path
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional
+
+EVAL_DIR = Path(__file__).resolve().parent
+REPO_ROOT = EVAL_DIR.parent.parent
+for _p in (str(REPO_ROOT), str(EVAL_DIR)):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
+import metrics  # noqa: E402
+import runners  # noqa: E402
+
+log = logging.getLogger(__name__)
+
+FIXTURES = EVAL_DIR / "fixtures"
+GOLDEN_PATH = FIXTURES / "golden_skus.json"
+CASSETTE_PATH = FIXTURES / "vlm_cassette.json"
+MAPPINGS_PATH = FIXTURES / "brand_mappings.json"
+BASELINE_PATH = FIXTURES / "baseline_v1.json"
+
+ENGINES = ("v1", "v2")
+SCENARIOS = ("normal", "gemini_down")
+
+# Source files whose behaviour the v1 baseline records. When any of them
+# changes (for example the v1 rollback hot-fixes), the live v1 run is no
+# longer expected to reproduce the stored numbers exactly.
+LEGACY_SOURCES = ("image_search.py", "image_quality_gatekeeper.py", "aesthetics_engine.py", "image_dedup_bktree.py")
+FIXTURE_FILES = ("golden_skus.json", "vlm_cassette.json", "brand_mappings.json")
+
+
+def _read_json(path: Path) -> Any:
+    with open(path, "r", encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def load_golden(path: Optional[os.PathLike] = None) -> Dict[str, Any]:
+    path = Path(path or GOLDEN_PATH)
+    golden = _read_json(path)
+    for sku in golden["skus"]:
+        sku.setdefault("_base_dir", str(path.parent))   # recorded sets keep their blobs next to the JSON
+    return golden
+
+
+def load_cassette(path: Optional[os.PathLike] = None) -> Dict[str, Any]:
+    return _read_json(Path(path or CASSETTE_PATH))
+
+
+def load_mappings(path: Optional[os.PathLike] = None) -> Dict[str, Any]:
+    return runners.load_mappings(path or MAPPINGS_PATH)
+
+
+def load_baseline(path: Optional[os.PathLike] = None) -> Dict[str, Any]:
+    return _read_json(Path(path or BASELINE_PATH))
+
+
+def _normalised_sha256(paths: Iterable[Path]) -> Dict[str, str]:
+    """sha256 per file with CRLF folded to LF, so a Windows checkout hashes the same."""
+    out = {}
+    for path in paths:
+        data = path.read_bytes().replace(b"\r\n", b"\n") if path.exists() else b""
+        out[path.name] = hashlib.sha256(data).hexdigest()
+    return out
+
+
+def _combined(digests: Mapping[str, str]) -> str:
+    return hashlib.sha256(json.dumps(dict(sorted(digests.items()))).encode("utf-8")).hexdigest()
+
+
+def legacy_fingerprint() -> Dict[str, Any]:
+    files = _normalised_sha256(REPO_ROOT / name for name in LEGACY_SOURCES)
+    return {"sha256": _combined(files), "files": files}
+
+
+def fixture_fingerprint() -> Dict[str, Any]:
+    files = _normalised_sha256(FIXTURES / name for name in FIXTURE_FILES)
+    files["imagegen.py"] = _normalised_sha256([EVAL_DIR / "imagegen.py"])["imagegen.py"]
+    return {"sha256": _combined(files), "files": files}
+
+
+def git_commit() -> Optional[str]:
+    try:
+        out = subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(REPO_ROOT), capture_output=True, text=True,
+                             timeout=10, check=False)
+        return out.stdout.strip() or None
+    except Exception:
+        return None
+
+
+def run_all(engine: str = "v1", scenario: str = "normal", *, golden: Optional[Mapping[str, Any]] = None,
+            cassette: Optional[Mapping[str, Any]] = None, mappings: Optional[Dict[str, Any]] = None,
+            sku_ids: Optional[Iterable[str]] = None,
+            progress: Optional[Callable[[int, int, metrics.Outcome], None]] = None) -> Dict[str, Any]:
+    """Replay every golden SKU through one engine with the network blocked; return a report dict."""
+    if engine not in ENGINES:
+        raise ValueError(f"engine must be one of {ENGINES}")
+    if scenario not in SCENARIOS:
+        raise ValueError(f"scenario must be one of {SCENARIOS}")
+    golden = golden or load_golden()
+    cassette = cassette or load_cassette()
+    mappings = mappings if mappings is not None else load_mappings()
+    wanted = set(sku_ids) if sku_ids else None
+    skus = [s for s in golden["skus"] if wanted is None or s["id"] in wanted]
+    run_one = runners.run_legacy if engine == "v1" else runners.run_v2
+
+    outcomes: List[metrics.Outcome] = []
+    attempts: List[str] = []
+    t0 = time.perf_counter()
+    with runners.network_blocked(attempts):
+        for i, sku in enumerate(skus, 1):
+            outcome = run_one(sku, cassette, scenario=scenario, mappings=mappings)
+            outcomes.append(outcome)
+            if progress:
+                progress(i, len(skus), outcome)
+    seconds = time.perf_counter() - t0
+
+    labels = metrics.labels_from_golden({"skus": skus})
+    report = {
+        "engine": engine,
+        "scenario": scenario,
+        "generated_at": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"),
+        "seconds": round(seconds, 2),
+        "n_skus": len(skus),
+        "network_attempts": runners.outbound_attempts(attempts),
+        "metrics": metrics.compute(outcomes, labels),
+        "outcomes": [o.to_dict() for o in outcomes],
+    }
+    if engine == "v1":
+        report["legacy_fingerprint"] = legacy_fingerprint()
+    report["fixture_fingerprint"] = fixture_fingerprint()
+    return report
+
+
+def report_dir() -> Path:
+    path = Path(os.environ.get("EVAL_REPORT_DIR") or Path(tempfile.gettempdir()) / "image_search_eval")
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def write_report(report: Mapping[str, Any], path: Optional[os.PathLike] = None) -> Path:
+    stamp = _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+    target = Path(path) if path else report_dir() / f"{report['engine']}-{report['scenario']}-{stamp}.json"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with open(target, "w", encoding="utf-8", newline="\n") as fh:
+        json.dump(report, fh, ensure_ascii=False, indent=1)
+        fh.write("\n")
+    return target
+
+
+def baseline_payload(report: Mapping[str, Any], golden: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
+    """The committed v1 baseline: aggregate metrics plus a per-SKU record of what v1 did."""
+    if report.get("engine") != "v1" or report.get("scenario") != "normal":
+        raise ValueError("the baseline is the legacy engine on the normal scenario")
+    golden = golden or load_golden()
+    labels = metrics.labels_from_golden(golden)
+    per_sku = {}
+    for o in report["outcomes"]:
+        lab = labels[o["sku_id"]]
+        per_sku[o["sku_id"]] = {
+            "decision": o["decision"],
+            "status": o["status"],
+            "chosen_id": o["chosen_id"],
+            "chosen_label": lab["candidates"].get(o["chosen_id"]) if o["chosen_id"] else None,
+            "auto": o["auto"],
+            "needs_review": o["needs_review"],
+            "kills": o["kills"],
+            "queries": o["queries"],
+        }
+    return {
+        "description": (
+            "Legacy v1 (image_search.search_best_product_image) replayed offline on the golden fixtures before any "
+            "fix. Aggregate metrics and what v1 did per SKU, kept as data so the 'before' state stays on record "
+            "after v1 is hot-fixed. Regenerate only with: python scripts/eval_report.py --engine v1 "
+            "--write-baseline (from a checkout of legacy_commit when v1 has changed since)."),
+        "engine": "v1",
+        "scenario": "normal",
+        "generated_at": report["generated_at"],
+        "legacy_commit": git_commit(),
+        "legacy_fingerprint": report["legacy_fingerprint"],
+        "fixture_fingerprint": report["fixture_fingerprint"],
+        "n_skus": report["n_skus"],
+        "metrics": report["metrics"],
+        "per_sku": per_sku,
+    }
+
+
+def write_baseline(report: Mapping[str, Any], path: Optional[os.PathLike] = None) -> Path:
+    payload = baseline_payload(report)
+    target = Path(path or BASELINE_PATH)
+    with open(target, "w", encoding="utf-8", newline="\n") as fh:
+        json.dump(payload, fh, ensure_ascii=False, indent=1)
+        fh.write("\n")
+    return target
+
+
+def fmt_rate(value: Any) -> str:
+    return "  -  " if value is None else f"{100 * float(value):5.1f}%"
+
+
+def stratum_table(m: Mapping[str, Any]) -> str:
+    """Plain-text per-stratum table of the headline rates."""
+    cols = (("n", "n_skus"), ("auto", "n_auto"), ("pre", "n_preselected"), ("auto prec", "auto_accept_precision"),
+            ("wrong auto", "wrong_auto_rate"), ("correct pick", "correct_pick_rate"),
+            ("presel prec", "preselect_precision"), ("review", "review_rate"), ("not found", "not_found_rate"),
+            ("false NF", "false_not_found_rate"), ("pool recall", "pool_recall"))
+    width = max([len("stratum"), len("ALL")] + [len(s) for s in m.get("per_stratum", {})]) + 2
+    head = "stratum".ljust(width) + "".join(c[0].rjust(13) for c in cols)
+    lines = [head, "-" * len(head)]
+
+    def row(name: str, data: Mapping[str, Any]) -> str:
+        cells = []
+        for _, key in cols:
+            v = data.get(key)
+            cells.append((str(v) if key.startswith("n_") else fmt_rate(v)).rjust(13))
+        return name.ljust(width) + "".join(cells)
+
+    for stratum, data in m.get("per_stratum", {}).items():
+        lines.append(row(stratum, data))
+    lines.append("-" * len(head))
+    lines.append(row("ALL", m))
+    return "\n".join(lines)

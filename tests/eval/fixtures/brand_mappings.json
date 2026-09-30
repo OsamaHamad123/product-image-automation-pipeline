@@ -1,0 +1,539 @@
+{
+ "version": 1,
+ "description": "Fixture 'Brands Mapping' sheet in the dict shape google_sheets.get_brand_mappings returns {brand_lower: {brand, synonyms, excluded_competitors}}, plus the optional sub_brands and official_domains columns (D9). The first six rows are the sheet defaults, unchanged.",
+ "mappings": {
+  "meliha": {
+   "brand": "Meliha",
+   "synonyms": [
+    "Meliha",
+    "Mleiha",
+    "مليحة",
+    "مليحه"
+   ],
+   "excluded_competitors": [
+    "Almarai",
+    "Sutas",
+    "Koita",
+    "Lacnor",
+    "Baladna",
+    "Al Rawabi",
+    "Nadec",
+    "Nada"
+   ]
+  },
+  "saba sanabel": {
+   "brand": "Saba Sanabel",
+   "synonyms": [
+    "Saba Sanabel",
+    "Sabaa Sanabel",
+    "سبع سنابل",
+    "صبا سنابل",
+    "سنابل"
+   ],
+   "excluded_competitors": [
+    "Al Baker",
+    "Jenan",
+    "Grand Mills",
+    "Organic Larder"
+   ]
+  },
+  "mai dubai": {
+   "brand": "Mai Dubai",
+   "synonyms": [
+    "Mai Dubai",
+    "May Dubai",
+    "ماي دبي",
+    "مي دبي",
+    "مياه دبي"
+   ],
+   "excluded_competitors": [
+    "Masafi",
+    "Al Ain",
+    "Oasis",
+    "Arwa",
+    "Aquafina",
+    "Nestle Pure Life",
+    "Voss",
+    "Evian"
+   ]
+  },
+  "almarai": {
+   "brand": "Almarai",
+   "synonyms": [
+    "Almarai",
+    "Al Marai",
+    "المراعي"
+   ],
+   "excluded_competitors": [
+    "Sutas",
+    "Koita",
+    "Lacnor",
+    "Baladna",
+    "Al Rawabi",
+    "Nadec",
+    "Nada",
+    "Meliha",
+    "Mleiha"
+   ]
+  },
+  "masafi": {
+   "brand": "Masafi",
+   "synonyms": [
+    "Masafi",
+    "مسافي"
+   ],
+   "excluded_competitors": [
+    "Al Ain",
+    "Oasis",
+    "Arwa",
+    "Aquafina",
+    "Nestle Pure Life",
+    "Mai Dubai",
+    "Voss",
+    "Evian"
+   ]
+  },
+  "al ain": {
+   "brand": "Al Ain",
+   "synonyms": [
+    "Al Ain",
+    "العين",
+    "alain"
+   ],
+   "excluded_competitors": [
+    "Masafi",
+    "Oasis",
+    "Arwa",
+    "Aquafina",
+    "Nestle Pure Life",
+    "Mai Dubai",
+    "Voss",
+    "Evian"
+   ]
+  },
+  "american garden": {
+   "brand": "American Garden",
+   "synonyms": [
+    "American Garden",
+    "A/G",
+    "AG",
+    "أمريكان جاردن"
+   ],
+   "excluded_competitors": [
+    "Heinz",
+    "Hellmann's",
+    "Kraft"
+   ],
+   "official_domains": [
+    "americangarden.us"
+   ]
+  },
+  "al rawabi": {
+   "brand": "Al Rawabi",
+   "synonyms": [
+    "Al Rawabi",
+    "Al-Rawabi",
+    "الروابي"
+   ],
+   "excluded_competitors": [
+    "Almarai",
+    "Al Ain Farms",
+    "Lacnor",
+    "Marmum",
+    "Meliha"
+   ],
+   "official_domains": [
+    "alrawabi.ae"
+   ]
+  },
+  "al ain farms": {
+   "brand": "Al Ain Farms",
+   "synonyms": [
+    "Al Ain Farms",
+    "مزارع العين"
+   ],
+   "excluded_competitors": [
+    "Almarai",
+    "Al Rawabi",
+    "Lacnor"
+   ],
+   "official_domains": [
+    "alainfarms.com"
+   ]
+  },
+  "lacnor": {
+   "brand": "Lacnor",
+   "synonyms": [
+    "Lacnor",
+    "لاكنور"
+   ],
+   "excluded_competitors": [
+    "Almarai",
+    "Al Rawabi",
+    "Al Ain Farms"
+   ]
+  },
+  "marmum": {
+   "brand": "Marmum",
+   "synonyms": [
+    "Marmum",
+    "مرموم"
+   ],
+   "excluded_competitors": [],
+   "official_domains": [
+    "marmum.ae"
+   ]
+  },
+  "nada": {
+   "brand": "Nada",
+   "synonyms": [
+    "Nada",
+    "ندى"
+   ],
+   "excluded_competitors": [
+    "Almarai"
+   ]
+  },
+  "baladna": {
+   "brand": "Baladna",
+   "synonyms": [
+    "Baladna",
+    "بلدنا"
+   ],
+   "excluded_competitors": [
+    "Almarai",
+    "Al Rawabi"
+   ],
+   "official_domains": [
+    "baladna.com"
+   ]
+  },
+  "koita": {
+   "brand": "Koita",
+   "synonyms": [
+    "Koita",
+    "كويتا"
+   ],
+   "excluded_competitors": [
+    "Almarai"
+   ]
+  },
+  "nestle": {
+   "brand": "Nestle",
+   "synonyms": [
+    "Nestle",
+    "Nestlé",
+    "نستله"
+   ],
+   "excluded_competitors": [],
+   "sub_brands": [
+    "Nido",
+    "KitKat",
+    "Maggi",
+    "Nesquik"
+   ],
+   "official_domains": [
+    "nestle-mena.com"
+   ]
+  },
+  "nescafe": {
+   "brand": "Nescafe",
+   "synonyms": [
+    "Nescafe",
+    "Nescafé",
+    "نسكافيه"
+   ],
+   "excluded_competitors": [
+    "Jacobs"
+   ],
+   "official_domains": [
+    "nescafe.com"
+   ]
+  },
+  "pepsico": {
+   "brand": "PepsiCo",
+   "synonyms": [
+    "PepsiCo",
+    "بيبسيكو"
+   ],
+   "excluded_competitors": [],
+   "sub_brands": [
+    "Lay's",
+    "Doritos",
+    "Pepsi",
+    "Mountain Dew",
+    "7UP"
+   ],
+   "official_domains": [
+    "pepsicoarabia.com"
+   ]
+  },
+  "pepsi": {
+   "brand": "Pepsi",
+   "synonyms": [
+    "Pepsi",
+    "بيبسي"
+   ],
+   "excluded_competitors": [
+    "Coca-Cola",
+    "Coca Cola",
+    "RC Cola"
+   ]
+  },
+  "coca-cola": {
+   "brand": "Coca-Cola",
+   "synonyms": [
+    "Coca-Cola",
+    "Coca Cola",
+    "Coke",
+    "كوكا كولا"
+   ],
+   "excluded_competitors": [
+    "Pepsi"
+   ],
+   "sub_brands": [
+    "Arwa"
+   ]
+  },
+  "arwa": {
+   "brand": "Arwa",
+   "synonyms": [
+    "Arwa",
+    "أروى"
+   ],
+   "excluded_competitors": [
+    "Masafi",
+    "Al Ain",
+    "Mai Dubai",
+    "Oasis",
+    "Aquafina"
+   ]
+  },
+  "mondelez": {
+   "brand": "Mondelez",
+   "synonyms": [
+    "Mondelez",
+    "مونديليز"
+   ],
+   "excluded_competitors": [],
+   "sub_brands": [
+    "Oreo",
+    "Tang",
+    "Cadbury",
+    "Toblerone"
+   ],
+   "official_domains": [
+    "mondelezinternational.com"
+   ]
+  },
+  "tang": {
+   "brand": "Tang",
+   "synonyms": [
+    "Tang",
+    "تانج"
+   ],
+   "excluded_competitors": []
+  },
+  "heinz": {
+   "brand": "Heinz",
+   "synonyms": [
+    "Heinz",
+    "هاينز"
+   ],
+   "excluded_competitors": [
+    "American Garden",
+    "Hellmann's"
+   ]
+  },
+  "hellmann's": {
+   "brand": "Hellmann's",
+   "synonyms": [
+    "Hellmann's",
+    "Hellmanns",
+    "هيلمانز"
+   ],
+   "excluded_competitors": [
+    "American Garden",
+    "Heinz"
+   ]
+  },
+  "kdd": {
+   "brand": "KDD",
+   "synonyms": [
+    "KDD",
+    "Kuwait Danish Dairy",
+    "كي دي دي"
+   ],
+   "excluded_competitors": [
+    "Rani"
+   ]
+  },
+  "rani": {
+   "brand": "Rani",
+   "synonyms": [
+    "Rani",
+    "راني"
+   ],
+   "excluded_competitors": [
+    "KDD"
+   ]
+  },
+  "tilda": {
+   "brand": "Tilda",
+   "synonyms": [
+    "Tilda",
+    "تيلدا"
+   ],
+   "excluded_competitors": [
+    "India Gate",
+    "Daawat",
+    "Abu Kass"
+   ],
+   "official_domains": [
+    "tilda.com"
+   ]
+  },
+  "carrefour": {
+   "brand": "Carrefour",
+   "synonyms": [
+    "Carrefour",
+    "كارفور"
+   ],
+   "excluded_competitors": [],
+   "official_domains": [
+    "carrefouruae.com"
+   ]
+  },
+  "lulu": {
+   "brand": "Lulu",
+   "synonyms": [
+    "Lulu",
+    "لولو"
+   ],
+   "excluded_competitors": [],
+   "official_domains": [
+    "luluhypermarket.com"
+   ]
+  },
+  "nutella": {
+   "brand": "Nutella",
+   "synonyms": [
+    "Nutella",
+    "نوتيلا"
+   ],
+   "excluded_competitors": []
+  },
+  "ferrero rocher": {
+   "brand": "Ferrero Rocher",
+   "synonyms": [
+    "Ferrero Rocher",
+    "Ferrero",
+    "فيريرو روشيه"
+   ],
+   "excluded_competitors": [
+    "Lindt"
+   ]
+  },
+  "galaxy": {
+   "brand": "Galaxy",
+   "synonyms": [
+    "Galaxy",
+    "جالكسي"
+   ],
+   "excluded_competitors": [
+    "Cadbury"
+   ]
+  },
+  "lipton": {
+   "brand": "Lipton",
+   "synonyms": [
+    "Lipton",
+    "ليبتون"
+   ],
+   "excluded_competitors": [
+    "Alokozay"
+   ]
+  },
+  "kellogg's": {
+   "brand": "Kellogg's",
+   "synonyms": [
+    "Kellogg's",
+    "Kelloggs",
+    "كيلوجز"
+   ],
+   "excluded_competitors": []
+  },
+  "puck": {
+   "brand": "Puck",
+   "synonyms": [
+    "Puck",
+    "بوك"
+   ],
+   "excluded_competitors": [],
+   "official_domains": [
+    "puckarabia.com"
+   ]
+  },
+  "al alali": {
+   "brand": "Al Alali",
+   "synonyms": [
+    "Al Alali",
+    "العلالي"
+   ],
+   "excluded_competitors": [
+    "Americana"
+   ]
+  },
+  "indomie": {
+   "brand": "Indomie",
+   "synonyms": [
+    "Indomie",
+    "إندومي",
+    "اندومي"
+   ],
+   "excluded_competitors": []
+  },
+  "al foah": {
+   "brand": "Al Foah",
+   "synonyms": [
+    "Al Foah",
+    "الفوعة"
+   ],
+   "excluded_competitors": [
+    "Bateel"
+   ]
+  },
+  "al wadi al akhdar": {
+   "brand": "Al Wadi Al Akhdar",
+   "synonyms": [
+    "Al Wadi Al Akhdar",
+    "الوادي الأخضر"
+   ],
+   "excluded_competitors": [
+    "Cortas"
+   ]
+  },
+  "zwan": {
+   "brand": "Zwan",
+   "synonyms": [
+    "Zwan",
+    "زوان"
+   ],
+   "excluded_competitors": [
+    "Americana"
+   ]
+  },
+  "al jadeed bakery": {
+   "brand": "Al Jadeed Bakery",
+   "synonyms": [
+    "Al Jadeed Bakery",
+    "Al Jadeed",
+    "مخبز الجديد"
+   ],
+   "excluded_competitors": [
+    "Modern Bakery",
+    "Lusine"
+   ]
+  }
+ }
+}
