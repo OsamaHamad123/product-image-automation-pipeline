@@ -60,6 +60,13 @@ core was rebuilt and wired into the queue, the dashboard actions and the sheet w
   key before a successful write and leaves unknown payloads in place.
 - `fastapi_server.py` is a thin development wrapper over the `cli_bridge` actions and is not launched.
 - `.env` values no longer override variables already set in the environment.
+- `verify_cloud_services.py` also checks the Serper key (one test image query). It checks Gemini with the same
+  `models.get` call the worker makes at start-up, with the key in a header instead of the URL. Google Custom
+  Search is reported as optional.
+- Error payloads from `cli_bridge` carry fixed messages. The exception text goes to `temp/search.log` and the
+  Errors page, never into a response, because `fastapi_server` returns the same payloads over HTTP.
+- `docs/walkthrough.md` is rewritten for the current system: keys, sheet columns, the Brands Mapping tab, the
+  daily review flow and reject reasons, failure codes, auto-publish, and measuring accuracy on real products.
 
 ### Removed
 
@@ -71,6 +78,11 @@ core was rebuilt and wired into the queue, the dashboard actions and the sheet w
   payloads in `fastapi_server.py`; CLIP embedding and "active learning" JSON logging on approval.
 - Settings `AUTO_APPROVE_THRESHOLD`, `IGNORE_UNIT_CLASH`, `USE_FALLBACK_SEARCH`, `SEARCH_CACHE_*`,
   `MAX_PARALLEL_DOWNLOADS`, `DRIVE_FOLDER_ID`.
+- The "Next-Gen Frontiers Telemetry" panel on the diagnostics page. Its figures, such as "Accuracy 98.4%",
+  were hard-coded and described deleted `verification_layer` modules.
+- `scripts/diagnose_search.py`, which probed the retired Google CSE/Bing/DDG scrapers, and
+  `scripts/verify_upgrades.py`, which tested deleted modules and wrote a test link to row 9999 of the live sheet.
+  Use `scripts/smoke_live.py --dry-run` instead.
 - The v1 "visual duplicate" shortcut that answered a search with another product's Cloudinary image when the
   pHash was within 5 bits. Flavour and size variants share packaging, so it handed out the wrong variant. The
   shared BK-tree (1.0.0 fix) is still built and filled with every saved image's hash; nothing substitutes answers

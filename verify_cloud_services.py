@@ -83,42 +83,67 @@ def verify_gemini():
     api_key = config.GEMINI_API_KEY
     if not api_key:
         print("❌ خطأ: لم يتم تعيين مفتاح GEMINI_API_KEY في ملف .env")
+        print("💡 بدون Gemini لا يُقرأ ملصق المنتج، فكل النتائج تذهب للمراجعة البشرية ولا يُنشر شيء تلقائياً.")
         return False
-        
+
+    # نفس الفحص الذي يجريه العامل عند البدء: models.get بالمفتاح في الترويسة (لا يظهر في الروابط أو السجلات)
+    from catalog_match.verify import check_model_available
     model = getattr(config, "GEMINI_MODEL", "gemini-3.1-flash-lite")
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
-    headers = {"Content-Type": "application/json"}
-    
-    payload = {
-        "contents": [{
-            "parts": [{"text": "Hello, respond with only the word: OK"}]
-        }]
+    print(f"🔄 التحقق من توفر الموديل {model} ...")
+    check = check_model_available(api_key=api_key, model=model, timeout=15)
+    if check.ok:
+        print(f"✅ مفتاح Gemini صالح والموديل {check.model} متاح.")
+        return True
+    hints = {
+        "model_not_found": "اسم الموديل غير موجود أو متقاعد: اختر موديلاً متاحاً من صفحة الإعدادات.",
+        "invalid_request_or_key": "المفتاح غير صالح: أنشئ مفتاحاً جديداً من Google AI Studio.",
+        "invalid_key": "المفتاح غير صالح: أنشئ مفتاحاً جديداً من Google AI Studio.",
+        "permission_denied": "المفتاح لا يملك صلاحية Gemini API أو المشروع موقوف.",
+        "quota": "تم استنفاد الحصة (429): فعّل الدفع (Paid tier) في Google AI Studio.",
+        "timeout": "انتهت المهلة: تحقق من الإنترنت أو البروكسي.",
+        "connection_error": "تعذر الاتصال: تحقق من الإنترنت أو البروكسي.",
     }
-    
-    try:
-        print(f"🔄 إرسال طلب اختبار خفيف إلى Gemini API ({model})...")
-        response = requests.post(url, headers=headers, json=payload, timeout=15)
-        
-        if response.status_code == 200:
-            data = response.json()
-            reply = data['candidates'][0]['content']['parts'][0]['text'].strip()
-            print(f"✅ نجح الاتصال بـ Gemini API. الرد المستلم: '{reply}'")
-            return True
-        elif response.status_code == 429:
-            print("❌ فشل الاتصال: تم استنفاد حصة استخدام Gemini API (Quota Exceeded - Error 429).")
-            print("💡 الحل: تحقق من حد الفوترة للـ Billing في حساب Google AI Studio الخاص بك.")
-            return False
-        elif response.status_code in [400, 403]:
-            print(f"❌ فشل الاتصال: مفتاح GEMINI_API_KEY غير صالح أو الموديل غير مدعوم (Error {response.status_code}).")
-            print(f"تفاصيل الخطأ: {response.text}")
-            return False
-        else:
-            print(f"❌ فشل الاتصال بـ Gemini (كود {response.status_code})")
-            print(f"تفاصيل الخطأ: {response.text}")
-            return False
-    except Exception as e:
-        print(f"❌ حدث خطأ أثناء فحص Gemini: {e}")
+    print(f"❌ فشل فحص Gemini ({check.status}).")
+    print(f"💡 {hints.get(check.status, 'راجع المفتاح والموديل في ملف .env أو صفحة الإعدادات.')}")
+    return False
+
+
+def verify_serper():
+    print_separator("فحص الاتصال بـ Serper (Google Images) - مصدر الصور الأساسي")
+    from catalog_match import settings as cm_settings
+    api_key = cm_settings.serper_api_key()
+    if not api_key:
+        print("⚠️ لم يتم تعيين SERPER_API_KEY: سيُستخدم Bing كبديل، ونتائجه تذهب للمراجعة دائماً ولا تُنشر تلقائياً.")
         return False
+    try:
+        print("🔄 إرسال بحث صور تجريبي واحد (يستهلك رصيد استعلام واحد)...")
+        response = requests.post(
+            "https://google.serper.dev/images",
+            headers={"X-API-KEY": api_key, "Content-Type": "application/json"},
+            json={"q": "Almarai Fresh Milk Full Fat 1L", "gl": "ae", "hl": "en", "num": 10},
+            timeout=15,
+        )
+    except requests.RequestException as e:
+        print(f"❌ تعذر الاتصال بـ Serper ({type(e).__name__}): تحقق من الإنترنت أو البروكسي.")
+        return False
+    if response.status_code == 200:
+        try:
+            images = response.json().get("images") or []
+        except ValueError:
+            images = []
+        if images:
+            print(f"✅ Serper يعمل: {len(images)} صورة للاستعلام التجريبي.")
+            return True
+        print("⚠️ Serper رد بنجاح لكن بدون صور: تحقق من الحساب أو جرّب لاحقاً.")
+        return False
+    if response.status_code in (401, 403):
+        print(f"❌ مفتاح SERPER_API_KEY غير صالح (Error {response.status_code}).")
+    elif response.status_code == 429:
+        print("❌ انتهى رصيد Serper أو تم تجاوز الحد (429): اشحن الرصيد من لوحة serper.dev.")
+    else:
+        print(f"❌ استجابة غير متوقعة من Serper (كود {response.status_code}).")
+    return False
+
 
 def verify_photoroom():
     print_separator("فحص الاتصال بـ PhotoRoom Cloud API (إزالة الخلفية)")
@@ -188,12 +213,12 @@ def verify_photoroom():
         return False
 
 def verify_google_search():
-    print_separator("فحص الاتصال بـ Google Custom Search API")
+    print_separator("فحص الاتصال بـ Google Custom Search API (اختياري، قديم)")
     keys = config.GOOGLE_SEARCH_API_KEYS
     cxs = config.GOOGLE_SEARCH_CX_LIST
     if not keys or not cxs:
-        print("❌ خطأ: لم يتم تعيين مفاتيح GOOGLE_SEARCH_API_KEY أو معرفات GOOGLE_SEARCH_CX في ملف .env")
-        return False
+        print("ℹ️ Google Custom Search غير مهيأ (اختياري وقديم: يتوقف بعد 2026-12-31؛ Serper هو المصدر الأساسي).")
+        return None
         
     key = keys[0]
     cx = cxs[0]
@@ -267,6 +292,7 @@ if __name__ == "__main__":
         cloudinary_ok = verify_cloudinary()
         gemini_ok = verify_gemini()
         photoroom_ok = verify_photoroom()
+        serper_ok = verify_serper()
         search_ok = verify_google_search()
         proxy_status = verify_proxy()
         
@@ -299,9 +325,14 @@ if __name__ == "__main__":
                     "status": "online" if photoroom_ok else "offline",
                     "is_critical": True
                 },
+                "serper": {
+                    "name": "Serper (Google Images)",
+                    "status": "online" if serper_ok else "offline",
+                    "is_critical": False
+                },
                 "google_search": {
                     "name": "Google Custom Search",
-                    "status": "online" if search_ok else "offline",
+                    "status": "online" if search_ok else ("disabled" if search_ok is None else "offline"),
                     "is_critical": False
                 },
                 "proxy": {
@@ -324,6 +355,7 @@ if __name__ == "__main__":
         "Cloudinary CDN": verify_cloudinary(),
         "Google Gemini API": verify_gemini(),
         "PhotoRoom API": verify_photoroom(),
+        "Serper (Google Images)": verify_serper(),
         "Google Custom Search": verify_google_search(),
         "Proxy Connection": verify_proxy()
     }
@@ -341,7 +373,7 @@ if __name__ == "__main__":
         else:
             status_str = "❌ فشل الاتصال / غير مهيأ"
             # فقط الخدمات الحيوية تؤدي لتعطيل التشغيل بالكامل
-            if service not in ["Google Custom Search", "Proxy Connection"]:
+            if service not in ["Serper (Google Images)", "Google Custom Search", "Proxy Connection"]:
                 all_ok = False
         print(f"- {service:22}: {status_str}")
     print("=" * 60)
