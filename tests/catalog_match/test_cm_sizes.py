@@ -135,3 +135,40 @@ def test_slug_decimals():
     multipack = parse_sizes(url_path_text("https://x.ae/masafi-12-x-1-5l"), "page_slug")
     assert [(s.base_value, s.pack_count) for s in multipack] == [(1500.0, 12)]
     assert compare(target("Al Ain Water 1.5L"), masafi) == "match"
+
+
+# -- live row 14 'ASHOKA PLAIN PARATHA 5S 400GM': "N's" before a net mass ---------------------------
+
+@pytest.mark.parametrize("text,value,pack,pieces", [
+    ("ASHOKA PLAIN PARATHA 5S 400GM", 400.0, None, 5),     # 5 pieces in one 400 g pack (or 5 packs?)
+    ("LAYS 6'S 23G", 23.0, None, 6),                      # the same wording: ambiguous either way
+    ("INDOMIE NOODLES 75G 5S", 75.0, 5, None),            # after the size it multiplies it
+    ("KINDER BUENO 43G 6'S", 43.0, 6, None),
+    ("MASAFI WATER 330ML 12S", 330.0, 12, None),          # with a volume it is always a pack
+    ("ALMARAI LABAN 6'S 180ML", 180.0, 6, None),
+])
+def test_n_s_before_a_net_mass_reads_like_pieces(text, value, pack, pieces):
+    (size,) = parse_sizes(text, "name")
+    assert (size.base_value, size.pack_count, size.pieces) == (value, pack, pieces)
+
+
+def test_paratha_listing_in_the_same_words_is_tier1_and_a_bundle_is_not():
+    from catalog_match.identity import build_sku_spec
+    from catalog_match.models import Candidate
+    from catalog_match.score import score_candidate
+
+    spec = build_sku_spec({"name": "ASHOKA PLAIN PARATHA 5S 400GM", "brand": "ASHOKA"}, {})
+    assert (spec.size.base_value, spec.size.pieces, spec.pack_count) == (400.0, 5, None)
+
+    def tier(title):
+        cand = Candidate(image_url="https://www.luluhypermarket.com/medias/1.jpg",
+                         page_url="https://www.luluhypermarket.com/en-ae/ashoka-plain-paratha-400g/p/1",
+                         title=title, page_title=title, provider="serper")
+        s = score_candidate(spec, cand)
+        return s.tier, s.hard_reject
+
+    assert tier("Ashoka Plain Paratha 5 pcs 400 g") == (1, ())
+    assert tier("Ashoka Plain Paratha 400g") == (2, ())          # one pack: the pieces are not stated
+    assert tier("Ashoka Plain Paratha 5 x 400g") == (2, ())      # five packs? review, never tier 1
+    assert tier("Ashoka Plain Paratha 10 x 400g")[1] == ("pack_conflict",)
+    assert tier("Ashoka Plain Paratha 800g")[1] == ("size_conflict",)

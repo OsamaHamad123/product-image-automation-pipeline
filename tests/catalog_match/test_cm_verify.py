@@ -311,3 +311,18 @@ def test_tuna_meat_grade_on_the_label_is_compared(sheet_name, printed):
                "brand_match": "yes", "variant_match": "yes", "size_match": "yes"}
     assert make_verdict(spec, 0, reading).decision == "MISMATCH"
     assert "tuna_meat" in build_prompt(spec, 1), "the model is told which grade to check"
+
+
+def test_printed_piece_count_of_a_pieces_sku_is_not_a_pack_mismatch():
+    # live row 14: 'ASHOKA PLAIN PARATHA 5S 400GM' is one 400 g pack of 5 parathas.
+    from catalog_match.identity import build_sku_spec
+    from catalog_match.verify import build_prompt, make_verdict
+
+    spec = build_sku_spec({"name": "ASHOKA PLAIN PARATHA 5S 400GM", "brand": "ASHOKA"}, {})
+    reading = {"brand_text": "Ashoka", "variant_text": "Plain Paratha", "size_text": "400 g", "pack_count": 5,
+               "view": "front_packshot", "brand_match": "yes", "variant_match": "yes", "size_match": "yes"}
+    assert make_verdict(spec, 0, reading).decision == "MATCH"
+    assert make_verdict(spec, 0, dict(reading, pack_count=1)).decision == "MATCH"
+    assert make_verdict(spec, 0, dict(reading, pack_count=3)).decision == "UNSURE"
+    assert make_verdict(spec, 0, dict(reading, size_text="2 kg")).decision == "MISMATCH"
+    assert "5 pieces" in build_prompt(spec, 1)

@@ -264,7 +264,10 @@ def classify(spec: SkuSpec, verdict: VlmImageVerdict) -> str:
     if spec.size is None and size_state not in ("match", "unknown"):
         return UNSURE
     target_pack = spec.pack_count or 1
-    if verdict.pack_count is not None and not counted and verdict.pack_count != target_pack:
+    pieces = spec.size.pieces if spec.size is not None else None
+    # 'PARATHA 5S 400GM' is one pack holding 5 pieces: a printed count of 5 is those pieces, not 5 packs.
+    if (verdict.pack_count is not None and not counted and verdict.pack_count != target_pack
+            and verdict.pack_count != pieces):
         return UNSURE
     if target_pack > 1 and not counted:
         # a multipack needs pack evidence: the printed count or an 'N x Q' size
@@ -307,6 +310,8 @@ def build_prompt(spec: SkuSpec, n_images: int) -> str:
     aliases = ", ".join(p for p in spec.match_brands if p) or "none"
     size = spec.size.canonical() if spec.size is not None else "not stated"
     pack = str(spec.pack_count) if spec.pack_count else "single unit"
+    if not spec.pack_count and spec.size is not None and spec.size.pieces:
+        pack += f" (the sheet also says {spec.size.pieces} pieces: pieces inside one pack, or {spec.size.pieces} packs)"
     lines = [
         "You check product photos for a UAE grocery catalogue. Compare EACH image with the target SKU "
         "and report only what is visibly printed on the pack. Never guess text you cannot read.",
