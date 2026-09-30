@@ -361,7 +361,8 @@ def score_candidate(spec: SkuSpec, cand: Candidate, negatives=None) -> Candidate
         soft_cap = True
 
     # --- variants --------------------------------------------------------
-    found_variants = {name: variants_mod.extract_variants(fields[name]) for name in IDENTITY_FIELDS}
+    context = variants_mod.spec_context(spec)
+    found_variants = {name: variants_mod.extract_variants(fields[name], context) for name in IDENTITY_FIELDS}
     hard_axes: List[str] = []
     for name in VARIANT_HARD_FIELDS:
         for axis in variants_mod.conflicts(spec.variants, found_variants[name]):
@@ -389,7 +390,7 @@ def score_candidate(spec: SkuSpec, cand: Candidate, negatives=None) -> Candidate
         if name == "page_slug":
             # Retailers name departments after a form ('/fresh-food/' holds water, juice and laban):
             # an unstated form counts from the product's own slug segment, not the breadcrumbs.
-            own = variants_mod.extract_variants(url_path_text(cand.page_url, product_segment=True))
+            own = variants_mod.extract_variants(url_path_text(cand.page_url, product_segment=True), context)
             found = {axis: value for axis, value in found.items() if axis not in DEPARTMENT_AXES}
             found.update({axis: value for axis, value in own.items() if axis in DEPARTMENT_AXES})
         for axis in variants_mod.unstated_marked(spec.variants, found):

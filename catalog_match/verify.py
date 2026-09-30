@@ -242,7 +242,8 @@ def classify(spec: SkuSpec, verdict: VlmImageVerdict) -> str:
     brand_state = _brand_reading(spec, verdict.brand_text)
     if brand_state == "other":
         return MISMATCH
-    printed_variants = variants_mod.extract_variants(verdict.variant_text)
+    # The label reading ('White Meat') seldom repeats the product type, so the SKU supplies the context.
+    printed_variants = variants_mod.extract_variants(verdict.variant_text, variants_mod.spec_context(spec))
     if variants_mod.conflicts(spec.variants, printed_variants):
         return MISMATCH
     if verdict.view in REJECT_VIEWS:

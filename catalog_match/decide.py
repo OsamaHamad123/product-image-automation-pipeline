@@ -16,8 +16,14 @@ Decisions
                           * the winner did not come from a relaxed query;
                           * not a cache hit;
                           * no other MATCH candidate with a conflicting parsed identity.
-    REVIEW_PRESELECTED  a tier 1/2 candidate with MATCH, else a tier 1 candidate with
-                        UNSURE or UNKNOWN; that candidate is pre-checked ('preselected').
+    REVIEW_PRESELECTED  a tier 1/2 candidate with MATCH, else a tier 1 candidate the
+                        verifier looked at and read as UNSURE, else (only while the
+                        verifier is down for the whole SKU) a tier 1 candidate with
+                        UNKNOWN; that candidate is pre-checked ('preselected').
+                        The tier-1 fallback is off when the verifier read ANOTHER brand
+                        on a tier-1 candidate: the text evidence that made the tier is
+                        then not trustworthy for this SKU (a brand that is also a common
+                        word, e.g. 'Freshly', matched listings of other brands).
     REVIEW_UNSELECTED   candidates exist but none qualifies; nothing is pre-checked.
     NOT_FOUND           providers were healthy and nothing survived the hard filters:
                         failure_code NO_RESULTS (empty pool) or ALL_CONFLICTED.
@@ -27,7 +33,8 @@ Decisions
 
 failure_code on review decisions
     VERIFIER_DOWN       verification unknown (or not run) while verifiable candidates
-                        exist; a tier 1 candidate is still preselected.
+                        exist; a tier 1 candidate is still preselected. Also when one
+                        of two verifier calls failed and nothing was read as MATCH.
     DOWNLOAD_FAILED     candidates survived the identity rules but every fetch failed.
 
 Only the winner of REVIEW_PRESELECTED / AUTO_PUBLISH has status 'preselected'. The
@@ -172,7 +179,9 @@ def identity_conflict(a: RankedCandidate, b: RankedCandidate, spec: Optional[Sku
             return "size"
         if (sa.pack_count or 1) != (sb.pack_count or 1):
             return "pack"
-    pa, pb = variants_mod.extract_variants(va.variant_text), variants_mod.extract_variants(vb.variant_text)
+    context = variants_mod.spec_context(spec) if spec is not None else None
+    pa = variants_mod.extract_variants(va.variant_text, context)
+    pb = variants_mod.extract_variants(vb.variant_text, context)
     axes = variants_mod.conflicts(pa, pb) or variants_mod.soft_conflicts(pa, pb)
     if axes:
         return f"variant:{axes[0]}"
@@ -181,6 +190,21 @@ def identity_conflict(a: RankedCandidate, b: RankedCandidate, spec: Optional[Sku
     if same_gtin(a.candidate.gtin_on_page, b.candidate.gtin_on_page) is False:
         return "gtin"
     return None
+
+
+def brand_refuted(ranked: Sequence[RankedCandidate]) -> bool:
+    """True when the verifier read a DIFFERENT brand on a tier-1 candidate.
+
+    Tier 1 rests on the brand being found in the listing text. When the label of such a
+    listing shows another brand, that text evidence is unreliable for this SKU, so an
+    unconfirmed (UNSURE/UNKNOWN) tier-1 candidate must not be pre-checked either.
+    """
+    for rc in ranked:
+        v = rc.verdict
+        if (v is not None and v.decision == MISMATCH and v.brand_match == "no"
+                and rc.score is not None and rc.score.tier == 1 and not rc.score.hard_reject):
+            return True
+    return False
 
 
 def _add(counts: Dict[str, int], key: str) -> None:
@@ -208,12 +232,15 @@ def route(spec: SkuSpec, ranked: Sequence[RankedCandidate],
     health_list = [_as_health(h) for h in (health or [])]
     results = _as_results(verification)
     vlm_calls = sum(int(r.calls or 0) for r in results)
-    if any(r.status == "ok" for r in results):
-        verify_state = "ok"
-    elif results:
-        verify_state = "unknown"
-    else:
+    n_ok = sum(1 for r in results if r.status == "ok")
+    if not results:
         verify_state = "not_run"
+    elif n_ok == len(results):
+        verify_state = "ok"
+    elif n_ok:
+        verify_state = "partial"      # one call answered, the other failed
+    else:
+        verify_state = "unknown"
 
     reject_counts: Dict[str, int] = {}
     survivors: List[RankedCandidate] = []
@@ -272,14 +299,24 @@ def route(spec: SkuSpec, ranked: Sequence[RankedCandidate],
                 and (rc.quality is None or rc.quality.hard_ok))
 
     verifiable = [rc for rc in survivors if usable(rc)]
-    if verifiable and verify_state != "ok":
+    verifier_down = verify_state in ("unknown", "not_run")
+    if verifiable and verifier_down:
         outcome.failure_code = "VERIFIER_DOWN"
 
     winner = next((rc for rc in verifiable if rc.score.tier in (1, 2) and _decision_of(rc) == MATCH), None)
     why = "vlm_match"
+    if winner is None and verify_state == "partial":
+        outcome.failure_code = "VERIFIER_DOWN"
     if winner is None:
-        winner = next((rc for rc in verifiable
-                       if rc.score.tier == 1 and _decision_of(rc) in (UNSURE, UNKNOWN)), None)
+        # Tier 1 without a MATCH: UNSURE is a reading the verifier made; UNKNOWN is accepted
+        # only while the verifier is down for the whole SKU. With the verifier up, UNKNOWN
+        # means it never saw the image (a skipped image or a failed second call).
+        fallback = (UNSURE, UNKNOWN) if verifier_down else (UNSURE,)
+        winner = next((rc for rc in verifiable if rc.score.tier == 1 and _decision_of(rc) in fallback), None)
+        if winner is not None and brand_refuted(ranked):
+            winner.reasons.append("vlm:tier1_brand_refuted")
+            _add(reject_counts, "vlm:tier1_brand_refuted")
+            winner = None
         why = f"tier1_{_decision_of(winner).lower()}" if winner is not None else ""
     if winner is None:
         outcome.decision = "REVIEW_UNSELECTED"
@@ -308,6 +345,8 @@ def route(spec: SkuSpec, ranked: Sequence[RankedCandidate],
         blockers.append("cache_hit")
     if outcome.failure_code:
         blockers.append(outcome.failure_code.lower())
+    elif verify_state == "partial":
+        blockers.append("verifier_partial")      # the conflict check below could not see every image
     for other in ranked:
         if other is winner or _identity_rejected(other) or other.status == "excluded":
             continue

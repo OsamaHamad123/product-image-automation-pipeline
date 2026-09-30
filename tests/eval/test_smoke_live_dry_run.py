@@ -166,3 +166,31 @@ def test_sheet_without_a_name_column_fails_loudly(wired):
     ws = FakeWorksheet([["SKU", "Price"], ["1", "2"]])
     with pytest.raises(SystemExit):
         wired["script"].read_sheet_rows(ws, [2])
+
+
+def test_the_pick_is_reported_even_below_the_top_five(wired, cassette, tmp_path, capsys):
+    # Live run 2026-09-30, row 34: the pick ranked 6th and no line of the report showed it.
+    out = tmp_path / "smoke.json"
+    with runners._v2_settings(False), runners.network_blocked():
+        wired["script"].main(["--rows", "2-4", "--dry-run", "--json", str(out)])
+    capsys.readouterr()
+    for r in json.loads(out.read_text(encoding="utf-8")):
+        if r["winner"]:
+            assert r["winner_detail"]["image_url"] == r["winner"]
+            assert any(x.startswith("preselected:") for x in r["winner_detail"]["reasons"])
+        else:
+            assert r["winner_detail"] is None
+
+    shown = {"rank": 1, "status": "rejected", "reasons": ["vlm:MISMATCH"], "provider": "serper", "domain": "x.ae",
+             "title": "Seara Chicken Shawarma 350g", "image_url": "https://x.ae/1.jpg", "page_url": "",
+             "evidence": "tier=1", "vlm": None}
+    pick = dict(shown, rank=7, status="preselected", reasons=["preselected:tier1_unsure"],
+                image_url="https://x.ae/7.jpg")
+    wired["script"].print_row({"row": 34, "name": "FRESHLY CHICKEN SHAWARMA 350GM", "brand": "FRESHLY",
+                               "brand_conf": "sheet_raw", "gtin_status": "missing", "variants": {}, "queries": [],
+                               "provider_calls": [], "top": [shown], "winner_detail": pick,
+                               "decision": "REVIEW_PRESELECTED", "failure_code": None, "winner": pick["image_url"],
+                               "cost_usd": 0.0, "serp_calls": 0, "vlm_calls": 0, "seconds": 0.0})
+    printed = capsys.readouterr().out
+    assert "pick (ranked below the top 5)" in printed and "#7 [preselected]" in printed
+    assert "reasons preselected:tier1_unsure" in printed

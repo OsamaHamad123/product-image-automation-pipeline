@@ -294,3 +294,20 @@ def test_check_model_available(monkeypatch):
     assert calls[0][1] == {"x-goog-api-key": "k"}
     assert not check_model_available(api_key="", model="m")
     assert len(calls) == 2
+
+
+# -- live run 2026-09-30: the model read the grade correctly, the code did not compare it ---------
+
+@pytest.mark.parametrize("sheet_name,printed", [
+    ("VIRGINIA L/MEAT TUNA WATER 170GM", "WHITE MEAT"),                        # row 58
+    ("VIRGINIA WHITE TUNA S/F OIL 170GM", "LIGHT MEAT Solid in Sunflower Oil"),  # row 60
+])
+def test_tuna_meat_grade_on_the_label_is_compared(sheet_name, printed):
+    from catalog_match.identity import build_sku_spec
+    from catalog_match.verify import build_prompt, make_verdict
+
+    spec = build_sku_spec({"name": sheet_name, "brand": "VIRGINIA"}, {})
+    reading = {"brand_text": "VIRGINIA", "variant_text": printed, "size_text": "170g", "view": "front_packshot",
+               "brand_match": "yes", "variant_match": "yes", "size_match": "yes"}
+    assert make_verdict(spec, 0, reading).decision == "MISMATCH"
+    assert "tuna_meat" in build_prompt(spec, 1), "the model is told which grade to check"

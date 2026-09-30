@@ -1,6 +1,21 @@
 {
   "version": 2,
-  "_doc": "Mutually exclusive variant groups (axes). Each value lists English and Arabic phrases; phrases are matched on whole tokens after catalog_match.text_norm normalisation, longest phrase first. 'unmarked' lists the values that do NOT make a candidate suspicious when the target SKU does not state that axis (e.g. a retailer title adding 'Full Fat' to 'Almarai Fresh Milk'). 'soft_groups' lists sets of values of one axis that describe closely related but distinct lines (Diet vs Zero Sugar vs Sugar Free): a difference inside one set is a soft conflict (never tier 1, never auto-publish) instead of a hard reject, because retailers word the same line differently. The form axis has no unmarked values: fresh, long-life, frozen and powder are different SKUs, so a candidate stating a form the SKU does not state is capped below tier 1. The medium axis is the oil or liquid a product is packed in or made of (tuna in sunflower oil vs olive oil vs water; sunflower vs corn oil): different SKUs, so it has no unmarked value.",
+  "_doc": "Mutually exclusive variant groups (axes). Each value lists English and Arabic phrases; phrases are matched on whole tokens after catalog_match.text_norm normalisation, longest phrase first. 'unmarked' lists the values that do NOT make a candidate suspicious when the target SKU does not state that axis (e.g. a retailer title adding 'Full Fat' to 'Almarai Fresh Milk'). 'soft_groups' lists sets of values of one axis that describe closely related but distinct lines (Diet vs Zero Sugar vs Sugar Free): a difference inside one set is a soft conflict (never tier 1, never auto-publish) instead of a hard reject, because retailers word the same line differently. The form axis has no unmarked values: fresh, long-life, frozen and powder are different SKUs, so a candidate stating a form the SKU does not state is capped below tier 1. The medium axis is the oil or liquid a product is packed in or made of (tuna in sunflower oil vs olive oil vs water; sunflower vs corn oil): different SKUs, so it has no unmarked value. 'contexts' names token sets; an axis's 'context_values' ({context: {value: [phrases]}}) are matched only when the text, or the SKU the text is compared with, contains a token of that context. 'White' is a meat grade on a tuna can and a colour anywhere else; 'water' is the packing medium of tuna and the product itself for a bottle. At equal phrase length a context-bound phrase wins ('light' on a tuna can is the meat grade, not low fat).",
+  "contexts": {
+    "canned_fish": [
+      "tuna",
+      "تونة",
+      "تونا",
+      "skipjack",
+      "albacore",
+      "yellowfin",
+      "sardine",
+      "sardines",
+      "سردين",
+      "mackerel",
+      "ماكريل"
+    ]
+  },
   "axes": {
     "fat": {
       "unmarked": [
@@ -141,7 +156,12 @@
         "sunflower_oil": [
           "sunflower oil",
           "زيت دوار الشمس",
-          "زيت عباد الشمس"
+          "زيت عباد الشمس",
+          "s f oil",
+          "sf oil",
+          "sunfl oil",
+          "sun oil",
+          "sunflower seed oil"
         ],
         "olive_oil": [
           "olive oil",
@@ -155,7 +175,9 @@
         ],
         "vegetable_oil": [
           "vegetable oil",
-          "زيت نباتي"
+          "زيت نباتي",
+          "veg oil",
+          "veg. oil"
         ],
         "canola_oil": [
           "canola oil",
@@ -168,7 +190,9 @@
           "soya oil",
           "soy oil",
           "زيت الصويا",
-          "زيت صويا"
+          "زيت صويا",
+          "soyabean oil",
+          "soya bean oil"
         ],
         "water": [
           "in water",
@@ -181,6 +205,21 @@
           "brine",
           "محلول ملحي"
         ]
+      },
+      "context_values": {
+        "canned_fish": {
+          "water": [
+            "water",
+            "spring water",
+            "ماء",
+            "مياه"
+          ],
+          "brine": [
+            "salt water",
+            "salted water",
+            "ماء مالح"
+          ]
+        }
       }
     },
     "flavour": {
@@ -426,6 +465,78 @@
           "saffron",
           "زعفران"
         ]
+      }
+    },
+    "tuna_meat": {
+      "_doc": "Tuna meat grade. Light (skipjack/yellowfin) and white (albacore) are different products of one brand; 'fancy' is how some brands (Al Alali) name their light-meat line, so fancy vs light is soft.",
+      "unmarked": [],
+      "soft_groups": [
+        [
+          "light",
+          "fancy"
+        ]
+      ],
+      "values": {},
+      "context_values": {
+        "canned_fish": {
+          "light": [
+            "light meat",
+            "l meat",
+            "lt meat",
+            "lite meat",
+            "light",
+            "لحم فاتح",
+            "لحم خفيف",
+            "لايت"
+          ],
+          "white": [
+            "white meat",
+            "w meat",
+            "wt meat",
+            "wht meat",
+            "white",
+            "albacore",
+            "لحم ابيض",
+            "ابيض"
+          ],
+          "fancy": [
+            "fancy meat",
+            "fancy",
+            "فانسي"
+          ]
+        }
+      }
+    },
+    "tuna_cut": {
+      "_doc": "How the fish is packed: one solid piece, chunks, or flakes.",
+      "unmarked": [],
+      "values": {},
+      "context_values": {
+        "canned_fish": {
+          "solid": [
+            "solid",
+            "solid pack",
+            "solid meat",
+            "صلب",
+            "قطعه واحده",
+            "قطعة واحدة"
+          ],
+          "chunks": [
+            "chunk",
+            "chunks",
+            "chunky",
+            "قطع"
+          ],
+          "flakes": [
+            "flake",
+            "flakes",
+            "flaked",
+            "shredded",
+            "رقائق",
+            "مفتت",
+            "مفتته"
+          ]
+        }
       }
     }
   }

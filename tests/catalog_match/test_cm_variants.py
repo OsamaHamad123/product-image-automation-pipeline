@@ -111,7 +111,7 @@ def test_packing_medium_is_an_exclusive_axis():
     auto-published when the sunflower-oil listings were missing.
     """
     sunflower = extract_variants("Al Alali Tuna Chunks in Sunflower Oil 170g")
-    assert sunflower == {"medium": "sunflower_oil"}
+    assert sunflower == {"medium": "sunflower_oil", "tuna_cut": "chunks"}
     assert extract_variants("تونة العلالي قطع في زيت دوار الشمس 170 جم") == sunflower
     assert conflicts(sunflower, extract_variants("Al Alali Tuna Chunks in Olive Oil 170g")) == ["medium"]
     assert conflicts(sunflower, extract_variants("Tuna Chunks in Water")) == ["medium"]
@@ -135,3 +135,58 @@ def test_olive_oil_tin_is_rejected_for_a_sunflower_oil_sku():
                       domain="luluhypermarket.com", provider="serper", sanctioned=True)
     score = score_candidate(spec, olive)
     assert score.tier is None and "variant_conflict:medium" in score.hard_reject
+
+
+# -- live run 2026-09-30: Light vs White tuna (sheet rows 57-60) ----------------------------------
+
+def test_tuna_meat_grade_and_sheet_abbreviations():
+    assert extract_variants("VIRGINIA L/MEAT TUNA WATER 170GM") == {"tuna_meat": "light", "medium": "water"}
+    assert extract_variants("VIRGINIA WHITE TUNA S/F OIL 170GM") == {"tuna_meat": "white", "medium": "sunflower_oil"}
+    assert extract_variants("SUP/T WT/MEAT SOLID TUNA 185GM") == {"tuna_meat": "white", "tuna_cut": "solid"}
+    assert extract_variants("SUPER T SOLID TUNA SALT WATER 3X185GM") == {"medium": "brine", "tuna_cut": "solid"}
+    assert extract_variants("GOLDEN PRIZE TUNA VEG OIL 185GM") == {"medium": "vegetable_oil"}
+    assert extract_variants("RIO MARIE TUNA SUN OIL 3X70GM") == {"medium": "sunflower_oil"}
+    assert extract_variants("SUPER T SOLID TUNA SUNFL OIL 3X185GM")["medium"] == "sunflower_oil"
+    assert extract_variants("تونة لحم أبيض بالماء") == {"tuna_meat": "white", "medium": "water"}
+    # On a tuna can 'light' is the meat grade, not low fat.
+    assert extract_variants("American Light Meat Tuna 185g") == {"tuna_meat": "light"}
+    assert extract_variants("Virginia Light Tuna in Water") == {"tuna_meat": "light", "medium": "water"}
+    white, light = extract_variants("Virginia White Meat Tuna In Water 170g"), extract_variants("VIRGINIA L/MEAT TUNA")
+    assert conflicts(light, white) == ["tuna_meat"]
+
+
+def test_context_bound_phrases_need_the_product_type():
+    # Without tuna, 'white', 'light' and 'water' keep their everyday meaning.
+    assert extract_variants("Kiri White Cheese 200g") == {"flavour": "cheese"}
+    assert extract_variants("Almarai Light Milk 1L") == {"fat": "low"}
+    assert extract_variants("Masafi Water 1.5L") == {} and extract_variants("Arwa Spring Water 500ml") == {}
+    # A label reading seldom repeats the product type: the SKU supplies it.
+    assert extract_variants("WHITE MEAT") == {}
+    assert extract_variants("WHITE MEAT", context="virginia tuna") == {"tuna_meat": "white"}
+
+
+def test_fancy_and_light_are_close_lines_white_is_not():
+    from catalog_match.variants import soft_conflicts
+
+    fancy = extract_variants("ALALALI FANCY TUNA S/F OIL 85GM")
+    light = extract_variants("Al Alali Light Meat Tuna in Sunflower Oil 85g")
+    white = extract_variants("Al Alali White Meat Tuna in Sunflower Oil 85g")
+    assert conflicts(fancy, light) == [] and soft_conflicts(fancy, light) == ["tuna_meat"]
+    assert conflicts(fancy, white) == ["tuna_meat"]
+
+
+@pytest.mark.parametrize("sheet_name,listing", [
+    ("VIRGINIA L/MEAT TUNA WATER 170GM", "Virginia White Meat Tuna In Water 170g : Amazon.ae: Grocery"),
+    ("VIRGINIA WHITE TUNA S/F OIL 170GM", "VIRGINIA Tuna L/meat solid in S/F Oil 170GM : Amazon.ae"),
+])
+def test_rows_58_and_60_listings_are_hard_rejected(sheet_name, listing):
+    from catalog_match.identity import build_sku_spec
+    from catalog_match.models import Candidate
+    from catalog_match.score import score_candidate
+
+    spec = build_sku_spec({"name": sheet_name, "brand": "VIRGINIA"}, {})
+    cand = Candidate(image_url="https://m.media-amazon.com/images/I/81ULgp9PnIL.jpg",
+                     page_url="https://www.amazon.ae/dp/B0TEST", page_title=listing, title=listing,
+                     domain="amazon.ae", provider="serper", sanctioned=True)
+    score = score_candidate(spec, cand)
+    assert score.tier is None and "variant_conflict:tuna_meat" in score.hard_reject

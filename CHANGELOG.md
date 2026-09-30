@@ -69,6 +69,28 @@ core was rebuilt and wired into the queue, the dashboard actions and the sheet w
 - `docs/walkthrough.md` is rewritten for the current system: keys, sheet columns, the Brands Mapping tab, the
   daily review flow and reject reasons, failure codes, auto-publish, and measuring accuracy on real products.
 
+### Fixed during the live dry runs (60 real sheet rows, `scripts/smoke_live.py --dry-run`)
+
+- Image downloads go direct first, with a browser TLS fingerprint (`curl_cffi`) when it is installed, and use the
+  proxy only as a fallback after a timeout, connection error, 5xx, 403 or 429. Timeouts on rows 2-31 fell from 96
+  to 9.
+- Serper free plans refuse `site:` operators with HTTP 400. The provider notices this once, strips the operators
+  and searches the plain query for the rest of the run. Google Custom Search stops being called for the run after
+  every key answered 403.
+- Retailer image URLs are cleaned to the original file: Amazon size and overlay modifiers (`._AC_SL1500_`,
+  `._PIRIOFOUR…`), and noon and Carrefour resize parameters.
+- A tier-1 image the verifier never read (it skipped the image, or the second call failed) is no longer
+  pre-checked while the verifier is up. A failed second call marks the SKU `VERIFIER_DOWN` and blocks
+  auto-publish.
+- When the verifier reads ANOTHER brand on a tier-1 image, no unconfirmed tier-1 image is pre-checked for that
+  SKU. Row 34 (`FRESHLY CHICKEN SHAWARMA`): "Freshly" is also an English word, and Seara, Zingo and Americana
+  listings scored tier 1 on it.
+- Tuna meat grade (light / white / fancy) and cut (solid / chunks / flakes) are variant axes, together with the
+  sheet's abbreviations `L/MEAT`, `WT/MEAT`, `S/F OIL`, `SUNFL OIL`, `VEG OIL` and `SALT WATER`. Rows 58 and 60
+  had each been given the other grade's photo although the model read the grade correctly. These phrases count
+  only next to a canned-fish word, so "white cheese" or "spring water" are unaffected.
+- The dry-run report always shows the pick, with its rank and reasons, even when it ranks below the top 5.
+
 ### Removed
 
 - `verification_layer/` (87 modules) and the 23 test files that only exercised it or asserted nothing

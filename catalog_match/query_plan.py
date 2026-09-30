@@ -235,7 +235,7 @@ def _analyse(spec: SkuSpec, name: str, brand: str, spellings: Sequence[str], lan
         for found in parse_sizes(name, "query"):
             _mark_phrase(words, found.unit_text, removed)
         _mark_packs(words, removed)
-    var_keys = variants_mod.variant_tokens(name)
+    var_keys = variants_mod.variant_tokens(name, variants_mod.spec_context(spec))
     variant_idx = {
         i for i, w in enumerate(words)
         if i not in removed and var_keys and all(k in var_keys for k in w.keys)

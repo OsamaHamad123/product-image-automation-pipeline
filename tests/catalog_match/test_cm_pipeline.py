@@ -16,7 +16,7 @@ from PIL import Image, ImageDraw
 from catalog_match import pipeline, settings
 from catalog_match.fetch import phash_distance, phash_hex
 from catalog_match.identity import build_sku_spec
-from catalog_match.models import Candidate, FetchedImage, ProviderResult, VerificationResult
+from catalog_match.models import Candidate, FetchedImage, ProviderResult, VerificationResult, VlmImageVerdict
 from catalog_match.verify import make_verdict
 
 MAPPINGS = {
@@ -327,3 +327,66 @@ def test_empty_pool_is_not_found_and_outage_is_provider_down():
                                           verifier=StubVerifier({}))
     assert (outcome.decision, outcome.failure_code) == ("PROVIDER_DOWN", "PROVIDER_DOWN")
     assert len(down.calls) == 1, "a blocked provider is not asked again for this SKU"
+
+
+# ---------------------------------------------------------------------------
+# Live run 2026-09-30, sheet row 34 'FRESHLY CHICKEN SHAWARMA 350GM'
+# ---------------------------------------------------------------------------
+
+FRESHLY = build_sku_spec({"name": "FRESHLY CHICKEN SHAWARMA 350GM", "brand": "FRESHLY"}, {})
+
+
+def freshly_listings(n):
+    """Tier-1 by text: 'Freshly' is also an English word, so other brands' listings carry it."""
+    return [cand(i, f"Freshly Chicken Shawarma 350g pack {i} - Carrefour UAE",
+                 f"https://www.carrefouruae.com/mafuae/en/freshly-chicken-shawarma-350g/p/{i}") for i in range(1, n + 1)]
+
+
+def read_other_brand(brand):
+    return {"brand_text": brand, "variant_text": "Chicken Shawarma", "size_text": "350 g", "view": "front_packshot",
+            "brand_match": "no", "variant_match": "yes", "size_match": "yes"}
+
+
+def test_row34_unconfirmed_tier1_is_not_prechecked_when_labels_show_other_brands():
+    cands = freshly_listings(6)
+    readings = {c.image_url: read_other_brand(b) for c, b in
+                zip(cands, ("Seara", "Zingo", "Al Kabeer", "Americana", "Sadia"))}
+    readings[cands[5].image_url] = dict(read_other_brand("Freshly"), brand_match="unsure", brand_text="")
+    verifier = StubVerifier(readings)
+    outcome = pipeline.find_product_image(
+        FRESHLY, providers=[StubProvider("serper", cands)],
+        fetcher=StubFetcher({c.image_url: packshot_png(70 + i) for i, c in enumerate(cands)}), verifier=verifier)
+
+    assert all(rc.score.tier == 1 for rc in outcome.ranked), "the text evidence alone looks perfect"
+    assert len(verifier.calls) == 2
+    assert outcome.decision == "REVIEW_UNSELECTED" and outcome.winner is None
+    assert not any(rc.status == "preselected" for rc in outcome.ranked)
+    assert "vlm:tier1_brand_refuted" in by_url(outcome)[cands[5].image_url].reasons
+
+
+class SkippingVerifier(StubVerifier):
+    """Answers 'ok' but has no reading for some images (the model skipped them, or one did not decode)."""
+
+    def __init__(self, readings, skip):
+        super().__init__(readings)
+        self.skip = set(skip)
+
+    def verify(self, spec, images):
+        result = super().verify(spec, images)
+        for i, f in enumerate(images):
+            if f.candidate.image_url in self.skip:
+                result.verdicts[i] = VlmImageVerdict(index=i, decision="UNKNOWN")
+        return result
+
+
+def test_an_image_the_verifier_skipped_is_never_prechecked():
+    cands = freshly_listings(5)
+    wrong_size = {c.image_url: dict(read_other_brand("Freshly"), brand_match="yes", size_text="1 kg",
+                                    size_match="no") for c in cands}
+    verifier = SkippingVerifier(wrong_size, skip=[cands[4].image_url])
+    outcome = pipeline.find_product_image(
+        FRESHLY, providers=[StubProvider("serper", cands)],
+        fetcher=StubFetcher({c.image_url: packshot_png(80 + i) for i, c in enumerate(cands)}), verifier=verifier)
+    assert by_url(outcome)[cands[4].image_url].verdict.decision == "UNKNOWN"
+    assert (outcome.decision, outcome.failure_code) == ("REVIEW_UNSELECTED", None)
+    assert outcome.winner is None

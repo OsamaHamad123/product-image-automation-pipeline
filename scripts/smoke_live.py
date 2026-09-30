@@ -227,38 +227,58 @@ def run_row(row, mappings, identity, pipeline, providers_mod, verify_mod, serp_c
     seconds = time.perf_counter() - t0
     serp_calls = sum(1 for c in calls if c["provider"] != "off" and c["query"] != "lookup")
     cost = serp_calls * serp_cost + verifier.calls * vlm_cost
-    top = []
-    for rc in outcome.ranked[:5]:
-        v = rc.verdict
-        top.append({
-            "status": rc.status, "provider": rc.candidate.provider, "domain": rc.candidate.domain,
-            "title": rc.candidate.title or rc.candidate.page_title, "image_url": rc.candidate.image_url,
-            "page_url": rc.candidate.page_url, "evidence": _evidence(rc),
-            "vlm": None if v is None else {"decision": v.decision, "view": v.view, "brand": v.brand_text,
-                                           "variant": v.variant_text, "size": v.size_text},
-        })
+    top = [_describe(rc, i) for i, rc in enumerate(outcome.ranked[:5], 1)]
+    # The pick is always reported, also when it ranks below the top 5 (live run: row 34's pick was invisible).
+    winner = None
+    if outcome.winner is not None:
+        position = next(i for i, rc in enumerate(outcome.ranked, 1) if rc is outcome.winner)
+        winner = _describe(outcome.winner, position)
     return {"row": row["row_number"], "name": row["name"], "brand": row["brand"], "sku_key": spec.sku_key,
-            "brand_conf": spec.brand_conf, "gtin_status": spec.gtin_status, "queries": list(outcome.queries),
-            "provider_calls": calls, "decision": outcome.decision, "failure_code": outcome.failure_code,
-            "winner": outcome.winner.candidate.image_url if outcome.winner else None, "top": top,
-            "vlm_calls": verifier.calls, "serp_calls": serp_calls, "cost_usd": round(cost, 4),
-            "seconds": round(seconds, 1)}
+            "brand_conf": spec.brand_conf, "gtin_status": spec.gtin_status, "variants": dict(spec.variants),
+            "queries": list(outcome.queries), "provider_calls": calls, "decision": outcome.decision,
+            "failure_code": outcome.failure_code,
+            "winner": outcome.winner.candidate.image_url if outcome.winner else None, "winner_detail": winner,
+            "top": top, "reject_counts": dict(outcome.reject_counts), "vlm_calls": verifier.calls,
+            "serp_calls": serp_calls, "cost_usd": round(cost, 4), "seconds": round(seconds, 1)}
+
+
+def _describe(rc, position):
+    v = rc.verdict
+    return {
+        "rank": position, "status": rc.status, "reasons": list(rc.reasons), "provider": rc.candidate.provider,
+        "domain": rc.candidate.domain, "title": rc.candidate.title or rc.candidate.page_title,
+        "image_url": rc.candidate.image_url, "page_url": rc.candidate.page_url, "evidence": _evidence(rc),
+        "vlm": None if v is None else {"decision": v.decision, "view": v.view, "brand": v.brand_text,
+                                       "variant": v.variant_text, "size": v.size_text},
+    }
+
+
+def _print_candidate(c):
+    print(f"  #{c['rank']} [{c['status']}] {c['provider']}/{c['domain']}: {c['title'][:80]}")
+    print(f"       {c['evidence']}")
+    if c["vlm"]:
+        print(f"       VLM {c['vlm']['decision']} view={c['vlm']['view']} brand={c['vlm']['brand']!r} "
+              f"variant={c['vlm']['variant']!r} size={c['vlm']['size']!r}")
+    if c["reasons"]:
+        print(f"       reasons {' '.join(c['reasons'])}")
+    print(f"       {c['image_url']}")
 
 
 def print_row(r):
-    print(f"\n=== row {r['row']}: {r['name']} | brand {r['brand']} ({r['brand_conf']}) | gtin {r['gtin_status']}")
+    variants = " ".join(f"{k}={v}" for k, v in sorted(r.get("variants", {}).items())) or "-"
+    print(f"\n=== row {r['row']}: {r['name']} | brand {r['brand']} ({r['brand_conf']}) | gtin {r['gtin_status']}"
+          f" | variants {variants}")
     for q in r["queries"]:
         print(f"  query  {q}")
     for c in r["provider_calls"]:
         print(f"  health {c['provider']:10s} {c['status']:8s} http={c['http_status']} n={c['count']} "
               f"{c['ms']}ms {c['error'] or ''}  <- {c['query'][:70]}")
-    for i, c in enumerate(r["top"], 1):
-        print(f"  #{i} [{c['status']}] {c['provider']}/{c['domain']}: {c['title'][:80]}")
-        print(f"       {c['evidence']}")
-        if c["vlm"]:
-            print(f"       VLM {c['vlm']['decision']} view={c['vlm']['view']} brand={c['vlm']['brand']!r} "
-                  f"variant={c['vlm']['variant']!r} size={c['vlm']['size']!r}")
-        print(f"       {c['image_url']}")
+    for c in r["top"]:
+        _print_candidate(c)
+    detail = r.get("winner_detail")
+    if detail and detail["rank"] > len(r["top"]):
+        print("  pick (ranked below the top 5):")
+        _print_candidate(detail)
     print(f"  DECISION {r['decision']} {r['failure_code'] or ''} -> {r['winner'] or '-'}")
     print(f"  cost ~${r['cost_usd']:.4f} ({r['serp_calls']} SERP queries, {r['vlm_calls']} VLM calls), {r['seconds']}s")
 

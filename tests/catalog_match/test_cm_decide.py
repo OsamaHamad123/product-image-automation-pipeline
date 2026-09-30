@@ -308,3 +308,67 @@ def test_route_is_idempotent_and_keeps_pipeline_reasons():
     assert [(r.status, list(r.reasons)) for r in second.ranked] == snapshot
     assert excluded.status == "excluded" and excluded.reasons == ["reviewer_negative:phash"]
     assert second.reject_counts == {"excluded": 1, "variant_conflict:fat": 1}
+
+
+# -- live run 2026-09-30: an unconfirmed tier-1 image was pre-checked (sheet row 34) -------------
+
+PARTIAL = [OK, DOWN]      # the first verifier call answered, the second one failed
+
+
+def size_mismatch():
+    """The right brand is printed, the size is not the SKU's: MISMATCH that says nothing about the brand."""
+    return VlmImageVerdict(index=0, brand_text="Almarai", size_text="2 L", view="front_packshot",
+                           brand_match="yes", size_match="no", decision="MISMATCH")
+
+
+def test_t1_the_verifier_never_saw_is_not_preselected_while_it_is_up():
+    # The call answered but skipped this image (or it could not be decoded): UNKNOWN is not a reading.
+    unseen = rc(t1(2), VlmImageVerdict(index=1, decision="UNKNOWN"))
+    out = decide.route(SPEC, ranked(rc(t1(1), size_mismatch()), unseen), OK, HEALTHY, set())
+    assert (out.decision, out.failure_code) == ("REVIEW_UNSELECTED", None)
+    assert out.winner is None and preselected(out) == []
+    assert unseen.status == "eligible"          # still shown to the reviewer, just not pre-checked
+
+
+def test_failed_second_call_is_verifier_down_and_nothing_unseen_is_preselected():
+    first = rc(t1(1), size_mismatch())
+    unseen = rc(t1(2), VlmImageVerdict(index=0, decision="UNKNOWN"))
+    out = decide.route(SPEC, ranked(first, unseen), PARTIAL, HEALTHY, set())
+    assert (out.decision, out.failure_code) == ("REVIEW_UNSELECTED", "VERIFIER_DOWN")
+    assert preselected(out) == []
+
+
+def test_match_with_a_failed_second_call_is_preselected_but_never_auto(monkeypatch):
+    auto_on(monkeypatch, "*")
+    win = rc(t1(1), verdict("MATCH"))
+    unseen = rc(t1(2), VlmImageVerdict(index=0, decision="UNKNOWN"))
+    out = decide.route(SPEC, ranked(win, unseen), PARTIAL, HEALTHY, set())
+    assert out.decision == "REVIEW_PRESELECTED" and out.winner is win and out.failure_code is None
+    assert "auto_blocked:verifier_partial" in win.reasons
+
+
+def test_another_brand_on_a_tier1_image_turns_the_tier1_fallback_off():
+    # The listing text named the brand, the label shows another one: tier 1 is not evidence here.
+    other_brand = rc(t1(1), verdict("MISMATCH"))                  # brand_match 'no'
+    unsure = rc(t1(2), verdict("UNSURE"))
+    out = decide.route(SPEC, ranked(other_brand, unsure), OK, HEALTHY, set())
+    assert out.decision == "REVIEW_UNSELECTED" and out.winner is None
+    assert "vlm:tier1_brand_refuted" in unsure.reasons
+    assert out.reject_counts["vlm:tier1_brand_refuted"] == 1
+    # route() is idempotent: the reason is not duplicated on a second pass.
+    decide.route(SPEC, out.ranked, OK, HEALTHY, set())
+    assert unsure.reasons.count("vlm:tier1_brand_refuted") == 1
+
+
+def test_a_verified_match_still_wins_when_another_tier1_shows_another_brand():
+    other_brand = rc(t1(1), verdict("MISMATCH"))
+    match = rc(t1(2), verdict("MATCH"))
+    out = decide.route(SPEC, ranked(other_brand, match), OK, HEALTHY, set())
+    assert out.decision == "REVIEW_PRESELECTED" and out.winner is match
+
+
+def test_a_size_mismatch_does_not_refute_the_brand():
+    unsure = rc(t1(2), verdict("UNSURE"))
+    out = decide.route(SPEC, ranked(rc(t1(1), size_mismatch()), unsure), OK, HEALTHY, set())
+    assert out.decision == "REVIEW_PRESELECTED" and out.winner is unsure
+    assert "preselected:tier1_unsure" in unsure.reasons

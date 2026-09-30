@@ -126,13 +126,13 @@ def _pack_count(size: Optional[Size]) -> Optional[int]:
     return None
 
 
-def _class_tokens(texts: Sequence[str], exclude: Set[str]) -> Tuple[str, ...]:
+def _class_tokens(texts: Sequence[str], exclude: Set[str], context: str = "") -> Tuple[str, ...]:
     out: List[str] = []
     seen: Set[str] = set()
     for text in texts:
         if not text:
             continue
-        var_toks = variants_mod.variant_tokens(text)
+        var_toks = variants_mod.variant_tokens(text, context)
         for tok in tokens(text):
             key = strip_arabic_clitics(tok)
             if key in seen:
@@ -181,15 +181,17 @@ def build_sku_spec(row: Mapping[str, Any], brand_mappings=None, size_text: Optio
 
     gtin14, gtin_status = normalize_gtin(barcode)
     size = _pick_size(size_text, raw_name, name_ar)
+    # Both names and the category open context-bound phrases ('white' next to 'tuna').
+    variant_context = " ".join(t for t in (raw_name, name_ar, category) if t)
     variants = variants_mod.merge(
-        variants_mod.extract_variants(raw_name),
-        variants_mod.extract_variants(name_ar),
+        variants_mod.extract_variants(raw_name, variant_context),
+        variants_mod.extract_variants(name_ar, variant_context),
     )
 
     brand_words: Set[str] = set()
     for phrase in (brand_raw, brand_ar_row, res.canonical, res.brand_ar) + tuple(res.match_brands) + tuple(res.family):
         brand_words |= _token_set(phrase or "")
-    class_tokens = _class_tokens((raw_name, name_ar), brand_words)
+    class_tokens = _class_tokens((raw_name, name_ar), brand_words, variant_context)
 
     # The key must not depend on the Brands Mapping sheet: editing it (or failing to load
     # it) would orphan approvals, rejections and queued review rows. Use the sheet's own
