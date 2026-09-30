@@ -49,6 +49,183 @@ class ProductController extends Controller
         return PythonBridge::run($action, $params);
     }
 
+    /** كاش صفوف الشيت الخام كما يعيدها get_products بلا أي دمج (تقدير البراند، إعادة محاولة الأخطاء). */
+    public const SHEET_ROWS_CACHE_KEY = 'sheet_rows_v2';
+
+    /** كاش منتجات المراجعة: صفوف الشيت مدمجة بالمرشحات المخزنة والاعتمادات (الكتالوج، المراجعة الجماعية، الرئيسية). */
+    public const REVIEW_PRODUCTS_CACHE_KEY = 'review_products_v2';
+
+    private const PRODUCTS_CACHE_SECONDS = 3600;
+
+    /**
+     * بصمة بيانات المراجعة في قاعدة البيانات. العامل (main.py) يكتب المرشحات والاعتمادات مباشرة دون المرور
+     * بلارافيل، فأي إدراج أو حذف أو تغيير اختيار أو اعتماد أو إلغاء اعتماد يغيّر البصمة (كل تعديل على
+     * resolved_products يحدّث resolved_at)، ويُعاد الدمج من قاعدة البيانات في الطلب التالي بدون إعادة قراءة الشيت.
+     * أخطاء المنتجات (product_failures) منها أيضاً: العامل يسجل الفشل دون أي كتابة في الشيت.
+     */
+    public const REVIEW_VERSION_SQL = "SELECT "
+        . "(SELECT CONCAT_WS(':', COUNT(*), COALESCE(MAX(id), 0), COALESCE(SUM(id * is_selected), 0)) "
+        . "FROM curation_candidates) AS candidates, "
+        . "(SELECT CONCAT_WS(':', COUNT(*), COALESCE(MAX(id), 0), COALESCE(SUM(UNIX_TIMESTAMP(resolved_at)), 0), "
+        . "COALESCE(SUM(verification_status = 'superseded'), 0)) FROM resolved_products) AS resolved, "
+        . "(SELECT CONCAT_WS(':', COUNT(*), COALESCE(SUM(CRC32(barcode)), 0), COALESCE(SUM(UNIX_TIMESTAMP(failed_at)), 0)) "
+        . "FROM product_failures) AS failures";
+
+    /** آخر نتيجة لفحص الاتصالات يحفظها verify_cloud_services.py --json. */
+    private const DIAGNOSTICS_RESULT_FILE = '../temp/diagnostics_last.json';
+
+    /** مهلة فحص الاتصالات: مهلة بايثون الإجمالية، ثم حد أقصى يُنهى بعده الفحص (خادم PHP المدمج يخدم طلباً واحداً). */
+    private const DIAGNOSTICS_DEADLINE_SECONDS = 30;
+    private const DIAGNOSTICS_KILL_SECONDS = 45;
+
+    /**
+     * تفريغ كاش صفوف الشيت وكاش منتجات المراجعة معاً. يُستدعى بعد كل كتابة من لوحة التحكم:
+     * اعتماد، رفض، رفع يدوي، إعادة محاولة، حفظ إعدادات الشيت، زر تفريغ الكاش.
+     */
+    public static function forgetProductCaches(): void
+    {
+        \Cache::forget(self::SHEET_ROWS_CACHE_KEY);
+        \Cache::forget(self::REVIEW_PRODUCTS_CACHE_KEY);
+    }
+
+    /**
+     * بصمة ملف كاش الشيت لدى بايثون (products_cache.json). بايثون يحذف الملف بعد كل كتابة في الشيت
+     * (العامل، عامل المزامنة، الاعتماد، حفظ إعدادات الشيت) ويعيد إنشاءه عند القراءة التالية، فتغيّر البصمة
+     * يعني أن الصفوف المخزنة هنا قديمة حتى لو لم تمر الكتابة عبر لارافيل. null: لا يوجد كاش صالح لدى بايثون.
+     */
+    private static function sheetStamp(): ?string
+    {
+        $path = base_path('../products_cache.json');
+        clearstatcache(true, $path);
+        if (!is_file($path)) {
+            return null;
+        }
+        return filemtime($path) . ':' . filesize($path);
+    }
+
+    /**
+     * صفوف الشيت الخام (get_products) من الكاش، أو من بايثون عند غيابها أو تغيّر بصمة الشيت.
+     * تعيد null عند فشل القراءة، وسبب الفشل في $error.
+     */
+    public static function sheetRows(bool $refresh = false, ?string &$error = null): ?array
+    {
+        $stamp = self::sheetStamp();
+        if (!$refresh && $stamp !== null) {
+            $cached = \Cache::get(self::SHEET_ROWS_CACHE_KEY);
+            if (is_array($cached) && ($cached['stamp'] ?? null) === $stamp && is_array($cached['rows'] ?? null)) {
+                return $cached['rows'];
+            }
+        }
+
+        $result = PythonBridge::run('get_products');
+        if (($result['status'] ?? '') !== 'success' || !is_array($result['products'] ?? null)) {
+            $error = (string) ($result['error'] ?? 'Unknown error');
+            return null;
+        }
+        \Cache::put(self::SHEET_ROWS_CACHE_KEY, ['stamp' => self::sheetStamp(), 'rows' => $result['products']],
+            self::PRODUCTS_CACHE_SECONDS);
+        return $result['products'];
+    }
+
+    /** بصمة بيانات المراجعة الحالية، أو null إذا تعذر حسابها (عندها لا يُخدم كاش المراجعة). */
+    private static function reviewDataVersion(): ?string
+    {
+        try {
+            $row = DB::selectOne(self::REVIEW_VERSION_SQL);
+            return $row ? ((string) $row->candidates . '|' . (string) $row->resolved . '|' . (string) $row->failures) : null;
+        } catch (\Throwable $e) {
+            return null;
+        }
+    }
+
+    /**
+     * منتجات المراجعة: صفوف الشيت مدمجة بالمرشحات المخزنة وحالة الاعتماد. تُخدم من الكاش ما دامت بصمة قاعدة
+     * البيانات وبصمة الشيت لم تتغيرا، وإلا يُعاد الدمج (وصفوف الشيت نفسها من كاشها الخاص).
+     * تعيد null عند فشل قراءة الشيت، وسبب الفشل في $error.
+     */
+    public static function reviewProducts(bool $refresh = false, ?string &$error = null, ?bool &$fromCache = null): ?array
+    {
+        $fromCache = false;
+        // البصمة تُحسب قبل قراءة البيانات: كتابة أثناء الدمج تجعل الطلب التالي يعيد الدمج ولا تُفقد
+        $version = self::reviewDataVersion();
+        $stamp = self::sheetStamp();
+        if (!$refresh && $version !== null && $stamp !== null) {
+            $cached = \Cache::get(self::REVIEW_PRODUCTS_CACHE_KEY);
+            if (is_array($cached) && ($cached['version'] ?? null) === $version
+                && ($cached['stamp'] ?? null) === $stamp && is_array($cached['products'] ?? null)) {
+                $fromCache = true;
+                return $cached['products'];
+            }
+        }
+
+        $products = self::sheetRows($refresh, $error);
+        if ($products === null) {
+            return null;
+        }
+
+        // جلب تفاصيل الكاش المحلي (الاعتمادات الملغاة superseded لا تعرض)
+        $resolvedQuery = ResolvedProduct::query();
+        try {
+            if (Schema::hasColumn('resolved_products', 'verification_status')) {
+                $resolvedQuery->where(function ($q) {
+                    $q->whereNull('verification_status')->orWhere('verification_status', '<>', 'superseded');
+                });
+            }
+        } catch (\Throwable $e) {
+            // جدول بدون أعمدة الهوية بعد
+        }
+        $resolved = $resolvedQuery->orderBy('id')->get()->keyBy('barcode');
+
+        // جلب مرشحات الصور المخزنة للفرز والاعتماد البصري.
+        // الربط بالمنتج يتم عبر sku_key (وليس رقم الصف الذي يتغير عند تعديل الشيت)،
+        // مع الرجوع لرقم الصف فقط للمرشحات القديمة التي لا تملك sku_key،
+        // وتعرض فقط مرشحات آخر تشغيل (run_id) لكل sku_key.
+        $candidateRows = [];
+        try {
+            $candidateRows = DB::table('curation_candidates')
+                ->orderBy('id', 'asc')
+                ->get()
+                ->map(fn ($r) => (array) $r)
+                ->all();
+        } catch (\Exception $e) {
+            // Table might not exist or be empty yet
+        }
+
+        $products = CandidateMatcher::attach($products, $candidateRows);
+
+        // أخطاء المنتجات من قاعدة البيانات في كل دمج: العامل يسجل الفشل في product_failures دون أي كتابة في الشيت،
+        // فقيمة has_error المحفوظة مع صفوف الشيت (من get_products) تبقى قديمة حتى الكتابة التالية في الشيت
+        $failures = null;
+        try {
+            $failures = DB::table('product_failures')->pluck('error_message', 'barcode')->all();
+        } catch (\Throwable $e) {
+            // الجدول غير موجود بعد: تبقى قيم get_products
+        }
+
+        foreach ($products as &$prod) {
+            $barcode = trim($prod['barcode'] ?? '');
+            if ($barcode && isset($resolved[$barcode])) {
+                $prod['cached_image'] = $resolved[$barcode]->cloudinary_url;
+                $prod['verification_status'] = $resolved[$barcode]->verification_status ?? 'legacy';
+                $prod['resolved_at'] = $resolved[$barcode]->resolved_at ? $resolved[$barcode]->resolved_at->toIso8601String() : null;
+            }
+            if (is_array($failures)) {
+                // نفس مفاتيح get_products في cli_bridge.py: الباركود، أو ERR_<الاسم>_<البراند>
+                $altKey = 'ERR_' . str_replace(' ', '_', ($prod['product_name'] ?? '') . '_' . ($prod['brand'] ?? ''));
+                $failureKey = ($barcode !== '' && array_key_exists($barcode, $failures)) ? $barcode
+                    : (array_key_exists($altKey, $failures) ? $altKey : null);
+                $prod['has_error'] = $failureKey !== null;
+                $prod['error_message'] = $failureKey !== null ? (string) ($failures[$failureKey] ?? '') : '';
+            }
+        }
+        unset($prod);
+
+        \Cache::put(self::REVIEW_PRODUCTS_CACHE_KEY,
+            ['version' => $version, 'stamp' => self::sheetStamp(), 'products' => $products],
+            self::PRODUCTS_CACHE_SECONDS);
+        return $products;
+    }
+
     /**
      * عرض الصفحة الرئيسية للوحة التحكم والإحصائيات.
      * كل الأرقام هنا عدادات حقيقية من قاعدة البيانات والشيت؛ لا توجد تقديرات أو ثوابت مختلقة.
@@ -78,20 +255,8 @@ class ProductController extends Controller
 
             $queueCounters = QueueStats::counters();
 
-            // الحصول على المنتجات لتعديل أرقام الإحصائيات الشاملة
-            $products = [];
-            $cacheKey = 'products_json_v1';
-            $cachedProducts = \Cache::get($cacheKey);
-
-            if ($cachedProducts !== null) {
-                $products = $cachedProducts;
-            } else {
-                $result = $this->runPython('get_products');
-                if (isset($result['status']) && $result['status'] === 'success') {
-                    $products = $result['products'];
-                    \Cache::put($cacheKey, $products, 3600);
-                }
-            }
+            // نفس منتجات المراجعة التي يعرضها الكتالوج (مع المرشحات المخزنة)، فتطابق أرقام "المراجعة" الصفحتين
+            $products = self::reviewProducts() ?? [];
 
             $total = count($products);
             $linked = 0;
@@ -136,90 +301,26 @@ class ProductController extends Controller
     /**
      * جلب المنتجات كـ JSON مع دمج البيانات الوصفية والحالات من SQLite
      */
-        public function getProductsJson(Request $request)
+    public function getProductsJson(Request $request)
     {
         try {
-            $cacheKey = 'products_json_v1';
             $forceRefresh = $request->query('refresh') === 'true';
-            
-            // Bypass cache if background automation is active or pending curation
-            $isAutomationActive = false;
-            try {
-                $stateRow = \DB::select("SELECT status FROM automation_state WHERE `key` = 'active_session' LIMIT 1");
-                if (!empty($stateRow)) {
-                    $status = $stateRow[0]->status;
-                    if ($status === 'pre_caching' || $status === 'running' || $status === 'curation_pending') {
-                        $isAutomationActive = true;
-                    }
-                }
-            } catch (\Exception $ex) {
-                // Table not loaded yet
+
+            // لا يُتجاوز الكاش أثناء التشغيل أو المراجعة: مرشحات العامل الجديدة تغيّر بصمة قاعدة البيانات
+            // (يُعاد الدمج من قاعدة البيانات فقط)، وكتابته في الشيت تحذف products_cache.json (تُعاد قراءة الشيت).
+            // التجاوز القديم كان يعيد قراءة الشيت كاملاً عبر بايثون مع كل تحميل للكتالوج وقت عمل المراجعين.
+            $error = null;
+            $fromCache = false;
+            $products = self::reviewProducts($forceRefresh, $error, $fromCache);
+            if ($products === null) {
+                return response()->json(['error' => 'Failed to load products from Google Sheets via CLI: ' . ($error ?? 'Unknown error')], 500);
             }
-            
-            $cachedProducts = ($forceRefresh || $isAutomationActive) ? null : \Cache::get($cacheKey);
-            
-            if ($cachedProducts !== null) {
-                return response()->json([
-                    'status'   => 'success',
-                    'products' => $cachedProducts,
-                    'cached'   => true
-                ])->header('X-Cache', 'HIT');
-            }
-
-            $result = $this->runPython('get_products');
-            if (!isset($result['status']) || $result['status'] !== 'success') {
-                return response()->json(['error' => 'Failed to load products from Google Sheets via CLI: ' . ($result['error'] ?? 'Unknown error')], 500);
-            }
-
-            $products = $result['products'];
-
-            // جلب تفاصيل الكاش المحلي (الاعتمادات الملغاة superseded لا تعرض)
-            $resolvedQuery = ResolvedProduct::query();
-            try {
-                if (Schema::hasColumn('resolved_products', 'verification_status')) {
-                    $resolvedQuery->where(function ($q) {
-                        $q->whereNull('verification_status')->orWhere('verification_status', '<>', 'superseded');
-                    });
-                }
-            } catch (\Throwable $e) {
-                // جدول بدون أعمدة الهوية بعد
-            }
-            $resolved = $resolvedQuery->orderBy('id')->get()->keyBy('barcode');
-
-            // جلب مرشحات الصور المخزنة للفرز والاعتماد البصري.
-            // الربط بالمنتج يتم عبر sku_key (وليس رقم الصف الذي يتغير عند تعديل الشيت)،
-            // مع الرجوع لرقم الصف فقط للمرشحات القديمة التي لا تملك sku_key،
-            // وتعرض فقط مرشحات آخر تشغيل (run_id) لكل sku_key.
-            $candidateRows = [];
-            try {
-                $candidateRows = DB::table('curation_candidates')
-                    ->orderBy('id', 'asc')
-                    ->get()
-                    ->map(fn ($r) => (array) $r)
-                    ->all();
-            } catch (\Exception $e) {
-                // Table might not exist or be empty yet
-            }
-
-            $products = CandidateMatcher::attach($products, $candidateRows);
-
-            foreach ($products as &$prod) {
-                $barcode = trim($prod['barcode'] ?? '');
-                if ($barcode && isset($resolved[$barcode])) {
-                    $prod['cached_image'] = $resolved[$barcode]->cloudinary_url;
-                    $prod['verification_status'] = $resolved[$barcode]->verification_status ?? 'legacy';
-                    $prod['resolved_at'] = $resolved[$barcode]->resolved_at ? $resolved[$barcode]->resolved_at->toIso8601String() : null;
-                }
-            }
-            unset($prod);
-
-            \Cache::put($cacheKey, $products, 3600);
 
             return response()->json([
                 'status'   => 'success',
                 'products' => $products,
-                'cached'   => false
-            ])->header('X-Cache', 'MISS');
+                'cached'   => $fromCache
+            ])->header('X-Cache', $fromCache ? 'HIT' : 'MISS');
         } catch (\Exception $e) {
             return response()->json(['error' => $e->getMessage()], 500);
         }
@@ -314,16 +415,7 @@ class ProductController extends Controller
                 return response()->json(['count' => 0]);
             }
 
-            $cacheKey = 'products_json_v1';
-            $products = \Cache::get($cacheKey);
-
-            if ($products === null) {
-                $result = $this->runPython('get_products');
-                if (isset($result['status']) && $result['status'] === 'success') {
-                    $products = $result['products'];
-                    \Cache::put($cacheKey, $products, 3600);
-                }
-            }
+            $products = self::sheetRows();
 
             if (empty($products)) {
                 return response()->json(['count' => 0]);
@@ -348,41 +440,90 @@ class ProductController extends Controller
      */
     public function systemDiagnostics()
     {
-        return view('dashboard.diagnostics');
+        // الصفحة لا تشغل فحص الاتصالات عند فتحها (استعلام Serper مدفوع + استدعاء PhotoRoom):
+        // تعرض آخر نتيجة محفوظة مع وقتها، والفحص الجديد بزر صريح فقط.
+        return view('dashboard.diagnostics', ['lastDiagnostics' => self::lastDiagnostics()]);
+    }
+
+    /** آخر نتيجة محفوظة لفحص الاتصالات، أو null إذا لم يُجرَ فحص بعد. */
+    public static function lastDiagnostics(): ?array
+    {
+        $path = base_path(self::DIAGNOSTICS_RESULT_FILE);
+        if (!is_file($path)) {
+            return null;
+        }
+        $decoded = json_decode((string) @file_get_contents($path), true);
+        return is_array($decoded) && is_array($decoded['services'] ?? null) ? $decoded : null;
     }
 
     /**
-     * تشغيل فحص الخدمات السحابية واسترجاع النتيجة بصيغة JSON
+     * تشغيل فحص الخدمات السحابية (بزر صريح فقط) واسترجاع النتيجة بصيغة JSON.
+     * الفحوص تعمل بالتوازي بمهلة إجمالية في بايثون، ويُنهى الفحص من هنا إذا تجاوز حده الأقصى،
+     * حتى لا يتوقف خادم PHP المدمج (طلب واحد في كل مرة) لدقائق.
      */
     public function runDiagnosticsJson()
     {
-        @set_time_limit(180);
+        @set_time_limit(self::DIAGNOSTICS_KILL_SECONDS + 15);
+        $outFile = null;
         try {
-            $pythonPath = $this->getPythonPath();
-            $scriptPath = base_path('../verify_cloud_services.py');
-            $cmd = "\"{$pythonPath}\" \"{$scriptPath}\" --json 2>&1";
-            $output = shell_exec($cmd);
-            
-            $pos = strpos($output, '{');
-            if ($pos !== false) {
-                $output = substr($output, $pos);
+            putenv('PYTHONUTF8=1');
+            putenv('PYTHONIOENCODING=utf-8');
+            $command = [
+                $this->getPythonPath(), base_path('../verify_cloud_services.py'),
+                '--json', '--deadline', (string) self::DIAGNOSTICS_DEADLINE_SECONDS,
+            ];
+            // المخرجات إلى ملف مؤقت لا إلى أنبوب: قراءة الأنابيب بلا انتظار لا تعمل على ويندوز
+            $outFile = tempnam(sys_get_temp_dir(), 'diag');
+            $nullDevice = strncasecmp(PHP_OS, 'WIN', 3) === 0 ? 'NUL' : '/dev/null';
+            $process = proc_open($command, [
+                0 => ['file', $nullDevice, 'r'],
+                1 => ['file', $outFile, 'w'],
+                2 => ['file', $nullDevice, 'w'],
+            ], $pipes, base_path('..'));
+            if (!is_resource($process)) {
+                throw new \RuntimeException('تعذر تشغيل verify_cloud_services.py');
             }
-            
-            $decoded = json_decode($output, true);
-            if ($decoded) {
+
+            $timedOut = false;
+            $killAt = microtime(true) + self::DIAGNOSTICS_KILL_SECONDS;
+            while (proc_get_status($process)['running']) {
+                if (microtime(true) >= $killAt) {
+                    proc_terminate($process, 9);
+                    $timedOut = true;
+                    break;
+                }
+                usleep(200000);
+            }
+            proc_close($process);
+            $output = (string) @file_get_contents($outFile);
+
+            if ($timedOut) {
+                return response()->json([
+                    'status' => 'failed',
+                    'error' => 'انتهت مهلة فحص الاتصالات (' . self::DIAGNOSTICS_KILL_SECONDS . ' ثانية) فأُوقف الفحص. '
+                        . 'تحقق من الإنترنت أو البروكسي ثم أعد المحاولة.'
+                ], 504);
+            }
+
+            $decoded = PythonBridge::decodeOutput($output);
+            if (is_array($decoded) && is_array($decoded['services'] ?? null)) {
                 return response()->json($decoded);
             }
-            
+
             return response()->json([
                 'status' => 'failed',
-                'error' => 'Invalid output from python diagnostic script',
-                'raw_output' => $output
+                'error' => 'لم يُرجع verify_cloud_services.py نتيجة صالحة: تحقق من بيئة بايثون ومكتباتها ثم أعد الفحص.',
+                'raw_output' => mb_substr($output, -4000)
             ], 500);
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             return response()->json([
                 'status' => 'failed',
                 'error' => $e->getMessage()
             ], 500);
+        } finally {
+            if ($outFile && file_exists($outFile)) {
+                @unlink($outFile);
+            }
         }
     }
 
@@ -529,7 +670,7 @@ class ProductController extends Controller
             $product->save();
 
             // Clear cache
-            \Cache::forget('products_json_v1');
+            self::forgetProductCaches();
 
             return response()->json([
                 'status' => 'success',

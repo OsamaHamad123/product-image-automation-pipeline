@@ -787,8 +787,6 @@ def _redis_write_behind(row_number, updates, expect=None):
         if not _redis_merge_payload(r, key, row_number, updates, expect):
             return False
         r.sadd(DIRTY_SET_KEY, key)
-        r.delete("laravel_database_laravel_cache:products_json_v1")
-        r.delete("laravel_cache:products_json_v1")
         return True
     except Exception as e:
         logger.warning("[Redis Write-Behind] %s؛ استخدام طابور MariaDB.", e)

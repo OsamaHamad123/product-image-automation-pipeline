@@ -65,7 +65,7 @@ class CurationController extends Controller
         $result = PythonBridge::run('reject_image', $params);
 
         if (!PythonBridge::isError($result)) {
-            \Cache::forget('products_json_v1');
+            ProductController::forgetProductCaches();
         }
 
         return response()->json($result, PythonBridge::httpStatus($result));
@@ -102,7 +102,7 @@ class CurationController extends Controller
                     ->update(['is_selected' => 1]);
             }
 
-            \Cache::forget('products_json_v1');
+            ProductController::forgetProductCaches();
 
             return response()->json([
                 'status' => 'success',
@@ -190,7 +190,7 @@ class CurationController extends Controller
                 });
             }
 
-            \Cache::forget('products_json_v1');
+            ProductController::forgetProductCaches();
 
             return response()->json([
                 'status' => 'success',

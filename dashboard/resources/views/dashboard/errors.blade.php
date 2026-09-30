@@ -280,7 +280,8 @@
             btn.innerHTML = originalText;
             
             if (data.status === 'success') {
-                alert('🎉 تم إعادة جدولة المنتج بنجاح في طابور الأتمتة وسيبدأ تشغيله فوراً.');
+                // إعادة المحاولة تضيف الصف للطابور فقط؛ لا يبدأ أي تشغيل من هذه الصفحة
+                alert('✅ ' + (data.message || 'أُضيف المنتج إلى طابور الأتمتة؛ شغّل الأتمتة من صفحة «التحكم والأتمتة الجماعية» لمعالجته.'));
                 const tr = document.getElementById(`row-${barcode}`);
                 if (tr) {
                     tr.style.opacity = '0.3';
@@ -306,7 +307,7 @@
         }
 
         const barcodes = checkedCbs.map(cb => cb.value);
-        if (!confirm(`هل أنت متأكد من إعادة جدولة ${barcodes.length} منتجات فاشلة دفعة واحدة؟`)) {
+        if (!confirm(`ستُضاف المنتجات المحددة (العدد: ${barcodes.length}) إلى طابور الأتمتة وتُزال من سجل الأخطاء. لا يبدأ أي تشغيل من هنا: تُعالج عندما تعمل الأتمتة. متابعة؟`)) {
             return;
         }
 
@@ -329,7 +330,7 @@
             btn.innerHTML = originalText;
 
             if (data.status === 'success') {
-                alert(`🎉 تم بنجاح تصفير وجدولة ${barcodes.length} منتجات في طابور الخلفية!`);
+                alert('✅ ' + (data.message || 'أُضيفت المنتجات إلى طابور الأتمتة؛ شغّل الأتمتة من صفحة «التحكم والأتمتة الجماعية» لمعالجتها.'));
                 barcodes.forEach(b => {
                     const tr = document.getElementById(`row-${b}`);
                     if (tr) {

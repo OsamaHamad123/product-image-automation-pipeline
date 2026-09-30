@@ -1,10 +1,15 @@
 # verify_cloud_services.py
 # سكربت للتحقق من الاتصال بالخدمات السحابية الأساسية وتأكيد صحة الاعتمادات والاشتراكات
 
+import io
+import logging
 import os
 import sys
+import threading
+import time
 import requests
 import json
+from datetime import datetime, timezone
 
 # تحميل الإعدادات من .env
 import config
@@ -42,7 +47,14 @@ def _redact(text):
     return re.sub(r"(?i)((?:api_?)?key=)[^&\s'\"]+", r"\1[REDACTED]", text)
 
 
+# مخرجات كل فحص تُلتقط في مخزن خاص بخيطه (الفحوص تعمل بالتوازي في وضع --json)
+_capture = threading.local()
+
+
 def print(*args, **kwargs):  # noqa: A001 - every message of this script is redacted
+    buffer = getattr(_capture, "buffer", None)
+    if buffer is not None and "file" not in kwargs:
+        kwargs["file"] = buffer
     builtins.print(*(_redact(a) for a in args), **kwargs)
 
 
@@ -154,7 +166,7 @@ def verify_serper():
     from catalog_match import settings as cm_settings
     api_key = cm_settings.serper_api_key()
     if not api_key:
-        print("⚠️ لم يتم تعيين SERPER_API_KEY: سيُستخدم Bing كبديل، ونتائجه تذهب للمراجعة دائماً ولا تُنشر تلقائياً.")
+        print("❌ لم يتم تعيين SERPER_API_KEY: سيُستخدم Bing كبديل، ونتائجه تذهب للمراجعة دائماً ولا تُنشر تلقائياً.")
         return False
     try:
         print("🔄 إرسال بحث صور تجريبي واحد (يستهلك رصيد استعلام واحد)...")
@@ -175,7 +187,7 @@ def verify_serper():
         if images:
             print(f"✅ Serper يعمل: {len(images)} صورة للاستعلام التجريبي.")
             return True
-        print("⚠️ Serper رد بنجاح لكن بدون صور: تحقق من الحساب أو جرّب لاحقاً.")
+        print("❌ Serper رد بنجاح لكن بدون صور: تحقق من الحساب أو جرّب لاحقاً.")
         return False
     if response.status_code in (401, 403):
         print(f"❌ مفتاح SERPER_API_KEY غير صالح (Error {response.status_code}).")
@@ -321,91 +333,149 @@ def verify_proxy():
         print(f"❌ حدث خطأ أثناء فحص اتصال البروكسي: {e}")
         return False
 
+# ---------------------------------------------------------------------------
+# تشغيل كل الفحوص
+# ---------------------------------------------------------------------------
+
+# (المفتاح في JSON، الاسم المعروض، دالة الفحص، حرج؟). Serper مصدر الصور الأساسي: بدونه يُستخدم Bing ونتائجه
+# لا تُنشر تلقائياً أبداً، فتعطله حرج مثل Gemini.
+SERVICES = (
+    ("google_sheets", "Google Sheets API", "verify_google_sheets", True),
+    ("cloudinary", "Cloudinary CDN", "verify_cloudinary", True),
+    ("gemini", "Google Gemini API", "verify_gemini", True),
+    ("photoroom", "PhotoRoom API", "verify_photoroom", True),
+    ("serper", "Serper (Google Images)", "verify_serper", True),
+    ("google_search", "Google Custom Search", "verify_google_search", False),
+    ("proxy", "Proxy Server", "verify_proxy", False),
+)
+
+# مهلة واحدة لكل الفحوص معاً في وضع --json: صفحة التشخيص تنتظر الرد، وخادم PHP المدمج يخدم طلباً واحداً في كل مرة
+DEFAULT_DEADLINE_S = 30
+
+# آخر نتيجة تعرضها صفحة التشخيص عند فتحها (الصفحة لا تشغل الفحص تلقائياً)
+LAST_RESULT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "temp", "diagnostics_last.json")
+
+
+class _ThreadLogHandler(logging.Handler):
+    """ينسخ تحذيرات المكتبات (مثل سبب فشل Google Sheets) إلى تفاصيل الفحص الذي أطلقها."""
+
+    def emit(self, record):
+        buffer = getattr(_capture, "buffer", None)
+        if buffer is not None:
+            try:
+                buffer.write(_redact(record.getMessage()) + "\n")
+            except Exception:
+                pass
+
+
+def _service_status(ok):
+    return "online" if ok is True else ("disabled" if ok is None else "offline")
+
+
+def _run_one(key, fn_name, outcomes):
+    _capture.buffer = io.StringIO()
+    try:
+        ok = globals()[fn_name]()
+    except Exception as e:
+        print(f"❌ خطأ غير متوقع أثناء الفحص ({type(e).__name__}): {e}")
+        ok = False
+    outcomes[key] = (ok, _capture.buffer.getvalue())
+
+
+def run_checks(deadline_s=DEFAULT_DEADLINE_S):
+    """
+    تشغيل كل الفحوص بالتوازي بمهلة إجمالية واحدة، وإرجاع النتيجة التي تعرضها صفحة التشخيص.
+    details لكل خدمة = ما طبعه فحصها فقط. الفحص الذي لم يرد خلال المهلة يُعد فاشلاً ولا يُنتظر (خيوط daemon).
+    """
+    started = time.monotonic()
+    outcomes = {}
+    handler = _ThreadLogHandler(level=logging.WARNING)
+    logging.getLogger().addHandler(handler)
+    try:
+        threads = []
+        for key, _name, fn_name, _critical in SERVICES:
+            thread = threading.Thread(target=_run_one, args=(key, fn_name, outcomes), name=f"verify-{key}",
+                                      daemon=True)
+            thread.start()
+            threads.append(thread)
+        for thread in threads:
+            thread.join(max(0.0, deadline_s - (time.monotonic() - started)))
+        finished = dict(outcomes)
+    finally:
+        logging.getLogger().removeHandler(handler)
+
+    services = {}
+    for key, name, _fn, critical in SERVICES:
+        if key in finished:
+            ok, details = finished[key]
+        else:
+            ok, details = False, (f"❌ لم يكتمل فحص {name} خلال {deadline_s:g} ثانية فتوقف انتظاره: "
+                                  "تحقق من الإنترنت أو البروكسي ثم أعد الفحص.")
+        services[key] = {"name": name, "status": _service_status(ok), "is_critical": critical,
+                         "details": details.strip()}
+    return {
+        "status": "success",
+        "all_ok": all(s["status"] == "online" for s in services.values() if s["is_critical"]),
+        "checked_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "duration_s": round(time.monotonic() - started, 1),
+        "services": services,
+        "raw_logs": "\n\n".join(s["details"] for s in services.values() if s["details"]),
+    }
+
+
+def save_last_result(result, path=LAST_RESULT_PATH):
+    """حفظ آخر نتيجة (كتابة ذرية) لتعرضها صفحة التشخيص مع وقتها دون فحص جديد."""
+    tmp = f"{path}.{os.getpid()}.tmp"
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(result, f, ensure_ascii=False)
+        os.replace(tmp, path)
+        return True
+    except OSError:
+        return False
+
+
+def _deadline_from_argv(argv):
+    if "--deadline" in argv:
+        try:
+            return max(1.0, float(argv[argv.index("--deadline") + 1]))
+        except (IndexError, ValueError):
+            pass
+    return DEFAULT_DEADLINE_S
+
+
+def main_json(argv, out, result_path=LAST_RESULT_PATH):
+    """وضع --json (صفحة التشخيص): وثيقة JSON واحدة على out، وتُحفظ النتيجة مع وقتها. يعيد رمز الخروج."""
+    results = run_checks(_deadline_from_argv(argv))
+    save_last_result(results, result_path)
+    out.write(json.dumps(results, ensure_ascii=False) + "\n")
+    out.flush()
+    return 0 if results["all_ok"] else 1
+
+
 if __name__ == "__main__":
     if "--json" in sys.argv:
-        import io
-        # كتم المخرجات النصية المطبوعة والتقاطها
-        old_stdout = sys.stdout
+        # ما تطبعه المكتبات لا يختلط بوثيقة JSON: stdout يبقى مكتوماً حتى الخروج
+        real_stdout = sys.stdout
         sys.stdout = io.StringIO()
-        
-        # إجراء الفحص
-        sheets_ok = verify_google_sheets()
-        cloudinary_ok = verify_cloudinary()
-        gemini_ok = verify_gemini()
-        photoroom_ok = verify_photoroom()
-        serper_ok = verify_serper()
-        search_ok = verify_google_search()
-        proxy_status = verify_proxy()
-        
-        # استرجاع النصوص التي طبعت في الخلفية كلوغات تفصيلية لكل خدمة
-        captured_logs = sys.stdout.getvalue()
-        sys.stdout = old_stdout
-        
-        # بناء هيكل البيانات الموحد لـ JSON
-        results = {
-            "status": "success",
-            "all_ok": bool(sheets_ok and cloudinary_ok and gemini_ok and photoroom_ok),
-            "services": {
-                "google_sheets": {
-                    "name": "Google Sheets API",
-                    "status": "online" if sheets_ok else "offline",
-                    "is_critical": True
-                },
-                "cloudinary": {
-                    "name": "Cloudinary CDN",
-                    "status": "online" if cloudinary_ok else "offline",
-                    "is_critical": True
-                },
-                "gemini": {
-                    "name": "Google Gemini API",
-                    "status": "online" if gemini_ok else "offline",
-                    "is_critical": True
-                },
-                "photoroom": {
-                    "name": "PhotoRoom API",
-                    "status": "online" if photoroom_ok else "offline",
-                    "is_critical": True
-                },
-                "serper": {
-                    "name": "Serper (Google Images)",
-                    "status": "online" if serper_ok else "offline",
-                    "is_critical": False
-                },
-                "google_search": {
-                    "name": "Google Custom Search",
-                    "status": "online" if search_ok else ("disabled" if search_ok is None else "offline"),
-                    "is_critical": False
-                },
-                "proxy": {
-                    "name": "Proxy Server",
-                    "status": "online" if proxy_status is True else ("disabled" if proxy_status is None else "offline"),
-                    "is_critical": False
-                }
-            },
-            "raw_logs": captured_logs
-        }
-        print(json.dumps(results, ensure_ascii=False))
-        sys.exit(0 if results["all_ok"] else 1)
+        code = main_json(sys.argv, real_stdout)
+        sys.stderr.flush()
+        # فحص عالق بعد المهلة لا يؤخر الخروج
+        os._exit(code)
 
     print("=" * 60)
     print("🚦 فحص جاهزية الخدمات السحابية لمشروع أتمتة المنتجات")
     print("=" * 60)
-    
-    results = {
-        "Google Sheets API": verify_google_sheets(),
-        "Cloudinary CDN": verify_cloudinary(),
-        "Google Gemini API": verify_gemini(),
-        "PhotoRoom API": verify_photoroom(),
-        "Serper (Google Images)": verify_serper(),
-        "Google Custom Search": verify_google_search(),
-        "Proxy Connection": verify_proxy()
-    }
-    
+
+    results = {name: globals()[fn_name]() for _key, name, fn_name, _critical in SERVICES}
+
     print("\n" + "=" * 60)
     print("📊 ملخص نتائج الفحص النهائي:")
     print("=" * 60)
     all_ok = True
-    for service, status in results.items():
+    for _key, service, _fn, critical in SERVICES:
+        status = results[service]
         if status or status is None:
             if status is None:
                 status_str = "ℹ️ غير مفعّل"
@@ -413,12 +483,12 @@ if __name__ == "__main__":
                 status_str = "✅ يعمل بنجاح"
         else:
             status_str = "❌ فشل الاتصال / غير مهيأ"
-            # فقط الخدمات الحيوية تؤدي لتعطيل التشغيل بالكامل
-            if service not in ["Serper (Google Images)", "Google Custom Search", "Proxy Connection"]:
+            # فقط الخدمات الحيوية تؤدي لتعطيل التشغيل بالكامل (Serper منها: مصدر الصور الأساسي)
+            if critical:
                 all_ok = False
         print(f"- {service:22}: {status_str}")
     print("=" * 60)
-    
+
     if not all_ok:
         print("\n⚠️ تنبيه: تم اكتشاف مشاكل في إعدادات بعض الخدمات الحيوية!")
         print("قد لا تتمكن الأتمتة من العمل بشكل صحيح.")
@@ -426,4 +496,3 @@ if __name__ == "__main__":
     else:
         print("\n🎉 كافة الخدمات الحيوية تعمل ومستعدة للتشغيل بأمان!")
         sys.exit(0)
-

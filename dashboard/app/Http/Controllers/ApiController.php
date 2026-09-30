@@ -56,7 +56,7 @@ class ApiController extends Controller
 
         if (($result['status'] ?? '') === 'success') {
             // تفريغ كاش الكتالوج ليعاد قراءته بالشيت المحدث
-            \Cache::forget('products_json_v1');
+            ProductController::forgetProductCaches();
         }
         return response()->json($result, ($result['status'] ?? '') === 'success' ? 200 : 500);
     }
@@ -69,7 +69,7 @@ class ApiController extends Controller
         $result = $this->runPython('reject_image', $request->all());
 
         if (!PythonBridge::isError($result)) {
-            \Cache::forget('products_json_v1');
+            ProductController::forgetProductCaches();
         }
         return response()->json($result, PythonBridge::httpStatus($result));
     }
@@ -112,7 +112,7 @@ class ApiController extends Controller
         }
 
         if (isset($result['status']) && $result['status'] === 'success') {
-            \Cache::forget('products_json_v1');
+            ProductController::forgetProductCaches();
             return response()->json($result, 200);
         }
         return response()->json($result, 500);
@@ -140,8 +140,8 @@ class ApiController extends Controller
 
     public function clearProductsCache()
     {
-        \Cache::forget('products_json_v1');
-        
+        ProductController::forgetProductCaches();
+
         $pCache = $this->automationPath('products_cache.json');
         $bCache = $this->automationPath('brand_mappings_cache.json');
         
@@ -448,7 +448,7 @@ class ApiController extends Controller
             $this->removeRunFiles($process);
 
             // Clear Laravel cache
-            \Cache::forget('products_json_v1');
+            ProductController::forgetProductCaches();
 
             // Clear python disk cache files
             $pCache = $basePath . DIRECTORY_SEPARATOR . 'products_cache.json';
@@ -572,7 +572,7 @@ class ApiController extends Controller
                 \DB::delete("DELETE FROM active_learning_feedback");
             }
             
-            \Cache::forget('products_json_v1');
+            ProductController::forgetProductCaches();
             return response()->json(['status' => 'success', 'message' => 'Active learning feedback reset successfully.']);
         } catch (\Exception $e) {
             return response()->json(['status' => 'failed', 'error' => $e->getMessage()], 500);
@@ -602,15 +602,8 @@ class ApiController extends Controller
         }
 
         try {
-            $cacheKey = 'products_json_v1';
-            $products = \Cache::get($cacheKey);
-            if (!$products) {
-                $result = $this->runPython('get_products');
-                if (isset($result['status']) && $result['status'] === 'success') {
-                    $products = $result['products'];
-                    \Cache::put($cacheKey, $products, 3600);
-                }
-            }
+            // صفوف الشيت الخام فقط (أرقام الصفوف والهوية)؛ لا تُكتب في كاش منتجات المراجعة
+            $products = ProductController::sheetRows();
 
             if (empty($products)) {
                 return response()->json(['status' => 'failed', 'error' => 'فشل تحميل قائمة المنتجات للتأكد من أرقام الصفوف.'], 500);
@@ -690,10 +683,23 @@ class ApiController extends Controller
                 });
             }
             $successCount = count($rows);
+            $notFound = count(array_unique(array_map(fn ($b) => trim((string) $b), $barcodes))) - count(array_unique($failureKeys));
 
-            \Cache::forget($cacheKey);
+            ProductController::forgetProductCaches();
 
-            return response()->json(['status' => 'success', 'requeued' => $successCount, 'message' => "تم إعادة جدولة {$successCount} منتجات بنجاح في طابور الأتمتة."]);
+            // إعادة المحاولة تضيف الصفوف للطابور فقط ولا تشغّل العامل: الرسالة تقول ذلك صراحة
+            $notFoundText = $notFound > 0
+                ? " لم يُعثر في الشيت على بعض المنتجات المحددة (العدد: {$notFound}) فبقيت في سجل الأخطاء."
+                : '';
+            if ($successCount === 0) {
+                return response()->json(['status' => 'failed', 'requeued' => 0, 'not_found' => $notFound,
+                    'error' => 'لم يُضف أي منتج إلى طابور الأتمتة.' . $notFoundText], 422);
+            }
+            $message = "أُضيفت المنتجات إلى طابور الأتمتة (العدد: {$successCount})، ولا تبدأ معالجتها من هنا: "
+                . "شغّل الأتمتة من صفحة «التحكم والأتمتة الجماعية» لمعالجتها. إن كان تشغيل جارٍ الآن فسيعالجها قبل أن ينتهي."
+                . $notFoundText;
+
+            return response()->json(['status' => 'success', 'requeued' => $successCount, 'not_found' => $notFound, 'message' => $message]);
         } catch (\Exception $e) {
             return response()->json(['status' => 'failed', 'error' => $e->getMessage()], 500);
         }
@@ -716,7 +722,7 @@ class ApiController extends Controller
      */
     public function saveSheetConfig(Request $request)
     {
-        \Cache::forget('products_json_v1');
+        ProductController::forgetProductCaches();
         $result = $this->runPython('sheet-save', $request->all());
         if (isset($result['status']) && $result['status'] === 'success') {
             return response()->json($result, 200);

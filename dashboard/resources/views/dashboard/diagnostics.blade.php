@@ -358,10 +358,17 @@
                 راقب حالة اتصال الخوادم وتفاصيل استهلاك الـ APIs والسجلات البرمجية الحية دون الحاجة لـ RDP.
             </p>
         </div>
-        <button type="button" class="btn" id="runDiagnosticBtn" onclick="runDiagnostics()" style="background: var(--accent-gradient); color: var(--btn-text); font-weight: 800;">
-            <i class="fas fa-sync-alt" id="syncIcon"></i> فحص حالة الاتصالات والاشتراكات 🔄
-        </button>
+        <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 0.35rem;">
+            <button type="button" class="btn" id="runDiagnosticBtn" onclick="runDiagnostics()" style="background: var(--accent-gradient); color: var(--btn-text); font-weight: 800;">
+                <i class="fas fa-sync-alt" id="syncIcon"></i> فحص الاتصالات الآن
+            </button>
+            <span id="diagCheckNote" style="font-size: 0.75rem; color: var(--text-secondary); max-width: 360px;">
+                لا يعمل الفحص تلقائياً عند فتح الصفحة. كل فحص يرسل استعلام صور واحداً إلى Serper (يُخصم من رصيده) واستدعاءً واحداً إلى PhotoRoom، ولا يتجاوز 45 ثانية.
+            </span>
+            <span id="lastCheckInfo" style="font-size: 0.75rem; color: var(--text-secondary); font-weight: bold;"></span>
+        </div>
     </div>
+    <div id="lastDiagnosticsData" hidden data-result="{{ json_encode($lastDiagnostics ?? null, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE) }}"></div>
 
     <!-- Services Cards Grid -->
     <div class="services-grid" id="servicesGrid">
@@ -431,7 +438,7 @@
             <div class="service-header">
                 <div>
                     <h4 class="service-title">Serper (Google Images)</h4>
-                    <span class="service-badge badge-optional">مصدر الصور الأساسي</span>
+                    <span class="service-badge badge-critical">حرج: مصدر الصور الأساسي</span>
                 </div>
                 <i class="fas fa-search" style="font-size: 1.5rem; color: #22c55e;"></i>
             </div>
@@ -577,22 +584,65 @@
         laravel: 0
     };
 
-    // Run Diagnostics check synchronously
+    // كل بطاقات الخدمات (تُعاد كلها لحالة "جاري الفحص" عند إعادة الفحص، ومنها Serper)
+    const DIAG_SERVICES = ['google_sheets', 'cloudinary', 'photoroom', 'gemini', 'serper', 'proxy'];
+    // آخر نتيجة محفوظة (من الخادم عند فتح الصفحة، ثم من آخر فحص ناجح)
+    let lastDiagnostics = null;
+
+    function setServiceCardsText(text) {
+        DIAG_SERVICES.forEach(s => {
+            const ind = document.getElementById(`ind-${s}`);
+            const txt = document.getElementById(`text-${s}`);
+            ind.className = 'status-indicator status-unknown';
+            txt.innerText = text;
+            txt.className = 'status-text text-secondary';
+            const card = document.getElementById(`card-${s}`);
+            const prevBtn = card && card.querySelector ? card.querySelector('.diag-err-btn') : null;
+            if (prevBtn) prevBtn.remove();
+        });
+    }
+
+    function readLastDiagnostics() {
+        try {
+            const holder = document.getElementById('lastDiagnosticsData');
+            const result = holder && holder.dataset ? JSON.parse(holder.dataset.result || 'null') : null;
+            return result && result.services ? result : null;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    // وقت آخر فحص بجانب الزر: الصفحة تعرض النتيجة المحفوظة ولا تفحص تلقائياً
+    function showLastCheckInfo(result) {
+        const info = document.getElementById('lastCheckInfo');
+        if (!result || !result.checked_at) {
+            info.textContent = 'لم يُجرَ أي فحص بعد: اضغط «فحص الاتصالات الآن» لفحص الخدمات.';
+            return;
+        }
+        const at = new Date(result.checked_at);
+        const age = Math.max(0, (Date.now() - at.getTime()) / 1000);
+        info.textContent = `المعروض نتيجة آخر فحص: ${at.toLocaleString('ar-AE')} (قبل ${formatAge(age)})` +
+            (result.all_ok === false ? ' — توجد خدمات حرجة متوقفة' : '');
+    }
+
+    function renderLastDiagnostics() {
+        if (lastDiagnostics) {
+            updateDiagnosticsUI(lastDiagnostics.services, lastDiagnostics.raw_logs);
+        } else {
+            setServiceCardsText('لم يُفحص بعد');
+        }
+        showLastCheckInfo(lastDiagnostics);
+    }
+
+    // فحص الاتصالات بزر صريح فقط: يستهلك استعلام Serper واحداً واستدعاء PhotoRoom واحداً
     async function runDiagnostics() {
         const btn = document.getElementById('runDiagnosticBtn');
         const icon = document.getElementById('syncIcon');
         btn.disabled = true;
         icon.className = 'fas fa-spinner fa-spin';
-        
+
         // Reset states
-        const services = ['google_sheets', 'cloudinary', 'photoroom', 'gemini', 'proxy'];
-        services.forEach(s => {
-            const ind = document.getElementById(`ind-${s}`);
-            const txt = document.getElementById(`text-${s}`);
-            ind.className = 'status-indicator status-unknown';
-            txt.innerText = 'جاري الفحص...';
-            txt.className = 'status-text text-secondary';
-        });
+        setServiceCardsText('جاري الفحص...');
 
         try {
             const response = await fetch('/api/system/run-diagnostics', {
@@ -608,13 +658,17 @@
 
             if (data.status === 'success') {
                 systemLogsData = data;
+                lastDiagnostics = data;
                 updateDiagnosticsUI(data.services, data.raw_logs);
+                showLastCheckInfo(data);
             } else {
+                renderLastDiagnostics();
                 alert('❌ فشل تشغيل فحص التشخيصات: ' + (data.error || 'خطأ غير معروف'));
             }
         } catch (e) {
             btn.disabled = false;
             icon.className = 'fas fa-sync-alt';
+            renderLastDiagnostics();
             alert('❌ خطأ في الاتصال بالخادم أثناء إجراء الفحص.');
         }
     }
@@ -657,7 +711,7 @@
                     errBtn.innerHTML = '<i class="fas fa-info-circle"></i> تفاصيل الخطأ';
                     errBtn.onclick = (e) => {
                         e.stopPropagation();
-                        showDiagErrorModal(service.name, rawLogs);
+                        showDiagErrorModal(service.name, service.details || rawLogs);
                     };
                     card.appendChild(errBtn);
                 } else {
@@ -963,8 +1017,9 @@
 
     // Initialize poller on load
     window.addEventListener('load', () => {
-        // Run initial diagnostics checking on load to feed stats
-        runDiagnostics();
+        // آخر نتيجة محفوظة فقط: فحص الاتصالات لا يعمل عند فتح الصفحة (له زر صريح)
+        lastDiagnostics = readLastDiagnostics();
+        renderLastDiagnostics();
         
         // Search health and cost panel
         loadOpsHealth(false);
