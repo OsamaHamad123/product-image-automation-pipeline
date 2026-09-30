@@ -91,6 +91,47 @@ core was rebuilt and wired into the queue, the dashboard actions and the sheet w
   only next to a canned-fish word, so "white cheese" or "spring water" are unaffected.
 - The dry-run report always shows the pick, with its rank and reasons, even when it ranks below the top 5.
 
+### Added after the live dry runs
+
+Built in parallel by five work packages, each checked by an adversarial reviewer, and measured against the 60
+live sheet rows (`tests/catalog_match/fixtures/live_rows_2026_09_30.json`). The offline eval is unchanged: correct
+pick 100%, wrong auto-publish 0%.
+
+- **Search text:** sheet shorthand is written out in the queries (`S/F OIL`, `SUNFL OIL`, `VEG OIL`, `WITH VEG`,
+  `L/MEAT`, `WT/MEAT`). The rules are in `catalog_match/data/abbreviations.json`, each with a reason, and
+  ambiguous shorthand stays as written. Brand cells lose stray punctuation (`SUPER T/` becomes `SUPER T`), and
+  a brand glued in the name (`ALALALI`) is written once. 15 of the 60 live rows get a better Q1.
+- **Brands that are common words** (Freshly, Family, Target, Golden Prize ...; list in
+  `catalog_match/data/common_words.json`): a brand hit is full evidence only at the start of the title or the
+  slug, or on the brand's official site. Otherwise the listing is capped at tier 2
+  (`generic_brand_position:<field>`).
+- **A UAE store's other-country section** (noon `/saudi-en/`, Lulu `/en-kw/`, talabat `/ar/kuwait/`) scores as
+  other retail, not as a UAE page. It can no longer reach tier 1 or be auto-published.
+- **Reviewer warnings** on the pick, shown in Arabic on the review screens and printed by `smoke_live.py`:
+  - the sheet does not name the variant the image shows (new fries-cut and cheese-form axes);
+  - Gemini unsure;
+  - low resolution;
+  - WhatsApp or screenshot export;
+  - social media;
+  - a store outside the UAE.
+  The pick and the decision are unchanged. Fries, paratha, nuggets and shawarma are treated as frozen by
+  default: a 'Frozen' listing is neither capped nor warned.
+- **Reviewer decisions** go to the new table `review_decisions` (approve, reject, manual upload, from the
+  batch or the catalog page), including whether the image was the engine's pre-check. The active-learning page
+  and `scripts/review_stats.py` show each brand's pre-check precision with a Wilson 95% lower bound. A brand is
+  ready for auto-publish at 30 or more reviewed pre-checks and a lower bound of at least 0.98 (about 189
+  accepted pre-checks with no miss). The suggested `AUTO_PUBLISH_BRANDS` value is read-only.
+- **Health and cost panel** on the diagnostics page: decisions, provider call outcomes, verifier calls,
+  estimated cost and failure codes over 24 hours and 7 days, with a red notice when Serper credits run out or
+  Gemini stops answering. Each search is stamped with `searched_at`.
+- **Nightly run:** `scripts/run_nightly.py` queues the rows without a final image and works the queue with
+  auto-publish forced off. `scripts/schedule_nightly.ps1` registers it in Windows Task Scheduler.
+
+### Fixed after the live dry runs
+
+- `setup_and_launch.ps1` and `launch_desktop.ps1` are saved with a UTF-8 BOM. Windows PowerShell 5.1 could not
+  parse the Arabic text of `setup_and_launch.ps1` without it.
+
 ### Removed
 
 - `verification_layer/` (87 modules) and the 23 test files that only exercised it or asserted nothing
@@ -103,6 +144,8 @@ core was rebuilt and wired into the queue, the dashboard actions and the sheet w
   `MAX_PARALLEL_DOWNLOADS`, `DRIVE_FOLDER_ID`.
 - The "Next-Gen Frontiers Telemetry" panel on the diagnostics page. Its figures, such as "Accuracy 98.4%",
   were hard-coded and described deleted `verification_layer` modules.
+- The per-brand "self-correction rules" on the active-learning page (padding ratio 0.70/0.75, strict clutter
+  check). The v2 engine never applied them. The page now shows real review statistics.
 - `scripts/diagnose_search.py`, which probed the retired Google CSE/Bing/DDG scrapers, and
   `scripts/verify_upgrades.py`, which tested deleted modules and wrote a test link to row 9999 of the live sheet.
   Use `scripts/smoke_live.py --dry-run` instead.
