@@ -431,3 +431,15 @@ def test_facade_serialises_warnings_for_every_candidate():
     plain = RankedCandidate(candidate=milk(image_url="https://x.ae/2.jpg"), score=score_candidate(MILK, milk()))
     assert facade.serialise_candidate(winner)["warnings"] == ["low_resolution"]
     assert facade.serialise_candidate(plain)["warnings"] == []
+
+
+def test_frozen_fries_listing_is_tier1_and_carries_no_sheet_silent_warning():
+    spec = build_sku_spec({"name": "AIDA FRENCH FRIES 1KG", "brand": "AIDA"}, {})
+    cand = Candidate(image_url="https://cdn.mafrservices.com/pim-content/UAE/media/product/1/1_main.jpg",
+                     page_url="https://www.carrefouruae.com/mafuae/en/aida-frozen-french-fries-1kg/p/1",
+                     title="Aida Frozen French Fries 1kg", page_title="Aida Frozen French Fries 1kg",
+                     provider="serper")
+    winner = rc(spec, cand, reading("MATCH", variant_text="Frozen French Fries", brand="AIDA"))
+    assert winner.score.tier == 1
+    out = decide.route(spec, [winner], OK, HEALTHY, set())
+    assert out.winner is winner and warns(winner) == []

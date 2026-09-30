@@ -48,6 +48,8 @@ class _Lexicon:
         # (phrase tokens, axis, value, context tokens or None), longest phrase first
         entries: List[Entry] = []
         self.unmarked: Dict[str, Set[str]] = {}
+        # axis -> [(context tokens, values that are not marked for products of that context)]
+        self.context_unmarked: Dict[str, List[Tuple[FrozenSet[str], Set[str]]]] = {}
         self.soft_groups: Dict[str, List[Set[str]]] = {}
         self.axes: Tuple[str, ...] = tuple(raw.get("axes", {}).keys())
         contexts = {name: frozenset(t for word in words for t in tokens(word, strip_clitics=True))
@@ -63,6 +65,10 @@ class _Lexicon:
         for axis, spec in raw.get("axes", {}).items():
             self.unmarked[axis] = set(spec.get("unmarked", []))
             self.soft_groups[axis] = [set(g) for g in spec.get("soft_groups", [])]
+            for ctx_name, values in (spec.get("context_unmarked") or {}).items():
+                if ctx_name not in contexts:
+                    raise ValueError(f"variants lexicon: axis {axis!r} uses unknown context {ctx_name!r}")
+                self.context_unmarked.setdefault(axis, []).append((contexts[ctx_name], set(values)))
             add(axis, spec.get("values", {}), None)
             for ctx_name, values in (spec.get("context_values") or {}).items():
                 if ctx_name not in contexts:
@@ -190,13 +196,32 @@ def matched_axes(target: Mapping[str, str], found: Mapping[str, str]) -> List[st
     ]
 
 
-def unstated_marked(target: Mapping[str, str], found: Mapping[str, str]) -> List[str]:
-    """Axes absent from the target where `found` states a marked (non-default) value."""
+def unmarked_values(axis: str, context: Optional[str] = None) -> Set[str]:
+    """Values of `axis` that are not suspicious when a SKU leaves the axis out.
+
+    The lexicon's 'unmarked' values, plus those its 'context_unmarked' lists for a context the
+    SKU text belongs to ('frozen' for fries, paratha or nuggets, which are sold frozen).
+    """
     lex = lexicon()
+    out = set(lex.unmarked.get(axis, set()))
+    rules = lex.context_unmarked.get(axis)
+    if rules and context:
+        present = set(tokens(context, strip_clitics=True))
+        for ctx, values in rules:
+            if not ctx.isdisjoint(present):
+                out |= values
+    return out
+
+
+def unstated_marked(target: Mapping[str, str], found: Mapping[str, str], context: Optional[str] = None) -> List[str]:
+    """Axes absent from the target where `found` states a marked (non-default) value.
+
+    `context` is the SKU text (spec_context) that makes context-unmarked values default.
+    """
     out = []
     for axis, fval in (found or {}).items():
         if (target or {}).get(axis):
             continue
-        if values_of(fval) - lex.unmarked.get(axis, set()):
+        if values_of(fval) - unmarked_values(axis, context):
             out.append(axis)
     return out

@@ -190,3 +190,16 @@ def test_rows_58_and_60_listings_are_hard_rejected(sheet_name, listing):
                      domain="amazon.ae", provider="serper", sanctioned=True)
     score = score_candidate(spec, cand)
     assert score.tier is None and "variant_conflict:tuna_meat" in score.hard_reject
+
+
+def test_frozen_is_the_normal_state_of_fries_paratha_and_nuggets():
+    from catalog_match.variants import unmarked_values
+
+    fries = "AIDA FRENCH FRIES 1KG"
+    assert unstated_marked({}, extract_variants("Aida Frozen French Fries 1kg"), fries) == []
+    assert unstated_marked({}, extract_variants("Ashoka Frozen Plain Paratha"), "ASHOKA PLAIN PARATHA 400GM") == []
+    # other forms of fries, and frozen milk, are still marked
+    assert unstated_marked({}, extract_variants("Aida Fresh French Fries 1kg"), fries) == ["form"]
+    assert unstated_marked({}, extract_variants("Almarai Frozen Milk"), "ALMARAI MILK 1L") == ["form"]
+    assert unstated_marked({}, extract_variants("Aida Frozen French Fries 1kg")) == ["form"]   # no SKU context
+    assert "frozen" in unmarked_values("form", fries) and "frozen" not in unmarked_values("form", "milk")

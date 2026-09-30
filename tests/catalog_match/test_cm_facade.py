@@ -283,3 +283,14 @@ def test_v2_invalid_barcode_is_not_a_cache_key(monkeypatch):
     monkeypatch.setattr(pipeline, "find_product_image", mock.Mock(return_value=preselected_outcome()))
     image_search.search_best_product_image(NAME, NAME, BRAND, barcode="6.29E+12")
     assert local_cache_db.get_cached_product.call_args.kwargs["barcode"] == ""
+
+
+def test_outcome_summary_is_stamped_with_the_search_time():
+    from datetime import datetime, timezone
+
+    from catalog_match.facade import outcome_summary
+    from catalog_match.models import SearchOutcome
+
+    stamp = outcome_summary(SearchOutcome(decision="NOT_FOUND"))["searched_at"]
+    when = datetime.fromisoformat(stamp)
+    assert when.tzinfo is not None and abs((datetime.now(timezone.utc) - when).total_seconds()) < 60

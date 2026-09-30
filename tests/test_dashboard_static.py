@@ -46,6 +46,8 @@ CHANGED_BLADES = [
     VIEWS / "dashboard" / "batch_automation.blade.php",
     VIEWS / "dashboard" / "index.blade.php",
     VIEWS / "dashboard" / "settings.blade.php",
+    VIEWS / "dashboard" / "diagnostics.blade.php",
+    VIEWS / "dashboard" / "active_learning.blade.php",
     VIEWS / "layouts" / "layout.blade.php",
 ]
 

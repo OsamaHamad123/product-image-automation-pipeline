@@ -466,7 +466,7 @@ def score_candidate(spec: SkuSpec, cand: Candidate, negatives=None) -> Candidate
             own = variants_mod.extract_variants(url_path_text(cand.page_url, product_segment=True), context)
             found = {axis: value for axis, value in found.items() if axis not in DEPARTMENT_AXES}
             found.update({axis: value for axis, value in own.items() if axis in DEPARTMENT_AXES})
-        for axis in variants_mod.unstated_marked(spec.variants, found):
+        for axis in variants_mod.unstated_marked(spec.variants, found, context):
             if axis not in unstated:
                 unstated.append(axis)
     for axis in unstated:

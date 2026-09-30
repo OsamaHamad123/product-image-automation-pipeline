@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import dataclasses
 import logging
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Mapping, Optional
 
 from .decide import warning_codes
@@ -182,6 +183,8 @@ def serialise_candidate(rc: RankedCandidate) -> Dict[str, Any]:
 
 def outcome_summary(outcome: SearchOutcome) -> Dict[str, Any]:
     return {
+        # When the search ran: the health panel (ops_health) windows on this, not on the queue row's updated_at.
+        "searched_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "decision": outcome.decision,
         "failure_code": outcome.failure_code,
         "provider_health": [_json_safe(h) for h in outcome.provider_health],

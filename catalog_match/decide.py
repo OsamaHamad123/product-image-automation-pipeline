@@ -277,10 +277,9 @@ def _sheet_silent(spec: SkuSpec, rc: RankedCandidate) -> List[str]:
     texts = (cand.title, cand.page_title, url_path_text(cand.page_url, product_segment=True),
              rc.verdict.variant_text if rc.verdict is not None else "")
     found = variants_mod.merge(*(variants_mod.extract_variants(t, context) for t in texts))
-    unmarked = variants_mod.lexicon().unmarked
     out = []
-    for axis in sorted(variants_mod.unstated_marked(spec.variants, found)):
-        marked = variants_mod.values_of(found[axis]) - unmarked.get(axis, set())
+    for axis in sorted(variants_mod.unstated_marked(spec.variants, found, context)):
+        marked = variants_mod.values_of(found[axis]) - variants_mod.unmarked_values(axis, context)
         out.append(f"sheet_silent:{axis}={variants_mod.SEP.join(sorted(marked))}")
     return out
 
