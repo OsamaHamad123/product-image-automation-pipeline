@@ -31,10 +31,6 @@ log = logging.getLogger("smoke_live")
 DEFAULT_SERP_COST = 0.001
 DEFAULT_VLM_COST = 0.001
 
-NAME_HEADERS = ["productname", "product name", "اسم المنتج"]
-NAME_AR_HEADERS = ["productname arabic", "product name arabic", "اسم المنتج بالعربي", "اسم المنتج عربي"]
-BRAND_AR_HEADERS = ["brand arabic", "brand_arabic", "البراند بالعربي", "البراند عربي"]
-SIZE_HEADERS = ["size", "الحجم", "volume", "weight"]
 WRITE_METHODS = ("update", "update_cell", "update_cells", "batch_update", "append_row", "append_rows", "insert_row",
                  "insert_rows", "delete_rows", "clear", "add_worksheet", "del_worksheet", "format", "update_acell")
 
@@ -71,14 +67,6 @@ def parse_rows(spec):
     return sorted(r for r in rows if r >= 2)
 
 
-def _col(headers, names):
-    lowered = [h.lower().strip() for h in headers]
-    for name in names:
-        if name in lowered:
-            return lowered.index(name)
-    return -1
-
-
 def open_sheet_read_only():
     """(spreadsheet, product worksheet) wrapped so that nothing can be written."""
     import config
@@ -102,12 +90,13 @@ def read_sheet_rows(worksheet, row_numbers):
     if not values:
         return []
     headers = values[0]
-    name_idx, brand_idx, _link, barcode_idx, category_idx, _origin = google_sheets.get_product_columns_indices(headers)
-    name_idx = _col(headers, NAME_HEADERS) if _col(headers, NAME_HEADERS) >= 0 else name_idx
-    extra = {"name_ar": _col(headers, NAME_AR_HEADERS), "brand_ar": _col(headers, BRAND_AR_HEADERS),
-             "size": _col(headers, SIZE_HEADERS)}
+    # Same header synonyms as the worker (google_sheets.get_products), so the dry run reads what production reads.
+    cols = google_sheets.resolve_columns(headers)
+    if cols["name"] < 0 and cols["name_ar"] < 0:
+        raise SystemExit(f"No product name column in the sheet headers: {headers}")
 
-    def cell(row, idx):
+    def cell(row, key):
+        idx = cols[key]
         return row[idx].strip() if 0 <= idx < len(row) else ""
 
     out = []
@@ -115,9 +104,9 @@ def read_sheet_rows(worksheet, row_numbers):
         if number - 1 >= len(values):
             break
         row = values[number - 1]
-        record = {"row_number": number, "name": cell(row, name_idx), "brand": cell(row, brand_idx),
-                  "barcode": cell(row, barcode_idx), "category": cell(row, category_idx)}
-        record.update({k: cell(row, idx) for k, idx in extra.items()})
+        record = {"row_number": number}
+        record.update({key: cell(row, key) for key in ("name", "name_ar", "brand", "brand_ar", "barcode",
+                                                       "category", "size")})
         if record["name"] or record["name_ar"]:
             record["name"] = record["name"] or record["name_ar"]
             out.append(record)

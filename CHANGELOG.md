@@ -62,7 +62,8 @@ core was rebuilt and wired into the queue, the dashboard actions and the sheet w
 - `.env` values no longer override variables already set in the environment.
 - `verify_cloud_services.py` also checks the Serper key (one test image query). It checks Gemini with the same
   `models.get` call the worker makes at start-up, with the key in a header instead of the URL. Google Custom
-  Search is reported as optional.
+  Search is reported as optional. Everything it prints is redacted: configured key values, `key=` query
+  parameters and proxy credentials never appear in its output or on the diagnostics page.
 - Error payloads from `cli_bridge` carry fixed messages. The exception text goes to `temp/search.log` and the
   Errors page, never into a response, because `fastapi_server` returns the same payloads over HTTP.
 - `docs/walkthrough.md` is rewritten for the current system: keys, sheet columns, the Brands Mapping tab, the

@@ -95,3 +95,30 @@ def test_diagnostics_page_shows_serper_and_no_fabricated_panel():
     assert 'id="card-serper"' in page and 'id="ind-serper"' in page and 'id="text-serper"' in page
     for fabricated in ("98.4%", "Next-Gen Frontiers", "CIEDE2000", "Speculative Search"):
         assert fabricated not in page
+
+
+def test_printed_errors_never_contain_keys(monkeypatch, capsys):
+    monkeypatch.setattr(config, "GOOGLE_SEARCH_API_KEYS", ["AIzaLEAKCHECK0123456789"], raising=False)
+    monkeypatch.setattr(config, "GOOGLE_SEARCH_CX_LIST", ["cx-123456"], raising=False)
+
+    def boom(url, params=None, timeout=None, **k):
+        raise requests.ConnectionError(f"Max retries exceeded with url: {url}?key={params['key']}&cx={params['cx']}")
+
+    monkeypatch.setattr(requests, "get", boom)
+    assert vcs.verify_google_search() is False
+    out = capsys.readouterr().out
+    assert "AIzaLEAKCHECK0123456789" not in out and "AIzaLEAK" not in out
+    assert "[REDACTED]" in out
+
+
+def test_proxy_credentials_are_never_printed(monkeypatch, capsys):
+    monkeypatch.setattr(config, "PROXY_URL", "http://staffuser:s3cretpass@proxy.example.com:8080", raising=False)
+
+    def boom(*a, **k):
+        raise requests.ConnectionError("ProxyError('Cannot connect to proxy http://staffuser:s3cretpass@proxy.example.com:8080')")
+
+    monkeypatch.setattr(requests, "get", boom)
+    assert vcs.verify_proxy() is False
+    out = capsys.readouterr().out
+    assert "s3cretpass" not in out and "staffuser" not in out
+    assert "proxy.example.com:8080" in out   # the host is still shown, so the owner knows which proxy failed

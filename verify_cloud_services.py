@@ -8,6 +8,47 @@ import json
 
 # تحميل الإعدادات من .env
 import config
+import builtins
+import re
+from urllib.parse import urlsplit
+
+# كل ما يطبعه هذا السكربت يمر على _redact: رسائل الأخطاء قد تحتوي الرابط كاملاً (مع ?key=) أو قيمة مفتاح،
+# والمخرجات تُعرض في صفحة التشخيص وتُحفظ في ملفات.
+_SECRET_SETTINGS = ("GEMINI_API_KEY", "SERPER_API_KEY", "GOOGLE_SEARCH_API_KEYS", "GOOGLE_SEARCH_API_KEY",
+                    "CLOUDINARY_API_KEY", "CLOUDINARY_API_SECRET", "PHOTOROOM_API_KEY", "REMOVE_BG_API_KEY",
+                    "TELEGRAM_BOT_TOKEN", "PROXY_URL")
+
+
+def _secret_values():
+    values = []
+    for name in _SECRET_SETTINGS:
+        raw = getattr(config, name, "") or os.getenv(name, "")
+        for item in (raw if isinstance(raw, (list, tuple)) else str(raw).split(",")):
+            item = str(item).strip()
+            if len(item) >= 6:
+                values.append(item)
+    proxy = urlsplit(str(getattr(config, "PROXY_URL", "") or ""))
+    if proxy.username:
+        values.append(proxy.username)
+    if proxy.password:
+        values.append(proxy.password)
+    return sorted(set(values), key=len, reverse=True)
+
+
+def _redact(text):
+    text = str(text)
+    for secret in _secret_values():
+        text = text.replace(secret, "[REDACTED]")
+    return re.sub(r"(?i)((?:api_?)?key=)[^&\s'\"]+", r"\1[REDACTED]", text)
+
+
+def print(*args, **kwargs):  # noqa: A001 - every message of this script is redacted
+    builtins.print(*(_redact(a) for a in args), **kwargs)
+
+
+def _proxy_host(proxy_url):
+    parts = urlsplit(proxy_url)
+    return f"{parts.scheme}://{parts.hostname or '?'}{f':{parts.port}' if parts.port else ''}"
 
 def print_separator(title):
     print("\n" + "=" * 50)
@@ -233,7 +274,7 @@ def verify_google_search():
     }
     
     try:
-        print(f"🔄 محاولة إرسال طلب بحث تجريبي لـ Google Search ({key[:8]}...)...")
+        print("🔄 محاولة إرسال طلب بحث تجريبي لـ Google Search...")
         response = requests.get(url, params=params, timeout=10)
         
         if response.status_code == 200:
@@ -262,16 +303,16 @@ def verify_proxy():
         return None
         
     try:
-        print(f"🔄 محاولة إرسال طلب فحص اتصال عبر البروكسي... ({proxy_url[:15]}...)")
+        print(f"🔄 محاولة إرسال طلب فحص اتصال عبر البروكسي ({_proxy_host(proxy_url)})...")
         proxies = {"http": proxy_url, "https": proxy_url}
-        # We fetch a Yandex images text query to verify it works
-        url = "https://yandex.com/images/search?text=Nellara"
+        # البروكسي يُستخدم لبديل Bing عند غياب Serper، فنفحصه على نفس الموقع
+        url = "https://www.bing.com/images/search?q=Almarai+Fresh+Milk"
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
         }
         response = requests.get(url, headers=headers, proxies=proxies, timeout=10)
         if response.status_code == 200:
-            print("✅ نجح الاتصال بمحرك Yandex عبر البروكسي والخدمة جاهزة ومصرح لها.")
+            print("✅ نجح الاتصال بـ Bing عبر البروكسي.")
             return True
         else:
             print(f"❌ فشل الاتصال عبر البروكسي: كود الاستجابة {response.status_code}")
