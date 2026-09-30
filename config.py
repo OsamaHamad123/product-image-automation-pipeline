@@ -2,6 +2,9 @@
 # ملف الإعدادات الخاص بنظام الأتمتة
 
 import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 # وظيفة بسيطة لقراءة ملف .env وتعيين المتغيرات البيئية يدوياً بدون مكتبات خارجية
 def _load_env(env_path=".env"):
@@ -17,7 +20,8 @@ def _load_env(env_path=".env"):
                     key, val = line.split("=", 1)
                     key = key.strip()
                     val = val.strip().strip('"').strip("'")
-                    os.environ[key] = val
+                    # متغيرات البيئة الفعلية (مثل DB_DATABASE في الاختبارات أو CI) لها الأولوية على ملف .env
+                    os.environ.setdefault(key, val)
 
 _load_env()
 
@@ -26,12 +30,6 @@ _load_env()
 SPREADSHEET_NAME_OR_URL = os.getenv("SPREADSHEET_NAME_OR_URL", "automation sheet")
 SPREADSHEET_TAB_NAME = os.getenv("SPREADSHEET_TAB_NAME", "")
 
-# 2. إعدادات Google Drive
-# معرف المجلد (Folder ID) الذي سيتم رفع الصور إليه على Drive.
-# إذا تركته فارغاً ""، سيتم رفع الصور إلى المجلد الرئيسي للـ Service Account.
-# يرجى مشاركة هذا المجلد مع البريد الإلكتروني للـ Service Account:
-# outomation-agent@boulevard-a50a0.iam.gserviceaccount.com
-DRIVE_FOLDER_ID = os.getenv("DRIVE_FOLDER_ID", "")
 
 # 3. إعدادات البحث عن الصور (Google Image Search)
 # للحصول على نتائج دقيقة ورسمية، أدخل بيانات Google Custom Search API أدناه.
@@ -42,12 +40,25 @@ GOOGLE_SEARCH_CX_LIST = [c.strip() for c in os.getenv("GOOGLE_SEARCH_CX", "").sp
 GOOGLE_SEARCH_API_KEY = GOOGLE_SEARCH_API_KEYS[0] if GOOGLE_SEARCH_API_KEYS else ""
 GOOGLE_SEARCH_CX = GOOGLE_SEARCH_CX_LIST[0] if GOOGLE_SEARCH_CX_LIST else ""
 
-# إذا كانت بيانات Google غير متوفرة، سيقوم النظام تلقائياً بالاعتماد على محركات البحث الهجينة
-USE_FALLBACK_SEARCH = True
+# محرك البحث: 'v2' (catalog_match، الافتراضي) أو 'v1' (المسار القديم للتراجع فقط لمدة 30 يوماً)
+SEARCH_ENGINE = os.getenv("SEARCH_ENGINE", "v2").strip().lower() or "v2"
+
+# مفتاح Serper.dev (Google Images عبر API، المصدر الأساسي للبحث في v2)
+SERPER_API_KEY = os.getenv("SERPER_API_KEY", "")
+
+# النشر التلقائي: معطل افتراضياً. يُفعّل فقط لبراندات محددة بعد أن تثبت مجموعة الاختبار الذهبية دقة >= 98%
+AUTO_PUBLISH_ENABLED = os.getenv("AUTO_PUBLISH_ENABLED", "False").strip().lower() in ("1", "true", "yes", "on")
+AUTO_PUBLISH_BRANDS = [b.strip() for b in os.getenv("AUTO_PUBLISH_BRANDS", "").split(",") if b.strip()]
 
 # 4. إعدادات معالجة الصور وتحجيمها
 # الأبعاد الافتراضية المطلوبة لجميع الصور بشكل ديناميكي (مثال: 800×800)
 IMAGE_TARGET_SIZE = (800, 800)
+
+# أبعاد لوحة النشر النهائية (مربع أبيض معتم) عند طلب 0 أو 'dynamic'
+try:
+    OUTPUT_CANVAS_SIZE = int(os.getenv("OUTPUT_CANVAS_SIZE", "800"))
+except ValueError:
+    OUTPUT_CANVAS_SIZE = 800
 
 # خيار إزالة خلفية الصورة. الخيارات المتاحة:
 # "none" -> تخطي إزالة الخلفية والقيام بالتحجيم فقط (مفيد للاختبار السريع)
@@ -106,9 +117,10 @@ ENABLE_IMAGE_ENHANCEMENT = False       # تعطيل تحسين/تنعيم الأ
 
 
 # 7. إعدادات تخطي أو استبدال الصور
-# إذا كان True، سيقوم النظام بالبحث عن الصور وتحديثها حتى لو كانت الخلية تحتوي على رابط سابق.
-# إذا كان False، سيتم تخطي أي صف يحتوي بالفعل على رابط صورة لتوفير الموارد.
-FORCE_OVERWRITE_IMAGES = True
+# إذا كان True، سيقوم النظام بالبحث عن الصور وتحديثها حتى لو كانت الخلية تحتوي على رابط نهائي سابق
+# (ويعيد معالجة الصفوف الجاهزة للمراجعة أو المكتملة في الطابور).
+# الافتراضي False: لا نعيد البحث عن صف له رابط نهائي ولا نمسح اختيارات المراجعين.
+FORCE_OVERWRITE_IMAGES = os.getenv("FORCE_OVERWRITE_IMAGES", "False").strip().lower() in ("1", "true", "yes", "on")
 
 # وضع المراجعة والاعتماد اليدوي (Curation Mode).
 # إذا كان True، فسيتم إرسال روابط الصور المكتشفة إلى الشيت مع بادئة مراجعة 'needs_review:' دون استهلاك رصيد PhotoRoom.
@@ -120,11 +132,13 @@ CURATION_MODE = os.getenv("CURATION_MODE", "True").lower() == "true"
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")
 
-# إيقاف تحميل وتشغيل نماذج الذكاء الاصطناعي المحلية (CLIP, SigLIP, BLIP, Moondream2, DINOv2) لتوفير الذاكرة والعمل سحابياً بتكلفة منخفضة
-DISABLE_LOCAL_AI_MODELS = os.getenv("DISABLE_LOCAL_AI_MODELS", "True").lower() == "true"
+# النماذج المحلية (CLIP, SigLIP, BLIP, Moondream2, DINOv2) أزيلت من كل مسارات القرار (D6).
+# هذا الثابت يبقى فقط لأن مسار التراجع v1 في image_search.py ما زال يقرؤه؛ لم يعد قابلاً للضبط.
+DISABLE_LOCAL_AI_MODELS = True
 
 ENABLE_GEMINI_VISION = True
 ENABLE_LOCAL_OCR = False
+# مطابقة البراند الصارمة (D9): المرشح الذي يحمل براند منافس معروف دون البراند المطلوب يُرفض
 STRICT_BRAND_MATCH = os.getenv("STRICT_BRAND_MATCH", "True").lower() == "true"
 
 # إعدادات التطوير الجديدة لزيادة الدقة
@@ -137,7 +151,7 @@ SIGLIP_MODEL_ID = "google/siglip-base-patch16-224"
 BLIP_MODEL_ID = "Salesforce/blip-image-captioning-base"
 MOONDREAM_MODEL_ID = "vikhyatk/moondream2"
 
-USE_SIGLIP_SEMANTIC_CHECK = True
+USE_SIGLIP_SEMANTIC_CHECK = True  # يقرؤه مسار v1 فقط؛ بدون نموذج محلي تعود الدرجة None
 USE_BLIP_CAPTION_CHECK = True
 USE_MOONDREAM_CHECK = False  # يمكن تفعيله يدوياً لتشغيل Moondream2 في الفرز الحتمي النهائي
 
@@ -157,11 +171,6 @@ METRICS = {
     "failed_runs": 0,
     "semantic_cache_savings": 0
 }
-
-# 10. إعدادات تسريع الأداء وتحسين الكفاءة للبحث
-MAX_PARALLEL_DOWNLOADS = 4      # عدد التنزيلات المتوازية للصور المرشحة
-SEARCH_CACHE_ENABLED = True     # تفعيل التخزين المؤقت لنتائج محرك البحث لمنع التكرار
-SEARCH_CACHE_TTL = 86400        # عمر التخزين المؤقت للبحث (24 ساعة بالثواني)
 
 RUNNER_LOGS = []
 _redis_available = (os.getenv("RUN_WITH_REDIS") == "1")
@@ -184,30 +193,18 @@ def log_runner(*args):
     if len(RUNNER_LOGS) > 100:
         RUNNER_LOGS.pop(0)
 
-    # بث الرسالة لـ Redis Pub/Sub لتغذية خوادم البث المباشر (SSE) لـ Gunicorn
+    # بث السطر كما هو لـ Redis Pub/Sub (إن وُجد) دون أي مؤشرات مختلقة
     if _redis_available is not False:
         try:
             import redis
-            # استخدام مهلة منخفضة جداً (0.2 ثانية) للفحص السريع لمنع تعليق الكونسول
-            r = redis.Redis(host='localhost', port=6379, db=0, socket_timeout=0.2)
-            payload = {
-                "timestamp": datetime.now().timestamp(),
-                "log": formatted,
-                "pipeline_metrics": {
-                    "progress_percentage": 100 if "بنجاح" in msg or "نجح" in msg else (10 if "البدء" in msg else 50),
-                    "active_sku_id": "Ingesting..."
-                },
-                "telemetry": {
-                    "queue_delay_seconds": 1.5,
-                    "gemini_api_tokens": METRICS.get("gemini_api_calls", 0) * 150
-                }
-            }
-            r.publish("tenant_stream:enterprise_tenant_102", json.dumps(payload))
+            # مهلة منخفضة جداً (0.2 ثانية) للفحص السريع لمنع تعليق الكونسول
+            r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB, socket_timeout=0.2)
+            payload = {"timestamp": datetime.now().timestamp(), "log": formatted}
+            r.publish("pipeline_log", json.dumps(payload, ensure_ascii=False))
             _redis_available = True
         except Exception:
             _redis_available = False
-            # طباعة رسالة تنبيهية خفيفة مرة واحدة
-            builtins.print("ℹ️ [System Notice] خادم Redis غير متصل محلياً؛ تم إيقاف محاولات البث المباشر لتسريع المعالجة.")
+            logger.debug("Redis غير متصل محلياً؛ تم إيقاف بث السجل المباشر.")
 
 def log_error_to_laravel(error_message, barcode=None, product_name=None, brand=None, level="ERROR"):
     """
@@ -252,8 +249,7 @@ def log_error_to_laravel(error_message, barcode=None, product_name=None, brand=N
             with open(log_file_path, "a", encoding="utf-8") as f:
                 f.write(formatted_log)
         except Exception as e:
-            import builtins
-            builtins.print(f"⚠️ فشل الكتابة في ملف سجلات لارافيل: {e}")
+            logger.warning("فشل الكتابة في ملف سجلات لارافيل: %s", e)
 
 def send_telegram_alert(message):
     """
@@ -289,8 +285,7 @@ def log_and_fail(barcode, product_name, brand, error_message):
         import local_cache_db
         local_cache_db.save_product_failure(barcode, product_name, brand, error_message)
     except Exception as e:
-        import builtins
-        builtins.print(f"⚠️ خطأ أثناء حفظ سجل الفشل: {e}")
+        logger.warning("خطأ أثناء حفظ سجل الفشل: %s", e)
 
     # إرسال إشعار تليجرام في حال وجود أخطاء متعلقة بالاشتراكات أو الحصص أو الـ APIs
     lower_err = error_message.lower()
@@ -315,7 +310,6 @@ REDIS_DB = int(os.getenv("REDIS_DB", "0"))
 # 12. إعدادات فلاتر الأتمتة الجماعية المتقدمة
 BRAND_FILTER = ""
 ROW_FILTER = ""
-AUTO_APPROVE_THRESHOLD = 0.0 # 0.0 تعني تعطيل الاعتماد التلقائي
 
 def load_db_config():
     """
@@ -352,6 +346,7 @@ def load_db_config():
             global CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET
             global GOOGLE_SEARCH_API_KEYS, GOOGLE_SEARCH_CX_LIST, GOOGLE_SEARCH_API_KEY, GOOGLE_SEARCH_CX
             global CLIP_RELEVANCE_THRESHOLD, CLIP_GREY_ZONE_THRESHOLD, STRICT_BRAND_MATCH, ENABLE_GEMINI_PRE_VALIDATION, FILTER_COMPETITORS, BYPASS_WHITE_BACKGROUND_CHECK, PROXY_URL
+            global SEARCH_ENGINE, SERPER_API_KEY, AUTO_PUBLISH_ENABLED, AUTO_PUBLISH_BRANDS, OUTPUT_CANVAS_SIZE
             
             if "photoroom_api_key" in db_keys and db_keys["photoroom_api_key"]:
                 PHOTOROOM_API_KEY = db_keys["photoroom_api_key"]
@@ -391,17 +386,25 @@ def load_db_config():
                 BYPASS_WHITE_BACKGROUND_CHECK = db_keys["bypass_white_background_check"].lower() == "true"
             if "proxy_url" in db_keys and db_keys["proxy_url"]:
                 PROXY_URL = db_keys["proxy_url"]
-            
-            import sys
-            if "--json" not in sys.argv:
-                import builtins
-                builtins.print("⚙️ [Config Loader] تم تحميل الإعدادات وتجاوز قيم بيئة .env ديناميكياً من قاعدة البيانات.")
+            # إعدادات محرك البحث v2 والنشر التلقائي (D1/D7/D10/D14)
+            if db_keys.get("search_engine"):
+                SEARCH_ENGINE = str(db_keys["search_engine"]).strip().lower()
+            if db_keys.get("serper_api_key"):
+                SERPER_API_KEY = str(db_keys["serper_api_key"]).strip()
+            if "auto_publish_enabled" in db_keys and db_keys["auto_publish_enabled"] is not None:
+                AUTO_PUBLISH_ENABLED = str(db_keys["auto_publish_enabled"]).strip().lower() in ("1", "true", "yes", "on")
+            if "auto_publish_brands" in db_keys and db_keys["auto_publish_brands"] is not None:
+                AUTO_PUBLISH_BRANDS = [b.strip() for b in str(db_keys["auto_publish_brands"]).split(",") if b.strip()]
+            if db_keys.get("output_canvas_size"):
+                try:
+                    OUTPUT_CANVAS_SIZE = int(db_keys["output_canvas_size"])
+                except (TypeError, ValueError):
+                    logger.warning("قيمة output_canvas_size غير صالحة: %r", db_keys["output_canvas_size"])
+
+            logger.info("[Config Loader] تم تحميل الإعدادات من قاعدة البيانات (تتجاوز قيم .env).")
         conn.close()
     except Exception as e:
-        import sys
-        if "--json" not in sys.argv:
-            import builtins
-            builtins.print(f"⚠️ [Config Loader] تنبيه أثناء تحميل الإعدادات من قاعدة البيانات (قد لا تكون مهيأة بعد): {e}")
+        logger.warning("[Config Loader] تعذر تحميل الإعدادات من قاعدة البيانات (قد لا تكون مهيأة بعد): %s", e)
 
 load_db_config()
 
