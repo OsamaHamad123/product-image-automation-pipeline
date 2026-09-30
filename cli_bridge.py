@@ -744,6 +744,21 @@ def action_sheet_save(params):
                         "sheet_save failed")
 
 
+# ---------------------------------------------------------------------------
+# ops_health (قراءة فقط: صحة البحث وتكلفته لصفحة التشخيصات)
+# ---------------------------------------------------------------------------
+
+def action_ops_health(params):
+    """ملخص automation_queue.trace_json لآخر 24 ساعة و7 أيام (ops_health.summarize). لا يكتب أي شيء."""
+    import ops_health
+    try:
+        report = ops_health.health_report()
+    except Exception:
+        return _failure("failed", "Could not read the automation queue (details in temp/search.log).",
+                        "ops_health failed")
+    return dict({"status": "success"}, **report)
+
+
 ACTIONS = {
     'get_products': action_get_products,
     'search': action_search,
@@ -753,6 +768,7 @@ ACTIONS = {
     'review_stats': action_review_stats,
     'sheet-preview': action_sheet_preview,
     'sheet-save': action_sheet_save,
+    'ops_health': action_ops_health,
 }
 
 

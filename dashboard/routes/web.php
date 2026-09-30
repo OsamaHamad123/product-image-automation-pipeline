@@ -26,6 +26,8 @@ Route::post('/api/failures/retry', [ApiController::class, 'retryFailures']);
 Route::get('/api/products-json', [ProductController::class, 'getProductsJson']);
 Route::post('/api/clear-products-cache', [ApiController::class, 'clearProductsCache']);
 Route::post('/api/system/run-diagnostics', [ProductController::class, 'runDiagnosticsJson']);
+// صحة البحث وتكلفته من سجل الطابور (قراءة فقط عبر cli_bridge.ops_health)
+Route::get('/api/system/ops-health', [\App\Http\Controllers\HealthController::class, 'summary']);
 
 // جسر بايثون (cli_bridge.py مباشرة، بدون خادم FastAPI)
 Route::post('/api/search', [ApiController::class, 'search']);

@@ -213,6 +213,122 @@
         font-weight: 700;
     }
 
+    /* Search health and cost panel (ops_health) */
+    .health-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 1rem;
+        margin-bottom: 1rem;
+    }
+
+    .health-alert {
+        display: flex;
+        gap: 0.75rem;
+        align-items: flex-start;
+        background: rgba(239, 68, 68, 0.12);
+        border: 1px solid rgba(239, 68, 68, 0.45);
+        color: #ef4444;
+        border-radius: 12px;
+        padding: 0.85rem 1rem;
+        margin-bottom: 0.75rem;
+        font-weight: 800;
+    }
+
+    .health-alert-detail {
+        font-weight: 600;
+        font-size: 0.8rem;
+        margin-top: 0.25rem;
+        color: var(--text-primary);
+    }
+
+    .health-tiles {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 1rem;
+        margin-bottom: 1.25rem;
+    }
+
+    .health-tile {
+        background: var(--card-bg);
+        border: 1px solid var(--panel-border);
+        border-radius: 14px;
+        padding: 1rem;
+    }
+
+    .health-tile-label {
+        font-size: 0.8rem;
+        color: var(--text-secondary);
+        font-weight: 700;
+    }
+
+    .health-tile-value {
+        font-size: 1.5rem;
+        font-weight: 900;
+        color: var(--text-primary);
+        margin-top: 0.25rem;
+    }
+
+    .health-tile-sub {
+        font-size: 0.75rem;
+        color: var(--text-secondary);
+        margin-top: 0.25rem;
+    }
+
+    .health-tables {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+        gap: 1rem;
+    }
+
+    .health-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.85rem;
+    }
+
+    .health-table caption {
+        text-align: right;
+        font-weight: 800;
+        color: var(--text-primary);
+        padding-bottom: 0.5rem;
+    }
+
+    .health-table th,
+    .health-table td {
+        border-bottom: 1px solid var(--panel-border);
+        padding: 0.4rem 0.5rem;
+        text-align: right;
+        color: var(--text-primary);
+    }
+
+    .health-table th {
+        color: var(--text-secondary);
+        font-weight: 700;
+    }
+
+    .health-table td.num {
+        font-family: 'Consolas', 'Monaco', monospace;
+        direction: ltr;
+    }
+
+    .health-empty {
+        padding: 1.5rem;
+        text-align: center;
+        color: var(--text-secondary);
+        font-weight: 700;
+        border: 1px dashed var(--panel-border);
+        border-radius: 12px;
+    }
+
+    .health-note {
+        font-size: 0.75rem;
+        color: var(--text-secondary);
+        margin-top: 1rem;
+        line-height: 1.7;
+    }
+
     .modal-body-content {
         background: var(--console-bg);
         border: 1px solid var(--panel-border);
@@ -339,6 +455,32 @@
                 <span class="status-text text-secondary" id="text-proxy">بانتظار الفحص</span>
             </div>
         </div>
+    </div>
+
+    <!-- Search health and cost (ops_health: automation_queue.trace_json, read-only) -->
+    <div class="glass-panel" id="opsHealthPanel" style="margin-bottom: 2rem;">
+        <div class="health-header">
+            <div>
+                <h3 style="font-size: 1.15rem; font-weight: 800; color: var(--text-primary); margin: 0; display: flex; align-items: center; gap: 0.5rem;">
+                    <i class="fas fa-heartbeat"></i> صحة البحث وتكلفته
+                </h3>
+                <p style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 0.25rem;">
+                    من سجل عمليات البحث المحفوظ في طابور الأتمتة: القرارات، ردود المزودين، استدعاءات Gemini والتكلفة التقديرية.
+                </p>
+            </div>
+            <div style="display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
+                <div class="console-tabs" style="margin-bottom: 0;">
+                    <button type="button" class="console-tab active" id="health-tab-24h" onclick="switchHealthWindow('24h')">آخر 24 ساعة</button>
+                    <button type="button" class="console-tab" id="health-tab-7d" onclick="switchHealthWindow('7d')">آخر 7 أيام</button>
+                </div>
+                <button type="button" class="btn btn-secondary btn-sm" id="opsHealthRefreshBtn" onclick="loadOpsHealth(true)">
+                    <i class="fas fa-sync-alt"></i> تحديث
+                </button>
+            </div>
+        </div>
+        <div id="opsHealthAlerts"></div>
+        <div id="opsHealthBody"><div class="health-empty">جاري تحميل ملخص الصحة والتكلفة...</div></div>
+        <div class="health-note" id="opsHealthNote"></div>
     </div>
 
     <!-- Live Logs Console Panel -->
@@ -683,11 +825,150 @@
             .replace(/'/g, "&#039;");
     }
 
+    // صحة البحث وتكلفته: كل رقم يأتي من /api/system/ops-health (ops_health.summarize على automation_queue.trace_json)
+    let opsHealthData = null;
+    let opsHealthWindow = '24h';
+    const HEALTH_WINDOW_LABELS = { '24h': 'آخر 24 ساعة', '7d': 'آخر 7 أيام' };
+    const DECISION_LABELS = {
+        AUTO_PUBLISH: 'نشر تلقائي',
+        REVIEW_PRESELECTED: 'مراجعة مع اختيار مسبق',
+        REVIEW_UNSELECTED: 'مراجعة بدون اختيار',
+        NOT_FOUND: 'لم يُعثر على صورة',
+        PROVIDER_DOWN: 'محركات البحث متوقفة',
+        VERIFIER_DOWN: 'التحقق متوقف'
+    };
+    const PROVIDER_STATUS_COLUMNS = ['ok', 'empty', 'error', 'quota', 'blocked'];
+
+    async function loadOpsHealth(refresh) {
+        const btn = document.getElementById('opsHealthRefreshBtn');
+        btn.disabled = true;
+        try {
+            const response = await fetch('/api/system/ops-health' + (refresh ? '?refresh=1' : ''), {
+                headers: { 'Accept': 'application/json' }
+            });
+            const data = await response.json();
+            if (data.status !== 'success') {
+                throw new Error(data.error || 'خطأ غير معروف');
+            }
+            opsHealthData = data;
+            renderOpsHealth();
+        } catch (e) {
+            opsHealthData = null;
+            document.getElementById('opsHealthAlerts').innerHTML = '';
+            document.getElementById('opsHealthNote').textContent = '';
+            document.getElementById('opsHealthBody').innerHTML =
+                `<div class="health-empty">تعذر تحميل ملخص الصحة والتكلفة: ${escapeHtml(String(e.message || e))}</div>`;
+        } finally {
+            btn.disabled = false;
+        }
+    }
+
+    function switchHealthWindow(name) {
+        opsHealthWindow = name;
+        Object.keys(HEALTH_WINDOW_LABELS).forEach(w => {
+            document.getElementById(`health-tab-${w}`).className = 'console-tab' + (w === name ? ' active' : '');
+        });
+        renderOpsHealth();
+    }
+
+    function formatAge(seconds) {
+        if (seconds < 3600) return `${Math.max(1, Math.round(seconds / 60))} دقيقة`;
+        if (seconds < 86400) return `${Math.round(seconds / 3600)} ساعة`;
+        return `${Math.round(seconds / 86400)} يوم`;
+    }
+
+    function formatUsd(value) {
+        return '$' + Number(value || 0).toFixed(3);
+    }
+
+    function healthTile(label, value, sub) {
+        return `<div class="health-tile"><div class="health-tile-label">${escapeHtml(label)}</div>` +
+            `<div class="health-tile-value">${escapeHtml(String(value))}</div>` +
+            (sub ? `<div class="health-tile-sub">${escapeHtml(sub)}</div>` : '') + `</div>`;
+    }
+
+    function healthTable(caption, headers, rows, emptyText) {
+        const head = headers.map(h => `<th>${escapeHtml(h)}</th>`).join('');
+        const body = rows.length
+            ? rows.map(cells => '<tr>' + cells.map((c, i) =>
+                `<td class="${i > 0 ? 'num' : ''}">${escapeHtml(String(c))}</td>`).join('') + '</tr>').join('')
+            : `<tr><td colspan="${headers.length}" style="color: var(--text-secondary);">${escapeHtml(emptyText)}</td></tr>`;
+        return `<table class="health-table"><caption>${escapeHtml(caption)}</caption><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+    }
+
+    function renderOpsHealth() {
+        const data = opsHealthData;
+        if (!data) return;
+
+        // تنبيهات الانقطاع (رصيد Serper / Gemini) بالأحمر فوق اللوحة
+        document.getElementById('opsHealthAlerts').innerHTML = (data.alerts || []).map(a =>
+            `<div class="health-alert"><i class="fas fa-exclamation-triangle" style="margin-top: 0.2rem;"></i>` +
+            `<div>${escapeHtml(a.message || '')}<div class="health-alert-detail">${escapeHtml(a.detail || '')}</div></div></div>`
+        ).join('');
+
+        const prices = data.prices || {};
+        const notes = [
+            `تم فحص ${Number(data.scanned || 0)} صف من الطابور (الحد ${Number(data.limit || 0)}).` +
+                (data.truncated ? ' وصل الفحص إلى الحد، فالأرقام الأقدم ناقصة.' : ''),
+            'الطابور يحفظ آخر بحث لكل صف فقط: إعادة المحاولة والبحث اليدوي من الكتالوج غير محسوبة.',
+            `التكلفة تقديرية: Serper ${prices.serper_per_query}$ لكل استعلام أجاب عنه، Gemini ${prices.gemini_per_call}$ لكل استدعاء.`
+        ];
+        if (data.timed_by_row_update) {
+            notes.push('وقت البحث مأخوذ من آخر تحديث لصف الطابور؛ إعادة إضافة الصفوف للطابور قد تُدخل عمليات بحث أقدم في النافذة.');
+        }
+        if (data.latest_age_s !== null && data.latest_age_s !== undefined) {
+            notes.unshift(`آخر بحث قبل ${formatAge(Number(data.latest_age_s))}.`);
+        }
+        document.getElementById('opsHealthNote').textContent = notes.join(' ');
+
+        const body = document.getElementById('opsHealthBody');
+        if (!data.scanned) {
+            body.innerHTML = '<div class="health-empty">لا توجد عمليات بحث مسجلة في الطابور خلال آخر 7 أيام. ' +
+                'شغّل الأتمتة من صفحة الدفعات أو انتظر التشغيل الليلي.</div>';
+            return;
+        }
+        const w = (data.windows || {})[opsHealthWindow] || {};
+        const codes = w.failure_codes || [];
+        if (!w.searches && !w.unreadable && !codes.length) {
+            body.innerHTML = `<div class="health-empty">لا توجد عمليات بحث مسجلة في ${escapeHtml(HEALTH_WINDOW_LABELS[opsHealthWindow])}.</div>`;
+            return;
+        }
+
+        const cost = w.cost_usd || {};
+        const verifier = w.verifier || {};
+        let html = '<div class="health-tiles">' +
+            healthTile('عمليات البحث', Number(w.searches || 0),
+                w.unreadable ? `صفوف بلا نتيجة بحث مقروءة: ${Number(w.unreadable)}` : '') +
+            healthTile('التكلفة التقديرية', formatUsd(cost.total),
+                `Serper ${formatUsd(cost.serper)} · Gemini ${formatUsd(cost.gemini)}`) +
+            healthTile('استعلامات Serper المحتسبة', Number(w.serper_queries || 0), 'الاستعلامات التي أجاب عنها Serper') +
+            healthTile('استدعاءات Gemini', Number(verifier.calls || 0),
+                `تعذر التحقق في ${Number(verifier.down || 0)} عملية بحث`) +
+            '</div>';
+
+        const decisions = Object.entries(w.decisions || {}).map(([code, n]) =>
+            [`${DECISION_LABELS[code] || code} (${code})`, Number(n)]);
+        const providers = Object.entries(w.providers || {});
+        const extra = providers.some(([, counts]) => counts.other) ? ['other'] : [];
+        const statusColumns = PROVIDER_STATUS_COLUMNS.concat(extra);
+        const providerRows = providers.map(([name, counts]) =>
+            [name].concat(statusColumns.map(s => Number(counts[s] || 0))));
+        html += '<div class="health-tables">' +
+            healthTable('القرارات', ['القرار', 'العدد'], decisions, 'لا توجد قرارات') +
+            healthTable('ردود المزودين', ['المزود'].concat(statusColumns), providerRows, 'لا توجد استدعاءات مزودين') +
+            healthTable('أكثر رموز الفشل', ['الرمز', 'العدد'], codes.map(c => [c.code, Number(c.count)]), 'لا توجد رموز فشل') +
+            '</div>';
+        body.innerHTML = html;
+    }
+
     // Initialize poller on load
     window.addEventListener('load', () => {
         // Run initial diagnostics checking on load to feed stats
         runDiagnostics();
         
+        // Search health and cost panel
+        loadOpsHealth(false);
+
         // Load initial logs
         fetchLogs();
         

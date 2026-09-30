@@ -645,6 +645,21 @@ def check_verifier():
         return f"VERIFIER_CHECK_FAILED: {type(e).__name__}"
 
 
+def _outage_notice(worker_id, since_seconds, base=None):
+    """
+    تنبيه اللوحة عند انتهاء العامل: base + سبب انقطاع ظهر في عمليات بحث هذا العامل (رصيد Serper انتهى /
+    Gemini لا يستجيب، من ops_health). None عندما لا يوجد أيهما فيبقى التنبيه الحالي. فشل الفحص لا يوقف الإنهاء.
+    """
+    outage = ""
+    if worker_id:
+        try:
+            import ops_health
+            outage = ops_health.outage_notice(since_seconds, worker_id=worker_id)
+        except Exception as e:
+            print(f"تنبيه: تعذر فحص انقطاع المزودين: {e}")
+    return " | ".join(n for n in (base, outage) if n) or None
+
+
 def _refresh_state(status, **extra):
     try:
         stats = local_cache_db.get_queue_statistics()
@@ -710,12 +725,14 @@ def run_worker_mode():
 
     load_run_config()
     local_cache_db.resume_automation()   # علم الإيقاف المؤقت القديم لا يمنع تشغيلاً جديداً
+    started = time.monotonic()
     notice = check_verifier()
     if notice:
         print(f"[Worker] {notice}")
 
     stop_reason = None
     queue_started = False
+    worker_id = None
     try:
         sheets_client = google_sheets.get_sheets_client()
         if not sheets_client:
@@ -792,16 +809,21 @@ def run_worker_mode():
                 time.sleep(1)
     finally:
         try:
+            # سبب الانقطاع (رصيد Serper / Gemini) من صفوف هذا العامل فقط (worker_id)؛ None يترك التنبيه كما هو
+            run_seconds = time.monotonic() - started + 60
             if stop_reason == "provider_down":
                 local_cache_db.update_automation_state(
                     status="provider_down", current_product="",
-                    notice="PROVIDER_DOWN: search providers unavailable; remaining rows stay pending")
+                    notice=_outage_notice(worker_id, run_seconds,
+                                          "PROVIDER_DOWN: search providers unavailable; remaining rows stay pending"))
             elif stop_reason in ("sheets_unavailable", "sheet_config"):
                 pass
             elif local_cache_db.get_ready_for_review_count() > 0:
-                local_cache_db.update_automation_state(status="curation_pending", current_product="")
+                local_cache_db.update_automation_state(status="curation_pending", current_product="",
+                                                       notice=_outage_notice(worker_id, run_seconds, notice))
             else:
-                local_cache_db.update_automation_state(status="idle", current_product="")
+                local_cache_db.update_automation_state(status="idle", current_product="",
+                                                       notice=_outage_notice(worker_id, run_seconds, notice))
         except Exception as e:
             print(f"[Worker] تعذر تحديث الحالة النهائية: {e}")
         if queue_started:
