@@ -6,6 +6,8 @@ Usage (from the repository root):
     python scripts/eval_report.py --engine v2
     python scripts/eval_report.py --engine v2 --scenario gemini_down
     python scripts/eval_report.py --engine v1 --write-baseline      # refresh tests/eval/fixtures/baseline_v1.json
+    python scripts/eval_report.py --engine v1 --write-hotfixed-baseline   # refresh baseline_v1_hotfixed.json
+    python scripts/eval_report.py --stored original                # print a stored baseline (original|hotfixed)
     python scripts/eval_report.py --engine v2 --golden tests/eval/fixtures/recorded/2026-10-02/golden_skus.json \
         --cassette tests/eval/fixtures/recorded/2026-10-02/vlm_cassette.json
 
@@ -82,12 +84,38 @@ def print_report(report, golden, baseline=None):
             print(f"  {o['sku_id']}: {o['error']}")
 
 
+def print_stored(stored, which):
+    """Metric table of a committed v1 baseline (no engine run)."""
+    m = stored["metrics"]
+    print(f"\nStored v1 baseline ({which}) | {stored['n_skus']} SKUs | recorded {stored['generated_at']} "
+          f"from commit {stored.get('legacy_commit')}")
+    print()
+    print(harness.stratum_table(m))
+    print()
+    print(f"auto-accept precision  {_pct(m['auto_accept_precision'])}  ({m['n_auto']} auto picks)")
+    print(f"wrong auto-publish     {_pct(m['wrong_auto_rate'])}  ({m['n_auto_wrong']} SKUs)")
+    print(f"correct pick           {_pct(m['correct_pick_rate'])}  ({m['n_correct_pick']}/{m['n_with_correct']})")
+    print(f"preselect precision    {_pct(m['preselect_precision'])}  ({m['n_preselected']} preselected)")
+    print(f"review rate            {_pct(m['review_rate'])}")
+    print(f"not found              {_pct(m['not_found_rate'])}  (false NOT_FOUND {_pct(m['false_not_found_rate'])})")
+    print(f"decisions              {m['decisions']}")
+    print("kills of correct_exact images by rule:")
+    for rule, count in sorted(m["kill_attribution"].items(), key=lambda kv: -kv[1]):
+        flag = "  <- image-quality rule" if metrics.is_quality_rule(rule) else ""
+        print(f"    {count:4d}  {rule}{flag}")
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--engine", choices=harness.ENGINES, default="v2")
     parser.add_argument("--scenario", choices=harness.SCENARIOS, default="normal")
     parser.add_argument("--write-baseline", action="store_true",
                         help="store this v1 run as tests/eval/fixtures/baseline_v1.json")
+    parser.add_argument("--write-hotfixed-baseline", action="store_true",
+                        help="store this v1 run as tests/eval/fixtures/baseline_v1_hotfixed.json (v1 after the "
+                             "rollback hot-fixes); baseline_v1.json keeps the original v1")
+    parser.add_argument("--stored", choices=("original", "hotfixed"),
+                        help="print a stored v1 baseline's metric table instead of running an engine")
     parser.add_argument("--force", action="store_true",
                         help="with --write-baseline: overwrite even though the legacy code has changed")
     parser.add_argument("--golden", help="golden_skus.json to replay (default: the committed fixture)")
@@ -101,6 +129,14 @@ def main(argv=None):
     logging.basicConfig(level=logging.INFO if args.verbose else logging.WARNING,
                         format="%(levelname)s %(name)s: %(message)s")
 
+    if args.stored:
+        stored = harness.load_baseline() if args.stored == "original" else harness.load_hotfixed_baseline()
+        print_stored(stored, args.stored)
+        return 0
+    if args.write_hotfixed_baseline and (args.engine != "v1" or args.scenario != "normal" or args.sku
+                                         or args.golden or args.write_baseline):
+        parser.error("--write-hotfixed-baseline needs --engine v1, the normal scenario and the full committed "
+                     "golden set (and not --write-baseline)")
     if args.write_baseline and (args.engine != "v1" or args.scenario != "normal" or args.sku or args.golden):
         parser.error("--write-baseline needs --engine v1, the normal scenario and the full committed golden set")
     if args.write_baseline and not args.force:
@@ -145,6 +181,9 @@ def main(argv=None):
     if args.write_baseline:
         target = harness.write_baseline(report)
         print(f"baseline written: {target}")
+    if args.write_hotfixed_baseline:
+        target = harness.write_hotfixed_baseline(report)
+        print(f"hot-fixed v1 baseline written: {target}")
     return 1 if report["network_attempts"] else 0
 
 

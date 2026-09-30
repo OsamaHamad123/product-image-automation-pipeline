@@ -40,6 +40,10 @@ GOLDEN_PATH = FIXTURES / "golden_skus.json"
 CASSETTE_PATH = FIXTURES / "vlm_cassette.json"
 MAPPINGS_PATH = FIXTURES / "brand_mappings.json"
 BASELINE_PATH = FIXTURES / "baseline_v1.json"
+# The ORIGINAL v1 (before any fix) stays in baseline_v1.json and is never regenerated; the
+# v2 gate compares against it. The legacy replay after the v1 rollback hot-fixes (WP-4a)
+# is recorded separately, so a live v1 replay can still be pinned exactly.
+HOTFIXED_BASELINE_PATH = FIXTURES / "baseline_v1_hotfixed.json"
 
 ENGINES = ("v1", "v2")
 SCENARIOS = ("normal", "gemini_down")
@@ -74,6 +78,10 @@ def load_mappings(path: Optional[os.PathLike] = None) -> Dict[str, Any]:
 
 def load_baseline(path: Optional[os.PathLike] = None) -> Dict[str, Any]:
     return _read_json(Path(path or BASELINE_PATH))
+
+
+def load_hotfixed_baseline(path: Optional[os.PathLike] = None) -> Dict[str, Any]:
+    return _read_json(Path(path or HOTFIXED_BASELINE_PATH))
 
 
 def _normalised_sha256(paths: Iterable[Path]) -> Dict[str, str]:
@@ -169,7 +177,16 @@ def write_report(report: Mapping[str, Any], path: Optional[os.PathLike] = None) 
     return target
 
 
-def baseline_payload(report: Mapping[str, Any], golden: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
+HOTFIXED_DESCRIPTION = (
+    "Legacy v1 (image_search.search_best_product_image with SEARCH_ENGINE=v1) replayed offline on the golden "
+    "fixtures AFTER the v1 rollback hot-fixes (no unverified pick counted as success, fail-closed Gemini, no "
+    "hard exposure/blur gates). The live legacy replay must reproduce it while the legacy sources keep this "
+    "fingerprint. Regenerate only with: python scripts/eval_report.py --engine v1 --write-hotfixed-baseline. "
+    "The ORIGINAL pre-fix v1 stays in baseline_v1.json.")
+
+
+def baseline_payload(report: Mapping[str, Any], golden: Optional[Mapping[str, Any]] = None,
+                     description: Optional[str] = None) -> Dict[str, Any]:
     """The committed v1 baseline: aggregate metrics plus a per-SKU record of what v1 did."""
     if report.get("engine") != "v1" or report.get("scenario") != "normal":
         raise ValueError("the baseline is the legacy engine on the normal scenario")
@@ -189,7 +206,7 @@ def baseline_payload(report: Mapping[str, Any], golden: Optional[Mapping[str, An
             "queries": o["queries"],
         }
     return {
-        "description": (
+        "description": description or (
             "Legacy v1 (image_search.search_best_product_image) replayed offline on the golden fixtures before any "
             "fix. Aggregate metrics and what v1 did per SKU, kept as data so the 'before' state stays on record "
             "after v1 is hot-fixed. Regenerate only with: python scripts/eval_report.py --engine v1 "
@@ -206,13 +223,18 @@ def baseline_payload(report: Mapping[str, Any], golden: Optional[Mapping[str, An
     }
 
 
-def write_baseline(report: Mapping[str, Any], path: Optional[os.PathLike] = None) -> Path:
-    payload = baseline_payload(report)
+def write_baseline(report: Mapping[str, Any], path: Optional[os.PathLike] = None,
+                   description: Optional[str] = None) -> Path:
+    payload = baseline_payload(report, description=description)
     target = Path(path or BASELINE_PATH)
     with open(target, "w", encoding="utf-8", newline="\n") as fh:
         json.dump(payload, fh, ensure_ascii=False, indent=1)
         fh.write("\n")
     return target
+
+
+def write_hotfixed_baseline(report: Mapping[str, Any], path: Optional[os.PathLike] = None) -> Path:
+    return write_baseline(report, path or HOTFIXED_BASELINE_PATH, description=HOTFIXED_DESCRIPTION)
 
 
 def fmt_rate(value: Any) -> str:

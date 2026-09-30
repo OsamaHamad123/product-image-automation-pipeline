@@ -589,7 +589,13 @@ class FixtureProvider:
 
 
 class FixtureOffProvider(FixtureProvider):
-    """Open Food Facts: a GTIN lookup, answered only for a valid GTIN."""
+    """Open Food Facts: a GTIN lookup, answered only for a valid GTIN.
+
+    kind = "lookup" like the real catalog_match OffProvider: retrieve() calls lookup()
+    once per SKU (in parallel with Q1) instead of search() for every query.
+    """
+
+    kind = "lookup"
 
     def __init__(self, models: Any, sku: Mapping[str, Any]):
         super().__init__(models, sku, "off", True)
@@ -685,8 +691,22 @@ def decide_verdict(entry: Mapping[str, Any], spec: Any) -> str:
     return "UNSURE"
 
 
+def _real_make_verdict() -> Optional[Callable[..., Any]]:
+    """catalog_match.verify.make_verdict when merged: the production code decides from the readings."""
+    try:
+        from catalog_match.verify import make_verdict
+        return make_verdict
+    except ImportError:
+        return None
+
+
 class CassetteVerifier:
-    """models.Verifier answering from vlm_cassette.json; the 'gemini_down' scenario returns unknown."""
+    """models.Verifier answering from vlm_cassette.json; the 'gemini_down' scenario returns unknown.
+
+    The recorded readings are turned into a verdict by catalog_match.verify.make_verdict (the
+    same code that decides for a live Gemini reply), so the replay measures the real D6 rules;
+    decide_verdict() above is only the fallback before verify.py exists.
+    """
 
     FIELDS = ("brand_text", "variant_text", "size_text", "pack_count", "view", "brand_match", "variant_match",
               "size_match")
@@ -706,11 +726,16 @@ class CassetteVerifier:
                                         verdicts=[m.VlmImageVerdict(index=i, decision="UNKNOWN")
                                                   for i in range(len(images))])
         verdicts = []
+        # The real rules need a SkuSpec; protocol checks that pass spec=None use decide_verdict().
+        make_verdict = _real_make_verdict() if isinstance(spec, m.SkuSpec) else None
         for i, fetched in enumerate(images):
             cid = self.index.cid(getattr(getattr(fetched, "candidate", None), "image_url", None))
             entry = cassette_entry(self.cassette, self.sku["id"], cid) if cid else None
             if entry is None:
                 verdicts.append(m.VlmImageVerdict(index=i, decision="UNSURE"))
+                continue
+            if make_verdict is not None:
+                verdicts.append(make_verdict(spec, i, entry))
                 continue
             fields = {k: entry.get(k) for k in self.FIELDS if k in entry}
             fields = {k: ("" if v is None and k.endswith("_text") else v) for k, v in fields.items()}

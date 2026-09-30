@@ -9,6 +9,7 @@ import urllib.parse
 import config
 import asyncio
 import io
+import logging
 import aiohttp
 import threading
 try:
@@ -19,6 +20,8 @@ except ImportError:
     T = None
 from PIL import Image
 from bs4 import BeautifulSoup
+
+logger = logging.getLogger(__name__)
 
 # تهيئة شجرة BK-Tree العالمية لفحص التكرارات بصرياً بفعالية
 _bktree = None
@@ -1892,9 +1895,113 @@ def run_parallel_consensus_search(query):
 def search_best_product_image(query, product_name, brand, **kwargs):
     """
     نقطة الدخول العامة للبحث عن صورة المنتج (التوقيع ثابت لكل المستدعين).
-    حالياً تستدعي المسار القديم v1؛ مسار v2 (catalog_match) يُربط هنا.
+
+    يختار الإعداد SEARCH_ENGINE المسار: 'v2' (الافتراضي، catalog_match) أو 'v1' (للتراجع فقط).
+    الوسائط الإضافية المقبولة: custom_query, exclude_urls, exclude_phashes, product_name_ar,
+    brand_ar, category, size_text, barcode, skip_cache, trace, brand_mappings
+    (والوسائط القديمة مثل strict_brand_match و origin تُمرَّر إلى v1 وتُتجاهل في v2).
     """
-    return search_best_product_image_v1(query, product_name, brand, **kwargs)
+    from catalog_match import settings as cm_settings
+
+    if cm_settings.search_engine() == "v1":
+        return search_best_product_image_v1(query, product_name, brand, **kwargs)
+    return search_best_product_image_v2(query, product_name, brand, **kwargs)
+
+
+def _load_brand_mappings_for_search():
+    """جلب جدول مرادفات البراندات من Google Sheets (يُستدعى فقط عندما لا تُمرَّر المرادفات)."""
+    try:
+        import google_sheets
+        sheets_client = google_sheets.get_sheets_client()
+        if sheets_client:
+            return google_sheets.get_brand_mappings(sheets_client, config.SPREADSHEET_NAME_OR_URL) or {}
+    except Exception as e:
+        logger.warning("v2: failed to load brand mappings: %s", e)
+    return {}
+
+
+def _cached_result_v2(barcode, product_name, brand, sku_key, trace):
+    """البحث في الكاش المحلي (نتيجة مسترجعة تحتاج دائماً مراجعة ولا تُنشر تلقائياً)."""
+    import inspect
+    import local_cache_db
+
+    lookup = local_cache_db.get_cached_product
+    kwargs = {"barcode": barcode, "product_name": product_name, "brand": brand}
+    try:
+        if "sku_key" in inspect.signature(lookup).parameters:
+            kwargs["sku_key"] = sku_key
+    except (TypeError, ValueError):
+        pass
+    cached = lookup(**kwargs)
+    if not cached:
+        return None
+    url = cached.get("cloudinary_url") or cached.get("url")
+    if not url:
+        return None
+    result = {
+        "url": url,
+        "title": "مسترجع من الكاش المحلي",
+        "width": 800,
+        "height": 800,
+        "source": "sqlite_cache",
+        "page_url": "",
+        "content_sha256": None,
+        "needs_review": True,
+        "preselect": True,
+        "unverified": False,
+        "clip_score": None,
+        "metadata": cached.get("metadata"),
+        "decision": "REVIEW_PRESELECTED",
+        "failure_code": None,
+        "sku_key": sku_key,
+        "status": "preselected",
+        "candidates": [],
+    }
+    if trace is not None:
+        trace["outcome"] = {
+            "decision": "REVIEW_PRESELECTED", "failure_code": None, "provider_health": [],
+            "queries": [], "sku_key": sku_key, "vlm_calls": 0, "reject_counts": {},
+            "winner_url": url, "cache_hit": True,
+        }
+    return result
+
+
+def search_best_product_image_v2(query, product_name, brand, **kwargs):
+    """
+    مسار v2 (catalog_match): تجميع المرشحين من كل الاستعلامات، ترتيب بالهوية، تحقق Gemini مغلق عند الفشل،
+    ثم توجيه القرار. لا توجد مواءمة للبراند عبر Gemini في هذا المسار (D8).
+    يعيد None عند NOT_FOUND أو PROVIDER_DOWN أو غياب أي مرشح قابل للمراجعة.
+    """
+    from catalog_match import facade, identity, pipeline
+
+    trace = kwargs.get("trace")
+    row = facade.to_sku_row(product_name, brand, kwargs)
+
+    # 0. الكاش المحلي أولاً (مطابقة صارمة بالباركود عند وجوده)
+    if not kwargs.get("skip_cache"):
+        try:
+            key_spec = identity.build_sku_spec(row, kwargs.get("brand_mappings") or None,
+                                               size_text=kwargs.get("size_text") or None)
+            cached = _cached_result_v2(row["barcode"], row["name"], row["brand"], key_spec.sku_key, trace)
+            if cached:
+                logger.info("v2: local cache hit for %r", product_name)
+                return cached
+        except Exception as e:
+            logger.warning("v2: local cache lookup failed: %s", e)
+
+    # 1. مرادفات البراندات: تُجلب فقط إن لم تُمرَّر
+    brand_mappings = kwargs.get("brand_mappings")
+    if not brand_mappings:
+        brand_mappings = _load_brand_mappings_for_search()
+
+    spec = identity.build_sku_spec(row, brand_mappings, size_text=kwargs.get("size_text") or None)
+    outcome = pipeline.find_product_image(
+        spec,
+        custom_query=kwargs.get("custom_query") or None,
+        exclude_urls=kwargs.get("exclude_urls") or (),
+        exclude_phashes=kwargs.get("exclude_phashes") or (),
+    )
+    return facade.outcome_to_legacy(outcome, trace)
 
 
 def search_best_product_image_v1(query, product_name, brand, **kwargs):
