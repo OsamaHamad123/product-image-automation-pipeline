@@ -1,0 +1,1009 @@
+[
+ {
+  "row": 2,
+  "name": "AIDA FRENCH FRIES 1KG",
+  "brand": "AIDA",
+  "sku_key": "k002",
+  "brand_conf": "sheet_raw",
+  "gtin_status": "missing",
+  "variants": {},
+  "queries": [
+   "Aida French Fries 1Kg"
+  ],
+  "provider_calls": [
+   {
+    "provider": "serper",
+    "query": "AIDA French Fries 1kg",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 10,
+    "ms": 420,
+    "error": null
+   },
+   {
+    "provider": "serper",
+    "query": "AIDA French Fries 1 kg UAE",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 10,
+    "ms": 420,
+    "error": null
+   },
+   {
+    "provider": "serper",
+    "query": "AIDA fries 1kg site:luluhypermarket.com",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 10,
+    "ms": 420,
+    "error": null
+   }
+  ],
+  "decision": "REVIEW_PRESELECTED",
+  "failure_code": null,
+  "winner": "https://lulu.akinoncloudcdn.com/products/2025/03/11/2/x-1500x1500.jpg",
+  "winner_detail": {
+   "rank": 1,
+   "status": "preselected",
+   "reasons": [
+    "vlm:MATCH",
+    "preselected:vlm_match"
+   ],
+   "warnings": [],
+   "provider": "serper",
+   "domain": "luluhypermarket.com",
+   "title": "Aida French Fries 1kg",
+   "image_url": "https://lulu.akinoncloudcdn.com/products/2025/03/11/2/x-1500x1500.jpg",
+   "page_url": "https://www.luluhypermarket.com/en-ae/aida-french-fries-1kg/p/2",
+   "evidence": "tier=1 size=match",
+   "vlm": {
+    "decision": "MATCH",
+    "view": "front_packshot",
+    "brand": "",
+    "variant": "",
+    "size": ""
+   },
+   "query_id": "Q1"
+  },
+  "warnings": [],
+  "top": [
+   {
+    "rank": 1,
+    "status": "preselected",
+    "reasons": [
+     "vlm:MATCH",
+     "preselected:vlm_match"
+    ],
+    "warnings": [],
+    "provider": "serper",
+    "domain": "luluhypermarket.com",
+    "title": "Aida French Fries 1kg",
+    "image_url": "https://lulu.akinoncloudcdn.com/products/2025/03/11/2/x-1500x1500.jpg",
+    "page_url": "https://www.luluhypermarket.com/en-ae/aida-french-fries-1kg/p/2",
+    "evidence": "tier=1 size=match",
+    "vlm": {
+     "decision": "MATCH",
+     "view": "front_packshot",
+     "brand": "",
+     "variant": "",
+     "size": ""
+    },
+    "query_id": "Q1"
+   }
+  ],
+  "reject_counts": {},
+  "vlm_calls": 1,
+  "serp_calls": 3,
+  "cost_usd": 0.004,
+  "seconds": 6.1
+ },
+ {
+  "row": 3,
+  "name": "BARTS TRADITON FRIES 1KG",
+  "brand": "BARTS TRADITON",
+  "sku_key": "k003",
+  "brand_conf": "sheet_raw",
+  "gtin_status": "missing",
+  "variants": {},
+  "queries": [
+   "Barts Traditon Fries 1Kg"
+  ],
+  "provider_calls": [
+   {
+    "provider": "serper",
+    "query": "AIDA French Fries 1kg",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 10,
+    "ms": 420,
+    "error": null
+   },
+   {
+    "provider": "serper",
+    "query": "AIDA French Fries 1 kg UAE",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 10,
+    "ms": 420,
+    "error": null
+   },
+   {
+    "provider": "serper",
+    "query": "AIDA fries 1kg site:luluhypermarket.com",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 10,
+    "ms": 420,
+    "error": null
+   }
+  ],
+  "decision": "REVIEW_UNSELECTED",
+  "failure_code": null,
+  "winner": null,
+  "winner_detail": null,
+  "warnings": [],
+  "top": [
+   {
+    "rank": 1,
+    "status": "rejected",
+    "reasons": [
+     "vlm:MISMATCH"
+    ],
+    "warnings": [],
+    "provider": "serper",
+    "domain": "emborg.com",
+    "title": "Emborg Traditional Fries 1kg",
+    "image_url": "https://emborg.com/img/1.jpg",
+    "page_url": "https://emborg.com/p/1",
+    "evidence": "tier=2 size=unknown",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "",
+     "variant": "",
+     "size": ""
+    },
+    "query_id": "Q1"
+   },
+   {
+    "rank": 2,
+    "status": "rejected",
+    "reasons": [
+     "vlm:MISMATCH"
+    ],
+    "warnings": [],
+    "provider": "serper",
+    "domain": "carrefouruae.com",
+    "title": "Emborg Fries 1kg",
+    "image_url": "https://carrefouruae.com/img/2.jpg",
+    "page_url": "https://carrefouruae.com/p/2",
+    "evidence": "tier=2 size=unknown",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "",
+     "variant": "",
+     "size": ""
+    },
+    "query_id": "Q1"
+   }
+  ],
+  "reject_counts": {
+   "vlm:MISMATCH": 3
+  },
+  "vlm_calls": 1,
+  "serp_calls": 3,
+  "cost_usd": 0.004,
+  "seconds": 6.1
+ },
+ {
+  "row": 8,
+  "name": "MCCAIN GOLDEN LONG 750GM",
+  "brand": "MCCAIN",
+  "sku_key": "k008",
+  "brand_conf": "sheet_raw",
+  "gtin_status": "missing",
+  "variants": {},
+  "queries": [
+   "Mccain Golden Long 750Gm"
+  ],
+  "provider_calls": [
+   {
+    "provider": "serper",
+    "query": "AIDA French Fries 1kg",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 10,
+    "ms": 420,
+    "error": null
+   },
+   {
+    "provider": "serper",
+    "query": "AIDA French Fries 1 kg UAE",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 10,
+    "ms": 420,
+    "error": null
+   },
+   {
+    "provider": "serper",
+    "query": "AIDA fries 1kg site:luluhypermarket.com",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 10,
+    "ms": 420,
+    "error": null
+   }
+  ],
+  "decision": "REVIEW_PRESELECTED",
+  "failure_code": null,
+  "winner": "https://cdn.mafrservices.com/sys-master-root/h8/large.jpg",
+  "winner_detail": {
+   "rank": 1,
+   "status": "preselected",
+   "reasons": [
+    "vlm:UNSURE",
+    "preselected:tier1_unsure",
+    "warn:vlm_unsure"
+   ],
+   "warnings": [
+    "vlm_unsure"
+   ],
+   "provider": "serper",
+   "domain": "carrefouruae.com",
+   "title": "McCain Golden Long Fries 750g",
+   "image_url": "https://cdn.mafrservices.com/sys-master-root/h8/large.jpg",
+   "page_url": "https://www.carrefouruae.com/mafuae/en/mccain-golden-long/p/8",
+   "evidence": "tier=1 size=match",
+   "vlm": {
+    "decision": "UNSURE",
+    "view": "front_packshot",
+    "brand": "",
+    "variant": "",
+    "size": ""
+   },
+   "query_id": "Q1"
+  },
+  "warnings": [
+   "vlm_unsure"
+  ],
+  "top": [
+   {
+    "rank": 1,
+    "status": "preselected",
+    "reasons": [
+     "vlm:UNSURE",
+     "preselected:tier1_unsure",
+     "warn:vlm_unsure"
+    ],
+    "warnings": [
+     "vlm_unsure"
+    ],
+    "provider": "serper",
+    "domain": "carrefouruae.com",
+    "title": "McCain Golden Long Fries 750g",
+    "image_url": "https://cdn.mafrservices.com/sys-master-root/h8/large.jpg",
+    "page_url": "https://www.carrefouruae.com/mafuae/en/mccain-golden-long/p/8",
+    "evidence": "tier=1 size=match",
+    "vlm": {
+     "decision": "UNSURE",
+     "view": "front_packshot",
+     "brand": "",
+     "variant": "",
+     "size": ""
+    },
+    "query_id": "Q1"
+   }
+  ],
+  "reject_counts": {},
+  "vlm_calls": 1,
+  "serp_calls": 3,
+  "cost_usd": 0.004,
+  "seconds": 6.1
+ },
+ {
+  "row": 14,
+  "name": "ASHOKA PLAIN PARATHA 5S 400GM",
+  "brand": "ASHOKA",
+  "sku_key": "k014",
+  "brand_conf": "sheet_raw",
+  "gtin_status": "missing",
+  "variants": {},
+  "queries": [
+   "Ashoka Plain Paratha 5S 400Gm"
+  ],
+  "provider_calls": [
+   {
+    "provider": "serper",
+    "query": "AIDA French Fries 1kg",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 10,
+    "ms": 420,
+    "error": null
+   },
+   {
+    "provider": "serper",
+    "query": "AIDA French Fries 1 kg UAE",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 10,
+    "ms": 420,
+    "error": null
+   },
+   {
+    "provider": "serper",
+    "query": "AIDA fries 1kg site:luluhypermarket.com",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 10,
+    "ms": 420,
+    "error": null
+   }
+  ],
+  "decision": "REVIEW_UNSELECTED",
+  "failure_code": null,
+  "winner": null,
+  "winner_detail": null,
+  "warnings": [],
+  "top": [
+   {
+    "rank": 1,
+    "status": "eligible",
+    "reasons": [
+     "vlm:UNSURE"
+    ],
+    "warnings": [],
+    "provider": "serper",
+    "domain": "luluhypermarket.com",
+    "title": "Ashoka Plain Paratha 400g",
+    "image_url": "https://lulu.akinoncloudcdn.com/products/2025/03/11/14/x-1500x1500.jpg",
+    "page_url": "https://www.luluhypermarket.com/en-ae/ashoka-paratha/p/14",
+    "evidence": "tier=2 size=unknown",
+    "vlm": {
+     "decision": "UNSURE",
+     "view": "front_packshot",
+     "brand": "",
+     "variant": "",
+     "size": ""
+    },
+    "query_id": "Q1"
+   }
+  ],
+  "reject_counts": {},
+  "vlm_calls": 2,
+  "serp_calls": 3,
+  "cost_usd": 0.005,
+  "seconds": 6.1
+ },
+ {
+  "row": 15,
+  "name": "MEHRAN PARATHA 2X400GM",
+  "brand": "MEHRAN",
+  "sku_key": "k015",
+  "brand_conf": "sheet_raw",
+  "gtin_status": "missing",
+  "variants": {},
+  "queries": [
+   "Mehran Paratha 2X400Gm"
+  ],
+  "provider_calls": [
+   {
+    "provider": "serper",
+    "query": "AIDA French Fries 1kg",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 10,
+    "ms": 420,
+    "error": null
+   },
+   {
+    "provider": "serper",
+    "query": "AIDA French Fries 1 kg UAE",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 10,
+    "ms": 420,
+    "error": null
+   },
+   {
+    "provider": "serper",
+    "query": "AIDA fries 1kg site:luluhypermarket.com",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 10,
+    "ms": 420,
+    "error": null
+   }
+  ],
+  "decision": "REVIEW_UNSELECTED",
+  "failure_code": null,
+  "winner": null,
+  "winner_detail": null,
+  "warnings": [],
+  "top": [
+   {
+    "rank": 1,
+    "status": "rejected",
+    "reasons": [
+     "vlm:MISMATCH"
+    ],
+    "warnings": [],
+    "provider": "serper",
+    "domain": "haldirams.com",
+    "title": "Haldiram's Paratha 2x400g",
+    "image_url": "https://haldirams.com/img/1.jpg",
+    "page_url": "https://haldirams.com/p/1",
+    "evidence": "tier=2 size=unknown",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "",
+     "variant": "",
+     "size": ""
+    },
+    "query_id": "Q1"
+   }
+  ],
+  "reject_counts": {
+   "vlm:MISMATCH": 2,
+   "brand_absent": 4
+  },
+  "vlm_calls": 1,
+  "serp_calls": 3,
+  "cost_usd": 0.004,
+  "seconds": 6.1
+ },
+ {
+  "row": 20,
+  "name": "ALALALI FANCY TUNA S/F OIL 85GM",
+  "brand": "AL ALALI",
+  "sku_key": "k020",
+  "brand_conf": "sheet_raw",
+  "gtin_status": "missing",
+  "variants": {},
+  "queries": [
+   "Alalali Fancy Tuna S/F Oil 85Gm"
+  ],
+  "provider_calls": [
+   {
+    "provider": "serper",
+    "query": "Al Alali Fancy Tuna Sunflower Oil 85g",
+    "hl": "en",
+    "status": "error",
+    "http_status": null,
+    "count": 0,
+    "ms": 420,
+    "error": "ConnectionError: HTTPSConnectionPool(host='google.serper.dev', port=443): Max retries exceeded with url: /images (Caused by NameResolutionError: Failed to resolve 'google.serper.dev')"
+   },
+   {
+    "provider": "bing_html",
+    "query": "Al Alali Fancy Tuna Sunflower Oil 85g",
+    "hl": "en",
+    "status": "error",
+    "http_status": null,
+    "count": 0,
+    "ms": 420,
+    "error": "ConnectTimeout: timed out"
+   }
+  ],
+  "decision": "PROVIDER_DOWN",
+  "failure_code": "PROVIDER_DOWN",
+  "winner": null,
+  "winner_detail": null,
+  "warnings": [],
+  "top": [],
+  "reject_counts": {},
+  "vlm_calls": 0,
+  "serp_calls": 0,
+  "cost_usd": 0.0,
+  "seconds": 6.1
+ },
+ {
+  "row": 21,
+  "name": "ALALALI FANCY TUNA WATER 85GM",
+  "brand": "AL ALALI",
+  "sku_key": "k021",
+  "brand_conf": "sheet_raw",
+  "gtin_status": "missing",
+  "variants": {},
+  "queries": [
+   "Alalali Fancy Tuna Water 85Gm"
+  ],
+  "provider_calls": [
+   {
+    "provider": "serper",
+    "query": "Al Alali Fancy Tuna Water 85g",
+    "hl": "en",
+    "status": "error",
+    "http_status": null,
+    "count": 0,
+    "ms": 420,
+    "error": "timeout"
+   }
+  ],
+  "decision": "PROVIDER_DOWN",
+  "failure_code": "PROVIDER_DOWN",
+  "winner": null,
+  "winner_detail": null,
+  "warnings": [],
+  "top": [],
+  "reject_counts": {},
+  "vlm_calls": 0,
+  "serp_calls": 0,
+  "cost_usd": 0.0,
+  "seconds": 6.1
+ },
+ {
+  "row": 30,
+  "name": "DOUBLE HORSE MEAT MASALA 140GM",
+  "brand": "DOUBLE HORSE",
+  "sku_key": "k030",
+  "brand_conf": "sheet_raw",
+  "gtin_status": "missing",
+  "variants": {},
+  "queries": [
+   "Double Horse Meat Masala 140Gm"
+  ],
+  "provider_calls": [
+   {
+    "provider": "serper",
+    "query": "AIDA French Fries 1kg",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 10,
+    "ms": 420,
+    "error": null
+   },
+   {
+    "provider": "serper",
+    "query": "AIDA French Fries 1 kg UAE",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 10,
+    "ms": 420,
+    "error": null
+   },
+   {
+    "provider": "serper",
+    "query": "AIDA fries 1kg site:luluhypermarket.com",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 10,
+    "ms": 420,
+    "error": null
+   }
+  ],
+  "decision": "REVIEW_UNSELECTED",
+  "failure_code": null,
+  "winner": null,
+  "winner_detail": null,
+  "warnings": [],
+  "top": [
+   {
+    "rank": 1,
+    "status": "eligible",
+    "reasons": [
+     "vlm:UNSURE"
+    ],
+    "warnings": [],
+    "provider": "serper",
+    "domain": "facebook.com",
+    "title": "Double Horse Meat Masala",
+    "image_url": "https://scontent.fdxb1-1.fna.fbcdn.net/v/t39/30.jpg",
+    "page_url": "https://www.facebook.com/doublehorse/30",
+    "evidence": "tier=2 size=unknown",
+    "vlm": {
+     "decision": "UNSURE",
+     "view": "front_packshot",
+     "brand": "",
+     "variant": "",
+     "size": ""
+    },
+    "query_id": "Q1"
+   },
+   {
+    "rank": 2,
+    "status": "eligible",
+    "reasons": [],
+    "warnings": [],
+    "provider": "serper",
+    "domain": "instagram.com",
+    "title": "Double Horse masala",
+    "image_url": "https://scontent.cdninstagram.com/v/30b.jpg",
+    "page_url": "https://www.instagram.com/p/30b",
+    "evidence": "tier=3 size=unknown",
+    "vlm": null,
+    "query_id": "Q1"
+   },
+   {
+    "rank": 3,
+    "status": "rejected",
+    "reasons": [
+     "hard:brand_conflict"
+    ],
+    "warnings": [],
+    "provider": "serper",
+    "domain": "eastern.in",
+    "title": "Eastern Meat Masala 100g",
+    "image_url": "https://eastern.in/30c.jpg",
+    "page_url": "",
+    "evidence": "tier=None",
+    "vlm": null,
+    "query_id": "Q1"
+   }
+  ],
+  "reject_counts": {},
+  "vlm_calls": 1,
+  "serp_calls": 3,
+  "cost_usd": 0.004,
+  "seconds": 6.1
+ },
+ {
+  "row": 40,
+  "name": "LORENA TUNA CHUNK W/S 185GM",
+  "brand": "LORENA",
+  "sku_key": "k040",
+  "brand_conf": "sheet_raw",
+  "gtin_status": "missing",
+  "variants": {},
+  "queries": [
+   "Lorena Tuna Chunk W/S 185Gm"
+  ],
+  "provider_calls": [
+   {
+    "provider": "serper",
+    "query": "AIDA French Fries 1kg",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 10,
+    "ms": 420,
+    "error": null
+   },
+   {
+    "provider": "serper",
+    "query": "AIDA French Fries 1 kg UAE",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 10,
+    "ms": 420,
+    "error": null
+   },
+   {
+    "provider": "serper",
+    "query": "AIDA fries 1kg site:luluhypermarket.com",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 10,
+    "ms": 420,
+    "error": null
+   }
+  ],
+  "decision": "REVIEW_PRESELECTED",
+  "failure_code": null,
+  "winner": "https://m.media-amazon.com/images/I/40small._AC_SL300_.jpg",
+  "winner_detail": {
+   "rank": 2,
+   "status": "preselected",
+   "reasons": [
+    "vlm:MATCH",
+    "preselected:vlm_match",
+    "warn:low_resolution"
+   ],
+   "warnings": [
+    "low_resolution"
+   ],
+   "provider": "serper",
+   "domain": "amazon.ae",
+   "title": "Lorena Tuna Chunk in Water 185g",
+   "image_url": "https://m.media-amazon.com/images/I/40small._AC_SL300_.jpg",
+   "page_url": "https://www.amazon.ae/dp/B040",
+   "evidence": "tier=1 size=match",
+   "vlm": {
+    "decision": "MATCH",
+    "view": "front_packshot",
+    "brand": "",
+    "variant": "",
+    "size": ""
+   },
+   "query_id": "Q1"
+  },
+  "warnings": [
+   "low_resolution"
+  ],
+  "top": [
+   {
+    "rank": 2,
+    "status": "preselected",
+    "reasons": [
+     "vlm:MATCH",
+     "preselected:vlm_match",
+     "warn:low_resolution"
+    ],
+    "warnings": [
+     "low_resolution"
+    ],
+    "provider": "serper",
+    "domain": "amazon.ae",
+    "title": "Lorena Tuna Chunk in Water 185g",
+    "image_url": "https://m.media-amazon.com/images/I/40small._AC_SL300_.jpg",
+    "page_url": "https://www.amazon.ae/dp/B040",
+    "evidence": "tier=1 size=match",
+    "vlm": {
+     "decision": "MATCH",
+     "view": "front_packshot",
+     "brand": "",
+     "variant": "",
+     "size": ""
+    },
+    "query_id": "Q1"
+   }
+  ],
+  "reject_counts": {},
+  "vlm_calls": 1,
+  "serp_calls": 3,
+  "cost_usd": 0.004,
+  "seconds": 6.1
+ },
+ {
+  "row": 45,
+  "name": "RIO MARIE TUNA SUN OIL 3X70GM",
+  "brand": "RIO MARIE",
+  "sku_key": "k045",
+  "brand_conf": "sheet_raw",
+  "gtin_status": "missing",
+  "variants": {},
+  "queries": [
+   "Rio Marie Tuna Sun Oil 3X70Gm"
+  ],
+  "provider_calls": [
+   {
+    "provider": "serper",
+    "query": "AIDA French Fries 1kg",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 10,
+    "ms": 420,
+    "error": null
+   },
+   {
+    "provider": "serper",
+    "query": "AIDA French Fries 1 kg UAE",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 10,
+    "ms": 420,
+    "error": null
+   },
+   {
+    "provider": "serper",
+    "query": "AIDA fries 1kg site:luluhypermarket.com",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 10,
+    "ms": 420,
+    "error": null
+   }
+  ],
+  "decision": "REVIEW_PRESELECTED",
+  "failure_code": null,
+  "winner": "https://f.nooncdn.com/p/v1645/rio-mare-3x70.jpg",
+  "winner_detail": {
+   "rank": 1,
+   "status": "preselected",
+   "reasons": [
+    "vlm:MATCH",
+    "preselected:vlm_match"
+   ],
+   "warnings": [],
+   "provider": "serper",
+   "domain": "noon.com",
+   "title": "Rio Mare Tuna in Sunflower Oil 3x70g",
+   "image_url": "https://f.nooncdn.com/p/v1645/rio-mare-3x70.jpg",
+   "page_url": "https://www.noon.com/uae-en/rio-mare/p/45",
+   "evidence": "tier=1 size=match",
+   "vlm": {
+    "decision": "MATCH",
+    "view": "front_packshot",
+    "brand": "",
+    "variant": "",
+    "size": ""
+   },
+   "query_id": "Q1"
+  },
+  "warnings": [],
+  "top": [
+   {
+    "rank": 1,
+    "status": "preselected",
+    "reasons": [
+     "vlm:MATCH",
+     "preselected:vlm_match"
+    ],
+    "warnings": [],
+    "provider": "serper",
+    "domain": "noon.com",
+    "title": "Rio Mare Tuna in Sunflower Oil 3x70g",
+    "image_url": "https://f.nooncdn.com/p/v1645/rio-mare-3x70.jpg",
+    "page_url": "https://www.noon.com/uae-en/rio-mare/p/45",
+    "evidence": "tier=1 size=match",
+    "vlm": {
+     "decision": "MATCH",
+     "view": "front_packshot",
+     "brand": "",
+     "variant": "",
+     "size": ""
+    },
+    "query_id": "Q1"
+   }
+  ],
+  "reject_counts": {},
+  "vlm_calls": 1,
+  "serp_calls": 3,
+  "cost_usd": 0.004,
+  "seconds": 6.1
+ },
+ {
+  "row": 50,
+  "name": "SUPER T SOLID TUNA SALT WATER 3X185GM",
+  "brand": "SUPER T/",
+  "sku_key": "k050",
+  "brand_conf": "sheet_raw",
+  "gtin_status": "missing",
+  "variants": {},
+  "queries": [
+   "Super T Solid Tuna Salt Water 3X185Gm"
+  ],
+  "provider_calls": [
+   {
+    "provider": "serper",
+    "query": "AIDA French Fries 1kg",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 10,
+    "ms": 420,
+    "error": null
+   },
+   {
+    "provider": "serper",
+    "query": "AIDA French Fries 1 kg UAE",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 10,
+    "ms": 420,
+    "error": null
+   },
+   {
+    "provider": "serper",
+    "query": "AIDA fries 1kg site:luluhypermarket.com",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 10,
+    "ms": 420,
+    "error": null
+   }
+  ],
+  "decision": "NOT_FOUND",
+  "failure_code": "NO_RESULTS",
+  "winner": null,
+  "winner_detail": null,
+  "warnings": [],
+  "top": [],
+  "reject_counts": {},
+  "vlm_calls": 0,
+  "serp_calls": 3,
+  "cost_usd": 0.003,
+  "seconds": 6.1
+ },
+ {
+  "row": 55,
+  "name": "TASTY FOOD MEAT MASALA 160GM",
+  "error": "KeyError: 'size'"
+ },
+ {
+  "row": 61,
+  "name": "حليب المراعي كامل الدسم 1 لتر",
+  "brand": "المراعي",
+  "sku_key": "k061",
+  "brand_conf": "sheet_raw",
+  "gtin_status": "missing",
+  "variants": {},
+  "queries": [
+   "حليب المراعي كامل الدسم 1 لتر"
+  ],
+  "provider_calls": [
+   {
+    "provider": "serper",
+    "query": "AIDA French Fries 1kg",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 10,
+    "ms": 420,
+    "error": null
+   },
+   {
+    "provider": "serper",
+    "query": "AIDA French Fries 1 kg UAE",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 10,
+    "ms": 420,
+    "error": null
+   },
+   {
+    "provider": "serper",
+    "query": "AIDA fries 1kg site:luluhypermarket.com",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 10,
+    "ms": 420,
+    "error": null
+   }
+  ],
+  "decision": "REVIEW_UNSELECTED",
+  "failure_code": null,
+  "winner": null,
+  "winner_detail": null,
+  "warnings": [],
+  "top": [
+   {
+    "rank": 1,
+    "status": "eligible",
+    "reasons": [
+     "vlm:UNSURE"
+    ],
+    "warnings": [],
+    "provider": "serper",
+    "domain": "almarai.com",
+    "title": "حليب المراعي طازج",
+    "image_url": "https://www.almarai.com/m/61.jpg",
+    "page_url": "https://www.almarai.com/ar/products/61",
+    "evidence": "tier=2 size=unknown",
+    "vlm": {
+     "decision": "UNSURE",
+     "view": "front_packshot",
+     "brand": "",
+     "variant": "",
+     "size": ""
+    },
+    "query_id": "Q1"
+   }
+  ],
+  "reject_counts": {},
+  "vlm_calls": 1,
+  "serp_calls": 3,
+  "cost_usd": 0.004,
+  "seconds": 6.1
+ }
+]
