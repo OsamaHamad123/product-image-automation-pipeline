@@ -44,6 +44,11 @@ def _parse(text: str) -> _ScriptCollector:
     return parser
 
 
+def script_sources(text: str) -> list:
+    """The src attribute of every <script src=...> in the page, in page order."""
+    return _parse(text).sources
+
+
 def inline_scripts(text: str) -> list:
     """Bodies of the attribute-less <script> blocks in the view source, in page order."""
     return _parse(text).blocks

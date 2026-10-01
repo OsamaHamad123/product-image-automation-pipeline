@@ -52,8 +52,17 @@ CHANGED_BLADES = [
     VIEWS / "layouts" / "layout.blade.php",
 ]
 
+# The review screen (catalog.blade.php) loads its JavaScript from files instead of an inline block.
+REVIEW_JS = sorted((DASH / "public" / "js" / "review").glob("*.js"))
+
 PHP = shutil.which("php")
 NODE = shutil.which("node")
+
+
+def review_page() -> str:
+    """catalog.blade.php, its Blade shell and the review scripts it loads."""
+    parts = [VIEWS / "dashboard" / "catalog.blade.php", VIEWS / "review" / "shell.blade.php"] + REVIEW_JS
+    return "\n".join(read(p) for p in parts)
 
 
 def read(path: Path) -> str:
@@ -83,7 +92,8 @@ def test_php_lint(path):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.skipif(NODE is None, reason="node is not installed")
-@pytest.mark.parametrize("path", [p for p in CHANGED_BLADES if p.name != "settings.blade.php"], ids=lambda p: p.name)
+@pytest.mark.parametrize("path", [p for p in CHANGED_BLADES if p.name not in ("settings.blade.php", "catalog.blade.php")],
+                         ids=lambda p: p.name)
 def test_inline_js_parses(path, tmp_path):
     blocks = inline_scripts(read(path))
     # Laqta pages keep their script in public/js/<page>.js (loaded with asset()): those files must parse too.
@@ -98,12 +108,21 @@ def test_inline_js_parses(path, tmp_path):
         assert result.returncode == 0, f"{path.name} script block {i + 1}: {result.stderr}"
 
 
+@pytest.mark.skipif(NODE is None, reason="node is not installed")
+@pytest.mark.parametrize("path", REVIEW_JS, ids=lambda p: p.name)
+def test_review_scripts_parse(path):
+    """catalog.blade.php has no inline script: its JavaScript is public/js/review/*.js, which must parse."""
+    assert len(REVIEW_JS) >= 6
+    result = subprocess.run([NODE, "--check", str(path)], capture_output=True, text=True, timeout=60)
+    assert result.returncode == 0, f"{path.name}: {result.stderr}"
+
+
 # ---------------------------------------------------------------------------
 # Contract text checks
 # ---------------------------------------------------------------------------
 
 def test_contracts():
-    catalog = read(VIEWS / "dashboard" / "catalog.blade.php")
+    catalog = review_page()
     batch = read(VIEWS / "dashboard" / "batch_automation.blade.php")
     index = read(VIEWS / "dashboard" / "index.blade.php")
     settings = read(VIEWS / "dashboard" / "settings.blade.php")
@@ -112,9 +131,11 @@ def test_contracts():
     assert "% Match" not in batch
     assert "% Match" not in catalog
 
-    for token in ("category_l1_en", "category_l2_en", "category_l3_en", "sku_key", "WRONG_VARIANT",
-                  "product_name_ar", "brand_ar"):
+    for token in ("sku_key", "WRONG_VARIANT", "product_name_ar", "brand_ar"):
         assert token in catalog, token
+    # The old page's category override came from a three-entry demo taxonomy that fell back to its first entry
+    # for any product. The review screen sends no override: the published metadata keeps the pipeline's category.
+    assert "category_l1_en" not in catalog and "taxonomyData" not in catalog
 
     assert "Array(512)" not in batch
     assert "0.98" not in batch
@@ -140,10 +161,11 @@ def test_contracts():
 
 def test_catalog_reject_sends_the_candidate_bytes():
     """The catalog stores no curation rows, so the reject must carry the sha for the bridge's pHash."""
-    catalog = read(VIEWS / "dashboard" / "catalog.blade.php")
-    body = catalog[catalog.index("async function submitReject"):]
-    body = body[:body.index("JSON.stringify(") + 2000]
+    catalog = review_page()
+    body = catalog[catalog.index("function rejectBody("):]
+    body = body[:body.index("\n    }\n")]
     assert "candidate_sha256: candidate.content_sha256" in body
+    assert "R.rejectBody(ctx, candidate, reasonCode" in catalog and "R.rejectBody(ctx, sel, code" in catalog
 
 
 def test_fake_flows_removed():
@@ -174,14 +196,15 @@ def test_fake_flows_removed():
     assert "fix-broken-image-link" not in layout
     assert "data-healing-active" not in layout
 
-    catalog = read(VIEWS / "dashboard" / "catalog.blade.php")
+    catalog = review_page()
     assert "CLIP" not in catalog
     assert "compareOverlay" not in catalog  # the raw-vs-raw compare slider is gone
 
 
 def test_views_do_not_inline_urls_in_handlers():
     """Candidate URLs/titles must not be interpolated into inline onclick handlers (stored XSS)."""
-    for path in (VIEWS / "dashboard" / "catalog.blade.php", VIEWS / "dashboard" / "batch_automation.blade.php"):
+    for path in [VIEWS / "dashboard" / "catalog.blade.php", VIEWS / "dashboard" / "batch_automation.blade.php",
+                 VIEWS / "review" / "shell.blade.php"] + REVIEW_JS:
         text = read(path)
         assert not re.search(r"onclick=\"[^\"]*\$\{[^}]*(url|title)", text, re.IGNORECASE), path.name
         assert not re.search(r"onclick=\"[^\"]*'\$\{", text), path.name

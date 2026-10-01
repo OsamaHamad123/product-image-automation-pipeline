@@ -236,14 +236,6 @@ class ProductController extends Controller
     }
 
     /**
-     * صفحة الكتالوج والفرز والاعتماد البصري
-     */
-    public function catalog()
-    {
-        return view('dashboard.catalog');
-    }
-
-    /**
      * جلب المنتجات كـ JSON مع دمج البيانات الوصفية والحالات من SQLite
      */
     public function getProductsJson(Request $request)
@@ -272,19 +264,11 @@ class ProductController extends Controller
     }
 
     /**
-     * صفحة سجل الأخطاء والتحذيرات للأتمتة
+     * سجل الأخطاء صار رقاقة «أعطال» في شاشة المراجعة (ReviewController): الرابط القديم يفتحها.
      */
     public function errors()
     {
-        try {
-            $failures = \App\Models\ProductFailure::orderBy('failed_at', 'desc')->get();
-            return view('dashboard.errors', compact('failures'));
-        } catch (\Exception $e) {
-            return view('dashboard.errors', [
-                'failures' => collect([]),
-                'error' => 'فشل تحميل سجل الأخطاء: ' . $e->getMessage()
-            ]);
-        }
+        return redirect()->route('dashboard.catalog', ['filter' => 'failed']);
     }
 
     /**
@@ -318,11 +302,11 @@ class ProductController extends Controller
     }
 
     /**
-     * صفحة معرض المنتجات الغني وتصفح الكتالوج بالبيانات الوصفية للذكاء الاصطناعي
+     * معرض الكتالوج الغني أُزيل (شاشة المراجعة تعرض الصور، وتصدير CSV للمعتمدة في وضع الجملة): الرابط القديم يفتح المراجعة.
      */
     public function richCatalog()
     {
-        return view('dashboard.rich_catalog');
+        return redirect()->route('dashboard.catalog');
     }
 
     /**

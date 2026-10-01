@@ -26,6 +26,21 @@ def read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
+REVIEW_JS = DASH / "public" / "js" / "review"
+
+
+def review_js(*names) -> str:
+    """The review screen's scripts (catalog.blade.php loads public/js/review/*.js)."""
+    names = names or ("core", "ui", "jobs", "single", "bulk", "app")
+    return "\n".join(read(REVIEW_JS / f"{n}.js") for n in names)
+
+
+def _js_function(source: str, name: str) -> str:
+    """Source of one top-level function of a review script (up to its closing brace at 4 spaces)."""
+    start = source.index(f"function {name}(")
+    return source[start:source.index("\n    }\n", start) + 6]
+
+
 def _json_body(source: str, anchor: str, span: int = 2500) -> str:
     """The JSON.stringify({...}) body of the first fetch after `anchor`."""
     start = source.index(anchor)
@@ -88,21 +103,18 @@ def test_search_falls_back_to_the_queue_payload(bridge, monkeypatch):
 
 
 def test_dashboard_search_bodies_send_size_identity():
-    # The batch page's review grid (inline search, single reject) moved to the review page (/catalog?mode=bulk);
-    # its request bodies are checked with that page.
-    catalog = read(VIEWS / "dashboard" / "catalog.blade.php")
+    # The batch page's review grid moved to the review screen (/catalog, public/js/review).
+    core = review_js("core")
 
-    ctx = catalog[catalog.index("function currentProductContext"):]
-    ctx = ctx[: ctx.index("};") + 2]
+    # the identity the review screen binds to a product (and to its search results) carries the size identity
+    ctx = _js_function(core, "productIdentity")
     for key in ("size", "sub_category", "origin"):
         assert re.search(rf"\b{key}:", ctx), key
-    select = catalog[catalog.index("function selectProduct"):]
-    select = select[: select.index("activeRowNumber")]
-    assert "form.dataset.size = prod.size" in select
-    assert "form.dataset.subCategory = prod.sub_category" in select
+    assert "size: prod.size" in ctx
+    assert "sub_category: prod.sub_category" in ctx
 
-    search = _json_body(catalog, "fetch('/api/search'")
-    reject = _json_body(catalog, "async function submitReject")
+    search = _js_function(core, "searchBody")
+    reject = _js_function(core, "rejectBody")
     for body in (search, reject):
         for token in ("size: ctx.size", "sub_category: ctx.sub_category", "origin: ctx.origin"):
             assert token in body, (token, body)
@@ -124,6 +136,10 @@ def test_curation_reject_forwards_size_identity_to_the_bridge():
 def test_every_element_id_the_script_reads_exists(name):
     text = read(VIEWS / "dashboard" / f"{name}.blade.php")
     layout = read(VIEWS / "layouts" / "layout.blade.php")
+    if name == "catalog":
+        # the review screen: its Blade shell, the Laqta layout and the scripts that build the page
+        text += read(VIEWS / "review" / "shell.blade.php") + review_js()
+        layout = read(VIEWS / "layouts" / "laqta.blade.php")
     ids = set(re.findall(r'id="([^"{]+)"', text + layout)) | set(re.findall(r"id:\s*'([^']+)'", text))
     refs = set(re.findall(r"getElementById\('([^'\s]+)'\)", text))
     assert not refs - ids, sorted(refs - ids)
@@ -242,11 +258,11 @@ def test_save_candidates_uses_the_shared_row_builder():
 
 
 def test_catalog_reject_with_research_persists_the_fresh_candidates():
-    catalog = read(VIEWS / "dashboard" / "catalog.blade.php")
-    submit = catalog[catalog.index("async function submitReject"):]
-    submit = submit[: submit.index("function showRejectedState")]
+    single = review_js("single")
+    submit = single[single.index("async function rejectCurrent"):]
+    submit = submit[: submit.index("function skip()")]
     assert "await persistResearchCandidates(ctx, data, candidate.url)" in submit
-    persist = catalog[catalog.index("async function persistResearchCandidates"):]
+    persist = single[single.index("async function persistResearchCandidates"):]
     persist = persist[: persist.index("\n    }\n")]
     assert "/api/v1/curation/save-candidates" in persist
     assert "c.url !== rejectedUrl" in persist

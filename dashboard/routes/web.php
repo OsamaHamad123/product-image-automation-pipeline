@@ -5,14 +5,15 @@ use App\Http\Controllers\ProductController;
 use App\Http\Controllers\ApiController;
 use App\Http\Controllers\CurationController;
 use App\Http\Controllers\OverviewController;
+use App\Http\Controllers\ReviewController;
 use App\Http\Controllers\RunController;
 
 // صفحات لوحة التحكم
 Route::get('/', [OverviewController::class, 'index'])->name('dashboard.index'); // p2-run: الرئيسية
-Route::get('/catalog', [ProductController::class, 'catalog'])->name('dashboard.catalog');
+Route::get('/catalog', [ReviewController::class, 'page'])->name('dashboard.catalog');
 Route::get('/active-learning', [ProductController::class, 'activeLearning'])->name('dashboard.active_learning');
-Route::get('/errors', [ProductController::class, 'errors'])->name('dashboard.errors');
-Route::get('/rich-catalog', [ProductController::class, 'richCatalog'])->name('dashboard.rich_catalog');
+Route::get('/errors', [ProductController::class, 'errors'])->name('dashboard.errors'); // ← /catalog?filter=failed
+Route::get('/rich-catalog', [ProductController::class, 'richCatalog'])->name('dashboard.rich_catalog'); // ← /catalog
 Route::get('/batch-automation', [RunController::class, 'page'])->name('dashboard.batch_automation'); // p2-run: التشغيل (?tab=review -> /catalog?mode=bulk)
 Route::get('/system-diagnostics', [ProductController::class, 'systemDiagnostics'])->name('dashboard.diagnostics');
 Route::get('/settings', [ProductController::class, 'settings'])->name('dashboard.settings');
@@ -54,6 +55,9 @@ Route::post('/api/sheet/save', [ApiController::class, 'saveSheetConfig']);
 Route::post('/api/v1/curation/reject', [CurationController::class, 'rejectAndReSearch']);
 Route::post('/api/v1/curation/select-candidate', [CurationController::class, 'selectCandidate']);
 Route::post('/api/v1/curation/save-candidates', [CurationController::class, 'saveCandidates']);
+
+// حزمة المراجعة (P2 review): من ينتظر المراجعة حسب حالة صف الطابور، بنفس عدّ /api/batch-status
+Route::get('/api/review/queue-state', [ReviewController::class, 'queueState']);
 
 // حالة جسر بايثون وقاعدة البيانات
 Route::get('/api/system/status', [ApiController::class, 'systemStatus']);
