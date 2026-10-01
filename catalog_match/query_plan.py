@@ -6,7 +6,8 @@ build_queries(spec, custom_query=None) -> list[PlannedQuery], at most 4:
     Q2 (hl=ar)  '{brand_ar} {Arabic name words} {size_ar}', only when name_ar has Arabic text
     Q3 (hl=en)  Q1 scoped with site: OR over the brand's official domains and the UAE
                 retailers; Serper only (providers_hint=('serper',))
-    Q4 (hl=en)  '"{brand_en}" {gtin}', only when the GTIN is valid
+    Q4 (hl=en)  '"{brand_en}" {gtin}', only when the GTIN is valid and global (and
+                GTIN_POLICY is not 'off')
 A staff custom_query REPLACES the plan: it is the only query, with query_id 'custom'.
 
 relaxations(spec) -> [R1 (variant words dropped), R2 (size dropped)], flagged relaxed.
@@ -35,6 +36,7 @@ from dataclasses import dataclass
 from typing import Iterable, List, Optional, Sequence, Set, Tuple
 
 from . import abbreviations
+from . import settings
 from . import variants as variants_mod
 from .gtin import is_restricted, normalize_gtin
 from .models import PlannedQuery, Size, SkuSpec
@@ -376,9 +378,13 @@ def build_queries(spec: SkuSpec, custom_query: Optional[str] = None) -> List[Pla
         plan.append(PlannedQuery(query_id="Q3", text=f"{q1} {_site_clause(spec)}", hl=main.lang,
                                  providers_hint=("serper",)))
 
+    # Q4 (GTIN query, identity package): only a valid, global barcode, always with the brand, and
+    # never under GTIN_POLICY 'off'. Its answers are scored like any other: a listing of another
+    # brand that prints the code gains nothing from it (score.py).
     gtin14, status = normalize_gtin(spec.gtin) if spec.gtin else (None, "missing")
     brand_q4 = english_brand(spec) or arabic_brand(spec)
-    if status == "ok" and gtin14 and brand_q4 and not is_restricted(gtin14):
+    if (status == "ok" and gtin14 and brand_q4 and not is_restricted(gtin14)
+            and settings.gtin_policy() != "off"):
         plan.append(PlannedQuery(query_id="Q4", text=f'"{brand_q4}" {display_gtin(gtin14)}',
                                  hl="ar" if _lang_of(brand_q4) == "ar" else "en"))
 

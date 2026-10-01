@@ -41,15 +41,37 @@ def test_every_cache_query_filters_verification_status(ldb, monkeypatch, fake_co
 
 
 def test_cache_hit_returns_the_row(ldb, monkeypatch, fake_connection):
+    # The row found by barcode is the requested product (same brand and name): served as before.
+    # (Phase 3: a barcode-keyed row must also name the same product; a row without a stored
+    # name or brand can no longer be checked and is not served, see the next test.)
     row = {"cloudinary_url": "https://res/x.png", "original_url": "https://src/x.jpg", "clip_score": None,
            "metadata_json": '{"ingredients": "milk"}', "sku_key": "06281007000024",
-           "verification_status": "human_approved", "approved_by": "human", "perceptual_hash": ""}
+           "verification_status": "human_approved", "approved_by": "human", "perceptual_hash": "",
+           "product_name": "Fresh Milk", "brand": "Almarai"}
     conn = fake_connection(lambda sql, params: [row])
     monkeypatch.setattr(ldb, "get_db_connection", lambda: conn)
     hit = ldb.get_cached_product("6281007000024", "Fresh Milk", "Almarai")
     assert hit["cloudinary_url"] == "https://res/x.png"
     assert hit["metadata"] == {"ingredients": "milk"}
     assert hit["verification_status"] == "human_approved"
+
+
+@pytest.mark.parametrize("stored", [
+    {"product_name": "Laban Up", "brand": "Almarai"},          # another product of the brand
+    {"product_name": "Fresh Milk", "brand": "Al Rawabi"},      # another brand
+    {"product_name": "", "brand": ""},                         # nothing to check against
+])
+def test_barcode_cache_hit_for_another_product_is_ignored(ldb, monkeypatch, fake_connection, stored):
+    row = {"cloudinary_url": "https://res/x.png", "original_url": "https://src/x.jpg", "clip_score": None,
+           "metadata_json": "", "sku_key": "06281007000024", "verification_status": "human_approved",
+           "approved_by": "human", "perceptual_hash": "", **stored}
+    conn = fake_connection(lambda sql, params: [row])
+    monkeypatch.setattr(ldb, "get_db_connection", lambda: conn)
+    assert ldb.get_cached_product("6281007000024", "Fresh Milk", "Almarai") is None
+    assert ldb.get_cached_product(barcode="6281007000024", product_name="Fresh Milk", brand="Almarai",
+                                  sku_key="06281007000024") is None
+    # an approval-status lookup by sku_key alone (no name to compare) is unchanged
+    assert ldb.get_cached_product(sku_key="06281007000024")["cloudinary_url"] == "https://res/x.png"
 
 
 class FakeCell:

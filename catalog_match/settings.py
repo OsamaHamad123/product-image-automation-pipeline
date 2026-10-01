@@ -34,6 +34,21 @@ DEFAULTS = {
     "OUTPUT_CANVAS_SIZE": 800,
 }
 
+# --- identity package (P3): how far a barcode is trusted ----------------------------------------
+# GTIN_POLICY
+#   'evidence' (default)  brand + product name (+ size / variant) is the identity; the barcode only
+#                         supports it. A page GTIN that matches the sheet makes tier 1 only with full
+#                         brand evidence; one that differs caps the candidate at tier 2 with the
+#                         'barcode_conflict' review warning, and is a hard reject only together with a
+#                         missing or other brand, a size, pack or variant conflict.
+#   'strict'              the earlier rule: any differing page GTIN is a hard reject, and a GTIN match
+#                         with brand OR product-type corroboration is tier 1.
+#   'off'                 the barcode is not used as evidence and gets no GTIN query (Q4).
+DEFAULTS.update({
+    "GTIN_POLICY": "evidence",
+})
+GTIN_POLICIES = ("evidence", "strict", "off")
+
 _TRUE = {"1", "true", "yes", "on"}
 
 
@@ -130,3 +145,11 @@ def cse_sunset_date() -> _dt.date:
         return _dt.date.fromisoformat(str(value).strip())
     except ValueError:
         return _dt.date.fromisoformat(DEFAULTS["CSE_SUNSET_DATE"])
+
+
+# --- identity package (P3) ---------------------------------------------------------------------
+
+def gtin_policy() -> str:
+    """'evidence' (default), 'strict' or 'off'; an unknown value falls back to 'evidence'."""
+    value = str(get("GTIN_POLICY") or "").strip().lower()
+    return value if value in GTIN_POLICIES else DEFAULTS["GTIN_POLICY"]

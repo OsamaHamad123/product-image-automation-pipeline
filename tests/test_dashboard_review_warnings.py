@@ -75,7 +75,8 @@ def test_the_pick_cards_show_the_notice():
 @pytest.mark.parametrize("path", BLADES, ids=lambda p: p.name)
 def test_warning_sentences(path, tmp_path):
     codes = ["sheet_silent:fries_cut=thin", "sheet_silent:cheese_form=grated+shredded", "sheet_silent:new_axis=x",
-             "vlm_unsure", "low_resolution", "chat_or_screenshot", "social_media", "foreign_store", "mystery_code"]
+             "vlm_unsure", "low_resolution", "chat_or_screenshot", "social_media", "foreign_store", "barcode_conflict",
+             "mystery_code"]
     script = tmp_path / "labels.js"
     call = f"\nconsole.log(JSON.stringify({json.dumps(codes)}.map(warningText)));\n"
     script.write_text(label_code(read(path)) + call, encoding="utf-8")
@@ -90,6 +91,7 @@ def test_warning_sentences(path, tmp_path):
     assert out["chat_or_screenshot"] == "صورة من واتساب أو لقطة شاشة"
     assert "مواقع التواصل" in out["social_media"]
     assert out["foreign_store"].startswith("الصورة من متجر خارج الإمارات")
+    assert out["barcode_conflict"] == "الباركود بالشيت مختلف عن باركود صفحة المتجر: تأكد من المنتج"
     assert out["mystery_code"] == "mystery_code"          # unknown codes are shown raw
 
 

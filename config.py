@@ -50,6 +50,11 @@ SERPER_API_KEY = os.getenv("SERPER_API_KEY", "")
 AUTO_PUBLISH_ENABLED = os.getenv("AUTO_PUBLISH_ENABLED", "False").strip().lower() in ("1", "true", "yes", "on")
 AUTO_PUBLISH_BRANDS = [b.strip() for b in os.getenv("AUTO_PUBLISH_BRANDS", "").split(",") if b.strip()]
 
+# --- identity package (P3) --------------------------------------------------------------------
+# مدى الثقة بالباركود: 'evidence' (الافتراضي: البراند والاسم هما الهوية والباركود دليل مساعد فقط)،
+# 'strict' (القاعدة السابقة: أي باركود مختلف بصفحة المتجر يرفض المرشح)، 'off' (الباركود لا يُستخدم كدليل)
+GTIN_POLICY = os.getenv("GTIN_POLICY", "evidence").strip().lower() or "evidence"
+
 # 4. إعدادات معالجة الصور وتحجيمها
 # الأبعاد الافتراضية المطلوبة لجميع الصور بشكل ديناميكي (مثال: 800×800)
 IMAGE_TARGET_SIZE = (800, 800)
@@ -413,6 +418,14 @@ def load_db_config():
             if "enable_image_enhancement" in db_keys and db_keys["enable_image_enhancement"] is not None:
                 ENABLE_IMAGE_ENHANCEMENT = str(db_keys["enable_image_enhancement"]).strip().lower() in (
                     "1", "true", "yes", "on")
+
+            # --- identity package (P3): سياسة الباركود (gtin_policy) ---
+            if db_keys.get("gtin_policy"):
+                policy = str(db_keys["gtin_policy"]).strip().lower()
+                if policy in ("evidence", "strict", "off"):
+                    globals()["GTIN_POLICY"] = policy
+                else:
+                    logger.warning("قيمة gtin_policy غير مدعومة: %r", db_keys["gtin_policy"])
 
             logger.info("[Config Loader] تم تحميل الإعدادات من قاعدة البيانات (تتجاوز قيم .env).")
         conn.close()
