@@ -49,6 +49,23 @@ DEFAULTS.update({
 })
 GTIN_POLICIES = ("evidence", "strict", "off")
 
+
+# --- sources package (P3): expansion round, product pages, shopping and visual search ---
+# EXPANSION_ENABLED    one extra search round for SKUs with no confident pick (catalog_match.expand)
+# EXPANSION_MAX_CALLS  paid calls the round may make per product (web, shopping, visual search)
+# VISUAL_SEARCH        'auto' (Serper lens, then SerpApi when SERPAPI_API_KEY is set) | 'off' | 'serper' | 'serpapi'
+# SERPAPI_API_KEY      secret; written only through the dashboard's write-only field
+# SERPAPI_LENS_PRICE_USD  what one SerpApi Google Lens search costs on the owner's plan (ops_health pricing)
+DEFAULTS.update({
+    "EXPANSION_ENABLED": True,
+    "EXPANSION_MAX_CALLS": 4,
+    "VISUAL_SEARCH": "auto",
+    "SERPAPI_API_KEY": "",
+    "SERPAPI_LENS_PRICE_USD": "0.015",
+})
+VISUAL_SEARCH_MODES = ("auto", "off", "serper", "serpapi")
+# --- end sources package ---
+
 _TRUE = {"1", "true", "yes", "on"}
 
 
@@ -205,3 +222,34 @@ def verifier_strong_max_calls() -> int:
 def model_prices_text() -> str:
     value = get("MODEL_PRICES")
     return value if isinstance(value, str) else ("" if value is None else str(value))
+
+
+# --- sources package (P3): accessors ---
+
+def expansion_enabled() -> bool:
+    return bool(get("EXPANSION_ENABLED"))
+
+
+def expansion_max_calls() -> int:
+    """Paid calls the expansion round may make per product (0 turns the round off)."""
+    value = get("EXPANSION_MAX_CALLS")
+    return max(0, int(value)) if isinstance(value, int) else int(DEFAULTS["EXPANSION_MAX_CALLS"])
+
+
+def visual_search_mode() -> str:
+    """'auto' | 'off' | 'serper' | 'serpapi'; an unknown value is 'off' (never a surprise paid call)."""
+    mode = str(get("VISUAL_SEARCH") or "").strip().lower() or str(DEFAULTS["VISUAL_SEARCH"])
+    return mode if mode in VISUAL_SEARCH_MODES else "off"
+
+
+def serpapi_api_key() -> str:
+    return str(get("SERPAPI_API_KEY") or "").strip()
+
+
+def serpapi_lens_price_usd() -> float:
+    try:
+        price = float(str(get("SERPAPI_LENS_PRICE_USD")).strip())
+    except (TypeError, ValueError):
+        price = float(DEFAULTS["SERPAPI_LENS_PRICE_USD"])
+    return price if price >= 0 else float(DEFAULTS["SERPAPI_LENS_PRICE_USD"])
+# --- end sources package ---

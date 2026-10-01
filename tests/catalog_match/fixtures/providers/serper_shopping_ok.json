@@ -1,0 +1,30 @@
+{
+  "searchParameters": {"q": "MEHRAN PARATHA 400g", "gl": "ae", "hl": "en", "type": "shopping", "engine": "google"},
+  "shopping": [
+    {"title": "Mehran Plain Paratha 400g",
+     "source": "Carrefour UAE",
+     "link": "https://www.google.com/url?url=https://www.carrefouruae.com/mafuae/en/frozen-bread/mehran-plain-paratha-400g/p/631098&rct=j&q=&esrc=s",
+     "price": "AED 9.75",
+     "delivery": "Free delivery",
+     "imageUrl": "https://encrypted-tbn2.gstatic.com/shopping?q=tbn:ANd9GcQ",
+     "rating": 4.5,
+     "ratingCount": 12,
+     "productId": "1234567890",
+     "position": 1},
+    {"title": "Mehran Paratha 400 g",
+     "source": "Amazon.ae - Al Noor Trading",
+     "link": "https://www.amazon.ae/Mehran-Paratha-400g/dp/B0C1234567",
+     "price": "AED 11.00",
+     "imageUrl": "https://m.media-amazon.com/images/I/71abcDEF12L._AC_SL1500_.jpg",
+     "imageWidth": 1500,
+     "imageHeight": 1500,
+     "position": 2},
+    {"title": "Mehran Paratha 400g",
+     "source": "Some Store",
+     "link": "https://www.google.com/shopping/product/1234567890?gl=ae",
+     "imageUrl": "https://encrypted-tbn1.gstatic.com/shopping?q=tbn:xyz",
+     "position": 3},
+    {"source": "No Title Store", "link": "https://example.ae/p/1", "position": 4},
+    {"title": "Nothing to follow", "source": "Some Store", "link": "https://www.google.com/shopping/product/9", "position": 5}
+  ]
+}

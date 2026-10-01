@@ -55,6 +55,19 @@ AUTO_PUBLISH_BRANDS = [b.strip() for b in os.getenv("AUTO_PUBLISH_BRANDS", "").s
 # 'strict' (القاعدة السابقة: أي باركود مختلف بصفحة المتجر يرفض المرشح)، 'off' (الباركود لا يُستخدم كدليل)
 GTIN_POLICY = os.getenv("GTIN_POLICY", "evidence").strip().lower() or "evidence"
 
+
+# --- sources package (P3): جولة البحث الموسّع (صفحات المتاجر، Google Shopping، البحث بالصورة) ---
+# EXPANSION_ENABLED: جولة إضافية واحدة للمنتجات التي لم يُحدَّد لها اختيار واثق
+# EXPANSION_MAX_CALLS: أقصى عدد استدعاءات مدفوعة في هذه الجولة لكل منتج
+# VISUAL_SEARCH: auto (Serper lens ثم SerpApi إن وُجد مفتاحه) | off | serper | serpapi
+# SERPAPI_API_KEY: سري؛ يُكتب فقط من حقل الإعدادات المخفي ولا يُطبع ولا يُسجَّل
+EXPANSION_ENABLED = os.getenv("EXPANSION_ENABLED", "true").strip().lower() in ("1", "true", "yes", "on")
+EXPANSION_MAX_CALLS = os.getenv("EXPANSION_MAX_CALLS", "4").strip() or "4"
+VISUAL_SEARCH = os.getenv("VISUAL_SEARCH", "auto").strip().lower() or "auto"
+SERPAPI_API_KEY = os.getenv("SERPAPI_API_KEY", "").strip()
+SERPAPI_LENS_PRICE_USD = os.getenv("SERPAPI_LENS_PRICE_USD", "0.015").strip() or "0.015"
+# --- end sources package ---
+
 # 4. إعدادات معالجة الصور وتحجيمها
 # الأبعاد الافتراضية المطلوبة لجميع الصور بشكل ديناميكي (مثال: 800×800)
 IMAGE_TARGET_SIZE = (800, 800)
@@ -348,6 +361,31 @@ def _apply_verifier_settings(db_keys):
             continue
         globals()[name] = str(value).strip()
 
+
+
+# --- sources package (P3): قيم جولة البحث الموسّع من system_settings (تتجاوز .env) ---
+def _load_sources_settings(db_keys):
+    global EXPANSION_ENABLED, EXPANSION_MAX_CALLS, VISUAL_SEARCH, SERPAPI_API_KEY, SERPAPI_LENS_PRICE_USD
+    if "expansion_enabled" in db_keys and db_keys["expansion_enabled"] is not None:
+        EXPANSION_ENABLED = str(db_keys["expansion_enabled"]).strip().lower() in ("1", "true", "yes", "on")
+    if db_keys.get("expansion_max_calls") not in (None, ""):
+        try:
+            EXPANSION_MAX_CALLS = str(max(0, int(str(db_keys["expansion_max_calls"]).strip())))
+        except (TypeError, ValueError):
+            logger.warning("قيمة expansion_max_calls غير صالحة: %r", db_keys["expansion_max_calls"])
+    if db_keys.get("visual_search"):
+        mode = str(db_keys["visual_search"]).strip().lower()
+        if mode in ("auto", "off", "serper", "serpapi"):
+            VISUAL_SEARCH = mode
+        else:
+            logger.warning("قيمة visual_search غير مدعومة: %r", db_keys["visual_search"])
+    if db_keys.get("serpapi_api_key"):
+        SERPAPI_API_KEY = str(db_keys["serpapi_api_key"]).strip()   # لا يُطبع أبداً
+    if db_keys.get("serpapi_lens_price_usd"):
+        SERPAPI_LENS_PRICE_USD = str(db_keys["serpapi_lens_price_usd"]).strip()
+# --- end sources package ---
+
+
 def load_db_config():
     """
     تحميل الإعدادات ديناميكياً من قاعدة البيانات لتجنب تعديل ملفات البيئة يدوياً.
@@ -457,6 +495,9 @@ def load_db_config():
                     globals()["GTIN_POLICY"] = policy
                 else:
                     logger.warning("قيمة gtin_policy غير مدعومة: %r", db_keys["gtin_policy"])
+
+
+            _load_sources_settings(db_keys)   # sources package (P3)
 
             logger.info("[Config Loader] تم تحميل الإعدادات من قاعدة البيانات (تتجاوز قيم .env).")
         conn.close()

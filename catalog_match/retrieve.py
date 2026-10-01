@@ -120,6 +120,20 @@ class CandidatePool:
     def candidates(self) -> List[Candidate]:
         return [e.cand for e in self._entries.values()]
 
+    def entries(self) -> List[Tuple[str, Candidate]]:
+        """(dedupe key, representative candidate) pairs in pool order (the expansion round's view)."""
+        return [(key, e.cand) for key, e in self._entries.items()]
+
+    def is_excluded(self, image_url: str) -> bool:
+        """True when the image is a reviewer negative (compared as a normalised URL)."""
+        return norm_image_url(image_url) in self.exclude
+
+    def unsanction(self, key: str) -> None:
+        """The entry now carries evidence that may never auto-publish (a fetched page): sanctioned False."""
+        entry = self._entries.get(key)
+        if entry is not None and entry.cand.sanctioned:
+            entry.cand = replace(entry.cand, sanctioned=False)
+
     def add(self, cand: Candidate, relaxed: bool = False) -> bool:
         """Add or merge one candidate; returns True when it created a new pool entry."""
         key = norm_image_url(cand.image_url)

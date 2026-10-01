@@ -1,0 +1,20 @@
+{
+  "searchParameters": {"q": "BARTS TRADITON FRIES 1KG (site:luluhypermarket.com OR site:carrefouruae.com)", "gl": "ae", "hl": "en", "type": "search", "num": 10, "engine": "google"},
+  "knowledgeGraph": {"title": "Barts", "type": "Brand"},
+  "organic": [
+    {"title": "Barts Traditional Fries 1kg Online at Best Price | Lulu UAE",
+     "link": "https://www.luluhypermarket.com/en-ae/barts-traditional-fries-1kg/p/88231",
+     "snippet": "Buy Barts Traditional Fries 1kg online at Lulu Hypermarket UAE. Crispy traditional cut.",
+     "imageUrl": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcR",
+     "position": 1},
+    {"title": "Buy Barts Traditional Fries 2.5kg Online - Shop on Carrefour UAE",
+     "link": "https://www.carrefouruae.com/mafuae/en/frozen-potato/barts-traditional-fries-2-5kg/p/77812",
+     "snippet": "Barts Traditional Fries 2.5kg",
+     "position": 2,
+     "sitelinks": [{"title": "Frozen", "link": "https://www.carrefouruae.com/mafuae/en/c/F1610000"}]},
+    {"title": "no link here", "position": 3},
+    {"title": "Barts Fries - Frozen Food", "link": "javascript:void(0)", "position": 4}
+  ],
+  "peopleAlsoAsk": [{"question": "Who makes Barts fries?"}],
+  "relatedSearches": [{"query": "barts fries price uae"}]
+}

@@ -192,7 +192,7 @@ def window_stats(entries):
         for provider, status, _http in e["providers"]:
             row = providers.setdefault(provider, dict.fromkeys(PROVIDER_STATUSES, 0))
             _count(row, status if status in PROVIDER_STATUSES else "other")
-            if provider == "serper" and status in ANSWERED_STATUSES:
+            if provider in SERPER_BILLED_PROVIDERS and status in ANSWERED_STATUSES:
                 serper_queries += 1
         verifier["calls"] += e["vlm_calls"]
         verifier["searches"] += 1 if e["vlm_calls"] > 0 else 0
@@ -211,14 +211,18 @@ def window_stats(entries):
             m["usd"] += u["usd"]
             m["estimated_calls"] += 1 if u["estimated"] else 0
             model_cost["claude" if u["provider"] == "claude" else "gemini"] += u["usd"]
-    serper_cost = serper_queries * SERPER_COST_PER_QUERY
+    sources = paid_sources(entries)
+    serper_cost = sum(v["cost_usd"] for k, v in sources.items() if k in SERPER_BILLED_PROVIDERS)
+    serpapi_cost = sum(v["cost_usd"] for k, v in sources.items() if k not in SERPER_BILLED_PROVIDERS)
     gemini_cost = legacy_calls * GEMINI_COST_PER_CALL + model_cost["gemini"]
     claude_cost = model_cost["claude"]
     top = sorted(codes.items(), key=lambda kv: (-kv[1], kv[0]))[:TOP_FAILURE_CODES]
     cost = {"serper": round(serper_cost, 4), "gemini": round(gemini_cost, 4)}
     if claude_cost > 0 or any(k[1] == "claude" for k in models):
         cost["claude"] = round(claude_cost, 4)
-    cost["total"] = round(serper_cost + gemini_cost + claude_cost, 4)
+    if serpapi_cost > 0:
+        cost["serpapi"] = round(serpapi_cost, 4)
+    cost["total"] = round(serper_cost + serpapi_cost + gemini_cost + claude_cost, 4)
     return {
         "searches": searches,
         "unreadable": unreadable,
@@ -226,6 +230,7 @@ def window_stats(entries):
         "providers": dict(sorted(providers.items())),
         "verifier": verifier,
         "serper_queries": serper_queries,
+        "sources": sources,
         "cost_usd": cost,
         "verifier_models": [dict(m, usd=round(m["usd"], 4)) for m in
                             sorted(models.values(), key=lambda m: (m["role"] != "primary", -m["usd"], m["model"]))],
@@ -307,6 +312,7 @@ def summarize(rows, now=None, limit=MAX_ROWS):
         "windows": windows,
         "alerts": alerts(in_alert_window),
         "prices": {"serper_per_query": SERPER_COST_PER_QUERY, "gemini_per_call": GEMINI_COST_PER_CALL},
+        "source_prices": source_prices(),
     }
 
 
@@ -434,3 +440,51 @@ def verifier_month():
         "primary": primary,
         "strong": strong,
     }
+
+
+# --- sources package (P3): كل مصدر مدفوع يُسعَّر حسب الاستدعاءات التي أجاب عنها ---
+# Serper يحاسب على كل نقطة نهاية: صور Google (serper)، بحث الويب لصفحات المتاجر (serper_web)، Google Shopping
+# (serper_shopping)، والبحث بالصورة (lens_serper). SerpApi Google Lens (lens_serpapi) أغلى بكثير، وسعره من
+# الإعداد SERPAPI_LENS_PRICE_USD (افتراضياً 0.015$ لكل بحث، خطة Developer). الأسعار قابلة للتعديل هنا.
+SERPER_WEB_COST_PER_QUERY = 0.001
+SERPER_SHOPPING_COST_PER_QUERY = 0.001
+SERPER_LENS_COST_PER_CALL = 0.001
+SERPAPI_LENS_DEFAULT_COST = 0.015
+SERPER_BILLED_PROVIDERS = ("serper", "serper_web", "serper_shopping", "lens_serper")
+PAID_PROVIDERS = SERPER_BILLED_PROVIDERS + ("lens_serpapi",)
+
+
+def _serpapi_lens_price():
+    try:
+        from catalog_match import settings as cm_settings
+        return float(cm_settings.serpapi_lens_price_usd())
+    except Exception:
+        return SERPAPI_LENS_DEFAULT_COST
+
+
+def source_prices():
+    """سعر الاستدعاء الواحد لكل مصدر مدفوع (دولار)."""
+    return {
+        "serper": SERPER_COST_PER_QUERY,
+        "serper_web": SERPER_WEB_COST_PER_QUERY,
+        "serper_shopping": SERPER_SHOPPING_COST_PER_QUERY,
+        "lens_serper": SERPER_LENS_COST_PER_CALL,
+        "lens_serpapi": _serpapi_lens_price(),
+    }
+
+
+def paid_sources(entries):
+    """
+    لكل مصدر مدفوع ظهر في النافذة: {calls: الاستدعاءات التي أجاب عنها (ok/empty)، cost_usd}.
+    الاستدعاءات المرفوضة (رصيد، مفتاح، خطأ) لا تُحتسب، مثل استعلامات Serper للصور.
+    """
+    prices = source_prices()
+    calls = {}
+    for e in entries:
+        if not e.get("readable"):
+            continue
+        for provider, status, _http in e["providers"]:
+            if provider in PAID_PROVIDERS and status in ANSWERED_STATUSES:
+                calls[provider] = calls.get(provider, 0) + 1
+    return {name: {"calls": n, "cost_usd": round(n * prices[name], 4)} for name, n in sorted(calls.items())}
+# --- end sources package ---
