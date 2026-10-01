@@ -23,7 +23,8 @@ Steps
 
 Nothing wins by arriving first: every query's candidates are pooled and ranked once.
 The per-SKU caps are 4 provider queries (the Open Food Facts lookup is not a query)
-and 2 verifier calls.
+and 2 verifier calls (the default verifier, catalog_match.verifiers, may add one budgeted
+strong second look inside a call: VERIFIER_STRONG_MAX_CALLS per SKU).
 """
 
 from __future__ import annotations
@@ -64,8 +65,9 @@ def _default_fetcher():
 
 
 def _default_verifier():
-    from .verify import GeminiVerifier
-    return GeminiVerifier()
+    # verifier package: VERIFIER_PRIMARY reads every batch, VERIFIER_STRONG takes one budgeted second look
+    from .verifiers.cascade import default_verifier
+    return default_verifier()
 
 
 def _as_spec(spec: Union[SkuSpec, Mapping[str, Any]], brand_index) -> SkuSpec:
@@ -273,6 +275,9 @@ def find_product_image(spec: Union[SkuSpec, Mapping[str, Any]], *, providers: Op
     outcome = decide.route(spec, ranked, results, retrieval.health, retrieval.relaxed_ids)
     outcome.queries = list(retrieval.queries)
     outcome.vlm_calls = sum(int(r.calls or 0) for r in results)
+    # verifier package: per-model usage of every billed verifier call, and its dashboard notices
+    outcome.vlm_usage = [dict(u) for r in results for u in (getattr(r, "usage", None) or []) if isinstance(u, dict)]
+    outcome.verifier_notices = sorted({str(n) for r in results for n in (getattr(r, "notices", None) or [])})
     if n_phash_dropped:
         outcome.reject_counts["reviewer_negative_phash"] = n_phash_dropped
     if retriever.pool.excluded:

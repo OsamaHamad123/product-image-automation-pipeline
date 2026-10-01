@@ -77,7 +77,7 @@ def test_pages_extend_the_laqta_layout(path, nav, title, script):
 
 def test_settings_partials_and_the_old_page():
     assert {p.name for p in PARTIALS} == {"sheet.blade.php", "keys.blade.php", "auto_publish.blade.php",
-                                          "processing.blade.php", "advanced.blade.php"}
+                                          "processing.blade.php", "advanced.blade.php", "models.blade.php"}
     for path in PARTIALS:
         assert "<script" not in read(path), path.name
     assert not (VIEWS / "dashboard" / "active_learning.blade.php").exists()
@@ -126,7 +126,7 @@ def test_classes_and_tokens_exist():
     ids = {"lq-health-initial", "lq-health-search-title", "lq-health-results-title", "lq-health-cost-title",
            "lq-health-reasons-title", "lq-health-log-title", "lq-health-log-body", "lq-settings-sheet-title",
            "lq-settings-keys-title", "lq-settings-ap-title", "lq-settings-processing-title",
-           "lq-settings-advanced-title", "lq-key-form", "lq-page-health", "lq-page-settings", "lq-health-spin"}
+           "lq-settings-advanced-title", "lq-settings-models-title", "lq-key-form", "lq-page-health", "lq-page-settings", "lq-health-spin"}
     # classes built at runtime: 'lq-tone--' + tone, 'lq-dot--' + tone, '...--' + tone
     runtime = {"lq-tone", "lq-dot", "lq-keys__state", "lq-settings-columns__item", "lq-settings-form__status",
                "lq-health-provider__problems", "lq-alert", "lq-toast", "lq-dot lq-dot", "lq-skeleton"}
@@ -686,11 +686,14 @@ SECRETS = {"gemini_api_key": _fake_secret("GEMINI"),
            "cloudinary_api_secret": _fake_secret("CLOUD"),
            "cloudinary_api_key": _fake_secret("CLKEY"),
            "google_search_api_key": _fake_secret("CSE"),
+           "anthropic_api_key": _fake_secret("ANTHROPIC"),
+           "serpapi_api_key": _fake_secret("SERPAPI"),
            "proxy_url": "http://user:SECRET-PROXY-pass@proxy.local:8080"}
 TOUCHED = list(SECRETS) + ["auto_publish_enabled", "auto_publish_brands", "search_engine", "gemini_model",
                            "google_search_cx", "cloudinary_cloud_name", "strict_brand_match", "output_canvas_size",
                            "bg_removal_method", "enable_image_enhancement", "enable_gemini_pre_validation",
-                           "filter_competitors", "bypass_white_background_check"]
+                           "filter_competitors", "bypass_white_background_check", "verifier_primary",
+                           "verifier_strong", "verifier_monthly_budget_usd", "model_prices"]
 
 
 def _sql(db, statement, params=()):
@@ -787,7 +790,8 @@ echo json_encode($out, JSON_UNESCAPED_UNICODE);
     return json.loads(result.stdout)
 
 
-TABS = ["sheet", "keys", "auto-publish", "processing", "advanced"]
+TABS = ["sheet", "keys", "models", "auto-publish", "processing", "advanced"]
+N_PAGES = 3 + len(TABS)
 PAGES = [["GET", "/system-diagnostics", {}], ["GET", "/active-learning", {}], ["GET", "/settings?tab=bogus", {}]] \
     + [["GET", f"/settings?tab={tab}", {}] for tab in TABS] \
     + [["GET", "/api/view-pipeline-log", {}], ["GET", "/api/view-laravel-log", {}]]
@@ -802,13 +806,13 @@ def test_routes_render_redirect_and_never_show_a_stored_key(app_env):
     assert "data-health-page" in health["body"] and "فحص الاتصالات الآن" in health["body"]
     assert active["status"] == 302 and active["location"].endswith("/settings?tab=auto-publish")
     assert bogus["status"] == 200 and re.search(r'href="[^"]+\?tab=sheet"[^>]*aria-current="page"', bogus["body"])
-    for tab, page in zip(TABS, out[3:8]):
+    for tab, page in zip(TABS, out[3:N_PAGES]):
         assert page["status"] == 200, (tab, page["body"][:2000])
         assert "<title>الإعدادات · لقطة</title>" in page["body"]
         assert re.search(rf'href="[^"]+\?tab={tab}"[^>]*aria-current="page"', page["body"]), tab
         for leftover in ("{{", "{!!", "@props", "<x-lq", "@json", "@include"):
             assert leftover not in page["body"], (tab, leftover)
-    for log in out[8:10]:
+    for log in out[N_PAGES:N_PAGES + 2]:
         assert log["status"] == 200 and json.loads(log["body"])["status"] == "success"
     # no stored key reaches any page or API, not even its last four characters on a page. The log tails read the
     # real temp/pipeline.log and laravel.log, whose lines may hold any text (a port like 8080): there a stored value
@@ -816,13 +820,13 @@ def test_routes_render_redirect_and_never_show_a_stored_key(app_env):
     for i, response in enumerate(out):
         for value in SECRETS.values():
             assert value not in response["body"], value
-            if i < 8:
+            if i < N_PAGES:
                 assert value[-4:] not in response["body"], value
-        if i < 8:
+        if i < N_PAGES:
             assert "SECRET-" not in response["body"]
     keys = out[4]["body"]
-    assert keys.count('type="password"') == 5                      # one empty, write-only field per stored key
-    assert len(re.findall(r'type="password"[^>]*value=""', keys)) == 5
+    assert keys.count('type="password"') == 7                      # one empty, write-only field per stored key
+    assert len(re.findall(r'type="password"[^>]*value=""', keys)) == 7
     assert "محفوظ" in keys and "غير محفوظ" not in keys
     # the auto-publish tab reads the bridge; nothing else on these pages does
     assert set(app_env["calls"].read_text().split()) == {"review_stats"}

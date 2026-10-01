@@ -158,6 +158,9 @@ def entry_from_row(row, now=None):
         "search_failure_code": str(outcome.get("failure_code") or "").strip() or None,
         "providers": _provider_calls(outcome),
         "vlm_calls": max(0, _as_int(outcome.get("vlm_calls")) or 0),
+        # حزمة المحقق (verifier, P3): استهلاك كل نموذج قراءة وتنبيهاته
+        "vlm_usage": _vlm_usage(outcome),
+        "verifier_notices": [str(n) for n in (outcome.get("verifier_notices") or []) if isinstance(n, str)],
     }
 
 
@@ -174,6 +177,9 @@ def window_stats(entries):
     decisions, providers, codes = {}, {}, {}
     searches = unreadable = serper_queries = 0
     verifier = {"calls": 0, "searches": 0, "down": 0}
+    models = {}                                    # (role, provider, model) -> استهلاك نموذج القراءة
+    model_cost = {"gemini": 0.0, "claude": 0.0}    # من الاستهلاك المسجل (outcome.vlm_usage)
+    legacy_calls = 0                               # استدعاءات بلا استهلاك مسجل: بالسعر الثابت للاستدعاء
     for e in entries:
         if e["failure_code"]:
             _count(codes, e["failure_code"])
@@ -191,9 +197,28 @@ def window_stats(entries):
         verifier["calls"] += e["vlm_calls"]
         verifier["searches"] += 1 if e["vlm_calls"] > 0 else 0
         verifier["down"] += 1 if e["search_failure_code"] == "VERIFIER_DOWN" else 0
+        usage = e.get("vlm_usage") or []
+        if not usage:
+            legacy_calls += e["vlm_calls"]
+        for u in usage:
+            key = (u["role"], u["provider"], u["model"])
+            m = models.setdefault(key, {"role": u["role"], "provider": u["provider"], "model": u["model"],
+                                        "calls": 0, "input_tokens": 0, "output_tokens": 0, "usd": 0.0,
+                                        "estimated_calls": 0})
+            m["calls"] += 1
+            m["input_tokens"] += u["input_tokens"]
+            m["output_tokens"] += u["output_tokens"]
+            m["usd"] += u["usd"]
+            m["estimated_calls"] += 1 if u["estimated"] else 0
+            model_cost["claude" if u["provider"] == "claude" else "gemini"] += u["usd"]
     serper_cost = serper_queries * SERPER_COST_PER_QUERY
-    gemini_cost = verifier["calls"] * GEMINI_COST_PER_CALL
+    gemini_cost = legacy_calls * GEMINI_COST_PER_CALL + model_cost["gemini"]
+    claude_cost = model_cost["claude"]
     top = sorted(codes.items(), key=lambda kv: (-kv[1], kv[0]))[:TOP_FAILURE_CODES]
+    cost = {"serper": round(serper_cost, 4), "gemini": round(gemini_cost, 4)}
+    if claude_cost > 0 or any(k[1] == "claude" for k in models):
+        cost["claude"] = round(claude_cost, 4)
+    cost["total"] = round(serper_cost + gemini_cost + claude_cost, 4)
     return {
         "searches": searches,
         "unreadable": unreadable,
@@ -201,8 +226,9 @@ def window_stats(entries):
         "providers": dict(sorted(providers.items())),
         "verifier": verifier,
         "serper_queries": serper_queries,
-        "cost_usd": {"serper": round(serper_cost, 4), "gemini": round(gemini_cost, 4),
-                     "total": round(serper_cost + gemini_cost, 4)},
+        "cost_usd": cost,
+        "verifier_models": [dict(m, usd=round(m["usd"], 4)) for m in
+                            sorted(models.values(), key=lambda m: (m["role"] != "primary", -m["usd"], m["model"]))],
         "failure_codes": [{"code": code, "count": n} for code, n in top],
     }
 
@@ -256,6 +282,7 @@ def alerts(entries):
         out.append({"code": "GEMINI_DOWN", "message": ALERTS["GEMINI_DOWN"], "searches": gemini,
                     "detail": f"آخر {gemini} عمليات بحث احتاجت التحقق: لم يُقرأ أي ملصق (VERIFIER_DOWN)؛ "
                               "النتائج تذهب للمراجعة البشرية."})
+    out.extend(verifier_alerts(readable))   # حزمة المحقق (verifier, P3)
     return out
 
 
@@ -285,7 +312,9 @@ def summarize(rows, now=None, limit=MAX_ROWS):
 
 def health_report():
     """ملخص صفحة التشخيصات (قراءة فقط؛ أخطاء قاعدة البيانات تُرفع)."""
-    return summarize(load_rows())
+    report = summarize(load_rows())
+    report["verifier_month"] = verifier_month()   # حزمة المحقق (verifier, P3): صرف الشهر وميزانية النموذج القوي
+    return report
 
 
 def outage_notice(since_seconds, worker_id=None):
@@ -295,3 +324,113 @@ def outage_notice(since_seconds, worker_id=None):
     """
     report = summarize(load_rows(since_seconds=max(1, int(since_seconds)), worker_id=worker_id))
     return " | ".join(f"{a['code']}: {a['message']}" for a in report["alerts"])
+
+
+# ---------------------------------------------------------------------------
+# حزمة المحقق (verifier, P3): استهلاك نماذج قراءة الملصق وتكلفتها، وتنبيهات الميزانية والمفتاح.
+# outcome.vlm_usage: لكل استدعاء مدفوع {role, provider, model, input_tokens, output_tokens, estimated, usd}
+# (catalog_match.verifiers)، و outcome.verifier_notices: رموز مثل 'strong_budget_exhausted'.
+# ---------------------------------------------------------------------------
+
+ALERTS.update({
+    "VERIFIER_BUDGET": "ميزانية النموذج القوي لهذا الشهر انتهت",
+    "VERIFIER_KEY": "مفتاح نموذج التحقق الإضافي مرفوض أو غير محفوظ",
+})
+BUDGET_NOTICES = ("strong_budget_exhausted",)
+# مفتاح النموذج القوي فقط (الإشعارات الموسومة strong: من catalog_match.verifiers.cascade). مشكلة مفتاح
+# النموذج الأساسي تظهر كـ VERIFIER_DOWN وتنبيه GEMINI_DOWN، لا هنا: إيقاف النموذج القوي لا يحلها.
+KEY_NOTICES = ("strong:claude_key_rejected", "strong:claude_key_missing", "strong:gemini_key_rejected")
+
+
+def _as_float(value):
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number == number and number >= 0 else None
+
+
+def _vlm_usage(outcome):
+    """outcome.vlm_usage مطبّعاً: مدخل تالف يُتجاهل، والرموز نصوص قصيرة، والأرقام غير السالبة فقط."""
+    out = []
+    for item in outcome.get("vlm_usage") or []:
+        if not isinstance(item, dict):
+            continue
+        provider = str(item.get("provider") or "").strip().lower()[:16]
+        model = str(item.get("model") or "").strip()[:96]
+        if not provider or not model:
+            continue
+        out.append({
+            "role": "strong" if str(item.get("role") or "") == "strong" else "primary",
+            "provider": provider,
+            "model": model,
+            "input_tokens": max(0, _as_int(item.get("input_tokens")) or 0),
+            "output_tokens": max(0, _as_int(item.get("output_tokens")) or 0),
+            "usd": _as_float(item.get("usd")) or 0.0,
+            "estimated": bool(item.get("estimated")),
+        })
+    return out
+
+
+def _strong_ran(e):
+    return any(u["role"] == "strong" for u in e.get("vlm_usage") or [])
+
+
+def verifier_alerts(entries):
+    """
+    تنبيهات حزمة المحقق من المدخلات المقروءة (الأحدث أولاً):
+      VERIFIER_BUDGET  آخر بحث احتاج نظرة النموذج القوي تخطاها لأن ميزانية الشهر انتهت (ولم تأتِ بعده نظرة)؛
+      VERIFIER_KEY     آخر ALERT_MIN_SEARCHES عمليات بحث على الأقل رفض فيها مزود النموذج الإضافي المفتاح أو لم يجده.
+    """
+    out = []
+    budget = 0
+    for e in entries:
+        notices = e.get("verifier_notices") or []
+        if any(n in BUDGET_NOTICES for n in notices):
+            budget += 1
+            continue
+        if _strong_ran(e):
+            break
+    if budget >= 1:
+        out.append({"code": "VERIFIER_BUDGET", "message": ALERTS["VERIFIER_BUDGET"], "searches": budget,
+                    "detail": f"آخر {budget} عمليات بحث احتاجت نظرة ثانية ولم تأخذها لأن الميزانية الشهرية انتهت؛ "
+                              "ارفع الميزانية من الإعدادات أو انتظر الشهر القادم. النتائج غير المؤكدة تذهب للمراجعة."})
+    key = 0
+    for e in entries:
+        notices = e.get("verifier_notices") or []
+        if any(n in KEY_NOTICES for n in notices):
+            key += 1
+            continue
+        if _strong_ran(e):
+            break
+    if key >= ALERT_MIN_SEARCHES:
+        out.append({"code": "VERIFIER_KEY", "message": ALERTS["VERIFIER_KEY"], "searches": key,
+                    "detail": f"آخر {key} عمليات بحث: النموذج الإضافي لم يقرأ أي ملصق لأن مفتاحه مرفوض أو غير محفوظ "
+                              "(Anthropic أو Gemini). أضف المفتاح من الإعدادات أو أوقف النموذج القوي."})
+    return out
+
+
+def verifier_month():
+    """
+    صرف الشهر الحالي (UTC) من جدول verifier_spend: {month, budget_usd, strong_usd, total_usd, models, primary,
+    strong}. قراءة فقط؛ None إذا تعذرت القراءة (لا يُختلق رقم).
+    """
+    try:
+        from catalog_match import settings as cm_settings
+        from catalog_match.verifiers.spend import MariaDbSpendStore, current_month
+        rows = MariaDbSpendStore().month_rows()
+        budget = cm_settings.verifier_monthly_budget_usd()
+        primary, strong = cm_settings.verifier_primary(), cm_settings.verifier_strong()
+    except Exception as exc:
+        logger.warning("ops_health: verifier month spend unreadable (%s)", type(exc).__name__)
+        return None
+    strong_usd = sum(r["usd"] for r in rows if r["role"] == "strong")
+    return {
+        "month": current_month(),
+        "budget_usd": round(budget, 2),
+        "strong_usd": round(strong_usd, 4),
+        "total_usd": round(sum(r["usd"] for r in rows), 4),
+        "models": rows,
+        "primary": primary,
+        "strong": strong,
+    }

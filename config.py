@@ -318,6 +318,36 @@ REDIS_DB = int(os.getenv("REDIS_DB", "0"))
 BRAND_FILTER = ""
 ROW_FILTER = ""
 
+# ---------------------------------------------------------------------------
+# حزمة المحقق (verifier, P3): نماذج قراءة الملصق، والنموذج القوي وميزانيته الشهرية (catalog_match.verifiers).
+# المعرّف "<provider>:<model>" حيث provider هو gemini أو claude. المفتاح السري لا يُطبع ولا يُسجَّل أبداً.
+# ---------------------------------------------------------------------------
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+VERIFIER_PRIMARY = os.getenv("VERIFIER_PRIMARY", "")                  # فارغ = "gemini:<GEMINI_MODEL>"
+VERIFIER_STRONG = os.getenv("VERIFIER_STRONG", "gemini:gemini-3.5-flash")   # أو "claude:<model>" أو "off"
+VERIFIER_MONTHLY_BUDGET_USD = os.getenv("VERIFIER_MONTHLY_BUDGET_USD", "5")
+VERIFIER_STRONG_MAX_CALLS = os.getenv("VERIFIER_STRONG_MAX_CALLS", "1")
+MODEL_PRICES = os.getenv("MODEL_PRICES", "")                          # JSON: دولار لكل مليون token (إدخال/إخراج)
+
+# مفاتيح system_settings التي تكتبها صفحة الإعدادات -> اسم الإعداد هنا
+VERIFIER_DB_KEYS = {
+    "anthropic_api_key": "ANTHROPIC_API_KEY",
+    "verifier_primary": "VERIFIER_PRIMARY",
+    "verifier_strong": "VERIFIER_STRONG",
+    "verifier_monthly_budget_usd": "VERIFIER_MONTHLY_BUDGET_USD",
+    "verifier_strong_max_calls": "VERIFIER_STRONG_MAX_CALLS",
+    "model_prices": "MODEL_PRICES",
+}
+
+
+def _apply_verifier_settings(db_keys):
+    """قيم حزمة المحقق من system_settings (قيمة فارغة تُبقي قيمة .env). يُستدعى من load_db_config."""
+    for db_key, name in VERIFIER_DB_KEYS.items():
+        value = db_keys.get(db_key)
+        if value is None or str(value).strip() == "":
+            continue
+        globals()[name] = str(value).strip()
+
 def load_db_config():
     """
     تحميل الإعدادات ديناميكياً من قاعدة البيانات لتجنب تعديل ملفات البيئة يدوياً.
@@ -418,6 +448,7 @@ def load_db_config():
             if "enable_image_enhancement" in db_keys and db_keys["enable_image_enhancement"] is not None:
                 ENABLE_IMAGE_ENHANCEMENT = str(db_keys["enable_image_enhancement"]).strip().lower() in (
                     "1", "true", "yes", "on")
+            _apply_verifier_settings(db_keys)   # حزمة المحقق (verifier, P3)
 
             # --- identity package (P3): سياسة الباركود (gtin_policy) ---
             if db_keys.get("gtin_policy"):

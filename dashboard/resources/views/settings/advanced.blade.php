@@ -1,7 +1,8 @@
 {{--
     Settings · متقدم. $advanced = SettingsController::advancedData(): the search engine (v2, or v1 as a temporary
-    rollback), the Gemini model, strict brand matching, the v1-only switches and the legacy Custom Search / proxy
-    settings. Secret fields are write-only (empty = keep the stored value) and never show a stored value.
+    rollback), strict brand matching, the v1-only switches and the legacy Custom Search / proxy settings. The label
+    reading models moved to the «نماذج التحقق» tab (settings/models.blade.php).
+    Secret fields are write-only (empty = keep the stored value) and never show a stored value.
 --}}
 @php $adv = $advanced; @endphp
 <form method="POST" action="{{ route('dashboard.save_settings') }}" class="lq-card lq-settings-card" aria-labelledby="lq-settings-advanced-title" autocomplete="off" data-advanced-form data-engine="{{ $adv['engine'] }}">
@@ -29,17 +30,7 @@
         <x-lq.alert variant="warning" title="قبل ما ترجع للنظام القديم:">ما بيقرأ الملصق ولا بيتأكد من الحجم والنوع متل الجديد، فبتكتر الاقتراحات الغلط. استعمله بس إذا النظام الجديد عم يعلق، ورجّع أول ما ينحل.</x-lq.alert>
     </fieldset>
 
-    <label class="lq-field">
-        <span class="lq-field__label">نموذج Gemini لقراءة الملصق</span>
-        <select name="gemini_model" class="lq-select lq-settings-field__control" @disabled((bool) $dbError)>
-            @foreach ($adv['models'] as $modelId => $modelLabel)
-                <option value="{{ $modelId }}" @selected($adv['model'] === $modelId)>{{ $modelLabel }}</option>
-            @endforeach
-        </select>
-        @if (!$adv['model_supported'])
-            <span class="lq-field__error">النموذج المحفوظ (<bdi dir="ltr">{{ $adv['model'] }}</bdi>) متقاعد أو مش مدعوم؛ اختار نموذج من القائمة واحفظ.</span>
-        @endif
-    </label>
+    <p class="lq-settings-card__note">نموذج قراءة الملصق (Gemini أو Claude) والنموذج القوي وميزانيته صاروا بتبويب <a class="lq-link" href="{{ route('dashboard.settings') }}?tab=models">نماذج التحقق</a>.</p>
 
     <div class="lq-settings-switch-row">
         <x-lq.switch name="strict_brand_match" value="true" label="مطابقة الماركة الصارمة" show-label :checked="$adv['strict']" :disabled="(bool) $dbError" />
@@ -77,7 +68,7 @@
         @endif
     </fieldset>
 
-    <p class="lq-settings-card__note">أسعار التكلفة التقديرية ثابتة بالنظام وما بتتغير من هون؛ بتلاقيها تحت «التكلفة التقديرية» بصفحة <a class="lq-link" href="{{ route('dashboard.diagnostics') }}">الصحة والتكلفة</a>.</p>
+    <p class="lq-settings-card__note">سعر Serper التقديري ثابت بالنظام؛ أسعار نماذج قراءة الملصق بتتعدّل من تبويب «نماذج التحقق»، والتكلفة كلها بصفحة <a class="lq-link" href="{{ route('dashboard.diagnostics') }}">الصحة والتكلفة</a>.</p>
 
     <div class="lq-settings-card__actions">
         <x-lq.button type="submit" icon="check" :disabled="(bool) $dbError">حفظ</x-lq.button>
