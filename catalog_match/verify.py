@@ -25,6 +25,11 @@ cool-down one trial call is let through (half-open), so a long-running worker
 recovers when the service comes back.
 
 check_model_available() calls models.get, for worker start-up and settings validation.
+
+Shared with the other label readers (catalog_match.verifiers): build_prompt (focus=True adds the strong
+model's FOCUS_LINES for its one-image second look), parse_readings (reply -> verdicts, fail-closed on a
+foreign numbering), make_verdict / classify and the CircuitBreaker. Every answered Gemini call carries one
+VerificationResult.usage entry (tokens from usageMetadata, or estimated from the image count).
 """
 
 from __future__ import annotations
@@ -305,7 +310,19 @@ def _describe_variants(spec: SkuSpec) -> str:
     return "; ".join(f"{axis}: {value.replace('|', ' / ')}" for axis, value in sorted(spec.variants.items()))
 
 
-def build_prompt(spec: SkuSpec, n_images: int) -> str:
+FOCUS_LINES = (
+    "FOCUSED SECOND LOOK: a first reader could not confirm every field on this image. Study the label itself, "
+    "including small print (the net weight or volume is often near the bottom edge or on a side panel, "
+    "e.g. 'Net Wt. 400 g', 'NET 1 L', '6 x 330 ml'). Read the brand, the variant (flavour, fat level, sugar, "
+    "form), the net weight or volume and the unit count exactly as printed. If a field is not printed or not "
+    "readable, answer '' or unsure: never guess and never copy the target SKU into a reading.",
+    "",
+)
+
+
+def build_prompt(spec: SkuSpec, n_images: int, focus: bool = False) -> str:
+    """The reading prompt. focus=True (the strong model's one-image second look) adds FOCUS_LINES; the
+    schema, the field rules and the code-side decision are the same."""
     brand = spec.brand_canonical or spec.brand_raw or "(unknown)"
     aliases = ", ".join(p for p in spec.match_brands if p) or "none"
     size = spec.size.canonical() if spec.size is not None else "not stated"
@@ -331,6 +348,10 @@ def build_prompt(spec: SkuSpec, n_images: int) -> str:
         f"- Net size per unit: {size}; pack: {pack}",
         f"- GTIN/barcode: {gtin13(spec.gtin) or '(none)'}",
         "",
+    ]
+    if focus:
+        lines += list(FOCUS_LINES)
+    lines += [
         f"There are {n_images} images, each preceded by its label 'Image 1'..'Image {n_images}'. "
         "Return one entry per image with image_index = the label number.",
         "- brand_text, variant_text, size_text: copy the printed words verbatim ('' when not readable). "
@@ -410,19 +431,73 @@ def check_model_available(api_key: Optional[str] = None, model: Optional[str] = 
     return ModelCheck(False, code, name, status)
 
 
+
+
+# ---------------------------------------------------------------------------
+# Reply parsing (shared by every model adapter, catalog_match.verifiers)
+# ---------------------------------------------------------------------------
+
+def parse_readings(spec: SkuSpec, data: Any, slots: List[int], n: int
+                   ) -> Tuple[Optional[List[VlmImageVerdict]], Optional[str]]:
+    """(verdicts, None) for a reply in the RESPONSE_SCHEMA shape, or (None, error code).
+
+    `slots[label-1]` is the input position of the image labelled 'Image <label>'. A 0-based,
+    out-of-range or repeated label means the model's numbering is not ours: readings could
+    land on the wrong image, so the whole reply fails closed. Images the reply skipped stay
+    UNKNOWN.
+    """
+    if not isinstance(data, dict) or not isinstance(data.get("images"), list):
+        return None, "schema_error"
+    verdicts = [VlmImageVerdict(index=i, decision=UNKNOWN) for i in range(n)]
+    seen = set()
+    labelled = []
+    for order, entry in enumerate(data["images"]):
+        if not isinstance(entry, dict):
+            continue
+        label = entry.get("image_index")
+        if isinstance(label, bool) or not isinstance(label, int):
+            label = order + 1
+        if not 1 <= label <= len(slots) or label in seen:
+            return None, "schema_error:image_index"
+        seen.add(label)
+        labelled.append((label, entry))
+    for label, entry in labelled:
+        pos = slots[label - 1]
+        verdicts[pos] = make_verdict(spec, pos, entry)
+    if not seen:
+        return None, "schema_error"
+    return verdicts, None
+
+
+def _int_or_none(value: Any) -> Optional[int]:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)) and value >= 0:
+        return int(value)
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Verifier
 # ---------------------------------------------------------------------------
 
 class GeminiVerifier:
-    """Verifier protocol implementation. Construct once per batch or per worker."""
+    """Verifier protocol implementation. Construct once per batch or per worker.
+
+    long_side / focus / max_images let catalog_match.verifiers use the same client for the strong
+    model's one-image second look (focus=True adds FOCUS_LINES to the prompt). Every answered call
+    (HTTP 200) carries one usage entry {provider, model, input_tokens, output_tokens, estimated,
+    images}; tokens come from usageMetadata, or are estimated from the image count when it is absent.
+    """
 
     name = "gemini"
+    provider = "gemini"
 
     def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None,
                  timeout: float = TIMEOUT_S, breaker: Optional[CircuitBreaker] = None,
                  sleep: Callable[[float], None] = time.sleep, backoff_s: float = BACKOFF_S,
-                 max_images: int = MAX_IMAGES, session: Optional[requests.Session] = None):
+                 max_images: int = MAX_IMAGES, session: Optional[requests.Session] = None,
+                 long_side: int = LONG_SIDE, focus: bool = False):
         self._api_key = api_key
         self._model = model
         self.timeout = timeout
@@ -431,6 +506,8 @@ class GeminiVerifier:
         self.backoff_s = backoff_s
         self.max_images = max_images
         self.session = session
+        self.long_side = long_side
+        self.focus = focus
 
     # -- helpers -----------------------------------------------------------
 
@@ -455,7 +532,10 @@ class GeminiVerifier:
     def _fail(self, n: int, error: str, calls: int) -> VerificationResult:
         self.breaker.record(False)
         logger.warning("verify: result UNKNOWN (%s); candidates go to human review", error)
-        return self._unknown(n, error, calls)
+        result = self._unknown(n, error, calls)
+        if error in ("http_401", "http_403"):
+            result.notices.append("gemini_key_rejected")
+        return result
 
     def _post(self, url: str, headers: dict, body: dict):
         poster = self.session.post if self.session is not None else requests.post
@@ -494,7 +574,7 @@ class GeminiVerifier:
             if img is None:
                 continue
             try:
-                data = encode_image(img)
+                data = encode_image(img, long_side=self.long_side)
             except Exception as exc:
                 logger.warning("verify: cannot encode image %d: %s", pos, exc)
                 continue
@@ -505,8 +585,9 @@ class GeminiVerifier:
             # Nothing to look at is not a verifier failure: do not touch the breaker.
             return self._unknown(n, "no_images")
 
+        prompt = build_prompt(spec, len(slots), focus=True) if self.focus else build_prompt(spec, len(slots))
         body = {
-            "contents": [{"role": "user", "parts": [{"text": build_prompt(spec, len(slots))}] + parts}],
+            "contents": [{"role": "user", "parts": [{"text": prompt}] + parts}],
             "generationConfig": {
                 "responseMimeType": "application/json",
                 "responseSchema": RESPONSE_SCHEMA,
@@ -534,15 +615,37 @@ class GeminiVerifier:
                 continue
             return self._fail(n, f"http_{status}", 1)
 
-        return self._parse(spec, resp, slots, n)
+        return self._parse(spec, resp, slots, n, prompt)
 
     # -- response parsing ------------------------------------------------------
 
-    def _parse(self, spec: SkuSpec, resp, slots: List[int], n: int) -> VerificationResult:
+    def _usage(self, payload: Any, n_images: int, prompt: str) -> Dict[str, Any]:
+        """Billed tokens of one answered call: usageMetadata, else an estimate from the image count."""
+        meta = payload.get("usageMetadata") if isinstance(payload, dict) else None
+        meta = meta if isinstance(meta, dict) else {}
+        prompt_tokens = _int_or_none(meta.get("promptTokenCount"))
+        output = [_int_or_none(meta.get(k)) for k in ("candidatesTokenCount", "thoughtsTokenCount")]
+        entry: Dict[str, Any] = {"provider": "gemini", "model": self.model, "images": n_images}
+        if prompt_tokens is not None and any(v is not None for v in output):
+            entry.update(input_tokens=prompt_tokens, output_tokens=sum(v or 0 for v in output), estimated=False)
+        else:
+            from .verifiers.pricing import estimate_tokens
+            est_in, est_out = estimate_tokens("gemini", n_images, prompt)
+            entry.update(input_tokens=est_in, output_tokens=est_out, estimated=True)
+        return entry
+
+    def _parse(self, spec: SkuSpec, resp, slots: List[int], n: int, prompt: str = "") -> VerificationResult:
         try:
             payload = resp.json()
         except Exception:
-            return self._fail(n, "bad_json", 1)
+            payload = None
+        result = self._parse_payload(spec, payload, slots, n)
+        if isinstance(payload, dict):
+            # An API answer is billed whatever its content: the usage goes with ok and unknown results alike.
+            result.usage.append(self._usage(payload, len(slots), prompt))
+        return result
+
+    def _parse_payload(self, spec: SkuSpec, payload: Any, slots: List[int], n: int) -> VerificationResult:
         if not isinstance(payload, dict):
             return self._fail(n, "bad_json", 1)
         feedback = payload.get("promptFeedback") or {}
@@ -564,29 +667,9 @@ class GeminiVerifier:
             data = json.loads(_strip_fences(text))
         except (ValueError, TypeError):
             return self._fail(n, "parse_error", 1)
-        if not isinstance(data, dict) or not isinstance(data.get("images"), list):
-            return self._fail(n, "schema_error", 1)
-
-        verdicts = [VlmImageVerdict(index=i, decision=UNKNOWN) for i in range(n)]
-        seen = set()
-        labelled = []
-        for order, entry in enumerate(data["images"]):
-            if not isinstance(entry, dict):
-                continue
-            label = entry.get("image_index")
-            if isinstance(label, bool) or not isinstance(label, int):
-                label = order + 1
-            if not 1 <= label <= len(slots) or label in seen:
-                # A 0-based or out-of-range label (or a repeated one) means the model's
-                # numbering is not ours: readings could land on the wrong image. Fail closed.
-                return self._fail(n, "schema_error:image_index", 1)
-            seen.add(label)
-            labelled.append((label, entry))
-        for label, entry in labelled:
-            pos = slots[label - 1]
-            verdicts[pos] = make_verdict(spec, pos, entry)
-        if not seen:
-            return self._fail(n, "schema_error", 1)
+        verdicts, error = parse_readings(spec, data, slots, n)
+        if verdicts is None:
+            return self._fail(n, error or "schema_error", 1)
 
         self.breaker.record(True)
         logger.info("verify: %s", ", ".join(f"#{v.index}={v.decision}" for v in verdicts))

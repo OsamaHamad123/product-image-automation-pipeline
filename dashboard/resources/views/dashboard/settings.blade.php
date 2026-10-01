@@ -1,9 +1,10 @@
 {{--
     لقطة · الإعدادات (Settings board). SettingsController::show renders it with:
-      $tab, $tabs     the active tab (?tab=sheet|keys|auto-publish|processing|advanced) and the tab list
+      $tab, $tabs     the active tab (?tab=sheet|keys|models|auto-publish|processing|advanced) and the tab list
       $dbError        set when system_settings cannot be read: the page says so and nothing can be saved
       $flash          success / error / warnings of the last save
-      one of $sheet | $keys | $autoPublish | $processing | $advanced for the active tab (resources/views/settings/*)
+      one of $sheet | $keys | $models | $autoPublish | $processing | $advanced for the active tab
+      (resources/views/settings/*)
     Stored keys are never printed, not even in part: the keys tab shows «محفوظ / غير محفوظ» and an empty,
     write-only field; an empty field keeps the stored key. Each form saves only its own section.
     public/js/settings.js: the sheet preview/save (POST /api/sheet/preview, /api/sheet/save), the key forms,
@@ -55,6 +56,9 @@
                     @break
                 @case('keys')
                     @include('settings.keys')
+                    @break
+                @case('models')
+                    @include('settings.models')
                     @break
                 @case('auto-publish')
                     @include('settings.auto_publish')

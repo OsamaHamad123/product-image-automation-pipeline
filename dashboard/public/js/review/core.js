@@ -23,11 +23,12 @@
     // تحذيرات المراجعة (warnings في استجابة البحث، أو warn:<code> في أسباب المرشح المحفوظ): جملة عربية لكل رمز
     const REVIEW_WARNING_LABELS = {
         sheet_silent: 'الشيت ما حدد النوع',
-        vlm_unsure: 'Gemini غير متأكد من المطابقة',
+        vlm_unsure: 'نموذج القراءة غير متأكد من المطابقة',
         low_resolution: 'صورة منخفضة الدقة (أقل من 500 بكسل)',
         chat_or_screenshot: 'صورة من واتساب أو لقطة شاشة',
         social_media: 'الصورة من مواقع التواصل الاجتماعي',
-        foreign_store: 'الصورة من متجر خارج الإمارات (قد تختلف العبوة)'
+        foreign_store: 'الصورة من متجر خارج الإمارات (قد تختلف العبوة)',
+        barcode_conflict: 'الباركود بالشيت مختلف عن باركود صفحة المتجر: تأكد من المنتج'
     };
 
     const VARIANT_AXIS_LABELS = {
@@ -86,7 +87,7 @@
         CANDIDATE_SAVE_FAILED: 'لقينا صور، بس ما قدرنا نحفظها بقاعدة البيانات.',
         WORKER_ERROR: 'صار خطأ غير متوقع أثناء التشغيل.',
         DOWNLOAD_FAILED: 'ما قدرنا نحمّل الصور من مواقعها.',
-        VERIFIER_DOWN: 'Gemini ما كان متاح وقت الفحص.',
+        VERIFIER_DOWN: 'نموذج قراءة الملصق ما كان متاح وقت الفحص.',
         PROVIDER_DOWN: 'مصادر البحث ما كانت متاحة.',
         REJECTED: 'رفضت الصورة المقترحة، فرجع المنتج للطابور.'
     };
@@ -276,7 +277,7 @@
         if (c.status === 'rejected') {
             const r = c.reasons;
             let text = 'استبعدها النظام';
-            if (r.some(x => /^vlm:MISMATCH/.test(x))) text = 'Gemini شاف منتج مختلف';
+            if (r.some(x => /^vlm:MISMATCH/.test(x))) text = 'نموذج القراءة شاف منتج مختلف';
             else if (r.some(x => /^download:/.test(x))) text = 'ما قدرنا نحمّلها';
             else if (r.some(x => /^quality:/.test(x))) text = 'جودة ضعيفة';
             else if (r.some(x => /size/.test(x))) text = 'حجم مختلف';
@@ -293,8 +294,8 @@
         }
         if (c.source === 'manual') return { text: 'رابط من عندك', tone: 'info', detail: detail };
         if (c.source === 'upload') return { text: 'صورة من جهازك', tone: 'info', detail: detail };
-        if (c.vlm && c.vlm.decision === 'UNSURE') return { text: 'Gemini مش متأكد', tone: 'muted', detail: detail };
-        if (c.vlm && c.vlm.decision === 'MATCH') return { text: 'Gemini شافها مطابقة', tone: 'success', detail: detail };
+        if (c.vlm && c.vlm.decision === 'UNSURE') return { text: 'نموذج القراءة مش متأكد', tone: 'muted', detail: detail };
+        if (c.vlm && c.vlm.decision === 'MATCH') return { text: 'نموذج القراءة شافها مطابقة', tone: 'success', detail: detail };
         return { text: 'مطابقة محتملة', tone: 'muted', detail: detail };
     }
 
@@ -692,7 +693,7 @@
         const out = c.warnings.map(w => warningText(w));
         if (c.status === 'rejected' || c.status === 'excluded') out.unshift(candidateNote(c, false).text);
         const vlm = c.vlm || {};
-        if (vlm.decision === 'MISMATCH' && !out.includes('Gemini شاف منتج مختلف')) out.unshift('Gemini شاف منتج مختلف');
+        if (vlm.decision === 'MISMATCH' && !out.includes('نموذج القراءة شاف منتج مختلف')) out.unshift('نموذج القراءة شاف منتج مختلف');
         if (vlm.decision === 'UNSURE' && !c.warnings.some(w => String(w).split(':')[0] === 'vlm_unsure')) {
             out.push(REVIEW_WARNING_LABELS.vlm_unsure);
         }

@@ -191,6 +191,9 @@ def outcome_summary(outcome: SearchOutcome) -> Dict[str, Any]:
         "queries": list(outcome.queries),
         "sku_key": outcome.sku_key,
         "vlm_calls": outcome.vlm_calls,
+        # verifier package: per-model tokens and estimated USD of each verifier call, and its notices
+        "vlm_usage": _json_safe(list(getattr(outcome, "vlm_usage", None) or [])),
+        "verifier_notices": list(getattr(outcome, "verifier_notices", None) or []),
         "reject_counts": dict(outcome.reject_counts),
         "winner_url": outcome.winner.candidate.image_url if outcome.winner is not None else None,
     }

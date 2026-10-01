@@ -8,6 +8,12 @@ default_providers() builds the list from settings:
                 - the primary text source when no sanctioned search API is configured;
                 - otherwise a per-query fallback, only when ENABLE_BING_HTML_FALLBACK is on,
                   used by retrieve() when every sanctioned search provider failed.
+
+Expansion-round sources (sources package, P3; never in default_providers(), built by
+catalog_match.expand.default_expansion()):
+    serper_web       Serper web search: UAE retailer / brand product PAGES (serper_web.py)
+    serper_shopping  Serper Google Shopping listings (serper_shopping.py)
+    lens_serper      Serper Lens visual search; lens_serpapi  SerpApi Google Lens (lens.py)
 """
 
 from __future__ import annotations
@@ -22,12 +28,18 @@ from .bing_html import BingHtmlProvider
 from .cse_legacy import CseLegacyProvider
 from .open_food_facts import OffProvider
 from .serper import SerperImagesProvider
+from .lens import SerpApiLensProvider, SerperLensProvider, VisualSearch, build_visual_search
+from .serper_shopping import SerperShoppingProvider
+from .serper_web import SerperWebProvider
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
     "BaseProvider", "BingHtmlProvider", "CseLegacyProvider", "OffProvider", "ProviderBlocked",
     "ProviderEmpty", "ProviderHTTPError", "SerperImagesProvider", "default_providers",
+    # sources package (P3)
+    "SerpApiLensProvider", "SerperLensProvider", "SerperShoppingProvider", "SerperWebProvider", "VisualSearch",
+    "build_visual_search",
 ]
 
 

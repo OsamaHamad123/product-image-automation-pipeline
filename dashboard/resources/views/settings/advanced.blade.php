@@ -1,9 +1,82 @@
 {{--
     Settings · متقدم. $advanced = SettingsController::advancedData(): the search engine (v2, or v1 as a temporary
-    rollback), the Gemini model, strict brand matching, the v1-only switches and the legacy Custom Search / proxy
-    settings. Secret fields are write-only (empty = keep the stored value) and never show a stored value.
+    rollback), strict brand matching, the v1-only switches and the legacy Custom Search / proxy settings. The label
+    reading models moved to the «نماذج التحقق» tab (settings/models.blade.php).
+    Secret fields are write-only (empty = keep the stored value) and never show a stored value.
+    A second form (section=sources, $advanced['sources'] = SettingsController::sourcesData()) controls the expansion
+    round of catalog_match/expand.py, visual search and the barcode policy; it reads no key, it only says whether the
+    SerpApi key is saved (the key itself is on the «المفاتيح» tab).
 --}}
-@php $adv = $advanced; @endphp
+@php $adv = $advanced; $src = $advanced['sources']; @endphp
+<form method="POST" action="{{ route('dashboard.save_settings') }}" class="lq-card lq-settings-card" aria-labelledby="lq-settings-sources-title" autocomplete="off" data-sources-form>
+    @csrf
+    <input type="hidden" name="section" value="sources">
+    <div class="lq-settings-card__head">
+        <h2 class="lq-section-title" id="lq-settings-sources-title">مصادر البحث الإضافية</h2>
+        <p class="lq-settings-card__intro">إذا ما لقى البحث العادي صورة أكيدة للمنتج، النظام بيعمل جولة تانية: صفحات المتاجر الإماراتية وموقع الماركة، Google Shopping، والبحث بالصورة (بيلاقي نفس الصورة بدقة أعلى). كل اللي بيلاقيه بيمر بنفس الفحص، وصور الصفحات ما بتنشر تلقائياً أبداً: بتستنى مراجعتك.</p>
+    </div>
+
+    <div class="lq-settings-switch-row">
+        <x-lq.switch name="expansion_enabled" value="true" label="الجولة الإضافية" show-label :checked="$src['enabled']" :disabled="(bool) $dbError" />
+        <span class="lq-field__hint">بتشتغل بس للمنتجات اللي ما انحسمت، ولصورة مختارة دقتها قليلة (بتدوّر على نسخة أكبر منها).</span>
+    </div>
+
+    <label class="lq-field">
+        <span class="lq-field__label">حد الطلبات المدفوعة لكل منتج</span>
+        <input type="number" class="lq-input lq-settings-field__control" name="expansion_max_calls" min="0" max="{{ \App\Http\Controllers\SettingsController::EXPANSION_MAX_CALLS_LIMIT }}" step="1" value="{{ $src['max_calls'] }}" dir="ltr" inputmode="numeric" @disabled((bool) $dbError)>
+        <span class="lq-field__hint">كل بحث (Serper أو SerpApi) طلب واحد؛ فتح صفحات المتاجر مجاني. 0 = الجولة موقفة.</span>
+    </label>
+
+    <fieldset class="lq-settings-fieldset lq-settings-fieldset--boxed" @disabled((bool) $dbError)>
+        <legend class="lq-field__label">البحث بالصورة</legend>
+        <label class="lq-check lq-settings-choice">
+            <input type="radio" name="visual_search" value="auto" @checked($src['visual'] === 'auto')>
+            <span>تلقائي: Serper أولاً، وSerpApi (Google Lens) إذا مفتاحه محفوظ (موصى به)</span>
+        </label>
+        <label class="lq-check lq-settings-choice">
+            <input type="radio" name="visual_search" value="serper" @checked($src['visual'] === 'serper')>
+            <span>Serper بس: الأرخص، إذا خطتك بتدعم البحث بالصورة</span>
+        </label>
+        <label class="lq-check lq-settings-choice">
+            <input type="radio" name="visual_search" value="serpapi" @checked($src['visual'] === 'serpapi')>
+            <span>SerpApi بس: Google Lens، أدق بالصور الكبيرة وأغلى</span>
+        </label>
+        <label class="lq-check lq-settings-choice">
+            <input type="radio" name="visual_search" value="off" @checked($src['visual'] === 'off')>
+            <span>موقف: بلا بحث بالصورة</span>
+        </label>
+        <p class="lq-settings-card__note" data-serpapi-key>مفتاح SerpApi: {{ $src['serpapi_saved'] ? 'محفوظ' : 'غير محفوظ' }} · بيتضاف من تبويب <a class="lq-link" href="{{ route('dashboard.settings') }}?tab=keys">المفاتيح</a>.</p>
+        @if ($src['visual'] === 'serpapi' && !$src['serpapi_saved'])
+            <x-lq.alert variant="warning" title="مفتاح SerpApi مش محفوظ:">البحث بالصورة موقف فعلياً لحد ما تضيف المفتاح، أو تختار «تلقائي».</x-lq.alert>
+        @endif
+        <label class="lq-field">
+            <span class="lq-field__label">سعر بحث SerpApi الواحد (دولار)</span>
+            <input type="number" class="lq-input lq-settings-field__control" name="serpapi_lens_price_usd" min="0" max="1" step="0.001" value="{{ $src['serpapi_price'] }}" dir="ltr" inputmode="decimal">
+            <span class="lq-field__hint">تقديري، للتكلفة بصفحة الصحة. عدّله حسب خطتك. ما بينطلب أكتر من بحث SerpApi واحد لكل منتج.</span>
+        </label>
+    </fieldset>
+
+    <fieldset class="lq-settings-fieldset lq-settings-fieldset--boxed" @disabled((bool) $dbError)>
+        <legend class="lq-field__label">الباركود</legend>
+        <label class="lq-check lq-settings-choice">
+            <input type="radio" name="gtin_policy" value="evidence" @checked($src['gtin_policy'] === 'evidence')>
+            <span>دليل مساعد (موصى به): بيقوّي الصورة بس إذا الماركة متطابقة؛ وإذا اختلف، الصورة بتحتاج تطابق كامل بالماركة والاسم والحجم، وبتوصلك للمراجعة مع تنبيه إن الباركود مختلف. مناسب لأن باركود الشيت ممكن يكون غلط.</span>
+        </label>
+        <label class="lq-check lq-settings-choice">
+            <input type="radio" name="gtin_policy" value="strict" @checked($src['gtin_policy'] === 'strict')>
+            <span>صارم: صفحة بباركود مختلف بتنرفض. استعمله بس إذا باركودات الشيت مضمونة.</span>
+        </label>
+        <label class="lq-check lq-settings-choice">
+            <input type="radio" name="gtin_policy" value="off" @checked($src['gtin_policy'] === 'off')>
+            <span>تجاهل الباركود: الماركة والاسم والحجم بس.</span>
+        </label>
+    </fieldset>
+
+    <div class="lq-settings-card__actions">
+        <x-lq.button type="submit" icon="check" :disabled="(bool) $dbError">حفظ</x-lq.button>
+    </div>
+</form>
+
 <form method="POST" action="{{ route('dashboard.save_settings') }}" class="lq-card lq-settings-card" aria-labelledby="lq-settings-advanced-title" autocomplete="off" data-advanced-form data-engine="{{ $adv['engine'] }}">
     @csrf
     <input type="hidden" name="section" value="advanced">
@@ -29,17 +102,7 @@
         <x-lq.alert variant="warning" title="قبل ما ترجع للنظام القديم:">ما بيقرأ الملصق ولا بيتأكد من الحجم والنوع متل الجديد، فبتكتر الاقتراحات الغلط. استعمله بس إذا النظام الجديد عم يعلق، ورجّع أول ما ينحل.</x-lq.alert>
     </fieldset>
 
-    <label class="lq-field">
-        <span class="lq-field__label">نموذج Gemini لقراءة الملصق</span>
-        <select name="gemini_model" class="lq-select lq-settings-field__control" @disabled((bool) $dbError)>
-            @foreach ($adv['models'] as $modelId => $modelLabel)
-                <option value="{{ $modelId }}" @selected($adv['model'] === $modelId)>{{ $modelLabel }}</option>
-            @endforeach
-        </select>
-        @if (!$adv['model_supported'])
-            <span class="lq-field__error">النموذج المحفوظ (<bdi dir="ltr">{{ $adv['model'] }}</bdi>) متقاعد أو مش مدعوم؛ اختار نموذج من القائمة واحفظ.</span>
-        @endif
-    </label>
+    <p class="lq-settings-card__note">نموذج قراءة الملصق (Gemini أو Claude) والنموذج القوي وميزانيته صاروا بتبويب <a class="lq-link" href="{{ route('dashboard.settings') }}?tab=models">نماذج التحقق</a>.</p>
 
     <div class="lq-settings-switch-row">
         <x-lq.switch name="strict_brand_match" value="true" label="مطابقة الماركة الصارمة" show-label :checked="$adv['strict']" :disabled="(bool) $dbError" />
@@ -77,7 +140,7 @@
         @endif
     </fieldset>
 
-    <p class="lq-settings-card__note">أسعار التكلفة التقديرية ثابتة بالنظام وما بتتغير من هون؛ بتلاقيها تحت «التكلفة التقديرية» بصفحة <a class="lq-link" href="{{ route('dashboard.diagnostics') }}">الصحة والتكلفة</a>.</p>
+    <p class="lq-settings-card__note">سعر Serper التقديري ثابت بالنظام؛ أسعار نماذج قراءة الملصق بتتعدّل من تبويب «نماذج التحقق»، والتكلفة كلها بصفحة <a class="lq-link" href="{{ route('dashboard.diagnostics') }}">الصحة والتكلفة</a>.</p>
 
     <div class="lq-settings-card__actions">
         <x-lq.button type="submit" icon="check" :disabled="(bool) $dbError">حفظ</x-lq.button>

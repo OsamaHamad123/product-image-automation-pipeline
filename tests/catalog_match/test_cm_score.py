@@ -10,6 +10,7 @@ import socket
 
 import pytest
 
+from catalog_match import settings
 from catalog_match.identity import build_sku_spec
 from catalog_match.models import Candidate, QualityReport
 from catalog_match.score import rank, rank_key, score_candidate
@@ -222,14 +223,29 @@ def test_parent_brand_nestle_matches_nido_title():
     assert "size_conflict" in score_candidate(spec, sibling).hard_reject
 
 
-def test_gtin_on_page():
+def _policy(monkeypatch, policy):
+    monkeypatch.setattr(settings, "_config", None)
+    monkeypatch.setenv("GTIN_POLICY", policy)
+
+
+@pytest.mark.parametrize("policy, brandless_tier", [("evidence", 3), ("strict", 1)])
+def test_gtin_on_page(monkeypatch, policy, brandless_tier):
+    # Under 'strict' (the earlier rule) the record's product words corroborate the GTIN: tier 1.
+    # Under 'evidence' (the default) the barcode only supports brand + name: a record that does
+    # not name the brand stays where its text puts it (tier 3), one that names it is tier 1.
+    _policy(monkeypatch, policy)
     spec = spec_for("Drinking Water 500ml", "Mai Dubai", barcode="6297000611365")
     same = cand("https://images.openfoodfacts.org/images/products/629/700/061/1365/front.jpg",
                 page_title="Drinking water 500 ml", provider="off", gtin_on_page="6297000611365",
                 page_url="https://world.openfoodfacts.org/product/6297000611365")
     sc = score_candidate(spec, same)
-    assert sc.tier == 1
+    assert sc.tier == brandless_tier
     assert sc.matched["gtin"] == "match"
+    branded = cand("https://images.openfoodfacts.org/images/products/629/700/061/1365/front.jpg",
+                   page_title="Mai Dubai Drinking water 500 ml", provider="off", gtin_on_page="6297000611365",
+                   page_url="https://world.openfoodfacts.org/product/6297000611365")
+    assert score_candidate(spec, branded).tier == 1
+    # a differing GTIN on a record that does not name the brand is rejected under both policies
     other = cand(page_title="Drinking water 500 ml", provider="off", gtin_on_page="4006381333931")
     osc = score_candidate(spec, other)
     assert "gtin_mismatch" in osc.hard_reject
@@ -430,14 +446,18 @@ def test_distinctive_phrase_of_a_common_word_brand_counts_anywhere():
     assert score_candidate(spec, listing("Skipjack Tuna Chunks 185g - Family فاميلي")).tier == 1
 
 
-def test_common_word_out_of_place_does_not_corroborate_a_gtin():
+@pytest.mark.parametrize("policy, covered_tier", [("evidence", 2), ("strict", 1)])
+def test_common_word_out_of_place_does_not_corroborate_a_gtin(monkeypatch, policy, covered_tier):
+    _policy(monkeypatch, policy)
     spec = build_sku_spec({"name": "FRESHLY CHICKEN SHAWARMA 350GM", "brand": "FRESHLY",
                            "barcode": "6297000611365"}, {})
     record = dict(provider="off", gtin_on_page="6297000611365",
                   page_url="https://world.openfoodfacts.org/product/6297000611365")
-    # the product words still corroborate the GTIN match ...
+    # Under 'strict' the product words still corroborate the GTIN match (tier 1). Under 'evidence'
+    # a GTIN match lifts only with full brand evidence, and 'freshly prepared' in a Seara listing
+    # is not the brand Freshly: the record stays at tier 2 (never pre-checked without a MATCH).
     covered = score_candidate(spec, listing("Seara Chicken Shawarma 350 g, freshly prepared", **record))
-    assert covered.tier == 1 and covered.matched["gtin"] == "match"
+    assert covered.tier == covered_tier and covered.matched["gtin"] == "match"
     # ... a common word out of place does not
     bare = score_candidate(spec, listing("Seara Snack, freshly packed", **record))
     assert bare.tier == 2 and bare.matched["gtin"] == "match" and bare.matched["brand"] is True

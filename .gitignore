@@ -17,6 +17,8 @@ temp/
 
 # HTML Response Dumps
 *.html
+# ...except the offline test fixtures (saved store pages and search responses)
+!tests/catalog_match/fixtures/**/*.html
 
 # Database dumps (may contain API keys from system_settings)
 *.sql

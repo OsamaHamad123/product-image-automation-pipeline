@@ -1,0 +1,27 @@
+{
+  "search_metadata": {"id": "abc", "status": "Success", "google_lens_url": "https://lens.google.com/uploadbyurl?url=https://img.example-cdn.com/barts-small.jpg"},
+  "search_parameters": {"engine": "google_lens", "url": "https://img.example-cdn.com/barts-small.jpg", "hl": "en", "country": "ae"},
+  "visual_matches": [
+    {"position": 1,
+     "title": "Barts Traditional Fries 1kg - Carrefour UAE",
+     "link": "https://www.carrefouruae.com/mafuae/en/frozen-potato/barts-traditional-fries-1kg/p/77811",
+     "source": "Carrefour UAE",
+     "source_icon": "https://serpapi.com/icons/carrefour.png",
+     "thumbnail": "https://encrypted-tbn2.gstatic.com/images?q=tbn:car",
+     "thumbnail_width": 225,
+     "thumbnail_height": 225,
+     "image": "https://cdn.mafrservices.com/sys-master-root/h1/h2/77811_main.jpg?im=Resize=1000",
+     "image_width": 1000,
+     "image_height": 1000,
+     "price": {"value": "AED 12.50", "extracted_value": 12.5, "currency": "AED"},
+     "in_stock": true},
+    {"position": 2,
+     "title": "Barts Fries",
+     "link": "https://www.noon.com/uae-en/barts-fries-1kg/N1/p/",
+     "source": {"name": "noon"},
+     "thumbnail": "https://encrypted-tbn1.gstatic.com/images?q=tbn:noon",
+     "thumbnail_width": 200,
+     "thumbnail_height": 200}
+  ],
+  "related_content": [{"query": "barts fries"}]
+}

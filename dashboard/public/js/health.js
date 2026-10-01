@@ -31,6 +31,10 @@
 
     var PROVIDER_NAMES = {
         serper: 'Serper (Google)',
+        serper_web: 'Serper · صفحات المتاجر',
+        serper_shopping: 'Serper · Google Shopping',
+        lens_serper: 'Serper · بحث بالصورة',
+        lens_serpapi: 'SerpApi · Google Lens',
         bing_html: 'Bing (احتياطي)',
         off: 'Open Food Facts',
         cse_legacy: 'Google Custom Search (قديم)'
@@ -42,7 +46,7 @@
         NO_RESULTS: ['ما في نتائج أبداً', 'غالباً اسم غير مألوف أو فيه اختصار'],
         NO_MATCH: ['ما في صورة مطابقة للمنتج', 'جرّب بحث بكلمات أخرى أو اسم المتجر'],
         DOWNLOAD_FAILED: ['ما قدرنا ننزّل الصور', 'صفحات تواصل اجتماعي أو مواقع بطيئة'],
-        VERIFIER_DOWN: ['Gemini ما ردّ', 'الصور راحت لمراجعتك بدون قراءة الملصق'],
+        VERIFIER_DOWN: ['نموذج قراءة الملصق ما ردّ', 'الصور راحت لمراجعتك بدون قراءة الملصق'],
         PROVIDER_DOWN: ['مصادر البحث ما ردّت', 'المنتجات رجعت للطابور وبتنعاد بالتشغيل الجاي'],
         SEARCH_ERROR: ['صار خطأ أثناء البحث', 'التفاصيل بسجل الأتمتة تحت'],
         CANDIDATE_SAVE_FAILED: ['ما قدرنا نحفظ الاقتراحات', 'تأكد إن قاعدة البيانات شغّالة'],
@@ -56,8 +60,23 @@
             return 'آخر ' + n + ' عمليات بحث رفض فيها Serper كل الاستعلامات. اشحن الرصيد أو غيّر المفتاح من الإعدادات.';
         },
         GEMINI_DOWN: function (n) {
-            return 'آخر ' + n + ' عمليات بحث احتاجت Gemini وما ردّ، فالنتائج بتستنى مراجعتك. تأكد من المفتاح من الإعدادات.';
+            return 'آخر ' + n + ' عمليات بحث احتاجت نموذج قراءة الملصق وما ردّ، فالنتائج بتستنى مراجعتك. تأكد من مفتاحه (Gemini أو Anthropic) من الإعدادات.';
+        },
+        VERIFIER_BUDGET: function () {
+            return 'المنتجات المش مؤكدة بتستنى مراجعتك بدون نظرة تانية. ارفع الميزانية من «نماذج التحقق» أو استنى الشهر الجاي.';
+        },
+        VERIFIER_KEY: function (n) {
+            return 'آخر ' + n + ' عمليات بحث ما قدر فيها النموذج القوي يقرأ لأن مفتاحه مرفوض أو مش محفوظ. ضيفه من «المفاتيح» أو وقّفه من «نماذج التحقق».';
         }
+    };
+
+    /* Label readers (catalog_match/verifiers/registry.SUPPORTED_MODELS); another model shows its own id. */
+    var MODEL_NAMES = {
+        'gemini-3.1-flash-lite': 'Gemini 3.1 Flash-Lite',
+        'gemini-3.5-flash': 'Gemini 3.5 Flash',
+        'claude-haiku-4-5': 'Claude Haiku 4.5',
+        'claude-sonnet-5-5': 'Claude Sonnet 5.5',
+        'claude-opus-5-5': 'Claude Opus 5.5'
     };
 
     var WINDOW_LABELS = { '24h': 'آخر 24 ساعة', '7d': 'آخر 7 أيام' };
@@ -256,25 +275,63 @@
         });
     }
 
-    function costView(w, prices) {
+    /* One cost line per label reader and role (ops_health window.verifier_models), e.g. «Claude Sonnet 5.5 · نظرة تانية · فحصين». */
+    function modelLines(models) {
+        return models.filter(isObject).map(function (m) {
+            var model = String(m.model || '');
+            var name = MODEL_NAMES[model] || model || 'نموذج';
+            var role = m.role === 'strong' ? ' · نظرة تانية' : '';
+            return { label: name + role + ' · ' + plural(count(m.calls), 'فحص', 'فحصين', 'فحوصات'), value: usd(m.usd),
+                title: String(m.provider || '') + ':' + model };
+        });
+    }
+
+    function costView(w, prices, month, sourcePrices) {
         var cost = isObject(w.cost_usd) ? w.cost_usd : {};
+        var sources = isObject(w.sources) ? w.sources : {};
+        var lens = isObject(sources.lens_serpapi) ? sources.lens_serpapi : null;
         var verifier = isObject(w.verifier) ? w.verifier : {};
+        var models = Array.isArray(w.verifier_models) ? w.verifier_models.filter(isObject) : [];
         var searches = count(w.searches);
         var total = num(cost.total);
         var note = [];
         if (searches > 0 && total !== null) note.push('التكلفة لكل منتج تقريباً ' + usdPrecise(total / searches) + '.');
-        if (isObject(prices)) {
-            note.push('الأسعار تقديرية: Serper ' + price(prices.serper_per_query) + ' لكل استعلام بيرد عليه، وGemini '
-                + price(prices.gemini_per_call) + ' لكل فحص.');
+        var lines = [
+            { label: 'Serper · ' + plural(count(w.serper_queries), 'استعلام', 'استعلامين', 'استعلامات'), value: usd(cost.serper) }
+        ];
+        /* SerpApi Google Lens (the expansion round, catalog_match/expand.py): its own line, at its own price */
+        if (lens || num(cost.serpapi) !== null) {
+            lines.push({ label: 'SerpApi Lens · ' + plural(count(lens ? lens.calls : 0), 'بحث', 'بحثين', 'عمليات بحث'),
+                value: usd(cost.serpapi), title: 'lens_serpapi' });
         }
-        return {
-            total: usd(total),
-            lines: [
-                { label: 'Serper · ' + plural(count(w.serper_queries), 'استعلام', 'استعلامين', 'استعلامات'), value: usd(cost.serper) },
-                { label: 'Gemini · ' + plural(count(verifier.calls), 'فحص', 'فحصين', 'فحوصات'), value: usd(cost.gemini) }
-            ],
-            note: note.join(' ')
-        };
+        if (!models.length) {
+            lines.push({ label: 'Gemini · ' + plural(count(verifier.calls), 'فحص', 'فحصين', 'فحوصات'), value: usd(cost.gemini) });
+            if (isObject(prices)) {
+                note.push('الأسعار تقديرية: Serper ' + price(prices.serper_per_query) + ' لكل استعلام بيرد عليه، وGemini '
+                    + price(prices.gemini_per_call) + ' لكل فحص.');
+            }
+        } else {
+            lines = lines.concat(modelLines(models));
+            var geminiUsage = 0;
+            models.forEach(function (m) {
+                if (m.provider !== 'claude') geminiUsage += num(m.usd) || 0;
+            });
+            var older = (num(cost.gemini) || 0) - geminiUsage;
+            if (older > 0.0005) {
+                lines.push({ label: 'Gemini · قراءات أقدم بلا تفاصيل', value: usd(older) });
+            }
+            if (isObject(prices)) {
+                note.push('الأسعار تقديرية: Serper ' + price(prices.serper_per_query) + ' لكل استعلام بيرد عليه، ونماذج القراءة '
+                    + 'حسب الـ tokens بأسعار تبويب «نماذج التحقق».');
+            }
+        }
+        if (lens && isObject(sourcePrices) && num(sourcePrices.lens_serpapi) !== null) {
+            note.push('بحث SerpApi ' + price(sourcePrices.lens_serpapi) + ' للبحث الواحد (من تبويب «متقدم»).');
+        }
+        if (isObject(month) && num(month.budget_usd) !== null) {
+            note.push('النموذج القوي هالشهر: ' + usd(month.strong_usd) + ' من ' + usd(month.budget_usd) + '.');
+        }
+        return { total: usd(total), lines: lines, note: note.join(' ') };
     }
 
     function reasonsView(w) {
@@ -334,7 +391,7 @@
             total: plural(count(w.searches), 'منتج', 'منتجين', 'منتجات'),
             decisions: decisionsView(w),
             providers: providersView(w),
-            cost: costView(w, report.prices),
+            cost: costView(w, report.prices, report.verifier_month, report.source_prices),
             reasons: reasonsView(w),
             note: noteView(report, w)
         };
@@ -667,6 +724,7 @@
         clear(lines);
         cost.lines.forEach(function (l) {
             var row = make('div', 'lq-health-cost__line');
+            if (l.title) row.title = l.title;
             row.appendChild(make('span', '', l.label));
             row.appendChild(make('span', 'lq-health-cost__value', l.value));
             lines.appendChild(row);

@@ -20,10 +20,16 @@ Steps
     7. verify #2  when nothing is MATCH yet and unverified tier-1/2 candidates remain,
                   one more call on the next 4 (never more than 2 calls per SKU).
     8. decide     decide.route() maps everything to a decision.
+    9. expand     catalog_match.expand: when nothing was picked (or the pick is low-resolution),
+                  one more round of paid sources (UAE retailer pages through web search, Google
+                  Shopping, visual search) into the same pool, then the same stages and the same
+                  route() rules. Off when the caller injected providers or a verifier (tests,
+                  the offline eval) unless it passes `expansion` itself.
 
 Nothing wins by arriving first: every query's candidates are pooled and ranked once.
 The per-SKU caps are 4 provider queries (the Open Food Facts lookup is not a query)
-and 2 verifier calls.
+and 2 verifier calls (the default verifier, catalog_match.verifiers, may add one budgeted
+strong second look inside a call: VERIFIER_STRONG_MAX_CALLS per SKU).
 """
 
 from __future__ import annotations
@@ -31,7 +37,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Iterable, List, Mapping, Optional, Sequence, Set, Tuple, Union
 
-from . import decide, quality as quality_mod
+from . import decide, expand as expand_mod, quality as quality_mod
 from .fetch import load_image, phash_distance
 from .models import (
     Candidate, CandidateScore, FetchedImage, RankedCandidate, SearchOutcome, SkuSpec,
@@ -64,8 +70,9 @@ def _default_fetcher():
 
 
 def _default_verifier():
-    from .verify import GeminiVerifier
-    return GeminiVerifier()
+    # verifier package: VERIFIER_PRIMARY reads every batch, VERIFIER_STRONG takes one budgeted second look
+    from .verifiers.cascade import default_verifier
+    return default_verifier()
 
 
 def _as_spec(spec: Union[SkuSpec, Mapping[str, Any]], brand_index) -> SkuSpec:
@@ -220,9 +227,15 @@ def _verify(spec: SkuSpec, verifier, batch: List[RankedCandidate]) -> Optional[V
 def find_product_image(spec: Union[SkuSpec, Mapping[str, Any]], *, providers: Optional[Sequence] = None,
                        fetcher=None, verifier=None, custom_query: Optional[str] = None,
                        exclude_urls: Iterable[str] = (), exclude_phashes: Iterable[Any] = (),
-                       brand_index=None) -> SearchOutcome:
-    """Find, check and route the image for one SKU. Never returns an unchecked pick as final."""
+                       brand_index=None, expansion: Any = None) -> SearchOutcome:
+    """Find, check and route the image for one SKU. Never returns an unchecked pick as final.
+
+    expansion: None (default: the configured round, only when neither providers nor a
+    verifier were injected), False (never), True (the configured round even with injected
+    stages) or an expand.Expansion.
+    """
     spec = _as_spec(spec, brand_index)
+    exp = expand_mod.resolve(expansion, injected=providers is not None or verifier is not None)
     providers = list(providers) if providers is not None else _default_providers()
     fetcher = fetcher if fetcher is not None else _default_fetcher()
     verifier = verifier if verifier is not None else _default_verifier()
@@ -260,9 +273,12 @@ def find_product_image(spec: Union[SkuSpec, Mapping[str, Any]], *, providers: Op
     if res is not None:
         results.append(res)
 
-    # 7. one more call when nothing matched and unverified tier-1/2 candidates remain
+    # 7. one more call when nothing matched and unverified tier-1/2 candidates remain. A MATCH on a page whose
+    #    barcode differs from the sheet's counts only as decide.route counts it: with a full reading (brand, size,
+    #    variant 'yes'); otherwise it cannot be picked and the next candidates are still worth reading.
     if res is not None and res.status == "ok" and len(results) < MAX_VERIFY_CALLS:
-        matched = any(rc.verdict is not None and rc.verdict.decision == decide.MATCH for rc in first)
+        matched = any(rc.verdict is not None and rc.verdict.decision == decide.MATCH
+                      and (not decide.gtin_conflict(rc) or decide.full_match(spec, rc)) for rc in first)
         rest = [rc for rc in usable[VERIFY_BATCH:] if rc.verdict is None and rc.score.tier in (1, 2)]
         if not matched and rest:
             res2 = _verify(spec, verifier, rest[:VERIFY_BATCH])
@@ -271,8 +287,24 @@ def find_product_image(spec: Union[SkuSpec, Mapping[str, Any]], *, providers: Op
 
     # 8. decide
     outcome = decide.route(spec, ranked, results, retrieval.health, retrieval.relaxed_ids)
-    outcome.queries = list(retrieval.queries)
+
+    # 9. expansion round (sources package): only when nothing confident was picked
+    extra_queries: List[str] = []
+    if exp is not None:
+        report = expand_mod.run_round(expand_mod.RoundInput(
+            spec=spec, exp=exp, outcome=outcome, ranked=ranked, results=results,
+            health=list(retrieval.health), relaxed_ids=set(retrieval.relaxed_ids), pool=retriever.pool,
+            fetcher=fetcher, verifier=verifier, phash_negatives=phash_negatives, negatives=negatives,
+            custom_query=custom))
+        outcome = report.outcome
+        results = results + report.verify_results
+        extra_queries = report.queries
+        n_phash_dropped += report.phash_dropped
+    outcome.queries = list(retrieval.queries) + extra_queries
     outcome.vlm_calls = sum(int(r.calls or 0) for r in results)
+    # verifier package: per-model usage of every billed verifier call, and its dashboard notices
+    outcome.vlm_usage = [dict(u) for r in results for u in (getattr(r, "usage", None) or []) if isinstance(u, dict)]
+    outcome.verifier_notices = sorted({str(n) for r in results for n in (getattr(r, "notices", None) or [])})
     if n_phash_dropped:
         outcome.reject_counts["reviewer_negative_phash"] = n_phash_dropped
     if retriever.pool.excluded:

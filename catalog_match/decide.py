@@ -15,8 +15,12 @@ Decisions
                           * spec.brand_conf == 'mapped';
                           * the winner did not come from a relaxed query;
                           * not a cache hit;
+                          * the winner's page barcode does not differ from the sheet's;
                           * no other MATCH candidate with a conflicting parsed identity.
-    REVIEW_PRESELECTED  a tier 1/2 candidate with MATCH, else a tier 1 candidate the
+    REVIEW_PRESELECTED  a tier 1/2 candidate with MATCH (one whose page barcode differs
+                        from the sheet's only when the verifier read brand, size and
+                        variant as 'yes', and only when no MATCH without that
+                        conflict exists), else a tier 1 candidate the
                         verifier looked at and read as UNSURE, else (only while the
                         verifier is down for the whole SKU) a tier 1 candidate with
                         UNKNOWN; that candidate is pre-checked ('preselected').
@@ -57,6 +61,15 @@ double-check before approving. They never change the winner or the decision.
                                  TLD ('.sa', '.ca', '.co.uk'; not generic ones like '.io'),
                                  a non-UAE retailer, or a UAE retailer's other-country
                                  section ('noon.com/saudi-en/'); never the brand's own site
+    barcode_conflict             the page carries a valid barcode that differs from the
+                                 sheet's (GTIN_POLICY 'evidence': tier 2 at most)
+
+Best-resolution copy (resolution_upgrade): once the winner and the decision are fixed, a
+fetched copy of the same picture (pHash distance <= 6, aspect within 10 %) with a larger
+short side is published instead when its own listing evidence is no weaker and it adds no
+risk (see resolution_upgrade()). The decision and the verifier reading stay the winner's;
+the copy carries 'resolution_upgrade:<winner short side>x<copy short side>' and the
+replaced winner 'resolution_upgrade:replaced'.
 """
 
 from __future__ import annotations
@@ -74,7 +87,8 @@ from .models import (
     Candidate, ProviderHealth, ProviderResult, RankedCandidate, SearchOutcome, Size, SkuSpec,
     VerificationResult,
 )
-from .score import page_host, trusted_domains
+from .fetch import phash_distance
+from .score import page_host, rank_key, trusted_domains
 from .sizes import compare, parse_sizes, product_size
 from .text_norm import domain_matches, normalize, phrase_in, store_market, url_host, url_path_text
 
@@ -87,11 +101,20 @@ MATCH, MISMATCH, UNSURE, UNKNOWN = "MATCH", "MISMATCH", "UNSURE", "UNKNOWN"
 WARN_PREFIX = "warn:"
 # Every review warning code (the dashboard maps each one to an Arabic sentence).
 WARNING_CODES = ("sheet_silent", "vlm_unsure", "low_resolution", "chat_or_screenshot", "social_media",
-                 "foreign_store")
+                 "foreign_store", "barcode_conflict")
 
+RESOLUTION_PREFIX = "resolution_upgrade"
 # Reason prefixes written by route(); recomputed on every call so route() is idempotent.
 _ROUTE_PREFIXES = ("hard:", "download:", "quality:", "vlm:", "preselected:", "auto_blocked:", "auto_publish",
-                   WARN_PREFIX)
+                   "gtin:", RESOLUTION_PREFIX, WARN_PREFIX)
+
+# Best-resolution copy: another fetched copy of the winning image is published instead when it
+# is the same picture (pHash distance and aspect ratio) with a larger short side.
+RESOLUTION_PHASH_MAX = 6
+RESOLUTION_ASPECT_TOL = 0.10
+# Warnings that a larger copy may differ in without adding a concern: it is larger by
+# construction, and the verifier reading stays the winner's.
+_UPGRADE_NEUTRAL_WARNINGS = frozenset({"low_resolution", "vlm_unsure"})
 
 # File names that chat apps and screenshot tools give exported images.
 _CHAT_OR_SCREENSHOT_RE = re.compile(
@@ -250,6 +273,26 @@ def identity_conflict(a: RankedCandidate, b: RankedCandidate, spec: Optional[Sku
     return None
 
 
+def gtin_conflict(rc: RankedCandidate) -> bool:
+    """True when the candidate's page carries a valid GTIN that differs from the sheet's."""
+    matched = (rc.score.matched or {}) if rc.score is not None else {}
+    return matched.get("gtin") == "mismatch"
+
+
+def full_match(spec: SkuSpec, rc: RankedCandidate) -> bool:
+    """MATCH with the verifier reading the brand and the size (and every stated variant) as 'yes'.
+
+    A candidate whose page barcode differs from the sheet's needs this reading to be pre-checked:
+    the same brand's other sizes and flavours carry other barcodes.
+    """
+    v = rc.verdict
+    if v is None or v.decision != MATCH:
+        return False
+    if v.brand_match != "yes" or v.size_match != "yes":
+        return False
+    return v.variant_match == "yes" if spec.variants else v.variant_match != "no"
+
+
 def brand_refuted(ranked: Sequence[RankedCandidate]) -> bool:
     """True when the verifier read a DIFFERENT brand on a tier-1 candidate.
 
@@ -322,9 +365,17 @@ def _foreign_store(spec: SkuSpec, cand: Candidate) -> bool:
     return domain_matches(host, data.get("other_retail", []))
 
 
-def review_warnings(spec: SkuSpec, rc: RankedCandidate) -> List[str]:
-    """Warning codes for a pre-checked candidate: what the reviewer should double-check first."""
+def review_warnings(spec: SkuSpec, rc: RankedCandidate, reading_of: Optional[RankedCandidate] = None
+                    ) -> List[str]:
+    """Warning codes for a pre-checked candidate: what the reviewer should double-check first.
+
+    reading_of, when given, is the candidate whose verifier reading the decision rests on (the
+    winner, when a larger copy of its picture is published instead of it); by default rc itself.
+    """
     cand = rc.candidate
+    if reading_of is not None and reading_of is not rc:
+        rc = RankedCandidate(candidate=rc.candidate, score=rc.score, fetched=rc.fetched, quality=rc.quality,
+                             verdict=reading_of.verdict, status=rc.status)
     out = _sheet_silent(spec, rc)
     if _decision_of(rc) != MATCH:
         out.append("vlm_unsure")
@@ -336,6 +387,8 @@ def review_warnings(spec: SkuSpec, rc: RankedCandidate) -> List[str]:
         out.append("social_media")
     if _foreign_store(spec, cand):
         out.append("foreign_store")
+    if gtin_conflict(rc):
+        out.append("barcode_conflict")
     return out
 
 
@@ -428,7 +481,17 @@ def route(spec: SkuSpec, ranked: Sequence[RankedCandidate],
     if verifiable and verifier_down:
         outcome.failure_code = "VERIFIER_DOWN"
 
-    winner = next((rc for rc in verifiable if rc.score.tier in (1, 2) and _decision_of(rc) == MATCH), None)
+    # A page barcode that differs from the sheet's (tier 2 at most) is pre-checked only on a
+    # MATCH that read the brand, the size and the variant as 'yes'; never on the tier-1 fallback.
+    for rc in verifiable:
+        if gtin_conflict(rc) and _decision_of(rc) == MATCH and not full_match(spec, rc):
+            rc.reasons.append("gtin:conflict_needs_full_match")
+    # A MATCH without that doubt is preferred to one with it, whatever their rank order.
+    winner = next((rc for rc in verifiable if rc.score.tier in (1, 2) and _decision_of(rc) == MATCH
+                   and not gtin_conflict(rc)), None)
+    if winner is None:
+        winner = next((rc for rc in verifiable if rc.score.tier in (1, 2) and _decision_of(rc) == MATCH
+                       and gtin_conflict(rc) and full_match(spec, rc)), None)
     why = "vlm_match"
     if winner is None and verify_state == "partial":
         outcome.failure_code = "VERIFIER_DOWN"
@@ -437,7 +500,8 @@ def route(spec: SkuSpec, ranked: Sequence[RankedCandidate],
         # only while the verifier is down for the whole SKU. With the verifier up, UNKNOWN
         # means it never saw the image (a skipped image or a failed second call).
         fallback = (UNSURE, UNKNOWN) if verifier_down else (UNSURE,)
-        winner = next((rc for rc in verifiable if rc.score.tier == 1 and _decision_of(rc) in fallback), None)
+        winner = next((rc for rc in verifiable if rc.score.tier == 1 and _decision_of(rc) in fallback
+                       and not gtin_conflict(rc)), None)
         if winner is not None and brand_refuted(ranked):
             winner.reasons.append("vlm:tier1_brand_refuted")
             _add(reject_counts, "vlm:tier1_brand_refuted")
@@ -468,27 +532,149 @@ def route(spec: SkuSpec, ranked: Sequence[RankedCandidate],
         blockers.append("relaxed_query")
     if cache_hit:
         blockers.append("cache_hit")
+    if gtin_conflict(winner):
+        blockers.append("barcode_conflict")
     if outcome.failure_code:
         blockers.append(outcome.failure_code.lower())
     elif verify_state == "partial":
         blockers.append("verifier_partial")      # the conflict check below could not see every image
-    for other in ranked:
-        if other is winner or _identity_rejected(other) or other.status == "excluded":
-            continue
-        if _decision_of(other) != MATCH:
-            continue
-        clash = identity_conflict(winner, other, spec)
-        if clash:
-            blockers.append(f"conflicting_match:{clash}")
-            break
+    clash = _conflicting_match(spec, winner, ranked)
+    if clash:
+        blockers.append(f"conflicting_match:{clash}")
 
     if blockers:
         winner.reasons.extend(f"auto_blocked:{b}" for b in blockers)
     else:
         outcome.decision = "AUTO_PUBLISH"
         winner.reasons.append("auto_publish")
-    warnings = review_warnings(spec, winner)
-    winner.reasons.extend(WARN_PREFIX + w for w in warnings)
-    logger.info("route %s: %s winner=%s warnings=%s", spec.sku_key, outcome.decision, winner.candidate.image_url,
-                ",".join(warnings) or "-")
+
+    # Best-resolution copy: the same picture, larger, from a page that is no weaker.
+    published = winner
+    copy = resolution_upgrade(spec, winner, ranked, relaxed_ids, outcome.decision)
+    if copy is not None:
+        moved = [r for r in winner.reasons if r.startswith(("preselected:", "auto_blocked:", "auto_publish"))]
+        winner.reasons[:] = [r for r in winner.reasons if r not in moved]
+        winner.reasons.append(f"{RESOLUTION_PREFIX}:replaced")
+        winner.status = "eligible"
+        copy.status = "preselected"
+        copy.reasons.extend(moved)
+        copy.reasons.append(f"{RESOLUTION_PREFIX}:{_short_side(winner)}x{_short_side(copy)}")
+        outcome.winner = published = copy
+    warnings = review_warnings(spec, published, reading_of=winner)
+    published.reasons.extend(WARN_PREFIX + w for w in warnings)
+    logger.info("route %s: %s winner=%s warnings=%s", spec.sku_key, outcome.decision,
+                published.candidate.image_url, ",".join(warnings) or "-")
     return outcome
+
+
+# ---------------------------------------------------------------------------
+# Best-resolution copy
+# ---------------------------------------------------------------------------
+
+def _conflicting_match(spec: SkuSpec, pick: RankedCandidate, ranked: Sequence[RankedCandidate]) -> Optional[str]:
+    """Why another MATCH candidate cannot show the same SKU as `pick` (the first clash), else None."""
+    for other in ranked:
+        if other is pick or _identity_rejected(other) or other.status == "excluded":
+            continue
+        if _decision_of(other) != MATCH:
+            continue
+        clash = identity_conflict(pick, other, spec)
+        if clash:
+            return clash
+    return None
+
+
+def _short_side(rc: RankedCandidate) -> int:
+    f = rc.fetched
+    if f is None or not f.ok or not f.width or not f.height:
+        return 0
+    return int(min(f.width, f.height))
+
+
+def _same_picture(a: RankedCandidate, b: RankedCandidate) -> bool:
+    """pHash distance <= RESOLUTION_PHASH_MAX and the aspect ratio within RESOLUTION_ASPECT_TOL of a's."""
+    dist = phash_distance(a.fetched.phash, b.fetched.phash)
+    if dist is None or dist > RESOLUTION_PHASH_MAX:
+        return False
+    ra = a.fetched.width / a.fetched.height
+    rb = b.fetched.width / b.fetched.height
+    return abs(ra - rb) <= RESOLUTION_ASPECT_TOL * ra
+
+
+def _identity_not_weaker(copy: RankedCandidate, winner: RankedCandidate) -> bool:
+    """The copy's own listing evidence is at least the winner's on every identity key and on source trust.
+
+    Keys (score.rank_key, lower is better): tier, size match, variants matched, class coverage,
+    source trust. A larger picture never buys a weaker listing.
+    """
+    kc = rank_key(copy.candidate, copy.score)
+    kw = rank_key(winner.candidate, winner.score)
+    return all(c <= w for c, w in zip(kc[:5], kw[:5]))
+
+
+def resolution_upgrade(spec: SkuSpec, winner: RankedCandidate, ranked: Sequence[RankedCandidate],
+                       relaxed_ids: Optional[Set[str]] = None, decision: str = "REVIEW_PRESELECTED"
+                       ) -> Optional[RankedCandidate]:
+    """The largest copy of the winner's picture that may be published instead of it, or None.
+
+    A copy qualifies only when every one of these holds:
+      * it is an eligible, fetched, quality-passing candidate (never hard-rejected, excluded,
+        a failed download or a verifier MISMATCH);
+      * it is the same picture: pHash distance <= 6 and aspect ratio within 10 %; its short
+        side is larger than the winner's;
+      * its own identity evidence is no weaker: same or better tier (never downward), size
+        match, variants matched, class coverage and page trust, and it carries no score
+        conflict (soft size / pack / variant / brand doubt) the winner does not;
+      * it adds no risk the winner did not carry: sanctioned when the winner is, not from a
+        relaxed query unless the winner is, no barcode conflict or differing page GTIN, no
+        identity conflict with the winner's reading, no review warning the winner lacks;
+      * its own verifier reading, when it has one, is not weaker than the winner's (UNSURE
+        never replaces a MATCH); for AUTO_PUBLISH it must have its own MATCH and no clash
+        with any other MATCH candidate.
+    The decision and its verifier reading stay the winner's.
+    """
+    base = _short_side(winner)
+    if not base or winner.fetched is None or not winner.fetched.phash or winner.score is None:
+        return None
+    # Soft doubts on the winner's own listing (the verifier read it as a match with them on record).
+    w_conflicts = set(winner.score.conflicts or ())
+    relaxed_ids = set(relaxed_ids or ())
+    w_decision = _decision_of(winner)
+    w_relaxed = bool(winner.candidate.query_id) and winner.candidate.query_id in relaxed_ids
+    w_warnings = set(review_warnings(spec, winner)) - _UPGRADE_NEUTRAL_WARNINGS
+    best: Optional[RankedCandidate] = None
+    for other in ranked:
+        if other is winner or other.status != "eligible" or _identity_rejected(other):
+            continue
+        if other.fetched is None or not other.fetched.ok or not other.fetched.phash:
+            continue
+        if other.quality is not None and not other.quality.hard_ok:
+            continue
+        size = _short_side(other)
+        if size <= base or (best is not None and size <= _short_side(best)):
+            continue
+        if not _same_picture(winner, other) or not _identity_not_weaker(other, winner):
+            continue
+        # A size / pack / variant / brand doubt on the copy's own evidence that the winner does not
+        # carry (a low-fat image file name, a 'pack of 6' URL): a grey-scale pHash cannot tell
+        # colour variants apart and the verifier never saw this image.
+        if not set(other.score.conflicts or ()) <= w_conflicts:
+            continue
+        if winner.candidate.sanctioned and not other.candidate.sanctioned:
+            continue
+        if not w_relaxed and other.candidate.query_id and other.candidate.query_id in relaxed_ids:
+            continue
+        if gtin_conflict(other) or same_gtin(winner.candidate.gtin_on_page, other.candidate.gtin_on_page) is False:
+            continue
+        o_decision = _decision_of(other)
+        if o_decision == MISMATCH or (o_decision == UNSURE and w_decision == MATCH):
+            continue
+        if decision == "AUTO_PUBLISH" and (o_decision != MATCH or _conflicting_match(spec, other, ranked)):
+            continue
+        if identity_conflict(winner, other, spec):
+            continue
+        added = set(review_warnings(spec, other, reading_of=winner)) - _UPGRADE_NEUTRAL_WARNINGS - w_warnings
+        if added:
+            continue
+        best = other
+    return best

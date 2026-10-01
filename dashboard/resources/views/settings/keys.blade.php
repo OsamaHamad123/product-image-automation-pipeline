@@ -1,6 +1,7 @@
 {{--
     Settings · المفاتيح. $keys = SettingsController::keyRows(): per provider its purpose, whether a key is saved
-    (database or environment) and the last connection check if it ran after the key changed.
+    (database or environment) and the last connection check if it ran after the key changed. Anthropic (Claude
+    label readers) and SerpApi (search by image) are optional: without a key they read «مش مضبوط · اختياري».
     A stored key is never printed, not even in part. «تغيير» opens an empty, write-only field; an empty field keeps
     the stored key. Each provider's form saves its own section only.
 --}}
@@ -12,6 +13,8 @@
         'photoroom_api_key' => 'مفتاح PhotoRoom الجديد',
         'cloudinary_api_key' => 'مفتاح Cloudinary الجديد (API Key)',
         'cloudinary_api_secret' => 'الرمز السري لـ Cloudinary (API Secret)',
+        'anthropic_api_key' => 'مفتاح Anthropic الجديد (لنماذج Claude)',
+        'serpapi_api_key' => 'مفتاح SerpApi الجديد',
     ];
 @endphp
 <section class="lq-card lq-settings-card" aria-labelledby="lq-settings-keys-title">

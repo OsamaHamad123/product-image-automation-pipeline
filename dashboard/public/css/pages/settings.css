@@ -556,3 +556,103 @@
         color: var(--lq-text-3);
     }
 }
+
+/* Verifier models (settings/models.blade.php, verifier package P3) */
+.lq-models__spend {
+    font-size: var(--lq-fs-sm);
+    line-height: 1.7;
+    color: var(--lq-text-2);
+}
+
+.lq-models__budget {
+    max-width: 200px;
+}
+
+.lq-models__table .lq-table td {
+    white-space: nowrap;
+}
+
+.lq-models__name {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--lq-space-2);
+}
+
+.lq-models__price {
+    width: 96px;
+    text-align: end;
+}
+
+@media (max-width: 980px) {
+    .lq-models__price {
+        width: 84px;
+    }
+}
+
+@media (max-width: 560px) {
+    .lq-models__budget {
+        max-width: none;
+    }
+
+    .lq-models__table {
+        overflow: visible;
+    }
+
+    .lq-models__table .lq-table thead {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
+    }
+
+    .lq-models__table .lq-table,
+    .lq-models__table .lq-table tbody {
+        display: block;
+    }
+
+    .lq-models__table .lq-table tr {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        align-items: center;
+        gap: var(--lq-space-2) var(--lq-space-3);
+        padding: var(--lq-space-3) 14px;
+        border-block-start: 1px solid var(--lq-border-soft);
+    }
+
+    .lq-models__table .lq-table tbody tr:first-child {
+        border-block-start: 0;
+    }
+
+    .lq-models__table .lq-table td {
+        display: block;
+        padding: 0;
+        border: 0;
+        white-space: normal;
+    }
+
+    .lq-models__table .lq-table tbody tr:hover td {
+        background: transparent;
+    }
+
+    .lq-models__table .lq-models__name {
+        display: flex;
+        grid-column: 1 / 3;
+    }
+
+    .lq-models__table td[data-label] {
+        font-size: var(--lq-fs-sm);
+        color: var(--lq-text-2);
+    }
+
+    .lq-models__table td[data-label]::before {
+        display: block;
+        content: attr(data-label);
+        color: var(--lq-text-3);
+    }
+
+    .lq-models__price {
+        width: 100%;
+    }
+}

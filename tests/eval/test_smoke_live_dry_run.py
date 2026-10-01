@@ -125,19 +125,27 @@ def wired(monkeypatch, golden, cassette):
     monkeypatch.setattr(cm_providers, "default_providers", lambda *a, **k: [Dispatch(i) for i in range(len(names))])
     monkeypatch.setattr(cm_pipeline, "_default_fetcher", lambda: Fetcher())
     monkeypatch.setattr(cm_verify, "GeminiVerifier", lambda *a, **k: Verifier())
+    # The dry run reads labels with the worker's own verifier (pipeline._default_verifier: the models chosen
+    # in Settings), so the double stands in there as well.
+    monkeypatch.setattr(cm_pipeline, "_default_verifier", lambda *a, **k: Verifier())
     return {"script": script, "skus": skus, "worksheet": worksheet, "mappings": mappings}
 
 
 def test_dry_run_reads_the_sheet_and_matches_the_pipeline(wired, cassette, tmp_path, capsys):
     out = tmp_path / "smoke.json"
     with runners._v2_settings(False), runners.network_blocked() as attempts:
-        code = wired["script"].main(["--rows", "2-4", "--dry-run", "--json", str(out)])
+        # the pipeline replay below has no expansion round either (injected stages)
+        code = wired["script"].main(["--rows", "2-4", "--dry-run", "--no-expansion", "--json", str(out)])
     assert code == 0
     assert runners.outbound_attempts(attempts) == []
     assert wired["worksheet"].writes == []
 
-    results = json.loads(out.read_text(encoding="utf-8"))
+    doc = json.loads(out.read_text(encoding="utf-8"))
+    assert doc["format"] == "smoke_live/2"
+    results = doc["rows"]
     assert [r["row"] for r in results] == [2, 3, 4]
+    assert doc["summary"]["rows"] == 3 and doc["summary"]["measured"] == 3
+    assert doc["summary"] == wired["script"].summarize(results)
     assert not [r for r in results if "error" in r], results
     for r, sku in zip(results, wired["skus"]):
         expected = runners.run_v2(sku, cassette, mappings=wired["mappings"])
@@ -145,6 +153,7 @@ def test_dry_run_reads_the_sheet_and_matches_the_pipeline(wired, cassette, tmp_p
         assert r["name"] == runners.sku_row(sku)["name"]
     printed = capsys.readouterr().out
     assert "3 rows | decisions" in printed and "DECISION" in printed
+    assert "=== run summary ===" in printed and "pre-selected " in printed
 
 
 def test_rows_are_read_with_the_production_header_synonyms(wired):
@@ -174,7 +183,7 @@ def test_the_pick_is_reported_even_below_the_top_five(wired, cassette, tmp_path,
     with runners._v2_settings(False), runners.network_blocked():
         wired["script"].main(["--rows", "2-4", "--dry-run", "--json", str(out)])
     capsys.readouterr()
-    for r in json.loads(out.read_text(encoding="utf-8")):
+    for r in json.loads(out.read_text(encoding="utf-8"))["rows"]:
         if r["winner"]:
             assert r["winner_detail"]["image_url"] == r["winner"]
             assert any(x.startswith("preselected:") for x in r["winner_detail"]["reasons"])
