@@ -1,7 +1,7 @@
-"""Diagnostics page: the search health and cost panel (HealthController + diagnostics.blade.php).
+"""Health page: the search health and cost panel (HealthController + diagnostics.blade.php + public/js/health.js).
 
-Static checks, `php -l`, and the panel's rendering code run under node against a stub DOM with a report
-shaped exactly like ops_health.summarize's output.
+Static checks, `php -l`, and the panel's view code (LaqtaHealth.opsView) run under node with a report shaped
+exactly like ops_health.summarize's output.
 """
 
 import json
@@ -13,15 +13,17 @@ from pathlib import Path
 import pytest
 
 import ops_health
-from blade_scripts import inline_scripts
 
 ROOT = Path(__file__).resolve().parents[1]
 DASH = ROOT / "dashboard"
 CONTROLLER = DASH / "app" / "Http" / "Controllers" / "HealthController.php"
 VIEW = DASH / "resources" / "views" / "dashboard" / "diagnostics.blade.php"
+JS = DASH / "public" / "js" / "health.js"
 ROUTES = DASH / "routes" / "web.php"
 PHP = shutil.which("php")
 NODE = shutil.which("node")
+LTR = "⁦"
+PDI = "⁩"
 
 
 def read(path):
@@ -55,36 +57,22 @@ def test_controller_is_read_only_through_the_bridge():
 
 def test_view_loads_the_panel():
     view = read(VIEW)
-    assert "fetch('/api/system/ops-health'" in view
-    assert "loadOpsHealth(false);" in view
-    assert 'id="opsHealthAlerts"' in view and 'id="opsHealthBody"' in view
-    assert "لا توجد عمليات بحث مسجلة في الطابور خلال آخر 7 أيام" in view
+    js = read(JS)
+    assert "var OPS_URL = '/api/system/ops-health';" in js
+    assert "deps.fetchJson(OPS_URL + (refresh ? '?refresh=1' : '')" in js
+    assert "loadOps(false);" in js
+    assert 'data-health="alerts"' in view and 'data-health="ops"' in view
+    assert "ما في عمليات بحث بآخر 7 أيام" in view and "ما في عمليات بحث بآخر 7 أيام" in js
+    # values from the table only ever reach the page as text
+    assert "innerHTML" not in js and "insertAdjacentHTML" not in js and ".textContent" in js
 
 
 def _render(report, window="24h"):
-    """Run the diagnostics page script under node with a stub DOM; return the panel's HTML and note text."""
-    blocks = inline_scripts(read(VIEW))
-    script = re.sub(r"\{\{.*?\}\}", "''", blocks[-1])
-    harness = """
-const elements = {};
-function el(id) {
-    if (!elements[id]) elements[id] = { id, innerHTML: '', textContent: '', className: '', disabled: false,
-                                        checked: false, style: {}, value: '' };
-    return elements[id];
-}
-globalThis.document = { getElementById: el, querySelector: () => ({ content: '' }) };
-globalThis.window = { addEventListener: () => {} };
-""" + script + f"""
-opsHealthData = {json.dumps(report, ensure_ascii=False)};
-switchHealthWindow({json.dumps(window)});
-console.log(JSON.stringify({{
-    alerts: el('opsHealthAlerts').innerHTML,
-    body: el('opsHealthBody').innerHTML,
-    note: el('opsHealthNote').textContent,
-    tab7d: el('health-tab-7d').className
-}}));
+    """LaqtaHealth.opsView(report, window) under node: the panel exactly as the page renders it."""
+    harness = "globalThis.window = globalThis;\n" + read(JS) + f"""
+console.log(JSON.stringify(window.LaqtaHealth.opsView({json.dumps(report, ensure_ascii=False)}, {json.dumps(window)})));
 """
-    result = subprocess.run([NODE, "-e", harness], capture_output=True, text=True, timeout=60)
+    result = subprocess.run([NODE, "-e", harness], capture_output=True, text=True, timeout=60, encoding="utf-8")
     assert result.returncode == 0, result.stderr
     return json.loads(result.stdout.strip().splitlines()[-1])
 
@@ -110,31 +98,47 @@ def test_panel_renders_alerts_in_red_and_escapes_provider_names():
     report = dict(ops_health.summarize(rows), status="success")
     out = _render(report)
 
-    assert out["alerts"].count('class="health-alert"') == 1
-    assert "رصيد Serper انتهى أو المفتاح مرفوض" in out["alerts"]
-    # values from the table never reach the page as markup
-    assert "<img" not in out["body"] and "&lt;img src=x onerror=alert(1)&gt;" in out["body"]
-    assert "<script>" not in out["body"] and "&lt;script&gt;x()&lt;/script&gt;" in out["body"]
-    assert "<b>" not in out["body"] and "&lt;b&gt;CODE&lt;/b&gt;" in out["body"]
-    assert "مراجعة بدون اختيار (REVIEW_UNSELECTED)" in out["body"]
-    assert "$0.001" in out["body"]                         # Serper answered nothing; one Gemini call
-    assert "VERIFIER_DOWN" in out["body"] and "PROVIDER_DOWN" in out["body"]
-    assert "تم فحص 4 صف" in out["note"] and "Serper 0.001$" in out["note"]
+    assert out["kind"] == "ok"
+    assert [a["title"] for a in out["alerts"]] == ["رصيد Serper انتهى أو المفتاح مرفوض"]
+    assert "401" not in out["alerts"][0]["text"] and "Serper" in out["alerts"][0]["text"]
+    # hostile values stay plain strings (the DOM code writes them with textContent, never as markup)
+    providers = {p["name"]: p for p in out["providers"]}
+    assert "<img src=x onerror=alert(1)>" in providers
+    assert providers["Serper (Google)"]["problems"] == "رفض الرصيد 3" and providers["Serper (Google)"]["tone"] == "danger"
+    decisions = {d["key"]: d for d in out["decisions"]}
+    assert decisions["other"]["title"] == "<script>x()</script> 1" and decisions["other"]["label"] == "غير ذلك"
+    # plain Arabic as the main text, the code only in the tooltip
+    assert decisions["none"]["label"] == "بلا اقتراح" and decisions["none"]["value"] == 1
+    assert decisions["none"]["title"] == "REVIEW_UNSELECTED 1"
+    assert decisions["error"]["label"] == "أعطال مؤقتة" and decisions["error"]["title"] == "PROVIDER_DOWN 1"
+    for d in out["decisions"]:
+        assert not re.search(r"[A-Z]{3,}_[A-Z]", d["label"]), d
+    reasons = {r["title"]: r for r in out["reasons"]}
+    assert reasons["VERIFIER_DOWN"]["label"] == "Gemini ما ردّ"
+    assert reasons["PROVIDER_DOWN"]["label"] == "مصادر البحث ما ردّت"
+    assert reasons["<b>CODE</b>"]["label"] == "سبب تاني"
+    # Serper answered nothing; one Gemini call ($0.001)
+    assert out["cost"]["lines"][0] == {"label": "Serper · 0 استعلام", "value": f"{LTR}$0.00{PDI}"}
+    assert out["cost"]["lines"][1] == {"label": "Gemini · فحص واحد", "value": f"أقل من {LTR}$0.01{PDI}"}
+    assert out["total"] == "3 منتجات"
+    assert "(4 صفوف)" in out["note"] and f"Serper {LTR}$0.001{PDI}" in out["cost"]["note"]
 
     week = _render(report, "7d")
-    assert week["tab7d"] == "console-tab active"
-    assert "REVIEW_PRESELECTED" in week["body"]
+    assert {d["key"]: d for d in week["decisions"]}["proposed"]["title"] == "REVIEW_PRESELECTED 1"
+    assert week["total"] == "4 منتجات"
 
 
 @pytest.mark.skipif(NODE is None, reason="node is not installed")
 def test_panel_empty_states():
     empty = dict(ops_health.summarize([]), status="success")
     out = _render(empty)
-    assert out["alerts"] == ""
-    assert "لا توجد عمليات بحث مسجلة في الطابور خلال آخر 7 أيام" in out["body"]
+    assert out["alerts"] == []
+    assert out["kind"] == "empty" and out["title"] == "ما في عمليات بحث بآخر 7 أيام" and out["action"] is True
 
     only_old = dict(ops_health.summarize([_row(3 * 86400, _outcome("NOT_FOUND", "NO_RESULTS"), "NO_RESULTS")]),
                     status="success")
     out = _render(only_old)
-    assert "لا توجد عمليات بحث مسجلة في آخر 24 ساعة" in out["body"]
-    assert "health-tile" not in out["body"]
+    assert out["kind"] == "window-empty" and out["title"] == "ما في عمليات بحث بآخر 24 ساعة"
+    assert "decisions" not in out
+    week = _render(only_old, "7d")
+    assert week["kind"] == "ok" and week["reasons"][0]["label"] == "ما في نتائج أبداً"

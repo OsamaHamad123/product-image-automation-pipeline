@@ -93,7 +93,10 @@ def test_google_cse_is_optional(monkeypatch):
 
 def test_diagnostics_page_shows_serper_and_no_fabricated_panel():
     page = (ROOT / "dashboard/resources/views/dashboard/diagnostics.blade.php").read_text(encoding="utf-8")
-    assert 'id="card-serper"' in page and 'id="ind-serper"' in page and 'id="text-serper"' in page
+    controller = (ROOT / "dashboard/app/Http/Controllers/HealthController.php").read_text(encoding="utf-8")
+    # one card per HealthController::SERVICES entry (Serper among them), with its state and dot
+    assert "'serper' => ['name' => 'Serper'" in controller
+    assert "id=\"card-{{ $service['key'] }}\"" in page and "data-service-state" in page and "data-service-dot" in page
     for fabricated in ("98.4%", "Next-Gen Frontiers", "CIEDE2000", "Speculative Search"):
         assert fabricated not in page
 

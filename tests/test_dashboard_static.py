@@ -48,7 +48,6 @@ CHANGED_BLADES = [
     VIEWS / "dashboard" / "index.blade.php",
     VIEWS / "dashboard" / "settings.blade.php",
     VIEWS / "dashboard" / "diagnostics.blade.php",
-    VIEWS / "dashboard" / "active_learning.blade.php",
     VIEWS / "layouts" / "layout.blade.php",
 ]
 
@@ -212,15 +211,22 @@ def test_views_do_not_inline_urls_in_handlers():
 
 
 def test_settings_never_echo_secrets():
-    settings = read(VIEWS / "dashboard" / "settings.blade.php")
+    # The Laqta settings page is settings.blade.php plus one partial per tab (resources/views/settings).
+    views = [VIEWS / "dashboard" / "settings.blade.php"] + sorted((VIEWS / "settings").glob("*.blade.php"))
+    settings = "\n".join(read(p) for p in views)
+    controller = read(CONTROLLERS / "SettingsController.php")
+    providers = controller[controller.index("public const PROVIDERS"):controller.index("public const LEGACY_SECRETS")]
     for key in ("photoroom_api_key", "gemini_api_key", "cloudinary_api_key", "cloudinary_api_secret",
                 "google_search_api_key", "serper_api_key", "proxy_url"):
         assert f"$settings['{key}']" not in settings, key
-        assert f'name="{key}"' in settings, key
+        assert f"['{key}']['value']" not in settings, key
+        # every secret is still reachable: a literal field («متقدم») or one per provider key (keys tab loop)
+        assert f'name="{key}"' in settings or f"'{key}' =>" in providers, key
+    assert 'name="{{ $field }}"' in settings and 'type="password"' in settings
     assert 'name="search_engine"' in settings
 
-    controller = read(CONTROLLERS / "ProductController.php")
-    assert "maskSecret" in controller
+    # Not even the last characters of a stored key are printed any more (no mask on the page).
+    assert "maskSecret" not in controller and "$masked" not in settings and "maskSecret" not in settings
     # A blank secret field keeps the stored key instead of overwriting it with a mask.
     assert re.search(r"if \(\$val === '' && !\$clear\)\s*\{\s*continue;", controller)
 

@@ -272,33 +272,12 @@ class ProductController extends Controller
     }
 
     /**
-     * صفحة التعلم من المراجعين: دقة الاختيار المسبق لكل براند ونطاق من قرارات المراجعين الحقيقية
-     * (إجراء cli_bridge review_stats، نفس حساب scripts/review_stats.py)، وسجل الرفض الأخير.
-     * لا توجد قواعد تصحيح ذاتي لكل براند: لا يقرأ أي كود بايثون هامشاً أو فحص خلفية من هذه الصفحة.
+     * صفحة التعلم من المراجعين صارت تبويب «النشر الآلي» في الإعدادات (SettingsController): نفس review_stats،
+     * ومعها التفعيل لكل ماركة جاهزة. الرابط القديم يفتح التبويب.
      */
     public function activeLearning()
     {
-        $errors = [];
-        $feedbackLogs = [];
-        try {
-            $feedbackLogs = DB::select("SELECT * FROM active_learning_feedback ORDER BY timestamp DESC");
-        } catch (\Exception $e) {
-            $errors[] = 'فشل تحميل سجل الرفض: ' . $e->getMessage();
-        }
-
-        $reviewStats = null;
-        $result = $this->runPython('review_stats');
-        if (($result['status'] ?? '') === 'success') {
-            $reviewStats = $result;
-        } else {
-            $errors[] = 'تعذر حساب إحصائيات المراجعة: ' . ($result['error'] ?? 'خطأ غير معروف');
-        }
-
-        $data = compact('feedbackLogs', 'reviewStats');
-        if (!empty($errors)) {
-            $data['error'] = implode(' ', $errors);
-        }
-        return view('dashboard.active_learning', $data);
+        return redirect()->to(route('dashboard.settings') . '?tab=auto-publish');
     }
 
     /**
@@ -366,13 +345,12 @@ class ProductController extends Controller
     }
 
     /**
-     * عرض صفحة تشخيصات وسجلات النظام
+     * صفحة الصحة والتكلفة (لقطة): تُبنى في HealthController::page، والرابط '/system-diagnostics' يشير إليها مباشرة.
+     * الصفحة لا تشغل فحص الاتصالات عند فتحها؛ تعرض آخر نتيجة محفوظة (lastDiagnostics) والفحص بزر صريح فقط.
      */
     public function systemDiagnostics()
     {
-        // الصفحة لا تشغل فحص الاتصالات عند فتحها (استعلام Serper مدفوع + استدعاء PhotoRoom):
-        // تعرض آخر نتيجة محفوظة مع وقتها، والفحص الجديد بزر صريح فقط.
-        return view('dashboard.diagnostics', ['lastDiagnostics' => self::lastDiagnostics()]);
+        return app(HealthController::class)->page();
     }
 
     /** آخر نتيجة محفوظة لفحص الاتصالات، أو null إذا لم يُجرَ فحص بعد. */
@@ -473,98 +451,19 @@ class ProductController extends Controller
     }
 
     /**
-     * عرض صفحة إعدادات النظام ومفاتيح الـ API.
-     * المفاتيح السرية لا تطبع في الصفحة أبداً؛ تعرض مقنّعة (آخر 4 أحرف) ويترك الحقل فارغاً.
+     * الإعدادات (لقطة): تُبنى في SettingsController، والرابطان GET/POST '/settings' يشيران إليه مباشرة.
      */
-    public function settings()
+    public function settings(Request $request)
     {
-        $settingsRaw = DB::table('system_settings')->get();
-        $stored = [];
-        foreach ($settingsRaw as $row) {
-            $stored[$row->key] = $row->value;
-        }
-
-        $settings = [];
-        foreach (array_merge(self::TEXT_SETTING_KEYS, self::CHECKBOX_SETTING_KEYS) as $k) {
-            $settings[$k] = $stored[$k] ?? '';
-        }
-        if ($settings['search_engine'] === '') {
-            $settings['search_engine'] = 'v2';
-        }
-        if ($settings['gemini_model'] === '') {
-            $settings['gemini_model'] = 'gemini-3.1-flash-lite';
-        }
-
-        $masked = [];
-        foreach (self::SECRET_SETTING_KEYS as $k) {
-            $masked[$k] = self::maskSecret($stored[$k] ?? '');
-        }
-
-        $geminiModels = self::SUPPORTED_GEMINI_MODELS;
-
-        return view('dashboard.settings', compact('settings', 'masked', 'geminiModels'));
+        return app(SettingsController::class)->show($request);
     }
 
     /**
-     * حفظ وتحديث إعدادات النظام ومفاتيح الـ API في قاعدة البيانات.
-     * حقل سري فارغ يعني "إبقاء القيمة الحالية" حتى لا يُكتب القناع فوق المفتاح الحقيقي.
+     * حفظ الإعدادات: SettingsController::save (نفس قائمة المفاتيح وقواعد التحقق؛ كل نموذج يحفظ قسمه فقط).
      */
     public function saveSettings(Request $request)
     {
-        $warnings = [];
-
-        try {
-            foreach (self::SECRET_SETTING_KEYS as $k) {
-                $val = trim((string) $request->input($k, ''));
-                $clear = $request->boolean('clear_' . $k);
-                if ($val === '' && !$clear) {
-                    continue;
-                }
-                if (strpos($val, '••••') === 0) {
-                    // قناع أعيد إرساله بالخطأ: لا نكتبه فوق المفتاح
-                    continue;
-                }
-                DB::table('system_settings')->updateOrInsert(
-                    ['key' => $k],
-                    ['value' => $clear ? '' : $val, 'updated_at' => now()]
-                );
-            }
-
-            foreach (self::TEXT_SETTING_KEYS as $k) {
-                $val = trim((string) $request->input($k, ''));
-                if ($k === 'search_engine' && !in_array($val, ['v2', 'v1'], true)) {
-                    $val = 'v2';
-                }
-                if ($k === 'gemini_model' && !array_key_exists($val, self::SUPPORTED_GEMINI_MODELS)) {
-                    $warnings[] = "نموذج Gemini '{$val}' غير مدعوم؛ لم يتم تغيير النموذج المحفوظ.";
-                    continue;
-                }
-                if ($k === 'auto_publish_brands') {
-                    $brands = array_filter(array_map('trim', explode(',', $val)), fn ($b) => $b !== '');
-                    $val = implode(', ', array_unique($brands));
-                }
-                DB::table('system_settings')->updateOrInsert(
-                    ['key' => $k],
-                    ['value' => $val, 'updated_at' => now()]
-                );
-            }
-
-            foreach (self::CHECKBOX_SETTING_KEYS as $ck) {
-                $val = $request->has($ck) ? 'true' : 'false';
-                DB::table('system_settings')->updateOrInsert(
-                    ['key' => $ck],
-                    ['value' => $val, 'updated_at' => now()]
-                );
-            }
-
-            $message = 'تم حفظ وتحديث الإعدادات بنجاح في قاعدة البيانات.';
-            if (!empty($warnings)) {
-                $message .= ' ' . implode(' ', $warnings);
-            }
-            return redirect()->route('dashboard.settings')->with('success', $message);
-        } catch (\Exception $e) {
-            return redirect()->route('dashboard.settings')->with('error', 'فشل حفظ الإعدادات: ' . $e->getMessage());
-        }
+        return app(SettingsController::class)->save($request);
     }
 
     /**

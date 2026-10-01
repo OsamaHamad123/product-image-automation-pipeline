@@ -1,0 +1,85 @@
+{{--
+    Settings · متقدم. $advanced = SettingsController::advancedData(): the search engine (v2, or v1 as a temporary
+    rollback), the Gemini model, strict brand matching, the v1-only switches and the legacy Custom Search / proxy
+    settings. Secret fields are write-only (empty = keep the stored value) and never show a stored value.
+--}}
+@php $adv = $advanced; @endphp
+<form method="POST" action="{{ route('dashboard.save_settings') }}" class="lq-card lq-settings-card" aria-labelledby="lq-settings-advanced-title" autocomplete="off" data-advanced-form data-engine="{{ $adv['engine'] }}">
+    @csrf
+    <input type="hidden" name="section" value="advanced">
+    <div class="lq-settings-card__head">
+        <h2 class="lq-section-title" id="lq-settings-advanced-title">متقدم</h2>
+        <p class="lq-settings-card__intro">إعدادات نادراً ما بتحتاجها. غيّرها بس إذا بتعرف شو بتعمل.</p>
+    </div>
+
+    @if ($adv['engine'] === 'v1')
+        <x-lq.alert variant="danger" title="النظام القديم شغّال هلق:">الصور ما عم تنفحص متل النظام الجديد. رجّع «النظام الجديد» أول ما تخلص.</x-lq.alert>
+    @endif
+
+    <fieldset class="lq-settings-fieldset" @disabled((bool) $dbError)>
+        <legend class="lq-field__label">نظام البحث</legend>
+        <label class="lq-check lq-settings-choice">
+            <input type="radio" name="search_engine" value="v2" @checked($adv['engine'] === 'v2')>
+            <span>النظام الجديد: بيقرأ الملصق وبيتأكد من الماركة والحجم والنوع (موصى به)</span>
+        </label>
+        <label class="lq-check lq-settings-choice">
+            <input type="radio" name="search_engine" value="v1" @checked($adv['engine'] === 'v1') data-engine-v1>
+            <span>النظام القديم: للرجوع المؤقت بس</span>
+        </label>
+        <x-lq.alert variant="warning" title="قبل ما ترجع للنظام القديم:">ما بيقرأ الملصق ولا بيتأكد من الحجم والنوع متل الجديد، فبتكتر الاقتراحات الغلط. استعمله بس إذا النظام الجديد عم يعلق، ورجّع أول ما ينحل.</x-lq.alert>
+    </fieldset>
+
+    <label class="lq-field">
+        <span class="lq-field__label">نموذج Gemini لقراءة الملصق</span>
+        <select name="gemini_model" class="lq-select lq-settings-field__control" @disabled((bool) $dbError)>
+            @foreach ($adv['models'] as $modelId => $modelLabel)
+                <option value="{{ $modelId }}" @selected($adv['model'] === $modelId)>{{ $modelLabel }}</option>
+            @endforeach
+        </select>
+        @if (!$adv['model_supported'])
+            <span class="lq-field__error">النموذج المحفوظ (<bdi dir="ltr">{{ $adv['model'] }}</bdi>) متقاعد أو مش مدعوم؛ اختار نموذج من القائمة واحفظ.</span>
+        @endif
+    </label>
+
+    <div class="lq-settings-switch-row">
+        <x-lq.switch name="strict_brand_match" value="true" label="مطابقة الماركة الصارمة" show-label :checked="$adv['strict']" :disabled="(bool) $dbError" />
+        <span class="lq-field__hint">بيرفض الصورة إذا بيّن عليها ماركة منافسة بدون الماركة المطلوبة.</span>
+    </div>
+
+    <fieldset class="lq-settings-fieldset lq-settings-fieldset--boxed" @disabled((bool) $dbError)>
+        <legend class="lq-field__label">خيارات النظام القديم (بتشتغل بس معه)</legend>
+        <x-lq.switch name="enable_gemini_pre_validation" value="true" label="فحص Gemini المسبق" show-label :checked="$adv['v1']['enable_gemini_pre_validation']" />
+        <x-lq.switch name="filter_competitors" value="true" label="فلترة الماركات المنافسة" show-label :checked="$adv['v1']['filter_competitors']" />
+        <x-lq.switch name="bypass_white_background_check" value="true" label="تخطي فحص الخلفية البيضا" show-label :checked="$adv['v1']['bypass_white_background_check']" />
+    </fieldset>
+
+    <fieldset class="lq-settings-fieldset lq-settings-fieldset--boxed" @disabled((bool) $dbError)>
+        <legend class="lq-field__label">مصادر قديمة واختيارية</legend>
+        <label class="lq-field">
+            <span class="lq-field__label">{{ $adv['secrets']['google_search_api_key']['label'] }} · {{ $adv['secrets']['google_search_api_key']['saved'] ? 'محفوظ' : 'غير محفوظ' }}</span>
+            <input type="password" class="lq-input" name="google_search_api_key" dir="ltr" value="" autocomplete="new-password" spellcheck="false" placeholder="{{ $adv['secrets']['google_search_api_key']['saved'] ? 'فاضي = خلي المحفوظ' : 'مفاتيح مفصولة بفاصلة' }}">
+            <span class="lq-field__hint">بيشتغل بس إذا كان مضبوط من قبل، وبيوقف بعد 2026-12-31.</span>
+        </label>
+        @if ($adv['secrets']['google_search_api_key']['saved'])
+            <label class="lq-check"><input type="checkbox" name="clear_google_search_api_key" value="1" data-key-clear><span>امسح المفاتيح المحفوظة</span></label>
+        @endif
+        <label class="lq-field">
+            <span class="lq-field__label">معرّف محرك البحث المخصص (CX)</span>
+            <input type="text" class="lq-input" name="google_search_cx" dir="ltr" value="{{ $adv['cx'] }}" autocomplete="off" spellcheck="false">
+        </label>
+        <label class="lq-field">
+            <span class="lq-field__label">{{ $adv['secrets']['proxy_url']['label'] }} · {{ $adv['secrets']['proxy_url']['saved'] ? 'محفوظ' : 'غير محفوظ' }}</span>
+            <input type="password" class="lq-input" name="proxy_url" dir="ltr" value="" autocomplete="new-password" spellcheck="false" placeholder="{{ $adv['secrets']['proxy_url']['saved'] ? 'فاضي = خلي المحفوظ' : 'http://user:password@host:port' }}">
+            <span class="lq-field__hint">اختياري: لتمرير طلبات Bing الاحتياطي إذا انحجبت.</span>
+        </label>
+        @if ($adv['secrets']['proxy_url']['saved'])
+            <label class="lq-check"><input type="checkbox" name="clear_proxy_url" value="1" data-key-clear><span>امسح العنوان المحفوظ</span></label>
+        @endif
+    </fieldset>
+
+    <p class="lq-settings-card__note">أسعار التكلفة التقديرية ثابتة بالنظام وما بتتغير من هون؛ بتلاقيها تحت «التكلفة التقديرية» بصفحة <a class="lq-link" href="{{ route('dashboard.diagnostics') }}">الصحة والتكلفة</a>.</p>
+
+    <div class="lq-settings-card__actions">
+        <x-lq.button type="submit" icon="check" :disabled="(bool) $dbError">حفظ</x-lq.button>
+    </div>
+</form>

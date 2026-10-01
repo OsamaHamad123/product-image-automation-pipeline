@@ -11,13 +11,13 @@ use App\Http\Controllers\RunController;
 // صفحات لوحة التحكم
 Route::get('/', [OverviewController::class, 'index'])->name('dashboard.index'); // p2-run: الرئيسية
 Route::get('/catalog', [ReviewController::class, 'page'])->name('dashboard.catalog');
-Route::get('/active-learning', [ProductController::class, 'activeLearning'])->name('dashboard.active_learning');
+Route::get('/active-learning', [ProductController::class, 'activeLearning'])->name('dashboard.active_learning'); // p2-health: ← /settings?tab=auto-publish
 Route::get('/errors', [ProductController::class, 'errors'])->name('dashboard.errors'); // ← /catalog?filter=failed
 Route::get('/rich-catalog', [ProductController::class, 'richCatalog'])->name('dashboard.rich_catalog'); // ← /catalog
 Route::get('/batch-automation', [RunController::class, 'page'])->name('dashboard.batch_automation'); // p2-run: التشغيل (?tab=review -> /catalog?mode=bulk)
-Route::get('/system-diagnostics', [ProductController::class, 'systemDiagnostics'])->name('dashboard.diagnostics');
-Route::get('/settings', [ProductController::class, 'settings'])->name('dashboard.settings');
-Route::post('/settings', [ProductController::class, 'saveSettings'])->name('dashboard.save_settings');
+Route::get('/system-diagnostics', [\App\Http\Controllers\HealthController::class, 'page'])->name('dashboard.diagnostics'); // p2-health: الصحة والتكلفة
+Route::get('/settings', [\App\Http\Controllers\SettingsController::class, 'show'])->name('dashboard.settings'); // p2-health: ?tab=
+Route::post('/settings', [\App\Http\Controllers\SettingsController::class, 'save'])->name('dashboard.save_settings'); // p2-health
 Route::get('/api/brand-estimate-count', [ProductController::class, 'getBrandEstimateCount']);
 Route::get('/api/rich-products', [ProductController::class, 'getRichProductsJson']);
 Route::post('/api/rich-products/update', [ProductController::class, 'updateRichProduct']);
@@ -62,25 +62,9 @@ Route::get('/api/review/queue-state', [ReviewController::class, 'queueState']);
 // حالة جسر بايثون وقاعدة البيانات
 Route::get('/api/system/status', [ApiController::class, 'systemStatus']);
 
-// عرض سجلات الأتمتة المباشرة من السيرفر لتشخيص الأخطاء
-Route::get('/api/view-pipeline-log', function() {
-    $logPath = base_path('../temp/pipeline.log');
-    if (file_exists($logPath)) {
-        return response(file_get_contents($logPath), 200, ['Content-Type' => 'text/plain; charset=UTF-8']);
-    }
-    return response('Log file not found at: ' . $logPath, 404);
-});
-
-// عرض سجلات أخطاء لارافيل لتشخيص فشل الرفع والاعتماد
-Route::get('/api/view-laravel-log', function() {
-    $logPath = storage_path('logs/laravel.log');
-    if (file_exists($logPath)) {
-        $content = file($logPath);
-        $lines = array_slice($content, -200);
-        return response(implode("", $lines), 200, ['Content-Type' => 'text/plain; charset=UTF-8']);
-    }
-    return response('Log file not found at: ' . $logPath, 404);
-});
+// حزمة الصحة والإعدادات (P2 health): آخر أسطر السجلين؛ ملف غير موجود حالة عادية (exists=false) وليس 404
+Route::get('/api/view-pipeline-log', [\App\Http\Controllers\HealthController::class, 'pipelineLog']);
+Route::get('/api/view-laravel-log', [\App\Http\Controllers\HealthController::class, 'laravelLog']);
 // p2-run (الرئيسية والتشغيل): بيانات للقراءة فقط؛ التشغيل والإيقاف يبقيان في ApiController
 Route::get('/api/overview', [OverviewController::class, 'data']);
 Route::get('/api/run/live', [RunController::class, 'live']);

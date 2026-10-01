@@ -4,7 +4,8 @@ Before this fix the diagnostics page ran verify_cloud_services on every load (a 
 call per visit) through a blocking shell_exec of up to 180 s, and a failing Serper showed as a grey "optional"
 card without details.
 
-Python checks run with every provider check replaced (offline). The page script runs under node with a stub DOM.
+Python checks run with every provider check replaced (offline). The Laqta health page script (public/js/health.js)
+runs under node with recorded fetches and renders.
 """
 
 import io
@@ -19,13 +20,14 @@ from pathlib import Path
 import pytest
 
 import verify_cloud_services as vcs
-from blade_scripts import inline_scripts
 
 ROOT = Path(__file__).resolve().parents[1]
 DASH = ROOT / "dashboard"
 VIEWS = DASH / "resources" / "views"
 DIAG_VIEW = VIEWS / "dashboard" / "diagnostics.blade.php"
 PRODUCT = DASH / "app" / "Http" / "Controllers" / "ProductController.php"
+HEALTH = DASH / "app" / "Http" / "Controllers" / "HealthController.php"
+HEALTH_JS = DASH / "public" / "js" / "health.js"
 NODE = shutil.which("node")
 
 CHECKS = [fn for _key, _name, fn, _critical in vcs.SERVICES]
@@ -185,15 +187,20 @@ def test_controller_bounds_the_check_and_passes_the_last_result_to_the_page():
     deadline = int(re.search(r"DIAGNOSTICS_DEADLINE_SECONDS = (\d+);", text).group(1))
     kill = int(re.search(r"DIAGNOSTICS_KILL_SECONDS = (\d+);", text).group(1))
     assert deadline < kill <= 60
-    assert "'lastDiagnostics' => self::lastDiagnostics()" in _method(text, "systemDiagnostics")
+    # the Laqta health page (HealthController::page) gets the saved result, never a fresh check
+    assert "return app(HealthController::class)->page();" in _method(text, "systemDiagnostics")
+    page = _method(read(HEALTH), "page")
+    assert "$last = ProductController::lastDiagnostics();" in page
+    assert "'lastDiagnostics' => self::publicResult($last)" in page
+    assert "verify_cloud_services" not in read(HEALTH) and "run-diagnostics" not in read(HEALTH)
     assert "temp/diagnostics_last.json" in text
     assert vcs.LAST_RESULT_PATH.replace("\\", "/").endswith("temp/diagnostics_last.json")
     # the note on the page states the same upper bound
-    assert f"لا يتجاوز {kill} ثانية" in read(DIAG_VIEW)
+    assert f"وما بياخد أكتر من {kill} ثانية" in read(DIAG_VIEW)
 
 
 def test_every_check_failure_the_page_alerts_is_in_arabic():
-    # the page shows data.error in an alert when the check fails (timeout, no result, crash)
+    # the page shows data.error in a toast when the check fails (timeout, no result, crash)
     run = _method(read(PRODUCT), "runDiagnosticsJson")
     assert "Invalid output from python" not in run
     literals = re.findall(r"'error' => '([^']*)'", run)
@@ -214,6 +221,21 @@ def test_no_page_runs_the_connection_check_on_its_own():
             line = text[text.rfind("\n", 0, pos) + 1:text.find("\n", pos)]
             assert 'onclick="runDiagnostics()"' in line or "async function runDiagnostics()" in line, \
                 f"{path.name}: {line.strip()}"
+    # the Laqta health page script is the only one that knows the endpoint, and runs it from the button only
+    for path in (DASH / "public" / "js").rglob("*.js"):
+        if "/api/system/run-diagnostics" in read(path):
+            assert path.name == "health.js", path.name
+    js = read(HEALTH_JS)
+    assert js.count("RUN_URL") == 2                                   # the constant and the one POST in runCheck
+    assert "deps.fetchJson(RUN_URL, { method: 'POST', body: {} })" in _js_function(js, "runCheck")
+    assert "runButton.addEventListener('click', function () { controller.runCheck(); });" in js
+    assert "runCheck" not in _js_function(js, "start")
+
+
+def _js_function(js, name):
+    """Body of one function of the controller (indented 8 spaces in createController)."""
+    start = js.index(f"        function {name}(")
+    return js[start:js.index("\n        }\n", start)]
 
 
 def test_button_and_note_say_what_a_check_costs():
@@ -221,60 +243,43 @@ def test_button_and_note_say_what_a_check_costs():
     assert "فحص الاتصالات الآن" in view
     note = re.search(r'id="diagCheckNote"[^>]*>(.*?)</span>', view, re.DOTALL).group(1)
     assert "Serper" in note and "PhotoRoom" in note and "واحد" in note
-    assert "لا يعمل الفحص تلقائياً" in note
-    # Serper's card is marked critical, not optional
-    serper_card = view[view.index('id="card-serper"'):view.index('id="card-proxy"')]
-    assert "badge-critical" in serper_card and "badge-optional" not in serper_card
+    assert "الفحص ما بيشتغل لحاله لما تفتح الصفحة" in view
+    # Serper has its own card among the main services, never on the optional line
+    health = read(HEALTH)
+    services = health[health.index("public const SERVICES"):health.index("public const OPTIONAL_SERVICES")]
+    optional = health[health.index("public const OPTIONAL_SERVICES"):health.index("public function page")]
+    assert "'serper' =>" in services and "serper" not in optional
 
 
 def test_recheck_resets_every_service_card():
     view = read(DIAG_VIEW)
-    cards = re.findall(r'id="card-([a-z_]+)"', view)
-    listed = json.loads(re.search(r"const DIAG_SERVICES = (\[.*?\]);", view).group(1).replace("'", '"'))
+    health = read(HEALTH)
+    services = health[health.index("public const SERVICES"):health.index("public const OPTIONAL_SERVICES")]
+    cards = re.findall(r"'([a-z_]+)' => \['name'", services)
+    listed = json.loads(re.search(r"var SERVICE_KEYS = (\[.*?\]);", read(HEALTH_JS)).group(1).replace("'", '"'))
     assert "serper" in cards
     assert sorted(listed) == sorted(cards)
-
-
-PAGE_HARNESS = """
-const elements = {};
-const fetched = [];
-const handlers = {};
-function makeEl(id) {
-    const node = { id, className: '', innerText: '', textContent: '', innerHTML: '', disabled: false, checked: true,
-                   style: {}, dataset: {}, children: [], parent: null };
-    node.appendChild = (child) => { child.parent = node; node.children.push(child); return child; };
-    node.remove = () => { if (node.parent) node.parent.children = node.parent.children.filter(c => c !== node); };
-    node.querySelector = (sel) => node.children.find(c => ('.' + c.className.split(' ').join(' .')).split(' ')
-        .includes(sel)) || null;
-    return node;
-}
-function el(id) {
-    if (!elements[id]) elements[id] = makeEl(id);
-    return elements[id];
-}
-globalThis.document = { getElementById: el, querySelector: () => ({ content: '' }), createElement: () => makeEl('') };
-globalThis.window = { addEventListener: (name, fn) => { handlers[name] = fn; } };
-globalThis.fetch = (url) => { fetched.push(String(url)); return new Promise(() => {}); };
-globalThis.setInterval = () => 0;
-globalThis.alert = () => {};
-"""
+    assert "@foreach ($services as $service)" in view and "id=\"card-{{ $service['key'] }}\"" in view
 
 
 def _run_page(stored, after=""):
-    blocks = inline_scripts(read(DIAG_VIEW))
-    script = re.sub(r"\{\{.*?\}\}", "''", blocks[-1])
-    js = PAGE_HARNESS + script + f"""
-el('lastDiagnosticsData').dataset.result = {json.dumps(json.dumps(stored, ensure_ascii=False))};
-handlers.load();
+    """The health page controller under node with recorded fetches and renders (health.js, no DOM)."""
+    js = "globalThis.window = globalThis;\n" + read(HEALTH_JS) + f"""
+const fetched = [];
+const views = {{ services: [], checked: [] }};
+const c = window.LaqtaHealth.createController({{
+    initial: {json.dumps(stored, ensure_ascii=False)},
+    fetchJson: (url, opts) => {{ fetched.push(url); return new Promise(() => {{}}); }},
+    renderServices: v => views.services.push(v), renderChecked: v => views.checked.push(v),
+    renderOptional: () => {{}}, setChecking: () => {{}}, renderOps: () => {{}}, renderLog: () => {{}},
+    toast: () => {{}}, now: () => Date.parse('2026-09-30T12:00:00+00:00'), schedule: () => 0, isHidden: () => false
+}});
+c.start();
 {after}
-const cards = {{}};
-for (const key of ['google_sheets', 'cloudinary', 'photoroom', 'gemini', 'serper', 'proxy']) {{
-    cards[key] = {{ ind: el('ind-' + key).className, text: el('text-' + key).innerText,
-                    detailsButton: el('card-' + key).children.length }};
-}}
-console.log(JSON.stringify({{ fetched, cards, info: el('lastCheckInfo').textContent }}));
+console.log(JSON.stringify({{ fetched, cards: views.services[views.services.length - 1],
+                              info: views.checked[views.checked.length - 1] }}));
 """
-    result = subprocess.run([NODE, "-e", js], capture_output=True, text=True, timeout=60)
+    result = subprocess.run([NODE, "-e", js], capture_output=True, text=True, timeout=60, encoding="utf-8")
     assert result.returncode == 0, result.stderr
     return json.loads(result.stdout.strip().splitlines()[-1])
 
@@ -302,24 +307,25 @@ def _stored_result():
 def test_opening_the_page_shows_the_saved_result_without_running_a_check():
     out = _run_page(_stored_result())
     assert "/api/system/run-diagnostics" not in out["fetched"]
-    assert out["cards"]["serper"] == {"ind": "status-indicator status-offline", "text": "فشل الاتصال / متوقف",
-                                      "detailsButton": 1}
-    assert out["cards"]["gemini"]["ind"] == "status-indicator status-online"
-    assert "المعروض نتيجة آخر فحص" in out["info"] and "توجد خدمات حرجة متوقفة" in out["info"]
+    assert "/api/system/ops-health" in out["fetched"]                  # the read-only panels load
+    assert out["cards"]["serper"] == {"state": "ما بيرد", "tone": "danger", "details": "❌ انتهى رصيد Serper (429)"}
+    assert out["cards"]["gemini"]["tone"] == "success" and out["cards"]["google_sheets"]["state"] == "متصل"
+    assert out["info"]["text"].startswith("آخر فحص للاتصالات:") and out["info"]["warn"] is True
 
 
 @pytest.mark.skipif(NODE is None, reason="node is not installed")
 def test_page_without_a_saved_result_asks_for_a_check():
     out = _run_page(None)
     assert "/api/system/run-diagnostics" not in out["fetched"]
-    assert "لم يُجرَ أي فحص بعد" in out["info"]
-    assert all(card["text"] == "لم يُفحص بعد" for card in out["cards"].values())
+    assert out["info"] == {"text": "لسا ما انعمل فحص للاتصالات.", "warn": False}
+    assert all(card["state"] == "لسا ما انفحص" and card["tone"] == "muted" for card in out["cards"].values())
 
 
 @pytest.mark.skipif(NODE is None, reason="node is not installed")
 def test_the_button_rechecks_every_card_including_serper():
-    out = _run_page(_stored_result(), after="runDiagnostics();")
+    out = _run_page(_stored_result(), after="c.runCheck();")
     assert out["fetched"].count("/api/system/run-diagnostics") == 1
+    assert sorted(out["cards"]) == ["cloudinary", "gemini", "google_sheets", "photoroom", "serper"]
     for key, card in out["cards"].items():
-        assert card["text"] == "جاري الفحص...", key
-        assert card["detailsButton"] == 0, key
+        assert card["state"] == "عم نفحص…", key
+        assert card["details"] == "", key

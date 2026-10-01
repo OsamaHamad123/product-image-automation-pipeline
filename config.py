@@ -67,6 +67,8 @@ except ValueError:
 # "remove_bg_api" -> استخدام خدمة remove.bg السحابية (تتطلب إدخال مفتاح API أدناه)
 # "photoroom" -> استخدام خدمة PhotoRoom السحابية لإزالة الخلفية مع القص التلقائي الاحترافي للهوامش
 BG_REMOVAL_METHOD = os.getenv("BG_REMOVAL_METHOD", "photoroom")
+# الطرق التي تقبلها صفحة الإعدادات من system_settings.bg_removal_method (نفس main.SUPPORTED_BG_METHODS)
+BG_REMOVAL_METHODS = ("photoroom", "remove_bg_api", "grabcut", "rembg", "none")
 
 # مفتاح API الخاص بخدمة remove.bg (مطلوب فقط إذا اخترت "remove_bg_api")
 REMOVE_BG_API_KEY = os.getenv("REMOVE_BG_API_KEY", "")
@@ -347,7 +349,8 @@ def load_db_config():
             global GOOGLE_SEARCH_API_KEYS, GOOGLE_SEARCH_CX_LIST, GOOGLE_SEARCH_API_KEY, GOOGLE_SEARCH_CX
             global CLIP_RELEVANCE_THRESHOLD, CLIP_GREY_ZONE_THRESHOLD, STRICT_BRAND_MATCH, ENABLE_GEMINI_PRE_VALIDATION, FILTER_COMPETITORS, BYPASS_WHITE_BACKGROUND_CHECK, PROXY_URL
             global SEARCH_ENGINE, SERPER_API_KEY, AUTO_PUBLISH_ENABLED, AUTO_PUBLISH_BRANDS, OUTPUT_CANVAS_SIZE
-            
+            global BG_REMOVAL_METHOD, ENABLE_IMAGE_ENHANCEMENT
+
             if "photoroom_api_key" in db_keys and db_keys["photoroom_api_key"]:
                 PHOTOROOM_API_KEY = db_keys["photoroom_api_key"]
             if "photoroom_crop" in db_keys:
@@ -400,6 +403,16 @@ def load_db_config():
                     OUTPUT_CANVAS_SIZE = int(db_keys["output_canvas_size"])
                 except (TypeError, ValueError):
                     logger.warning("قيمة output_canvas_size غير صالحة: %r", db_keys["output_canvas_size"])
+            # معالجة الصور من صفحة الإعدادات (تبويب «معالجة الصور»)؛ run_config.json للتشغيل يبقى أعلى أولوية
+            if db_keys.get("bg_removal_method"):
+                method = str(db_keys["bg_removal_method"]).strip().lower()
+                if method in BG_REMOVAL_METHODS:
+                    BG_REMOVAL_METHOD = method
+                else:
+                    logger.warning("قيمة bg_removal_method غير مدعومة: %r", db_keys["bg_removal_method"])
+            if "enable_image_enhancement" in db_keys and db_keys["enable_image_enhancement"] is not None:
+                ENABLE_IMAGE_ENHANCEMENT = str(db_keys["enable_image_enhancement"]).strip().lower() in (
+                    "1", "true", "yes", "on")
 
             logger.info("[Config Loader] تم تحميل الإعدادات من قاعدة البيانات (تتجاوز قيم .env).")
         conn.close()
