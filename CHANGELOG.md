@@ -153,7 +153,36 @@ pick 100%, wrong auto-publish 0%.
 ### Added in the redesign
 
 - **Laqta Studio UI foundation:** design tokens (`public/css/laqta.css`), `x-lq.*` Blade components, the RTL app
-  shell `layouts/laqta.blade.php` and a `/ui-kit` reference page. The pages move onto it next.
+  shell `layouts/laqta.blade.php` and a `/ui-kit` reference page.
+- **Five pages instead of eight**, all on the approved Laqta design (Arabic, RTL, desktop and phone):
+  - **الرئيسية** (`/`): where the sheet's products stand, the last run with its cost, auto-publish readiness per
+    brand, services from the last connection check, and this week's cost. The waiting-for-review number is the
+    one the sidebar badge shows.
+  - **المراجعة** (`/catalog`): one screen, product image first, for one product (Enter approves, X rejects with a
+    reason, S skips, 1-5 select) or many (`?mode=bulk`: approves only the system's suggestions without a warning,
+    and only the cards on screen). Approvals run in the background one at a time. Failures are the «أعطال» filter.
+  - **التشغيل** (`/batch-automation`): a run over the whole sheet, a brand or chosen rows, with the number of
+    products to search, those skipped, and the estimated cost and time before it starts; the live run with pause,
+    a stop that deletes nothing, «إصلاح تشغيل عالق» only when it is stuck, and the latest results.
+  - **الصحة والتكلفة** (`/system-diagnostics`): the on-demand connection check, searches over 24 hours or 7 days,
+    cost, why products were not found, and redacted log tails.
+  - **الإعدادات** (`/settings?tab=`): the sheet connection, the keys (state only, never their value), auto-publish
+    per brand with «تفعيل» only for a brand at the 98% bar, image processing, and the v1 rollback.
+  - `/errors`, `/rich-catalog`, `/active-learning` and `/batch-automation?tab=review` redirect to their new place.
+- The sidebar run card reads the same phase, alert and stuck reason as the Run page.
+
+### Changed in the redesign
+
+- Approvals and manual uploads use the saved «تحسين الألوان» setting.
+- The foreign-store warning covers every country domain outside the UAE (a `.ca` or `.co.uk` store), not only
+  the Gulf ones; generic two-letter domains (`.io`, `.co`) do not warn.
+- Dashboard sessions and cache are files (`SESSION_DRIVER=file`, `CACHE_STORE=file`), so the pages can say the
+  database is down instead of failing with HTTP 500. The launcher switches an existing `dashboard/.env` once.
+
+### Removed in the redesign
+
+- The rich catalog page and its API (`/api/rich-products*`), the brand-estimate and `/api/logs` endpoints, the
+  active-learning page and its reset, and `layouts/layout.blade.php`. The CSV export stays, in bulk review.
 
 ### Removed
 
