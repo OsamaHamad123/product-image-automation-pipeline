@@ -175,8 +175,9 @@ def test_routes():
     assert "Log file not found" not in routes and "function()" not in routes
     product = read(CONTROLLERS / "ProductController.php")
     assert "return redirect()->to(route('dashboard.settings') . '?tab=auto-publish');" in product
-    assert "return app(SettingsController::class)->show($request);" in product
-    assert "return app(SettingsController::class)->save($request);" in product
+    # the old settings and diagnostics methods are gone; the routes point at SettingsController / HealthController
+    for gone in ("function settings(", "function saveSettings(", "function systemDiagnostics(", "maskSecret"):
+        assert gone not in product, gone
 
 
 # ---------------------------------------------------------------------------

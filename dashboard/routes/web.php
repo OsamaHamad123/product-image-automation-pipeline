@@ -18,11 +18,7 @@ Route::get('/batch-automation', [RunController::class, 'page'])->name('dashboard
 Route::get('/system-diagnostics', [\App\Http\Controllers\HealthController::class, 'page'])->name('dashboard.diagnostics'); // p2-health: الصحة والتكلفة
 Route::get('/settings', [\App\Http\Controllers\SettingsController::class, 'show'])->name('dashboard.settings'); // p2-health: ?tab=
 Route::post('/settings', [\App\Http\Controllers\SettingsController::class, 'save'])->name('dashboard.save_settings'); // p2-health
-Route::get('/api/brand-estimate-count', [ProductController::class, 'getBrandEstimateCount']);
-Route::get('/api/rich-products', [ProductController::class, 'getRichProductsJson']);
-Route::post('/api/rich-products/update', [ProductController::class, 'updateRichProduct']);
 Route::get('/rich-catalog/export', [ProductController::class, 'exportRichCatalog'])->name('dashboard.rich_catalog.export');
-Route::post('/api/active-learning/reset', [ApiController::class, 'resetActiveLearning']);
 Route::post('/api/failures/retry', [ApiController::class, 'retryFailures']);
 
 // خدمات البيانات الداخلية لـ AJAX
@@ -37,7 +33,6 @@ Route::post('/api/search', [ApiController::class, 'search']);
 Route::post('/api/select_image', [ApiController::class, 'selectImage']);
 Route::post('/api/reject_image', [ApiController::class, 'rejectImage']);
 Route::post('/api/upload_manual_image', [ApiController::class, 'uploadManualImage']);
-Route::get('/api/logs', [ApiController::class, 'logs']);
 Route::get('/api/image-proxy', [ApiController::class, 'imageProxy']);
 Route::post('/api/run_all', [ApiController::class, 'runAll']);
 Route::post('/api/run-all', [ApiController::class, 'runAll']);

@@ -98,6 +98,16 @@ def _as_bool(value):
     return bool(value)
 
 
+def _enhance(params):
+    """
+    تحسين الألوان عند الاعتماد أو الرفع اليدوي: قيمة الطلب إن أُرسلت، وإلا إعداد «تحسين الألوان» المحفوظ
+    (config.ENABLE_IMAGE_ENHANCEMENT من system_settings)، نفس ما يستخدمه العامل في التشغيل.
+    """
+    if params.get('enhance') in (None, ""):
+        return bool(getattr(config, 'ENABLE_IMAGE_ENHANCEMENT', False))
+    return _as_bool(params.get('enhance'))
+
+
 def _failure(status, message, context):
     """
     حمولة خطأ برسالة ثابتة فقط: نص الاستثناء والـ traceback يذهبان إلى السجل (temp/search.log)
@@ -506,7 +516,7 @@ def action_select_image(params):
             bg_method=_text(params, 'bg_removal_method') or None,
             target=(int(params.get('target_width') or 0), int(params.get('target_height') or 0)),
             category_override={k: _text(params, k) for k in ('category_l1_en', 'category_l2_en', 'category_l3_en')},
-            enhance=_as_bool(params.get('enhance', False)), key_size=_text(params, 'size') or None,
+            enhance=_enhance(params), key_size=_text(params, 'size') or None,
         )
         if res["status"] == "failed":
             return {'status': 'failed', 'error': res.get('error'), 'isolated': res.get('isolated', False)}
@@ -565,7 +575,7 @@ def action_upload_manual_image(params):
             bg_method=_text(params, 'bg_removal_method') or None,
             target=(int(params.get('target_width') or 0), int(params.get('target_height') or 0)),
             category_override={k: _text(params, k) for k in ('category_l1_en', 'category_l2_en', 'category_l3_en')},
-            enhance=_as_bool(params.get('enhance', False)), key_size=_text(params, 'size') or None,
+            enhance=_enhance(params), key_size=_text(params, 'size') or None,
         )
         try:
             os.remove(file_path)

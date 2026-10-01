@@ -212,6 +212,8 @@ def test_social_networks_warn(image_url, page_url):
     "https://www.luluhypermarket.com/en-kw/almarai-full-fat-milk-1l/p/1",
     "https://www.talabat.com/kuwait/grocery/almarai-full-fat-milk-1l",
     "https://www.bigbasket.in/pd/almarai-full-fat-milk-1l/",
+    "https://www.halalgrocer.ca/almarai-full-fat-milk-canada",                       # golden uae-019: Canada
+    "https://www.tesco.co.uk/groceries/en-GB/products/1",                            # any country domain
 ])
 def test_a_store_outside_the_uae_warns(page_url):
     cand = milk(image_url="https://cdnprod.mafretailproxy.com/sys-master-root/1.jpg", page_url=page_url)
@@ -227,6 +229,7 @@ def test_a_store_outside_the_uae_warns(page_url):
     "https://www.westzone.com/almarai-full-fat-milk-1l",
     "https://www.almarai.com/sa/products/full-fat-milk",            # the brand's official site
     "https://www.example-blog.com/almarai-milk-review",             # unknown generic host
+    "https://shop.example.io/almarai-full-fat-milk-1l",              # '.io' is used as a generic name
 ])
 def test_uae_stores_official_sites_and_unknown_hosts_do_not_warn(page_url):
     cand = milk(image_url="https://img.example-cdn.com/1.jpg", page_url=page_url)

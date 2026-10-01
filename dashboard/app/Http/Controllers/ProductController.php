@@ -6,30 +6,11 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use App\Models\ResolvedProduct;
-use App\Models\ProductFailure;
 use App\Services\PythonBridge;
-use App\Services\QueueStats;
 use App\Services\CandidateMatcher;
 
 class ProductController extends Controller
 {
-    /** مفاتيح الإعدادات السرية: لا تُطبع أبداً في الصفحة، وتُعرض آخر 4 أحرف فقط. */
-    private const SECRET_SETTING_KEYS = [
-        'photoroom_api_key', 'gemini_api_key', 'cloudinary_api_key', 'cloudinary_api_secret',
-        'google_search_api_key', 'serper_api_key', 'proxy_url'
-    ];
-
-    private const TEXT_SETTING_KEYS = [
-        'gemini_model', 'cloudinary_cloud_name', 'google_search_cx',
-        'search_engine', 'auto_publish_brands'
-    ];
-
-    private const CHECKBOX_SETTING_KEYS = [
-        'strict_brand_match', 'auto_publish_enabled',
-        // مفاتيح محرك البحث القديم v1 فقط (للتراجع المؤقت)
-        'enable_gemini_pre_validation', 'filter_competitors', 'bypass_white_background_check'
-    ];
-
     /** نماذج Gemini المدعومة حالياً (النماذج المتقاعدة أزيلت من القائمة). */
     public const SUPPORTED_GEMINI_MODELS = [
         'gemini-3.1-flash-lite' => 'gemini-3.1-flash-lite (الافتراضي: اقتصادي ومناسب للتحقق البصري)',
@@ -41,15 +22,7 @@ class ProductController extends Controller
         return PythonBridge::pythonPath();
     }
 
-    /**
-     * تنفيذ أوامر جسر بايثون مباشرة عبر سطر الأوامر (cli_bridge.py) بترميز UTF-8.
-     */
-    private function runPython($action, $params = [])
-    {
-        return PythonBridge::run($action, $params);
-    }
-
-    /** كاش صفوف الشيت الخام كما يعيدها get_products بلا أي دمج (تقدير البراند، إعادة محاولة الأخطاء). */
+    /** كاش صفوف الشيت الخام كما يعيدها get_products بلا أي دمج (الرئيسية، خطة التشغيل، إعادة محاولة الأخطاء). */
     public const SHEET_ROWS_CACHE_KEY = 'sheet_rows_v2';
 
     /** كاش منتجات المراجعة: صفوف الشيت مدمجة بالمرشحات المخزنة والاعتمادات (الكتالوج، المراجعة الجماعية، الرئيسية). */
@@ -226,14 +199,6 @@ class ProductController extends Controller
         return $products;
     }
 
-    /**
-     * الصفحة الرئيسية (لقطة): تُبنى في OverviewController؛ كل رقم فيها من مصدر واحد مسمّى هناك.
-     * الرابط '/' يشير إلى OverviewController::index مباشرة، وهذه الدالة تبقى لأي استدعاء قديم.
-     */
-    public function index()
-    {
-        return app(OverviewController::class)->index();
-    }
 
     /**
      * جلب المنتجات كـ JSON مع دمج البيانات الوصفية والحالات من SQLite
@@ -288,70 +253,9 @@ class ProductController extends Controller
         return redirect()->route('dashboard.catalog');
     }
 
-    /**
-     * صفحة التشغيل (لقطة): تُبنى في RunController (?tab=review تفتح المراجعة الجماعية على /catalog?mode=bulk).
-     * الرابط '/batch-automation' يشير إلى RunController::page مباشرة، وهذه الدالة تبقى لأي استدعاء قديم.
-     */
-    public function batchAutomation(Request $request)
-    {
-        return app(RunController::class)->page($request);
-    }
 
-    /**
-     * جلب المنتجات المكتملة ذات البيانات الوصفية كـ JSON
-     */
-    public function getRichProductsJson()
-    {
-        try {
-            $resolved = \App\Models\ResolvedProduct::orderBy('resolved_at', 'desc')->get();
-            return response()->json([
-                'status' => 'success',
-                'products' => $resolved
-            ]);
-        } catch (\Exception $e) {
-            return response()->json(['error' => $e->getMessage()], 500);
-        }
-    }
 
-    /**
-     * حساب عدد الصفوف التقديرية لبراند معين عبر كاش المنتجات
-     */
-    public function getBrandEstimateCount(Request $request)
-    {
-        try {
-            $brand = mb_strtolower(trim($request->query('brand', '')));
-            if (empty($brand)) {
-                return response()->json(['count' => 0]);
-            }
 
-            $products = self::sheetRows();
-
-            if (empty($products)) {
-                return response()->json(['count' => 0]);
-            }
-
-            $count = 0;
-            foreach ($products as $prod) {
-                $prodBrand = mb_strtolower(trim($prod['brand'] ?? ''));
-                if (!empty($prodBrand) && mb_strpos($prodBrand, $brand) !== false) {
-                    $count++;
-                }
-            }
-
-            return response()->json(['count' => $count]);
-        } catch (\Exception $e) {
-            return response()->json(['error' => $e->getMessage()], 500);
-        }
-    }
-
-    /**
-     * صفحة الصحة والتكلفة (لقطة): تُبنى في HealthController::page، والرابط '/system-diagnostics' يشير إليها مباشرة.
-     * الصفحة لا تشغل فحص الاتصالات عند فتحها؛ تعرض آخر نتيجة محفوظة (lastDiagnostics) والفحص بزر صريح فقط.
-     */
-    public function systemDiagnostics()
-    {
-        return app(HealthController::class)->page();
-    }
 
     /** آخر نتيجة محفوظة لفحص الاتصالات، أو null إذا لم يُجرَ فحص بعد. */
     public static function lastDiagnostics(): ?array
@@ -435,83 +339,9 @@ class ProductController extends Controller
         }
     }
 
-    /**
-     * إخفاء القيمة السرية: تعرض آخر 4 أحرف فقط.
-     */
-    public static function maskSecret(?string $value): string
-    {
-        $value = (string) $value;
-        if ($value === '') {
-            return '';
-        }
-        if (mb_strlen($value) <= 4) {
-            return '••••';
-        }
-        return '••••' . mb_substr($value, -4);
-    }
 
-    /**
-     * الإعدادات (لقطة): تُبنى في SettingsController، والرابطان GET/POST '/settings' يشيران إليه مباشرة.
-     */
-    public function settings(Request $request)
-    {
-        return app(SettingsController::class)->show($request);
-    }
 
-    /**
-     * حفظ الإعدادات: SettingsController::save (نفس قائمة المفاتيح وقواعد التحقق؛ كل نموذج يحفظ قسمه فقط).
-     */
-    public function saveSettings(Request $request)
-    {
-        return app(SettingsController::class)->save($request);
-    }
 
-    /**
-     * تحديث بيانات المنتج الموثقة بالبيانات الغنية المعدلة يدوياً
-     */
-    public function updateRichProduct(Request $request)
-    {
-        $request->validate([
-            'barcode' => 'required',
-            'product_name' => 'required|string|max:255',
-            'brand' => 'required|string|max:255',
-            'metadata' => 'required|array'
-        ]);
-
-        try {
-            $product = \App\Models\ResolvedProduct::where('barcode', $request->input('barcode'))->first();
-            if (!$product) {
-                return response()->json([
-                    'status' => 'failed',
-                    'error' => 'المنتج غير موجود في قاعدة بيانات المنتجات الموثقة.'
-                ], 404);
-            }
-
-            $product->product_name = $request->input('product_name');
-            $product->brand = $request->input('brand');
-
-            $existingMeta = $product->metadata_json ?? [];
-            if (!is_array($existingMeta)) {
-                $existingMeta = json_decode($product->metadata_json, true) ?? [];
-            }
-            
-            $product->metadata_json = array_merge($existingMeta, $request->input('metadata'));
-            $product->save();
-
-            // Clear cache
-            self::forgetProductCaches();
-
-            return response()->json([
-                'status' => 'success',
-                'message' => 'تم تحديث بيانات المنتج الغنية بنجاح في قاعدة البيانات.'
-            ]);
-        } catch (\Exception $e) {
-            return response()->json([
-                'status' => 'failed',
-                'error' => 'فشل التحديث: ' . $e->getMessage()
-            ], 500);
-        }
-    }
 
     /**
      * تصدير الكتالوج الموثق بصيغة CSV أو JSON

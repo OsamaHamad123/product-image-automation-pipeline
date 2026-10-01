@@ -212,6 +212,33 @@ def test_select_no_upscale(select_env):
     assert kwargs["sku_key"] == "06281007000024"
 
 
+@pytest.mark.parametrize("sent, saved, used", [
+    (None, True, True),        # the review page sends nothing: the saved «تحسين الألوان» setting applies
+    (None, False, False),
+    ("false", True, False),    # an explicit value in the request still wins
+    ("true", False, True),
+])
+def test_select_uses_the_saved_enhancement_setting(select_env, monkeypatch, sent, saved, used):
+    import config
+    import image_processor
+
+    bridge, events, state = select_env
+    original = image_processor.process_product_image_result
+    seen = {}
+
+    def spy(*args, **kwargs):
+        seen["enhance"] = kwargs.get("enhance")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(image_processor, "process_product_image_result", spy)
+    monkeypatch.setattr(config, "ENABLE_IMAGE_ENHANCEMENT", saved, raising=False)
+    params = {k: v for k, v in SELECT_PARAMS.items() if k != "enhance"}
+    if sent is not None:
+        params["enhance"] = sent
+    assert bridge.action_select_image(params)["status"] == "success"
+    assert seen["enhance"] is used
+
+
 def test_select_not_isolated_writes_needs_review(select_env):
     bridge, events, state = select_env
     state["isolated"] = False

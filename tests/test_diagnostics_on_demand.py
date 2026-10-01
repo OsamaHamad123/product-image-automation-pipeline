@@ -28,6 +28,7 @@ DIAG_VIEW = VIEWS / "dashboard" / "diagnostics.blade.php"
 PRODUCT = DASH / "app" / "Http" / "Controllers" / "ProductController.php"
 HEALTH = DASH / "app" / "Http" / "Controllers" / "HealthController.php"
 HEALTH_JS = DASH / "public" / "js" / "health.js"
+ROUTES = DASH / "routes" / "web.php"
 NODE = shutil.which("node")
 
 CHECKS = [fn for _key, _name, fn, _critical in vcs.SERVICES]
@@ -188,7 +189,8 @@ def test_controller_bounds_the_check_and_passes_the_last_result_to_the_page():
     kill = int(re.search(r"DIAGNOSTICS_KILL_SECONDS = (\d+);", text).group(1))
     assert deadline < kill <= 60
     # the Laqta health page (HealthController::page) gets the saved result, never a fresh check
-    assert "return app(HealthController::class)->page();" in _method(text, "systemDiagnostics")
+    assert "function systemDiagnostics(" not in text           # /system-diagnostics routes to HealthController::page
+    assert "[\\App\\Http\\Controllers\\HealthController::class, 'page']" in read(ROUTES)
     page = _method(read(HEALTH), "page")
     assert "$last = ProductController::lastDiagnostics();" in page
     assert "'lastDiagnostics' => self::publicResult($last)" in page

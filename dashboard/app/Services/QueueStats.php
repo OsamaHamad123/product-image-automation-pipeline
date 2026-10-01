@@ -213,6 +213,7 @@ class QueueStats
         'not_found' => ['label' => 'ما انلقت', 'chip' => 'not-found', 'tone' => 'info'],
         'error' => ['label' => 'عطل مؤقت', 'chip' => 'error', 'tone' => 'danger'],
         'requeued' => ['label' => 'رجعت للطابور', 'chip' => 'warning', 'tone' => 'warning'],
+        'rejected' => ['label' => 'رجعت للطابور', 'chip' => 'none', 'tone' => 'muted'],
         'approved' => ['label' => 'معتمدة', 'chip' => 'approved', 'tone' => 'teal'],
         'searching' => ['label' => 'عم ندوّر', 'chip' => 'none', 'tone' => 'muted'],
         'waiting' => ['label' => 'بالطابور', 'chip' => 'none', 'tone' => 'muted'],
@@ -239,7 +240,7 @@ class QueueStats
 
     /**
      * The result kind of one queue row from its status, failure code and the engine decision (trace outcome):
-     * proposed | none | not_found | error | requeued | approved | searching | waiting.
+     * proposed | none | not_found | error | requeued | rejected | approved | searching | waiting.
      */
     public static function resultKind(string $status, ?string $failureCode = null, ?string $decision = null): string
     {
@@ -259,7 +260,12 @@ class QueueStats
             case 'processing':
                 return 'searching';
             case 'pending':
-                return $code === 'PROVIDER_DOWN' ? 'requeued' : 'waiting';
+                if ($code === 'PROVIDER_DOWN') {
+                    return 'requeued';
+                }
+                // a reviewer rejected the pick and the product waits for a new search: same words as the
+                // review page (public/js/review/core.js), but not a failure of the run
+                return $code === 'REJECTED' ? 'rejected' : 'waiting';
         }
         return 'waiting';
     }

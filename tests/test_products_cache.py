@@ -81,11 +81,8 @@ def test_readers_use_the_right_cache():
     # the Laqta home (OverviewController) and the run plan read the sheet through the raw-rows cache only
     assert "ProductController::sheetRows(" in method_body(overview, "overview")
     assert "ProductController::sheetRows(" in method_body(run, "plan")
-    assert "return app(OverviewController::class)->index();" in method_body(product, "index")
-    assert "self::sheetRows(" in method_body(product, "getBrandEstimateCount")
     assert "ProductController::sheetRows(" in method_body(api, "retryFailures")
-    for name in ("index", "getProductsJson", "getBrandEstimateCount"):
-        assert "runPython('get_products')" not in method_body(product, name), name
+    assert "runPython('get_products')" not in method_body(product, "getProductsJson")
     for text in (overview, run):
         assert "get_products" not in text and "Cache::put(ProductController" not in text
     assert "runPython('get_products')" not in method_body(api, "retryFailures")
@@ -113,7 +110,6 @@ def test_helper_forgets_both_keys():
     (CURATION, "rejectAndReSearch"),
     (CURATION, "selectCandidate"),
     (CURATION, "saveCandidates"),
-    (PRODUCT, "updateRichProduct"),
 ])
 def test_every_write_path_calls_the_invalidation_helper(path, name):
     body = method_body(read(path), name)
@@ -271,7 +267,6 @@ namespace {
     //    (OverviewController::overview) reads the sheet through ProductController::sheetRows().
     ProductController::sheetRows();
     $out['after_home'] = $catalog();
-    $out['estimate'] = $controller->getBrandEstimateCount(new Illuminate\Http\Request(['brand' => 'almarai']))->data;
 
     // 2. a new run starts (before the fix the catalog skipped the cache in this state); nothing changed yet
     DB::$status = 'pre_caching';
@@ -330,7 +325,6 @@ def test_home_visit_does_not_hide_prechecked_products_from_review(tmp_path):
     assert first["rows"]["3"]["enriched"] is True and first["rows"]["3"]["needs_review"] is False
     # the home's «بانتظار مراجعتك» is now the sidebar badge's number (automation_queue ready_for_review, one
     # source for both): tests/test_laqta_run.py::test_every_number_has_one_source
-    assert out["estimate"] == {"count": 2}
 
 
 @pytest.mark.skipif(PHP is None, reason="php is not installed")

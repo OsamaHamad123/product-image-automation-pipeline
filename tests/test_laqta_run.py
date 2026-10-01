@@ -205,14 +205,16 @@ def test_result_kinds_are_plain_arabic():
              ("ready_for_review", None, "AUTO_PUBLISH"), ("ready_for_review", "VERIFIER_DOWN", "REVIEW_UNSELECTED"),
              ("ready_for_review", None, None), ("failed", "NO_RESULTS", "NOT_FOUND"), ("failed", "ALL_CONFLICTED", None),
              ("failed", None, "NOT_FOUND"), ("failed", "SEARCH_ERROR", None), ("failed", "CANDIDATE_SAVE_FAILED", None),
-             ("pending", "PROVIDER_DOWN", None), ("pending", None, None), ("processing", None, None)]
+             ("pending", "PROVIDER_DOWN", None), ("pending", None, None), ("processing", None, None),
+             ("pending", "REJECTED", None)]
     out = _php("foreach (" + php_value(cases) + " as [$s, $c, $d]) { $out['kinds'][] = QueueStats::resultKind($s, $c, $d); }\n"
                "$out['labels'] = QueueStats::RESULT_KINDS; $out['failure'] = QueueStats::FAILURE_TEXT;")
     assert out["kinds"] == ["approved", "proposed", "proposed", "none", "none", "not_found", "not_found", "not_found",
-                            "error", "error", "requeued", "waiting", "searching"]
+                            "error", "error", "requeued", "waiting", "searching", "rejected"]
     labels = {k: v["label"] for k, v in out["labels"].items()}
     assert labels["proposed"] == "مقترحة" and labels["none"] == "بلا اقتراح" and labels["not_found"] == "ما انلقت"
     assert labels["error"] == "عطل مؤقت" and labels["requeued"] == "رجعت للطابور"
+    assert labels["rejected"] == "رجعت للطابور"            # a reviewer's rejection reads as on the review page
     chips = {"proposed", "warning", "none", "not-found", "approved", "error"}          # x-lq.chip statuses
     assert {v["chip"] for v in out["labels"].values()} <= chips
     for text in list(labels.values()) + list(out["failure"].values()):
@@ -304,8 +306,8 @@ def test_run_summary_counts_and_explains():
                "$out['clean'] = QueueStats::explainFailures(['proposed' => 3]);\n"
                "$out['nothing'] = QueueStats::explainFailures([]);")
     s = out["s"]
-    assert s["counts"] == {"proposed": 1, "none": 1, "not_found": 1, "error": 1, "requeued": 1, "approved": 1,
-                           "searching": 0, "waiting": 1}
+    assert s["counts"] == {"proposed": 1, "none": 1, "not_found": 1, "error": 1, "requeued": 1, "rejected": 0,
+                           "approved": 1, "searching": 0, "waiting": 1}
     assert sum(s["counts"].values()) == s["total"] == 7
     # the same "processed" as the sidebar and /api/batch-status (QueueStats::runTotals)
     assert s["processed"] == out["totals"]["processed"] == 5

@@ -54,7 +54,8 @@ double-check before approving. They never change the winner or the decision.
                                  ('WhatsApp Image ...', 'IMG-20251014-WA0003', 'Screenshot')
     social_media                 the image or page host is a social network
     foreign_store                the page is a store outside the UAE: a non-UAE country
-                                 TLD, a non-UAE retailer, or a UAE retailer's other-country
+                                 TLD ('.sa', '.ca', '.co.uk'; not generic ones like '.io'),
+                                 a non-UAE retailer, or a UAE retailer's other-country
                                  section ('noon.com/saudi-en/'); never the brand's own site
 """
 
@@ -111,6 +112,17 @@ _SOCIAL_LABELS = frozenset({
 _SOCIAL_DOMAINS = ("x.com", "fb.com", "t.co", "redd.it", "threads.net")
 # Country TLDs of the other markets the catalogue's products are also sold in.
 _FOREIGN_TLDS = frozenset({"kw", "sa", "qa", "om", "bh", "in", "pk", "eg", "jo"})
+# Two-letter domains sold as generic names (start-ups, media, shops): no country, so no warning on their own.
+_GENERIC_CCTLDS = frozenset({"io", "co", "me", "tv", "ai", "ly", "gg", "fm", "am", "to", "cc", "ws", "so", "sh",
+                             "is", "it", "la", "nu", "pw", "vc", "tk"})
+
+
+def _is_foreign_tld(host: str) -> bool:
+    """A country domain outside the UAE ('.sa', '.ca', '.co.uk'); not '.ae' and not a generic-use one ('.io')."""
+    tld = host.rsplit(".", 1)[-1]
+    if tld in _FOREIGN_TLDS:
+        return True
+    return len(tld) == 2 and tld.isalpha() and tld != "ae" and tld not in _GENERIC_CCTLDS
 # 'other_retail' stores (trusted_domains.json) that are UAE stores without an .ae domain.
 _UAE_DOTCOM_STORES = ("westzone.com", "instashop.com")
 
@@ -305,7 +317,7 @@ def _foreign_store(spec: SkuSpec, cand: Candidate) -> bool:
         return store_market(cand.page_url) == "foreign"
     if host.endswith(".ae") or domain_matches(host, _UAE_DOTCOM_STORES):
         return False
-    if host.rsplit(".", 1)[-1] in _FOREIGN_TLDS:
+    if _is_foreign_tld(host):
         return True
     return domain_matches(host, data.get("other_retail", []))
 

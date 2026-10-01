@@ -119,25 +119,6 @@ class ApiController extends Controller
         return response()->json($result, 500);
     }
 
-    /**
-     * قراءة سجلات التشغيل المباشر من ملف الـ Log لـ main.py
-     */
-    public function logs()
-    {
-        try {
-            $logPath = $this->automationPath('temp/pipeline.log');
-            if (file_exists($logPath)) {
-                $content = file($logPath);
-                // جلب آخر 100 سطر لتوفير الأداء
-                $lines = array_slice($content, -100);
-                $lines = array_map('trim', $lines);
-                return response()->json(['logs' => $lines])->header('Cache-Control', 'no-store');
-            }
-            return response()->json(['logs' => []])->header('Cache-Control', 'no-store');
-        } catch (\Exception $e) {
-            return response()->json(['logs' => []])->header('Cache-Control', 'no-store');
-        }
-    }
 
     public function clearProductsCache()
     {
@@ -563,28 +544,6 @@ class ApiController extends Controller
         return response()->json($result + ['worker' => $worker]);
     }
 
-    /**
-     * إعادة تعيين التعلم النشط وحذف سجلات التغذية الراجعة
-     */
-    public function resetActiveLearning(Request $request)
-    {
-        try {
-            $brand = $request->input('brand');
-            
-            if ($brand) {
-                // حذف سجلات براند محدد
-                \DB::delete("DELETE FROM active_learning_feedback WHERE LOWER(brand) = ?", [strtolower(trim($brand))]);
-            } else {
-                // حذف كافة سجلات التعلم النشط
-                \DB::delete("DELETE FROM active_learning_feedback");
-            }
-            
-            ProductController::forgetProductCaches();
-            return response()->json(['status' => 'success', 'message' => 'Active learning feedback reset successfully.']);
-        } catch (\Exception $e) {
-            return response()->json(['status' => 'failed', 'error' => $e->getMessage()], 500);
-        }
-    }
 
     /**
      * إعادة تشغيل وضم المنتجات الفاشلة لطابور المعالجة.
@@ -703,7 +662,7 @@ class ApiController extends Controller
                     'error' => 'لم يُضف أي منتج إلى طابور الأتمتة.' . $notFoundText], 422);
             }
             $message = "أُضيفت المنتجات إلى طابور الأتمتة (العدد: {$successCount})، ولا تبدأ معالجتها من هنا: "
-                . "شغّل الأتمتة من صفحة «التحكم والأتمتة الجماعية» لمعالجتها. إن كان تشغيل جارٍ الآن فسيعالجها قبل أن ينتهي."
+                . "شغّل التشغيل من صفحة «التشغيل» لمعالجتها. إن كان تشغيل جارٍ الآن فسيعالجها قبل أن ينتهي."
                 . $notFoundText;
 
             return response()->json(['status' => 'success', 'requeued' => $successCount, 'not_found' => $notFound, 'message' => $message]);

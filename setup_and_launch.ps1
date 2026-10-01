@@ -241,6 +241,17 @@ if (-not (Test-Path $dashboardEnv)) {
     }
 }
 
+# الجلسات والكاش في ملفات لا في MariaDB: لو قاعدة البيانات واقفة تفتح اللوحة وتقول «قاعدة البيانات مش متاحة» بدل خطأ 500
+if (Test-Path $dashboardEnv) {
+    $envText = [System.IO.File]::ReadAllText($dashboardEnv)
+    $newText = $envText -replace '(?m)^SESSION_DRIVER=database(\r?)$', 'SESSION_DRIVER=file$1'
+    $newText = $newText -replace '(?m)^CACHE_STORE=database(\r?)$', 'CACHE_STORE=file$1'
+    if ($newText -ne $envText) {
+        [System.IO.File]::WriteAllText($dashboardEnv, $newText, (New-Object System.Text.UTF8Encoding($false)))
+        Write-Host "⚙️ الجلسات والكاش صاروا ملفات بدل قاعدة البيانات." -ForegroundColor Yellow
+    }
+}
+
 # توليد مفتاح التطبيق للوحة التحكم إن لم يكن موجوداً
 if (Test-Path $dashboardEnv) {
     $envContent = Get-Content $dashboardEnv

@@ -388,7 +388,7 @@
             brand_ar: ctx.brand_ar,
             category: ctx.category,
             ...reviewedCandidateView(candidate, ctx),
-            enhance: false,
+            // no enhance / bg_removal_method: the bridge applies the saved image-processing settings
             target_width: 0,
             target_height: 0
         };
@@ -433,7 +433,6 @@
             ['product_name_ar', ctx.product_name_ar],
             ['brand_ar', ctx.brand_ar],
             ['category', ctx.category],
-            ['enhance', 'false'],
             ['target_width', '0'],
             ['target_height', '0']
         ];
