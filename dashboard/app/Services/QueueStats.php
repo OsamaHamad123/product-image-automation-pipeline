@@ -146,6 +146,7 @@ class QueueStats
         'SHEET_CONFIG' => 'إعداد الشيت غير صالح فتوقف التشغيل قبل معالجة أي منتج',
         'PROVIDER_DOWN' => 'محركات البحث غير متاحة، فتوقف العامل وبقيت الصفوف المتبقية في الانتظار. أعد التشغيل لاحقاً.',
         'VERIFIER_NOT_CONFIGURED' => 'لا يوجد مفتاح Gemini: كل النتائج تذهب للمراجعة البشرية ولا يُنشر أي شيء تلقائياً.',
+        'VERIFIER_NOT_CONFIGURED_CLAUDE' => 'نموذج القراءة الأساسي من Claude ولا يوجد مفتاح Anthropic: كل النتائج تذهب للمراجعة البشرية ولا يُنشر أي شيء تلقائياً.',
         'VERIFIER_UNAVAILABLE' => 'نموذج Gemini غير متاح: كل النتائج تذهب للمراجعة البشرية.',
         'VERIFIER_CHECK_FAILED' => 'تعذر فحص نموذج Gemini عند بدء العامل: كل النتائج تذهب للمراجعة البشرية.',
     ];
@@ -229,11 +230,17 @@ class QueueStats
         'CANDIDATE_SAVE_FAILED' => 'ما قدرنا نحفظ الاقتراحات بقاعدة البيانات',
         'PROVIDER_DOWN' => 'مصادر البحث ما كانت متاحة',
         'DOWNLOAD_FAILED' => 'ما قدرنا ننزّل الصور من مواقعها',
-        'VERIFIER_DOWN' => 'Gemini ما ردّ، فالاختيار بدّه عينك',
+        'VERIFIER_DOWN' => 'نموذج قراءة الملصق ما ردّ، فالاختيار بدّه عينك',
     ];
 
-    /** Same prices as ops_health.SERPER_COST_PER_QUERY / GEMINI_COST_PER_CALL; the prices ops_health reports win. */
-    public const DEFAULT_PRICES = ['serper_per_query' => 0.001, 'gemini_per_call' => 0.001];
+    /**
+     * Same prices as ops_health.SERPER_COST_PER_QUERY / GEMINI_COST_PER_CALL and, for SerpApi Google Lens,
+     * ops_health.SERPAPI_LENS_DEFAULT_COST; the prices ops_health reports win.
+     */
+    public const DEFAULT_PRICES = ['serper_per_query' => 0.001, 'gemini_per_call' => 0.001, 'lens_serpapi' => 0.015];
+
+    /** Every Serper endpoint is billed per answered call (ops_health.SERPER_BILLED_PROVIDERS). */
+    public const SERPER_BILLED_PROVIDERS = ['serper', 'serper_web', 'serper_shopping', 'lens_serper'];
 
     /** A Serper query the provider answered (ops_health.ANSWERED_STATUSES): only these are billed. */
     public const ANSWERED_STATUSES = ['ok', 'empty'];
@@ -308,31 +315,56 @@ class QueueStats
         return implode('، ', $text);
     }
 
-    /** Billable use in one trace outcome: answered Serper queries and Gemini calls, counted as ops_health counts. */
+    /**
+     * Billable use in one trace outcome, counted as ops_health counts it: answered calls of every Serper endpoint,
+     * answered SerpApi Google Lens calls, and the label readers. A reader that recorded its spend (outcome.vlm_usage:
+     * tokens priced per model) is billed by that spend; an older outcome without it, by its calls at the flat price.
+     */
     public static function outcomeUsage(?array $outcome): array
     {
-        $serper = 0;
+        $serper = $serpapi = 0;
         foreach ((array) ($outcome['provider_health'] ?? []) as $item) {
             if (!is_array($item)) {
                 continue;
             }
             $provider = strtolower(trim((string) ($item['provider'] ?? '')));
             $status = strtolower(trim((string) ($item['status'] ?? '')));
-            if ($provider === 'serper' && in_array($status, self::ANSWERED_STATUSES, true)) {
+            if (!in_array($status, self::ANSWERED_STATUSES, true)) {
+                continue;
+            }
+            if (in_array($provider, self::SERPER_BILLED_PROVIDERS, true)) {
                 $serper++;
+            } elseif ($provider === 'lens_serpapi') {
+                $serpapi++;
             }
         }
         $vlm = is_numeric($outcome['vlm_calls'] ?? null) ? max(0, (int) $outcome['vlm_calls']) : 0;
-        return ['serper_queries' => $serper, 'vlm_calls' => $vlm];
+        $priced = false;
+        $vlmUsd = 0.0;
+        foreach ((array) ($outcome['vlm_usage'] ?? []) as $use) {
+            // the entries ops_health._vlm_usage keeps: a provider and a model; a negative or unreadable cost is 0
+            if (!is_array($use) || trim((string) ($use['provider'] ?? '')) === '' || trim((string) ($use['model'] ?? '')) === '') {
+                continue;
+            }
+            $priced = true;
+            $usd = is_numeric($use['usd'] ?? null) ? (float) $use['usd'] : 0.0;
+            $vlmUsd += $usd > 0 ? $usd : 0.0;
+        }
+        return ['serper_queries' => $serper, 'serpapi_calls' => $serpapi, 'vlm_calls' => $vlm,
+                'unpriced_vlm_calls' => $priced ? 0 : $vlm, 'vlm_usd' => $vlmUsd];
     }
 
-    public static function usageCost(int $serperQueries, int $vlmCalls, ?array $prices = null): float
+    /**
+     * Estimated cost of answered Serper queries, label reads without a recorded spend (flat price per call),
+     * SerpApi Lens calls and the recorded label-reader spend.
+     */
+    public static function usageCost(int $serperQueries, int $unpricedVlmCalls, ?array $prices = null, int $serpapiCalls = 0,
+                                     float $vlmUsd = 0.0): float
     {
-        $serperPrice = is_numeric($prices['serper_per_query'] ?? null) ? (float) $prices['serper_per_query']
-            : self::DEFAULT_PRICES['serper_per_query'];
-        $geminiPrice = is_numeric($prices['gemini_per_call'] ?? null) ? (float) $prices['gemini_per_call']
-            : self::DEFAULT_PRICES['gemini_per_call'];
-        return round($serperQueries * $serperPrice + $vlmCalls * $geminiPrice, 4);
+        $price = fn (string $k) => is_numeric($prices[$k] ?? null) && (float) $prices[$k] >= 0 ? (float) $prices[$k]
+            : self::DEFAULT_PRICES[$k];
+        return round($serperQueries * $price('serper_per_query') + $unpricedVlmCalls * $price('gemini_per_call')
+            + $serpapiCalls * $price('lens_serpapi') + $vlmUsd, 4);
     }
 
     /** Epoch seconds of outcome.searched_at (ISO time with a zone, as catalog_match.facade writes it), or null. */
@@ -360,7 +392,8 @@ class QueueStats
         $rowsByKind = [];
         $times = [];
         $numbers = [];
-        $serper = $vlm = $readable = $processed = 0;
+        $serper = $serpapi = $vlm = $readable = $processed = 0;
+        $vlmUsd = 0.0;
         foreach ($rows as $row) {
             $row = (array) $row;
             $outcome = is_array($row['outcome'] ?? null) ? $row['outcome'] : null;
@@ -389,7 +422,9 @@ class QueueStats
                 $readable++;
                 $use = self::outcomeUsage($outcome);
                 $serper += $use['serper_queries'];
-                $vlm += $use['vlm_calls'];
+                $serpapi += $use['serpapi_calls'];
+                $vlm += $use['unpriced_vlm_calls'];
+                $vlmUsd += $use['vlm_usd'];
             }
         }
         $started = $times ? min($times) : null;
@@ -404,7 +439,7 @@ class QueueStats
             'ended_at' => $ended,
             'duration_s' => $span,
             'per_product_s' => count($times) >= 2 ? round($span / (count($times) - 1), 1) : null,
-            'cost_usd' => $readable > 0 ? self::usageCost($serper, $vlm, $prices) : null,
+            'cost_usd' => $readable > 0 ? self::usageCost($serper, $vlm, $prices, $serpapi, $vlmUsd) : null,
             'explain' => self::explainFailures($counts, $codes, $rowsByKind),
         ];
     }

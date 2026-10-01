@@ -692,7 +692,7 @@
         return el('section', { className: 'rv-panel rv-checks', 'aria-label': 'الشيت مقابل الصورة' }, [
             el('div', { className: 'rv-checks__head' }, [
                 el('h3', { className: 'rv-h3', text: 'الشيت مقابل الصورة' }),
-                el('span', { className: 'rv-checks__src' }, [icon('sparkle', 14), el('span', { text: res.read ? 'قراءة Gemini' : 'Gemini ما قرأ هالصورة' })])
+                el('span', { className: 'rv-checks__src' }, [icon('sparkle', 14), el('span', { text: res.read ? 'قراءة الملصق' : 'نموذج القراءة ما قرأ هالصورة' })])
             ]),
             el('div', { className: 'rv-checks__cols', 'aria-hidden': 'true' }, [el('span'), el('span', { text: 'بالشيت' }), el('span', { text: 'بالصورة' }), el('span')]),
             el('div', { className: 'lq-checks' }, res.rows.map(checkRow)),
@@ -816,7 +816,7 @@
             if (!hasCands) {
                 out.push(alertBox('info', 'ما انلقت:', 'ما لقينا صور مطابقة لهالمنتج. جرّب كلمات ثانية، أو حط رابط، أو ارفع صورة.'));
             } else if (search.decision === 'VERIFIER_DOWN') {
-                out.push(alertBox('warning', 'Gemini مش متاح هلق:', 'ما في فحص بصري لهالنتائج، راجع الصور بنفسك قبل الاعتماد.'));
+                out.push(alertBox('warning', 'نموذج القراءة مش متاح هلق:', 'ما في فحص بصري لهالنتائج، راجع الصور بنفسك قبل الاعتماد.'));
             } else if (search.decision === 'AUTO_PUBLISH') {
                 out.push(alertBox('success', 'مطابقة مؤكدة بالكامل.', 'راجعها واعتمدها.'));
             } else if (!search.selectedUrl) {

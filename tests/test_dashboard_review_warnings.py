@@ -86,7 +86,7 @@ def test_warning_sentences(path, tmp_path):
     assert out["sheet_silent:fries_cut=thin"] == "الشيت ما حدد طريقة التقطيع: thin"
     assert out["sheet_silent:cheese_form=grated+shredded"] == "الشيت ما حدد شكل الجبن: grated / shredded"
     assert out["sheet_silent:new_axis=x"] == "الشيت ما حدد النوع: x"
-    assert out["vlm_unsure"] == "Gemini غير متأكد من المطابقة"
+    assert out["vlm_unsure"] == "نموذج القراءة غير متأكد من المطابقة"
     assert out["low_resolution"].startswith("صورة منخفضة الدقة")
     assert out["chat_or_screenshot"] == "صورة من واتساب أو لقطة شاشة"
     assert "مواقع التواصل" in out["social_media"]

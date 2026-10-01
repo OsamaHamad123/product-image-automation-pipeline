@@ -670,13 +670,25 @@ def run_enqueue_mode():
 # ---------------------------------------------------------------------------
 
 def check_verifier():
-    """فحص توفر نموذج Gemini عند بدء العامل؛ يعيد نص تنبيه للوحة التحكم أو '' إذا كان متاحاً."""
+    """
+    فحص قارئ الملصق الأساسي (VERIFIER_PRIMARY) عند بدء العامل؛ يعيد نص تنبيه للوحة التحكم أو '' إذا كان متاحاً.
+    قارئ Claude يحتاج مفتاح Anthropic؛ قارئ Gemini يحتاج مفتاح Gemini ونموذجاً متاحاً.
+    """
     try:
         from catalog_match import settings as cm_settings
         from catalog_match import verify as cm_verify
+        try:
+            from catalog_match.verifiers import cascade as cm_cascade
+            ref = cm_cascade.primary_ref()
+        except Exception:
+            ref = None
+        if ref is not None and ref.provider == "claude":
+            if not cm_settings.anthropic_api_key():
+                return "VERIFIER_NOT_CONFIGURED_CLAUDE: no Anthropic key, every result goes to human review"
+            return ""
         if not cm_settings.gemini_api_key():
             return "VERIFIER_NOT_CONFIGURED: no Gemini key, every result goes to human review"
-        check = cm_verify.check_model_available()
+        check = cm_verify.check_model_available(model=ref.model if ref is not None else None)
         if not check:
             return f"VERIFIER_UNAVAILABLE: {check.status} ({check.model}); every result goes to human review"
         return ""

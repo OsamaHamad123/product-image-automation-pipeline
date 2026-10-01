@@ -127,3 +127,13 @@ def test_proxy_credentials_are_never_printed(monkeypatch, capsys):
     assert "s3cretpass" not in out and "staffuser" not in out
     # the host is still shown, so the owner knows which proxy failed
     assert re.search(r"\bproxy\.example\.com:8080\b", out)
+
+
+@pytest.mark.parametrize("name", ["ANTHROPIC_API_KEY", "SERPAPI_API_KEY"])
+def test_phase3_keys_are_masked_in_the_connection_check_output(monkeypatch, name):
+    """The Anthropic (label reader) and SerpApi (visual search) keys are masked like every other key."""
+    fake = "phase3-" + name.lower().replace("_", "-") + "-value"
+    monkeypatch.setattr(config, name, fake, raising=False)
+    assert name in vcs._SECRET_SETTINGS
+    out = vcs._redact(f"request failed for {fake} at https://api.example/v1?api_key={fake}")
+    assert fake not in out

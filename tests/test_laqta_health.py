@@ -126,7 +126,7 @@ def test_classes_and_tokens_exist():
     ids = {"lq-health-initial", "lq-health-search-title", "lq-health-results-title", "lq-health-cost-title",
            "lq-health-reasons-title", "lq-health-log-title", "lq-health-log-body", "lq-settings-sheet-title",
            "lq-settings-keys-title", "lq-settings-ap-title", "lq-settings-processing-title",
-           "lq-settings-advanced-title", "lq-settings-models-title", "lq-key-form", "lq-page-health", "lq-page-settings", "lq-health-spin"}
+           "lq-settings-advanced-title", "lq-settings-models-title", "lq-settings-sources-title", "lq-key-form", "lq-page-health", "lq-page-settings", "lq-health-spin"}
     # classes built at runtime: 'lq-tone--' + tone, 'lq-dot--' + tone, '...--' + tone
     runtime = {"lq-tone", "lq-dot", "lq-keys__state", "lq-settings-columns__item", "lq-settings-form__status",
                "lq-health-provider__problems", "lq-alert", "lq-toast", "lq-dot lq-dot", "lq-skeleton"}
@@ -693,7 +693,8 @@ TOUCHED = list(SECRETS) + ["auto_publish_enabled", "auto_publish_brands", "searc
                            "google_search_cx", "cloudinary_cloud_name", "strict_brand_match", "output_canvas_size",
                            "bg_removal_method", "enable_image_enhancement", "enable_gemini_pre_validation",
                            "filter_competitors", "bypass_white_background_check", "verifier_primary",
-                           "verifier_strong", "verifier_monthly_budget_usd", "model_prices"]
+                           "verifier_strong", "verifier_monthly_budget_usd", "model_prices", "expansion_enabled",
+                           "expansion_max_calls", "visual_search", "serpapi_lens_price_usd", "gtin_policy"]
 
 
 def _sql(db, statement, params=()):
@@ -929,6 +930,46 @@ def test_auto_publish_rules_on_the_server(app_env):
     assert "ALMARAI" in down[2]["body"] and 'name="op" value="disable"' in down[2]["body"]
     assert re.search(r'name="auto_publish_enabled"[^>]*disabled', down[2]["body"])
     assert _settings(db)["auto_publish_enabled"] == "false"
+
+
+def test_extra_sources_form_saves_checks_and_shows_its_section(app_env):
+    """«مصادر البحث الإضافية» on the «متقدم» tab: its own section, refused values keep the stored ones, no key shown."""
+    db = app_env["db"]
+    env = app_env["env"]
+    _put(db, {"filter_competitors": "true", "expansion_enabled": "true", "expansion_max_calls": "4",
+              "visual_search": "auto", "serpapi_lens_price_usd": "0.015", "gtin_policy": "evidence"})
+    before = _settings(db)
+    out = _kernel(env, [
+        ["POST", "/settings", {"section": "sources", "expansion_enabled": "true", "expansion_max_calls": "6",
+                               "visual_search": "serpapi", "serpapi_lens_price_usd": "0.02", "gtin_policy": "strict"}],
+        ["GET", "/settings?tab=advanced", {}],
+        # every value refused: the stored ones stay, one warning each; the switch left off turns the round off
+        ["POST", "/settings", {"section": "sources", "expansion_max_calls": "12", "visual_search": "lens",
+                               "serpapi_lens_price_usd": "abc", "gtin_policy": "hard"}],
+    ])
+    saved, page, refused = out
+    assert saved["location"].endswith("?tab=advanced") and "الجولة الإضافية بتشتغل" in saved["flash"]["success"]
+    assert page["status"] == 200, page["body"][:2000]
+    body = page["body"]
+    assert 'name="section" value="sources"' in body and "مصادر البحث الإضافية" in body
+    assert re.search(r'name="expansion_enabled"[^>]*checked', body)
+    assert re.search(r'name="expansion_max_calls"[^>]*value="6"', body)
+    assert re.search(r'name="visual_search" value="serpapi" checked', body)
+    assert re.search(r'name="gtin_policy" value="strict" checked', body)
+    assert "مفتاح SerpApi: محفوظ" in body and "مفتاح SerpApi مش محفوظ" not in body
+    assert SECRETS["serpapi_api_key"] not in body and SECRETS["serpapi_api_key"][-4:] not in body
+    assert len(refused["flash"]["warnings"]) == 4, refused["flash"]
+    assert "الجولة الإضافية مطفأة" in refused["flash"]["success"]
+    after = _settings(db)
+    assert (after["expansion_enabled"], after["expansion_max_calls"], after["visual_search"],
+            after["serpapi_lens_price_usd"], after["gtin_policy"]) == ("false", "6", "serpapi", "0.02", "strict")
+    for key in ("search_engine", "strict_brand_match", "filter_competitors", "serpapi_api_key", "auto_publish_enabled"):
+        assert after[key] == before[key], key
+
+    # SerpApi chosen without a saved key: the page says visual search is off until the key is added
+    _put(db, {"serpapi_api_key": ""})
+    page = _kernel(env, [["GET", "/settings?tab=advanced", {}]])[0]["body"]
+    assert "مفتاح SerpApi مش محفوظ" in page and "مفتاح SerpApi: غير محفوظ" in page
 
 
 def test_unavailable_database_is_said(app_env):

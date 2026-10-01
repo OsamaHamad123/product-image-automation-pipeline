@@ -184,6 +184,64 @@ pick 100%, wrong auto-publish 0%.
 - The rich catalog page and its API (`/api/rich-products*`), the brand-estimate and `/api/logs` endpoints, the
   active-learning page and its reset, and `layouts/layout.blade.php`. The CSV export stays, in bulk review.
 
+### Added in phase 3 (coverage and accuracy)
+
+The second live dry run pre-selected 32 of 55 measured products, and 17 of the other 23 had no correct image
+anywhere in the Google Images results. Phase 3 widens where the search looks, makes the label reader switchable,
+and treats the barcode as supporting evidence. It was built in four packages, each checked by an adversarial
+reviewer. The offline eval gate is unchanged: correct pick 100% on the normal and noisy-reader scenarios, wrong
+auto-publish 0%.
+
+- **Expansion round** (`catalog_match/expand.py`, `catalog_match/pages.py`). When the normal search ends with no
+  confident pick, one more round runs within `EXPANSION_MAX_CALLS` paid calls (default 4):
+  - a Serper web search for the product page on the brand's site and UAE stores;
+  - Google Shopping through Serper;
+  - visual search (Serper Lens, or SerpApi Google Lens with `SERPAPI_API_KEY`) seeded by the best near-match.
+
+  Store pages are read without running scripts (JSON-LD, `__NEXT_DATA__`, `og:image`). New candidates go through
+  the same scoring, download, quality and verifier rules. Page images are never auto-published. A pick flagged
+  low-resolution gets one visual search for a larger copy of the same packshot.
+- **Switchable label readers** (`catalog_match/verifiers/`):
+  - `VERIFIER_PRIMARY` reads every batch (default Gemini 3.1 Flash-Lite).
+  - `VERIFIER_STRONG` takes one second look at an unsure top candidate (default Gemini 3.5 Flash). Claude
+    Haiku 4.5, Sonnet 5.5 and Opus 5.5 are available with `ANTHROPIC_API_KEY`.
+  - The second look never turns a MISMATCH into a MATCH.
+  - It stops for the month at `VERIFIER_MONTHLY_BUDGET_USD` (default $5).
+  - Every reading records its model, tokens and cost (`outcome.vlm_usage`).
+- **Barcode as evidence** (`GTIN_POLICY=evidence`, default; `strict` and `off` remain).
+  - A matching page barcode strengthens identity only when the brand agrees.
+  - A different one caps the candidate at tier 2 and needs a full verifier MATCH to be pre-checked. The reviewer
+    sees «الباركود بالشيت مختلف عن باركود صفحة المتجر».
+  - The barcode cache serves an approved image only when brand, name and size agree.
+- **Best-resolution copy:** a near-identical copy of the pick at a higher resolution is published instead.
+- **Settings:**
+  - tab «نماذج التحقق»: models, prices per 1M tokens, an estimate per 100 products and the monthly budget;
+  - write-only Anthropic and SerpApi keys;
+  - in «متقدم», «مصادر البحث الإضافية»: the expansion round, paid calls per product, visual search, the SerpApi
+    price and the barcode policy.
+- **Health and cost:**
+  - one cost line per label-reading model and one for SerpApi Lens;
+  - names for the new Serper endpoints;
+  - the Run page cost counts every Serper endpoint, SerpApi and each model's recorded spend, as `ops_health` does.
+- **Measuring:**
+  - `scripts/smoke_live.py --probe`: one cheap call per paid service, never a key.
+  - Every dry run ends with a coverage and cost summary. `--json` saves it, and `--no-expansion` measures without
+    the expansion round.
+  - `scripts/compare_runs.py old.json new.json [--md] [--out]` compares two runs.
+  - `scripts/eval_record.py --prefill-labels-from-db` copies the dashboard's review decisions into `labels.csv`.
+
+### Fixed while integrating phase 3
+
+- A barcode-conflict MATCH that cannot be pre-checked no longer skips the second verifier call on the next
+  candidates.
+- `verify_cloud_services.py` masks the Anthropic and SerpApi keys like the others.
+- The worker's start-up check reads the configured primary model. A Claude primary without an Anthropic key is
+  reported as «every result goes to review» instead of probing Gemini.
+- The review screens and the reader-outage messages say «نموذج القراءة» instead of Gemini, because the primary
+  reader can be a Claude model.
+- `.gitignore` keeps ignoring HTML dumps but lets the offline test fixtures under `tests/catalog_match/fixtures`
+  be added.
+
 ### Removed
 
 - `verification_layer/` (87 modules) and the 23 test files that only exercised it or asserted nothing

@@ -270,20 +270,44 @@ def _outcome(serper=(), google=(), vlm=0, decision="REVIEW_PRESELECTED", at=None
 def test_run_cost_counts_what_ops_health_bills():
     import ops_health
 
+    def extra(outcome, health=(), usage=None):
+        outcome["provider_health"] += [{"provider": p, "status": s} for p, s in health]
+        if usage is not None:
+            outcome["vlm_usage"] = usage
+        return outcome
+
+    read = lambda provider, model, usd, role="primary": {"role": role, "provider": provider, "model": model,
+                                                          "input_tokens": 1200, "output_tokens": 80, "usd": usd}
     outcomes = [_outcome(("ok", "ok", "empty"), ("ok",), 2), _outcome(("quota", "error"), (), 0),
-                _outcome(("ok",), ("error",), 3), _outcome((), (), 1, decision="NOT_FOUND"), None]
+                _outcome(("ok",), ("error",), 3), _outcome((), (), 1, decision="NOT_FOUND"), None,
+                # the expansion round: every Serper endpoint, SerpApi Lens (answered or not), and readers that recorded
+                # their spend (billed by it, not by the flat price per call); a malformed entry is ignored
+                extra(_outcome(("ok",), (), 3, decision="REVIEW_UNSELECTED"),
+                      [("serper_web", "ok"), ("serper_shopping", "empty"), ("lens_serper", "quota"),
+                       ("lens_serpapi", "ok"), ("lens_serpapi", "error"), ("page", "ok")],
+                      [read("gemini", "gemini-3.1-flash-lite", 0.0004), read("claude", "claude-sonnet-5-5", 0.012, "strong"),
+                       read("gemini", "gemini-3.1-flash-lite", -1), {"provider": "", "model": "x", "usd": 5}, "junk"]),
+                extra(_outcome((), (), 2), [("lens_serpapi", "empty")], [])]
     rows = [{"status": "ready_for_review", "failure_code": None, "age_s": 30,
              "outcome_json": json.dumps(o) if o else None, "has_trace": True} for o in outcomes]
     entries = [e for e in (ops_health.entry_from_row(r) for r in rows) if e]
     expected = ops_health.window_stats(entries)["cost_usd"]["total"]
-    prices = {"serper_per_query": ops_health.SERPER_COST_PER_QUERY, "gemini_per_call": ops_health.GEMINI_COST_PER_CALL}
-    out = _php("$s = 0; $v = 0; foreach (" + php_value([o for o in outcomes if o]) + " as $o) {"
-               " $u = QueueStats::outcomeUsage($o); $s += $u['serper_queries']; $v += $u['vlm_calls']; }\n"
-               "$out['cost'] = QueueStats::usageCost($s, $v, " + php_value(prices) + ");\n"
-               "$out['defaults'] = QueueStats::DEFAULT_PRICES; $out['answered'] = QueueStats::ANSWERED_STATUSES;")
-    assert out["cost"] == pytest.approx(expected)
-    assert out["defaults"] == prices
+    prices = {"serper_per_query": ops_health.SERPER_COST_PER_QUERY, "gemini_per_call": ops_health.GEMINI_COST_PER_CALL,
+              "lens_serpapi": ops_health.source_prices()["lens_serpapi"]}
+    out = _php("$s = 0; $v = 0; $l = 0; $u = 0.0; foreach (" + php_value([o for o in outcomes if o]) + " as $o) {"
+               " $use = QueueStats::outcomeUsage($o); $s += $use['serper_queries']; $v += $use['unpriced_vlm_calls'];"
+               " $l += $use['serpapi_calls']; $u += $use['vlm_usd']; }\n"
+               "$out['cost'] = QueueStats::usageCost($s, $v, " + php_value(prices) + ", $l, $u);\n"
+               "$out['counts'] = [$s, $v, $l];\n"
+               "$out['defaults'] = QueueStats::DEFAULT_PRICES; $out['answered'] = QueueStats::ANSWERED_STATUSES;"
+               " $out['billed'] = QueueStats::SERPER_BILLED_PROVIDERS;")
+    assert out["cost"] == pytest.approx(expected) and expected > 0.012
+    # Serper 3 + 1 + 3 (web ok, shopping empty, not the refused lens); flat reads 2+0+3+1+2 (vlm_usage [] records
+    # nothing); SerpApi 1 ok + 1 empty
+    assert out["counts"] == [7, 8, 2]
+    assert out["defaults"] == dict(prices, lens_serpapi=ops_health.SERPAPI_LENS_DEFAULT_COST)
     assert tuple(out["answered"]) == ops_health.ANSWERED_STATUSES
+    assert tuple(out["billed"]) == ops_health.SERPER_BILLED_PROVIDERS
 
 
 @NEEDS_PHP

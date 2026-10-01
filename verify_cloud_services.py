@@ -21,7 +21,7 @@ from urllib.parse import urlsplit
 # والمخرجات تُعرض في صفحة التشخيص وتُحفظ في ملفات.
 _SECRET_SETTINGS = ("GEMINI_API_KEY", "SERPER_API_KEY", "GOOGLE_SEARCH_API_KEYS", "GOOGLE_SEARCH_API_KEY",
                     "CLOUDINARY_API_KEY", "CLOUDINARY_API_SECRET", "PHOTOROOM_API_KEY", "REMOVE_BG_API_KEY",
-                    "TELEGRAM_BOT_TOKEN", "PROXY_URL")
+                    "TELEGRAM_BOT_TOKEN", "PROXY_URL", "ANTHROPIC_API_KEY", "SERPAPI_API_KEY")
 
 
 def _secret_values():

@@ -114,7 +114,7 @@ def test_panel_renders_alerts_in_red_and_escapes_provider_names():
     for d in out["decisions"]:
         assert not re.search(r"[A-Z]{3,}_[A-Z]", d["label"]), d
     reasons = {r["title"]: r for r in out["reasons"]}
-    assert reasons["VERIFIER_DOWN"]["label"] == "Gemini ما ردّ"
+    assert reasons["VERIFIER_DOWN"]["label"] == "نموذج قراءة الملصق ما ردّ"
     assert reasons["PROVIDER_DOWN"]["label"] == "مصادر البحث ما ردّت"
     assert reasons["<b>CODE</b>"]["label"] == "سبب تاني"
     # Serper answered nothing; one Gemini call ($0.001)

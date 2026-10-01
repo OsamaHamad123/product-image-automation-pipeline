@@ -273,9 +273,12 @@ def find_product_image(spec: Union[SkuSpec, Mapping[str, Any]], *, providers: Op
     if res is not None:
         results.append(res)
 
-    # 7. one more call when nothing matched and unverified tier-1/2 candidates remain
+    # 7. one more call when nothing matched and unverified tier-1/2 candidates remain. A MATCH on a page whose
+    #    barcode differs from the sheet's counts only as decide.route counts it: with a full reading (brand, size,
+    #    variant 'yes'); otherwise it cannot be picked and the next candidates are still worth reading.
     if res is not None and res.status == "ok" and len(results) < MAX_VERIFY_CALLS:
-        matched = any(rc.verdict is not None and rc.verdict.decision == decide.MATCH for rc in first)
+        matched = any(rc.verdict is not None and rc.verdict.decision == decide.MATCH
+                      and (not decide.gtin_conflict(rc) or decide.full_match(spec, rc)) for rc in first)
         rest = [rc for rc in usable[VERIFY_BATCH:] if rc.verdict is None and rc.score.tier in (1, 2)]
         if not matched and rest:
             res2 = _verify(spec, verifier, rest[:VERIFY_BATCH])

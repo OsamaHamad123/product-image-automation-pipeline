@@ -100,11 +100,22 @@ class RunController extends Controller
         ];
     }
 
-    /** The prices ops_health reported last (cached by the Health page), else the same defaults. */
+    /**
+     * The prices ops_health reported last (cached by the Health page), with its SerpApi Lens price
+     * (source_prices.lens_serpapi, the SERPAPI_LENS_PRICE_USD setting), else the same defaults.
+     */
     private static function prices(): ?array
     {
         $cached = Cache::get(HealthController::CACHE_KEY);
-        return is_array($cached) && is_array($cached['prices'] ?? null) ? $cached['prices'] : null;
+        if (!is_array($cached) || !is_array($cached['prices'] ?? null)) {
+            return null;
+        }
+        $prices = $cached['prices'];
+        $lens = $cached['source_prices']['lens_serpapi'] ?? null;
+        if (is_numeric($lens)) {
+            $prices['lens_serpapi'] = (float) $lens;
+        }
+        return $prices;
     }
 
     /**

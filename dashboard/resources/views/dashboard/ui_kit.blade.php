@@ -474,7 +474,7 @@
     {{-- Sheet vs image --}}
     <div class="lq-grid lq-grid--2" id="kit-checks">
         <x-lq.card title="الشيت مقابل الصورة" padding="compact">
-            <x-slot:actions><span class="lq-row lq-row--sm lq-muted" style="font-size: 12px"><x-lq.icon name="sparkle" :size="14" />قراءة Gemini</span></x-slot:actions>
+            <x-slot:actions><span class="lq-row lq-row--sm lq-muted" style="font-size: 12px"><x-lq.icon name="sparkle" :size="14" />قراءة الملصق</span></x-slot:actions>
             <div class="lq-checks">
                 <x-lq.check-row label="الماركة" sheet="SUNBULAH" image="Sunbulah" status="match" />
                 <x-lq.check-row label="الحجم" sheet="1 كغ" image="1 kg" status="match" />

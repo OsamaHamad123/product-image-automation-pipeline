@@ -367,8 +367,8 @@ out.texts = texts;
         found = RAW_CODES.findall(text)
         assert not found, (found, text[:400])
     joined = " ".join(out["texts"])
-    for arabic in ("مقترحة من النظام", "الشيت مقابل الصورة", "قراءة Gemini", "ما انلقت:", "عطل:", "رجعت للطابور",
-                   "الصورة الحالية بالشيت", "Gemini شاف منتج مختلف", "مقترحة · ماركة وحجم مطابقين"):
+    for arabic in ("مقترحة من النظام", "الشيت مقابل الصورة", "قراءة الملصق", "ما انلقت:", "عطل:", "رجعت للطابور",
+                   "الصورة الحالية بالشيت", "نموذج القراءة شاف منتج مختلف", "مقترحة · ماركة وحجم مطابقين"):
         assert arabic in joined, arabic
 
 
@@ -381,7 +381,7 @@ out.caution = ws().querySelector('.rv-caution').textContent;
 out.checks = ws().querySelectorAll('.rv-check').map(r => [r.getAttribute('data-check'), r.getAttribute('data-status')]);
 out.requests = requests('/api/select_image').length;
 """, tmp_path)
-    assert out["caution"].startswith("تأكد قبل الاعتماد: ") and "Gemini غير متأكد من المطابقة" in out["caution"]
+    assert out["caution"].startswith("تأكد قبل الاعتماد: ") and "نموذج القراءة غير متأكد من المطابقة" in out["caution"]
     assert ["size", "unsure"] in out["checks"]
     assert out["requests"] == 0
 
@@ -448,9 +448,9 @@ out.confirms = confirms.slice();
 out.sent = requests('/api/select_image').map(c => c.body.row_number);
 out.none_button = document.querySelectorAll('.rv-card').find(c => c.getAttribute('data-kind') === 'none').querySelector('.rv-card__approve').disabled;
 """, tmp_path, fixture(products=READY, rows=queue_rows()))
-    assert out["card_warning"] == "Gemini غير متأكد من المطابقة"
+    assert out["card_warning"] == "نموذج القراءة غير متأكد من المطابقة"
     assert out["refused"] == 0
-    assert all("تأكد قبل الاعتماد: Gemini غير متأكد من المطابقة" in c for c in out["confirms"])
+    assert all("تأكد قبل الاعتماد: نموذج القراءة غير متأكد من المطابقة" in c for c in out["confirms"])
     assert out["sent"] == ["21"]
     assert out["none_button"] is True                             # nothing proposed: open it instead
 
@@ -746,7 +746,7 @@ out.own = caution();
     assert out["system"] == ""                                   # the system pick: Gemini matched a front packshot
     assert out["pick"] == "https://images.openfoodfacts.org/milk-life.jpg"
     assert "تأكد قبل الاعتماد" in out["own"]
-    assert "Gemini غير متأكد من المطابقة" in out["own"] and "صورة استخدام" in out["own"]
+    assert "نموذج القراءة غير متأكد من المطابقة" in out["own"] and "صورة استخدام" in out["own"]
     assert not RAW_CODES.search(out["own"])
 
 

@@ -258,3 +258,30 @@ def test_health_page_shows_one_cost_line_per_model():
     assert "Claude Sonnet 5.5 · نظرة تانية · فحص واحد" in labels
     assert "Gemini · قراءات أقدم بلا تفاصيل" in labels                  # the old row's flat-priced call
     assert "النموذج القوي هالشهر" in cost["note"] and "نماذج التحقق" in cost["note"]
+
+
+@pytest.mark.skipif(NODE is None, reason="node is not installed")
+def test_health_page_names_the_expansion_sources_and_prices_serpapi_on_its_own_line():
+    """The expansion round's paid calls (catalog_match/expand.py) show under their own names, and SerpApi Lens gets
+    its own cost line at its own price; the total is ops_health's."""
+    doc = _outcome(1, [PRIMARY])
+    doc["provider_health"] += [{"provider": p, "status": s, "http_status": 200, "query_id": q} for p, s, q in
+                               [("serper_web", "ok", "X1"), ("serper_shopping", "empty", "X2"),
+                                ("lens_serper", "quota", "X3"), ("lens_serpapi", "ok", "X4")]]
+    report = dict(ops_health.summarize([_row(60, doc), _row(120, _outcome(1, [PRIMARY]))], now=NOW), status="success")
+    window = report["windows"]["24h"]
+    assert window["serper_queries"] == 4 and window["sources"]["lens_serpapi"]["calls"] == 1
+    harness = ("globalThis.window = globalThis;\n" + HEALTH_JS.read_text(encoding="utf-8")
+               + f"\nconsole.log(JSON.stringify(window.LaqtaHealth.opsView({json.dumps(report)}, '24h')));")
+    out = subprocess.run([NODE, "-e", harness], capture_output=True, text=True, timeout=60, encoding="utf-8")
+    assert out.returncode == 0, out.stderr
+    view = json.loads(out.stdout.strip().splitlines()[-1])
+    names = [p["name"] for p in view["providers"]]
+    assert names[0] == "Serper (Google)"
+    assert {"Serper · صفحات المتاجر", "Serper · Google Shopping", "Serper · بحث بالصورة",
+            "SerpApi · Google Lens"} <= set(names)
+    labels = {line["label"]: line["value"] for line in view["cost"]["lines"]}
+    assert "Serper · 4 استعلامات" in labels and "SerpApi Lens · بحث واحد" in labels
+    assert "$0.01" in labels["SerpApi Lens · بحث واحد"]                    # $0.015, to the cent as every line
+    assert "SerpApi" in view["cost"]["note"] and "0.015" in view["cost"]["note"]
+    assert "0.02" in view["cost"]["total"] and window["cost_usd"]["total"] == pytest.approx(0.023)

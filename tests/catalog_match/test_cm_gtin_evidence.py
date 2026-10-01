@@ -408,3 +408,40 @@ def test_barcode_conflict_never_auto_publishes_even_with_a_tier1_score(monkeypat
     rc = RankedCandidate(candidate=c, score=fake, fetched=fi, quality=QualityReport(hard_ok=True), verdict=reading())
     out = _route(SPEC, [rc])
     assert out.decision == "REVIEW_PRESELECTED" and "auto_blocked:barcode_conflict" in rc.reasons
+
+
+def test_a_barcode_conflict_match_that_cannot_be_picked_still_lets_the_next_candidates_be_read():
+    # Integration review: the second verifier call is skipped once the first batch holds a MATCH. A MATCH on a page
+    # whose barcode differs from the sheet's, without a full reading, is never picked by decide.route; it must not
+    # stop the pipeline from reading the next tier-1/2 candidates either.
+    from test_cm_pipeline import StubProvider, cand
+
+    spec = build_sku_spec({"name": "Almarai Full Fat Milk", "brand": "Almarai", "barcode": SHEET_GTIN}, MAPPINGS)
+    pages = [cand(n, f"Almarai Full Fat Milk - Carrefour UAE {n}",
+                  f"https://www.carrefouruae.com/mafuae/en/almarai-full-fat-milk/p/{n}", gtin=OTHER_GTIN)
+             for n in range(1, 7)]
+    no_size = {"brand_text": "Almarai", "variant_text": "Full Fat Milk", "size_text": "", "view": "front_packshot",
+               "brand_match": "yes", "variant_match": "yes", "size_match": "unsure"}
+    full = dict(no_size, size_text="1 L", size_match="yes")
+
+    class FirstBatchWithoutSize(StubVerifier):
+        """The first call reads every image with no size; a later call reads them in full."""
+
+        def verify(self, spec, images):
+            self.readings = {f.candidate.image_url: (full if self.calls else no_size) for f in images}
+            return super().verify(spec, images)
+
+    verifier = FirstBatchWithoutSize({})
+    outcome = pipeline.find_product_image(
+        spec, providers=[StubProvider("serper", pages)],
+        fetcher=StubFetcher({c.image_url: packshot_png(90 + c.rank) for c in pages}), verifier=verifier)
+
+    by_url = {rc.candidate.image_url: rc for rc in outcome.ranked}
+    assert all(rc.score.tier == 2 for rc in outcome.ranked)
+    assert len(verifier.calls[0]) == 4
+    assert all(by_url[u].verdict.decision == "MATCH" and not decide.full_match(spec, by_url[u])
+               for u in verifier.calls[0]), "the first batch: MATCH readings that cannot be picked"
+    assert len(verifier.calls) == 2 and outcome.vlm_calls == 2
+    assert outcome.decision == "REVIEW_PRESELECTED"
+    assert outcome.winner.candidate.image_url in verifier.calls[1]
+    assert "warn:barcode_conflict" in outcome.winner.reasons

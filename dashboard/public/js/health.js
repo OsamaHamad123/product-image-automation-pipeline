@@ -31,6 +31,10 @@
 
     var PROVIDER_NAMES = {
         serper: 'Serper (Google)',
+        serper_web: 'Serper · صفحات المتاجر',
+        serper_shopping: 'Serper · Google Shopping',
+        lens_serper: 'Serper · بحث بالصورة',
+        lens_serpapi: 'SerpApi · Google Lens',
         bing_html: 'Bing (احتياطي)',
         off: 'Open Food Facts',
         cse_legacy: 'Google Custom Search (قديم)'
@@ -42,7 +46,7 @@
         NO_RESULTS: ['ما في نتائج أبداً', 'غالباً اسم غير مألوف أو فيه اختصار'],
         NO_MATCH: ['ما في صورة مطابقة للمنتج', 'جرّب بحث بكلمات أخرى أو اسم المتجر'],
         DOWNLOAD_FAILED: ['ما قدرنا ننزّل الصور', 'صفحات تواصل اجتماعي أو مواقع بطيئة'],
-        VERIFIER_DOWN: ['Gemini ما ردّ', 'الصور راحت لمراجعتك بدون قراءة الملصق'],
+        VERIFIER_DOWN: ['نموذج قراءة الملصق ما ردّ', 'الصور راحت لمراجعتك بدون قراءة الملصق'],
         PROVIDER_DOWN: ['مصادر البحث ما ردّت', 'المنتجات رجعت للطابور وبتنعاد بالتشغيل الجاي'],
         SEARCH_ERROR: ['صار خطأ أثناء البحث', 'التفاصيل بسجل الأتمتة تحت'],
         CANDIDATE_SAVE_FAILED: ['ما قدرنا نحفظ الاقتراحات', 'تأكد إن قاعدة البيانات شغّالة'],
@@ -56,7 +60,7 @@
             return 'آخر ' + n + ' عمليات بحث رفض فيها Serper كل الاستعلامات. اشحن الرصيد أو غيّر المفتاح من الإعدادات.';
         },
         GEMINI_DOWN: function (n) {
-            return 'آخر ' + n + ' عمليات بحث احتاجت Gemini وما ردّ، فالنتائج بتستنى مراجعتك. تأكد من المفتاح من الإعدادات.';
+            return 'آخر ' + n + ' عمليات بحث احتاجت نموذج قراءة الملصق وما ردّ، فالنتائج بتستنى مراجعتك. تأكد من مفتاحه (Gemini أو Anthropic) من الإعدادات.';
         },
         VERIFIER_BUDGET: function () {
             return 'المنتجات المش مؤكدة بتستنى مراجعتك بدون نظرة تانية. ارفع الميزانية من «نماذج التحقق» أو استنى الشهر الجاي.';
@@ -282,8 +286,10 @@
         });
     }
 
-    function costView(w, prices, month) {
+    function costView(w, prices, month, sourcePrices) {
         var cost = isObject(w.cost_usd) ? w.cost_usd : {};
+        var sources = isObject(w.sources) ? w.sources : {};
+        var lens = isObject(sources.lens_serpapi) ? sources.lens_serpapi : null;
         var verifier = isObject(w.verifier) ? w.verifier : {};
         var models = Array.isArray(w.verifier_models) ? w.verifier_models.filter(isObject) : [];
         var searches = count(w.searches);
@@ -293,6 +299,11 @@
         var lines = [
             { label: 'Serper · ' + plural(count(w.serper_queries), 'استعلام', 'استعلامين', 'استعلامات'), value: usd(cost.serper) }
         ];
+        /* SerpApi Google Lens (the expansion round, catalog_match/expand.py): its own line, at its own price */
+        if (lens || num(cost.serpapi) !== null) {
+            lines.push({ label: 'SerpApi Lens · ' + plural(count(lens ? lens.calls : 0), 'بحث', 'بحثين', 'عمليات بحث'),
+                value: usd(cost.serpapi), title: 'lens_serpapi' });
+        }
         if (!models.length) {
             lines.push({ label: 'Gemini · ' + plural(count(verifier.calls), 'فحص', 'فحصين', 'فحوصات'), value: usd(cost.gemini) });
             if (isObject(prices)) {
@@ -313,6 +324,9 @@
                 note.push('الأسعار تقديرية: Serper ' + price(prices.serper_per_query) + ' لكل استعلام بيرد عليه، ونماذج القراءة '
                     + 'حسب الـ tokens بأسعار تبويب «نماذج التحقق».');
             }
+        }
+        if (lens && isObject(sourcePrices) && num(sourcePrices.lens_serpapi) !== null) {
+            note.push('بحث SerpApi ' + price(sourcePrices.lens_serpapi) + ' للبحث الواحد (من تبويب «متقدم»).');
         }
         if (isObject(month) && num(month.budget_usd) !== null) {
             note.push('النموذج القوي هالشهر: ' + usd(month.strong_usd) + ' من ' + usd(month.budget_usd) + '.');
@@ -377,7 +391,7 @@
             total: plural(count(w.searches), 'منتج', 'منتجين', 'منتجات'),
             decisions: decisionsView(w),
             providers: providersView(w),
-            cost: costView(w, report.prices, report.verifier_month),
+            cost: costView(w, report.prices, report.verifier_month, report.source_prices),
             reasons: reasonsView(w),
             note: noteView(report, w)
         };

@@ -54,6 +54,11 @@ class SettingsController extends Controller
     public const DEFAULT_SHEET = 'automation sheet';
 
     public const CANVAS_SIZES = [600, 800, 1000, 1200, 1500, 2000];
+
+    /** جولة البحث الإضافية (catalog_match/expand.py) وسياسة الباركود: نفس القيم التي يقبلها config.py. */
+    public const VISUAL_SEARCH_MODES = ['auto', 'off', 'serper', 'serpapi'];
+    public const GTIN_POLICIES = ['evidence', 'strict', 'off'];
+    public const EXPANSION_MAX_CALLS_LIMIT = 8;
     public const CANVAS_MIN = 300;
     public const CANVAS_MAX = 4000;
 
@@ -69,6 +74,10 @@ class SettingsController extends Controller
         'auto-publish' => ['tab' => 'auto-publish', 'checkbox' => ['auto_publish_enabled']],
         'processing' => ['tab' => 'processing', 'text' => ['output_canvas_size', 'bg_removal_method'],
                          'checkbox' => ['enable_image_enhancement']],
+        // مصادر البحث الإضافية وسياسة الباركود (المرحلة الثالثة): بتبويب «متقدم»، نموذج منفصل
+        'sources' => ['tab' => 'advanced', 'text' => ['expansion_max_calls', 'visual_search', 'serpapi_lens_price_usd',
+                                                     'gtin_policy'],
+                      'checkbox' => ['expansion_enabled']],
         // نموذج Gemini صار بتبويب «نماذج التحقق» (saveModels): «متقدم» ما بيكتبه
         'advanced' => ['tab' => 'advanced', 'secret' => ['google_search_api_key', 'proxy_url'],
                        'text' => ['search_engine', 'google_search_cx'],
@@ -146,6 +155,7 @@ class SettingsController extends Controller
         'SPREADSHEET_NAME_OR_URL', 'SPREADSHEET_TAB_NAME', 'CREDENTIALS_FILE', 'BG_REMOVAL_METHOD',
         'OUTPUT_CANVAS_SIZE', 'GEMINI_MODEL', 'SEARCH_ENGINE',
         'VERIFIER_PRIMARY', 'VERIFIER_STRONG', 'VERIFIER_MONTHLY_BUDGET_USD', 'MODEL_PRICES',
+        'EXPANSION_ENABLED', 'EXPANSION_MAX_CALLS', 'VISUAL_SEARCH', 'SERPAPI_LENS_PRICE_USD', 'GTIN_POLICY',
     ];
 
     public function show(Request $request)
@@ -252,6 +262,32 @@ class SettingsController extends Controller
                         continue;
                     }
                     $val = (string) (int) $val;
+                }
+                if ($k === 'expansion_max_calls') {
+                    if (!preg_match('/^\d{1,2}$/', $val) || (int) $val > self::EXPANSION_MAX_CALLS_LIMIT) {
+                        $warnings[] = 'عدد الطلبات الإضافية لازم يكون رقم من 0 لـ ' . self::EXPANSION_MAX_CALLS_LIMIT
+                            . '؛ ما تغيّر الرقم المحفوظ.';
+                        continue;
+                    }
+                    $val = (string) (int) $val;
+                }
+                if ($k === 'visual_search' && !in_array($val, self::VISUAL_SEARCH_MODES, true)) {
+                    $warnings[] = 'طريقة البحث المرئي هاي مش مدعومة؛ ما تغيّرت المحفوظة.';
+                    continue;
+                }
+                if ($k === 'serpapi_lens_price_usd') {
+                    if ($val === '') {
+                        continue;
+                    }
+                    if (!is_numeric($val) || (float) $val < 0 || (float) $val > 1) {
+                        $warnings[] = 'سعر بحث SerpApi لازم يكون رقم بين 0 و1 دولار؛ ما تغيّر السعر المحفوظ.';
+                        continue;
+                    }
+                    $val = (string) (float) $val;
+                }
+                if ($k === 'gtin_policy' && !in_array($val, self::GTIN_POLICIES, true)) {
+                    $warnings[] = 'سياسة الباركود هاي مش مدعومة؛ ما تغيّرت المحفوظة.';
+                    continue;
                 }
                 if ($k === 'bg_removal_method' && !in_array($val, self::BG_METHODS, true)) {
                     $warnings[] = 'طريقة عزل الخلفية هاي مش مدعومة؛ ما تغيّرت الطريقة المحفوظة.';
@@ -664,6 +700,38 @@ class SettingsController extends Controller
                 'bypass_white_background_check' => $value('bypass_white_background_check') === 'true',
             ],
             'secrets' => $secrets,
+            'sources' => self::sourcesData($stored),
+        ];
+    }
+
+    /**
+     * «مصادر البحث الإضافية»: القيم كما يقرؤها config.py (المحفوظ، وإلا .env، وإلا الافتراضي). لا مفتاح هنا:
+     * مفتاح SerpApi بتبويب «المفاتيح»، والصفحة بتقول بس إذا هو محفوظ.
+     */
+    public static function sourcesData(array $stored): array
+    {
+        $env = self::envValues(['EXPANSION_ENABLED', 'EXPANSION_MAX_CALLS', 'VISUAL_SEARCH', 'SERPAPI_LENS_PRICE_USD',
+                                'GTIN_POLICY']);
+        $pick = function (string $k, string $envName, string $default) use ($stored, $env): string {
+            $v = trim((string) ($stored[$k]['value'] ?? ''));
+            if ($v === '') {
+                $v = trim((string) ($env[$envName] ?? ''));
+            }
+            return $v !== '' ? strtolower($v) : $default;
+        };
+        $enabled = $pick('expansion_enabled', 'EXPANSION_ENABLED', 'true');
+        $calls = $pick('expansion_max_calls', 'EXPANSION_MAX_CALLS', '4');
+        $visual = $pick('visual_search', 'VISUAL_SEARCH', 'auto');
+        $price = $pick('serpapi_lens_price_usd', 'SERPAPI_LENS_PRICE_USD', '0.015');
+        $policy = $pick('gtin_policy', 'GTIN_POLICY', 'evidence');
+        return [
+            'enabled' => in_array($enabled, ['1', 'true', 'yes', 'on'], true),
+            'max_calls' => ctype_digit($calls) ? min((int) $calls, self::EXPANSION_MAX_CALLS_LIMIT) : 4,
+            'visual' => in_array($visual, self::VISUAL_SEARCH_MODES, true) ? $visual : 'auto',
+            'serpapi_price' => is_numeric($price) ? (float) $price : 0.015,
+            'serpapi_saved' => trim((string) ($stored['serpapi_api_key']['value'] ?? '')) !== ''
+                || self::envHas('SERPAPI_API_KEY'),
+            'gtin_policy' => in_array($policy, self::GTIN_POLICIES, true) ? $policy : 'evidence',
         ];
     }
 
@@ -1010,6 +1078,9 @@ class SettingsController extends Controller
                 ? 'النشر الآلي شغّال للماركات المفعّلة.'
                 : 'النشر الآلي مطفأ: كل النتائج رح تستنى مراجعتك.',
             'processing' => 'انحفظت إعدادات معالجة الصور، وبتنطبق من التشغيل الجاي.',
+            'sources' => ($changes['expansion_enabled'] ?? '') === 'true'
+                ? 'انحفظ. الجولة الإضافية بتشتغل للمنتجات اللي ما انحسمت، من التشغيل الجاي.'
+                : 'انحفظ. الجولة الإضافية مطفأة: البحث بيضل على صور جوجل بس.',
             default => 'انحفظت الإعدادات.',
         };
     }
