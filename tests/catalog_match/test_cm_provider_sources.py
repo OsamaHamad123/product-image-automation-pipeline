@@ -8,8 +8,10 @@ serper_shopping_ok.json, serper_lens_ok.json, serpapi_lens_ok.json); sockets are
 import hashlib
 import json
 import logging
+import re
 import socket
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -35,7 +37,13 @@ def _fake_key(tag: str) -> str:
 
 
 KEY = _fake_key("test-serper")
-SERPAPI_KEY = _fake_key("test-serpapi")
+SERPAPI_STANDIN = _fake_key("test-serpapi")
+
+
+def _on_host(url: str, domain: str) -> bool:
+    """The URL's host is the domain or one of its subdomains (compared by host, not by substring)."""
+    host = (urlsplit(url).hostname or "").lower()
+    return host == domain or host.endswith("." + domain)
 
 
 @pytest.fixture(autouse=True)
@@ -101,7 +109,7 @@ def serper_lens(session):
     return SerperLensProvider(api_key=KEY, session=session, bucket=ratelimit.UNLIMITED)
 
 
-def serpapi(session, key=SERPAPI_KEY):
+def serpapi(session, key=SERPAPI_STANDIN):
     return SerpApiLensProvider(api_key=key, session=session, bucket=ratelimit.UNLIMITED)
 
 
@@ -195,7 +203,7 @@ def test_shopping_request_and_listings():
     carrefour = by_rank[1]
     assert carrefour.page_url == "https://www.carrefouruae.com/mafuae/en/frozen-bread/mehran-plain-paratha-400g/p/631098"
     assert carrefour.domain == "carrefouruae.com" and carrefour.snippet == "Carrefour UAE"
-    assert "gstatic.com" in carrefour.image_url       # a thumbnail: the expansion round follows the page
+    assert _on_host(carrefour.image_url, "gstatic.com")   # a thumbnail: the expansion round follows the page
     amazon = by_rank[2]
     # the full-size Amazon image, its overlay/resize modifiers removed (providers.base.canonical_image_url)
     assert amazon.image_url == "https://m.media-amazon.com/images/I/71abcDEF12L.jpg"
@@ -236,6 +244,10 @@ def test_unwrap_link():
     assert unwrap_link("https://www.google.ae/shopping/product/123") == ""
     assert unwrap_link("https://www.talabat.com/uae/x") == "https://www.talabat.com/uae/x"
     assert unwrap_link("javascript:void(0)") == ""
+    # a host that only ends like Google's ad redirect is a store link, not a redirect to unwrap
+    assert unwrap_link("https://evilgoogleadservices.com/aclk?adurl=https://www.lulu.ae/x") == \
+        "https://evilgoogleadservices.com/aclk?adurl=https://www.lulu.ae/x"
+    assert unwrap_link("https://googleadservices.com/aclk?adurl=https://www.lulu.ae/x") == "https://www.lulu.ae/x"
 
 
 # ---------------------------------------------------------------------------
@@ -258,7 +270,7 @@ def test_serper_lens_request_and_matches():
     assert lulu.image_url.endswith("barts-traditional-fries-1kg-1500x1500.jpg")
     assert lulu.page_url.startswith("https://www.luluhypermarket.com/") and lulu.domain == "luluhypermarket.com"
     assert lulu.snippet == "Lulu Hypermarket" and lulu.sanctioned
-    assert "gstatic.com" in fb.image_url and "gstatic.com" in talabat.image_url   # thumbnails only
+    assert _on_host(fb.image_url, "gstatic.com") and _on_host(talabat.image_url, "gstatic.com")   # thumbnails only
 
 
 @pytest.mark.parametrize("status,text,unsupported,expected", [
@@ -279,7 +291,7 @@ def test_serpapi_request_parse_and_key_stays_out_of_results():
     method, url, kwargs = session.calls[0]
     assert (method, url) == ("GET", SERPAPI_URL)
     assert kwargs["params"] == {"engine": "google_lens", "url": SEED, "hl": "en", "country": "ae",
-                                "api_key": SERPAPI_KEY}
+                                "api_key": SERPAPI_STANDIN}
     assert res.status == "ok" and res.provider == "lens_serpapi"
     car, noon = res.candidates
     # the full image, without the Carrefour resize policy
@@ -302,24 +314,24 @@ def test_serpapi_error_bodies(body, expected):
 def test_serpapi_never_leaks_the_key(caplog):
     caplog.set_level(logging.DEBUG)
     leaky = ConnectionError(f"HTTPSConnectionPool(host='serpapi.com'): Max retries exceeded with url: "
-                            f"/search.json?engine=google_lens&api_key={SERPAPI_KEY}&url=x")
-    timeout = type("ReadTimeout", (Exception,), {})(f"read timed out (api_key={SERPAPI_KEY})")
-    bad_key = FakeResponse(401, text=f'{{"error": "Invalid API key {SERPAPI_KEY}"}}')
+                            f"/search.json?engine=google_lens&api_key={SERPAPI_STANDIN}&url=x")
+    timeout = type("ReadTimeout", (Exception,), {})(f"read timed out (api_key={SERPAPI_STANDIN})")
+    bad_key = FakeResponse(401, text=f'{{"error": "Invalid API key {SERPAPI_STANDIN}"}}')
     results = [serpapi(FakeSession(r)).search(SEED, "en", SPEC) for r in (leaky, timeout, bad_key)]
     assert [r.status for r in results] == ["error", "error", "error"]
     assert results[1].error == "timeout"
     blob = json.dumps([r.__dict__ for r in results], default=str) + caplog.text
-    assert SERPAPI_KEY not in blob
+    assert SERPAPI_STANDIN not in blob
     assert "[REDACTED]" in results[0].error
 
 
 def test_build_visual_search_modes(monkeypatch):
-    assert build_visual_search("off", KEY, SERPAPI_KEY) is None
+    assert build_visual_search("off", KEY, SERPAPI_STANDIN) is None
     assert build_visual_search("auto", "", "") is None
     assert build_visual_search("serpapi", KEY, "") is None
     assert build_visual_search("auto", KEY, "").names == ["lens_serper"]
-    assert build_visual_search("auto", KEY, SERPAPI_KEY).names == ["lens_serper", "lens_serpapi"]
-    assert build_visual_search("serpapi", KEY, SERPAPI_KEY).names == ["lens_serpapi"]
+    assert build_visual_search("auto", KEY, SERPAPI_STANDIN).names == ["lens_serper", "lens_serpapi"]
+    assert build_visual_search("serpapi", KEY, SERPAPI_STANDIN).names == ["lens_serpapi"]
     # from settings: an unknown mode is 'off', never a surprise paid call
     monkeypatch.setenv("SERPER_API_KEY", KEY)
     monkeypatch.setenv("VISUAL_SEARCH", "bogus")
@@ -353,5 +365,5 @@ def test_http_client_debug_logs_never_show_the_serpapi_key(caplog):
     serpapi(FakeSession())                      # building the provider guards the HTTP client loggers
     logging.getLogger("urllib3.connectionpool").debug(
         '%s://%s:%s "%s %s %s" %s %s', "https", "serpapi.com", 443, "GET",
-        f"/search.json?engine=google_lens&api_key={SERPAPI_KEY}&url=x", "HTTP/1.1", 200, 512)
-    assert "serpapi.com" in caplog.text and SERPAPI_KEY not in caplog.text
+        f"/search.json?engine=google_lens&api_key={SERPAPI_STANDIN}&url=x", "HTTP/1.1", 200, 512)
+    assert re.search(r"\bserpapi\.com\b", caplog.text) and SERPAPI_STANDIN not in caplog.text

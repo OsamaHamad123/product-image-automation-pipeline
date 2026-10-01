@@ -7,10 +7,16 @@ import importlib.util
 import json
 import uuid
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import pytest
 
 REPO = Path(__file__).resolve().parents[1]
+
+
+def _host(url: str) -> str:
+    """The URL's host name: the fake HTTP routes match services by host, not by substring."""
+    return (urlsplit(url).hostname or "").lower()
 
 
 def _load_script():
@@ -80,15 +86,15 @@ def ok_route(keys):
             # SerpApi's account answer carries the key itself: it must never reach the output
             return FakeResponse(200, {"api_key": keys["SERPAPI_API_KEY"], "plan_name": "Developer",
                                       "total_searches_left": 4870, "account_email": "owner@example.com"})
-        if "generativelanguage.googleapis.com" in url:
+        if _host(url) == "generativelanguage.googleapis.com":
             return FakeResponse(200, {"candidates": [{"content": {"parts": [{"text": "OK"}]}}]})
         if url.endswith("/v1/messages"):
             return FakeResponse(200, {"content": [{"type": "text", "text": "OK"}]})
         if url.endswith("/v1/models"):
             return FakeResponse(200, {"data": [{"id": "claude-haiku-4-5"}]})
-        if "image-api.photoroom.com" in url:
+        if _host(url) == "image-api.photoroom.com":
             return FakeResponse(200, {"images": {"available": 812, "subscription": 1000}})
-        if "api.cloudinary.com" in url:
+        if _host(url) == "api.cloudinary.com":
             return FakeResponse(200, {"status": "ok"})
         raise AssertionError(f"unexpected URL {url}")
     return route
@@ -135,7 +141,7 @@ def test_everything_configured_works_and_no_key_is_printed(keys, offline, tmp_pa
         _assert_no_key(call["url"], keys)
     gemini = next(c for c in http.calls if "generativelanguage" in c["url"])
     assert gemini["headers"]["x-goog-api-key"] == keys["GEMINI_API_KEY"]
-    serpapi = next(c for c in http.calls if "serpapi.com" in c["url"])
+    serpapi = next(c for c in http.calls if _host(c["url"]) == "serpapi.com")
     assert serpapi["method"] == "get" and serpapi["params"] == {"api_key": keys["SERPAPI_API_KEY"]}
     cloud = next(c for c in http.calls if "cloudinary" in c["url"])
     assert cloud["method"] == "get" and cloud["url"].endswith("/demo-cloud/ping")
@@ -201,7 +207,7 @@ def test_failures_are_explained_in_plain_words_without_keys(keys, offline):
             return FakeResponse(429, text="rate limited")
         if "serper.dev/lens" in url:
             return FakeResponse(404, text="Not Found")
-        if "serpapi.com" in url:
+        if _host(url) == "serpapi.com":
             # requests puts the whole URL (with ?api_key=) into its exception text
             raise requests.ConnectionError(f"Max retries exceeded with url: /account.json?api_key="
                                            f"{kwargs['params']['api_key']}")

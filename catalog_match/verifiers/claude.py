@@ -22,7 +22,7 @@ Every answered call carries one usage entry {provider, model, input_tokens, outp
 
 from __future__ import annotations
 
-import hashlib
+import hmac
 import json
 import logging
 import threading
@@ -89,14 +89,15 @@ def _sdk():
 
 
 def _client_for(key: str, timeout: float):
-    """One SDK client per key (keyed by a hash, never by the key), no SDK retries: we retry once ourselves."""
-    digest = hashlib.sha256(key.encode("utf-8")).hexdigest()
+    """One SDK client for the current key, no SDK retries: we retry once ourselves. A changed key replaces the
+    client; the key is compared in constant time and only the client (which needs it anyway) keeps it."""
     with _CLIENTS_LOCK:
-        client = _CLIENTS.get(digest)
-        if client is None:
-            client = _sdk().Anthropic(api_key=key, base_url=BASE_URL, max_retries=0, timeout=timeout)
-            _CLIENTS.clear()            # a changed key replaces the old client
-            _CLIENTS[digest] = client
+        current = _CLIENTS.get("current")
+        if current is not None and hmac.compare_digest(current[0].encode("utf-8"), key.encode("utf-8")):
+            return current[1]
+        client = _sdk().Anthropic(api_key=key, base_url=BASE_URL, max_retries=0, timeout=timeout)
+        _CLIENTS.clear()
+        _CLIENTS["current"] = (key, client)
         return client
 
 

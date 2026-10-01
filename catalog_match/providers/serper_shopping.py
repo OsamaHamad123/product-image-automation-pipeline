@@ -52,7 +52,8 @@ def store_domain(source: str) -> str:
 
 def _is_google(host: str) -> bool:
     labels = host.split(".")
-    return "google" in labels[:-1] or host.endswith("googleadservices.com")
+    # Google's ad redirect is googleadservices.com or a subdomain of it (www.), never a host that only ends alike
+    return "google" in labels[:-1] or host == "googleadservices.com" or host.endswith(".googleadservices.com")
 
 
 def unwrap_link(link: str) -> str:
