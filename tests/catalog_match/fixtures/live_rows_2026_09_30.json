@@ -1,0 +1,305 @@
+{
+ "_doc": "Product name and brand cells of sheet rows 2-61 as the owner's live dry run of 2026-09-30 read them (scripts/smoke_live.py, report of run 2). No barcode, size, category or Arabic columns were reported. Offline tests use these rows as a realistic corpus: sheet abbreviations (S/F, L/MEAT, WT/MEAT, SUNFL, VEG), brands glued in the name (ALALALI), brand cells with stray punctuation (SUPER T/, SUP/T), brands that are common words (FRESHLY, FAMILY, TARGET, GOLDEN PRIZE), a typo (900 MM) and a duplicate (rows 54/55).",
+ "rows": [
+  {
+   "row": 2,
+   "name": "AIDA FRENCH FRIES 1KG",
+   "brand": "AIDA"
+  },
+  {
+   "row": 3,
+   "name": "BARTS TRADITON FRIES 1KG",
+   "brand": "BARTS TRADITON"
+  },
+  {
+   "row": 4,
+   "name": "BATO FRENCH FRIES 900 MM",
+   "brand": "BATO"
+  },
+  {
+   "row": 5,
+   "name": "FARMILA FRIES 9MM 1KG",
+   "brand": "FARMILA"
+  },
+  {
+   "row": 6,
+   "name": "HUP HUP FRIES 1 KG",
+   "brand": "HUP HUP"
+  },
+  {
+   "row": 7,
+   "name": "JOYS FRENCH FRIES 1KG",
+   "brand": "JOYS"
+  },
+  {
+   "row": 8,
+   "name": "MCCAIN GOLDEN LONG 750GM",
+   "brand": "MCCAIN"
+  },
+  {
+   "row": 9,
+   "name": "MCCAIN TRADITION 750GM",
+   "brand": "MCCAIN"
+  },
+  {
+   "row": 10,
+   "name": "MR JOHN FRENCH FRIES 900GM",
+   "brand": "MR JOHN"
+  },
+  {
+   "row": 11,
+   "name": "SUNBULAH FRENCH FRIES 1KG",
+   "brand": "SUNBULAH"
+  },
+  {
+   "row": 12,
+   "name": "TOMEX FRIES 9MM 1 KG",
+   "brand": "TOMEX"
+  },
+  {
+   "row": 13,
+   "name": "YUMWAY FRIES 2.5 KG",
+   "brand": "YUMWAY"
+  },
+  {
+   "row": 14,
+   "name": "ASHOKA PLAIN PARATHA 5S 400GM",
+   "brand": "ASHOKA"
+  },
+  {
+   "row": 15,
+   "name": "MEHRAN PARATHA 2X400GM",
+   "brand": "MEHRAN"
+  },
+  {
+   "row": 16,
+   "name": "MEHRAN PARATHA 400GM",
+   "brand": "MEHRAN"
+  },
+  {
+   "row": 17,
+   "name": "AL RAWABI MOZZARELLA 200GM",
+   "brand": "AL RAWABI"
+  },
+  {
+   "row": 18,
+   "name": "AJMI MEAT MASALA 160GM",
+   "brand": "AJMI"
+  },
+  {
+   "row": 19,
+   "name": "AL ALALI FANCY TUNA WATER 170GM",
+   "brand": "AL ALALI"
+  },
+  {
+   "row": 20,
+   "name": "ALALALI FANCY TUNA S/F OIL 85GM",
+   "brand": "AL ALALI"
+  },
+  {
+   "row": 21,
+   "name": "ALALALI FANCY TUNA WATER 85GM",
+   "brand": "AL ALALI"
+  },
+  {
+   "row": 22,
+   "name": "ALALALI WHITE TUNA S/F OIL 85GM",
+   "brand": "AL ALALI"
+  },
+  {
+   "row": 23,
+   "name": "ALALALI WHITE TUNA WATER 170GM",
+   "brand": "AL ALALI"
+  },
+  {
+   "row": 24,
+   "name": "ALALALI WHITE TUNA WATER 85GM",
+   "brand": "AL ALALI"
+  },
+  {
+   "row": 25,
+   "name": "ALLDE MEAT MASALA 160GM",
+   "brand": "ALLDE"
+  },
+  {
+   "row": 26,
+   "name": "AMERICAN GOLD TUNA FLAKE 160GM",
+   "brand": "AMERICAN GOLD"
+  },
+  {
+   "row": 27,
+   "name": "AMERICAN LIGHT MEAT TUNA 185GM",
+   "brand": "AMERICAN LIGHT"
+  },
+  {
+   "row": 28,
+   "name": "AMERICAN LIGHT TUNA SOLID 185GM",
+   "brand": "AMERICAN LIGHT"
+  },
+  {
+   "row": 29,
+   "name": "CHALIYAR MEAT MASALA 160GM",
+   "brand": "CHALIYAR"
+  },
+  {
+   "row": 30,
+   "name": "DOUBLE HORSE MEAT MASALA 140GM",
+   "brand": "DOUBLE HORSE"
+  },
+  {
+   "row": 31,
+   "name": "FAMILY LIGHT TUNA BRINE 185GM",
+   "brand": "FAMILY"
+  },
+  {
+   "row": 32,
+   "name": "FAMILY SKIPJACK CHUNKS 185GM",
+   "brand": "FAMILY"
+  },
+  {
+   "row": 33,
+   "name": "FAMILY TUNA SPRING WATER 185GM",
+   "brand": "FAMILY"
+  },
+  {
+   "row": 34,
+   "name": "FRESHLY CHICKEN SHAWARMA 350GM",
+   "brand": "FRESHLY"
+  },
+  {
+   "row": 35,
+   "name": "GOLDEN PRIZE TUNA VEG OIL 185GM",
+   "brand": "GOLDEN PRIZE"
+  },
+  {
+   "row": 36,
+   "name": "GREEN FARM MEAT MASALA 200GM",
+   "brand": "GREEN FARM"
+  },
+  {
+   "row": 37,
+   "name": "INA PARAMANS MEAT SPICE 200ML",
+   "brand": "INA PARAMANS"
+  },
+  {
+   "row": 38,
+   "name": "KABANI MEAT MASALA 160GM",
+   "brand": "KABANI"
+  },
+  {
+   "row": 39,
+   "name": "KITCHEN TREASURE MEAT MASALA 160GM",
+   "brand": "KITCHEN TREASURE"
+  },
+  {
+   "row": 40,
+   "name": "LORENA TUNA CHUNK W/S 185GM",
+   "brand": "LORENA"
+  },
+  {
+   "row": 41,
+   "name": "MAHRA MEAT MASALA 100GM",
+   "brand": "MAHRA"
+  },
+  {
+   "row": 42,
+   "name": "MUKALLA WHITE TUNA WITH VEG 185GM",
+   "brand": "MUKALLA"
+  },
+  {
+   "row": 43,
+   "name": "NELLARA MEAT MASALA 165GM",
+   "brand": "NELLARA"
+  },
+  {
+   "row": 44,
+   "name": "NIRAPARA MEAT MASALA 200GM",
+   "brand": "NIRAPARA"
+  },
+  {
+   "row": 45,
+   "name": "RIO MARIE TUNA SUN OIL 3X70GM",
+   "brand": "RIO MARIE"
+  },
+  {
+   "row": 46,
+   "name": "ROYAL ARM TUNA FLAKES 170GM",
+   "brand": "ROYAL ARM"
+  },
+  {
+   "row": 47,
+   "name": "SARAS MEAT MASALA 160GM",
+   "brand": "SARAS"
+  },
+  {
+   "row": 48,
+   "name": "SHAN MEAT MASALA 100GM",
+   "brand": "SHAN"
+  },
+  {
+   "row": 49,
+   "name": "SUP/T WT/MEAT SOLID TUNA 185GM",
+   "brand": "SUP/T"
+  },
+  {
+   "row": 50,
+   "name": "SUPER T SOLID TUNA SALT WATER 3X185GM",
+   "brand": "SUPER T/"
+  },
+  {
+   "row": 51,
+   "name": "SUPER T SOLID TUNA SUNFL OIL 3X185GM",
+   "brand": "SUPER T/"
+  },
+  {
+   "row": 52,
+   "name": "SUPER/T TUNA SOYBEAN OIL 185GM",
+   "brand": "SUPER/T"
+  },
+  {
+   "row": 53,
+   "name": "TARGET CHICKEN LUNCHEON 340GM",
+   "brand": "TARGET"
+  },
+  {
+   "row": 54,
+   "name": "TASTY FOOD MEAT MASALA 160 GM",
+   "brand": "TASTY FOOD"
+  },
+  {
+   "row": 55,
+   "name": "TASTY FOOD MEAT MASALA 160GM",
+   "brand": "TASTY FOOD"
+  },
+  {
+   "row": 56,
+   "name": "UFC MENUDO SAUCE 200GM",
+   "brand": "UFC"
+  },
+  {
+   "row": 57,
+   "name": "VIRGINIA L/MEAT TUNA S/F OIL 170GM",
+   "brand": "VIRGINIA"
+  },
+  {
+   "row": 58,
+   "name": "VIRGINIA L/MEAT TUNA WATER 170GM",
+   "brand": "VIRGINIA"
+  },
+  {
+   "row": 59,
+   "name": "VIRGINIA WHITE TUNA WATER 170GM",
+   "brand": "VIRGINIA"
+  },
+  {
+   "row": 60,
+   "name": "VIRGINIA WHITE TUNA S/F OIL 170GM",
+   "brand": "VIRGINIA"
+  },
+  {
+   "row": 61,
+   "name": "ZWAN BEEF LUNCHEON 850GM",
+   "brand": "ZWAN"
+  }
+ ]
+}

@@ -4,6 +4,216 @@ All notable changes to this project are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [2.0.0] — Unreleased
+
+This release answers the owner's report that the search "never gave correct results". An audit found the
+causes: the quality gate threw away white-background packshots, an unverified "last resort" pick counted as a
+success, siblings of the right product outranked it, and reviewers' rejections were never remembered. The search
+core was rebuilt and wired into the queue, the dashboard actions and the sheet writes. Every claim below has a test.
+
+### Added
+
+- **`catalog_match/` search core** (behind the unchanged `image_search.search_best_product_image`, `SEARCH_ENGINE=v2`):
+  identity parsing (brand index built from the Brands Mapping sheet, GTIN, sizes, variants), a deterministic query
+  plan, Serper / Open Food Facts / Bing-HTML-fallback providers, identity-tier ranking with hard rejects, soft
+  image quality, a fail-closed Gemini label reader, and D10 decision routing. v1 stays as a 30-day rollback.
+- **Offline evaluation harness** (`tests/eval`, `scripts/eval_report.py`, `scripts/eval_record.py`,
+  `scripts/smoke_live.py`) with a 63-SKU UAE golden set and a binding merge gate for v2.
+- **Reviewer negatives:** table `rejected_images` (URL, pHash, reason code). Rejected images are excluded from
+  every later search for that SKU; `reject_image` accepts `research: true` to search again at once.
+- **Queue columns** `sku_key`, `payload_json` (Arabic name and brand, category, size), `worker_id`,
+  `lease_until`, `failure_code`, `trace_json`. **Curation columns** `status`, `reasons_json`, `evidence_json`,
+  `vlm_json`, `content_sha256`, `identity_tier`, `sku_key`, `run_id`, `page_url`. **Cache columns** `sku_key`,
+  `verification_status`, `approved_by`. All migrations are idempotent (`ADD COLUMN IF NOT EXISTS`).
+- **Sheet outbox safety:** identity re-check of the target row at flush time (`CONFLICT`), column resolved by
+  header name, newest update per cell wins, row-by-row retry after a failed batch, `attempts`/`last_error`, `DEAD`
+  after 5 attempts.
+- Header synonyms for the product sheet (EAN/GTIN/UPC/Item Name/Brand Name/Size/Arabic headers) and the optional
+  `Sub-brands` and `Official domains` columns in Brands Mapping.
+- Worker start-up check of the configured Gemini model; the result is shown in `automation_state.notice`.
+- Settings `SEARCH_ENGINE`, `SERPER_API_KEY`, `AUTO_PUBLISH_ENABLED`, `AUTO_PUBLISH_BRANDS`, `OUTPUT_CANVAS_SIZE`.
+
+### Changed
+
+- **Auto-publish** happens only on decision `AUTO_PUBLISH` (off by default, per-brand allow-list); the
+  `clip_score` threshold is gone and cache hits are never auto-published.
+- **Worker retries** only when every provider is down or the search raised; a clean "no match" is recorded once
+  with its failure code. A provider outage returns the row to `pending` and is not logged as a product failure.
+  The worker exits only when a real `COUNT(*)` of open tasks returns 0 (or after 5 consecutive provider outages).
+- **Queue claim** is one atomic `UPDATE` with a 15-minute lease; database errors propagate instead of looking
+  like an empty queue. **Enqueue** is an upsert that never resets rows in review or completed, validates the
+  sheet and filters before touching the queue, and skips rows whose link is final (`FORCE_OVERWRITE_IMAGES`
+  now defaults to `False`).
+- **Cache** serves only `human_approved` / `auto_verified` resolutions, strictly by barcode when there is one
+  (no name fallback). Existing rows become `legacy` and are not served.
+- **Approve** requires `sku_key` (and the barcode when the row has one), uses the 800×800 canvas without any
+  upscale, writes sheet metadata only after the Cloudinary upload succeeds, and writes `needs_review:` when the
+  background could not be removed.
+- **Reject** validates the reason code, supersedes the cached resolution, deletes the row's candidates and blanks
+  the sheet cell only when it still holds the rejected URL.
+- `cli_bridge.py` prints exactly one JSON document on stdout (UTF-8, safe on a cp1256 Windows console); logs go
+  to `temp/search.log`. The search response carries `status`, `decision`, `failure_code`, `candidates` with
+  status/reasons/evidence, `provider_health` and `sku_key`. Brand "alignment" through Gemini is no longer called.
+- An empty sheet brand stays empty (the first-word brand guess is deleted); a missing name column or a missing
+  configured tab is an error instead of a silent positional or first-tab fallback.
+- Redis write-behind is used only while `sync_worker.py` keeps its heartbeat key alive; sync_worker never drops a
+  key before a successful write and leaves unknown payloads in place.
+- `fastapi_server.py` is a thin development wrapper over the `cli_bridge` actions and is not launched.
+- `.env` values no longer override variables already set in the environment.
+- `verify_cloud_services.py` also checks the Serper key (one test image query). It checks Gemini with the same
+  `models.get` call the worker makes at start-up, with the key in a header instead of the URL. Google Custom
+  Search is reported as optional. Everything it prints is redacted: configured key values, `key=` query
+  parameters and proxy credentials never appear in its output or on the diagnostics page.
+- Error payloads from `cli_bridge` carry fixed messages. The exception text goes to `temp/search.log` and the
+  Errors page, never into a response, because `fastapi_server` returns the same payloads over HTTP.
+- `docs/walkthrough.md` is rewritten for the current system: keys, sheet columns, the Brands Mapping tab, the
+  daily review flow and reject reasons, failure codes, auto-publish, and measuring accuracy on real products.
+
+### Fixed during the live dry runs (60 real sheet rows, `scripts/smoke_live.py --dry-run`)
+
+- Image downloads go direct first, with a browser TLS fingerprint (`curl_cffi`) when it is installed, and use the
+  proxy only as a fallback after a timeout, connection error, 5xx, 403 or 429. Timeouts on rows 2-31 fell from 96
+  to 9.
+- Serper free plans refuse `site:` operators with HTTP 400. The provider notices this once, strips the operators
+  and searches the plain query for the rest of the run. Google Custom Search stops being called for the run after
+  every key answered 403.
+- Retailer image URLs are cleaned to the original file: Amazon size and overlay modifiers (`._AC_SL1500_`,
+  `._PIRIOFOUR…`), and noon and Carrefour resize parameters.
+- A tier-1 image the verifier never read (it skipped the image, or the second call failed) is no longer
+  pre-checked while the verifier is up. A failed second call marks the SKU `VERIFIER_DOWN` and blocks
+  auto-publish.
+- When the verifier reads ANOTHER brand on a tier-1 image, no unconfirmed tier-1 image is pre-checked for that
+  SKU. Row 34 (`FRESHLY CHICKEN SHAWARMA`): "Freshly" is also an English word, and Seara, Zingo and Americana
+  listings scored tier 1 on it.
+- Tuna meat grade (light / white / fancy) and cut (solid / chunks / flakes) are variant axes, together with the
+  sheet's abbreviations `L/MEAT`, `WT/MEAT`, `S/F OIL`, `SUNFL OIL`, `VEG OIL` and `SALT WATER`. Rows 58 and 60
+  had each been given the other grade's photo although the model read the grade correctly. These phrases count
+  only next to a canned-fish word, so "white cheese" or "spring water" are unaffected.
+- The dry-run report always shows the pick, with its rank and reasons, even when it ranks below the top 5.
+
+### Added after the live dry runs
+
+Built in parallel by five work packages, each checked by an adversarial reviewer, and measured against the 60
+live sheet rows (`tests/catalog_match/fixtures/live_rows_2026_09_30.json`). The offline eval is unchanged: correct
+pick 100%, wrong auto-publish 0%.
+
+- **Search text:** sheet shorthand is written out in the queries (`S/F OIL`, `SUNFL OIL`, `VEG OIL`, `WITH VEG`,
+  `L/MEAT`, `WT/MEAT`). The rules are in `catalog_match/data/abbreviations.json`, each with a reason, and
+  ambiguous shorthand stays as written. Brand cells lose stray punctuation (`SUPER T/` becomes `SUPER T`), and
+  a brand glued in the name (`ALALALI`) is written once. 15 of the 60 live rows get a better Q1.
+- **Brands that are common words** (Freshly, Family, Target, Golden Prize ...; list in
+  `catalog_match/data/common_words.json`): a brand hit is full evidence only at the start of the title or the
+  slug, or on the brand's official site. Otherwise the listing is capped at tier 2
+  (`generic_brand_position:<field>`).
+- **A UAE store's other-country section** (noon `/saudi-en/`, Lulu `/en-kw/`, talabat `/ar/kuwait/`) scores as
+  other retail, not as a UAE page. It can no longer reach tier 1 or be auto-published.
+- **Reviewer warnings** on the pick, shown in Arabic on the review screens and printed by `smoke_live.py`:
+  - the sheet does not name the variant the image shows (new fries-cut and cheese-form axes);
+  - Gemini unsure;
+  - low resolution;
+  - WhatsApp or screenshot export;
+  - social media;
+  - a store outside the UAE.
+  The pick and the decision are unchanged. Fries, paratha, nuggets and shawarma are treated as frozen by
+  default: a 'Frozen' listing is neither capped nor warned.
+- **Reviewer decisions** go to the new table `review_decisions` (approve, reject, manual upload, from the
+  batch or the catalog page), including whether the image was the engine's pre-check. The active-learning page
+  and `scripts/review_stats.py` show each brand's pre-check precision with a Wilson 95% lower bound. A brand is
+  ready for auto-publish at 30 or more reviewed pre-checks and a lower bound of at least 0.98 (about 189
+  accepted pre-checks with no miss). The suggested `AUTO_PUBLISH_BRANDS` value is read-only.
+- **Health and cost panel** on the diagnostics page: decisions, provider call outcomes, verifier calls,
+  estimated cost and failure codes over 24 hours and 7 days, with a red notice when Serper credits run out or
+  Gemini stops answering. Each search is stamped with `searched_at`.
+- **Nightly run:** `scripts/run_nightly.py` queues the rows without a final image and works the queue with
+  auto-publish forced off. `scripts/schedule_nightly.ps1` registers it in Windows Task Scheduler.
+
+### Fixed after the live dry runs
+
+- `setup_and_launch.ps1` and `launch_desktop.ps1` are saved with a UTF-8 BOM. Windows PowerShell 5.1 could not
+  parse the Arabic text of `setup_and_launch.ps1` without it.
+
+### Fixed in the dashboard audit (phase 1)
+
+- **Stop and reset keep work.** Stop asks the worker to finish its current row and stop; queued rows, candidates
+  and review decisions stay. Reset is now «إصلاح تشغيل عالق»: it clears a stuck lock and returns `processing` rows
+  to `pending`, and never deletes a row. Each run has a `run_id` (`automation_queue`, `automation_state`), so the
+  progress bar counts that run instead of the whole queue. A failed run shows a red banner instead of looking idle.
+- **A late search answer can no longer publish to the wrong product.** Each search on the review page carries a
+  token and is aborted when the product changes; `select_image`, `reject_image` and `upload_manual_image` refuse a
+  `sku_key` that does not match the product in the request. One approval runs at a time; number keys only select,
+  and modifier keys are ignored.
+- **Diagnostics no longer spend Serper credit on every visit.** The connection check runs from a button, is bounded
+  to 45 seconds, treats Serper as critical and keeps its last result.
+- Raw sheet rows and review products have separate cache keys; the errors tab updates during a run; retry says the
+  rows are queued. Bulk approve and reject send the Arabic name, Arabic brand and category, and a manual upload
+  passes them on, so the product check does not depend on the stored queue row.
+- Laravel migration `2026_10_02_000001` mirrors the Python schema: `run_id`, `stop_requested` and the
+  `review_decisions` table.
+
+### Added in the redesign
+
+- **Laqta Studio UI foundation:** design tokens (`public/css/laqta.css`), `x-lq.*` Blade components, the RTL app
+  shell `layouts/laqta.blade.php` and a `/ui-kit` reference page.
+- **Five pages instead of eight**, all on the approved Laqta design (Arabic, RTL, desktop and phone):
+  - **الرئيسية** (`/`): where the sheet's products stand, the last run with its cost, auto-publish readiness per
+    brand, services from the last connection check, and this week's cost. The waiting-for-review number is the
+    one the sidebar badge shows.
+  - **المراجعة** (`/catalog`): one screen, product image first, for one product (Enter approves, X rejects with a
+    reason, S skips, 1-5 select) or many (`?mode=bulk`: approves only the system's suggestions without a warning,
+    and only the cards on screen). Approvals run in the background one at a time. Failures are the «أعطال» filter.
+  - **التشغيل** (`/batch-automation`): a run over the whole sheet, a brand or chosen rows, with the number of
+    products to search, those skipped, and the estimated cost and time before it starts; the live run with pause,
+    a stop that deletes nothing, «إصلاح تشغيل عالق» only when it is stuck, and the latest results.
+  - **الصحة والتكلفة** (`/system-diagnostics`): the on-demand connection check, searches over 24 hours or 7 days,
+    cost, why products were not found, and redacted log tails.
+  - **الإعدادات** (`/settings?tab=`): the sheet connection, the keys (state only, never their value), auto-publish
+    per brand with «تفعيل» only for a brand at the 98% bar, image processing, and the v1 rollback.
+  - `/errors`, `/rich-catalog`, `/active-learning` and `/batch-automation?tab=review` redirect to their new place.
+- The sidebar run card reads the same phase, alert and stuck reason as the Run page.
+
+### Changed in the redesign
+
+- Approvals and manual uploads use the saved «تحسين الألوان» setting.
+- The foreign-store warning covers every country domain outside the UAE (a `.ca` or `.co.uk` store), not only
+  the Gulf ones; generic two-letter domains (`.io`, `.co`) do not warn.
+- Dashboard sessions and cache are files (`SESSION_DRIVER=file`, `CACHE_STORE=file`), so the pages can say the
+  database is down instead of failing with HTTP 500. The launcher switches an existing `dashboard/.env` once.
+
+### Removed in the redesign
+
+- The rich catalog page and its API (`/api/rich-products*`), the brand-estimate and `/api/logs` endpoints, the
+  active-learning page and its reset, and `layouts/layout.blade.php`. The CSV export stays, in bulk review.
+
+### Removed
+
+- `verification_layer/` (87 modules) and the 23 test files that only exercised it or asserted nothing
+  (`tests/test_report_*.py`, `test_verification_pipeline.py`, `test_validate_blade_js.py`); the pHash/BK-tree
+  test survives as `tests/test_phash_bktree.py`.
+- `celery_config.py`, `distributed_lock.py`, `catalog_dedup.py`, `self_healing.py`, `google_drive.py`.
+- The fabricated `/api/dashboard-enterprise-metrics` endpoint, the verification router and the hand-rolled Redis
+  payloads in `fastapi_server.py`; CLIP embedding and "active learning" JSON logging on approval.
+- Settings `AUTO_APPROVE_THRESHOLD`, `IGNORE_UNIT_CLASH`, `USE_FALLBACK_SEARCH`, `SEARCH_CACHE_*`,
+  `MAX_PARALLEL_DOWNLOADS`, `DRIVE_FOLDER_ID`.
+- The "Next-Gen Frontiers Telemetry" panel on the diagnostics page. Its figures, such as "Accuracy 98.4%",
+  were hard-coded and described deleted `verification_layer` modules.
+- The per-brand "self-correction rules" on the active-learning page (padding ratio 0.70/0.75, strict clutter
+  check). The v2 engine never applied them. The page now shows real review statistics.
+- `scripts/diagnose_search.py`, which probed the retired Google CSE/Bing/DDG scrapers, and
+  `scripts/verify_upgrades.py`, which tested deleted modules and wrote a test link to row 9999 of the live sheet.
+  Use `scripts/smoke_live.py --dry-run` instead.
+- The v1 "visual duplicate" shortcut that answered a search with another product's Cloudinary image when the
+  pHash was within 5 bits. Flavour and size variants share packaging, so it handed out the wrong variant. The
+  shared BK-tree (1.0.0 fix) is still built and filled with every saved image's hash; nothing substitutes answers
+  from it.
+
+### Corrections to 1.0.0
+
+The 1.0.0 entry described components that never ran in production: no Celery worker was ever started, Google
+Drive upload and the Redis GPU lock were unused, the RRF "hybrid search" and SSRF-safe proxy in
+`verification_layer/` were not on the search path (their output was discarded), and the FastAPI service could not
+start because of a missing import. The "Gemini Vision verification" passed images on errors. These are removed
+or replaced above.
+
 ## [1.0.0] — 2026-09-29
 
 First public release.

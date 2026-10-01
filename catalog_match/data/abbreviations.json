@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "_doc": "Sheet shorthand -> search words, used ONLY for the query text (catalog_match.abbreviations, applied by query_plan to Q1, Q3 and R1/R2). Sheet product names use internal shorthand that image search engines do not read ('TUNA S/F OIL', 'L/MEAT'); the query plan writes it out. Identity is not built from this file: the variant lexicon (variants_lexicon.json) already reads the same shorthand, so an expansion must state the variant the lexicon reads for the shorthand ('S/F OIL' and 'Sunflower Oil' are both medium=sunflower_oil) and nothing more. Keys are matched on whole words after catalog_match.text_norm normalisation ('S/F', 's/f', 'S F' and 'S.F' are one key; 'S/FOIL' and '5S' are not), longest key first, never across a brand or size word; the words keep the case style of the sheet text (upper-case text gets upper-case words). 'groups' are named sets of keys, each with a one-line 'why'; a group with a 'context' (a token set named in variants_lexicon.json 'contexts') expands only when the product name, Arabic name, category or class words contain a token of that context. Be conservative: list only shorthand that is unambiguous in grocery names. A word not listed here stays exactly as written, and so does ambiguous shorthand: 'W/S', 'S/F' without OIL (sugar free, salt free), 'VEG' alone (vegetable, vegetables, vegetarian), 'F/F' (full fat or fat free), 'L/F' (low fat or lactose free). Brand shorthand never belongs here ('SUP/T' is not written out as a brand): map it in the Brands Mapping sheet. Spelling typos are not corrected ('TRADITON').",
+  "groups": {
+    "oil": {
+      "why": "The oil a product is packed in or made of: S/F and SF before OIL, and SUNFL anywhere, are sunflower; VEG before OIL is vegetable (alone S/F can be sugar free and VEG vegetables, so both are keyed with OIL).",
+      "expand": {
+        "S/F OIL": "Sunflower Oil",
+        "SF OIL": "Sunflower Oil",
+        "SUNFL": "Sunflower",
+        "VEG OIL": "Vegetable Oil"
+      }
+    },
+    "vegetables": {
+      "why": "WITH VEG is a product with vegetables ('White Tuna with Veg'), not vegetable oil; WITH VEG OIL is listed so the longer key wins and it stays vegetable oil.",
+      "expand": {
+        "WITH VEG": "with Vegetables",
+        "WITH VEG OIL": "with Vegetable Oil"
+      }
+    },
+    "canned_fish": {
+      "why": "On a canned-fish name SUN OIL is sunflower oil and L/, LT/, W/, WT/, WHT/MEAT are the light and white meat grades; elsewhere SUN OIL can be a sun-care oil and L/MEAT luncheon meat, so they are context-bound.",
+      "context": "canned_fish",
+      "expand": {
+        "SUN OIL": "Sunflower Oil",
+        "L/MEAT": "Light Meat",
+        "LT/MEAT": "Light Meat",
+        "W/MEAT": "White Meat",
+        "WT/MEAT": "White Meat",
+        "WHT/MEAT": "White Meat"
+      }
+    },
+    "poultry_and_meat": {
+      "why": "Till-receipt spellings of poultry and meat cuts with no other grocery meaning.",
+      "expand": {
+        "CHKN": "Chicken",
+        "BNLS": "Boneless",
+        "SKNLS": "Skinless"
+      }
+    },
+    "tomato": {
+      "why": "TOM alone can be a name, but TOM before PASTE or KETCHUP is always tomato.",
+      "expand": {
+        "TOM PASTE": "Tomato Paste",
+        "TOM KETCHUP": "Tomato Ketchup"
+      }
+    },
+    "assorted": {
+      "why": "ASST and ASSTD on a grocery name only ever mean an assorted mix (biscuits, chocolates, juices).",
+      "expand": {
+        "ASST": "Assorted",
+        "ASSTD": "Assorted"
+      }
+    }
+  }
+}

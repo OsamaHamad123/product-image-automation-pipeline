@@ -1,0 +1,3807 @@
+{
+ "version": 1,
+ "description": "Recorded structured VLM verdicts per (sku_id, candidate_id), in the D6 schema: what the model read on the pack (brand_text, variant_text, size_text, pack_count, view) and its yes/no/unsure match calls. Code, not the model, turns these into MATCH/MISMATCH/UNSURE. Some entries carry realistic model errors on purpose (see the candidate notes in golden_skus.json). Scenario \"gemini_down\" forces UNKNOWN for every image.",
+ "schema": [
+  "brand_text",
+  "variant_text",
+  "size_text",
+  "pack_count",
+  "view",
+  "brand_match",
+  "variant_match",
+  "size_match"
+ ],
+ "scenarios": {
+  "gemini_down": {
+   "decision": "UNKNOWN",
+   "reason": "verifier unavailable (quota, 5xx or no key)"
+  }
+ },
+ "verdicts": {
+  "uae-001-almarai-full-fat-milk-1l": {
+   "c1": {
+    "brand_text": "Almarai",
+    "variant_text": "Full Fat Milk",
+    "size_text": "1l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Almarai",
+    "variant_text": "Low Fat Milk",
+    "size_text": "1l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   },
+   "c3": {
+    "brand_text": "Almarai",
+    "variant_text": "Full Fat Milk",
+    "size_text": "2l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c4": {
+    "brand_text": "Almarai",
+    "variant_text": "Strawberry Milk",
+    "size_text": "1l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   },
+   "c6": {
+    "brand_text": "Almarai",
+    "variant_text": "Full Fat Milk",
+    "size_text": "2l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c7": {
+    "brand_text": "Almarai",
+    "variant_text": "Full Fat Milk",
+    "size_text": "1l",
+    "pack_count": null,
+    "view": "lifestyle",
+    "brand_match": "yes",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   },
+   "c8": {
+    "brand_text": "Almarai",
+    "variant_text": "Full Fat Milk",
+    "size_text": "1l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   }
+  },
+  "uae-019-almarai-fresh-milk-full-fat-2-85l": {
+   "c1": {
+    "brand_text": "Almarai",
+    "variant_text": "Full Fat Milk",
+    "size_text": "2.85l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Almarai",
+    "variant_text": "Full Fat Milk",
+    "size_text": "2l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c3": {
+    "brand_text": "Almarai",
+    "variant_text": "Low Fat Milk",
+    "size_text": "2.85l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   },
+   "c4": {
+    "brand_text": "Nada",
+    "variant_text": "Full Fat Milk",
+    "size_text": "2.85l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "no",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   },
+   "c5": {
+    "brand_text": "Almarai",
+    "variant_text": "Full Fat Milk",
+    "size_text": "1l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c6": {
+    "brand_text": "Almarai",
+    "variant_text": "Fresh Milk",
+    "size_text": "",
+    "pack_count": null,
+    "view": "banner",
+    "brand_match": "yes",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   }
+  },
+  "uae-002-almarai-fresh-milk-low-fat-1l": {
+   "c1": {
+    "brand_text": "Almarai",
+    "variant_text": "Low Fat Milk",
+    "size_text": "1l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Almarai",
+    "variant_text": "Full Fat Milk",
+    "size_text": "1l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   },
+   "c3": {
+    "brand_text": "Almarai",
+    "variant_text": "Low Fat",
+    "size_text": "1l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c4": {
+    "brand_text": "Almarai",
+    "variant_text": "Low Fat Milk",
+    "size_text": "2l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c5": {
+    "brand_text": "Almarai",
+    "variant_text": "Low Fat Milk",
+    "size_text": "",
+    "pack_count": null,
+    "view": "lifestyle",
+    "brand_match": "yes",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   }
+  },
+  "uae-003-almarai-laban-full-fat-1l": {
+   "c1": {
+    "brand_text": "Almarai",
+    "variant_text": "Laban Full Fat",
+    "size_text": "1l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Almarai",
+    "variant_text": "Laban Low Fat",
+    "size_text": "1l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   },
+   "c3": {
+    "brand_text": "Almarai",
+    "variant_text": "Full Fat Milk",
+    "size_text": "1l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "unsure"
+   },
+   "c4": {
+    "brand_text": "Almarai",
+    "variant_text": "Laban Full Fat",
+    "size_text": "2l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c5": {
+    "brand_text": "Almarai",
+    "variant_text": "Laban",
+    "size_text": "",
+    "pack_count": null,
+    "view": "banner",
+    "brand_match": "yes",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   },
+   "c6": {
+    "brand_text": "Almarai",
+    "variant_text": "Laban Full Fat",
+    "size_text": "1l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   }
+  },
+  "uae-004-almarai-strawberry-milk-180ml": {
+   "c1": {
+    "brand_text": "Almarai",
+    "variant_text": "Strawberry Milk",
+    "size_text": "180ml",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Almarai",
+    "variant_text": "Banana Milk",
+    "size_text": "180ml",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   },
+   "c3": {
+    "brand_text": "Almarai",
+    "variant_text": "Strawberry Milk",
+    "size_text": "6 x 180ml",
+    "pack_count": 6,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c4": {
+    "brand_text": "Almarai",
+    "variant_text": "Strawberry Milk",
+    "size_text": "1l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c5": {
+    "brand_text": "Almarai",
+    "variant_text": "Chocolate Milk",
+    "size_text": "180ml",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   },
+   "c6": {
+    "brand_text": "Nesquik",
+    "variant_text": "Strawberry Milk",
+    "size_text": "180ml",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "no",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   }
+  },
+  "uae-005-al-rawabi-laban-up-180ml": {
+   "c1": {
+    "brand_text": "Al Rawabi",
+    "variant_text": "Laban Up",
+    "size_text": "180ml",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Al Rawabi",
+    "variant_text": "Laban Up",
+    "size_text": "180ml",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c3": {
+    "brand_text": "Al Rawabi",
+    "variant_text": "Laban Up",
+    "size_text": "1l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c4": {
+    "brand_text": "Al Rawabi",
+    "variant_text": "Family Range",
+    "size_text": "",
+    "pack_count": null,
+    "view": "banner",
+    "brand_match": "yes",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   },
+   "c5": {
+    "brand_text": "Al Rawabi",
+    "variant_text": "Laban Up Mango",
+    "size_text": "180ml",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   },
+   "c6": {
+    "brand_text": "Al Rawabi",
+    "variant_text": "Laban Up",
+    "size_text": "180ml",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   }
+  },
+  "uae-006-al-rawabi-fresh-milk-full-fat-2l": {
+   "c1": {
+    "brand_text": "Al Rawabi",
+    "variant_text": "Full Fat Milk",
+    "size_text": "1l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c2": {
+    "brand_text": "Al Rawabi",
+    "variant_text": "Full Cream Milk",
+    "size_text": "1l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c3": {
+    "brand_text": "Al Rawabi",
+    "variant_text": "Low Fat Milk",
+    "size_text": "2l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   },
+   "c4": {
+    "brand_text": "Almarai",
+    "variant_text": "Full Fat Milk",
+    "size_text": "2l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "no",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   },
+   "c5": {
+    "brand_text": "Al Rawabi",
+    "variant_text": "Full Fat Milk",
+    "size_text": "2 x 2l",
+    "pack_count": 2,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   }
+  },
+  "uae-007-al-ain-farms-full-cream-milk-1l": {
+   "c1": {
+    "brand_text": "Al Ain Farms",
+    "variant_text": "Full Cream Milk",
+    "size_text": "1l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Al Ain Farms",
+    "variant_text": "Low Fat Milk",
+    "size_text": "1l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   },
+   "c3": {
+    "brand_text": "Al Ain",
+    "variant_text": "Water",
+    "size_text": "1.5l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "no",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   },
+   "c4": {
+    "brand_text": "Al Ain Farms",
+    "variant_text": "Full Cream Milk",
+    "size_text": "2l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c5": {
+    "brand_text": "Al Ain Farms",
+    "variant_text": "Fresh Dairy",
+    "size_text": "",
+    "pack_count": null,
+    "view": "banner",
+    "brand_match": "yes",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   },
+   "c6": {
+    "brand_text": "Al Ain Farms",
+    "variant_text": "Full Cream Milk",
+    "size_text": "1l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   }
+  },
+  "uae-008-lacnor-full-cream-milk-1l": {
+   "c1": {
+    "brand_text": "Lacnor",
+    "variant_text": "Essentials Full Cream Milk",
+    "size_text": "1l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Lacnor",
+    "variant_text": "Essentials Low Fat Milk",
+    "size_text": "1l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   },
+   "c3": {
+    "brand_text": "Lacnor",
+    "variant_text": "Full Cream Milk",
+    "size_text": "4 x 1l",
+    "pack_count": 4,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c4": {
+    "brand_text": "Lacnor",
+    "variant_text": "Strawberry Milk",
+    "size_text": "180ml",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   },
+   "c5": {
+    "brand_text": "Lacnor",
+    "variant_text": "Essentials Full Cream Milk",
+    "size_text": "1l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c6": {
+    "brand_text": "Lacnor",
+    "variant_text": "Milk",
+    "size_text": "",
+    "pack_count": null,
+    "view": "lifestyle",
+    "brand_match": "yes",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   }
+  },
+  "uae-009-marmum-fresh-milk-full-cream-1l": {
+   "c1": {
+    "brand_text": "Marmum",
+    "variant_text": "Full Cream Milk",
+    "size_text": "1l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Marmum",
+    "variant_text": "Low Fat Milk",
+    "size_text": "1l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   },
+   "c3": {
+    "brand_text": "Marmum",
+    "variant_text": "Full Cream Milk",
+    "size_text": "500ml",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c4": {
+    "brand_text": "Marmum",
+    "variant_text": "Full Cream Milk",
+    "size_text": "1l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c5": {
+    "brand_text": "Marmum",
+    "variant_text": "Laban Full Cream",
+    "size_text": "1l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "unsure"
+   }
+  },
+  "uae-010-meliha-long-life-organic-milk-180ml": {
+   "c1": {
+    "brand_text": "Meliha",
+    "variant_text": "Organic Milk",
+    "size_text": "180ml",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Meliha",
+    "variant_text": "Organic Milk",
+    "size_text": "180ml",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c3": {
+    "brand_text": "Meliha",
+    "variant_text": "Organic Milk",
+    "size_text": "1l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c4": {
+    "brand_text": "Meliha",
+    "variant_text": "Chocolate Milk",
+    "size_text": "180ml",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   },
+   "c5": {
+    "brand_text": "Almarai",
+    "variant_text": "Organic Milk",
+    "size_text": "180ml",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "no",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   },
+   "c6": {
+    "brand_text": "Meliha",
+    "variant_text": "Organic Milk",
+    "size_text": "180ml",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   }
+  },
+  "uae-011-meliha-chocolate-milk-180ml": {
+   "c1": {
+    "brand_text": "Meliha",
+    "variant_text": "Chocolate Milk",
+    "size_text": "180ml",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Meliha",
+    "variant_text": "Strawberry Milk",
+    "size_text": "180ml",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   },
+   "c3": {
+    "brand_text": "Nesquik",
+    "variant_text": "Chocolate Milk",
+    "size_text": "180ml",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "no",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   },
+   "c4": {
+    "brand_text": "Meliha",
+    "variant_text": "Organic Range",
+    "size_text": "",
+    "pack_count": null,
+    "view": "banner",
+    "brand_match": "yes",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   },
+   "c5": {
+    "brand_text": "Meliha",
+    "variant_text": "Chocolate Milk",
+    "size_text": "6 x 180ml",
+    "pack_count": 6,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c6": {
+    "brand_text": "Meliha",
+    "variant_text": "Chocolate Milk",
+    "size_text": "180ml",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   }
+  },
+  "uae-012-nada-greek-yoghurt-plain-160g": {
+   "c1": {
+    "brand_text": "Nada",
+    "variant_text": "Greek Yoghurt Plain",
+    "size_text": "160g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Nada",
+    "variant_text": "Greek Yoghurt Strawberry",
+    "size_text": "160g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   },
+   "c3": {
+    "brand_text": "Almarai",
+    "variant_text": "Greek Yoghurt Plain",
+    "size_text": "150g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "no",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   },
+   "c4": {
+    "brand_text": "Nada",
+    "variant_text": "Greek Yoghurt Plain",
+    "size_text": "4 x 160g",
+    "pack_count": 4,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c5": {
+    "brand_text": "Nada",
+    "variant_text": "Greek Yoghurt Plain",
+    "size_text": "160g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   }
+  },
+  "uae-013-baladna-fresh-milk-low-fat-1l": {
+   "c1": {
+    "brand_text": "Baladna",
+    "variant_text": "Low Fat Milk",
+    "size_text": "1l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Baladna",
+    "variant_text": "Full Fat Milk",
+    "size_text": "1l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   },
+   "c3": {
+    "brand_text": "Baladna",
+    "variant_text": "Low Fat Milk",
+    "size_text": "1.75l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c4": {
+    "brand_text": "Almarai",
+    "variant_text": "Low Fat Milk",
+    "size_text": "1l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "no",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   },
+   "c5": {
+    "brand_text": "Baladna",
+    "variant_text": "Laban Low Fat",
+    "size_text": "1l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "unsure"
+   },
+   "c6": {
+    "brand_text": "Baladna",
+    "variant_text": "Dairy",
+    "size_text": "",
+    "pack_count": null,
+    "view": "banner",
+    "brand_match": "yes",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   }
+  },
+  "uae-014-almarai-orange-juice-nas-1l": {
+   "c1": {
+    "brand_text": "Almarai",
+    "variant_text": "Orange Juice No Added Sugar",
+    "size_text": "1l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Almarai",
+    "variant_text": "Mango Juice No Added Sugar",
+    "size_text": "1l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   },
+   "c3": {
+    "brand_text": "Almarai",
+    "variant_text": "Orange Juice",
+    "size_text": "1l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "unsure",
+    "size_match": "yes"
+   },
+   "c4": {
+    "brand_text": "Almarai",
+    "variant_text": "Orange Juice No Added Sugar",
+    "size_text": "200ml",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c5": {
+    "brand_text": "Almarai",
+    "variant_text": "Juices",
+    "size_text": "",
+    "pack_count": null,
+    "view": "banner",
+    "brand_match": "yes",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   },
+   "c6": {
+    "brand_text": "Almarai",
+    "variant_text": "Orange Juice No Added Sugar",
+    "size_text": "1l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c7": {
+    "brand_text": "Almarai",
+    "variant_text": "Orange Juice No Added Sugar",
+    "size_text": "",
+    "pack_count": null,
+    "view": "banner",
+    "brand_match": "yes",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   }
+  },
+  "uae-015-tang-orange-powder-375g": {
+   "c1": {
+    "brand_text": "Tang",
+    "variant_text": "Orange Powder Drink",
+    "size_text": "375g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Tang",
+    "variant_text": "Mango Powder Drink",
+    "size_text": "375g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   },
+   "c3": {
+    "brand_text": "Tang",
+    "variant_text": "Orange Powder Drink",
+    "size_text": "750g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c4": {
+    "brand_text": "Al Rawabi",
+    "variant_text": "Tangerine Juice",
+    "size_text": "500ml",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "no",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   },
+   "c5": {
+    "brand_text": "Tang",
+    "variant_text": "Orange Sachets",
+    "size_text": "12 x 30g",
+    "pack_count": 12,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c6": {
+    "brand_text": "Tang",
+    "variant_text": "Ramadan",
+    "size_text": "",
+    "pack_count": null,
+    "view": "banner",
+    "brand_match": "yes",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   }
+  },
+  "uae-016-masafi-orange-juice-1l": {
+   "c1": {
+    "brand_text": "Masafi",
+    "variant_text": "Orange Juice",
+    "size_text": "1l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Masafi",
+    "variant_text": "Mango Juice",
+    "size_text": "1l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   },
+   "c3": {
+    "brand_text": "Masafi",
+    "variant_text": "Water",
+    "size_text": "1l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "unsure"
+   },
+   "c4": {
+    "brand_text": "Masafi",
+    "variant_text": "Orange Juice",
+    "size_text": "1l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c5": {
+    "brand_text": "Al Ain",
+    "variant_text": "Orange Juice",
+    "size_text": "1l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "no",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   },
+   "c6": {
+    "brand_text": "Masafi",
+    "variant_text": "Orange Juice",
+    "size_text": "200ml",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   }
+  },
+  "uae-017-lacnor-mango-juice-180ml": {
+   "c1": {
+    "brand_text": "Lacnor",
+    "variant_text": "Mango Juice",
+    "size_text": "180ml",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Lacnor",
+    "variant_text": "Orange Juice",
+    "size_text": "180ml",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   },
+   "c3": {
+    "brand_text": "Lacnor",
+    "variant_text": "Mango Juice",
+    "size_text": "1l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c4": {
+    "brand_text": "Lacnor",
+    "variant_text": "Mango Juice",
+    "size_text": "8 x 180ml",
+    "pack_count": 8,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c5": {
+    "brand_text": "Lacnor",
+    "variant_text": "Mango Juice",
+    "size_text": "",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "unsure",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   },
+   "c6": {
+    "brand_text": "Lacnor",
+    "variant_text": "Mango Juice",
+    "size_text": "",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "unsure"
+   }
+  },
+  "uae-018-rani-float-orange-240ml": {
+   "c1": {
+    "brand_text": "Rani",
+    "variant_text": "Float Orange",
+    "size_text": "240ml",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Rani",
+    "variant_text": "Float Mango",
+    "size_text": "240ml",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   },
+   "c3": {
+    "brand_text": "Rani",
+    "variant_text": "Float Peach",
+    "size_text": "240ml",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   },
+   "c4": {
+    "brand_text": "Rani",
+    "variant_text": "Float Orange",
+    "size_text": "24 x 240ml",
+    "pack_count": 24,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c5": {
+    "brand_text": "Rani",
+    "variant_text": "Orange Juice",
+    "size_text": "1l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "unsure"
+   },
+   "c6": {
+    "brand_text": "Rani",
+    "variant_text": "Float",
+    "size_text": "",
+    "pack_count": null,
+    "view": "banner",
+    "brand_match": "yes",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   }
+  },
+  "uae-020-masafi-water-1-5l": {
+   "c1": {
+    "brand_text": "Masafi",
+    "variant_text": "Water",
+    "size_text": "1.5l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Masafi",
+    "variant_text": "Water",
+    "size_text": "12 x 1.5l",
+    "pack_count": 12,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c3": {
+    "brand_text": "Masafi",
+    "variant_text": "Water",
+    "size_text": "500ml",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c4": {
+    "brand_text": "Al Ain",
+    "variant_text": "Water",
+    "size_text": "1.5l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "no",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   },
+   "c5": {
+    "brand_text": "Masafi",
+    "variant_text": "Water",
+    "size_text": "6 x 1.5l",
+    "pack_count": 6,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c6": {
+    "brand_text": "Masafi",
+    "variant_text": "Water",
+    "size_text": "1.5l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c7": {
+    "brand_text": "Masafi",
+    "variant_text": "Water",
+    "size_text": "1.5l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   }
+  },
+  "uae-021-mai-dubai-drinking-water-500ml": {
+   "c1": {
+    "brand_text": "Mai Dubai",
+    "variant_text": "Drinking Water",
+    "size_text": "500ml",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Mai Dubai",
+    "variant_text": "Drinking Water",
+    "size_text": "24 x 500ml",
+    "pack_count": 24,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c3": {
+    "brand_text": "Mai Dubai",
+    "variant_text": "Drinking Water",
+    "size_text": "1.5l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c4": {
+    "brand_text": "Mai Dubai",
+    "variant_text": "Drinking Water",
+    "size_text": "500ml",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c5": {
+    "brand_text": "Mai Dubai",
+    "variant_text": "Drinking Water",
+    "size_text": "500ml",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c6": {
+    "brand_text": "Mai Dubai",
+    "variant_text": "Drinking Water",
+    "size_text": "500ml",
+    "pack_count": null,
+    "view": "lifestyle",
+    "brand_match": "yes",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   },
+   "c7": {
+    "brand_text": "Masafi",
+    "variant_text": "Water",
+    "size_text": "500ml",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "no",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   }
+  },
+  "uae-022-al-ain-water-500ml": {
+   "c1": {
+    "brand_text": "Al Ain",
+    "variant_text": "Water",
+    "size_text": "500ml",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Al Ain",
+    "variant_text": "Water",
+    "size_text": "24 x 500ml",
+    "pack_count": 24,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c3": {
+    "brand_text": "Al Ain",
+    "variant_text": "Zero Sodium Water",
+    "size_text": "500ml",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   },
+   "c4": {
+    "brand_text": "Al Ain",
+    "variant_text": "Water",
+    "size_text": "500ml",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c5": {
+    "brand_text": "Al Ain",
+    "variant_text": "Water",
+    "size_text": "1.5l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c6": {
+    "brand_text": "Al Ain",
+    "variant_text": "Water",
+    "size_text": "500ml",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   }
+  },
+  "uae-023-arwa-water-1-5l": {
+   "c1": {
+    "brand_text": "Arwa",
+    "variant_text": "Water",
+    "size_text": "1.5l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Arwa",
+    "variant_text": "Water",
+    "size_text": "500ml",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c3": {
+    "brand_text": "Arwa",
+    "variant_text": "Water",
+    "size_text": "6 x 1.5l",
+    "pack_count": 6,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c4": {
+    "brand_text": "Aquafina",
+    "variant_text": "Water",
+    "size_text": "1.5l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "no",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   },
+   "c5": {
+    "brand_text": "Arwa",
+    "variant_text": "Water",
+    "size_text": "",
+    "pack_count": null,
+    "view": "lifestyle",
+    "brand_match": "yes",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   },
+   "c6": {
+    "brand_text": "Arwa",
+    "variant_text": "Water",
+    "size_text": "",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "unsure"
+   }
+  },
+  "uae-024-ag-mayonnaise-473ml": {
+   "c1": {
+    "brand_text": "American Garden",
+    "variant_text": "Mayonnaise",
+    "size_text": "473ml",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Heinz",
+    "variant_text": "Mayonnaise",
+    "size_text": "400ml",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "no",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   },
+   "c3": {
+    "brand_text": "Hellmann'S",
+    "variant_text": "Real Mayonnaise",
+    "size_text": "400ml",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "no",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   },
+   "c4": {
+    "brand_text": "American Garden",
+    "variant_text": "Light Mayonnaise",
+    "size_text": "473ml",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   },
+   "c5": {
+    "brand_text": "American Garden",
+    "variant_text": "Mayonnaise",
+    "size_text": "946ml",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   }
+  },
+  "uae-025-ag-tomato-ketchup-28oz": {
+   "c1": {
+    "brand_text": "American Garden",
+    "variant_text": "Tomato Ketchup",
+    "size_text": "28oz",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Heinz",
+    "variant_text": "Tomato Ketchup",
+    "size_text": "28oz",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "no",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   },
+   "c3": {
+    "brand_text": "American Garden",
+    "variant_text": "Tomato Ketchup",
+    "size_text": "20oz",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c4": {
+    "brand_text": "American Garden",
+    "variant_text": "Hot Ketchup",
+    "size_text": "28oz",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   },
+   "c5": {
+    "brand_text": "American Garden",
+    "variant_text": "Tomato Ketchup",
+    "size_text": "2 x 28oz",
+    "pack_count": 2,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c6": {
+    "brand_text": "American Garden",
+    "variant_text": "Tomato Ketchup",
+    "size_text": "28oz",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c7": {
+    "brand_text": "American Garden",
+    "variant_text": "Tomato Ketchup",
+    "size_text": "28oz",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   }
+  },
+  "uae-026-kdd-mango-nectar-250ml": {
+   "c1": {
+    "brand_text": "Kdd",
+    "variant_text": "Mango Nectar",
+    "size_text": "250ml",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Kdd",
+    "variant_text": "Guava Nectar",
+    "size_text": "250ml",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   },
+   "c3": {
+    "brand_text": "Kdd",
+    "variant_text": "Mango Nectar",
+    "size_text": "1l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c4": {
+    "brand_text": "Kdd",
+    "variant_text": "Mango Nectar",
+    "size_text": "6 x 250ml",
+    "pack_count": 6,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c5": {
+    "brand_text": "Rani",
+    "variant_text": "Float Mango",
+    "size_text": "240ml",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "no",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   },
+   "c6": {
+    "brand_text": "Kdd",
+    "variant_text": "Juices",
+    "size_text": "",
+    "pack_count": null,
+    "view": "banner",
+    "brand_match": "yes",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   }
+  },
+  "uae-027-nido-fortified-2-25kg": {
+   "c1": {
+    "brand_text": "Nido",
+    "variant_text": "Fortified Milk Powder",
+    "size_text": "2.25kg",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Nido",
+    "variant_text": "Fortified Milk Powder",
+    "size_text": "2.25kg",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c3": {
+    "brand_text": "Nido",
+    "variant_text": "1+ Growing Up Milk",
+    "size_text": "1.8kg",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "unsure"
+   },
+   "c4": {
+    "brand_text": "Nido",
+    "variant_text": "Fortified Milk Powder",
+    "size_text": "900g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c5": {
+    "brand_text": "Nido",
+    "variant_text": "Nestle",
+    "size_text": "",
+    "pack_count": null,
+    "view": "banner",
+    "brand_match": "yes",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   },
+   "c6": {
+    "brand_text": "Anchor",
+    "variant_text": "Full Cream Milk Powder",
+    "size_text": "2.25kg",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "no",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   },
+   "c7": {
+    "brand_text": "Nido",
+    "variant_text": "Fortified Milk Powder",
+    "size_text": "2.25kg",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   }
+  },
+  "uae-028-kitkat-4-finger-41-5g": {
+   "c1": {
+    "brand_text": "Kitkat",
+    "variant_text": "4 Finger Milk Chocolate",
+    "size_text": "41.5g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Kitkat",
+    "variant_text": "Chunky",
+    "size_text": "40g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "unsure"
+   },
+   "c3": {
+    "brand_text": "Kitkat",
+    "variant_text": "4 Finger",
+    "size_text": "24 x 41.5g",
+    "pack_count": 24,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c4": {
+    "brand_text": "Kitkat",
+    "variant_text": "4 Finger Dark Chocolate",
+    "size_text": "41.5g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   },
+   "c5": {
+    "brand_text": "Twix",
+    "variant_text": "Twin Bars",
+    "size_text": "50g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "no",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   },
+   "c6": {
+    "brand_text": "Kitkat",
+    "variant_text": "4 Finger Milk Chocolate",
+    "size_text": "41.5g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   }
+  },
+  "uae-029-lays-salted-170g": {
+   "c1": {
+    "brand_text": "Lay'S",
+    "variant_text": "Classic Salted",
+    "size_text": "170g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Lay'S",
+    "variant_text": "Salt & Vinegar",
+    "size_text": "170g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   },
+   "c3": {
+    "brand_text": "Lay'S",
+    "variant_text": "Classic Salted",
+    "size_text": "23g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c4": {
+    "brand_text": "Pringles",
+    "variant_text": "Original",
+    "size_text": "165g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "no",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   },
+   "c5": {
+    "brand_text": "Lay'S",
+    "variant_text": "Classic Salted",
+    "size_text": "14 x 23g",
+    "pack_count": 14,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c6": {
+    "brand_text": "Lay'S",
+    "variant_text": "Pepsico Brands",
+    "size_text": "",
+    "pack_count": null,
+    "view": "banner",
+    "brand_match": "yes",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   }
+  },
+  "uae-030-oreo-original-38g": {
+   "c1": {
+    "brand_text": "Oreo",
+    "variant_text": "Original",
+    "size_text": "38g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Oreo",
+    "variant_text": "Golden",
+    "size_text": "38g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   },
+   "c3": {
+    "brand_text": "Oreo",
+    "variant_text": "Strawberry Creme",
+    "size_text": "38g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   },
+   "c4": {
+    "brand_text": "Oreo",
+    "variant_text": "Original",
+    "size_text": "16 x 38g",
+    "pack_count": 16,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c5": {
+    "brand_text": "Oreo",
+    "variant_text": "Original Family Pack",
+    "size_text": "266g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c6": {
+    "brand_text": "Oreo",
+    "variant_text": "Mondelez",
+    "size_text": "",
+    "pack_count": null,
+    "view": "banner",
+    "brand_match": "yes",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   }
+  },
+  "uae-031-nescafe-classic-200g": {
+   "c1": {
+    "brand_text": "Nescafe",
+    "variant_text": "Classic",
+    "size_text": "200g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Nescafe",
+    "variant_text": "Gold",
+    "size_text": "200g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   },
+   "c3": {
+    "brand_text": "Nescafe",
+    "variant_text": "Classic",
+    "size_text": "100g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c4": {
+    "brand_text": "Nescafe",
+    "variant_text": "Classic Decaf",
+    "size_text": "200g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   },
+   "c5": {
+    "brand_text": "Nescafe",
+    "variant_text": "Classic",
+    "size_text": "200g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c6": {
+    "brand_text": "Nescafe",
+    "variant_text": "Classic",
+    "size_text": "",
+    "pack_count": null,
+    "view": "lifestyle",
+    "brand_match": "yes",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   }
+  },
+  "uae-032-pepsi-2-25l": {
+   "c1": {
+    "brand_text": "Pepsi",
+    "variant_text": "Cola",
+    "size_text": "2.25l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Pepsi",
+    "variant_text": "Cola Cans",
+    "size_text": "24x330ml",
+    "pack_count": 24,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c3": {
+    "brand_text": "Pepsi",
+    "variant_text": "Diet",
+    "size_text": "2.25l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   },
+   "c4": {
+    "brand_text": "Pepsi",
+    "variant_text": "Cola",
+    "size_text": "2.5l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c5": {
+    "brand_text": "Coca-Cola",
+    "variant_text": "Original",
+    "size_text": "2.25l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "no",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   },
+   "c6": {
+    "brand_text": "Pepsi",
+    "variant_text": "Cola",
+    "size_text": "2.25l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c7": {
+    "brand_text": "Pepsi",
+    "variant_text": "Ramadan",
+    "size_text": "",
+    "pack_count": null,
+    "view": "banner",
+    "brand_match": "yes",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   }
+  },
+  "uae-033-al-rawabi-laban-6x180ml": {
+   "c1": {
+    "brand_text": "Al Rawabi",
+    "variant_text": "Laban",
+    "size_text": "6 x 180ml",
+    "pack_count": 6,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Al Rawabi",
+    "variant_text": "Laban",
+    "size_text": "180ml",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c3": {
+    "brand_text": "Al Rawabi",
+    "variant_text": "Laban",
+    "size_text": "1l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c4": {
+    "brand_text": "Al Rawabi",
+    "variant_text": "Laban Up",
+    "size_text": "6 x 180ml",
+    "pack_count": 6,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "unsure"
+   },
+   "c5": {
+    "brand_text": "Al Rawabi",
+    "variant_text": "Laban",
+    "size_text": "6 x 180ml",
+    "pack_count": 6,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c6": {
+    "brand_text": "Almarai",
+    "variant_text": "Laban",
+    "size_text": "6 x 180ml",
+    "pack_count": 6,
+    "view": "front_packshot",
+    "brand_match": "no",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   }
+  },
+  "uae-034-mai-dubai-water-24x500ml": {
+   "c1": {
+    "brand_text": "Mai Dubai",
+    "variant_text": "Drinking Water",
+    "size_text": "24 x 500ml",
+    "pack_count": 24,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Mai Dubai",
+    "variant_text": "Drinking Water",
+    "size_text": "500ml",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c3": {
+    "brand_text": "Mai Dubai",
+    "variant_text": "Drinking Water",
+    "size_text": "12 x 500ml",
+    "pack_count": 12,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c4": {
+    "brand_text": "Mai Dubai",
+    "variant_text": "Drinking Water",
+    "size_text": "24 x 330ml",
+    "pack_count": 24,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c5": {
+    "brand_text": "Masafi",
+    "variant_text": "Water",
+    "size_text": "24 x 500ml",
+    "pack_count": 24,
+    "view": "front_packshot",
+    "brand_match": "no",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   },
+   "c6": {
+    "brand_text": "Mai Dubai",
+    "variant_text": "Drinking Water",
+    "size_text": "24 x 500ml",
+    "pack_count": 24,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   }
+  },
+  "uae-035-coca-cola-can-6x330ml": {
+   "c1": {
+    "brand_text": "Coca-Cola",
+    "variant_text": "Original Taste",
+    "size_text": "6 x 330ml",
+    "pack_count": 6,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Coca-Cola",
+    "variant_text": "Original Taste",
+    "size_text": "330ml",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c3": {
+    "brand_text": "Coca-Cola",
+    "variant_text": "Original Taste",
+    "size_text": "24 x 330ml",
+    "pack_count": 24,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c4": {
+    "brand_text": "Coca-Cola",
+    "variant_text": "Zero Sugar",
+    "size_text": "6 x 330ml",
+    "pack_count": 6,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   },
+   "c5": {
+    "brand_text": "Pepsi",
+    "variant_text": "Cola",
+    "size_text": "6 x 330ml",
+    "pack_count": 6,
+    "view": "front_packshot",
+    "brand_match": "no",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   },
+   "c6": {
+    "brand_text": "Coca-Cola",
+    "variant_text": "Cans",
+    "size_text": "",
+    "pack_count": null,
+    "view": "lifestyle",
+    "brand_match": "yes",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   }
+  },
+  "uae-036-indomie-chicken-75g": {
+   "c1": {
+    "brand_text": "Indomie",
+    "variant_text": "Chicken Flavour",
+    "size_text": "75g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Indomie",
+    "variant_text": "Chicken Flavour",
+    "size_text": "5 x 75g",
+    "pack_count": 5,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c3": {
+    "brand_text": "Indomie",
+    "variant_text": "Vegetable Flavour",
+    "size_text": "75g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   },
+   "c4": {
+    "brand_text": "Indomie",
+    "variant_text": "Chicken Curry Flavour",
+    "size_text": "75g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   },
+   "c5": {
+    "brand_text": "Indomie",
+    "variant_text": "Chicken Flavour",
+    "size_text": "40 x 75g",
+    "pack_count": 40,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c6": {
+    "brand_text": "Indomie",
+    "variant_text": "Chicken Flavour",
+    "size_text": "75g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c7": {
+    "brand_text": "Indomie",
+    "variant_text": "Chicken Flavour",
+    "size_text": "75g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   }
+  },
+  "uae-037-arabic-only-almarai-milk-2l": {
+   "c1": {
+    "brand_text": "Almarai",
+    "variant_text": "Full Fat Milk",
+    "size_text": "2l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Almarai",
+    "variant_text": "Full Fat Milk",
+    "size_text": "2l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c3": {
+    "brand_text": "Almarai",
+    "variant_text": "Full Fat Milk",
+    "size_text": "1l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c4": {
+    "brand_text": "Almarai",
+    "variant_text": "Low Fat Milk",
+    "size_text": "2l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   },
+   "c5": {
+    "brand_text": "Al Rawabi",
+    "variant_text": "Full Fat Milk",
+    "size_text": "2l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "no",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   },
+   "c6": {
+    "brand_text": "Almarai",
+    "variant_text": "Fresh Milk",
+    "size_text": "",
+    "pack_count": null,
+    "view": "banner",
+    "brand_match": "yes",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   }
+  },
+  "uae-038-arabic-only-almarai-labneh-400g": {
+   "c1": {
+    "brand_text": "Almarai",
+    "variant_text": "Labneh Full Fat",
+    "size_text": "400g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Almarai",
+    "variant_text": "Labneh Low Fat",
+    "size_text": "400g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   },
+   "c3": {
+    "brand_text": "Almarai",
+    "variant_text": "Labneh Full Fat",
+    "size_text": "180g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c4": {
+    "brand_text": "Al Safi Danone",
+    "variant_text": "Labneh",
+    "size_text": "400g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "no",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   },
+   "c5": {
+    "brand_text": "Almarai",
+    "variant_text": "Labneh Full Fat",
+    "size_text": "400g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c6": {
+    "brand_text": "",
+    "variant_text": "Labneh",
+    "size_text": "",
+    "pack_count": null,
+    "view": "lifestyle",
+    "brand_match": "no",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   }
+  },
+  "uae-039-arabic-brand-al-rawabi-low-fat-1l": {
+   "c1": {
+    "brand_text": "Al Rawabi",
+    "variant_text": "Low Fat Milk",
+    "size_text": "1l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Al Rawabi",
+    "variant_text": "Full Fat Milk",
+    "size_text": "1l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   },
+   "c3": {
+    "brand_text": "Almarai",
+    "variant_text": "Low Fat Milk",
+    "size_text": "1l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "no",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   },
+   "c4": {
+    "brand_text": "Al Rawabi",
+    "variant_text": "Low Fat Milk",
+    "size_text": "1l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c5": {
+    "brand_text": "Al Rawabi",
+    "variant_text": "Low Fat Milk",
+    "size_text": "2l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c6": {
+    "brand_text": "Al Rawabi",
+    "variant_text": "Dairy",
+    "size_text": "",
+    "pack_count": null,
+    "view": "banner",
+    "brand_match": "yes",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   }
+  },
+  "uae-040-al-marai-greek-yoghurt-150g": {
+   "c1": {
+    "brand_text": "Almarai",
+    "variant_text": "Greek Yoghurt Plain",
+    "size_text": "150g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Almarai",
+    "variant_text": "Greek Yoghurt Strawberry",
+    "size_text": "150g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   },
+   "c3": {
+    "brand_text": "Nada",
+    "variant_text": "Greek Yoghurt Plain",
+    "size_text": "160g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "no",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   },
+   "c4": {
+    "brand_text": "Almarai",
+    "variant_text": "Greek Yoghurt Plain",
+    "size_text": "4 x 150g",
+    "pack_count": 4,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c5": {
+    "brand_text": "Almarai",
+    "variant_text": "Greek Yoghurt Plain",
+    "size_text": "150g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   }
+  },
+  "uae-041-arabic-only-al-foah-khalas-dates-1kg": {
+   "c1": {
+    "brand_text": "Al Foah",
+    "variant_text": "Khalas Dates",
+    "size_text": "1kg",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Al Foah",
+    "variant_text": "Fard Dates",
+    "size_text": "1kg",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   },
+   "c3": {
+    "brand_text": "Al Foah",
+    "variant_text": "Khalas Dates",
+    "size_text": "500g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c4": {
+    "brand_text": "Bateel",
+    "variant_text": "Khalas Dates",
+    "size_text": "1kg",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "no",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   },
+   "c5": {
+    "brand_text": "الفوعة",
+    "variant_text": "تمر خلاص",
+    "size_text": "1kg",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "unsure",
+    "variant_match": "yes",
+    "size_match": "yes"
+   }
+  },
+  "uae-043-invalid-barcode-lacnor-orange-180ml": {
+   "c1": {
+    "brand_text": "Lacnor",
+    "variant_text": "Orange Juice",
+    "size_text": "180ml",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Lacnor",
+    "variant_text": "Mango Juice",
+    "size_text": "180ml",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   },
+   "c3": {
+    "brand_text": "Lacnor",
+    "variant_text": "Orange Juice",
+    "size_text": "1l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c4": {
+    "brand_text": "",
+    "variant_text": "Scientific Notation",
+    "size_text": "",
+    "pack_count": null,
+    "view": "not_product",
+    "brand_match": "no",
+    "variant_match": "no",
+    "size_match": "unsure"
+   },
+   "c5": {
+    "brand_text": "Lacnor",
+    "variant_text": "Orange Juice",
+    "size_text": "8 x 180ml",
+    "pack_count": 8,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c6": {
+    "brand_text": "Lacnor",
+    "variant_text": "Orange Juice",
+    "size_text": "180ml",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   }
+  },
+  "uae-044-bad-check-digit-nutella-400g": {
+   "c1": {
+    "brand_text": "Nutella",
+    "variant_text": "Hazelnut Spread",
+    "size_text": "400g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Nutella",
+    "variant_text": "Hazelnut Spread",
+    "size_text": "400g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c3": {
+    "brand_text": "Nutella",
+    "variant_text": "Hazelnut Spread",
+    "size_text": "750g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c4": {
+    "brand_text": "Nutella",
+    "variant_text": "B-Ready",
+    "size_text": "6 x 22g",
+    "pack_count": 6,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "unsure"
+   },
+   "c5": {
+    "brand_text": "",
+    "variant_text": "Barcode Not Found",
+    "size_text": "",
+    "pack_count": null,
+    "view": "not_product",
+    "brand_match": "no",
+    "variant_match": "no",
+    "size_match": "unsure"
+   },
+   "c6": {
+    "brand_text": "Nutella",
+    "variant_text": "Hazelnut Spread",
+    "size_text": "",
+    "pack_count": null,
+    "view": "lifestyle",
+    "brand_match": "yes",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   }
+  },
+  "uae-045-valid-gtin-al-wadi-hummus-380g": {
+   "c1": {
+    "brand_text": "Al Wadi Al Akhdar",
+    "variant_text": "Hummus Tahina",
+    "size_text": "380g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Al Wadi Al Akhdar",
+    "variant_text": "Hummus Tahina",
+    "size_text": "380g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c3": {
+    "brand_text": "Al Wadi Al Akhdar",
+    "variant_text": "Hummus Tahina",
+    "size_text": "185g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c4": {
+    "brand_text": "Al Wadi Al Akhdar",
+    "variant_text": "Hummus Pine Nuts",
+    "size_text": "380g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   },
+   "c5": {
+    "brand_text": "Cortas",
+    "variant_text": "Hummus Tahina",
+    "size_text": "380g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "no",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   }
+  },
+  "uae-046-barcode-spaces-galaxy-36g": {
+   "c1": {
+    "brand_text": "Galaxy",
+    "variant_text": "Smooth Milk",
+    "size_text": "36g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Galaxy",
+    "variant_text": "Smooth Milk",
+    "size_text": "110g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c3": {
+    "brand_text": "Galaxy",
+    "variant_text": "Smooth Milk",
+    "size_text": "36g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c4": {
+    "brand_text": "Galaxy",
+    "variant_text": "Smooth Milk",
+    "size_text": "24 x 36g",
+    "pack_count": 24,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c5": {
+    "brand_text": "Cadbury",
+    "variant_text": "Dairy Milk",
+    "size_text": "37g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "no",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   },
+   "c6": {
+    "brand_text": "Galaxy",
+    "variant_text": "Smooth Milk",
+    "size_text": "36g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   }
+  },
+  "uae-048-carrefour-full-cream-milk-1l": {
+   "c1": {
+    "brand_text": "Carrefour",
+    "variant_text": "Full Cream Milk",
+    "size_text": "1l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Almarai",
+    "variant_text": "Full Fat Milk",
+    "size_text": "1l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "no",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   },
+   "c3": {
+    "brand_text": "Carrefour",
+    "variant_text": "Low Fat Milk",
+    "size_text": "1l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   },
+   "c4": {
+    "brand_text": "Carrefour",
+    "variant_text": "Full Cream Milk",
+    "size_text": "2l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c5": {
+    "brand_text": "Al Rawabi",
+    "variant_text": "Full Cream Milk",
+    "size_text": "1l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "no",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   },
+   "c6": {
+    "brand_text": "Carrefour",
+    "variant_text": "Weekly Offers",
+    "size_text": "",
+    "pack_count": null,
+    "view": "banner",
+    "brand_match": "yes",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   }
+  },
+  "uae-049-lulu-basmati-rice-5kg": {
+   "c1": {
+    "brand_text": "Lulu",
+    "variant_text": "Premium Basmati Rice",
+    "size_text": "5kg",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "India Gate",
+    "variant_text": "Basmati Rice Classic",
+    "size_text": "5kg",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "no",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   },
+   "c3": {
+    "brand_text": "Lulu",
+    "variant_text": "Premium Basmati Rice",
+    "size_text": "2kg",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c4": {
+    "brand_text": "Tilda",
+    "variant_text": "Pure Basmati Rice",
+    "size_text": "5kg",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "no",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   },
+   "c5": {
+    "brand_text": "Lulu",
+    "variant_text": "Sella Basmati Rice",
+    "size_text": "5kg",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   },
+   "c6": {
+    "brand_text": "Lulu",
+    "variant_text": "Premium Basmati Rice",
+    "size_text": "2 x 5kg",
+    "pack_count": 2,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   }
+  },
+  "uae-050-carrefour-sunflower-oil-1-5l": {
+   "c1": {
+    "brand_text": "Carrefour",
+    "variant_text": "Sunflower Oil",
+    "size_text": "1.5l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Carrefour",
+    "variant_text": "Corn Oil",
+    "size_text": "1.5l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   },
+   "c3": {
+    "brand_text": "Carrefour",
+    "variant_text": "Sunflower Oil",
+    "size_text": "3l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c4": {
+    "brand_text": "Afia",
+    "variant_text": "Sunflower Oil",
+    "size_text": "1.5l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "no",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   },
+   "c5": {
+    "brand_text": "Carrefour",
+    "variant_text": "Bio Sunflower Oil",
+    "size_text": "1l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c6": {
+    "brand_text": "Carrefour",
+    "variant_text": "Own Brand",
+    "size_text": "",
+    "pack_count": null,
+    "view": "banner",
+    "brand_match": "yes",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   }
+  },
+  "uae-051-no-correct-al-jadeed-arabic-bread": {
+   "c1": {
+    "brand_text": "Modern Bakery",
+    "variant_text": "Arabic Bread Large",
+    "size_text": "6 pcs",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "no",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   },
+   "c2": {
+    "brand_text": "Lusine",
+    "variant_text": "Arabic Bread",
+    "size_text": "6 pcs",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "no",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   },
+   "c3": {
+    "brand_text": "Lulu",
+    "variant_text": "Arabic Bread Large",
+    "size_text": "6 pcs",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "no",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   },
+   "c4": {
+    "brand_text": "Al Jadeed Bakery",
+    "variant_text": "Arabic Bread Small",
+    "size_text": "12 pcs",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c5": {
+    "brand_text": "Al Jadeed Bakery",
+    "variant_text": "Bakery",
+    "size_text": "",
+    "pack_count": null,
+    "view": "lifestyle",
+    "brand_match": "yes",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   }
+  },
+  "uae-052-no-results-healthy-farms-eggs-30": {},
+  "uae-053-no-correct-emirates-bio-farm-kale": {
+   "c1": {
+    "brand_text": "Kibsons",
+    "variant_text": "Organic Kale",
+    "size_text": "250g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "no",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   },
+   "c2": {
+    "brand_text": "",
+    "variant_text": "Kale",
+    "size_text": "",
+    "pack_count": null,
+    "view": "lifestyle",
+    "brand_match": "no",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   },
+   "c3": {
+    "brand_text": "",
+    "variant_text": "Kale Salad",
+    "size_text": "",
+    "pack_count": null,
+    "view": "lifestyle",
+    "brand_match": "no",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   },
+   "c4": {
+    "brand_text": "Emirates Bio Farm",
+    "variant_text": "Organic",
+    "size_text": "",
+    "pack_count": null,
+    "view": "banner",
+    "brand_match": "yes",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   },
+   "c5": {
+    "brand_text": "Greenhouse",
+    "variant_text": "Organic Kale",
+    "size_text": "200g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "no",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   }
+  },
+  "uae-054-no-usable-koita-organic-laban-1l": {
+   "c1": {
+    "brand_text": "Koita",
+    "variant_text": "Organic Laban Full Fat",
+    "size_text": "",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "unsure",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   },
+   "c4": {
+    "brand_text": "Koita",
+    "variant_text": "Organic Laban Low Fat",
+    "size_text": "1l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   },
+   "c5": {
+    "brand_text": "Almarai",
+    "variant_text": "Laban Full Fat",
+    "size_text": "1l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "no",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   }
+  },
+  "uae-055-al-rawabi-fresh-milk-full-fat-1l": {
+   "c1": {
+    "brand_text": "Al Rawabi",
+    "variant_text": "Full Fat Milk",
+    "size_text": "1l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "",
+    "variant_text": "",
+    "size_text": "",
+    "pack_count": null,
+    "view": "not_product",
+    "brand_match": "no",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   },
+   "c3": {
+    "brand_text": "Al Rawabi",
+    "variant_text": "Fresh Milk",
+    "size_text": "",
+    "pack_count": null,
+    "view": "multi_product",
+    "brand_match": "yes",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   },
+   "c4": {
+    "brand_text": "Al Rawabi",
+    "variant_text": "Low Fat Milk",
+    "size_text": "1l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   },
+   "c5": {
+    "brand_text": "Al Rawabi",
+    "variant_text": "Full Fat Milk",
+    "size_text": "500ml",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c6": {
+    "brand_text": "Al Rawabi",
+    "variant_text": "Full Fat Milk",
+    "size_text": "1l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   }
+  },
+  "uae-057-puck-cream-cheese-500g": {
+   "c1": {
+    "brand_text": "Puck",
+    "variant_text": "Cream Cheese Spread",
+    "size_text": "500g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Puck",
+    "variant_text": "Cream Cheese Spread",
+    "size_text": "500g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c3": {
+    "brand_text": "Puck",
+    "variant_text": "Cream Cheese Spread",
+    "size_text": "240g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c4": {
+    "brand_text": "Puck",
+    "variant_text": "Cream Cheese Spread Light",
+    "size_text": "500g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   },
+   "c5": {
+    "brand_text": "Puck",
+    "variant_text": "Cheddar Cheese Spread",
+    "size_text": "500g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "unsure"
+   },
+   "c6": {
+    "brand_text": "Puck",
+    "variant_text": "Cream Cheese",
+    "size_text": "",
+    "pack_count": null,
+    "view": "lifestyle",
+    "brand_match": "yes",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   }
+  },
+  "uae-060-tilda-pure-basmati-rice-5kg": {
+   "c1": {
+    "brand_text": "Tilda",
+    "variant_text": "Pure Basmati Rice",
+    "size_text": "5kg",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Tilda",
+    "variant_text": "Price Offers",
+    "size_text": "",
+    "pack_count": null,
+    "view": "banner",
+    "brand_match": "yes",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   },
+   "c3": {
+    "brand_text": "Tilda",
+    "variant_text": "Pure Basmati Rice",
+    "size_text": "5kg, 10kg, 20kg",
+    "pack_count": null,
+    "view": "multi_product",
+    "brand_match": "yes",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   },
+   "c4": {
+    "brand_text": "Tilda",
+    "variant_text": "Pure Basmati Rice",
+    "size_text": "10kg",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c5": {
+    "brand_text": "Tilda",
+    "variant_text": "Brown Basmati Rice",
+    "size_text": "5kg",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   },
+   "c6": {
+    "brand_text": "India Gate",
+    "variant_text": "Basmati Rice Classic",
+    "size_text": "5kg",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "no",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   },
+   "c7": {
+    "brand_text": "Tilda",
+    "variant_text": "Pure Basmati Rice",
+    "size_text": "5kg",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   }
+  },
+  "uae-061-saba-sanabel-chakki-atta-5kg": {
+   "c1": {
+    "brand_text": "Saba Sanabel",
+    "variant_text": "Chakki Fresh Atta",
+    "size_text": "5kg",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Saba Sanabel",
+    "variant_text": "Chakki Fresh Atta",
+    "size_text": "10kg",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c3": {
+    "brand_text": "Aashirvaad",
+    "variant_text": "Whole Wheat Atta",
+    "size_text": "5kg",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "no",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   },
+   "c4": {
+    "brand_text": "Saba Sanabel",
+    "variant_text": "Multigrain Atta",
+    "size_text": "5kg",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   },
+   "c5": {
+    "brand_text": "Al Baker",
+    "variant_text": "Chakki Fresh Atta",
+    "size_text": "5kg",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "no",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   },
+   "c6": {
+    "brand_text": "Saba Sanabel",
+    "variant_text": "Chakki Fresh Atta",
+    "size_text": "5kg",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   }
+  },
+  "uae-062-lipton-yellow-label-100-bags": {
+   "c1": {
+    "brand_text": "Lipton",
+    "variant_text": "Yellow Label Black Tea",
+    "size_text": "100 tea bags",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Lipton",
+    "variant_text": "Yellow Label Black Tea",
+    "size_text": "50 tea bags",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c3": {
+    "brand_text": "Lipton",
+    "variant_text": "Green Tea Classic",
+    "size_text": "100 tea bags",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   },
+   "c4": {
+    "brand_text": "Lipton",
+    "variant_text": "Yellow Label Loose Tea",
+    "size_text": "450g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "unsure"
+   },
+   "c5": {
+    "brand_text": "Alokozay",
+    "variant_text": "Black Tea",
+    "size_text": "100 tea bags",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "no",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   },
+   "c6": {
+    "brand_text": "Lipton",
+    "variant_text": "Yellow Label Black Tea",
+    "size_text": "100 tea bags",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   }
+  },
+  "uae-063-kelloggs-corn-flakes-500g": {
+   "c1": {
+    "brand_text": "Kellogg'S",
+    "variant_text": "Corn Flakes",
+    "size_text": "500g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Kellogg'S",
+    "variant_text": "Corn Flakes",
+    "size_text": "750g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c3": {
+    "brand_text": "Kellogg'S",
+    "variant_text": "Frosties",
+    "size_text": "500g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "unsure"
+   },
+   "c4": {
+    "brand_text": "Nestle",
+    "variant_text": "Corn Flakes",
+    "size_text": "375g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "no",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   },
+   "c5": {
+    "brand_text": "Kellogg'S",
+    "variant_text": "Corn Flakes",
+    "size_text": "2 x 500g",
+    "pack_count": 2,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c6": {
+    "brand_text": "Kellogg'S",
+    "variant_text": "Corn Flakes",
+    "size_text": "",
+    "pack_count": null,
+    "view": "lifestyle",
+    "brand_match": "yes",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   },
+   "c7": {
+    "brand_text": "Kellogg'S",
+    "variant_text": "Corn Flakes",
+    "size_text": "500g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   }
+  },
+  "uae-064-al-alali-tuna-sunflower-170g": {
+   "c1": {
+    "brand_text": "Al Alali",
+    "variant_text": "Tuna Chunks Sunflower Oil",
+    "size_text": "170g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Al Alali",
+    "variant_text": "Tuna Chunks In Water",
+    "size_text": "170g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   },
+   "c3": {
+    "brand_text": "Al Alali",
+    "variant_text": "Tuna Chunks Sunflower Oil",
+    "size_text": "170g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c4": {
+    "brand_text": "Al Alali",
+    "variant_text": "Tuna Chunks Sunflower Oil",
+    "size_text": "4 x 170g",
+    "pack_count": 4,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c5": {
+    "brand_text": "Americana",
+    "variant_text": "Tuna Sunflower Oil",
+    "size_text": "170g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "no",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   },
+   "c6": {
+    "brand_text": "Al Alali",
+    "variant_text": "Tuna Chunks Sunflower Oil",
+    "size_text": "170g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   }
+  },
+  "uae-065-almarai-long-life-milk-full-fat-1l": {
+   "c1": {
+    "brand_text": "Almarai",
+    "variant_text": "Long Life Milk Full Fat",
+    "size_text": "1l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Almarai",
+    "variant_text": "Fresh Milk Full Fat",
+    "size_text": "1l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   },
+   "c3": {
+    "brand_text": "Almarai",
+    "variant_text": "Long Life Milk Low Fat",
+    "size_text": "1l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   },
+   "c4": {
+    "brand_text": "Almarai",
+    "variant_text": "Long Life Milk Full Fat",
+    "size_text": "4 x 1l",
+    "pack_count": 4,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c5": {
+    "brand_text": "Almarai",
+    "variant_text": "Long Life Milk Full Fat",
+    "size_text": "1l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c6": {
+    "brand_text": "Almarai",
+    "variant_text": "Long Life Milk Full Fat",
+    "size_text": "200ml",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   }
+  },
+  "uae-066-ferrero-rocher-t16-200g": {
+   "c1": {
+    "brand_text": "Ferrero Rocher",
+    "variant_text": "T16",
+    "size_text": "200g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Ferrero Rocher",
+    "variant_text": "T24",
+    "size_text": "300g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c3": {
+    "brand_text": "Ferrero Rocher",
+    "variant_text": "T3",
+    "size_text": "37.5g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c4": {
+    "brand_text": "Lindt",
+    "variant_text": "Lindor Milk",
+    "size_text": "200g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "no",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   },
+   "c5": {
+    "brand_text": "Ferrero Rocher",
+    "variant_text": "Gifting",
+    "size_text": "",
+    "pack_count": null,
+    "view": "banner",
+    "brand_match": "yes",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   }
+  },
+  "uae-068-unmapped-brand-americana-nuggets-400g": {
+   "c1": {
+    "brand_text": "Americana",
+    "variant_text": "Chicken Nuggets",
+    "size_text": "400g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Americana",
+    "variant_text": "Chicken Nuggets",
+    "size_text": "750g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c3": {
+    "brand_text": "Americana",
+    "variant_text": "Spicy Chicken Nuggets",
+    "size_text": "400g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   },
+   "c4": {
+    "brand_text": "Sadia",
+    "variant_text": "Chicken Nuggets",
+    "size_text": "400g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "no",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   },
+   "c5": {
+    "brand_text": "Americana",
+    "variant_text": "Chicken Nuggets",
+    "size_text": "400g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   }
+  },
+  "uae-067-zwan-chicken-luncheon-200g": {
+   "c1": {
+    "brand_text": "Zwan",
+    "variant_text": "Chicken Luncheon Meat",
+    "size_text": "200g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Zwan",
+    "variant_text": "Beef Luncheon Meat",
+    "size_text": "200g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   },
+   "c3": {
+    "brand_text": "Zwan",
+    "variant_text": "Chicken Luncheon Olives",
+    "size_text": "200g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   },
+   "c4": {
+    "brand_text": "Zwan",
+    "variant_text": "Chicken Luncheon Meat",
+    "size_text": "340g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c5": {
+    "brand_text": "Americana",
+    "variant_text": "Chicken Luncheon",
+    "size_text": "200g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "no",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   }
+  }
+ }
+}

@@ -18,6 +18,9 @@ temp/
 # HTML Response Dumps
 *.html
 
+# Database dumps (may contain API keys from system_settings)
+*.sql
+
 # Secrets and Credentials
 .env
 credentials.json

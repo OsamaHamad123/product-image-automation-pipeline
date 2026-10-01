@@ -1,4 +1,4 @@
-# setup_and_launch.ps1
+﻿# setup_and_launch.ps1
 # سكربت الإعداد والتشغيل التلقائي بنقرة واحدة لفريق إدخال البيانات
 # يقوم بالتحقق من المتطلبات وتنزيل المكونات المحمولة وتشغيل النظام وإغلاقه تلقائياً عند الانتهاء.
 
@@ -10,6 +10,11 @@ Set-Location $PSScriptRoot
 
 # ترميز الإخراج لدعم اللغة العربية في الكونسول
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+
+# وضع UTF-8 لكل عمليات بايثون (جسر cli_bridge.py والعامل main.py) حتى لا تفشل الأسماء العربية
+# والرموز في الطباعة مع ترميز ويندوز الافتراضي (cp1252 / cp1256). ترثه كل العمليات الفرعية.
+$env:PYTHONUTF8 = "1"
+$env:PYTHONIOENCODING = "utf-8"
 
 Write-Host "============================================================" -ForegroundColor Green
 Write-Host "   نظام أتمتة صور المنتجات - إعداد وتشغيل محلي تلقائي" -ForegroundColor Green
@@ -236,6 +241,17 @@ if (-not (Test-Path $dashboardEnv)) {
     }
 }
 
+# الجلسات والكاش في ملفات لا في MariaDB: لو قاعدة البيانات واقفة تفتح اللوحة وتقول «قاعدة البيانات مش متاحة» بدل خطأ 500
+if (Test-Path $dashboardEnv) {
+    $envText = [System.IO.File]::ReadAllText($dashboardEnv)
+    $newText = $envText -replace '(?m)^SESSION_DRIVER=database(\r?)$', 'SESSION_DRIVER=file$1'
+    $newText = $newText -replace '(?m)^CACHE_STORE=database(\r?)$', 'CACHE_STORE=file$1'
+    if ($newText -ne $envText) {
+        [System.IO.File]::WriteAllText($dashboardEnv, $newText, (New-Object System.Text.UTF8Encoding($false)))
+        Write-Host "⚙️ الجلسات والكاش صاروا ملفات بدل قاعدة البيانات." -ForegroundColor Yellow
+    }
+}
+
 # توليد مفتاح التطبيق للوحة التحكم إن لم يكن موجوداً
 if (Test-Path $dashboardEnv) {
     $envContent = Get-Content $dashboardEnv
@@ -345,10 +361,28 @@ if ($LASTEXITCODE -ne 0) {
 # تأكيد وجود مجلد المؤقتات لنموذج بايثون
 if (-not (Test-Path "temp")) { New-Item -ItemType Directory -Path "temp" | Out-Null }
 
-Write-Host "🚀 جاري تشغيل خادم معالجة الصور FastAPI..." -ForegroundColor Yellow
-$fastapiOut = Join-Path $PSScriptRoot "fastapi_stdout.log"
-$fastapiErr = Join-Path $PSScriptRoot "fastapi_stderr.log"
-$fastapiProcess = Start-Process -FilePath $venvPython -ArgumentList "fastapi_server.py" -WorkingDirectory $PSScriptRoot -WindowStyle Hidden -RedirectStandardOutput $fastapiOut -RedirectStandardError $fastapiErr -PassThru
+# لا يوجد خادم FastAPI: لوحة التحكم تستدعي cli_bridge.py مباشرة.
+# عامل مزامنة الشيت (sync_worker) يعمل فقط عند توفر Redis؛ بدونه تُكتب التحديثات مباشرة.
+$syncWorkerProcess = $null
+$redisPort = 6379
+if ($env:REDIS_PORT) { $redisPort = [int]$env:REDIS_PORT }
+$redisUp = $false
+try {
+    $tcp = New-Object System.Net.Sockets.TcpClient
+    $attempt = $tcp.BeginConnect("127.0.0.1", $redisPort, $null, $null)
+    $redisUp = $attempt.AsyncWaitHandle.WaitOne(1000, $false) -and $tcp.Connected
+    $tcp.Close()
+} catch {
+    $redisUp = $false
+}
+if ($redisUp) {
+    Write-Host "🔁 تم اكتشاف Redis على المنفذ ${redisPort} - جاري تشغيل عامل مزامنة الشيت (sync_worker)..." -ForegroundColor Yellow
+    $syncOut = Join-Path $PSScriptRoot "temp\sync_worker_stdout.log"
+    $syncErr = Join-Path $PSScriptRoot "temp\sync_worker_stderr.log"
+    $syncWorkerProcess = Start-Process -FilePath $venvPython -ArgumentList "sync_worker.py" -WorkingDirectory $PSScriptRoot -WindowStyle Hidden -RedirectStandardOutput $syncOut -RedirectStandardError $syncErr -PassThru
+} else {
+    Write-Host "ℹ️ Redis غير متوفر: تُكتب تحديثات الشيت مباشرة دون عامل مزامنة." -ForegroundColor Gray
+}
 
 Write-Host "🚀 جاري تشغيل خادم لوحة التحكم Laravel..." -ForegroundColor Yellow
 $laravelOut = Join-Path $PSScriptRoot "laravel_stdout.log"
@@ -362,7 +396,7 @@ Start-Sleep -Seconds 4
 Write-Host ""
 Write-Host "🎉 تم تشغيل كافة الخدمات بنجاح!" -ForegroundColor Green
 Write-Host "------------------------------------------------------------" -ForegroundColor Green
-Write-Host "  FastAPI Server runs on http://127.0.0.1:8001" -ForegroundColor Gray
+Write-Host "  Python bridge: cli_bridge.py (CLI, UTF-8)" -ForegroundColor Gray
 Write-Host "  Laravel Dashboard runs on http://127.0.0.1:8000" -ForegroundColor Gray
 Write-Host "------------------------------------------------------------" -ForegroundColor Green
 Write-Host "جاري فتح لوحة التحكم..." -ForegroundColor Cyan
@@ -403,7 +437,9 @@ if ($chromePath -or (Test-Path "${env:ProgramFiles}\Google\Chrome\Application\ch
 Write-Host ""
 Write-Host "🛑 جاري إيقاف خوادم الخلفية وتنظيف الموارد..." -ForegroundColor Yellow
 
-Stop-Process -Id $fastapiProcess.Id -Force -ErrorAction SilentlyContinue
+if ($syncWorkerProcess) {
+    Stop-Process -Id $syncWorkerProcess.Id -Force -ErrorAction SilentlyContinue
+}
 Stop-Process -Id $laravelProcess.Id -Force -ErrorAction SilentlyContinue
 
 Write-Host "👋 تم إغلاق النظام بنجاح. يومك سعيد!" -ForegroundColor Green

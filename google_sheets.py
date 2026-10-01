@@ -1,34 +1,439 @@
 # google_sheets.py
-# موديول التعامل مع Google Sheets وجلب وتحديث بيانات المنتجات
+# موديول التعامل مع Google Sheets: قراءة المنتجات بعناوين أعمدة مرنة، وكتابة آمنة عبر طابور MariaDB (outbox).
+#
+# قواعد الأمان (SHEET-1/2, SYNC-1/2, D12):
+# - الأعمدة تُحدد بأسماء العناوين (مع جدول مرادفات) ولا يوجد أي رجوع لمواقع ثابتة؛ غياب عمود الاسم خطأ صريح.
+# - لا يُخترع البراند من أول كلمة في الاسم: البراند الفارغ يبقى فارغاً.
+# - كل كتابة تحمل هوية المنتج (الباركود/الاسم). عند التفريغ نعيد قراءة عمود المفتاح للصف الهدف،
+#   وأي اختلاف يُسجل CONFLICT ولا يُكتب. عمود الهدف يُحدد باسم العنوان وقت التفريغ.
+# - الكتابة المؤجلة عبر Redis تُستخدم فقط إذا كان مفتاح نبض sync_worker موجوداً.
 
-import time
-import os
 import json
+import logging
+import os
 import random
+import re
+import threading
+import time
+import unicodedata
+
 import gspread
 import pymysql
-import threading
 from gspread.exceptions import APIError
-from oauth2client.service_account import ServiceAccountCredentials
+
 import config
+
+logger = logging.getLogger(__name__)
 
 _queue = None
 _worker = None
+_redis_client = None
 _redis_cache_available = None
 
+# مكان ملفات الكاش المحلية (قابل للتغيير في الاختبارات)
+CACHE_DIR = os.path.dirname(os.path.abspath(__file__))
+PRODUCTS_CACHE_VERSION = 2
+BRAND_CACHE_VERSION = 2
+
+HEARTBEAT_KEY = "writebehind:heartbeat"
+DIRTY_SET_KEY = "writebehind:dirty_set"
+CACHE_PREFIX = "product:data:"
+MAX_OUTBOX_ATTEMPTS = 5
+OUTBOX_BATCH = 200
+
+
+class SheetConfigError(Exception):
+    """إعداد الشيت غير صالح (مثل تبويب غير موجود)."""
+
+
+class SheetSchemaError(SheetConfigError):
+    """عناوين الأعمدة لا تسمح بتحديد عمود إلزامي (مثل اسم المنتج)."""
+
+
+# ---------------------------------------------------------------------------
+# عناوين الأعمدة ومرادفاتها
+# ---------------------------------------------------------------------------
+
+_NON_ALNUM_RE = re.compile(r"[\W_]+", re.UNICODE)
+
+
+def normalize_header(header):
+    """strip + casefold + تحويل أي علامات ترقيم أو فراغات متتالية إلى فراغ واحد."""
+    text = unicodedata.normalize("NFKC", str(header or "")).casefold()
+    return _NON_ALNUM_RE.sub(" ", text).strip()
+
+
+# الترتيب داخل كل قائمة هو الأولوية (أول مرادف موجود يفوز، لا ترتيب الأعمدة في الشيت)
+COLUMN_SYNONYMS = {
+    "barcode": ["barcode", "ean", "gtin", "upc", "item code", "barcode no", "barcode number",
+                "الباركود", "باركود"],
+    "name": ["product name", "productname", "item name", "name en", "description", "اسم المنتج"],
+    "brand": ["brand", "brand en", "brand name", "البراند", "الماركة", "العلامة التجارية"],
+    "size": ["size", "weight", "volume", "pack size", "الحجم"],
+    "name_ar": ["product name arabic", "productname arabic", "name ar", "product name ar",
+                "اسم المنتج بالعربي", "اسم المنتج عربي"],
+    "brand_ar": ["brand arabic", "brand ar", "البراند بالعربي", "البراند عربي"],
+    "category": ["category", "الفئة", "التصنيف"],
+    "sub_category": ["sub category", "subcategory"],
+    "sub_sub_category": ["sub sub category"],
+    "sub_sub_category_ar": ["sub sub category arabic"],
+    "origin": ["origin", "بلد المنشأ", "المنشأ"],
+    "link": ["drive image link", "image link", "رابط الصورة", "images"],
+}
+DEFAULT_LINK_HEADER = "Drive Image Link"
+
+
+def resolve_columns(headers):
+    """{مفتاح منطقي: فهرس العمود (0-based) أو -1} حسب جدول المرادفات."""
+    normalized = [normalize_header(h) for h in headers or []]
+    out = {}
+    for key, synonyms in COLUMN_SYNONYMS.items():
+        idx = -1
+        for syn in synonyms:
+            target = normalize_header(syn)
+            if target in normalized:
+                idx = normalized.index(target)
+                break
+        out[key] = idx
+    return out
+
+
+def _cell(row, idx):
+    return row[idx].strip() if 0 <= idx < len(row) else ""
+
+
+def _norm_barcode(value):
+    digits = re.sub(r"\D", "", str(value or ""))
+    return digits.lstrip("0")
+
+
+def _norm_name(value):
+    return re.sub(r"\s+", " ", unicodedata.normalize("NFKC", str(value or "")).casefold()).strip()
+
+
+# ---------------------------------------------------------------------------
+# الكاش المحلي لقراءات الشيت
+# ---------------------------------------------------------------------------
+
+def _cache_path(name):
+    return os.path.join(CACHE_DIR, name)
+
+
 def clear_cache():
-    cache_dir = os.path.dirname(os.path.abspath(__file__))
-    p_cache = os.path.join(cache_dir, "products_cache.json")
-    b_cache = os.path.join(cache_dir, "brand_mappings_cache.json")
-    for f in [p_cache, b_cache]:
-        if os.path.exists(f):
+    for name in ("products_cache.json", "brand_mappings_cache.json"):
+        path = _cache_path(name)
+        if os.path.exists(path):
             try:
-                os.remove(f)
-                print(f"🧹 [Google Sheets Cache] Cleared cache file: {os.path.basename(f)}")
+                os.remove(path)
+                logger.debug("[Google Sheets Cache] حذف ملف الكاش %s", name)
             except Exception:
                 pass
 
+
+def _read_cache(name, ttl, version):
+    path = _cache_path(name)
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            cached = json.load(f)
+        if cached.get("version") == version and time.time() - cached.get("timestamp", 0) < ttl:
+            return cached
+    except Exception as ce:
+        logger.warning("[Google Sheets Cache] تعذر قراءة %s: %s", name, ce)
+    return None
+
+
+def _write_cache(name, payload, version):
+    try:
+        payload = dict(payload, timestamp=time.time(), version=version)
+        with open(_cache_path(name), "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+    except Exception as ce:
+        logger.warning("[Google Sheets Cache] تعذر كتابة %s: %s", name, ce)
+
+
+# ---------------------------------------------------------------------------
+# إعادة المحاولة عند 429 / 5xx
+# ---------------------------------------------------------------------------
+
+def retry_gspread_on_429(max_retries=5):
+    """
+    مُزخرف لإعادة محاولة استدعاءات Google API عند 429 أو 500 أو 503 مع ارتداد أسّي عشوائي.
+    الأخطاء الأخرى تُرفع كما هي.
+    """
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            retry = 0
+            while True:
+                try:
+                    return func(*args, **kwargs)
+                except APIError as e:
+                    code = getattr(e, "code", None)
+                    if code in (429, 500, 503) and retry < max_retries:
+                        retry += 1
+                        backoff = min((2 ** retry) + random.uniform(0.1, 1.0), 32)
+                        logger.warning("[Google Sheets API] خطأ %s؛ إعادة المحاولة %s/%s خلال %.2f ثانية",
+                                       code, retry, max_retries, backoff)
+                        time.sleep(backoff)
+                        continue
+                    raise
+        wrapper.__wrapped__ = func
+        wrapper.__name__ = getattr(func, "__name__", "wrapper")
+        return wrapper
+    return decorator
+
+
+# ---------------------------------------------------------------------------
+# الاتصال وفتح الشيت
+# ---------------------------------------------------------------------------
+
+def get_sheets_client():
+    """الاتصال بـ Google Sheets API باستخدام ملف الاعتمادات."""
+    try:
+        return gspread.service_account(filename=config.CREDENTIALS_FILE)
+    except Exception as e:
+        logger.error("فشل الاتصال بـ Google Sheets API: %s", e)
+        return None
+
+
+def _one_line(value):
+    """نص آمن لسطر سجل واحد: قيم يدخلها المستخدم لا يجوز أن تزوّر أسطر سجل جديدة."""
+    return str(value).replace("\r\n", " ").replace("\n", " ").replace("\r", " ")
+
+
+def _open_spreadsheet(client, sheet_name_or_url):
+    if str(sheet_name_or_url).startswith("https://"):
+        return client.open_by_url(sheet_name_or_url)
+    return client.open(sheet_name_or_url)
+
+
+def open_worksheet(client, sheet_name_or_url, worksheet_index=0):
+    """
+    فتح ورقة العمل. إذا كان SPREADSHEET_TAB_NAME مضبوطاً وغير موجود نرفع SheetConfigError
+    بدلاً من الكتابة بصمت في التبويب الأول. تعيد None إذا تعذر فتح الملف نفسه.
+    """
+    try:
+        sh = _open_spreadsheet(client, sheet_name_or_url)
+    except Exception as e:
+        logger.error("فشل فتح جدول البيانات '%s': %s", _one_line(sheet_name_or_url), e)
+        return None
+    tab_name = (getattr(config, "SPREADSHEET_TAB_NAME", "") or "").strip()
+    if tab_name and worksheet_index == 0:
+        try:
+            return sh.worksheet(tab_name)
+        except gspread.exceptions.WorksheetNotFound:
+            try:
+                titles = [ws.title for ws in sh.worksheets()]
+            except Exception:
+                titles = []
+            raise SheetConfigError(f"التبويب '{tab_name}' غير موجود في الشيت. التبويبات المتاحة: {titles}")
+    return sh.get_worksheet(worksheet_index)
+
+
+_HEADER_TTL = 60.0
+_header_cache = {}
+_header_lock = threading.Lock()
+
+
+def _worksheet_headers(worksheet, fresh=False):
+    """صف العناوين (مع كاش قصير 60 ثانية لكل ورقة لتقليل استهلاك الحصة)."""
+    key = (getattr(worksheet, "id", None), getattr(worksheet, "title", None), id(worksheet))
+    now = time.time()
+    with _header_lock:
+        hit = _header_cache.get(key)
+        if hit and not fresh and now - hit[0] < _HEADER_TTL:
+            return list(hit[1])
+    headers = worksheet.row_values(1)
+    with _header_lock:
+        _header_cache[key] = (now, list(headers))
+    return list(headers)
+
+
+def find_link_column(worksheet, create=True):
+    """فهرس عمود رابط الصورة من العناوين الحالية؛ يُنشأ العمود في النهاية إن لم يوجد و create=True."""
+    headers = _worksheet_headers(worksheet, fresh=True)
+    idx = resolve_columns(headers)["link"]
+    if idx == -1 and create:
+        idx = len(headers)
+        worksheet.update_cell(1, idx + 1, DEFAULT_LINK_HEADER)
+        _worksheet_headers(worksheet, fresh=True)
+        logger.info("تم إنشاء عمود '%s' في العمود رقم %s", DEFAULT_LINK_HEADER, idx + 1)
+    return idx
+
+
+# ---------------------------------------------------------------------------
+# قراءة المنتجات
+# ---------------------------------------------------------------------------
+
+def get_products(worksheet):
+    """
+    جلب كل المنتجات مع رقم الصف. الأعمدة تُحدد بالعناوين؛ يُرفع SheetSchemaError إذا لم يوجد عمود الاسم.
+    البراند الفارغ يبقى ''. تعيد (products, link_idx).
+    """
+    cached = _read_cache("products_cache.json", 3600, PRODUCTS_CACHE_VERSION)
+    if cached:
+        return cached["products"], cached["link_idx"]
+
+    rows = worksheet.get_all_values()
+    if not rows or len(rows) <= 1:
+        logger.warning("لا توجد بيانات في الشيت (أو يوجد صف العناوين فقط).")
+        return [], -1
+
+    headers = rows[0]
+    cols = resolve_columns(headers)
+    if cols["name"] == -1:
+        raise SheetSchemaError(
+            "تعذر تحديد عمود اسم المنتج. العناوين الموجودة: "
+            f"{[h for h in headers]}. العناوين المقبولة: {COLUMN_SYNONYMS['name']}"
+        )
+
+    link_idx = cols["link"]
+    if link_idx == -1:
+        link_idx = len(headers)
+        worksheet.update_cell(1, link_idx + 1, DEFAULT_LINK_HEADER)
+        logger.info("تم إنشاء عمود جديد '%s' في العمود رقم %s", DEFAULT_LINK_HEADER, link_idx + 1)
+
+    products = []
+    for idx, row in enumerate(rows[1:], start=2):
+        product_name = _cell(row, cols["name"])
+        if not product_name:
+            continue
+        brand = _cell(row, cols["brand"])
+        existing_link = _cell(row, link_idx)
+        needs_review = False
+        needs_review_url = ""
+        if existing_link.startswith("needs_review:"):
+            needs_review = True
+            needs_review_url = existing_link[len("needs_review:"):].strip()
+            existing_link = ""  # ليس رابطاً نهائياً: الصف يبقى في طابور الأتمتة والمراجعة
+        products.append({
+            "row_number": idx,
+            "product_name": product_name,
+            "product_name_ar": _cell(row, cols["name_ar"]),
+            "brand": brand,
+            "brand_ar": _cell(row, cols["brand_ar"]),
+            "size": _cell(row, cols["size"]),
+            "category": _cell(row, cols["category"]),
+            "sub_category": _cell(row, cols["sub_category"]),
+            "sub_sub_category": _cell(row, cols["sub_sub_category"]),
+            "sub_sub_category_ar": _cell(row, cols["sub_sub_category_ar"]),
+            "barcode": _cell(row, cols["barcode"]),
+            "origin": _cell(row, cols["origin"]),
+            "existing_image_link": existing_link,
+            "needs_review": needs_review,
+            "needs_review_url": needs_review_url,
+            "search_query": f"{product_name} {brand}".strip(),
+        })
+
+    _write_cache("products_cache.json", {"products": products, "link_idx": link_idx}, PRODUCTS_CACHE_VERSION)
+    return products, link_idx
+
+
+# ---------------------------------------------------------------------------
+# هوية الصفوف (للتحقق قبل الكتابة)
+# ---------------------------------------------------------------------------
+
+def _expectation(barcode=None, product_name=None, size=None, brand=None):
+    """
+    هوية المنتج المتوقع في الصف. الحجم والبراند يُخزنان مع الاسم: بدون باركود، شقيقان بنفس الاسم
+    (1L و 2L، أو نفس الاسم لبراندين) في صفين متجاورين يتميزان بهما فقط.
+    """
+    expect = {}
+    for key, value in (("barcode", barcode), ("name", product_name), ("size", size), ("brand", brand)):
+        if value and str(value).strip():
+            expect[key] = str(value).strip()
+    return expect or None
+
+
+def _norm_size(value):
+    return re.sub(r"\s+", "", unicodedata.normalize("NFKC", str(value or "")).casefold())
+
+
+def _outbox_keys(expect):
+    """أعمدة الهوية في طابور MariaDB لتوقع معين."""
+    expect = expect or {}
+    return {"key_barcode": expect.get("barcode"), "key_name": expect.get("name"),
+            "key_size": expect.get("size"), "key_brand": expect.get("brand")}
+
+
+def _read_column_cells(worksheet, col_idx, rows):
+    """قيم عمود واحد لصفوف محددة عبر batch_get لنطاق واحد متصل."""
+    lo, hi = min(rows), max(rows)
+    letter_lo = gspread.utils.rowcol_to_a1(lo, col_idx + 1)
+    letter_hi = gspread.utils.rowcol_to_a1(hi, col_idx + 1)
+    result = worksheet.batch_get([f"{letter_lo}:{letter_hi}"])
+    values = list(result[0]) if result else []
+    out = {}
+    for r in rows:
+        offset = r - lo
+        cell = values[offset] if offset < len(values) else []
+        out[r] = str(cell[0]).strip() if cell else ""
+    return out
+
+
+def find_record_conflicts(worksheet, records, headers=None):
+    """
+    records: {record_id: (row_number, {'barcode': ..., 'name': ..., 'size': ..., 'brand': ...})}.
+    يعيد {record_id: سبب} لكل سجل لا يطابق عمود المفتاح في صفه هويته هو. التحقق لكل سجل على حدة:
+    سجلان لمنتجين مختلفين على نفس رقم الصف (رقم صف قديم) لا يأخذ أحدهما حكم الآخر.
+    الباركود هو المفتاح عند توفره (في التوقع وفي الشيت)، وإلا الاسم مع الحجم والبراند (كل منهما
+    يُقارن إذا كان في التوقع وكان عموده موجوداً في الشيت).
+    """
+    records = {k: (row, e) for k, (row, e) in (records or {}).items() if e}
+    if not records:
+        return {}
+    if headers is None:
+        headers = _worksheet_headers(worksheet, fresh=True)
+    cols = resolve_columns(headers)
+    barcode_ids = [k for k, (_, e) in records.items() if e.get("barcode") and cols["barcode"] != -1]
+    name_ids = [k for k, (_, e) in records.items()
+                if k not in barcode_ids and e.get("name") and cols["name"] != -1]
+    conflicts = {}
+    if barcode_ids:
+        actual = _read_column_cells(worksheet, cols["barcode"], sorted({records[k][0] for k in barcode_ids}))
+        for k in barcode_ids:
+            row, e = records[k]
+            if _norm_barcode(actual.get(row)) != _norm_barcode(e["barcode"]):
+                conflicts[k] = f"barcode mismatch: sheet has {actual.get(row)!r}, expected {e['barcode']!r}"
+    if name_ids:
+        name_rows = sorted({records[k][0] for k in name_ids})
+        actual = _read_column_cells(worksheet, cols["name"], name_rows)
+        for k in name_ids:
+            row, e = records[k]
+            if _norm_name(actual.get(row)) != _norm_name(e["name"]):
+                conflicts[k] = f"name mismatch: sheet has {actual.get(row)!r}, expected {e['name']!r}"
+        for field, norm in (("size", _norm_size), ("brand", _norm_name)):
+            ids = [k for k in name_ids if k not in conflicts and records[k][1].get(field) and cols[field] != -1]
+            if not ids:
+                continue
+            actual = _read_column_cells(worksheet, cols[field], sorted({records[k][0] for k in ids}))
+            for k in ids:
+                row, e = records[k]
+                if norm(actual.get(row)) != norm(e[field]):
+                    conflicts[k] = f"{field} mismatch: sheet has {actual.get(row)!r}, expected {e[field]!r}"
+    for k in records:
+        if k not in barcode_ids and k not in name_ids:
+            conflicts[k] = "no key column in sheet to verify row identity"
+    return conflicts
+
+
+def find_identity_conflicts(worksheet, expectations, headers=None):
+    """
+    expectations: {row_number: {'barcode': ..., 'name': ...}}.
+    يعيد {row_number: سبب} للصفوف التي لا يطابق عمود المفتاح فيها الهوية المخزنة.
+    """
+    records = {r: (r, e) for r, e in (expectations or {}).items() if e}
+    return find_record_conflicts(worksheet, records, headers=headers)
+
+
+# ---------------------------------------------------------------------------
+# طابور الكتابة في MariaDB (outbox)
+# ---------------------------------------------------------------------------
+
 class SQLiteTransactionQueue:
+    """طابور الكتابة (outbox) في جدول sheet_updates على MariaDB (الاسم تاريخي)."""
+
     def __init__(self, db_path=None):
         self._setup_schema()
 
@@ -57,23 +462,51 @@ class SQLiteTransactionQueue:
                     sync_status VARCHAR(255) DEFAULT 'PENDING'
                 ) ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
             """)
+            for stmt in (
+                "ALTER TABLE sheet_updates ADD COLUMN IF NOT EXISTS col_name VARCHAR(255) NULL",
+                "ALTER TABLE sheet_updates ADD COLUMN IF NOT EXISTS key_barcode VARCHAR(255) NULL",
+                "ALTER TABLE sheet_updates ADD COLUMN IF NOT EXISTS key_name VARCHAR(512) NULL",
+                "ALTER TABLE sheet_updates ADD COLUMN IF NOT EXISTS key_size VARCHAR(255) NULL",
+                "ALTER TABLE sheet_updates ADD COLUMN IF NOT EXISTS key_brand VARCHAR(255) NULL",
+                "ALTER TABLE sheet_updates ADD COLUMN IF NOT EXISTS attempts INT NOT NULL DEFAULT 0",
+                "ALTER TABLE sheet_updates ADD COLUMN IF NOT EXISTS last_error TEXT NULL",
+                "ALTER TABLE sheet_updates ADD INDEX IF NOT EXISTS idx_sheet_updates_status (sync_status)",
+            ):
+                cursor.execute(stmt)
             conn.commit()
         finally:
             conn.close()
 
-    def append_update(self, row_number, col_index, value):
+    def append_update(self, row_number, col_index, value, col_name=None, key_barcode=None, key_name=None,
+                      key_size=None, key_brand=None):
         conn = self._connect()
         try:
             cursor = conn.cursor()
             cursor.execute(
-                "INSERT INTO sheet_updates (`row_number`, `col_index`, `value`) VALUES (%s, %s, %s)",
-                (row_number, col_index, value)
+                "INSERT INTO sheet_updates (`row_number`, `col_index`, `value`, col_name, key_barcode, key_name, "
+                "key_size, key_brand) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                (row_number, col_index, "" if value is None else str(value), col_name, key_barcode, key_name,
+                 key_size, key_brand)
             )
             conn.commit()
         finally:
             conn.close()
         clear_cache()
 
+
+def _outbox_lock_name():
+    """اسم قفل المُفرِّغ؛ يتضمن اسم قاعدة البيانات لأن أقفال MariaDB على مستوى الخادم كله."""
+    return f"sheet_outbox_flush:{os.getenv('DB_DATABASE', 'automation_db')}"[:64]
+
+
+def _set_status(cursor, ids, status, error=None):
+    if not ids:
+        return
+    placeholders = ",".join("%s" for _ in ids)
+    cursor.execute(
+        f"UPDATE sheet_updates SET sync_status = %s, last_error = %s WHERE id IN ({placeholders})",
+        (status, error) + tuple(ids),
+    )
 
 
 class GoogleSheetsBatchWorker(threading.Thread):
@@ -90,136 +523,175 @@ class GoogleSheetsBatchWorker(threading.Thread):
         self._exit_signal.set()
 
     def run(self):
-        client = None
         worksheet = None
-        
         while not self._exit_signal.is_set():
             try:
-                if client is None or worksheet is None:
-                    import google_sheets
-                    sheets_client = google_sheets.get_sheets_client()
-                    if sheets_client:
-                        client = sheets_client
-                        worksheet = google_sheets.open_worksheet(client, self.spreadsheet_name)
-                
+                if worksheet is None:
+                    client = get_sheets_client()
+                    if client:
+                        worksheet = open_worksheet(client, self.spreadsheet_name)
                 if worksheet:
                     self._synchronize_pending_records(worksheet)
             except Exception as e:
-                print(f"⚠️ [GoogleSheetsBatchWorker Error] {e}")
-                client = None
+                logger.warning("[GoogleSheetsBatchWorker] %s", e)
                 worksheet = None
-                
             self._exit_signal.wait(self.sync_interval)
-            
         if worksheet:
             try:
-                self._synchronize_pending_records(worksheet)
-            except Exception:
-                pass
+                # التفريغ الأخير ينتظر القفل قليلاً كي لا تبقى كتابات هذه العملية معلقة بلا مُفرِّغ
+                self._synchronize_pending_records(worksheet, lock_timeout=30)
+            except Exception as e:
+                logger.warning("[GoogleSheetsBatchWorker] فشل التفريغ الأخير: %s", e)
 
-    def _synchronize_pending_records(self, worksheet):
+    def _synchronize_pending_records(self, worksheet, lock_timeout=0):
+        """
+        تفريغ طابور الكتابة:
+        0. قفل MariaDB مسمى (GET_LOCK) يجعل المُفرِّغ واحداً في كل لحظة عبر كل العمليات (العامل وكل استدعاء
+           cli_bridge)؛ وإلا قد يرسل مُفرِّغ متأخر قيمة قديمة بعد أن كتب آخر القيمة الأحدث فيمحوها.
+           من لم يحصل على القفل يتخطى هذه الدورة (الصفوف تبقى PENDING لمن يملكه).
+        1. قراءة الصفوف المعلقة بالترتيب (ORDER BY id) ودمج التكرارات على نفس الخلية ولنفس الهوية المتوقعة
+           فقط (الأحدث يفوز)؛ سجلات بهويات مختلفة تُفحص كل منها على حدة.
+        2. تحديد عمود الهدف باسم العنوان الآن، والتحقق من هوية كل سجل بقراءة عمود المفتاح (CONFLICT عند الاختلاف).
+        3. إرسال دفعة واحدة؛ عند فشلها نعيد المحاولة صفاً صفاً كي لا يوقف صف معطوب البقية.
+           كل فشل فردي يزيد attempts ويحفظ last_error، وبعد 5 محاولات تصبح الحالة DEAD.
+        """
         conn = self.queue._connect()
+        lock_name = _outbox_lock_name()
+        locked = False
         try:
             cursor = conn.cursor()
-            cursor.execute(
-                "SELECT id, `row_number`, `col_index`, `value` FROM sheet_updates WHERE sync_status IN ('PENDING', 'FAILED') LIMIT 100"
-            )
-            rows = cursor.fetchall()
-            
-            if not rows:
+            cursor.execute("SELECT GET_LOCK(%s, %s) AS got", (lock_name, int(lock_timeout)))
+            locked = bool((cursor.fetchone() or {}).get("got"))
+            if not locked:
+                logger.debug("[Sheets Outbox] مُفرِّغ آخر يعمل الآن؛ تخطي هذه الدورة.")
                 return
-                
-            print(f"🔄 [Async Sheets Sync] Synchronizing {len(rows)} pending cell updates to Google Sheets...")
-            ws_max_rows = worksheet.row_count
-            ws_max_cols = worksheet.col_count
-            
-            # Auto-expand worksheet bounds if reasonable
-            max_requested_row = max((r["row_number"] for r in rows), default=0)
-            max_requested_col = max((r["col_index"] + 1 for r in rows), default=0)
-            
-            if max_requested_row > ws_max_rows and max_requested_row <= 2000:
-                try:
-                    worksheet.add_rows(max_requested_row - ws_max_rows)
-                    ws_max_rows = max_requested_row
-                    print(f"ℹ️ [Google Sheets] Expanded worksheet rows to {ws_max_rows}")
-                except Exception as ex_rows:
-                    print(f"⚠️ [Google Sheets] Auto-expand rows skipped: {ex_rows}")
-                    
-            if max_requested_col > ws_max_cols and max_requested_col <= 100:
-                try:
-                    worksheet.add_cols(max_requested_col - ws_max_cols)
-                    ws_max_cols = max_requested_col
-                    print(f"ℹ️ [Google Sheets] Expanded worksheet cols to {ws_max_cols}")
-                except Exception as ex_cols:
-                    print(f"⚠️ [Google Sheets] Auto-expand cols skipped: {ex_cols}")
-
-            batch_data = []
-            valid_row_ids = []
-            invalid_row_ids = []
-            
-            for r in rows:
-                row_id = r["id"]
-                r_num = r["row_number"]
-                c_idx = r["col_index"]
-                val = r["value"]
-                
-                if r_num > ws_max_rows or (c_idx + 1) > ws_max_cols or r_num <= 0 or (c_idx + 1) <= 0:
-                    invalid_row_ids.append(row_id)
-                    continue
-
-                valid_row_ids.append(row_id)
-                a1_range = gspread.utils.rowcol_to_a1(r_num, c_idx + 1)
-                full_range = f"'{worksheet.title}'!{a1_range}"
-                batch_data.append({
-                    "range": full_range,
-                    "values": [[str(val)]]
-                })
-                
-            if invalid_row_ids:
-                id_placeholders = ",".join("%s" for _ in invalid_row_ids)
-                cursor.execute(
-                    f"UPDATE sheet_updates SET sync_status = 'SKIPPED_OUT_OF_BOUNDS' WHERE id IN ({id_placeholders})",
-                    invalid_row_ids
-                )
-                conn.commit()
-                print(f"⚠️ [Async Sheets Sync] Pruned {len(invalid_row_ids)} out-of-bounds row requests.")
-
-            if not batch_data:
-                return
-                
-            try:
-                # Use worksheet.spreadsheet.values_batch_update for correct gspread v5/v6 multi-range update
-                body = {
-                    "valueInputOption": "RAW",
-                    "data": batch_data
-                }
-                retried_batch_update = retry_gspread_on_429(max_retries=5)(worksheet.spreadsheet.values_batch_update)
-                retried_batch_update(body)
-                
-                id_placeholders = ",".join("%s" for _ in valid_row_ids)
-                cursor.execute(
-                    f"UPDATE sheet_updates SET sync_status = 'SYNCED' WHERE id IN ({id_placeholders})",
-                    valid_row_ids
-                )
-                conn.commit()
-                print(f"✅ [Async Sheets Sync - RAW Mode] Successfully synced {len(valid_row_ids)} bulk updates.")
-            except Exception as e:
-                print(f"❌ [Async Sheets Sync Error] Batch RAW update failed: {e}. Preserving status for retry...")
-                id_placeholders = ",".join("%s" for _ in valid_row_ids)
-                cursor.execute(
-                    f"UPDATE sheet_updates SET sync_status = 'FAILED' WHERE id IN ({id_placeholders})",
-                    valid_row_ids
-                )
-                conn.commit()
+            self._flush_locked(worksheet, conn, cursor)
         finally:
+            if locked:
+                try:
+                    conn.cursor().execute("SELECT RELEASE_LOCK(%s) AS released", (lock_name,))
+                except Exception:
+                    pass
             conn.close()
+
+    def _flush_locked(self, worksheet, conn, cursor):
+        """Body of one flush; the caller holds the outbox lock and closes the connection."""
+        cursor.execute(
+            "SELECT id, `row_number`, `col_index`, `value`, col_name, key_barcode, key_name, key_size, key_brand, "
+            "attempts "
+            "FROM sheet_updates WHERE sync_status IN ('PENDING', 'FAILED') ORDER BY id LIMIT %s",
+            (OUTBOX_BATCH,),
+        )
+        rows = list(cursor.fetchall())
+        if not rows:
+            return
+
+        # 1. الأحدث لكل خلية (صف، عمود) ولنفس الهوية المتوقعة يفوز؛ الأقدم يصبح SUPERSEDED.
+        #    كتابة لمنتج آخر على نفس رقم الصف (رقم صف قديم) لا تُلغي كتابة المنتج الصحيح ولا العكس.
+        latest = {}
+        for r in rows:
+            cell_key = (r["row_number"], (r.get("col_name") or "").strip().casefold() or r["col_index"],
+                        _norm_barcode(r.get("key_barcode")), _norm_name(r.get("key_name")),
+                        _norm_size(r.get("key_size")), _norm_name(r.get("key_brand")))
+            if cell_key not in latest or r["id"] > latest[cell_key]["id"]:
+                latest[cell_key] = r
+        keep_ids = {r["id"] for r in latest.values()}
+        superseded = [r["id"] for r in rows if r["id"] not in keep_ids]
+        _set_status(cursor, superseded, "SUPERSEDED")
+        rows = sorted(latest.values(), key=lambda r: r["id"])
+
+        # 2. العمود بالاسم الآن + التحقق من الهوية
+        headers = worksheet.row_values(1)
+        normalized_headers = [normalize_header(h) for h in headers]
+        ws_max_rows = worksheet.row_count
+        targets = []
+        conflicts = {}
+        out_of_bounds = []
+        for r in rows:
+            col = r["col_index"]
+            if r.get("col_name"):
+                wanted = normalize_header(r["col_name"])
+                if wanted not in normalized_headers:
+                    conflicts[r["id"]] = f"column '{r['col_name']}' not found in sheet headers"
+                    continue
+                col = normalized_headers.index(wanted)
+            if r["row_number"] <= 1 or col < 0 or r["row_number"] > ws_max_rows:
+                out_of_bounds.append(r["id"])
+                continue
+            targets.append((r, col))
+
+        records = {}
+        for r, _ in targets:
+            expect = _expectation(r.get("key_barcode"), r.get("key_name"), r.get("key_size"), r.get("key_brand"))
+            if expect:
+                records[r["id"]] = (r["row_number"], expect)
+        record_conflicts = find_record_conflicts(worksheet, records, headers=headers) if records else {}
+        ready = []
+        for r, col in targets:
+            reason = record_conflicts.get(r["id"])
+            if reason:
+                conflicts[r["id"]] = reason
+            else:
+                ready.append((r, col))
+        # بعد التحقق: خلية واحدة تُكتب مرة واحدة فقط (الأحدث)
+        newest = {}
+        for r, col in ready:
+            if (r["row_number"], col) not in newest or r["id"] > newest[(r["row_number"], col)][0]["id"]:
+                newest[(r["row_number"], col)] = (r, col)
+        dup_ids = [r["id"] for r, col in ready if newest[(r["row_number"], col)][0] is not r]
+        _set_status(cursor, dup_ids, "SUPERSEDED")
+        ready = sorted(newest.values(), key=lambda item: item[0]["id"])
+
+        for rid, reason in conflicts.items():
+            _set_status(cursor, [rid], "CONFLICT", reason[:1000])
+            logger.warning("[Sheets Outbox] CONFLICT للتحديث %s: %s", rid, reason)
+        _set_status(cursor, out_of_bounds, "SKIPPED_OUT_OF_BOUNDS")
+        conn.commit()
+        if not ready:
+            return
+
+        def body_for(items):
+            return {
+                "valueInputOption": "RAW",
+                "data": [{
+                    "range": f"'{worksheet.title}'!{gspread.utils.rowcol_to_a1(r['row_number'], col + 1)}",
+                    "values": [[str(r['value'])]],
+                } for r, col in items],
+            }
+
+        send = retry_gspread_on_429(max_retries=5)(worksheet.spreadsheet.values_batch_update)
+        try:
+            send(body_for(ready))
+            _set_status(cursor, [r["id"] for r, _ in ready], "SYNCED")
+            conn.commit()
+            logger.info("[Sheets Outbox] تمت مزامنة %s خلية.", len(ready))
+            return
+        except Exception as e:
+            logger.warning("[Sheets Outbox] فشل الإرسال الجماعي (%s)؛ إعادة المحاولة صفاً صفاً.", e)
+
+        for r, col in ready:
+            try:
+                send(body_for([(r, col)]))
+                _set_status(cursor, [r["id"]], "SYNCED")
+            except Exception as e:
+                attempts = int(r.get("attempts") or 0) + 1
+                status = "DEAD" if attempts >= MAX_OUTBOX_ATTEMPTS else "FAILED"
+                cursor.execute(
+                    "UPDATE sheet_updates SET attempts = %s, last_error = %s, sync_status = %s WHERE id = %s",
+                    (attempts, str(e)[:1000], status, r["id"]),
+                )
+                logger.warning("[Sheets Outbox] فشل التحديث %s (المحاولة %s): %s", r["id"], attempts, e)
+            conn.commit()
+        clear_cache()
+
 
 def init_async_queue(creds_path, spreadsheet_name, sync_interval=5):
     global _queue, _worker
     _queue = SQLiteTransactionQueue()
     _worker = GoogleSheetsBatchWorker(_queue, creds_path, spreadsheet_name, sync_interval)
     _worker.start()
-    print("🚀 [Async Sheets Sync] Background batch worker started successfully.")
+    logger.info("[Sheets Outbox] بدأ عامل المزامنة في الخلفية.")
+
 
 def stop_async_queue():
     global _worker
@@ -227,727 +699,356 @@ def stop_async_queue():
         _worker.stop_gracefully()
         _worker.join(timeout=10)
         _worker = None
-        print("🛑 [Async Sheets Sync] Background batch worker stopped.")
+        logger.info("[Sheets Outbox] توقف عامل المزامنة.")
 
-def retry_gspread_on_429(max_retries=5):
-    """
-    مُزخرف (Decorator) لإعادة محاولة استدعاءات Google API عند تلقي الأخطاء 429 أو 5xx
-    باستخدام ارتداد لوغاريتمي عشوائي (Exponential Backoff with Jitter).
-    """
-    def decorator(func):
-        def wrapper(*args, **kwargs):
-            retry = 0
-            while retry <= max_retries:
-                try:
-                    return func(*args, **kwargs)
-                except APIError as e:
-                    if e.code in [429, 500, 503]:
-                        retry += 1
-                        if retry > max_retries:
-                            raise e
-                        backoff = min((2 ** retry) + random.uniform(0.1, 1.0), 32)
-                        print(f"⚠️ [Google Sheets API] تفعيل الارتداد اللوغاريتمي المحمي. إعادة محاولة {retry}/{max_retries} خلال {backoff:.2f} ثانية...")
-                        time.sleep(backoff)
-                    else:
-                        raise e
-                except Exception as e:
-                    raise e
-            return None
-        return wrapper
-    return decorator
 
-def get_sheets_client():
-    """
-    الاتصال بـ Google Sheets API باستخدام ملف الاعتمادات من الإعدادات.
-    """
-    try:
-        gc = gspread.service_account(filename=config.CREDENTIALS_FILE)
-        return gc
-    except Exception as e:
-        print(f"❌ فشل الاتصال بـ Google Sheets API: {e}")
-        return None
+# ---------------------------------------------------------------------------
+# الكتابة المؤجلة عبر Redis (فقط عند وجود نبض sync_worker)
+# ---------------------------------------------------------------------------
 
-def open_worksheet(client, sheet_name_or_url, worksheet_index=0):
-    """
-    فتح ورقة العمل المحددة بالاسم أو الرابط.
-    """
-    try:
-        if sheet_name_or_url.startswith("https://"):
-            sh = client.open_by_url(sheet_name_or_url)
-        else:
-            sh = client.open(sheet_name_or_url)
-            
-        tab_name = getattr(config, "SPREADSHEET_TAB_NAME", "")
-        if tab_name and worksheet_index == 0:
-            try:
-                ws = sh.worksheet(tab_name)
-                if ws:
-                    return ws
-            except Exception:
-                pass
-        return sh.get_worksheet(worksheet_index)
-    except Exception as e:
-        print(f"❌ فشل فتح جدول البيانات '{sheet_name_or_url}': {e}")
-        return None
-
-def get_product_columns_indices(headers):
-    """
-    تحديد فهارس (Indices) الأعمدة المهمة ديناميكياً من خلال عناوين الجدول مع تحديد أولويات صارمة.
-    """
-    name_indices = [i for i, h in enumerate(headers) if h.lower() in ["productname", "product name", "اسم المنتج"]]
-    brand_indices = [i for i, h in enumerate(headers) if h.lower() in ["brand", "البراند", "العلامة التجارية"]]
-    barcode_indices = [i for i, h in enumerate(headers) if h.lower() in ["barcode", "باركود", "الباركود"]]
-    category_indices = [i for i, h in enumerate(headers) if h.lower() in ["category", "الفئة", "التصنيف"]]
-    origin_indices = [i for i, h in enumerate(headers) if h.lower() in ["origin", "بلد المنشأ", "المنشأ"]]
-
-    name_idx = name_indices[0] if name_indices else 2
-    brand_idx = brand_indices[0] if brand_indices else 4
-    
-    # تحديد أولوية عمود الرابط: نبحث عن drive image link أولاً ثم البدائل لمنع الخلط مع عمود images العام
-    link_idx = -1
-    for term in ["drive image link", "image link", "رابط الصورة", "images"]:
-        indices = [i for i, h in enumerate(headers) if h.lower().strip() == term]
-        if indices:
-            link_idx = indices[0]
-            break
-
-    barcode_idx = barcode_indices[0] if barcode_indices else -1
-    category_idx = category_indices[0] if category_indices else -1
-    origin_idx = origin_indices[0] if origin_indices else -1
-
-    return name_idx, brand_idx, link_idx, barcode_idx, category_idx, origin_idx
-
-def get_products(worksheet):
-    """
-    جلب جميع المنتجات من الشيت مع تحديد رقم الصف لكل منتج لتسهيل التحديث لاحقاً.
-    """
-    cache_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "products_cache.json")
-    ttl = 3600
-    if os.path.exists(cache_file):
-        try:
-            with open(cache_file, "r", encoding="utf-8") as f:
-                cached = json.load(f)
-            if time.time() - cached.get("timestamp", 0) < ttl:
-                print("⚡ [Google Sheets Cache] Loaded products list from cache file.")
-                return cached["products"], cached["link_idx"]
-        except Exception as ce:
-            print(f"⚠️ [Google Sheets Cache] Failed to load cache: {ce}")
-
-    try:
-        rows = worksheet.get_all_values()
-        if not rows or len(rows) <= 1:
-            print("⚠️ لا توجد بيانات في الشيت (أو يوجد صف العناوين فقط).")
-            return [], -1
-
-        headers = rows[0]
-        name_idx, brand_idx, link_idx, barcode_idx, category_idx, origin_idx = get_product_columns_indices(headers)
-
-        # إذا لم يكن عمود الرابط موجوداً، نقوم بإنشائه في نهاية الجدول
-        if link_idx == -1:
-            link_idx = len(headers)
-            new_column_name = "Drive Image Link"
-            worksheet.update_cell(1, link_idx + 1, new_column_name)
-            print(f"ℹ️ تم إنشاء عمود جديد لحفظ روابط الصور باسم '{new_column_name}' في العمود رقم {link_idx + 1}")
-
-        # جلب مرادفات البراندات للمطابقة التلقائية
-        brand_mappings = {}
-        try:
-            sheets_client = get_sheets_client()
-            if sheets_client:
-                brand_mappings = get_brand_mappings(sheets_client, worksheet.spreadsheet.url)
-        except Exception as e:
-            print(f"⚠️ فشل جلب مرادفات البراندات أثناء قراءة المنتجات: {e}")
-
-        name_ar_indices = [i for i, h in enumerate(headers) if h.lower() in ["productname arabic", "product name arabic", "اسم المنتج بالعربي", "اسم المنتج عربي"]]
-        brand_ar_indices = [i for i, h in enumerate(headers) if h.lower() in ["brand arabic", "brand_arabic", "البراند بالعربي", "البراند عربي"]]
-        sub_sub_indices = [i for i, h in enumerate(headers) if h.lower() in ["sub sub category", "sub_sub_category"]]
-        sub_sub_ar_indices = [i for i, h in enumerate(headers) if h.lower() in ["sub sub category arabic", "sub_sub_category_arabic"]]
-        
-        name_ar_idx = name_ar_indices[0] if name_ar_indices else -1
-        brand_ar_idx = brand_ar_indices[0] if brand_ar_indices else -1
-        sub_sub_idx = sub_sub_indices[0] if sub_sub_indices else -1
-        sub_sub_ar_idx = sub_sub_ar_indices[0] if sub_sub_ar_indices else -1
-
-        products = []
-        # تبدأ الحلقة من الصف الثاني (الفهرس 1) لأن الصف الأول يحتوي على العناوين
-        for idx, row in enumerate(rows[1:], start=2):
-            product_name = row[name_idx].strip() if name_idx < len(row) else ""
-            brand = row[brand_idx].strip() if brand_idx < len(row) else ""
-            
-            # استخراج البراند تلقائياً إذا كان فارغاً
-            if product_name and not brand:
-                extracted = extract_brand_from_name(product_name, brand_mappings)
-                if extracted:
-                    brand = extracted
-                    print(f"💡 [Auto Brand] تم استخراج البراند '{brand}' تلقائياً لـ '{product_name}' من جدول المرادفات.")
-                else:
-                    extracted = extract_brand_from_start(product_name, brand_mappings)
-                    if extracted:
-                        brand = extracted
-                        print(f"💡 [Auto Brand] تم استخراج البراند '{brand}' تلقائياً لـ '{product_name}' من بداية الاسم.")
-
-            product_name_ar = row[name_ar_idx].strip() if (name_ar_idx != -1 and name_ar_idx < len(row)) else ""
-            brand_ar = row[brand_ar_idx].strip() if (brand_ar_idx != -1 and brand_ar_idx < len(row)) else ""
-            sub_sub_category = row[sub_sub_idx].strip() if (sub_sub_idx != -1 and sub_sub_idx < len(row)) else ""
-            sub_sub_category_ar = row[sub_sub_ar_idx].strip() if (sub_sub_ar_idx != -1 and sub_sub_ar_idx < len(row)) else ""
-            
-            barcode = row[barcode_idx].strip() if (barcode_idx != -1 and barcode_idx < len(row)) else ""
-            category = row[category_idx].strip() if (category_idx != -1 and category_idx < len(row)) else ""
-            origin = row[origin_idx].strip() if (origin_idx != -1 and origin_idx < len(row)) else ""
-            
-            # قراءة الرابط الحالي إذا كان العمود موجوداً وبه قيمة
-            existing_link = row[link_idx].strip() if link_idx < len(row) else ""
-            
-            needs_review = False
-            needs_review_url = ""
-            if existing_link.startswith("needs_review:"):
-                needs_review = True
-                needs_review_url = existing_link.replace("needs_review:", "").strip()
-                existing_link = "" # نعتبر الرابط الرئيسي فارغاً ليظهر في طابور الأتمتة والمراجعة
-
-            # نقوم فقط بمعالجة الصفوف التي تحتوي على اسم منتج على الأقل
-            if product_name:
-                products.append({
-                    "row_number": idx,
-                    "product_name": product_name,
-                    "product_name_ar": product_name_ar,
-                    "brand": brand,
-                    "brand_ar": brand_ar,
-                    "sub_sub_category": sub_sub_category,
-                    "sub_sub_category_ar": sub_sub_category_ar,
-                    "barcode": barcode,
-                    "category": category,
-                    "origin": origin,
-                    "existing_image_link": existing_link,
-                    "needs_review": needs_review,
-                    "needs_review_url": needs_review_url,
-                    "search_query": f"{product_name} {brand}".strip()
-                })
-        
-        # Save cache
-        try:
-            with open(cache_file, "w", encoding="utf-8") as f:
-                json.dump({
-                    "timestamp": time.time(),
-                    "products": products,
-                    "link_idx": link_idx
-                }, f, ensure_ascii=False, indent=2)
-            print("💾 [Google Sheets Cache] Products list cached successfully.")
-        except Exception as ce:
-            print(f"⚠️ [Google Sheets Cache] Failed to write cache: {ce}")
-
-        return products, link_idx
-
-    except Exception as e:
-        print(f"❌ حدث خطأ أثناء قراءة المنتجات من الشيت: {e}")
-        return [], -1
-
-def _redis_write_behind(row_number, col_idx, value):
-    global _redis_cache_available
+def _get_redis():
+    """عميل Redis أو None إذا لم يكن الخادم متاحاً (يُفحص مرة واحدة لكل عملية)."""
+    global _redis_client, _redis_cache_available
     if _redis_cache_available is False:
-        return False
+        return None
+    if _redis_client is not None:
+        return _redis_client
     try:
         import redis
-        import json
-        r = redis.Redis(host=config.REDIS_HOST, port=config.REDIS_PORT, db=config.REDIS_DB, socket_timeout=0.2, decode_responses=True)
-        if _redis_cache_available is None:
-            r.ping()
-            _redis_cache_available = True
-            
+        client = redis.Redis(host=config.REDIS_HOST, port=config.REDIS_PORT, db=config.REDIS_DB,
+                             socket_timeout=0.2, decode_responses=True)
+        client.ping()
+        _redis_client = client
+        _redis_cache_available = True
+        return client
+    except Exception:
+        _redis_cache_available = False
+        logger.debug("[google_sheets] Redis غير متاح محلياً؛ الكتابة عبر طابور MariaDB.")
+        return None
+
+
+def _merged_payload(cached, row_number, updates, expect):
+    """الحمولة بعد الدمج، أو None إذا تعذر الدمج بأمان (صيغة غير معروفة أو هوية مختلفة)."""
+    payload = json.loads(cached) if cached else {"row_index": row_number, "updates": {}}
+    if not isinstance(payload, dict) or not isinstance(payload.get("updates"), dict):
+        logger.warning("[Redis Write-Behind] صيغة غير معروفة للصف %s؛ استخدام طابور MariaDB.", row_number)
+        return None
+    if cached and (payload.get("expect") or None) != (expect or None):
+        # حمولة معلقة لمنتج آخر على نفس رقم الصف: لا ندمج (وإلا كُتبت قيمها بهوية المنتج الجديد)
+        logger.warning("[Redis Write-Behind] حمولة الصف %s تخص هوية أخرى؛ استخدام طابور MariaDB.", row_number)
+        return None
+    payload["row_index"] = row_number
+    for col, value in updates.items():
+        payload["updates"][str(col)] = value
+    if expect:
+        payload["expect"] = expect
+    return json.dumps(payload, ensure_ascii=False)
+
+
+def _redis_merge_payload(r, key, row_number, updates, expect):
+    """دمج ذري (WATCH/MULTI) لتحديثات الصف في حمولته؛ يعيد False ليُستخدم طابور MariaDB."""
+    cache_key = f"{CACHE_PREFIX}{key}"
+    if getattr(r, "pipeline", None) is None:
+        merged = _merged_payload(r.get(cache_key), row_number, updates, expect)
+        if merged is None:
+            return False
+        r.set(cache_key, merged)
+        return True
+    import redis
+    for _ in range(5):
+        with r.pipeline() as p:
+            try:
+                p.watch(cache_key)
+                merged = _merged_payload(p.get(cache_key), row_number, updates, expect)
+                if merged is None:
+                    p.unwatch()
+                    return False
+                p.multi()
+                p.set(cache_key, merged)
+                p.execute()
+                return True
+            except redis.WatchError:
+                continue
+    return False
+
+
+def _redis_write_behind(row_number, updates, expect=None):
+    """
+    جدولة تحديثات صف عبر Redis بالصيغة {'row_index', 'updates': {col: value}, 'expect': {...}}.
+    تعيد False (ليُستخدم طابور MariaDB) إذا لم يكن Redis متاحاً أو لا يوجد نبض حي لـ sync_worker.
+    """
+    r = _get_redis()
+    if r is None:
+        return False
+    try:
+        if not r.exists(HEARTBEAT_KEY):
+            return False
         key = f"row_{row_number}"
-        cached = r.get(f"product:data:{key}")
-        if cached:
-            payload = json.loads(cached)
-        else:
-            payload = {"row_index": row_number, "updates": {}}
-        payload["updates"][str(col_idx)] = value
-        r.set(f"product:data:{key}", json.dumps(payload))
-        r.sadd("writebehind:dirty_set", key)
-        
-        # تفريغ كاش الكتالوج لضمان التحديث في المتصفح
-        r.delete("laravel_database_laravel_cache:products_json_v1")
-        r.delete("laravel_cache:products_json_v1")
+        if not _redis_merge_payload(r, key, row_number, updates, expect):
+            return False
+        r.sadd(DIRTY_SET_KEY, key)
         return True
     except Exception as e:
-        if _redis_cache_available is None:
-            _redis_cache_available = False
-            print("ℹ️ [google_sheets] Redis server not detected locally. Skipping Redis write-behind to avoid timeout latency.")
-        else:
-            print(f"⚠️ [Redis Write-Behind Fallback] {e}")
+        logger.warning("[Redis Write-Behind] %s؛ استخدام طابور MariaDB.", e)
         return False
+
+
+def _header_name(worksheet, col_idx):
+    if worksheet is None:
+        return None
+    try:
+        headers = _worksheet_headers(worksheet)
+    except APIError:
+        raise
+    except Exception:
+        return None
+    return headers[col_idx] if 0 <= col_idx < len(headers) and str(headers[col_idx]).strip() else None
+
 
 @retry_gspread_on_429()
-def update_image_link(worksheet, row_number, link_column_index, image_link):
+def update_image_link(worksheet, row_number, link_column_index, image_link, barcode=None, product_name=None,
+                      size=None, brand=None):
     """
-    تحديث خلية رابط الصورة لصف منتج معين.
+    تحديث خلية رابط الصورة لصف منتج. barcode/product_name/size/brand هوية المنتج المتوقع في هذا الصف
+    (قيم خلايا الشيت نفسها):
+    عند التفريغ يُعاد التحقق منها، وأي اختلاف يُسجل CONFLICT ولا يُكتب.
+    أخطاء APIError تُرفع كي يعمل مُزخرف إعادة المحاولة.
     """
-    if _redis_write_behind(row_number, link_column_index, image_link):
-        print(f"⏳ [Redis Write-Behind] تمت جدولة تحديث الرابط في الصف {row_number} عبر Redis.")
-        return True
-
-    global _queue, _worker
-    if _queue is not None and _worker is not None:
-        _queue.append_update(row_number, link_column_index, image_link)
-        print(f"⏳ [Queue Sheets Update] تمت جدولة تحديث الرابط في الصف {row_number} في طابور الخلفية.")
-        return True
-        
+    expect = _expectation(barcode, product_name, size, brand)
     try:
-        # gspread يعتمد على ترقيم 1-indexed للأعمدة والصفوف
+        if _redis_write_behind(row_number, {link_column_index: image_link}, expect):
+            logger.info("[Redis Write-Behind] جدولة رابط الصف %s.", row_number)
+            return True
+
+        if _queue is not None and _worker is not None:
+            _queue.append_update(row_number, link_column_index, image_link,
+                                 col_name=_header_name(worksheet, link_column_index), **_outbox_keys(expect))
+            logger.info("[Sheets Outbox] جدولة رابط الصف %s.", row_number)
+            return True
+
+        if expect:
+            conflicts = find_identity_conflicts(worksheet, {row_number: expect})
+            if row_number in conflicts:
+                logger.warning("[Google Sheets] رفض الكتابة في الصف %s: %s", row_number, conflicts[row_number])
+                return False
         worksheet.update_cell(row_number, link_column_index + 1, image_link)
-        print(f"✅ تم تحديث الرابط في الصف {row_number} بنجاح.")
         clear_cache()
         return True
+    except APIError:
+        raise
     except Exception as e:
-        print(f"❌ فشل تحديث الرابط في الصف {row_number}: {e}")
+        logger.error("فشل تحديث الرابط في الصف %s: %s", row_number, e)
         return False
+
+
+_METADATA_COLUMNS = {
+    "nutrition": "Nutrition Facts",
+    "ingredients": "Ingredients",
+    "description_en": "Description EN",
+    "description_ar": "Description AR",
+    "category_l1_en": "Category L1 EN",
+    "category_l2_en": "Category L2 EN",
+    "category_l3_en": "Category L3 EN",
+    "category_l1_ar": "Category L1 AR",
+    "category_l2_ar": "Category L2 AR",
+    "category_l3_ar": "Category L3 AR",
+    "tags_en": "Tags EN",
+    "tags_ar": "Tags AR",
+}
+
+
+@retry_gspread_on_429()
+def update_product_metadata(worksheet, row_number, metadata, barcode=None, product_name=None,
+                            size=None, brand=None):
+    """
+    تحديث أعمدة البيانات الوصفية لصف (ينشئ العناوين الناقصة). نفس قواعد الهوية والطابور مثل update_image_link.
+    """
+    expect = _expectation(barcode, product_name, size, brand)
+    try:
+        headers = _worksheet_headers(worksheet, fresh=True)
+        normalized = [normalize_header(h) for h in headers]
+        col_indices = {}
+        for key, name in _METADATA_COLUMNS.items():
+            if not (metadata or {}).get(key):
+                continue
+            target = normalize_header(name)
+            if target in normalized:
+                col_indices[key] = normalized.index(target)
+                continue
+            new_idx = len(headers)
+            if new_idx + 1 > worksheet.col_count:
+                worksheet.add_cols(new_idx + 1 - worksheet.col_count)
+            worksheet.update_cell(1, new_idx + 1, name)
+            headers.append(name)
+            normalized.append(target)
+            col_indices[key] = new_idx
+            logger.info("تم إنشاء عمود '%s' في العمود رقم %s", name, new_idx + 1)
+        _worksheet_headers(worksheet, fresh=True)
+        updates = {col_indices[k]: str(metadata[k]) for k in col_indices}
+        if not updates:
+            return True
+
+        if _redis_write_behind(row_number, updates, expect):
+            return True
+
+        if _queue is not None and _worker is not None:
+            for col, value in updates.items():
+                _queue.append_update(row_number, col, value, col_name=headers[col], **_outbox_keys(expect))
+            return True
+
+        if expect:
+            conflicts = find_identity_conflicts(worksheet, {row_number: expect}, headers=headers)
+            if row_number in conflicts:
+                logger.warning("[Google Sheets] رفض كتابة البيانات الوصفية في الصف %s: %s",
+                               row_number, conflicts[row_number])
+                return False
+        worksheet.batch_update([
+            {"range": gspread.utils.rowcol_to_a1(row_number, col + 1), "values": [[value]]}
+            for col, value in updates.items()
+        ], value_input_option="RAW")
+        return True
+    except APIError:
+        raise
+    except Exception as e:
+        logger.error("فشل تحديث البيانات الوصفية في الصف %s: %s", row_number, e)
+        return False
+
+
+# ---------------------------------------------------------------------------
+# ورقة 'Brands Mapping'
+# ---------------------------------------------------------------------------
+
+_BRAND_SHEET_COLUMNS = {
+    "brand": ["brand", "brand name", "البراند"],
+    "synonyms": ["synonyms", "aliases", "المرادفات"],
+    "competitors": ["excluded competitors", "competitors", "المنافسين"],
+    "sub_brands": ["sub brands", "subbrands", "البراندات الفرعية"],
+    "official_domains": ["official domains", "domains", "official domain"],
+}
+
+
+def _split_list(value):
+    return [p.strip() for p in str(value or "").replace("،", ",").split(",") if p.strip()]
+
+
+def parse_brand_mapping_rows(rows):
+    """تحويل صفوف ورقة 'Brands Mapping' (مع صف العناوين) إلى قاموس المرادفات."""
+    if not rows or len(rows) <= 1:
+        return {}
+    normalized = [normalize_header(h) for h in rows[0]]
+    cols = {}
+    for key, synonyms in _BRAND_SHEET_COLUMNS.items():
+        cols[key] = next((normalized.index(normalize_header(s)) for s in synonyms
+                          if normalize_header(s) in normalized), -1)
+    if cols["brand"] == -1:
+        # الورقة القديمة المنشأة تلقائياً بلا عناوين معروفة: الأعمدة الثلاثة الأولى فقط
+        cols.update({"brand": 0, "synonyms": 1, "competitors": 2})
+    mappings = {}
+    for r in rows[1:]:
+        brand = _cell(r, cols["brand"])
+        if not brand:
+            continue
+        syns = _split_list(_cell(r, cols["synonyms"]))
+        if brand not in syns:
+            syns.insert(0, brand)
+        mappings[brand.lower()] = {
+            "brand": brand,
+            "synonyms": syns,
+            "excluded_competitors": _split_list(_cell(r, cols["competitors"])),
+            "sub_brands": _split_list(_cell(r, cols["sub_brands"])),
+            "official_domains": _split_list(_cell(r, cols["official_domains"])),
+        }
+    return mappings
+
 
 def get_brand_mappings(client, sheet_name_or_url):
     """
-    جلب مرادفات البراندات والمنافسين المستبعدين من ورقة العمل 'Brands Mapping'.
-    إذا لم تكن موجودة، يتم إنشاؤها تلقائياً وتعبئتها بالقيم الافتراضية.
+    جلب مرادفات البراندات من ورقة 'Brands Mapping' (أعمدة بالعناوين: Brand, Synonyms,
+    Excluded Competitors, Sub-brands, Official domains). تُنشأ الورقة بالقيم الافتراضية إن لم توجد.
     """
-    cache_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "brand_mappings_cache.json")
-    ttl = 300
-    if os.path.exists(cache_file):
-        try:
-            with open(cache_file, "r", encoding="utf-8") as f:
-                cached = json.load(f)
-            if time.time() - cached.get("timestamp", 0) < ttl:
-                print("⚡ [Google Sheets Cache] Loaded brand mappings from cache file.")
-                return cached["mappings"]
-        except Exception as ce:
-            print(f"⚠️ [Google Sheets Cache] Failed to load brand mappings cache: {ce}")
-
+    cached = _read_cache("brand_mappings_cache.json", 300, BRAND_CACHE_VERSION)
+    if cached:
+        return cached["mappings"]
     try:
-        if sheet_name_or_url.startswith("https://"):
-            sh = client.open_by_url(sheet_name_or_url)
-        else:
-            sh = client.open(sheet_name_or_url)
-            
-        # محاولة فتح ورقة العمل
+        sh = _open_spreadsheet(client, sheet_name_or_url)
         try:
             worksheet = sh.worksheet("Brands Mapping")
         except gspread.exceptions.WorksheetNotFound:
-            print("ℹ️ ورقة العمل 'Brands Mapping' غير موجودة. جاري إنشاؤها تلقائياً بالقيم الافتراضية...")
-            # إنشاء الورقة الجديدة بـ 3 أعمدة
-            worksheet = sh.add_worksheet(title="Brands Mapping", rows="100", cols="3")
-            
-            # العناوين والبيانات الافتراضية
-            headers = ["Brand", "Synonyms", "Excluded Competitors"]
+            logger.info("ورقة 'Brands Mapping' غير موجودة؛ إنشاؤها بالقيم الافتراضية.")
+            worksheet = sh.add_worksheet(title="Brands Mapping", rows="100", cols="5")
             default_rows = [
-                headers,
-                ["Meliha", "Mleiha, مليحة, مليحه", "Almarai, Sutas, Koita, Lacnor, Baladna, Al Rawabi, Nadec, Nada"],
-                ["Saba Sanabel", "Sabaa Sanabel, سبع سنابل, صبا سنابل, سنابل", "Al Baker, Jenan, Grand Mills, Organic Larder"],
-                ["Mai Dubai", "May Dubai, ماي دبي, مي دبي, مياه دبي", "Masafi, Al Ain, Oasis, Arwa, Aquafina, Nestle Pure Life, Voss, Evian"],
-                ["Almarai", "Al Marai, المراعي", "Sutas, Koita, Lacnor, Baladna, Al Rawabi, Nadec, Nada, Meliha, Mleiha"],
-                ["Masafi", "مسافي", "Al Ain, Oasis, Arwa, Aquafina, Nestle Pure Life, Mai Dubai, Voss, Evian"],
-                ["Al Ain", "العين, alain", "Masafi, Oasis, Arwa, Aquafina, Nestle Pure Life, Mai Dubai, Voss, Evian"]
+                ["Brand", "Synonyms", "Excluded Competitors", "Sub-brands", "Official domains"],
+                ["Meliha", "Mleiha, مليحة, مليحه", "Almarai, Sutas, Koita, Lacnor, Baladna, Al Rawabi, Nadec, Nada", "", ""],
+                ["Saba Sanabel", "Sabaa Sanabel, سبع سنابل, صبا سنابل, سنابل", "Al Baker, Jenan, Grand Mills, Organic Larder", "", ""],
+                ["Mai Dubai", "May Dubai, ماي دبي, مي دبي, مياه دبي", "Masafi, Al Ain, Oasis, Arwa, Aquafina, Nestle Pure Life, Voss, Evian", "", ""],
+                ["Almarai", "Al Marai, المراعي", "Sutas, Koita, Lacnor, Baladna, Al Rawabi, Nadec, Nada, Meliha, Mleiha", "", ""],
+                ["Masafi", "مسافي", "Al Ain, Oasis, Arwa, Aquafina, Nestle Pure Life, Mai Dubai, Voss, Evian", "", ""],
+                ["Al Ain", "العين, alain", "Masafi, Oasis, Arwa, Aquafina, Nestle Pure Life, Mai Dubai, Voss, Evian", "", ""],
             ]
-            
-            # تحديث الورقة بالقيم الافتراضية
-            worksheet.update("A1:C7", default_rows)
-            print("✅ تم إنشاء ورقة 'Brands Mapping' وتعبئتها بالقيم الافتراضية بنجاح.")
-            
-        # قراءة جميع الصفوف
-        rows = worksheet.get_all_values()
-        if not rows or len(rows) <= 1:
-            return {}
-            
-        mappings = {}
-        
-        for r in rows[1:]:
-            if len(r) > 0 and r[0].strip():
-                brand_name = r[0].strip().lower()
-                syns = [s.strip() for s in r[1].split(",") if s.strip()] if len(r) > 1 else []
-                comps = [c.strip() for c in r[2].split(",") if c.strip()] if len(r) > 2 else []
-                
-                # إضافة البراند نفسه لقائمة المرادفات لضمان وجوده
-                if r[0].strip() not in syns:
-                    syns.insert(0, r[0].strip())
-                    
-                mappings[brand_name] = {
-                    "brand": r[0].strip(),
-                    "synonyms": syns,
-                    "excluded_competitors": comps
-                }
-                
-        # Save cache
-        try:
-            with open(cache_file, "w", encoding="utf-8") as f:
-                json.dump({
-                    "timestamp": time.time(),
-                    "mappings": mappings
-                }, f, ensure_ascii=False, indent=2)
-            print("💾 [Google Sheets Cache] Brand mappings cached successfully.")
-        except Exception as ce:
-            print(f"⚠️ [Google Sheets Cache] Failed to write brand mappings cache: {ce}")
-
+            worksheet.update("A1:E7", default_rows)
+        mappings = parse_brand_mapping_rows(worksheet.get_all_values())
+        _write_cache("brand_mappings_cache.json", {"mappings": mappings}, BRAND_CACHE_VERSION)
         return mappings
     except Exception as e:
-        print(f"❌ حدث خطأ أثناء جلب مرادفات البراندات من الشيت: {e}")
+        logger.error("خطأ أثناء جلب مرادفات البراندات من الشيت: %s", e)
         return {}
 
-@retry_gspread_on_429()
-def update_product_metadata(worksheet, row_number, metadata):
-    """
-    تحديث شيت البيانات بالقيم الغذائية والمكونات والوصف التسويقي دفعة واحدة (Batch Update).
-    """
-    try:
-        # 1. قراءة صف العناوين الأول
-        headers = worksheet.row_values(1)
-        
-        # 2. البحث عن الأعمدة أو إضافتها إن لم تكن موجودة
-        col_names = {
-            "nutrition": "Nutrition Facts",
-            "ingredients": "Ingredients",
-            "description_en": "Description EN",
-            "description_ar": "Description AR",
-            "category_l1_en": "Category L1 EN",
-            "category_l2_en": "Category L2 EN",
-            "category_l3_en": "Category L3 EN",
-            "category_l1_ar": "Category L1 AR",
-            "category_l2_ar": "Category L2 AR",
-            "category_l3_ar": "Category L3 AR",
-            "tags_en": "Tags EN",
-            "tags_ar": "Tags AR"
-        }
-        
-        col_indices = {}
-        header_changed = False
-        
-        for key, name in col_names.items():
-            found_idx = -1
-            for idx, h in enumerate(headers):
-                if h.strip().lower() == name.lower():
-                    found_idx = idx
-                    break
-            
-            if found_idx == -1:
-                found_idx = len(headers)
-                headers.append(name)
-                try:
-                    if found_idx + 1 > worksheet.col_count:
-                        cols_to_add = (found_idx + 1) - worksheet.col_count
-                        worksheet.add_cols(cols_to_add)
-                        print(f"ℹ️ تم توسيع أعمدة الشيت بإضافة {cols_to_add} أعمدة جديدة.")
-                except Exception as ex:
-                    print(f"⚠️ فشل توسيع أعمدة الشيت تلقائياً: {ex}")
-                worksheet.update_cell(1, found_idx + 1, name)
-                header_changed = True
-                print(f"ℹ️ تم إنشاء عمود جديد '{name}' في العمود رقم {found_idx + 1}")
-                
-            col_indices[key] = found_idx
-            
-        # 3. محاولة الحفظ عبر Redis Write-Behind
-        global _redis_cache_available
-        if _redis_cache_available is not False:
-            try:
-                import redis
-                import json
-                r = redis.Redis(host=config.REDIS_HOST, port=config.REDIS_PORT, db=config.REDIS_DB, socket_timeout=0.2, decode_responses=True)
-                if _redis_cache_available is None:
-                    r.ping()
-                    _redis_cache_available = True
-                    
-                key = f"row_{row_number}"
-                
-                cached = r.get(f"product:data:{key}")
-                if cached:
-                    payload = json.loads(cached)
-                else:
-                    payload = {"row_index": row_number, "updates": {}}
-                    
-                for k, val in metadata.items():
-                    if k in col_indices and val:
-                        payload["updates"][str(col_indices[k])] = val
-                        
-                r.set(f"product:data:{key}", json.dumps(payload))
-                r.sadd("writebehind:dirty_set", key)
-                
-                # تفريغ كاش الكتالوج
-                r.delete("laravel_database_laravel_cache:products_json_v1")
-                r.delete("laravel_cache:products_json_v1")
-                print(f"⏳ [Redis Write-Behind] تمت جدولة تحديث {len(metadata)} حقول وصفية للمنتج في الصف {row_number} عبر Redis.")
-                return True
-            except Exception as ree:
-                if _redis_cache_available is None:
-                    _redis_cache_available = False
-                    print("ℹ️ [google_sheets] Redis server not detected locally. Skipping Redis write-behind to avoid timeout latency.")
-                else:
-                    print(f"⚠️ [Redis Write-Behind Fallback] {ree}")
-            
-        # 4. تحديث خلايا البيانات للصف المعني (SQLite / direct fallback)
-        global _queue, _worker
-        if _queue is not None and _worker is not None:
-            for key, val in metadata.items():
-                if key in col_indices and val:
-                    _queue.append_update(row_number, col_indices[key], val)
-            print(f"⏳ [Queue Sheets Update] تمت جدولة تحديث {len(metadata)} حقول وصفية للمنتج في الصف {row_number} في الخلفية.")
-            return True
 
-        # مسار الكتابة الفوري المتزامن كخيار بديل
-        batch_data = []
-        for key, val in metadata.items():
-            if key in col_indices and val:
-                col_letter = gspread.utils.rowcol_to_a1(row_number, col_indices[key] + 1)
-                batch_data.append({
-                    "range": col_letter,
-                    "values": [[str(val)]]
-                })
-                
-        if batch_data:
-            worksheet.batch_update(batch_data, value_input_option="USER_ENTERED")
-                
-        print(f"✅ [Batch Update Sheets] تم تحديث {len(batch_data)} حقول وصفية للمنتج بنجاح في الصف {row_number}.")
-        return True
-    except Exception as e:
-        print(f"❌ فشل تحديث البيانات الوصفية للمنتج في الصف {row_number}: {e}")
-        return False
+# ---------------------------------------------------------------------------
+# مسار v1 القديم فقط
+# ---------------------------------------------------------------------------
 
-def extract_brand_from_name(product_name, brand_mappings):
-    """
-    البحث عن اسم البراند أو أحد مرادفاته داخل اسم المنتج وتوحيده للاسم المعتمد.
-    """
-    import re
-    if not product_name or not brand_mappings:
-        return ""
-        
-    prod_name_lower = product_name.lower().strip()
-    
-    # البحث عن تطابق مباشر أو مرادفات للبراند
-    for brand_key, mapping in brand_mappings.items():
-        # نفحص قائمة المرادفات (التي تحتوي أيضاً على البراند نفسه)
-        for synonym in mapping.get("synonyms", []):
-            syn_lower = synonym.lower().strip()
-            if not syn_lower:
-                continue
-            
-            # نتحقق من أن المرادف موجود ككلمة كاملة بحدود الكلمة أو substring إن كان طوله أكبر من 2 لمنع المطابقات الخاطئة
-            pattern = rf"\b{re.escape(syn_lower)}\b"
-            if re.search(pattern, prod_name_lower) or (len(syn_lower) > 2 and syn_lower in prod_name_lower):
-                return mapping["brand"]
-                    
 def align_brand_via_gemini(product_name, sheet_brand):
     """
-    التحقق من تطابق البراند المسجل في الشيت مع اسم المنتج الفعلي عبر Gemini.
-    إذا كان هناك خطأ في إدخال البراند (مثل تعيين Emirates Macaroni لـ Emirates Pofaki)،
-    يقوم النموذج بتصحيحه وتفكيك الاسم بشكل صحيح.
+    (مسار التراجع v1 فقط؛ أزيل من مسار البحث v2 — D8) التحقق من البراند عبر Gemini.
+    يعيد البراند كما هو عند أي خطأ.
     """
     import requests
-    import json
-    
+
     if not config.GEMINI_API_KEY or not product_name or not sheet_brand:
         return sheet_brand
-        
     try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{config.GEMINI_MODEL}:generateContent?key={config.GEMINI_API_KEY}"
-        
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{config.GEMINI_MODEL}:generateContent"
         prompt = (
             f"You are an e-commerce catalog data verification assistant.\n"
             f"We have a product named '{product_name}' which is classified under the brand '{sheet_brand}' in our sheet.\n"
-            f"Verify if the brand '{sheet_brand}' is correct for this product.\n"
-            f"Note that data entry errors are common (e.g. assigning 'Emirates Macaroni' to 'Emirates Pofaki Cheese Corn Curls' because both start with 'Emirates').\n"
-            f"Analyze the product name and decide:\n"
-            f"1. Is '{sheet_brand}' correct, a valid parent/subsidiary, or is the product generic/white-label (like flour, water, sugar) which can be packaged under '{sheet_brand}'? If the product title does not explicitly contain or imply a DIFFERENT competing brand, set 'is_correct' to true.\n"
-            f"2. Only set 'is_correct' to false if the product name explicitly mentions a different, competing brand name (e.g. title is 'Al Ain Water' but brand is 'Mai Dubai'). In that case, set 'is_correct' to false and extract the actual brand from the title.\n"
-            f"Reply strictly in JSON format matching this schema:\n"
-            f'{{\n'
-            f'  "is_correct": true or false,\n'
-            f'  "corrected_brand": "the correct brand name"\n'
-            f'}}'
+            f"Only set 'is_correct' to false if the product name explicitly mentions a different, competing brand name. "
+            f"In that case extract the actual brand from the title.\n"
+            f'Reply strictly in JSON: {{"is_correct": true or false, "corrected_brand": "the correct brand name"}}'
         )
-        
-        payload = {
-            "contents": [
-                {
-                    "parts": [
-                        {"text": prompt}
-                    ]
-                }
-            ],
-            "generationConfig": {
-                "responseMimeType": "application/json"
-            }
-        }
-        
-        headers = {"Content-Type": "application/json"}
-        
-        # update API calls metric if configuration dict exists
+        payload = {"contents": [{"parts": [{"text": prompt}]}],
+                   "generationConfig": {"responseMimeType": "application/json"}}
+        headers = {"Content-Type": "application/json", "x-goog-api-key": config.GEMINI_API_KEY}
         if hasattr(config, "METRICS") and "gemini_api_calls" in config.METRICS:
             config.METRICS["gemini_api_calls"] += 1
-            
         response = requests.post(url, headers=headers, json=payload, timeout=10)
         if response.status_code == 200:
-            res_data = response.json()
-            text_response = res_data['candidates'][0]['content']['parts'][0]['text'].strip()
-            if text_response.startswith("```json"):
-                text_response = text_response[7:]
-            elif text_response.startswith("```"):
-                text_response = text_response[3:]
-            if text_response.endswith("```"):
-                text_response = text_response[:-3]
-            text_response = text_response.strip()
-            
-            result = json.loads(text_response)
-            is_correct = result.get("is_correct", True)
-            corrected_brand = result.get("corrected_brand", sheet_brand).strip()
-            
-            if not is_correct and corrected_brand and corrected_brand.lower() != "unknown":
-                print(f"💡 [Brand Alignment] تصحيح البراند تلقائياً عبر Gemini لـ '{product_name}': من '{sheet_brand}' إلى '{corrected_brand}'")
-                return corrected_brand
-                
+            text = response.json()['candidates'][0]['content']['parts'][0]['text'].strip()
+            text = re.sub(r"^```(?:json)?|```$", "", text).strip()
+            result = json.loads(text)
+            corrected = str(result.get("corrected_brand") or sheet_brand).strip()
+            if result.get("is_correct") is False and corrected and corrected.lower() != "unknown":
+                logger.info("[Brand Alignment v1] '%s': '%s' -> '%s'", product_name, sheet_brand, corrected)
+                return corrected
     except Exception as e:
-        print(f"⚠️ خطأ أثناء تصحيح اسم البراند بـ Gemini: {e}")
-        
+        logger.warning("خطأ أثناء تصحيح البراند بـ Gemini: %s", e)
     return sheet_brand
 
-def extract_brand_via_gemini(product_name):
-    """
-    استخراج اسم البراند (العلامة التجارية) من اسم المنتج باستخدام Gemini 3.5 Flash كخيار بديل.
-    """
-    import requests
-    import json
-    
-    if not config.GEMINI_API_KEY or not product_name:
-        return ""
-        
-    try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{config.GEMINI_MODEL}:generateContent?key={config.GEMINI_API_KEY}"
-        
-        prompt = (
-            f"Extract the brand name (manufacturer/brand name) from this e-commerce product name: '{product_name}'.\n"
-            f"If there is a clear brand name, return only that brand name (e.g. 'Meliha', 'Mai Dubai', 'Almarai', 'Baladna', 'Lacnor').\n"
-            f"If there is no brand name, reply with 'Unknown'.\n"
-            f"Reply strictly in JSON format matching this schema:\n"
-            f'{{\n'
-            f'  "brand": "extracted brand name or Unknown"\n'
-            f'}}'
-        )
-        
-        payload = {
-            "contents": [
-                {
-                    "parts": [
-                        {"text": prompt}
-                    ]
-                }
-            ],
-            "generationConfig": {
-                "responseMimeType": "application/json"
-            }
-        }
-        
-        headers = {"Content-Type": "application/json"}
-        print(f"🤖 [Auto Brand] جاري استخراج اسم البراند لـ '{product_name}' عبر Gemini 3.5 Flash...")
-        
-        # update API calls metric if configuration dict exists
-        if hasattr(config, "METRICS") and "gemini_api_calls" in config.METRICS:
-            config.METRICS["gemini_api_calls"] += 1
-            
-        response = requests.post(url, headers=headers, json=payload, timeout=10)
-        if response.status_code == 200:
-            res_data = response.json()
-            text_response = res_data['candidates'][0]['content']['parts'][0]['text'].strip()
-            if text_response.startswith("```json"):
-                text_response = text_response[7:]
-            elif text_response.startswith("```"):
-                text_response = text_response[3:]
-            if text_response.endswith("```"):
-                text_response = text_response[:-3]
-            text_response = text_response.strip()
-            
-            result = json.loads(text_response)
-            brand = result.get("brand", "").strip()
-            if brand.lower() == "unknown":
-                return ""
-            return brand
-    except Exception as e:
-        print(f"⚠️ خطأ أثناء استخراج اسم البراند بـ Gemini: {e}")
-        
-    return ""
-
-def extract_brand_from_start(product_name, brand_mappings):
-    """
-    محاولة استخراج البراند من بداية اسم المنتج إذا لم يكن مسجلاً في ورقة المرادفات.
-    نتخطى الكلمات الوصفية الشائعة (مثل Organic, Fresh, حليب، إلخ).
-    """
-    import re
-    if not product_name:
-        return ""
-        
-    # 1. تنظيف اسم المنتج
-    name_clean = product_name.strip()
-    words = name_clean.split()
-    if not words:
-        return ""
-        
-    # كلمات وصفية شائعة باللغة الإنجليزية والعربية يجب ألا نعتبرها براندات
-    skip_words = {
-        # English descriptive/generic words
-        "organic", "fresh", "pure", "natural", "long", "whole", "chakki", "drinking", "water",
-        "chocolate", "local", "premium", "frozen", "sweet", "salted", "unsalted", "green", 
-        "red", "white", "black", "low", "fat", "full", "skimmed", "light", "lite", "diet", 
-        "healthy", "daily", "fine", "golden", "royal", "classic", "original", "extra", 
-        "virgin", "powdered", "instant", "canned", "sliced", "milk", "bread", "cheese",
-        "butter", "juice", "yogurt", "flour", "oil", "ghee", "sugar", "salt", "rice", "tea", "coffee",
-        # Arabic descriptive/generic words
-        "حليب", "لبن", "زبادي", "قشطة", "طحين", "دقيق", "مياه", "ماء", "عصير", "شراب", "جبن", 
-        "جبنة", "زبدة", "سمن", "زيت", "شوكولاتة", "كاكاو", "شاي", "قهوة", "سكر", "ملح", "أرز", 
-        "خبز", "توست", "بسكويت", "كعك", "حلوى", "عسل", "مربى", "صلصة", "معجون", "خضار", "فواكه", 
-        "طازج", "عضوي", "طبيعي", "سادة", "كامل", "قليل", "خالي", "الدسم", "لايت", "دايت", "مبخر",
-        "كيس", "علبة", "كرتون"
-    }
-    
-    first_word = words[0].lower().strip(",.-()\"'")
-    
-    # إذا كانت الكلمة الأولى كلمة وصفية شائعة، نتخطاها
-    if first_word in skip_words:
-        # ربما الكلمة الثانية هي البراند؟ مثل "Organic Meliha Milk"
-        if len(words) > 1:
-            second_word = words[1].lower().strip(",.-()\"'")
-            if second_word not in skip_words and len(second_word) > 2:
-                # نرجع الكلمة الثانية بالصيغة الأصلية (مرفوعة الحروف الأولى)
-                return words[1].strip(",.-()\"'")
-        return ""
-        
-    # نتحقق إذا كانت الكلمة الأولى "Al" أو "El" أو "Abu" أو "Mai" أو "May" أو "Saba" أو "Sabaa"
-    # فغالباً البراند يتكون من كلمتين
-    two_word_starters = {"al", "el", "abu", "mai", "may", "saba", "sabaa", "grand", "new", "old"}
-    if first_word in two_word_starters and len(words) > 1:
-        second_word = words[1].lower().strip(",.-()\"'")
-        if second_word not in skip_words:
-            return f"{words[0]} {words[1]}".strip(",.-()\"'")
-            
-    if len(first_word) > 2:
-        return words[0].strip(",.-()\"'")
-        
-    return ""
 
 def update_product_localization(worksheet, row_number, clean_title_ar, canonical_brand_ar):
     """
-    تحديث الشيت بالاسم العربي والبراند العربي المصححين من Gemini إذا كانت أعمدتهما فارغة.
+    (الوضع التسلسلي القديم) كتابة الاسم والبراند العربي المقترحين إذا كانت خلاياهما فارغة.
     """
     try:
         headers = worksheet.row_values(1)
-        name_ar_indices = [i for i, h in enumerate(headers) if h.lower() in ["productname arabic", "product name arabic", "اسم المنتج بالعربي", "اسم المنتج عربي"]]
-        brand_ar_indices = [i for i, h in enumerate(headers) if h.lower() in ["brand arabic", "brand_arabic", "البراند بالعربي", "البراند عربي"]]
-        
-        name_ar_idx = name_ar_indices[0] if name_ar_indices else -1
-        brand_ar_idx = brand_ar_indices[0] if brand_ar_indices else -1
-        
-        # تحديث الاسم العربي
-        if name_ar_idx != -1 and clean_title_ar:
-            val = worksheet.cell(row_number, name_ar_idx + 1).value
-            if not val or not val.strip():
-                worksheet.update_cell(row_number, name_ar_idx + 1, clean_title_ar)
-                print(f"✍️ [Localization] تم تحديث اسم المنتج بالعربي في الصف {row_number}: '{clean_title_ar}'")
-                
-        # تحديث البراند العربي
-        if brand_ar_idx != -1 and canonical_brand_ar:
-            val = worksheet.cell(row_number, brand_ar_idx + 1).value
-            if not val or not val.strip():
-                worksheet.update_cell(row_number, brand_ar_idx + 1, canonical_brand_ar)
-                print(f"✍️ [Localization] تم تحديث البراند بالعربي في الصف {row_number}: '{canonical_brand_ar}'")
+        cols = resolve_columns(headers)
+        for idx, value, label in ((cols["name_ar"], clean_title_ar, "اسم المنتج بالعربي"),
+                                  (cols["brand_ar"], canonical_brand_ar, "البراند بالعربي")):
+            if idx == -1 or not value:
+                continue
+            current = worksheet.cell(row_number, idx + 1).value
+            if not current or not str(current).strip():
+                worksheet.update_cell(row_number, idx + 1, value)
+                logger.info("[Localization] تحديث %s في الصف %s", label, row_number)
     except Exception as e:
-        print(f"⚠️ فشل تحديث التعريب التلقائي في الشيت: {e}")
-
+        logger.warning("فشل تحديث التعريب التلقائي في الشيت: %s", e)

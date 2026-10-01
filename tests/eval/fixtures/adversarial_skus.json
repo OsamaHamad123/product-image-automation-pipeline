@@ -1,0 +1,302 @@
+{
+ "version": 1,
+ "description": "Adversarial cases for the v2 merge gate (D2), built on golden SKUs without changing golden_skus.json or vlm_cassette.json (the v1 baseline pins those). Each case names its base SKU, the candidates it drops, the candidate / SKU fields it overrides and the model readings it overrides ('readings': a VLM misread, written as the model would report it). Labels describe what the image really shows; an overridden label says why. The cases exist so the gate fails when a D4 identity rule, the D10 conflicting-match guard or a query of the D8 plan stops working: the golden set alone cannot show it, because every VLM error there is shadowed by a better-ranked correct candidate and every query surfaces the whole pool. 'rule' names what the case guards. expected_v2: correct_pick | no_pick | not_found | review_unselected | no_auto (any decision but AUTO_PUBLISH) | no_wrong_pick (a pick, if any, is correct_exact).",
+ "cases": [
+  {
+   "id": "adv-size-nido-no-correct",
+   "base": "uae-027-nido-fortified-2-25kg",
+   "rule": "size_conflict",
+   "drop": [
+    "c1",
+    "c7"
+   ],
+   "expected_v2": "no_pick",
+   "why": "The correct listings are missing; the model misread the 2.5kg Carrefour tin (c2) as 2.25kg. Only the title's size conflict keeps it from being pre-checked."
+  },
+  {
+   "id": "adv-size-nutella-no-correct",
+   "base": "uae-044-bad-check-digit-nutella-400g",
+   "rule": "size_conflict",
+   "drop": [
+    "c1"
+   ],
+   "expected_v2": "no_pick",
+   "why": "No 400g listing; the model misread the 350g jar (c2) as 400g."
+  },
+  {
+   "id": "adv-size-laban-up-no-correct",
+   "base": "uae-005-al-rawabi-laban-up-180ml",
+   "rule": "size_conflict",
+   "drop": [
+    "c1",
+    "c2"
+   ],
+   "expected_v2": "no_pick",
+   "why": "No 180ml listing; the model misread the 200ml bottle (c6) as 180ml."
+  },
+  {
+   "id": "adv-variant-fat-free-no-correct",
+   "base": "uae-002-almarai-fresh-milk-low-fat-1l",
+   "rule": "variant_conflict",
+   "drop": [
+    "c1"
+   ],
+   "expected_v2": "no_pick",
+   "readings": {
+    "c3": {
+     "variant_text": "Fresh Milk Low Fat",
+     "variant_match": "yes",
+     "why": "the model misreads the Fat Free carton as Low Fat"
+    }
+   },
+   "why": "No Low Fat listing; the Fat Free carton (c3) is misread as Low Fat. Only the title's fat level keeps it from being pre-checked."
+  },
+  {
+   "id": "adv-variant-tuna-medium-no-correct",
+   "base": "uae-064-al-alali-tuna-sunflower-170g",
+   "rule": "variant_conflict",
+   "drop": [
+    "c1",
+    "c6"
+   ],
+   "expected_v2": "no_pick",
+   "why": "No sunflower-oil listing; the recorded reading of the olive-oil tin (c3) says Sunflower Oil. Only the title's packing medium keeps it from being auto-published."
+  },
+  {
+   "id": "adv-pack-masafi-no-correct",
+   "base": "uae-020-masafi-water-1-5l",
+   "rule": "pack_conflict",
+   "drop": [
+    "c1",
+    "c6",
+    "c7"
+   ],
+   "expected_v2": "no_pick",
+   "readings": {
+    "c2": {
+     "size_text": "1.5l",
+     "pack_count": 1,
+     "size_match": "yes",
+     "why": "the model reads one bottle of the shrink-wrapped 12-pack"
+    },
+    "c5": {
+     "size_text": "1.5l",
+     "pack_count": 1,
+     "size_match": "yes",
+     "why": "the model reads one bottle of the 6-pack"
+    }
+   },
+   "why": "No single-bottle listing; the model reads the 12-pack and 6-pack photos as one 1.5L bottle. Only the titles' pack counts keep them from being auto-published."
+  },
+  {
+   "id": "adv-competitor-mayonnaise-only-competitors",
+   "base": "uae-024-ag-mayonnaise-473ml",
+   "rule": "competitor_brand",
+   "drop": [
+    "c1",
+    "c4",
+    "c5"
+   ],
+   "expected_v2": "not_found",
+   "candidates": {
+    "c2": {
+     "title": "Heinz Seriously Good Mayonnaise",
+     "page_title": "Heinz Seriously Good Mayonnaise",
+     "why": "a listing without a size, so the competitor brand is its only conflict"
+    },
+    "c3": {
+     "title": "Hellmann's Real Mayonnaise",
+     "page_title": "Hellmann's Real Mayonnaise",
+     "why": "a listing without a size, so the competitor brand is its only conflict"
+    }
+   },
+   "readings": {
+    "c2": {
+     "brand_text": "",
+     "brand_match": "unsure",
+     "why": "the brand is not readable"
+    },
+    "c3": {
+     "brand_text": "",
+     "brand_match": "unsure",
+     "why": "the brand is not readable"
+    }
+   },
+   "why": "Only Heinz and Hellmann's listings are found and the model cannot read their brands. Every candidate names a known competitor and not the target brand, so the pool is empty after the hard filters: NOT_FOUND (ALL_CONFLICTED), not a review of competitor jars."
+  },
+  {
+   "id": "adv-guard-fresh-milk-fat-unstated",
+   "base": "uae-002-almarai-fresh-milk-low-fat-1l",
+   "rule": "conflicting_match_guard",
+   "drop": [
+    "c3",
+    "c4",
+    "c5"
+   ],
+   "expected_v2": "no_auto",
+   "set": {
+    "name_en": "Almarai Fresh Milk 1L",
+    "name_ar": "حليب المراعي طازج 1 لتر",
+    "notes": "The sheet row does not state the fat level; the store's item is the low-fat carton."
+   },
+   "candidates": {
+    "c1": {
+     "domain": "grocer-express.ae",
+     "title": "Almarai Fresh Milk 1L",
+     "page_title": "Almarai Fresh Milk 1L",
+     "page_url": "https://grocer-express.ae/p/almarai-fresh-milk-1l",
+     "why": "the store's own low-fat carton, on a small shop page without the fat level"
+    },
+    "c2": {
+     "title": "Buy Almarai Fresh Milk 1L Online - Shop on Carrefour UAE",
+     "page_title": "Buy Almarai Fresh Milk 1L Online - Shop on Carrefour UAE",
+     "page_url": "https://www.carrefouruae.com/mafuae/en/fresh-food/almarai-fresh-milk-1l/p/108596",
+     "why": "the full-fat carton (label wrong_variant, unchanged) on a retailer page that omits the fat level"
+    }
+   },
+   "readings": {
+    "c1": {
+     "variant_text": "Fresh Milk Low Fat",
+     "variant_match": "yes"
+    },
+    "c2": {
+     "variant_text": "Fresh Milk Full Fat",
+     "variant_match": "yes",
+     "why": "the SKU states no fat level, so the model accepts the printed one"
+    }
+   },
+   "why": "Two MATCH images whose printed fat levels contradict each other cannot both be the SKU. The retailer listing (tier 1) wins the ranking, but its twin with another printed variant must block auto-publish (D10 conflicting-match guard); without the guard the full-fat carton would be published."
+  },
+  {
+   "id": "adv-plan-q2-arabic-only",
+   "base": "uae-005-al-rawabi-laban-up-180ml",
+   "rule": "query_plan:Q2",
+   "drop": [
+    "c2"
+   ],
+   "expected_v2": "correct_pick",
+   "candidates": {
+    "c1": {
+     "surfaced_by": [
+      "Q2"
+     ],
+     "why": "only the Arabic query (Q2, hl=ar) finds the Arabic listing"
+    },
+    "c3": {
+     "surfaced_by": [
+      "Q1",
+      "Q2",
+      "R1",
+      "R2"
+     ]
+    },
+    "c4": {
+     "surfaced_by": [
+      "Q1",
+      "R1",
+      "R2"
+     ]
+    },
+    "c5": {
+     "surfaced_by": [
+      "Q1",
+      "Q2",
+      "R1",
+      "R2"
+     ]
+    },
+    "c6": {
+     "surfaced_by": [
+      "Q1",
+      "R1",
+      "R2"
+     ]
+    }
+   },
+   "why": "Q1 only finds siblings; the correct listing is Arabic-titled and only Q2 surfaces it."
+  },
+  {
+   "id": "adv-plan-q3-site-only",
+   "base": "uae-001-almarai-full-fat-milk-1l",
+   "rule": "query_plan:Q3",
+   "drop": [
+    "c8"
+   ],
+   "expected_v2": "correct_pick",
+   "candidates": {
+    "c1": {
+     "surfaced_by": [
+      "Q3"
+     ],
+     "why": "only the site:-scoped retailer query finds it"
+    },
+    "c2": {
+     "surfaced_by": [
+      "Q1",
+      "Q2",
+      "R1",
+      "R2"
+     ]
+    },
+    "c3": {
+     "surfaced_by": [
+      "Q1",
+      "Q2",
+      "R1",
+      "R2"
+     ]
+    },
+    "c4": {
+     "surfaced_by": [
+      "Q1",
+      "R1",
+      "R2"
+     ]
+    }
+   },
+   "why": "Q1 and Q2 only find siblings; the Carrefour packshot is only reached by Q3 (site: retailers)."
+  },
+  {
+   "id": "adv-plan-false-t1-hides-correct",
+   "base": "uae-001-almarai-full-fat-milk-1l",
+   "rule": "query_plan:early_stop",
+   "drop": [
+    "c8"
+   ],
+   "expected_v2": "no_wrong_pick",
+   "candidates": {
+    "c1": {
+     "surfaced_by": [
+      "Q2"
+     ],
+     "why": "only the Arabic query finds the correct packshot"
+    },
+    "c2": {
+     "surfaced_by": [
+      "Q1"
+     ],
+     "title": "Shop Almarai Full Fat Milk 1L online in Dubai, Abu Dhabi and all UAE",
+     "page_title": "Shop Almarai Full Fat Milk 1L online in Dubai, Abu Dhabi and all UAE",
+     "page_url": "https://www.noon.com/uae-en/almarai-full-fat-milk-1l/N45441711A/p/",
+     "why": "a listing whose text is the exact SKU but whose photo is the low-fat carton (label unchanged)"
+    },
+    "c3": {
+     "surfaced_by": [
+      "Q1",
+      "Q2",
+      "R1",
+      "R2"
+     ]
+    },
+    "c4": {
+     "surfaced_by": [
+      "Q1",
+      "R1",
+      "R2"
+     ]
+    }
+   },
+   "why": "Q1 returns a text-perfect tier-1 listing with the wrong photo, so retrieval stops early; the model rejects the photo. Whatever v2 decides, it must not pick the wrong photo. (Today the early stop also hides the Q2-only correct listing: the case measures that cost.)"
+  }
+ ]
+}

@@ -1,0 +1,254 @@
+/*
+ * لقطة · الرئيسية (Overview board). Page-only styles on top of public/css/laqta.css tokens and classes.
+ * Loaded by resources/views/dashboard/index.blade.php through @push('styles').
+ */
+
+/* The page toggles sections with the hidden attribute; lq components set their own display. */
+.lq-page-home [hidden] {
+    display: none !important;
+}
+
+.lq-home {
+    display: flex;
+    flex-direction: column;
+    gap: 22px;
+    min-width: 0;
+}
+
+.lq-body .lq-home__title {
+    font-size: 28px;
+}
+
+.lq-home__actions .lq-btn {
+    height: 46px;
+}
+
+.lq-home__actions .lq-btn--secondary {
+    padding-inline: 18px;
+}
+
+/* Skeleton sizes for the slow sections */
+.lq-home__skel-value {
+    width: 64px;
+    height: 36px;
+    margin-block: 1px;
+}
+
+.lq-home__skel-bar {
+    width: 100%;
+    height: 16px;
+    border-radius: var(--lq-radius-pill);
+}
+
+.lq-home__skel-tile {
+    height: 74px;
+    border-radius: var(--lq-radius-lg);
+}
+
+.lq-home__skel-inline {
+    display: inline-block;
+    width: 56px;
+    height: 12px;
+    vertical-align: middle;
+}
+
+.lq-home__message {
+    font-size: 13px;
+    line-height: 1.7;
+    color: var(--lq-text-2);
+}
+
+/* Sheet funnel */
+.lq-home-funnel__body {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.lq-home-funnel__legend {
+    gap: var(--lq-space-2) 18px;
+    font-size: 13px;
+}
+
+.lq-home-funnel__legend .lq-legend__swatch {
+    width: 10px;
+    height: 10px;
+}
+
+.lq-home-funnel__notes {
+    font-size: var(--lq-fs-sm);
+    line-height: 1.6;
+    color: var(--lq-text-2);
+}
+
+/* Last run + readiness */
+.lq-home__grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+    gap: var(--lq-space-4);
+    align-items: start;
+}
+
+.lq-home-tiles {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+    gap: 10px;
+}
+
+.lq-home-lastrun__summary,
+.lq-home-lastrun__live {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.lq-home-lastrun__explain,
+.lq-home-lastrun__phase {
+    font-size: 13px;
+    line-height: 1.7;
+    color: var(--lq-text-2);
+}
+
+.lq-home-lastrun__live .lq-link {
+    align-self: flex-start;
+    font-size: var(--lq-fs-sm);
+}
+
+.lq-home-ready {
+    gap: var(--lq-space-3);
+}
+
+.lq-home-ready__link {
+    font-size: var(--lq-fs-sm);
+}
+
+.lq-home-ready__intro {
+    font-size: var(--lq-fs-sm);
+    line-height: 1.6;
+    color: var(--lq-text-2);
+}
+
+.lq-home-ready__list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--lq-space-3);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.lq-home-ready__item {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.lq-home-ready__head {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 2px var(--lq-space-3);
+    font-size: 13px;
+}
+
+.lq-home-ready__brand {
+    font-weight: 500;
+}
+
+.lq-home-ready__text {
+    color: var(--lq-text-2);
+}
+
+.lq-home-ready .lq-progress--sm {
+    height: 7px;
+}
+
+/* Services strip */
+.lq-home-services {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--lq-space-3) 22px;
+    padding: var(--lq-space-4) var(--lq-space-5);
+}
+
+.lq-body .lq-home-services__title {
+    font-size: 14.5px;
+    font-weight: 600;
+}
+
+.lq-home-services__list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--lq-space-2) 22px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.lq-home-services__name {
+    unicode-bidi: isolate;
+}
+
+.lq-body .lq-home-services__checked {
+    font-size: var(--lq-fs-sm);
+    color: var(--lq-text-3);
+    text-decoration: none;
+}
+
+.lq-body .lq-home-services__checked:hover {
+    color: var(--lq-teal-700);
+    text-decoration: underline;
+}
+
+.lq-home-services__cost {
+    margin-inline-start: auto;
+    font-size: 13px;
+    color: var(--lq-text-2);
+}
+
+.lq-home-services__cost strong {
+    color: var(--lq-text);
+    font-weight: 600;
+}
+
+@media (max-width: 980px) {
+    .lq-home__grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+@media (max-width: 560px) {
+    .lq-body .lq-home__title {
+        font-size: 24px;
+    }
+
+    .lq-home__actions {
+        width: 100%;
+    }
+
+    .lq-home__actions .lq-btn {
+        flex: 1 1 auto;
+    }
+
+    .lq-home__kpis {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: var(--lq-space-3);
+    }
+
+    .lq-home__kpis .lq-kpi {
+        padding: 14px;
+    }
+
+    .lq-body .lq-home__kpis .lq-kpi__value {
+        font-size: 28px;
+    }
+
+    .lq-home-tiles {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .lq-home-services__cost {
+        margin-inline-start: 0;
+    }
+}

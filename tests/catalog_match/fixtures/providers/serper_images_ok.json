@@ -1,0 +1,73 @@
+{
+  "searchParameters": {
+    "q": "Almarai Fresh Milk Full Fat 1L",
+    "gl": "ae",
+    "hl": "en",
+    "type": "images",
+    "num": 20,
+    "engine": "google"
+  },
+  "images": [
+    {
+      "title": "Almarai Fresh Milk Full Fat 1L | Carrefour UAE",
+      "imageUrl": "https://cdn.mafrservices.com/sys-master-root/h9a/h1c/51234567890014/12345_main.jpg",
+      "imageWidth": 1200,
+      "imageHeight": 1200,
+      "thumbnailUrl": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQ1carrefour",
+      "thumbnailWidth": 225,
+      "thumbnailHeight": 225,
+      "source": "Carrefour UAE",
+      "domain": "www.carrefouruae.com",
+      "link": "https://www.carrefouruae.com/mafuae/en/fresh-milk/almarai-fresh-milk-full-fat-1l/p/12345",
+      "googleUrl": "https://www.google.com/imgres?imgurl=https%3A%2F%2Fcdn.mafrservices.com%2F12345_main.jpg&tbnid=abc&docid=def",
+      "position": 1
+    },
+    {
+      "title": "Almarai Full Fat Fresh Milk 1 Litre | noon UAE",
+      "imageUrl": "https://f.nooncdn.com/p/v1612345678/N12345678A_1.jpg?format=jpg&width=800",
+      "imageWidth": 800,
+      "imageHeight": 800,
+      "thumbnailUrl": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQ2noon",
+      "thumbnailWidth": 225,
+      "thumbnailHeight": 225,
+      "source": "noon",
+      "domain": "www.noon.com",
+      "link": "https://www.noon.com/uae-en/fresh-milk-full-fat-1l/N12345678A/p/",
+      "googleUrl": "https://www.google.com/imgres?imgurl=https%3A%2F%2Ff.nooncdn.com%2Fp%2FN12345678A_1.jpg",
+      "position": 2
+    },
+    {
+      "title": "Almarai Fresh Milk Low Fat 1L - LuLu Hypermarket UAE",
+      "imageUrl": "https://www.luluhypermarket.com/medias/1234600-01.jpg-1200Wx1200H",
+      "imageWidth": 1200,
+      "imageHeight": 1200,
+      "thumbnailUrl": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQ3lulu",
+      "thumbnailWidth": 225,
+      "thumbnailHeight": 225,
+      "source": "LuLu Hypermarket",
+      "link": "https://www.luluhypermarket.com/en-ae/almarai-fresh-milk-low-fat-1l/p/1234600",
+      "googleUrl": "https://www.google.com/imgres?imgurl=https%3A%2F%2Fwww.luluhypermarket.com%2Fmedias%2F1234600-01.jpg",
+      "position": 3
+    },
+    {
+      "title": "Almarai milk - a morning ritual",
+      "imageUrl": "https://example-food-blog.com/wp-content/uploads/2025/03/almarai.png",
+      "thumbnailUrl": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQ4blog",
+      "source": "Example Food Blog",
+      "domain": "example-food-blog.com",
+      "link": "https://example-food-blog.com/posts/almarai-morning",
+      "googleUrl": "https://www.google.com/imgres?imgurl=https%3A%2F%2Fexample-food-blog.com%2Falmarai.png",
+      "position": 4
+    },
+    {
+      "title": "Item without an image URL",
+      "imageUrl": "",
+      "thumbnailUrl": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQ5none",
+      "source": "Nowhere",
+      "domain": "nowhere.example",
+      "link": "https://nowhere.example/page",
+      "position": 5
+    }
+  ],
+  "credits": 1
+}
