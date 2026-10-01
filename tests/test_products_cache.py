@@ -75,12 +75,19 @@ def test_raw_rows_and_review_products_have_separate_versioned_keys():
 def test_readers_use_the_right_cache():
     product = read(PRODUCT)
     api = read(API)
+    overview = read(CONTROLLERS / "OverviewController.php")
+    run = read(CONTROLLERS / "RunController.php")
     assert "self::reviewProducts(" in method_body(product, "getProductsJson")
-    assert "self::reviewProducts(" in method_body(product, "index")
+    # the Laqta home (OverviewController) and the run plan read the sheet through the raw-rows cache only
+    assert "ProductController::sheetRows(" in method_body(overview, "overview")
+    assert "ProductController::sheetRows(" in method_body(run, "plan")
+    assert "return app(OverviewController::class)->index();" in method_body(product, "index")
     assert "self::sheetRows(" in method_body(product, "getBrandEstimateCount")
     assert "ProductController::sheetRows(" in method_body(api, "retryFailures")
     for name in ("index", "getProductsJson", "getBrandEstimateCount"):
         assert "runPython('get_products')" not in method_body(product, name), name
+    for text in (overview, run):
+        assert "get_products" not in text and "Cache::put(ProductController" not in text
     assert "runPython('get_products')" not in method_body(api, "retryFailures")
 
 
@@ -260,9 +267,9 @@ namespace {
     // a stopped run left pre-checked candidates behind (automation_state is back to idle)
     DB::$status = 'idle';
 
-    // 1. home first (it used to store raw rows under the shared key), then the catalog
-    $home = $controller->index();
-    $out['home_review'] = $home['data']['review'] ?? null;
+    // 1. home first (it used to store raw rows under the shared key), then the catalog. The Laqta home
+    //    (OverviewController::overview) reads the sheet through ProductController::sheetRows().
+    ProductController::sheetRows();
     $out['after_home'] = $catalog();
     $out['estimate'] = $controller->getBrandEstimateCount(new Illuminate\Http\Request(['brand' => 'almarai']))->data;
 
@@ -294,7 +301,7 @@ namespace {
         ProductController::forgetProductCaches();
     }
     $out['keys_after_forget'] = array_keys(Cache::$store);
-    $out['home_after_all'] = $controller->index()['data']['review'] ?? null;
+    $out['review_after_all'] = count(array_filter($catalog()['rows'], fn ($r) => $r['needs_review']));
 
     echo json_encode($out);
 }
@@ -321,8 +328,8 @@ def test_home_visit_does_not_hide_prechecked_products_from_review(tmp_path):
     # row 2 has a stored, preselected candidate: it is in review with its candidate, even right after a home visit
     assert first["rows"]["2"] == {"needs_review": True, "candidates": 1, "enriched": True, "link": ""}
     assert first["rows"]["3"]["enriched"] is True and first["rows"]["3"]["needs_review"] is False
-    # home counts the same review products as the catalog
-    assert out["home_review"] == 1
+    # the home's «بانتظار مراجعتك» is now the sidebar badge's number (automation_queue ready_for_review, one
+    # source for both): tests/test_laqta_run.py::test_every_number_has_one_source
     assert out["estimate"] == {"count": 2}
 
 
@@ -363,7 +370,7 @@ def test_raw_rows_and_review_products_live_under_different_keys(tmp_path):
     assert sorted(out["keys_before_forget"]) == ["review_products_v2", "sheet_rows_v2"]
     assert out["raw_rows_enriched"] is False               # the raw-rows cache never holds enriched products
     assert out["keys_after_forget"] == []
-    assert out["home_after_all"] == 2                      # rows 2 and 3 both have stored candidates
+    assert out["review_after_all"] == 2                    # rebuilt: rows 2 and 3 both have stored candidates
 
 
 # ---------------------------------------------------------------------------

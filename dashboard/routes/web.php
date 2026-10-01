@@ -4,14 +4,16 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\ProductController;
 use App\Http\Controllers\ApiController;
 use App\Http\Controllers\CurationController;
+use App\Http\Controllers\OverviewController;
+use App\Http\Controllers\RunController;
 
 // صفحات لوحة التحكم
-Route::get('/', [ProductController::class, 'index'])->name('dashboard.index');
+Route::get('/', [OverviewController::class, 'index'])->name('dashboard.index'); // p2-run: الرئيسية
 Route::get('/catalog', [ProductController::class, 'catalog'])->name('dashboard.catalog');
 Route::get('/active-learning', [ProductController::class, 'activeLearning'])->name('dashboard.active_learning');
 Route::get('/errors', [ProductController::class, 'errors'])->name('dashboard.errors');
 Route::get('/rich-catalog', [ProductController::class, 'richCatalog'])->name('dashboard.rich_catalog');
-Route::get('/batch-automation', [ProductController::class, 'batchAutomation'])->name('dashboard.batch_automation');
+Route::get('/batch-automation', [RunController::class, 'page'])->name('dashboard.batch_automation'); // p2-run: التشغيل (?tab=review -> /catalog?mode=bulk)
 Route::get('/system-diagnostics', [ProductController::class, 'systemDiagnostics'])->name('dashboard.diagnostics');
 Route::get('/settings', [ProductController::class, 'settings'])->name('dashboard.settings');
 Route::post('/settings', [ProductController::class, 'saveSettings'])->name('dashboard.save_settings');
@@ -75,4 +77,9 @@ Route::get('/api/view-laravel-log', function() {
     }
     return response('Log file not found at: ' . $logPath, 404);
 });
+// p2-run (الرئيسية والتشغيل): بيانات للقراءة فقط؛ التشغيل والإيقاف يبقيان في ApiController
+Route::get('/api/overview', [OverviewController::class, 'data']);
+Route::get('/api/run/live', [RunController::class, 'live']);
+Route::get('/api/run/plan', [RunController::class, 'plan']);
+
 Route::view('/ui-kit', 'dashboard.ui_kit')->name('dashboard.ui_kit'); // مرجع مكوّنات هوية لقطة

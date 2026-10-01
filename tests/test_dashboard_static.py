@@ -14,7 +14,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
-from blade_scripts import inline_scripts
+from blade_scripts import asset_scripts, inline_scripts
 
 ROOT = Path(__file__).resolve().parents[1]
 DASH = ROOT / "dashboard"
@@ -86,6 +86,8 @@ def test_php_lint(path):
 @pytest.mark.parametrize("path", [p for p in CHANGED_BLADES if p.name != "settings.blade.php"], ids=lambda p: p.name)
 def test_inline_js_parses(path, tmp_path):
     blocks = inline_scripts(read(path))
+    # Laqta pages keep their script in public/js/<page>.js (loaded with asset()): those files must parse too.
+    blocks += [read(DASH / "public" / "js" / name) for name in asset_scripts(read(path))]
     assert blocks, f"no inline <script> block found in {path.name}"
     for i, block in enumerate(blocks):
         # Blade echo tags are replaced by a string literal, as they would be after rendering.

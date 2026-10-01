@@ -227,67 +227,12 @@ class ProductController extends Controller
     }
 
     /**
-     * عرض الصفحة الرئيسية للوحة التحكم والإحصائيات.
-     * كل الأرقام هنا عدادات حقيقية من قاعدة البيانات والشيت؛ لا توجد تقديرات أو ثوابت مختلقة.
+     * الصفحة الرئيسية (لقطة): تُبنى في OverviewController؛ كل رقم فيها من مصدر واحد مسمّى هناك.
+     * الرابط '/' يشير إلى OverviewController::index مباشرة، وهذه الدالة تبقى لأي استدعاء قديم.
      */
     public function index()
     {
-        try {
-            $failedRuns = ProductFailure::count();
-
-            // عدادات الاعتماد الحقيقية من resolved_products حسب حالة التحقق
-            $resolvedByStatus = [];
-            try {
-                if (Schema::hasColumn('resolved_products', 'verification_status')) {
-                    $rows = DB::table('resolved_products')
-                        ->select('verification_status', DB::raw('COUNT(*) AS n'))
-                        ->groupBy('verification_status')
-                        ->get();
-                    foreach ($rows as $r) {
-                        $resolvedByStatus[(string) ($r->verification_status ?? 'legacy')] = (int) $r->n;
-                    }
-                } else {
-                    $resolvedByStatus['legacy'] = ResolvedProduct::count();
-                }
-            } catch (\Throwable $e) {
-                $resolvedByStatus = [];
-            }
-
-            $queueCounters = QueueStats::counters();
-
-            // نفس منتجات المراجعة التي يعرضها الكتالوج (مع المرشحات المخزنة)، فتطابق أرقام "المراجعة" الصفحتين
-            $products = self::reviewProducts() ?? [];
-
-            $total = count($products);
-            $linked = 0;
-            $review = 0;
-            $errors = $failedRuns;
-
-            foreach ($products as $p) {
-                $hasLink = !empty($p['existing_image_link']) && trim($p['existing_image_link']) !== '';
-                
-                // التحقق من حالة المراجعة بناءً على الكلمة المفتاحية في الرابط
-                $isReview = (strpos($p['existing_image_link'] ?? '', 'needs_review:') !== false) || (!empty($p['needs_review']) && $p['needs_review']);
-                
-                if ($hasLink && !$isReview) {
-                    $linked++;
-                } elseif ($isReview) {
-                    $review++;
-                }
-            }
-
-            $missing = max(0, $total - $linked - $review - $errors);
-            $percentage = $total > 0 ? round(($linked / $total) * 100) : 0;
-
-            return view('dashboard.index', compact('resolvedByStatus', 'queueCounters', 'total', 'linked', 'review', 'errors', 'missing', 'percentage'));
-        } catch (\Exception $e) {
-            return view('dashboard.index', [
-                'resolvedByStatus' => [],
-                'queueCounters' => ['by_status' => [], 'by_failure_code' => []],
-                'total' => 0, 'linked' => 0, 'review' => 0, 'errors' => 0, 'missing' => 0, 'percentage' => 0,
-                'error' => 'حدث خطأ أثناء تحميل الإحصائيات: ' . $e->getMessage()
-            ]);
-        }
+        return app(OverviewController::class)->index();
     }
 
     /**
@@ -381,11 +326,12 @@ class ProductController extends Controller
     }
 
     /**
-     * صفحة التحكم والأتمتة الجماعية
+     * صفحة التشغيل (لقطة): تُبنى في RunController (?tab=review تفتح المراجعة الجماعية على /catalog?mode=bulk).
+     * الرابط '/batch-automation' يشير إلى RunController::page مباشرة، وهذه الدالة تبقى لأي استدعاء قديم.
      */
-    public function batchAutomation()
+    public function batchAutomation(Request $request)
     {
-        return view('dashboard.batch_automation');
+        return app(RunController::class)->page($request);
     }
 
     /**

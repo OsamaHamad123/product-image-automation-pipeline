@@ -2,8 +2,10 @@
 
 - ApiController: stop / reset never delete queue rows or review work; they go through cli_bridge run_control.
 - QueueStats: the run phase, its Arabic texts and the red banner (pure functions, run under the PHP CLI).
-- The views' scripts run under node against a small stub DOM: end-of-run refresh and tab switch, the red
-  banner and sidebar state, bulk approve locking, and review shortcuts only on the review tab.
+- The views' scripts run under node: the Run page (public/js/run.js) and the Home page (public/js/home.js)
+  through their pure view functions and page controllers (end-of-run refresh, per-run progress, the red banner),
+  the old sidebar against a small stub DOM. Bulk approve locking and the review shortcuts moved with the review
+  grid to the review page (/catalog?mode=bulk) and are checked there.
 PHP or node checks are skipped when the binary is not installed.
 """
 
@@ -26,6 +28,9 @@ QUEUE_STATS = DASH / "app" / "Services" / "QueueStats.php"
 BATCH = VIEWS / "dashboard" / "batch_automation.blade.php"
 INDEX = VIEWS / "dashboard" / "index.blade.php"
 LAYOUT = VIEWS / "layouts" / "layout.blade.php"
+JS = DASH / "public" / "js"
+RUN_JS = [JS / "run-common.js", JS / "run.js"]         # the Run page (batch_automation.blade.php)
+HOME_JS = [JS / "run-common.js", JS / "home.js"]       # the Home page (index.blade.php)
 PHP = shutil.which("php")
 NODE = shutil.which("node")
 
@@ -313,221 +318,151 @@ def _status(phase, **extra):
     return base
 
 
-BATCH_SETUP = """
-setDisplay({ tabContentAutomation: 'block', tabContentCuration: 'none', batchCurationWorkspace: 'none',
-             batchRejectModal: 'none' });
+def _page_js(files) -> str:
+    """The page's scripts without a DOM: they only define window.LaqtaRunPage / LaqtaHomePage (no auto-mount)."""
+    return "globalThis.window = globalThis;\n" + "\n".join(read(f) for f in files) + "\n"
+
+
+# Fake deps for the page controllers: every fetch, rendered view, confirmation and toast is recorded.
+CONTROLLER_HARNESS = r"""
+const fetchLog = [];
+const toasts = [];
+const confirms = [];
+const views = { live: [], plan: [], start: [], overview: [], banner: [] };
+let lives = [];
+let liveIndex = 0;
+let confirmAnswer = true;
+function fakeFetch(url, opts) {
+    fetchLog.push({ url, method: (opts && opts.method) || 'GET', body: opts && opts.body });
+    if (url === '/api/run/live') return Promise.resolve({ ok: true, status: 200, data: lives[Math.min(liveIndex++, lives.length - 1)] });
+    if (url.startsWith('/api/run/plan')) return Promise.resolve({ ok: true, status: 200, data: { status: 'success', total: 3, skipped_final: 1, estimate: {} } });
+    if (url.startsWith('/api/overview')) return Promise.resolve({ ok: true, status: 200, data: { status: 'success', kpis: {}, sheet: { status: 'ok', total: 0, stages: [] }, readiness: { status: 'ok', brands: [] }, cost: { status: 'ok', week_usd: 0 }, services: {}, alerts: [] } });
+    return Promise.resolve({ ok: true, status: 200, data: { status: 'success', message: 'ok' } });
+}
+const deps = {
+    fetchJson: fakeFetch,
+    renderLive: v => views.live.push(v), renderPlan: v => views.plan.push(v), renderStart: v => views.start.push(v),
+    renderOverview: v => views.overview.push(v), renderBanner: v => views.banner.push(v),
+    confirm: t => { confirms.push(t); return confirmAnswer; }, toast: (t, v) => toasts.push([t, v]),
+    now: () => 1790000000, schedule: () => 0
+};
+const tick = () => new Promise(r => setTimeout(r, 0));
+const last = (list) => list[list.length - 1];
+const freshPlans = () => fetchLog.filter(f => f.url.startsWith('/api/run/plan') && f.url.includes('refresh=1')).length;
 """
+
+
+def _snap(batch, run=None):
+    """A GET /api/run/live snapshot: the /api/batch-status payload plus the run summary (RunController::snapshot)."""
+    return {"status": "success", "batch": batch, "run": run, "recent": []}
+
+
+def _run_summary(total=20, processed=20, **counts):
+    base = {"proposed": 0, "none": 0, "not_found": 0, "error": 0, "requeued": 0, "approved": 0, "searching": 0,
+            "waiting": 0}
+    base.update(counts)
+    return {"run_id": "r1", "total": total, "processed": processed, "counts": base, "rows_label": "2–21",
+            "started_at": 1789999000, "ended_at": 1789999400, "duration_s": 400, "per_product_s": 20,
+            "cost_usd": 0.06, "explain": "", "current": False}
 
 
 @pytest.mark.skipif(NODE is None, reason="node is not installed")
-def test_batch_page_refreshes_the_grid_and_opens_the_review_tab_when_a_run_finishes():
-    statuses = [_status("running", is_running=True), _status("running", is_running=True), _status("review")]
-    script = STUB_DOM + _page_script(BATCH) + BATCH_SETUP + f"""
-const statuses = {json.dumps(statuses, ensure_ascii=False)};
-let i = 0;
-fetchHandler = (url) => url === '/api/batch-status' ? statuses[Math.min(i++, statuses.length - 1)] : {{ products: [] }};
+def test_run_page_refreshes_past_the_caches_and_offers_the_review_when_a_run_finishes():
+    """Ported from the batch page's end-of-run test: the review grid moved to /catalog?mode=bulk, so at the end of a
+    run the Run page shows the run's summary with a review button and reads the sheet again past every cache."""
+    lives = [_snap(_status("running", is_running=True)), _snap(_status("running", is_running=True)),
+             _snap(_status("review"), _run_summary(proposed=3, none=0, error=1, approved=1, waiting=15, processed=5))]
+    script = _page_js(RUN_JS) + CONTROLLER_HARNESS + f"""
+lives = {json.dumps(lives, ensure_ascii=False)};
+const ctl = LaqtaRunPage.createController(deps);
 (async () => {{
-    // the workspace is already visible (products loaded): the old code never switched in that case
-    document.getElementById('batchCurationWorkspace').style.display = 'block';
-    await pollBatchStatus(); await tick();
-    const running = {{
-        curation: document.getElementById('tabContentCuration').style.display,
-        percent: document.getElementById('batchProgressPercent').innerText,
-        counts: document.getElementById('batchProgressCounts').innerText,
-        failedCard: document.getElementById('statFailedCount').innerText,
-        productsFetched: fetchLog.filter(u => u.startsWith('/api/products-json')).length
-    }};
-    await pollBatchStatus(); await tick();
-    await pollBatchStatus(); await tick();
-    console.log(JSON.stringify({{ running,
-        curation: document.getElementById('tabContentCuration').style.display,
-        automation: document.getElementById('tabContentAutomation').style.display,
-        productsFetched: fetchLog.filter(u => u.startsWith('/api/products-json')).length,
-        freshFetched: fetchLog.filter(u => u === '/api/products-json?refresh=true').length,
-        idleText: document.getElementById('batchIdleState').textContent }}));
+    await ctl.poll(); await tick();
+    const v = last(views.live);
+    const running = {{ percent: v.progress.percentText, counts: v.progress.countsText, fresh: freshPlans(),
+                       finished: v.finished, state: v.state }};
+    await ctl.poll(); await tick();
+    await ctl.poll(); await tick(); await tick();
+    const end = last(views.live);
+    console.log(JSON.stringify({{ running, fresh: freshPlans(), state: end.state, finished: end.finished,
+                                  progress: end.progress, toasts }}));
 }})();
 """
     out = _node(script)
-    assert out["running"]["curation"] == "none" and out["running"]["productsFetched"] == 0
-    assert out["running"]["percent"] == "25%"                                 # per-run: 5 of 20
+    assert out["running"]["percent"] == "25%"                                  # per-run: 5 of 20
     assert out["running"]["counts"].startswith("5 من 20 في هذا التشغيل")
-    assert out["running"]["failedCard"] == "7"                               # the global card keeps queue numbers
-    assert out["curation"] == "block" and out["automation"] == "none"
-    assert out["productsFetched"] == 1 and out["freshFetched"] == 1       # never the server's products cache
-    assert "text:review" in out["idleText"]
+    assert "300" not in out["running"]["counts"] and "7" not in out["running"]["counts"]   # never the queue's numbers
+    assert out["running"]["fresh"] == 0 and out["running"]["finished"] is None
+    assert out["fresh"] == 1                                                   # never the server's caches
+    assert out["progress"] is None and out["finished"]["reviewVisible"] is True
+    assert out["finished"]["reviewCount"] == 3 and out["finished"]["reviewLabel"] == "راجع النتائج (3)"
+    assert out["state"] == "stopped"                     # 5 of 20 searched: it did not finish, and says so
+    assert "وقف قبل ما يخلص" in out["finished"]["title"]
+    # the end-of-run toast agrees with the card: a run that stopped at 5 of 20 did not finish
+    assert out["toasts"][-1][0] == "وقف التشغيل قبل ما يخلص: 3 منتجات بانتظار مراجعتك."
 
 
 @pytest.mark.skipif(NODE is None, reason="node is not installed")
-def test_run_ending_on_a_provider_outage_reloads_the_grid_past_the_products_cache():
-    """Review fix. ProductController::getProductsJson skips its one-hour cache only while the state is pre_caching /
-    running / curation_pending. A run that stops on a provider outage ends in 'provider_down' (phase error), so a
-    plain /api/products-json returned the list cached when the page was opened, without the rows that reached
-    review during the run, while the page switched to the review tab."""
-    statuses = [_status("running", is_running=True, status="pre_caching"),
-                _status("error", status="provider_down", ready_for_review=4,
-                        alert="محركات البحث غير متاحة، فتوقف العامل وبقيت الصفوف المتبقية في الانتظار.")]
-    script = STUB_DOM + _page_script(BATCH) + BATCH_SETUP + f"""
-const statuses = {json.dumps(statuses, ensure_ascii=False)};
-let i = 0;
-fetchHandler = (url) => url === '/api/batch-status' ? statuses[Math.min(i++, statuses.length - 1)] : {{ products: [] }};
+def test_run_ending_on_a_provider_outage_reloads_past_the_caches_and_shows_the_banner():
+    """Review fix, ported: a run that stops on a provider outage ends in 'provider_down' (phase error). The page
+    must still read the sheet again past the caches and offer the rows that reached review during the run."""
+    lives = [_snap(_status("running", is_running=True, status="pre_caching")),
+             _snap(_status("error", status="provider_down", ready_for_review=4,
+                           alert="محركات البحث غير متاحة، فتوقف العامل وبقيت الصفوف المتبقية في الانتظار."),
+                   _run_summary(total=10, processed=6, proposed=4, requeued=4))]
+    script = _page_js(RUN_JS) + CONTROLLER_HARNESS + f"""
+lives = {json.dumps(lives, ensure_ascii=False)};
+const ctl = LaqtaRunPage.createController(deps);
 (async () => {{
-    await pollBatchStatus(); await tick();
-    await pollBatchStatus(); await tick();
-    console.log(JSON.stringify({{
-        products: fetchLog.filter(u => u.startsWith('/api/products-json')),
-        curation: document.getElementById('tabContentCuration').style.display,
-        banner: document.getElementById('batchStateAlert').style.display }}));
+    await ctl.poll(); await tick();
+    await ctl.poll(); await tick(); await tick();
+    const v = last(views.live);
+    console.log(JSON.stringify({{ fresh: freshPlans(), banner: v.banner, finished: v.finished, state: v.state }}));
 }})();
 """
     out = _node(script)
-    assert out["products"] == ["/api/products-json?refresh=true"]
-    assert out["curation"] == "block" and out["banner"] == "block"
+    assert out["fresh"] == 1
+    assert out["banner"]["visible"] is True and out["banner"]["variant"] == "danger"
+    assert out["banner"]["text"].startswith("محركات البحث غير متاحة")
+    assert out["finished"]["reviewVisible"] is True and out["finished"]["reviewCount"] == 4
+    assert out["finished"]["title"] == "آخر تشغيل وقف بعطل"
 
 
 @pytest.mark.skipif(NODE is None, reason="node is not installed")
-def test_batch_page_shows_the_enqueue_phase_and_the_red_banner():
-    statuses = [_status("starting", is_running=True, run={"run_id": None, "total": 0, "processed": 0}),
-                _status("error", status="error", ready_for_review=0,
-                        alert="فشل تجهيز التشغيل ولم يبدأ العامل: لم يُعثر على الشيت")]
-    script = STUB_DOM + _page_script(BATCH) + BATCH_SETUP + f"""
-const statuses = {json.dumps(statuses, ensure_ascii=False)};
-let i = 0;
-fetchHandler = (url) => url === '/api/batch-status' ? statuses[Math.min(i++, statuses.length - 1)] : {{ products: [] }};
+def test_run_page_shows_the_enqueue_phase_and_the_red_banner():
+    lives = [_snap(_status("starting", is_running=True, run={"run_id": None, "total": 0, "processed": 0})),
+             _snap(_status("error", status="error", ready_for_review=0,
+                           alert="فشل تجهيز التشغيل ولم يبدأ العامل: لم يُعثر على الشيت"))]
+    script = _page_js(RUN_JS) + CONTROLLER_HARNESS + f"""
+lives = {json.dumps(lives, ensure_ascii=False)};
+const ctl = LaqtaRunPage.createController(deps);
 (async () => {{
-    await pollBatchStatus();
-    const starting = {{
-        text: document.getElementById('batchProgressText').textContent,
-        percent: document.getElementById('batchProgressPercent').innerText,
-        counts: document.getElementById('batchProgressCounts').innerText,
-        pause: document.getElementById('pauseResumeBatchBtn').disabled,
-        banner: document.getElementById('batchStateAlert').style.display
-    }};
-    await pollBatchStatus(); await tick();
-    console.log(JSON.stringify({{ starting,
-        banner: document.getElementById('batchStateAlert').style.display,
-        bannerText: document.getElementById('batchStateAlert').textContent,
-        label: document.getElementById('statProgressLabel').innerHTML,
-        curation: document.getElementById('tabContentCuration').style.display }}));
+    await ctl.poll();
+    const s = last(views.live);
+    const starting = {{ text: s.progress.phaseText, percent: s.progress.percentText, counts: s.progress.countsText,
+                        pause: s.progress.pause.disabled, banner: s.banner.visible, big: s.progress.done }};
+    await ctl.poll(); await tick();
+    const e = last(views.live);
+    console.log(JSON.stringify({{ starting, banner: e.banner, chip: e.chip, finished: e.finished, state: e.state,
+                                  startBlocked: [s.startBlocked, e.startBlocked] }}));
 }})();
 """
     out = _node(script)
-    assert out["starting"]["text"] == "text:starting" and out["starting"]["percent"] == "—"
-    assert out["starting"]["counts"] == "" and out["starting"]["pause"] is True
-    assert out["starting"]["banner"] == "none"
-    assert out["banner"] == "block" and "لم يُعثر على الشيت" in out["bannerText"]
-    assert "خطأ" in out["label"] and "خامل" not in out["label"]
-    assert out["curation"] == "none"         # an error that left nothing to review keeps the run tab and its log
+    assert out["starting"] == {"text": "text:starting", "percent": "—", "counts": "", "pause": True,
+                               "banner": False, "big": None}
+    assert out["banner"]["visible"] is True and "لم يُعثر على الشيت" in out["banner"]["text"]
+    assert "عطل" in out["chip"]["label"] and "خامل" not in out["chip"]["label"]
+    assert out["state"] == "error" and out["finished"] is None   # an error that left nothing to review offers none
+    assert out["startBlocked"] == [True, False]
 
 
-def _products():
-    def cand(url, status):
-        return {"image_url": url, "status": status, "is_selected": 1 if status == "preselected" else 0}
-    return [{"row_number": r, "product_name": f"P{r}", "brand": "B", "sku_key": f"k{r}", "needs_review": True,
-             "curation_candidates": [cand(f"https://x.ae/{r}a.jpg", "preselected"), cand(f"https://x.ae/{r}b.jpg", "eligible")]}
-            for r in (11, 12)]
-
-
-@pytest.mark.skipif(NODE is None, reason="node is not installed")
-def test_bulk_approve_locks_the_review_controls_and_never_publishes_twice():
-    script = STUB_DOM + _page_script(BATCH) + BATCH_SETUP + f"""
-setDisplay({{ tabContentAutomation: 'none', tabContentCuration: 'block', batchCurationWorkspace: 'block' }});
-document.getElementById('curationPageSize').value = '25';
-const products = {json.dumps(_products())};
-const pending = [];
-fetchHandler = (url, opts) => {{
-    if (url === '/api/select_image') return new Promise(r => pending.push({{ body: JSON.parse(opts.body), r }}));
-    if (url === '/api/products-json') return {{ products: JSON.parse(JSON.stringify(products)) }};
-    return {{}};
-}};
-(async () => {{
-    await fetchCurationProducts(); await tick();
-    const boxes = () => document.querySelectorAll('.batch-select-checkbox');
-    const checkedBefore = boxes().filter(b => b.checked).length;
-    const run = submitBatchApproval();
-    await tick();
-    const during = {{
-        busy: reviewBusy, requests: pending.length,
-        approveDisabled: document.getElementById('batchApproveBtn').disabled,
-        rejectDisabled: document.getElementById('batchRejectBtn').disabled,
-        boxesDisabled: boxes().every(b => b.disabled),
-        percent: document.getElementById('batchCurationProgressPercent').innerText
-    }};
-    // everything that could approve, reject or change the pick is ignored while the bulk run works
-    submitBatchApproval();
-    const thumb = document.querySelector('.curation-thumb-card');
-    selectCurationThumb(thumb, 11, 'https://x.ae/11b.jpg');
-    docListeners.keydown.forEach(fn => fn({{ key: 'Enter', preventDefault() {{}} }}));
-    openBatchRejectModal({{ mode: 'bulk', count: 2 }});
-    await tick();
-    const ignored = {{ requests: pending.length, modal: document.getElementById('batchRejectModal').style.display,
-                       pick: products[0].curation_candidates[0].image_url }};
-    pending[0].r({{ status: 'success' }}); await tick(); await tick();
-    const afterFirst = {{ percent: document.getElementById('batchCurationProgressPercent').innerText,
-                          requests: pending.length }};
-    pending[1].r({{ status: 'success' }});
-    await run; await tick(); await tick();
-    const after = {{ busy: reviewBusy, approved: Array.from(approvedRowKeys),
-                     boxes: boxes().map(b => ({{ checked: b.checked, disabled: b.disabled }})),
-                     approveDisabled: document.getElementById('batchApproveBtn').disabled }};
-    // the sheet still says needs_review (background not removed): the rows come back but cannot be approved again
-    selectAllBatch(true);
-    const before2 = pending.length;
-    await submitBatchApproval();
-    console.log(JSON.stringify({{ checkedBefore, during, ignored, afterFirst, after,
-                                  secondRequests: pending.length - before2,
-                                  bodies: pending.map(p => p.body.row_number), lastAlert: alerts[alerts.length - 1] }}));
-}})();
-"""
-    out = _node(script)
-    assert out["checkedBefore"] == 2
-    assert out["during"] == {"busy": True, "requests": 1, "approveDisabled": True, "rejectDisabled": True,
-                             "boxesDisabled": True, "percent": "0%"}          # no progress before a request ends
-    assert out["ignored"]["requests"] == 1 and out["ignored"]["modal"] == "none"
-    assert out["afterFirst"] == {"percent": "50%", "requests": 2}
-    assert out["after"]["busy"] is False and out["after"]["approveDisabled"] is False
-    assert sorted(out["after"]["approved"]) == ["11|k11", "12|k12"]
-    assert all(b == {"checked": False, "disabled": True} for b in out["after"]["boxes"])
-    assert out["secondRequests"] == 0 and out["bodies"] == [11, 12]
-    assert out["lastAlert"].startswith("❌ يرجى تحديد منتج واحد على الأقل")
-
-
-@pytest.mark.skipif(NODE is None, reason="node is not installed")
-def test_review_shortcuts_only_work_on_the_review_tab():
-    script = STUB_DOM + _page_script(BATCH) + BATCH_SETUP + f"""
-setDisplay({{ batchCurationWorkspace: 'block' }});
-document.getElementById('curationPageSize').value = '25';
-const products = {json.dumps(_products())};
-let approvals = 0;
-fetchHandler = (url) => {{
-    if (url === '/api/select_image') {{ approvals++; return {{ status: 'success' }}; }}
-    if (url === '/api/products-json') return {{ products: JSON.parse(JSON.stringify(products)) }};
-    return {{}};
-}};
-const press = (key) => docListeners.keydown.forEach(fn => fn({{ key, preventDefault() {{}} }}));
-(async () => {{
-    await fetchCurationProducts(); await tick();
-    switchTab('automation');
-    press('ArrowDown'); press('2'); press('Enter'); await tick(); await tick();
-    const onRunTab = {{ focused: focusedCardIndex, approvals,
-                        pick: currentProducts[0].curation_candidates.find(c => c.is_selected === 1).image_url }};
-    switchTab('curation');
-    press('ArrowDown'); press('2'); await tick();
-    const onReviewTab = {{ focused: focusedCardIndex,
-                           pick: currentProducts[0].curation_candidates.find(c => c.is_selected === 1).image_url }};
-    console.log(JSON.stringify({{ onRunTab, onReviewTab }}));
-}})();
-"""
-    out = _node(script)
-    assert out["onRunTab"] == {"focused": -1, "approvals": 0, "pick": "https://x.ae/11a.jpg"}
-    assert out["onReviewTab"] == {"focused": 0, "pick": "https://x.ae/11b.jpg"}
-
-
-@pytest.mark.skipif(NODE is None, reason="node is not installed")
-def test_batch_page_opens_the_review_tab_from_the_home_link():
-    text = read(BATCH)
-    loaded = text[text.index('document.addEventListener("DOMContentLoaded"'):]
-    assert "new URLSearchParams(window.location.search).get('tab') === 'review'" in loaded
-    assert loaded.index("switchTab('curation')") < loaded.index("pollBatchStatus();")
+def test_old_review_tab_link_opens_the_bulk_review():
+    """The home page used to link to /batch-automation?tab=review; the review grid now lives at /catalog?mode=bulk,
+    and the old link redirects there. The home page links to the review list directly."""
+    run = read(DASH / "app" / "Http" / "Controllers" / "RunController.php")
+    page = method(run, "page")
+    assert "$request->query('tab') === 'review'" in page and "redirect('/catalog?mode=bulk')" in page
+    assert page.index("redirect('/catalog?mode=bulk')") < page.index("self::snapshot()")
+    assert "?tab=review" not in read(INDEX)
 
 
 @pytest.mark.skipif(NODE is None, reason="node is not installed")
@@ -560,44 +495,47 @@ const cases = {json.dumps([_status("error", alert="x"), _status("review", ready_
 
 @pytest.mark.skipif(NODE is None, reason="node is not installed")
 def test_home_page_banner_progress_and_review_link():
-    statuses = [_status("starting", is_running=True), _status("running", is_running=True),
-                _status("review", alert="Gemini لا يستجيب")]
-    script = STUB_DOM + _page_script(INDEX) + f"""
-const statuses = {json.dumps(statuses, ensure_ascii=False)};
-let i = 0;
-fetchHandler = () => statuses[Math.min(i++, statuses.length - 1)];
+    lives = [_snap(_status("starting", is_running=True)), _snap(_status("running", is_running=True)),
+             _snap(_status("review", alert="Gemini لا يستجيب"))]
+    script = _page_js(HOME_JS) + CONTROLLER_HARNESS + f"""
+lives = {json.dumps(lives, ensure_ascii=False)};
+const ctl = LaqtaHomePage.createController(deps);
 (async () => {{
-    await pollBatchStatus();
-    const starting = {{ percent: document.getElementById('batchProgressPercent').innerText,
-                        counts: document.getElementById('batchProgressCounts').innerText,
-                        text: document.getElementById('batchProgressText').textContent }};
-    await pollBatchStatus();
-    const running = {{ percent: document.getElementById('batchProgressPercent').innerText,
-                       counts: document.getElementById('batchProgressCounts').innerText }};
-    await pollBatchStatus();
-    document.getElementById('runAllBtn').onclick();
-    console.log(JSON.stringify({{ starting, running, href: window.location.href,
-        banner: document.getElementById('batchStateAlert').style.display,
-        bannerText: document.getElementById('batchStateAlert').textContent }}));
+    await ctl.poll();
+    const s = last(views.live).lastRun;
+    const starting = {{ percent: s.percentText, counts: s.countsText, text: s.phaseText }};
+    await ctl.poll();
+    const r = last(views.live).lastRun;
+    const running = {{ percent: r.percentText, counts: r.countsText }};
+    await ctl.poll(); await tick(); await tick();
+    console.log(JSON.stringify({{ starting, running, banner: last(views.banner), waiting: last(views.live).waiting,
+        overviews: fetchLog.filter(f => f.url.startsWith('/api/overview')).map(f => f.url) }}));
 }})();
 """
     out = _node(script)
     assert out["starting"] == {"percent": "—", "counts": "", "text": "text:starting"}
     assert out["running"]["percent"] == "25%" and out["running"]["counts"].startswith("5 من 20 في هذا التشغيل")
-    assert out["href"] == "/batch-automation?tab=review"
-    assert out["banner"] == "block" and "Gemini لا يستجيب" in out["bannerText"]
-    assert '"/catalog"' not in read(INDEX)
+    assert out["banner"]["visible"] is True and "Gemini لا يستجيب" in out["banner"]["text"]
+    assert out["waiting"] == 3                                  # the sidebar badge's ready_for_review
+    assert out["overviews"] == ["/api/overview?refresh=1"]      # the run ended: read again past the caches
+    index = read(INDEX)
+    link = index[index.index('data-home="review-link"') - 200:index.index('data-home="review-link"')]
+    assert "route('dashboard.catalog')" in link                # the review list, not the run page
+    assert "?tab=review" not in index
 
 
 def test_confirm_texts_say_exactly_what_happens():
-    batch, index = read(BATCH), read(INDEX)
-    for text in (batch, index):
-        stop = text[text.index("const STOP_CONFIRM_TEXT"):]
-        stop = stop[:stop.index(";\n")]
-        assert "تعود الصفوف التي كانت قيد المعالجة إلى الانتظار" in stop
-        assert "لا يُحذف أي صف" in stop
+    run_js, batch, index = read(JS / "run.js"), read(BATCH), read(INDEX)
+    stop = run_js[run_js.index("var STOP_CONFIRM_TEXT"):]
+    stop = stop[:stop.index(";\n")]
+    assert "تعود الصفوف التي كانت قيد المعالجة إلى الانتظار" in stop
+    assert "لا يُحذف أي صف" in stop
+    for text in (run_js, batch, index, read(JS / "home.js")):
         assert "إنهاء قسري" not in text
-    reset = batch[batch.index("const RESET_CONFIRM_TEXT"):]
+    reset = run_js[run_js.index("var RESET_CONFIRM_TEXT"):]
     reset = reset[:reset.index(";\n")]
     assert "لا يُحذف أي منتج جاهز للمراجعة أو معتمد أو فاشل، ولا أي مرشح أو قرار مراجعة" in reset
-    assert "إصلاح تشغيل عالق" in batch and "تصفير وإعادة تعيين الحالة" not in batch
+    assert "إصلاح تشغيل عالق" in batch and "تصفير وإعادة تعيين الحالة" not in batch + run_js
+    # the page says the same next to the button, and the stop button exists only on the Run page
+    assert "الإيقاف ما بيحذف شي" in batch
+    assert "/api/stop-batch" not in index + read(JS / "home.js")

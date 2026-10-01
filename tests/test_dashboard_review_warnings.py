@@ -17,7 +17,8 @@ from catalog_match import variants as variants_mod
 
 ROOT = Path(__file__).resolve().parents[1]
 VIEWS = ROOT / "dashboard" / "resources" / "views" / "dashboard"
-BLADES = [VIEWS / "catalog.blade.php", VIEWS / "batch_automation.blade.php"]
+# The batch page's review grid moved to the review page (/catalog?mode=bulk); the Run page shows no candidates.
+BLADES = [VIEWS / "catalog.blade.php"]
 NODE = shutil.which("node")
 
 
@@ -58,12 +59,6 @@ def test_the_pick_cards_show_the_notice():
     assert "renderWarnings(c)" in card[:card.index("function renderCandidatesGrid")]
     recommended = catalog[catalog.index("function renderRecommendedCard"):]
     assert "renderWarnings(c)" in recommended[:recommended.index("function showProcessedPreview")]
-    batch = read(VIEWS / "batch_automation.blade.php")
-    row = batch[batch.index("function buildCurationRow"):]
-    assert "rowWarningsEl(selected)" in row[:row.index("function renderBatchCurationGrid")]
-    # a reviewer's other choice replaces the notice
-    select = batch[batch.index("function selectCurationThumb"):]
-    assert "rowWarningsEl(chosen)" in select[:select.index("openBatchRejectModal")]
 
 
 @pytest.mark.skipif(NODE is None, reason="node is not installed")

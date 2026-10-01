@@ -88,8 +88,9 @@ def test_search_falls_back_to_the_queue_payload(bridge, monkeypatch):
 
 
 def test_dashboard_search_bodies_send_size_identity():
+    # The batch page's review grid (inline search, single reject) moved to the review page (/catalog?mode=bulk);
+    # its request bodies are checked with that page.
     catalog = read(VIEWS / "dashboard" / "catalog.blade.php")
-    batch = read(VIEWS / "dashboard" / "batch_automation.blade.php")
 
     ctx = catalog[catalog.index("function currentProductContext"):]
     ctx = ctx[: ctx.index("};") + 2]
@@ -104,12 +105,6 @@ def test_dashboard_search_bodies_send_size_identity():
     reject = _json_body(catalog, "async function submitReject")
     for body in (search, reject):
         for token in ("size: ctx.size", "sub_category: ctx.sub_category", "origin: ctx.origin"):
-            assert token in body, (token, body)
-
-    inline = _json_body(batch, "async function triggerInlineSearch")
-    single_reject = _json_body(batch, "async function rejectAndReSearchCandidate")
-    for body in (inline, single_reject):
-        for token in ("size: p.size", "sub_category: p.sub_category", "origin: p.origin"):
             assert token in body, (token, body)
 
 
@@ -135,9 +130,13 @@ def test_every_element_id_the_script_reads_exists(name):
 
 
 def test_batch_progress_counts_lives_in_the_progress_panel():
+    # Home (Laqta): the current run's counts are written by public/js/home.js into the live block of the
+    # «آخر تشغيل» card, which exists in the page.
     index = read(VIEWS / "dashboard" / "index.blade.php")
-    panel = index[index.index('id="batchProgressPanel"'):index.index('id="stopBatchBtn"')]
-    assert 'id="batchProgressCounts"' in panel
+    panel = index[index.index('data-home="lastrun-live"'):index.index('data-home="lastrun-summary"')]
+    assert 'data-home="live-counts"' in panel
+    home = read(DASH / "public" / "js" / "home.js")
+    assert "$('live-counts')" in home
 
 
 # ---------------------------------------------------------------------------
@@ -175,10 +174,19 @@ def test_unknown_bg_removal_method_is_ignored(run_config):
 
 
 def test_batch_page_posts_the_selected_method():
-    batch = read(VIEWS / "dashboard" / "batch_automation.blade.php")
-    run_all = batch[batch.index("async function runAllAutomation"):]
-    run_all = run_all[: run_all.index("fetch('/api/run-all'")]
-    assert "bgRemovalMethod: document.getElementById('bgRemovalMethod').value" in run_all
+    # The Run page (Laqta) no longer has a background-removal selector (the worker uses the configured method);
+    # everything it does post must reach main.load_run_config, so no choice on the page is silently ignored.
+    run_js = read(DASH / "public" / "js" / "run.js")
+    body = run_js[run_js.index("function runBody(form)"):]
+    body = body[: body.index("\n    }\n")]
+    keys = re.findall(r"^\s*([A-Za-z_]+):", body, re.MULTILINE)
+    assert keys == ["row_filter", "brand_filter", "forceOverwrite", "skipCache"]
+    import inspect
+    import main
+    loader = inspect.getsource(main.load_run_config)
+    for key in keys:
+        assert f'"{key}"' in loader, key
+    assert "fetchJson('/api/run-all', { method: 'POST', body: body })" in run_js
 
 
 # ---------------------------------------------------------------------------
@@ -231,14 +239,6 @@ echo json_encode($out);
 def test_save_candidates_uses_the_shared_row_builder():
     text = read(DASH / "app" / "Http" / "Controllers" / "CurationController.php")
     assert "CandidateRow::optionalColumns($c, $skuKey, $runId)" in text
-
-
-def test_batch_normaliser_maps_the_tier_from_evidence():
-    batch = read(VIEWS / "dashboard" / "batch_automation.blade.php")
-    norm = batch[batch.index("function normalizeCurationCandidate"):]
-    norm = norm[: norm.index("\n    }\n")]
-    assert "identity_tier: c.identity_tier || ev.tier" in norm
-    assert "page_url: String(c.page_url || ev.page_url" in norm
 
 
 def test_catalog_reject_with_research_persists_the_fresh_candidates():

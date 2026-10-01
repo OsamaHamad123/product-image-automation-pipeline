@@ -334,7 +334,7 @@ class ApiController extends Controller
     {
         $state = null;
         try {
-            $stateRow = \DB::select("SELECT * FROM automation_state WHERE `key` = 'active_session' LIMIT 1");
+            $stateRow = \DB::select("SELECT *, TIMESTAMPDIFF(SECOND, updated_at, NOW()) AS lq_age_s FROM automation_state WHERE `key` = 'active_session' LIMIT 1");
             $state = $stateRow[0] ?? null;
         } catch (\Exception $e) {
             // Table not loaded yet
@@ -402,6 +402,12 @@ class ApiController extends Controller
             'failed_by_code' => $counters['by_failure_code'],
             // حالة المحقق/المزودين كما يكتبها العامل (مثلاً نموذج Gemini غير متاح)
             'notice' => $notice,
+            // صفحة التشغيل (إضافة فقط): حالة قفل العامل، وسبب عرض «إصلاح تشغيل عالق» ('' = التشغيل غير عالق)
+            'worker' => $process['state'],
+            'state_age_s' => isset($state->lq_age_s) ? (int) $state->lq_age_s : null,
+            'stuck' => QueueStats::stuckReason($phase, $process['state'], $status,
+                (int) ($counters['by_status']['processing'] ?? 0),
+                isset($state->lq_age_s) ? (int) $state->lq_age_s : null, $pauseRequested),
         ];
 
         return response()->json($response)->header('Cache-Control', 'no-store');
