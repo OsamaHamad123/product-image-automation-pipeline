@@ -48,7 +48,7 @@ CHANGED_BLADES = [
     VIEWS / "dashboard" / "index.blade.php",
     VIEWS / "dashboard" / "settings.blade.php",
     VIEWS / "dashboard" / "diagnostics.blade.php",
-    VIEWS / "layouts" / "layout.blade.php",
+    VIEWS / "layouts" / "laqta.blade.php",
 ]
 
 # The review screen (catalog.blade.php) loads its JavaScript from files instead of an inline block.
@@ -191,7 +191,8 @@ def test_fake_flows_removed():
     for gone in ("BiRefNet", "GraphRAG", "Swarm", "GRPO", "0.923", "enterprise-metrics", "EventSource", "8001"):
         assert gone not in index, gone
 
-    layout = read(VIEWS / "layouts" / "layout.blade.php")
+    assert not (VIEWS / "layouts" / "layout.blade.php").exists()   # every page uses layouts/laqta
+    layout = read(VIEWS / "layouts" / "laqta.blade.php")
     assert "fix-broken-image-link" not in layout
     assert "data-healing-active" not in layout
 

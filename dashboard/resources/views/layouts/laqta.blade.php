@@ -98,12 +98,16 @@
         var RUNNING = { running: 1, pre_caching: 1, starting: 1, processing: 1, queued: 1, resuming: 1 };
         var PAUSED = { paused: 1, pausing: 1 };
         var FAILED = { error: 1, provider_down: 1, failed: 1 };
+        var PHASES = { starting: 'running', running: 'running', paused: 'paused', stopping: 'stopping',
+                       error: 'error', review: 'idle', idle: 'idle' };
         var COPY = {
             loading: { label: 'لحظة…', text: 'جارٍ قراءة حالة التشغيل…', link: 'صفحة التشغيل ←' },
             idle: { label: 'جاهز', text: 'لا يوجد تشغيل الآن', link: 'ابدأ تشغيلاً جديداً ←' },
             running: { label: 'يعمل', text: 'جارٍ تجهيز التشغيل…', link: 'عرض التفاصيل ←' },
             paused: { label: 'متوقف مؤقتاً', text: 'التشغيل متوقف مؤقتاً', link: 'عرض التفاصيل ←' },
+            stopping: { label: 'عم يوقف', text: 'بيكمّل المنتج الحالي وبيوقف', link: 'عرض التفاصيل ←' },
             error: { label: 'توقف بعطل', text: 'توقف التشغيل بسبب عطل.', link: 'عرض التفاصيل ←' },
+            stuck: { label: 'عالق', text: 'التشغيل عالق', link: 'صفحة التشغيل ←' },
             unknown: { label: 'غير معروف', text: 'تعذّر قراءة حالة التشغيل', link: 'صفحة التشغيل ←' }
         };
         // Worker notices are "CODE: message | CODE: message"; show plain Arabic instead of the codes.
@@ -186,8 +190,15 @@
             var notice = firstOf(both, ['notice', 'message']);
             var review = toCount(firstOf([root.counts, run.counts, root, root.queue, run], ['ready_for_review', 'review_count']));
 
+            // /api/batch-status says what the Run page says: its phase, the Arabic alert and why a run is stuck
+            var phase = toText(firstOf(both, ['phase'])).toLowerCase();
+            var stuck = toText(firstOf(both, ['stuck']));
+            var alert = toText(firstOf(both, ['alert']));
+
             var state = 'idle';
-            if (FAILED[status]) state = 'error';
+            if (stuck) state = 'stuck';
+            else if (PHASES[phase]) state = PHASES[phase];
+            else if (FAILED[status]) state = 'error';
             else if (PAUSED[status]) state = 'paused';
             else if (RUNNING[status] || runningFlag) state = pauseFlag ? 'paused' : 'running';
 
@@ -197,7 +208,8 @@
                 total: total,
                 done: done,
                 rows: rowsLabel(run),
-                notice: plainNotice(notice),
+                notice: alert || plainNotice(notice),
+                stuck: stuck,
                 product: toText(firstOf(both, ['current_product', 'current_product_name'])),
                 reviewCount: review
             };
@@ -207,7 +219,7 @@
             var state = n && COPY[n.state] ? n.state : 'unknown';
             var copy = COPY[state];
             var out = { state: state, label: copy.label, text: copy.text, count: '', pct: null, link: copy.link };
-            if (state === 'running' || state === 'paused') {
+            if (state === 'running' || state === 'paused' || state === 'stopping') {
                 if (n.total && n.total > 0) {
                     var done = Math.min(n.done || 0, n.total);
                     out.text = n.rows ? 'الصفوف ' + n.rows : 'المنتجات';
@@ -216,6 +228,8 @@
                 }
             } else if (state === 'error') {
                 out.text = n.notice || (n.status === 'provider_down' ? NOTICE_TEXT.PROVIDER_DOWN : copy.text);
+            } else if (state === 'stuck') {
+                out.text = n.stuck || copy.text;
             }
             return out;
         }

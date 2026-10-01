@@ -135,11 +135,10 @@ def test_curation_reject_forwards_size_identity_to_the_bridge():
 @pytest.mark.parametrize("name", ["index", "catalog", "batch_automation"])
 def test_every_element_id_the_script_reads_exists(name):
     text = read(VIEWS / "dashboard" / f"{name}.blade.php")
-    layout = read(VIEWS / "layouts" / "layout.blade.php")
+    layout = read(VIEWS / "layouts" / "laqta.blade.php")
     if name == "catalog":
-        # the review screen: its Blade shell, the Laqta layout and the scripts that build the page
+        # the review screen: its Blade shell and the scripts that build the page
         text += read(VIEWS / "review" / "shell.blade.php") + review_js()
-        layout = read(VIEWS / "layouts" / "laqta.blade.php")
     ids = set(re.findall(r'id="([^"{]+)"', text + layout)) | set(re.findall(r"id:\s*'([^']+)'", text))
     refs = set(re.findall(r"getElementById\('([^'\s]+)'\)", text))
     assert not refs - ids, sorted(refs - ids)

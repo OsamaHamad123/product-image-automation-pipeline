@@ -11,14 +11,12 @@ PHP or node checks are skipped when the binary is not installed.
 
 import json
 import os
-import re
 import shutil
 import subprocess
 import tempfile
 from pathlib import Path
 
 import pytest
-from blade_scripts import inline_scripts
 
 ROOT = Path(__file__).resolve().parents[1]
 DASH = ROOT / "dashboard"
@@ -27,7 +25,7 @@ CONTROLLER = DASH / "app" / "Http" / "Controllers" / "ApiController.php"
 QUEUE_STATS = DASH / "app" / "Services" / "QueueStats.php"
 BATCH = VIEWS / "dashboard" / "batch_automation.blade.php"
 INDEX = VIEWS / "dashboard" / "index.blade.php"
-LAYOUT = VIEWS / "layouts" / "layout.blade.php"
+LAYOUT = VIEWS / "layouts" / "laqta.blade.php"
 JS = DASH / "public" / "js"
 RUN_JS = [JS / "run-common.js", JS / "run.js"]         # the Run page (batch_automation.blade.php)
 HOME_JS = [JS / "run-common.js", JS / "home.js"]       # the Home page (index.blade.php)
@@ -214,93 +212,6 @@ def test_alert_texts_are_arabic():
 # Views under node with a stub DOM
 # ---------------------------------------------------------------------------
 
-STUB_DOM = r"""
-const byId = {};
-const docListeners = {};
-const fetchLog = [];
-const alerts = [];
-let fetchHandler = () => ({});
-function matches(node, sel) {
-    let s = sel;
-    let needChecked = false;
-    if (s.endsWith(':checked')) { needChecked = true; s = s.slice(0, -8); }
-    if (needChecked && !node.checked) return false;
-    let m = s.match(/^([a-z]*)\[name="([^"]+)"\]$/);
-    if (m) return (!m[1] || node.tagName === m[1].toUpperCase()) && node.attributes.name === m[2];
-    if (s.startsWith('.')) {
-        const cls = s.slice(1);
-        return String(node.className || '').split(/\s+/).includes(cls) || node.classList._s.has(cls);
-    }
-    return node.tagName === s.toUpperCase();
-}
-function walk(node, out) { node.children.forEach(c => { out.push(c); walk(c, out); }); return out; }
-function allNodes() { const out = []; Object.values(byId).forEach(r => { out.push(r); walk(r, out); }); return out; }
-function makeEl(tag, id) {
-    const node = {
-        tagName: String(tag || 'div').toUpperCase(), id: id || '', children: [], parentNode: null,
-        style: {}, dataset: {}, attributes: {}, listeners: {}, disabled: false, checked: false, value: '',
-        className: '', innerHTML: '', title: '', _text: '', scrollTop: 0, scrollHeight: 0,
-        classList: { _s: new Set(), add(c) { this._s.add(c); }, remove(c) { this._s.delete(c); },
-                     contains(c) { return this._s.has(c); } },
-        get textContent() { return this._text + this.children.map(c => c.textContent).join(''); },
-        set textContent(v) { this._text = String(v); this.children = []; },
-        get innerText() { return this.textContent; },
-        set innerText(v) { this.textContent = v; },
-        appendChild(c) { c.parentNode = this; this.children.push(c); return c; },
-        after(c) { if (this.parentNode) { const k = this.parentNode.children; k.splice(k.indexOf(this) + 1, 0, c); c.parentNode = this.parentNode; } },
-        remove() { if (this.parentNode) { const k = this.parentNode.children; k.splice(k.indexOf(this), 1); this.parentNode = null; } },
-        setAttribute(k, v) { this.attributes[k] = String(v); if (k === 'id') this.id = String(v); },
-        getAttribute(k) { return this.attributes[k]; },
-        addEventListener(t, fn) { (this.listeners[t] = this.listeners[t] || []).push(fn); },
-        click() { (this.listeners.click || []).forEach(fn => fn({ stopPropagation() {}, preventDefault() {} })); },
-        querySelectorAll(sel) { return walk(this, []).filter(n => matches(n, sel)); },
-        querySelector(sel) { return this.querySelectorAll(sel)[0] || null; },
-        closest(sel) { let n = this; while (n) { if (matches(n, sel)) return n; n = n.parentNode; } return null; },
-        scrollIntoView() {}, focus() {}
-    };
-    return node;
-}
-globalThis.document = {
-    getElementById(id) {
-        const found = allNodes().find(n => n.id === id);
-        if (found) return found;
-        byId[id] = makeEl('div', id);
-        return byId[id];
-    },
-    createElement: (t) => makeEl(t),
-    createTextNode: (t) => { const n = makeEl('#text'); n._text = String(t); return n; },
-    querySelector(sel) {
-        if (sel.startsWith('meta')) return { content: 'token', getAttribute: () => 'token' };
-        return this.querySelectorAll(sel)[0] || null;
-    },
-    querySelectorAll(sel) { return allNodes().filter(n => matches(n, sel)); },
-    addEventListener(t, fn) { (docListeners[t] = docListeners[t] || []).push(fn); },
-    activeElement: { tagName: 'BODY' },
-    body: makeEl('body')
-};
-globalThis.window = { location: { search: '', href: '', reload() { fetchLog.push('RELOAD'); } },
-                      addEventListener() {} };
-globalThis.location = window.location;
-globalThis.confirm = () => true;
-globalThis.alert = (m) => alerts.push(String(m));
-globalThis.setInterval = () => 0;
-const store = {};
-globalThis.localStorage = { getItem: k => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = String(v); },
-                            removeItem: k => { delete store[k]; } };
-globalThis.fetch = (url, opts) => {
-    fetchLog.push(url);
-    return Promise.resolve(fetchHandler(url, opts)).then(body => ({ status: 200, json: async () => body }));
-};
-const tick = () => new Promise(r => setTimeout(r, 0));
-function setDisplay(ids) { Object.entries(ids).forEach(([id, d]) => { document.getElementById(id).style.display = d; }); }
-"""
-
-
-def _page_script(path: Path, index: int = -1) -> str:
-    blocks = inline_scripts(read(path))
-    return re.sub(r"\{\{.*?\}\}", "''", blocks[index])
-
-
 def _node(script: str):
     result = subprocess.run([NODE, "-e", script], capture_output=True, text=True, timeout=60, encoding="utf-8")
     assert result.returncode == 0, result.stderr
@@ -465,32 +376,13 @@ def test_old_review_tab_link_opens_the_bulk_review():
     assert "?tab=review" not in read(INDEX)
 
 
-@pytest.mark.skipif(NODE is None, reason="node is not installed")
-def test_sidebar_widget_states():
-    script = STUB_DOM + _page_script(LAYOUT, 0) + f"""
-const cases = {json.dumps([_status("error", alert="x"), _status("review", ready_for_review=4), _status("idle"),
-                           _status("starting", is_running=True), _status("running", is_running=True)],
-                          ensure_ascii=False)};
-(async () => {{
-    const out = [];
-    for (const c of cases) {{
-        fetchHandler = () => c;
-        await updateSidebarStatus();
-        out.push({{ label: document.getElementById('stateLabel').innerText,
-                    color: document.getElementById('stateDot').style.color,
-                    progress: document.getElementById('stateProgressContainer').style.display,
-                    text: document.getElementById('stateProgressText').innerText }});
-    }}
-    console.log(JSON.stringify(out));
-}})();
-"""
-    error, review, idle, starting, running = _node(script)
-    assert error["color"] == "var(--danger)" and "خطأ" in error["label"]
-    assert review["label"] == "بانتظار الفرز والاعتماد البشري (4)"
-    assert idle["label"] == "جاهز: لا توجد منتجات بانتظار المراجعة" and "خامل" not in idle["label"]
-    assert starting["label"] == "جاري قراءة الشيت وتجهيز الطابور…" and starting["progress"] == "none"
-    assert running["progress"] == "block" and running["text"] == "5/20 منتج"        # per-run numbers
-    assert "جاهز وخامل" not in read(LAYOUT)
+def test_sidebar_run_card_speaks_the_run_states():
+    """The Laqta sidebar card (layouts/laqta) reads the same phase, alert and stuck fields as the Run page.
+    Its behaviour is run under node in tests/test_laqta_ui.py::test_run_card_follows_the_run_pages_phase_alert_and_stuck."""
+    layout = read(LAYOUT)
+    for field in ("'phase'", "'stuck'", "'alert'"):
+        assert field in layout, field
+    assert "جاهز وخامل" not in layout and "خامل" not in layout
 
 
 @pytest.mark.skipif(NODE is None, reason="node is not installed")

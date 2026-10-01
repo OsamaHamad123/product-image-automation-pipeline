@@ -534,6 +534,13 @@ html:has(.lq-body) {
 .lq-runcard[data-state="error"] .lq-runcard__state { color: var(--lq-danger-on-dark); }
 .lq-runcard[data-state="error"] .lq-runcard__dot { background: var(--lq-danger-dot); }
 .lq-runcard[data-state="error"] .lq-runcard__text { color: #FBD5D7; }
+.lq-runcard[data-state="stopping"] .lq-runcard__state { color: #FCD34D; }
+.lq-runcard[data-state="stopping"] .lq-runcard__dot { background: var(--lq-saffron-500); }
+.lq-runcard[data-state="stopping"] .lq-runcard__fill { background: var(--lq-saffron-500); }
+.lq-runcard[data-state="stuck"] { border-color: rgba(229, 72, 77, 0.55); background: #2A1F27; }
+.lq-runcard[data-state="stuck"] .lq-runcard__state { color: var(--lq-danger-on-dark); }
+.lq-runcard[data-state="stuck"] .lq-runcard__dot { background: var(--lq-danger-dot); }
+.lq-runcard[data-state="stuck"] .lq-runcard__text { color: #FBD5D7; }
 
 .lq-runcard[data-state="unknown"] .lq-runcard__text,
 .lq-runcard[data-state="loading"] .lq-runcard__text,

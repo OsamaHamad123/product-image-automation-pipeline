@@ -299,7 +299,7 @@ def test_run_card_copy_matches_the_layout_script():
         read(COMPONENTS / "run-card.blade.php"))}
     js = {state: rest for state, *rest in re.findall(
         r"(\w+): \{ label: '([^']*)', text: '([^']*)', link: '([^']*)' \}", _script_blocks(LAYOUT)[0])}
-    assert set(php) == {"loading", "idle", "running", "paused", "error", "unknown"}
+    assert set(php) == {"loading", "idle", "running", "paused", "stopping", "error", "stuck", "unknown"}
     assert php == js
     assert php["idle"][1] == "لا يوجد تشغيل الآن"
 
@@ -338,6 +338,15 @@ RUN_STATUS_CASES = {
     "future_error": {"run": {"status": "provider_down", "notice": "GEMINI_DOWN: Gemini لا يستجيب"}},
     "future_idle": {"run": None, "counts": {"ready_for_review": 0}},
     "overflow": {"is_running": True, "status": "running", "total": 10, "current": 12},
+    # the fields Phase 1 and the Run page added: phase, the Arabic alert, and why a run is stuck
+    "phase_stopping": {"is_running": True, "status": "running", "phase": "stopping", "total": 8, "current": 3,
+                       "stop_requested": 1},
+    "phase_review": {"is_running": False, "status": "curation_pending", "phase": "review", "ready_for_review": 4},
+    "phase_error_alert": {"is_running": False, "status": "error", "phase": "error",
+                          "alert": "تعذر الوصول إلى Google Sheet: تأكد من الرابط.",
+                          "notice": "SHEETS_UNAVAILABLE: Google Sheets connection failed"},
+    "stuck_dead_worker": {"is_running": False, "status": "running", "phase": "idle", "total": 5, "current": 2,
+                          "stuck": "الحالة بتقول إنو في تشغيل، بس ما في عامل شغّال بالخلفية."},
     # garbage never throws
     "null": None,
     "list": [1, 2],
@@ -412,6 +421,20 @@ def test_run_card_error_states_speak_plain_arabic(run_status):
     assert run_status["future_error"]["view"]["text"] == "Gemini لا يستجيب."
     for name in ("sheets_error", "provider_down", "future_error"):
         assert run_status[name]["view"]["pct"] is None, name
+
+
+def test_run_card_follows_the_run_pages_phase_alert_and_stuck(run_status):
+    """The sidebar says what the Run page says (same /api/batch-status fields): no «يعمل» on a stuck run."""
+    stopping = run_status["phase_stopping"]["view"]
+    assert (stopping["state"], stopping["label"], stopping["count"]) == ("stopping", "عم يوقف", "3 / 8")
+    review = run_status["phase_review"]
+    assert review["view"]["state"] == "idle" and review["n"]["reviewCount"] == 4
+    error = run_status["phase_error_alert"]["view"]
+    assert error["state"] == "error" and error["text"] == "تعذر الوصول إلى Google Sheet: تأكد من الرابط."
+    stuck = run_status["stuck_dead_worker"]["view"]
+    assert (stuck["state"], stuck["label"]) == ("stuck", "عالق")
+    assert stuck["text"] == "الحالة بتقول إنو في تشغيل، بس ما في عامل شغّال بالخلفية."
+    assert stuck["pct"] is None and stuck["count"] == ""
 
 
 def test_run_card_reads_the_future_run_object(run_status):
