@@ -382,6 +382,7 @@ def test_the_replay_decides_exactly_as_the_recording_offline(recorded, tmp_path)
         assert r["replay"]["complete"] and not r["replay"]["approximate"], r["replay"]
         assert r["replay"]["misses"] == [] and r["replay"]["answers"] > 0
     assert doc["replay"]["outbound_attempts"] == 0 and doc["replay"]["complete"] == 4
+    assert doc["replay"]["compared_rows"] == 4 and doc["replay"]["changed_vs_recording"] == {}
     assert doc["format"] == "smoke_live/2" and doc["summary"]["rows"] == 4
     assert not (tmp_path / "replayed.misses.json").exists()
     # compare_runs.py reads the replay like any dry run: nothing changed
@@ -487,6 +488,33 @@ def test_a_changed_prompt_reuses_the_recorded_readings_and_says_so(recorded, tmp
     for r in doc["rows"]:
         assert r["replay"]["complete"] and r["replay"]["approximate"], r["replay"]
         assert any("another recorded call" in a for a in r["replay"]["approximations"])
+
+
+def test_a_changed_scoring_rule_still_replays_and_says_what_it_approximated(recorded, tmp_path):
+    from catalog_match import pipeline
+
+    real = pipeline.score_candidate
+
+    def stricter(spec, cand, negatives=None):          # a new rule rejects one of row 2's listings
+        score = real(spec, cand, negatives)
+        if cand.image_url.endswith("/a2.jpg"):
+            return dataclasses.replace(score, tier=None, hard_reject=tuple(score.hard_reject) + ("test_rule",))
+        return score
+
+    with mock.patch.object(pipeline, "score_candidate", stricter):
+        code, doc = replay(recorded["folder"], tmp_path / "rule.json")
+    assert code == 0
+    rows = {r["row"]: r for r in doc["rows"]}
+    assert rows[2]["winner"] == "https://cdn.carrefouruae.com/a1.jpg"
+    assert any("test_rule" in " ".join(c["reasons"]) + c["evidence"] for c in rows[2]["top"]
+               if c["image_url"].endswith("/a2.jpg"))
+    # row 2's label reader now gets a batch of one image: never recorded, so the reading of that image from the
+    # recorded batch of two is used, and the row says so
+    assert rows[2]["replay"]["complete"] and rows[2]["replay"]["approximate"]
+    assert list(doc["replay"]["changed_vs_recording"]) == ["2"]          # its top 5 moved: the rule's effect
+    for n in (3, 4, 5):
+        assert view(rows[n]) == view(next(r for r in recorded["doc"]["rows"] if r["row"] == n))
+        assert rows[n]["replay"]["complete"] and not rows[n]["replay"]["approximate"]
 
 
 def test_shadow_recording_leaves_the_live_decisions_alone_and_stores_more(recorded, tmp_path, capsys):

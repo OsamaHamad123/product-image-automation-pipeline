@@ -50,8 +50,8 @@ Record once, replay for free (catalog_match/cassette.py):
 
 --record DIR stores every answer the run gets from outside (search responses, image downloads, product
 pages, label-reader replies, the local-index rows and the wall-clock decisions) in the folder DIR, without
-any key, header or token; the run itself is unchanged. The folder holds 100-250 MB for 60 rows and is
-ignored by version control (runs/ and cassette_*/): zip it to send it. --record-shadow also stores, after
+any key, header or token; the run itself is unchanged. The folder holds 100-250 MB for 60 rows (about
+twice that with --record-shadow) and is ignored by version control (runs/ and cassette_*/): zip it to send it. --record-shadow also stores, after
 each row's decision is made, answers a later code version may ask for (every pooled image up to 24, the
 pages of the tier-1/2 listings, the retailer web search and the shopping search for a row without a pick,
 one label reading of every downloaded image); it costs a little more, printed at the end. A replay that
@@ -1476,6 +1476,13 @@ def _folder_mb(path):
     return total / (1024 * 1024)
 
 
+def recorded_decisions(results):
+    """What each row decided live (a replay of the same code must decide the same): row -> decision and pick."""
+    return {str(r.get("row")): {"decision": r.get("decision", "ERROR"), "failure_code": r.get("failure_code"),
+                                "winner": r.get("winner"), "top": [c.get("image_url") for c in r.get("top") or []]}
+            for r in results}
+
+
 def start_cassette(args, rows, mappings, meta, expansion, secrets):
     """Install the --record cassette (mode 'fill' with --fill-misses); None without --record."""
     if not args.record:
@@ -1504,7 +1511,7 @@ def finish_cassette(cas, args, results):
     if cas.mode == "record":
         meta.update(finished_at=dt.datetime.now().isoformat(timespec="seconds"),
                     rows_recorded=[r.get("row") for r in results], answers=cas.counts["recorded"],
-                    shadow=totals if shadow else None)
+                    shadow=totals if shadow else None, decisions=recorded_decisions(results))
     else:
         meta.setdefault("fills", []).append({
             "at": dt.datetime.now().isoformat(timespec="seconds"), "git": git_info(),

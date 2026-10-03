@@ -33,8 +33,9 @@ Layout of a cassette (a directory, or a zip of one; a zip is read-only):
     blobs/<sha256>     bodies of images; '<sha256>.gz' gzip-compressed pages and large API bodies
 
 Secrets never enter a cassette: requests are stored without headers; query and body parameters named like a
-key (api_key, key, cx, X-API-KEY, Authorization, token, ...) are dropped; exception texts and every stored line
-pass the caller's redact() (scripts/smoke_live.py passes its redact() over the configured secret values).
+key (api_key, key, cx, X-API-KEY, Authorization, token, ...) are dropped; an exception text loses any 'key=...'
+value; every stored line passes the caller's redact() (scripts/smoke_live.py passes its redact() over the
+configured secret values). meta.json keeps only whether each secret setting was set (or how many keys).
 
 Keys: method + canonical URL (+ the JSON body of a POST); a search text ('q') is case-folded with its
 whitespace collapsed; an image download is also found under providers.base.canonical_image_url of its URL;
@@ -69,7 +70,6 @@ import os
 import re
 import socket
 import threading
-import time
 import uuid
 import zipfile
 from typing import Any, Callable, Dict, Iterable, Iterator, List, Mapping, Optional, Sequence, Tuple
@@ -1441,7 +1441,3 @@ def offline(attempts: Optional[List[str]] = None) -> Iterator[List[str]]:
             stack.enter_context(p)
         yield attempts
 
-
-def wall_clock() -> float:
-    """time.time(), for the run's own meta (kept here so a test can pin it)."""
-    return time.time()

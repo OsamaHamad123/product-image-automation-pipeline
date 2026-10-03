@@ -24,6 +24,9 @@ misses     what it asked for and the cassette does not hold (a provider call fai
 approximate a label reading came from another recorded call of the same row and model (another batch or
            prompt), or an index lookup or deadline was not recorded for exactly this request.
 
+The replay summary also counts the rows that decided as the recording did live (decision, pick and top 5,
+kept in the cassette's meta.json): with the recording's own code every complete row must.
+
 When a row missed answers, the misses are also written to a manifest (--misses, by default next to --json as
 <name>.misses.json). On the machine with the keys,
     smoke_live.py --record runs\\cassette_2026-10 --fill-misses replayed.misses.json
@@ -203,6 +206,13 @@ def print_replay(report):
         print(f"    approx  {note}")
 
 
+def changed_vs_recording(results, recorded):
+    """Rows whose decision, pick or top 5 differ from what the recording decided live ({} when unknown)."""
+    now = smoke_live.recorded_decisions(results)
+    return {row: {"recorded": recorded[row], "replayed": now[row]} for row in now
+            if row in recorded and recorded[row] != now[row]}
+
+
 def replay_summary(results):
     rows = [r for r in results if isinstance(r.get("replay"), dict)]
     by_kind = {}
@@ -231,6 +241,11 @@ def format_replay_summary(s):
                      "the decisions of those rows may differ from the live services'")
     else:
         lines.append("every answer the code asked for was in the cassette")
+    if s.get("compared_rows"):
+        changed = sorted(s["changed_vs_recording"], key=int)
+        lines.append(f"vs the recorded run: {s['compared_rows'] - len(changed)} of {s['compared_rows']} rows decided "
+                     f"the same (decision, pick, top 5)"
+                     f"{'; changed: ' + smoke_live._rows_text([int(n) for n in changed]) if changed else ''}")
     return "\n".join(lines)
 
 
@@ -295,6 +310,9 @@ def run(args):
     print(smoke_live.format_summary(summary))
     rsum = replay_summary(results)
     rsum["outbound_attempts"] = len(outbound)
+    recorded = meta.get("decisions") or {}
+    rsum["compared_rows"] = sum(1 for r in results if str(r.get("row")) in recorded)
+    rsum["changed_vs_recording"] = changed_vs_recording(results, recorded)
     print(format_replay_summary(rsum))
     manifest.update(created_at=dt.datetime.now().isoformat(timespec="seconds"), git_commit=here_git)
     misses_path = args.misses or (os.path.splitext(args.json)[0] + ".misses.json" if args.json else None)
