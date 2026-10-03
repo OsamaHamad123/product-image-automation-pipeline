@@ -726,6 +726,8 @@ def _published_response(res, sku_key, row_number, **extra):
                     **extra)
     if res.get("rows_failed"):
         response['rows_failed'] = res["rows_failed"]
+    if res.get("quality_flags"):
+        response['quality_flags'] = list(res["quality_flags"])     # فحص جودة القص (لماذا لم تُعزل الخلفية)
     warnings = []
     if not res["isolated"]:
         warnings.append('background_not_removed')

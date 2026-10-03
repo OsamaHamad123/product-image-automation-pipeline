@@ -361,6 +361,26 @@ def test_select_not_isolated_writes_needs_review(select_env):
     assert link[3].startswith("needs_review:https://res.cloudinary.com/")
 
 
+def test_a_cutout_that_failed_the_quality_gate_stays_needs_review(select_env, monkeypatch):
+    """The image package returns a cutout that failed its quality gate as not isolated (with quality_flags when
+    it provides them): written with the needs_review: prefix, never as a clean publish, and the flags reach the page."""
+    import image_processor
+    bridge, events, state = select_env
+    original = image_processor.process_product_image_result
+
+    def gated(*a, **k):
+        result = original(*a, **k)
+        result.isolated = False
+        result.quality_flags = ["halo_fringe"]
+        return result
+
+    monkeypatch.setattr(image_processor, "process_product_image_result", gated)
+    result = bridge.action_select_image(dict(SELECT_PARAMS))
+    assert result["status"] == "success" and result["warning"] == "background_not_removed"
+    assert result["quality_flags"] == ["halo_fringe"]
+    assert next(e for e in events if e[0] == "link")[3].startswith("needs_review:")
+
+
 def test_select_requires_identity(select_env, monkeypatch):
     bridge, events, state = select_env
     import local_cache_db
