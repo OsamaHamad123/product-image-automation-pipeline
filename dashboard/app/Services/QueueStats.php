@@ -149,6 +149,8 @@ class QueueStats
         'VERIFIER_NOT_CONFIGURED_CLAUDE' => 'نموذج القراءة الأساسي من Claude ولا يوجد مفتاح Anthropic: كل النتائج تذهب للمراجعة البشرية ولا يُنشر أي شيء تلقائياً.',
         'VERIFIER_UNAVAILABLE' => 'نموذج Gemini غير متاح: كل النتائج تذهب للمراجعة البشرية.',
         'VERIFIER_CHECK_FAILED' => 'تعذر فحص نموذج Gemini عند بدء العامل: كل النتائج تذهب للمراجعة البشرية.',
+        'BUDGET_REACHED' => 'بلغ صرف اليوم الميزانية اليومية للبحث (DAILY_BUDGET_USD)، فتوقف العامل وبقيت الصفوف المتبقية في الانتظار. يكمل التشغيل التالي في يوم جديد أو بعد رفع الميزانية.',
+        'DB_UNAVAILABLE' => 'تعذر الوصول إلى قاعدة البيانات فتوقف العامل، وبقيت الصفوف المتبقية في الانتظار.',
     ];
 
     /** Codes whose detail (the sheet error or the Arabic enqueue error) is shown after the sentence. */

@@ -190,6 +190,9 @@ def test_alert_texts_are_arabic():
         "verifier": ("pre_caching", "VERIFIER_NOT_CONFIGURED: no Gemini key, every result goes to human review", True),
         "gemini": ("curation_pending", "GEMINI_DOWN: Gemini لا يستجيب", False),
         "unknown": ("idle", "SOMETHING_NEW: raw text", False),
+        "budget": ("idle", "BUDGET_REACHED: daily search budget 5.00 USD reached (spent 5.01); remaining rows stay "
+                           "pending", False),
+        "db": ("error", "DB_UNAVAILABLE: database unreachable", False),
         "error_without_notice": ("error", "", False),
         "idle": ("idle", "", False),
     }
@@ -204,6 +207,8 @@ def test_alert_texts_are_arabic():
     assert out["verifier"].startswith("لا يوجد مفتاح Gemini")
     assert out["gemini"] == "Gemini لا يستجيب"
     assert out["unknown"] == "SOMETHING_NEW: raw text"
+    assert out["budget"].startswith("بلغ صرف اليوم الميزانية اليومية") and "USD" not in out["budget"]
+    assert out["db"].startswith("تعذر الوصول إلى قاعدة البيانات")
     assert out["error_without_notice"].startswith("توقف التشغيل بسبب خطأ غير معروف")
     assert out["idle"] == ""
 
