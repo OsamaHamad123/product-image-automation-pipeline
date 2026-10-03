@@ -12,6 +12,39 @@ def calculate_hamming_distance(hash_a: int, hash_b: int) -> int:
     return bin(hash_a ^ hash_b).count('1')
 
 
+# v2 (catalog_match.fetch.phash_hex) stores the hash as exactly 16 hex digits; the legacy v1
+# path stored str(int), a decimal number. calculate_phash never sets the top bit (63 bits).
+PHASH_HEX_DIGITS = 16
+_PHASH_LIMIT = 2 ** 63
+
+
+def parse_phash(value):
+    """
+    A stored pHash as an int, or None when it is missing or malformed.
+    Accepts an int, a v2 hex string ('0a1b...', 16 digits, optional '0x') and a legacy decimal string.
+    A 16-character string is read as hex (the current format) unless that value is too large to be a
+    pHash; any other all-digit string is the legacy decimal form.
+    """
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value > 0 else None
+    text = str(value).strip().lower()
+    if text.startswith("0x"):
+        text, base = text[2:], 16
+    elif any(c in "abcdef" for c in text):
+        base = 16
+    elif len(text) == PHASH_HEX_DIGITS and text.isdigit() and int(text, 16) < _PHASH_LIMIT:
+        base = 16
+    else:
+        base = 10
+    try:
+        parsed = int(text, base)
+    except ValueError:
+        return None
+    return parsed if parsed > 0 else None
+
+
 def calculate_phash(image_input) -> int:
     """
     حساب الهاش الإدراكي (Perceptual Hash - pHash) للصور:
@@ -153,9 +186,8 @@ def build_bktree_from_db():
         return tree
 
     for row in rows:
-        try:
-            phash_value = int(row["perceptual_hash"])
-        except (TypeError, ValueError):
+        phash_value = parse_phash(row["perceptual_hash"])
+        if phash_value is None:
             continue
         tree.insert_node(
             phash_value,
@@ -184,9 +216,8 @@ def remember_image(phash_value, image_id: str, cloudinary_url: str, product_name
     run is checked against it. Does nothing until the tree has been built: the
     first build reads this row from the database anyway.
     """
-    try:
-        phash_int = int(phash_value)
-    except (TypeError, ValueError):
+    phash_int = parse_phash(phash_value)
+    if phash_int is None:
         return
     with _shared_tree_lock:
         if _shared_tree is not None:

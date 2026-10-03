@@ -5,6 +5,10 @@
 #   (بدون e_trim / c_fit / c_pad / e_sharpen، وبدون مشتقات eager).
 # - مهلة 60 ثانية لكل رفع، وإعادة المحاولة مرتين عند الاستثناءات المؤقتة أو أخطاء 5xx.
 # - مقاطع المجلد تحوَّل إلى [a-z0-9_-] فقط ('100% Juice' -> '100_juice').
+# - استجابة الرفع تُفحص: الحجم بالبايت والأبعاد و etag (بصمة md5) يجب أن تطابق ما أُرسل عندما تذكرها
+#   Cloudinary؛ أي اختلاف يعني أن الأصل المخزن ليس الصورة التي تحققنا منها فلا يُعاد رابطه.
+# - existing=True في الاستجابة يعني أن نفس البايتات مرفوعة سابقاً (public_id = md5 البايتات)؛ تُكشف
+#   للمستدعي عبر upload_product_image() ليعرف إذا نُشرت نفس الصورة لمنتجين.
 
 import hashlib
 import io
@@ -12,7 +16,8 @@ import logging
 import os
 import re
 import time
-from typing import Iterable, Optional
+from dataclasses import dataclass
+from typing import Iterable, Optional, Tuple
 
 import cloudinary
 import cloudinary.exceptions
@@ -47,6 +52,28 @@ cloudinary.config(
 )
 
 
+@dataclass
+class UploadResult:
+    """
+    نتيجة رفع اللوحة.
+    url: رابط التسليم، أو None عند أي فشل (بما فيه استجابة لا تطابق ما أُرسل).
+    public_id: معرّف الأصل في Cloudinary.
+    existing: True إذا كانت نفس البايتات مرفوعة سابقاً في نفس المجلد (Cloudinary أعاد الأصل الموجود).
+    content_md5: بصمة md5 للبايتات المرسلة (نفسها اسم الأصل)؛ تكشف نفس الصورة عبر مجلدات مختلفة.
+    error: upload_file_missing | upload_not_image | upload_failed | upload_bytes_mismatch |
+           upload_size_mismatch | upload_etag_mismatch، أو None.
+    """
+
+    url: Optional[str]
+    public_id: Optional[str] = None
+    existing: bool = False
+    content_md5: Optional[str] = None
+    error: Optional[str] = None
+
+
+_MD5_RE = re.compile(r"^[0-9a-f]{32}$")
+
+
 def _sleep(seconds: float) -> None:
     time.sleep(seconds)
 
@@ -77,7 +104,7 @@ def _prepare_payload(local_path: str):
     """
     يقرأ الملف ويتأكد أنه صورة. إذا كان يحتوي شفافية (مثلاً من مسار الرفع اليدوي القديم)
     يتم تسطيحه محلياً على لوحة بيضاء معتمة بالحجم القياسي، لأن التسليم لم يعد يضيف خلفية.
-    يعيد (مصدر الرفع، البيانات) أو (None، None) إذا لم يكن الملف صورة.
+    يعيد (مصدر الرفع، البيانات، (العرض، الارتفاع)) أو (None، None، None) إذا لم يكن الملف صورة.
     """
     from PIL import Image
 
@@ -86,14 +113,15 @@ def _prepare_payload(local_path: str):
     try:
         with Image.open(io.BytesIO(data)) as img:
             img.load()
+            size = img.size
             has_alpha = img.mode in ("RGBA", "LA", "PA") or "transparency" in img.info
             rgba = img.convert("RGBA") if has_alpha else None
     except Exception as exc:  # noqa: BLE001
         logger.error("[Cloudinary] الملف ليس صورة صالحة ولن يتم رفعه: %s (%s)", local_path, exc)
-        return None, None
+        return None, None, None
 
     if rgba is None or rgba.getchannel("A").getextrema()[0] == 255:
-        return local_path, data
+        return local_path, data, size
 
     from catalog_match import settings
     from edge_shadow_engine import compose_on_white_canvas
@@ -103,12 +131,39 @@ def _prepare_payload(local_path: str):
         canvas = compose_on_white_canvas(rgba, (side, side))
     except ValueError as exc:  # صورة شفافة بالكامل: لا يوجد منتج لنشره
         logger.error("[Cloudinary] الصورة لا تحتوي منتجاً مرئياً ولن يتم رفعها: %s (%s)", local_path, exc)
-        return None, None
+        return None, None, None
     buf = io.BytesIO()
     canvas.save(buf, format="PNG")
     logger.warning("[Cloudinary] الصورة تحتوي شفافية؛ تم تسطيحها على لوحة بيضاء %dx%d قبل الرفع", side, side)
     flat = buf.getvalue()
-    return io.BytesIO(flat), flat
+    return io.BytesIO(flat), flat, canvas.size
+
+
+def _response_int(response: dict, key: str) -> Optional[int]:
+    value = response.get(key)
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _verify_upload(response: dict, data: bytes, size: Tuple[int, int], md5: str) -> Optional[str]:
+    """
+    يطابق ما قالته Cloudinary عن الأصل المخزن مع ما أُرسل: الحجم بالبايت، الأبعاد، و etag (md5 البايتات).
+    حقل غائب أو غير مقروء لا يُفشل الرفع (السلوك الحالي)؛ حقل موجود ومختلف يعيد رمز خطأ.
+    """
+    stored = _response_int(response, "bytes")
+    if stored is not None and stored != len(data):
+        return "upload_bytes_mismatch"
+    width, height = _response_int(response, "width"), _response_int(response, "height")
+    if (width is not None and width != size[0]) or (height is not None and height != size[1]):
+        return "upload_size_mismatch"
+    etag = str(response.get("etag") or "").strip().strip('"').lower()
+    if _MD5_RE.match(etag) and etag != md5:
+        return "upload_etag_mismatch"
+    return None
 
 
 def _upload_with_retries(source, options: dict):
@@ -146,27 +201,27 @@ def delivery_url(public_id: str, version=None) -> str:
     return url
 
 
-def upload_product_image_to_cloudinary(local_path, product_name, brand, folder=None, tags: Optional[Iterable[str]] = None,
-                                       target_width=800, target_height=800, padding_ratio=0.85, bg_color="ffffff"):
+def upload_product_image(local_path, product_name, brand, folder=None,
+                         tags: Optional[Iterable[str]] = None) -> UploadResult:
     """
-    يرفع اللوحة النهائية ويعيد رابط التسليم أو None.
-    target_width / target_height / padding_ratio / bg_color مقبولة للتوافق فقط ولا أثر لها:
-    اللوحة (الأبعاد، الإشغال 88%، الخلفية البيضاء) تُبنى محلياً في image_processor.
+    يرفع اللوحة النهائية ويتحقق من استجابة Cloudinary، ويعيد UploadResult (url=None عند أي فشل).
+    existing=True: نفس البايتات مرفوعة سابقاً في نفس المجلد (قد تكون صورة منتج آخر).
     """
     if not local_path or not os.path.exists(local_path):
         logger.error("[Cloudinary] ملف الصورة المحلي غير موجود: %s", local_path)
-        return None
+        return UploadResult(None, error="upload_file_missing")
 
     try:
-        source, data = _prepare_payload(local_path)
+        source, data, size = _prepare_payload(local_path)
     except OSError as exc:
         logger.error("[Cloudinary] تعذر قراءة الملف المحلي: %s", exc)
-        return None
+        return UploadResult(None, error="upload_file_missing")
     if source is None:
-        return None
+        return UploadResult(None, error="upload_not_image")
 
+    md5 = hashlib.md5(data).hexdigest()
     options = {
-        "public_id": hashlib.md5(data).hexdigest(),
+        "public_id": md5,
         "folder": slugify_folder(folder or DEFAULT_FOLDER),
         "overwrite": False,
         "invalidate": True,
@@ -179,12 +234,34 @@ def upload_product_image_to_cloudinary(local_path, product_name, brand, folder=N
 
     response = _upload_with_retries(source, options)
     if response is None:
-        return None
+        return UploadResult(None, content_md5=md5, error="upload_failed")
+
+    existing = response.get("existing") is True or str(response.get("existing")).strip().lower() == "true"
+    mismatch = _verify_upload(response, data, size, md5)
+    if mismatch:
+        logger.error("[Cloudinary] الأصل المخزن لا يطابق الصورة المرسلة (%s، existing=%s، public_id=%s)؛ "
+                     "لن يُستخدم رابطه. إذا تكرر هذا لكل رفع فتحقق من عدم وجود upload preset افتراضي يعدّل الصور.",
+                     mismatch, existing, response.get("public_id"))
+        return UploadResult(None, public_id=response.get("public_id"), existing=existing, content_md5=md5,
+                            error=mismatch)
 
     url = delivery_url(response["public_id"], response.get("version"))
     try:
         config.METRICS["cloudinary_uploads"] += 1
     except Exception:  # noqa: BLE001
         pass
-    logger.info("[Cloudinary] تم الرفع: %s", url)
-    return url
+    if existing:
+        logger.warning("[Cloudinary] نفس البايتات مرفوعة سابقاً (existing)؛ أُعيد الأصل الموجود: %s", url)
+    else:
+        logger.info("[Cloudinary] تم الرفع: %s", url)
+    return UploadResult(url, public_id=response["public_id"], existing=existing, content_md5=md5)
+
+
+def upload_product_image_to_cloudinary(local_path, product_name, brand, folder=None, tags: Optional[Iterable[str]] = None,
+                                       target_width=800, target_height=800, padding_ratio=0.85, bg_color="ffffff"):
+    """
+    يرفع اللوحة النهائية ويعيد رابط التسليم أو None (واجهة متوافقة؛ upload_product_image تعيد التفاصيل).
+    target_width / target_height / padding_ratio / bg_color مقبولة للتوافق فقط ولا أثر لها:
+    اللوحة (الأبعاد، الإشغال 88%، الخلفية البيضاء) تُبنى محلياً في image_processor.
+    """
+    return upload_product_image(local_path, product_name, brand, folder=folder, tags=tags).url

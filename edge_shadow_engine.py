@@ -19,6 +19,9 @@ logger = logging.getLogger(__name__)
 CANVAS_FILL_RATIO = 0.88
 # بكسلات بشفافية أقل من هذا الحد لا تدخل في حساب حدود المنتج (ضباب الحواف)
 ALPHA_BBOX_THRESHOLD = 8
+# مكوّن (بكسلات شفافيتها فوق ALPHA_BBOX_THRESHOLD) لا يحتوي أي بكسل أعتم من هذا الحد هو ضباب:
+# شبه غير مرئي على الأبيض (12.5% أو أقل) لكنه كان يوسّع حدود المنتج فيصغر المنتج ويخرج عن المركز
+HAZE_ALPHA_MAX = 32
 WHITE_RGBA = (255, 255, 255, 255)
 
 ImageLike = Union[str, Image.Image]
@@ -109,10 +112,33 @@ class EdgeShadowEngine:
         cleaned[drop[labels]] = 0
         return cleaned
 
+    @staticmethod
+    def remove_alpha_haze(alpha_mask: np.ndarray, threshold: int = ALPHA_BBOX_THRESHOLD,
+                          haze_max: int = HAZE_ALPHA_MAX) -> np.ndarray:
+        """
+        يزيل الضباب: كل مكوّن متصل من البكسلات التي تحسبها alpha_bbox ضمن المنتج (شفافية > threshold)
+        ولا يحتوي أي بكسل أعتم من haze_max. بهذا يتفق التنظيف وحساب حدود المنتج على ما هو منتج.
+        الضباب الملتصق بالمنتج يبقى (تحكم عليه بوابة الجودة)، ولا يتغير شيء إذا لم يبق غير الضباب.
+        """
+        import cv2
+
+        alpha = np.ascontiguousarray(alpha_mask, dtype=np.uint8)
+        num_labels, labels = cv2.connectedComponents((alpha > threshold).astype(np.uint8), connectivity=8)
+        if num_labels <= 1:
+            return alpha
+        keep = np.zeros(num_labels, dtype=bool)
+        keep[np.unique(labels[alpha > haze_max])] = True
+        keep[0] = True
+        if keep.all() or not keep[1:].any():
+            return alpha
+        cleaned = alpha.copy()
+        cleaned[~keep[labels]] = 0
+        return cleaned
+
     @classmethod
     def process_mask(cls, provider_rgba: ImageLike, target_path: Optional[str] = None) -> Image.Image:
         """
-        يعيد مخرجات مزوّد العزل كما هي (ألوانه وقناعه) بعد إزالة النقاط المعزولة الصغيرة فقط.
+        يعيد مخرجات مزوّد العزل كما هي (ألوانه وقناعه) بعد إزالة النقاط المعزولة الصغيرة والضباب المنفصل فقط.
         لا يعيد بناء الصورة من الألوان الخام ولا يملأ الثقوب.
         """
         rgba = _as_rgba(provider_rgba)
@@ -121,6 +147,7 @@ class EdgeShadowEngine:
         # الحد الأدنى نسبي لحجم المنتج: 0.1% من البكسلات الأمامية أو 25 بكسل
         min_area = max(25, int(foreground * 0.001))
         cleaned = cls.clean_alpha_matte_via_cca(alpha, min_noise_area=min_area)
+        cleaned = cls.remove_alpha_haze(cleaned)
         if not np.array_equal(cleaned, alpha):
             rgba = rgba.copy()
             rgba.putalpha(Image.fromarray(cleaned))
