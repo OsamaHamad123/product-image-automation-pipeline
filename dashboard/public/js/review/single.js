@@ -294,9 +294,12 @@
     function buildJob(item, ctx, candidate) {
         const label = item.product.product_name || item.product.product_name_ar || `صف ${item.product.row_number}`;
         const approved = st().approved.get(item.key);
-        // ما رأته الصفحة عن المنتج لحظة الاعتماد (C1)؛ replace يُرسل فقط بعد تأكيد صريح من المراجع
+        // ما رأته الصفحة عن المنتج لحظة الاعتماد (C1)؛ بعد اعتماد في هذه الجلسة: ما قاله الخادم عنه (current).
+        // replace يُرسل فقط بعد تأكيد صريح من المراجع
+        const expected = approved && approved.current ? R.expectedFromCurrent(approved.current)
+            : R.expectedState(item, approved && approved.link);
         const base = { key: item.key, label: label, row: ctx.row_number, ctx: ctx, candidate: candidate,
-                       expected: R.expectedState(item, approved && approved.link), replace: false };
+                       expected: expected, replace: false };
         if (candidate.source === 'upload') return Object.assign(base, { type: 'upload' });
         return Object.assign(base, { type: 'approve', body: R.selectBody(ctx, candidate) });
     }
@@ -368,23 +371,33 @@
         const data = (job.result && job.result.data) || {};
         if (job.state === 'done') {
             if (job.type === 'reject') {
-                const kept = !!data.approval_kept;
+                // C2: رفض الصورة المقترحة وغيرها باقٍ يُبقي المنتج بانتظار المراجعة بصوره الباقية
+                const outcome = R.rejectionOutcome(data, false);
                 if (S.local.get(job.key) === 'rejecting') S.local.delete(job.key);
-                if (!kept && S.local.get(job.key) !== 'approved') S.local.set(job.key, 'rejected');
+                if (S.local.get(job.key) !== 'approved' && !outcome.kept) {
+                    if (outcome.requeued) S.local.set(job.key, 'rejected');
+                    else dropCandidate(job.key, job.candidate.url);
+                }
             } else {
                 S.local.set(job.key, 'approved');
                 const rawLink = String(data.image_link || '');
-                const warning = data.warning || (rawLink.startsWith('needs_review:') ? 'background_not_removed' : '');
+                const notes = R.approvalNotes(data);
                 // C3: ما حدث في الشيت كما قاله الخادم؛ «كُتب في الشيت» فقط عند written
                 const sheet = R.sheetNote(data.sheet);
-                S.approved.set(job.key, { link: rawLink.replace(/^needs_review:/, ''), warning: warning, url: job.candidate.url,
-                                          sheet: sheet.state });
-                if (warning) {
+                S.approved.set(job.key, { link: rawLink.replace(/^needs_review:/, ''), warning: notes.bgFailed ? 'background_not_removed' : '',
+                                          url: job.candidate.url, sheet: sheet.state, notes: notes,
+                                          current: data.current && typeof data.current === 'object' ? data.current : null });
+                const flagsPart = notes.flagTexts.length ? ` فحص القص: ${notes.flagTexts.join('، ')}.` : '';
+                if (notes.bgFailed) {
                     const sheetPart = sheet.state === 'written' ? 'وكُتب رابطها في الشيت بعلامة «بحاجة مراجعة».' : sheet.text;
-                    R.toast(`اعتُمدت صورة «${job.label}» ولم تُعزل خلفيتها${sheetPart ? '، ' + sheetPart : '.'} تجدها في رقاقة «الخلفية لم تُعزل».`,
+                    R.toast(`اعتُمدت صورة «${job.label}» ولم تُعزل خلفيتها${sheetPart ? '، ' + sheetPart : '.'}${flagsPart} تجدها في رقاقة «الخلفية لم تُعزل».`,
                             'warning', 9000);
                 } else if (sheet.state && sheet.state !== 'written') {
                     R.toast(`اعتُمدت صورة «${job.label}» ${sheet.text}`, sheet.tone, 12000);
+                }
+                if (notes.duplicate) {
+                    const who = notes.duplicateOf.length ? `: ${notes.duplicateOf.map(n => `«${n}»`).join('، ')}` : '';
+                    R.toast(`صورة «${job.label}» نفسها منشورة لمنتج آخر${who}. تأكد أنها ليست صورة منتج مختلف.`, 'warning', 12000);
                 }
             }
         } else {
@@ -404,6 +417,16 @@
         } else {
             R.bulk.render();
         }
+    }
+
+    // صورة رُفضت والمنتج باقٍ بانتظار المراجعة (C2): تُزال من صوره المحفوظة هنا، ويبقى في رقاقته
+    function dropCandidate(key, url) {
+        const S = st();
+        const item = S.byKey.get(key);
+        if (!item) return;
+        item.product.curation_candidates = (item.product.curation_candidates || [])
+            .filter(c => String(c.url || c.image_url || '') !== url);
+        S.keep.add(key);
     }
 
     // أسباب الرفض المعروضة للمنتج المفتوح (التجميلية أولاً لاعتماد لم تُعزل خلفيته)
@@ -499,10 +522,11 @@
         if (sess.pick === candidate.url) sess.pick = null;
         const flag = S.local.get(item.key);
         const settled = flag === 'approving' || flag === 'approved' || (S.jobs && S.jobs.has(item.key));
-        const rejection = data.rejection || data;
-        const kept = !!rejection.approval_kept;
-        // الخادم يقول إن أعاد المنتج للطابور (requeued)؛ وإلا: رفض صورة غير اختيار النظام لا يعيده (C2)
-        const requeued = typeof rejection.requeued === 'boolean' ? rejection.requeued : !alternative;
+        // C2: ما قاله الخادم عن الطابور (rejection.queue_status) والصور الباقية (candidates_left)
+        const outcome = R.rejectionOutcome(data, alternative);
+        const kept = outcome.kept;
+        const requeued = outcome.requeued;
+        const left = outcome.left ? ` (${outcome.left})` : '';
         const saved = savedCount(data);
         let message = kept ? 'انرفضت الصورة. الصورة المعتمدة قبل بتضل زي ما هي.' : 'انرفضت الصورة وسجّلنا السبب. المنتج رجع للطابور.';
         if (research) {
@@ -515,21 +539,23 @@
                     // الخادم حفظ المرشحين الجدد والمنتج بانتظار المراجعة: لا حفظ من الصفحة، ولا «رجع للطابور»
                     requeueForReview(item, data, candidate.url);
                     message = 'انرفضت الصورة وسجّلنا السبب. نتيجة البحث الجديد محفوظة والمنتج بانتظار مراجعتك.';
-                } else if (!kept) {
+                } else if (!kept && requeued) {
                     S.local.set(item.key, 'rejected');
+                } else if (!kept) {
+                    dropCandidate(item.key, candidate.url);
+                    message = `انرفضت الصورة وسجّلنا السبب. باقي الصور ما زالت للمراجعة${left}.`;
                 }
             }
         } else if (!requeued && !kept) {
             // صورة بديلة: تُستبعد وحدها، والصورة المقترحة وباقي الصور تبقى للمراجعة
-            if (!settled) {
-                item.product.curation_candidates = (item.product.curation_candidates || [])
-                    .filter(c => String(c.url || c.image_url || '') !== candidate.url);
-            }
-            sess.note = `رفضتها («${R.reasonLabel(reasonCode)}») وسجّلنا السبب، ولن نقترحها لهذا المنتج مرة أخرى. باقي الصور ما زالت للمراجعة.`;
-            message = 'انرفضت الصورة وسجّلنا السبب. باقي الصور ما زالت للمراجعة.';
+            if (!settled) dropCandidate(item.key, candidate.url);
+            sess.note = `رفضتها («${R.reasonLabel(reasonCode)}») وسجّلنا السبب، ولن نقترحها لهذا المنتج مرة أخرى. باقي الصور ما زالت للمراجعة${left}.`;
+            message = `انرفضت الصورة وسجّلنا السبب. باقي الصور ما زالت للمراجعة${left}.`;
         } else {
             if (!kept && !settled) S.local.set(item.key, 'rejected');
-            sess.note = `رفضتها («${R.reasonLabel(reasonCode)}») وسجّلنا السبب. المنتج رجع للطابور ورح ينبحث عنه من جديد بالتشغيل الجاي؛ وإذا في صورة صحيحة تحت، اختارها واعتمدها هلق.`;
+            sess.note = kept
+                ? `رفضتها («${R.reasonLabel(reasonCode)}») وسجّلنا السبب. الصورة المعتمدة قبل بتضل زي ما هي.`
+                : `رفضتها («${R.reasonLabel(reasonCode)}») وسجّلنا السبب. المنتج رجع للطابور ورح ينبحث عنه من جديد بالتشغيل الجاي؛ وإذا في صورة صحيحة تحت، اختارها واعتمدها هلق.`;
         }
         R.toast(message, 'success');
         R.rebuild();
@@ -1027,9 +1053,17 @@
             // C3: ما حدث في الشيت كما قاله الخادم، بلا ادعاء
             const sheet = R.sheetNote(done.sheet);
             body.appendChild(alertBox(sheet.tone, 'تم الاعتماد.', sheet.text ? `رُفعت الصورة ${sheet.text}` : 'رُفعت الصورة.'));
+            const notes = done.notes || { flagTexts: [], duplicate: false, duplicateOf: [], flags: [] };
             if (done.warning) {
-                body.appendChild(alertBox('warning', 'الخلفية لم تُعزل:', sheet.state === 'written'
-                    ? 'كُتب الرابط في الشيت بعلامة «بحاجة مراجعة».' : 'الصورة بحاجة مراجعة: تجدها في رقاقة «الخلفية لم تُعزل».'));
+                const why = notes.flagTexts.length ? ` فحص القص: ${notes.flagTexts.join('، ')}.` : '';
+                const box = alertBox('warning', 'الخلفية لم تُعزل:', (sheet.state === 'written'
+                    ? 'كُتب الرابط في الشيت بعلامة «بحاجة مراجعة».' : 'الصورة بحاجة مراجعة: تجدها في رقاقة «الخلفية لم تُعزل».') + why);
+                if (notes.flags.length) box.setAttribute('title', notes.flags.join(' · '));
+                body.appendChild(box);
+            }
+            if (notes.duplicate) {
+                const who = notes.duplicateOf.length ? `: ${notes.duplicateOf.map(n => `«${n}»`).join('، ')}` : '';
+                body.appendChild(alertBox('warning', 'الصورة نفسها لمنتج آخر:', `هذه الصورة منشورة أيضاً لمنتج آخر${who}. تأكد أنها ليست صورة منتج مختلف.`));
             }
             body.appendChild(el('section', { className: 'rv-panel rv-final', dataset: { url: done.link } }, [
                 el('div', { className: 'rv-final__stage' }, [R.img(done.link || done.url, 'الصورة المعتمدة', S.urls.imageProxy)]),

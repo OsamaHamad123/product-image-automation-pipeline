@@ -598,3 +598,146 @@ out.toast = toasts.slice(-1)[0].text;
 """, tmp_path, fixture([B, OTHER]))
     assert "لم تُعزل خلفيتها" in out["toast"] and "بالانتظار" in out["toast"]
     assert "وكُتب رابطها" not in out["toast"]
+
+
+# ---------------------------------------------------------------------------
+# The backend's answers as implemented (P3): busy, current, duplicate_image / duplicate_of, quality_flags,
+# rejection.queue_status / candidates_left
+# ---------------------------------------------------------------------------
+
+@NEEDS_NODE
+def test_rejecting_the_pick_while_other_images_remain_keeps_the_product_waiting(tmp_path):
+    three = product(9, "Almarai Fresh Milk 2L", needs_review=True, preselected=True, curation_candidates=[
+        cand(B_URLS[0], "preselected", 1, reasons=["vlm:MATCH"]), cand(B_URLS[1], "eligible", 0),
+        cand("https://www.lulu.com/b3.jpg", "eligible", 0)])
+    out = page(r"""
+openRow(9);
+press('x');
+document.getElementById('rvRejectResearch').checked = false;
+press('1');
+await flush();
+FIXTURE.products[0].curation_candidates = FIXTURE.products[0].curation_candidates.slice(1);   // what the server kept
+answer(requests('/api/reject_image')[0], { status: 'success', approval_kept: false, candidates_left: 2,
+                                           queue_status: 'ready_for_review', current: { queue_status: 'ready_for_review' } });
+await flush();
+out.waiting = [itemOf(9).bucket, R.visibleItems().map(it => it.product.row_number)];
+out.text = wsText();
+out.alts = altUrls();
+press('1');
+press('x');
+press('1');
+await flush();
+FIXTURE.products[0].curation_candidates = [];
+FIXTURE.queue.rows = FIXTURE.queue.rows.map(r => r.row_number === 9 ? Object.assign({}, r, { status: 'pending', failure_code: 'REJECTED' }) : r);
+answer(requests('/api/reject_image')[1], { status: 'success', approval_kept: false, candidates_left: 1, queue_status: 'pending' });
+await flush();
+out.requeued = itemOf(9).bucket;
+""", tmp_path, fixture([three, OTHER]), config={"filter": "proposed"})
+    assert out["waiting"] == ["none", [8, 9]]                  # no pick left, still waiting and still in its chip
+    assert "باقي الصور ما زالت للمراجعة (2)" in out["text"] and "رجع للطابور" not in out["text"]
+    assert out["alts"] == [B_URLS[1], "https://www.lulu.com/b3.jpg"]
+    assert out["requeued"] in ("rejected", "requeued")         # the server put it back to the queue
+
+
+@NEEDS_NODE
+def test_a_bulk_reject_says_back_to_the_queue_only_when_the_server_requeued(tmp_path):
+    two = product(9, "Almarai Fresh Milk 2L", needs_review=True, preselected=True, curation_candidates=[
+        cand(B_URLS[0], "preselected", 1, reasons=["vlm:MATCH"]), cand(B_URLS[1], "eligible", 0)])
+    out = page(r"""
+R.setMode('bulk');
+await flush();
+R.bulk.rejectList([itemOf(9), itemOf(8)], 'WRONG_SIZE');
+await flush();
+const overlays = () => Object.fromEntries(document.querySelectorAll('.rv-card').map(c => [
+    S().byKey.get(c.getAttribute('data-key')).product.row_number,
+    (c.querySelector('.rv-card__overlay') || { textContent: '' }).textContent]));
+FIXTURE.products[0].curation_candidates = FIXTURE.products[0].curation_candidates.slice(1);   // what the server kept
+answer(requests('/api/reject_image')[0], { status: 'success', approval_kept: false, candidates_left: 1, queue_status: 'ready_for_review' });
+await flush();
+out.first = [itemOf(9).bucket, overlays()[9]];
+answer(requests('/api/reject_image')[1], { status: 'success', approval_kept: false, candidates_left: 0, queue_status: 'pending' });
+await flush();
+out.second = [itemOf(8).bucket, overlays()[8]];
+""", tmp_path, fixture([two, OTHER]))
+    assert out["first"] == ["none", ""]                       # still waiting, without its rejected pick
+    assert out["second"] == ["rejected", "رجعت للطابور"]
+
+
+@NEEDS_NODE
+def test_a_busy_refusal_is_retried_not_replaced(tmp_path):
+    out = page(r"""
+openRow(9);
+press('Enter');
+await flush();
+answer(requests('/api/select_image')[0], { status: 'failed', error_code: 'busy',
+                                           error: 'نشر آخر لهذا المنتج ما زال يكتب في الشيت؛ حاول بعد قليل' }, 500);
+await flush();
+out.panel = jobsText();
+out.buttons = document.querySelectorAll('#rvJobs button').map(b => b.textContent).filter(t => t);
+document.querySelectorAll('#rvJobs button').find(b => b.textContent === 'أعد المحاولة').click();
+await flush();
+const again = requests('/api/select_image')[1];
+out.again = [again.body.replace === undefined, again.body.expected_state.queue_status];
+""", tmp_path, fixture([B, OTHER]))
+    assert "نشر آخر لهذا المنتج ما زال يكتب في الشيت" in out["panel"]
+    assert "أعد المحاولة" in out["buttons"] and "استبدال المعتمدة…" not in out["buttons"]
+    assert out["again"] == [True, "ready_for_review"]
+
+
+@NEEDS_NODE
+def test_duplicate_and_cutout_flags_are_said_and_a_duplicate_is_not_called_a_background_failure(tmp_path):
+    out = page(r"""
+openRow(9);
+press('Enter');
+await flush();
+answer(requests('/api/select_image')[0], { status: 'success', image_link: 'https://res.cloudinary.com/demo/b.png', isolated: true,
+    sheet: 'written', warning: 'duplicate_image', warnings: ['duplicate_image'],
+    duplicate_of: [{ sku_key: 'k-x', product_name: 'Almarai Milk 2L Twin Pack', cloudinary_url: 'https://res.cloudinary.com/demo/b.png' }] });
+await flush();
+out.dup_toasts = toasts.map(t => t.text);
+openRow(9);
+out.dup_text = wsText();
+openRow(8);
+press('Enter');
+await flush();
+answer(requests('/api/select_image')[1], { status: 'success', image_link: 'needs_review:https://res.cloudinary.com/demo/l.png',
+    isolated: false, sheet: 'written', warning: 'background_not_removed', warnings: ['background_not_removed'],
+    quality_flags: ['edge_clipped', 'alpha_haze', 'brand_new_flag'] });
+await flush();
+out.bg_toast = toasts.slice(-1)[0].text;
+openRow(8);
+out.bg_text = wsText();
+out.bg_title = ws().querySelectorAll('.rv-alert').map(a => a.getAttribute('title')).filter(Boolean);
+""", tmp_path, fixture([B, OTHER]))
+    assert not any("لم تُعزل خلفيتها" in t for t in out["dup_toasts"])
+    assert any("نفسها منشورة لمنتج آخر: «Almarai Milk 2L Twin Pack»" in t for t in out["dup_toasts"])
+    assert "الصورة نفسها لمنتج آخر:" in out["dup_text"] and "الخلفية لم تُعزل:" not in out["dup_text"]
+    assert "المنتج مقصوص عند حافة الصورة" in out["bg_toast"] and "هالة أو ضباب حول حواف المنتج" in out["bg_toast"]
+    assert "ملاحظة أخرى من فحص القص" in out["bg_toast"]
+    assert "edge_clipped" not in out["bg_toast"] + out["bg_text"] and "brand_new_flag" not in out["bg_text"]
+    assert "فحص القص:" in out["bg_text"] and out["bg_title"] == ["edge_clipped · alpha_haze · brand_new_flag"]
+
+
+@NEEDS_NODE
+def test_the_next_approval_of_the_same_product_carries_the_state_the_server_returned(tmp_path):
+    current = {"queue_status": "completed", "queue_updated_at": "2026-10-03 11:00:00",
+               "approved_url": "https://res.cloudinary.com/demo/b.png", "approval_status": "human_approved"}
+    out = page(r"""
+openRow(9);
+press('Enter');
+await flush();
+answer(requests('/api/select_image')[0], { status: 'success', image_link: 'https://res.cloudinary.com/demo/b.png',
+                                           isolated: true, sheet: 'written', current: __CUR__ });
+await flush();
+openRow(9);
+ws().querySelector('.rv-research').click();          // replace the approved image: an explicit new search
+await flush();
+answer(requests('/api/search')[0], { status: 'review', decision: 'REVIEW_UNSELECTED', sku_key: 'key-9',
+                                     candidates: [{ url: 'https://www.lulu.com/b8.jpg', status: 'eligible', title: 'new' }] });
+await flush();
+press('1'); press('Enter');
+await flush();
+out.second = requests('/api/select_image')[1].body.expected_state;
+""".replace("__CUR__", js(current)), tmp_path, fixture([B, OTHER]))
+    assert out["second"] == {"queue_status": "completed", "queue_updated_at": "2026-10-03 11:00:00",
+                             "approved_url": "https://res.cloudinary.com/demo/b.png"}

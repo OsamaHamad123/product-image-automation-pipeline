@@ -622,6 +622,66 @@
         return s ? { state: String(sheet), tone: s.tone, text: s.text } : { state: '', tone: 'success', text: '' };
     }
 
+    // ما يعرفه الخادم بعد الاعتماد (current في كل استجابة): يصير ما «رأته الصفحة» للاعتماد التالي لنفس المنتج
+    function expectedFromCurrent(cur) {
+        cur = cur && typeof cur === 'object' ? cur : {};
+        return {
+            queue_status: cur.queue_status ? String(cur.queue_status) : null,
+            queue_updated_at: cur.queue_updated_at ? String(cur.queue_updated_at) : null,
+            approved_url: cur.approved_url ? String(cur.approved_url) : null
+        };
+    }
+
+    // علامات فحص القص (quality_flags، image_processor): لماذا لم تُعتبر الخلفية معزولة. الرمز يبقى في التلميح فقط
+    const QUALITY_FLAG_LABELS = {
+        opaque_fill: 'لم تُزل الخلفية (بقيت الصورة معتمة)',
+        opaque_backdrop: 'بقي صندوق خلفية معتم حول المنتج',
+        edge_clipped: 'المنتج مقصوص عند حافة الصورة',
+        alpha_haze: 'هالة أو ضباب حول حواف المنتج',
+        second_object: 'ظهر جسم آخر بجانب المنتج',
+        upscaled: 'الصورة المصدر صغيرة فكُبّرت',
+        too_small_on_canvas: 'المنتج صغير على اللوحة'
+    };
+
+    function qualityFlagText(code) {
+        return QUALITY_FLAG_LABELS[String(code || '')] || 'ملاحظة أخرى من فحص القص';
+    }
+
+    // ما يُقال للمراجع بعد اعتماد ناجح: الخلفية (background_not_removed)، الصورة نفسها لمنتج آخر (duplicate_image و
+    // duplicate_of)، وعلامات فحص القص
+    function approvalNotes(data) {
+        data = data || {};
+        const list = Array.isArray(data.warnings) ? data.warnings.map(w => String(w)) : (data.warning ? [String(data.warning)] : []);
+        const link = String(data.image_link || '');
+        const owners = Array.isArray(data.duplicate_of) ? data.duplicate_of : (data.duplicate_of ? [data.duplicate_of] : []);
+        const names = owners.map(o => (o && typeof o === 'object')
+            ? String(o.product_name || o.sku_key || o.cloudinary_url || '').trim() : String(o || '').trim()).filter(Boolean);
+        const flags = Array.isArray(data.quality_flags) ? data.quality_flags.map(f => String(f)) : [];
+        return {
+            bgFailed: list.includes('background_not_removed') || link.startsWith('needs_review:'),
+            duplicate: list.includes('duplicate_image') || owners.length > 0,
+            duplicateOf: names,
+            flags: flags,
+            flagTexts: Array.from(new Set(flags.map(qualityFlagText)))
+        };
+    }
+
+    // نتيجة الرفض كما قالها الخادم (عقد C2: rejection.queue_status و candidates_left). queue_status: 'pending' =
+    // رجع للطابور؛ 'ready_for_review' أو null (لم تتغير) = ما زال بانتظار المراجعة بصوره الباقية. خادم أقدم لا يرسلها:
+    // رفض اختيار النظام يعيده للطابور، ورفض غيره لا
+    function rejectionOutcome(data, alternative) {
+        data = data || {};
+        const r = data.rejection && typeof data.rejection === 'object' ? data.rejection : data;
+        const kept = !!r.approval_kept;
+        const n = parseInt(r.candidates_left, 10);
+        let requeued;
+        if (r.queue_status !== undefined) requeued = r.queue_status === 'pending';
+        else if (typeof r.requeued === 'boolean') requeued = r.requeued;
+        else requeued = !alternative;
+        return { kept: kept, requeued: requeued, left: isFinite(n) && n >= 0 ? n : null,
+                 queueStatus: r.queue_status === undefined ? undefined : (r.queue_status || null) };
+    }
+
     // مجموعة المنتج في القائمة. queueKnown=false: حالة الطابور غير معروفة (تُقدّر من المرشحين المحفوظين)
     function classify(prod, q, queueKnown) {
         const selected = storedSelected(prod);
@@ -898,7 +958,8 @@
         productIdentity, sameProduct, itemKey, failureKey, reviewedCandidateView,
         searchBody, selectBody, rejectBody, uploadFields,
         matchQueue, classify, hasFinalImage, bgFailedLink, shownApprovedUrl, expectedState, staleInfo, queueText,
-        sheetNote, confidenceRank, compareWaiting, sortWaiting, buildItems, countBuckets, matchesQuery, filterItems,
+        sheetNote, expectedFromCurrent, qualityFlagText, approvalNotes, rejectionOutcome,
+        confidenceRank, compareWaiting, sortWaiting, buildItems, countBuckets, matchesQuery, filterItems,
         sizeText, categoryPath, factsFor, checksFor, cautionsFor
     });
 
