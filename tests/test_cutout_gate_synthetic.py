@@ -245,3 +245,30 @@ def test_transparent_png_with_a_baked_in_shadow_is_not_published_as_source_alpha
     result, services = run(baked, work)                   # the provider re-isolates the product without it
     assert (result.isolated, result.provider, result.quality_flags) == (True, "photoroom", [])
     assert services.paid == 1
+
+
+# ---------------------------------------------------------------------------
+# #5: small web images (policy: blocking above 3x, a non-blocking note between 2x and 3x)
+# ---------------------------------------------------------------------------
+
+def small_bottle(long_side):
+    """A web image whose product is `long_side` px tall (the canvas box is 704 px on 800)."""
+    size = (int(round(long_side * 0.6)), int(round(long_side / 0.8)))
+    return ps.make("bottle", size, fill=0.8)
+
+
+@pytest.mark.parametrize("long_side, flags, notes", [
+    (400, [], []),                      # 1.76x
+    (300, [], [ip.NOTE_UPSCALED]),      # 2.35x: used to be blocked (review)
+    (250, [], [ip.NOTE_UPSCALED]),      # 2.8x
+    (220, [ip.FLAG_UPSCALED], []),      # 3.2x: still blocked
+])
+def test_small_web_image_publishes_with_an_upscale_note(work, long_side, flags, notes):
+    shot = small_bottle(long_side)
+
+    result, services = run(shot, work, remove_bg="truth")
+
+    assert (result.quality_flags, result.quality_notes) == (flags, notes)
+    assert result.isolated is (not flags)
+    assert services.names() == ["photoroom"], "upscaling cannot be fixed by another provider"
+    assert result.path and (result.width, result.height) == (800, 800)

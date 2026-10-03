@@ -81,7 +81,8 @@ SECOND_OBJECT_MIN = 0.01        # الأجسام الأخرى معاً (غير �
 GROUP_ALPHA = 24                # الأجزاء المتصلة عبر شفافية > 24 جسم واحد (جسم عبوة شفافة يصل الغطاء بالملصق)
 GROUP_AREA_MIN = 0.40           # عبوة متعددة: كل قطعة 40% على الأقل من الأكبر وبارتفاع مماثل (80%) = منتج واحد
 GROUP_HEIGHT_MIN = 0.80
-MAX_UPSCALE = 2.0               # تكبير المنتج على اللوحة أكثر من الضعف
+MAX_UPSCALE = 3.0               # تكبير المنتج على اللوحة أكثر من 3 أضعاف: علامة تمنع النشر التلقائي
+UPSCALE_NOTE_MIN = 2.0          # بين ضعفين و3 أضعاف: ينشر مع ملاحظة (quality_notes) يراها المراجع والتقرير
 MIN_MAIN_EXTENT = 0.80          # الجسم الرئيسي يشغل أقل من 80% من مساحة الإشغال المتاحة
 FRAME_ASPECT_TOLERANCE = 0.02   # مخرج المزوّد بنفس نسبة أبعاد الإطار المرسل (لم يقصه المزوّد)
 # خلفية معتمة بقيت حول المنتج (ورقة/صندوق تصوير رمادي في PNG شفاف أو في مخرج المزوّد)
@@ -104,6 +105,9 @@ FLAG_UPSCALED = "upscaled"
 FLAG_TOO_SMALL = "too_small_on_canvas"
 FLAG_OPAQUE_BACKDROP = "opaque_backdrop"
 FLAG_KEPT_SHADOW = "kept_shadow"
+# ملاحظات لا تمنع النشر (ProcessResult.quality_notes): نفس رمز العلامة، لكن في القائمة غير الحاجبة
+NOTE_UPSCALED = FLAG_UPSCALED
+NON_BLOCKING_NOTES = frozenset({NOTE_UPSCALED})
 # علامات لا تصلحها إعادة العزل (المصدر نفسه صغير): لا نعيد المحاولة بمزوّد مدفوع من أجلها
 _UNFIXABLE_FLAGS = frozenset({FLAG_UPSCALED})
 # لاختيار أفضل محاولة عندما تبقى العلامات بعد كل البدائل (الأقل وزناً تُعرض على المراجع)
@@ -143,6 +147,8 @@ class ProcessResult:
     width/height: أبعاد اللوحة النهائية (0 عند الفشل).
     quality_flags: علامات بوابة الجودة للوحة المعادة ([] = نظيفة). عند وجودها تكون isolated=False
         مع path موجود: نفس حالة "الخلفية لم تُعزل" (رابط needs_review: ولا نشر تلقائي).
+    quality_notes: ملاحظات لا تمنع النشر (NON_BLOCKING_NOTES)، مثل 'upscaled': المنتج كُبّر بين ضعفين و3 أضعاف
+        على اللوحة (مصدر ويب صغير). اللوحة تُنشر كالمعتاد والملاحظة للمراجع والتقرير فقط.
     white_source: ما فعله/كان سيفعله كشف الخلفية البيضاء: None (معطل أو لم يُفحص) | 'used' |
         'eligible' (وضع log: كان سيُستخدم) | 'ineligible:<سبب>' | 'flagged:<علامات>'.
     """
@@ -155,6 +161,7 @@ class ProcessResult:
     height: int = 0
     quality_flags: List[str] = field(default_factory=list)
     white_source: Optional[str] = None
+    quality_notes: List[str] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -853,6 +860,7 @@ def _product_group(areas, heights, main):
 class _Assessment:
     flags: List[str]
     main_rect: Optional[Tuple[int, int, int, int]] = None   # حدود الجسم الرئيسي بإحداثيات القص
+    notes: List[str] = field(default_factory=list)          # ملاحظات لا تمنع النشر
 
 
 def assess_cutout(cutout: Image.Image, frame_size=None, crop_sides=_NO_CROP, canvas_size=(800, 800),
@@ -871,7 +879,7 @@ def assess_cutout(cutout: Image.Image, frame_size=None, crop_sides=_NO_CROP, can
                          البكسلات المرئية فيصغر المنتج ويخرج عن المركز (ظلال الاستوديو معطلة بطلب العميل).
       second_object      أجسام أخرى (مجموع مساحتها الصلبة) 1% أو أكثر من الجسم الرئيسي. قطع متقاربة الحجم
                          والارتفاع (عبوتان متجاورتان) مجموعة منتج واحدة وليست جسماً ثانياً.
-      upscaled           المنتج سيُكبّر أكثر من الضعف على اللوحة.
+      upscaled           المنتج سيُكبّر أكثر من 3 أضعاف على اللوحة (بين ضعفين و3: ملاحظة فقط، _assess().notes).
       too_small_on_canvas الجسم الرئيسي يشغل أقل من 80% من مساحة الإشغال (شيء آخر يحدد الحجم).
       opaque_backdrop    (مع check_backdrop) ورقة/صندوق تصوير محايد اللون بقي حول المنتج.
     """
@@ -923,8 +931,11 @@ def _assess(cutout: Image.Image, frame_size=None, crop_sides=_NO_CROP, canvas_si
     max_w = max(1, int(int(canvas_size[0]) * fill))
     max_h = max(1, int(int(canvas_size[1]) * fill))
     scale = min(max_w / box_w, max_h / box_h)
+    notes = []
     if scale > MAX_UPSCALE:
         flags.append(FLAG_UPSCALED)
+    elif scale > UPSCALE_NOTE_MIN:
+        notes.append(NOTE_UPSCALED)
     left, top = stats[group, cv2.CC_STAT_LEFT], stats[group, cv2.CC_STAT_TOP]
     group_w = int((left + stats[group, cv2.CC_STAT_WIDTH]).max() - left.min())
     group_h = int((top + stats[group, cv2.CC_STAT_HEIGHT]).max() - top.min())
@@ -937,7 +948,7 @@ def _assess(cutout: Image.Image, frame_size=None, crop_sides=_NO_CROP, canvas_si
         rgb = np.asarray(rgba.convert("RGB"))
         if _has_opaque_backdrop(rgb, (labels == main) & solid, main_w * main_h):
             flags.append(FLAG_OPAQUE_BACKDROP)
-    return _Assessment(flags, (main_x, main_y, main_x + main_w, main_y + main_h))
+    return _Assessment(flags, (main_x, main_y, main_x + main_w, main_y + main_h), notes)
 
 
 # ---------------------------------------------------------------------------
@@ -1006,6 +1017,7 @@ class _Attempt:
     label: str = ""
     matches_source: bool = False     # قناع المزوّد يطابق شفافية المصدر (IoU > 0.95)
     main_rect: Optional[Tuple[int, int, int, int]] = None
+    notes: List[str] = field(default_factory=list)
 
 
 def _flags_final(flags) -> bool:
@@ -1073,7 +1085,7 @@ def _gated(cutout, provider, frame_size, crop_sides, canvas_size, label, frame_r
                                                     product_rect)
         if FLAG_OPAQUE_BACKDROP in flags and (matches_source or matches_box):
             flags.remove(FLAG_OPAQUE_BACKDROP)
-    return _Attempt(cutout, provider, flags, None, label, matches_source, found.main_rect)
+    return _Attempt(cutout, provider, flags, None, label, matches_source, found.main_rect, list(found.notes))
 
 
 def _provider_attempt(frame, method, crop_sides, frame_rect, canvas_size, source_mask=None,
@@ -1248,7 +1260,7 @@ def process_product_image_result(image_url_or_path, product_name, brand, target_
             return ProcessResult(None, False, method, code)
         img = _limit_work_size(img)
 
-        flags, white_note = [], None
+        flags, notes, white_note = [], [], None
         if method == "none":
             # 'none' تعني فعلاً بدون عزل: الصورة كما هي (بعد تصحيح الاتجاه) على اللوحة، ولا ندّعي العزل أبداً
             cutout, provider, isolated = EdgeShadowEngine.process_mask(img.convert("RGBA")), "none", False
@@ -1259,7 +1271,7 @@ def process_product_image_result(image_url_or_path, product_name, brand, target_
             if attempt.cutout is None:
                 logger.warning("فشل عزل الخلفية بطريقة %s: %s", attempt.provider, attempt.error)
                 return ProcessResult(None, False, attempt.provider, attempt.error, white_source=white_note)
-            cutout, provider, flags = attempt.cutout, attempt.provider, list(attempt.flags)
+            cutout, provider, flags, notes = attempt.cutout, attempt.provider, list(attempt.flags), list(attempt.notes)
         if _as_bool(enhance):
             cutout = _enhance_rgb(cutout)
 
@@ -1272,7 +1284,7 @@ def process_product_image_result(image_url_or_path, product_name, brand, target_
         out_path = os.path.join(job_dir, f"{uuid.uuid4().hex}.png")
         canvas.save(out_path, format="PNG")
         return ProcessResult(out_path, isolated, provider, None, canvas.width, canvas.height,
-                             quality_flags=flags, white_source=white_note)
+                             quality_flags=flags, white_source=white_note, quality_notes=notes)
     except Exception as exc:  # noqa: BLE001 - لا نسمح لأي خطأ غير متوقع بأن يصبح نشراً صامتاً
         logger.exception("خطأ غير متوقع أثناء معالجة الصورة: %s", exc)
         return ProcessResult(None, False, method, "processing_failed")
