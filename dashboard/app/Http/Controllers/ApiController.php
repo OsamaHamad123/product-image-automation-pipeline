@@ -425,13 +425,18 @@ class ApiController extends Controller
             $run['failed'] = (int) ($state->failed_count ?? 0);
         }
         $phase = QueueStats::runPhase($process['state'], $status, $pauseRequested, $stopRequested, $readyForReview);
+        $processingRows = (int) ($counters['by_status']['processing'] ?? 0);
+        // العامل حي ولا يبحث الآن: ينتظر موعد إعادة محاولة بعد انقطاع المزودين (ليس عالقاً)
+        $retryWaitS = ($phase === 'running' && $processingRows === 0) ? QueueStats::retryWaitS() : null;
 
         $response = [
             'is_running' => $isRunning,
             // starting | running | paused | stopping | error | review | idle
             'phase' => $phase,
             'phase_text' => QueueStats::phaseText($phase, $stopRequested, $readyForReview,
-                (int) ($counters['by_status']['pending'] ?? 0)),
+                (int) ($counters['by_status']['pending'] ?? 0), $retryWaitS),
+            // ثوانٍ حتى المحاولة التالية التي ينتظرها العامل (null = لا ينتظر)
+            'retry_wait_s' => $retryWaitS,
             // الشريط الأحمر: خطأ التشغيل أو التنبيه بالعربية (فارغ إن لم يوجد)
             'alert' => QueueStats::alertText($status, $notice, $isRunning),
             'status' => $status,
@@ -453,9 +458,8 @@ class ApiController extends Controller
             // صفحة التشغيل (إضافة فقط): حالة قفل العامل، وسبب عرض «إصلاح تشغيل عالق» ('' = التشغيل غير عالق)
             'worker' => $process['state'],
             'state_age_s' => isset($state->lq_age_s) ? (int) $state->lq_age_s : null,
-            'stuck' => QueueStats::stuckReason($phase, $process['state'], $status,
-                (int) ($counters['by_status']['processing'] ?? 0),
-                isset($state->lq_age_s) ? (int) $state->lq_age_s : null, $pauseRequested),
+            'stuck' => QueueStats::stuckReason($phase, $process['state'], $status, $processingRows,
+                isset($state->lq_age_s) ? (int) $state->lq_age_s : null, $pauseRequested, $retryWaitS),
         ];
 
         return response()->json($response)->header('Cache-Control', 'no-store');

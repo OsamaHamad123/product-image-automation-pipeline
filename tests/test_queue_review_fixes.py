@@ -577,6 +577,113 @@ def test_the_layout_card_reads_the_budget_and_database_notices_in_arabic():
     assert out["db"].startswith("تعذّر الوصول إلى قاعدة البيانات")
 
 
+# ---------------------------------------------------------------------------
+# C9: waiting for a PROVIDER_DOWN retry is not a stuck run
+# ---------------------------------------------------------------------------
+
+def test_the_worker_beats_while_it_waits_for_a_retry(offline, monkeypatch, tmp_path):
+    """During a 10-20 minute PROVIDER_DOWN backoff the loop never wrote automation_state, so the dashboard showed
+    «worker running, no progress» after 600 s and offered «fix stuck run» (which stops the worker)."""
+    import config
+    import google_sheets
+    import local_cache_db
+    import main
+
+    monkeypatch.chdir(tmp_path)
+    os.makedirs("temp", exist_ok=True)
+    real_sleep = time.sleep
+    monkeypatch.setattr(time, "sleep", lambda s: real_sleep(0.005))
+    monkeypatch.setattr(config, "DAILY_BUDGET_USD", 0)
+    for name, value in (("_another_worker_running", lambda lock: False), ("load_run_config", lambda: None),
+                        ("check_verifier", lambda: ""), ("WAIT_HEARTBEAT_SECONDS", 0.05),
+                        ("_outage_notice", lambda worker_id, since, base=None, **k: base),
+                        ("_run_health", lambda worker_id, since: None)):
+        monkeypatch.setattr(main, name, value, raising=name != "WAIT_HEARTBEAT_SECONDS")
+    beats = []
+    monkeypatch.setattr(main, "_refresh_state", lambda status, run_id=None, **kw: beats.append((status, kw)))
+    monkeypatch.setattr(local_cache_db, "resume_automation", lambda: True)
+    monkeypatch.setattr(local_cache_db, "get_automation_state",
+                        lambda: {"pause_requested": 0, "stop_requested": 0, "run_id": "run-b"})
+    monkeypatch.setattr(local_cache_db, "update_automation_state", lambda status, **kw: True)
+    monkeypatch.setattr(local_cache_db, "get_ready_for_review_count", lambda: 0)
+    monkeypatch.setattr(local_cache_db, "requeue_verifier_down", lambda run_id=None: 0)
+    monkeypatch.setattr(local_cache_db, "park_verifier_rechecks", lambda: 0)
+    monkeypatch.setattr(local_cache_db, "fetch_next_task", lambda worker_id: None)    # the row waits for its time
+    until = time.monotonic() + 0.6
+    monkeypatch.setattr(local_cache_db, "count_open_tasks", lambda: 1 if time.monotonic() < until else 0)
+    monkeypatch.setattr(google_sheets, "get_sheets_client", lambda: object())
+    monkeypatch.setattr(google_sheets, "open_worksheet", lambda client, name: object())
+    monkeypatch.setattr(google_sheets, "find_link_column", lambda ws: 7)
+    monkeypatch.setattr(google_sheets, "get_brand_mappings", lambda *a: {})
+    monkeypatch.setattr(google_sheets, "init_async_queue", lambda *a: None)
+    monkeypatch.setattr(google_sheets, "stop_async_queue", lambda: None)
+    main.run_worker_mode(report=False)
+    waiting = [kw for status, kw in beats if status == "pre_caching" and kw.get("current_product") == ""]
+    assert len(waiting) >= 3, beats                               # one beat per interval while it waited
+    assert main.LAST_WORKER["stop_reason"] is None
+
+
+@NEEDS_PHP
+def test_a_retry_wait_is_not_a_stuck_run_and_the_page_says_it_waits():
+    import local_cache_db
+    out = _queue_stats("""
+$out['stuck'] = QueueStats::stuckReason('running', 'running', 'pre_caching', 0, 1200, 0);
+$out['waiting'] = QueueStats::stuckReason('running', 'running', 'pre_caching', 0, 1200, 0, 540);
+$out['busy'] = QueueStats::stuckReason('running', 'running', 'pre_caching', 1, 1200, 0, 540);
+$out['text'] = QueueStats::phaseText('running', 0, 0, 3, 540);
+$out['plain'] = QueueStats::phaseText('running', 0, 0, 3);
+$out['minutes'] = array_map(fn ($s) => QueueStats::minutesText($s), [5, 60, 61, 125, 600, 1200]);
+$out['horizon'] = QueueStats::RETRY_HORIZON_MINUTES;
+""")
+    assert "20 دقيقة" in out["stuck"]
+    assert out["waiting"] == ""                                   # waiting for a retry, not stuck
+    assert out["busy"] != ""                                      # a row being searched for 20 minutes is
+    assert out["text"] == "مصادر البحث لم تستجب لبعض المنتجات؛ العامل ينتظر ويعيد المحاولة بعد 9 دقائق."
+    assert out["plain"] == "جاري تحضير المرشحات…"
+    assert out["minutes"] == ["دقيقة", "دقيقة", "دقيقتين", "3 دقائق", "10 دقائق", "20 دقيقة"]
+    assert out["horizon"] == local_cache_db.OPEN_TASK_HORIZON_MINUTES
+
+
+LARAVEL = PHP is not None and (DASH / "vendor" / "autoload.php").exists()
+
+
+@pytest.mark.skipif(not LARAVEL, reason="php or dashboard/vendor is not installed")
+def test_the_dashboard_reads_when_the_next_retry_is_due(db):
+    """QueueStats::retryWaitS against the real queue: the earliest PROVIDER_DOWN retry within the horizon."""
+    _add(db, 0)
+    _add(db, 1)
+    _add(db, 2)
+    _sql(db, "UPDATE automation_queue SET failure_code = 'PROVIDER_DOWN', next_attempt_at = NOW() + INTERVAL 9 MINUTE "
+             "WHERE `row_number` = %s", (ROW,))
+    _sql(db, "UPDATE automation_queue SET failure_code = 'PROVIDER_DOWN', next_attempt_at = NOW() + INTERVAL 12 HOUR "
+             "WHERE `row_number` = %s", (ROW + 1,))                  # parked for the next run: not waited for
+    dash = str(DASH).replace("\\", "/")
+    # this checkout's QueueStats (an optimised composer classmap may point to another copy of the app)
+    script = (f"<?php\nrequire '{dash}/vendor/autoload.php';\nrequire_once '{dash}/app/Services/QueueStats.php';\n"
+              f"$app = require '{dash}/bootstrap/app.php';\n"
+              "$app->make(Illuminate\\Contracts\\Console\\Kernel::class)->bootstrap();\n"
+              "echo json_encode(App\\Services\\QueueStats::retryWaitS());\n")
+    env = dict(os.environ, APP_ENV="testing", APP_KEY="base64:" + "A" * 43 + "=", CACHE_STORE="array",
+               SESSION_DRIVER="array", LOG_CHANNEL="stderr", DB_CONNECTION="mariadb",
+               DB_HOST=os.getenv("DB_HOST", "127.0.0.1"), DB_PORT=os.getenv("DB_PORT", "3306"),
+               DB_DATABASE=os.environ["DB_DATABASE"], DB_USERNAME=os.getenv("DB_USERNAME", "root"),
+               DB_PASSWORD=os.getenv("DB_PASSWORD", ""))
+    with tempfile.NamedTemporaryFile("w", suffix=".php", delete=False, encoding="utf-8") as fh:
+        fh.write(script)
+        path = fh.name
+    try:
+        def wait():
+            result = subprocess.run([PHP, path], cwd=DASH, env=env, capture_output=True, text=True, timeout=120,
+                                    encoding="utf-8")
+            assert result.returncode == 0, result.stdout[-2000:] + result.stderr[-2000:]
+            return json.loads(result.stdout.strip().splitlines()[-1])
+        assert 8 * 60 <= wait() <= 9 * 60
+        _sql(db, "UPDATE automation_queue SET next_attempt_at = NULL WHERE `row_number` = %s", (ROW,))
+        assert wait() is None
+    finally:
+        os.unlink(path)
+
+
 def test_stopping_from_the_dashboard_returns_unclaimed_rechecks_to_review(db):
     """The dashboard's stop ends the worker process (its finally may not run); stop_run settles the queue."""
     _verifier_down_review_row(db, 0)

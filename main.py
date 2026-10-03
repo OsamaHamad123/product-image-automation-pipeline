@@ -1656,6 +1656,9 @@ def _cli_trigger(argv):
 
 
 BUDGET_WARN_RATIO = 0.8
+# العامل بلا مهمة جاهزة (ينتظر موعد إعادة محاولة) يحدّث automation_state بهذا الفاصل؛ اللوحة تعد التشغيل عالقاً
+# بعد 600 ثانية بلا تحديث (QueueStats::stuckReason)
+WAIT_HEARTBEAT_SECONDS = 60
 
 
 def _daily_budget():
@@ -1809,6 +1812,7 @@ def run_worker_mode(trigger="manual", report=True):
         max_workers = 3
         active = []
         db_outage_since = None
+        last_beat = time.monotonic()
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             while True:
                 active = [f for f in active if not f.done()]
@@ -1861,10 +1865,16 @@ def run_worker_mode(trigger="manual", report=True):
                             print(f"[Queue] سحب مهمة الصف {task['row_number']}.")
                             active.append(executor.submit(runner, task))
                             db_outage_since = None
+                            last_beat = time.monotonic()
                             continue
                     if not active and local_cache_db.count_open_tasks() == 0:
                         print("[Worker] الطابور فارغ؛ خروج العامل.")
                         break
+                    if not active and time.monotonic() - last_beat >= WAIT_HEARTBEAT_SECONDS:
+                        # لا مهمة جاهزة الآن (صف ينتظر موعد إعادة المحاولة بعد انقطاع المزودين، 10-20 دقيقة): نبضة
+                        # تُبقي updated_at حديثاً، فلا تعرض اللوحة «العامل شغّال بلا تقدم» وزر «إصلاح تشغيل عالق»
+                        _refresh_state("pre_caching", run_id=run_id, current_product="")
+                        last_beat = time.monotonic()
                     db_outage_since = None
                 except Exception as e:
                     # خطأ قاعدة البيانات ليس "طابوراً فارغاً": ننتظر ونعيد المحاولة
