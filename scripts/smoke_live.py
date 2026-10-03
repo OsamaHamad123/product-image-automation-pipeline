@@ -7,6 +7,17 @@ Usage (on the machine with the keys, from the repository root):
     python scripts/smoke_live.py --rows 5 --rows 40-45 --dry-run --json smoke.json
     python scripts/compare_runs.py run2.json run3.json                # what changed between two dry runs
 
+Without the Google Sheet (a machine with the keys but no credentials.json, e.g. a cloud session):
+
+    python scripts/smoke_live.py --rows-file runs/2026-10-03/rows_2_61.csv \
+        --brands-file runs/2026-10-03/brands_mapping_suggested.csv --dry-run --json runs/after.json
+
+--rows-file reads the products from a CSV (a header row with any of row, name, name_ar, brand,
+brand_ar, barcode, category, size; the sheet's header synonyms work too) or from an earlier
+--json file (its rows' name and brand). --rows still picks rows from it. --brands-file reads a
+Brands Mapping CSV in the tab's layout (Brand, Synonyms, Excluded Competitors, Sub-brands,
+Official domains); without it a file run has no brand mappings (every brand is sheet_raw).
+
 --probe makes one cheap, read-only call per configured service (Serper images, web search,
 shopping and lens; SerpApi; the primary and the strong label-reading model; Anthropic;
 PhotoRoom; Cloudinary) and prints a table of what works and, in plain words, why not.
@@ -265,6 +276,54 @@ def read_sheet_rows(worksheet, row_numbers):
             record["name"] = record["name"] or record["name_ar"]
             out.append(record)
     return out
+
+
+def read_rows_file(path, row_numbers=None):
+    """Rows (the read_sheet_rows shape) from a CSV with a header row, or from an earlier --json run."""
+    import csv
+
+    keys = ("name", "name_ar", "brand", "brand_ar", "barcode", "category", "size")
+    if str(path).lower().endswith(".json"):
+        doc = load_run(path)
+        source = doc.get("rows", []) if isinstance(doc, dict) else doc
+        rows = [{"row_number": int(r["row"]), **{k: str(r.get(k) or "").strip() for k in keys}}
+                for r in source if isinstance(r, dict) and r.get("row") and (r.get("name") or r.get("name_ar"))]
+    else:
+        import google_sheets
+
+        with open(path, "r", encoding="utf-8-sig", newline="") as fh:
+            table = [row for row in csv.reader(fh)]
+        if not table:
+            return []
+        cols = google_sheets.resolve_columns(table[0])
+        heads = [google_sheets.normalize_header(h) for h in table[0]]
+        for key in keys:            # the plain field names too ('name', 'brand', 'name_ar')
+            plain = google_sheets.normalize_header(key)
+            if cols.get(key, -1) < 0 and plain in heads:
+                cols[key] = heads.index(plain)
+        row_col = next((heads.index(h) for h in ("row", "row number", "row_number", "#") if h in heads), -1)
+        rows = []
+        for i, line in enumerate(table[1:], start=2):
+            def cell(key):
+                idx = cols.get(key, -1)
+                return line[idx].strip() if 0 <= idx < len(line) else ""
+            number = int(line[row_col]) if 0 <= row_col < len(line) and line[row_col].strip().isdigit() else i
+            record = {"row_number": number, **{k: cell(k) for k in keys}}
+            if record["name"] or record["name_ar"]:
+                record["name"] = record["name"] or record["name_ar"]
+                rows.append(record)
+    wanted = set(row_numbers or ())
+    return [r for r in rows if not wanted or r["row_number"] in wanted]
+
+
+def read_brands_file(path):
+    """A Brands Mapping CSV (the tab's layout) in get_brand_mappings' shape."""
+    import csv
+
+    import google_sheets
+
+    with open(path, "r", encoding="utf-8-sig", newline="") as fh:
+        return google_sheets.parse_brand_mapping_rows([row for row in csv.reader(fh)])
 
 
 def read_brand_mappings(spreadsheet):
@@ -1332,7 +1391,10 @@ def run_meta(args, settings, pipeline, expansion):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--rows", action="append", help="sheet rows, e.g. 2-31 (repeatable); required for a dry run")
+    parser.add_argument("--rows", action="append", help="sheet rows, e.g. 2-31 (repeatable); required for a dry run "
+                                                        "on the sheet, optional with --rows-file")
+    parser.add_argument("--rows-file", help="read the products from this CSV or earlier --json run, not the sheet")
+    parser.add_argument("--brands-file", help="a Brands Mapping CSV to use instead of the sheet's tab")
     parser.add_argument("--probe", action="store_true",
                         help="check each configured paid service with one cheap read-only call, then exit")
     parser.add_argument("--probe-image", default=PROBE_IMAGE, help="public image URL for the visual-search check")
@@ -1356,13 +1418,22 @@ def main(argv=None):
             parser.error(f"--json {args.json}: give a file name in a folder that exists")
     if args.probe:
         return run_probe(args)
-    if not args.rows:
-        parser.error("--rows is required for a dry run (or use --probe)")
+    if not args.rows and not args.rows_file:
+        parser.error("--rows (or --rows-file) is required for a dry run (or use --probe)")
 
     identity, pipeline, providers_mod, settings, verify_mod = load_v2()
-    spreadsheet, worksheet = open_sheet_read_only()
-    rows = read_sheet_rows(worksheet, parse_rows(args.rows))
-    mappings = read_brand_mappings(spreadsheet)
+    if args.rows_file:
+        try:
+            rows = read_rows_file(args.rows_file, parse_rows(args.rows) if args.rows else None)
+            mappings = read_brands_file(args.brands_file) if args.brands_file else {}
+        except (OSError, ValueError, KeyError) as exc:
+            parser.error(f"cannot read the rows / brands file: {exc}")
+        print(f"rows from {args.rows_file} | brand mappings: "
+              f"{args.brands_file + ' (' + str(len(mappings)) + ' brands)' if args.brands_file else 'none'}")
+    else:
+        spreadsheet, worksheet = open_sheet_read_only()
+        rows = read_sheet_rows(worksheet, parse_rows(args.rows))
+        mappings = read_brands_file(args.brands_file) if args.brands_file else read_brand_mappings(spreadsheet)
     expansion = False if args.no_expansion else True
     meta = run_meta(args, settings, pipeline, expansion)
     print(f"dry run on {len(rows)} rows | Serper key {'set' if settings.serper_api_key() else 'MISSING'} | "
