@@ -105,6 +105,42 @@ def test_route_tab_and_script_url():
     assert "$request->query('file'" not in body and "$request->query('path'" not in body
 
 
+@pytest.mark.skipif(PHP is None or not (DASH / "vendor" / "autoload.php").exists(),
+                    reason="php or dashboard/vendor is not installed")
+def test_the_route_answers_through_laravel(mariadb_or_skip, tmp_path):
+    compiled = tmp_path / "views"
+    compiled.mkdir()
+    env = dict(os.environ, APP_ENV="testing", APP_KEY="base64:" + "A" * 43 + "=", APP_DEBUG="true",
+               SESSION_DRIVER="array", CACHE_STORE="array", LOG_CHANNEL="stderr", VIEW_COMPILED_PATH=str(compiled),
+               DB_CONNECTION="mariadb", DB_HOST=os.getenv("DB_HOST", "127.0.0.1"), DB_PORT=os.getenv("DB_PORT", "3306"),
+               DB_DATABASE=os.environ["DB_DATABASE"], DB_USERNAME=os.getenv("DB_USERNAME", "root"),
+               DB_PASSWORD=os.getenv("DB_PASSWORD", ""))
+    dash = str(DASH).replace("\\", "/")
+    script = f"""<?php
+require '{dash}/vendor/autoload.php';
+$app = require '{dash}/bootstrap/app.php';
+$kernel = $app->make(Illuminate\\Contracts\\Http\\Kernel::class);
+$out = [];
+foreach (['/api/view-nightly-log', '/api/view-nightly-log?date=..%2F..%2F.env'] as $path) {{
+    $response = $kernel->handle(Illuminate\\Http\\Request::create($path, 'GET'));
+    $out[] = ['status' => $response->getStatusCode(), 'body' => json_decode($response->getContent(), true)];
+}}
+echo json_encode($out, JSON_UNESCAPED_UNICODE);
+"""
+    with tempfile.NamedTemporaryFile("w", suffix=".php", delete=False, encoding="utf-8") as fh:
+        fh.write(script)
+        path = fh.name
+    try:
+        result = subprocess.run([PHP, path], cwd=DASH, env=env, capture_output=True, text=True, timeout=240,
+                                encoding="utf-8")
+    finally:
+        os.unlink(path)
+    assert result.returncode == 0, result.stdout[-3000:] + result.stderr[-3000:]
+    latest, traversal = json.loads(result.stdout)
+    assert latest["status"] == 200 and latest["body"]["status"] == "success" and latest["body"]["kind"] == "nightly"
+    assert traversal["status"] == 400 and "lines" not in traversal["body"]
+
+
 @pytest.mark.skipif(NODE is None, reason="node is not installed")
 def test_the_nightly_tab_says_which_night_and_what_to_do_without_a_log():
     script = ("globalThis.window = globalThis;\n" + HEALTH_JS.read_text(encoding="utf-8") + "\n"
