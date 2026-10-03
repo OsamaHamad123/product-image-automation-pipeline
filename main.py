@@ -1067,6 +1067,7 @@ def run_worker_mode(trigger="manual", report=True):
 
     queue_started = False
     worker_id = None
+    start_notice = None          # سبب التوقف قبل أي منتج (للتقرير)
     try:
         if stop_reason == "db_unavailable":
             print(f"[Worker] قاعدة البيانات لا ترد ({state.get('db_error') or '-'})؛ لن يُعالج أي منتج.")
@@ -1077,7 +1078,8 @@ def run_worker_mode(trigger="manual", report=True):
         sheets_client = google_sheets.get_sheets_client()
         if not sheets_client:
             stop_reason = "sheets_unavailable"
-            local_cache_db.update_automation_state(status="error", notice="SHEETS_UNAVAILABLE: Google Sheets connection failed")
+            start_notice = "SHEETS_UNAVAILABLE: Google Sheets connection failed"
+            local_cache_db.update_automation_state(status="error", notice=start_notice)
             return
         try:
             worksheet = google_sheets.open_worksheet(sheets_client, config.SPREADSHEET_NAME_OR_URL)
@@ -1089,7 +1091,8 @@ def run_worker_mode(trigger="manual", report=True):
         except Exception as e:
             stop_reason = stop_reason or _sheet_failure_reason(e)
             code = "SHEETS_UNAVAILABLE" if stop_reason == "sheets_unavailable" else "SHEET_CONFIG"
-            local_cache_db.update_automation_state(status="error", notice=f"{code}: {e}")
+            start_notice = f"{code}: {e}"
+            local_cache_db.update_automation_state(status="error", notice=start_notice)
             print(f"[Worker] {e}")
             return
         brand_mappings = google_sheets.get_brand_mappings(sheets_client, config.SPREADSHEET_NAME_OR_URL)
@@ -1205,7 +1208,7 @@ def run_worker_mode(trigger="manual", report=True):
         except Exception:
             pass
         LAST_WORKER.update(stop_reason=stop_reason, run_id=run_id, worker_id=worker_id, started_ts=started_ts,
-                           ended_ts=time.time(), notice=final_notice or notice or None, health=health)
+                           ended_ts=time.time(), notice=final_notice or start_notice or notice or None, health=health)
         if report:
             try:
                 import run_report

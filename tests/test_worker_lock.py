@@ -39,6 +39,15 @@ def main_mod(offline, monkeypatch, tmp_path):
 
 
 @pytest.fixture
+def lock_log(main_mod, monkeypatch):
+    """What main.py logs. main's print is config.log_runner, which cli_bridge (imported by other tests) turns into a
+    logger call: record main.print itself instead of reading stdout."""
+    lines = []
+    monkeypatch.setattr(main_mod, "print", lambda *args: lines.append(" ".join(str(a) for a in args)))
+    return lines
+
+
+@pytest.fixture
 def fake_worker_script(tmp_path):
     """A python process whose command line is `python .../main.py` (stands in for a live worker)."""
     folder = tmp_path / "worker_bin"
@@ -79,7 +88,7 @@ def _json_lock(pid, **extra):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.skipif(not LINUX_PROC, reason="needs Linux /proc")
-def test_a_reused_pid_of_another_program_does_not_skip_the_night(main_mod, capsys):
+def test_a_reused_pid_of_another_program_does_not_skip_the_night(main_mod, lock_log):
     """The audit's reproduction: the lock holds the PID of `sleep` (not a pipeline worker)."""
     other = subprocess.Popen(["sleep", "30"])
     try:
@@ -87,19 +96,19 @@ def test_a_reused_pid_of_another_program_does_not_skip_the_night(main_mod, capsy
             _write(main_mod.LOCK_FILE, content)
             assert main_mod._another_worker_running(main_mod.LOCK_FILE) is False
             assert not os.path.exists(main_mod.LOCK_FILE), "the stale lock is removed"
-        assert "ليست بايثون" in capsys.readouterr().out
+        assert "ليست بايثون" in "\n".join(lock_log)
     finally:
         other.kill()
         other.wait()
 
 
 @pytest.mark.skipif(not LINUX_PROC, reason="needs Linux /proc")
-def test_a_python_process_that_is_not_the_worker_does_not_hold_the_lock(main_mod, fake_worker_script, capsys):
+def test_a_python_process_that_is_not_the_worker_does_not_hold_the_lock(main_mod, fake_worker_script, lock_log):
     proc = fake_worker_script("other_tool.py")
     _write(main_mod.LOCK_FILE, _json_lock(proc.pid))
     assert main_mod._another_worker_running(main_mod.LOCK_FILE) is False
     assert not os.path.exists(main_mod.LOCK_FILE)
-    assert "ليست عامل الأتمتة" in capsys.readouterr().out
+    assert "ليست عامل الأتمتة" in "\n".join(lock_log)
 
 
 @pytest.mark.skipif(not LINUX_PROC, reason="needs Linux /proc")
@@ -112,11 +121,11 @@ def test_a_genuine_live_worker_holds_the_lock_in_both_formats(main_mod, fake_wor
 
 
 @pytest.mark.skipif(not LINUX_PROC, reason="needs Linux /proc")
-def test_a_worker_that_started_after_the_lock_was_written_is_a_reused_pid(main_mod, fake_worker_script, capsys):
+def test_a_worker_that_started_after_the_lock_was_written_is_a_reused_pid(main_mod, fake_worker_script, lock_log):
     proc = fake_worker_script("run_nightly.py")
     _write(main_mod.LOCK_FILE, _json_lock(proc.pid, started_ts=time.time() - 3600))
     assert main_mod._another_worker_running(main_mod.LOCK_FILE) is False
-    assert "بدأت بعد كتابة القفل" in capsys.readouterr().out
+    assert "بدأت بعد كتابة القفل" in "\n".join(lock_log)
 
 
 @pytest.mark.skipif(not LINUX_PROC, reason="needs Linux /proc")
@@ -149,7 +158,7 @@ def test_a_dead_pid_is_stale(main_mod):
     assert not os.path.exists(main_mod.LOCK_FILE)
 
 
-def test_a_lock_from_another_computer_is_stale_without_looking_at_this_computers_processes(main_mod, capsys):
+def test_a_lock_from_another_computer_is_stale_without_looking_at_this_computers_processes(main_mod, lock_log):
     _write(main_mod.LOCK_FILE, _json_lock(4242, host="OTHER-PC"))
 
     def never(pid):
@@ -157,7 +166,7 @@ def test_a_lock_from_another_computer_is_stale_without_looking_at_this_computers
 
     assert main_mod._another_worker_running(main_mod.LOCK_FILE, process_info=never) is False
     assert not os.path.exists(main_mod.LOCK_FILE)
-    assert "OTHER-PC" in capsys.readouterr().out
+    assert "OTHER-PC" in "\n".join(lock_log)
 
 
 def test_a_lock_older_than_the_maximum_is_stale(main_mod):
@@ -187,7 +196,7 @@ def test_a_script_named_like_main_py_inside_another_name_does_not_count(main_mod
         main_mod.LOCK_FILE, process_info=_info(cmdline="python /srv/app/domain.py --serve")) is False
 
 
-def test_our_own_lock_the_dashboards_starting_lock_and_garbage(main_mod, capsys):
+def test_our_own_lock_the_dashboards_starting_lock_and_garbage(main_mod, lock_log):
     _write(main_mod.LOCK_FILE, _json_lock(os.getpid(), role="nightly"))     # the nightly holds it during the enqueue
     assert main_mod._another_worker_running(main_mod.LOCK_FILE, process_info=_info(alive=False)) is False
     assert os.path.exists(main_mod.LOCK_FILE)
@@ -197,7 +206,7 @@ def test_our_own_lock_the_dashboards_starting_lock_and_garbage(main_mod, capsys)
     _write(main_mod.LOCK_FILE, "not a lock")
     assert main_mod._another_worker_running(main_mod.LOCK_FILE) is False
     assert not os.path.exists(main_mod.LOCK_FILE)
-    assert "محتوى غير مفهوم" in capsys.readouterr().out
+    assert "محتوى غير مفهوم" in "\n".join(lock_log)
 
 
 def test_write_read_and_release_only_our_own_lock(main_mod):

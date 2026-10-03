@@ -315,6 +315,48 @@ def test_the_worker_reports_its_run_unless_the_nightly_does(offline, monkeypatch
     assert len(reports) == 1
 
 
+@pytest.mark.parametrize("failure, reason, code, notice", [
+    ("tab", "sheet_config", 1, "SHEET_CONFIG: التبويب 'Products' غير موجود"),
+    ("none", "sheet_not_found", 2, "SHEET_CONFIG: sheet not found: My Sheet"),
+    ("busy", "sheets_unavailable", 2, "SHEETS_UNAVAILABLE: 503 busy"),
+])
+def test_a_sheet_the_worker_cannot_open_is_reported_with_its_reason(offline, monkeypatch, tmp_path, failure, reason,
+                                                                    code, notice):
+    """A wrong tab is a setting (exit 1, no retry); a sheet Google does not open or answer is an outage the nightly
+    retries (exit 2). The report carries the detail the dashboard shows."""
+    import config
+    import google_sheets
+    import local_cache_db
+    import main
+    import run_report
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(main, "load_run_config", lambda: None)
+    monkeypatch.setattr(main, "check_verifier", lambda: "")
+    monkeypatch.setattr(config, "SPREADSHEET_NAME_OR_URL", "My Sheet")
+    monkeypatch.setattr(local_cache_db, "resume_automation", lambda: True)
+    monkeypatch.setattr(local_cache_db, "get_automation_state", lambda: {"stop_requested": 0, "run_id": None})
+    states = []
+    monkeypatch.setattr(local_cache_db, "update_automation_state", lambda *a, **k: states.append(k) or True)
+    monkeypatch.setattr(google_sheets, "get_sheets_client", lambda: object())
+
+    def open_worksheet(client, name):
+        if failure == "tab":
+            raise google_sheets.SheetConfigError("التبويب 'Products' غير موجود")
+        return None if failure == "none" else object()
+
+    def find_link_column(ws):
+        raise ConnectionError("503 busy")
+
+    monkeypatch.setattr(google_sheets, "open_worksheet", open_worksheet)
+    monkeypatch.setattr(google_sheets, "find_link_column", find_link_column)
+
+    main.run_worker_mode(report=False)
+
+    assert main.LAST_WORKER["stop_reason"] == reason and run_report.exit_code(reason) == code
+    assert main.LAST_WORKER["notice"] == notice and states[-1]["notice"] == notice
+
+
 @pytest.mark.parametrize("case, reason", [
     ("bad_row_filter", "enqueue_failed"),
     ("no_client", "sheets_unavailable"),
