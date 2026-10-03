@@ -315,6 +315,53 @@ def test_the_worker_reports_its_run_unless_the_nightly_does(offline, monkeypatch
     assert len(reports) == 1
 
 
+@pytest.mark.parametrize("case, reason", [
+    ("bad_row_filter", "enqueue_failed"),
+    ("no_client", "sheets_unavailable"),
+    ("no_worksheet", "sheet_not_found"),
+    ("schema", "sheet_config"),
+    ("google_503", "sheets_unavailable"),
+    ("db_down", "db_unavailable"),
+    ("queue_bug", "enqueue_failed"),
+])
+def test_an_enqueue_failure_says_whether_it_is_an_outage(offline, monkeypatch, tmp_path, case, reason):
+    """The nightly retries an enqueue that failed on an outage (main.LAST_ENQUEUE['reason']), not a setting."""
+    import config
+    import google_sheets
+    import local_cache_db
+    import main
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(main, "load_run_config", lambda: None)
+    monkeypatch.setattr(google_sheets, "clear_cache", lambda: None)
+    monkeypatch.setattr(local_cache_db, "update_automation_state", lambda *a, **k: True)
+    monkeypatch.setattr(config, "ROW_FILTER", "5-x" if case == "bad_row_filter" else "")
+    monkeypatch.setattr(config, "BRAND_FILTER", "")
+    monkeypatch.setattr(google_sheets, "get_sheets_client", lambda: None if case == "no_client" else object())
+    monkeypatch.setattr(google_sheets, "open_worksheet", lambda c, n: None if case == "no_worksheet" else object())
+    monkeypatch.setattr(google_sheets, "get_brand_mappings", lambda *a: {})
+
+    def products(ws):
+        if case == "schema":
+            raise google_sheets.SheetSchemaError("no product name column")
+        if case == "google_503":
+            raise ConnectionError("503 Service Unavailable")
+        return [{"row_number": 5, "product_name": "Laban Up 180ml", "brand": "Al Rawabi", "barcode": ""}], 9
+
+    def add(*a, **k):
+        raise RuntimeError("queue write failed")
+
+    monkeypatch.setattr(google_sheets, "get_products", products)
+    monkeypatch.setattr(local_cache_db, "add_to_queue", add)
+    monkeypatch.setattr(local_cache_db, "db_available", lambda: case != "db_down")
+    main.LAST_ENQUEUE.clear()
+
+    with pytest.raises(SystemExit) as exc:
+        main.run_enqueue_mode()
+
+    assert exc.value.code == 1 and main.LAST_ENQUEUE["reason"] == reason and main.LAST_ENQUEUE["message"]
+
+
 @pytest.mark.parametrize("argv, trigger", [
     (["main.py", "--worker"], "manual"),
     (["main.py", "--worker", "--trigger=dashboard"], "dashboard"),
