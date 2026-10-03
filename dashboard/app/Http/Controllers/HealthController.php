@@ -13,8 +13,8 @@ use Illuminate\Support\Facades\Cache;
  *   أبداً (استعلام Serper مدفوع + طلب PhotoRoom)؛ الفحص بزر صريح فقط (ProductController::runDiagnosticsJson).
  * - «عمليات البحث»: التجميع في بايثون (ops_health.summarize، مغطى بـ pytest) عبر إجراء cli_bridge للقراءة فقط
  *   'ops_health'، فاللوحة وتنبيه العامل يتشاركان نفس القواعد. النتيجة تُخزن دقيقة واحدة؛ ?refresh=1 يعيد القراءة.
- * - «السجل»: آخر أسطر سجل الأتمتة وسجل لوحة التحكم. ملف غير موجود حالة عادية (exists=false) وليس 404،
- *   والقيم السرية المحفوظة تُحجب من الأسطر قبل إرسالها.
+ * - «السجل»: آخر أسطر سجل الأتمتة وسجل لوحة التحكم وسجل التشغيل الليلي (temp/nightly). ملف غير موجود حالة
+ *   عادية (exists=false) وليس 404، والقيم السرية المحفوظة تُحجب من الأسطر قبل إرسالها.
  */
 class HealthController extends Controller
 {
@@ -83,6 +83,18 @@ class HealthController extends Controller
     public function laravelLog()
     {
         return self::logResponse('laravel', storage_path('logs/laravel.log'));
+    }
+
+    /**
+     * آخر أسطر سجل التشغيل الليلي (temp/nightly/nightly_YYYY-MM-DD.log الذي يكتبه scripts/run_nightly.py):
+     * أحدث ليلة، أو ?date=YYYY-MM-DD. لا يُقبل اسم ملف ولا مسار من الطلب: التاريخ فقط بصيغة ثابتة.
+     */
+    public function nightlyLog(Request $request)
+    {
+        [$code, $body] = self::nightlyPayload(base_path('../temp/nightly'), (string) $request->query('date', ''),
+            SettingsController::secretValues());
+        return response()->json($body, $code, [], JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE)
+            ->header('Cache-Control', 'no-store');
     }
 
     // ------------------------------------------------------------------
@@ -255,6 +267,46 @@ class HealthController extends Controller
         $lines = array_map(fn ($line) => self::redact($line, $secrets), $lines);
         return [200, ['status' => 'success', 'kind' => $kind, 'exists' => true, 'lines' => $lines,
                       'updated_at' => @filemtime($path) ?: null]];
+    }
+
+    /** تواريخ سجلات التشغيل الليلي الموجودة في $dir (الأحدث أولاً)، من أسماء الملفات بالصيغة الثابتة فقط. */
+    public static function nightlyDates(string $dir): array
+    {
+        $dates = [];
+        foreach (@scandir($dir) ?: [] as $name) {
+            if (preg_match('/^nightly_(\d{4}-\d{2}-\d{2})\.log$/', $name, $m) && is_file($dir . DIRECTORY_SEPARATOR . $name)) {
+                $dates[] = $m[1];
+            }
+        }
+        rsort($dates);
+        return $dates;
+    }
+
+    /**
+     * [HTTP code, body] لسجل ليلة واحدة: $date فارغ = أحدث ليلة. أي تاريخ بغير صيغة YYYY-MM-DD يُرفض (400)،
+     * والملف المقروء يجب أن يبقى داخل $dir بعد حل الروابط (لا path traversal). لا سجل بعد: exists=false (200).
+     * يضيف dates (الليالي المتاحة) و date (الليلة المعروضة).
+     */
+    public static function nightlyPayload(string $dir, string $date, array $secrets = []): array
+    {
+        $date = trim($date);
+        $dates = self::nightlyDates($dir);
+        if ($date !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+            return [400, ['status' => 'error', 'kind' => 'nightly', 'error' => 'تاريخ السجل غير صالح.']];
+        }
+        $date = $date !== '' ? $date : ($dates[0] ?? '');
+        if ($date === '') {
+            return [200, ['status' => 'success', 'kind' => 'nightly', 'exists' => false, 'lines' => [],
+                          'updated_at' => null, 'dates' => [], 'date' => null]];
+        }
+        $path = $dir . DIRECTORY_SEPARATOR . 'nightly_' . $date . '.log';
+        $realDir = realpath($dir);
+        $realPath = realpath($path);
+        if ($realPath !== false && ($realDir === false || strpos($realPath, $realDir . DIRECTORY_SEPARATOR) !== 0)) {
+            return [400, ['status' => 'error', 'kind' => 'nightly', 'error' => 'تاريخ السجل غير صالح.']];
+        }
+        [$code, $body] = self::logPayload('nightly', $path, $secrets);
+        return [$code, $body + ['dates' => $dates, 'date' => $date]];
     }
 
     /** آخر $max سطر غير فارغ من نهاية الملف (بلا قراءة الملف كله)، أو null إذا تعذرت القراءة. */

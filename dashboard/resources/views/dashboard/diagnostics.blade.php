@@ -6,7 +6,7 @@
       $checkedAt        epoch of the last check or null;  $allOk  false when a critical service failed
     Opening the page never runs the check (a paid Serper query and a PhotoRoom call): the button does.
     public/js/health.js runs the check on click, loads «عمليات البحث» from GET /api/system/ops-health and
-    the log tails from GET /api/view-pipeline-log and /api/view-laravel-log.
+    the log tails from GET /api/view-pipeline-log, /api/view-laravel-log and /api/view-nightly-log.
 --}}
 @extends('layouts.laqta')
 
@@ -127,6 +127,7 @@
             <div class="lq-health-log__tabs" role="tablist" aria-label="نوع السجل">
                 <button type="button" role="tab" class="lq-health-log__tab" id="tab-pipeline" data-log-tab="pipeline" aria-selected="true" aria-controls="lq-health-log-body">الأتمتة</button>
                 <button type="button" role="tab" class="lq-health-log__tab" id="tab-laravel" data-log-tab="laravel" aria-selected="false" aria-controls="lq-health-log-body" tabindex="-1">لوحة التحكم</button>
+                <button type="button" role="tab" class="lq-health-log__tab" id="tab-nightly" data-log-tab="nightly" aria-selected="false" aria-controls="lq-health-log-body" tabindex="-1">التشغيل الليلي</button>
             </div>
         </div>
         <div class="lq-health-log__body" id="lq-health-log-body" role="tabpanel" aria-labelledby="tab-pipeline" tabindex="0" data-health="log-body">
