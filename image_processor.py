@@ -84,7 +84,7 @@ GROUP_AREA_MIN = 0.40           # عبوة متعددة: كل قطعة 40% عل�
 GROUP_HEIGHT_MIN = 0.80
 MAX_UPSCALE = 3.0               # تكبير المنتج على اللوحة أكثر من 3 أضعاف: علامة تمنع النشر التلقائي
 UPSCALE_NOTE_MIN = 2.0          # بين ضعفين و3 أضعاف: ينشر مع ملاحظة (quality_notes) يراها المراجع والتقرير
-MIN_MAIN_EXTENT = 0.80          # الجسم الرئيسي يشغل أقل من 80% من مساحة الإشغال المتاحة
+MIN_MAIN_EXTENT = 0.80          # مجموعة المنتج تشغل أقل من 80% من مساحة الإشغال المتاحة
 FRAME_ASPECT_TOLERANCE = 0.02   # مخرج المزوّد بنفس نسبة أبعاد الإطار المرسل (لم يقصه المزوّد)
 # خلفية معتمة بقيت حول المنتج (ورقة/صندوق تصوير رمادي في PNG شفاف أو في مخرج المزوّد)
 BACKDROP_RECT_MIN = 0.95
@@ -920,8 +920,8 @@ def assess_cutout(cutout: Image.Image, frame_size=None, crop_sides=_NO_CROP, can
       second_object      أجسام أخرى (مجموع مساحتها الصلبة) 1% أو أكثر من الجسم الرئيسي. قطع متقاربة الحجم
                          والارتفاع (عبوتان متجاورتان) مجموعة منتج واحدة وليست جسماً ثانياً.
       upscaled           المنتج سيُكبّر أكثر من 3 أضعاف على اللوحة (بين ضعفين و3: ملاحظة فقط، _assess().notes).
-      too_small_on_canvas الجسم الرئيسي يشغل أقل من 80% من مساحة الإشغال (شيء آخر يحدد الحجم).
-      opaque_backdrop    (مع check_backdrop) ورقة/صندوق تصوير محايد اللون بقي حول المنتج.
+      too_small_on_canvas مجموعة المنتج تشغل أقل من 80% من مساحة الإشغال (شيء آخر يحدد الحجم).
+      opaque_backdrop    (مع check_backdrop، ودائماً في مسار العزل) ورقة/صندوق تصوير محايد اللون بقي حول المنتج.
     """
     return _assess(cutout, frame_size, crop_sides, canvas_size, fill, check_backdrop).flags
 
@@ -991,9 +991,10 @@ def _assess(cutout: Image.Image, frame_size=None, crop_sides=_NO_CROP, canvas_si
 
     main_x, main_y = int(stats[main, cv2.CC_STAT_LEFT]), int(stats[main, cv2.CC_STAT_TOP])
     main_w, main_h = int(stats[main, cv2.CC_STAT_WIDTH]), int(stats[main, cv2.CC_STAT_HEIGHT])
-    if check_backdrop:
-        rgb = np.asarray(rgba.convert("RGB"))
-        if _has_opaque_backdrop(rgb, (labels == main) & solid, main_w * main_h):
+    main_solid = (labels == main) & solid
+    # المستطيل أولاً: أغلب المنتجات ليست مستطيلاً معتماً فلا داعي لتحويل الألوان
+    if check_backdrop and int(main_solid.sum()) >= BACKDROP_RECT_MIN * main_w * main_h:
+        if _has_opaque_backdrop(np.asarray(rgba.convert("RGB")), main_solid, main_w * main_h):
             flags.append(FLAG_OPAQUE_BACKDROP)
     return _Assessment(flags, (main_x, main_y, main_x + main_w, main_y + main_h), notes)
 
