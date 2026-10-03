@@ -476,6 +476,9 @@ def _cache_row_to_dict(row):
         "approved_by": row.get("approved_by"),
         "perceptual_hash": row.get("perceptual_hash"),
         "resolved_at": row.get("resolved_at"),
+        # هوية السجل كما حُفظت (للمقارنة بصف الشيت: main._gtin_resolution_fits)
+        "product_name": row.get("product_name"),
+        "brand": row.get("brand"),
         "source": "mariadb_cache",
     }
 

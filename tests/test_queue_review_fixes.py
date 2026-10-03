@@ -369,6 +369,58 @@ def test_a_reviewer_status_write_is_retried_after_a_deadlock(offline, monkeypatc
 
 
 # ---------------------------------------------------------------------------
+# C7: a GTIN row whose size is only in the SIZE column gets its own approval
+# ---------------------------------------------------------------------------
+
+MILK_GTIN = "6281007000024"
+
+
+def _approve_gtin(db, prod, link=LINK, name=None):
+    key = _keys(prod)[0]
+    assert db.save_product_resolution(prod["barcode"], name or prod["product_name"], prod["brand"],
+                                      "https://p4f.example/milk.jpg", link, verification_status="human_approved",
+                                      approved_by="human", sku_key=key)
+    return key
+
+
+def test_a_gtin_row_with_a_size_column_gets_its_own_approval_relinked(db, sheet):
+    """Probe C7: the stored resolution keeps only the name, so a size stated only in the SIZE column never matched,
+    not even for the row's own approval: a paid search and a second human review instead of a free rewrite."""
+    import main
+    prod = _prod(0, "P4F Almarai Fresh Milk", brand="Almarai", barcode=MILK_GTIN, size="1L")
+    _approve_gtin(db, prod)
+    rows, stats = main.plan_enqueue([prod])
+    assert rows[0]["task_kind"] == "relink" and stats["relink"] == 1
+    db.add_many_to_queue(rows)
+    assert _work(main, db.fetch_next_task("host:1")) == "success"
+    assert sheet["links"] == [(ROW, LINK)] and sheet["searches"] == []
+    # spelling of the name and brand does not matter, a different product under the same barcode does
+    assert main._gtin_resolution_fits({"product_name": "p4f almarai  FRESH milk", "brand": "AL-MARAI"},
+                                      "P4F Almarai Fresh Milk", "Al Marai", "1 L")
+    assert not main._gtin_resolution_fits({"product_name": "P4F Almarai Laban", "brand": "Almarai"},
+                                          "P4F Almarai Fresh Milk", "Almarai", "1L")
+
+
+def test_rows_sharing_a_barcode_with_other_sizes_keep_the_identity_guard(db, sheet):
+    """Two rows with one barcode and one name but 1L / 2L in the SIZE column: the barcode is wrong on one of them,
+    so the name alone does not give either the other's image (the guard of the cache identity check)."""
+    import main
+    one = _prod(0, "P4F Almarai Fresh Milk", brand="Almarai", barcode=MILK_GTIN, size="1L")
+    two = _prod(1, "P4F Almarai Fresh Milk", brand="Almarai", barcode=MILK_GTIN, size="2L")
+    _approve_gtin(db, one)
+    rows, _ = main.plan_enqueue([one, two])
+    assert [r["task_kind"] for r in rows] == [None, None]
+    # the worker checks the queue rows of the barcode as well
+    db.add_many_to_queue(rows)
+    assert main._servable_resolution(_keys(one)[0], _keys(one)[1], one["product_name"], "Almarai", "1L") is None
+    _sql(db, "DELETE FROM automation_queue WHERE `row_number` = %s", (ROW + 1,))
+    res = main._servable_resolution(_keys(one)[0], _keys(one)[1], one["product_name"], "Almarai", "1L")
+    assert res is not None and res["cloudinary_url"] == LINK
+    # another product under the same barcode never fits
+    assert main._servable_resolution(_keys(one)[0], None, "P4F Almarai Laban", "Almarai", "1L") is None
+
+
+# ---------------------------------------------------------------------------
 # C5: rows waiting for review stay there when a run stops early
 # ---------------------------------------------------------------------------
 

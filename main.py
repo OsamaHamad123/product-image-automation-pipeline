@@ -607,11 +607,48 @@ def _rejections(sku_key, alt_key=None):
     return urls, phashes
 
 
+def _size_key(text):
+    """خلية الحجم للمقارنة: '1 L' و '1L' و '1l' واحدة."""
+    from catalog_match.text_norm import match_key
+    return match_key(str(text or "")).replace(" ", "")
+
+
+def _same_named_resolution(res, name, brand):
+    """الحل المحفوظ لهذا الاسم والبراند نفسيهما (بعد التطبيع: حالة الأحرف والمسافات والترقيم)."""
+    from catalog_match.text_norm import match_key
+    want = match_key(name)
+    return (bool(want) and match_key(res.get("product_name")) == want
+            and match_key(res.get("brand")).replace(" ", "") == match_key(brand).replace(" ", ""))
+
+
+def _gtin_resolution_fits(res, name, brand, size, brand_index=None, sizes=()):
+    """
+    حل مفتاحه باركود يخدم هذا الصف؟ فحص الهوية نفسه الذي يمر به الكاش (cached_row_matches): باركود مشترك أو خاطئ
+    لا يعطي الصف صورة منتج آخر. السجل المحفوظ لا يحفظ إلا الاسم، فحجم لا يذكره إلا عمود الحجم لا يتأكد منه أبداً،
+    ولا حتى لاعتماد الصف نفسه (بحث مدفوع ومراجعة ثانية بدل كتابة مجانية). لذلك: نفس الاسم والبراند يكفي، إلا إذا
+    ذكرت صفوف أخرى بالباركود نفسه حجماً آخر في عمود الحجم (sizes: أحجام صفوف هذا المفتاح)؛ عندها يبقى الفحص كاملاً.
+    """
+    if local_cache_db.cached_row_matches(res, name, brand, brand_index, size_text=size or None):
+        return True
+    own = _size_key(size)
+    return (bool(own) and _same_named_resolution(res, name, brand)
+            and not any(s and s != own for s in sizes or ()))
+
+
 def _servable_resolution(sku_key, alt_key, name, brand, size, brand_mappings=None):
-    """الحل المعتمد (human_approved / auto_verified) لهذا المنتج بمفتاحه أو بالمفتاح البديل، أو None."""
+    """
+    الحل المعتمد (human_approved / auto_verified) لهذا المنتج بمفتاحه أو بالمفتاح البديل، أو None.
+    حل مفتاحه باركود لصف حجمه في عمود الحجم فقط يُقبل بنفس الاسم والبراند (_gtin_resolution_fits).
+    """
     for key in dict.fromkeys(k for k in (sku_key, alt_key) if k):
         cached = local_cache_db.get_cached_product(sku_key=key, product_name=name, brand=brand,
                                                    brand_mappings=brand_mappings, size_text=size or None)
+        if not cached and size and _is_gtin_key(key):
+            plain = local_cache_db.get_cached_product(sku_key=key, product_name=name, brand=brand,
+                                                      brand_mappings=brand_mappings)
+            sizes = [_size_key(task_payload(t).get("size")) for t in local_cache_db.get_tasks_by_sku(key)]
+            if plain and _gtin_resolution_fits(plain, name, brand, size, brand_mappings, sizes):
+                cached = plain
         if cached and cached.get("cloudinary_url"):
             return cached
     return None
@@ -1008,21 +1045,36 @@ def _row_was_edited(prod, sku_key, alt_key, link_rows):
     return True
 
 
-def _snapshot_resolution(snapshot, prod, payload, sku_key, alt_key, brand_index, human_only=False):
+def _snapshot_resolution(snapshot, prod, payload, sku_key, alt_key, brand_index, human_only=False, sizes=()):
     """
     الحل المعتمد لمنتج الصف من لقطة الحلول: بالمفتاح ثم بالبديل. حل مفتاحه باركود يمر بفحص الهوية نفسه
-    الذي يمر به الكاش (cached_row_matches): باركود مشترك أو خاطئ لا يعطي الصف صورة منتج آخر.
+    الذي يمر به الكاش (_gtin_resolution_fits): باركود مشترك أو خاطئ لا يعطي الصف صورة منتج آخر، واعتماد الصف
+    نفسه لا يُرفض لأن حجمه في عمود الحجم فقط. sizes: أحجام صفوف الشيت التي تحمل هذا الباركود.
     """
     for key in dict.fromkeys(k for k in (sku_key, alt_key) if k):
         res = snapshot["by_key"].get(key)
         if not res or (human_only and res.get("verification_status") != "human_approved"):
             continue
-        if _is_gtin_key(key) and not local_cache_db.cached_row_matches(
-                res, prod.get("product_name"), prod.get("brand") or "", brand_index,
-                size_text=payload.get("size") or None):
+        if _is_gtin_key(key) and not _gtin_resolution_fits(
+                res, prod.get("product_name"), prod.get("brand") or "", payload.get("size"), brand_index, sizes):
             continue
         return res
     return None
+
+
+def _sizes_by_gtin(products):
+    """{GTIN-14: أحجام عمود الحجم (بعد التطبيع)} لصفوف الشيت ذات الباركود الصالح: صفان بباركود واحد وحجمين مختلفين
+    يعنيان باركوداً خاطئاً، فلا يكفي تطابق الاسم والبراند لإعطاء أحدهما صورة الآخر."""
+    from catalog_match.gtin import normalize_gtin
+    out = {}
+    for prod in products:
+        try:
+            gtin, status = normalize_gtin(str(prod.get("barcode") or "").strip())
+        except Exception:
+            continue
+        if status == "ok" and gtin:
+            out.setdefault(gtin, set()).add(_size_key(prod.get("size")))
+    return out
 
 
 def _outbox_records(row_numbers):
@@ -1105,6 +1157,7 @@ def plan_enqueue(products, reprocess=False, brand_mappings=None):
              "index_changed": 0}
     snapshot = local_cache_db.resolution_snapshot()
     queue = local_cache_db.queue_snapshot()
+    gtin_sizes = _sizes_by_gtin(products)
     entries = []
     for prod in products:
         name, brand = prod["product_name"], prod.get("brand") or ""
@@ -1123,13 +1176,14 @@ def plan_enqueue(products, reprocess=False, brand_mappings=None):
                 continue
             stats["edited"] += 1
             entry["reason"] = "ROW_EDITED"
-            if _snapshot_resolution(snapshot, prod, payload, sku_key, alt_key, index, human_only=True):
+            if _snapshot_resolution(snapshot, prod, payload, sku_key, alt_key, index, human_only=True,
+                                    sizes=gtin_sizes.get(sku_key)):
                 entry["task_kind"] = local_cache_db.TASK_RELINK
             else:
                 entry["review_only"] = True
         elif not reprocess:
             res = _snapshot_resolution(snapshot, prod, payload, sku_key, alt_key, index,
-                                       human_only=bool(prod.get("needs_review")))
+                                       human_only=bool(prod.get("needs_review")), sizes=gtin_sizes.get(sku_key))
             old = queue.get(prod["row_number"])
             if res:
                 entry["resolution"] = res
