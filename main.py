@@ -931,7 +931,9 @@ def process_single_product(prod, worksheet, link_column_index, brand_mappings=No
     }
     if brand_mappings:
         search_kwargs["brand_mappings"] = brand_mappings
-    best, trace, state, error = search_with_retry(query, name, brand, search_kwargs)
+    # الصرف في سجل اليوم نفسه (الميزانية اليومية تحسب كل بحث مدفوع، لا عامل الطابور وحده)
+    best, trace, state, error = search_with_retry(query, name, brand, search_kwargs,
+                                                  on_attempt=lambda tr: _record_spend(tr, "sequential"))
     if not best:
         if state == "provider_down":
             print(f"محركات البحث غير متاحة؛ الصف {row_num} لم يُعالج.")

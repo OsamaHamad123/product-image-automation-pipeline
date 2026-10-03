@@ -789,6 +789,64 @@ echo json_encode($out, JSON_UNESCAPED_UNICODE);
     assert _failures(db) == {}
 
 
+# ---------------------------------------------------------------------------
+# C12: the daily budget counts every paid search
+# ---------------------------------------------------------------------------
+
+PAID = {"decision": "REVIEW_PRESELECTED", "provider_health": [
+    {"provider": "serper", "status": "ok", "http_status": 200}, {"provider": "serper", "status": "empty", "http_status": 200},
+    {"provider": "lens_serpapi", "status": "ok", "http_status": 200}, {"provider": "local_index", "status": "ok"}]}
+
+
+def test_dashboard_searches_and_research_after_a_reject_count_against_the_budget(db, monkeypatch):
+    """record_search_spend was called by the worker only: a reviewer's searches and the re-search after a rejection
+    spent money the daily budget never saw."""
+    import cli_bridge
+    import image_search
+
+    def search(query, name, brand, trace=None, **kw):
+        trace["outcome"] = dict(PAID)
+        return {"url": "https://p4f.example/x.jpg", "decision": "REVIEW_PRESELECTED", "candidates": []}
+
+    monkeypatch.setattr(image_search, "search_best_product_image", search)
+    params = {"product_name": "P4F Milk", "brand": "B", "sku_key": SKU + "s"}
+    assert cli_bridge.action_search(dict(params), brand_mappings={})["status"] == "review"
+    assert cli_bridge.action_search(dict(params, skip_cache=True), brand_mappings={}, found={})["status"] == "review"
+    ledger = {(r["run_id"], r["provider"]): (r["calls"], float(r["usd"]))
+              for r in _sql(db, "SELECT run_id, provider, calls, usd FROM search_spend WHERE day = CURDATE()")}
+    assert ledger == {("dashboard", "serper"): (2, 0.002), ("dashboard", "lens_serpapi"): (1, 0.015),
+                      (f"research-{SKU}s", "serper"): (2, 0.002), (f"research-{SKU}s", "lens_serpapi"): (1, 0.015)}
+    assert db.spend_today() == pytest.approx(2 * 0.017)          # what the worker reads before each claim
+
+    def broken(query, name, brand, trace=None, **kw):
+        trace["outcome"] = dict(PAID)
+        raise RuntimeError("parser crashed after the calls were made")
+
+    monkeypatch.setattr(image_search, "search_best_product_image", broken)
+    assert cli_bridge.action_search(dict(params), brand_mappings={})["status"] == "error"
+    assert db.spend_today() == pytest.approx(3 * 0.017)
+
+
+def test_the_sequential_mode_records_its_spend(offline, monkeypatch):
+    import local_cache_db
+    import main
+    from query_refiner import QueryRefiner
+    recorded = []
+    monkeypatch.setattr(local_cache_db, "record_search_spend", lambda outcome, run_id=None: recorded.append(run_id))
+    monkeypatch.setattr(local_cache_db, "get_rejections", lambda sku: ([], []))
+    monkeypatch.setattr(QueryRefiner, "refine_product_metadata", staticmethod(lambda *a, **k: {}))
+
+    def search(query, name, brand, kwargs, on_attempt=None, **kw):
+        if on_attempt is not None:
+            on_attempt({"outcome": dict(PAID)})
+        return None, {}, "provider_down", "down"
+
+    monkeypatch.setattr(main, "search_with_retry", search)
+    prod = {"row_number": 2, "product_name": "Milk", "brand": "B", "barcode": "", "existing_image_link": ""}
+    assert main.process_single_product(prod, worksheet=object(), link_column_index=3) == "failed"
+    assert recorded == ["sequential"]
+
+
 def test_stopping_from_the_dashboard_returns_unclaimed_rechecks_to_review(db):
     """The dashboard's stop ends the worker process (its finally may not run); stop_run settles the queue."""
     _verifier_down_review_row(db, 0)

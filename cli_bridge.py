@@ -253,6 +253,20 @@ def _merge_urls(*lists):
     return out
 
 
+SPEND_RUN_DASHBOARD = "dashboard"
+SPEND_RUN_RESEARCH = "research-"
+
+
+def _record_spend(trace, sku_key, found):
+    """
+    تكلفة البحث من اللوحة في سجل الصرف اليومي نفسه الذي يقرؤه العامل قبل كل سحب (local_cache_db.record_search_spend،
+    بأسعار ops_health): بحث المراجع بـ run_id 'dashboard'، وإعادة البحث بعد الرفض (reject_image يمرر found) بـ
+    'research-<sku_key>'. لا يرفع أبداً.
+    """
+    run_id = f"{SPEND_RUN_RESEARCH}{sku_key or ''}"[:64] if found is not None else SPEND_RUN_DASHBOARD
+    local_cache_db.record_search_spend((trace or {}).get('outcome'), run_id)
+
+
 def action_search(params, brand_mappings=None, found=None):
     """
     بحث تفاعلي لمنتج واحد. الاستجابة (عقد ثابت للوحة التحكم):
@@ -303,9 +317,11 @@ def action_search(params, brand_mappings=None, found=None):
         )
     except Exception:
         logger.exception("search failed for %s", product_name)
+        _record_spend(trace, sku_key, found)
         return {'status': 'error', 'error': "Search failed (details in temp/search.log).", 'decision': None,
                 'failure_code': 'SEARCH_ERROR',
                 'selected_image': None, 'candidates': [], 'provider_health': [], 'sku_key': sku_key, 'trace': trace}
+    _record_spend(trace, sku_key, found)
 
     if found is not None:
         found.update(best=best, trace=trace)
