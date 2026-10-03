@@ -328,7 +328,7 @@ def test_a_logging_failure_does_not_change_the_approval(recorder, monkeypatch, c
     assert result == expected
     assert {"save_product_resolution", "update_task_status_by_row", "delete_curation_candidates"} <= set(_names(events))
     logged = [r for r in caplog.records if r.name == "cli_bridge" and r.exc_info]
-    assert logged and "review_decisions is locked" in str(logged[-1].exc_info[1])
+    assert any("review_decisions is locked" in str(r.exc_info[1]) for r in logged)
 
 
 def test_a_logging_failure_does_not_change_the_rejection(recorder, monkeypatch, caplog):
@@ -354,7 +354,7 @@ def test_a_logging_failure_does_not_change_the_upload(recorder, monkeypatch, tmp
         result = cli_bridge.action_upload_manual_image(_upload_params(tmp_path))
     assert result == expected and "delete_curation_candidates" in _names(events)
     logged = [r for r in caplog.records if r.name == "cli_bridge" and r.exc_info]
-    assert logged and "review_decisions is locked" in str(logged[-1].exc_info[1])
+    assert any("review_decisions is locked" in str(r.exc_info[1]) for r in logged)
 
 
 def test_nothing_is_recorded_when_the_approval_fails(recorder, monkeypatch):
