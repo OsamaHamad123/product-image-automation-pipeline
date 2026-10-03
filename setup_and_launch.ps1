@@ -358,10 +358,16 @@ if (Test-Path $dashboardEnv) {
 Write-Host ""
 Write-Host "[6/6] جاري تشغيل النظام وفتح لوحة التحكم..." -ForegroundColor Cyan
 
-# إيقاف أي خوادم سابقة لمنع التضارب
-Write-Host "⏳ جاري إغلاق أي عمليات سابقة معلقة..." -ForegroundColor Yellow
-Stop-Process -Name php -Force -ErrorAction SilentlyContinue
-Stop-Process -Name python -Force -ErrorAction SilentlyContinue
+# إيقاف خوادم هذا المشغل السابقة فقط لمنع التضارب: خادم لوحة التحكم (PHP على المنفذ 8000) وعامل مزامنة الشيت.
+# لا نوقف أي بايثون آخر أبداً: عامل الأتمتة (main.py) أو التشغيل الليلي (run_nightly.py) قد يعمل الآن ويحمل القفل.
+Write-Host "⏳ جاري إغلاق خوادم لوحة التحكم السابقة (عامل الأتمتة والتشغيل الليلي لا يُوقفان)..." -ForegroundColor Yellow
+Get-CimInstance Win32_Process -Filter "Name = 'php.exe' OR Name = 'python.exe' OR Name = 'pythonw.exe'" -ErrorAction SilentlyContinue |
+    Where-Object {
+        $cmd = [string]$_.CommandLine
+        ($cmd -like '*dashboard/server.php*' -or $cmd -like '*dashboard\server.php*' -or $cmd -like '*artisan serve*' -or $cmd -like '*sync_worker.py*') -and
+        $cmd -notlike '*main.py*' -and $cmd -notlike '*run_nightly.py*'
+    } |
+    ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 
 # ----------------- فحص الخدمات السحابية والاشتراكات قبل البدء -----------------
 Write-Host "🚦 جاري التحقق من حالة الاشتراكات والخدمات السحابية..." -ForegroundColor Cyan
@@ -445,6 +451,11 @@ if ($chromePath -or (Test-Path "${env:ProgramFiles}\Google\Chrome\Application\ch
     
     # الانتظار حتى يغلق المستخدم واجهة البرنامج (سيحظر هنا لأننا نستخدم ملف تعريفي مستقل للمستخدم)
     $chromeProcess.WaitForExit()
+    # نافذة بنفس الملف التعريفي مفتوحة من تشغيل سابق: كروم يسلّمها الرابط ويخرج فوراً. ننتظر إغلاقها قبل إيقاف الخادم.
+    while (Get-CimInstance Win32_Process -Filter "Name = 'chrome.exe'" -ErrorAction SilentlyContinue |
+           Where-Object { ([string]$_.CommandLine).Contains($chromeProfile) }) {
+        Start-Sleep -Seconds 5
+    }
 } else {
     # فتح المتصفح الافتراضي في حال عدم وجود Chrome
     Write-Host "🌐 لم يتم العثور على متصفح Chrome. جاري فتح الرابط في متصفحك الافتراضي..." -ForegroundColor Yellow

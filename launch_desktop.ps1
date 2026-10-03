@@ -15,8 +15,15 @@ if ($consolePtr -ne [IntPtr]::Zero) {
 $env:PYTHONUTF8 = "1"
 $env:PYTHONIOENCODING = "utf-8"
 
-# 1. إيقاف أي خوادم قديمة لتجنب تضارب المنافذ
-Stop-Process -Name "php" -Force -ErrorAction SilentlyContinue
+# 1. إيقاف خوادم هذا المشغل القديمة فقط لتجنب تضارب المنافذ (خادم لوحة التحكم وعامل مزامنة الشيت).
+# لا نوقف أي بايثون آخر أبداً: عامل الأتمتة (main.py) أو التشغيل الليلي (run_nightly.py) قد يعمل الآن ويحمل القفل.
+Get-CimInstance Win32_Process -Filter "Name = 'php.exe' OR Name = 'python.exe' OR Name = 'pythonw.exe'" -ErrorAction SilentlyContinue |
+    Where-Object {
+        $cmd = [string]$_.CommandLine
+        ($cmd -like '*artisan serve*' -or $cmd -like '*dashboard/server.php*' -or $cmd -like '*dashboard\server.php*' -or $cmd -like '*sync_worker.py*') -and
+        $cmd -notlike '*main.py*' -and $cmd -notlike '*run_nightly.py*'
+    } |
+    ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 
 $pythonPath = Join-Path $PSScriptRoot ".venv\Scripts\python.exe"
 
@@ -43,11 +50,19 @@ $laravelProcess = Start-Process -FilePath "php" -ArgumentList "artisan serve --p
 # الانتظار لتهيئة المنافذ
 Start-Sleep -Seconds 3
 
-# 4. تشغيل المتصفح في وضع التطبيق مستقل (Chrome App Mode)
-$chromeApp = Start-Process -FilePath "chrome.exe" -ArgumentList "--app=http://127.0.0.1:8000/" -PassThru
+# 4. تشغيل المتصفح في وضع التطبيق مستقل (Chrome App Mode) بملف تعريفي خاص به (--user-data-dir):
+# بدونه، إذا كان كروم مفتوحاً أصلاً، يسلّم الرابط للنافذة الموجودة ويخرج فوراً فيوقف السكربت الخادم.
+$chromeProfile = Join-Path $PSScriptRoot "temp\chrome_profile"
+if (-not (Test-Path $chromeProfile)) { New-Item -ItemType Directory -Path $chromeProfile -Force | Out-Null }
+$chromeApp = Start-Process -FilePath "chrome.exe" -ArgumentList "--app=http://127.0.0.1:8000/ --user-data-dir=`"$chromeProfile`"" -PassThru
 
 # 5. مراقبة التطبيق: عند إغلاق واجهة البرنامج، قم بإغلاق خوادم الخلفية تلقائياً لمنع استهلاك الموارد
 $chromeApp.WaitForExit()
+# نافذة بنفس الملف التعريفي مفتوحة من تشغيل سابق: كروم يسلّمها الرابط ويخرج فوراً. ننتظر إغلاقها قبل إيقاف الخادم.
+while (Get-CimInstance Win32_Process -Filter "Name = 'chrome.exe'" -ErrorAction SilentlyContinue |
+       Where-Object { ([string]$_.CommandLine).Contains($chromeProfile) }) {
+    Start-Sleep -Seconds 5
+}
 
 # إغلاق الخوادم
 Stop-Process -Id $laravelProcess.Id -Force -ErrorAction SilentlyContinue
