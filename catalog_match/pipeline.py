@@ -7,7 +7,10 @@ find_product_image(spec, *, providers=None, fetcher=None, verifier=None,
 Steps
     1. retrieve   pooled retrieval over the query plan (or the staff custom query);
                   early stop as soon as a web-search candidate is tier 1 (an Open
-                  Food Facts record alone never stops the search).
+                  Food Facts record alone never stops the search). When brand
+                  discovery finds the stores' spelling of the sheet brand, the local
+                  catalog index is asked again with it (free), alongside one corrected
+                  query.
     2. score      every pooled candidate with score.score_candidate.
     3. relax      R1/R2 into the same pool, only when no candidate is tier 1 or 2
                   and there is no custom query (relaxed winners are capped at review).
@@ -264,8 +267,8 @@ def find_product_image(spec: Union[SkuSpec, Mapping[str, Any]], *, providers: Op
         # the corrected query only when the listings found so far are not already tier 1 in the store spelling
         extra = brand_discovery.corrected_query(spec, retrieval.queries) \
             if not custom and not retriever.early_stop(list(retrieval.pool)) else None
-        if extra is not None:
-            retrieval = retriever.run_extra(extra)
+        # the local catalog index is asked again with the store spelling (free), alongside the corrected query
+        retrieval = retriever.rerun_lookups(extra)
 
     # 2. score
     scored = _score_pool(spec, retrieval.pool, negatives)

@@ -405,3 +405,130 @@ def test_a_sub_brand_stays_in_the_query():
     assert build_queries(spec)[0].text == "Nestle NIDO FORTIFIED MILK POWDER 2.25kg"
     spec = spec_of("NIDO FORTIFIED MILK POWDER 2.25KG", "NIDO", maps)          # the brand cell is the sub-brand
     assert "NIDO" in build_queries(spec)[0].text
+
+
+# ---------------------------------------------------------------------------
+# Pipeline stage doubles (sockets stay blocked: every stage is a double)
+# ---------------------------------------------------------------------------
+
+def _png(seed=2):
+    import io
+
+    from PIL import Image, ImageDraw
+
+    img = Image.new("RGB", (800, 800), (255, 255, 255))
+    ImageDraw.Draw(img).rectangle([220, 120, 580, 680], fill=(30 + seed * 30, 80, 150))
+    buf = io.BytesIO()
+    img.save(buf, "PNG")
+    return buf.getvalue()
+
+
+class ByQuery:
+    """A web search double: the candidates of the first rule whose words the query holds."""
+    kind, fallback, sanctioned, name = "search", False, True, "serper"
+
+    def __init__(self, rules):
+        self.rules, self.queries = list(rules), []
+
+    def search(self, query, hl, spec_):
+        from catalog_match.models import ProviderResult
+
+        self.queries.append(query)
+        cands = next((c for words, c in self.rules if words.lower() in query.lower()), [])
+        return ProviderResult(provider="serper", status="ok" if cands else "empty", candidates=list(cands))
+
+
+class IndexLookup:
+    """A local catalog index double: rows only for a brand phrase the spec accepts."""
+    kind, needs_gtin, sanctioned, name, lookup_query_id = "lookup", False, False, "local_index", "IDX"
+
+    def __init__(self, phrase, cands):
+        self.phrase, self.cands, self.asked = phrase, list(cands), []
+
+    def lookup(self, spec_):
+        from catalog_match.models import ProviderResult
+
+        self.asked.append(tuple(spec_.match_brands))
+        found = self.phrase in spec_.match_brands
+        return ProviderResult(provider="local_index", status="ok" if found else "empty",
+                              candidates=list(self.cands) if found else [])
+
+
+class Images:
+    def __init__(self, bodies):
+        self.bodies = bodies
+
+    def fetch(self, cands, spec_):
+        import io
+
+        from PIL import Image
+
+        from catalog_match.fetch import phash_hex
+        from catalog_match.models import FetchedImage
+
+        out = []
+        for c in cands:
+            body = self.bodies.get(c.image_url)
+            if body is None:
+                out.append(FetchedImage(candidate=c, ok=False, error="http_404"))
+                continue
+            with Image.open(io.BytesIO(body)) as im:
+                out.append(FetchedImage(candidate=c, ok=True, content_sha256=f"{abs(hash(body)):064x}"[:64],
+                                        width=im.width, height=im.height, path_or_bytes=body, phash=phash_hex(im)))
+        return out
+
+
+class Reads:
+    """A label reader double: what a model would read on each image (by URL); verify.make_verdict decides."""
+
+    def __init__(self, readings):
+        self.readings, self.calls = dict(readings), []
+
+    def verify(self, spec_, images):
+        from catalog_match.models import VerificationResult
+        from catalog_match.verify import make_verdict
+
+        self.calls.append([f.candidate.image_url for f in images])
+        return VerificationResult(status="ok", calls=1, verdicts=[
+            make_verdict(spec_, i, self.readings.get(f.candidate.image_url, {})) for i, f in enumerate(images)])
+
+
+def _reading(brand, variant, size, pack=1):
+    return {"brand_text": brand, "variant_text": variant, "size_text": size, "pack_count": pack,
+            "view": "front_packshot", "brand_match": "yes", "variant_match": "yes", "size_match": "yes"}
+
+
+# ---------------------------------------------------------------------------
+# 6. The local index is asked again with a discovered spelling
+# ---------------------------------------------------------------------------
+
+RIO_ROW = ("RIO MARIE LIGHT MEAT TUNA IN SUN OIL 3X70GM", "RIO MARIE")                  # row 45
+
+
+def test_row45_the_local_index_is_asked_again_in_the_store_spelling(monkeypatch):
+    from catalog_match import pipeline
+
+    monkeypatch.setenv("AUTO_PUBLISH_ENABLED", "true")
+    monkeypatch.setenv("AUTO_PUBLISH_BRANDS", "*")
+    # the web search finds the brand only in a listing without the size (tier 2), written the stores' way
+    weak = listing("Rio Mare Light Meat Tuna in Sunflower Oil | Carrefour UAE",
+                   "https://www.carrefouruae.com/mafuae/en/tuna/rio-mare-light-meat-tuna/p/1",
+                   "https://img.example-cdn.com/rio-mare-tuna.jpg")
+    indexed = Candidate(image_url="https://img.example-cdn.com/rio-mare-3x70-lulu.jpg",
+                        page_url="https://gcc.luluhypermarket.com/en-ae/rio-mare-light-meat-tuna-sunflower-oil-3x70g/p/7",
+                        title="Rio Mare Light Meat Tuna In Sunflower Oil 3 x 70 g",
+                        page_title="Rio Mare Light Meat Tuna In Sunflower Oil 3 x 70 g", provider="local_index",
+                        query_id="IDX", sanctioned=False)
+    index = IndexLookup("rio mare", [indexed])
+    search = ByQuery([("", [weak])])
+    reader = Reads({indexed.image_url: _reading("Rio mare", "Light Meat Tuna in Sunflower Oil", "3 x 70 g", 3)})
+    outcome = pipeline.find_product_image(spec_of(*RIO_ROW), providers=[search, index],
+                                          fetcher=Images({weak.image_url: _png(1), indexed.image_url: _png(2)}),
+                                          verifier=reader, expansion=False)
+    assert outcome.discovered_brands == ["Rio Mare"]
+    assert len(index.asked) == 2 and "rio mare" in index.asked[1]          # was asked once, in the sheet's spelling
+    assert outcome.decision == "REVIEW_PRESELECTED"                       # an index page never auto-publishes
+    assert outcome.winner.candidate.image_url == indexed.image_url
+    assert "warn:brand_spelling:Rio Mare" in outcome.winner.reasons
+    # the corrected query went out alongside the second lookup
+    assert any(q.startswith("Rio Mare ") for q in search.queries)
