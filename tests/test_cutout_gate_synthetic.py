@@ -4,6 +4,8 @@ Each test is a review finding: what a good packshot must cost (paid calls) and t
 damaged one is flagged. Everything is offline: PhotoRoom / remove.bg / the Gemini box are fakes, sockets are blocked.
 """
 
+import functools
+
 import numpy as np
 import pytest
 
@@ -355,3 +357,76 @@ def test_photoroom_crop_true_costs_one_call(work, kind):
     assert (result.isolated, result.provider, result.quality_flags) == (True, "photoroom", [])
     expected = np.asarray(ip.compose_on_white_canvas(shot.product, (800, 800)))
     assert ps.ink_box(ps.canvas_array(result)) == ps.ink_box(expected)
+
+
+# ---------------------------------------------------------------------------
+# #8: WHITE_SOURCE_MODE (on is opt-in; log records what on would do)
+# ---------------------------------------------------------------------------
+
+WHITE_BAD_REASON = {"soft_shadow": "soft_edge", "reflection": "soft_edge", "offset_shadow": "soft_edge",
+                    "white_jar": "white_parts", "white_straw": "white_parts"}
+
+
+def _near(a, b, tolerance=2):
+    return all(abs(x - y) <= tolerance for x, y in zip(a, b))
+
+
+@functools.lru_cache(maxsize=None)
+def white_shots(good: bool):
+    return ps.white_source_good() if good else ps.white_source_bad()
+
+
+@pytest.mark.parametrize("name", sorted(WHITE_BAD_REASON))
+def test_white_source_refuses_shadows_reflections_and_white_parts(work, name):
+    # Before: 'used' with no flags; the shadow / reflection was baked in as opaque product (the product 7-14%
+    # smaller and off-centre), the white jar lost its body (only the lid, stretched), the white straw was cut off.
+    shot = white_shots(False)[name]
+    reason = WHITE_BAD_REASON[name]
+
+    result, services = run(shot, work, white_mode="log")
+    assert result.white_source == f"ineligible:{reason}", "log mode must not report these as eligible"
+
+    result, services = run(shot, work, white_mode="on")
+    assert result.white_source == f"ineligible:{reason}"
+    assert (result.isolated, result.provider, result.quality_flags) == (True, "photoroom", [])
+    expected = np.asarray(ip.compose_on_white_canvas(shot.product, (800, 800)))
+    assert _near(ps.ink_box(ps.canvas_array(result)), ps.ink_box(expected))
+
+
+@pytest.mark.parametrize("name", sorted(ps.white_source_good()))
+def test_white_source_keeps_clean_packshots_free(work, name):
+    shot = white_shots(True)[name]
+
+    result, services = run(shot, work, white_mode="log")
+    assert result.white_source == "eligible" and services.paid == 1
+
+    result, services = run(shot, work, white_mode="on")
+    assert (result.isolated, result.provider, result.white_source, result.quality_flags) == \
+        (True, "white_source", "used", [])
+    assert services.paid == 0 and services.box_calls == 0
+    expected = np.asarray(ip.compose_on_white_canvas(shot.product, (800, 800)))
+    assert _near(ps.ink_box(ps.canvas_array(result)), ps.ink_box(expected))
+
+
+def test_white_source_log_mode_analyses_a_small_copy(work, monkeypatch):
+    # Log mode cost ~1.9 s on a 4000x4000 image (the flood fill and the gate at full resolution) for a note.
+    import time
+
+    shot = ps.make("bottle", (4000, 4000), ss=1)
+    original = ip._white_source_cutout
+    seen = []
+
+    def spy(*args, **kwargs):
+        start = time.perf_counter()
+        cut, reason = original(*args, **kwargs)
+        seen.append((cut.size if cut is not None else None, reason, time.perf_counter() - start))
+        return cut, reason
+
+    monkeypatch.setattr(ip, "_white_source_cutout", spy)
+    result, services = run(shot, work, white_mode="log")
+
+    assert result.white_source == "eligible" and result.isolated is True
+    (size, reason, seconds), = seen
+    assert max(size) <= ip.WHITE_SOURCE_ANALYSIS_SIDE, "log mode works on a copy of at most 1000 px"
+    assert seconds < 1.0
+

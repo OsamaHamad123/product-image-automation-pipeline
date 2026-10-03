@@ -146,6 +146,11 @@ WHITE_SOURCE_MIN_CHANNEL = 248
 WHITE_SOURCE_BAND = 0.02
 WHITE_SOURCE_BORDER_MIN = 0.995
 WHITE_SOURCE_MAIN_SHARE = 0.98
+WHITE_SOURCE_ANALYSIS_SIDE = 1000   # الأهلية تُحسم على نسخة مصغرة: وضع log لا يكلف أكثر من جزء من الثانية
+WHITE_SOURCE_EDGE_STEP = 32         # حافة المنتج: أغمق من مستوى الخلفية بـ 32 درجة خلال بكسلين...
+WHITE_SOURCE_EDGE_MIN = 0.90        # ...في 90% من محيطه (ظل ناعم أو انعكاس يتلاشى بلا حافة)
+WHITE_SOURCE_STRICT_AREA = 1.25     # المنتج بعتبة صارمة أكبر بـ 25%، أو تمتد حدوده 8%: أجزاء بيضاء ابتلعتها الخلفية
+WHITE_SOURCE_STRICT_GROWTH = 0.08
 
 _ALLOWED_FORMATS = {"JPEG", "PNG", "WEBP", "GIF", "BMP", "TIFF", "MPO", "AVIF", "HEIF"}
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -915,8 +920,12 @@ def assess_cutout(cutout: Image.Image, frame_size=None, crop_sides=_NO_CROP, can
 
 
 def _assess(cutout: Image.Image, frame_size=None, crop_sides=_NO_CROP, canvas_size=(800, 800),
-            fill: float = CANVAS_FILL_RATIO, check_backdrop: bool = False, frame_checks: bool = True) -> _Assessment:
-    """assess_cutout مع ما يحتاجه مسار العزل. frame_checks=False: المزوّد طُلب منه قص الإطار (crop=true)."""
+            fill: float = CANVAS_FILL_RATIO, check_backdrop: bool = False, frame_checks: bool = True,
+            pixel_scale: float = 1.0) -> _Assessment:
+    """
+    assess_cutout مع ما يحتاجه مسار العزل. frame_checks=False: المزوّد طُلب منه قص الإطار (crop=true).
+    pixel_scale: كم بكسلاً من المصدر يمثل بكسل القص (قص نسخة مصغرة) لحساب التكبير الحقيقي على اللوحة.
+    """
     import cv2
     import numpy as np
 
@@ -961,10 +970,11 @@ def _assess(cutout: Image.Image, frame_size=None, crop_sides=_NO_CROP, canvas_si
     max_w = max(1, int(int(canvas_size[0]) * fill))
     max_h = max(1, int(int(canvas_size[1]) * fill))
     scale = min(max_w / box_w, max_h / box_h)
+    upscale = scale / max(pixel_scale, 1e-6)
     notes = []
-    if scale > MAX_UPSCALE:
+    if upscale > MAX_UPSCALE:
         flags.append(FLAG_UPSCALED)
-    elif scale > UPSCALE_NOTE_MIN:
+    elif upscale > UPSCALE_NOTE_MIN:
         notes.append(NOTE_UPSCALED)
     left, top = stats[group, cv2.CC_STAT_LEFT], stats[group, cv2.CC_STAT_TOP]
     group_w = int((left + stats[group, cv2.CC_STAT_WIDTH]).max() - left.min())
@@ -994,41 +1004,98 @@ def _white_source_mode() -> str:
     return value if value in WHITE_SOURCE_MODES else "log"
 
 
-def _white_source_cutout(img: Image.Image):
+def _white_background(white):
+    """البكسلات البيضاء (white) المتصلة بإطار الصورة (اتصال رباعي): الخلفية. البياض داخل المنتج يبقى."""
+    import cv2
+    import numpy as np
+
+    _, labels = cv2.connectedComponents(white.astype(np.uint8), connectivity=4)
+    edge_labels = np.unique(np.concatenate([labels[0], labels[-1], labels[:, 0], labels[:, -1]]))
+    return np.isin(labels, edge_labels[edge_labels != 0])
+
+
+def _white_source_mask(rgb):
     """
-    إذا كانت الصورة لقطة منتج على خلفية بيضاء نظيفة يُبنى القص محلياً: الخلفية = البكسلات شبه البيضاء
-    المتصلة بالإطار (البياض داخل المنتج يبقى). الشروط: 99.5% من شريط 2% حول الإطار شبه أبيض، المنتج
-    لا يلمس الإطار، وجسم واحد يحمل 98% من المقدمة. يعيد (RGBA، None) أو (None، السبب).
+    (قناع المنتج، None) أو (None، السبب) لصورة RGB على خلفية بيضاء. الشروط:
+    - 99.5% من شريط 2% حول الإطار شبه أبيض (>= 248)، والمنتج لا يلمس الإطار، وجسم واحد يحمل 98% من المقدمة.
+    - soft_edge: حافة المنتج واضحة في 90% من محيطه على الأقل (أغمق من الخلفية بـ 32 درجة خلال بكسلين). ظل ناعم
+      أو انعكاس يتلاشى يلتصق بالخلفية بتدرج رمادي بلا حافة، وكان يُخبز في المنتج كجزء معتم.
+    - white_parts: المنتج بعتبة صارمة (درجة واحدة تحت مستوى الخلفية) ليس أكبر بوضوح: جسم أبيض بلا حد داكن
+      (برطمان 249-253) أو شفاطة بيضاء ابتلعتها الخلفية عند عتبة 248.
     """
     import cv2
     import numpy as np
 
-    rgb = np.asarray(_flatten_on_white(img))
     h, w = rgb.shape[:2]
     if min(h, w) < 16:
         return None, "too_small"
     band = max(2, int(round(WHITE_SOURCE_BAND * min(h, w))))
-    near_white = rgb.min(axis=2) >= WHITE_SOURCE_MIN_CHANNEL
-    border = np.concatenate([near_white[:band].ravel(), near_white[-band:].ravel(),
-                             near_white[band:-band, :band].ravel(), near_white[band:-band, -band:].ravel()])
-    if float(border.mean()) < WHITE_SOURCE_BORDER_MIN:
+
+    def ring(values):
+        return np.concatenate([values[:band].ravel(), values[-band:].ravel(),
+                               values[band:-band, :band].ravel(), values[band:-band, -band:].ravel()])
+
+    darkest = np.ascontiguousarray(rgb.min(axis=2))
+    if float(ring(darkest >= WHITE_SOURCE_MIN_CHANNEL).mean()) < WHITE_SOURCE_BORDER_MIN:
         return None, "background_not_white"
-    _, labels = cv2.connectedComponents(near_white.astype(np.uint8), connectivity=4)
-    edge_labels = np.unique(np.concatenate([labels[0], labels[-1], labels[:, 0], labels[:, -1]]))
-    background = np.isin(labels, edge_labels[edge_labels != 0])
+    background = _white_background(darkest >= WHITE_SOURCE_MIN_CHANNEL)
     foreground = ~background
     fg_box = _mask_bbox(foreground)
     if fg_box is None:
         return None, "empty"
     if fg_box[0] < 2 or fg_box[1] < 2 or fg_box[2] > w - 2 or fg_box[3] > h - 2:
         return None, "product_touches_frame"
-    _, _, stats, _ = cv2.connectedComponentsWithStats(foreground.astype(np.uint8), connectivity=8)
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(foreground.astype(np.uint8), connectivity=8)
     areas = stats[1:, cv2.CC_STAT_AREA]
     if int(areas.max()) < WHITE_SOURCE_MAIN_SHARE * int(areas.sum()):
         return None, "several_objects"
+    main = labels == 1 + int(np.argmax(areas))
+
+    # مستوى الخلفية بعد تنعيم ضوضاء JPEG (أدنى 1% من الشريط)
+    smooth = cv2.blur(darkest, (3, 3))
+    level = float(np.percentile(ring(smooth), 1))
+    kernel = np.ones((3, 3), np.uint8)
+    rim = main & cv2.dilate(background.astype(np.uint8), kernel).astype(bool)
+    near_min = cv2.erode(darkest, np.ones((5, 5), np.uint8))
+    if rim.any() and float((near_min[rim] <= level - WHITE_SOURCE_EDGE_STEP).mean()) < WHITE_SOURCE_EDGE_MIN:
+        return None, "soft_edge"
+
+    strict = ~_white_background(smooth >= max(WHITE_SOURCE_MIN_CHANNEL, level - 1))
+    count, labels = cv2.connectedComponents(strict.astype(np.uint8), connectivity=8)
+    overlap = np.bincount(labels[main], minlength=count)
+    overlap[0] = 0
+    strict_main = labels == int(np.argmax(overlap)) if overlap.any() else main
+    box, strict_box = _mask_bbox(main), _mask_bbox(strict_main)
+    bw, bh = box[2] - box[0], box[3] - box[1]
+    growth = max(box[0] - strict_box[0], strict_box[2] - box[2]) / bw
+    growth = max(growth, max(box[1] - strict_box[1], strict_box[3] - box[3]) / bh)
+    if int(strict_main.sum()) > WHITE_SOURCE_STRICT_AREA * int(main.sum()) or growth > WHITE_SOURCE_STRICT_GROWTH:
+        return None, "white_parts"
+    return foreground, None
+
+
+def _white_source_cutout(img: Image.Image, full: bool = True):
+    """
+    إذا كانت الصورة لقطة منتج على خلفية بيضاء نظيفة يُبنى القص محلياً: الخلفية = البكسلات شبه البيضاء المتصلة
+    بالإطار (البياض داخل المنتج يبقى). الأهلية (_white_source_mask) تُحسم على نسخة مصغرة (<= 1000 بكسل) حتى يبقى
+    وضع log رخيصاً؛ full=True يبني القناع بالدقة الكاملة (للنشر في وضع on)، و full=False يعيد قص النسخة المصغرة.
+    يعيد (RGBA، None) أو (None، السبب).
+    """
+    import numpy as np
+
+    flat = _flatten_on_white(img)
+    factor = max(1, -(-max(flat.size) // WHITE_SOURCE_ANALYSIS_SIDE))
+    small = flat.reduce(factor) if factor > 1 else flat
+    rgb = np.asarray(small)
+    foreground, reason = _white_source_mask(rgb)
+    if foreground is None:
+        return None, reason
+    if full and factor > 1:
+        rgb = np.asarray(flat)
+        foreground = ~_white_background(rgb.min(axis=2) >= WHITE_SOURCE_MIN_CHANNEL)
     # قناع حاد بلا تنعيم: حواف المنتج في المصدر ممزوجة بالأبيض أصلاً، فتظهر على اللوحة البيضاء كما في المصدر
     # (وتنعيم القناع كان سيضيف هالة بكسل تدخل في حساب حدود المنتج)
-    alpha = np.where(background, 0, 255).astype(np.uint8)
+    alpha = np.where(foreground, 255, 0).astype(np.uint8)
     cutout = Image.fromarray(np.ascontiguousarray(rgb), "RGB").convert("RGBA")
     cutout.putalpha(Image.fromarray(alpha))
     return cutout, None
@@ -1106,7 +1173,7 @@ def _region_match(cutout, main_rect, frame_size, frame_rect, source_mask, produc
 
 
 def _gated(cutout, provider, frame_size, crop_sides, canvas_size, label, frame_rect=None, source_mask=None,
-           product_rect=None, frame_checks=True) -> _Attempt:
+           product_rect=None, frame_checks=True, pixel_scale=1.0) -> _Attempt:
     """
     ينظف القناع ويمرره على البوابة (مع فحص صندوق الخلفية دائماً). source_mask: الجزء الصلب من شفافية المصدر
     بإحداثيات صورة العمل؛ product_rect: صندوق Gemini بلا هامش. frame_rect: موضع الإطار المرسل في صورة العمل
@@ -1115,7 +1182,8 @@ def _gated(cutout, provider, frame_size, crop_sides, canvas_size, label, frame_r
     cutout = EdgeShadowEngine.process_mask(cutout)
     if alpha_bbox(cutout) is None:
         return _Attempt(None, provider, [], f"{provider}_empty_cutout", label)
-    found = _assess(cutout, frame_size, crop_sides, canvas_size, check_backdrop=True, frame_checks=frame_checks)
+    found = _assess(cutout, frame_size, crop_sides, canvas_size, check_backdrop=True, frame_checks=frame_checks,
+                    pixel_scale=pixel_scale)
     flags = list(found.flags)
     matches_source = False
     if source_mask is not None or product_rect is not None:
@@ -1207,11 +1275,13 @@ def _isolate_checked(img: Image.Image, method: str, product_name, brand, canvas_
     white_note = None
     mode = _white_source_mode()
     if mode != "off":
-        white_cut, reason = _white_source_cutout(work)
+        # وضع log: التحليل والبوابة على النسخة المصغرة فقط؛ وضع on: القص بالدقة الكاملة
+        white_cut, reason = _white_source_cutout(work, full=(mode == "on"))
         if white_cut is None:
             white_note = f"ineligible:{reason}"
         else:
-            white = _gated(white_cut, "white_source", work.size, _NO_CROP, canvas_size, "white_source")
+            white = _gated(white_cut, "white_source", white_cut.size, _NO_CROP, canvas_size, "white_source",
+                           pixel_scale=work.width / white_cut.width)
             if white.cutout is not None and not white.flags:
                 if mode == "on":
                     return white, True, "used"

@@ -31,21 +31,21 @@ CARD_GREY = (178, 178, 176)
 # ---------------------------------------------------------------------------
 
 class Layer:
-    """An RGBA layer drawn at SS x the final size; `done()` downsamples it with area coverage."""
+    """An RGBA layer drawn at ss x the final size; `done()` downsamples it with area coverage."""
 
-    def __init__(self, size):
+    def __init__(self, size, ss=SS):
         self.size = (int(size[0]), int(size[1]))
-        self.img = Image.new("RGBA", (self.size[0] * SS, self.size[1] * SS), (0, 0, 0, 0))
+        self.ss = int(ss)
+        self.img = Image.new("RGBA", (self.size[0] * self.ss, self.size[1] * self.ss), (0, 0, 0, 0))
         self.draw = ImageDraw.Draw(self.img)
 
-    @staticmethod
-    def _xy(box):
-        return [int(round(v * SS)) for v in box]
+    def _xy(self, box):
+        return [int(round(v * self.ss)) for v in box]
 
     def rect(self, box, fill, radius=0):
         xy = self._xy(box)
         if radius:
-            self.draw.rounded_rectangle(xy, radius=int(round(radius * SS)), fill=_rgba(fill))
+            self.draw.rounded_rectangle(xy, radius=int(round(radius * self.ss)), fill=_rgba(fill))
         else:
             self.draw.rectangle(xy, fill=_rgba(fill))
 
@@ -53,7 +53,7 @@ class Layer:
         self.draw.ellipse(self._xy(box), fill=_rgba(fill))
 
     def polygon(self, points, fill):
-        self.draw.polygon([(int(round(x * SS)), int(round(y * SS))) for x, y in points], fill=_rgba(fill))
+        self.draw.polygon([(int(round(x * self.ss)), int(round(y * self.ss))) for x, y in points], fill=_rgba(fill))
 
     def clear(self, box, radius=0):
         """A real hole (transparent), e.g. a jerry-can handle."""
@@ -169,7 +169,16 @@ def draw_clear_bottle(L, x0, y0, w, h, body_alpha=40, cap=(20, 60, 170), label=(
     text_bars(L, x0 + 0.15 * w, y0 + 0.46 * h, x0 + 0.85 * w, y0 + 0.62 * h, (250, 250, 250))
 
 
-DRAWERS = {"bottle": draw_bottle, "clear_bottle": draw_clear_bottle, "can": draw_can, "carton": draw_carton, "jar": draw_jar,
+def draw_white_jar(L, x0, y0, w, h, lid=(40, 150, 60)):
+    """A noise-free white jar: body 249-253 (soft shading, no darker outline) and a green lid."""
+    L.rect((x0 + 0.05 * w, y0, x0 + 0.95 * w, y0 + 0.16 * h), lid, radius=0.04 * w)
+    bands = (249, 250, 251, 252, 253, 253, 252, 251, 250, 249)
+    for i, value in enumerate(bands):
+        left = x0 + w * i / len(bands)
+        L.rect((left, y0 + 0.14 * h, left + w / len(bands) + 1, y0 + h), (value, value, value))
+
+
+DRAWERS = {"bottle": draw_bottle, "clear_bottle": draw_clear_bottle, "white_jar": draw_white_jar, "can": draw_can, "carton": draw_carton, "jar": draw_jar,
            "jerrycan": draw_jerrycan, "juicebox": draw_juicebox, "white_bottle": draw_white_bottle}
 
 
@@ -251,11 +260,12 @@ def gemini_box_of(alpha: np.ndarray, pad=0.0, region=None) -> List[float]:
             min(1000.0, (b + ph) / h * 1000), min(1000.0, (r + pw) / w * 1000)]
 
 
-def make(kind, size=(600, 800), fill=0.62, aspect=None, bg=WHITE, offset=(0.0, 0.0), **style) -> Shot:
-    """One product centred in the frame. fill: product height / frame height (or width for a wide product)."""
+def make(kind, size=(600, 800), fill=0.62, aspect=None, bg=WHITE, offset=(0.0, 0.0), ss=SS, **style) -> Shot:
+    """One product centred in the frame. fill: product height / frame height (or width for a wide product).
+    ss: supersampling (lower it for very large shots)."""
     W, H = size
     aspect = aspect or {"bottle": 0.36, "white_bottle": 0.36, "clear_bottle": 0.36, "can": 0.55, "carton": 0.5,
-                        "jar": 0.8, "jerrycan": 0.75, "juicebox": 0.55}.get(kind, 0.5)
+                        "jar": 0.8, "white_jar": 0.8, "jerrycan": 0.75, "juicebox": 0.55}.get(kind, 0.5)
     h = H * fill
     w = h * aspect
     if w > W * 0.9:
@@ -263,7 +273,7 @@ def make(kind, size=(600, 800), fill=0.62, aspect=None, bg=WHITE, offset=(0.0, 0
         h = w / aspect
     x0 = (W - w) / 2 + offset[0] * W
     y0 = (H - h) / 2 + offset[1] * H
-    L = Layer(size)
+    L = Layer(size, ss)
     DRAWERS[kind](L, x0, y0, w, h, **style)
     product = L.done()
     return Shot(f"{kind}_{W}x{H}", product, bg, box=gemini_box_of(np.asarray(product.getchannel("A"))))
@@ -398,15 +408,20 @@ def _refuse(*_args, **_kwargs):
 Edit = Callable[[np.ndarray, Tuple[int, int, int, int]], np.ndarray]
 
 
-def truth_provider(shot: Shot, keep: Tuple[Image.Image, ...] = (), edit: Optional[Edit] = None):
-    """A provider that isolates exactly the product (+ `keep`: extras it wrongly keeps). edit(rgba, rect) -> rgba."""
+def _at_work_size(img: Image.Image, work_size) -> Image.Image:
+    return img if img.size == tuple(work_size) else img.resize(tuple(work_size), Image.Resampling.BOX)
 
-    def answer(frame_rect, form):
+
+def truth_provider(shot: Shot, keep: Tuple[Image.Image, ...] = (), edit: Optional[Edit] = None):
+    """A provider that isolates exactly the product (+ `keep`: extras it wrongly keeps). edit(rgba, rect) -> rgba.
+    frame_rect is in the pipeline's work image (the source reduced to MAX_WORK_SIDE)."""
+
+    def answer(frame_rect, form, work_size):
         cut = Image.new("RGBA", shot.size, (0, 0, 0, 0))
         for extra in keep:
             cut.alpha_composite(extra)
         cut.alpha_composite(shot.product)
-        cut = cut.crop(frame_rect)
+        cut = _at_work_size(cut, work_size).crop(frame_rect)
         arr = np.array(cut)
         arr[arr[..., 3] == 0, :3] = 0
         if edit is not None:
@@ -423,8 +438,8 @@ def truth_provider(shot: Shot, keep: Tuple[Image.Image, ...] = (), edit: Optiona
 def opaque_provider(shot: Shot):
     """A no-op segmentation: the frame comes back fully opaque."""
 
-    def answer(frame_rect, form):
-        return FakeResponse(200, png_bytes(shot.source().convert("RGBA").crop(frame_rect)))
+    def answer(frame_rect, form, work_size):
+        return FakeResponse(200, png_bytes(_at_work_size(shot.source().convert("RGBA"), work_size).crop(frame_rect)))
 
     return answer
 
@@ -465,8 +480,17 @@ class Services:
         self.box_calls += 1
         return list(self.gemini_box) if self.gemini_box else None
 
+    @property
+    def work_size(self):
+        """The pipeline's work image size (the source reduced to MAX_WORK_SIDE, as _limit_work_size does)."""
+        probe = Image.new("1", self.shot.size)
+        side = self.ip.MAX_WORK_SIDE
+        if max(probe.size) > side:
+            probe.thumbnail((side, side))
+        return probe.size
+
     def frame_rect(self, sent_size):
-        W, H = self.shot.size
+        W, H = self.work_size
         if tuple(sent_size) == (W, H):
             return (0, 0, W, H)
         assert self.gemini_box, f"a {sent_size} frame was sent without a Gemini box"
@@ -484,7 +508,7 @@ class Services:
         self.calls.append((name, sent.size, rect))
         handler = self.handlers[name]
         assert handler is not None, f"{name} must not be called"
-        return handler(rect, dict(data or {}))
+        return handler(rect, dict(data or {}), self.work_size)
 
     @property
     def paid(self) -> int:
@@ -612,3 +636,35 @@ def damaged_corpus():
     out["straw_cut_by_box"] = (juice, {"gemini_box": gemini_box_of(a, region=(l, carton_top, r, b)),
                                        "assess_first_only": True})
     return out
+
+
+def white_source_good() -> Dict[str, Shot]:
+    """Clean packshots on a white background: the free white-source cutout is right for them."""
+    shots = {
+        "bottle": make("bottle", (600, 900)),
+        "can": make("can", (600, 800)),
+        "carton": make("carton", (800, 1000), gable=True),
+        "jar": make("jar", (700, 700)),
+        "jerrycan": make("jerrycan", (900, 1000)),
+        "juicebox": make("juicebox", (600, 900), straw=(30, 160, 220)),
+        "white_bottle": make("white_bottle", (600, 900)),
+        "wide_box": make("carton", (1000, 600), fill=0.7, aspect=1.7, face=(40, 150, 70)),
+    }
+    noisy = make("bottle", (700, 1000))
+    noisy.noise, noisy.jpeg, noisy.name = 1.5, True, "bottle_noisy_jpeg"
+    shots["bottle_noisy_jpeg"] = noisy
+    return shots
+
+
+def white_source_bad() -> Dict[str, Shot]:
+    """White-background photos where the white-source cutout is wrong (shadow/reflection baked in, body lost)."""
+    can = make("can", (600, 800))
+    bottle = make("bottle", (600, 900))
+    jar = make("white_jar", (700, 700), fill=0.6)
+    return {
+        "soft_shadow": with_extras(can, "can_soft_shadow", under=[soft_shadow(can, opacity=0.5, blur=10, squash=0.1)]),
+        "reflection": with_extras(bottle, "bottle_reflection", under=[reflection(bottle)]),
+        "offset_shadow": with_extras(can, "can_offset_shadow", under=[offset_shadow(can, blur=4.0)]),
+        "white_jar": Shot("white_jar", jar.product, WHITE, box=jar.box),
+        "white_straw": make("juicebox", (600, 900)),   # the white straw (250) is as white as the background
+    }
