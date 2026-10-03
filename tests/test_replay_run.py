@@ -134,7 +134,8 @@ class FakeWeb:
     def get(self, url, params=None, headers=None, timeout=None, **kwargs):
         with self.lock:
             self.calls.append(("GET", url, ""))
-        if (urlsplit(url).hostname or "").endswith("openfoodfacts.org"):
+        host = urlsplit(url).hostname or ""
+        if host == "openfoodfacts.org" or host.endswith(".openfoodfacts.org"):
             return FakeResponse(404, b'{"status": 0, "status_verbose": "product not found"}')
         if url in self.slow:
             time.sleep(self.slow[url])
