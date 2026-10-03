@@ -8,6 +8,7 @@ import csv
 import json
 import socket
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -654,7 +655,12 @@ def test_rows_29_38_41_only_social_posts_show_the_product(number, before):
     out = replay_route(number)
     assert out.decision == "REVIEW_UNSELECTED"
     assert out.failure_code == "SOCIAL_ONLY", (number, before)            # was `before`
-    assert out.social_links and all(("instagram.com" in u or "facebook.com" in u) for u in out.social_links)
+    assert out.social_links and all(_on_social_host(u) for u in out.social_links)
+
+
+def _on_social_host(url):
+    host = (urlsplit(url).hostname or "").lower()
+    return any(host == h or host.endswith("." + h) for h in ("instagram.com", "facebook.com"))
 
 
 def test_a_downloadable_brand_listing_is_not_social_only():
