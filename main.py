@@ -666,7 +666,8 @@ def _relink_task(task, worksheet, link_column_index, sku_key, alt_key, brand_map
 
 def _publish_to_siblings(task, sku_key, worksheet, link_column_index):
     """
-    النشر التلقائي لمنتج له صفوف أخرى في الشيت (نفس sku_key) تنتظر: الصورة المنشورة تُكتب في كل صف بهويته.
+    النشر التلقائي لمنتج له صفوف أخرى في الشيت (نفس sku_key ونفس الهوية: local_cache_db.get_sku_siblings يستبعد
+    منتجاً آخر يشاركه خلية الباركود) تنتظر: الصورة المنشورة تُكتب في كل صف بهويته.
     تعيد معرفات الصفوف التي جُدولت كتابتها (تُكمل مع الصف الأصلي)؛ صف تعذرت كتابته يُسجل SHEET_WRITE_FAILED
     والإدراج التالي يعيد كتابة الرابط المعتمد بلا بحث. صف عُدل بعد نشره (review_only) لا يُكتب فيه.
     """
@@ -800,7 +801,8 @@ def pre_cache_product_candidates(task, worksheet=None, link_column_index=None, b
 
     candidates = collect_candidates(best, trace)
     saved = local_cache_db.save_curation_candidates(
-        row_number, name, brand, candidates, best.get("url"), sku_key=sku_key, run_id=uuid.uuid4().hex[:16])
+        row_number, name, brand, candidates, best.get("url"), sku_key=sku_key, run_id=uuid.uuid4().hex[:16],
+        identity=task)
     if not saved:
         _finish_task(task, "failed", "Could not save review candidates",
                      failure_code="CANDIDATE_SAVE_FAILED", trace=trace)
@@ -868,7 +870,8 @@ def process_single_product(prod, worksheet, link_column_index, brand_mappings=No
     if getattr(config, 'CURATION_MODE', False) or not best.get("url"):
         candidates = collect_candidates(best, trace)
         if not local_cache_db.save_curation_candidates(row_num, name, brand, candidates, best.get("url"),
-                                                       sku_key=sku_key, run_id=uuid.uuid4().hex[:16]):
+                                                       sku_key=sku_key, run_id=uuid.uuid4().hex[:16],
+                                                       identity=dict(payload, name=name, brand=brand)):
             config.log_and_fail(barcode, name, brand, "CANDIDATE_SAVE_FAILED: تعذر حفظ المرشحات.")
             return "failed"
         if not best.get("url"):

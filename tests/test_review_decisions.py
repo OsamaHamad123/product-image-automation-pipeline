@@ -137,7 +137,7 @@ def recorder(sheet, offline, monkeypatch):
         return lambda *a, **k: events.append((name, a, k)) or result
 
     monkeypatch.setattr(local_cache_db, "get_task_by_row", lambda row: None)
-    monkeypatch.setattr(local_cache_db, "get_curation_candidates", lambda row, sku_key=None: list(state["candidates"]))
+    monkeypatch.setattr(local_cache_db, "get_curation_candidates", lambda row, sku_key=None, **k: list(state["candidates"]))
     monkeypatch.setattr(local_cache_db, "get_cached_product", lambda **k: state["approved"])
     monkeypatch.setattr(local_cache_db, "get_rejections", lambda sku: ([], []))
     for name in ("save_product_resolution", "update_task_status_by_row", "delete_curation_candidates",

@@ -171,7 +171,7 @@ def bridge(offline, sheet, monkeypatch):
         return lambda *a, **k: writes.append(name) or result
 
     monkeypatch.setattr(local_cache_db, "get_task_by_row", lambda row: state["tasks"].get(row))
-    monkeypatch.setattr(local_cache_db, "get_curation_candidates", lambda row, sku_key=None: [])
+    monkeypatch.setattr(local_cache_db, "get_curation_candidates", lambda row, sku_key=None, **k: [])
     monkeypatch.setattr(local_cache_db, "get_cached_product", lambda **k: None)
     monkeypatch.setattr(local_cache_db, "get_rejections", lambda sku: ([], []))
     for name in ("save_product_resolution", "update_task_status_by_row", "delete_curation_candidates",

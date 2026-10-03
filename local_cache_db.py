@@ -634,22 +634,98 @@ def cached_row_matches(row, product_name, brand, brand_mappings=None, size_text=
                              size_text=str(size_text).strip() if size_text else None)
         got = build_sku_spec({"name": got_name, "brand": str(row.get("brand") or "").strip()},
                              brand_mappings or None)
-        if not _cache_brands_agree(req, got, req_name, got_name):
-            return False
-        if (req.size is None) != (got.size is None):
-            return False
-        if req.size is not None:
-            if compare(req.size, [got.size]) != "match" or (req.pack_count or 1) != (got.pack_count or 1):
-                return False
-        if dict(req.variants) != dict(got.variants):
-            return False
-        brand_words = _cache_brand_words(req, got)
-        a, b = _cache_class_words(req, brand_words), _cache_class_words(got, brand_words)
-        if not a and not b:
-            return True
-        return len(a & b) / len(a | b) >= CACHE_NAME_JACCARD
+        return _specs_agree(req, got, req_name, got_name, compare)
     except Exception as e:  # fail closed
         logger.warning("[MariaDB Cache] تعذر مقارنة هوية السجل المخزن: %s", e)
+        return False
+
+
+def _specs_agree(req, got, req_name, got_name, compare, one_sided_size=False):
+    """
+    قاعدة «نفس المنتج» لـ cached_row_matches و same_product: البراند، الحجم والعبوة، النوع، وكلمات الاسم.
+    one_sided_size: حجم يذكره طرف واحد فقط ليس اختلافاً (صفان بنفس الباركود: الباركود يحدد الحجم).
+    """
+    if not _cache_brands_agree(req, got, req_name, got_name):
+        return False
+    if (req.size is None) != (got.size is None) and not one_sided_size:
+        return False
+    if req.size is not None and got.size is not None:
+        if compare(req.size, [got.size]) != "match" or (req.pack_count or 1) != (got.pack_count or 1):
+            return False
+    if dict(req.variants) != dict(got.variants):
+        return False
+    brand_words = _cache_brand_words(req, got)
+    a, b = _cache_class_words(req, brand_words), _cache_class_words(got, brand_words)
+    if not a and not b:
+        return True
+    return len(a & b) / len(a | b) >= CACHE_NAME_JACCARD
+
+
+def _identity_text(row, *keys):
+    for key in keys:
+        value = str(row.get(key) or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def queue_row_identity(row):
+    """
+    هوية صف الشيت كما سُجلت في صف الطابور عند الإدراج: {name, brand, name_ar, brand_ar, size}. تقبل أيضاً قاموس
+    هوية جاهزاً (name أو product_name، و name_ar أو product_name_ar).
+    """
+    row = row or {}
+    payload = row.get("payload_json")
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload) if payload else {}
+        except ValueError:
+            payload = {}
+    payload = payload if isinstance(payload, dict) else {}
+    merged = dict(payload, **{k: v for k, v in row.items() if v not in (None, "")})
+    return {"name": _identity_text(merged, "name", "product_name"), "brand": _identity_text(merged, "brand"),
+            "name_ar": _identity_text(merged, "name_ar", "product_name_ar"),
+            "brand_ar": _identity_text(merged, "brand_ar"), "size": _identity_text(merged, "size")}
+
+
+def _names_agree(a_name, a_brand, a_size, b_name, b_brand, b_size, brand_mappings, extra_a=None, extra_b=None):
+    from catalog_match.identity import build_sku_spec
+    from catalog_match.sizes import compare
+
+    if not a_name or not b_name:
+        return False
+    req = build_sku_spec(dict({"name": a_name, "brand": a_brand, "size": a_size}, **(extra_a or {})),
+                         brand_mappings or None)
+    got = build_sku_spec(dict({"name": b_name, "brand": b_brand, "size": b_size}, **(extra_b or {})),
+                         brand_mappings or None)
+    # المفتاح بلا باركود يتضمن الحجم، وبباركود يحدده الباركود: حجم في صف واحد فقط ليس منتجاً آخر
+    return _specs_agree(req, got, a_name, b_name, compare, one_sided_size=True)
+
+
+def same_product(a, b, brand_mappings=None):
+    """
+    هل يصف صفّا الشيت هذان المنتج نفسه؟ sku_key وحده لا يكفي: منتجان مختلفان قد يتشاركان خلية باركود واحدة،
+    والمفتاح بلا باركود لا يقرأ الاسم العربي. a و b: queue_row_identity (أو صف طابور / قاموس هوية).
+    نفس قاعدة cached_row_matches على الاسم والبراند الإنجليزيين (والحجم من خلية الحجم أو الاسم)، ثم الاسمان العربيان
+    (مع البراند العربي) بالقاعدة نفسها عندما يكون لكلا الصفين اسم عربي. أي شك أو خطأ = لا (لا يُكتب في صف الآخر).
+    """
+    try:
+        from catalog_match.text_norm import normalize
+
+        a, b = queue_row_identity(a), queue_row_identity(b)
+        brand_a = a["brand"] or a["brand_ar"]
+        brand_b = b["brand"] or b["brand_ar"]
+        if a["name"] or b["name"]:
+            if not _names_agree(a["name"], brand_a, a["size"], b["name"], brand_b, b["size"], brand_mappings):
+                return False
+        elif not (a["name_ar"] and b["name_ar"]):
+            return False
+        if a["name_ar"] and b["name_ar"] and normalize(a["name_ar"]) != normalize(b["name_ar"]):
+            return _names_agree(a["name_ar"], brand_a, a["size"], b["name_ar"], brand_b, b["size"], brand_mappings,
+                                {"brand_ar": a["brand_ar"]}, {"brand_ar": b["brand_ar"]})
+        return True
+    except Exception as e:  # fail closed
+        logger.warning("[MariaDB Queue] تعذر مقارنة هوية صفين: %s", e)
         return False
 
 
@@ -1675,6 +1751,24 @@ def _claimable(alias=""):
 # منتج واحد = بحث واحد: صف لمنتج له صف آخر قيد المعالجة بحجز ساري ينتظر نتيجته (تُطبق عليه عند انتهائه)
 _SIBLING_BUSY_SQL = ("q.sku_key IS NOT NULL AND EXISTS (SELECT 1 FROM automation_queue s WHERE s.sku_key = q.sku_key "
                      "AND s.id <> q.id AND s.status = 'processing' AND s.lease_until >= NOW())")
+_BUSY_SCAN_LIMIT = 500
+
+
+def _not_really_busy_ids(cursor):
+    """
+    صفوف قابلة للسحب يمنعها _SIBLING_BUSY_SQL فقط بسبب صفوف قيد المعالجة بنفس المفتاح لمنتج آخر (نفس خلية الباركود،
+    أو اسم عربي آخر: same_product): لا تنتظر نتيجة منتج آخر.
+    """
+    cursor.execute(
+        "SELECT q.id, q.product_name, q.brand, q.payload_json, s.product_name AS s_name, s.brand AS s_brand, "
+        "s.payload_json AS s_payload FROM automation_queue q JOIN automation_queue s ON s.sku_key = q.sku_key "
+        "AND s.id <> q.id AND s.status = 'processing' AND s.lease_until >= NOW() "
+        f"WHERE q.sku_key IS NOT NULL AND {_claimable('q')} LIMIT {_BUSY_SCAN_LIMIT}")
+    waits = {}
+    for r in cursor.fetchall() or []:
+        other = {"product_name": r.get("s_name"), "brand": r.get("s_brand"), "payload_json": r.get("s_payload")}
+        waits[r["id"]] = waits.get(r["id"], False) or same_product(r, other)
+    return sorted(int(i) for i, same in waits.items() if not same)
 
 
 def new_claim_id(worker_id=None):
@@ -1696,13 +1790,15 @@ def fetch_next_task(worker_id=None):
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
+        free = _not_really_busy_ids(cursor)
+        free_sql = f" OR q.id IN ({','.join(['%s'] * len(free))})" if free else ""
         cursor.execute(
             "UPDATE automation_queue SET status='processing', worker_id=%s, "
             f"lease_until=NOW() + INTERVAL {LEASE_MINUTES} MINUTE, attempts=attempts+1, updated_at=CURRENT_TIMESTAMP "
             f"WHERE id=(SELECT id FROM (SELECT q.id FROM automation_queue q WHERE {_claimable('q')} "
-            f"AND NOT ({_SIBLING_BUSY_SQL}) ORDER BY q.priority, q.id LIMIT 1) t) "
+            f"AND (NOT ({_SIBLING_BUSY_SQL}){free_sql}) ORDER BY q.priority, q.id LIMIT 1) t) "
             f"AND {_claimable()}",
-            (claim_id,),
+            (claim_id,) + tuple(free),
         )
         conn.commit()
         cursor.execute("SELECT * FROM automation_queue WHERE worker_id = %s LIMIT 1", (claim_id,))
@@ -1840,7 +1936,8 @@ def update_task_status(task_id, status, error_message=None, failure_code=None, t
         conn = get_db_connection()
         try:
             cursor = conn.cursor()
-            sql = "SELECT id, sku_key, task_kind, fail_count, down_count, priority FROM automation_queue WHERE id = %s"
+            sql = ("SELECT id, sku_key, task_kind, fail_count, down_count, priority, product_name, brand, payload_json "
+                   "FROM automation_queue WHERE id = %s")
             params = (task_id,)
             if claim_id:
                 sql += " AND worker_id = %s AND status = 'processing'"
@@ -1861,8 +1958,8 @@ def update_task_status(task_id, status, error_message=None, failure_code=None, t
                 learned = status in ("ready_for_review", "completed") or (
                     status == "failed" and failure_code in NOT_FOUND_CODES)
                 waiting = "('pending','failed')" if learned else "('pending')"
-                base = ("SELECT id, fail_count FROM automation_queue WHERE sku_key = %s AND id <> %s "
-                        f"AND status IN {waiting} AND task_kind IS NULL")
+                base = ("SELECT id, fail_count, product_name, brand, payload_json FROM automation_queue "
+                        f"WHERE sku_key = %s AND id <> %s AND status IN {waiting} AND task_kind IS NULL")
                 if siblings is None and status != "completed":
                     cursor.execute(base + " FOR UPDATE", (sku, task_id))
                     sibling_rows = list(cursor.fetchall() or [])
@@ -1871,6 +1968,8 @@ def update_task_status(task_id, status, error_message=None, failure_code=None, t
                     cursor.execute(base + f" AND id IN ({','.join(['%s'] * len(ids))}) FOR UPDATE",
                                    (sku, task_id) + tuple(ids))
                     sibling_rows = list(cursor.fetchall() or [])
+                # منتج آخر يشارك المفتاح (نفس خلية الباركود، أو اسم عربي آخر) ليس صفاً شقيقاً: يُبحث عنه باسمه هو
+                sibling_rows = [r for r in sibling_rows if same_product(row, r)]
             group_fail = max([int(r.get("fail_count") or 0) for r in sibling_rows] or [0])
             plan = outcome_schedule(row, status, failure_code, group_fail)
             if plan["next_minutes"] is None:
@@ -1909,6 +2008,7 @@ def update_task_status(task_id, status, error_message=None, failure_code=None, t
 def get_sku_siblings(task_id, sku_key):
     """
     صفوف المنتج نفسه (sku_key) التي تنتظر نتيجة بحث هذه المهمة (pending / failed، مهمة بحث)، مع هويتها في الشيت.
+    صف بنفس المفتاح لمنتج آخر (نفس خلية الباركود، أو اسم عربي آخر: same_product) ليس منها.
     خطأ القراءة يُسجل ويعيد [] (لا تُكتب صفوف إضافية).
     """
     if not sku_key:
@@ -1917,11 +2017,15 @@ def get_sku_siblings(task_id, sku_key):
         conn = get_db_connection()
         try:
             cursor = conn.cursor()
+            cursor.execute("SELECT product_name, brand, payload_json FROM automation_queue WHERE id = %s", (task_id,))
+            own = cursor.fetchone()
+            if own is None:
+                return []
             cursor.execute(
                 "SELECT id, `row_number`, barcode, product_name, brand, payload_json, review_only "
                 "FROM automation_queue WHERE sku_key = %s AND id <> %s AND status IN ('pending','failed') "
                 "AND task_kind IS NULL ORDER BY id", (str(sku_key).strip(), task_id))
-            return [dict(r) for r in cursor.fetchall() or []]
+            return [dict(r) for r in cursor.fetchall() or [] if same_product(own, r)]
         finally:
             _close(conn)
     except Exception as e:
@@ -1988,13 +2092,14 @@ _SETTLE_REVIEW_SQL = (
 )
 
 
-def update_task_status_by_row(row_number, status, error_message=None, failure_code=None, sku_key=None):
+def update_task_status_by_row(row_number, status, error_message=None, failure_code=None, sku_key=None, rows=None):
     """
     تحديث حالة المهمة لمنتج: بـ sku_key عند تمريره (فلا يتأثر منتج آخر انتقل إلى رقم الصف نفسه
     بعد تعديل الشيت)، وبرقم الصف فقط للصفوف القديمة بلا sku_key.
+    rows: أرقام صفوف هذا المنتج بين صفوف المفتاح (same_product)، فلا يتأثر منتج آخر يشاركه الباركود.
     قرارات المراجع (اعتماد / رفض / رفع يدوي) تمر من هنا: إذا لم يبق صف جاهز للمراجعة تصبح الحالة خاملة.
     """
-    clause, params = _row_or_sku_clause(row_number, sku_key)
+    clause, params = _row_or_sku_clause(row_number, sku_key, rows)
     try:
         conn = get_db_connection()
         try:
@@ -2015,14 +2120,14 @@ def update_task_status_by_row(row_number, status, error_message=None, failure_co
         return False
 
 
-def release_worker_claims(row_number, sku_key=None):
+def release_worker_claims(row_number, sku_key=None, rows=None):
     """
     يسحب حجز العامل عن صفوف هذا المنتج قيد المعالجة (worker_id = NULL) دون تغيير حالتها: قرار مراجع على وشك
     الكتابة في الشيت، فالعامل الذي يعالج نفس المنتج يفقد ملكية الحجز (is_claim_held) ولا ينشر فوقه ولا يكتب
     حالته. الصف يبقى 'processing' حتى يكتب المراجع حالته، أو حتى ينتهي الحجز فيُسحب من جديد إن فشل الاعتماد.
-    تعيد عدد الصفوف، أو None عند خطأ قاعدة البيانات.
+    تعيد عدد الصفوف، أو None عند خطأ قاعدة البيانات. rows: صفوف هذا المنتج فقط (انظر update_task_status_by_row).
     """
-    clause, params = _row_or_sku_clause(row_number, sku_key)
+    clause, params = _row_or_sku_clause(row_number, sku_key, rows)
     try:
         conn = get_db_connection()
         try:
@@ -2369,15 +2474,20 @@ def _as_int(value):
         return None
 
 
-def save_curation_candidates(row_number, product_name, brand, candidates, best_url=None, sku_key=None, run_id=None):
+def save_curation_candidates(row_number, product_name, brand, candidates, best_url=None, sku_key=None, run_id=None,
+                             identity=None):
     """
     استبدال مرشحات المنتج بمرشحات التشغيل الحالي في معاملة واحدة.
     تُحفظ الحالة والأسباب والأدلة وقراءة VLM لكل مرشح. is_selected=1 فقط للحالة 'preselected'
     (best_url لم يعد يحدد الاختيار المسبق). تعيد True عند النجاح و False عند أي خطأ (مع التراجع).
     الحذف بنفس قاعدة القراءة (_row_or_sku_clause): مرشحات هذا الـ sku_key، ورقم الصف فقط للصفوف القديمة بلا
-    sku_key؛ فمنتج انتقل إلى رقم صف منتج آخر بعد تعديل الشيت لا يمسح مرشحات ذلك المنتج.
+    sku_key؛ فمنتج انتقل إلى رقم صف منتج آخر بعد تعديل الشيت لا يمسح مرشحات ذلك المنتج. مرشحات منتج آخر يشارك
+    هذا المنتج الـ sku_key (نفس خلية الباركود) لا تُمسح (_foreign_candidate_ids). identity: هوية المنتج
+    (queue_row_identity)؛ الافتراضي الاسم والبراند.
     """
     run_id = run_id or uuid.uuid4().hex[:16]
+    if identity is None:
+        identity = {"name": product_name, "brand": brand}
     try:
         conn = get_db_connection()
     except Exception as e:
@@ -2385,7 +2495,8 @@ def save_curation_candidates(row_number, product_name, brand, candidates, best_u
         return False
     try:
         cursor = conn.cursor()
-        clause, params = _row_or_sku_clause(row_number, sku_key)
+        clause, params = _without_ids(*_row_or_sku_clause(row_number, sku_key),
+                                      _foreign_candidate_ids(cursor, sku_key, identity))
         cursor.execute(f"DELETE FROM curation_candidates WHERE {clause}", params)
         seen = set()
         for c in candidates or []:
@@ -2442,13 +2553,17 @@ def _loads(value, default):
         return default
 
 
-def get_curation_candidates(row_number, sku_key=None):
-    """جلب المرشحات المحفوظة لمنتج (المختار مسبقاً أولاً): بـ sku_key عند تمريره، وإلا برقم الصف."""
+def get_curation_candidates(row_number, sku_key=None, identity=None):
+    """
+    جلب المرشحات المحفوظة لمنتج (المختار مسبقاً أولاً): بـ sku_key عند تمريره، وإلا برقم الصف.
+    identity (هوية المنتج): تُستبعد مرشحات منتج آخر يشاركه الـ sku_key.
+    """
     clause, params = _row_or_sku_clause(row_number, sku_key)
     try:
         conn = get_db_connection()
         try:
             cursor = conn.cursor()
+            clause, params = _without_ids(clause, params, _foreign_candidate_ids(cursor, sku_key, identity))
             cursor.execute(
                 f"SELECT * FROM curation_candidates WHERE {clause} ORDER BY is_selected DESC, id ASC",
                 params,
@@ -2486,26 +2601,71 @@ def get_curation_candidates(row_number, sku_key=None):
         return []
 
 
-def _row_or_sku_clause(row_number, sku_key):
+def _row_or_sku_clause(row_number, sku_key, rows=None):
     """
     شرط يحدد صفوف منتج واحد: بـ sku_key عند توفره (أرقام الصفوف تتغير عند تعديل الشيت)،
     وبرقم الصف فقط للصفوف القديمة بلا sku_key.
+    rows: أرقام صفوف المنتج بين صفوف هذا الـ sku_key (same_product)؛ منتج آخر يشاركه المفتاح (نفس خلية الباركود)
+    لا يُلمس. None = كل صفوف المفتاح.
     """
+    if sku_key and rows is not None:
+        numbers = sorted({int(r) for r in rows})
+        if not numbers:
+            return "(sku_key IS NULL AND `row_number` = %s)", (row_number,)
+        marks = ",".join(["%s"] * len(numbers))
+        return (f"((sku_key = %s AND `row_number` IN ({marks})) OR (sku_key IS NULL AND `row_number` = %s))",
+                (str(sku_key).strip(),) + tuple(numbers) + (row_number,))
     if sku_key:
         return "(sku_key = %s OR (sku_key IS NULL AND `row_number` = %s))", (str(sku_key).strip(), row_number)
     return "`row_number` = %s", (row_number,)
 
 
-def exclude_curation_candidate(row_number, image_url, sku_key=None):
+def _foreign_candidate_ids(cursor, sku_key, identity):
+    """
+    معرفات مرشحات محفوظة بهذا الـ sku_key لمنتج آخر يشاركه المفتاح: اسمها وبراندها المحفوظان لمنتج آخر، أو صف الطابور
+    عند رقم صفها (بنفس المفتاح) هويته لمنتج آخر (الاسم العربي). identity: هوية المنتج المطلوب (queue_row_identity).
+    """
+    if not sku_key or identity is None:
+        return []
+    identity = queue_row_identity(identity)
+    sku = str(sku_key).strip()
+    cursor.execute("SELECT id, `row_number`, product_name, brand FROM curation_candidates WHERE sku_key = %s", (sku,))
+    found = list(cursor.fetchall() or [])
+    if not found:
+        return []
+    cursor.execute("SELECT `row_number`, product_name, brand, payload_json FROM automation_queue WHERE sku_key = %s",
+                   (sku,))
+    queue = {r["row_number"]: r for r in cursor.fetchall() or []}
+    verdicts, foreign = {}, []
+    for c in found:
+        key = (c.get("row_number"), c.get("product_name"), c.get("brand"))
+        if key not in verdicts:
+            # المرشح لا يحفظ الحجم: حجم المنتج المطلوب (المفتاح نفسه يتضمنه لصف بلا باركود)
+            stored = {"name": c.get("product_name"), "brand": c.get("brand"), "size": identity["size"]}
+            task = queue.get(c.get("row_number"))
+            verdicts[key] = same_product(identity, stored) and (task is None or same_product(identity, task))
+        if not verdicts[key]:
+            foreign.append(int(c["id"]))
+    return foreign
+
+
+def _without_ids(clause, params, ids):
+    if not ids:
+        return clause, params
+    return f"{clause} AND id NOT IN ({','.join(['%s'] * len(ids))})", tuple(params) + tuple(ids)
+
+
+def exclude_curation_candidate(row_number, image_url, sku_key=None, identity=None):
     """
     رفض المراجع لصورة واحدة: يُعلَّم مرشحها وحده 'excluded' (ولا يبقى مختاراً)، وباقي مرشحات المنتج تبقى
-    للمراجعة. تعيد عدد الصفوف، أو None عند خطأ قاعدة البيانات.
+    للمراجعة. تعيد عدد الصفوف، أو None عند خطأ قاعدة البيانات. identity: لا تُمس مرشحات منتج آخر يشاركه المفتاح.
     """
     clause, params = _row_or_sku_clause(row_number, sku_key)
     try:
         conn = get_db_connection()
         try:
             cursor = conn.cursor()
+            clause, params = _without_ids(clause, params, _foreign_candidate_ids(cursor, sku_key, identity))
             cursor.execute(f"UPDATE curation_candidates SET status = 'excluded', is_selected = 0 "
                            f"WHERE {clause} AND image_url = %s", params + (image_url,))
             affected = cursor.rowcount
@@ -2518,13 +2678,17 @@ def exclude_curation_candidate(row_number, image_url, sku_key=None):
         return None
 
 
-def delete_curation_candidates(row_number, sku_key=None):
-    """مسح كل مرشحات منتج بعد اعتماده أو رفضه (بـ sku_key عند توفره، وإلا برقم الصف)."""
+def delete_curation_candidates(row_number, sku_key=None, identity=None):
+    """
+    مسح كل مرشحات منتج بعد اعتماده أو رفضه (بـ sku_key عند توفره، وإلا برقم الصف). identity (هوية المنتج):
+    مرشحات منتج آخر يشاركه الـ sku_key تبقى.
+    """
     clause, params = _row_or_sku_clause(row_number, sku_key)
     try:
         conn = get_db_connection()
         try:
             cursor = conn.cursor()
+            clause, params = _without_ids(clause, params, _foreign_candidate_ids(cursor, sku_key, identity))
             cursor.execute(f"DELETE FROM curation_candidates WHERE {clause}", params)
             conn.commit()
         finally:

@@ -390,7 +390,7 @@ def _identity_problem(params, row_number):
     return sku_key, barcode, None
 
 
-def _candidate_sha(params, row_number, sku_key, image_url):
+def _candidate_sha(params, row_number, sku_key, image_url, identity=None):
     """
     بصمة بايتات المرشح التي تم التحقق منها. الواجهة ترسل candidate_sha256 (والاسم القديم content_sha256)؛
     عند غيابهما تُؤخذ من مرشحات هذا المنتج المحفوظة لنفس الرابط.
@@ -398,7 +398,7 @@ def _candidate_sha(params, row_number, sku_key, image_url):
     sha = _text(params, 'candidate_sha256') or _text(params, 'content_sha256')
     if sha:
         return sha
-    for c in local_cache_db.get_curation_candidates(row_number, sku_key=sku_key or None):
+    for c in local_cache_db.get_curation_candidates(row_number, sku_key=sku_key or None, identity=identity):
         if c.get("image_url") == image_url and c.get("content_sha256"):
             return c["content_sha256"]
     return None
@@ -441,7 +441,8 @@ def _reviewer_view(params, action):
     return decision, (status == "preselected") if status else None
 
 
-def _record_review(action, params, row_number, sku_key, image_url=None, reason_code=None, approval=None):
+def _record_review(action, params, row_number, sku_key, image_url=None, reason_code=None, approval=None,
+                   identity=None):
     """
     يسجل قرار المراجع في review_decisions (دليل فتح النشر الآلي لكل براند). يُستدعى قبل حذف مرشحات المنتج:
     ما عرضه المحرك يُقرأ منها. قرار البحث يُعرف فقط عندما تكون الصورة بين المرشحات المحفوظة (أو عند الرفع
@@ -454,7 +455,7 @@ def _record_review(action, params, row_number, sku_key, image_url=None, reason_c
     """
     acted, first = None, {}
     try:
-        stored = local_cache_db.get_curation_candidates(row_number, sku_key=sku_key or None)
+        stored = local_cache_db.get_curation_candidates(row_number, sku_key=sku_key or None, identity=identity)
         candidates = [c for c in stored if not _is_cache_hit(c)]      # ما اختاره المحرك فقط
         acted = next((c for c in candidates if image_url and c.get("image_url") == image_url), None)
         decision = was_preselected = None
@@ -633,17 +634,18 @@ def _stale_refusal(params, sku_key, row_number, product_name, image_url=None):
     return {'status': 'failed', 'error_code': code, 'error': STALE_ERRORS[code], 'current': current}
 
 
-def _reviewer_check(params, sku_key, row_number, product_name, image_url, out):
+def _reviewer_check(params, sku_key, row_number, product_name, image_url, out, rows=None):
     """
     before_write لاعتماد المراجع ورفعه (تحت قفل النشر للـ SKU، بعد المعالجة والرفع): يعيد فحص C1 لأن الحالة
-    قد تتغير أثناء المعالجة، ثم يسحب حجز العامل عن صفوف المنتج فلا ينشر العامل فوق هذا القرار بعد تحرير القفل.
+    قد تتغير أثناء المعالجة، ثم يسحب حجز العامل عن صفوف المنتج (rows: صفوف هذا المنتج فقط، _product_scope) فلا
+    ينشر العامل فوق هذا القرار بعد تحرير القفل.
     """
     def check():
         refusal = _stale_refusal(params, sku_key, row_number, product_name, image_url)
         if refusal:
             out["refusal"] = refusal
             return False
-        local_cache_db.release_worker_claims(row_number, sku_key=sku_key)
+        local_cache_db.release_worker_claims(row_number, sku_key=sku_key, rows=rows)
         return True
     return check
 
@@ -655,17 +657,60 @@ def _not_written(res, out):
     return {'status': 'failed', 'error_code': 'busy', 'error': STALE_ERRORS["busy"]}
 
 
-def _other_rows(sku_key, row_number):
+def _request_identity(params, task=None):
     """
-    صفوف الشيت الأخرى لنفس المنتج: صفوف الطابور بنفس sku_key (المنتج مكرر في الشيت)، كل منها بهويته المسجلة
-    عند الإدراج (الباركود والاسم والحجم والبراند)، فيتحقق الشيت من كل صف بهويته هو قبل الكتابة. الاعتماد يُكتب
-    فيها كلها، وإلا تبقى الصفوف المكررة فارغة إلى الأبد بينما الطابور يعدّها مكتملة.
+    هوية المنتج المطلوب (local_cache_db.queue_row_identity): الاسم والبراند من الطلب، والاسم والبراند بالعربي والحجم
+    من الطلب إن أرسلها، وإلا من حمولة صف الطابور task (يمرره المستدعي فقط إن كان لنفس المنتج).
+    """
+    stored = _pipeline().task_payload(task) if task else {}
+
+    def pick(sent, key):
+        return _text(params, sent) if sent in params else str(stored.get(key) or "").strip()
+
+    return {"name": _text(params, 'product_name'), "brand": _text(params, 'brand'),
+            "name_ar": pick('product_name_ar', 'name_ar'), "brand_ar": pick('brand_ar', 'brand_ar'),
+            "size": pick('size', 'size')}
+
+
+def _product_scope(params, sku_key, row_number):
+    """
+    (هوية المنتج، صفوف الطابور لهذا المنتج). sku_key وحده لا يكفي: منتجان مختلفان قد يتشاركان خلية باركود واحدة،
+    والمفتاح بلا باركود لا يقرأ الاسم العربي. الصفوف: صفوف المفتاح التي تصف المنتج نفسه (local_cache_db.same_product)،
+    وصف الطابور عند رقم صف الطلب إن كان لنفس المنتج (_same_product_task: هو الصف الذي تعرضه الصفحة).
+    """
+    task = local_cache_db.get_task_by_row(row_number)
+    own = task if _same_product_task(task, sku_key, _text(params, 'product_name')) else None
+    identity = _request_identity(params, own)
+    tasks = []
+    for t in (local_cache_db.get_tasks_by_sku(sku_key) if sku_key else []):
+        same_row = own is not None and t.get("id") == own.get("id")
+        if same_row or local_cache_db.same_product(identity, t):
+            tasks.append(t)
+    return identity, tasks
+
+
+def _rows_of(tasks):
+    out = []
+    for task in tasks:
+        try:
+            out.append(int(task.get("row_number")))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def _other_rows(sku_key, row_number, tasks=None):
+    """
+    صفوف الشيت الأخرى لنفس المنتج: صفوف الطابور لهذا المنتج (_product_scope؛ المنتج مكرر في الشيت)، كل منها بهويته
+    المسجلة عند الإدراج (الباركود والاسم والحجم والبراند)، فيتحقق الشيت من كل صف بهويته هو قبل الكتابة. الاعتماد
+    يُكتب فيها كلها، وإلا تبقى الصفوف المكررة فارغة إلى الأبد بينما الطابور يعدّها مكتملة. منتج آخر يشارك المفتاح
+    (نفس خلية الباركود) ليس منها أبداً.
     """
     if not sku_key:
         return []
     pipeline = _pipeline()
     out = []
-    for task in local_cache_db.get_tasks_by_sku(sku_key):
+    for task in (tasks if tasks is not None else []):
         try:
             other = int(task.get("row_number"))
         except (TypeError, ValueError):
@@ -781,6 +826,8 @@ def action_select_image(params):
         return refusal
 
     pipeline = _pipeline()
+    identity, tasks = _product_scope(params, sku_key, row_number)
+    rows = _rows_of(tasks)
     queue_started = False
     guard = {}
     try:
@@ -792,11 +839,11 @@ def action_select_image(params):
         # target_width / enhance / bg_removal_method في الطلب لا تغيّره
         res = pipeline.publish_image(
             image_url, product_name, brand, row_number, worksheet, link_column_index,
-            barcode=barcode, candidate_sha256=_candidate_sha(params, row_number, sku_key, image_url),
+            barcode=barcode, candidate_sha256=_candidate_sha(params, row_number, sku_key, image_url, identity),
             category_override={k: _text(params, k) for k in ('category_l1_en', 'category_l2_en', 'category_l3_en')},
             key_size=_text(params, 'size') or None, key_brand=brand or None, sku_key=sku_key,
-            also_rows=_other_rows(sku_key, row_number),
-            before_write=_reviewer_check(params, sku_key, row_number, product_name, image_url, guard),
+            also_rows=_other_rows(sku_key, row_number, tasks),
+            before_write=_reviewer_check(params, sku_key, row_number, product_name, image_url, guard, rows),
         )
         if res["status"] == "superseded":
             return _not_written(res, guard)
@@ -808,9 +855,9 @@ def action_select_image(params):
             perceptual_hash=res.get("phash"), verification_status="human_approved", approved_by="human",
             sku_key=sku_key,
         )
-        local_cache_db.update_task_status_by_row(row_number, "completed", sku_key=sku_key)
-        _record_review("approved", params, row_number, sku_key, image_url)
-        local_cache_db.delete_curation_candidates(row_number, sku_key=sku_key)
+        local_cache_db.update_task_status_by_row(row_number, "completed", sku_key=sku_key, rows=rows)
+        _record_review("approved", params, row_number, sku_key, image_url, identity=identity)
+        local_cache_db.delete_curation_candidates(row_number, sku_key=sku_key, identity=identity)
         response = _published_response(res, sku_key, row_number, provider=res.get("provider"))
     except Exception as e:
         config.log_error_to_laravel(f"CLI action_select_image exception: {e}\n{traceback.format_exc()}",
@@ -849,6 +896,8 @@ def action_upload_manual_image(params):
     refusal = _stale_refusal(params, sku_key, row_number, product_name)
     if refusal:
         return refusal
+    identity, tasks = _product_scope(params, sku_key, row_number)
+    rows = _rows_of(tasks)
     queue_started = False
     guard = {}
     try:
@@ -860,8 +909,8 @@ def action_upload_manual_image(params):
             file_path, product_name, brand, row_number, worksheet, link_column_index, barcode=barcode,
             category_override={k: _text(params, k) for k in ('category_l1_en', 'category_l2_en', 'category_l3_en')},
             key_size=_text(params, 'size') or None, key_brand=brand or None, sku_key=sku_key,
-            also_rows=_other_rows(sku_key, row_number),
-            before_write=_reviewer_check(params, sku_key, row_number, product_name, None, guard),
+            also_rows=_other_rows(sku_key, row_number, tasks),
+            before_write=_reviewer_check(params, sku_key, row_number, product_name, None, guard, rows),
         )
         try:
             os.remove(file_path)
@@ -876,9 +925,9 @@ def action_upload_manual_image(params):
             perceptual_hash=res.get("phash"), verification_status="human_approved", approved_by="human_upload",
             sku_key=sku_key,
         )
-        local_cache_db.update_task_status_by_row(row_number, "completed", sku_key=sku_key)
-        _record_review("manual_upload", params, row_number, sku_key)
-        local_cache_db.delete_curation_candidates(row_number, sku_key=sku_key)
+        local_cache_db.update_task_status_by_row(row_number, "completed", sku_key=sku_key, rows=rows)
+        _record_review("manual_upload", params, row_number, sku_key, identity=identity)
+        local_cache_db.delete_curation_candidates(row_number, sku_key=sku_key, identity=identity)
         response = _published_response(res, sku_key, row_number)
     except Exception as e:
         config.log_error_to_laravel(f"CLI action_upload_manual_image exception: {e}\n{traceback.format_exc()}",
@@ -915,7 +964,7 @@ def _phash_of_stored(sha):
         return None
 
 
-def _candidate_phash(row_number, image_url, params=None, sku_key=None):
+def _candidate_phash(row_number, image_url, params=None, sku_key=None, identity=None):
     """
     pHash للمرشح المرفوض ورابط صفحته. يعيد (phash, page_url).
     المصادر بالترتيب: phash المرسل، ثم بصمة البايتات المرسلة (candidate_sha256/content_sha256) من مخزن
@@ -929,7 +978,7 @@ def _candidate_phash(row_number, image_url, params=None, sku_key=None):
     phash = _phash_of_stored(_text(params, 'candidate_sha256') or _text(params, 'content_sha256'))
     if phash:
         return phash, page_url
-    for c in local_cache_db.get_curation_candidates(row_number, sku_key=sku_key or None):
+    for c in local_cache_db.get_curation_candidates(row_number, sku_key=sku_key or None, identity=identity):
         if c.get("image_url") != image_url:
             continue
         return _phash_of_stored(c.get("content_sha256")), c.get("page_url") or page_url
@@ -943,14 +992,15 @@ def _cell_holds(value, image_url):
     return value == image_url
 
 
-def _clear_rejected_cells(params, row_number, sku_key, image_url):
+def _clear_rejected_cells(params, row_number, sku_key, image_url, tasks=None):
     """
     يفرّغ خلية الرابط التي تحمل الصورة المرفوضة (مع بادئة needs_review: أو بدونها) في صف المنتج وفي صفوفه
-    المكررة، كل كتابة بهوية صفها (الباركود والاسم والحجم والبراند). يعيد (فُرّغت خلية واحدة على الأقل، خطأ أو None).
+    المكررة (tasks: صفوف هذا المنتج، _product_scope)، كل كتابة بهوية صفها (الباركود والاسم والحجم والبراند).
+    يعيد (فُرّغت خلية واحدة على الأقل، خطأ أو None).
     """
     rows = [{"row_number": row_number, "barcode": _text(params, 'barcode'), "product_name": _text(params, 'product_name'),
              "size": _text(params, 'size') or None, "brand": _text(params, 'brand') or None}]
-    rows += _other_rows(sku_key, row_number)
+    rows += _other_rows(sku_key, row_number, tasks)
     cleared, error = False, None
     queue_started = False
     try:
@@ -975,7 +1025,7 @@ def _clear_rejected_cells(params, row_number, sku_key, image_url):
     return cleared, error
 
 
-def _save_research_candidates(found, row_number, product_name, brand, sku_key, rejected_url):
+def _save_research_candidates(found, row_number, product_name, brand, sku_key, rejected_url, identity=None):
     """
     إعادة البحث بعد الرفض تحفظ مرشحاتها الجديدة بنفسها (عقد C2، بـ sku_key المنتج)، بدل أن تحفظها الصفحة.
     لا شيء يُحفظ بلا نتيجة (لم يُعثر على شيء / المزودون معطلون): المرشحات الباقية تبقى. يعيد عدد المحفوظ.
@@ -989,13 +1039,16 @@ def _save_research_candidates(found, row_number, product_name, brand, sku_key, r
         return 0
     if not local_cache_db.save_curation_candidates(row_number, product_name, best.get("brand") or brand, candidates,
                                                    best.get("url"), sku_key=sku_key,
-                                                   run_id=f"research-{uuid.uuid4().hex[:8]}"):
+                                                   run_id=f"research-{uuid.uuid4().hex[:8]}", identity=identity):
         return 0
     return len(candidates)
 
 
-def _set_review_queue_status(row_number, sku_key, product_name, status, reason_code, failure_code=None):
-    """حالة الطابور بعد الرفض (None = بلا تغيير). لا يُعاد كتابة نفس الحالة: توقيت الصف يبقى كما رأته الصفحة."""
+def _set_review_queue_status(row_number, sku_key, product_name, status, reason_code, failure_code=None, rows=None):
+    """
+    حالة الطابور بعد الرفض (None = بلا تغيير). لا يُعاد كتابة نفس الحالة: توقيت الصف يبقى كما رأته الصفحة.
+    rows: صفوف هذا المنتج فقط (_product_scope)؛ منتج آخر يشاركه الباركود لا يعود للطابور برفض صورة غيره.
+    """
     if not status:
         return
     task = local_cache_db.get_task_by_row(row_number)
@@ -1003,10 +1056,10 @@ def _set_review_queue_status(row_number, sku_key, product_name, status, reason_c
         return
     if status == "pending":
         local_cache_db.update_task_status_by_row(row_number, "pending", f"rejected by reviewer: {reason_code}",
-                                                 failure_code="REJECTED", sku_key=sku_key)
+                                                 failure_code="REJECTED", sku_key=sku_key, rows=rows)
     else:
         local_cache_db.update_task_status_by_row(row_number, status, None, failure_code=failure_code,
-                                                 sku_key=sku_key)
+                                                 sku_key=sku_key, rows=rows)
 
 
 def action_reject_image(params):
@@ -1040,7 +1093,9 @@ def action_reject_image(params):
         sku_key = _pipeline().compute_sku_key({"name": product_name, "brand": brand, "barcode": barcode},
                                               brand_mappings)
 
-    phash, page_url = _candidate_phash(row_number, image_url, params, sku_key)
+    identity, tasks = _product_scope(params, sku_key, row_number)
+    rows = _rows_of(tasks)
+    phash, page_url = _candidate_phash(row_number, image_url, params, sku_key, identity)
     if not local_cache_db.add_rejected_image(sku_key, image_url, page_url=page_url or _text(params, 'page_url') or None,
                                              phash=phash, reason_code=reason_code):
         return {'status': 'error', 'error': 'could not record the rejection'}
@@ -1049,9 +1104,9 @@ def action_reject_image(params):
     approved = local_cache_db.get_cached_product(sku_key=sku_key)
     targets_approval = bool(approved) and image_url in (approved.get("original_url"), approved.get("cloudinary_url"))
     keep_approval = bool(approved) and approved.get("verification_status") == "human_approved" and not targets_approval
-    stored = local_cache_db.get_curation_candidates(row_number, sku_key=sku_key or None)
+    stored = local_cache_db.get_curation_candidates(row_number, sku_key=sku_key or None, identity=identity)
     _record_review("rejected", params, row_number, sku_key, image_url, reason_code=reason_code,
-                   approval=approved if targets_approval else None)
+                   approval=approved if targets_approval else None, identity=identity)
     # المراجعة تبقى حية (عقد C2): تُستبعد الصورة المرفوضة وحدها، وباقي المرشحات تبقى للمراجع
     rejected = next((c for c in stored if c.get("image_url") == image_url), None)
     remaining = [c for c in stored if c.get("image_url") != image_url
@@ -1059,11 +1114,11 @@ def action_reject_image(params):
     shown_status = rejected.get("status") if rejected else _text(params, 'candidate_status')
     was_pick = targets_approval or shown_status == "preselected"
     if rejected:
-        local_cache_db.exclude_curation_candidate(row_number, image_url, sku_key=sku_key)
+        local_cache_db.exclude_curation_candidate(row_number, image_url, sku_key=sku_key, identity=identity)
     local_cache_db.save_feedback(str(uuid.uuid4()), image_url.split("/")[-1].split("?")[0], row_number,
                                  product_name, brand, image_url, [reason_code])
 
-    sheet_cleared, sheet_error = _clear_rejected_cells(params, row_number, sku_key, image_url)
+    sheet_cleared, sheet_error = _clear_rejected_cells(params, row_number, sku_key, image_url, tasks)
     if sheet_cleared:
         # الخلية كانت تحمل الصورة المرفوضة: هي المنشورة (أو المقترحة needs_review:)، فالاعتماد السابق لم يعد
         # منشوراً ويُلغى
@@ -1080,7 +1135,8 @@ def action_reject_image(params):
                              exclude_urls=_merge_urls(params.get('exclude_urls'), [image_url]))
         found = {}
         response = action_search(search_params, brand_mappings=brand_mappings, found=found)
-        candidates_saved = _save_research_candidates(found, row_number, product_name, brand, sku_key, image_url)
+        candidates_saved = _save_research_candidates(found, row_number, product_name, brand, sku_key, image_url,
+                                                     identity)
 
     # حالة الطابور: الاعتماد البشري الباقي لا يُمس. مرشحات جديدة من إعادة البحث -> بانتظار المراجعة. رفض الاختيار
     # (المسبق أو المعتمد أو المنشور) -> بانتظار المراجعة إن بقي مرشح مؤهل، وإلا يعود الصف للطابور، وكذلك رفض آخر
@@ -1092,7 +1148,7 @@ def action_reject_image(params):
         elif was_pick or (rejected is not None and not remaining):
             queue_status = "ready_for_review" if remaining else "pending"
     _set_review_queue_status(row_number, sku_key, product_name, queue_status, reason_code,
-                             (response or {}).get('failure_code'))
+                             (response or {}).get('failure_code'), rows)
 
     rejection = {'sku_key': sku_key, 'reason_code': reason_code, 'phash': phash, 'sheet_cleared': sheet_cleared,
                  'superseded': superseded, 'sheet_error': sheet_error, 'approval_kept': keep_approval,
