@@ -207,7 +207,7 @@ def test_alert_texts_are_arabic():
     assert out["verifier"].startswith("لا يوجد مفتاح Gemini")
     assert out["gemini"] == "Gemini لا يستجيب"
     assert out["unknown"] == "SOMETHING_NEW: raw text"
-    assert out["budget"].startswith("بلغ صرف اليوم الميزانية اليومية") and "USD" not in out["budget"]
+    assert out["budget"].startswith("بلغ صرف اليوم الميزانية اليومية") and "spent" not in out["budget"]
     assert out["db"].startswith("تعذر الوصول إلى قاعدة البيانات")
     assert out["error_without_notice"].startswith("توقف التشغيل بسبب خطأ غير معروف")
     assert out["idle"] == ""
