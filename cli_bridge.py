@@ -673,6 +673,45 @@ def _other_rows(sku_key, row_number):
     return out
 
 
+# حالات google_sheets.outbox_outcomes (أو sync_status في طابور الكتابة) كما تعيدها الاستجابة (عقد C3)
+_SHEET_OUTCOMES = {"written": "written", "synced": "written", "pending": "pending", "failed": "pending",
+                   "conflict": "conflict", "dead": "conflict", "skipped_out_of_bounds": "conflict"}
+
+
+def _sheet_outcome(rows):
+    """
+    ما حدث لكتابة الرابط في الشيت بعد التفريغ الأخير لطابور الكتابة (عقد C3):
+    written (كُتب في كل الصفوف) | pending (ما زال في الطابور، يُعاد لاحقاً) | conflict (رُفض: هوية الصف تغيّرت،
+    أو فشل نهائياً) | unknown. المصدر google_sheets.outbox_outcomes(rows) إن وُجدت (حزمة الشيت: حالة كل صف)،
+    وإلا unknown. أسوأ حالة بين الصفوف هي النتيجة.
+    """
+    outcomes = getattr(google_sheets, "outbox_outcomes", None)
+    if not callable(outcomes) or not rows:
+        return "unknown"
+    try:
+        result = outcomes(list(rows))
+    except Exception:
+        logger.exception("تعذر قراءة نتيجة الكتابة في الشيت للصفوف %s", rows)
+        return "unknown"
+    if isinstance(result, dict):
+        values = list(result.values())
+    elif isinstance(result, (list, tuple, set)):
+        values = list(result)
+    else:
+        values = [result]
+    codes = set()
+    for value in values:
+        if isinstance(value, dict):
+            value = value.get("outcome") or value.get("status") or value.get("sync_status")
+        codes.add(_SHEET_OUTCOMES.get(str(value or "").strip().lower(), "unknown"))
+    if not codes:
+        return "unknown"
+    for code in ("conflict", "pending", "unknown"):
+        if code in codes:
+            return code
+    return "written"
+
+
 def _published_response(res, sku_key, row_number, **extra):
     """
     استجابة الاعتماد / الرفع الناجح. warnings: background_not_removed (كُتب needs_review:)، و duplicate_image
@@ -743,14 +782,15 @@ def action_select_image(params):
         _record_review("approved", params, row_number, sku_key, image_url)
         local_cache_db.delete_curation_candidates(row_number, sku_key=sku_key)
         response = _published_response(res, sku_key, row_number, provider=res.get("provider"))
-        return response
     except Exception as e:
         config.log_error_to_laravel(f"CLI action_select_image exception: {e}\n{traceback.format_exc()}",
                                     product_name=product_name, brand=brand, barcode=barcode, level="ERROR")
         return {'status': 'failed', 'error': "Publishing the image failed (details on the Errors page)."}
     finally:
         if queue_started:
-            google_sheets.stop_async_queue()
+            google_sheets.stop_async_queue()     # التفريغ الأخير لطابور الكتابة
+    response['sheet'] = _sheet_outcome(response['rows_written'])
+    return response
 
 
 # ---------------------------------------------------------------------------
@@ -809,14 +849,15 @@ def action_upload_manual_image(params):
         _record_review("manual_upload", params, row_number, sku_key)
         local_cache_db.delete_curation_candidates(row_number, sku_key=sku_key)
         response = _published_response(res, sku_key, row_number)
-        return response
     except Exception as e:
         config.log_error_to_laravel(f"CLI action_upload_manual_image exception: {e}\n{traceback.format_exc()}",
                                     product_name=product_name, brand=brand, barcode=barcode, level="ERROR")
         return {'status': 'failed', 'error': "Uploading the image failed (details on the Errors page)."}
     finally:
         if queue_started:
-            google_sheets.stop_async_queue()
+            google_sheets.stop_async_queue()     # التفريغ الأخير لطابور الكتابة
+    response['sheet'] = _sheet_outcome(response['rows_written'])
+    return response
 
 
 # ---------------------------------------------------------------------------

@@ -568,6 +568,67 @@ def test_a_publish_lock_held_elsewhere_writes_nothing(stale_env, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# C3: what happened to the sheet write, read after the outbox's final flush
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("answer, sheet", [
+    ({4: "written"}, "written"),
+    ({4: "SYNCED", 9: "synced"}, "written"),
+    ({4: "written", 9: "pending"}, "pending"),
+    ({4: "FAILED"}, "pending"),
+    ({4: "pending", 9: "conflict"}, "conflict"),
+    ({4: "DEAD"}, "conflict"),
+    ([{"row_number": 4, "outcome": "written"}], "written"),
+    ("conflict", "conflict"),
+    ({4: "something new"}, "unknown"),
+    ({}, "unknown"),
+])
+def test_the_sheet_outcome_follows_the_final_flush(select_env, monkeypatch, answer, sheet):
+    import google_sheets
+    import local_cache_db
+    bridge, events, state = select_env
+    monkeypatch.setattr(local_cache_db, "get_tasks_by_sku", lambda key: [
+        {"row_number": 9, "sku_key": key, "barcode": "6281007000024", "product_name": "Fresh Milk Full Fat 1L",
+         "brand": "Almarai", "payload_json": "{}"}])
+    monkeypatch.setattr(google_sheets, "stop_async_queue", lambda *a, **k: events.append(("flushed",)))
+    monkeypatch.setattr(google_sheets, "outbox_outcomes",
+                        lambda rows: events.append(("outcomes", list(rows))) or answer, raising=False)
+    result = bridge.action_select_image(dict(SELECT_PARAMS))
+    assert result["status"] == "success" and result["sheet"] == sheet
+    kinds = [e[0] for e in events]
+    assert kinds.index("flushed") < kinds.index("outcomes")         # read after the final flush
+    assert ("outcomes", [4, 9]) in events
+
+
+def test_the_sheet_outcome_is_unknown_without_the_outbox_api(select_env, monkeypatch, tmp_path):
+    import google_sheets
+    bridge, events, state = select_env
+    if hasattr(google_sheets, "outbox_outcomes"):
+        monkeypatch.setattr(google_sheets, "outbox_outcomes", None)
+    assert bridge.action_select_image(dict(SELECT_PARAMS))["sheet"] == "unknown"
+
+    def broken(rows):
+        raise RuntimeError("outbox unreadable")
+
+    monkeypatch.setattr(google_sheets, "outbox_outcomes", broken, raising=False)
+    upload = tmp_path / "manual.png"
+    _canvas(upload, (300, 300))
+    params = {k: SELECT_PARAMS[k] for k in ("row_number", "product_name", "brand", "barcode", "sku_key")}
+    result = bridge.action_upload_manual_image(dict(params, file_path=str(upload)))
+    assert result["status"] == "success" and result["sheet"] == "unknown"
+
+
+def test_the_upload_reports_the_sheet_outcome(select_env, monkeypatch, tmp_path):
+    import google_sheets
+    bridge, events, state = select_env
+    monkeypatch.setattr(google_sheets, "outbox_outcomes", lambda rows: {r: "conflict" for r in rows}, raising=False)
+    upload = tmp_path / "manual.png"
+    _canvas(upload, (300, 300))
+    params = {k: SELECT_PARAMS[k] for k in ("row_number", "product_name", "brand", "barcode", "sku_key")}
+    assert bridge.action_upload_manual_image(dict(params, file_path=str(upload)))["sheet"] == "conflict"
+
+
+# ---------------------------------------------------------------------------
 # Error payloads never carry exception text (fastapi_server returns them over HTTP)
 # ---------------------------------------------------------------------------
 

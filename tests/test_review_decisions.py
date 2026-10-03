@@ -161,7 +161,8 @@ def test_approving_the_precheck_records_it_before_the_candidates_are_deleted(rec
     result = cli_bridge.action_select_image(_approve_params())
 
     assert result == {"status": "success", "image_link": LINK, "sheet_value": LINK, "isolated": True,
-                      "provider": "photoroom", "sku_key": SKU, "rows_written": [ROW]}
+                      "provider": "photoroom", "sku_key": SKU, "rows_written": [ROW],
+                      "sheet": "unknown"}
     (action, row), = _reviews(events)
     assert action == "approved"
     assert row == {"sku_key": SKU, "row_number": ROW, "brand": BRAND, "product_name": NAME, "image_url": PRE_URL,
@@ -240,7 +241,8 @@ def test_manual_upload_is_recorded_as_not_the_precheck(recorder, tmp_path):
     cli_bridge, events, state = recorder
     result = cli_bridge.action_upload_manual_image(_upload_params(tmp_path))
     assert result == {"status": "success", "image_link": LINK, "sheet_value": LINK, "isolated": True, "sku_key": SKU,
-                      "rows_written": [ROW]}
+                      "rows_written": [ROW],
+                      "sheet": "unknown"}
     (action, row), = _reviews(events)
     assert action == "manual_upload"
     assert (row["image_url"], row["page_domain"]) == (None, None)            # the local file path is never stored
@@ -541,7 +543,8 @@ def test_a_failing_insert_does_not_break_the_approval(db, sheet, monkeypatch, ca
     with caplog.at_level(logging.ERROR, logger="cli_bridge"):
         result = cli_bridge.action_select_image(_approve_params())
     assert result == {"status": "success", "image_link": LINK, "sheet_value": LINK, "isolated": True,
-                      "provider": "photoroom", "sku_key": SKU, "rows_written": [ROW]}
+                      "provider": "photoroom", "sku_key": SKU, "rows_written": [ROW],
+                      "sheet": "unknown"}
     assert _db_reviews(db) == []
     assert db.get_curation_candidates(ROW, sku_key=SKU) == []
     assert db.get_cached_product(sku_key=SKU)["verification_status"] == "human_approved"
@@ -567,10 +570,12 @@ def test_a_missing_table_does_not_break_approve_reject_or_upload(db, sheet, tmp_
             # replace: the approval above is seconds old (an old client may not overwrite it without replace)
             uploaded = cli_bridge.action_upload_manual_image(_upload_params(tmp_path, replace=True))
         assert approved == {"status": "success", "image_link": LINK, "sheet_value": LINK, "isolated": True,
-                            "provider": "photoroom", "sku_key": SKU, "rows_written": [ROW]}
+                            "provider": "photoroom", "sku_key": SKU, "rows_written": [ROW],
+                      "sheet": "unknown"}
         assert rejected["status"] == "success" and rejected["reason_code"] == "WRONG_VARIANT"
         assert uploaded == {"status": "success", "image_link": LINK, "sheet_value": LINK, "isolated": True,
-                            "sku_key": SKU, "rows_written": [ROW]}
+                            "sku_key": SKU, "rows_written": [ROW],
+                      "sheet": "unknown"}
         assert db.get_curation_candidates(ROW, sku_key=SKU) == []
         failures = [r for r in caplog.records if r.name == "cli_bridge" and r.exc_info]
         assert len(failures) == 3 and all("review_decisions" in str(r.exc_info[1]) for r in failures)
