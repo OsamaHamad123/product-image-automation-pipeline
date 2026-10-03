@@ -17,7 +17,8 @@ temp/run_config.json can change them:
 
 The run writes nothing to the sheet beyond what those entry points already write (the enqueue adds the image-link
 column header when it is missing); with auto-publish off the worker writes no image link at all. It is skipped
-when a worker already holds temp/pipeline.lock. Output goes to temp/nightly/nightly_YYYY-MM-DD.log (the newest 30
+when a live worker already holds temp/pipeline.lock (main._another_worker_running: a stale lock left by a crashed
+or killed run, whose PID now belongs to another process, is removed and never skips a night). Output goes to temp/nightly/nightly_YYYY-MM-DD.log (the newest 30
 logs are kept). Exit code 0 when the queue was worked or the run was skipped, 1 otherwise.
 """
 
@@ -81,7 +82,7 @@ def pin_nightly_settings(main_module, config_module, settings=NIGHTLY_SETTINGS):
 
 
 def worker_busy(main_module, lock_file=LOCK_FILE, now=time.time):
-    """True while a worker (started from the dashboard or an earlier nightly run) holds the pipeline lock."""
+    """True while a live worker (started from the dashboard or an earlier nightly run) holds the pipeline lock."""
     try:
         with open(lock_file, "r", encoding="utf-8", errors="replace") as fh:
             content = fh.read().strip()
@@ -95,21 +96,14 @@ def worker_busy(main_module, lock_file=LOCK_FILE, now=time.time):
     return main_module._another_worker_running(lock_file)
 
 
-def _hold_lock(lock_file=LOCK_FILE):
-    """Our PID in the lock during the enqueue, so the dashboard shows a run and refuses to start a second one."""
-    os.makedirs(os.path.dirname(lock_file) or ".", exist_ok=True)
-    with open(lock_file, "w") as fh:
-        fh.write(str(os.getpid()))
+def _hold_lock(main_module, lock_file=LOCK_FILE):
+    """Our lock during the enqueue, so the dashboard shows a run and refuses to start a second one."""
+    main_module.write_lock("nightly", lock_file)
 
 
-def _release_lock(lock_file=LOCK_FILE):
-    try:
-        with open(lock_file, "r") as fh:
-            mine = fh.read().strip() == str(os.getpid())
-        if mine:
-            os.remove(lock_file)
-    except OSError:
-        pass
+def _release_lock(main_module, lock_file=LOCK_FILE):
+    """Removes the lock only while it is ours (the worker, in this process, may already have removed it)."""
+    main_module.release_own_lock(lock_file)
 
 
 def run():
@@ -122,7 +116,7 @@ def run():
         say(f"a worker is already running ({LOCK_FILE}); nothing to do tonight")
         return 0
     pin_nightly_settings(main, config)
-    _hold_lock()
+    _hold_lock(main)
     # A new run, like the dashboard's run button: a stop or pause request left over from an earlier run must not
     # stop tonight's worker, and the dashboard shows 'reading the sheet' instead of the last run's numbers.
     if not local_cache_db.prepare_run():
@@ -133,11 +127,11 @@ def run():
     except SystemExit as exc:
         if exc.code not in (0, None):
             say(f"enqueue failed (exit {exc.code}); the worker is not started")
-            _release_lock()
+            _release_lock(main)
             return 1
     except Exception:
         say("enqueue raised:\n" + traceback.format_exc())
-        _release_lock()
+        _release_lock(main)
         return 1
 
     say("worker: searching the queued rows")
@@ -148,7 +142,7 @@ def run():
             say(f"worker exited with {exc.code}")
             return 1
     finally:
-        _release_lock()
+        _release_lock(main)
     state = local_cache_db.get_automation_state()
     status = state.get("status")
     say(f"worker finished: status={status} notice={state.get('notice') or '-'}")

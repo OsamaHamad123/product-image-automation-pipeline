@@ -51,7 +51,8 @@ def nightly(offline, monkeypatch, tmp_path):
     def fake_enqueue():
         main.load_run_config()
         with open(runner.LOCK_FILE) as fh:
-            rec["calls"].append(("enqueue", fh.read().strip(), config.ROW_FILTER, config.FORCE_OVERWRITE_IMAGES))
+            lock = json.load(fh)
+        rec["calls"].append(("enqueue", lock["pid"], lock["role"], config.ROW_FILTER, config.FORCE_OVERWRITE_IMAGES))
 
     def fake_worker():
         main.load_run_config()
@@ -97,7 +98,7 @@ def test_run_enqueues_then_works_the_queue_with_auto_publish_off(nightly, monkey
     _owner_settings(monkeypatch, main, config)
 
     assert runner.run() == 0
-    assert rec["calls"] == [("enqueue", str(os.getpid()), "", False), ("worker", False)]
+    assert rec["calls"] == [("enqueue", os.getpid(), "nightly", "", False), ("worker", False)]
     assert not os.path.exists(runner.LOCK_FILE)
 
 
