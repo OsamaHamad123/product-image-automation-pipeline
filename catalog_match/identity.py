@@ -207,6 +207,7 @@ def build_sku_spec(row: Mapping[str, Any], brand_mappings=None, size_text: Optio
         match_brands=tuple(res.match_brands),
         competitors=tuple(res.competitors),
         official_domains=tuple(res.official_domains),
+        learned_domains=tuple(getattr(res, "learned_domains", ()) or ()),
         brand_conf=res.conf,
         gtin=gtin14,
         gtin_raw="" if barcode is None else str(barcode),

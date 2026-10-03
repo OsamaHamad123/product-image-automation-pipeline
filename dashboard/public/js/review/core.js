@@ -351,7 +351,9 @@
             candidate_status: c.status,
             candidate_cache_hit: cacheHit,
             identity_tier: c.identity_tier === null || c.identity_tier === undefined ? '' : String(c.identity_tier),
-            vlm_decision: (c.vlm && c.vlm.decision) ? String(c.vlm.decision) : ''
+            vlm_decision: (c.vlm && c.vlm.decision) ? String(c.vlm.decision) : '',
+            // تحذيرات الصورة كما رآها المراجع: اعتماد صورة عليها brand_spelling:<الكتابة> يعلّم البحث هذه الكتابة
+            candidate_warnings: (c.warnings || []).map(w => String(w)).join('|')
         };
     }
 

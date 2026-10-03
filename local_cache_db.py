@@ -333,6 +333,21 @@ def init_db():
             ) ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
         """)
 
+        # 11. ما تعلّمه البحث من المراجعة (catalog_match/learning.py): كتابة المتاجر لماركة الشيت كما اعتمدها المراجع
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS learned_brand_aliases (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                brand_key VARCHAR(255) NOT NULL,
+                sheet_brand VARCHAR(255) NOT NULL,
+                alias VARCHAR(255) NOT NULL,
+                approvals INT NOT NULL DEFAULT 0,
+                rejections INT NOT NULL DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                UNIQUE KEY uq_learned_alias (brand_key, alias)
+            ) ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
+        """)
+
         # القيم الافتراضية المبدئية من ملف .env (INSERT IGNORE لا يغير القيم الموجودة)
         import config
         default_settings = {
@@ -942,6 +957,75 @@ def add_review_decision(action, sku_key=None, row_number=None, brand=None, produ
     finally:
         _close(conn)
     return True
+
+
+# ---------------------------------------------------------------------------
+# ما يتعلّمه البحث من المراجعة (catalog_match/learning.py)
+# ---------------------------------------------------------------------------
+
+def _alias_key(brand):
+    from catalog_match.text_norm import match_key
+    return (match_key(brand) or str(brand or "").strip().lower())[:255]
+
+
+def record_brand_alias(sheet_brand, alias, approved=True):
+    """
+    اعتماد (approved=True) أو رفض WRONG_BRAND لصورة كانت ماركتها مؤكدة فقط بكتابة المتاجر (تنبيه brand_spelling):
+    يُحسب للكتابة أو عليها. تُستعمل الكتابة ما دامت الاعتمادات أكثر من الرفض. لا يُرفع خطأ: التعلّم لا يعطل المراجعة.
+    """
+    sheet_brand, alias = str(sheet_brand or "").strip(), str(alias or "").strip()
+    if not sheet_brand or not alias or _alias_key(sheet_brand) == _alias_key(alias):
+        return False
+    column = "approvals" if approved else "rejections"
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            f"INSERT INTO learned_brand_aliases (brand_key, sheet_brand, alias, {column}) VALUES (%s, %s, %s, 1) "
+            f"ON DUPLICATE KEY UPDATE {column} = {column} + 1, sheet_brand = VALUES(sheet_brand)",
+            (_alias_key(sheet_brand), _clip(sheet_brand, 255), _clip(alias, 255)))
+        conn.commit()
+        return True
+    finally:
+        _close(conn)
+
+
+def get_learned_brand_aliases():
+    """[(sheet_brand, alias, approvals, rejections)] للكتابات التي اعتماداتها أكثر من رفضها، الأقوى أولاً."""
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT sheet_brand, alias, approvals, rejections FROM learned_brand_aliases "
+                       "WHERE approvals > rejections ORDER BY approvals - rejections DESC, id")
+        return [(r["sheet_brand"], r["alias"], int(r["approvals"]), int(r["rejections"])) for r in cursor.fetchall()]
+    finally:
+        _close(conn)
+
+
+def get_learned_brand_sources(min_approvals=2):
+    """
+    {ماركة الشيت: [مواقع]}: موقع اعتمد منه المراجعون صور هذه الماركة min_approvals مرة على الأقل، ولم يُرفض منه
+    لها أي صورة لسبب هوية (منتج أو ماركة أو نوع أو حجم أو عبوة مختلفة). الماركة بكتابة الشيت كما سُجلت.
+    """
+    identity = ",".join(["%s"] * len(IDENTITY_REASON_CODES[:5]))
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(f"""
+            SELECT MIN(brand) AS brand, LOWER(TRIM(page_domain)) AS domain,
+                   SUM(action = 'approved') AS approvals,
+                   SUM(action = 'rejected' AND reason_code IN ({identity})) AS identity_rejections
+            FROM review_decisions
+            WHERE brand IS NOT NULL AND TRIM(brand) <> '' AND page_domain IS NOT NULL AND TRIM(page_domain) <> ''
+            GROUP BY LOWER(TRIM(brand)), LOWER(TRIM(page_domain))
+        """, tuple(IDENTITY_REASON_CODES[:5]))
+        out = {}
+        for r in cursor.fetchall():
+            if int(r["approvals"] or 0) >= int(min_approvals) and not int(r["identity_rejections"] or 0):
+                out.setdefault(r["brand"].strip(), []).append(r["domain"])
+        return {brand: sorted(set(domains)) for brand, domains in out.items()}
+    finally:
+        _close(conn)
 
 
 def get_review_decisions():

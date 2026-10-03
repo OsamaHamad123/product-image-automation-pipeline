@@ -46,7 +46,7 @@ class SkuSpec:
     match_brands: Tuple[str, ...] = ()        # normalised phrases incl. sub-brands, each >= 3 alnum chars
     competitors: Tuple[str, ...] = ()         # normalised phrases of known other brands
     official_domains: Tuple[str, ...] = ()
-    brand_conf: str = "none"                  # 'mapped' | 'sheet_raw' | 'none'
+    brand_conf: str = "none"                  # 'mapped' | 'learned' | 'sheet_raw' | 'none'
     gtin: Optional[str] = None                # GTIN-14 when the barcode is valid
     gtin_raw: str = ""
     gtin_status: str = "missing"              # 'ok' | 'missing' | 'bad_check_digit' | 'scientific_notation' | 'bad_length' | ...
@@ -61,6 +61,8 @@ class SkuSpec:
     # brand_discovery: how the stores write a sheet brand they spell differently ('Rio Mare' for 'RIO MARIE');
     # its normalised phrase is in match_brands too. Never set for a mapped brand; never an auto-publish.
     discovered_brands: Tuple[str, ...] = ()
+    # learning: sites the reviewers keep approving this brand's images from (UAE-retailer trust, site: queries)
+    learned_domains: Tuple[str, ...] = ()
 
     def __hash__(self) -> int:  # dict field makes the generated hash unusable
         return hash(self.sku_key or (self.raw_name, self.brand_raw))

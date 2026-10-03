@@ -12,7 +12,8 @@ Decisions
                             is in AUTO_PUBLISH_BRANDS, or the list is '*';
                           * the winner is tier 1 with VLM verdict MATCH;
                           * the winner's source is sanctioned;
-                          * spec.brand_conf == 'mapped';
+                          * spec.brand_conf == 'mapped' (never 'learned');
+                          * the page's trust is not only learned from reviews ('reviewed_source');
                           * the winner did not come from a relaxed query;
                           * not a cache hit;
                           * the winner's page barcode does not differ from the sheet's;
@@ -63,9 +64,10 @@ double-check before approving. They never change the winner or the decision.
                                  section ('noon.com/saudi-en/'); never the brand's own site
     barcode_conflict             the page carries a valid barcode that differs from the
                                  sheet's (GTIN_POLICY 'evidence': tier 2 at most)
-    brand_spelling               the brand is confirmed only in the stores' spelling of a
+    brand_spelling:<spelling>    the brand is confirmed only in the stores' spelling of a
                                  sheet brand they write differently (brand_discovery:
-                                 'Rio Mare' for 'RIO MARIE', 'Super Tasty' for 'SUP/T')
+                                 'Rio Mare' for 'RIO MARIE', 'Super Tasty' for 'SUP/T');
+                                 approving the pick teaches it (catalog_match.learning)
 
 Best-resolution copy (resolution_upgrade): once the winner and the decision are fixed, a
 fetched copy of the same picture (pHash distance <= 6, aspect within 10 %) with a larger
@@ -413,7 +415,7 @@ def review_warnings(spec: SkuSpec, rc: RankedCandidate, reading_of: Optional[Ran
     if gtin_conflict(rc):
         out.append("barcode_conflict")
     if _brand_spelling_only(spec, rc):
-        out.append("brand_spelling")
+        out.append(f"brand_spelling:{spec.discovered_brands[0]}")
     return out
 
 
@@ -563,6 +565,9 @@ def route(spec: SkuSpec, ranked: Sequence[RankedCandidate],
         blockers.append("unsanctioned_source")
     if spec.brand_conf != "mapped":
         blockers.append(f"brand_conf_{spec.brand_conf or 'none'}")
+    if (winner.score.matched or {}).get("source_class") == "reviewed_source":
+        # a site trusted only because reviewers keep approving it (catalog_match.learning): review, never auto
+        blockers.append("reviewed_source")
     if winner.candidate.query_id and winner.candidate.query_id in relaxed_ids:
         blockers.append("relaxed_query")
     if cache_hit:

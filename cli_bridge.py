@@ -455,6 +455,7 @@ def _record_review(action, params, row_number, sku_key, image_url=None, reason_c
     رفض صورة نُشرت تلقائياً هو رفض لاختيار المحرك (AUTO_PUBLISH).
     أي خطأ هنا يُسجل في السجل ولا يغير نتيجة الإجراء.
     """
+    acted, first = None, {}
     try:
         stored = local_cache_db.get_curation_candidates(row_number, sku_key=sku_key or None)
         candidates = [c for c in stored if not _is_cache_hit(c)]      # ما اختاره المحرك فقط
@@ -489,6 +490,28 @@ def _record_review(action, params, row_number, sku_key, image_url=None, reason_c
         )
     except Exception:
         logger.exception("تعذر تسجيل قرار المراجع (%s) للصف %s", action, row_number)
+    _learn_brand_spelling(action, params, acted, reason_code, first_brand=(first or {}).get("brand"))
+
+
+def _learn_brand_spelling(action, params, acted, reason_code, first_brand=None):
+    """
+    التعلّم من المراجعة (catalog_match/learning.py): صورة ماركتها مؤكدة فقط بكتابة المتاجر (تنبيه
+    brand_spelling:<الكتابة>) يعلّم اعتمادُها البحثَ هذه الكتابة لماركة الشيت، ورفضها بسبب WRONG_BRAND يُحسب ضدها.
+    التحذيرات من المرشح المحفوظ (أسبابه) أو مما أرسلته شاشة المراجعة (candidate_warnings). لا يُرفع أي خطأ.
+    """
+    try:
+        if action not in ("approved", "rejected") or (action == "rejected" and reason_code != "WRONG_BRAND"):
+            return
+        from catalog_match import learning
+
+        spelling = learning.spelling_from((acted or {}).get("reasons") or []) \
+            or learning.spelling_from(params.get('candidate_warnings'))
+        brand = _text(params, 'brand') or (first_brand or "")
+        if spelling and brand:
+            local_cache_db.record_brand_alias(brand, spelling, approved=(action == "approved"))
+            learning.clear_cache()
+    except Exception:
+        logger.exception("تعذر تسجيل ما تعلّمه البحث من قرار المراجع (%s)", action)
 
 
 def action_select_image(params):

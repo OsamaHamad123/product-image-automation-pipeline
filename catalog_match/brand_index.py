@@ -10,6 +10,10 @@ resolve(brand_raw, name_en, name_ar) -> BrandResolution
      synonym (EN+AR) and sub-brand: 'A/G', 'المراعي', 'Al Marai' all resolve;
   2. otherwise a known synonym or sub-brand phrase at the START of the name;
   3. otherwise conf 'sheet_raw' (brand kept as written) or 'none' (no brand).
+An entry the reviewers taught (catalog_match.learning: a store spelling they approved, the
+sites they keep approving a brand's images from) resolves with conf 'learned': like a mapped
+brand for search and scoring, never an auto-publish (decide.py). Learned entries are listed
+after the sheet's, and a phrase the sheet already maps keeps its sheet entry.
 Nothing is ever guessed from the first word of the name, and there is no fuzzy
 matching (it merges real competitors such as Al Rawabi / Al Rabie).
 
@@ -119,6 +123,8 @@ class BrandEntry:
     sub_brands: Tuple[str, ...] = ()
     competitors: Tuple[str, ...] = ()
     official_domains: Tuple[str, ...] = ()
+    learned: bool = False                    # taught by review decisions, not the Brands Mapping sheet
+    learned_domains: Tuple[str, ...] = ()    # sites the reviewers keep approving this brand's images from
 
     def phrases(self) -> Tuple[str, ...]:
         return tuple(dict.fromkeys((self.canonical,) + self.synonyms + self.sub_brands))
@@ -130,7 +136,8 @@ class BrandResolution:
     match_brands: Tuple[str, ...] = ()
     competitors: Tuple[str, ...] = ()
     official_domains: Tuple[str, ...] = ()
-    conf: str = "none"                       # 'mapped' | 'sheet_raw' | 'none'
+    conf: str = "none"                       # 'mapped' | 'learned' | 'sheet_raw' | 'none'
+    learned_domains: Tuple[str, ...] = ()
     brand_ar: str = ""                       # first Arabic spelling in the mapping, if any
     family: Tuple[str, ...] = field(default=())   # every normalised phrase of the resolved brand
     required: Tuple[str, ...] = ()           # sub-brand(s) the SKU names: evidence must show one for tier 1
@@ -196,6 +203,8 @@ class BrandIndex:
                 sub_brands=tuple(_as_list(row.get("sub_brands"))),
                 competitors=tuple(_as_list(row.get("excluded_competitors"))),
                 official_domains=tuple(d for d in (_clean_domain(x) for x in _as_list(row.get("official_domains"))) if d),
+                learned=bool(row.get("learned")),
+                learned_domains=tuple(d for d in (_clean_domain(x) for x in _as_list(row.get("learned_domains"))) if d),
             ))
         return cls(entries)
 
@@ -287,7 +296,8 @@ class BrandIndex:
             match_brands=match_brands,
             competitors=comp,
             official_domains=entry.official_domains,
-            conf="mapped",
+            conf="learned" if entry.learned else "mapped",
+            learned_domains=entry.learned_domains,
             brand_ar=brand_ar,
             family=family,
             required=tuple(required),
