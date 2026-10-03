@@ -194,7 +194,7 @@ class ApiController extends Controller
                 $batContent .= "cd /d \"" . $basePath . "\"\r\n";
                 $batContent .= "\"" . $pythonPath . "\" \"" . $scriptPath . "\" --enqueue > \"" . $logPath . "\" 2>&1\r\n";
                 $batContent .= "if %errorlevel% equ 0 (\r\n";
-                $batContent .= "    \"" . $pythonPath . "\" -u \"" . $scriptPath . "\" --worker >> \"" . $logPath . "\" 2>&1\r\n";
+                $batContent .= "    \"" . $pythonPath . "\" -u \"" . $scriptPath . "\" --worker --trigger=dashboard >> \"" . $logPath . "\" 2>&1\r\n";
                 $batContent .= ")\r\n";
                 
                 $batFile = $tempDir . DIRECTORY_SEPARATOR . 'run_pipeline.bat';
@@ -214,7 +214,7 @@ class ApiController extends Controller
                 }
             } else {
                 // Linux background execution
-                $cmd = "cd \"" . $basePath . "\" && export PYTHONUTF8=1 PYTHONIOENCODING=utf-8 && \"" . $pythonPath . "\" \"" . $scriptPath . "\" --enqueue > \"" . $logPath . "\" 2>&1 && \"" . $pythonPath . "\" -u \"" . $scriptPath . "\" --worker >> \"" . $logPath . "\" 2>&1";
+                $cmd = "cd \"" . $basePath . "\" && export PYTHONUTF8=1 PYTHONIOENCODING=utf-8 && \"" . $pythonPath . "\" \"" . $scriptPath . "\" --enqueue > \"" . $logPath . "\" 2>&1 && \"" . $pythonPath . "\" -u \"" . $scriptPath . "\" --worker --trigger=dashboard >> \"" . $logPath . "\" 2>&1";
                 $linuxCmd = "nohup sh -c " . escapeshellarg($cmd) . " > /dev/null 2>&1 &";
                 shell_exec($linuxCmd);
             }

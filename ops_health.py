@@ -328,8 +328,12 @@ def outage_notice(since_seconds, worker_id=None):
     نص automation_state.notice لانقطاع ظهر في عمليات بحث العامل worker_id خلال since_seconds الأخيرة،
     مثل 'SERPER_CREDIT: رصيد Serper انتهى أو المفتاح مرفوض'، أو '' إن لم يوجد. أخطاء قاعدة البيانات تُرفع.
     """
-    report = summarize(load_rows(since_seconds=max(1, int(since_seconds)), worker_id=worker_id))
-    return " | ".join(f"{a['code']}: {a['message']}" for a in report["alerts"])
+    return notice_from_report(summarize(load_rows(since_seconds=max(1, int(since_seconds)), worker_id=worker_id)))
+
+
+def notice_from_report(report):
+    """نص التنبيه من ملخص summarize: 'CODE: الرسالة' لكل تنبيه مفصولة بـ ' | '، أو ''."""
+    return " | ".join(f"{a['code']}: {a['message']}" for a in (report or {}).get("alerts") or [])
 
 
 # ---------------------------------------------------------------------------

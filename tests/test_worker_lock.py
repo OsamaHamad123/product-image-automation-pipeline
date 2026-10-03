@@ -215,6 +215,30 @@ def test_write_read_and_release_only_our_own_lock(main_mod):
     assert os.path.exists(main_mod.LOCK_FILE)
 
 
+def test_the_worker_takes_over_a_stale_lock_and_writes_the_json_lock(main_mod, monkeypatch):
+    """run_worker_mode over a stale lock: it runs (no 'already running' exit) and holds a JSON lock while it works."""
+    import google_sheets
+    import local_cache_db
+
+    _write(main_mod.LOCK_FILE, _json_lock(4242, host="OTHER-PC"))
+    seen = {}
+    monkeypatch.setattr(main_mod, "load_run_config", lambda: None)
+    monkeypatch.setattr(local_cache_db, "resume_automation", lambda: True)
+    monkeypatch.setattr(local_cache_db, "get_automation_state", lambda: {"stop_requested": 0, "run_id": None})
+    monkeypatch.setattr(local_cache_db, "update_automation_state", lambda *a, **k: True)
+    monkeypatch.setattr(main_mod, "check_verifier", lambda: "")
+
+    def no_sheets():
+        seen["lock"] = main_mod.read_lock(main_mod.LOCK_FILE)
+        return None
+
+    monkeypatch.setattr(google_sheets, "get_sheets_client", no_sheets)
+    main_mod.run_worker_mode(report=False)
+    assert seen["lock"]["kind"] == "json" and seen["lock"]["pid"] == os.getpid()
+    assert main_mod.LAST_WORKER["stop_reason"] == "sheets_unavailable"
+    assert not os.path.exists(main_mod.LOCK_FILE)
+
+
 # ---------------------------------------------------------------------------
 # Dashboard: ApiController::pipelineProcess follows the same rules
 # ---------------------------------------------------------------------------

@@ -566,6 +566,12 @@ def process_single_product(prod, worksheet, link_column_index, brand_mappings=No
 
 LOCK_FILE = "temp/pipeline.lock"
 
+# نتيجة آخر عامل في هذه العملية (يقرؤها التشغيل الليلي و`python main.py --worker` لرمز الخروج):
+# {stop_reason, run_id, worker_id, started_ts, ended_ts, notice, health}. stop_reason None = الطابور انتهى.
+LAST_WORKER = {}
+# سبب فشل آخر إدراج في هذه العملية (_enqueue_failed): {reason, message}
+LAST_ENQUEUE = {}
+
 
 def _release_starting_lock(lock_file=LOCK_FILE):
     """يحذف قفل لوحة التحكم 'STARTING' (مرحلة الإدراج) فقط؛ قفل يحمل PID يحرره صاحبه (العامل أو التشغيل الليلي)."""
@@ -578,11 +584,14 @@ def _release_starting_lock(lock_file=LOCK_FILE):
         pass
 
 
-def _enqueue_failed(message):
+def _enqueue_failed(message, reason="enqueue_failed"):
     """
     فشل الإدراج: رسالة عربية في automation_state.notice بحالة 'error' تعرضها اللوحة فوراً، وتحرير قفل 'STARTING'
     فوراً (لا تبقى اللوحة على «قيد التشغيل» وترفض تشغيلاً جديداً لخمس دقائق). العامل لا يبدأ (رمز الخروج 1).
+    reason (في LAST_ENQUEUE للتشغيل الليلي): sheets_unavailable / sheet_not_found / db_unavailable تُعاد محاولتها
+    ليلاً، وenqueue_failed / sheet_config خطأ إعداد.
     """
+    LAST_ENQUEUE.update(reason=reason, message=message)
     print(f"[Enqueue Error] {message}")
     # التشغيل انتهى هنا: طلب إيقاف سُجل أثناء الإدراج يُلغى، وإلا أوقف عاملاً يُشغَّل لاحقاً يدوياً قبل أي منتج
     local_cache_db.update_automation_state(status="error", current_product="", notice=f"ENQUEUE_FAILED: {message}",
@@ -609,11 +618,11 @@ def run_enqueue_mode():
         sheets_client = google_sheets.get_sheets_client()
         if not sheets_client:
             _enqueue_failed("تعذر الاتصال بـ Google Sheets. تحقق من ملف بيانات الاعتماد والاتصال بالإنترنت. "
-                            "لم يتغير الطابور.")
+                            "لم يتغير الطابور.", reason="sheets_unavailable")
         worksheet = google_sheets.open_worksheet(sheets_client, config.SPREADSHEET_NAME_OR_URL)
         if not worksheet:
             _enqueue_failed(f"لم يُعثر على الشيت «{config.SPREADSHEET_NAME_OR_URL}». تحقق من الرابط واسم ورقة "
-                            "العمل ومن مشاركة الشيت مع حساب الخدمة. لم يتغير الطابور.")
+                            "العمل ومن مشاركة الشيت مع حساب الخدمة. لم يتغير الطابور.", reason="sheet_not_found")
         products, _ = google_sheets.get_products(worksheet)
         products = products or []
         if not products:
@@ -624,7 +633,7 @@ def run_enqueue_mode():
     except SystemExit:
         raise
     except Exception as e:
-        _enqueue_failed(f"تعذر قراءة الشيت: {e}. لم يتغير الطابور.")
+        _enqueue_failed(f"تعذر قراءة الشيت: {e}. لم يتغير الطابور.", reason=_sheet_failure_reason(e))
 
     reprocess = bool(getattr(config, "FORCE_OVERWRITE_IMAGES", False))
     brand_filter = (config.BRAND_FILTER or "").lower()
@@ -657,7 +666,8 @@ def run_enqueue_mode():
         print(f"[Enqueue] {enqueued} صف في الطابور؛ {skipped_final} صف تم تخطيه لأن رابطه نهائي.")
         local_cache_db.get_queue_statistics()
     except Exception as e:
-        _enqueue_failed(f"تعذر إضافة الصفوف إلى الطابور: {e}. أُضيف {enqueued} صف قبل الخطأ ولم يُحذف أي صف.")
+        _enqueue_failed(f"تعذر إضافة الصفوف إلى الطابور: {e}. أُضيف {enqueued} صف قبل الخطأ ولم يُحذف أي صف.",
+                        reason="enqueue_failed" if local_cache_db.db_available() else "db_unavailable")
 
     run_id = local_cache_db.new_run_id()
     run_rows = local_cache_db.begin_run(run_id)
@@ -698,16 +708,35 @@ def check_verifier():
         return f"VERIFIER_CHECK_FAILED: {type(e).__name__}"
 
 
-def _outage_notice(worker_id, since_seconds, base=None):
+def _run_health(worker_id, since_seconds):
+    """
+    ملخص ops_health لعمليات بحث هذا العامل (قراءة واحدة عند الإنهاء): تنبيهات الانقطاع للوحة، والتكلفة التقديرية
+    لتقرير التشغيل قبل أن يكتب تشغيل لاحق فوق trace الصفوف. None بلا عامل أو عند فشل القراءة (لا يوقف الإنهاء).
+    """
+    if not worker_id:
+        return None
+    try:
+        import ops_health
+        return ops_health.summarize(ops_health.load_rows(since_seconds=max(1, int(since_seconds)), worker_id=worker_id))
+    except Exception as e:
+        print(f"تنبيه: تعذر فحص انقطاع المزودين: {e}")
+        return None
+
+
+def _outage_notice(worker_id, since_seconds, base=None, health=None):
     """
     تنبيه اللوحة عند انتهاء العامل: base + سبب انقطاع ظهر في عمليات بحث هذا العامل (رصيد Serper انتهى /
     Gemini لا يستجيب، من ops_health). None عندما لا يوجد أيهما فيبقى التنبيه الحالي. فشل الفحص لا يوقف الإنهاء.
+    health: ملخص _run_health المقروء مسبقاً (لا قراءة ثانية).
     """
     outage = ""
     if worker_id:
         try:
             import ops_health
-            outage = ops_health.outage_notice(since_seconds, worker_id=worker_id)
+            if isinstance(health, dict):
+                outage = ops_health.notice_from_report(health)
+            else:
+                outage = ops_health.outage_notice(since_seconds, worker_id=worker_id)
         except Exception as e:
             print(f"تنبيه: تعذر فحص انقطاع المزودين: {e}")
     return " | ".join(n for n in (base, outage) if n) or None
@@ -972,23 +1001,49 @@ def release_own_lock(lock_file=LOCK_FILE):
         _remove_lock_if_unchanged(lock_file, lock["raw"])
 
 
-def run_worker_mode():
+WORKER_TRIGGERS = ("dashboard", "nightly", "manual")
+DB_UNAVAILABLE_NOTICE = "DB_UNAVAILABLE: تعذر الوصول إلى قاعدة البيانات فتوقف العامل؛ بقيت الصفوف المتبقية في الانتظار"
+
+
+def _sheet_failure_reason(error):
+    """إعداد الشيت (تبويب أو عمود غير موجود) أم تعذر الوصول إليه (قد يزول وحده: يعيده التشغيل الليلي)."""
+    config_errors = tuple(c for c in (getattr(google_sheets, "SheetConfigError", None),
+                                      getattr(google_sheets, "SheetSchemaError", None)) if isinstance(c, type))
+    return "sheet_config" if config_errors and isinstance(error, config_errors) else "sheets_unavailable"
+
+
+def _cli_trigger(argv):
+    """--trigger=dashboard|nightly|manual من سطر الأوامر؛ افتراضياً manual (تشغيل يدوي)."""
+    for i, arg in enumerate(argv):
+        value = arg.split("=", 1)[1] if arg.startswith("--trigger=") else (
+            argv[i + 1] if arg == "--trigger" and i + 1 < len(argv) else None)
+        if value and value.strip().lower() in WORKER_TRIGGERS:
+            return value.strip().lower()
+    return "manual"
+
+
+def run_worker_mode(trigger="manual", report=True):
     """
     عامل الخلفية: يسحب المهام ذرياً ويعالجها بالتوازي (3 خيوط).
     يخرج فقط عندما ينجح COUNT(*) للمهام المفتوحة ويعيد 0، أو عند توقف المزودين (5 مهام متتالية PROVIDER_DOWN)،
     أو عند طلب إيقاف من لوحة التحكم (stop_requested): لا يسحب مهمة جديدة، ينهي المنتجات الجارية، ثم يعيد
     local_cache_db.stop_run الصفوف العالقة للانتظار. طلب إيقاف سُجل أثناء الإدراج يُنفذ قبل معالجة أي منتج.
+    قاعدة بيانات لا ترد عند البدء: يتوقف فوراً (db_unavailable) بدل اعتبار التشغيل منتهياً.
+    النتيجة في LAST_WORKER؛ report=True يكتب تقرير التشغيل (run_report: سجل التشغيلات، last_report.json، Telegram).
+    التشغيل الليلي يمرر report=False ويكتب تقريراً واحداً لليلة بعد إعادة المحاولات.
     """
     from concurrent.futures import ThreadPoolExecutor
     import threading
 
+    LAST_WORKER.clear()
     lock_file = LOCK_FILE
     os.makedirs("temp", exist_ok=True)
     if _another_worker_running(lock_file):
+        LAST_WORKER.update(stop_reason="another_worker")
         print("[Worker] معالج الخلفية يعمل بالفعل. خروج.")
         sys.exit(0)
     try:
-        write_lock("worker", lock_file)
+        write_lock("nightly" if trigger == "nightly" else "worker", lock_file)
     except Exception:
         pass
 
@@ -999,10 +1054,13 @@ def run_worker_mode():
     load_run_config()
     local_cache_db.resume_automation()   # علم الإيقاف المؤقت القديم لا يمنع تشغيلاً جديداً
     started = time.monotonic()
+    started_ts = time.time()
     state = local_cache_db.get_automation_state()
     run_id = state.get("run_id") or None
     # طلب إيقاف وصل أثناء الإدراج (قبل وجود العامل): لا يُعالج أي منتج
     stop_reason = "stopped" if state.get("stop_requested") == 1 else None
+    if state.get("status") == "db_unavailable":
+        stop_reason = "db_unavailable"
     notice = "" if stop_reason else check_verifier()
     if notice:
         print(f"[Worker] {notice}")
@@ -1010,6 +1068,9 @@ def run_worker_mode():
     queue_started = False
     worker_id = None
     try:
+        if stop_reason == "db_unavailable":
+            print(f"[Worker] قاعدة البيانات لا ترد ({state.get('db_error') or '-'})؛ لن يُعالج أي منتج.")
+            return
         if stop_reason:
             print("[Worker] طلب إيقاف من لوحة التحكم سُجل قبل بدء العامل؛ لن يُعالج أي منتج.")
             return
@@ -1021,11 +1082,14 @@ def run_worker_mode():
         try:
             worksheet = google_sheets.open_worksheet(sheets_client, config.SPREADSHEET_NAME_OR_URL)
             if not worksheet:
+                # فتح الملف نفسه فشل: إعداد خاطئ، أو انقطاع مؤقت لا تميزه open_worksheet (يعيده التشغيل الليلي)
+                stop_reason = "sheet_not_found"
                 raise google_sheets.SheetConfigError(f"sheet not found: {config.SPREADSHEET_NAME_OR_URL}")
             link_column_index = google_sheets.find_link_column(worksheet)
         except Exception as e:
-            stop_reason = "sheet_config"
-            local_cache_db.update_automation_state(status="error", notice=f"SHEET_CONFIG: {e}")
+            stop_reason = stop_reason or _sheet_failure_reason(e)
+            code = "SHEETS_UNAVAILABLE" if stop_reason == "sheets_unavailable" else "SHEET_CONFIG"
+            local_cache_db.update_automation_state(status="error", notice=f"{code}: {e}")
             print(f"[Worker] {e}")
             return
         brand_mappings = google_sheets.get_brand_mappings(sheets_client, config.SPREADSHEET_NAME_OR_URL)
@@ -1093,26 +1157,43 @@ def run_worker_mode():
                     continue
                 time.sleep(1)
     finally:
+        # سبب الانقطاع (رصيد Serper / Gemini) من صفوف هذا العامل فقط (worker_id)؛ None يترك التنبيه كما هو.
+        # نهاية التشغيل تلغي طلب إيقاف وصل مع نهايته (stop_requested=0) كي لا يوقف عاملاً لاحقاً قبل أي منتج.
+        run_seconds = time.monotonic() - started + 60
+        health = _run_health(worker_id, run_seconds)
+        final_notice = None
         try:
-            # سبب الانقطاع (رصيد Serper / Gemini) من صفوف هذا العامل فقط (worker_id)؛ None يترك التنبيه كما هو.
-            # نهاية التشغيل تلغي طلب إيقاف وصل مع نهايته (stop_requested=0) كي لا يوقف عاملاً لاحقاً قبل أي منتج.
-            run_seconds = time.monotonic() - started + 60
             if stop_reason == "stopped":
                 # يعيد أي صف بقي 'processing' إلى الانتظار، ويلغي طلب الإيقاف، ويضبط الحالة (مراجعة أو خامل)
                 local_cache_db.stop_run(worker_active=False)
             elif stop_reason == "provider_down":
-                local_cache_db.update_automation_state(
-                    status="provider_down", current_product="", stop_requested=0,
-                    notice=_outage_notice(worker_id, run_seconds,
-                                          "PROVIDER_DOWN: search providers unavailable; remaining rows stay pending"))
-            elif stop_reason in ("sheets_unavailable", "sheet_config"):
+                final_notice = _outage_notice(worker_id, run_seconds,
+                                              "PROVIDER_DOWN: search providers unavailable; remaining rows stay pending",
+                                              health=health)
+                local_cache_db.update_automation_state(status="provider_down", current_product="", stop_requested=0,
+                                                       notice=final_notice)
+            elif stop_reason == "db_unavailable":
+                # غالباً يفشل هذا التحديث أيضاً؛ التقرير (run_report) وملف last_report.json يقولان ذلك صراحة
+                final_notice = DB_UNAVAILABLE_NOTICE
+                local_cache_db.update_automation_state(status="error", current_product="", stop_requested=0,
+                                                       notice=final_notice)
+            elif stop_reason in ("sheets_unavailable", "sheet_config", "sheet_not_found"):
                 pass
-            elif local_cache_db.get_ready_for_review_count() > 0:
-                local_cache_db.update_automation_state(status="curation_pending", current_product="", stop_requested=0,
-                                                       notice=_outage_notice(worker_id, run_seconds, notice))
             else:
-                local_cache_db.update_automation_state(status="idle", current_product="", stop_requested=0,
-                                                       notice=_outage_notice(worker_id, run_seconds, notice))
+                # الطابور انتهى، أو سبب توقف آخر (مثل حد الميزانية) يظهر نصه كما هو في التنبيه والتقرير
+                base = notice
+                if stop_reason:
+                    base = " | ".join(n for n in (
+                        f"{str(stop_reason).upper()}: توقف العامل قبل نهاية الطابور ({stop_reason})؛ "
+                        "بقيت الصفوف المتبقية في الانتظار", notice) if n)
+                final_notice = _outage_notice(worker_id, run_seconds, base, health=health)
+                ready = local_cache_db.get_ready_for_review_count()
+                if ready is None:
+                    # خطأ قاعدة البيانات ليس «لا شيء للمراجعة»: الحالة تبقى، ولوحة التحكم تضبطها عند عودة القاعدة
+                    print("[Worker] تعذر قراءة عدد الصفوف الجاهزة للمراجعة؛ لم تُكتب الحالة النهائية.")
+                else:
+                    local_cache_db.update_automation_state(status="curation_pending" if ready > 0 else "idle",
+                                                           current_product="", stop_requested=0, notice=final_notice)
         except Exception as e:
             print(f"[Worker] تعذر تحديث الحالة النهائية: {e}")
         if queue_started:
@@ -1123,6 +1204,14 @@ def run_worker_mode():
                 os.remove("temp/batch_progress.json")
         except Exception:
             pass
+        LAST_WORKER.update(stop_reason=stop_reason, run_id=run_id, worker_id=worker_id, started_ts=started_ts,
+                           ended_ts=time.time(), notice=final_notice or notice or None, health=health)
+        if report:
+            try:
+                import run_report
+                run_report.report_worker_run(dict(LAST_WORKER), trigger=trigger)
+            except Exception as e:
+                print(f"[Worker] تعذر كتابة تقرير التشغيل: {e}")
 
 
 def run_automation_pipeline():
@@ -1183,6 +1272,8 @@ if __name__ == "__main__":
     if "--enqueue" in sys.argv:
         run_enqueue_mode()
     elif "--worker" in sys.argv:
-        run_worker_mode()
+        run_worker_mode(trigger=_cli_trigger(sys.argv))
+        import run_report
+        sys.exit(run_report.exit_code(LAST_WORKER.get("stop_reason")))
     else:
         run_automation_pipeline()

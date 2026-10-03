@@ -277,12 +277,23 @@ def log_error_to_laravel(error_message, barcode=None, product_name=None, brand=N
         except Exception as e:
             logger.warning("فشل الكتابة في ملف سجلات لارافيل: %s", e)
 
+def _telegram_credentials():
+    return (os.getenv("TELEGRAM_BOT_TOKEN", TELEGRAM_BOT_TOKEN) or "").strip(), \
+        (os.getenv("TELEGRAM_CHAT_ID", TELEGRAM_CHAT_ID) or "").strip()
+
+
+def telegram_configured():
+    """هل ضُبط بوت Telegram (TELEGRAM_BOT_TOKEN و TELEGRAM_CHAT_ID)؟ تقرير كل تشغيل يُرسل فقط عندها."""
+    token, chat_id = _telegram_credentials()
+    return bool(token and chat_id)
+
+
 def send_telegram_alert(message):
     """
-    إرسال إشعار فوري عبر بوت Telegram للمشرف
+    إرسال إشعار فوري عبر بوت Telegram للمشرف. تعيد True فقط إذا قبل Telegram الرسالة (HTTP 2xx)؛
+    لا يُطبع المفتاح أبداً (الرابط يحتويه).
     """
-    token = os.getenv("TELEGRAM_BOT_TOKEN", TELEGRAM_BOT_TOKEN)
-    chat_id = os.getenv("TELEGRAM_CHAT_ID", TELEGRAM_CHAT_ID)
+    token, chat_id = _telegram_credentials()
     if not token or not chat_id:
         return False
     url = f"https://api.telegram.org/bot{token}/sendMessage"
@@ -293,9 +304,13 @@ def send_telegram_alert(message):
     }
     try:
         import requests
-        requests.post(url, json=payload, timeout=5)
-        return True
-    except Exception:
+        response = requests.post(url, json=payload, timeout=10)
+        if 200 <= int(getattr(response, "status_code", 0) or 0) < 300:
+            return True
+        logger.warning("Telegram رفض الرسالة (HTTP %s).", getattr(response, "status_code", "?"))
+        return False
+    except Exception as e:
+        logger.warning("تعذر إرسال رسالة Telegram (%s).", type(e).__name__)
         return False
 
 def log_and_fail(barcode, product_name, brand, error_message):

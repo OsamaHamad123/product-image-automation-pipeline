@@ -1,7 +1,8 @@
 """Nightly run (scripts/run_nightly.py) and its Windows Task Scheduler script (scripts/schedule_nightly.ps1).
 
 The runner is exercised offline with main.py's entry points replaced by recorders; the PowerShell script is
-checked statically (and parsed when PowerShell is installed).
+checked statically (and parsed when PowerShell is installed). The retry waits (15 and 60 minutes after an outage)
+go through an injected sleeper, never a real sleep.
 """
 
 import datetime
@@ -32,14 +33,21 @@ def _load_runner():
 
 @pytest.fixture
 def nightly(offline, monkeypatch, tmp_path):
-    """The runner in a scratch working directory, with main's entry points and state reads recorded."""
+    """The runner in a scratch working directory, with main's entry points and state reads recorded.
+
+    rec["workers"]: what each worker call leaves in main.LAST_WORKER (consumed in order; an empty list leaves
+    LAST_WORKER empty, and the runner then reads the automation state rec["state"]). runner.run() sleeps through
+    rec["sleeps"] and keeps the night's report in rec["reports"].
+    """
     import config
     import local_cache_db
     import main
+    import run_report
 
     monkeypatch.chdir(tmp_path)
     runner = _load_runner()
-    rec = {"calls": [], "state": {"status": "curation_pending", "notice": ""}}
+    rec = {"calls": [], "state": {"status": "curation_pending", "notice": ""}, "workers": [], "sleeps": [],
+           "reports": [], "prepared": True, "db": True, "telegram": []}
     # restored after the test: pin_nightly_settings replaces main.load_run_config
     monkeypatch.setattr(main, "load_run_config", main.load_run_config)
     for name in ("ROW_FILTER", "BRAND_FILTER", "FORCE_OVERWRITE_IMAGES", "AUTO_PUBLISH_ENABLED", "AUTO_PUBLISH_BRANDS",
@@ -47,6 +55,22 @@ def nightly(offline, monkeypatch, tmp_path):
         monkeypatch.setattr(config, name, getattr(config, name, None))
     monkeypatch.setattr(main, "_another_worker_running", lambda lock: False)
     monkeypatch.setattr(local_cache_db, "get_automation_state", lambda: dict(rec["state"]))
+    monkeypatch.setattr(local_cache_db, "prepare_run", lambda: rec["prepared"])
+    monkeypatch.setattr(local_cache_db, "db_available", lambda: rec["db"])
+    monkeypatch.setattr(local_cache_db, "run_outcome_counts", lambda **kw: {
+        "enqueued": 3, "searched": 3, "auto_published": 0, "ready_for_review": 2, "not_found": 1, "failed": 0,
+        "provider_down": 0, "pending_left": 0})
+    monkeypatch.setattr(local_cache_db, "save_run_history", lambda entry: rec.setdefault("history", []).append(entry) or 7)
+    monkeypatch.setattr(run_report, "worker_health", lambda worker_id, since: None)
+    publish = run_report.publish
+
+    def recording_publish(report, **kw):
+        rec["reports"].append(report)
+        return publish(report, **kw)
+
+    monkeypatch.setattr(run_report, "publish", recording_publish)
+    real_run = runner.run
+    monkeypatch.setattr(runner, "run", lambda **kw: real_run(**dict({"sleep": rec["sleeps"].append}, **kw)))
 
     def fake_enqueue():
         main.load_run_config()
@@ -54,9 +78,11 @@ def nightly(offline, monkeypatch, tmp_path):
             lock = json.load(fh)
         rec["calls"].append(("enqueue", lock["pid"], lock["role"], config.ROW_FILTER, config.FORCE_OVERWRITE_IMAGES))
 
-    def fake_worker():
+    def fake_worker(trigger="manual", report=True):
         main.load_run_config()
-        rec["calls"].append(("worker", config.AUTO_PUBLISH_ENABLED))
+        rec["calls"].append(("worker", config.AUTO_PUBLISH_ENABLED, trigger, report))
+        if rec["workers"]:
+            main.LAST_WORKER.update(rec["workers"].pop(0))
         os.remove(runner.LOCK_FILE)           # the real worker removes its lock in its finally block
 
     monkeypatch.setattr(main, "run_enqueue_mode", fake_enqueue)
@@ -75,6 +101,11 @@ def _owner_settings(monkeypatch, main, config):
         config.AUTO_PUBLISH_ENABLED = True
 
     monkeypatch.setattr(config, "load_db_config", load_db_config)
+
+
+def _last_report():
+    with open(os.path.join("temp", "nightly", "last_report.json"), encoding="utf-8") as fh:
+        return json.load(fh)
 
 
 def test_pinned_settings_win_over_db_settings_and_the_last_run_config(nightly, monkeypatch):
@@ -98,15 +129,106 @@ def test_run_enqueues_then_works_the_queue_with_auto_publish_off(nightly, monkey
     _owner_settings(monkeypatch, main, config)
 
     assert runner.run() == 0
-    assert rec["calls"] == [("enqueue", os.getpid(), "nightly", "", False), ("worker", False)]
+    # the lock is JSON with our PID during the enqueue; the worker runs for the nightly and leaves the report to us
+    assert rec["calls"] == [("enqueue", os.getpid(), "nightly", "", False), ("worker", False, "nightly", False)]
     assert not os.path.exists(runner.LOCK_FILE)
+    assert rec["sleeps"] == [] and len(rec["reports"]) == 1
 
 
-@pytest.mark.parametrize("status, code", [("idle", 0), ("curation_pending", 0), ("provider_down", 1), ("error", 1)])
-def test_exit_code_follows_the_worker_state(nightly, status, code):
+@pytest.mark.parametrize("status, notice, code", [
+    ("idle", "", 0),
+    ("curation_pending", "", 0),
+    ("provider_down", "PROVIDER_DOWN: search providers unavailable", 2),
+    ("db_unavailable", "", 2),
+    ("error", "SHEET_CONFIG: sheet not found: Products", 1),
+])
+def test_exit_code_follows_the_worker_state(nightly, status, notice, code):
+    """A worker that left no LAST_WORKER (older main.py): the automation state decides. 'idle' from a database that
+    did not answer used to count as a finished night (exit 0); get_automation_state now says 'db_unavailable'."""
     runner, _, _, rec = nightly
-    rec["state"] = {"status": status, "notice": "PROVIDER_DOWN: search providers unavailable"}
+    rec["state"] = {"status": status, "notice": notice}
     assert runner.run() == code
+    assert rec["reports"][-1]["exit_code"] == code
+
+
+@pytest.mark.parametrize("stop_reason, outcome, code", [
+    (None, "done", 0),
+    ("stopped", "stopped", 3),
+    ("BUDGET_REACHED", "stopped", 3),          # a stop reason this runner does not know: shown as it is
+    ("SERPER_CREDIT", "stopped", 3),
+    ("sheet_config", "failed", 1),
+])
+def test_exit_code_follows_the_worker_stop_reason(nightly, stop_reason, outcome, code):
+    runner, _, _, rec = nightly
+    rec["workers"] = [{"stop_reason": stop_reason, "run_id": "run-1", "worker_id": "host:1"}]
+    assert runner.run() == code
+    report = rec["reports"][-1]
+    assert (report["outcome"], report["exit_code"], report["stop_reason"]) == (outcome, code, stop_reason)
+    assert rec["sleeps"] == [], "only an outage is retried"
+    if stop_reason == "BUDGET_REACHED":
+        assert report["reason_text"] == "BUDGET_REACHED"
+    assert _last_report()["exit_code"] == code
+
+
+def test_an_outage_retries_the_whole_run_after_15_and_60_minutes(nightly):
+    runner, _, _, rec = nightly
+    rec["workers"] = [{"stop_reason": "db_unavailable", "run_id": "run-1"},
+                      {"stop_reason": "provider_down", "run_id": "run-2"},
+                      {"stop_reason": None, "run_id": "run-3"}]
+    assert runner.run() == 0
+    assert rec["sleeps"] == [15 * 60, 60 * 60]
+    assert [c[0] for c in rec["calls"]] == ["enqueue", "worker"] * 3
+    report = rec["reports"][-1]
+    assert report["attempts"] == 3 and report["attempt_reasons"] == ["db_unavailable", "provider_down"]
+    assert report["run_ids"] == ["run-1", "run-2", "run-3"] and report["outcome"] == "done"
+
+
+def test_an_outage_that_outlasts_the_retries_is_reported_as_a_failure(nightly, monkeypatch):
+    runner, main, _, rec = nightly
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123:test")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "42")
+    import config
+    monkeypatch.setattr(config, "send_telegram_alert", lambda text: rec["telegram"].append(text) or True)
+    rec["workers"] = [{"stop_reason": "provider_down", "run_id": f"run-{i}"} for i in range(3)]
+
+    assert runner.run() == 2
+    assert rec["sleeps"] == [15 * 60, 60 * 60] and len(rec["calls"]) == 6
+    report = _last_report()
+    assert report["outcome"] == "outage" and report["exit_code"] == 2 and report["attempts"] == 3
+    (message,) = rec["telegram"]                      # one message for the night, not one per attempt
+    assert "انقطاع" in message and "محركات البحث غير متاحة" in message and "المحاولات: 3" in message
+
+
+def test_a_database_that_does_not_answer_is_never_a_finished_night(nightly):
+    """The audit's case: with MariaDB down, get_automation_state() said 'idle' and the nightly exited 0."""
+    runner, _, _, rec = nightly
+    rec["prepared"], rec["db"] = False, False
+    assert runner.run() == 2
+    assert rec["calls"] == [], "no attempt reads the sheet while the database is down"
+    assert rec["sleeps"] == [15 * 60, 60 * 60]
+    report = _last_report()
+    assert report["stop_reason"] == "db_unavailable" and report["outcome"] == "outage"
+    assert report["counts"] is None and "قاعدة البيانات لا ترد" in report["reason_text"]
+
+
+@pytest.mark.parametrize("reason, retried, code", [
+    ("sheets_unavailable", True, 2),
+    ("sheet_not_found", True, 2),
+    ("db_unavailable", True, 2),
+    ("enqueue_failed", False, 1),
+])
+def test_an_enqueue_failure_is_retried_only_for_an_outage(nightly, monkeypatch, reason, retried, code):
+    runner, main, _, rec = nightly
+
+    def broken_enqueue():
+        main.LAST_ENQUEUE.update(reason=reason, message="تعذر الاتصال")
+        raise SystemExit(1)
+
+    monkeypatch.setattr(main, "run_enqueue_mode", broken_enqueue)
+    assert runner.run() == code
+    assert rec["sleeps"] == ([15 * 60, 60 * 60] if retried else [])
+    assert not any(c[0] == "worker" for c in rec["calls"]) and not os.path.exists(runner.LOCK_FILE)
+    assert rec["reports"][-1]["stop_reason"] == reason
 
 
 def test_run_is_skipped_while_a_worker_holds_the_lock(nightly, monkeypatch):
@@ -116,12 +238,29 @@ def test_run_is_skipped_while_a_worker_holds_the_lock(nightly, monkeypatch):
         fh.write("STARTING")                  # the dashboard is enqueueing right now
     assert runner.run() == 0
     assert rec["calls"] == [] and open(runner.LOCK_FILE).read() == "STARTING"
+    assert rec["reports"][-1]["outcome"] == "skipped"
 
     with open(runner.LOCK_FILE, "w") as fh:
         fh.write("4242")
     monkeypatch.setattr(main, "_another_worker_running", lambda lock: True)
     assert runner.run() == 0
     assert rec["calls"] == [] and open(runner.LOCK_FILE).read() == "4242"
+
+
+def test_a_worker_started_during_the_wait_ends_the_night(nightly, monkeypatch):
+    runner, main, _, rec = nightly
+    rec["workers"] = [{"stop_reason": "provider_down", "run_id": "run-1"}]
+
+    def sleep(seconds):
+        rec["sleeps"].append(seconds)
+        with open(runner.LOCK_FILE, "w") as fh:                                   # the owner pressed run
+            fh.write(json.dumps({"pid": 4242, "role": "worker"}))
+        monkeypatch.setattr(main, "_another_worker_running", lambda lock: True)
+
+    assert runner.run(sleep=sleep) == 0
+    assert rec["sleeps"] == [15 * 60] and [c[0] for c in rec["calls"]] == ["enqueue", "worker"]
+    report = rec["reports"][-1]
+    assert report["outcome"] == "skipped" and report["attempt_reasons"] == ["provider_down"]
 
 
 def test_stale_starting_lock_does_not_block_the_run(nightly):
@@ -139,7 +278,7 @@ def test_failed_enqueue_does_not_start_the_worker(nightly, monkeypatch):
     runner, main, _, rec = nightly
 
     def broken_enqueue():
-        raise SystemExit(1)                   # e.g. the sheet could not be opened
+        raise SystemExit(1)                   # e.g. the row filter is invalid
 
     monkeypatch.setattr(main, "run_enqueue_mode", broken_enqueue)
     assert runner.run() == 1
@@ -155,7 +294,21 @@ def test_empty_sheet_still_works_the_leftover_queue(nightly, monkeypatch):
 
     monkeypatch.setattr(main, "run_enqueue_mode", no_products)
     assert runner.run() == 0
-    assert rec["calls"] == [("worker", False)]
+    assert rec["calls"] == [("worker", False, "nightly", False)]
+
+
+def test_the_night_report_lands_in_run_history_and_last_report(nightly):
+    runner, _, _, rec = nightly
+    rec["workers"] = [{"stop_reason": None, "run_id": "run-9", "worker_id": "host:1",
+                       "notice": "GEMINI_DOWN: Gemini لا يستجيب"}]
+    assert runner.run() == 0
+    (entry,) = rec["history"]
+    assert entry["run_trigger"] == "nightly" and entry["run_id"] == "run-9" and entry["outcome"] == "done"
+    assert (entry["enqueued"], entry["ready_for_review"], entry["not_found"]) == (3, 2, 1)
+    assert entry["notices"] == "GEMINI_DOWN: Gemini لا يستجيب"
+    report = _last_report()
+    assert report["history_id"] == 7 and report["counts"]["ready_for_review"] == 2
+    assert report["telegram_sent"] is False             # Telegram is not configured in the tests
 
 
 def test_main_logs_to_temp_nightly_and_restores_the_console(nightly, monkeypatch, tmp_path):
@@ -197,7 +350,8 @@ def test_old_logs_are_pruned(tmp_path):
 
 def test_runner_reuses_main_entry_points_and_writes_no_sheet():
     text = RUNNER.read_text(encoding="utf-8")
-    assert "main.run_enqueue_mode()" in text and "main.run_worker_mode()" in text
+    assert "main_module.run_enqueue_mode()" in text
+    assert 'main_module.run_worker_mode(trigger="nightly", report=False)' in text
     assert '"AUTO_PUBLISH_ENABLED": False' in text and '"FORCE_OVERWRITE_IMAGES": False' in text
     for forbidden in ("google_sheets", "update_image_link", "update_cell", "subprocess", "AUTO_PUBLISH_ENABLED\": True"):
         assert forbidden not in text, forbidden

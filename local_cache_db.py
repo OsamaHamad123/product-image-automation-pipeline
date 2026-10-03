@@ -348,6 +348,39 @@ def init_db():
             ) ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
         """)
 
+        # 12. سجل التشغيلات (run_report.py): صف لكل تشغيل من لوحة التحكم أو يدوي، وصف واحد لكل ليلة
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS run_history (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                run_id VARCHAR(64) NULL,
+                run_trigger VARCHAR(16) NOT NULL DEFAULT 'manual',
+                started_at DATETIME NULL,
+                ended_at DATETIME NULL,
+                outcome VARCHAR(16) NOT NULL,
+                stop_reason VARCHAR(64) NULL,
+                exit_code INT NOT NULL DEFAULT 0,
+                attempts INT NOT NULL DEFAULT 1,
+                enqueued INT NULL,
+                searched INT NULL,
+                auto_published INT NULL,
+                ready_for_review INT NULL,
+                not_found INT NULL,
+                failed INT NULL,
+                provider_down INT NULL,
+                pending_left INT NULL,
+                outbox_pending INT NULL,
+                outbox_conflict INT NULL,
+                outbox_dead INT NULL,
+                spend_usd DECIMAL(12,4) NULL,
+                spend_source VARCHAR(16) NULL,
+                notices TEXT NULL,
+                report_json LONGTEXT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                INDEX idx_run_history_started (started_at),
+                INDEX idx_run_history_run (run_id)
+            ) ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
+        """)
+
         # القيم الافتراضية المبدئية من ملف .env (INSERT IGNORE لا يغير القيم الموجودة)
         import config
         default_settings = {
@@ -1468,7 +1501,7 @@ def clear_queue():
 
 
 def get_ready_for_review_count():
-    """عدد المنتجات الجاهزة للمراجعة."""
+    """عدد المنتجات الجاهزة للمراجعة، أو None عند خطأ قاعدة البيانات (ليس 0: لا يُعد التشغيل بلا مراجعة)."""
     try:
         conn = get_db_connection()
         try:
@@ -1477,11 +1510,10 @@ def get_ready_for_review_count():
             row = cursor.fetchone()
         finally:
             _close(conn)
-        if row:
-            return row['count']
+        return int(row['count']) if row else 0
     except Exception as e:
         logger.warning("[MariaDB Queue] فشل حساب المهام الجاهزة للمراجعة: %s", e)
-    return 0
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -1696,10 +1728,28 @@ def get_automation_state():
             _close(conn)
         if row:
             return dict(row)
+        error = None
     except Exception as e:
         logger.warning("[MariaDB State] فشل استرداد حالة الأتمتة: %s", e)
-    return {"status": "idle", "total_items": 0, "processed_items": 0, "success_count": 0, "failed_count": 0,
-            "current_product_name": "", "pause_requested": 0}
+        error = f"{type(e).__name__}: {e}"[:255]
+    # قاعدة بيانات لا ترد ليست «خاملاً»: الحالة 'db_unavailable' (لا تُكتب في الجدول أبداً) فلا يُعد التشغيل منتهياً
+    return {"status": "db_unavailable" if error else "idle", "db_error": error, "total_items": 0,
+            "processed_items": 0, "success_count": 0, "failed_count": 0, "current_product_name": "",
+            "pause_requested": 0}
+
+
+def db_available():
+    """هل ترد قاعدة البيانات الآن (SELECT 1)؟ لا ترفع استثناء."""
+    try:
+        conn = get_db_connection()
+        try:
+            conn.cursor().execute("SELECT 1")
+        finally:
+            _close(conn)
+        return True
+    except Exception as e:
+        logger.warning("[MariaDB] قاعدة البيانات لا ترد: %s", e)
+        return False
 
 
 def _set_pause(value):
@@ -1885,6 +1935,112 @@ def reset_run(worker_active=False):
         )
         conn.commit()
         return _run_control_result(cursor, released, worker_active)
+    finally:
+        _close(conn)
+
+
+# ---------------------------------------------------------------------------
+# نتيجة التشغيل وسجل التشغيلات (run_history) — run_report.py يكتبها بعد كل تشغيل
+# ---------------------------------------------------------------------------
+
+# رموز «لم يُعثر على صورة مقبولة» (المنتج، لا عطل خدمة) كما في QueueStats::NOT_FOUND_CODES
+NOT_FOUND_CODES = ("NO_RESULTS", "ALL_CONFLICTED", "NO_MATCH", "NOT_FOUND")
+RUN_COUNT_KEYS = ("enqueued", "searched", "auto_published", "ready_for_review", "not_found", "failed",
+                  "provider_down", "pending_left")
+
+
+def run_outcome_counts(run_ids=None, worker_id=None, since_seconds=None):
+    """
+    نتيجة تشغيل من صفوف الطابور: صفوف run_ids (محاولات الليلة كلها)، أو بلا run_id صفوف العامل worker_id
+    (قبل '#') التي تحدثت خلال since_seconds. تعيد {enqueued, searched, auto_published, ready_for_review,
+    not_found, failed, provider_down, pending_left}:
+      enqueued       صفوف التشغيل؛ searched ما بُحث عنه (انتهى، أو عاد للانتظار لأن المزودين لا يردون)
+      auto_published مكتمل بقرار AUTO_PUBLISH؛ not_found فشل برمز «لا صورة مقبولة»؛ failed باقي الفشل
+      provider_down  عاد للانتظار برمز PROVIDER_DOWN؛ pending_left ما بقي في الانتظار أو قيد المعالجة
+    أخطاء قاعدة البيانات تُرفع.
+    """
+    ids = [str(r) for r in (run_ids or []) if r]
+    if ids:
+        where, params = f"run_id IN ({', '.join(['%s'] * len(ids))})", tuple(ids)
+    elif worker_id:
+        prefix = str(worker_id).replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "#%"
+        where = "worker_id LIKE %s AND updated_at >= NOW() - INTERVAL %s SECOND"
+        params = (prefix, int(since_seconds or 24 * 3600))
+    else:
+        return dict.fromkeys(RUN_COUNT_KEYS, 0)
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT status, UPPER(COALESCE(failure_code, '')) AS code, "
+            "JSON_UNQUOTE(JSON_EXTRACT(trace_json, '$.outcome.decision')) AS decision, COUNT(*) AS cnt "
+            f"FROM automation_queue WHERE {where} GROUP BY status, code, decision", params)
+        rows = cursor.fetchall()
+    finally:
+        _close(conn)
+    counts = dict.fromkeys(RUN_COUNT_KEYS, 0)
+    for r in rows:
+        n, status, code = int(r["cnt"]), r["status"], r["code"] or ""
+        counts["enqueued"] += n
+        if status == "completed":
+            counts["searched"] += n
+            counts["auto_published"] += n if r.get("decision") == "AUTO_PUBLISH" else 0
+        elif status == "ready_for_review":
+            counts["searched"] += n
+            counts["ready_for_review"] += n
+        elif status == "failed":
+            counts["searched"] += n
+            counts["not_found" if code in NOT_FOUND_CODES else "failed"] += n
+        else:
+            counts["pending_left"] += n
+            if code == "PROVIDER_DOWN":
+                counts["provider_down"] += n
+                counts["searched"] += n
+    return counts
+
+
+_RUN_HISTORY_FIELDS = ("run_id", "run_trigger", "started_at", "ended_at", "outcome", "stop_reason", "exit_code",
+                       "attempts") + RUN_COUNT_KEYS + ("outbox_pending", "outbox_conflict", "outbox_dead",
+                                                       "spend_usd", "spend_source", "notices", "report_json")
+
+
+def save_run_history(entry):
+    """
+    يضيف صفاً إلى run_history من قاموس بأسماء الأعمدة (الناقص NULL). تعيد رقم الصف، أو None عند خطأ قاعدة البيانات
+    (يُسجل؛ التقرير يبقى في temp/nightly/last_report.json).
+    """
+    values = []
+    for field in _RUN_HISTORY_FIELDS:
+        value = entry.get(field)
+        if isinstance(value, (dict, list)):
+            value = json.dumps(value, ensure_ascii=False, default=str)
+        if field in ("stop_reason", "outcome", "run_trigger", "spend_source", "run_id") and isinstance(value, str):
+            value = value[:64]
+        values.append(value)
+    try:
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                f"INSERT INTO run_history ({', '.join(_RUN_HISTORY_FIELDS)}) "
+                f"VALUES ({', '.join(['%s'] * len(_RUN_HISTORY_FIELDS))})", tuple(values))
+            conn.commit()
+            return cursor.lastrowid
+        finally:
+            _close(conn)
+    except Exception as e:
+        logger.warning("[MariaDB] فشل حفظ سجل التشغيل: %s", e)
+        return None
+
+
+def get_run_history(limit=20):
+    """أحدث صفوف run_history (الأحدث أولاً) بلا report_json. أخطاء قاعدة البيانات تُرفع."""
+    columns = ", ".join(("id",) + tuple(f for f in _RUN_HISTORY_FIELDS if f != "report_json") + ("created_at",))
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(f"SELECT {columns} FROM run_history ORDER BY id DESC LIMIT %s", (max(1, int(limit)),))
+        return [dict(r) for r in cursor.fetchall()]
     finally:
         _close(conn)
 
