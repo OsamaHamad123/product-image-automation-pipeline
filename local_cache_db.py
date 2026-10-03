@@ -1514,9 +1514,11 @@ def _as_int(value):
 
 def save_curation_candidates(row_number, product_name, brand, candidates, best_url=None, sku_key=None, run_id=None):
     """
-    استبدال مرشحات الصف بمرشحات التشغيل الحالي في معاملة واحدة.
+    استبدال مرشحات المنتج بمرشحات التشغيل الحالي في معاملة واحدة.
     تُحفظ الحالة والأسباب والأدلة وقراءة VLM لكل مرشح. is_selected=1 فقط للحالة 'preselected'
     (best_url لم يعد يحدد الاختيار المسبق). تعيد True عند النجاح و False عند أي خطأ (مع التراجع).
+    الحذف بنفس قاعدة القراءة (_row_or_sku_clause): مرشحات هذا الـ sku_key، ورقم الصف فقط للصفوف القديمة بلا
+    sku_key؛ فمنتج انتقل إلى رقم صف منتج آخر بعد تعديل الشيت لا يمسح مرشحات ذلك المنتج.
     """
     run_id = run_id or uuid.uuid4().hex[:16]
     try:
@@ -1526,7 +1528,8 @@ def save_curation_candidates(row_number, product_name, brand, candidates, best_u
         return False
     try:
         cursor = conn.cursor()
-        cursor.execute("DELETE FROM curation_candidates WHERE `row_number` = %s", (row_number,))
+        clause, params = _row_or_sku_clause(row_number, sku_key)
+        cursor.execute(f"DELETE FROM curation_candidates WHERE {clause}", params)
         seen = set()
         for c in candidates or []:
             url = (c.get("url") or c.get("image_url") or "").strip()
