@@ -246,3 +246,93 @@ def test_the_worker_never_writes_or_settles_another_product_sharing_its_barcode(
     assert task["row_number"] == ROWS[0]
     assert db.update_task_status(task["id"], "ready_for_review", claim_id=task["worker_id"])
     assert [_status(db, r) for r in ROWS[:3]] == ["ready_for_review", "pending", "ready_for_review"]
+
+
+# ---------------------------------------------------------------------------
+# #1: two reviewers approving at once; the worker's save racing a reviewer's
+# ---------------------------------------------------------------------------
+
+def _page_view(db, row):
+    task = db.get_task_by_row(row)
+    return {"queue_status": task["status"], "queue_updated_at": str(task["updated_at"]), "approved_url": None}
+
+
+def test_two_reviewers_approving_at_once_the_second_is_refused_and_db_and_sheet_agree(db, bridge, monkeypatch,
+                                                                                         tmp_path):
+    import cloudinary_storage
+    import hashlib
+    import image_processor
+    import local_cache_db
+    from PIL import Image
+
+    cli_bridge, env = bridge
+    row = ROWS[0]
+    sku = _queue(db, row, MILK, GTIN)
+    seen = _page_view(db, row)                     # both pages opened before either approval
+    both_checked = threading.Barrier(2, timeout=10)
+
+    def processing(image_url, *a, **k):
+        both_checked.wait()                        # both passed the first C1 check: they race for the publish lock
+        tag = hashlib.md5(image_url.encode()).hexdigest()[:8]
+        out = tmp_path / f"canvas_{tag}_{os.urandom(3).hex()}.png"
+        Image.new("RGB", (800, 800), "white").save(out)
+        return image_processor.ProcessResult(str(out), True, "photoroom", None, 800, 800)
+
+    real_save = local_cache_db.save_product_resolution
+
+    def slow_save(*a, **k):
+        time.sleep(0.2)                            # the decision record takes a moment (a busy database)
+        return real_save(*a, **k)
+
+    env["write_delay"] = 0.15                      # the sheet enqueue takes 150 ms
+    monkeypatch.setattr(image_processor, "process_product_image_result", processing)
+    monkeypatch.setattr(cloudinary_storage, "upload_product_image_to_cloudinary",
+                        lambda path, *a, **k: CLOUD + os.path.basename(path).split("_")[1] + ".png")
+    monkeypatch.setattr(local_cache_db, "save_product_resolution", slow_save)
+    results = {}
+
+    def approve(who, url):
+        results[who] = cli_bridge.action_select_image(_approve_params(row, MILK, url, sku, GTIN, expected_state=seen))
+
+    threads = [threading.Thread(target=approve, args=(who, f"https://x/{who}.jpg")) for who in ("a", "b")]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(30)
+    statuses = sorted(r["status"] for r in results.values())
+    assert statuses == ["failed", "success"], results
+    refused = next(r for r in results.values() if r["status"] == "failed")
+    assert refused["error_code"] in ("already_approved", "state_changed")
+    assert len(env["sheet"]) == 1                                   # one write, the winner's
+    approval = db.get_cached_product(sku_key=sku)
+    assert approval["verification_status"] == "human_approved"
+    assert approval["cloudinary_url"] == env["cells"][row]          # the database and the sheet agree
+    assert refused["current"]["approved_url"] == env["cells"][row]
+
+
+def test_a_workers_late_save_never_overwrites_a_human_approval_being_written(db):
+    """The guard and the write are one transaction: the worker's save waits for the reviewer's and then sees it."""
+    sku = KEYS[0]
+    assert db.save_product_resolution(GTIN, MILK["product_name"], MILK["brand"], "https://src/auto1.jpg",
+                                      CLOUD + "auto1.png", verification_status="auto_verified", approved_by="auto",
+                                      sku_key=sku)
+    reviewer = db.get_db_connection()
+    try:
+        cur = reviewer.cursor()
+        # the reviewer's approval is being written (not committed yet)
+        cur.execute("UPDATE resolved_products SET verification_status = 'human_approved', approved_by = 'human', "
+                    "cloudinary_url = %s, original_url = 'https://src/human.jpg' WHERE sku_key = %s",
+                    (CLOUD + "human.png", sku))
+        result = {}
+        worker = threading.Thread(target=lambda: result.update(saved=db.save_product_resolution(
+            GTIN, MILK["product_name"], MILK["brand"], "https://src/auto2.jpg", CLOUD + "auto2.png",
+            verification_status="auto_verified", approved_by="auto", sku_key=sku)))
+        worker.start()
+        time.sleep(0.5)                             # the worker reads the row now, while the approval is in flight
+        reviewer.commit()
+        worker.join(30)
+    finally:
+        reviewer.close()
+    assert result["saved"] is False
+    cached = db.get_cached_product(sku_key=sku)
+    assert (cached["cloudinary_url"], cached["verification_status"]) == (CLOUD + "human.png", "human_approved")

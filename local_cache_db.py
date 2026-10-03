@@ -747,7 +747,8 @@ def save_product_resolution(barcode, product_name, brand, original_url, cloudina
     حفظ أو تحديث الحل المعتمد لمنتج (Upsert بـ sku_key، أو بالباركود إن لم يوجد sku_key).
     أحدث سجل مطابق يُحدّث، وأي سجلات مطابقة أخرى تصبح superseded.
     حل auto_verified لا يحل أبداً محل اعتماد بشري (human_approved): إذا كان أي سجل مطابق معتمداً بشرياً
-    لا يُكتب شيء وتعيد False (مراجع اعتمد أثناء نشر العامل التلقائي).
+    لا يُكتب شيء وتعيد False (مراجع اعتمد أثناء نشر العامل التلقائي). الفحص والكتابة في معاملة واحدة تقفل السجلات
+    المطابقة (SELECT ... FOR UPDATE): اعتماد بشري يُكتب في اللحظة نفسها ينتظر أو يُرى، ولا يُكتب فوقه أبداً.
     """
     if verification_status not in VERIFICATION_STATUSES:
         raise ValueError(f"verification_status غير صالح: {verification_status!r}")
@@ -757,33 +758,28 @@ def save_product_resolution(barcode, product_name, brand, original_url, cloudina
     metadata_str = json.dumps(metadata, ensure_ascii=False) if metadata else ""
     embedding_str = json.dumps(clip_embedding) if clip_embedding is not None else ""
     hash_str = str(perceptual_hash) if perceptual_hash is not None else ""
-    try:
+    values = (barcode_raw, product_name, brand, original_url, cloudinary_url, clip_score,
+              metadata_str, embedding_str, hash_str, sku_clean or None, verification_status, approved_by)
+
+    def attempt():
         conn = get_db_connection()
         try:
             cursor = conn.cursor()
-            clauses, params = [], []
-            if sku_clean:
-                clauses.append("sku_key = %s")
-                params.append(sku_clean)
-            if barcode_clean:
-                clauses.append("barcode = %s")
-                params.append(barcode_clean)
-            existing = []
-            if clauses:
-                cursor.execute(
-                    f"SELECT id, verification_status FROM resolved_products WHERE {' OR '.join(clauses)} "
-                    "ORDER BY id DESC",
-                    tuple(params),
-                )
-                found = cursor.fetchall()
-                existing = [r["id"] for r in found]
-                if verification_status == "auto_verified" and any(
-                        r.get("verification_status") == "human_approved" for r in found):
-                    logger.warning("[MariaDB Cache] لا يُحفظ نشر تلقائي فوق اعتماد بشري لـ '%s' (SKU %s).",
-                                   product_name, sku_clean or barcode_clean)
-                    return False
-            values = (barcode_raw, product_name, brand, original_url, cloudinary_url, clip_score,
-                      metadata_str, embedding_str, hash_str, sku_clean or None, verification_status, approved_by)
+            found = {}
+            # كل مفتاح باستعلامه (فهرسه): القفل على السجلات المطابقة وفجواتها فقط، لا على الجدول
+            for column, value in (("sku_key", sku_clean), ("barcode", barcode_clean)):
+                if value:
+                    cursor.execute(f"SELECT id, verification_status FROM resolved_products WHERE {column} = %s "
+                                   "FOR UPDATE", (value,))
+                    for r in cursor.fetchall() or []:
+                        found[r["id"]] = r
+            existing = sorted(found, reverse=True)
+            if verification_status == "auto_verified" and any(
+                    r.get("verification_status") == "human_approved" for r in found.values()):
+                conn.rollback()
+                logger.warning("[MariaDB Cache] لا يُحفظ نشر تلقائي فوق اعتماد بشري لـ '%s' (SKU %s).",
+                               product_name, sku_clean or barcode_clean)
+                return None
             if existing:
                 cursor.execute("""
                     UPDATE resolved_products
@@ -809,10 +805,23 @@ def save_product_resolution(barcode, product_name, brand, original_url, cloudina
                 """, values)
                 saved_id = cursor.lastrowid
             conn.commit()
+            return saved_id
+        except Exception:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            raise
         finally:
             _close(conn)
+
+    try:
+        # حفظان متزامنان لمنتج بلا سجل: قفل الفجوة يجعل أحدهما deadlock فيُعاد ويرى سجل الآخر
+        saved_id = _retry_lock_conflicts(attempt)
     except Exception as e:
         logger.warning("[MariaDB Cache] فشل حفظ الحل المعتمد لـ '%s': %s", product_name, e)
+        return False
+    if saved_id is None:
         return False
     _remember_phash(hash_str, saved_id, cloudinary_url, product_name)
     if verification_status in SERVABLE_STATUSES:

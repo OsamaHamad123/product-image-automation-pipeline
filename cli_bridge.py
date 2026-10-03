@@ -650,6 +650,21 @@ def _reviewer_check(params, sku_key, row_number, product_name, image_url, out, r
     return check
 
 
+def _human_decision(barcode, product_name, brand, original_url, approved_by, sku_key, row_number, rows):
+    """
+    after_write لاعتماد المراجع ورفعه: الحل المعتمد بشرياً وحالة صفوف المنتج (مكتملة) تُكتب قبل تحرير قفل النشر،
+    فمراجع آخر ينتظر القفل يرى هذا الاعتماد في إعادة فحص C1 (already_approved) ولا يكتب فوقه في صمت.
+    """
+    def record(res):
+        local_cache_db.save_product_resolution(
+            barcode, product_name, brand, original_url, res["link"], None, res.get("metadata"),
+            perceptual_hash=res.get("phash"), verification_status="human_approved", approved_by=approved_by,
+            sku_key=sku_key,
+        )
+        local_cache_db.update_task_status_by_row(row_number, "completed", sku_key=sku_key, rows=rows)
+    return record
+
+
 def _not_written(res, out):
     """استجابة نشر لم يكتب شيئاً (superseded): رفض C1 إن حدث، وإلا قفل النشر بقي عند غيرنا."""
     if out.get("refusal"):
@@ -844,18 +859,13 @@ def action_select_image(params):
             key_size=_text(params, 'size') or None, key_brand=brand or None, sku_key=sku_key,
             also_rows=_other_rows(sku_key, row_number, tasks),
             before_write=_reviewer_check(params, sku_key, row_number, product_name, image_url, guard, rows),
+            after_write=_human_decision(barcode, product_name, brand, image_url, "human", sku_key, row_number, rows),
         )
         if res["status"] == "superseded":
             return _not_written(res, guard)
         if res["status"] == "failed":
             return {'status': 'failed', 'error': res.get('error'), 'isolated': res.get('isolated', False)}
 
-        local_cache_db.save_product_resolution(
-            barcode, product_name, brand, image_url, res["link"], None, res.get("metadata"),
-            perceptual_hash=res.get("phash"), verification_status="human_approved", approved_by="human",
-            sku_key=sku_key,
-        )
-        local_cache_db.update_task_status_by_row(row_number, "completed", sku_key=sku_key, rows=rows)
         _record_review("approved", params, row_number, sku_key, image_url, identity=identity)
         local_cache_db.delete_curation_candidates(row_number, sku_key=sku_key, identity=identity)
         response = _published_response(res, sku_key, row_number, provider=res.get("provider"))
@@ -911,6 +921,8 @@ def action_upload_manual_image(params):
             key_size=_text(params, 'size') or None, key_brand=brand or None, sku_key=sku_key,
             also_rows=_other_rows(sku_key, row_number, tasks),
             before_write=_reviewer_check(params, sku_key, row_number, product_name, None, guard, rows),
+            after_write=_human_decision(barcode, product_name, brand, "manual_upload", "human_upload", sku_key,
+                                        row_number, rows),
         )
         try:
             os.remove(file_path)
@@ -920,12 +932,6 @@ def action_upload_manual_image(params):
             return _not_written(res, guard)
         if res["status"] == "failed":
             return {'status': 'failed', 'error': res.get('error')}
-        local_cache_db.save_product_resolution(
-            barcode, product_name, brand, "manual_upload", res["link"], None, res.get("metadata"),
-            perceptual_hash=res.get("phash"), verification_status="human_approved", approved_by="human_upload",
-            sku_key=sku_key,
-        )
-        local_cache_db.update_task_status_by_row(row_number, "completed", sku_key=sku_key, rows=rows)
         _record_review("manual_upload", params, row_number, sku_key, identity=identity)
         local_cache_db.delete_curation_candidates(row_number, sku_key=sku_key, identity=identity)
         response = _published_response(res, sku_key, row_number)

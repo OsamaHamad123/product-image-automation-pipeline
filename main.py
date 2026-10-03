@@ -364,7 +364,7 @@ def _folder_and_tags(metadata):
 def publish_image(image_url, name, brand, row_number, worksheet, link_column_index, *, barcode="",
                   candidate_sha256=None, category_override=None, force_review=False, key_size=None,
                   key_brand=None, profile=None, sku_key=None, before_write=None, duplicates="warn",
-                  also_rows=None):
+                  also_rows=None, after_write=None):
     """
     معالجة الصورة المعتمدة إلى لوحة النشر النهائية ورفعها وكتابة رابطها في الشيت.
     key_size/key_brand: خلايا الحجم والبراند في الشيت لهذا المنتج، تُضاف إلى هوية الصف المتحقق منها
@@ -376,6 +376,8 @@ def publish_image(image_url, name, brand, row_number, worksheet, link_column_ind
     also_rows: صفوف الشيت الأخرى لنفس المنتج (نفس sku_key)، كل منها {row_number, barcode, product_name, size,
     brand} بهويته هو: تُكتب فيها نفس القيمة والبيانات الوصفية، وكل كتابة يتحقق منها الشيت بهوية صفها.
     rows_written: الصفوف التي قُبلت كتابة رابطها؛ rows_failed: صفوف also_rows التي رُفضت.
+    after_write(result): يُستدعى بعد الكتابة في الشيت وقبل تحرير قفل النشر، بالنتيجة التي ستُعاد: يحفظ فيه المستدعي
+    قراره (الحل المعتمد وحالة الطابور)، فمن ينتظر القفل (مراجع آخر أو العامل) يرى القرار في إعادة تحققه. خطؤه يُرفع.
     duplicates: صورة نُشرت لمنتج آخر (نفس رابط Cloudinary أو pHash اللوحة على مسافة 4 أو أقل، sku_key مختلف):
     'block' (النشر التلقائي من الطابور) لا يكتب شيئاً والحالة 'needs_review' (error='duplicate_image')؛ 'review'
     (الوضع التسلسلي القديم) يكتب الرابط ببادئة needs_review: فقط؛ 'warn' (اعتماد المراجع الصريح) يكتب كالمعتاد.
@@ -462,8 +464,11 @@ def publish_image(image_url, name, brand, row_number, worksheet, link_column_ind
                 continue
             written.append(other_row)
             _write_metadata(worksheet, other_row, metadata, other_identity)
-    return dict(base, status="needs_review" if review else "published", link=link, sheet_value=sheet_value,
-                rows_written=written, rows_failed=failed)
+        outcome = dict(base, status="needs_review" if review else "published", link=link, sheet_value=sheet_value,
+                       rows_written=written, rows_failed=failed)
+        if after_write is not None:
+            after_write(outcome)
+    return outcome
 
 
 def _write_metadata(worksheet, row_number, metadata, identity):
@@ -516,12 +521,21 @@ def auto_approve_product(task, best_image, worksheet, link_column_index, sku_key
         return (local_cache_db.is_claim_held(task["id"], task.get("worker_id"))
                 and not _has_human_approval(sku_key))
 
+    def record(res):
+        # تحت قفل النشر: الحل التلقائي يُحفظ قبل أن يرى مراجع ينتظر القفل حالة المنتج
+        if res["status"] == "published":
+            local_cache_db.save_product_resolution(
+                barcode, name, brand, best_image["url"], res["link"], None, res.get("metadata"),
+                perceptual_hash=res.get("phash"), verification_status="auto_verified",
+                approved_by="auto", sku_key=sku_key,
+            )
+
     try:
         res = publish_image(
             best_image["url"], name, brand, task["row_number"], worksheet, link_column_index,
             barcode=barcode, candidate_sha256=best_image.get("content_sha256"),
             key_size=task_payload(task).get("size"), key_brand=brand, profile=processing_profile.current(),
-            sku_key=sku_key, before_write=still_ours, duplicates="block",
+            sku_key=sku_key, before_write=still_ours, duplicates="block", after_write=record,
         )
     except Exception as e:
         print(f"[Auto-Publish Error] فشل النشر التلقائي لـ [{name}]: {e}")
@@ -533,11 +547,6 @@ def auto_approve_product(task, best_image, worksheet, link_column_index, sku_key
     if res.get("error") == "duplicate_image":
         _warn_duplicate(best_image)
     if res["status"] == "published":
-        local_cache_db.save_product_resolution(
-            barcode, name, brand, best_image["url"], res["link"], None, res.get("metadata"),
-            perceptual_hash=res.get("phash"), verification_status="auto_verified",
-            approved_by="auto", sku_key=sku_key,
-        )
         local_cache_db.delete_product_failure(barcode)
     elif res["status"] == "failed":
         print(f"[Auto-Publish] تعذر النشر لـ [{name}] ({res.get('error')}); يحال للمراجعة.")

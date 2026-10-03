@@ -81,8 +81,11 @@ def sheet(monkeypatch, tmp_path):
 
     def fake_publish(image_url, name, brand, row_number, worksheet, link_column_index, **kwargs):
         events.append(("publish", image_url))
-        return {"status": "published", "isolated": True, "provider": "photoroom", "metadata": {},
-                "width": 800, "height": 800, "link": LINK, "sheet_value": LINK}
+        res = {"status": "published", "isolated": True, "provider": "photoroom", "metadata": {},
+               "width": 800, "height": 800, "link": LINK, "sheet_value": LINK}
+        if kwargs.get("after_write"):
+            kwargs["after_write"](res)        # the decision is recorded under the publish lock
+        return res
 
     monkeypatch.setattr(cli_bridge, "LOG_PATH", str(tmp_path / "search.log"))
     monkeypatch.setattr(main, "publish_image", fake_publish)

@@ -456,7 +456,7 @@ def stale_env(select_env, monkeypatch):
     monkeypatch.setattr(local_cache_db, "get_cached_product", lambda **k: state["approval"])
     monkeypatch.setattr(local_cache_db, "get_task_by_row", lambda row: state["task"])
     monkeypatch.setattr(local_cache_db, "release_worker_claims",
-                        lambda row, sku_key=None: state["fenced"].append((row, sku_key)) or 1)
+                        lambda row, sku_key=None, **k: state["fenced"].append((row, sku_key)) or 1)
     state["now"] = datetime.datetime.now().replace(microsecond=0)
     return bridge, events, state
 
