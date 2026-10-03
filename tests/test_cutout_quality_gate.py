@@ -696,3 +696,29 @@ def test_redownloaded_bytes_must_match_the_verified_sha256(monkeypatch, tmp_path
     local.write_bytes(changed)
     assert run(str(local), candidate_sha256=sha).error == "source_changed"
 
+
+# ---------------------------------------------------------------------------
+# One processing profile: the canvas depends only on the explicit arguments
+# ---------------------------------------------------------------------------
+
+def test_same_profile_gives_identical_output_whatever_the_global_settings(monkeypatch, tmp_path):
+    src = save(bottle(bg=GREY), tmp_path)
+    Providers(monkeypatch, photoroom=keyer(GREY))
+
+    def render(enhance):
+        return canvas_of(image_processor.process_product_image_result(
+            src, "Milk", "Almarai", 800, 800, bg_method="photoroom", enhance=enhance))
+
+    plain = render(False)
+    enhanced = render(True)
+    assert not np.array_equal(plain, enhanced)
+
+    monkeypatch.setattr(config, "OUTPUT_CANVAS_SIZE", 1200, raising=False)
+    monkeypatch.setattr(config, "IMAGE_TARGET_SIZE", (1000, 1000))
+    monkeypatch.setattr(config, "BG_REMOVAL_METHOD", "remove_bg_api")
+    monkeypatch.setattr(config, "ENABLE_IMAGE_ENHANCEMENT", True)
+    monkeypatch.setattr(config, "PHOTOROOM_CROP", True)
+    for value in (False, "false", "0", "", "off", None):
+        assert np.array_equal(render(value), plain), f"enhance={value!r} changed the canvas"
+    for value in (True, "true", "1", "on"):
+        assert np.array_equal(render(value), enhanced), f"enhance={value!r} changed the canvas"

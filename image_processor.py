@@ -648,11 +648,22 @@ def _isolate(img: Image.Image, method: str):
 
 
 def _enhance_rgb(rgba: Image.Image) -> Image.Image:
-    """تحسين خفيف للتباين والألوان على قنوات RGB فقط (قناة الشفافية لا تتغير)."""
+    """
+    تحسين خفيف للتباين والألوان على قنوات RGB فقط (قناة الشفافية لا تتغير).
+    التباين حول متوسط سطوع المنتج نفسه (موزوناً بالشفافية) كما يفعل ImageEnhance.Contrast لصورة معتمة؛
+    متوسط الإطار كله كان يحسب البكسلات الشفافة فتتغير النتيجة حسب الهامش الذي أعاده المزوّد أو صندوق Gemini.
+    """
+    import numpy as np
+
     rgba = rgba.convert("RGBA")
     alpha = rgba.getchannel("A")
     rgb = rgba.convert("RGB")
-    rgb = ImageEnhance.Contrast(rgb).enhance(1.08)
+    luminance = np.asarray(rgb.convert("L"), dtype=np.float64)
+    weights = np.asarray(alpha, dtype=np.float64)
+    total = float(weights.sum())
+    mean = float((luminance * weights).sum() / total) if total > 0 else float(luminance.mean())
+    level = int(mean + 0.5)
+    rgb = Image.blend(Image.new("RGB", rgb.size, (level, level, level)), rgb, 1.08)
     rgb = ImageEnhance.Color(rgb).enhance(1.05)
     out = rgb.convert("RGBA")
     out.putalpha(alpha)
@@ -664,6 +675,13 @@ def _count_gemini_call() -> None:
         config.METRICS["gemini_api_calls"] += 1
     except Exception:  # noqa: BLE001
         pass
+
+
+def _as_bool(value) -> bool:
+    """'false' و'0' و'' نصوصاً تعني False (bool('false') كان True فيُحسّن اللون دون طلب)."""
+    if isinstance(value, str):
+        return value.strip().lower() in ("1", "true", "yes", "on")
+    return bool(value)
 
 
 def _flatten_on_white(img: Image.Image) -> Image.Image:
@@ -999,6 +1017,7 @@ def process_product_image_result(image_url_or_path, product_name, brand, target_
     (0 أو 'dynamic' = OUTPUT_CANVAS_SIZE، افتراضياً 800x800) والمنتج يملأ 88% وموسّط.
     لا يرفع استثناءات: كل فشل يعود كـ ProcessResult(path=None, isolated=False, error=<رمز>).
     قص لم يجتز بوابة الجودة بعد كل البدائل يعود بلوحة (path) مع isolated=False و quality_flags.
+    عند تمرير الأبعاد و enhance و bg_method صراحةً تكون اللوحة دالة لها وللمصدر فقط (ملف معالجة موحد).
     """
     method = _normalise_method(bg_method)
     try:
@@ -1028,7 +1047,7 @@ def process_product_image_result(image_url_or_path, product_name, brand, target_
                 logger.warning("فشل عزل الخلفية بطريقة %s: %s", attempt.provider, attempt.error)
                 return ProcessResult(None, False, attempt.provider, attempt.error, white_source=white_note)
             cutout, provider, flags = attempt.cutout, attempt.provider, list(attempt.flags)
-        if enhance:
+        if _as_bool(enhance):
             cutout = _enhance_rgb(cutout)
 
         if getattr(config, "ENABLE_STUDIO_SHADOWS", False):
