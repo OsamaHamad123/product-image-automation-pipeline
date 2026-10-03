@@ -559,6 +559,8 @@ def test_the_worker_taking_the_row_after_the_page_opened_refuses_the_approval(db
     task = db.get_task_by_row(ROWS[0])
     result = cli_bridge.action_select_image(dict(params, expected_state=result["current"]))
     assert result["status"] == "success" and env["sheet"]
+    approved_view = result["current"]
+    assert (approved_view["approval_status"], approved_view["queue_status"]) == ("human_approved", "completed")
     assert not db.is_claim_held(task["id"], "w#c1")
     assert db.get_task_by_row(ROWS[0])["status"] == "completed"
 
@@ -568,6 +570,11 @@ def test_the_worker_taking_the_row_after_the_page_opened_refuses_the_approval(db
     assert result["error_code"] == "already_approved" and result["current"]["approved_url"] == env["link"]
     assert env["sheet"] == []
     assert db.get_cached_product(sku_key=key)["original_url"] == "https://x/a.jpg"
+
+    # the first reviewer's page, which holds the state its approval returned, may replace it with another image
+    result = cli_bridge.action_select_image(dict(params, image_url="https://x/b.jpg", expected_state=approved_view))
+    assert result["status"] == "success"
+    assert db.get_cached_product(sku_key=key)["original_url"] == "https://x/b.jpg"
 
 
 def test_the_upload_endpoint_forwards_what_the_page_showed():

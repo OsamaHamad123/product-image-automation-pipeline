@@ -795,6 +795,7 @@ def action_select_image(params):
         if queue_started:
             google_sheets.stop_async_queue()     # التفريغ الأخير لطابور الكتابة
     response['sheet'] = _sheet_outcome(response['rows_written'])
+    response['current'] = _current_state(sku_key, row_number, product_name)[0]   # expected_state للطلب التالي
     return response
 
 
@@ -862,6 +863,7 @@ def action_upload_manual_image(params):
         if queue_started:
             google_sheets.stop_async_queue()     # التفريغ الأخير لطابور الكتابة
     response['sheet'] = _sheet_outcome(response['rows_written'])
+    response['current'] = _current_state(sku_key, row_number, product_name)[0]   # expected_state للطلب التالي
     return response
 
 
