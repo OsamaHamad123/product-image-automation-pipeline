@@ -6,7 +6,8 @@
 # - النشر التلقائي فقط عندما يكون قرار البحث AUTO_PUBLISH (لا عتبات clip_score)، وأبداً لنتيجة من الكاش.
 # - إعادة المحاولة فقط عند PROVIDER_DOWN أو استثناء؛ "لا نتيجة" نظيفة لا تُعاد.
 # - رفض المراجعين (روابط + pHash) يُمرر للبحث كاستبعادات لكل SKU.
-# - اللوحة المنشورة 800x800 بيضاء من image_processor بدون أي تكبير لاحق؛ إذا لم تُعزل الخلفية
+# - اللوحة المنشورة بيضاء من image_processor بدون أي تكبير لاحق، بملف المعالجة الواحد (processing_profile:
+#   أبعاد اللوحة وتحسين الألوان وطريقة العزل من صفحة الإعدادات) لكل مسارات النشر؛ إذا لم تُعزل الخلفية
 #   يُكتب الرابط ببادئة needs_review: ولا يُخزن كحل معتمد.
 
 import json
@@ -36,6 +37,7 @@ import image_search
 import image_processor
 import cloudinary_storage
 import local_cache_db
+import processing_profile
 
 MAX_SEARCH_ATTEMPTS = 3
 RETRY_BASE_DELAY = 2.0
@@ -277,23 +279,38 @@ def _folder_and_tags(metadata):
 
 
 def publish_image(image_url, name, brand, row_number, worksheet, link_column_index, *, barcode="",
-                  candidate_sha256=None, bg_method=None, target=(0, 0), category_override=None,
-                  enhance=False, force_review=False, key_size=None, key_brand=None):
+                  candidate_sha256=None, category_override=None, force_review=False, key_size=None,
+                  key_brand=None, profile=None, sku_key=None, before_write=None, duplicates="warn",
+                  also_rows=None):
     """
     معالجة الصورة المعتمدة إلى لوحة النشر النهائية ورفعها وكتابة رابطها في الشيت.
     key_size/key_brand: خلايا الحجم والبراند في الشيت لهذا المنتج، تُضاف إلى هوية الصف المتحقق منها
     قبل الكتابة (بدون باركود تميز الشقيقين بنفس الاسم).
+    profile: ملف المعالجة (processing_profile)؛ الافتراضي ملف الإعدادات الحالي، نفسه لكل مسارات النشر.
+    before_write: دالة بلا وسائط تُستدعى بعد الرفع ومباشرة قبل الكتابة في الشيت، تحت قفل النشر لهذا الـ sku_key
+    (local_cache_db.sku_publish_lock)؛ إذا أعادت False (أو رفعت استثناء، أو بقي القفل عند غيرنا حتى المهلة) لا
+    يُكتب شيء وتكون الحالة 'superseded'. المعالجة والرفع قد يستغرقان دقيقة، والمراجع قد يعتمد خلالها.
+    also_rows: صفوف الشيت الأخرى لنفس المنتج (نفس sku_key)، كل منها {row_number, barcode, product_name, size,
+    brand} بهويته هو: تُكتب فيها نفس القيمة والبيانات الوصفية، وكل كتابة يتحقق منها الشيت بهوية صفها.
+    rows_written: الصفوف التي قُبلت كتابة رابطها؛ rows_failed: صفوف also_rows التي رُفضت.
+    duplicates: صورة نُشرت لمنتج آخر (نفس رابط Cloudinary أو pHash اللوحة على مسافة 4 أو أقل، sku_key مختلف):
+    'block' (النشر التلقائي من الطابور) لا يكتب شيئاً والحالة 'needs_review' (error='duplicate_image')؛ 'review'
+    (الوضع التسلسلي القديم) يكتب الرابط ببادئة needs_review: فقط؛ 'warn' (اعتماد المراجع الصريح) يكتب كالمعتاد.
+    المالكون في duplicate_of، وتعذر التحقق يُعامل كتكرار في 'block' و 'review'.
+    phash: بصمة اللوحة النهائية (تُخزن مع الحل المعتمد).
     لا تكبير لاحق: اللوحة من image_processor نهائية. البيانات الوصفية تُكتب في الشيت فقط بعد نجاح الرفع.
-    الحالة: 'published' (معزولة وليست للمراجعة) | 'needs_review' (رابط ببادئة needs_review:) | 'failed'.
+    الحالة: 'published' (معزولة وليست للمراجعة) | 'needs_review' (رابط ببادئة needs_review:) | 'superseded'
+    (لم يُكتب شيء) | 'failed'.
     """
-    w, h = target or (0, 0)
+    profile = profile or processing_profile.current()
+    w, h = profile.target
     result = image_processor.process_product_image_result(
-        image_url, name, brand, target_width=w or 0, target_height=h or 0,
-        bg_method=bg_method, candidate_sha256=candidate_sha256, enhance=bool(enhance),
+        image_url, name, brand, target_width=w, target_height=h,
+        bg_method=profile.bg_method, candidate_sha256=candidate_sha256, enhance=profile.enhance,
     )
     if not result.path:
         return {"status": "failed", "error": result.error or "processing_failed", "isolated": False,
-                "provider": result.provider}
+                "provider": result.provider, "profile": profile.as_dict()}
 
     metadata = {}
     try:
@@ -310,6 +327,7 @@ def publish_image(image_url, name, brand, row_number, worksheet, link_column_ind
                 (override.get("category_l2_en") or "").strip(),
                 (override.get("category_l3_en") or "").strip()))
         folder, tags = _folder_and_tags(metadata)
+        phash = _canvas_phash(result.path)
         link = cloudinary_storage.upload_product_image_to_cloudinary(
             result.path, name, brand, folder=folder, tags=tags,
             target_width=result.width, target_height=result.height,
@@ -318,21 +336,82 @@ def publish_image(image_url, name, brand, row_number, worksheet, link_column_ind
         image_processor.cleanup_processed_image(result.path)
 
     base = {"isolated": bool(result.isolated), "provider": result.provider, "metadata": metadata,
-            "width": result.width, "height": result.height}
+            "width": result.width, "height": result.height, "profile": profile.as_dict(), "phash": phash,
+            "quality_flags": getattr(result, "quality_flags", None)}
     if not link:
         return dict(base, status="failed", error="upload_failed")
 
-    review = force_review or not result.isolated
+    # نفس الصورة منشورة لمنتج آخر؟ الرفع الموجود مسبقاً (existing من Cloudinary) دليل إضافي فقط
+    owners = local_cache_db.find_image_owners(link, phash, sku_key=sku_key, product_name=name)
+    base["duplicate_of"] = list(owners or [])
+    base["cloudinary_existing"] = getattr(link, "existing", None)
+    duplicate = owners is None or bool(owners)
+    if duplicates == "block" and duplicate:
+        print(f"[Publish] صورة الصف {row_number} منشورة لمنتج آخر (أو تعذر التحقق)؛ لا نشر تلقائي، تُحال للمراجعة.")
+        return dict(base, status="needs_review", error="duplicate_image", link=link)
+
+    review = force_review or not result.isolated or (duplicates == "review" and duplicate)
     sheet_value = f"needs_review:{link}" if review else link
     identity = {"barcode": barcode, "product_name": name, "size": key_size, "brand": key_brand}
-    if not google_sheets.update_image_link(worksheet, row_number, link_column_index, sheet_value, **identity):
-        return dict(base, status="failed", error="sheet_write_failed", link=link)
-    if metadata:
-        try:
-            google_sheets.update_product_metadata(worksheet, row_number, metadata, **identity)
-        except Exception as e:
-            print(f"تنبيه: تعذر كتابة البيانات الوصفية للصف {row_number}: {e}")
-    return dict(base, status="needs_review" if review else "published", link=link, sheet_value=sheet_value)
+    with local_cache_db.sku_publish_lock(sku_key) as lock_state:
+        if before_write is not None:
+            if lock_state == "busy":
+                print(f"[Publish] نشر آخر لنفس المنتج ما زال يكتب؛ لم يُكتب شيء للصف {row_number}.")
+                return dict(base, status="superseded", error="publish_busy", link=link)
+            if not _write_still_allowed(before_write):
+                return dict(base, status="superseded", error="superseded", link=link)
+        if not google_sheets.update_image_link(worksheet, row_number, link_column_index, sheet_value, **identity):
+            return dict(base, status="failed", error="sheet_write_failed", link=link)
+        written, failed = [row_number], []
+        _write_metadata(worksheet, row_number, metadata, identity)
+        for other in also_rows or []:
+            other_row = other.get("row_number")
+            other_identity = {"barcode": other.get("barcode") or "", "product_name": other.get("product_name"),
+                              "size": other.get("size"), "brand": other.get("brand")}
+            try:
+                ok = google_sheets.update_image_link(worksheet, other_row, link_column_index, sheet_value,
+                                                     **other_identity)
+            except Exception as e:
+                print(f"تنبيه: تعذر كتابة الرابط في الصف المكرر {other_row}: {e}")
+                ok = False
+            if not ok:
+                failed.append(other_row)
+                continue
+            written.append(other_row)
+            _write_metadata(worksheet, other_row, metadata, other_identity)
+    return dict(base, status="needs_review" if review else "published", link=link, sheet_value=sheet_value,
+                rows_written=written, rows_failed=failed)
+
+
+def _write_metadata(worksheet, row_number, metadata, identity):
+    if not metadata:
+        return
+    try:
+        google_sheets.update_product_metadata(worksheet, row_number, metadata, **identity)
+    except Exception as e:
+        print(f"تنبيه: تعذر كتابة البيانات الوصفية للصف {row_number}: {e}")
+
+
+def _canvas_phash(path):
+    """pHash اللوحة النهائية (16 خانة hex مثل catalog_match.fetch.phash_hex)، أو None."""
+    try:
+        from PIL import Image
+        from catalog_match.fetch import phash_hex
+        with Image.open(path) as img:
+            img.load()
+            return phash_hex(img.convert("RGB"))
+    except Exception as e:
+        print(f"تنبيه: تعذر حساب pHash للوحة النهائية: {e}")
+        return None
+
+
+def _write_still_allowed(before_write):
+    """نتيجة إعادة التحقق قبل الكتابة؛ أي استثناء يعني لا (لا نكتب ونحن لا نعرف)."""
+    try:
+        return bool(before_write())
+    except Exception as e:
+        print(f"[Publish] تعذرت إعادة التحقق قبل الكتابة: {e}")
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -341,27 +420,39 @@ def publish_image(image_url, name, brand, row_number, worksheet, link_column_ind
 
 def auto_approve_product(task, best_image, worksheet, link_column_index, sku_key=None):
     """
-    نشر نتيجة AUTO_PUBLISH مباشرة. تعيد 'published' أو 'needs_review' (الخلفية لم تُعزل) أو 'failed'.
+    نشر نتيجة AUTO_PUBLISH مباشرة. تعيد 'published' أو 'needs_review' (الخلفية لم تُعزل) أو 'superseded'
+    (مراجع اعتمد المنتج أثناء المعالجة والرفع، أو لم يعد الصف محجوزاً لهذا العامل: لم يُكتب شيء) أو 'failed'.
     الحل يُخزن auto_verified فقط عند النشر الفعلي بلوحة معزولة.
     """
     name = task["product_name"]
     brand = task.get("brand") or ""
     barcode = task.get("barcode") or ""
+
+    def still_ours():
+        # إعادة التحقق تحت قفل النشر قبل الكتابة: الحجز ما زال لهذا العامل ولا يوجد اعتماد بشري
+        return (local_cache_db.is_claim_held(task["id"], task.get("worker_id"))
+                and not _has_human_approval(sku_key))
+
     try:
         res = publish_image(
             best_image["url"], name, brand, task["row_number"], worksheet, link_column_index,
             barcode=barcode, candidate_sha256=best_image.get("content_sha256"),
-            key_size=task_payload(task).get("size"), key_brand=brand,
-            bg_method=getattr(config, "BG_REMOVAL_METHOD", None),
-            target=getattr(config, "IMAGE_TARGET_SIZE", (0, 0)),
+            key_size=task_payload(task).get("size"), key_brand=brand, profile=processing_profile.current(),
+            sku_key=sku_key, before_write=still_ours, duplicates="block",
         )
     except Exception as e:
         print(f"[Auto-Publish Error] فشل النشر التلقائي لـ [{name}]: {e}")
         return "failed"
+    if res["status"] == "superseded":
+        print(f"[Auto-Publish] الصف {task['row_number']}: اعتمده مراجع أثناء المعالجة أو لم يعد محجوزاً لهذا "
+              "العامل؛ لم يُكتب شيء.")
+        return "superseded"
+    if res.get("error") == "duplicate_image":
+        _warn_duplicate(best_image)
     if res["status"] == "published":
         local_cache_db.save_product_resolution(
             barcode, name, brand, best_image["url"], res["link"], None, res.get("metadata"),
-            perceptual_hash=best_image.get("phash"), verification_status="auto_verified",
+            perceptual_hash=res.get("phash"), verification_status="auto_verified",
             approved_by="auto", sku_key=sku_key,
         )
         local_cache_db.delete_product_failure(barcode)
@@ -370,12 +461,25 @@ def auto_approve_product(task, best_image, worksheet, link_column_index, sku_key
     return res["status"]
 
 
+DUPLICATE_WARNING = "warn:duplicate_image"
+
+
+def _warn_duplicate(best_image):
+    """تحذير مراجعة على الصورة المختارة (ومرشحها المحفوظ): نفس الصورة منشورة لمنتج آخر."""
+    url = best_image.get("url")
+    for c in [best_image] + [c for c in best_image.get("candidates") or [] if isinstance(c, dict)]:
+        if c is best_image or (url and (c.get("url") or c.get("image_url")) == url):
+            reasons = c.setdefault("reasons", [])
+            if isinstance(reasons, list) and DUPLICATE_WARNING not in reasons:
+                reasons.append(DUPLICATE_WARNING)
+
+
 def _has_human_approval(sku_key):
     """هل للـ SKU حل معتمد بشرياً في الكاش؟ (خطأ القراءة يُعامل كنعم: الأمان أولاً، فلا نشر تلقائي)."""
     if not sku_key:
         return False
     try:
-        cached = local_cache_db.get_cached_product(sku_key=sku_key)
+        cached = local_cache_db.get_cached_product(sku_key=sku_key, strict=True)
     except Exception:
         return True
     return bool(cached) and cached.get("verification_status") == "human_approved"
@@ -455,6 +559,9 @@ def pre_cache_product_candidates(task, worksheet=None, link_column_index=None, b
             _finish_task(task, "completed", failure_code=None,
                          trace={"outcome": _outcome(trace)})
             print(f"[Auto-Publish] تم نشر الصف {row_number} تلقائياً (قرار AUTO_PUBLISH).")
+            return "success"
+        if status == "superseded" or not local_cache_db.is_claim_held(task["id"], task.get("worker_id")):
+            # قرار المراجع (أو حجز أحدث) أثناء المعالجة والرفع يبقى كما هو: لا مرشحات ولا حالة فوقه
             return "success"
 
     candidates = collect_candidates(best, trace)
@@ -545,11 +652,9 @@ def process_single_product(prod, worksheet, link_column_index, brand_mappings=No
         return "success" if ok else "failed"
 
     res = publish_image(best["url"], name, brand, row_num, worksheet, link_column_index, barcode=barcode,
-                        candidate_sha256=best.get("content_sha256"),
-                        bg_method=getattr(config, "BG_REMOVAL_METHOD", None),
-                        target=getattr(config, "IMAGE_TARGET_SIZE", (0, 0)),
-                        enhance=getattr(config, 'ENABLE_IMAGE_ENHANCEMENT', False),
-                        force_review=decision != "AUTO_PUBLISH", key_size=payload["size"], key_brand=brand)
+                        candidate_sha256=best.get("content_sha256"), profile=processing_profile.current(),
+                        force_review=decision != "AUTO_PUBLISH", key_size=payload["size"], key_brand=brand,
+                        sku_key=sku_key, duplicates="review")
     if res["status"] == "failed":
         config.log_and_fail(barcode, name, brand, f"فشل النشر: {res.get('error')}")
         return "failed"

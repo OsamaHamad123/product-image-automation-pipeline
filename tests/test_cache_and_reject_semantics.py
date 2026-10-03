@@ -148,7 +148,7 @@ def test_reject_flow(bridge, monkeypatch):
     assert args[0] == "06281007000024" and args[1] == url and kwargs["reason_code"] == "WRONG_VARIANT"
     (args, kwargs), = calls["supersede_resolution"]
     assert args[0] == "06281007000024"
-    assert calls["delete_curation_candidates"] == [((14,), {"sku_key": "06281007000024"})]
+    assert calls["delete_curation_candidates"] == []      # C2: a rejection never wipes the candidate set
     (args, kwargs), = calls["status"]
     assert args[:2] == (14, "pending") and kwargs["sku_key"] == "06281007000024"
     # the sheet held exactly this URL (with the needs_review: prefix), so it is cleared
@@ -157,6 +157,17 @@ def test_reject_flow(bridge, monkeypatch):
     assert kwargs["barcode"] == "6281007000024"          # the clear itself is identity-checked
     assert ws.cell_reads == [(14, 4)]
     assert result["sheet_cleared"] is True
+
+
+def test_reject_clears_the_cell_with_the_brand_identity(bridge, monkeypatch):
+    """The clear is identity-checked with the sheet brand too, so a same-name product of another brand that moved
+    into this row number keeps its image."""
+    cli_bridge, google_sheets, calls = bridge
+    url = "https://www.carrefouruae.com/img/laban-up-strawberry.jpg"
+    monkeypatch.setattr(google_sheets, "open_worksheet", lambda client, name: FakeWorksheet(url))
+    assert _reject(cli_bridge, url, size="180ml")["sheet_cleared"] is True
+    (args, kwargs), = calls["update_image_link"]
+    assert kwargs["brand"] == "Al Rawabi" and kwargs["size"] == "180ml" and kwargs["product_name"] == "Laban Up"
 
 
 def test_reject_does_not_clear_a_different_url(bridge, monkeypatch):
@@ -248,3 +259,196 @@ def test_reject_records_phash_from_the_sent_candidate_bytes(bridge, monkeypatch)
     (args, kwargs), = calls["add_rejected_image"]
     assert kwargs["phash"] and len(kwargs["phash"]) == 16
     assert kwargs["page_url"] == "https://www.noon.com/p/1"
+
+
+# ---------------------------------------------------------------------------
+# C2: a rejection keeps the review alive
+# ---------------------------------------------------------------------------
+
+PICK = "https://www.carrefouruae.com/img/laban-up.jpg"
+ALT = "https://www.noon.com/img/laban-up-180.jpg"
+ALT2 = "https://www.lulu.ae/img/laban-up.jpg"
+
+
+def _stored(*items):
+    return [{"image_url": url, "status": status, "is_selected": int(status == "preselected"), "reasons": [],
+             "evidence": {}, "sku_key": "06281007000024", "row_number": 14} for url, status in items]
+
+
+@pytest.fixture
+def review(bridge, monkeypatch):
+    cli_bridge, google_sheets, calls = bridge
+    import local_cache_db
+    calls["stored"] = []
+    calls["excluded"] = []
+    calls["saved"] = []
+    monkeypatch.setattr(local_cache_db, "get_curation_candidates", lambda row, sku_key=None: list(calls["stored"]))
+    monkeypatch.setattr(local_cache_db, "exclude_curation_candidate",
+                        lambda row, url, sku_key=None: calls["excluded"].append((row, url, sku_key)) or 1)
+    monkeypatch.setattr(local_cache_db, "save_curation_candidates",
+                        lambda *a, **k: calls["saved"].append((a, k)) or True)
+    monkeypatch.setattr(local_cache_db, "get_tasks_by_sku", lambda sku: [])
+    monkeypatch.setattr(local_cache_db, "get_rejections", lambda sku: ([], []))
+    monkeypatch.setattr(google_sheets, "open_worksheet", lambda client, name: FakeWorksheet(""))
+    return cli_bridge, google_sheets, calls
+
+
+def test_rejecting_an_alternative_excludes_only_that_image(review):
+    cli_bridge, google_sheets, calls = review
+    calls["stored"] = _stored((PICK, "preselected"), (ALT, "eligible"), (ALT2, "eligible"))
+    result = _reject(cli_bridge, ALT)
+    assert result["status"] == "success"
+    assert calls["excluded"] == [(14, ALT, "06281007000024")]
+    assert calls["delete_curation_candidates"] == []
+    assert calls["status"] == [] and calls["supersede_resolution"] == []      # the queue row and the pick stay
+    assert result["queue_status"] is None and result["candidates_left"] == 2
+
+
+def test_rejecting_the_pick_keeps_reviewing_the_remaining_candidates(review):
+    cli_bridge, google_sheets, calls = review
+    calls["stored"] = _stored((PICK, "preselected"), (ALT, "eligible"), (ALT2, "rejected"))
+    result = _reject(cli_bridge, PICK)
+    assert calls["excluded"] == [(14, PICK, "06281007000024")]
+    (args, kwargs), = calls["status"]
+    assert args[:2] == (14, "ready_for_review") and kwargs["sku_key"] == "06281007000024"
+    assert result["queue_status"] == "ready_for_review" and result["candidates_left"] == 1
+
+
+def test_rejecting_the_pick_with_nothing_eligible_left_requeues(review):
+    cli_bridge, google_sheets, calls = review
+    calls["stored"] = _stored((PICK, "preselected"), (ALT, "rejected"), (ALT2, "excluded"))
+    result = _reject(cli_bridge, PICK)
+    (args, kwargs), = calls["status"]
+    assert args[:2] == (14, "pending") and kwargs["failure_code"] == "REJECTED"
+    assert result["queue_status"] == "pending"
+    assert calls["supersede_resolution"] == []          # nothing was approved or published: nothing to void
+
+
+def test_rejecting_a_new_pick_never_voids_another_approved_image(review):
+    """An auto-published image stays approved when the reviewer rejects another image (a research pick)."""
+    cli_bridge, google_sheets, calls = review
+    calls["approved"] = {"cloudinary_url": "https://res.cloudinary.com/demo/auto.png", "original_url": PICK,
+                         "verification_status": "auto_verified"}
+    calls["stored"] = _stored((ALT, "preselected"))
+    result = _reject(cli_bridge, ALT)
+    assert calls["supersede_resolution"] == [] and result["superseded"] == 0
+    # rejecting the auto-published image itself voids it
+    _reject(cli_bridge, PICK)
+    assert len(calls["supersede_resolution"]) == 1
+
+
+def test_rejecting_the_last_eligible_candidate_requeues(review):
+    """The pick was rejected earlier (excluded); the reviewer now rejects the only candidate left: nothing remains
+    to review, so the product goes back to the queue instead of waiting forever."""
+    cli_bridge, google_sheets, calls = review
+    calls["stored"] = _stored((PICK, "excluded"), (ALT, "eligible"), (ALT2, "rejected"))
+    assert _reject(cli_bridge, ALT)["queue_status"] == "pending"
+    (args, kwargs), = calls["status"]
+    assert args[:2] == (14, "pending")
+
+
+def test_the_catalog_pages_pick_counts_without_stored_candidates(review):
+    """The catalog page searches live (nothing stored): it says which image was the pick."""
+    cli_bridge, google_sheets, calls = review
+    assert _reject(cli_bridge, ALT, candidate_status="eligible")["queue_status"] is None
+    assert calls["status"] == []
+    assert _reject(cli_bridge, PICK, candidate_status="preselected")["queue_status"] == "pending"
+
+
+def test_a_status_already_set_is_not_written_again(review, monkeypatch):
+    """Rewriting the same status would change the row's updated_at, and the page's next approval would be refused
+    as state_changed."""
+    import local_cache_db
+    cli_bridge, google_sheets, calls = review
+    monkeypatch.setattr(local_cache_db, "get_task_by_row", lambda row: {
+        "sku_key": "06281007000024", "barcode": "6281007000024", "product_name": "Laban Up",
+        "status": "ready_for_review", "updated_at": "2026-10-03 10:00:00"})
+    calls["stored"] = _stored((PICK, "preselected"), (ALT, "eligible"))
+    result = _reject(cli_bridge, PICK)
+    assert result["queue_status"] == "ready_for_review" and calls["status"] == []
+    assert result["current"]["queue_updated_at"] == "2026-10-03 10:00:00"
+
+
+def test_research_saves_the_fresh_candidates_and_keeps_the_review(review, monkeypatch):
+    cli_bridge, google_sheets, calls = review
+    import image_search
+    calls["stored"] = _stored((PICK, "preselected"))
+    fresh = [{"url": ALT, "status": "preselected", "reasons": ["tier T1"], "page_url": "https://www.noon.com/p/1"},
+             {"url": ALT2, "status": "eligible", "reasons": []},
+             {"url": PICK, "status": "eligible", "reasons": []}]
+
+    def fake_search(query, name, brand, **kwargs):
+        assert PICK in kwargs["exclude_urls"] and kwargs["skip_cache"] is True
+        kwargs["trace"]["outcome"] = {"decision": "REVIEW_PRESELECTED", "failure_code": None}
+        return {"url": ALT, "decision": "REVIEW_PRESELECTED", "source": "serper", "preselect": True,
+                "candidates": fresh}
+
+    monkeypatch.setattr(image_search, "search_best_product_image", fake_search)
+    monkeypatch.setattr(google_sheets, "get_brand_mappings", lambda *a, **k: {})
+    result = _reject(cli_bridge, PICK, research=True)
+    assert result["status"] == "review" and result["candidates_saved"] == 2
+    (args, kwargs), = calls["saved"]
+    assert args[0] == 14 and [c["url"] for c in args[3]] == [ALT, ALT2] and args[4] == ALT
+    assert kwargs["sku_key"] == "06281007000024" and kwargs["run_id"].startswith("research-")
+    (args, kwargs), = calls["status"]
+    assert args[:2] == (14, "ready_for_review")
+    assert result["rejection"]["queue_status"] == "ready_for_review"
+
+
+def test_research_that_finds_nothing_keeps_the_remaining_candidates(review, monkeypatch):
+    cli_bridge, google_sheets, calls = review
+    import image_search
+    calls["stored"] = _stored((PICK, "preselected"), (ALT, "eligible"))
+
+    def fake_search(query, name, brand, **kwargs):
+        kwargs["trace"]["outcome"] = {"decision": "NOT_FOUND", "failure_code": "NO_RESULTS"}
+        return None
+
+    monkeypatch.setattr(image_search, "search_best_product_image", fake_search)
+    monkeypatch.setattr(google_sheets, "get_brand_mappings", lambda *a, **k: {})
+    result = _reject(cli_bridge, PICK, research=True)
+    assert result["status"] == "not_found" and result["candidates_saved"] == 0 and calls["saved"] == []
+    (args, kwargs), = calls["status"]
+    assert args[:2] == (14, "ready_for_review")                  # ALT is still there to review
+
+
+def test_research_never_reopens_a_kept_approval(review, monkeypatch):
+    cli_bridge, google_sheets, calls = review
+    import image_search
+    calls["approved"] = {"cloudinary_url": "https://res.cloudinary.com/demo/approved.png",
+                         "original_url": "https://x.ae/src.jpg", "verification_status": "human_approved"}
+
+    def fake_search(query, name, brand, **kwargs):
+        kwargs["trace"]["outcome"] = {"decision": "REVIEW_UNSELECTED"}
+        return {"url": None, "decision": "REVIEW_UNSELECTED", "source": "serper",
+                "candidates": [{"url": ALT2, "status": "eligible"}]}
+
+    monkeypatch.setattr(image_search, "search_best_product_image", fake_search)
+    monkeypatch.setattr(google_sheets, "get_brand_mappings", lambda *a, **k: {})
+    result = _reject(cli_bridge, ALT, research=True)
+    assert result["candidates_saved"] == 1 and result["rejection"]["approval_kept"] is True
+    assert calls["status"] == [] and calls["supersede_resolution"] == []
+
+
+def test_the_rejected_image_is_cleared_from_every_row_of_the_product(review, monkeypatch):
+    import local_cache_db
+    cli_bridge, google_sheets, calls = review
+
+    class Sheet(FakeWorksheet):
+        def cell(self, row, col):
+            self.cell_reads.append((row, col))
+            return FakeCell({14: f"needs_review:{PICK}", 30: PICK, 31: "https://res/other.png"}.get(row, ""))
+
+    ws = Sheet("")
+    monkeypatch.setattr(google_sheets, "open_worksheet", lambda client, name: ws)
+    monkeypatch.setattr(local_cache_db, "get_tasks_by_sku", lambda sku: [
+        {"row_number": 14, "sku_key": sku, "barcode": "6281007000024", "product_name": "Laban Up", "brand": "Al Rawabi"},
+        {"row_number": 30, "sku_key": sku, "barcode": "6281007000024", "product_name": "LABAN UP", "brand": "AL RAWABI",
+         "payload_json": '{"size": "180 ml"}'},
+        {"row_number": 31, "sku_key": sku, "barcode": "6281007000024", "product_name": "Laban Up", "brand": "Al Rawabi"}])
+    result = _reject(cli_bridge, PICK)
+    assert result["sheet_cleared"] is True
+    cleared = [(a[1], a[3], k) for a, k in calls["update_image_link"]]
+    assert [c[:2] for c in cleared] == [(14, ""), (30, "")]
+    assert cleared[1][2] == {"barcode": "6281007000024", "product_name": "LABAN UP", "size": "180 ml",
+                             "brand": "AL RAWABI"}

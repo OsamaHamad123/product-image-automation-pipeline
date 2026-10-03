@@ -29,6 +29,8 @@ def wiring(offline, monkeypatch):
                         lambda *a, **k: rec["saved"].append((a, k)) or True)
     monkeypatch.setattr(main, "auto_approve_product",
                         lambda task, best, ws, col, sku_key=None: rec["auto"].append(best) or "published")
+    # no human approval stored (an unreadable cache counts as one: the worker would never auto-publish)
+    monkeypatch.setattr(local_cache_db, "get_cached_product", lambda **k: None)
     return main, local_cache_db, rec
 
 
@@ -221,6 +223,8 @@ def test_auto_approve_not_isolated_is_not_cached(offline, monkeypatch, tmp_path)
     written, cached = [], []
     monkeypatch.setattr(google_sheets, "update_image_link", lambda ws, row, col, value, **k: written.append(value) or True)
     monkeypatch.setattr(local_cache_db, "save_product_resolution", lambda *a, **k: cached.append(k) or True)
+    monkeypatch.setattr(local_cache_db, "get_cached_product", lambda **k: None)
+    monkeypatch.setattr(local_cache_db, "find_image_owners", lambda *a, **k: [])
 
     status = main.auto_approve_product(_task(), _best("AUTO_PUBLISH"), object(), 5, sku_key="sku-laban-up")
 
@@ -250,6 +254,8 @@ def test_auto_approve_writes_with_size_and_brand_identity(offline, monkeypatch, 
     monkeypatch.setattr(google_sheets, "update_product_metadata", lambda ws, row, md, **k: metas.append(k) or True)
     monkeypatch.setattr(local_cache_db, "save_product_resolution", lambda *a, **k: True)
     monkeypatch.setattr(local_cache_db, "delete_product_failure", lambda *a, **k: True)
+    monkeypatch.setattr(local_cache_db, "get_cached_product", lambda **k: None)
+    monkeypatch.setattr(local_cache_db, "find_image_owners", lambda *a, **k: [])
 
     status = main.auto_approve_product(_task(size="180ml"), _best("AUTO_PUBLISH"), object(), 5, sku_key="sku-laban-up")
 
@@ -358,3 +364,174 @@ def test_llm_localisation_never_feeds_search_identity(wiring, monkeypatch):
     main.process_single_product(prod, object(), 5)
     assert written and written[0][2] == "حليب المراعي"                 # localisation still written back
     assert calls and calls[0]["product_name_ar"] == "" and calls[0]["brand_ar"] == ""
+
+
+# ---------------------------------------------------------------------------
+# A reviewer decides while the worker is inside publish_image (processing and upload take up to a minute)
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def race(offline, monkeypatch, tmp_path):
+    """The real pre_cache -> auto_approve -> publish_image path; the reviewer acts during the processing step."""
+    import main
+    import local_cache_db
+    import google_sheets
+    import cloudinary_storage
+    import image_processor
+    import image_search
+    from PIL import Image
+
+    rec = {"sheet": [], "resolution": [], "saved": [], "status": [], "claim": True, "approval": None,
+           "reviewer": None}
+    canvas = tmp_path / "canvas.png"
+    Image.new("RGB", (800, 800), "white").save(canvas)
+
+    def processing(*a, **k):
+        if rec["reviewer"]:
+            rec["reviewer"](rec)
+        return image_processor.ProcessResult(str(canvas), True, "photoroom", None, 800, 800)
+
+    def cached(**k):
+        if isinstance(rec["approval"], Exception):
+            raise rec["approval"]
+        return rec["approval"]
+
+    monkeypatch.setattr(image_processor, "process_product_image_result", processing)
+    monkeypatch.setattr(image_processor, "extract_metadata_from_image", lambda *a, **k: {"description_en": "x"})
+    monkeypatch.setattr(cloudinary_storage, "upload_product_image_to_cloudinary", lambda *a, **k: "https://res/a.png")
+    monkeypatch.setattr(google_sheets, "update_image_link", lambda *a, **k: rec["sheet"].append(("link", a[3])) or True)
+    monkeypatch.setattr(google_sheets, "update_product_metadata", lambda *a, **k: rec["sheet"].append(("md",)) or True)
+    monkeypatch.setattr(local_cache_db, "is_claim_held", lambda task_id, claim_id: rec["claim"])
+    monkeypatch.setattr(local_cache_db, "get_cached_product", cached)
+    monkeypatch.setattr(local_cache_db, "find_image_owners", lambda *a, **k: [])
+    monkeypatch.setattr(local_cache_db, "get_rejections", lambda sku: ([], []))
+    monkeypatch.setattr(local_cache_db, "save_product_resolution", lambda *a, **k: rec["resolution"].append(k) or True)
+    monkeypatch.setattr(local_cache_db, "delete_product_failure", lambda *a, **k: True)
+    monkeypatch.setattr(local_cache_db, "save_curation_candidates", lambda *a, **k: rec["saved"].append(a) or True)
+    monkeypatch.setattr(local_cache_db, "update_task_status",
+                        lambda task_id, status, *a, **k: rec["status"].append(status) or rec["claim"])
+    monkeypatch.setattr(image_search, "search_best_product_image",
+                        _search_returning([(_best("AUTO_PUBLISH"), {"decision": "AUTO_PUBLISH"})], []))
+    return main, rec
+
+
+def _approve_during_processing(rec):
+    # what cli_bridge.action_select_image leaves behind: the worker's claim is gone and the approval is stored
+    rec["claim"] = False
+    rec["approval"] = {"verification_status": "human_approved", "cloudinary_url": "https://res/human.png"}
+
+
+def _claim_lost_during_processing(rec):
+    rec["claim"] = False
+
+
+def _approval_stored_during_processing(rec):
+    rec["approval"] = {"verification_status": "human_approved", "cloudinary_url": "https://res/human.png"}
+
+
+def _cache_unreadable_during_processing(rec):
+    rec["approval"] = RuntimeError("MariaDB went away")
+
+
+@pytest.mark.parametrize("reviewer", [_approve_during_processing, _claim_lost_during_processing,
+                                      _approval_stored_during_processing, _cache_unreadable_during_processing])
+def test_a_decision_made_during_processing_supersedes_the_auto_publish(race, reviewer):
+    main, rec = race
+    rec["reviewer"] = reviewer
+    task = dict(_task(), worker_id="w1#claim")
+    assert main.auto_approve_product(task, _best("AUTO_PUBLISH"), object(), 5, sku_key="sku-laban-up") == "superseded"
+    assert rec["sheet"] == [] and rec["resolution"] == []
+
+
+def test_the_worker_writes_nothing_after_a_mid_processing_approval(race):
+    main, rec = race
+    rec["reviewer"] = _approve_during_processing
+    task = dict(_task(), worker_id="w1#claim")
+    result = main.pre_cache_product_candidates(task, worksheet=object(), link_column_index=5, sleep=lambda s: None)
+    assert result == "success"
+    # no sheet write, no cached resolution, no candidates over the approval, no queue status
+    assert rec["sheet"] == [] and rec["resolution"] == [] and rec["saved"] == [] and rec["status"] == []
+
+
+def test_without_a_decision_the_auto_publish_still_writes(race):
+    main, rec = race
+    task = dict(_task(), worker_id="w1#claim")
+    result = main.pre_cache_product_candidates(task, worksheet=object(), link_column_index=5, sleep=lambda s: None)
+    assert result == "success"
+    assert rec["sheet"] == [("link", "https://res/a.png"), ("md",)]
+    assert rec["resolution"][0]["verification_status"] == "auto_verified" and rec["status"] == ["completed"]
+
+
+def test_a_busy_publish_lock_writes_nothing(race, monkeypatch):
+    """Another publish of the same product holds the lock past the timeout: the worker writes nothing."""
+    import contextlib
+    import local_cache_db
+    main, rec = race
+
+    @contextlib.contextmanager
+    def busy(sku_key, timeout=None):
+        yield "busy"
+
+    monkeypatch.setattr(local_cache_db, "sku_publish_lock", busy)
+    task = dict(_task(), worker_id="w1#claim")
+    assert main.auto_approve_product(task, _best("AUTO_PUBLISH"), object(), 5, sku_key="sku-laban-up") == "superseded"
+    assert rec["sheet"] == [] and rec["resolution"] == []
+
+
+def test_an_unreadable_cache_counts_as_a_human_approval(offline, monkeypatch):
+    """get_cached_product swallowed database errors, so _has_human_approval treated an unreadable cache as
+    'no approval' (its docstring promised the opposite)."""
+    import main
+    import local_cache_db
+
+    def down():
+        raise OSError("MariaDB is down")
+
+    monkeypatch.setattr(local_cache_db, "get_db_connection", down)
+    assert local_cache_db.get_cached_product(sku_key="sku-laban-up") is None
+    with pytest.raises(OSError):
+        local_cache_db.get_cached_product(sku_key="sku-laban-up", strict=True)
+    assert main._has_human_approval("sku-laban-up") is True
+
+
+def test_a_failed_auto_publish_after_an_approval_saves_no_candidates(race, monkeypatch):
+    """Processing failed (no sheet write at all) while the reviewer approved: the worker must not put its
+    candidates and a ready_for_review status back over the approval."""
+    import image_processor
+    main, rec = race
+
+    def failing(*a, **k):
+        _approve_during_processing(rec)
+        return image_processor.ProcessResult(None, False, "photoroom", "photoroom_402")
+
+    monkeypatch.setattr(image_processor, "process_product_image_result", failing)
+    task = dict(_task(), worker_id="w1#claim")
+    result = main.pre_cache_product_candidates(task, worksheet=object(), link_column_index=5, sleep=lambda s: None)
+    assert result == "success"
+    assert rec["sheet"] == [] and rec["saved"] == [] and rec["status"] == []
+
+
+@pytest.mark.parametrize("owners, written, cached", [
+    ([], "https://res/a.png", True),
+    ([{"sku_key": "other", "product_name": "Other", "match": "url", "distance": 0}], "needs_review:https://res/a.png",
+     False),
+    (None, "needs_review:https://res/a.png", False),          # the check could not run: not published as final
+])
+def test_legacy_mode_marks_another_products_image_for_review(race, monkeypatch, owners, written, cached):
+    import config
+    import google_sheets
+    import image_search
+    import local_cache_db
+    import query_refiner
+    main, rec = race
+    monkeypatch.setattr(local_cache_db, "find_image_owners", lambda *a, **k: owners)
+    monkeypatch.setattr(query_refiner.QueryRefiner, "refine_product_metadata", staticmethod(lambda *a, **k: {}))
+    monkeypatch.setattr(google_sheets, "update_product_localization", lambda *a, **k: True)
+    monkeypatch.setattr(config, "CURATION_MODE", False, raising=False)
+    monkeypatch.setattr(config, "FORCE_OVERWRITE_IMAGES", False, raising=False)
+    monkeypatch.setattr(image_search, "search_best_product_image",
+                        _search_returning([(_best("AUTO_PUBLISH"), {"decision": "AUTO_PUBLISH"})], []))
+    prod = {"row_number": 17, "product_name": "Laban Up Strawberry 180ml", "brand": "Al Rawabi", "barcode": ""}
+    assert main.process_single_product(prod, object(), 5) == "success"
+    assert rec["sheet"][0] == ("link", written)
+    assert bool(rec["resolution"]) is cached

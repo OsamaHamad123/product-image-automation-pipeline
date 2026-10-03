@@ -7,6 +7,7 @@
 # - رفض المراجع يُسجل في rejected_images (الرابط + pHash) ويُمرر للبحث كاستبعادات.
 # - سحب المهام من الطابور ذري (UPDATE واحد مع lease) ولا تُبتلع أخطاء قاعدة البيانات.
 
+import contextlib
 import json
 import logging
 import math
@@ -453,12 +454,13 @@ def _cache_row_to_dict(row):
         "verification_status": row.get("verification_status"),
         "approved_by": row.get("approved_by"),
         "perceptual_hash": row.get("perceptual_hash"),
+        "resolved_at": row.get("resolved_at"),
         "source": "mariadb_cache",
     }
 
 
 def get_cached_product(barcode=None, product_name=None, brand=None, sku_key=None, brand_mappings=None,
-                       size_text=None):
+                       size_text=None, strict=False):
     """
     الاستعلام من الكاش. لا يخدم إلا الحلول المعتمدة (human_approved / auto_verified).
     - بـ sku_key أولاً إن مُرر.
@@ -474,6 +476,7 @@ def get_cached_product(barcode=None, product_name=None, brand=None, sku_key=None
     يُطبق هذا الفحص عندما يمرر المستدعي product_name أو brand؛ استعلام حالة الاعتماد بـ sku_key وحده لا يتغير.
     size_text: خلية الحجم (SIZE) في الشيت إن وُجدت؛ تدخل في حجم المنتج المطلوب، والسجل المخزن لا يحفظ إلا
     الاسم، فحجم لا يذكره إلا عمود الحجم لا يمكن تأكيده (يُتجاهل الكاش).
+    strict=True: خطأ قاعدة البيانات يُرفع بدل None (لمن يجب أن يعامل الخطأ كـ «يوجد اعتماد»، مثل النشر التلقائي).
     """
     barcode_clean = _cache_barcode(barcode)
     sku_clean = str(sku_key).strip() if sku_key else ""
@@ -517,6 +520,8 @@ def get_cached_product(barcode=None, product_name=None, brand=None, sku_key=None
         return _cache_row_to_dict(row) if row else None
     except Exception as e:
         logger.warning("[MariaDB Cache] خطأ أثناء القراءة من الكاش: %s", e)
+        if strict:
+            raise
         return None
 
 
@@ -644,6 +649,8 @@ def save_product_resolution(barcode, product_name, brand, original_url, cloudina
     """
     حفظ أو تحديث الحل المعتمد لمنتج (Upsert بـ sku_key، أو بالباركود إن لم يوجد sku_key).
     أحدث سجل مطابق يُحدّث، وأي سجلات مطابقة أخرى تصبح superseded.
+    حل auto_verified لا يحل أبداً محل اعتماد بشري (human_approved): إذا كان أي سجل مطابق معتمداً بشرياً
+    لا يُكتب شيء وتعيد False (مراجع اعتمد أثناء نشر العامل التلقائي).
     """
     if verification_status not in VERIFICATION_STATUSES:
         raise ValueError(f"verification_status غير صالح: {verification_status!r}")
@@ -667,10 +674,17 @@ def save_product_resolution(barcode, product_name, brand, original_url, cloudina
             existing = []
             if clauses:
                 cursor.execute(
-                    f"SELECT id FROM resolved_products WHERE {' OR '.join(clauses)} ORDER BY id DESC",
+                    f"SELECT id, verification_status FROM resolved_products WHERE {' OR '.join(clauses)} "
+                    "ORDER BY id DESC",
                     tuple(params),
                 )
-                existing = [r["id"] for r in cursor.fetchall()]
+                found = cursor.fetchall()
+                existing = [r["id"] for r in found]
+                if verification_status == "auto_verified" and any(
+                        r.get("verification_status") == "human_approved" for r in found):
+                    logger.warning("[MariaDB Cache] لا يُحفظ نشر تلقائي فوق اعتماد بشري لـ '%s' (SKU %s).",
+                                   product_name, sku_clean or barcode_clean)
+                    return False
             values = (barcode_raw, product_name, brand, original_url, cloudinary_url, clip_score,
                       metadata_str, embedding_str, hash_str, sku_clean or None, verification_status, approved_by)
             if existing:
@@ -741,6 +755,120 @@ def supersede_resolution(sku_key, barcode=None):
     except Exception as e:
         logger.warning("[MariaDB Cache] فشل إلغاء الحل السابق لـ %s: %s", sku_key, e)
         return None
+
+
+# صورة منشورة «لمنتج آخر»: نفس رابط Cloudinary، أو pHash للوحة النهائية على هذه المسافة أو أقل
+DUPLICATE_PHASH_DISTANCE = 4
+
+
+def _phash_int(value):
+    """pHash بصيغة v2 (16 خانة hex، catalog_match.fetch.phash_hex) كعدد، أو None لغير ذلك (القيم القديمة)."""
+    text = str(value or "").strip().lower()
+    if len(text) != 16:
+        return None
+    try:
+        return int(text, 16)
+    except ValueError:
+        return None
+
+
+def find_image_owners(cloudinary_url=None, phash=None, sku_key=None, product_name=None,
+                      max_distance=DUPLICATE_PHASH_DISTANCE):
+    """
+    المنتجات الأخرى التي نُشرت لها نفس الصورة: نفس رابط Cloudinary (الرفع يسمي الملف ببصمة بايتاته، فنفس
+    اللوحة = نفس الرابط)، أو pHash اللوحة النهائية على مسافة max_distance أو أقل. يقرأ الحلول المعتمدة فقط
+    (human_approved / auto_verified). «منتج آخر» = sku_key مختلف؛ سجل قديم بلا sku_key يُعد منتجاً آخر إذا اختلف
+    اسمه. تعيد [{sku_key, product_name, brand, cloudinary_url, verification_status, match, distance}] (منتج واحد
+    لكل مالك، الأقرب أولاً)، أو None عند خطأ قاعدة البيانات (النشر التلقائي يعامله كتكرار).
+    """
+    url = str(cloudinary_url or "").strip()
+    target = _phash_int(phash)
+    if not url and target is None:
+        return []
+    sku = str(sku_key or "").strip()
+    name = " ".join(str(product_name or "").lower().split())
+    try:
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT sku_key, product_name, brand, cloudinary_url, perceptual_hash, verification_status "
+                f"FROM resolved_products WHERE {_SERVABLE_SQL} AND (cloudinary_url = %s "
+                "OR (perceptual_hash IS NOT NULL AND perceptual_hash <> ''))",
+                (url,),
+            )
+            rows = cursor.fetchall()
+        finally:
+            _close(conn)
+    except Exception as e:
+        logger.warning("[MariaDB Cache] تعذر فحص تكرار الصورة المنشورة: %s", e)
+        return None
+    owners = {}
+    for r in rows:
+        owner_sku = str(r.get("sku_key") or "").strip()
+        owner_name = " ".join(str(r.get("product_name") or "").lower().split())
+        if owner_sku and sku:
+            if owner_sku == sku:
+                continue
+        elif owner_name == name:
+            continue
+        match, distance = None, None
+        if url and str(r.get("cloudinary_url") or "").strip() == url:
+            match, distance = "url", 0
+        else:
+            other = _phash_int(r.get("perceptual_hash"))
+            if target is not None and other is not None:
+                d = bin(target ^ other).count("1")
+                if d <= max_distance:
+                    match, distance = "phash", d
+        if match is None:
+            continue
+        key = owner_sku or f"name:{owner_name}"
+        if key in owners and owners[key]["distance"] <= distance:
+            continue
+        owners[key] = {"sku_key": owner_sku or None, "product_name": r.get("product_name"), "brand": r.get("brand"),
+                       "cloudinary_url": r.get("cloudinary_url"), "verification_status": r.get("verification_status"),
+                       "match": match, "distance": distance}
+    return sorted(owners.values(), key=lambda o: o["distance"])
+
+
+# مهلة انتظار قفل النشر لنفس الـ SKU (عامل آخر أو مراجع يكتب نفس المنتج الآن)
+PUBLISH_LOCK_SECONDS = 60
+
+
+@contextlib.contextmanager
+def sku_publish_lock(sku_key, timeout=PUBLISH_LOCK_SECONDS):
+    """
+    قفل MariaDB مسمى (GET_LOCK) لكل SKU حول «إعادة التحقق ثم الكتابة في الشيت» عند النشر: النشر التلقائي
+    واعتماد المراجع لنفس المنتج لا يتداخلان، فمن يكتب ثانياً يرى ما سجله الأول قبل أن يكتب.
+    يعطي 'held' عند الحصول عليه، و'busy' إذا انتهت المهلة والقفل عند غيره، و'unavailable' إذا تعذر الاتصال
+    بقاعدة البيانات (المستدعي يعيد التحقق بنفسه، والتحقق يفشل مغلقاً عند تعطل القاعدة)، و'none' بلا sku_key.
+    القفل يُحرر عند الخروج، أو تلقائياً إذا انقطع الاتصال (توقف العملية لا يتركه معلقاً).
+    """
+    sku = str(sku_key or "").strip()
+    if not sku:
+        yield "none"
+        return
+    name = f"lq_publish:{sku}:{os.getenv('DB_DATABASE', 'automation_db')}"[:64]
+    conn, state = None, "unavailable"
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT GET_LOCK(%s, %s) AS got", (name, int(timeout)))
+        state = "held" if (cursor.fetchone() or {}).get("got") == 1 else "busy"
+    except Exception as e:
+        logger.warning("[MariaDB Publish] تعذر أخذ قفل النشر للـ SKU %s: %s", sku, e)
+        state = "unavailable"
+    try:
+        yield state
+    finally:
+        if conn is not None:
+            if state == "held":
+                try:
+                    conn.cursor().execute("SELECT RELEASE_LOCK(%s) AS released", (name,))
+                except Exception:
+                    pass
+            _close(conn)
 
 
 def find_visual_duplicate(target_embedding, threshold=0.96):
@@ -1376,6 +1504,28 @@ def get_task_by_row(row_number):
         return None
 
 
+def get_tasks_by_sku(sku_key):
+    """
+    صفوف الطابور لهذا الـ sku_key مرتبة برقم الصف: نفس المنتج قد يتكرر في أكثر من صف بالشيت، والاعتماد يُكتب
+    في كل صفوفه. أخطاء قاعدة البيانات تُسجل وتعيد [] (يُكتب الصف المطلوب وحده كما كان).
+    """
+    sku = str(sku_key or "").strip()
+    if not sku:
+        return []
+    try:
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM automation_queue WHERE sku_key = %s ORDER BY `row_number`", (sku,))
+            rows = cursor.fetchall()
+        finally:
+            _close(conn)
+        return [dict(r) for r in rows]
+    except Exception as e:
+        logger.warning("[MariaDB Queue] فشل قراءة صفوف الطابور للـ SKU %s: %s", sku, e)
+        return []
+
+
 def _trace_to_json(trace):
     if trace is None:
         return None
@@ -1453,6 +1603,30 @@ def update_task_status_by_row(row_number, status, error_message=None, failure_co
     except Exception as e:
         logger.warning("[MariaDB Queue] فشل تحديث حالة المهمة للصف %s: %s", row_number, e)
         return False
+
+
+def release_worker_claims(row_number, sku_key=None):
+    """
+    يسحب حجز العامل عن صفوف هذا المنتج قيد المعالجة (worker_id = NULL) دون تغيير حالتها: قرار مراجع على وشك
+    الكتابة في الشيت، فالعامل الذي يعالج نفس المنتج يفقد ملكية الحجز (is_claim_held) ولا ينشر فوقه ولا يكتب
+    حالته. الصف يبقى 'processing' حتى يكتب المراجع حالته، أو حتى ينتهي الحجز فيُسحب من جديد إن فشل الاعتماد.
+    تعيد عدد الصفوف، أو None عند خطأ قاعدة البيانات.
+    """
+    clause, params = _row_or_sku_clause(row_number, sku_key)
+    try:
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(f"UPDATE automation_queue SET worker_id = NULL WHERE {clause} AND status = 'processing' "
+                           "AND worker_id IS NOT NULL", params)
+            affected = cursor.rowcount
+            conn.commit()
+        finally:
+            _close(conn)
+        return affected
+    except Exception as e:
+        logger.warning("[MariaDB Queue] تعذر سحب حجز العامل عن الصف %s: %s", row_number, e)
+        return None
 
 
 def get_queue_statistics():
@@ -1546,9 +1720,11 @@ def _as_int(value):
 
 def save_curation_candidates(row_number, product_name, brand, candidates, best_url=None, sku_key=None, run_id=None):
     """
-    استبدال مرشحات الصف بمرشحات التشغيل الحالي في معاملة واحدة.
+    استبدال مرشحات المنتج بمرشحات التشغيل الحالي في معاملة واحدة.
     تُحفظ الحالة والأسباب والأدلة وقراءة VLM لكل مرشح. is_selected=1 فقط للحالة 'preselected'
     (best_url لم يعد يحدد الاختيار المسبق). تعيد True عند النجاح و False عند أي خطأ (مع التراجع).
+    الحذف بنفس قاعدة القراءة (_row_or_sku_clause): مرشحات هذا الـ sku_key، ورقم الصف فقط للصفوف القديمة بلا
+    sku_key؛ فمنتج انتقل إلى رقم صف منتج آخر بعد تعديل الشيت لا يمسح مرشحات ذلك المنتج.
     """
     run_id = run_id or uuid.uuid4().hex[:16]
     try:
@@ -1558,7 +1734,8 @@ def save_curation_candidates(row_number, product_name, brand, candidates, best_u
         return False
     try:
         cursor = conn.cursor()
-        cursor.execute("DELETE FROM curation_candidates WHERE `row_number` = %s", (row_number,))
+        clause, params = _row_or_sku_clause(row_number, sku_key)
+        cursor.execute(f"DELETE FROM curation_candidates WHERE {clause}", params)
         seen = set()
         for c in candidates or []:
             url = (c.get("url") or c.get("image_url") or "").strip()
@@ -1666,6 +1843,28 @@ def _row_or_sku_clause(row_number, sku_key):
     if sku_key:
         return "(sku_key = %s OR (sku_key IS NULL AND `row_number` = %s))", (str(sku_key).strip(), row_number)
     return "`row_number` = %s", (row_number,)
+
+
+def exclude_curation_candidate(row_number, image_url, sku_key=None):
+    """
+    رفض المراجع لصورة واحدة: يُعلَّم مرشحها وحده 'excluded' (ولا يبقى مختاراً)، وباقي مرشحات المنتج تبقى
+    للمراجعة. تعيد عدد الصفوف، أو None عند خطأ قاعدة البيانات.
+    """
+    clause, params = _row_or_sku_clause(row_number, sku_key)
+    try:
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(f"UPDATE curation_candidates SET status = 'excluded', is_selected = 0 "
+                           f"WHERE {clause} AND image_url = %s", params + (image_url,))
+            affected = cursor.rowcount
+            conn.commit()
+        finally:
+            _close(conn)
+        return affected
+    except Exception as e:
+        logger.warning("[Curation] فشل استبعاد المرشح المرفوض للصف %s: %s", row_number, e)
+        return None
 
 
 def delete_curation_candidates(row_number, sku_key=None):
