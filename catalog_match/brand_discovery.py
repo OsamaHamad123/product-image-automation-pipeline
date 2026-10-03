@@ -14,15 +14,19 @@ the sheet's brand (title, page title or the page's own URL slug). The words that
 title, page title and slug (after 'Buy' / 'Shop') are compared with the sheet brand:
   * spelling: the same number of words, exactly one word one edit away (a letter added, dropped or
     changed, or two neighbours swapped), never on its first or last letter, the word 4+ letters and
-    the brand 7+ letters. 'rio marie' -> 'rio mare', 'ina paramans' -> 'ina paarmans'; 'american' is
+    the brand 7+ letters (the sheet's and the store's). 'rio marie' -> 'rio mare', 'ina paramans' -> 'ina paarmans'; 'american' is
     never 'americana' (the last letter differs: that is another brand, not a typo);
   * abbreviation: only for a sheet brand written with '/' or '.' or with a one-letter word, of 2+
     words; every sheet word starts its store word, at least one store word is longer, the first sheet
     word keeps 3+ letters and the store phrase 6+ letters. 'sup t' -> 'super tasty'.
 The store phrase counts only where the same text also names one of the product-type words (sheet words
 written together count: 'SOLIDTUNA' in 'Solid Tuna'), it must come from a UAE store (a known UAE
-retailer outside its other-country sections, or a .ae site) or from two different sites, and it must
-not be a known other brand.
+retailer outside its other-country sections, a .ae site, or a site's UAE section such as Tradeling's
+'/ae-en/') or from two different sites, and it must not be a known other brand. Sites are the listing
+pages' own hosts (a listing without a page counts for nothing: its image host may be the same store's
+CDN), never a social network or a stock-photo site. When two different store phrases qualify ('American
+Gold' and 'American Garden' for 'AMERICAN G/'), nothing is discovered: which brand the sheet means is
+the sheet owner's call, never a guess.
 
 apply() makes the spec accept the store spelling: it is added to match_brands (scoring, the label
 reader's accepted names and its brand check) and to discovered_brands (queries write it, the prompt
@@ -99,7 +103,7 @@ def _one_inner_edit(sheet: str, store: str) -> bool:
 
 def spelling_of(sheet: Sequence[str], store: Sequence[str]) -> bool:
     """The store words are the sheet brand with one typo (see the module docstring)."""
-    if len(sheet) != len(store) or sum(len(w) for w in store) < MIN_SPELLING_LETTERS:
+    if len(sheet) != len(store) or min(sum(len(w) for w in sheet), sum(len(w) for w in store)) < MIN_SPELLING_LETTERS:
         return False
     diffs = [(s, w) for s, w in zip(sheet, store) if s != w]
     return len(diffs) == 1 and _one_inner_edit(*diffs[0])
@@ -155,18 +159,25 @@ def names_the_product(spec: SkuSpec, text: str) -> bool:
 
 
 def _domain(cand: Candidate) -> str:
-    from .score import page_host
-    return page_host(cand) or url_host(cand.image_url)
+    """The listing page's own host; '' without a page, or for a social network or a stock-photo site."""
+    from .decide import _social_host
+    from .score import trusted_domains
+    from .text_norm import domain_matches
+    host = url_host(cand.page_url) if cand.page_url else ""
+    if not host or _social_host(host) or domain_matches(host, trusted_domains().get("stock_or_clipart", [])):
+        return ""
+    return host
 
 
 def _uae_store(cand: Candidate) -> bool:
-    """A known UAE retailer outside its other-country sections, or any .ae site."""
+    """A known UAE retailer outside its other-country sections, a .ae site, or a site's UAE section ('/ae-en/')."""
     from .score import trusted_domains
     from .text_norm import domain_matches
     host = _domain(cand)
-    if not host or store_market(cand.page_url) == "foreign":
+    market = store_market(cand.page_url)
+    if not host or market == "foreign":
         return False
-    return host.endswith(".ae") or domain_matches(host, trusted_domains().get("uae_retailers", []))
+    return host.endswith(".ae") or market == "uae" or domain_matches(host, trusted_domains().get("uae_retailers", []))
 
 
 def states_the_brand(spec: SkuSpec, cands: Iterable[Candidate]) -> bool:
@@ -194,6 +205,8 @@ def discover(spec: SkuSpec, cands: Iterable[Candidate]) -> Optional[Discovery]:
         return None
     found: Dict[str, Dict] = {}
     for cand in cands:
+        if not _domain(cand):
+            continue                       # no page of its own, or a social / stock site: not a store's word
         for text in _texts(cand):
             lead = _leading(text)
             if not lead or not names_the_product(spec, text):
@@ -218,6 +231,10 @@ def discover(spec: SkuSpec, cands: Iterable[Candidate]) -> Optional[Discovery]:
             continue                         # a known other brand is never a spelling of this one
         ranked.append((not e["uae"], -len(e["domains"]), key, e))
     if not ranked:
+        return None
+    if len({key.replace(" ", "") for _, _, key, _ in ranked}) > 1:
+        logger.info("brand discovery sku=%s: %r could be %s; not guessed", spec.sku_key, spec.brand_raw,
+                    " or ".join(repr(k) for _, _, k, _ in sorted(ranked)))
         return None
     _, _, key, e = sorted(ranked)[0]
     found_one = Discovery(phrase=key, display=" ".join(w.capitalize() for w in key.split()), kind=e["kind"],

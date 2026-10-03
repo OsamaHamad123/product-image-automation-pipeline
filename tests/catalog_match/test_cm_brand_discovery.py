@@ -72,6 +72,7 @@ def test_osa_distance_counts_a_swap_as_one_edit():
     ("rio marie", "rio mar", False),               # two edits
     ("rio marie", "rio marie", False),             # the same: nothing to discover
     ("rio marie", "rio mare tuna", False),         # another number of words
+    ("lurpak", "lurpack", False),                  # the sheet brand is under 7 letters
 ])
 def test_a_spelling_is_one_inner_edit_of_a_long_enough_brand(sheet, store, ok):
     assert bd.spelling_of(sheet.split(), store.split()) is ok
@@ -161,6 +162,42 @@ def test_one_foreign_site_is_not_enough_two_sites_are():
     assert bd.discover(RIO, foreign) is None
     second = listing("Rio Mare Light Meat Tuna in Sunflower Oil", "https://www.example-grocer.com/rio-mare-tuna", 1)
     assert bd.discover(RIO, foreign + [second]).domains == ("carrefourksa.com", "example-grocer.com")
+
+
+TRADELING = "https://www.tradeling.com/ae-en/product/{}/{}"
+
+
+def test_a_sites_uae_section_is_a_uae_store():
+    # rows 50-51: the only 'Super Tasty' listings were Tradeling's '/ae-en/' pages
+    sup = spec("SUPER T/WHITE MEAT SOLID TUNA IN WATER 185GM", "SUPER T/")
+    found = bd.discover(sup, [listing("Super Tasty White Meat Solid Tuna In Water 185g",
+                                      TRADELING.format("super-tasty-white-meat-tuna", 1))])
+    assert found is not None and found.display == "Super Tasty"
+    sa = listing("Super Tasty White Meat Solid Tuna In Water 185g",
+                 "https://www.tradeling.com/sa-en/product/super-tasty-white-meat-tuna/1")
+    assert bd.discover(sup, [sa]) is None                                # its Saudi section is not
+
+
+def test_an_abbreviation_two_brands_could_expand_to_is_never_guessed():
+    # 'AMERICAN G/': American Gold on Lulu and noon, American Garden on Carrefour; the sheet has both brands
+    amg = spec("AMERICAN G/ SWEET CORN 400G", "AMERICAN G/")
+    cands = [listing("American Gold Sweet Corn 400g", LULU.format("american-gold-sweet-corn-400g", 1), 1),
+             listing("American Gold Sweet Corn 400 g", "https://www.noon.com/uae-en/american-gold-sweet-corn/N1/p/", 2),
+             listing("American Garden Sweet Corn 400g",
+                     "https://www.carrefouruae.com/mafuae/en/canned/american-garden-sweet-corn-400g/p/3", 3)]
+    assert bd.discover(amg, cands) is None
+    assert bd.discover(amg, cands[:2]).display == "American Gold"        # one candidate brand: found
+
+
+def test_stock_sites_listings_without_a_page_and_a_stores_cdn_never_vouch_for_a_spelling():
+    getty = listing("Rio Mare Light Meat Tuna 70g", "https://www.gettyimages.ae/detail/photo/rio-mare-tuna/1", 1)
+    assert bd.discover(RIO, [getty]) is None                             # a .ae stock site is not a store
+    foreign = listing("Rio Mare Light Meat Tuna 70g", "https://www.example-shop.de/rio-mare-tuna-70g", 2)
+    no_page = Candidate(image_url="https://cdn.example-shop.net/rio-mare-tuna.jpg", page_url="",
+                        title="Rio Mare Light Meat Tuna 70g", provider="serper", rank=3)
+    assert bd.discover(RIO, [foreign, no_page]) is None                 # one site, not two
+    other = listing("Rio Mare Light Meat Tuna 70g", "https://www.another-shop.it/rio-mare-tuna-70g", 4)
+    assert bd.discover(RIO, [foreign, other]).display == "Rio Mare"
 
 
 def test_the_store_spelling_must_open_a_listing_of_the_same_kind_of_product():
