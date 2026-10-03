@@ -315,22 +315,30 @@ def view(r):
     }
 
 
-@pytest.fixture
-def recorded(tmp_path, capsys):
-    """One recording run of the three rows: (world, cassette folder, the run's --json document)."""
+@pytest.fixture(scope="module")
+def recording(tmp_path_factory):
+    """One recording run of the rows for the whole module: (world, cassette folder, the run's --json document)."""
+    base = tmp_path_factory.mktemp("recording")
     world = build_world()
-    rows = tmp_path / "rows.csv"
+    rows = base / "rows.csv"
     rows.write_text(ROWS_CSV, encoding="utf-8")
-    out, folder = tmp_path / "after.json", tmp_path / "cassette_test"
+    out, folder = base / "after.json", base / "cassette_test"
     smoke = _load("smoke_live_record_under_test", "smoke_live.py")
-    with live(world, tmp_path):
+    printed = io.StringIO()
+    with live(world, base), contextlib.redirect_stdout(printed):
         code = smoke.main(["--rows-file", str(rows), "--dry-run", "--json", str(out), "--record", str(folder)])
         _wait_background_reads()
     assert code == 0
-    printed = capsys.readouterr().out
-    assert f"cassette {folder}" in printed and "replay_run.py" in printed
     return {"world": world, "folder": folder, "doc": json.loads(out.read_text(encoding="utf-8")),
-            "rows": rows, "smoke": smoke, "printed": printed}
+            "rows": rows, "smoke": smoke, "printed": printed.getvalue()}
+
+
+@pytest.fixture
+def recorded(recording, tmp_path):
+    """The module's recording, with a private copy of its cassette (a test may top it up)."""
+    folder = tmp_path / "cassette_test"
+    shutil.copytree(recording["folder"], folder)
+    return dict(recording, folder=folder)
 
 
 def replay(folder, out, *extra):
@@ -343,7 +351,8 @@ def replay(folder, out, *extra):
 # Tests
 # ---------------------------------------------------------------------------
 
-def test_the_recording_run_decides_as_the_fake_web_intends(recorded):
+def test_the_recording_run_decides_as_the_fake_web_intends(recorded, recording):
+    assert f"cassette {recording['folder']}" in recorded["printed"] and "replay_run.py" in recorded["printed"]
     rows = {r["row"]: r for r in recorded["doc"]["rows"]}
     assert not [r for r in rows.values() if "error" in r], rows
     assert rows[2]["decision"] == "REVIEW_PRESELECTED" and rows[2]["winner"] == "https://cdn.carrefouruae.com/a1.jpg"
@@ -375,6 +384,13 @@ def test_the_replay_decides_exactly_as_the_recording_offline(recorded, tmp_path)
     assert doc["replay"]["outbound_attempts"] == 0 and doc["replay"]["complete"] == 4
     assert doc["format"] == "smoke_live/2" and doc["summary"]["rows"] == 4
     assert not (tmp_path / "replayed.misses.json").exists()
+    # compare_runs.py reads the replay like any dry run: nothing changed
+    (tmp_path / "after.json").write_text(json.dumps(recorded["doc"]), encoding="utf-8")
+    compare = _load("compare_runs_under_test", "compare_runs.py")
+    assert compare.main([str(tmp_path / "after.json"), str(tmp_path / "replayed.json"),
+                         "--out", str(tmp_path / "compare.txt")]) == 0
+    report = (tmp_path / "compare.txt").read_text(encoding="utf-8")
+    assert "ROWS WHOSE DECISION CHANGED (0)" in report and "OTHER PICK, WARNINGS OR REASON (0)" in report
 
 
 def test_the_replay_works_from_a_zip_of_the_cassette(recorded, tmp_path):
@@ -384,6 +400,21 @@ def test_the_replay_works_from_a_zip_of_the_cassette(recorded, tmp_path):
     assert code == 0
     assert [view(r) for r in doc["rows"]] == [view(r) for r in recorded["doc"]["rows"]]
     assert all(r["replay"]["complete"] for r in doc["rows"])
+
+
+def test_a_late_index_read_the_run_never_saw_finish_is_not_a_miss(recorded, tmp_path):
+    # the run can end before a page read it gave up on finishes: the cassette then has no answer for it
+    folder = tmp_path / "cassette_cut"
+    shutil.copytree(recorded["folder"], folder)
+    slow = next(iter(recorded["world"].slow))
+    lines = (folder / "http.jsonl").read_text(encoding="utf-8").splitlines()
+    kept = [x for x in lines if json.loads(x)["request"].get("url") != slow]
+    assert len(kept) == len(lines) - 1
+    (folder / "http.jsonl").write_text("\n".join(kept) + "\n", encoding="utf-8")
+    code, doc = replay(folder, tmp_path / "cut.json")
+    assert code == 0
+    assert [view(r) for r in doc["rows"]] == [view(r) for r in recorded["doc"]["rows"]]
+    assert all(r["replay"]["complete"] for r in doc["rows"]), [r["replay"] for r in doc["rows"]]
 
 
 def test_no_key_header_or_token_is_stored(recorded):

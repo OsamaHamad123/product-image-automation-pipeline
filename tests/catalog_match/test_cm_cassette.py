@@ -301,6 +301,30 @@ def test_attempts_replay_in_order_and_a_retry_after_a_failure_is_not_invented(tm
     assert cas.row_report(4)["complete"]
 
 
+def test_a_zip_made_on_windows_replays(tmp_path):
+    import zipfile
+
+    folder = tmp_path / "cassette_win"
+    cas = cassette.install("record", str(folder))
+    cas.write_meta({"format": cassette.FORMAT})
+    with cassette.row(2):
+        cassette.http("fetch", "GET", URLS["ok"], lambda: Resp(200, jpeg((1, 2, 3))), stream=True,
+                      max_bytes=10 ** 7).close()
+    cassette.uninstall()
+    archive = tmp_path / "cassette_win.zip"
+    with zipfile.ZipFile(archive, "w") as zf:            # PowerShell 5.1 Compress-Archive: backslash names
+        for path in folder.rglob("*"):
+            if path.is_file():
+                zf.write(path, "cassette_win\\" + str(path.relative_to(folder)).replace("/", "\\"))
+    cas = cassette.install("replay", str(archive))
+    assert cas.read_meta() == {"format": cassette.FORMAT}
+    with cassette.row(2):
+        resp = cassette.http("fetch", "GET", URLS["ok"], lambda: pytest.fail("no live call"), stream=True)
+    assert b"".join(resp.iter_content(4096)) == jpeg((1, 2, 3))
+    with pytest.raises(ValueError):
+        cassette.install("fill", str(archive))            # a zip is read-only
+
+
 # ---------------------------------------------------------------------------
 # Label readers
 # ---------------------------------------------------------------------------
@@ -479,6 +503,10 @@ def test_index_rows_and_the_read_deadline_replay_without_the_database(tmp_path):
     with cassette.offline(), cassette.row(8), pytest.raises(cassette.NotRecorded):
         cassette.local_index_rows(other, lambda: [])
 
+    # a replayed page read is not news for the index: nothing is written back
+    store = local_index.DbCatalogStore(connect=lambda: pytest.fail("a replay wrote to the index"))
+    store.save_page(1, local_index.PageRecord(status="ok", image_url="https://x/1.jpg"))
+
 
 # ---------------------------------------------------------------------------
 # Secrets
@@ -496,7 +524,9 @@ def test_no_key_reaches_the_cassette(tmp_path, monkeypatch):
     cse_url = "https://www.googleapis.com/customsearch/v1"
     cse_ok = {"items": [{"link": "https://cdn.example.ae/1.jpg", "title": "Almarai Milk",
                          "image": {"contextLink": "https://www.example.ae/p/1", "width": 800, "height": 800}}]}
-    session = Session({lens_url: Resp(200, json.dumps(echo).encode(), "application/json"),
+    cut = requests.exceptions.ConnectionError(
+        f"HTTPSConnectionPool: Max retries exceeded with url: /search.json?engine=google_lens&api_key={serpapi_key}")
+    session = Session({lens_url: [Resp(200, json.dumps(echo).encode(), "application/json"), cut],
                        cse_url: [Resp(403, f'{{"error": "key {cse_keys[0]} refused"}}'.encode(), "application/json"),
                                  Resp(200, json.dumps(cse_ok).encode(), "application/json")]})
     folder = tmp_path / "cas"
@@ -505,8 +535,14 @@ def test_no_key_reaches_the_cassette(tmp_path, monkeypatch):
         lens = SerpApiLensProvider(api_key=serpapi_key, session=session, bucket=UNLIMITED).search(
             "https://cdn.example.ae/seed.jpg", "en", SPEC)
         cse = CseLegacyProvider(cse_keys, cse_cx, session=session, bucket=UNLIMITED).search("Almarai milk", "en", SPEC)
+    # and without any redact function, a transport error's URL loses its key
     cassette.uninstall()
-    assert lens.status == "ok" and cse.status == "ok"
+    cassette.install("fill", str(folder))
+    with cassette.row(3):
+        failed = SerpApiLensProvider(api_key=serpapi_key, session=session, bucket=UNLIMITED).search(
+            "https://cdn.example.ae/other.jpg", "en", SPEC)
+    cassette.uninstall()
+    assert lens.status == "ok" and cse.status == "ok" and failed.status == "error"
     for path in folder.rglob("*"):
         if path.is_file():
             data = path.read_bytes()

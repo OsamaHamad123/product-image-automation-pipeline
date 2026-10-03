@@ -102,6 +102,7 @@ _SECRET_PARAM_RE = re.compile(r"(?i)^(api_?key|apikey|key|cx|x-api-key|x-goog-ap
                               r"access_token|secret|password|auth|signature)$")
 # Settings that are secrets: a cassette keeps only whether they were set (or how many there were).
 _SECRET_SETTING_RE = re.compile(r"(?i)(KEY|SECRET|TOKEN|PASSWORD|PROXY_URL|_CX)")
+_KEY_IN_TEXT_RE = re.compile(r"(?i)((?:api_?)?key=)[^&\s'\"]+")
 _FENCE_RE = re.compile(r"^\s*```(?:json)?\s*|\s*```\s*$", re.IGNORECASE)
 
 
@@ -384,8 +385,10 @@ class Replayed:
 
 
 def _exc_info(exc: BaseException, redact: Callable[[str], str]) -> Dict[str, Any]:
+    # a transport error's text can hold the request URL, and SerpApi's carries the key in its query
+    message = _KEY_IN_TEXT_RE.sub(r"\1[hidden]", redact(str(exc)))[:500]
     info: Dict[str, Any] = {"module": type(exc).__module__, "type": type(exc).__name__,
-                            "mro": [c.__name__ for c in type(exc).__mro__], "message": redact(str(exc))[:500]}
+                            "mro": [c.__name__ for c in type(exc).__mro__], "message": message}
     status = getattr(exc, "status_code", None)
     if isinstance(status, int):
         info["status_code"] = status
@@ -505,12 +508,15 @@ class _Store:
         self._prefix = ""
         self._lock = threading.Lock()
         self._handles: Dict[str, Any] = {}
+        self._names: Dict[str, str] = {}
         self.closed = False
         if os.path.isfile(self.path) and zipfile.is_zipfile(self.path):
             if writable:
                 raise ValueError(f"{self.path}: a zipped cassette can only be replayed; unzip it to record into it")
             self._zip = zipfile.ZipFile(self.path)
-            metas = sorted((n for n in self._zip.namelist() if n.endswith(META_FILE)), key=len)
+            # Windows PowerShell 5.1's Compress-Archive stores 'folder\\file': names are matched with '/'
+            self._names = {n.replace("\\", "/"): n for n in self._zip.namelist()}
+            metas = sorted((n for n in self._names if n.endswith(META_FILE)), key=len)
             self._prefix = metas[0][:-len(META_FILE)] if metas else ""
         elif writable:
             os.makedirs(os.path.join(self.path, BLOB_DIR), exist_ok=True)
@@ -519,11 +525,11 @@ class _Store:
 
     def read_bytes(self, name: str) -> Optional[bytes]:
         if self._zip is not None:
+            member = self._names.get(self._prefix + name)
+            if member is None:
+                return None
             with self._lock:
-                try:
-                    return self._zip.read(self._prefix + name)
-                except KeyError:
-                    return None
+                return self._zip.read(member)
         try:
             with open(os.path.join(self.path, name), "rb") as fh:
                 return fh.read()
@@ -692,6 +698,13 @@ class Cassette:
         logger.warning("cassette: row %s: no recorded answer for %s %s", self._row, kind,
                        what.get("url") or what.get("model") or "")
 
+    def _forget_misses(self, row: int, kind: str, urls: Iterable[str]) -> None:
+        urls = set(urls)
+        with self._lock:
+            rep = self._report(row)
+            rep["misses"] = [m for m in rep["misses"]
+                             if not (m.get("kind") == kind and (m.get("request") or {}).get("url") in urls)]
+
     def _approx(self, text: str) -> None:
         with self._lock:
             rep = self._report(self._row)
@@ -818,7 +831,8 @@ class Cassette:
         try:
             value = {"value": live()}
         except Exception as exc:
-            value = {"raise": f"{type(exc).__name__}: {self.redact(str(exc))[:200]}"}
+            text = _KEY_IN_TEXT_RE.sub(r"\1[hidden]", self.redact(str(exc)))[:200]
+            value = {"raise": f"{type(exc).__name__}: {text}"}
         self._write(file, {"kind": "event", "name": name, "row": row, "n": n, "value": value})
         return self._event_value(value)
 
@@ -1189,6 +1203,9 @@ class Cassette:
                 self._served()
                 in_time = set(entry.get("done") or [])
                 ready = {f for f in futures if urls[f] in in_time and f.done()}
+                # a read the live run gave up on is discarded here too: its answer (maybe never recorded,
+                # the run may have ended first) is not a miss
+                self._forget_misses(row, "page", {urls[f] for f in futures if f not in ready})
                 return ready, set(futures) - ready
         self._write(INDEX_FILE, {"kind": "deadline", "key": key, "request": request, "row": row, "attempt": attempt,
                                  "done": sorted(urls[f] for f in done)})
