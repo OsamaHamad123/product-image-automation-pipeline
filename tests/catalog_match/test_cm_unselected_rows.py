@@ -374,3 +374,34 @@ def test_a_site_name_segment_that_names_the_product_is_kept():
 def test_the_suggested_mapping_no_longer_lists_mehranfoods_as_official():
     mehran = [v for v in suggested_mappings().values() if v.get("brand") == "Mehran"]
     assert len(mehran) == 1 and "mehranfoods.com" not in (mehran[0].get("official_domains") or [])
+
+
+# ---------------------------------------------------------------------------
+# 7. A mapped misspelling is never sent again next to the right name
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("row, name, brand, q1", [
+    (45, "RIO MARIE LIGHT MEAT TUNA IN SUN OIL 3X70GM", "RIO MARIE",
+     "Rio Mare LIGHT MEAT TUNA IN SUNFLOWER OIL 3x70g"),                 # was 'Rio Mare RIO MARIE LIGHT ...'
+    (49, "SUP/T WT/MEAT SOLIDTUNA SALTWATER 185GM", "SUP/T",
+     "Super Tasty WHITE MEAT SOLID TUNA SALT WATER 185g"),                # was 'Super Tasty SUP/T WT/MEAT ...'
+    (52, "SUPER/T LIGHT MEAT TUNA SOBEANOIL 185GM", "SUPER/T", "Super Tasty LIGHT MEAT TUNA SOYBEAN OIL 185g"),
+    (37, "INA PARAMANS SEASOING MEAT SPICE 200ML", "INA PARAMANS", "Ina Paarman's SEASONING MEAT SPICE 200ml"),
+    (39, "KITCHEN TREASURE MEAT MASALA 160GM", "KITCHEN TREASURE", "Kitchen Treasures MEAT MASALA 160g"),
+    # a synonym that only adds the product's words to the brand keeps them: 'LIGHT' is the meat grade
+    (28, "AMERICAN LIGHT MEAT TUNA SOLID 185GM", "AMERICAN LIGHT", "American LIGHT MEAT TUNA SOLID 185g"),
+    (3, "BARTS TRADITON FRENCH FRIES STRAIGHT CUT 1KG", "BARTS TRADITON",
+     "Bart's TRADITON FRENCH FRIES STRAIGHT CUT 1kg"),
+])
+def test_q1_writes_the_mapped_brand_once(row, name, brand, q1):
+    spec = spec_of(name, brand, suggested_mappings())
+    assert spec.brand_conf == "mapped"
+    assert build_queries(spec)[0].text == q1, row
+
+
+def test_a_sub_brand_stays_in_the_query():
+    maps = {"nestle": {"brand": "Nestle", "synonyms": ["NESTLE"], "sub_brands": ["Nido", "Nesquik"]}}
+    spec = spec_of("NIDO FORTIFIED MILK POWDER 2.25KG", "NESTLE", maps)
+    assert build_queries(spec)[0].text == "Nestle NIDO FORTIFIED MILK POWDER 2.25kg"
+    spec = spec_of("NIDO FORTIFIED MILK POWDER 2.25KG", "NIDO", maps)          # the brand cell is the sub-brand
+    assert "NIDO" in build_queries(spec)[0].text

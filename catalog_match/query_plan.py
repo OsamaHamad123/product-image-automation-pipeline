@@ -171,20 +171,30 @@ def arabic_brand(spec: SkuSpec) -> str:
 def _brand_spellings(spec: SkuSpec, brand_en: str, brand_ar: str) -> List[str]:
     """Every spelling of the target brand to strip from a name before prefixing the brand once.
 
-    A match phrase counts as the same brand only when its compact form equals the
-    canonical/English/Arabic brand's, so sub-brands such as 'Nido' stay in the query.
+    Every spelling of the resolved brand counts: the canonical, English and Arabic brand, each
+    Brands Mapping synonym the SKU matches and the sheet's own brand cell. With the mapping
+    Rio Mare <- 'RIO MARIE', Q1 was 'Rio Mare RIO MARIE LIGHT MEAT TUNA ...' and Super Tasty
+    <- 'SUP/T' gave 'Super Tasty SUP/T WT/MEAT ...' (live run 2026-10-03, rows 45 and 49): the
+    misspelling went to the search engine with the right name. Never stripped: a sub-brand the
+    SKU names or its siblings ('Nido' for Nestle stays in the query), and a synonym that only
+    adds words to a shorter spelling of the brand ('AMERICAN LIGHT' for American: 'LIGHT' is the
+    tuna's meat grade, and the shorter spelling is stripped anyway).
     A sheet brand shorter than 3 characters ('A/G') is always stripped.
     """
     base = [p for p in (brand_en, brand_ar, spec.brand_canonical) if p]
-    base_keys = {_compact(p) for p in base if _compact(p)}
+    subs = {_compact(p) for p in tuple(spec.required_brands) + tuple(spec.sibling_brands) if p}
     out = list(base)
     for phrase in tuple(spec.match_brands) + (spec.brand_raw,):
-        if not phrase:
+        if not phrase or not _compact(phrase):
             continue
-        if _compact(phrase) in base_keys or alnum_len(phrase) < 3:
+        if alnum_len(phrase) < 3 or _compact(phrase) not in subs:
             out.append(phrase)
     uniq = list(dict.fromkeys(p for p in out if _compact(p)))
-    return sorted(uniq, key=lambda p: -len(tokens(p)))
+    keys = {p: tuple(tokens(p, strip_clitics=True)) for p in uniq}
+    kept = [p for p in uniq
+            if not any(len(keys[q]) < len(keys[p]) and keys[q] and keys[p][:len(keys[q])] == keys[q]
+                       for q in uniq if q is not p)]
+    return sorted(kept, key=lambda p: -len(tokens(p)))
 
 
 def _fmt(value: float) -> str:
