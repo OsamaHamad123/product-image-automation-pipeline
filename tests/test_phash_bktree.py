@@ -41,3 +41,63 @@ def test_bktree_does_not_match_a_different_image():
     tree = PerceptualDeduplicationTree()
     tree.insert_node(boxed, "img_001", {})
     assert tree.query_duplicates(stripes, tolerance_threshold=5) == []
+
+
+# ---------------------------------------------------------------------------
+# Stored hashes: v2 writes 16 hex digits, the legacy path wrote a decimal number
+# ---------------------------------------------------------------------------
+
+def test_parse_phash_accepts_hex_and_decimal():
+    from catalog_match.fetch import phash_hex
+    from image_dedup_bktree import parse_phash
+
+    value = calculate_phash(_red_box((200, 0, 0)))
+    hx = phash_hex(_red_box((200, 0, 0)))
+    assert len(hx) == 16 and int(hx, 16) == value
+    assert parse_phash(hx) == value                       # v2 (catalog_match.fetch.phash_hex)
+    assert parse_phash(hx.upper()) == value
+    assert parse_phash("0x" + hx) == value
+    assert parse_phash(str(value)) == value               # legacy decimal (image_search v1)
+    assert parse_phash(value) == value
+    assert parse_phash("0000000000012345") == 0x12345     # 16 digits, zero-padded: hex
+    assert parse_phash("9999999999999999") == 9999999999999999   # 16 digits too large for 63-bit hex
+    for bad in (None, "", "  ", "not-a-hash", "0", 0, -5, True):
+        assert parse_phash(bad) is None
+
+
+def test_tree_from_db_and_remember_image_read_hex_hashes(monkeypatch, fake_connection):
+    import image_dedup_bktree
+    import local_cache_db
+    from catalog_match.fetch import phash_hex
+
+    hex_img = _red_box((200, 0, 0))
+    dec_img = Image.new("RGB", (300, 300), (255, 255, 255))
+    ImageDraw.Draw(dec_img).ellipse([40, 40, 260, 260], fill=(0, 0, 200))
+    rows = [
+        {"id": 1, "product_name": "V2 row", "cloudinary_url": "https://res/v2.png",
+         "perceptual_hash": phash_hex(hex_img)},
+        {"id": 2, "product_name": "Legacy row", "cloudinary_url": "https://res/v1.png",
+         "perceptual_hash": str(calculate_phash(dec_img))},
+        {"id": 3, "product_name": "Broken", "cloudinary_url": "https://res/x.png", "perceptual_hash": "zz"},
+    ]
+    conn = fake_connection(lambda sql, params: rows if sql.startswith("SELECT") else None)
+    monkeypatch.setattr(local_cache_db, "get_db_connection", lambda: conn)
+
+    tree = image_dedup_bktree.build_bktree_from_db()
+
+    def ids(img):
+        return [m["image_id"] for m in tree.query_duplicates(calculate_phash(img), tolerance_threshold=0)]
+
+    assert ids(hex_img) == ["1"], "a v2 (hex) row must be found by the image's own hash"
+    assert ids(dec_img) == ["2"]
+
+    other = Image.new("RGB", (300, 300), (255, 255, 255))
+    for x in range(0, 300, 20):
+        ImageDraw.Draw(other).rectangle([x, 0, x + 9, 300], fill=(0, 0, 0))
+    saved = image_dedup_bktree._shared_tree
+    try:
+        image_dedup_bktree._shared_tree = tree
+        image_dedup_bktree.remember_image(phash_hex(other), "4", "https://res/new.png", "New")
+        assert ids(other) == ["4"]
+    finally:
+        image_dedup_bktree._shared_tree = saved
