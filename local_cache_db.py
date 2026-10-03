@@ -83,6 +83,8 @@ _SCHEMA_MIGRATIONS = [
     "ALTER TABLE resolved_products ADD INDEX IF NOT EXISTS idx_barcode (barcode)",
     "ALTER TABLE resolved_products ADD INDEX IF NOT EXISTS idx_name_brand (product_name, brand)",
     "ALTER TABLE resolved_products ADD INDEX IF NOT EXISTS idx_resolved_sku (sku_key)",
+    # بصمة ألوان اللوحة (image_dedup_bktree.color_signature): تطابق pHash بلون مختلف بوضوح ليس الصورة نفسها
+    "ALTER TABLE resolved_products ADD COLUMN IF NOT EXISTS color_signature VARCHAR(64) NULL",
     # automation_queue
     "ALTER TABLE automation_queue ADD COLUMN IF NOT EXISTS sku_key VARCHAR(64) NULL",
     "ALTER TABLE automation_queue ADD COLUMN IF NOT EXISTS payload_json LONGTEXT NULL",
@@ -475,6 +477,7 @@ def _cache_row_to_dict(row):
         "verification_status": row.get("verification_status"),
         "approved_by": row.get("approved_by"),
         "perceptual_hash": row.get("perceptual_hash"),
+        "color_signature": row.get("color_signature"),
         "resolved_at": row.get("resolved_at"),
         "source": "mariadb_cache",
     }
@@ -742,7 +745,7 @@ def _remember_phash(hash_str, row_id, cloudinary_url, product_name):
 
 def save_product_resolution(barcode, product_name, brand, original_url, cloudinary_url, clip_score=None,
                             metadata=None, clip_embedding=None, perceptual_hash=None,
-                            verification_status="legacy", approved_by=None, sku_key=None):
+                            verification_status="legacy", approved_by=None, sku_key=None, color_signature=None):
     """
     حفظ أو تحديث الحل المعتمد لمنتج (Upsert بـ sku_key، أو بالباركود إن لم يوجد sku_key).
     أحدث سجل مطابق يُحدّث، وأي سجلات مطابقة أخرى تصبح superseded.
@@ -759,7 +762,8 @@ def save_product_resolution(barcode, product_name, brand, original_url, cloudina
     embedding_str = json.dumps(clip_embedding) if clip_embedding is not None else ""
     hash_str = str(perceptual_hash) if perceptual_hash is not None else ""
     values = (barcode_raw, product_name, brand, original_url, cloudinary_url, clip_score,
-              metadata_str, embedding_str, hash_str, sku_clean or None, verification_status, approved_by)
+              metadata_str, embedding_str, hash_str, sku_clean or None, verification_status, approved_by,
+              str(color_signature)[:64] if color_signature else None)
 
     def attempt():
         conn = get_db_connection()
@@ -785,7 +789,8 @@ def save_product_resolution(barcode, product_name, brand, original_url, cloudina
                     UPDATE resolved_products
                     SET barcode = %s, product_name = %s, brand = %s, original_url = %s, cloudinary_url = %s,
                         clip_score = %s, metadata_json = %s, clip_embedding_json = %s, perceptual_hash = %s,
-                        sku_key = %s, verification_status = %s, approved_by = %s, resolved_at = CURRENT_TIMESTAMP
+                        sku_key = %s, verification_status = %s, approved_by = %s, color_signature = %s,
+                        resolved_at = CURRENT_TIMESTAMP
                     WHERE id = %s
                 """, values + (existing[0],))
                 saved_id = existing[0]
@@ -800,8 +805,8 @@ def save_product_resolution(barcode, product_name, brand, original_url, cloudina
                 cursor.execute("""
                     INSERT INTO resolved_products (barcode, product_name, brand, original_url, cloudinary_url,
                         clip_score, metadata_json, clip_embedding_json, perceptual_hash, sku_key,
-                        verification_status, approved_by)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        verification_status, approved_by, color_signature)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """, values)
                 saved_id = cursor.lastrowid
             conn.commit()
@@ -868,6 +873,16 @@ def supersede_resolution(sku_key, barcode=None):
 DUPLICATE_PHASH_DISTANCE = 4
 
 
+def _colors_differ(a, b):
+    """image_dedup_bktree.colors_differ؛ تعذر المقارنة = لا اختلاف (يبقى التطابق تكراراً)."""
+    try:
+        import image_dedup_bktree
+        return image_dedup_bktree.colors_differ(a, b)
+    except Exception as e:
+        logger.warning("[MariaDB Cache] تعذر مقارنة بصمتي الألوان: %s", e)
+        return False
+
+
 def _phash_int(value):
     """pHash بصيغة v2 (16 خانة hex، catalog_match.fetch.phash_hex) كعدد، أو None لغير ذلك (القيم القديمة)."""
     text = str(value or "").strip().lower()
@@ -880,10 +895,13 @@ def _phash_int(value):
 
 
 def find_image_owners(cloudinary_url=None, phash=None, sku_key=None, product_name=None,
-                      max_distance=DUPLICATE_PHASH_DISTANCE):
+                      max_distance=DUPLICATE_PHASH_DISTANCE, color_signature=None):
     """
     المنتجات الأخرى التي نُشرت لها نفس الصورة: نفس رابط Cloudinary (الرفع يسمي الملف ببصمة بايتاته، فنفس
-    اللوحة = نفس الرابط)، أو pHash اللوحة النهائية على مسافة max_distance أو أقل. يقرأ الحلول المعتمدة فقط
+    اللوحة = نفس الرابط، تكرار دائماً)، أو pHash اللوحة النهائية على مسافة max_distance أو أقل ولونها غير مختلف بوضوح:
+    pHash (32x32 رمادي) لا يرى اللون، فنفس العبوة بملصق أحمر وأزرق (نكهتان) مسافتها صفر. color_signature: بصمة ألوان
+    اللوحة (image_dedup_bktree.color_signature)؛ تطابق pHash مع بصمة ألوان مختلفة بوضوح ليس تكراراً، وبصمة غائبة
+    (هنا أو لصورة نُشرت قبلها) لا تُسقط التطابق. يقرأ الحلول المعتمدة فقط
     (human_approved / auto_verified). «منتج آخر» = sku_key مختلف؛ سجل قديم بلا sku_key يُعد منتجاً آخر إذا اختلف
     اسمه. تعيد [{sku_key, product_name, brand, cloudinary_url, verification_status, match, distance}] (منتج واحد
     لكل مالك، الأقرب أولاً)، أو None عند خطأ قاعدة البيانات (النشر التلقائي يعامله كتكرار).
@@ -899,8 +917,8 @@ def find_image_owners(cloudinary_url=None, phash=None, sku_key=None, product_nam
         try:
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT sku_key, product_name, brand, cloudinary_url, perceptual_hash, verification_status "
-                f"FROM resolved_products WHERE {_SERVABLE_SQL} AND (cloudinary_url = %s "
+                "SELECT sku_key, product_name, brand, cloudinary_url, perceptual_hash, verification_status, "
+                f"color_signature FROM resolved_products WHERE {_SERVABLE_SQL} AND (cloudinary_url = %s "
                 "OR (perceptual_hash IS NOT NULL AND perceptual_hash <> ''))",
                 (url,),
             )
@@ -926,7 +944,7 @@ def find_image_owners(cloudinary_url=None, phash=None, sku_key=None, product_nam
             other = _phash_int(r.get("perceptual_hash"))
             if target is not None and other is not None:
                 d = bin(target ^ other).count("1")
-                if d <= max_distance:
+                if d <= max_distance and not _colors_differ(color_signature, r.get("color_signature")):
                     match, distance = "phash", d
         if match is None:
             continue

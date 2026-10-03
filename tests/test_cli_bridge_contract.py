@@ -305,7 +305,7 @@ def test_an_explicit_approval_of_another_products_image_is_written_with_a_warnin
              "match": "phash", "distance": 2}
     seen = []
     monkeypatch.setattr(local_cache_db, "find_image_owners",
-                        lambda url, phash, sku_key=None, product_name=None: seen.append((url, sku_key)) or [owner])
+                        lambda url, phash, sku_key=None, product_name=None, **k: seen.append((url, sku_key)) or [owner])
     monkeypatch.setattr(main_module(), "_canvas_phash", lambda path: "00ff00ff00ff00ff")
     result = bridge.action_select_image(dict(SELECT_PARAMS))
     assert result["status"] == "success"

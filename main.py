@@ -378,11 +378,12 @@ def publish_image(image_url, name, brand, row_number, worksheet, link_column_ind
     rows_written: الصفوف التي قُبلت كتابة رابطها؛ rows_failed: صفوف also_rows التي رُفضت.
     after_write(result): يُستدعى بعد الكتابة في الشيت وقبل تحرير قفل النشر، بالنتيجة التي ستُعاد: يحفظ فيه المستدعي
     قراره (الحل المعتمد وحالة الطابور)، فمن ينتظر القفل (مراجع آخر أو العامل) يرى القرار في إعادة تحققه. خطؤه يُرفع.
-    duplicates: صورة نُشرت لمنتج آخر (نفس رابط Cloudinary أو pHash اللوحة على مسافة 4 أو أقل، sku_key مختلف):
+    duplicates: صورة نُشرت لمنتج آخر (نفس رابط Cloudinary، أو pHash اللوحة على مسافة 4 أو أقل بألوان غير مختلفة
+    بوضوح: local_cache_db.find_image_owners؛ sku_key مختلف):
     'block' (النشر التلقائي من الطابور) لا يكتب شيئاً والحالة 'needs_review' (error='duplicate_image')؛ 'review'
     (الوضع التسلسلي القديم) يكتب الرابط ببادئة needs_review: فقط؛ 'warn' (اعتماد المراجع الصريح) يكتب كالمعتاد.
     المالكون في duplicate_of، وتعذر التحقق يُعامل كتكرار في 'block' و 'review'.
-    phash: بصمة اللوحة النهائية (تُخزن مع الحل المعتمد).
+    phash و color_signature: بصمتا اللوحة النهائية (pHash وبصمة الألوان، تُخزنان مع الحل المعتمد).
     لا تكبير لاحق: اللوحة من image_processor نهائية. البيانات الوصفية تُكتب في الشيت فقط بعد نجاح الرفع.
     الحالة: 'published' (معزولة وليست للمراجعة) | 'needs_review' (رابط ببادئة needs_review:) | 'superseded'
     (لم يُكتب شيء) | 'failed'.
@@ -413,6 +414,7 @@ def publish_image(image_url, name, brand, row_number, worksheet, link_column_ind
                 (override.get("category_l3_en") or "").strip()))
         folder, tags = _folder_and_tags(metadata)
         phash = _canvas_phash(result.path)
+        color = _canvas_color_signature(result.path)
         link = cloudinary_storage.upload_product_image_to_cloudinary(
             result.path, name, brand, folder=folder, tags=tags,
             target_width=result.width, target_height=result.height,
@@ -422,12 +424,14 @@ def publish_image(image_url, name, brand, row_number, worksheet, link_column_ind
 
     base = {"isolated": bool(result.isolated), "provider": result.provider, "metadata": metadata,
             "width": result.width, "height": result.height, "profile": profile.as_dict(), "phash": phash,
+            "color_signature": color,
             "quality_flags": getattr(result, "quality_flags", None)}
     if not link:
         return dict(base, status="failed", error="upload_failed")
 
     # نفس الصورة منشورة لمنتج آخر؟ الرفع الموجود مسبقاً (existing من Cloudinary) دليل إضافي فقط
-    owners = local_cache_db.find_image_owners(link, phash, sku_key=sku_key, product_name=name)
+    owners = local_cache_db.find_image_owners(link, phash, sku_key=sku_key, product_name=name,
+                                              color_signature=color)
     base["duplicate_of"] = list(owners or [])
     base["cloudinary_existing"] = getattr(link, "existing", None)
     duplicate = owners is None or bool(owners)
@@ -493,6 +497,12 @@ def _canvas_phash(path):
         return None
 
 
+def _canvas_color_signature(path):
+    """بصمة ألوان اللوحة النهائية (image_dedup_bktree.color_signature)، أو None."""
+    import image_dedup_bktree
+    return image_dedup_bktree.color_signature(path)
+
+
 def _write_still_allowed(before_write):
     """نتيجة إعادة التحقق قبل الكتابة؛ أي استثناء يعني لا (لا نكتب ونحن لا نعرف)."""
     try:
@@ -535,7 +545,7 @@ def auto_approve_product(task, best_image, worksheet, link_column_index, sku_key
             local_cache_db.save_product_resolution(
                 barcode, name, brand, best_image["url"], res["link"], None, res.get("metadata"),
                 perceptual_hash=res.get("phash"), verification_status="auto_verified",
-                approved_by="auto", sku_key=sku_key,
+                approved_by="auto", sku_key=sku_key, color_signature=res.get("color_signature"),
             )
 
     try:

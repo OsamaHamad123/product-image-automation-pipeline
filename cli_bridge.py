@@ -701,7 +701,7 @@ def _human_decision(barcode, product_name, brand, original_url, approved_by, sku
         local_cache_db.save_product_resolution(
             barcode, product_name, brand, original_url, res["link"], None, res.get("metadata"),
             perceptual_hash=res.get("phash"), verification_status="human_approved", approved_by=approved_by,
-            sku_key=sku_key,
+            sku_key=sku_key, color_signature=res.get("color_signature"),
         )
         local_cache_db.update_task_status_by_row(row_number, "completed", sku_key=sku_key, rows=rows)
     return record

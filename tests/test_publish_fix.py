@@ -652,3 +652,94 @@ def test_an_approval_during_processing_finishes_the_workers_row(db, worker):
     assert run() == "success"
     assert env["sheet"] == [] and _status(db, ROWS[0]) == "completed"
     assert db.get_cached_product(sku_key=sku)["cloudinary_url"] == CLOUD + "human.png"
+
+
+# ---------------------------------------------------------------------------
+# #7: sibling variants (same bottle, another label colour) are not the same image
+# ---------------------------------------------------------------------------
+
+def _bottle(path, label):
+    from PIL import Image, ImageDraw
+    img = Image.new("RGB", (800, 800), "white")
+    draw = ImageDraw.Draw(img)
+    draw.rectangle([330, 100, 470, 160], fill=(240, 240, 240))           # cap
+    draw.rectangle([300, 160, 500, 700], fill=(235, 235, 245))           # bottle
+    draw.rectangle([300, 330, 500, 520], fill=label)                     # the flavour's label
+    img.save(path)
+    return str(path)
+
+
+@pytest.fixture
+def variants(db, monkeypatch, tmp_path):
+    """auto_approve_product with the real database; the processing returns state['canvas']."""
+    import cloudinary_storage
+    import google_sheets
+    import image_processor
+    import local_cache_db
+    import main
+
+    state = {"canvas": None, "link": None, "sheet": []}
+
+    def processing(*a, **k):
+        out = tmp_path / f"canvas_{os.urandom(3).hex()}.png"
+        with open(state["canvas"], "rb") as src, open(out, "wb") as dst:
+            dst.write(src.read())
+        return image_processor.ProcessResult(str(out), True, "photoroom", None, 800, 800)
+
+    monkeypatch.setattr(image_processor, "process_product_image_result", processing)
+    monkeypatch.setattr(image_processor, "extract_metadata_from_image", lambda *a, **k: {})
+    monkeypatch.setattr(cloudinary_storage, "upload_product_image_to_cloudinary", lambda *a, **k: state["link"])
+    monkeypatch.setattr(google_sheets, "update_image_link", lambda *a, **k: state["sheet"].append((a[1], a[3])) or True)
+    monkeypatch.setattr(local_cache_db, "delete_product_failure", lambda *a, **k: True)
+
+    def publish(n, name, canvas, link):
+        state["canvas"], state["link"] = canvas, link
+        task = {"id": 990000 + n, "row_number": ROWS[n], "product_name": name, "brand": "Almarai",
+                "payload_json": "{}"}
+        return main.auto_approve_product(task, {"url": f"https://shop/{n}.jpg"}, object(), 5, sku_key=KEYS[n])
+
+    return publish, state
+
+
+def test_a_sibling_variant_with_another_label_colour_is_not_a_duplicate(db, variants, tmp_path):
+    from catalog_match.fetch import phash_hex
+    from PIL import Image
+    publish, state = variants
+    strawberry = _bottle(tmp_path / "strawberry.png", (200, 30, 40))
+    blueberry = _bottle(tmp_path / "blueberry.png", (40, 50, 170))
+    with Image.open(strawberry) as a, Image.open(blueberry) as b:
+        assert phash_hex(a.convert("RGB")) == phash_hex(b.convert("RGB"))     # pHash cannot tell them apart
+    assert publish(0, "Juice Strawberry 1L", strawberry, CLOUD + "strawberry.png") == "published"
+    assert publish(1, "Juice Blueberry 1L", blueberry, CLOUD + "blueberry.png") == "published"
+    assert db.get_cached_product(sku_key=KEYS[0])["color_signature"]          # stored with the approval
+    # the same strawberry picture for another product is still a duplicate (no auto-publish)
+    assert publish(2, "Juice Mango 1L", strawberry, CLOUD + "strawberry-again.png") == "needs_review"
+    assert [link for _, link in state["sheet"]] == [CLOUD + "strawberry.png", CLOUD + "blueberry.png"]
+
+
+def test_the_colour_signature_survives_re_encoding_and_tells_label_colours_apart(tmp_path):
+    import io
+    import image_dedup_bktree as dedup
+    from PIL import Image
+    strawberry = Image.open(_bottle(tmp_path / "s.png", (200, 30, 40))).convert("RGB")
+    buf = io.BytesIO()
+    strawberry.save(buf, "JPEG", quality=60)
+    copies = [Image.open(io.BytesIO(buf.getvalue())).convert("RGB"), strawberry.resize((300, 300)).resize((800, 800))]
+    sig = dedup.color_signature(strawberry)
+    assert not any(dedup.colors_differ(sig, dedup.color_signature(c)) for c in copies)
+    for label in ((40, 50, 170), (40, 160, 60), (230, 120, 30)):                 # blue, green, orange
+        other = Image.open(_bottle(tmp_path / "o.png", label)).convert("RGB")
+        assert dedup.colors_differ(sig, dedup.color_signature(other))
+    assert not dedup.colors_differ(sig, None) and not dedup.colors_differ("garbage", sig)
+
+
+def test_an_image_published_before_colour_signatures_still_blocks_a_matching_phash(db, variants, tmp_path):
+    publish, state = variants
+    strawberry = _bottle(tmp_path / "strawberry.png", (200, 30, 40))
+    blueberry = _bottle(tmp_path / "blueberry.png", (40, 50, 170))
+    assert publish(0, "Juice Strawberry 1L", strawberry, CLOUD + "strawberry.png") == "published"
+    _sql(db, "UPDATE resolved_products SET color_signature = NULL WHERE sku_key = %s", (KEYS[0],))
+    # no colour to compare with: fail closed, as before
+    assert publish(1, "Juice Blueberry 1L", blueberry, CLOUD + "blueberry.png") == "needs_review"
+    # the same Cloudinary link is always the same image
+    assert publish(2, "Juice Mango 1L", blueberry, CLOUD + "strawberry.png") == "needs_review"
