@@ -581,9 +581,9 @@ def test_the_layout_card_reads_the_budget_and_database_notices_in_arabic():
 # C9: waiting for a PROVIDER_DOWN retry is not a stuck run
 # ---------------------------------------------------------------------------
 
-def test_the_worker_beats_while_it_waits_for_a_retry(offline, monkeypatch, tmp_path):
-    """During a 10-20 minute PROVIDER_DOWN backoff the loop never wrote automation_state, so the dashboard showed
-    «worker running, no progress» after 600 s and offered «fix stuck run» (which stops the worker)."""
+@pytest.fixture
+def offline_worker(offline, monkeypatch, tmp_path):
+    """run_worker_mode with the sheet, the queue state and the reader check replaced by recorders (no database)."""
     import config
     import google_sheets
     import local_cache_db
@@ -594,33 +594,69 @@ def test_the_worker_beats_while_it_waits_for_a_retry(offline, monkeypatch, tmp_p
     real_sleep = time.sleep
     monkeypatch.setattr(time, "sleep", lambda s: real_sleep(0.005))
     monkeypatch.setattr(config, "DAILY_BUDGET_USD", 0)
+    monkeypatch.setattr(config, "SERPER_CREDIT_STOP_SEARCHES", 3)
+    rec = {"beats": [], "states": [], "tasks": []}
     for name, value in (("_another_worker_running", lambda lock: False), ("load_run_config", lambda: None),
-                        ("check_verifier", lambda: ""), ("WAIT_HEARTBEAT_SECONDS", 0.05),
-                        ("_outage_notice", lambda worker_id, since, base=None, **k: base),
-                        ("_run_health", lambda worker_id, since: None)):
-        monkeypatch.setattr(main, name, value, raising=name != "WAIT_HEARTBEAT_SECONDS")
-    beats = []
-    monkeypatch.setattr(main, "_refresh_state", lambda status, run_id=None, **kw: beats.append((status, kw)))
+                        ("check_verifier", lambda: ""), ("_run_health", lambda worker_id, since: None)):
+        monkeypatch.setattr(main, name, value)
+    monkeypatch.setattr(main, "_refresh_state", lambda status, run_id=None, **kw: rec["beats"].append((status, kw)))
     monkeypatch.setattr(local_cache_db, "resume_automation", lambda: True)
     monkeypatch.setattr(local_cache_db, "get_automation_state",
                         lambda: {"pause_requested": 0, "stop_requested": 0, "run_id": "run-b"})
-    monkeypatch.setattr(local_cache_db, "update_automation_state", lambda status, **kw: True)
+    monkeypatch.setattr(local_cache_db, "update_automation_state",
+                        lambda status, **kw: rec["states"].append(dict(kw, status=status)) or True)
     monkeypatch.setattr(local_cache_db, "get_ready_for_review_count", lambda: 0)
     monkeypatch.setattr(local_cache_db, "requeue_verifier_down", lambda run_id=None: 0)
     monkeypatch.setattr(local_cache_db, "park_verifier_rechecks", lambda: 0)
-    monkeypatch.setattr(local_cache_db, "fetch_next_task", lambda worker_id: None)    # the row waits for its time
-    until = time.monotonic() + 0.6
-    monkeypatch.setattr(local_cache_db, "count_open_tasks", lambda: 1 if time.monotonic() < until else 0)
+    monkeypatch.setattr(local_cache_db, "fetch_next_task", lambda worker_id: rec["tasks"].pop(0) if rec["tasks"] else None)
+    monkeypatch.setattr(local_cache_db, "count_open_tasks", lambda: len(rec["tasks"]))
     monkeypatch.setattr(google_sheets, "get_sheets_client", lambda: object())
     monkeypatch.setattr(google_sheets, "open_worksheet", lambda client, name: object())
     monkeypatch.setattr(google_sheets, "find_link_column", lambda ws: 7)
     monkeypatch.setattr(google_sheets, "get_brand_mappings", lambda *a: {})
     monkeypatch.setattr(google_sheets, "init_async_queue", lambda *a: None)
     monkeypatch.setattr(google_sheets, "stop_async_queue", lambda: None)
+    return main, rec
+
+
+def test_the_worker_beats_while_it_waits_for_a_retry(offline_worker, monkeypatch):
+    """During a 10-20 minute PROVIDER_DOWN backoff the loop never wrote automation_state, so the dashboard showed
+    «worker running, no progress» after 600 s and offered «fix stuck run» (which stops the worker)."""
+    import local_cache_db
+    main, rec = offline_worker
+    monkeypatch.setattr(main, "WAIT_HEARTBEAT_SECONDS", 0.05, raising=False)
+    monkeypatch.setattr(main, "_outage_notice", lambda worker_id, since, base=None, **k: base)
+    until = time.monotonic() + 0.6                              # the row waits for its time, then it is parked
+    monkeypatch.setattr(local_cache_db, "count_open_tasks", lambda: 1 if time.monotonic() < until else 0)
     main.run_worker_mode(report=False)
-    waiting = [kw for status, kw in beats if status == "pre_caching" and kw.get("current_product") == ""]
-    assert len(waiting) >= 3, beats                               # one beat per interval while it waited
+    waiting = [kw for status, kw in rec["beats"] if status == "pre_caching" and kw.get("current_product") == ""]
+    assert len(waiting) >= 3, rec["beats"]                      # one beat per interval while it waited
     assert main.LAST_WORKER["stop_reason"] is None
+
+
+@pytest.mark.parametrize("ops_alert", [False, True])
+def test_a_credit_stop_after_one_search_says_why(offline_worker, monkeypatch, ops_alert):
+    """SERPER_CREDIT_STOP_SEARCHES=1: ops_health raises SERPER_CREDIT only after 2 refused searches, so the run stopped
+    with a notice that never said the credit was the reason. With the ops_health alert it is not said twice."""
+    import config
+    import ops_health
+    main, rec = offline_worker
+    monkeypatch.setattr(config, "SERPER_CREDIT_STOP_SEARCHES", 1)
+    alerts = [{"code": "SERPER_CREDIT", "message": ops_health.ALERTS["SERPER_CREDIT"]}] if ops_alert else []
+    monkeypatch.setattr(main, "_run_health", lambda worker_id, since: {"alerts": alerts})
+    rec["tasks"] = [{"id": i, "row_number": 100 + i, "product_name": f"P{i}"} for i in range(5)]
+
+    def refused(task, *a, report=None, **k):
+        report.update(searched=True, serper_credit=True)
+        return "provider_down"
+
+    monkeypatch.setattr(main, "pre_cache_product_candidates", refused)
+    main.run_worker_mode(report=False)
+    assert main.LAST_WORKER["stop_reason"] == "serper_credit"
+    notice = rec["states"][-1]["notice"]
+    parts = notice.split(" | ")
+    assert [p.split(":", 1)[0] for p in parts] == ["SERPER_CREDIT"], notice
+    assert ops_health.ALERTS["SERPER_CREDIT"] in parts[0] and "serper_credit" not in parts[0]
 
 
 @NEEDS_PHP

@@ -1437,7 +1437,38 @@ def _outage_notice(worker_id, since_seconds, base=None, health=None):
                 outage = ops_health.outage_notice(since_seconds, worker_id=worker_id)
         except Exception as e:
             print(f"تنبيه: تعذر فحص انقطاع المزودين: {e}")
-    return " | ".join(n for n in (base, outage) if n) or None
+    return _merge_notices(base, outage)
+
+
+_NOTICE_CODE_RE = re.compile(r"^([A-Z][A-Z0-9_]+):")
+
+
+def _merge_notices(*notices):
+    """التنبيهات بفاصل ' | '، وكل رمز (CODE: ...) مرة واحدة: الأول يبقى (سبب التوقف قبل تنبيه ops_health نفسه)."""
+    parts, codes = [], set()
+    for notice in notices:
+        for part in str(notice or "").split(" | "):
+            part = part.strip()
+            m = _NOTICE_CODE_RE.match(part)
+            if not part or (m and m.group(1) in codes):
+                continue
+            if m:
+                codes.add(m.group(1))
+            parts.append(part)
+    return " | ".join(parts) or None
+
+
+def _stop_notice(stop_reason):
+    """نص التنبيه لسبب توقف قبل نهاية الطابور (رصيد Serper بنص ops_health نفسه، أيا كان عدد عمليات البحث)."""
+    code = str(stop_reason).upper()
+    if stop_reason == "serper_credit":
+        try:
+            import ops_health
+            text = ops_health.ALERTS["SERPER_CREDIT"]
+        except Exception:
+            text = "رصيد Serper انتهى أو المفتاح مرفوض"
+        return f"{code}: {text}؛ توقف العامل وبقيت الصفوف المتبقية في الانتظار"
+    return f"{code}: توقف العامل قبل نهاية الطابور ({stop_reason})؛ بقيت الصفوف المتبقية في الانتظار"
 
 
 def _refresh_state(status, run_id=None, **extra):
@@ -1984,9 +2015,9 @@ def run_worker_mode(trigger="manual", report=True):
                 # الطابور انتهى، أو سبب توقف آخر (مثل حد الميزانية) يظهر نصه كما هو في التنبيه والتقرير
                 base = notice
                 if stop_reason and not str(notice or "").startswith(f"{str(stop_reason).upper()}:"):
-                    base = " | ".join(n for n in (
-                        f"{str(stop_reason).upper()}: توقف العامل قبل نهاية الطابور ({stop_reason})؛ "
-                        "بقيت الصفوف المتبقية في الانتظار", notice) if n)
+                    # SERPER_CREDIT يُذكر سببه دائماً: تنبيه ops_health يحتاج عمليتي بحث على الأقل، والإيقاف قد يكون
+                    # بعد واحدة (SERPER_CREDIT_STOP_SEARCHES=1)؛ تنبيه ops_health بالرمز نفسه لا يتكرر
+                    base = _merge_notices(_stop_notice(stop_reason), notice)
                 final_notice = _outage_notice(worker_id, run_seconds, base, health=health)
                 ready = local_cache_db.get_ready_for_review_count()
                 if ready is None:
