@@ -47,8 +47,8 @@ def index_of(*locs):
 
 
 class Resp:
-    def __init__(self, status, body=b""):
-        self.status_code, self.body, self.closed = status, body, False
+    def __init__(self, status, body=b"", url=None):
+        self.status_code, self.body, self.closed, self.url = status, body, False, url
 
     def iter_content(self, chunk_size):
         for i in range(0, len(self.body), chunk_size):
@@ -68,10 +68,10 @@ class FakeHttp:
         self.calls.append(url)
         self.headers.append(dict(headers or {}))
         assert "proxies" not in kwargs, "a sitemap is never fetched through a proxy"
-        status, body = self.pages.get(url, (404, b""))
+        status, body, *final = self.pages.get(url, (404, b""))     # (status, body[, the URL it redirected to])
         if isinstance(status, Exception):
             raise status
-        return Resp(status, body)
+        return Resp(status, body, final[0] if final else url)
 
 
 def lulu():
@@ -256,9 +256,28 @@ def test_without_robots_the_usual_sitemap_locations_are_tried():
     pages = {BASE + "/robots.txt": (404, b""), BASE + "/sitemap_index.xml": (200, urlset(PRODUCT_1))}
     rep = harvester(pages).harvest(lulu())
     assert rep.started_from == [BASE + "/sitemap.xml", BASE + "/sitemap_index.xml"]
-    assert rep.status == "partial" and rep.product_urls == 1        # /sitemap.xml answered 404
+    # a guessed location that is not there is no failure: the harvest is complete (so --prune can run)
+    assert rep.status == "ok" and rep.product_urls == 1
     rep = harvester({BASE + "/robots.txt": (404, b"")}).harvest(lulu())
     assert rep.status == "error" and rep.sitemaps_read == 0
+
+
+def test_the_second_usual_location_is_asked_only_when_the_first_gave_nothing():
+    # /sitemap_index.xml is the site's single-page app (HTML, status 200): never asked when /sitemap.xml works
+    pages = {BASE + "/robots.txt": (404, b""), BASE + "/sitemap.xml": (200, index_of(BASE + "/s/p1.xml")),
+             BASE + "/s/p1.xml": (200, urlset(PRODUCT_1)),
+             BASE + "/sitemap_index.xml": (200, b"<!DOCTYPE html><html>app</html>")}
+    h = harvester(pages)
+    rep = h.harvest(lulu())
+    assert rep.status == "ok" and rep.product_urls == 1 and BASE + "/sitemap_index.xml" not in h.http.calls
+
+
+def test_an_html_page_after_the_first_sitemap_is_one_failed_sitemap_not_a_block():
+    pages = full_store()
+    pages[BASE + "/sitemaps/products-1.xml.gz"] = (200, b"<!DOCTYPE html><html>not found</html>")
+    rep = harvester(pages).harvest(lulu())
+    assert rep.status == "partial" and (BASE + "/sitemaps/products-1.xml.gz", "html") in rep.skipped
+    assert BASE + "/sitemaps/categories.xml" in [n["url"] for n in rep.tree]   # the next sitemap was still read
 
 
 def test_limits_stop_early_and_mark_the_harvest_partial():
@@ -339,3 +358,155 @@ def test_cli_reports_a_blocked_store_and_fails_when_every_store_was_refused(monk
     monkeypatch.setattr(sitemaps, "SitemapHarvester", Harvester)
     assert build_catalog_index.main(["--dry-run", "--stores", "lulu"]) == 1
     assert "never worked around): lulu" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------
+# Review 3: robots.txt as RFC 9309 reads it, and a broken file never ends the run
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("rules,path,allowed", [
+    ("Allow: /\nDisallow: /sitemaps/", "/sitemaps/a.xml", False),          # the longest match wins, not the first
+    ("Disallow: /\nAllow: /sitemap", "/sitemap.xml", True),
+    ("Disallow: /*?", "/sitemap.xml?page=2", False),                        # '*' wildcard
+    ("Disallow: /*?", "/sitemap.xml", True),
+    ("Disallow: /*.xml.gz$", "/s/products-1.xml.gz", False),                # '$' end anchor
+    ("Disallow: /*.xml.gz$", "/s/products-1.xml.gz.txt", True),
+    ("Allow: /s/\nDisallow: /s/", "/s/a.xml", True),                        # a tie: Allow wins
+    ("Disallow:", "/anything.xml", True),                                    # an empty Disallow is no rule
+])
+def test_robots_rules_follow_rfc_9309(rules, path, allowed):
+    robots = parse_robots(f"User-agent: *\n{rules}\n")
+    assert robots.allowed(BASE + path) is allowed
+
+
+def test_robots_groups_byte_order_mark_and_a_decimal_crawl_delay():
+    text = ("\ufeffUser-agent: *\nDisallow: /sm/private\nCrawl-delay: 2.5\n\n"
+            "User-agent: image\nDisallow: /\n")                            # another crawler's group
+    robots = parse_robots(text)
+    assert robots.crawl_delay == 2.5 and not robots.allowed(BASE + "/sm/private/a.xml")
+    assert robots.allowed(BASE + "/sm/public.xml")                          # 'image' is not our agent
+    ours = parse_robots(f"User-agent: *\nDisallow: /\n\nUser-agent: {sitemaps.ROBOTS_AGENT}\nDisallow: /tmp/\n")
+    assert ours.allowed(BASE + "/sitemap.xml") and not ours.allowed(BASE + "/tmp/x.xml")   # our own group wins
+
+
+def test_a_byte_order_mark_on_robots_never_drops_its_rules_in_a_harvest():
+    pages = full_store()
+    pages[BASE + "/robots.txt"] = (200, "\ufeff".encode() + ROBOTS)
+    h = harvester(pages)
+    rep = h.harvest(lulu())
+    assert BASE + "/private/hidden.xml" not in h.http.calls and rep.crawl_delay == 2.0
+
+
+def test_a_store_asking_for_a_longer_crawl_delay_than_we_wait_is_skipped():
+    pages = {BASE + "/robots.txt": (200, b"User-agent: *\nCrawl-delay: 120\n")}
+    h = harvester(pages)
+    rep = h.harvest(lulu())
+    assert rep.status == "blocked" and "Crawl-delay of 120s" in rep.error and h.http.calls == [BASE + "/robots.txt"]
+
+
+CDN_INDEX = "https://sitemaps.example-cdn.net/gcc/sitemap_index.xml"
+
+
+def test_a_robots_sitemap_on_another_host_is_reported_and_read_once_its_host_is_listed():
+    pages = {BASE + "/robots.txt": (200, f"User-agent: *\nSitemap: {CDN_INDEX}\n".encode()),
+             CDN_INDEX: (200, index_of("https://sitemaps.example-cdn.net/gcc/products.xml")),
+             "https://sitemaps.example-cdn.net/gcc/products.xml": (200, urlset(PRODUCT_1))}
+    rep = harvester(pages).harvest(lulu())
+    assert any(url == CDN_INDEX and "sitemap_hosts" in why for url, why in rep.skipped)
+    assert sitemaps.format_report(rep, lulu(), discover=True).count(CDN_INDEX) == 1
+    from dataclasses import replace
+    store = replace(lulu(), sitemap_hosts=("sitemaps.example-cdn.net",))
+    rep = harvester(pages).harvest(store)
+    assert rep.status == "ok" and rep.product_urls == 1
+    assert not store.is_product("https://sitemaps.example-cdn.net/en-ae/x/p/1")   # product pages stay the store's
+
+
+def test_a_redirect_off_the_store_or_to_its_home_page_is_a_failed_sitemap():
+    pages = full_store()
+    pages[BASE + "/sitemaps/products-1.xml.gz"] = (200, urlset(PRODUCT_1), "https://evil.example/x.xml")
+    pages[BASE + "/sitemaps/categories.xml"] = (200, urlset(PRODUCT_2), BASE + "/")
+    rep = harvester(pages).harvest(lulu())
+    assert (BASE + "/sitemaps/products-1.xml.gz", "redirected outside the store") in rep.skipped
+    assert (BASE + "/sitemaps/categories.xml", "redirected to the home page") in rep.skipped
+    assert rep.status == "partial" and rep.product_urls == 0
+
+
+@pytest.mark.parametrize("body,why", [
+    (b"\x1f\x8b\x08\x00\x00\x00\x00\x00\x00\x03" + b"\xff" * 40, "bad gzip"),        # corrupt deflate data
+    (b'<?xml version="1.0" encoding="x-unknown"?><urlset/>', "bad xml"),
+    (b'<?xml version="1.0" encoding="gbk"?><urlset/>', "bad xml"),
+    ('<?xml version="1.0" encoding="UTF-16"?><!DOCTYPE x><urlset/>'.encode("utf-16"), "not utf-8"),
+])
+def test_a_broken_file_is_one_failed_sitemap(body, why):
+    with pytest.raises(SitemapError, match=why):
+        parse_sitemap(decompress(body))
+    pages = full_store()
+    pages[BASE + "/sitemaps/products-1.xml.gz"] = (200, body)
+    rep = harvester(pages).harvest(lulu())
+    assert rep.status == "partial" and any(u.endswith("products-1.xml.gz") for u, _ in rep.skipped)
+
+
+def test_an_exact_max_urls_with_nothing_left_is_a_complete_harvest():
+    one = {BASE + "/robots.txt": (404, b""), BASE + "/sitemap.xml": (200, urlset(PRODUCT_1, PRODUCT_2))}
+    rep = harvester(one).harvest(lulu(), max_urls=2)
+    assert rep.product_urls == 2 and not rep.truncated and rep.status == "ok"
+    rep = harvester(full_store()).harvest(lulu(), max_urls=2)            # a sitemap left unread: partial
+    assert rep.truncated and rep.status == "partial"
+
+
+def test_discover_reads_every_nested_index_even_past_the_url_list_cap():
+    pages = full_store()
+    lists = [BASE + f"/sitemaps/products-{i}.xml" for i in range(4)]
+    group, deep = BASE + "/sitemaps/group-index.xml", BASE + "/sitemaps/deep-index.xml"
+    pages[BASE + "/sitemaps/index.xml"] = (200, index_of(*lists, group))
+    pages[group] = (200, index_of(BASE + "/sitemaps/products-9.xml", deep))   # read first: its name says index
+    for c in lists + [BASE + "/sitemaps/products-9.xml"]:
+        pages[c] = (200, urlset(BASE + "/en-ae/item/p/1"))
+    pages[deep] = (200, index_of(BASE + "/sitemaps/en-ae-products.xml"))
+    rep = harvester(pages).harvest(lulu(), discover=True)
+    indexes = [n["url"] for n in rep.tree if n["kind"] == "index"]
+    assert group in indexes and deep in indexes                         # deep-index.xml came after the cap
+    assert sum(1 for n in rep.tree if n["kind"] == "urlset") == sitemaps.DISCOVER_URLSETS
+
+
+def test_a_bad_pattern_or_a_byte_order_mark_in_the_stores_file(tmp_path):
+    good = tmp_path / "stores.json"
+    good.write_text("\ufeff" + json.dumps({"stores": [{"key": "x", "base_url": "https://x.ae", "product_path": "/p/"}]}),
+                    encoding="utf-8")
+    assert [s.key for s in load_stores(good)] == ["x"]
+    bad = tmp_path / "bad.json"
+    bad.write_text(json.dumps({"stores": [{"key": "x", "base_url": "https://x.ae", "product_path": "/p/("}]}),
+                   encoding="utf-8")
+    with pytest.raises(ValueError, match="x: product_path"):
+        load_stores(bad)
+    assert build_catalog_index.main(["--discover", "--config", str(bad)]) == 2
+
+
+def test_cli_one_store_failing_never_stops_the_others_and_the_json_is_written(monkeypatch, capsys, tmp_path):
+    pages = full_store()
+    spinneys = next(s for s in load_stores() if s.key == "spinneys")
+    pages[spinneys.base_url + "/robots.txt"] = (404, b"")
+    pages[spinneys.base_url + "/sitemap.xml"] = (200, urlset(spinneys.base_url + "/en-ae/catalogue/x_1/"))
+    http = FakeHttp(pages)
+
+    class Harvester(SitemapHarvester):
+        def __init__(self, *a, **kw):
+            super().__init__(http=http, sleep=lambda s: None)
+
+    monkeypatch.setattr(sitemaps, "SitemapHarvester", Harvester)
+    store = MemoryCatalogStore()
+    real_upsert = store.upsert
+
+    def upsert(key, batch):
+        if key == "lulu":
+            raise RuntimeError("database went away")
+        return real_upsert(key, batch)
+
+    store.upsert = upsert
+    monkeypatch.setattr(build_catalog_index, "_db_store", lambda: (store, ""))
+    out = tmp_path / "run.json"
+    code = build_catalog_index.main(["--stores", "lulu,spinneys", "--json", str(out)])
+    reports = json.loads(out.read_text(encoding="utf-8"))
+    assert code == 0 and [r["status"] for r in reports] == ["error", "ok"]
+    assert "database went away" in reports[0]["error"]
+    assert [h["store"] for h in store.harvests] == ["lulu", "spinneys"]   # both recorded

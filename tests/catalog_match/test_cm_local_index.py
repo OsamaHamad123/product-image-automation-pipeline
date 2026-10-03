@@ -112,6 +112,16 @@ def test_urls_are_one_product_whatever_the_query_or_slash():
     assert url_hash("https://www.spinneys.com/en-ae/catalogue/x_1/") == url_hash("https://spinneys.com/en-ae/catalogue/x_1")
 
 
+def test_the_indexed_words_are_the_products_own_slug_not_its_department():
+    from catalog_match.local_index import slug_text
+    assert slug_text("https://www.carrefouruae.com/mafuae/en/carbonated-soft-drinks-and-mixers/pepsi-can-330ml/p/1") \
+        == "pepsi can 330ml"
+    assert slug_text(LULU.format("ashoka-plain-paratha-400-g", 2)) == "ashoka plain paratha 400 g"
+    assert slug_text("https://www.spinneys.com/en-ae/catalogue/ashoka-plain-paratha-400g_3/") == \
+        "ashoka plain paratha 400g 3"
+    assert slug_text("https://www.carrefouruae.com/mafuae/en/p/2149577") != "en"
+
+
 def test_search_keys_need_the_brand_words_and_rank_by_product_words():
     groups, extra = search_keys(spec_for())
     assert groups == [["ashoka"]]

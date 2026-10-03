@@ -97,8 +97,22 @@ def index_keys(text: Optional[str]) -> List[str]:
     return out
 
 
+# A product id marker after the slug: '/<department>/<slug>/p/<id>' (Carrefour, Lulu), '/<slug>/dp/<id>'.
+_ID_MARKERS = frozenset({"p", "dp"})
+
+
 def slug_text(url: str) -> str:
-    """The words of a product URL's own slug (no locale or department breadcrumbs)."""
+    """The words of a product URL's own slug (no locale or department breadcrumbs): the segment before an id
+    marker ('/p/<id>') when there is one, else the segment with the most words. A department name with more
+    words than the product's slug ('carbonated-soft-drinks-and-mixers/pepsi-can-330ml/p/1') is never indexed
+    in its place."""
+    try:
+        segs = [seg for seg in urlsplit((url or "").strip()).path.split("/") if seg]
+    except ValueError:
+        segs = []
+    for i in range(1, len(segs) - 1):
+        if segs[i].lower() in _ID_MARKERS and any(ch in "-_" for ch in segs[i - 1]):   # a slug, not a locale
+            return url_path_text("https://slug.invalid/" + segs[i - 1])
     return url_path_text(url, product_segment=True)
 
 
