@@ -547,10 +547,12 @@
                     bdi(j.label || `صف ${j.row}`, 'rv-jobs__name'),
                     el('span', { className: 'rv-jobs__why', title: j.detail || null, text: ` — ${j.error}` })
                 ]),
-                // تغيّر المنتج بعد فتح الصفحة (C1): الإعادة كما هي تُرفض مرة أخرى؛ الاستبدال بتأكيد صريح فقط
+                // تغيّر المنتج بعد فتح الصفحة (C1): الإعادة كما هي تُرفض مرة أخرى؛ الاستبدال بتأكيد صريح فقط. صورة رفضها
+                // مراجع آخر لا تُستبدل ولا تُعاد (الخادم يرفضها دائماً): لا زر
                 j.stale
-                    ? el('button', { type: 'button', className: 'lq-btn lq-btn--danger lq-btn--sm rv-jobs__replace', text: 'استبدال المعتمدة…',
-                                     disabled: S.jobs.has(j.key), onclick: () => R.single.confirmReplace(j) })
+                    ? (j.stale.replaceable === false ? null
+                        : el('button', { type: 'button', className: 'lq-btn lq-btn--danger lq-btn--sm rv-jobs__replace', text: 'استبدال المعتمدة…',
+                                         disabled: S.jobs.has(j.key), onclick: () => R.single.confirmReplace(j) }))
                     : el('button', { type: 'button', className: 'lq-btn lq-btn--secondary lq-btn--sm', text: 'أعد المحاولة',
                                      disabled: S.jobs.has(j.key), onclick: () => S.jobs.retry(j.id) })
             ]))));

@@ -616,6 +616,27 @@ def _rejections(sku_key, alt_key=None):
     return urls, phashes
 
 
+def rejected_image(sku_key, alt_key=None, url=None, phash=None):
+    """
+    هل رفض مراجعٌ هذه الصورة لهذا المنتج (بالمفتاح أو بالمفتاح البديل)؟ رابطها (بصيغة url_norm) أو pHash على مسافة
+    استبعاد البحث نفسها (catalog_match.pipeline.PHASH_EXCLUDE_DISTANCE). None عندما تعذرت قراءة الرفض.
+    """
+    try:
+        urls, phashes = _rejections(sku_key, alt_key)
+    except Exception as e:
+        print(f"تنبيه: تعذر قراءة رفض المراجعين للـ SKU {sku_key}: {e}")
+        return None
+    if url and local_cache_db.url_norm(url) in {local_cache_db.url_norm(u) for u in urls}:
+        return True
+    if phash and phashes:
+        from catalog_match.pipeline import _near_negative, _phash_hex
+        negatives = [h for h in (_phash_hex(p) for p in phashes) if h]
+        own = _phash_hex(phash)
+        if own and _near_negative(own, negatives) is not None:
+            return True
+    return False
+
+
 def _servable_resolution(sku_key, alt_key, name, brand, size, brand_mappings=None):
     """الحل المعتمد (human_approved / auto_verified) لهذا المنتج بمفتاحه أو بالمفتاح البديل، أو None."""
     for key in dict.fromkeys(k for k in (sku_key, alt_key) if k):

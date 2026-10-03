@@ -523,6 +523,9 @@ STALE_ERRORS = {
     "state_changed": "حالة المنتج تغيّرت منذ فتحه؛ افتحه من جديد",
     "busy": "نشر آخر لهذا المنتج ما زال يكتب في الشيت؛ حاول بعد قليل",
 }
+# state_changed لأن الصورة نفسها رُفضت لهذا المنتج بعد فتح الصفحة (reason، و current.rejected_image)
+IMAGE_REJECTED = "image_rejected"
+IMAGE_REJECTED_ERROR = "هذه الصورة رفضها مراجع آخر لهذا المنتج؛ اختر صورة أخرى"
 
 
 def _ts(value):
@@ -604,15 +607,54 @@ def _approval_age_seconds(approval):
     return abs(time.time() - resolved_at.timestamp())
 
 
+def _image_phash(params, row_number, sku_key, image_url):
+    """pHash الصورة المطلوب اعتمادها: المرسل، أو من بايتات المرشح المحفوظة (candidate_sha256 أو مرشحات المنتج)."""
+    sent = _text(params, 'phash')
+    if sent:
+        return sent
+    sha = _text(params, 'candidate_sha256') or _text(params, 'content_sha256')
+    if not sha:
+        for c in local_cache_db.get_curation_candidates(row_number, sku_key=sku_key or None):
+            if c.get("image_url") == image_url and c.get("content_sha256"):
+                sha = c["content_sha256"]
+                break
+    return _phash_of_stored(sha) if sha else None
+
+
+def _rejected_refusal(params, sku_key, row_number, product_name, image_url):
+    """
+    رفض اعتماد صورة رفضها مراجع لهذا المنتج (رابطها أو pHash، بالمفتاح أو بمفتاح الصف البديل) بعد فتح الصفحة: الرفض لا
+    يغيّر حالة الطابور ولا توقيته، فلا يراه expected_state. state_changed مع reason=image_rejected و
+    current.rejected_image. replace لا يتجاوزه: الرفض دائم لهذه الصورة لهذا المنتج (ارفع الصورة يدوياً إن كان الرفض خطأ).
+    """
+    if not image_url or not sku_key:
+        return None
+    task = local_cache_db.get_task_by_row(row_number)
+    alt = (task or {}).get("alt_sku_key") if _same_product_task(task, sku_key, product_name) else None
+    pipeline = _pipeline()
+    rejected = pipeline.rejected_image(sku_key, alt, image_url)
+    if rejected is False:
+        rejected = pipeline.rejected_image(sku_key, alt, None, _image_phash(params, row_number, sku_key, image_url))
+    if not rejected:
+        return None
+    current = dict(_current_state(sku_key, row_number, product_name)[0], rejected_image=True)
+    return {'status': 'failed', 'error_code': 'state_changed', 'reason': IMAGE_REJECTED,
+            'error': IMAGE_REJECTED_ERROR, 'current': current}
+
+
 def _stale_refusal(params, sku_key, row_number, product_name, image_url=None):
     """
-    رفض الاعتماد / الرفع فوق قرار لم يره المراجع (None = مسموح). replace=true يتجاوز الفحص.
+    رفض الاعتماد / الرفع فوق قرار لم يره المراجع (None = مسموح). replace=true يتجاوز الفحص، إلا رفض الصورة نفسها.
+    - الصورة رفضها مراجع لهذا المنتج -> state_changed (reason=image_rejected، _rejected_refusal)
     expected_state (ما عرضته الصفحة: queue_status, queue_updated_at, approved_url):
       - اعتماد بشري لم تعرضه الصفحة (رابطه غير approved_url) -> already_approved
       - صف الطابور تغيّر منذ فتح الصفحة -> state_changed
     بلا expected_state (عميل قديم): يبقى السلوك القديم، إلا أن اعتماداً بشرياً لصورة أخرى خلال آخر دقيقتين
     (APPROVAL_GUARD_SECONDS) لا يُستبدل -> already_approved. الاستجابة تحمل current لتعرضه الصفحة.
     """
+    refusal = _rejected_refusal(params, sku_key, row_number, product_name, image_url)
+    if refusal:
+        return refusal
     if _as_bool(params.get('replace', False)):
         return None
     current, approval = _current_state(sku_key, row_number, product_name)

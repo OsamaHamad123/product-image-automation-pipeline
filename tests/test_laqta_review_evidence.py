@@ -741,3 +741,30 @@ out.second = requests('/api/select_image')[1].body.expected_state;
 """.replace("__CUR__", js(current)), tmp_path, fixture([B, OTHER]))
     assert out["second"] == {"queue_status": "completed", "queue_updated_at": "2026-10-03 11:00:00",
                              "approved_url": "https://res.cloudinary.com/demo/b.png"}
+
+
+# ---------------------------------------------------------------------------
+# wp/p4-publish-fix: an image another reviewer rejected after the page opened (state_changed, image_rejected)
+# ---------------------------------------------------------------------------
+
+@NEEDS_NODE
+def test_an_image_another_reviewer_rejected_is_said_and_never_offered_for_replacement(tmp_path):
+    out = page(r"""
+openRow(9);
+press('Enter');
+await flush();
+answer(requests('/api/select_image')[0], { status: 'failed', error_code: 'state_changed', reason: 'image_rejected',
+    error: 'هذه الصورة رفضها مراجع آخر لهذا المنتج؛ اختر صورة أخرى',
+    current: { queue_status: 'ready_for_review', queue_updated_at: '2026-10-03 10:00:00', approved_url: null,
+               rejected_image: true } }, 500);
+await flush();
+out.toast = toasts.slice(-1)[0];
+out.panel = jobsText();
+out.buttons = document.querySelectorAll('#rvJobs button').map(b => b.textContent).filter(t => t);
+out.bucket = itemOf(9).bucket;
+""", tmp_path, fixture([B, OTHER]))
+    assert out["toast"]["variant"] == "danger"
+    assert "رفضها مراجع آخر لهذا المنتج" in out["toast"]["text"] and "استبدال" not in out["toast"]["text"]
+    assert "رفضها مراجع آخر لهذا المنتج" in out["panel"] and "تغيّرت حالة المنتج" not in out["panel"]
+    assert "استبدال المعتمدة…" not in out["buttons"] and "أعد المحاولة" not in out["buttons"]
+    assert out["bucket"] == "proposed"                          # nothing was published: still waiting

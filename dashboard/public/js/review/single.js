@@ -352,7 +352,7 @@
     // الخادم الآن (expected = current)، فلا يستبدل إلا ما رآه المراجع
     function confirmReplace(job) {
         const S = st();
-        if (!job || !job.stale) return false;
+        if (!job || !job.stale || job.stale.replaceable === false) return false;
         const what = job.stale.text || '';
         const msg = `${what} هل تريد استبدال ما هو معتمد الآن بالصورة التي اخترتها لـ «${job.label}»؟`;
         if (!root.confirm(msg)) return false;
@@ -402,7 +402,9 @@
             }
         } else {
             if (['approving', 'rejecting'].includes(S.local.get(job.key))) S.local.delete(job.key);
-            if (job.stale) {
+            if (job.stale && job.stale.replaceable === false) {
+                R.toast(`لم تُعتمد صورة «${job.label}»: ${job.stale.text}`, 'danger', 12000);
+            } else if (job.stale) {
                 R.toast(`لم تُعتمد صورة «${job.label}»: ${job.stale.text} تستطيع استبدالها من لوحة الاعتمادات بعد التأكد.`, 'danger', 12000);
             } else if (String(job.detail || '').indexOf(R.PRODUCT_CHANGED) >= 0) {
                 R.toast(`${R.PRODUCT_CHANGED}: «${job.label}»`, 'danger', 9000);

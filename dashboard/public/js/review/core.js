@@ -590,12 +590,18 @@
         return status ? (QUEUE_STATUS_TEXT[status] || 'حالة غير معروفة') : 'ليس في الطابور';
     }
 
-    // ما تغيّر منذ فتح الصفحة، بالعربي، من رد الخادم (error_code و current) وما أرسلته الصفحة (expected)؛ null لغيره
+    // ما تغيّر منذ فتح الصفحة، بالعربي، من رد الخادم (error_code و current) وما أرسلته الصفحة (expected)؛ null لغيره.
+    // replaceable=false: لا يُعرض «استبدال المعتمدة»؛ الصورة نفسها رفضها مراجع آخر (reason=image_rejected) والخادم
+    // يرفض اعتمادها حتى مع replace
     function staleInfo(data, expected) {
         data = data || {};
         const code = String(data.error_code || '');
         if (!STALE_CODES.includes(code)) return null;
         const cur = data.current && typeof data.current === 'object' && !Array.isArray(data.current) ? data.current : {};
+        if (data.reason === 'image_rejected' || cur.rejected_image === true) {
+            return { code: code, reason: 'image_rejected', current: cur, approvedUrl: String(cur.approved_url || '').trim(),
+                     replaceable: false, text: 'هذه الصورة رفضها مراجع آخر لهذا المنتج بعد فتح الصفحة؛ اختر صورة أخرى.' };
+        }
         const exp = expected || {};
         const parts = [code === 'already_approved' ? 'اعتُمدت لهذا المنتج صورة بعد فتح الصفحة' : 'تغيّرت حالة المنتج بعد فتح الصفحة'];
         const curUrl = String(cur.approved_url || '').trim();
@@ -605,7 +611,7 @@
         if ('queue_status' in cur && (cur.queue_status || null) !== (exp.queue_status || null)) {
             parts.push(`حالته كانت «${queueText(exp.queue_status)}» وصارت «${queueText(cur.queue_status)}»`);
         }
-        return { code: code, current: cur, approvedUrl: curUrl, text: parts.join('، ') + '.' };
+        return { code: code, current: cur, approvedUrl: curUrl, replaceable: true, text: parts.join('، ') + '.' };
     }
 
     // ما يُقال عن الشيت بعد الاعتماد (عقد C3: sheet = written | pending | conflict | unknown). لا يُقال «كُتب في الشيت»

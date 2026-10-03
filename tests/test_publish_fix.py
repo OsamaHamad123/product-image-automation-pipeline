@@ -523,3 +523,37 @@ def test_an_approval_whose_write_is_not_in_the_outbox_is_not_judged_by_the_rows_
     monkeypatch.setattr(google_sheets, "update_image_link", lambda *a, **k: True)
     result = cli_bridge.action_select_image(_approve_params(row, MILK, "https://x/a.jpg", sku, GTIN))
     assert result["status"] == "success" and result["sheet"] == "unknown"
+
+
+# ---------------------------------------------------------------------------
+# #5: C1 sees a rejection made after the page opened
+# ---------------------------------------------------------------------------
+
+def test_approving_an_image_another_reviewer_rejected_after_the_page_opened_is_refused(db, bridge):
+    cli_bridge, env = bridge
+    row = ROWS[0]
+    sku = _queue(db, row, MILK, GTIN)
+    pick, other = "https://x/pick.jpg", "https://x/other.jpg"
+    assert db.save_curation_candidates(row, MILK["product_name"], MILK["brand"], [
+        {"url": pick, "status": "preselected"}, {"url": other, "status": "eligible"}], sku_key=sku)
+    seen = _page_view(db, row)                                  # both pages open
+    rejected = cli_bridge.action_reject_image(dict(_approve_params(row, MILK, pick, sku, GTIN),
+                                                   reason_code="WRONG_VARIANT", phash="0f0ff0f03c3ca5a5"))
+    assert rejected["status"] == "success" and rejected["queue_status"] == "ready_for_review"
+    assert _page_view(db, row) == seen                          # the rejection leaves the row as the pages saw it
+
+    result = cli_bridge.action_select_image(_approve_params(row, MILK, pick, sku, GTIN, expected_state=seen))
+    assert (result["status"], result["error_code"], result["reason"]) == ("failed", "state_changed", "image_rejected")
+    assert result["current"]["rejected_image"] is True and result["current"]["queue_status"] == "ready_for_review"
+    # replace (the stale-approval confirmation) does not re-approve a rejected image
+    result = cli_bridge.action_select_image(_approve_params(row, MILK, pick, sku, GTIN, expected_state=seen,
+                                                            replace=True))
+    assert result["reason"] == "image_rejected"
+    # the same picture under another address (its pHash) is the rejected image too
+    result = cli_bridge.action_select_image(_approve_params(row, MILK, "https://mirror/pick.jpg", sku, GTIN,
+                                                            expected_state=seen, phash="0f0ff0f03c3ca5a4"))
+    assert result["reason"] == "image_rejected"
+    assert env["sheet"] == [] and db.get_cached_product(sku_key=sku) is None
+    # another image of the product is approved as usual
+    assert cli_bridge.action_select_image(_approve_params(row, MILK, other, sku, GTIN,
+                                                          expected_state=seen))["status"] == "success"
