@@ -322,6 +322,9 @@ def find_product_image(spec: Union[SkuSpec, Mapping[str, Any]], *, providers: Op
         results = results + report.verify_results
         extra_queries = report.queries
         n_phash_dropped += report.phash_dropped
+        if report.store_image_wrong:
+            # X0: store pages whose own picture is the picture that failed (catalog_match.expand)
+            outcome.reject_counts[expand_mod.STORE_IMAGE_WRONG] = report.store_image_wrong
     outcome.queries = list(retrieval.queries) + extra_queries
     outcome.discovered_brands = list(spec.discovered_brands)
     outcome.vlm_calls = sum(int(r.calls or 0) for r in results)
