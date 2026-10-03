@@ -7,7 +7,9 @@ GeminiVerifier.verify(spec, images) -> VerificationResult
     * generationConfig.responseSchema asks, per image, for what is PRINTED
       (brand_text, variant_text, size_text, pack_count), the view, and
       brand/variant/size match in {yes, no, unsure}, plus best_index;
-    * timeout 25 s, one retry with backoff on 429 or 5xx.
+    * timeout 25 s, one retry with backoff on 429 or 5xx, and one immediate retry after a
+      timeout (one slow answer is not an outage: live run 2026-10-03, row 4 lost its pick to a
+      single timeout; the Claude reader already retried its timeouts).
 
 The CODE decides, never the model:
     MATCH     brand_match == 'yes', view == 'front_packshot', variant_match != 'no',
@@ -606,6 +608,9 @@ class GeminiVerifier:
             try:
                 resp = self._post(url, headers, body)
             except requests.Timeout:
+                if attempt == 1:
+                    logger.info("verify: the call timed out; sending it once more")
+                    continue
                 return self._fail(n, "timeout", 1)
             except requests.RequestException as exc:
                 return self._fail(n, f"connection_error:{type(exc).__name__}", 1)

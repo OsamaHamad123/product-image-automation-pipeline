@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "_doc": "Sheet compounds and typos -> the words the stores write, read by catalog_match.sheet_names BEFORE identity parsing (size, variants, product-type words) and the query plan. Never applied to the sku_key: identity.make_sku_key keeps the raw sheet name and the size parsed from it, so editing this file never orphans an approval, a rejection or a queued row. Keys are matched like data/abbreviations.json keys (catalog_match.abbreviations.rewrite): whole words on normalised tokens, longest key first, never inside another word or abbreviation; the words take the case style of the sheet text. An entry with a 'context' (a token set of variants_lexicon.json 'contexts') applies only when the name, Arabic name, category or class words hold a token of it. Each entry has a one-line 'why' naming the live row it comes from. Be conservative: list only a spelling that has no other reading in a grocery name; a size or a brand is never 'corrected' here (brand spellings belong in the Brands Mapping sheet, shorthand in abbreviations.json).",
+  "entries": {
+    "LIGHTMEAT": {"reads": "LIGHT MEAT", "why": "glued words; live 2026-10-03 rows 32 and 33 (FAMILY LIGHTMEAT ... TUNA): no light-meat grade was read and 'lightmeat' was a product word no listing has"},
+    "SOLIDTUNA": {"reads": "SOLID TUNA", "why": "glued words; row 49 (SUP/T WT/MEAT SOLIDTUNA SALTWATER): no 'tuna' token, so no canned-fish context and WT/MEAT (white meat) went unread"},
+    "SALTWATER": {"reads": "SALT WATER", "why": "glued words; row 49: 'salt water' is the brine a tuna is packed in"},
+    "SALT WATE": {"reads": "SALT WATER", "why": "truncated word; row 50 (SUPER T/MEAT SOLID TUNA SALT WATE3X185GM): the brine medium was lost", "context": "canned_fish"},
+    "CHICKN": {"reads": "CHICKEN", "why": "typo; row 53 (TARGET CHICKN LUNCHENMEAT RECTANGL 340GM): no listing writes 'chickn', product-word coverage 0"},
+    "LUNCHENMEAT": {"reads": "LUNCHEON MEAT", "why": "typo and glued words; row 53: the listings say 'Luncheon Meat'"},
+    "SEASOING": {"reads": "SEASONING", "why": "typo; row 37 (INA PARAMANS SEASOING MEAT SPICE 200ML): the listings say 'Seasoning Meat Spice'"},
+    "SOBEANOIL": {"reads": "SOYBEAN OIL", "why": "typo and glued words; row 52 (SUPER/T LIGHT MEAT TUNA SOBEANOIL 185GM): the soybean-oil medium was lost"},
+    "VEGE OIL": {"reads": "VEGETABLE OIL", "why": "truncated word; row 35 (GOLDEN PRIZE L/ MEAT TUNA VEGE OIL 185GM): the vegetable-oil medium was lost"}
+  }
+}

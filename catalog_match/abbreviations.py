@@ -54,9 +54,7 @@ def rules() -> Tuple[Rule, ...]:
     """Every rule of the data file, longest key first (file order on a tie)."""
     with open(ABBREVIATIONS_PATH, "r", encoding="utf-8") as fh:
         raw = json.load(fh)
-    with open(LEXICON_PATH, "r", encoding="utf-8") as fh:
-        contexts = {name: frozenset(t for word in words for t in tokens(word, strip_clitics=True))
-                    for name, words in (json.load(fh).get("contexts") or {}).items()}
+    contexts = load_contexts()
     out: List[Rule] = []
     for group, spec in (raw.get("groups") or {}).items():
         ctx_name = spec.get("context")
@@ -84,16 +82,32 @@ def _is_edge(text: str, i: int) -> bool:
 
 def expand(text: Optional[str], context: Optional[str] = None) -> str:
     """The text with every known sheet shorthand written out (see the module docstring)."""
+    return rewrite(text, context, rules(), _vocabulary())
+
+
+def load_contexts() -> dict:
+    """The token sets of variants_lexicon.json 'contexts', by name (a rule's 'context' names one)."""
+    with open(LEXICON_PATH, "r", encoding="utf-8") as fh:
+        return {name: frozenset(t for word in words for t in tokens(word, strip_clitics=True))
+                for name, words in (json.load(fh).get("contexts") or {}).items()}
+
+
+def rewrite(text: Optional[str], context: Optional[str], rule_set: Tuple[Rule, ...],
+            vocabulary: FrozenSet[str]) -> str:
+    """The matching engine of expand(): every rule of `rule_set` (longest key first) replaced by its words.
+
+    catalog_match.sheet_names runs the same engine over its own data file (sheet compounds and typos).
+    """
     if not text:
         return text or ""
     found = [(m.start(), m.end(), normalize(m.group())) for m in _TOKEN_RE.finditer(text)]
     keys = [k for _, _, k in found]
-    if _vocabulary().isdisjoint(keys):
+    if vocabulary.isdisjoint(keys):
         return text
     present = set(tokens(text, strip_clitics=True)) | set(tokens(context, strip_clitics=True))
     used = [False] * len(found)
     spans: List[Tuple[int, int, str]] = []
-    for rule in rules():
+    for rule in rule_set:
         n = len(rule.toks)
         if rule.context is not None and rule.context.isdisjoint(present):
             continue

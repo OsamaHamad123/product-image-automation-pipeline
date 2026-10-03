@@ -6,14 +6,20 @@ build_sku_spec(row, brand_mappings, size_text=None)
 
 * raw_name is kept exactly as the sheet has it; nothing here rewrites it.
 * brand goes through the reverse brand index (mapped / sheet_raw / none).
+* size, variants and class_tokens are parsed from the READABLE names
+  (catalog_match.sheet_names: a size glued to a word split off, 'MASALA160 GM' ->
+  'MASALA 160 GM'; sheet compounds and typos fixed, 'SOLIDTUNA' -> 'SOLID TUNA').
 * size is the size column merged with the name (see _pick_size): a pack stated only
   in the name, or a measure stated only in the name, is never dropped.
-* class_tokens are the product-type words left after removing brand, size,
-  variant and stop words ('Almarai Full Fat Milk 1L' -> ('milk',)).
+* class_tokens are the product-type words left after removing brand, size (and unit
+  words, 'mm' included: '9MM' fries are a cut, not a product word), variant and stop
+  words ('Almarai Full Fat Milk 1L' -> ('milk',)).
 * sku_key is the GTIN-14 when the barcode is valid, otherwise
   sha1(norm sheet brand | norm raw name | size canonical)[:16]. The sheet brand is
   the raw brand cell (or the Arabic brand cell), never the mapping-derived canonical
   brand, so the key is stable when the Brands Mapping sheet changes or fails to load.
+  The size in the key is parsed from the RAW names, never from the readable ones: a
+  new spelling fix or size rule never moves an existing row's key.
 """
 
 from __future__ import annotations
@@ -23,6 +29,7 @@ import logging
 from dataclasses import replace
 from typing import Any, List, Mapping, Optional, Sequence, Set, Tuple, Union
 
+from . import sheet_names
 from . import variants as variants_mod
 from .brand_index import BrandIndex, BrandResolution, build_index
 from .gtin import normalize_gtin
@@ -45,6 +52,8 @@ _STOPWORDS_RAW = (
 _UNIT_WORDS_RAW = (
     "ml mls cl l lt ltr ltrs litre litres liter liters g gm gms gr grs gram grams kg kgs kilo"
     " kilos kilogram kilograms oz lb lbs fl floz pk pkt ct"
+    # a length: '9MM' / '900 MM' fries (live run 2026-10-03, rows 4, 5, 12) is the cut, never a product word
+    " mm"
     " مل ملل مللي ملي لتر ليتر لترات ل غ غم غرام جم جرام كجم كغ كغم كيلو كيلوغرام كيلوجرام"
 )
 
@@ -180,18 +189,26 @@ def build_sku_spec(row: Mapping[str, Any], brand_mappings=None, size_text: Optio
     res = _resolve_brand(index, brand_raw, brand_ar_row, raw_name, name_ar)
 
     gtin14, gtin_status = normalize_gtin(barcode)
-    size = _pick_size(size_text, raw_name, name_ar)
+    # The size, variants and product-type words are parsed from the names as the stores write them: a size
+    # glued to a word split off ('WATE3X185GM'), sheet compounds and typos fixed ('SOLIDTUNA SALTWATER',
+    # 'CHICKN LUNCHENMEAT'; catalog_match.sheet_names). The sku_key keeps the raw name and the size parsed
+    # from it (key_size), so an existing row's key never moves (live run 2026-10-03, rows 32-53).
+    raw_context = sheet_names.raw_context(raw_name, name_ar, category)
+    name = sheet_names.readable(raw_name, raw_context)
+    name_ar_read = sheet_names.readable(name_ar, raw_context)
+    size = _pick_size(size_text, name, name_ar_read)
+    key_size = _pick_size(size_text, raw_name, name_ar)
     # Both names and the category open context-bound phrases ('white' next to 'tuna').
-    variant_context = " ".join(t for t in (raw_name, name_ar, category) if t)
+    variant_context = " ".join(t for t in (name, name_ar_read, category) if t)
     variants = variants_mod.merge(
-        variants_mod.extract_variants(raw_name, variant_context),
-        variants_mod.extract_variants(name_ar, variant_context),
+        variants_mod.extract_variants(name, variant_context),
+        variants_mod.extract_variants(name_ar_read, variant_context),
     )
 
     brand_words: Set[str] = set()
     for phrase in (brand_raw, brand_ar_row, res.canonical, res.brand_ar) + tuple(res.match_brands) + tuple(res.family):
         brand_words |= _token_set(phrase or "")
-    class_tokens = _class_tokens((raw_name, name_ar), brand_words, variant_context)
+    class_tokens = _class_tokens((name, name_ar_read), brand_words, variant_context)
 
     # The key must not depend on the Brands Mapping sheet: editing it (or failing to load
     # it) would orphan approvals, rejections and queued review rows. Use the sheet's own
@@ -217,7 +234,7 @@ def build_sku_spec(row: Mapping[str, Any], brand_mappings=None, size_text: Optio
         variants=variants,
         class_tokens=class_tokens,
         category=category,
-        sku_key=make_sku_key(gtin14, brand_for_key, raw_name, size),
+        sku_key=make_sku_key(gtin14, brand_for_key, raw_name, key_size),
         required_brands=tuple(res.required),
         sibling_brands=tuple(res.siblings),
     )

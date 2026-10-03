@@ -22,6 +22,11 @@ Context-bound phrases ('context_values' in the lexicon) count only when the text
 `context` text passed in, has a token of that context: 'white' is a tuna meat grade only
 next to 'tuna'. Callers that compare a candidate or a label reading with a SKU pass
 spec_context(spec), because a label reading ('White Meat') rarely repeats the product type.
+
+An axis's 'generic' values give way to a specific value stated in the same text (or in the
+other name, for merge()): the protein of 'Mutton Meat Masala' is mutton, not mutton+meat,
+so it still conflicts with a chicken masala (live run 2026-10-03: 'ZWAN BEEF LUNCHEON MEAT'
+and the Zwan Chicken listing, 'ALLDE MEAT MASALA' and Allde Chicken Masala).
 """
 
 from __future__ import annotations
@@ -51,6 +56,8 @@ class _Lexicon:
         # axis -> [(context tokens, values that are not marked for products of that context)]
         self.context_unmarked: Dict[str, List[Tuple[FrozenSet[str], Set[str]]]] = {}
         self.soft_groups: Dict[str, List[Set[str]]] = {}
+        # axis -> values that a more specific value of the axis replaces ('meat' next to 'beef' is beef)
+        self.generic: Dict[str, Set[str]] = {}
         self.axes: Tuple[str, ...] = tuple(raw.get("axes", {}).keys())
         contexts = {name: frozenset(t for word in words for t in tokens(word, strip_clitics=True))
                     for name, words in (raw.get("contexts") or {}).items()}
@@ -65,6 +72,7 @@ class _Lexicon:
         for axis, spec in raw.get("axes", {}).items():
             self.unmarked[axis] = set(spec.get("unmarked", []))
             self.soft_groups[axis] = [set(g) for g in spec.get("soft_groups", [])]
+            self.generic[axis] = set(spec.get("generic", []))
             for ctx_name, values in (spec.get("context_unmarked") or {}).items():
                 if ctx_name not in contexts:
                     raise ValueError(f"variants lexicon: axis {axis!r} uses unknown context {ctx_name!r}")
@@ -122,10 +130,21 @@ def values_of(value: Optional[str]) -> Set[str]:
 
 
 def spec_context(spec) -> str:
-    """The SKU text that opens context-bound phrases when a candidate or a label is compared with it."""
-    parts = [getattr(spec, "raw_name", ""), getattr(spec, "name_ar", ""), getattr(spec, "category", "")]
+    """The SKU text that opens context-bound phrases when a candidate or a label is compared with it
+    (the sheet name as written and as the stores write it: 'SOLIDTUNA' holds the 'tuna' of 'SOLID TUNA')."""
+    from .sheet_names import spec_name      # sheet_names reads the lexicon's contexts through abbreviations
+    parts = [getattr(spec, "raw_name", ""), spec_name(spec), getattr(spec, "name_ar", ""),
+             getattr(spec, "category", "")]
     parts.extend(getattr(spec, "class_tokens", ()) or ())
     return " ".join(p for p in parts if p)
+
+
+def _specific(axis: str, values: Set[str]) -> Set[str]:
+    """The values without the axis's generic ones when a specific one is stated too ('meat' + 'mutton' -> mutton)."""
+    generic = lexicon().generic.get(axis)
+    if generic and values - generic:
+        return values - generic
+    return values
 
 
 def extract_variants(text: Optional[str], context: Optional[str] = None) -> Dict[str, str]:
@@ -133,7 +152,7 @@ def extract_variants(text: Optional[str], context: Optional[str] = None) -> Dict
     per_axis: Dict[str, Set[str]] = {}
     for axis, value, _ in _scan(text, context):
         per_axis.setdefault(axis, set()).add(value)
-    return {axis: _join(vals) for axis, vals in per_axis.items()}
+    return {axis: _join(_specific(axis, vals)) for axis, vals in per_axis.items()}
 
 
 def variant_tokens(text: Optional[str], context: Optional[str] = None) -> Set[str]:
@@ -151,7 +170,7 @@ def merge(*variant_dicts: Mapping[str, str]) -> Dict[str, str]:
     for d in variant_dicts:
         for axis, value in (d or {}).items():
             per_axis.setdefault(axis, set()).update(values_of(value))
-    return {axis: _join(vals) for axis, vals in per_axis.items() if vals}
+    return {axis: _join(_specific(axis, vals)) for axis, vals in per_axis.items() if vals}
 
 
 def _soft_pair(axis: str, tvals: Set[str], fvals: Set[str]) -> bool:

@@ -6,7 +6,8 @@ retrieve(spec, providers, custom_query=None, exclude_urls=(), max_queries=4,
 * The lookup providers run once, in parallel with Q1: the GTIN lookups (Open Food
   Facts) only for a valid GTIN, the local catalog index (needs_gtin False) always;
   then the next planned queries run in order. Nothing wins by coming first: the
-  caller scores and ranks the whole pool.
+  caller scores and ranks the whole pool. Retriever.rerun_lookups() asks the
+  brand-word lookups (the local index) once more after brand discovery changed the spec.
 * early_stop(pool) -> bool is checked after each step (callers pass a T1 test built
   on score.py, see t1_early_stop()).
 * At most max_queries planned queries are sent (relaxations share that budget). A
@@ -384,6 +385,32 @@ class Retriever:
         if ran is not None:
             self._merge(ran)
         self._log_summary(f"extra {query.query_id}")
+        return self.result
+
+    def rerun_lookups(self, extra: Optional[PlannedQuery] = None) -> RetrievalResult:
+        """Ask the lookups that read the spec's brand words once more, with the spec as it is now, in parallel
+        with `extra` (one more planned query, within the query budget, not a relaxation) when one is given.
+
+        Only the lookups that need no GTIN (the local catalog index): a GTIN lookup reads the barcode, which
+        brand discovery never changes. After discovery the spec accepts the stores' spelling ('Rio Mare' for
+        the sheet's 'RIO MARIE'), and the index rows written that way were never asked for in the first step
+        (live run 2026-10-03). Free: a local lookup and at most LOCAL_INDEX_MAX_PAGES page reads.
+        """
+        lookups = [p for p in self.providers if self._runs_lookup(p) and not getattr(p, "needs_gtin", True)]
+        query = extra
+        if query is not None and self._budget() <= 0:
+            logger.info("retrieve: query budget of %d reached; %s not sent", self.max_queries, query.query_id)
+            query = None
+        if not lookups and query is None:
+            return self.result
+        with ThreadPoolExecutor(max_workers=self._workers) as ex:
+            lookup_futs = [ex.submit(self._call, p, _lookup_query(p), True) for p in lookups]
+            ran = self._run_query(query, ex) if query is not None else None
+            lookup_results = [f.result() for f in lookup_futs]
+        self._merge(lookup_results)
+        if ran is not None:
+            self._merge(ran)
+        self._log_summary(f"lookups again{' + ' + query.query_id if query is not None else ''}")
         return self.result
 
     def relax(self) -> RetrievalResult:

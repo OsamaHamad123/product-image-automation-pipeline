@@ -803,3 +803,67 @@ def test_when_x0s_verifier_call_gets_no_answer_no_paid_call_is_made():
     assert len(verifier.calls) == 2 and SHOP_OWN_IMG in verifier.calls[1]
     assert web_p.calls == [] and shop_p.calls == []
     assert outcome.failure_code == "VERIFIER_DOWN"
+
+
+# ---------------------------------------------------------------------------
+# X0: the store's own page shows the same picture that failed (same bytes): never read again, never picked
+# (live run 2026-10-03: Google filed Ansar Gallery's Yumway page and Tradeling's Green Farm page under
+# another product's pack, rows 13 and 36; a store whose own page shows that pack has the wrong image)
+# ---------------------------------------------------------------------------
+
+STORE_WRONG = "x0:store_image_wrong"
+
+
+def test_x0_records_a_store_page_that_shows_the_failed_picture_itself():
+    outcome, d = run([shop_listing()], web=[hit(LULU_PAGE, "Barts Traditional Fries 1kg")],
+                     docs={SHOP_PAGE: product_page("Barts Traditional Fries 1kg", SHOP_OWN_IMG, brand="Barts"),
+                           LULU_PAGE: lulu_html()},
+                     bodies={SHOP_LISTING_IMG: packshot_png(3), SHOP_OWN_IMG: packshot_png(3),
+                             LULU_IMAGE: packshot_png(7)},
+                     readings={SHOP_LISTING_IMG: READ_EMBORG, LULU_IMAGE: READ_MATCH})
+    own = next(rc for rc in outcome.ranked if rc.candidate.image_url == SHOP_OWN_IMG)
+    assert STORE_WRONG in own.reasons and own.status == "rejected"
+    assert outcome.reject_counts.get(STORE_WRONG) == 1
+    assert not any(SHOP_OWN_IMG in call for call in d["verifier"].calls)       # never read again
+    # the paid steps still look further: the Lulu page is the pick
+    assert outcome.decision == "REVIEW_PRESELECTED" and outcome.winner.candidate.image_url == LULU_IMAGE
+
+
+def test_x0_never_preselects_the_back_of_the_pack_its_page_shows_again():
+    # The Spinneys listing has no size in its title (tier 2) and its picture is the back of the pack (UNSURE,
+    # other_side). The page's own picture is the same image file under another address, and the page's
+    # name states the size (tier 1): the inherited UNSURE must not pre-check the back of the pack.
+    page = "https://www.spinneys.com/en-ae/catalogue/barts-traditional-fries_88/"
+    listing_img = "https://img.example-cdn.com/barts-back.jpg"
+    own_img = "https://img.example-cdn.com/barts-traditional-fries-1kg-back.jpg"
+    back = cand(listing_img, "Barts Traditional Fries | Spinneys", page)
+    read_back = dict(READ_MATCH, view="other_side")
+    outcome, d = run([back], docs={page: product_page("Barts Traditional Fries 1kg", own_img, brand="Barts")},
+                     bodies={listing_img: packshot_png(3), own_img: packshot_png(3)},
+                     readings={listing_img: read_back, own_img: read_back}, max_calls=1)
+    own = next(rc for rc in outcome.ranked if rc.candidate.image_url == own_img)
+    assert own.score.tier == 1 and STORE_WRONG in own.reasons
+    assert outcome.winner is None or outcome.winner.candidate.image_url != own_img
+    assert outcome.decision != "REVIEW_PRESELECTED"
+
+
+def test_x0_spends_no_verifier_call_on_the_failed_picture_under_another_address():
+    # The page's own picture was already in the pool under its address, below the 8 download slots of the
+    # normal flow; it is the same file as the failed listing picture. X0 downloads it and must not read it.
+    retail = [cand(f"https://img.example-cdn.com/o{i}.jpg", "Barts Traditional Fries | Carrefour UAE",
+                   f"https://www.carrefouruae.com/mafuae/en/fries/barts-traditional-fries-{i}/p/{i}", n=i + 1)
+              for i in range(1, 9)]
+    own_img = "https://img.example-cdn.com/p-77.jpg"                     # no product words in its address
+    same = cand(own_img, "Barts fries", "https://www.example-blog.com/barts", n=20)
+    read_no = dict(READ_MATCH, size_text="2.5 kg", size_match="no")
+    bodies = {c.image_url: packshot_png(40 + i) for i, c in enumerate(retail)}
+    bodies.update({SHOP_LISTING_IMG: packshot_png(3), own_img: packshot_png(3)})
+    readings = {c.image_url: read_no for c in retail}
+    readings.update({SHOP_LISTING_IMG: READ_EMBORG})
+    outcome, d = run([shop_listing()] + retail + [same],
+                     docs={SHOP_PAGE: product_page("Barts Traditional Fries 1kg", own_img, brand="Barts")},
+                     bodies=bodies, readings=readings, max_calls=1)
+    assert d["fetcher"].fetched.index(own_img) >= 8                 # downloaded by X0, not the normal flow
+    assert not any(own_img in call for call in d["verifier"].calls)  # but never read
+    own = next(rc for rc in outcome.ranked if rc.candidate.image_url == own_img)
+    assert STORE_WRONG in own.reasons
