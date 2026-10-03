@@ -90,7 +90,13 @@ def test_a_page_record_is_kept_with_its_age_and_found_by_gtin(store):
     assert [r.id for r in store.find(["ashoka"], ["paratha"])] == [row.id]
     store.save_page(row.id, PageRecord(status="timeout"))
     (again,) = store.find(["ashoka"], [])
-    assert (again.page_status, again.image_url, again.page_title) == ("timeout", "", "Ashoka Plain Paratha 400 g")
+    # a transient failure changes only the status: the image, size and GTIN an earlier read found stay
+    assert (again.page_status, again.image_url, again.image_width, again.gtin, again.page_title) == \
+        ("timeout", "https://gcc.luluhypermarket.com/medias/1.jpg", 900, "08906008560022", "Ashoka Plain Paratha 400 g")
+    assert [r.id for r in store.by_gtin("08906008560022")] == [row.id]
+    store.save_page(row.id, PageRecord(status="http_404"))          # a permanent answer replaces it
+    (gone,) = store.find(["ashoka"], [])
+    assert (gone.page_status, gone.image_url, gone.gtin) == ("http_404", "", None)
 
 
 def test_prune_removes_pages_no_longer_listed_with_their_words(store, mariadb_or_skip):

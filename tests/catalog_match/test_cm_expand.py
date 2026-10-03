@@ -713,3 +713,93 @@ def test_when_x0_finds_no_pick_the_paid_steps_still_run():
     assert d["pages"].fetched[0] == SHOP_PAGE and LULU_PAGE in d["pages"].fetched
     assert len(d["web"].calls) == 1
     assert outcome.decision == "REVIEW_PRESELECTED" and outcome.winner.candidate.image_url == LULU_IMAGE
+
+
+# ---------------------------------------------------------------------------
+# X0, review 3: one page is one page, the listing must name the brand, the one call is for the pages' images
+# ---------------------------------------------------------------------------
+
+def test_x0_reads_one_page_once_whatever_its_tracking_parameters():
+    # row 36: five listings of one Tradeling page under different '?srsltid=' values took every X0 slot
+    same = [shop_listing(image=f"https://img.example-cdn.com/s{i}.jpg", page=f"{SHOP_PAGE}?srsltid=AfmBOo{i}", n=i + 1)
+            for i in range(4)]
+    other_page = "https://www.example-grocer.ae/barts-traditional-fries-1kg"
+    other = shop_listing(image="https://img.example-cdn.com/o.jpg", page=other_page, n=5)
+    outcome, d = run(same + [other], bodies={c.image_url: "http_404" for c in same + [other]})
+    assert len(d["pages"].fetched) == 2
+    assert d["pages"].fetched[0].startswith(SHOP_PAGE) and d["pages"].fetched[1] == other_page
+    assert expand.page_key(f"{SHOP_PAGE}?srsltid=x&utm_source=g") == expand.page_key(SHOP_PAGE + "/")
+    assert expand.page_key("https://shop.example.com/p?id=1") != expand.page_key("https://shop.example.com/p?id=2")
+
+
+def test_x0_never_reads_a_page_whose_listing_names_the_brand_only_in_the_image_file():
+    # row 13: a blog page ('Blogs -') whose only brand evidence was the failed image's own file name
+    blog = cand("https://img.example-cdn.com/barts-traditional-fries-1kg.jpg", "Blogs - Example Mart",
+                "https://www.example-mart.com/blogs/news")
+    outcome, d = run([blog], bodies={blog.image_url: "http_404"})
+    assert d["pages"].fetched == []
+
+
+def test_x0_never_reads_a_page_where_a_common_word_brand_is_not_in_a_brand_position():
+    # row 32 (FAMILY): 'Western Family' pages of Canadian stores took two X0 slots
+    spec = build_sku_spec({"name": "FAMILY TOMATO PASTE 400G", "brand": "FAMILY"}, {})
+    western = cand("https://img.example-cdn.com/wf.jpg", "Western Family Tomato Paste 400g",
+                   "https://www.urbanfare.com/western-family-tomato-paste-400g")
+    from catalog_match.score import score_candidate
+    rc = RankedCandidate(candidate=western, score=score_candidate(spec, western),
+                         fetched=FetchedImage(candidate=western, ok=False, error="http_404"))
+    assert rc.score.tier in (1, 2, 3) and any(str(c).startswith("generic_brand_position") for c in rc.score.conflicts)
+    assert expand.recovery_pages(spec, [rc]) == []
+
+
+def test_x0s_one_verifier_call_reads_the_recovered_images_first():
+    # The normal flow downloads and reads 8 retailer listings (tier 2: no size in their titles); 4 more are
+    # never downloaded, and they rank above the recovered page's own image (a lower soft-quality score: the
+    # last ranking key). X0's single verifier call must read that image, not those four.
+    read_no = dict(READ_MATCH, size_text="2.5 kg", size_match="no")
+    page = "https://www.spinneys.com/en-ae/catalogue/barts-traditional-fries/"
+    own = "https://img.example-cdn.com/barts-traditional-fries-main.jpg"
+    trigger = cand(SHOP_LISTING_IMG, "Barts Traditional Fries | Spinneys", page, n=1)
+    retail = [cand(f"https://img.example-cdn.com/o{i}.jpg", "Barts Traditional Fries | Carrefour UAE",
+                   f"https://www.carrefouruae.com/mafuae/en/fries/barts-traditional-fries-{i}/p/{i}", n=i + 1)
+              for i in range(1, 12)]
+    sharp = (45, 51, 54, 57, 60, 30, 75, 78, 69, 63, 39)                       # quality.assess >= 0.82
+    bodies = {c.image_url: packshot_png(seed) for c, seed in zip(retail, sharp)}
+    bodies[SHOP_LISTING_IMG] = packshot_png(3)
+    bodies[own] = packshot_png(32)                                              # quality.assess 0.64
+    readings = {c.image_url: read_no for c in retail}
+    readings.update({SHOP_LISTING_IMG: READ_EMBORG, own: READ_MATCH})
+    outcome, d = run([trigger] + retail, web=[hit(LULU_PAGE, "Barts Traditional Fries 1kg")],
+                     docs={page: product_page("Barts Traditional Fries", own, brand="Barts")},
+                     bodies=bodies, readings=readings)
+    assert len(d["verifier"].calls) == 3 and own in d["verifier"].calls[2]   # the X0 call
+    assert outcome.winner is not None and outcome.winner.candidate.image_url == own
+    assert d["web"].calls == [] and d["shop"].calls == []               # X0 was enough: no paid call
+
+
+class DownOnCall(StubVerifier):
+    def __init__(self, readings, down_on):
+        super().__init__(readings)
+        self.down_on = down_on
+
+    def verify(self, spec, images):
+        if len(self.calls) + 1 == self.down_on:
+            self.calls.append([f.candidate.image_url for f in images])
+            return VerificationResult(status="unknown", calls=1, error="http_503")
+        return super().verify(spec, images)
+
+
+def test_when_x0s_verifier_call_gets_no_answer_no_paid_call_is_made():
+    web_p, shop_p = StubProvider("serper_web", [hit(LULU_PAGE, "Barts Traditional Fries 1kg")]), \
+        StubProvider("serper_shopping", [])
+    exp = expand.Expansion(web=web_p, shopping=shop_p, visual=None,
+                           pages=StubPages({SHOP_PAGE: product_page("Barts Traditional Fries 1kg", SHOP_OWN_IMG,
+                                                                    brand="Barts")}), max_calls=4)
+    verifier = DownOnCall({SHOP_LISTING_IMG: READ_EMBORG, SHOP_OWN_IMG: READ_MATCH}, down_on=2)
+    outcome = pipeline.find_product_image(
+        SPEC, providers=[StubProvider("serper", [shop_listing()])],
+        fetcher=StubFetcher({SHOP_LISTING_IMG: packshot_png(3), SHOP_OWN_IMG: packshot_png(5)}),
+        verifier=verifier, expansion=exp)
+    assert len(verifier.calls) == 2 and SHOP_OWN_IMG in verifier.calls[1]
+    assert web_p.calls == [] and shop_p.calls == []
+    assert outcome.failure_code == "VERIFIER_DOWN"

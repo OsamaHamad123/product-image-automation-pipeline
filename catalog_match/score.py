@@ -248,15 +248,16 @@ def source_trust(spec: SkuSpec, cand: Candidate) -> Tuple[int, str]:
     host = page_host(cand)
     if host and domain_matches(host, spec.official_domains):
         return TRUST_OFFICIAL, TRUST_NAMES[TRUST_OFFICIAL]
-    if (host and spec.learned_domains and domain_matches(host, spec.learned_domains)
-            and store_market(cand.page_url) != "foreign"):
-        # a site the reviewers keep approving this brand's images from (catalog_match.learning)
-        return TRUST_UAE_RETAILER, "reviewed_source"
     if host and domain_matches(host, data.get("uae_retailers", [])):
         # The same store's other-country section ('/saudi-en/', '/en-kw/') sells the foreign pack.
         if store_market(cand.page_url) == "foreign":
             return TRUST_OTHER_RETAIL, TRUST_NAMES[TRUST_OTHER_RETAIL]
         return TRUST_UAE_RETAILER, TRUST_NAMES[TRUST_UAE_RETAILER]
+    if (host and spec.learned_domains and domain_matches(host, spec.learned_domains)
+            and store_market(cand.page_url) != "foreign"):
+        # a site the reviewers keep approving this brand's images from (catalog_match.learning, which
+        # never learns a listed retailer or a foreign store): a listed UAE retailer stays 'uae_retailer'
+        return TRUST_UAE_RETAILER, "reviewed_source"
     if (host and domain_matches(host, data.get("structured", []))) or (
         (cand.provider or "").lower() in set(data.get("structured_providers", []))
     ):

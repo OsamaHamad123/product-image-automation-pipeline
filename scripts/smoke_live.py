@@ -278,6 +278,15 @@ def read_sheet_rows(worksheet, row_numbers):
     return out
 
 
+def _row_number(text):
+    """A sheet row number written as '45' or as a spreadsheet export writes it ('45.0'); None otherwise."""
+    try:
+        value = float(str(text).strip())
+    except ValueError:
+        return None
+    return int(value) if value.is_integer() and value >= 1 else None
+
+
 def read_rows_file(path, row_numbers=None):
     """Rows (the read_sheet_rows shape) from a CSV with a header row, or from an earlier --json run."""
     import csv
@@ -301,13 +310,19 @@ def read_rows_file(path, row_numbers=None):
             plain = google_sheets.normalize_header(key)
             if cols.get(key, -1) < 0 and plain in heads:
                 cols[key] = heads.index(plain)
-        row_col = next((heads.index(h) for h in ("row", "row number", "row_number", "#") if h in heads), -1)
+        if cols.get("name", -1) < 0 and cols.get("name_ar", -1) < 0:
+            raise SystemExit(f"No product name column in the file's headers: {table[0]}")
+        # '#' normalises to nothing, so the raw header is checked too
+        row_names = {google_sheets.normalize_header(h) for h in ("row", "row number", "row_number")}
+        row_col = next((i for i, (raw, head) in enumerate(zip(table[0], heads))
+                        if raw.strip() == "#" or (head and head in row_names)), -1)
         rows = []
         for i, line in enumerate(table[1:], start=2):
             def cell(key):
                 idx = cols.get(key, -1)
                 return line[idx].strip() if 0 <= idx < len(line) else ""
-            number = int(line[row_col]) if 0 <= row_col < len(line) and line[row_col].strip().isdigit() else i
+            number = _row_number(line[row_col]) if 0 <= row_col < len(line) else None
+            number = number if number is not None else i
             record = {"row_number": number, **{k: cell(k) for k in keys}}
             if record["name"] or record["name_ar"]:
                 record["name"] = record["name"] or record["name_ar"]

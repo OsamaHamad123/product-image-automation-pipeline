@@ -13,14 +13,21 @@ parallel with the first web query:
      or a size / pack conflict in the URL alone is dropped, so is a row without brand evidence or
      below MIN_COVERAGE of the product-type words;
      the rest are ranked with score.rank_key, one row per store first;
-  3. the best LOCAL_INDEX_MAX_PAGES pages are read (pages.PageFetcher, in parallel) for their main
-     image, product name and GTIN. What a page said is kept in its row for LOCAL_INDEX_PAGE_TTL_DAYS
-     (a transient failure for FAILED_PAGE_TTL_H), so the next run needs no request for it;
+  3. walking the ranked rows, the first LOCAL_INDEX_MAX_PAGES usable ones give candidates: a row
+     read within LOCAL_INDEX_PAGE_TTL_DAYS gives what its page said then, an unread or stale row is
+     read now (pages.PageFetcher, in parallel) for its main image, product name and GTIN. A row
+     known to be dead (redirected, no image, 404 / 410), one that failed in the last
+     FAILED_PAGE_TTL_H and one on a host left alone is skipped and takes no slot. What a page
+     said is kept in its row (a transient failure keeps what an earlier read said, only the
+     status changes), so the next run needs no request for it. The reads hold the first step
+     at most READ_DEADLINE_S: a page still loading then gives nothing now (its record is still
+     saved for the next run);
   4. each page gives at most one candidate: provider 'local_index', query_id 'IDX', sanctioned
      False (a page we read ourselves never auto-publishes; it can be pre-selected for review).
 
 A page that now redirects elsewhere (sold out, delisted) gives nothing and is remembered as such.
-A store host that refused BLOCKED_HOST_LIMIT reads in a row is not asked again in this process.
+A store host that refused or timed out BLOCKED_HOST_LIMIT reads in a row is not asked again in
+this process.
 The index never stops the web search early (retrieve.t1_early_stop) and its answers never make a
 web-search outage look healthy (decide.LOOKUP_PROVIDERS): it only adds candidates.
 """
@@ -31,7 +38,7 @@ import hashlib
 import logging
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, wait
 from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 from urllib.parse import urlsplit, urlunsplit
@@ -58,6 +65,9 @@ UNIT_WORDS = frozenset({"ml", "cl", "lt", "ltr", "ltrs", "litre", "liter", "kg",
                         "gram", "oz", "lb", "pc", "pcs", "piece", "pack", "pk", "pkt"})
 COUNT_CACHE_S = 600.0
 FETCH_WORKERS = 3
+READ_DEADLINE_S = 8.0          # the page reads hold the first search step (Q1 waits on the lookups) at most this long
+PAGE_TIMEOUT_S = 6.0           # one index page read (the expansion round's reads keep pages.PAGE_TIMEOUT_S)
+HOST_FAILURE_STATUSES = ("http_403", "http_429", "timeout", "connection_error")
 
 
 # ---------------------------------------------------------------------------
@@ -87,8 +97,22 @@ def index_keys(text: Optional[str]) -> List[str]:
     return out
 
 
+# A product id marker after the slug: '/<department>/<slug>/p/<id>' (Carrefour, Lulu), '/<slug>/dp/<id>'.
+_ID_MARKERS = frozenset({"p", "dp"})
+
+
 def slug_text(url: str) -> str:
-    """The words of a product URL's own slug (no locale or department breadcrumbs)."""
+    """The words of a product URL's own slug (no locale or department breadcrumbs): the segment before an id
+    marker ('/p/<id>') when there is one, else the segment with the most words. A department name with more
+    words than the product's slug ('carbonated-soft-drinks-and-mixers/pepsi-can-330ml/p/1') is never indexed
+    in its place."""
+    try:
+        segs = [seg for seg in urlsplit((url or "").strip()).path.split("/") if seg]
+    except ValueError:
+        segs = []
+    for i in range(1, len(segs) - 1):
+        if segs[i].lower() in _ID_MARKERS and any(ch in "-_" for ch in segs[i - 1]):   # a slug, not a locale
+            return url_path_text("https://slug.invalid/" + segs[i - 1])
     return url_path_text(url, product_segment=True)
 
 
@@ -231,6 +255,9 @@ class MemoryCatalogStore:
         if row is None:
             return
         self._checked[row_id] = self.clock()
+        if rec.status not in PERMANENT_PAGE_STATUSES:     # a transient failure: what the page said before stays
+            self.rows[row_id] = replace(row, page_status=rec.status)
+            return
         self.rows[row_id] = replace(row, page_status=rec.status, page_title=rec.page_title or row.page_title,
                                     image_url=rec.image_url, image_width=rec.width, image_height=rec.height,
                                     gtin=rec.gtin)
@@ -389,14 +416,16 @@ class DbCatalogStore:
         if not req:
             return []
         keys = list(dict.fromkeys(req + [k[:MAX_TOKEN_LEN] for k in extra if k]))
+        # The brand's own rows first (one posting list), then the product words are counted only on them.
         sql = (
             f"SELECT {self._ROW_COLUMNS}, h.hits FROM ("
             f" SELECT product_id, COUNT(*) AS hits FROM catalog_tokens"
             f" WHERE token IN ({','.join(['%s'] * len(keys))})"
+            f" AND product_id IN (SELECT product_id FROM catalog_tokens WHERE token = %s)"
             f" GROUP BY product_id HAVING SUM(token IN ({','.join(['%s'] * len(req))})) = %s"
             f" ORDER BY hits DESC, product_id LIMIT %s) h"
             f" JOIN catalog_products p ON p.id = h.product_id ORDER BY h.hits DESC, p.id")
-        return self._rows(sql, keys + req + [len(req), max(0, int(limit))])
+        return self._rows(sql, keys + [req[0]] + req + [len(req), max(0, int(limit))])
 
     def by_gtin(self, gtin: str, limit: int = 20) -> List[CatalogRow]:
         if not gtin:
@@ -424,6 +453,12 @@ class DbCatalogStore:
         conn = self._conn()
         try:
             with conn.cursor() as cur:
+                if rec.status not in PERMANENT_PAGE_STATUSES:
+                    # a transient failure: the image, size and GTIN an earlier read found stay
+                    cur.execute("UPDATE catalog_products SET page_checked_at = NOW(), page_status = %s WHERE id = %s",
+                                (rec.status[:32], row_id))
+                    conn.commit()
+                    return
                 cur.execute(
                     "UPDATE catalog_products SET page_checked_at = NOW(), page_status = %s, "
                     "page_title = COALESCE(NULLIF(%s, ''), page_title), image_url = NULLIF(%s, ''), "
@@ -491,10 +526,11 @@ def row_candidate(row: CatalogRow, rank: int = 0) -> Candidate:
         provider=PROVIDER, query_id=QUERY_ID, rank=rank, gtin_on_page=row.gtin, sanctioned=False)
 
 
-def rank_rows(spec: SkuSpec, rows: Sequence[CatalogRow], max_pages: int
+def rank_rows(spec: SkuSpec, rows: Sequence[CatalogRow], max_pages: Optional[int] = None
               ) -> List[Tuple[CatalogRow, CandidateScore]]:
     """The rows worth reading, best first: no hard reject, brand evidence, enough product words;
-    the best row of each store before a second row of any store."""
+    the best row of each store before a second row of any store. All of them unless max_pages is
+    given (the provider walks the list and skips the rows it cannot use)."""
     from .score import rank_key, score_candidate
 
     scored: List[Tuple[Tuple, CatalogRow, CandidateScore]] = []
@@ -523,7 +559,8 @@ def rank_rows(spec: SkuSpec, rows: Sequence[CatalogRow], max_pages: int
     for _, row, score in scored:
         (rest if row.store in stores else first).append((row, score))
         stores.add(row.store)
-    return (first + rest)[:max(0, int(max_pages))]
+    ranked = first + rest
+    return ranked if max_pages is None else ranked[:max(0, int(max_pages))]
 
 
 # ---------------------------------------------------------------------------
@@ -536,7 +573,7 @@ _blocked_lock = threading.Lock()
 
 def _note_host(host: str, status: str) -> None:
     with _blocked_lock:
-        if status in ("http_403", "http_429"):
+        if status in HOST_FAILURE_STATUSES:
             _blocked_hosts[host] = _blocked_hosts.get(host, 0) + 1
         elif status in PERMANENT_PAGE_STATUSES:
             _blocked_hosts.pop(host, None)
@@ -587,7 +624,7 @@ class LocalIndexProvider(BaseProvider):
     def fetcher(self):
         if self._fetcher is None:
             from .pages import PageFetcher
-            self._fetcher = PageFetcher()
+            self._fetcher = PageFetcher(timeout=PAGE_TIMEOUT_S)
         return self._fetcher
 
     def lookup(self, spec: SkuSpec) -> Any:
@@ -613,29 +650,54 @@ class LocalIndexProvider(BaseProvider):
     def _search(self, query: str, hl: str, spec: SkuSpec) -> List[Candidate]:
         if self.max_pages <= 0:
             return []
-        picked = rank_rows(spec, self._rows(spec), self.max_pages)
-        if not picked:
+        ranked = rank_rows(spec, self._rows(spec))
+        if not ranked:
             raise ProviderEmpty("no indexed page of this brand and product")
         found: Dict[int, List[Candidate]] = {}
         todo: List[Tuple[int, CatalogRow]] = []
-        for i, (row, _score) in enumerate(picked):
+        used = skipped = 0
+        for i, (row, _score) in enumerate(ranked):
+            if used >= self.max_pages:
+                break
             if self._fresh(row):
                 if row.page_status == "ok" and row.image_url:
                     found[i] = [row_candidate(row, rank=i + 1)]
+                    used += 1
+                else:
+                    skipped += 1     # known dead, or failed lately: no slot
             elif host_blocked(url_host(row.url)):
+                skipped += 1
                 logger.info("local index: %s refused earlier reads; not asked again in this run", url_host(row.url))
             else:
                 todo.append((i, row))
+                used += 1
         if todo:
-            with ThreadPoolExecutor(max_workers=max(1, min(FETCH_WORKERS, len(todo)))) as ex:
-                for (i, _row), cands in zip(todo, ex.map(lambda item: self._read(*item), todo)):
-                    if cands:
-                        found[i] = cands
+            for i, cands in self._read_all(todo).items():
+                if cands:
+                    found[i] = cands
         out = [c for i in sorted(found) for c in found[i]]
-        logger.info("local index sku=%s: %d rows ranked, %d pages read now, %d candidates",
-                    spec.sku_key, len(picked), len(todo), len(out))
+        logger.info("local index sku=%s: %d rows ranked, %d skipped, %d pages read now, %d candidates",
+                    spec.sku_key, len(ranked), skipped, len(todo), len(out))
         if not out:
             raise ProviderEmpty("indexed pages gave no product image")
+        return out
+
+    def _read_all(self, todo: List[Tuple[int, CatalogRow]]) -> Dict[int, List[Candidate]]:
+        """Read the pages in parallel for at most READ_DEADLINE_S; a page still loading then gives nothing now."""
+        ex = ThreadPoolExecutor(max_workers=max(1, min(FETCH_WORKERS, len(todo))))
+        futures = {ex.submit(self._read, i, row): i for i, row in todo}
+        done, pending = wait(futures, timeout=READ_DEADLINE_S)
+        # the reads still running finish in the background and save their record for the next run
+        ex.shutdown(wait=False, cancel_futures=True)
+        if pending:
+            logger.info("local index: %d page read(s) still running after %.0f s; not waited for",
+                        len(pending), READ_DEADLINE_S)
+        out: Dict[int, List[Candidate]] = {}
+        for fut in done:
+            try:
+                out[futures[fut]] = fut.result()
+            except Exception as exc:  # pragma: no cover - _read never raises
+                logger.warning("local index: page read failed (%s)", type(exc).__name__)
         return out
 
     def _read(self, i: int, row: CatalogRow) -> List[Candidate]:

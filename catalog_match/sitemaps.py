@@ -7,20 +7,28 @@ load_stores(path=None) -> [StoreConfig]
 SitemapHarvester().harvest(store, on_urls=None, max_urls=None, max_sitemaps=None, discover=False)
     -> HarvestReport
     Reads the store's published sitemaps and hands every product URL to on_urls([(url, lastmod)])
-    in batches (on_urls returns how many were new). With discover=True every sitemap index is read
-    but at most DISCOVER_URLSETS lists of URLs, and samples of matching and non-matching URLs are
-    kept, so the store's patterns can be checked before a full harvest.
+    in batches (on_urls returns how many were new). With discover=True the sitemap indexes are read
+    first (children named '...index...' before the others, and past the cap) but at most
+    DISCOVER_URLSETS lists of URLs, and samples of matching and non-matching URLs are kept, so the
+    store's patterns can be checked before a full harvest.
 
 Only what a store publishes for crawlers is read, and nothing is worked around:
-* robots.txt first. Its Sitemap: lines are the starting points (else the store's configured
-  sitemaps, else /sitemap.xml and /sitemap_index.xml); a sitemap its rules disallow for
-  ROBOTS_AGENT is not read; its Crawl-delay is kept between requests (at least MIN_DELAY_S, at
-  most MAX_DELAY_S). A robots.txt that answers 5xx stops the store (RFC 9309: assume disallowed).
-* An answer of 401, 403 or 429, or an HTML page where a sitemap should be (a bot check), stops the
-  store: it is reported 'blocked' and skipped. No proxy, no browser fingerprint, no other headers:
-  the client says who it is (USER_AGENT).
+* robots.txt first (RFC 9309: the group naming ROBOTS_AGENT, else '*'; the longest matching rule
+  wins, Allow on a tie; '*' and '$' wildcards). Its Sitemap: lines are the starting points (else the
+  store's configured sitemaps, else /sitemap.xml, then /sitemap_index.xml only when that one gave
+  nothing; a guessed location that is missing is not a failure). A Sitemap: line on another host is
+  read only when the store lists that host in 'sitemap_hosts' (a CDN that serves its sitemaps), and
+  is reported otherwise. A sitemap its rules disallow is not read. Its Crawl-delay is kept between
+  requests (at least MIN_DELAY_S); a store asking for more than MAX_DELAY_S is skipped, never read
+  faster than it asks. A robots.txt that answers 5xx stops the store (RFC 9309: assume disallowed).
+* An answer of 401, 403 or 429 stops the store: it is reported 'blocked' and skipped. So is an HTML
+  page at every starting point before any sitemap was read (a bot check); later, an HTML page, a
+  redirect to the home page or off the store's hosts is one sitemap that failed. No proxy, no
+  browser fingerprint, no other headers: the client says who it is (USER_AGENT).
 * Sitemap indexes are followed to MAX_DEPTH. A .gz sitemap is decompressed to at most MAX_XML_BYTES.
-  A document with a DOCTYPE is refused (no entity expansion), and only <loc> / <lastmod> are read.
+  A document with a DOCTYPE, or not UTF-8 (the sitemap protocol's encoding), is refused (no entity
+  expansion), and only <loc> / <lastmod> are read. A broken file is one failed sitemap, never the
+  end of the run.
 * Only URLs on the store's hosts whose path matches its product pattern are kept.
 """
 
@@ -33,12 +41,12 @@ import logging
 import re
 import time
 import xml.etree.ElementTree as ET
+import zlib
 from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 from urllib.parse import urljoin, urlsplit
-from urllib.robotparser import RobotFileParser
 
 logger = logging.getLogger(__name__)
 
@@ -81,13 +89,14 @@ class StoreConfig:
     exclude: Optional["re.Pattern[str]"] = None
     enabled: bool = True
     note: str = ""
+    sitemap_hosts: Tuple[str, ...] = ()             # other hosts serving the store's sitemaps (a CDN)
 
     def on_store(self, url: str) -> bool:
-        try:
-            host = (urlsplit(url).hostname or "").lower()
-        except ValueError:
-            return False
-        return host in self.hosts
+        return _host(url) in self.hosts
+
+    def on_sitemap_host(self, url: str) -> bool:
+        host = _host(url)
+        return bool(host) and (host in self.hosts or host in self.sitemap_hosts)
 
     def is_product(self, url: str) -> bool:
         try:
@@ -97,24 +106,39 @@ class StoreConfig:
         return (parts.hostname or "").lower() in self.hosts and bool(self.product_path.search(parts.path or ""))
 
 
-def _pattern(value: Any) -> Optional["re.Pattern[str]"]:
-    return re.compile(str(value)) if value else None
+def _host(url: str) -> str:
+    try:
+        return (urlsplit(url).hostname or "").lower()
+    except ValueError:
+        return ""
+
+
+def _pattern(value: Any, what: str = "pattern") -> Optional["re.Pattern[str]"]:
+    if not value:
+        return None
+    try:
+        return re.compile(str(value))
+    except re.error as exc:
+        raise ValueError(f"{what} {value!r} is not a valid regular expression: {exc}") from exc
 
 
 def load_stores(path: Optional[Path] = None) -> List[StoreConfig]:
-    """The stores of catalog_stores.json, in file order (disabled ones included)."""
-    with open(path or STORES_PATH, "r", encoding="utf-8") as fh:
+    """The stores of catalog_stores.json, in file order (disabled ones included); ValueError for a bad file."""
+    with open(path or STORES_PATH, "r", encoding="utf-8-sig") as fh:      # Notepad saves a byte-order mark
         data = json.load(fh)
     out = []
     for item in data.get("stores", []):
         base = str(item["base_url"]).rstrip("/")
         hosts = tuple(h.lower() for h in (item.get("hosts") or [urlsplit(base).hostname or ""]))
+        key = str(item["key"])
         out.append(StoreConfig(
-            key=str(item["key"]), name=str(item.get("name") or item["key"]), base_url=base, hosts=hosts,
-            product_path=re.compile(str(item["product_path"])),
+            key=key, name=str(item.get("name") or key), base_url=base, hosts=hosts,
+            product_path=_pattern(item["product_path"], f"{key}: product_path"),
             sitemaps=tuple(str(s) for s in item.get("sitemaps") or ()),
-            include=_pattern(item.get("sitemap_include")), exclude=_pattern(item.get("sitemap_exclude")),
-            enabled=bool(item.get("enabled", True)), note=str(item.get("note") or "")))
+            include=_pattern(item.get("sitemap_include"), f"{key}: sitemap_include"),
+            exclude=_pattern(item.get("sitemap_exclude"), f"{key}: sitemap_exclude"),
+            enabled=bool(item.get("enabled", True)), note=str(item.get("note") or ""),
+            sitemap_hosts=tuple(h.lower() for h in item.get("sitemap_hosts") or ())))
     return out
 
 
@@ -152,7 +176,7 @@ def decompress(body: bytes, limit: int = MAX_XML_BYTES) -> bytes:
     try:
         with gzip.GzipFile(fileobj=io.BytesIO(body)) as gz:
             data = gz.read(limit + 1)
-    except (OSError, EOFError) as exc:
+    except (OSError, EOFError, zlib.error) as exc:
         raise SitemapError(f"bad gzip: {type(exc).__name__}") from exc
     if len(data) > limit:
         raise SitemapError("too_large")
@@ -161,6 +185,8 @@ def decompress(body: bytes, limit: int = MAX_XML_BYTES) -> bytes:
 
 def parse_sitemap(data: bytes) -> Tuple[str, List[Tuple[str, Optional[str]]]]:
     """('index' | 'urlset', [(loc, lastmod)]) of one sitemap document."""
+    if data[:2] in (b"\xff\xfe", b"\xfe\xff") or b"\x00" in data[:512]:
+        raise SitemapError("not utf-8")          # the protocol's encoding; a UTF-16 file would hide a DOCTYPE
     if looks_like_html(data):
         raise SitemapError("html")
     if _DOCTYPE_RE.search(data):
@@ -185,7 +211,7 @@ def parse_sitemap(data: bytes) -> Tuple[str, List[Tuple[str, Optional[str]]]]:
                 if loc:
                     out.append((loc, lastmod))
                 elem.clear()
-    except ET.ParseError as exc:
+    except (ET.ParseError, ValueError, LookupError) as exc:      # also an unknown or multi-byte encoding
         raise SitemapError(f"bad xml: {exc}") from exc
     if kind not in ("index", "urlset"):
         raise SitemapError(f"not a sitemap (<{kind}>)")
@@ -202,21 +228,102 @@ class Robots:
     http_status: Optional[int] = None
     sitemaps: List[str] = field(default_factory=list)
     crawl_delay: Optional[float] = None
-    parser: Optional[RobotFileParser] = None
+    rules: List[Tuple[bool, str]] = field(default_factory=list)   # (allow, path pattern) of the group that applies
 
     def allowed(self, url: str) -> bool:
-        return self.parser is None or self.parser.can_fetch(ROBOTS_AGENT, url)
+        return robots_allowed(self.rules, url)
+
+
+def _agent_matches(value: str) -> bool:
+    token = value.strip().lower()
+    return token == ROBOTS_AGENT.lower() or token.split("/", 1)[0] == ROBOTS_AGENT.lower()
 
 
 def parse_robots(text: str) -> Robots:
-    parser = RobotFileParser()
-    parser.parse(text.splitlines())
-    delay = parser.crawl_delay(ROBOTS_AGENT)
+    """RFC 9309: the groups naming ROBOTS_AGENT (case-insensitive), else the '*' groups; Sitemap: lines anywhere."""
+    groups: List[Tuple[List[str], List[Tuple[bool, str]], List[float]]] = []
+    sitemaps: List[str] = []
+    current: Optional[Tuple[List[str], List[Tuple[bool, str]], List[float]]] = None
+    agent_line = False
+    for raw in text.lstrip("\ufeff").splitlines():
+        line = raw.split("#", 1)[0].strip()
+        if ":" not in line:
+            continue
+        key, value = (part.strip() for part in line.split(":", 1))
+        key = key.lower()
+        if key == "sitemap":
+            if value:
+                sitemaps.append(value)
+            continue
+        if key == "user-agent":
+            if current is None or not agent_line:        # a user-agent line after rules starts a new group
+                current = ([], [], [])
+                groups.append(current)
+            current[0].append(value)
+            agent_line = True
+            continue
+        agent_line = False
+        if current is None:
+            continue                                     # rules before any user-agent line apply to nobody
+        if key in ("allow", "disallow"):
+            if value:                                    # an empty Disallow allows everything: no rule
+                current[1].append((key == "allow", value))
+        elif key == "crawl-delay":
+            try:
+                current[2].append(float(value))
+            except ValueError:
+                pass
+    chosen = [g for g in groups if any(_agent_matches(a) for a in g[0])] \
+        or [g for g in groups if any(a.strip() == "*" for a in g[0])]
+    delays = [d for g in chosen for d in g[2] if d >= 0]
+    return Robots(status="ok", sitemaps=sitemaps, crawl_delay=max(delays) if delays else None,
+                  rules=[r for g in chosen for r in g[1]])
+
+
+def _rule_matches(pattern: str, path: str) -> bool:
+    """RFC 9309 path matching: a prefix match, '*' any characters, a final '$' the end of the path (linear scan)."""
+    anchored = pattern.endswith("$")
+    if anchored:
+        pattern = pattern[:-1]
+    p = t = 0
+    star = mark = -1
+    while True:
+        if p == len(pattern) and not anchored:
+            return True
+        if t == len(path):
+            break
+        if p < len(pattern) and pattern[p] == "*":
+            star, mark = p, t
+            p += 1
+        elif p < len(pattern) and pattern[p] == path[t]:
+            p += 1
+            t += 1
+        elif star >= 0:
+            mark += 1
+            p, t = star + 1, mark
+        else:
+            return False
+    while p < len(pattern) and pattern[p] == "*":
+        p += 1
+    return p == len(pattern)
+
+
+def robots_allowed(rules: Sequence[Tuple[bool, str]], url: str) -> bool:
+    """The longest matching rule wins, Allow on a tie; no matching rule (or /robots.txt itself) is allowed."""
     try:
-        delay = float(delay) if delay is not None else None
-    except (TypeError, ValueError):
-        delay = None
-    return Robots(status="ok", sitemaps=list(parser.site_maps() or []), crawl_delay=delay, parser=parser)
+        parts = urlsplit(url)
+    except ValueError:
+        return False
+    path = (parts.path or "/") + (f"?{parts.query}" if parts.query else "")
+    if path == "/robots.txt":
+        return True
+    best, allow = -1, True
+    for is_allow, pattern in rules:
+        if _rule_matches(pattern, path):
+            n = len(pattern)
+            if n > best or (n == best and is_allow):
+                best, allow = n, is_allow
+    return allow
 
 
 # ---------------------------------------------------------------------------
@@ -271,8 +378,9 @@ class SitemapHarvester:
                 self._sleep(left)
         self._last = self._clock()
 
-    def get(self, url: str) -> Tuple[Optional[bytes], Optional[int], str]:
-        """(body, http status, error) of one polite GET; never raises."""
+    def get(self, url: str, store: Optional[StoreConfig] = None) -> Tuple[Optional[bytes], Optional[int], str]:
+        """(body, http status, error) of one polite GET; never raises. With a store, a redirect off its
+        (sitemap) hosts or to its home page is an error: that is not the sitemap that was asked for."""
         self._wait()
         headers = {"User-Agent": USER_AGENT, "Accept": "application/xml,text/xml,text/plain;q=0.9,*/*;q=0.5"}
         try:
@@ -283,6 +391,12 @@ class SitemapHarvester:
             status = int(getattr(resp, "status_code", 0) or 0)
             if status != 200:
                 return None, status, f"http_{status}"
+            final = getattr(resp, "url", None)
+            if store is not None and isinstance(final, str) and final and final != url:
+                if not store.on_sitemap_host(final):
+                    return None, status, "redirected outside the store"
+                if (urlsplit(final).path or "/") == "/":
+                    return None, status, "redirected to the home page"
             buf = bytearray()
             for chunk in resp.iter_content(chunk_size=64 * 1024):
                 if chunk:
@@ -309,7 +423,7 @@ class SitemapHarvester:
             return Robots(status="missing", http_status=status)   # 404 / 410: no rules, no listed sitemaps
         if looks_like_html(body):
             return Robots(status="missing", http_status=status)
-        robots = parse_robots(body.decode("utf-8", errors="replace"))
+        robots = parse_robots(body.decode("utf-8-sig", errors="replace"))
         robots.http_status = status
         return robots
 
@@ -324,15 +438,33 @@ class SitemapHarvester:
             rep.status = robots.status
             rep.error = f"robots.txt answered {robots.http_status or 'nothing'}: store skipped"
             return rep
-        self.delay = min(MAX_DELAY_S, max(MIN_DELAY_S, robots.crawl_delay or 0.0))
+        if robots.crawl_delay is not None and robots.crawl_delay > MAX_DELAY_S:
+            rep.status = "blocked"
+            rep.error = (f"robots.txt asks for a Crawl-delay of {robots.crawl_delay:g}s (more than {MAX_DELAY_S:g}s): "
+                         "store skipped, never read faster than it asks")
+            return rep
+        self.delay = max(MIN_DELAY_S, robots.crawl_delay or 0.0)
         rep.crawl_delay = self.delay
-        starts = [urljoin(store.base_url + "/", s) for s in store.sitemaps] or \
-            [s for s in robots.sitemaps if store.on_store(s)] or [store.base_url + p for p in DEFAULT_SITEMAPS]
+        listed = [s for s in robots.sitemaps if store.on_sitemap_host(s)]
+        rep.skipped.extend((s, "outside the store (robots.txt lists it; add its host to sitemap_hosts)")
+                           for s in robots.sitemaps if not store.on_sitemap_host(s))
+        guesses: List[str] = []
+        starts = [urljoin(store.base_url + "/", s) for s in store.sitemaps] or listed
+        if not starts:
+            # the usual locations: the second only when the first gave nothing; a missing guess is no failure
+            guesses = [store.base_url + p for p in DEFAULT_SITEMAPS]
+            starts = guesses[:1]
         rep.started_from = list(starts)
         queue = deque((url, 0) for url in starts)
         seen = set()
         emitted = urlsets = failed = 0
-        while queue:
+        start_answers: List[str] = []        # why each starting point gave nothing, while nothing was read
+        while queue or (guesses and rep.sitemaps_read == 0 and len(rep.started_from) < len(guesses)
+                        and "html" not in start_answers):      # an HTML page at the first guess: a bot check
+            if not queue:
+                nxt = guesses[len(rep.started_from)]
+                rep.started_from.append(nxt)
+                queue.append((nxt, 0))
             url, depth = queue.popleft()
             if url in seen:
                 continue
@@ -341,14 +473,14 @@ class SitemapHarvester:
             if why:
                 rep.skipped.append((url, why))
                 continue
-            if discover and urlsets >= DISCOVER_URLSETS:
+            if discover and urlsets >= DISCOVER_URLSETS and "index" not in url.lower():
                 rep.skipped.append((url, "not read (discover)"))
                 continue
             if max_sitemaps is not None and rep.sitemaps_read >= max_sitemaps:
                 rep.truncated = True
                 rep.skipped.append((url, "not read (--max-sitemaps)"))
                 continue
-            body, status, error = self.get(url)
+            body, status, error = self.get(url, store)
             if status in BLOCK_STATUSES:
                 rep.status, rep.error = "blocked", f"http_{status} on {url}: store skipped"
                 break
@@ -357,18 +489,18 @@ class SitemapHarvester:
                     raise SitemapError(error or "error")
                 kind, entries = parse_sitemap(decompress(body))
             except SitemapError as exc:
-                if str(exc) == "html":
-                    rep.status, rep.error = "blocked", f"an HTML page instead of a sitemap at {url} (bot check?)"
-                    break
                 rep.skipped.append((url, str(exc)))
-                failed += 1
+                if depth == 0 and rep.sitemaps_read == 0:
+                    start_answers.append(str(exc))
+                if not (url in guesses and status in (404, 410)):
+                    failed += 1              # a guessed location that is not there is not a failure
                 continue
             rep.sitemaps_read += 1
             if kind == "index":
                 rep.tree.append({"depth": depth, "url": url, "kind": "index", "entries": len(entries)})
                 children = [loc for loc, _ in entries]
-                if discover:     # read the product lists first
-                    children.sort(key=lambda u: 0 if "product" in u.lower() else 1)
+                if discover:     # the indexes first (the store's structure), then the product lists
+                    children.sort(key=lambda u: 0 if "index" in u.lower() else 1 if "product" in u.lower() else 2)
                 if depth + 1 > MAX_DEPTH:
                     rep.skipped.extend((c, "too deep") for c in children)
                 else:
@@ -387,19 +519,25 @@ class SitemapHarvester:
                     break
                 if not store.is_product(loc):
                     rep.other_samples.append(loc)
-            if max_urls is not None and emitted + len(products) >= max_urls:
+            if max_urls is not None and emitted + len(products) > max_urls:
                 products = products[:max(0, max_urls - emitted)]
-                rep.truncated = True
+                rep.truncated = True         # products were cut
             emitted += len(products)
             if on_urls is not None:
                 for i in range(0, len(products), BATCH):
                     rep.new_urls += int(on_urls(products[i:i + BATCH]) or 0)
-            if rep.truncated and max_urls is not None and emitted >= max_urls:
+            if max_urls is not None and emitted >= max_urls:
+                if queue:
+                    rep.truncated = True     # sitemaps left unread
                 break
         if rep.status == "ok":
             if rep.sitemaps_read == 0:
-                rep.status = "error"
-                rep.error = rep.error or "no sitemap could be read"
+                if start_answers and all(a == "html" for a in start_answers):
+                    rep.status = "blocked"
+                    rep.error = f"an HTML page instead of a sitemap at {rep.started_from[0]} (bot check?)"
+                else:
+                    rep.status = "error"
+                    rep.error = rep.error or "no sitemap could be read"
             elif rep.truncated or failed:
                 rep.status = "partial"
             elif rep.product_urls == 0:
@@ -410,9 +548,9 @@ class SitemapHarvester:
 
     @staticmethod
     def _skip_reason(store: StoreConfig, robots: Robots, url: str, depth: int) -> str:
-        if not url.lower().startswith(("http://", "https://")) or not store.on_store(url):
+        if not url.lower().startswith(("http://", "https://")) or not store.on_sitemap_host(url):
             return "outside the store"
-        if not robots.allowed(url):
+        if store.on_store(url) and not robots.allowed(url):     # the store's rules are for its own hosts
             return "disallowed by robots.txt"
         if depth > 0 and store.include is not None and not store.include.search(url):
             return "not included"

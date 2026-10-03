@@ -10,10 +10,15 @@ resolve(brand_raw, name_en, name_ar) -> BrandResolution
      synonym (EN+AR) and sub-brand: 'A/G', 'المراعي', 'Al Marai' all resolve;
   2. otherwise a known synonym or sub-brand phrase at the START of the name;
   3. otherwise conf 'sheet_raw' (brand kept as written) or 'none' (no brand).
-An entry the reviewers taught (catalog_match.learning: a store spelling they approved, the
-sites they keep approving a brand's images from) resolves with conf 'learned': like a mapped
-brand for search and scoring, never an auto-publish (decide.py). Learned entries are listed
-after the sheet's, and a phrase the sheet already maps keeps its sheet entry.
+A store spelling the reviewers taught (catalog_match.learning) is an entry flagged 'learned': the
+sheet brand it was taught for (step 1 only) resolves to it with conf 'learned', like a mapped
+brand for search and scoring, never an auto-publish (decide.py). A lesson stays with the sheet
+brand it was taught for: a learned entry is never matched at the start of another product's
+name and its phrases never count as another product's competitor. Learned entries are listed
+after the sheet's, and a phrase the sheet already maps keeps its sheet entry. An entry flagged
+'sources_only' carries nothing but the sites the reviewers keep approving an unmapped sheet
+brand's images from: that brand still resolves as 'sheet_raw' (brand discovery still runs for
+it) with those sites as learned_domains.
 Nothing is ever guessed from the first word of the name, and there is no fuzzy
 matching (it merges real competitors such as Al Rawabi / Al Rabie).
 
@@ -125,6 +130,7 @@ class BrandEntry:
     official_domains: Tuple[str, ...] = ()
     learned: bool = False                    # taught by review decisions, not the Brands Mapping sheet
     learned_domains: Tuple[str, ...] = ()    # sites the reviewers keep approving this brand's images from
+    sources_only: bool = False               # only learned_domains for an unmapped sheet brand: no identity
 
     def phrases(self) -> Tuple[str, ...]:
         return tuple(dict.fromkeys((self.canonical,) + self.synonyms + self.sub_brands))
@@ -153,13 +159,21 @@ class BrandIndex:
         self._compact: Dict[str, Optional[int]] = {}
         self._sub_exact: Dict[str, int] = {}
         self._sub_compact: Dict[str, Optional[int]] = {}
+        self._raw_sources: Dict[str, Tuple[str, ...]] = {}
         for idx, entry in enumerate(self.entries):
+            if entry.sources_only:
+                key = match_key(entry.canonical)
+                if key and entry.learned_domains:
+                    self._raw_sources.setdefault(key, entry.learned_domains)
+                continue
             for phrase in (entry.canonical,) + entry.synonyms:
                 self._add(self._exact, self._compact, phrase, idx)
             for phrase in entry.sub_brands:
                 self._add(self._sub_exact, self._sub_compact, phrase, idx)
         known = set()
         for entry in self.entries:
+            if entry.learned or entry.sources_only:
+                continue          # a lesson never makes another product's brand a competitor
             for phrase in entry.phrases() + entry.competitors:
                 p = norm_phrase(phrase)
                 if p and _matchable(p):
@@ -205,6 +219,7 @@ class BrandIndex:
                 official_domains=tuple(d for d in (_clean_domain(x) for x in _as_list(row.get("official_domains"))) if d),
                 learned=bool(row.get("learned")),
                 learned_domains=tuple(d for d in (_clean_domain(x) for x in _as_list(row.get("learned_domains"))) if d),
+                sources_only=bool(row.get("sources_only")),
             ))
         return cls(entries)
 
@@ -235,6 +250,8 @@ class BrandIndex:
         best: Optional[Tuple[int, str, bool]] = None
         best_len = 0
         for idx, entry in enumerate(self.entries):
+            if entry.learned or entry.sources_only:
+                continue  # a lesson applies to the sheet brand it was taught for, not to a name that starts with it
             for phrase, is_sub in [(p, False) for p in (entry.canonical,) + entry.synonyms] + [(p, True) for p in entry.sub_brands]:
                 if not _matchable(phrase):
                     continue  # 'A/G' at the start of a name is too weak to invent a brand from
@@ -315,6 +332,7 @@ class BrandIndex:
             match_brands=match_brands,
             competitors=comp,
             conf="sheet_raw",
+            learned_domains=self._raw_sources.get(match_key(brand), ()),
             brand_ar=brand if is_arabic(normalize(brand)[:1]) else "",
             family=(phrase,) if phrase else (),
         )

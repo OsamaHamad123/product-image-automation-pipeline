@@ -19,6 +19,10 @@ retrieve(spec, providers, custom_query=None, exclude_urls=(), max_queries=4,
   providers' candidates remain.
 * Candidates are deduplicated on norm_image_url(); duplicates merge their page
   evidence and raise consensus_count (one count per distinct provider + page).
+  An entry a page we read ourselves touched (the local catalog index, the expansion
+  round's page reads: PAGE_READ_PROVIDERS) carries scraped evidence: it is never
+  sanctioned, even when a search API also returns the image, so it never auto-publishes;
+  an entry the index created keeps its provider, so it never stops the web search early.
 * exclude_urls (reviewer negatives) are dropped, compared as normalised URLs. The
   pHash half of the negative filter runs after download (fetch stage).
 * Relaxations R1/R2 run only when the caller asks: relax_when(pool) is True, or
@@ -103,6 +107,15 @@ def _page_key(page_url: str) -> str:
 class _Entry:
     cand: Candidate
     sources: Set[Tuple[str, str]] = field(default_factory=set)
+    page_read: bool = False         # a page we read ourselves gave evidence to this entry
+
+
+# Providers whose candidates come from a page we read ourselves (scraped evidence, catalog_match.pages).
+PAGE_READ_PROVIDERS = frozenset({"local_index", "page"})
+
+
+def _page_read(cand: Candidate) -> bool:
+    return (cand.provider or "").lower() in PAGE_READ_PROVIDERS
 
 
 class CandidatePool:
@@ -146,10 +159,13 @@ class CandidatePool:
         source = (cand.provider, _page_key(cand.page_url))
         entry = self._entries.get(key)
         if entry is None:
-            self._entries[key] = _Entry(replace(cand, consensus_count=1), {source})
+            page_read = _page_read(cand)
+            self._entries[key] = _Entry(replace(cand, consensus_count=1, sanctioned=cand.sanctioned and not page_read),
+                                        {source}, page_read)
             return True
         entry.sources.add(source)
-        merged = self._merge(entry.cand, cand, relaxed)
+        entry.page_read = entry.page_read or _page_read(cand)
+        merged = self._merge(entry.cand, cand, relaxed, entry.page_read)
         entry.cand = replace(merged, consensus_count=len(entry.sources))
         return False
 
@@ -163,7 +179,7 @@ class CandidatePool:
     def _evidence_rank(self, cand: Candidate) -> Tuple[int, int, int]:
         return (self._trust(cand), int(bool(cand.page_url)), int(bool(cand.page_title or cand.title)))
 
-    def _merge(self, rep: Candidate, new: Candidate, new_relaxed: bool) -> Candidate:
+    def _merge(self, rep: Candidate, new: Candidate, new_relaxed: bool, page_read: bool = False) -> Candidate:
         changes: Dict[str, object] = {}
         # Page evidence travels as one block (a title belongs to its page).
         if (new.page_url or new.page_title or new.title) and self._evidence_rank(new) > self._evidence_rank(rep):
@@ -182,8 +198,12 @@ class CandidatePool:
                 changes.update(width=new.width, height=new.height)
         if rep.width is None and rep.height is None and new.width and new.height and "width" not in changes:
             changes.update(width=new.width, height=new.height)
-        # Found by a sanctioned source in a non-relaxed query: the image is sanctioned.
-        if new.sanctioned and not rep.sanctioned and not new_relaxed:
+        # Found by a sanctioned source in a non-relaxed query: the image is sanctioned, unless a page we read
+        # ourselves gave the entry evidence (scraped text never makes an image auto-publishable).
+        if page_read:
+            if rep.sanctioned:
+                changes.update(sanctioned=False)
+        elif new.sanctioned and not rep.sanctioned and not new_relaxed:
             changes.update(sanctioned=True, provider=new.provider, rank=new.rank)
         return replace(rep, **changes) if changes else rep
 

@@ -25,9 +25,14 @@ The round ('expand') starts with a free step:
         Google Images often files a page under a "related products" picture: the Ansar
         Gallery page of Yumway fries under a Mondelle pack, Tradeling's Green Farm Meat
         Masala under Shan and Double Horse (live run 2026-10-03, rows 13 and 36). At most
-        MAX_RECOVER_PAGES pages, never a social network or stock site. Their images go
-        through the stages below with one verifier call; when that gives a pick, the paid
-        steps are skipped.
+        MAX_RECOVER_PAGES distinct pages (one page under different tracking parameters is
+        one page), never a social network or stock site, and only a listing whose title,
+        page title or own URL slug names the brand (not just the failed image's file name)
+        where a brand stands (a common-word brand such as 'Family' elsewhere in the title
+        is not enough). Their images go through the stages below with one verifier call,
+        which reads the recovered pages' images first; when that gives a pick, the paid
+        steps are skipped, and so they are when that call got no answer (a round nobody
+        can read is not worth paying for).
 Then, within EXPANSION_MAX_CALLS paid calls (every provider call counts):
     X1  serper_web: the SKU's Q1 text (or the staff's custom query) scoped with site: OR
         over the brand's official domains and the main UAE retailers; the result pages
@@ -404,6 +409,27 @@ def _image_failed(rc: RankedCandidate) -> bool:
         v.brand_match == "no" or v.view in RECOVER_VIEWS)
 
 
+_TRACKING_PARAMS = frozenset({"srsltid", "gclid", "fbclid", "gbraid", "wbraid", "msclkid", "ref", "ref_"})
+
+
+def page_key(url: str) -> str:
+    """One product page whatever the tracking parameters ('?srsltid=', 'utm_*'): host + path + the rest of the query."""
+    from urllib.parse import parse_qsl, urlencode, urlsplit
+
+    try:
+        parts = urlsplit((url or "").strip())
+    except ValueError:
+        return (url or "").strip().lower()
+    host = (parts.hostname or "").lower()
+    host = host[4:] if host.startswith("www.") else host
+    query = sorted((k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True)
+                   if k.lower() not in _TRACKING_PARAMS and not k.lower().startswith("utm_"))
+    return host + (parts.path or "").rstrip("/").lower() + ("?" + urlencode(query) if query else "")
+
+
+_LISTING_BRAND_FIELDS = ("title", "page_title", "page_slug")
+
+
 def recovery_pages(spec: SkuSpec, ranked: Sequence[RankedCandidate]) -> List[RankedCandidate]:
     """X0: up to MAX_RECOVER_PAGES listings, best first, whose page is worth reading for its own image."""
     data = trusted_domains()
@@ -420,9 +446,14 @@ def recovery_pages(spec: SkuSpec, ranked: Sequence[RankedCandidate]) -> List[Ran
         host = url_host(cand.page_url)
         if not host or decide._social_host(host) or domain_matches(host, data.get("stock_or_clipart", [])):
             continue
-        if not (s.matched or {}).get("brand") or s.size_status == "conflict" or not _image_failed(rc):
+        matched = s.matched or {}
+        if not matched.get("brand") or s.size_status == "conflict" or not _image_failed(rc):
             continue
-        key = norm_image_url(cand.page_url)
+        # the listing itself names the brand where a brand stands, not only the failed image's file name
+        if not any(f in (matched.get("brand_fields") or {}) for f in _LISTING_BRAND_FIELDS) \
+                or any(str(c).startswith("generic_brand_position") for c in s.conflicts):
+            continue
+        key = page_key(cand.page_url)
         if key in seen:
             continue
         seen.add(key)
@@ -555,9 +586,12 @@ def _inherit_readings(everything: List[RankedCandidate], fresh: List[RankedCandi
 
 
 def _verify_new(inp: RoundInput, everything: List[RankedCandidate],
-                max_calls: int = MAX_VERIFY_CALLS) -> List[VerificationResult]:
+                max_calls: int = MAX_VERIFY_CALLS, first_ids: Set[int] = frozenset()) -> List[VerificationResult]:
+    """Read the unread usable tier-1/2 images, best first (the candidates in first_ids before the others)."""
     p = _stages()
     todo = [rc for rc in everything if p._usable(rc) and rc.verdict is None and rc.score.tier in (1, 2)]
+    if first_ids:
+        todo.sort(key=lambda rc: id(rc) not in first_ids)       # stable: rank order within each group
     out: List[VerificationResult] = []
     first = todo[:VERIFY_BATCH]
     res = p._verify(inp.spec, inp.verifier, first)
@@ -584,11 +618,13 @@ def _record(report: RoundReport, res: ProviderResult, what: str) -> None:
 # ---------------------------------------------------------------------------
 
 def _grow(inp: RoundInput, report: RoundReport, new: List[Candidate],
-          verify_calls: int = MAX_VERIFY_CALLS) -> Tuple[List[RankedCandidate], int, int]:
+          verify_calls: int = MAX_VERIFY_CALLS, new_first: bool = False) -> Tuple[List[RankedCandidate], int, int]:
     """The normal stages over the pool grown by `new`: merge, download, quality, verify, route.
 
     report.outcome is re-decided over everything (the normal readings plus every reading of this
-    round). Returns (every ranked candidate, how many were new, how many of those were downloaded).
+    round). new_first: the verifier reads the new candidates before older unread ones (X0's one call
+    is for the images the pages showed). Returns (every ranked candidate, how many were new, how
+    many of those were downloaded).
     """
     spec = inp.spec
     p = _stages()
@@ -605,7 +641,8 @@ def _grow(inp: RoundInput, report: RoundReport, new: List[Candidate],
     p._assess(kept)
     everything = p._rerank(everything)
     _inherit_readings(everything, fresh)
-    report.verify_results.extend(_verify_new(inp, everything, verify_calls))
+    report.verify_results.extend(_verify_new(inp, everything, verify_calls,
+                                             {id(rc) for rc in fresh} if new_first else frozenset()))
     report.outcome = decide.route(spec, everything, list(inp.results) + report.verify_results,
                                   list(inp.health) + report.health, inp.relaxed_ids)
     return everything, len(fresh), len(kept)
@@ -623,7 +660,7 @@ def _recover(inp: RoundInput, report: RoundReport, collector: "_Collector") -> O
     if not new:
         logger.info("expand sku=%s: X0 read %d pages, no image of their own", inp.spec.sku_key, len(hits))
         return None
-    everything, n_new, n_kept = _grow(inp, report, new, RECOVER_VERIFY_CALLS)
+    everything, n_new, n_kept = _grow(inp, report, new, RECOVER_VERIFY_CALLS, new_first=True)
     report.new_candidates += n_new
     logger.info("expand sku=%s: X0 read %d pages, %d new candidates (%d fetched) -> %s", inp.spec.sku_key,
                 len(hits), n_new, n_kept, report.outcome.decision)
@@ -637,7 +674,8 @@ def _expand(inp: RoundInput, report: RoundReport) -> RoundReport:
     # X0 (free): when the pages of the listings already found give a pick, no paid call is made
     recovered = _recover(inp, report, collector)
     if recovered is not None:
-        if report.outcome.decision in PICK_DECISIONS:
+        if report.outcome.decision in PICK_DECISIONS or report.outcome.failure_code == "VERIFIER_DOWN":
+            # a pick, or nobody could read X0's images: the paid steps would not be read either
             _append_health(report)
             return report
         inp = replace(inp, ranked=recovered)

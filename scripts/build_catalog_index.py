@@ -115,18 +115,13 @@ def main(argv=None) -> int:
 
     harvester = sitemaps.SitemapHarvester()
     reports = []
-    for store in chosen:
-        started = db.begin_harvest(store.key) if db is not None else None
-        on_urls = (lambda batch, key=store.key: db.upsert(key, batch)) if db is not None else None
-        rep = harvester.harvest(store, on_urls=on_urls, max_urls=args.max_urls, max_sitemaps=args.max_sitemaps,
-                                discover=args.discover)
-        if db is not None:
-            if args.prune and rep.status == "ok" and not rep.truncated:
-                rep.pruned = db.prune(store.key, started)
-            db.finish_harvest(store.key, started, rep.as_dict())
-        reports.append(rep)
-        print(sitemaps.format_report(rep, store, discover=args.discover))
-        print()
+    try:
+        for store in chosen:
+            reports.append(_harvest_one(harvester, store, db, args))
+    finally:
+        if args.json:      # what was read so far, even when the run stops
+            with open(args.json, "w", encoding="utf-8", newline="\n") as fh:
+                json.dump([r.as_dict() for r in reports], fh, ensure_ascii=False, indent=2)
 
     blocked = [r.store for r in reports if r.status in ("blocked", "error")]
     if args.discover:
@@ -137,12 +132,33 @@ def main(argv=None) -> int:
         print(f"{sum(r.new_urls for r in reports)} new product pages indexed.")
         print_stats(db)
     if blocked:
-        print(f"Skipped (blocked or unreachable, never worked around): {', '.join(blocked)}")
+        print(f"Skipped (blocked, unreachable or failed; never worked around): {', '.join(blocked)}")
     if args.json:
-        with open(args.json, "w", encoding="utf-8", newline="\n") as fh:
-            json.dump([r.as_dict() for r in reports], fh, ensure_ascii=False, indent=2)
         print(f"reports written to {args.json}")
     return 0 if len(blocked) < len(reports) else 1
+
+
+def _harvest_one(harvester, store, db, args):
+    """One store's harvest and its record; an unexpected failure (a database error, a bug) is that store's
+    'error' and the next store is still harvested."""
+    started = db.begin_harvest(store.key) if db is not None else None
+    on_urls = (lambda batch, key=store.key: db.upsert(key, batch)) if db is not None else None
+    try:
+        rep = harvester.harvest(store, on_urls=on_urls, max_urls=args.max_urls, max_sitemaps=args.max_sitemaps,
+                                discover=args.discover)
+    except Exception as exc:
+        logging.getLogger(__name__).exception("harvest of %s failed", store.key)
+        rep = sitemaps.HarvestReport(store=store.key, status="error", error=f"{type(exc).__name__}: {exc}"[:300])
+    if db is not None:
+        try:
+            if args.prune and rep.status == "ok" and not rep.truncated:
+                rep.pruned = db.prune(store.key, started)
+            db.finish_harvest(store.key, started, rep.as_dict())
+        except Exception as exc:
+            rep.status, rep.error = "error", f"the index could not be updated: {type(exc).__name__}"
+    print(sitemaps.format_report(rep, store, discover=args.discover))
+    print()
+    return rep
 
 
 if __name__ == "__main__":

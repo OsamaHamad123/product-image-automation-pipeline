@@ -5,7 +5,9 @@
     "product pages the live runs of 2026-10-03 found (runs/2026-10-03/smoke_*.json). The sitemap",
     "locations are not known yet: run 'python scripts/build_catalog_index.py --discover' and adjust",
     "sitemaps / sitemap_include from what it prints. A store whose page slugs often leave out the brand",
-    "(noon, Union Coop) is disabled: the index finds rows by the brand's words."
+    "(noon, Union Coop) is disabled: the index finds rows by the brand's words.",
+    "sitemap_hosts (optional): other hosts that serve the store's sitemaps (a CDN its robots.txt points to);",
+    "their files are read, but product pages still have to be on 'hosts'."
   ],
   "stores": [
     {

@@ -363,6 +363,57 @@ learned ever auto-publishes.
   - The 60 products of the live run and the suggested mapping are committed under `runs/2026-10-03/`, so a
     machine with the keys but no `credentials.json` can measure the same products again.
 
+### Fixed in the review of the four additions (before their first live run)
+
+- **Learning from reviews**
+  - A learned spelling stays with the sheet brand it was taught for. It never makes another product's brand
+    a competitor (a `SUPER T/` product still finds and accepts Super Tasty once `SUP/T` is taught), and it is
+    never matched at the start of another product's name.
+  - Learned sites alone never give an unmapped sheet brand an identity: it stays `sheet_raw`, brand discovery
+    still runs for it, and the sheet's name rule still wins (brand cell `NESTLE`, product `NIDO ...`).
+  - The `brand_spelling` warning stays on a pick whose brand evidence is only a learned spelling, so a
+    `WRONG_BRAND` rejection still counts against one mistaken approval.
+  - A site is learned only from two different approved products, counted per brand as the search resolves
+    it (two sheet spellings of one mapped brand count together; a rejection under either counts).
+  - Listed UAE retailers, structured sources and stores outside the UAE are never learned: a listed retailer
+    keeps its own trust, so learning never blocks its auto-publish, and a foreign store never gets UAE trust.
+  - A larger copy of the winning picture from a learned source never replaces an `AUTO_PUBLISH` winner.
+  - `smoke_live --rows-file` reads a `#` row column and `45.0` row numbers, and stops when the file has no
+    product name column.
+- **Local catalog index**
+  - An image a page we read ourselves gave evidence to is never sanctioned, even when a search API also
+    returns it: the index can pre-check an image for review, never make it auto-publishable, and it never
+    stops the web search early.
+  - A web-search outage is `PROVIDER_DOWN` even when the index (or Open Food Facts) answered, so the product
+    is searched again; with no web search provider at all nothing was searched.
+  - The index never cancels the relaxed queries R1/R2.
+  - Pages known to be dead, pages that failed in the last day and hosts left alone take no read slot. The
+    reads hold the first search step at most 8 s. Timeouts count toward leaving a store alone. A transient
+    failure keeps the image and barcode an earlier read stored. The words indexed for a URL are the product's
+    own slug (the segment before `/p/<id>`), not its department.
+- **Brand discovery and page recovery (X0)**
+  - The corrected query is not sent when a listing is already tier 1 in the store spelling, and the early stop
+    uses the corrected brand.
+  - A site's UAE section (Tradeling `/ae-en/`) counts as a UAE store. An abbreviation two brands could expand
+    to is never guessed. Stock sites, social networks and listings without a page never vouch for a spelling,
+    and the 7-letter minimum applies to the sheet brand too.
+  - X0 reads one page once whatever its tracking parameters, only listings that name the brand in their
+    title, page title or own slug (where a brand stands), and its one verifier call reads the recovered
+    images first. When that call gets no answer, no paid call is made.
+- **Sitemap harvester**
+  - robots.txt is read as RFC 9309 says (longest rule wins, `*` and `$`, our own group before `*`, a byte-order
+    mark, a decimal Crawl-delay). A store asking for a longer Crawl-delay than 60 s is skipped, never read
+    faster than it asks.
+  - An HTML page is a block only at every starting point before anything was read; later it is one failed
+    sitemap. `/sitemap_index.xml` is asked only when `/sitemap.xml` gave nothing, and a guessed location that
+    is missing is not a failure (so `--prune` can run).
+  - A `Sitemap:` line on another host is reported, and read once its host is listed in the store's new
+    `sitemap_hosts`. A redirect off the store or to its home page is a failed sitemap.
+  - A broken file (corrupt gzip, an unknown or UTF-16 encoding) is one failed sitemap; an unexpected error is
+    that store's `error` and the next store is still harvested; the `--json` file is always written.
+  - An exact `--max-urls` with nothing left is a complete harvest; `--discover` reads every nested index.
+  - A bad pattern or a byte-order mark in the stores file gives a clear message.
+
 ### Fixed while integrating phase 3
 
 - A barcode-conflict MATCH that cannot be pre-checked no longer skips the second verifier call on the next
