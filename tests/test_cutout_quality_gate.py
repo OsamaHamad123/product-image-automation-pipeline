@@ -1,11 +1,12 @@
-"""Published image quality: cutout quality gate, automatic fallback, clean white sources.
+"""Published image quality: cutout quality gate, automatic fallback, clean white sources, verified bytes.
 
 The scenarios are the audit probes turned into tests (P1 opaque no-op segmentation, P2 faint alpha haze,
 P3 second object, P4 a Gemini box that cuts off the cap, P5 a transparent PNG with an opaque grey box).
 All tests are offline: sockets are blocked, PhotoRoom / remove.bg are fakes behind requests.post, the
-Gemini box is a fake.
+Gemini box is a fake, and the URL download goes through a scripted HTTP session.
 """
 
+import hashlib
 import io
 import json
 import os
@@ -83,6 +84,36 @@ class FakeResponse:
 
     def json(self):
         return json.loads(self.content)
+
+
+class FakeHttpResponse:
+    """Minimal stand-in for a curl_cffi streaming response."""
+
+    def __init__(self, status_code=200, body=b"", headers=None):
+        self.status_code = status_code
+        self._body = body
+        self.headers = headers or {}
+
+    @property
+    def content(self):
+        return self._body
+
+    def iter_content(self, chunk_size=65536):
+        for i in range(0, len(self._body), chunk_size):
+            yield self._body[i:i + chunk_size]
+
+    def close(self):
+        pass
+
+
+class ScriptedSession:
+    def __init__(self, script):
+        self.script = list(script)
+        self.calls = []
+
+    def get(self, url, **kwargs):
+        self.calls.append(url)
+        return self.script.pop(0)
 
 
 def png_bytes(img):
@@ -636,4 +667,32 @@ def test_white_source_off_mode_does_not_look(monkeypatch, tmp_path):
     Providers(monkeypatch, photoroom=keyer(WHITE))
     result = run(save(bottle(), tmp_path))
     assert (result.isolated, result.white_source) == (True, None)
+
+
+# ---------------------------------------------------------------------------
+# Never publish different bytes than were verified
+# ---------------------------------------------------------------------------
+
+def test_redownloaded_bytes_must_match_the_verified_sha256(monkeypatch, tmp_path):
+    (tmp_path / "candidates").mkdir()      # the store exists but the verified file is gone
+    verified = png_bytes(bottle())
+    sha = hashlib.sha256(verified).hexdigest()
+    changed = png_bytes(bottle(body=(150, 150, 450, 750)))   # the URL now serves another picture
+
+    providers = Providers(monkeypatch, photoroom=keyer(WHITE))
+    session = ScriptedSession([FakeHttpResponse(200, changed, {"Content-Type": "image/png"})])
+    monkeypatch.setattr(http_client, "_new_session", lambda: session)
+    result = run("https://cdn.example.ae/p/1.png", candidate_sha256=sha.upper())
+    assert (result.path, result.isolated, result.error) == (None, False, "source_changed")
+    assert providers.calls == [], "nothing may be isolated or published from unverified bytes"
+
+    session = ScriptedSession([FakeHttpResponse(200, verified, {"Content-Type": "image/png"})])
+    monkeypatch.setattr(http_client, "_new_session", lambda: session)
+    result = run("https://cdn.example.ae/p/1.png", candidate_sha256=sha)
+    assert result.isolated is True and result.error is None
+
+    # The same rule for a local file read again.
+    local = tmp_path / "local.png"
+    local.write_bytes(changed)
+    assert run(str(local), candidate_sha256=sha).error == "source_changed"
 

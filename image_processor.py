@@ -122,7 +122,7 @@ class ProcessResult:
     path: مسار لوحة PNG النهائية (None عند أي فشل؛ لا يوجد ملف قابل للنشر).
     isolated: True فقط إذا تم عزل المنتج عن خلفيته فعلاً واجتاز القص بوابة الجودة.
     provider: photoroom | remove_bg_api | grabcut | rembg | source_alpha | white_source | none | ...
-    error: رمز خطأ واضح (مثل photoroom_402، download_not_image) أو None.
+    error: رمز خطأ واضح (مثل photoroom_402، download_not_image، source_changed) أو None.
     width/height: أبعاد اللوحة النهائية (0 عند الفشل).
     quality_flags: علامات بوابة الجودة للوحة المعادة ([] = نظيفة). عند وجودها تكون isolated=False
         مع path موجود: نفس حالة "الخلفية لم تُعزل" (رابط needs_review: ولا نشر تلقائي).
@@ -326,11 +326,25 @@ def _download_bytes(url: str) -> Tuple[Optional[bytes], Optional[str]]:
 
 
 def _load_source(image_url_or_path, candidate_sha256=None) -> Tuple[Optional[bytes], Optional[str], str]:
-    """يعيد (البيانات، رمز الخطأ، نوع المصدر: candidate|download|local)."""
+    """
+    يعيد (البيانات، رمز الخطأ، نوع المصدر: candidate|download|local).
+    إذا مُررت بصمة sha256 لبايتات تم التحقق منها ولم يوجد ملفها في مخزن المرشحات، تُقرأ الصورة من الرابط
+    من جديد ويجب أن تطابق البايتات تلك البصمة؛ وإلا نفشل بإغلاق (source_changed) ولا ننشر صورة لم يُتحقق منها.
+    """
     data = _load_from_candidate_store(candidate_sha256) if candidate_sha256 else None
     if data is not None:
         return data, None, "candidate"
 
+    data, error, origin = _read_source(image_url_or_path)
+    sha = str(candidate_sha256 or "").strip().lower()
+    if data is not None and _SHA256_RE.match(sha) and hashlib.sha256(data).hexdigest() != sha:
+        logger.warning("بايتات المصدر تغيرت منذ التحقق منها (البصمة لا تطابق)؛ لن تتم معالجتها: %s",
+                       str(image_url_or_path)[:200])
+        return None, "source_changed", origin
+    return data, error, origin
+
+
+def _read_source(image_url_or_path) -> Tuple[Optional[bytes], Optional[str], str]:
     source = str(image_url_or_path or "").strip()
     if not source:
         return None, "source_missing", "local"
