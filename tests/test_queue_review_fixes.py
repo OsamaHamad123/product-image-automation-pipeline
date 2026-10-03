@@ -13,13 +13,42 @@ Real-MariaDB tests use the test database (conftest) and skip when MariaDB is dow
 
 import json
 import os
+import re
+import shutil
+import subprocess
+import tempfile
 import threading
 import time
+from pathlib import Path
 
 import pytest
 
 ROW = 963000
 SKU = "p4f-sku-"
+
+ROOT = Path(__file__).resolve().parents[1]
+DASH = ROOT / "dashboard"
+QUEUE_STATS = DASH / "app" / "Services" / "QueueStats.php"
+PHP = shutil.which("php")
+NODE = shutil.which("node")
+NEEDS_PHP = pytest.mark.skipif(PHP is None, reason="php is not installed")
+NEEDS_NODE = pytest.mark.skipif(NODE is None, reason="node is not installed")
+
+
+def _queue_stats(calls: str):
+    """QueueStats pure functions under the PHP CLI: $out (assigned by calls) as JSON."""
+    service = str(QUEUE_STATS).replace("\\", "/")
+    script = (f"<?php\nrequire '{service}';\nuse App\\Services\\QueueStats;\n$out = [];\n{calls}\n"
+              "echo json_encode($out, JSON_UNESCAPED_UNICODE);\n")
+    with tempfile.NamedTemporaryFile("w", suffix=".php", delete=False, encoding="utf-8") as fh:
+        fh.write(script)
+        path = fh.name
+    try:
+        result = subprocess.run([PHP, path], capture_output=True, text=True, timeout=60, encoding="utf-8")
+    finally:
+        os.unlink(path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    return json.loads(result.stdout)
 
 
 def _sql(db, statement, params=()):
@@ -43,8 +72,8 @@ def db(mariadb_or_skip):
         _sql(db, "DELETE FROM automation_queue")
         _sql(db, "DELETE FROM curation_candidates WHERE sku_key LIKE %s OR product_name LIKE 'P4F %%'", (SKU + "%",))
         _sql(db, "DELETE FROM resolved_products WHERE sku_key LIKE %s OR product_name LIKE 'P4F %%'", (SKU + "%",))
-        _sql(db, "DELETE FROM rejected_images WHERE sku_key LIKE %s OR original_url LIKE 'https://p4f.example/%%'",
-             (SKU + "%",))
+        _sql(db, "DELETE FROM rejected_images WHERE sku_key LIKE %s OR original_url LIKE 'https://p4f.example/%%' "
+                 "OR original_url LIKE 'https://res.cloudinary.com/p4f/%%'", (SKU + "%",))
         _sql(db, "DELETE FROM product_failures WHERE sku_key LIKE %s OR product_name LIKE 'P4F %%'", (SKU + "%",))
         _sql(db, "DELETE FROM search_spend")
         _sql(db, "UPDATE automation_state SET status = 'idle', stop_requested = 0, pause_requested = 0, run_id = NULL, "
@@ -61,6 +90,225 @@ def _add(db, i, sku=None, **kw):
 
 def _row(db, i):
     return _sql(db, "SELECT * FROM automation_queue WHERE `row_number` = %s", (ROW + i,))[0]
+
+
+LINK = "https://res.cloudinary.com/p4f/approved.png"
+GTIN = "5449000000996"
+
+
+def _prod(i, name, brand="P4F Brand", barcode="", size=""):
+    return {"row_number": ROW + i, "product_name": name, "brand": brand, "barcode": barcode, "size": size,
+            "existing_image_link": ""}
+
+
+def _keys(prod):
+    import main
+    row = main.sku_row(prod["product_name"], prod["brand"], prod["barcode"], {"size": prod.get("size", "")})
+    return main.compute_sku_key(row), main.compute_alt_sku_key(row)
+
+
+def _candidates(db, i, sku, urls):
+    assert db.save_curation_candidates(ROW + i, f"P4F Product {i}", "Brand",
+                                       [{"url": u, "status": "eligible"} for u in urls], sku_key=sku)
+
+
+@pytest.fixture
+def sheet(monkeypatch):
+    """google_sheets writes and the search, recorded. The sheet outbox has nothing for these rows (its real shape:
+    a list of records)."""
+    import google_sheets
+    import image_search
+
+    rec = {"links": [], "searches": []}
+    monkeypatch.setattr(google_sheets, "update_image_link",
+                        lambda ws, row, col, value, **k: rec["links"].append((row, value)) or True)
+    monkeypatch.setattr(google_sheets, "update_product_metadata", lambda *a, **k: True)
+    monkeypatch.setattr(google_sheets, "outbox_outcomes", lambda row_numbers=None, since_id=None, limit=500: [])
+
+    def search(query, name, brand, trace=None, **kw):
+        rec["searches"].append(kw)
+        trace["outcome"] = rec.get("outcome", {"decision": "NOT_FOUND", "failure_code": "NO_RESULTS",
+                                               "provider_health": []})
+        return rec.get("best")
+
+    monkeypatch.setattr(image_search, "search_best_product_image", search)
+    return rec
+
+
+def _work(main, task):
+    return main.pre_cache_product_candidates(task, worksheet=object(), link_column_index=4, sleep=lambda s: None)
+
+
+# ---------------------------------------------------------------------------
+# C2: a reviewer's rejection is never overwritten by a stale relink
+# ---------------------------------------------------------------------------
+
+def _approved_before_the_barcode(db):
+    """A row approved while it had no barcode; the owner then typed its valid barcode (the approval stays under the
+    old key, the row's alternative key)."""
+    before = _prod(0, "P4F Cola Regular 330ml")
+    old_key = _keys(before)[0]
+    assert db.save_product_resolution("", before["product_name"], before["brand"], "https://p4f.example/cola.jpg",
+                                      LINK, verification_status="human_approved", approved_by="human", sku_key=old_key)
+    after = dict(before, barcode=GTIN)
+    new_key, alt_key = _keys(after)
+    assert alt_key == old_key and new_key != old_key
+    return after, new_key
+
+
+def test_a_rejected_relinked_image_is_not_written_again_by_the_next_claim(db, sheet):
+    """Probe C2: the row got its image by relink from the approval under its pre-barcode key; the reviewer rejected
+    it (recorded and superseded under the row's key, the row back to pending REJECTED). The row kept
+    task_kind='relink', so the next claim wrote the rejected image again without a search."""
+    import main
+    after, new_key = _approved_before_the_barcode(db)
+    rows, _ = main.plan_enqueue([after])
+    db.add_many_to_queue(rows)
+    task = db.fetch_next_task("host:1")
+    assert task["task_kind"] == "relink"
+    assert _work(main, task) == "success" and sheet["links"] == [(ROW, LINK)] and sheet["searches"] == []
+    assert (_row(db, 0)["status"], _row(db, 0)["task_kind"], _row(db, 0)["requeue_reason"]) == ("completed", None, None)
+
+    # the reviewer rejects the published image (cli_bridge.action_reject_image: rejection, supersede, back to pending)
+    assert db.add_rejected_image(new_key, LINK, reason_code="WRONG_PRODUCT")
+    db.supersede_resolution(new_key, barcode=GTIN)
+    db.update_task_status_by_row(ROW, "pending", "rejected by reviewer: WRONG_PRODUCT", failure_code="REJECTED",
+                                 sku_key=new_key)
+    sheet["links"].clear()
+    task = db.fetch_next_task("host:1")
+    assert task["task_kind"] is None
+    _work(main, task)
+    assert sheet["links"] == []                                   # the rejected image is not written again
+    (kw,) = sheet["searches"]                                     # a normal search, the rejection excluded
+    assert LINK in kw["exclude_urls"]
+
+
+def test_a_relink_skips_an_approval_whose_image_a_reviewer_rejected(db, sheet):
+    """The enqueue still sees the approval under the old key and plans a relink each night; the worker must not
+    write an image rejected under the row's key (or its alternative key)."""
+    import main
+    after, new_key = _approved_before_the_barcode(db)
+    assert db.add_rejected_image(new_key, LINK, reason_code="WRONG_PRODUCT")
+    rows, _ = main.plan_enqueue([after])
+    assert rows[0]["task_kind"] == "relink"
+    db.add_many_to_queue(rows)
+    _work(main, db.fetch_next_task("host:1"))
+    assert sheet["links"] == [] and len(sheet["searches"]) == 1
+
+
+def test_a_relink_skips_an_approval_whose_canvas_phash_was_rejected(offline, monkeypatch):
+    import local_cache_db
+    import main
+    monkeypatch.setattr(local_cache_db, "get_rejections",
+                        lambda key: (["https://elsewhere.example/x.jpg"], ["ffff0000ffff0003"]) if key == "alt" else ([], []))
+    res = {"original_url": "https://p4f.example/a.jpg", "cloudinary_url": LINK, "perceptual_hash": "ffff0000ffff0000"}
+    assert main._rejected_resolution(res, "gtin", "alt") is True                # 2 bits apart
+    assert main._rejected_resolution(dict(res, perceptual_hash="0000ffff0000ffff"), "gtin", "alt") is False
+    assert main._rejected_resolution(dict(res, perceptual_hash=None), "gtin", "alt") is False
+
+
+def test_a_finished_task_forgets_why_it_was_queued(db):
+    _add(db, 0, task_kind="relink", requeue_reason="APPROVED_IMAGE")
+    task = db.fetch_next_task("host:1")
+    db.update_task_status(task["id"], "pending", "Search providers unavailable", failure_code="PROVIDER_DOWN",
+                          claim_id=task["worker_id"])
+    row = _row(db, 0)
+    assert (row["task_kind"], row["requeue_reason"]) == ("relink", "APPROVED_IMAGE")   # the same task tries again
+    _sql(db, "UPDATE automation_queue SET next_attempt_at = NOW() - INTERVAL 1 MINUTE WHERE `row_number` = %s", (ROW,))
+    task = db.fetch_next_task("host:1")
+    db.update_task_status(task["id"], "completed", claim_id=task["worker_id"])
+    row = _row(db, 0)
+    assert (row["status"], row["task_kind"], row["requeue_reason"]) == ("completed", None, None)
+
+    # a reviewer's write forgets them too (a row waiting for review after a recheck, rejected by the reviewer)
+    _add(db, 1)
+    _sql(db, "UPDATE automation_queue SET status = 'ready_for_review', requeue_reason = 'VERIFIER_RECHECK', "
+             "task_kind = 'relink' WHERE `row_number` = %s", (ROW + 1,))
+    db.update_task_status_by_row(ROW + 1, "pending", "rejected by reviewer: WRONG_PRODUCT", failure_code="REJECTED",
+                                 sku_key=SKU + "1")
+    row = _row(db, 1)
+    assert (row["status"], row["task_kind"], row["requeue_reason"]) == ("pending", None, None)
+
+
+# ---------------------------------------------------------------------------
+# C4: re-verification never leaves an empty review row
+# ---------------------------------------------------------------------------
+
+def test_a_rejection_after_a_recheck_is_not_parked_back_into_review(db):
+    """Probe C4 (outcome A): a recheck found a new pick, the reviewer rejected the last candidate (pending REJECTED),
+    and the next run started with the label reader down: park_verifier_rechecks turned the row into an empty
+    VERIFIER_DOWN review row because it still carried requeue_reason='VERIFIER_RECHECK'."""
+    sku = SKU + "0"
+    _add(db, 0)
+    task = db.fetch_next_task("host:1")
+    db.update_task_status(task["id"], "ready_for_review", failure_code="VERIFIER_DOWN", claim_id=task["worker_id"])
+    _candidates(db, 0, sku, ["https://p4f.example/old.jpg"])
+    assert db.requeue_verifier_down("run-1") == 1
+    task = db.fetch_next_task("host:1")
+    _candidates(db, 0, sku, ["https://p4f.example/new.jpg"])        # the recheck's new pick
+    db.update_task_status(task["id"], "ready_for_review", claim_id=task["worker_id"])
+    db.exclude_curation_candidate(ROW, "https://p4f.example/new.jpg", sku_key=sku)
+    db.update_task_status_by_row(ROW, "pending", "rejected by reviewer: WRONG_PRODUCT", failure_code="REJECTED",
+                                 sku_key=sku)
+    assert db.park_verifier_rechecks() == 0
+    row = _row(db, 0)
+    assert (row["status"], row["failure_code"]) == ("pending", "REJECTED")
+
+
+def test_only_rechecks_with_candidates_left_are_parked(db):
+    for i in (0, 1):
+        _add(db, i)
+        _sql(db, "UPDATE automation_queue SET requeue_reason = 'VERIFIER_RECHECK', reverify_count = 1 "
+                 "WHERE `row_number` = %s", (ROW + i,))
+    _candidates(db, 0, SKU + "0", ["https://p4f.example/a.jpg"])
+    _candidates(db, 1, SKU + "1", ["https://p4f.example/b.jpg"])
+    db.exclude_curation_candidate(ROW + 1, "https://p4f.example/b.jpg", sku_key=SKU + "1")   # nothing left to review
+    assert db.park_verifier_rechecks() == 1
+    assert (_row(db, 0)["status"], _row(db, 0)["failure_code"], _row(db, 0)["reverify_count"]) == (
+        "ready_for_review", "VERIFIER_DOWN", 0)
+    assert _row(db, 1)["status"] == "pending"                       # searched by the worker instead
+
+
+def test_a_recheck_without_candidates_that_finds_nothing_is_a_normal_not_found(db, sheet):
+    """Probe C4 (outcome B): the recheck branch returned the row to review with no candidate; once reverify_count
+    reached 2 it stayed there every night (never failed, never scheduled, never in product_failures)."""
+    import main
+    _add(db, 0)
+    _sql(db, "UPDATE automation_queue SET requeue_reason = 'VERIFIER_RECHECK', reverify_count = 2 "
+             "WHERE `row_number` = %s", (ROW,))
+    assert _work(main, db.fetch_next_task("host:1")) == "failed"
+    row = _row(db, 0)
+    assert (row["status"], row["failure_code"], row["fail_count"]) == ("failed", "NO_RESULTS", 1)
+    assert row["next_attempt_at"] is not None and row["requeue_reason"] is None
+    assert _sql(db, "SELECT COUNT(*) AS n FROM product_failures WHERE sku_key = %s", (SKU + "0",))[0]["n"] == 1
+
+
+def test_a_recheck_with_candidates_that_finds_nothing_waits_for_the_reviewer(db, sheet):
+    import main
+    _add(db, 0)
+    _sql(db, "UPDATE automation_queue SET requeue_reason = 'VERIFIER_RECHECK', reverify_count = 1 "
+             "WHERE `row_number` = %s", (ROW,))
+    _candidates(db, 0, SKU + "0", ["https://p4f.example/a.jpg"])
+    assert _work(main, db.fetch_next_task("host:1")) == "success"
+    row = _row(db, 0)
+    assert (row["status"], row["failure_code"], row["requeue_reason"]) == ("ready_for_review", "RECHECK_NOT_FOUND", None)
+    assert db.requeue_verifier_down("run-2") == 0                  # a healthy reader found nothing: no third look
+
+
+@NEEDS_PHP
+def test_the_new_queue_codes_have_plain_arabic_texts():
+    """The run page's «why» (QueueStats::FAILURE_TEXT) and the review screen (core.js FAILURE_TEXT) read the queue's
+    failure code: a recheck that found nothing with a healthy reader is not «the label reader did not answer», and a
+    link that could not be queued for the sheet had no text at all."""
+    out = _queue_stats("$out = QueueStats::FAILURE_TEXT;")
+    for code in ("RECHECK_NOT_FOUND", "SHEET_WRITE_FAILED"):
+        assert re.search(r"[؀-ۿ]", out.get(code, "")), code
+    assert out["RECHECK_NOT_FOUND"] != out["VERIFIER_DOWN"]
+    core = (DASH / "public" / "js" / "review" / "core.js").read_text(encoding="utf-8")
+    table = core[core.index("const FAILURE_TEXT = {"):]
+    table = table[:table.index("};")]
+    for code in ("RECHECK_NOT_FOUND", "SHEET_WRITE_FAILED"):
+        assert re.search(code + r": '[^']*[؀-ۿ][^']*'", table), code
 
 
 # ---------------------------------------------------------------------------

@@ -638,15 +638,42 @@ def _write_row_link(worksheet, link_column_index, row, link, metadata=None):
     return bool(ok)
 
 
+def _rejected_resolution(res, sku_key, alt_key):
+    """
+    هل رفض مراجع صورة هذا الحل بمفتاح الصف أو بمفتاحه البديل: رابطها الأصلي أو رابط Cloudinary، أو بصمة pHash على
+    مسافة DUPLICATE_PHASH_DISTANCE أو أقل؟ خطأ قراءة الرفض يُعامل كنعم (لا نكتب ونحن لا نعرف).
+    """
+    try:
+        urls, phashes = _rejections(sku_key, alt_key)
+    except Exception as e:
+        print(f"[Relink] تعذر قراءة رفض المراجعين: {e}")
+        return True
+    rejected = {local_cache_db.url_norm(u) for u in urls if u}
+    if any(local_cache_db.url_norm(u) in rejected for u in (res.get("original_url"), res.get("cloudinary_url")) if u):
+        return True
+    mine = local_cache_db._phash_int(res.get("perceptual_hash"))
+    if mine is None:
+        return False
+    for p in phashes:
+        other = local_cache_db._phash_int(p)
+        if other is not None and bin(mine ^ other).count("1") <= local_cache_db.DUPLICATE_PHASH_DISTANCE:
+            return True
+    return False
+
+
 def _relink_task(task, worksheet, link_column_index, sku_key, alt_key, brand_mappings=None):
     """
     مهمة «كتابة رابط معتمد» (task_kind='relink' من الإدراج): للمنتج صورة معتمدة لكن رابطها ليس في هذا الصف
     (صف مكرر، كتابة انتهت CONFLICT / DEAD، أو صف عُدل وللمنتج الجديد اعتماد بشري). يُكتب الرابط بلا بحث.
-    تعيد None عندما لم يعد للمنتج حل معتمد (رُفض منذ الإدراج): يجري البحث العادي بدلها.
+    تعيد None عندما لم يعد للمنتج حل معتمد (رُفض منذ الإدراج)، أو رفض مراجع صورة الحل بمفتاح الصف أو بديله
+    (اعتماد بالمفتاح القديم بقي بعد رفض بالمفتاح الجديد): يجري البحث العادي بدلها، والرفض يُستبعد فيه.
     """
     name, brand = task["product_name"], task.get("brand") or ""
     res = _servable_resolution(sku_key, alt_key, name, brand, task_payload(task).get("size"), brand_mappings)
     if res is None:
+        return None
+    if _rejected_resolution(res, sku_key, alt_key):
+        print(f"[Relink] رفض مراجع الصورة المعتمدة للصف {task['row_number']}؛ لا تُكتب من جديد.")
         return None
     if worksheet is None or link_column_index is None:
         _finish_task(task, "failed", "No worksheet to write the approved link", failure_code="SHEET_WRITE_FAILED")
@@ -689,6 +716,10 @@ def _publish_to_siblings(task, sku_key, worksheet, link_column_index):
     return written
 
 
+# إعادة تحقق اكتملت بقارئ ملصق يعمل ولم تجد صورة أفضل: الصف ينتظر المراجع بمرشحاته السابقة (لا إعادة فحص أخرى)
+RECHECK_NOT_FOUND = "RECHECK_NOT_FOUND"
+
+
 def _record_spend(trace, run_id=None):
     """تكلفة محاولة بحث واحدة في سجل الصرف اليومي (search_spend). لا يرفع أبداً."""
     local_cache_db.record_search_spend(_outcome(trace), run_id)
@@ -699,9 +730,10 @@ def pre_cache_product_candidates(task, worksheet=None, link_column_index=None, b
     """
     البحث المسبق لمهمة من الطابور وحفظ مرشحاتها للمراجعة، أو نشرها إذا كان القرار AUTO_PUBLISH.
     تعيد 'success' | 'failed' | 'provider_down'.
-    - مهمة relink: يُكتب الرابط المعتمد للمنتج بلا بحث.
+    - مهمة relink: يُكتب الرابط المعتمد للمنتج بلا بحث (إلا صورة رفضها مراجع: بحث عادي).
     - صف عُدل بعد نشره (review_only) لا يُنشر تلقائياً أبداً: تُعرض النتيجة للمراجعة.
-    - إعادة تحقق (VERIFIER_RECHECK) لم تجد شيئاً: يعود الصف جاهزاً للمراجعة بمرشحاته السابقة.
+    - إعادة تحقق (VERIFIER_RECHECK) لم تجد شيئاً: يعود الصف جاهزاً للمراجعة بمرشحاته السابقة إن بقي منها شيء،
+      وإلا فهي «لا نتيجة» عادية (فشل يُجدول ويُسجل).
     - رفض Serper كل استعلاماته (رصيد / مفتاح) و«لا نتيجة»: انقطاع وليس فشلاً للمنتج.
     report (dict اختياري) يملؤه البحث للعامل: searched، serper_credit (True / False / None).
     """
@@ -755,11 +787,18 @@ def pre_cache_product_candidates(task, worksheet=None, link_column_index=None, b
             code = _outcome(trace).get("failure_code") or "NO_RESULTS"
             message = f"No acceptable image found ({code})"
         down = state == "provider_down" or (state == "ok" and credit)
-        if recheck:
-            # إعادة التحقق لم تأتِ بجديد: المرشحات السابقة ما زالت محفوظة، فيعود الصف للمراجعة ولا يضيع
+        if recheck and local_cache_db.has_review_candidates(row_number, sku_key):
+            # إعادة التحقق لم تأتِ بجديد والمرشحات السابقة ما زالت أمام المراجع: يعود الصف للمراجعة ولا يضيع.
+            # بحث لم يكتمل (انقطاع أو خطأ) يبقى VERIFIER_DOWN فيُعاد فحصه في تشغيل لاحق؛ بحث اكتمل بقارئ يعمل
+            # ولم يجد شيئاً: RECHECK_NOT_FOUND (لا إعادة فحص أخرى، المراجع يقرر)
+            if down or state == "error":
+                _finish_task(task, "ready_for_review", f"Re-verification could not search ({code})",
+                             failure_code="VERIFIER_DOWN", trace=trace)
+                return "provider_down" if down else "success"
             _finish_task(task, "ready_for_review", f"Re-verification found nothing new ({code})",
-                         failure_code="VERIFIER_DOWN", trace=trace)
-            return "provider_down" if down else "success"
+                         failure_code=RECHECK_NOT_FOUND, trace=trace)
+            return "success"
+        # إعادة تحقق لم يبقَ لها مرشح (رفضها المراجع) نتيجة عادية: الانقطاع ينتظر، و«لا نتيجة» تُسجل وتُجدول
         if down:
             # انقطاع المزودين (أو رصيد Serper) ليس فشلاً للمنتج: يعود الصف للانتظار بموعد ولا يُسجل في product_failures
             message = "Serper refused every query (credit or key)" if credit else "Search providers unavailable"

@@ -1832,10 +1832,24 @@ def outcome_schedule(row, status, failure_code, group_fail_count=0):
     return {"next_minutes": None, "fail_count": fail, "down_count": 0, "priority": priority}
 
 
+# حالات تنهي المهمة: سبب إدراجها (task_kind / requeue_reason) لم يعد يصفها
+FINISHED_STATUSES = ("completed", "failed", "ready_for_review")
+
+
+def _forget_reason_sql(status):
+    """
+    مهمة انتهت تنسى لماذا أُدرجت: task_kind='relink' أو requeue_reason='VERIFIER_RECHECK' القديمان لا يحكمان قراراً
+    لاحقاً (رفض مراجع يعيد الصف للانتظار ثم يُسحب ككتابة رابط أو كإعادة تحقق). العودة للانتظار (انقطاع المزودين)
+    تبقيهما: المحاولة التالية للمهمة نفسها. الإدراج التالي يحسب السبب من جديد.
+    """
+    return ", task_kind = NULL, requeue_reason = NULL" if status in FINISHED_STATUSES else ""
+
+
 def update_task_status(task_id, status, error_message=None, failure_code=None, trace=None, claim_id=None,
                        siblings=None):
     """
     تحديث حالة المهمة بعد المعالجة، مع رمز الفشل والـ trace وموعد المحاولة التالية (outcome_schedule)، وتحرير الحجز.
+    نهاية المهمة (مكتملة / فاشلة / للمراجعة) تمسح task_kind و requeue_reason (_forget_reason_sql).
     claim_id (معرف السحب من fetch_next_task): عند تمريره لا يُحدَّث الصف إلا إذا كان ما زال محجوزاً بهذا
     المعرف وفي حالة 'processing'؛ فلا تكتب نتيجة العامل فوق اعتماد بشري تم أثناء المعالجة أو فوق حجز
     أعيد سحبه بعد انتهائه. تعيد False إن لم يعد الحجز ملكاً للعامل.
@@ -1892,7 +1906,7 @@ def update_task_status(task_id, status, error_message=None, failure_code=None, t
                 "UPDATE automation_queue SET status = %s, error_message = %s, failure_code = %s, "
                 "trace_json = COALESCE(%s, trace_json), lease_until = NULL, "
                 f"next_attempt_at = {next_sql}, fail_count = %s, down_count = %s, priority = %s, "
-                "searched_at = NOW(), updated_at = CURRENT_TIMESTAMP WHERE id = %s",
+                f"searched_at = NOW(), updated_at = CURRENT_TIMESTAMP{_forget_reason_sql(status)} WHERE id = %s",
                 (status, error_message, failure_code, trace_json) + next_params + counters + (task_id,),
             )
             if sibling_rows:
@@ -1967,20 +1981,56 @@ def requeue_verifier_down(run_id=None, max_reverify=MAX_REVERIFY):
         return None
 
 
+# مرشحات ما زالت أمام المراجع لصف الطابور q (بنفس قاعدة _row_or_sku_clause): ما رفضه المراجع لا يُحسب
+_CANDIDATES_LEFT_SQL = (
+    "EXISTS (SELECT 1 FROM curation_candidates c WHERE (c.sku_key = q.sku_key OR (c.sku_key IS NULL "
+    "AND c.`row_number` = q.`row_number`)) AND COALESCE(c.status, '') NOT IN ('excluded', 'rejected'))")
+
+
+def has_review_candidates(row_number, sku_key=None):
+    """
+    هل بقي للمنتج مرشح أمام المراجع (غير مستبعد)؟ إعادة تحقق لم تجد شيئاً تعيد الصف للمراجعة فقط عندها؛ بدونها
+    يكون صفاً فارغاً في المراجعة. خطأ القراءة يُسجل ويعيد True (السلوك السابق: يعود للمراجعة ولا يُسجل فشلاً).
+    """
+    clause, params = _row_or_sku_clause(row_number, sku_key)
+    try:
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(f"SELECT COUNT(*) AS n FROM curation_candidates WHERE {clause} "
+                           "AND COALESCE(status, '') NOT IN ('excluded', 'rejected')", params)
+            row = cursor.fetchone() or {}
+        finally:
+            _close(conn)
+        return int(row.get("n") or 0) > 0
+    except Exception as e:
+        logger.warning("[Curation] تعذر عدّ مرشحات الصف %s: %s", row_number, e)
+        return True
+
+
+def _park_rechecks(cursor):
+    """
+    صفوف إعادة تحقق لم تُسحب تعود جاهزة للمراجعة بمرشحاتها (إعادة التحقق لم تحدث، فلا تُحسب من MAX_REVERIFY).
+    صف لم يبقَ له مرشح لا يُركن (كان صفاً فارغاً في المراجعة): يبقى في الانتظار ويبحث عنه العامل. تعيد العدد.
+    """
+    cursor.execute(
+        "UPDATE automation_queue q SET q.status = 'ready_for_review', q.failure_code = 'VERIFIER_DOWN', "
+        "q.reverify_count = GREATEST(q.reverify_count - 1, 0), q.updated_at = CURRENT_TIMESTAMP "
+        f"WHERE q.status = 'pending' AND q.requeue_reason = 'VERIFIER_RECHECK' AND {_CANDIDATES_LEFT_SQL}")
+    return cursor.rowcount
+
+
 def park_verifier_rechecks():
     """
-    قارئ الملصق ما زال معطلاً في هذا التشغيل: صفوف إعادة التحقق التي لم تُسحب بعد تعود جاهزة للمراجعة
-    (مرشحاتها ما زالت محفوظة)، فلا يُدفع بحث جديد سينتهي VERIFIER_DOWN مرة أخرى. تعيد العدد أو None عند خطأ.
+    صفوف إعادة التحقق التي لم تُسحب بعد تعود جاهزة للمراجعة بمرشحاتها (_park_rechecks): قارئ الملصق ما زال معطلاً
+    في هذا التشغيل (فلا يُدفع بحث جديد سينتهي VERIFIER_DOWN مرة أخرى)، أو توقف التشغيل قبل أن يصل إليها.
+    تعيد العدد أو None عند خطأ.
     """
     try:
         conn = get_db_connection()
         try:
             cursor = conn.cursor()
-            cursor.execute(
-                "UPDATE automation_queue SET status = 'ready_for_review', failure_code = 'VERIFIER_DOWN', "
-                "reverify_count = GREATEST(reverify_count - 1, 0), updated_at = CURRENT_TIMESTAMP "
-                "WHERE status = 'pending' AND requeue_reason = 'VERIFIER_RECHECK'")
-            count = cursor.rowcount
+            count = _park_rechecks(cursor)
             conn.commit()
             return count
         finally:
@@ -2005,6 +2055,8 @@ def update_task_status_by_row(row_number, status, error_message=None, failure_co
     قرارات المراجع (اعتماد / رفض / رفع يدوي) تمر من هنا: إذا لم يبق صف جاهز للمراجعة تصبح الحالة خاملة.
     تعارض أقفال مع سحب العامل أو كتابة نتيجته (1213 / 1205) يعيد المعاملة كما في update_task_status: قرار المراجع
     لا يضيع بسبب تعارض عابر.
+    قرار المراجع يمسح task_kind و requeue_reason: صف رفضه مراجع يعود للانتظار كبحث عادي، لا ككتابة رابط معتمد
+    (relink) ولا كإعادة تحقق (VERIFIER_RECHECK) من إدراج سابق.
     """
     clause, params = _row_or_sku_clause(row_number, sku_key)
 
@@ -2015,7 +2067,7 @@ def update_task_status_by_row(row_number, status, error_message=None, failure_co
             cursor.execute(f"""
                 UPDATE automation_queue
                 SET status = %s, error_message = %s, failure_code = %s, lease_until = NULL,
-                    updated_at = CURRENT_TIMESTAMP
+                    task_kind = NULL, requeue_reason = NULL, updated_at = CURRENT_TIMESTAMP
                 WHERE {clause}
             """, (status, error_message, failure_code) + params)
             cursor.execute(_SETTLE_REVIEW_SQL)

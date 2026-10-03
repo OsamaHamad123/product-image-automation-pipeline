@@ -233,6 +233,10 @@ class QueueStats
         'PROVIDER_DOWN' => 'مصادر البحث ما كانت متاحة',
         'DOWNLOAD_FAILED' => 'ما قدرنا ننزّل الصور من مواقعها',
         'VERIFIER_DOWN' => 'نموذج قراءة الملصق ما ردّ، فالاختيار بدّه عينك',
+        // a re-verification with a working label reader found nothing better: the earlier proposals wait for review
+        'RECHECK_NOT_FOUND' => 'رجعنا فحصنا بنموذج قراءة الملصق وما لقينا صورة أحسن، فالاقتراحات القديمة بتستنى عينك',
+        // an approved image whose link could not be queued for the sheet: the next run writes it without a search
+        'SHEET_WRITE_FAILED' => 'الصورة معتمدة بس ما قدرنا نكتب رابطها بالشيت، وبتنكتب بالتشغيل الجاي',
     ];
 
     /**
