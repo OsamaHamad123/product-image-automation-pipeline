@@ -440,3 +440,86 @@ def test_a_rejection_voids_the_approval_stored_under_the_rows_key_before_its_bar
     # the relink path (the worker writing an approved link back) finds nothing to write
     assert main._servable_resolution(sku, alt, MILK["product_name"], MILK["brand"], None) is None
     assert link in db.get_rejections(alt)[0] and link in db.get_rejections(sku)[0]
+
+
+# ---------------------------------------------------------------------------
+# #4: the sheet outcome (C3) is this approval's own link write, read from the real outbox
+# ---------------------------------------------------------------------------
+
+def _set_outbox_status(db, ids, status):
+    if not ids:
+        return
+    _sql(db,f"UPDATE sheet_updates SET sync_status = %s WHERE id IN ({', '.join(['%s'] * len(ids))})",
+         (status,) + tuple(ids))
+
+
+def _row_history(db, row):
+    """The row's outbox history from earlier approvals: an old CONFLICT link write, a DEAD metadata write, and an
+    earlier link write that a newer one superseded."""
+    import google_sheets
+    queue = google_sheets.SQLiteTransactionQueue()
+    ident = {"key_barcode": GTIN, "key_name": MILK["product_name"], "key_brand": MILK["brand"]}
+    conflict = queue.append_update(row, 3, CLOUD + "old1.png", col_key="link", **ident)
+    dead = queue.append_update(row, 5, "Dairy", col_key="meta:category_l1_en", **ident)
+    superseded = queue.append_update(row, 3, CLOUD + "old2.png", col_key="link", **ident)
+    _set_outbox_status(db, [conflict], "CONFLICT")
+    _set_outbox_status(db, [dead], "DEAD")
+    _set_outbox_status(db, [superseded], "SUPERSEDED")
+
+
+@pytest.fixture
+def final_flush(db, outbox, monkeypatch):
+    """stop_async_queue stands for the final flush: every pending write of the test rows is written, after
+    `before` (a write that lands in the same flush) has run."""
+    import google_sheets
+    cli_bridge, env = outbox
+    hooks = {"before": None}
+
+    def flush(*a, **k):
+        if hooks["before"]:
+            hooks["before"]()
+        marks = ", ".join(["%s"] * len(ROWS))
+        pending = [r["id"] for r in _sql(db, f"SELECT id FROM sheet_updates WHERE sync_status = 'PENDING' "
+                                             f"AND `row_number` IN ({marks}) ORDER BY id", ROWS)]
+        if pending:
+            _set_outbox_status(db, pending[:-1], "SUPERSEDED")       # one cell: the newest write wins
+            _set_outbox_status(db, pending[-1:], "SYNCED")
+
+    monkeypatch.setattr(google_sheets, "stop_async_queue", flush)
+    return cli_bridge, env, hooks
+
+
+def test_the_rows_old_outbox_history_does_not_change_this_approvals_outcome(db, final_flush):
+    cli_bridge, env, hooks = final_flush
+    row = ROWS[0]
+    sku = _queue(db, row, MILK, GTIN)
+    _row_history(db, row)
+    result = cli_bridge.action_select_image(_approve_params(row, MILK, "https://x/a.jpg", sku, GTIN))
+    assert result["status"] == "success" and result["sheet"] == "written"
+
+
+def test_this_approvals_write_superseded_in_the_same_flush_is_not_reported_written(db, final_flush):
+    import google_sheets
+    cli_bridge, env, hooks = final_flush
+    row = ROWS[0]
+    sku = _queue(db, row, MILK, GTIN)
+    _row_history(db, row)
+    # another approval's write of the same cell lands after this one, in the same flush: the sheet holds the other
+    hooks["before"] = lambda: google_sheets.SQLiteTransactionQueue().append_update(
+        row, 3, CLOUD + "other.png", col_key="link", key_barcode=GTIN, key_name=MILK["product_name"],
+        key_brand=MILK["brand"])
+    result = cli_bridge.action_select_image(_approve_params(row, MILK, "https://x/a.jpg", sku, GTIN))
+    assert result["status"] == "success" and result["sheet"] == "conflict"
+
+
+def test_an_approval_whose_write_is_not_in_the_outbox_is_not_judged_by_the_rows_history(db, final_flush,
+                                                                                       monkeypatch):
+    import google_sheets
+    cli_bridge, env, hooks = final_flush
+    row = ROWS[0]
+    sku = _queue(db, row, MILK, GTIN)
+    _row_history(db, row)
+    # the link went another way (the Redis write-behind channel): this request has no outbox record yet
+    monkeypatch.setattr(google_sheets, "update_image_link", lambda *a, **k: True)
+    result = cli_bridge.action_select_image(_approve_params(row, MILK, "https://x/a.jpg", sku, GTIN))
+    assert result["status"] == "success" and result["sheet"] == "unknown"

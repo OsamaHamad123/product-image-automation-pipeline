@@ -91,6 +91,8 @@ def sheet(monkeypatch, tmp_path):
     monkeypatch.setattr(main, "publish_image", fake_publish)
     monkeypatch.setattr(google_sheets, "init_async_queue", lambda *a, **k: None)
     monkeypatch.setattr(google_sheets, "stop_async_queue", lambda *a, **k: None)
+    # the sheet outcome (C3) is not what these tests read: an empty outbox, not an offline database error
+    monkeypatch.setattr(google_sheets, "outbox_outcomes", lambda *a, **k: {}, raising=False)
     monkeypatch.setattr(google_sheets, "get_sheets_client", lambda: object())
     monkeypatch.setattr(google_sheets, "get_brand_mappings", lambda *a, **k: {})
     monkeypatch.setattr(google_sheets, "open_worksheet", lambda client, name: ws)

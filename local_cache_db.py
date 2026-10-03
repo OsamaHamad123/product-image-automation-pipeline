@@ -2428,6 +2428,24 @@ def catalog_brand_news(tokens):
     return out
 
 
+def outbox_max_id():
+    """
+    أكبر معرّف في طابور كتابة الشيت (sheet_updates) الآن: ما يُجدول بعده هو كتابات هذا الطلب (cli_bridge._sheet_outcome
+    يقرأ ما بعده فقط). None عند الخطأ أو غياب الجدول.
+    """
+    try:
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT COALESCE(MAX(id), 0) AS top FROM sheet_updates")
+            return int((cursor.fetchone() or {}).get("top") or 0)
+        finally:
+            _close(conn)
+    except Exception as e:
+        logger.warning("[Sheets Outbox] تعذر قراءة آخر معرّف في طابور الكتابة: %s", e)
+        return None
+
+
 def outbox_link_writes(row_numbers):
     """
     كتابات طابور الشيت (sheet_updates) لهذه الصفوف بالترتيب: [{id, row_number, value, sync_status}].

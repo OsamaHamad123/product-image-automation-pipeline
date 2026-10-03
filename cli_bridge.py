@@ -747,10 +747,12 @@ _SHEET_OUTCOMES = {"written": "written", "synced": "written", "pending": "pendin
                    "superseded": "conflict"}
 
 
-def _latest_link_writes(values):
+def _own_link_writes(values, rows=None, since_id=None, value=None):
     """
-    سجلات طابور الكتابة (google_sheets.outbox_outcomes: {id, row, column_key, status ...}): آخر كتابة للرابط في كل صف
-    فقط، وهي كتابة هذا الاعتماد؛ كتابات قديمة لنفس الصف (تعارض أو فشل قبل أسابيع) وكتابات البيانات الوصفية لا تُحسب.
+    سجلات طابور الكتابة (google_sheets.outbox_outcomes: {id, row, queued_row, column_key, status, value ...}): كتابة
+    الرابط التي جدولها هذا الطلب في كل صف، الأحدث فقط. since_id: آخر معرّف في الطابور قبل الجدولة (ما بعده فقط)؛
+    value: القيمة التي كتبها الطلب. كتابات قديمة لنفس الصف (تعارض أو فشل قبل أسابيع، أو كتابة أُلغيت)، وكتابات
+    البيانات الوصفية، وكتابة طلب آخر للخلية نفسها لا تُحسب. صف بلا كتابة من هذا الطلب (مع since_id) = unknown.
     """
     records = [v for v in values if isinstance(v, dict) and "id" in v and ("row" in v or "row_number" in v)]
     if not records or len(records) != len(values):
@@ -759,24 +761,39 @@ def _latest_link_writes(values):
     for rec in records:
         if rec.get("column_key") not in (None, "", "link"):
             continue
-        row = rec.get("row", rec.get("row_number"))
+        if since_id is not None and int(rec.get("id") or 0) <= int(since_id):
+            continue
+        if value is not None and "value" in rec and str(rec.get("value") or "") != str(value):
+            continue
+        row = rec.get("queued_row") or rec.get("row", rec.get("row_number"))
+        if since_id is not None and rows and row not in rows:
+            continue
         if row not in latest or (rec.get("id") or 0) > (latest[row].get("id") or 0):
             latest[row] = rec
-    return list(latest.values())
+    out = list(latest.values())
+    if since_id is not None:
+        out += ["unknown" for row in (rows or []) if row not in latest]
+    return out
 
 
-def _sheet_outcome(rows):
+def _sheet_outcome(rows, since_id=None, value=None):
     """
     ما حدث لكتابة الرابط في الشيت بعد التفريغ الأخير لطابور الكتابة (عقد C3):
     written (كُتب في كل الصفوف) | pending (ما زال في الطابور، يُعاد لاحقاً) | conflict (رُفض: هوية الصف تغيّرت،
-    أو فشل نهائياً) | unknown. المصدر google_sheets.outbox_outcomes(rows) إن وُجدت (حزمة الشيت: حالة كل صف)،
-    وإلا unknown. أسوأ حالة بين الصفوف هي النتيجة.
+    أو فشل نهائياً، أو كتابة أحدث لنفس الخلية سبقتها) | unknown. المصدر google_sheets.outbox_outcomes إن وُجدت (حزمة
+    الشيت)، وإلا unknown. since_id / value: كتابات هذا الطلب فقط (_own_link_writes). أسوأ حالة بين الصفوف هي النتيجة.
     """
     outcomes = getattr(google_sheets, "outbox_outcomes", None)
     if not callable(outcomes) or not rows:
         return "unknown"
     try:
-        result = outcomes(list(rows))
+        if since_id is None:
+            result = outcomes(list(rows))
+        else:
+            try:
+                result = outcomes(list(rows), since_id=since_id)
+            except TypeError:
+                result = outcomes(list(rows))
     except Exception:
         logger.exception("تعذر قراءة نتيجة الكتابة في الشيت للصفوف %s", rows)
         return "unknown"
@@ -786,12 +803,12 @@ def _sheet_outcome(rows):
         values = list(result)
     else:
         values = [result]
-    values = _latest_link_writes(values)
+    values = _own_link_writes(values, [int(r) for r in rows], since_id, value)
     codes = set()
-    for value in values:
-        if isinstance(value, dict):
-            value = value.get("outcome") or value.get("status") or value.get("sync_status")
-        codes.add(_SHEET_OUTCOMES.get(str(value or "").strip().lower(), "unknown"))
+    for item in values:
+        if isinstance(item, dict):
+            item = item.get("outcome") or item.get("status") or item.get("sync_status")
+        codes.add(_SHEET_OUTCOMES.get(str(item or "").strip().lower(), "unknown"))
     if not codes:
         return "unknown"
     for code in ("conflict", "pending", "unknown"):
@@ -848,6 +865,7 @@ def action_select_image(params):
     try:
         google_sheets.init_async_queue(config.CREDENTIALS_FILE, config.SPREADSHEET_NAME_OR_URL)
         queue_started = True
+        outbox_since = local_cache_db.outbox_max_id()      # ما يُجدول بعده هو كتابات هذا الاعتماد (C3)
         worksheet = _open_sheet()
         link_column_index = google_sheets.find_link_column(worksheet)
         # ملف المعالجة الواحد (processing_profile) من صفحة الإعدادات، نفسه للنشر التلقائي والرفع اليدوي؛
@@ -876,7 +894,7 @@ def action_select_image(params):
     finally:
         if queue_started:
             google_sheets.stop_async_queue()     # التفريغ الأخير لطابور الكتابة
-    response['sheet'] = _sheet_outcome(response['rows_written'])
+    response['sheet'] = _sheet_outcome(response['rows_written'], outbox_since, response['sheet_value'])
     response['current'] = _current_state(sku_key, row_number, product_name)[0]   # expected_state للطلب التالي
     return response
 
@@ -913,6 +931,7 @@ def action_upload_manual_image(params):
     try:
         google_sheets.init_async_queue(config.CREDENTIALS_FILE, config.SPREADSHEET_NAME_OR_URL)
         queue_started = True
+        outbox_since = local_cache_db.outbox_max_id()      # ما يُجدول بعده هو كتابات هذا الرفع (C3)
         worksheet = _open_sheet()
         link_column_index = google_sheets.find_link_column(worksheet)
         res = pipeline.publish_image(
@@ -942,7 +961,7 @@ def action_upload_manual_image(params):
     finally:
         if queue_started:
             google_sheets.stop_async_queue()     # التفريغ الأخير لطابور الكتابة
-    response['sheet'] = _sheet_outcome(response['rows_written'])
+    response['sheet'] = _sheet_outcome(response['rows_written'], outbox_since, response['sheet_value'])
     response['current'] = _current_state(sku_key, row_number, product_name)[0]   # expected_state للطلب التالي
     return response
 
