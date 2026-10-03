@@ -101,8 +101,10 @@ def test_exit_codes_mean_what_they_say(reason, outcome, code):
     import run_report
 
     assert (run_report.outcome_of(reason), run_report.exit_code(reason)) == (outcome, code)
-    if reason in ("BUDGET_REACHED", "something_new"):
-        assert run_report.reason_text(reason) == reason
+    if reason == "something_new":
+        assert run_report.reason_text(reason) == reason          # an unknown reason is shown as the worker wrote it
+    if reason in ("BUDGET_REACHED", "SERPER_CREDIT"):
+        assert run_report.reason_text(reason) != reason          # the queue package's stops have an Arabic text
 
 
 # ---------------------------------------------------------------------------
@@ -251,15 +253,18 @@ def test_spend_prefers_a_ledger_and_outbox_counts_are_optional():
             return {"usd": 0.25} if run_id == "r1" else 0.5
 
     class Sheets:
+        since = []
+
         @staticmethod
-        def outbox_outcomes():
+        def outbox_summary(since_ts):
+            Sheets.since.append(since_ts)          # only this run's writes, not every night's
             return {"PENDING": 3, "conflict": 1, "dead": 0, "other": "x"}
 
     report = run_report.build_report("nightly", [{"run_id": "r1"}, {"run_id": "r2", "stop_reason": None}],
                                      1, 2, health={"windows": {"7d": {"cost_usd": {"total": 9.0}}}},
                                      db=Ledger(COUNTS), sheets=Sheets)
     assert report["spend"] == {"usd": 0.75, "source": "ledger"}
-    assert report["outbox"] == {"pending": 3, "conflict": 1, "dead": 0}
+    assert report["outbox"] == {"pending": 3, "conflict": 1, "dead": 0} and Sheets.since == [1]
     no_ledger = run_report.build_report("nightly", [{"run_id": "r1"}], 1, 2,
                                         health={"windows": {"7d": {"cost_usd": {"total": 9.0}}}},
                                         db=FakeDb(COUNTS), sheets=object())
@@ -484,3 +489,49 @@ def test_the_health_page_shows_the_run_history_cost():
     assert result.returncode == 0, result.stderr
     cost = json.loads(result.stdout.strip().splitlines()[-1])
     assert "حسب سجل التشغيلات" in cost["note"] and "تشغيلين" in cost["note"]
+
+
+def test_the_real_ledger_and_outbox_give_this_runs_spend_and_unwritten_writes(mariadb_or_skip):
+    """local_cache_db.run_spend (P4a's ledger) and google_sheets.outbox_summary (P1's outbox) as run_report reads them."""
+    import time
+
+    import google_sheets
+    import run_report
+
+    db = mariadb_or_skip
+    conn = db.get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM search_spend WHERE run_id IN ('rr-ledger-1', 'rr-ledger-2')")
+            cur.execute("INSERT INTO search_spend (day, run_id, provider, calls, usd) VALUES "
+                        "(CURDATE(), 'rr-ledger-1', 'serper', 4, 0.004), (CURDATE(), 'rr-ledger-1', 'gemini', 2, 0.02)")
+        conn.commit()
+    finally:
+        conn.close()
+    assert abs(db.run_spend("rr-ledger-1") - 0.024) < 1e-9
+    assert db.run_spend("rr-ledger-2") is None and db.run_spend("") is None
+    assert run_report.ledger_spend(["rr-ledger-1", "rr-ledger-2"], db) == 0.024
+
+    google_sheets._queue = None
+    google_sheets.SQLiteTransactionQueue()          # creates / migrates sheet_updates in the test database
+    conn = db.get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM sheet_updates WHERE `row_number` BETWEEN 990001 AND 990010")
+            rows = [(990001, "PENDING", 0), (990002, "FAILED", 0), (990003, "CONFLICT", 0), (990004, "DEAD", 0),
+                    (990005, "SYNCED", 0), (990006, "DEAD", 2 * 86400)]           # the last one is from 2 days ago
+            for row, status, age in rows:
+                cur.execute("INSERT INTO sheet_updates (`row_number`, `col_index`, `value`, sync_status, registered_at) "
+                            "VALUES (%s, 0, 'x', %s, FROM_UNIXTIME(%s))", (row, status, int(time.time()) - age))
+        conn.commit()
+        since = int(time.time()) - 3600
+        summary = google_sheets.outbox_summary(since)
+        mine = {k: v for k, v in summary.items()}
+        assert mine["dead"] >= 1 and mine["pending"] >= 2 and mine["conflict"] >= 1 and mine["written"] >= 1
+        older = google_sheets.outbox_summary(None)
+        assert older["dead"] >= mine["dead"] + 1              # the old DEAD write is not this run's
+    finally:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM sheet_updates WHERE `row_number` BETWEEN 990001 AND 990010")
+        conn.commit()
+        conn.close()

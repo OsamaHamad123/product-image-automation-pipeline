@@ -50,6 +50,8 @@ REASON_TEXT = {
     "worker_error": "خطأ غير متوقع في العامل",
     "stopped": "أُوقف من لوحة التحكم",
     "another_worker": "تشغيل آخر يعمل الآن",
+    "budget_reached": "بلغ صرف اليوم الميزانية اليومية (DAILY_BUDGET_USD)",
+    "serper_credit": "رصيد Serper انتهى أو مفتاحه مرفوض",
 }
 OUTCOME_TEXT = {
     "done": "✅ اكتمل",
@@ -145,14 +147,14 @@ def worker_health(worker_id, since_seconds):
         return None
 
 
-def outbox_counts(sheets=None):
-    """{pending, conflict, dead} من google_sheets.outbox_outcomes() إن وُجدت، أو None."""
+def outbox_counts(sheets=None, since_ts=None):
+    """{pending, conflict, dead} لكتابات الشيت منذ بداية التشغيل (google_sheets.outbox_summary)، أو None."""
     if sheets is None:
         import google_sheets as sheets
-    fn = getattr(sheets, "outbox_outcomes", None)
+    fn = getattr(sheets, "outbox_summary", None)
     if not callable(fn):
         return None
-    data = fn()
+    data = fn(since_ts)
     if not isinstance(data, dict):
         return None
     lowered = {str(k).lower(): v for k, v in data.items()}
@@ -218,7 +220,7 @@ def build_report(trigger, attempts, started_ts, ended_ts, health=None, db=None, 
         if not db.db_available():
             report["database"] = "unavailable"
     try:
-        report["outbox"] = outbox_counts(sheets)
+        report["outbox"] = outbox_counts(sheets, started_ts)
     except Exception as e:
         logger.warning("run_report: outbox unreadable: %s", e)
     try:

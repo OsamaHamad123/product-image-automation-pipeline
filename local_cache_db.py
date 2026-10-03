@@ -2211,6 +2211,21 @@ def spend_today():
     return float(row.get("usd") or 0.0)
 
 
+def run_spend(run_id):
+    """تكلفة تشغيل واحد من سجل الصرف (دولار)، أو None إن لم يُسجل له شيء. أخطاء قاعدة البيانات تُرفع."""
+    if not run_id:
+        return None
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) AS n, COALESCE(SUM(usd), 0) AS usd FROM search_spend WHERE run_id = %s",
+                       (str(run_id)[:64],))
+        row = cursor.fetchone() or {}
+    finally:
+        _close(conn)
+    return float(row.get("usd") or 0.0) if int(row.get("n") or 0) else None
+
+
 def spend_by_day(days=7):
     """[{day, provider, calls, usd}] لآخر days يوماً (قراءة فقط؛ أخطاء قاعدة البيانات تُرفع)."""
     conn = get_db_connection()

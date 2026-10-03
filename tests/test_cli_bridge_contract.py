@@ -620,6 +620,24 @@ def test_the_sheet_outcome_follows_the_final_flush(select_env, monkeypatch, answ
     assert ("outcomes", [4, 9]) in events
 
 
+def test_the_sheet_outcome_reads_only_this_approvals_link_write_in_the_outbox_records(select_env, monkeypatch):
+    # google_sheets.outbox_outcomes returns every queued write of the rows: an old CONFLICT of row 4 from an earlier
+    # approval, and metadata writes, must not make this approval's (SYNCED) write look failed
+    import google_sheets
+    import local_cache_db
+    bridge, events, state = select_env
+    monkeypatch.setattr(local_cache_db, "get_tasks_by_sku", lambda key: [])
+    records = [
+        {"id": 3, "row": 4, "queued_row": 4, "column_key": "link", "status": "CONFLICT"},     # weeks ago
+        {"id": 40, "row": 4, "queued_row": 4, "column_key": "meta:category_l1_en", "status": "DEAD"},
+        {"id": 41, "row": 4, "queued_row": 4, "column_key": "link", "status": "SYNCED"},      # this approval
+    ]
+    monkeypatch.setattr(google_sheets, "outbox_outcomes", lambda rows: list(records), raising=False)
+    assert bridge.action_select_image(dict(SELECT_PARAMS))["sheet"] == "written"
+    records.append({"id": 42, "row": 4, "queued_row": 4, "column_key": "link", "status": "SUPERSEDED"})
+    assert bridge.action_select_image(dict(SELECT_PARAMS, replace=True))["sheet"] == "conflict"
+
+
 def test_the_sheet_outcome_is_unknown_without_the_outbox_api(select_env, monkeypatch, tmp_path):
     import google_sheets
     bridge, events, state = select_env

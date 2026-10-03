@@ -682,7 +682,27 @@ def _other_rows(sku_key, row_number):
 
 # حالات google_sheets.outbox_outcomes (أو sync_status في طابور الكتابة) كما تعيدها الاستجابة (عقد C3)
 _SHEET_OUTCOMES = {"written": "written", "synced": "written", "pending": "pending", "failed": "pending",
-                   "conflict": "conflict", "dead": "conflict", "skipped_out_of_bounds": "conflict"}
+                   "conflict": "conflict", "dead": "conflict", "skipped_out_of_bounds": "conflict",
+                   # كتابة أحدث لنفس الخلية سبقتها: صورة هذا الاعتماد ليست ما في الشيت
+                   "superseded": "conflict"}
+
+
+def _latest_link_writes(values):
+    """
+    سجلات طابور الكتابة (google_sheets.outbox_outcomes: {id, row, column_key, status ...}): آخر كتابة للرابط في كل صف
+    فقط، وهي كتابة هذا الاعتماد؛ كتابات قديمة لنفس الصف (تعارض أو فشل قبل أسابيع) وكتابات البيانات الوصفية لا تُحسب.
+    """
+    records = [v for v in values if isinstance(v, dict) and "id" in v and ("row" in v or "row_number" in v)]
+    if not records or len(records) != len(values):
+        return values
+    latest = {}
+    for rec in records:
+        if rec.get("column_key") not in (None, "", "link"):
+            continue
+        row = rec.get("row", rec.get("row_number"))
+        if row not in latest or (rec.get("id") or 0) > (latest[row].get("id") or 0):
+            latest[row] = rec
+    return list(latest.values())
 
 
 def _sheet_outcome(rows):
@@ -706,6 +726,7 @@ def _sheet_outcome(rows):
         values = list(result)
     else:
         values = [result]
+    values = _latest_link_writes(values)
     codes = set()
     for value in values:
         if isinstance(value, dict):

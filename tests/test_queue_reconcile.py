@@ -220,6 +220,8 @@ def test_a_review_only_row_is_never_auto_published(offline, monkeypatch):
     monkeypatch.setattr(local_cache_db, "get_rejections", lambda sku: ([], []))
     monkeypatch.setattr(local_cache_db, "save_curation_candidates", lambda *a, **k: True)
     monkeypatch.setattr(main, "auto_approve_product", lambda *a, **k: auto.append(a) or "published")
+    # offline: an unreadable approval cache fails closed (no auto-publish at all), so the cache answers "no approval"
+    monkeypatch.setattr(main, "_has_human_approval", lambda *a, **k: False)
 
     def search(query, name, brand, trace=None, **kw):
         trace["outcome"] = {"decision": "AUTO_PUBLISH"}
@@ -473,3 +475,30 @@ def test_worker_parks_or_requeues_rechecks_by_the_reader_state(offline, monkeypa
 def test_payload_json_keeps_unicode(db):
     db.add_to_queue(ROW, "", "P4Q لبن", "P4Q Brand", "q", payload={"name_ar": "لبن"}, sku_key="p4q-u")
     assert json.loads(_queue_row(db, 0)["payload_json"]) == {"name_ar": "لبن"}
+
+
+def test_the_reconcile_reads_the_real_outbox_records(mariadb_or_skip):
+    """main._outbox_records over google_sheets.outbox_outcomes as the sheets package returns it ({row, column_key,
+    status, value}): the link writes of the row, never its metadata writes."""
+    import google_sheets
+    import main
+
+    db = mariadb_or_skip
+    google_sheets._queue = None
+    google_sheets.SQLiteTransactionQueue()
+    conn = db.get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM sheet_updates WHERE `row_number` = 990077")
+            cur.execute("INSERT INTO sheet_updates (`row_number`, `col_index`, `value`, sync_status, col_key) VALUES "
+                        "(990077, 0, 'https://res.cloudinary.com/x/a.jpg', 'DEAD', 'link'), "
+                        "(990077, 0, 'Dairy', 'SYNCED', 'meta:category_l1_en')")
+        conn.commit()
+        records = main._outbox_records([990077])
+        assert [r["status"] for r in records[990077]] == ["DEAD"]
+        assert main._link_write_state(records[990077], "https://res.cloudinary.com/x/a.jpg") == "DEAD"
+    finally:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM sheet_updates WHERE `row_number` = 990077")
+        conn.commit()
+        conn.close()

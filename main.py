@@ -997,8 +997,11 @@ def _outbox_records(row_numbers):
         items = [dict(r) for r in raw if isinstance(r, dict)]
     out = {}
     for i, rec in enumerate(items):
+        if rec.get("column_key") not in (None, "", "link"):
+            continue                            # كتابات البيانات الوصفية (meta:*) ليست الرابط
         try:
-            row = int(rec.get("row_number"))
+            # google_sheets.outbox_outcomes يسمي الصف row (الصف الحالي بعد أي نقل)؛ قراءة الجدول مباشرة row_number
+            row = int(rec.get("row_number", rec.get("row")))
         except (TypeError, ValueError):
             continue
         status = str(rec.get("sync_status") or rec.get("status") or rec.get("outcome") or "").strip().upper()

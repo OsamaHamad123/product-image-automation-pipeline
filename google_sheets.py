@@ -834,6 +834,35 @@ def outbox_outcomes(row_numbers=None, since_id=None, limit=500):
              "value": r.get("value")} for r in found]
 
 
+def outbox_summary(since_ts=None):
+    """
+    عدد الكتابات المجدولة حسب نتيجتها منذ since_ts (ثوانٍ unix؛ دونه كل ما في الطابور):
+    {pending (PENDING و FAILED التي تنتظر إعادة المحاولة), conflict (CONFLICT و SKIPPED_OUT_OF_BOUNDS), dead, written}.
+    لتقرير التشغيل (run_report): ما لم يُكتب من هذا التشغيل، لا تراكم الليالي السابقة.
+    """
+    sql = "SELECT sync_status, COUNT(*) AS n FROM sheet_updates"
+    params = ()
+    if since_ts is not None:
+        sql += " WHERE registered_at >= FROM_UNIXTIME(%s)"
+        params = (int(since_ts),)
+    sql += " GROUP BY sync_status"
+    conn = (_queue._connect if _queue is not None else _db_connect)()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(sql, params)
+        found = cursor.fetchall()
+    finally:
+        conn.close()
+    out = {"pending": 0, "conflict": 0, "dead": 0, "written": 0}
+    bucket = {"PENDING": "pending", "FAILED": "pending", "CONFLICT": "conflict",
+              "SKIPPED_OUT_OF_BOUNDS": "conflict", "DEAD": "dead", "SYNCED": "written"}
+    for r in found:
+        key = bucket.get(str(r.get("sync_status") or "").upper())
+        if key:
+            out[key] += int(r.get("n") or 0)
+    return out
+
+
 class GoogleSheetsBatchWorker(threading.Thread):
     def __init__(self, queue, credentials_json_path, spreadsheet_name_or_url, sync_interval=5):
         super().__init__()
