@@ -340,7 +340,7 @@ def test_a_logging_failure_does_not_change_the_rejection(recorder, monkeypatch, 
     with caplog.at_level(logging.ERROR, logger="cli_bridge"):
         result = cli_bridge.action_reject_image(_reject_params())
     assert result == expected
-    assert {"supersede_resolution", "exclude_curation_candidate", "update_task_status_by_row"} <= set(_names(events))
+    assert {"exclude_curation_candidate", "update_task_status_by_row"} <= set(_names(events))
     assert any(r.exc_info for r in caplog.records if r.name == "cli_bridge")
 
 

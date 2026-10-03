@@ -320,7 +320,21 @@ def test_rejecting_the_pick_with_nothing_eligible_left_requeues(review):
     result = _reject(cli_bridge, PICK)
     (args, kwargs), = calls["status"]
     assert args[:2] == (14, "pending") and kwargs["failure_code"] == "REJECTED"
-    assert result["queue_status"] == "pending" and len(calls["supersede_resolution"]) == 1
+    assert result["queue_status"] == "pending"
+    assert calls["supersede_resolution"] == []          # nothing was approved or published: nothing to void
+
+
+def test_rejecting_a_new_pick_never_voids_another_approved_image(review):
+    """An auto-published image stays approved when the reviewer rejects another image (a research pick)."""
+    cli_bridge, google_sheets, calls = review
+    calls["approved"] = {"cloudinary_url": "https://res.cloudinary.com/demo/auto.png", "original_url": PICK,
+                         "verification_status": "auto_verified"}
+    calls["stored"] = _stored((ALT, "preselected"))
+    result = _reject(cli_bridge, ALT)
+    assert calls["supersede_resolution"] == [] and result["superseded"] == 0
+    # rejecting the auto-published image itself voids it
+    _reject(cli_bridge, PICK)
+    assert len(calls["supersede_resolution"]) == 1
 
 
 def test_rejecting_the_last_eligible_candidate_requeues(review):

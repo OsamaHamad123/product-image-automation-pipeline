@@ -1044,7 +1044,8 @@ def action_reject_image(params):
         # منشوراً ويُلغى
         was_pick, keep_approval = True, False
     superseded = 0
-    if targets_approval or (was_pick and not keep_approval):
+    if targets_approval or sheet_cleared:
+        # الحل المعتمد (أو المنشور في الخلية) هو المرفوض؛ اعتماد صورة أخرى لا يُلغى برفض غيرها
         superseded = local_cache_db.supersede_resolution(sku_key, barcode=barcode or None)
 
     response = None
