@@ -306,17 +306,23 @@ def test_enqueue_payload_and_final_links(offline, monkeypatch):
     monkeypatch.setattr(google_sheets, "get_products", lambda ws: (products, 9))
     monkeypatch.setattr(google_sheets, "get_brand_mappings", lambda *a: {})
     monkeypatch.setattr(local_cache_db, "clear_queue", lambda: pytest.fail("enqueue must not clear the queue"))
-    monkeypatch.setattr(local_cache_db, "add_to_queue", lambda *a, **k: added.append((a, k)))
+    monkeypatch.setattr(local_cache_db, "add_to_queue", lambda *a, **k: pytest.fail("enqueue writes in batches"))
+    monkeypatch.setattr(local_cache_db, "add_many_to_queue",
+                        lambda rows, reprocess=False, totals=None: added.append((list(rows), reprocess)) or totals)
+    monkeypatch.setattr(local_cache_db, "resolution_snapshot", lambda: {"by_key": {}, "by_url": {}})
+    monkeypatch.setattr(local_cache_db, "queue_snapshot", lambda: {})
     monkeypatch.setattr(local_cache_db, "get_queue_statistics", lambda: {})
 
     main.run_enqueue_mode()
 
-    (args, kwargs), = added                 # row 3 has a final link and is skipped
-    assert args[0] == 2
-    assert kwargs["payload"] == {"name_ar": "لبن أب فراولة", "brand_ar": "الروابي", "category": "Dairy",
-                                 "sub_category": "Laban", "origin": "UAE", "size": "180ml"}
-    assert kwargs["sku_key"] and len(kwargs["sku_key"]) == 16
-    assert kwargs["reprocess"] is False
+    ((row,), reprocess), = added            # row 3 has a final link and is skipped
+    assert row["row_number"] == 2
+    assert json.loads(row["payload_json"]) == {"name_ar": "لبن أب فراولة", "brand_ar": "الروابي", "category": "Dairy",
+                                               "sub_category": "Laban", "origin": "UAE", "size": "180ml"}
+    assert row["sku_key"] and len(row["sku_key"]) == 16
+    assert row["alt_sku_key"] == row["sku_key"]          # no valid barcode: the fingerprint is the key
+    assert row["task_kind"] is None and row["review_only"] == 0
+    assert reprocess is False
 
 
 def test_auto_publish_never_overwrites_a_human_approval(wiring, monkeypatch):

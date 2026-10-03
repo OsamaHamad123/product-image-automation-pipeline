@@ -186,6 +186,39 @@ def compute_sku_key(row, brand_mappings=None):
     return build_sku_spec(row, brand_mappings).sku_key
 
 
+def _is_gtin_key(sku_key):
+    key = str(sku_key or "")
+    return len(key) == 14 and key.isdigit()
+
+
+def compute_alt_sku_key(row, spec=None):
+    """
+    المفتاح البديل للمنتج: بصمة البراند|الاسم|الحجم بدون الباركود (make_sku_key بلا GTIN). لصف بلا باركود صالح
+    يساوي sku_key نفسه؛ ولصف أُضيف له باركود صالح لاحقاً يساوي مفتاحه القديم، فتبقى الاعتمادات والرفض المحفوظة
+    بالمفتاح القديم سارية. لا يغيّر أي sku_key محفوظ.
+    """
+    from catalog_match.identity import build_sku_spec, make_sku_key
+    from catalog_match.text_norm import match_key
+    spec = spec if spec is not None else build_sku_spec(row, None)
+    if not spec.gtin:
+        return spec.sku_key
+    brand = next((str(row.get(k)) for k in ("brand", "brand_en", "brand_ar") if str(row.get(k) or "").strip()), "")
+    return make_sku_key(None, match_key(brand).replace(" ", ""), spec.raw_name, spec.size)
+
+
+def brand_fingerprint(spec):
+    """
+    بصمة مدخل البراند في Brands Mapping كما يراه البحث (الاسم المعتمد، المرادفات، المنافسون، المواقع الرسمية،
+    العلامات الفرعية). None لبراند بلا مدخل: فشل تحميل الورقة لا يبدو «تغييراً» يعيد البحث عن كل منتجاته.
+    """
+    import hashlib
+    if getattr(spec, "brand_conf", "") != "mapped":
+        return None
+    parts = [spec.brand_canonical or ""] + ["|".join(sorted(v or ())) for v in (
+        spec.match_brands, spec.competitors, spec.official_domains, spec.required_brands, spec.sibling_brands)]
+    return hashlib.sha1("\n".join(parts).encode("utf-8")).hexdigest()[:16]
+
+
 def default_query(name, brand):
     return f"{name or ''} {brand or ''}".strip()
 
@@ -240,11 +273,34 @@ def _is_provider_down(best, trace):
     return best is None and "PROVIDER_DOWN" in (outcome.get("failure_code"), outcome.get("decision"))
 
 
+def serper_credit_refused(trace):
+    """
+    قاعدة SERPER_CREDIT في ops_health لبحث واحد: True عندما لم يُجب Serper عن أي استعلام ورفض واحداً على الأقل
+    بسبب الرصيد أو المفتاح (quota، أو http 401/403)؛ False عندما أجاب؛ None عندما لم يُستدعَ Serper أصلاً.
+    """
+    import ops_health
+    calls = []
+    for item in _outcome(trace).get("provider_health") or []:
+        if isinstance(item, dict) and str(item.get("provider") or "").strip().lower() == "serper":
+            try:
+                http = int(item.get("http_status"))
+            except (TypeError, ValueError):
+                http = None
+            calls.append((str(item.get("status") or "").strip().lower(), http))
+    if not calls:
+        return None
+    if any(status in ops_health.ANSWERED_STATUSES for status, _ in calls):
+        return False
+    return any(status == "quota" or (status == "error" and http in ops_health.KEY_REJECTED_HTTP)
+               for status, http in calls)
+
+
 def search_with_retry(query, name, brand, search_kwargs, sleep=time.sleep,
-                      max_attempts=MAX_SEARCH_ATTEMPTS, base_delay=RETRY_BASE_DELAY):
+                      max_attempts=MAX_SEARCH_ATTEMPTS, base_delay=RETRY_BASE_DELAY, on_attempt=None):
     """
     البحث مع إعادة المحاولة فقط عند PROVIDER_DOWN أو استثناء (بحد أقصى 3 مع ارتداد).
     كل محاولة تحصل على trace جديد. تعيد (best, trace, state, error) حيث state: ok | provider_down | error.
+    on_attempt(trace): يُستدعى بعد كل محاولة (سجل الصرف اليومي يحسب كل محاولة، لا الأخيرة فقط)؛ خطؤه لا يوقف البحث.
     """
     delay = base_delay
     trace, state, error = {}, "ok", None
@@ -253,13 +309,22 @@ def search_with_retry(query, name, brand, search_kwargs, sleep=time.sleep,
         try:
             best = image_search.search_best_product_image(query, name, brand, trace=trace, **search_kwargs)
         except Exception as ex:
+            best = None
             state, error = "error", f"{type(ex).__name__}: {ex}"
             print(f"[Attempt {attempt}/{max_attempts}] فشل البحث للمنتج [{name}]: {error}")
         else:
             if not _is_provider_down(best, trace):
-                return best, trace, "ok", None
-            state, error = "provider_down", "all search providers unavailable"
-            print(f"[Attempt {attempt}/{max_attempts}] محركات البحث غير متاحة للمنتج [{name}].")
+                state, error = "ok", None
+            else:
+                state, error = "provider_down", "all search providers unavailable"
+                print(f"[Attempt {attempt}/{max_attempts}] محركات البحث غير متاحة للمنتج [{name}].")
+        if on_attempt is not None:
+            try:
+                on_attempt(trace)
+            except Exception as e:
+                print(f"تنبيه: تعذر تسجيل صرف البحث: {e}")
+        if state == "ok":
+            return best, trace, "ok", None
         if attempt < max_attempts:
             sleep(delay)
             delay *= 2
@@ -474,39 +539,172 @@ def _warn_duplicate(best_image):
                 reasons.append(DUPLICATE_WARNING)
 
 
-def _has_human_approval(sku_key):
-    """هل للـ SKU حل معتمد بشرياً في الكاش؟ (خطأ القراءة يُعامل كنعم: الأمان أولاً، فلا نشر تلقائي)."""
-    if not sku_key:
-        return False
-    try:
-        cached = local_cache_db.get_cached_product(sku_key=sku_key, strict=True)
-    except Exception:
-        return True
-    return bool(cached) and cached.get("verification_status") == "human_approved"
+def _has_human_approval(sku_key, alt_key=None):
+    """
+    هل للـ SKU حل معتمد بشرياً في الكاش؟ (خطأ القراءة يُعامل كنعم: الأمان أولاً، فلا نشر تلقائي).
+    alt_key: المفتاح بلا باركود؛ اعتماد حُفظ قبل إضافة باركود صالح للصف يبقى اعتماداً لهذا المنتج.
+    """
+    for key in dict.fromkeys(k for k in (sku_key, alt_key) if k):
+        try:
+            cached = local_cache_db.get_cached_product(sku_key=key, strict=True)
+        except Exception:
+            return True
+        if bool(cached) and cached.get("verification_status") == "human_approved":
+            return True
+    return False
 
 
-def _finish_task(task, status, error_message=None, failure_code=None, trace=None):
-    """تحديث حالة مهمة سحبها هذا العامل؛ لا يكتب فوق صف اعتمده مراجع أثناء المعالجة (ملكية الحجز)."""
+def _finish_task(task, status, error_message=None, failure_code=None, trace=None, siblings=None):
+    """
+    تحديث حالة مهمة سحبها هذا العامل؛ لا يكتب فوق صف اعتمده مراجع أثناء المعالجة (ملكية الحجز).
+    صفوف المنتج نفسه التي تنتظر تأخذ النتيجة نفسها (local_cache_db.update_task_status)؛ siblings عند النشر:
+    معرفات الصفوف التي كُتب رابطها.
+    """
+    extra = {"siblings": siblings} if siblings else {}
     return local_cache_db.update_task_status(task["id"], status, error_message, failure_code=failure_code,
-                                             trace=trace, claim_id=task.get("worker_id") or None)
+                                             trace=trace, claim_id=task.get("worker_id") or None, **extra)
+
+
+def _task_alt_key(task, row, sku_key):
+    """المفتاح البديل المحفوظ مع الصف عند الإدراج، أو يُحسب لصف مفتاحه باركود (لغيره يساوي sku_key)."""
+    alt = task.get("alt_sku_key")
+    if alt:
+        return alt
+    if not _is_gtin_key(sku_key):
+        return sku_key
+    try:
+        return compute_alt_sku_key(row)
+    except Exception:
+        return sku_key
+
+
+def _rejections(sku_key, alt_key=None):
+    """رفض المراجعين بالمفتاح الحالي وبالمفتاح البديل (رفض حُفظ قبل إضافة باركود صالح يبقى سارياً)."""
+    urls, phashes = local_cache_db.get_rejections(sku_key)
+    urls, phashes = list(urls), list(phashes)
+    if alt_key and alt_key != sku_key:
+        more_urls, more_phashes = local_cache_db.get_rejections(alt_key)
+        urls += [u for u in more_urls if u not in urls]
+        phashes += [p for p in more_phashes if p not in phashes]
+    return urls, phashes
+
+
+def _servable_resolution(sku_key, alt_key, name, brand, size, brand_mappings=None):
+    """الحل المعتمد (human_approved / auto_verified) لهذا المنتج بمفتاحه أو بالمفتاح البديل، أو None."""
+    for key in dict.fromkeys(k for k in (sku_key, alt_key) if k):
+        cached = local_cache_db.get_cached_product(sku_key=key, product_name=name, brand=brand,
+                                                   brand_mappings=brand_mappings, size_text=size or None)
+        if cached and cached.get("cloudinary_url"):
+            return cached
+    return None
+
+
+def _write_row_link(worksheet, link_column_index, row, link, metadata=None):
+    """
+    كتابة رابط معتمد وبياناته الوصفية في صف واحد بهوية الصف نفسه (الباركود والاسم والحجم والبراند)؛
+    التفريغ يرفض الكتابة إن تغير المنتج في هذا الصف. تعيد True عند جدولة الرابط.
+    """
+    payload = task_payload(row)
+    identity = {"barcode": row.get("barcode") or "", "product_name": row.get("product_name"),
+                "size": payload.get("size"), "brand": row.get("brand") or ""}
+    try:
+        ok = google_sheets.update_image_link(worksheet, row["row_number"], link_column_index, link, **identity)
+    except Exception as e:
+        print(f"[Sheet] تعذر جدولة الرابط للصف {row.get('row_number')}: {e}")
+        return False
+    if ok and metadata:
+        try:
+            google_sheets.update_product_metadata(worksheet, row["row_number"], metadata, **identity)
+        except Exception as e:
+            print(f"تنبيه: تعذر كتابة البيانات الوصفية للصف {row.get('row_number')}: {e}")
+    return bool(ok)
+
+
+def _relink_task(task, worksheet, link_column_index, sku_key, alt_key, brand_mappings=None):
+    """
+    مهمة «كتابة رابط معتمد» (task_kind='relink' من الإدراج): للمنتج صورة معتمدة لكن رابطها ليس في هذا الصف
+    (صف مكرر، كتابة انتهت CONFLICT / DEAD، أو صف عُدل وللمنتج الجديد اعتماد بشري). يُكتب الرابط بلا بحث.
+    تعيد None عندما لم يعد للمنتج حل معتمد (رُفض منذ الإدراج): يجري البحث العادي بدلها.
+    """
+    name, brand = task["product_name"], task.get("brand") or ""
+    res = _servable_resolution(sku_key, alt_key, name, brand, task_payload(task).get("size"), brand_mappings)
+    if res is None:
+        return None
+    if worksheet is None or link_column_index is None:
+        _finish_task(task, "failed", "No worksheet to write the approved link", failure_code="SHEET_WRITE_FAILED")
+        return "failed"
+    if not local_cache_db.is_claim_held(task["id"], task.get("worker_id")):
+        print(f"[Relink] الصف {task['row_number']} لم يعد محجوزاً لهذا العامل؛ لا كتابة.")
+        return "success"
+    if not _write_row_link(worksheet, link_column_index, task, res["cloudinary_url"], res.get("metadata")):
+        _finish_task(task, "failed", "Could not queue the approved link for the sheet",
+                     failure_code="SHEET_WRITE_FAILED")
+        return "failed"
+    _finish_task(task, "completed", None, failure_code=None)
+    local_cache_db.delete_product_failure(task.get("barcode") or "", sku_key=sku_key, product_name=name, brand=brand)
+    print(f"[Relink] كُتب الرابط المعتمد في الصف {task['row_number']} بلا بحث ({task.get('requeue_reason') or ''}).")
+    return "success"
+
+
+def _publish_to_siblings(task, sku_key, worksheet, link_column_index):
+    """
+    النشر التلقائي لمنتج له صفوف أخرى في الشيت (نفس sku_key) تنتظر: الصورة المنشورة تُكتب في كل صف بهويته.
+    تعيد معرفات الصفوف التي جُدولت كتابتها (تُكمل مع الصف الأصلي)؛ صف تعذرت كتابته يُسجل SHEET_WRITE_FAILED
+    والإدراج التالي يعيد كتابة الرابط المعتمد بلا بحث. صف عُدل بعد نشره (review_only) لا يُكتب فيه.
+    """
+    siblings = [s for s in local_cache_db.get_sku_siblings(task["id"], sku_key) if not s.get("review_only")]
+    if not siblings:
+        return []
+    cached = local_cache_db.get_cached_product(sku_key=sku_key)
+    link = (cached or {}).get("cloudinary_url")
+    if not link or not local_cache_db.is_claim_held(task["id"], task.get("worker_id")):
+        return []
+    written = []
+    for sib in siblings:
+        if _write_row_link(worksheet, link_column_index, sib, link, (cached or {}).get("metadata")):
+            written.append(sib["id"])
+        else:
+            local_cache_db.update_task_status(sib["id"], "failed", "Could not queue the published link for the sheet",
+                                              failure_code="SHEET_WRITE_FAILED", siblings=())
+    if written:
+        print(f"[Auto-Publish] كُتب الرابط نفسه في {len(written)} صف آخر لنفس المنتج.")
+    return written
+
+
+def _record_spend(trace, run_id=None):
+    """تكلفة محاولة بحث واحدة في سجل الصرف اليومي (search_spend). لا يرفع أبداً."""
+    local_cache_db.record_search_spend(_outcome(trace), run_id)
 
 
 def pre_cache_product_candidates(task, worksheet=None, link_column_index=None, brand_mappings=None,
-                                 sleep=time.sleep):
+                                 sleep=time.sleep, report=None):
     """
     البحث المسبق لمهمة من الطابور وحفظ مرشحاتها للمراجعة، أو نشرها إذا كان القرار AUTO_PUBLISH.
     تعيد 'success' | 'failed' | 'provider_down'.
+    - مهمة relink: يُكتب الرابط المعتمد للمنتج بلا بحث.
+    - صف عُدل بعد نشره (review_only) لا يُنشر تلقائياً أبداً: تُعرض النتيجة للمراجعة.
+    - إعادة تحقق (VERIFIER_RECHECK) لم تجد شيئاً: يعود الصف جاهزاً للمراجعة بمرشحاته السابقة.
+    - رفض Serper كل استعلاماته (رصيد / مفتاح) و«لا نتيجة»: انقطاع وليس فشلاً للمنتج.
+    report (dict اختياري) يملؤه البحث للعامل: searched، serper_credit (True / False / None).
     """
+    report = report if report is not None else {}
     name = task["product_name"]
     brand = task.get("brand") or ""
     barcode = task.get("barcode") or ""
     row_number = task["row_number"]
     payload = task_payload(task)
-    sku_key = task.get("sku_key") or payload.get("sku_key") or compute_sku_key(
-        sku_row(name, brand, barcode, payload), brand_mappings)
+    row = sku_row(name, brand, barcode, payload)
+    sku_key = task.get("sku_key") or payload.get("sku_key") or compute_sku_key(row, brand_mappings)
+    alt_key = _task_alt_key(task, row, sku_key)
     query = (task.get("search_query") or "").strip() or default_query(name, brand)
 
-    exclude_urls, exclude_phashes = local_cache_db.get_rejections(sku_key)
+    if task.get("task_kind") == local_cache_db.TASK_RELINK:
+        result = _relink_task(task, worksheet, link_column_index, sku_key, alt_key, brand_mappings)
+        if result is not None:
+            return result
+        print(f"[Relink] لم يعد للصف {row_number} حل معتمد؛ يجري البحث بدلاً من ذلك.")
+
+    exclude_urls, exclude_phashes = _rejections(sku_key, alt_key)
     search_kwargs = {
         "product_name_ar": payload.get("name_ar", ""),
         "brand_ar": payload.get("brand_ar", ""),
@@ -524,21 +722,33 @@ def pre_cache_product_candidates(task, worksheet=None, link_column_index=None, b
         search_kwargs["brand_mappings"] = brand_mappings
 
     print(f"[Pre-Cache] البحث عن مرشحات لـ [{name}] (SKU {sku_key})")
-    best, trace, state, error = search_with_retry(query, name, brand, search_kwargs, sleep=sleep)
+    run_id = task.get("run_id") or None
+    best, trace, state, error = search_with_retry(query, name, brand, search_kwargs, sleep=sleep,
+                                                  on_attempt=lambda tr: _record_spend(tr, run_id))
+    credit = serper_credit_refused(trace)
+    report["searched"] = True
+    report["serper_credit"] = credit
+    recheck = task.get("requeue_reason") == "VERIFIER_RECHECK"
 
     if best is None:
-        if state == "provider_down":
-            # انقطاع المزودين ليس فشلاً للمنتج: يعود الصف للانتظار ولا يُسجل في product_failures
-            _finish_task(task, "pending", "Search providers unavailable",
-                         failure_code="PROVIDER_DOWN", trace=trace)
-            return "provider_down"
         if state == "error":
             code, message = "SEARCH_ERROR", error or "search raised an exception"
         else:
             code = _outcome(trace).get("failure_code") or "NO_RESULTS"
             message = f"No acceptable image found ({code})"
+        down = state == "provider_down" or (state == "ok" and credit)
+        if recheck:
+            # إعادة التحقق لم تأتِ بجديد: المرشحات السابقة ما زالت محفوظة، فيعود الصف للمراجعة ولا يضيع
+            _finish_task(task, "ready_for_review", f"Re-verification found nothing new ({code})",
+                         failure_code="VERIFIER_DOWN", trace=trace)
+            return "provider_down" if down else "success"
+        if down:
+            # انقطاع المزودين (أو رصيد Serper) ليس فشلاً للمنتج: يعود الصف للانتظار بموعد ولا يُسجل في product_failures
+            message = "Serper refused every query (credit or key)" if credit else "Search providers unavailable"
+            _finish_task(task, "pending", message, failure_code="PROVIDER_DOWN", trace=trace)
+            return "provider_down"
         _finish_task(task, "failed", message, failure_code=code, trace=trace)
-        local_cache_db.save_product_failure(barcode, name, brand, f"{code}: {message}")
+        local_cache_db.save_product_failure(barcode, name, brand, f"{code}: {message}", sku_key=sku_key)
         print(f"[Pre-Cache] لا توجد صورة للصف {row_number}: {code}")
         return "failed"
 
@@ -548,16 +758,22 @@ def pre_cache_product_candidates(task, worksheet=None, link_column_index=None, b
         return "success"
 
     decision = best.get("decision")
-    if decision == "AUTO_PUBLISH" and _has_human_approval(sku_key):
+    if decision == "AUTO_PUBLISH" and _has_human_approval(sku_key, alt_key):
         # لا يُنشر تلقائياً فوق صورة اعتمدها مراجع: تُعرض النتيجة للمراجعة فقط
         print(f"[Auto-Publish] الصف {row_number} له اعتماد بشري سابق؛ يحال للمراجعة بدل النشر التلقائي.")
+        decision = "REVIEW_PRESELECTED"
+    if decision == "AUTO_PUBLISH" and task.get("review_only"):
+        # الصف عُدل بعد نشر صورته (أو مُسح رابطه): الصورة الجديدة يراها مراجع قبل أي كتابة
+        print(f"[Auto-Publish] الصف {row_number} للمراجعة فقط ({task.get('requeue_reason') or 'review_only'}); "
+              "لا نشر تلقائي.")
         decision = "REVIEW_PRESELECTED"
     if (decision == "AUTO_PUBLISH" and best.get("source") != "sqlite_cache"
             and worksheet is not None and link_column_index is not None):
         status = auto_approve_product(task, best, worksheet, link_column_index, sku_key=sku_key)
         if status == "published":
+            written = _publish_to_siblings(task, sku_key, worksheet, link_column_index)
             _finish_task(task, "completed", failure_code=None,
-                         trace={"outcome": _outcome(trace)})
+                         trace={"outcome": _outcome(trace)}, siblings=written)
             print(f"[Auto-Publish] تم نشر الصف {row_number} تلقائياً (قرار AUTO_PUBLISH).")
             return "success"
         if status == "superseded" or not local_cache_db.is_claim_held(task["id"], task.get("worker_id")):
@@ -705,11 +921,219 @@ def _enqueue_failed(message, reason="enqueue_failed"):
     sys.exit(1)
 
 
+def _enqueue_payload(prod):
+    return {
+        "name_ar": prod.get("product_name_ar", ""),
+        "brand_ar": prod.get("brand_ar", ""),
+        "category": prod.get("category", ""),
+        "sub_category": prod.get("sub_category", ""),
+        "origin": prod.get("origin", ""),
+        "size": prod.get("size", ""),
+    }
+
+
+def _row_was_edited(prod, sku_key, alt_key, link_rows):
+    """
+    رابط الصف النهائي نُشر لمنتج آخر: الحلول التي تحمل هذا الرابط كلها لمفاتيح غير مفتاح الصف (أو بديله)،
+    واسمها أو براندها (أو باركود صالح مختلف) غير ما في الصف الآن. اختلاف المفتاح وحده (عمود الحجم، صيغة قديمة
+    للمفتاح) لا يكفي: لا يُعاد البحث عن صف لم يتغير منتجه.
+    """
+    from catalog_match.text_norm import match_key
+    if not link_rows or any(r.get("sku_key") in (sku_key, alt_key) for r in link_rows):
+        return False
+    name, brand = match_key(prod.get("product_name")), match_key(prod.get("brand"))
+    gtin = local_cache_db._cache_barcode(prod.get("barcode"))
+    for r in link_rows:
+        if match_key(r.get("product_name")) == name and match_key(r.get("brand")) == brand:
+            other = local_cache_db._cache_barcode(r.get("barcode"))
+            if not (gtin and other and gtin != other):
+                return False
+    return True
+
+
+def _snapshot_resolution(snapshot, prod, payload, sku_key, alt_key, brand_index, human_only=False):
+    """
+    الحل المعتمد لمنتج الصف من لقطة الحلول: بالمفتاح ثم بالبديل. حل مفتاحه باركود يمر بفحص الهوية نفسه
+    الذي يمر به الكاش (cached_row_matches): باركود مشترك أو خاطئ لا يعطي الصف صورة منتج آخر.
+    """
+    for key in dict.fromkeys(k for k in (sku_key, alt_key) if k):
+        res = snapshot["by_key"].get(key)
+        if not res or (human_only and res.get("verification_status") != "human_approved"):
+            continue
+        if _is_gtin_key(key) and not local_cache_db.cached_row_matches(
+                res, prod.get("product_name"), prod.get("brand") or "", brand_index,
+                size_text=payload.get("size") or None):
+            continue
+        return res
+    return None
+
+
+def _outbox_records(row_numbers):
+    """
+    كتابات الشيت لهذه الصفوف: {row_number: [{value, status, id}]} بالترتيب. من google_sheets.outbox_outcomes إن
+    وُجدت (حزمة الشيت)، وإلا قراءة طابور الكتابة مباشرة. أي خطأ يعيد {} (حالة الكتابة مجهولة).
+    """
+    raw = None
+    fn = getattr(google_sheets, "outbox_outcomes", None)
+    if callable(fn):
+        try:
+            try:
+                raw = fn(list(row_numbers))
+            except TypeError:
+                raw = fn()
+        except Exception as e:
+            print(f"تنبيه: تعذر قراءة نتائج كتابات الشيت: {e}")
+            raw = None
+    if raw is None:
+        raw = local_cache_db.outbox_link_writes(row_numbers)
+    items = []
+    if isinstance(raw, dict):
+        for row, value in raw.items():
+            for v in (value if isinstance(value, (list, tuple)) else [value]):
+                rec = dict(v) if isinstance(v, dict) else {"status": v}
+                rec.setdefault("row_number", row)
+                items.append(rec)
+    elif isinstance(raw, (list, tuple)):
+        items = [dict(r) for r in raw if isinstance(r, dict)]
+    out = {}
+    for i, rec in enumerate(items):
+        try:
+            row = int(rec.get("row_number"))
+        except (TypeError, ValueError):
+            continue
+        status = str(rec.get("sync_status") or rec.get("status") or rec.get("outcome") or "").strip().upper()
+        out.setdefault(row, []).append({"value": rec.get("value"), "status": status, "id": rec.get("id") or i})
+    for recs in out.values():
+        recs.sort(key=lambda r: (r["id"] if isinstance(r["id"], int) else 0))
+    return out
+
+
+def _link_write_state(records, link):
+    """حالة آخر كتابة لهذا الرابط في هذا الصف (PENDING / FAILED / SYNCED / CONFLICT / DEAD ...)، أو None."""
+    matching = [r for r in records or [] if r.get("value") in (None, link)]
+    return matching[-1]["status"] if matching else None
+
+
+def _brand_index_token(spec):
+    """أطول كلمة (3 أحرف فأكثر) لكل عبارة براند كما يخزنها الفهرس المحلي، للكشف عن صفحات جديدة للبراند."""
+    from catalog_match.local_index import index_keys
+    out = set()
+    for phrase in tuple(spec.match_brands or ()) + (spec.brand_raw or "",):
+        keys = [k for k in index_keys(phrase) if len(k) >= 3]
+        if keys:
+            out.add(max(keys, key=len))
+    return out
+
+
+def plan_enqueue(products, reprocess=False, brand_mappings=None):
+    """
+    صفوف الشيت (بعد الفلاتر) -> (صفوف local_cache_db.add_many_to_queue، عدادات). المطابقة عند الإدراج:
+    (a) صف بلا رابط نهائي ولمنتجه (sku_key أو المفتاح البديل) صورة معتمدة: مهمة كتابة الرابط (relink) بدل بحث جديد.
+        خلية فيها needs_review: تُكتب فقط من اعتماد بشري. كتابة سابقة ما زالت في الطابور (PENDING / FAILED) تُترك؛
+        كتابة نجحت ثم مُسح الرابط من الشيت (SYNCED) لا تُعاد كتابتها: بحث للمراجعة فقط (LINK_CLEARED).
+    (b) صف رابطه منشور لمنتج آخر (عُدل الصف بعد النشر): بحث للمراجعة فقط (ROW_EDITED)، لا نشر تلقائي فوقه؛
+        وإن كان للمنتج الجديد اعتماد بشري يُكتب رابطه.
+    (c) صف مكتمل لم يصل رابطه للشيت (CONFLICT / DEAD) يُعاد كتابته (a)، وبلا حل معتمد: بحث للمراجعة (LINK_MISSING).
+    صف «لا نتيجة» ظهرت لبراند منتجه صفحات جديدة في الفهرس المحلي منذ آخر بحث: LOCAL_INDEX_CHANGED.
+    صفوف المنتج نفسه تتبع صفاً للمراجعة فقط منها (بحث واحد لكل منتج، فلا ينشر أحدها تلقائياً).
+    """
+    from catalog_match.brand_index import build_index
+    from catalog_match.identity import build_sku_spec
+
+    index = build_index(brand_mappings) if brand_mappings else None   # يُبنى مرة واحدة لكل الصفوف
+    stats = {"skipped_final": 0, "relink": 0, "edited": 0, "cleared": 0, "missing": 0, "in_flight": 0,
+             "index_changed": 0}
+    snapshot = local_cache_db.resolution_snapshot()
+    queue = local_cache_db.queue_snapshot()
+    entries = []
+    for prod in products:
+        name, brand = prod["product_name"], prod.get("brand") or ""
+        barcode = prod.get("barcode", "")
+        payload = _enqueue_payload(prod)
+        row = sku_row(name, brand, barcode, payload)
+        spec = build_sku_spec(row, index)
+        sku_key, alt_key = spec.sku_key, compute_alt_sku_key(row, spec)
+        entry = {"prod": prod, "payload": payload, "spec": spec, "sku_key": sku_key, "alt_key": alt_key,
+                 "brand_fp": brand_fingerprint(spec), "task_kind": None, "review_only": False, "reason": None}
+        link = prod.get("existing_image_link")
+        if link and not reprocess:
+            if not _row_was_edited(prod, sku_key, alt_key,
+                                   snapshot["by_url"].get(local_cache_db.url_norm(link)) or []):
+                stats["skipped_final"] += 1
+                continue
+            stats["edited"] += 1
+            entry["reason"] = "ROW_EDITED"
+            if _snapshot_resolution(snapshot, prod, payload, sku_key, alt_key, index, human_only=True):
+                entry["task_kind"] = local_cache_db.TASK_RELINK
+            else:
+                entry["review_only"] = True
+        elif not reprocess:
+            res = _snapshot_resolution(snapshot, prod, payload, sku_key, alt_key, index,
+                                       human_only=bool(prod.get("needs_review")))
+            old = queue.get(prod["row_number"])
+            if res:
+                entry["resolution"] = res
+            elif old and old.get("status") == "completed" and old.get("sku_key") == sku_key:
+                entry["review_only"], entry["reason"] = True, "LINK_MISSING"
+                stats["missing"] += 1
+        entries.append(entry)
+
+    waiting = [e for e in entries if e.get("resolution")]
+    outbox = _outbox_records([e["prod"]["row_number"] for e in waiting]) if waiting else {}
+    for e in waiting:
+        state = _link_write_state(outbox.get(e["prod"]["row_number"]), e["resolution"]["cloudinary_url"])
+        if state in ("PENDING", "FAILED"):
+            e["skip"] = True
+            stats["in_flight"] += 1
+        elif state == "SYNCED":
+            e["review_only"], e["reason"] = True, "LINK_CLEARED"
+            stats["cleared"] += 1
+        else:
+            e["task_kind"] = local_cache_db.TASK_RELINK
+            e["reason"] = "SHEET_WRITE_RETRY" if state in ("CONFLICT", "DEAD") else "APPROVED_IMAGE"
+
+    # «لا نتيجة» تنتظر موعدها: هل ظهرت صفحات جديدة للبراند في الفهرس المحلي منذ آخر بحث؟
+    sleeping = []
+    for e in entries:
+        old = queue.get(e["prod"]["row_number"])
+        if (not e.get("skip") and e["task_kind"] is None and not e["reason"] and old
+                and old.get("status") == "failed" and old.get("failure_code") in local_cache_db.NOT_FOUND_CODES
+                and old.get("sku_key") == e["sku_key"] and old.get("searched_at")):
+            e["tokens"] = _brand_index_token(e["spec"])
+            sleeping.append((e, old["searched_at"]))
+    if sleeping:
+        news = local_cache_db.catalog_brand_news(set().union(*(e["tokens"] for e, _ in sleeping)))
+        for e, searched_at in sleeping:
+            newest = [news[t] for t in e["tokens"] if t in news]
+            if newest and max(newest) > searched_at:
+                e["reason"] = "LOCAL_INDEX_CHANGED"
+                stats["index_changed"] += 1
+
+    # بحث واحد لكل منتج: إن كان أحد صفوف المنتج للمراجعة فقط فنتيجة بحثه (التي تُطبق على كل صفوفه) للمراجعة
+    review_skus = {e["sku_key"] for e in entries if e["review_only"] and not e.get("skip")}
+    rows = []
+    for e in entries:
+        if e.get("skip"):
+            continue
+        if e["task_kind"] == local_cache_db.TASK_RELINK:
+            stats["relink"] += 1
+        elif e["sku_key"] in review_skus:
+            e["review_only"] = True
+        prod = e["prod"]
+        name, brand = prod["product_name"], prod.get("brand") or ""
+        rows.append(local_cache_db.queue_input(
+            prod["row_number"], prod.get("barcode", ""), name, brand, prod.get("search_query") or default_query(name, brand),
+            payload=e["payload"], sku_key=e["sku_key"], alt_sku_key=e["alt_key"], brand_fp=e["brand_fp"],
+            task_kind=e["task_kind"], review_only=e["review_only"], requeue_reason=e["reason"]))
+    return rows, stats
+
+
 def run_enqueue_mode():
     """
     قراءة الشيت وإضافة الصفوف للطابور (Upsert). يتم التحقق من الاتصال وعناوين الأعمدة والفلاتر
     قبل لمس الطابور، ولا تُمسح صفوف المراجعة أبداً. كل إدراج يبدأ تشغيلاً جديداً (run_id) يحمله كل صف
     سيعالجه العامل (local_cache_db.begin_run)، فيُحسب التقدم من صفوف هذا التشغيل فقط.
+    المطابقة مع الكاش وطابور الكتابة (plan_enqueue) تسبق الإدراج، والإدراج دفعات (add_many_to_queue).
     """
     try:
         load_run_config()
@@ -742,36 +1166,26 @@ def run_enqueue_mode():
 
     reprocess = bool(getattr(config, "FORCE_OVERWRITE_IMAGES", False))
     brand_filter = (config.BRAND_FILTER or "").lower()
-    enqueued = skipped_final = 0
+    selected = [prod for prod in products
+                if (allowed_rows is None or prod["row_number"] in allowed_rows)
+                and (not brand_filter or brand_filter in (prod.get("brand") or "").lower())]
+    done = {"insert": 0, "keep": 0, "reset": 0}
     try:
-        for prod in products:
-            row_num = prod["row_number"]
-            name = prod["product_name"]
-            brand = prod.get("brand") or ""
-            if allowed_rows is not None and row_num not in allowed_rows:
-                continue
-            if brand_filter and brand_filter not in brand.lower():
-                continue
-            if prod.get("existing_image_link") and not reprocess:
-                skipped_final += 1
-                continue
-            payload = {
-                "name_ar": prod.get("product_name_ar", ""),
-                "brand_ar": prod.get("brand_ar", ""),
-                "category": prod.get("category", ""),
-                "sub_category": prod.get("sub_category", ""),
-                "origin": prod.get("origin", ""),
-                "size": prod.get("size", ""),
-            }
-            barcode = prod.get("barcode", "")
-            sku_key = compute_sku_key(sku_row(name, brand, barcode, payload), brand_mappings)
-            local_cache_db.add_to_queue(row_num, barcode, name, brand, prod.get("search_query") or default_query(name, brand),
-                                        payload=payload, sku_key=sku_key, reprocess=reprocess)
-            enqueued += 1
-        print(f"[Enqueue] {enqueued} صف في الطابور؛ {skipped_final} صف تم تخطيه لأن رابطه نهائي.")
+        rows, stats = plan_enqueue(selected, reprocess=reprocess, brand_mappings=brand_mappings)
+        local_cache_db.add_many_to_queue(rows, reprocess=reprocess, totals=done)
+        print(f"[Enqueue] {len(rows)} صف في الطابور (جديد {done['insert']}، يعود للانتظار {done['reset']}، "
+              f"باقٍ كما هو {done['keep']})؛ {stats['skipped_final']} صف تم تخطيه لأن رابطه نهائي.")
+        if stats["relink"] or stats["in_flight"]:
+            print(f"[Enqueue] {stats['relink']} صف لمنتج له صورة معتمدة: يُكتب رابطها بلا بحث؛ "
+                  f"{stats['in_flight']} كتابة ما زالت في طابور الشيت.")
+        if stats["edited"] or stats["cleared"] or stats["missing"]:
+            print(f"[Enqueue] للمراجعة فقط: {stats['edited']} صف عُدل بعد نشر صورته، {stats['cleared']} صف مُسح رابطه، "
+                  f"{stats['missing']} صف مكتمل بلا رابط.")
+        if stats["index_changed"]:
+            print(f"[Enqueue] {stats['index_changed']} منتج «لا نتيجة» ظهرت لبراندها صفحات جديدة؛ يُعاد بحثه الآن.")
         local_cache_db.get_queue_statistics()
     except Exception as e:
-        _enqueue_failed(f"تعذر إضافة الصفوف إلى الطابور: {e}. أُضيف {enqueued} صف قبل الخطأ ولم يُحذف أي صف.",
+        _enqueue_failed(f"تعذر إضافة الصفوف إلى الطابور: {e}. أُضيف {sum(done.values())} صف قبل الخطأ ولم يُحذف أي صف.",
                         reason="enqueue_failed" if local_cache_db.db_available() else "db_unavailable")
 
     run_id = local_cache_db.new_run_id()
@@ -1127,6 +1541,53 @@ def _cli_trigger(argv):
     return "manual"
 
 
+BUDGET_WARN_RATIO = 0.8
+
+
+def _daily_budget():
+    """DAILY_BUDGET_USD (0 أو قيمة غير صالحة = بلا حد)."""
+    try:
+        return max(0.0, float(getattr(config, "DAILY_BUDGET_USD", 0) or 0))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _credit_stop_searches():
+    """SERPER_CREDIT_STOP_SEARCHES (0 = لا إيقاف بسبب رصيد Serper)."""
+    try:
+        return max(0, int(getattr(config, "SERPER_CREDIT_STOP_SEARCHES", 3) or 0))
+    except (TypeError, ValueError):
+        return 3
+
+
+def _next_credit_streak(streak, report):
+    """
+    عدد عمليات البحث المتتالية التي رفض فيها Serper كل استعلاماته (رصيد / مفتاح). بحث أجاب فيه Serper يصفّره؛
+    مهمة بلا بحث (كتابة رابط) أو بحث لم يستدعِ Serper لا يغيّره.
+    """
+    credit = (report or {}).get("serper_credit")
+    if credit is True:
+        return streak + 1
+    if credit is False:
+        return 0
+    return streak
+
+
+def _prepare_verifier_rechecks(notice, run_id):
+    """
+    صفوف جاهزة للمراجعة بسبب تعطل قارئ الملصق (VERIFIER_DOWN): إن كان القارئ متاحاً في هذا التشغيل (لا تنبيه
+    VERIFIER_*) تعود للبحث بأولوية إعادة التحقق؛ وإلا تعود صفوف إعادة تحقق سابقة لم تُسحب إلى المراجعة.
+    """
+    if notice:
+        parked = local_cache_db.park_verifier_rechecks()
+        if parked:
+            print(f"[Worker] قارئ الملصق غير متاح؛ {parked} صف إعادة تحقق عاد للمراجعة.")
+        return
+    requeued = local_cache_db.requeue_verifier_down(run_id)
+    if requeued:
+        print(f"[Worker] {requeued} صف انتظر المراجعة لأن قارئ الملصق تعطل؛ يُعاد بحثه الآن بقارئ يعمل.")
+
+
 def run_worker_mode(trigger="manual", report=True):
     """
     عامل الخلفية: يسحب المهام ذرياً ويعالجها بالتوازي (3 خيوط).
@@ -1207,18 +1668,24 @@ def run_worker_mode(trigger="manual", report=True):
 
         worker_id = local_cache_db.new_claim_id().split("#")[0]
         lock = threading.Lock()
-        counters = {"provider_down_streak": 0}
+        counters = {"provider_down_streak": 0, "credit_streak": 0}
+        _prepare_verifier_rechecks(notice, run_id)
+        budget = _daily_budget()
+        credit_stop = _credit_stop_searches()
+        budget_warned = False
 
         def runner(t):
+            report = {}
             try:
                 local_cache_db.update_automation_state(status="pre_caching", current_product=t["product_name"])
-                result = pre_cache_product_candidates(t, worksheet, link_column_index, brand_mappings)
+                result = pre_cache_product_candidates(t, worksheet, link_column_index, brand_mappings, report=report)
             except Exception as e:
                 _finish_task(t, "failed", f"Unexpected worker error: {e}", failure_code="WORKER_ERROR")
                 print(f"[Worker Thread Error] الصف {t['row_number']}: {e}")
                 result = "failed"
             with lock:
                 counters["provider_down_streak"] = counters["provider_down_streak"] + 1 if result == "provider_down" else 0
+                counters["credit_streak"] = _next_credit_streak(counters["credit_streak"], report)
             _refresh_state("pre_caching", run_id=run_id)
 
         max_workers = 3
@@ -1229,6 +1696,13 @@ def run_worker_mode(trigger="manual", report=True):
                 active = [f for f in active if not f.done()]
                 with lock:
                     streak = counters["provider_down_streak"]
+                    credit_streak = counters["credit_streak"]
+                if credit_stop and credit_streak >= credit_stop:
+                    # لا نكمل الدفع لبحث بلا Serper: التنبيه SERPER_CREDIT يضيفه _outage_notice من صفوف هذا العامل
+                    stop_reason = "serper_credit"
+                    print(f"[Worker] رفض Serper كل الاستعلامات في آخر {credit_streak} عمليات بحث (رصيد أو مفتاح)؛ "
+                          "إيقاف العامل وإبقاء الصفوف في الانتظار.")
+                    break
                 if streak >= MAX_PROVIDER_DOWN_STREAK:
                     stop_reason = "provider_down"
                     print("[Worker] محركات البحث غير متاحة لعدة منتجات متتالية؛ إيقاف العامل وإبقاء الصفوف في الانتظار.")
@@ -1244,6 +1718,19 @@ def run_worker_mode(trigger="manual", report=True):
                         time.sleep(1)
                         continue
                     if len(active) < max_workers:
+                        if budget > 0:
+                            spent = local_cache_db.spend_today()
+                            if spent >= budget:
+                                stop_reason = "budget_reached"
+                                notice = (f"BUDGET_REACHED: daily search budget {budget:.2f} USD reached "
+                                          f"(spent {spent:.2f}); remaining rows stay pending")
+                                print(f"[Worker] بلغ صرف اليوم {spent:.2f}$ الميزانية اليومية {budget:.2f}$؛ "
+                                      "إيقاف العامل وإبقاء الصفوف في الانتظار.")
+                                break
+                            if not budget_warned and spent >= BUDGET_WARN_RATIO * budget:
+                                budget_warned = True
+                                print(f"[Worker] تنبيه: صرف اليوم {spent:.2f}$ بلغ {int(BUDGET_WARN_RATIO * 100)}% "
+                                      f"من الميزانية اليومية {budget:.2f}$.")
                         task = local_cache_db.fetch_next_task(worker_id)
                         if task:
                             print(f"[Queue] سحب مهمة الصف {task['row_number']}.")
@@ -1290,7 +1777,7 @@ def run_worker_mode(trigger="manual", report=True):
             else:
                 # الطابور انتهى، أو سبب توقف آخر (مثل حد الميزانية) يظهر نصه كما هو في التنبيه والتقرير
                 base = notice
-                if stop_reason:
+                if stop_reason and not str(notice or "").startswith(f"{str(stop_reason).upper()}:"):
                     base = " | ".join(n for n in (
                         f"{str(stop_reason).upper()}: توقف العامل قبل نهاية الطابور ({stop_reason})؛ "
                         "بقيت الصفوف المتبقية في الانتظار", notice) if n)

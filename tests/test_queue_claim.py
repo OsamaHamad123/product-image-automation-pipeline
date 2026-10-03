@@ -77,20 +77,87 @@ def test_queue_statistics_include_ready_for_review_and_raise(ldb, monkeypatch, f
         ldb.count_open_tasks()
 
 
+def _batching_connection(fake_connection, existing):
+    """FakeConnection whose cursor also records executemany; the FOR UPDATE read returns `existing`."""
+    def responder(sql, params):
+        return [dict(r) for r in existing] if "FOR UPDATE" in sql else None
+
+    conn = fake_connection(responder)
+    real_cursor = conn.cursor
+
+    def cursor():
+        c = real_cursor()
+        c.executemany = lambda sql, rows: conn.executed.append((" ".join(sql.split()), list(rows)))
+        return c
+
+    conn.cursor = cursor
+    return conn
+
+
 def test_add_to_queue_is_an_upsert_that_protects_review_rows(ldb, monkeypatch, fake_connection):
-    conn = fake_connection()
+    review_row = {"id": 1, "row_number": 5, "sku_key": "k", "product_name": "Fresh Milk", "status": "ready_for_review",
+                  "failure_code": None, "fail_count": 0, "reverify_count": 0, "priority": 0, "task_kind": None,
+                  "review_only": 0, "requeue_reason": None, "brand_fp": None, "live": 0, "has_next": 0, "due": 0}
+    conn = _batching_connection(fake_connection, [review_row])
     monkeypatch.setattr(ldb, "get_db_connection", lambda: conn)
     ldb.add_to_queue(5, "6281007000028", "Fresh Milk", "Almarai", "q", payload={"name_ar": "حليب"}, sku_key="k")
-    (sql, params), = conn.executed
+    (read_sql, read_params), (sql, rows) = conn.executed
+    assert read_sql.startswith("SELECT") and read_sql.endswith("FOR UPDATE") and read_params == (5,)
     assert "REPLACE" not in sql.upper() and "DELETE" not in sql.upper()
     assert "ON DUPLICATE KEY UPDATE" in sql
-    assert "status IN ('ready_for_review','completed')" in sql
-    # every status-dependent assignment comes before `status` is overwritten
-    assert sql.index("status = IF(") > sql.index("attempts = IF(")
-    assert sql.index("status = IF(") < sql.index("sku_key = VALUES(sku_key)")
-    assert params[-7:] == (0,) * 7
-    assert '"name_ar": "حليب"' in params[6]
+    # the review row of the same product is kept: only identity and payload columns are refreshed
+    postfix = sql.split("ON DUPLICATE KEY UPDATE", 1)[1]
+    assert "status" not in postfix and "payload_json = VALUES(payload_json)" in postfix
+    assert '"name_ar": "حليب"' in rows[0][9]
+    assert conn.commits == 1
 
     conn.executed.clear()
-    ldb.add_to_queue(5, "", "Fresh Milk", "Almarai", "q", reprocess=True)
-    assert conn.executed[0][1][-7:] == (1,) * 7
+    ldb.add_to_queue(5, "", "Fresh Milk", "Almarai", "q", sku_key="k", reprocess=True)
+    _, (sql, rows) = conn.executed
+    assert "status = 'pending'" in sql.split("ON DUPLICATE KEY UPDATE", 1)[1]
+
+
+def test_a_status_write_is_retried_after_a_deadlock(ldb, monkeypatch, fake_connection):
+    """The result write locks the row and the waiting rows of the same product, so it can meet the claim scan in a
+    deadlock; InnoDB then aborts one side. A lost result write would cost a second search after the lease."""
+    calls = {"select": 0}
+
+    def responder(sql, params):
+        if sql.startswith("SELECT id, sku_key, task_kind"):
+            calls["select"] += 1
+            if calls["select"] == 1:
+                raise pymysql.err.OperationalError(1213, "Deadlock found when trying to get lock")
+            return [{"id": 7, "sku_key": None, "task_kind": None, "fail_count": 0, "down_count": 0, "priority": 0}]
+        return None
+
+    conns = []
+
+    def connect():
+        conns.append(fake_connection(responder))
+        return conns[-1]
+
+    monkeypatch.setattr(ldb, "get_db_connection", connect)
+    monkeypatch.setattr("time.sleep", lambda s: None)
+    assert ldb.update_task_status(7, "ready_for_review", claim_id="host:1#c") is True
+    assert len(conns) == 2 and conns[1].commits == 1
+    assert any(s.startswith("UPDATE automation_queue SET status") for s in conns[1].sql())
+
+    def broken(sql, params):
+        raise pymysql.err.OperationalError(2013, "Lost connection to MySQL server during query")
+
+    conns.clear()
+    monkeypatch.setattr(ldb, "get_db_connection", lambda: conns.append(fake_connection(broken)) or conns[-1])
+    assert ldb.update_task_status(7, "ready_for_review", claim_id="host:1#c") is False
+    assert len(conns) == 1                                   # other errors are not retried
+
+
+def test_queue_upserts_are_sent_as_one_multi_row_statement():
+    """pymysql batches executemany into one INSERT only when VALUES holds nothing but %s and no %s follows
+    ON DUPLICATE KEY UPDATE; otherwise it silently falls back to one round trip per row (the old 25 ms/row)."""
+    import pymysql.cursors
+
+    import local_cache_db as ldb
+    for sql in (ldb._QUEUE_KEEP_SQL, ldb._QUEUE_RESET_SQL):
+        m = pymysql.cursors.RE_INSERT_VALUES.match(sql)
+        assert m is not None, sql
+        assert "%" not in m.group(1) and "%" not in m.group(3)

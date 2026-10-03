@@ -96,6 +96,23 @@ _SCHEMA_MIGRATIONS = [
     "ALTER TABLE automation_queue ADD INDEX IF NOT EXISTS idx_queue_worker (worker_id)",
     "ALTER TABLE automation_queue ADD INDEX IF NOT EXISTS idx_queue_sku (sku_key)",
     "ALTER TABLE automation_queue ADD INDEX IF NOT EXISTS idx_queue_run (run_id)",
+    # جدولة الطابور (P4a): مفتاح بديل بلا باركود، موعد المحاولة التالية وعداداتها، أولوية السحب، نوع المهمة
+    # (بحث أو كتابة رابط معتمد)، منع النشر التلقائي لصف عُدل، سبب إعادة الإدراج، وبصمة البراند وقت الإدراج
+    "ALTER TABLE automation_queue ADD COLUMN IF NOT EXISTS alt_sku_key VARCHAR(64) NULL",
+    "ALTER TABLE automation_queue ADD COLUMN IF NOT EXISTS next_attempt_at DATETIME NULL",
+    "ALTER TABLE automation_queue ADD COLUMN IF NOT EXISTS fail_count INT NOT NULL DEFAULT 0",
+    "ALTER TABLE automation_queue ADD COLUMN IF NOT EXISTS down_count INT NOT NULL DEFAULT 0",
+    "ALTER TABLE automation_queue ADD COLUMN IF NOT EXISTS reverify_count INT NOT NULL DEFAULT 0",
+    "ALTER TABLE automation_queue ADD COLUMN IF NOT EXISTS priority TINYINT NOT NULL DEFAULT 0",
+    "ALTER TABLE automation_queue ADD COLUMN IF NOT EXISTS task_kind VARCHAR(16) NULL",
+    "ALTER TABLE automation_queue ADD COLUMN IF NOT EXISTS review_only TINYINT NOT NULL DEFAULT 0",
+    "ALTER TABLE automation_queue ADD COLUMN IF NOT EXISTS requeue_reason VARCHAR(32) NULL",
+    "ALTER TABLE automation_queue ADD COLUMN IF NOT EXISTS brand_fp VARCHAR(16) NULL",
+    "ALTER TABLE automation_queue ADD COLUMN IF NOT EXISTS searched_at DATETIME NULL",
+    "ALTER TABLE automation_queue ADD INDEX IF NOT EXISTS idx_queue_claim (status, priority, id)",
+    # product_failures: سجل لكل منتج (sku_key) وليس لكل خلية باركود ('N/A' مشتركة بين منتجات كثيرة)
+    "ALTER TABLE product_failures ADD COLUMN IF NOT EXISTS sku_key VARCHAR(64) NULL",
+    "ALTER TABLE product_failures ADD UNIQUE INDEX IF NOT EXISTS uq_failure_sku (sku_key)",
     # curation_candidates
     "ALTER TABLE curation_candidates MODIFY COLUMN title TEXT NULL",
     "ALTER TABLE curation_candidates ADD COLUMN IF NOT EXISTS sku_key VARCHAR(64) NULL",
@@ -381,6 +398,9 @@ def init_db():
                 INDEX idx_run_history_run (run_id)
             ) ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
         """)
+        # 13. سجل الصرف اليومي للبحث (P4a): استدعاءات كل مزود مدفوع وتكلفتها التقديرية لكل يوم وتشغيل،
+        # يُقرأ قبل كل سحب مهمة عند ضبط DAILY_BUDGET_USD
+        cursor.execute(SPEND_TABLE_SQL)
 
         # القيم الافتراضية المبدئية من ملف .env (INSERT IGNORE لا يغير القيم الموجودة)
         import config
@@ -405,6 +425,7 @@ def init_db():
 
         for stmt in _SCHEMA_MIGRATIONS:
             cursor.execute(stmt)
+        _rekey_junk_failures(cursor)
 
         conn.commit()
         conn.close()
@@ -719,7 +740,8 @@ def save_product_resolution(barcode, product_name, brand, original_url, cloudina
         return False
     _remember_phash(hash_str, saved_id, cloudinary_url, product_name)
     if verification_status in SERVABLE_STATUSES:
-        delete_product_failure(barcode_raw or f"ERR_{product_name}_{brand}".replace(" ", "_"))
+        delete_product_failure(barcode_raw or f"ERR_{product_name}_{brand}".replace(" ", "_"),
+                               sku_key=sku_clean or None, product_name=product_name, brand=brand)
     return True
 
 
@@ -967,19 +989,56 @@ def get_rejections(sku_key):
 # أخطاء المنتجات والملاحظات
 # ---------------------------------------------------------------------------
 
-def save_product_failure(barcode, product_name, brand, error_message):
-    """تسجيل فشل منتج حقيقي (لا تُسجل هنا انقطاعات المزودين)."""
+def failure_key(barcode, product_name, brand):
+    """
+    مفتاح عرض سجل الفشل (عمود barcode، الذي تطابقه لوحة التحكم و cli_bridge): الباركود عندما يكون GTIN صالحاً،
+    وإلا ERR_<الاسم>_<البراند>. خلية باركود مثل 'N/A' أو '0' تشترك فيها منتجات كثيرة، فلا تكون مفتاحاً أبداً
+    (كانت سجلات هذه المنتجات تكتب فوق بعضها وتظهر الخطأ نفسه على كل صف 'N/A').
+    """
+    return (_cache_barcode(barcode) or f"ERR_{product_name}_{brand}".replace(" ", "_"))[:255]
+
+
+def _rekey_junk_failures(cursor):
+    """
+    ترقية لمرة واحدة (Idempotent): سجلات قديمة مفتاحها خلية باركود غير صالحة ('N/A') تنتقل إلى مفتاح المنتج
+    ERR_<الاسم>_<البراند> المحفوظ في السجل نفسه. إن وُجد سجل بذلك المفتاح فهو سجل المنتج نفسه ويُحذف القديم.
+    """
+    cursor.execute("SELECT barcode, product_name, brand FROM product_failures "
+                   "WHERE sku_key IS NULL AND barcode NOT LIKE 'ERR\\_%%'")
+    for row in cursor.fetchall() or []:
+        old = row["barcode"]
+        if not old or _cache_barcode(old):
+            continue
+        new = failure_key("", row["product_name"], row["brand"] or "")
+        cursor.execute("SELECT 1 FROM product_failures WHERE barcode = %s", (new,))
+        if cursor.fetchone():
+            cursor.execute("DELETE FROM product_failures WHERE barcode = %s", (old,))
+        else:
+            cursor.execute("UPDATE product_failures SET barcode = %s WHERE barcode = %s", (new, old))
+
+
+def save_product_failure(barcode, product_name, brand, error_message, sku_key=None):
+    """
+    تسجيل فشل منتج حقيقي (لا تُسجل هنا انقطاعات المزودين). سجل واحد لكل منتج: بـ sku_key عند تمريره
+    (عمود فريد)، ومفتاح العرض failure_key. منتج آخر يحمل مفتاح العرض نفسه (نفس الاسم والبراند وحجم آخر)
+    لا يُكتب فوقه: يُضاف sku_key إلى المفتاح.
+    """
+    sku_clean = str(sku_key).strip()[:64] if sku_key else ""
+    key = failure_key(barcode, product_name, brand or "")
     try:
         conn = get_db_connection()
         try:
             cursor = conn.cursor()
-            barcode_clean = str(barcode).strip() if barcode else ""
-            if not barcode_clean:
-                barcode_clean = f"ERR_{product_name}_{brand}".replace(" ", "_")
+            if sku_clean:
+                cursor.execute("DELETE FROM product_failures WHERE sku_key = %s", (sku_clean,))
+                cursor.execute("SELECT sku_key FROM product_failures WHERE barcode = %s", (key,))
+                holder = cursor.fetchone()
+                if holder and holder.get("sku_key") and holder["sku_key"] != sku_clean:
+                    key = f"{key[:190]}#{sku_clean}"
             cursor.execute("""
-                REPLACE INTO product_failures (barcode, product_name, brand, error_message, failed_at)
-                VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)
-            """, (barcode_clean[:255], product_name, brand, error_message))
+                REPLACE INTO product_failures (barcode, product_name, brand, error_message, failed_at, sku_key)
+                VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP, %s)
+            """, (key, product_name, brand, error_message, sku_clean or None))
             conn.commit()
         finally:
             _close(conn)
@@ -989,16 +1048,25 @@ def save_product_failure(barcode, product_name, brand, error_message):
         return False
 
 
-def delete_product_failure(barcode):
-    """حذف سجل الفشل عند نجاح مطابقة المنتج لاحقاً."""
+def delete_product_failure(barcode, sku_key=None, product_name=None, brand=None):
+    """
+    حذف سجل الفشل عند نجاح مطابقة المنتج لاحقاً: بالمفتاح الممرر (السلوك القديم)، وبـ sku_key،
+    وبمفتاح العرض failure_key عند تمرير الاسم.
+    """
     try:
         conn = get_db_connection()
         try:
             cursor = conn.cursor()
             barcode_clean = str(barcode).strip() if barcode else ""
-            cursor.execute("DELETE FROM product_failures WHERE barcode = %s", (barcode_clean,))
-            if barcode_clean.startswith("ERR_"):
-                cursor.execute("DELETE FROM product_failures WHERE barcode LIKE %s", (barcode_clean + "%",))
+            keys = [barcode_clean] if barcode_clean else []
+            if product_name:
+                keys.append(failure_key(barcode, product_name, brand or ""))
+            for key in dict.fromkeys(keys):
+                cursor.execute("DELETE FROM product_failures WHERE barcode = %s", (key,))
+                if key.startswith("ERR_"):
+                    cursor.execute("DELETE FROM product_failures WHERE barcode LIKE %s", (key + "%",))
+            if sku_key:
+                cursor.execute("DELETE FROM product_failures WHERE sku_key = %s", (str(sku_key).strip(),))
             conn.commit()
         finally:
             _close(conn)
@@ -1009,7 +1077,7 @@ def delete_product_failure(barcode):
 
 
 def get_product_failures():
-    """استرجاع كافة المنتجات الفاشلة كـ dict."""
+    """استرجاع كافة المنتجات الفاشلة كـ dict بمفتاح العرض (عمود barcode)، وبـ sku_key أيضاً للسجلات الجديدة."""
     try:
         conn = get_db_connection()
         try:
@@ -1018,8 +1086,14 @@ def get_product_failures():
             rows = cursor.fetchall()
         finally:
             _close(conn)
-        return {row["barcode"]: {"error_message": row["error_message"], "failed_at": row["failed_at"]}
-                for row in rows if row["barcode"]}
+        out = {}
+        for row in rows:
+            entry = {"error_message": row["error_message"], "failed_at": row["failed_at"]}
+            if row.get("sku_key"):
+                out.setdefault(row["sku_key"], entry)
+            if row["barcode"]:
+                out[row["barcode"]] = entry
+        return out
     except Exception as e:
         logger.warning("[MariaDB] فشل استرجاع سجلات الأخطاء: %s", e)
         return {}
@@ -1384,52 +1458,223 @@ def review_stats(rows):
 # طابور المهام (automation_queue)
 # ---------------------------------------------------------------------------
 
-def add_to_queue(row_number, barcode, name, brand, query, payload=None, sku_key=None, reprocess=False):
+# --- جدولة الطابور (P4a) ---------------------------------------------------------------------------
+# أولوية السحب: الصفوف الجديدة (وكتابة رابط معتمد) أولاً، ثم إعادة التحقق، ثم إعادة المحاولة التي حان موعدها
+PRIORITY_NEW, PRIORITY_REVERIFY, PRIORITY_RETRY = 0, 1, 2
+# «لا نتيجة» نظيفة: إعادة المحاولة بعد 3 ثم 7 ثم 30 يوماً، ثم يبقى الصف فاشلاً (أو قبل ذلك إذا تغير
+# مدخل البراند في Brands Mapping أو ظهرت صفحات جديدة للبراند في الفهرس المحلي)
+NOT_FOUND_CODES = ("NO_RESULTS", "ALL_CONFLICTED")
+NOT_FOUND_RETRY_DAYS = (3, 7, 30)
+# انقطاع المزودين لصف واحد: انتظار 10 دقائق يتضاعف، وبعد 3 محاولات في التشغيل نفسه يُركن الصف للتشغيل التالي
+PROVIDER_DOWN_BACKOFF_MINUTES = 10
+MAX_PROVIDER_DOWN_PER_RUN = 3
+PROVIDER_DOWN_PARK_MINUTES = 12 * 60
+# العامل ينتظر صفاً مؤجلاً يحين موعده خلال هذه المدة؛ ما بعدها يبقى في الانتظار للتشغيل التالي
+OPEN_TASK_HORIZON_MINUTES = 45
+# صف جاهز للمراجعة بسبب تعطل قارئ الملصق (VERIFIER_DOWN) يُعاد بحثه عند تشغيل يكون فيه القارئ متاحاً، مرتين كحد أقصى
+MAX_REVERIFY = 2
+TASK_RELINK = "relink"
+# أسباب تفتح صفاً مكتملاً بلا رابط في الشيت للبحث من جديد (للمراجعة فقط)
+REOPEN_REASONS = ("LINK_CLEARED", "LINK_MISSING")
+QUEUE_BATCH = 500
+# تعارض أقفال InnoDB (1213 deadlock، 1205 انتهاء انتظار القفل) بين السحب وكتابة النتيجة أو الإدراج:
+# تُعاد المعاملة حتى LOCK_RETRIES مرات
+LOCK_CONFLICT_CODES = (1205, 1213)
+LOCK_RETRIES = 3
+
+_QUEUE_COLUMNS = ("`row_number`", "barcode", "product_name", "brand", "search_query", "status", "attempts",
+                  "sku_key", "alt_sku_key", "payload_json", "brand_fp", "priority", "task_kind", "review_only",
+                  "requeue_reason", "fail_count", "reverify_count")
+_IDENTITY_UPDATE = ("barcode = VALUES(barcode), product_name = VALUES(product_name), brand = VALUES(brand), "
+                    "search_query = VALUES(search_query), sku_key = VALUES(sku_key), "
+                    "alt_sku_key = VALUES(alt_sku_key), payload_json = VALUES(payload_json), "
+                    "updated_at = CURRENT_TIMESTAMP")
+# الصيغة (VALUES من %s فقط، ولا %s بعد ON DUPLICATE) تجعل pymysql يرسل الدفعة كلها في عبارة INSERT واحدة
+_QUEUE_INSERT = (f"INSERT INTO automation_queue ({', '.join(_QUEUE_COLUMNS)}) "
+                 f"VALUES ({', '.join(['%s'] * len(_QUEUE_COLUMNS))}) ON DUPLICATE KEY UPDATE ")
+# صف موجود يبقى كما هو (مراجعة، مكتمل، حجز ساري، فاشل لم يحن موعده): أعمدة الهوية والحمولة فقط تتحدث
+_QUEUE_KEEP_SQL = _QUEUE_INSERT + _IDENTITY_UPDATE
+# صف يعود للانتظار: حالة جديدة بلا رمز فشل ولا trace ولا حجز، والمحاولة التالية الآن
+_QUEUE_RESET_SQL = _QUEUE_INSERT + (
+    "status = 'pending', error_message = NULL, attempts = 0, failure_code = NULL, trace_json = NULL, "
+    "worker_id = NULL, lease_until = NULL, next_attempt_at = NULL, down_count = 0, "
+    "fail_count = VALUES(fail_count), reverify_count = VALUES(reverify_count), priority = VALUES(priority), "
+    "task_kind = VALUES(task_kind), review_only = VALUES(review_only), requeue_reason = VALUES(requeue_reason), "
+    "brand_fp = VALUES(brand_fp), " + _IDENTITY_UPDATE)
+
+
+def _same_text(a, b):
+    return str(a or "").strip().casefold() == str(b or "").strip().casefold()
+
+
+def plan_queue_row(old, new, reprocess=False):
     """
-    إضافة/تحديث صف في الطابور (Upsert على row_number).
-    لا يعيد أبداً ضبط صف جاهز للمراجعة أو مكتمل (ولا صف قيد المعالجة بحجز ساري) إلا إذا reprocess=True
-    أو تغيّر المنتج في هذا الصف (sku_key مختلف). تعيد True عند النجاح وترفع أخطاء قاعدة البيانات.
+    ماذا يفعل الإدراج بصف واحد: ('insert' | 'keep' | 'reset', حقول الصف عند الإدراج أو إعادة الضبط).
+    old: صف الطابور الحالي (أو None) مع live (حجز ساري)، has_next و due (موعد المحاولة التالية موجود / حان).
+    new: الصف من الشيت (الهوية، task_kind، review_only، requeue_reason، brand_fp).
+    - منتج آخر في الصف (sku_key مختلف) أو reprocess: صف جديد من الصفر.
+    - حجز ساري لعامل: يبقى كما هو.
+    - كتابة رابط معتمد (task_kind='relink'): تعود للانتظار مهما كانت الحالة.
+    - جاهز للمراجعة: يبقى. مكتمل: يبقى، إلا إذا مُسح رابطه من الشيت (REOPEN_REASONS).
+    - فاشل بـ «لا نتيجة»: يبقى حتى يحين موعده (3 / 7 / 30 يوماً) أو يتغير مدخل البراند أو الفهرس المحلي.
+      فاشل لسبب آخر: يعود للانتظار (إعادة محاولة).
+    - في الانتظار (أو حجز انتهى): يعود للانتظار بأولويته، والمحاولة التالية الآن.
     """
-    payload_json = json.dumps(payload, ensure_ascii=False) if payload is not None else None
-    # ملاحظة: في ON DUPLICATE KEY UPDATE تُقيّم الإسنادات بالترتيب ويرى كل إسناد القيم المحدثة قبله؛
-    # لذلك تأتي الأعمدة المعتمدة على الحالة القديمة أولاً، ثم status، ثم أعمدة الهوية.
-    # نفس المنتج: نفس sku_key، أو صف قديم بلا sku_key (قبل الترقية) بنفس الاسم
-    keep = ("(%s = 0 AND (sku_key <=> VALUES(sku_key) OR (sku_key IS NULL AND product_name <=> VALUES(product_name))) AND ("
-            "status IN ('ready_for_review','completed') "
-            "OR (status = 'processing' AND lease_until IS NOT NULL AND lease_until >= NOW())))")
-    sql = f"""
-        INSERT INTO automation_queue (`row_number`, barcode, product_name, brand, search_query, status,
-                                      error_message, attempts, sku_key, payload_json, failure_code, updated_at)
-        VALUES (%s, %s, %s, %s, %s, 'pending', NULL, 0, %s, %s, NULL, CURRENT_TIMESTAMP)
-        ON DUPLICATE KEY UPDATE
-            error_message = IF({keep}, error_message, NULL),
-            attempts = IF({keep}, attempts, 0),
-            failure_code = IF({keep}, failure_code, NULL),
-            trace_json = IF({keep}, trace_json, NULL),
-            worker_id = IF({keep}, worker_id, NULL),
-            lease_until = IF({keep}, lease_until, NULL),
-            status = IF({keep}, status, 'pending'),
-            barcode = VALUES(barcode),
-            product_name = VALUES(product_name),
-            brand = VALUES(brand),
-            search_query = VALUES(search_query),
-            sku_key = VALUES(sku_key),
-            payload_json = VALUES(payload_json),
-            updated_at = CURRENT_TIMESTAMP
+    fresh = {"priority": PRIORITY_NEW, "fail_count": 0, "reverify_count": 0, "task_kind": new.get("task_kind") or None,
+             "review_only": 1 if new.get("review_only") else 0, "requeue_reason": new.get("requeue_reason") or None}
+    if old is None:
+        return "insert", fresh
+    same = old.get("sku_key") == new.get("sku_key") or (
+        old.get("sku_key") is None and _same_text(old.get("product_name"), new.get("product_name")))
+    if reprocess or not same:
+        return "reset", fresh
+    if old.get("status") == "processing" and old.get("live"):
+        return "keep", None
+    carry = dict(fresh, fail_count=int(old.get("fail_count") or 0), reverify_count=int(old.get("reverify_count") or 0))
+    reason = fresh["requeue_reason"]
+    if fresh["task_kind"] == TASK_RELINK:
+        return "reset", carry
+    status = old.get("status")
+    if status == "ready_for_review":
+        return "keep", None
+    if status == "completed":
+        return ("reset", carry) if reason in REOPEN_REASONS else ("keep", None)
+    if status == "failed":
+        if old.get("failure_code") in NOT_FOUND_CODES and reason not in REOPEN_REASONS:
+            brand_changed = bool(old.get("brand_fp") and new.get("brand_fp") and old["brand_fp"] != new["brand_fp"])
+            exhausted = carry["fail_count"] > len(NOT_FOUND_RETRY_DAYS)
+            due = not exhausted and (not old.get("has_next") or bool(old.get("due")))
+            if brand_changed:
+                reason = "BRAND_MAPPING_CHANGED"
+            elif reason != "LOCAL_INDEX_CHANGED":
+                if not due:
+                    return "keep", None
+                reason = "SCHEDULED_RETRY"
+        return "reset", dict(carry, priority=PRIORITY_RETRY, requeue_reason=reason or "RETRY")
+    # في الانتظار من تشغيل سابق (انقطاع مزودين، ميزانية، إيقاف) أو حجز انتهى: يعود الآن بأولويته وسببه
+    return "reset", dict(carry, priority=int(old.get("priority") or 0),
+                         requeue_reason=reason or old.get("requeue_reason") or None)
+
+
+def _queue_row_params(new, fields):
+    return (new["row_number"], new.get("barcode"), new.get("product_name"), new.get("brand"), new.get("search_query"),
+            "pending", 0, new.get("sku_key"), new.get("alt_sku_key"), new.get("payload_json"), new.get("brand_fp"),
+            fields["priority"], fields["task_kind"], fields["review_only"], fields["requeue_reason"],
+            fields["fail_count"], fields["reverify_count"])
+
+
+def _upsert_queue_chunk(cursor, chunk, reprocess):
+    numbers = [r["row_number"] for r in chunk]
+    cursor.execute(
+        "SELECT id, `row_number`, sku_key, product_name, status, failure_code, fail_count, reverify_count, priority, "
+        "task_kind, review_only, requeue_reason, brand_fp, "
+        "(lease_until IS NOT NULL AND lease_until >= NOW()) AS live, (next_attempt_at IS NOT NULL) AS has_next, "
+        "(next_attempt_at IS NOT NULL AND next_attempt_at <= NOW()) AS due "
+        f"FROM automation_queue WHERE `row_number` IN ({','.join(['%s'] * len(numbers))}) FOR UPDATE",
+        tuple(numbers),
+    )
+    existing = {r["row_number"]: r for r in cursor.fetchall() or []}
+    keep_rows, reset_rows = [], []
+    counts = {"insert": 0, "keep": 0, "reset": 0}
+    for new in chunk:
+        old = existing.get(new["row_number"])
+        action, fields = plan_queue_row(old, new, reprocess)
+        counts[action] += 1
+        if action == "keep":
+            fields = {"priority": old.get("priority") or 0, "task_kind": old.get("task_kind"),
+                      "review_only": old.get("review_only") or 0, "requeue_reason": old.get("requeue_reason"),
+                      "fail_count": old.get("fail_count") or 0, "reverify_count": old.get("reverify_count") or 0}
+            keep_rows.append(_queue_row_params(new, fields))
+        elif action == "insert":
+            keep_rows.append(_queue_row_params(new, fields))        # صف جديد: ON DUPLICATE لا يُستخدم
+        else:
+            reset_rows.append(_queue_row_params(new, fields))
+    if keep_rows:
+        cursor.executemany(_QUEUE_KEEP_SQL, keep_rows)
+    if reset_rows:
+        cursor.executemany(_QUEUE_RESET_SQL, reset_rows)
+    return counts
+
+
+def queue_input(row_number, barcode, name, brand, query, payload=None, sku_key=None, alt_sku_key=None,
+                 brand_fp=None, task_kind=None, review_only=False, requeue_reason=None):
+    return {"row_number": row_number, "barcode": barcode, "product_name": name, "brand": brand,
+            "search_query": query, "sku_key": sku_key, "alt_sku_key": alt_sku_key or sku_key,
+            "payload_json": json.dumps(payload, ensure_ascii=False) if payload is not None else None,
+            "brand_fp": brand_fp, "task_kind": task_kind, "review_only": 1 if review_only else 0,
+            "requeue_reason": requeue_reason}
+
+
+def add_many_to_queue(rows, reprocess=False, totals=None):
     """
-    flag = 1 if reprocess else 0
-    params = (row_number, barcode, name, brand, query, sku_key, payload_json) + (flag,) * 7
+    إدراج/تحديث صفوف كثيرة في الطابور (Upsert على row_number) بدفعات من QUEUE_BATCH صف: قراءة الصفوف الحالية
+    (FOR UPDATE) وعبارتا INSERT جماعيتان ثم commit لكل دفعة، بدل اتصال و commit لكل صف (10 آلاف صف في ثوانٍ).
+    rows: قواميس queue_input (row_number, barcode, product_name, brand, search_query, sku_key, alt_sku_key,
+    payload_json, brand_fp, task_kind, review_only, requeue_reason). القرار لكل صف من plan_queue_row.
+    تعيد {'insert', 'keep', 'reset'} وترفع أخطاء قاعدة البيانات. totals (dict اختياري): يُحدَّث بعد كل دفعة تُحفظ،
+    فيعرف المستدعي كم صفاً حُفظ قبل خطأ في منتصف الطريق.
+    """
+    latest = {}
+    for r in rows or []:
+        latest[r["row_number"]] = r                      # رقم صف مكرر: الأخير يفوز
+    items = list(latest.values())
+    totals = totals if totals is not None else {}
+    for k in ("insert", "keep", "reset"):
+        totals.setdefault(k, 0)
+    if not items:
+        return totals
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
-        cursor.execute(sql, params)
-        conn.commit()
+        for start in range(0, len(items), QUEUE_BATCH):
+            for n in range(1, LOCK_RETRIES + 1):
+                try:
+                    counts = _upsert_queue_chunk(cursor, items[start:start + QUEUE_BATCH], bool(reprocess))
+                    conn.commit()
+                    break
+                except pymysql.err.OperationalError as e:
+                    conn.rollback()
+                    if not e.args or e.args[0] not in LOCK_CONFLICT_CODES or n == LOCK_RETRIES:
+                        raise
+                    logger.warning("[MariaDB Queue] تعارض أقفال أثناء الإدراج (%s)؛ إعادة الدفعة.", e.args[0])
+                except Exception:
+                    conn.rollback()
+                    raise
+            for k, v in counts.items():
+                totals[k] += v
     finally:
         _close(conn)
+    return totals
+
+
+def add_to_queue(row_number, barcode, name, brand, query, payload=None, sku_key=None, reprocess=False,
+                 alt_sku_key=None, brand_fp=None, task_kind=None, review_only=False, requeue_reason=None):
+    """
+    إضافة/تحديث صف واحد في الطابور (Upsert على row_number؛ نفس قرار add_many_to_queue).
+    لا يعيد أبداً ضبط صف جاهز للمراجعة أو مكتمل (ولا صف قيد المعالجة بحجز ساري) إلا إذا reprocess=True
+    أو تغيّر المنتج في هذا الصف (sku_key مختلف)، وصف «لا نتيجة» ينتظر موعده. تعيد True وترفع أخطاء قاعدة البيانات.
+    """
+    add_many_to_queue([queue_input(row_number, barcode, name, brand, query, payload, sku_key, alt_sku_key,
+                                    brand_fp, task_kind, review_only, requeue_reason)], reprocess=reprocess)
     return True
 
 
 CLAIMABLE_SQL = "(status='pending' OR (status='processing' AND (lease_until IS NULL OR lease_until<NOW())))"
+
+
+def _claimable(alias=""):
+    """
+    صف قابل للسحب: في الانتظار، أو قيد المعالجة انتهى حجزه؛ إلا صفاً أعاده انقطاع المزودين بموعد لم يحن بعد.
+    إعادة المحاولة من لوحة التحكم أو رفض المراجع تمسح رمز PROVIDER_DOWN فيُسحب الصف فوراً.
+    """
+    p = f"{alias}." if alias else ""
+    return (f"(({p}status='pending' OR ({p}status='processing' AND ({p}lease_until IS NULL OR {p}lease_until<NOW()))) "
+            f"AND NOT ({p}status='pending' AND {p}failure_code <=> 'PROVIDER_DOWN' AND {p}next_attempt_at > NOW()))")
+
+
+# منتج واحد = بحث واحد: صف لمنتج له صف آخر قيد المعالجة بحجز ساري ينتظر نتيجته (تُطبق عليه عند انتهائه)
+_SIBLING_BUSY_SQL = ("q.sku_key IS NOT NULL AND EXISTS (SELECT 1 FROM automation_queue s WHERE s.sku_key = q.sku_key "
+                     "AND s.id <> q.id AND s.status = 'processing' AND s.lease_until >= NOW())")
 
 
 def new_claim_id(worker_id=None):
@@ -1441,20 +1686,22 @@ def fetch_next_task(worker_id=None):
     """
     سحب ذري للمهمة التالية: UPDATE واحد يحجز الصف (pending، أو processing انتهى حجزه) بمعرف سحب فريد،
     ثم SELECT بذلك المعرف. شرط الحالة يتكرر في الـ WHERE الخارجي كي يفشل المتسابق الثاني بدل أن يسرق الصف.
+    الترتيب: الأولوية (جديد، ثم إعادة تحقق، ثم إعادة محاولة) ثم id. صف أعاده انقطاع المزودين لا يُسحب قبل موعده،
+    وصف لمنتج (sku_key) قيد المعالجة في صف آخر ينتظر (بحث واحد لكل منتج).
     أخطاء قاعدة البيانات تُرفع (لا تتحول إلى None).
     """
     claim_id = new_claim_id(worker_id)
     # حجز بلا lease_until (صفوف تركها الإصدار القديم في 'processing' عند إيقافه) يُعامل كمنتهٍ،
     # وإلا لن يُسحب أبداً ويبقى count_open_tasks أكبر من صفر فلا ينتهي العامل.
-    claimable = CLAIMABLE_SQL
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
         cursor.execute(
             "UPDATE automation_queue SET status='processing', worker_id=%s, "
             f"lease_until=NOW() + INTERVAL {LEASE_MINUTES} MINUTE, attempts=attempts+1, updated_at=CURRENT_TIMESTAMP "
-            f"WHERE id=(SELECT id FROM (SELECT id FROM automation_queue WHERE {claimable} ORDER BY id LIMIT 1) t) "
-            f"AND {claimable}",
+            f"WHERE id=(SELECT id FROM (SELECT q.id FROM automation_queue q WHERE {_claimable('q')} "
+            f"AND NOT ({_SIBLING_BUSY_SQL}) ORDER BY q.priority, q.id LIMIT 1) t) "
+            f"AND {_claimable()}",
             (claim_id,),
         )
         conn.commit()
@@ -1535,39 +1782,202 @@ def _trace_to_json(trace):
         return None
 
 
-def update_task_status(task_id, status, error_message=None, failure_code=None, trace=None, claim_id=None):
+def _retry_lock_conflicts(attempt, retries=LOCK_RETRIES):
+    """تنفيذ معاملة (attempt تفتح اتصالها وتغلقه) مع إعادتها عند تعارض أقفال؛ أي خطأ آخر يُرفع كما هو."""
+    import time
+    for n in range(1, retries + 1):
+        try:
+            return attempt()
+        except pymysql.err.OperationalError as e:
+            if not e.args or e.args[0] not in LOCK_CONFLICT_CODES or n == retries:
+                raise
+            logger.warning("[MariaDB Queue] تعارض أقفال (%s)؛ إعادة المعاملة (%s/%s).", e.args[0], n, retries)
+            time.sleep(0.1 * n)
+
+
+def outcome_schedule(row, status, failure_code, group_fail_count=0):
     """
-    تحديث حالة المهمة بعد المعالجة، مع رمز الفشل والـ trace، وتحرير الحجز.
+    موعد المحاولة التالية وعداداتها بعد نتيجة البحث: {next_minutes (None = لا موعد), fail_count, down_count, priority}.
+    - PROVIDER_DOWN (يعود للانتظار): 10 دقائق ثم 20 ...؛ المحاولة الثالثة في التشغيل نفسه تركن الصف 12 ساعة
+      (الإدراج التالي يعيده فوراً). down_count يُصفّر عند كل إدراج، فهو عدد محاولات هذا التشغيل.
+    - «لا نتيجة» (NO_RESULTS / ALL_CONFLICTED): 3 ثم 7 ثم 30 يوماً، ثم بلا موعد (يبقى فاشلاً).
+      group_fail_count: أعلى عداد بين صفوف المنتج نفسه، فلا يبدأ الجدول من جديد لصف مكرر.
+    - نتيجة للمراجعة أو نشر: تُصفّر العدادات.
+    """
+    fail = int(row.get("fail_count") or 0)
+    down = int(row.get("down_count") or 0)
+    priority = int(row.get("priority") or 0)
+    if status == "pending" and failure_code == "PROVIDER_DOWN":
+        down += 1
+        minutes = (PROVIDER_DOWN_PARK_MINUTES if down >= MAX_PROVIDER_DOWN_PER_RUN
+                   else min(PROVIDER_DOWN_BACKOFF_MINUTES * 2 ** (down - 1), PROVIDER_DOWN_PARK_MINUTES))
+        return {"next_minutes": minutes, "fail_count": fail, "down_count": down, "priority": PRIORITY_RETRY}
+    if status == "failed" and failure_code in NOT_FOUND_CODES:
+        fail = max(fail, int(group_fail_count or 0)) + 1
+        days = NOT_FOUND_RETRY_DAYS[fail - 1] if fail <= len(NOT_FOUND_RETRY_DAYS) else None
+        return {"next_minutes": days * 24 * 60 if days else None, "fail_count": fail, "down_count": 0,
+                "priority": PRIORITY_RETRY}
+    if status in ("ready_for_review", "completed"):
+        return {"next_minutes": None, "fail_count": 0, "down_count": 0, "priority": priority}
+    return {"next_minutes": None, "fail_count": fail, "down_count": 0, "priority": priority}
+
+
+def update_task_status(task_id, status, error_message=None, failure_code=None, trace=None, claim_id=None,
+                       siblings=None):
+    """
+    تحديث حالة المهمة بعد المعالجة، مع رمز الفشل والـ trace وموعد المحاولة التالية (outcome_schedule)، وتحرير الحجز.
     claim_id (معرف السحب من fetch_next_task): عند تمريره لا يُحدَّث الصف إلا إذا كان ما زال محجوزاً بهذا
     المعرف وفي حالة 'processing'؛ فلا تكتب نتيجة العامل فوق اعتماد بشري تم أثناء المعالجة أو فوق حجز
     أعيد سحبه بعد انتهائه. تعيد False إن لم يعد الحجز ملكاً للعامل.
+    منتج واحد = بحث واحد: صفوف المنتج نفسه (sku_key) التي تنتظر (pending / failed، مهمة بحث) تأخذ النتيجة نفسها
+    في المعاملة نفسها. siblings=None: كلها، إلا عند 'completed' (النشر يكتب رابط كل صف أولاً ويمرر معرفاته)؛
+    siblings=[ids]: هذه الصفوف فقط؛ siblings=(): لا شيء. صف مكتمل أو جاهز للمراجعة أو قيد المعالجة لا يُلمس،
+    ونتيجة عابرة (انقطاع المزودين، خطأ بحث) لا تغيّر صفاً فاشلاً ينتظر موعده.
     """
-    sql = """
-        UPDATE automation_queue
-        SET status = %s, error_message = %s, failure_code = %s,
-            trace_json = COALESCE(%s, trace_json), lease_until = NULL, updated_at = CURRENT_TIMESTAMP
-        WHERE id = %s
+    trace_json = _trace_to_json(trace)
+
+    def attempt():
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            sql = "SELECT id, sku_key, task_kind, fail_count, down_count, priority FROM automation_queue WHERE id = %s"
+            params = (task_id,)
+            if claim_id:
+                sql += " AND worker_id = %s AND status = 'processing'"
+                params += (claim_id,)
+            cursor.execute(sql + " FOR UPDATE", params)
+            row = cursor.fetchone()
+            if row is None:
+                conn.rollback()
+                if claim_id:
+                    logger.warning("[MariaDB Queue] المهمة %s لم تعد محجوزة بـ %s؛ لم تُكتب الحالة %s",
+                                   task_id, claim_id, status)
+                    return False
+                return True
+            sibling_rows = []
+            sku = row.get("sku_key")
+            if sku and not row.get("task_kind") and siblings != ():
+                # نتيجة عابرة (انقطاع، خطأ بحث) لا تغيّر صفاً فاشلاً ينتظر موعده: لم نعرف شيئاً جديداً عن المنتج
+                learned = status in ("ready_for_review", "completed") or (
+                    status == "failed" and failure_code in NOT_FOUND_CODES)
+                waiting = "('pending','failed')" if learned else "('pending')"
+                base = ("SELECT id, fail_count FROM automation_queue WHERE sku_key = %s AND id <> %s "
+                        f"AND status IN {waiting} AND task_kind IS NULL")
+                if siblings is None and status != "completed":
+                    cursor.execute(base + " FOR UPDATE", (sku, task_id))
+                    sibling_rows = list(cursor.fetchall() or [])
+                elif siblings:
+                    ids = [int(i) for i in siblings]
+                    cursor.execute(base + f" AND id IN ({','.join(['%s'] * len(ids))}) FOR UPDATE",
+                                   (sku, task_id) + tuple(ids))
+                    sibling_rows = list(cursor.fetchall() or [])
+            group_fail = max([int(r.get("fail_count") or 0) for r in sibling_rows] or [0])
+            plan = outcome_schedule(row, status, failure_code, group_fail)
+            if plan["next_minutes"] is None:
+                next_sql, next_params = "NULL", ()
+            else:
+                next_sql, next_params = "NOW() + INTERVAL %s MINUTE", (int(plan["next_minutes"]),)
+            counters = (plan["fail_count"], plan["down_count"], plan["priority"])
+            cursor.execute(
+                "UPDATE automation_queue SET status = %s, error_message = %s, failure_code = %s, "
+                "trace_json = COALESCE(%s, trace_json), lease_until = NULL, "
+                f"next_attempt_at = {next_sql}, fail_count = %s, down_count = %s, priority = %s, "
+                "searched_at = NOW(), updated_at = CURRENT_TIMESTAMP WHERE id = %s",
+                (status, error_message, failure_code, trace_json) + next_params + counters + (task_id,),
+            )
+            if sibling_rows:
+                ids = tuple(int(r["id"]) for r in sibling_rows)
+                cursor.execute(
+                    "UPDATE automation_queue SET status = %s, error_message = %s, failure_code = %s, lease_until = NULL, "
+                    f"next_attempt_at = {next_sql}, fail_count = %s, down_count = %s, priority = %s, "
+                    "searched_at = NOW(), updated_at = CURRENT_TIMESTAMP "
+                    f"WHERE id IN ({','.join(['%s'] * len(ids))})",
+                    (status, error_message, failure_code) + next_params + counters + ids,
+                )
+            conn.commit()
+        finally:
+            _close(conn)
+        return True
+
+    try:
+        return _retry_lock_conflicts(attempt)
+    except Exception as e:
+        logger.warning("[MariaDB Queue] فشل تحديث حالة المهمة %s: %s", task_id, e)
+        return False
+
+
+def get_sku_siblings(task_id, sku_key):
     """
-    params = (status, error_message, failure_code, _trace_to_json(trace), task_id)
-    if claim_id:
-        sql += " AND worker_id = %s AND status = 'processing'"
-        params += (claim_id,)
+    صفوف المنتج نفسه (sku_key) التي تنتظر نتيجة بحث هذه المهمة (pending / failed، مهمة بحث)، مع هويتها في الشيت.
+    خطأ القراءة يُسجل ويعيد [] (لا تُكتب صفوف إضافية).
+    """
+    if not sku_key:
+        return []
     try:
         conn = get_db_connection()
         try:
             cursor = conn.cursor()
-            cursor.execute(sql, params)
-            affected = cursor.rowcount
-            conn.commit()
+            cursor.execute(
+                "SELECT id, `row_number`, barcode, product_name, brand, payload_json, review_only "
+                "FROM automation_queue WHERE sku_key = %s AND id <> %s AND status IN ('pending','failed') "
+                "AND task_kind IS NULL ORDER BY id", (str(sku_key).strip(), task_id))
+            return [dict(r) for r in cursor.fetchall() or []]
         finally:
             _close(conn)
-        if claim_id and not affected:
-            logger.warning("[MariaDB Queue] المهمة %s لم تعد محجوزة بـ %s؛ لم تُكتب الحالة %s", task_id, claim_id, status)
-            return False
-        return True
     except Exception as e:
-        logger.warning("[MariaDB Queue] فشل تحديث حالة المهمة %s: %s", task_id, e)
-        return False
+        logger.warning("[MariaDB Queue] تعذر قراءة صفوف المنتج %s: %s", sku_key, e)
+        return []
+
+
+def requeue_verifier_down(run_id=None, max_reverify=MAX_REVERIFY):
+    """
+    صفوف جاهزة للمراجعة لأن قارئ الملصق تعطل (VERIFIER_DOWN) ولم يقرر فيها مراجع بعد تعود للانتظار بأولوية
+    إعادة التحقق (بحث جديد بقارئ يعمل)، حتى max_reverify مرة لكل صف ثم تنتظر المراجع. مرشحاتها تبقى حتى يحل
+    محلها البحث الجديد. يستدعيه العامل عندما يكون القارئ متاحاً. تعيد عدد الصفوف، أو None عند خطأ (يُسجل).
+    """
+    try:
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE automation_queue SET status = 'pending', priority = %s, requeue_reason = 'VERIFIER_RECHECK', "
+                "reverify_count = reverify_count + 1, run_id = COALESCE(%s, run_id), worker_id = NULL, "
+                "lease_until = NULL, next_attempt_at = NULL, updated_at = CURRENT_TIMESTAMP "
+                "WHERE status = 'ready_for_review' AND failure_code = 'VERIFIER_DOWN' AND reverify_count < %s "
+                "AND task_kind IS NULL",
+                (PRIORITY_REVERIFY, run_id, int(max_reverify)),
+            )
+            count = cursor.rowcount
+            conn.commit()
+            return count
+        finally:
+            _close(conn)
+    except Exception as e:
+        logger.warning("[MariaDB Queue] تعذر إعادة صفوف VERIFIER_DOWN للتحقق: %s", e)
+        return None
+
+
+def park_verifier_rechecks():
+    """
+    قارئ الملصق ما زال معطلاً في هذا التشغيل: صفوف إعادة التحقق التي لم تُسحب بعد تعود جاهزة للمراجعة
+    (مرشحاتها ما زالت محفوظة)، فلا يُدفع بحث جديد سينتهي VERIFIER_DOWN مرة أخرى. تعيد العدد أو None عند خطأ.
+    """
+    try:
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE automation_queue SET status = 'ready_for_review', failure_code = 'VERIFIER_DOWN', "
+                "reverify_count = GREATEST(reverify_count - 1, 0), updated_at = CURRENT_TIMESTAMP "
+                "WHERE status = 'pending' AND requeue_reason = 'VERIFIER_RECHECK'")
+            count = cursor.rowcount
+            conn.commit()
+            return count
+        finally:
+            _close(conn)
+    except Exception as e:
+        logger.warning("[MariaDB Queue] تعذر إرجاع صفوف إعادة التحقق للمراجعة: %s", e)
+        return None
 
 
 # حالة «بانتظار المراجعة» تنتهي عندما لا يبقى أي صف جاهز للمراجعة (اعتمد المراجع أو رفض آخر صف)
@@ -1647,11 +2057,18 @@ def get_queue_statistics():
 
 
 def count_open_tasks():
-    """عدد المهام المفتوحة (pending أو processing) بـ COUNT(*) موثوق. أخطاء قاعدة البيانات تُرفع."""
+    """
+    عدد المهام المفتوحة (pending أو processing) التي يستطيع هذا التشغيل معالجتها، بـ COUNT(*) موثوق. صف أعاده
+    انقطاع المزودين بموعد أبعد من OPEN_TASK_HORIZON_MINUTES لا يُحسب: يبقى في الانتظار للتشغيل التالي ولا يُبقي
+    العامل حياً بلا عمل. أخطاء قاعدة البيانات تُرفع.
+    """
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
-        cursor.execute("SELECT COUNT(*) AS cnt FROM automation_queue WHERE status IN ('pending','processing')")
+        cursor.execute(
+            "SELECT COUNT(*) AS cnt FROM automation_queue WHERE status IN ('pending','processing') "
+            "AND NOT (status = 'pending' AND failure_code <=> 'PROVIDER_DOWN' "
+            f"AND next_attempt_at > NOW() + INTERVAL {OPEN_TASK_HORIZON_MINUTES} MINUTE)")
         row = cursor.fetchone()
     finally:
         _close(conn)
@@ -1688,6 +2105,225 @@ def get_ready_for_review_count():
     except Exception as e:
         logger.warning("[MariaDB Queue] فشل حساب المهام الجاهزة للمراجعة: %s", e)
     return None
+
+
+# ---------------------------------------------------------------------------
+# سجل الصرف اليومي للبحث (search_spend) — P4a. صف لكل (يوم، تشغيل، مزود): الاستدعاءات المدفوعة التي أجاب عنها
+# المزود وتكلفتها التقديرية بأسعار ops_health، وقراءات الملصق المدفوعة (Gemini / Claude). اليوم هو تاريخ خادم
+# MariaDB (CURDATE)، أي اليوم المحلي على جهاز المالك. يقرؤه العامل قبل كل سحب عند ضبط DAILY_BUDGET_USD.
+# ---------------------------------------------------------------------------
+
+SPEND_TABLE_SQL = """
+    CREATE TABLE IF NOT EXISTS search_spend (
+        day DATE NOT NULL,
+        run_id VARCHAR(64) NOT NULL DEFAULT '',
+        provider VARCHAR(32) NOT NULL,
+        calls INT NOT NULL DEFAULT 0,
+        usd DECIMAL(14,6) NOT NULL DEFAULT 0,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (day, run_id, provider)
+    ) ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
+"""
+
+
+def spend_from_outcome(outcome):
+    """
+    تكلفة بحث واحد من trace['outcome']: [(provider, calls, usd)]. كل استعلام لمزود مدفوع أجاب عنه (ok / empty)
+    بسعره في ops_health.source_prices؛ الاستعلامات المرفوضة (رصيد، مفتاح، خطأ) لا تُحتسب، مثل لوحة التشخيصات.
+    قراءات الملصق: usd المسجل لكل استدعاء (outcome.vlm_usage)، وإلا vlm_calls بسعر Gemini الثابت.
+    """
+    import ops_health
+
+    outcome = outcome if isinstance(outcome, dict) else {}
+    prices = ops_health.source_prices()
+    totals = {}
+
+    def add(provider, calls, usd):
+        entry = totals.setdefault(provider, [0, 0.0])
+        entry[0] += calls
+        entry[1] += usd
+
+    for item in outcome.get("provider_health") or []:
+        if not isinstance(item, dict):
+            continue
+        provider = str(item.get("provider") or "").strip().lower()
+        status = str(item.get("status") or "").strip().lower()
+        if provider in ops_health.PAID_PROVIDERS and status in ops_health.ANSWERED_STATUSES:
+            add(provider, 1, float(prices.get(provider) or 0.0))
+    usage = [u for u in (outcome.get("vlm_usage") or []) if isinstance(u, dict)]
+    for u in usage:
+        provider = "claude" if str(u.get("provider") or "").strip().lower() == "claude" else "gemini"
+        try:
+            usd = max(0.0, float(u.get("usd") or 0.0))
+        except (TypeError, ValueError):
+            usd = 0.0
+        add(provider, 1, usd)
+    if not usage:
+        try:
+            calls = max(0, int(outcome.get("vlm_calls") or 0))
+        except (TypeError, ValueError):
+            calls = 0
+        if calls:
+            add("gemini", calls, calls * ops_health.GEMINI_COST_PER_CALL)
+    return [(p, c, round(u, 6)) for p, (c, u) in sorted(totals.items()) if c > 0]
+
+
+def record_search_spend(outcome, run_id=None):
+    """
+    يضيف تكلفة بحث واحد إلى سجل اليوم. لا يرفع أبداً: صف ضائع يُسجل في السجل والبحث يكمل.
+    تعيد عدد المزودين المسجلين، أو None عند الفشل.
+    """
+    try:
+        items = spend_from_outcome(outcome)
+    except Exception as e:
+        logger.warning("[Spend] تعذر حساب تكلفة البحث: %s", e)
+        return None
+    if not items:
+        return 0
+    try:
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            for provider, calls, usd in items:
+                cursor.execute(
+                    "INSERT INTO search_spend (day, run_id, provider, calls, usd) VALUES (CURDATE(), %s, %s, %s, %s) "
+                    "ON DUPLICATE KEY UPDATE calls = calls + VALUES(calls), usd = usd + VALUES(usd)",
+                    (str(run_id or "")[:64], provider[:32], int(calls), float(usd)),
+                )
+            conn.commit()
+            return len(items)
+        finally:
+            _close(conn)
+    except Exception as e:
+        logger.warning("[Spend] لم يُسجل صرف البحث: %s", e)
+        return None
+
+
+def spend_today():
+    """التكلفة التقديرية لكل عمليات البحث اليوم (دولار). أخطاء قاعدة البيانات تُرفع: صرف مجهول لا يصبح ميزانية مفتوحة."""
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT COALESCE(SUM(usd), 0) AS usd FROM search_spend WHERE day = CURDATE()")
+        row = cursor.fetchone() or {}
+    finally:
+        _close(conn)
+    return float(row.get("usd") or 0.0)
+
+
+def spend_by_day(days=7):
+    """[{day, provider, calls, usd}] لآخر days يوماً (قراءة فقط؛ أخطاء قاعدة البيانات تُرفع)."""
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT day, provider, SUM(calls) AS calls, SUM(usd) AS usd FROM search_spend "
+            "WHERE day >= CURDATE() - INTERVAL %s DAY GROUP BY day, provider ORDER BY day DESC, provider",
+            (max(0, int(days) - 1),))
+        rows = cursor.fetchall() or []
+    finally:
+        _close(conn)
+    return [{"day": str(r["day"]), "provider": r["provider"], "calls": int(r["calls"] or 0),
+             "usd": round(float(r["usd"] or 0.0), 6)} for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# قراءات المطابقة عند الإدراج (P4a): ما يعرفه الطابور والكاش والفهرس المحلي وطابور الكتابة عن كل صف.
+# كلها قراءة فقط.
+# ---------------------------------------------------------------------------
+
+def queue_snapshot():
+    """{row_number: {sku_key, status, failure_code, fail_count, searched_at}} لكل صفوف الطابور. الأخطاء تُرفع."""
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT `row_number`, sku_key, status, failure_code, fail_count, searched_at "
+                       "FROM automation_queue")
+        rows = cursor.fetchall() or []
+    finally:
+        _close(conn)
+    return {r["row_number"]: dict(r) for r in rows}
+
+
+def resolution_snapshot():
+    """
+    الحلول المحفوظة: {'by_key': {sku_key: أحدث حل قابل للخدمة}, 'by_url': {url_norm(cloudinary_url): [حلول]}}.
+    by_url يشمل كل الحالات (حتى superseded): رابط في الشيت يدل على المنتج الذي نُشر له. الأخطاء تُرفع.
+    """
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, sku_key, barcode, product_name, brand, cloudinary_url, verification_status, metadata_json "
+            "FROM resolved_products WHERE sku_key IS NOT NULL AND sku_key <> '' ORDER BY resolved_at DESC, id DESC")
+        rows = cursor.fetchall() or []
+    finally:
+        _close(conn)
+    by_key, by_url = {}, {}
+    for r in rows:
+        r = dict(r)
+        if r.get("verification_status") in SERVABLE_STATUSES:
+            by_key.setdefault(r["sku_key"], r)
+        if r.get("cloudinary_url"):
+            by_url.setdefault(url_norm(r["cloudinary_url"]), []).append(r)
+    return {"by_key": by_key, "by_url": by_url}
+
+
+def catalog_brand_news(tokens):
+    """
+    {كلمة براند: أحدث first_seen} لصفوف الفهرس المحلي التي تحمل كل كلمة: متجر بدأ يعرض منتجات جديدة لهذا البراند.
+    {} عند الخطأ (يُسجل): لا إعادة بحث مبكرة، والجدول الزمني يبقى.
+    """
+    tokens = sorted({str(t) for t in tokens or [] if t})
+    out = {}
+    if not tokens:
+        return out
+    try:
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            for start in range(0, len(tokens), 500):
+                part = tokens[start:start + 500]
+                cursor.execute(
+                    "SELECT t.token, MAX(p.first_seen) AS newest FROM catalog_tokens t "
+                    "JOIN catalog_products p ON p.id = t.product_id "
+                    f"WHERE t.token IN ({','.join(['%s'] * len(part))}) GROUP BY t.token", tuple(part))
+                for r in cursor.fetchall() or []:
+                    if r.get("newest") is not None:
+                        out[r["token"]] = r["newest"]
+        finally:
+            _close(conn)
+    except Exception as e:
+        logger.warning("[Catalog Index] تعذر فحص الصفوف الجديدة للبراندات: %s", e)
+        return {}
+    return out
+
+
+def outbox_link_writes(row_numbers):
+    """
+    كتابات طابور الشيت (sheet_updates) لهذه الصفوف بالترتيب: [{id, row_number, value, sync_status}].
+    قراءة فقط، احتياط عندما لا يوفر google_sheets الدالة outbox_outcomes. [] عند الخطأ أو غياب الجدول.
+    """
+    numbers = sorted({int(n) for n in row_numbers or []})
+    out = []
+    if not numbers:
+        return out
+    try:
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            for start in range(0, len(numbers), 1000):
+                part = numbers[start:start + 1000]
+                cursor.execute(
+                    "SELECT id, `row_number`, `value`, sync_status FROM sheet_updates "
+                    f"WHERE `row_number` IN ({','.join(['%s'] * len(part))}) ORDER BY id", tuple(part))
+                out.extend(dict(r) for r in cursor.fetchall() or [])
+        finally:
+            _close(conn)
+    except Exception as e:
+        logger.warning("[Sheets Outbox] تعذر قراءة حالة كتابات الشيت: %s", e)
+        return []
+    return out
 
 
 # ---------------------------------------------------------------------------

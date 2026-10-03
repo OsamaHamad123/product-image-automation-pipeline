@@ -74,6 +74,23 @@ LOCAL_INDEX_MAX_PAGES = os.getenv("LOCAL_INDEX_MAX_PAGES", "3").strip() or "3"
 LOCAL_INDEX_PAGE_TTL_DAYS = os.getenv("LOCAL_INDEX_PAGE_TTL_DAYS", "30").strip() or "30"
 # --- end sources package ---
 
+# --- queue package (P4a): حدود الصرف للعامل ---
+# DAILY_BUDGET_USD: أقصى صرف تقديري للبحث في اليوم (Serper / SerpApi / قراءة الملصق، بأسعار ops_health).
+#   يُفحص قبل سحب كل منتج؛ عند بلوغه يتوقف التشغيل (BUDGET_REACHED) وتبقى الصفوف في الانتظار. 0 = بلا حد.
+# SERPER_CREDIT_STOP_SEARCHES: يتوقف التشغيل بعد هذا العدد من عمليات البحث المتتالية التي رفض فيها Serper
+#   كل استعلاماته بسبب الرصيد أو المفتاح (quota / 401 / 403)، وتبقى الصفوف في الانتظار. 0 = لا إيقاف.
+def _number_env(name, default):
+    try:
+        return max(0.0, float(os.getenv(name, str(default)).strip() or default))
+    except ValueError:
+        logger.warning("قيمة %s غير صالحة؛ تُستخدم %s.", name, default)
+        return float(default)
+
+
+DAILY_BUDGET_USD = _number_env("DAILY_BUDGET_USD", 0)
+SERPER_CREDIT_STOP_SEARCHES = int(_number_env("SERPER_CREDIT_STOP_SEARCHES", 3))
+# --- end queue package ---
+
 # 4. إعدادات معالجة الصور وتحجيمها
 # الأبعاد الافتراضية المطلوبة لجميع الصور بشكل ديناميكي (مثال: 800×800)
 IMAGE_TARGET_SIZE = (800, 800)
@@ -422,6 +439,23 @@ def _load_sources_settings(db_keys):
 # --- end sources package ---
 
 
+# --- queue package (P4a): حدود الصرف من system_settings (daily_budget_usd، serper_credit_stop_searches) ---
+def _load_queue_settings(db_keys):
+    global DAILY_BUDGET_USD, SERPER_CREDIT_STOP_SEARCHES
+    for key, name in (("daily_budget_usd", "DAILY_BUDGET_USD"), ("serper_credit_stop_searches",
+                                                                 "SERPER_CREDIT_STOP_SEARCHES")):
+        value = db_keys.get(key)
+        if value is None or str(value).strip() == "":
+            continue
+        try:
+            number = max(0.0, float(str(value).strip()))
+        except ValueError:
+            logger.warning("قيمة %s غير صالحة: %r", key, value)
+            continue
+        globals()[name] = int(number) if name == "SERPER_CREDIT_STOP_SEARCHES" else number
+# --- end queue package ---
+
+
 def load_db_config():
     """
     تحميل الإعدادات ديناميكياً من قاعدة البيانات لتجنب تعديل ملفات البيئة يدوياً.
@@ -534,6 +568,7 @@ def load_db_config():
 
 
             _load_sources_settings(db_keys)   # sources package (P3)
+            _load_queue_settings(db_keys)     # queue package (P4a)
 
             logger.info("[Config Loader] تم تحميل الإعدادات من قاعدة البيانات (تتجاوز قيم .env).")
         conn.close()
