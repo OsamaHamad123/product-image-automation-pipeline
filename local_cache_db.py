@@ -7,6 +7,7 @@
 # - رفض المراجع يُسجل في rejected_images (الرابط + pHash) ويُمرر للبحث كاستبعادات.
 # - سحب المهام من الطابور ذري (UPDATE واحد مع lease) ولا تُبتلع أخطاء قاعدة البيانات.
 
+import contextlib
 import json
 import logging
 import math
@@ -420,12 +421,13 @@ def _cache_row_to_dict(row):
         "verification_status": row.get("verification_status"),
         "approved_by": row.get("approved_by"),
         "perceptual_hash": row.get("perceptual_hash"),
+        "resolved_at": row.get("resolved_at"),
         "source": "mariadb_cache",
     }
 
 
 def get_cached_product(barcode=None, product_name=None, brand=None, sku_key=None, brand_mappings=None,
-                       size_text=None):
+                       size_text=None, strict=False):
     """
     الاستعلام من الكاش. لا يخدم إلا الحلول المعتمدة (human_approved / auto_verified).
     - بـ sku_key أولاً إن مُرر.
@@ -441,6 +443,7 @@ def get_cached_product(barcode=None, product_name=None, brand=None, sku_key=None
     يُطبق هذا الفحص عندما يمرر المستدعي product_name أو brand؛ استعلام حالة الاعتماد بـ sku_key وحده لا يتغير.
     size_text: خلية الحجم (SIZE) في الشيت إن وُجدت؛ تدخل في حجم المنتج المطلوب، والسجل المخزن لا يحفظ إلا
     الاسم، فحجم لا يذكره إلا عمود الحجم لا يمكن تأكيده (يُتجاهل الكاش).
+    strict=True: خطأ قاعدة البيانات يُرفع بدل None (لمن يجب أن يعامل الخطأ كـ «يوجد اعتماد»، مثل النشر التلقائي).
     """
     barcode_clean = _cache_barcode(barcode)
     sku_clean = str(sku_key).strip() if sku_key else ""
@@ -484,6 +487,8 @@ def get_cached_product(barcode=None, product_name=None, brand=None, sku_key=None
         return _cache_row_to_dict(row) if row else None
     except Exception as e:
         logger.warning("[MariaDB Cache] خطأ أثناء القراءة من الكاش: %s", e)
+        if strict:
+            raise
         return None
 
 
@@ -611,6 +616,8 @@ def save_product_resolution(barcode, product_name, brand, original_url, cloudina
     """
     حفظ أو تحديث الحل المعتمد لمنتج (Upsert بـ sku_key، أو بالباركود إن لم يوجد sku_key).
     أحدث سجل مطابق يُحدّث، وأي سجلات مطابقة أخرى تصبح superseded.
+    حل auto_verified لا يحل أبداً محل اعتماد بشري (human_approved): إذا كان أي سجل مطابق معتمداً بشرياً
+    لا يُكتب شيء وتعيد False (مراجع اعتمد أثناء نشر العامل التلقائي).
     """
     if verification_status not in VERIFICATION_STATUSES:
         raise ValueError(f"verification_status غير صالح: {verification_status!r}")
@@ -634,10 +641,17 @@ def save_product_resolution(barcode, product_name, brand, original_url, cloudina
             existing = []
             if clauses:
                 cursor.execute(
-                    f"SELECT id FROM resolved_products WHERE {' OR '.join(clauses)} ORDER BY id DESC",
+                    f"SELECT id, verification_status FROM resolved_products WHERE {' OR '.join(clauses)} "
+                    "ORDER BY id DESC",
                     tuple(params),
                 )
-                existing = [r["id"] for r in cursor.fetchall()]
+                found = cursor.fetchall()
+                existing = [r["id"] for r in found]
+                if verification_status == "auto_verified" and any(
+                        r.get("verification_status") == "human_approved" for r in found):
+                    logger.warning("[MariaDB Cache] لا يُحفظ نشر تلقائي فوق اعتماد بشري لـ '%s' (SKU %s).",
+                                   product_name, sku_clean or barcode_clean)
+                    return False
             values = (barcode_raw, product_name, brand, original_url, cloudinary_url, clip_score,
                       metadata_str, embedding_str, hash_str, sku_clean or None, verification_status, approved_by)
             if existing:
@@ -708,6 +722,45 @@ def supersede_resolution(sku_key, barcode=None):
     except Exception as e:
         logger.warning("[MariaDB Cache] فشل إلغاء الحل السابق لـ %s: %s", sku_key, e)
         return None
+
+
+# مهلة انتظار قفل النشر لنفس الـ SKU (عامل آخر أو مراجع يكتب نفس المنتج الآن)
+PUBLISH_LOCK_SECONDS = 60
+
+
+@contextlib.contextmanager
+def sku_publish_lock(sku_key, timeout=PUBLISH_LOCK_SECONDS):
+    """
+    قفل MariaDB مسمى (GET_LOCK) لكل SKU حول «إعادة التحقق ثم الكتابة في الشيت» عند النشر: النشر التلقائي
+    واعتماد المراجع لنفس المنتج لا يتداخلان، فمن يكتب ثانياً يرى ما سجله الأول قبل أن يكتب.
+    يعطي 'held' عند الحصول عليه، و'busy' إذا انتهت المهلة والقفل عند غيره، و'unavailable' إذا تعذر الاتصال
+    بقاعدة البيانات (المستدعي يعيد التحقق بنفسه، والتحقق يفشل مغلقاً عند تعطل القاعدة)، و'none' بلا sku_key.
+    القفل يُحرر عند الخروج، أو تلقائياً إذا انقطع الاتصال (توقف العملية لا يتركه معلقاً).
+    """
+    sku = str(sku_key or "").strip()
+    if not sku:
+        yield "none"
+        return
+    name = f"lq_publish:{sku}:{os.getenv('DB_DATABASE', 'automation_db')}"[:64]
+    conn, state = None, "unavailable"
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT GET_LOCK(%s, %s) AS got", (name, int(timeout)))
+        state = "held" if (cursor.fetchone() or {}).get("got") == 1 else "busy"
+    except Exception as e:
+        logger.warning("[MariaDB Publish] تعذر أخذ قفل النشر للـ SKU %s: %s", sku, e)
+        state = "unavailable"
+    try:
+        yield state
+    finally:
+        if conn is not None:
+            if state == "held":
+                try:
+                    conn.cursor().execute("SELECT RELEASE_LOCK(%s) AS released", (name,))
+                except Exception:
+                    pass
+            _close(conn)
 
 
 def find_visual_duplicate(target_embedding, threshold=0.96):
@@ -1420,6 +1473,30 @@ def update_task_status_by_row(row_number, status, error_message=None, failure_co
     except Exception as e:
         logger.warning("[MariaDB Queue] فشل تحديث حالة المهمة للصف %s: %s", row_number, e)
         return False
+
+
+def release_worker_claims(row_number, sku_key=None):
+    """
+    يسحب حجز العامل عن صفوف هذا المنتج قيد المعالجة (worker_id = NULL) دون تغيير حالتها: قرار مراجع على وشك
+    الكتابة في الشيت، فالعامل الذي يعالج نفس المنتج يفقد ملكية الحجز (is_claim_held) ولا ينشر فوقه ولا يكتب
+    حالته. الصف يبقى 'processing' حتى يكتب المراجع حالته، أو حتى ينتهي الحجز فيُسحب من جديد إن فشل الاعتماد.
+    تعيد عدد الصفوف، أو None عند خطأ قاعدة البيانات.
+    """
+    clause, params = _row_or_sku_clause(row_number, sku_key)
+    try:
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(f"UPDATE automation_queue SET worker_id = NULL WHERE {clause} AND status = 'processing' "
+                           "AND worker_id IS NOT NULL", params)
+            affected = cursor.rowcount
+            conn.commit()
+        finally:
+            _close(conn)
+        return affected
+    except Exception as e:
+        logger.warning("[MariaDB Queue] تعذر سحب حجز العامل عن الصف %s: %s", row_number, e)
+        return None
 
 
 def get_queue_statistics():

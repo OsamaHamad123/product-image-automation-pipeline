@@ -207,3 +207,115 @@ namespace {{
     # P's candidates survive Q's save at P's old row; Q's own old row and the legacy row at row 8 are replaced;
     # without a key, only the legacy rows at that row number are replaced
     assert sorted(out["urls"]) == ["l-new.jpg", "p1.jpg", "q-new.jpg"]
+
+
+# ---------------------------------------------------------------------------
+# Item 1: a reviewer's decision made while the worker publishes is never overwritten
+# ---------------------------------------------------------------------------
+
+def _resolution(db, sku):
+    conn = db.get_db_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT cloudinary_url, verification_status FROM resolved_products WHERE sku_key = %s "
+                    "ORDER BY id", (sku,))
+        return [(r["cloudinary_url"], r["verification_status"]) for r in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def test_auto_verified_never_replaces_a_human_approval(db):
+    sku = SKUS[0]
+    assert db.save_product_resolution("", "Product P", "Brand", "https://src/a.jpg", "https://res/auto1.png",
+                                      verification_status="auto_verified", approved_by="auto", sku_key=sku)
+    # auto over auto, then human over auto: both replace
+    assert db.save_product_resolution("", "Product P", "Brand", "https://src/b.jpg", "https://res/auto2.png",
+                                      verification_status="auto_verified", approved_by="auto", sku_key=sku)
+    assert db.save_product_resolution("", "Product P", "Brand", "https://src/c.jpg", "https://res/human.png",
+                                      verification_status="human_approved", approved_by="human", sku_key=sku)
+    # the worker's late save after a reviewer approved: refused, the approval stays
+    assert db.save_product_resolution("", "Product P", "Brand", "https://src/d.jpg", "https://res/auto3.png",
+                                      verification_status="auto_verified", approved_by="auto", sku_key=sku) is False
+    assert _resolution(db, sku) == [("https://res/human.png", "human_approved")]
+    cached = db.get_cached_product(sku_key=sku)
+    assert cached["approved_by"] == "human" and cached["resolved_at"] is not None
+
+
+def test_the_publish_lock_is_exclusive_per_product(db):
+    with db.sku_publish_lock(SKUS[0]) as first:
+        assert first == "held"
+        with db.sku_publish_lock(SKUS[0], timeout=0) as second:
+            assert second == "busy"
+        with db.sku_publish_lock(SKUS[1], timeout=0) as other:
+            assert other == "held"          # another product is not blocked
+    with db.sku_publish_lock(SKUS[0], timeout=0) as again:
+        assert again == "held"              # released on exit
+    with db.sku_publish_lock("") as none:
+        assert none == "none"
+
+
+def test_a_reviewer_fence_takes_the_claim_from_the_worker(db):
+    """release_worker_claims (the reviewer's step under the publish lock) makes the worker's claim fail, on every
+    row of the product, without changing the rows' status."""
+    sku = SKUS[0]
+    for row in ROWS[:2]:
+        db.add_to_queue(row, "", "Product P", "Brand", "q", sku_key=sku)
+    db.add_to_queue(ROWS[2], "", "Product Q", "Brand", "q", sku_key=SKUS[1])
+    conn = db.get_db_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute("UPDATE automation_queue SET status = 'processing', worker_id = CONCAT('w#', `row_number`), "
+                    "lease_until = NOW() + INTERVAL 15 MINUTE WHERE `row_number` IN (%s, %s, %s)", ROWS[:3])
+        conn.commit()
+        tasks = {row: db.get_task_by_row(row) for row in ROWS[:3]}
+        assert all(db.is_claim_held(t["id"], t["worker_id"]) for t in tasks.values())
+        assert db.release_worker_claims(ROWS[1], sku_key=sku) == 2
+        assert not db.is_claim_held(tasks[ROWS[0]]["id"], tasks[ROWS[0]]["worker_id"])
+        assert not db.is_claim_held(tasks[ROWS[1]]["id"], tasks[ROWS[1]]["worker_id"])
+        assert db.is_claim_held(tasks[ROWS[2]]["id"], tasks[ROWS[2]]["worker_id"])      # another product
+        assert {db.get_task_by_row(r)["status"] for r in ROWS[:3]} == {"processing"}
+        # the worker's late status write is refused
+        assert db.update_task_status(tasks[ROWS[0]]["id"], "ready_for_review",
+                                     claim_id=tasks[ROWS[0]]["worker_id"]) is False
+    finally:
+        conn.close()
+
+
+def test_auto_publish_against_the_real_queue_after_a_mid_processing_approval(db, monkeypatch, tmp_path):
+    """The worker claims the row and processes; meanwhile the reviewer approves (fence + approval stored). The
+    worker's re-check under the publish lock sees it: nothing is written and the approval stays."""
+    import cloudinary_storage
+    import google_sheets
+    import image_processor
+    import main
+    from PIL import Image
+
+    sku = SKUS[0]
+    db.add_to_queue(ROWS[0], "", "Product P", "Brand", "q", sku_key=sku)
+    conn = db.get_db_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute("UPDATE automation_queue SET status = 'processing', worker_id = 'w#race', "
+                    "lease_until = NOW() + INTERVAL 15 MINUTE WHERE `row_number` = %s", (ROWS[0],))
+        conn.commit()
+    finally:
+        conn.close()
+    task = db.get_task_by_row(ROWS[0])
+    canvas = tmp_path / "canvas.png"
+    Image.new("RGB", (800, 800), "white").save(canvas)
+    written = []
+
+    def processing(*a, **k):
+        # the reviewer's approval of another image lands while PhotoRoom runs
+        db.release_worker_claims(ROWS[0], sku_key=sku)
+        db.save_product_resolution("", "Product P", "Brand", "https://src/human.jpg", "https://res/human.png",
+                                   verification_status="human_approved", approved_by="human", sku_key=sku)
+        return image_processor.ProcessResult(str(canvas), True, "photoroom", None, 800, 800)
+
+    monkeypatch.setattr(image_processor, "process_product_image_result", processing)
+    monkeypatch.setattr(image_processor, "extract_metadata_from_image", lambda *a, **k: {})
+    monkeypatch.setattr(cloudinary_storage, "upload_product_image_to_cloudinary", lambda *a, **k: "https://res/auto.png")
+    monkeypatch.setattr(google_sheets, "update_image_link", lambda *a, **k: written.append(a[3]) or True)
+    status = main.auto_approve_product(task, {"url": "https://src/auto.jpg"}, object(), 5, sku_key=sku)
+    assert status == "superseded" and written == []
+    assert _resolution(db, sku) == [("https://res/human.png", "human_approved")]

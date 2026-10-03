@@ -278,14 +278,18 @@ def _folder_and_tags(metadata):
 
 def publish_image(image_url, name, brand, row_number, worksheet, link_column_index, *, barcode="",
                   candidate_sha256=None, category_override=None, force_review=False, key_size=None,
-                  key_brand=None, profile=None):
+                  key_brand=None, profile=None, sku_key=None, before_write=None):
     """
     معالجة الصورة المعتمدة إلى لوحة النشر النهائية ورفعها وكتابة رابطها في الشيت.
     key_size/key_brand: خلايا الحجم والبراند في الشيت لهذا المنتج، تُضاف إلى هوية الصف المتحقق منها
     قبل الكتابة (بدون باركود تميز الشقيقين بنفس الاسم).
     profile: ملف المعالجة (processing_profile)؛ الافتراضي ملف الإعدادات الحالي، نفسه لكل مسارات النشر.
+    before_write: دالة بلا وسائط تُستدعى بعد الرفع ومباشرة قبل الكتابة في الشيت، تحت قفل النشر لهذا الـ sku_key
+    (local_cache_db.sku_publish_lock)؛ إذا أعادت False (أو رفعت استثناء، أو بقي القفل عند غيرنا حتى المهلة) لا
+    يُكتب شيء وتكون الحالة 'superseded'. المعالجة والرفع قد يستغرقان دقيقة، والمراجع قد يعتمد خلالها.
     لا تكبير لاحق: اللوحة من image_processor نهائية. البيانات الوصفية تُكتب في الشيت فقط بعد نجاح الرفع.
-    الحالة: 'published' (معزولة وليست للمراجعة) | 'needs_review' (رابط ببادئة needs_review:) | 'failed'.
+    الحالة: 'published' (معزولة وليست للمراجعة) | 'needs_review' (رابط ببادئة needs_review:) | 'superseded'
+    (لم يُكتب شيء) | 'failed'.
     """
     profile = profile or processing_profile.current()
     w, h = profile.target
@@ -327,14 +331,30 @@ def publish_image(image_url, name, brand, row_number, worksheet, link_column_ind
     review = force_review or not result.isolated
     sheet_value = f"needs_review:{link}" if review else link
     identity = {"barcode": barcode, "product_name": name, "size": key_size, "brand": key_brand}
-    if not google_sheets.update_image_link(worksheet, row_number, link_column_index, sheet_value, **identity):
-        return dict(base, status="failed", error="sheet_write_failed", link=link)
-    if metadata:
-        try:
-            google_sheets.update_product_metadata(worksheet, row_number, metadata, **identity)
-        except Exception as e:
-            print(f"تنبيه: تعذر كتابة البيانات الوصفية للصف {row_number}: {e}")
+    with local_cache_db.sku_publish_lock(sku_key) as lock_state:
+        if before_write is not None:
+            if lock_state == "busy":
+                print(f"[Publish] نشر آخر لنفس المنتج ما زال يكتب؛ لم يُكتب شيء للصف {row_number}.")
+                return dict(base, status="superseded", error="publish_busy", link=link)
+            if not _write_still_allowed(before_write):
+                return dict(base, status="superseded", error="superseded", link=link)
+        if not google_sheets.update_image_link(worksheet, row_number, link_column_index, sheet_value, **identity):
+            return dict(base, status="failed", error="sheet_write_failed", link=link)
+        if metadata:
+            try:
+                google_sheets.update_product_metadata(worksheet, row_number, metadata, **identity)
+            except Exception as e:
+                print(f"تنبيه: تعذر كتابة البيانات الوصفية للصف {row_number}: {e}")
     return dict(base, status="needs_review" if review else "published", link=link, sheet_value=sheet_value)
+
+
+def _write_still_allowed(before_write):
+    """نتيجة إعادة التحقق قبل الكتابة؛ أي استثناء يعني لا (لا نكتب ونحن لا نعرف)."""
+    try:
+        return bool(before_write())
+    except Exception as e:
+        print(f"[Publish] تعذرت إعادة التحقق قبل الكتابة: {e}")
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -343,21 +363,33 @@ def publish_image(image_url, name, brand, row_number, worksheet, link_column_ind
 
 def auto_approve_product(task, best_image, worksheet, link_column_index, sku_key=None):
     """
-    نشر نتيجة AUTO_PUBLISH مباشرة. تعيد 'published' أو 'needs_review' (الخلفية لم تُعزل) أو 'failed'.
+    نشر نتيجة AUTO_PUBLISH مباشرة. تعيد 'published' أو 'needs_review' (الخلفية لم تُعزل) أو 'superseded'
+    (مراجع اعتمد المنتج أثناء المعالجة والرفع، أو لم يعد الصف محجوزاً لهذا العامل: لم يُكتب شيء) أو 'failed'.
     الحل يُخزن auto_verified فقط عند النشر الفعلي بلوحة معزولة.
     """
     name = task["product_name"]
     brand = task.get("brand") or ""
     barcode = task.get("barcode") or ""
+
+    def still_ours():
+        # إعادة التحقق تحت قفل النشر قبل الكتابة: الحجز ما زال لهذا العامل ولا يوجد اعتماد بشري
+        return (local_cache_db.is_claim_held(task["id"], task.get("worker_id"))
+                and not _has_human_approval(sku_key))
+
     try:
         res = publish_image(
             best_image["url"], name, brand, task["row_number"], worksheet, link_column_index,
             barcode=barcode, candidate_sha256=best_image.get("content_sha256"),
             key_size=task_payload(task).get("size"), key_brand=brand, profile=processing_profile.current(),
+            sku_key=sku_key, before_write=still_ours,
         )
     except Exception as e:
         print(f"[Auto-Publish Error] فشل النشر التلقائي لـ [{name}]: {e}")
         return "failed"
+    if res["status"] == "superseded":
+        print(f"[Auto-Publish] الصف {task['row_number']}: اعتمده مراجع أثناء المعالجة أو لم يعد محجوزاً لهذا "
+              "العامل؛ لم يُكتب شيء.")
+        return "superseded"
     if res["status"] == "published":
         local_cache_db.save_product_resolution(
             barcode, name, brand, best_image["url"], res["link"], None, res.get("metadata"),
@@ -375,7 +407,7 @@ def _has_human_approval(sku_key):
     if not sku_key:
         return False
     try:
-        cached = local_cache_db.get_cached_product(sku_key=sku_key)
+        cached = local_cache_db.get_cached_product(sku_key=sku_key, strict=True)
     except Exception:
         return True
     return bool(cached) and cached.get("verification_status") == "human_approved"
@@ -455,6 +487,9 @@ def pre_cache_product_candidates(task, worksheet=None, link_column_index=None, b
             _finish_task(task, "completed", failure_code=None,
                          trace={"outcome": _outcome(trace)})
             print(f"[Auto-Publish] تم نشر الصف {row_number} تلقائياً (قرار AUTO_PUBLISH).")
+            return "success"
+        if status == "superseded" or not local_cache_db.is_claim_held(task["id"], task.get("worker_id")):
+            # قرار المراجع (أو حجز أحدث) أثناء المعالجة والرفع يبقى كما هو: لا مرشحات ولا حالة فوقه
             return "success"
 
     candidates = collect_candidates(best, trace)
