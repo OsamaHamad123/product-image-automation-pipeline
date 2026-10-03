@@ -665,18 +665,65 @@ def test_older_write_retried_later_never_overwrites_a_newer_one(gs, outbox):
     assert statuses(gs) == {old: "SUPERSEDED", new: "SYNCED"}
 
 
-def test_duplicate_rows_of_one_product_do_not_cancel_each_other(gs, outbox):
+def test_older_write_to_one_duplicate_row_still_lands_after_a_newer_write_to_the_other(gs, outbox):
+    """The same product listed twice (rows 2 and 4): a newer write to row 4 must not cancel an older, still
+    pending write to row 2 (the row test applies because the product has two rows)."""
     ws = sheet()
     ws.set(4, 1, MILK)
-    ws.set(4, 2, "Almarai Fresh Milk")                            # the same product listed twice (rows 2 and 4)
-    first = outbox.append_update(2, 5, "https://res/milk-a.png", col_key="link", key_barcode=MILK)
-    flush(gs, ws, outbox)
+    ws.set(4, 2, "Almarai Fresh Milk")
+    ws.down = api_error(503)
+    older = outbox.append_update(2, 5, "https://res/milk-a.png", col_key="link", key_barcode=MILK)
+    flush(gs, ws, outbox)                                       # fails: retried in 60 s
     ws.down = None
-    ws_seq_newer = outbox.append_update(4, 5, "https://res/milk-b.png", col_key="link", key_barcode=MILK)
+    newer = outbox.append_update(4, 5, "https://res/milk-b.png", col_key="link", key_barcode=MILK)
     flush(gs, ws, outbox)
-    assert statuses(gs) == {first: "SYNCED", ws_seq_newer: "SYNCED"}
+    gs.clock["now"] += 61
+    flush(gs, ws, outbox)
+    assert statuses(gs) == {older: "SYNCED", newer: "SYNCED"}
     assert ws.value(2, "Drive Image Link") == "https://res/milk-a.png"
     assert ws.value(4, "Drive Image Link") == "https://res/milk-b.png"
+
+
+def test_a_newer_write_for_another_product_does_not_cancel_an_older_write(gs, outbox):
+    ws = sheet()
+    ws.down = api_error(503)
+    older = outbox.append_update(2, 5, "https://res/milk.png", col_key="link", key_barcode=MILK)
+    flush(gs, ws, outbox)
+    ws.down = None
+    newer = outbox.append_update(3, 5, "https://res/laban.png", col_key="link", key_barcode=LABAN)
+    flush(gs, ws, outbox)
+    gs.clock["now"] += 61
+    flush(gs, ws, outbox)
+    assert statuses(gs) == {older: "SYNCED", newer: "SYNCED"}
+    assert ws.value(2, "Drive Image Link") == "https://res/milk.png"
+
+
+def test_same_batch_older_redis_value_loses_to_a_newer_outbox_value(gs, outbox, monkeypatch):
+    """Both writes reach one flush; the forwarded Redis row has the larger id but the smaller seq."""
+    import sync_worker
+    ws = sheet()
+    r = FakeRedis()
+    monkeypatch.setattr(gs, "_get_redis", lambda: r)
+    assert gs.update_image_link(ws, 2, 5, "needs_review:https://res/old.png", barcode=MILK)
+    monkeypatch.setattr(gs, "_get_redis", lambda: None)
+    assert gs.update_image_link(ws, 2, 5, "https://res/approved.png", barcode=MILK)
+    assert sync_worker.run_sync_cycle(ws, r, queue=outbox) == 1        # forward, then one flush of both
+    assert ws.value(2, "Drive Image Link") == "https://res/approved.png"
+
+
+def test_same_batch_older_relocated_value_loses_to_a_newer_value_for_the_same_cell(gs, outbox, monkeypatch):
+    """The older write (Redis, queued for the product's old row) is relocated onto the cell the newer write
+    targets: the newest by seq wins even though the forwarded row has the larger id."""
+    import sync_worker
+    ws = sheet()
+    r = FakeRedis()
+    monkeypatch.setattr(gs, "_get_redis", lambda: r)
+    assert gs.update_image_link(ws, 4, 5, "needs_review:https://res/old.png", barcode=JUICE)
+    ws.insert_row(2, [WATER, "Mai Dubai Water", "Mai Dubai", "500ml", "UAE", ""])   # Juice moves to row 5
+    monkeypatch.setattr(gs, "_get_redis", lambda: None)
+    assert gs.update_image_link(ws, 5, 5, "https://res/approved.png", barcode=JUICE)
+    assert sync_worker.run_sync_cycle(ws, r, queue=outbox) == 1
+    assert ws.value(5, "Drive Image Link") == "https://res/approved.png"
 
 
 # ---------------------------------------------------------------------------
@@ -747,3 +794,56 @@ def test_relocation_never_overwrites_a_different_value_in_the_target_cell(gs, ou
     assert ws.value(3, "Drive Image Link") == "https://res/laban-approved.png"
     assert rows_of(outbox)[wid]["sync_status"] == "CONFLICT"
     assert "already holds" in gs.reported[0]["error"]
+
+
+def test_older_value_never_wins_when_the_identity_form_changes(gs, outbox):
+    """No barcode when the old write was queued; the owner then types the GTIN and the reviewer approves (GTIN
+    identity). The old write, retried later, must not land over the approval."""
+    ws = Sheet([HEADERS, ["", "Rani Orange Juice", "Rani", "1L", "KSA", ""]])
+    ws.down = api_error(503)
+    old = outbox.append_update(2, 5, "needs_review:https://res/old.png", col_key="link",
+                               key_name="Rani Orange Juice", key_brand="Rani", key_size="1L")
+    flush(gs, ws, outbox)
+    ws.down = None
+    ws.set(2, 1, JUICE)
+    new = outbox.append_update(2, 5, "https://res/approved.png", col_key="link", key_barcode=JUICE,
+                               key_name="Rani Orange Juice", key_brand="Rani", key_size="1L")
+    flush(gs, ws, outbox)
+    gs.clock["now"] += 61
+    flush(gs, ws, outbox)
+    assert ws.value(2, "Drive Image Link") == "https://res/approved.png"
+    assert statuses(gs) == {old: "SUPERSEDED", new: "SYNCED"}
+
+
+def test_an_older_write_still_lands_when_the_newer_write_was_for_a_product_that_moved_away(gs, outbox):
+    """The same-cell rule only applies while the newer write's product is still in that row."""
+    ws = sheet()
+    ws.down = api_error(503)
+    old = outbox.append_update(2, 5, "https://res/milk.png", col_key="link", key_barcode=MILK)
+    flush(gs, ws, outbox)                                       # Milk's write fails at row 2
+    ws.down = None
+    new = outbox.append_update(3, 5, "https://res/laban.png", col_key="link", key_barcode=LABAN)
+    flush(gs, ws, outbox)                                       # Laban's link written at row 3
+    ws.rows.insert(2, ws.rows.pop(1))                           # the owner swaps rows 2 and 3 (cells move along)
+    gs.clock["now"] += 61
+    flush(gs, ws, outbox)                                       # Milk is row 3 now, Laban (and its link) row 2
+    assert ws.value(3, "Drive Image Link") == "https://res/milk.png"
+    assert ws.value(2, "Drive Image Link") == "https://res/laban.png"
+    assert statuses(gs) == {old: "SYNCED", new: "SYNCED"}
+
+
+def test_older_value_never_wins_after_the_row_drifts_twice(gs, outbox):
+    ws = sheet()
+    ws.down = api_error(503)
+    a = outbox.append_update(3, 5, "needs_review:https://res/old.png", col_key="link", key_barcode=LABAN)
+    flush(gs, ws, outbox)                                       # A fails at row 3
+    ws.down = None
+    ws.insert_row(2, [WATER, "Mai Dubai Water", "Mai Dubai", "500ml", "UAE", ""])   # Laban -> row 4
+    b = outbox.append_update(4, 5, "https://res/approved.png", col_key="link", key_barcode=LABAN)
+    flush(gs, ws, outbox)                                       # B written at row 4
+    ws.insert_row(2, ["6281007000055", "Almarai Cheese", "Almarai", "200g", "KSA", ""])   # Laban -> row 5
+    gs.clock["now"] += 61
+    flush(gs, ws, outbox)                                       # A is due: relocated 3 -> 5, then superseded
+    assert ws.value(5, "Drive Image Link") == "https://res/approved.png"
+    assert statuses(gs) == {a: "SUPERSEDED", b: "SYNCED"}
+    assert gs.reported == []

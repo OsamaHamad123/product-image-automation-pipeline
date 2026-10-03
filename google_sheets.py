@@ -1035,7 +1035,7 @@ class GoogleSheetsBatchWorker(threading.Thread):
         _set_status(cursor, [r["id"] for r, col in ready if newest[(r["row_number"], col)][0] is not r],
                     "SUPERSEDED")
         ready = sorted(newest.values(), key=lambda item: order(item[0]))
-        stale = _older_than_written(cursor, ready)
+        stale = _older_than_written(cursor, worksheet, headers, ready)
         _set_status(cursor, sorted(stale), "SUPERSEDED", "a newer value was already written to this cell")
         ready = [(r, col) for r, col in ready if r["id"] not in stale]
 
@@ -1153,42 +1153,69 @@ def _read_cells(worksheet, cells):
     return out
 
 
-def _older_than_written(cursor, items):
+def _older_than_written(cursor, worksheet, headers, items):
     """
-    معرّفات الكتابات التي كُتبت بعدها قيمة أحدث (seq أكبر) لنفس العمود ونفس المنتج في نفس الصف (الحالي أو
-    الصف عند الجدولة قبل النقل): لا تُرسل أبداً، كي لا تمحو قيمةٌ قديمة قيمةً أحدث (بين العمليات، وحمولات Redis
-    المنقولة متأخرة، وإعادة المحاولة المؤجلة). صفان مكرران لنفس المنتج لا يلغي أحدهما كتابة الآخر.
+    معرّفات الكتابات التي كُتبت بعدها قيمة أحدث (seq أكبر) لنفس العمود؛ لا تُرسل أبداً، كي لا تمحو قيمةٌ قديمة
+    قيمةً أحدث (بين العمليات، وحمولات Redis المنقولة متأخرة، وإعادة المحاولة المؤجلة). الكتابة قديمة إذا:
+    - كُتبت بعدها قيمة لنفس المنتج (نفس بصمة الهوية) في أي صف: الصف ينجرف مع كل إدراج أو حذف. الاستثناء: منتج له
+      الآن أكثر من صف (صفوف مكررة)؛ عندها فقط إذا كانت في نفس الصف (الحالي أو عند الجدولة)، فلا يلغي صف مكرر
+      كتابة الصف الآخر.
+    - أو كُتبت بعدها قيمة في نفس خلية الهدف بهوية بصيغة أخرى (مثلاً أُضيف الباركود بعد الجدولة)، ما دام منتج
+      تلك الكتابة الأحدث ما زال في هذا الصف (وإلا فالقيمة الأحدث انتقلت مع صفها).
     """
     keyed = []
     for r, _ in items:
         col_key = r.get("col_key") or _col_key_for_header(r.get("col_name"))
         if col_key:
-            keyed.append((r, col_key, {r["row_number"], r.get("relocated_from")} - {None}))
+            keyed.append((r, col_key))
     if not keyed:
         return set()
-    idents = sorted({r["ident"] for r, _, _ in keyed if r.get("ident")})
-    rows = sorted({row for _, _, cells in keyed for row in cells})
-    clauses, params = [], [min(int(r.get("seq") or 0) for r, _, _ in keyed)]
+    idents = sorted({r["ident"] for r, _ in keyed if r.get("ident")})
+    rows = sorted({r["row_number"] for r, _ in keyed})
+    clauses = ["`row_number` IN (" + ",".join("%s" for _ in rows) + ")"]
+    params = [min(int(r.get("seq") or 0) for r, _ in keyed)] + rows
     if idents:
         clauses.append("ident IN (" + ",".join("%s" for _ in idents) + ")")
         params += idents
-    clauses.append("(ident IS NULL AND `row_number` IN (" + ",".join("%s" for _ in rows) + "))")
-    params += rows
     cursor.execute(
-        "SELECT `row_number`, relocated_from, col_key, ident, seq FROM sheet_updates "
-        "WHERE sync_status = 'SYNCED' AND seq > %s AND (" + " OR ".join(clauses) + ")",
+        "SELECT id, `row_number`, relocated_from, col_key, ident, seq, key_barcode, key_name, key_size, key_brand "
+        "FROM sheet_updates WHERE sync_status = 'SYNCED' AND seq > %s AND (" + " OR ".join(clauses) + ")",
         tuple(params),
     )
     written = [w for w in cursor.fetchall() if w.get("seq") is not None and w.get("col_key")]
-    stale = set()
-    for r, col_key, cells in keyed:
-        seq = int(r.get("seq") or 0)
-        for w in written:
-            if (w["col_key"] == col_key and int(w["seq"]) > seq
-                    and (w.get("ident") or None) == (r.get("ident") or None)
-                    and cells & ({w.get("row_number"), w.get("relocated_from")} - {None})):
-                stale.add(r["id"])
+    stale, elsewhere, same_cell = set(), {}, {}
+    for r, col_key in keyed:
+        newer = [w for w in written if w["col_key"] == col_key and int(w["seq"]) > int(r.get("seq") or 0)]
+        mine = [w for w in newer if r.get("ident") and w.get("ident") == r["ident"]]
+        cells = {r["row_number"], r.get("relocated_from")} - {None}
+        if any(cells & ({w["row_number"], w.get("relocated_from")} - {None}) for w in mine):
+            stale.add(r["id"])
+            continue
+        if mine:
+            elsewhere[r["id"]] = r
+        others = [w for w in newer if w["row_number"] == r["row_number"] and w not in mine]
+        if others:
+            same_cell[r["id"]] = (r, others)
+    # نفس المنتج في صف آخر: قديمة ما لم يكن للمنتج الآن أكثر من صف
+    if elsewhere:
+        found = find_identity_rows(worksheet, {k: r["expect"] for k, r in elsewhere.items()}, headers=headers,
+                                   strict=False)
+        stale.update(k for k in elsewhere if len(found.get(k) or []) <= 1)
+    # نفس الخلية بهوية أخرى: قديمة ما دام منتج الكتابة الأحدث ما زال في هذا الصف
+    records = {}
+    for k, (r, others) in same_cell.items():
+        if k in stale:
+            continue
+        for w in others:
+            expect = _expectation(w.get("key_barcode"), w.get("key_name"), w.get("key_size"), w.get("key_brand"))
+            if not expect:
+                stale.add(k)
                 break
+            records[(k, w["id"])] = (r["row_number"], expect)
+    records = {key: rec for key, rec in records.items() if key[0] not in stale}
+    if records:
+        conflicts = find_record_conflicts(worksheet, records, headers=headers)
+        stale.update(key[0] for key in records if key not in conflicts)
     return stale
 
 
