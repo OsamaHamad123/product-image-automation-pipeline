@@ -557,3 +557,98 @@ def test_approving_an_image_another_reviewer_rejected_after_the_page_opened_is_r
     # another image of the product is approved as usual
     assert cli_bridge.action_select_image(_approve_params(row, MILK, other, sku, GTIN,
                                                           expected_state=seen))["status"] == "success"
+
+
+# ---------------------------------------------------------------------------
+# #6 and the worker's unfinished outcomes: a pick rejected while it was processed, a busy lock, an approval
+# ---------------------------------------------------------------------------
+
+PICK, ALT_PICK, PICK_PHASH = "https://shop/milk-pick.jpg", "https://shop/milk-alt.jpg", "0f0ff0f03c3ca5a5"
+
+
+@pytest.fixture
+def worker(db, monkeypatch, tmp_path):
+    """main.pre_cache_product_candidates on the real queue: an AUTO_PUBLISH search, stand-in processing and upload,
+    a recorded sheet; env["during"] runs while the image is processed."""
+    import cloudinary_storage
+    import google_sheets
+    import image_processor
+    import image_search
+    import local_cache_db
+    import main
+    from PIL import Image
+
+    env = {"sheet": [], "during": None}
+
+    def fake_search(query, name, brand, trace=None, **kw):
+        trace["outcome"] = {"decision": "AUTO_PUBLISH"}
+        return {"url": PICK, "decision": "AUTO_PUBLISH", "source": "serper", "phash": PICK_PHASH,
+                "candidates": [{"url": PICK, "status": "preselected", "phash": PICK_PHASH},
+                               {"url": ALT_PICK, "status": "eligible"}]}
+
+    def processing(*a, **k):
+        if env["during"]:
+            env["during"]()
+        out = tmp_path / f"canvas_{os.urandom(3).hex()}.png"
+        Image.new("RGB", (800, 800), "white").save(out)
+        return image_processor.ProcessResult(str(out), True, "photoroom", None, 800, 800)
+
+    monkeypatch.setattr(image_search, "search_best_product_image", fake_search)
+    monkeypatch.setattr(image_processor, "process_product_image_result", processing)
+    monkeypatch.setattr(image_processor, "extract_metadata_from_image", lambda *a, **k: {})
+    monkeypatch.setattr(cloudinary_storage, "upload_product_image_to_cloudinary", lambda *a, **k: CLOUD + "auto.png")
+    monkeypatch.setattr(google_sheets, "update_image_link", lambda ws, row, col, value, **k: env["sheet"].append(
+        (row, value)) or True)
+    monkeypatch.setattr(google_sheets, "update_product_metadata", lambda *a, **k: True)
+    monkeypatch.setattr(local_cache_db, "record_search_spend", lambda *a, **k: None)
+    sku = _queue(db, ROWS[0], MILK, GTIN, status="pending")
+    task = db.fetch_next_task("host:1")
+    assert task["row_number"] == ROWS[0]
+
+    def run():
+        return main.pre_cache_product_candidates(task, worksheet=object(), link_column_index=5, sleep=lambda s: None)
+
+    return run, env, sku
+
+
+@pytest.mark.parametrize("by", ["url", "phash"])
+def test_the_worker_never_publishes_a_pick_rejected_while_it_was_processed(db, worker, by):
+    run, env, sku = worker
+    if by == "url":
+        env["during"] = lambda: db.add_rejected_image(sku, PICK, reason_code="WRONG_VARIANT")
+    else:   # the same picture rejected under another address
+        env["during"] = lambda: db.add_rejected_image(sku, "https://mirror/milk.jpg", phash=PICK_PHASH,
+                                                      reason_code="WRONG_VARIANT")
+    assert run() == "success"
+    assert env["sheet"] == [] and db.get_cached_product(sku_key=sku) is None
+    # the remaining candidate waits for a reviewer, without the rejected pick
+    assert _status(db, ROWS[0]) == "ready_for_review"
+    assert _candidate_urls(db, ROWS[0]) == [ALT_PICK]
+
+
+def test_a_busy_publish_lock_requeues_the_row_instead_of_leaving_it_processing(db, worker, monkeypatch):
+    import local_cache_db
+    run, env, sku = worker
+    real_lock = local_cache_db.sku_publish_lock
+    monkeypatch.setattr(local_cache_db, "sku_publish_lock", lambda key, timeout=None: real_lock(key, timeout=1))
+    holder = db.get_db_connection()
+    try:
+        holder.cursor().execute("SELECT GET_LOCK(%s, 0)",
+                                (f"lq_publish:{sku}:{os.getenv('DB_DATABASE', 'automation_db')}"[:64],))
+        assert run() == "success"
+    finally:
+        holder.close()
+    task = db.get_task_by_row(ROWS[0])
+    assert (task["status"], task["failure_code"]) == ("pending", "PUBLISH_BUSY")
+    assert env["sheet"] == []
+
+
+def test_an_approval_during_processing_finishes_the_workers_row(db, worker):
+    run, env, sku = worker
+    # a reviewer approved another image while the worker processed (without taking the worker's claim)
+    env["during"] = lambda: db.save_product_resolution(GTIN, MILK["product_name"], MILK["brand"], "https://x/h.jpg",
+                                                       CLOUD + "human.png", verification_status="human_approved",
+                                                       approved_by="human", sku_key=sku)
+    assert run() == "success"
+    assert env["sheet"] == [] and _status(db, ROWS[0]) == "completed"
+    assert db.get_cached_product(sku_key=sku)["cloudinary_url"] == CLOUD + "human.png"

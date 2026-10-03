@@ -509,17 +509,25 @@ def _write_still_allowed(before_write):
 def auto_approve_product(task, best_image, worksheet, link_column_index, sku_key=None):
     """
     نشر نتيجة AUTO_PUBLISH مباشرة. تعيد 'published' أو 'needs_review' (الخلفية لم تُعزل) أو 'superseded'
-    (مراجع اعتمد المنتج أثناء المعالجة والرفع، أو لم يعد الصف محجوزاً لهذا العامل: لم يُكتب شيء) أو 'failed'.
-    الحل يُخزن auto_verified فقط عند النشر الفعلي بلوحة معزولة.
+    (مراجع اعتمد المنتج أثناء المعالجة والرفع، أو لم يعد الصف محجوزاً لهذا العامل: لم يُكتب شيء) أو 'rejected'
+    (مراجع رفض هذه الصورة لهذا المنتج أثناء المعالجة: لم يُكتب شيء) أو 'busy' (قفل النشر بقي عند غيرنا حتى المهلة)
+    أو 'failed'. الحل يُخزن auto_verified فقط عند النشر الفعلي بلوحة معزولة.
     """
     name = task["product_name"]
     brand = task.get("brand") or ""
     barcode = task.get("barcode") or ""
+    alt_key = task.get("alt_sku_key") or None
+    why = {}
 
     def still_ours():
-        # إعادة التحقق تحت قفل النشر قبل الكتابة: الحجز ما زال لهذا العامل ولا يوجد اعتماد بشري
-        return (local_cache_db.is_claim_held(task["id"], task.get("worker_id"))
-                and not _has_human_approval(sku_key))
+        # إعادة التحقق تحت قفل النشر قبل الكتابة: الحجز ما زال لهذا العامل، ولا يوجد اعتماد بشري، ولم يرفض مراجع
+        # هذه الصورة (رابطها أو pHash) أثناء المعالجة. تعذر قراءة الرفض = لا نشر
+        if not local_cache_db.is_claim_held(task["id"], task.get("worker_id")) or _has_human_approval(sku_key, alt_key):
+            return False
+        if rejected_image(sku_key, alt_key, best_image["url"], _image_phash(best_image)) is not False:
+            why["rejected"] = True
+            return False
+        return True
 
     def record(res):
         # تحت قفل النشر: الحل التلقائي يُحفظ قبل أن يرى مراجع ينتظر القفل حالة المنتج
@@ -541,6 +549,11 @@ def auto_approve_product(task, best_image, worksheet, link_column_index, sku_key
         print(f"[Auto-Publish Error] فشل النشر التلقائي لـ [{name}]: {e}")
         return "failed"
     if res["status"] == "superseded":
+        if res.get("error") == "publish_busy":
+            return "busy"
+        if why.get("rejected"):
+            print(f"[Auto-Publish] الصف {task['row_number']}: رفض مراجع هذه الصورة أثناء المعالجة؛ لم يُكتب شيء.")
+            return "rejected"
         print(f"[Auto-Publish] الصف {task['row_number']}: اعتمده مراجع أثناء المعالجة أو لم يعد محجوزاً لهذا "
               "العامل؛ لم يُكتب شيء.")
         return "superseded"
@@ -616,6 +629,19 @@ def _rejections(sku_key, alt_key=None):
     return urls, phashes
 
 
+def _rejected_by(url, phash, urls, phashes):
+    """الصورة (رابطها بصيغة url_norm، أو pHash على مسافة استبعاد البحث نفسها) بين الصور المرفوضة urls / phashes؟"""
+    if url and local_cache_db.url_norm(url) in {local_cache_db.url_norm(u) for u in urls}:
+        return True
+    if phash and phashes:
+        from catalog_match.pipeline import _near_negative, _phash_hex
+        negatives = [h for h in (_phash_hex(p) for p in phashes) if h]
+        own = _phash_hex(phash)
+        if own and _near_negative(own, negatives) is not None:
+            return True
+    return False
+
+
 def rejected_image(sku_key, alt_key=None, url=None, phash=None):
     """
     هل رفض مراجعٌ هذه الصورة لهذا المنتج (بالمفتاح أو بالمفتاح البديل)؟ رابطها (بصيغة url_norm) أو pHash على مسافة
@@ -626,15 +652,17 @@ def rejected_image(sku_key, alt_key=None, url=None, phash=None):
     except Exception as e:
         print(f"تنبيه: تعذر قراءة رفض المراجعين للـ SKU {sku_key}: {e}")
         return None
-    if url and local_cache_db.url_norm(url) in {local_cache_db.url_norm(u) for u in urls}:
-        return True
-    if phash and phashes:
-        from catalog_match.pipeline import _near_negative, _phash_hex
-        negatives = [h for h in (_phash_hex(p) for p in phashes) if h]
-        own = _phash_hex(phash)
-        if own and _near_negative(own, negatives) is not None:
-            return True
-    return False
+    return _rejected_by(url, phash, urls, phashes)
+
+
+def _image_phash(best_image):
+    """pHash الصورة المختارة كما قرأها البحث (أو مرشحها بنفس الرابط)، أو None."""
+    if best_image.get("phash"):
+        return best_image["phash"]
+    for c in best_image.get("candidates") or []:
+        if isinstance(c, dict) and (c.get("url") or c.get("image_url")) == best_image.get("url") and c.get("phash"):
+            return c["phash"]
+    return None
 
 
 def _servable_resolution(sku_key, alt_key, name, brand, size, brand_mappings=None):
@@ -816,6 +844,7 @@ def pre_cache_product_candidates(task, worksheet=None, link_column_index=None, b
         print(f"[Auto-Publish] الصف {row_number} للمراجعة فقط ({task.get('requeue_reason') or 'review_only'}); "
               "لا نشر تلقائي.")
         decision = "REVIEW_PRESELECTED"
+    status = None
     if (decision == "AUTO_PUBLISH" and best.get("source") != "sqlite_cache"
             and worksheet is not None and link_column_index is not None):
         status = auto_approve_product(task, best, worksheet, link_column_index, sku_key=sku_key)
@@ -825,11 +854,34 @@ def pre_cache_product_candidates(task, worksheet=None, link_column_index=None, b
                          trace={"outcome": _outcome(trace)}, siblings=written)
             print(f"[Auto-Publish] تم نشر الصف {row_number} تلقائياً (قرار AUTO_PUBLISH).")
             return "success"
-        if status == "superseded" or not local_cache_db.is_claim_held(task["id"], task.get("worker_id")):
+        held = local_cache_db.is_claim_held(task["id"], task.get("worker_id"))
+        if status == "busy" and held:
+            # نشر آخر لنفس المنتج احتفظ بالقفل حتى المهلة: يعود الصف للانتظار الآن بدل أن يبقى «قيد المعالجة»
+            # حتى ينتهي حجزه (15 دقيقة)
+            _finish_task(task, "pending", "Another publish of this product held the publish lock",
+                         failure_code="PUBLISH_BUSY", trace={"outcome": _outcome(trace)})
+            return "success"
+        if status == "superseded" and held and _has_human_approval(sku_key, alt_key):
+            # اعتمده مراجع أثناء المعالجة (دون أن يسحب الحجز): المنتج منتهٍ، ويُحرر الحجز
+            _finish_task(task, "completed", failure_code=None, trace={"outcome": _outcome(trace)}, siblings=())
+            return "success"
+        if status != "rejected" or not held:
             # قرار المراجع (أو حجز أحدث) أثناء المعالجة والرفع يبقى كما هو: لا مرشحات ولا حالة فوقه
             return "success"
+        # رفض مراجع الصورة المختارة أثناء المعالجة: باقي المرشحات (بدونها) للمراجعة
 
     candidates = collect_candidates(best, trace)
+    try:
+        rejected_urls, rejected_phashes = _rejections(sku_key, alt_key)
+        candidates = [c for c in candidates if not _rejected_by(c.get("url") or c.get("image_url"), c.get("phash"),
+                                                               rejected_urls, rejected_phashes)]
+    except Exception as e:
+        print(f"تنبيه: تعذر قراءة رفض المراجعين قبل حفظ المرشحات: {e}")
+    if status == "rejected" and not candidates:
+        # لم يبق إلا الصورة المرفوضة: بحث جديد يستبعدها
+        _finish_task(task, "pending", "The pick was rejected while it was being published", failure_code="REJECTED",
+                     trace={"outcome": _outcome(trace)})
+        return "success"
     saved = local_cache_db.save_curation_candidates(
         row_number, name, brand, candidates, best.get("url"), sku_key=sku_key, run_id=uuid.uuid4().hex[:16],
         identity=task)
