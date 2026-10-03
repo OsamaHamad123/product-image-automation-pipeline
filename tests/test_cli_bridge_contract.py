@@ -279,6 +279,21 @@ def test_one_processing_profile_for_auto_publish_approval_and_upload(select_env,
     assert seen == [((1000, 1000), "remove_bg_api", True)] * 3
 
 
+def test_approval_and_upload_write_with_the_brand_identity(select_env, tmp_path):
+    """Without the brand in the row identity, a stale row number now holding a same-name product of another brand
+    would receive this image; the link and the metadata writes carry the sheet brand (as auto-publish does)."""
+    bridge, events, state = select_env
+    assert bridge.action_select_image(dict(SELECT_PARAMS, size="1L"))["status"] == "success"
+    upload = tmp_path / "manual.png"
+    _canvas(upload, (300, 300))
+    params = {k: SELECT_PARAMS[k] for k in ("row_number", "product_name", "brand", "barcode", "sku_key")}
+    assert bridge.action_upload_manual_image(dict(params, file_path=str(upload)))["status"] == "success"
+    writes = [e[-1] for e in events if e[0] in ("link", "metadata_write")]
+    assert len(writes) == 4
+    assert all(w["brand"] == "Almarai" and w["barcode"] == "6281007000024" for w in writes)
+    assert writes[0]["size"] == "1L"
+
+
 def test_select_not_isolated_writes_needs_review(select_env):
     bridge, events, state = select_env
     state["isolated"] = False

@@ -529,7 +529,7 @@ def action_select_image(params):
             image_url, product_name, brand, row_number, worksheet, link_column_index,
             barcode=barcode, candidate_sha256=_candidate_sha(params, row_number, sku_key, image_url),
             category_override={k: _text(params, k) for k in ('category_l1_en', 'category_l2_en', 'category_l3_en')},
-            key_size=_text(params, 'size') or None,
+            key_size=_text(params, 'size') or None, key_brand=brand or None,
         )
         if res["status"] == "failed":
             return {'status': 'failed', 'error': res.get('error'), 'isolated': res.get('isolated', False)}
@@ -586,7 +586,7 @@ def action_upload_manual_image(params):
         res = pipeline.publish_image(
             file_path, product_name, brand, row_number, worksheet, link_column_index, barcode=barcode,
             category_override={k: _text(params, k) for k in ('category_l1_en', 'category_l2_en', 'category_l3_en')},
-            key_size=_text(params, 'size') or None,
+            key_size=_text(params, 'size') or None, key_brand=brand or None,
         )
         try:
             os.remove(file_path)
@@ -731,7 +731,7 @@ def action_reject_image(params):
             if _cell_holds(current, image_url):
                 sheet_cleared = bool(google_sheets.update_image_link(
                     worksheet, row_number, link_column_index, "", barcode=barcode or None,
-                    product_name=product_name or None, size=_text(params, 'size') or None))
+                    product_name=product_name or None, size=_text(params, 'size') or None, brand=brand or None))
     except Exception:
         sheet_error = "Could not update the sheet cell (details in temp/search.log)."
         logger.exception("تعذر تحديث الشيت بعد الرفض")

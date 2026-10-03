@@ -159,6 +159,17 @@ def test_reject_flow(bridge, monkeypatch):
     assert result["sheet_cleared"] is True
 
 
+def test_reject_clears_the_cell_with_the_brand_identity(bridge, monkeypatch):
+    """The clear is identity-checked with the sheet brand too, so a same-name product of another brand that moved
+    into this row number keeps its image."""
+    cli_bridge, google_sheets, calls = bridge
+    url = "https://www.carrefouruae.com/img/laban-up-strawberry.jpg"
+    monkeypatch.setattr(google_sheets, "open_worksheet", lambda client, name: FakeWorksheet(url))
+    assert _reject(cli_bridge, url, size="180ml")["sheet_cleared"] is True
+    (args, kwargs), = calls["update_image_link"]
+    assert kwargs["brand"] == "Al Rawabi" and kwargs["size"] == "180ml" and kwargs["product_name"] == "Laban Up"
+
+
 def test_reject_does_not_clear_a_different_url(bridge, monkeypatch):
     cli_bridge, google_sheets, calls = bridge
     ws = FakeWorksheet("https://res.cloudinary.com/demo/approved-other.png")
