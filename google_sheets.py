@@ -41,6 +41,10 @@ CACHE_PREFIX = "product:data:"
 MAX_OUTBOX_ATTEMPTS = 5
 OUTBOX_BATCH = 200
 
+# أخطاء مؤقتة تُعاد محاولتها: تجاوز الحصة وأخطاء الخادم
+_TRANSIENT_CODES = (429, 500, 502, 503, 504)
+_sleep = time.sleep      # قابلة للاستبدال في الاختبارات
+
 
 class SheetConfigError(Exception):
     """إعداد الشيت غير صالح (مثل تبويب غير موجود)."""
@@ -48,6 +52,13 @@ class SheetConfigError(Exception):
 
 class SheetSchemaError(SheetConfigError):
     """عناوين الأعمدة لا تسمح بتحديد عمود إلزامي (مثل اسم المنتج)."""
+
+
+class SheetTransientError(Exception):
+    """
+    Google Sheets غير متاح مؤقتاً (429 / 5xx / انقطاع الاتصال) بعد استنفاد إعادة المحاولة.
+    ليس خطأ إعداد: الرابط والمشاركة سليمان، والحل الانتظار ثم إعادة المحاولة.
+    """
 
 
 # ---------------------------------------------------------------------------
@@ -157,10 +168,37 @@ def _write_cache(name, payload, version):
 # إعادة المحاولة عند 429 / 5xx
 # ---------------------------------------------------------------------------
 
+def _is_transient(exc):
+    """
+    خطأ مؤقت يستحق إعادة المحاولة: APIError برمز 429/500/502/503/504 (أو 403 لتجاوز معدل Drive)،
+    أو انقطاع/مهلة اتصال. 'غير موجود' و'لا صلاحية' (404/403/SpreadsheetNotFound) ليست مؤقتة.
+    """
+    if isinstance(exc, APIError):
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+        code = getattr(exc, "code", None)
+        if code in _TRANSIENT_CODES or status in _TRANSIENT_CODES:
+            return True
+        return code == 403 and "ratelimitexceeded" in str(exc).replace(" ", "").casefold()
+    if isinstance(exc, (ConnectionError, TimeoutError)):
+        return True
+    try:
+        import requests
+        if isinstance(exc, (requests.exceptions.ConnectionError, requests.exceptions.Timeout,
+                            requests.exceptions.ChunkedEncodingError)):
+            return True
+    except ImportError:  # pragma: no cover - requests is a gspread dependency
+        pass
+    try:
+        from google.auth.exceptions import TransportError
+        return isinstance(exc, TransportError)
+    except ImportError:  # pragma: no cover
+        return False
+
+
 def retry_gspread_on_429(max_retries=5):
     """
-    مُزخرف لإعادة محاولة استدعاءات Google API عند 429 أو 500 أو 503 مع ارتداد أسّي عشوائي.
-    الأخطاء الأخرى تُرفع كما هي.
+    مُزخرف لإعادة محاولة استدعاءات Google API عند الأخطاء المؤقتة (429 و5xx وانقطاع الاتصال، انظر
+    _is_transient) مع ارتداد أسّي عشوائي. الأخطاء الأخرى تُرفع كما هي.
     """
     def decorator(func):
         def wrapper(*args, **kwargs):
@@ -168,20 +206,35 @@ def retry_gspread_on_429(max_retries=5):
             while True:
                 try:
                     return func(*args, **kwargs)
-                except APIError as e:
-                    code = getattr(e, "code", None)
-                    if code in (429, 500, 503) and retry < max_retries:
+                except Exception as e:
+                    if _is_transient(e) and retry < max_retries:
                         retry += 1
                         backoff = min((2 ** retry) + random.uniform(0.1, 1.0), 32)
-                        logger.warning("[Google Sheets API] خطأ %s؛ إعادة المحاولة %s/%s خلال %.2f ثانية",
-                                       code, retry, max_retries, backoff)
-                        time.sleep(backoff)
+                        logger.warning("[Google Sheets API] خطأ مؤقت (%s)؛ إعادة المحاولة %s/%s خلال %.2f ثانية",
+                                       _one_line(e), retry, max_retries, backoff)
+                        _sleep(backoff)
                         continue
                     raise
         wrapper.__wrapped__ = func
         wrapper.__name__ = getattr(func, "__name__", "wrapper")
         return wrapper
     return decorator
+
+
+def _retrying(func, *args, **kwargs):
+    """
+    استدعاء Google API مع إعادة المحاولة عند الأخطاء المؤقتة؛ إذا بقي الخطأ مؤقتاً بعد كل المحاولات يُرفع
+    SheetTransientError (رسالة واضحة أنه ليس خطأ في الرابط أو المشاركة).
+    """
+    try:
+        return retry_gspread_on_429()(func)(*args, **kwargs)
+    except Exception as e:
+        if _is_transient(e):
+            raise SheetTransientError(
+                "Google Sheets غير متاح مؤقتاً (تجاوز الحصة أو خطأ في خادم Google أو انقطاع الاتصال) بعد عدة "
+                f"محاولات: {_one_line(e)}. هذا ليس خطأ في رابط الشيت أو مشاركته؛ أعد المحاولة بعد دقائق."
+            ) from e
+        raise
 
 
 # ---------------------------------------------------------------------------
@@ -211,24 +264,30 @@ def _open_spreadsheet(client, sheet_name_or_url):
 def open_worksheet(client, sheet_name_or_url, worksheet_index=0):
     """
     فتح ورقة العمل. إذا كان SPREADSHEET_TAB_NAME مضبوطاً وغير موجود نرفع SheetConfigError
-    بدلاً من الكتابة بصمت في التبويب الأول. تعيد None إذا تعذر فتح الملف نفسه.
+    بدلاً من الكتابة بصمت في التبويب الأول. تعيد None إذا كان الملف غير موجود أو غير مشارك مع حساب الخدمة.
+    الأخطاء المؤقتة (429 / 5xx / انقطاع الاتصال) تُعاد محاولتها، وإذا استمرت يُرفع SheetTransientError
+    (لا None: رسالة 'الشيت غير موجود / تحقق من المشاركة' لا تصف خطأً مؤقتاً).
     """
     try:
-        sh = _open_spreadsheet(client, sheet_name_or_url)
+        sh = _retrying(_open_spreadsheet, client, sheet_name_or_url)
+    except SheetTransientError as e:
+        logger.error("تعذر فتح جدول البيانات '%s' مؤقتاً: %s", _one_line(sheet_name_or_url), e)
+        raise
     except Exception as e:
-        logger.error("فشل فتح جدول البيانات '%s': %s", _one_line(sheet_name_or_url), e)
+        logger.error("فشل فتح جدول البيانات '%s' (غير موجود أو غير مشارك مع حساب الخدمة): %s",
+                     _one_line(sheet_name_or_url), _one_line(e))
         return None
     tab_name = (getattr(config, "SPREADSHEET_TAB_NAME", "") or "").strip()
     if tab_name and worksheet_index == 0:
         try:
-            return sh.worksheet(tab_name)
+            return _retrying(sh.worksheet, tab_name)
         except gspread.exceptions.WorksheetNotFound:
             try:
                 titles = [ws.title for ws in sh.worksheets()]
             except Exception:
                 titles = []
             raise SheetConfigError(f"التبويب '{tab_name}' غير موجود في الشيت. التبويبات المتاحة: {titles}")
-    return sh.get_worksheet(worksheet_index)
+    return _retrying(sh.get_worksheet, worksheet_index)
 
 
 _HEADER_TTL = 60.0
@@ -251,16 +310,18 @@ def _worksheet_headers(worksheet, fresh=False):
 
 
 def find_link_column(worksheet, create=True):
-    """فهرس عمود رابط الصورة من العناوين الحالية؛ يُنشأ العمود في النهاية إن لم يوجد و create=True."""
-    headers = _worksheet_headers(worksheet, fresh=True)
+    """
+    فهرس عمود رابط الصورة من العناوين الحالية؛ يُنشأ العمود في النهاية إن لم يوجد و create=True.
+    الأخطاء المؤقتة تُعاد محاولتها (SheetTransientError إذا استمرت).
+    """
+    headers = _retrying(_worksheet_headers, worksheet, fresh=True)
     idx = resolve_columns(headers)["link"]
     if idx == -1 and create:
         idx = len(headers)
-        worksheet.update_cell(1, idx + 1, DEFAULT_LINK_HEADER)
-        _worksheet_headers(worksheet, fresh=True)
+        _retrying(worksheet.update_cell, 1, idx + 1, DEFAULT_LINK_HEADER)
+        _retrying(_worksheet_headers, worksheet, fresh=True)
         logger.info("تم إنشاء عمود '%s' في العمود رقم %s", DEFAULT_LINK_HEADER, idx + 1)
     return idx
-
 
 # ---------------------------------------------------------------------------
 # قراءة المنتجات
@@ -269,13 +330,13 @@ def find_link_column(worksheet, create=True):
 def get_products(worksheet):
     """
     جلب كل المنتجات مع رقم الصف. الأعمدة تُحدد بالعناوين؛ يُرفع SheetSchemaError إذا لم يوجد عمود الاسم.
-    البراند الفارغ يبقى ''. تعيد (products, link_idx).
+    البراند الفارغ يبقى ''. تعيد (products, link_idx). الأخطاء المؤقتة تُعاد محاولتها (SheetTransientError إذا استمرت).
     """
     cached = _read_cache("products_cache.json", 3600, PRODUCTS_CACHE_VERSION)
     if cached:
         return cached["products"], cached["link_idx"]
 
-    rows = worksheet.get_all_values()
+    rows = _retrying(worksheet.get_all_values)
     if not rows or len(rows) <= 1:
         logger.warning("لا توجد بيانات في الشيت (أو يوجد صف العناوين فقط).")
         return [], -1
@@ -291,7 +352,7 @@ def get_products(worksheet):
     link_idx = cols["link"]
     if link_idx == -1:
         link_idx = len(headers)
-        worksheet.update_cell(1, link_idx + 1, DEFAULT_LINK_HEADER)
+        _retrying(worksheet.update_cell, 1, link_idx + 1, DEFAULT_LINK_HEADER)
         logger.info("تم إنشاء عمود جديد '%s' في العمود رقم %s", DEFAULT_LINK_HEADER, link_idx + 1)
 
     products = []
