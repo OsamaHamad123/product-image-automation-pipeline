@@ -1847,11 +1847,16 @@ def run_automation_pipeline():
         if not sheets_client:
             print("فشل الاتصال بـ Google Sheets API.")
             return
-        worksheet = google_sheets.open_worksheet(sheets_client, config.SPREADSHEET_NAME_OR_URL)
-        if not worksheet:
-            print(f"لم يتم العثور على ورقة العمل: {config.SPREADSHEET_NAME_OR_URL}")
+        try:
+            worksheet = google_sheets.open_worksheet(sheets_client, config.SPREADSHEET_NAME_OR_URL)
+            if not worksheet:
+                print(f"لم يتم العثور على ورقة العمل: {config.SPREADSHEET_NAME_OR_URL}")
+                return
+            products, link_column_index = google_sheets.get_products(worksheet)
+        except google_sheets.SheetTransientError as e:
+            # ليس خطأ رابط أو مشاركة: Google رفض مؤقتاً حتى بعد إعادة المحاولة
+            print(f"Google Sheets غير متاح مؤقتاً؛ لم يبدأ التشغيل. أعد المحاولة بعد دقائق. ({e})")
             return
-        products, link_column_index = google_sheets.get_products(worksheet)
         if not products:
             print("لم يتم العثور على أي منتجات صالحة للمعالجة.")
             return

@@ -592,10 +592,37 @@ def find_record_conflicts(worksheet, records, headers=None):
     return conflicts
 
 
-def find_identity_rows(worksheet, expectations, headers=None):
+# خانات مطابقة الصفوف: (عمود الشيت، دالة التطبيع، خانة التوقع). 'gtin' يقارن GTIN صالحاً، و'barcode_text' يقارن
+# نص خلية الباركود كما هو (للنقل الصارم: 'N/A' لا تطابق '-'، والفارغة لا تطابق إلا فارغة)
+_MATCH_FIELDS = {"gtin": ("barcode", _gtin, "barcode"), "barcode_text": ("barcode", _norm_name, "barcode"),
+                 "name": ("name", _norm_name, "name"), "size": ("size", _norm_size, "size"),
+                 "brand": ("brand", _norm_name, "brand")}
+
+
+def _relocation_fields(expect, cols):
+    """
+    خانات المطابقة الصارمة لنقل كتابة إلى صف آخر: GTIN صالح وحده، أو هوية كاملة: الاسم والحجم والبراند (أعمدتها
+    الثلاثة موجودة في الشيت) ومعها نص الباركود إن كان عموده موجوداً، والخانة الفارغة في التوقع لا تطابق إلا خانة
+    فارغة. [] = لا نقل أبداً (عمود ناقص أو بلا اسم): براند أو حجم فارغ لا يصبح «أي قيمة».
+    """
+    expect = expect or {}
+    if cols.get("barcode", -1) != -1 and _gtin(expect.get("barcode")):
+        return ["gtin"]
+    if expect.get("name") and all(cols.get(f, -1) != -1 for f in ("name", "size", "brand")):
+        return ["name", "size", "brand"] + (["barcode_text"] if cols.get("barcode", -1) != -1 else [])
+    return []
+
+
+def _verification_fields(expect, cols):
+    """خانات _key_fields بأسماء _MATCH_FIELDS (مطابقة التحقق: الحجم والبراند فقط إذا كانا في التوقع)."""
+    return ["gtin" if f == "barcode" else f for f in _key_fields(expect, cols)]
+
+
+def find_identity_rows(worksheet, expectations, headers=None, strict=True):
     """
     expectations: {record_id: expect}. يعيد {record_id: [أرقام كل الصفوف التي تطابق هوية المنتج]} بعد قراءة
-    أعمدة الهوية للورقة كلها مرة واحدة (batch_get واحد). توقع بلا مفتاح صالح يعيد [] (لا يُنقل أبداً).
+    أعمدة الهوية للورقة كلها مرة واحدة (batch_get واحد). strict=True (للنقل): مطابقة كاملة حسب
+    _relocation_fields؛ strict=False: مطابقة التحقق (_key_fields)، لعدّ صفوف المنتج. توقع بلا مفتاح يعيد [].
     """
     expectations = {k: e for k, e in (expectations or {}).items() if e}
     if not expectations:
@@ -603,19 +630,22 @@ def find_identity_rows(worksheet, expectations, headers=None):
     if headers is None:
         headers = _worksheet_headers(worksheet, fresh=True)
     cols = resolve_columns(headers)
-    fields = {k: _key_fields(e, cols) for k, e in expectations.items()}
+    choose = _relocation_fields if strict else _verification_fields
+    fields = {k: choose(e, cols) for k, e in expectations.items()}
     out = {k: [] for k in expectations}
-    needed = sorted({f for fs in fields.values() for f in fs})
-    if not needed:
+    used = sorted({f for fs in fields.values() for f in fs})
+    if not used:
         return out
-    cells = _read_identity_cells(worksheet, {f: cols[f] for f in needed})
-    normalized = {f: {row: _IDENTITY_NORMS[f](value) for row, value in cells[f].items()} for f in needed}
-    all_rows = sorted({row for f in needed for row in cells[f]})
+    columns = sorted({_MATCH_FIELDS[f][0] for f in used})
+    cells = _read_identity_cells(worksheet, {c: cols[c] for c in columns})
+    all_rows = sorted({row for c in columns for row in cells[c]})
+    normalized = {f: {row: _MATCH_FIELDS[f][1](cells[_MATCH_FIELDS[f][0]].get(row, "")) for row in all_rows}
+                  for f in used}
     for k, e in expectations.items():
         if not fields[k]:
             continue
-        want = {f: _IDENTITY_NORMS[f](e[f]) for f in fields[k]}
-        out[k] = [row for row in all_rows if all(normalized[f].get(row) == want[f] for f in fields[k])]
+        want = {f: _MATCH_FIELDS[f][1](e.get(_MATCH_FIELDS[f][2]) or "") for f in fields[k]}
+        out[k] = [row for row in all_rows if all(normalized[f][row] == want[f] for f in fields[k])]
     return out
 
 
@@ -636,14 +666,14 @@ _seq_lock = threading.Lock()
 _last_seq = 0
 
 
-def _next_seq():
+def _next_seq(floor=0):
     """
-    تسلسل الكتابة: وقت الجدولة بالنانوثانية، متزايد تماماً داخل العملية. الكتابات من كل العمليات والقنوات
-    تُرتب به، والمُفرِّغ لا يرسل قيمة seq أصغر من قيمة كُتبت بعدها لنفس الخلية ونفس المنتج.
+    تسلسل الكتابة: وقت الجدولة بالنانوثانية، متزايد تماماً داخل العملية ولا يقل عن floor. الكتابات من كل العمليات
+    والقنوات تُرتب به، والمُفرِّغ لا يرسل قيمة seq أصغر من قيمة كُتبت بعدها لنفس الخلية ونفس المنتج.
     """
     global _last_seq
     with _seq_lock:
-        _last_seq = max(time.time_ns(), _last_seq + 1)
+        _last_seq = max(time.time_ns(), _last_seq + 1, int(floor or 0))
         return _last_seq
 
 
@@ -699,6 +729,7 @@ class SQLiteTransactionQueue:
                 "ALTER TABLE sheet_updates ADD INDEX IF NOT EXISTS idx_sheet_updates_status (sync_status)",
                 "ALTER TABLE sheet_updates ADD INDEX IF NOT EXISTS idx_sheet_updates_ident (ident)",
                 "ALTER TABLE sheet_updates ADD INDEX IF NOT EXISTS idx_sheet_updates_row (`row_number`)",
+                "ALTER TABLE sheet_updates ADD INDEX IF NOT EXISTS idx_sheet_updates_seq (seq)",
             ):
                 cursor.execute(stmt)
             conn.commit()
@@ -709,18 +740,32 @@ class SQLiteTransactionQueue:
                       key_size=None, key_brand=None, col_key=None, seq=None):
         """
         جدولة كتابة خلية. col_key: المفتاح المنطقي للعمود ('link' أو 'meta:<key>') ويُحدد عموده وقت الكتابة؛
-        col_index/col_name للكتابات القديمة فقط. seq: تسلسل الجدولة (يُولَّد الآن إن لم يُمرر). يعيد معرّف الصف.
+        col_index/col_name للكتابات القديمة فقط. يعيد معرّف الصف.
+        seq: تسلسل كتابة نُقلت من Redis (بوقت جدولتها هناك)؛ نقلها مرة أخرى (نقل جزئي أو حمولة تغيرت أثناء النقل)
+        لا يكرر الصف. دونه يُولَّد الآن ولا يقل عن أكبر seq في الطابور + 1: الترتيب بين العمليات يبقى صحيحاً حتى
+        لو رجعت ساعة الجهاز أو وقعت كتابتان في نفس نبضة الساعة.
         """
         expect = _expectation(key_barcode, key_name, key_size, key_brand)
+        ident = _identity_hash(expect)
         conn = self._connect()
         try:
             cursor = conn.cursor()
+            if seq:
+                cursor.execute(
+                    "SELECT id FROM sheet_updates WHERE (`row_number` = %s OR relocated_from = %s) AND col_key <=> %s "
+                    "AND seq = %s AND ident <=> %s ORDER BY id LIMIT 1",
+                    (row_number, row_number, col_key, int(seq), ident))
+                existing = cursor.fetchone()
+                if existing:
+                    return existing["id"]
+            else:
+                cursor.execute("SELECT MAX(seq) AS top FROM sheet_updates")
+                seq = _next_seq(floor=int((cursor.fetchone() or {}).get("top") or 0) + 1)
             cursor.execute(
                 "INSERT INTO sheet_updates (`row_number`, `col_index`, `value`, col_name, col_key, seq, ident, "
                 "key_barcode, key_name, key_size, key_brand) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
                 (row_number, -1 if col_index is None else col_index, "" if value is None else str(value),
-                 col_name, col_key, int(seq or _next_seq()), _identity_hash(expect), key_barcode, key_name,
-                 key_size, key_brand)
+                 col_name, col_key, int(seq), ident, key_barcode, key_name, key_size, key_brand)
             )
             new_id = getattr(cursor, "lastrowid", None)
             conn.commit()
@@ -771,9 +816,10 @@ def _default_outcome_hook(outcome):
     logger.error("%s", message)
     log = getattr(config, "log_error_to_laravel", None)
     if callable(log):
+        # قيم خلايا الشيت تُمرر سطراً واحداً: خلية فيها سطر جديد لا تزوّر أسطر سجل
+        fields = {k: _one_line(outcome[k]) if outcome.get(k) else None for k in ("barcode", "product_name", "brand")}
         try:
-            log(message, barcode=outcome.get("barcode") or None, product_name=outcome.get("product_name") or None,
-                brand=outcome.get("brand") or None, level="ERROR")
+            log(message, level="ERROR", **fields)
         except Exception:
             pass
 
@@ -999,21 +1045,24 @@ class GoogleSheetsBatchWorker(threading.Thread):
                     beyond.add(r["id"])
             targets.append((r, col))
 
-        # 3. التحقق من الهوية؛ عند CONFLICT (أو صف خارج الورقة) نقل الكتابة إلى الصف الوحيد المطابق للمنتج
+        # 3. التحقق من الهوية؛ عند CONFLICT (أو صف خارج الورقة) نقل مبدئي إلى الصف الوحيد الذي يطابق المنتج مطابقة
+        #    كاملة (find_identity_rows الصارمة). النقل يُحفظ فقط بعد فحص الترتيب وخلية الهدف (الخطوة 5).
         records = {r["id"]: (r["row_number"], r["expect"]) for r, _ in targets
                    if r["expect"] and r["id"] not in beyond}
         record_conflicts = find_record_conflicts(worksheet, records, headers=headers) if records else {}
         lost = {r["id"]: r["expect"] for r, _ in targets
                 if r["expect"] and (r["id"] in record_conflicts or r["id"] in beyond)}
         found = find_identity_rows(worksheet, lost, headers=headers) if lost else {}
-        ready = []
+        ready, moved = [], {}
         for r, col in targets:
             if r["id"] not in record_conflicts and r["id"] not in beyond:
                 ready.append((r, col))
                 continue
             matches = found.get(r["id"]) or []
             if len(matches) == 1:
-                self._relocate(cursor, r, matches[0])
+                moved[r["id"]] = (r["row_number"], r.get("relocated_from"))
+                r["relocated_from"] = r.get("relocated_from") or r["row_number"]
+                r["row_number"] = matches[0]
                 ready.append((r, col))
                 continue
             where = "no row matches" if not matches else f"{len(matches)} rows match"
@@ -1031,9 +1080,23 @@ class GoogleSheetsBatchWorker(threading.Thread):
         _set_status(cursor, [r["id"] for r, col in ready if newest[(r["row_number"], col)][0] is not r],
                     "SUPERSEDED")
         ready = sorted(newest.values(), key=lambda item: order(item[0]))
-        stale = _older_than_written(cursor, ready)
+        stale = _older_than_written(cursor, worksheet, headers, ready)
         _set_status(cursor, sorted(stale), "SUPERSEDED", "a newer value was already written to this cell")
         ready = [(r, col) for r, col in ready if r["id"] not in stale]
+
+        # 5. النقل لا يكتب أبداً فوق قيمة مختلفة: خلية الهدف في صف المنتج الجديد فارغة أو تحمل نفس القيمة، وإلا CONFLICT
+        relocated = [(r, col) for r, col in ready if r["id"] in moved]
+        if relocated:
+            held = _read_cells(worksheet, [(r["row_number"], col) for r, col in relocated])
+            for r, col in relocated:
+                current = held.get((r["row_number"], col), "")
+                if current and current != str(r["value"]).strip():
+                    conflicts[r["id"]] = (f"the product moved from row {moved[r['id']][0]} to row {r['row_number']}, "
+                                          f"whose cell already holds a different value ({current[:200]!r}); not moved")
+                    r["row_number"], r["relocated_from"] = moved[r["id"]]
+                else:
+                    self._relocate(cursor, r, moved[r["id"]][0])
+            ready = [(r, col) for r, col in ready if r["id"] not in conflicts]
 
         unwritten = []
         by_id = {r["id"]: r for r in rows}
@@ -1085,15 +1148,15 @@ class GoogleSheetsBatchWorker(threading.Thread):
         clear_cache()
 
     @staticmethod
-    def _relocate(cursor, r, new_row):
-        """نقل كتابة إلى صف المنتج الحالي (أُدرج أو حُذف صف فوقه)؛ relocated_from يحفظ الصف عند الجدولة."""
-        old_row = r["row_number"]
-        r["relocated_from"] = r.get("relocated_from") or old_row
-        r["row_number"] = new_row
+    def _relocate(cursor, r, old_row):
+        """
+        حفظ نقل كتابة إلى صف المنتج الحالي (r['row_number']؛ أُدرج أو حُذف صف فوقه). relocated_from يحفظ الصف
+        عند الجدولة.
+        """
         cursor.execute("UPDATE sheet_updates SET `row_number` = %s, relocated_from = %s WHERE id = %s",
-                       (new_row, r["relocated_from"], r["id"]))
+                       (r["row_number"], r["relocated_from"], r["id"]))
         logger.warning("[Sheets Outbox] الكتابة %s: المنتج لم يعد في الصف %s؛ نُقلت إلى الصف %s (الصف الوحيد المطابق).",
-                       r["id"], old_row, new_row)
+                       r["id"], old_row, r["row_number"])
 
     @staticmethod
     def _record_failures(conn, cursor, items, error, now):
@@ -1122,42 +1185,82 @@ class GoogleSheetsBatchWorker(threading.Thread):
             _report_outcome(outcome)
 
 
-def _older_than_written(cursor, items):
+def _read_cells(worksheet, cells):
+    """قيم خلايا محددة [(row, col 0-based)] عبر batch_get واحد: {(row, col): القيمة}."""
+    cells = list(dict.fromkeys(cells))
+    ranges = [f"{gspread.utils.rowcol_to_a1(row, col + 1)}:{gspread.utils.rowcol_to_a1(row, col + 1)}"
+              for row, col in cells]
+    result = _retrying(worksheet.batch_get, ranges) if ranges else []
+    out = {}
+    for i, cell in enumerate(cells):
+        values = list(result[i]) if result and i < len(result) else []
+        out[cell] = str(values[0][0]).strip() if values and values[0] else ""
+    return out
+
+
+def _older_than_written(cursor, worksheet, headers, items):
     """
-    معرّفات الكتابات التي كُتبت بعدها قيمة أحدث (seq أكبر) لنفس العمود ونفس المنتج في نفس الصف (الحالي أو
-    الصف عند الجدولة قبل النقل): لا تُرسل أبداً، كي لا تمحو قيمةٌ قديمة قيمةً أحدث (بين العمليات، وحمولات Redis
-    المنقولة متأخرة، وإعادة المحاولة المؤجلة). صفان مكرران لنفس المنتج لا يلغي أحدهما كتابة الآخر.
+    معرّفات الكتابات التي كُتبت بعدها قيمة أحدث (seq أكبر) لنفس العمود؛ لا تُرسل أبداً، كي لا تمحو قيمةٌ قديمة
+    قيمةً أحدث (بين العمليات، وحمولات Redis المنقولة متأخرة، وإعادة المحاولة المؤجلة). الكتابة قديمة إذا:
+    - كُتبت بعدها قيمة لنفس المنتج (نفس بصمة الهوية) في أي صف: الصف ينجرف مع كل إدراج أو حذف. الاستثناء: منتج له
+      الآن أكثر من صف (صفوف مكررة)؛ عندها فقط إذا كانت في نفس الصف (الحالي أو عند الجدولة)، فلا يلغي صف مكرر
+      كتابة الصف الآخر.
+    - أو كُتبت بعدها قيمة في نفس خلية الهدف بهوية بصيغة أخرى (مثلاً أُضيف الباركود بعد الجدولة)، ما دام منتج
+      تلك الكتابة الأحدث ما زال في هذا الصف (وإلا فالقيمة الأحدث انتقلت مع صفها).
     """
     keyed = []
     for r, _ in items:
         col_key = r.get("col_key") or _col_key_for_header(r.get("col_name"))
         if col_key:
-            keyed.append((r, col_key, {r["row_number"], r.get("relocated_from")} - {None}))
+            keyed.append((r, col_key))
     if not keyed:
         return set()
-    idents = sorted({r["ident"] for r, _, _ in keyed if r.get("ident")})
-    rows = sorted({row for _, _, cells in keyed for row in cells})
-    clauses, params = [], [min(int(r.get("seq") or 0) for r, _, _ in keyed)]
+    idents = sorted({r["ident"] for r, _ in keyed if r.get("ident")})
+    rows = sorted({r["row_number"] for r, _ in keyed})
+    clauses = ["`row_number` IN (" + ",".join("%s" for _ in rows) + ")"]
+    params = [min(int(r.get("seq") or 0) for r, _ in keyed)] + rows
     if idents:
         clauses.append("ident IN (" + ",".join("%s" for _ in idents) + ")")
         params += idents
-    clauses.append("(ident IS NULL AND `row_number` IN (" + ",".join("%s" for _ in rows) + "))")
-    params += rows
     cursor.execute(
-        "SELECT `row_number`, relocated_from, col_key, ident, seq FROM sheet_updates "
-        "WHERE sync_status = 'SYNCED' AND seq > %s AND (" + " OR ".join(clauses) + ")",
+        "SELECT id, `row_number`, relocated_from, col_key, ident, seq, key_barcode, key_name, key_size, key_brand "
+        "FROM sheet_updates WHERE sync_status = 'SYNCED' AND seq > %s AND (" + " OR ".join(clauses) + ")",
         tuple(params),
     )
     written = [w for w in cursor.fetchall() if w.get("seq") is not None and w.get("col_key")]
-    stale = set()
-    for r, col_key, cells in keyed:
-        seq = int(r.get("seq") or 0)
-        for w in written:
-            if (w["col_key"] == col_key and int(w["seq"]) > seq
-                    and (w.get("ident") or None) == (r.get("ident") or None)
-                    and cells & ({w.get("row_number"), w.get("relocated_from")} - {None})):
-                stale.add(r["id"])
+    stale, elsewhere, same_cell = set(), {}, {}
+    for r, col_key in keyed:
+        newer = [w for w in written if w["col_key"] == col_key and int(w["seq"]) > int(r.get("seq") or 0)]
+        mine = [w for w in newer if r.get("ident") and w.get("ident") == r["ident"]]
+        cells = {r["row_number"], r.get("relocated_from")} - {None}
+        if any(cells & ({w["row_number"], w.get("relocated_from")} - {None}) for w in mine):
+            stale.add(r["id"])
+            continue
+        if mine:
+            elsewhere[r["id"]] = r
+        others = [w for w in newer if w["row_number"] == r["row_number"] and w not in mine]
+        if others:
+            same_cell[r["id"]] = (r, others)
+    # نفس المنتج في صف آخر: قديمة ما لم يكن للمنتج الآن أكثر من صف
+    if elsewhere:
+        found = find_identity_rows(worksheet, {k: r["expect"] for k, r in elsewhere.items()}, headers=headers,
+                                   strict=False)
+        stale.update(k for k in elsewhere if len(found.get(k) or []) <= 1)
+    # نفس الخلية بهوية أخرى: قديمة ما دام منتج الكتابة الأحدث ما زال في هذا الصف
+    records = {}
+    for k, (r, others) in same_cell.items():
+        if k in stale:
+            continue
+        for w in others:
+            expect = _expectation(w.get("key_barcode"), w.get("key_name"), w.get("key_size"), w.get("key_brand"))
+            if not expect:
+                stale.add(k)
                 break
+            records[(k, w["id"])] = (r["row_number"], expect)
+    records = {key: rec for key, rec in records.items() if key[0] not in stale}
+    if records:
+        conflicts = find_record_conflicts(worksheet, records, headers=headers)
+        stale.update(key[0] for key in records if key not in conflicts)
     return stale
 
 

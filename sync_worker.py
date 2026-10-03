@@ -164,6 +164,28 @@ def run_sync_cycle(worksheet, r=None, queue=None, flush=True):
     return forwarded
 
 
+def _loop_once(r, state):
+    """
+    دورة واحدة من حلقة العامل: نقل حمولات Redis إلى الطابور أولاً (لا ينتظر فتح الشيت)، ثم فتح الشيت إن لزم
+    وتفريغ الطابور. فتح الشيت قد يطول (إعادة محاولة الأخطاء المؤقتة) فيُجدد النبض بعده.
+    state: {'queue', 'worksheet'} يبقى بين الدورات.
+    """
+    beat(r)
+    if state.get("queue") is None:
+        state["queue"] = google_sheets.SQLiteTransactionQueue()
+    run_sync_cycle(None, r, queue=state["queue"], flush=False)
+    if state.get("worksheet") is None:
+        client = google_sheets.get_sheets_client()
+        if client:
+            try:
+                state["worksheet"] = google_sheets.open_worksheet(client, config.SPREADSHEET_NAME_OR_URL)
+            finally:
+                beat(r)
+    if state.get("worksheet") is not None:
+        google_sheets.flush_outbox(state["worksheet"], state["queue"])
+        beat(r)
+
+
 def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     r = _client()
@@ -174,21 +196,13 @@ def main():
         return
 
     logger.info("[Sync Worker] عامل المزامنة المؤجلة يعمل.")
-    worksheet = None
-    queue = None
+    state = {}
     while True:
         try:
-            beat(r)
-            if queue is None:
-                queue = google_sheets.SQLiteTransactionQueue()
-            if worksheet is None:
-                client = google_sheets.get_sheets_client()
-                if client:
-                    worksheet = google_sheets.open_worksheet(client, config.SPREADSHEET_NAME_OR_URL)
-            run_sync_cycle(worksheet, r, queue=queue, flush=worksheet is not None)
+            _loop_once(r, state)
         except Exception as e:
             logger.exception("[Sync Worker] خطأ في الدورة: %s", e)
-            worksheet = None
+            state["worksheet"] = None
         time.sleep(SYNC_INTERVAL)
 
 

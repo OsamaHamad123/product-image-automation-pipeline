@@ -296,11 +296,11 @@ def test_redis_payload_carries_the_logical_column_end_to_end(gs, outbox, monkeyp
 # ---------------------------------------------------------------------------
 
 PLACEHOLDERS = [
-    ["Barcode", "Product Name", "Brand", "Drive Image Link"],
-    ["N/A", "Tomato Paste 400g", "Al Alali", ""],         # row 2
-    ["6.29E+12", "Chickpeas 400g", "California Garden", ""],  # row 3
-    ["0", "Basmati Rice 5kg", "Abu Kass", ""],            # row 4
-    ["-", "Sunflower Oil 1.5L", "Afia", ""],              # row 5
+    ["Barcode", "Product Name", "Brand", "Size", "Drive Image Link"],
+    ["N/A", "Tomato Paste 400g", "Al Alali", "400g", ""],             # row 2
+    ["6.29E+12", "Chickpeas 400g", "California Garden", "400g", ""],  # row 3
+    ["0", "Basmati Rice 5kg", "Abu Kass", "5kg", ""],                 # row 4
+    ["-", "Sunflower Oil 1.5L", "Afia", "1.5L", ""],                  # row 5
 ]
 
 
@@ -358,8 +358,8 @@ def test_review_publish_paths_pass_the_brand_into_the_row_identity(gs, offline, 
 
 def test_placeholder_write_for_another_product_goes_to_that_products_row(gs, outbox):
     ws = Sheet(PLACEHOLDERS)
-    assert gs.update_image_link(ws, 2, 3, "https://res/oil.png", barcode="-", product_name="Sunflower Oil 1.5L",
-                                brand="Afia") is True
+    assert gs.update_image_link(ws, 2, 4, "https://res/oil.png", barcode="-", product_name="Sunflower Oil 1.5L",
+                                size="1.5L", brand="Afia") is True
     flush(gs, ws, outbox)
     assert ws.value(2, "Drive Image Link") == ""              # the tomato paste row is never touched
     assert ws.value(5, "Drive Image Link") == "https://res/oil.png"
@@ -665,15 +665,310 @@ def test_older_write_retried_later_never_overwrites_a_newer_one(gs, outbox):
     assert statuses(gs) == {old: "SUPERSEDED", new: "SYNCED"}
 
 
-def test_duplicate_rows_of_one_product_do_not_cancel_each_other(gs, outbox):
+def test_older_write_to_one_duplicate_row_still_lands_after_a_newer_write_to_the_other(gs, outbox):
+    """The same product listed twice (rows 2 and 4): a newer write to row 4 must not cancel an older, still
+    pending write to row 2 (the row test applies because the product has two rows)."""
     ws = sheet()
     ws.set(4, 1, MILK)
-    ws.set(4, 2, "Almarai Fresh Milk")                            # the same product listed twice (rows 2 and 4)
-    first = outbox.append_update(2, 5, "https://res/milk-a.png", col_key="link", key_barcode=MILK)
-    flush(gs, ws, outbox)
+    ws.set(4, 2, "Almarai Fresh Milk")
+    ws.down = api_error(503)
+    older = outbox.append_update(2, 5, "https://res/milk-a.png", col_key="link", key_barcode=MILK)
+    flush(gs, ws, outbox)                                       # fails: retried in 60 s
     ws.down = None
-    ws_seq_newer = outbox.append_update(4, 5, "https://res/milk-b.png", col_key="link", key_barcode=MILK)
+    newer = outbox.append_update(4, 5, "https://res/milk-b.png", col_key="link", key_barcode=MILK)
     flush(gs, ws, outbox)
-    assert statuses(gs) == {first: "SYNCED", ws_seq_newer: "SYNCED"}
+    gs.clock["now"] += 61
+    flush(gs, ws, outbox)
+    assert statuses(gs) == {older: "SYNCED", newer: "SYNCED"}
     assert ws.value(2, "Drive Image Link") == "https://res/milk-a.png"
     assert ws.value(4, "Drive Image Link") == "https://res/milk-b.png"
+
+
+def test_a_newer_write_for_another_product_does_not_cancel_an_older_write(gs, outbox):
+    ws = sheet()
+    ws.down = api_error(503)
+    older = outbox.append_update(2, 5, "https://res/milk.png", col_key="link", key_barcode=MILK)
+    flush(gs, ws, outbox)
+    ws.down = None
+    newer = outbox.append_update(3, 5, "https://res/laban.png", col_key="link", key_barcode=LABAN)
+    flush(gs, ws, outbox)
+    gs.clock["now"] += 61
+    flush(gs, ws, outbox)
+    assert statuses(gs) == {older: "SYNCED", newer: "SYNCED"}
+    assert ws.value(2, "Drive Image Link") == "https://res/milk.png"
+
+
+def test_same_batch_older_redis_value_loses_to_a_newer_outbox_value(gs, outbox, monkeypatch):
+    """Both writes reach one flush; the forwarded Redis row has the larger id but the smaller seq."""
+    import sync_worker
+    ws = sheet()
+    r = FakeRedis()
+    monkeypatch.setattr(gs, "_get_redis", lambda: r)
+    assert gs.update_image_link(ws, 2, 5, "needs_review:https://res/old.png", barcode=MILK)
+    monkeypatch.setattr(gs, "_get_redis", lambda: None)
+    assert gs.update_image_link(ws, 2, 5, "https://res/approved.png", barcode=MILK)
+    assert sync_worker.run_sync_cycle(ws, r, queue=outbox) == 1        # forward, then one flush of both
+    assert ws.value(2, "Drive Image Link") == "https://res/approved.png"
+
+
+def test_same_batch_older_relocated_value_loses_to_a_newer_value_for_the_same_cell(gs, outbox, monkeypatch):
+    """The older write (Redis, queued for the product's old row) is relocated onto the cell the newer write
+    targets: the newest by seq wins even though the forwarded row has the larger id."""
+    import sync_worker
+    ws = sheet()
+    r = FakeRedis()
+    monkeypatch.setattr(gs, "_get_redis", lambda: r)
+    assert gs.update_image_link(ws, 4, 5, "needs_review:https://res/old.png", barcode=JUICE)
+    ws.insert_row(2, [WATER, "Mai Dubai Water", "Mai Dubai", "500ml", "UAE", ""])   # Juice moves to row 5
+    monkeypatch.setattr(gs, "_get_redis", lambda: None)
+    assert gs.update_image_link(ws, 5, 5, "https://res/approved.png", barcode=JUICE)
+    assert sync_worker.run_sync_cycle(ws, r, queue=outbox) == 1
+    assert ws.value(5, "Drive Image Link") == "https://res/approved.png"
+
+
+# ---------------------------------------------------------------------------
+# review fixes
+# ---------------------------------------------------------------------------
+
+TOMATO = [
+    ["Barcode", "Product Name", "Brand", "Size", "Drive Image Link"],
+    ["", "Tomato Paste", "", "", ""],                                   # row 2: no barcode, blank brand/size
+    ["", "Chickpeas", "", "", ""],                                      # row 3
+    ["", "Tomato Paste", "Al Alali", "400g", "https://res/alali-approved.png"],   # row 4: another product
+]
+
+
+def test_relocation_never_treats_a_blank_brand_or_size_as_a_wildcard(gs, outbox):
+    ws = Sheet(TOMATO)
+    wid = outbox.append_update(2, 4, "https://res/tomato.png", col_key="link", key_name="Tomato Paste")
+    ws.rows.pop(1)                                              # row 2 deleted: Al Alali is now row 3
+    flush(gs, ws, outbox)
+    assert ws.value(3, "Drive Image Link") == "https://res/alali-approved.png"     # never overwritten
+    assert rows_of(outbox)[wid]["sync_status"] == "CONFLICT"
+    assert [o["status"] for o in gs.reported] == ["CONFLICT"]
+
+    # the same with an empty link cell on the Al Alali row: still another product, never relocated onto it
+    ws = Sheet(TOMATO)
+    ws.set(4, 5, "")
+    wid = outbox.append_update(2, 4, "https://res/tomato.png", col_key="link", key_name="Tomato Paste")
+    ws.rows.pop(1)
+    flush(gs, ws, outbox)
+    assert ws.value(3, "Drive Image Link") == "" and rows_of(outbox)[wid]["sync_status"] == "CONFLICT"
+
+
+def test_relocation_needs_every_identity_column_of_the_sheet(gs, outbox):
+    """Without a Size column the name and brand alone are not a complete identity: no relocation."""
+    ws = Sheet([["Product Name", "Brand", "Drive Image Link"],
+                ["Chickpeas", "California Garden", ""],
+                ["Tomato Paste", "Al Alali", ""]])
+    wid = outbox.append_update(2, 2, "https://res/tomato.png", col_key="link", key_name="Tomato Paste",
+                               key_brand="Al Alali")
+    flush(gs, ws, outbox)
+    assert ws.value(3, "Drive Image Link") == "" and rows_of(outbox)[wid]["sync_status"] == "CONFLICT"
+
+    # a complete name + size + brand match (blank barcode = blank barcode) is still relocated
+    ws = Sheet(TOMATO)
+    ws.set(4, 5, "")
+    moved = outbox.append_update(3, 4, "https://res/alali.png", col_key="link", key_name="Tomato Paste",
+                                 key_brand="Al Alali", key_size="400g")
+    flush(gs, ws, outbox)
+    assert ws.value(4, "Drive Image Link") == "https://res/alali.png"
+    assert (rows_of(outbox)[moved]["sync_status"], rows_of(outbox)[moved]["row_number"]) == ("SYNCED", 4)
+
+
+def test_relocation_compares_the_barcode_cell_text_too(gs, outbox):
+    """Without a valid GTIN the barcode cell is still part of the complete identity: 'N/A' only matches 'N/A'."""
+    ws = Sheet(TOMATO)
+    ws.set(4, 5, "")
+    wid = outbox.append_update(3, 4, "https://res/alali.png", col_key="link", key_barcode="N/A",
+                               key_name="Tomato Paste", key_brand="Al Alali", key_size="400g")
+    flush(gs, ws, outbox)                                       # row 4 has the same name/brand/size, blank barcode
+    assert ws.value(4, "Drive Image Link") == "" and rows_of(outbox)[wid]["sync_status"] == "CONFLICT"
+
+
+def test_relocation_never_overwrites_a_different_value_in_the_target_cell(gs, outbox):
+    ws = sheet()
+    ws.set(3, 6, "https://res/laban-approved.png")             # Laban's link is already set
+    wid = outbox.append_update(4, 5, "needs_review:https://res/laban-new.png", col_key="link", key_barcode=LABAN)
+    flush(gs, ws, outbox)                                       # row 4 is Juice: the single Laban row is row 3
+    assert ws.value(3, "Drive Image Link") == "https://res/laban-approved.png"
+    assert rows_of(outbox)[wid]["sync_status"] == "CONFLICT"
+    assert "already holds" in gs.reported[0]["error"]
+
+
+def test_older_value_never_wins_when_the_identity_form_changes(gs, outbox):
+    """No barcode when the old write was queued; the owner then types the GTIN and the reviewer approves (GTIN
+    identity). The old write, retried later, must not land over the approval."""
+    ws = Sheet([HEADERS, ["", "Rani Orange Juice", "Rani", "1L", "KSA", ""]])
+    ws.down = api_error(503)
+    old = outbox.append_update(2, 5, "needs_review:https://res/old.png", col_key="link",
+                               key_name="Rani Orange Juice", key_brand="Rani", key_size="1L")
+    flush(gs, ws, outbox)
+    ws.down = None
+    ws.set(2, 1, JUICE)
+    new = outbox.append_update(2, 5, "https://res/approved.png", col_key="link", key_barcode=JUICE,
+                               key_name="Rani Orange Juice", key_brand="Rani", key_size="1L")
+    flush(gs, ws, outbox)
+    gs.clock["now"] += 61
+    flush(gs, ws, outbox)
+    assert ws.value(2, "Drive Image Link") == "https://res/approved.png"
+    assert statuses(gs) == {old: "SUPERSEDED", new: "SYNCED"}
+
+
+def test_an_older_write_still_lands_when_the_newer_write_was_for_a_product_that_moved_away(gs, outbox):
+    """The same-cell rule only applies while the newer write's product is still in that row."""
+    ws = sheet()
+    ws.down = api_error(503)
+    old = outbox.append_update(2, 5, "https://res/milk.png", col_key="link", key_barcode=MILK)
+    flush(gs, ws, outbox)                                       # Milk's write fails at row 2
+    ws.down = None
+    new = outbox.append_update(3, 5, "https://res/laban.png", col_key="link", key_barcode=LABAN)
+    flush(gs, ws, outbox)                                       # Laban's link written at row 3
+    ws.rows.insert(2, ws.rows.pop(1))                           # the owner swaps rows 2 and 3 (cells move along)
+    gs.clock["now"] += 61
+    flush(gs, ws, outbox)                                       # Milk is row 3 now, Laban (and its link) row 2
+    assert ws.value(3, "Drive Image Link") == "https://res/milk.png"
+    assert ws.value(2, "Drive Image Link") == "https://res/laban.png"
+    assert statuses(gs) == {old: "SYNCED", new: "SYNCED"}
+
+
+def test_older_value_never_wins_after_the_row_drifts_twice(gs, outbox):
+    ws = sheet()
+    ws.down = api_error(503)
+    a = outbox.append_update(3, 5, "needs_review:https://res/old.png", col_key="link", key_barcode=LABAN)
+    flush(gs, ws, outbox)                                       # A fails at row 3
+    ws.down = None
+    ws.insert_row(2, [WATER, "Mai Dubai Water", "Mai Dubai", "500ml", "UAE", ""])   # Laban -> row 4
+    b = outbox.append_update(4, 5, "https://res/approved.png", col_key="link", key_barcode=LABAN)
+    flush(gs, ws, outbox)                                       # B written at row 4
+    ws.insert_row(2, ["6281007000055", "Almarai Cheese", "Almarai", "200g", "KSA", ""])   # Laban -> row 5
+    gs.clock["now"] += 61
+    flush(gs, ws, outbox)                                       # A is due: relocated 3 -> 5, then superseded
+    assert ws.value(5, "Drive Image Link") == "https://res/approved.png"
+    assert statuses(gs) == {a: "SUPERSEDED", b: "SYNCED"}
+    assert gs.reported == []
+
+
+def test_reforwarding_a_redis_payload_never_duplicates_outbox_rows(gs, outbox):
+    import sync_worker
+    payload = {"v": 2, "row_index": 2, "expect": {"barcode": MILK},
+               "updates": {"link": "https://res/milk.png", "meta:description_en": "Milk"},
+               "seqs": {"link": 11, "meta:description_en": 12}}
+    r = FakeRedis()
+    r.sadd("writebehind:dirty_set", "row_2")
+    r.set("product:data:row_2", json.dumps(payload))
+
+    class FailsOnSecond:
+        calls = 0
+
+        def append_update(self, *args, **kwargs):
+            FailsOnSecond.calls += 1
+            if FailsOnSecond.calls == 2:
+                raise RuntimeError("MariaDB went away")
+            return outbox.append_update(*args, **kwargs)
+
+    assert sync_worker.run_sync_cycle(None, r, queue=FailsOnSecond(), flush=False) == 0   # partial forward
+    assert sync_worker.run_sync_cycle(None, r, queue=outbox, flush=False) == 1
+    assert sorted((row["col_key"], row["seq"]) for row in rows_of(outbox).values()) == [
+        ("link", 11), ("meta:description_en", 12)]
+    ws = sheet()
+    ws.insert_column(6, "Description EN")
+    flush(gs, ws, outbox)
+    # the same payload forwarded again after it was written: not inserted, not re-sent over the owner's edit
+    ws.set(2, 6, "https://res/typed-by-owner.png")
+    r.sadd("writebehind:dirty_set", "row_2")
+    r.set("product:data:row_2", json.dumps(dict(payload, updates={"link": "https://res/milk.png"},
+                                                seqs={"link": 11})))
+    assert sync_worker.run_sync_cycle(ws, r, queue=outbox) == 1
+    assert len(rows_of(outbox)) == 2 and ws.value(2, "Drive Image Link") == "https://res/typed-by-owner.png"
+    assert gs.reported == []
+
+
+def test_default_outcome_hook_keeps_each_field_on_one_line(gs, monkeypatch, offline):
+    import config
+    monkeypatch.setattr(gs, "_outcome_hook", None)
+    logged = []
+    monkeypatch.setattr(config, "log_error_to_laravel", lambda msg, **k: logged.append(k))
+    gs._report_outcome({"id": 1, "status": "CONFLICT", "error": "x", "barcode": "62\n[fake] local.ERROR: forged",
+                        "product_name": "Milk\r\n[2026-01-01] local.ERROR: forged", "brand": "Al\nmarai"})
+    (kwargs,) = logged
+    assert not any("\n" in str(v) or "\r" in str(v) for v in kwargs.values())
+
+
+def test_queued_seq_never_goes_below_the_outbox_high_water_mark(gs, outbox):
+    """A clock step back (or two processes in one coarse clock tick) must not make a later write look older."""
+    import time as _time
+    ahead = _time.time_ns() + 10 * 1_000_000_000              # written by another process before the clock stepped back
+    first = outbox.append_update(2, 5, "https://res/a.png", col_key="link", key_barcode=MILK, seq=ahead)
+    later = outbox.append_update(2, 5, "https://res/b.png", col_key="link", key_barcode=MILK)
+    rows = rows_of(outbox)
+    assert rows[later]["seq"] > rows[first]["seq"]
+    ws = sheet()
+    flush(gs, ws, outbox)
+    assert ws.value(2, "Drive Image Link") == "https://res/b.png"
+
+
+def test_sheet_transient_error_is_not_a_config_error(gs, offline):
+    assert not issubclass(gs.SheetTransientError, gs.SheetConfigError)
+    assert not issubclass(gs.SheetTransientError, gs.SheetSchemaError)
+
+
+def test_legacy_pipeline_reports_a_transient_sheets_error_without_a_traceback(gs, offline, monkeypatch, tmp_path):
+    import main
+    printed = []
+    monkeypatch.setattr(main, "print", lambda *a: printed.append(" ".join(str(x) for x in a)))   # main logs via print
+    monkeypatch.chdir(tmp_path)                                 # the legacy run writes temp/pipeline.lock
+    monkeypatch.setattr(main, "load_run_config", lambda: None)
+    monkeypatch.setattr(gs, "init_async_queue", lambda *a, **k: None)
+    monkeypatch.setattr(gs, "stop_async_queue", lambda *a, **k: None)
+    monkeypatch.setattr(gs, "get_sheets_client", lambda: object())
+
+    def busy(client, name):
+        raise gs.SheetTransientError("APIError: [429]: quota")
+
+    monkeypatch.setattr(gs, "open_worksheet", busy)
+    main.run_automation_pipeline()                              # returns instead of raising
+    assert any("Google Sheets غير متاح مؤقتاً" in line for line in printed)
+    assert not (tmp_path / "temp" / "pipeline.lock").exists()
+
+
+def test_flush_script_reports_a_transient_sheets_error_without_a_traceback(gs, offline, monkeypatch, capsys):
+    import importlib.util
+    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts", "flush_sheets_sync.py")
+    spec = importlib.util.spec_from_file_location("flush_sheets_sync_under_test", path)
+    script = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(script)
+    monkeypatch.setattr(gs, "get_sheets_client", lambda: object())
+
+    def busy(client, name):
+        raise gs.SheetTransientError("APIError: [503]: unavailable")
+
+    monkeypatch.setattr(gs, "open_worksheet", busy)
+    script.flush()
+    assert "Google Sheets غير متاح مؤقتاً" in capsys.readouterr().out
+
+
+def test_sync_worker_forwards_payloads_even_while_the_sheet_cannot_be_opened(gs, offline, monkeypatch):
+    import sync_worker
+    r = FakeRedis()
+    r.sadd("writebehind:dirty_set", "row_2")
+    r.set("product:data:row_2", json.dumps({"v": 2, "row_index": 2, "updates": {"link": "https://res/milk.png"},
+                                            "seqs": {"link": 5}, "expect": {"barcode": MILK}}))
+    forwarded = []
+
+    class Queue:
+        def append_update(self, *args, **kwargs):
+            forwarded.append((args, kwargs))
+
+    monkeypatch.setattr(gs, "get_sheets_client", lambda: object())
+
+    def busy(client, name):
+        r.delete("writebehind:heartbeat")                       # the open retried for longer than the heartbeat TTL
+        raise gs.SheetTransientError("APIError: [429]: quota")
+
+    monkeypatch.setattr(gs, "open_worksheet", busy)
+    state = {"queue": Queue()}
+    with pytest.raises(gs.SheetTransientError):
+        sync_worker._loop_once(r, state)
+    assert len(forwarded) == 1 and "row_2" not in r.smembers("writebehind:dirty_set")
+    assert r.exists("writebehind:heartbeat")                    # renewed after the slow open
