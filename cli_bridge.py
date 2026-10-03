@@ -98,16 +98,6 @@ def _as_bool(value):
     return bool(value)
 
 
-def _enhance(params):
-    """
-    تحسين الألوان عند الاعتماد أو الرفع اليدوي: قيمة الطلب إن أُرسلت، وإلا إعداد «تحسين الألوان» المحفوظ
-    (config.ENABLE_IMAGE_ENHANCEMENT من system_settings)، نفس ما يستخدمه العامل في التشغيل.
-    """
-    if params.get('enhance') in (None, ""):
-        return bool(getattr(config, 'ENABLE_IMAGE_ENHANCEMENT', False))
-    return _as_bool(params.get('enhance'))
-
-
 def _failure(status, message, context):
     """
     حمولة خطأ برسالة ثابتة فقط: نص الاستثناء والـ traceback يذهبان إلى السجل (temp/search.log)
@@ -533,13 +523,13 @@ def action_select_image(params):
         queue_started = True
         worksheet = _open_sheet()
         link_column_index = google_sheets.find_link_column(worksheet)
+        # ملف المعالجة الواحد (processing_profile) من صفحة الإعدادات، نفسه للنشر التلقائي والرفع اليدوي؛
+        # target_width / enhance / bg_removal_method في الطلب لا تغيّره
         res = pipeline.publish_image(
             image_url, product_name, brand, row_number, worksheet, link_column_index,
             barcode=barcode, candidate_sha256=_candidate_sha(params, row_number, sku_key, image_url),
-            bg_method=_text(params, 'bg_removal_method') or None,
-            target=(int(params.get('target_width') or 0), int(params.get('target_height') or 0)),
             category_override={k: _text(params, k) for k in ('category_l1_en', 'category_l2_en', 'category_l3_en')},
-            enhance=_enhance(params), key_size=_text(params, 'size') or None,
+            key_size=_text(params, 'size') or None,
         )
         if res["status"] == "failed":
             return {'status': 'failed', 'error': res.get('error'), 'isolated': res.get('isolated', False)}
@@ -595,10 +585,8 @@ def action_upload_manual_image(params):
         link_column_index = google_sheets.find_link_column(worksheet)
         res = pipeline.publish_image(
             file_path, product_name, brand, row_number, worksheet, link_column_index, barcode=barcode,
-            bg_method=_text(params, 'bg_removal_method') or None,
-            target=(int(params.get('target_width') or 0), int(params.get('target_height') or 0)),
             category_override={k: _text(params, k) for k in ('category_l1_en', 'category_l2_en', 'category_l3_en')},
-            enhance=_enhance(params), key_size=_text(params, 'size') or None,
+            key_size=_text(params, 'size') or None,
         )
         try:
             os.remove(file_path)

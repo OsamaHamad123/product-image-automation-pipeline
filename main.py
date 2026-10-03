@@ -6,7 +6,8 @@
 # - النشر التلقائي فقط عندما يكون قرار البحث AUTO_PUBLISH (لا عتبات clip_score)، وأبداً لنتيجة من الكاش.
 # - إعادة المحاولة فقط عند PROVIDER_DOWN أو استثناء؛ "لا نتيجة" نظيفة لا تُعاد.
 # - رفض المراجعين (روابط + pHash) يُمرر للبحث كاستبعادات لكل SKU.
-# - اللوحة المنشورة 800x800 بيضاء من image_processor بدون أي تكبير لاحق؛ إذا لم تُعزل الخلفية
+# - اللوحة المنشورة بيضاء من image_processor بدون أي تكبير لاحق، بملف المعالجة الواحد (processing_profile:
+#   أبعاد اللوحة وتحسين الألوان وطريقة العزل من صفحة الإعدادات) لكل مسارات النشر؛ إذا لم تُعزل الخلفية
 #   يُكتب الرابط ببادئة needs_review: ولا يُخزن كحل معتمد.
 
 import json
@@ -34,6 +35,7 @@ import image_search
 import image_processor
 import cloudinary_storage
 import local_cache_db
+import processing_profile
 
 MAX_SEARCH_ATTEMPTS = 3
 RETRY_BASE_DELAY = 2.0
@@ -275,23 +277,25 @@ def _folder_and_tags(metadata):
 
 
 def publish_image(image_url, name, brand, row_number, worksheet, link_column_index, *, barcode="",
-                  candidate_sha256=None, bg_method=None, target=(0, 0), category_override=None,
-                  enhance=False, force_review=False, key_size=None, key_brand=None):
+                  candidate_sha256=None, category_override=None, force_review=False, key_size=None,
+                  key_brand=None, profile=None):
     """
     معالجة الصورة المعتمدة إلى لوحة النشر النهائية ورفعها وكتابة رابطها في الشيت.
     key_size/key_brand: خلايا الحجم والبراند في الشيت لهذا المنتج، تُضاف إلى هوية الصف المتحقق منها
     قبل الكتابة (بدون باركود تميز الشقيقين بنفس الاسم).
+    profile: ملف المعالجة (processing_profile)؛ الافتراضي ملف الإعدادات الحالي، نفسه لكل مسارات النشر.
     لا تكبير لاحق: اللوحة من image_processor نهائية. البيانات الوصفية تُكتب في الشيت فقط بعد نجاح الرفع.
     الحالة: 'published' (معزولة وليست للمراجعة) | 'needs_review' (رابط ببادئة needs_review:) | 'failed'.
     """
-    w, h = target or (0, 0)
+    profile = profile or processing_profile.current()
+    w, h = profile.target
     result = image_processor.process_product_image_result(
-        image_url, name, brand, target_width=w or 0, target_height=h or 0,
-        bg_method=bg_method, candidate_sha256=candidate_sha256, enhance=bool(enhance),
+        image_url, name, brand, target_width=w, target_height=h,
+        bg_method=profile.bg_method, candidate_sha256=candidate_sha256, enhance=profile.enhance,
     )
     if not result.path:
         return {"status": "failed", "error": result.error or "processing_failed", "isolated": False,
-                "provider": result.provider}
+                "provider": result.provider, "profile": profile.as_dict()}
 
     metadata = {}
     try:
@@ -316,7 +320,7 @@ def publish_image(image_url, name, brand, row_number, worksheet, link_column_ind
         image_processor.cleanup_processed_image(result.path)
 
     base = {"isolated": bool(result.isolated), "provider": result.provider, "metadata": metadata,
-            "width": result.width, "height": result.height}
+            "width": result.width, "height": result.height, "profile": profile.as_dict()}
     if not link:
         return dict(base, status="failed", error="upload_failed")
 
@@ -349,9 +353,7 @@ def auto_approve_product(task, best_image, worksheet, link_column_index, sku_key
         res = publish_image(
             best_image["url"], name, brand, task["row_number"], worksheet, link_column_index,
             barcode=barcode, candidate_sha256=best_image.get("content_sha256"),
-            key_size=task_payload(task).get("size"), key_brand=brand,
-            bg_method=getattr(config, "BG_REMOVAL_METHOD", None),
-            target=getattr(config, "IMAGE_TARGET_SIZE", (0, 0)),
+            key_size=task_payload(task).get("size"), key_brand=brand, profile=processing_profile.current(),
         )
     except Exception as e:
         print(f"[Auto-Publish Error] فشل النشر التلقائي لـ [{name}]: {e}")
@@ -543,10 +545,7 @@ def process_single_product(prod, worksheet, link_column_index, brand_mappings=No
         return "success" if ok else "failed"
 
     res = publish_image(best["url"], name, brand, row_num, worksheet, link_column_index, barcode=barcode,
-                        candidate_sha256=best.get("content_sha256"),
-                        bg_method=getattr(config, "BG_REMOVAL_METHOD", None),
-                        target=getattr(config, "IMAGE_TARGET_SIZE", (0, 0)),
-                        enhance=getattr(config, 'ENABLE_IMAGE_ENHANCEMENT', False),
+                        candidate_sha256=best.get("content_sha256"), profile=processing_profile.current(),
                         force_review=decision != "AUTO_PUBLISH", key_size=payload["size"], key_brand=brand)
     if res["status"] == "failed":
         config.log_and_fail(barcode, name, brand, f"فشل النشر: {res.get('error')}")

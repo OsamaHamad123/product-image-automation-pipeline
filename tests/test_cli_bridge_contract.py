@@ -215,8 +215,8 @@ def test_select_no_upscale(select_env):
 @pytest.mark.parametrize("sent, saved, used", [
     (None, True, True),        # the review page sends nothing: the saved «تحسين الألوان» setting applies
     (None, False, False),
-    ("false", True, False),    # an explicit value in the request still wins
-    ("true", False, True),
+    ("false", True, True),     # one processing profile: a value in the request no longer changes it
+    ("true", False, False),
 ])
 def test_select_uses_the_saved_enhancement_setting(select_env, monkeypatch, sent, saved, used):
     import config
@@ -237,6 +237,46 @@ def test_select_uses_the_saved_enhancement_setting(select_env, monkeypatch, sent
         params["enhance"] = sent
     assert bridge.action_select_image(params)["status"] == "success"
     assert seen["enhance"] is used
+
+
+def test_one_processing_profile_for_auto_publish_approval_and_upload(select_env, monkeypatch, tmp_path):
+    """The worker's auto-publish, the reviewer's approval and a manual upload all process with the Settings
+    profile: the Settings canvas (not IMAGE_TARGET_SIZE), the saved enhancement and background method; what a
+    request asks for does not change it."""
+    import config
+    import image_processor
+    import local_cache_db
+    import main
+
+    bridge, events, state = select_env
+    monkeypatch.setattr(config, "OUTPUT_CANVAS_SIZE", 1000, raising=False)
+    monkeypatch.setattr(config, "IMAGE_TARGET_SIZE", (800, 800), raising=False)
+    monkeypatch.setattr(config, "ENABLE_IMAGE_ENHANCEMENT", True, raising=False)
+    monkeypatch.setattr(config, "BG_REMOVAL_METHOD", "remove_bg_api", raising=False)
+    monkeypatch.setattr(local_cache_db, "get_cached_product", lambda **k: None)
+    monkeypatch.setattr(local_cache_db, "delete_product_failure", lambda *a, **k: True)
+    original = image_processor.process_product_image_result
+    seen = []
+
+    def spy(src, name, brand, target_width=0, target_height=0, bg_method=None, candidate_sha256=None, enhance=False):
+        seen.append((image_processor._resolve_canvas_size(target_width, target_height),
+                     image_processor._normalise_method(bg_method), enhance))
+        return original(src, name, brand, target_width=target_width, target_height=target_height,
+                        bg_method=bg_method, candidate_sha256=candidate_sha256, enhance=enhance)
+
+    monkeypatch.setattr(image_processor, "process_product_image_result", spy)
+    task = {"id": 7, "row_number": 4, "product_name": SELECT_PARAMS["product_name"], "brand": "Almarai",
+            "barcode": SELECT_PARAMS["barcode"], "payload_json": "{}", "sku_key": SELECT_PARAMS["sku_key"]}
+    assert main.auto_approve_product(task, {"url": V2_RESULT["url"]}, object(), 3,
+                                     sku_key=SELECT_PARAMS["sku_key"]) == "published"
+    sent = dict(SELECT_PARAMS, target_width=800, target_height=800, enhance="false", bg_removal_method="none")
+    assert bridge.action_select_image(sent)["status"] == "success"
+    upload = tmp_path / "manual.png"
+    _canvas(upload, (300, 300))
+    params = {k: SELECT_PARAMS[k] for k in ("row_number", "product_name", "brand", "barcode", "sku_key")}
+    assert bridge.action_upload_manual_image(dict(params, file_path=str(upload), enhance="false",
+                                                  target_width=640, target_height=640))["status"] == "success"
+    assert seen == [((1000, 1000), "remove_bg_api", True)] * 3
 
 
 def test_select_not_isolated_writes_needs_review(select_env):
