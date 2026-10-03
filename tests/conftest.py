@@ -120,6 +120,14 @@ def fake_connection():
 
 
 @pytest.fixture(autouse=True)
+def _no_telegram(monkeypatch):
+    """Every run writes a report and sends it to Telegram when configured (run_report.notify). The owner's .env may
+    hold a real bot token: no test may send a message, so Telegram reads as not configured unless a test sets it."""
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "")
+
+
+@pytest.fixture(autouse=True)
 def _reset_learned_provider_state():
     """Providers learn per-process facts from live answers (a free Serper plan refuses site:, a CSE key gets
     403). Tests must not leak that learning into each other."""

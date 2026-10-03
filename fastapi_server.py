@@ -3,6 +3,7 @@
 # ملاحظة (D12): لوحة Laravel تستدعي cli_bridge.py مباشرة، ولا يشغّل أي مُشغّل هذا الخادم.
 # يبقى قابلاً للاستيراد والتشغيل يدوياً (python fastapi_server.py) لأغراض التطوير فقط.
 
+import json
 import os
 import subprocess
 import sys
@@ -159,6 +160,8 @@ def get_batch_status():
     try:
         with open(lock_file, "r") as f:
             pid = f.read().strip()
+        if pid.startswith("{"):          # main.write_lock: JSON {pid, host, started_at, ...}
+            pid = str(json.loads(pid).get("pid", ""))
         if not pid.isdigit():
             return {"is_running": False}
         if os.name == "nt":

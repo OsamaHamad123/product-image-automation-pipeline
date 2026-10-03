@@ -194,7 +194,7 @@ class ApiController extends Controller
                 $batContent .= "cd /d \"" . $basePath . "\"\r\n";
                 $batContent .= "\"" . $pythonPath . "\" \"" . $scriptPath . "\" --enqueue > \"" . $logPath . "\" 2>&1\r\n";
                 $batContent .= "if %errorlevel% equ 0 (\r\n";
-                $batContent .= "    \"" . $pythonPath . "\" -u \"" . $scriptPath . "\" --worker >> \"" . $logPath . "\" 2>&1\r\n";
+                $batContent .= "    \"" . $pythonPath . "\" -u \"" . $scriptPath . "\" --worker --trigger=dashboard >> \"" . $logPath . "\" 2>&1\r\n";
                 $batContent .= ")\r\n";
                 
                 $batFile = $tempDir . DIRECTORY_SEPARATOR . 'run_pipeline.bat';
@@ -214,7 +214,7 @@ class ApiController extends Controller
                 }
             } else {
                 // Linux background execution
-                $cmd = "cd \"" . $basePath . "\" && export PYTHONUTF8=1 PYTHONIOENCODING=utf-8 && \"" . $pythonPath . "\" \"" . $scriptPath . "\" --enqueue > \"" . $logPath . "\" 2>&1 && \"" . $pythonPath . "\" -u \"" . $scriptPath . "\" --worker >> \"" . $logPath . "\" 2>&1";
+                $cmd = "cd \"" . $basePath . "\" && export PYTHONUTF8=1 PYTHONIOENCODING=utf-8 && \"" . $pythonPath . "\" \"" . $scriptPath . "\" --enqueue > \"" . $logPath . "\" 2>&1 && \"" . $pythonPath . "\" -u \"" . $scriptPath . "\" --worker --trigger=dashboard >> \"" . $logPath . "\" 2>&1";
                 $linuxCmd = "nohup sh -c " . escapeshellarg($cmd) . " > /dev/null 2>&1 &";
                 shell_exec($linuxCmd);
             }
@@ -225,10 +225,14 @@ class ApiController extends Controller
         }
     }
 
+    /** قفل أقدم من هذا ليس لعامل حي (نفس main.MAX_LOCK_AGE_SECONDS). */
+    private const MAX_LOCK_AGE_S = 86400;
+
     /**
-     * حالة عامل الخلفية من ملف القفل temp/pipeline.lock:
-     * starting = كتبت لوحة التحكم 'STARTING' والإدراج يقرأ الشيت (حتى 5 دقائق)، running = PID حي،
-     * none = لا قفل، أو قفل قديم، أو عملية انتهت.
+     * حالة عامل الخلفية من ملف القفل temp/pipeline.lock (JSON يكتبه main.write_lock، أو رقم العملية فقط بالصيغة
+     * القديمة): starting = كتبت لوحة التحكم 'STARTING' والإدراج يقرأ الشيت (حتى 5 دقائق)، running = عملية بايثون
+     * حية للأتمتة على هذا الجهاز، none = لا قفل، أو قفل قديم، أو من جهاز آخر، أو عملية انتهت أو ليست العامل
+     * (نفس قواعد main._another_worker_running، فلا يرفض زر التشغيل بسبب رقم عملية أعيد استخدامه).
      */
     private function pipelineProcess(): array
     {
@@ -242,13 +246,56 @@ class ApiController extends Controller
             if (time() - filemtime($lockFile) < 300) {
                 $process['state'] = 'starting';
             }
-        } elseif ($lockContent !== '' && ctype_digit($lockContent)) {
-            $process['pid'] = $lockContent;
-            if ($this->processAlive($lockContent)) {
+            return $process;
+        }
+        $lock = self::parseLock($lockContent, (int) @filemtime($lockFile));
+        if ($lock !== null) {
+            $process['pid'] = $lock['pid'];
+            if (self::lockIsCurrent($lock, time(), (string) gethostname()) && $this->processAlive($lock['pid'])
+                && $this->runsAutomation($lock['pid'])) {
                 $process['state'] = 'running';
             }
         }
         return $process;
+    }
+
+    /** ['pid' => '123', 'host' => ?string, 'started' => epoch] من محتوى القفل، أو null لمحتوى غير مفهوم. */
+    public static function parseLock(string $content, int $mtime): ?array
+    {
+        if ($content !== '' && ctype_digit($content)) {
+            return ['pid' => $content, 'host' => null, 'started' => $mtime];
+        }
+        $data = json_decode($content, true);
+        if (!is_array($data) || !is_numeric($data['pid'] ?? null) || (int) $data['pid'] <= 1) {
+            return null;
+        }
+        $started = is_numeric($data['started_ts'] ?? null) ? (int) $data['started_ts'] : $mtime;
+        $host = is_string($data['host'] ?? null) && $data['host'] !== '' ? $data['host'] : null;
+        return ['pid' => (string) (int) $data['pid'], 'host' => $host, 'started' => $started];
+    }
+
+    /** القفل من هذا الجهاز وليس أقدم من MAX_LOCK_AGE_S. */
+    public static function lockIsCurrent(array $lock, int $now, string $host): bool
+    {
+        if ($lock['host'] !== null && strcasecmp($lock['host'], $host) !== 0) {
+            return false;
+        }
+        return $now - (int) $lock['started'] <= self::MAX_LOCK_AGE_S;
+    }
+
+    /**
+     * العملية تشغّل main.py أو run_nightly.py ببايثون (لينكس: /proc/PID/cmdline). حيث لا يُقرأ سطر الأوامر
+     * (ويندوز) يكفي ما يفحصه processAlive: اسم البرنامج python.
+     */
+    private function runsAutomation(string $pid): bool
+    {
+        $cmd = @file_get_contents("/proc/{$pid}/cmdline");
+        if (!is_string($cmd) || $cmd === '') {
+            return true;
+        }
+        $cmd = str_replace("\0", ' ', $cmd);
+        return stripos($cmd, 'python') !== false
+            && preg_match('#(^|[\\\\/\s"\'])(main|run_nightly)\.py($|[\s"\'])#i', $cmd) === 1;
     }
 
     private function processAlive(string $pid): bool

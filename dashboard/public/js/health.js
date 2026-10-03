@@ -5,8 +5,8 @@
  *   never runs the check: only the «فحص الاتصالات الآن» button POSTs /api/system/run-diagnostics.
  * - «عمليات البحث» comes from GET /api/system/ops-health (ops_health.summarize over automation_queue.trace_json),
  *   split in plain Arabic; decision and failure codes appear only in tooltips.
- * - «السجل» shows the tails of GET /api/view-pipeline-log and /api/view-laravel-log; a missing file is the normal
- *   «لسا ما في سجل» state.
+ * - «السجل» shows the tails of GET /api/view-pipeline-log, /api/view-laravel-log and /api/view-nightly-log (the
+ *   newest temp/nightly/nightly_YYYY-MM-DD.log); a missing file is the normal «لسا ما في سجل» state.
  * The view functions are pure (node tests call them through window.LaqtaHealth); the DOM code below only sets
  * textContent and attributes, never HTML.
  */
@@ -15,7 +15,8 @@
 
     var RUN_URL = '/api/system/run-diagnostics';
     var OPS_URL = '/api/system/ops-health';
-    var LOG_URLS = { pipeline: '/api/view-pipeline-log', laravel: '/api/view-laravel-log' };
+    var LOG_URLS = { pipeline: '/api/view-pipeline-log', laravel: '/api/view-laravel-log',
+        nightly: '/api/view-nightly-log' };
     var LOG_POLL_MS = 5000;
 
     var SERVICE_KEYS = ['google_sheets', 'serper', 'gemini', 'photoroom', 'cloudinary'];
@@ -287,7 +288,7 @@
         });
     }
 
-    function costView(w, prices, month, sourcePrices) {
+    function costView(w, prices, month, sourcePrices, runs) {
         var cost = isObject(w.cost_usd) ? w.cost_usd : {};
         var sources = isObject(w.sources) ? w.sources : {};
         var lens = isObject(sources.lens_serpapi) ? sources.lens_serpapi : null;
@@ -331,6 +332,12 @@
         }
         if (isObject(month) && num(month.budget_usd) !== null) {
             note.push('النموذج القوي هالشهر: ' + usd(month.strong_usd) + ' من ' + usd(month.budget_usd) + '.');
+        }
+        /* run_history (ops_health.runs_cost): each run's cost saved when it ended, kept after a later search
+           overwrites the rows; the figure above sees only each row's last search. */
+        if (isObject(runs) && count(runs.priced_runs) > 0) {
+            note.push('حسب سجل التشغيلات: ' + usd(runs.usd) + ' في ' + plural(count(runs.priced_runs), 'تشغيل', 'تشغيلين', 'تشغيلات')
+                + ' (يشمل عمليات بحث أعيدت لاحقاً).');
         }
         return { total: usd(total), lines: lines, note: note.join(' ') };
     }
@@ -392,7 +399,8 @@
             total: plural(count(w.searches), 'منتج', 'منتجين', 'منتجات'),
             decisions: decisionsView(w),
             providers: providersView(w),
-            cost: costView(w, report.prices, report.verifier_month, report.source_prices),
+            cost: costView(w, report.prices, report.verifier_month, report.source_prices,
+                isObject(report.runs_cost) ? report.runs_cost[windowName] : null),
             reasons: reasonsView(w),
             note: noteView(report, w)
         };
@@ -403,8 +411,10 @@
             return { kind: 'error', text: 'ما قدرنا نقرأ السجل. جرّب كمان شوي.', lines: [], meta: '' };
         }
         if (!payload.exists) {
-            return { kind: 'missing', text: 'لسا ما في سجل.' + (kind === 'laravel'
-                ? ' لوحة التحكم ما سجّلت ولا شي لهلق.' : ' بيبلّش أول ما تشغّل بحث من صفحة التشغيل.'), lines: [], meta: '' };
+            var why = kind === 'laravel' ? ' لوحة التحكم ما سجّلت ولا شي لهلق.'
+                : kind === 'nightly' ? ' التشغيل الليلي ما اشتغل لهلق (سجّله بـ scripts\\schedule_nightly.ps1).'
+                    : ' بيبلّش أول ما تشغّل بحث من صفحة التشغيل.';
+            return { kind: 'missing', text: 'لسا ما في سجل.' + why, lines: [], meta: '' };
         }
         var lines = (Array.isArray(payload.lines) ? payload.lines : []).map(function (line) {
             line = String(line);
@@ -413,6 +423,7 @@
         if (!lines.length) return { kind: 'empty', text: 'السجل فاضي.', lines: [], meta: '' };
         var meta = lines.length === 1 ? 'آخر سطر' : 'آخر ' + plural(lines.length, 'سطر', 'سطرين', 'أسطر');
         var at = num(payload.updated_at);
+        if (kind === 'nightly' && typeof payload.date === 'string' && payload.date) meta = 'ليلة ' + payload.date + ' · ' + meta;
         if (at !== null) meta += ' · آخر تعديل ' + whenText(at * 1000, nowMs);
         return { kind: 'ok', text: '', lines: lines, meta: meta };
     }

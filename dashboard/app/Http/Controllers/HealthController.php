@@ -13,8 +13,8 @@ use Illuminate\Support\Facades\Cache;
  *   أبداً (استعلام Serper مدفوع + طلب PhotoRoom)؛ الفحص بزر صريح فقط (ProductController::runDiagnosticsJson).
  * - «عمليات البحث»: التجميع في بايثون (ops_health.summarize، مغطى بـ pytest) عبر إجراء cli_bridge للقراءة فقط
  *   'ops_health'، فاللوحة وتنبيه العامل يتشاركان نفس القواعد. النتيجة تُخزن دقيقة واحدة؛ ?refresh=1 يعيد القراءة.
- * - «السجل»: آخر أسطر سجل الأتمتة وسجل لوحة التحكم. ملف غير موجود حالة عادية (exists=false) وليس 404،
- *   والقيم السرية المحفوظة تُحجب من الأسطر قبل إرسالها.
+ * - «السجل»: آخر أسطر سجل الأتمتة وسجل لوحة التحكم وسجل التشغيل الليلي (temp/nightly). ملف غير موجود حالة
+ *   عادية (exists=false) وليس 404، والقيم السرية المحفوظة تُحجب من الأسطر قبل إرسالها.
  */
 class HealthController extends Controller
 {
@@ -49,7 +49,77 @@ class HealthController extends Controller
             'optional' => self::optionalServices($last),
             'checkedAt' => self::checkedAt($last),
             'allOk' => is_array($last) ? ($last['all_ok'] ?? null) : null,
+            'lastRun' => self::lastRunCard(self::lastRunRow()),
         ]);
+    }
+
+    // ------------------------------------------------------------------
+    // Last run (package P4b): temp/nightly/last_report.json, which run_report.py writes after every run (the
+    // same report as the run_history row; this page reads no table directly)
+    // ------------------------------------------------------------------
+
+    /** النتيجة -> [النص، اللون] (run_report.OUTCOME_TEXT بلا رموز). */
+    public const RUN_OUTCOMES = [
+        'done' => ['خلص', 'success'],
+        'skipped' => ['ما بلّش لأنو في تشغيل تاني شغّال', 'muted'],
+        'stopped' => ['وقف قبل ما يخلص الطابور', 'warning'],
+        'outage' => ['انقطاع', 'danger'],
+        'failed' => ['فشل', 'danger'],
+    ];
+    public const RUN_TRIGGERS = ['nightly' => 'التشغيل الليلي', 'dashboard' => 'تشغيل من اللوحة', 'manual' => 'تشغيل يدوي'];
+
+    /**
+     * آخر تقرير تشغيل (temp/nightly/last_report.json، يُكتب حتى عندما لا ترد قاعدة البيانات) بشكل صف run_history:
+     * {run_trigger, started_at, outcome, stop_reason, attempts, report_json, ...counts}، أو null إن لم يوجد.
+     */
+    public static function lastRunRow(?string $file = null): ?array
+    {
+        $file = $file ?? base_path('../temp/nightly/last_report.json');
+        $report = is_file($file) ? json_decode((string) @file_get_contents($file), true) : null;
+        if (!is_array($report)) {
+            return null;
+        }
+        $counts = is_array($report['counts'] ?? null) ? $report['counts'] : [];
+        return ['run_trigger' => $report['trigger'] ?? null, 'started_at' => $report['started_at'] ?? null,
+                'outcome' => $report['outcome'] ?? null, 'stop_reason' => $report['stop_reason'] ?? null,
+                'attempts' => $report['attempts'] ?? 1, 'report_json' => $report] + $counts;
+    }
+
+    /**
+     * بطاقة «آخر تشغيل»: {title, tone, when, summary} من صف run_history (أو التقرير)، أو null.
+     * الأرقام كما حُفظت عند نهاية التشغيل؛ السبب من reason_text الذي كتبه run_report.py.
+     */
+    public static function lastRunCard(?array $row): ?array
+    {
+        if (!$row) {
+            return null;
+        }
+        $report = $row['report_json'] ?? null;
+        $report = is_string($report) ? json_decode($report, true) : $report;
+        $report = is_array($report) ? $report : [];
+        [$label, $tone] = self::RUN_OUTCOMES[(string) ($row['outcome'] ?? '')] ?? ['انتهى', 'muted'];
+        $trigger = self::RUN_TRIGGERS[(string) ($row['run_trigger'] ?? '')] ?? 'تشغيل';
+        $reason = trim((string) ($report['reason_text'] ?? ($row['stop_reason'] ?? '')));
+        $title = $trigger . ': ' . $label . ($reason !== '' && ($row['outcome'] ?? '') !== 'skipped' ? ' (' . $reason . ')' : '');
+        $started = strtotime((string) ($row['started_at'] ?? ''));
+        $parts = [];
+        foreach (['ready_for_review' => 'بانتظار المراجعة', 'auto_published' => 'انتشر تلقائياً',
+                  'not_found' => 'ما انلقت', 'failed' => 'فشل', 'pending_left' => 'بقي بالانتظار'] as $key => $text) {
+            if (is_numeric($row[$key] ?? null) && ((int) $row[$key] > 0 || $key === 'ready_for_review')) {
+                $parts[] = $text . ' ' . (int) $row[$key];
+            }
+        }
+        $retries = (int) ($row['attempts'] ?? 1) - 1;
+        if ($retries > 0) {
+            $parts[] = 'انعاد التشغيل ' . ($retries === 1 ? 'مرة' : ($retries === 2 ? 'مرتين' : $retries . ' مرات'))
+                . ' بعد انقطاع';
+        }
+        return [
+            'title' => $title,
+            'tone' => $tone,
+            'when' => $started ? date('Y-m-d H:i', $started) : '',
+            'summary' => $parts ? implode(' · ', $parts) : (($row['outcome'] ?? '') === 'skipped' ? '' : 'الأرقام مش متاحة.'),
+        ];
     }
 
     public function summary(Request $request)
@@ -83,6 +153,18 @@ class HealthController extends Controller
     public function laravelLog()
     {
         return self::logResponse('laravel', storage_path('logs/laravel.log'));
+    }
+
+    /**
+     * آخر أسطر سجل التشغيل الليلي (temp/nightly/nightly_YYYY-MM-DD.log الذي يكتبه scripts/run_nightly.py):
+     * أحدث ليلة، أو ?date=YYYY-MM-DD. لا يُقبل اسم ملف ولا مسار من الطلب: التاريخ فقط بصيغة ثابتة.
+     */
+    public function nightlyLog(Request $request)
+    {
+        [$code, $body] = self::nightlyPayload(base_path('../temp/nightly'), (string) $request->query('date', ''),
+            SettingsController::secretValues());
+        return response()->json($body, $code, [], JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE)
+            ->header('Cache-Control', 'no-store');
     }
 
     // ------------------------------------------------------------------
@@ -255,6 +337,46 @@ class HealthController extends Controller
         $lines = array_map(fn ($line) => self::redact($line, $secrets), $lines);
         return [200, ['status' => 'success', 'kind' => $kind, 'exists' => true, 'lines' => $lines,
                       'updated_at' => @filemtime($path) ?: null]];
+    }
+
+    /** تواريخ سجلات التشغيل الليلي الموجودة في $dir (الأحدث أولاً)، من أسماء الملفات بالصيغة الثابتة فقط. */
+    public static function nightlyDates(string $dir): array
+    {
+        $dates = [];
+        foreach (@scandir($dir) ?: [] as $name) {
+            if (preg_match('/^nightly_(\d{4}-\d{2}-\d{2})\.log$/', $name, $m) && is_file($dir . DIRECTORY_SEPARATOR . $name)) {
+                $dates[] = $m[1];
+            }
+        }
+        rsort($dates);
+        return $dates;
+    }
+
+    /**
+     * [HTTP code, body] لسجل ليلة واحدة: $date فارغ = أحدث ليلة. أي تاريخ بغير صيغة YYYY-MM-DD يُرفض (400)،
+     * والملف المقروء يجب أن يبقى داخل $dir بعد حل الروابط (لا path traversal). لا سجل بعد: exists=false (200).
+     * يضيف dates (الليالي المتاحة) و date (الليلة المعروضة).
+     */
+    public static function nightlyPayload(string $dir, string $date, array $secrets = []): array
+    {
+        $date = trim($date);
+        $dates = self::nightlyDates($dir);
+        if ($date !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+            return [400, ['status' => 'error', 'kind' => 'nightly', 'error' => 'تاريخ السجل غير صالح.']];
+        }
+        $date = $date !== '' ? $date : ($dates[0] ?? '');
+        if ($date === '') {
+            return [200, ['status' => 'success', 'kind' => 'nightly', 'exists' => false, 'lines' => [],
+                          'updated_at' => null, 'dates' => [], 'date' => null]];
+        }
+        $path = $dir . DIRECTORY_SEPARATOR . 'nightly_' . $date . '.log';
+        $realDir = realpath($dir);
+        $realPath = realpath($path);
+        if ($realPath !== false && ($realDir === false || strpos($realPath, $realDir . DIRECTORY_SEPARATOR) !== 0)) {
+            return [400, ['status' => 'error', 'kind' => 'nightly', 'error' => 'تاريخ السجل غير صالح.']];
+        }
+        [$code, $body] = self::logPayload('nightly', $path, $secrets);
+        return [$code, $body + ['dates' => $dates, 'date' => $date]];
     }
 
     /** آخر $max سطر غير فارغ من نهاية الملف (بلا قراءة الملف كله)، أو null إذا تعذرت القراءة. */

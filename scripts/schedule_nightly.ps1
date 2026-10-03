@@ -8,6 +8,11 @@
 # المهمة تعمل من مجلد المشروع ببايثون البيئة الافتراضية (.venv) وتكتب سجلها في temp\nightly\.
 # التشغيل الليلي يضيف للطابور صفوف الشيت التي ليس لها رابط صورة نهائي ثم يشغل العامل حتى يفرغ الطابور،
 # والنشر التلقائي معطل دائماً فيه: النتائج تنتظر المراجعة في لوحة التحكم.
+# عند انقطاع (قاعدة البيانات، الشيت، محركات البحث) يعيد التشغيل كله بعد 15 ثم 60 دقيقة، ثم يكتب تقرير الليلة:
+# temp\nightly\last_report.json، وصف في سجل التشغيلات (بطاقة «آخر تشغيل» في صفحة الصحة)، ورسالة Telegram إن
+# ضُبط TELEGRAM_BOT_TOKEN و TELEGRAM_CHAT_ID. رمز النتيجة في جدولة المهام (Last Run Result):
+#   0 اكتمل، أو كان تشغيل آخر يعمل · 1 فشل (إعداد الشيت أو خطأ) · 2 انقطاع بقي بعد إعادة المحاولتين
+#   3 توقف قبل نهاية الطابور (إيقاف من اللوحة أو حد)
 # لا يحتاج هذا السكربت أي مفتاح: المفاتيح تُقرأ من .env وصفحة الإعدادات عند كل تشغيل.
 # الملف محفوظ بترميز UTF-8 مع BOM: بدونه يقرأ Windows PowerShell 5.1 النص العربي بترميز ANSI فيفشل التحليل.
 #
@@ -81,5 +86,6 @@ Write-Host "✅ تم تسجيل التشغيل الليلي ($TaskName) كل ي�
 Write-Host "   التشغيل القادم: $($info.NextRunTime)"
 Write-Host "   بايثون: $pythonPath"
 Write-Host "   السجل: $(Join-Path $repoRoot 'temp\nightly')"
+Write-Host "   تقرير آخر ليلة: $(Join-Path $repoRoot 'temp\nightly\last_report.json') (وفي صفحة الصحة: «آخر تشغيل» وتبويب «التشغيل الليلي»)"
 Write-Host "   للتشغيل الآن: Start-ScheduledTask -TaskName '$TaskName'"
 Write-Host "   للإلغاء: powershell -ExecutionPolicy Bypass -File `"$PSCommandPath`" -Unregister"

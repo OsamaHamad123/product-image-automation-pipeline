@@ -609,10 +609,10 @@ def test_nightly_prepares_the_run_before_the_enqueue(offline, monkeypatch, tmp_p
     monkeypatch.setattr(local_cache_db, "get_automation_state", lambda: {"status": "idle"})
     monkeypatch.setattr(main, "run_enqueue_mode", lambda: order.append("enqueue"))
 
-    def fake_worker():
+    def fake_worker(**kwargs):
         order.append("worker")
         os.remove(runner.LOCK_FILE)
 
     monkeypatch.setattr(main, "run_worker_mode", fake_worker)
-    assert runner.run() == 0
+    assert runner.run(sleep=lambda seconds: pytest.fail("no outage, no retry")) == 0
     assert order == ["prepare", "enqueue", "worker"]

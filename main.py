@@ -11,6 +11,8 @@
 
 import json
 import os
+import re
+import socket
 import sys
 import time
 import uuid
@@ -564,6 +566,12 @@ def process_single_product(prod, worksheet, link_column_index, brand_mappings=No
 
 LOCK_FILE = "temp/pipeline.lock"
 
+# نتيجة آخر عامل في هذه العملية (يقرؤها التشغيل الليلي و`python main.py --worker` لرمز الخروج):
+# {stop_reason, run_id, worker_id, started_ts, ended_ts, notice, health}. stop_reason None = الطابور انتهى.
+LAST_WORKER = {}
+# سبب فشل آخر إدراج في هذه العملية (_enqueue_failed): {reason, message}
+LAST_ENQUEUE = {}
+
 
 def _release_starting_lock(lock_file=LOCK_FILE):
     """يحذف قفل لوحة التحكم 'STARTING' (مرحلة الإدراج) فقط؛ قفل يحمل PID يحرره صاحبه (العامل أو التشغيل الليلي)."""
@@ -576,11 +584,14 @@ def _release_starting_lock(lock_file=LOCK_FILE):
         pass
 
 
-def _enqueue_failed(message):
+def _enqueue_failed(message, reason="enqueue_failed"):
     """
     فشل الإدراج: رسالة عربية في automation_state.notice بحالة 'error' تعرضها اللوحة فوراً، وتحرير قفل 'STARTING'
     فوراً (لا تبقى اللوحة على «قيد التشغيل» وترفض تشغيلاً جديداً لخمس دقائق). العامل لا يبدأ (رمز الخروج 1).
+    reason (في LAST_ENQUEUE للتشغيل الليلي): sheets_unavailable / sheet_not_found / db_unavailable تُعاد محاولتها
+    ليلاً، وenqueue_failed / sheet_config خطأ إعداد.
     """
+    LAST_ENQUEUE.update(reason=reason, message=message)
     print(f"[Enqueue Error] {message}")
     # التشغيل انتهى هنا: طلب إيقاف سُجل أثناء الإدراج يُلغى، وإلا أوقف عاملاً يُشغَّل لاحقاً يدوياً قبل أي منتج
     local_cache_db.update_automation_state(status="error", current_product="", notice=f"ENQUEUE_FAILED: {message}",
@@ -607,11 +618,11 @@ def run_enqueue_mode():
         sheets_client = google_sheets.get_sheets_client()
         if not sheets_client:
             _enqueue_failed("تعذر الاتصال بـ Google Sheets. تحقق من ملف بيانات الاعتماد والاتصال بالإنترنت. "
-                            "لم يتغير الطابور.")
+                            "لم يتغير الطابور.", reason="sheets_unavailable")
         worksheet = google_sheets.open_worksheet(sheets_client, config.SPREADSHEET_NAME_OR_URL)
         if not worksheet:
             _enqueue_failed(f"لم يُعثر على الشيت «{config.SPREADSHEET_NAME_OR_URL}». تحقق من الرابط واسم ورقة "
-                            "العمل ومن مشاركة الشيت مع حساب الخدمة. لم يتغير الطابور.")
+                            "العمل ومن مشاركة الشيت مع حساب الخدمة. لم يتغير الطابور.", reason="sheet_not_found")
         products, _ = google_sheets.get_products(worksheet)
         products = products or []
         if not products:
@@ -622,7 +633,7 @@ def run_enqueue_mode():
     except SystemExit:
         raise
     except Exception as e:
-        _enqueue_failed(f"تعذر قراءة الشيت: {e}. لم يتغير الطابور.")
+        _enqueue_failed(f"تعذر قراءة الشيت: {e}. لم يتغير الطابور.", reason=_sheet_failure_reason(e))
 
     reprocess = bool(getattr(config, "FORCE_OVERWRITE_IMAGES", False))
     brand_filter = (config.BRAND_FILTER or "").lower()
@@ -655,7 +666,8 @@ def run_enqueue_mode():
         print(f"[Enqueue] {enqueued} صف في الطابور؛ {skipped_final} صف تم تخطيه لأن رابطه نهائي.")
         local_cache_db.get_queue_statistics()
     except Exception as e:
-        _enqueue_failed(f"تعذر إضافة الصفوف إلى الطابور: {e}. أُضيف {enqueued} صف قبل الخطأ ولم يُحذف أي صف.")
+        _enqueue_failed(f"تعذر إضافة الصفوف إلى الطابور: {e}. أُضيف {enqueued} صف قبل الخطأ ولم يُحذف أي صف.",
+                        reason="enqueue_failed" if local_cache_db.db_available() else "db_unavailable")
 
     run_id = local_cache_db.new_run_id()
     run_rows = local_cache_db.begin_run(run_id)
@@ -696,16 +708,35 @@ def check_verifier():
         return f"VERIFIER_CHECK_FAILED: {type(e).__name__}"
 
 
-def _outage_notice(worker_id, since_seconds, base=None):
+def _run_health(worker_id, since_seconds):
+    """
+    ملخص ops_health لعمليات بحث هذا العامل (قراءة واحدة عند الإنهاء): تنبيهات الانقطاع للوحة، والتكلفة التقديرية
+    لتقرير التشغيل قبل أن يكتب تشغيل لاحق فوق trace الصفوف. None بلا عامل أو عند فشل القراءة (لا يوقف الإنهاء).
+    """
+    if not worker_id:
+        return None
+    try:
+        import ops_health
+        return ops_health.summarize(ops_health.load_rows(since_seconds=max(1, int(since_seconds)), worker_id=worker_id))
+    except Exception as e:
+        print(f"تنبيه: تعذر فحص انقطاع المزودين: {e}")
+        return None
+
+
+def _outage_notice(worker_id, since_seconds, base=None, health=None):
     """
     تنبيه اللوحة عند انتهاء العامل: base + سبب انقطاع ظهر في عمليات بحث هذا العامل (رصيد Serper انتهى /
     Gemini لا يستجيب، من ops_health). None عندما لا يوجد أيهما فيبقى التنبيه الحالي. فشل الفحص لا يوقف الإنهاء.
+    health: ملخص _run_health المقروء مسبقاً (لا قراءة ثانية).
     """
     outage = ""
     if worker_id:
         try:
             import ops_health
-            outage = ops_health.outage_notice(since_seconds, worker_id=worker_id)
+            if isinstance(health, dict):
+                outage = ops_health.notice_from_report(health)
+            else:
+                outage = ops_health.outage_notice(since_seconds, worker_id=worker_id)
         except Exception as e:
             print(f"تنبيه: تعذر فحص انقطاع المزودين: {e}")
     return " | ".join(n for n in (base, outage) if n) or None
@@ -729,47 +760,290 @@ def _refresh_state(status, run_id=None, **extra):
     )
 
 
-def _another_worker_running(lock_file):
-    import subprocess
-    if not os.path.exists(lock_file):
-        return False
+# ---------------------------------------------------------------------------
+# قفل العامل (temp/pipeline.lock)
+# القفل JSON: {pid, host, started_at, started_ts, role, cmd}؛ الصيغة القديمة (رقم العملية فقط) ما زالت تُقرأ،
+# و'STARTING' تكتبه لوحة التحكم أثناء الإدراج. القفل يُعد حياً فقط إذا كانت عمليته بايثون تشغّل main.py أو
+# run_nightly.py على هذا الجهاز، وبدأت قبل كتابة القفل، والقفل أحدث من MAX_LOCK_AGE_SECONDS. غير ذلك قفل متروك
+# (عامل انهار أو أُنهي ثم أُعيد استخدام رقم عمليته): يُحذف ويُسجل السبب، فلا تضيع ليلة بسبب رقم عملية معاد.
+# نفس القواعد في لوحة التحكم (ApiController::pipelineProcess).
+# ---------------------------------------------------------------------------
+
+# عامل أقدم من هذا يُعد عالقاً: التشغيل الليلي يتوقف بعد 8 ساعات (schedule_nightly.ps1 -MaxHours، حتى 23)
+MAX_LOCK_AGE_SECONDS = 24 * 3600
+# فرق مسموح بين وقت بدء العملية ووقت كتابة القفل (دقة ساعة النظام)
+LOCK_CLOCK_SLACK_SECONDS = 5
+LOCK_SCRIPTS = ("main.py", "run_nightly.py")
+_LOCK_SCRIPT_RE = re.compile(r"(?:^|[\\/\s\"'])(?:main|run_nightly)\.py(?=$|[\s\"'])", re.IGNORECASE)
+
+
+def write_lock(role, lock_file=LOCK_FILE):
+    """يكتب قفل هذه العملية (role: worker | nightly). أخطاء الكتابة تُرفع."""
+    os.makedirs(os.path.dirname(lock_file) or ".", exist_ok=True)
+    now = time.time()
+    data = {
+        "pid": os.getpid(),
+        "host": socket.gethostname(),
+        "started_at": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(now)),
+        "started_ts": round(now, 3),
+        "role": role,
+        "cmd": " ".join(sys.argv)[:300],
+    }
+    with open(lock_file, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False)
+
+
+def read_lock(lock_file=LOCK_FILE):
+    """
+    محتوى القفل: None إن لم يوجد، وإلا {raw, kind: json | pid | starting | invalid, pid, host, started_ts, role}.
+    started_ts للصيغة القديمة (أو JSON بلا وقت) هو وقت تعديل الملف.
+    """
     try:
-        with open(lock_file, "r") as f:
-            pid_str = f.read().strip()
-        if not pid_str.isdigit() or pid_str == "1" or int(pid_str) == os.getpid():
-            return False
-        pid = int(pid_str)
-        import platform
-        if platform.system().lower() == "windows":
-            output = subprocess.check_output(f'tasklist /FI "PID eq {pid}"', shell=True).decode(errors="replace")
-            return str(pid) in output
+        with open(lock_file, "r", encoding="utf-8", errors="replace") as f:
+            raw = f.read().strip()
+        mtime = os.path.getmtime(lock_file)
+    except OSError:
+        return None
+    lock = {"raw": raw, "kind": "invalid", "pid": None, "host": None, "started_ts": mtime, "role": None}
+    if raw == "STARTING":
+        lock["kind"] = "starting"
+    elif raw.isdigit():
+        lock.update(kind="pid", pid=int(raw))
+    elif raw.startswith("{"):
         try:
-            os.kill(pid, 0)
-            return True
-        except OSError:
-            return False
+            data = json.loads(raw)
+            pid = int(data.get("pid"))
+        except (ValueError, TypeError, AttributeError):
+            return lock
+        started = data.get("started_ts")
+        lock.update(kind="json", pid=pid, host=str(data.get("host") or "") or None, role=data.get("role"),
+                    started_ts=float(started) if isinstance(started, (int, float)) else mtime)
+    return lock
+
+
+def _windows_process_info(pid):
+    """عملية على ويندوز: سطر الأوامر ووقت البدء من Win32_Process، أو اسم البرنامج فقط من tasklist."""
+    import subprocess
+    no_window = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    script = (f"$p = Get-CimInstance Win32_Process -Filter 'ProcessId = {int(pid)}' -ErrorAction Stop; "
+              "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; "
+              "if ($p) { 'NAME=' + $p.Name; 'CREATED=' + ([DateTimeOffset]$p.CreationDate).ToUnixTimeSeconds(); "
+              "'CMD=' + $p.CommandLine }")
+    try:
+        out = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+                             capture_output=True, timeout=30, creationflags=no_window)
+        if out.returncode == 0:
+            info = {"alive": False, "name": None, "cmdline": None, "created": None}
+            for line in out.stdout.decode("utf-8", errors="replace").splitlines():
+                key, _, value = line.partition("=")
+                if key == "NAME":
+                    info.update(alive=True, name=value.strip())
+                elif key == "CREATED" and value.strip().isdigit():
+                    info["created"] = float(value.strip())
+                elif key == "CMD":
+                    info["cmdline"] = value.strip() or None
+            return info
     except Exception:
+        pass
+    out = subprocess.run(["tasklist", "/FI", f"PID eq {int(pid)}", "/FO", "CSV", "/NH"], capture_output=True,
+                         timeout=30, creationflags=no_window).stdout.decode(errors="replace")
+    for line in out.splitlines():
+        cells = [c.strip('"') for c in line.split('","')]
+        if len(cells) > 1 and cells[1].strip('"') == str(pid):
+            return {"alive": True, "name": cells[0], "cmdline": None, "created": None}
+    return {"alive": False, "name": None, "cmdline": None, "created": None}
+
+
+def _proc_process_info(pid):
+    """عملية على لينكس من /proc: الاسم وسطر الأوامر ووقت البدء؛ عملية زومبي ليست حية."""
+    base = f"/proc/{int(pid)}"
+    try:
+        with open(f"{base}/stat", "r") as f:
+            stat = f.read()
+    except OSError:
+        return {"alive": False, "name": None, "cmdline": None, "created": None}
+    fields = stat.rsplit(")", 1)[-1].split()
+    if fields and fields[0] == "Z":
+        return {"alive": False, "name": None, "cmdline": None, "created": None}
+    info = {"alive": True, "name": None, "cmdline": None, "created": None}
+    try:
+        with open(f"{base}/cmdline", "rb") as f:
+            argv = [a.decode("utf-8", errors="replace") for a in f.read().split(b"\0") if a]
+        if argv:
+            info["cmdline"] = " ".join(argv)
+            info["name"] = re.split(r"[\\/]", argv[0])[-1]
+    except OSError:
+        pass
+    try:
+        with open("/proc/stat", "r") as f:
+            boot = next(float(line.split()[1]) for line in f if line.startswith("btime "))
+        info["created"] = boot + int(fields[19]) / os.sysconf("SC_CLK_TCK")
+    except (OSError, ValueError, IndexError, StopIteration):
+        pass
+    return info
+
+
+def _process_info(pid):
+    """
+    {alive, name, cmdline, created} لعملية؛ None للحقل الذي لا يمكن معرفته. psutil إن كان مثبتاً، وإلا /proc
+    (لينكس)، وإلا Win32_Process / tasklist (ويندوز)، وإلا os.kill و ps.
+    """
+    try:
+        import psutil
+    except ImportError:
+        psutil = None
+    if psutil is not None:
+        try:
+            p = psutil.Process(pid)
+            if p.status() == psutil.STATUS_ZOMBIE:
+                return {"alive": False, "name": None, "cmdline": None, "created": None}
+            info = {"alive": True, "name": None, "cmdline": None, "created": None}
+            for key, read in (("name", p.name), ("cmdline", lambda: " ".join(p.cmdline())), ("created", p.create_time)):
+                try:
+                    info[key] = read()
+                except psutil.Error:
+                    pass
+            return info
+        except psutil.NoSuchProcess:
+            return {"alive": False, "name": None, "cmdline": None, "created": None}
+        except psutil.Error:
+            pass
+    if os.name == "nt":
+        return _windows_process_info(pid)
+    if os.path.isdir("/proc"):
+        return _proc_process_info(pid)
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return {"alive": False, "name": None, "cmdline": None, "created": None}
+    except OSError:
+        pass
+    info = {"alive": True, "name": None, "cmdline": None, "created": None}
+    try:
+        import subprocess
+        out = subprocess.run(["ps", "-p", str(int(pid)), "-o", "command="], capture_output=True, timeout=10)
+        info["cmdline"] = out.stdout.decode(errors="replace").strip() or None
+        if info["cmdline"]:
+            info["name"] = re.split(r"[\\/]", info["cmdline"].split()[0])[-1]
+    except Exception:
+        pass
+    return info
+
+
+def stale_lock_reason(lock, now=None, process_info=None, host=None):
+    """
+    None إذا كان القفل لعامل أتمتة حي على هذا الجهاز، وإلا سبب اعتباره متروكاً (نص عربي للسجل).
+    process_info(pid) -> {alive, name, cmdline, created} (للاختبارات؛ افتراضياً _process_info).
+    """
+    now = time.time() if now is None else now
+    pid = lock.get("pid")
+    if lock.get("kind") not in ("json", "pid") or not isinstance(pid, int):
+        return f"محتوى غير مفهوم: «{str(lock.get('raw') or '')[:40]}»"
+    if pid <= 1:
+        return f"رقم عملية غير صالح ({pid})"
+    here = host or socket.gethostname()
+    if lock.get("host") and lock["host"].lower() != here.lower():
+        return f"القفل من جهاز آخر ({lock['host']})"
+    started = lock.get("started_ts")
+    if started is not None and now - started > MAX_LOCK_AGE_SECONDS:
+        return f"عمره أكثر من {MAX_LOCK_AGE_SECONDS // 3600} ساعة"
+    try:
+        info = (process_info or _process_info)(pid)
+    except Exception as e:
+        return f"تعذر فحص العملية {pid}: {type(e).__name__}"
+    if not info.get("alive"):
+        return f"العملية {pid} لم تعد تعمل"
+    name = info.get("name")
+    if name and "python" not in name.lower():
+        return f"العملية {pid} ليست بايثون ({name})"
+    cmdline = info.get("cmdline")
+    if cmdline and not _LOCK_SCRIPT_RE.search(cmdline):
+        return f"العملية {pid} ليست عامل الأتمتة (main.py / run_nightly.py)"
+    created = info.get("created")
+    if created is not None and started is not None and created > started + LOCK_CLOCK_SLACK_SECONDS:
+        return f"العملية {pid} بدأت بعد كتابة القفل (رقم عملية أُعيد استخدامه)"
+    return None
+
+
+def _remove_lock_if_unchanged(lock_file, raw):
+    """يحذف القفل فقط إذا لم يكتبه أحد بعد قراءته (عامل بدأ للتو)."""
+    try:
+        with open(lock_file, "r", encoding="utf-8", errors="replace") as f:
+            if f.read().strip() != raw:
+                return False
+        os.remove(lock_file)
+        return True
+    except OSError:
         return False
 
 
-def run_worker_mode():
+def _another_worker_running(lock_file, now=None, process_info=None):
+    """
+    هل يحمل القفل عامل أتمتة حي آخر؟ لا قفل، أو 'STARTING' (العامل يأخذ القفل من الإدراج)، أو قفل هذه العملية
+    (التشغيل الليلي يحمله أثناء الإدراج): False. قفل متروك يُحذف ويُسجل السبب ثم False.
+    """
+    lock = read_lock(lock_file)
+    if lock is None or lock["kind"] == "starting" or lock.get("pid") == os.getpid():
+        return False
+    reason = stale_lock_reason(lock, now=now, process_info=process_info)
+    if reason is None:
+        return True
+    removed = _remove_lock_if_unchanged(lock_file, lock["raw"])
+    print(f"[Lock] قفل متروك في {lock_file}: {reason}؛ "
+          + ("حُذف ويستمر التشغيل." if removed else "تغير أثناء الفحص فلم يُحذف."))
+    return False
+
+
+def release_own_lock(lock_file=LOCK_FILE):
+    """يحذف القفل فقط إذا كان لهذه العملية (لا يحذف قفل عامل آخر بدأ بعد أن عُدّ قفلنا متروكاً)."""
+    lock = read_lock(lock_file)
+    if lock is not None and lock.get("pid") == os.getpid():
+        _remove_lock_if_unchanged(lock_file, lock["raw"])
+
+
+WORKER_TRIGGERS = ("dashboard", "nightly", "manual")
+DB_UNAVAILABLE_NOTICE = "DB_UNAVAILABLE: تعذر الوصول إلى قاعدة البيانات فتوقف العامل؛ بقيت الصفوف المتبقية في الانتظار"
+
+
+def _sheet_failure_reason(error):
+    """إعداد الشيت (تبويب أو عمود غير موجود) أم تعذر الوصول إليه (قد يزول وحده: يعيده التشغيل الليلي)."""
+    config_errors = tuple(c for c in (getattr(google_sheets, "SheetConfigError", None),
+                                      getattr(google_sheets, "SheetSchemaError", None)) if isinstance(c, type))
+    return "sheet_config" if config_errors and isinstance(error, config_errors) else "sheets_unavailable"
+
+
+def _cli_trigger(argv):
+    """--trigger=dashboard|nightly|manual من سطر الأوامر؛ افتراضياً manual (تشغيل يدوي)."""
+    for i, arg in enumerate(argv):
+        value = arg.split("=", 1)[1] if arg.startswith("--trigger=") else (
+            argv[i + 1] if arg == "--trigger" and i + 1 < len(argv) else None)
+        if value and value.strip().lower() in WORKER_TRIGGERS:
+            return value.strip().lower()
+    return "manual"
+
+
+def run_worker_mode(trigger="manual", report=True):
     """
     عامل الخلفية: يسحب المهام ذرياً ويعالجها بالتوازي (3 خيوط).
     يخرج فقط عندما ينجح COUNT(*) للمهام المفتوحة ويعيد 0، أو عند توقف المزودين (5 مهام متتالية PROVIDER_DOWN)،
     أو عند طلب إيقاف من لوحة التحكم (stop_requested): لا يسحب مهمة جديدة، ينهي المنتجات الجارية، ثم يعيد
     local_cache_db.stop_run الصفوف العالقة للانتظار. طلب إيقاف سُجل أثناء الإدراج يُنفذ قبل معالجة أي منتج.
+    قاعدة بيانات لا ترد عند البدء: يتوقف فوراً (db_unavailable) بدل اعتبار التشغيل منتهياً.
+    النتيجة في LAST_WORKER؛ report=True يكتب تقرير التشغيل (run_report: سجل التشغيلات، last_report.json، Telegram).
+    التشغيل الليلي يمرر report=False ويكتب تقريراً واحداً لليلة بعد إعادة المحاولات.
     """
     from concurrent.futures import ThreadPoolExecutor
     import threading
 
+    LAST_WORKER.clear()
     lock_file = LOCK_FILE
     os.makedirs("temp", exist_ok=True)
     if _another_worker_running(lock_file):
+        LAST_WORKER.update(stop_reason="another_worker")
         print("[Worker] معالج الخلفية يعمل بالفعل. خروج.")
         sys.exit(0)
     try:
-        with open(lock_file, "w") as f:
-            f.write(str(os.getpid()))
+        write_lock("nightly" if trigger == "nightly" else "worker", lock_file)
     except Exception:
         pass
 
@@ -780,33 +1054,45 @@ def run_worker_mode():
     load_run_config()
     local_cache_db.resume_automation()   # علم الإيقاف المؤقت القديم لا يمنع تشغيلاً جديداً
     started = time.monotonic()
+    started_ts = time.time()
     state = local_cache_db.get_automation_state()
     run_id = state.get("run_id") or None
     # طلب إيقاف وصل أثناء الإدراج (قبل وجود العامل): لا يُعالج أي منتج
     stop_reason = "stopped" if state.get("stop_requested") == 1 else None
+    if state.get("status") == "db_unavailable":
+        stop_reason = "db_unavailable"
     notice = "" if stop_reason else check_verifier()
     if notice:
         print(f"[Worker] {notice}")
 
     queue_started = False
     worker_id = None
+    start_notice = None          # سبب التوقف قبل أي منتج (للتقرير)
     try:
+        if stop_reason == "db_unavailable":
+            print(f"[Worker] قاعدة البيانات لا ترد ({state.get('db_error') or '-'})؛ لن يُعالج أي منتج.")
+            return
         if stop_reason:
             print("[Worker] طلب إيقاف من لوحة التحكم سُجل قبل بدء العامل؛ لن يُعالج أي منتج.")
             return
         sheets_client = google_sheets.get_sheets_client()
         if not sheets_client:
             stop_reason = "sheets_unavailable"
-            local_cache_db.update_automation_state(status="error", notice="SHEETS_UNAVAILABLE: Google Sheets connection failed")
+            start_notice = "SHEETS_UNAVAILABLE: Google Sheets connection failed"
+            local_cache_db.update_automation_state(status="error", notice=start_notice)
             return
         try:
             worksheet = google_sheets.open_worksheet(sheets_client, config.SPREADSHEET_NAME_OR_URL)
             if not worksheet:
+                # فتح الملف نفسه فشل: إعداد خاطئ، أو انقطاع مؤقت لا تميزه open_worksheet (يعيده التشغيل الليلي)
+                stop_reason = "sheet_not_found"
                 raise google_sheets.SheetConfigError(f"sheet not found: {config.SPREADSHEET_NAME_OR_URL}")
             link_column_index = google_sheets.find_link_column(worksheet)
         except Exception as e:
-            stop_reason = "sheet_config"
-            local_cache_db.update_automation_state(status="error", notice=f"SHEET_CONFIG: {e}")
+            stop_reason = stop_reason or _sheet_failure_reason(e)
+            code = "SHEETS_UNAVAILABLE" if stop_reason == "sheets_unavailable" else "SHEET_CONFIG"
+            start_notice = f"{code}: {e}"
+            local_cache_db.update_automation_state(status="error", notice=start_notice)
             print(f"[Worker] {e}")
             return
         brand_mappings = google_sheets.get_brand_mappings(sheets_client, config.SPREADSHEET_NAME_OR_URL)
@@ -874,36 +1160,61 @@ def run_worker_mode():
                     continue
                 time.sleep(1)
     finally:
+        # سبب الانقطاع (رصيد Serper / Gemini) من صفوف هذا العامل فقط (worker_id)؛ None يترك التنبيه كما هو.
+        # نهاية التشغيل تلغي طلب إيقاف وصل مع نهايته (stop_requested=0) كي لا يوقف عاملاً لاحقاً قبل أي منتج.
+        run_seconds = time.monotonic() - started + 60
+        health = _run_health(worker_id, run_seconds)
+        final_notice = None
         try:
-            # سبب الانقطاع (رصيد Serper / Gemini) من صفوف هذا العامل فقط (worker_id)؛ None يترك التنبيه كما هو.
-            # نهاية التشغيل تلغي طلب إيقاف وصل مع نهايته (stop_requested=0) كي لا يوقف عاملاً لاحقاً قبل أي منتج.
-            run_seconds = time.monotonic() - started + 60
             if stop_reason == "stopped":
                 # يعيد أي صف بقي 'processing' إلى الانتظار، ويلغي طلب الإيقاف، ويضبط الحالة (مراجعة أو خامل)
                 local_cache_db.stop_run(worker_active=False)
             elif stop_reason == "provider_down":
-                local_cache_db.update_automation_state(
-                    status="provider_down", current_product="", stop_requested=0,
-                    notice=_outage_notice(worker_id, run_seconds,
-                                          "PROVIDER_DOWN: search providers unavailable; remaining rows stay pending"))
-            elif stop_reason in ("sheets_unavailable", "sheet_config"):
+                final_notice = _outage_notice(worker_id, run_seconds,
+                                              "PROVIDER_DOWN: search providers unavailable; remaining rows stay pending",
+                                              health=health)
+                local_cache_db.update_automation_state(status="provider_down", current_product="", stop_requested=0,
+                                                       notice=final_notice)
+            elif stop_reason == "db_unavailable":
+                # غالباً يفشل هذا التحديث أيضاً؛ التقرير (run_report) وملف last_report.json يقولان ذلك صراحة
+                final_notice = DB_UNAVAILABLE_NOTICE
+                local_cache_db.update_automation_state(status="error", current_product="", stop_requested=0,
+                                                       notice=final_notice)
+            elif stop_reason in ("sheets_unavailable", "sheet_config", "sheet_not_found"):
                 pass
-            elif local_cache_db.get_ready_for_review_count() > 0:
-                local_cache_db.update_automation_state(status="curation_pending", current_product="", stop_requested=0,
-                                                       notice=_outage_notice(worker_id, run_seconds, notice))
             else:
-                local_cache_db.update_automation_state(status="idle", current_product="", stop_requested=0,
-                                                       notice=_outage_notice(worker_id, run_seconds, notice))
+                # الطابور انتهى، أو سبب توقف آخر (مثل حد الميزانية) يظهر نصه كما هو في التنبيه والتقرير
+                base = notice
+                if stop_reason:
+                    base = " | ".join(n for n in (
+                        f"{str(stop_reason).upper()}: توقف العامل قبل نهاية الطابور ({stop_reason})؛ "
+                        "بقيت الصفوف المتبقية في الانتظار", notice) if n)
+                final_notice = _outage_notice(worker_id, run_seconds, base, health=health)
+                ready = local_cache_db.get_ready_for_review_count()
+                if ready is None:
+                    # خطأ قاعدة البيانات ليس «لا شيء للمراجعة»: الحالة تبقى، ولوحة التحكم تضبطها عند عودة القاعدة
+                    print("[Worker] تعذر قراءة عدد الصفوف الجاهزة للمراجعة؛ لم تُكتب الحالة النهائية.")
+                else:
+                    local_cache_db.update_automation_state(status="curation_pending" if ready > 0 else "idle",
+                                                           current_product="", stop_requested=0, notice=final_notice)
         except Exception as e:
             print(f"[Worker] تعذر تحديث الحالة النهائية: {e}")
         if queue_started:
             google_sheets.stop_async_queue()
-        for path in (lock_file, "temp/batch_progress.json"):
+        release_own_lock(lock_file)
+        try:
+            if os.path.exists("temp/batch_progress.json"):
+                os.remove("temp/batch_progress.json")
+        except Exception:
+            pass
+        LAST_WORKER.update(stop_reason=stop_reason, run_id=run_id, worker_id=worker_id, started_ts=started_ts,
+                           ended_ts=time.time(), notice=final_notice or start_notice or notice or None, health=health)
+        if report:
             try:
-                if os.path.exists(path):
-                    os.remove(path)
-            except Exception:
-                pass
+                import run_report
+                run_report.report_worker_run(dict(LAST_WORKER), trigger=trigger)
+            except Exception as e:
+                print(f"[Worker] تعذر كتابة تقرير التشغيل: {e}")
 
 
 def run_automation_pipeline():
@@ -964,6 +1275,8 @@ if __name__ == "__main__":
     if "--enqueue" in sys.argv:
         run_enqueue_mode()
     elif "--worker" in sys.argv:
-        run_worker_mode()
+        run_worker_mode(trigger=_cli_trigger(sys.argv))
+        import run_report
+        sys.exit(run_report.exit_code(LAST_WORKER.get("stop_reason")))
     else:
         run_automation_pipeline()
