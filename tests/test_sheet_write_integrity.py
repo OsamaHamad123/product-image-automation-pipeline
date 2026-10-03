@@ -1,5 +1,6 @@
 """Sheet-write integrity: transient Google errors (429 / 5xx / connection) are retried when the sheet is opened and
-read, and a real 'not found / no access' is reported distinctly from a transient error.
+read, and a real 'not found / no access' is reported distinctly from a transient error; the right row: only a
+valid GTIN may identify a row on its own, placeholders never do.
 
 Google Sheets is an in-memory fake; every connection is refused.
 """
@@ -267,3 +268,37 @@ def test_get_products_and_find_link_column_retry_transient_errors(gs, offline):
     with pytest.raises(gs.SheetTransientError):
         gs.get_products(ws)
 
+
+# ---------------------------------------------------------------------------
+# 2. the right row: placeholders are never identity keys
+# ---------------------------------------------------------------------------
+
+PLACEHOLDERS = [
+    ["Barcode", "Product Name", "Brand", "Drive Image Link"],
+    ["N/A", "Tomato Paste 400g", "Al Alali", ""],         # row 2
+    ["6.29E+12", "Chickpeas 400g", "California Garden", ""],  # row 3
+    ["0", "Basmati Rice 5kg", "Abu Kass", ""],            # row 4
+    ["-", "Sunflower Oil 1.5L", "Afia", ""],              # row 5
+]
+
+
+def test_placeholder_barcodes_never_identify_a_row(gs, offline):
+    ws = Sheet(PLACEHOLDERS)
+    conflicts = gs.find_record_conflicts(ws, {
+        # another product whose barcode cell is also a placeholder: the old digits-only compare saw '' == ''
+        "dash_vs_na": (2, gs._expectation("-", "Sunflower Oil 1.5L", brand="Afia")),
+        "zero_vs_zeros": (4, gs._expectation("000", "Tomato Paste 400g")),
+        # Sheets collapses different barcodes to the same scientific notation
+        "sci": (3, gs._expectation("6.29E+12", "Tomato Paste 400g")),
+        # the right products, still verified by name (and brand when given)
+        "ok_na": (2, gs._expectation("N/A", "Tomato Paste 400g", brand="Al Alali")),
+        "ok_sci": (3, gs._expectation("6.29E+12", "chickpeas  400G")),
+        "wrong_brand": (5, gs._expectation("-", "Sunflower Oil 1.5L", brand="Noor")),
+    })
+    assert set(conflicts) == {"dash_vs_na", "zero_vs_zeros", "sci", "wrong_brand"}
+    assert "name mismatch" in conflicts["dash_vs_na"] and "brand mismatch" in conflicts["wrong_brand"]
+    # a placeholder alone (no name) can never verify a row
+    assert gs.find_record_conflicts(ws, {"bare": (2, gs._expectation("N/A"))})
+    # a valid GTIN is the sole key: the owner may fix a product name without blocking the write
+    gtin_sheet = Sheet([["Barcode", "Product Name"], [MILK, "Almarai Fresh Milk 1 Litre"]])
+    assert gs.find_record_conflicts(gtin_sheet, {"g": (2, gs._expectation(MILK, "Almarai Fresh Milk 1L"))}) == {}

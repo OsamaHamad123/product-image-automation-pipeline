@@ -4,8 +4,10 @@
 # قواعد الأمان (SHEET-1/2, SYNC-1/2, D12):
 # - الأعمدة تُحدد بأسماء العناوين (مع جدول مرادفات) ولا يوجد أي رجوع لمواقع ثابتة؛ غياب عمود الاسم خطأ صريح.
 # - لا يُخترع البراند من أول كلمة في الاسم: البراند الفارغ يبقى فارغاً.
-# - كل كتابة تحمل هوية المنتج (الباركود/الاسم). عند التفريغ نعيد قراءة عمود المفتاح للصف الهدف،
-#   وأي اختلاف يُسجل CONFLICT ولا يُكتب. عمود الهدف يُحدد باسم العنوان وقت التفريغ.
+# - كل كتابة تحمل هوية المنتج (الباركود/الاسم/الحجم/البراند). عند التفريغ نعيد قراءة أعمدة الهوية للصف الهدف،
+#   وأي اختلاف يُسجل CONFLICT ولا يُكتب. الباركود وحده مفتاح فقط إذا كان GTIN صالحاً (رقم تحقق GS1)؛
+#   'N/A' و'0' و'-' و'6.29E+12' ليست مفاتيح أبداً، فيُقارن الاسم مع الحجم والبراند. عمود الهدف يُحدد باسم
+#   العنوان وقت التفريغ.
 # - الكتابة المؤجلة عبر Redis تُستخدم فقط إذا كان مفتاح نبض sync_worker موجوداً.
 
 import json
@@ -22,6 +24,7 @@ import pymysql
 from gspread.exceptions import APIError
 
 import config
+from catalog_match.gtin import normalize_gtin
 
 logger = logging.getLogger(__name__)
 
@@ -116,6 +119,14 @@ def _cell(row, idx):
 def _norm_barcode(value):
     digits = re.sub(r"\D", "", str(value or ""))
     return digits.lstrip("0")
+
+
+def _gtin(value):
+    """GTIN-14 لباركود صالح (طول ورقم تحقق GS1 صحيحان)، وإلا None: العناصر النائبة ليست مفاتيح أبداً."""
+    try:
+        return normalize_gtin(value)[0]
+    except Exception:
+        return None
 
 
 def _norm_name(value):
@@ -397,7 +408,7 @@ def get_products(worksheet):
 
 def _expectation(barcode=None, product_name=None, size=None, brand=None):
     """
-    هوية المنتج المتوقع في الصف. الحجم والبراند يُخزنان مع الاسم: بدون باركود، شقيقان بنفس الاسم
+    هوية المنتج المتوقع في الصف. الحجم والبراند يُخزنان مع الاسم: بدون باركود صالح، شقيقان بنفس الاسم
     (1L و 2L، أو نفس الاسم لبراندين) في صفين متجاورين يتميزان بهما فقط.
     """
     expect = {}
@@ -411,6 +422,32 @@ def _norm_size(value):
     return re.sub(r"\s+", "", unicodedata.normalize("NFKC", str(value or "")).casefold())
 
 
+# كيف تُقارن كل خانة هوية بين التوقع والشيت
+_IDENTITY_NORMS = {"barcode": _gtin, "name": _norm_name, "size": _norm_size, "brand": _norm_name}
+
+
+def _key_fields(expect, cols):
+    """
+    خانات الهوية التي تُقارن لتوقع معين: الباركود وحده إذا كان GTIN صالحاً وعموده موجوداً في الشيت، وإلا
+    الاسم مع الحجم والبراند (كل منهما إذا كان في التوقع وكان عموده موجوداً). [] إذا تعذر التحقق.
+    """
+    expect = expect or {}
+    if cols.get("barcode", -1) != -1 and _gtin(expect.get("barcode")):
+        return ["barcode"]
+    if expect.get("name") and cols.get("name", -1) != -1:
+        return ["name"] + [f for f in ("size", "brand") if expect.get(f) and cols.get(f, -1) != -1]
+    return []
+
+
+def _identity_mismatch(expect, cells, fields):
+    """سبب عدم تطابق خلايا صف ({field: القيمة}) مع التوقع في الخانات المحددة، أو None عند التطابق."""
+    for field in fields:
+        norm = _IDENTITY_NORMS[field]
+        if norm(cells.get(field)) != norm(expect[field]):
+            return f"{field} mismatch: sheet has {cells.get(field)!r}, expected {expect[field]!r}"
+    return None
+
+
 def _outbox_keys(expect):
     """أعمدة الهوية في طابور MariaDB لتوقع معين."""
     expect = expect or {}
@@ -418,28 +455,36 @@ def _outbox_keys(expect):
             "key_size": expect.get("size"), "key_brand": expect.get("brand")}
 
 
-def _read_column_cells(worksheet, col_idx, rows):
-    """قيم عمود واحد لصفوف محددة عبر batch_get لنطاق واحد متصل."""
-    lo, hi = min(rows), max(rows)
-    letter_lo = gspread.utils.rowcol_to_a1(lo, col_idx + 1)
-    letter_hi = gspread.utils.rowcol_to_a1(hi, col_idx + 1)
-    result = worksheet.batch_get([f"{letter_lo}:{letter_hi}"])
-    values = list(result[0]) if result else []
+def _read_identity_cells(worksheet, columns, rows=None):
+    """
+    قيم عدة أعمدة عبر batch_get واحد. columns: {field: فهرس العمود}. rows: أرقام صفوف (يُقرأ النطاق المتصل
+    بين أصغرها وأكبرها)، أو None للعمود كله بدءاً من الصف 2. يعيد {field: {row: القيمة}}.
+    """
+    fields = list(columns)
+    if not fields:
+        return {}
+    lo, hi = (min(rows), max(rows)) if rows else (2, None)
+    ranges = []
+    for field in fields:
+        start = gspread.utils.rowcol_to_a1(lo, columns[field] + 1)
+        if hi is None:
+            ranges.append(f"{start}:{re.sub(r'[0-9]', '', start)}")
+        else:
+            ranges.append(f"{start}:{gspread.utils.rowcol_to_a1(hi, columns[field] + 1)}")
+    result = _retrying(worksheet.batch_get, ranges)
     out = {}
-    for r in rows:
-        offset = r - lo
-        cell = values[offset] if offset < len(values) else []
-        out[r] = str(cell[0]).strip() if cell else ""
+    for i, field in enumerate(fields):
+        values = list(result[i]) if result and i < len(result) else []
+        out[field] = {lo + offset: (str(cell[0]).strip() if cell else "") for offset, cell in enumerate(values)}
     return out
 
 
 def find_record_conflicts(worksheet, records, headers=None):
     """
     records: {record_id: (row_number, {'barcode': ..., 'name': ..., 'size': ..., 'brand': ...})}.
-    يعيد {record_id: سبب} لكل سجل لا يطابق عمود المفتاح في صفه هويته هو. التحقق لكل سجل على حدة:
+    يعيد {record_id: سبب} لكل سجل لا تطابق أعمدة الهوية في صفه هويته هو. التحقق لكل سجل على حدة:
     سجلان لمنتجين مختلفين على نفس رقم الصف (رقم صف قديم) لا يأخذ أحدهما حكم الآخر.
-    الباركود هو المفتاح عند توفره (في التوقع وفي الشيت)، وإلا الاسم مع الحجم والبراند (كل منهما
-    يُقارن إذا كان في التوقع وكان عموده موجوداً في الشيت).
+    الباركود هو المفتاح فقط إذا كان GTIN صالحاً (وعموده موجوداً)، وإلا الاسم مع الحجم والبراند (_key_fields).
     """
     records = {k: (row, e) for k, (row, e) in (records or {}).items() if e}
     if not records:
@@ -447,35 +492,21 @@ def find_record_conflicts(worksheet, records, headers=None):
     if headers is None:
         headers = _worksheet_headers(worksheet, fresh=True)
     cols = resolve_columns(headers)
-    barcode_ids = [k for k, (_, e) in records.items() if e.get("barcode") and cols["barcode"] != -1]
-    name_ids = [k for k, (_, e) in records.items()
-                if k not in barcode_ids and e.get("name") and cols["name"] != -1]
+    fields = {k: _key_fields(e, cols) for k, (_, e) in records.items()}
+    keyed = [k for k in records if fields[k]]
     conflicts = {}
-    if barcode_ids:
-        actual = _read_column_cells(worksheet, cols["barcode"], sorted({records[k][0] for k in barcode_ids}))
-        for k in barcode_ids:
+    if keyed:
+        needed = sorted({f for k in keyed for f in fields[k]})
+        cells = _read_identity_cells(worksheet, {f: cols[f] for f in needed}, [records[k][0] for k in keyed])
+        for k in keyed:
             row, e = records[k]
-            if _norm_barcode(actual.get(row)) != _norm_barcode(e["barcode"]):
-                conflicts[k] = f"barcode mismatch: sheet has {actual.get(row)!r}, expected {e['barcode']!r}"
-    if name_ids:
-        name_rows = sorted({records[k][0] for k in name_ids})
-        actual = _read_column_cells(worksheet, cols["name"], name_rows)
-        for k in name_ids:
-            row, e = records[k]
-            if _norm_name(actual.get(row)) != _norm_name(e["name"]):
-                conflicts[k] = f"name mismatch: sheet has {actual.get(row)!r}, expected {e['name']!r}"
-        for field, norm in (("size", _norm_size), ("brand", _norm_name)):
-            ids = [k for k in name_ids if k not in conflicts and records[k][1].get(field) and cols[field] != -1]
-            if not ids:
-                continue
-            actual = _read_column_cells(worksheet, cols[field], sorted({records[k][0] for k in ids}))
-            for k in ids:
-                row, e = records[k]
-                if norm(actual.get(row)) != norm(e[field]):
-                    conflicts[k] = f"{field} mismatch: sheet has {actual.get(row)!r}, expected {e[field]!r}"
+            reason = _identity_mismatch(e, {f: cells[f].get(row, "") for f in fields[k]}, fields[k])
+            if reason:
+                conflicts[k] = reason
     for k in records:
-        if k not in barcode_ids and k not in name_ids:
-            conflicts[k] = "no key column in sheet to verify row identity"
+        if not fields[k]:
+            conflicts[k] = ("no key column in sheet to verify row identity "
+                            "(the barcode is not a valid GTIN and there is no product name to compare)")
     return conflicts
 
 
