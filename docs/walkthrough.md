@@ -281,8 +281,8 @@ AUTO_PUBLISH_BRANDS=Almarai, Al Rawabi
    يرسل طلباً رخيصاً واحداً لكل خدمة مضبوطة: Serper بأنواعه، وSerpApi، ونموذجا القراءة، وPhotoRoom، وCloudinary. ثم يطبع جدولاً بالحالة وسبب أي فشل، ولا يطبع أي جزء من أي مفتاح.
 2. **قِس نفس الصفوف مرتين، بدون الجولة الإضافية ثم معها:**
    ```bat
-   .venv\Scripts\python.exe scripts\smoke_live.py --rows 2-61 --dry-run --no-expansion --json before.json
-   .venv\Scripts\python.exe scripts\smoke_live.py --rows 2-61 --dry-run --json after.json
+   .venv\Scripts\python.exe scripts\smoke_live.py --rows 2-61 --dry-run --no-expansion --json runs\before.json
+   .venv\Scripts\python.exe scripts\smoke_live.py --rows 2-61 --dry-run --json runs\after.json
    ```
    كل تشغيل ينتهي بملخص فيه:
    - نسبة المنتجات التي لها اقتراح؛
@@ -294,9 +294,10 @@ AUTO_PUBLISH_BRANDS=Almarai, Al Rawabi
    الصفوف التي تعطلت فيها المصادر لا تُحسب في النسبة.
 3. **قارن:**
    ```bat
-   .venv\Scripts\python.exe scripts\compare_runs.py before.json after.json --md --out compare.md
+   .venv\Scripts\python.exe scripts\compare_runs.py runs\before.json runs\after.json --md --out runs\compare.md
    ```
    يعرض أولاً المنتجات التي تغيّر قرارها، ثم الفرق في الملخص.
+   ملفات القياس في مجلد `runs` تبقى على جهازك ولا تُرفع إلى git. فيه أيضاً خط الأساس `runs\2026-10-03\smoke_6.json` (قبل المرحلة الثالثة) للمقارنة.
 4. **وفّر وقت التصنيف:** المراجعات التي تمت في لوحة التحكم تُنسخ إلى ملف التصنيف، فلا تصنّف إلا الباقي:
    ```bat
    .venv\Scripts\python.exe scripts\eval_record.py --prefill-labels-from-db tests\eval\fixtures\recorded\<التاريخ>\labels.csv
