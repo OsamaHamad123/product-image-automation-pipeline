@@ -35,7 +35,10 @@ Sugar), a pack the title leaves ambiguous for a single-unit SKU ('16 pcs 200g'),
 and a missing sub-brand the SKU names (parent-brand-only evidence).
 
 Brand evidence ignores store-name title segments ('- Shop on Carrefour UAE'), so a
-private-label SKU never matches another brand through the retailer's name.
+private-label SKU never matches another brand through the retailer's name. On a page of
+the brand's official site (or a learned source) the site's own name segment ('| Mehran
+Foods Korea' on mehranfoods.com) is ignored the same way, unless it names the product:
+the site's trust already counts, its name is no evidence of which brand the page shows.
 
 A brand that is also an everyday listing word (brand_index.is_generic_brand: 'Freshly',
 'Family', 'Golden Prize') turns up in other brands' listings ('Seara Chicken Shawarma
@@ -154,21 +157,72 @@ def _site_only(segment: str) -> bool:
 _TRAILING_SITE_RE = re.compile(r"\s+(?:online\s+)?(?:at|on|from|in)\s+(?P<rest>[^|]*)$")
 
 
-def strip_site_suffix(text: str) -> str:
+def _own_site_name(segment: str, site_names: Sequence[str], names_product=None) -> bool:
+    """True when a title segment is the page's own site name: its words, run together, start with the site's
+    domain label or are the start of it ('Mehran Foods Korea' on mehranfoods.com), and it names nothing of the
+    product (names_product(segment) is False: no product word, size or variant)."""
+    if not site_names:
+        return False
+    compact = "".join(match_string(segment).split())
+    if not compact:
+        return False
+    for label in site_names:
+        if len(label) >= 3 and (compact.startswith(label) or (len(compact) >= 3 and label.startswith(compact))):
+            return not (names_product and names_product(segment))
+    return False
+
+
+def strip_site_suffix(text: str, site_names: Sequence[str] = (), names_product=None) -> str:
     """Drop store-name segments ('- Shop on Carrefour UAE', '| Lulu UAE', 'at Amazon.ae') from a title.
 
     Used for brand evidence only: a retailer's own name in every listing title must
     not count as the brand of a private-label SKU (brand 'Carrefour'), nor as a
-    competitor of the target brand.
+    competitor of the target brand. site_names are the page's own domain labels when the
+    page is on a site whose trust it raises (own_site_names): a segment that is only that
+    site's name ('| Mehran Foods Korea' on mehranfoods.com) is dropped the same way.
     """
     if not text:
         return ""
-    kept = [seg for seg in _SEGMENT_SPLIT_RE.split(text) if seg and not _site_only(seg)]
+    kept = [seg for seg in _SEGMENT_SPLIT_RE.split(text)
+            if seg and not _site_only(seg) and not _own_site_name(seg, site_names, names_product)]
     out = " - ".join(kept)
     m = _TRAILING_SITE_RE.search(out)
-    if m and _site_only(m.group("rest")):
+    if m and (_site_only(m.group("rest")) or _own_site_name(m.group("rest"), site_names, names_product)):
         out = out[:m.start()]
     return out
+
+
+def own_site_names(spec: SkuSpec, cand: Candidate) -> Tuple[str, ...]:
+    """The domain labels ('mehranfoods') of the brand-official or learned site the page is on, else ().
+
+    Such a site lifts the page's trust, so its own name in the title must not also be the brand
+    evidence: with the CSV's official domain mehranfoods.com (a Korean store), 'Buy DAWN BREAD Plain
+    Frozen Paratha Online | Mehran Foods Korea' scored tier 1 for 'MEHRAN PLAIN PARATHA 400GM 5S'
+    (live run 2026-10-03, row 16).
+    """
+    host = page_host(cand)
+    if not host:
+        return ()
+    out = []
+    for d in tuple(spec.official_domains) + tuple(spec.learned_domains or ()):
+        d = (d or "").strip().lower().lstrip(".")
+        if d and domain_matches(host, [d]):
+            label = "".join(ch for ch in d.split(".")[0] if ch.isalnum())
+            if label and label not in out:
+                out.append(label)
+    return tuple(out)
+
+
+def _product_namer(spec: SkuSpec):
+    """names_product(text): the text holds one of the SKU's product words, a size or a variant phrase."""
+    stems = {_stem(t) for tok in spec.class_tokens for t in tokens(tok, strip_clitics=True)}
+    context = variants_mod.spec_context(spec)
+
+    def names_product(text: str) -> bool:
+        words = {_stem(t) for t in tokens(text, strip_clitics=True)}
+        return bool(words & stems) or bool(parse_sizes(text, "title")) \
+            or bool(variants_mod.extract_variants(text, context))
+    return names_product
 
 
 def _brand_leads(phrases: Sequence[str], text: str) -> Optional[bool]:
@@ -338,10 +392,13 @@ def score_candidate(spec: SkuSpec, cand: Candidate, negatives=None) -> Candidate
     soft_cap = False
 
     # --- brand -----------------------------------------------------------
-    # Store-name suffixes ('- Shop on Carrefour UAE') are not brand evidence.
+    # Store-name suffixes ('- Shop on Carrefour UAE') are not brand evidence, nor is the own name of an
+    # official or learned site the page is on ('| Mehran Foods Korea' on mehranfoods.com).
     brand_texts = dict(fields)
+    site_names = own_site_names(spec, cand)
+    namer = _product_namer(spec) if site_names else None
     for name in ("title", "page_title", "snippet"):
-        brand_texts[name] = strip_site_suffix(fields[name])
+        brand_texts[name] = strip_site_suffix(fields[name], site_names, namer)
     brand_fields: Dict[str, str] = {}
     for name in IDENTITY_FIELDS + ("snippet",):
         hit = any_brand_in(spec.match_brands, brand_texts[name]) if spec.match_brands else None

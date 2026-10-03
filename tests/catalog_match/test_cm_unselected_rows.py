@@ -329,3 +329,48 @@ def test_row11_the_plain_listing_is_preselected_when_every_one_reads_as_a_match(
     assert out.decision == "REVIEW_PRESELECTED" and out.failure_code is None
     assert out.winner is not None and out.winner.candidate is not LULU_KSA_THIN
     assert not any(w.startswith("warn:sheet_silent") for w in out.winner.reasons)
+
+
+# ---------------------------------------------------------------------------
+# 3. An official site's own name is not brand evidence
+# ---------------------------------------------------------------------------
+
+MEHRAN_OFFICIAL = {"mehran": {"brand": "Mehran", "synonyms": ["MEHRAN"], "official_domains": ["mehranfoods.com"]}}
+MEHRAN_PAGE = ("https://mehranfoods.com/ar/products/dawn-bread-plain-frozen-paratha-bread-5pcs-400g-"
+               "%ED%94%8C%EB%9E%98%EC%9D%B8-%EB%83%89%EB%8F%99-%ED%8C%8C%EB%9D%BC%ED%83%80")
+
+
+def test_row16_the_site_name_of_an_official_domain_is_not_the_brand():
+    spec = spec_of("MEHRAN PLAIN PARATHA 400GM 5S", "MEHRAN", MEHRAN_OFFICIAL)
+    dawn = score_candidate(spec, listing("Buy DAWN BREAD Plain Frozen Paratha Online | Mehran Foods Korea", MEHRAN_PAGE,
+                                         "https://cdn.shopify.com/s/files/1/0848/9110/7613/files/front-163.jpg"))
+    assert dawn.matched["source_class"] == "official"
+    assert dawn.tier == 3 and not dawn.matched["brand"]                 # was tier 1 on the site's name alone
+    # a page of that site that names the brand in the product part keeps it
+    own = score_candidate(spec, listing("Mehran Plain Paratha (5 pieces) 400 g | Mehran Foods",
+                                        "https://mehranfoods.com/products/mehran-plain-paratha-400g"))
+    assert own.tier == 1 and own.matched["brand_fields"]["title"] == "mehran"
+    # the same title on a site that is not the brand's is unaffected (store-name rules only there)
+    other = score_candidate(spec, listing("Buy DAWN BREAD Plain Frozen Paratha Online | Mehran Foods Korea",
+                                          "https://www.example-shop.com/dawn-bread-paratha"))
+    assert other.matched["brand"]
+
+
+def _paratha_only(text):
+    return "paratha" in text.lower()
+
+
+def test_a_site_name_segment_that_names_the_product_is_kept():
+    from catalog_match.score import strip_site_suffix
+
+    assert strip_site_suffix("Buy DAWN BREAD Plain Paratha | Mehran Foods Korea", ("mehranfoods",),
+                             _paratha_only) == "Buy DAWN BREAD Plain Paratha"
+    assert strip_site_suffix("Plain Paratha | Mehran Plain Paratha", ("mehranfoods",),
+                             _paratha_only) == "Plain Paratha - Mehran Plain Paratha"
+    assert strip_site_suffix("YUMWAY | Premium Frozen French Fries", ("yumwayfood",)) == "Premium Frozen French Fries"
+    assert strip_site_suffix("Fries 1kg - Shop on Carrefour UAE") == "Fries 1kg"
+
+
+def test_the_suggested_mapping_no_longer_lists_mehranfoods_as_official():
+    mehran = [v for v in suggested_mappings().values() if v.get("brand") == "Mehran"]
+    assert len(mehran) == 1 and "mehranfoods.com" not in (mehran[0].get("official_domains") or [])
