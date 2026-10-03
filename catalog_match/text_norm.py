@@ -169,6 +169,56 @@ def any_phrase_in(phrases: Iterable[str], text: Optional[str]) -> Optional[str]:
     return None
 
 
+# ---------------------------------------------------------------------------
+# Brand phrases: a plural or singular last word is the same brand
+# ---------------------------------------------------------------------------
+
+_PLURAL_STEM_RE = re.compile(r"[a-z]{4,}")
+
+
+@lru_cache(maxsize=4096)
+def _brand_regex(match_phrase: str) -> "re.Pattern[str]":
+    """phrase_in's pattern with the last Latin word allowed with or without a final 's'.
+
+    The sheet and the stores do not agree on it ('KITCHEN TREASURE' / 'Kitchen Treasures Meat
+    Masala', live run 2026-10-03). Only words of 4+ letters, never one ending in 'ss', and the
+    word must still end on a token boundary: 'Lays' (4 letters) stays exact, 'Swiss' is not 'Swis'.
+    """
+    head, _, last = match_phrase.rpartition(" ")
+    prefix = re.escape(head + " ") if head else ""
+    if _PLURAL_STEM_RE.fullmatch(last) and not last.endswith("ss"):
+        stem = last[:-1] if (last.endswith("s") and len(last) >= 5) else last
+        body = prefix + re.escape(stem) + "s?"
+    else:
+        body = re.escape(match_phrase)
+    return re.compile(r"(?<![\w])" + body + r"(?![\w])")
+
+
+def brand_pattern(phrase: Optional[str]) -> Optional["re.Pattern[str]"]:
+    """The compiled brand pattern of `phrase` over match_string() text, or None for an empty phrase."""
+    p = match_string(phrase)
+    return _brand_regex(p) if p else None
+
+
+def brand_in(phrase: Optional[str], text: Optional[str]) -> bool:
+    """phrase_in for brand names: the last word may differ by a plural 's' ('Treasure' / 'Treasures')."""
+    pattern = brand_pattern(phrase)
+    t = match_string(text)
+    return bool(pattern and t and pattern.search(t))
+
+
+def any_brand_in(phrases: Iterable[str], text: Optional[str]) -> Optional[str]:
+    """any_phrase_in for brand names (see brand_in): the first phrase found in `text`, else None."""
+    t = match_string(text)
+    if not t:
+        return None
+    for phrase in phrases:
+        pattern = brand_pattern(phrase)
+        if pattern and pattern.search(t):
+            return phrase
+    return None
+
+
 def alnum_len(text: Optional[str]) -> int:
     """Number of letters/digits in the text (Arabic letters count)."""
     return sum(1 for ch in normalize(text) if ch.isalnum())

@@ -90,7 +90,7 @@ from .models import (
 from .fetch import phash_distance
 from .score import page_host, rank_key, trusted_domains
 from .sizes import compare, parse_sizes, product_size
-from .text_norm import domain_matches, normalize, phrase_in, store_market, url_host, url_path_text
+from .text_norm import brand_in, domain_matches, normalize, store_market, url_host, url_path_text
 
 logger = logging.getLogger(__name__)
 
@@ -148,6 +148,21 @@ def _is_foreign_tld(host: str) -> bool:
     return len(tld) == 2 and tld.isalpha() and tld != "ae" and tld not in _GENERIC_CCTLDS
 # 'other_retail' stores (trusted_domains.json) that are UAE stores without an .ae domain.
 _UAE_DOTCOM_STORES = ("westzone.com", "instashop.com")
+
+# Marketplaces whose first host label names the country store: angola.desertcart.com sells the Angolan
+# listing (live run 2026-10-03), uae.desertcart.com the UAE one; www. says nothing either way.
+_COUNTRY_SUBDOMAIN_STORES = ("desertcart.com",)
+_UAE_STORE_LABELS = frozenset({"uae", "ae", "dubai"})
+_NEUTRAL_HOST_LABELS = frozenset({"www", "m", "shop", "store"})
+
+
+def _country_store_label(host: str) -> Optional[str]:
+    """The country label of a country-subdomain marketplace host ('angola'), else None."""
+    for base in _COUNTRY_SUBDOMAIN_STORES:
+        if host.endswith("." + base):
+            label = host[: -len(base) - 1].rsplit(".", 1)[-1]
+            return None if label in _NEUTRAL_HOST_LABELS else label
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -243,7 +258,7 @@ def _sub_brands_read(spec: Optional[SkuSpec], brand_text: str) -> Set[str]:
     if spec is None or not brand_text:
         return set()
     phrases = tuple(spec.required_brands) + tuple(spec.sibling_brands)
-    return {p for p in phrases if phrase_in(p, brand_text)}
+    return {p for p in phrases if brand_in(p, brand_text)}
 
 
 def identity_conflict(a: RankedCandidate, b: RankedCandidate, spec: Optional[SkuSpec] = None) -> Optional[str]:
@@ -355,6 +370,9 @@ def _foreign_store(spec: SkuSpec, cand: Candidate) -> bool:
     host = page_host(cand) or url_host(cand.image_url)
     if not host or domain_matches(host, spec.official_domains):
         return False
+    label = _country_store_label(host)
+    if label is not None:
+        return label not in _UAE_STORE_LABELS
     data = trusted_domains()
     if domain_matches(host, data.get("uae_retailers", [])):
         return store_market(cand.page_url) == "foreign"

@@ -53,7 +53,7 @@ from .gtin import gtin13
 from .models import FetchedImage, SkuSpec, VerificationResult, VlmImageVerdict
 from . import variants as variants_mod
 from .sizes import compare, compare_pack, parse_sizes
-from .text_norm import any_phrase_in
+from .text_norm import any_brand_in
 
 logger = logging.getLogger(__name__)
 
@@ -212,16 +212,16 @@ def _brand_reading(spec: SkuSpec, brand_text: str) -> str:
     """'target' | 'other' | 'unknown' for the verbatim brand the model read."""
     if not brand_text:
         return "unknown"
-    target = any_phrase_in(spec.match_brands, brand_text) if spec.match_brands else None
+    target = any_brand_in(spec.match_brands, brand_text) if spec.match_brands else None
     if spec.required_brands:
-        if any_phrase_in(spec.required_brands, brand_text):
+        if any_brand_in(spec.required_brands, brand_text):
             return "target"
-        if spec.sibling_brands and any_phrase_in(spec.sibling_brands, brand_text):
+        if spec.sibling_brands and any_brand_in(spec.sibling_brands, brand_text):
             return "other"            # 'Nestle Everyday' read for a Nido SKU
         return "unknown"              # parent brand only: the sub-brand is not confirmed
     if target:
         return "target"
-    if spec.competitors and any_phrase_in(spec.competitors, brand_text):
+    if spec.competitors and any_brand_in(spec.competitors, brand_text):
         return "other"
     return "unknown"
 
