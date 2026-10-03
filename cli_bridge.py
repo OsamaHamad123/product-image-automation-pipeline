@@ -698,6 +698,8 @@ def _human_decision(barcode, product_name, brand, original_url, approved_by, sku
     فمراجع آخر ينتظر القفل يرى هذا الاعتماد في إعادة فحص C1 (already_approved) ولا يكتب فوقه في صمت.
     """
     def record(res):
+        if res.get("status") != "published":
+            return      # رابط needs_review: ليس اعتماداً: لا يُسجل اعتماد بشري ولا يكتمل الصف (الشيت وقاعدة البيانات متفقان)
         local_cache_db.save_product_resolution(
             barcode, product_name, brand, original_url, res["link"], None, res.get("metadata"),
             perceptual_hash=res.get("phash"), verification_status="human_approved", approved_by=approved_by,
@@ -705,6 +707,25 @@ def _human_decision(barcode, product_name, brand, original_url, approved_by, sku
         )
         local_cache_db.update_task_status_by_row(row_number, "completed", sku_key=sku_key, rows=rows)
     return record
+
+
+# لوحة لم تجتز فحص القص (main.publish_image: quality_refused): لا يُرفع ولا يُكتب شيء، ويبقى المنتج بانتظار المراجعة
+QUALITY_ERRORS = {
+    "quality_flags": "فحص القص وجد ملاحظات على الصورة؛ لم تُنشر. راجعها ثم انشرها رغم ذلك أو اختر صورة أخرى",
+    "background_failed": "لم تُعزل خلفية الصورة؛ لم تُنشر. اختر صورة أخرى أو ارفع صورة أوضح",
+}
+
+
+def _quality_refusal(res, sku_key, row_number, product_name):
+    """
+    استجابة اعتماد / رفع لم يُنشر لأن القص لم يجتز الفحص: error_code quality_flags (علامات عرض فقط؛ يعيد المراجع الطلب
+    مع publish_anyway=true بعد تأكيده) أو background_failed (لا نشر بهذه الصورة). quality_flags و quality_notes كما هي.
+    """
+    code = res.get("error") if res.get("error") in QUALITY_ERRORS else "background_failed"
+    return {'status': 'failed', 'error_code': code, 'error': QUALITY_ERRORS[code],
+            'quality_flags': list(res.get("quality_flags") or []), 'quality_notes': list(res.get("quality_notes") or []),
+            'publish_anyway_allowed': bool(res.get("publish_anyway_allowed")), 'isolated': False,
+            'current': _current_state(sku_key, row_number, product_name)[0]}
 
 
 def _not_written(res, out):
@@ -861,8 +882,9 @@ def _sheet_outcome(rows, since_id=None, value=None):
 
 def _published_response(res, sku_key, row_number, **extra):
     """
-    استجابة الاعتماد / الرفع الناجح. warnings: background_not_removed (كُتب needs_review:)، و duplicate_image
-    (نفس الصورة منشورة لمنتج آخر، duplicate_of يسمّيه؛ الاعتماد الصريح يُكتب مع ذلك). warning: أول تحذير.
+    استجابة الاعتماد / الرفع الناجح. warnings: background_not_removed (كُتب needs_review:)، quality_flags (نُشرت
+    رغم علامات العرض بعد تأكيد المراجع، published_anyway)، و duplicate_image (نفس الصورة منشورة لمنتج آخر،
+    duplicate_of يسمّيه؛ الاعتماد الصريح يُكتب مع ذلك). warning: أول تحذير. quality_flags / quality_notes: فحص القص.
     """
     response = dict({'status': 'success', 'image_link': res["link"], 'sheet_value': res["sheet_value"],
                      'isolated': res["isolated"], 'sku_key': sku_key,
@@ -872,9 +894,14 @@ def _published_response(res, sku_key, row_number, **extra):
         response['rows_failed'] = res["rows_failed"]
     if res.get("quality_flags"):
         response['quality_flags'] = list(res["quality_flags"])     # فحص جودة القص (لماذا لم تُعزل الخلفية)
+    if res.get("quality_notes"):
+        response['quality_notes'] = list(res["quality_notes"])     # ملاحظات الفحص غير المانعة
     warnings = []
-    if not res["isolated"]:
+    if str(res.get("sheet_value") or "").startswith("needs_review:"):
         warnings.append('background_not_removed')
+    if res.get("published_anyway"):
+        response['published_anyway'] = True
+        warnings.append('quality_flags')
     if res.get("duplicate_of"):
         warnings.append('duplicate_image')
         response['duplicate_of'] = res["duplicate_of"]
@@ -920,7 +947,10 @@ def action_select_image(params):
             also_rows=_other_rows(sku_key, row_number, tasks),
             before_write=_reviewer_check(params, sku_key, row_number, product_name, image_url, guard, rows),
             after_write=_human_decision(barcode, product_name, brand, image_url, "human", sku_key, row_number, rows),
+            unclean="refuse", publish_anyway=_as_bool(params.get('publish_anyway', False)),
         )
+        if res["status"] == "quality_refused":
+            return _quality_refusal(res, sku_key, row_number, product_name)
         if res["status"] == "superseded":
             return _not_written(res, guard)
         if res["status"] == "failed":
@@ -984,11 +1014,14 @@ def action_upload_manual_image(params):
             before_write=_reviewer_check(params, sku_key, row_number, product_name, None, guard, rows),
             after_write=_human_decision(barcode, product_name, brand, "manual_upload", "human_upload", sku_key,
                                         row_number, rows),
+            unclean="refuse", publish_anyway=_as_bool(params.get('publish_anyway', False)),
         )
         try:
             os.remove(file_path)
         except OSError:
             pass
+        if res["status"] == "quality_refused":
+            return _quality_refusal(res, sku_key, row_number, product_name)
         if res["status"] == "superseded":
             return _not_written(res, guard)
         if res["status"] == "failed":

@@ -364,7 +364,7 @@ def _folder_and_tags(metadata):
 def publish_image(image_url, name, brand, row_number, worksheet, link_column_index, *, barcode="",
                   candidate_sha256=None, category_override=None, force_review=False, key_size=None,
                   key_brand=None, profile=None, sku_key=None, before_write=None, duplicates="warn",
-                  also_rows=None, after_write=None):
+                  also_rows=None, after_write=None, unclean="review", publish_anyway=False):
     """
     معالجة الصورة المعتمدة إلى لوحة النشر النهائية ورفعها وكتابة رابطها في الشيت.
     key_size/key_brand: خلايا الحجم والبراند في الشيت لهذا المنتج، تُضاف إلى هوية الصف المتحقق منها
@@ -384,9 +384,14 @@ def publish_image(image_url, name, brand, row_number, worksheet, link_column_ind
     (الوضع التسلسلي القديم) يكتب الرابط ببادئة needs_review: فقط؛ 'warn' (اعتماد المراجع الصريح) يكتب كالمعتاد.
     المالكون في duplicate_of، وتعذر التحقق يُعامل كتكرار في 'block' و 'review'.
     phash و color_signature: بصمتا اللوحة النهائية (pHash وبصمة الألوان، تُخزنان مع الحل المعتمد).
+    quality_flags: علامات بوابة القص (image_processor) و quality_notes: ملاحظاتها غير المانعة، تعودان دائماً.
+    لوحة لم تُعزل خلفيتها (isolated=False): unclean='review' (العامل) تُكتب ببادئة needs_review:؛ unclean='refuse'
+    (اعتماد المراجع ورفعه) لا يُرفع ولا يُكتب شيء والحالة 'quality_refused' (publish_anyway_allowed: علاماتها كلها
+    للعرض فقط، PRESENTATION_FLAGS)، فلا يُسجل اعتماد بشري ورابط الشيت needs_review:. publish_anyway=True (تأكيد
+    المراجع بعد رؤية العلامات) يكتب اللوحة نظيفة عندما تسمح علاماتها بذلك؛ عزل فشل (بلا علامات أو بعلامة مانعة) أبداً.
     لا تكبير لاحق: اللوحة من image_processor نهائية. البيانات الوصفية تُكتب في الشيت فقط بعد نجاح الرفع.
-    الحالة: 'published' (معزولة وليست للمراجعة) | 'needs_review' (رابط ببادئة needs_review:) | 'superseded'
-    (لم يُكتب شيء) | 'failed'.
+    الحالة: 'published' (معزولة وليست للمراجعة، أو نُشرت رغم علامات العرض) | 'needs_review' (رابط ببادئة
+    needs_review:) | 'quality_refused' | 'superseded' (لم يُكتب شيء) | 'failed'.
     """
     profile = profile or processing_profile.current()
     w, h = profile.target
@@ -397,6 +402,19 @@ def publish_image(image_url, name, brand, row_number, worksheet, link_column_ind
     if not result.path:
         return {"status": "failed", "error": result.error or "processing_failed", "isolated": False,
                 "provider": result.provider, "profile": profile.as_dict()}
+
+    flags = [str(f) for f in (getattr(result, "quality_flags", None) or [])]
+    # ملاحظات البوابة غير المانعة (إن أضافتها حزمة الصورة) تُعاد كما هي
+    notes = [str(n) for n in (getattr(result, "quality_notes", None) or getattr(result, "notes", None) or [])]
+    unisolated = not result.isolated
+    anyway_allowed = unisolated and bool(flags) and set(flags) <= PRESENTATION_FLAGS
+    anyway = bool(publish_anyway) and anyway_allowed
+    if unisolated and not anyway and unclean == "refuse":
+        image_processor.cleanup_processed_image(result.path)
+        print(f"[Publish] لوحة الصف {row_number} لم تجتز فحص القص ({', '.join(flags) or 'no isolation'})؛ لم يُنشر شيء.")
+        return {"status": "quality_refused", "error": "quality_flags" if anyway_allowed else "background_failed",
+                "isolated": False, "provider": result.provider, "profile": profile.as_dict(),
+                "quality_flags": flags, "quality_notes": notes, "publish_anyway_allowed": anyway_allowed}
 
     metadata = {}
     try:
@@ -424,8 +442,7 @@ def publish_image(image_url, name, brand, row_number, worksheet, link_column_ind
 
     base = {"isolated": bool(result.isolated), "provider": result.provider, "metadata": metadata,
             "width": result.width, "height": result.height, "profile": profile.as_dict(), "phash": phash,
-            "color_signature": color,
-            "quality_flags": getattr(result, "quality_flags", None)}
+            "color_signature": color, "quality_flags": flags, "quality_notes": notes, "published_anyway": anyway}
     if not link:
         return dict(base, status="failed", error="upload_failed")
 
@@ -439,7 +456,7 @@ def publish_image(image_url, name, brand, row_number, worksheet, link_column_ind
         print(f"[Publish] صورة الصف {row_number} منشورة لمنتج آخر (أو تعذر التحقق)؛ لا نشر تلقائي، تُحال للمراجعة.")
         return dict(base, status="needs_review", error="duplicate_image", link=link)
 
-    review = force_review or not result.isolated or (duplicates == "review" and duplicate)
+    review = force_review or (unisolated and not anyway) or (duplicates == "review" and duplicate)
     sheet_value = f"needs_review:{link}" if review else link
     identity = {"barcode": barcode, "product_name": name, "size": key_size, "brand": key_brand}
     with local_cache_db.sku_publish_lock(sku_key) as lock_state:
@@ -473,6 +490,11 @@ def publish_image(image_url, name, brand, row_number, worksheet, link_column_ind
         if after_write is not None:
             after_write(outcome)
     return outcome
+
+
+# علامات بوابة القص التي تخص العرض فقط (الخلفية معزولة): المراجع يستطيع نشر اللوحة رغمها بعد أن يراها
+# (publish_anyway). edge_clipped و opaque_backdrop وأي علامة أخرى، وعزل فشل بلا علامات، لا يُنشر نظيفاً أبداً.
+PRESENTATION_FLAGS = frozenset({"upscaled", "too_small_on_canvas", "second_object", "opaque_fill", "alpha_haze"})
 
 
 def _write_metadata(worksheet, row_number, metadata, identity):

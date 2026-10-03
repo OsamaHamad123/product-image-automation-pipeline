@@ -653,6 +653,22 @@
         return QUALITY_FLAG_LABELS[String(code || '')] || 'ملاحظة أخرى من فحص القص';
     }
 
+    // اعتماد / رفع لم يُنشر لأن القص لم يجتز الفحص (error_code quality_flags أو background_failed): العلامات بالعربي، و
+    // allowed=true عندما تخص العرض فقط فيستطيع المراجع نشرها رغمها بعد تأكيد صريح (publish_anyway)؛ null لغيره
+    function qualityInfo(data) {
+        data = data || {};
+        const code = String(data.error_code || '');
+        if (code !== 'quality_flags' && code !== 'background_failed') return null;
+        const flags = Array.isArray(data.quality_flags) ? data.quality_flags.map(f => String(f)) : [];
+        const texts = Array.from(new Set(flags.map(qualityFlagText)));
+        const allowed = code === 'quality_flags' && data.publish_anyway_allowed === true;
+        const what = texts.length ? texts.join('، ') : 'لم تُعزل الخلفية';
+        const text = allowed
+            ? `فحص القص وجد في الصورة: ${what}. لم تُنشر بعد.`
+            : `لم تُعزل خلفية الصورة (${what}). لم تُنشر؛ اختر صورة أخرى أو ارفع صورة أوضح.`;
+        return { code: code, flags: flags, texts: texts, allowed: allowed, text: text };
+    }
+
     // ما يُقال للمراجع بعد اعتماد ناجح: الخلفية (background_not_removed)، الصورة نفسها لمنتج آخر (duplicate_image و
     // duplicate_of)، وعلامات فحص القص
     function approvalNotes(data) {
@@ -663,12 +679,15 @@
         const names = owners.map(o => (o && typeof o === 'object')
             ? String(o.product_name || o.sku_key || o.cloudinary_url || '').trim() : String(o || '').trim()).filter(Boolean);
         const flags = Array.isArray(data.quality_flags) ? data.quality_flags.map(f => String(f)) : [];
+        const notes = Array.isArray(data.quality_notes) ? data.quality_notes.map(f => String(f)) : [];
         return {
             bgFailed: list.includes('background_not_removed') || link.startsWith('needs_review:'),
+            // نُشرت نظيفة رغم علامات العرض بعد تأكيد المراجع (publish_anyway)
+            publishedAnyway: data.published_anyway === true || list.includes('quality_flags'),
             duplicate: list.includes('duplicate_image') || owners.length > 0,
             duplicateOf: names,
             flags: flags,
-            flagTexts: Array.from(new Set(flags.map(qualityFlagText)))
+            flagTexts: Array.from(new Set(flags.concat(notes).map(qualityFlagText)))
         };
     }
 
@@ -964,7 +983,7 @@
         productIdentity, sameProduct, itemKey, failureKey, reviewedCandidateView,
         searchBody, selectBody, rejectBody, uploadFields,
         matchQueue, classify, hasFinalImage, bgFailedLink, shownApprovedUrl, expectedState, staleInfo, queueText,
-        sheetNote, expectedFromCurrent, qualityFlagText, approvalNotes, rejectionOutcome,
+        sheetNote, expectedFromCurrent, qualityFlagText, qualityInfo, approvalNotes, rejectionOutcome,
         confidenceRank, compareWaiting, sortWaiting, buildItems, countBuckets, matchesQuery, filterItems,
         sizeText, categoryPath, factsFor, checksFor, cautionsFor
     });

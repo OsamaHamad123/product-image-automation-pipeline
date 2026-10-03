@@ -549,7 +549,13 @@
                 ]),
                 // تغيّر المنتج بعد فتح الصفحة (C1): الإعادة كما هي تُرفض مرة أخرى؛ الاستبدال بتأكيد صريح فقط. صورة رفضها
                 // مراجع آخر لا تُستبدل ولا تُعاد (الخادم يرفضها دائماً): لا زر
-                j.stale
+                // فحص القص (quality): علامات العرض تُنشر رغمها بتأكيد صريح فقط؛ عزل فشل لا يُنشر ولا يُعاد
+                j.quality
+                    ? (j.quality.allowed
+                        ? el('button', { type: 'button', className: 'lq-btn lq-btn--danger lq-btn--sm rv-jobs__anyway', text: 'انشرها رغم ذلك…',
+                                         disabled: S.jobs.has(j.key), onclick: () => R.single.confirmPublishAnyway(j) })
+                        : null)
+                    : j.stale
                     ? (j.stale.replaceable === false ? null
                         : el('button', { type: 'button', className: 'lq-btn lq-btn--danger lq-btn--sm rv-jobs__replace', text: 'استبدال المعتمدة…',
                                          disabled: S.jobs.has(j.key), onclick: () => R.single.confirmReplace(j) }))

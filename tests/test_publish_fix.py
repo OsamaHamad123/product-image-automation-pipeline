@@ -743,3 +743,103 @@ def test_an_image_published_before_colour_signatures_still_blocks_a_matching_pha
     assert publish(1, "Juice Blueberry 1L", blueberry, CLOUD + "blueberry.png") == "needs_review"
     # the same Cloudinary link is always the same image
     assert publish(2, "Juice Mango 1L", blueberry, CLOUD + "strawberry.png") == "needs_review"
+
+
+# ---------------------------------------------------------------------------
+# C: a human approval of a cut-out with gate flags: the flags are said, presentation-only flags can be published
+# after an explicit confirmation, and the database never says approved while the sheet says needs_review:
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def gate(monkeypatch, tmp_path):
+    """The image processing stand-in returns a canvas with state['isolated'] / state['flags'] (a perfectly cut-out
+    400 px bottle comes back upscaled, not isolated)."""
+    import image_processor
+    from PIL import Image
+
+    state = {"isolated": False, "flags": ["upscaled"], "notes": None, "uploads": 0}
+
+    def processing(*a, **k):
+        out = tmp_path / f"canvas_{os.urandom(3).hex()}.png"
+        Image.new("RGB", (800, 800), "white").save(out)
+        result = image_processor.ProcessResult(str(out), state["isolated"], "photoroom", None, 800, 800,
+                                               quality_flags=list(state["flags"]))
+        if state["notes"] is not None:
+            result.quality_notes = list(state["notes"])     # the image package's non-blocking notes, when present
+        return result
+
+    monkeypatch.setattr(image_processor, "process_product_image_result", processing)
+    return state
+
+
+def test_publish_image_for_a_human_names_the_flags_and_publishes_clean_only_when_confirmed(db, monkeypatch, gate):
+    import cloudinary_storage
+    import google_sheets
+    import image_processor
+    import main
+
+    sheet = []
+    monkeypatch.setattr(image_processor, "extract_metadata_from_image", lambda *a, **k: {})
+    monkeypatch.setattr(cloudinary_storage, "upload_product_image_to_cloudinary",
+                        lambda *a, **k: gate.update(uploads=gate["uploads"] + 1) or CLOUD + "bottle.png")
+    monkeypatch.setattr(google_sheets, "update_image_link", lambda *a, **k: sheet.append(a[3]) or True)
+
+    def publish(**kw):
+        return main.publish_image("https://x/bottle.jpg", MILK["product_name"], MILK["brand"], ROWS[0], object(), 3,
+                                  sku_key=KEYS[0], unclean="refuse", **kw)
+
+    res = publish()
+    assert (res["status"], res["error"], res["quality_flags"]) == ("quality_refused", "quality_flags", ["upscaled"])
+    assert res["publish_anyway_allowed"] is True and sheet == [] and gate["uploads"] == 0
+    res = publish(publish_anyway=True)
+    assert (res["status"], res["sheet_value"], res["quality_flags"]) == ("published", CLOUD + "bottle.png", ["upscaled"])
+    assert res["published_anyway"] is True and sheet == [CLOUD + "bottle.png"]
+    # a clipped product is never published clean, confirmed or not
+    gate["flags"] = ["upscaled", "edge_clipped"]
+    res = publish(publish_anyway=True)
+    assert (res["status"], res["publish_anyway_allowed"]) == ("quality_refused", False)
+    # the worker path is unchanged: written needs_review:, flags returned
+    gate["flags"], gate["notes"] = ["alpha_haze"], ["soft_shadow"]
+    res = main.publish_image("https://x/bottle.jpg", MILK["product_name"], MILK["brand"], ROWS[0], object(), 3,
+                             sku_key=KEYS[0])
+    assert res["status"] == "needs_review" and res["sheet_value"].startswith("needs_review:")
+    assert res["quality_flags"] == ["alpha_haze"] and res["quality_notes"] == ["soft_shadow"]
+
+
+def test_an_approval_with_presentation_flags_waits_for_the_reviewers_confirmation(db, bridge, gate):
+    cli_bridge, env = bridge
+    row = ROWS[0]
+    sku = _queue(db, row, MILK, GTIN)
+    params = _approve_params(row, MILK, "https://x/bottle.jpg", sku, GTIN)
+
+    result = cli_bridge.action_select_image(dict(params))
+    assert (result["status"], result["error_code"]) == ("failed", "quality_flags")
+    assert result["quality_flags"] == ["upscaled"] and result["publish_anyway_allowed"] is True
+    # nothing written and nothing recorded: the product is still waiting for review
+    assert env["sheet"] == [] and db.get_cached_product(sku_key=sku) is None
+    assert _status(db, row) == "ready_for_review" and result["current"]["queue_status"] == "ready_for_review"
+
+    result = cli_bridge.action_select_image(dict(params, publish_anyway=True))
+    assert result["status"] == "success" and result["published_anyway"] is True
+    assert result["quality_flags"] == ["upscaled"] and result["warnings"] == ["quality_flags"]
+    assert result["sheet_value"] == env["link"] and [v for _, v, _ in env["sheet"]] == [env["link"]]
+    approval = db.get_cached_product(sku_key=sku)
+    assert (approval["verification_status"], approval["cloudinary_url"]) == ("human_approved", env["link"])
+    assert _status(db, row) == "completed"
+
+
+def test_an_upload_whose_background_removal_failed_is_never_recorded_as_approved(db, bridge, gate, tmp_path):
+    from PIL import Image
+    cli_bridge, env = bridge
+    row = ROWS[0]
+    sku = _queue(db, row, MILK, GTIN)
+    gate["flags"] = []                                    # no isolation at all
+    upload = tmp_path / "manual.png"
+    Image.new("RGB", (400, 400), "white").save(upload)
+    params = {"file_path": str(upload), "row_number": row, "product_name": MILK["product_name"],
+              "brand": MILK["brand"], "barcode": GTIN, "sku_key": sku, "publish_anyway": "1"}
+    result = cli_bridge.action_upload_manual_image(params)
+    assert (result["status"], result["error_code"], result["publish_anyway_allowed"]) == (
+        "failed", "background_failed", False)
+    assert env["sheet"] == [] and db.get_cached_product(sku_key=sku) is None
+    assert _status(db, row) == "ready_for_review"

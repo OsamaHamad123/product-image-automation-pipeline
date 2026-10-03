@@ -50,13 +50,17 @@ class ApiController extends Controller
     /**
      * اعتماد صورة معينة وتحديث الشيت.
      * expected_state (ما رأته الصفحة: حالة صف الطابور ووقت تحديثه والصورة المعتمدة) و replace (تأكيد المراجع الصريح
-     * باستبدال ما تغيّر) يمران إلى الجسر ضمن الطلب؛ replace قيمة منطقية فقط.
+     * باستبدال ما تغيّر) و publish_anyway (تأكيده نشر صورة فيها علامات عرض من فحص القص) تمر إلى الجسر ضمن الطلب؛
+     * replace و publish_anyway قيمتان منطقيتان فقط.
      */
     public function selectImage(Request $request)
     {
         $params = $request->all();
         if ($request->has('replace')) {
             $params['replace'] = $request->boolean('replace');
+        }
+        if ($request->has('publish_anyway')) {
+            $params['publish_anyway'] = $request->boolean('publish_anyway');
         }
         $result = $this->runPython('select_image', $params);
 
@@ -121,6 +125,10 @@ class ApiController extends Controller
         }
         if ($request->has('replace')) {
             $params['replace'] = $request->boolean('replace');
+        }
+        // تأكيد المراجع نشر صورة فيها علامات عرض من فحص القص (قيمة منطقية)
+        if ($request->has('publish_anyway')) {
+            $params['publish_anyway'] = $request->boolean('publish_anyway');
         }
         $params['file_path'] = $targetPath;
 

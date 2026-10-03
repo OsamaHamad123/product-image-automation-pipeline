@@ -299,7 +299,7 @@
         const expected = approved && approved.current ? R.expectedFromCurrent(approved.current)
             : R.expectedState(item, approved && approved.link);
         const base = { key: item.key, label: label, row: ctx.row_number, ctx: ctx, candidate: candidate,
-                       expected: expected, replace: false };
+                       expected: expected, replace: false, publishAnyway: false };
         if (candidate.source === 'upload') return Object.assign(base, { type: 'upload' });
         return Object.assign(base, { type: 'approve', body: R.selectBody(ctx, candidate) });
     }
@@ -340,11 +340,13 @@
             // C1: حقول النموذج نصوص، فما رأته الصفحة يُرسل JSON (ApiController يفكه)
             form.append('expected_state', JSON.stringify(job.expected || null));
             if (job.replace) form.append('replace', '1');
+            if (job.publishAnyway) form.append('publish_anyway', '1');
             return R.requestJson(S.urls.upload, { method: 'POST', body: form });
         }
         if (job.type === 'reject') return R.requestJson(S.urls.reject, { method: 'POST', body: job.body });
         const guard = { expected_state: job.expected || null };
         if (job.replace) guard.replace = true;
+        if (job.publishAnyway) guard.publish_anyway = true;
         return R.requestJson(S.urls.select, { method: 'POST', body: Object.assign({}, job.body, guard) });
     }
 
@@ -364,6 +366,16 @@
             approved_url: cur.approved_url === undefined ? (job.expected || {}).approved_url || null : (cur.approved_url || null)
         };
         return S.jobs.retry(job.id, { replace: true, expected: expected, stale: null });
+    }
+
+    // نشر صورة فيها علامات عرض من فحص القص (publish_anyway): تأكيد صريح يسمّي العلامات بالعربي، ثم الطلب نفسه
+    function confirmPublishAnyway(job) {
+        const S = st();
+        if (!job || !job.quality || !job.quality.allowed) return false;
+        const what = job.quality.texts.length ? job.quality.texts.join('، ') : 'ملاحظات من فحص القص';
+        const msg = `فحص القص وجد في صورة «${job.label}»: ${what}. الخلفية معزولة، وهذه ملاحظات على شكل الصورة فقط. هل تريد نشرها كما هي؟`;
+        if (!root.confirm(msg)) return false;
+        return S.jobs.retry(job.id, { publishAnyway: true, quality: null });
     }
 
     function settleJob(job) {
@@ -388,7 +400,10 @@
                                           url: job.candidate.url, sheet: sheet.state, notes: notes,
                                           current: data.current && typeof data.current === 'object' ? data.current : null });
                 const flagsPart = notes.flagTexts.length ? ` فحص القص: ${notes.flagTexts.join('، ')}.` : '';
-                if (notes.bgFailed) {
+                if (notes.publishedAnyway) {
+                    R.toast(`نُشرت صورة «${job.label}» رغم ملاحظات فحص القص: ${notes.flagTexts.join('، ') || 'ملاحظات العرض'}.`
+                            + (sheet.state && sheet.state !== 'written' ? ` ${sheet.text}` : ''), 'warning', 9000);
+                } else if (notes.bgFailed) {
                     const sheetPart = sheet.state === 'written' ? 'وكُتب رابطها في الشيت بعلامة «بحاجة مراجعة».' : sheet.text;
                     R.toast(`اعتُمدت صورة «${job.label}» ولم تُعزل خلفيتها${sheetPart ? '، ' + sheetPart : '.'}${flagsPart} تجدها في رقاقة «الخلفية لم تُعزل».`,
                             'warning', 9000);
@@ -402,7 +417,10 @@
             }
         } else {
             if (['approving', 'rejecting'].includes(S.local.get(job.key))) S.local.delete(job.key);
-            if (job.stale && job.stale.replaceable === false) {
+            if (job.quality) {
+                R.toast(`لم تُنشر صورة «${job.label}»: ${job.quality.text}`
+                        + (job.quality.allowed ? ' تستطيع نشرها رغم ذلك من لوحة الاعتمادات بعد مراجعتها.' : ''), 'danger', 12000);
+            } else if (job.stale && job.stale.replaceable === false) {
                 R.toast(`لم تُعتمد صورة «${job.label}»: ${job.stale.text}`, 'danger', 12000);
             } else if (job.stale) {
                 R.toast(`لم تُعتمد صورة «${job.label}»: ${job.stale.text} تستطيع استبدالها من لوحة الاعتمادات بعد التأكد.`, 'danger', 12000);
@@ -1209,7 +1227,7 @@
     R.single = {
         sessionOf, currentItem, currentCandidates, currentPick, systemPickUrl, boundContext, openItem, startSearch,
         cancelPendingSearch, applySearchResponse, canApprove, canReject, selectByNumber, approveCurrent, sendJob,
-        settleJob, confirmReplace, openReasons, closeReasons, currentReasons, rejectCurrent, skip, move, toggleNotFound,
+        settleJob, confirmReplace, confirmPublishAnyway, openReasons, closeReasons, currentReasons, rejectCurrent, skip, move, toggleNotFound,
         previewUrl, chooseFile, retryFailures, renderWorkspace, updateBar, updateJobsOffset, isOpen, updatePosition
     };
 })(typeof window !== 'undefined' ? window : globalThis);
