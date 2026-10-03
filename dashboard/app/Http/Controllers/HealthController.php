@@ -49,7 +49,83 @@ class HealthController extends Controller
             'optional' => self::optionalServices($last),
             'checkedAt' => self::checkedAt($last),
             'allOk' => is_array($last) ? ($last['all_ok'] ?? null) : null,
+            'lastRun' => self::lastRunCard(self::lastRunRow()),
         ]);
+    }
+
+    // ------------------------------------------------------------------
+    // Last run (package P4b): run_history written by run_report.py after every run
+    // ------------------------------------------------------------------
+
+    /** النتيجة -> [النص، اللون] (run_report.OUTCOME_TEXT بلا رموز). */
+    public const RUN_OUTCOMES = [
+        'done' => ['خلص', 'success'],
+        'skipped' => ['ما بلّش لأنو في تشغيل تاني شغّال', 'muted'],
+        'stopped' => ['وقف قبل ما يخلص الطابور', 'warning'],
+        'outage' => ['انقطاع', 'danger'],
+        'failed' => ['فشل', 'danger'],
+    ];
+    public const RUN_TRIGGERS = ['nightly' => 'التشغيل الليلي', 'dashboard' => 'تشغيل من اللوحة', 'manual' => 'تشغيل يدوي'];
+
+    /** آخر صف في run_history، أو temp/nightly/last_report.json إذا تعذرت قراءة قاعدة البيانات. null إن لم يوجد. */
+    private static function lastRunRow(): ?array
+    {
+        try {
+            $rows = \DB::select('SELECT run_trigger, started_at, outcome, stop_reason, attempts, ready_for_review, not_found, '
+                . 'failed, pending_left, auto_published, report_json FROM run_history ORDER BY id DESC LIMIT 1');
+            if ($rows) {
+                return (array) $rows[0];
+            }
+            return null;
+        } catch (\Throwable $e) {
+            // run_history not created yet, or the database is down: the report file still says what happened
+        }
+        $file = base_path('../temp/nightly/last_report.json');
+        $report = is_file($file) ? json_decode((string) @file_get_contents($file), true) : null;
+        if (!is_array($report)) {
+            return null;
+        }
+        $counts = is_array($report['counts'] ?? null) ? $report['counts'] : [];
+        return ['run_trigger' => $report['trigger'] ?? null, 'started_at' => $report['started_at'] ?? null,
+                'outcome' => $report['outcome'] ?? null, 'stop_reason' => $report['stop_reason'] ?? null,
+                'attempts' => $report['attempts'] ?? 1, 'report_json' => $report] + $counts;
+    }
+
+    /**
+     * بطاقة «آخر تشغيل»: {title, tone, when, summary} من صف run_history (أو التقرير)، أو null.
+     * الأرقام كما حُفظت عند نهاية التشغيل؛ السبب من reason_text الذي كتبه run_report.py.
+     */
+    public static function lastRunCard(?array $row): ?array
+    {
+        if (!$row) {
+            return null;
+        }
+        $report = $row['report_json'] ?? null;
+        $report = is_string($report) ? json_decode($report, true) : $report;
+        $report = is_array($report) ? $report : [];
+        [$label, $tone] = self::RUN_OUTCOMES[(string) ($row['outcome'] ?? '')] ?? ['انتهى', 'muted'];
+        $trigger = self::RUN_TRIGGERS[(string) ($row['run_trigger'] ?? '')] ?? 'تشغيل';
+        $reason = trim((string) ($report['reason_text'] ?? ($row['stop_reason'] ?? '')));
+        $title = $trigger . ': ' . $label . ($reason !== '' && ($row['outcome'] ?? '') !== 'skipped' ? ' (' . $reason . ')' : '');
+        $started = strtotime((string) ($row['started_at'] ?? ''));
+        $parts = [];
+        foreach (['ready_for_review' => 'بانتظار المراجعة', 'auto_published' => 'انتشر تلقائياً',
+                  'not_found' => 'ما انلقت', 'failed' => 'فشل', 'pending_left' => 'بقي بالانتظار'] as $key => $text) {
+            if (is_numeric($row[$key] ?? null) && ((int) $row[$key] > 0 || $key === 'ready_for_review')) {
+                $parts[] = $text . ' ' . (int) $row[$key];
+            }
+        }
+        $retries = (int) ($row['attempts'] ?? 1) - 1;
+        if ($retries > 0) {
+            $parts[] = 'انعاد التشغيل ' . ($retries === 1 ? 'مرة' : ($retries === 2 ? 'مرتين' : $retries . ' مرات'))
+                . ' بعد انقطاع';
+        }
+        return [
+            'title' => $title,
+            'tone' => $tone,
+            'when' => $started ? date('Y-m-d H:i', $started) : '',
+            'summary' => $parts ? implode(' · ', $parts) : (($row['outcome'] ?? '') === 'skipped' ? '' : 'الأرقام مش متاحة.'),
+        ];
     }
 
     public function summary(Request $request)
