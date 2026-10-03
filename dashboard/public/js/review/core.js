@@ -686,17 +686,28 @@
         return bulkEligible(sel) ? 0 : 1;
     }
 
-    function compareBrands(a, b) {
-        const ka = norm(a.brand || a.brand_ar);
-        const kb = norm(b.brand || b.brand_ar);
-        if (ka === kb) return 0;
-        if (!ka || !kb) return ka ? -1 : 1;              // بلا ماركة آخراً
-        return ka < kb ? -1 : 1;
+    // مفتاح الترتيب يُحسب مرة لكل منتج (لا لكل مقارنة): الدرجة، ثم الماركة، ثم رقم الصف
+    function waitingKey(prod) {
+        return { rank: confidenceRank(prod), brand: norm(prod.brand || prod.brand_ar), row: parseInt(prod.row_number, 10) || 0 };
+    }
+
+    function compareWaitingKeys(a, b) {
+        if (a.rank !== b.rank) return a.rank - b.rank;
+        if (a.brand !== b.brand) {
+            if (!a.brand || !b.brand) return a.brand ? -1 : 1;     // بلا ماركة آخراً
+            return a.brand < b.brand ? -1 : 1;
+        }
+        return a.row - b.row;
     }
 
     function compareWaiting(a, b) {
-        return (confidenceRank(a) - confidenceRank(b)) || compareBrands(a, b)
-            || ((parseInt(a.row_number, 10) || 0) - (parseInt(b.row_number, 10) || 0));
+        return compareWaitingKeys(waitingKey(a), waitingKey(b));
+    }
+
+    // منتجات بترتيب الثقة ثم الماركة (list: عناصر فيها product)
+    function sortWaiting(list) {
+        const keys = new Map(list.map(it => [it, waitingKey(it.product)]));
+        return list.sort((a, b) => compareWaitingKeys(keys.get(a), keys.get(b)));
     }
 
     // عناصر القائمة من منتجات الشيت وحالة الطابور. local: حالة هذه الجلسة لكل مفتاح (approving / approved / rejected)
@@ -718,8 +729,9 @@
             const flag = local && typeof local.get === 'function' ? local.get(it.key) : null;
             it.bucket = flag && BUCKET_LABELS[flag] ? flag : it.base;
         });
+        const keys = new Map(items.filter(it => WAITING.includes(it.bucket)).map(it => [it, waitingKey(it.product)]));
         items.sort((a, b) => (BUCKET_RANK[a.bucket] - BUCKET_RANK[b.bucket])
-            || (WAITING.includes(a.bucket) && WAITING.includes(b.bucket) ? compareWaiting(a.product, b.product) : 0)
+            || (keys.has(a) && keys.has(b) ? compareWaitingKeys(keys.get(a), keys.get(b)) : 0)
             || ((parseInt(a.product.row_number, 10) || 0) - (parseInt(b.product.row_number, 10) || 0)));
         return items;
     }
@@ -886,7 +898,7 @@
         productIdentity, sameProduct, itemKey, failureKey, reviewedCandidateView,
         searchBody, selectBody, rejectBody, uploadFields,
         matchQueue, classify, hasFinalImage, bgFailedLink, shownApprovedUrl, expectedState, staleInfo, queueText,
-        sheetNote, confidenceRank, compareWaiting, buildItems, countBuckets, matchesQuery, filterItems,
+        sheetNote, confidenceRank, compareWaiting, sortWaiting, buildItems, countBuckets, matchesQuery, filterItems,
         sizeText, categoryPath, factsFor, checksFor, cautionsFor
     });
 

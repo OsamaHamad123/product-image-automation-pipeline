@@ -34,8 +34,7 @@
 
     // المنتجات التي تنتظر المراجعة (ومعها ما اعتُمد أو رُفض منها في هذه الجلسة، بحالته)، بترتيب الثقة ثم الماركة
     function source() {
-        return st().items.filter(it => R.WAITING.includes(it.base))
-            .sort((a, b) => R.compareWaiting(a.product, b.product));
+        return R.sortWaiting(st().items.filter(it => R.WAITING.includes(it.base)));
     }
 
     function brandOf(it) {
