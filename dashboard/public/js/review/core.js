@@ -42,7 +42,8 @@
         medium: 'الزيت أو الماء',
         flavour: 'النكهة',
         tuna_meat: 'نوع لحم التونة',
-        tuna_cut: 'تقطيع التونة'
+        tuna_cut: 'تقطيع التونة',
+        protein: 'نوع اللحم'
     };
 
     function warningText(code) {
