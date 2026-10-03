@@ -322,6 +322,35 @@ def main_module():
     return main
 
 
+def test_a_product_on_two_rows_gets_the_approval_on_both(select_env, monkeypatch, tmp_path):
+    """The same product twice in the sheet: the approval (and the upload) is written to every row of its key, each
+    write carrying that row's own identity, so the second row is not left empty while the queue says completed."""
+    import local_cache_db
+    bridge, events, state = select_env
+    sku = SELECT_PARAMS["sku_key"]
+    rows = [{"row_number": 4, "sku_key": sku, "barcode": "6281007000024", "product_name": "Fresh Milk Full Fat 1L",
+             "brand": "Almarai", "payload_json": '{"size": "1L"}'},
+            {"row_number": 9, "sku_key": sku, "barcode": "6281007000024", "product_name": "FRESH MILK FULL FAT 1 L",
+             "brand": "ALMARAI", "payload_json": '{"size": "1 L"}'}]
+    asked = []
+    monkeypatch.setattr(local_cache_db, "get_tasks_by_sku", lambda key: asked.append(key) or [dict(r) for r in rows])
+    result = bridge.action_select_image(dict(SELECT_PARAMS, size="1L"))
+    assert result["status"] == "success" and result["rows_written"] == [4, 9] and asked == [sku]
+    links = [(e[1], e[4]) for e in events if e[0] == "link"]
+    assert links == [(4, {"barcode": "6281007000024", "product_name": "Fresh Milk Full Fat 1L", "size": "1L",
+                          "brand": "Almarai"}),
+                     (9, {"barcode": "6281007000024", "product_name": "FRESH MILK FULL FAT 1 L", "size": "1 L",
+                          "brand": "ALMARAI"})]
+    assert [e[1] for e in events if e[0] == "metadata_write"] == [4, 9]
+
+    events.clear()
+    upload = tmp_path / "manual.png"
+    _canvas(upload, (300, 300))
+    params = {k: SELECT_PARAMS[k] for k in ("row_number", "product_name", "brand", "barcode", "sku_key")}
+    result = bridge.action_upload_manual_image(dict(params, file_path=str(upload)))
+    assert result["rows_written"] == [4, 9] and [e[1] for e in events if e[0] == "link"] == [4, 9]
+
+
 def test_select_not_isolated_writes_needs_review(select_env):
     bridge, events, state = select_env
     state["isolated"] = False

@@ -417,3 +417,109 @@ def test_a_different_image_is_not_a_duplicate(publishing, tmp_path):
     state["canvas"], state["link"] = str(tmp_path / "other.png"), "https://res/other.png"
     task_q = dict(task_p, id=2, row_number=ROWS[1], product_name="Product Q")
     assert main.auto_approve_product(task_q, {"url": "https://src/q.jpg"}, object(), 5, sku_key=SKUS[1]) == "published"
+
+
+# ---------------------------------------------------------------------------
+# Item 4: one product on several sheet rows
+# ---------------------------------------------------------------------------
+
+DUP_NAME, DUP_BRAND = "AIDA FRENCH FRIES 1KG", "AIDA"
+
+
+def _dup_key():
+    import main
+    return main.compute_sku_key(main.sku_row(DUP_NAME, DUP_BRAND, "", {}))
+
+
+@pytest.fixture
+def review_env(db, monkeypatch, tmp_path):
+    """cli_bridge on the real database; the sheet, processing and upload are recorders."""
+    import cli_bridge
+    import cloudinary_storage
+    import google_sheets
+    import image_processor
+    from PIL import Image
+
+    env = {"sheet": [], "cells": {}, "link": "https://res/aida.png"}
+
+    def processing(*a, **k):
+        out = tmp_path / f"canvas_{os.urandom(3).hex()}.png"
+        Image.new("RGB", (800, 800), "white").save(out)
+        return image_processor.ProcessResult(str(out), True, "photoroom", None, 800, 800)
+
+    class Cell:
+        def __init__(self, value):
+            self.value = value
+
+    class Sheet:
+        title = "Products"
+
+        def cell(self, row, col):
+            return Cell(env["cells"].get(row, ""))
+
+    def write(ws, row, col, value, **identity):
+        env["sheet"].append((row, value, identity))
+        env["cells"][row] = value
+        return True
+
+    monkeypatch.setattr(cli_bridge, "LOG_PATH", str(tmp_path / "search.log"))
+    monkeypatch.setattr(image_processor, "process_product_image_result", processing)
+    monkeypatch.setattr(image_processor, "extract_metadata_from_image", lambda *a, **k: {})
+    monkeypatch.setattr(cloudinary_storage, "upload_product_image_to_cloudinary", lambda *a, **k: env["link"])
+    monkeypatch.setattr(google_sheets, "init_async_queue", lambda *a, **k: None)
+    monkeypatch.setattr(google_sheets, "stop_async_queue", lambda *a, **k: None)
+    monkeypatch.setattr(google_sheets, "get_sheets_client", lambda: object())
+    monkeypatch.setattr(google_sheets, "get_brand_mappings", lambda *a, **k: {})
+    monkeypatch.setattr(google_sheets, "open_worksheet", lambda client, name: Sheet())
+    monkeypatch.setattr(google_sheets, "find_link_column", lambda worksheet, create=True: 3)
+    monkeypatch.setattr(google_sheets, "update_image_link", write)
+    key = _dup_key()
+    yield cli_bridge, env, key
+    conn = db.get_db_connection()
+    try:
+        cur = conn.cursor()
+        for table in ("curation_candidates", "resolved_products", "rejected_images", "review_decisions"):
+            cur.execute(f"DELETE FROM {table} WHERE sku_key = %s", (key,))
+        cur.execute("DELETE FROM active_learning_feedback WHERE `row_number` IN (%s, %s, %s, %s)", ROWS)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _queue(db, rows):
+    conn = db.get_db_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(f"SELECT `row_number`, status FROM automation_queue WHERE `row_number` IN "
+                    f"({', '.join(['%s'] * len(rows))}) ORDER BY `row_number`", tuple(rows))
+        return {r["row_number"]: r["status"] for r in cur.fetchall()}
+    finally:
+        conn.close()
+
+
+def _set_status(db, row, status):
+    conn = db.get_db_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute("UPDATE automation_queue SET status = %s WHERE `row_number` = %s", (status, row))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def test_approving_one_row_of_a_duplicated_product_writes_every_row(db, review_env):
+    cli_bridge, env, key = review_env
+    for row, size in ((ROWS[0], ""), (ROWS[1], "1KG")):
+        db.add_to_queue(row, "", DUP_NAME, DUP_BRAND, "q", payload={"size": size}, sku_key=key)
+        _set_status(db, row, "ready_for_review")
+        assert db.save_curation_candidates(row, DUP_NAME, DUP_BRAND, [{"url": f"https://x/{row}.jpg"}], sku_key=key)
+    db.add_to_queue(ROWS[2], "", "AIDA FRENCH FRIES 2KG", DUP_BRAND, "q", sku_key="p4-other-size")
+    params = {"image_url": f"https://x/{ROWS[1]}.jpg", "product_name": DUP_NAME, "brand": DUP_BRAND,
+              "row_number": ROWS[0], "barcode": "", "sku_key": key}
+    result = cli_bridge.action_select_image(params)
+    assert result["status"] == "success" and result["rows_written"] == [ROWS[0], ROWS[1]]
+    assert [(r, v) for r, v, _ in env["sheet"]] == [(ROWS[0], env["link"]), (ROWS[1], env["link"])]
+    assert env["sheet"][1][2] == {"barcode": "", "product_name": DUP_NAME, "size": "1KG", "brand": DUP_BRAND}
+    assert _queue(db, ROWS[:3]) == {ROWS[0]: "completed", ROWS[1]: "completed", ROWS[2]: "pending"}
+    assert db.get_curation_candidates(ROWS[1], sku_key=key) == []
+    db.delete_curation_candidates(ROWS[2], sku_key="p4-other-size")

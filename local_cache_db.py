@@ -1471,6 +1471,28 @@ def get_task_by_row(row_number):
         return None
 
 
+def get_tasks_by_sku(sku_key):
+    """
+    صفوف الطابور لهذا الـ sku_key مرتبة برقم الصف: نفس المنتج قد يتكرر في أكثر من صف بالشيت، والاعتماد يُكتب
+    في كل صفوفه. أخطاء قاعدة البيانات تُسجل وتعيد [] (يُكتب الصف المطلوب وحده كما كان).
+    """
+    sku = str(sku_key or "").strip()
+    if not sku:
+        return []
+    try:
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM automation_queue WHERE sku_key = %s ORDER BY `row_number`", (sku,))
+            rows = cursor.fetchall()
+        finally:
+            _close(conn)
+        return [dict(r) for r in rows]
+    except Exception as e:
+        logger.warning("[MariaDB Queue] فشل قراءة صفوف الطابور للـ SKU %s: %s", sku, e)
+        return []
+
+
 def _trace_to_json(trace):
     if trace is None:
         return None

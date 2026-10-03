@@ -278,7 +278,8 @@ def _folder_and_tags(metadata):
 
 def publish_image(image_url, name, brand, row_number, worksheet, link_column_index, *, barcode="",
                   candidate_sha256=None, category_override=None, force_review=False, key_size=None,
-                  key_brand=None, profile=None, sku_key=None, before_write=None, duplicates="warn"):
+                  key_brand=None, profile=None, sku_key=None, before_write=None, duplicates="warn",
+                  also_rows=None):
     """
     معالجة الصورة المعتمدة إلى لوحة النشر النهائية ورفعها وكتابة رابطها في الشيت.
     key_size/key_brand: خلايا الحجم والبراند في الشيت لهذا المنتج، تُضاف إلى هوية الصف المتحقق منها
@@ -287,6 +288,9 @@ def publish_image(image_url, name, brand, row_number, worksheet, link_column_ind
     before_write: دالة بلا وسائط تُستدعى بعد الرفع ومباشرة قبل الكتابة في الشيت، تحت قفل النشر لهذا الـ sku_key
     (local_cache_db.sku_publish_lock)؛ إذا أعادت False (أو رفعت استثناء، أو بقي القفل عند غيرنا حتى المهلة) لا
     يُكتب شيء وتكون الحالة 'superseded'. المعالجة والرفع قد يستغرقان دقيقة، والمراجع قد يعتمد خلالها.
+    also_rows: صفوف الشيت الأخرى لنفس المنتج (نفس sku_key)، كل منها {row_number, barcode, product_name, size,
+    brand} بهويته هو: تُكتب فيها نفس القيمة والبيانات الوصفية، وكل كتابة يتحقق منها الشيت بهوية صفها.
+    rows_written: الصفوف التي قُبلت كتابة رابطها؛ rows_failed: صفوف also_rows التي رُفضت.
     duplicates: صورة نُشرت لمنتج آخر (نفس رابط Cloudinary أو pHash اللوحة على مسافة 4 أو أقل، sku_key مختلف):
     'block' (النشر التلقائي) لا يكتب شيئاً والحالة 'needs_review' (error='duplicate_image')؛ 'warn' (اعتماد
     المراجع الصريح) يكتب ويعيد المالكين في duplicate_of. phash: بصمة اللوحة النهائية (تُخزن مع الحل المعتمد).
@@ -353,12 +357,34 @@ def publish_image(image_url, name, brand, row_number, worksheet, link_column_ind
                 return dict(base, status="superseded", error="superseded", link=link)
         if not google_sheets.update_image_link(worksheet, row_number, link_column_index, sheet_value, **identity):
             return dict(base, status="failed", error="sheet_write_failed", link=link)
-        if metadata:
+        written, failed = [row_number], []
+        _write_metadata(worksheet, row_number, metadata, identity)
+        for other in also_rows or []:
+            other_row = other.get("row_number")
+            other_identity = {"barcode": other.get("barcode") or "", "product_name": other.get("product_name"),
+                              "size": other.get("size"), "brand": other.get("brand")}
             try:
-                google_sheets.update_product_metadata(worksheet, row_number, metadata, **identity)
+                ok = google_sheets.update_image_link(worksheet, other_row, link_column_index, sheet_value,
+                                                     **other_identity)
             except Exception as e:
-                print(f"تنبيه: تعذر كتابة البيانات الوصفية للصف {row_number}: {e}")
-    return dict(base, status="needs_review" if review else "published", link=link, sheet_value=sheet_value)
+                print(f"تنبيه: تعذر كتابة الرابط في الصف المكرر {other_row}: {e}")
+                ok = False
+            if not ok:
+                failed.append(other_row)
+                continue
+            written.append(other_row)
+            _write_metadata(worksheet, other_row, metadata, other_identity)
+    return dict(base, status="needs_review" if review else "published", link=link, sheet_value=sheet_value,
+                rows_written=written, rows_failed=failed)
+
+
+def _write_metadata(worksheet, row_number, metadata, identity):
+    if not metadata:
+        return
+    try:
+        google_sheets.update_product_metadata(worksheet, row_number, metadata, **identity)
+    except Exception as e:
+        print(f"تنبيه: تعذر كتابة البيانات الوصفية للصف {row_number}: {e}")
 
 
 def _canvas_phash(path):

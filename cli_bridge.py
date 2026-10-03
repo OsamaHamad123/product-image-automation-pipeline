@@ -504,13 +504,42 @@ def _learn_brand_spelling(action, params, acted, reason_code, first_brand=None):
         logger.exception("تعذر تسجيل ما تعلّمه البحث من قرار المراجع (%s)", action)
 
 
-def _published_response(res, sku_key, **extra):
+def _other_rows(sku_key, row_number):
+    """
+    صفوف الشيت الأخرى لنفس المنتج: صفوف الطابور بنفس sku_key (المنتج مكرر في الشيت)، كل منها بهويته المسجلة
+    عند الإدراج (الباركود والاسم والحجم والبراند)، فيتحقق الشيت من كل صف بهويته هو قبل الكتابة. الاعتماد يُكتب
+    فيها كلها، وإلا تبقى الصفوف المكررة فارغة إلى الأبد بينما الطابور يعدّها مكتملة.
+    """
+    if not sku_key:
+        return []
+    pipeline = _pipeline()
+    out = []
+    for task in local_cache_db.get_tasks_by_sku(sku_key):
+        try:
+            other = int(task.get("row_number"))
+        except (TypeError, ValueError):
+            continue
+        if other == int(row_number):
+            continue
+        payload = pipeline.task_payload(task)
+        out.append({"row_number": other, "barcode": str(task.get("barcode") or "").strip(),
+                    "product_name": str(task.get("product_name") or "").strip(),
+                    "size": str(payload.get("size") or "").strip() or None,
+                    "brand": str(task.get("brand") or "").strip() or None})
+    return out
+
+
+def _published_response(res, sku_key, row_number, **extra):
     """
     استجابة الاعتماد / الرفع الناجح. warnings: background_not_removed (كُتب needs_review:)، و duplicate_image
     (نفس الصورة منشورة لمنتج آخر، duplicate_of يسمّيه؛ الاعتماد الصريح يُكتب مع ذلك). warning: أول تحذير.
     """
     response = dict({'status': 'success', 'image_link': res["link"], 'sheet_value': res["sheet_value"],
-                     'isolated': res["isolated"], 'sku_key': sku_key}, **extra)
+                     'isolated': res["isolated"], 'sku_key': sku_key,
+                     'rows_written': res.get("rows_written") or [row_number]},
+                    **extra)
+    if res.get("rows_failed"):
+        response['rows_failed'] = res["rows_failed"]
     warnings = []
     if not res["isolated"]:
         warnings.append('background_not_removed')
@@ -549,6 +578,7 @@ def action_select_image(params):
             barcode=barcode, candidate_sha256=_candidate_sha(params, row_number, sku_key, image_url),
             category_override={k: _text(params, k) for k in ('category_l1_en', 'category_l2_en', 'category_l3_en')},
             key_size=_text(params, 'size') or None, key_brand=brand or None, sku_key=sku_key,
+            also_rows=_other_rows(sku_key, row_number),
         )
         if res["status"] == "failed":
             return {'status': 'failed', 'error': res.get('error'), 'isolated': res.get('isolated', False)}
@@ -561,7 +591,7 @@ def action_select_image(params):
         local_cache_db.update_task_status_by_row(row_number, "completed", sku_key=sku_key)
         _record_review("approved", params, row_number, sku_key, image_url)
         local_cache_db.delete_curation_candidates(row_number, sku_key=sku_key)
-        response = _published_response(res, sku_key, provider=res.get("provider"))
+        response = _published_response(res, sku_key, row_number, provider=res.get("provider"))
         return response
     except Exception as e:
         config.log_error_to_laravel(f"CLI action_select_image exception: {e}\n{traceback.format_exc()}",
@@ -604,6 +634,7 @@ def action_upload_manual_image(params):
             file_path, product_name, brand, row_number, worksheet, link_column_index, barcode=barcode,
             category_override={k: _text(params, k) for k in ('category_l1_en', 'category_l2_en', 'category_l3_en')},
             key_size=_text(params, 'size') or None, key_brand=brand or None, sku_key=sku_key,
+            also_rows=_other_rows(sku_key, row_number),
         )
         try:
             os.remove(file_path)
@@ -619,7 +650,7 @@ def action_upload_manual_image(params):
         local_cache_db.update_task_status_by_row(row_number, "completed", sku_key=sku_key)
         _record_review("manual_upload", params, row_number, sku_key)
         local_cache_db.delete_curation_candidates(row_number, sku_key=sku_key)
-        response = _published_response(res, sku_key)
+        response = _published_response(res, sku_key, row_number)
         return response
     except Exception as e:
         config.log_error_to_laravel(f"CLI action_upload_manual_image exception: {e}\n{traceback.format_exc()}",
