@@ -906,3 +906,69 @@ def test_queued_seq_never_goes_below_the_outbox_high_water_mark(gs, outbox):
     ws = sheet()
     flush(gs, ws, outbox)
     assert ws.value(2, "Drive Image Link") == "https://res/b.png"
+
+
+def test_sheet_transient_error_is_not_a_config_error(gs, offline):
+    assert not issubclass(gs.SheetTransientError, gs.SheetConfigError)
+    assert not issubclass(gs.SheetTransientError, gs.SheetSchemaError)
+
+
+def test_legacy_pipeline_reports_a_transient_sheets_error_without_a_traceback(gs, offline, monkeypatch, tmp_path):
+    import main
+    printed = []
+    monkeypatch.setattr(main, "print", lambda *a: printed.append(" ".join(str(x) for x in a)))   # main logs via print
+    monkeypatch.chdir(tmp_path)                                 # the legacy run writes temp/pipeline.lock
+    monkeypatch.setattr(main, "load_run_config", lambda: None)
+    monkeypatch.setattr(gs, "init_async_queue", lambda *a, **k: None)
+    monkeypatch.setattr(gs, "stop_async_queue", lambda *a, **k: None)
+    monkeypatch.setattr(gs, "get_sheets_client", lambda: object())
+
+    def busy(client, name):
+        raise gs.SheetTransientError("APIError: [429]: quota")
+
+    monkeypatch.setattr(gs, "open_worksheet", busy)
+    main.run_automation_pipeline()                              # returns instead of raising
+    assert any("Google Sheets غير متاح مؤقتاً" in line for line in printed)
+    assert not (tmp_path / "temp" / "pipeline.lock").exists()
+
+
+def test_flush_script_reports_a_transient_sheets_error_without_a_traceback(gs, offline, monkeypatch, capsys):
+    import importlib.util
+    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts", "flush_sheets_sync.py")
+    spec = importlib.util.spec_from_file_location("flush_sheets_sync_under_test", path)
+    script = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(script)
+    monkeypatch.setattr(gs, "get_sheets_client", lambda: object())
+
+    def busy(client, name):
+        raise gs.SheetTransientError("APIError: [503]: unavailable")
+
+    monkeypatch.setattr(gs, "open_worksheet", busy)
+    script.flush()
+    assert "Google Sheets غير متاح مؤقتاً" in capsys.readouterr().out
+
+
+def test_sync_worker_forwards_payloads_even_while_the_sheet_cannot_be_opened(gs, offline, monkeypatch):
+    import sync_worker
+    r = FakeRedis()
+    r.sadd("writebehind:dirty_set", "row_2")
+    r.set("product:data:row_2", json.dumps({"v": 2, "row_index": 2, "updates": {"link": "https://res/milk.png"},
+                                            "seqs": {"link": 5}, "expect": {"barcode": MILK}}))
+    forwarded = []
+
+    class Queue:
+        def append_update(self, *args, **kwargs):
+            forwarded.append((args, kwargs))
+
+    monkeypatch.setattr(gs, "get_sheets_client", lambda: object())
+
+    def busy(client, name):
+        r.delete("writebehind:heartbeat")                       # the open retried for longer than the heartbeat TTL
+        raise gs.SheetTransientError("APIError: [429]: quota")
+
+    monkeypatch.setattr(gs, "open_worksheet", busy)
+    state = {"queue": Queue()}
+    with pytest.raises(gs.SheetTransientError):
+        sync_worker._loop_once(r, state)
+    assert len(forwarded) == 1 and "row_2" not in r.smembers("writebehind:dirty_set")
+    assert r.exists("writebehind:heartbeat")                    # renewed after the slow open
