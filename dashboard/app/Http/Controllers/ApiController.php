@@ -107,11 +107,10 @@ class ApiController extends Controller
         $params = $request->only([
             'row_number', 'product_name', 'brand', 'barcode', 'sku_key',
             'size', 'product_name_ar', 'brand_ar', 'category',
-            'target_width', 'target_height', 'enhance', 'search_decision',
-            // ما عرضته الصفحة وتأكيد الاستبدال (cli_bridge._stale_refusal)
-            'expected_state', 'replace'
+            'target_width', 'target_height', 'enhance', 'search_decision'
         ]);
-        // ما رأته الصفحة (expected_state) يصل نصاً JSON من نموذج الرفع، و replace تأكيد صريح بالاستبدال (قيمة منطقية)
+        // ما رأته الصفحة (expected_state) يصل نصاً JSON من نموذج الرفع، و replace تأكيد صريح بالاستبدال (قيمة منطقية)؛
+        // يقرؤهما cli_bridge._stale_refusal
         $expected = $request->input('expected_state');
         if (is_string($expected)) {
             $decoded = json_decode($expected, true);
