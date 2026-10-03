@@ -24,6 +24,7 @@ from pathlib import Path
 import pytest
 
 from laqta_review_harness import NODE, run
+from test_laqta_review import NEEDS_LARAVEL, _config_of, _http
 
 ROOT = Path(__file__).resolve().parents[1]
 DASH = ROOT / "dashboard"
@@ -294,6 +295,13 @@ out.state = [S().filter, productName()];
 def test_the_review_page_accepts_the_bg_failed_filter():
     review = (CONTROLLERS / "ReviewController.php").read_text(encoding="utf-8")
     assert "'bg_failed'" in review[review.index("public const FILTERS"):][:200]
+
+
+@NEEDS_LARAVEL
+def test_the_bg_failed_deep_link_reaches_the_page_config(tmp_path):
+    res = _http(tmp_path, ["/catalog?filter=bg_failed"], DB_PORT="1")
+    assert res[0]["status"] == 200, res[0]["body"][:2000]
+    assert _config_of(res[0]["body"])["filter"] == "bg_failed"
 
 
 # ---------------------------------------------------------------------------
