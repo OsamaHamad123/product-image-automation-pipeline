@@ -78,7 +78,8 @@ from .gtin import is_restricted, normalize_gtin
 from .models import Candidate, CandidateScore, SkuSpec
 from .sizes import compare, compare_pack, parse_sizes
 from .text_norm import (
-    any_phrase_in, domain_matches, is_arabic, match_string, store_market, tokens, url_host, url_path_text,
+    any_brand_in, any_phrase_in, brand_pattern, domain_matches, is_arabic, match_string, store_market, tokens,
+    url_host, url_path_text,
 )
 
 logger = logging.getLogger(__name__)
@@ -178,10 +179,10 @@ def _brand_leads(phrases: Sequence[str], text: str) -> Optional[bool]:
     name ('Target') still opens its own listing.
     """
     names, filler = _retailer_vocab()
-    keys = [k for k in (match_string(p) for p in phrases) if k]
+    patterns = [pt for pt in (brand_pattern(p) for p in phrases) if pt is not None]
     rest = match_string(text)
     while rest:
-        if any(rest == k or rest.startswith(k + " ") for k in keys):
+        if any(pt.match(rest) for pt in patterns):
             return True
         store = next((n for n in names if rest == n or rest.startswith(n + " ")), None)
         if store:
@@ -217,9 +218,9 @@ def _generic_brand_weak_fields(spec: SkuSpec, cand: Candidate, brand_texts: Mapp
     weak: List[str] = []
     for name in IDENTITY_FIELDS:
         text = brand_texts[name]
-        if distinctive and any_phrase_in(distinctive, text):
+        if distinctive and any_brand_in(distinctive, text):
             return []
-        if not any_phrase_in(generic, text):
+        if not any_brand_in(generic, text):
             continue
         if name in TEXT_FIELDS and _brand_opens_title(generic, text):
             return []
@@ -338,13 +339,13 @@ def score_candidate(spec: SkuSpec, cand: Candidate, negatives=None) -> Candidate
         brand_texts[name] = strip_site_suffix(fields[name])
     brand_fields: Dict[str, str] = {}
     for name in IDENTITY_FIELDS + ("snippet",):
-        hit = any_phrase_in(spec.match_brands, brand_texts[name]) if spec.match_brands else None
+        hit = any_brand_in(spec.match_brands, brand_texts[name]) if spec.match_brands else None
         if hit:
             brand_fields[name] = hit
     brand_ok = any(name in brand_fields for name in IDENTITY_FIELDS)
     if spec.match_brands and not brand_fields:
         for name in COMPETITOR_FIELDS:
-            comp = any_phrase_in(spec.competitors, brand_texts[name])
+            comp = any_brand_in(spec.competitors, brand_texts[name])
             if comp:
                 hard.append("competitor_brand")
                 conflicts.append(f"competitor_brand:{name}:{comp}")
@@ -353,10 +354,10 @@ def score_candidate(spec: SkuSpec, cand: Candidate, negatives=None) -> Candidate
     # ('Nestle') caps at tier 2, and a sibling sub-brand ('Nestle Everyday') is another product.
     sub_brand_ok = True
     if spec.required_brands:
-        sub_brand_ok = any(any_phrase_in(spec.required_brands, brand_texts[n]) for n in IDENTITY_FIELDS)
+        sub_brand_ok = any(any_brand_in(spec.required_brands, brand_texts[n]) for n in IDENTITY_FIELDS)
         if not sub_brand_ok:
             for name in COMPETITOR_FIELDS:
-                sib = any_phrase_in(spec.sibling_brands, brand_texts[name]) if spec.sibling_brands else None
+                sib = any_brand_in(spec.sibling_brands, brand_texts[name]) if spec.sibling_brands else None
                 if sib:
                     if "competitor_brand" not in hard:
                         hard.append("competitor_brand")

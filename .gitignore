@@ -39,3 +39,12 @@ brand_mappings_cache.json
 local_cache.db
 search_cache.json
 human_feedback_local.json
+
+# Live run outputs (scripts/smoke_live.py --json, console logs, connection checks): they stay on the machine.
+# runs/README.md and the dated baseline already in runs/ are tracked; new files there are not.
+/smoke_*.json
+/smoke_console*.txt
+/verify_output*.txt
+/runs/*
+!/runs/README.md
+!/runs/2026-10-03/

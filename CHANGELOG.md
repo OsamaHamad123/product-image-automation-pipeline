@@ -230,6 +230,22 @@ auto-publish 0%.
   - `scripts/compare_runs.py old.json new.json [--md] [--out]` compares two runs.
   - `scripts/eval_record.py --prefill-labels-from-db` copies the dashboard's review decisions into `labels.csv`.
 
+### Fixed after the owner's live run of 2026-10-03
+
+`runs/2026-10-03/smoke_6.json`, sheet rows 2-61, is the baseline before phase 3: 33 of 60 pre-checked, and
+every pick checked by hand shows the right product.
+
+- **Plural brand names:** a brand name's last word now matches with or without a final 's' in scoring
+  and in the label reading. `KITCHEN TREASURE` in the sheet now matches `Kitchen Treasures` in a store
+  title (row 39); before, that listing scored as no-brand tier 3.
+  - Only Latin words of 4+ letters, never one ending in 'ss', and only whole words.
+  - Product words keep the exact rule.
+  - Typos such as `INA PARAMANS` and `RIO MARIE` still need a Brands Mapping synonym.
+- **desertcart country stores:** `angola.desertcart.com` (row 47) is now a store outside the UAE and gets
+  the review warning. `uae.desertcart.com` and `desertcart.ae` do not.
+- **Run outputs:** moved to `runs/2026-10-03/`. New `smoke_*.json`, `smoke_console*.txt`,
+  `verify_output*.txt` files and new files in `runs/` stay out of git.
+
 ### Fixed while integrating phase 3
 
 - A barcode-conflict MATCH that cannot be pre-checked no longer skips the second verifier call on the next
