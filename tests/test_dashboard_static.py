@@ -465,6 +465,17 @@ def test_launchers_pass_no_powershell_switches_to_native_programs():
             raise AssertionError(line)
 
 
+def test_launcher_cache_cleanup_keeps_the_folders_gitignore():
+    """Remove-Item '<dir>\\*' also deleted data/.gitignore at every launch, and the owner's next commit
+    carried the deletion (twice, 2026-10-03). The cleanup must skip it, and the file must be in the repo."""
+    ps1 = read(ROOT / "setup_and_launch.ps1")
+    block = ps1[ps1.index("$laravelCacheDir = "):ps1.index("# ----------------- 5.")]
+    assert 'Join-Path $laravelCacheDir "*"' not in block
+    assert '$_.Name -ne ".gitignore"' in block
+    kept = ROOT / "dashboard" / "storage" / "framework" / "cache" / "data" / ".gitignore"
+    assert kept.read_text(encoding="utf-8").split() == ["*", "!.gitignore"]
+
+
 def test_batch_titles_and_echoes_have_no_bare_ampersand():
     """'title Setup & Launcher' made cmd run 'Launcher' as a command (owner's log, 2026-10-03)."""
     for bat in sorted(ROOT.glob("*.bat")):
