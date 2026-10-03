@@ -210,3 +210,38 @@ def test_thin_straw_cut_by_the_gemini_box_is_edge_clipped(work):
     assert (result.isolated, result.provider, result.quality_flags) == (True, "photoroom", [])
     whole = ps.ink_box(np.asarray(ip.compose_on_white_canvas(juice.product, (800, 800))))
     assert ps.ink_box(ps.canvas_array(result)) == whole, "the straw is whole on the canvas"
+
+
+# ---------------------------------------------------------------------------
+# 7d: a visible shadow kept with the product
+# ---------------------------------------------------------------------------
+
+def test_offset_shadow_kept_by_the_provider_is_flagged(work):
+    # alpha 48-97: above the haze limit (32), so it used to set the canvas size: the can was published ~8% smaller
+    # and off-centre. remove.bg, which drops the shadow, is used instead.
+    can = ps.make("can", (600, 800))
+    shot = ps.with_extras(can, "can_shadow", under=[ps.offset_shadow(can)])
+    keeper = ps.truth_provider(shot, keep=(shot.extras_under[0],))
+    kept = ps.Shot("kept", shot.scene(), None).product
+    assert ip.assess_cutout(kept) == [ip.FLAG_KEPT_SHADOW]
+
+    result, services = run(shot, work, photoroom=keeper, box=False)
+    assert result.isolated is False and result.quality_flags == [ip.FLAG_KEPT_SHADOW]
+
+    result, services = run(shot, work, photoroom=keeper, remove_bg="truth", box=False)
+    assert (result.isolated, result.provider, result.quality_flags) == (True, "remove_bg_api", [])
+    x0, y0, x1, y1 = ps.ink_box(ps.canvas_array(result))
+    assert y1 - y0 >= 700 and abs((x0 + x1) / 2 - 400) <= 1 and abs((y0 + y1) / 2 - 400) <= 1
+
+
+def test_transparent_png_with_a_baked_in_shadow_is_not_published_as_source_alpha(work):
+    can = ps.make("can", (600, 800))
+    baked = ps.Shot("baked_png", can.product, None, extras_under=[ps.offset_shadow(can)], box=can.box)
+    assert ip.assess_cutout(baked.scene()) == [ip.FLAG_KEPT_SHADOW]
+
+    result, services = run(baked, work, photoroom=None)   # no provider key: nothing can re-isolate it
+    assert (result.isolated, result.provider, result.quality_flags) == (False, "source_alpha", [ip.FLAG_KEPT_SHADOW])
+
+    result, services = run(baked, work)                   # the provider re-isolates the product without it
+    assert (result.isolated, result.provider, result.quality_flags) == (True, "photoroom", [])
+    assert services.paid == 1

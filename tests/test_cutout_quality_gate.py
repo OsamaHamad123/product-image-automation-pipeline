@@ -281,7 +281,10 @@ def test_gate_too_small_on_canvas_when_something_else_sets_the_size():
     arr = np.array(ideal_cutout(bottle(size=(900, 1300), body=(350, 150, 550, 750))))
     arr[1100:1200, 400:500] = (90, 90, 90, 60)   # a visible grey ghost below (not haze, not solid)
     flags = image_processor.assess_cutout(Image.fromarray(arr, "RGBA"))
-    assert flags == [image_processor.FLAG_TOO_SMALL]
+    # it sets the size, and being shadow-grey beyond the solid product it is also a kept shadow
+    assert sorted(flags) == [image_processor.FLAG_KEPT_SHADOW, image_processor.FLAG_TOO_SMALL]
+    arr[1100:1200, 400:500] = (60, 140, 220, 60)  # a light blue ghost: something else sets the size, no shadow
+    assert image_processor.assess_cutout(Image.fromarray(arr, "RGBA")) == [image_processor.FLAG_TOO_SMALL]
 
 
 def test_gate_opaque_backdrop_p5():

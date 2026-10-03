@@ -71,6 +71,12 @@ EDGE_TOUCH_MIN = 0.02           # المنتج يغطي أكثر من 2% من خ
 EDGE_RUN_MIN_PX = 3             # أو جزء رفيع (شفاطة) عرضه 3 بكسل يلمس الخط ويمتد 3 بكسل للداخل
 HAZE_GROWTH_MAX = 0.08          # البكسلات شبه الشفافة توسّع حدود المنتج بأكثر من 8% (و4 بكسل على الأقل)
 HAZE_GROWTH_MIN_PX = 4
+# ظل مرئي بقي مع المنتج: البكسلات المرئية (شفافية > 32) تتجاوز حدود الجزء الصلب (>= 128) بأكثر من 3% (و4 بكسل)،
+# وأغلب هذا الامتداد رمادي داكن (لون الظل)؛ جسم عبوة شفافة يمتد بنفس الطريقة لكنه فاتح أو ملون
+SHADOW_GROWTH_MAX = 0.03
+SHADOW_VALUE_MAX = 170
+SHADOW_CHROMA_MAX = 40
+SHADOW_SHARE_MIN = 0.5
 SECOND_OBJECT_MIN = 0.01        # الأجسام الأخرى معاً (غير المنتج ومجموعته) 1% أو أكثر من الجسم الرئيسي
 GROUP_ALPHA = 24                # الأجزاء المتصلة عبر شفافية > 24 جسم واحد (جسم عبوة شفافة يصل الغطاء بالملصق)
 GROUP_AREA_MIN = 0.40           # عبوة متعددة: كل قطعة 40% على الأقل من الأكبر وبارتفاع مماثل (80%) = منتج واحد
@@ -97,11 +103,12 @@ FLAG_SECOND_OBJECT = "second_object"
 FLAG_UPSCALED = "upscaled"
 FLAG_TOO_SMALL = "too_small_on_canvas"
 FLAG_OPAQUE_BACKDROP = "opaque_backdrop"
+FLAG_KEPT_SHADOW = "kept_shadow"
 # علامات لا تصلحها إعادة العزل (المصدر نفسه صغير): لا نعيد المحاولة بمزوّد مدفوع من أجلها
 _UNFIXABLE_FLAGS = frozenset({FLAG_UPSCALED})
 # لاختيار أفضل محاولة عندما تبقى العلامات بعد كل البدائل (الأقل وزناً تُعرض على المراجع)
-_FLAG_WEIGHT = {FLAG_OPAQUE_FILL: 4, FLAG_OPAQUE_BACKDROP: 4, FLAG_EDGE_CLIPPED: 3, FLAG_SECOND_OBJECT: 2,
-                FLAG_TOO_SMALL: 2, FLAG_ALPHA_HAZE: 1, FLAG_UPSCALED: 1}
+_FLAG_WEIGHT = {FLAG_OPAQUE_FILL: 4, FLAG_OPAQUE_BACKDROP: 4, FLAG_EDGE_CLIPPED: 3, FLAG_KEPT_SHADOW: 3,
+                FLAG_SECOND_OBJECT: 2, FLAG_TOO_SMALL: 2, FLAG_ALPHA_HAZE: 1, FLAG_UPSCALED: 1}
 _NO_CROP = (False, False, False, False)
 # البديل التلقائي عند علامة جودة: المزوّدان المدفوعان فقط (GrabCut/rembg لا تُستخدم كبديل أبداً)
 _PAID_METHODS = ("photoroom", "remove_bg_api")
@@ -805,6 +812,29 @@ def _has_opaque_backdrop(rgb, main_mask, bbox_area: int) -> bool:
     return int(distinct.sum()) >= BACKDROP_OBJECT_MIN * area
 
 
+def _kept_shadow(rgba: Image.Image, alpha, solid) -> bool:
+    """
+    الحجم والمركز الحقيقيان للمنتج هما حدود جزئه الصلب (شفافية >= 128). إذا امتدت البكسلات المرئية (> 32) خارجها
+    بأكثر من 3% (و4 بكسل) وكان أغلب الامتداد رمادياً داكناً فهو ظل بقي مع المنتج (مزوّد أبقاه، أو مدمج في PNG).
+    """
+    import numpy as np
+
+    box = _mask_bbox(solid)
+    if box is None:
+        return False
+    tx = max(HAZE_GROWTH_MIN_PX, int(SHADOW_GROWTH_MAX * (box[2] - box[0])))
+    ty = max(HAZE_GROWTH_MIN_PX, int(SHADOW_GROWTH_MAX * (box[3] - box[1])))
+    outside = alpha > HAZE_ALPHA_MAX
+    outside[max(0, box[1] - ty):box[3] + ty, max(0, box[0] - tx):box[2] + tx] = False
+    count = int(outside.sum())
+    if count < max(20, 0.002 * int(solid.sum())):
+        return False
+    rgb = np.asarray(rgba.convert("RGB"))[outside].astype(np.int16)
+    value = rgb.max(axis=1)
+    shadowy = (value <= SHADOW_VALUE_MAX) & (value - rgb.min(axis=1) <= SHADOW_CHROMA_MAX)
+    return float(shadowy.mean()) >= SHADOW_SHARE_MIN
+
+
 def _product_group(areas, heights, main):
     """
     مجموعة المنتج: الجسم الرئيسي وكل جسم مساحته 40% على الأقل منه وارتفاعه مماثل (عبوة ثنائية بينها فراغ).
@@ -837,6 +867,8 @@ def assess_cutout(cutout: Image.Image, frame_size=None, crop_sides=_NO_CROP, can
                          الإطار (علبة مقصوصة بإحكام) ليس "لم يُزل شيء".
       edge_clipped       المنتج يلمس خط قص داخلي: الصندوق قص جزءاً منه (الغطاء، أو شفاطة بعرض 3 بكسل فأكثر).
       alpha_haze         بكسلات شبه شفافة (غير مرئية تقريباً) توسّع حدود المنتج بوضوح.
+      kept_shadow        ظل مرئي (شفافية > 32، رمادي داكن) يمتد خارج حدود الجزء الصلب: اللوحة تُحجّم على كل
+                         البكسلات المرئية فيصغر المنتج ويخرج عن المركز (ظلال الاستوديو معطلة بطلب العميل).
       second_object      أجسام أخرى (مجموع مساحتها الصلبة) 1% أو أكثر من الجسم الرئيسي. قطع متقاربة الحجم
                          والارتفاع (عبوتان متجاورتان) مجموعة منتج واحدة وليست جسماً ثانياً.
       upscaled           المنتج سيُكبّر أكثر من الضعف على اللوحة.
@@ -872,6 +904,8 @@ def _assess(cutout: Image.Image, frame_size=None, crop_sides=_NO_CROP, canvas_si
         if (box_w - vis_w > max(HAZE_GROWTH_MIN_PX, HAZE_GROWTH_MAX * vis_w)
                 or box_h - vis_h > max(HAZE_GROWTH_MIN_PX, HAZE_GROWTH_MAX * vis_h)):
             flags.append(FLAG_ALPHA_HAZE)
+    if _kept_shadow(rgba, alpha, solid):
+        flags.append(FLAG_KEPT_SHADOW)
 
     # الأجسام: مكونات متصلة على شفافية > 24 (جسم عبوة شفافة لا ينفصل غطاؤها عن ملصقها) تحوي بكسلاً صلباً،
     # ومساحة كل جسم = بكسلاته الصلبة
