@@ -96,6 +96,18 @@ def test_white_carton_on_an_opaque_photo_matches_the_gemini_box(work):
     assert services.paid == 1
 
 
+def test_white_carton_on_an_opaque_photo_without_gemini_is_confirmed_by_both_providers(work):
+    # No Gemini box (key missing or Gemini down): PhotoRoom's rectangle is ambiguous on its own; remove.bg returning
+    # the same rectangle confirms it is the product. A photo card kept by one provider is still flagged (above).
+    shot = ps.make("carton", (700, 900), fill=0.75, face=(245, 245, 242), logo=(40, 110, 200),
+                   print_=(40, 110, 200), bg=ps.STUDIO)
+
+    result, services = run(shot, work, box=False, remove_bg="truth")
+
+    assert (result.isolated, result.provider, result.quality_flags) == (True, "photoroom", [])
+    assert services.names() == ["photoroom", "remove_bg_api"]
+
+
 # ---------------------------------------------------------------------------
 # #3 / 7b / clear bottles: what is one product, what is a second object
 # ---------------------------------------------------------------------------

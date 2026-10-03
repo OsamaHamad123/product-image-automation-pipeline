@@ -1123,6 +1123,8 @@ class _Attempt:
     matches_source: bool = False     # قناع المزوّد يطابق شفافية المصدر (IoU > 0.95)
     main_rect: Optional[Tuple[int, int, int, int]] = None
     notes: List[str] = field(default_factory=list)
+    frame_size: Optional[Tuple[int, int]] = None              # الإطار المرسل وموضعه في صورة العمل
+    frame_rect: Optional[Tuple[int, int, int, int]] = None
 
 
 def _flags_final(flags) -> bool:
@@ -1180,6 +1182,17 @@ def _region_match(cutout, main_rect, frame_size, frame_rect, source_mask, produc
     return matches_source, matches_box
 
 
+def _same_mask(a: _Attempt, b: _Attempt, shape) -> bool:
+    """مخرجان يغطيان نفس بكسلات صورة العمل (IoU > 0.95)."""
+    placed = []
+    for attempt in (a, b):
+        if attempt.frame_rect is None or not _same_frame(attempt.cutout.size, attempt.frame_size):
+            return False
+        placed.append(_placed_mask(attempt.cutout, attempt.frame_size, attempt.frame_rect, shape))
+    union = int((placed[0] | placed[1]).sum())
+    return union > 0 and int((placed[0] & placed[1]).sum()) / union > SOURCE_MATCH_IOU
+
+
 def _gated(cutout, provider, frame_size, crop_sides, canvas_size, label, frame_rect=None, source_mask=None,
            product_rect=None, frame_checks=True, pixel_scale=1.0) -> _Attempt:
     """
@@ -1199,7 +1212,8 @@ def _gated(cutout, provider, frame_size, crop_sides, canvas_size, label, frame_r
                                                     product_rect)
         if FLAG_OPAQUE_BACKDROP in flags and (matches_source or matches_box):
             flags.remove(FLAG_OPAQUE_BACKDROP)
-    return _Attempt(cutout, provider, flags, None, label, matches_source, found.main_rect, list(found.notes))
+    return _Attempt(cutout, provider, flags, None, label, matches_source, found.main_rect, list(found.notes),
+                    tuple(frame_size) if frame_size else None, frame_rect)
 
 
 def _provider_attempt(frame, method, crop_sides, frame_rect, canvas_size, source_mask=None,
@@ -1248,7 +1262,8 @@ def _isolate_checked(img: Image.Image, method: str, product_name, brand, canvas_
        (_FLAG_REMEDY: second_object، upscaled): لا نصرف على نتيجة ستذهب للمراجعة على أي حال.
     فحص صندوق الخلفية يُجرى على كل مخرج، ويسقط إذا طابق القناع منطقة المنتج المعروفة (شفافية المصدر أو صندوق
     Gemini). إذا طابق مخرج المزوّد شفافية المصدر فالمصدر كان صحيحاً: تُقبل شفافيته (علبة مطبوعة، لا ورقة خلفية)،
-    إلا إذا حدد صندوق Gemini المنتج داخل ذلك المستطيل (رأي ثالث يقول إنه ورقة خلفية).
+    إلا إذا حدد صندوق Gemini المنتج داخل ذلك المستطيل (رأي ثالث يقول إنه ورقة خلفية). بلا صندوق Gemini يكفي
+    أن يعيد المزوّدان المدفوعان نفس المستطيل.
     القص المحلي للخلفية البيضاء مشتق من بكسلات المصدر نفسها فلا يُحسب رأياً مستقلاً.
     يعيد (المحاولة المختارة أو محاولة خطأ، isolated، ملاحظة الخلفية البيضاء).
     """
@@ -1352,6 +1367,16 @@ def _isolate_checked(img: Image.Image, method: str, product_name, brand, canvas_
         other = attempt_with(cropped if cropped is not None and not box_problem else full, fallback)
         if other.cutout is None:
             logger.warning("فشل العزل بالمزوّد البديل %s: %s", fallback, other.error)
+        elif product_rect is None and FLAG_OPAQUE_BACKDROP in other.flags:
+            # بلا صندوق Gemini: المزوّدان المدفوعان المستقلان أعادا نفس المستطيل، فهو المنتج (علبة بيضاء مطبوعة)
+            for earlier in attempts[:-1]:
+                if earlier.provider in _PAID_METHODS and earlier.provider != other.provider \
+                        and FLAG_OPAQUE_BACKDROP in earlier.flags \
+                        and _same_mask(earlier, other, (work.height, work.width)):
+                    earlier.flags.remove(FLAG_OPAQUE_BACKDROP)
+                    other.flags.remove(FLAG_OPAQUE_BACKDROP)
+                    logger.info("المزوّدان أعادا نفس المستطيل؛ ليس صندوق خلفية")
+                    break
     return finish()
 
 
