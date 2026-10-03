@@ -172,3 +172,26 @@ def test_paratha_listing_in_the_same_words_is_tier1_and_a_bundle_is_not():
     assert tier("Ashoka Plain Paratha 5 x 400g") == (2, ())      # five packs? review, never tier 1
     assert tier("Ashoka Plain Paratha 10 x 400g")[1] == ("pack_conflict",)
     assert tier("Ashoka Plain Paratha 800g")[1] == ("size_conflict",)
+
+
+# -- live run 2026-10-03, row 16 'MEHRAN PLAIN PARATHA 400GM 5S': the same pack written the other way round --
+
+@pytest.mark.parametrize("text,value,pack,pieces", [
+    ("MEHRAN PLAIN PARATHA 400GM 5S", 400.0, None, 5),     # was a pack of five 400 g (2 kg in the query)
+    ("Tortilla Wraps 320G 8S", 320.0, None, 8),
+    ("SAMOSA 500G 20S", 500.0, None, 20),
+    ("INDOMIE NOODLES 75G 5S", 75.0, 5, None),            # not a food sold by the piece: still a pack
+    ("MEHRAN PLAIN PARATHA 2X400GM 5S", 400.0, 2, None),  # an explicit 2x pack keeps its pack count
+])
+def test_n_s_after_the_mass_of_a_food_sold_by_the_piece_counts_pieces(text, value, pack, pieces):
+    (size,) = parse_sizes(text, "name")
+    assert (size.base_value, size.pack_count, size.pieces) == (value, pack, pieces)    # value: one unit
+
+
+def test_row16_paratha_query_asks_for_the_400g_pack():
+    from catalog_match.identity import build_sku_spec
+    from catalog_match.query_plan import build_queries
+
+    spec = build_sku_spec({"name": "MEHRAN PLAIN PARATHA 400GM 5S", "brand": "MEHRAN"}, {})
+    assert (spec.size.base_value, spec.size.pieces, spec.pack_count) == (400.0, 5, None)
+    assert build_queries(spec)[0].text == "MEHRAN PLAIN PARATHA 400g"

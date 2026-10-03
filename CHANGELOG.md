@@ -245,6 +245,11 @@ every pick checked by hand shows the right product.
   the review warning. `uae.desertcart.com` and `desertcart.ae` do not.
 - **Run outputs:** moved to `runs/2026-10-03/`. New `smoke_*.json`, `smoke_console*.txt`,
   `verify_output*.txt` files and new files in `runs/` stay out of git.
+- **Pieces after the weight (row 16):** `MEHRAN PLAIN PARATHA 400GM 5S` is one 400 g pack of 5 pieces, not 5 packs
+  of 400 g. The first query asked for `5x400g` before; it now asks for `400g`.
+  - Applies only to foods sold by the piece: paratha, roti, chapati, naan, tortilla, wraps, pita, khubz, samosa,
+    spring rolls, and their Arabic names.
+  - `INDOMIE NOODLES 75G 5S` is still 5 packs. An explicit `2X400GM 5S` keeps its pack count of 2.
 
 ### Fixed while integrating phase 3
 
