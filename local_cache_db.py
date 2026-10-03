@@ -724,6 +724,81 @@ def supersede_resolution(sku_key, barcode=None):
         return None
 
 
+# صورة منشورة «لمنتج آخر»: نفس رابط Cloudinary، أو pHash للوحة النهائية على هذه المسافة أو أقل
+DUPLICATE_PHASH_DISTANCE = 4
+
+
+def _phash_int(value):
+    """pHash بصيغة v2 (16 خانة hex، catalog_match.fetch.phash_hex) كعدد، أو None لغير ذلك (القيم القديمة)."""
+    text = str(value or "").strip().lower()
+    if len(text) != 16:
+        return None
+    try:
+        return int(text, 16)
+    except ValueError:
+        return None
+
+
+def find_image_owners(cloudinary_url=None, phash=None, sku_key=None, product_name=None,
+                      max_distance=DUPLICATE_PHASH_DISTANCE):
+    """
+    المنتجات الأخرى التي نُشرت لها نفس الصورة: نفس رابط Cloudinary (الرفع يسمي الملف ببصمة بايتاته، فنفس
+    اللوحة = نفس الرابط)، أو pHash اللوحة النهائية على مسافة max_distance أو أقل. يقرأ الحلول المعتمدة فقط
+    (human_approved / auto_verified). «منتج آخر» = sku_key مختلف؛ سجل قديم بلا sku_key يُعد منتجاً آخر إذا اختلف
+    اسمه. تعيد [{sku_key, product_name, brand, cloudinary_url, verification_status, match, distance}] (منتج واحد
+    لكل مالك، الأقرب أولاً)، أو None عند خطأ قاعدة البيانات (النشر التلقائي يعامله كتكرار).
+    """
+    url = str(cloudinary_url or "").strip()
+    target = _phash_int(phash)
+    if not url and target is None:
+        return []
+    sku = str(sku_key or "").strip()
+    name = " ".join(str(product_name or "").lower().split())
+    try:
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT sku_key, product_name, brand, cloudinary_url, perceptual_hash, verification_status "
+                f"FROM resolved_products WHERE {_SERVABLE_SQL} AND (cloudinary_url = %s "
+                "OR (perceptual_hash IS NOT NULL AND perceptual_hash <> ''))",
+                (url,),
+            )
+            rows = cursor.fetchall()
+        finally:
+            _close(conn)
+    except Exception as e:
+        logger.warning("[MariaDB Cache] تعذر فحص تكرار الصورة المنشورة: %s", e)
+        return None
+    owners = {}
+    for r in rows:
+        owner_sku = str(r.get("sku_key") or "").strip()
+        owner_name = " ".join(str(r.get("product_name") or "").lower().split())
+        if owner_sku and sku:
+            if owner_sku == sku:
+                continue
+        elif owner_name == name:
+            continue
+        match, distance = None, None
+        if url and str(r.get("cloudinary_url") or "").strip() == url:
+            match, distance = "url", 0
+        else:
+            other = _phash_int(r.get("perceptual_hash"))
+            if target is not None and other is not None:
+                d = bin(target ^ other).count("1")
+                if d <= max_distance:
+                    match, distance = "phash", d
+        if match is None:
+            continue
+        key = owner_sku or f"name:{owner_name}"
+        if key in owners and owners[key]["distance"] <= distance:
+            continue
+        owners[key] = {"sku_key": owner_sku or None, "product_name": r.get("product_name"), "brand": r.get("brand"),
+                       "cloudinary_url": r.get("cloudinary_url"), "verification_status": r.get("verification_status"),
+                       "match": match, "distance": distance}
+    return sorted(owners.values(), key=lambda o: o["distance"])
+
+
 # مهلة انتظار قفل النشر لنفس الـ SKU (عامل آخر أو مراجع يكتب نفس المنتج الآن)
 PUBLISH_LOCK_SECONDS = 60
 

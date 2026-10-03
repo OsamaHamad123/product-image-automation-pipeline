@@ -278,7 +278,7 @@ def _folder_and_tags(metadata):
 
 def publish_image(image_url, name, brand, row_number, worksheet, link_column_index, *, barcode="",
                   candidate_sha256=None, category_override=None, force_review=False, key_size=None,
-                  key_brand=None, profile=None, sku_key=None, before_write=None):
+                  key_brand=None, profile=None, sku_key=None, before_write=None, duplicates="warn"):
     """
     معالجة الصورة المعتمدة إلى لوحة النشر النهائية ورفعها وكتابة رابطها في الشيت.
     key_size/key_brand: خلايا الحجم والبراند في الشيت لهذا المنتج، تُضاف إلى هوية الصف المتحقق منها
@@ -287,6 +287,9 @@ def publish_image(image_url, name, brand, row_number, worksheet, link_column_ind
     before_write: دالة بلا وسائط تُستدعى بعد الرفع ومباشرة قبل الكتابة في الشيت، تحت قفل النشر لهذا الـ sku_key
     (local_cache_db.sku_publish_lock)؛ إذا أعادت False (أو رفعت استثناء، أو بقي القفل عند غيرنا حتى المهلة) لا
     يُكتب شيء وتكون الحالة 'superseded'. المعالجة والرفع قد يستغرقان دقيقة، والمراجع قد يعتمد خلالها.
+    duplicates: صورة نُشرت لمنتج آخر (نفس رابط Cloudinary أو pHash اللوحة على مسافة 4 أو أقل، sku_key مختلف):
+    'block' (النشر التلقائي) لا يكتب شيئاً والحالة 'needs_review' (error='duplicate_image')؛ 'warn' (اعتماد
+    المراجع الصريح) يكتب ويعيد المالكين في duplicate_of. phash: بصمة اللوحة النهائية (تُخزن مع الحل المعتمد).
     لا تكبير لاحق: اللوحة من image_processor نهائية. البيانات الوصفية تُكتب في الشيت فقط بعد نجاح الرفع.
     الحالة: 'published' (معزولة وليست للمراجعة) | 'needs_review' (رابط ببادئة needs_review:) | 'superseded'
     (لم يُكتب شيء) | 'failed'.
@@ -316,6 +319,7 @@ def publish_image(image_url, name, brand, row_number, worksheet, link_column_ind
                 (override.get("category_l2_en") or "").strip(),
                 (override.get("category_l3_en") or "").strip()))
         folder, tags = _folder_and_tags(metadata)
+        phash = _canvas_phash(result.path)
         link = cloudinary_storage.upload_product_image_to_cloudinary(
             result.path, name, brand, folder=folder, tags=tags,
             target_width=result.width, target_height=result.height,
@@ -324,9 +328,18 @@ def publish_image(image_url, name, brand, row_number, worksheet, link_column_ind
         image_processor.cleanup_processed_image(result.path)
 
     base = {"isolated": bool(result.isolated), "provider": result.provider, "metadata": metadata,
-            "width": result.width, "height": result.height, "profile": profile.as_dict()}
+            "width": result.width, "height": result.height, "profile": profile.as_dict(), "phash": phash,
+            "quality_flags": getattr(result, "quality_flags", None)}
     if not link:
         return dict(base, status="failed", error="upload_failed")
+
+    # نفس الصورة منشورة لمنتج آخر؟ الرفع الموجود مسبقاً (existing من Cloudinary) دليل إضافي فقط
+    owners = local_cache_db.find_image_owners(link, phash, sku_key=sku_key, product_name=name)
+    base["duplicate_of"] = list(owners or [])
+    base["cloudinary_existing"] = getattr(link, "existing", None)
+    if duplicates == "block" and (owners is None or owners):
+        print(f"[Publish] صورة الصف {row_number} منشورة لمنتج آخر (أو تعذر التحقق)؛ لا نشر تلقائي، تُحال للمراجعة.")
+        return dict(base, status="needs_review", error="duplicate_image", link=link)
 
     review = force_review or not result.isolated
     sheet_value = f"needs_review:{link}" if review else link
@@ -346,6 +359,19 @@ def publish_image(image_url, name, brand, row_number, worksheet, link_column_ind
             except Exception as e:
                 print(f"تنبيه: تعذر كتابة البيانات الوصفية للصف {row_number}: {e}")
     return dict(base, status="needs_review" if review else "published", link=link, sheet_value=sheet_value)
+
+
+def _canvas_phash(path):
+    """pHash اللوحة النهائية (16 خانة hex مثل catalog_match.fetch.phash_hex)، أو None."""
+    try:
+        from PIL import Image
+        from catalog_match.fetch import phash_hex
+        with Image.open(path) as img:
+            img.load()
+            return phash_hex(img.convert("RGB"))
+    except Exception as e:
+        print(f"تنبيه: تعذر حساب pHash للوحة النهائية: {e}")
+        return None
 
 
 def _write_still_allowed(before_write):
@@ -381,7 +407,7 @@ def auto_approve_product(task, best_image, worksheet, link_column_index, sku_key
             best_image["url"], name, brand, task["row_number"], worksheet, link_column_index,
             barcode=barcode, candidate_sha256=best_image.get("content_sha256"),
             key_size=task_payload(task).get("size"), key_brand=brand, profile=processing_profile.current(),
-            sku_key=sku_key, before_write=still_ours,
+            sku_key=sku_key, before_write=still_ours, duplicates="block",
         )
     except Exception as e:
         print(f"[Auto-Publish Error] فشل النشر التلقائي لـ [{name}]: {e}")
@@ -390,16 +416,31 @@ def auto_approve_product(task, best_image, worksheet, link_column_index, sku_key
         print(f"[Auto-Publish] الصف {task['row_number']}: اعتمده مراجع أثناء المعالجة أو لم يعد محجوزاً لهذا "
               "العامل؛ لم يُكتب شيء.")
         return "superseded"
+    if res.get("error") == "duplicate_image":
+        _warn_duplicate(best_image)
     if res["status"] == "published":
         local_cache_db.save_product_resolution(
             barcode, name, brand, best_image["url"], res["link"], None, res.get("metadata"),
-            perceptual_hash=best_image.get("phash"), verification_status="auto_verified",
+            perceptual_hash=res.get("phash"), verification_status="auto_verified",
             approved_by="auto", sku_key=sku_key,
         )
         local_cache_db.delete_product_failure(barcode)
     elif res["status"] == "failed":
         print(f"[Auto-Publish] تعذر النشر لـ [{name}] ({res.get('error')}); يحال للمراجعة.")
     return res["status"]
+
+
+DUPLICATE_WARNING = "warn:duplicate_image"
+
+
+def _warn_duplicate(best_image):
+    """تحذير مراجعة على الصورة المختارة (ومرشحها المحفوظ): نفس الصورة منشورة لمنتج آخر."""
+    url = best_image.get("url")
+    for c in [best_image] + [c for c in best_image.get("candidates") or [] if isinstance(c, dict)]:
+        if c is best_image or (url and (c.get("url") or c.get("image_url")) == url):
+            reasons = c.setdefault("reasons", [])
+            if isinstance(reasons, list) and DUPLICATE_WARNING not in reasons:
+                reasons.append(DUPLICATE_WARNING)
 
 
 def _has_human_approval(sku_key):

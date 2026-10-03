@@ -254,6 +254,7 @@ def test_one_processing_profile_for_auto_publish_approval_and_upload(select_env,
     monkeypatch.setattr(config, "ENABLE_IMAGE_ENHANCEMENT", True, raising=False)
     monkeypatch.setattr(config, "BG_REMOVAL_METHOD", "remove_bg_api", raising=False)
     monkeypatch.setattr(local_cache_db, "get_cached_product", lambda **k: None)
+    monkeypatch.setattr(local_cache_db, "find_image_owners", lambda *a, **k: [])
     monkeypatch.setattr(local_cache_db, "delete_product_failure", lambda *a, **k: True)
     original = image_processor.process_product_image_result
     seen = []
@@ -292,6 +293,33 @@ def test_approval_and_upload_write_with_the_brand_identity(select_env, tmp_path)
     assert len(writes) == 4
     assert all(w["brand"] == "Almarai" and w["barcode"] == "6281007000024" for w in writes)
     assert writes[0]["size"] == "1L"
+
+
+def test_an_explicit_approval_of_another_products_image_is_written_with_a_warning(select_env, monkeypatch):
+    """Auto-publish refuses an image another product already owns; the reviewer's explicit approval goes through
+    but names the other product, and the canvas hash is stored with the approval."""
+    import local_cache_db
+    bridge, events, state = select_env
+    owner = {"sku_key": "06291003000013", "product_name": "Masafi Water 1.5L", "brand": "Masafi",
+             "cloudinary_url": "https://res.cloudinary.com/demo/masafi.png", "verification_status": "human_approved",
+             "match": "phash", "distance": 2}
+    seen = []
+    monkeypatch.setattr(local_cache_db, "find_image_owners",
+                        lambda url, phash, sku_key=None, product_name=None: seen.append((url, sku_key)) or [owner])
+    monkeypatch.setattr(main_module(), "_canvas_phash", lambda path: "00ff00ff00ff00ff")
+    result = bridge.action_select_image(dict(SELECT_PARAMS))
+    assert result["status"] == "success"
+    assert result["warning"] == "duplicate_image" and result["warnings"] == ["duplicate_image"]
+    assert result["duplicate_of"] == [owner]
+    assert seen == [(result["image_link"], "06281007000024")]
+    assert any(e[0] == "link" for e in events)
+    _, args, kwargs = next(e for e in events if e[0] == "resolution")
+    assert kwargs["perceptual_hash"] == "00ff00ff00ff00ff" and kwargs["verification_status"] == "human_approved"
+
+
+def main_module():
+    import main
+    return main
 
 
 def test_select_not_isolated_writes_needs_review(select_env):

@@ -319,3 +319,101 @@ def test_auto_publish_against_the_real_queue_after_a_mid_processing_approval(db,
     status = main.auto_approve_product(task, {"url": "https://src/auto.jpg"}, object(), 5, sku_key=sku)
     assert status == "superseded" and written == []
     assert _resolution(db, sku) == [("https://res/human.png", "human_approved")]
+
+
+# ---------------------------------------------------------------------------
+# Item 7: the same image published for two products
+# ---------------------------------------------------------------------------
+
+def _hex(value):
+    return f"{value:016x}"
+
+
+def test_find_image_owners(db):
+    base = 0x0F0F_F0F0_3C3C_A5A5
+    rows = [
+        # (sku, name, cloudinary url, phash, status)
+        (SKUS[1], "Product Q", "https://res/q.png", _hex(base ^ 0b1111), "human_approved"),       # distance 4
+        (SKUS[2], "Product R", "https://res/r.png", _hex(base ^ 0b11111), "auto_verified"),       # distance 5
+        (SKUS[3], "Product S", "https://res/shared.png", None, "auto_verified"),                  # same URL
+        (SKUS[0], "Product P", "https://res/p-old.png", _hex(base), "human_approved"),           # own product
+    ]
+    for sku, name, url, phash, status in rows:
+        assert db.save_product_resolution("", name, "Brand", f"https://src/{sku}.jpg", url, perceptual_hash=phash,
+                                          verification_status=status, approved_by="test", sku_key=sku)
+    owners = db.find_image_owners("https://res/shared.png", _hex(base), sku_key=SKUS[0], product_name="Product P")
+    assert [(o["sku_key"], o["match"], o["distance"]) for o in owners] == [(SKUS[3], "url", 0), (SKUS[1], "phash", 4)]
+    # a superseded owner no longer owns the image
+    db.supersede_resolution(SKUS[1])
+    assert [o["sku_key"] for o in db.find_image_owners(None, _hex(base), sku_key=SKUS[0])] == []
+    assert db.find_image_owners(None, None, sku_key=SKUS[0]) == []
+
+
+def _poster(path, color=(200, 30, 30)):
+    from PIL import Image, ImageDraw
+    img = Image.new("RGB", (800, 800), "white")
+    ImageDraw.Draw(img).rectangle([250, 120, 550, 700], fill=color)
+    ImageDraw.Draw(img).ellipse([320, 200, 480, 360], fill=(20, 20, 160))
+    img.save(path)
+    return str(path)
+
+
+@pytest.fixture
+def publishing(db, monkeypatch, tmp_path):
+    """publish_image with the real database, a recorded sheet and a fake processing that returns `canvas`."""
+    import cloudinary_storage
+    import google_sheets
+    import image_processor
+    import local_cache_db
+    import main
+
+    state = {"canvas": _poster(tmp_path / "poster.png"), "link": "https://res/poster.png", "sheet": []}
+
+    def processing(*a, **k):
+        import shutil as sh
+        out = tmp_path / f"canvas_{len(state['sheet'])}_{os.urandom(3).hex()}.png"
+        sh.copy(state["canvas"], out)
+        return image_processor.ProcessResult(str(out), True, "photoroom", None, 800, 800)
+
+    monkeypatch.setattr(image_processor, "process_product_image_result", processing)
+    monkeypatch.setattr(image_processor, "extract_metadata_from_image", lambda *a, **k: {})
+    monkeypatch.setattr(cloudinary_storage, "upload_product_image_to_cloudinary", lambda *a, **k: state["link"])
+    monkeypatch.setattr(google_sheets, "update_image_link", lambda *a, **k: state["sheet"].append((a[1], a[3])) or True)
+    monkeypatch.setattr(local_cache_db, "delete_product_failure", lambda *a, **k: True)
+    return main, state
+
+
+def test_the_published_image_hash_is_stored_and_blocks_another_products_auto_publish(publishing):
+    main, state = publishing
+    import local_cache_db as db
+    task_p = {"id": 1, "row_number": ROWS[0], "product_name": "Product P", "brand": "Brand", "payload_json": "{}"}
+    assert main.auto_approve_product(task_p, {"url": "https://src/p.jpg"}, object(), 5, sku_key=SKUS[0]) == "published"
+    stored = db.get_cached_product(sku_key=SKUS[0])
+    assert stored["perceptual_hash"] and len(stored["perceptual_hash"]) == 16
+
+    # another product's auto-publish produces the same canvas (another upload URL): blocked, nothing written
+    state["link"] = "https://res/poster-again.png"
+    best = {"url": "https://src/q.jpg", "candidates": [{"url": "https://src/q.jpg", "status": "preselected",
+                                                        "reasons": ["tier T1"]}]}
+    task_q = dict(task_p, id=2, row_number=ROWS[1], product_name="Product Q")
+    assert main.auto_approve_product(task_q, best, object(), 5, sku_key=SKUS[1]) == "needs_review"
+    assert state["sheet"] == [(ROWS[0], "https://res/poster.png")]
+    assert db.get_cached_product(sku_key=SKUS[1]) is None
+    assert "warn:duplicate_image" in best["candidates"][0]["reasons"]
+
+    # the same product publishing its own image again is not a duplicate
+    state["link"] = "https://res/poster.png"
+    assert main.auto_approve_product(task_p, {"url": "https://src/p.jpg"}, object(), 5, sku_key=SKUS[0]) == "published"
+
+
+def test_a_different_image_is_not_a_duplicate(publishing, tmp_path):
+    main, state = publishing
+    task_p = {"id": 1, "row_number": ROWS[0], "product_name": "Product P", "brand": "Brand", "payload_json": "{}"}
+    assert main.auto_approve_product(task_p, {"url": "https://src/p.jpg"}, object(), 5, sku_key=SKUS[0]) == "published"
+    from PIL import Image, ImageDraw
+    other = Image.new("RGB", (800, 800), "white")
+    ImageDraw.Draw(other).ellipse([100, 300, 700, 500], fill=(30, 160, 30))
+    other.save(tmp_path / "other.png")
+    state["canvas"], state["link"] = str(tmp_path / "other.png"), "https://res/other.png"
+    task_q = dict(task_p, id=2, row_number=ROWS[1], product_name="Product Q")
+    assert main.auto_approve_product(task_q, {"url": "https://src/q.jpg"}, object(), 5, sku_key=SKUS[1]) == "published"
