@@ -47,7 +47,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 import requests
 from PIL import Image
 
-from . import settings
+from . import cassette, settings
 from .fetch import load_image
 from .gtin import gtin13
 from .models import FetchedImage, SkuSpec, VerificationResult, VlmImageVerdict
@@ -542,7 +542,7 @@ class GeminiVerifier:
 
     def _post(self, url: str, headers: dict, body: dict):
         poster = self.session.post if self.session is not None else requests.post
-        return poster(url, headers=headers, json=body, timeout=self.timeout)
+        return cassette.verifier(lambda: poster(url, headers=headers, json=body, timeout=self.timeout))
 
     def _retry_delay(self, resp, attempt: int) -> float:
         retry_after = None
@@ -589,6 +589,7 @@ class GeminiVerifier:
             return self._unknown(n, "no_images")
 
         prompt = build_prompt(spec, len(slots), focus=True) if self.focus else build_prompt(spec, len(slots))
+        cassette.verifier_scope(self.provider, self.model, self.focus, self.long_side, prompt, images, slots)
         body = {
             "contents": [{"role": "user", "parts": [{"text": prompt}] + parts}],
             "generationConfig": {

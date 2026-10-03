@@ -16,7 +16,7 @@ from typing import Any, List, Optional
 
 import requests
 
-from .. import settings
+from .. import cassette, settings
 from ..models import Candidate, SkuSpec
 from .base import BaseProvider, ProviderHTTPError, page_domain, response_text, to_int
 
@@ -72,12 +72,12 @@ class SerperImagesProvider(BaseProvider):
     def _post(self, key: str, query: str, hl: str):
         payload = {"q": query, "gl": self.gl, "hl": hl or "en", "num": self.num}
         http = self._session or requests
-        return http.post(
+        return cassette.http(self.name, "POST", SERPER_IMAGES_URL, lambda: http.post(
             SERPER_IMAGES_URL,
             headers={"X-API-KEY": key, "Content-Type": "application/json"},
             json=payload,
             timeout=self.timeout,
-        )
+        ), body=payload)
 
     def _search(self, query: str, hl: str, spec: SkuSpec) -> List[Candidate]:
         key = self.api_key()

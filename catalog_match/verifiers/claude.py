@@ -29,7 +29,7 @@ import threading
 import time
 from typing import Any, Callable, Dict, List, Optional
 
-from .. import settings
+from .. import cassette, settings
 from ..fetch import load_image
 from ..models import FetchedImage, SkuSpec, VerificationResult, VlmImageVerdict
 from ..verify import (
@@ -204,8 +204,8 @@ class ClaudeVerifier:
 
     def _send(self, client, kwargs: Dict[str, Any]):
         if self.thinking:
-            return client.beta.messages.create(**kwargs)
-        return client.messages.create(**kwargs)
+            return cassette.verifier(lambda: client.beta.messages.create(**kwargs))
+        return cassette.verifier(lambda: client.messages.create(**kwargs))
 
     def _retry_delay(self, exc: Exception, attempt: int) -> float:
         response = getattr(exc, "response", None)
@@ -255,6 +255,7 @@ class ClaudeVerifier:
         slots, dims, content, prompt = self._content(spec, images)
         if not slots:
             return self._unknown(n, "no_images")
+        cassette.verifier_scope(self.provider, self.model, self.focus, self.long_side, prompt, images, slots)
         try:
             client = self._client if self._client is not None else _client_for(key, self.timeout)
         except Exception as exc:

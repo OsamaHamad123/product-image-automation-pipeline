@@ -30,7 +30,7 @@ from urllib.parse import parse_qs, urlsplit
 import requests
 from bs4 import BeautifulSoup
 
-from .. import settings
+from .. import cassette, settings
 from ..models import Candidate, SkuSpec
 from .base import BaseProvider, ProviderBlocked, ProviderHTTPError, page_domain, response_text, to_int
 
@@ -83,7 +83,7 @@ class BingHtmlProvider(BaseProvider):
         headers = dict(HEADERS)
         headers["Accept-Language"] = "ar-AE,ar;q=0.9,en;q=0.8" if lang == "ar" else "en-US,en;q=0.9"
         params = {"q": query, "form": "HDRSC2", "first": "1", "cc": "AE", "setlang": lang}
-        resp = self._get(params, headers)
+        resp = cassette.http(self.name, "GET", BING_IMAGES_URL, lambda: self._get(params, headers), params=params)
         if resp.status_code != 200:
             raise ProviderHTTPError(resp.status_code, response_text(resp))
         final_url = str(getattr(resp, "url", "") or "")
