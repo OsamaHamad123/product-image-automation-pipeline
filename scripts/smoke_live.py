@@ -16,7 +16,9 @@ Without the Google Sheet (a machine with the keys but no credentials.json, e.g. 
 brand_ar, barcode, category, size; the sheet's header synonyms work too) or from an earlier
 --json file (its rows' name and brand). --rows still picks rows from it. --brands-file reads a
 Brands Mapping CSV in the tab's layout (Brand, Synonyms, Excluded Competitors, Sub-brands,
-Official domains); without it a file run has no brand mappings (every brand is sheet_raw).
+Official domains); without it a file run has no brand mappings (every brand is sheet_raw). Every
+run prints how many Brands Mapping entries it uses and how many of its rows have a mapped brand, and
+warns when none has.
 
 --probe makes one cheap, read-only call per configured service (Serper images, web search,
 shopping and lens; SerpApi; the primary and the strong label-reading model; Anthropic;
@@ -83,12 +85,15 @@ _CONNECTIVITY_RE = re.compile(
 _LINK_DOWN_RE = re.compile(r"connection|connect|name resolution|getaddrinfo|unreachable|refused|ssl|proxy",
                            re.IGNORECASE)
 
-# Why a measured row has no pick, in the order they are tested, with the words the summary prints.
+# Why a measured row has no pick, with the words the summary prints (unselected_reason() tests them in its
+# own order). The label reader's readings count only on listings that name the brand (tier 1 or 2): another
+# brand's listing it rejected is not why the product had no pick.
 UNSELECTED_REASONS = (
     ("verifier_mismatch", "label reader saw another product"),
     ("unsure", "label reader was unsure"),
     ("download_failed", "every image download failed"),
     ("only_social", "only social-media images"),
+    ("brand_not_found", "brand not found (no listing names it)"),
     ("not_found", "nothing matched the name"),
     ("provider_down", "search service refused or failed"),
     ("verifier_down", "label reader unavailable"),
@@ -380,6 +385,31 @@ def read_brand_mappings(spreadsheet):
     return mappings
 
 
+def mapping_report(rows, mappings, identity):
+    """Lines saying how many Brands Mapping entries the run uses and how many of its rows have a mapped brand,
+    with a warning when none has: the live run of 2026-10-03 (smoke_6.json) ran without any mapping, so every
+    brand was 'sheet_raw' (no auto-publish, misspellings unfixed, no excluded competitors) and nothing said so."""
+    mappings = mappings or {}
+    learned = sum(1 for v in mappings.values() if isinstance(v, dict) and (v.get("learned") or v.get("sources_only")))
+    mapped = 0
+    for row in rows or []:
+        try:
+            spec = identity.build_sku_spec({k: row.get(k, "") for k in ("name", "name_ar", "brand", "brand_ar",
+                                                                        "barcode", "category", "size")}, mappings)
+        except Exception:      # a row the identity cannot read is reported by the run itself
+            continue
+        if getattr(spec, "brand_conf", "") in ("mapped", "learned"):
+            mapped += 1
+    n = len(rows or [])
+    entries = f"{len(mappings) - learned} entries" + (f" + {learned} learned from reviews" if learned else "")
+    lines = [f"Brands Mapping: {entries} loaded | {mapped} of {n} rows have a mapped brand"]
+    if n and not mapped:
+        lines.append("WARNING: none of this run's brands is in the Brands Mapping: every brand is searched as the "
+                     "sheet writes it (no auto-publish, sheet misspellings unfixed, no excluded competitors). Fill "
+                     "the 'Brands Mapping' tab or pass --brands-file (e.g. runs/2026-10-03/brands_mapping_suggested.csv).")
+    return lines
+
+
 def load_v2():
     """The catalog_match stages; a clear message when a stage is not merged yet."""
     try:
@@ -586,7 +616,9 @@ def run_row(row, mappings, identity, pipeline, providers_mod, verify_mod, serp_c
         position = next(i for i, rc in enumerate(outcome.ranked, 1) if rc is outcome.winner)
         winner = _describe(outcome.winner, position)
     survivors = [rc for rc in outcome.ranked if _survives(rc.status, rc.reasons)]
-    verdicts = Counter(rc.verdict.decision for rc in survivors if rc.verdict is not None)
+    # the listings that name the brand: why a row has no pick is read on them, never on another brand's listing
+    brand = [rc for rc in survivors if rc.score is not None and rc.score.tier in (1, 2)]
+    verdicts = Counter(rc.verdict.decision for rc in brand if rc.verdict is not None)
     record = {
         "row": row["row_number"], "name": row["name"], "brand": row["brand"], "sku_key": spec.sku_key,
         "brand_conf": spec.brand_conf, "gtin_status": spec.gtin_status, "variants": dict(spec.variants),
@@ -602,8 +634,10 @@ def run_row(row, mappings, identity, pipeline, providers_mod, verify_mod, serp_c
                             if k != "usage"} for entry in verifier.log],
         "vlm_usage": usage, "strong_calls": sum(1 for u in usage if u.get("role") == "strong"),
         "verdicts": dict(verdicts),
-        "only_social": bool(survivors) and all(is_social(rc.candidate.image_url, rc.candidate.page_url,
-                                                         rc.candidate.domain) for rc in survivors),
+        "brand_found": bool(brand),
+        "only_social": outcome.failure_code == "SOCIAL_ONLY" or (bool(brand) and all(
+            is_social(rc.candidate.image_url, rc.candidate.page_url, rc.candidate.domain) for rc in brand)),
+        "social_links": list(getattr(outcome, "social_links", None) or []),
         "expansion": {"ran": bool(exp), "kind": ("upgrade" if any(c.get("query_id") == "XU" for c in exp)
                                                  else "expand") if exp else "", "calls": len(exp)},
         "serp_calls": serp_calls,
@@ -622,6 +656,7 @@ def _describe(rc, position):
     v = rc.verdict
     return {
         "rank": position, "status": rc.status, "reasons": list(rc.reasons), "warnings": warning_codes(rc.reasons),
+        "tier": rc.score.tier if rc.score is not None else None,
         "provider": rc.candidate.provider, "domain": rc.candidate.domain, "query_id": rc.candidate.query_id,
         "sanctioned": rc.candidate.sanctioned, "title": rc.candidate.title or rc.candidate.page_title,
         "image_url": rc.candidate.image_url, "page_url": rc.candidate.page_url, "evidence": _evidence(rc),
@@ -664,37 +699,91 @@ def outage_reason(r):
     return None
 
 
+_TIER_RE = re.compile(r"\btier=(\d|None)\b")
+_UNKNOWN_TIER = "?"
+
+
+def _tier(c):
+    """A top-list entry's identity tier: its 'tier' field, else the 'tier=N' of its evidence text (older
+    files); _UNKNOWN_TIER when the file does not say."""
+    if "tier" in c:
+        return c["tier"]
+    m = _TIER_RE.search(str(c.get("evidence") or ""))
+    if m is None:
+        return _UNKNOWN_TIER
+    return None if m.group(1) == "None" else int(m.group(1))
+
+
+def _survivors(r):
+    return [c for c in r.get("top") or [] if _survives(c.get("status"), c.get("reasons"))]
+
+
+def _brand_survivors(r):
+    """The top list's survivors that name the brand (tier 1 or 2); None when the file does not say the tiers."""
+    survivors = _survivors(r)
+    tiers = [_tier(c) for c in survivors]
+    if any(t == _UNKNOWN_TIER for t in tiers):
+        return None
+    return [c for c, t in zip(survivors, tiers) if t in (1, 2)]
+
+
+def _brand_found(r):
+    """True / False when the row's record or its top list says whether any listing named the brand, else None."""
+    if "brand_found" in r:
+        return bool(r["brand_found"])
+    if not _survivors(r):
+        return None
+    brand = _brand_survivors(r)
+    return None if brand is None else bool(brand)
+
+
 def _only_social(r):
+    """Every listing that names the brand is a social-network post (live run 2026-10-03, rows 29, 38, 41: the
+    pipeline's failure code SOCIAL_ONLY when none of their pictures could be downloaded). Older files without
+    tiers: every survivor is a social post."""
+    if r.get("failure_code") == "SOCIAL_ONLY":
+        return True
     if "only_social" in r:
         return bool(r["only_social"])
-    survivors = [c for c in r.get("top") or [] if _survives(c.get("status"), c.get("reasons"))]
-    return bool(survivors) and all(is_social(c.get("image_url"), c.get("page_url"), c.get("domain"))
-                                   for c in survivors)
+    brand = _brand_survivors(r)
+    pool = brand if brand is not None else _survivors(r)
+    return bool(pool) and all(is_social(c.get("image_url"), c.get("page_url"), c.get("domain")) for c in pool)
 
 
 def _verdicts(r):
+    """The label reader's readings of the listings that name the brand (all survivors in a file without tiers)."""
     if isinstance(r.get("verdicts"), dict):
         return Counter(r["verdicts"])
-    found = Counter((c.get("vlm") or {}).get("decision") for c in r.get("top") or []
-                    if c.get("vlm") and _survives(c.get("status"), c.get("reasons")))
-    mismatches = int((r.get("reject_counts") or {}).get("vlm:MISMATCH") or 0)
-    found["MISMATCH"] = max(found.get("MISMATCH", 0), mismatches)
+    brand = _brand_survivors(r)
+    pool = brand if brand is not None else _survivors(r)
+    found = Counter((c.get("vlm") or {}).get("decision") for c in pool if c.get("vlm"))
+    if brand is None:
+        # no tiers in the file: the run's own count is the best it says (rows beyond the top 5 included)
+        mismatches = int((r.get("reject_counts") or {}).get("vlm:MISMATCH") or 0)
+        found["MISMATCH"] = max(found.get("MISMATCH", 0), mismatches)
     return found
 
 
 def unselected_reason(r):
-    """Why a row without a pick has none: one of UNSELECTED_REASONS' keys."""
+    """Why a row without a pick has none: one of UNSELECTED_REASONS' keys.
+
+    Computed over the listings that name the brand (tier 1 or 2): in the live run of 2026-10-03 rows 38
+    and 41 were 'label reader saw another product' because it rejected other brands' listings, while
+    only social-network posts had shown the product; rows 3 and 26 had no listing of the brand at all.
+    """
     decision, code = r.get("decision"), r.get("failure_code")
     if decision == "PROVIDER_DOWN":
         return "provider_down"
     if decision == "NOT_FOUND":
         return "not_found"
+    if _only_social(r):
+        return "only_social"
     if code == "DOWNLOAD_FAILED":
         return "download_failed"
     if decision == "VERIFIER_DOWN" or code == "VERIFIER_DOWN":
         return "verifier_down"
-    if _only_social(r):
-        return "only_social"
+    if _brand_found(r) is False:
+        return "brand_not_found"
     verdicts = _verdicts(r)
     refuted = int((r.get("reject_counts") or {}).get("vlm:tier1_brand_refuted") or 0)
     if verdicts.get("UNSURE") and not refuted:
@@ -903,6 +992,8 @@ def print_row(r):
         print(f"  OUTAGE {r['outage']} (left out of the coverage)")
     elif r.get("unselected_reason"):
         print(f"  NO PICK {dict(UNSELECTED_REASONS).get(r['unselected_reason'], r['unselected_reason'])}")
+    for link in r.get("social_links") or []:
+        print(f"  SOCIAL POST {link}")
     usage = r.get("vlm_usage") or []
     if usage:
         models = Counter(f"{u.get('provider')}:{u.get('model')}{' (strong)' if u.get('role') == 'strong' else ''}"
@@ -1452,6 +1543,8 @@ def main(argv=None):
     # what the reviewers taught, as the worker sees it (google_sheets.get_brand_mappings); none without a database
     from catalog_match import learning
     mappings = learning.load_and_apply(mappings)
+    for line in mapping_report(rows, mappings, identity):
+        print(line)
     expansion = False if args.no_expansion else True
     meta = run_meta(args, settings, pipeline, expansion)
     print(f"dry run on {len(rows)} rows | Serper key {'set' if settings.serper_api_key() else 'MISSING'} | "

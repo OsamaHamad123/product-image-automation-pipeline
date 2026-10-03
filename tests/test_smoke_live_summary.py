@@ -43,8 +43,8 @@ def test_summary_of_a_run_in_the_older_list_format(script):
     assert s["outage_row_numbers"] == [20, 21] and s["error_row_numbers"] == [55]
     assert (s["preselected"], s["auto_publish"], s["coverage_pct"]) == (4, 0, 40.0)
     assert s["unselected_rows"] == {"verifier_mismatch": [3, 15], "unsure": [14, 61], "download_failed": [],
-                                    "only_social": [30], "not_found": [50], "provider_down": [],
-                                    "verifier_down": [], "weak_only": []}
+                                    "only_social": [30], "brand_not_found": [], "not_found": [50],
+                                    "provider_down": [], "verifier_down": [], "weak_only": []}
     assert sum(s["unselected"].values()) == s["measured"] - s["preselected"]
     assert s["winner_providers"] == {"serper": 4}
     assert s["winner_domains"] == {"luluhypermarket.com": 1, "carrefouruae.com": 1, "amazon.ae": 1, "noon.com": 1}
@@ -65,7 +65,8 @@ def test_summary_of_a_run_in_this_format(script):
     assert (s["rows"], s["outage_rows"], s["errors"], s["measured"]) == (13, 0, 0, 13)
     assert (s["preselected"], s["coverage_pct"]) == (8, 61.5)
     assert {k: v for k, v in s["unselected_rows"].items() if v} == {
-        "verifier_mismatch": [15], "unsure": [21], "only_social": [30], "not_found": [50], "weak_only": [55]}
+        "verifier_mismatch": [15], "unsure": [21], "only_social": [30], "not_found": [50],
+        "brand_not_found": [55]}       # its one listing does not name the brand (tier 3)
     assert s["winner_providers"] == {"serper": 6, "page": 1, "lens_serper": 1}
     assert s["winner_domains"]["luluhypermarket.com"] == 3
     # rows 3 and 15 ran an expansion round (2 calls each), row 40 an upgrade (1 visual search);
