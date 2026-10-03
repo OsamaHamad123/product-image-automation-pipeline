@@ -896,6 +896,66 @@ def test_the_reconcile_reads_every_outbox_page(mariadb_or_skip):
         conn.close()
 
 
+# ---------------------------------------------------------------------------
+# Plausible: LOCAL_INDEX_CHANGED keyed on the whole brand, within the retry schedule
+# ---------------------------------------------------------------------------
+
+def test_new_index_pages_do_not_reopen_an_exhausted_row(offline):
+    import local_cache_db
+    old = {"sku_key": "k", "status": "failed", "failure_code": "NO_RESULTS", "fail_count": 4, "reverify_count": 0,
+           "priority": 2, "live": 0, "has_next": 0, "due": 0, "brand_fp": "fp"}
+    new = {"sku_key": "k", "requeue_reason": "LOCAL_INDEX_CHANGED", "brand_fp": "fp"}
+    assert local_cache_db.plan_queue_row(old, new) == ("keep", None)
+    action, fields = local_cache_db.plan_queue_row(dict(old, fail_count=2, has_next=1), new)
+    assert (action, fields["requeue_reason"]) == ("reset", "LOCAL_INDEX_CHANGED")       # within the schedule
+    action, fields = local_cache_db.plan_queue_row(old, dict(new, brand_fp="fp-new"))
+    assert (action, fields["requeue_reason"]) == ("reset", "BRAND_MAPPING_CHANGED")     # the owner's own edit
+
+
+@pytest.fixture
+def catalog(db):
+    def wipe():
+        _sql(db, "DELETE FROM catalog_products WHERE store = 'p4ftest'")
+
+    wipe()
+    yield db
+    wipe()
+
+
+def _catalog_page(db, url, words):
+    _sql(db, "INSERT INTO catalog_products (store, url, url_hash, slug_text, first_seen, last_seen) "
+             "VALUES ('p4ftest', %s, SHA1(%s), %s, NOW(), NOW())", (url, url, " ".join(words)))
+    pid = _sql(db, "SELECT id FROM catalog_products WHERE url = %s", (url,))[0]["id"]
+    for w in words:
+        _sql(db, "INSERT INTO catalog_tokens (token, product_id) VALUES (%s, %s)", (w, pid))
+
+
+def test_a_new_page_must_carry_the_whole_brand(catalog):
+    """LOCAL_INDEX_CHANGED keyed on the longest brand word: any new page with 'sun' re-searched every NOT_FOUND row of
+    «Sun Top» (and of every other brand with that word)."""
+    import main
+    db = catalog
+    prod = {"row_number": ROW, "product_name": "P4F Sun Top Orange Juice 250ml", "brand": "Sun Top", "barcode": "",
+            "existing_image_link": ""}
+    rows, _ = main.plan_enqueue([prod])
+    db.add_many_to_queue(rows)
+    task = db.fetch_next_task("host:1")
+    db.update_task_status(task["id"], "failed", failure_code="NO_RESULTS", claim_id=task["worker_id"])
+    _sql(db, "UPDATE automation_queue SET searched_at = NOW() - INTERVAL 1 DAY WHERE id = %s", (task["id"],))
+
+    _catalog_page(db, "https://shop.example/sun-maid-raisins", ["sun", "maid", "raisins"])
+    rows, stats = main.plan_enqueue([prod])
+    assert rows[0]["requeue_reason"] is None and stats["index_changed"] == 0
+
+    _catalog_page(db, "https://shop.example/sun-top-orange-250ml", ["sun", "top", "orange"])
+    rows, stats = main.plan_enqueue([prod])
+    assert rows[0]["requeue_reason"] == "LOCAL_INDEX_CHANGED" and stats["index_changed"] == 1
+
+    _sql(db, "UPDATE automation_queue SET fail_count = 4 WHERE id = %s", (task["id"],))      # no retries left
+    rows, stats = main.plan_enqueue([prod])
+    assert rows[0]["requeue_reason"] is None and stats["index_changed"] == 0
+
+
 def test_stopping_from_the_dashboard_returns_unclaimed_rechecks_to_review(db):
     """The dashboard's stop ends the worker process (its finally may not run); stop_run settles the queue."""
     _verifier_down_review_row(db, 0)

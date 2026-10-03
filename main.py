@@ -1166,14 +1166,17 @@ def _link_write_state(records, link):
     return matching[-1]["status"] if matching else None
 
 
-def _brand_index_token(spec):
-    """أطول كلمة (3 أحرف فأكثر) لكل عبارة براند كما يخزنها الفهرس المحلي، للكشف عن صفحات جديدة للبراند."""
+def _brand_index_phrases(spec):
+    """
+    كل عبارة براند (اسم الشيت ومرادفاته) ككلماتها في الفهرس المحلي (3 أحرف فأكثر، tuple مرتبة)، للكشف عن صفحات
+    جديدة للبراند: الصفحة تحمل كل كلمات العبارة، لا أطولها وحدها ('sun' من «Sun Top» تطابق كل براند فيه sun).
+    """
     from catalog_match.local_index import index_keys
     out = set()
     for phrase in tuple(spec.match_brands or ()) + (spec.brand_raw or "",):
-        keys = [k for k in index_keys(phrase) if len(k) >= 3]
+        keys = tuple(sorted({k for k in index_keys(phrase) if len(k) >= 3}))
         if keys:
-            out.add(max(keys, key=len))
+            out.add(keys)
     return out
 
 
@@ -1246,14 +1249,16 @@ def plan_enqueue(products, reprocess=False, brand_mappings=None):
             e["task_kind"] = local_cache_db.TASK_RELINK
             e["reason"] = "SHEET_WRITE_RETRY" if state in ("CONFLICT", "DEAD") else "APPROVED_IMAGE"
 
-    # «لا نتيجة» تنتظر موعدها: هل ظهرت صفحات جديدة للبراند في الفهرس المحلي منذ آخر بحث؟
+    # «لا نتيجة» تنتظر موعدها: هل ظهرت صفحات جديدة للبراند في الفهرس المحلي منذ آخر بحث؟ صف استنفد محاولاته
+    # (3 / 7 / 30 يوماً) لا يعود بها كل ليلة: يبقى فاشلاً حتى يتغير مدخل البراند أو يُطلب من جديد
     sleeping = []
     for e in entries:
         old = queue.get(e["prod"]["row_number"])
         if (not e.get("skip") and e["task_kind"] is None and not e["reason"] and old
                 and old.get("status") == "failed" and old.get("failure_code") in local_cache_db.NOT_FOUND_CODES
-                and old.get("sku_key") == e["sku_key"] and old.get("searched_at")):
-            e["tokens"] = _brand_index_token(e["spec"])
+                and old.get("sku_key") == e["sku_key"] and old.get("searched_at")
+                and int(old.get("fail_count") or 0) <= len(local_cache_db.NOT_FOUND_RETRY_DAYS)):
+            e["tokens"] = _brand_index_phrases(e["spec"])
             sleeping.append((e, old["searched_at"]))
     if sleeping:
         news = local_cache_db.catalog_brand_news(set().union(*(e["tokens"] for e, _ in sleeping)))

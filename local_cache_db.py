@@ -1527,7 +1527,8 @@ def plan_queue_row(old, new, reprocess=False):
     - حجز ساري لعامل: يبقى كما هو.
     - كتابة رابط معتمد (task_kind='relink'): تعود للانتظار مهما كانت الحالة.
     - جاهز للمراجعة: يبقى. مكتمل: يبقى، إلا إذا مُسح رابطه من الشيت (REOPEN_REASONS).
-    - فاشل بـ «لا نتيجة»: يبقى حتى يحين موعده (3 / 7 / 30 يوماً) أو يتغير مدخل البراند أو الفهرس المحلي.
+    - فاشل بـ «لا نتيجة»: يبقى حتى يحين موعده (3 / 7 / 30 يوماً) أو يتغير مدخل البراند أو الفهرس المحلي
+      (الفهرس المحلي لا يعيد صفاً استنفد محاولاته).
       فاشل لسبب آخر: يعود للانتظار (إعادة محاولة).
     - في الانتظار (أو حجز انتهى): يعود للانتظار بأولويته، والمحاولة التالية الآن.
     """
@@ -1557,7 +1558,11 @@ def plan_queue_row(old, new, reprocess=False):
             due = not exhausted and (not old.get("has_next") or bool(old.get("due")))
             if brand_changed:
                 reason = "BRAND_MAPPING_CHANGED"
-            elif reason != "LOCAL_INDEX_CHANGED":
+            elif reason == "LOCAL_INDEX_CHANGED":
+                if exhausted:
+                    # صفحات جديدة للبراند لا تتجاوز نهاية الجدول: صف استنفد محاولاته لا يُبحث عنه كل ليلة
+                    return "keep", None
+            else:
                 if not due:
                     return "keep", None
                 reason = "SCHEDULED_RETRY"
@@ -2363,28 +2368,42 @@ def resolution_snapshot():
     return {"by_key": by_key, "by_url": by_url}
 
 
-def catalog_brand_news(tokens):
+def catalog_brand_news(phrases):
     """
-    {كلمة براند: أحدث first_seen} لصفوف الفهرس المحلي التي تحمل كل كلمة: متجر بدأ يعرض منتجات جديدة لهذا البراند.
-    {} عند الخطأ (يُسجل): لا إعادة بحث مبكرة، والجدول الزمني يبقى.
+    {عبارة براند: أحدث first_seen} لصفوف الفهرس المحلي التي تحمل كل كلمات العبارة: متجر بدأ يعرض منتجات جديدة لهذا
+    البراند. العبارة tuple كلمات مرتبة (نص = كلمة واحدة، ومفتاحه tuple من كلمة)؛ صفحة فيها كلمة واحدة من «Sun Top»
+    ('sun') ليست صفحة لهذا البراند. {} عند الخطأ (يُسجل): لا إعادة بحث مبكرة، والجدول الزمني يبقى.
     """
-    tokens = sorted({str(t) for t in tokens or [] if t})
+    wanted = set()
+    for p in phrases or []:
+        words = tuple(sorted({str(w) for w in ((p,) if isinstance(p, str) else p) if w}))
+        if words:
+            wanted.add(words)
     out = {}
-    if not tokens:
+    if not wanted:
         return out
     try:
         conn = get_db_connection()
         try:
             cursor = conn.cursor()
-            for start in range(0, len(tokens), 500):
-                part = tokens[start:start + 500]
+            singles = sorted(w[0] for w in wanted if len(w) == 1)
+            for start in range(0, len(singles), 500):
+                part = singles[start:start + 500]
                 cursor.execute(
                     "SELECT t.token, MAX(p.first_seen) AS newest FROM catalog_tokens t "
                     "JOIN catalog_products p ON p.id = t.product_id "
                     f"WHERE t.token IN ({','.join(['%s'] * len(part))}) GROUP BY t.token", tuple(part))
                 for r in cursor.fetchall() or []:
                     if r.get("newest") is not None:
-                        out[r["token"]] = r["newest"]
+                        out[(r["token"],)] = r["newest"]
+            for words in sorted(w for w in wanted if len(w) > 1):
+                cursor.execute(
+                    "SELECT MAX(p.first_seen) AS newest FROM catalog_products p JOIN (SELECT product_id "
+                    f"FROM catalog_tokens WHERE token IN ({','.join(['%s'] * len(words))}) GROUP BY product_id "
+                    "HAVING COUNT(DISTINCT token) = %s) t ON t.product_id = p.id", words + (len(words),))
+                row = cursor.fetchone() or {}
+                if row.get("newest") is not None:
+                    out[words] = row["newest"]
         finally:
             _close(conn)
     except Exception as e:
