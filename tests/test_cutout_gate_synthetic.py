@@ -201,6 +201,23 @@ def test_nothing_removed_on_a_studio_backdrop_is_still_opaque_fill(work, bg):
     assert (result.isolated, result.provider, result.quality_flags) == (True, "remove_bg_api", [])
 
 
+def test_nothing_removed_on_a_coloured_backdrop_is_opaque_fill_when_gemini_locates_the_product(work):
+    # A uniform saturated band may be a printed carton's edge, so on its own it is not a backdrop; when the Gemini
+    # box says the product is a small part of the frame, a fully opaque answer means nothing was removed.
+    shot = ps.make("bottle", (600, 900), bg=(240, 200, 30))
+    noop = ps.opaque_provider(shot)
+
+    result, services = run(shot, work, photoroom=noop)
+    assert result.isolated is False and result.quality_flags == [ip.FLAG_OPAQUE_FILL]
+    assert services.paid == 1, "PhotoRoom again on the full frame cannot fix a no-op"
+
+    result, services = run(shot, work, photoroom=noop, remove_bg="truth")
+    assert (result.isolated, result.provider, result.quality_flags) == (True, "remove_bg_api", [])
+    # a tightly cropped carton with a uniform coloured edge (Gemini: the product fills the frame) stays clean
+    result, services = run(tight_carton(0), work, remove_bg="truth")
+    assert (result.isolated, result.quality_flags, services.paid) == (True, [], 1)
+
+
 # ---------------------------------------------------------------------------
 # 7a: a thin part cut by the Gemini crop
 # ---------------------------------------------------------------------------

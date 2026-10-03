@@ -67,7 +67,8 @@ GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:ge
 # بوابة جودة القص (assess_cutout)
 SOLID_ALPHA = 128               # بكسل "صلب" من المنتج
 OPAQUE_FILL_MAX = 0.97          # أكثر من 97% من الإطار معتم: المزوّد لم يزل شيئاً...
-OPAQUE_FILL_BAND = 0.02         # ...إذا كان شريط الإطار (2%، و3 بكسل على الأقل) خلفية موحدة محايدة اللون
+OPAQUE_FILL_BAND = 0.02         # ...إذا كان شريط الإطار (2%، و3 بكسل على الأقل) خلفية موحدة محايدة اللون،
+OPAQUE_FILL_PRODUCT_MAX = 0.85  # أو موحدة ملونة وصندوق Gemini أقل من 85% من الإطار (إطار القص بهامشه ~80%)
 EDGE_TOUCH_MIN = 0.02           # المنتج يغطي أكثر من 2% من خط قص داخلي: الصندوق قص جزءاً منه
 EDGE_RUN_MIN_PX = 3             # أو جزء رفيع (شفاطة) عرضه 3 بكسل يلمس الخط ويمتد 3 بكسل للداخل
 HAZE_GROWTH_MAX = 0.08          # البكسلات شبه الشفافة توسّع حدود المنتج بأكثر من 8% (و4 بكسل على الأقل)
@@ -810,10 +811,12 @@ def _edge_clipped(solid, crop_sides) -> bool:
                for side, line, run in zip(crop_sides, lines, deep))
 
 
-def _uniform_backdrop_band(rgb) -> bool:
+def _uniform_backdrop_band(rgb, product_share=None) -> bool:
     """
-    شريط إطار الصورة (2%، و3 بكسل على الأقل) بلون واحد محايد (رمادي/أبيض): خلفية تصوير كان على المزوّد إزالتها.
-    منتج يملأ الإطار بهامش 0-3 بكسل يجعل الشريط خليطاً من الهامش والمنتج، أو لون واجهته المطبوعة.
+    شريط إطار الصورة (2%، و3 بكسل على الأقل) بلون واحد: خلفية تصوير كان على المزوّد إزالتها. منتج يملأ الإطار
+    بهامش 0-3 بكسل يجعل الشريط خليطاً من الهامش والمنتج. شريط موحد بلون مشبع قد يكون حافة واجهة علبة مطبوعة تملأ
+    الإطار، فلا يُعتبر خلفية إلا إذا قال صندوق Gemini إن المنتج أصغر بوضوح من الإطار (product_share < 85%؛
+    إطار قص Gemini بهامش 6% من كل جهة نسبته نحو 80%، فشريطه هامش خلفية دائماً).
     """
     import numpy as np
 
@@ -825,9 +828,11 @@ def _uniform_backdrop_band(rgb) -> bool:
                            rgb[band:-band, :band].reshape(-1, 3), rgb[band:-band, -band:].reshape(-1, 3)])
     ring = ring.astype(np.int16)
     ref = np.median(ring, axis=0)
-    if _chroma(ref) > BACKDROP_CHROMA_MAX:
+    if float((np.abs(ring - ref).max(axis=1) <= BACKDROP_TOLERANCE).mean()) < BACKDROP_RING_UNIFORM:
         return False
-    return float((np.abs(ring - ref).max(axis=1) <= BACKDROP_TOLERANCE).mean()) >= BACKDROP_RING_UNIFORM
+    if _chroma(ref) <= BACKDROP_CHROMA_MAX:
+        return True
+    return product_share is not None and product_share < OPAQUE_FILL_PRODUCT_MAX
 
 
 def _has_opaque_backdrop(rgb, main_mask, bbox_area: int) -> bool:
@@ -928,10 +933,11 @@ def assess_cutout(cutout: Image.Image, frame_size=None, crop_sides=_NO_CROP, can
 
 def _assess(cutout: Image.Image, frame_size=None, crop_sides=_NO_CROP, canvas_size=(800, 800),
             fill: float = CANVAS_FILL_RATIO, check_backdrop: bool = False, frame_checks: bool = True,
-            pixel_scale: float = 1.0) -> _Assessment:
+            pixel_scale: float = 1.0, product_share=None) -> _Assessment:
     """
     assess_cutout مع ما يحتاجه مسار العزل. frame_checks=False: المزوّد طُلب منه قص الإطار (crop=true).
     pixel_scale: كم بكسلاً من المصدر يمثل بكسل القص (قص نسخة مصغرة) لحساب التكبير الحقيقي على اللوحة.
+    product_share: نسبة صندوق Gemini من الإطار المرسل (None بلا صندوق).
     """
     import cv2
     import numpy as np
@@ -945,7 +951,8 @@ def _assess(cutout: Image.Image, frame_size=None, crop_sides=_NO_CROP, canvas_si
     flags = []
 
     if frame_checks and _same_frame(rgba.size, frame_size):
-        if float(solid.mean()) > OPAQUE_FILL_MAX and _uniform_backdrop_band(np.asarray(_flatten_on_white(rgba))):
+        if float(solid.mean()) > OPAQUE_FILL_MAX and _uniform_backdrop_band(np.asarray(_flatten_on_white(rgba)),
+                                                                            product_share):
             # لم يُزل شيء: الإطار كله يلمس خطوط القص، فهذا لا يقول شيئاً عن صندوق Gemini
             flags.append(FLAG_OPAQUE_FILL)
         elif _edge_clipped(solid, crop_sides):
@@ -1203,8 +1210,14 @@ def _gated(cutout, provider, frame_size, crop_sides, canvas_size, label, frame_r
     cutout = EdgeShadowEngine.process_mask(cutout)
     if alpha_bbox(cutout) is None:
         return _Attempt(None, provider, [], f"{provider}_empty_cutout", label)
+    product_share = None
+    if product_rect is not None and frame_rect is not None:
+        inside = (max(product_rect[0], frame_rect[0]), max(product_rect[1], frame_rect[1]),
+                  min(product_rect[2], frame_rect[2]), min(product_rect[3], frame_rect[3]))
+        frame_area = (frame_rect[2] - frame_rect[0]) * (frame_rect[3] - frame_rect[1])
+        product_share = max(0, inside[2] - inside[0]) * max(0, inside[3] - inside[1]) / max(1, frame_area)
     found = _assess(cutout, frame_size, crop_sides, canvas_size, check_backdrop=True, frame_checks=frame_checks,
-                    pixel_scale=pixel_scale)
+                    pixel_scale=pixel_scale, product_share=product_share)
     flags = list(found.flags)
     matches_source = False
     if source_mask is not None or product_rect is not None:
