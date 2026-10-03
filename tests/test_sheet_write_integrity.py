@@ -296,11 +296,11 @@ def test_redis_payload_carries_the_logical_column_end_to_end(gs, outbox, monkeyp
 # ---------------------------------------------------------------------------
 
 PLACEHOLDERS = [
-    ["Barcode", "Product Name", "Brand", "Drive Image Link"],
-    ["N/A", "Tomato Paste 400g", "Al Alali", ""],         # row 2
-    ["6.29E+12", "Chickpeas 400g", "California Garden", ""],  # row 3
-    ["0", "Basmati Rice 5kg", "Abu Kass", ""],            # row 4
-    ["-", "Sunflower Oil 1.5L", "Afia", ""],              # row 5
+    ["Barcode", "Product Name", "Brand", "Size", "Drive Image Link"],
+    ["N/A", "Tomato Paste 400g", "Al Alali", "400g", ""],             # row 2
+    ["6.29E+12", "Chickpeas 400g", "California Garden", "400g", ""],  # row 3
+    ["0", "Basmati Rice 5kg", "Abu Kass", "5kg", ""],                 # row 4
+    ["-", "Sunflower Oil 1.5L", "Afia", "1.5L", ""],                  # row 5
 ]
 
 
@@ -358,8 +358,8 @@ def test_review_publish_paths_pass_the_brand_into_the_row_identity(gs, offline, 
 
 def test_placeholder_write_for_another_product_goes_to_that_products_row(gs, outbox):
     ws = Sheet(PLACEHOLDERS)
-    assert gs.update_image_link(ws, 2, 3, "https://res/oil.png", barcode="-", product_name="Sunflower Oil 1.5L",
-                                brand="Afia") is True
+    assert gs.update_image_link(ws, 2, 4, "https://res/oil.png", barcode="-", product_name="Sunflower Oil 1.5L",
+                                size="1.5L", brand="Afia") is True
     flush(gs, ws, outbox)
     assert ws.value(2, "Drive Image Link") == ""              # the tomato paste row is never touched
     assert ws.value(5, "Drive Image Link") == "https://res/oil.png"
@@ -677,3 +677,73 @@ def test_duplicate_rows_of_one_product_do_not_cancel_each_other(gs, outbox):
     assert statuses(gs) == {first: "SYNCED", ws_seq_newer: "SYNCED"}
     assert ws.value(2, "Drive Image Link") == "https://res/milk-a.png"
     assert ws.value(4, "Drive Image Link") == "https://res/milk-b.png"
+
+
+# ---------------------------------------------------------------------------
+# review fixes
+# ---------------------------------------------------------------------------
+
+TOMATO = [
+    ["Barcode", "Product Name", "Brand", "Size", "Drive Image Link"],
+    ["", "Tomato Paste", "", "", ""],                                   # row 2: no barcode, blank brand/size
+    ["", "Chickpeas", "", "", ""],                                      # row 3
+    ["", "Tomato Paste", "Al Alali", "400g", "https://res/alali-approved.png"],   # row 4: another product
+]
+
+
+def test_relocation_never_treats_a_blank_brand_or_size_as_a_wildcard(gs, outbox):
+    ws = Sheet(TOMATO)
+    wid = outbox.append_update(2, 4, "https://res/tomato.png", col_key="link", key_name="Tomato Paste")
+    ws.rows.pop(1)                                              # row 2 deleted: Al Alali is now row 3
+    flush(gs, ws, outbox)
+    assert ws.value(3, "Drive Image Link") == "https://res/alali-approved.png"     # never overwritten
+    assert rows_of(outbox)[wid]["sync_status"] == "CONFLICT"
+    assert [o["status"] for o in gs.reported] == ["CONFLICT"]
+
+    # the same with an empty link cell on the Al Alali row: still another product, never relocated onto it
+    ws = Sheet(TOMATO)
+    ws.set(4, 5, "")
+    wid = outbox.append_update(2, 4, "https://res/tomato.png", col_key="link", key_name="Tomato Paste")
+    ws.rows.pop(1)
+    flush(gs, ws, outbox)
+    assert ws.value(3, "Drive Image Link") == "" and rows_of(outbox)[wid]["sync_status"] == "CONFLICT"
+
+
+def test_relocation_needs_every_identity_column_of_the_sheet(gs, outbox):
+    """Without a Size column the name and brand alone are not a complete identity: no relocation."""
+    ws = Sheet([["Product Name", "Brand", "Drive Image Link"],
+                ["Chickpeas", "California Garden", ""],
+                ["Tomato Paste", "Al Alali", ""]])
+    wid = outbox.append_update(2, 2, "https://res/tomato.png", col_key="link", key_name="Tomato Paste",
+                               key_brand="Al Alali")
+    flush(gs, ws, outbox)
+    assert ws.value(3, "Drive Image Link") == "" and rows_of(outbox)[wid]["sync_status"] == "CONFLICT"
+
+    # a complete name + size + brand match (blank barcode = blank barcode) is still relocated
+    ws = Sheet(TOMATO)
+    ws.set(4, 5, "")
+    moved = outbox.append_update(3, 4, "https://res/alali.png", col_key="link", key_name="Tomato Paste",
+                                 key_brand="Al Alali", key_size="400g")
+    flush(gs, ws, outbox)
+    assert ws.value(4, "Drive Image Link") == "https://res/alali.png"
+    assert (rows_of(outbox)[moved]["sync_status"], rows_of(outbox)[moved]["row_number"]) == ("SYNCED", 4)
+
+
+def test_relocation_compares_the_barcode_cell_text_too(gs, outbox):
+    """Without a valid GTIN the barcode cell is still part of the complete identity: 'N/A' only matches 'N/A'."""
+    ws = Sheet(TOMATO)
+    ws.set(4, 5, "")
+    wid = outbox.append_update(3, 4, "https://res/alali.png", col_key="link", key_barcode="N/A",
+                               key_name="Tomato Paste", key_brand="Al Alali", key_size="400g")
+    flush(gs, ws, outbox)                                       # row 4 has the same name/brand/size, blank barcode
+    assert ws.value(4, "Drive Image Link") == "" and rows_of(outbox)[wid]["sync_status"] == "CONFLICT"
+
+
+def test_relocation_never_overwrites_a_different_value_in_the_target_cell(gs, outbox):
+    ws = sheet()
+    ws.set(3, 6, "https://res/laban-approved.png")             # Laban's link is already set
+    wid = outbox.append_update(4, 5, "needs_review:https://res/laban-new.png", col_key="link", key_barcode=LABAN)
+    flush(gs, ws, outbox)                                       # row 4 is Juice: the single Laban row is row 3
+    assert ws.value(3, "Drive Image Link") == "https://res/laban-approved.png"
+    assert rows_of(outbox)[wid]["sync_status"] == "CONFLICT"
+    assert "already holds" in gs.reported[0]["error"]

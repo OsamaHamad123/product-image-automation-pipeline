@@ -592,10 +592,37 @@ def find_record_conflicts(worksheet, records, headers=None):
     return conflicts
 
 
-def find_identity_rows(worksheet, expectations, headers=None):
+# خانات مطابقة الصفوف: (عمود الشيت، دالة التطبيع، خانة التوقع). 'gtin' يقارن GTIN صالحاً، و'barcode_text' يقارن
+# نص خلية الباركود كما هو (للنقل الصارم: 'N/A' لا تطابق '-'، والفارغة لا تطابق إلا فارغة)
+_MATCH_FIELDS = {"gtin": ("barcode", _gtin, "barcode"), "barcode_text": ("barcode", _norm_name, "barcode"),
+                 "name": ("name", _norm_name, "name"), "size": ("size", _norm_size, "size"),
+                 "brand": ("brand", _norm_name, "brand")}
+
+
+def _relocation_fields(expect, cols):
+    """
+    خانات المطابقة الصارمة لنقل كتابة إلى صف آخر: GTIN صالح وحده، أو هوية كاملة: الاسم والحجم والبراند (أعمدتها
+    الثلاثة موجودة في الشيت) ومعها نص الباركود إن كان عموده موجوداً، والخانة الفارغة في التوقع لا تطابق إلا خانة
+    فارغة. [] = لا نقل أبداً (عمود ناقص أو بلا اسم): براند أو حجم فارغ لا يصبح «أي قيمة».
+    """
+    expect = expect or {}
+    if cols.get("barcode", -1) != -1 and _gtin(expect.get("barcode")):
+        return ["gtin"]
+    if expect.get("name") and all(cols.get(f, -1) != -1 for f in ("name", "size", "brand")):
+        return ["name", "size", "brand"] + (["barcode_text"] if cols.get("barcode", -1) != -1 else [])
+    return []
+
+
+def _verification_fields(expect, cols):
+    """خانات _key_fields بأسماء _MATCH_FIELDS (مطابقة التحقق: الحجم والبراند فقط إذا كانا في التوقع)."""
+    return ["gtin" if f == "barcode" else f for f in _key_fields(expect, cols)]
+
+
+def find_identity_rows(worksheet, expectations, headers=None, strict=True):
     """
     expectations: {record_id: expect}. يعيد {record_id: [أرقام كل الصفوف التي تطابق هوية المنتج]} بعد قراءة
-    أعمدة الهوية للورقة كلها مرة واحدة (batch_get واحد). توقع بلا مفتاح صالح يعيد [] (لا يُنقل أبداً).
+    أعمدة الهوية للورقة كلها مرة واحدة (batch_get واحد). strict=True (للنقل): مطابقة كاملة حسب
+    _relocation_fields؛ strict=False: مطابقة التحقق (_key_fields)، لعدّ صفوف المنتج. توقع بلا مفتاح يعيد [].
     """
     expectations = {k: e for k, e in (expectations or {}).items() if e}
     if not expectations:
@@ -603,19 +630,22 @@ def find_identity_rows(worksheet, expectations, headers=None):
     if headers is None:
         headers = _worksheet_headers(worksheet, fresh=True)
     cols = resolve_columns(headers)
-    fields = {k: _key_fields(e, cols) for k, e in expectations.items()}
+    choose = _relocation_fields if strict else _verification_fields
+    fields = {k: choose(e, cols) for k, e in expectations.items()}
     out = {k: [] for k in expectations}
-    needed = sorted({f for fs in fields.values() for f in fs})
-    if not needed:
+    used = sorted({f for fs in fields.values() for f in fs})
+    if not used:
         return out
-    cells = _read_identity_cells(worksheet, {f: cols[f] for f in needed})
-    normalized = {f: {row: _IDENTITY_NORMS[f](value) for row, value in cells[f].items()} for f in needed}
-    all_rows = sorted({row for f in needed for row in cells[f]})
+    columns = sorted({_MATCH_FIELDS[f][0] for f in used})
+    cells = _read_identity_cells(worksheet, {c: cols[c] for c in columns})
+    all_rows = sorted({row for c in columns for row in cells[c]})
+    normalized = {f: {row: _MATCH_FIELDS[f][1](cells[_MATCH_FIELDS[f][0]].get(row, "")) for row in all_rows}
+                  for f in used}
     for k, e in expectations.items():
         if not fields[k]:
             continue
-        want = {f: _IDENTITY_NORMS[f](e[f]) for f in fields[k]}
-        out[k] = [row for row in all_rows if all(normalized[f].get(row) == want[f] for f in fields[k])]
+        want = {f: _MATCH_FIELDS[f][1](e.get(_MATCH_FIELDS[f][2]) or "") for f in fields[k]}
+        out[k] = [row for row in all_rows if all(normalized[f][row] == want[f] for f in fields[k])]
     return out
 
 
@@ -970,21 +1000,24 @@ class GoogleSheetsBatchWorker(threading.Thread):
                     beyond.add(r["id"])
             targets.append((r, col))
 
-        # 3. التحقق من الهوية؛ عند CONFLICT (أو صف خارج الورقة) نقل الكتابة إلى الصف الوحيد المطابق للمنتج
+        # 3. التحقق من الهوية؛ عند CONFLICT (أو صف خارج الورقة) نقل مبدئي إلى الصف الوحيد الذي يطابق المنتج مطابقة
+        #    كاملة (find_identity_rows الصارمة). النقل يُحفظ فقط بعد فحص الترتيب وخلية الهدف (الخطوة 5).
         records = {r["id"]: (r["row_number"], r["expect"]) for r, _ in targets
                    if r["expect"] and r["id"] not in beyond}
         record_conflicts = find_record_conflicts(worksheet, records, headers=headers) if records else {}
         lost = {r["id"]: r["expect"] for r, _ in targets
                 if r["expect"] and (r["id"] in record_conflicts or r["id"] in beyond)}
         found = find_identity_rows(worksheet, lost, headers=headers) if lost else {}
-        ready = []
+        ready, moved = [], {}
         for r, col in targets:
             if r["id"] not in record_conflicts and r["id"] not in beyond:
                 ready.append((r, col))
                 continue
             matches = found.get(r["id"]) or []
             if len(matches) == 1:
-                self._relocate(cursor, r, matches[0])
+                moved[r["id"]] = (r["row_number"], r.get("relocated_from"))
+                r["relocated_from"] = r.get("relocated_from") or r["row_number"]
+                r["row_number"] = matches[0]
                 ready.append((r, col))
                 continue
             where = "no row matches" if not matches else f"{len(matches)} rows match"
@@ -1005,6 +1038,20 @@ class GoogleSheetsBatchWorker(threading.Thread):
         stale = _older_than_written(cursor, ready)
         _set_status(cursor, sorted(stale), "SUPERSEDED", "a newer value was already written to this cell")
         ready = [(r, col) for r, col in ready if r["id"] not in stale]
+
+        # 5. النقل لا يكتب أبداً فوق قيمة مختلفة: خلية الهدف في صف المنتج الجديد فارغة أو تحمل نفس القيمة، وإلا CONFLICT
+        relocated = [(r, col) for r, col in ready if r["id"] in moved]
+        if relocated:
+            held = _read_cells(worksheet, [(r["row_number"], col) for r, col in relocated])
+            for r, col in relocated:
+                current = held.get((r["row_number"], col), "")
+                if current and current != str(r["value"]).strip():
+                    conflicts[r["id"]] = (f"the product moved from row {moved[r['id']][0]} to row {r['row_number']}, "
+                                          f"whose cell already holds a different value ({current[:200]!r}); not moved")
+                    r["row_number"], r["relocated_from"] = moved[r["id"]]
+                else:
+                    self._relocate(cursor, r, moved[r["id"]][0])
+            ready = [(r, col) for r, col in ready if r["id"] not in conflicts]
 
         unwritten = []
         by_id = {r["id"]: r for r in rows}
@@ -1056,15 +1103,15 @@ class GoogleSheetsBatchWorker(threading.Thread):
         clear_cache()
 
     @staticmethod
-    def _relocate(cursor, r, new_row):
-        """نقل كتابة إلى صف المنتج الحالي (أُدرج أو حُذف صف فوقه)؛ relocated_from يحفظ الصف عند الجدولة."""
-        old_row = r["row_number"]
-        r["relocated_from"] = r.get("relocated_from") or old_row
-        r["row_number"] = new_row
+    def _relocate(cursor, r, old_row):
+        """
+        حفظ نقل كتابة إلى صف المنتج الحالي (r['row_number']؛ أُدرج أو حُذف صف فوقه). relocated_from يحفظ الصف
+        عند الجدولة.
+        """
         cursor.execute("UPDATE sheet_updates SET `row_number` = %s, relocated_from = %s WHERE id = %s",
-                       (new_row, r["relocated_from"], r["id"]))
+                       (r["row_number"], r["relocated_from"], r["id"]))
         logger.warning("[Sheets Outbox] الكتابة %s: المنتج لم يعد في الصف %s؛ نُقلت إلى الصف %s (الصف الوحيد المطابق).",
-                       r["id"], old_row, new_row)
+                       r["id"], old_row, r["row_number"])
 
     @staticmethod
     def _record_failures(conn, cursor, items, error, now):
@@ -1091,6 +1138,19 @@ class GoogleSheetsBatchWorker(threading.Thread):
         conn.commit()
         for outcome in dead:
             _report_outcome(outcome)
+
+
+def _read_cells(worksheet, cells):
+    """قيم خلايا محددة [(row, col 0-based)] عبر batch_get واحد: {(row, col): القيمة}."""
+    cells = list(dict.fromkeys(cells))
+    ranges = [f"{gspread.utils.rowcol_to_a1(row, col + 1)}:{gspread.utils.rowcol_to_a1(row, col + 1)}"
+              for row, col in cells]
+    result = _retrying(worksheet.batch_get, ranges) if ranges else []
+    out = {}
+    for i, cell in enumerate(cells):
+        values = list(result[i]) if result and i < len(result) else []
+        out[cell] = str(values[0][0]).strip() if values and values[0] else ""
+    return out
 
 
 def _older_than_written(cursor, items):

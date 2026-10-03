@@ -565,12 +565,13 @@ def test_outbox_sibling_write_with_stale_row_is_relocated_or_a_conflict(gs, fake
     assert written == [("'Products'!D2", "https://res/milk-1l.png"), ("'Products'!D3", "https://res/milk-2l.png")]
     assert ("UPDATE sheet_updates SET `row_number` = %s, relocated_from = %s WHERE id = %s", (2, 3, 1)) in conn.executed
 
-    # without the size, the name and brand match two rows: never guessed, stays a CONFLICT
+    # without the size the identity is incomplete: a blank size is not a wildcard (it would match both Almarai
+    # rows), so nothing is guessed and it stays a CONFLICT
     ws.sent_bodies.clear()
     vague = _outbox_row(3, 4, "https://res/milk.png", name="Fresh Milk", brand="Almarai")
     status = _final_status(_flush(gs, ws, [vague], fake_connection))
     assert status[3] == "CONFLICT" and ws.sent_bodies == []
-    assert "2 rows match" in gs.reported[-1]["error"]
+    assert "no row matches" in gs.reported[-1]["error"]
 
 
 def test_writes_carry_size_and_brand_to_outbox_and_redis(gs, monkeypatch):
