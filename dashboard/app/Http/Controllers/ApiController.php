@@ -48,11 +48,17 @@ class ApiController extends Controller
     }
 
     /**
-     * اعتماد صورة معينة وتحديث الشيت
+     * اعتماد صورة معينة وتحديث الشيت.
+     * expected_state (ما رأته الصفحة: حالة صف الطابور ووقت تحديثه والصورة المعتمدة) و replace (تأكيد المراجع الصريح
+     * باستبدال ما تغيّر) يمران إلى الجسر ضمن الطلب؛ replace قيمة منطقية فقط.
      */
     public function selectImage(Request $request)
     {
-        $result = $this->runPython('select_image', $request->all());
+        $params = $request->all();
+        if ($request->has('replace')) {
+            $params['replace'] = $request->boolean('replace');
+        }
+        $result = $this->runPython('select_image', $params);
 
         if (($result['status'] ?? '') === 'success') {
             // تفريغ كاش الكتالوج ليعاد قراءته بالشيت المحدث
@@ -103,6 +109,18 @@ class ApiController extends Controller
             'size', 'product_name_ar', 'brand_ar', 'category',
             'target_width', 'target_height', 'enhance', 'search_decision'
         ]);
+        // ما رأته الصفحة (expected_state) يصل نصاً JSON من نموذج الرفع، و replace تأكيد صريح بالاستبدال (قيمة منطقية)
+        $expected = $request->input('expected_state');
+        if (is_string($expected)) {
+            $decoded = json_decode($expected, true);
+            $expected = is_array($decoded) ? $decoded : null;
+        }
+        if (is_array($expected)) {
+            $params['expected_state'] = array_intersect_key($expected, array_flip(['queue_status', 'queue_updated_at', 'approved_url']));
+        }
+        if ($request->has('replace')) {
+            $params['replace'] = $request->boolean('replace');
+        }
         $params['file_path'] = $targetPath;
 
         $result = $this->runPython('upload_manual_image', $params);
