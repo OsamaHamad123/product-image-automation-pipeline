@@ -3,9 +3,10 @@
 retrieve(spec, providers, custom_query=None, exclude_urls=(), max_queries=4,
          early_stop=None, relax_when=None) -> RetrievalResult
 
-* The GTIN lookup providers (Open Food Facts) run once, in parallel with Q1; then
-  the next planned queries run in order. Nothing wins by coming first: the caller
-  scores and ranks the whole pool.
+* The lookup providers run once, in parallel with Q1: the GTIN lookups (Open Food
+  Facts) only for a valid GTIN, the local catalog index (needs_gtin False) always;
+  then the next planned queries run in order. Nothing wins by coming first: the
+  caller scores and ranks the whole pool.
 * early_stop(pool) -> bool is checked after each step (callers pass a T1 test built
   on score.py, see t1_early_stop()).
 * At most max_queries planned queries are sent (relaxations share that budget). A
@@ -195,6 +196,11 @@ def _valid_gtin(spec: SkuSpec) -> bool:
     return bool(spec.gtin) and is_global_gtin(spec.gtin)
 
 
+def _lookup_query(provider) -> PlannedQuery:
+    """The pseudo-query a lookup is filed under: 'OFF' for a GTIN lookup, the provider's own id otherwise."""
+    return PlannedQuery(query_id=str(getattr(provider, "lookup_query_id", "") or LOOKUP_QUERY_ID), text="", hl="")
+
+
 class Retriever:
     """Runs the query plan against the providers and keeps one pool across calls."""
 
@@ -213,11 +219,11 @@ class Retriever:
 
     # ----------------------------------------------------------------- calls
 
-    def _call(self, provider, query: PlannedQuery) -> ProviderResult:
+    def _call(self, provider, query: PlannedQuery, lookup: bool = False) -> ProviderResult:
         name = str(getattr(provider, "name", "") or type(provider).__name__)
         start = time.monotonic()
         try:
-            if query.query_id == LOOKUP_QUERY_ID and hasattr(provider, "lookup"):
+            if lookup and hasattr(provider, "lookup"):
                 res = provider.lookup(self.spec)
             else:
                 res = provider.search(query.text, query.hl, self.spec)
@@ -300,6 +306,12 @@ class Retriever:
             self.stopped = True
         return stop
 
+    def _runs_lookup(self, provider) -> bool:
+        """A lookup provider runs once per SKU: a GTIN lookup only for a valid GTIN."""
+        if getattr(provider, "kind", "search") != "lookup":
+            return False
+        return _valid_gtin(self.spec) or not getattr(provider, "needs_gtin", True)
+
     def _budget(self) -> int:
         return self.max_queries - len(self.result.queries)
 
@@ -309,11 +321,10 @@ class Retriever:
         """Run the GTIN lookups and the planned queries (or the custom query)."""
         self.custom_query = custom_query.strip() if custom_query and custom_query.strip() else None
         plan = build_queries(self.spec, self.custom_query)
-        lookups = [p for p in self.providers if getattr(p, "kind", "search") == "lookup"] if _valid_gtin(self.spec) else []
-        lookup_q = PlannedQuery(query_id=LOOKUP_QUERY_ID, text="", hl="")
+        lookups = [p for p in self.providers if self._runs_lookup(p)]
         with ThreadPoolExecutor(max_workers=self._workers) as ex:
-            # Step 1: GTIN lookups in parallel with the first query.
-            lookup_futs = [ex.submit(self._call, p, lookup_q) for p in lookups]
+            # Step 1: the lookups in parallel with the first query.
+            lookup_futs = [ex.submit(self._call, p, _lookup_query(p), True) for p in lookups]
             first_results: List[ProviderResult] = []
             rest = list(plan)
             while rest and self._budget() > 0:
@@ -395,6 +406,9 @@ def retrieve(spec: SkuSpec, providers: Sequence, custom_query: Optional[str] = N
 # ---------------------------------------------------------------------------
 
 LOOKUP_PROVIDER_NAMES = frozenset({"off", "open_food_facts", "openfoodfacts"})
+# Candidates that never stop the web search on their own: the GTIN lookups, and the local catalog
+# index (catalog_match.local_index.PROVIDER), which only adds pages the web search may not rank.
+NO_EARLY_STOP_PROVIDERS = LOOKUP_PROVIDER_NAMES | {"local_index"}
 
 
 def t1_early_stop(spec: SkuSpec, negatives=None) -> EarlyStop:
@@ -402,12 +416,13 @@ def t1_early_stop(spec: SkuSpec, negatives=None) -> EarlyStop:
 
     A GTIN-lookup record (Open Food Facts) never stops the search on its own: its photo is
     often a user snapshot and its data can be wrong, while the retailer packshot the next
-    query would find is usually better evidence.
+    query would find is usually better evidence. A local-index page does not either: the
+    index only adds candidates, the web search runs as it would without it.
     """
     from .score import has_tier1
 
     def _stop(pool: List[Candidate]) -> bool:
-        web = [c for c in pool if (c.provider or "").lower() not in LOOKUP_PROVIDER_NAMES]
+        web = [c for c in pool if (c.provider or "").lower() not in NO_EARLY_STOP_PROVIDERS]
         return has_tier1(spec, web, negatives)
 
     return _stop

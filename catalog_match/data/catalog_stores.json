@@ -1,0 +1,78 @@
+{
+  "_about": [
+    "Stores the local catalog index reads (catalog_match/sitemaps.py, scripts/build_catalog_index.py).",
+    "product_path: a regular expression the PATH of a product page matches. The patterns come from the",
+    "product pages the live runs of 2026-10-03 found (runs/2026-10-03/smoke_*.json). The sitemap",
+    "locations are not known yet: run 'python scripts/build_catalog_index.py --discover' and adjust",
+    "sitemaps / sitemap_include from what it prints. A store whose page slugs often leave out the brand",
+    "(noon, Union Coop) is disabled: the index finds rows by the brand's words."
+  ],
+  "stores": [
+    {
+      "key": "lulu",
+      "name": "Lulu Hypermarket UAE",
+      "base_url": "https://gcc.luluhypermarket.com",
+      "hosts": ["gcc.luluhypermarket.com"],
+      "product_path": "^/en-ae/[^/]+/p/\\d+/?$",
+      "sitemaps": [],
+      "sitemap_include": "",
+      "enabled": true,
+      "note": "e.g. /en-ae/al-alali-fancy-meat-tuna-in-water-170-g/p/14751"
+    },
+    {
+      "key": "carrefour_uae",
+      "name": "Carrefour UAE",
+      "base_url": "https://www.carrefouruae.com",
+      "hosts": ["www.carrefouruae.com", "carrefouruae.com"],
+      "product_path": "^/mafuae/en/(?:[^/]+/)*[^/]+/p/\\d+/?$",
+      "sitemaps": [],
+      "sitemap_include": "",
+      "enabled": true,
+      "note": "e.g. /mafuae/en/beef-luncheon/zwan-beef-luncheon-meat-850gr/p/10937 (English pages only)"
+    },
+    {
+      "key": "spinneys",
+      "name": "Spinneys UAE",
+      "base_url": "https://www.spinneys.com",
+      "hosts": ["www.spinneys.com", "spinneys.com"],
+      "product_path": "^/en-ae/catalogue/[^/]+_\\d+/?$",
+      "sitemaps": [],
+      "sitemap_include": "",
+      "enabled": true,
+      "note": "e.g. /en-ae/catalogue/mccain-golden-long-french-fries-750g_22359/"
+    },
+    {
+      "key": "talabat_mart_uae",
+      "name": "talabat mart UAE",
+      "base_url": "https://www.talabat.com",
+      "hosts": ["www.talabat.com", "talabat.com"],
+      "product_path": "^/uae/talabat-mart/product/[^/]+/s/\\d+/?$",
+      "sitemaps": [],
+      "sitemap_include": "",
+      "enabled": true,
+      "note": "e.g. /uae/talabat-mart/product/ashoka-plain-paratha-400-g/s/905099 (UAE only, not /bahrain/)"
+    },
+    {
+      "key": "noon_uae",
+      "name": "noon UAE",
+      "base_url": "https://www.noon.com",
+      "hosts": ["www.noon.com", "supermall.noon.com"],
+      "product_path": "^/uae-en/[^/]+/[A-Za-z0-9]+/p/?$",
+      "sitemaps": [],
+      "sitemap_include": "",
+      "enabled": false,
+      "note": "very large catalog of every category; slugs often leave out the brand (fancy-meat-tuna-in-water-170grams)"
+    },
+    {
+      "key": "unioncoop",
+      "name": "Union Coop",
+      "base_url": "https://www.unioncoop.ae",
+      "hosts": ["www.unioncoop.ae", "unioncoop.ae"],
+      "product_path": "^/(?:english/)?[^/]*-\\d{5,}[^/]*\\.html$",
+      "sitemaps": [],
+      "sitemap_include": "",
+      "enabled": false,
+      "note": "slugs often leave out the brand (skipjack-tuna-chunks-in-brine-13600527.html)"
+    }
+  ]
+}

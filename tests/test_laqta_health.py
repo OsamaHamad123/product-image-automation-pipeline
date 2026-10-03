@@ -694,7 +694,8 @@ TOUCHED = list(SECRETS) + ["auto_publish_enabled", "auto_publish_brands", "searc
                            "bg_removal_method", "enable_image_enhancement", "enable_gemini_pre_validation",
                            "filter_competitors", "bypass_white_background_check", "verifier_primary",
                            "verifier_strong", "verifier_monthly_budget_usd", "model_prices", "expansion_enabled",
-                           "expansion_max_calls", "visual_search", "serpapi_lens_price_usd", "gtin_policy"]
+                           "expansion_max_calls", "visual_search", "serpapi_lens_price_usd", "gtin_policy",
+                           "local_index_enabled", "local_index_max_pages"]
 
 
 def _sql(db, statement, params=()):
@@ -970,6 +971,43 @@ def test_extra_sources_form_saves_checks_and_shows_its_section(app_env):
     _put(db, {"serpapi_api_key": ""})
     page = _kernel(env, [["GET", "/settings?tab=advanced", {}]])[0]["body"]
     assert "مفتاح SerpApi مش محفوظ" in page and "مفتاح SerpApi: غير محفوظ" in page
+
+
+def test_local_index_switch_and_pages_save_and_the_page_says_what_the_index_holds(app_env):
+    """The local catalog index in the «مصادر البحث الإضافية» form: its switch, pages per product, and its status."""
+    db = app_env["db"]
+    env = app_env["env"]
+    _sql(db, "DELETE FROM catalog_products")
+    _sql(db, "DELETE FROM catalog_harvests")
+    _put(db, {"expansion_enabled": "true", "local_index_enabled": "true", "local_index_max_pages": "3"})
+    try:
+        saved, empty_page, refused = _kernel(env, [
+            ["POST", "/settings", {"section": "sources", "expansion_enabled": "true", "local_index_max_pages": "5"}],
+            ["GET", "/settings?tab=advanced", {}],
+            ["POST", "/settings", {"section": "sources", "expansion_enabled": "true", "local_index_enabled": "true",
+                                   "local_index_max_pages": "12"}],
+        ])
+        after = _settings(db)
+        # the switch left off turns the index off; 12 pages is refused and 5 stays
+        assert (after["local_index_enabled"], after["local_index_max_pages"]) == ("true", "5")
+        assert any("الفهرس المحلي" in w for w in refused["flash"]["warnings"]), refused["flash"]
+        body = empty_page["body"]
+        assert 'data-local-index' in body and re.search(r'name="local_index_max_pages"[^>]*value="5"', body)
+        assert not re.search(r'name="local_index_enabled"[^>]*checked', body)
+        assert "الفهرس لسا ما انبنى" in body and "build_catalog_index.py --discover" in body
+
+        for i, store in enumerate(("lulu", "lulu", "spinneys")):
+            _sql(db, "INSERT INTO catalog_products (store, url, url_hash, slug_text) VALUES (%s, %s, %s, %s)",
+                 (store, f"https://example.ae/p/{i}", f"{i:040d}", "x"))
+        _sql(db, "INSERT INTO catalog_harvests (store, started_at, finished_at, status) "
+                 "VALUES ('lulu', NOW(), '2026-10-03 09:30:00', 'ok')")
+        page = _kernel(env, [["GET", "/settings?tab=advanced", {}]])[0]["body"]
+        assert re.search(r'name="local_index_enabled"[^>]*checked', page)
+        assert "بالفهرس 3 صفحة منتج من 2 متجر" in page and "2026-10-03 09:30:00" in page
+        assert "الفهرس لسا ما انبنى" not in page
+    finally:
+        _sql(db, "DELETE FROM catalog_products")
+        _sql(db, "DELETE FROM catalog_harvests")
 
 
 def test_unavailable_database_is_said(app_env):

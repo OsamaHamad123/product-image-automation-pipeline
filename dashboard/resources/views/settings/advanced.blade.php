@@ -5,9 +5,11 @@
     Secret fields are write-only (empty = keep the stored value) and never show a stored value.
     A second form (section=sources, $advanced['sources'] = SettingsController::sourcesData()) controls the expansion
     round of catalog_match/expand.py, visual search and the barcode policy; it reads no key, it only says whether the
-    SerpApi key is saved (the key itself is on the «المفاتيح» tab).
+    SerpApi key is saved (the key itself is on the «المفاتيح» tab). It also switches the local catalog index
+    (catalog_match/local_index.py) and says what the index holds ($advanced['local_index'] =
+    SettingsController::localIndexStats(), null before scripts/build_catalog_index.py first ran).
 --}}
-@php $adv = $advanced; $src = $advanced['sources']; @endphp
+@php $adv = $advanced; $src = $advanced['sources']; $idx = $advanced['local_index'] ?? null; @endphp
 <form method="POST" action="{{ route('dashboard.save_settings') }}" class="lq-card lq-settings-card" aria-labelledby="lq-settings-sources-title" autocomplete="off" data-sources-form>
     @csrf
     <input type="hidden" name="section" value="sources">
@@ -26,6 +28,24 @@
         <input type="number" class="lq-input lq-settings-field__control" name="expansion_max_calls" min="0" max="{{ \App\Http\Controllers\SettingsController::EXPANSION_MAX_CALLS_LIMIT }}" step="1" value="{{ $src['max_calls'] }}" dir="ltr" inputmode="numeric" @disabled((bool) $dbError)>
         <span class="lq-field__hint">كل بحث (Serper أو SerpApi) طلب واحد؛ فتح صفحات المتاجر مجاني. 0 = الجولة موقفة.</span>
     </label>
+
+    <fieldset class="lq-settings-fieldset lq-settings-fieldset--boxed" @disabled((bool) $dbError) data-local-index>
+        <legend class="lq-field__label">الفهرس المحلي (مجاني)</legend>
+        <div class="lq-settings-switch-row">
+            <x-lq.switch name="local_index_enabled" value="true" label="البحث بالفهرس المحلي" show-label :checked="$src['local_index_enabled']" :disabled="(bool) $dbError" />
+            <span class="lq-field__hint">صفحات منتجات المتاجر الإماراتية من خرائط مواقعها (sitemaps). النظام بيدوّر فيها مع أول بحث بجوجل وبدون أي تكلفة، وصورها بتمر بنفس الفحص وما بتنشر تلقائياً أبداً: بتستنى مراجعتك.</span>
+        </div>
+        <label class="lq-field">
+            <span class="lq-field__label">صفحات بتنقرا لكل منتج</span>
+            <input type="number" class="lq-input lq-settings-field__control" name="local_index_max_pages" min="0" max="{{ \App\Http\Controllers\SettingsController::LOCAL_INDEX_MAX_PAGES_LIMIT }}" step="1" value="{{ $src['local_index_max_pages'] }}" dir="ltr" inputmode="numeric">
+            <span class="lq-field__hint">قراءة الصفحة مجانية، واللي فيها (الصورة والاسم والباركود) بينحفظ 30 يوم. 0 = الفهرس موقف.</span>
+        </label>
+        @if ($idx === null)
+            <p class="lq-settings-card__note" data-local-index-status>الفهرس لسا ما انبنى، فهو موقف فعلياً. لبنائه من مجلد المشروع: <code dir="ltr">python scripts/build_catalog_index.py --discover</code> للفحص أولاً، وبعدها نفس الأمر بدون <code dir="ltr">--discover</code>.</p>
+        @else
+            <p class="lq-settings-card__note" data-local-index-status>بالفهرس {{ number_format($idx['products']) }} صفحة منتج من {{ count($idx['stores']) }} متجر ({{ implode('، ', array_keys($idx['stores'])) }})@if ($idx['last']) · آخر تحديث <span dir="ltr">{{ $idx['last'] }}</span>@endif. للتحديث: <code dir="ltr">python scripts/build_catalog_index.py</code></p>
+        @endif
+    </fieldset>
 
     <fieldset class="lq-settings-fieldset lq-settings-fieldset--boxed" @disabled((bool) $dbError)>
         <legend class="lq-field__label">البحث بالصورة</legend>

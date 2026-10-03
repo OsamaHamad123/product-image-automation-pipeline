@@ -94,7 +94,9 @@ from .text_norm import brand_in, domain_matches, normalize, store_market, url_ho
 
 logger = logging.getLogger(__name__)
 
-LOOKUP_PROVIDERS = frozenset({"off", "open_food_facts", "openfoodfacts"})
+# Lookups, not web searches: their answers never make a search outage look healthy (local_index: the
+# local catalog index, catalog_match.local_index).
+LOOKUP_PROVIDERS = frozenset({"off", "open_food_facts", "openfoodfacts", "local_index"})
 DOWN_STATUSES = frozenset({"error", "quota", "blocked"})
 MATCH, MISMATCH, UNSURE, UNKNOWN = "MATCH", "MISMATCH", "UNSURE", "UNKNOWN"
 
@@ -191,8 +193,8 @@ def _as_results(verification) -> List[VerificationResult]:
 def providers_down(health: Sequence[ProviderHealth]) -> bool:
     """True when no search provider answered (every one is error / quota / blocked).
 
-    The Open Food Facts GTIN lookup does not search the web for images, so its
-    'empty' answer does not make an outage of the image search providers healthy.
+    The Open Food Facts GTIN lookup and the local catalog index do not search the web
+    for images, so their answers do not make an outage of the image search providers healthy.
     With no health at all nothing was searched, which also counts as down.
     """
     if not health:

@@ -280,6 +280,59 @@ def init_db():
             ) ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
         """)
 
+        # 10. الفهرس المحلي (catalog_match/local_index.py): روابط منتجات المتاجر من خرائط مواقعها (sitemaps)،
+        # مع ما قالته صفحة المنتج عند قراءتها (الصورة والاسم والباركود). يبنيه scripts/build_catalog_index.py
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS catalog_products (
+                id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                store VARCHAR(32) NOT NULL,
+                url TEXT NOT NULL,
+                url_hash CHAR(40) NOT NULL,
+                slug_text VARCHAR(512) NULL,
+                lastmod VARCHAR(32) NULL,
+                first_seen TIMESTAMP NULL DEFAULT NULL,
+                last_seen TIMESTAMP NULL DEFAULT NULL,
+                page_checked_at TIMESTAMP NULL DEFAULT NULL,
+                page_status VARCHAR(32) NULL,
+                page_title VARCHAR(512) NULL,
+                image_url TEXT NULL,
+                image_width INT NULL,
+                image_height INT NULL,
+                gtin VARCHAR(14) NULL,
+                UNIQUE KEY uq_catalog_url (url_hash),
+                INDEX idx_catalog_store_seen (store, last_seen),
+                INDEX idx_catalog_gtin (gtin)
+            ) ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
+        """)
+        # كلمات رابط المنتج (وعنوان صفحته بعد قراءتها): البحث بكلمات الماركة بدون مسح الجدول كله
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS catalog_tokens (
+                token VARCHAR(64) NOT NULL,
+                product_id BIGINT NOT NULL,
+                PRIMARY KEY (token, product_id),
+                INDEX idx_catalog_tokens_product (product_id),
+                CONSTRAINT fk_catalog_tokens_product FOREIGN KEY (product_id)
+                    REFERENCES catalog_products (id) ON DELETE CASCADE
+            ) ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
+        """)
+        # سجل كل جمع لخرائط متجر: الحالة (ok / blocked / error / partial) وعدد الروابط
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS catalog_harvests (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                store VARCHAR(32) NOT NULL,
+                started_at TIMESTAMP NULL DEFAULT NULL,
+                finished_at TIMESTAMP NULL DEFAULT NULL,
+                status VARCHAR(16) NOT NULL,
+                sitemaps_read INT NOT NULL DEFAULT 0,
+                urls_seen INT NOT NULL DEFAULT 0,
+                product_urls INT NOT NULL DEFAULT 0,
+                new_urls INT NOT NULL DEFAULT 0,
+                pruned INT NOT NULL DEFAULT 0,
+                error VARCHAR(255) NULL,
+                INDEX idx_catalog_harvests_store (store)
+            ) ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
+        """)
+
         # القيم الافتراضية المبدئية من ملف .env (INSERT IGNORE لا يغير القيم الموجودة)
         import config
         default_settings = {

@@ -66,6 +66,12 @@ EXPANSION_MAX_CALLS = os.getenv("EXPANSION_MAX_CALLS", "4").strip() or "4"
 VISUAL_SEARCH = os.getenv("VISUAL_SEARCH", "auto").strip().lower() or "auto"
 SERPAPI_API_KEY = os.getenv("SERPAPI_API_KEY", "").strip()
 SERPAPI_LENS_PRICE_USD = os.getenv("SERPAPI_LENS_PRICE_USD", "0.015").strip() or "0.015"
+# الفهرس المحلي (catalog_match/local_index.py): صفحات منتجات المتاجر من خرائط مواقعها، يبنيه
+# scripts/build_catalog_index.py. LOCAL_INDEX_MAX_PAGES: صفحات بتنقرا لكل منتج (مجاناً)، 0 = موقف.
+# LOCAL_INDEX_PAGE_TTL_DAYS: كم يوم بينحفظ ما قالته الصفحة (الصورة والاسم والباركود) قبل ما تنقرا من جديد
+LOCAL_INDEX_ENABLED = os.getenv("LOCAL_INDEX_ENABLED", "true").strip().lower() in ("1", "true", "yes", "on")
+LOCAL_INDEX_MAX_PAGES = os.getenv("LOCAL_INDEX_MAX_PAGES", "3").strip() or "3"
+LOCAL_INDEX_PAGE_TTL_DAYS = os.getenv("LOCAL_INDEX_PAGE_TTL_DAYS", "30").strip() or "30"
 # --- end sources package ---
 
 # 4. إعدادات معالجة الصور وتحجيمها
@@ -383,6 +389,14 @@ def _load_sources_settings(db_keys):
         SERPAPI_API_KEY = str(db_keys["serpapi_api_key"]).strip()   # لا يُطبع أبداً
     if db_keys.get("serpapi_lens_price_usd"):
         SERPAPI_LENS_PRICE_USD = str(db_keys["serpapi_lens_price_usd"]).strip()
+    global LOCAL_INDEX_ENABLED, LOCAL_INDEX_MAX_PAGES
+    if "local_index_enabled" in db_keys and db_keys["local_index_enabled"] is not None:
+        LOCAL_INDEX_ENABLED = str(db_keys["local_index_enabled"]).strip().lower() in ("1", "true", "yes", "on")
+    if db_keys.get("local_index_max_pages") not in (None, ""):
+        try:
+            LOCAL_INDEX_MAX_PAGES = str(max(0, int(str(db_keys["local_index_max_pages"]).strip())))
+        except (TypeError, ValueError):
+            logger.warning("قيمة local_index_max_pages غير صالحة: %r", db_keys["local_index_max_pages"])
 # --- end sources package ---
 
 
