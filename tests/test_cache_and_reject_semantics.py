@@ -140,6 +140,9 @@ def test_reject_flow(bridge, monkeypatch):
     url = "https://www.carrefouruae.com/img/laban-up-strawberry.jpg"
     ws = FakeWorksheet(f"needs_review:{url}")
     monkeypatch.setattr(google_sheets, "open_worksheet", lambda client, name: ws)
+    # the published image is the rejected one (an approval is voided only when it is the rejected image)
+    calls["approved"] = {"original_url": url, "cloudinary_url": "https://res.cloudinary.com/demo/laban.png",
+                         "verification_status": "auto_verified"}
 
     result = _reject(cli_bridge, url)
 

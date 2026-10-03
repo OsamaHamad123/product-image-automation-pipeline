@@ -37,8 +37,14 @@ def _key(name, brand, barcode="", payload=None):
     return main.compute_sku_key(main.sku_row(name, brand, barcode, payload or {}))
 
 
+def _alt_key(name, brand, barcode):
+    import main
+    return main.compute_alt_sku_key(main.sku_row(name, brand, barcode, {}))
+
+
 KEYS = (_key(MILK["product_name"], MILK["brand"], GTIN),
-        _key("Almarai Milk 1L", "Almarai", "", {"name_ar": "حليب كامل الدسم"}))
+        _key("Almarai Milk 1L", "Almarai", "", {"name_ar": "حليب كامل الدسم"}),
+        _alt_key(MILK["product_name"], MILK["brand"], GTIN))
 
 
 @pytest.fixture
@@ -69,7 +75,10 @@ def db(db_only, mariadb_or_skip):
         for table in ("resolved_products", "rejected_images", "review_decisions"):
             _sql(db, f"DELETE FROM {table} WHERE sku_key IN ({keys})", KEYS)
         _sql(db, f"DELETE FROM active_learning_feedback WHERE `row_number` IN ({marks})", ROWS)
+        _sql(db, f"DELETE FROM sheet_updates WHERE `row_number` IN ({marks})", ROWS)
 
+    import google_sheets
+    google_sheets.SQLiteTransactionQueue()            # the outbox table exists
     wipe()
     yield db
     wipe()
@@ -336,3 +345,98 @@ def test_a_workers_late_save_never_overwrites_a_human_approval_being_written(db)
     assert result["saved"] is False
     cached = db.get_cached_product(sku_key=sku)
     assert (cached["cloudinary_url"], cached["verification_status"]) == (CLOUD + "human.png", "human_approved")
+
+
+# ---------------------------------------------------------------------------
+# #3 / B: a rejection voids only the approval of the rejected image, judged from the approval record and the
+# outbox's pending link writes (not only the live cell); it holds under the row's alternate key too
+# ---------------------------------------------------------------------------
+
+import google_sheets as _google_sheets  # noqa: E402
+
+REAL_OUTBOX_OUTCOMES = _google_sheets.outbox_outcomes
+
+
+@pytest.fixture
+def outbox(bridge, monkeypatch):
+    """The real outbox: an approval's link write waits there (PENDING); the live cell does not see it yet."""
+    import google_sheets
+    cli_bridge, env = bridge
+    queue = google_sheets.SQLiteTransactionQueue()
+
+    def enqueue(ws, row, col, value, **identity):
+        env["sheet"].append((row, value, identity))
+        queue.append_update(row, col, value, col_key="link", key_barcode=identity.get("barcode"),
+                            key_name=identity.get("product_name"), key_size=identity.get("size"),
+                            key_brand=identity.get("brand"))
+        return True
+
+    monkeypatch.setattr(google_sheets, "update_image_link", enqueue)
+    monkeypatch.setattr(google_sheets, "outbox_outcomes", REAL_OUTBOX_OUTCOMES)
+    return cli_bridge, env
+
+
+def _reject_params(row, product, url, sku, barcode=GTIN, **extra):
+    return dict(_approve_params(row, product, url, sku, barcode), reason_code="WRONG_VARIANT", **extra)
+
+
+def test_a_stale_page_rejecting_the_old_image_never_voids_a_fresh_approval_of_another(db, outbox):
+    cli_bridge, env = outbox
+    row = ROWS[0]
+    sku = _queue(db, row, MILK, GTIN, status="completed")
+    old_link = CLOUD + "x.png"
+    assert db.save_product_resolution(GTIN, MILK["product_name"], MILK["brand"], "https://x/x.jpg", old_link,
+                                      verification_status="auto_verified", approved_by="auto", sku_key=sku)
+    env["cells"][row] = old_link                                  # X is published
+    stale_view = {"queue_status": "completed", "queue_updated_at": str(db.get_task_by_row(row)["updated_at"]),
+                  "approved_url": old_link}
+
+    # A approves Y: its link waits in the outbox, the cell still shows X
+    env["link"] = CLOUD + "y.png"
+    approved = cli_bridge.action_select_image(_approve_params(row, MILK, "https://x/y.jpg", sku, GTIN,
+                                                              expected_state=stale_view))
+    assert approved["status"] == "success"
+    assert env["cells"][row] == old_link
+
+    # B's page still shows X and rejects it
+    result = cli_bridge.action_reject_image(_reject_params(row, MILK, old_link, sku))
+    assert result["status"] == "success"
+    assert result["superseded"] == 0 and result["approval_kept"] is True and result["sheet_cleared"] is False
+    approval = db.get_cached_product(sku_key=sku)
+    assert (approval["original_url"], approval["verification_status"]) == ("https://x/y.jpg", "human_approved")
+    assert [v for _, v, _ in env["sheet"]] == [CLOUD + "y.png"]   # nothing cleared after A's write
+    assert _status(db, row) == "completed"
+
+
+def test_rejecting_an_approved_image_by_its_source_url_clears_its_cloudinary_link(db, outbox):
+    cli_bridge, env = outbox
+    row = ROWS[0]
+    sku = _queue(db, row, MILK, GTIN, status="completed")
+    link = CLOUD + "x.png"
+    assert db.save_product_resolution(GTIN, MILK["product_name"], MILK["brand"], "https://x/x.jpg", link,
+                                      verification_status="human_approved", approved_by="human", sku_key=sku)
+    env["cells"][row] = link
+    result = cli_bridge.action_reject_image(_reject_params(row, MILK, "https://x/x.jpg", sku))
+    assert result["superseded"] == 1 and result["sheet_cleared"] is True
+    assert [(r, v) for r, v, _ in env["sheet"]] == [(row, "")]
+    assert db.get_cached_product(sku_key=sku) is None
+
+
+def test_a_rejection_voids_the_approval_stored_under_the_rows_key_before_its_barcode(db, outbox):
+    import main
+    cli_bridge, env = outbox
+    row = ROWS[0]
+    sku, alt = KEYS[0], KEYS[2]
+    db.add_to_queue(row, GTIN, MILK["product_name"], MILK["brand"], "q", payload={}, sku_key=sku, alt_sku_key=alt)
+    _sql(db, "UPDATE automation_queue SET status = 'completed' WHERE `row_number` = %s", (row,))
+    link = CLOUD + "x.png"
+    # approved before the owner added the barcode: stored under the name key
+    assert db.save_product_resolution("", MILK["product_name"], MILK["brand"], "https://x/x.jpg", link,
+                                      verification_status="human_approved", approved_by="human", sku_key=alt)
+    assert main._servable_resolution(sku, alt, MILK["product_name"], MILK["brand"], None)["cloudinary_url"] == link
+    env["cells"][row] = link
+    result = cli_bridge.action_reject_image(_reject_params(row, MILK, link, sku))
+    assert result["superseded"] == 1 and result["sheet_cleared"] is True
+    # the relink path (the worker writing an approved link back) finds nothing to write
+    assert main._servable_resolution(sku, alt, MILK["product_name"], MILK["brand"], None) is None
+    assert link in db.get_rejections(alt)[0] and link in db.get_rejections(sku)[0]
