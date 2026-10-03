@@ -1,0 +1,10 @@
+Traceback (most recent call last):
+  File "F:\automation\scripts\smoke_live.py", line 323, in <module>
+    sys.exit(main())
+             ~~~~^^
+  File "F:\automation\scripts\smoke_live.py", line 292, in main
+    rows = read_sheet_rows(worksheet, parse_rows(args.rows))
+  File "F:\automation\scripts\smoke_live.py", line 105, in read_sheet_rows
+    name_idx, brand_idx, _link, barcode_idx, category_idx, _origin = google_sheets.get_product_columns_indices(headers)
+                                                                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'google_sheets' has no attribute 'get_product_columns_indices'

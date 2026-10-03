@@ -1,0 +1,3351 @@
+[
+ {
+  "row": 2,
+  "name": "AIDA FRENCH FRIES 1KG",
+  "brand": "AIDA",
+  "sku_key": "7bc4dae17ed58c82",
+  "brand_conf": "sheet_raw",
+  "gtin_status": "missing",
+  "queries": [
+   "AIDA FRENCH FRIES 1kg"
+  ],
+  "provider_calls": [
+   {
+    "provider": "cse_legacy",
+    "query": "AIDA FRENCH FRIES 1kg",
+    "hl": "en",
+    "status": "error",
+    "http_status": 403,
+    "count": 0,
+    "ms": 719,
+    "error": "http_403"
+   },
+   {
+    "provider": "serper",
+    "query": "AIDA FRENCH FRIES 1kg",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 2003,
+    "error": null
+   }
+  ],
+  "decision": "REVIEW_PRESELECTED",
+  "failure_code": null,
+  "winner": "https://bf1af2.akinoncloudcdn.com/products/2025/10/10/602053/07be3cde-7a2c-4ad1-9026-392dc60edd67_size1920x1920_cropCenter.jpg",
+  "top": [
+   {
+    "status": "preselected",
+    "provider": "serper",
+    "domain": "gcc.luluhypermarket.com",
+    "title": "Aida French Fries 1 kg",
+    "image_url": "https://bf1af2.akinoncloudcdn.com/products/2025/10/10/602053/07be3cde-7a2c-4ad1-9026-392dc60edd67_size1920x1920_cropCenter.jpg",
+    "page_url": "https://gcc.luluhypermarket.com/en-ae/aida-french-fries-1-kg/p/2072326",
+    "evidence": "tier=1 size=match brand=True variants=[] coverage=1.0 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MATCH",
+     "view": "front_packshot",
+     "brand": "AIDA",
+     "variant": "French Fries",
+     "size": "1 kg"
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "cart-online.com",
+    "title": "Aida French Fries 1Kg",
+    "image_url": "https://cdn.zetupstore.com/uploads/146/25/06/06685bae623dfdc2506251750838882medium.webp",
+    "page_url": "https://cart-online.com/product/aida-french-fries-1kg?srsltid=AU7gw4XAUpVEVj6FXFZzYsXElEsY2swMWHikuFiX1HHu8Kh8Tcafnhj7",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=1.0 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "araça",
+     "variant": "FROZEN CHICKEN WITHOUT GIBLETS",
+     "size": ""
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "shoprite.co.za",
+    "title": "Shoprite ZA | AIDA Frozen French Fries 1kg",
+    "image_url": "https://catalog.sixty60.co.za/v2/files/6a5a1d3d53bbac2a0430d1f0?width=1440&height=1440",
+    "page_url": "https://www.shoprite.co.za/product/aida-frozen-french-fries-1kg-64d9d66f8acd743e3e2f387f?srsltid=AU7gw4VUsPK-fu3ZjEJY4YmJopuQ2eZUI3Caj-B_2Lk1sQhvE8zkqnMT",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=1.0 source_trust=0 gtin=None fetch=timeout",
+    "vlm": null
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "instagram.com",
+    "title": "Crisp quality you can count on. AIDA French Fries deliver consistent  texture, golden color, and reliable performance ideal for restaurants,  cafés, and catering operations. Now available from Al Tayeb Distribution —  stock",
+    "image_url": "https://lookaside.instagram.com/seo/google_widget/crawler/?media_id=3770672574461009644",
+    "page_url": "https://www.instagram.com/p/DRUHrqFDl7s/",
+    "evidence": "tier=2 size=unknown brand=True variants=[] coverage=1.0 source_trust=0 gtin=None fetch=not_image",
+    "vlm": null
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "madinamarketoman.com",
+    "title": "Al Madina",
+    "image_url": "https://madinamarketoman.com/assets/products/original/products_r2dbrj.jpg",
+    "page_url": "https://madinamarketoman.com/product_detail/aida-french-fries-2-5kg",
+    "evidence": "tier=2 size=conflict brand=True variants=[] coverage=1.0 source_trust=0 gtin=None quality=short_side<250",
+    "vlm": null
+   }
+  ],
+  "vlm_calls": 1,
+  "serp_calls": 2,
+  "cost_usd": 0.003,
+  "seconds": 17.3
+ },
+ {
+  "row": 3,
+  "name": "BARTS TRADITON FRENCH FRIES STRAIGHT CUT 1KG",
+  "brand": "BARTS TRADITON",
+  "sku_key": "2ebb6a03780769b3",
+  "brand_conf": "sheet_raw",
+  "gtin_status": "missing",
+  "queries": [
+   "BARTS TRADITON FRENCH FRIES STRAIGHT CUT 1kg",
+   "BARTS TRADITON FRENCH FRIES STRAIGHT CUT 1kg (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)",
+   "BARTS TRADITON FRENCH FRIES STRAIGHT CUT"
+  ],
+  "provider_calls": [
+   {
+    "provider": "serper",
+    "query": "BARTS TRADITON FRENCH FRIES STRAIGHT CUT 1kg",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 2193,
+    "error": null
+   },
+   {
+    "provider": "serper",
+    "query": "BARTS TRADITON FRENCH FRIES STRAIGHT CUT 1kg (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 2675,
+    "error": null
+   },
+   {
+    "provider": "serper",
+    "query": "BARTS TRADITON FRENCH FRIES STRAIGHT CUT",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 10207,
+    "error": null
+   }
+  ],
+  "decision": "REVIEW_UNSELECTED",
+  "failure_code": null,
+  "winner": null,
+  "top": [
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "gcc.luluhypermarket.com",
+    "title": "Emborg French Fries Straight Cut 1 kg Online at Best Price | Lulu Oman",
+    "image_url": "https://bf1af2.akinoncloudcdn.com/products/2024/09/27/164335/e2aa9266-ee0b-44eb-94af-03e0197d9c43.jpg",
+    "page_url": "https://gcc.luluhypermarket.com/en-om/emborg-french-fries-straight-cut-1-kg/p/325998",
+    "evidence": "tier=3 size=match brand=False variants=[] coverage=1.0 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "EMBORG",
+     "variant": "French Fries Straight",
+     "size": "1000 g"
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "gcc.luluhypermarket.com",
+    "title": "Emborg French Fries Straight Cut 1 kg Online at Best Price | Lulu UAE",
+    "image_url": "https://bf1af2.akinoncloudcdn.com/products/2024/09/27/164335/e2aa9266-ee0b-44eb-94af-03e0197d9c43_size1920x1920_cropCenter.jpg",
+    "page_url": "https://gcc.luluhypermarket.com/en-ae/emborg-french-fries-straight-cut-1-kg/p/325998",
+    "evidence": "tier=3 size=match brand=False variants=[] coverage=1.0 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "EMBORG",
+     "variant": "French Fries Straight",
+     "size": "1000 g"
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "degrocery.com",
+    "title": "Simplot French Fries Straight Cut 1kg - DeGrocery.com",
+    "image_url": "https://www.degrocery.com/de-grocery/2021/11/Simplot-French-Fries-Straight-Cut-1kg.jpg",
+    "page_url": "https://www.degrocery.com/product/simplot-french-fries-straight-cut-1kg/",
+    "evidence": "tier=3 size=match brand=False variants=[] coverage=1.0 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "Simplot",
+     "variant": "French Fries straight cut",
+     "size": "1 kg"
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "jgfb.jayagrocer.com",
+    "title": "Simplot Straight Cut French Fries 1kg – Jaya Grocer | Food Bayana",
+    "image_url": "https://jgfb.jayagrocer.com/cdn/shop/files/041177-U-1-1.jpg?v=1767783471&width=1024",
+    "page_url": "https://jgfb.jayagrocer.com/products/simplot-straight-cut-french-fries-1kg-1",
+    "evidence": "tier=3 size=match brand=False variants=[] coverage=1.0 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "Simplot",
+     "variant": "FRENCH FRIES STRAIGHT CUT",
+     "size": "1 kg"
+    }
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "panda.sa",
+    "title": "Emborg Frozen French Fries Straight Cut 1kg - Buy French Fries & Onion  Rings Online at Panda KSA",
+    "image_url": "https://images.todoorstep.com/product/169600327/Ar_large.jpg?t=1744675200",
+    "page_url": "https://panda.sa/en/p/148775.emborg-frozen-french-fries-straight-cut-1kg",
+    "evidence": "tier=3 size=match brand=False variants=[] coverage=1.0 source_trust=0 gtin=None",
+    "vlm": null
+   }
+  ],
+  "vlm_calls": 1,
+  "serp_calls": 3,
+  "cost_usd": 0.004,
+  "seconds": 22.3
+ },
+ {
+  "row": 4,
+  "name": "BATO FRENCH FRIES 900 MM",
+  "brand": "BATO",
+  "sku_key": "834b2a9ce73f921f",
+  "brand_conf": "sheet_raw",
+  "gtin_status": "missing",
+  "queries": [
+   "BATO FRENCH FRIES 900 MM",
+   "BATO FRENCH FRIES 900 MM (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)"
+  ],
+  "provider_calls": [
+   {
+    "provider": "serper",
+    "query": "BATO FRENCH FRIES 900 MM",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 3242,
+    "error": null
+   },
+   {
+    "provider": "serper",
+    "query": "BATO FRENCH FRIES 900 MM (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 3401,
+    "error": null
+   }
+  ],
+  "decision": "REVIEW_PRESELECTED",
+  "failure_code": null,
+  "winner": "https://cdnprod.mafretailproxy.com/sys-master-root/h08/hf5/26483779272734/753529_main.jpg_480Wx480H",
+  "top": [
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "supermarket.kanbkam.com",
+    "title": "bato french fries cut 1010mm Price in UAE | supermarket kanbkam",
+    "image_url": "https://prod-spinneys-cdn-new.azureedge.net/media/cache/c6/23/c623a0eb85604686ce5a4e14e546d7a2.jpg",
+    "page_url": "https://supermarket.kanbkam.com/ae/en/bato-french-fries-cut-1010mm-900g-CK753529",
+    "evidence": "tier=2 size=unknown brand=True variants=[] coverage=1.0 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "McCain",
+     "variant": "Tradition",
+     "size": "750g"
+    }
+   },
+   {
+    "status": "preselected",
+    "provider": "serper",
+    "domain": "supermarket.kanbkam.com",
+    "title": "Bato Potato French Fries 10x10mm 900g price in Kuwait | Carrefour Kuwait |  supermarket kanbkam",
+    "image_url": "https://cdnprod.mafretailproxy.com/sys-master-root/h08/hf5/26483779272734/753529_main.jpg_480Wx480H",
+    "page_url": "https://supermarket.kanbkam.com/kw/en/bato-french-fries-cut-1010mm-900g-CK753529",
+    "evidence": "tier=2 size=unknown brand=True variants=[] coverage=1.0 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "MATCH",
+     "view": "front_packshot",
+     "brand": "Bato",
+     "variant": "FRENCH FRIES",
+     "size": ""
+    }
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "supermarket.kanbkam.com",
+    "title": "Bato Potato French Fries 8x8mm 2.5kg price in Kuwait | Carrefour Kuwait |  supermarket kanbkam",
+    "image_url": "https://cdnprod.mafretailproxy.com/sys-master-root/hba/hab/26483668320286/753528_main.jpg_480Wx480H",
+    "page_url": "https://supermarket.kanbkam.com/kw/en/bato-french-fries-cut-88mm-25kg-CK753528",
+    "evidence": "tier=2 size=unknown brand=True variants=[] coverage=1.0 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "MATCH",
+     "view": "front_packshot",
+     "brand": "Bato",
+     "variant": "FRENCH FRIES",
+     "size": ""
+    }
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "take.app",
+    "title": "BATO ORIGINAL FRENCH FRIES 2.5KG - All Mart Trading",
+    "image_url": "https://storage.googleapis.com/takeapp/media/cm3oji9wf00050ciagj2t8fnc.jpg",
+    "page_url": "https://take.app/allmarttrading/p/cm3ojk2fx00bb3dzunsj8ju0p",
+    "evidence": "tier=2 size=unknown brand=True variants=[] coverage=0.6667 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "MATCH",
+     "view": "front_packshot",
+     "brand": "Bato",
+     "variant": "FRENCH FRIES",
+     "size": ""
+    }
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "potatopro.com",
+    "title": "Bato French-Fries | PotatoPro",
+    "image_url": "https://media.potatopro.com/bato-ff-1600x785.jpg",
+    "page_url": "https://www.potatopro.com/brands/bato-french-fries",
+    "evidence": "tier=2 size=unknown brand=True variants=[] coverage=0.6667 source_trust=0 gtin=None",
+    "vlm": null
+   }
+  ],
+  "vlm_calls": 1,
+  "serp_calls": 2,
+  "cost_usd": 0.003,
+  "seconds": 13.7
+ },
+ {
+  "row": 5,
+  "name": "FARMILA FRENCH FRIES 9MM 1KG",
+  "brand": "FARMILA",
+  "sku_key": "12a83cc20b9682bb",
+  "brand_conf": "sheet_raw",
+  "gtin_status": "missing",
+  "queries": [
+   "FARMILA FRENCH FRIES 9MM 1kg",
+   "FARMILA FRENCH FRIES 9MM 1kg (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)"
+  ],
+  "provider_calls": [
+   {
+    "provider": "serper",
+    "query": "FARMILA FRENCH FRIES 9MM 1kg",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 2092,
+    "error": null
+   },
+   {
+    "provider": "serper",
+    "query": "FARMILA FRENCH FRIES 9MM 1kg (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 8604,
+    "error": null
+   }
+  ],
+  "decision": "REVIEW_PRESELECTED",
+  "failure_code": null,
+  "winner": "https://farzana.ae/images/thumbs/0009778_farmila-straight-cut-fries-9mm-1kg.jpeg",
+  "top": [
+   {
+    "status": "preselected",
+    "provider": "serper",
+    "domain": "farzana.ae",
+    "title": "Farmila Straight Cut Fries 9mm 1Kg",
+    "image_url": "https://farzana.ae/images/thumbs/0009778_farmila-straight-cut-fries-9mm-1kg.jpeg",
+    "page_url": "https://farzana.ae/farmila-signature-straight-cut-fries-9mm-1kg?srsltid=AU7gw4WY-prBsdXWqVRI6QEQf-L9pMrBMgyij4KTsQ8K5efXJMK0vAEu",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=0.6667 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "MATCH",
+     "view": "front_packshot",
+     "brand": "FARMILA",
+     "variant": "FRENCH FRIES STRAIGHT CUT 9 MM",
+     "size": "1Kg"
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "farmila.com",
+    "title": "Farmila",
+    "image_url": "https://farmila.com/public/upload/product/medium/17175867589-mm.jpg",
+    "page_url": "https://farmila.com/productsinfo/fries",
+    "evidence": "tier=2 size=unknown brand=True variants=[] coverage=0.6667 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "FARMILA",
+     "variant": "FRENCH FRIES STRAIGHT CUT 9 MM",
+     "size": "2.5Kg"
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "farmila.com",
+    "title": "Farmila",
+    "image_url": "https://farmila.com/public/upload/product/medium/1714562039chicken-fillet.jpg",
+    "page_url": "https://farmila.com/products",
+    "evidence": "tier=2 size=unknown brand=True variants=[] coverage=0.0 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "FARMILA",
+     "variant": "ZING CHICKEN FILLET",
+     "size": "1000g"
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "welaza.com",
+    "title": "Farmila – Welaza",
+    "image_url": "https://welaza.com/cdn/shop/files/0008971_farmila-straight-cut-french-fries-9mm-4x25kg.png?v=1790146365&width=1763",
+    "page_url": "https://welaza.com/collections/vendors?q=Farmila&srsltid=AU7gw4VcHO8UlQ2H5_qEqzgyXG-TbinFpqnUzRyR7Hc0Dwgah5K84Uny",
+    "evidence": "tier=2 size=conflict brand=True variants=[] coverage=1.0 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "FARMILA",
+     "variant": "FRENCH FRIES STRAIGHT CUT 9 MM",
+     "size": "2.5Kg"
+    }
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "carrefouruae.com",
+    "title": "Buy Sadia Thin Cut French Fries, 9mm, 1kg Online | Carrefour UAE",
+    "image_url": "https://cdn.mafrservices.com/pim-content/UAE/media/product/1162450/1783024200/1162450_main.jpg",
+    "page_url": "https://www.carrefouruae.com/mafuae/en/french-fries/sadia-french-fries-9-mm-1kg/p/1162450",
+    "evidence": "tier=3 size=match brand=False variants=[] coverage=1.0 source_trust=3 gtin=None",
+    "vlm": null
+   }
+  ],
+  "vlm_calls": 1,
+  "serp_calls": 2,
+  "cost_usd": 0.003,
+  "seconds": 19.7
+ },
+ {
+  "row": 6,
+  "name": "HUP HUP FRENCH FRIES REGULAR CUT 1 KG",
+  "brand": "HUP HUP",
+  "sku_key": "00206ddb0e0ad08f",
+  "brand_conf": "sheet_raw",
+  "gtin_status": "missing",
+  "queries": [
+   "HUP HUP FRENCH FRIES REGULAR CUT 1kg",
+   "HUP HUP FRENCH FRIES REGULAR CUT 1kg (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)"
+  ],
+  "provider_calls": [
+   {
+    "provider": "serper",
+    "query": "HUP HUP FRENCH FRIES REGULAR CUT 1kg",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 3797,
+    "error": null
+   },
+   {
+    "provider": "serper",
+    "query": "HUP HUP FRENCH FRIES REGULAR CUT 1kg (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 2776,
+    "error": null
+   }
+  ],
+  "decision": "REVIEW_UNSELECTED",
+  "failure_code": null,
+  "winner": null,
+  "top": [
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "farzana.ae",
+    "title": "Hup Hup French Fries Straight Cut 9/9 (1kg)",
+    "image_url": "https://farzana.ae/images/thumbs/0009719_hup-hup-french-fries-straight-cut-99-1kg.png",
+    "page_url": "https://farzana.ae/hup-hup-french-fries-straight-cut-99?srsltid=AU7gw4X_RiP1ySIVFpqiqm-4HyPFC2zg-VVerQBkIph0S-uMAktLoaqg",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=1.0 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "not_product",
+     "brand": "",
+     "variant": "",
+     "size": ""
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "instagram.com",
+    "title": "Hup Hup French Fries",
+    "image_url": "https://lookaside.fbsbx.com/lookaside/crawler/instagram/DV3iH2kDBk3/0/image.jpg",
+    "page_url": "https://www.instagram.com/popular/hup-hup-french-fries/",
+    "evidence": "tier=2 size=unknown brand=True variants=[] coverage=0.6667 source_trust=0 gtin=None fetch=too_small",
+    "vlm": null
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "instagram.com",
+    "title": "Bahrain, the wait is finally over 🍟✨ Say hello to the golden, crispy  perfection of Hup Hup French Fries @rgtradingcompanywll The crunch you've  been craving has officially landed — and now it's",
+    "image_url": "https://lookaside.instagram.com/seo/google_widget/crawler/?media_id=3987201969278033899",
+    "page_url": "https://www.instagram.com/reel/DRumpHgjPxz/",
+    "evidence": "tier=2 size=unknown brand=True variants=[] coverage=0.6667 source_trust=0 gtin=None fetch=not_image",
+    "vlm": null
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "instagram.com",
+    "title": "Hup Hup French Fries",
+    "image_url": "https://lookaside.instagram.com/seo/google_widget/crawler/?media_id=3836477860295699596",
+    "page_url": "https://www.instagram.com/popular/hup-hup-french-fries/",
+    "evidence": "tier=2 size=unknown brand=True variants=[] coverage=0.6667 source_trust=0 gtin=None fetch=not_image",
+    "vlm": null
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "instagram.com",
+    "title": "Bahrain, the wait is finally over 🍟✨, Say hello to the golden, crispy  perfection of Hup Hup French Fries @rgtradingcompanywll, The crunch you’ve  been craving has officially landed — and now it’s ...",
+    "image_url": "https://lookaside.instagram.com/seo/google_widget/crawler/?media_id=3778127088738696307",
+    "page_url": "https://www.instagram.com/reel/DRumpHgjPxz/",
+    "evidence": "tier=2 size=unknown brand=True variants=[] coverage=0.6667 source_trust=0 gtin=None fetch=not_image",
+    "vlm": null
+   }
+  ],
+  "vlm_calls": 1,
+  "serp_calls": 2,
+  "cost_usd": 0.003,
+  "seconds": 11.4
+ },
+ {
+  "row": 7,
+  "name": "JOYS FRENCH FRIES 1KG",
+  "brand": "JOYS",
+  "sku_key": "146f93363729ab1a",
+  "brand_conf": "sheet_raw",
+  "gtin_status": "missing",
+  "queries": [
+   "JOYS FRENCH FRIES 1kg",
+   "JOYS FRENCH FRIES 1kg (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)"
+  ],
+  "provider_calls": [
+   {
+    "provider": "serper",
+    "query": "JOYS FRENCH FRIES 1kg",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 2358,
+    "error": null
+   },
+   {
+    "provider": "serper",
+    "query": "JOYS FRENCH FRIES 1kg (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 3334,
+    "error": null
+   }
+  ],
+  "decision": "REVIEW_PRESELECTED",
+  "failure_code": null,
+  "winner": "https://cdn.zetupstore.com/uploads/146/24/02/0265d9760e5c8362402241708750350.webp",
+  "top": [
+   {
+    "status": "preselected",
+    "provider": "serper",
+    "domain": "cart-online.com",
+    "title": "JOYS FRENCH FRIES STIRGHT CUT 9MM 1KG",
+    "image_url": "https://cdn.zetupstore.com/uploads/146/24/02/0265d9760e5c8362402241708750350.webp",
+    "page_url": "https://cart-online.com/product/joys-french-fries-stirght-cut-9mm-1kg?srsltid=AU7gw4WSLmLJYzITjd30nBNCgeqDY-YmQw7bo5oud_tSGeS_x5iS4WrT",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=1.0 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "MATCH",
+     "view": "front_packshot",
+     "brand": "Joy's",
+     "variant": "French Fries",
+     "size": "1 KG"
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "cart-online.com",
+    "title": "JOYS FRENCH FRIES 1KG",
+    "image_url": "https://cdn.zetupstore.com/uploads/146/23/03/20032316793122516418457b85363.webp",
+    "page_url": "https://cart-online.com/product/joys-french-fries-1kg?srsltid=AU7gw4Upl1W4HU9Gm5em1Bx_xPM1O2z5I8ffMSLbs2Yg0PJyJJZZ_diO",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=1.0 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "McCain",
+     "variant": "Golden Longs",
+     "size": "750g"
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "cart-online.com",
+    "title": "JOYS FRENCH FRIES 1KG",
+    "image_url": "https://cdn.zetupstore.com/uploads/146/23/01/180123167404180663c7d9ce70043medium.webp",
+    "page_url": "https://cart-online.com/product/joys-french-fries-1kg?srsltid=AU7gw4XveAntNZrSAqrqGFO0UpDxjcZq0g7uIpa7b-XSNCc6h7uWd_18",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=1.0 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "Tiffany",
+     "variant": "FINNS CREAMY CHEDDAR",
+     "size": "15g"
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "grandiose.ae",
+    "title": "Joy's French Fries Straight Cut 9MM - Grandiose.ae",
+    "image_url": "https://www.grandiose.ae/media/catalog/product/cache/9d74524075f5722e40a1490cbcfae5ff/6/2/6291079257271.jpg",
+    "page_url": "https://www.grandiose.ae/joys-french-fries-straight-cut-9mm6527?srsltid=AU7gw4XUQ2zSUZ76L2q4VEtWtmdOQjiDwi_ji6XDXqcTXDCu7cZqYN0b",
+    "evidence": "tier=2 size=unknown brand=True variants=[] coverage=1.0 source_trust=1 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "multi_product",
+     "brand": "McCain",
+     "variant": "Tradition",
+     "size": "750g"
+    }
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "grandiose.ae",
+    "title": "Joys French Fries Crispy Coated - Grandiose.ae",
+    "image_url": "https://www.grandiose.ae/media/catalog/product/cache/9d74524075f5722e40a1490cbcfae5ff/5/0/5033712155619.jpg",
+    "page_url": "https://www.grandiose.ae/joys-french-fries-crispy-coated6541?srsltid=AU7gw4WGYuiI454eKp3nPtXvZaxX7GztWcsS67_eMfUrhjALmK_i9LmV",
+    "evidence": "tier=2 size=unknown brand=True variants=[] coverage=1.0 source_trust=1 gtin=None",
+    "vlm": null
+   }
+  ],
+  "vlm_calls": 1,
+  "serp_calls": 2,
+  "cost_usd": 0.003,
+  "seconds": 12.0
+ },
+ {
+  "row": 8,
+  "name": "MCCAIN FRENCH FRIES GOLDEN LONG 750GM",
+  "brand": "MCCAIN",
+  "sku_key": "b29fcc37c34a3bc2",
+  "brand_conf": "sheet_raw",
+  "gtin_status": "missing",
+  "queries": [
+   "MCCAIN FRENCH FRIES GOLDEN LONG 750g"
+  ],
+  "provider_calls": [
+   {
+    "provider": "serper",
+    "query": "MCCAIN FRENCH FRIES GOLDEN LONG 750g",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 2394,
+    "error": null
+   }
+  ],
+  "decision": "REVIEW_PRESELECTED",
+  "failure_code": null,
+  "winner": "https://cdn.mafrservices.com/pim-content/UAE/media/product/66667/1763154604/66667_main.jpg",
+  "top": [
+   {
+    "status": "preselected",
+    "provider": "serper",
+    "domain": "carrefouruae.com",
+    "title": "Buy McCain Golden Longs French Fries, 750g Online | Carrefour UAE",
+    "image_url": "https://cdn.mafrservices.com/pim-content/UAE/media/product/66667/1763154604/66667_main.jpg",
+    "page_url": "https://www.carrefouruae.com/mafuae/en/french-fries/mc-cain-golden-long-750g/p/66667",
+    "evidence": "tier=1 size=match brand=True variants=[] coverage=1.0 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MATCH",
+     "view": "front_packshot",
+     "brand": "McCain",
+     "variant": "Golden Longs",
+     "size": "750g"
+    }
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "amazon.ae",
+    "title": "McCain Golden Long French Fries 750g : Amazon.ae: Grocery",
+    "image_url": "https://m.media-amazon.com/images/I/61eqIG2i17L.jpg",
+    "page_url": "https://www.amazon.ae/McCain-Golden-Long-French-Fries/dp/B0B94Q7CNJ",
+    "evidence": "tier=1 size=match brand=True variants=[] coverage=1.0 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MATCH",
+     "view": "front_packshot",
+     "brand": "McCain",
+     "variant": "Golden Longs",
+     "size": "750g"
+    }
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "spinneys.com",
+    "title": "McCain Frozen Golden Longs French Fries 750G",
+    "image_url": "https://prod-spinneys-cdn-new.azureedge.net/media/cache/80/4d/804dc8898954bc8982936bce7e3de302.jpg",
+    "page_url": "https://www.spinneys.com/en-ae/catalogue/mccain-golden-long-french-fries-750g_22359/?srsltid=AU7gw4Umox13IoipBntLUVQZVmg9EATdx8eD50tHkym9iFsdMJgnz_Nt",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=1.0 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MATCH",
+     "view": "front_packshot",
+     "brand": "McCain",
+     "variant": "Golden Longs",
+     "size": "750g"
+    }
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "prices.nedostavka.net",
+    "title": "McCain Golden Longs French fries, 750 g 8710438033205 price in different  countries",
+    "image_url": "https://img.nedostavka.net/67473acf143012791204a644",
+    "page_url": "https://prices.nedostavka.net/en/product/8710438033205",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=1.0 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "MATCH",
+     "view": "front_packshot",
+     "brand": "McCain",
+     "variant": "Golden Longs",
+     "size": "750g"
+    }
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "scotts.com.mt",
+    "title": "MCCAIN GOLDEN LONG FRIES 750g - Scotts Supermarket",
+    "image_url": "https://www.scotts.com.mt/wp-content/uploads/2025/12/10b26441859933ddbfc395c5fd24d0c6.jpg",
+    "page_url": "https://www.scotts.com.mt/product/mccain-golden-long-fries-750g/",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=0.75 source_trust=0 gtin=None",
+    "vlm": null
+   }
+  ],
+  "vlm_calls": 1,
+  "serp_calls": 1,
+  "cost_usd": 0.002,
+  "seconds": 9.0
+ },
+ {
+  "row": 9,
+  "name": "MCCAIN FRENCH FRIES TRADITION 750GM",
+  "brand": "MCCAIN",
+  "sku_key": "c18f7dcea1ad53b8",
+  "brand_conf": "sheet_raw",
+  "gtin_status": "missing",
+  "queries": [
+   "MCCAIN FRENCH FRIES TRADITION 750g"
+  ],
+  "provider_calls": [
+   {
+    "provider": "serper",
+    "query": "MCCAIN FRENCH FRIES TRADITION 750g",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 1476,
+    "error": null
+   }
+  ],
+  "decision": "REVIEW_PRESELECTED",
+  "failure_code": null,
+  "winner": "https://cdn.mafrservices.com/pim-content/UAE/media/product/66661/1763154604/66661_main.jpg",
+  "top": [
+   {
+    "status": "preselected",
+    "provider": "serper",
+    "domain": "carrefouruae.com",
+    "title": "Buy McCain Tradition French Fries, 750g Online | Carrefour UAE",
+    "image_url": "https://cdn.mafrservices.com/pim-content/UAE/media/product/66661/1763154604/66661_main.jpg",
+    "page_url": "https://www.carrefouruae.com/mafuae/en/french-fries/mc-cain-french-fries-trad-750g/p/66661",
+    "evidence": "tier=1 size=match brand=True variants=[] coverage=1.0 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MATCH",
+     "view": "front_packshot",
+     "brand": "McCain",
+     "variant": "Tradition",
+     "size": "750g"
+    }
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "gcc.luluhypermarket.com",
+    "title": "McCain Tradition French Fries 750 g + Super Crispy Value Pack 750 g Online  at Best Price | Lulu UAE",
+    "image_url": "https://bf1af2.akinoncloudcdn.com/products/2025/02/26/351933/0add9fc5-95b3-4b7f-9e77-6417eca1006d.jpg",
+    "page_url": "https://gcc.luluhypermarket.com/en-ae/mccain-tradition-french-fries-750-g-super-crispy-value-pack-750-g/p/2444023",
+    "evidence": "tier=1 size=match brand=True variants=[] coverage=1.0 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MATCH",
+     "view": "front_packshot",
+     "brand": "McCain",
+     "variant": "Tradition",
+     "size": "750g"
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "carrefouruae.com",
+    "title": "Buy McCain Tradition French Fries, 750g Online | Carrefour UAE",
+    "image_url": "https://cdn.mafrservices.com/pim-content/UAE/media/product/1839000/1783024200/1839000_main.jpg",
+    "page_url": "https://www.carrefouruae.com/mafuae/en/french-fries/mc-cain-french-fries-trad-750g/p/66661?offer=offer_carrefour_",
+    "evidence": "tier=1 size=match brand=True variants=[] coverage=1.0 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "Sadia",
+     "variant": "Extra Crispy French Fries",
+     "size": "2.5kg"
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "gcc.luluhypermarket.com",
+    "title": "McCain Tradition French Fries 750 g + Super Crispy Value Pack 750 g Online  at Best Price | Lulu UAE",
+    "image_url": "https://bf1af2.akinoncloudcdn.com/products/2025/02/26/351933/8e333854-ccb8-42bc-8bae-61a7ab55ea1f.jpg",
+    "page_url": "https://gcc.luluhypermarket.com/en-ae/mccain-tradition-french-fries-750-g-super-crispy-value-pack-750-g/p/2444023",
+    "evidence": "tier=1 size=match brand=True variants=[] coverage=1.0 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "McCain",
+     "variant": "Super Crisps",
+     "size": "750g"
+    }
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "carrefouruae.com",
+    "title": "Buy McCain Golden Longs French Fries, 750g Online | Carrefour UAE",
+    "image_url": "https://cdn.mafrservices.com/pim-content/UAE/media/product/66667/1763154604/66667_main.jpg",
+    "page_url": "https://www.carrefouruae.com/mafuae/en/french-fries/mc-cain-golden-long-750g/p/66667",
+    "evidence": "tier=1 size=match brand=True variants=[] coverage=0.6667 source_trust=3 gtin=None",
+    "vlm": null
+   }
+  ],
+  "vlm_calls": 1,
+  "serp_calls": 1,
+  "cost_usd": 0.002,
+  "seconds": 10.8
+ },
+ {
+  "row": 10,
+  "name": "MR JOHN FRENCH FRIES 900GM",
+  "brand": "MR JOHN",
+  "sku_key": "83a280d3fa3df468",
+  "brand_conf": "sheet_raw",
+  "gtin_status": "missing",
+  "queries": [
+   "MR JOHN FRENCH FRIES 900g",
+   "MR JOHN FRENCH FRIES 900g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)"
+  ],
+  "provider_calls": [
+   {
+    "provider": "serper",
+    "query": "MR JOHN FRENCH FRIES 900g",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 1734,
+    "error": null
+   },
+   {
+    "provider": "serper",
+    "query": "MR JOHN FRENCH FRIES 900g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 1660,
+    "error": null
+   }
+  ],
+  "decision": "REVIEW_UNSELECTED",
+  "failure_code": null,
+  "winner": null,
+  "top": [
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "horecamarket.ae",
+    "title": "Frozen French Fries 9mm Mr. John Brand Best Price For Hotels",
+    "image_url": "https://horecamarket.ae/wp-content/uploads/2026/05/Add-34-400x300.webp",
+    "page_url": "https://horecamarket.ae/product/frozen-french-fries-9mm/?srsltid=AU7gw4VHk68drzFSBFQuT-GNfaESeUD6pDpSFo8v-gqdYWT4yw3OZqjE",
+    "evidence": "tier=2 size=unknown brand=True variants=[] coverage=1.0 source_trust=0 gtin=None quality=foreground>98%",
+    "vlm": null
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "rawabihypermarket.com",
+    "title": "Rawabi Hypermarket - Qatar's Trusted Retailer Online",
+    "image_url": "https://rawabihypermarket.com/uploads/product_images/featured_image/Mr._John_Chips_Frozen_(9Mm)__2.5Kg288959.jpg",
+    "page_url": "https://rawabihypermarket.com/french-fries/1/11/65/486",
+    "evidence": "tier=2 size=conflict brand=True variants=[] coverage=1.0 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "UNSURE",
+     "view": "front_packshot",
+     "brand": "MR JOHN",
+     "variant": "FRENCH FRIES",
+     "size": ""
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "gcc.luluhypermarket.com",
+    "title": "Nobar French Fries 900 g Online at Best Price | Lulu UAE",
+    "image_url": "https://bf1af2.akinoncloudcdn.com/products/2025/08/20/609428/baed120d-1d42-4d42-8efc-cef5ff368a45_size1920x1920_cropCenter.jpg",
+    "page_url": "https://gcc.luluhypermarket.com/en-ae/nobar-french-fries-900-g/p/2216500",
+    "evidence": "tier=3 size=match brand=False variants=[] coverage=1.0 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "NOBAR SABZ",
+     "variant": "French Fries",
+     "size": "900 gr"
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "unioncoop.ae",
+    "title": "Ulker Marifet Thin French Fries - 900g",
+    "image_url": "https://www.unioncoop.ae/media/catalog/product/1/-/1-_lker_Marifet_French_Fries__1000g_F-min_1043185_9738_1.jpg",
+    "page_url": "https://www.unioncoop.ae/ulker-french-fries-7x7-900gr-1724281309-ody5mduwndy1mzcwnw-ody5mduwndy1mzcwn18xnzi0mjgxmzew.html",
+    "evidence": "tier=3 size=match brand=False variants=[] coverage=1.0 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "ULKER Marifet",
+     "variant": "Patates French Fries",
+     "size": "1000 g"
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "unioncoop.ae",
+    "title": "Ulker Marifet Thin French Fries - 900g",
+    "image_url": "https://www.unioncoop.ae/media/catalog/product/J/o/Joys_French_Fries_9mm_1Kg_101431_6739_1.jpg",
+    "page_url": "https://www.unioncoop.ae/ulker-french-fries-7x7-900gr-1724281309-ody5mduwndy1mzcwnw-ody5mduwndy1mzcwn18xnzi0mjgxmzew.html",
+    "evidence": "tier=3 size=match brand=False variants=[] coverage=1.0 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "Joy's",
+     "variant": "French Fries",
+     "size": "1 KG"
+    }
+   }
+  ],
+  "vlm_calls": 1,
+  "serp_calls": 2,
+  "cost_usd": 0.003,
+  "seconds": 11.5
+ },
+ {
+  "row": 11,
+  "name": "SUNBULAH FRENCH FRIES 1KG",
+  "brand": "SUNBULAH",
+  "sku_key": "65f3b486429f0423",
+  "brand_conf": "sheet_raw",
+  "gtin_status": "missing",
+  "queries": [
+   "SUNBULAH FRENCH FRIES 1kg"
+  ],
+  "provider_calls": [
+   {
+    "provider": "serper",
+    "query": "SUNBULAH FRENCH FRIES 1kg",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 3536,
+    "error": null
+   }
+  ],
+  "decision": "REVIEW_PRESELECTED",
+  "failure_code": null,
+  "winner": "https://bf1af2.akinoncloudcdn.com/products/2024/09/20/121771/491e497e-5cc8-4ad4-8dc3-88e773eaed8c.jpg",
+  "top": [
+   {
+    "status": "preselected",
+    "provider": "serper",
+    "domain": "gcc.luluhypermarket.com",
+    "title": "Sunbulah Thin French Fries 1 kg Online at Best Price | Lulu KSA",
+    "image_url": "https://bf1af2.akinoncloudcdn.com/products/2024/09/20/121771/491e497e-5cc8-4ad4-8dc3-88e773eaed8c.jpg",
+    "page_url": "https://gcc.luluhypermarket.com/en-sa/sunbulah-thin-french-fries-1-kg/p/136497",
+    "evidence": "tier=1 size=match brand=True variants=[] coverage=1.0 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MATCH",
+     "view": "front_packshot",
+     "brand": "Sunbulah",
+     "variant": "Thin French Fries",
+     "size": "1 KG"
+    }
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "gcc.luluhypermarket.com",
+    "title": "Sunbulah Thin French Fries 1 kg Online at Best Price | Lulu KSA",
+    "image_url": "https://bf1af2.akinoncloudcdn.com/products/2024/09/20/121771/ca77ef5e-df99-4704-bbc7-d0a7233ca84c_size1920x1920_cropCenter.jpg",
+    "page_url": "https://gcc.luluhypermarket.com/en-sa/sunbulah-thin-french-fries-1-kg/p/136497",
+    "evidence": "tier=1 size=match brand=True variants=[] coverage=1.0 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "UNSURE",
+     "view": "other_side",
+     "brand": "Sunbulah",
+     "variant": "Frozen Thin French Fries",
+     "size": ""
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "amazon.ae",
+    "title": "Sunbulah Potato French Fries 1Kg : Amazon.ae: Grocery",
+    "image_url": "https://m.media-amazon.com/images/I/81rKLXKeCHL.jpg",
+    "page_url": "https://www.amazon.ae/Sunbulah-Potato-French-Fries-1Kg/dp/B08MTX5SZ6",
+    "evidence": "tier=1 size=match brand=True variants=[] coverage=1.0 source_trust=3 gtin=None quality=foreground>98%",
+    "vlm": null
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "spinneys.com",
+    "title": "Sunbulah Frozen French Fries 1kg",
+    "image_url": "https://prod-spinneys-cdn-new.azureedge.net/media/images/products/2026/07/6281073151026.jpg",
+    "page_url": "https://www.spinneys.com/en-sa/catalogue/sunbulah-frozen-french-fries-1kg_89748/?srsltid=AU7gw4UjsIPiMBz4gF8sdWmjBnfYVEI6lRlogM-VFJc0ZJr20EOv5aRX",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=1.0 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MATCH",
+     "view": "front_packshot",
+     "brand": "Sunbulah",
+     "variant": "French Fries",
+     "size": "1 KG"
+    }
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "carrefourksa.com",
+    "title": "Buy Sunbulah French Fries 1kg Online | Carrefour KSA",
+    "image_url": "https://cdn.mafrservices.com/sys-master-root/haa/h9d/14585604964382/26393_main.jpg",
+    "page_url": "https://www.carrefourksa.com/mafsau/en/french-fries/sunbulah-french-fries-7mm-1kg/p/26393",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=1.0 source_trust=1 gtin=None",
+    "vlm": {
+     "decision": "MATCH",
+     "view": "front_packshot",
+     "brand": "Sunbulah",
+     "variant": "Thin French Fries",
+     "size": "1 KG"
+    }
+   }
+  ],
+  "vlm_calls": 1,
+  "serp_calls": 1,
+  "cost_usd": 0.002,
+  "seconds": 11.4
+ },
+ {
+  "row": 12,
+  "name": "TOMEX FRENCH FRIES 9MM 1 KG",
+  "brand": "TOMEX",
+  "sku_key": "8a15e3997d23c3fe",
+  "brand_conf": "sheet_raw",
+  "gtin_status": "missing",
+  "queries": [
+   "TOMEX FRENCH FRIES 9MM 1kg",
+   "TOMEX FRENCH FRIES 9MM 1kg (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)"
+  ],
+  "provider_calls": [
+   {
+    "provider": "serper",
+    "query": "TOMEX FRENCH FRIES 9MM 1kg",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 4453,
+    "error": null
+   },
+   {
+    "provider": "serper",
+    "query": "TOMEX FRENCH FRIES 9MM 1kg (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 1532,
+    "error": null
+   }
+  ],
+  "decision": "REVIEW_UNSELECTED",
+  "failure_code": null,
+  "winner": null,
+  "top": [
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "facebook.com",
+    "title": "Tomex Shoestring Fries, ✔1kilogram Per Pack, ✔10kls Per Box, 📌Bulk,  Wholesale And Retail Price, 📌Available Now‼‼‼, #celestestorefrozen |  Celeste Store Frozen Food Products Trading | Facebook",
+    "image_url": "https://lookaside.fbsbx.com/lookaside/crawler/media/?media_id=1115358429110280&get_thumbnail=1",
+    "page_url": "https://www.facebook.com/CelAndFin/videos/tomex-shoestring-french-fries/1115358429110280/",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=0.6667 source_trust=0 gtin=None fetch=too_small",
+    "vlm": null
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "admirals.ae",
+    "title": "Tomex Coated & Saltd Fries 6mm — Admirals Trading LLC",
+    "image_url": "https://www.admirals.ae/assets/wp-content/uploads/2021/07/tomex-coated-fries.jpg",
+    "page_url": "https://www.admirals.ae/products/culinary/tomex-coated-saltd-fries-6mm/",
+    "evidence": "tier=2 size=unknown brand=True variants=[] coverage=0.6667 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "TOMEX",
+     "variant": "COATED CRUNCHY FRIES",
+     "size": "2.5KG"
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "admirals.ae",
+    "title": "Tomex Reg Unsalted Fries 9mm — Admirals Trading LLC",
+    "image_url": "https://www.admirals.ae/assets/wp-content/uploads/2023/05/27-300x300.png",
+    "page_url": "https://www.admirals.ae/products/frozen/tomex-reg-unsalted-fries-9mm/",
+    "evidence": "tier=2 size=unknown brand=True variants=[] coverage=0.6667 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "banner",
+     "brand": "TOMEX",
+     "variant": "",
+     "size": ""
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "qnited.com",
+    "title": "Tomex - Qnited",
+    "image_url": "https://qnited.com/wp-content/uploads/2024/07/tomex-banner-1.jpg",
+    "page_url": "https://qnited.com/brands/tomex/",
+    "evidence": "tier=2 size=unknown brand=True variants=[] coverage=0.0 source_trust=0 gtin=None quality=foreground>98%",
+    "vlm": null
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "admirals.ae",
+    "title": "Tomex Reg Unsalted Fries 9mm — Admirals Trading LLC",
+    "image_url": "https://www.admirals.ae/assets/wp-content/uploads/2021/07/tomex-frozen-french-fries-9x9mm-4x2.5kg.jpg",
+    "page_url": "https://www.admirals.ae/products/frozen/tomex-reg-unsalted-fries-9mm/",
+    "evidence": "tier=2 size=conflict brand=True variants=[] coverage=1.0 source_trust=0 gtin=None quality=foreground>98%",
+    "vlm": null
+   }
+  ],
+  "vlm_calls": 1,
+  "serp_calls": 2,
+  "cost_usd": 0.003,
+  "seconds": 12.9
+ },
+ {
+  "row": 13,
+  "name": "YUMWAY STRAIGHT CUT FRENCH FRIES 2.5 KG",
+  "brand": "YUMWAY",
+  "sku_key": "188e6c84ed040201",
+  "brand_conf": "sheet_raw",
+  "gtin_status": "missing",
+  "queries": [
+   "YUMWAY STRAIGHT CUT FRENCH FRIES 2.5kg",
+   "YUMWAY STRAIGHT CUT FRENCH FRIES 2.5kg (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)"
+  ],
+  "provider_calls": [
+   {
+    "provider": "serper",
+    "query": "YUMWAY STRAIGHT CUT FRENCH FRIES 2.5kg",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 2771,
+    "error": null
+   },
+   {
+    "provider": "serper",
+    "query": "YUMWAY STRAIGHT CUT FRENCH FRIES 2.5kg (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 3300,
+    "error": null
+   }
+  ],
+  "decision": "REVIEW_UNSELECTED",
+  "failure_code": null,
+  "winner": null,
+  "top": [
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "ansargallery.com",
+    "title": "Yumway Straight Cut French Fries 9mm 2.5Kg | Ansar Gallery",
+    "image_url": "https://media.ansargallery.com/media/catalog/product/5/4/5412588350043_1.jpg",
+    "page_url": "https://www.ansargallery.com/en/yumway-straight-cut-french-fries-9mm-2-5kg-qatar-626861497454",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=1.0 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "Mondelle",
+     "variant": "French Fries",
+     "size": ""
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "ansargallery.com",
+    "title": "Yumway Straight Cut French Fries 9mm 2.5Kg | Ansar Gallery",
+    "image_url": "https://www.ansargallery.com/_next/image?url=https%3A%2F%2Fmedia.ansargallery.com%2Fmedia%2Fcatalog%2Fproduct%2F6%2F2%2F626861497454_1_1.jpg&w=828&q=75",
+    "page_url": "https://www.ansargallery.com/en/yumway-straight-cut-french-fries-9mm-2-5kg-qatar-626861497454",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=1.0 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "Max Foods",
+     "variant": "CRISPY FRIES",
+     "size": "2500"
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "yumwayfood.com",
+    "title": "Blogs -",
+    "image_url": "https://yumwayfood.com/blogs/wp-content/uploads/2026/04/Why-Restaurants-Prefer-Frozen-French-Fries-Over-Fresh-Fries-Yumway-Foods.jpg",
+    "page_url": "https://yumwayfood.com/blogs/",
+    "evidence": "tier=2 size=unknown brand=True variants=[] coverage=0.5 source_trust=0 gtin=None quality=foreground>98%",
+    "vlm": null
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "yumwayfood.com",
+    "title": "YUMWAY | Premium Frozen French Fries & Frozen Foods Manufacturer in India",
+    "image_url": "https://yumwayfood.com/static/media/StraightcutFrenchfries.5a7453723b0eb4bfba49.jpg",
+    "page_url": "https://yumwayfood.com/frenchfries",
+    "evidence": "tier=2 size=unknown brand=True variants=[] coverage=0.5 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "UNSURE",
+     "view": "lifestyle",
+     "brand": "YUM-WAY",
+     "variant": "French Fries",
+     "size": ""
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "yumwayfood.com",
+    "title": "YUMWAY | Premium Frozen French Fries & Frozen Foods Manufacturer in India",
+    "image_url": "https://yumwayfood.com/static/media/bulk2.94b75c138d41f6390092.png",
+    "page_url": "https://yumwayfood.com/exports",
+    "evidence": "tier=2 size=unknown brand=True variants=[] coverage=0.5 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "multi_product",
+     "brand": "YUM-WAY",
+     "variant": "French Fries",
+     "size": "2.5 Kg"
+    }
+   }
+  ],
+  "vlm_calls": 1,
+  "serp_calls": 2,
+  "cost_usd": 0.003,
+  "seconds": 12.7
+ },
+ {
+  "row": 14,
+  "name": "ASHOKA PLAIN PARATHA 5S 400GM",
+  "brand": "ASHOKA",
+  "sku_key": "389c92d2d9ad7015",
+  "brand_conf": "sheet_raw",
+  "gtin_status": "missing",
+  "queries": [
+   "ASHOKA PLAIN PARATHA 5x400g",
+   "ASHOKA PLAIN PARATHA 5x400g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)"
+  ],
+  "provider_calls": [
+   {
+    "provider": "serper",
+    "query": "ASHOKA PLAIN PARATHA 5x400g",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 2630,
+    "error": null
+   },
+   {
+    "provider": "serper",
+    "query": "ASHOKA PLAIN PARATHA 5x400g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 1577,
+    "error": null
+   }
+  ],
+  "decision": "REVIEW_PRESELECTED",
+  "failure_code": null,
+  "winner": "https://bf1af2.akinoncloudcdn.com/products/2024/09/11/54571/4d94d2d5-9c9c-4d80-8dfc-ecb3e5bcff99.jpg",
+  "top": [
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "talabat.com",
+    "title": "Buy Ashoka Plain Paratha 400 g Online in UAE | Talabat UAE",
+    "image_url": "https://talabat.dhmedia.io/image/talabat-nv/Regional_Images/Images/QC_Standard_Images/KWVWQNHZ.png",
+    "page_url": "https://www.talabat.com/uae/talabat-mart/product/ashoka-plain-paratha-400-g/s/905099",
+    "evidence": "tier=2 size=match brand=True variants=['flavour'] coverage=1.0 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "iD",
+     "variant": "WHOLE WHEAT CHAPATI",
+     "size": ""
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "amazon.ae",
+    "title": "Ashoka Plain Paratha 400g : Amazon.ae: Grocery",
+    "image_url": "https://images-eu.ssl-images-amazon.com/images/I/619DLXQOP1L.jpg",
+    "page_url": "https://www.amazon.ae/ASHOKA-1748-Ashoka-Plain-Paratha/dp/B012S2S2ZW",
+    "evidence": "tier=2 size=match brand=True variants=['flavour'] coverage=1.0 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "FIT'N BAKES",
+     "variant": "HIGH PROTEIN TORTILLA",
+     "size": "360g"
+    }
+   },
+   {
+    "status": "preselected",
+    "provider": "serper",
+    "domain": "gcc.luluhypermarket.com",
+    "title": "Ashoka Plain Paratha 5 pcs 400 g",
+    "image_url": "https://bf1af2.akinoncloudcdn.com/products/2024/09/11/54571/4d94d2d5-9c9c-4d80-8dfc-ecb3e5bcff99.jpg",
+    "page_url": "https://gcc.luluhypermarket.com/en-ae/ashoka-plain-paratha-5-pcs-400-g/p/353472",
+    "evidence": "tier=2 size=match brand=True variants=['flavour'] coverage=1.0 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MATCH",
+     "view": "front_packshot",
+     "brand": "ASHOKA",
+     "variant": "PLAIN PARATHA",
+     "size": "400 g / 14 Oz"
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "gcc.luluhypermarket.com",
+    "title": "Ashoka Asli Plain Paratha 5 pcs 400 g Online at Best Price | Lulu UAE",
+    "image_url": "https://bf1af2.akinoncloudcdn.com/products/2024/09/11/54496/2dfd25c4-89f0-420a-b77d-dcdc71cc3ed8_size1920x1920_cropCenter.jpg",
+    "page_url": "https://gcc.luluhypermarket.com/en-ae/ashoka-asli-plain-paratha-5-pcs-400-g/p/420274",
+    "evidence": "tier=2 size=match brand=True variants=['flavour'] coverage=1.0 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "ASHOKA",
+     "variant": "ASLI PARATHA",
+     "size": "400 g / 14 Oz"
+    }
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "talabat.com",
+    "title": "Buy Ashoka Plain Paratha 400 g Online in UAE | Talabat UAE",
+    "image_url": "https://talabat.dhmedia.io/image/product-information-management/6811d65493f7e66be40bb782.jpg",
+    "page_url": "https://www.talabat.com/uae/talabat-mart/product/ashoka-plain-paratha-400-g/s/905099",
+    "evidence": "tier=2 size=match brand=True variants=['flavour'] coverage=1.0 source_trust=3 gtin=None",
+    "vlm": null
+   }
+  ],
+  "vlm_calls": 1,
+  "serp_calls": 2,
+  "cost_usd": 0.003,
+  "seconds": 14.1
+ },
+ {
+  "row": 15,
+  "name": "MEHRAN PLAIN PARATHA 2X400GM 5S",
+  "brand": "MEHRAN",
+  "sku_key": "a66c3b5167bb6e5e",
+  "brand_conf": "sheet_raw",
+  "gtin_status": "missing",
+  "queries": [
+   "MEHRAN PLAIN PARATHA 2x400g",
+   "MEHRAN PLAIN PARATHA 2x400g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)"
+  ],
+  "provider_calls": [
+   {
+    "provider": "serper",
+    "query": "MEHRAN PLAIN PARATHA 2x400g",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 1597,
+    "error": null
+   },
+   {
+    "provider": "serper",
+    "query": "MEHRAN PLAIN PARATHA 2x400g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 1487,
+    "error": null
+   }
+  ],
+  "decision": "REVIEW_UNSELECTED",
+  "failure_code": null,
+  "winner": null,
+  "top": [
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "shinjukuhalalfood.com",
+    "title": "Mehran Plain Paratha 400g – Ready to Cook",
+    "image_url": "https://shinjukuhalalfood.com/wp-content/uploads/2024/05/Pran-Plain-Paratha-400g-1.jpg",
+    "page_url": "https://shinjukuhalalfood.com/product/mehran-plain-paratha-400g/",
+    "evidence": "tier=2 size=match brand=True variants=['flavour'] coverage=1.0 source_trust=0 gtin=None fetch=timeout",
+    "vlm": null
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "shinjukuhalalfood.com",
+    "title": "Mehran Plain Paratha 400g – Ready to Cook",
+    "image_url": "https://shinjukuhalalfood.com/wp-content/uploads/2025/09/Plain-Paratha-400g-600x600.jpg",
+    "page_url": "https://shinjukuhalalfood.com/product/mehran-plain-paratha-400g/",
+    "evidence": "tier=2 size=match brand=True variants=['flavour'] coverage=1.0 source_trust=0 gtin=None fetch=timeout",
+    "vlm": null
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "shinjukuhalalfood.com",
+    "title": "Mehran Plain Paratha 400g – Ready to Cook",
+    "image_url": "https://shinjukuhalalfood.com/wp-content/uploads/2020/11/Plain-Paratha-Kazifarm-1.jpg",
+    "page_url": "https://shinjukuhalalfood.com/product/mehran-plain-paratha-400g/",
+    "evidence": "tier=2 size=match brand=True variants=['flavour'] coverage=1.0 source_trust=0 gtin=None fetch=timeout",
+    "vlm": null
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "shinjukuhalalfood.com",
+    "title": "Mehran Plain Paratha 400g – Ready to Cook",
+    "image_url": "https://shinjukuhalalfood.com/wp-content/uploads/2020/11/Kawan-Plain-Paratha-400g.jpg",
+    "page_url": "https://shinjukuhalalfood.com/product/mehran-plain-paratha-400g/",
+    "evidence": "tier=2 size=match brand=True variants=['flavour'] coverage=1.0 source_trust=0 gtin=None fetch=timeout",
+    "vlm": null
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "yabaneez.com",
+    "title": "PLAIN PARATHA \"MEHRAN\"",
+    "image_url": "https://media.zid.store/548ead68-37ea-4424-a30f-6cbbd00a8037/9b53a63c-4370-40a3-bc1f-d8d29f526c0c.png",
+    "page_url": "https://yabaneez.com/en-ae/products/%D8%A8%D8%B1%D8%A7%D8%AA%D8%A7-%D8%B3%D8%A7%D8%AF%D8%A9-%D9%85%D9%87%D8%B1%D8%A7%D9%86?srsltid=AU7gw4XJH0gtu8iqDdV54xv9f0NobhU2HQ0poK11JzkypX-8yIRExu53",
+    "evidence": "tier=2 size=unknown brand=True variants=['flavour'] coverage=1.0 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "Mehran",
+     "variant": "PLAIN PARATHA",
+     "size": "400g"
+    }
+   }
+  ],
+  "vlm_calls": 1,
+  "serp_calls": 2,
+  "cost_usd": 0.003,
+  "seconds": 18.2
+ },
+ {
+  "row": 16,
+  "name": "MEHRAN PLAIN PARATHA 400GM 5S",
+  "brand": "MEHRAN",
+  "sku_key": "a0f7edfe01436735",
+  "brand_conf": "sheet_raw",
+  "gtin_status": "missing",
+  "queries": [
+   "MEHRAN PLAIN PARATHA 5x400g",
+   "MEHRAN PLAIN PARATHA 5x400g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)"
+  ],
+  "provider_calls": [
+   {
+    "provider": "serper",
+    "query": "MEHRAN PLAIN PARATHA 5x400g",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 1302,
+    "error": null
+   },
+   {
+    "provider": "serper",
+    "query": "MEHRAN PLAIN PARATHA 5x400g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 1820,
+    "error": null
+   }
+  ],
+  "decision": "REVIEW_UNSELECTED",
+  "failure_code": null,
+  "winner": null,
+  "top": [
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "yasminstore.com",
+    "title": "Mehran Plain Paratha (5 pieces) 400 g | Yasmine Store",
+    "image_url": "https://cdn.salla.sa/dPKDdg/qc5cO2jSVAw87uqcWQJxAegLdjLchYdLJWmPncvi.png",
+    "page_url": "https://yasminstore.com/ur/8961102042560-mehran-plain-paratha-5-pieces-400-g",
+    "evidence": "tier=2 size=match brand=True variants=['flavour'] coverage=1.0 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "multi_product",
+     "brand": "Haldiram's",
+     "variant": "ALL IN ONE",
+     "size": "200g"
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "shinjukuhalalfood.com",
+    "title": "Mehran Plain Paratha 400g – Ready to Cook",
+    "image_url": "https://shinjukuhalalfood.com/wp-content/uploads/2024/05/Pran-Plain-Paratha-400g-1.jpg",
+    "page_url": "https://shinjukuhalalfood.com/product/mehran-plain-paratha-400g/",
+    "evidence": "tier=2 size=match brand=True variants=['flavour'] coverage=1.0 source_trust=0 gtin=None fetch=timeout",
+    "vlm": null
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "shinjukuhalalfood.com",
+    "title": "Mehran Plain Paratha 400g – Ready to Cook",
+    "image_url": "https://shinjukuhalalfood.com/wp-content/uploads/2025/09/Plain-Paratha-400g-600x600.jpg",
+    "page_url": "https://shinjukuhalalfood.com/product/mehran-plain-paratha-400g/",
+    "evidence": "tier=2 size=match brand=True variants=['flavour'] coverage=1.0 source_trust=0 gtin=None fetch=timeout",
+    "vlm": null
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "shinjukuhalalfood.com",
+    "title": "Mehran Plain Paratha 400g – Ready to Cook",
+    "image_url": "https://shinjukuhalalfood.com/wp-content/uploads/2020/11/Plain-Paratha-Kazifarm-1.jpg",
+    "page_url": "https://shinjukuhalalfood.com/product/mehran-plain-paratha-400g/",
+    "evidence": "tier=2 size=match brand=True variants=['flavour'] coverage=1.0 source_trust=0 gtin=None fetch=timeout",
+    "vlm": null
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "rawabihypermarket.com",
+    "title": "Mehran Malabar Paratha 5S 400g | Rawabi Hypermarket",
+    "image_url": "https://rawabihypermarket.com/uploads/product_images/featured_image/1002491.jpg",
+    "page_url": "https://rawabihypermarket.com/mehran-malabar-paratha-5s-400g/265090",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=1.0 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "Mehran",
+     "variant": "MALABAR PARATHA",
+     "size": "400g"
+    }
+   }
+  ],
+  "vlm_calls": 2,
+  "serp_calls": 2,
+  "cost_usd": 0.004,
+  "seconds": 20.0
+ },
+ {
+  "row": 17,
+  "name": "AL RAWABI MOZZARELLA CHEESE 200GM",
+  "brand": "AL RAWABI",
+  "sku_key": "af3f4c5604abafee",
+  "brand_conf": "sheet_raw",
+  "gtin_status": "missing",
+  "queries": [
+   "AL RAWABI MOZZARELLA CHEESE 200g"
+  ],
+  "provider_calls": [
+   {
+    "provider": "serper",
+    "query": "AL RAWABI MOZZARELLA CHEESE 200g",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 9164,
+    "error": null
+   }
+  ],
+  "decision": "REVIEW_PRESELECTED",
+  "failure_code": null,
+  "winner": "https://m.media-amazon.com/images/I/61KbqeCGBxL.jpg",
+  "top": [
+   {
+    "status": "preselected",
+    "provider": "serper",
+    "domain": "amazon.ae",
+    "title": "Al Rawabi Shredded Mozzarella Cheese 200g : Amazon.ae: Grocery",
+    "image_url": "https://m.media-amazon.com/images/I/61KbqeCGBxL.jpg",
+    "page_url": "https://www.amazon.ae/Al-Rawabi-Shredded-Mozzarella-Cheese/dp/B088YH9XH4",
+    "evidence": "tier=1 size=match brand=True variants=['flavour'] coverage=1.0 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MATCH",
+     "view": "front_packshot",
+     "brand": "AL RAWABI",
+     "variant": "Mozzarella Shredded Mozzarella Cheese",
+     "size": "200 grams"
+    }
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "talabat.com",
+    "title": "Buy Al Rawabi Shredded Mozzarella Cheese 200 g Online in UAE | Talabat UAE",
+    "image_url": "https://talabat.dhmedia.io/image/talabat-nv/Regional_Images/Al_Rawabi_Tmart/6291030109588_2.jpg",
+    "page_url": "https://www.talabat.com/uae/talabat-mart/product/al-rawabi-shredded-mozzarella-cheese-200-g/s/904393",
+    "evidence": "tier=1 size=match brand=True variants=['flavour'] coverage=1.0 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "UNSURE",
+     "view": "other_side",
+     "brand": "AL RAWABI",
+     "variant": "SHREDDED MOZZARELLA CHEESE",
+     "size": ""
+    }
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "palmyraorders.com",
+    "title": "Al Rawabi Shredded Mozzarella Cheese Full Fat-200g | UAE – Palmyra Orders",
+    "image_url": "https://palmyraorders.com/cdn/shop/files/al-rawabi-shredded-mozzarella-cheese-full-fat-200g.jpg?v=1755852670&width=1000",
+    "page_url": "https://palmyraorders.com/products/al-rawabi-shredded-mozzarella-cheese-full-fat-200g",
+    "evidence": "tier=2 size=match brand=True variants=['flavour'] coverage=1.0 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "MATCH",
+     "view": "front_packshot",
+     "brand": "AL RAWABI",
+     "variant": "Mozzarella Shredded Mozzarella Cheese",
+     "size": "200 grams"
+    }
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "sharjahcoop.ae",
+    "title": "Al Rawabi Shredded Mozarella Cheese 200g | Sharjah Co-operative Society",
+    "image_url": "https://www.sharjahcoop.ae/medias/1200Wx1200H-00000-6291030109588-001.jpg?context=bWFzdGVyfGltYWdlc3wyMzUyMzZ8aW1hZ2UvanBlZ3xhR1ZpTDJnMk5pOHhNREF6TkRVME5UWTFOVGd6T0M4eE1qQXdWM2d4TWpBd1NGOHdNREF3TUY4Mk1qa3hNRE13TVRBNU5UZzRYekF3TVM1cWNHY3w2Njc4ZDk4YjkyZTc0YTRmODBjOWMxOGFiYTM1NWZiOTNkZjQwNWM0YTM1MzRmMGM0NTdhYjIwOTRiODEzMGMw",
+    "page_url": "https://www.sharjahcoop.ae/en/al-rawabi-shredded-mozarella-cheese-200g/p/6291030109588?srsltid=AU7gw4X2dX-v5CquuRbf6Ctl3iTHfyaPCqQh1cO-DHjNjzpmpert80Ea",
+    "evidence": "tier=2 size=match brand=True variants=['flavour'] coverage=0.0 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "MATCH",
+     "view": "front_packshot",
+     "brand": "AL RAWABI",
+     "variant": "Mozzarella Shredded Mozzarella Cheese",
+     "size": "200 grams"
+    }
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "sharjahcoop.ae",
+    "title": "Al Rawabi Shredded Mozarella Cheese 200g | Sharjah Co-operative Society",
+    "image_url": "https://www.sharjahcoop.ae/medias/6291030109588-1200Wx1200H-001.jpg?context=bWFzdGVyfHNjc3w1NzIyOTN8aW1hZ2UvanBlZ3xjMk56TDJneE5TOW9NVFF2T0RnMk9UTTVOVFEyTkRJeU1pNXFjR2N8MThjMjcxM2QxZWZhNGM1NjNhZDMwNWJhMzIxZmVmODFlYWI5NmY1MTU2NWJjZjRlYjcwZGIxZTA3NWM0ZTU4NQ",
+    "page_url": "https://www.sharjahcoop.ae/en/al-rawabi-shredded-mozarella-cheese-200g/p/6291030109588?srsltid=AU7gw4UZ2HoVOVRsH-3yHQJSnDTm-osUyN8OJFGli1vZ3-kDd_5_HNPj",
+    "evidence": "tier=2 size=match brand=True variants=['flavour'] coverage=0.0 source_trust=0 gtin=None",
+    "vlm": null
+   }
+  ],
+  "vlm_calls": 1,
+  "serp_calls": 1,
+  "cost_usd": 0.002,
+  "seconds": 15.8
+ },
+ {
+  "row": 18,
+  "name": "AJMI MEAT MASALA 160GM",
+  "brand": "AJMI",
+  "sku_key": "959d361cd096423f",
+  "brand_conf": "sheet_raw",
+  "gtin_status": "missing",
+  "queries": [
+   "AJMI MEAT MASALA 160g"
+  ],
+  "provider_calls": [
+   {
+    "provider": "serper",
+    "query": "AJMI MEAT MASALA 160g",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 1898,
+    "error": null
+   }
+  ],
+  "decision": "REVIEW_PRESELECTED",
+  "failure_code": null,
+  "winner": "https://bf1af2.akinoncloudcdn.com/products/2025/10/06/617530/5c748fd3-4981-4cce-b0c4-0687f0d64b72_size1920x1920_cropCenter.jpg",
+  "top": [
+   {
+    "status": "preselected",
+    "provider": "serper",
+    "domain": "gcc.luluhypermarket.com",
+    "title": "Ajmi Meat Masala 160 g Online at Best Price | Lulu Oman",
+    "image_url": "https://bf1af2.akinoncloudcdn.com/products/2025/10/06/617530/5c748fd3-4981-4cce-b0c4-0687f0d64b72_size1920x1920_cropCenter.jpg",
+    "page_url": "https://gcc.luluhypermarket.com/en-om/ajmi-meat-masala-160-g/p/2104381",
+    "evidence": "tier=1 size=match brand=True variants=[] coverage=1.0 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MATCH",
+     "view": "front_packshot",
+     "brand": "Ajmi",
+     "variant": "Meat Masala",
+     "size": "160 g"
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "gcc.luluhypermarket.com",
+    "title": "Ajmi Chicken Masala 160 g Online at Best Price | Lulu UAE",
+    "image_url": "https://bf1af2.akinoncloudcdn.com/products/2025/10/06/617538/ffc809c2-57a3-42e2-8c8b-c47543e80899.jpg",
+    "page_url": "https://gcc.luluhypermarket.com/en-ae/ajmi-chicken-masala-160-g/p/2104380",
+    "evidence": "tier=1 size=match brand=True variants=[] coverage=0.5 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "Ajmi",
+     "variant": "Chicken Masala",
+     "size": "160 g"
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "homeland.net.nz",
+    "title": "Ajmi Chicken Masala 160g – Homeland Indian Mart",
+    "image_url": "https://cdn.shopify.com/s/files/1/0722/5465/2721/files/34.png?v=1703697036",
+    "page_url": "https://homeland.net.nz/products/ajmi-chicken-masala-160g",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=0.5 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "Ajmi",
+     "variant": "Chicken Masala",
+     "size": ""
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "kergro.in",
+    "title": "AJMI MEAT MASALA – KERGRO",
+    "image_url": "https://kergro.in/cdn/shop/files/39.jpg?v=1772869911",
+    "page_url": "https://kergro.in/products/ajmi-meat-masala",
+    "evidence": "tier=2 size=unknown brand=True variants=[] coverage=1.0 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "other_side",
+     "brand": "Ajmi",
+     "variant": "Meat Curry Recipe",
+     "size": "100 g"
+    }
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "kergro.in",
+    "title": "AJMI MEAT MASALA – KERGRO",
+    "image_url": "https://kergro.in/cdn/shop/files/187.jpg?v=1768460961&width=720",
+    "page_url": "https://kergro.in/products/ajmi-meat-masala",
+    "evidence": "tier=2 size=unknown brand=True variants=[] coverage=1.0 source_trust=0 gtin=None",
+    "vlm": null
+   }
+  ],
+  "vlm_calls": 1,
+  "serp_calls": 1,
+  "cost_usd": 0.002,
+  "seconds": 11.0
+ },
+ {
+  "row": 19,
+  "name": "AL ALALI FANCY MEAT TUNA IN WATER170GM",
+  "brand": "AL ALALI",
+  "sku_key": "c23ef872761f5765",
+  "brand_conf": "sheet_raw",
+  "gtin_status": "missing",
+  "queries": [
+   "AL ALALI FANCY MEAT TUNA IN WATER170GM",
+   "AL ALALI FANCY MEAT TUNA IN WATER170GM (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)"
+  ],
+  "provider_calls": [
+   {
+    "provider": "serper",
+    "query": "AL ALALI FANCY MEAT TUNA IN WATER170GM",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 3648,
+    "error": null
+   },
+   {
+    "provider": "serper",
+    "query": "AL ALALI FANCY MEAT TUNA IN WATER170GM (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 2330,
+    "error": null
+   }
+  ],
+  "decision": "REVIEW_PRESELECTED",
+  "failure_code": null,
+  "winner": "https://bf1af2.akinoncloudcdn.com/products/2025/02/17/65251/0df84500-c59f-4fba-88bb-020f4dd12657_size1920x1920_cropCenter.jpg",
+  "top": [
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "carrefouruae.com",
+    "title": "Buy Al Alali Fancy Meat Tuna In Water 170g Pack of 3 Online | Carrefour UAE",
+    "image_url": "https://cdn.mafrservices.com/sys-master-root/hdf/hc2/12781160693790/1659731_main.jpg",
+    "page_url": "https://www.carrefouruae.com/mafuae/en/tuna/al-alali-fancy-tuna-water-sp-170gx3/p/1659731",
+    "evidence": "tier=2 size=unknown brand=True variants=['medium'] coverage=1.0 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "multi_product",
+     "brand": "al alali",
+     "variant": "FANCY MEAT TUNA SOLID PACK IN WATER",
+     "size": ""
+    }
+   },
+   {
+    "status": "preselected",
+    "provider": "serper",
+    "domain": "gcc.luluhypermarket.com",
+    "title": "Al Alali Fancy Meat Tuna In Water 170 g Online at Best Price | Lulu UAE",
+    "image_url": "https://bf1af2.akinoncloudcdn.com/products/2025/02/17/65251/0df84500-c59f-4fba-88bb-020f4dd12657_size1920x1920_cropCenter.jpg",
+    "page_url": "https://gcc.luluhypermarket.com/en-ae/al-alali-fancy-meat-tuna-in-water-170-g/p/14751",
+    "evidence": "tier=2 size=unknown brand=True variants=['medium'] coverage=1.0 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MATCH",
+     "view": "front_packshot",
+     "brand": "al alali",
+     "variant": "لحم تونا فاخر كتل درجة ممتازة بالماء",
+     "size": "170 g"
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "talabat.com",
+    "title": "Buy Al Alali Fancy Meat Tuna in Water 170 g Online in UAE | Talabat UAE",
+    "image_url": "https://talabat.dhmedia.io/image/product-information-management/6a968afc1f3eed815ed0174a.jpg",
+    "page_url": "https://www.talabat.com/uae/talabat-mart/product/al-alali-fancy-meat-tuna-in-water-170-g/s/902409",
+    "evidence": "tier=2 size=unknown brand=True variants=['medium'] coverage=1.0 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "al alali",
+     "variant": "YELLOWFIN TUNA SOLID PACK In Water",
+     "size": ""
+    }
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "talabat.com",
+    "title": "Buy Al Alali Fancy Meat Tuna in Water 170 g Online in UAE | Talabat UAE",
+    "image_url": "https://talabat.dhmedia.io/image/darkstores/groceries-catalog/products-uae/UAE_617950144199.jpg",
+    "page_url": "https://www.talabat.com/uae/talabat-mart/product/al-alali-fancy-meat-tuna-in-water-170-g/s/902409",
+    "evidence": "tier=2 size=unknown brand=True variants=['medium'] coverage=1.0 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MATCH",
+     "view": "front_packshot",
+     "brand": "al alali",
+     "variant": "FANCY MEAT TUNA SOLID PACK In Water",
+     "size": "170 g"
+    }
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "amazon.ae",
+    "title": "Al Alali Fancy Meat Tuna In Water, 85 G: Buy Online at Best Price in UAE -  Amazon.ae",
+    "image_url": "https://m.media-amazon.com/images/I/81gczx1oSmL.jpg",
+    "page_url": "https://www.amazon.ae/Al-Alali-Fancy-Meat-Water/dp/B07MTSKZRT",
+    "evidence": "tier=2 size=unknown brand=True variants=['medium'] coverage=1.0 source_trust=3 gtin=None",
+    "vlm": null
+   }
+  ],
+  "vlm_calls": 1,
+  "serp_calls": 2,
+  "cost_usd": 0.003,
+  "seconds": 15.6
+ },
+ {
+  "row": 20,
+  "name": "ALALALI FANCY MEAT TUNA IN SUNFLOWER OIL 85GM",
+  "brand": "AL ALALI",
+  "sku_key": "8827015bf07ff456",
+  "brand_conf": "sheet_raw",
+  "gtin_status": "missing",
+  "queries": [
+   "AL ALALI ALALALI FANCY MEAT TUNA IN SUNFLOWER OIL 85g"
+  ],
+  "provider_calls": [
+   {
+    "provider": "serper",
+    "query": "AL ALALI ALALALI FANCY MEAT TUNA IN SUNFLOWER OIL 85g",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 3873,
+    "error": null
+   }
+  ],
+  "decision": "REVIEW_PRESELECTED",
+  "failure_code": null,
+  "winner": "https://bf1af2.akinoncloudcdn.com/products/2025/02/17/65294/8ce1b932-84aa-409f-ae06-9984cdb9b3ae_size1920x1920_cropCenter.jpg",
+  "top": [
+   {
+    "status": "preselected",
+    "provider": "serper",
+    "domain": "gcc.luluhypermarket.com",
+    "title": "Al Alali Fancy Meat Tuna Solid Pack In Sunflower Oil 85 g Online at Best  Price | Lulu UAE",
+    "image_url": "https://bf1af2.akinoncloudcdn.com/products/2025/02/17/65294/8ce1b932-84aa-409f-ae06-9984cdb9b3ae_size1920x1920_cropCenter.jpg",
+    "page_url": "https://gcc.luluhypermarket.com/en-ae/al-alali-fancy-meat-tuna-solid-pack-in-sunflower-oil-85-g/p/1812",
+    "evidence": "tier=1 size=match brand=True variants=['medium'] coverage=0.75 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MATCH",
+     "view": "front_packshot",
+     "brand": "al alali",
+     "variant": "FANCY MEAT TUNA SOLID PACK In Sunflower oil",
+     "size": "85 g"
+    }
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "gcc.luluhypermarket.com",
+    "title": "Al Alali Fancy Meat Tuna Solid Pack In Sunflower Oil 85 g Online at Best  Price | Lulu UAE",
+    "image_url": "https://bf1af2.akinoncloudcdn.com/products/2025/02/17/65294/668aa8a8-01fd-4f5c-b24d-0ebeadf37f64_size1920x1920_cropCenter.jpg",
+    "page_url": "https://gcc.luluhypermarket.com/en-ae/al-alali-fancy-meat-tuna-solid-pack-in-sunflower-oil-85-g/p/1812",
+    "evidence": "tier=1 size=match brand=True variants=['medium'] coverage=0.75 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "UNSURE",
+     "view": "front_packshot",
+     "brand": "العلالي",
+     "variant": "لحم تونا فاخر كتل درجة ممتازة بزيت دوار الشمس",
+     "size": "85 غرام"
+    }
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "nextbuy.ae",
+    "title": "Al Alali Fancy Meat Tuna In Sunflower Oil 85 g | Nextbuy.ae",
+    "image_url": "https://i0.wp.com/nextbuy.ae/wp-content/uploads/2020/05/Al-Alali-Fancy-Meat-Tuna-In-Sunflower-Oil-85-g.jpg?fit=600%2C600&ssl=1",
+    "page_url": "https://nextbuy.ae/product/al-alali-fancy-meat-tuna-in-sunflower-oil-85-g/?srsltid=AU7gw4XK2QgwHohAKYxkW4e9l62pVtKOM-TNXg2G4ekTsnkyRVhk8Whf",
+    "evidence": "tier=2 size=match brand=True variants=['medium'] coverage=0.75 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "MATCH",
+     "view": "front_packshot",
+     "brand": "al alali",
+     "variant": "FANCY MEAT TUNA SOLID PACK IN SUNFLOWER OIL",
+     "size": "85 g"
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "getit.qa",
+    "title": "Al Alali Fancy Meat Tuna Solid Pack In Sunflower Oil 85 g | GETIT.QA",
+    "image_url": "https://getit.qa/cdn/shop/products/1812-03.jpg?v=1707806533",
+    "page_url": "https://getit.qa/products/buy-al-alali-fancy-meat-tuna-solid-pack-in-sunflower-oil-85-g-qatar?srsltid=AU7gw4VaqijuhsZRUzlJZwLpWUQp-YjU3eBn42aSigJdroTGYF535OSm",
+    "evidence": "tier=2 size=match brand=True variants=['medium'] coverage=0.75 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "multi_product",
+     "brand": "al alali",
+     "variant": "FANCY MEAT TUNA SOLID PACK In Sunflower oil",
+     "size": "85 g"
+    }
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "waitrose.ae",
+    "title": "Al Alali White Meat Tuna Solid Pack in Sunflower Oil 85g - Waitrose UAE &  Partners",
+    "image_url": "https://prod-waitrose.azureedge.net/media/cache/f5/74/f5747f4a1736af696dbd9a3e405454e3.jpg",
+    "page_url": "https://www.waitrose.ae/en/products/white-meat-tuna-solid-in-sunflower-oil-85g_1369/",
+    "evidence": "tier=2 size=match brand=True variants=['medium'] coverage=0.5 source_trust=0 gtin=None",
+    "vlm": null
+   }
+  ],
+  "vlm_calls": 1,
+  "serp_calls": 1,
+  "cost_usd": 0.002,
+  "seconds": 13.5
+ },
+ {
+  "row": 21,
+  "name": "ALALALI FANCY MEAT TUNA IN WATER 85GM",
+  "brand": "AL ALALI",
+  "sku_key": "06206a3fa7b86a81",
+  "brand_conf": "sheet_raw",
+  "gtin_status": "missing",
+  "queries": [
+   "AL ALALI ALALALI FANCY MEAT TUNA IN WATER 85g"
+  ],
+  "provider_calls": [
+   {
+    "provider": "serper",
+    "query": "AL ALALI ALALALI FANCY MEAT TUNA IN WATER 85g",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 1565,
+    "error": null
+   }
+  ],
+  "decision": "REVIEW_PRESELECTED",
+  "failure_code": null,
+  "winner": "https://cdn.mafrservices.com/pim-content/UAE/media/product/617937/1746429603/617937_main.jpg",
+  "top": [
+   {
+    "status": "preselected",
+    "provider": "serper",
+    "domain": "carrefouruae.com",
+    "title": "Buy Al Alali Fancy Meat Tuna in Water, 85g Online | Carrefour UAE",
+    "image_url": "https://cdn.mafrservices.com/pim-content/UAE/media/product/617937/1746429603/617937_main.jpg",
+    "page_url": "https://www.carrefouruae.com/mafuae/en/tuna/al-alali-fancy-water-tuna-85g/p/617937",
+    "evidence": "tier=1 size=match brand=True variants=['medium'] coverage=0.75 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "UNSURE",
+     "view": "front_packshot",
+     "brand": "alalali",
+     "variant": "FANCY MEAT TUNA SOLID PACK In Water",
+     "size": "85 g"
+    }
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "noon.com",
+    "title": "Al Alali Fancy Meat Tuna in Water 85grams | Best Price UAE | Dubai, Abu  Dhabi",
+    "image_url": "https://f.nooncdn.com/p/v1590856283/N12277957A_2.jpg",
+    "page_url": "https://www.noon.com/uae-en/fancy-meat-tuna-in-water-85grams/N12277957A/p/",
+    "evidence": "tier=1 size=match brand=True variants=['medium'] coverage=0.75 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "UNSURE",
+     "view": "front_packshot",
+     "brand": "العلا لي",
+     "variant": "لحم تونا فاخر كتل درجة ممتازة بالماء",
+     "size": "85 g"
+    }
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "amazon.ae",
+    "title": "Al Alali Fancy Meat Tuna In Water, 85 G: Buy Online at Best Price in UAE -  Amazon.ae",
+    "image_url": "https://m.media-amazon.com/images/I/81gczx1oSmL.jpg",
+    "page_url": "https://www.amazon.ae/Al-Alali-Fancy-Meat-Water/dp/B07MTSKZRT",
+    "evidence": "tier=1 size=match brand=True variants=['medium'] coverage=0.75 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "UNSURE",
+     "view": "front_packshot",
+     "brand": "alalali",
+     "variant": "FANCY MEAT TUNA SOLID PACK In Water",
+     "size": "85 g"
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "amazon.ae",
+    "title": "Al Alali White Meat Tuna In Water, 85 G: Buy Online at Best Price in UAE -  Amazon.ae",
+    "image_url": "https://m.media-amazon.com/images/I/81xMBIfEBrL.jpg",
+    "page_url": "https://www.amazon.ae/Al-Alali-White-Meat-Water/dp/B07MP8VZND",
+    "evidence": "tier=1 size=match brand=True variants=['medium'] coverage=0.5 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "alalali",
+     "variant": "WHITE MEAT TUNA SOLID PACK In Water",
+     "size": "85 g"
+    }
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "martoo.com",
+    "title": "Fancy Meat Tuna in Water - Buy Canned Tuna In Bulk",
+    "image_url": "https://martoo.com/wp-content/uploads/2024/12/Al-Alali-Fancy-Meat-Tuna-in-Water-48-x-170g.jpg",
+    "page_url": "https://martoo.com/product/al-alali-fancy-meat-tuna-in-water/",
+    "evidence": "tier=2 size=conflict brand=True variants=['medium'] coverage=0.75 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "UNSURE",
+     "view": "front_packshot",
+     "brand": "alalali",
+     "variant": "FANCY MEAT TUNA SOLID PACK In Water",
+     "size": "85 g"
+    }
+   }
+  ],
+  "vlm_calls": 2,
+  "serp_calls": 1,
+  "cost_usd": 0.003,
+  "seconds": 14.5
+ },
+ {
+  "row": 22,
+  "name": "ALALALI WHITE MEAT TUNA IN S/F OIL 85GM",
+  "brand": "AL ALALI",
+  "sku_key": "c9a1307106c02ed2",
+  "brand_conf": "sheet_raw",
+  "gtin_status": "missing",
+  "queries": [
+   "AL ALALI ALALALI WHITE MEAT TUNA IN S/F OIL 85g",
+   "AL ALALI ALALALI WHITE MEAT TUNA IN S/F OIL 85g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)"
+  ],
+  "provider_calls": [
+   {
+    "provider": "serper",
+    "query": "AL ALALI ALALALI WHITE MEAT TUNA IN S/F OIL 85g",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 1516,
+    "error": null
+   },
+   {
+    "provider": "serper",
+    "query": "AL ALALI ALALALI WHITE MEAT TUNA IN S/F OIL 85g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 3175,
+    "error": null
+   }
+  ],
+  "decision": "REVIEW_UNSELECTED",
+  "failure_code": null,
+  "winner": null,
+  "top": [
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "gcc.luluhypermarket.com",
+    "title": "Al Alali White Meat Tuna in Sunflower Oil 85 g Online at Best Price | Lulu  UAE",
+    "image_url": "https://bf1af2.akinoncloudcdn.com/products/2025/02/17/65247/2d85d807-4b8c-40da-aca9-62bcd2f10645_size1920x1920_cropCenter.jpg",
+    "page_url": "https://gcc.luluhypermarket.com/en-ae/al-alali-white-meat-tuna-in-sunflower-oil-85-g/p/132380",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=0.8 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "UNSURE",
+     "view": "front_packshot",
+     "brand": "العلايلي",
+     "variant": "لحم تونا أبيض",
+     "size": "85 g"
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "gcc.luluhypermarket.com",
+    "title": "Al Alali Fancy Meat Tuna Solid Pack In Sunflower Oil 85 g Online at Best  Price | Lulu UAE",
+    "image_url": "https://bf1af2.akinoncloudcdn.com/products/2025/02/17/65294/8ce1b932-84aa-409f-ae06-9984cdb9b3ae_size1920x1920_cropCenter.jpg",
+    "page_url": "https://gcc.luluhypermarket.com/en-ae/al-alali-fancy-meat-tuna-solid-pack-in-sunflower-oil-85-g/p/1812",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=0.6 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "alalali",
+     "variant": "FANCY MEAT TUNA",
+     "size": "85 g"
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "amazon.ae",
+    "title": "Al Alali Fancy Meat Tuna Solid Pack In Sunflower Oil 85g : Amazon.ae:  Kitchen",
+    "image_url": "https://m.media-amazon.com/images/I/61CGC1YnhnL.jpg",
+    "page_url": "https://www.amazon.ae/Al-Alali-Fancy-Solid-Sunflower/dp/B07MTSCGP6",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=0.6 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "alalali",
+     "variant": "FANCY MEAT TUNA",
+     "size": "85 g"
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "amazon.ae",
+    "title": "Al Alali White Meat Tuna In Water, 85 G: Buy Online at Best Price in UAE -  Amazon.ae",
+    "image_url": "https://m.media-amazon.com/images/I/81xMBIfEBrL.jpg",
+    "page_url": "https://www.amazon.ae/Al-Alali-White-Meat-Water/dp/B07MP8VZND",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=0.6 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "alalali",
+     "variant": "WHITE MEAT TUNA",
+     "size": "85 g"
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "getit.qa",
+    "title": "Al Alali Fancy Meat Tuna Solid Pack In Sunflower Oil 85 g | GETIT.QA",
+    "image_url": "http://getit.qa/cdn/shop/products/1812-03_grande.jpg?v=1707806533",
+    "page_url": "https://getit.qa/products/buy-al-alali-fancy-meat-tuna-solid-pack-in-sunflower-oil-85-g-qatar?srsltid=AU7gw4UuYbYScPtsLqchei6QLIYuKnM_Ueo4Bbo33dg7PRLr8E9TaKsa",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=0.6 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "banner",
+     "brand": "al alali",
+     "variant": "FANCY MEAT TUNA SOLID PACK In Sunflower oil",
+     "size": "85 g"
+    }
+   }
+  ],
+  "vlm_calls": 2,
+  "serp_calls": 2,
+  "cost_usd": 0.004,
+  "seconds": 15.9
+ },
+ {
+  "row": 23,
+  "name": "ALALALI WHITE MEAT TUNA WATER 170GM",
+  "brand": "AL ALALI",
+  "sku_key": "b853b9354ca6c16e",
+  "brand_conf": "sheet_raw",
+  "gtin_status": "missing",
+  "queries": [
+   "AL ALALI ALALALI WHITE MEAT TUNA WATER 170g",
+   "AL ALALI ALALALI WHITE MEAT TUNA WATER 170g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)"
+  ],
+  "provider_calls": [
+   {
+    "provider": "serper",
+    "query": "AL ALALI ALALALI WHITE MEAT TUNA WATER 170g",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 3658,
+    "error": null
+   },
+   {
+    "provider": "serper",
+    "query": "AL ALALI ALALALI WHITE MEAT TUNA WATER 170g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 7431,
+    "error": null
+   }
+  ],
+  "decision": "REVIEW_PRESELECTED",
+  "failure_code": null,
+  "winner": "https://talabat.dhmedia.io/image/product-information-management/68bdb997754b2cdae91f3fe4.jpg?size=520",
+  "top": [
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "unioncoop.ae",
+    "title": "al alali white meat tuna in water, 170 g Price | Buy Online in Dubai, UAE -  Union Coop",
+    "image_url": "https://www.unioncoop.ae/media/catalog/product/6/2/6294010703134_1.jpg",
+    "page_url": "https://www.unioncoop.ae/white-meat-tuna-in-water-170gm-4703774.html",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=0.8 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "Ajeeb",
+     "variant": "WHITE MEAT Tuna Water only",
+     "size": ""
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "unioncoop.ae",
+    "title": "al alali white meat tuna in water, 170 g Price | Buy Online in Dubai, UAE -  Union Coop",
+    "image_url": "https://www.unioncoop.ae/media/catalog/product/6/2/6294010703318_1.jpg",
+    "page_url": "https://www.unioncoop.ae/white-meat-tuna-in-water-170gm-4703774.html",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=0.8 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "multi_product",
+     "brand": "Ajeeb",
+     "variant": "WHITE MEAT Tuna Water only",
+     "size": ""
+    }
+   },
+   {
+    "status": "preselected",
+    "provider": "serper",
+    "domain": "talabat.com",
+    "title": "Buy Al Alali White Meat Tuna in Water 170 g Online in UAE | Talabat UAE",
+    "image_url": "https://talabat.dhmedia.io/image/product-information-management/68bdb997754b2cdae91f3fe4.jpg?size=520",
+    "page_url": "https://www.talabat.com/uae/talabat-mart/product/al-alali-white-meat-tuna-in-water-170-g/s/902408",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=0.8 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MATCH",
+     "view": "front_packshot",
+     "brand": "al alali",
+     "variant": "WHITE MEAT TUNA SOLID PACK In Water",
+     "size": "170 g"
+    }
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "martoo.com",
+    "title": "Al Alali White Meat Tuna in Water 170g",
+    "image_url": "https://martoo.com/wp-content/uploads/2024/12/Al-Alali-White-Meat-Tuna-in-Water-48-x-170g.jpg",
+    "page_url": "https://martoo.com/product/al-alali-white-meat-tuna-in-water/",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=0.8 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "UNSURE",
+     "view": "front_packshot",
+     "brand": "alalali",
+     "variant": "WHITE MEAT TUNA SOLID PACK In Water",
+     "size": "170 g"
+    }
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "palmyraorders.com",
+    "title": "Al Alali White Meat Tuna In Water 170g",
+    "image_url": "https://palmyraorders.com/cdn/shop/files/al-alali-white-meat-tuna-in-water-170g-shop-your-daily-fresh-products-free-delivery-1.jpg?v=1723634016&width=1214",
+    "page_url": "https://palmyraorders.com/products/al-alali-white-meat-tuna-in-water-170g",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=0.8 source_trust=0 gtin=None",
+    "vlm": null
+   }
+  ],
+  "vlm_calls": 1,
+  "serp_calls": 2,
+  "cost_usd": 0.003,
+  "seconds": 16.8
+ },
+ {
+  "row": 24,
+  "name": "ALALALI WHITE MEAT TUNA WATER 85GM",
+  "brand": "AL ALALI",
+  "sku_key": "ca43a81c9f9b6258",
+  "brand_conf": "sheet_raw",
+  "gtin_status": "missing",
+  "queries": [
+   "AL ALALI ALALALI WHITE MEAT TUNA WATER 85g"
+  ],
+  "provider_calls": [
+   {
+    "provider": "serper",
+    "query": "AL ALALI ALALALI WHITE MEAT TUNA WATER 85g",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 4834,
+    "error": null
+   }
+  ],
+  "decision": "REVIEW_PRESELECTED",
+  "failure_code": null,
+  "winner": "https://m.media-amazon.com/images/I/81xMBIfEBrL.jpg",
+  "top": [
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "world.openfoodfacts.org",
+    "title": "White meat tuna – Al alali – 85 g",
+    "image_url": "https://images.openfoodfacts.org/images/products/061/795/014/3598/front_fr.3.full.jpg",
+    "page_url": "https://world.openfoodfacts.org/product/0617950143598/white-meat-tuna-al-alali",
+    "evidence": "tier=1 size=match brand=True variants=[] coverage=0.6 source_trust=2 gtin=None quality=foreground>98%",
+    "vlm": null
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "gcc.luluhypermarket.com",
+    "title": "Al Alali White Meat Tuna Solid Pack In Water 85 g Online at Best Price |  Lulu UAE",
+    "image_url": "https://bf1af2.akinoncloudcdn.com/products/2025/02/17/210473/3a6abf73-fe47-4e0d-8d38-ff5ee08fcff8_size1920x1920_cropCenter.jpg",
+    "page_url": "https://gcc.luluhypermarket.com/en-ae/al-alali-white-meat-tuna-solid-pack-in-water-85-g/p/421008",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=0.8 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "UNSURE",
+     "view": "front_packshot",
+     "brand": "العلا لي",
+     "variant": "لحم تونا أبيض",
+     "size": "85 g"
+    }
+   },
+   {
+    "status": "preselected",
+    "provider": "serper",
+    "domain": "amazon.ae",
+    "title": "Al Alali White Meat Tuna In Water, 85 G: Buy Online at Best Price in UAE -  Amazon.ae",
+    "image_url": "https://m.media-amazon.com/images/I/81xMBIfEBrL.jpg",
+    "page_url": "https://www.amazon.ae/Al-Alali-White-Meat-Water/dp/B07MP8VZND",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=0.8 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MATCH",
+     "view": "front_packshot",
+     "brand": "al alali",
+     "variant": "WHITE MEAT TUNA",
+     "size": "85 g"
+    }
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "amazon.ae",
+    "title": "Al Alali White Meat Tuna In Water, 85 G: Buy Online at Best Price in UAE -  Amazon.ae",
+    "image_url": "https://m.media-amazon.com/images/I/919H9wbxLAL.jpg",
+    "page_url": "https://www.amazon.ae/Al-Alali-White-Meat-Water/dp/B07MP8VZND",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=0.8 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "UNSURE",
+     "view": "other_side",
+     "brand": "",
+     "variant": "",
+     "size": "85 g"
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "grandiose.ae",
+    "title": "Al Alali White Meat Tuna in Water - Grandiose.ae",
+    "image_url": "https://www.grandiose.ae/media/catalog/product/cache/9d74524075f5722e40a1490cbcfae5ff/6/1/617950373247_2.jpg",
+    "page_url": "https://www.grandiose.ae/al-alali-white-meat-tuna-in-water3598?srsltid=AU7gw4WSl9mV-DagsNUz5UXPPA6Skf1etdDZsq-J6ZLZlDsPO1AMLi1y",
+    "evidence": "tier=2 size=unknown brand=True variants=[] coverage=0.8 source_trust=1 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "multi_product",
+     "brand": "al alali",
+     "variant": "SKIPJACK TUNA",
+     "size": ""
+    }
+   }
+  ],
+  "vlm_calls": 1,
+  "serp_calls": 1,
+  "cost_usd": 0.002,
+  "seconds": 20.7
+ },
+ {
+  "row": 25,
+  "name": "ALLDE MEAT MASALA 160GM",
+  "brand": "ALLDE",
+  "sku_key": "b644c66bc82adf73",
+  "brand_conf": "sheet_raw",
+  "gtin_status": "missing",
+  "queries": [
+   "ALLDE MEAT MASALA 160g",
+   "ALLDE MEAT MASALA 160g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)"
+  ],
+  "provider_calls": [
+   {
+    "provider": "serper",
+    "query": "ALLDE MEAT MASALA 160g",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 1374,
+    "error": null
+   },
+   {
+    "provider": "serper",
+    "query": "ALLDE MEAT MASALA 160g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 1517,
+    "error": null
+   }
+  ],
+  "decision": "REVIEW_PRESELECTED",
+  "failure_code": null,
+  "winner": "https://alldefood.com/wp-content/uploads/2025/10/Meat_masala.webp",
+  "top": [
+   {
+    "status": "preselected",
+    "provider": "serper",
+    "domain": "alldefood.com",
+    "title": "products | Allde",
+    "image_url": "https://alldefood.com/wp-content/uploads/2025/10/Meat_masala.webp",
+    "page_url": "https://alldefood.com/products/",
+    "evidence": "tier=2 size=unknown brand=True variants=[] coverage=1.0 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "MATCH",
+     "view": "front_packshot",
+     "brand": "allde",
+     "variant": "MEAT MASALA",
+     "size": "160g"
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "alldefood.com",
+    "title": "products | Allde",
+    "image_url": "https://alldefood.com/wp-content/uploads/2025/10/Mutton_masala.webp",
+    "page_url": "https://alldefood.com/products/",
+    "evidence": "tier=2 size=unknown brand=True variants=[] coverage=0.5 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "allde",
+     "variant": "MUTTON MASALA",
+     "size": "160g"
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "alldefood.com",
+    "title": "products | Allde",
+    "image_url": "https://alldefood.com/wp-content/uploads/2025/10/chicken_masala.webp",
+    "page_url": "https://alldefood.com/products/",
+    "evidence": "tier=2 size=unknown brand=True variants=[] coverage=0.5 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "allde",
+     "variant": "CHICKEN MASALA",
+     "size": "160g"
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "loudchilli.com",
+    "title": "Allde Masala",
+    "image_url": "https://assets.zyrosite.com/cdn-cgi/image/format=auto,w=1440,h=954,fit=crop/YleMblx2GaCDBkkQ/allde-egg-masala-YD0peE012jUpzEGg.jpeg",
+    "page_url": "https://loudchilli.com/allde-masala",
+    "evidence": "tier=2 size=unknown brand=True variants=[] coverage=0.5 source_trust=0 gtin=None quality=foreground>98%",
+    "vlm": null
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "alldefood.com",
+    "title": "products | Allde",
+    "image_url": "https://alldefood.com/wp-content/uploads/2025/10/Sambar_powder.webp",
+    "page_url": "https://alldefood.com/products/",
+    "evidence": "tier=2 size=unknown brand=True variants=[] coverage=0.0 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "allde",
+     "variant": "SAMBAR POWDER",
+     "size": "160g"
+    }
+   }
+  ],
+  "vlm_calls": 1,
+  "serp_calls": 2,
+  "cost_usd": 0.003,
+  "seconds": 9.5
+ },
+ {
+  "row": 26,
+  "name": "AMERICAN GOLD LGT MEAT TUNA FLAKE IN SUNFLOWER OIL 160GM",
+  "brand": "AMERICAN GOLD",
+  "sku_key": "df00af707392acc5",
+  "brand_conf": "sheet_raw",
+  "gtin_status": "missing",
+  "queries": [
+   "AMERICAN GOLD LGT MEAT TUNA FLAKE IN SUNFLOWER OIL 160g",
+   "AMERICAN GOLD LGT MEAT TUNA FLAKE IN SUNFLOWER OIL 160g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)",
+   "AMERICAN GOLD LGT MEAT TUNA FLAKE IN 160g",
+   "AMERICAN GOLD LGT MEAT TUNA FLAKE IN SUNFLOWER OIL"
+  ],
+  "provider_calls": [
+   {
+    "provider": "serper",
+    "query": "AMERICAN GOLD LGT MEAT TUNA FLAKE IN SUNFLOWER OIL 160g",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 1957,
+    "error": null
+   },
+   {
+    "provider": "serper",
+    "query": "AMERICAN GOLD LGT MEAT TUNA FLAKE IN SUNFLOWER OIL 160g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 2946,
+    "error": null
+   },
+   {
+    "provider": "serper",
+    "query": "AMERICAN GOLD LGT MEAT TUNA FLAKE IN 160g",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 2178,
+    "error": null
+   },
+   {
+    "provider": "serper",
+    "query": "AMERICAN GOLD LGT MEAT TUNA FLAKE IN SUNFLOWER OIL",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 1425,
+    "error": null
+   }
+  ],
+  "decision": "REVIEW_UNSELECTED",
+  "failure_code": null,
+  "winner": null,
+  "top": [
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "gcc.luluhypermarket.com",
+    "title": "Goody Light Meat Tuna In Sunflower Oil 160 g Online at Best Price | Lulu UAE",
+    "image_url": "https://bf1af2.akinoncloudcdn.com/products/2024/09/11/64769/0155a446-4967-443e-8301-f4e86da42bad.jpg",
+    "page_url": "https://gcc.luluhypermarket.com/en-ae/goody-light-meat-tuna-in-sunflower-oil-160-g/p/1603206",
+    "evidence": "tier=3 size=match brand=False variants=['medium'] coverage=0.5 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "GOODY",
+     "variant": "LIGHT MEAT TUNA IN SUNFLOWER OIL",
+     "size": ""
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "carrefouruae.com",
+    "title": "Buy Afia Light Meat Chunk Tuna in Sunflower Oil, 160g Online | Carrefour UAE",
+    "image_url": "https://cdn.mafrservices.com/sys-master-root/h89/h5c/61921395376158/2149577_main.jpg",
+    "page_url": "https://www.carrefouruae.com/mafuae/en/p/2149577",
+    "evidence": "tier=3 size=match brand=False variants=['medium'] coverage=0.5 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "Afia",
+     "variant": "CHUNK TUNA IN SUNFLOWER OIL",
+     "size": "160 g"
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "gcc.luluhypermarket.com",
+    "title": "Americana Light Meat Chili Tuna in Sunflower Oil 160 g Online at Best Price  | Lulu UAE",
+    "image_url": "https://bf1af2.akinoncloudcdn.com/products/2026/04/22/664281/eb7099b5-cbed-4290-85e9-901e8175cb2b_size1920x1920_cropCenter.jpg",
+    "page_url": "https://gcc.luluhypermarket.com/en-ae/americana-light-meat-chili-tuna-in-sunflower-oil-160-g/p/2662530",
+    "evidence": "tier=3 size=match brand=False variants=['medium'] coverage=0.5 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "AMERICANA",
+     "variant": "Light Meat Chili Tuna IN SUNFLOWER OIL",
+     "size": ""
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "gcc.luluhypermarket.com",
+    "title": "Goody Light Meat Tuna In Sunflower Oil 160 g Online at Best Price | Lulu UAE",
+    "image_url": "https://bf1af2.akinoncloudcdn.com/products/2024/09/11/64769/e855bd1e-97fa-4726-b0f3-1fa6ff682a3c.jpg",
+    "page_url": "https://gcc.luluhypermarket.com/en-ae/goody-light-meat-tuna-in-sunflower-oil-160-g/p/1603206",
+    "evidence": "tier=3 size=match brand=False variants=['medium'] coverage=0.5 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "GOODY",
+     "variant": "LIGHT MEAT TUNA IN SUNFLOWER OIL",
+     "size": ""
+    }
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "amazon.ae",
+    "title": "Goody Albacore White Meat Tuna In Sunflower Oil, 160 Gm: Buy Online at Best  Price in UAE - Amazon.ae",
+    "image_url": "https://m.media-amazon.com/images/I/81Dtb1QxkRL.jpg",
+    "page_url": "https://www.amazon.ae/Goody-Albacore-White-Meat-Sunflower/dp/B07XC2KTK2",
+    "evidence": "tier=3 size=match brand=False variants=['medium'] coverage=0.5 source_trust=3 gtin=None",
+    "vlm": null
+   }
+  ],
+  "vlm_calls": 1,
+  "serp_calls": 4,
+  "cost_usd": 0.005,
+  "seconds": 16.9
+ },
+ {
+  "row": 27,
+  "name": "AMERICAN LIGHT MEAT TUNA 185 GM",
+  "brand": "AMERICAN LIGHT",
+  "sku_key": "fe0fbbf624dd8d1a",
+  "brand_conf": "sheet_raw",
+  "gtin_status": "missing",
+  "queries": [
+   "AMERICAN LIGHT MEAT TUNA 185g"
+  ],
+  "provider_calls": [
+   {
+    "provider": "serper",
+    "query": "AMERICAN LIGHT MEAT TUNA 185g",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 9004,
+    "error": null
+   }
+  ],
+  "decision": "REVIEW_PRESELECTED",
+  "failure_code": null,
+  "winner": "https://bf1af2.akinoncloudcdn.com/products/2024/09/11/65163/292b4be2-eb2f-4364-980e-1eeee5d8e4f9_size1920x1920_cropCenter.jpg",
+  "top": [
+   {
+    "status": "preselected",
+    "provider": "serper",
+    "domain": "gcc.luluhypermarket.com",
+    "title": "American Light Meat Tuna 185 g Online at Best Price | Lulu UAE",
+    "image_url": "https://bf1af2.akinoncloudcdn.com/products/2024/09/11/65163/292b4be2-eb2f-4364-980e-1eeee5d8e4f9_size1920x1920_cropCenter.jpg",
+    "page_url": "https://gcc.luluhypermarket.com/en-ae/american-light-meat-tuna-185-g/p/258114",
+    "evidence": "tier=1 size=match brand=True variants=['fat'] coverage=1.0 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "UNSURE",
+     "view": "front_packshot",
+     "brand": "American",
+     "variant": "LIGHT MEAT TUNA",
+     "size": "185 g"
+    }
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "amazon.ae",
+    "title": "American Light Meat Tuna 185 g: Buy Online at Best Price in UAE - Amazon.ae",
+    "image_url": "https://m.media-amazon.com/images/I/81wdpcQ4H8L.jpg",
+    "page_url": "https://www.amazon.ae/American-Light-Meat-Tuna-185/dp/B0B8GMKGM8",
+    "evidence": "tier=1 size=match brand=True variants=['fat'] coverage=1.0 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "UNSURE",
+     "view": "front_packshot",
+     "brand": "American",
+     "variant": "LIGHT MEAT TUNA",
+     "size": ""
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "baladifoodstuff.com",
+    "title": "اشترِ تونة أمريكية خفيفة 185 غرام | تسوق عبر الإنترنت في الإمارات العربية  المتحدة – Baladi Foodstuff",
+    "image_url": "https://www.baladifoodstuff.com/cdn/shop/files/American_Light_Meat_Tuna_48x185g.jpg?v=1762601193&width=1946",
+    "page_url": "https://www.baladifoodstuff.com/ar/products/american-light-meat-tuna-185g?srsltid=AU7gw4WgJiDcSiUlW6nD5AdD48SA0MS8GBisi3btIKd9A0WHTJa12U2z",
+    "evidence": "tier=2 size=match brand=True variants=['fat'] coverage=1.0 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "multi_product",
+     "brand": "American",
+     "variant": "LIGHT MEAT TUNA",
+     "size": "185g"
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "baladifoodstuff.com",
+    "title": "Buy American Light Meat Tuna 185g | Online Shopping UAE – Baladi Foodstuff",
+    "image_url": "https://www.baladifoodstuff.com/cdn/shop/files/American_Light_Meat_Tuna_185g_back.jpg?v=1762601036&width=1445",
+    "page_url": "https://www.baladifoodstuff.com/products/american-light-meat-tuna-185g?srsltid=AU7gw4W_YK_O_XKr9neA1Ge9KysI2v-mrfRbqfEOCAsNHGpvl9asFsdR",
+    "evidence": "tier=2 size=match brand=True variants=['fat'] coverage=1.0 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "other_side",
+     "brand": "American",
+     "variant": "LIGHT MEAT TUNA",
+     "size": "6.5 OZ"
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "falconfresh.com",
+    "title": "American Light Meat Tuna Fish 185g, Box of 48",
+    "image_url": "https://falconfresh.com/media/catalog/product/cache/0e405ab110ef006cccff6c2150b91e32/m/e/meat_tuna.jpg",
+    "page_url": "https://falconfresh.com/american-light-meat-tuna-fish-185g-1.html?srsltid=AU7gw4Wbp722GeC5G5yuxc9g7w4D3ZEHqtJmO9sfQ51Fcg-EnoCcYHAt",
+    "evidence": "tier=2 size=match brand=True variants=['fat'] coverage=1.0 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "multi_product",
+     "brand": "American",
+     "variant": "LIGHT MEAT TUNA",
+     "size": ""
+    }
+   }
+  ],
+  "vlm_calls": 2,
+  "serp_calls": 1,
+  "cost_usd": 0.003,
+  "seconds": 20.4
+ },
+ {
+  "row": 28,
+  "name": "AMERICAN LIGHT MEAT TUNA SOLID 185GM",
+  "brand": "AMERICAN LIGHT",
+  "sku_key": "5eb2bb69d6b8563f",
+  "brand_conf": "sheet_raw",
+  "gtin_status": "missing",
+  "queries": [
+   "AMERICAN LIGHT MEAT TUNA SOLID 185g"
+  ],
+  "provider_calls": [
+   {
+    "provider": "serper",
+    "query": "AMERICAN LIGHT MEAT TUNA SOLID 185g",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 1655,
+    "error": null
+   }
+  ],
+  "decision": "REVIEW_PRESELECTED",
+  "failure_code": null,
+  "winner": "https://m.media-amazon.com/images/I/81Dh1T79vqL.jpg",
+  "top": [
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "gcc.luluhypermarket.com",
+    "title": "American Light Meat Tuna 185 g Online at Best Price | Lulu UAE",
+    "image_url": "https://bf1af2.akinoncloudcdn.com/products/2024/09/11/65163/ff87c10e-5f12-4a74-8cfd-f1d6a30b1885.jpg",
+    "page_url": "https://gcc.luluhypermarket.com/en-ae/american-light-meat-tuna-185-g/p/258114",
+    "evidence": "tier=1 size=match brand=True variants=['fat'] coverage=0.6667 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "American",
+     "variant": "LIGHT MEAT TUNA",
+     "size": "6.5 OZ"
+    }
+   },
+   {
+    "status": "preselected",
+    "provider": "serper",
+    "domain": "amazon.ae",
+    "title": "American Light Meat Tuna 185 g: Buy Online at Best Price in UAE - Amazon.ae",
+    "image_url": "https://m.media-amazon.com/images/I/81Dh1T79vqL.jpg",
+    "page_url": "https://www.amazon.ae/American-Light-Meat-Tuna-185/dp/B0B8GMKGM8",
+    "evidence": "tier=1 size=match brand=True variants=['fat'] coverage=0.6667 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "UNSURE",
+     "view": "front_packshot",
+     "brand": "American",
+     "variant": "LIGHT MEAT TUNA",
+     "size": "6.5 OZ. (185 g)"
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "tradeling.com",
+    "title": "American Light Meat Tuna 185g (1x48 Carton) – Premium Canned Tuna in  Brine/Oil",
+    "image_url": "https://c8n.tradeling.com/img/plain/pim/rs:auto:1600::0/f:webp/q:90/up/6985b89ba69848c4970a5089/58bf8e82d2d51aa7953d279e302ac2af.jpg",
+    "page_url": "https://www.tradeling.com/ae-en/product-details/american-light-meat-tuna-185g-1x48-carton-premium-canned-tuna-in-brineoil-69c409f48c82cf4220160851-6985b89ba69848c4970a5089?srsltid=AU7gw4XFvtDWrVerF5n1PZ690eW3lAxn-kSrRd63vSWPfkSmlt4y0oLe",
+    "evidence": "tier=2 size=match brand=True variants=['fat'] coverage=0.6667 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "multi_product",
+     "brand": "American",
+     "variant": "LIGHT MEAT TUNA",
+     "size": ""
+    }
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "goodnessuae.com",
+    "title": "American Light Meat Tuna 185 g on www.goodnessauec.om delivery across the  UAE at best price. Free delivery above 100 AED",
+    "image_url": "https://goodnessuae.com/content/attachments/TUNA-LIGHT-MEAT-AMERICAN-(-185-GM-)SMGT1150620220831151219.webp",
+    "page_url": "https://www.goodnessuae.com/en/-American-Light-Meat-Tuna-185-g-on-www-goodnessauec-om-delivery-across-the-UAE-at-best-price-Free-delivery-above-100-AED/11506/d?srsltid=AU7gw4XmWAf3014hVQGbXlVR-iuCMWbf9PrW8xAYw_EPk0QXITrYQjFu",
+    "evidence": "tier=2 size=match brand=True variants=['fat'] coverage=0.6667 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "UNSURE",
+     "view": "front_packshot",
+     "brand": "American",
+     "variant": "LIGHT MEAT TUNA",
+     "size": "6.5 OZ. (185 g)"
+    }
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "murukali.com",
+    "title": "American Light Meat Tuna Fish 185g - Murukali.com",
+    "image_url": "https://murukali.com/cdn/shop/files/American-Light-Meat-Tuna-Fish-185g-Murukali.com-56151732_515x582.jpg?v=1752688016",
+    "page_url": "https://murukali.com/products/american-light-meat-tuna-fish-185g?srsltid=AU7gw4Uy_AQVDBP2yzMpsrszW6AC6XwzXfDAbAlkN4wJGtGRBU4xQ5hY",
+    "evidence": "tier=2 size=match brand=True variants=['fat'] coverage=0.6667 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "UNSURE",
+     "view": "front_packshot",
+     "brand": "American",
+     "variant": "LIGHT MEAT TUNA Fancy Solid Pack",
+     "size": ""
+    }
+   }
+  ],
+  "vlm_calls": 2,
+  "serp_calls": 1,
+  "cost_usd": 0.003,
+  "seconds": 18.4
+ },
+ {
+  "row": 29,
+  "name": "CHALIYAR MEAT MASALA 160GM",
+  "brand": "CHALIYAR",
+  "sku_key": "82cb805b0ecc9e5a",
+  "brand_conf": "sheet_raw",
+  "gtin_status": "missing",
+  "queries": [
+   "CHALIYAR MEAT MASALA 160g",
+   "CHALIYAR MEAT MASALA 160g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)"
+  ],
+  "provider_calls": [
+   {
+    "provider": "serper",
+    "query": "CHALIYAR MEAT MASALA 160g",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 5365,
+    "error": null
+   },
+   {
+    "provider": "serper",
+    "query": "CHALIYAR MEAT MASALA 160g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 1817,
+    "error": null
+   }
+  ],
+  "decision": "REVIEW_UNSELECTED",
+  "failure_code": "DOWNLOAD_FAILED",
+  "winner": null,
+  "top": [
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "facebook.com",
+    "title": "Chaliyar Spices | Mutton Masala 🥩 📌 Majid Spices Mill - Street # 4C -  Dubai - United Arab Emirates. ☎️ +971 4 337 3177 #MuttonMasala #MeatMasala  #MuttonMasalaPowder #MeatMasalapowder #MeatMasalaRecipe #TraditionalSpices  #GaramMasala ...",
+    "image_url": "https://lookaside.fbsbx.com/lookaside/crawler/media/?media_id=451838938631958",
+    "page_url": "https://www.facebook.com/ChaliyarSpicesDubai/posts/chaliyar-spices-mutton-masala-majid-spices-mill-street-4c-dubai-united-arab-emir/451840035298515/",
+    "evidence": "tier=2 size=unknown brand=True variants=[] coverage=0.5 source_trust=0 gtin=None fetch=too_small",
+    "vlm": null
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "instagram.com",
+    "title": "Turn everyday chicken into something unforgettable. 🍗🔥 Chaliyar Chicken  Masala — bold flavour in every bite. 🌶️✨",
+    "image_url": "https://lookaside.instagram.com/seo/google_widget/crawler/?media_id=3974434258600195288",
+    "page_url": "https://www.instagram.com/p/DcoBuaXAfTY/",
+    "evidence": "tier=2 size=unknown brand=True variants=[] coverage=0.5 source_trust=0 gtin=None fetch=not_image",
+    "vlm": null
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "instagram.com",
+    "title": "Turn everyday chicken into something unforgettable. 🍗🔥 Chaliyar Chicken  Masala — bold flavour in every bite. 🌶️✨",
+    "image_url": "https://lookaside.instagram.com/seo/google_widget/crawler/?media_id=3975861827136890683",
+    "page_url": "https://www.instagram.com/p/DcoBuaXAfTY/",
+    "evidence": "tier=2 size=unknown brand=True variants=[] coverage=0.5 source_trust=0 gtin=None fetch=not_image",
+    "vlm": null
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "facebook.com",
+    "title": "Chaliyar Spices | Dubai",
+    "image_url": "https://lookaside.fbsbx.com/lookaside/crawler/media/?media_id=523451521470699",
+    "page_url": "https://www.facebook.com/ChaliyarSpicesDubai/",
+    "evidence": "tier=2 size=unknown brand=True variants=[] coverage=0.0 source_trust=0 gtin=None fetch=too_small",
+    "vlm": null
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "instagram.com",
+    "title": "Chaliyar Spices AE (@chaliyar.spices) • Instagram photos and videos",
+    "image_url": "https://lookaside.instagram.com/seo/google_widget/crawler/?media_id=3668558025536596766",
+    "page_url": "https://www.instagram.com/chaliyar.spices/?__d=1%252F%253Fhidemenu%253Dtrue%253Cbr%253E%25EB%25AF%25B8%25EC%2584%25B8%25EC%258A%25A4",
+    "evidence": "tier=2 size=unknown brand=True variants=[] coverage=0.0 source_trust=0 gtin=None fetch=not_image",
+    "vlm": null
+   }
+  ],
+  "vlm_calls": 0,
+  "serp_calls": 2,
+  "cost_usd": 0.002,
+  "seconds": 9.1
+ },
+ {
+  "row": 30,
+  "name": "DOUBLE HORSE MEAT MASALA 140GM",
+  "brand": "DOUBLE HORSE",
+  "sku_key": "992015184827178a",
+  "brand_conf": "sheet_raw",
+  "gtin_status": "missing",
+  "queries": [
+   "DOUBLE HORSE MEAT MASALA 140g"
+  ],
+  "provider_calls": [
+   {
+    "provider": "serper",
+    "query": "DOUBLE HORSE MEAT MASALA 140g",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 1559,
+    "error": null
+   }
+  ],
+  "decision": "REVIEW_PRESELECTED",
+  "failure_code": null,
+  "winner": "https://m.media-amazon.com/images/I/71fguAqJVSL.jpg",
+  "top": [
+   {
+    "status": "preselected",
+    "provider": "serper",
+    "domain": "amazon.ae",
+    "title": "Double Horse Meat Masala 140 Gm : Amazon.ae: Grocery",
+    "image_url": "https://m.media-amazon.com/images/I/71fguAqJVSL.jpg",
+    "page_url": "https://www.amazon.ae/Double-Horse-Meat-Masala-140/dp/B01BK369AA",
+    "evidence": "tier=1 size=match brand=True variants=[] coverage=1.0 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MATCH",
+     "view": "front_packshot",
+     "brand": "Double Horse",
+     "variant": "MEAT MASALA",
+     "size": "140g"
+    }
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "amazon.ae",
+    "title": "Double Horse Meat Masala 140 Gm : Amazon.ae: Grocery",
+    "image_url": "https://m.media-amazon.com/images/I/712MeULol9L.jpg",
+    "page_url": "https://www.amazon.ae/Double-Horse-Meat-Masala-140/dp/B01BK369AA",
+    "evidence": "tier=1 size=match brand=True variants=[] coverage=1.0 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "UNSURE",
+     "view": "other_side",
+     "brand": "Double Horse",
+     "variant": "MEAT MASALA",
+     "size": "140g"
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "amazon.ae",
+    "title": "Double Horse Meat Masala 140 Gm : Amazon.ae: Grocery",
+    "image_url": "https://images-eu.ssl-images-amazon.com/images/I/61SP9DfaC7L.jpg",
+    "page_url": "https://www.amazon.ae/Double-Horse-Meat-Masala-140/dp/B01BK369AA",
+    "evidence": "tier=1 size=match brand=True variants=[] coverage=1.0 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "Shan",
+     "variant": "MANDHI",
+     "size": "50 g"
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "gcc.luluhypermarket.com",
+    "title": "Double Horse Meat Masala 140 g Online at Best Price | Lulu UAE",
+    "image_url": "https://bf1af2.akinoncloudcdn.com/products/2024/09/07/76060/1da37b14-8c98-4a72-a0a1-a58dd9f27728.jpg",
+    "page_url": "https://gcc.luluhypermarket.com/en-ae/double-horse-meat-masala-140-g/p/661564",
+    "evidence": "tier=1 size=match brand=True variants=[] coverage=1.0 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "Double Horse",
+     "variant": "Meat Masala",
+     "size": ""
+    }
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "gcc.luluhypermarket.com",
+    "title": "Double Horse Meat Masala 140 g Online at Best Price | Lulu UAE",
+    "image_url": "https://bf1af2.akinoncloudcdn.com/products/2024/09/07/76060/9bd6a244-57e5-409b-8fe7-03abb8f07601.jpg",
+    "page_url": "https://gcc.luluhypermarket.com/en-ae/double-horse-meat-masala-140-g/p/661564",
+    "evidence": "tier=1 size=match brand=True variants=[] coverage=1.0 source_trust=3 gtin=None",
+    "vlm": null
+   }
+  ],
+  "vlm_calls": 1,
+  "serp_calls": 1,
+  "cost_usd": 0.002,
+  "seconds": 15.5
+ },
+ {
+  "row": 31,
+  "name": "FAMILY LIGHT TUNA MEAT CHUNK IN BRINE 185GM",
+  "brand": "FAMILY",
+  "sku_key": "93848e754f2d4966",
+  "brand_conf": "sheet_raw",
+  "gtin_status": "missing",
+  "queries": [
+   "FAMILY LIGHT TUNA MEAT CHUNK IN BRINE 185g",
+   "FAMILY LIGHT TUNA MEAT CHUNK IN BRINE 185g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)"
+  ],
+  "provider_calls": [
+   {
+    "provider": "serper",
+    "query": "FAMILY LIGHT TUNA MEAT CHUNK IN BRINE 185g",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 1978,
+    "error": null
+   },
+   {
+    "provider": "serper",
+    "query": "FAMILY LIGHT TUNA MEAT CHUNK IN BRINE 185g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 2104,
+    "error": null
+   }
+  ],
+  "decision": "REVIEW_UNSELECTED",
+  "failure_code": null,
+  "winner": null,
+  "top": [
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "atxpview-ecom-v2.family.qa",
+    "title": "Del Monte Light Meat Tuna Solid Pack In Brine 185gm | Family Food Center -  Qatar",
+    "image_url": "https://res.cloudinary.com/family-food-centre/image/upload/w_3840,q_auto,f_auto/v1790232611/prod-ecom-v2/products/100307234/1790232610427.jpg",
+    "page_url": "https://atxpview-ecom-v2.family.qa/en/product/del-monte-light-meat-tuna-solid-pack-in-brine-185gm-736211763730?sch=2",
+    "evidence": "tier=2 size=match brand=True variants=['medium', 'fat'] coverage=0.6667 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "Del Monte",
+     "variant": "LIGHT SKIPJACK IN BRINE",
+     "size": ""
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "shops.ae",
+    "title": "Family Light Meat Tuna Chunk In Oil Eoe 185Gm",
+    "image_url": "https://shops.ae/products/Shopping/6c5acf29837aa123b6e57ecc026d5e75.400x400.jpeg",
+    "page_url": "https://shops.ae/product/family-light-meat-tuna-chunk-in-oil-eoe-185gm/2d0a9d4291d5213ea4004b6cf0eeb659/",
+    "evidence": "tier=2 size=match brand=True variants=['fat'] coverage=1.0 source_trust=0 gtin=None fetch=timeout",
+    "vlm": null
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "foodedge.com",
+    "title": "Family Light Meat Tuna 185gm",
+    "image_url": "https://www.foodedge.com/wp-content/uploads/2021/05/Family-Light-Meat-Tuna.jpg",
+    "page_url": "https://www.foodedge.com/product/family-light-meat-tuna-185gm/",
+    "evidence": "tier=2 size=match brand=True variants=['fat'] coverage=0.6667 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "Family",
+     "variant": "FANCY LIGHT MEAT TUNA IN SUNFLOWER OIL",
+     "size": ""
+    }
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "mygroceryfinder.com",
+    "title": "Family Fancy Skipjack Chunks Light Meat Tuna In Brine – myGroceryfinder",
+    "image_url": "https://mygroceryfinder.com/cdn/shop/products/5441_FamilyFancySkipjackChunksLightMeatTunaInBrine_580x.png?v=1620300264",
+    "page_url": "https://mygroceryfinder.com/products/family-fancy-skipjack-chunks-light-meat-tuna-in-brine",
+    "evidence": "tier=2 size=unknown brand=True variants=['medium', 'fat'] coverage=1.0 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "UNSURE",
+     "view": "front_packshot",
+     "brand": "Family",
+     "variant": "FANCY SKIPJACK CHUNKS PACK LIGHT MEAT TUNA IN BRINE",
+     "size": ""
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "unioncoop.ae",
+    "title": "union light meat tuna chunks in brine - 185 g Price | Buy Online in Dubai,  UAE - Union Coop",
+    "image_url": "https://www.unioncoop.ae/media/catalog/product/6/2/6295135074468_1_1.jpg",
+    "page_url": "https://www.unioncoop.ae/skipjack-tuna-chunks-in-brine-13600527.html",
+    "evidence": "tier=3 size=match brand=False variants=['medium', 'fat'] coverage=1.0 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "Union",
+     "variant": "",
+     "size": ""
+    }
+   }
+  ],
+  "vlm_calls": 1,
+  "serp_calls": 2,
+  "cost_usd": 0.003,
+  "seconds": 21.2
+ }
+]
