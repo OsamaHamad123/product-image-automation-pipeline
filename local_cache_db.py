@@ -1002,28 +1002,29 @@ def get_learned_brand_aliases():
         _close(conn)
 
 
-def get_learned_brand_sources(min_approvals=2):
+def get_brand_source_counts():
     """
-    {ماركة الشيت: [مواقع]}: موقع اعتمد منه المراجعون صور هذه الماركة min_approvals مرة على الأقل، ولم يُرفض منه
-    لها أي صورة لسبب هوية (منتج أو ماركة أو نوع أو حجم أو عبوة مختلفة). الماركة بكتابة الشيت كما سُجلت.
+    [(ماركة الشيت, الموقع, عدد المنتجات المعتمدة منه, عدد رفض الهوية)] لكل ماركة وموقع في review_decisions.
+    المنتجات المعتمدة تُعد مرة واحدة لكل منتج (sku_key، وإلا اسم المنتج أو الصورة): إعادة اعتماد المنتج نفسه لا تُحسب
+    مرتين. رفض الهوية: منتج أو ماركة أو نوع أو حجم أو عبوة مختلفة. التجميع حسب الماركة كما يفهمها البحث (فتهجئتان في
+    الشيت لماركة واحدة تُحسبان معاً) يجري في catalog_match.learning.apply. أخطاء قاعدة البيانات تُرفع.
     """
     identity = ",".join(["%s"] * len(IDENTITY_REASON_CODES[:5]))
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
         cursor.execute(f"""
-            SELECT MIN(brand) AS brand, LOWER(TRIM(page_domain)) AS domain,
-                   SUM(action = 'approved') AS approvals,
+            SELECT MIN(TRIM(brand)) AS brand, LOWER(TRIM(page_domain)) AS domain,
+                   COUNT(DISTINCT CASE WHEN action = 'approved'
+                         THEN COALESCE(NULLIF(sku_key, ''), NULLIF(product_name, ''), image_url, CONCAT('#', id))
+                         END) AS approvals,
                    SUM(action = 'rejected' AND reason_code IN ({identity})) AS identity_rejections
             FROM review_decisions
             WHERE brand IS NOT NULL AND TRIM(brand) <> '' AND page_domain IS NOT NULL AND TRIM(page_domain) <> ''
             GROUP BY LOWER(TRIM(brand)), LOWER(TRIM(page_domain))
         """, tuple(IDENTITY_REASON_CODES[:5]))
-        out = {}
-        for r in cursor.fetchall():
-            if int(r["approvals"] or 0) >= int(min_approvals) and not int(r["identity_rejections"] or 0):
-                out.setdefault(r["brand"].strip(), []).append(r["domain"])
-        return {brand: sorted(set(domains)) for brand, domains in out.items()}
+        return [(r["brand"], r["domain"], int(r["approvals"] or 0), int(r["identity_rejections"] or 0))
+                for r in cursor.fetchall()]
     finally:
         _close(conn)
 

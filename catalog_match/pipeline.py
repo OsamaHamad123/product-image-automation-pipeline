@@ -43,7 +43,7 @@ from .models import (
     Candidate, CandidateScore, FetchedImage, RankedCandidate, SearchOutcome, SkuSpec,
     VerificationResult, VlmImageVerdict,
 )
-from .retrieve import Retriever, t1_early_stop
+from .retrieve import NO_EARLY_STOP_PROVIDERS, Retriever, t1_early_stop
 from .score import rank, score_candidate
 
 logger = logging.getLogger(__name__)
@@ -117,7 +117,10 @@ def _score_pool(spec: SkuSpec, pool: Iterable[Candidate], negatives) -> List[Tup
 
 
 def _has_t1_t2(scored: Sequence[Tuple[Candidate, CandidateScore]]) -> bool:
-    return any(s.tier in (1, 2) and not s.hard_reject for _, s in scored)
+    """A web-search tier-1/2 candidate: the lookups (the local index, a GTIN record) never cancel the relaxations,
+    the web search runs as it would without them."""
+    return any(s.tier in (1, 2) and not s.hard_reject and (c.provider or "").lower() not in NO_EARLY_STOP_PROVIDERS
+               for c, s in scored)
 
 
 def _identity_ok(rc: RankedCandidate) -> bool:
@@ -257,7 +260,10 @@ def find_product_image(spec: Union[SkuSpec, Mapping[str, Any]], *, providers: Op
         spec = brand_discovery.apply(spec, found)
         retriever.spec = spec
         retriever.pool.spec = spec
-        extra = brand_discovery.corrected_query(spec, retrieval.queries) if not custom else None
+        retriever.early_stop = t1_early_stop(spec, negatives)      # tier 1 in the store spelling now stops too
+        # the corrected query only when the listings found so far are not already tier 1 in the store spelling
+        extra = brand_discovery.corrected_query(spec, retrieval.queries) \
+            if not custom and not retriever.early_stop(list(retrieval.pool)) else None
         if extra is not None:
             retrieval = retriever.run_extra(extra)
 

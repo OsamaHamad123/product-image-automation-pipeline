@@ -13,7 +13,8 @@ Decisions
                           * the winner is tier 1 with VLM verdict MATCH;
                           * the winner's source is sanctioned;
                           * spec.brand_conf == 'mapped' (never 'learned');
-                          * the page's trust is not only learned from reviews ('reviewed_source');
+                          * the page's trust is not only learned from reviews ('reviewed_source'),
+                            and neither is a larger copy's that would be published instead;
                           * the winner did not come from a relaxed query;
                           * not a cache hit;
                           * the winner's page barcode does not differ from the sheet's;
@@ -34,7 +35,10 @@ Decisions
                         failure_code NO_RESULTS (empty pool) or ALL_CONFLICTED.
     PROVIDER_DOWN       nothing survived and every search provider is error/quota/blocked,
                         or the pool is empty and the main query (custom or Q1) was
-                        answered by no provider (later 'empty' answers do not count).
+                        answered by no provider (later 'empty' answers do not count),
+                        or every web search provider is down and only the lookups (the
+                        local catalog index, Open Food Facts) gave survivors: their
+                        answers never hide an outage, the product is searched again.
 
 failure_code on review decisions
     VERIFIER_DOWN       verification unknown (or not run) while verifiable candidates
@@ -67,7 +71,9 @@ double-check before approving. They never change the winner or the decision.
     brand_spelling:<spelling>    the brand is confirmed only in the stores' spelling of a
                                  sheet brand they write differently (brand_discovery:
                                  'Rio Mare' for 'RIO MARIE', 'Super Tasty' for 'SUP/T');
-                                 approving the pick teaches it (catalog_match.learning)
+                                 approving the pick teaches it (catalog_match.learning).
+                                 It stays on once the spelling is learned, so a
+                                 WRONG_BRAND rejection can still count against it
 
 Best-resolution copy (resolution_upgrade): once the winner and the decision are fixed, a
 fetched copy of the same picture (pHash distance <= 6, aspect within 10 %) with a larger
@@ -95,7 +101,7 @@ from .models import (
 from .fetch import phash_distance
 from .score import page_host, rank_key, trusted_domains
 from .sizes import compare, parse_sizes, product_size
-from .text_norm import brand_in, domain_matches, match_string, normalize, store_market, url_host, url_path_text
+from .text_norm import brand_in, domain_matches, match_key, match_string, normalize, store_market, url_host, url_path_text
 
 logger = logging.getLogger(__name__)
 
@@ -200,14 +206,13 @@ def providers_down(health: Sequence[ProviderHealth]) -> bool:
 
     The Open Food Facts GTIN lookup and the local catalog index do not search the web
     for images, so their answers do not make an outage of the image search providers healthy.
-    With no health at all nothing was searched, which also counts as down.
+    With no web search health at all nothing searched the web, which also counts as down.
     """
-    if not health:
-        return True
     search = [h for h in health if (h.provider or "").lower() not in LOOKUP_PROVIDERS]
-    considered = search or list(health)
+    if not search:
+        return True
     by_provider: Dict[str, List[str]] = {}
-    for h in considered:
+    for h in search:
         by_provider.setdefault((h.provider or "").lower(), []).append((h.status or "").lower())
     return all(all(s in DOWN_STATUSES for s in statuses) for statuses in by_provider.values())
 
@@ -372,22 +377,27 @@ def _social_host(host: str) -> bool:
     return domain_matches(host, _SOCIAL_DOMAINS) or not _SOCIAL_LABELS.isdisjoint(host.split(".")[:-1])
 
 
+def foreign_host(host: str) -> bool:
+    """True when the host alone says a store outside the UAE: a country label ('angola.desertcart.com'),
+    a foreign country domain ('.sa', '.co.uk') or a listed foreign store (trusted_domains.json other_retail)."""
+    label = _country_store_label(host)
+    if label is not None:
+        return label not in _UAE_STORE_LABELS
+    if host.endswith(".ae") or domain_matches(host, _UAE_DOTCOM_STORES):
+        return False
+    if _is_foreign_tld(host):
+        return True
+    return domain_matches(host, trusted_domains().get("other_retail", []))
+
+
 def _foreign_store(spec: SkuSpec, cand: Candidate) -> bool:
     """True when the page is a store outside the UAE (the pack may differ from the UAE one)."""
     host = page_host(cand) or url_host(cand.image_url)
     if not host or domain_matches(host, spec.official_domains):
         return False
-    label = _country_store_label(host)
-    if label is not None:
-        return label not in _UAE_STORE_LABELS
-    data = trusted_domains()
-    if domain_matches(host, data.get("uae_retailers", [])):
+    if _country_store_label(host) is None and domain_matches(host, trusted_domains().get("uae_retailers", [])):
         return store_market(cand.page_url) == "foreign"
-    if host.endswith(".ae") or domain_matches(host, _UAE_DOTCOM_STORES):
-        return False
-    if _is_foreign_tld(host):
-        return True
-    return domain_matches(host, data.get("other_retail", []))
+    return foreign_host(host)
 
 
 def review_warnings(spec: SkuSpec, rc: RankedCandidate, reading_of: Optional[RankedCandidate] = None
@@ -414,19 +424,34 @@ def review_warnings(spec: SkuSpec, rc: RankedCandidate, reading_of: Optional[Ran
         out.append("foreign_store")
     if gtin_conflict(rc):
         out.append("barcode_conflict")
-    if _brand_spelling_only(spec, rc):
-        out.append(f"brand_spelling:{spec.discovered_brands[0]}")
+    spelling = _store_spelling(spec)
+    if spelling and _brand_spelling_only(spec, rc):
+        out.append(f"brand_spelling:{spelling}")
     return out
 
 
+def _store_spelling(spec: SkuSpec) -> str:
+    """The store spelling the SKU's brand is searched under instead of the sheet's: the one brand_discovery
+    found, or one the reviewers taught (brand_conf 'learned' under another name); '' for neither."""
+    if spec.discovered_brands:
+        return spec.discovered_brands[0]
+    if spec.brand_conf == "learned" and spec.brand_canonical \
+            and match_key(spec.brand_canonical) != match_key(spec.brand_raw):
+        return spec.brand_canonical
+    return ""
+
+
 def _brand_spelling_only(spec: SkuSpec, rc: RankedCandidate) -> bool:
-    """The brand evidence of this pick is only a store spelling brand_discovery found."""
-    if not spec.discovered_brands:
-        return False
-    found = {match_string(d) for d in spec.discovered_brands if d}
+    """The brand evidence of this pick is only the store spelling (_store_spelling), never the sheet's own.
+
+    It stays a warning while the spelling is learned: the reviewer's approval keeps counting for it and a
+    WRONG_BRAND rejection against it (catalog_match.learning), so one mistaken approval can be undone.
+    """
     hits = {match_string(p) for p in ((rc.score.matched or {}).get("brand_fields") or {}).values()} \
         if rc.score is not None else set()
-    return not (hits - found)
+    if spec.discovered_brands:
+        return not (hits - {match_string(d) for d in spec.discovered_brands if d})
+    return match_string(spec.brand_raw) not in hits
 
 
 def warning_codes(reasons: Iterable[str]) -> List[str]:
@@ -492,6 +517,14 @@ def route(spec: SkuSpec, ranked: Sequence[RankedCandidate],
 
     outcome = SearchOutcome(decision="REVIEW_UNSELECTED", ranked=ranked, provider_health=health_list,
                             vlm_calls=vlm_calls, sku_key=spec.sku_key, reject_counts=reject_counts)
+
+    # -- the web search is down and only the lookups answered ------------------
+    # (an index page or a GTIN record alone never hides an outage: the product is searched again later)
+    if survivors and providers_down(health_list) \
+            and all((rc.candidate.provider or "").lower() in LOOKUP_PROVIDERS for rc in survivors):
+        outcome.decision, outcome.failure_code = "PROVIDER_DOWN", "PROVIDER_DOWN"
+        logger.info("route %s: PROVIDER_DOWN (only lookups answered)", spec.sku_key)
+        return outcome
 
     # -- nothing survived the hard filters -------------------------------------
     if not survivors:
@@ -709,8 +742,9 @@ def resolution_upgrade(spec: SkuSpec, winner: RankedCandidate, ranked: Sequence[
         o_decision = _decision_of(other)
         if o_decision == MISMATCH or (o_decision == UNSURE and w_decision == MATCH):
             continue
-        if decision == "AUTO_PUBLISH" and (o_decision != MATCH or _conflicting_match(spec, other, ranked)):
-            continue
+        if decision == "AUTO_PUBLISH" and (o_decision != MATCH or _conflicting_match(spec, other, ranked)
+                                           or (other.score.matched or {}).get("source_class") == "reviewed_source"):
+            continue      # what blocks the winner's auto-publish blocks a copy's too
         if identity_conflict(winner, other, spec):
             continue
         added = set(review_warnings(spec, other, reading_of=winner)) - _UPGRADE_NEUTRAL_WARNINGS - w_warnings

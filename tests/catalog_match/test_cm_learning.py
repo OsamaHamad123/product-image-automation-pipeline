@@ -37,8 +37,10 @@ SHEET = {"almarai": {"brand": "Almarai", "synonyms": ["Almarai", "Al Marai"],
                      "excluded_competitors": ["Al Rawabi"], "official_domains": ["almarai.com"]},
          "rio mare": {"brand": "Rio Mare", "synonyms": ["Rio Mare"]}}
 ALIASES = [("SUP/T", "Super Tasty"), ("SUPER T/", "Super Tasty"), ("RIO MARIE", "Rio Mare"), ("ALMARAI", "Almaraii")]
-SOURCES = {"SUP/T": ["www.tradeling.com", "www.instagram.com", "shutterstock.com"],
-           "ALMARAI": ["www.example-grocer.com", "almarai.com"], "KABANI": ["sharjahcoop.ae"]}
+# (sheet brand, site, approved products, identity rejections), as local_cache_db.get_brand_source_counts gives them
+SOURCES = [("SUP/T", "www.tradeling.com", 2, 0), ("SUP/T", "www.instagram.com", 5, 0), ("SUP/T", "shutterstock.com", 3, 0),
+           ("ALMARAI", "www.example-grocer.com", 2, 0), ("ALMARAI", "almarai.com", 4, 0),
+           ("KABANI", "sharjahcoop.ae", 2, 0), ("KABANI", "tradeling.com", 1, 0)]
 
 
 def learned():
@@ -82,16 +84,93 @@ def test_the_sheet_always_wins():
     assert rio.brand_conf == "sheet_raw"
 
 
-def test_a_source_alone_makes_a_learned_entry_and_nothing_learned_changes_the_sku_key():
+def test_sites_alone_give_an_unmapped_brand_no_identity_and_nothing_learned_changes_the_sku_key():
     kabani = build_sku_spec({"name": "KABANI MEAT MASALA 160 GM", "brand": "KABANI"}, learned())
-    assert (kabani.brand_conf, kabani.learned_domains) == ("learned", ("sharjahcoop.ae",))
+    # the brand stays the sheet's (brand discovery still runs for it); only the sites are learned
+    assert (kabani.brand_conf, kabani.learned_domains) == ("sheet_raw", ("sharjahcoop.ae",))
     plain = build_sku_spec({"name": "KABANI MEAT MASALA 160 GM", "brand": "KABANI"}, SHEET)
     assert plain.brand_conf == "sheet_raw" and plain.sku_key == kabani.sku_key
+    assert plain.competitors == kabani.competitors
+    rio = build_sku_spec({"name": "RIO MARIE TUNA 70G", "brand": "RIO MARIE"},
+                         learning.apply(SHEET, [], [("RIO MARIE", "sharjahcoop.ae", 3, 0)]))
+    assert rio.brand_conf == "sheet_raw" and rio.learned_domains == ("sharjahcoop.ae",)
+
+
+def test_sites_learned_under_a_sheet_brand_never_override_the_sheets_name_rule():
+    # brand cell 'NESTLE', product 'NIDO ...': the sheet maps Nido, so the product is Nido (tier 1 possible)
+    sheet = {"nido": {"brand": "Nido", "synonyms": ["Nido"], "official_domains": ["nido.com"]}}
+    merged = learning.apply(sheet, [], [("NESTLE", "sharjahcoop.ae", 4, 0)])
+    row = {"name": "NIDO FORTIFIED MILK POWDER 900G", "brand": "NESTLE"}
+    spec = build_sku_spec(row, merged)
+    assert (spec.brand_conf, spec.brand_canonical) == ("mapped", "Nido")
+    assert spec.competitors == build_sku_spec(row, sheet).competitors
+    nido = Candidate(image_url="https://img.example-cdn.com/nido.jpg",
+                     page_url="https://www.carrefouruae.com/mafuae/en/milk/nido-fortified-milk-powder-900g/p/1",
+                     title="Nido Fortified Milk Powder 900g", page_title="Nido Fortified Milk Powder 900g")
+    assert score_candidate(spec, nido).tier == 1
+
+
+def test_a_learned_spelling_never_makes_another_product_reject_its_own_brand():
+    # Live rows 49-52: 'SUP/T' and 'SUPER T/' are two sheet abbreviations of Super Tasty. Once 'SUP/T' is
+    # taught, a 'SUPER T/' product must still find (and accept) the Super Tasty listing.
+    merged = learning.apply(SHEET, [("SUP/T", "Super Tasty")], [])
+    spec = build_sku_spec({"name": "SUPER T/WHITE MEAT SOLID TUNA IN WATER 185GM", "brand": "SUPER T/"}, merged)
+    assert spec.brand_conf == "sheet_raw" and "super tasty" not in spec.competitors
+    listing = Candidate(image_url="https://cdn.mafrservices.com/st-white.jpg",
+                        page_url="https://www.carrefouruae.com/mafuae/en/tuna/super-tasty-white-meat-solid-tuna/p/7",
+                        title="Super Tasty White Meat Solid Tuna In Water 185g",
+                        page_title="Super Tasty White Meat Solid Tuna In Water 185g", provider="serper", rank=1)
+    scored = score_candidate(spec, listing)
+    assert not scored.hard_reject and scored.tier in (2, 3)
+    from catalog_match.brand_discovery import discover
+    found = discover(spec, [listing])
+    assert found is not None and found.display == "Super Tasty"
+    # nor does a lesson apply to a name that merely starts with the spelling
+    other = build_sku_spec({"name": "SUPER TASTY TUNA CHUNKS 170G", "brand": "AL ALALI"}, merged)
+    assert (other.brand_conf, other.brand_canonical) == ("sheet_raw", "AL ALALI")
 
 
 def test_nothing_learned_means_the_mappings_unchanged():
-    assert learning.apply(SHEET, [], {}) == SHEET
-    assert learning.apply(None, [("A", "A")], {"X": ["instagram.com"]}) == {}
+    assert learning.apply(SHEET, [], []) == SHEET
+    assert learning.apply(None, [("A", "A")], [("X", "instagram.com", 9, 0)]) == {}
+
+
+@pytest.mark.parametrize("site", [
+    "www.carrefouruae.com", "noon.com", "luluhypermarket.com",       # listed UAE retailers: trust already set
+    "openfoodfacts.org",                                             # structured source
+    "carrefourksa.com", "amazon.com", "www.tesco.com",               # foreign stores (other_retail)
+    "danube.sa", "shop.example.co.uk", "angola.desertcart.com",      # foreign country domain / country store
+    "www.instagram.com", "shutterstock.com", "almarai.com",          # social, stock, the brand's own site
+])
+def test_a_site_whose_trust_is_already_set_or_never_given_is_never_learned(site):
+    merged = learning.apply(SHEET, [], [("ALMARAI", site, 9, 0)])
+    assert "learned_domains" not in merged["almarai"] or not merged["almarai"]["learned_domains"]
+
+
+def test_a_uae_store_the_search_does_not_list_is_learned():
+    merged = learning.apply(SHEET, [], [("ALMARAI", "nesto.ae", 2, 0), ("ALMARAI", "uae.desertcart.com", 3, 0),
+                                        ("ALMARAI", "instashop.com", 2, 0)])
+    assert merged["almarai"]["learned_domains"] == ["uae.desertcart.com", "instashop.com", "nesto.ae"]
+
+
+def test_sources_are_counted_per_brand_as_the_search_resolves_it():
+    # 'ALMARAI' and 'Al Marai' are two sheet spellings of one mapped brand
+    two_spellings = learning.apply(SHEET, [], [("ALMARAI", "example-grocer.com", 1, 0),
+                                               ("Al Marai", "example-grocer.com", 1, 0)])
+    assert two_spellings["almarai"]["learned_domains"] == ["example-grocer.com"]
+    rejected = learning.apply(SHEET, [], [("ALMARAI", "example-grocer.com", 2, 0),
+                                          ("Al Marai", "example-grocer.com", 0, 1)])
+    assert not rejected["almarai"].get("learned_domains")
+    once = learning.apply(SHEET, [], [("ALMARAI", "example-grocer.com", 1, 0)])
+    assert not once["almarai"].get("learned_domains")
+
+
+def test_a_listed_retailer_keeps_its_own_trust_even_if_a_brand_lists_it():
+    m = {"almarai": dict(SHEET["almarai"], learned_domains=["carrefouruae.com"])}
+    spec = build_sku_spec({"name": "ALMARAI FULL FAT MILK 1L", "brand": "ALMARAI"}, m)
+    page = Candidate(image_url="https://cdn.mafrservices.com/a.jpg",
+                     page_url="https://www.carrefouruae.com/mafuae/en/milk/almarai-full-fat-milk-1l/p/1")
+    assert source_trust(spec, page) == (3, "uae_retailer")
 
 
 # ---------------------------------------------------------------------------
@@ -185,7 +264,9 @@ def test_a_learned_brand_is_never_auto_published_and_needs_no_discovery():
     assert "auto_blocked:brand_conf_learned" in outcome.winner.reasons
     assert outcome.discovered_brands == []                               # already known: nothing to discover
     assert search.queries[0].startswith("Super Tasty ")
-    assert not [r for r in outcome.winner.reasons if r.startswith(decide.WARN_PREFIX + "brand_spelling")]
+    # the warning stays: approving keeps counting for the spelling, a WRONG_BRAND rejection against it
+    assert "warn:brand_spelling:Super Tasty" in outcome.winner.reasons
+    assert learning.spelling_from(outcome.winner.reasons) == "Super Tasty"
 
 
 def test_a_spelling_the_sheet_lists_under_another_entry_is_never_learned_as_a_new_brand():

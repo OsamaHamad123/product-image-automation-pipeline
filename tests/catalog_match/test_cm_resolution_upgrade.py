@@ -371,6 +371,38 @@ def test_auto_publish_never_upgrades_to_an_unsanctioned_copy(monkeypatch):
     assert out.decision == "AUTO_PUBLISH" and out.winner is winner
 
 
+def test_auto_publish_never_upgrades_to_a_copy_trusted_only_through_a_learned_source(monkeypatch):
+    # A site the reviewers keep approving Almarai from (catalog_match.learning) scores like a UAE retailer,
+    # so its larger copy passes 'not weaker'; but what blocks a winner's auto-publish blocks a copy's too.
+    monkeypatch.setenv("AUTO_PUBLISH_ENABLED", "true")
+    monkeypatch.setenv("AUTO_PUBLISH_BRANDS", "Almarai")
+    spec = build_sku_spec({"name": "Almarai Full Fat Milk 1L", "brand": "Almarai", "category": "Dairy"},
+                          {"almarai": {"brand": "Almarai", "synonyms": ["المراعي"], "official_domains": ["almarai.com"],
+                                       "learned_domains": ["example-grocer.com"]}})
+    grocer = dict(image_url="https://img.example-grocer.com/almarai-full-fat-milk-1l-1500.jpg",
+                  page_url="https://www.example-grocer.com/almarai-full-fat-milk-1l",
+                  title="Almarai Full Fat Milk 1L")
+
+    def ranked(c, size, phash, sha):
+        fi = FetchedImage(candidate=c, ok=True, content_sha256=sha * 32, width=size[0], height=size[1],
+                          path_or_bytes=b"x", phash=phash)
+        return RankedCandidate(candidate=c, score=score_candidate(spec, c), fetched=fi,
+                               quality=QualityReport(hard_ok=True, quality_score=0.5), verdict=reading())
+
+    winner = ranked(cand(LULU, rank=1), (500, 500), PHASH, "ab")
+    copy = ranked(cand(grocer, rank=2), (1500, 1500), NEAR, "cd")
+    assert copy.score.matched.get("source_class") == "reviewed_source" and copy.score.tier == 1
+    out = decide.route(spec, [winner, copy], OK, HEALTHY, set())
+    assert out.decision == "AUTO_PUBLISH" and out.winner is winner
+    assert not any(r.startswith("resolution_upgrade") for r in winner.reasons + copy.reasons)
+    # under review the larger copy is still offered: the reviewer sees where it comes from
+    monkeypatch.setenv("AUTO_PUBLISH_ENABLED", "false")
+    winner = ranked(cand(LULU, rank=1), (500, 500), PHASH, "ab")
+    copy = ranked(cand(grocer, rank=2), (1500, 1500), NEAR, "cd")
+    out = decide.route(spec, [winner, copy], OK, HEALTHY, set())
+    assert out.decision == "REVIEW_PRESELECTED" and out.winner is copy
+
+
 # ---------------------------------------------------------------------------
 # End to end through the pipeline
 # ---------------------------------------------------------------------------

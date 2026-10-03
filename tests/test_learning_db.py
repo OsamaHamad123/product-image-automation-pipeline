@@ -50,14 +50,30 @@ def test_approvals_teach_a_spelling_and_wrong_brand_rejections_unteach_it(db):
     assert not [a for a in db.get_learned_brand_aliases() if a[0] == "SUP/T"]   # 2 approvals, 2 rejections
 
 
-def test_sources_need_two_approvals_and_no_identity_rejection(db):
-    for _ in range(2):
-        db.add_review_decision("approved", brand="KABANI", page_domain="sharjahcoop.ae")
-        db.add_review_decision("approved", brand="KABANI", page_domain="www.example-grocer.com")
-    db.add_review_decision("approved", brand="KABANI", page_domain="tradeling.com")             # only once
+def _kabani_sources(db):
+    return learning.apply({}, [], db.get_brand_source_counts()).get("learned source: kabani", {}).get("learned_domains")
+
+
+def test_sources_need_two_approved_products_and_no_identity_rejection(db):
+    for sku in ("k1", "k2"):
+        db.add_review_decision("approved", sku_key=sku, brand="KABANI", page_domain="sharjahcoop.ae")
+        db.add_review_decision("approved", sku_key=sku, brand="KABANI", page_domain="www.example-grocer.com")
+    db.add_review_decision("approved", sku_key="k1", brand="KABANI", page_domain="tradeling.com")   # only once
     db.add_review_decision("rejected", brand="KABANI", page_domain="www.example-grocer.com", reason_code="WRONG_SIZE")
     db.add_review_decision("rejected", brand="KABANI", page_domain="sharjahcoop.ae", reason_code="LOW_QUALITY")
-    assert db.get_learned_brand_sources(2).get("KABANI") == ["sharjahcoop.ae"]
+    rows = {(b, d): (ok, bad) for b, d, ok, bad in db.get_brand_source_counts() if b == "KABANI"}
+    assert rows[("KABANI", "sharjahcoop.ae")] == (2, 0) and rows[("KABANI", "www.example-grocer.com")] == (2, 1)
+    assert _kabani_sources(db) == ["sharjahcoop.ae"]
+
+
+def test_one_product_approved_again_is_one_approval(db):
+    for _ in range(3):      # a re-approval or a retry of the same product
+        db.add_review_decision("approved", sku_key="k1", brand="KABANI", product_name="KABANI MEAT MASALA 160 GM",
+                               page_domain="sharjahcoop.ae")
+    assert _kabani_sources(db) is None
+    db.add_review_decision("approved", product_name="KABANI CHICKEN MASALA 160 GM", page_domain="sharjahcoop.ae",
+                           brand="KABANI")                 # a second product (no sku_key: its name counts)
+    assert _kabani_sources(db) == ["sharjahcoop.ae"]
 
 
 def test_the_bridge_learns_from_the_stored_reasons_or_the_screens_warnings(db):
@@ -82,8 +98,8 @@ def test_every_search_gets_what_was_learned_through_get_brand_mappings(db, monke
     import google_sheets
 
     db.record_brand_alias("SUPER T/", "Super Tasty")
-    for _ in range(2):
-        db.add_review_decision("approved", brand="SUPER T/", page_domain="www.tradeling.com")
+    for sku in ("st1", "st2"):
+        db.add_review_decision("approved", sku_key=sku, brand="SUPER T/", page_domain="www.tradeling.com")
     monkeypatch.setattr(google_sheets, "_sheet_brand_mappings", lambda client, sheet: {})
     learning.clear_cache()
     mappings = google_sheets.get_brand_mappings(None, "sheet")

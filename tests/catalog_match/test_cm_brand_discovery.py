@@ -267,11 +267,39 @@ def test_row45_is_found_preselected_with_the_warning_and_never_auto_published(mo
     outcome = pipeline.find_product_image(RIO, providers=[search], fetcher=Images({hit.image_url: _png()}),
                                           verifier=verifier, expansion=False)
     assert outcome.discovered_brands == ["Rio Mare"]
-    assert any(q.startswith("Rio Mare ") for q in search.queries)        # the corrected query was sent
+    # the listing is already tier 1 in the store spelling: the corrected query would only cost a query
+    assert not any(q.startswith("Rio Mare ") for q in search.queries)
     assert outcome.decision == "REVIEW_PRESELECTED"                      # never AUTO_PUBLISH: not a mapped brand
     assert "auto_blocked:brand_conf_sheet_raw" in outcome.winner.reasons
     assert decide.WARN_PREFIX + "brand_spelling:Rio Mare" in outcome.winner.reasons
     assert "the stores write it Rio Mare" in verifier.prompts[0]
+
+
+def test_the_corrected_query_is_sent_when_no_listing_is_tier_1_in_the_store_spelling():
+    # Only listings that name the product without its size: tier 2 in the store spelling, so the corrected
+    # query may find the right listing; once it does (tier 1), the search stops there (no relaxation).
+    weak = Candidate(image_url="https://img.example-cdn.com/rio-mare-tuna.jpg",
+                     page_url="https://www.carrefouruae.com/mafuae/en/tuna/rio-mare-light-meat-tuna/p/1",
+                     title="Rio Mare Light Meat Tuna in Sunflower Oil | Carrefour UAE",
+                     page_title="Rio Mare Light Meat Tuna in Sunflower Oil", provider="serper", rank=1)
+    right = Candidate(image_url="https://img.example-cdn.com/rio-mare-3x70.jpg",
+                      page_url="https://www.luluhypermarket.com/en-ae/rio-mare-light-meat-tuna-sunflower-oil-3x70g/p/5",
+                      title="Rio Mare Light Meat Tuna in Sunflower Oil 3 x 70g", provider="serper", rank=1)
+
+    class ByQuery(Search):
+        def search(self, query, hl, spec_):
+            self.queries.append(query)
+            cands = [right] if query.startswith("Rio Mare ") else [weak]
+            return ProviderResult(provider="serper", status="ok", candidates=cands)
+
+    search = ByQuery([])
+    outcome = pipeline.find_product_image(RIO, providers=[search],
+                                          fetcher=Images({weak.image_url: _png(), right.image_url: _png()}),
+                                          verifier=ReadsRioMare(), expansion=False)
+    assert outcome.discovered_brands == ["Rio Mare"]
+    corrected = [q for q in search.queries if q.startswith("Rio Mare ")]
+    assert len(corrected) == 1 and search.queries[-1] == corrected[0]   # B1 found tier 1: nothing after it
+    assert outcome.winner is not None and outcome.winner.candidate.image_url == right.image_url
 
 
 def test_the_warning_is_not_shown_when_the_sheet_spelling_is_on_the_listing_too():

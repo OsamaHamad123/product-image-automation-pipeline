@@ -8,16 +8,25 @@ Two lessons, both kept in the local database (local_cache_db), neither ever an a
     WRONG_BRAND rejection of it counts against it. While approvals outnumber those rejections, the
     sheet brand resolves to the spelling (brand_conf 'learned'): queries write it from the first
     query, scoring and the label reader accept it, and the warning is no longer needed.
-  * A brand's sources. A site the reviewers approved a brand's images from at least
-    MIN_SOURCE_APPROVALS times, with no identity rejection of an image from it for that brand,
-    gets UAE-retailer trust for the brand ('reviewed_source', score.source_trust) and a place in
-    its site: query. Social networks and stock-photo sites never count.
+  * A brand's sources. A site the reviewers approved images of at least MIN_SOURCE_APPROVALS
+    different products of a brand from, with no identity rejection of an image from it for that
+    brand, gets UAE-retailer trust for the brand ('reviewed_source', score.source_trust) and a
+    place in its site: query. The review rows are counted per brand as the search resolves it
+    (two sheet spellings of one mapped brand count together, and a rejection under either one
+    counts). Only a site the search does not already know is ever learned: never a social
+    network, a stock-photo site, the brand's official site, a listed UAE retailer or structured
+    source (their trust is already set, and a learned label would block their auto-publish) or a
+    store outside the UAE.
 
-apply(mappings, aliases, sources) merges both into the Brands Mapping dict as entries flagged
-'learned' (brand_index): the sheet's own entries always win (a phrase the sheet maps keeps its
-entry), a learned spelling is never added when the sheet maps the sheet brand or the spelling (the
-sheet's owner decides those), and a mapped brand only gains learned_domains. decide.py blocks
-auto-publish for brand_conf 'learned' and for a pick whose trust is only 'reviewed_source'.
+apply(mappings, aliases, sources) merges both into the Brands Mapping dict (brand_index): the
+sheet's own entries always win (a phrase the sheet maps keeps its entry), a learned spelling is
+an entry flagged 'learned', and is never added when the sheet maps the sheet brand or the
+spelling (the sheet's owner decides those). A mapped brand or a learned spelling gains
+learned_domains; an unmapped sheet brand's sites go in an entry flagged 'sources_only', which
+gives the brand no identity: it still resolves as 'sheet_raw' and brand discovery still runs
+for it. decide.py blocks auto-publish for brand_conf 'learned' and for a pick whose trust is
+only 'reviewed_source', and keeps the 'brand_spelling' warning on a pick whose brand evidence is
+only a learned spelling, so a WRONG_BRAND rejection can still count against it.
 
 load_and_apply(mappings) reads both lessons (cached LEARN_CACHE_S per process) and never raises:
 without a database the mappings come back unchanged.
@@ -58,22 +67,40 @@ def spelling_from(warnings: Any) -> Optional[str]:
     return None
 
 
-def _usable_source(domain: str) -> str:
-    from .decide import _social_host
+def _usable_source(domain: str, official: Iterable[str] = ()) -> str:
+    """The host of a reviewed site the search may learn; '' for one whose trust is already set or never given."""
+    from .decide import _social_host, foreign_host
     from .score import trusted_domains
     from .text_norm import domain_matches
 
     host = url_host(domain) or str(domain or "").strip().lower()
-    if not host or "." not in host or _social_host(host):
+    if not host or "." not in host or _social_host(host) or domain_matches(host, list(official)):
         return ""
-    if domain_matches(host, trusted_domains().get("stock_or_clipart", [])):
-        return ""
-    return host
+    data = trusted_domains()
+    for listed in ("stock_or_clipart", "uae_retailers", "structured"):
+        if domain_matches(host, data.get(listed, [])):
+            return ""
+    return "" if foreign_host(host) else host
+
+
+def _source_rows(sources: Any) -> List[Tuple[str, str, int, int]]:
+    """(sheet brand, site, approved products, identity rejections) rows; a {brand: [sites]} dict is already vetted."""
+    if isinstance(sources, Mapping):
+        return [(b, d, MIN_SOURCE_APPROVALS, 0) for b, ds in sources.items() for d in ds or ()]
+    rows = []
+    for row in sources or ():
+        brand, domain, approvals, rejections = (list(row) + [0, 0])[:4]
+        rows.append((str(brand or "").strip(), str(domain or "").strip(), int(approvals or 0), int(rejections or 0)))
+    return rows
 
 
 def apply(mappings: Optional[Mapping[str, Any]], aliases: Iterable[Sequence[Any]] = (),
-          sources: Optional[Mapping[str, Sequence[str]]] = None) -> Dict[str, Any]:
-    """The Brands Mapping dict with what the reviewers taught (see the module docstring)."""
+          sources: Any = ()) -> Dict[str, Any]:
+    """The Brands Mapping dict with what the reviewers taught (see the module docstring).
+
+    sources: (sheet brand, site, approved products, identity rejections) rows, as
+    local_cache_db.get_brand_source_counts returns them (a {brand: [sites]} dict counts as vetted).
+    """
     from .brand_index import BrandIndex
 
     out: Dict[str, Any] = {k: (dict(v) if isinstance(v, Mapping) else v) for k, v in (mappings or {}).items()}
@@ -94,28 +121,44 @@ def apply(mappings: Optional[Mapping[str, Any]], aliases: Iterable[Sequence[Any]
                                                         "excluded_competitors": [], "learned_domains": []})
         if sheet_brand not in entry["synonyms"]:
             entry["synonyms"].append(sheet_brand)
+    learned = {k: v for k, v in learned.items() if k not in out}
 
-    for brand, domains in (sources or {}).items():
-        brand = str(brand or "").strip()
-        hosts = [h for h in dict.fromkeys(_usable_source(d) for d in domains or ()) if h]
-        if not brand or not hosts:
+    # Each review row counts for the brand the search resolves its sheet brand to.
+    with_spellings = BrandIndex.from_mappings({**out, **learned})
+    targets: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    tally: Dict[Tuple[str, str], Dict[str, List[int]]] = {}
+    for brand, domain, approvals, rejections in _source_rows(sources):
+        if not brand or not domain:
             continue
-        res = index.resolve(brand)
-        if res.conf == "mapped":
-            key = next((k for k, v in out.items() if isinstance(v, Mapping)
+        res = with_spellings.resolve(brand)
+        if res.conf in ("mapped", "learned"):
+            pool = out if res.conf == "mapped" else learned
+            key = next((k for k, v in pool.items() if isinstance(v, Mapping)
                         and match_key(str(v.get("brand") or k)) == match_key(res.canonical)), None)
             if key is None:
                 continue
-            entry = out[key]
+            target = (res.conf, key)
+            targets.setdefault(target, pool[key])
         else:
-            entry = next((e for e in learned.values() if any(match_key(s) == match_key(brand) for s in e["synonyms"])),
-                         None)
-            if entry is None:
-                entry = learned.setdefault(learned_key(brand), {"brand": brand, "synonyms": [brand], "learned": True,
-                                                               "excluded_competitors": [], "learned_domains": []})
-        official = {url_host(d) or d for d in entry.get("official_domains") or []}
-        merged = [h for h in dict.fromkeys(list(entry.get("learned_domains") or []) + hosts) if h not in official]
+            target = ("raw", match_key(brand))
+            targets.setdefault(target, {"brand": brand, "synonyms": [], "learned": True, "sources_only": True,
+                                        "excluded_competitors": [], "learned_domains": []})
+        host = _usable_source(domain, (url_host(d) or d for d in targets[target].get("official_domains") or []))
+        if host:
+            counts = tally.setdefault(target, {}).setdefault(host, [0, 0])
+            counts[0] += approvals
+            counts[1] += rejections
+
+    for target, hosts in tally.items():
+        entry = targets[target]
+        kept = sorted((h for h, (ok, bad) in hosts.items() if ok >= MIN_SOURCE_APPROVALS and not bad),
+                      key=lambda h: (-hosts[h][0], h))
+        merged = list(dict.fromkeys(list(entry.get("learned_domains") or []) + kept))
+        if not merged:
+            continue
         entry["learned_domains"] = merged[:MAX_SOURCES_PER_BRAND]
+        if target[0] == "raw":
+            out.setdefault("learned source: " + target[1], entry)
 
     for key, entry in learned.items():
         out.setdefault(key, entry)
@@ -145,7 +188,7 @@ def load_and_apply(mappings: Optional[Mapping[str, Any]], clock=time.monotonic) 
 
         now = clock()
         aliases = _cached("aliases", lambda: [(a[0], a[1]) for a in local_cache_db.get_learned_brand_aliases()], now)
-        sources = _cached("sources", lambda: local_cache_db.get_learned_brand_sources(MIN_SOURCE_APPROVALS), now)
+        sources = _cached("sources", local_cache_db.get_brand_source_counts, now)
     except Exception as exc:
         logger.info("learning: nothing learned is available (%s)", type(exc).__name__)
         return dict(mappings or {})

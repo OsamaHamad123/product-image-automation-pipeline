@@ -52,6 +52,23 @@ def test_a_csv_with_the_sheets_own_headers_and_no_row_column(script, tmp_path):
     assert rows[0]["name_ar"] == "حليب المراعي"
 
 
+@pytest.mark.parametrize("head,first,second", [("#", "45", "49"), ("#", "45.0", "49.0"), ("Row Number", "45", "49"),
+                                                ("row_number", "45", "49")])
+def test_the_row_number_column_is_read_whatever_its_header(script, tmp_path, head, first, second):
+    path = tmp_path / "rows.csv"
+    path.write_text(f"{head},Item Name,Brand Name\n{first},RIO MARIE TUNA 70G,RIO MARIE\n"
+                    f"{second},SUP/T TUNA 185GM,SUP/T\n", encoding="utf-8")
+    assert [r["row_number"] for r in script.read_rows_file(path)] == [45, 49]
+    assert [r["brand"] for r in script.read_rows_file(path, [49])] == ["SUP/T"]
+
+
+def test_a_csv_without_a_product_name_column_stops_like_the_sheet_mode(script, tmp_path):
+    path = tmp_path / "rows.csv"
+    path.write_text("Title,Brand Name\nRio Marie Tuna 70g,RIO MARIE\n", encoding="utf-8")
+    with pytest.raises(SystemExit, match="No product name column"):
+        script.read_rows_file(path)
+
+
 def test_the_brands_file_maps_the_live_runs_brands(script):
     mappings = script.read_brands_file(RUNS / "brands_mapping_suggested.csv")
     assert len(mappings) == 43
