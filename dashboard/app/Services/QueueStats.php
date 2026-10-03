@@ -117,8 +117,13 @@ class QueueStats
         return $readyForReview > 0 ? 'review' : 'idle';
     }
 
-    public static function phaseText(string $phase, int $stopRequested, int $readyForReview): string
+    /**
+     * $pending: rows still waiting in the queue. A run that stopped early (daily budget, Serper credit, a stop) ends
+     * idle or in review with rows left; the text says they wait for the next run instead of «nothing waiting».
+     */
+    public static function phaseText(string $phase, int $stopRequested, int $readyForReview, int $pending = 0): string
     {
+        $left = $pending > 0 ? 'في الطابور ' . self::countText($pending) . ' بانتظار التشغيل التالي' : '';
         switch ($phase) {
             case 'starting':
                 return $stopRequested === 1
@@ -133,9 +138,11 @@ class QueueStats
             case 'error':
                 return 'توقف التشغيل بسبب خطأ (السبب في الشريط الأحمر).';
             case 'review':
-                return "انتهى التحضير: {$readyForReview} منتج بانتظار المراجعة.";
+                return "انتهى التحضير: {$readyForReview} منتج بانتظار المراجعة" . ($left !== '' ? "، و{$left}." : '.');
             default:
-                return 'لا يوجد تشغيل حالياً، ولا توجد منتجات بانتظار المراجعة.';
+                return $left !== ''
+                    ? "لا يوجد تشغيل حالياً ولا منتجات بانتظار المراجعة؛ {$left}."
+                    : 'لا يوجد تشغيل حالياً، ولا توجد منتجات بانتظار المراجعة.';
         }
     }
 

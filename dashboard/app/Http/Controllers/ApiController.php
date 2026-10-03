@@ -430,7 +430,8 @@ class ApiController extends Controller
             'is_running' => $isRunning,
             // starting | running | paused | stopping | error | review | idle
             'phase' => $phase,
-            'phase_text' => QueueStats::phaseText($phase, $stopRequested, $readyForReview),
+            'phase_text' => QueueStats::phaseText($phase, $stopRequested, $readyForReview,
+                (int) ($counters['by_status']['pending'] ?? 0)),
             // الشريط الأحمر: خطأ التشغيل أو التنبيه بالعربية (فارغ إن لم يوجد)
             'alert' => QueueStats::alertText($status, $notice, $isRunning),
             'status' => $status,

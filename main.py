@@ -1840,8 +1840,11 @@ def run_worker_mode(trigger="manual", report=True):
                             spent = local_cache_db.spend_today()
                             if spent >= budget:
                                 stop_reason = "budget_reached"
-                                notice = (f"BUDGET_REACHED: daily search budget {budget:.2f} USD reached "
-                                          f"(spent {spent:.2f}); remaining rows stay pending")
+                                # سبب التوقف أولاً، ويبقى تنبيه قارئ الملصق (VERIFIER_*) من بداية التشغيل بعده:
+                                # كلاهما صحيح ولا يحل أحدهما محل الآخر
+                                notice = " | ".join(n for n in (
+                                    f"BUDGET_REACHED: daily search budget {budget:.2f} USD reached (spent {spent:.2f})",
+                                    notice) if n)
                                 print(f"[Worker] بلغ صرف اليوم {spent:.2f}$ الميزانية اليومية {budget:.2f}$؛ "
                                       "إيقاف العامل وإبقاء الصفوف في الانتظار.")
                                 break

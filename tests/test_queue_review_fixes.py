@@ -511,6 +511,72 @@ def test_rechecks_the_run_did_not_reach_go_back_to_review(real_worker, db, monke
     assert db.get_ready_for_review_count() == 2
 
 
+# ---------------------------------------------------------------------------
+# C8: the budget stop speaks Arabic everywhere and keeps the reader notice
+# ---------------------------------------------------------------------------
+
+VERIFIER_NOTICE = "VERIFIER_UNAVAILABLE: not_found (m); every result goes to human review"
+
+
+def test_a_budget_stop_keeps_the_label_reader_notice_of_the_same_run(real_worker, db, monkeypatch):
+    """The BUDGET_REACHED notice replaced the VERIFIER_* notice found at the start of the run: the owner was not told
+    that every result of that run went to human review. Both stay, the stop reason first."""
+    import config
+    main = real_worker
+    _add(db, 0)
+    _sql(db, "INSERT INTO search_spend (day, run_id, provider, calls, usd) VALUES (CURDATE(), 'p4f', 'serper', 1, 5)")
+    monkeypatch.setattr(config, "DAILY_BUDGET_USD", 1.0)
+    monkeypatch.setattr(main, "check_verifier", lambda: VERIFIER_NOTICE)
+    main.run_worker_mode(report=False)
+    notice = db.get_automation_state()["notice"]
+    parts = [p.split(":", 1)[0] for p in notice.split(" | ")]
+    assert parts == ["BUDGET_REACHED", "VERIFIER_UNAVAILABLE"], notice
+    assert main.LAST_WORKER["notice"] == notice
+
+
+@NEEDS_PHP
+def test_a_run_that_stopped_with_rows_left_does_not_say_nothing_waits():
+    out = _queue_stats(f"""
+$out['idle'] = QueueStats::phaseText('idle', 0, 0, 7);
+$out['idle_empty'] = QueueStats::phaseText('idle', 0, 0, 0);
+$out['review'] = QueueStats::phaseText('review', 0, 12, 1);
+$out['review_only'] = QueueStats::phaseText('review', 0, 12);
+$out['alert'] = QueueStats::alertText('idle', {json.dumps('BUDGET_REACHED: daily search budget 5.00 USD reached (spent 5.01) | ' + VERIFIER_NOTICE)}, false);
+""")
+    assert "7 منتجات بانتظار التشغيل التالي" in out["idle"] and "لا توجد منتجات بانتظار" not in out["idle"]
+    assert out["idle_empty"] == "لا يوجد تشغيل حالياً، ولا توجد منتجات بانتظار المراجعة."
+    assert out["review"] == "انتهى التحضير: 12 منتج بانتظار المراجعة، وفي الطابور منتج واحد بانتظار التشغيل التالي."
+    assert out["review_only"] == "انتهى التحضير: 12 منتج بانتظار المراجعة."
+    budget, reader = out["alert"].split(" | ")
+    assert budget.startswith("بلغ صرف اليوم الميزانية اليومية") and reader.startswith("نموذج Gemini غير متاح")
+
+
+@NEEDS_NODE
+def test_the_layout_card_reads_the_budget_and_database_notices_in_arabic():
+    """The sidebar run card's own map (used when /api/batch-status carries no Arabic alert) had no text for
+    BUDGET_REACHED or DB_UNAVAILABLE."""
+    from blade_scripts import inline_scripts
+    layout = (DASH / "resources" / "views" / "layouts" / "laqta.blade.php").read_text(encoding="utf-8")
+    script = re.sub(r"\{\{.*?\}\}", "''", inline_scripts(layout)[0])
+    harness = ("globalThis.window = globalThis;\nglobalThis.document = { body: null, hidden: false, "
+               "querySelector: () => null, querySelectorAll: () => [], addEventListener: () => {}, "
+               "dispatchEvent: () => true };\n" + script + "\nconsole.log(JSON.stringify({"
+               "budget: window.Laqta.plainNotice('BUDGET_REACHED: daily search budget 5.00 USD reached (spent 5.01)'),"
+               "db: window.Laqta.describeRunStatus(window.Laqta.normalizeRunStatus("
+               "{status: 'error', notice: 'DB_UNAVAILABLE: database unreachable'})).text}));")
+    with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as fh:
+        fh.write(harness)
+        path = fh.name
+    try:
+        result = subprocess.run([NODE, path], capture_output=True, text=True, timeout=60, encoding="utf-8")
+    finally:
+        os.unlink(path)
+    assert result.returncode == 0, result.stderr
+    out = json.loads(result.stdout)
+    assert out["budget"].startswith("بلغ صرف اليوم الميزانية اليومية للبحث")
+    assert out["db"].startswith("تعذّر الوصول إلى قاعدة البيانات")
+
+
 def test_stopping_from_the_dashboard_returns_unclaimed_rechecks_to_review(db):
     """The dashboard's stop ends the worker process (its finally may not run); stop_run settles the queue."""
     _verifier_down_review_row(db, 0)
