@@ -11,8 +11,9 @@ build_sku_spec(row, brand_mappings, size_text=None)
   'MASALA 160 GM'; sheet compounds and typos fixed, 'SOLIDTUNA' -> 'SOLID TUNA').
 * size is the size column merged with the name (see _pick_size): a pack stated only
   in the name, or a measure stated only in the name, is never dropped.
-* class_tokens are the product-type words left after removing brand, size,
-  variant and stop words ('Almarai Full Fat Milk 1L' -> ('milk',)).
+* class_tokens are the product-type words left after removing brand, size (and unit
+  words, 'mm' included: '9MM' fries are a cut, not a product word), variant and stop
+  words ('Almarai Full Fat Milk 1L' -> ('milk',)).
 * sku_key is the GTIN-14 when the barcode is valid, otherwise
   sha1(norm sheet brand | norm raw name | size canonical)[:16]. The sheet brand is
   the raw brand cell (or the Arabic brand cell), never the mapping-derived canonical
@@ -51,6 +52,8 @@ _STOPWORDS_RAW = (
 _UNIT_WORDS_RAW = (
     "ml mls cl l lt ltr ltrs litre litres liter liters g gm gms gr grs gram grams kg kgs kilo"
     " kilos kilogram kilograms oz lb lbs fl floz pk pkt ct"
+    # a length: '9MM' / '900 MM' fries (live run 2026-10-03, rows 4, 5, 12) is the cut, never a product word
+    " mm"
     " مل ملل مللي ملي لتر ليتر لترات ل غ غم غرام جم جرام كجم كغ كغم كيلو كيلوغرام كيلوجرام"
 )
 

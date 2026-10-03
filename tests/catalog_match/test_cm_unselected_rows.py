@@ -254,3 +254,24 @@ def test_protein_is_read_only_where_it_names_the_product(text, context, protein)
 def test_the_suggested_mapping_keeps_zwan_beef_and_chicken_apart():
     spec = spec_of(*ZWAN_BEEF, mappings=suggested_mappings())
     assert spec.brand_conf == "mapped" and spec.variants == {"protein": "beef"}
+
+
+# ---------------------------------------------------------------------------
+# 12. 'mm' is a unit, never a product word ('9MM' fries are a cut)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("row, name, brand", [
+    (4, "BATO FRENCH FRIES 900 MM", "BATO"),
+    (5, "FARMILA FRENCH FRIES 9MM 1KG", "FARMILA"),
+    (12, "TOMEX FRENCH FRIES 9MM 1 KG", "TOMEX"),
+])
+def test_mm_is_not_a_product_word(row, name, brand):
+    spec = spec_of(name, brand)
+    assert spec.class_tokens == ("french", "fries"), row
+    assert "9MM" in build_queries(spec)[0].text or row == 4        # the cut stays in the query
+
+
+def test_row12_a_listing_without_mm_covers_every_product_word():
+    spec = spec_of("TOMEX FRENCH FRIES 9MM 1 KG", "TOMEX")
+    s = score_candidate(spec, listing("Tomex French Fries 1kg | Example Mart", "https://www.example-mart.ae/tomex-fries"))
+    assert s.matched["coverage"] == 1.0                                # was 0.67: 'mm' counted as a product word
