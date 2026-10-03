@@ -69,7 +69,10 @@ OPAQUE_FILL_MAX = 0.97          # أكثر من 97% من الإطار معتم: 
 EDGE_TOUCH_MIN = 0.02           # المنتج يغطي أكثر من 2% من خط قص داخلي: الصندوق قص جزءاً منه
 HAZE_GROWTH_MAX = 0.08          # البكسلات شبه الشفافة توسّع حدود المنتج بأكثر من 8% (و4 بكسل على الأقل)
 HAZE_GROWTH_MIN_PX = 4
-SECOND_OBJECT_MIN = 0.01        # جسم صلب ثانٍ بحجم 1% أو أكثر من الجسم الرئيسي
+SECOND_OBJECT_MIN = 0.01        # الأجسام الأخرى معاً (غير المنتج ومجموعته) 1% أو أكثر من الجسم الرئيسي
+GROUP_ALPHA = 24                # الأجزاء المتصلة عبر شفافية > 24 جسم واحد (جسم عبوة شفافة يصل الغطاء بالملصق)
+GROUP_AREA_MIN = 0.40           # عبوة متعددة: كل قطعة 40% على الأقل من الأكبر وبارتفاع مماثل (80%) = منتج واحد
+GROUP_HEIGHT_MIN = 0.80
 MAX_UPSCALE = 2.0               # تكبير المنتج على اللوحة أكثر من الضعف
 MIN_MAIN_EXTENT = 0.80          # الجسم الرئيسي يشغل أقل من 80% من مساحة الإشغال المتاحة
 FRAME_ASPECT_TOLERANCE = 0.02   # مخرج المزوّد بنفس نسبة أبعاد الإطار المرسل (لم يقصه المزوّد)
@@ -758,6 +761,20 @@ def _has_opaque_backdrop(rgb, main_mask, bbox_area: int) -> bool:
     return int(distinct.sum()) >= BACKDROP_OBJECT_MIN * area
 
 
+def _product_group(areas, heights, main):
+    """
+    مجموعة المنتج: الجسم الرئيسي وكل جسم مساحته 40% على الأقل منه وارتفاعه مماثل (عبوة ثنائية بينها فراغ).
+    جسم أصغر بوضوح (بطاقة سعر، غطاء منفصل، حروف) ليس من المجموعة.
+    """
+    import numpy as np
+
+    tall = np.maximum(heights, heights[main])
+    group = (areas >= GROUP_AREA_MIN * areas[main]) & (np.minimum(heights, heights[main]) >= GROUP_HEIGHT_MIN * tall)
+    group[0] = False
+    group[main] = True
+    return group
+
+
 @dataclass
 class _Assessment:
     flags: List[str]
@@ -775,7 +792,8 @@ def assess_cutout(cutout: Image.Image, frame_size=None, crop_sides=_NO_CROP, can
       opaque_fill        أكثر من 97% من الإطار معتم: لم يُزل شيء.
       edge_clipped       المنتج يلمس خط قص داخلي: الصندوق قص جزءاً منه (الغطاء مثلاً).
       alpha_haze         بكسلات شبه شفافة (غير مرئية تقريباً) توسّع حدود المنتج بوضوح.
-      second_object      جسم صلب آخر بحجم 1% أو أكثر من الجسم الرئيسي.
+      second_object      أجسام أخرى (مجموع مساحتها الصلبة) 1% أو أكثر من الجسم الرئيسي. قطع متقاربة الحجم
+                         والارتفاع (عبوتان متجاورتان) مجموعة منتج واحدة وليست جسماً ثانياً.
       upscaled           المنتج سيُكبّر أكثر من الضعف على اللوحة.
       too_small_on_canvas الجسم الرئيسي يشغل أقل من 80% من مساحة الإشغال (شيء آخر يحدد الحجم).
       opaque_backdrop    (مع check_backdrop) ورقة/صندوق تصوير محايد اللون بقي حول المنتج.
@@ -811,10 +829,16 @@ def _assess(cutout: Image.Image, frame_size=None, crop_sides=_NO_CROP, canvas_si
                 or box_h - vis_h > max(HAZE_GROWTH_MIN_PX, HAZE_GROWTH_MAX * vis_h)):
             flags.append(FLAG_ALPHA_HAZE)
 
-    count, labels, stats, _ = cv2.connectedComponentsWithStats(solid.astype(np.uint8), connectivity=8)
-    areas = stats[1:, cv2.CC_STAT_AREA]
-    main = 1 + int(np.argmax(areas))
-    if count > 2 and int(np.sort(areas)[-2]) >= SECOND_OBJECT_MIN * int(areas.max()):
+    # الأجسام: مكونات متصلة على شفافية > 24 (جسم عبوة شفافة لا ينفصل غطاؤها عن ملصقها) تحوي بكسلاً صلباً،
+    # ومساحة كل جسم = بكسلاته الصلبة
+    count, labels, stats, _ = cv2.connectedComponentsWithStats((alpha > GROUP_ALPHA).astype(np.uint8),
+                                                               connectivity=8)
+    areas = np.bincount(labels[solid], minlength=count)
+    areas[0] = 0
+    main = int(np.argmax(areas))
+    group = _product_group(areas, stats[:, cv2.CC_STAT_HEIGHT], main)
+    # كل ما ليس من مجموعة المنتج معاً: تسع حروف علامة مائية بـ 0.5% لكل منها جسم ثانٍ
+    if int(areas[~group].sum()) >= SECOND_OBJECT_MIN * int(areas[main]):
         flags.append(FLAG_SECOND_OBJECT)
 
     # نفس حساب fit_cutout: الحجم يُحدد من حدود الشفافية كلها
@@ -823,14 +847,17 @@ def _assess(cutout: Image.Image, frame_size=None, crop_sides=_NO_CROP, canvas_si
     scale = min(max_w / box_w, max_h / box_h)
     if scale > MAX_UPSCALE:
         flags.append(FLAG_UPSCALED)
-    main_x, main_y = int(stats[main, cv2.CC_STAT_LEFT]), int(stats[main, cv2.CC_STAT_TOP])
-    main_w, main_h = int(stats[main, cv2.CC_STAT_WIDTH]), int(stats[main, cv2.CC_STAT_HEIGHT])
-    if max(main_w * scale / max_w, main_h * scale / max_h) < MIN_MAIN_EXTENT:
+    left, top = stats[group, cv2.CC_STAT_LEFT], stats[group, cv2.CC_STAT_TOP]
+    group_w = int((left + stats[group, cv2.CC_STAT_WIDTH]).max() - left.min())
+    group_h = int((top + stats[group, cv2.CC_STAT_HEIGHT]).max() - top.min())
+    if max(group_w * scale / max_w, group_h * scale / max_h) < MIN_MAIN_EXTENT:
         flags.append(FLAG_TOO_SMALL)
 
+    main_x, main_y = int(stats[main, cv2.CC_STAT_LEFT]), int(stats[main, cv2.CC_STAT_TOP])
+    main_w, main_h = int(stats[main, cv2.CC_STAT_WIDTH]), int(stats[main, cv2.CC_STAT_HEIGHT])
     if check_backdrop:
         rgb = np.asarray(rgba.convert("RGB"))
-        if _has_opaque_backdrop(rgb, labels == main, main_w * main_h):
+        if _has_opaque_backdrop(rgb, (labels == main) & solid, main_w * main_h):
             flags.append(FLAG_OPAQUE_BACKDROP)
     return _Assessment(flags, (main_x, main_y, main_x + main_w, main_y + main_h))
 

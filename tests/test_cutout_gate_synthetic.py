@@ -91,3 +91,63 @@ def test_white_carton_on_an_opaque_photo_matches_the_gemini_box(work):
 
     assert (result.isolated, result.provider, result.quality_flags) == (True, "photoroom", [])
     assert services.paid == 1
+
+
+# ---------------------------------------------------------------------------
+# #3 / 7b / clear bottles: what is one product, what is a second object
+# ---------------------------------------------------------------------------
+
+PACKS = {
+    "bottles": lambda: ps.make_pack("bottle", (900, 800), gap=18),
+    "cans": lambda: ps.make_pack("can", (900, 700), gap=20),
+    "boxes": lambda: ps.make_pack("carton", (1000, 700), gap=24, face=(200, 120, 30)),
+}
+
+
+@pytest.mark.parametrize("opaque", [True, False])
+@pytest.mark.parametrize("kind", sorted(PACKS))
+def test_two_pack_with_a_gap_is_one_product(work, kind, opaque):
+    # Before: second_object (boxes also too_small_on_canvas) after 2 paid calls, then review.
+    shot = PACKS[kind]()
+    if not opaque:
+        shot = ps.transparent(shot)
+
+    result, services = run(shot, work, remove_bg="truth")
+
+    assert result.isolated is True and result.quality_flags == []
+    assert services.paid == (1 if opaque else 0)
+    assert result.provider == ("photoroom" if opaque else "source_alpha")
+    x0, y0, x1, y1 = ps.ink_box(ps.canvas_array(result))
+    assert max(x1 - x0, y1 - y0) >= 700, "the pair fills the canvas"
+
+
+def test_a_distinct_smaller_object_is_still_a_second_object():
+    bottle = ps.make("bottle", (900, 900), fill=0.6)
+    small = ps.make("bottle", (900, 900), fill=0.4, offset=(0.3, 0.1))   # a smaller, shorter bottle beside it
+    pair = bottle.product.copy()
+    pair.alpha_composite(small.product)
+    assert ip.assess_cutout(pair) == [ip.FLAG_SECOND_OBJECT]
+    tagged = ps.with_extras(bottle, "tagged", over=[ps.price_tag(bottle, share=0.03)]).scene()
+    assert ip.assess_cutout(tagged) == [ip.FLAG_SECOND_OBJECT]
+
+
+def test_many_small_stray_pieces_add_up_to_a_second_object():
+    # 7b: nine watermark letters at 0.54% each (4.9% together) passed because each was compared alone with 1%.
+    bottle = ps.make("bottle", (700, 900))
+    marked = ps.with_extras(bottle, "marked", over=[ps.watermark_letters(bottle, count=9, share=0.0054)]).scene()
+    assert ip.assess_cutout(marked) == [ip.FLAG_SECOND_OBJECT]
+    one = ps.with_extras(bottle, "one", over=[ps.watermark_letters(bottle, count=1, share=0.0054)]).scene()
+    assert ip.assess_cutout(one) == [], "a single speck under 1% is not an object"
+
+
+@pytest.mark.parametrize("body_alpha", [40, 90])
+def test_clear_bottle_body_joins_cap_and_label(work, body_alpha):
+    # The provider gives a clear plastic body alpha < 128: cap and label are separate solid parts. Grouping on
+    # alpha > 24 keeps them one product (before: second_object + too_small_on_canvas after every fallback).
+    shot = ps.transparent(ps.make("clear_bottle", (600, 900), body_alpha=body_alpha), f"clear_{body_alpha}")
+    assert ip.assess_cutout(shot.product) == []
+
+    result, services = run(shot, work)
+
+    assert (result.isolated, result.provider, result.quality_flags) == (True, "source_alpha", [])
+    assert services.paid == 0

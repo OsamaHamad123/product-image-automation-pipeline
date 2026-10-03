@@ -155,7 +155,21 @@ def draw_juicebox(L, x0, y0, w, h, colour=(250, 140, 20), straw_w=4.0, straw_h=N
     text_bars(L, x0 + 0.15 * w, y0 + 0.75 * h, x0 + 0.85 * w, y0 + 0.92 * h, (255, 255, 255))
 
 
-DRAWERS = {"bottle": draw_bottle, "can": draw_can, "carton": draw_carton, "jar": draw_jar,
+def draw_clear_bottle(L, x0, y0, w, h, body_alpha=40, cap=(20, 60, 170), label=(30, 120, 200)):
+    """Clear plastic water bottle as a provider mattes it: the body is translucent (alpha < 128), so only the cap
+    and the label are solid and the body is what joins them."""
+    cx = x0 + w / 2
+    clear = (215, 228, 240, body_alpha)
+    L.rect((cx - 0.15 * w, y0 + 0.08 * h, cx + 0.15 * w, y0 + 0.2 * h), clear)
+    L.polygon([(cx - 0.15 * w, y0 + 0.18 * h), (cx + 0.15 * w, y0 + 0.18 * h), (x0 + w, y0 + 0.33 * h),
+               (x0, y0 + 0.33 * h)], clear)
+    L.rect((x0, y0 + 0.3 * h, x0 + w, y0 + h), clear, radius=0.1 * w)
+    L.rect((cx - 0.2 * w, y0, cx + 0.2 * w, y0 + 0.09 * h), cap, radius=0.03 * w)
+    L.rect((x0, y0 + 0.42 * h, x0 + w, y0 + 0.66 * h), label)
+    text_bars(L, x0 + 0.15 * w, y0 + 0.46 * h, x0 + 0.85 * w, y0 + 0.62 * h, (250, 250, 250))
+
+
+DRAWERS = {"bottle": draw_bottle, "clear_bottle": draw_clear_bottle, "can": draw_can, "carton": draw_carton, "jar": draw_jar,
            "jerrycan": draw_jerrycan, "juicebox": draw_juicebox, "white_bottle": draw_white_bottle}
 
 
@@ -240,8 +254,8 @@ def gemini_box_of(alpha: np.ndarray, pad=0.0, region=None) -> List[float]:
 def make(kind, size=(600, 800), fill=0.62, aspect=None, bg=WHITE, offset=(0.0, 0.0), **style) -> Shot:
     """One product centred in the frame. fill: product height / frame height (or width for a wide product)."""
     W, H = size
-    aspect = aspect or {"bottle": 0.36, "white_bottle": 0.36, "can": 0.55, "carton": 0.5, "jar": 0.8,
-                        "jerrycan": 0.75, "juicebox": 0.55}.get(kind, 0.5)
+    aspect = aspect or {"bottle": 0.36, "white_bottle": 0.36, "clear_bottle": 0.36, "can": 0.55, "carton": 0.5,
+                        "jar": 0.8, "jerrycan": 0.75, "juicebox": 0.55}.get(kind, 0.5)
     h = H * fill
     w = h * aspect
     if w > W * 0.9:
