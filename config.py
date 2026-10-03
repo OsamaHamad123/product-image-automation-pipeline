@@ -102,7 +102,9 @@ PHOTOROOM_API_KEY = os.getenv("PHOTOROOM_API_KEY", "")
 
 # إعدادات واجهة برمجة تطبيقات إزالة الخلفية لـ PhotoRoom (v1/segment API)
 PHOTOROOM_SIZE = "full"       # دقة الصورة المستردة: preview, medium, hd, full
-PHOTOROOM_CROP = os.getenv("PHOTOROOM_CROP", "True").lower() == "true"        # قص الهوامش الشفافة الزائدة لجعل الكائن ممتداً على كامل الحدود (False لترك مساحة الحواف الأصلية)
+# قص PhotoRoom للهوامش الشفافة: مطفأ افتراضياً. اللوحة النهائية تقص المنتج وتوسّطه محلياً على أي حال،
+# والإطار الكامل يسمح لبوابة الجودة بكشف منتج قصه صندوق Gemini (مع القص يلمس كل منتج الحواف فلا يُكشف شيء)
+PHOTOROOM_CROP = os.getenv("PHOTOROOM_CROP", "False").lower() == "true"
 PHOTOROOM_DESPILL = True      # تفعيل تقنية تصحيح الحواف وإزالة تسرب الألوان من الخلفية الأصلية (Chroma key)
 
 # 5. ملف اعتمادات Google Service Account
