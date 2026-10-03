@@ -33,6 +33,11 @@ def _offline(monkeypatch):
     monkeypatch.setattr(settings, "_config", None)
     monkeypatch.setenv("AUTO_PUBLISH_ENABLED", "false")
     monkeypatch.setenv("AUTO_PUBLISH_BRANDS", "")
+    from catalog_match import brand_discovery
+
+    brand_discovery.forget_all()          # the spellings sibling rows proved live per process: none leaks in or out
+    yield
+    brand_discovery.forget_all()
 
 
 def spec_of(name, brand, mappings=None):
@@ -532,3 +537,68 @@ def test_row45_the_local_index_is_asked_again_in_the_store_spelling(monkeypatch)
     assert "warn:brand_spelling:Rio Mare" in outcome.winner.reasons
     # the corrected query went out alongside the second lookup
     assert any(q.startswith("Rio Mare ") for q in search.queries)
+
+
+# ---------------------------------------------------------------------------
+# 9. One proven spelling per process, shared by the sheet's sibling spellings
+# ---------------------------------------------------------------------------
+
+ROW49 = ("SUP/T WT/MEAT SOLIDTUNA SALTWATER 185GM", "SUP/T")
+ROW52 = ("SUPER/T LIGHT MEAT TUNA SOBEANOIL 185GM", "SUPER/T")
+SHARJAH_ST = Candidate(image_url="https://www.sharjahcoop.ae/medias/1200Wx1200H-00000-6290360090887-001.jpg",
+                       page_url="https://www.sharjahcoop.ae/en/super-tasty-l-meat-tuna-in-soya-oil-185g/p/6290360090887",
+                       title="Super Tasty L.Meat Tuna In Soya Oil 185g | Sharjah Co-operative Society",
+                       page_title="Super Tasty L.Meat Tuna In Soya Oil 185g | Sharjah Co-operative Society",
+                       provider="serper", rank=5)
+# row 52's own results (live run): other brands' light meat tuna, no Super Tasty listing
+ROW52_OWN = [listing("Aloha Light Meat Tuna in Vegetable Oil 185 g Online at Best Price | Lulu UAE",
+                     "https://gcc.luluhypermarket.com/en-ae/aloha-light-meat-tuna/p/1", "https://img.example-cdn.com/a.jpg"),
+             listing("Le Supreme Light Meat Tuna in Sunflower Oil 185 g Can, Premium Quality: Buy Online",
+                     "https://www.amazon.ae/Le-Supreme-Light-Meat-Tuna/dp/B0", "https://img.example-cdn.com/l.jpg")]
+
+
+def _row(name_brand, search, reader, bodies):
+    from catalog_match import pipeline
+
+    return pipeline.find_product_image(spec_of(*name_brand), providers=[search], fetcher=Images(bodies),
+                                       verifier=reader, expansion=False)
+
+
+def test_rows_49_and_52_one_spelling_proved_by_a_sibling_row(monkeypatch):
+    monkeypatch.setenv("AUTO_PUBLISH_ENABLED", "true")
+    monkeypatch.setenv("AUTO_PUBLISH_BRANDS", "*")
+    st_reading = _reading("SUPER TASTY", "Light Meat Tuna in Soya Oil", "185 g")
+    bodies = {SHARJAH_ST.image_url: _png(3), ROW52_OWN[0].image_url: _png(4), ROW52_OWN[1].image_url: _png(5)}
+    # row 49: its own results hold the UAE store's Super Tasty listing: discovered there
+    first = _row(ROW49, ByQuery([("", [SHARJAH_ST])]), Reads({}), bodies)
+    assert first.discovered_brands == ["Super Tasty"]
+    # row 52: no Super Tasty listing of its own; the spelling row 49 proved sends B1 written with it
+    search = ByQuery([("super tasty", [SHARJAH_ST]), ("", ROW52_OWN)])
+    out = _row(ROW52, search, Reads({SHARJAH_ST.image_url: st_reading}), bodies)
+    assert out.discovered_brands == ["Super Tasty"]                       # was [] (no pick, row left unselected)
+    assert search.queries[-1] == "Super Tasty LIGHT MEAT TUNA SOYBEAN OIL 185g"
+    assert out.decision == "REVIEW_PRESELECTED" and out.winner.candidate.image_url == SHARJAH_ST.image_url
+    assert "warn:brand_spelling:Super Tasty" in out.winner.reasons
+    assert "auto_blocked:brand_conf_sheet_raw" in out.winner.reasons      # never an auto-publish
+
+
+def test_the_memory_is_keyed_by_the_sheet_brand_letters_and_never_guesses():
+    from catalog_match import brand_discovery as bd
+
+    assert bd.memory_key("SUPER T/") == bd.memory_key("SUPER/T") == "supert" and bd.memory_key("SUP/T") == "supt"
+    proved = bd.discover(spec_of(*ROW49), [SHARJAH_ST])
+    assert proved is not None and proved.display == "Super Tasty"
+    bd.remember(spec_of(*ROW49), proved)
+    # a sibling spelling recalls it; an unrelated or a mapped brand never does
+    assert bd.find(spec_of(*ROW52), []) == proved
+    assert bd.find(spec_of("SUPER T/MEAT SOLID TUNA SALT WATE3X185GM", "SUPER T/"), ROW52_OWN) == proved
+    assert bd.find(spec_of("AMERICAN G/ LIGHT MEAT TUNA 185GM", "AMERICAN G/"), ROW52_OWN) is None
+    mapped = spec_of(*ROW52, mappings={"super t": {"brand": "Super T", "synonyms": ["SUPER/T"]}})
+    assert bd.find(mapped, []) is None
+    # a row whose own listings prove another spelling gets neither: the owner's call
+    other = listing("Super Taste Light Meat Tuna 185g | Union Coop", "https://www.unioncoop.ae/super-taste-tuna/p/9")
+    assert bd.discover(spec_of(*ROW52), [other]) is not None
+    assert bd.find(spec_of(*ROW52), [other]) is None
+    # a listing that writes the sheet's own spelling needs no store spelling at all
+    sheet_way = listing("Super T Light Meat Tuna 185g | Union Coop", "https://www.unioncoop.ae/super-t-tuna/p/8")
+    assert bd.find(spec_of(*ROW52), [sheet_way]) is None

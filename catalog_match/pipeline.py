@@ -258,7 +258,8 @@ def find_product_image(spec: Union[SkuSpec, Mapping[str, Any]], *, providers: Op
     # 1b. brand discovery: a sheet brand no listing writes the sheet's way ('RIO MARIE', 'SUP/T') but the
     #     stores write one typo or abbreviation away ('Rio Mare', 'Super Tasty'): accept the store spelling
     #     (never an auto-publish) and send the first query once more, written with it.
-    found = brand_discovery.discover(spec, retrieval.pool)
+    #     A spelling an earlier row of this process proved for the same (or a sibling) sheet brand counts too.
+    found = brand_discovery.find(spec, retrieval.pool)
     if found is not None:
         spec = brand_discovery.apply(spec, found)
         retriever.spec = spec
