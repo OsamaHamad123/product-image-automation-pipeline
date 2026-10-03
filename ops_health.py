@@ -33,6 +33,8 @@ GEMINI_COST_PER_CALL = 0.001
 PROVIDER_STATUSES = ("ok", "empty", "error", "quota", "blocked")
 ANSWERED_STATUSES = ("ok", "empty")          # استعلام أجاب عنه المزود (يُحتسب في التكلفة)
 KEY_REJECTED_HTTP = (401, 403)
+# حد السرعة (يربطه المزود بالحالة quota): عابر، ليس رصيداً منتهياً ولا مفتاحاً مرفوضاً
+RATE_LIMITED_HTTP = (429,)
 TOP_FAILURE_CODES = 5
 # عدد عمليات البحث المتتالية (الأحدث أولاً) الفاشلة بنفس السبب قبل إظهار التنبيه
 ALERT_MIN_SEARCHES = 2
@@ -256,7 +258,8 @@ def _serper_credit_streak(entries):
             continue
         if any(status in ANSWERED_STATUSES for status, _ in serper):
             break
-        credit = [s for s, http in serper if s == "quota" or (s == "error" and http in KEY_REJECTED_HTTP)]
+        credit = [s for s, http in serper if (s == "quota" and http not in RATE_LIMITED_HTTP)
+                  or (s == "error" and http in KEY_REJECTED_HTTP)]
         if not credit:
             break
         streak += 1

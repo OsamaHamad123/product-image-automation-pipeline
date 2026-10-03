@@ -291,12 +291,8 @@ def _is_provider_down(best, trace):
     return best is None and "PROVIDER_DOWN" in (outcome.get("failure_code"), outcome.get("decision"))
 
 
-def serper_credit_refused(trace):
-    """
-    قاعدة SERPER_CREDIT في ops_health لبحث واحد: True عندما لم يُجب Serper عن أي استعلام ورفض واحداً على الأقل
-    بسبب الرصيد أو المفتاح (quota، أو http 401/403)؛ False عندما أجاب؛ None عندما لم يُستدعَ Serper أصلاً.
-    """
-    import ops_health
+def _serper_calls(trace):
+    """[(status, http_status)] لاستعلامات Serper في بحث واحد (outcome.provider_health)."""
     calls = []
     for item in _outcome(trace).get("provider_health") or []:
         if isinstance(item, dict) and str(item.get("provider") or "").strip().lower() == "serper":
@@ -305,12 +301,31 @@ def serper_credit_refused(trace):
             except (TypeError, ValueError):
                 http = None
             calls.append((str(item.get("status") or "").strip().lower(), http))
+    return calls
+
+
+def serper_credit_refused(trace):
+    """
+    قاعدة SERPER_CREDIT في ops_health لبحث واحد: True عندما لم يُجب Serper عن أي استعلام ورفض واحداً على الأقل
+    بسبب الرصيد أو المفتاح (quota، أو http 401/403)؛ False عندما أجاب؛ None عندما لم يُستدعَ Serper أصلاً.
+    HTTP 429 (quota في المزود) حد سرعة عابر وليس رصيداً: لا يُحسب هنا (serper_rate_limited).
+    """
+    import ops_health
+    calls = _serper_calls(trace)
     if not calls:
         return None
     if any(status in ops_health.ANSWERED_STATUSES for status, _ in calls):
         return False
-    return any(status == "quota" or (status == "error" and http in ops_health.KEY_REJECTED_HTTP)
-               for status, http in calls)
+    return any((status == "quota" and http not in ops_health.RATE_LIMITED_HTTP)
+               or (status == "error" and http in ops_health.KEY_REJECTED_HTTP) for status, http in calls)
+
+
+def serper_rate_limited(trace):
+    """True عندما لم يُجب Serper عن أي استعلام ورد بحد السرعة (HTTP 429) مرة على الأقل: انقطاع عابر ينتظر."""
+    import ops_health
+    calls = _serper_calls(trace)
+    return (bool(calls) and not any(status in ops_health.ANSWERED_STATUSES for status, _ in calls)
+            and any(http in ops_health.RATE_LIMITED_HTTP for _, http in calls))
 
 
 def search_with_retry(query, name, brand, search_kwargs, sleep=time.sleep,
@@ -771,7 +786,8 @@ def pre_cache_product_candidates(task, worksheet=None, link_column_index=None, b
     - صف عُدل بعد نشره (review_only) لا يُنشر تلقائياً أبداً: تُعرض النتيجة للمراجعة.
     - إعادة تحقق (VERIFIER_RECHECK) لم تجد شيئاً: يعود الصف جاهزاً للمراجعة بمرشحاته السابقة إن بقي منها شيء،
       وإلا فهي «لا نتيجة» عادية (فشل يُجدول ويُسجل).
-    - رفض Serper كل استعلاماته (رصيد / مفتاح) و«لا نتيجة»: انقطاع وليس فشلاً للمنتج.
+    - رفض Serper كل استعلاماته (رصيد / مفتاح، أو حد السرعة 429) و«لا نتيجة»: انقطاع وليس فشلاً للمنتج؛ حد السرعة
+      لا يُحسب في إيقاف العامل بسبب الرصيد.
     report (dict اختياري) يملؤه البحث للعامل: searched، serper_credit (True / False / None).
     """
     report = report if report is not None else {}
@@ -823,7 +839,9 @@ def pre_cache_product_candidates(task, worksheet=None, link_column_index=None, b
         else:
             code = _outcome(trace).get("failure_code") or "NO_RESULTS"
             message = f"No acceptable image found ({code})"
-        down = state == "provider_down" or (state == "ok" and credit)
+        # Serper رد بحد السرعة (429) على كل استعلاماته: انقطاع عابر ينتظر موعده، لا «لا نتيجة» ولا رصيد منتهٍ
+        throttled = state == "ok" and not credit and serper_rate_limited(trace)
+        down = state == "provider_down" or (state == "ok" and credit) or throttled
         if recheck and local_cache_db.has_review_candidates(row_number, sku_key):
             # إعادة التحقق لم تأتِ بجديد والمرشحات السابقة ما زالت أمام المراجع: يعود الصف للمراجعة ولا يضيع.
             # بحث لم يكتمل (انقطاع أو خطأ) يبقى VERIFIER_DOWN فيُعاد فحصه في تشغيل لاحق؛ بحث اكتمل بقارئ يعمل
@@ -838,7 +856,9 @@ def pre_cache_product_candidates(task, worksheet=None, link_column_index=None, b
         # إعادة تحقق لم يبقَ لها مرشح (رفضها المراجع) نتيجة عادية: الانقطاع ينتظر، و«لا نتيجة» تُسجل وتُجدول
         if down:
             # انقطاع المزودين (أو رصيد Serper) ليس فشلاً للمنتج: يعود الصف للانتظار بموعد ولا يُسجل في product_failures
-            message = "Serper refused every query (credit or key)" if credit else "Search providers unavailable"
+            message = ("Serper refused every query (credit or key)" if credit
+                       else "Serper rate-limited every query (HTTP 429)" if throttled
+                       else "Search providers unavailable")
             _finish_task(task, "pending", message, failure_code="PROVIDER_DOWN", trace=trace)
             return "provider_down"
         _finish_task(task, "failed", message, failure_code=code, trace=trace)

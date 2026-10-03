@@ -956,6 +956,57 @@ def test_a_new_page_must_carry_the_whole_brand(catalog):
     assert rows[0]["requeue_reason"] is None and stats["index_changed"] == 0
 
 
+# ---------------------------------------------------------------------------
+# Plausible: Serper HTTP 429 is a rate limit, not a spent credit
+# ---------------------------------------------------------------------------
+
+def _serper(*calls):
+    return {"outcome": {"decision": "NOT_FOUND", "failure_code": "NO_RESULTS", "provider_health": [
+        {"provider": "serper", "status": status, "http_status": http} for status, http in calls]}}
+
+
+@pytest.mark.parametrize("calls, credit, limited", [
+    ([("quota", 429)], False, True),                           # the provider maps 429 to 'quota'
+    ([("quota", 400)], True, False),                           # "Not enough credits"
+    ([("quota", 429), ("quota", 400)], True, True),
+    ([("quota", 429), ("ok", 200)], False, False),             # Serper answered: neither
+    ([("error", 403)], True, False),
+])
+def test_a_rate_limited_serper_is_not_a_credit_stop(offline, calls, credit, limited):
+    """Serper's HTTP 429 maps to 'quota', so three rate-limited searches stopped the run as a credit stop
+    (SERPER_CREDIT) and ops_health raised the credit alert."""
+    import main
+    import ops_health
+    trace = _serper(*calls)
+    assert main.serper_credit_refused(trace) is credit
+    assert main.serper_rate_limited(trace) is limited
+    streak = ops_health._serper_credit_streak([{"providers": [("serper", s, h) for s, h in calls]}])
+    assert streak == (1 if credit else 0)                       # the dashboard alert follows the same rule
+
+
+def test_a_rate_limited_search_backs_off_instead_of_failing_the_product(offline, monkeypatch):
+    import image_search
+    import local_cache_db
+    import main
+    statuses, failures = [], []
+    monkeypatch.setattr(local_cache_db, "update_task_status",
+                        lambda task_id, status, *a, **k: statuses.append((status, k.get("failure_code"))) or True)
+    monkeypatch.setattr(local_cache_db, "get_rejections", lambda sku: ([], []))
+    monkeypatch.setattr(local_cache_db, "save_product_failure", lambda *a, **k: failures.append(a) or True)
+    monkeypatch.setattr(local_cache_db, "record_search_spend", lambda *a, **k: 0)
+
+    def search(query, name, brand, trace=None, **kw):
+        trace.update(_serper(("quota", 429), ("quota", 429)))
+        return None
+
+    monkeypatch.setattr(image_search, "search_best_product_image", search)
+    report = {}
+    task = {"id": 1, "row_number": 2, "product_name": "Milk", "brand": "B", "sku_key": "k"}
+    assert main.pre_cache_product_candidates(task, sleep=lambda s: None, report=report) == "provider_down"
+    assert statuses == [("pending", "PROVIDER_DOWN")] and failures == []
+    assert report["serper_credit"] is False                      # the credit streak does not grow
+
+
 def test_stopping_from_the_dashboard_returns_unclaimed_rechecks_to_review(db):
     """The dashboard's stop ends the worker process (its finally may not run); stop_run settles the queue."""
     _verifier_down_review_row(db, 0)
