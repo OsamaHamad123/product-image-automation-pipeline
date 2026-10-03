@@ -65,7 +65,8 @@ GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:ge
 
 # بوابة جودة القص (assess_cutout)
 SOLID_ALPHA = 128               # بكسل "صلب" من المنتج
-OPAQUE_FILL_MAX = 0.97          # أكثر من 97% من الإطار معتم: المزوّد لم يزل شيئاً
+OPAQUE_FILL_MAX = 0.97          # أكثر من 97% من الإطار معتم: المزوّد لم يزل شيئاً...
+OPAQUE_FILL_BAND = 0.02         # ...إذا كان شريط الإطار (2%، و3 بكسل على الأقل) خلفية موحدة محايدة اللون
 EDGE_TOUCH_MIN = 0.02           # المنتج يغطي أكثر من 2% من خط قص داخلي: الصندوق قص جزءاً منه
 HAZE_GROWTH_MAX = 0.08          # البكسلات شبه الشفافة توسّع حدود المنتج بأكثر من 8% (و4 بكسل على الأقل)
 HAZE_GROWTH_MIN_PX = 4
@@ -732,6 +733,26 @@ def _chroma(colour) -> float:
     return float(max(colour) - min(colour))
 
 
+def _uniform_backdrop_band(rgb) -> bool:
+    """
+    شريط إطار الصورة (2%، و3 بكسل على الأقل) بلون واحد محايد (رمادي/أبيض): خلفية تصوير كان على المزوّد إزالتها.
+    منتج يملأ الإطار بهامش 0-3 بكسل يجعل الشريط خليطاً من الهامش والمنتج، أو لون واجهته المطبوعة.
+    """
+    import numpy as np
+
+    h, w = rgb.shape[:2]
+    band = max(3, int(round(OPAQUE_FILL_BAND * min(h, w))))
+    if 2 * band >= min(h, w):
+        return False
+    ring = np.concatenate([rgb[:band].reshape(-1, 3), rgb[-band:].reshape(-1, 3),
+                           rgb[band:-band, :band].reshape(-1, 3), rgb[band:-band, -band:].reshape(-1, 3)])
+    ring = ring.astype(np.int16)
+    ref = np.median(ring, axis=0)
+    if _chroma(ref) > BACKDROP_CHROMA_MAX:
+        return False
+    return float((np.abs(ring - ref).max(axis=1) <= BACKDROP_TOLERANCE).mean()) >= BACKDROP_RING_UNIFORM
+
+
 def _has_opaque_backdrop(rgb, main_mask, bbox_area: int) -> bool:
     """
     الجسم الرئيسي مستطيل معتم حوافه بلون واحد محايد (رمادي/أبيض/أسود) يغطي نصف القناع على الأقل، وبداخله جسم
@@ -789,7 +810,8 @@ def assess_cutout(cutout: Image.Image, frame_size=None, crop_sides=_NO_CROP, can
         غطى المخرج نفس الإطار (PHOTOROOM_CROP مطفأ)؛ القص من المزوّد يجعل لمس الحواف طبيعياً فلا يمكن كشفه.
     crop_sides: (left, top, right, bottom) أي جوانب الإطار خطوط قص داخلية من صندوق Gemini.
     العلامات:
-      opaque_fill        أكثر من 97% من الإطار معتم: لم يُزل شيء.
+      opaque_fill        أكثر من 97% من الإطار معتم وشريط الإطار خلفية موحدة محايدة: لم يُزل شيء. منتج يملأ
+                         الإطار (علبة مقصوصة بإحكام) ليس "لم يُزل شيء".
       edge_clipped       المنتج يلمس خط قص داخلي: الصندوق قص جزءاً منه (الغطاء مثلاً).
       alpha_haze         بكسلات شبه شفافة (غير مرئية تقريباً) توسّع حدود المنتج بوضوح.
       second_object      أجسام أخرى (مجموع مساحتها الصلبة) 1% أو أكثر من الجسم الرئيسي. قطع متقاربة الحجم
@@ -815,7 +837,7 @@ def _assess(cutout: Image.Image, frame_size=None, crop_sides=_NO_CROP, canvas_si
     flags = []
 
     if _same_frame(rgba.size, frame_size):
-        if float(solid.mean()) > OPAQUE_FILL_MAX:
+        if float(solid.mean()) > OPAQUE_FILL_MAX and _uniform_backdrop_band(np.asarray(_flatten_on_white(rgba))):
             flags.append(FLAG_OPAQUE_FILL)
         lines = (solid[:, 0], solid[0, :], solid[:, -1], solid[-1, :])
         if any(side and float(line.mean()) > EDGE_TOUCH_MIN for side, line in zip(crop_sides, lines)):

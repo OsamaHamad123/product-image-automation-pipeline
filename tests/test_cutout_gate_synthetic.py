@@ -151,3 +151,36 @@ def test_clear_bottle_body_joins_cap_and_label(work, body_alpha):
 
     assert (result.isolated, result.provider, result.quality_flags) == (True, "source_alpha", [])
     assert services.paid == 0
+
+
+# ---------------------------------------------------------------------------
+# #4: opaque_fill means "nothing was removed", not "the product fills the frame"
+# ---------------------------------------------------------------------------
+
+def tight_carton(margin, size=(600, 800), **style):
+    layer = ps.Layer(size)
+    ps.draw_carton(layer, margin, margin, size[0] - 2 * margin, size[1] - 2 * margin, **style)
+    product = layer.done()
+    return ps.Shot(f"tight_{margin}", product, ps.WHITE, box=ps.gemini_box_of(np.asarray(product.getchannel("A"))))
+
+
+@pytest.mark.parametrize("margin", [0, 1, 3])
+def test_tightly_cropped_carton_is_not_opaque_fill(work, margin):
+    # Before: opaque_fill after PhotoRoom and after remove.bg (2 paid calls), then review.
+    shot = tight_carton(margin)
+
+    result, services = run(shot, work, remove_bg="truth")
+
+    assert (result.isolated, result.provider, result.quality_flags) == (True, "photoroom", [])
+    assert services.names() == ["photoroom"], "no fallback spent on a carton that fills its frame"
+
+
+@pytest.mark.parametrize("bg", [ps.WHITE, (150, 160, 170)])
+def test_nothing_removed_on_a_studio_backdrop_is_still_opaque_fill(work, bg):
+    shot = ps.make("bottle", (600, 900), bg=bg)
+    noop = shot.source().convert("RGBA")
+    assert ip.assess_cutout(noop, frame_size=noop.size) == [ip.FLAG_OPAQUE_FILL]
+
+    result, services = run(shot, work, photoroom=ps.opaque_provider(shot), remove_bg="truth")
+
+    assert (result.isolated, result.provider, result.quality_flags) == (True, "remove_bg_api", [])
