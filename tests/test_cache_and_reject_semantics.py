@@ -41,15 +41,37 @@ def test_every_cache_query_filters_verification_status(ldb, monkeypatch, fake_co
 
 
 def test_cache_hit_returns_the_row(ldb, monkeypatch, fake_connection):
+    # The row found by barcode is the requested product (same brand and name): served as before.
+    # (Phase 3: a barcode-keyed row must also name the same product; a row without a stored
+    # name or brand can no longer be checked and is not served, see the next test.)
     row = {"cloudinary_url": "https://res/x.png", "original_url": "https://src/x.jpg", "clip_score": None,
            "metadata_json": '{"ingredients": "milk"}', "sku_key": "06281007000024",
-           "verification_status": "human_approved", "approved_by": "human", "perceptual_hash": ""}
+           "verification_status": "human_approved", "approved_by": "human", "perceptual_hash": "",
+           "product_name": "Fresh Milk", "brand": "Almarai"}
     conn = fake_connection(lambda sql, params: [row])
     monkeypatch.setattr(ldb, "get_db_connection", lambda: conn)
     hit = ldb.get_cached_product("6281007000024", "Fresh Milk", "Almarai")
     assert hit["cloudinary_url"] == "https://res/x.png"
     assert hit["metadata"] == {"ingredients": "milk"}
     assert hit["verification_status"] == "human_approved"
+
+
+@pytest.mark.parametrize("stored", [
+    {"product_name": "Laban Up", "brand": "Almarai"},          # another product of the brand
+    {"product_name": "Fresh Milk", "brand": "Al Rawabi"},      # another brand
+    {"product_name": "", "brand": ""},                         # nothing to check against
+])
+def test_barcode_cache_hit_for_another_product_is_ignored(ldb, monkeypatch, fake_connection, stored):
+    row = {"cloudinary_url": "https://res/x.png", "original_url": "https://src/x.jpg", "clip_score": None,
+           "metadata_json": "", "sku_key": "06281007000024", "verification_status": "human_approved",
+           "approved_by": "human", "perceptual_hash": "", **stored}
+    conn = fake_connection(lambda sql, params: [row])
+    monkeypatch.setattr(ldb, "get_db_connection", lambda: conn)
+    assert ldb.get_cached_product("6281007000024", "Fresh Milk", "Almarai") is None
+    assert ldb.get_cached_product(barcode="6281007000024", product_name="Fresh Milk", brand="Almarai",
+                                  sku_key="06281007000024") is None
+    # an approval-status lookup by sku_key alone (no name to compare) is unchanged
+    assert ldb.get_cached_product(sku_key="06281007000024")["cloudinary_url"] == "https://res/x.png"
 
 
 class FakeCell:
@@ -82,7 +104,7 @@ def bridge(offline, monkeypatch, tmp_path):
              "update_image_link": [], "search": []}
 
     monkeypatch.setattr(cli_bridge, "LOG_PATH", str(tmp_path / "search.log"))
-    monkeypatch.setattr(local_cache_db, "get_task_by_row", lambda row: {"sku_key": "06281007000028", "barcode": "6281007000028",
+    monkeypatch.setattr(local_cache_db, "get_task_by_row", lambda row: {"sku_key": "06281007000024", "barcode": "6281007000024",
                                                                          "product_name": "Laban Up"})
     monkeypatch.setattr(local_cache_db, "get_curation_candidates", lambda row, sku_key=None: [])
     monkeypatch.setattr(local_cache_db, "get_cached_product", lambda **k: calls["approved"])
@@ -106,8 +128,9 @@ def bridge(offline, monkeypatch, tmp_path):
 
 
 def _reject(cli_bridge, url, **extra):
+    # a valid GTIN: the product's key is its GTIN-14 (the bridge refuses a sku_key the product fields do not give)
     params = {"row_number": 14, "image_url": url, "product_name": "Laban Up", "brand": "Al Rawabi",
-              "barcode": "6281007000028", "sku_key": "06281007000028", "reason_code": "WRONG_VARIANT"}
+              "barcode": "6281007000024", "sku_key": "06281007000024", "reason_code": "WRONG_VARIANT"}
     params.update(extra)
     return cli_bridge.action_reject_image(params)
 
@@ -122,16 +145,16 @@ def test_reject_flow(bridge, monkeypatch):
 
     assert result["status"] == "success"
     (args, kwargs), = calls["add_rejected_image"]
-    assert args[0] == "06281007000028" and args[1] == url and kwargs["reason_code"] == "WRONG_VARIANT"
+    assert args[0] == "06281007000024" and args[1] == url and kwargs["reason_code"] == "WRONG_VARIANT"
     (args, kwargs), = calls["supersede_resolution"]
-    assert args[0] == "06281007000028"
-    assert calls["delete_curation_candidates"] == [((14,), {"sku_key": "06281007000028"})]
+    assert args[0] == "06281007000024"
+    assert calls["delete_curation_candidates"] == [((14,), {"sku_key": "06281007000024"})]
     (args, kwargs), = calls["status"]
-    assert args[:2] == (14, "pending") and kwargs["sku_key"] == "06281007000028"
+    assert args[:2] == (14, "pending") and kwargs["sku_key"] == "06281007000024"
     # the sheet held exactly this URL (with the needs_review: prefix), so it is cleared
     (args, kwargs), = calls["update_image_link"]
     assert args[1] == 14 and args[2] == 3 and args[3] == ""
-    assert kwargs["barcode"] == "6281007000028"          # the clear itself is identity-checked
+    assert kwargs["barcode"] == "6281007000024"          # the clear itself is identity-checked
     assert ws.cell_reads == [(14, 4)]
     assert result["sheet_cleared"] is True
 
@@ -171,7 +194,7 @@ def test_reject_with_research_returns_search_with_exclusions(bridge, monkeypatch
     def fake_search(query, name, brand, **kwargs):
         seen.update(kwargs)
         kwargs["trace"]["outcome"] = {"decision": "NOT_FOUND", "failure_code": "NO_RESULTS", "provider_health": [],
-                                      "queries": [], "sku_key": "06281007000028"}
+                                      "queries": [], "sku_key": "06281007000024"}
         return None
 
     monkeypatch.setattr(image_search, "search_best_product_image", fake_search)

@@ -16,3 +16,5 @@ scipy
 opencv-python-headless
 curl-cffi
 pymysql
+# verifier package (P3): Claude label reader (official Anthropic SDK)
+anthropic>=1.11,<2

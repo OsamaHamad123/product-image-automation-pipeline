@@ -29,6 +29,18 @@ writes the labels into golden_skus.json, and the set replays offline (with the v
 brand_mappings.json recorded next to it) with:
 
     python scripts/eval_report.py --engine v2 --golden <dir>/golden_skus.json
+
+The reviews already made in the dashboard can fill part of labels.csv first (read-only on the database):
+
+    python scripts/eval_record.py --prefill-labels-from-db tests/eval/fixtures/recorded/2026-10-02/labels.csv
+
+Each review decision (review_decisions) is matched to the candidates of the same product (the same
+sku_key; the same sheet row when either side has no sku_key) and the same image URL (exact, else the
+same host and path when that is unambiguous); candidates of that product whose downloaded file is the
+same image (the same sha256 in image_file) get the same label. An approval labels the image
+correct_exact; a rejection is labelled by its reason code (REVIEW_LABELS below; LOW_QUALITY -> unusable).
+Cosmetic rejections (halo, background bleed, cropped margin) say nothing about the product and stay empty.
+Labels already in the file are never overwritten; the rest stays empty for the owner to fill in.
 """
 
 import argparse
@@ -38,8 +50,11 @@ import hashlib
 import json
 import logging
 import os
+import re
 import sys
+import tempfile
 from pathlib import Path
+from urllib.parse import urlsplit
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 for _p in (REPO_ROOT, os.path.join(REPO_ROOT, "scripts")):
@@ -55,6 +70,14 @@ CSV_FIELDS = ("sku_id", "row_number", "name", "name_ar", "brand", "size", "barco
               "download", "vlm_decision", "label", "notes")
 EXT = {"JPEG": "jpg", "PNG": "png", "WEBP": "webp", "GIF": "gif", "BMP": "bmp", "TIFF": "tif"}
 FETCH_TO_DOWNLOAD = {"http_403": "403", "not_image": "html"}
+# Dashboard rejection reason (review_decisions.reason_code) -> label. Approvals are correct_exact.
+REVIEW_LABELS = {
+    "WRONG_PRODUCT": "wrong_product", "WRONG_BRAND": "wrong_brand", "WRONG_VARIANT": "wrong_variant",
+    "WRONG_SIZE": "wrong_size", "WRONG_PACK": "wrong_pack", "NOT_PACKSHOT": "not_packshot",
+    "LOW_QUALITY": "unusable",
+    "BRAND_STYLE_MISMATCH": "wrong_brand",      # the catalog page's old name of WRONG_BRAND (cli_bridge alias)
+}
+_SHA_RE = re.compile(r"^[0-9a-f]{64}$")
 VERDICT_FIELDS = ("brand_text", "variant_text", "size_text", "pack_count", "view", "brand_match", "variant_match",
                   "size_match")
 
@@ -227,15 +250,250 @@ def import_labels(csv_path):
     return 1 if problems else 0
 
 
+# ---------------------------------------------------------------------------
+# --prefill-labels-from-db: the dashboard's review decisions as labels
+# ---------------------------------------------------------------------------
+
+def review_label(decision):
+    """The label a review decision gives its image, or None (manual upload, cosmetic or missing reason)."""
+    action = str(decision.get("action") or "").strip().lower()
+    if action == "approved":
+        return "correct_exact"
+    if action == "rejected":
+        return REVIEW_LABELS.get(str(decision.get("reason_code") or "").strip().upper())
+    return None
+
+
+def _url_key(url):
+    try:
+        from catalog_match.text_norm import url_key
+        return url_key(url)
+    except Exception:
+        return str(url or "").strip().lower()
+
+
+_IMAGE_FILE_RE = re.compile(r"\.(?:jpe?g|jfif|png|webp|gif|avif|bmp|tiff?)$", re.IGNORECASE)
+
+
+def _near_key(url):
+    """host + path of an image URL whose path names the image file, else '' (then only the exact URL matches).
+
+    Only then is the query string a size or cache parameter; behind an image proxy ('/_next/image?url=...',
+    'img.php?id=...') the query names the image, and host + path would match another image.
+    """
+    url = str(url or "").strip()
+    try:
+        path = urlsplit(url).path
+    except ValueError:
+        return ""
+    return _url_key(url) if _IMAGE_FILE_RE.search(path.rstrip("/")) else ""
+
+
+def _file_sha(line):
+    stem = os.path.basename(str(line.get("image_file") or "")).split(".", 1)[0].lower()
+    return stem if _SHA_RE.match(stem) else ""
+
+
+def _row_text(value):
+    try:
+        return str(int(str(value).strip()))
+    except (TypeError, ValueError):
+        return ""
+
+
+def load_review_decisions():
+    """Every review decision of the dashboard's database, oldest first (read-only)."""
+    try:
+        import config  # noqa: F401  (.env: the database the dashboard uses)
+    except Exception:
+        pass
+    import local_cache_db
+
+    return local_cache_db.get_review_decisions()
+
+
+def _same_product(decision, sku_key, row_number):
+    key = str(decision.get("sku_key") or "").strip()
+    if key and sku_key:
+        return key == sku_key
+    return bool(row_number) and _row_text(decision.get("row_number")) == row_number
+
+
+def prefill_labels_from_db(csv_path, decisions=None):
+    """Fill the empty labels of labels.csv from the dashboard's review decisions; returns the counts."""
+    csv_path = Path(csv_path)
+    if decisions is None:
+        decisions = load_review_decisions()
+    golden_path = csv_path.parent / "golden_skus.json"
+    sku_keys = {}
+    if golden_path.exists():
+        golden = json.loads(golden_path.read_text(encoding="utf-8"))
+        sku_keys = {s.get("id"): str(s.get("sku_key") or "").strip() for s in golden.get("skus", [])}
+    with open(csv_path, "r", encoding="utf-8-sig", newline="") as fh:
+        reader = csv.DictReader(fh)
+        fields = list(reader.fieldnames or CSV_FIELDS)
+        lines = list(reader)
+
+    products = {}                                   # sku_id -> {"sku_key", "row", "lines"}
+    for line in lines:
+        entry = products.setdefault(line.get("sku_id"), {"sku_key": sku_keys.get(line.get("sku_id"), ""),
+                                                         "row": _row_text(line.get("row_number")), "lines": []})
+        entry["lines"].append(line)
+
+    counts = {"decisions": len(decisions or []), "usable": 0, "matched": 0, "unmatched": 0, "ambiguous": 0,
+              "not_mapped": 0, "conflicts": 0}
+    suggested = {}                                  # id(line) -> (label, why)
+    ordered = sorted(enumerate(decisions or []),
+                     key=lambda p: (str(p[1].get("created_at") or ""), int(_row_text(p[1].get("id")) or 0), p[0]))
+    for _i, decision in ordered:
+        if not decision.get("image_url"):
+            continue
+        label = review_label(decision)
+        if label is None:
+            counts["not_mapped"] += 1
+            continue
+        counts["usable"] += 1
+        url = str(decision["image_url"]).strip()
+        hits, ambiguous = [], False
+        for product in products.values():
+            if not _same_product(decision, product["sku_key"], product["row"]):
+                continue
+            exact = [ln for ln in product["lines"] if str(ln.get("image_url") or "").strip() == url]
+            if not exact:
+                key = _near_key(url)
+                near = [ln for ln in product["lines"] if key and _near_key(ln.get("image_url")) == key]
+                if len({str(ln.get("image_url") or "").strip() for ln in near}) > 1:
+                    ambiguous = True        # host + path match several different images: never guess
+                    continue
+                exact = near
+            hits.extend(exact)
+        if not hits:
+            counts["ambiguous" if ambiguous else "unmatched"] += 1
+            continue
+        counts["matched"] += 1
+        action = str(decision.get("action")).strip().lower()
+        why = "approved" if action == "approved" else f"rejected {str(decision.get('reason_code')).strip().upper()}"
+        for line in hits:
+            previous = suggested.get(id(line))
+            if previous is not None and previous[0] != label:
+                counts["conflicts"] += 1        # reviewed twice with different outcomes: the later one counts
+            suggested[id(line)] = (label, why)
+
+    # The same downloaded file (sha256) of the same product is the same image: it gets the same label,
+    # when one of its copies was reviewed and every label known for that file agrees (the dashboard's
+    # and the owner's own labels in the file: a label the owner set on one copy is never contradicted).
+    same_file = {}
+    for product in products.values():
+        by_sha = {}                                 # sha -> {"reviewed": bool, "labels": set}
+        for line in product["lines"]:
+            sha = _file_sha(line)
+            if not sha:
+                continue
+            group = by_sha.setdefault(sha, {"reviewed": False, "labels": set()})
+            current = (line.get("label") or "").strip()
+            if current:
+                group["labels"].add(current)
+            if id(line) in suggested:
+                group["reviewed"] = True
+                group["labels"].add(suggested[id(line)][0])
+        for line in product["lines"]:
+            group = by_sha.get(_file_sha(line))
+            if id(line) not in suggested and group and group["reviewed"] and len(group["labels"]) == 1:
+                same_file[id(line)] = (next(iter(group["labels"])), "same image file as a reviewed candidate")
+    suggested.update(same_file)
+
+    result = {"prefilled": 0, "approved": 0, "rejected": 0, "same_file": 0, "kept": 0, "disagree": [],
+              "empty": 0}
+    for line in lines:
+        hit = suggested.get(id(line))
+        current = (line.get("label") or "").strip()
+        if hit is None:
+            result["empty"] += 0 if current else 1
+            continue
+        label, why = hit
+        if current:
+            result["kept"] += 1
+            if current != label:
+                result["disagree"].append(f"{line.get('sku_id')}/{line.get('candidate_id')}: file says {current}, "
+                                          f"dashboard says {label} ({why})")
+            continue
+        line["label"] = label
+        if not (line.get("notes") or "").strip():
+            line["notes"] = f"prefilled from dashboard review: {why}"
+        result["prefilled"] += 1
+        bucket = ("same_file" if id(line) in same_file else "approved" if label == "correct_exact" else "rejected")
+        result[bucket] += 1
+
+    fd, tmp = tempfile.mkstemp(prefix=".labels-", suffix=".csv", dir=str(csv_path.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8-sig", newline="") as fh:
+            writer = csv.DictWriter(fh, fieldnames=fields, extrasaction="ignore")
+            writer.writeheader()
+            writer.writerows(lines)
+        os.replace(tmp, csv_path)
+    except Exception:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        raise
+    result.update(counts)
+    return result
+
+
+def print_prefill(result, csv_path):
+    print(f"{result['prefilled']} labels prefilled from dashboard reviews ({result['approved']} approved -> "
+          f"correct_exact, {result['rejected']} from rejections, {result['same_file']} same image file) in {csv_path}")
+    print(f"{result['empty']} candidates are still empty for you to label; {result['kept']} labels already in the "
+          f"file were kept")
+    print(f"review decisions read {result['decisions']}: {result['matched']} matched this recording, "
+          f"{result['unmatched']} are for other products or images, {result['ambiguous']} matched several images "
+          f"(left empty), {result['not_mapped']} carry no product label (manual uploads, cosmetic rejections)")
+    if result["conflicts"]:
+        print(f"{result['conflicts']} images were reviewed twice with different outcomes: the later review was used")
+    if result["disagree"]:
+        print(f"{len(result['disagree'])} labels in the file differ from the dashboard review (kept, please check):")
+        for text in result["disagree"][:20]:
+            print("  " + text)
+
+
+def run_prefill(csv_path):
+    """--prefill-labels-from-db: plain sentences (exit 1) for a database that is down or a locked file."""
+    if not os.path.isfile(csv_path):
+        print(f"{csv_path} was not found: give the labels.csv of a recording folder", file=sys.stderr)
+        return 1
+    try:
+        decisions = load_review_decisions()
+    except Exception as exc:
+        print(f"could not read the dashboard's review decisions ({type(exc).__name__}): is MariaDB running, and "
+              "is DB_DATABASE in .env the dashboard's database? labels.csv was not changed", file=sys.stderr)
+        return 1
+    try:
+        result = prefill_labels_from_db(csv_path, decisions=decisions)
+    except PermissionError:
+        print(f"could not write {csv_path}: close it in Excel (or any program that has it open) and run again; "
+              "it was not changed", file=sys.stderr)
+        return 1
+    print_prefill(result, csv_path)
+    return 0
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--rows", action="append", help="sheet rows to record, e.g. 2-201 (repeatable)")
     parser.add_argument("--out", help="output folder (default tests/eval/fixtures/recorded/<today>)")
     parser.add_argument("--import-labels", metavar="CSV", help="merge a filled-in labels.csv and exit")
+    parser.add_argument("--prefill-labels-from-db", metavar="CSV",
+                        help="fill the empty labels of a labels.csv from the dashboard's review decisions and exit")
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO if args.verbose else logging.WARNING,
                         format="%(levelname)s %(name)s: %(message)s")
+    if (getattr(sys.stdout, "encoding", "") or "").lower().replace("-", "") != "utf8":
+        try:
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")   # Arabic names on a Windows console
+        except Exception:
+            pass
+    if args.prefill_labels_from_db:
+        return run_prefill(args.prefill_labels_from_db)
     if args.import_labels:
         return import_labels(args.import_labels)
     if not args.rows:

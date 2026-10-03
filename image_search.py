@@ -1918,16 +1918,25 @@ def _load_brand_mappings_for_search():
     return {}
 
 
-def _cached_result_v2(barcode, product_name, brand, sku_key, trace):
-    """البحث في الكاش المحلي (نتيجة مسترجعة تحتاج دائماً مراجعة ولا تُنشر تلقائياً)."""
+def _cached_result_v2(barcode, product_name, brand, sku_key, trace, brand_mappings=None, size_text=None):
+    """البحث في الكاش المحلي (نتيجة مسترجعة تحتاج دائماً مراجعة ولا تُنشر تلقائياً).
+
+    السجل المخزن بالباركود لا يُخدم إلا إذا طابق براندُه واسمُه المنتجَ المطلوب (local_cache_db
+    يتحقق من ذلك عند تمرير الاسم والبراند): باركود مشترك بين منتجين لا يعطي أحدهما صورة الآخر.
+    """
     import inspect
     import local_cache_db
 
     lookup = local_cache_db.get_cached_product
     kwargs = {"barcode": barcode, "product_name": product_name, "brand": brand}
     try:
-        if "sku_key" in inspect.signature(lookup).parameters:
+        params = inspect.signature(lookup).parameters
+        if "sku_key" in params:
             kwargs["sku_key"] = sku_key
+        if "brand_mappings" in params and brand_mappings:
+            kwargs["brand_mappings"] = brand_mappings
+        if "size_text" in params and size_text:
+            kwargs["size_text"] = size_text
     except (TypeError, ValueError):
         pass
     cached = lookup(**kwargs)
@@ -1985,7 +1994,9 @@ def search_best_product_image_v2(query, product_name, brand, **kwargs):
                                                size_text=kwargs.get("size_text") or None)
             # الباركود غير الصالح ('N/A' / '6.29E+12') لا يصلح مفتاحاً: يُمرَّر فارغاً
             cache_barcode = row["barcode"] if key_spec.gtin_status == "ok" else ""
-            cached = _cached_result_v2(cache_barcode, row["name"], row["brand"], key_spec.sku_key, trace)
+            cached = _cached_result_v2(cache_barcode, row["name"], row["brand"], key_spec.sku_key, trace,
+                                       brand_mappings=kwargs.get("brand_mappings") or None,
+                                       size_text=row.get("size") or None)
             if cached:
                 logger.info("v2: local cache hit for %r", product_name)
                 return cached

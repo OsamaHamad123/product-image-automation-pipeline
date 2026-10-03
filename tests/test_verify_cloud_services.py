@@ -1,5 +1,6 @@
 """verify_cloud_services: the key checker the launcher and the diagnostics page run (offline, requests mocked)."""
 
+import re
 from pathlib import Path
 
 import pytest
@@ -92,7 +93,10 @@ def test_google_cse_is_optional(monkeypatch):
 
 def test_diagnostics_page_shows_serper_and_no_fabricated_panel():
     page = (ROOT / "dashboard/resources/views/dashboard/diagnostics.blade.php").read_text(encoding="utf-8")
-    assert 'id="card-serper"' in page and 'id="ind-serper"' in page and 'id="text-serper"' in page
+    controller = (ROOT / "dashboard/app/Http/Controllers/HealthController.php").read_text(encoding="utf-8")
+    # one card per HealthController::SERVICES entry (Serper among them), with its state and dot
+    assert "'serper' => ['name' => 'Serper'" in controller
+    assert "id=\"card-{{ $service['key'] }}\"" in page and "data-service-state" in page and "data-service-dot" in page
     for fabricated in ("98.4%", "Next-Gen Frontiers", "CIEDE2000", "Speculative Search"):
         assert fabricated not in page
 
@@ -121,4 +125,15 @@ def test_proxy_credentials_are_never_printed(monkeypatch, capsys):
     assert vcs.verify_proxy() is False
     out = capsys.readouterr().out
     assert "s3cretpass" not in out and "staffuser" not in out
-    assert "proxy.example.com:8080" in out   # the host is still shown, so the owner knows which proxy failed
+    # the host is still shown, so the owner knows which proxy failed
+    assert re.search(r"\bproxy\.example\.com:8080\b", out)
+
+
+@pytest.mark.parametrize("name", ["ANTHROPIC_API_KEY", "SERPAPI_API_KEY"])
+def test_phase3_keys_are_masked_in_the_connection_check_output(monkeypatch, name):
+    """The Anthropic (label reader) and SerpApi (visual search) keys are masked like every other key."""
+    fake = "phase3-" + name.lower().replace("_", "-") + "-value"
+    monkeypatch.setattr(config, name, fake, raising=False)
+    assert name in vcs._SECRET_SETTINGS
+    out = vcs._redact(f"request failed for {fake} at https://api.example/v1?api_key={fake}")
+    assert fake not in out

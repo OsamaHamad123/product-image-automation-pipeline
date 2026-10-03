@@ -89,9 +89,12 @@ _SCHEMA_MIGRATIONS = [
     "ALTER TABLE automation_queue ADD COLUMN IF NOT EXISTS lease_until DATETIME NULL",
     "ALTER TABLE automation_queue ADD COLUMN IF NOT EXISTS failure_code VARCHAR(32) NULL",
     "ALTER TABLE automation_queue ADD COLUMN IF NOT EXISTS trace_json LONGTEXT NULL",
+    # التشغيل الذي يعالج الصف (begin_run): تقدم التشغيل يُحسب من صفوفه فقط وليس من الطابور كله
+    "ALTER TABLE automation_queue ADD COLUMN IF NOT EXISTS run_id VARCHAR(64) NULL",
     "ALTER TABLE automation_queue ADD INDEX IF NOT EXISTS idx_queue_status (status)",
     "ALTER TABLE automation_queue ADD INDEX IF NOT EXISTS idx_queue_worker (worker_id)",
     "ALTER TABLE automation_queue ADD INDEX IF NOT EXISTS idx_queue_sku (sku_key)",
+    "ALTER TABLE automation_queue ADD INDEX IF NOT EXISTS idx_queue_run (run_id)",
     # curation_candidates
     "ALTER TABLE curation_candidates MODIFY COLUMN title TEXT NULL",
     "ALTER TABLE curation_candidates ADD COLUMN IF NOT EXISTS sku_key VARCHAR(64) NULL",
@@ -106,6 +109,9 @@ _SCHEMA_MIGRATIONS = [
     "ALTER TABLE curation_candidates ADD INDEX IF NOT EXISTS idx_curation_sku (sku_key)",
     # automation_state: رسالة تنبيه مرئية للوحة التحكم (مثل عدم توفر نموذج Gemini)
     "ALTER TABLE automation_state ADD COLUMN IF NOT EXISTS notice VARCHAR(255) NULL",
+    # automation_state: التشغيل الحالي، وطلب الإيقاف من لوحة التحكم (يلتزم به العامل بين المنتجات أو عند بدئه)
+    "ALTER TABLE automation_state ADD COLUMN IF NOT EXISTS run_id VARCHAR(64) NULL",
+    "ALTER TABLE automation_state ADD COLUMN IF NOT EXISTS stop_requested INT DEFAULT 0",
 ]
 
 
@@ -350,7 +356,8 @@ def _cache_row_to_dict(row):
     }
 
 
-def get_cached_product(barcode=None, product_name=None, brand=None, sku_key=None):
+def get_cached_product(barcode=None, product_name=None, brand=None, sku_key=None, brand_mappings=None,
+                       size_text=None):
     """
     الاستعلام من الكاش. لا يخدم إلا الحلول المعتمدة (human_approved / auto_verified).
     - بـ sku_key أولاً إن مُرر.
@@ -358,6 +365,14 @@ def get_cached_product(barcode=None, product_name=None, brand=None, sku_key=None
       الباركود غير الصالح ('N/A' أو '0' أو '6.29E+12') لا يُستخدم مفتاحاً أبداً: قد تشترك فيه منتجات مختلفة.
     - بدون باركود صالح ولا sku_key: مطابقة دقيقة للاسم والبراند.
     خطأ القراءة يُعامل كعدم وجود (None) ويُسجل.
+
+    هوية المنتج هي البراند والاسم، والباركود دليل مساعد فقط (قد يكون خاطئاً أو مشتركاً بين منتجين):
+    سجل وُجد بالباركود (أو بـ sku_key هو GTIN) لا يُخدم إلا إذا طابق براندُه البراندَ المطلوب
+    (بعد التطبيع ومرادفات جدول البراندات إن مُررت brand_mappings) واتفق الاسمان
+    (نفس كلمات المنتج ونفس الحجم والنوع). وإلا يُتجاهل الكاش ويجري البحث (identity_mismatch).
+    يُطبق هذا الفحص عندما يمرر المستدعي product_name أو brand؛ استعلام حالة الاعتماد بـ sku_key وحده لا يتغير.
+    size_text: خلية الحجم (SIZE) في الشيت إن وُجدت؛ تدخل في حجم المنتج المطلوب، والسجل المخزن لا يحفظ إلا
+    الاسم، فحجم لا يذكره إلا عمود الحجم لا يمكن تأكيده (يُتجاهل الكاش).
     """
     barcode_clean = _cache_barcode(barcode)
     sku_clean = str(sku_key).strip() if sku_key else ""
@@ -366,6 +381,7 @@ def get_cached_product(barcode=None, product_name=None, brand=None, sku_key=None
         try:
             cursor = conn.cursor()
             row = None
+            barcode_keyed = False
             if sku_clean:
                 cursor.execute(
                     f"SELECT * FROM resolved_products WHERE sku_key = %s AND {_SERVABLE_SQL} "
@@ -373,6 +389,7 @@ def get_cached_product(barcode=None, product_name=None, brand=None, sku_key=None
                     (sku_clean,),
                 )
                 row = cursor.fetchone()
+                barcode_keyed = row is not None and _gtin_sku_key(sku_clean)
             if row is None and barcode_clean:
                 cursor.execute(
                     f"SELECT * FROM resolved_products WHERE barcode = %s AND {_SERVABLE_SQL} "
@@ -380,6 +397,7 @@ def get_cached_product(barcode=None, product_name=None, brand=None, sku_key=None
                     (barcode_clean,),
                 )
                 row = cursor.fetchone()
+                barcode_keyed = row is not None
             elif row is None and not sku_clean and product_name:
                 cursor.execute(
                     f"SELECT * FROM resolved_products WHERE LOWER(product_name) = %s AND LOWER(brand) = %s "
@@ -389,10 +407,123 @@ def get_cached_product(barcode=None, product_name=None, brand=None, sku_key=None
                 row = cursor.fetchone()
         finally:
             _close(conn)
+        if row and barcode_keyed and (product_name or brand):
+            if not cached_row_matches(row, product_name, brand, brand_mappings, size_text=size_text):
+                logger.info("[MariaDB Cache] الصورة المخزنة لهذا الباركود تخص منتجاً آخر (%r / %r)؛ "
+                            "يُتجاهل الكاش لـ %r ويجري البحث (identity_mismatch).",
+                            row.get("brand"), row.get("product_name"), product_name)
+                return None
         return _cache_row_to_dict(row) if row else None
     except Exception as e:
         logger.warning("[MariaDB Cache] خطأ أثناء القراءة من الكاش: %s", e)
         return None
+
+
+# --- identity package (P3): a barcode-keyed cache row must be the same product -------------------
+
+# Product-type words of the two names must overlap at least this much (shared / all, both names).
+CACHE_NAME_JACCARD = 0.75
+
+
+def _gtin_sku_key(sku_key):
+    """True when the sku_key is a GTIN-14 (identity.make_sku_key uses the barcode when it is valid)."""
+    return len(sku_key) == 14 and sku_key.isdigit()
+
+
+def _cache_brands_agree(req, got, req_name, got_name):
+    """Same brand: equal sheet brand (spacing/punctuation ignored), the same mapped brand, or a brand
+    phrase of one side in the other's brand. With one side's brand empty, the other's brand must be
+    named in that side's product name. Both empty: nothing to compare (the names decide)."""
+    from catalog_match.text_norm import any_phrase_in, match_key, normalize
+
+    k_req = match_key(req.brand_raw).replace(" ", "")
+    k_got = match_key(got.brand_raw).replace(" ", "")
+    if not k_req and not k_got:
+        return True
+    if k_req and k_got:
+        if k_req == k_got:
+            return True
+        if (req.brand_conf == "mapped" and got.brand_conf == "mapped" and req.brand_canonical
+                and normalize(req.brand_canonical) == normalize(got.brand_canonical)):
+            return True
+        return bool(any_phrase_in(req.match_brands, got.brand_raw) or any_phrase_in(got.match_brands, req.brand_raw))
+    if k_req:
+        return bool(any_phrase_in(req.match_brands, got_name))
+    return bool(any_phrase_in(got.match_brands, req_name))
+
+
+def _cache_brand_words(*specs):
+    """Every token (and joined spelling: 'al marai' -> 'almarai') of either side's brand phrases."""
+    from catalog_match.text_norm import tokens
+
+    out = set()
+    for spec in specs:
+        for phrase in (spec.brand_raw, spec.brand_canonical, spec.brand_ar) + tuple(spec.match_brands):
+            toks = tokens(phrase or "", strip_clitics=True)
+            out.update(toks)
+            if toks:
+                out.add("".join(toks))
+    return out
+
+
+def _cache_class_words(spec, brand_words):
+    """The product-type words of a name (plural 's' folded), without any spelling of either brand."""
+    from catalog_match.text_norm import is_arabic, tokens
+
+    out = set()
+    for word in spec.class_tokens:
+        for tok in tokens(word, strip_clitics=True):
+            if tok in brand_words:
+                continue
+            if not is_arabic(tok) and len(tok) > 3 and tok.endswith("s") and not tok.endswith("ss"):
+                tok = tok[:-1]
+            out.add(tok)
+    return out
+
+
+def cached_row_matches(row, product_name, brand, brand_mappings=None, size_text=None):
+    """
+    Does a cached resolution found by barcode describe the requested product? Fail closed: any
+    doubt or error answers False (the cache is ignored and the product is searched).
+
+    Same product means: the brands agree (see _cache_brands_agree), the stated sizes and pack
+    counts match (a size stated on one side only is a doubt), the variant readings are identical
+    (full fat vs low fat, diet, a flavour), and the product-type words overlap with a Jaccard
+    similarity of at least CACHE_NAME_JACCARD.
+
+    size_text is the requested row's sheet SIZE cell: it is part of that product's size (merged
+    with its name, as identity.build_sku_spec does). The stored row keeps only its name, so a
+    size that only the column states is not confirmed and the row is not served.
+    """
+    try:
+        from catalog_match.identity import build_sku_spec
+        from catalog_match.sizes import compare
+
+        req_name = str(product_name or "").strip()
+        got_name = str(row.get("product_name") or "").strip()
+        if not req_name or not got_name:
+            return False
+        req = build_sku_spec({"name": req_name, "brand": str(brand or "").strip()}, brand_mappings or None,
+                             size_text=str(size_text).strip() if size_text else None)
+        got = build_sku_spec({"name": got_name, "brand": str(row.get("brand") or "").strip()},
+                             brand_mappings or None)
+        if not _cache_brands_agree(req, got, req_name, got_name):
+            return False
+        if (req.size is None) != (got.size is None):
+            return False
+        if req.size is not None:
+            if compare(req.size, [got.size]) != "match" or (req.pack_count or 1) != (got.pack_count or 1):
+                return False
+        if dict(req.variants) != dict(got.variants):
+            return False
+        brand_words = _cache_brand_words(req, got)
+        a, b = _cache_class_words(req, brand_words), _cache_class_words(got, brand_words)
+        if not a and not b:
+            return True
+        return len(a & b) / len(a | b) >= CACHE_NAME_JACCARD
+    except Exception as e:  # fail closed
+        logger.warning("[MariaDB Cache] تعذر مقارنة هوية السجل المخزن: %s", e)
+        return False
 
 
 def _remember_phash(hash_str, row_id, cloudinary_url, product_name):
@@ -1118,10 +1249,19 @@ def update_task_status(task_id, status, error_message=None, failure_code=None, t
         return False
 
 
+# حالة «بانتظار المراجعة» تنتهي عندما لا يبقى أي صف جاهز للمراجعة (اعتمد المراجع أو رفض آخر صف)
+_SETTLE_REVIEW_SQL = (
+    "UPDATE automation_state SET status = 'idle', current_product_name = '' "
+    "WHERE `key` = 'active_session' AND status = 'curation_pending' "
+    "AND NOT EXISTS (SELECT 1 FROM automation_queue WHERE status = 'ready_for_review')"
+)
+
+
 def update_task_status_by_row(row_number, status, error_message=None, failure_code=None, sku_key=None):
     """
     تحديث حالة المهمة لمنتج: بـ sku_key عند تمريره (فلا يتأثر منتج آخر انتقل إلى رقم الصف نفسه
     بعد تعديل الشيت)، وبرقم الصف فقط للصفوف القديمة بلا sku_key.
+    قرارات المراجع (اعتماد / رفض / رفع يدوي) تمر من هنا: إذا لم يبق صف جاهز للمراجعة تصبح الحالة خاملة.
     """
     clause, params = _row_or_sku_clause(row_number, sku_key)
     try:
@@ -1134,6 +1274,7 @@ def update_task_status_by_row(row_number, status, error_message=None, failure_co
                     updated_at = CURRENT_TIMESTAMP
                 WHERE {clause}
             """, (status, error_message, failure_code) + params)
+            cursor.execute(_SETTLE_REVIEW_SQL)
             conn.commit()
         finally:
             _close(conn)
@@ -1379,8 +1520,8 @@ def delete_curation_candidates(row_number, sku_key=None):
 # ---------------------------------------------------------------------------
 
 def update_automation_state(status, total=None, processed=None, success=None, failed=None,
-                            current_product=None, notice=None):
-    """تحديث حالة ومؤشرات جلسة الأتمتة الجارية."""
+                            current_product=None, notice=None, stop_requested=None):
+    """تحديث حالة ومؤشرات جلسة الأتمتة الجارية. stop_requested=0 عند نهاية تشغيل: طلب إيقاف لم يعد له تشغيل."""
     try:
         conn = get_db_connection()
         try:
@@ -1389,7 +1530,8 @@ def update_automation_state(status, total=None, processed=None, success=None, fa
             params = [status]
             for column, value in (("total_items", total), ("processed_items", processed),
                                   ("success_count", success), ("failed_count", failed),
-                                  ("current_product_name", current_product), ("notice", notice)):
+                                  ("current_product_name", current_product), ("notice", notice),
+                                  ("stop_requested", stop_requested)):
                 if value is not None:
                     updates.append(f"{column} = %s")
                     params.append(value[:255] if isinstance(value, str) else value)
@@ -1445,6 +1587,168 @@ def pause_automation():
 def resume_automation():
     """إلغاء علم الإيقاف المؤقت."""
     return _set_pause(0)
+
+
+# ---------------------------------------------------------------------------
+# التحكم في التشغيل (تشغيل جديد، إيقاف، إصلاح تشغيل عالق) — cli_bridge run_control والتشغيل الليلي.
+# لا يُحذف أي صف أو مرشح أو قرار مراجعة هنا أبداً: الإيقاف يعيد الصفوف قيد المعالجة إلى الانتظار فقط.
+# ---------------------------------------------------------------------------
+
+def new_run_id():
+    return uuid.uuid4().hex[:16]
+
+
+def prepare_run():
+    """
+    قبل كل تشغيل جديد (زر التشغيل في اللوحة، والتشغيل الليلي): الحالة 'starting' بلا أرقام التشغيل السابق
+    (run_id فارغ حتى ينتهي الإدراج)، ويُلغى طلب الإيقاف والإيقاف المؤقت القديمان والتنبيه السابق.
+    يُستدعى قبل بدء الإدراج، فطلب إيقاف يصل أثناء قراءة الشيت لا يُمسح. تعيد True، أو False عند خطأ قاعدة البيانات.
+    """
+    try:
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE automation_state SET status = 'starting', stop_requested = 0, pause_requested = 0, "
+                "run_id = NULL, notice = NULL, current_product_name = '', total_items = 0, processed_items = 0, "
+                "success_count = 0, failed_count = 0, updated_at = CURRENT_TIMESTAMP WHERE `key` = 'active_session'"
+            )
+            conn.commit()
+        finally:
+            _close(conn)
+        return True
+    except Exception as e:
+        logger.warning("[MariaDB State] فشل تجهيز التشغيل الجديد: %s", e)
+        return False
+
+
+def begin_run(run_id):
+    """
+    نهاية الإدراج: كل صف مفتوح (pending أو processing) سيعالجه العامل في هذا التشغيل فيحمل run_id، وهذا يشمل
+    الصفوف التي أعاد الإدراج ضبطها وأي صف بقي في الانتظار من تشغيل سابق. الصفوف الجاهزة للمراجعة أو المعتمدة
+    التي أبقاها الإدراج كما هي ليست عمل هذا التشغيل، فلا تُحسب في تقدمه (وإلا بدأ التقدم من نسبة عالية).
+    يسجل run_id وعدد صفوفه في automation_state. تعيد عدد الصفوف، أو None عند خطأ قاعدة البيانات (يُسجل).
+    """
+    try:
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("UPDATE automation_queue SET run_id = %s WHERE status IN ('pending','processing')",
+                           (run_id,))
+            cursor.execute("SELECT COUNT(*) AS cnt FROM automation_queue WHERE run_id = %s", (run_id,))
+            total = int(cursor.fetchone()["cnt"])
+            cursor.execute(
+                "UPDATE automation_state SET run_id = %s, total_items = %s, processed_items = 0, success_count = 0, "
+                "failed_count = 0, updated_at = CURRENT_TIMESTAMP WHERE `key` = 'active_session'",
+                (run_id, total),
+            )
+            conn.commit()
+        finally:
+            _close(conn)
+        return total
+    except Exception as e:
+        logger.warning("[MariaDB State] فشل تسجيل التشغيل %s: %s", run_id, e)
+        return None
+
+
+def _status_counts(cursor, where="", params=()):
+    cursor.execute(f"SELECT status, COUNT(*) AS cnt FROM automation_queue {where} GROUP BY status", params)
+    stats = {"total": 0, "pending": 0, "processing": 0, "ready_for_review": 0, "completed": 0, "failed": 0}
+    for r in cursor.fetchall():
+        status = r["status"] or "unknown"
+        stats[status] = stats.get(status, 0) + int(r["cnt"])
+        stats["total"] += int(r["cnt"])
+    return stats
+
+
+def get_run_statistics(run_id):
+    """
+    عدادات صفوف تشغيل واحد (run_id) حسب الحالة، مع processed = جاهز للمراجعة + مكتمل + فاشل.
+    أخطاء قاعدة البيانات تُرفع.
+    """
+    conn = get_db_connection()
+    try:
+        stats = _status_counts(conn.cursor(), "WHERE run_id = %s", (run_id,))
+    finally:
+        _close(conn)
+    stats["processed"] = stats["ready_for_review"] + stats["completed"] + stats["failed"]
+    stats["run_id"] = run_id
+    return stats
+
+
+def _release_processing(cursor):
+    """الصفوف العالقة في 'processing' (عامل أُنهي أو توقف) تعود إلى 'pending' بلا حجز؛ تعيد عددها."""
+    cursor.execute(
+        "UPDATE automation_queue SET status = 'pending', worker_id = NULL, lease_until = NULL, "
+        "updated_at = CURRENT_TIMESTAMP WHERE status = 'processing'"
+    )
+    return cursor.rowcount
+
+
+def _settled_status(cursor):
+    """الحالة بعد انتهاء التشغيل: بانتظار المراجعة إن بقي صف جاهز للمراجعة، وإلا خامل."""
+    cursor.execute("SELECT COUNT(*) AS cnt FROM automation_queue WHERE status = 'ready_for_review'")
+    return "curation_pending" if int(cursor.fetchone()["cnt"]) > 0 else "idle"
+
+
+def _run_control_result(cursor, released, stop_requested):
+    cursor.execute("SELECT status FROM automation_state WHERE `key` = 'active_session'")
+    row = cursor.fetchone() or {}
+    return {"released": released, "stop_requested": bool(stop_requested), "status": row.get("status"),
+            "queue": _status_counts(cursor)}
+
+
+def stop_run(worker_active=False):
+    """
+    زر «إيقاف التشغيل». لا يُحذف أي صف: الجاهز للمراجعة والمعتمد والفاشل والمنتظر يبقى كما هو مع مرشحاته.
+    - worker_active=True (الإدراج ما زال يقرأ الشيت ولا عامل بعد، أو العامل ما زال حياً): يُسجل طلب إيقاف
+      يلتزم به العامل بين المنتجات، أو عند بدئه قبل معالجة أي منتج؛ الحالة لا تتغير.
+    - worker_active=False (أُنهي العامل أو لم يكن يعمل): الصفوف في 'processing' تعود إلى 'pending'، ويُلغى طلبا
+      الإيقاف والإيقاف المؤقت، والحالة: بانتظار المراجعة إن بقي صف جاهز، وإلا خامل. التنبيه يبقى كما هو.
+    تعيد {released, stop_requested, status, queue}. أخطاء قاعدة البيانات تُرفع.
+    """
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        released = 0
+        if worker_active:
+            cursor.execute("UPDATE automation_state SET stop_requested = 1 WHERE `key` = 'active_session'")
+        else:
+            released = _release_processing(cursor)
+            cursor.execute(
+                "UPDATE automation_state SET status = %s, stop_requested = 0, pause_requested = 0, "
+                "current_product_name = '', updated_at = CURRENT_TIMESTAMP WHERE `key` = 'active_session'",
+                (_settled_status(cursor),),
+            )
+        conn.commit()
+        return _run_control_result(cursor, released, worker_active)
+    finally:
+        _close(conn)
+
+
+def reset_run(worker_active=False):
+    """
+    زر «إصلاح تشغيل عالق»: يمسح حالة التشغيل العالقة فقط، ولا يحذف أي صف ولا يلمس curation_candidates
+    ولا review_decisions ولا rejected_images ولا resolved_products. الصفوف في 'processing' تعود إلى 'pending'،
+    ويُلغى الإيقاف المؤقت، ويُمسح التقدم (run_id والعدادات) والمنتج الحالي والتنبيه، والحالة: بانتظار المراجعة
+    إن بقي صف جاهز، وإلا خامل. worker_active=True: قد يكون الإدراج ما زال يقرأ الشيت أو بقي عامل حياً، فيُسجل طلب
+    إيقاف كي لا يبدأ المعالجة أو يتوقف بعد المنتجات الجارية؛ وإلا يُلغى طلب الإيقاف. تعيد
+    {released, stop_requested, status, queue}. أخطاء قاعدة البيانات تُرفع.
+    """
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        released = _release_processing(cursor)
+        cursor.execute(
+            "UPDATE automation_state SET status = %s, stop_requested = %s, pause_requested = 0, run_id = NULL, "
+            "notice = NULL, current_product_name = '', total_items = 0, processed_items = 0, success_count = 0, "
+            "failed_count = 0, updated_at = CURRENT_TIMESTAMP WHERE `key` = 'active_session'",
+            (_settled_status(cursor), 1 if worker_active else 0),
+        )
+        conn.commit()
+        return _run_control_result(cursor, released, worker_active)
+    finally:
+        _close(conn)
 
 
 # تهيئة قاعدة البيانات تلقائياً عند استيراد الموديول للمرة الأولى

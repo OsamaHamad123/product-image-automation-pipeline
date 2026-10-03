@@ -15,7 +15,15 @@ Hard rejects (tier None):
     size_conflict           title or page_title states another size (> 3 %)
     pack_conflict           title or page_title states another pack count
     variant_conflict:<axis> title / page_title / page_slug states an exclusive other variant
-    gtin_mismatch           gtin_on_page is a valid GTIN different from the SKU's
+    gtin_mismatch           gtin_on_page is a valid GTIN different from the SKU's valid GTIN AND
+                            (GTIN_POLICY 'evidence', the default) the brand is not fully
+                            evidenced or a size / pack / variant conflict (hard or soft,
+                            including an unstated marked variant or an ambiguous pack) is
+                            also present; under 'strict' any differing GTIN. Alone, under
+                            'evidence', it caps the tier at 2 (conflict 'gtin_mismatch:<gtin>',
+                            review warning 'barcode_conflict'). Under 'off' GTINs are ignored.
+                            Under 'evidence' an equal in-store (restricted) number is no
+                            evidence: it never lifts a tier.
     stock_or_clipart        stock/clipart domain or keyword
     reviewer_negative       the image URL was rejected by a reviewer before
 
@@ -38,13 +46,15 @@ domain. A hit anywhere else keeps the brand match (tier 2, conflict
 generic_brand_position:<field>) but neither makes tier 1 nor corroborates a GTIN match.
 Distinctive brands are not affected.
 
-Tiers:
-    1  GTIN match with brand or class-coverage corroboration, or brand + size +
-       every specified variant matched with class coverage >= 0.5 on a
-       brand-official, UAE-retailer or structured page (a common-word brand only
-       where a brand stands)
-    2  brand matched (or GTIN matched), no hard conflict
-    3  no brand evidence, no hard conflict
+Tiers (GTIN_POLICY 'evidence': brand + name is the identity, the barcode supports it):
+    1  GTIN match with full brand evidence, or brand + size + every specified
+       variant matched with class coverage >= 0.5 on a brand-official,
+       UAE-retailer or structured page (a common-word brand only where a brand
+       stands); never with a differing page GTIN
+    2  brand matched, no hard conflict
+    3  no brand evidence, no hard conflict (a GTIN match alone does not lift it)
+Under 'strict' a GTIN match with brand OR class-coverage corroboration is tier 1 and a
+GTIN match alone is tier 2 (the earlier rule).
 
 rank(scored, quality) sorts by the lexicographic key
     tier > size match > variants matched > class coverage > source trust
@@ -61,9 +71,10 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple
 
+from . import settings
 from . import variants as variants_mod
 from .brand_index import is_generic_brand
-from .gtin import normalize_gtin
+from .gtin import is_restricted, normalize_gtin
 from .models import Candidate, CandidateScore, SkuSpec
 from .sizes import compare, compare_pack, parse_sizes
 from .text_norm import (
@@ -84,6 +95,11 @@ COMPETITOR_FIELDS = ("title", "page_title", "page_slug", "image_file")
 URL_FIELDS = ("page_slug", "image_file")
 DEPARTMENT_AXES = ("form",)   # variant axes retailers also use as department names in page URLs
 IDENTITY_FIELDS = ("title", "page_title", "page_slug", "image_file")
+# Soft size / pack / variant conflicts that turn a differing page GTIN into a hard reject: every
+# soft doubt about size, pack or variant (a marked variant the SKU does not state, a pack the
+# title leaves ambiguous), not only the ones seen in a URL or the image file name.
+_GTIN_COMPANION_CONFLICTS = ("url_size_conflict", "url_pack_conflict", "image_variant_conflict",
+                             "soft_variant_conflict", "unstated_variant", "pack_ambiguous")
 
 
 @lru_cache(maxsize=1)
@@ -351,14 +367,24 @@ def score_candidate(spec: SkuSpec, cand: Candidate, negatives=None) -> Candidate
                 soft_cap = True
 
     # --- GTIN ------------------------------------------------------------
+    # Both sides must be valid GTINs: an invalid sheet barcode (bad check digit, '6.29E+12')
+    # or page code is no evidence either way. What a differing code does depends on
+    # GTIN_POLICY (the 'GTIN as evidence' block below, and settings.py).
+    policy = settings.gtin_policy()
     gtin_state: Optional[str] = None
-    if cand.gtin_on_page and spec.gtin:
+    if cand.gtin_on_page and spec.gtin and policy != "off":
+        sheet_gtin, _sheet_status = normalize_gtin(spec.gtin)
         page_gtin, _status = normalize_gtin(cand.gtin_on_page)
-        if page_gtin:
-            gtin_state = "match" if page_gtin == spec.gtin else "mismatch"
+        if sheet_gtin and page_gtin:
+            gtin_state = "match" if page_gtin == sheet_gtin else "mismatch"
+            if gtin_state == "match" and policy == "evidence" and is_restricted(sheet_gtin):
+                # an in-store (restricted-circulation) number is unique only inside one company:
+                # another store's page that carries it proves nothing, so it never lifts a tier
+                gtin_state = None
             if gtin_state == "mismatch":
-                hard.append("gtin_mismatch")
                 conflicts.append(f"gtin_mismatch:{page_gtin}")
+                if policy == "strict":
+                    hard.append("gtin_mismatch")
 
     # --- size and pack ---------------------------------------------------
     size_by_field: Dict[str, str] = {}
@@ -497,6 +523,20 @@ def score_candidate(spec: SkuSpec, cand: Candidate, negatives=None) -> Candidate
 
     coverage = class_coverage(spec, fields)
 
+    # --- GTIN as evidence (GTIN_POLICY 'evidence') -------------------------
+    # The barcode supports brand + name identity, it never replaces it: sheet barcodes are
+    # often missing and sometimes wrong. A differing page code caps the candidate at tier 2
+    # (never tier 1, never auto-published; the reviewer is warned) and is a hard reject only
+    # when the brand is not fully evidenced either (another brand, no brand, a common-word
+    # brand out of place, a missing sub-brand) or the evidence also shows another size,
+    # pack or variant (hard, or only in a URL / the image file name).
+    if gtin_state == "mismatch" and policy == "evidence":
+        soft_cap = True
+        brand_agrees = brand_t1 and sub_brand_ok
+        other_conflict = any(str(c).startswith(_GTIN_COMPANION_CONFLICTS) for c in conflicts)
+        if hard or not brand_agrees or other_conflict:
+            hard.append("gtin_mismatch")
+
     # --- tier ------------------------------------------------------------
     gtin_ok = gtin_state == "match"
     size_ok = spec.size is not None and size_status == "match" and (
@@ -506,13 +546,21 @@ def score_candidate(spec: SkuSpec, cand: Candidate, negatives=None) -> Candidate
     if hard:
         tier: Optional[int] = None
     else:
-        # A GTIN match alone (an Open Food Facts record) is tier 1 only with brand or
-        # product-type corroboration: records can be wrong, and in-store codes are reused.
-        gtin_t1 = gtin_ok and (brand_t1 or coverage >= COVERAGE_T1)
+        if policy == "strict":
+            # A GTIN match alone (an Open Food Facts record) is tier 1 only with brand or
+            # product-type corroboration: records can be wrong, and in-store codes are reused.
+            gtin_t1 = gtin_ok and (brand_t1 or coverage >= COVERAGE_T1)
+            gtin_lifts = gtin_ok
+        else:
+            # A matching code strengthens identity only where the brand agrees (full brand
+            # evidence, not a common word out of place): another brand's listing that carries
+            # the sheet's (possibly wrong) barcode stays where its own text puts it.
+            gtin_t1 = gtin_ok and brand_t1
+            gtin_lifts = False
         t1 = gtin_t1 or (brand_t1 and size_ok and variants_ok and coverage >= COVERAGE_T1 and trusted_page)
         if t1 and not soft_cap:
             tier = 1
-        elif brand_ok or gtin_ok:
+        elif brand_ok or gtin_lifts:
             tier = 2
         else:
             tier = 3
@@ -533,7 +581,9 @@ def score_candidate(spec: SkuSpec, cand: Candidate, negatives=None) -> Candidate
     }
     return CandidateScore(
         tier=tier,
-        identity_score=_identity_score(tier, brand_ok, gtin_ok, size_status, len(matched_axes),
+        # the display score counts a GTIN match only where it counts for the tier
+        identity_score=_identity_score(tier, brand_ok, gtin_ok and (policy == "strict" or brand_t1),
+                                       size_status, len(matched_axes),
                                        len(spec.variants), coverage, trust),
         hard_reject=tuple(dict.fromkeys(hard)),
         matched=matched,

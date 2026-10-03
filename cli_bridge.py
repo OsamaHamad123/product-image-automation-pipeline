@@ -98,6 +98,16 @@ def _as_bool(value):
     return bool(value)
 
 
+def _enhance(params):
+    """
+    تحسين الألوان عند الاعتماد أو الرفع اليدوي: قيمة الطلب إن أُرسلت، وإلا إعداد «تحسين الألوان» المحفوظ
+    (config.ENABLE_IMAGE_ENHANCEMENT من system_settings)، نفس ما يستخدمه العامل في التشغيل.
+    """
+    if params.get('enhance') in (None, ""):
+        return bool(getattr(config, 'ENABLE_IMAGE_ENHANCEMENT', False))
+    return _as_bool(params.get('enhance'))
+
+
 def _failure(status, message, context):
     """
     حمولة خطأ برسالة ثابتة فقط: نص الاستثناء والـ traceback يذهبان إلى السجل (temp/search.log)
@@ -326,11 +336,47 @@ def _same_product_task(task, sku_key, product_name):
     return bool(task_name) and task_name == name
 
 
+# sku_key المرسل لمنتج غير الذي تصفه حقول الطلب (نتيجة بحث لمنتج آخر وصلت متأخرة، أو صفحة قديمة): لا يُكتب شيء
+PRODUCT_CHANGED_ERROR = "المنتج تغيّر أثناء المراجعة؛ افتحه من جديد"
+
+# حقول حمولة الطابور في مفتاح الصف (main.sku_row): (اسم الحقل في الطلب، اسمه في الحمولة)
+_KEY_PAYLOAD_FIELDS = (("product_name_ar", "name_ar"), ("brand_ar", "brand_ar"), ("category", "category"),
+                       ("size", "size"))
+
+
+def _request_sku_key(params, task=None):
+    """
+    sku_key لحقول المنتج في الطلب بنفس حساب مفتاح صف الشيت عند بناء الطابور
+    (main.compute_sku_key(main.sku_row(...))، والمفتاح لا يعتمد على شيت مرادفات البراندات).
+    الاسم والبراند والباركود من الطلب دائماً. الحقل الغائب تماماً من الطلب (صفحة الدفعات لا ترسل الاسم والبراند
+    بالعربية، ورفع الصورة لا يمرر الحجم) يؤخذ من حمولة صف الطابور task، ويمرره المستدعي فقط إن كان لنفس المنتج.
+    """
+    pipeline = _pipeline()
+    stored = pipeline.task_payload(task) if task else {}
+    payload = {key: (_text(params, sent) if sent in params else str(stored.get(key) or "").strip())
+               for sent, key in _KEY_PAYLOAD_FIELDS}
+    return pipeline.compute_sku_key(pipeline.sku_row(
+        _text(params, 'product_name'), _text(params, 'brand'), _text(params, 'barcode'), payload))
+
+
+def _product_changed(params, task):
+    """
+    هل sku_key المرسل لمنتج آخر غير الذي تصفه حقول الطلب (الاسم والبراند والباركود والحجم)؟ يُعاد حسابه من الحقول
+    ويقارن. طلب بلا sku_key أو بلا اسم منتج لا يحمل هوية للمقارنة. task: صف الطابور عند رقم الصف (أو None).
+    """
+    sku_key = _text(params, 'sku_key')
+    product_name = _text(params, 'product_name')
+    if not sku_key or not product_name:
+        return False
+    same = _same_product_task(task, sku_key, product_name)
+    return _request_sku_key(params, task if same else None) != sku_key
+
+
 def _identity_problem(params, row_number):
     """
     يتحقق من sku_key والباركود المطلوبين. يعيد (sku_key, barcode, خطأ أو None).
     الباركود لا يُقارن بنسخة الطابور القديمة: الكتابة في الشيت تتحقق من هوية الصف الحي عند التنفيذ،
-    وتصحيح المالك للباركود لا يجب أن يمنع الاعتماد.
+    وتصحيح المالك للباركود لا يجب أن يمنع الاعتماد. sku_key المرسل يجب أن يطابق حقول المنتج المرسلة معه.
     """
     sku_key = _text(params, 'sku_key')
     barcode = _text(params, 'barcode')
@@ -342,6 +388,8 @@ def _identity_problem(params, row_number):
         sku_key = sku_key or (task.get("sku_key") or "")
     if not sku_key:
         return sku_key, barcode, "sku_key is required"
+    if _product_changed(params, task):
+        return sku_key, barcode, PRODUCT_CHANGED_ERROR
     return sku_key, barcode, None
 
 
@@ -468,7 +516,7 @@ def action_select_image(params):
             bg_method=_text(params, 'bg_removal_method') or None,
             target=(int(params.get('target_width') or 0), int(params.get('target_height') or 0)),
             category_override={k: _text(params, k) for k in ('category_l1_en', 'category_l2_en', 'category_l3_en')},
-            enhance=_as_bool(params.get('enhance', False)), key_size=_text(params, 'size') or None,
+            enhance=_enhance(params), key_size=_text(params, 'size') or None,
         )
         if res["status"] == "failed":
             return {'status': 'failed', 'error': res.get('error'), 'isolated': res.get('isolated', False)}
@@ -507,11 +555,13 @@ def action_upload_manual_image(params):
     if not file_path or not row_number or not product_name or not os.path.exists(file_path):
         return {'status': 'failed', 'error': 'Missing parameters or local file path not found'}
     row_number = int(row_number)
+    task = local_cache_db.get_task_by_row(row_number)
+    if _product_changed(params, task):
+        return {'status': 'failed', 'error': PRODUCT_CHANGED_ERROR}
 
     pipeline = _pipeline()
     sku_key = _text(params, 'sku_key')
     if not sku_key:
-        task = local_cache_db.get_task_by_row(row_number)
         sku_key = (task or {}).get("sku_key") or pipeline.compute_sku_key(
             {"name": product_name, "brand": brand, "barcode": barcode}, _load_brand_mappings())
     queue_started = False
@@ -525,7 +575,7 @@ def action_upload_manual_image(params):
             bg_method=_text(params, 'bg_removal_method') or None,
             target=(int(params.get('target_width') or 0), int(params.get('target_height') or 0)),
             category_override={k: _text(params, k) for k in ('category_l1_en', 'category_l2_en', 'category_l3_en')},
-            enhance=_as_bool(params.get('enhance', False)), key_size=_text(params, 'size') or None,
+            enhance=_enhance(params), key_size=_text(params, 'size') or None,
         )
         try:
             os.remove(file_path)
@@ -621,11 +671,13 @@ def action_reject_image(params):
         return {'status': 'error', 'error': f"invalid reason_code {reason_code!r}",
                 'allowed': list(local_cache_db.REJECT_REASON_CODES)}
     row_number = int(row_number)
+    task = local_cache_db.get_task_by_row(row_number)
+    if _product_changed(params, task):
+        return {'status': 'error', 'error': PRODUCT_CHANGED_ERROR}
 
     brand_mappings = None
     sku_key = _text(params, 'sku_key')
     if not sku_key:
-        task = local_cache_db.get_task_by_row(row_number)
         sku_key = (task or {}).get("sku_key") or ""
     if not sku_key:
         if not product_name:
@@ -784,6 +836,88 @@ def action_ops_health(params):
     return dict({"status": "success"}, **report)
 
 
+# ---------------------------------------------------------------------------
+# run_control (قراءة/كتابة): تشغيل جديد، إيقاف، إصلاح تشغيل عالق — لا يُحذف أي صف أبداً
+# ---------------------------------------------------------------------------
+
+# حالة عامل الخلفية كما رأتها لوحة التحكم (ApiController): العملية تُنهى في PHP لأنها تحتاج نظام التشغيل
+RUN_CONTROL_WORKERS = ("starting", "running", "killed", "none")
+
+
+def _kept_rows_text(queue):
+    return (f"لم يُحذف أي صف: {queue.get('ready_for_review', 0)} منتج بانتظار المراجعة، "
+            f"{queue.get('pending', 0)} صف في الانتظار، {queue.get('completed', 0)} معتمد، "
+            f"{queue.get('failed', 0)} فاشل.")
+
+
+def _stop_message(worker, result):
+    kept = _kept_rows_text(result["queue"])
+    if worker == "starting":
+        return ("سُجل طلب الإيقاف: التشغيل ما زال يقرأ الشيت، وسيتوقف العامل فور بدئه قبل معالجة أي منتج. "
+                "لم يُحذف أي صف.")
+    if worker == "running":
+        return ("سُجل طلب الإيقاف: سيتوقف العامل بعد إنهاء المنتجات الجارية، وتبقى باقي الصفوف في الانتظار. "
+                "لم يُحذف أي صف.")
+    released = result["released"]
+    if worker == "killed":
+        return (f"تم إيقاف التشغيل. أُعيد {released} صف كان قيد المعالجة إلى الانتظار ليُعالج في التشغيل القادم. "
+                + kept)
+    if released:
+        return f"لم يكن هناك تشغيل نشط. أُعيد {released} صف عالق في «قيد المعالجة» إلى الانتظار. " + kept
+    return "لم يكن هناك تشغيل نشط لإيقافه، ولم يتغير أي صف."
+
+
+def _reset_message(worker, result):
+    parts = [f"تم إصلاح حالة التشغيل: حُذف ملف القفل، ومُسح التقدم والتنبيه والإيقاف المؤقت، وأُعيد "
+             f"{result['released']} صف من «قيد المعالجة» إلى الانتظار."]
+    if worker == "killed":
+        parts.append("وأُنهي العامل الذي كان ما زال يعمل.")
+    elif worker == "starting":
+        parts.append("وسُجل طلب إيقاف للتشغيل الذي كان يقرأ الشيت كي لا يبدأ المعالجة.")
+    elif worker == "running":
+        parts.append("وسُجل طلب إيقاف للعامل الذي تعذر إنهاؤه، فيتوقف بعد المنتجات الجارية.")
+    parts.append(_kept_rows_text(result["queue"]))
+    return " ".join(parts)
+
+
+def action_run_control(params):
+    """
+    التحكم في تشغيل الأتمتة من لوحة التحكم (local_cache_db). op:
+    - start: قبل إطلاق تشغيل جديد (prepare_run): حالة 'starting' بلا أرقام التشغيل السابق، وإلغاء طلبي
+      الإيقاف والإيقاف المؤقت القديمين.
+    - stop: زر «إيقاف التشغيل» (stop_run). worker: starting | running (العامل لم يبدأ أو ما زال حياً: طلب إيقاف
+      يلتزم به) أو killed | none (أُنهي أو لم يكن يعمل: الصفوف قيد المعالجة تعود للانتظار وتُضبط الحالة).
+    - reset: زر «إصلاح تشغيل عالق» (reset_run). worker=starting | running يسجل طلب إيقاف للإدراج الذي قد يكون
+      ما زال يعمل أو للعامل الذي لم يُنهَ.
+    لا يحذف أي صف أو مرشح أو قرار مراجعة. الاستجابة: {status, op, message (عربية), released, stop_requested,
+    state, queue}.
+    """
+    op = _text(params, 'op')
+    worker = _text(params, 'worker') or "none"
+    if op not in ("start", "stop", "reset"):
+        return {'status': 'error', 'error': f"invalid op {op!r}", 'allowed': ["start", "stop", "reset"]}
+    if worker not in RUN_CONTROL_WORKERS:
+        return {'status': 'error', 'error': f"invalid worker {worker!r}", 'allowed': list(RUN_CONTROL_WORKERS)}
+    if op == "start":
+        if not local_cache_db.prepare_run():
+            return {'status': 'failed', 'op': op,
+                    'error': "تعذر تجهيز التشغيل في قاعدة البيانات؛ لم يبدأ أي تشغيل (التفاصيل في temp/search.log)."}
+        return {'status': 'success', 'op': op, 'message': "تم تجهيز تشغيل جديد."}
+    worker_active = worker in ("starting", "running")
+    try:
+        if op == "stop":
+            result = local_cache_db.stop_run(worker_active=worker_active)
+            message = _stop_message(worker, result)
+        else:
+            result = local_cache_db.reset_run(worker_active=worker_active)
+            message = _reset_message(worker, result)
+    except Exception:
+        return _failure('failed', "تعذر تعديل حالة التشغيل في قاعدة البيانات؛ لم يتغير أي صف "
+                                  "(التفاصيل في temp/search.log).", f"run_control {op} failed")
+    return {'status': 'success', 'op': op, 'message': message, 'released': result['released'],
+            'stop_requested': result['stop_requested'], 'state': result['status'], 'queue': result['queue']}
+
+
 ACTIONS = {
     'get_products': action_get_products,
     'search': action_search,
@@ -794,6 +928,7 @@ ACTIONS = {
     'sheet-preview': action_sheet_preview,
     'sheet-save': action_sheet_save,
     'ops_health': action_ops_health,
+    'run_control': action_run_control,
 }
 
 

@@ -1,5 +1,6 @@
 """Reviewer evidence for auto-publish: the pure stats over review_decisions rows, the Wilson bound,
-scripts/review_stats.py (read-only) and the active-learning page that shows them.
+scripts/review_stats.py (read-only) and the auto-publish tab of Settings (was the active-learning page) that
+shows them.
 
 Everything here is offline: the stats are pure functions and the script reads through a fake
 connection. The DB round trip and the bridge writes are in test_review_decisions.py.
@@ -18,8 +19,9 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 DASH = ROOT / "dashboard"
-PAGE = DASH / "resources" / "views" / "dashboard" / "active_learning.blade.php"
-CONTROLLER = DASH / "app" / "Http" / "Controllers" / "ProductController.php"
+PAGE = DASH / "resources" / "views" / "settings" / "auto_publish.blade.php"
+CONTROLLER = DASH / "app" / "Http" / "Controllers" / "SettingsController.php"
+SETTINGS_JS = DASH / "public" / "js" / "settings.js"
 LIVE_ROWS = ROOT / "tests" / "catalog_match" / "fixtures" / "live_rows_2026_09_30.json"
 NODE = shutil.which("node")
 
@@ -376,7 +378,7 @@ def test_format_report_marks_a_brand_below_target(script, ldb):
 
 
 # ---------------------------------------------------------------------------
-# The active-learning page shows the real stats, not fabricated rules
+# The auto-publish tab of Settings (was the active-learning page) shows the real stats, not fabricated rules
 # ---------------------------------------------------------------------------
 
 FABRICATED = (
@@ -397,23 +399,29 @@ def test_python_ignores_the_padding_the_page_claimed(offline):
 def test_page_no_longer_shows_fabricated_rules():
     page = PAGE.read_text(encoding="utf-8")
     controller = CONTROLLER.read_text(encoding="utf-8")
-    body = controller[controller.index("public function activeLearning"):controller.index("public function richCatalog")]
     for token in FABRICATED:
         assert token not in page, token
-        assert token not in body, token
+        assert token not in controller, token
+    assert not (DASH / "resources" / "views" / "dashboard" / "active_learning.blade.php").exists()
 
 
 def test_page_shows_the_review_stats():
     page = PAGE.read_text(encoding="utf-8")
     controller = CONTROLLER.read_text(encoding="utf-8")
-    body = controller[controller.index("public function activeLearning"):controller.index("public function richCatalog")]
-    assert "runPython('review_stats')" in body
-    for text in ("جاهزة للنشر الآلي", "تحتاج مراجعات أكثر", "دقة أقل من المطلوب", "AUTO_PUBLISH_BRANDS=",
-                 "لا توجد قرارات مراجعة مسجلة بعد", "suggested_auto_publish_brands", "domains", "lower_bound"):
-        assert text in page, text
-    # the thresholds come from the bridge (local_cache_db), never hard-coded in the page
-    assert "$thresholds['min_reviewed']" in page and "/30)" not in page and "0.98" not in page
-    assert "isset($error)" in page
+    show = controller[controller.index("public function show"):controller.index("public function save")]
+    assert "PythonBridge::run('review_stats')" in show
+    # per brand: the reviewed suggestions, precision, Wilson lower bound and the status, from the bridge
+    for key in ("$row['reviews']", "$row['precision']", "$row['lower_bound']", "$row['chip']"):
+        assert key in page, key
+    row = controller[controller.index("public static function brandRow"):controller.index("public static function listedOnlyRow")]
+    for text in ("'prechecked'", "'lower_bound'", "'reviews_needed'", "'جاهزة'", "'تحتاج '", "'دقة أقل من المطلوب'"):
+        assert text in row, text
+    # empty and unavailable states are said, never shown as zero
+    assert "لسا ما في مراجعات" in page and "ما قدرنا نحسب دقة الماركات" in page
+    # the thresholds come from the bridge (local_cache_db), never hard-coded in the page or the controller
+    assert "$thresholds['min_lower_bound']" in controller and "$thresholds['perfect_record_reviews']" in controller
+    for text in (page, controller):
+        assert "/30)" not in text and "0.98" not in text and "189" not in text
 
 
 def test_review_stats_is_a_valid_bridge_action():
@@ -425,10 +433,7 @@ def test_review_stats_is_a_valid_bridge_action():
 
 @pytest.mark.skipif(NODE is None, reason="node is not installed")
 def test_page_inline_js_parses(tmp_path):
-    blocks = re.findall(r"<script>(.*?)</script>", PAGE.read_text(encoding="utf-8"), re.DOTALL)
-    assert blocks
-    for i, block in enumerate(blocks):
-        js = tmp_path / f"active_learning_{i}.js"
-        js.write_text(re.sub(r"\{\{.*?\}\}", "''", block), encoding="utf-8")
-        result = subprocess.run([NODE, "--check", str(js)], capture_output=True, text=True, timeout=60)
-        assert result.returncode == 0, result.stderr
+    # the settings page keeps its script in public/js/settings.js; the tab itself has no inline script
+    assert "<script" not in PAGE.read_text(encoding="utf-8")
+    result = subprocess.run([NODE, "--check", str(SETTINGS_JS)], capture_output=True, text=True, timeout=60)
+    assert result.returncode == 0, result.stderr

@@ -14,6 +14,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
+from blade_scripts import asset_scripts, inline_scripts
 
 ROOT = Path(__file__).resolve().parents[1]
 DASH = ROOT / "dashboard"
@@ -47,12 +48,20 @@ CHANGED_BLADES = [
     VIEWS / "dashboard" / "index.blade.php",
     VIEWS / "dashboard" / "settings.blade.php",
     VIEWS / "dashboard" / "diagnostics.blade.php",
-    VIEWS / "dashboard" / "active_learning.blade.php",
-    VIEWS / "layouts" / "layout.blade.php",
+    VIEWS / "layouts" / "laqta.blade.php",
 ]
+
+# The review screen (catalog.blade.php) loads its JavaScript from files instead of an inline block.
+REVIEW_JS = sorted((DASH / "public" / "js" / "review").glob("*.js"))
 
 PHP = shutil.which("php")
 NODE = shutil.which("node")
+
+
+def review_page() -> str:
+    """catalog.blade.php, its Blade shell and the review scripts it loads."""
+    parts = [VIEWS / "dashboard" / "catalog.blade.php", VIEWS / "review" / "shell.blade.php"] + REVIEW_JS
+    return "\n".join(read(p) for p in parts)
 
 
 def read(path: Path) -> str:
@@ -82,9 +91,12 @@ def test_php_lint(path):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.skipif(NODE is None, reason="node is not installed")
-@pytest.mark.parametrize("path", [p for p in CHANGED_BLADES if p.name != "settings.blade.php"], ids=lambda p: p.name)
+@pytest.mark.parametrize("path", [p for p in CHANGED_BLADES if p.name not in ("settings.blade.php", "catalog.blade.php")],
+                         ids=lambda p: p.name)
 def test_inline_js_parses(path, tmp_path):
-    blocks = re.findall(r"<script>(.*?)</script>", read(path), re.DOTALL)
+    blocks = inline_scripts(read(path))
+    # Laqta pages keep their script in public/js/<page>.js (loaded with asset()): those files must parse too.
+    blocks += [read(DASH / "public" / "js" / name) for name in asset_scripts(read(path))]
     assert blocks, f"no inline <script> block found in {path.name}"
     for i, block in enumerate(blocks):
         # Blade echo tags are replaced by a string literal, as they would be after rendering.
@@ -95,12 +107,21 @@ def test_inline_js_parses(path, tmp_path):
         assert result.returncode == 0, f"{path.name} script block {i + 1}: {result.stderr}"
 
 
+@pytest.mark.skipif(NODE is None, reason="node is not installed")
+@pytest.mark.parametrize("path", REVIEW_JS, ids=lambda p: p.name)
+def test_review_scripts_parse(path):
+    """catalog.blade.php has no inline script: its JavaScript is public/js/review/*.js, which must parse."""
+    assert len(REVIEW_JS) >= 6
+    result = subprocess.run([NODE, "--check", str(path)], capture_output=True, text=True, timeout=60)
+    assert result.returncode == 0, f"{path.name}: {result.stderr}"
+
+
 # ---------------------------------------------------------------------------
 # Contract text checks
 # ---------------------------------------------------------------------------
 
 def test_contracts():
-    catalog = read(VIEWS / "dashboard" / "catalog.blade.php")
+    catalog = review_page()
     batch = read(VIEWS / "dashboard" / "batch_automation.blade.php")
     index = read(VIEWS / "dashboard" / "index.blade.php")
     settings = read(VIEWS / "dashboard" / "settings.blade.php")
@@ -109,9 +130,11 @@ def test_contracts():
     assert "% Match" not in batch
     assert "% Match" not in catalog
 
-    for token in ("category_l1_en", "category_l2_en", "category_l3_en", "sku_key", "WRONG_VARIANT",
-                  "product_name_ar", "brand_ar"):
+    for token in ("sku_key", "WRONG_VARIANT", "product_name_ar", "brand_ar"):
         assert token in catalog, token
+    # The old page's category override came from a three-entry demo taxonomy that fell back to its first entry
+    # for any product. The review screen sends no override: the published metadata keeps the pipeline's category.
+    assert "category_l1_en" not in catalog and "taxonomyData" not in catalog
 
     assert "Array(512)" not in batch
     assert "0.98" not in batch
@@ -137,10 +160,11 @@ def test_contracts():
 
 def test_catalog_reject_sends_the_candidate_bytes():
     """The catalog stores no curation rows, so the reject must carry the sha for the bridge's pHash."""
-    catalog = read(VIEWS / "dashboard" / "catalog.blade.php")
-    body = catalog[catalog.index("async function submitReject"):]
-    body = body[:body.index("JSON.stringify(") + 2000]
+    catalog = review_page()
+    body = catalog[catalog.index("function rejectBody("):]
+    body = body[:body.index("\n    }\n")]
     assert "candidate_sha256: candidate.content_sha256" in body
+    assert "R.rejectBody(ctx, candidate, reasonCode" in catalog and "R.rejectBody(ctx, sel, code" in catalog
 
 
 def test_fake_flows_removed():
@@ -167,18 +191,20 @@ def test_fake_flows_removed():
     for gone in ("BiRefNet", "GraphRAG", "Swarm", "GRPO", "0.923", "enterprise-metrics", "EventSource", "8001"):
         assert gone not in index, gone
 
-    layout = read(VIEWS / "layouts" / "layout.blade.php")
+    assert not (VIEWS / "layouts" / "layout.blade.php").exists()   # every page uses layouts/laqta
+    layout = read(VIEWS / "layouts" / "laqta.blade.php")
     assert "fix-broken-image-link" not in layout
     assert "data-healing-active" not in layout
 
-    catalog = read(VIEWS / "dashboard" / "catalog.blade.php")
+    catalog = review_page()
     assert "CLIP" not in catalog
     assert "compareOverlay" not in catalog  # the raw-vs-raw compare slider is gone
 
 
 def test_views_do_not_inline_urls_in_handlers():
     """Candidate URLs/titles must not be interpolated into inline onclick handlers (stored XSS)."""
-    for path in (VIEWS / "dashboard" / "catalog.blade.php", VIEWS / "dashboard" / "batch_automation.blade.php"):
+    for path in [VIEWS / "dashboard" / "catalog.blade.php", VIEWS / "dashboard" / "batch_automation.blade.php",
+                 VIEWS / "review" / "shell.blade.php"] + REVIEW_JS:
         text = read(path)
         assert not re.search(r"onclick=\"[^\"]*\$\{[^}]*(url|title)", text, re.IGNORECASE), path.name
         assert not re.search(r"onclick=\"[^\"]*'\$\{", text), path.name
@@ -186,15 +212,22 @@ def test_views_do_not_inline_urls_in_handlers():
 
 
 def test_settings_never_echo_secrets():
-    settings = read(VIEWS / "dashboard" / "settings.blade.php")
+    # The Laqta settings page is settings.blade.php plus one partial per tab (resources/views/settings).
+    views = [VIEWS / "dashboard" / "settings.blade.php"] + sorted((VIEWS / "settings").glob("*.blade.php"))
+    settings = "\n".join(read(p) for p in views)
+    controller = read(CONTROLLERS / "SettingsController.php")
+    providers = controller[controller.index("public const PROVIDERS"):controller.index("public const LEGACY_SECRETS")]
     for key in ("photoroom_api_key", "gemini_api_key", "cloudinary_api_key", "cloudinary_api_secret",
                 "google_search_api_key", "serper_api_key", "proxy_url"):
         assert f"$settings['{key}']" not in settings, key
-        assert f'name="{key}"' in settings, key
+        assert f"['{key}']['value']" not in settings, key
+        # every secret is still reachable: a literal field («متقدم») or one per provider key (keys tab loop)
+        assert f'name="{key}"' in settings or f"'{key}' =>" in providers, key
+    assert 'name="{{ $field }}"' in settings and 'type="password"' in settings
     assert 'name="search_engine"' in settings
 
-    controller = read(CONTROLLERS / "ProductController.php")
-    assert "maskSecret" in controller
+    # Not even the last characters of a stored key are printed any more (no mask on the page).
+    assert "maskSecret" not in controller and "$masked" not in settings and "maskSecret" not in settings
     # A blank secret field keeps the stored key instead of overwriting it with a mask.
     assert re.search(r"if \(\$val === '' && !\$clear\)\s*\{\s*continue;", controller)
 

@@ -1,7 +1,7 @@
 """The dashboard shows the pick's review warnings: every code decide.route emits has an Arabic sentence.
 
-Static checks on catalog.blade.php and batch_automation.blade.php, plus the label function run
-under Node (skipped when node is not installed).
+Static checks on the review screen's labels (public/js/review/core.js, used by /catalog in both modes), plus the
+label function run under Node (skipped when node is not installed).
 """
 
 import json
@@ -17,7 +17,10 @@ from catalog_match import variants as variants_mod
 
 ROOT = Path(__file__).resolve().parents[1]
 VIEWS = ROOT / "dashboard" / "resources" / "views" / "dashboard"
-BLADES = [VIEWS / "catalog.blade.php", VIEWS / "batch_automation.blade.php"]
+REVIEW_JS = ROOT / "dashboard" / "public" / "js" / "review"
+REVIEW_CORE = REVIEW_JS / "core.js"
+# the review screen (catalog.blade.php loads public/js/review/*.js); the Run page shows no candidates
+BLADES = [REVIEW_CORE]
 NODE = shutil.which("node")
 
 
@@ -53,24 +56,27 @@ def test_every_warning_code_and_variant_axis_has_an_arabic_label(path):
 
 
 def test_the_pick_cards_show_the_notice():
-    catalog = read(VIEWS / "catalog.blade.php")
-    card = catalog[catalog.index("function buildCandidateCard"):]
-    assert "renderWarnings(c)" in card[:card.index("function renderCandidatesGrid")]
-    recommended = catalog[catalog.index("function renderRecommendedCard"):]
-    assert "renderWarnings(c)" in recommended[:recommended.index("function showProcessedPreview")]
-    batch = read(VIEWS / "batch_automation.blade.php")
-    row = batch[batch.index("function buildCurationRow"):]
-    assert "rowWarningsEl(selected)" in row[:row.index("function renderBatchCurationGrid")]
-    # a reviewer's other choice replaces the notice
-    select = batch[batch.index("function selectCurationThumb"):]
-    assert "rowWarningsEl(chosen)" in select[:select.index("openBatchRejectModal")]
+    core = read(REVIEW_CORE)
+    single = read(REVIEW_JS / "single.js")
+    bulk = read(REVIEW_JS / "bulk.js")
+    # «تأكد قبل الاعتماد» under the selected image: every warning of the pick, in Arabic
+    cautions = core[core.index("function cautionsFor"):]
+    assert "c.warnings.map(w => warningText(w))" in cautions[:cautions.index("\n    }\n")]
+    checks = single[single.index("function checksCard"):]
+    assert "R.cautionsFor(pick)" in checks[:checks.index("function altButton")]
+    # every other image names its first warning, and each bulk card shows the pick's warning
+    note = core[core.index("function candidateNote"):]
+    assert "warningText(c.warnings[0])" in note[:note.index("\n    }\n")]
+    card = bulk[bulk.index("function card("):]
+    assert "R.warningText(sel.warnings[0])" in card[:card.index("function render(")]
 
 
 @pytest.mark.skipif(NODE is None, reason="node is not installed")
 @pytest.mark.parametrize("path", BLADES, ids=lambda p: p.name)
 def test_warning_sentences(path, tmp_path):
     codes = ["sheet_silent:fries_cut=thin", "sheet_silent:cheese_form=grated+shredded", "sheet_silent:new_axis=x",
-             "vlm_unsure", "low_resolution", "chat_or_screenshot", "social_media", "foreign_store", "mystery_code"]
+             "vlm_unsure", "low_resolution", "chat_or_screenshot", "social_media", "foreign_store", "barcode_conflict",
+             "mystery_code"]
     script = tmp_path / "labels.js"
     call = f"\nconsole.log(JSON.stringify({json.dumps(codes)}.map(warningText)));\n"
     script.write_text(label_code(read(path)) + call, encoding="utf-8")
@@ -80,19 +86,21 @@ def test_warning_sentences(path, tmp_path):
     assert out["sheet_silent:fries_cut=thin"] == "الشيت ما حدد طريقة التقطيع: thin"
     assert out["sheet_silent:cheese_form=grated+shredded"] == "الشيت ما حدد شكل الجبن: grated / shredded"
     assert out["sheet_silent:new_axis=x"] == "الشيت ما حدد النوع: x"
-    assert out["vlm_unsure"] == "Gemini غير متأكد من المطابقة"
+    assert out["vlm_unsure"] == "نموذج القراءة غير متأكد من المطابقة"
     assert out["low_resolution"].startswith("صورة منخفضة الدقة")
     assert out["chat_or_screenshot"] == "صورة من واتساب أو لقطة شاشة"
     assert "مواقع التواصل" in out["social_media"]
     assert out["foreign_store"].startswith("الصورة من متجر خارج الإمارات")
+    assert out["barcode_conflict"] == "الباركود بالشيت مختلف عن باركود صفحة المتجر: تأكد من المنتج"
     assert out["mystery_code"] == "mystery_code"          # unknown codes are shown raw
 
 
 def test_catalog_page_sends_the_reviewers_view_with_approve_reject_and_upload():
-    page = (ROOT / "dashboard/resources/views/dashboard/catalog.blade.php").read_text(encoding="utf-8")
+    page = "\n".join(read(REVIEW_JS / f"{name}.js") for name in ("core", "single", "bulk", "app"))
     assert "function reviewedCandidateView(" in page
     assert page.count("...reviewedCandidateView(") == 2            # approve and reject
-    assert "formData.append('search_decision'" in page            # manual upload
-    assert "dataset.searchDecision = String(data.decision" in page
+    assert "['search_decision', ctx.search_decision" in page       # manual upload
+    assert "R.uploadFields(job.ctx).forEach(([name, value]) => form.append(name" in page
+    assert "target.search_decision = String(data.decision" in page
     api = (ROOT / "dashboard/app/Http/Controllers/ApiController.php").read_text(encoding="utf-8")
     assert "'search_decision'" in api                             # the upload whitelist forwards it

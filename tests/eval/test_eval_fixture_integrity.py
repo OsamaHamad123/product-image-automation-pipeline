@@ -3,6 +3,7 @@
 import hashlib
 import io
 import re
+from urllib.parse import urlsplit
 
 import pytest
 from PIL import Image
@@ -126,7 +127,8 @@ def test_named_cases_carry_the_audited_evidence(golden, cassette):
     correct = [c for c in _cands(sku, label="correct_exact") if c["domain"] == "carrefouruae.com"]
     assert correct and correct[0]["image_recipe"]["kind"] == "packshot_white"
     assert correct[0]["image_recipe"]["size"] == [1500, 1500]
-    banner = [c for c in sku["candidates"] if "almarai.com" in c["image_url"] and c["download"] == "403"]
+    banner = [c for c in sku["candidates"]
+              if urlsplit(c["image_url"]).hostname in ("almarai.com", "www.almarai.com") and c["download"] == "403"]
     assert banner and banner[0]["surfaced_by"] == ["gtin"] and banner[0]["label"] == "not_packshot"
 
     # (2) Laban Up 180ml: Arabic-titled correct listing, empty Bing desc, 1L sibling, wp-content banner

@@ -8,6 +8,9 @@ parse_sizes(text, source_field) -> list[Size]
       'Q ml' + 'N pcs'                             -> pack N of Q (volume)
       'Q g' + 'N pcs'                              -> Q with pieces=N (pieces in one box or a
                                                       pack: compare_pack calls it ambiguous)
+      "N's Q g" (N's written BEFORE a net mass)    -> Q with pieces=N, like 'N pcs':
+                                                      'PARATHA 5S 400GM' is 5 pieces in 400 g,
+                                                      'LAYS 6'S 23G' is six 23 g bags
       'N pcs' / 'N bags' ... with no measured size -> a count
       '1/2 kg', '½ L', '1 1/2 kg'                  -> fractions
       '2.5-3 kg'                                   -> a range: two sizes, so 'ambiguous'
@@ -221,24 +224,29 @@ def parse_sizes(text: Optional[str], source_field: str = "") -> List[Size]:
             continue
         found.append((m.start(), size))
 
-    packs: List[Tuple[int, int, str, str]] = []          # (start, n, raw text, 'pack' | 'pieces')
+    packs: List[Tuple[int, int, str, str]] = []          # (start, n, raw text, 'pack' | 'pieces' | 'n_s')
     for rx, kind in ((_PACK, "pack"), (_PIECES, "pieces")):
         for m in rx.finditer(t):
             if _overlaps(m.span(), taken):
                 continue
             n = next(int(g) for g in m.groups() if g)
-            packs.append((m.start(), n, m.group(0), kind))
+            # "N's": a pack after a size ('75G 5S'); before a net mass it may count the pieces in one pack
+            packs.append((m.start(), n, m.group(0), "n_s" if kind == "pack" and m.group("c") else kind))
     for m in _WORD_PACK.finditer(t):
         packs.append((m.start(), _WORD_PACK_N[m.group("w")], m.group(0), "pack"))
     for m in _PLUS_FREE.finditer(t):
         packs.append((m.start(), int(m.group("a")) + int(m.group("b")), f"pack {m.group(0)}", "pack"))
 
-    sizes = [s for _, s in sorted(found, key=lambda x: x[0])]
-    if sizes:
-        pack_ns = {n for _, n, _, kind in packs if n > 1 and kind == "pack"}
-        piece_ns = {n for _, n, _, kind in packs if n > 1 and kind == "pieces"}
+    ordered = sorted(found, key=lambda x: x[0])
+    if ordered:
         out: List[Size] = []
-        for s in sizes:
+        for pos, s in ordered:
+            # "N's" before a net mass reads like 'N pcs' ('PARATHA 5S 400GM': 5 pieces, 400 g in all, or
+            # five 400 g packs?), so it is ambiguous; after the size, or with a volume, it is a pack.
+            pack_ns = {n for p, n, _, kind in packs
+                       if n > 1 and (kind == "pack" or (kind == "n_s" and (p > pos or s.dimension != "mass")))}
+            piece_ns = {n for p, n, _, kind in packs
+                        if n > 1 and (kind == "pieces" or (kind == "n_s" and p < pos and s.dimension == "mass"))}
             if s.pack_count:
                 out.append(s)
             elif s.dimension == "mass":

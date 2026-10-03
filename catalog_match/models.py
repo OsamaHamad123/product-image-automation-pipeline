@@ -201,6 +201,10 @@ class VerificationResult:
     verdicts: List[VlmImageVerdict] = field(default_factory=list)
     calls: int = 0
     error: Optional[str] = None
+    # verifier package: one entry per billed model call {role, provider, model, input_tokens, output_tokens,
+    # estimated, usd, ...} and machine notices for the dashboard ('strong_budget_exhausted', 'claude_key_rejected')
+    usage: List[Dict[str, Any]] = field(default_factory=list)
+    notices: List[str] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -247,6 +251,9 @@ class SearchOutcome:
     vlm_calls: int = 0
     sku_key: str = ""
     reject_counts: Dict[str, int] = field(default_factory=dict)   # hard-reject rule -> count
+    # verifier package: every billed verifier call of this search (VerificationResult.usage) and its notices
+    vlm_usage: List[Dict[str, Any]] = field(default_factory=list)
+    verifier_notices: List[str] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------

@@ -26,6 +26,21 @@ def read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
+REVIEW_JS = DASH / "public" / "js" / "review"
+
+
+def review_js(*names) -> str:
+    """The review screen's scripts (catalog.blade.php loads public/js/review/*.js)."""
+    names = names or ("core", "ui", "jobs", "single", "bulk", "app")
+    return "\n".join(read(REVIEW_JS / f"{n}.js") for n in names)
+
+
+def _js_function(source: str, name: str) -> str:
+    """Source of one top-level function of a review script (up to its closing brace at 4 spaces)."""
+    start = source.index(f"function {name}(")
+    return source[start:source.index("\n    }\n", start) + 6]
+
+
 def _json_body(source: str, anchor: str, span: int = 2500) -> str:
     """The JSON.stringify({...}) body of the first fetch after `anchor`."""
     start = source.index(anchor)
@@ -88,28 +103,20 @@ def test_search_falls_back_to_the_queue_payload(bridge, monkeypatch):
 
 
 def test_dashboard_search_bodies_send_size_identity():
-    catalog = read(VIEWS / "dashboard" / "catalog.blade.php")
-    batch = read(VIEWS / "dashboard" / "batch_automation.blade.php")
+    # The batch page's review grid moved to the review screen (/catalog, public/js/review).
+    core = review_js("core")
 
-    ctx = catalog[catalog.index("function currentProductContext"):]
-    ctx = ctx[: ctx.index("};") + 2]
+    # the identity the review screen binds to a product (and to its search results) carries the size identity
+    ctx = _js_function(core, "productIdentity")
     for key in ("size", "sub_category", "origin"):
         assert re.search(rf"\b{key}:", ctx), key
-    select = catalog[catalog.index("function selectProduct"):]
-    select = select[: select.index("activeRowNumber")]
-    assert "form.dataset.size = prod.size" in select
-    assert "form.dataset.subCategory = prod.sub_category" in select
+    assert "size: prod.size" in ctx
+    assert "sub_category: prod.sub_category" in ctx
 
-    search = _json_body(catalog, "fetch('/api/search'")
-    reject = _json_body(catalog, "async function submitReject")
+    search = _js_function(core, "searchBody")
+    reject = _js_function(core, "rejectBody")
     for body in (search, reject):
         for token in ("size: ctx.size", "sub_category: ctx.sub_category", "origin: ctx.origin"):
-            assert token in body, (token, body)
-
-    inline = _json_body(batch, "async function triggerInlineSearch")
-    single_reject = _json_body(batch, "async function rejectAndReSearchCandidate")
-    for body in (inline, single_reject):
-        for token in ("size: p.size", "sub_category: p.sub_category", "origin: p.origin"):
             assert token in body, (token, body)
 
 
@@ -128,16 +135,23 @@ def test_curation_reject_forwards_size_identity_to_the_bridge():
 @pytest.mark.parametrize("name", ["index", "catalog", "batch_automation"])
 def test_every_element_id_the_script_reads_exists(name):
     text = read(VIEWS / "dashboard" / f"{name}.blade.php")
-    layout = read(VIEWS / "layouts" / "layout.blade.php")
+    layout = read(VIEWS / "layouts" / "laqta.blade.php")
+    if name == "catalog":
+        # the review screen: its Blade shell and the scripts that build the page
+        text += read(VIEWS / "review" / "shell.blade.php") + review_js()
     ids = set(re.findall(r'id="([^"{]+)"', text + layout)) | set(re.findall(r"id:\s*'([^']+)'", text))
     refs = set(re.findall(r"getElementById\('([^'\s]+)'\)", text))
     assert not refs - ids, sorted(refs - ids)
 
 
 def test_batch_progress_counts_lives_in_the_progress_panel():
+    # Home (Laqta): the current run's counts are written by public/js/home.js into the live block of the
+    # «آخر تشغيل» card, which exists in the page.
     index = read(VIEWS / "dashboard" / "index.blade.php")
-    panel = index[index.index('id="batchProgressPanel"'):index.index('id="stopBatchBtn"')]
-    assert 'id="batchProgressCounts"' in panel
+    panel = index[index.index('data-home="lastrun-live"'):index.index('data-home="lastrun-summary"')]
+    assert 'data-home="live-counts"' in panel
+    home = read(DASH / "public" / "js" / "home.js")
+    assert "$('live-counts')" in home
 
 
 # ---------------------------------------------------------------------------
@@ -175,10 +189,19 @@ def test_unknown_bg_removal_method_is_ignored(run_config):
 
 
 def test_batch_page_posts_the_selected_method():
-    batch = read(VIEWS / "dashboard" / "batch_automation.blade.php")
-    run_all = batch[batch.index("async function runAllAutomation"):]
-    run_all = run_all[: run_all.index("fetch('/api/run-all'")]
-    assert "bgRemovalMethod: document.getElementById('bgRemovalMethod').value" in run_all
+    # The Run page (Laqta) no longer has a background-removal selector (the worker uses the configured method);
+    # everything it does post must reach main.load_run_config, so no choice on the page is silently ignored.
+    run_js = read(DASH / "public" / "js" / "run.js")
+    body = run_js[run_js.index("function runBody(form)"):]
+    body = body[: body.index("\n    }\n")]
+    keys = re.findall(r"^\s*([A-Za-z_]+):", body, re.MULTILINE)
+    assert keys == ["row_filter", "brand_filter", "forceOverwrite", "skipCache"]
+    import inspect
+    import main
+    loader = inspect.getsource(main.load_run_config)
+    for key in keys:
+        assert f'"{key}"' in loader, key
+    assert "fetchJson('/api/run-all', { method: 'POST', body: body })" in run_js
 
 
 # ---------------------------------------------------------------------------
@@ -233,20 +256,12 @@ def test_save_candidates_uses_the_shared_row_builder():
     assert "CandidateRow::optionalColumns($c, $skuKey, $runId)" in text
 
 
-def test_batch_normaliser_maps_the_tier_from_evidence():
-    batch = read(VIEWS / "dashboard" / "batch_automation.blade.php")
-    norm = batch[batch.index("function normalizeCurationCandidate"):]
-    norm = norm[: norm.index("\n    }\n")]
-    assert "identity_tier: c.identity_tier || ev.tier" in norm
-    assert "page_url: String(c.page_url || ev.page_url" in norm
-
-
 def test_catalog_reject_with_research_persists_the_fresh_candidates():
-    catalog = read(VIEWS / "dashboard" / "catalog.blade.php")
-    submit = catalog[catalog.index("async function submitReject"):]
-    submit = submit[: submit.index("function showRejectedState")]
+    single = review_js("single")
+    submit = single[single.index("async function rejectCurrent"):]
+    submit = submit[: submit.index("function skip()")]
     assert "await persistResearchCandidates(ctx, data, candidate.url)" in submit
-    persist = catalog[catalog.index("async function persistResearchCandidates"):]
+    persist = single[single.index("async function persistResearchCandidates"):]
     persist = persist[: persist.index("\n    }\n")]
     assert "/api/v1/curation/save-candidates" in persist
     assert "c.url !== rejectedUrl" in persist

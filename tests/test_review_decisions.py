@@ -13,12 +13,15 @@ import socket
 
 import pytest
 
+from catalog_match.identity import build_sku_spec
+
 ROW = 920019            # AL ALALI FANCY TUNA WATER 170GM (live row 19), shifted clear of the other DB tests
 ROW_B = 920057          # VIRGINIA L/MEAT TUNA S/F OIL 170GM (live row 57)
-SKU = "wpd-review-alali-170"
-SKU_B = "wpd-review-virginia-170"
 NAME, BRAND = "AL ALALI FANCY TUNA WATER 170GM", "AL ALALI"
 NAME_B, BRAND_B = "VIRGINIA L/MEAT TUNA S/F OIL 170GM", "VIRGINIA"
+# The products' real keys (main.compute_sku_key): cli_bridge refuses a sku_key the sent product fields do not give.
+SKU = build_sku_spec({"name": NAME, "brand": BRAND, "size": "170GM"}).sku_key
+SKU_B = build_sku_spec({"name": NAME_B, "brand": BRAND_B, "size": "170GM"}).sku_key
 PRE_URL = "https://www.luluhypermarket.com/medias/al-alali-fancy-tuna-water-170g.jpg"
 OTHER_URL = "https://f.nooncdn.com/p/al-alali-fancy-tuna-oil-170g.jpg"
 LINK = "https://res.cloudinary.com/demo/image/upload/products/canned/alali.png"
@@ -259,7 +262,9 @@ def test_approving_a_cached_approval_is_not_an_engine_precheck(recorder):
     """A cache hit re-offers an earlier approval: it never auto-publishes, so it is no evidence for the engine."""
     cli_bridge, events, state = recorder
     state["candidates"] = _stored(_cache_hit_candidates())
-    cli_bridge.action_select_image(_approve_params(LINK, brand="", product_name=NAME))
+    # a request without the brand carries the key of that brand-less product (else it is refused as another product)
+    cli_bridge.action_select_image(_approve_params(LINK, brand="", product_name=NAME, sku_key=build_sku_spec(
+        {"name": NAME, "brand": "", "size": "170GM"}).sku_key))
     (action, row), = _reviews(events)
     assert (row["engine_decision"], row["was_preselected"]) == (None, None)
     assert row["page_domain"] is None                                 # not the CDN host of the cached copy

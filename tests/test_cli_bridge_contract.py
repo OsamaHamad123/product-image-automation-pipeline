@@ -182,8 +182,9 @@ def select_env(bridge, monkeypatch, tmp_path):
     return bridge, events, state
 
 
+# A valid GTIN, so the product's key is its GTIN-14 (the bridge refuses a sku_key the product fields do not give).
 SELECT_PARAMS = {"image_url": V2_RESULT["url"], "product_name": "Fresh Milk Full Fat 1L", "brand": "Almarai",
-                 "row_number": 4, "barcode": "6281007000028", "sku_key": "06281007000028",
+                 "row_number": 4, "barcode": "6281007000024", "sku_key": "06281007000024",
                  "content_sha256": "ab" * 32, "category_l1_en": "Dairy & Eggs", "category_l2_en": "Milk",
                  "upscale": True, "target_width": 800, "target_height": 800}
 
@@ -201,14 +202,41 @@ def test_select_no_upscale(select_env):
     assert kinds.index("upload") < kinds.index("metadata_write")
     link = next(e for e in events if e[0] == "link")
     assert link[3] == "https://res.cloudinary.com/demo/image/upload/q_auto,f_auto/products/dairy/abc.png"
-    assert link[4]["barcode"] == "6281007000028"
+    assert link[4]["barcode"] == "6281007000024"
     md = next(e for e in events if e[0] == "metadata_write")[2]
     assert md.get("category_l1_en") and md.get("ingredients") == "Fresh cow milk"
     _, args, kwargs = next(e for e in events if e[0] == "resolution")
-    assert args[0] == "6281007000028"
+    assert args[0] == "6281007000024"
     assert kwargs["verification_status"] == "human_approved"
     assert kwargs["approved_by"] == "human"
-    assert kwargs["sku_key"] == "06281007000028"
+    assert kwargs["sku_key"] == "06281007000024"
+
+
+@pytest.mark.parametrize("sent, saved, used", [
+    (None, True, True),        # the review page sends nothing: the saved «تحسين الألوان» setting applies
+    (None, False, False),
+    ("false", True, False),    # an explicit value in the request still wins
+    ("true", False, True),
+])
+def test_select_uses_the_saved_enhancement_setting(select_env, monkeypatch, sent, saved, used):
+    import config
+    import image_processor
+
+    bridge, events, state = select_env
+    original = image_processor.process_product_image_result
+    seen = {}
+
+    def spy(*args, **kwargs):
+        seen["enhance"] = kwargs.get("enhance")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(image_processor, "process_product_image_result", spy)
+    monkeypatch.setattr(config, "ENABLE_IMAGE_ENHANCEMENT", saved, raising=False)
+    params = {k: v for k, v in SELECT_PARAMS.items() if k != "enhance"}
+    if sent is not None:
+        params["enhance"] = sent
+    assert bridge.action_select_image(params)["status"] == "success"
+    assert seen["enhance"] is used
 
 
 def test_select_not_isolated_writes_needs_review(select_env):
@@ -229,7 +257,7 @@ def test_select_requires_identity(select_env, monkeypatch):
     assert bridge.action_select_image(params)["status"] == "failed"
 
     monkeypatch.setattr(local_cache_db, "get_task_by_row",
-                        lambda row: {"barcode": "6281007000028", "sku_key": "06281007000028"})
+                        lambda row: {"barcode": "6281007000024", "sku_key": "06281007000024"})
     params = dict(SELECT_PARAMS)
     params["barcode"] = ""
     result = bridge.action_select_image(params)
@@ -267,7 +295,7 @@ def test_select_ignores_a_queue_row_of_another_product(select_env, monkeypatch):
     monkeypatch.setattr(local_cache_db, "delete_curation_candidates", lambda *a, **k: cleaned.append(("delete", a, k)))
     result = bridge.action_select_image(dict(SELECT_PARAMS))
     assert result["status"] == "success"
-    assert all(k["sku_key"] == "06281007000028" for _, _, k in cleaned) and len(cleaned) == 2
+    assert all(k["sku_key"] == "06281007000024" for _, _, k in cleaned) and len(cleaned) == 2
 
 
 def test_select_after_owner_fixed_the_barcode(select_env, monkeypatch):
@@ -275,7 +303,7 @@ def test_select_after_owner_fixed_the_barcode(select_env, monkeypatch):
     bridge, events, state = select_env
     import local_cache_db
     monkeypatch.setattr(local_cache_db, "get_task_by_row",
-                        lambda row: {"barcode": "6.28E+12", "sku_key": "06281007000028", "product_name": "Fresh Milk"})
+                        lambda row: {"barcode": "6.28E+12", "sku_key": "06281007000024", "product_name": "Fresh Milk"})
     assert bridge.action_select_image(dict(SELECT_PARAMS))["status"] == "success"
 
 

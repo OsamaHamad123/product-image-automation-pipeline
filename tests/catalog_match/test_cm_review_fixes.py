@@ -265,12 +265,17 @@ def test_banner_is_never_preselected():
 # GTIN evidence (an unrelated Open Food Facts record was tier 1 and stopped retrieval)
 # ---------------------------------------------------------------------------
 
-def test_gtin_match_alone_is_not_tier1():
+@pytest.mark.parametrize("policy, alone_tier", [("evidence", 3), ("strict", 2)])
+def test_gtin_match_alone_is_not_tier1(monkeypatch, policy, alone_tier):
+    # Never tier 1 under either policy. Under 'evidence' (the default since phase 3) a matching
+    # code without the brand does not lift the record at all (tier 3, as its text alone puts it);
+    # the earlier 'strict' rule still lifts it to tier 2.
+    monkeypatch.setenv("GTIN_POLICY", policy)
     spec = spec_of("Almarai Fresh Full Fat Milk 1L", "Almarai", barcode="6281007000024")
     off = Candidate(image_url="https://images.openfoodfacts.org/x.jpg", page_url="https://world.openfoodfacts.org/p",
                     title="Emmental rape", page_title="Emmental rape", provider="off", gtin_on_page=spec.gtin,
                     sanctioned=True)
-    assert score_candidate(spec, off).tier == 2
+    assert score_candidate(spec, off).tier == alone_tier
     ok = Candidate(image_url="https://images.openfoodfacts.org/y.jpg", page_url="https://world.openfoodfacts.org/p",
                    title="Almarai Milk", page_title="Almarai Milk", provider="off", gtin_on_page=spec.gtin,
                    sanctioned=True)

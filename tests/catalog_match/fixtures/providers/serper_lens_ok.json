@@ -1,0 +1,23 @@
+{
+  "searchParameters": {"url": "https://img.example-cdn.com/barts-small.jpg", "gl": "ae", "hl": "en", "type": "lens", "engine": "google"},
+  "organic": [
+    {"title": "Barts Traditional Fries 1kg | Lulu UAE",
+     "source": "Lulu Hypermarket",
+     "link": "https://www.luluhypermarket.com/en-ae/barts-traditional-fries-1kg/p/88231",
+     "imageUrl": "https://lulu.akinoncloudcdn.com/products/2025/03/11/88231/barts-traditional-fries-1kg-1500x1500.jpg",
+     "thumbnailUrl": "https://encrypted-tbn1.gstatic.com/images?q=tbn:lulu",
+     "position": 1},
+    {"title": "Barts fries on the table",
+     "source": "Facebook",
+     "link": "https://www.facebook.com/bartsfries/photos/123",
+     "thumbnailUrl": "https://encrypted-tbn3.gstatic.com/images?q=tbn:fb",
+     "position": 2},
+    {"title": "", "link": "https://example.com/untitled", "imageUrl": "https://example.com/x.jpg", "position": 3},
+    "not a match",
+    {"title": "Barts Traditional Fries - Talabat",
+     "source": "talabat",
+     "link": "https://www.talabat.com/uae/grocery/barts-traditional-fries-1kg",
+     "thumbnailUrl": "https://encrypted-tbn0.gstatic.com/images?q=tbn:tal",
+     "position": 5}
+  ]
+}
