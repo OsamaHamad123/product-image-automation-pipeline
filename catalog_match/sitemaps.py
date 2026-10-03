@@ -58,7 +58,7 @@ SAMPLES = 5
 BATCH = 1000
 
 _DOCTYPE_RE = re.compile(rb"<!DOCTYPE", re.I)
-_HTML_RE = re.compile(rb"^\s*(?:<!--.*?-->\s*)*<(?:!doctype\s+html|html)\b", re.I | re.S)
+_HTML_START_RE = re.compile(rb"<(?:!doctype\s+html|html)\b", re.I)
 
 
 class SitemapError(Exception):
@@ -127,7 +127,22 @@ def _local(tag: Any) -> str:
 
 
 def looks_like_html(body: bytes) -> bool:
-    return bool(_HTML_RE.match(body[:4096]))
+    """True when the document starts as an HTML page: after an XML prolog and comments, <!DOCTYPE html> or <html>.
+
+    A plain scan, not one regular expression: '<!--.*?-->' repeated is exponential on '--><!--' runs.
+    """
+    head = body[:4096].lstrip()
+    if head.startswith(b"<?xml"):
+        end = head.find(b"?>")
+        if end < 0:
+            return False
+        head = head[end + 2:].lstrip()
+    while head.startswith(b"<!--"):
+        end = head.find(b"-->", 4)
+        if end < 0:
+            return False
+        head = head[end + 3:].lstrip()
+    return bool(_HTML_START_RE.match(head))
 
 
 def decompress(body: bytes, limit: int = MAX_XML_BYTES) -> bytes:

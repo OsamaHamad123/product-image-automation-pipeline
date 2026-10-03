@@ -167,6 +167,26 @@ def test_documents_that_are_not_plain_sitemaps_are_refused(body, why):
         parse_sitemap(body)
 
 
+@pytest.mark.parametrize("body,html", [
+    (b"<!-- cdn --> <!--x--><!DOCTYPE html><html>", True),
+    (b'<?xml version="1.0"?>\n<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0//EN"><html>', True),
+    (b"  <HTML lang=en>", True),
+    (b'<?xml version="1.0"?><!-- generated --><urlset>', False),
+    (b"<htmlish/>", False),
+    (b"<!-- never closed <html>", False),
+])
+def test_an_html_page_is_recognised_after_a_prolog_and_comments(body, html):
+    assert sitemaps.looks_like_html(body) is html
+
+
+def test_html_detection_stays_linear_on_comment_runs():
+    # CodeQL py/redos: '(?:<!--.*?-->\s*)*' backtracked exponentially on '<!--' + '--><!--' * n
+    import time
+    start = time.monotonic()
+    assert sitemaps.looks_like_html(b"<!--" + b"--><!--" * 5000) is False
+    assert time.monotonic() - start < 0.5
+
+
 def test_gzip_is_decompressed_within_a_limit():
     data = urlset(PRODUCT_1)
     assert decompress(gzip.compress(data)) == data
