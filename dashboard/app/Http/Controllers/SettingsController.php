@@ -59,6 +59,8 @@ class SettingsController extends Controller
     public const VISUAL_SEARCH_MODES = ['auto', 'off', 'serper', 'serpapi'];
     public const GTIN_POLICIES = ['evidence', 'strict', 'off'];
     public const EXPANSION_MAX_CALLS_LIMIT = 8;
+    /** صفحات الفهرس المحلي اللي بتنقرا لكل منتج (catalog_match/settings.py LOCAL_INDEX_MAX_PAGES_LIMIT). */
+    public const LOCAL_INDEX_MAX_PAGES_LIMIT = 8;
     public const CANVAS_MIN = 300;
     public const CANVAS_MAX = 4000;
 
@@ -76,8 +78,8 @@ class SettingsController extends Controller
                          'checkbox' => ['enable_image_enhancement']],
         // مصادر البحث الإضافية وسياسة الباركود (المرحلة الثالثة): بتبويب «متقدم»، نموذج منفصل
         'sources' => ['tab' => 'advanced', 'text' => ['expansion_max_calls', 'visual_search', 'serpapi_lens_price_usd',
-                                                     'gtin_policy'],
-                      'checkbox' => ['expansion_enabled']],
+                                                     'gtin_policy', 'local_index_max_pages'],
+                      'checkbox' => ['expansion_enabled', 'local_index_enabled']],
         // نموذج Gemini صار بتبويب «نماذج التحقق» (saveModels): «متقدم» ما بيكتبه
         'advanced' => ['tab' => 'advanced', 'secret' => ['google_search_api_key', 'proxy_url'],
                        'text' => ['search_engine', 'google_search_cx'],
@@ -156,6 +158,7 @@ class SettingsController extends Controller
         'OUTPUT_CANVAS_SIZE', 'GEMINI_MODEL', 'SEARCH_ENGINE',
         'VERIFIER_PRIMARY', 'VERIFIER_STRONG', 'VERIFIER_MONTHLY_BUDGET_USD', 'MODEL_PRICES',
         'EXPANSION_ENABLED', 'EXPANSION_MAX_CALLS', 'VISUAL_SEARCH', 'SERPAPI_LENS_PRICE_USD', 'GTIN_POLICY',
+        'LOCAL_INDEX_ENABLED', 'LOCAL_INDEX_MAX_PAGES',
     ];
 
     public function show(Request $request)
@@ -266,6 +269,17 @@ class SettingsController extends Controller
                 if ($k === 'expansion_max_calls') {
                     if (!preg_match('/^\d{1,2}$/', $val) || (int) $val > self::EXPANSION_MAX_CALLS_LIMIT) {
                         $warnings[] = 'عدد الطلبات الإضافية لازم يكون رقم من 0 لـ ' . self::EXPANSION_MAX_CALLS_LIMIT
+                            . '؛ ما تغيّر الرقم المحفوظ.';
+                        continue;
+                    }
+                    $val = (string) (int) $val;
+                }
+                if ($k === 'local_index_max_pages') {
+                    if ($val === '') {
+                        continue;   // حقل غايب (نموذج أقدم): الرقم المحفوظ بيضل
+                    }
+                    if (!preg_match('/^\d{1,2}$/', $val) || (int) $val > self::LOCAL_INDEX_MAX_PAGES_LIMIT) {
+                        $warnings[] = 'عدد صفحات الفهرس المحلي لازم يكون رقم من 0 لـ ' . self::LOCAL_INDEX_MAX_PAGES_LIMIT
                             . '؛ ما تغيّر الرقم المحفوظ.';
                         continue;
                     }
@@ -701,7 +715,27 @@ class SettingsController extends Controller
             ],
             'secrets' => $secrets,
             'sources' => self::sourcesData($stored),
+            'local_index' => self::localIndexStats(),
         ];
+    }
+
+    /**
+     * ما يحمله الفهرس المحلي (scripts/build_catalog_index.py): عدد صفحات المنتجات لكل متجر وآخر جمع. null إذا الجدول
+     * لسا ما انعمل أو قاعدة البيانات مش متاحة (الصفحة بتقول كيف ينبني).
+     */
+    public static function localIndexStats(): ?array
+    {
+        try {
+            $stores = DB::table('catalog_products')->select('store', DB::raw('COUNT(*) AS products'))
+                ->groupBy('store')->orderBy('store')->pluck('products', 'store')->map(fn ($n) => (int) $n)->all();
+            if ($stores === []) {
+                return null;
+            }
+            $last = DB::table('catalog_harvests')->max('finished_at');
+        } catch (\Throwable $e) {
+            return null;
+        }
+        return ['products' => array_sum($stores), 'stores' => $stores, 'last' => $last ? (string) $last : ''];
     }
 
     /**
@@ -711,7 +745,7 @@ class SettingsController extends Controller
     public static function sourcesData(array $stored): array
     {
         $env = self::envValues(['EXPANSION_ENABLED', 'EXPANSION_MAX_CALLS', 'VISUAL_SEARCH', 'SERPAPI_LENS_PRICE_USD',
-                                'GTIN_POLICY']);
+                                'GTIN_POLICY', 'LOCAL_INDEX_ENABLED', 'LOCAL_INDEX_MAX_PAGES']);
         $pick = function (string $k, string $envName, string $default) use ($stored, $env): string {
             $v = trim((string) ($stored[$k]['value'] ?? ''));
             if ($v === '') {
@@ -724,6 +758,8 @@ class SettingsController extends Controller
         $visual = $pick('visual_search', 'VISUAL_SEARCH', 'auto');
         $price = $pick('serpapi_lens_price_usd', 'SERPAPI_LENS_PRICE_USD', '0.015');
         $policy = $pick('gtin_policy', 'GTIN_POLICY', 'evidence');
+        $indexOn = $pick('local_index_enabled', 'LOCAL_INDEX_ENABLED', 'true');
+        $indexPages = $pick('local_index_max_pages', 'LOCAL_INDEX_MAX_PAGES', '3');
         return [
             'enabled' => in_array($enabled, ['1', 'true', 'yes', 'on'], true),
             'max_calls' => ctype_digit($calls) ? min((int) $calls, self::EXPANSION_MAX_CALLS_LIMIT) : 4,
@@ -732,6 +768,9 @@ class SettingsController extends Controller
             'serpapi_saved' => trim((string) ($stored['serpapi_api_key']['value'] ?? '')) !== ''
                 || self::envHas('SERPAPI_API_KEY'),
             'gtin_policy' => in_array($policy, self::GTIN_POLICIES, true) ? $policy : 'evidence',
+            'local_index_enabled' => in_array($indexOn, ['1', 'true', 'yes', 'on'], true),
+            'local_index_max_pages' => ctype_digit($indexPages)
+                ? min((int) $indexPages, self::LOCAL_INDEX_MAX_PAGES_LIMIT) : 3,
         ];
     }
 

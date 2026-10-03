@@ -11,6 +11,9 @@ parse_sizes(text, source_field) -> list[Size]
       "N's Q g" (N's written BEFORE a net mass)    -> Q with pieces=N, like 'N pcs':
                                                       'PARATHA 5S 400GM' is 5 pieces in 400 g,
                                                       'LAYS 6'S 23G' is six 23 g bags
+      "Q g N's" for a food sold by the piece        -> Q with pieces=N as well: 'PARATHA 400GM 5S'
+                                                      is the same pack written the other way round
+                                                      ('NOODLES 75G 5S' stays a pack of five)
       'N pcs' / 'N bags' ... with no measured size -> a count
       '1/2 kg', '½ L', '1 1/2 kg'                  -> fractions
       '2.5-3 kg'                                   -> a range: two sizes, so 'ambiguous'
@@ -109,6 +112,12 @@ _PIECES = re.compile(
     + r"|" + _START + r"(?P<b>\d{1,3})\s*(?:حبات|حبه|قطع|قطعه)" + _END
 )
 # Worded packs ('twin pack') and bonus packs ('4+1 free' is 5 units).
+# Foods counted by the piece inside one pack: after their net mass "N's" counts the pieces
+# ('MEHRAN PLAIN PARATHA 400GM 5S', live run 2026-10-03), not N packs of that mass.
+_PIECE_FOODS = re.compile(
+    r"(?<![^\W\d_])(?:paratha|parotta|porotta|roti|chapati|chapathi|naan|nan bread|tortillas?|wraps?|"
+    r"pita|pitta|khubz|kubz|samosas?|spring rolls?|برا?ثا|براتا|خبز|تورتيلا|سمبوسة|سمبوسه)(?![^\W\d_])"
+)
 _WORD_PACK = re.compile(r"(?<![^\W\d_])(?P<w>twin|double|triple)\s*[-]?\s*pack" + _END)
 _WORD_PACK_N = {"twin": 2, "double": 2, "triple": 3}
 _PLUS_FREE = re.compile(_START + r"(?P<a>\d{1,2})\s*\+\s*(?P<b>\d{1,2})\s*(?:free|مجانا|مجاني)" + _END)
@@ -239,6 +248,10 @@ def parse_sizes(text: Optional[str], source_field: str = "") -> List[Size]:
 
     ordered = sorted(found, key=lambda x: x[0])
     if ordered:
+        piece_food = bool(_PIECE_FOODS.search(t))
+        if piece_food:
+            # "N's" counts the pieces of a food sold by the piece on either side of its net mass
+            packs = [(p, n, raw, "n_s_piece" if kind == "n_s" else kind) for p, n, raw, kind in packs]
         out: List[Size] = []
         for pos, s in ordered:
             # "N's" before a net mass reads like 'N pcs' ('PARATHA 5S 400GM': 5 pieces, 400 g in all, or
@@ -246,7 +259,10 @@ def parse_sizes(text: Optional[str], source_field: str = "") -> List[Size]:
             pack_ns = {n for p, n, _, kind in packs
                        if n > 1 and (kind == "pack" or (kind == "n_s" and (p > pos or s.dimension != "mass")))}
             piece_ns = {n for p, n, _, kind in packs
-                        if n > 1 and (kind == "pieces" or (kind == "n_s" and p < pos and s.dimension == "mass"))}
+                        if n > 1 and (kind == "pieces" or (kind == "n_s" and p < pos and s.dimension == "mass")
+                                      or (kind == "n_s_piece" and s.dimension == "mass"))}
+            if s.dimension != "mass":
+                pack_ns |= {n for p, n, _, kind in packs if n > 1 and kind == "n_s_piece"}
             if s.pack_count:
                 out.append(s)
             elif s.dimension == "mass":

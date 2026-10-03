@@ -37,6 +37,7 @@
         lens_serpapi: 'SerpApi · Google Lens',
         bing_html: 'Bing (احتياطي)',
         off: 'Open Food Facts',
+        local_index: 'الفهرس المحلي (مجاني)',
         cse_legacy: 'Google Custom Search (قديم)'
     };
 

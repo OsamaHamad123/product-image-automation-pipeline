@@ -253,3 +253,33 @@ def serpapi_lens_price_usd() -> float:
         price = float(DEFAULTS["SERPAPI_LENS_PRICE_USD"])
     return price if price >= 0 else float(DEFAULTS["SERPAPI_LENS_PRICE_USD"])
 # --- end sources package ---
+
+
+# --- local catalog index: UAE retailer product pages from the stores' sitemaps (catalog_match.local_index) ---
+# LOCAL_INDEX_ENABLED        look the product up in the local index (built by scripts/build_catalog_index.py);
+#                            it only runs once the index has rows
+# LOCAL_INDEX_MAX_PAGES      indexed product pages read per product (0 turns the lookup off); reads are free
+# LOCAL_INDEX_PAGE_TTL_DAYS  how long what a page said (image, name, GTIN) is reused before it is read again
+DEFAULTS.update({
+    "LOCAL_INDEX_ENABLED": True,
+    "LOCAL_INDEX_MAX_PAGES": 3,
+    "LOCAL_INDEX_PAGE_TTL_DAYS": 30,
+})
+LOCAL_INDEX_MAX_PAGES_LIMIT = 8
+
+
+def local_index_enabled() -> bool:
+    return bool(get("LOCAL_INDEX_ENABLED"))
+
+
+def local_index_max_pages() -> int:
+    value = get("LOCAL_INDEX_MAX_PAGES")
+    value = value if isinstance(value, int) else int(DEFAULTS["LOCAL_INDEX_MAX_PAGES"])
+    return min(LOCAL_INDEX_MAX_PAGES_LIMIT, max(0, value))
+
+
+def local_index_page_ttl_days() -> int:
+    value = get("LOCAL_INDEX_PAGE_TTL_DAYS")
+    value = value if isinstance(value, int) else int(DEFAULTS["LOCAL_INDEX_PAGE_TTL_DAYS"])
+    return min(365, max(0, value))
+# --- end local catalog index ---

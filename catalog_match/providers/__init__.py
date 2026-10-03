@@ -1,6 +1,8 @@
 """Image sources behind the models.Provider interface (decision D7).
 
 default_providers() builds the list from settings:
+    local_index the local catalog index (catalog_match.local_index): a free lookup, listed only when
+                LOCAL_INDEX_ENABLED and the index has rows (scripts/build_catalog_index.py)
     serper      Serper.dev Google Images, when SERPER_API_KEY is set (primary, sanctioned)
     off         Open Food Facts GTIN lookup (always listed; it only calls out for a valid GTIN)
     cse_legacy  Google CSE, only with an existing key and cx, until CSE_SUNSET_DATE
@@ -46,6 +48,10 @@ __all__ = [
 def default_providers(today: Optional[_dt.date] = None) -> List[BaseProvider]:
     """The configured providers, in the order retrieve() should try them."""
     providers: List[BaseProvider] = []
+    from ..local_index import LocalIndexProvider   # here, not at import: local_index imports providers.base
+    local = LocalIndexProvider.create()
+    if local is not None:
+        providers.append(local)
     serper_key = settings.serper_api_key()
     if serper_key:
         providers.append(SerperImagesProvider(api_key=serper_key))

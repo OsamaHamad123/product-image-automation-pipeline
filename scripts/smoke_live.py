@@ -55,7 +55,7 @@ DEFAULT_VLM_COST = 0.001
 DEFAULT_SERPAPI_COST = 0.015     # one SerpApi Google Lens search (Developer plan); SERPAPI_LENS_PRICE_USD wins
 DEFAULT_CSE_COST = 0.005         # a Google CSE query beyond the free 100 a day
 
-FREE_PROVIDERS = frozenset({"off", "open_food_facts", "openfoodfacts", "bing_html"})
+FREE_PROVIDERS = frozenset({"off", "open_food_facts", "openfoodfacts", "bing_html", "local_index"})
 SERPER_PROVIDERS = frozenset({"serper", "serper_web", "serper_shopping", "lens_serper"})
 EXPANSION_PROVIDERS = frozenset({"serper_web", "serper_shopping", "lens_serper", "lens_serpapi"})
 EXPANSION_SOURCES = EXPANSION_PROVIDERS | {"page"}      # 'page': an image read from a fetched product page

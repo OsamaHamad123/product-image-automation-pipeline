@@ -223,7 +223,9 @@ foreach ($cacheFile in $pythonCaches) {
 }
 $laravelCacheDir = Join-Path $PSScriptRoot "dashboard\storage\framework\cache\data"
 if (Test-Path $laravelCacheDir) {
-    Remove-Item (Join-Path $laravelCacheDir "*") -Recurse -Force -ErrorAction SilentlyContinue
+    # .gitignore يبقى: الـ "*" كانت تحذفه مع الكاش فيظهر حذفه بأول git add
+    Get-ChildItem -LiteralPath $laravelCacheDir -Force | Where-Object { $_.Name -ne ".gitignore" } |
+        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
 }
 
 # ----------------- 5. تهيئة ملفات الإعدادات وقاعدة البيانات -----------------

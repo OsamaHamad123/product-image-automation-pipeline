@@ -245,6 +245,52 @@ every pick checked by hand shows the right product.
   the review warning. `uae.desertcart.com` and `desertcart.ae` do not.
 - **Run outputs:** moved to `runs/2026-10-03/`. New `smoke_*.json`, `smoke_console*.txt`,
   `verify_output*.txt` files and new files in `runs/` stay out of git.
+- **Pieces after the weight (row 16):** `MEHRAN PLAIN PARATHA 400GM 5S` is one 400 g pack of 5 pieces, not 5 packs
+  of 400 g. The first query asked for `5x400g` before; it now asks for `400g`.
+  - Applies only to foods sold by the piece: paratha, roti, chapati, naan, tortilla, wraps, pita, khubz, samosa,
+    spring rolls, and their Arabic names.
+  - `INDOMIE NOODLES 75G 5S` is still 5 packs. An explicit `2X400GM 5S` keeps its pack count of 2.
+
+### Added: local catalog index (free retrieval from the stores' own sitemaps)
+
+- **What it does:** UAE store product pages become a local index. While the first web query runs, the pipeline
+  looks the product up in that index, at no cost.
+  - Sources: Lulu, Carrefour UAE, Spinneys and talabat mart UAE. noon and Union Coop are present but switched off,
+    because their page slugs often leave out the brand.
+  - The index is built from each store's published sitemaps, read by `scripts/build_catalog_index.py`.
+- **Search:** finds rows by every word of a brand phrase, plus rows whose page stated the product's barcode.
+  - A row is dropped when it has another brand, a size, pack or variant conflict (the link alone is enough), or
+    too few product words.
+  - The best `LOCAL_INDEX_MAX_PAGES` pages (default 3, one per store first) are read for their main image, name
+    and barcode.
+- **Page cache:** what a page said is kept for `LOCAL_INDEX_PAGE_TTL_DAYS` (default 30). A timeout or refusal is
+  retried after a day. A page that now redirects (sold out, delisted) gives nothing and is remembered.
+- **Limits on what the index can do:**
+  - Its pages are provider `local_index` and unsanctioned: they can be pre-checked for review and never
+    auto-publish.
+  - They never stop the web search early.
+  - Their answers never hide a web-search outage.
+  - The offline evaluation is unchanged.
+- **Polite harvesting:** `catalog_match/sitemaps.py` follows robots.txt rules, Sitemap lines and Crawl-delay,
+  says who it is, and reads gzip sitemaps and nested indexes. It refuses any document with a DOCTYPE.
+  - A store that answers 401, 403 or 429, a bot-check page, or a robots.txt 5xx is reported BLOCKED and skipped.
+    It is never worked around.
+  - While the pipeline searches, a store that refuses three page reads is left alone for the rest of the run.
+- **Commands:**
+  - `--discover` looks first and writes nothing.
+  - `--dry-run` counts only.
+  - With no flag, the command builds the index.
+  - `--prune` drops pages a store no longer lists, after a complete harvest only.
+  - `--stats` prints what the index holds.
+  - `--json` saves the reports.
+  - Store patterns are in `catalog_match/data/catalog_stores.json`, taken from the product pages of the live runs.
+    The stores' sitemap locations are found with `--discover`.
+- **Tables:** `catalog_products`, `catalog_tokens` (slug and page-title words, deleted with their row) and
+  `catalog_harvests`, all created by `init_db()`.
+- **Settings:** `LOCAL_INDEX_ENABLED`, `LOCAL_INDEX_MAX_PAGES` and `LOCAL_INDEX_PAGE_TTL_DAYS`.
+  - The dashboard «متقدم» tab has the switch and the pages-per-product field, and says what the index holds or how
+    to build it.
+  - The Health page names the provider «الفهرس المحلي».
 
 ### Fixed while integrating phase 3
 
