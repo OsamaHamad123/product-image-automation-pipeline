@@ -84,3 +84,37 @@ def test_a_legacy_provider_down_row_without_a_date_is_claimed_and_counted(db):
              "next_attempt_at = NOW() + INTERVAL 2 HOUR WHERE `row_number` = %s", (ROW + 1,))
     assert db.fetch_next_task("host:1") is None
     assert db.count_open_tasks() == 1                     # the claimed row only; the parked one is beyond the horizon
+
+
+# ---------------------------------------------------------------------------
+# C11: a reviewer's status write survives a deadlock with the claim
+# ---------------------------------------------------------------------------
+
+def test_a_reviewer_status_write_is_retried_after_a_deadlock(offline, monkeypatch, fake_connection):
+    """The claim scan and a multi-row result write can deadlock (InnoDB 1213 aborts one side). The worker's write
+    retried; the reviewer's write (approve / reject / upload) did not, and the decision's queue status was lost."""
+    import pymysql
+    import local_cache_db
+
+    calls = {"update": 0}
+
+    def responder(sql, params):
+        if sql.startswith("UPDATE automation_queue SET status"):
+            calls["update"] += 1
+            if calls["update"] == 1:
+                raise pymysql.err.OperationalError(1213, "Deadlock found when trying to get lock")
+        return None
+
+    conns = []
+    monkeypatch.setattr(local_cache_db, "get_db_connection", lambda: conns.append(fake_connection(responder)) or conns[-1])
+    monkeypatch.setattr("time.sleep", lambda s: None)
+    assert local_cache_db.update_task_status_by_row(12, "completed", sku_key="k") is True
+    assert len(conns) == 2 and conns[1].commits == 1 and conns[0].commits == 0
+
+    def lost(sql, params):
+        raise pymysql.err.OperationalError(2013, "Lost connection to MySQL server during query")
+
+    conns.clear()
+    monkeypatch.setattr(local_cache_db, "get_db_connection", lambda: conns.append(fake_connection(lost)) or conns[-1])
+    assert local_cache_db.update_task_status_by_row(12, "completed", sku_key="k") is False
+    assert len(conns) == 1                                   # other errors are not retried

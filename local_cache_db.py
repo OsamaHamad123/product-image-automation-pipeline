@@ -2003,9 +2003,12 @@ def update_task_status_by_row(row_number, status, error_message=None, failure_co
     تحديث حالة المهمة لمنتج: بـ sku_key عند تمريره (فلا يتأثر منتج آخر انتقل إلى رقم الصف نفسه
     بعد تعديل الشيت)، وبرقم الصف فقط للصفوف القديمة بلا sku_key.
     قرارات المراجع (اعتماد / رفض / رفع يدوي) تمر من هنا: إذا لم يبق صف جاهز للمراجعة تصبح الحالة خاملة.
+    تعارض أقفال مع سحب العامل أو كتابة نتيجته (1213 / 1205) يعيد المعاملة كما في update_task_status: قرار المراجع
+    لا يضيع بسبب تعارض عابر.
     """
     clause, params = _row_or_sku_clause(row_number, sku_key)
-    try:
+
+    def attempt():
         conn = get_db_connection()
         try:
             cursor = conn.cursor()
@@ -2020,6 +2023,9 @@ def update_task_status_by_row(row_number, status, error_message=None, failure_co
         finally:
             _close(conn)
         return True
+
+    try:
+        return _retry_lock_conflicts(attempt)
     except Exception as e:
         logger.warning("[MariaDB Queue] فشل تحديث حالة المهمة للصف %s: %s", row_number, e)
         return False
