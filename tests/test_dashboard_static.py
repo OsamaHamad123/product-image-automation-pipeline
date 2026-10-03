@@ -431,3 +431,44 @@ echo json_encode(['decoded' => $decoded, 'codes' => $codes, 'missing' => PythonB
     assert codes["error"] == [500, True]
     assert codes["failed"] == [500, True]
     assert data["missing"] == 500
+
+
+def test_launcher_keeps_the_dashboard_on_the_workers_mariadb():
+    """Owner's launch log, 2026-10-03: 'Cannot index into a null array' at $Matches[1], then the dashboard .env was
+    rewritten to SQLite. -match on Get-Content's line array filters lines and leaves $Matches empty, so the old block
+    always took the SQLite path. Python only speaks MariaDB (pymysql): the dashboard must use the root .env DB_*."""
+    ps1 = read(ROOT / "setup_and_launch.ps1")
+    assert "DB_CONNECTION=sqlite" not in ps1 and "local_cache.db" not in ps1.replace("(local_cache.db)", "")
+    block = ps1[ps1.index("$dbKeys = @("):ps1.index("# ----------------- 6.")]
+    for key in ("DB_CONNECTION", "DB_HOST", "DB_PORT", "DB_DATABASE", "DB_USERNAME", "DB_PASSWORD"):
+        assert f"'{key}'" in block, key
+    assert "ReadAllLines($rootEnv)" in block and "ReadAllLines($dashboardEnv)" in block
+    assert "UTF8Encoding($false)" in block                       # no BOM: Laravel would read '﻿APP_NAME'
+    # $Matches is read only after a -match on a single line, never on a Get-Content array
+    for i, line in enumerate(ps1.splitlines()):
+        if "$Matches[" in line:
+            context = "\n".join(ps1.splitlines()[max(0, i - 3):i])
+            assert "Get-Content" not in context, line
+
+
+def test_launcher_generates_the_app_key_only_when_missing():
+    ps1 = read(ROOT / "setup_and_launch.ps1")
+    check = ps1[ps1.index("# توليد مفتاح التطبيق"):ps1.index("key:generate")]
+    assert "ReadAllText($dashboardEnv)" in check and "Get-Content" not in check
+
+
+def test_launchers_pass_no_powershell_switches_to_native_programs():
+    """'-ErrorAction' after a python/pip call is an argument to pip ('no such option: -E'), not to PowerShell."""
+    ps1 = read(ROOT / "setup_and_launch.ps1")
+    for line in ps1.splitlines():
+        if line.lstrip().startswith("& $") and "-ErrorAction" in line:
+            raise AssertionError(line)
+
+
+def test_batch_titles_and_echoes_have_no_bare_ampersand():
+    """'title Setup & Launcher' made cmd run 'Launcher' as a command (owner's log, 2026-10-03)."""
+    for bat in sorted(ROOT.glob("*.bat")):
+        for line in read(bat).splitlines():
+            stripped = line.strip().lower()
+            if stripped.startswith(("title ", "echo ")):
+                assert not re.search(r"(?<!\^)&(?!&)", line.replace("&&", "")), (bat.name, line)

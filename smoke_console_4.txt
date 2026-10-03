@@ -1,0 +1,766 @@
+WARNING catalog_match.providers.cse_legacy: cse_legacy: key #0 http_status=403 body='{\n  "error": {\n    "code": 403,\n    "message": "This project does not have the access to Custom Search JSON API.",\n    "errors": [\n      {\n        "message": "This project does not have the access to Custom Search JSON API.",\n        "domain": "global",\n        "reason": "forbidden"\n      }\n    ],\n    "status": "PERMISSION_DENIED"\n  }\n}\n'
+WARNING catalog_match.providers.cse_legacy: cse_legacy: every key was refused with 403 (Custom Search API not enabled for the project, or the key is restricted); Google CSE is skipped for the rest of this run
+WARNING catalog_match.providers: provider=cse_legacy status=error count=0 latency_ms=576 http_status=403 error=http_403 query='FAMILY LIGHTMEAT SKIPJACK CHUNKS TUNA 185g' body='{\n  "error": {\n    "code": 403,\n    "message": "This project does not have the access to Custom Search JSON API.",\n    "errors": [\n      {\n        "message": "This project does not have the access to Custom Search JSON API.",\n        "domain": "global",\n        "reason": "forbidden"\n      }\n    ],\n    "status": "PERMISSION_DENIED"\n  }\n}\n'
+WARNING catalog_match.providers.serper: serper: this account does not allow site: operators (free plan); retailer-scoped queries are sent without them from now on
+WARNING catalog_match.verify: verify: result UNKNOWN (connection_error:ConnectionError); candidates go to human review
+WARNING catalog_match.providers: provider=serper status=error count=0 latency_ms=15018 http_status=None error=timeout query='SARAS MEAT MASALA 160g'
+WARNING catalog_match.providers: provider=bing_html status=error count=0 latency_ms=3 http_status=None error=ProxyError: Failed to perform, curl: (5) Could not resolve proxy: gate.smartproxy.com. See https://curl.se/libcurl/c/libcurl-errors.html first for more details. query='SARAS MEAT MASALA 160g'
+WARNING catalog_match.providers: provider=serper status=error count=0 latency_ms=3 http_status=None error=ConnectionError: HTTPSConnectionPool(host='google.serper.dev', port=443): Max retries exceeded with url: /images (Caused by NameResolutionError("HTTPSConnection(host='google.serper.dev', port=443): Failed to resolve 'google.serper.dev' ([Errno 11001] getaddrinfo failed)")) query='SARAS MEAT MASALA 160g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)'
+WARNING catalog_match.providers: provider=serper status=error count=0 latency_ms=2 http_status=None error=ConnectionError: HTTPSConnectionPool(host='google.serper.dev', port=443): Max retries exceeded with url: /images (Caused by NameResolutionError("HTTPSConnection(host='google.serper.dev', port=443): Failed to resolve 'google.serper.dev' ([Errno 11001] getaddrinfo failed)")) query='SARAS MEAT MASALA'
+WARNING catalog_match.providers: provider=bing_html status=error count=0 latency_ms=4 http_status=None error=ProxyError: Failed to perform, curl: (5) Could not resolve proxy: gate.smartproxy.com. See https://curl.se/libcurl/c/libcurl-errors.html first for more details. query='SARAS MEAT MASALA'
+WARNING catalog_match.providers: provider=serper status=error count=0 latency_ms=3 http_status=None error=ConnectionError: HTTPSConnectionPool(host='google.serper.dev', port=443): Max retries exceeded with url: /images (Caused by NameResolutionError("HTTPSConnection(host='google.serper.dev', port=443): Failed to resolve 'google.serper.dev' ([Errno 11001] getaddrinfo failed)")) query='SHAN MEAT MASALA 100g'
+WARNING catalog_match.providers: provider=bing_html status=error count=0 latency_ms=4 http_status=None error=ProxyError: Failed to perform, curl: (5) Could not resolve proxy: gate.smartproxy.com. See https://curl.se/libcurl/c/libcurl-errors.html first for more details. query='SHAN MEAT MASALA 100g'
+WARNING catalog_match.providers: provider=serper status=error count=0 latency_ms=8 http_status=None error=ConnectionError: HTTPSConnectionPool(host='google.serper.dev', port=443): Max retries exceeded with url: /images (Caused by NameResolutionError("HTTPSConnection(host='google.serper.dev', port=443): Failed to resolve 'google.serper.dev' ([Errno 11001] getaddrinfo failed)")) query='SHAN MEAT MASALA 100g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)'
+WARNING catalog_match.providers: provider=serper status=error count=0 latency_ms=2 http_status=None error=ConnectionError: HTTPSConnectionPool(host='google.serper.dev', port=443): Max retries exceeded with url: /images (Caused by NameResolutionError("HTTPSConnection(host='google.serper.dev', port=443): Failed to resolve 'google.serper.dev' ([Errno 11001] getaddrinfo failed)")) query='SHAN MEAT MASALA'
+WARNING catalog_match.providers: provider=bing_html status=error count=0 latency_ms=11171 http_status=None error=timeout query='SHAN MEAT MASALA'
+WARNING catalog_match.providers: provider=serper status=error count=0 latency_ms=11137 http_status=None error=ConnectionError: HTTPSConnectionPool(host='google.serper.dev', port=443): Max retries exceeded with url: /images (Caused by NameResolutionError("HTTPSConnection(host='google.serper.dev', port=443): Failed to resolve 'google.serper.dev' ([Errno 11001] getaddrinfo failed)")) query='SUP/T WT/MEAT SOLIDTUNA SALTWATER 185g'
+WARNING catalog_match.providers: provider=bing_html status=error count=0 latency_ms=12061 http_status=None error=timeout query='SUP/T WT/MEAT SOLIDTUNA SALTWATER 185g'
+WARNING catalog_match.providers: provider=serper status=error count=0 latency_ms=12041 http_status=None error=ConnectionError: HTTPSConnectionPool(host='google.serper.dev', port=443): Max retries exceeded with url: /images (Caused by NameResolutionError("HTTPSConnection(host='google.serper.dev', port=443): Failed to resolve 'google.serper.dev' ([Errno 11001] getaddrinfo failed)")) query='SUP/T WT/MEAT SOLIDTUNA SALTWATER 185g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)'
+WARNING catalog_match.providers: provider=serper status=error count=0 latency_ms=12037 http_status=None error=ConnectionError: HTTPSConnectionPool(host='google.serper.dev', port=443): Max retries exceeded with url: /images (Caused by NameResolutionError("HTTPSConnection(host='google.serper.dev', port=443): Failed to resolve 'google.serper.dev' ([Errno 11001] getaddrinfo failed)")) query='SUP/T WT/MEAT SOLIDTUNA SALTWATER'
+WARNING catalog_match.providers: provider=bing_html status=error count=0 latency_ms=12054 http_status=None error=timeout query='SUP/T WT/MEAT SOLIDTUNA SALTWATER'
+WARNING catalog_match.providers: provider=serper status=error count=0 latency_ms=12069 http_status=None error=ConnectionError: HTTPSConnectionPool(host='google.serper.dev', port=443): Max retries exceeded with url: /images (Caused by NameResolutionError("HTTPSConnection(host='google.serper.dev', port=443): Failed to resolve 'google.serper.dev' ([Errno 11001] getaddrinfo failed)")) query='SUPER T/ SOLID TUNA SALT WATE3X185GM'
+WARNING catalog_match.providers: provider=bing_html status=error count=0 latency_ms=12035 http_status=None error=timeout query='SUPER T/ SOLID TUNA SALT WATE3X185GM'
+WARNING catalog_match.providers: provider=serper status=error count=0 latency_ms=12042 http_status=None error=ConnectionError: HTTPSConnectionPool(host='google.serper.dev', port=443): Max retries exceeded with url: /images (Caused by NameResolutionError("HTTPSConnection(host='google.serper.dev', port=443): Failed to resolve 'google.serper.dev' ([Errno 11001] getaddrinfo failed)")) query='SUPER T/ SOLID TUNA SALT WATE3X185GM (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)'
+dry run on 30 rows | Serper key set | Gemini key set | model gemini-3.1-flash-lite | auto-publish off (not applied in a dry run)
+
+=== row 32: FAMILY LIGHTMEAT SKIPJACK CHUNKS TUNA 185GM | brand FAMILY (sheet_raw) | gtin missing
+  query  FAMILY LIGHTMEAT SKIPJACK CHUNKS TUNA 185g
+  query  FAMILY LIGHTMEAT SKIPJACK CHUNKS TUNA 185g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)
+  health cse_legacy error    http=403 n=0 585ms http_403  <- FAMILY LIGHTMEAT SKIPJACK CHUNKS TUNA 185g
+  health serper     ok       http=200 n=20 1757ms   <- FAMILY LIGHTMEAT SKIPJACK CHUNKS TUNA 185g
+  health serper     ok       http=200 n=20 2054ms   <- FAMILY LIGHTMEAT SKIPJACK CHUNKS TUNA 185g (site:carrefouruae.com OR s
+  #1 [rejected] serper/family.qa: Ola Skipjack Light Meat Tuna Solid Flakes In Brine 185gm | Family Food  Center -
+       tier=2 size=match brand=True variants=[] coverage=0.5 source_trust=0 gtin=None
+       VLM MISMATCH view=front_packshot brand='Ola' variant='SKIPJACK LIGHT MEAT TUNA FLAKES IN BRINE' size='185g'
+       https://res.cloudinary.com/family-food-centre/image/upload/w_3840,q_auto,f_auto/v1757776362/prod-ecom-v2/product/1/0/1/0/100334145.jpg
+  #2 [rejected] serper/shops.ae: Family Light Meat Tuna Chunk In Oil Eoe 185Gm
+       tier=2 size=match brand=True variants=[] coverage=0.5 source_trust=0 gtin=None fetch=timeout
+       https://shops.ae/products/Shopping/6c5acf29837aa123b6e57ecc026d5e75.400x400.jpeg
+  #3 [rejected] serper/atxpview-ecom-v2.family.qa: Del Monte Light Meat Tuna Solid Pack In Brine 185gm | Family Food Center -  Qata
+       tier=2 size=match brand=True variants=[] coverage=0.25 source_trust=0 gtin=None
+       VLM MISMATCH view=front_packshot brand='Del Monte' variant='LIGHT SKIPJACK IN BRINE' size=''
+       https://res.cloudinary.com/family-food-centre/image/upload/w_3840,q_auto,f_auto/v1790232611/prod-ecom-v2/products/100307234/1790232610427.jpg
+  #4 [rejected] serper/urbanfare.com: Western Family - Chunk Light Tuna Skipjack In Water - Urban Fare
+       tier=2 size=unknown brand=True variants=[] coverage=0.75 source_trust=0 gtin=None
+       VLM MISMATCH view=front_packshot brand='Western family' variant='FLAKED LIGHT TUNA SKIPJACK IN WATER' size='170g'
+       https://images.cdn.saveonfoods.com/detail/00062639298524.jpg
+  #5 [rejected] serper/qualityfoods.com: Western Family - Chunk Light Tuna Skipjack in Water - Quality-Foods
+       tier=2 size=unknown brand=True variants=[] coverage=0.75 source_trust=0 gtin=None
+       VLM MISMATCH view=front_packshot brand='Western family' variant='CHUNK POLE CAUGHT LIGHT TUNA SKIPJACK IN WATER' size='140g'
+       https://images.cdn.saveonfoods.com/detail/00062639334321.jpg
+  DECISION REVIEW_UNSELECTED  -> -
+  cost ~$0.0050 (3 SERP queries, 2 VLM calls), 24.0s
+
+=== row 33: FAMILY LIGHTMEAT TUNA SPRING WATER 185GM | brand FAMILY (sheet_raw) | gtin missing
+  query  FAMILY LIGHTMEAT TUNA SPRING WATER 185g
+  query  FAMILY LIGHTMEAT TUNA SPRING WATER 185g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)
+  health serper     ok       http=200 n=20 2635ms   <- FAMILY LIGHTMEAT TUNA SPRING WATER 185g
+  health serper     ok       http=200 n=20 1494ms   <- FAMILY LIGHTMEAT TUNA SPRING WATER 185g (site:carrefouruae.com OR site
+  #1 [eligible] serper/carrefourqatar.com: Buy Family Light Meat Tuna Flakes Sunflower Oil 185g Online | Carrefour  Qatar
+       tier=2 size=match brand=True variants=[] coverage=0.25 source_trust=1 gtin=None
+       VLM UNSURE view=front_packshot brand='Family' variant='Light Meat Tuna' size=''
+       https://cdn.mafrservices.com/sys-master-root/hca/h03/9428179222558/24221_main.jpg
+  #2 [rejected] serper/family.qa: Best Light Meat Tuna Flake 185gm | Family Food Center - Qatar
+       tier=2 size=match brand=True variants=[] coverage=0.25 source_trust=0 gtin=None
+       VLM MISMATCH view=front_packshot brand='Best' variant='Light Meat Tuna' size=''
+       https://res.cloudinary.com/family-food-centre/image/upload/w_3840,q_auto,f_auto/v1774968439/prod-ecom-v2/products/05040037/1774968437833.jpg
+  #3 [eligible] serper/foodedge.com: Family Light Meat Tuna 185gm
+       tier=2 size=match brand=True variants=[] coverage=0.25 source_trust=0 gtin=None
+       VLM UNSURE view=front_packshot brand='Family' variant='Light Meat Tuna' size=''
+       https://www.foodedge.com/wp-content/uploads/2021/05/Family-Light-Meat-Tuna.jpg
+  #4 [eligible] serper/snoonu.com: Family Light Meat Tuna 185G
+       tier=2 size=match brand=True variants=[] coverage=0.25 source_trust=0 gtin=None
+       VLM UNSURE view=front_packshot brand='Family' variant='Light Meat Tuna' size=''
+       https://images.snoonu.com/brand_product/2024-05/18184794-f670-444b-8c5f-d5ea7d76c641_output.png
+  #5 [rejected] serper/shops.ae: Family Light Meat Tuna Chunk In Oil Eoe 185Gm
+       tier=2 size=match brand=True variants=[] coverage=0.25 source_trust=0 gtin=None fetch=timeout
+       https://shops.ae/products/Shopping/6c5acf29837aa123b6e57ecc026d5e75.400x400.jpeg
+  DECISION REVIEW_UNSELECTED  -> -
+  cost ~$0.0030 (2 SERP queries, 1 VLM calls), 20.4s
+
+=== row 34: FRESHLY CHICKEN SHAWARMA MEAT 350GM | brand FRESHLY (sheet_raw) | gtin missing
+  query  FRESHLY CHICKEN SHAWARMA MEAT 350g
+  query  FRESHLY CHICKEN SHAWARMA MEAT 350g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)
+  health serper     ok       http=200 n=19 1605ms   <- FRESHLY CHICKEN SHAWARMA MEAT 350g
+  health serper     ok       http=200 n=20 3875ms   <- FRESHLY CHICKEN SHAWARMA MEAT 350g (site:carrefouruae.com OR site:noon
+  #1 [rejected] serper/unioncoop.ae: Shop Freshly Foods Gourmet Chicken Shawarma - 350g | Union Coop
+       tier=1 size=match brand=True variants=[] coverage=0.6667 source_trust=3 gtin=None
+       VLM MISMATCH view=front_packshot brand='Seara' variant='Chicken Tikka' size='350g'
+       https://www.unioncoop.ae/media/catalog/product/7/8/7894904256846-main.jpg
+  #2 [rejected] serper/emcoop.ae: Freshly Foods Gourmet Chicken Shawarma Meat 350G | Buy...
+       tier=2 size=match brand=True variants=[] coverage=1.0 source_trust=0 gtin=None
+       VLM MISMATCH view=front_packshot brand='FRESHLY FOODS' variant='ZINGO CHICKEN BREAST STRIPS' size='500G'
+       https://suppystorage.blob.core.windows.net/valeur/items/FMCG_598491_1.jpg
+  #3 [rejected] serper/emcoop.ae: Freshly Foods Gourmet Chicken Shawarma Meat 350G | Buy...
+       tier=2 size=match brand=True variants=[] coverage=1.0 source_trust=0 gtin=None
+       VLM MISMATCH view=front_packshot brand='FRESHLY FOODS' variant='Chicken Sheesh Kebab' size='245g'
+       https://suppystorage.blob.core.windows.net/valeur/items/FMCG_495871_1.jpg
+  #4 [rejected] serper/emiratescoop.suppy.app: Freshly Foods Gourmet Chicken Shawarma Meat 350G | Buy...
+       tier=2 size=match brand=True variants=[] coverage=1.0 source_trust=0 gtin=None
+       VLM MISMATCH view=front_packshot brand='AMERICANA' variant='Breaded Chicken Burger' size='720g'
+       https://suppystorage.blob.core.windows.net/valeur/items/FMCG_614565_1.jpg
+  #5 [rejected] serper/emcoop.ae: Freshly Foods Gourmet Chicken Shawarma Meat 350G | Buy...
+       tier=2 size=match brand=True variants=[] coverage=1.0 source_trust=0 gtin=None
+       VLM MISMATCH view=front_packshot brand='FRESHLY FOODS' variant='Homestyle Zingo Chicken Fillet' size='800gms'
+       https://suppystorage.blob.core.windows.net/valeur/items/FMCG_499518_1.jpg
+  DECISION REVIEW_PRESELECTED  -> https://prod-spinneys-cdn-new.azureedge.net/media/cache/12/51/125141e02ce7953c7b0c11445e9714f0.jpg
+  cost ~$0.0040 (2 SERP queries, 2 VLM calls), 15.1s
+
+=== row 35: GOLDEN PRIZE L/ MEAT TUNA VEGE OIL 185GM | brand GOLDEN PRIZE (sheet_raw) | gtin missing
+  query  GOLDEN PRIZE L/ MEAT TUNA VEGE OIL 185g
+  query  GOLDEN PRIZE L/ MEAT TUNA VEGE OIL 185g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)
+  health serper     ok       http=200 n=20 2434ms   <- GOLDEN PRIZE L/ MEAT TUNA VEGE OIL 185g
+  health serper     ok       http=200 n=20 2885ms   <- GOLDEN PRIZE L/ MEAT TUNA VEGE OIL 185g (site:carrefouruae.com OR site
+  #1 [rejected] serper/carrefouruae.com: Buy Golden Prize Light Meat Tuna In Vegetable Oil 185g Online | Carrefour  UAE
+       tier=2 size=match brand=True variants=[] coverage=0.75 source_trust=3 gtin=None
+       VLM MISMATCH view=multi_product brand='Golden Prize' variant='FLAKES LIGHT MEAT TUNA IN VEGETABLE OIL' size=''
+       https://cdn.mafrservices.com/pim-content/UAE/media/product/1879781/1745319603/1879781_main.jpg
+  #2 [rejected] serper/bigbasket.com: Buy Golden Prize Canned Skipjack Light Meat Tuna Chunk In Olive Oil 185 Gm  Onli
+       tier=2 size=match brand=True variants=[] coverage=0.75 source_trust=0 gtin=None
+       VLM MISMATCH view=front_packshot brand='GOLDEN PRIZE' variant='TUNA CHUNKS in Olive Oil' size=''
+       https://www.bbassets.com/media/uploads/p/xl/40037992_9-golden-prize-canned-skipjack-light-meat-tuna-chunk-in-olive-oil.jpg
+  #3 [rejected] serper/luxury.tatacliq.com: Buy Golden Prize Canned Skipjack Light Meat Tuna In Soya Bean Oil - 185 gm  Onli
+       tier=2 size=match brand=True variants=[] coverage=0.75 source_trust=0 gtin=None fetch=timeout
+       https://img.tatacliq.com/images/i8/658Wx734H/MP000000013068786_658Wx734H_202205081206051.jpeg
+  #4 [rejected] serper/amazon.in: Golden Prize Tuna Chunks in Olive Oil, 185g : Amazon.in: Grocery & Gourmet  Food
+       tier=2 size=match brand=True variants=[] coverage=0.5 source_trust=1 gtin=None
+       VLM MISMATCH view=front_packshot brand='GOLDEN PRIZE' variant='TUNA in OLIVE OIL CHUNKS' size='185 g.'
+       https://m.media-amazon.com/images/I/714aWh0pyeL.jpg
+  #5 [rejected] serper/instamart.in: Buy Golden Prize Tuna Chunks in Soyabean Oil Online (185 g) At Best Price
+       tier=2 size=match brand=True variants=[] coverage=0.5 source_trust=0 gtin=None
+       VLM MISMATCH view=front_packshot brand='GOLDEN PRIZE' variant='TUNA CHUNKS in Soya Bean Oil' size='185 g.'
+       https://instamart-media-assets.swiggy.com/swiggy/image/upload/fl_lossy,f_auto,q_auto,w_1200,h_630/NI_CATALOG/IMAGES/CIW/2025/11/13/7a109dfc-c5e8-4154-b8d5-342fbff27345_468976_1.png
+  DECISION REVIEW_UNSELECTED  -> -
+  cost ~$0.0040 (2 SERP queries, 2 VLM calls), 24.3s
+
+=== row 36: GREEN FARM MEAT MASALA 200GM | brand GREEN FARM (sheet_raw) | gtin missing
+  query  GREEN FARM MEAT MASALA 200g
+  query  GREEN FARM MEAT MASALA 200g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)
+  health serper     ok       http=200 n=20 2030ms   <- GREEN FARM MEAT MASALA 200g
+  health serper     ok       http=200 n=20 1519ms   <- GREEN FARM MEAT MASALA 200g (site:carrefouruae.com OR site:noon.com OR
+  #1 [rejected] serper/tradeling.com: Buy Green Farm Meat Masala 200gr Online in UAE | Tradeling
+       tier=2 size=match brand=True variants=[] coverage=1.0 source_trust=0 gtin=None
+       VLM MISMATCH view=front_packshot brand='Double Horse' variant='MEAT MASALA' size='140g'
+       https://c8n.tradeling.com/img/plain/pim/rs:auto:1600::0/f:webp/q:90/up/5f266248d0ba82001b295418/455df00f0d5b613111645711fff2a6fa.jpg
+  #2 [rejected] serper/tradeling.com: Buy Green Farm Meat Masala 200gr Online in UAE | Tradeling
+       tier=2 size=match brand=True variants=[] coverage=1.0 source_trust=0 gtin=None
+       VLM MISMATCH view=front_packshot brand='Gyeen Farm' variant='Cumin Seeds' size='200g'
+       https://c8n.tradeling.com/img/plain/pim/rs:auto:1600::0/f:webp/q:90/up/5fba0c6142480f001bed85d4/5ef04414b78f3cd61e93cbb272d6bbb5.jpg
+  #3 [rejected] serper/tradeling.com: Buy Green Farm Meat Masala 200gr Online in UAE | Tradeling
+       tier=2 size=match brand=True variants=[] coverage=1.0 source_trust=0 gtin=None
+       VLM MISMATCH view=front_packshot brand='Shan' variant='Meat & Vegetable' size='100 g'
+       https://c8n.tradeling.com/img/plain/pim/rs:auto:1600::0/f:webp/q:90/up/5fba0c6142480f001bed85d4/1f00fe64e13e7bc4521006960152593a.jpg
+  #4 [rejected] serper/tradeling.com: Buy Green Farm Meat Masala 200gr Online in UAE | Tradeling
+       tier=2 size=match brand=True variants=[] coverage=1.0 source_trust=0 gtin=None
+       VLM MISMATCH view=front_packshot brand='Gyeen Farm' variant='Ajwain' size='200g'
+       https://c8n.tradeling.com/img/plain/pim/rs:auto:1600::0/f:webp/q:90/up/5fba0c6142480f001bed85d4/df0de5aa28eac7490df68c13309dd3a4.jpg
+  #5 [rejected] serper/tradeling.com: Buy Green Farm Meat Masala 200gr Online in UAE | Tradeling
+       tier=2 size=match brand=True variants=[] coverage=1.0 source_trust=0 gtin=None
+       VLM MISMATCH view=front_packshot brand='Green Farm' variant="ZA'ATAR" size='200 grm'
+       https://c8n.tradeling.com/img/plain/pim/rs:auto:1600::0/f:webp/q:90/up/5fba0c6142480f001bed85d4/9ff890bd15b8177f6ebf88b5b89bfb3b.jpg
+  DECISION REVIEW_UNSELECTED  -> -
+  cost ~$0.0040 (2 SERP queries, 2 VLM calls), 36.1s
+
+=== row 37: INA PARAMANS SEASOING MEAT SPICE 200ML | brand INA PARAMANS (sheet_raw) | gtin missing
+  query  INA PARAMANS SEASOING MEAT SPICE 200ml
+  query  INA PARAMANS SEASOING MEAT SPICE 200ml (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)
+  query  INA PARAMANS SEASOING MEAT SPICE
+  health serper     ok       http=200 n=20 4891ms   <- INA PARAMANS SEASOING MEAT SPICE 200ml
+  health serper     ok       http=200 n=20 1567ms   <- INA PARAMANS SEASOING MEAT SPICE 200ml (site:carrefouruae.com OR site:
+  health serper     ok       http=200 n=20 3214ms   <- INA PARAMANS SEASOING MEAT SPICE
+  #1 [eligible] serper/amazon.ae: Ina Paarman's Seasoning Meat Spice, 200ml (Pack of 1) : Amazon.ae: Grocery
+       tier=3 size=match brand=False variants=[] coverage=0.6667 source_trust=3 gtin=None
+       VLM UNSURE view=front_packshot brand="INA PAARMAN'S" variant='MEAT SPICE' size=''
+       https://m.media-amazon.com/images/I/71Dp35G49QL.jpg
+  #2 [eligible] serper/carrefouruae.com: Buy Ina Paarman&#39;s Kitchen Meat Spice Powder 200g Online | Carrefour UAE
+       tier=3 size=match brand=False variants=[] coverage=0.6667 source_trust=3 gtin=None
+       VLM UNSURE view=front_packshot brand="INA PAARMAN'S" variant='MEAT SPICE' size=''
+       https://cdn.mafrservices.com/sys-master-root/h01/he2/12660226850846/799482_main.jpg
+  #3 [eligible] serper/spinneys.com: Ina Paarman's Meat Spice 200g
+       tier=3 size=match brand=False variants=[] coverage=0.6667 source_trust=3 gtin=None
+       VLM UNSURE view=front_packshot brand="INA PAARMAN'S" variant='MEAT SPICE' size=''
+       https://prod-spinneys-cdn-new.azureedge.net/media/cache/c3/78/c378791616775cec20e1af503a1dc309.jpg
+  #4 [rejected] serper/amazon.ae: Ina Paarman's Seasoning Meat Spice, 200ml (Pack of 1) : Amazon.ae: Grocery
+       tier=3 size=match brand=False variants=[] coverage=0.6667 source_trust=3 gtin=None
+       VLM MISMATCH view=banner brand="INA PAARMAN'S" variant='MEAT SPICE' size=''
+       https://m.media-amazon.com/images/I/81Kg9y7s0KL.jpg
+  #5 [rejected] serper/amazon.ae: Ina Paarman's Seasoning Meat Spice, 200ml (Pack of 1) : Amazon.ae: Grocery
+       tier=3 size=match brand=False variants=[] coverage=0.6667 source_trust=3 gtin=None quality=foreground>98%
+       https://m.media-amazon.com/images/I/61lwz5MN8CL.jpg
+  DECISION REVIEW_UNSELECTED  -> -
+  cost ~$0.0040 (3 SERP queries, 1 VLM calls), 17.3s
+
+=== row 38: KABANI MEAT MASALA160 GM | brand KABANI (sheet_raw) | gtin missing
+  query  KABANI MEAT MASALA160 GM
+  query  KABANI MEAT MASALA160 GM (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)
+  health serper     ok       http=200 n=20 2045ms   <- KABANI MEAT MASALA160 GM
+  health serper     ok       http=200 n=20 2164ms   <- KABANI MEAT MASALA160 GM (site:carrefouruae.com OR site:noon.com OR si
+  #1 [rejected] serper/facebook.com: With Kabani Meat Masala, transform every meal into a feast of flavor.  Perfectly
+       tier=2 size=unknown brand=True variants=[] coverage=1.0 source_trust=0 gtin=None fetch=too_small
+       https://lookaside.fbsbx.com/lookaside/crawler/media/?media_id=1439766450645221
+  #2 [rejected] serper/facebook.com: With Kabani Meat Masala, transform every meal into a feast of flavor.  Perfectly
+       tier=2 size=unknown brand=True variants=[] coverage=1.0 source_trust=0 gtin=None fetch=too_small
+       https://lookaside.fbsbx.com/lookaside/crawler/media/?media_id=1086758133319004
+  #3 [rejected] serper/facebook.com: With Kabani Meat Masala, transform every meal into a feast of flavor.  Perfectly
+       tier=2 size=unknown brand=True variants=[] coverage=1.0 source_trust=0 gtin=None fetch=too_small
+       https://lookaside.fbsbx.com/lookaside/crawler/media/?media_id=1081058363888981
+  #4 [rejected] serper/gcc.luluhypermarket.com: Kitchen Treasures Meat Masala 160 g Online at Best Price | Lulu UAE
+       tier=3 size=unknown brand=False variants=[] coverage=1.0 source_trust=3 gtin=None
+       VLM MISMATCH view=front_packshot brand='KITCHEN TREASURES' variant='Meat Masala' size='160g'
+       https://bf1af2.akinoncloudcdn.com/products/2024/09/12/75992/f56ba480-18e7-4e9e-9f21-e0440a7524d2.jpg
+  #5 [rejected] serper/gcc.luluhypermarket.com: Eastern Meat Masala Value Pack 160 g Online at Best Price | Lulu UAE
+       tier=3 size=unknown brand=False variants=[] coverage=1.0 source_trust=3 gtin=None
+       VLM MISMATCH view=front_packshot brand='Eastern' variant='Meat Masala' size=''
+       https://bf1af2.akinoncloudcdn.com/products/2025/08/04/169633/6b4be789-6e67-4881-8ce0-7048a7ca13c1_size1920x1920_cropCenter.jpg
+  DECISION REVIEW_UNSELECTED  -> -
+  cost ~$0.0030 (2 SERP queries, 1 VLM calls), 17.0s
+
+=== row 39: KITCHEN TREASURE MEAT MASALA 160GM | brand KITCHEN TREASURE (sheet_raw) | gtin missing
+  query  KITCHEN TREASURE MEAT MASALA 160g
+  query  KITCHEN TREASURE MEAT MASALA 160g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)
+  query  KITCHEN TREASURE MEAT MASALA
+  health serper     ok       http=200 n=20 2938ms   <- KITCHEN TREASURE MEAT MASALA 160g
+  health serper     ok       http=200 n=20 2089ms   <- KITCHEN TREASURE MEAT MASALA 160g (site:carrefouruae.com OR site:noon.
+  health serper     ok       http=200 n=20 3453ms   <- KITCHEN TREASURE MEAT MASALA
+  #1 [eligible] serper/gcc.luluhypermarket.com: Kitchen Treasures Meat Masala 160 g Online at Best Price | Lulu UAE
+       tier=3 size=match brand=False variants=[] coverage=1.0 source_trust=3 gtin=None
+       VLM UNSURE view=front_packshot brand='KITCHEN TREASURES' variant='Meat Masala' size='160g'
+       https://bf1af2.akinoncloudcdn.com/products/2024/09/12/75992/f56ba480-18e7-4e9e-9f21-e0440a7524d2.jpg
+  #2 [rejected] serper/carrefouruae.com: Buy Eastern Meat Masala 160g Online | Carrefour UAE
+       tier=3 size=match brand=False variants=[] coverage=1.0 source_trust=3 gtin=None
+       VLM MISMATCH view=front_packshot brand='Eastern' variant='Meat Masala' size='160g'
+       https://cdn.mafrservices.com/sys-master-root/hed/h27/62520952586270/1217616_main.jpg
+  #3 [rejected] serper/family.qa: Kitchen Treasures Meat Masala 160gm | Family Food Center - Qatar
+       tier=3 size=match brand=False variants=[] coverage=1.0 source_trust=0 gtin=None
+       VLM MISMATCH view=front_packshot brand='KITCHEN TREASURES' variant='Fish Fry Masala' size='100g'
+       https://res.cloudinary.com/family-food-centre/image/upload/w_3840,q_auto,f_auto/v1777362119/prod-ecom-v2/products/100322491/1777362118587.jpg
+  #4 [rejected] serper/sharjahcoop.ae: Eastern Meat Masala 160g | Sharjah Co-operative Society
+       tier=3 size=match brand=False variants=[] coverage=1.0 source_trust=0 gtin=None
+       VLM MISMATCH view=front_packshot brand='Eastern' variant='Meat Masala' size='160g'
+       https://www.sharjahcoop.ae/medias/1200Wx1200H-00000-8901440209355-001.jpg?context=bWFzdGVyfGltYWdlc3wyMTQ3NzR8aW1hZ2UvanBlZ3xhRFptTDJnM05TOHhNREF6TURZNU1UYzNPRFU1TUM4eE1qQXdWM2d4TWpBd1NGOHdNREF3TUY4NE9UQXhORFF3TWpBNU16VTFYekF3TVM1cWNHY3w1YWQ0N2U0NDg1NTA4ZTliZjU5MWU0ZDRlZTZkNWMyN2ViYjg4YjE0Zjg5ZmE0YzIyYzcyZGRjNzI1MGI2OWNh
+  #5 [eligible] serper/ansargallery.com: Kitchen Treasures Meat Masala 160g | Ansar Gallery
+       tier=3 size=match brand=False variants=[] coverage=1.0 source_trust=0 gtin=None
+       https://media.ansargallery.com/media/catalog/product/6/2/6291103782045_1.jpg
+  DECISION REVIEW_UNSELECTED  -> -
+  cost ~$0.0040 (3 SERP queries, 1 VLM calls), 17.9s
+
+=== row 40: LORENA LIGHT MEAT TUNA CHUNK W/S 185GM | brand LORENA (sheet_raw) | gtin missing
+  query  LORENA LIGHT MEAT TUNA CHUNK W/S 185g
+  health serper     ok       http=200 n=20 2820ms   <- LORENA LIGHT MEAT TUNA CHUNK W/S 185g
+  #1 [preselected] serper/amazon.ae: Lorena Light Meat Tuna Chunk in SF Oil - 185 g: Buy Online at Best Price in  UAE
+       tier=1 size=match brand=True variants=['fat'] coverage=1.0 source_trust=3 gtin=None
+       VLM MATCH view=front_packshot brand='LORENA' variant='light meat TUNA CHUNKS in sunflower oil' size='185g'
+       https://m.media-amazon.com/images/I/81ntNAXlCfL.jpg
+  #2 [eligible] serper/amazon.ae: Lorena Light Meat Tuna Solid in SF Oil 185g: Buy Online at Best Price in  UAE - 
+       tier=1 size=match brand=True variants=['fat'] coverage=0.6667 source_trust=3 gtin=None
+       VLM UNSURE view=other_side brand='' variant='' size=''
+       https://m.media-amazon.com/images/I/81z2wg8d+XL.jpg
+  #3 [rejected] serper/amazon.ae: Lorena Light Meat Tuna Solid in SF Oil 185g: Buy Online at Best Price in  UAE - 
+       tier=1 size=match brand=True variants=['fat'] coverage=0.6667 source_trust=3 gtin=None
+       VLM MISMATCH view=front_packshot brand='LORENA' variant='light meat TUNA SOLID in sunflower oil' size='185g'
+       https://m.media-amazon.com/images/I/71yZGfpPnoL.jpg
+  #4 [eligible] serper/amazon.ae: Lorena Light Meat Tuna Chunk in Water 185g: Buy Online at Best Price in UAE  - A
+       tier=2 size=match brand=True variants=['fat'] coverage=1.0 source_trust=3 gtin=None
+       VLM UNSURE view=other_side brand='' variant='' size=''
+       https://m.media-amazon.com/images/I/81InA6IH+6L.jpg
+  #5 [eligible] serper/gfb.ae: Lorena Light Meat Tuna Chunks in Water & Salt 185g
+       tier=2 size=match brand=True variants=['fat'] coverage=1.0 source_trust=0 gtin=None
+       http://gfb.ae/cdn/shop/files/Lorena_Light_Meat_Tuna_Chunks_in_Water___Salt_185g_6291103380333_T1.jpg?v=1747729860
+  DECISION REVIEW_PRESELECTED  -> https://m.media-amazon.com/images/I/81ntNAXlCfL.jpg
+  cost ~$0.0020 (1 SERP queries, 1 VLM calls), 11.4s
+
+=== row 41: MAHRA MEAT MASALA 100GM | brand MAHRA (sheet_raw) | gtin missing
+  query  MAHRA MEAT MASALA 100g
+  query  MAHRA MEAT MASALA 100g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)
+  health serper     ok       http=200 n=20 1909ms   <- MAHRA MEAT MASALA 100g
+  health serper     ok       http=200 n=20 1612ms   <- MAHRA MEAT MASALA 100g (site:carrefouruae.com OR site:noon.com OR site
+  #1 [rejected] serper/instagram.com: This Ramadan, let the authentic taste of Mahra Mutton Masala bring your  family 
+       tier=2 size=unknown brand=True variants=[] coverage=0.5 source_trust=0 gtin=None fetch=not_image
+       https://lookaside.instagram.com/seo/google_widget/crawler/?media_id=3851896056351182294
+  #2 [rejected] serper/instagram.com: This Ramadan, let the authentic taste of Mahra Mutton Masala bring your  family 
+       tier=2 size=unknown brand=True variants=[] coverage=0.5 source_trust=0 gtin=None fetch=not_image
+       https://lookaside.instagram.com/seo/google_widget/crawler/?media_id=3851896050831460368
+  #3 [rejected] serper/instagram.com: This Ramadan, let the authentic taste of Mahra Mutton Masala bring your  family 
+       tier=2 size=unknown brand=True variants=[] coverage=0.5 source_trust=0 gtin=None fetch=not_image
+       https://lookaside.instagram.com/seo/google_widget/crawler/?media_id=3962091374976835381
+  #4 [rejected] serper/instagram.com: This Ramadan, let the authentic taste of Mahra Mutton Masala bring your  family 
+       tier=2 size=unknown brand=True variants=[] coverage=0.5 source_trust=0 gtin=None fetch=not_image
+       https://lookaside.instagram.com/seo/google_widget/crawler/?media_id=3963580427697977475
+  #5 [rejected] serper/gcc.luluhypermarket.com: Eastern Meat Masala 100 g Online at Best Price | Lulu UAE
+       tier=3 size=match brand=False variants=[] coverage=1.0 source_trust=3 gtin=None
+       VLM MISMATCH view=front_packshot brand='Eastern' variant='Meat Masala' size=''
+       https://bf1af2.akinoncloudcdn.com/products/2025/08/04/169633/6b4be789-6e67-4881-8ce0-7048a7ca13c1_size1920x1920_cropCenter.jpg
+  DECISION REVIEW_UNSELECTED  -> -
+  cost ~$0.0030 (2 SERP queries, 1 VLM calls), 10.9s
+
+=== row 42: MUKALLA WHITE MEAT TUNA WITH VEG 185GM | brand MUKALLA (sheet_raw) | gtin missing
+  query  MUKALLA WHITE MEAT TUNA WITH VEG 185g
+  query  MUKALLA WHITE MEAT TUNA WITH VEG 185g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)
+  health serper     ok       http=200 n=20 2633ms   <- MUKALLA WHITE MEAT TUNA WITH VEG 185g
+  health serper     ok       http=200 n=20 2154ms   <- MUKALLA WHITE MEAT TUNA WITH VEG 185g (site:carrefouruae.com OR site:n
+  #1 [rejected] serper/unioncoop.ae: Buy Mukalla Fancy Meat Tuna with Vegetable Oil 185 gm | Union Coop
+       tier=2 size=match brand=True variants=[] coverage=0.75 source_trust=3 gtin=None
+       VLM MISMATCH view=front_packshot brand='العلالي' variant='لحم تونا فاخر' size='170 g'
+       https://www.unioncoop.ae/media/catalog/product/6/1/617950144953_ar.jpg
+  #2 [rejected] serper/unioncoop.ae: Buy Mukalla Fancy Meat Tuna with Vegetable Oil 185 gm | Union Coop
+       tier=2 size=match brand=True variants=[] coverage=0.75 source_trust=3 gtin=None
+       VLM MISMATCH view=front_packshot brand='alalali' variant='FANCY MEAT TUNA' size='170 g'
+       https://www.unioncoop.ae/media/catalog/product/6/1/617950143192_eng.jpg
+  #3 [rejected] serper/unioncoop.ae: Buy Mukalla Fancy Meat Tuna with Vegetable Oil 185 gm | Union Coop
+       tier=2 size=match brand=True variants=[] coverage=0.75 source_trust=3 gtin=None
+       VLM MISMATCH view=front_packshot brand='العلالي' variant='لحم تونا أبيض' size='170 g'
+       https://www.unioncoop.ae/media/catalog/product/6/1/617950143178_ar.jpg
+  #4 [rejected] serper/carton.sa: Carton Wholesale - "Save Big, Shop Smart! Wholesale Groceries Delivered to  Your
+       tier=2 size=match brand=True variants=[] coverage=0.75 source_trust=0 gtin=None
+       VLM MISMATCH view=front_packshot brand='Rana' variant='Light Meat Tuna Solid' size='185gm'
+       https://www.carton.sa/storage/productImages/4908/WhatsApp%20Image%202026-07-07%20at%208.13.39%20AM_1783403458.jpeg
+  #5 [preselected] serper/carton.sa: Carton Wholesale - "Save Big, Shop Smart! Wholesale Groceries Delivered to  Your
+       tier=2 size=match brand=True variants=[] coverage=0.75 source_trust=0 gtin=None
+       VLM MATCH view=front_packshot brand='MUKALLA' variant='WHITE MEAT TUNA WITH VEGETABLE OIL' size='185 g'
+       https://www.carton.sa/storage/productImages/4783/WhatsApp%20Image%202025-10-14%20at%2010.07.41%20AM_1760425491.jpeg
+  DECISION REVIEW_PRESELECTED  -> https://www.carton.sa/storage/productImages/4783/WhatsApp%20Image%202025-10-14%20at%2010.07.41%20AM_1760425491.jpeg
+  cost ~$0.0040 (2 SERP queries, 2 VLM calls), 14.8s
+
+=== row 43: NELLARA MEAT MASALA 165GM | brand NELLARA (sheet_raw) | gtin missing
+  query  NELLARA MEAT MASALA 165g
+  health serper     ok       http=200 n=20 1258ms   <- NELLARA MEAT MASALA 165g
+  #1 [rejected] serper/amazon.ae: Nellara Fish Masala, 165 gm : Amazon.ae: Grocery
+       tier=1 size=match brand=True variants=[] coverage=0.5 source_trust=3 gtin=None
+       VLM MISMATCH view=front_packshot brand='NELLARA' variant='FISH MASALA' size='165 g'
+       https://m.media-amazon.com/images/I/61eTxqxXUUL.jpg
+  #2 [rejected] serper/amazon.ae: Nellara Meat Masala Powder 165grams : Amazon.ae: Grocery
+       tier=2 size=match brand=True variants=[] coverage=1.0 source_trust=3 gtin=None
+       VLM MISMATCH view=multi_product brand='Mehran' variant='Karahi Gosht' size='50g'
+       https://images-eu.ssl-images-amazon.com/images/I/819rZ1Y0r7L.jpg
+  #3 [preselected] serper/amazon.ae: Nellara Meat Masala Powder 165grams : Amazon.ae: Grocery
+       tier=2 size=match brand=True variants=[] coverage=1.0 source_trust=3 gtin=None
+       VLM MATCH view=front_packshot brand='NELLARA' variant='MEAT MASALA' size='165 g'
+       https://images-eu.ssl-images-amazon.com/images/I/41SZuipj4fL.jpg
+  #4 [rejected] serper/cart-online.com: NELLARA MEAT MASALA POWDER 165G DUPLEX
+       tier=2 size=match brand=True variants=[] coverage=1.0 source_trust=0 gtin=None
+       VLM MISMATCH view=front_packshot brand='NELLARA' variant='CHICKEN' size=''
+       https://cart-online.com/uploads/146/25/07/07686e093e045560907251752041790medium.webp
+  #5 [eligible] serper/ae.grandhyper.com: Nellara Meat Masala Powder 165 g
+       tier=2 size=match brand=True variants=[] coverage=1.0 source_trust=0 gtin=None
+       https://uae-image-bucket.s3.ap-south-1.amazonaws.com/products/6295151220092_1.webp
+  DECISION REVIEW_PRESELECTED  -> https://images-eu.ssl-images-amazon.com/images/I/41SZuipj4fL.jpg
+  cost ~$0.0020 (1 SERP queries, 1 VLM calls), 18.4s
+
+=== row 44: NIRAPARA MEAT MASALA 200GM | brand NIRAPARA (sheet_raw) | gtin missing
+  query  NIRAPARA MEAT MASALA 200g
+  health serper     ok       http=200 n=20 4746ms   <- NIRAPARA MEAT MASALA 200g
+  #1 [rejected] serper/amazon.ae: NIRAPARA MEAT MASALA - 200 GM: Buy Online at Best Price in UAE - Amazon.ae
+       tier=1 size=match brand=True variants=[] coverage=1.0 source_trust=3 gtin=None
+       VLM MISMATCH view=front_packshot brand='AWAFI MILL' variant='PAPRIKA POWDER' size='100 g'
+       https://images-eu.ssl-images-amazon.com/images/I/61n+LyZBFfL.jpg
+  #2 [rejected] serper/amazon.ae: NIRAPARA MEAT MASALA - 200 GM: Buy Online at Best Price in UAE - Amazon.ae
+       tier=1 size=match brand=True variants=[] coverage=1.0 source_trust=3 gtin=None
+       VLM MISMATCH view=front_packshot brand='Goodness UAE' variant='' size=''
+       https://images-eu.ssl-images-amazon.com/images/I/51wvAlBN9JL.jpg
+  #3 [rejected] serper/amazon.ae: NIRAPARA MEAT MASALA - 200 GM: Buy Online at Best Price in UAE - Amazon.ae
+       tier=1 size=match brand=True variants=[] coverage=1.0 source_trust=3 gtin=None
+       VLM MISMATCH view=front_packshot brand='AMERICAN HARVEST' variant='PAPRIKA POWDER' size='200G'
+       https://images-eu.ssl-images-amazon.com/images/I/61Va0qwYKvL.jpg
+  #4 [preselected] serper/gcc.luluhypermarket.com: Nirapara Meat Masala 200 g
+       tier=1 size=match brand=True variants=[] coverage=1.0 source_trust=3 gtin=None
+       VLM MATCH view=front_packshot brand='NIRAPARA' variant='Meat Masala' size='200g'
+       https://bf1af2.akinoncloudcdn.com/products/2024/09/12/76169/788294db-d2d2-47c4-9120-90d3e240f9a3.jpg
+  #5 [eligible] serper/amazon.ae: NIRAPARA MEAT MASALA - 200 GM: Buy Online at Best Price in UAE - Amazon.ae
+       tier=1 size=match brand=True variants=[] coverage=1.0 source_trust=3 gtin=None
+       https://images-eu.ssl-images-amazon.com/images/I/71+NqdtYw5L.jpg
+  DECISION REVIEW_PRESELECTED  -> https://bf1af2.akinoncloudcdn.com/products/2024/09/12/76169/788294db-d2d2-47c4-9120-90d3e240f9a3.jpg
+  cost ~$0.0020 (1 SERP queries, 1 VLM calls), 12.6s
+
+=== row 45: RIO MARIE LIGHT MEAT TUNA IN SUN OIL 3X70GM | brand RIO MARIE (sheet_raw) | gtin missing
+  query  RIO MARIE LIGHT MEAT TUNA IN SUN OIL 3x70g
+  query  RIO MARIE LIGHT MEAT TUNA IN SUN OIL 3x70g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)
+  query  RIO MARIE MEAT TUNA IN SUN OIL 3x70g
+  query  RIO MARIE LIGHT MEAT TUNA IN SUN OIL
+  health serper     ok       http=200 n=20 3796ms   <- RIO MARIE LIGHT MEAT TUNA IN SUN OIL 3x70g
+  health serper     ok       http=200 n=20 1741ms   <- RIO MARIE LIGHT MEAT TUNA IN SUN OIL 3x70g (site:carrefouruae.com OR s
+  health serper     ok       http=200 n=20 1920ms   <- RIO MARIE MEAT TUNA IN SUN OIL 3x70g
+  health serper     ok       http=200 n=20 1736ms   <- RIO MARIE LIGHT MEAT TUNA IN SUN OIL
+  #1 [rejected] serper/gcc.luluhypermarket.com: Rio Mare Light Meat Tuna In Sunflower Oil 70 g
+       tier=3 size=match brand=False variants=['fat'] coverage=0.75 source_trust=3 gtin=None
+       VLM MISMATCH view=front_packshot brand='RIO mare' variant='Light Meat Tuna in Sunflower Oil' size=''
+       https://bf1af2.akinoncloudcdn.com/products/2024/09/11/64803/0fa68e28-f99e-4d68-9b8f-d289c1d049bd_size1920x1920_cropCenter.jpg
+  #2 [rejected] serper/gcc.luluhypermarket.com: Rio Mare Light Meat Tuna In Sunflower Oil 70 g Online at Best Price | Lulu  UAE
+       tier=3 size=match brand=False variants=['fat'] coverage=0.75 source_trust=3 gtin=None
+       VLM MISMATCH view=front_packshot brand='RIO mare' variant='Light Meat Tuna in Sunflower Oil' size=''
+       https://bf1af2.akinoncloudcdn.com/products/2024/09/11/64803/961e3f04-054d-4833-a061-751e3dd60b2c.jpg
+  #3 [eligible] serper/carrefouruae.com: Buy Rio Mare Light Meat Tuna in Sunflower Oil, 70g Pack of 3 Online |  Carrefour
+       tier=3 size=match brand=False variants=['fat'] coverage=0.75 source_trust=3 gtin=None
+       VLM UNSURE view=front_packshot brand='RIO mare' variant='Light Meat Tuna in Sunflower Oil' size='3x70g'
+       https://cdn.mafrservices.com/pim-content/UAE/media/product/1730324/1751832003/1730324_main.jpg
+  #4 [eligible] serper/amazon.ae: Rio Mare Light Meat Tuna In Sunflower Oil 70G×3: Buy Online at Best Price  in UA
+       tier=3 size=match brand=False variants=['fat'] coverage=0.75 source_trust=3 gtin=None
+       VLM UNSURE view=front_packshot brand='RIO mare' variant='Light Meat Tuna in Sunflower Oil' size='3x70g'
+       https://m.media-amazon.com/images/I/71s13kH9h2L.jpg
+  #5 [eligible] serper/noon.com: Rio Mare Light Meat Tuna In Sunflower Oil 70grams Pack of 3 | Best Price  UAE | 
+       tier=3 size=match brand=False variants=['fat'] coverage=0.75 source_trust=3 gtin=None
+       https://f.nooncdn.com/p/pnsku/N44333374A/45/_/1739335350/45fbb757-7e23-4230-a4f1-1ad18e4ead2f.jpg
+  DECISION REVIEW_UNSELECTED  -> -
+  cost ~$0.0050 (4 SERP queries, 1 VLM calls), 17.8s
+
+=== row 46: ROYAL ARM LIGHT MEAT TUNA FLAKES 170GM | brand ROYAL ARM (sheet_raw) | gtin missing
+  query  ROYAL ARM LIGHT MEAT TUNA FLAKES 170g
+  query  ROYAL ARM LIGHT MEAT TUNA FLAKES 170g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)
+  health serper     ok       http=200 n=20 1432ms   <- ROYAL ARM LIGHT MEAT TUNA FLAKES 170g
+  health serper     ok       http=200 n=20 6693ms   <- ROYAL ARM LIGHT MEAT TUNA FLAKES 170g (site:carrefouruae.com OR site:n
+  #1 [eligible] serper/shopee.ph: Royal Arm Light Meat Tuna Flakes in Sunflower Oil 170g | Shopee Philippines
+       tier=2 size=match brand=True variants=['fat'] coverage=1.0 source_trust=0 gtin=None
+       VLM UNKNOWN view= brand='' variant='' size=''
+       https://down-ph.img.susercontent.com/file/ph-11134207-7r98u-lr5cz4chgbpgd5
+  #2 [eligible] serper/shopee.ph: Royal Arm Light Meat Tuna Flakes in Sunflower Oil 170g | Shopee Philippines
+       tier=2 size=match brand=True variants=['fat'] coverage=1.0 source_trust=0 gtin=None
+       VLM UNKNOWN view= brand='' variant='' size=''
+       https://down-ph.img.susercontent.com/file/ph-11134207-7r98w-lr5cz4chdikkcb
+  #3 [eligible] serper/lazada.com.ph: Royal Arm Light Meat Tuna Flakes in Sunflower Oil 170g | Lazada Philippines
+       tier=2 size=match brand=True variants=['fat'] coverage=1.0 source_trust=0 gtin=None
+       VLM UNKNOWN view= brand='' variant='' size=''
+       https://ph-live-01.slatic.net/p/2b17eb100a71c10458a27a4f605037cf.jpg
+  #4 [eligible] serper/shopee.ph: Royal Arm Light Meat Tuna Flakes in Sunflower Oil 170g | Shopee Philippines
+       tier=2 size=match brand=True variants=['fat'] coverage=1.0 source_trust=0 gtin=None
+       VLM UNKNOWN view= brand='' variant='' size=''
+       https://down-ph.img.susercontent.com/file/ph-11134207-7r98x-lrplkjp5rmd194
+  #5 [eligible] serper/lazada.com.ph: Royal Arm Light Meat Tuna Flakes in Sunflower Oil 170g | Lazada Philippines
+       tier=2 size=match brand=True variants=['fat'] coverage=1.0 source_trust=0 gtin=None
+       https://img.lazcdn.com/g/p/7490aea00633788cc743d31ba448b3ab.jpg_720x720q80.jpg_.webp
+  DECISION REVIEW_UNSELECTED VERIFIER_DOWN -> -
+  cost ~$0.0030 (2 SERP queries, 1 VLM calls), 32.1s
+
+=== row 47: SARAS MEAT MASALA 160GM | brand SARAS (sheet_raw) | gtin missing
+  query  SARAS MEAT MASALA 160g
+  query  SARAS MEAT MASALA 160g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)
+  query  SARAS MEAT MASALA
+  health serper     error    http=None n=0 15018ms timeout  <- SARAS MEAT MASALA 160g
+  health bing_html  error    http=None n=0 4ms ProxyError: Failed to perform, curl: (5) Could not resolve proxy: gate.smartproxy.com. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.  <- SARAS MEAT MASALA 160g
+  health serper     error    http=None n=0 3ms ConnectionError: HTTPSConnectionPool(host='google.serper.dev', port=443): Max retries exceeded with url: /images (Caused by NameResolutionError("HTTPSConnection(host='google.serper.dev', port=443): Failed to resolve 'google.serper.dev' ([Errno 11001] getaddrinfo failed)"))  <- SARAS MEAT MASALA 160g (site:carrefouruae.com OR site:noon.com OR site
+  health serper     error    http=None n=0 2ms ConnectionError: HTTPSConnectionPool(host='google.serper.dev', port=443): Max retries exceeded with url: /images (Caused by NameResolutionError("HTTPSConnection(host='google.serper.dev', port=443): Failed to resolve 'google.serper.dev' ([Errno 11001] getaddrinfo failed)"))  <- SARAS MEAT MASALA
+  health bing_html  error    http=None n=0 4ms ProxyError: Failed to perform, curl: (5) Could not resolve proxy: gate.smartproxy.com. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.  <- SARAS MEAT MASALA
+  DECISION PROVIDER_DOWN PROVIDER_DOWN -> -
+  cost ~$0.0050 (5 SERP queries, 0 VLM calls), 15.0s
+
+=== row 48: SHAN MEAT MASALA 100GM | brand SHAN (sheet_raw) | gtin missing
+  query  SHAN MEAT MASALA 100g
+  query  SHAN MEAT MASALA 100g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)
+  query  SHAN MEAT MASALA
+  health serper     error    http=None n=0 3ms ConnectionError: HTTPSConnectionPool(host='google.serper.dev', port=443): Max retries exceeded with url: /images (Caused by NameResolutionError("HTTPSConnection(host='google.serper.dev', port=443): Failed to resolve 'google.serper.dev' ([Errno 11001] getaddrinfo failed)"))  <- SHAN MEAT MASALA 100g
+  health bing_html  error    http=None n=0 4979ms ProxyError: Failed to perform, curl: (5) Could not resolve proxy: gate.smartproxy.com. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.  <- SHAN MEAT MASALA 100g
+  health serper     error    http=None n=0 8ms ConnectionError: HTTPSConnectionPool(host='google.serper.dev', port=443): Max retries exceeded with url: /images (Caused by NameResolutionError("HTTPSConnection(host='google.serper.dev', port=443): Failed to resolve 'google.serper.dev' ([Errno 11001] getaddrinfo failed)"))  <- SHAN MEAT MASALA 100g (site:carrefouruae.com OR site:noon.com OR site:
+  health serper     error    http=None n=0 2ms ConnectionError: HTTPSConnectionPool(host='google.serper.dev', port=443): Max retries exceeded with url: /images (Caused by NameResolutionError("HTTPSConnection(host='google.serper.dev', port=443): Failed to resolve 'google.serper.dev' ([Errno 11001] getaddrinfo failed)"))  <- SHAN MEAT MASALA
+  health bing_html  error    http=None n=0 16152ms timeout  <- SHAN MEAT MASALA
+  DECISION PROVIDER_DOWN PROVIDER_DOWN -> -
+  cost ~$0.0050 (5 SERP queries, 0 VLM calls), 21.2s
+
+=== row 49: SUP/T WT/MEAT SOLIDTUNA SALTWATER 185GM | brand SUP/T (sheet_raw) | gtin missing
+  query  SUP/T WT/MEAT SOLIDTUNA SALTWATER 185g
+  query  SUP/T WT/MEAT SOLIDTUNA SALTWATER 185g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)
+  query  SUP/T WT/MEAT SOLIDTUNA SALTWATER
+  health serper     error    http=None n=0 11137ms ConnectionError: HTTPSConnectionPool(host='google.serper.dev', port=443): Max retries exceeded with url: /images (Caused by NameResolutionError("HTTPSConnection(host='google.serper.dev', port=443): Failed to resolve 'google.serper.dev' ([Errno 11001] getaddrinfo failed)"))  <- SUP/T WT/MEAT SOLIDTUNA SALTWATER 185g
+  health bing_html  error    http=None n=0 12061ms timeout  <- SUP/T WT/MEAT SOLIDTUNA SALTWATER 185g
+  health serper     error    http=None n=0 12041ms ConnectionError: HTTPSConnectionPool(host='google.serper.dev', port=443): Max retries exceeded with url: /images (Caused by NameResolutionError("HTTPSConnection(host='google.serper.dev', port=443): Failed to resolve 'google.serper.dev' ([Errno 11001] getaddrinfo failed)"))  <- SUP/T WT/MEAT SOLIDTUNA SALTWATER 185g (site:carrefouruae.com OR site:
+  health serper     error    http=None n=0 12038ms ConnectionError: HTTPSConnectionPool(host='google.serper.dev', port=443): Max retries exceeded with url: /images (Caused by NameResolutionError("HTTPSConnection(host='google.serper.dev', port=443): Failed to resolve 'google.serper.dev' ([Errno 11001] getaddrinfo failed)"))  <- SUP/T WT/MEAT SOLIDTUNA SALTWATER
+  health bing_html  error    http=None n=0 12054ms timeout  <- SUP/T WT/MEAT SOLIDTUNA SALTWATER
+  DECISION PROVIDER_DOWN PROVIDER_DOWN -> -
+  cost ~$0.0050 (5 SERP queries, 0 VLM calls), 59.3s
+
+=== row 50: SUPER T/MEAT SOLID TUNA SALT WATE3X185GM | brand SUPER T/ (sheet_raw) | gtin missing
+  query  SUPER T/ SOLID TUNA SALT WATE3X185GM
+  query  SUPER T/ SOLID TUNA SALT WATE3X185GM (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)
+  health serper     error    http=None n=0 12069ms ConnectionError: HTTPSConnectionPool(host='google.serper.dev', port=443): Max retries exceeded with url: /images (Caused by NameResolutionError("HTTPSConnection(host='google.serper.dev', port=443): Failed to resolve 'google.serper.dev' ([Errno 11001] getaddrinfo failed)"))  <- SUPER T/ SOLID TUNA SALT WATE3X185GM
+  health bing_html  error    http=None n=0 12036ms timeout  <- SUPER T/ SOLID TUNA SALT WATE3X185GM
+  health serper     error    http=None n=0 12042ms ConnectionError: HTTPSConnectionPool(host='google.serper.dev', port=443): Max retries exceeded with url: /images (Caused by NameResolutionError("HTTPSConnection(host='google.serper.dev', port=443): Failed to resolve 'google.serper.dev' ([Errno 11001] getaddrinfo failed)"))  <- SUPER T/ SOLID TUNA SALT WATE3X185GM (site:carrefouruae.com OR site:no
+  DECISION PROVIDER_DOWN PROVIDER_DOWN -> -
+  cost ~$0.0030 (3 SERP queries, 0 VLM calls), 36.2s
+
+=== row 51: SUPER T/MEAT SOLID TUNA SUNFL OIL3X185GM | brand SUPER T/ (sheet_raw) | gtin missing
+  query  SUPER T/ SOLID TUNA SUNFL OIL3X185GM
+  query  SUPER T/ SOLID TUNA SUNFL OIL3X185GM (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)
+  health serper     ok       http=200 n=20 1999ms   <- SUPER T/ SOLID TUNA SUNFL OIL3X185GM
+  health serper     ok       http=200 n=20 2367ms   <- SUPER T/ SOLID TUNA SUNFL OIL3X185GM (site:carrefouruae.com OR site:no
+  #1 [rejected] serper/carrefouruae.com: Buy California Garden Light Solid Tuna in Sunflower Oil, 185g Online |  Carrefou
+       tier=3 size=unknown brand=False variants=[] coverage=0.8 source_trust=3 gtin=None
+       VLM MISMATCH view=front_packshot brand='CALIFORNIA GARDEN' variant='LIGHT SOLID TUNA IN SUNFLOWER OIL' size=''
+       https://cdn.mafrservices.com/pim-content/UAE/media/product/10864/1749376805/10864_main.jpg
+  #2 [rejected] serper/amazon.ae: Lorena Light Meat Tuna Solid in SF Oil 185g: Buy Online at Best Price in  UAE - 
+       tier=3 size=unknown brand=False variants=[] coverage=0.8 source_trust=3 gtin=None
+       VLM MISMATCH view=front_packshot brand='LORENA' variant='light meat TUNA SOLID in sunflower oil' size='185g'
+       https://m.media-amazon.com/images/I/71yZGfpPnoL.jpg
+  #3 [rejected] serper/gcc.luluhypermarket.com: LuLu Light Meat Tuna Solid In Sunflower Oil 3 x 185 g Online at Best Price  | Lu
+       tier=3 size=unknown brand=False variants=[] coverage=0.8 source_trust=3 gtin=None
+       VLM MISMATCH view=front_packshot brand='LuLu' variant='LIGHT MEAT TUNA in SUNFLOWER OIL SOLID' size=''
+       https://bf1af2.akinoncloudcdn.com/products/2024/09/11/65156/04227906-fb39-4be2-b183-45b8d30f6388_size256_cropCenter.jpg
+  #4 [rejected] serper/tradeling.com: Buy Super Tasty White Meat Solid Premium Tuna In Sunflower Oil 185g x 3  Pieces 
+       tier=3 size=unknown brand=False variants=[] coverage=0.8 source_trust=0 gtin=None
+       VLM MISMATCH view=front_packshot brand='Super Tasty' variant='WHITE MEAT TUNA IN SUNFLOWER OIL SOLID' size='185 g'
+       https://c8n.tradeling.com/img/plain/pim/rs:auto:1600::0/f:webp/q:90/up/5fba0c6142480f001bed85d4/403af066d1b25692bc6d35a00da83507.jpg
+  #5 [eligible] serper/tradeling.com: Buy Pran Tuna Light Meat Solid In Sunflower Oil 185g,Carton of 48pcs Online  in 
+       tier=3 size=unknown brand=False variants=[] coverage=0.8 source_trust=0 gtin=None
+       https://c8n.tradeling.com/img/plain/pim/rs:auto:1600::0/f:webp/q:90/up/670164cfc913175ba0aad7de/57a11c9487a29c824e9bae4ee9f00ecf.jpg
+  DECISION REVIEW_UNSELECTED  -> -
+  cost ~$0.0030 (2 SERP queries, 1 VLM calls), 12.3s
+
+=== row 52: SUPER/T LIGHT MEAT TUNA SOBEANOIL 185GM | brand SUPER/T (sheet_raw) | gtin missing
+  query  SUPER/T LIGHT MEAT TUNA SOBEANOIL 185g
+  query  SUPER/T LIGHT MEAT TUNA SOBEANOIL 185g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)
+  query  SUPER/T MEAT TUNA SOBEANOIL 185g
+  query  SUPER/T LIGHT MEAT TUNA SOBEANOIL
+  health serper     ok       http=200 n=20 1813ms   <- SUPER/T LIGHT MEAT TUNA SOBEANOIL 185g
+  health serper     ok       http=200 n=20 2212ms   <- SUPER/T LIGHT MEAT TUNA SOBEANOIL 185g (site:carrefouruae.com OR site:
+  health serper     ok       http=200 n=20 2214ms   <- SUPER/T MEAT TUNA SOBEANOIL 185g
+  health serper     ok       http=200 n=20 1870ms   <- SUPER/T LIGHT MEAT TUNA SOBEANOIL
+  #1 [rejected] serper/gcc.luluhypermarket.com: LuLu Light Meat Tuna Solid In Brine 185 g Online at Best Price | Lulu UAE
+       tier=3 size=match brand=False variants=['fat'] coverage=0.6667 source_trust=3 gtin=None
+       VLM MISMATCH view=front_packshot brand='Lulu' variant='Light Meat Tuna' size=''
+       https://bf1af2.akinoncloudcdn.com/products/2024/09/11/64762/82dd1a2b-7c60-4426-8d03-81737ab53acb_size1920x1920_cropCenter.jpg
+  #2 [rejected] serper/gcc.luluhypermarket.com: Aloha Light Meat Tuna in Vegetable Oil 185 g Online at Best Price | Lulu UAE
+       tier=3 size=match brand=False variants=['fat'] coverage=0.6667 source_trust=3 gtin=None
+       VLM MISMATCH view=front_packshot brand='OHA TUNA' variant='Light Meat Tuna, Vegetable Oil (Canola)' size='185g'
+       https://bf1af2.akinoncloudcdn.com/products/2025/05/16/330928/fa1ff631-2141-4846-b85d-c2d2ac484cca_size1920x1920_cropCenter.jpg
+  #3 [rejected] serper/gcc.luluhypermarket.com: American Light Meat Tuna 185 g Online at Best Price | Lulu UAE
+       tier=3 size=match brand=False variants=['fat'] coverage=0.6667 source_trust=3 gtin=None
+       VLM MISMATCH view=front_packshot brand='American' variant='Light Meat Tuna, Sunflower Oil' size='6.5OZ'
+       https://bf1af2.akinoncloudcdn.com/products/2024/09/11/65163/ff87c10e-5f12-4a74-8cfd-f1d6a30b1885.jpg
+  #4 [rejected] serper/talabat.com: Buy Goody Light Meat Tuna in Brine Water, 185g Online in Bahrain | Talabat  Bahr
+       tier=3 size=match brand=False variants=['fat'] coverage=0.6667 source_trust=3 gtin=None
+       VLM MISMATCH view=front_packshot brand='Goody' variant='Light Meat Tuna, In Brine Water' size=''
+       https://talabat.dhmedia.io/image/talabat/MenuItems/6281014800440_637452970790291963.jpg?size=520
+  #5 [eligible] serper/amazon.ae: Le Supreme Light Meat Tuna in Sunflower Oil 185 g Can, Premium Quality: Buy  Onl
+       tier=3 size=match brand=False variants=['fat'] coverage=0.6667 source_trust=3 gtin=None
+       https://images-eu.ssl-images-amazon.com/images/I/71mTSUwfKqL.jpg
+  DECISION REVIEW_UNSELECTED  -> -
+  cost ~$0.0050 (4 SERP queries, 1 VLM calls), 17.7s
+
+=== row 53: TARGET CHICKN LUNCHENMEAT RECTANGL 340GM | brand TARGET (sheet_raw) | gtin missing
+  query  TARGET CHICKN LUNCHENMEAT RECTANGL 340g
+  query  TARGET CHICKN LUNCHENMEAT RECTANGL 340g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)
+  health serper     ok       http=200 n=20 1584ms   <- TARGET CHICKN LUNCHENMEAT RECTANGL 340g
+  health serper     ok       http=200 n=20 1651ms   <- TARGET CHICKN LUNCHENMEAT RECTANGL 340g (site:carrefouruae.com OR site
+  #1 [rejected] serper/amazon.ae: Target Beef Luncheon Meat 340 Gm: Buy Online at Best Price in UAE -  Amazon.ae
+       tier=2 size=match brand=True variants=[] coverage=0.0 source_trust=3 gtin=None
+       VLM MISMATCH view=front_packshot brand='TARGET' variant='BEEF Luncheon Meat' size='340 grams'
+       https://m.media-amazon.com/images/I/71yLfegUU4L.jpg
+  #2 [eligible] serper/carrefourksa.com: Buy Target Chicken Luncheon Meat 340g Online | Carrefour KSA
+       tier=2 size=match brand=True variants=[] coverage=0.0 source_trust=1 gtin=None
+       VLM UNSURE view=front_packshot brand='TARGET' variant='CHICKEN Luncheon Meat' size=''
+       https://cdn.mafrservices.com/sys-master-root/h6a/h57/14184893808670/576551_main.jpg
+  #3 [eligible] serper/emdadx.com: Target Chicken Luncheon Meat - Box Of 24 Pcs - 340 Gm For Piece | امداد إكس
+       tier=2 size=match brand=True variants=[] coverage=0.0 source_trust=0 gtin=None
+       VLM UNSURE view=front_packshot brand='TARGET' variant='CHICKEN Luncheon Meat' size=''
+       https://emdadx.com/wp-content/uploads/2023/09/Target-Chicken-Luncheon-Meat-Box-Of-24-Pcs-340-gm-For-Piece.jpg
+  #4 [rejected] serper/emdadx.com: Target Chicken Luncheon Meat - Box Of 24 Pcs - 340 Gm For Piece | امداد إكس
+       tier=2 size=match brand=True variants=[] coverage=0.0 source_trust=0 gtin=None
+       VLM MISMATCH view=front_packshot brand='DANBORG' variant='CHICKEN LUNCHEON MEAT' size='340g'
+       https://emdadx.com/wp-content/uploads/2023/09/Danborg-Chicken-Luncheon-Meat-Box-Of-24-Pcs-340-gm-For-Piece-430x587.jpg
+  #5 [eligible] serper/hungerstation.com: Buy Target Chicken Luncheon Meat 340g in Saudi Arabia | HungerStation
+       tier=2 size=match brand=True variants=[] coverage=0.0 source_trust=0 gtin=None
+       VLM UNSURE view=other_side brand='TARGETER' variant='Chicken Meat' size='340g'
+       https://hungerstation.dhmedia.io/image/product-information-management/6694e763b507613748fc12bb.jpg
+  DECISION REVIEW_UNSELECTED  -> -
+  cost ~$0.0040 (2 SERP queries, 2 VLM calls), 14.6s
+
+=== row 54: TASTY FOOD MEAT MASALA 160 GM | brand TASTY FOOD (sheet_raw) | gtin missing
+  query  TASTY FOOD MEAT MASALA 160g
+  health serper     ok       http=200 n=20 3154ms   <- TASTY FOOD MEAT MASALA 160g
+  #1 [preselected] serper/amazon.ae: Tasty Food Meat Masala 160gm: Buy Online at Best Price in UAE - Amazon.ae
+       tier=1 size=match brand=True variants=[] coverage=1.0 source_trust=3 gtin=None
+       VLM MATCH view=front_packshot brand='Tasty Food' variant='Meat Masala' size='160 g'
+       https://m.media-amazon.com/images/I/41JIWBVJD9L.jpg
+  #2 [rejected] serper/amazon.ae: Tasty Food Chicken Masala 160gm: Buy Online at Best Price in UAE - Amazon.ae
+       tier=1 size=match brand=True variants=[] coverage=0.5 source_trust=3 gtin=None
+       VLM MISMATCH view=front_packshot brand='Tasty Food' variant='Chicken Masala' size='160 g'
+       https://m.media-amazon.com/images/I/61DUdDA1FYL.jpg
+  #3 [rejected] serper/amazon.ae: Tasty Food Fish Masala 160gm: Buy Online at Best Price in UAE - Amazon.ae
+       tier=1 size=match brand=True variants=[] coverage=0.5 source_trust=3 gtin=None
+       VLM MISMATCH view=front_packshot brand='Tasty Food' variant='Fish Masala' size='160 g'
+       https://m.media-amazon.com/images/I/41oQaukOZaL.jpg
+  #4 [eligible] serper/shops.ae: Tasty Food Meat Masala 160Gm
+       tier=2 size=match brand=True variants=[] coverage=1.0 source_trust=0 gtin=None
+       VLM MATCH view=front_packshot brand='Tasty Food' variant='MEAT MASALA' size='160 g'
+       https://shops.ae/products/Shopping/456e68268ad936f56b24245e5ecccb8b.400x400.jpeg
+  #5 [rejected] serper/shops.ae: Tasty Food Meat Masala 160Gm
+       tier=2 size=match brand=True variants=[] coverage=1.0 source_trust=0 gtin=None quality=short_side<250
+       https://shops.ae/products/Shopping/d4277ba35e06bb9ccfaacb1e8b1ae2bb.thumb.jpeg
+  DECISION REVIEW_PRESELECTED  -> https://m.media-amazon.com/images/I/41JIWBVJD9L.jpg
+  cost ~$0.0020 (1 SERP queries, 1 VLM calls), 11.4s
+
+=== row 55: TASTY FOOD MEAT MASALA 160GM | brand TASTY FOOD (sheet_raw) | gtin missing
+  query  TASTY FOOD MEAT MASALA 160g
+  health serper     ok       http=200 n=20 2463ms   <- TASTY FOOD MEAT MASALA 160g
+  #1 [preselected] serper/amazon.ae: Tasty Food Meat Masala 160gm: Buy Online at Best Price in UAE - Amazon.ae
+       tier=1 size=match brand=True variants=[] coverage=1.0 source_trust=3 gtin=None
+       VLM MATCH view=front_packshot brand='Tasty Food' variant='Meat Masala' size='160 g'
+       https://m.media-amazon.com/images/I/41JIWBVJD9L.jpg
+  #2 [rejected] serper/amazon.ae: Tasty Food Chicken Masala 160gm: Buy Online at Best Price in UAE - Amazon.ae
+       tier=1 size=match brand=True variants=[] coverage=0.5 source_trust=3 gtin=None
+       VLM MISMATCH view=front_packshot brand='Tasty Food' variant='Chicken Masala' size='160 g'
+       https://m.media-amazon.com/images/I/61DUdDA1FYL.jpg
+  #3 [rejected] serper/amazon.ae: Tasty Food Fish Masala 160gm: Buy Online at Best Price in UAE - Amazon.ae
+       tier=1 size=match brand=True variants=[] coverage=0.5 source_trust=3 gtin=None
+       VLM MISMATCH view=front_packshot brand='Tasty Food' variant='Fish Masala' size='160 g'
+       https://m.media-amazon.com/images/I/41oQaukOZaL.jpg
+  #4 [eligible] serper/shops.ae: Tasty Food Meat Masala 160Gm
+       tier=2 size=match brand=True variants=[] coverage=1.0 source_trust=0 gtin=None
+       VLM MATCH view=front_packshot brand='Tasty Food' variant='MEAT MASALA' size='160g'
+       https://shops.ae/products/Shopping/456e68268ad936f56b24245e5ecccb8b.400x400.jpeg
+  #5 [rejected] serper/shops.ae: Tasty Food Meat Masala 160Gm
+       tier=2 size=match brand=True variants=[] coverage=1.0 source_trust=0 gtin=None quality=short_side<250
+       https://shops.ae/products/Shopping/d4277ba35e06bb9ccfaacb1e8b1ae2bb.thumb.jpeg
+  DECISION REVIEW_PRESELECTED  -> https://m.media-amazon.com/images/I/41JIWBVJD9L.jpg
+  cost ~$0.0020 (1 SERP queries, 1 VLM calls), 8.8s
+
+=== row 56: UFC MENUDO MEAT STEW SAUCE 200GM | brand UFC (sheet_raw) | gtin missing
+  query  UFC MENUDO MEAT STEW SAUCE 200g
+  health serper     ok       http=200 n=20 1780ms   <- UFC MENUDO MEAT STEW SAUCE 200g
+  #1 [preselected] serper/noon.com: Ufc Ufc Ready Recipes Menudo Sauce 200Gm | Best Price UAE | Dubai, Abu Dhabi
+       tier=1 size=match brand=True variants=[] coverage=0.5 source_trust=3 gtin=None
+       VLM MATCH view=front_packshot brand='UFC' variant='MENUDO Sauce' size='200g'
+       https://f.nooncdn.com/p/pzsku/Z4DCD38CF1E3460827A1BZ/45/1757058998/7746ef20-067b-4b3c-9135-bd588f8a0980.jpg
+  #2 [eligible] serper/amazon.ae: Ufc Ready Recipes Menudo Sauce 200 gm: Buy Online at Best Price in UAE -  Amazon
+       tier=1 size=match brand=True variants=[] coverage=0.5 source_trust=3 gtin=None
+       VLM MATCH view=front_packshot brand='UFC' variant='MENUDO Sauce' size='200g'
+       https://m.media-amazon.com/images/I/81UiPZ+tzPL.jpg
+  #3 [eligible] serper/matransworld-shop.com: UFC Ready Recipes Menudo Sauce 200g
+       tier=2 size=match brand=True variants=[] coverage=0.5 source_trust=0 gtin=None
+       VLM UNSURE view=front_packshot brand='UFC' variant='MENUDO Sauce' size=''
+       http://matransworld-shop.com/cdn/shop/files/IMG-20251112-WA0028.jpg?v=1774103582
+  #4 [rejected] serper/staluciagrocers.com: UFC Ready Recipes Menudo Sauce 200g
+       tier=2 size=match brand=True variants=[] coverage=0.5 source_trust=0 gtin=None
+       VLM MISMATCH view=front_packshot brand='UFC' variant='Tomato Sauce Guisado' size='200g'
+       https://staluciagrocers.com/_next/image?url=https%3A%2F%2Fgoycjwogg8pwb1uj.public.blob.vercel-storage.com%2Fproducts%2F014285003991-gRouAylbBpM5f2ID8Iykwjg90U1gSh.jpg&w=1920&q=75
+  #5 [eligible] serper/chuchaysupermarket.com: UFC READY RECIPE MENUDO
+       tier=2 size=match brand=True variants=[] coverage=0.5 source_trust=0 gtin=None
+       http://chuchaysupermarket.com/cdn/shop/products/images_7_bbc9d24c-db40-4d32-8110-a1a227a2f7b5.jpg?v=1622274949
+  DECISION REVIEW_PRESELECTED  -> https://f.nooncdn.com/p/pzsku/Z4DCD38CF1E3460827A1BZ/45/1757058998/7746ef20-067b-4b3c-9135-bd588f8a0980.jpg
+  cost ~$0.0020 (1 SERP queries, 1 VLM calls), 10.5s
+
+=== row 57: VIRGINIA L/MEAT TUNA IN S/F OIL 170GM | brand VIRGINIA (sheet_raw) | gtin missing
+  query  VIRGINIA L/MEAT TUNA IN S/F OIL 170g
+  health serper     ok       http=200 n=20 1498ms   <- VIRGINIA L/MEAT TUNA IN S/F OIL 170g
+  #1 [preselected] serper/amazon.ae: VIRGINIA Tuna L/meat solid in S/F Oil 170GM: Buy Online at Best Price in  UAE - 
+       tier=1 size=match brand=True variants=[] coverage=1.0 source_trust=3 gtin=None
+       VLM MATCH view=front_packshot brand='Virginia' variant='LIGHT MEAT TUNA IN SUNFLOWER OIL' size='170g'
+       https://m.media-amazon.com/images/I/814heZmloVL.jpg
+  #2 [rejected] serper/gcc.luluhypermarket.com: Virginia White Meat Tuna In Sunflower Oil 170 g Online at Best Price | Lulu  Bah
+       tier=2 size=match brand=True variants=[] coverage=1.0 source_trust=3 gtin=None
+       VLM MISMATCH view=front_packshot brand='Virginia' variant='WHITE MEAT TUNA IN SUNFLOWER OIL' size='170g'
+       https://bf1af2.akinoncloudcdn.com/products/2024/09/10/64774/8b03f976-9173-41dd-a17f-e5927da785d5.jpg
+  #3 [eligible] serper/sharjahcoop.ae: Virginia Tuna L/Meat In S/F Oil 170gm | Sharjah Co-operative Society
+       tier=2 size=match brand=True variants=[] coverage=1.0 source_trust=0 gtin=None
+       VLM UNSURE view=front_packshot brand='فرجينيا' variant='لحم فاتح تونا في زيت دوار الشمس' size='170 جم'
+       https://www.sharjahcoop.ae/medias/1200Wx1200H-00000-6297000958248-001.jpg?context=bWFzdGVyfGltYWdlc3wxNzc1NTB8aW1hZ2UvanBlZ3xhR1E0TDJoa09DOHhNREF5T1RNME9ESTFOemd5TWk4eE1qQXdWM2d4TWpBd1NGOHdNREF3TUY4Mk1qazNNREF3T1RVNE1qUTRYekF3TVM1cWNHY3w1YWNmNGNmYjcyMTI1MmViMDRlOGE4MGQ2N2RhOTU5MjU4OWUxNjFkOWQ3YzE5ZDAyNGI3MDhlM2I4YzMyYTU0
+  #4 [rejected] serper/unioncoop.ae: Virginia Yelowfin Tuna Sunflower Oil - 170g
+       tier=2 size=match brand=True variants=[] coverage=0.6667 source_trust=3 gtin=None
+       VLM MISMATCH view=banner brand='Virginia' variant='YELLOWFINE TUNA IN SUNFLOWER' size=''
+       https://www.unioncoop.ae/media/catalog/product/Y/E/YELLOWFIN_TUNA_S_F_OIL_CHK_16X3X170G__101479_9538_1.jpg
+  #5 [eligible] serper/gcc.luluhypermarket.com: Virginia Skip Jack Tuna In Sunflower Oil 170 g Online at Best Price | Lulu  Oman
+       tier=2 size=match brand=True variants=[] coverage=0.6667 source_trust=3 gtin=None
+       https://bf1af2.akinoncloudcdn.com/products/2025/06/25/378998/73f5c0e8-7d63-450e-ab6e-1b809e21a538_size1920x1920_cropCenter.jpg
+  DECISION REVIEW_PRESELECTED  -> https://m.media-amazon.com/images/I/814heZmloVL.jpg
+  cost ~$0.0020 (1 SERP queries, 1 VLM calls), 9.7s
+
+=== row 58: VIRGINIA L/MEAT TUNA IN WATER 170GM | brand VIRGINIA (sheet_raw) | gtin missing
+  query  VIRGINIA L/MEAT TUNA IN WATER 170g
+  health serper     ok       http=200 n=20 1478ms   <- VIRGINIA L/MEAT TUNA IN WATER 170g
+  #1 [eligible] serper/gcc.luluhypermarket.com: Virginia White Meat Tuna In Water 170 g Online at Best Price | Lulu UAE
+       tier=1 size=match brand=True variants=['medium'] coverage=1.0 source_trust=3 gtin=None
+       VLM UNSURE view=other_side brand='Virginia' variant='' size='170g'
+       https://bf1af2.akinoncloudcdn.com/products/2024/09/11/64737/70f6c6ab-db50-4939-9116-af0b49c413bd.jpg
+  #2 [preselected] serper/amazon.ae: Virginia White Meat Tuna In Water 170g: Buy Online at Best Price in UAE -  Amazo
+       tier=1 size=match brand=True variants=['medium'] coverage=1.0 source_trust=3 gtin=None
+       VLM MATCH view=front_packshot brand='Virginia' variant='WHITE MEAT TUNA IN WATER' size='170g'
+       https://m.media-amazon.com/images/I/81ULgp9PnIL.jpg
+  #3 [rejected] serper/amazon.ae: Virginia White Meat Tuna In Water 170g: Buy Online at Best Price in UAE -  Amazo
+       tier=1 size=match brand=True variants=['medium'] coverage=1.0 source_trust=3 gtin=None quality=foreground>98%
+       https://m.media-amazon.com/images/I/81Sx4cIkXML.jpg
+  #4 [rejected] serper/amazon.ae: VIRGINIA Tuna L/meat solid in S/F Oil 170GM: Buy Online at Best Price in  UAE - 
+       tier=2 size=match brand=True variants=[] coverage=1.0 source_trust=3 gtin=None
+       VLM MISMATCH view=front_packshot brand='Virginia' variant='LIGHT MEAT TUNA IN SUNFLOWER OIL' size='170g'
+       https://m.media-amazon.com/images/I/814heZmloVL.jpg
+  #5 [rejected] serper/sharjahcoop.ae: Virginia Tuna L/Meat In S/F Oil 170gm | Sharjah Co-operative Society
+       tier=2 size=match brand=True variants=[] coverage=1.0 source_trust=0 gtin=None
+       VLM MISMATCH view=front_packshot brand='Virginia' variant='TUNA IN SUNFLOWER OIL' size='170g'
+       https://www.sharjahcoop.ae/medias/1200Wx1200H-00000-6297000958248-001.jpg?context=bWFzdGVyfGltYWdlc3wxNzc1NTB8aW1hZ2UvanBlZ3xhR1E0TDJoa09DOHhNREF5T1RNME9ESTFOemd5TWk4eE1qQXdWM2d4TWpBd1NGOHdNREF3TUY4Mk1qazNNREF3T1RVNE1qUTRYekF3TVM1cWNHY3w1YWNmNGNmYjcyMTI1MmViMDRlOGE4MGQ2N2RhOTU5MjU4OWUxNjFkOWQ3YzE5ZDAyNGI3MDhlM2I4YzMyYTU0
+  DECISION REVIEW_PRESELECTED  -> https://m.media-amazon.com/images/I/81ULgp9PnIL.jpg
+  cost ~$0.0020 (1 SERP queries, 1 VLM calls), 9.0s
+
+=== row 59: VIRGINIA WHITE MEAT TUNA IN WATER 170GM | brand VIRGINIA (sheet_raw) | gtin missing
+  query  VIRGINIA WHITE MEAT TUNA IN WATER 170g
+  health serper     ok       http=200 n=20 1883ms   <- VIRGINIA WHITE MEAT TUNA IN WATER 170g
+  #1 [eligible] serper/gcc.luluhypermarket.com: Virginia White Meat Tuna In Water 170 g Online at Best Price | Lulu UAE
+       tier=1 size=match brand=True variants=['medium'] coverage=1.0 source_trust=3 gtin=None
+       VLM UNSURE view=other_side brand='' variant='' size='170'
+       https://bf1af2.akinoncloudcdn.com/products/2024/09/11/64737/70f6c6ab-db50-4939-9116-af0b49c413bd_size1920x1920_cropCenter.jpg
+  #2 [preselected] serper/amazon.ae: Virginia White Meat Tuna In Water 170g: Buy Online at Best Price in UAE -  Amazo
+       tier=1 size=match brand=True variants=['medium'] coverage=1.0 source_trust=3 gtin=None
+       VLM MATCH view=front_packshot brand='Virginia' variant='WHITE MEAT TUNA IN WATER' size='170g'
+       https://m.media-amazon.com/images/I/81ULgp9PnIL.jpg
+  #3 [rejected] serper/amazon.ae: Virginia White Meat Tuna In Water 170g: Buy Online at Best Price in UAE -  Amazo
+       tier=1 size=match brand=True variants=['medium'] coverage=1.0 source_trust=3 gtin=None quality=foreground>98%
+       https://m.media-amazon.com/images/I/81Sx4cIkXML.jpg
+  #4 [rejected] serper/amazon.ae: Virginia White Meat Tuna In Water 170g: Buy Online at Best Price in UAE -  Amazo
+       tier=1 size=match brand=True variants=['medium'] coverage=1.0 source_trust=3 gtin=None quality=foreground>98%
+       https://m.media-amazon.com/images/I/61fYAJBl83L.jpg
+  #5 [rejected] serper/unioncoop.ae: Virginia Tuna with Meat In Water - 170 g
+       tier=1 size=match brand=True variants=['medium'] coverage=0.6667 source_trust=3 gtin=None
+       VLM MISMATCH view=multi_product brand='عافية' variant='' size=''
+       https://www.unioncoop.ae/media/catalog/product/6/0/6084011497756.jpg
+  DECISION REVIEW_PRESELECTED  -> https://m.media-amazon.com/images/I/81ULgp9PnIL.jpg
+  cost ~$0.0020 (1 SERP queries, 1 VLM calls), 7.8s
+
+=== row 60: VIRGINIA WHTE MEAT TUNA IN S/F OIL 170GM | brand VIRGINIA (sheet_raw) | gtin missing
+  query  VIRGINIA WHTE MEAT TUNA IN S/F OIL 170g
+  query  VIRGINIA WHTE MEAT TUNA IN S/F OIL 170g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)
+  health serper     ok       http=200 n=20 1620ms   <- VIRGINIA WHTE MEAT TUNA IN S/F OIL 170g
+  health serper     ok       http=200 n=20 1599ms   <- VIRGINIA WHTE MEAT TUNA IN S/F OIL 170g (site:carrefouruae.com OR site
+  #1 [preselected] serper/amazon.ae: VIRGINIA Tuna L/meat solid in S/F Oil 170GM: Buy Online at Best Price in UAE  - 
+       tier=1 size=match brand=True variants=[] coverage=0.75 source_trust=3 gtin=None
+       VLM MATCH view=front_packshot brand='Virginia' variant='LIGHT MEAT TUNA IN SUNFLOWER OIL' size='170g'
+       https://m.media-amazon.com/images/I/814heZmloVL.jpg
+  #2 [eligible] serper/gcc.luluhypermarket.com: Virginia White Meat Tuna In Sunflower Oil 170 g Online at Best Price | Lulu  Bah
+       tier=2 size=match brand=True variants=[] coverage=0.75 source_trust=3 gtin=None
+       VLM MATCH view=front_packshot brand='Virginia' variant='WHITE MEAT TUNA IN SUNFLOWER OIL' size='170g'
+       https://bf1af2.akinoncloudcdn.com/products/2024/09/10/64774/8b03f976-9173-41dd-a17f-e5927da785d5.jpg
+  #3 [eligible] serper/gcc.luluhypermarket.com: Virginia Light Meat Tuna In Sunflower Oil 170 g Online at Best Price | Lulu  UAE
+       tier=2 size=match brand=True variants=[] coverage=0.75 source_trust=3 gtin=None
+       VLM UNSURE view=other_side brand='فرجينيا' variant='' size='170 جم'
+       https://bf1af2.akinoncloudcdn.com/products/2024/09/11/64748/36bbc47a-fd60-47e1-b16e-e14157493ec9.jpg
+  #4 [eligible] serper/sharjahcoop.ae: Virginia Tuna L/Meat In S/F Oil 170gm | Sharjah Co-operative Society
+       tier=2 size=match brand=True variants=[] coverage=0.75 source_trust=0 gtin=None
+       VLM UNSURE view=front_packshot brand='فرجينيا' variant='لحم فاتح تونا في زيت دوار الشمس' size='170 جم'
+       https://www.sharjahcoop.ae/medias/1200Wx1200H-00000-6297000958248-001.jpg?context=bWFzdGVyfGltYWdlc3wxNzc1NTB8aW1hZ2UvanBlZ3xhR1E0TDJoa09DOHhNREF5T1RNME9ESTFOemd5TWk4eE1qQXdWM2d4TWpBd1NGOHdNREF3TUY4Mk1qazNNREF3T1RVNE1qUTRYekF3TVM1cWNHY3w1YWNmNGNmYjcyMTI1MmViMDRlOGE4MGQ2N2RhOTU5MjU4OWUxNjFkOWQ3YzE5ZDAyNGI3MDhlM2I4YzMyYTU0
+  #5 [eligible] serper/emiratescoop.suppy.app: AIRPORT VIEW | Virginia White Meat Tuna In Sunflower Oil 170G
+       tier=2 size=match brand=True variants=[] coverage=0.75 source_trust=0 gtin=None
+       https://suppystorage.blob.core.windows.net/valeur/items/FMCG_465057_1.jpg
+  DECISION REVIEW_PRESELECTED  -> https://m.media-amazon.com/images/I/814heZmloVL.jpg
+  cost ~$0.0030 (2 SERP queries, 1 VLM calls), 10.4s
+
+=== row 61: ZWAN BEEF LUNCHEON MEAT 850GM | brand ZWAN (sheet_raw) | gtin missing
+  query  ZWAN BEEF LUNCHEON MEAT 850g
+  health serper     ok       http=200 n=20 2389ms   <- ZWAN BEEF LUNCHEON MEAT 850g
+  #1 [preselected] serper/carrefouruae.com: Zwan Luncheon Meat, 850g
+       tier=1 size=match brand=True variants=[] coverage=1.0 source_trust=3 gtin=None
+       VLM UNSURE view=front_packshot brand='ZWAN' variant='LUNCHEON MEAT' size=''
+       https://cdn.mafrservices.com/pim-content/UAE/media/product/10937/1757135408/10937_main.jpg
+  #2 [eligible] serper/noon.com: Zwan Zwan Beef Luncheon Meat Can - 850gms | Best Price UAE | Dubai, Abu  Dhabi
+       tier=1 size=match brand=True variants=[] coverage=1.0 source_trust=3 gtin=None
+       VLM UNSURE view=front_packshot brand='ZWAN' variant='LUNCHEON MEAT' size=''
+       https://f.nooncdn.com/p/pzsku/Z03F2EB671498FA72870AZ/45/_/1744377753/8a988184-4f6f-4352-b06f-032b88de92af.jpg
+  #3 [eligible] serper/amazon.ae: Zwan Luncheon Meat, 850 g: Buy Online at Best Price in UAE - Amazon.ae
+       tier=1 size=match brand=True variants=[] coverage=0.6667 source_trust=3 gtin=None
+       VLM UNSURE view=front_packshot brand='ZWAN' variant='LUNCHEON MEAT' size=''
+       https://m.media-amazon.com/images/I/71jyWVpnt+L.jpg
+  #4 [rejected] serper/gcc.luluhypermarket.com: Zwan Chicken Luncheon Meat 850 g Online at Best Price | Lulu UAE
+       tier=1 size=match brand=True variants=[] coverage=0.6667 source_trust=3 gtin=None
+       VLM MISMATCH view=front_packshot brand='زوان' variant='لحم لنشون دجاج' size=''
+       https://bf1af2.akinoncloudcdn.com/products/2024/09/11/65203/c52eef43-ae6e-486e-a2cd-019be287dbca.jpg
+  #5 [rejected] serper/unioncoop.ae: Zwan Beef Luncheon Meat - 850g
+       tier=2 size=match brand=True variants=[] coverage=1.0 source_trust=3 gtin=None
+       VLM MISMATCH view=multi_product brand='ZWAN' variant='HOT & SPICY' size=''
+       https://www.unioncoop.ae/media/catalog/product/Z/w/Zwan_Luncheon_Meat_Beef_Hot___Spicy_340g_x_2_101431_6236_1.jpg
+  DECISION REVIEW_PRESELECTED  -> https://cdn.mafrservices.com/pim-content/UAE/media/product/10937/1757135408/10937_main.jpg
+  cost ~$0.0030 (1 SERP queries, 2 VLM calls), 13.1s
+
+30 rows | decisions {'REVIEW_UNSELECTED': 13, 'REVIEW_PRESELECTED': 13, 'PROVIDER_DOWN': 4} | estimated cost $0.1000
+results written to smoke_4.json

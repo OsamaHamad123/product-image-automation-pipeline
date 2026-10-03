@@ -70,7 +70,7 @@ if (-not (Test-Path $venvDir)) {
 
 # تثبيت متطلبات بايثون
 Write-Host "⏳ جاري تحديث وتثبيت مكتبات بايثون المطلوبة (Requirements)..." -ForegroundColor Yellow
-& $venvPython -m pip install --upgrade pip -ErrorAction SilentlyContinue | Out-Null
+& $venvPython -m pip install --upgrade pip --quiet --disable-pip-version-check | Out-Null
 & $venvPython -m pip install -r requirements.txt
 Write-Host "✅ تم إعداد مكتبات بايثون بنجاح." -ForegroundColor Green
 
@@ -254,8 +254,9 @@ if (Test-Path $dashboardEnv) {
 
 # توليد مفتاح التطبيق للوحة التحكم إن لم يكن موجوداً
 if (Test-Path $dashboardEnv) {
-    $envContent = Get-Content $dashboardEnv
-    if (($envContent -match "APP_KEY=\s*$" -or $envContent -notmatch "APP_KEY=base64:")) {
+    # نص الملف كاملاً لا مصفوفة أسطر: -match على مصفوفة يصفّي الأسطر ولا يجيب بنعم/لا (كان يولّد مفتاحاً جديداً كل مرة)
+    $envText = [System.IO.File]::ReadAllText($dashboardEnv)
+    if ($envText -notmatch '(?m)^APP_KEY=base64:\S+') {
         Write-Host "🔑 جاري توليد مفتاح الأمان للوحة التحكم..." -ForegroundColor Yellow
         & $phpPath dashboard/artisan key:generate | Out-Null
     }
@@ -297,36 +298,57 @@ if (Test-Path $rootEnv) {
     }
 }
 
-# تحديث مسار قاعدة البيانات المطلق SQLite في ملف .env الخاص بلوحة التحكم فقط إذا كان الاتصال هو SQLite
+# قاعدة بيانات لوحة التحكم = نفس قاعدة MariaDB التي يستعملها بايثون (قيم DB_* في .env الرئيسي).
+# نسخ سابقة من هذا الملف كانت تحوّل اللوحة خطأً إلى SQLite (local_cache.db) فتقرأ قاعدة غير قاعدة العامل؛ هنا تُصلَح.
 if (Test-Path $dashboardEnv) {
-    $envContent = Get-Content $dashboardEnv
-    
-    # التحقق من نوع الاتصال الحالي
-    $currentConn = ""
-    if ($envContent -match '(?mi)^\s*DB_CONNECTION\s*=\s*(\w+)') {
-        $currentConn = $Matches[1]
+    $dbKeys = @('DB_CONNECTION', 'DB_HOST', 'DB_PORT', 'DB_DATABASE', 'DB_USERNAME', 'DB_PASSWORD')
+    $rootDb = @{ DB_CONNECTION = 'mariadb'; DB_HOST = '127.0.0.1'; DB_PORT = '3306'; DB_DATABASE = 'automation_db';
+                 DB_USERNAME = 'root'; DB_PASSWORD = '' }
+    if (Test-Path $rootEnv) {
+        foreach ($line in [System.IO.File]::ReadAllLines($rootEnv)) {
+            # سطر واحد في كل مرة: هنا -match يملأ $Matches
+            if ($line -match '^\s*(DB_(?:CONNECTION|HOST|PORT|DATABASE|USERNAME|PASSWORD))\s*=\s*(.*?)\s*$') {
+                $rootDb[$Matches[1]] = $Matches[2].Trim('"', "'")
+            }
+        }
     }
-    
-    if ($currentConn -eq "sqlite" -or $currentConn -eq "") {
-        $sqliteDbPath = Join-Path $PSScriptRoot "local_cache.db"
-        $sqliteDbPathEscaped = $sqliteDbPath -replace '\\', '/'
-        
-        if ($envContent -match 'DB_DATABASE=') {
-            $envContent = $envContent -replace '#?\s*DB_DATABASE=.*', "DB_DATABASE=`"$sqliteDbPathEscaped`""
-        } else {
-            $envContent += "DB_DATABASE=`"$sqliteDbPathEscaped`""
+    # بايثون يتصل عبر pymysql دائماً: أي قيمة غير mysql تعني mariadb
+    if ($rootDb['DB_CONNECTION'] -ne 'mysql') { $rootDb['DB_CONNECTION'] = 'mariadb' }
+
+    $lines = New-Object System.Collections.Generic.List[string]
+    foreach ($line in [System.IO.File]::ReadAllLines($dashboardEnv)) { $lines.Add($line) }
+    $wasSqlite = $false
+    $changed = $false
+    foreach ($key in $dbKeys) {
+        $value = [string]$rootDb[$key]
+        if ($value -match '[\s#"]') { $value = '"' + ($value -replace '"', '\"') + '"' }
+        $want = "$key=$value"
+        # السطر الفعّال أولاً، وإن لم يوجد فالسطر المعلَّق
+        $idx = -1
+        for ($i = 0; $i -lt $lines.Count; $i++) {
+            if ($lines[$i] -match "^\s*$key\s*=") { $idx = $i; break }
         }
-        
-        if ($envContent -match 'DB_CONNECTION=') {
-            $envContent = $envContent -replace '#?\s*DB_CONNECTION=.*', "DB_CONNECTION=sqlite"
-        } else {
-            $envContent += "DB_CONNECTION=sqlite"
+        if ($idx -lt 0) {
+            for ($i = 0; $i -lt $lines.Count; $i++) {
+                if ($lines[$i] -match "^\s*#\s*$key\s*=") { $idx = $i; break }
+            }
         }
-        
-        $envContent | Set-Content $dashboardEnv -Encoding UTF8
-        Write-Host "✅ تم ربط قاعدة بيانات SQLite المحلية بنجاح." -ForegroundColor Green
+        if ($idx -ge 0) {
+            if ($key -eq 'DB_CONNECTION' -and $lines[$idx] -match '^\s*DB_CONNECTION\s*=\s*"?sqlite') { $wasSqlite = $true }
+            if ($lines[$idx] -ne $want) { $lines[$idx] = $want; $changed = $true }
+        } else {
+            $lines.Add($want)
+            $changed = $true
+        }
+    }
+    if ($changed) {
+        [System.IO.File]::WriteAllText($dashboardEnv, (($lines -join "`n") + "`n"), (New-Object System.Text.UTF8Encoding($false)))
+        & $phpPath dashboard/artisan config:clear | Out-Null
+    }
+    if ($wasSqlite) {
+        Write-Host "✅ أصلحنا اتصال لوحة التحكم: كانت على SQLite، وصارت على MariaDB ($($rootDb['DB_DATABASE'])) مثل العامل." -ForegroundColor Green
     } else {
-        Write-Host "ℹ️ تم الكشف عن اتصال قاعدة بيانات مخصص ($currentConn)، تم تخطي تهيئة SQLite التلقائية." -ForegroundColor Yellow
+        Write-Host "✅ لوحة التحكم مربوطة بقاعدة MariaDB ($($rootDb['DB_DATABASE'])) نفسها التي يستعملها العامل." -ForegroundColor Green
     }
 }
 
