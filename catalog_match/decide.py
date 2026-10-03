@@ -45,6 +45,9 @@ failure_code on review decisions
                         exist; a tier 1 candidate is still preselected. Also when one
                         of two verifier calls failed and nothing was read as MATCH.
     DOWNLOAD_FAILED     candidates survived the identity rules but every fetch failed.
+    SOCIAL_ONLY         every tier-1/2 survivor is a social-network post whose picture could
+                        not be downloaded (whatever happened to other brands' listings): the
+                        post links are in outcome.social_links for the reviewer.
 
 Only the winner of REVIEW_PRESELECTED / AUTO_PUBLISH has status 'preselected'. The
 others are 'eligible' or 'rejected' (with reasons) or stay 'excluded' when the
@@ -454,6 +457,26 @@ def _brand_spelling_only(spec: SkuSpec, rc: RankedCandidate) -> bool:
     return match_string(spec.brand_raw) not in hits
 
 
+def social_only_links(survivors: Sequence[RankedCandidate]) -> List[str]:
+    """The post links when every tier-1/2 survivor is a social-network post whose picture could not be
+    downloaded; [] otherwise (failure_code SOCIAL_ONLY).
+
+    Live run 2026-10-03, rows 29, 38 and 41 (CHALIYAR, KABANI, MAHRA MEAT MASALA): the brand was found only
+    in Instagram and Facebook posts, whose pictures those networks refuse to hand out. Row 29 read
+    DOWNLOAD_FAILED and rows 38 and 41 no failure at all (other brands' store listings had been read), so the
+    reviewer was never told where the product had been seen. The networks' blocking is never worked around.
+    """
+    brand = [rc for rc in survivors if rc.score is not None and rc.score.tier in (1, 2)]
+    if not brand or not all(_social_post(rc.candidate) and rc.fetched is not None and not rc.fetched.ok
+                            for rc in brand):
+        return []
+    return list(dict.fromkeys(rc.candidate.page_url or rc.candidate.image_url for rc in brand))
+
+
+def _social_post(cand: Candidate) -> bool:
+    return _social_host(url_host(cand.image_url)) or _social_host(page_host(cand))
+
+
 def warning_codes(reasons: Iterable[str]) -> List[str]:
     """The warning codes (without 'warn:') among a candidate's reasons."""
     return [str(r)[len(WARN_PREFIX):] for r in reasons or () if str(r).startswith(WARN_PREFIX)]
@@ -537,9 +560,12 @@ def route(spec: SkuSpec, ranked: Sequence[RankedCandidate],
         return outcome
 
     attempted = [rc for rc in survivors if rc.fetched is not None]
+    social = social_only_links(survivors)
     if attempted and not any(rc.fetched.ok for rc in attempted):
-        outcome.decision, outcome.failure_code = "REVIEW_UNSELECTED", "DOWNLOAD_FAILED"
-        logger.info("route %s: every download failed", spec.sku_key)
+        outcome.decision = "REVIEW_UNSELECTED"
+        outcome.failure_code = "SOCIAL_ONLY" if social else "DOWNLOAD_FAILED"
+        outcome.social_links = social
+        logger.info("route %s: every download failed%s", spec.sku_key, " (social-network posts only)" if social else "")
         return outcome
 
     def usable(rc: RankedCandidate) -> bool:
@@ -579,6 +605,8 @@ def route(spec: SkuSpec, ranked: Sequence[RankedCandidate],
         why = f"tier1_{_decision_of(winner).lower()}" if winner is not None else ""
     if winner is None:
         outcome.decision = "REVIEW_UNSELECTED"
+        if social and not outcome.failure_code:
+            outcome.failure_code, outcome.social_links = "SOCIAL_ONLY", social
         logger.info("route %s: REVIEW_UNSELECTED (%s)", spec.sku_key, outcome.failure_code or "no match")
         return outcome
 

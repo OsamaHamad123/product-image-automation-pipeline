@@ -602,3 +602,51 @@ def test_the_memory_is_keyed_by_the_sheet_brand_letters_and_never_guesses():
     # a listing that writes the sheet's own spelling needs no store spelling at all
     sheet_way = listing("Super T Light Meat Tuna 185g | Union Coop", "https://www.unioncoop.ae/super-t-tuna/p/8")
     assert bd.find(spec_of(*ROW52), [sheet_way]) is None
+
+
+# ---------------------------------------------------------------------------
+# 11. Only social-network posts show the product: a failure code of its own, with the links
+# ---------------------------------------------------------------------------
+
+def smoke6_row(number):
+    with open(RUN / "smoke_6.json", encoding="utf-8") as fh:
+        return next(r for r in json.load(fh) if r["row"] == number)
+
+
+def replay_route(number):
+    """decide.route over the live run's own top listings of one row, as they were downloaded and read."""
+    from catalog_match import decide
+    from catalog_match.models import (
+        FetchedImage, ProviderHealth, QualityReport, RankedCandidate, VerificationResult,
+    )
+
+    row = smoke6_row(number)
+    spec = spec_of(row["name"], row["brand"])
+    ranked = []
+    for t in row["top"]:
+        c = Candidate(image_url=t["image_url"], page_url=t["page_url"] or "", title=t["title"] or "",
+                      page_title=t["title"] or "", domain=t["domain"] or "", provider=t["provider"], rank=t["rank"])
+        failed = next((r.split(":", 1)[1] for r in t["reasons"] if r.startswith("download:")), None)
+        fetched = FetchedImage(candidate=c, ok=failed is None, error=failed, width=800, height=800,
+                               content_sha256=None if failed else f"{t['rank']:064d}", path_or_bytes=b"x")
+        bad_quality = [r.split(":", 1)[1] for r in t["reasons"] if r.startswith("quality:")]
+        vlm = (t.get("vlm") or {}).get("decision")
+        ranked.append(RankedCandidate(
+            candidate=c, score=score_candidate(spec, c), fetched=fetched,
+            quality=None if failed else QualityReport(hard_ok=not bad_quality, hard_reasons=bad_quality),
+            verdict=VlmImageVerdict(index=0, decision=vlm) if vlm else None))
+    return decide.route(spec, ranked, VerificationResult(status="ok", calls=1),
+                        [ProviderHealth(provider="serper", status="ok", query_id="Q1")])
+
+
+@pytest.mark.parametrize("number, before", [(29, "DOWNLOAD_FAILED"), (38, None), (41, None)])
+def test_rows_29_38_41_only_social_posts_show_the_product(number, before):
+    out = replay_route(number)
+    assert out.decision == "REVIEW_UNSELECTED"
+    assert out.failure_code == "SOCIAL_ONLY", (number, before)            # was `before`
+    assert out.social_links and all(("instagram.com" in u or "facebook.com" in u) for u in out.social_links)
+
+
+def test_a_downloadable_brand_listing_is_not_social_only():
+    out = replay_route(6)            # HUP HUP: farzana.ae's listing downloaded (read as not the product)
+    assert out.failure_code != "SOCIAL_ONLY" and out.social_links == []
