@@ -270,7 +270,7 @@ def test_row45_is_found_preselected_with_the_warning_and_never_auto_published(mo
     assert any(q.startswith("Rio Mare ") for q in search.queries)        # the corrected query was sent
     assert outcome.decision == "REVIEW_PRESELECTED"                      # never AUTO_PUBLISH: not a mapped brand
     assert "auto_blocked:brand_conf_sheet_raw" in outcome.winner.reasons
-    assert decide.WARN_PREFIX + "brand_spelling" in outcome.winner.reasons
+    assert decide.WARN_PREFIX + "brand_spelling:Rio Mare" in outcome.winner.reasons
     assert "the stores write it Rio Mare" in verifier.prompts[0]
 
 
@@ -280,5 +280,6 @@ def test_the_warning_is_not_shown_when_the_sheet_spelling_is_on_the_listing_too(
     from catalog_match.score import score_candidate
     both = listing("Rio Mare (Rio Marie) Light Meat Tuna 70 g", LULU.format("rio-mare-tuna", 3))
     only = listing("Rio Mare Light Meat Tuna 70 g", LULU.format("rio-mare-tuna", 4))
-    assert "brand_spelling" not in decide.review_warnings(s, RankedCandidate(both, score_candidate(s, both)))
-    assert "brand_spelling" in decide.review_warnings(s, RankedCandidate(only, score_candidate(s, only)))
+    assert not [w for w in decide.review_warnings(s, RankedCandidate(both, score_candidate(s, both)))
+                if w.startswith("brand_spelling")]
+    assert "brand_spelling:Rio Mare" in decide.review_warnings(s, RankedCandidate(only, score_candidate(s, only)))

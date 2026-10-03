@@ -327,6 +327,42 @@ Google filed under it was another product.
   - Their images are verified with one call. When that gives a pick, no paid call is made.
   - Rows 13 (Ansar Gallery, Yumway) and 36 (Tradeling, Green Farm) were this case.
 
+### Added: learning from review decisions
+
+Every review now teaches the search, beyond the reviewed product (`catalog_match/learning.py`). Nothing
+learned ever auto-publishes.
+
+- **Store spellings of a brand**
+  - The review warning is now `brand_spelling:<spelling>`. The review screen sends a picture's warnings with
+    the decision (`candidate_warnings`).
+  - Approving such a pick records the spelling for the sheet brand (table `learned_brand_aliases`). A
+    `WRONG_BRAND` rejection of one counts against it. The spelling is used while approvals outnumber those
+    rejections.
+  - From then on the sheet brand resolves to the spelling with the new `brand_conf` `learned`:
+    - the first query writes it;
+    - scoring and the label reader accept it;
+    - no discovery query is needed.
+- **A brand's sources**
+  - A site the reviewers approved a brand's images from at least twice, with no identity rejection of an image
+    from it for that brand, is a learned source. It is read from `review_decisions`. Social networks and stock
+    sites never count.
+  - For that brand only, a learned source:
+    - gets UAE-retailer trust (`reviewed_source`);
+    - gets a place in the `site:` query after the official sites.
+- **The sheet always wins**
+  - A spelling is never learned when Brands Mapping maps the sheet brand or the spelling (also as another
+    entry's synonym).
+  - A mapped brand only gains learned sources.
+  - The merge happens in `google_sheets.get_brand_mappings`, so the worker, the dashboard search and
+    `smoke_live` all see it. Without a database the mappings are unchanged.
+- **Never an auto-publish:** `decide.py` blocks auto-publish for `brand_conf` `learned` (`brand_conf_learned`)
+  and for a pick whose trust is only a learned source (`reviewed_source`).
+- **`smoke_live` without the sheet**
+  - `--rows-file` reads the products from a CSV or an earlier `--json` run.
+  - `--brands-file` reads a Brands Mapping CSV.
+  - The 60 products of the live run and the suggested mapping are committed under `runs/2026-10-03/`, so a
+    machine with the keys but no `credentials.json` can measure the same products again.
+
 ### Fixed while integrating phase 3
 
 - A barcode-conflict MATCH that cannot be pre-checked no longer skips the second verifier call on the next

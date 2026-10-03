@@ -48,6 +48,7 @@ logger = logging.getLogger(__name__)
 MAX_PLANNED_QUERIES = 4
 RETAILER_SITES = ("carrefouruae.com", "noon.com", "luluhypermarket.com", "amazon.ae", "talabat.com")
 MAX_OFFICIAL_SITES = 2
+MAX_LEARNED_SITES = 2      # sites the reviewers keep approving the brand's images from (catalog_match.learning)
 
 _SPLIT_RE = re.compile(r"(?:[\s()\[\]{};|]|,(?!\d))+")   # keep '1,5L' (comma decimal) in one word
 _EDGE_PUNCT = ".:-_'\"`"
@@ -328,7 +329,8 @@ def _is_bare_number(text: str) -> bool:
 
 def _site_clause(spec: SkuSpec) -> str:
     sites: List[str] = []
-    for d in tuple(spec.official_domains)[:MAX_OFFICIAL_SITES] + RETAILER_SITES:
+    for d in (tuple(spec.official_domains)[:MAX_OFFICIAL_SITES] + tuple(spec.learned_domains)[:MAX_LEARNED_SITES]
+              + RETAILER_SITES):
         d = (d or "").strip().lower()
         if d and d not in sites:
             sites.append(d)

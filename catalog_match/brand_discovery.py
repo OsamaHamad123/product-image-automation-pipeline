@@ -186,7 +186,8 @@ def _sheet_phrases(spec: SkuSpec) -> List[Tuple[str, List[str]]]:
 def discover(spec: SkuSpec, cands: Iterable[Candidate]) -> Optional[Discovery]:
     """The store spelling of the sheet brand, or None (see the module docstring)."""
     cands = list(cands or ())
-    if spec.brand_conf == "mapped" or not spec.match_brands or not cands or states_the_brand(spec, cands):
+    if spec.brand_conf in ("mapped", "learned") or not spec.match_brands or not cands \
+            or states_the_brand(spec, cands):
         return None
     phrases = _sheet_phrases(spec)
     if not phrases:

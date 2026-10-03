@@ -965,7 +965,22 @@ def get_brand_mappings(client, sheet_name_or_url):
     """
     جلب مرادفات البراندات من ورقة 'Brands Mapping' (أعمدة بالعناوين: Brand, Synonyms,
     Excluded Competitors, Sub-brands, Official domains). تُنشأ الورقة بالقيم الافتراضية إن لم توجد.
+    يُضاف إليها ما تعلّمه البحث من المراجعة (catalog_match/learning.py): كتابة المتاجر لماركة اعتمدها المراجع،
+    والمواقع التي يتكرر اعتماد صور الماركة منها. ما في الشيت يبقى هو الأساس ولا يغيّره التعلّم.
     """
+    return _with_learning(_sheet_brand_mappings(client, sheet_name_or_url))
+
+
+def _with_learning(mappings):
+    try:
+        from catalog_match import learning
+        return learning.load_and_apply(mappings)
+    except Exception as e:  # التعلّم لا يعطل البحث أبداً
+        logger.warning("تعذر إضافة ما تعلّمه البحث من المراجعة: %s", e)
+        return mappings
+
+
+def _sheet_brand_mappings(client, sheet_name_or_url):
     cached = _read_cache("brand_mappings_cache.json", 300, BRAND_CACHE_VERSION)
     if cached:
         return cached["mappings"]

@@ -104,3 +104,15 @@ def test_catalog_page_sends_the_reviewers_view_with_approve_reject_and_upload():
     assert "target.search_decision = String(data.decision" in page
     api = (ROOT / "dashboard/app/Http/Controllers/ApiController.php").read_text(encoding="utf-8")
     assert "'search_decision'" in api                             # the upload whitelist forwards it
+
+
+def test_approvals_send_the_pictures_warnings_so_a_store_spelling_can_be_learned():
+    """catalog_match.learning: approving a 'brand_spelling:<spelling>' pick teaches the spelling. The live search
+    screen keeps no stored candidates, so the review screen sends the warnings it showed with the decision."""
+    core = (Path(__file__).resolve().parents[1] / "dashboard" / "public" / "js" / "review" / "core.js").read_text(
+        encoding="utf-8")
+    view = re.search(r"function reviewedCandidateView\(c, ctx\) \{.*?\n    \}\n", core, re.DOTALL).group(0)
+    assert "candidate_warnings: (c.warnings || []).map(w => String(w)).join('|')" in view
+    # 'brand_spelling:Rio Mare' shows the label of its code
+    labels = re.search(r"const REVIEW_WARNING_LABELS = \{.*?\n    \};", core, re.DOTALL).group(0)
+    assert "brand_spelling:" in labels

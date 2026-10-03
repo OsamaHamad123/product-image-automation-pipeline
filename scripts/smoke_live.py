@@ -1434,6 +1434,9 @@ def main(argv=None):
         spreadsheet, worksheet = open_sheet_read_only()
         rows = read_sheet_rows(worksheet, parse_rows(args.rows))
         mappings = read_brands_file(args.brands_file) if args.brands_file else read_brand_mappings(spreadsheet)
+    # what the reviewers taught, as the worker sees it (google_sheets.get_brand_mappings); none without a database
+    from catalog_match import learning
+    mappings = learning.load_and_apply(mappings)
     expansion = False if args.no_expansion else True
     meta = run_meta(args, settings, pipeline, expansion)
     print(f"dry run on {len(rows)} rows | Serper key {'set' if settings.serper_api_key() else 'MISSING'} | "
