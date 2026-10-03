@@ -9,6 +9,12 @@
 # - الطابور يحفظ آخر بحث لكل صف فقط: إعادة المحاولة عند PROVIDER_DOWN والبحث من الكتالوج غير محسوبة.
 # - وقت البحث هو outcome.searched_at إن وُجد، وإلا آخر تحديث للصف (updated_at). إعادة الإدراج في الطابور
 #   تحدّث updated_at لصفوف المراجعة دون بحث جديد، فقد تدخل عمليات بحث أقدم في نافذة الـ 24 ساعة.
+# - الإدراج يمسح trace_json للصفوف التي يعيدها للانتظار، وكل تشغيل يكتب فوق trace الصف: تكلفة بحث سابق لصف
+#   أُعيد البحث عنه تختفي من نوافذ الطابور (تقدير أقل من الحقيقة).
+# لذلك يحفظ كل تشغيل تكلفته عند نهايته في run_history (run_report.py: من سجل الصرف إن وُجد، وإلا تقدير هذا
+# الملخص لعمليات بحث العامل نفسه، مرة واحدة لكل تشغيل أو ليلة فلا تُحسب مرتين)، وruns_cost() يجمعها لكل نافذة.
+# هذا الرقم لا يمحوه بحث لاحق، لكنه لا يرى محاولات PROVIDER_DOWN المعادة داخل البحث الواحد، ولا البحث اليدوي
+# من صفحة المراجعة (خارج الطابور)، ولا ما قبل وجود run_history. الصرف الفعلي يحتاج سجل صرف لكل استدعاء.
 
 import json
 import logging
@@ -320,7 +326,62 @@ def health_report():
     """ملخص صفحة التشخيصات (قراءة فقط؛ أخطاء قاعدة البيانات تُرفع)."""
     report = summarize(load_rows())
     report["verifier_month"] = verifier_month()   # حزمة المحقق (verifier, P3): صرف الشهر وميزانية النموذج القوي
+    report["runs_cost"] = runs_cost()             # حزمة التشغيل الليلي (P4b): التكلفة كما حُفظت عند نهاية كل تشغيل
     return report
+
+
+# ---------------------------------------------------------------------------
+# حزمة التشغيل الليلي (P4b): تكلفة التشغيلات من run_history (تبقى بعد أن يكتب تشغيل لاحق فوق trace الصفوف)
+# ---------------------------------------------------------------------------
+
+RUNS_COST_SQL = """
+    SELECT TIMESTAMPDIFF(SECOND, COALESCE(ended_at, created_at), NOW()) AS age_s, spend_usd, spend_source
+    FROM run_history
+    WHERE COALESCE(ended_at, created_at) >= NOW() - INTERVAL %s SECOND
+"""
+
+
+def runs_cost_summary(rows):
+    """
+    لكل نافذة (24h، 7d): {usd, runs, priced_runs, estimated_runs} من صفوف run_history (دالة نقية). تشغيل بلا
+    تكلفة محفوظة (قاعدة البيانات لم ترد، أو لم يبحث) يُعد في runs فقط.
+    """
+    out = {}
+    for name, seconds in WINDOWS:
+        usd, runs, priced, estimated = 0.0, 0, 0, 0
+        for r in rows or []:
+            age = _as_int(r.get("age_s"))
+            if age is None or age > seconds:
+                continue
+            runs += 1
+            spend = _as_float(r.get("spend_usd"))
+            if spend is None:
+                continue
+            usd += spend
+            priced += 1
+            estimated += 1 if str(r.get("spend_source") or "") == "estimate" else 0
+        out[name] = {"usd": round(usd, 4), "runs": runs, "priced_runs": priced, "estimated_runs": estimated}
+    return out
+
+
+def runs_cost():
+    """runs_cost_summary لآخر 7 أيام من run_history، أو None إذا تعذرت القراءة (لا يُختلق رقم)."""
+    try:
+        import local_cache_db
+        conn = local_cache_db.get_db_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(RUNS_COST_SQL, (WINDOWS[-1][1],))
+            rows = [dict(r) for r in cursor.fetchall()]
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+    except Exception as exc:
+        logger.warning("ops_health: run_history unreadable (%s)", type(exc).__name__)
+        return None
+    return runs_cost_summary(rows)
 
 
 def outage_notice(since_seconds, worker_id=None):

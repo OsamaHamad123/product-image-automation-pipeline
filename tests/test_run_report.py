@@ -14,6 +14,7 @@ Real-MariaDB tests use the test database (conftest) and skip when MariaDB is dow
 import datetime
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -330,3 +331,67 @@ def test_the_dashboard_starts_its_worker_as_a_dashboard_run():
     text = (ROOT / "dashboard" / "app" / "Http" / "Controllers" / "ApiController.php").read_text(encoding="utf-8")
     run_all = text[text.index("public function runAll("):text.index("private function pipelineProcess")]
     assert run_all.count("--worker --trigger=dashboard") == 2          # the Windows and the Linux command
+
+
+# ---------------------------------------------------------------------------
+# Item 6: each run keeps its cost (the queue rows keep only their last search)
+# ---------------------------------------------------------------------------
+
+def test_runs_cost_summary_per_window():
+    import ops_health
+
+    rows = [{"age_s": 3600, "spend_usd": 0.10, "spend_source": "estimate"},
+            {"age_s": 3 * 86400, "spend_usd": "0.2000", "spend_source": "ledger"},
+            {"age_s": 600, "spend_usd": None, "spend_source": None},          # a run whose cost was not saved
+            {"age_s": 9 * 86400, "spend_usd": 5.0, "spend_source": "estimate"}]
+    assert ops_health.runs_cost_summary(rows) == {
+        "24h": {"usd": 0.1, "runs": 2, "priced_runs": 1, "estimated_runs": 1},
+        "7d": {"usd": 0.3, "runs": 3, "priced_runs": 2, "estimated_runs": 1},
+    }
+
+
+def test_a_re_searched_row_keeps_the_cost_of_both_runs(db):
+    """Run A searched row R (2 answered Serper queries, ~$0.002), then run B searched R again and overwrote its trace.
+    The queue window now sees one search; run_history kept both runs' cost."""
+    import ops_health
+    import run_report
+
+    def search(run_id, worker):
+        outcome = {"decision": "REVIEW_PRESELECTED", "provider_health": [
+            {"provider": "serper", "status": "ok"}, {"provider": "serper", "status": "ok"}], "vlm_calls": 0}
+        _sql(db, "DELETE FROM automation_queue WHERE `row_number` = %s", (ROWS[0],))
+        _sql(db, "INSERT INTO automation_queue (`row_number`, product_name, status, trace_json, run_id, worker_id) "
+                 "VALUES (%s, 'R', 'ready_for_review', %s, %s, %s)",
+             (ROWS[0], json.dumps({"outcome": outcome}), run_id, worker + "#c1"))
+        health = ops_health.summarize(ops_health.load_rows(since_seconds=600, worker_id=worker))
+        now = datetime.datetime.now().timestamp()
+        info = {"stop_reason": None, "run_id": run_id, "worker_id": worker, "started_ts": now - 60, "ended_ts": now,
+                "health": health}
+        return run_report.report_worker_run(info, trigger="manual", path=os.devnull)
+
+    first = search(RUN + "a", "p4ops-host:1")
+    second = search(RUN + "b", "p4ops-host:2")
+    assert first["spend"] == second["spend"] == {"usd": 0.002, "source": "estimate"}
+
+    rows = ops_health.load_rows(since_seconds=600)
+    assert [r for r in rows if r["status"] == "ready_for_review"]      # the queue holds R's second search only
+    ours = [r for r in db.get_run_history(limit=50) if str(r["run_id"]).startswith(RUN)]
+    assert len(ours) == 2 and sum(float(r["spend_usd"]) for r in ours) == pytest.approx(0.004)
+    runs = ops_health.runs_cost()["24h"]
+    assert runs["priced_runs"] >= 2 and runs["usd"] >= 0.004 - 1e-9
+    assert ops_health.health_report()["runs_cost"]["24h"] == runs
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+def test_the_health_page_shows_the_run_history_cost():
+    js = (ROOT / "dashboard" / "public" / "js" / "health.js").read_text(encoding="utf-8")
+    report = {"scanned": 3, "windows": {"24h": {"searches": 2, "serper_queries": 2, "verifier": {"calls": 0},
+                                                "cost_usd": {"serper": 0.002, "gemini": 0, "total": 0.002}}},
+              "prices": {"serper_per_query": 0.001, "gemini_per_call": 0.001},
+              "runs_cost": {"24h": {"usd": 0.004, "runs": 2, "priced_runs": 2, "estimated_runs": 2}}}
+    script = ("globalThis.window = globalThis;\n" + js + "\nconst H = window.LaqtaHealth;\n"
+              f"console.log(JSON.stringify(H.opsView({json.dumps(report)}, '24h').cost));")
+    result = subprocess.run(["node", "-e", script], capture_output=True, text=True, timeout=60, encoding="utf-8")
+    assert result.returncode == 0, result.stderr
+    cost = json.loads(result.stdout.strip().splitlines()[-1])
+    assert "حسب سجل التشغيلات" in cost["note"] and "تشغيلين" in cost["note"]

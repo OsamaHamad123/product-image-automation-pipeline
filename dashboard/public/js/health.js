@@ -288,7 +288,7 @@
         });
     }
 
-    function costView(w, prices, month, sourcePrices) {
+    function costView(w, prices, month, sourcePrices, runs) {
         var cost = isObject(w.cost_usd) ? w.cost_usd : {};
         var sources = isObject(w.sources) ? w.sources : {};
         var lens = isObject(sources.lens_serpapi) ? sources.lens_serpapi : null;
@@ -332,6 +332,12 @@
         }
         if (isObject(month) && num(month.budget_usd) !== null) {
             note.push('النموذج القوي هالشهر: ' + usd(month.strong_usd) + ' من ' + usd(month.budget_usd) + '.');
+        }
+        /* run_history (ops_health.runs_cost): each run's cost saved when it ended, kept after a later search
+           overwrites the rows; the figure above sees only each row's last search. */
+        if (isObject(runs) && count(runs.priced_runs) > 0) {
+            note.push('حسب سجل التشغيلات: ' + usd(runs.usd) + ' في ' + plural(count(runs.priced_runs), 'تشغيل', 'تشغيلين', 'تشغيلات')
+                + ' (يشمل عمليات بحث أعيدت لاحقاً).');
         }
         return { total: usd(total), lines: lines, note: note.join(' ') };
     }
@@ -393,7 +399,8 @@
             total: plural(count(w.searches), 'منتج', 'منتجين', 'منتجات'),
             decisions: decisionsView(w),
             providers: providersView(w),
-            cost: costView(w, report.prices, report.verifier_month, report.source_prices),
+            cost: costView(w, report.prices, report.verifier_month, report.source_prices,
+                isObject(report.runs_cost) ? report.runs_cost[windowName] : null),
             reasons: reasonsView(w),
             note: noteView(report, w)
         };
