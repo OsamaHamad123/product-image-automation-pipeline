@@ -1,0 +1,3275 @@
+[
+ {
+  "row": 32,
+  "name": "FAMILY LIGHTMEAT SKIPJACK CHUNKS TUNA 185GM",
+  "brand": "FAMILY",
+  "sku_key": "6e8482e5baa40f6c",
+  "brand_conf": "sheet_raw",
+  "gtin_status": "missing",
+  "queries": [
+   "FAMILY LIGHTMEAT SKIPJACK CHUNKS TUNA 185g",
+   "FAMILY LIGHTMEAT SKIPJACK CHUNKS TUNA 185g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)"
+  ],
+  "provider_calls": [
+   {
+    "provider": "cse_legacy",
+    "query": "FAMILY LIGHTMEAT SKIPJACK CHUNKS TUNA 185g",
+    "hl": "en",
+    "status": "error",
+    "http_status": 403,
+    "count": 0,
+    "ms": 585,
+    "error": "http_403"
+   },
+   {
+    "provider": "serper",
+    "query": "FAMILY LIGHTMEAT SKIPJACK CHUNKS TUNA 185g",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 1757,
+    "error": null
+   },
+   {
+    "provider": "serper",
+    "query": "FAMILY LIGHTMEAT SKIPJACK CHUNKS TUNA 185g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 2054,
+    "error": null
+   }
+  ],
+  "decision": "REVIEW_UNSELECTED",
+  "failure_code": null,
+  "winner": null,
+  "top": [
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "family.qa",
+    "title": "Ola Skipjack Light Meat Tuna Solid Flakes In Brine 185gm | Family Food  Center - Qatar",
+    "image_url": "https://res.cloudinary.com/family-food-centre/image/upload/w_3840,q_auto,f_auto/v1757776362/prod-ecom-v2/product/1/0/1/0/100334145.jpg",
+    "page_url": "https://family.qa/product/ola-skipjack-light-meat-tuna-solid-flakes-in-brine-185gm-798190224886?srsltid=AU7gw4V1tCKpsAqbchsBlCchbAik0R4d8CjW7aVA6gNynWvWBIoqbVJr",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=0.5 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "Ola",
+     "variant": "SKIPJACK LIGHT MEAT TUNA FLAKES IN BRINE",
+     "size": "185g"
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "shops.ae",
+    "title": "Family Light Meat Tuna Chunk In Oil Eoe 185Gm",
+    "image_url": "https://shops.ae/products/Shopping/6c5acf29837aa123b6e57ecc026d5e75.400x400.jpeg",
+    "page_url": "https://shops.ae/product/family-light-meat-tuna-chunk-in-oil-eoe-185gm/2d0a9d4291d5213ea4004b6cf0eeb659/",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=0.5 source_trust=0 gtin=None fetch=timeout",
+    "vlm": null
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "atxpview-ecom-v2.family.qa",
+    "title": "Del Monte Light Meat Tuna Solid Pack In Brine 185gm | Family Food Center -  Qatar",
+    "image_url": "https://res.cloudinary.com/family-food-centre/image/upload/w_3840,q_auto,f_auto/v1790232611/prod-ecom-v2/products/100307234/1790232610427.jpg",
+    "page_url": "https://atxpview-ecom-v2.family.qa/en/product/del-monte-light-meat-tuna-solid-pack-in-brine-185gm-736211763730?sch=2",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=0.25 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "Del Monte",
+     "variant": "LIGHT SKIPJACK IN BRINE",
+     "size": ""
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "urbanfare.com",
+    "title": "Western Family - Chunk Light Tuna Skipjack In Water - Urban Fare",
+    "image_url": "https://images.cdn.saveonfoods.com/detail/00062639298524.jpg",
+    "page_url": "https://www.urbanfare.com/product/western-family-chunk-light-skipjack-tuna-in-water-00062639298517",
+    "evidence": "tier=2 size=unknown brand=True variants=[] coverage=0.75 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "Western family",
+     "variant": "FLAKED LIGHT TUNA SKIPJACK IN WATER",
+     "size": "170g"
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "qualityfoods.com",
+    "title": "Western Family - Chunk Light Tuna Skipjack in Water - Quality-Foods",
+    "image_url": "https://images.cdn.saveonfoods.com/detail/00062639334321.jpg",
+    "page_url": "https://www.qualityfoods.com/product/western-family-chunk-light-tuna-skipjack-in-water-id-00062639334321",
+    "evidence": "tier=2 size=unknown brand=True variants=[] coverage=0.75 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "Western family",
+     "variant": "CHUNK POLE CAUGHT LIGHT TUNA SKIPJACK IN WATER",
+     "size": "140g"
+    }
+   }
+  ],
+  "vlm_calls": 2,
+  "serp_calls": 3,
+  "cost_usd": 0.005,
+  "seconds": 24.0
+ },
+ {
+  "row": 33,
+  "name": "FAMILY LIGHTMEAT TUNA SPRING WATER 185GM",
+  "brand": "FAMILY",
+  "sku_key": "194b0629c9ece644",
+  "brand_conf": "sheet_raw",
+  "gtin_status": "missing",
+  "queries": [
+   "FAMILY LIGHTMEAT TUNA SPRING WATER 185g",
+   "FAMILY LIGHTMEAT TUNA SPRING WATER 185g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)"
+  ],
+  "provider_calls": [
+   {
+    "provider": "serper",
+    "query": "FAMILY LIGHTMEAT TUNA SPRING WATER 185g",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 2635,
+    "error": null
+   },
+   {
+    "provider": "serper",
+    "query": "FAMILY LIGHTMEAT TUNA SPRING WATER 185g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 1494,
+    "error": null
+   }
+  ],
+  "decision": "REVIEW_UNSELECTED",
+  "failure_code": null,
+  "winner": null,
+  "top": [
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "carrefourqatar.com",
+    "title": "Buy Family Light Meat Tuna Flakes Sunflower Oil 185g Online | Carrefour  Qatar",
+    "image_url": "https://cdn.mafrservices.com/sys-master-root/hca/h03/9428179222558/24221_main.jpg",
+    "page_url": "https://www.carrefourqatar.com/mafqat/en/tuna/family-light-meat-tuna-flake-185gr/p/24221?srsltid=AU7gw4V3hRwEAC-abVKGpABHhef92LHbXjiyblYjlvIgtgs_2FCCS4Xq",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=0.25 source_trust=1 gtin=None",
+    "vlm": {
+     "decision": "UNSURE",
+     "view": "front_packshot",
+     "brand": "Family",
+     "variant": "Light Meat Tuna",
+     "size": ""
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "family.qa",
+    "title": "Best Light Meat Tuna Flake 185gm | Family Food Center - Qatar",
+    "image_url": "https://res.cloudinary.com/family-food-centre/image/upload/w_3840,q_auto,f_auto/v1774968439/prod-ecom-v2/products/05040037/1774968437833.jpg",
+    "page_url": "https://family.qa/product/best-light-meat-tuna-flake-185gm-9345678000053?srsltid=AU7gw4UMbkEnelU-dbEj5vo6INeTaNkot5eWS-Hk3JWky-6wWd81SBBD",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=0.25 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "Best",
+     "variant": "Light Meat Tuna",
+     "size": ""
+    }
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "foodedge.com",
+    "title": "Family Light Meat Tuna 185gm",
+    "image_url": "https://www.foodedge.com/wp-content/uploads/2021/05/Family-Light-Meat-Tuna.jpg",
+    "page_url": "https://www.foodedge.com/product/family-light-meat-tuna-185gm/",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=0.25 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "UNSURE",
+     "view": "front_packshot",
+     "brand": "Family",
+     "variant": "Light Meat Tuna",
+     "size": ""
+    }
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "snoonu.com",
+    "title": "Family Light Meat Tuna 185G",
+    "image_url": "https://images.snoonu.com/brand_product/2024-05/18184794-f670-444b-8c5f-d5ea7d76c641_output.png",
+    "page_url": "https://snoonu.com/product/family-light-meat-tuna-185g/663b944ceb2708c63ba514ad",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=0.25 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "UNSURE",
+     "view": "front_packshot",
+     "brand": "Family",
+     "variant": "Light Meat Tuna",
+     "size": ""
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "shops.ae",
+    "title": "Family Light Meat Tuna Chunk In Oil Eoe 185Gm",
+    "image_url": "https://shops.ae/products/Shopping/6c5acf29837aa123b6e57ecc026d5e75.400x400.jpeg",
+    "page_url": "https://shops.ae/product/family-light-meat-tuna-chunk-in-oil-eoe-185gm/2d0a9d4291d5213ea4004b6cf0eeb659/",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=0.25 source_trust=0 gtin=None fetch=timeout",
+    "vlm": null
+   }
+  ],
+  "vlm_calls": 1,
+  "serp_calls": 2,
+  "cost_usd": 0.003,
+  "seconds": 20.4
+ },
+ {
+  "row": 34,
+  "name": "FRESHLY CHICKEN SHAWARMA MEAT 350GM",
+  "brand": "FRESHLY",
+  "sku_key": "983109fc60b385bb",
+  "brand_conf": "sheet_raw",
+  "gtin_status": "missing",
+  "queries": [
+   "FRESHLY CHICKEN SHAWARMA MEAT 350g",
+   "FRESHLY CHICKEN SHAWARMA MEAT 350g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)"
+  ],
+  "provider_calls": [
+   {
+    "provider": "serper",
+    "query": "FRESHLY CHICKEN SHAWARMA MEAT 350g",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 19,
+    "ms": 1605,
+    "error": null
+   },
+   {
+    "provider": "serper",
+    "query": "FRESHLY CHICKEN SHAWARMA MEAT 350g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 3875,
+    "error": null
+   }
+  ],
+  "decision": "REVIEW_PRESELECTED",
+  "failure_code": null,
+  "winner": "https://prod-spinneys-cdn-new.azureedge.net/media/cache/12/51/125141e02ce7953c7b0c11445e9714f0.jpg",
+  "top": [
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "unioncoop.ae",
+    "title": "Shop Freshly Foods Gourmet Chicken Shawarma - 350g | Union Coop",
+    "image_url": "https://www.unioncoop.ae/media/catalog/product/7/8/7894904256846-main.jpg",
+    "page_url": "https://www.unioncoop.ae/chicken-shawarma-350gm-37261616-nji5mtewnjqymzi5n18xnjkzndy4nji4.html",
+    "evidence": "tier=1 size=match brand=True variants=[] coverage=0.6667 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "Seara",
+     "variant": "Chicken Tikka",
+     "size": "350g"
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "emcoop.ae",
+    "title": "Freshly Foods Gourmet Chicken Shawarma Meat 350G | Buy...",
+    "image_url": "https://suppystorage.blob.core.windows.net/valeur/items/FMCG_598491_1.jpg",
+    "page_url": "https://www.emcoop.ae/shop/stores/170/Garhoud/products/84739/Freshly%20Foods%20Gourmet%20Chicken%20Shawarma%20Meat%C2%A0350G",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=1.0 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "FRESHLY FOODS",
+     "variant": "ZINGO CHICKEN BREAST STRIPS",
+     "size": "500G"
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "emcoop.ae",
+    "title": "Freshly Foods Gourmet Chicken Shawarma Meat 350G | Buy...",
+    "image_url": "https://suppystorage.blob.core.windows.net/valeur/items/FMCG_495871_1.jpg",
+    "page_url": "https://www.emcoop.ae/shop/stores/146/TWAR/products/84739/Freshly%20Foods%20Gourmet%20Chicken%20Shawarma%20Meat%C2%A0350G",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=1.0 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "FRESHLY FOODS",
+     "variant": "Chicken Sheesh Kebab",
+     "size": "245g"
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "emiratescoop.suppy.app",
+    "title": "Freshly Foods Gourmet Chicken Shawarma Meat 350G | Buy...",
+    "image_url": "https://suppystorage.blob.core.windows.net/valeur/items/FMCG_614565_1.jpg",
+    "page_url": "https://emiratescoop.suppy.app/shop/stores/147/AIRPORT%20VIEW/products/84739/Freshly%20Foods%20Gourmet%20Chicken%20Shawarma%20Meat%C2%A0350G",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=1.0 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "AMERICANA",
+     "variant": "Breaded Chicken Burger",
+     "size": "720g"
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "emcoop.ae",
+    "title": "Freshly Foods Gourmet Chicken Shawarma Meat 350G | Buy...",
+    "image_url": "https://suppystorage.blob.core.windows.net/valeur/items/FMCG_499518_1.jpg",
+    "page_url": "https://www.emcoop.ae/shop/stores/170/Garhoud/products/84739/Freshly%20Foods%20Gourmet%20Chicken%20Shawarma%20Meat%C2%A0350G",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=1.0 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "FRESHLY FOODS",
+     "variant": "Homestyle Zingo Chicken Fillet",
+     "size": "800gms"
+    }
+   }
+  ],
+  "vlm_calls": 2,
+  "serp_calls": 2,
+  "cost_usd": 0.004,
+  "seconds": 15.1
+ },
+ {
+  "row": 35,
+  "name": "GOLDEN PRIZE L/ MEAT TUNA VEGE OIL 185GM",
+  "brand": "GOLDEN PRIZE",
+  "sku_key": "1aa9aa8fb6c5de4a",
+  "brand_conf": "sheet_raw",
+  "gtin_status": "missing",
+  "queries": [
+   "GOLDEN PRIZE L/ MEAT TUNA VEGE OIL 185g",
+   "GOLDEN PRIZE L/ MEAT TUNA VEGE OIL 185g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)"
+  ],
+  "provider_calls": [
+   {
+    "provider": "serper",
+    "query": "GOLDEN PRIZE L/ MEAT TUNA VEGE OIL 185g",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 2434,
+    "error": null
+   },
+   {
+    "provider": "serper",
+    "query": "GOLDEN PRIZE L/ MEAT TUNA VEGE OIL 185g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 2885,
+    "error": null
+   }
+  ],
+  "decision": "REVIEW_UNSELECTED",
+  "failure_code": null,
+  "winner": null,
+  "top": [
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "carrefouruae.com",
+    "title": "Buy Golden Prize Light Meat Tuna In Vegetable Oil 185g Online | Carrefour  UAE",
+    "image_url": "https://cdn.mafrservices.com/pim-content/UAE/media/product/1879781/1745319603/1879781_main.jpg",
+    "page_url": "https://www.carrefouruae.com/mafuae/en/tuna/golden-prize-tuna-185grx2/p/1879781",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=0.75 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "multi_product",
+     "brand": "Golden Prize",
+     "variant": "FLAKES LIGHT MEAT TUNA IN VEGETABLE OIL",
+     "size": ""
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "bigbasket.com",
+    "title": "Buy Golden Prize Canned Skipjack Light Meat Tuna Chunk In Olive Oil 185 Gm  Online at the Best Price of Rs 270.75 - bigbasket",
+    "image_url": "https://www.bbassets.com/media/uploads/p/xl/40037992_9-golden-prize-canned-skipjack-light-meat-tuna-chunk-in-olive-oil.jpg",
+    "page_url": "https://www.bigbasket.com/pd/40037992/golden-prize-canned-skipjack-light-meat-tuna-chunk-in-olive-oil-185-g/",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=0.75 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "GOLDEN PRIZE",
+     "variant": "TUNA CHUNKS in Olive Oil",
+     "size": ""
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "luxury.tatacliq.com",
+    "title": "Buy Golden Prize Canned Skipjack Light Meat Tuna In Soya Bean Oil - 185 gm  Online @ Tata CLiQ Luxury",
+    "image_url": "https://img.tatacliq.com/images/i8/658Wx734H/MP000000013068786_658Wx734H_202205081206051.jpeg",
+    "page_url": "https://luxury.tatacliq.com/golden-prize-canned-skipjack-light-meat-tuna-chunk-in-soya-bean-oil--185-g/p-mp000000013068786?srsltid=AU7gw4VQYmXve82XhXvn5yWyQHo5Qo86KsuYypT3pCjGdEgAGOADL81O",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=0.75 source_trust=0 gtin=None fetch=timeout",
+    "vlm": null
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "amazon.in",
+    "title": "Golden Prize Tuna Chunks in Olive Oil, 185g : Amazon.in: Grocery & Gourmet  Foods",
+    "image_url": "https://m.media-amazon.com/images/I/714aWh0pyeL.jpg",
+    "page_url": "https://www.amazon.in/Golden-Prize-Tuna-Chunks-Olive/dp/B01MYECJ7M",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=0.5 source_trust=1 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "GOLDEN PRIZE",
+     "variant": "TUNA in OLIVE OIL CHUNKS",
+     "size": "185 g."
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "instamart.in",
+    "title": "Buy Golden Prize Tuna Chunks in Soyabean Oil Online (185 g) At Best Price",
+    "image_url": "https://instamart-media-assets.swiggy.com/swiggy/image/upload/fl_lossy,f_auto,q_auto,w_1200,h_630/NI_CATALOG/IMAGES/CIW/2025/11/13/7a109dfc-c5e8-4154-b8d5-342fbff27345_468976_1.png",
+    "page_url": "https://instamart.in/p/golden-prize-tuna-chunks-in-soyabean-oil-ENBEY10CAS?srsltid=AU7gw4XtpocD_Hkh_6qrIp0o4G34-CcKUXwqmtz7G_zXb8El4mYdZ-mq",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=0.5 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "GOLDEN PRIZE",
+     "variant": "TUNA CHUNKS in Soya Bean Oil",
+     "size": "185 g."
+    }
+   }
+  ],
+  "vlm_calls": 2,
+  "serp_calls": 2,
+  "cost_usd": 0.004,
+  "seconds": 24.3
+ },
+ {
+  "row": 36,
+  "name": "GREEN FARM MEAT MASALA 200GM",
+  "brand": "GREEN FARM",
+  "sku_key": "e93d8a6a2a3db9ac",
+  "brand_conf": "sheet_raw",
+  "gtin_status": "missing",
+  "queries": [
+   "GREEN FARM MEAT MASALA 200g",
+   "GREEN FARM MEAT MASALA 200g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)"
+  ],
+  "provider_calls": [
+   {
+    "provider": "serper",
+    "query": "GREEN FARM MEAT MASALA 200g",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 2030,
+    "error": null
+   },
+   {
+    "provider": "serper",
+    "query": "GREEN FARM MEAT MASALA 200g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 1519,
+    "error": null
+   }
+  ],
+  "decision": "REVIEW_UNSELECTED",
+  "failure_code": null,
+  "winner": null,
+  "top": [
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "tradeling.com",
+    "title": "Buy Green Farm Meat Masala 200gr Online in UAE | Tradeling",
+    "image_url": "https://c8n.tradeling.com/img/plain/pim/rs:auto:1600::0/f:webp/q:90/up/5f266248d0ba82001b295418/455df00f0d5b613111645711fff2a6fa.jpg",
+    "page_url": "https://www.tradeling.com/ae-en/product-details/green-farm-meat-masala-200gr-6996a3b4c18f01221d4957fb-5fba0c6142480f001bed85d4?srsltid=AU7gw4WKY5Ovb5zWjWlNvAPq5spLS9qj8o5F8ITZuL2uGt3wg5O2eMgZ",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=1.0 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "Double Horse",
+     "variant": "MEAT MASALA",
+     "size": "140g"
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "tradeling.com",
+    "title": "Buy Green Farm Meat Masala 200gr Online in UAE | Tradeling",
+    "image_url": "https://c8n.tradeling.com/img/plain/pim/rs:auto:1600::0/f:webp/q:90/up/5fba0c6142480f001bed85d4/5ef04414b78f3cd61e93cbb272d6bbb5.jpg",
+    "page_url": "https://www.tradeling.com/ae-en/product-details/green-farm-meat-masala-200gr-6996a3b4c18f01221d4957fb-5fba0c6142480f001bed85d4?srsltid=AU7gw4UrOtIIRCJgv_Djr3e7_p6jVGdivhx9_sy5Xdtw1QPW7QU7u1p5",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=1.0 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "Gyeen Farm",
+     "variant": "Cumin Seeds",
+     "size": "200g"
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "tradeling.com",
+    "title": "Buy Green Farm Meat Masala 200gr Online in UAE | Tradeling",
+    "image_url": "https://c8n.tradeling.com/img/plain/pim/rs:auto:1600::0/f:webp/q:90/up/5fba0c6142480f001bed85d4/1f00fe64e13e7bc4521006960152593a.jpg",
+    "page_url": "https://www.tradeling.com/ae-en/product-details/green-farm-meat-masala-200gr-6996a3b4c18f01221d4957fb-5fba0c6142480f001bed85d4?srsltid=AU7gw4UJi5bjuTqsgiwu6oSHyRQVeICqTLpFog6ZysEmJsitIrzvVX3_",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=1.0 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "Shan",
+     "variant": "Meat & Vegetable",
+     "size": "100 g"
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "tradeling.com",
+    "title": "Buy Green Farm Meat Masala 200gr Online in UAE | Tradeling",
+    "image_url": "https://c8n.tradeling.com/img/plain/pim/rs:auto:1600::0/f:webp/q:90/up/5fba0c6142480f001bed85d4/df0de5aa28eac7490df68c13309dd3a4.jpg",
+    "page_url": "https://www.tradeling.com/ae-en/product-details/green-farm-meat-masala-200gr-6996a3b4c18f01221d4957fb-5fba0c6142480f001bed85d4?srsltid=AU7gw4U8BUVnJBzj7jIscbE1aXRfHQcpd7Li6anx_trwvjTalpc29eJB",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=1.0 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "Gyeen Farm",
+     "variant": "Ajwain",
+     "size": "200g"
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "tradeling.com",
+    "title": "Buy Green Farm Meat Masala 200gr Online in UAE | Tradeling",
+    "image_url": "https://c8n.tradeling.com/img/plain/pim/rs:auto:1600::0/f:webp/q:90/up/5fba0c6142480f001bed85d4/9ff890bd15b8177f6ebf88b5b89bfb3b.jpg",
+    "page_url": "https://www.tradeling.com/ae-en/product-details/green-farm-meat-masala-200gr-6996a3b4c18f01221d4957fb-5fba0c6142480f001bed85d4?srsltid=AU7gw4UV_DdyUT-r655nKdgjwLKukQ5JQimsWpsmZ7t46Hm3L9yymYc4",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=1.0 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "Green Farm",
+     "variant": "ZA'ATAR",
+     "size": "200 grm"
+    }
+   }
+  ],
+  "vlm_calls": 2,
+  "serp_calls": 2,
+  "cost_usd": 0.004,
+  "seconds": 36.1
+ },
+ {
+  "row": 37,
+  "name": "INA PARAMANS SEASOING MEAT SPICE 200ML",
+  "brand": "INA PARAMANS",
+  "sku_key": "1c74e287e58390b3",
+  "brand_conf": "sheet_raw",
+  "gtin_status": "missing",
+  "queries": [
+   "INA PARAMANS SEASOING MEAT SPICE 200ml",
+   "INA PARAMANS SEASOING MEAT SPICE 200ml (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)",
+   "INA PARAMANS SEASOING MEAT SPICE"
+  ],
+  "provider_calls": [
+   {
+    "provider": "serper",
+    "query": "INA PARAMANS SEASOING MEAT SPICE 200ml",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 4891,
+    "error": null
+   },
+   {
+    "provider": "serper",
+    "query": "INA PARAMANS SEASOING MEAT SPICE 200ml (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 1567,
+    "error": null
+   },
+   {
+    "provider": "serper",
+    "query": "INA PARAMANS SEASOING MEAT SPICE",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 3214,
+    "error": null
+   }
+  ],
+  "decision": "REVIEW_UNSELECTED",
+  "failure_code": null,
+  "winner": null,
+  "top": [
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "amazon.ae",
+    "title": "Ina Paarman's Seasoning Meat Spice, 200ml (Pack of 1) : Amazon.ae: Grocery",
+    "image_url": "https://m.media-amazon.com/images/I/71Dp35G49QL.jpg",
+    "page_url": "https://www.amazon.ae/Ina-Paarmans-Seasoning-Spice-200ml/dp/B007UOLCSS",
+    "evidence": "tier=3 size=match brand=False variants=[] coverage=0.6667 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "UNSURE",
+     "view": "front_packshot",
+     "brand": "INA PAARMAN'S",
+     "variant": "MEAT SPICE",
+     "size": ""
+    }
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "carrefouruae.com",
+    "title": "Buy Ina Paarman&#39;s Kitchen Meat Spice Powder 200g Online | Carrefour UAE",
+    "image_url": "https://cdn.mafrservices.com/sys-master-root/h01/he2/12660226850846/799482_main.jpg",
+    "page_url": "https://www.carrefouruae.com/mafuae/en/masala-and-mix/inaparman-spice-meat-200ml/p/799482",
+    "evidence": "tier=3 size=match brand=False variants=[] coverage=0.6667 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "UNSURE",
+     "view": "front_packshot",
+     "brand": "INA PAARMAN'S",
+     "variant": "MEAT SPICE",
+     "size": ""
+    }
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "spinneys.com",
+    "title": "Ina Paarman's Meat Spice 200g",
+    "image_url": "https://prod-spinneys-cdn-new.azureedge.net/media/cache/c3/78/c378791616775cec20e1af503a1dc309.jpg",
+    "page_url": "https://www.spinneys.com/en-ae/catalogue/ina-p-meat-spice-200ml_8971/?srsltid=AU7gw4WmoyEpxvsZe8ufWmiwXcfp7Iscb8qzKjjat0WWy4H0Cma7kCZX",
+    "evidence": "tier=3 size=match brand=False variants=[] coverage=0.6667 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "UNSURE",
+     "view": "front_packshot",
+     "brand": "INA PAARMAN'S",
+     "variant": "MEAT SPICE",
+     "size": ""
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "amazon.ae",
+    "title": "Ina Paarman's Seasoning Meat Spice, 200ml (Pack of 1) : Amazon.ae: Grocery",
+    "image_url": "https://m.media-amazon.com/images/I/81Kg9y7s0KL.jpg",
+    "page_url": "https://www.amazon.ae/Ina-Paarmans-Seasoning-Spice-200ml/dp/B007UOLCSS",
+    "evidence": "tier=3 size=match brand=False variants=[] coverage=0.6667 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "banner",
+     "brand": "INA PAARMAN'S",
+     "variant": "MEAT SPICE",
+     "size": ""
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "amazon.ae",
+    "title": "Ina Paarman's Seasoning Meat Spice, 200ml (Pack of 1) : Amazon.ae: Grocery",
+    "image_url": "https://m.media-amazon.com/images/I/61lwz5MN8CL.jpg",
+    "page_url": "https://www.amazon.ae/Ina-Paarmans-Seasoning-Spice-200ml/dp/B007UOLCSS",
+    "evidence": "tier=3 size=match brand=False variants=[] coverage=0.6667 source_trust=3 gtin=None quality=foreground>98%",
+    "vlm": null
+   }
+  ],
+  "vlm_calls": 1,
+  "serp_calls": 3,
+  "cost_usd": 0.004,
+  "seconds": 17.3
+ },
+ {
+  "row": 38,
+  "name": "KABANI MEAT MASALA160 GM",
+  "brand": "KABANI",
+  "sku_key": "e037c77395bb0062",
+  "brand_conf": "sheet_raw",
+  "gtin_status": "missing",
+  "queries": [
+   "KABANI MEAT MASALA160 GM",
+   "KABANI MEAT MASALA160 GM (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)"
+  ],
+  "provider_calls": [
+   {
+    "provider": "serper",
+    "query": "KABANI MEAT MASALA160 GM",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 2045,
+    "error": null
+   },
+   {
+    "provider": "serper",
+    "query": "KABANI MEAT MASALA160 GM (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 2164,
+    "error": null
+   }
+  ],
+  "decision": "REVIEW_UNSELECTED",
+  "failure_code": null,
+  "winner": null,
+  "top": [
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "facebook.com",
+    "title": "With Kabani Meat Masala, transform every meal into a feast of flavor.  Perfectly blended spices to bring out the best in your non-veg dishes. 🍖🍛  Available now at: 📍 Ozone Foodstuff Trading",
+    "image_url": "https://lookaside.fbsbx.com/lookaside/crawler/media/?media_id=1439766450645221",
+    "page_url": "https://www.facebook.com/ozonefoodstufftrading/posts/with-kabani-meat-masala-transform-every-meal-into-a-feast-of-flavor-perfectly-bl/1439767300645136/",
+    "evidence": "tier=2 size=unknown brand=True variants=[] coverage=1.0 source_trust=0 gtin=None fetch=too_small",
+    "vlm": null
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "facebook.com",
+    "title": "With Kabani Meat Masala, transform every meal into a feast of flavor.  Perfectly blended spices to bring out the best in your non-veg dishes. 🍖🍛  Available now at: 📍 Ozone Foodstuff Trading",
+    "image_url": "https://lookaside.fbsbx.com/lookaside/crawler/media/?media_id=1086758133319004",
+    "page_url": "https://www.facebook.com/ozonefoodstufftrading/posts/with-kabani-meat-masala-transform-every-meal-into-a-feast-of-flavor-perfectly-bl/1439767300645136/",
+    "evidence": "tier=2 size=unknown brand=True variants=[] coverage=1.0 source_trust=0 gtin=None fetch=too_small",
+    "vlm": null
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "facebook.com",
+    "title": "With Kabani Meat Masala, transform every meal into a feast of flavor.  Perfectly blended spices to bring out the best in your non-veg dishes. 🍖🍛  Available now at: 📍 Ozone Foodstuff Trading",
+    "image_url": "https://lookaside.fbsbx.com/lookaside/crawler/media/?media_id=1081058363888981",
+    "page_url": "https://www.facebook.com/ozonefoodstufftrading/posts/with-kabani-meat-masala-transform-every-meal-into-a-feast-of-flavor-perfectly-bl/1439767300645136/",
+    "evidence": "tier=2 size=unknown brand=True variants=[] coverage=1.0 source_trust=0 gtin=None fetch=too_small",
+    "vlm": null
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "gcc.luluhypermarket.com",
+    "title": "Kitchen Treasures Meat Masala 160 g Online at Best Price | Lulu UAE",
+    "image_url": "https://bf1af2.akinoncloudcdn.com/products/2024/09/12/75992/f56ba480-18e7-4e9e-9f21-e0440a7524d2.jpg",
+    "page_url": "https://gcc.luluhypermarket.com/en-ae/kitchen-treasures-meat-masala-160-g/p/1429444",
+    "evidence": "tier=3 size=unknown brand=False variants=[] coverage=1.0 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "KITCHEN TREASURES",
+     "variant": "Meat Masala",
+     "size": "160g"
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "gcc.luluhypermarket.com",
+    "title": "Eastern Meat Masala Value Pack 160 g Online at Best Price | Lulu UAE",
+    "image_url": "https://bf1af2.akinoncloudcdn.com/products/2025/08/04/169633/6b4be789-6e67-4881-8ce0-7048a7ca13c1_size1920x1920_cropCenter.jpg",
+    "page_url": "https://gcc.luluhypermarket.com/en-ae/eastern-meat-masala-value-pack-160-g/p/1196251",
+    "evidence": "tier=3 size=unknown brand=False variants=[] coverage=1.0 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "Eastern",
+     "variant": "Meat Masala",
+     "size": ""
+    }
+   }
+  ],
+  "vlm_calls": 1,
+  "serp_calls": 2,
+  "cost_usd": 0.003,
+  "seconds": 17.0
+ },
+ {
+  "row": 39,
+  "name": "KITCHEN TREASURE MEAT MASALA 160GM",
+  "brand": "KITCHEN TREASURE",
+  "sku_key": "35ef721ebe57724f",
+  "brand_conf": "sheet_raw",
+  "gtin_status": "missing",
+  "queries": [
+   "KITCHEN TREASURE MEAT MASALA 160g",
+   "KITCHEN TREASURE MEAT MASALA 160g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)",
+   "KITCHEN TREASURE MEAT MASALA"
+  ],
+  "provider_calls": [
+   {
+    "provider": "serper",
+    "query": "KITCHEN TREASURE MEAT MASALA 160g",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 2938,
+    "error": null
+   },
+   {
+    "provider": "serper",
+    "query": "KITCHEN TREASURE MEAT MASALA 160g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 2089,
+    "error": null
+   },
+   {
+    "provider": "serper",
+    "query": "KITCHEN TREASURE MEAT MASALA",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 3453,
+    "error": null
+   }
+  ],
+  "decision": "REVIEW_UNSELECTED",
+  "failure_code": null,
+  "winner": null,
+  "top": [
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "gcc.luluhypermarket.com",
+    "title": "Kitchen Treasures Meat Masala 160 g Online at Best Price | Lulu UAE",
+    "image_url": "https://bf1af2.akinoncloudcdn.com/products/2024/09/12/75992/f56ba480-18e7-4e9e-9f21-e0440a7524d2.jpg",
+    "page_url": "https://gcc.luluhypermarket.com/en-ae/kitchen-treasures-meat-masala-160-g/p/1429444",
+    "evidence": "tier=3 size=match brand=False variants=[] coverage=1.0 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "UNSURE",
+     "view": "front_packshot",
+     "brand": "KITCHEN TREASURES",
+     "variant": "Meat Masala",
+     "size": "160g"
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "carrefouruae.com",
+    "title": "Buy Eastern Meat Masala 160g Online | Carrefour UAE",
+    "image_url": "https://cdn.mafrservices.com/sys-master-root/hed/h27/62520952586270/1217616_main.jpg",
+    "page_url": "https://www.carrefouruae.com/mafuae/en/masala-and-mix/eastern-meat-masala-125g/p/1217616",
+    "evidence": "tier=3 size=match brand=False variants=[] coverage=1.0 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "Eastern",
+     "variant": "Meat Masala",
+     "size": "160g"
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "family.qa",
+    "title": "Kitchen Treasures Meat Masala 160gm | Family Food Center - Qatar",
+    "image_url": "https://res.cloudinary.com/family-food-centre/image/upload/w_3840,q_auto,f_auto/v1777362119/prod-ecom-v2/products/100322491/1777362118587.jpg",
+    "page_url": "https://family.qa/product/kitchen-treasures-meat-masala-160gm-8906091680683?srsltid=AU7gw4W_OtxmnTsogNDwRU-UpnoGoSGTb6q2RypL8tq2PZBbB2oJR8Mo",
+    "evidence": "tier=3 size=match brand=False variants=[] coverage=1.0 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "KITCHEN TREASURES",
+     "variant": "Fish Fry Masala",
+     "size": "100g"
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "sharjahcoop.ae",
+    "title": "Eastern Meat Masala 160g | Sharjah Co-operative Society",
+    "image_url": "https://www.sharjahcoop.ae/medias/1200Wx1200H-00000-8901440209355-001.jpg?context=bWFzdGVyfGltYWdlc3wyMTQ3NzR8aW1hZ2UvanBlZ3xhRFptTDJnM05TOHhNREF6TURZNU1UYzNPRFU1TUM4eE1qQXdWM2d4TWpBd1NGOHdNREF3TUY4NE9UQXhORFF3TWpBNU16VTFYekF3TVM1cWNHY3w1YWQ0N2U0NDg1NTA4ZTliZjU5MWU0ZDRlZTZkNWMyN2ViYjg4YjE0Zjg5ZmE0YzIyYzcyZGRjNzI1MGI2OWNh",
+    "page_url": "https://www.sharjahcoop.ae/en/eastern-meat-masala-160g/p/8901440209355?srsltid=AU7gw4WhSB9sPgnHOrtOFxwSm0ddmMAKBoMbLBnwcvsvn1QSbIOdY3-T",
+    "evidence": "tier=3 size=match brand=False variants=[] coverage=1.0 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "Eastern",
+     "variant": "Meat Masala",
+     "size": "160g"
+    }
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "ansargallery.com",
+    "title": "Kitchen Treasures Meat Masala 160g | Ansar Gallery",
+    "image_url": "https://media.ansargallery.com/media/catalog/product/6/2/6291103782045_1.jpg",
+    "page_url": "https://www.ansargallery.com/en/kitchen-treasures-meat-masala-160g-qatar-8906091680683",
+    "evidence": "tier=3 size=match brand=False variants=[] coverage=1.0 source_trust=0 gtin=None",
+    "vlm": null
+   }
+  ],
+  "vlm_calls": 1,
+  "serp_calls": 3,
+  "cost_usd": 0.004,
+  "seconds": 17.9
+ },
+ {
+  "row": 40,
+  "name": "LORENA LIGHT MEAT TUNA CHUNK W/S 185GM",
+  "brand": "LORENA",
+  "sku_key": "ee8fa1cee3168f68",
+  "brand_conf": "sheet_raw",
+  "gtin_status": "missing",
+  "queries": [
+   "LORENA LIGHT MEAT TUNA CHUNK W/S 185g"
+  ],
+  "provider_calls": [
+   {
+    "provider": "serper",
+    "query": "LORENA LIGHT MEAT TUNA CHUNK W/S 185g",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 2820,
+    "error": null
+   }
+  ],
+  "decision": "REVIEW_PRESELECTED",
+  "failure_code": null,
+  "winner": "https://m.media-amazon.com/images/I/81ntNAXlCfL.jpg",
+  "top": [
+   {
+    "status": "preselected",
+    "provider": "serper",
+    "domain": "amazon.ae",
+    "title": "Lorena Light Meat Tuna Chunk in SF Oil - 185 g: Buy Online at Best Price in  UAE - Amazon.ae",
+    "image_url": "https://m.media-amazon.com/images/I/81ntNAXlCfL.jpg",
+    "page_url": "https://www.amazon.ae/Lorena-Light-Meat-Tuna-Chunk/dp/B07PDHVD7K",
+    "evidence": "tier=1 size=match brand=True variants=['fat'] coverage=1.0 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MATCH",
+     "view": "front_packshot",
+     "brand": "LORENA",
+     "variant": "light meat TUNA CHUNKS in sunflower oil",
+     "size": "185g"
+    }
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "amazon.ae",
+    "title": "Lorena Light Meat Tuna Solid in SF Oil 185g: Buy Online at Best Price in  UAE - Amazon.ae",
+    "image_url": "https://m.media-amazon.com/images/I/81z2wg8d+XL.jpg",
+    "page_url": "https://www.amazon.ae/Lorena-Light-Meat-Tuna-Solid/dp/B07PKCZ34V",
+    "evidence": "tier=1 size=match brand=True variants=['fat'] coverage=0.6667 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "UNSURE",
+     "view": "other_side",
+     "brand": "",
+     "variant": "",
+     "size": ""
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "amazon.ae",
+    "title": "Lorena Light Meat Tuna Solid in SF Oil 185g: Buy Online at Best Price in  UAE - Amazon.ae",
+    "image_url": "https://m.media-amazon.com/images/I/71yZGfpPnoL.jpg",
+    "page_url": "https://www.amazon.ae/Lorena-Light-Meat-Tuna-Solid/dp/B07PKCZ34V",
+    "evidence": "tier=1 size=match brand=True variants=['fat'] coverage=0.6667 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "LORENA",
+     "variant": "light meat TUNA SOLID in sunflower oil",
+     "size": "185g"
+    }
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "amazon.ae",
+    "title": "Lorena Light Meat Tuna Chunk in Water 185g: Buy Online at Best Price in UAE  - Amazon.ae",
+    "image_url": "https://m.media-amazon.com/images/I/81InA6IH+6L.jpg",
+    "page_url": "https://www.amazon.ae/Lorena-Light-Meat-Chunk-Water/dp/B07MTXN1G1",
+    "evidence": "tier=2 size=match brand=True variants=['fat'] coverage=1.0 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "UNSURE",
+     "view": "other_side",
+     "brand": "",
+     "variant": "",
+     "size": ""
+    }
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "gfb.ae",
+    "title": "Lorena Light Meat Tuna Chunks in Water & Salt 185g",
+    "image_url": "http://gfb.ae/cdn/shop/files/Lorena_Light_Meat_Tuna_Chunks_in_Water___Salt_185g_6291103380333_T1.jpg?v=1747729860",
+    "page_url": "https://gfb.ae/products/lorena-light-meat-tuna-chunks-in-sunflower-oil-185g-copy?srsltid=AU7gw4V_QBq5VYzj2UGrWjxC_3kVYLCKmniqngNQreOpe2pf3yw6PpLj",
+    "evidence": "tier=2 size=match brand=True variants=['fat'] coverage=1.0 source_trust=0 gtin=None",
+    "vlm": null
+   }
+  ],
+  "vlm_calls": 1,
+  "serp_calls": 1,
+  "cost_usd": 0.002,
+  "seconds": 11.4
+ },
+ {
+  "row": 41,
+  "name": "MAHRA MEAT MASALA 100GM",
+  "brand": "MAHRA",
+  "sku_key": "311a3752a07c62bd",
+  "brand_conf": "sheet_raw",
+  "gtin_status": "missing",
+  "queries": [
+   "MAHRA MEAT MASALA 100g",
+   "MAHRA MEAT MASALA 100g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)"
+  ],
+  "provider_calls": [
+   {
+    "provider": "serper",
+    "query": "MAHRA MEAT MASALA 100g",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 1909,
+    "error": null
+   },
+   {
+    "provider": "serper",
+    "query": "MAHRA MEAT MASALA 100g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 1612,
+    "error": null
+   }
+  ],
+  "decision": "REVIEW_UNSELECTED",
+  "failure_code": null,
+  "winner": null,
+  "top": [
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "instagram.com",
+    "title": "This Ramadan, let the authentic taste of Mahra Mutton Masala bring your  family together. Whether it's a slow-cooked mutton curry or a flavorful  biryani, our premium blend of spices ensures every bite",
+    "image_url": "https://lookaside.instagram.com/seo/google_widget/crawler/?media_id=3851896056351182294",
+    "page_url": "https://www.instagram.com/p/DV0rxPoCr_6/",
+    "evidence": "tier=2 size=unknown brand=True variants=[] coverage=0.5 source_trust=0 gtin=None fetch=not_image",
+    "vlm": null
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "instagram.com",
+    "title": "This Ramadan, let the authentic taste of Mahra Mutton Masala bring your  family together. Whether it's a slow-cooked mutton curry or a flavorful  biryani, our premium blend of spices ensures every bite",
+    "image_url": "https://lookaside.instagram.com/seo/google_widget/crawler/?media_id=3851896050831460368",
+    "page_url": "https://www.instagram.com/p/DV0rxPoCr_6/",
+    "evidence": "tier=2 size=unknown brand=True variants=[] coverage=0.5 source_trust=0 gtin=None fetch=not_image",
+    "vlm": null
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "instagram.com",
+    "title": "This Ramadan, let the authentic taste of Mahra Mutton Masala bring your  family together. Whether it's a slow-cooked mutton curry or a flavorful  biryani, our premium blend of spices ensures every bite",
+    "image_url": "https://lookaside.instagram.com/seo/google_widget/crawler/?media_id=3962091374976835381",
+    "page_url": "https://www.instagram.com/p/DV0rxPoCr_6/",
+    "evidence": "tier=2 size=unknown brand=True variants=[] coverage=0.5 source_trust=0 gtin=None fetch=not_image",
+    "vlm": null
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "instagram.com",
+    "title": "This Ramadan, let the authentic taste of Mahra Mutton Masala bring your  family together. Whether it's a slow-cooked mutton curry or a flavorful  biryani, our premium blend of spices ensures every bite",
+    "image_url": "https://lookaside.instagram.com/seo/google_widget/crawler/?media_id=3963580427697977475",
+    "page_url": "https://www.instagram.com/p/DV0rxPoCr_6/",
+    "evidence": "tier=2 size=unknown brand=True variants=[] coverage=0.5 source_trust=0 gtin=None fetch=not_image",
+    "vlm": null
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "gcc.luluhypermarket.com",
+    "title": "Eastern Meat Masala 100 g Online at Best Price | Lulu UAE",
+    "image_url": "https://bf1af2.akinoncloudcdn.com/products/2025/08/04/169633/6b4be789-6e67-4881-8ce0-7048a7ca13c1_size1920x1920_cropCenter.jpg",
+    "page_url": "https://gcc.luluhypermarket.com/en-ae/eastern-meat-masala-100-g/p/296652",
+    "evidence": "tier=3 size=match brand=False variants=[] coverage=1.0 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "Eastern",
+     "variant": "Meat Masala",
+     "size": ""
+    }
+   }
+  ],
+  "vlm_calls": 1,
+  "serp_calls": 2,
+  "cost_usd": 0.003,
+  "seconds": 10.9
+ },
+ {
+  "row": 42,
+  "name": "MUKALLA WHITE MEAT TUNA WITH VEG 185GM",
+  "brand": "MUKALLA",
+  "sku_key": "a0aff764334c952c",
+  "brand_conf": "sheet_raw",
+  "gtin_status": "missing",
+  "queries": [
+   "MUKALLA WHITE MEAT TUNA WITH VEG 185g",
+   "MUKALLA WHITE MEAT TUNA WITH VEG 185g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)"
+  ],
+  "provider_calls": [
+   {
+    "provider": "serper",
+    "query": "MUKALLA WHITE MEAT TUNA WITH VEG 185g",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 2633,
+    "error": null
+   },
+   {
+    "provider": "serper",
+    "query": "MUKALLA WHITE MEAT TUNA WITH VEG 185g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 2154,
+    "error": null
+   }
+  ],
+  "decision": "REVIEW_PRESELECTED",
+  "failure_code": null,
+  "winner": "https://www.carton.sa/storage/productImages/4783/WhatsApp%20Image%202025-10-14%20at%2010.07.41%20AM_1760425491.jpeg",
+  "top": [
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "unioncoop.ae",
+    "title": "Buy Mukalla Fancy Meat Tuna with Vegetable Oil 185 gm | Union Coop",
+    "image_url": "https://www.unioncoop.ae/media/catalog/product/6/1/617950144953_ar.jpg",
+    "page_url": "https://www.unioncoop.ae/white-meat-tuna-in-oil-185gm-2364283.html",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=0.75 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "العلالي",
+     "variant": "لحم تونا فاخر",
+     "size": "170 g"
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "unioncoop.ae",
+    "title": "Buy Mukalla Fancy Meat Tuna with Vegetable Oil 185 gm | Union Coop",
+    "image_url": "https://www.unioncoop.ae/media/catalog/product/6/1/617950143192_eng.jpg",
+    "page_url": "https://www.unioncoop.ae/white-meat-tuna-in-oil-185gm-2364283.html",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=0.75 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "alalali",
+     "variant": "FANCY MEAT TUNA",
+     "size": "170 g"
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "unioncoop.ae",
+    "title": "Buy Mukalla Fancy Meat Tuna with Vegetable Oil 185 gm | Union Coop",
+    "image_url": "https://www.unioncoop.ae/media/catalog/product/6/1/617950143178_ar.jpg",
+    "page_url": "https://www.unioncoop.ae/white-meat-tuna-in-oil-185gm-2364283.html",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=0.75 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "العلالي",
+     "variant": "لحم تونا أبيض",
+     "size": "170 g"
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "carton.sa",
+    "title": "Carton Wholesale - \"Save Big, Shop Smart! Wholesale Groceries Delivered to  Your Doorstep!\" - Mukalla White Meat Tuna With Vegetable Oil 185gm -",
+    "image_url": "https://www.carton.sa/storage/productImages/4908/WhatsApp%20Image%202026-07-07%20at%208.13.39%20AM_1783403458.jpeg",
+    "page_url": "https://carton.sa/en/product-detail/economic-food-trading/mukalla-white-meat-tuna-with-vegetable-oil-185gm?srsltid=AU7gw4VVz2NMj50Gglxcprq5wtQz_a8MIAkoADrLPD692nk61ZhNJwFL",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=0.75 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "Rana",
+     "variant": "Light Meat Tuna Solid",
+     "size": "185gm"
+    }
+   },
+   {
+    "status": "preselected",
+    "provider": "serper",
+    "domain": "carton.sa",
+    "title": "Carton Wholesale - \"Save Big, Shop Smart! Wholesale Groceries Delivered to  Your Doorstep!\" - Mukalla White Meat Tuna With Vegetable Oil 185gm -",
+    "image_url": "https://www.carton.sa/storage/productImages/4783/WhatsApp%20Image%202025-10-14%20at%2010.07.41%20AM_1760425491.jpeg",
+    "page_url": "https://carton.sa/en/product-detail/economic-food-trading/mukalla-white-meat-tuna-with-vegetable-oil-185gm?srsltid=AU7gw4VIK1m4o303fJaWeBk9VD1emeKwRDk5Zonh9nEad_zOPRoTHVdh",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=0.75 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "MATCH",
+     "view": "front_packshot",
+     "brand": "MUKALLA",
+     "variant": "WHITE MEAT TUNA WITH VEGETABLE OIL",
+     "size": "185 g"
+    }
+   }
+  ],
+  "vlm_calls": 2,
+  "serp_calls": 2,
+  "cost_usd": 0.004,
+  "seconds": 14.8
+ },
+ {
+  "row": 43,
+  "name": "NELLARA MEAT MASALA 165GM",
+  "brand": "NELLARA",
+  "sku_key": "669f98c343570fda",
+  "brand_conf": "sheet_raw",
+  "gtin_status": "missing",
+  "queries": [
+   "NELLARA MEAT MASALA 165g"
+  ],
+  "provider_calls": [
+   {
+    "provider": "serper",
+    "query": "NELLARA MEAT MASALA 165g",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 1258,
+    "error": null
+   }
+  ],
+  "decision": "REVIEW_PRESELECTED",
+  "failure_code": null,
+  "winner": "https://images-eu.ssl-images-amazon.com/images/I/41SZuipj4fL.jpg",
+  "top": [
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "amazon.ae",
+    "title": "Nellara Fish Masala, 165 gm : Amazon.ae: Grocery",
+    "image_url": "https://m.media-amazon.com/images/I/61eTxqxXUUL.jpg",
+    "page_url": "https://www.amazon.ae/Nellara-Fish-Masala-165-gm/dp/B086N559T9",
+    "evidence": "tier=1 size=match brand=True variants=[] coverage=0.5 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "NELLARA",
+     "variant": "FISH MASALA",
+     "size": "165 g"
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "amazon.ae",
+    "title": "Nellara Meat Masala Powder 165grams : Amazon.ae: Grocery",
+    "image_url": "https://images-eu.ssl-images-amazon.com/images/I/819rZ1Y0r7L.jpg",
+    "page_url": "https://www.amazon.ae/Nellara-Meat-Masala-Powder-165grams/dp/B086N3DTYC",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=1.0 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "multi_product",
+     "brand": "Mehran",
+     "variant": "Karahi Gosht",
+     "size": "50g"
+    }
+   },
+   {
+    "status": "preselected",
+    "provider": "serper",
+    "domain": "amazon.ae",
+    "title": "Nellara Meat Masala Powder 165grams : Amazon.ae: Grocery",
+    "image_url": "https://images-eu.ssl-images-amazon.com/images/I/41SZuipj4fL.jpg",
+    "page_url": "https://www.amazon.ae/Nellara-Meat-Masala-Powder-165grams/dp/B086N3DTYC",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=1.0 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MATCH",
+     "view": "front_packshot",
+     "brand": "NELLARA",
+     "variant": "MEAT MASALA",
+     "size": "165 g"
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "cart-online.com",
+    "title": "NELLARA MEAT MASALA POWDER 165G DUPLEX",
+    "image_url": "https://cart-online.com/uploads/146/25/07/07686e093e045560907251752041790medium.webp",
+    "page_url": "https://cart-online.com/product/nellara-meat-masala-powder-165g-duplex?srsltid=AU7gw4V8FMcpm9NdtKJkSrdYV4LqSgskPaA0tKrcpi7f1Ivv5wolD5bg",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=1.0 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "NELLARA",
+     "variant": "CHICKEN",
+     "size": ""
+    }
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "ae.grandhyper.com",
+    "title": "Nellara Meat Masala Powder 165 g",
+    "image_url": "https://uae-image-bucket.s3.ap-south-1.amazonaws.com/products/6295151220092_1.webp",
+    "page_url": "https://ae.grandhyper.com/ae/en/product/nellara-meat-masala-powder",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=1.0 source_trust=0 gtin=None",
+    "vlm": null
+   }
+  ],
+  "vlm_calls": 1,
+  "serp_calls": 1,
+  "cost_usd": 0.002,
+  "seconds": 18.4
+ },
+ {
+  "row": 44,
+  "name": "NIRAPARA MEAT MASALA 200GM",
+  "brand": "NIRAPARA",
+  "sku_key": "a158c6421caca234",
+  "brand_conf": "sheet_raw",
+  "gtin_status": "missing",
+  "queries": [
+   "NIRAPARA MEAT MASALA 200g"
+  ],
+  "provider_calls": [
+   {
+    "provider": "serper",
+    "query": "NIRAPARA MEAT MASALA 200g",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 4746,
+    "error": null
+   }
+  ],
+  "decision": "REVIEW_PRESELECTED",
+  "failure_code": null,
+  "winner": "https://bf1af2.akinoncloudcdn.com/products/2024/09/12/76169/788294db-d2d2-47c4-9120-90d3e240f9a3.jpg",
+  "top": [
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "amazon.ae",
+    "title": "NIRAPARA MEAT MASALA - 200 GM: Buy Online at Best Price in UAE - Amazon.ae",
+    "image_url": "https://images-eu.ssl-images-amazon.com/images/I/61n+LyZBFfL.jpg",
+    "page_url": "https://www.amazon.ae/NIRAPARA-MEAT-MASALA-200-GM/dp/B00ZLVETPA",
+    "evidence": "tier=1 size=match brand=True variants=[] coverage=1.0 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "AWAFI MILL",
+     "variant": "PAPRIKA POWDER",
+     "size": "100 g"
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "amazon.ae",
+    "title": "NIRAPARA MEAT MASALA - 200 GM: Buy Online at Best Price in UAE - Amazon.ae",
+    "image_url": "https://images-eu.ssl-images-amazon.com/images/I/51wvAlBN9JL.jpg",
+    "page_url": "https://www.amazon.ae/NIRAPARA-MEAT-MASALA-200-GM/dp/B00ZLVETPA",
+    "evidence": "tier=1 size=match brand=True variants=[] coverage=1.0 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "Goodness UAE",
+     "variant": "",
+     "size": ""
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "amazon.ae",
+    "title": "NIRAPARA MEAT MASALA - 200 GM: Buy Online at Best Price in UAE - Amazon.ae",
+    "image_url": "https://images-eu.ssl-images-amazon.com/images/I/61Va0qwYKvL.jpg",
+    "page_url": "https://www.amazon.ae/NIRAPARA-MEAT-MASALA-200-GM/dp/B00ZLVETPA",
+    "evidence": "tier=1 size=match brand=True variants=[] coverage=1.0 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "AMERICAN HARVEST",
+     "variant": "PAPRIKA POWDER",
+     "size": "200G"
+    }
+   },
+   {
+    "status": "preselected",
+    "provider": "serper",
+    "domain": "gcc.luluhypermarket.com",
+    "title": "Nirapara Meat Masala 200 g",
+    "image_url": "https://bf1af2.akinoncloudcdn.com/products/2024/09/12/76169/788294db-d2d2-47c4-9120-90d3e240f9a3.jpg",
+    "page_url": "https://gcc.luluhypermarket.com/en-ae/nirapara-meat-masala-200-g/p/297772",
+    "evidence": "tier=1 size=match brand=True variants=[] coverage=1.0 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MATCH",
+     "view": "front_packshot",
+     "brand": "NIRAPARA",
+     "variant": "Meat Masala",
+     "size": "200g"
+    }
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "amazon.ae",
+    "title": "NIRAPARA MEAT MASALA - 200 GM: Buy Online at Best Price in UAE - Amazon.ae",
+    "image_url": "https://images-eu.ssl-images-amazon.com/images/I/71+NqdtYw5L.jpg",
+    "page_url": "https://www.amazon.ae/NIRAPARA-MEAT-MASALA-200-GM/dp/B00ZLVETPA",
+    "evidence": "tier=1 size=match brand=True variants=[] coverage=1.0 source_trust=3 gtin=None",
+    "vlm": null
+   }
+  ],
+  "vlm_calls": 1,
+  "serp_calls": 1,
+  "cost_usd": 0.002,
+  "seconds": 12.6
+ },
+ {
+  "row": 45,
+  "name": "RIO MARIE LIGHT MEAT TUNA IN SUN OIL 3X70GM",
+  "brand": "RIO MARIE",
+  "sku_key": "39c78ae2298d9c22",
+  "brand_conf": "sheet_raw",
+  "gtin_status": "missing",
+  "queries": [
+   "RIO MARIE LIGHT MEAT TUNA IN SUN OIL 3x70g",
+   "RIO MARIE LIGHT MEAT TUNA IN SUN OIL 3x70g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)",
+   "RIO MARIE MEAT TUNA IN SUN OIL 3x70g",
+   "RIO MARIE LIGHT MEAT TUNA IN SUN OIL"
+  ],
+  "provider_calls": [
+   {
+    "provider": "serper",
+    "query": "RIO MARIE LIGHT MEAT TUNA IN SUN OIL 3x70g",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 3796,
+    "error": null
+   },
+   {
+    "provider": "serper",
+    "query": "RIO MARIE LIGHT MEAT TUNA IN SUN OIL 3x70g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 1741,
+    "error": null
+   },
+   {
+    "provider": "serper",
+    "query": "RIO MARIE MEAT TUNA IN SUN OIL 3x70g",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 1920,
+    "error": null
+   },
+   {
+    "provider": "serper",
+    "query": "RIO MARIE LIGHT MEAT TUNA IN SUN OIL",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 1736,
+    "error": null
+   }
+  ],
+  "decision": "REVIEW_UNSELECTED",
+  "failure_code": null,
+  "winner": null,
+  "top": [
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "gcc.luluhypermarket.com",
+    "title": "Rio Mare Light Meat Tuna In Sunflower Oil 70 g",
+    "image_url": "https://bf1af2.akinoncloudcdn.com/products/2024/09/11/64803/0fa68e28-f99e-4d68-9b8f-d289c1d049bd_size1920x1920_cropCenter.jpg",
+    "page_url": "https://gcc.luluhypermarket.com/en-ae/rio-mare-light-meat-tuna-in-sunflower-oil-70-g/p/1508837",
+    "evidence": "tier=3 size=match brand=False variants=['fat'] coverage=0.75 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "RIO mare",
+     "variant": "Light Meat Tuna in Sunflower Oil",
+     "size": ""
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "gcc.luluhypermarket.com",
+    "title": "Rio Mare Light Meat Tuna In Sunflower Oil 70 g Online at Best Price | Lulu  UAE",
+    "image_url": "https://bf1af2.akinoncloudcdn.com/products/2024/09/11/64803/961e3f04-054d-4833-a061-751e3dd60b2c.jpg",
+    "page_url": "https://gcc.luluhypermarket.com/en-ae/rio-mare-light-meat-tuna-in-sunflower-oil-70-g/p/1508837",
+    "evidence": "tier=3 size=match brand=False variants=['fat'] coverage=0.75 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "RIO mare",
+     "variant": "Light Meat Tuna in Sunflower Oil",
+     "size": ""
+    }
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "carrefouruae.com",
+    "title": "Buy Rio Mare Light Meat Tuna in Sunflower Oil, 70g Pack of 3 Online |  Carrefour UAE",
+    "image_url": "https://cdn.mafrservices.com/pim-content/UAE/media/product/1730324/1751832003/1730324_main.jpg",
+    "page_url": "https://www.carrefouruae.com/mafuae/en/tuna/rio-mare-tuna-chunks-in-sfo-70gx3/p/1730324",
+    "evidence": "tier=3 size=match brand=False variants=['fat'] coverage=0.75 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "UNSURE",
+     "view": "front_packshot",
+     "brand": "RIO mare",
+     "variant": "Light Meat Tuna in Sunflower Oil",
+     "size": "3x70g"
+    }
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "amazon.ae",
+    "title": "Rio Mare Light Meat Tuna In Sunflower Oil 70G×3: Buy Online at Best Price  in UAE - Amazon.ae",
+    "image_url": "https://m.media-amazon.com/images/I/71s13kH9h2L.jpg",
+    "page_url": "https://www.amazon.ae/Rio-Mare-Light-Sunflower-70G%C3%973/dp/B08WDDGYGY",
+    "evidence": "tier=3 size=match brand=False variants=['fat'] coverage=0.75 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "UNSURE",
+     "view": "front_packshot",
+     "brand": "RIO mare",
+     "variant": "Light Meat Tuna in Sunflower Oil",
+     "size": "3x70g"
+    }
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "noon.com",
+    "title": "Rio Mare Light Meat Tuna In Sunflower Oil 70grams Pack of 3 | Best Price  UAE | Dubai, Abu Dhabi",
+    "image_url": "https://f.nooncdn.com/p/pnsku/N44333374A/45/_/1739335350/45fbb757-7e23-4230-a4f1-1ad18e4ead2f.jpg",
+    "page_url": "https://www.noon.com/uae-en/light-meat-tuna-in-sunflower-oil-70grams-pack-of-3/N44333374A/p/",
+    "evidence": "tier=3 size=match brand=False variants=['fat'] coverage=0.75 source_trust=3 gtin=None",
+    "vlm": null
+   }
+  ],
+  "vlm_calls": 1,
+  "serp_calls": 4,
+  "cost_usd": 0.005,
+  "seconds": 17.8
+ },
+ {
+  "row": 46,
+  "name": "ROYAL ARM LIGHT MEAT TUNA FLAKES 170GM",
+  "brand": "ROYAL ARM",
+  "sku_key": "957612d33ceebba7",
+  "brand_conf": "sheet_raw",
+  "gtin_status": "missing",
+  "queries": [
+   "ROYAL ARM LIGHT MEAT TUNA FLAKES 170g",
+   "ROYAL ARM LIGHT MEAT TUNA FLAKES 170g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)"
+  ],
+  "provider_calls": [
+   {
+    "provider": "serper",
+    "query": "ROYAL ARM LIGHT MEAT TUNA FLAKES 170g",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 1432,
+    "error": null
+   },
+   {
+    "provider": "serper",
+    "query": "ROYAL ARM LIGHT MEAT TUNA FLAKES 170g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 6693,
+    "error": null
+   }
+  ],
+  "decision": "REVIEW_UNSELECTED",
+  "failure_code": "VERIFIER_DOWN",
+  "winner": null,
+  "top": [
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "shopee.ph",
+    "title": "Royal Arm Light Meat Tuna Flakes in Sunflower Oil 170g | Shopee Philippines",
+    "image_url": "https://down-ph.img.susercontent.com/file/ph-11134207-7r98u-lr5cz4chgbpgd5",
+    "page_url": "https://shopee.ph/Royal-Arm-Light-Meat-Tuna-Flakes-in-Sunflower-Oil-170g-i.847283816.25961650259",
+    "evidence": "tier=2 size=match brand=True variants=['fat'] coverage=1.0 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "UNKNOWN",
+     "view": "",
+     "brand": "",
+     "variant": "",
+     "size": ""
+    }
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "shopee.ph",
+    "title": "Royal Arm Light Meat Tuna Flakes in Sunflower Oil 170g | Shopee Philippines",
+    "image_url": "https://down-ph.img.susercontent.com/file/ph-11134207-7r98w-lr5cz4chdikkcb",
+    "page_url": "https://shopee.ph/Royal-Arm-Light-Meat-Tuna-Flakes-in-Sunflower-Oil-170g-i.847283816.25961650259",
+    "evidence": "tier=2 size=match brand=True variants=['fat'] coverage=1.0 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "UNKNOWN",
+     "view": "",
+     "brand": "",
+     "variant": "",
+     "size": ""
+    }
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "lazada.com.ph",
+    "title": "Royal Arm Light Meat Tuna Flakes in Sunflower Oil 170g | Lazada Philippines",
+    "image_url": "https://ph-live-01.slatic.net/p/2b17eb100a71c10458a27a4f605037cf.jpg",
+    "page_url": "https://www.lazada.com.ph/products/royal-arm-light-meat-tuna-flakes-in-sunflower-oil-170g-i4338925137.html",
+    "evidence": "tier=2 size=match brand=True variants=['fat'] coverage=1.0 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "UNKNOWN",
+     "view": "",
+     "brand": "",
+     "variant": "",
+     "size": ""
+    }
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "shopee.ph",
+    "title": "Royal Arm Light Meat Tuna Flakes in Sunflower Oil 170g | Shopee Philippines",
+    "image_url": "https://down-ph.img.susercontent.com/file/ph-11134207-7r98x-lrplkjp5rmd194",
+    "page_url": "https://shopee.ph/Royal-Arm-Light-Meat-Tuna-Flakes-in-Sunflower-Oil-170g-i.126416725.24313462353",
+    "evidence": "tier=2 size=match brand=True variants=['fat'] coverage=1.0 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "UNKNOWN",
+     "view": "",
+     "brand": "",
+     "variant": "",
+     "size": ""
+    }
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "lazada.com.ph",
+    "title": "Royal Arm Light Meat Tuna Flakes in Sunflower Oil 170g | Lazada Philippines",
+    "image_url": "https://img.lazcdn.com/g/p/7490aea00633788cc743d31ba448b3ab.jpg_720x720q80.jpg_.webp",
+    "page_url": "https://www.lazada.com.ph/products/royal-arm-light-meat-tuna-flakes-in-sunflower-oil-170g-i4338925137.html",
+    "evidence": "tier=2 size=match brand=True variants=['fat'] coverage=1.0 source_trust=0 gtin=None",
+    "vlm": null
+   }
+  ],
+  "vlm_calls": 1,
+  "serp_calls": 2,
+  "cost_usd": 0.003,
+  "seconds": 32.1
+ },
+ {
+  "row": 47,
+  "name": "SARAS MEAT MASALA 160GM",
+  "brand": "SARAS",
+  "sku_key": "7baa3324431907c4",
+  "brand_conf": "sheet_raw",
+  "gtin_status": "missing",
+  "queries": [
+   "SARAS MEAT MASALA 160g",
+   "SARAS MEAT MASALA 160g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)",
+   "SARAS MEAT MASALA"
+  ],
+  "provider_calls": [
+   {
+    "provider": "serper",
+    "query": "SARAS MEAT MASALA 160g",
+    "hl": "en",
+    "status": "error",
+    "http_status": null,
+    "count": 0,
+    "ms": 15018,
+    "error": "timeout"
+   },
+   {
+    "provider": "bing_html",
+    "query": "SARAS MEAT MASALA 160g",
+    "hl": "en",
+    "status": "error",
+    "http_status": null,
+    "count": 0,
+    "ms": 4,
+    "error": "ProxyError: Failed to perform, curl: (5) Could not resolve proxy: gate.smartproxy.com. See https://curl.se/libcurl/c/libcurl-errors.html first for more details."
+   },
+   {
+    "provider": "serper",
+    "query": "SARAS MEAT MASALA 160g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)",
+    "hl": "en",
+    "status": "error",
+    "http_status": null,
+    "count": 0,
+    "ms": 3,
+    "error": "ConnectionError: HTTPSConnectionPool(host='google.serper.dev', port=443): Max retries exceeded with url: /images (Caused by NameResolutionError(\"HTTPSConnection(host='google.serper.dev', port=443): Failed to resolve 'google.serper.dev' ([Errno 11001] getaddrinfo failed)\"))"
+   },
+   {
+    "provider": "serper",
+    "query": "SARAS MEAT MASALA",
+    "hl": "en",
+    "status": "error",
+    "http_status": null,
+    "count": 0,
+    "ms": 2,
+    "error": "ConnectionError: HTTPSConnectionPool(host='google.serper.dev', port=443): Max retries exceeded with url: /images (Caused by NameResolutionError(\"HTTPSConnection(host='google.serper.dev', port=443): Failed to resolve 'google.serper.dev' ([Errno 11001] getaddrinfo failed)\"))"
+   },
+   {
+    "provider": "bing_html",
+    "query": "SARAS MEAT MASALA",
+    "hl": "en",
+    "status": "error",
+    "http_status": null,
+    "count": 0,
+    "ms": 4,
+    "error": "ProxyError: Failed to perform, curl: (5) Could not resolve proxy: gate.smartproxy.com. See https://curl.se/libcurl/c/libcurl-errors.html first for more details."
+   }
+  ],
+  "decision": "PROVIDER_DOWN",
+  "failure_code": "PROVIDER_DOWN",
+  "winner": null,
+  "top": [],
+  "vlm_calls": 0,
+  "serp_calls": 5,
+  "cost_usd": 0.005,
+  "seconds": 15.0
+ },
+ {
+  "row": 48,
+  "name": "SHAN MEAT MASALA 100GM",
+  "brand": "SHAN",
+  "sku_key": "ea5465fa27c51b2c",
+  "brand_conf": "sheet_raw",
+  "gtin_status": "missing",
+  "queries": [
+   "SHAN MEAT MASALA 100g",
+   "SHAN MEAT MASALA 100g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)",
+   "SHAN MEAT MASALA"
+  ],
+  "provider_calls": [
+   {
+    "provider": "serper",
+    "query": "SHAN MEAT MASALA 100g",
+    "hl": "en",
+    "status": "error",
+    "http_status": null,
+    "count": 0,
+    "ms": 3,
+    "error": "ConnectionError: HTTPSConnectionPool(host='google.serper.dev', port=443): Max retries exceeded with url: /images (Caused by NameResolutionError(\"HTTPSConnection(host='google.serper.dev', port=443): Failed to resolve 'google.serper.dev' ([Errno 11001] getaddrinfo failed)\"))"
+   },
+   {
+    "provider": "bing_html",
+    "query": "SHAN MEAT MASALA 100g",
+    "hl": "en",
+    "status": "error",
+    "http_status": null,
+    "count": 0,
+    "ms": 4979,
+    "error": "ProxyError: Failed to perform, curl: (5) Could not resolve proxy: gate.smartproxy.com. See https://curl.se/libcurl/c/libcurl-errors.html first for more details."
+   },
+   {
+    "provider": "serper",
+    "query": "SHAN MEAT MASALA 100g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)",
+    "hl": "en",
+    "status": "error",
+    "http_status": null,
+    "count": 0,
+    "ms": 8,
+    "error": "ConnectionError: HTTPSConnectionPool(host='google.serper.dev', port=443): Max retries exceeded with url: /images (Caused by NameResolutionError(\"HTTPSConnection(host='google.serper.dev', port=443): Failed to resolve 'google.serper.dev' ([Errno 11001] getaddrinfo failed)\"))"
+   },
+   {
+    "provider": "serper",
+    "query": "SHAN MEAT MASALA",
+    "hl": "en",
+    "status": "error",
+    "http_status": null,
+    "count": 0,
+    "ms": 2,
+    "error": "ConnectionError: HTTPSConnectionPool(host='google.serper.dev', port=443): Max retries exceeded with url: /images (Caused by NameResolutionError(\"HTTPSConnection(host='google.serper.dev', port=443): Failed to resolve 'google.serper.dev' ([Errno 11001] getaddrinfo failed)\"))"
+   },
+   {
+    "provider": "bing_html",
+    "query": "SHAN MEAT MASALA",
+    "hl": "en",
+    "status": "error",
+    "http_status": null,
+    "count": 0,
+    "ms": 16152,
+    "error": "timeout"
+   }
+  ],
+  "decision": "PROVIDER_DOWN",
+  "failure_code": "PROVIDER_DOWN",
+  "winner": null,
+  "top": [],
+  "vlm_calls": 0,
+  "serp_calls": 5,
+  "cost_usd": 0.005,
+  "seconds": 21.2
+ },
+ {
+  "row": 49,
+  "name": "SUP/T WT/MEAT SOLIDTUNA SALTWATER 185GM",
+  "brand": "SUP/T",
+  "sku_key": "2f05184b63702d59",
+  "brand_conf": "sheet_raw",
+  "gtin_status": "missing",
+  "queries": [
+   "SUP/T WT/MEAT SOLIDTUNA SALTWATER 185g",
+   "SUP/T WT/MEAT SOLIDTUNA SALTWATER 185g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)",
+   "SUP/T WT/MEAT SOLIDTUNA SALTWATER"
+  ],
+  "provider_calls": [
+   {
+    "provider": "serper",
+    "query": "SUP/T WT/MEAT SOLIDTUNA SALTWATER 185g",
+    "hl": "en",
+    "status": "error",
+    "http_status": null,
+    "count": 0,
+    "ms": 11137,
+    "error": "ConnectionError: HTTPSConnectionPool(host='google.serper.dev', port=443): Max retries exceeded with url: /images (Caused by NameResolutionError(\"HTTPSConnection(host='google.serper.dev', port=443): Failed to resolve 'google.serper.dev' ([Errno 11001] getaddrinfo failed)\"))"
+   },
+   {
+    "provider": "bing_html",
+    "query": "SUP/T WT/MEAT SOLIDTUNA SALTWATER 185g",
+    "hl": "en",
+    "status": "error",
+    "http_status": null,
+    "count": 0,
+    "ms": 12061,
+    "error": "timeout"
+   },
+   {
+    "provider": "serper",
+    "query": "SUP/T WT/MEAT SOLIDTUNA SALTWATER 185g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)",
+    "hl": "en",
+    "status": "error",
+    "http_status": null,
+    "count": 0,
+    "ms": 12041,
+    "error": "ConnectionError: HTTPSConnectionPool(host='google.serper.dev', port=443): Max retries exceeded with url: /images (Caused by NameResolutionError(\"HTTPSConnection(host='google.serper.dev', port=443): Failed to resolve 'google.serper.dev' ([Errno 11001] getaddrinfo failed)\"))"
+   },
+   {
+    "provider": "serper",
+    "query": "SUP/T WT/MEAT SOLIDTUNA SALTWATER",
+    "hl": "en",
+    "status": "error",
+    "http_status": null,
+    "count": 0,
+    "ms": 12038,
+    "error": "ConnectionError: HTTPSConnectionPool(host='google.serper.dev', port=443): Max retries exceeded with url: /images (Caused by NameResolutionError(\"HTTPSConnection(host='google.serper.dev', port=443): Failed to resolve 'google.serper.dev' ([Errno 11001] getaddrinfo failed)\"))"
+   },
+   {
+    "provider": "bing_html",
+    "query": "SUP/T WT/MEAT SOLIDTUNA SALTWATER",
+    "hl": "en",
+    "status": "error",
+    "http_status": null,
+    "count": 0,
+    "ms": 12054,
+    "error": "timeout"
+   }
+  ],
+  "decision": "PROVIDER_DOWN",
+  "failure_code": "PROVIDER_DOWN",
+  "winner": null,
+  "top": [],
+  "vlm_calls": 0,
+  "serp_calls": 5,
+  "cost_usd": 0.005,
+  "seconds": 59.3
+ },
+ {
+  "row": 50,
+  "name": "SUPER T/MEAT SOLID TUNA SALT WATE3X185GM",
+  "brand": "SUPER T/",
+  "sku_key": "f0a1bbae3f58383a",
+  "brand_conf": "sheet_raw",
+  "gtin_status": "missing",
+  "queries": [
+   "SUPER T/ SOLID TUNA SALT WATE3X185GM",
+   "SUPER T/ SOLID TUNA SALT WATE3X185GM (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)"
+  ],
+  "provider_calls": [
+   {
+    "provider": "serper",
+    "query": "SUPER T/ SOLID TUNA SALT WATE3X185GM",
+    "hl": "en",
+    "status": "error",
+    "http_status": null,
+    "count": 0,
+    "ms": 12069,
+    "error": "ConnectionError: HTTPSConnectionPool(host='google.serper.dev', port=443): Max retries exceeded with url: /images (Caused by NameResolutionError(\"HTTPSConnection(host='google.serper.dev', port=443): Failed to resolve 'google.serper.dev' ([Errno 11001] getaddrinfo failed)\"))"
+   },
+   {
+    "provider": "bing_html",
+    "query": "SUPER T/ SOLID TUNA SALT WATE3X185GM",
+    "hl": "en",
+    "status": "error",
+    "http_status": null,
+    "count": 0,
+    "ms": 12036,
+    "error": "timeout"
+   },
+   {
+    "provider": "serper",
+    "query": "SUPER T/ SOLID TUNA SALT WATE3X185GM (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)",
+    "hl": "en",
+    "status": "error",
+    "http_status": null,
+    "count": 0,
+    "ms": 12042,
+    "error": "ConnectionError: HTTPSConnectionPool(host='google.serper.dev', port=443): Max retries exceeded with url: /images (Caused by NameResolutionError(\"HTTPSConnection(host='google.serper.dev', port=443): Failed to resolve 'google.serper.dev' ([Errno 11001] getaddrinfo failed)\"))"
+   }
+  ],
+  "decision": "PROVIDER_DOWN",
+  "failure_code": "PROVIDER_DOWN",
+  "winner": null,
+  "top": [],
+  "vlm_calls": 0,
+  "serp_calls": 3,
+  "cost_usd": 0.003,
+  "seconds": 36.2
+ },
+ {
+  "row": 51,
+  "name": "SUPER T/MEAT SOLID TUNA SUNFL OIL3X185GM",
+  "brand": "SUPER T/",
+  "sku_key": "cc7e4979b610ae65",
+  "brand_conf": "sheet_raw",
+  "gtin_status": "missing",
+  "queries": [
+   "SUPER T/ SOLID TUNA SUNFL OIL3X185GM",
+   "SUPER T/ SOLID TUNA SUNFL OIL3X185GM (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)"
+  ],
+  "provider_calls": [
+   {
+    "provider": "serper",
+    "query": "SUPER T/ SOLID TUNA SUNFL OIL3X185GM",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 1999,
+    "error": null
+   },
+   {
+    "provider": "serper",
+    "query": "SUPER T/ SOLID TUNA SUNFL OIL3X185GM (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 2367,
+    "error": null
+   }
+  ],
+  "decision": "REVIEW_UNSELECTED",
+  "failure_code": null,
+  "winner": null,
+  "top": [
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "carrefouruae.com",
+    "title": "Buy California Garden Light Solid Tuna in Sunflower Oil, 185g Online |  Carrefour UAE",
+    "image_url": "https://cdn.mafrservices.com/pim-content/UAE/media/product/10864/1749376805/10864_main.jpg",
+    "page_url": "https://www.carrefouruae.com/mafuae/en/tuna/california-g-tuna-meat-185g/p/10864",
+    "evidence": "tier=3 size=unknown brand=False variants=[] coverage=0.8 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "CALIFORNIA GARDEN",
+     "variant": "LIGHT SOLID TUNA IN SUNFLOWER OIL",
+     "size": ""
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "amazon.ae",
+    "title": "Lorena Light Meat Tuna Solid in SF Oil 185g: Buy Online at Best Price in  UAE - Amazon.ae",
+    "image_url": "https://m.media-amazon.com/images/I/71yZGfpPnoL.jpg",
+    "page_url": "https://www.amazon.ae/Lorena-Light-Meat-Tuna-Solid/dp/B07PKCZ34V",
+    "evidence": "tier=3 size=unknown brand=False variants=[] coverage=0.8 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "LORENA",
+     "variant": "light meat TUNA SOLID in sunflower oil",
+     "size": "185g"
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "gcc.luluhypermarket.com",
+    "title": "LuLu Light Meat Tuna Solid In Sunflower Oil 3 x 185 g Online at Best Price  | Lulu Qatar",
+    "image_url": "https://bf1af2.akinoncloudcdn.com/products/2024/09/11/65156/04227906-fb39-4be2-b183-45b8d30f6388_size256_cropCenter.jpg",
+    "page_url": "https://gcc.luluhypermarket.com/en-qa/lulu-light-meat-tuna-solid-in-sunflower-oil-3-185-g/p/269150/",
+    "evidence": "tier=3 size=unknown brand=False variants=[] coverage=0.8 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "LuLu",
+     "variant": "LIGHT MEAT TUNA in SUNFLOWER OIL SOLID",
+     "size": ""
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "tradeling.com",
+    "title": "Buy Super Tasty White Meat Solid Premium Tuna In Sunflower Oil 185g x 3  Pieces Online in UAE | Tradeling",
+    "image_url": "https://c8n.tradeling.com/img/plain/pim/rs:auto:1600::0/f:webp/q:90/up/5fba0c6142480f001bed85d4/403af066d1b25692bc6d35a00da83507.jpg",
+    "page_url": "https://www.tradeling.com/ae-en/product-details/super-tasty-white-meat-solid-premium-tuna-in-sunflower-oil-185g-x-3-pieces-66cecc1a3af83dca02871825-5fba0c6142480f001bed85d4?srsltid=AU7gw4Uh0txDmxMuM6oGwYYakjgEYCUBxEK4RGRITr946gVDh1nLljuX",
+    "evidence": "tier=3 size=unknown brand=False variants=[] coverage=0.8 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "Super Tasty",
+     "variant": "WHITE MEAT TUNA IN SUNFLOWER OIL SOLID",
+     "size": "185 g"
+    }
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "tradeling.com",
+    "title": "Buy Pran Tuna Light Meat Solid In Sunflower Oil 185g,Carton of 48pcs Online  in UAE | Tradeling",
+    "image_url": "https://c8n.tradeling.com/img/plain/pim/rs:auto:1600::0/f:webp/q:90/up/670164cfc913175ba0aad7de/57a11c9487a29c824e9bae4ee9f00ecf.jpg",
+    "page_url": "https://www.tradeling.com/ae-en/product-details/pran-tuna-light-meat-solid-in-sunflower-oil-185gcarton-of-48pcs-67f55a60793f818bcb843570-6320bd834efabf903ac3ea43?srsltid=AU7gw4WhZ3nai3jXUeBUanp29JMD4ywVwtLTyFyxfV_nUHgywIDh7qiF",
+    "evidence": "tier=3 size=unknown brand=False variants=[] coverage=0.8 source_trust=0 gtin=None",
+    "vlm": null
+   }
+  ],
+  "vlm_calls": 1,
+  "serp_calls": 2,
+  "cost_usd": 0.003,
+  "seconds": 12.3
+ },
+ {
+  "row": 52,
+  "name": "SUPER/T LIGHT MEAT TUNA SOBEANOIL 185GM",
+  "brand": "SUPER/T",
+  "sku_key": "c8da4a7a5be7788f",
+  "brand_conf": "sheet_raw",
+  "gtin_status": "missing",
+  "queries": [
+   "SUPER/T LIGHT MEAT TUNA SOBEANOIL 185g",
+   "SUPER/T LIGHT MEAT TUNA SOBEANOIL 185g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)",
+   "SUPER/T MEAT TUNA SOBEANOIL 185g",
+   "SUPER/T LIGHT MEAT TUNA SOBEANOIL"
+  ],
+  "provider_calls": [
+   {
+    "provider": "serper",
+    "query": "SUPER/T LIGHT MEAT TUNA SOBEANOIL 185g",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 1813,
+    "error": null
+   },
+   {
+    "provider": "serper",
+    "query": "SUPER/T LIGHT MEAT TUNA SOBEANOIL 185g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 2212,
+    "error": null
+   },
+   {
+    "provider": "serper",
+    "query": "SUPER/T MEAT TUNA SOBEANOIL 185g",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 2214,
+    "error": null
+   },
+   {
+    "provider": "serper",
+    "query": "SUPER/T LIGHT MEAT TUNA SOBEANOIL",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 1870,
+    "error": null
+   }
+  ],
+  "decision": "REVIEW_UNSELECTED",
+  "failure_code": null,
+  "winner": null,
+  "top": [
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "gcc.luluhypermarket.com",
+    "title": "LuLu Light Meat Tuna Solid In Brine 185 g Online at Best Price | Lulu UAE",
+    "image_url": "https://bf1af2.akinoncloudcdn.com/products/2024/09/11/64762/82dd1a2b-7c60-4426-8d03-81737ab53acb_size1920x1920_cropCenter.jpg",
+    "page_url": "https://gcc.luluhypermarket.com/en-ae/lulu-light-meat-tuna-solid-in-brine-185-g/p/889908",
+    "evidence": "tier=3 size=match brand=False variants=['fat'] coverage=0.6667 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "Lulu",
+     "variant": "Light Meat Tuna",
+     "size": ""
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "gcc.luluhypermarket.com",
+    "title": "Aloha Light Meat Tuna in Vegetable Oil 185 g Online at Best Price | Lulu UAE",
+    "image_url": "https://bf1af2.akinoncloudcdn.com/products/2025/05/16/330928/fa1ff631-2141-4846-b85d-c2d2ac484cca_size1920x1920_cropCenter.jpg",
+    "page_url": "https://gcc.luluhypermarket.com/en-ae/aloha-light-meat-tuna-in-vegetable-oil-185-g/p/619071",
+    "evidence": "tier=3 size=match brand=False variants=['fat'] coverage=0.6667 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "OHA TUNA",
+     "variant": "Light Meat Tuna, Vegetable Oil (Canola)",
+     "size": "185g"
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "gcc.luluhypermarket.com",
+    "title": "American Light Meat Tuna 185 g Online at Best Price | Lulu UAE",
+    "image_url": "https://bf1af2.akinoncloudcdn.com/products/2024/09/11/65163/ff87c10e-5f12-4a74-8cfd-f1d6a30b1885.jpg",
+    "page_url": "https://gcc.luluhypermarket.com/en-ae/american-light-meat-tuna-185-g/p/258114",
+    "evidence": "tier=3 size=match brand=False variants=['fat'] coverage=0.6667 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "American",
+     "variant": "Light Meat Tuna, Sunflower Oil",
+     "size": "6.5OZ"
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "talabat.com",
+    "title": "Buy Goody Light Meat Tuna in Brine Water, 185g Online in Bahrain | Talabat  Bahrain",
+    "image_url": "https://talabat.dhmedia.io/image/talabat/MenuItems/6281014800440_637452970790291963.jpg?size=520",
+    "page_url": "https://www.talabat.com/bahrain/talabat-mart/product/goody-light-meat-tuna-in-brine-water-185g/s/908043",
+    "evidence": "tier=3 size=match brand=False variants=['fat'] coverage=0.6667 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "Goody",
+     "variant": "Light Meat Tuna, In Brine Water",
+     "size": ""
+    }
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "amazon.ae",
+    "title": "Le Supreme Light Meat Tuna in Sunflower Oil 185 g Can, Premium Quality: Buy  Online at Best Price in UAE - Amazon.ae",
+    "image_url": "https://images-eu.ssl-images-amazon.com/images/I/71mTSUwfKqL.jpg",
+    "page_url": "https://www.amazon.ae/Supreme-Light-Sunflower-Premium-Quality/dp/B08SC5NWPH",
+    "evidence": "tier=3 size=match brand=False variants=['fat'] coverage=0.6667 source_trust=3 gtin=None",
+    "vlm": null
+   }
+  ],
+  "vlm_calls": 1,
+  "serp_calls": 4,
+  "cost_usd": 0.005,
+  "seconds": 17.7
+ },
+ {
+  "row": 53,
+  "name": "TARGET CHICKN LUNCHENMEAT RECTANGL 340GM",
+  "brand": "TARGET",
+  "sku_key": "0c644d5dc536f19b",
+  "brand_conf": "sheet_raw",
+  "gtin_status": "missing",
+  "queries": [
+   "TARGET CHICKN LUNCHENMEAT RECTANGL 340g",
+   "TARGET CHICKN LUNCHENMEAT RECTANGL 340g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)"
+  ],
+  "provider_calls": [
+   {
+    "provider": "serper",
+    "query": "TARGET CHICKN LUNCHENMEAT RECTANGL 340g",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 1584,
+    "error": null
+   },
+   {
+    "provider": "serper",
+    "query": "TARGET CHICKN LUNCHENMEAT RECTANGL 340g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 1651,
+    "error": null
+   }
+  ],
+  "decision": "REVIEW_UNSELECTED",
+  "failure_code": null,
+  "winner": null,
+  "top": [
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "amazon.ae",
+    "title": "Target Beef Luncheon Meat 340 Gm: Buy Online at Best Price in UAE -  Amazon.ae",
+    "image_url": "https://m.media-amazon.com/images/I/71yLfegUU4L.jpg",
+    "page_url": "https://www.amazon.ae/Target-Beef-Luncheon-Meat-340/dp/B0941PFL9K",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=0.0 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "TARGET",
+     "variant": "BEEF Luncheon Meat",
+     "size": "340 grams"
+    }
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "carrefourksa.com",
+    "title": "Buy Target Chicken Luncheon Meat 340g Online | Carrefour KSA",
+    "image_url": "https://cdn.mafrservices.com/sys-master-root/h6a/h57/14184893808670/576551_main.jpg",
+    "page_url": "https://www.carrefourksa.com/mafsau/en/poultry-luncheon/target-ckn-luncheon-meat-340g/p/576551",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=0.0 source_trust=1 gtin=None",
+    "vlm": {
+     "decision": "UNSURE",
+     "view": "front_packshot",
+     "brand": "TARGET",
+     "variant": "CHICKEN Luncheon Meat",
+     "size": ""
+    }
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "emdadx.com",
+    "title": "Target Chicken Luncheon Meat - Box Of 24 Pcs - 340 Gm For Piece | امداد إكس",
+    "image_url": "https://emdadx.com/wp-content/uploads/2023/09/Target-Chicken-Luncheon-Meat-Box-Of-24-Pcs-340-gm-For-Piece.jpg",
+    "page_url": "https://emdadx.com/en/target-chicken-luncheon-meat-box-of-24-pcs-340-gm-for-piece?srsltid=AU7gw4X_SLtNLy2rTcgaoO2v9i3dYoDsc87MjnqvyWWNNyoRHj2CQh95",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=0.0 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "UNSURE",
+     "view": "front_packshot",
+     "brand": "TARGET",
+     "variant": "CHICKEN Luncheon Meat",
+     "size": ""
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "emdadx.com",
+    "title": "Target Chicken Luncheon Meat - Box Of 24 Pcs - 340 Gm For Piece | امداد إكس",
+    "image_url": "https://emdadx.com/wp-content/uploads/2023/09/Danborg-Chicken-Luncheon-Meat-Box-Of-24-Pcs-340-gm-For-Piece-430x587.jpg",
+    "page_url": "https://emdadx.com/en/target-chicken-luncheon-meat-box-of-24-pcs-340-gm-for-piece?srsltid=AU7gw4X6yRHlk9Wvsb00A31zIIxsmOf-FuNcadmIAHBwc0iAOVDph4u_",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=0.0 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "DANBORG",
+     "variant": "CHICKEN LUNCHEON MEAT",
+     "size": "340g"
+    }
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "hungerstation.com",
+    "title": "Buy Target Chicken Luncheon Meat 340g in Saudi Arabia | HungerStation",
+    "image_url": "https://hungerstation.dhmedia.io/image/product-information-management/6694e763b507613748fc12bb.jpg",
+    "page_url": "https://hungerstation.com/sa-en/supermarkets/regions/sabya/rihab/branch/panda-132303/product/Target-Chicken-Luncheon-Meat-340g-2502055",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=0.0 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "UNSURE",
+     "view": "other_side",
+     "brand": "TARGETER",
+     "variant": "Chicken Meat",
+     "size": "340g"
+    }
+   }
+  ],
+  "vlm_calls": 2,
+  "serp_calls": 2,
+  "cost_usd": 0.004,
+  "seconds": 14.6
+ },
+ {
+  "row": 54,
+  "name": "TASTY FOOD MEAT MASALA 160 GM",
+  "brand": "TASTY FOOD",
+  "sku_key": "07a22c2a8e99b95c",
+  "brand_conf": "sheet_raw",
+  "gtin_status": "missing",
+  "queries": [
+   "TASTY FOOD MEAT MASALA 160g"
+  ],
+  "provider_calls": [
+   {
+    "provider": "serper",
+    "query": "TASTY FOOD MEAT MASALA 160g",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 3154,
+    "error": null
+   }
+  ],
+  "decision": "REVIEW_PRESELECTED",
+  "failure_code": null,
+  "winner": "https://m.media-amazon.com/images/I/41JIWBVJD9L.jpg",
+  "top": [
+   {
+    "status": "preselected",
+    "provider": "serper",
+    "domain": "amazon.ae",
+    "title": "Tasty Food Meat Masala 160gm: Buy Online at Best Price in UAE - Amazon.ae",
+    "image_url": "https://m.media-amazon.com/images/I/41JIWBVJD9L.jpg",
+    "page_url": "https://www.amazon.ae/Tasty-Food-Meat-Masala-160gm/dp/B07P8B4D5Y",
+    "evidence": "tier=1 size=match brand=True variants=[] coverage=1.0 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MATCH",
+     "view": "front_packshot",
+     "brand": "Tasty Food",
+     "variant": "Meat Masala",
+     "size": "160 g"
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "amazon.ae",
+    "title": "Tasty Food Chicken Masala 160gm: Buy Online at Best Price in UAE - Amazon.ae",
+    "image_url": "https://m.media-amazon.com/images/I/61DUdDA1FYL.jpg",
+    "page_url": "https://www.amazon.ae/Tasty-Food-Chicken-Masala-160gm/dp/B07P8B2TNP",
+    "evidence": "tier=1 size=match brand=True variants=[] coverage=0.5 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "Tasty Food",
+     "variant": "Chicken Masala",
+     "size": "160 g"
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "amazon.ae",
+    "title": "Tasty Food Fish Masala 160gm: Buy Online at Best Price in UAE - Amazon.ae",
+    "image_url": "https://m.media-amazon.com/images/I/41oQaukOZaL.jpg",
+    "page_url": "https://www.amazon.ae/Tasty-Food-Fish-Masala-160gm/dp/B07P75SYZJ",
+    "evidence": "tier=1 size=match brand=True variants=[] coverage=0.5 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "Tasty Food",
+     "variant": "Fish Masala",
+     "size": "160 g"
+    }
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "shops.ae",
+    "title": "Tasty Food Meat Masala 160Gm",
+    "image_url": "https://shops.ae/products/Shopping/456e68268ad936f56b24245e5ecccb8b.400x400.jpeg",
+    "page_url": "https://shops.ae/product/tasty-food-meat-masala-160gm/85543ecc97e41b1bd0499090548b9bf0/",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=1.0 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "MATCH",
+     "view": "front_packshot",
+     "brand": "Tasty Food",
+     "variant": "MEAT MASALA",
+     "size": "160 g"
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "shops.ae",
+    "title": "Tasty Food Meat Masala 160Gm",
+    "image_url": "https://shops.ae/products/Shopping/d4277ba35e06bb9ccfaacb1e8b1ae2bb.thumb.jpeg",
+    "page_url": "https://shops.ae/product/tasty-food-meat-masala-160gm/85543ecc97e41b1bd0499090548b9bf0/",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=1.0 source_trust=0 gtin=None quality=short_side<250",
+    "vlm": null
+   }
+  ],
+  "vlm_calls": 1,
+  "serp_calls": 1,
+  "cost_usd": 0.002,
+  "seconds": 11.4
+ },
+ {
+  "row": 55,
+  "name": "TASTY FOOD MEAT MASALA 160GM",
+  "brand": "TASTY FOOD",
+  "sku_key": "bbd106753ba02a47",
+  "brand_conf": "sheet_raw",
+  "gtin_status": "missing",
+  "queries": [
+   "TASTY FOOD MEAT MASALA 160g"
+  ],
+  "provider_calls": [
+   {
+    "provider": "serper",
+    "query": "TASTY FOOD MEAT MASALA 160g",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 2463,
+    "error": null
+   }
+  ],
+  "decision": "REVIEW_PRESELECTED",
+  "failure_code": null,
+  "winner": "https://m.media-amazon.com/images/I/41JIWBVJD9L.jpg",
+  "top": [
+   {
+    "status": "preselected",
+    "provider": "serper",
+    "domain": "amazon.ae",
+    "title": "Tasty Food Meat Masala 160gm: Buy Online at Best Price in UAE - Amazon.ae",
+    "image_url": "https://m.media-amazon.com/images/I/41JIWBVJD9L.jpg",
+    "page_url": "https://www.amazon.ae/Tasty-Food-Meat-Masala-160gm/dp/B07P8B4D5Y",
+    "evidence": "tier=1 size=match brand=True variants=[] coverage=1.0 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MATCH",
+     "view": "front_packshot",
+     "brand": "Tasty Food",
+     "variant": "Meat Masala",
+     "size": "160 g"
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "amazon.ae",
+    "title": "Tasty Food Chicken Masala 160gm: Buy Online at Best Price in UAE - Amazon.ae",
+    "image_url": "https://m.media-amazon.com/images/I/61DUdDA1FYL.jpg",
+    "page_url": "https://www.amazon.ae/Tasty-Food-Chicken-Masala-160gm/dp/B07P8B2TNP",
+    "evidence": "tier=1 size=match brand=True variants=[] coverage=0.5 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "Tasty Food",
+     "variant": "Chicken Masala",
+     "size": "160 g"
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "amazon.ae",
+    "title": "Tasty Food Fish Masala 160gm: Buy Online at Best Price in UAE - Amazon.ae",
+    "image_url": "https://m.media-amazon.com/images/I/41oQaukOZaL.jpg",
+    "page_url": "https://www.amazon.ae/Tasty-Food-Fish-Masala-160gm/dp/B07P75SYZJ",
+    "evidence": "tier=1 size=match brand=True variants=[] coverage=0.5 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "Tasty Food",
+     "variant": "Fish Masala",
+     "size": "160 g"
+    }
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "shops.ae",
+    "title": "Tasty Food Meat Masala 160Gm",
+    "image_url": "https://shops.ae/products/Shopping/456e68268ad936f56b24245e5ecccb8b.400x400.jpeg",
+    "page_url": "https://shops.ae/product/tasty-food-meat-masala-160gm/85543ecc97e41b1bd0499090548b9bf0/",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=1.0 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "MATCH",
+     "view": "front_packshot",
+     "brand": "Tasty Food",
+     "variant": "MEAT MASALA",
+     "size": "160g"
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "shops.ae",
+    "title": "Tasty Food Meat Masala 160Gm",
+    "image_url": "https://shops.ae/products/Shopping/d4277ba35e06bb9ccfaacb1e8b1ae2bb.thumb.jpeg",
+    "page_url": "https://shops.ae/product/tasty-food-meat-masala-160gm/85543ecc97e41b1bd0499090548b9bf0/",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=1.0 source_trust=0 gtin=None quality=short_side<250",
+    "vlm": null
+   }
+  ],
+  "vlm_calls": 1,
+  "serp_calls": 1,
+  "cost_usd": 0.002,
+  "seconds": 8.8
+ },
+ {
+  "row": 56,
+  "name": "UFC MENUDO MEAT STEW SAUCE 200GM",
+  "brand": "UFC",
+  "sku_key": "b60aa74cde2c2d2f",
+  "brand_conf": "sheet_raw",
+  "gtin_status": "missing",
+  "queries": [
+   "UFC MENUDO MEAT STEW SAUCE 200g"
+  ],
+  "provider_calls": [
+   {
+    "provider": "serper",
+    "query": "UFC MENUDO MEAT STEW SAUCE 200g",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 1780,
+    "error": null
+   }
+  ],
+  "decision": "REVIEW_PRESELECTED",
+  "failure_code": null,
+  "winner": "https://f.nooncdn.com/p/pzsku/Z4DCD38CF1E3460827A1BZ/45/1757058998/7746ef20-067b-4b3c-9135-bd588f8a0980.jpg",
+  "top": [
+   {
+    "status": "preselected",
+    "provider": "serper",
+    "domain": "noon.com",
+    "title": "Ufc Ufc Ready Recipes Menudo Sauce 200Gm | Best Price UAE | Dubai, Abu Dhabi",
+    "image_url": "https://f.nooncdn.com/p/pzsku/Z4DCD38CF1E3460827A1BZ/45/1757058998/7746ef20-067b-4b3c-9135-bd588f8a0980.jpg",
+    "page_url": "https://www.noon.com/uae-en/ufc-ready-recipes-menudo-sauce-200gm/Z4DCD38CF1E3460827A1BZ/p/",
+    "evidence": "tier=1 size=match brand=True variants=[] coverage=0.5 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MATCH",
+     "view": "front_packshot",
+     "brand": "UFC",
+     "variant": "MENUDO Sauce",
+     "size": "200g"
+    }
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "amazon.ae",
+    "title": "Ufc Ready Recipes Menudo Sauce 200 gm: Buy Online at Best Price in UAE -  Amazon.ae",
+    "image_url": "https://m.media-amazon.com/images/I/81UiPZ+tzPL.jpg",
+    "page_url": "https://www.amazon.ae/Ufc-Ready-Recipes-Menudo-Sauce/dp/B07X3ZPF3F",
+    "evidence": "tier=1 size=match brand=True variants=[] coverage=0.5 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MATCH",
+     "view": "front_packshot",
+     "brand": "UFC",
+     "variant": "MENUDO Sauce",
+     "size": "200g"
+    }
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "matransworld-shop.com",
+    "title": "UFC Ready Recipes Menudo Sauce 200g",
+    "image_url": "http://matransworld-shop.com/cdn/shop/files/IMG-20251112-WA0028.jpg?v=1774103582",
+    "page_url": "https://matransworld-shop.com/products/ufc-ready-recipes-menudo-sauce-200g",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=0.5 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "UNSURE",
+     "view": "front_packshot",
+     "brand": "UFC",
+     "variant": "MENUDO Sauce",
+     "size": ""
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "staluciagrocers.com",
+    "title": "UFC Ready Recipes Menudo Sauce 200g",
+    "image_url": "https://staluciagrocers.com/_next/image?url=https%3A%2F%2Fgoycjwogg8pwb1uj.public.blob.vercel-storage.com%2Fproducts%2F014285003991-gRouAylbBpM5f2ID8Iykwjg90U1gSh.jpg&w=1920&q=75",
+    "page_url": "https://staluciagrocers.com/products/ufc-ready-recipes-menudo-sauce-200g?srsltid=AU7gw4VOb_noDGGMn-ImLG9kahiXX0vIUo9J8oyaSMIST2bY0Hm_fELV",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=0.5 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "UFC",
+     "variant": "Tomato Sauce Guisado",
+     "size": "200g"
+    }
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "chuchaysupermarket.com",
+    "title": "UFC READY RECIPE MENUDO",
+    "image_url": "http://chuchaysupermarket.com/cdn/shop/products/images_7_bbc9d24c-db40-4d32-8110-a1a227a2f7b5.jpg?v=1622274949",
+    "page_url": "https://chuchaysupermarket.com/products/copy-of-ufc-caldereta-ready-recipes-sauce-200g",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=0.5 source_trust=0 gtin=None",
+    "vlm": null
+   }
+  ],
+  "vlm_calls": 1,
+  "serp_calls": 1,
+  "cost_usd": 0.002,
+  "seconds": 10.5
+ },
+ {
+  "row": 57,
+  "name": "VIRGINIA L/MEAT TUNA IN S/F OIL 170GM",
+  "brand": "VIRGINIA",
+  "sku_key": "c722db0d31ad7a15",
+  "brand_conf": "sheet_raw",
+  "gtin_status": "missing",
+  "queries": [
+   "VIRGINIA L/MEAT TUNA IN S/F OIL 170g"
+  ],
+  "provider_calls": [
+   {
+    "provider": "serper",
+    "query": "VIRGINIA L/MEAT TUNA IN S/F OIL 170g",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 1498,
+    "error": null
+   }
+  ],
+  "decision": "REVIEW_PRESELECTED",
+  "failure_code": null,
+  "winner": "https://m.media-amazon.com/images/I/814heZmloVL.jpg",
+  "top": [
+   {
+    "status": "preselected",
+    "provider": "serper",
+    "domain": "amazon.ae",
+    "title": "VIRGINIA Tuna L/meat solid in S/F Oil 170GM: Buy Online at Best Price in  UAE - Amazon.ae",
+    "image_url": "https://m.media-amazon.com/images/I/814heZmloVL.jpg",
+    "page_url": "https://www.amazon.ae/VIRGINIA-Tuna-meat-solid-170GM/dp/B09QLSV7CS",
+    "evidence": "tier=1 size=match brand=True variants=[] coverage=1.0 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MATCH",
+     "view": "front_packshot",
+     "brand": "Virginia",
+     "variant": "LIGHT MEAT TUNA IN SUNFLOWER OIL",
+     "size": "170g"
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "gcc.luluhypermarket.com",
+    "title": "Virginia White Meat Tuna In Sunflower Oil 170 g Online at Best Price | Lulu  Bahrain",
+    "image_url": "https://bf1af2.akinoncloudcdn.com/products/2024/09/10/64774/8b03f976-9173-41dd-a17f-e5927da785d5.jpg",
+    "page_url": "https://gcc.luluhypermarket.com/en-bh/virginia-white-meat-tuna-in-sunflower-oil-170-g/p/1879201",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=1.0 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "Virginia",
+     "variant": "WHITE MEAT TUNA IN SUNFLOWER OIL",
+     "size": "170g"
+    }
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "sharjahcoop.ae",
+    "title": "Virginia Tuna L/Meat In S/F Oil 170gm | Sharjah Co-operative Society",
+    "image_url": "https://www.sharjahcoop.ae/medias/1200Wx1200H-00000-6297000958248-001.jpg?context=bWFzdGVyfGltYWdlc3wxNzc1NTB8aW1hZ2UvanBlZ3xhR1E0TDJoa09DOHhNREF5T1RNME9ESTFOemd5TWk4eE1qQXdWM2d4TWpBd1NGOHdNREF3TUY4Mk1qazNNREF3T1RVNE1qUTRYekF3TVM1cWNHY3w1YWNmNGNmYjcyMTI1MmViMDRlOGE4MGQ2N2RhOTU5MjU4OWUxNjFkOWQ3YzE5ZDAyNGI3MDhlM2I4YzMyYTU0",
+    "page_url": "https://www.sharjahcoop.ae/en/virginia-tuna-l-meat-in-s-f-oil-170gm/p/6297000958248?srsltid=AU7gw4UdXvQvE7JYxEYIplh-Cckyt5TbX_uOKN14xogAg7Gkw8gcp97U",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=1.0 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "UNSURE",
+     "view": "front_packshot",
+     "brand": "فرجينيا",
+     "variant": "لحم فاتح تونا في زيت دوار الشمس",
+     "size": "170 جم"
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "unioncoop.ae",
+    "title": "Virginia Yelowfin Tuna Sunflower Oil - 170g",
+    "image_url": "https://www.unioncoop.ae/media/catalog/product/Y/E/YELLOWFIN_TUNA_S_F_OIL_CHK_16X3X170G__101479_9538_1.jpg",
+    "page_url": "https://www.unioncoop.ae/english/yelowf-tuna-s-f-oil-chk-170g-1707865686-nji5mtewotg1mdm0mg-nji5mtewotg1mdm0ml8xnza3ody1njg3.html",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=0.6667 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "banner",
+     "brand": "Virginia",
+     "variant": "YELLOWFINE TUNA IN SUNFLOWER",
+     "size": ""
+    }
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "gcc.luluhypermarket.com",
+    "title": "Virginia Skip Jack Tuna In Sunflower Oil 170 g Online at Best Price | Lulu  Oman",
+    "image_url": "https://bf1af2.akinoncloudcdn.com/products/2025/06/25/378998/73f5c0e8-7d63-450e-ab6e-1b809e21a538_size1920x1920_cropCenter.jpg",
+    "page_url": "https://gcc.luluhypermarket.com/en-om/virginia-skip-jack-tuna-in-sunflower-oil-170-g/p/2458437",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=0.6667 source_trust=3 gtin=None",
+    "vlm": null
+   }
+  ],
+  "vlm_calls": 1,
+  "serp_calls": 1,
+  "cost_usd": 0.002,
+  "seconds": 9.7
+ },
+ {
+  "row": 58,
+  "name": "VIRGINIA L/MEAT TUNA IN WATER 170GM",
+  "brand": "VIRGINIA",
+  "sku_key": "5285421cadb35ed5",
+  "brand_conf": "sheet_raw",
+  "gtin_status": "missing",
+  "queries": [
+   "VIRGINIA L/MEAT TUNA IN WATER 170g"
+  ],
+  "provider_calls": [
+   {
+    "provider": "serper",
+    "query": "VIRGINIA L/MEAT TUNA IN WATER 170g",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 1478,
+    "error": null
+   }
+  ],
+  "decision": "REVIEW_PRESELECTED",
+  "failure_code": null,
+  "winner": "https://m.media-amazon.com/images/I/81ULgp9PnIL.jpg",
+  "top": [
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "gcc.luluhypermarket.com",
+    "title": "Virginia White Meat Tuna In Water 170 g Online at Best Price | Lulu UAE",
+    "image_url": "https://bf1af2.akinoncloudcdn.com/products/2024/09/11/64737/70f6c6ab-db50-4939-9116-af0b49c413bd.jpg",
+    "page_url": "https://gcc.luluhypermarket.com/en-ae/virginia-white-meat-tuna-in-water-170-g/p/1879202",
+    "evidence": "tier=1 size=match brand=True variants=['medium'] coverage=1.0 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "UNSURE",
+     "view": "other_side",
+     "brand": "Virginia",
+     "variant": "",
+     "size": "170g"
+    }
+   },
+   {
+    "status": "preselected",
+    "provider": "serper",
+    "domain": "amazon.ae",
+    "title": "Virginia White Meat Tuna In Water 170g: Buy Online at Best Price in UAE -  Amazon.ae",
+    "image_url": "https://m.media-amazon.com/images/I/81ULgp9PnIL.jpg",
+    "page_url": "https://www.amazon.ae/Virginia-White-Meat-Tuna-Water/dp/B09QLQQV3T",
+    "evidence": "tier=1 size=match brand=True variants=['medium'] coverage=1.0 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MATCH",
+     "view": "front_packshot",
+     "brand": "Virginia",
+     "variant": "WHITE MEAT TUNA IN WATER",
+     "size": "170g"
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "amazon.ae",
+    "title": "Virginia White Meat Tuna In Water 170g: Buy Online at Best Price in UAE -  Amazon.ae",
+    "image_url": "https://m.media-amazon.com/images/I/81Sx4cIkXML.jpg",
+    "page_url": "https://www.amazon.ae/Virginia-White-Meat-Tuna-Water/dp/B09QLQQV3T",
+    "evidence": "tier=1 size=match brand=True variants=['medium'] coverage=1.0 source_trust=3 gtin=None quality=foreground>98%",
+    "vlm": null
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "amazon.ae",
+    "title": "VIRGINIA Tuna L/meat solid in S/F Oil 170GM: Buy Online at Best Price in  UAE - Amazon.ae",
+    "image_url": "https://m.media-amazon.com/images/I/814heZmloVL.jpg",
+    "page_url": "https://www.amazon.ae/VIRGINIA-Tuna-meat-solid-170GM/dp/B09QLSV7CS",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=1.0 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "Virginia",
+     "variant": "LIGHT MEAT TUNA IN SUNFLOWER OIL",
+     "size": "170g"
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "sharjahcoop.ae",
+    "title": "Virginia Tuna L/Meat In S/F Oil 170gm | Sharjah Co-operative Society",
+    "image_url": "https://www.sharjahcoop.ae/medias/1200Wx1200H-00000-6297000958248-001.jpg?context=bWFzdGVyfGltYWdlc3wxNzc1NTB8aW1hZ2UvanBlZ3xhR1E0TDJoa09DOHhNREF5T1RNME9ESTFOemd5TWk4eE1qQXdWM2d4TWpBd1NGOHdNREF3TUY4Mk1qazNNREF3T1RVNE1qUTRYekF3TVM1cWNHY3w1YWNmNGNmYjcyMTI1MmViMDRlOGE4MGQ2N2RhOTU5MjU4OWUxNjFkOWQ3YzE5ZDAyNGI3MDhlM2I4YzMyYTU0",
+    "page_url": "https://www.sharjahcoop.ae/en/virginia-tuna-l-meat-in-s-f-oil-170gm/p/6297000958248?srsltid=AU7gw4XJcGcyWiLmTmg1F5Q7KBaAm3HMsp6rv7ABW5s8BKz7lRzhuZ1-",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=1.0 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "Virginia",
+     "variant": "TUNA IN SUNFLOWER OIL",
+     "size": "170g"
+    }
+   }
+  ],
+  "vlm_calls": 1,
+  "serp_calls": 1,
+  "cost_usd": 0.002,
+  "seconds": 9.0
+ },
+ {
+  "row": 59,
+  "name": "VIRGINIA WHITE MEAT TUNA IN WATER 170GM",
+  "brand": "VIRGINIA",
+  "sku_key": "506854206a385469",
+  "brand_conf": "sheet_raw",
+  "gtin_status": "missing",
+  "queries": [
+   "VIRGINIA WHITE MEAT TUNA IN WATER 170g"
+  ],
+  "provider_calls": [
+   {
+    "provider": "serper",
+    "query": "VIRGINIA WHITE MEAT TUNA IN WATER 170g",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 1883,
+    "error": null
+   }
+  ],
+  "decision": "REVIEW_PRESELECTED",
+  "failure_code": null,
+  "winner": "https://m.media-amazon.com/images/I/81ULgp9PnIL.jpg",
+  "top": [
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "gcc.luluhypermarket.com",
+    "title": "Virginia White Meat Tuna In Water 170 g Online at Best Price | Lulu UAE",
+    "image_url": "https://bf1af2.akinoncloudcdn.com/products/2024/09/11/64737/70f6c6ab-db50-4939-9116-af0b49c413bd_size1920x1920_cropCenter.jpg",
+    "page_url": "https://gcc.luluhypermarket.com/en-ae/virginia-white-meat-tuna-in-water-170-g/p/1879202",
+    "evidence": "tier=1 size=match brand=True variants=['medium'] coverage=1.0 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "UNSURE",
+     "view": "other_side",
+     "brand": "",
+     "variant": "",
+     "size": "170"
+    }
+   },
+   {
+    "status": "preselected",
+    "provider": "serper",
+    "domain": "amazon.ae",
+    "title": "Virginia White Meat Tuna In Water 170g: Buy Online at Best Price in UAE -  Amazon.ae",
+    "image_url": "https://m.media-amazon.com/images/I/81ULgp9PnIL.jpg",
+    "page_url": "https://www.amazon.ae/Virginia-White-Meat-Tuna-Water/dp/B09QLQQV3T",
+    "evidence": "tier=1 size=match brand=True variants=['medium'] coverage=1.0 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MATCH",
+     "view": "front_packshot",
+     "brand": "Virginia",
+     "variant": "WHITE MEAT TUNA IN WATER",
+     "size": "170g"
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "amazon.ae",
+    "title": "Virginia White Meat Tuna In Water 170g: Buy Online at Best Price in UAE -  Amazon.ae",
+    "image_url": "https://m.media-amazon.com/images/I/81Sx4cIkXML.jpg",
+    "page_url": "https://www.amazon.ae/Virginia-White-Meat-Tuna-Water/dp/B09QLQQV3T",
+    "evidence": "tier=1 size=match brand=True variants=['medium'] coverage=1.0 source_trust=3 gtin=None quality=foreground>98%",
+    "vlm": null
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "amazon.ae",
+    "title": "Virginia White Meat Tuna In Water 170g: Buy Online at Best Price in UAE -  Amazon.ae",
+    "image_url": "https://m.media-amazon.com/images/I/61fYAJBl83L.jpg",
+    "page_url": "https://www.amazon.ae/Virginia-White-Meat-Tuna-Water/dp/B09QLQQV3T",
+    "evidence": "tier=1 size=match brand=True variants=['medium'] coverage=1.0 source_trust=3 gtin=None quality=foreground>98%",
+    "vlm": null
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "unioncoop.ae",
+    "title": "Virginia Tuna with Meat In Water - 170 g",
+    "image_url": "https://www.unioncoop.ae/media/catalog/product/6/0/6084011497756.jpg",
+    "page_url": "https://www.unioncoop.ae/tuna-w-meat-solid-in-water-1674601311-nji5nzawmdk1odixnw-nji5nzawmdk1odixn18xnjc0njaxmzex.html",
+    "evidence": "tier=1 size=match brand=True variants=['medium'] coverage=0.6667 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "multi_product",
+     "brand": "عافية",
+     "variant": "",
+     "size": ""
+    }
+   }
+  ],
+  "vlm_calls": 1,
+  "serp_calls": 1,
+  "cost_usd": 0.002,
+  "seconds": 7.8
+ },
+ {
+  "row": 60,
+  "name": "VIRGINIA WHTE MEAT TUNA IN S/F OIL 170GM",
+  "brand": "VIRGINIA",
+  "sku_key": "60355af9a37b9268",
+  "brand_conf": "sheet_raw",
+  "gtin_status": "missing",
+  "queries": [
+   "VIRGINIA WHTE MEAT TUNA IN S/F OIL 170g",
+   "VIRGINIA WHTE MEAT TUNA IN S/F OIL 170g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)"
+  ],
+  "provider_calls": [
+   {
+    "provider": "serper",
+    "query": "VIRGINIA WHTE MEAT TUNA IN S/F OIL 170g",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 1620,
+    "error": null
+   },
+   {
+    "provider": "serper",
+    "query": "VIRGINIA WHTE MEAT TUNA IN S/F OIL 170g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 1599,
+    "error": null
+   }
+  ],
+  "decision": "REVIEW_PRESELECTED",
+  "failure_code": null,
+  "winner": "https://m.media-amazon.com/images/I/814heZmloVL.jpg",
+  "top": [
+   {
+    "status": "preselected",
+    "provider": "serper",
+    "domain": "amazon.ae",
+    "title": "VIRGINIA Tuna L/meat solid in S/F Oil 170GM: Buy Online at Best Price in UAE  - Amazon.ae",
+    "image_url": "https://m.media-amazon.com/images/I/814heZmloVL.jpg",
+    "page_url": "https://www.amazon.ae/VIRGINIA-Tuna-meat-solid-170GM/dp/B09QLSV7CS",
+    "evidence": "tier=1 size=match brand=True variants=[] coverage=0.75 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MATCH",
+     "view": "front_packshot",
+     "brand": "Virginia",
+     "variant": "LIGHT MEAT TUNA IN SUNFLOWER OIL",
+     "size": "170g"
+    }
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "gcc.luluhypermarket.com",
+    "title": "Virginia White Meat Tuna In Sunflower Oil 170 g Online at Best Price | Lulu  Bahrain",
+    "image_url": "https://bf1af2.akinoncloudcdn.com/products/2024/09/10/64774/8b03f976-9173-41dd-a17f-e5927da785d5.jpg",
+    "page_url": "https://gcc.luluhypermarket.com/en-bh/virginia-white-meat-tuna-in-sunflower-oil-170-g/p/1879201",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=0.75 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MATCH",
+     "view": "front_packshot",
+     "brand": "Virginia",
+     "variant": "WHITE MEAT TUNA IN SUNFLOWER OIL",
+     "size": "170g"
+    }
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "gcc.luluhypermarket.com",
+    "title": "Virginia Light Meat Tuna In Sunflower Oil 170 g Online at Best Price | Lulu  UAE",
+    "image_url": "https://bf1af2.akinoncloudcdn.com/products/2024/09/11/64748/36bbc47a-fd60-47e1-b16e-e14157493ec9.jpg",
+    "page_url": "https://gcc.luluhypermarket.com/en-ae/virginia-light-meat-tuna-in-sunflower-oil-170-g/p/1879199",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=0.75 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "UNSURE",
+     "view": "other_side",
+     "brand": "فرجينيا",
+     "variant": "",
+     "size": "170 جم"
+    }
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "sharjahcoop.ae",
+    "title": "Virginia Tuna L/Meat In S/F Oil 170gm | Sharjah Co-operative Society",
+    "image_url": "https://www.sharjahcoop.ae/medias/1200Wx1200H-00000-6297000958248-001.jpg?context=bWFzdGVyfGltYWdlc3wxNzc1NTB8aW1hZ2UvanBlZ3xhR1E0TDJoa09DOHhNREF5T1RNME9ESTFOemd5TWk4eE1qQXdWM2d4TWpBd1NGOHdNREF3TUY4Mk1qazNNREF3T1RVNE1qUTRYekF3TVM1cWNHY3w1YWNmNGNmYjcyMTI1MmViMDRlOGE4MGQ2N2RhOTU5MjU4OWUxNjFkOWQ3YzE5ZDAyNGI3MDhlM2I4YzMyYTU0",
+    "page_url": "https://www.sharjahcoop.ae/en/virginia-tuna-l-meat-in-s-f-oil-170gm/p/6297000958248?srsltid=AU7gw4WYRXUoFpoAiv_O7F3r820rt5l_QfoV3lacbNEZBMukABzUOoYn",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=0.75 source_trust=0 gtin=None",
+    "vlm": {
+     "decision": "UNSURE",
+     "view": "front_packshot",
+     "brand": "فرجينيا",
+     "variant": "لحم فاتح تونا في زيت دوار الشمس",
+     "size": "170 جم"
+    }
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "emiratescoop.suppy.app",
+    "title": "AIRPORT VIEW | Virginia White Meat Tuna In Sunflower Oil 170G",
+    "image_url": "https://suppystorage.blob.core.windows.net/valeur/items/FMCG_465057_1.jpg",
+    "page_url": "https://emiratescoop.suppy.app/shop/stores/147/AIRPORT%20VIEW/products/317476/Virginia%20White%20Meat%20Tuna%20In%20Sunflower%20Oil%20170G",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=0.75 source_trust=0 gtin=None",
+    "vlm": null
+   }
+  ],
+  "vlm_calls": 1,
+  "serp_calls": 2,
+  "cost_usd": 0.003,
+  "seconds": 10.4
+ },
+ {
+  "row": 61,
+  "name": "ZWAN BEEF LUNCHEON MEAT 850GM",
+  "brand": "ZWAN",
+  "sku_key": "04b2fe81ce30e1cc",
+  "brand_conf": "sheet_raw",
+  "gtin_status": "missing",
+  "queries": [
+   "ZWAN BEEF LUNCHEON MEAT 850g"
+  ],
+  "provider_calls": [
+   {
+    "provider": "serper",
+    "query": "ZWAN BEEF LUNCHEON MEAT 850g",
+    "hl": "en",
+    "status": "ok",
+    "http_status": 200,
+    "count": 20,
+    "ms": 2389,
+    "error": null
+   }
+  ],
+  "decision": "REVIEW_PRESELECTED",
+  "failure_code": null,
+  "winner": "https://cdn.mafrservices.com/pim-content/UAE/media/product/10937/1757135408/10937_main.jpg",
+  "top": [
+   {
+    "status": "preselected",
+    "provider": "serper",
+    "domain": "carrefouruae.com",
+    "title": "Zwan Luncheon Meat, 850g",
+    "image_url": "https://cdn.mafrservices.com/pim-content/UAE/media/product/10937/1757135408/10937_main.jpg",
+    "page_url": "https://www.carrefouruae.com/mafuae/en/beef-luncheon/zwan-beef-luncheon-meat-850gr/p/10937",
+    "evidence": "tier=1 size=match brand=True variants=[] coverage=1.0 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "UNSURE",
+     "view": "front_packshot",
+     "brand": "ZWAN",
+     "variant": "LUNCHEON MEAT",
+     "size": ""
+    }
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "noon.com",
+    "title": "Zwan Zwan Beef Luncheon Meat Can - 850gms | Best Price UAE | Dubai, Abu  Dhabi",
+    "image_url": "https://f.nooncdn.com/p/pzsku/Z03F2EB671498FA72870AZ/45/_/1744377753/8a988184-4f6f-4352-b06f-032b88de92af.jpg",
+    "page_url": "https://www.noon.com/uae-en/zwan-beef-luncheon-meat-can-850gms/Z03F2EB671498FA72870AZ/p/?o=z03f2eb671498fa72870az-1",
+    "evidence": "tier=1 size=match brand=True variants=[] coverage=1.0 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "UNSURE",
+     "view": "front_packshot",
+     "brand": "ZWAN",
+     "variant": "LUNCHEON MEAT",
+     "size": ""
+    }
+   },
+   {
+    "status": "eligible",
+    "provider": "serper",
+    "domain": "amazon.ae",
+    "title": "Zwan Luncheon Meat, 850 g: Buy Online at Best Price in UAE - Amazon.ae",
+    "image_url": "https://m.media-amazon.com/images/I/71jyWVpnt+L.jpg",
+    "page_url": "https://www.amazon.ae/Zwan-Luncheon-Meat-850-g/dp/B07P8B2XHT",
+    "evidence": "tier=1 size=match brand=True variants=[] coverage=0.6667 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "UNSURE",
+     "view": "front_packshot",
+     "brand": "ZWAN",
+     "variant": "LUNCHEON MEAT",
+     "size": ""
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "gcc.luluhypermarket.com",
+    "title": "Zwan Chicken Luncheon Meat 850 g Online at Best Price | Lulu UAE",
+    "image_url": "https://bf1af2.akinoncloudcdn.com/products/2024/09/11/65203/c52eef43-ae6e-486e-a2cd-019be287dbca.jpg",
+    "page_url": "https://gcc.luluhypermarket.com/en-ae/zwan-chicken-luncheon-meat-850-g/p/1651",
+    "evidence": "tier=1 size=match brand=True variants=[] coverage=0.6667 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "front_packshot",
+     "brand": "زوان",
+     "variant": "لحم لنشون دجاج",
+     "size": ""
+    }
+   },
+   {
+    "status": "rejected",
+    "provider": "serper",
+    "domain": "unioncoop.ae",
+    "title": "Zwan Beef Luncheon Meat - 850g",
+    "image_url": "https://www.unioncoop.ae/media/catalog/product/Z/w/Zwan_Luncheon_Meat_Beef_Hot___Spicy_340g_x_2_101431_6236_1.jpg",
+    "page_url": "https://www.unioncoop.ae/beef-luncheon-meat-1x850gm-1704927654-nji5mta1ode1mzaznw-nji5mta1ode1mzazn18xnza0oti3nju1.html",
+    "evidence": "tier=2 size=match brand=True variants=[] coverage=1.0 source_trust=3 gtin=None",
+    "vlm": {
+     "decision": "MISMATCH",
+     "view": "multi_product",
+     "brand": "ZWAN",
+     "variant": "HOT & SPICY",
+     "size": ""
+    }
+   }
+  ],
+  "vlm_calls": 2,
+  "serp_calls": 1,
+  "cost_usd": 0.003,
+  "seconds": 13.1
+ }
+]

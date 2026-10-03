@@ -1,0 +1,824 @@
+WARNING catalog_match.providers.cse_legacy: cse_legacy: key #0 http_status=403 body='{\n  "error": {\n    "code": 403,\n    "message": "This project does not have the access to Custom Search JSON API.",\n    "errors": [\n      {\n        "message": "This project does not have the access to Custom Search JSON API.",\n        "domain": "global",\n        "reason": "forbidden"\n      }\n    ],\n    "status": "PERMISSION_DENIED"\n  }\n}\n'
+WARNING catalog_match.providers: provider=cse_legacy status=error count=0 latency_ms=498 http_status=403 error=http_403 query='AIDA FRENCH FRIES 1kg' body='{\n  "error": {\n    "code": 403,\n    "message": "This project does not have the access to Custom Search JSON API.",\n    "errors": [\n      {\n        "message": "This project does not have the access to Custom Search JSON API.",\n        "domain": "global",\n        "reason": "forbidden"\n      }\n    ],\n    "status": "PERMISSION_DENIED"\n  }\n}\n'
+WARNING catalog_match.providers.cse_legacy: cse_legacy: key #0 http_status=403 body='{\n  "error": {\n    "code": 403,\n    "message": "This project does not have the access to Custom Search JSON API.",\n    "errors": [\n      {\n        "message": "This project does not have the access to Custom Search JSON API.",\n        "domain": "global",\n        "reason": "forbidden"\n      }\n    ],\n    "status": "PERMISSION_DENIED"\n  }\n}\n'
+WARNING catalog_match.providers: provider=cse_legacy status=error count=0 latency_ms=568 http_status=403 error=http_403 query='BARTS TRADITON FRENCH FRIES STRAIGHT CUT 1kg' body='{\n  "error": {\n    "code": 403,\n    "message": "This project does not have the access to Custom Search JSON API.",\n    "errors": [\n      {\n        "message": "This project does not have the access to Custom Search JSON API.",\n        "domain": "global",\n        "reason": "forbidden"\n      }\n    ],\n    "status": "PERMISSION_DENIED"\n  }\n}\n'
+WARNING catalog_match.providers: provider=serper status=error count=0 latency_ms=624 http_status=400 error=http_400 query='BARTS TRADITON FRENCH FRIES STRAIGHT CUT 1kg (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)' body='{"message":"Query pattern not allowed for free accounts.","statusCode":400}'
+WARNING catalog_match.providers.cse_legacy: cse_legacy: key #0 http_status=403 body='{\n  "error": {\n    "code": 403,\n    "message": "This project does not have the access to Custom Search JSON API.",\n    "errors": [\n      {\n        "message": "This project does not have the access to Custom Search JSON API.",\n        "domain": "global",\n        "reason": "forbidden"\n      }\n    ],\n    "status": "PERMISSION_DENIED"\n  }\n}\n'
+WARNING catalog_match.providers: provider=cse_legacy status=error count=0 latency_ms=587 http_status=403 error=http_403 query='BATO FRENCH FRIES 900 MM' body='{\n  "error": {\n    "code": 403,\n    "message": "This project does not have the access to Custom Search JSON API.",\n    "errors": [\n      {\n        "message": "This project does not have the access to Custom Search JSON API.",\n        "domain": "global",\n        "reason": "forbidden"\n      }\n    ],\n    "status": "PERMISSION_DENIED"\n  }\n}\n'
+WARNING catalog_match.providers: provider=serper status=error count=0 latency_ms=640 http_status=400 error=http_400 query='BATO FRENCH FRIES 900 MM (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)' body='{"message":"Query pattern not allowed for free accounts.","statusCode":400}'
+WARNING catalog_match.providers.cse_legacy: cse_legacy: key #0 http_status=403 body='{\n  "error": {\n    "code": 403,\n    "message": "This project does not have the access to Custom Search JSON API.",\n    "errors": [\n      {\n        "message": "This project does not have the access to Custom Search JSON API.",\n        "domain": "global",\n        "reason": "forbidden"\n      }\n    ],\n    "status": "PERMISSION_DENIED"\n  }\n}\n'
+WARNING catalog_match.providers: provider=cse_legacy status=error count=0 latency_ms=537 http_status=403 error=http_403 query='FARMILA FRENCH FRIES 9MM 1kg' body='{\n  "error": {\n    "code": 403,\n    "message": "This project does not have the access to Custom Search JSON API.",\n    "errors": [\n      {\n        "message": "This project does not have the access to Custom Search JSON API.",\n        "domain": "global",\n        "reason": "forbidden"\n      }\n    ],\n    "status": "PERMISSION_DENIED"\n  }\n}\n'
+WARNING catalog_match.providers: provider=serper status=error count=0 latency_ms=669 http_status=400 error=http_400 query='FARMILA FRENCH FRIES 9MM 1kg (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)' body='{"message":"Query pattern not allowed for free accounts.","statusCode":400}'
+WARNING catalog_match.providers.cse_legacy: cse_legacy: key #0 http_status=403 body='{\n  "error": {\n    "code": 403,\n    "message": "This project does not have the access to Custom Search JSON API.",\n    "errors": [\n      {\n        "message": "This project does not have the access to Custom Search JSON API.",\n        "domain": "global",\n        "reason": "forbidden"\n      }\n    ],\n    "status": "PERMISSION_DENIED"\n  }\n}\n'
+WARNING catalog_match.providers: provider=cse_legacy status=error count=0 latency_ms=571 http_status=403 error=http_403 query='HUP HUP FRENCH FRIES REGULAR CUT 1kg' body='{\n  "error": {\n    "code": 403,\n    "message": "This project does not have the access to Custom Search JSON API.",\n    "errors": [\n      {\n        "message": "This project does not have the access to Custom Search JSON API.",\n        "domain": "global",\n        "reason": "forbidden"\n      }\n    ],\n    "status": "PERMISSION_DENIED"\n  }\n}\n'
+WARNING catalog_match.providers: provider=serper status=error count=0 latency_ms=647 http_status=400 error=http_400 query='HUP HUP FRENCH FRIES REGULAR CUT 1kg (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)' body='{"message":"Query pattern not allowed for free accounts.","statusCode":400}'
+WARNING catalog_match.providers.cse_legacy: cse_legacy: key #0 http_status=403 body='{\n  "error": {\n    "code": 403,\n    "message": "This project does not have the access to Custom Search JSON API.",\n    "errors": [\n      {\n        "message": "This project does not have the access to Custom Search JSON API.",\n        "domain": "global",\n        "reason": "forbidden"\n      }\n    ],\n    "status": "PERMISSION_DENIED"\n  }\n}\n'
+WARNING catalog_match.providers: provider=cse_legacy status=error count=0 latency_ms=545 http_status=403 error=http_403 query='JOYS FRENCH FRIES 1kg' body='{\n  "error": {\n    "code": 403,\n    "message": "This project does not have the access to Custom Search JSON API.",\n    "errors": [\n      {\n        "message": "This project does not have the access to Custom Search JSON API.",\n        "domain": "global",\n        "reason": "forbidden"\n      }\n    ],\n    "status": "PERMISSION_DENIED"\n  }\n}\n'
+WARNING catalog_match.providers: provider=serper status=error count=0 latency_ms=725 http_status=400 error=http_400 query='JOYS FRENCH FRIES 1kg (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)' body='{"message":"Query pattern not allowed for free accounts.","statusCode":400}'
+WARNING catalog_match.providers.cse_legacy: cse_legacy: key #0 http_status=403 body='{\n  "error": {\n    "code": 403,\n    "message": "This project does not have the access to Custom Search JSON API.",\n    "errors": [\n      {\n        "message": "This project does not have the access to Custom Search JSON API.",\n        "domain": "global",\n        "reason": "forbidden"\n      }\n    ],\n    "status": "PERMISSION_DENIED"\n  }\n}\n'
+WARNING catalog_match.providers: provider=cse_legacy status=error count=0 latency_ms=529 http_status=403 error=http_403 query='MCCAIN FRENCH FRIES GOLDEN LONG 750g' body='{\n  "error": {\n    "code": 403,\n    "message": "This project does not have the access to Custom Search JSON API.",\n    "errors": [\n      {\n        "message": "This project does not have the access to Custom Search JSON API.",\n        "domain": "global",\n        "reason": "forbidden"\n      }\n    ],\n    "status": "PERMISSION_DENIED"\n  }\n}\n'
+WARNING catalog_match.providers.cse_legacy: cse_legacy: key #0 http_status=403 body='{\n  "error": {\n    "code": 403,\n    "message": "This project does not have the access to Custom Search JSON API.",\n    "errors": [\n      {\n        "message": "This project does not have the access to Custom Search JSON API.",\n        "domain": "global",\n        "reason": "forbidden"\n      }\n    ],\n    "status": "PERMISSION_DENIED"\n  }\n}\n'
+WARNING catalog_match.providers: provider=cse_legacy status=error count=0 latency_ms=528 http_status=403 error=http_403 query='MCCAIN FRENCH FRIES TRADITION 750g' body='{\n  "error": {\n    "code": 403,\n    "message": "This project does not have the access to Custom Search JSON API.",\n    "errors": [\n      {\n        "message": "This project does not have the access to Custom Search JSON API.",\n        "domain": "global",\n        "reason": "forbidden"\n      }\n    ],\n    "status": "PERMISSION_DENIED"\n  }\n}\n'
+WARNING catalog_match.providers.cse_legacy: cse_legacy: key #0 http_status=403 body='{\n  "error": {\n    "code": 403,\n    "message": "This project does not have the access to Custom Search JSON API.",\n    "errors": [\n      {\n        "message": "This project does not have the access to Custom Search JSON API.",\n        "domain": "global",\n        "reason": "forbidden"\n      }\n    ],\n    "status": "PERMISSION_DENIED"\n  }\n}\n'
+WARNING catalog_match.providers: provider=cse_legacy status=error count=0 latency_ms=640 http_status=403 error=http_403 query='MR JOHN FRENCH FRIES 900g' body='{\n  "error": {\n    "code": 403,\n    "message": "This project does not have the access to Custom Search JSON API.",\n    "errors": [\n      {\n        "message": "This project does not have the access to Custom Search JSON API.",\n        "domain": "global",\n        "reason": "forbidden"\n      }\n    ],\n    "status": "PERMISSION_DENIED"\n  }\n}\n'
+WARNING catalog_match.providers: provider=serper status=error count=0 latency_ms=587 http_status=400 error=http_400 query='MR JOHN FRENCH FRIES 900g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)' body='{"message":"Query pattern not allowed for free accounts.","statusCode":400}'
+WARNING catalog_match.providers.cse_legacy: cse_legacy: key #0 http_status=403 body='{\n  "error": {\n    "code": 403,\n    "message": "This project does not have the access to Custom Search JSON API.",\n    "errors": [\n      {\n        "message": "This project does not have the access to Custom Search JSON API.",\n        "domain": "global",\n        "reason": "forbidden"\n      }\n    ],\n    "status": "PERMISSION_DENIED"\n  }\n}\n'
+WARNING catalog_match.providers: provider=cse_legacy status=error count=0 latency_ms=560 http_status=403 error=http_403 query='SUNBULAH FRENCH FRIES 1kg' body='{\n  "error": {\n    "code": 403,\n    "message": "This project does not have the access to Custom Search JSON API.",\n    "errors": [\n      {\n        "message": "This project does not have the access to Custom Search JSON API.",\n        "domain": "global",\n        "reason": "forbidden"\n      }\n    ],\n    "status": "PERMISSION_DENIED"\n  }\n}\n'
+WARNING catalog_match.providers.cse_legacy: cse_legacy: key #0 http_status=403 body='{\n  "error": {\n    "code": 403,\n    "message": "This project does not have the access to Custom Search JSON API.",\n    "errors": [\n      {\n        "message": "This project does not have the access to Custom Search JSON API.",\n        "domain": "global",\n        "reason": "forbidden"\n      }\n    ],\n    "status": "PERMISSION_DENIED"\n  }\n}\n'
+WARNING catalog_match.providers: provider=cse_legacy status=error count=0 latency_ms=561 http_status=403 error=http_403 query='TOMEX FRENCH FRIES 9MM 1kg' body='{\n  "error": {\n    "code": 403,\n    "message": "This project does not have the access to Custom Search JSON API.",\n    "errors": [\n      {\n        "message": "This project does not have the access to Custom Search JSON API.",\n        "domain": "global",\n        "reason": "forbidden"\n      }\n    ],\n    "status": "PERMISSION_DENIED"\n  }\n}\n'
+WARNING catalog_match.providers: provider=serper status=error count=0 latency_ms=626 http_status=400 error=http_400 query='TOMEX FRENCH FRIES 9MM 1kg (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)' body='{"message":"Query pattern not allowed for free accounts.","statusCode":400}'
+WARNING catalog_match.providers.cse_legacy: cse_legacy: key #0 http_status=403 body='{\n  "error": {\n    "code": 403,\n    "message": "This project does not have the access to Custom Search JSON API.",\n    "errors": [\n      {\n        "message": "This project does not have the access to Custom Search JSON API.",\n        "domain": "global",\n        "reason": "forbidden"\n      }\n    ],\n    "status": "PERMISSION_DENIED"\n  }\n}\n'
+WARNING catalog_match.providers: provider=cse_legacy status=error count=0 latency_ms=589 http_status=403 error=http_403 query='YUMWAY STRAIGHT CUT FRENCH FRIES 2.5kg' body='{\n  "error": {\n    "code": 403,\n    "message": "This project does not have the access to Custom Search JSON API.",\n    "errors": [\n      {\n        "message": "This project does not have the access to Custom Search JSON API.",\n        "domain": "global",\n        "reason": "forbidden"\n      }\n    ],\n    "status": "PERMISSION_DENIED"\n  }\n}\n'
+WARNING catalog_match.providers: provider=serper status=error count=0 latency_ms=589 http_status=400 error=http_400 query='YUMWAY STRAIGHT CUT FRENCH FRIES 2.5kg (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)' body='{"message":"Query pattern not allowed for free accounts.","statusCode":400}'
+WARNING catalog_match.providers.cse_legacy: cse_legacy: key #0 http_status=403 body='{\n  "error": {\n    "code": 403,\n    "message": "This project does not have the access to Custom Search JSON API.",\n    "errors": [\n      {\n        "message": "This project does not have the access to Custom Search JSON API.",\n        "domain": "global",\n        "reason": "forbidden"\n      }\n    ],\n    "status": "PERMISSION_DENIED"\n  }\n}\n'
+WARNING catalog_match.providers: provider=cse_legacy status=error count=0 latency_ms=530 http_status=403 error=http_403 query='ASHOKA PLAIN PARATHA 5x400g' body='{\n  "error": {\n    "code": 403,\n    "message": "This project does not have the access to Custom Search JSON API.",\n    "errors": [\n      {\n        "message": "This project does not have the access to Custom Search JSON API.",\n        "domain": "global",\n        "reason": "forbidden"\n      }\n    ],\n    "status": "PERMISSION_DENIED"\n  }\n}\n'
+WARNING catalog_match.providers: provider=serper status=error count=0 latency_ms=629 http_status=400 error=http_400 query='ASHOKA PLAIN PARATHA 5x400g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)' body='{"message":"Query pattern not allowed for free accounts.","statusCode":400}'
+WARNING catalog_match.providers.cse_legacy: cse_legacy: key #0 http_status=403 body='{\n  "error": {\n    "code": 403,\n    "message": "This project does not have the access to Custom Search JSON API.",\n    "errors": [\n      {\n        "message": "This project does not have the access to Custom Search JSON API.",\n        "domain": "global",\n        "reason": "forbidden"\n      }\n    ],\n    "status": "PERMISSION_DENIED"\n  }\n}\n'
+WARNING catalog_match.providers: provider=cse_legacy status=error count=0 latency_ms=554 http_status=403 error=http_403 query='MEHRAN PLAIN PARATHA 2x400g' body='{\n  "error": {\n    "code": 403,\n    "message": "This project does not have the access to Custom Search JSON API.",\n    "errors": [\n      {\n        "message": "This project does not have the access to Custom Search JSON API.",\n        "domain": "global",\n        "reason": "forbidden"\n      }\n    ],\n    "status": "PERMISSION_DENIED"\n  }\n}\n'
+WARNING catalog_match.providers: provider=serper status=error count=0 latency_ms=602 http_status=400 error=http_400 query='MEHRAN PLAIN PARATHA 2x400g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)' body='{"message":"Query pattern not allowed for free accounts.","statusCode":400}'
+WARNING catalog_match.providers.cse_legacy: cse_legacy: key #0 http_status=403 body='{\n  "error": {\n    "code": 403,\n    "message": "This project does not have the access to Custom Search JSON API.",\n    "errors": [\n      {\n        "message": "This project does not have the access to Custom Search JSON API.",\n        "domain": "global",\n        "reason": "forbidden"\n      }\n    ],\n    "status": "PERMISSION_DENIED"\n  }\n}\n'
+WARNING catalog_match.providers: provider=cse_legacy status=error count=0 latency_ms=553 http_status=403 error=http_403 query='MEHRAN PLAIN PARATHA 5x400g' body='{\n  "error": {\n    "code": 403,\n    "message": "This project does not have the access to Custom Search JSON API.",\n    "errors": [\n      {\n        "message": "This project does not have the access to Custom Search JSON API.",\n        "domain": "global",\n        "reason": "forbidden"\n      }\n    ],\n    "status": "PERMISSION_DENIED"\n  }\n}\n'
+WARNING catalog_match.providers: provider=serper status=error count=0 latency_ms=886 http_status=400 error=http_400 query='MEHRAN PLAIN PARATHA 5x400g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)' body='{"message":"Query pattern not allowed for free accounts.","statusCode":400}'
+WARNING catalog_match.providers.cse_legacy: cse_legacy: key #0 http_status=403 body='{\n  "error": {\n    "code": 403,\n    "message": "This project does not have the access to Custom Search JSON API.",\n    "errors": [\n      {\n        "message": "This project does not have the access to Custom Search JSON API.",\n        "domain": "global",\n        "reason": "forbidden"\n      }\n    ],\n    "status": "PERMISSION_DENIED"\n  }\n}\n'
+WARNING catalog_match.providers: provider=cse_legacy status=error count=0 latency_ms=641 http_status=403 error=http_403 query='AL RAWABI MOZZARELLA CHEESE 200g' body='{\n  "error": {\n    "code": 403,\n    "message": "This project does not have the access to Custom Search JSON API.",\n    "errors": [\n      {\n        "message": "This project does not have the access to Custom Search JSON API.",\n        "domain": "global",\n        "reason": "forbidden"\n      }\n    ],\n    "status": "PERMISSION_DENIED"\n  }\n}\n'
+WARNING catalog_match.providers.cse_legacy: cse_legacy: key #0 http_status=403 body='{\n  "error": {\n    "code": 403,\n    "message": "This project does not have the access to Custom Search JSON API.",\n    "errors": [\n      {\n        "message": "This project does not have the access to Custom Search JSON API.",\n        "domain": "global",\n        "reason": "forbidden"\n      }\n    ],\n    "status": "PERMISSION_DENIED"\n  }\n}\n'
+WARNING catalog_match.providers: provider=cse_legacy status=error count=0 latency_ms=578 http_status=403 error=http_403 query='AJMI MEAT MASALA 160g' body='{\n  "error": {\n    "code": 403,\n    "message": "This project does not have the access to Custom Search JSON API.",\n    "errors": [\n      {\n        "message": "This project does not have the access to Custom Search JSON API.",\n        "domain": "global",\n        "reason": "forbidden"\n      }\n    ],\n    "status": "PERMISSION_DENIED"\n  }\n}\n'
+WARNING catalog_match.providers.cse_legacy: cse_legacy: key #0 http_status=403 body='{\n  "error": {\n    "code": 403,\n    "message": "This project does not have the access to Custom Search JSON API.",\n    "errors": [\n      {\n        "message": "This project does not have the access to Custom Search JSON API.",\n        "domain": "global",\n        "reason": "forbidden"\n      }\n    ],\n    "status": "PERMISSION_DENIED"\n  }\n}\n'
+WARNING catalog_match.providers: provider=cse_legacy status=error count=0 latency_ms=564 http_status=403 error=http_403 query='AL ALALI FANCY MEAT TUNA IN WATER170GM' body='{\n  "error": {\n    "code": 403,\n    "message": "This project does not have the access to Custom Search JSON API.",\n    "errors": [\n      {\n        "message": "This project does not have the access to Custom Search JSON API.",\n        "domain": "global",\n        "reason": "forbidden"\n      }\n    ],\n    "status": "PERMISSION_DENIED"\n  }\n}\n'
+WARNING catalog_match.providers: provider=serper status=error count=0 latency_ms=658 http_status=400 error=http_400 query='AL ALALI FANCY MEAT TUNA IN WATER170GM (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)' body='{"message":"Query pattern not allowed for free accounts.","statusCode":400}'
+WARNING catalog_match.providers.cse_legacy: cse_legacy: key #0 http_status=403 body='{\n  "error": {\n    "code": 403,\n    "message": "This project does not have the access to Custom Search JSON API.",\n    "errors": [\n      {\n        "message": "This project does not have the access to Custom Search JSON API.",\n        "domain": "global",\n        "reason": "forbidden"\n      }\n    ],\n    "status": "PERMISSION_DENIED"\n  }\n}\n'
+WARNING catalog_match.providers: provider=cse_legacy status=error count=0 latency_ms=583 http_status=403 error=http_403 query='AL ALALI ALALALI FANCY MEAT TUNA IN SUNFLOWER OIL 85g' body='{\n  "error": {\n    "code": 403,\n    "message": "This project does not have the access to Custom Search JSON API.",\n    "errors": [\n      {\n        "message": "This project does not have the access to Custom Search JSON API.",\n        "domain": "global",\n        "reason": "forbidden"\n      }\n    ],\n    "status": "PERMISSION_DENIED"\n  }\n}\n'
+WARNING catalog_match.providers.cse_legacy: cse_legacy: key #0 http_status=403 body='{\n  "error": {\n    "code": 403,\n    "message": "This project does not have the access to Custom Search JSON API.",\n    "errors": [\n      {\n        "message": "This project does not have the access to Custom Search JSON API.",\n        "domain": "global",\n        "reason": "forbidden"\n      }\n    ],\n    "status": "PERMISSION_DENIED"\n  }\n}\n'
+WARNING catalog_match.providers: provider=cse_legacy status=error count=0 latency_ms=636 http_status=403 error=http_403 query='AL ALALI ALALALI FANCY MEAT TUNA IN WATER 85g' body='{\n  "error": {\n    "code": 403,\n    "message": "This project does not have the access to Custom Search JSON API.",\n    "errors": [\n      {\n        "message": "This project does not have the access to Custom Search JSON API.",\n        "domain": "global",\n        "reason": "forbidden"\n      }\n    ],\n    "status": "PERMISSION_DENIED"\n  }\n}\n'
+WARNING catalog_match.providers.cse_legacy: cse_legacy: key #0 http_status=403 body='{\n  "error": {\n    "code": 403,\n    "message": "This project does not have the access to Custom Search JSON API.",\n    "errors": [\n      {\n        "message": "This project does not have the access to Custom Search JSON API.",\n        "domain": "global",\n        "reason": "forbidden"\n      }\n    ],\n    "status": "PERMISSION_DENIED"\n  }\n}\n'
+WARNING catalog_match.providers: provider=cse_legacy status=error count=0 latency_ms=540 http_status=403 error=http_403 query='AL ALALI ALALALI WHITE MEAT TUNA IN S/F OIL 85g' body='{\n  "error": {\n    "code": 403,\n    "message": "This project does not have the access to Custom Search JSON API.",\n    "errors": [\n      {\n        "message": "This project does not have the access to Custom Search JSON API.",\n        "domain": "global",\n        "reason": "forbidden"\n      }\n    ],\n    "status": "PERMISSION_DENIED"\n  }\n}\n'
+WARNING catalog_match.providers: provider=serper status=error count=0 latency_ms=647 http_status=400 error=http_400 query='AL ALALI ALALALI WHITE MEAT TUNA IN S/F OIL 85g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)' body='{"message":"Query pattern not allowed for free accounts.","statusCode":400}'
+WARNING catalog_match.providers.cse_legacy: cse_legacy: key #0 http_status=403 body='{\n  "error": {\n    "code": 403,\n    "message": "This project does not have the access to Custom Search JSON API.",\n    "errors": [\n      {\n        "message": "This project does not have the access to Custom Search JSON API.",\n        "domain": "global",\n        "reason": "forbidden"\n      }\n    ],\n    "status": "PERMISSION_DENIED"\n  }\n}\n'
+WARNING catalog_match.providers: provider=cse_legacy status=error count=0 latency_ms=652 http_status=403 error=http_403 query='AL ALALI ALALALI WHITE MEAT TUNA WATER 170g' body='{\n  "error": {\n    "code": 403,\n    "message": "This project does not have the access to Custom Search JSON API.",\n    "errors": [\n      {\n        "message": "This project does not have the access to Custom Search JSON API.",\n        "domain": "global",\n        "reason": "forbidden"\n      }\n    ],\n    "status": "PERMISSION_DENIED"\n  }\n}\n'
+WARNING catalog_match.providers: provider=serper status=error count=0 latency_ms=587 http_status=400 error=http_400 query='AL ALALI ALALALI WHITE MEAT TUNA WATER 170g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)' body='{"message":"Query pattern not allowed for free accounts.","statusCode":400}'
+WARNING catalog_match.providers.cse_legacy: cse_legacy: key #0 http_status=403 body='{\n  "error": {\n    "code": 403,\n    "message": "This project does not have the access to Custom Search JSON API.",\n    "errors": [\n      {\n        "message": "This project does not have the access to Custom Search JSON API.",\n        "domain": "global",\n        "reason": "forbidden"\n      }\n    ],\n    "status": "PERMISSION_DENIED"\n  }\n}\n'
+WARNING catalog_match.providers: provider=cse_legacy status=error count=0 latency_ms=670 http_status=403 error=http_403 query='AL ALALI ALALALI WHITE MEAT TUNA WATER 85g' body='{\n  "error": {\n    "code": 403,\n    "message": "This project does not have the access to Custom Search JSON API.",\n    "errors": [\n      {\n        "message": "This project does not have the access to Custom Search JSON API.",\n        "domain": "global",\n        "reason": "forbidden"\n      }\n    ],\n    "status": "PERMISSION_DENIED"\n  }\n}\n'
+WARNING catalog_match.providers: provider=serper status=error count=0 latency_ms=716 http_status=400 error=http_400 query='AL ALALI ALALALI WHITE MEAT TUNA WATER 85g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)' body='{"message":"Query pattern not allowed for free accounts.","statusCode":400}'
+WARNING catalog_match.providers.cse_legacy: cse_legacy: key #0 http_status=403 body='{\n  "error": {\n    "code": 403,\n    "message": "This project does not have the access to Custom Search JSON API.",\n    "errors": [\n      {\n        "message": "This project does not have the access to Custom Search JSON API.",\n        "domain": "global",\n        "reason": "forbidden"\n      }\n    ],\n    "status": "PERMISSION_DENIED"\n  }\n}\n'
+WARNING catalog_match.providers: provider=cse_legacy status=error count=0 latency_ms=615 http_status=403 error=http_403 query='ALLDE MEAT MASALA 160g' body='{\n  "error": {\n    "code": 403,\n    "message": "This project does not have the access to Custom Search JSON API.",\n    "errors": [\n      {\n        "message": "This project does not have the access to Custom Search JSON API.",\n        "domain": "global",\n        "reason": "forbidden"\n      }\n    ],\n    "status": "PERMISSION_DENIED"\n  }\n}\n'
+WARNING catalog_match.providers: provider=serper status=error count=0 latency_ms=881 http_status=400 error=http_400 query='ALLDE MEAT MASALA 160g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)' body='{"message":"Query pattern not allowed for free accounts.","statusCode":400}'
+WARNING catalog_match.providers.cse_legacy: cse_legacy: key #0 http_status=403 body='{\n  "error": {\n    "code": 403,\n    "message": "This project does not have the access to Custom Search JSON API.",\n    "errors": [\n      {\n        "message": "This project does not have the access to Custom Search JSON API.",\n        "domain": "global",\n        "reason": "forbidden"\n      }\n    ],\n    "status": "PERMISSION_DENIED"\n  }\n}\n'
+WARNING catalog_match.providers: provider=cse_legacy status=error count=0 latency_ms=495 http_status=403 error=http_403 query='AMERICAN GOLD LGT MEAT TUNA FLAKE IN SUNFLOWER OIL 160g' body='{\n  "error": {\n    "code": 403,\n    "message": "This project does not have the access to Custom Search JSON API.",\n    "errors": [\n      {\n        "message": "This project does not have the access to Custom Search JSON API.",\n        "domain": "global",\n        "reason": "forbidden"\n      }\n    ],\n    "status": "PERMISSION_DENIED"\n  }\n}\n'
+WARNING catalog_match.providers: provider=serper status=error count=0 latency_ms=771 http_status=400 error=http_400 query='AMERICAN GOLD LGT MEAT TUNA FLAKE IN SUNFLOWER OIL 160g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)' body='{"message":"Query pattern not allowed for free accounts.","statusCode":400}'
+WARNING catalog_match.providers.cse_legacy: cse_legacy: key #0 http_status=403 body='{\n  "error": {\n    "code": 403,\n    "message": "This project does not have the access to Custom Search JSON API.",\n    "errors": [\n      {\n        "message": "This project does not have the access to Custom Search JSON API.",\n        "domain": "global",\n        "reason": "forbidden"\n      }\n    ],\n    "status": "PERMISSION_DENIED"\n  }\n}\n'
+WARNING catalog_match.providers: provider=cse_legacy status=error count=0 latency_ms=692 http_status=403 error=http_403 query='AMERICAN LIGHT MEAT TUNA 185g' body='{\n  "error": {\n    "code": 403,\n    "message": "This project does not have the access to Custom Search JSON API.",\n    "errors": [\n      {\n        "message": "This project does not have the access to Custom Search JSON API.",\n        "domain": "global",\n        "reason": "forbidden"\n      }\n    ],\n    "status": "PERMISSION_DENIED"\n  }\n}\n'
+WARNING catalog_match.providers.cse_legacy: cse_legacy: key #0 http_status=403 body='{\n  "error": {\n    "code": 403,\n    "message": "This project does not have the access to Custom Search JSON API.",\n    "errors": [\n      {\n        "message": "This project does not have the access to Custom Search JSON API.",\n        "domain": "global",\n        "reason": "forbidden"\n      }\n    ],\n    "status": "PERMISSION_DENIED"\n  }\n}\n'
+WARNING catalog_match.providers: provider=cse_legacy status=error count=0 latency_ms=577 http_status=403 error=http_403 query='AMERICAN LIGHT MEAT TUNA SOLID 185g' body='{\n  "error": {\n    "code": 403,\n    "message": "This project does not have the access to Custom Search JSON API.",\n    "errors": [\n      {\n        "message": "This project does not have the access to Custom Search JSON API.",\n        "domain": "global",\n        "reason": "forbidden"\n      }\n    ],\n    "status": "PERMISSION_DENIED"\n  }\n}\n'
+WARNING catalog_match.providers.cse_legacy: cse_legacy: key #0 http_status=403 body='{\n  "error": {\n    "code": 403,\n    "message": "This project does not have the access to Custom Search JSON API.",\n    "errors": [\n      {\n        "message": "This project does not have the access to Custom Search JSON API.",\n        "domain": "global",\n        "reason": "forbidden"\n      }\n    ],\n    "status": "PERMISSION_DENIED"\n  }\n}\n'
+WARNING catalog_match.providers: provider=cse_legacy status=error count=0 latency_ms=475 http_status=403 error=http_403 query='CHALIYAR MEAT MASALA 160g' body='{\n  "error": {\n    "code": 403,\n    "message": "This project does not have the access to Custom Search JSON API.",\n    "errors": [\n      {\n        "message": "This project does not have the access to Custom Search JSON API.",\n        "domain": "global",\n        "reason": "forbidden"\n      }\n    ],\n    "status": "PERMISSION_DENIED"\n  }\n}\n'
+WARNING catalog_match.providers: provider=serper status=error count=0 latency_ms=633 http_status=400 error=http_400 query='CHALIYAR MEAT MASALA 160g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)' body='{"message":"Query pattern not allowed for free accounts.","statusCode":400}'
+WARNING catalog_match.providers.cse_legacy: cse_legacy: key #0 http_status=403 body='{\n  "error": {\n    "code": 403,\n    "message": "This project does not have the access to Custom Search JSON API.",\n    "errors": [\n      {\n        "message": "This project does not have the access to Custom Search JSON API.",\n        "domain": "global",\n        "reason": "forbidden"\n      }\n    ],\n    "status": "PERMISSION_DENIED"\n  }\n}\n'
+WARNING catalog_match.providers: provider=cse_legacy status=error count=0 latency_ms=561 http_status=403 error=http_403 query='DOUBLE HORSE MEAT MASALA 140g' body='{\n  "error": {\n    "code": 403,\n    "message": "This project does not have the access to Custom Search JSON API.",\n    "errors": [\n      {\n        "message": "This project does not have the access to Custom Search JSON API.",\n        "domain": "global",\n        "reason": "forbidden"\n      }\n    ],\n    "status": "PERMISSION_DENIED"\n  }\n}\n'
+WARNING catalog_match.providers.cse_legacy: cse_legacy: key #0 http_status=403 body='{\n  "error": {\n    "code": 403,\n    "message": "This project does not have the access to Custom Search JSON API.",\n    "errors": [\n      {\n        "message": "This project does not have the access to Custom Search JSON API.",\n        "domain": "global",\n        "reason": "forbidden"\n      }\n    ],\n    "status": "PERMISSION_DENIED"\n  }\n}\n'
+WARNING catalog_match.providers: provider=cse_legacy status=error count=0 latency_ms=492 http_status=403 error=http_403 query='FAMILY LIGHT TUNA MEAT CHUNK IN BRINE 185g' body='{\n  "error": {\n    "code": 403,\n    "message": "This project does not have the access to Custom Search JSON API.",\n    "errors": [\n      {\n        "message": "This project does not have the access to Custom Search JSON API.",\n        "domain": "global",\n        "reason": "forbidden"\n      }\n    ],\n    "status": "PERMISSION_DENIED"\n  }\n}\n'
+WARNING catalog_match.providers: provider=serper status=error count=0 latency_ms=608 http_status=400 error=http_400 query='FAMILY LIGHT TUNA MEAT CHUNK IN BRINE 185g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)' body='{"message":"Query pattern not allowed for free accounts.","statusCode":400}'
+dry run on 30 rows | Serper key set | Gemini key set | model gemini-3.1-flash-lite | auto-publish off (not applied in a dry run)
+
+=== row 2: AIDA FRENCH FRIES 1KG | brand AIDA (sheet_raw) | gtin missing
+  query  AIDA FRENCH FRIES 1kg
+  health cse_legacy error    http=403 n=0 509ms http_403  <- AIDA FRENCH FRIES 1kg
+  health serper     ok       http=200 n=20 1476ms   <- AIDA FRENCH FRIES 1kg
+  #1 [rejected] serper/gcc.luluhypermarket.com: Aida French Fries 1 kg
+       tier=1 size=match brand=True variants=[] coverage=1.0 source_trust=3 gtin=None fetch=timeout
+       https://bf1af2.akinoncloudcdn.com/products/2025/10/10/602053/07be3cde-7a2c-4ad1-9026-392dc60edd67_size1920x1920_cropCenter.jpg
+  #2 [rejected] serper/shoprite.co.za: Shoprite ZA | AIDA Frozen French Fries 1kg
+       tier=2 size=match brand=True variants=[] coverage=1.0 source_trust=0 gtin=None fetch=timeout
+       https://catalog.sixty60.co.za/v2/files/6a5a1d3d53bbac2a0430d1f0?width=1440&height=1440
+  #3 [rejected] serper/cart-online.com: Aida French Fries 1Kg
+       tier=2 size=match brand=True variants=[] coverage=1.0 source_trust=0 gtin=None fetch=timeout
+       https://cdn.zetupstore.com/uploads/146/25/06/06685bae623dfdc2506251750838882medium.webp
+  #4 [rejected] serper/instagram.com: Crisp quality you can count on. AIDA French Fries deliver consistent  texture, g
+       tier=2 size=unknown brand=True variants=[] coverage=1.0 source_trust=0 gtin=None fetch=not_image
+       https://lookaside.instagram.com/seo/google_widget/crawler/?media_id=3770672574461009644
+  #5 [rejected] serper/madinamarketoman.com: Al Madina
+       tier=2 size=conflict brand=True variants=[] coverage=1.0 source_trust=0 gtin=None fetch=timeout
+       https://madinamarketoman.com/assets/products/original/products_r2dbrj.jpg
+  DECISION REVIEW_UNSELECTED  -> -
+  cost ~$0.0030 (2 SERP queries, 1 VLM calls), 28.2s
+
+=== row 3: BARTS TRADITON FRENCH FRIES STRAIGHT CUT 1KG | brand BARTS TRADITON (sheet_raw) | gtin missing
+  query  BARTS TRADITON FRENCH FRIES STRAIGHT CUT 1kg
+  query  BARTS TRADITON FRENCH FRIES STRAIGHT CUT 1kg (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)
+  query  BARTS TRADITON FRENCH FRIES STRAIGHT CUT
+  health cse_legacy error    http=403 n=0 568ms http_403  <- BARTS TRADITON FRENCH FRIES STRAIGHT CUT 1kg
+  health serper     ok       http=200 n=20 2246ms   <- BARTS TRADITON FRENCH FRIES STRAIGHT CUT 1kg
+  health serper     error    http=400 n=0 624ms http_400  <- BARTS TRADITON FRENCH FRIES STRAIGHT CUT 1kg (site:carrefouruae.com OR
+  health serper     ok       http=200 n=20 2199ms   <- BARTS TRADITON FRENCH FRIES STRAIGHT CUT
+  #1 [rejected] serper/facebook.com: Kitchentials - Bart's Premium Fries 1kg From Belgium to Philippines Straight  Cu
+       tier=3 size=match brand=False variants=[] coverage=1.0 source_trust=0 gtin=None fetch=too_small
+       https://lookaside.fbsbx.com/lookaside/crawler/media/?media_id=134880981598990
+  #2 [rejected] serper/panda.sa: Emborg Frozen French Fries Straight Cut 1kg - Buy French Fries & Onion  Rings On
+       tier=3 size=match brand=False variants=[] coverage=1.0 source_trust=0 gtin=None fetch=timeout
+       https://images.todoorstep.com/product/169600327/Ar_large.jpg?t=1744675200
+  #3 [rejected] serper/shop.barakah.sg: Ramly, French Fries Straight Cut, 1 kg – Al Barakah Health & Beauty Mart
+       tier=3 size=match brand=False variants=[] coverage=1.0 source_trust=0 gtin=None fetch=timeout
+       https://shop.barakah.sg/cdn/shop/products/RAMLYFRENCHFRIESSTRAIGHTCUT1KG1_medium.jpg?v=1605596420
+  #4 [rejected] serper/jgfb.jayagrocer.com: Simplot Straight Cut French Fries 1kg – Jaya Grocer | Food Bayana
+       tier=3 size=match brand=False variants=[] coverage=1.0 source_trust=0 gtin=None fetch=timeout
+       https://jgfb.jayagrocer.com/cdn/shop/files/041177-U-1-1.jpg?v=1767783471&width=1024
+  #5 [rejected] serper/degrocery.com: Simplot French Fries Straight Cut 1kg - DeGrocery.com
+       tier=3 size=match brand=False variants=[] coverage=1.0 source_trust=0 gtin=None fetch=timeout
+       https://www.degrocery.com/de-grocery/2021/11/Simplot-French-Fries-Straight-Cut-1kg.jpg
+  DECISION REVIEW_UNSELECTED DOWNLOAD_FAILED -> -
+  cost ~$0.0040 (4 SERP queries, 0 VLM calls), 45.8s
+
+=== row 4: BATO FRENCH FRIES 900 MM | brand BATO (sheet_raw) | gtin missing
+  query  BATO FRENCH FRIES 900 MM
+  query  BATO FRENCH FRIES 900 MM (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)
+  health cse_legacy error    http=403 n=0 587ms http_403  <- BATO FRENCH FRIES 900 MM
+  health serper     ok       http=200 n=20 3050ms   <- BATO FRENCH FRIES 900 MM
+  health serper     error    http=400 n=0 641ms http_400  <- BATO FRENCH FRIES 900 MM (site:carrefouruae.com OR site:noon.com OR si
+  #1 [rejected] serper/supermarket.kanbkam.com: bato french fries cut 1010mm Price in UAE | supermarket kanbkam
+       tier=2 size=unknown brand=True variants=[] coverage=1.0 source_trust=0 gtin=None
+       VLM MISMATCH view=front_packshot brand='McCain' variant='Tradition' size='750g'
+       https://prod-spinneys-cdn-new.azureedge.net/media/cache/c6/23/c623a0eb85604686ce5a4e14e546d7a2.jpg
+  #2 [rejected] serper/supermarket.kanbkam.com: Bato Potato French Fries 10x10mm 900g price in Kuwait | Carrefour Kuwait |  supe
+       tier=2 size=unknown brand=True variants=[] coverage=1.0 source_trust=0 gtin=None fetch=timeout
+       https://cdnprod.mafretailproxy.com/sys-master-root/h08/hf5/26483779272734/753529_main.jpg_480Wx480H
+  #3 [rejected] serper/supermarket.kanbkam.com: Bato Potato French Fries 8x8mm 2.5kg price in Kuwait | Carrefour Kuwait |  super
+       tier=2 size=unknown brand=True variants=[] coverage=1.0 source_trust=0 gtin=None fetch=timeout
+       https://cdnprod.mafretailproxy.com/sys-master-root/hba/hab/26483668320286/753528_main.jpg_480Wx480H
+  #4 [preselected] serper/take.app: BATO ORIGINAL FRENCH FRIES 2.5KG - All Mart Trading
+       tier=2 size=unknown brand=True variants=[] coverage=0.6667 source_trust=0 gtin=None
+       VLM MATCH view=front_packshot brand='Bato' variant='Original French Fries' size=''
+       https://storage.googleapis.com/takeapp/media/cm3oji9wf00050ciagj2t8fnc.jpg
+  #5 [rejected] serper/21food.com: Frozen French Fries,Iran BATO price supplier - 21food
+       tier=2 size=unknown brand=True variants=[] coverage=0.6667 source_trust=0 gtin=None fetch=timeout
+       https://img.21food.com/20110609/product/1306578797510.jpg
+  DECISION REVIEW_PRESELECTED  -> https://storage.googleapis.com/takeapp/media/cm3oji9wf00050ciagj2t8fnc.jpg
+  cost ~$0.0040 (3 SERP queries, 1 VLM calls), 30.5s
+
+=== row 5: FARMILA FRENCH FRIES 9MM 1KG | brand FARMILA (sheet_raw) | gtin missing
+  query  FARMILA FRENCH FRIES 9MM 1kg
+  query  FARMILA FRENCH FRIES 9MM 1kg (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)
+  health cse_legacy error    http=403 n=0 537ms http_403  <- FARMILA FRENCH FRIES 9MM 1kg
+  health serper     ok       http=200 n=20 2153ms   <- FARMILA FRENCH FRIES 9MM 1kg
+  health serper     error    http=400 n=0 669ms http_400  <- FARMILA FRENCH FRIES 9MM 1kg (site:carrefouruae.com OR site:noon.com O
+  #1 [rejected] serper/farzana.ae: Farmila Straight Cut Fries 9mm 1Kg
+       tier=2 size=match brand=True variants=[] coverage=0.6667 source_trust=0 gtin=None fetch=timeout
+       https://farzana.ae/images/thumbs/0009778_farmila-straight-cut-fries-9mm-1kg.jpeg
+  #2 [rejected] serper/farmila.com: Farmila
+       tier=2 size=unknown brand=True variants=[] coverage=0.6667 source_trust=0 gtin=None fetch=timeout
+       https://farmila.com/public/upload/product/medium/17175867589-mm.jpg
+  #3 [rejected] serper/farmila.com: Farmila
+       tier=2 size=unknown brand=True variants=[] coverage=0.0 source_trust=0 gtin=None fetch=timeout
+       https://farmila.com/public/upload/product/medium/1714562039chicken-fillet.jpg
+  #4 [rejected] serper/indiamart.com: French Fries 1kg 9mm at ₹ 145/pack | Bansdroni | Kolkata | ID: 2856603627562
+       tier=3 size=match brand=False variants=[] coverage=1.0 source_trust=0 gtin=None fetch=timeout
+       https://5.imimg.com/data5/ANDROID/Default/2025/5/515019497/CU/NZ/UN/35016848/product-jpeg.jpg
+  #5 [rejected] serper/gcc.luluhypermarket.com: Fira French Fries 1 kg Online at Best Price | Lulu Oman
+       tier=3 size=match brand=False variants=[] coverage=0.6667 source_trust=3 gtin=None fetch=timeout
+       https://bf1af2.akinoncloudcdn.com/products/2026/02/18/630376/0d794e11-2d75-448e-876b-e5548af1dd89_size1920x1920_cropCenter.jpg
+  DECISION REVIEW_UNSELECTED DOWNLOAD_FAILED -> -
+  cost ~$0.0030 (3 SERP queries, 0 VLM calls), 43.8s
+
+=== row 6: HUP HUP FRENCH FRIES REGULAR CUT 1 KG | brand HUP HUP (sheet_raw) | gtin missing
+  query  HUP HUP FRENCH FRIES REGULAR CUT 1kg
+  query  HUP HUP FRENCH FRIES REGULAR CUT 1kg (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)
+  health cse_legacy error    http=403 n=0 571ms http_403  <- HUP HUP FRENCH FRIES REGULAR CUT 1kg
+  health serper     ok       http=200 n=20 1668ms   <- HUP HUP FRENCH FRIES REGULAR CUT 1kg
+  health serper     error    http=400 n=0 647ms http_400  <- HUP HUP FRENCH FRIES REGULAR CUT 1kg (site:carrefouruae.com OR site:no
+  #1 [rejected] serper/farzana.ae: Hup Hup French Fries Straight Cut 9/9 (1kg)
+       tier=2 size=match brand=True variants=[] coverage=1.0 source_trust=0 gtin=None fetch=timeout
+       https://farzana.ae/images/thumbs/0009719_hup-hup-french-fries-straight-cut-99-1kg.png
+  #2 [rejected] serper/instagram.com: Hup Hup French Fries
+       tier=2 size=unknown brand=True variants=[] coverage=0.6667 source_trust=0 gtin=None fetch=too_small
+       https://lookaside.fbsbx.com/lookaside/crawler/instagram/DV3iH2kDBk3/0/image.jpg
+  #3 [rejected] serper/instagram.com: Hup Hup French Fries
+       tier=2 size=unknown brand=True variants=[] coverage=0.6667 source_trust=0 gtin=None fetch=too_small
+       https://lookaside.fbsbx.com/lookaside/crawler/instagram/DVoiYiAAgj9/0/image.jpg
+  #4 [rejected] serper/instagram.com: Hup Hup French Fries
+       tier=2 size=unknown brand=True variants=[] coverage=0.6667 source_trust=0 gtin=None fetch=not_image
+       https://lookaside.instagram.com/seo/google_widget/crawler/?media_id=3836477860295699596
+  #5 [rejected] serper/instagram.com: Hup Hup French Fries
+       tier=2 size=unknown brand=True variants=[] coverage=0.6667 source_trust=0 gtin=None fetch=too_small
+       https://lookaside.fbsbx.com/lookaside/crawler/instagram/DUGnGD7iufP/0/image.jpg
+  DECISION REVIEW_UNSELECTED DOWNLOAD_FAILED -> -
+  cost ~$0.0030 (3 SERP queries, 0 VLM calls), 24.4s
+
+=== row 7: JOYS FRENCH FRIES 1KG | brand JOYS (sheet_raw) | gtin missing
+  query  JOYS FRENCH FRIES 1kg
+  query  JOYS FRENCH FRIES 1kg (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)
+  health cse_legacy error    http=403 n=0 545ms http_403  <- JOYS FRENCH FRIES 1kg
+  health serper     ok       http=200 n=20 8103ms   <- JOYS FRENCH FRIES 1kg
+  health serper     error    http=400 n=0 725ms http_400  <- JOYS FRENCH FRIES 1kg (site:carrefouruae.com OR site:noon.com OR site:
+  #1 [rejected] serper/cart-online.com: JOYS FRENCH FRIES STIRGHT CUT 9MM 1KG
+       tier=2 size=match brand=True variants=[] coverage=1.0 source_trust=0 gtin=None fetch=timeout
+       https://cdn.zetupstore.com/uploads/146/24/02/0265d9760e5c8362402241708750350.webp
+  #2 [rejected] serper/cart-online.com: JOYS FRENCH FRIES 1KG
+       tier=2 size=match brand=True variants=[] coverage=1.0 source_trust=0 gtin=None fetch=timeout
+       https://cdn.zetupstore.com/uploads/146/23/03/20032316793122516418457b85363.webp
+  #3 [rejected] serper/grandiose.ae: Joy's French Fries Straight Cut 9MM - Grandiose.ae
+       tier=2 size=unknown brand=True variants=[] coverage=1.0 source_trust=1 gtin=None fetch=timeout
+       https://www.grandiose.ae/media/catalog/product/cache/9d74524075f5722e40a1490cbcfae5ff/6/2/6291079257271.jpg
+  #4 [rejected] serper/facebook.com: Joy's French Fries International (@joysfrenchfries) • Facebook
+       tier=2 size=unknown brand=True variants=[] coverage=1.0 source_trust=0 gtin=None fetch=too_small
+       https://lookaside.fbsbx.com/lookaside/crawler/media/?media_id=491855790214826
+  #5 [rejected] serper/instagram.com: Joy's Food International (@joysfoodinternational) · UAE · Instagram photos  and 
+       tier=2 size=unknown brand=True variants=[] coverage=0.0 source_trust=0 gtin=None fetch=not_image
+       https://lookaside.instagram.com/seo/google_widget/crawler/?media_id=3104479310706347449
+  DECISION REVIEW_UNSELECTED DOWNLOAD_FAILED -> -
+  cost ~$0.0030 (3 SERP queries, 0 VLM calls), 33.3s
+
+=== row 8: MCCAIN FRENCH FRIES GOLDEN LONG 750GM | brand MCCAIN (sheet_raw) | gtin missing
+  query  MCCAIN FRENCH FRIES GOLDEN LONG 750g
+  health cse_legacy error    http=403 n=0 529ms http_403  <- MCCAIN FRENCH FRIES GOLDEN LONG 750g
+  health serper     ok       http=200 n=20 5287ms   <- MCCAIN FRENCH FRIES GOLDEN LONG 750g
+  #1 [preselected] serper/amazon.ae: McCain Golden Long French Fries 750g : Amazon.ae: Grocery
+       tier=1 size=match brand=True variants=[] coverage=1.0 source_trust=3 gtin=None
+       VLM MATCH view=front_packshot brand='McCain' variant='Golden Longs' size='750g'
+       https://m.media-amazon.com/images/I/61eqIG2i17L.jpg
+  #2 [eligible] serper/amazon.ae: McCain Golden Long French Fries 750g : Amazon.ae: Grocery
+       tier=1 size=match brand=True variants=[] coverage=1.0 source_trust=3 gtin=None
+       VLM MATCH view=front_packshot brand='McCain' variant='Golden Longs' size='750g'
+       https://m.media-amazon.com/images/I/61eqIG2i17L.jpg_BO30,255,255,255_UF750,750_SR1910,1000,0,C_ZJPHNwYW4gZm9yZWdyb3VuZD0iIzBGMTExMSIgZm9udD0iQW1hem9uRW1iZXIgNjYiPjQuMzwvc3Bhbj4=,60,875,420,420,0,0_PIRIOFOURANDHALF-medium-V2,TopLeft,190,885_ZJPHNwYW4gZm9yZWdyb3VuZD0iIzU2NTk1OSIgZm9udD0iQW1hem9uRW1iZXIgNjYiPigzNik8L3NwYW4+,650,875,420,420,0,0_QL100_.jpg
+  #3 [rejected] serper/carrefouruae.com: Buy McCain Golden Longs French Fries, 750g Online | Carrefour UAE
+       tier=1 size=match brand=True variants=[] coverage=1.0 source_trust=3 gtin=None fetch=timeout
+       https://cdn.mafrservices.com/pim-content/UAE/media/product/66667/1763154604/66667_main.jpg?im=Resize=376
+  #4 [rejected] serper/gcc.luluhypermarket.com: McCain Golden Long French Fries 750 g Online at Best Price | Lulu UAE
+       tier=1 size=match brand=True variants=[] coverage=1.0 source_trust=3 gtin=None fetch=timeout
+       https://bf1af2.akinoncloudcdn.com/products/2024/09/11/60845/f6d9e27e-d1e8-4514-8f38-451a1bcaee37_size1920x1920_cropCenter.jpg
+  #5 [rejected] serper/gcc.luluhypermarket.com: McCain Golden Long French Fries 750 g Online at Best Price | Lulu UAE
+       tier=1 size=match brand=True variants=[] coverage=1.0 source_trust=3 gtin=None fetch=timeout
+       https://bf1af2.akinoncloudcdn.com/products/2024/09/11/60845/f6d9e27e-d1e8-4514-8f38-451a1bcaee37.jpg
+  DECISION REVIEW_PRESELECTED  -> https://m.media-amazon.com/images/I/61eqIG2i17L.jpg
+  cost ~$0.0030 (2 SERP queries, 1 VLM calls), 31.8s
+
+=== row 9: MCCAIN FRENCH FRIES TRADITION 750GM | brand MCCAIN (sheet_raw) | gtin missing
+  query  MCCAIN FRENCH FRIES TRADITION 750g
+  health cse_legacy error    http=403 n=0 528ms http_403  <- MCCAIN FRENCH FRIES TRADITION 750g
+  health serper     ok       http=200 n=20 1719ms   <- MCCAIN FRENCH FRIES TRADITION 750g
+  #1 [rejected] serper/carrefouruae.com: Buy McCain Tradition French Fries, 750g Online | Carrefour UAE
+       tier=1 size=match brand=True variants=[] coverage=1.0 source_trust=3 gtin=None fetch=timeout
+       https://cdn.mafrservices.com/pim-content/UAE/media/product/66661/1763154604/66661_main.jpg
+  #2 [rejected] serper/gcc.luluhypermarket.com: McCain Tradition French Fries 750 g + Super Crispy Value Pack 750 g Online  at B
+       tier=1 size=match brand=True variants=[] coverage=1.0 source_trust=3 gtin=None fetch=timeout
+       https://bf1af2.akinoncloudcdn.com/products/2025/02/26/351933/0add9fc5-95b3-4b7f-9e77-6417eca1006d.jpg
+  #3 [rejected] serper/gcc.luluhypermarket.com: McCain Tradition French Fries 750 g + Super Crispy Value Pack 750 g Online  at B
+       tier=1 size=match brand=True variants=[] coverage=1.0 source_trust=3 gtin=None fetch=timeout
+       https://bf1af2.akinoncloudcdn.com/products/2025/02/26/351933/8e333854-ccb8-42bc-8bae-61a7ab55ea1f.jpg
+  #4 [rejected] serper/carrefouruae.com: Buy McCain Tradition French Fries, 750g Online | Carrefour UAE
+       tier=1 size=match brand=True variants=[] coverage=1.0 source_trust=3 gtin=None fetch=timeout
+       https://cdn.mafrservices.com/pim-content/UAE/media/product/1839000/1783024200/1839000_main.jpg?im=Resize=(300,300)
+  #5 [rejected] serper/carrefouruae.com: Buy McCain Golden Longs French Fries, 750g Online | Carrefour UAE
+       tier=1 size=match brand=True variants=[] coverage=0.6667 source_trust=3 gtin=None fetch=timeout
+       https://cdn.mafrservices.com/pim-content/UAE/media/product/66667/1763154604/66667_main.jpg?im=Resize=376
+  DECISION REVIEW_UNSELECTED  -> -
+  cost ~$0.0030 (2 SERP queries, 1 VLM calls), 44.8s
+
+=== row 10: MR JOHN FRENCH FRIES 900GM | brand MR JOHN (sheet_raw) | gtin missing
+  query  MR JOHN FRENCH FRIES 900g
+  query  MR JOHN FRENCH FRIES 900g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)
+  health cse_legacy error    http=403 n=0 640ms http_403  <- MR JOHN FRENCH FRIES 900g
+  health serper     ok       http=200 n=20 1919ms   <- MR JOHN FRENCH FRIES 900g
+  health serper     error    http=400 n=0 587ms http_400  <- MR JOHN FRENCH FRIES 900g (site:carrefouruae.com OR site:noon.com OR s
+  #1 [rejected] serper/horecamarket.ae: Frozen French Fries 9mm Mr. John Brand Best Price For Hotels
+       tier=2 size=unknown brand=True variants=[] coverage=1.0 source_trust=0 gtin=None fetch=timeout
+       https://horecamarket.ae/wp-content/uploads/2026/05/Add-34-400x300.webp
+  #2 [rejected] serper/waitrose.ae: McCain crispy French fries 900g - Waitrose UAE & Partners
+       tier=3 size=match brand=False variants=[] coverage=1.0 source_trust=0 gtin=None
+       VLM MISMATCH view=front_packshot brand='McCain' variant='Crispy French Fries' size='900ge'
+       https://prod-waitrose.azureedge.net/media/images/products/2021/01/.jpg_oUEEJt5
+  #3 [rejected] serper/waitrose.ae: Waitrose Essential French Fries 900g - Waitrose UAE & Partners
+       tier=3 size=match brand=False variants=[] coverage=1.0 source_trust=0 gtin=None
+       VLM MISMATCH view=front_packshot brand='Essential Waitrose & Partners' variant='French Fries' size=''
+       https://prod-waitrose.azureedge.net/media/cache/ae/da/aeda34f4bb56cc305747c40506801443.jpg
+  #4 [rejected] serper/waitrose.ae: McCain crispy French fries 900g - Waitrose UAE & Partners
+       tier=3 size=match brand=False variants=[] coverage=1.0 source_trust=0 gtin=None
+       VLM MISMATCH view=front_packshot brand='McCain' variant='Southern Fries' size='750ge'
+       https://prod-waitrose.azureedge.net/media/cache/92/3d/923dc5674bea59c878adffb6d6b6ca05.jpg
+  #5 [rejected] serper/waitrose.ae: McCain crispy French fries 900g - Waitrose UAE & Partners
+       tier=3 size=match brand=False variants=[] coverage=1.0 source_trust=0 gtin=None
+       VLM MISMATCH view=front_packshot brand='LambWeston' variant='Tasty Original Fries' size='1kg'
+       https://prod-waitrose.azureedge.net/media/cache/be/16/be16b8ac44f1ede3ecee9bfe3f9d2c40.jpg
+  DECISION REVIEW_UNSELECTED  -> -
+  cost ~$0.0040 (3 SERP queries, 1 VLM calls), 27.1s
+
+=== row 11: SUNBULAH FRENCH FRIES 1KG | brand SUNBULAH (sheet_raw) | gtin missing
+  query  SUNBULAH FRENCH FRIES 1kg
+  health cse_legacy error    http=403 n=0 561ms http_403  <- SUNBULAH FRENCH FRIES 1kg
+  health serper     ok       http=200 n=20 1481ms   <- SUNBULAH FRENCH FRIES 1kg
+  #1 [rejected] serper/amazon.ae: Sunbulah Potato French Fries 1Kg : Amazon.ae: Grocery
+       tier=1 size=match brand=True variants=[] coverage=1.0 source_trust=3 gtin=None quality=foreground>98%
+       https://m.media-amazon.com/images/I/81rKLXKeCHL._AC_UF894,1000_QL80_.jpg
+  #2 [rejected] serper/gcc.luluhypermarket.com: Sunbulah Thin French Fries 1 kg Online at Best Price | Lulu KSA
+       tier=1 size=match brand=True variants=[] coverage=1.0 source_trust=3 gtin=None fetch=timeout
+       https://bf1af2.akinoncloudcdn.com/products/2024/09/20/121771/491e497e-5cc8-4ad4-8dc3-88e773eaed8c.jpg
+  #3 [rejected] serper/gcc.luluhypermarket.com: Sunbulah Thin French Fries 1 kg Online at Best Price | Lulu KSA
+       tier=1 size=match brand=True variants=[] coverage=1.0 source_trust=3 gtin=None fetch=timeout
+       https://bf1af2.akinoncloudcdn.com/products/2024/09/20/121771/ca77ef5e-df99-4704-bbc7-d0a7233ca84c_size1920x1920_cropCenter.jpg
+  #4 [preselected] serper/spinneys.com: Sunbulah Frozen French Fries 1kg
+       tier=2 size=match brand=True variants=[] coverage=1.0 source_trust=3 gtin=None
+       VLM MATCH view=front_packshot brand='Sunbulah' variant='French Fries' size='1 KG'
+       https://prod-spinneys-cdn-new.azureedge.net/media/images/products/2026/07/6281073151026.jpg
+  #5 [rejected] serper/carrefourksa.com: Buy Sunbulah French Fries 1kg Online | Carrefour KSA
+       tier=2 size=match brand=True variants=[] coverage=1.0 source_trust=1 gtin=None fetch=timeout
+       https://cdn.mafrservices.com/sys-master-root/haa/h9d/14585604964382/26393_main.jpg
+  DECISION REVIEW_PRESELECTED  -> https://prod-spinneys-cdn-new.azureedge.net/media/images/products/2026/07/6281073151026.jpg
+  cost ~$0.0030 (2 SERP queries, 1 VLM calls), 26.6s
+
+=== row 12: TOMEX FRENCH FRIES 9MM 1 KG | brand TOMEX (sheet_raw) | gtin missing
+  query  TOMEX FRENCH FRIES 9MM 1kg
+  query  TOMEX FRENCH FRIES 9MM 1kg (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)
+  health cse_legacy error    http=403 n=0 561ms http_403  <- TOMEX FRENCH FRIES 9MM 1kg
+  health serper     ok       http=200 n=20 1707ms   <- TOMEX FRENCH FRIES 9MM 1kg
+  health serper     error    http=400 n=0 626ms http_400  <- TOMEX FRENCH FRIES 9MM 1kg (site:carrefouruae.com OR site:noon.com OR 
+  #1 [rejected] serper/facebook.com: Tomex Shoestring Fries, ✔1kilogram Per Pack, ✔10kls Per Box, 📌Bulk,  Wholesale A
+       tier=2 size=match brand=True variants=[] coverage=0.6667 source_trust=0 gtin=None fetch=too_small
+       https://lookaside.fbsbx.com/lookaside/crawler/media/?media_id=1115358429110280&get_thumbnail=1
+  #2 [rejected] serper/admirals.ae: Tomex Coated & Saltd Fries 6mm — Admirals Trading LLC
+       tier=2 size=unknown brand=True variants=[] coverage=0.6667 source_trust=0 gtin=None fetch=timeout
+       https://www.admirals.ae/assets/wp-content/uploads/2021/07/tomex-coated-fries.jpg
+  #3 [rejected] serper/qnited.com: Tomex - Qnited
+       tier=2 size=unknown brand=True variants=[] coverage=0.0 source_trust=0 gtin=None fetch=timeout
+       https://qnited.com/wp-content/uploads/2024/07/tomex-banner-1.jpg
+  #4 [rejected] serper/admirals.ae: Tomex Reg Unsalted Fries 9mm — Admirals Trading LLC
+       tier=2 size=conflict brand=True variants=[] coverage=1.0 source_trust=0 gtin=None fetch=timeout
+       https://www.admirals.ae/assets/wp-content/uploads/2021/07/tomex-frozen-french-fries-9x9mm-4x2.5kg.jpg
+  #5 [rejected] serper/friendlyfoodqatar.com: Tomex
+       tier=2 size=conflict brand=True variants=[] coverage=1.0 source_trust=0 gtin=None fetch=timeout
+       https://www.friendlyfoodqatar.com/mt-content/uploads/2017/03/tomex-frozen-french-fries-6x6mm-4x2.5kg.jpg
+  DECISION REVIEW_UNSELECTED DOWNLOAD_FAILED -> -
+  cost ~$0.0030 (3 SERP queries, 0 VLM calls), 43.0s
+
+=== row 13: YUMWAY STRAIGHT CUT FRENCH FRIES 2.5 KG | brand YUMWAY (sheet_raw) | gtin missing
+  query  YUMWAY STRAIGHT CUT FRENCH FRIES 2.5kg
+  query  YUMWAY STRAIGHT CUT FRENCH FRIES 2.5kg (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)
+  health cse_legacy error    http=403 n=0 589ms http_403  <- YUMWAY STRAIGHT CUT FRENCH FRIES 2.5kg
+  health serper     ok       http=200 n=20 1593ms   <- YUMWAY STRAIGHT CUT FRENCH FRIES 2.5kg
+  health serper     error    http=400 n=0 590ms http_400  <- YUMWAY STRAIGHT CUT FRENCH FRIES 2.5kg (site:carrefouruae.com OR site:
+  #1 [rejected] serper/ansargallery.com: Yumway Straight Cut French Fries 9mm 2.5Kg | Ansar Gallery
+       tier=2 size=match brand=True variants=[] coverage=1.0 source_trust=0 gtin=None fetch=timeout
+       https://media.ansargallery.com/media/catalog/product/6/2/626861497454_1_1.jpg
+  #2 [rejected] serper/yumwayfood.com: YUMWAY | Premium Frozen French Fries & Frozen Foods Manufacturer in India
+       tier=2 size=unknown brand=True variants=[] coverage=0.5 source_trust=0 gtin=None fetch=timeout
+       https://yumwayfood.com/static/media/StraightcutFrenchfries.5a7453723b0eb4bfba49.jpg
+  #3 [rejected] serper/instagram.com: From the pack to the pan to your plate — watch how Yumway French Fries turn  int
+       tier=2 size=unknown brand=True variants=[] coverage=0.5 source_trust=0 gtin=None fetch=not_image
+       https://lookaside.instagram.com/seo/google_widget/crawler/?media_id=3791521430891500917
+  #4 [rejected] serper/yumwayfood.com: YUMWAY | Premium Frozen French Fries & Frozen Foods Manufacturer in India
+       tier=2 size=unknown brand=True variants=[] coverage=0.5 source_trust=0 gtin=None fetch=timeout
+       https://yumwayfood.com/static/media/bulk2.94b75c138d41f6390092.png
+  #5 [rejected] serper/yumwayfood.com: Why Is India Becoming a Major Exporter of Frozen French Fries? – Yumway  Foods
+       tier=2 size=unknown brand=True variants=[] coverage=0.5 source_trust=0 gtin=None fetch=timeout
+       https://yumwayfood.com/blogs/wp-content/uploads/2026/03/Why-Is-India-Becoming-a-Major-Exporter-of-Frozen-French-Fries-1200x675.jpg
+  DECISION REVIEW_UNSELECTED DOWNLOAD_FAILED -> -
+  cost ~$0.0030 (3 SERP queries, 0 VLM calls), 33.8s
+
+=== row 14: ASHOKA PLAIN PARATHA 5S 400GM | brand ASHOKA (sheet_raw) | gtin missing
+  query  ASHOKA PLAIN PARATHA 5x400g
+  query  ASHOKA PLAIN PARATHA 5x400g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)
+  health cse_legacy error    http=403 n=0 530ms http_403  <- ASHOKA PLAIN PARATHA 5x400g
+  health serper     ok       http=200 n=20 1259ms   <- ASHOKA PLAIN PARATHA 5x400g
+  health serper     error    http=400 n=0 629ms http_400  <- ASHOKA PLAIN PARATHA 5x400g (site:carrefouruae.com OR site:noon.com OR
+  #1 [preselected] serper/amazon.ae: Ashoka Asli Plain Paratha 400g : Amazon.ae: Grocery
+       tier=2 size=match brand=True variants=['flavour'] coverage=1.0 source_trust=3 gtin=None
+       VLM MATCH view=front_packshot brand='ASHOKA' variant='ASLI PARATHA' size='400 g'
+       https://m.media-amazon.com/images/I/61htev8zjJL.jpg_BO30,255,255,255_UF750,750_SR1910,1000,0,C_ZJPHNwYW4gZm9yZWdyb3VuZD0iIzBGMTExMSIgZm9udD0iQW1hem9uRW1iZXIgNjYiPjQuNDwvc3Bhbj4=,60,875,420,420,0,0_PIRIOFOURANDHALF-medium-V2,TopLeft,190,885_ZJPHNwYW4gZm9yZWdyb3VuZD0iIzU2NTk1OSIgZm9udD0iQW1hem9uRW1iZXIgNjYiPig4KTwvc3Bhbj4=,650,875,420,420,0,0_QL100_.jpg
+  #2 [rejected] serper/amazon.ae: Ashoka Plain Paratha 400g : Amazon.ae: Grocery
+       tier=2 size=match brand=True variants=['flavour'] coverage=1.0 source_trust=3 gtin=None
+       VLM MISMATCH view=front_packshot brand="FIT'N BAKES" variant='HIGH PROTEIN TORTILLA' size='360 g'
+       https://images-eu.ssl-images-amazon.com/images/I/619DLXQOP1L._AC_UL495_SR435,495_.jpg
+  #3 [rejected] serper/gcc.luluhypermarket.com: Ashoka Plain Paratha 5 pcs 400 g
+       tier=2 size=match brand=True variants=['flavour'] coverage=1.0 source_trust=3 gtin=None fetch=timeout
+       https://bf1af2.akinoncloudcdn.com/products/2024/09/11/54571/4d94d2d5-9c9c-4d80-8dfc-ecb3e5bcff99.jpg
+  #4 [rejected] serper/gcc.luluhypermarket.com: Ashoka Asli Plain Paratha 5 pcs 400 g Online at Best Price | Lulu UAE
+       tier=2 size=match brand=True variants=['flavour'] coverage=1.0 source_trust=3 gtin=None fetch=timeout
+       https://bf1af2.akinoncloudcdn.com/products/2024/09/11/54496/2dfd25c4-89f0-420a-b77d-dcdc71cc3ed8_size1920x1920_cropCenter.jpg
+  #5 [rejected] serper/amazon.ae: Ashoka Asli Plain Paratha 400g : Amazon.ae: Grocery
+       tier=2 size=match brand=True variants=['flavour'] coverage=1.0 source_trust=3 gtin=None quality=foreground>98%
+       https://m.media-amazon.com/images/I/61htev8zjJL._AC_UF894,1000_QL80_.jpg
+  DECISION REVIEW_PRESELECTED  -> https://m.media-amazon.com/images/I/61htev8zjJL.jpg_BO30,255,255,255_UF750,750_SR1910,1000,0,C_ZJPHNwYW4gZm9yZWdyb3VuZD0iIzBGMTExMSIgZm9udD0iQW1hem9uRW1iZXIgNjYiPjQuNDwvc3Bhbj4=,60,875,420,420,0,0_PIRIOFOURANDHALF-medium-V2,TopLeft,190,885_ZJPHNwYW4gZm9yZWdyb3VuZD0iIzU2NTk1OSIgZm9udD0iQW1hem9uRW1iZXIgNjYiPig4KTwvc3Bhbj4=,650,875,420,420,0,0_QL100_.jpg
+  cost ~$0.0040 (3 SERP queries, 1 VLM calls), 35.2s
+
+=== row 15: MEHRAN PLAIN PARATHA 2X400GM 5S | brand MEHRAN (sheet_raw) | gtin missing
+  query  MEHRAN PLAIN PARATHA 2x400g
+  query  MEHRAN PLAIN PARATHA 2x400g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)
+  health cse_legacy error    http=403 n=0 555ms http_403  <- MEHRAN PLAIN PARATHA 2x400g
+  health serper     ok       http=200 n=20 2007ms   <- MEHRAN PLAIN PARATHA 2x400g
+  health serper     error    http=400 n=0 602ms http_400  <- MEHRAN PLAIN PARATHA 2x400g (site:carrefouruae.com OR site:noon.com OR
+  #1 [rejected] serper/shinjukuhalalfood.com: Mehran Plain Paratha 400g – Ready to Cook
+       tier=2 size=match brand=True variants=['flavour'] coverage=1.0 source_trust=0 gtin=None fetch=timeout
+       https://shinjukuhalalfood.com/wp-content/uploads/2024/05/Pran-Plain-Paratha-400g-1.jpg
+  #2 [rejected] serper/shinjukuhalalfood.com: Mehran Plain Paratha 400g – Ready to Cook
+       tier=2 size=match brand=True variants=['flavour'] coverage=1.0 source_trust=0 gtin=None fetch=timeout
+       https://shinjukuhalalfood.com/wp-content/uploads/2025/09/Plain-Paratha-400g-600x600.jpg
+  #3 [rejected] serper/shinjukuhalalfood.com: Mehran Plain Paratha 400g – Ready to Cook
+       tier=2 size=match brand=True variants=['flavour'] coverage=1.0 source_trust=0 gtin=None fetch=timeout
+       https://shinjukuhalalfood.com/wp-content/uploads/2020/11/Plain-Paratha-Kazifarm-1.jpg
+  #4 [rejected] serper/shinjukuhalalfood.com: Mehran Plain Paratha 400g – Ready to Cook
+       tier=2 size=match brand=True variants=['flavour'] coverage=1.0 source_trust=0 gtin=None fetch=timeout
+       https://shinjukuhalalfood.com/wp-content/uploads/2020/11/Kawan-Plain-Paratha-400g.jpg
+  #5 [rejected] serper/yabaneez.com: PLAIN PARATHA "MEHRAN"
+       tier=2 size=unknown brand=True variants=['flavour'] coverage=1.0 source_trust=0 gtin=None fetch=timeout
+       https://media.zid.store/548ead68-37ea-4424-a30f-6cbbd00a8037/9b53a63c-4370-40a3-bc1f-d8d29f526c0c.png
+  DECISION REVIEW_UNSELECTED DOWNLOAD_FAILED -> -
+  cost ~$0.0030 (3 SERP queries, 0 VLM calls), 43.6s
+
+=== row 16: MEHRAN PLAIN PARATHA 400GM 5S | brand MEHRAN (sheet_raw) | gtin missing
+  query  MEHRAN PLAIN PARATHA 5x400g
+  query  MEHRAN PLAIN PARATHA 5x400g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)
+  health cse_legacy error    http=403 n=0 553ms http_403  <- MEHRAN PLAIN PARATHA 5x400g
+  health serper     ok       http=200 n=20 2058ms   <- MEHRAN PLAIN PARATHA 5x400g
+  health serper     error    http=400 n=0 887ms http_400  <- MEHRAN PLAIN PARATHA 5x400g (site:carrefouruae.com OR site:noon.com OR
+  #1 [rejected] serper/shinjukuhalalfood.com: Mehran Plain Paratha 400g – Ready to Cook
+       tier=2 size=match brand=True variants=['flavour'] coverage=1.0 source_trust=0 gtin=None fetch=timeout
+       https://shinjukuhalalfood.com/wp-content/uploads/2024/05/Pran-Plain-Paratha-400g-1.jpg
+  #2 [rejected] serper/shinjukuhalalfood.com: Mehran Plain Paratha 400g – Ready to Cook
+       tier=2 size=match brand=True variants=['flavour'] coverage=1.0 source_trust=0 gtin=None fetch=timeout
+       https://shinjukuhalalfood.com/wp-content/uploads/2025/09/Plain-Paratha-400g-600x600.jpg
+  #3 [rejected] serper/yasminstore.com: Mehran Plain Paratha (5 pieces) 400 g | Yasmine Store
+       tier=2 size=match brand=True variants=['flavour'] coverage=1.0 source_trust=0 gtin=None fetch=timeout
+       https://cdn.salla.sa/dPKDdg/i2lPlRJ3F2G9zuNqcc6QwtAtPG3woiEIAXGtt0n1.png
+  #4 [rejected] serper/yasminstore.com: Mehran Plain Paratha (5 pieces) 400 g | Yasmine Store
+       tier=2 size=match brand=True variants=['flavour'] coverage=1.0 source_trust=0 gtin=None fetch=timeout
+       https://cdn.salla.sa/dPKDdg/qc5cO2jSVAw87uqcWQJxAegLdjLchYdLJWmPncvi.png
+  #5 [rejected] serper/shinjukuhalalfood.com: Mehran Plain Paratha 400g – Ready to Cook
+       tier=2 size=match brand=True variants=['flavour'] coverage=1.0 source_trust=0 gtin=None fetch=timeout
+       https://shinjukuhalalfood.com/wp-content/uploads/2020/11/Plain-Paratha-Kazifarm-1.jpg
+  DECISION REVIEW_UNSELECTED DOWNLOAD_FAILED -> -
+  cost ~$0.0030 (3 SERP queries, 0 VLM calls), 43.5s
+
+=== row 17: AL RAWABI MOZZARELLA CHEESE 200GM | brand AL RAWABI (sheet_raw) | gtin missing
+  query  AL RAWABI MOZZARELLA CHEESE 200g
+  health cse_legacy error    http=403 n=0 641ms http_403  <- AL RAWABI MOZZARELLA CHEESE 200g
+  health serper     ok       http=200 n=20 1651ms   <- AL RAWABI MOZZARELLA CHEESE 200g
+  #1 [preselected] serper/amazon.ae: Al Rawabi Shredded Mozzarella Cheese 200g : Amazon.ae: Grocery
+       tier=1 size=match brand=True variants=['flavour'] coverage=1.0 source_trust=3 gtin=None
+       VLM MATCH view=front_packshot brand='AL RAWABI' variant='Mozzarella Shredded Mozzarella Cheese' size='200 grams'
+       https://m.media-amazon.com/images/I/61KbqeCGBxL.jpg_BO30,255,255,255_UF750,750_SR1910,1000,0,C_ZJPHNwYW4gZm9yZWdyb3VuZD0iIzBGMTExMSIgZm9udD0iQW1hem9uRW1iZXIgNjYiPjQuNDwvc3Bhbj4=,60,875,420,420,0,0_PIRIOFOURANDHALF-medium-V2,TopLeft,190,885_ZJPHNwYW4gZm9yZWdyb3VuZD0iIzU2NTk1OSIgZm9udD0iQW1hem9uRW1iZXIgNjYiPig4NCk8L3NwYW4+,650,875,420,420,0,0_QL100_.jpg
+  #2 [rejected] serper/talabat.com: Buy Al Rawabi Shredded Mozzarella Cheese 200 g Online in UAE | Talabat UAE
+       tier=1 size=match brand=True variants=['flavour'] coverage=1.0 source_trust=3 gtin=None fetch=timeout
+       https://talabat.dhmedia.io/image/talabat-nv/Regional_Images/Al_Rawabi_Tmart/6291030109588_2.jpg?size=520
+  #3 [rejected] serper/palmyraorders.com: Al Rawabi Shredded Mozzarella Cheese Full Fat-200g
+       tier=2 size=match brand=True variants=['flavour'] coverage=1.0 source_trust=0 gtin=None fetch=timeout
+       https://palmyraorders.com/cdn/shop/files/al-rawabi-shredded-mozzarella-cheese-full-fat-200g.jpg?v=1755852670&width=1000
+  #4 [rejected] serper/emcoop.ae: Al Rawabi Cheese Burger Slices 200G
+       tier=2 size=match brand=True variants=['flavour'] coverage=0.0 source_trust=0 gtin=None
+       VLM MISMATCH view=front_packshot brand='AL RAWABI' variant='Burger processed cheese slices' size='200 grams'
+       https://suppystorage.blob.core.windows.net/valeur/items/FMCG_490782_1.jpg
+  #5 [rejected] serper/sharjahcoop.ae: Al Rawabi Cheese Slices for Sandwich 200g | Sharjah Co-operative Society
+       tier=2 size=match brand=True variants=['flavour'] coverage=0.0 source_trust=0 gtin=None fetch=timeout
+       https://www.sharjahcoop.ae/medias/6291030109533-1200Wx1200H-001.jpg?context=bWFzdGVyfHNjc3w0MjgwNTF8aW1hZ2UvanBlZ3xjMk56TDJneE9DOW9aREV2T0RnMk5EVXpOamN5TXpRNE5pNXFjR2N8MGE0MmU1NDE3YTNkMzg3ZWU5Zjg3NTYzZDU5NzdiYzM1ZTBlNmVlOTdjMTUwODUwZDQ1ZjY2NmUwMGZkZjk3OQ
+  DECISION REVIEW_PRESELECTED  -> https://m.media-amazon.com/images/I/61KbqeCGBxL.jpg_BO30,255,255,255_UF750,750_SR1910,1000,0,C_ZJPHNwYW4gZm9yZWdyb3VuZD0iIzBGMTExMSIgZm9udD0iQW1hem9uRW1iZXIgNjYiPjQuNDwvc3Bhbj4=,60,875,420,420,0,0_PIRIOFOURANDHALF-medium-V2,TopLeft,190,885_ZJPHNwYW4gZm9yZWdyb3VuZD0iIzU2NTk1OSIgZm9udD0iQW1hem9uRW1iZXIgNjYiPig4NCk8L3NwYW4+,650,875,420,420,0,0_QL100_.jpg
+  cost ~$0.0030 (2 SERP queries, 1 VLM calls), 26.2s
+
+=== row 18: AJMI MEAT MASALA 160GM | brand AJMI (sheet_raw) | gtin missing
+  query  AJMI MEAT MASALA 160g
+  health cse_legacy error    http=403 n=0 579ms http_403  <- AJMI MEAT MASALA 160g
+  health serper     ok       http=200 n=20 2185ms   <- AJMI MEAT MASALA 160g
+  #1 [rejected] serper/gcc.luluhypermarket.com: Ajmi Meat Masala 160 g Online at Best Price | Lulu Oman
+       tier=1 size=match brand=True variants=[] coverage=1.0 source_trust=3 gtin=None fetch=timeout
+       https://bf1af2.akinoncloudcdn.com/products/2025/10/06/617530/5fa082bf-666f-41d2-8dfd-01ed8afec285_size1920x1920_cropCenter.jpg
+  #2 [rejected] serper/gcc.luluhypermarket.com: Ajmi Chicken Masala 160 g Online at Best Price | Lulu UAE
+       tier=1 size=match brand=True variants=[] coverage=0.5 source_trust=3 gtin=None fetch=timeout
+       https://bf1af2.akinoncloudcdn.com/products/2025/10/06/617538/ffc809c2-57a3-42e2-8c8b-c47543e80899.jpg
+  #3 [rejected] serper/homeland.net.nz: Ajmi Chicken Masala 160g – Homeland Indian Mart
+       tier=2 size=match brand=True variants=[] coverage=0.5 source_trust=0 gtin=None
+       VLM MISMATCH view=front_packshot brand='Ajmi' variant='Chicken Masala' size=''
+       https://cdn.shopify.com/s/files/1/0722/5465/2721/files/34.png?v=1703697036
+  #4 [rejected] serper/homeland.net.nz: Ajmi Fish Masala 160g – Homeland Indian Mart
+       tier=2 size=match brand=True variants=[] coverage=0.5 source_trust=0 gtin=None fetch=timeout
+       https://homeland.net.nz/cdn/shop/files/39.png?v=1703698176
+  #5 [rejected] serper/kergro.in: AJMI MEAT MASALA – KERGRO
+       tier=2 size=unknown brand=True variants=[] coverage=1.0 source_trust=0 gtin=None fetch=timeout
+       https://kergro.in/cdn/shop/files/187.jpg?v=1768460961&width=720
+  DECISION REVIEW_UNSELECTED  -> -
+  cost ~$0.0030 (2 SERP queries, 1 VLM calls), 45.0s
+
+=== row 19: AL ALALI FANCY MEAT TUNA IN WATER170GM | brand AL ALALI (sheet_raw) | gtin missing
+  query  AL ALALI FANCY MEAT TUNA IN WATER170GM
+  query  AL ALALI FANCY MEAT TUNA IN WATER170GM (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)
+  health cse_legacy error    http=403 n=0 564ms http_403  <- AL ALALI FANCY MEAT TUNA IN WATER170GM
+  health serper     ok       http=200 n=20 1465ms   <- AL ALALI FANCY MEAT TUNA IN WATER170GM
+  health serper     error    http=400 n=0 658ms http_400  <- AL ALALI FANCY MEAT TUNA IN WATER170GM (site:carrefouruae.com OR site:
+  #1 [rejected] serper/amazon.ae: Al Alali Fancy Meat Tuna In Water, 85 G: Buy Online at Best Price in UAE -  Amaz
+       tier=2 size=unknown brand=True variants=['medium'] coverage=1.0 source_trust=3 gtin=None
+       VLM MISMATCH view=front_packshot brand='al alali' variant='FANCY MEAT TUNA SOLID PACK In Water' size='85 g'
+       https://m.media-amazon.com/images/I/81gczx1oSmL.jpg
+  #2 [rejected] serper/carrefouruae.com: Buy Al Alali Fancy Meat Tuna In Water 170g Pack of 3 Online | Carrefour UAE
+       tier=2 size=unknown brand=True variants=['medium'] coverage=1.0 source_trust=3 gtin=None fetch=timeout
+       https://cdn.mafrservices.com/sys-master-root/hdf/hc2/12781160693790/1659731_main.jpg
+  #3 [rejected] serper/gcc.luluhypermarket.com: Al Alali Fancy Meat Tuna In Water 170 g Online at Best Price | Lulu UAE
+       tier=2 size=unknown brand=True variants=['medium'] coverage=1.0 source_trust=3 gtin=None fetch=timeout
+       https://bf1af2.akinoncloudcdn.com/products/2025/02/17/65251/0df84500-c59f-4fba-88bb-020f4dd12657_size1920x1920_cropCenter.jpg
+  #4 [rejected] serper/talabat.com: Buy Al Alali Fancy Meat Tuna in Water 170 g Online in UAE | Talabat UAE
+       tier=2 size=unknown brand=True variants=['medium'] coverage=1.0 source_trust=3 gtin=None fetch=timeout
+       https://talabat.dhmedia.io/image/product-information-management/6aa2e2012fe0f55c9be7c47a.png
+  #5 [rejected] serper/waitrose.ae: Al Alali Fancy Meat Tuna Solid Pack In Water 170g - Waitrose UAE & Partners
+       tier=2 size=unknown brand=True variants=['medium'] coverage=1.0 source_trust=0 gtin=None
+       VLM MISMATCH view=front_packshot brand='al alali' variant='YELLOWFIN TUNA SOLID PACK in olive oil' size=''
+       https://prod-waitrose.azureedge.net/media/cache/f5/74/f5747f4a1736af696dbd9a3e405454e3.jpg
+  DECISION REVIEW_UNSELECTED  -> -
+  cost ~$0.0040 (3 SERP queries, 1 VLM calls), 27.8s
+
+=== row 20: ALALALI FANCY MEAT TUNA IN SUNFLOWER OIL 85GM | brand AL ALALI (sheet_raw) | gtin missing
+  query  AL ALALI ALALALI FANCY MEAT TUNA IN SUNFLOWER OIL 85g
+  health cse_legacy error    http=403 n=0 583ms http_403  <- AL ALALI ALALALI FANCY MEAT TUNA IN SUNFLOWER OIL 85g
+  health serper     ok       http=200 n=20 1960ms   <- AL ALALI ALALALI FANCY MEAT TUNA IN SUNFLOWER OIL 85g
+  #1 [rejected] serper/gcc.luluhypermarket.com: Al Alali Fancy Meat Tuna Solid Pack In Sunflower Oil 85 g Online at Best  Price 
+       tier=1 size=match brand=True variants=['medium'] coverage=0.75 source_trust=3 gtin=None fetch=timeout
+       https://bf1af2.akinoncloudcdn.com/products/2025/02/17/65294/8ce1b932-84aa-409f-ae06-9984cdb9b3ae_size1920x1920_cropCenter.jpg
+  #2 [rejected] serper/gcc.luluhypermarket.com: Al Alali Fancy Meat Tuna Solid Pack In Sunflower Oil 85 g Online at Best  Price 
+       tier=1 size=match brand=True variants=['medium'] coverage=0.75 source_trust=3 gtin=None fetch=timeout
+       https://bf1af2.akinoncloudcdn.com/products/2025/02/17/65294/668aa8a8-01fd-4f5c-b24d-0ebeadf37f64_size1920x1920_cropCenter.jpg
+  #3 [preselected] serper/nextbuy.ae: Al Alali Fancy Meat Tuna In Sunflower Oil 85 g | Nextbuy.ae
+       tier=2 size=match brand=True variants=['medium'] coverage=0.75 source_trust=0 gtin=None
+       VLM MATCH view=front_packshot brand='al alali' variant='FANCY MEAT TUNA IN SUNFLOWER OIL' size='85 g'
+       https://i0.wp.com/nextbuy.ae/wp-content/uploads/2020/05/Al-Alali-Fancy-Meat-Tuna-In-Sunflower-Oil-85-g.jpg?fit=600%2C600&ssl=1
+  #4 [rejected] serper/getit.qa: Al Alali Fancy Meat Tuna Solid Pack In Sunflower Oil 85 g | GETIT.QA
+       tier=2 size=match brand=True variants=['medium'] coverage=0.75 source_trust=0 gtin=None fetch=timeout
+       https://getit.qa/cdn/shop/products/1812-03.jpg?v=1707806533
+  #5 [rejected] serper/waitrose.ae: Al Alali White Meat Tuna Solid Pack in Sunflower Oil 85g - Waitrose UAE &  Partn
+       tier=2 size=match brand=True variants=['medium'] coverage=0.5 source_trust=0 gtin=None
+       VLM MISMATCH view=front_packshot brand='al alali' variant='YELLOWFIN TUNA IN OLIVE OIL' size='85 g'
+       https://prod-waitrose.azureedge.net/media/cache/f5/74/f5747f4a1736af696dbd9a3e405454e3.jpg
+  DECISION REVIEW_PRESELECTED  -> https://i0.wp.com/nextbuy.ae/wp-content/uploads/2020/05/Al-Alali-Fancy-Meat-Tuna-In-Sunflower-Oil-85-g.jpg?fit=600%2C600&ssl=1
+  cost ~$0.0030 (2 SERP queries, 1 VLM calls), 27.4s
+
+=== row 21: ALALALI FANCY MEAT TUNA IN WATER 85GM | brand AL ALALI (sheet_raw) | gtin missing
+  query  AL ALALI ALALALI FANCY MEAT TUNA IN WATER 85g
+  health cse_legacy error    http=403 n=0 636ms http_403  <- AL ALALI ALALALI FANCY MEAT TUNA IN WATER 85g
+  health serper     ok       http=200 n=20 1558ms   <- AL ALALI ALALALI FANCY MEAT TUNA IN WATER 85g
+  #1 [preselected] serper/amazon.ae: Al Alali Fancy Meat Tuna In Water, 85 G: Buy Online at Best Price in UAE -  Amaz
+       tier=1 size=match brand=True variants=['medium'] coverage=0.75 source_trust=3 gtin=None
+       VLM MATCH view=front_packshot brand='al alali' variant='FANCY MEAT TUNA SOLID PACK In Water' size='85 g'
+       https://m.media-amazon.com/images/I/81gczx1oSmL.jpg
+  #2 [rejected] serper/carrefouruae.com: Buy Al Alali Fancy Meat Tuna in Water, 85g Online | Carrefour UAE
+       tier=1 size=match brand=True variants=['medium'] coverage=0.75 source_trust=3 gtin=None fetch=timeout
+       https://cdn.mafrservices.com/pim-content/UAE/media/product/617937/1746429603/617937_main.jpg
+  #3 [rejected] serper/noon.com: Al Alali Fancy Meat Tuna in Water 85grams | Best Price UAE | Dubai, Abu  Dhabi
+       tier=1 size=match brand=True variants=['medium'] coverage=0.75 source_trust=3 gtin=None fetch=timeout
+       https://f.nooncdn.com/p/v1590856283/N12277957A_2.jpg?width=800
+  #4 [rejected] serper/amazon.ae: Al Alali White Meat Tuna In Water, 85 G: Buy Online at Best Price in UAE -  Amaz
+       tier=1 size=match brand=True variants=['medium'] coverage=0.5 source_trust=3 gtin=None
+       VLM MISMATCH view=front_packshot brand='al alali' variant='WHITE MEAT TUNA SOLID PACK In Water' size='85 g'
+       https://m.media-amazon.com/images/I/81xMBIfEBrL.jpg
+  #5 [rejected] serper/carrefourqatar.com: Buy Alalali Albacore Tuna Solid Pack In Water 85gr Online | Carrefour Qatar
+       tier=3 size=match brand=False variants=['medium'] coverage=0.5 source_trust=1 gtin=None fetch=timeout
+       https://cdn.mafrservices.com/sys-master-root/h1d/hc9/48636548612126/452503_main.jpg
+  DECISION REVIEW_PRESELECTED  -> https://m.media-amazon.com/images/I/81gczx1oSmL.jpg
+  cost ~$0.0030 (2 SERP queries, 1 VLM calls), 31.4s
+
+=== row 22: ALALALI WHITE MEAT TUNA IN S/F OIL 85GM | brand AL ALALI (sheet_raw) | gtin missing
+  query  AL ALALI ALALALI WHITE MEAT TUNA IN S/F OIL 85g
+  query  AL ALALI ALALALI WHITE MEAT TUNA IN S/F OIL 85g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)
+  health cse_legacy error    http=403 n=0 540ms http_403  <- AL ALALI ALALALI WHITE MEAT TUNA IN S/F OIL 85g
+  health serper     ok       http=200 n=20 1785ms   <- AL ALALI ALALALI WHITE MEAT TUNA IN S/F OIL 85g
+  health serper     error    http=400 n=0 647ms http_400  <- AL ALALI ALALALI WHITE MEAT TUNA IN S/F OIL 85g (site:carrefouruae.com
+  #1 [rejected] serper/gcc.luluhypermarket.com: Al Alali White Meat Tuna in Sunflower Oil 85 g Online at Best Price | Lulu  UAE
+       tier=2 size=match brand=True variants=[] coverage=0.8 source_trust=3 gtin=None fetch=timeout
+       https://bf1af2.akinoncloudcdn.com/products/2025/02/17/65247/2d85d807-4b8c-40da-aca9-62bcd2f10645_size1920x1920_cropCenter.jpg
+  #2 [rejected] serper/amazon.ae: Al Alali White Meat Tuna In Water, 85 G: Buy Online at Best Price in UAE -  Amaz
+       tier=2 size=match brand=True variants=[] coverage=0.6 source_trust=3 gtin=None
+       VLM MISMATCH view=front_packshot brand='alalali' variant='WHITE MEAT TUNA In Water' size='85 g'
+       https://m.media-amazon.com/images/I/81xMBIfEBrL.jpg_BO30,255,255,255_UF750,750_SR1910,1000,0,C_ZJPHNwYW4gZm9yZWdyb3VuZD0iIzBGMTExMSIgZm9udD0iQW1hem9uRW1iZXIgNjYiPjMuNzwvc3Bhbj4=,60,875,420,420,0,0_PIRIOTHREEANDHALF-medium-V2,TopLeft,190,885_ZJPHNwYW4gZm9yZWdyb3VuZD0iIzU2NTk1OSIgZm9udD0iQW1hem9uRW1iZXIgNjYiPigzMSk8L3NwYW4+,650,875,420,420,0,0_QL100_.jpg
+  #3 [rejected] serper/amazon.ae: Al Alali Fancy Meat Tuna Solid Pack In Sunflower Oil 85g : Amazon.ae:  Kitchen
+       tier=2 size=match brand=True variants=[] coverage=0.6 source_trust=3 gtin=None
+       VLM MISMATCH view=front_packshot brand='alalali' variant='FANCY MEAT TUNA In Sunflower oil' size='85 g'
+       https://m.media-amazon.com/images/I/61CGC1YnhnL.jpg
+  #4 [rejected] serper/amazon.ae: Al Alali White Meat Tuna In Water, 85 G: Buy Online at Best Price in UAE -  Amaz
+       tier=2 size=match brand=True variants=[] coverage=0.6 source_trust=3 gtin=None
+       VLM MISMATCH view=front_packshot brand='alalali' variant='WHITE MEAT TUNA In Water' size='85 g'
+       https://m.media-amazon.com/images/I/81xMBIfEBrL._AC_UF894,1000_QL80_.jpg
+  #5 [rejected] serper/getit.qa: Al Alali Fancy Meat Tuna Solid Pack In Sunflower Oil 85 g | GETIT.QA
+       tier=2 size=match brand=True variants=[] coverage=0.6 source_trust=0 gtin=None fetch=timeout
+       http://getit.qa/cdn/shop/products/1812-03_grande.jpg?v=1707806533
+  DECISION REVIEW_UNSELECTED  -> -
+  cost ~$0.0040 (3 SERP queries, 1 VLM calls), 29.1s
+
+=== row 23: ALALALI WHITE MEAT TUNA WATER 170GM | brand AL ALALI (sheet_raw) | gtin missing
+  query  AL ALALI ALALALI WHITE MEAT TUNA WATER 170g
+  query  AL ALALI ALALALI WHITE MEAT TUNA WATER 170g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)
+  health cse_legacy error    http=403 n=0 652ms http_403  <- AL ALALI ALALALI WHITE MEAT TUNA WATER 170g
+  health serper     ok       http=200 n=20 1680ms   <- AL ALALI ALALALI WHITE MEAT TUNA WATER 170g
+  health serper     error    http=400 n=0 588ms http_400  <- AL ALALI ALALALI WHITE MEAT TUNA WATER 170g (site:carrefouruae.com OR 
+  #1 [eligible] serper/amazon.ae: Al Alali White Meat Tuna Solid Pack In Water 170g : Amazon.ae: Grocery
+       tier=2 size=match brand=True variants=[] coverage=0.8 source_trust=3 gtin=None
+       VLM UNSURE view=front_packshot brand='alalali' variant='WHITE MEAT TUNA In Water' size='170 g'
+       https://m.media-amazon.com/images/I/81crBUh1YiL.jpg_BO30,255,255,255_UF750,750_SR1910,1000,0,C_ZJPHNwYW4gZm9yZWdyb3VuZD0iIzBGMTExMSIgZm9udD0iQW1hem9uRW1iZXIgNjYiPjQuMzwvc3Bhbj4=,60,875,420,420,0,0_PIRIOFOURANDHALF-medium-V2,TopLeft,190,885_ZJPHNwYW4gZm9yZWdyb3VuZD0iIzU2NTk1OSIgZm9udD0iQW1hem9uRW1iZXIgNjYiPig0NSk8L3NwYW4+,650,875,420,420,0,0_QL100_.jpg
+  #2 [eligible] serper/spinneys.com: Al Alali White Meat Tuna In Water Canned Meat 170g
+       tier=2 size=match brand=True variants=[] coverage=0.8 source_trust=3 gtin=None
+       VLM UNSURE view=front_packshot brand='alalali' variant='WHITE MEAT TUNA In Water' size='170 g'
+       https://prod-spinneys-cdn-new.azureedge.net/media/cache/db/a2/dba2a36e336380679968662436b14417.jpg
+  #3 [rejected] serper/unioncoop.ae: al alali white meat tuna in water, 170 g Price | Buy Online in Dubai, UAE -  Uni
+       tier=2 size=match brand=True variants=[] coverage=0.8 source_trust=3 gtin=None fetch=timeout
+       https://www.unioncoop.ae/media/catalog/product/6/2/6294010703134_1.jpg
+  #4 [rejected] serper/unioncoop.ae: al alali white meat tuna in water, 170 g Price | Buy Online in Dubai, UAE -  Uni
+       tier=2 size=match brand=True variants=[] coverage=0.8 source_trust=3 gtin=None fetch=timeout
+       https://www.unioncoop.ae/media/catalog/product/6/2/6294010703318_1.jpg
+  #5 [rejected] serper/waitrose.ae: Al Alali White Meat Tuna In Water Canned Meat 170g - Waitrose UAE & Partners
+       tier=2 size=match brand=True variants=[] coverage=0.8 source_trust=0 gtin=None
+       VLM MISMATCH view=front_packshot brand='alalali' variant='SKIPJACK TUNA In Sunflower oil' size='170 g'
+       https://prod-waitrose.azureedge.net/media/cache/e9/55/e955688e697d17619469f410789e59b7.jpg
+  DECISION REVIEW_UNSELECTED  -> -
+  cost ~$0.0040 (3 SERP queries, 1 VLM calls), 27.8s
+
+=== row 24: ALALALI WHITE MEAT TUNA WATER 85GM | brand AL ALALI (sheet_raw) | gtin missing
+  query  AL ALALI ALALALI WHITE MEAT TUNA WATER 85g
+  query  AL ALALI ALALALI WHITE MEAT TUNA WATER 85g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)
+  health cse_legacy error    http=403 n=0 670ms http_403  <- AL ALALI ALALALI WHITE MEAT TUNA WATER 85g
+  health serper     ok       http=200 n=20 2001ms   <- AL ALALI ALALALI WHITE MEAT TUNA WATER 85g
+  health serper     error    http=400 n=0 716ms http_400  <- AL ALALI ALALALI WHITE MEAT TUNA WATER 85g (site:carrefouruae.com OR s
+  #1 [preselected] serper/amazon.ae: Al Alali White Meat Tuna In Water, 85 G: Buy Online at Best Price in UAE -  Amaz
+       tier=2 size=match brand=True variants=[] coverage=0.8 source_trust=3 gtin=None
+       VLM MATCH view=front_packshot brand='al alali' variant='WHITE MEAT TUNA SOLID PACK In Water' size='85 g'
+       https://m.media-amazon.com/images/I/81xMBIfEBrL.jpg_BO30,255,255,255_UF750,750_SR1910,1000,0,C_ZJPHNwYW4gZm9yZWdyb3VuZD0iIzBGMTExMSIgZm9udD0iQW1hem9uRW1iZXIgNjYiPjMuNzwvc3Bhbj4=,60,875,420,420,0,0_PIRIOTHREEANDHALF-medium-V2,TopLeft,190,885_ZJPHNwYW4gZm9yZWdyb3VuZD0iIzU2NTk1OSIgZm9udD0iQW1hem9uRW1iZXIgNjYiPigzMSk8L3NwYW4+,650,875,420,420,0,0_QL100_.jpg
+  #2 [rejected] serper/amazon.ae: Al Alali White Meat Tuna In Water, 85 G: Buy Online at Best Price in UAE -  Amaz
+       tier=2 size=match brand=True variants=[] coverage=0.8 source_trust=3 gtin=None
+       VLM MISMATCH view=other_side brand='al alali' variant='' size='60 g'
+       https://m.media-amazon.com/images/I/919H9wbxLAL.jpg
+  #3 [eligible] serper/amazon.ae: Al Alali White Meat Tuna In Water, 85 G: Buy Online at Best Price in UAE -  Amaz
+       tier=2 size=match brand=True variants=[] coverage=0.8 source_trust=3 gtin=None
+       VLM MATCH view=front_packshot brand='al alali' variant='WHITE MEAT TUNA SOLID PACK In Water' size='85 g'
+       https://m.media-amazon.com/images/I/81xMBIfEBrL._AC_UF894,1000_QL80_.jpg
+  #4 [rejected] serper/gcc.luluhypermarket.com: Al Alali White Meat Tuna Solid Pack In Water 85 g Online at Best Price |  Lulu U
+       tier=2 size=match brand=True variants=[] coverage=0.8 source_trust=3 gtin=None fetch=timeout
+       https://bf1af2.akinoncloudcdn.com/products/2025/02/17/210473/3a6abf73-fe47-4e0d-8d38-ff5ee08fcff8_size1920x1920_cropCenter.jpg
+  #5 [rejected] serper/emiratescoop.suppy.app: Al Alali White Meat Tuna Solid Pack In Water 85G | Buy...
+       tier=2 size=match brand=True variants=[] coverage=0.8 source_trust=0 gtin=None
+       VLM MISMATCH view=front_packshot brand='Afia' variant='CHUNK TUNA In Sunflower Oil' size=''
+       https://suppystorage.blob.core.windows.net/valeur/items/FMCG_465057_1.jpg
+  DECISION REVIEW_PRESELECTED  -> https://m.media-amazon.com/images/I/81xMBIfEBrL.jpg_BO30,255,255,255_UF750,750_SR1910,1000,0,C_ZJPHNwYW4gZm9yZWdyb3VuZD0iIzBGMTExMSIgZm9udD0iQW1hem9uRW1iZXIgNjYiPjMuNzwvc3Bhbj4=,60,875,420,420,0,0_PIRIOTHREEANDHALF-medium-V2,TopLeft,190,885_ZJPHNwYW4gZm9yZWdyb3VuZD0iIzU2NTk1OSIgZm9udD0iQW1hem9uRW1iZXIgNjYiPigzMSk8L3NwYW4+,650,875,420,420,0,0_QL100_.jpg
+  cost ~$0.0040 (3 SERP queries, 1 VLM calls), 30.4s
+
+=== row 25: ALLDE MEAT MASALA 160GM | brand ALLDE (sheet_raw) | gtin missing
+  query  ALLDE MEAT MASALA 160g
+  query  ALLDE MEAT MASALA 160g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)
+  health cse_legacy error    http=403 n=0 615ms http_403  <- ALLDE MEAT MASALA 160g
+  health serper     ok       http=200 n=20 1835ms   <- ALLDE MEAT MASALA 160g
+  health serper     error    http=400 n=0 881ms http_400  <- ALLDE MEAT MASALA 160g (site:carrefouruae.com OR site:noon.com OR site
+  #1 [rejected] serper/alldefood.com: products | Allde
+       tier=2 size=unknown brand=True variants=[] coverage=1.0 source_trust=0 gtin=None fetch=timeout
+       https://alldefood.com/wp-content/uploads/2025/10/Meat_masala.webp
+  #2 [rejected] serper/alldefood.com: products | Allde
+       tier=2 size=unknown brand=True variants=[] coverage=0.5 source_trust=0 gtin=None fetch=timeout
+       https://alldefood.com/wp-content/uploads/2025/10/Mutton_masala.webp
+  #3 [rejected] serper/alldefood.com: products | Allde
+       tier=2 size=unknown brand=True variants=[] coverage=0.5 source_trust=0 gtin=None fetch=timeout
+       https://alldefood.com/wp-content/uploads/2025/10/chicken_masala.webp
+  #4 [rejected] serper/loudchilli.com: Allde Masala
+       tier=2 size=unknown brand=True variants=[] coverage=0.5 source_trust=0 gtin=None fetch=timeout
+       https://assets.zyrosite.com/cdn-cgi/image/format=auto,w=1440,h=954,fit=crop/YleMblx2GaCDBkkQ/allde-egg-masala-YD0peE012jUpzEGg.jpeg
+  #5 [rejected] serper/alldefood.com: products | Allde
+       tier=2 size=unknown brand=True variants=[] coverage=0.0 source_trust=0 gtin=None fetch=timeout
+       https://alldefood.com/wp-content/uploads/2025/10/Sambar_powder.webp
+  DECISION REVIEW_UNSELECTED DOWNLOAD_FAILED -> -
+  cost ~$0.0030 (3 SERP queries, 0 VLM calls), 38.4s
+
+=== row 26: AMERICAN GOLD LGT MEAT TUNA FLAKE IN SUNFLOWER OIL 160GM | brand AMERICAN GOLD (sheet_raw) | gtin missing
+  query  AMERICAN GOLD LGT MEAT TUNA FLAKE IN SUNFLOWER OIL 160g
+  query  AMERICAN GOLD LGT MEAT TUNA FLAKE IN SUNFLOWER OIL 160g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)
+  query  AMERICAN GOLD LGT MEAT TUNA FLAKE IN 160g
+  query  AMERICAN GOLD LGT MEAT TUNA FLAKE IN SUNFLOWER OIL
+  health cse_legacy error    http=403 n=0 495ms http_403  <- AMERICAN GOLD LGT MEAT TUNA FLAKE IN SUNFLOWER OIL 160g
+  health serper     ok       http=200 n=20 7452ms   <- AMERICAN GOLD LGT MEAT TUNA FLAKE IN SUNFLOWER OIL 160g
+  health serper     error    http=400 n=0 771ms http_400  <- AMERICAN GOLD LGT MEAT TUNA FLAKE IN SUNFLOWER OIL 160g (site:carrefou
+  health serper     ok       http=200 n=20 1857ms   <- AMERICAN GOLD LGT MEAT TUNA FLAKE IN 160g
+  health serper     ok       http=200 n=20 1666ms   <- AMERICAN GOLD LGT MEAT TUNA FLAKE IN SUNFLOWER OIL
+  #1 [rejected] serper/makanifoods.com: Light Meat Tuna in Sunflower Oil 160g
+       tier=3 size=match brand=False variants=['medium'] coverage=0.5 source_trust=0 gtin=None fetch=timeout
+       http://makanifoods.com/cdn/shop/files/TUNAINSUNFLOWEROIL.webp?v=1788858307
+  #2 [rejected] serper/bakersway.sa: Golden Plate Thai Tuna 160g | BAKERS WAY
+       tier=3 size=match brand=False variants=[] coverage=0.25 source_trust=0 gtin=None fetch=timeout
+       https://cdn.salla.sa/DGdwdl/eb25f1b3-dc27-4e78-b72a-501072659324-1000x751.2077294686-b3RN6IfrnAdwTD00bIEozoVR1r9zzZYK762GhIMX.png
+  #3 [rejected] serper/americanspecialtyfoods.com: Light Meat Tuna Flakes In Sunflower Oil – American Specialty Foods Co – The  Fin
+       tier=3 size=ambiguous brand=False variants=['medium'] coverage=0.75 source_trust=0 gtin=None fetch=timeout
+       https://americanspecialtyfoods.com/wp-content/uploads/2023/09/Light-Meat-Tuna-Flakes-In-Sunflower-Oil-185g-1850g-600x600.png
+  #4 [rejected] serper/navkarexport.com: American Garden Light Tuna-Flakes In Sunflower Oil - Canned Seafood -  Navkar Ex
+       tier=3 size=unknown brand=False variants=['medium'] coverage=0.5 source_trust=0 gtin=None fetch=timeout
+       https://content.jdmagicbox.com/quickquotes/images_main/light-tuna-flakes-in-sunflower-oil-219947263-debkq.jpg?fit=around|500:500
+  #5 [rejected] serper/americanafoods.com: Light Meat Tuna in Sunflower Oil - Americana Foods
+       tier=3 size=unknown brand=False variants=['medium'] coverage=0.5 source_trust=0 gtin=None fetch=timeout
+       https://www.americanafoods.com/wp-content/uploads/2024/06/CG-Tuna-Mockups_Light-Meat-Tuna-SFO-45.png
+  DECISION REVIEW_UNSELECTED DOWNLOAD_FAILED -> -
+  cost ~$0.0050 (5 SERP queries, 0 VLM calls), 55.1s
+
+=== row 27: AMERICAN LIGHT MEAT TUNA 185 GM | brand AMERICAN LIGHT (sheet_raw) | gtin missing
+  query  AMERICAN LIGHT MEAT TUNA 185g
+  health cse_legacy error    http=403 n=0 692ms http_403  <- AMERICAN LIGHT MEAT TUNA 185g
+  health serper     ok       http=200 n=20 1498ms   <- AMERICAN LIGHT MEAT TUNA 185g
+  #1 [rejected] serper/amazon.ae: American Light Meat Tuna 185 g: Buy Online at Best Price in UAE - Amazon.ae
+       tier=1 size=match brand=True variants=['fat'] coverage=1.0 source_trust=3 gtin=None
+       VLM MISMATCH view=front_packshot brand='American' variant='LIGHT MEAT TUNA' size=''
+       https://m.media-amazon.com/images/I/81wdpcQ4H8L.jpg
+  #2 [rejected] serper/gcc.luluhypermarket.com: American Light Meat Tuna 185 g Online at Best Price | Lulu UAE
+       tier=1 size=match brand=True variants=['fat'] coverage=1.0 source_trust=3 gtin=None fetch=timeout
+       https://bf1af2.akinoncloudcdn.com/products/2024/09/11/65163/ff87c10e-5f12-4a74-8cfd-f1d6a30b1885.jpg
+  #3 [rejected] serper/baladifoodstuff.com: تونة أمريكية خفيفة اللحم – 185 غرام
+       tier=2 size=match brand=True variants=['fat'] coverage=1.0 source_trust=0 gtin=None fetch=timeout
+       https://www.baladifoodstuff.com/cdn/shop/files/American_Light_Meat_Tuna_48x185g.jpg?v=1762601193&width=1946
+  #4 [rejected] serper/tradeling.com: American Light Meat Tuna 185g (1x48 Carton) – Premium Canned Tuna in  Brine/Oil
+       tier=2 size=match brand=True variants=['fat'] coverage=1.0 source_trust=0 gtin=None fetch=timeout
+       https://cfn-catalog-prod.tradeling.com/up/6985b89ba69848c4970a5089/58bf8e82d2d51aa7953d279e302ac2af.jpg
+  #5 [rejected] serper/tradeling.com: American Light Meat Tuna - 185GM
+       tier=2 size=match brand=True variants=['fat'] coverage=1.0 source_trust=0 gtin=None fetch=timeout
+       https://c8n.tradeling.com/img/plain/pim/rs:auto:1600::0/f:webp/q:90/up/69e112d795d2b978ef6c874d/18a72d8e51ab38419a79203de428a757.jpg
+  DECISION REVIEW_UNSELECTED  -> -
+  cost ~$0.0030 (2 SERP queries, 1 VLM calls), 28.2s
+
+=== row 28: AMERICAN LIGHT MEAT TUNA SOLID 185GM | brand AMERICAN LIGHT (sheet_raw) | gtin missing
+  query  AMERICAN LIGHT MEAT TUNA SOLID 185g
+  health cse_legacy error    http=403 n=0 577ms http_403  <- AMERICAN LIGHT MEAT TUNA SOLID 185g
+  health serper     ok       http=200 n=20 2145ms   <- AMERICAN LIGHT MEAT TUNA SOLID 185g
+  #1 [preselected] serper/amazon.ae: American Light Meat Tuna 185 g: Buy Online at Best Price in UAE - Amazon.ae
+       tier=1 size=match brand=True variants=['fat'] coverage=0.6667 source_trust=3 gtin=None
+       VLM UNSURE view=front_packshot brand='American' variant='LIGHT MEAT TUNA' size='185 g'
+       https://m.media-amazon.com/images/I/81Dh1T79vqL.jpg
+  #2 [rejected] serper/gcc.luluhypermarket.com: American Light Meat Tuna 185 g Online at Best Price | Lulu UAE
+       tier=1 size=match brand=True variants=['fat'] coverage=0.6667 source_trust=3 gtin=None fetch=timeout
+       https://bf1af2.akinoncloudcdn.com/products/2024/09/11/65163/ff87c10e-5f12-4a74-8cfd-f1d6a30b1885.jpg
+  #3 [rejected] serper/goodnessuae.com: American Light Meat Tuna 185 g on www.goodnessauec.om delivery across the  UAE a
+       tier=2 size=match brand=True variants=['fat'] coverage=0.6667 source_trust=0 gtin=None fetch=timeout
+       https://goodnessuae.com/content/attachments/TUNA-LIGHT-MEAT-AMERICAN-(-185-GM-)SMGT1150620220831151219.webp
+  #4 [rejected] serper/tradeling.com: American Light Meat Tuna 185g (1x48 Carton) – Premium Canned Tuna in  Brine/Oil
+       tier=2 size=match brand=True variants=['fat'] coverage=0.6667 source_trust=0 gtin=None fetch=timeout
+       https://c8n.tradeling.com/img/plain/pim/rs:auto:1600::0/f:webp/q:90/up/6985b89ba69848c4970a5089/58bf8e82d2d51aa7953d279e302ac2af.jpg
+  #5 [rejected] serper/murukali.com: American Light Meat Tuna Fish 185g - Murukali.com
+       tier=2 size=match brand=True variants=['fat'] coverage=0.6667 source_trust=0 gtin=None fetch=timeout
+       https://murukali.com/cdn/shop/files/American-Light-Meat-Tuna-Fish-185g-Murukali.com-56151732_515x582.jpg?v=1752688016
+  DECISION REVIEW_PRESELECTED  -> https://m.media-amazon.com/images/I/81Dh1T79vqL.jpg
+  cost ~$0.0030 (2 SERP queries, 1 VLM calls), 45.7s
+
+=== row 29: CHALIYAR MEAT MASALA 160GM | brand CHALIYAR (sheet_raw) | gtin missing
+  query  CHALIYAR MEAT MASALA 160g
+  query  CHALIYAR MEAT MASALA 160g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)
+  health cse_legacy error    http=403 n=0 476ms http_403  <- CHALIYAR MEAT MASALA 160g
+  health serper     ok       http=200 n=20 2708ms   <- CHALIYAR MEAT MASALA 160g
+  health serper     error    http=400 n=0 633ms http_400  <- CHALIYAR MEAT MASALA 160g (site:carrefouruae.com OR site:noon.com OR s
+  #1 [rejected] serper/facebook.com: Chaliyar Spices 🍲 " Are you hosting guests over for dinner? Blend together  your
+       tier=2 size=unknown brand=True variants=[] coverage=1.0 source_trust=0 gtin=None fetch=too_small
+       https://lookaside.fbsbx.com/lookaside/crawler/media/?media_id=521957201620131
+  #2 [rejected] serper/instagram.com: Turn everyday chicken into something unforgettable. 🍗🔥 Chaliyar Chicken  Masala 
+       tier=2 size=unknown brand=True variants=[] coverage=0.5 source_trust=0 gtin=None fetch=not_image
+       https://lookaside.instagram.com/seo/google_widget/crawler/?media_id=3974434258600195288
+  #3 [rejected] serper/instagram.com: Turn everyday chicken into something unforgettable. 🍗🔥 Chaliyar Chicken  Masala 
+       tier=2 size=unknown brand=True variants=[] coverage=0.5 source_trust=0 gtin=None fetch=not_image
+       https://lookaside.instagram.com/seo/google_widget/crawler/?media_id=3975861827136890683
+  #4 [rejected] serper/instagram.com: Chaliyar Spices AE (@chaliyar.spices) • Instagram photos and videos
+       tier=2 size=unknown brand=True variants=[] coverage=0.0 source_trust=0 gtin=None fetch=not_image
+       https://lookaside.instagram.com/seo/google_widget/crawler/?media_id=3668558025536596766
+  #5 [rejected] serper/instagram.com: Chaliyar Spices AE (@chaliyar.spices) • Instagram photos and videos
+       tier=2 size=unknown brand=True variants=[] coverage=0.0 source_trust=0 gtin=None fetch=not_image
+       https://lookaside.instagram.com/seo/google_widget/crawler/?media_id=3677135991271213275
+  DECISION REVIEW_UNSELECTED DOWNLOAD_FAILED -> -
+  cost ~$0.0030 (3 SERP queries, 0 VLM calls), 16.0s
+
+=== row 30: DOUBLE HORSE MEAT MASALA 140GM | brand DOUBLE HORSE (sheet_raw) | gtin missing
+  query  DOUBLE HORSE MEAT MASALA 140g
+  health cse_legacy error    http=403 n=0 561ms http_403  <- DOUBLE HORSE MEAT MASALA 140g
+  health serper     ok       http=200 n=20 1358ms   <- DOUBLE HORSE MEAT MASALA 140g
+  #1 [preselected] serper/amazon.ae: Double Horse Meat Masala 140 Gm : Amazon.ae: Grocery
+       tier=1 size=match brand=True variants=[] coverage=1.0 source_trust=3 gtin=None
+       VLM MATCH view=front_packshot brand='Double Horse' variant='MEAT MASALA' size='140g'
+       https://m.media-amazon.com/images/I/71fguAqJVSL.jpg
+  #2 [eligible] serper/amazon.ae: Double Horse Meat Masala 140 Gm : Amazon.ae: Grocery
+       tier=1 size=match brand=True variants=[] coverage=1.0 source_trust=3 gtin=None
+       VLM MATCH view=front_packshot brand='Double Horse' variant='MEAT MASALA' size='140g'
+       https://m.media-amazon.com/images/I/71fguAqJVSL.jpg_BO30,255,255,255_UF750,750_SR1910,1000,0,C_ZJPHNwYW4gZm9yZWdyb3VuZD0iIzBGMTExMSIgZm9udD0iQW1hem9uRW1iZXIgNjYiPjQuMTwvc3Bhbj4=,60,875,420,420,0,0_PIRIOFOUR-medium-V2,TopLeft,190,885_ZJPHNwYW4gZm9yZWdyb3VuZD0iIzU2NTk1OSIgZm9udD0iQW1hem9uRW1iZXIgNjYiPigxMCk8L3NwYW4+,650,875,420,420,0,0_QL100_.jpg
+  #3 [eligible] serper/amazon.ae: Double Horse Meat Masala 140 Gm : Amazon.ae: Grocery
+       tier=1 size=match brand=True variants=[] coverage=1.0 source_trust=3 gtin=None
+       VLM UNSURE view=other_side brand='Double Horse' variant='MEAT MASALA' size='140g'
+       https://m.media-amazon.com/images/I/712MeULol9L._AC_UF894,1000_QL80_.jpg
+  #4 [rejected] serper/gcc.luluhypermarket.com: Double Horse Meat Masala 140 g Online at Best Price | Lulu UAE
+       tier=1 size=match brand=True variants=[] coverage=1.0 source_trust=3 gtin=None fetch=timeout
+       https://bf1af2.akinoncloudcdn.com/products/2024/09/07/76060/1da37b14-8c98-4a72-a0a1-a58dd9f27728.jpg
+  #5 [rejected] serper/gcc.luluhypermarket.com: Double Horse Meat Masala 140 g Online at Best Price | Lulu UAE
+       tier=1 size=match brand=True variants=[] coverage=1.0 source_trust=3 gtin=None fetch=timeout
+       https://bf1af2.akinoncloudcdn.com/products/2024/09/07/76060/9bd6a244-57e5-409b-8fe7-03abb8f07601.jpg
+  DECISION REVIEW_PRESELECTED  -> https://m.media-amazon.com/images/I/71fguAqJVSL.jpg
+  cost ~$0.0030 (2 SERP queries, 1 VLM calls), 27.8s
+
+=== row 31: FAMILY LIGHT TUNA MEAT CHUNK IN BRINE 185GM | brand FAMILY (sheet_raw) | gtin missing
+  query  FAMILY LIGHT TUNA MEAT CHUNK IN BRINE 185g
+  query  FAMILY LIGHT TUNA MEAT CHUNK IN BRINE 185g (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com OR site:amazon.ae OR site:talabat.com)
+  health cse_legacy error    http=403 n=0 492ms http_403  <- FAMILY LIGHT TUNA MEAT CHUNK IN BRINE 185g
+  health serper     ok       http=200 n=20 1466ms   <- FAMILY LIGHT TUNA MEAT CHUNK IN BRINE 185g
+  health serper     error    http=400 n=0 609ms http_400  <- FAMILY LIGHT TUNA MEAT CHUNK IN BRINE 185g (site:carrefouruae.com OR s
+  #1 [rejected] serper/atxpview-ecom-v2.family.qa: Del Monte Light Meat Tuna Solid Pack In Brine 185gm | Family Food Center -  Qata
+       tier=2 size=match brand=True variants=['medium', 'fat'] coverage=0.6667 source_trust=0 gtin=None
+       VLM MISMATCH view=front_packshot brand='Del Monte' variant='LIGHT SKIPJACK IN BRINE' size=''
+       https://res.cloudinary.com/family-food-centre/image/upload/w_3840,q_auto,f_auto/v1790232611/prod-ecom-v2/products/100307234/1790232610427.jpg
+  #2 [rejected] serper/foodedge.com: Family Light Meat Tuna 185gm
+       tier=2 size=match brand=True variants=['fat'] coverage=0.6667 source_trust=0 gtin=None fetch=timeout
+       https://www.foodedge.com/wp-content/uploads/2021/05/Family-Light-Meat-Tuna.jpg
+  #3 [rejected] serper/mygroceryfinder.com: Family Fancy Skipjack Chunks Light Meat Tuna In Brine – myGroceryfinder
+       tier=2 size=unknown brand=True variants=['medium', 'fat'] coverage=1.0 source_trust=0 gtin=None fetch=timeout
+       https://mygroceryfinder.com/cdn/shop/products/5441_FamilyFancySkipjackChunksLightMeatTunaInBrine_580x.png?v=1620300264
+  #4 [rejected] serper/unioncoop.ae: union light meat tuna chunks in brine - 185 g Price | Buy Online in Dubai,  UAE 
+       tier=3 size=match brand=False variants=['medium', 'fat'] coverage=1.0 source_trust=3 gtin=None fetch=timeout
+       https://www.unioncoop.ae/media/catalog/product/6/2/6295135074468_1_1.jpg
+  #5 [rejected] serper/amazon.ae: California Garden Canned Light Tuna Chunk In Brine 185G: Buy Online at Best  Pri
+       tier=3 size=match brand=False variants=['medium', 'fat'] coverage=0.6667 source_trust=3 gtin=None
+       VLM MISMATCH view=front_packshot brand='CALIFORNIA GARDEN' variant='LIGHT CHUNKS TUNA IN WATER' size=''
+       https://m.media-amazon.com/images/I/91m9qgQN3XL.jpg_BO30,255,255,255_UF750,750_SR1910,1000,0,C_QL100_.jpg
+  DECISION REVIEW_UNSELECTED  -> -
+  cost ~$0.0040 (3 SERP queries, 1 VLM calls), 27.1s
+
+30 rows | decisions {'REVIEW_UNSELECTED': 20, 'REVIEW_PRESELECTED': 10} | estimated cost $0.1010
+results written to smoke_2.json
