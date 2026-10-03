@@ -58,7 +58,7 @@ from html.parser import HTMLParser
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 from urllib.parse import unquote, urljoin, urlsplit
 
-from . import ratelimit, settings
+from . import cassette, ratelimit, settings
 from .fetch import HttpFetcher, _blocked, _retryable
 from .gtin import is_global_gtin, normalize_gtin
 from .models import Candidate
@@ -669,7 +669,8 @@ class PageFetcher(HttpFetcher):
         if cached is not None:
             return cached
         info = self._fetch_uncached(url, referer)
-        _cache_put(key, info, self._clock())
+        if info.error != cassette.NOT_RECORDED:     # a replay miss is asked again (and reported again)
+            _cache_put(key, info, self._clock())
         return info
 
     def _fetch_uncached(self, url: str, referer: str) -> PageInfo:

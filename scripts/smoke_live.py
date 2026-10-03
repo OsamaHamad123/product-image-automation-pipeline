@@ -73,7 +73,7 @@ import sys
 import time
 import traceback
 from collections import Counter
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO_ROOT not in sys.path:
@@ -124,9 +124,11 @@ _SOCIAL_LABELS = frozenset({
 })
 _SOCIAL_DOMAINS = ("x.com", "fb.com", "t.co", "redd.it", "threads.net")
 
+# (the CSE engine ids are no key, but they identify the account and are hidden with the keys)
 SECRET_SETTINGS = ("SERPER_API_KEY", "GEMINI_API_KEY", "SERPAPI_API_KEY", "ANTHROPIC_API_KEY", "PHOTOROOM_API_KEY",
                    "CLOUDINARY_API_KEY", "CLOUDINARY_API_SECRET", "GOOGLE_SEARCH_API_KEYS", "GOOGLE_SEARCH_API_KEY",
-                   "REMOVE_BG_API_KEY", "TELEGRAM_BOT_TOKEN", "PROXY_URL")
+                   "GOOGLE_SEARCH_CX_LIST", "GOOGLE_SEARCH_CX", "REMOVE_BG_API_KEY", "TELEGRAM_BOT_TOKEN", "PROXY_URL")
+_QUERY_KEY_RE = re.compile(r"(?i)((?:(?:api_?)?key|(?<![a-z0-9])cx)(?:=|%3D))[^&\s'\"]+")
 
 WRITE_METHODS = ("update", "update_cell", "update_cells", "batch_update", "append_row", "append_rows", "insert_row",
                  "insert_rows", "delete_rows", "clear", "add_worksheet", "del_worksheet", "format", "update_acell")
@@ -193,12 +195,13 @@ def secret_values(lookup=None):
                 parts = urlsplit(item)
                 values.update(v for v in (parts.username, parts.password) if v and len(v) >= 4)
             if len(item) >= 6:
-                values.add(item)
+                values.update((item, quote(item, safe="")))      # as is, and as a URL query carries it
     return sorted(values, key=len, reverse=True)
 
 
 def redact(text, secrets=None, query_keys=True):
-    """text with every secret value replaced, and (query_keys) every 'key=...' / 'api_key=...' query value.
+    """text with every secret value replaced, and (query_keys) every 'key=...' / 'api_key=...' / 'cx=...' query
+    value.
 
     Error texts get both; a whole --json document only the secret values, so that image URLs with a
     harmless 'key=' parameter stay comparable between runs.
@@ -206,7 +209,7 @@ def redact(text, secrets=None, query_keys=True):
     text = "" if text is None else str(text)
     for secret in (secret_values() if secrets is None else secrets):
         text = text.replace(secret, "[hidden]")
-    return re.sub(r"(?i)((?:api_?)?key=)[^&\s'\"]+", r"\1[hidden]", text) if query_keys else text
+    return _QUERY_KEY_RE.sub(r"\1[hidden]", text) if query_keys else text
 
 
 def _utf8_stdout():

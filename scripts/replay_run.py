@@ -37,7 +37,8 @@ providers and readers are built), the brand mappings are the recorded ones (afte
 do not wait, the local index answers from its recorded rows and deadline, the circuit breakers, the strong
 reader's month spend and the index size are the recorded values, the CSE sunset check uses the recording
 day, every process-wide switch starts as in a fresh worker, and the page cache is emptied for every row.
-Every socket and database connection is refused for the whole replay.
+Every socket and database connection is refused for the whole replay, a local one too, and the proxy
+settings of the environment (HTTP_PROXY, HTTPS_PROXY, ALL_PROXY) are removed.
 """
 
 import argparse
@@ -62,6 +63,7 @@ log = logging.getLogger("replay_run")
 
 DUMMY_PROXY = "http://replay-proxy.invalid:9"
 LIST_SECRETS = ("GOOGLE_SEARCH_API_KEYS", "GOOGLE_SEARCH_CX_LIST")
+PROXY_ENV = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy")
 
 
 # ---------------------------------------------------------------------------
@@ -133,6 +135,10 @@ def replay_environment(meta, candidate_dir):
                GOOGLE_SEARCH_CX=_env_text(values.get("GOOGLE_SEARCH_CX_LIST", [])))
     with contextlib.ExitStack() as stack:
         stack.enter_context(mock.patch.dict(os.environ, env))
+        # a proxy (one on this machine too) would carry a request out: none, and every host bypasses any other
+        for name in PROXY_ENV:
+            os.environ.pop(name, None)
+        os.environ["NO_PROXY"] = os.environ["no_proxy"] = "*"
         cfg = getattr(cm_settings, "_config", None)
         if cfg is not None:
             for name, value in values.items():

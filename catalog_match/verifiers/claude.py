@@ -270,7 +270,7 @@ class ClaudeVerifier:
             except Exception as exc:  # every SDK error fails closed
                 code, retryable, notice = self._classify_error(sdk, exc)
                 if retryable and attempt == 1:
-                    self.sleep(self._retry_delay(exc, attempt))
+                    cassette.retry_sleep(self._retry_delay(exc, attempt), self.sleep)   # no wait in a replay
                     continue
                 return self._fail(n, code, 1, notice)
 
