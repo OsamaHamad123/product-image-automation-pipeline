@@ -101,7 +101,9 @@ class ApiController extends Controller
         $params = $request->only([
             'row_number', 'product_name', 'brand', 'barcode', 'sku_key',
             'size', 'product_name_ar', 'brand_ar', 'category',
-            'target_width', 'target_height', 'enhance', 'search_decision'
+            'target_width', 'target_height', 'enhance', 'search_decision',
+            // ما عرضته الصفحة وتأكيد الاستبدال (cli_bridge._stale_refusal)
+            'expected_state', 'replace'
         ]);
         $params['file_path'] = $targetPath;
 

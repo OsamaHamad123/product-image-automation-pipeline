@@ -564,7 +564,8 @@ def test_a_missing_table_does_not_break_approve_reject_or_upload(db, sheet, tmp_
             _db_candidates(db)
             rejected = cli_bridge.action_reject_image(_reject_params(OTHER_URL))
             _db_candidates(db)
-            uploaded = cli_bridge.action_upload_manual_image(_upload_params(tmp_path))
+            # replace: the approval above is seconds old (an old client may not overwrite it without replace)
+            uploaded = cli_bridge.action_upload_manual_image(_upload_params(tmp_path, replace=True))
         assert approved == {"status": "success", "image_link": LINK, "sheet_value": LINK, "isolated": True,
                             "provider": "photoroom", "sku_key": SKU, "rows_written": [ROW]}
         assert rejected["status"] == "success" and rejected["reason_code"] == "WRONG_VARIANT"

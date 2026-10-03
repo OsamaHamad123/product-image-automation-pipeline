@@ -420,6 +420,154 @@ def test_select_after_owner_fixed_the_barcode(select_env, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# C1: an approval or upload never replaces a decision the reviewer's page did not show
+# ---------------------------------------------------------------------------
+
+HUMAN = {"cloudinary_url": "https://res.cloudinary.com/demo/other-reviewer.png", "original_url": "https://lulu.ae/x.jpg",
+         "verification_status": "human_approved", "approved_by": "human"}
+
+
+@pytest.fixture
+def stale_env(select_env, monkeypatch):
+    import datetime
+    import local_cache_db
+    bridge, events, state = select_env
+    state.update(approval=None, task=None, fenced=[])
+    monkeypatch.setattr(local_cache_db, "get_cached_product", lambda **k: state["approval"])
+    monkeypatch.setattr(local_cache_db, "get_task_by_row", lambda row: state["task"])
+    monkeypatch.setattr(local_cache_db, "release_worker_claims",
+                        lambda row, sku_key=None: state["fenced"].append((row, sku_key)) or 1)
+    state["now"] = datetime.datetime.now().replace(microsecond=0)
+    return bridge, events, state
+
+
+def _approved(state, seconds_ago, **extra):
+    import datetime
+    return dict(HUMAN, resolved_at=state["now"] - datetime.timedelta(seconds=seconds_ago), **extra)
+
+
+def _queue_row(status="ready_for_review", updated_at="2026-10-03 10:00:00"):
+    return {"row_number": 4, "sku_key": SELECT_PARAMS["sku_key"], "product_name": SELECT_PARAMS["product_name"],
+            "barcode": SELECT_PARAMS["barcode"], "status": status, "updated_at": updated_at}
+
+
+def _writes(events):
+    return [e for e in events if e[0] in ("process", "link", "resolution")]
+
+
+def test_an_approval_the_page_did_not_show_is_not_replaced(stale_env):
+    bridge, events, state = stale_env
+    state["approval"] = _approved(state, 3600)
+    state["task"] = _queue_row("completed")
+    expected = {"queue_status": None, "queue_updated_at": None, "approved_url": None}
+    result = bridge.action_select_image(dict(SELECT_PARAMS, expected_state=expected))
+    assert result["status"] == "failed" and result["error_code"] == "already_approved" and result["error"]
+    assert result["current"]["approved_url"] == HUMAN["cloudinary_url"]
+    assert result["current"]["approval_status"] == "human_approved"
+    assert result["current"]["queue_status"] == "completed"
+    assert _writes(events) == [] and state["fenced"] == []
+
+    # the page shows it (the sheet link, with or without the needs_review: prefix): the approval replaces it
+    shown = dict(expected, approved_url="needs_review:" + HUMAN["cloudinary_url"])
+    assert bridge.action_select_image(dict(SELECT_PARAMS, expected_state=shown))["status"] == "success"
+    # or the reviewer confirmed the replacement
+    assert bridge.action_select_image(dict(SELECT_PARAMS, expected_state=expected, replace=True))["status"] == "success"
+
+
+def test_a_queue_row_that_changed_since_the_page_opened_refuses(stale_env):
+    bridge, events, state = stale_env
+    state["task"] = _queue_row("processing", "2026-10-03 10:05:00")
+    expected = {"queue_status": "ready_for_review", "queue_updated_at": "2026-10-03 10:00:00", "approved_url": None}
+    result = bridge.action_select_image(dict(SELECT_PARAMS, expected_state=expected))
+    assert result["error_code"] == "state_changed"
+    assert result["current"]["queue_status"] == "processing"
+    assert result["current"]["queue_updated_at"] == "2026-10-03 10:05:00"
+    assert _writes(events) == []
+
+    state["task"] = _queue_row("ready_for_review", "2026-10-03 10:07:00")      # same status, newer row
+    assert bridge.action_select_image(dict(SELECT_PARAMS, expected_state=expected))["error_code"] == "state_changed"
+
+    # unchanged (the page's ISO form of the same time), or replace: approved; the worker's claim is taken
+    import datetime
+    state["task"] = _queue_row("ready_for_review", datetime.datetime(2026, 10, 3, 10, 0, 0))
+    iso = dict(expected, queue_updated_at="2026-10-03T10:00:00")
+    assert bridge.action_select_image(dict(SELECT_PARAMS, expected_state=iso))["status"] == "success"
+    assert state["fenced"] == [(4, SELECT_PARAMS["sku_key"])]
+    state["task"] = _queue_row("processing", "2026-10-03 10:05:00")
+    assert bridge.action_select_image(dict(SELECT_PARAMS, expected_state=expected, replace="true"))["status"] == "success"
+
+
+def test_the_expected_state_may_arrive_as_json_text(stale_env):
+    """The upload form posts fields as text."""
+    import json as _json
+    bridge, events, state = stale_env
+    state["approval"] = _approved(state, 3600)
+    expected = _json.dumps({"queue_status": None, "queue_updated_at": None, "approved_url": ""})
+    assert bridge.action_select_image(dict(SELECT_PARAMS, expected_state=expected))["error_code"] == "already_approved"
+
+
+@pytest.mark.parametrize("seconds_ago, same_image, refused", [
+    (30, False, True),           # another approval seconds ago: an old client may not replace it
+    (30, True, False),           # the same image approved again (a retried request)
+    (600, False, False),         # older than two minutes: the old behaviour
+])
+def test_an_old_client_never_replaces_a_fresh_approval(stale_env, seconds_ago, same_image, refused):
+    bridge, events, state = stale_env
+    state["approval"] = _approved(state, seconds_ago, **({"original_url": V2_RESULT["url"]} if same_image else {}))
+    result = bridge.action_select_image(dict(SELECT_PARAMS))
+    assert (result.get("error_code") == "already_approved") is refused
+    assert (result["status"] == "success") is (not refused)
+    assert bridge.action_select_image(dict(SELECT_PARAMS, replace=True))["status"] == "success"
+
+
+def test_an_approval_made_during_processing_is_not_overwritten(stale_env, monkeypatch):
+    """The re-check under the publish lock: another reviewer approved while this image was processed."""
+    import image_processor
+    bridge, events, state = stale_env
+    original = image_processor.process_product_image_result
+
+    def slow(*a, **k):
+        state["approval"] = _approved(state, 1)
+        return original(*a, **k)
+
+    monkeypatch.setattr(image_processor, "process_product_image_result", slow)
+    expected = {"queue_status": None, "queue_updated_at": None, "approved_url": None}
+    result = bridge.action_select_image(dict(SELECT_PARAMS, expected_state=expected))
+    assert result["error_code"] == "already_approved"
+    assert not any(e[0] in ("link", "metadata_write", "resolution") for e in events)
+    assert state["fenced"] == []
+
+
+def test_a_manual_upload_follows_the_same_rule(stale_env, tmp_path):
+    bridge, events, state = stale_env
+    state["approval"] = _approved(state, 10)
+    upload = tmp_path / "manual.png"
+    _canvas(upload, (300, 300))
+    params = {k: SELECT_PARAMS[k] for k in ("row_number", "product_name", "brand", "barcode", "sku_key")}
+    params["file_path"] = str(upload)
+    assert bridge.action_upload_manual_image(dict(params))["error_code"] == "already_approved"
+    expected = {"queue_status": None, "queue_updated_at": None, "approved_url": None}
+    assert bridge.action_upload_manual_image(dict(params, expected_state=expected))["error_code"] == "already_approved"
+    assert _writes(events) == []
+    assert bridge.action_upload_manual_image(dict(params, expected_state=expected, replace=True))["status"] == "success"
+
+
+def test_a_publish_lock_held_elsewhere_writes_nothing(stale_env, monkeypatch):
+    import contextlib
+    import local_cache_db
+    bridge, events, state = stale_env
+
+    @contextlib.contextmanager
+    def busy(sku_key, timeout=None):
+        yield "busy"
+
+    monkeypatch.setattr(local_cache_db, "sku_publish_lock", busy)
+    result = bridge.action_select_image(dict(SELECT_PARAMS))
+    assert result["status"] == "failed" and result["error_code"] == "busy"
+    assert not any(e[0] in ("link", "resolution") for e in events)
+
+
+# ---------------------------------------------------------------------------
 # Error payloads never carry exception text (fastapi_server returns them over HTTP)
 # ---------------------------------------------------------------------------
 

@@ -504,6 +504,150 @@ def _learn_brand_spelling(action, params, acted, reason_code, first_brand=None):
         logger.exception("تعذر تسجيل ما تعلّمه البحث من قرار المراجع (%s)", action)
 
 
+# ---------------------------------------------------------------------------
+# الاعتماد فوق قرار لم يره المراجع (عقد C1 مع شاشة المراجعة)
+# ---------------------------------------------------------------------------
+
+# بلا expected_state (عميل قديم): اعتماد بشري لصورة أخرى خلال هذه المدة لا يُستبدل إلا بـ replace
+APPROVAL_GUARD_SECONDS = 120
+STALE_ERRORS = {
+    "already_approved": "هذا المنتج اعتمده مراجع آخر؛ راجع الصورة المعتمدة قبل استبدالها",
+    "state_changed": "حالة المنتج تغيّرت منذ فتحه؛ افتحه من جديد",
+    "busy": "نشر آخر لهذا المنتج ما زال يكتب في الشيت؛ حاول بعد قليل",
+}
+
+
+def _ts(value):
+    """توقيت كنص 'YYYY-MM-DD HH:MM:SS' للمقارنة (datetime من بايثون أو نص من صفحة اللوحة)، أو None."""
+    if value in (None, ""):
+        return None
+    if hasattr(value, "strftime"):
+        return value.strftime("%Y-%m-%d %H:%M:%S")
+    text = str(value).strip().replace("T", " ")[:19]
+    return text or None
+
+
+def _bare_link(value):
+    text = str(value or "").strip()
+    if text.startswith("needs_review:"):
+        text = text[len("needs_review:"):].strip()
+    return text
+
+
+def _current_state(sku_key, row_number, product_name):
+    """
+    (الحالة كما تعيدها الاستجابة، الحل المعتمد الحالي أو None). الحالة: صف الطابور لهذا المنتج عند رقم الصف
+    (queue_status / queue_updated_at)، والحل المعتمد (approved_url وهو رابط Cloudinary، approved_image_url
+    الصورة الأصلية، approval_status: human_approved | auto_verified، approved_by، approved_at).
+    """
+    approval = local_cache_db.get_cached_product(sku_key=sku_key) if sku_key else None
+    task = local_cache_db.get_task_by_row(row_number)
+    if not _same_product_task(task, sku_key, product_name):
+        task = None
+    approval = approval or {}
+    current = {
+        "queue_status": (task or {}).get("status") or None,
+        "queue_updated_at": _ts((task or {}).get("updated_at")),
+        "approved_url": approval.get("cloudinary_url") or None,
+        "approved_image_url": approval.get("original_url") or None,
+        "approval_status": approval.get("verification_status") or None,
+        "approved_by": approval.get("approved_by") or None,
+        "approved_at": _ts(approval.get("resolved_at")),
+    }
+    return current, (approval or None)
+
+
+def _expected_state(params):
+    expected = params.get('expected_state')
+    if isinstance(expected, str) and expected.strip():
+        try:
+            expected = json.loads(expected)
+        except ValueError:
+            return None
+    return expected if isinstance(expected, dict) else None
+
+
+def _queue_changed(expected, current):
+    """
+    هل تغيّر صف الطابور منذ فتح الصفحة؟ الحالة ثم التوقيت (إن أرسلته الصفحة). صفحة لم ترَ صفاً (null) لا ترى
+    الصفوف المكتملة أصلاً، فصف 'completed' يطابقها؛ الاعتماد البشري الذي أكمله يُفحص منفصلاً (already_approved).
+    """
+    seen = str(expected.get("queue_status") or "").strip() or None
+    now = current["queue_status"]
+    if seen is None:
+        return now not in (None, "completed")
+    if seen != now:
+        return True
+    seen_at = _ts(expected.get("queue_updated_at"))
+    return bool(seen_at) and seen_at != current["queue_updated_at"]
+
+
+def _approval_age_seconds(approval):
+    resolved_at = approval.get("resolved_at")
+    if resolved_at in (None, ""):
+        return None
+    if not hasattr(resolved_at, "timestamp"):
+        try:
+            import datetime
+            resolved_at = datetime.datetime.strptime(_ts(resolved_at), "%Y-%m-%d %H:%M:%S")
+        except (TypeError, ValueError):
+            return None
+    import time
+    return abs(time.time() - resolved_at.timestamp())
+
+
+def _stale_refusal(params, sku_key, row_number, product_name, image_url=None):
+    """
+    رفض الاعتماد / الرفع فوق قرار لم يره المراجع (None = مسموح). replace=true يتجاوز الفحص.
+    expected_state (ما عرضته الصفحة: queue_status, queue_updated_at, approved_url):
+      - اعتماد بشري لم تعرضه الصفحة (رابطه غير approved_url) -> already_approved
+      - صف الطابور تغيّر منذ فتح الصفحة -> state_changed
+    بلا expected_state (عميل قديم): يبقى السلوك القديم، إلا أن اعتماداً بشرياً لصورة أخرى خلال آخر دقيقتين
+    (APPROVAL_GUARD_SECONDS) لا يُستبدل -> already_approved. الاستجابة تحمل current لتعرضه الصفحة.
+    """
+    if _as_bool(params.get('replace', False)):
+        return None
+    current, approval = _current_state(sku_key, row_number, product_name)
+    human = bool(approval) and approval.get("verification_status") == "human_approved"
+    expected = _expected_state(params)
+    code = None
+    if expected is not None:
+        shown = _bare_link(expected.get("approved_url"))
+        if human and shown not in (approval.get("cloudinary_url"), approval.get("original_url")):
+            code = "already_approved"
+        elif _queue_changed(expected, current):
+            code = "state_changed"
+    elif human and not (image_url and image_url == approval.get("original_url")):
+        age = _approval_age_seconds(approval)
+        if age is not None and age < APPROVAL_GUARD_SECONDS:
+            code = "already_approved"
+    if code is None:
+        return None
+    return {'status': 'failed', 'error_code': code, 'error': STALE_ERRORS[code], 'current': current}
+
+
+def _reviewer_check(params, sku_key, row_number, product_name, image_url, out):
+    """
+    before_write لاعتماد المراجع ورفعه (تحت قفل النشر للـ SKU، بعد المعالجة والرفع): يعيد فحص C1 لأن الحالة
+    قد تتغير أثناء المعالجة، ثم يسحب حجز العامل عن صفوف المنتج فلا ينشر العامل فوق هذا القرار بعد تحرير القفل.
+    """
+    def check():
+        refusal = _stale_refusal(params, sku_key, row_number, product_name, image_url)
+        if refusal:
+            out["refusal"] = refusal
+            return False
+        local_cache_db.release_worker_claims(row_number, sku_key=sku_key)
+        return True
+    return check
+
+
+def _not_written(res, out):
+    """استجابة نشر لم يكتب شيئاً (superseded): رفض C1 إن حدث، وإلا قفل النشر بقي عند غيرنا."""
+    if out.get("refusal"):
+        return out["refusal"]
+    return {'status': 'failed', 'error_code': 'busy', 'error': STALE_ERRORS["busy"]}
+
+
 def _other_rows(sku_key, row_number):
     """
     صفوف الشيت الأخرى لنفس المنتج: صفوف الطابور بنفس sku_key (المنتج مكرر في الشيت)، كل منها بهويته المسجلة
@@ -563,9 +707,13 @@ def action_select_image(params):
     sku_key, barcode, problem = _identity_problem(params, row_number)
     if problem:
         return {'status': 'failed', 'error': problem}
+    refusal = _stale_refusal(params, sku_key, row_number, product_name, image_url)
+    if refusal:
+        return refusal
 
     pipeline = _pipeline()
     queue_started = False
+    guard = {}
     try:
         google_sheets.init_async_queue(config.CREDENTIALS_FILE, config.SPREADSHEET_NAME_OR_URL)
         queue_started = True
@@ -579,7 +727,10 @@ def action_select_image(params):
             category_override={k: _text(params, k) for k in ('category_l1_en', 'category_l2_en', 'category_l3_en')},
             key_size=_text(params, 'size') or None, key_brand=brand or None, sku_key=sku_key,
             also_rows=_other_rows(sku_key, row_number),
+            before_write=_reviewer_check(params, sku_key, row_number, product_name, image_url, guard),
         )
+        if res["status"] == "superseded":
+            return _not_written(res, guard)
         if res["status"] == "failed":
             return {'status': 'failed', 'error': res.get('error'), 'isolated': res.get('isolated', False)}
 
@@ -624,7 +775,11 @@ def action_upload_manual_image(params):
     if not sku_key:
         sku_key = (task or {}).get("sku_key") or pipeline.compute_sku_key(
             {"name": product_name, "brand": brand, "barcode": barcode}, _load_brand_mappings())
+    refusal = _stale_refusal(params, sku_key, row_number, product_name)
+    if refusal:
+        return refusal
     queue_started = False
+    guard = {}
     try:
         google_sheets.init_async_queue(config.CREDENTIALS_FILE, config.SPREADSHEET_NAME_OR_URL)
         queue_started = True
@@ -635,11 +790,14 @@ def action_upload_manual_image(params):
             category_override={k: _text(params, k) for k in ('category_l1_en', 'category_l2_en', 'category_l3_en')},
             key_size=_text(params, 'size') or None, key_brand=brand or None, sku_key=sku_key,
             also_rows=_other_rows(sku_key, row_number),
+            before_write=_reviewer_check(params, sku_key, row_number, product_name, None, guard),
         )
         try:
             os.remove(file_path)
         except OSError:
             pass
+        if res["status"] == "superseded":
+            return _not_written(res, guard)
         if res["status"] == "failed":
             return {'status': 'failed', 'error': res.get('error')}
         local_cache_db.save_product_resolution(

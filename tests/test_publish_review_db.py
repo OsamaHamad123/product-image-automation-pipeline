@@ -523,3 +523,56 @@ def test_approving_one_row_of_a_duplicated_product_writes_every_row(db, review_e
     assert _queue(db, ROWS[:3]) == {ROWS[0]: "completed", ROWS[1]: "completed", ROWS[2]: "pending"}
     assert db.get_curation_candidates(ROWS[1], sku_key=key) == []
     db.delete_curation_candidates(ROWS[2], sku_key="p4-other-size")
+
+
+# ---------------------------------------------------------------------------
+# C1 on the real queue: what the review page read is compared with the row now
+# ---------------------------------------------------------------------------
+
+def _page_view(db, row):
+    """What ReviewController::presentQueueRow serves the page: the status and (string) updated_at."""
+    task = db.get_task_by_row(row)
+    return {"queue_status": task["status"], "queue_updated_at": str(task["updated_at"]), "approved_url": None}
+
+
+def test_the_worker_taking_the_row_after_the_page_opened_refuses_the_approval(db, review_env):
+    import time
+    cli_bridge, env, key = review_env
+    db.add_to_queue(ROWS[0], "", DUP_NAME, DUP_BRAND, "q", payload={"size": ""}, sku_key=key)
+    seen = _page_view(db, ROWS[0])
+    params = {"image_url": "https://x/a.jpg", "product_name": DUP_NAME, "brand": DUP_BRAND, "row_number": ROWS[0],
+              "barcode": "", "sku_key": key, "expected_state": seen}
+    time.sleep(1.1)                                        # updated_at has one-second resolution
+    conn = db.get_db_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute("UPDATE automation_queue SET status = 'processing', worker_id = 'w#c1', "
+                    "lease_until = NOW() + INTERVAL 15 MINUTE WHERE `row_number` = %s", (ROWS[0],))
+        conn.commit()
+    finally:
+        conn.close()
+    result = cli_bridge.action_select_image(dict(params))
+    assert result["error_code"] == "state_changed" and result["current"]["queue_status"] == "processing"
+    assert env["sheet"] == []
+
+    # the page refreshed its view: approved, the worker's claim is gone and the row is completed
+    task = db.get_task_by_row(ROWS[0])
+    result = cli_bridge.action_select_image(dict(params, expected_state=result["current"]))
+    assert result["status"] == "success" and env["sheet"]
+    assert not db.is_claim_held(task["id"], "w#c1")
+    assert db.get_task_by_row(ROWS[0])["status"] == "completed"
+
+    # a second reviewer's page still shows the row without that approval
+    env["sheet"].clear()
+    result = cli_bridge.action_select_image(dict(params, image_url="https://x/b.jpg", expected_state=seen))
+    assert result["error_code"] == "already_approved" and result["current"]["approved_url"] == env["link"]
+    assert env["sheet"] == []
+    assert db.get_cached_product(sku_key=key)["original_url"] == "https://x/a.jpg"
+
+
+def test_the_upload_endpoint_forwards_what_the_page_showed():
+    """ApiController::uploadManualImage passes only listed fields to the bridge: C1's fields must be among them."""
+    text = (ROOT / "dashboard" / "app" / "Http" / "Controllers" / "ApiController.php").read_text(encoding="utf-8")
+    method = text[text.index("function uploadManualImage"):text.index("function clearProductsCache")]
+    listed = method[method.index("$request->only(["):method.index("]);", method.index("$request->only(["))]
+    assert "'expected_state'" in listed and "'replace'" in listed
