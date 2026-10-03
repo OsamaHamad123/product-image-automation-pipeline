@@ -816,9 +816,10 @@ def _default_outcome_hook(outcome):
     logger.error("%s", message)
     log = getattr(config, "log_error_to_laravel", None)
     if callable(log):
+        # قيم خلايا الشيت تُمرر سطراً واحداً: خلية فيها سطر جديد لا تزوّر أسطر سجل
+        fields = {k: _one_line(outcome[k]) if outcome.get(k) else None for k in ("barcode", "product_name", "brand")}
         try:
-            log(message, barcode=outcome.get("barcode") or None, product_name=outcome.get("product_name") or None,
-                brand=outcome.get("brand") or None, level="ERROR")
+            log(message, level="ERROR", **fields)
         except Exception:
             pass
 

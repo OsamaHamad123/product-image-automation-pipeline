@@ -884,6 +884,17 @@ def test_reforwarding_a_redis_payload_never_duplicates_outbox_rows(gs, outbox):
     assert gs.reported == []
 
 
+def test_default_outcome_hook_keeps_each_field_on_one_line(gs, monkeypatch, offline):
+    import config
+    monkeypatch.setattr(gs, "_outcome_hook", None)
+    logged = []
+    monkeypatch.setattr(config, "log_error_to_laravel", lambda msg, **k: logged.append(k))
+    gs._report_outcome({"id": 1, "status": "CONFLICT", "error": "x", "barcode": "62\n[fake] local.ERROR: forged",
+                        "product_name": "Milk\r\n[2026-01-01] local.ERROR: forged", "brand": "Al\nmarai"})
+    (kwargs,) = logged
+    assert not any("\n" in str(v) or "\r" in str(v) for v in kwargs.values())
+
+
 def test_queued_seq_never_goes_below_the_outbox_high_water_mark(gs, outbox):
     """A clock step back (or two processes in one coarse clock tick) must not make a later write look older."""
     import time as _time
