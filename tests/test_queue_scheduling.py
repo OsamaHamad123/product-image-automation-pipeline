@@ -166,6 +166,45 @@ def test_not_found_is_retried_early_when_the_brand_mapping_changes(db):
     assert (_row(db, 0)["status"], _row(db, 0)["requeue_reason"]) == ("pending", "LOCAL_INDEX_CHANGED")
 
 
+@pytest.fixture
+def catalog(db):
+    def wipe():
+        _sql(db, "DELETE FROM catalog_products WHERE store = 'p4qtest'")
+
+    wipe()
+    yield db
+    wipe()
+
+
+def _catalog_row(db, url, token, age_sql):
+    _sql(db, "INSERT INTO catalog_products (store, url, url_hash, slug_text, first_seen, last_seen) "
+             f"VALUES ('p4qtest', %s, SHA1(%s), %s, {age_sql}, NOW())", (url, url, token))
+    pid = _sql(db, "SELECT id FROM catalog_products WHERE url = %s", (url,))[0]["id"]
+    _sql(db, "INSERT INTO catalog_tokens (token, product_id) VALUES (%s, %s)", (token, pid))
+
+
+def test_enqueue_sees_new_local_index_pages_for_the_brand_of_a_not_found_row(catalog, monkeypatch):
+    import main
+    db = catalog
+    prod = {"row_number": ROW, "product_name": "Zwanzig Beef Luncheon Meat 850g", "brand": "Zwanzig",
+            "barcode": "", "existing_image_link": ""}
+    rows, _ = main.plan_enqueue([prod])
+    db.add_many_to_queue(rows)
+    task = db.fetch_next_task("host:1")
+    db.update_task_status(task["id"], "failed", failure_code="NO_RESULTS", claim_id=task["worker_id"])
+    _sql(db, "UPDATE automation_queue SET searched_at = NOW() - INTERVAL 1 DAY WHERE id = %s", (task["id"],))
+
+    _catalog_row(db, "https://shop.example/zwanzig-old-can", "zwanzig", "NOW() - INTERVAL 3 DAY")
+    rows, stats = main.plan_enqueue([prod])
+    assert rows[0]["requeue_reason"] is None and stats["index_changed"] == 0     # nothing new since the search
+
+    _catalog_row(db, "https://shop.example/zwanzig-luncheon-850g", "zwanzig", "NOW()")
+    rows, stats = main.plan_enqueue([prod])
+    assert rows[0]["requeue_reason"] == "LOCAL_INDEX_CHANGED" and stats["index_changed"] == 1
+    db.add_many_to_queue(rows)
+    assert _sql(db, "SELECT status FROM automation_queue WHERE id = %s", (task["id"],))[0]["status"] == "pending"
+
+
 # ---------------------------------------------------------------------------
 # PROVIDER_DOWN backoff and the per-run cap
 # ---------------------------------------------------------------------------
