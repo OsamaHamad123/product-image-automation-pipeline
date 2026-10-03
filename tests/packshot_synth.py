@@ -605,36 +605,44 @@ def good_corpus() -> Dict[str, List[Tuple[Shot, dict]]]:
 
 
 def damaged_corpus():
-    """name -> (shot, run options). The gate must flag every one (the result is not isolated)."""
+    """
+    name -> (shot, run options, (how, flag)). how 'flag': the final result is not isolated and carries `flag`;
+    how 'retry': the first (Gemini crop) attempt carried `flag`, so the full frame was tried (2 calls) and the
+    published canvas is the whole product.
+    """
     bottle = make("bottle", (600, 900))
     can = make("can", (600, 800))
     juice = make("juicebox", (600, 900), straw_w=4.0)
     out = {}
-    # a provider that keeps a grey photo card (opaque source), with and without a Gemini box
+    # a provider that keeps a grey photo card (opaque source), without and with a Gemini box
     carded = with_extras(bottle, "bottle_on_card", under=[photo_card(bottle)])
-    out["kept_card_no_box"] = (carded, {"photoroom": truth_provider(carded, keep=(carded.extras_under[0],)),
-                                        "box": False})
+    keeper = truth_provider(carded, keep=(carded.extras_under[0],))
+    out["kept_card_no_box"] = (carded, {"photoroom": keeper, "box": False}, ("flag", "opaque_backdrop"))
+    out["kept_card_with_box"] = (carded, {"photoroom": keeper}, ("flag", "opaque_fill"))
     # an offset shadow kept by the provider at alpha 48-97
     shadowed = with_extras(can, "can_offset_shadow", under=[offset_shadow(can)])
-    out["kept_offset_shadow"] = (shadowed, {"photoroom": truth_provider(shadowed, keep=(shadowed.extras_under[0],))})
-    # a transparent PNG with a baked-in shadow and no provider to re-isolate it
+    out["kept_offset_shadow"] = (shadowed, {"photoroom": truth_provider(shadowed, keep=(shadowed.extras_under[0],))},
+                                 ("flag", "kept_shadow"))
+    # a transparent PNG with a baked-in shadow and no provider key to re-isolate it
     baked = Shot("can_baked_shadow_png", can.product, None, extras_under=[offset_shadow(can)], box=can.box)
-    out["baked_shadow_png"] = (baked, {"photoroom": None})
+    out["baked_shadow_png"] = (baked, {"photoroom": None}, ("flag", "kept_shadow"))
     # nine watermark letters kept by the provider (0.54% each)
     marked = with_extras(bottle, "bottle_watermark", over=[watermark_letters(bottle)])
-    out["watermark_letters"] = (marked, {"photoroom": truth_provider(marked, keep=(marked.extras_over[0],))})
+    out["watermark_letters"] = (marked, {"photoroom": truth_provider(marked, keep=(marked.extras_over[0],))},
+                                ("flag", "second_object"))
     # a distinct smaller object kept (a price tag)
     tagged = with_extras(bottle, "bottle_price_tag", over=[price_tag(bottle)])
-    out["price_tag"] = (tagged, {"photoroom": truth_provider(tagged, keep=(tagged.extras_over[0],)), "box": False})
+    out["price_tag"] = (tagged, {"photoroom": truth_provider(tagged, keep=(tagged.extras_over[0],)), "box": False},
+                        ("flag", "second_object"))
     # a no-op segmentation of a studio photo
     studio = make("bottle", (600, 900), bg=(150, 160, 170))
-    out["opaque_noop"] = (studio, {"photoroom": opaque_provider(studio)})
-    # the Gemini box cuts the 4 px straw; nothing else configured to retry with (the crop result is assessed)
+    out["opaque_noop"] = (studio, {"photoroom": opaque_provider(studio)}, ("flag", "opaque_fill"))
+    # the Gemini box encloses the carton only and cuts the 4 px straw
     a = juice.alpha()
     l, t, r, b = product_box(a)
     carton_top = t + int(round(0.22 * (b - t)))
-    out["straw_cut_by_box"] = (juice, {"gemini_box": gemini_box_of(a, region=(l, carton_top, r, b)),
-                                       "assess_first_only": True})
+    out["straw_cut_by_box"] = (juice, {"gemini_box": gemini_box_of(a, region=(l, carton_top, r, b))},
+                               ("retry", "edge_clipped"))
     return out
 
 
