@@ -165,7 +165,7 @@ class FakeWeb:
 
 
 def _dumps(data):
-    return json.dumps(data).encode("utf-8")
+    return json.dumps(data, ensure_ascii=False).encode("utf-8")      # as a real server: UTF-8, not \u-escaped
 
 
 def build_world():
@@ -175,11 +175,12 @@ def build_world():
             reading("ALMARAI", "Full Fat Fresh Milk", "1 L"))
     w.image("https://cdn.luluhypermarket.com/a2.jpg", (30, 160, 30), (200, 200, 600, 650),
             reading("ALMARAI", "", "", view="lifestyle", variant_match="unsure", size_match="unsure"))
+    # titles as the web writes them: a U+2028 line separator, and U+0085 (an ellipsis decoded as cp1252)
     w.serper["almarai"] = [
-        {"title": "Almarai Full Fat Fresh Milk 1L", "imageUrl": "https://cdn.carrefouruae.com/a1.jpg",
+        {"title": "Almarai Full Fat Fresh Milk\u20281L", "imageUrl": "https://cdn.carrefouruae.com/a1.jpg",
          "link": "https://www.carrefouruae.com/mafuae/en/milk/almarai-full-fat-fresh-milk-1l/p/111",
          "domain": "carrefouruae.com", "imageWidth": 800, "imageHeight": 800, "position": 1},
-        {"title": "Almarai Full Fat Milk 1L", "imageUrl": "https://cdn.luluhypermarket.com/a2.jpg",
+        {"title": "Almarai Full Fat Milk 1L\x85", "imageUrl": "https://cdn.luluhypermarket.com/a2.jpg",
          "link": "https://www.luluhypermarket.com/en-ae/almarai-full-fat-milk-1l/p/112",
          "domain": "luluhypermarket.com", "imageWidth": 800, "imageHeight": 800, "position": 2},
     ]
@@ -372,6 +373,9 @@ def test_the_recording_run_decides_as_the_fake_web_intends(recorded, recording):
     assert meta["versions"]["pillow"] and meta["run"]["expansion"] is True
     assert {f.name for f in recorded["folder"].iterdir()} >= {"meta.json", "http.jsonl", "verifier.jsonl",
                                                                "local_index.jsonl", "blobs"}
+    # the titles' U+2028 / U+0085 are stored escaped: every line of the cassette is one answer
+    text = (recorded["folder"] / "http.jsonl").read_text(encoding="utf-8")
+    assert "\\u2028" in text and "\\u0085" in text and len(text.splitlines()) == text.count("\n")
 
 
 def test_the_replay_decides_exactly_as_the_recording_offline(recorded, tmp_path):
@@ -549,3 +553,129 @@ def test_record_refuses_a_folder_that_already_holds_a_cassette(recorded):
                                 str(recorded["folder"])])
     with pytest.raises(SystemExit):
         recorded["smoke"].main(["--rows-file", str(recorded["rows"]), "--dry-run", "--record-shadow"])
+
+
+# ---------------------------------------------------------------------------
+# Review fixes: a crash, a database call, an unfinished cassette, a full disk, the shadow price
+# ---------------------------------------------------------------------------
+
+def test_a_row_that_crashes_in_the_replay_is_incomplete_and_fails_strict(recorded, tmp_path, capsys):
+    from catalog_match import identity
+
+    real = identity.build_sku_spec
+
+    def crashing(fields, mappings=None):
+        if "NADEC" in fields.get("name", ""):
+            raise KeyError("a field this code expects")
+        return real(fields, mappings)
+
+    with mock.patch.object(identity, "build_sku_spec", crashing):
+        code, doc = replay(recorded["folder"], tmp_path / "crash.json", "--strict")
+    assert code == 1
+    rows = {r["row"]: r for r in doc["rows"]}
+    assert "error" in rows[3] and rows[3]["replay"]["complete"] is False
+    assert "a field this code expects" in rows[3]["replay"]["error"]
+    assert doc["replay"]["crashed_rows"] == [3] and doc["replay"]["incomplete_rows"] == [3]
+    assert all(rows[n]["replay"]["complete"] for n in (2, 4, 5))
+    printed = capsys.readouterr().out
+    assert "CRASHED in the replay: rows 3" in printed and "the row crashed" in printed
+
+
+def test_a_database_call_in_the_replay_is_listed_under_its_row_and_fails_strict(recorded, tmp_path, capsys):
+    import pymysql
+
+    real = retrieve.build_queries
+
+    def asks_the_database(spec, custom=None):
+        if "PUCK" in spec.raw_name:                 # new code that reads something from the database
+            try:
+                pymysql.connect(host="127.0.0.1", user="worker")
+            except pymysql.err.OperationalError:
+                pass
+        return real(spec, custom)
+
+    with mock.patch.object(retrieve, "build_queries", asks_the_database):
+        code, doc = replay(recorded["folder"], tmp_path / "db.json", "--strict")
+    assert code == 1
+    rows = {r["row"]: r for r in doc["rows"]}
+    assert rows[4]["replay"]["complete"] is False and rows[4]["replay"]["blocked"] == ["pymysql.connect"]
+    assert all(rows[n]["replay"]["complete"] and rows[n]["replay"]["blocked"] == [] for n in (2, 3, 5))
+    assert doc["replay"]["database_attempts"] == 1 and doc["replay"]["blocked_rows"] == [4]
+    assert "blocked pymysql.connect" in capsys.readouterr().out
+
+
+def test_a_cassette_that_cannot_be_finished_keeps_the_runs_results(recorded, tmp_path, capsys, monkeypatch):
+    folder, out = tmp_path / "cassette_locked", tmp_path / "after_locked.json"
+    world = build_world()
+    real = os.replace
+    meta_writes = []
+
+    def locked(src, dst):
+        if os.path.basename(str(dst)) == "meta.json":
+            meta_writes.append(dst)
+            if len(meta_writes) > 1:           # the closing write: an indexer holds the file on Windows
+                raise PermissionError(32, "The process cannot access the file because it is being used by "
+                                          "another process", str(dst))
+        return real(src, dst)
+
+    monkeypatch.setattr(cassette, "REPLACE_WAITS", (0, 0))
+    with live(world, tmp_path), mock.patch.object(os, "replace", locked):
+        code = recorded["smoke"].main(["--rows-file", str(recorded["rows"]), "--dry-run", "--json", str(out),
+                                       "--record", str(folder)])
+        _wait_background_reads()
+        # nothing of the cassette outlives the run: no breaker, spend or index-size hook stays installed
+        assert cassette.active() is None and "is_open" not in verify.BREAKER.__dict__
+        assert "Cassette" not in spend_mod.MariaDbSpendStore.role_spend.__qualname__
+        assert "Cassette" not in local_index.DbCatalogStore.count.__qualname__
+    assert code == 1
+    doc = json.loads(out.read_text(encoding="utf-8"))          # the paid run's results are all there
+    assert [view(r) for r in doc["rows"]] == [view(r) for r in recorded["doc"]["rows"]]
+    kept = list(folder.glob("meta.json.*.tmp"))
+    assert len(kept) == 1
+    assert set(json.loads(kept[0].read_text(encoding="utf-8"))["decisions"]) == {"2", "3", "4", "5"}
+    printed = capsys.readouterr().out
+    assert "could not be finished" in printed and kept[0].name in printed and "results written to" in printed
+
+
+def test_a_full_disk_while_recording_leaves_the_live_decisions_alone(recorded, tmp_path, capsys, monkeypatch):
+    import errno
+
+    folder, out = tmp_path / "cassette_full", tmp_path / "after_full.json"
+    world = build_world()
+
+    def full(self, *args, **kwargs):
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    monkeypatch.setattr(cassette._Store, "write_blob", full)       # every image, page and large body
+    with live(world, tmp_path):
+        code = recorded["smoke"].main(["--rows-file", str(recorded["rows"]), "--dry-run", "--json", str(out),
+                                       "--record", str(folder)])
+        _wait_background_reads()
+    assert code == 0
+    doc = json.loads(out.read_text(encoding="utf-8"))
+    assert [view(r) for r in doc["rows"]] == [view(r) for r in recorded["doc"]["rows"]]
+    assert all(r["cassette"]["complete"] is False and r["cassette"]["not_stored"] for r in doc["rows"])
+    printed = capsys.readouterr().out
+    assert printed.count("CASSETTE:") == 4 and "No space left on device" in printed
+    meta = json.loads((folder / "meta.json").read_text(encoding="utf-8"))
+    assert set(meta["not_stored"]) == {"2", "3", "4", "5"}
+    monkeypatch.undo()
+    code, replayed = replay(folder, tmp_path / "full_replayed.json")
+    assert all(not r["replay"]["complete"] and r["replay"]["misses"] for r in replayed["rows"])     # reported
+
+
+def test_shadow_recording_is_priced_at_the_runs_serp_cost(recorded, tmp_path):
+    rows = tmp_path / "one_row.csv"
+    rows.write_text("row,name,brand,barcode\n2,ALMARAI FULL FAT MILK 1L,ALMARAI,6281007012348\n", encoding="utf-8")
+    seen = []
+    real = cassette.shadow_record
+
+    def spy(spec, outcome, serp_cost=None):
+        seen.append(serp_cost)
+        return real(spec, outcome, serp_cost=serp_cost)
+
+    with live(build_world(), tmp_path), mock.patch.object(cassette, "shadow_record", spy):
+        code = recorded["smoke"].main(["--rows-file", str(rows), "--dry-run", "--serp-cost", "0.0042",
+                                       "--record", str(tmp_path / "cassette_priced"), "--record-shadow"])
+        _wait_background_reads()
+    assert code == 0 and seen == [0.0042]
