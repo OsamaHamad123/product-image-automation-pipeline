@@ -1637,15 +1637,18 @@ def _prepare_verifier_rechecks(notice, run_id):
     """
     صفوف جاهزة للمراجعة بسبب تعطل قارئ الملصق (VERIFIER_DOWN): إن كان القارئ متاحاً في هذا التشغيل (لا تنبيه
     VERIFIER_*) تعود للبحث بأولوية إعادة التحقق؛ وإلا تعود صفوف إعادة تحقق سابقة لم تُسحب إلى المراجعة.
+    يستدعيها العامل عند أول سحب فقط (بعد فحص الميزانية والرصيد وطلب الإيقاف): تشغيل يتوقف قبل أي سحب لا يُخرج
+    صفوفاً من المراجعة. تعيد عدد الصفوف التي عادت للبحث.
     """
     if notice:
         parked = local_cache_db.park_verifier_rechecks()
         if parked:
             print(f"[Worker] قارئ الملصق غير متاح؛ {parked} صف إعادة تحقق عاد للمراجعة.")
-        return
+        return 0
     requeued = local_cache_db.requeue_verifier_down(run_id)
     if requeued:
         print(f"[Worker] {requeued} صف انتظر المراجعة لأن قارئ الملصق تعطل؛ يُعاد بحثه الآن بقارئ يعمل.")
+    return requeued or 0
 
 
 def run_worker_mode(trigger="manual", report=True):
@@ -1694,6 +1697,8 @@ def run_worker_mode(trigger="manual", report=True):
     queue_started = False
     worker_id = None
     start_notice = None          # سبب التوقف قبل أي منتج (للتقرير)
+    rechecks_prepared = False    # إعادة التحقق تُجهز عند أول سحب (_prepare_verifier_rechecks)
+    rechecks_requeued = 0
     try:
         if stop_reason == "db_unavailable":
             print(f"[Worker] قاعدة البيانات لا ترد ({state.get('db_error') or '-'})؛ لن يُعالج أي منتج.")
@@ -1729,7 +1734,6 @@ def run_worker_mode(trigger="manual", report=True):
         worker_id = local_cache_db.new_claim_id().split("#")[0]
         lock = threading.Lock()
         counters = {"provider_down_streak": 0, "credit_streak": 0}
-        _prepare_verifier_rechecks(notice, run_id)
         budget = _daily_budget()
         credit_stop = _credit_stop_searches()
         budget_warned = False
@@ -1791,6 +1795,10 @@ def run_worker_mode(trigger="manual", report=True):
                                 budget_warned = True
                                 print(f"[Worker] تنبيه: صرف اليوم {spent:.2f}$ بلغ {int(BUDGET_WARN_RATIO * 100)}% "
                                       f"من الميزانية اليومية {budget:.2f}$.")
+                        if not rechecks_prepared:
+                            # إعادة التحقق تُخرج صفوفاً من المراجعة: فقط عندما يوشك العامل أن يسحب فعلاً
+                            rechecks_prepared = True
+                            rechecks_requeued = _prepare_verifier_rechecks(notice, run_id)
                         task = local_cache_db.fetch_next_task(worker_id)
                         if task:
                             print(f"[Queue] سحب مهمة الصف {task['row_number']}.")
@@ -1817,6 +1825,12 @@ def run_worker_mode(trigger="manual", report=True):
         run_seconds = time.monotonic() - started + 60
         health = _run_health(worker_id, run_seconds)
         final_notice = None
+        if rechecks_requeued:
+            # صفوف إعادة تحقق لم يصل إليها هذا التشغيل (توقف مبكراً، أو أُجلت بعد انقطاع المزودين) تعود للمراجعة
+            # بمرشحاتها قبل كتابة الحالة النهائية، فلا تختفي من المراجعة حتى التشغيل التالي
+            parked = local_cache_db.park_verifier_rechecks()
+            if parked:
+                print(f"[Worker] {parked} صف إعادة تحقق لم يصل إليه التشغيل؛ عاد للمراجعة.")
         try:
             if stop_reason == "stopped":
                 # يعيد أي صف بقي 'processing' إلى الانتظار، ويلغي طلب الإيقاف، ويضبط الحالة (مراجعة أو خامل)

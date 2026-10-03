@@ -2809,8 +2809,9 @@ def stop_run(worker_active=False):
     زر «إيقاف التشغيل». لا يُحذف أي صف: الجاهز للمراجعة والمعتمد والفاشل والمنتظر يبقى كما هو مع مرشحاته.
     - worker_active=True (الإدراج ما زال يقرأ الشيت ولا عامل بعد، أو العامل ما زال حياً): يُسجل طلب إيقاف
       يلتزم به العامل بين المنتجات، أو عند بدئه قبل معالجة أي منتج؛ الحالة لا تتغير.
-    - worker_active=False (أُنهي العامل أو لم يكن يعمل): الصفوف في 'processing' تعود إلى 'pending'، ويُلغى طلبا
-      الإيقاف والإيقاف المؤقت، والحالة: بانتظار المراجعة إن بقي صف جاهز، وإلا خامل. التنبيه يبقى كما هو.
+    - worker_active=False (أُنهي العامل أو لم يكن يعمل): الصفوف في 'processing' تعود إلى 'pending'، وصفوف إعادة
+      التحقق التي لم يصل إليها العامل تعود للمراجعة بمرشحاتها (_park_rechecks)، ويُلغى طلبا الإيقاف والإيقاف المؤقت،
+      والحالة: بانتظار المراجعة إن بقي صف جاهز، وإلا خامل. التنبيه يبقى كما هو.
     تعيد {released, stop_requested, status, queue}. أخطاء قاعدة البيانات تُرفع.
     """
     conn = get_db_connection()
@@ -2821,6 +2822,7 @@ def stop_run(worker_active=False):
             cursor.execute("UPDATE automation_state SET stop_requested = 1 WHERE `key` = 'active_session'")
         else:
             released = _release_processing(cursor)
+            _park_rechecks(cursor)
             cursor.execute(
                 "UPDATE automation_state SET status = %s, stop_requested = 0, pause_requested = 0, "
                 "current_product_name = '', updated_at = CURRENT_TIMESTAMP WHERE `key` = 'active_session'",
@@ -2836,6 +2838,7 @@ def reset_run(worker_active=False):
     """
     زر «إصلاح تشغيل عالق»: يمسح حالة التشغيل العالقة فقط، ولا يحذف أي صف ولا يلمس curation_candidates
     ولا review_decisions ولا rejected_images ولا resolved_products. الصفوف في 'processing' تعود إلى 'pending'،
+    وصفوف إعادة التحقق التي لم تُسحب تعود للمراجعة بمرشحاتها (_park_rechecks)،
     ويُلغى الإيقاف المؤقت، ويُمسح التقدم (run_id والعدادات) والمنتج الحالي والتنبيه، والحالة: بانتظار المراجعة
     إن بقي صف جاهز، وإلا خامل. worker_active=True: قد يكون الإدراج ما زال يقرأ الشيت أو بقي عامل حياً، فيُسجل طلب
     إيقاف كي لا يبدأ المعالجة أو يتوقف بعد المنتجات الجارية؛ وإلا يُلغى طلب الإيقاف. تعيد
@@ -2845,6 +2848,7 @@ def reset_run(worker_active=False):
     try:
         cursor = conn.cursor()
         released = _release_processing(cursor)
+        _park_rechecks(cursor)
         cursor.execute(
             "UPDATE automation_state SET status = %s, stop_requested = %s, pause_requested = 0, run_id = NULL, "
             "notice = NULL, current_product_name = '', total_items = 0, processed_items = 0, success_count = 0, "

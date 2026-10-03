@@ -366,3 +366,105 @@ def test_a_reviewer_status_write_is_retried_after_a_deadlock(offline, monkeypatc
     monkeypatch.setattr(local_cache_db, "get_db_connection", lambda: conns.append(fake_connection(lost)) or conns[-1])
     assert local_cache_db.update_task_status_by_row(12, "completed", sku_key="k") is False
     assert len(conns) == 1                                   # other errors are not retried
+
+
+# ---------------------------------------------------------------------------
+# C5: rows waiting for review stay there when a run stops early
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def real_worker(db, monkeypatch, tmp_path):
+    """run_worker_mode on the real queue with the sheet replaced (the search is replaced by each test)."""
+    import config
+    import google_sheets
+    import main
+
+    monkeypatch.chdir(tmp_path)
+    os.makedirs("temp", exist_ok=True)
+    real_sleep = time.sleep
+    monkeypatch.setattr(time, "sleep", lambda s: real_sleep(0.01))
+    monkeypatch.setattr(config, "DAILY_BUDGET_USD", 0)
+    monkeypatch.setattr(config, "SERPER_CREDIT_STOP_SEARCHES", 3)
+    monkeypatch.setattr(main, "_another_worker_running", lambda lock: False)
+    monkeypatch.setattr(main, "load_run_config", lambda: None)
+    monkeypatch.setattr(main, "check_verifier", lambda: "")
+    monkeypatch.setattr(main, "_outage_notice", lambda worker_id, since, base=None, **k: base)
+    monkeypatch.setattr(google_sheets, "get_sheets_client", lambda: object())
+    monkeypatch.setattr(google_sheets, "open_worksheet", lambda client, name: object())
+    monkeypatch.setattr(google_sheets, "find_link_column", lambda ws: 5)
+    monkeypatch.setattr(google_sheets, "get_brand_mappings", lambda *a: {})
+    monkeypatch.setattr(google_sheets, "init_async_queue", lambda *a: None)
+    monkeypatch.setattr(google_sheets, "stop_async_queue", lambda: None)
+    done = threading.Event()
+
+    def watchdog():
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline and not done.is_set():
+            real_sleep(0.1)
+        if not done.is_set():
+            db.update_automation_state(status="pre_caching", stop_requested=1)
+
+    threading.Thread(target=watchdog, daemon=True).start()
+    yield main
+    done.set()
+
+
+def _verifier_down_review_row(db, i):
+    _add(db, i)
+    task = db.fetch_next_task("host:1")
+    db.update_task_status(task["id"], "ready_for_review", failure_code="VERIFIER_DOWN", claim_id=task["worker_id"])
+    _candidates(db, i, f"{SKU}{i}", [f"https://p4f.example/{i}.jpg"])
+
+
+def test_a_run_stopped_by_the_budget_before_any_claim_keeps_the_review_rows(real_worker, db, monkeypatch):
+    """Probe C5: today's spend already at the budget. The worker requeued the VERIFIER_DOWN review row (pending,
+    priority 1) and then stopped on BUDGET_REACHED: the review count dropped from 1 to 0 until the next run."""
+    import config
+    main = real_worker
+    _verifier_down_review_row(db, 0)
+    _add(db, 1)                                                    # other work is waiting
+    _sql(db, "INSERT INTO search_spend (day, run_id, provider, calls, usd) VALUES (CURDATE(), 'p4f', 'serper', 1, 5)")
+    monkeypatch.setattr(config, "DAILY_BUDGET_USD", 1.0)
+    monkeypatch.setattr(main, "pre_cache_product_candidates", lambda *a, **k: pytest.fail("nothing may be claimed"))
+    main.run_worker_mode(report=False)
+    assert main.LAST_WORKER["stop_reason"] == "budget_reached"
+    row = _row(db, 0)
+    assert (row["status"], row["failure_code"], row["reverify_count"]) == ("ready_for_review", "VERIFIER_DOWN", 0)
+    assert db.get_ready_for_review_count() == 1
+    assert db.get_automation_state()["status"] == "curation_pending"
+
+
+def test_rechecks_the_run_did_not_reach_go_back_to_review(real_worker, db, monkeypatch):
+    """The budget is reached after the first recheck: the second one waits for review again, not pending."""
+    import config
+    import local_cache_db
+    main = real_worker
+    _verifier_down_review_row(db, 0)
+    _verifier_down_review_row(db, 1)
+    monkeypatch.setattr(config, "DAILY_BUDGET_USD", 1.0)
+    spent = iter([0.0])
+    monkeypatch.setattr(local_cache_db, "spend_today", lambda: next(spent, 5.0))
+    worked = []
+
+    def recheck(task, *a, **k):
+        worked.append(task["row_number"] - ROW)
+        main._finish_task(task, "ready_for_review")
+        return "success"
+
+    monkeypatch.setattr(main, "pre_cache_product_candidates", recheck)
+    main.run_worker_mode(report=False)
+    assert worked == [0] and main.LAST_WORKER["stop_reason"] == "budget_reached"
+    row = _row(db, 1)
+    assert (row["status"], row["failure_code"], row["reverify_count"]) == ("ready_for_review", "VERIFIER_DOWN", 0)
+    assert db.get_ready_for_review_count() == 2
+
+
+def test_stopping_from_the_dashboard_returns_unclaimed_rechecks_to_review(db):
+    """The dashboard's stop ends the worker process (its finally may not run); stop_run settles the queue."""
+    _verifier_down_review_row(db, 0)
+    assert db.requeue_verifier_down("run-s") == 1
+    result = db.stop_run(worker_active=False)
+    assert _row(db, 0)["status"] == "ready_for_review" and result["status"] == "curation_pending"
+    assert db.requeue_verifier_down("run-r") == 1
+    db.reset_run(worker_active=False)
+    assert _row(db, 0)["status"] == "ready_for_review"
