@@ -292,6 +292,41 @@ every pick checked by hand shows the right product.
     to build it.
   - The Health page names the provider «الفهرس المحلي».
 
+### Added: search accuracy (brand spellings, page recovery)
+
+Taken from the 27 rows of `runs/2026-10-03/smoke_6.json` that had no pick. In 10 of them the sheet's brand
+was written differently from the stores. In several more, the right store page was found, but the picture
+Google filed under it was another product.
+
+- **Brand discovery** (`catalog_match/brand_discovery.py`)
+  - When the brand is not in Brands Mapping and no listing writes it the sheet's way, the opening words of
+    each listing are compared with the sheet brand.
+  - **Typo:** one word one letter away, or two letters swapped, never on its first or last letter.
+    `RIO MARIE` matches Rio Mare, `INA PARAMANS` matches Ina Paarman's, `BARTS TRADITON` matches Barts
+    Tradition. American never matches Americana.
+  - **Abbreviation:** only when the sheet brand is written with `/`, `.` or a one-letter word.
+    `SUP/T`, `SUPER T/` and `SUPER/T` all match Super Tasty.
+  - The store spelling counts only when:
+    - the same listing also names the product type;
+    - it comes from a UAE store or from two different sites;
+    - it is not a known other brand.
+  - Once found, the store spelling is used everywhere:
+    - one more query is sent, written with it;
+    - scoring accepts it;
+    - the label reader is told about it.
+  - What a discovered spelling never does:
+    - it never makes a mapped brand, so nothing auto-publishes on it;
+    - a pick supported only by the store spelling carries the new review warning `brand_spelling`.
+- **Page recovery (X0)**, a free first step of the expansion round.
+  - When the page names the right product (tier 1 or 2, the brand, no size conflict) but its picture failed,
+    the page is read for its own main image. A failed picture means any of:
+    - it could not be downloaded;
+    - it is a thumbnail or a banner;
+    - the label reader saw another brand, several products, or not a front packshot.
+  - At most 3 pages, never a social network or stock-photo site.
+  - Their images are verified with one call. When that gives a pick, no paid call is made.
+  - Rows 13 (Ansar Gallery, Yumway) and 36 (Tradeling, Green Farm) were this case.
+
 ### Fixed while integrating phase 3
 
 - A barcode-conflict MATCH that cannot be pre-checked no longer skips the second verifier call on the next

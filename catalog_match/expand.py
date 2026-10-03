@@ -17,7 +17,18 @@ When it runs
     * never when the caller injected providers or a verifier (tests, the offline eval),
       unless it also passed an Expansion explicitly (pipeline.find_product_image).
 
-The round ('expand'), within EXPANSION_MAX_CALLS paid calls (every provider call counts):
+The round ('expand') starts with a free step:
+    X0  page recovery: the normal flow's listings whose page names the right product (tier
+        1/2 with the brand, no size conflict) but whose IMAGE failed - not downloadable, a
+        thumbnail or banner, or read as another brand's pack or as not a single front
+        packshot - have their page read (pages.py, no paid call) for its own main image.
+        Google Images often files a page under a "related products" picture: the Ansar
+        Gallery page of Yumway fries under a Mondelle pack, Tradeling's Green Farm Meat
+        Masala under Shan and Double Horse (live run 2026-10-03, rows 13 and 36). At most
+        MAX_RECOVER_PAGES pages, never a social network or stock site. Their images go
+        through the stages below with one verifier call; when that gives a pick, the paid
+        steps are skipped.
+Then, within EXPANSION_MAX_CALLS paid calls (every provider call counts):
     X1  serper_web: the SKU's Q1 text (or the staff's custom query) scoped with site: OR
         over the brand's official domains and the main UAE retailers; the result pages
         are fetched (catalog_match.pages) for their product image, name and GTIN;
@@ -91,6 +102,10 @@ MAX_SERPAPI_SEEDS = 1
 PAGE_WORKERS = 6
 VERIFY_BATCH = 4
 MAX_VERIFY_CALLS = 2
+MAX_RECOVER_PAGES = 3
+RECOVER_VERIFY_CALLS = 1
+# Readings that say the picture is not this product's single front pack, whatever its page says.
+RECOVER_VIEWS = frozenset({"multi_product", "banner", "not_product", "other_side", "lifestyle"})
 UPGRADE_PHASH_DISTANCE = 8
 UPGRADE_MAX_FETCH = 6
 SMALL_IMAGE_REASONS = frozenset({"short_side<250"})
@@ -182,6 +197,7 @@ class RoundReport:
     verify_results: List[VerificationResult] = field(default_factory=list)
     phash_dropped: int = 0
     pages_fetched: int = 0
+    recovered_pages: int = 0                        # X0: free page reads of listings whose image failed
     new_candidates: int = 0
     upgraded: bool = False
 
@@ -335,6 +351,16 @@ class _Collector:
         self.report.pages_fetched += len(hits)
         return [c for lst in lists for c in lst]
 
+    def follow(self, hits: List[Candidate], query_id: str) -> List[Candidate]:
+        """Read the pages of these listings (each page once per round) for their own images."""
+        todo: List[Candidate] = []
+        for hit in hits:
+            key = norm_image_url(hit.page_url)
+            if key and key not in self.seen_pages:
+                self.seen_pages.add(key)
+                todo.append(replace(hit, query_id=query_id))
+        return self._fetch_pages(todo)
+
     def collect(self, results: Iterable[ProviderResult], kind: str) -> List[Candidate]:
         """Candidates from one source's results. kind: 'web' | 'shopping' | 'lens'."""
         direct: List[Candidate] = []
@@ -360,6 +386,50 @@ class _Collector:
             if len(picked) >= MAX_PAGES[kind]:
                 break
         return direct + self._fetch_pages(picked)
+
+
+# ---------------------------------------------------------------------------
+# X0: listings whose page is the product but whose image failed
+# ---------------------------------------------------------------------------
+
+def _image_failed(rc: RankedCandidate) -> bool:
+    """The picture, not the listing, is what failed: not downloadable, a thumbnail or banner, another
+    brand's pack on the label, or not a single front packshot."""
+    if rc.fetched is not None and not rc.fetched.ok:
+        return True
+    if rc.quality is not None and not rc.quality.hard_ok:
+        return True
+    v = rc.verdict
+    return v is not None and v.decision in (decide.MISMATCH, decide.UNSURE) and (
+        v.brand_match == "no" or v.view in RECOVER_VIEWS)
+
+
+def recovery_pages(spec: SkuSpec, ranked: Sequence[RankedCandidate]) -> List[RankedCandidate]:
+    """X0: up to MAX_RECOVER_PAGES listings, best first, whose page is worth reading for its own image."""
+    data = trusted_domains()
+    out: List[RankedCandidate] = []
+    seen: Set[str] = set()
+    for rc in ranked:
+        s, cand = rc.score, rc.candidate
+        if s is None or s.tier not in (1, 2) or s.hard_reject or rc.status == "excluded":
+            continue
+        if (cand.provider or "") in (PAGE_PROVIDER, "local_index"):
+            continue                       # already the image the page itself shows
+        if not cand.page_url.lower().startswith(("http://", "https://")):
+            continue
+        host = url_host(cand.page_url)
+        if not host or decide._social_host(host) or domain_matches(host, data.get("stock_or_clipart", [])):
+            continue
+        if not (s.matched or {}).get("brand") or s.size_status == "conflict" or not _image_failed(rc):
+            continue
+        key = norm_image_url(cand.page_url)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(rc)
+        if len(out) >= MAX_RECOVER_PAGES:
+            break
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -434,10 +504,12 @@ def _merge_into_pool(inp: RoundInput, new: List[Candidate]) -> Tuple[List[Ranked
     """
     pool = inp.pool
     by_cand = {id(rc.candidate): rc for rc in inp.ranked}
+    # an earlier pass of this round may have given an entry's ranked candidate its downloaded rendition
+    by_norm = {norm_image_url(rc.candidate.image_url): rc for rc in inp.ranked}
     by_key: Dict[str, RankedCandidate] = {}
     dropped: Set[str] = set()                   # pHash reviewer negatives of the normal flow
     for key, cand in pool.entries():
-        rc = by_cand.get(id(cand))
+        rc = by_cand.get(id(cand)) or by_norm.get(key)
         if rc is None:
             dropped.add(key)
         else:
@@ -482,7 +554,8 @@ def _inherit_readings(everything: List[RankedCandidate], fresh: List[RankedCandi
     return n
 
 
-def _verify_new(inp: RoundInput, everything: List[RankedCandidate]) -> List[VerificationResult]:
+def _verify_new(inp: RoundInput, everything: List[RankedCandidate],
+                max_calls: int = MAX_VERIFY_CALLS) -> List[VerificationResult]:
     p = _stages()
     todo = [rc for rc in everything if p._usable(rc) and rc.verdict is None and rc.score.tier in (1, 2)]
     out: List[VerificationResult] = []
@@ -491,7 +564,7 @@ def _verify_new(inp: RoundInput, everything: List[RankedCandidate]) -> List[Veri
     if res is None:
         return out
     out.append(res)
-    if res.status == "ok" and len(out) < MAX_VERIFY_CALLS:
+    if res.status == "ok" and len(out) < max_calls:
         matched = any(rc.verdict is not None and rc.verdict.decision == decide.MATCH for rc in first)
         rest = [rc for rc in todo[VERIFY_BATCH:] if rc.verdict is None]
         if not matched and rest:
@@ -510,11 +583,67 @@ def _record(report: RoundReport, res: ProviderResult, what: str) -> None:
 # The round
 # ---------------------------------------------------------------------------
 
+def _grow(inp: RoundInput, report: RoundReport, new: List[Candidate],
+          verify_calls: int = MAX_VERIFY_CALLS) -> Tuple[List[RankedCandidate], int, int]:
+    """The normal stages over the pool grown by `new`: merge, download, quality, verify, route.
+
+    report.outcome is re-decided over everything (the normal readings plus every reading of this
+    round). Returns (every ranked candidate, how many were new, how many of those were downloaded).
+    """
+    spec = inp.spec
+    p = _stages()
+    everything, fresh = _merge_into_pool(inp, new)
+    # The new candidates, and the pool's never-downloaded ones that are tier 1/2 now (a page's
+    # evidence merged into an image the normal flow ranked below its download slots).
+    fresh_ids = {id(rc) for rc in fresh}
+    unseen = [rc for rc in everything if id(rc) not in fresh_ids and rc.fetched is None]
+    fetch_list = [rc for rc in rank_rcs(fresh + unseen) if _identity_ok(rc) and rc.score.tier in (1, 2)]
+    kept, n_dropped = p._fetch(spec, inp.fetcher, fetch_list, inp.phash_negatives) if fetch_list else ([], 0)
+    gone = {id(rc) for rc in fetch_list} - {id(rc) for rc in kept}
+    everything = [rc for rc in everything if id(rc) not in gone]
+    report.phash_dropped += n_dropped
+    p._assess(kept)
+    everything = p._rerank(everything)
+    _inherit_readings(everything, fresh)
+    report.verify_results.extend(_verify_new(inp, everything, verify_calls))
+    report.outcome = decide.route(spec, everything, list(inp.results) + report.verify_results,
+                                  list(inp.health) + report.health, inp.relaxed_ids)
+    return everything, len(fresh), len(kept)
+
+
+def _recover(inp: RoundInput, report: RoundReport, collector: "_Collector") -> Optional[List[RankedCandidate]]:
+    """X0 (free): read the pages of right-product listings whose image failed; None when nothing new."""
+    if inp.exp.pages is None:
+        return None
+    hits = [rc.candidate for rc in recovery_pages(inp.spec, inp.ranked)]
+    if not hits:
+        return None
+    new = collector.follow(hits, "X0")
+    report.recovered_pages = len(hits)
+    if not new:
+        logger.info("expand sku=%s: X0 read %d pages, no image of their own", inp.spec.sku_key, len(hits))
+        return None
+    everything, n_new, n_kept = _grow(inp, report, new, RECOVER_VERIFY_CALLS)
+    report.new_candidates += n_new
+    logger.info("expand sku=%s: X0 read %d pages, %d new candidates (%d fetched) -> %s", inp.spec.sku_key,
+                len(hits), n_new, n_kept, report.outcome.decision)
+    return everything
+
+
 def _expand(inp: RoundInput, report: RoundReport) -> RoundReport:
     exp, spec = inp.exp, inp.spec
+    collector = _Collector(inp, report)
+
+    # X0 (free): when the pages of the listings already found give a pick, no paid call is made
+    recovered = _recover(inp, report, collector)
+    if recovered is not None:
+        if report.outcome.decision in PICK_DECISIONS:
+            _append_health(report)
+            return report
+        inp = replace(inp, ranked=recovered)
+
     budget = _Budget(exp.max_calls)
     serper_ok = not _serper_refused(inp.health)
-    collector = _Collector(inp, report)
     text, hl = text_query(spec, inp.custom_query)
     groups = site_groups(spec)
     new: List[Candidate] = []
@@ -559,33 +688,17 @@ def _expand(inp: RoundInput, report: RoundReport) -> RoundReport:
         _record(report, res, query)
         new.extend(collector.collect([res], "web"))
 
-    report.new_candidates = len(new)
     if not new:
         _append_health(report)
         logger.info("expand sku=%s: %d calls, nothing new", spec.sku_key, report.calls)
         return report
 
     # the normal stages over the grown pool
-    p = _stages()
-    everything, fresh = _merge_into_pool(inp, new)
-    # The new candidates, and the pool's never-downloaded ones that are tier 1/2 now (a page's
-    # evidence merged into an image the normal flow ranked below its download slots).
-    fresh_ids = {id(rc) for rc in fresh}
-    unseen = [rc for rc in everything if id(rc) not in fresh_ids and rc.fetched is None]
-    fetch_list = [rc for rc in rank_rcs(fresh + unseen) if _identity_ok(rc) and rc.score.tier in (1, 2)]
-    kept, n_dropped = p._fetch(spec, inp.fetcher, fetch_list, inp.phash_negatives) if fetch_list else ([], 0)
-    gone = {id(rc) for rc in fetch_list} - {id(rc) for rc in kept}
-    everything = [rc for rc in everything if id(rc) not in gone]
-    report.phash_dropped += n_dropped
-    p._assess(kept)
-    everything = p._rerank(everything)
-    inherited = _inherit_readings(everything, fresh)
-    report.verify_results.extend(_verify_new(inp, everything))
-    report.outcome = decide.route(spec, everything, list(inp.results) + report.verify_results,
-                                  list(inp.health) + report.health, inp.relaxed_ids)
-    logger.info("expand sku=%s: %d calls, %d pages, %d new candidates (%d fetched, %d readings inherited), "
-                "%d verifier calls -> %s", spec.sku_key, report.calls, report.pages_fetched, len(fresh), len(kept),
-                inherited, sum(int(r.calls or 0) for r in report.verify_results), report.outcome.decision)
+    _, n_new, n_kept = _grow(inp, report, new)
+    report.new_candidates += n_new
+    logger.info("expand sku=%s: %d calls, %d pages, %d new candidates (%d fetched), %d verifier calls -> %s",
+                spec.sku_key, report.calls, report.pages_fetched, n_new, n_kept,
+                sum(int(r.calls or 0) for r in report.verify_results), report.outcome.decision)
     return report
 
 
