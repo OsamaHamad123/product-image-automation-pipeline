@@ -576,3 +576,77 @@ def test_the_upload_endpoint_forwards_what_the_page_showed():
     method = text[text.index("function uploadManualImage"):text.index("function clearProductsCache")]
     listed = method[method.index("$request->only(["):method.index("]);", method.index("$request->only(["))]
     assert "'expected_state'" in listed and "'replace'" in listed
+
+
+# ---------------------------------------------------------------------------
+# C2 on the real tables: a rejection keeps the review alive
+# ---------------------------------------------------------------------------
+
+def _reject_params(key, url, **extra):
+    return dict({"row_number": ROWS[0], "image_url": url, "product_name": DUP_NAME, "brand": DUP_BRAND,
+                 "barcode": "", "sku_key": key, "reason_code": "WRONG_VARIANT"}, **extra)
+
+
+def _statuses(db, key):
+    return [(c["image_url"], c["status"]) for c in db.get_curation_candidates(ROWS[0], sku_key=key)]
+
+
+def test_rejecting_candidates_one_by_one(db, review_env):
+    import time
+    cli_bridge, env, key = review_env
+    db.add_to_queue(ROWS[0], "", DUP_NAME, DUP_BRAND, "q", payload={"size": ""}, sku_key=key)
+    _set_status(db, ROWS[0], "ready_for_review")
+    pick, alt, other = "https://x/pick.jpg", "https://x/alt.jpg", "https://x/other.jpg"
+    assert db.save_curation_candidates(ROWS[0], DUP_NAME, DUP_BRAND, [
+        {"url": pick, "status": "preselected"}, {"url": alt, "status": "eligible"},
+        {"url": other, "status": "eligible"}], sku_key=key)
+    before = db.get_task_by_row(ROWS[0])["updated_at"]
+    time.sleep(1.1)
+
+    # an alternative: only it is excluded; the queue row is untouched (same updated_at the page holds)
+    result = cli_bridge.action_reject_image(_reject_params(key, alt))
+    assert result["status"] == "success" and result["queue_status"] is None
+    assert _statuses(db, key) == [(pick, "preselected"), (alt, "excluded"), (other, "eligible")]
+    assert db.get_task_by_row(ROWS[0])["updated_at"] == before
+    assert result["current"]["queue_status"] == "ready_for_review"
+
+    # the pick, with one candidate left: still waiting for review, nothing searched again
+    result = cli_bridge.action_reject_image(_reject_params(key, pick))
+    assert result["queue_status"] == "ready_for_review"
+    assert db.get_task_by_row(ROWS[0])["status"] == "ready_for_review"
+    assert _statuses(db, key)[-1] == (other, "eligible")
+
+    # the last eligible candidate goes (the pick was rejected before it): requeued for a new search
+    result = cli_bridge.action_reject_image(_reject_params(key, other))
+    assert result["queue_status"] == "pending"
+    task = db.get_task_by_row(ROWS[0])
+    assert (task["status"], task["failure_code"]) == ("pending", "REJECTED")
+    assert {u for u, _ in _statuses(db, key)} == {pick, alt, other}
+    assert sorted(db.get_rejections(key)[0]) == sorted([pick, alt, other])
+
+
+def test_research_after_a_rejection_saves_the_candidates_server_side(db, review_env, monkeypatch):
+    import image_search
+    cli_bridge, env, key = review_env
+    db.add_to_queue(ROWS[0], "", DUP_NAME, DUP_BRAND, "q", payload={"size": ""}, sku_key=key)
+    _set_status(db, ROWS[0], "failed")
+    pick = "https://x/pick.jpg"
+    assert db.save_curation_candidates(ROWS[0], DUP_NAME, DUP_BRAND, [{"url": pick, "status": "preselected"}],
+                                       sku_key=key)
+    fresh = [{"url": "https://x/new1.jpg", "status": "preselected", "page_url": "https://x/p/1", "evidence": {"tier": 1}},
+             {"url": "https://x/new2.jpg", "status": "eligible"}]
+
+    def fake_search(query, name, brand, **kwargs):
+        kwargs["trace"]["outcome"] = {"decision": "REVIEW_PRESELECTED"}
+        return {"url": "https://x/new1.jpg", "decision": "REVIEW_PRESELECTED", "source": "serper",
+                "preselect": True, "candidates": fresh}
+
+    monkeypatch.setattr(image_search, "search_best_product_image", fake_search)
+    result = cli_bridge.action_reject_image(_reject_params(key, pick, research=True))
+    assert result["candidates_saved"] == 2 and result["rejection"]["queue_status"] == "ready_for_review"
+    saved = db.get_curation_candidates(ROWS[0], sku_key=key)
+    assert [(c["image_url"], c["status"], c["sku_key"]) for c in saved] == [
+        ("https://x/new1.jpg", "preselected", key), ("https://x/new2.jpg", "eligible", key)]
+    assert saved[0]["page_url"] == "https://x/p/1" and saved[0]["identity_tier"] == "1"
+    assert db.get_task_by_row(ROWS[0])["status"] == "ready_for_review"
+    assert result["current"]["queue_status"] == "ready_for_review"

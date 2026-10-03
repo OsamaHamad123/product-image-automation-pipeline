@@ -1813,6 +1813,28 @@ def _row_or_sku_clause(row_number, sku_key):
     return "`row_number` = %s", (row_number,)
 
 
+def exclude_curation_candidate(row_number, image_url, sku_key=None):
+    """
+    رفض المراجع لصورة واحدة: يُعلَّم مرشحها وحده 'excluded' (ولا يبقى مختاراً)، وباقي مرشحات المنتج تبقى
+    للمراجعة. تعيد عدد الصفوف، أو None عند خطأ قاعدة البيانات.
+    """
+    clause, params = _row_or_sku_clause(row_number, sku_key)
+    try:
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(f"UPDATE curation_candidates SET status = 'excluded', is_selected = 0 "
+                           f"WHERE {clause} AND image_url = %s", params + (image_url,))
+            affected = cursor.rowcount
+            conn.commit()
+        finally:
+            _close(conn)
+        return affected
+    except Exception as e:
+        logger.warning("[Curation] فشل استبعاد المرشح المرفوض للصف %s: %s", row_number, e)
+        return None
+
+
 def delete_curation_candidates(row_number, sku_key=None):
     """مسح كل مرشحات منتج بعد اعتماده أو رفضه (بـ sku_key عند توفره، وإلا برقم الصف)."""
     clause, params = _row_or_sku_clause(row_number, sku_key)

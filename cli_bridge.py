@@ -235,12 +235,13 @@ def _merge_urls(*lists):
     return out
 
 
-def action_search(params, brand_mappings=None):
+def action_search(params, brand_mappings=None, found=None):
     """
     بحث تفاعلي لمنتج واحد. الاستجابة (عقد ثابت للوحة التحكم):
     {status: success|review|not_found|provider_down|error, decision, failure_code, selected_image,
      candidates (أفضل 8 مع status/reasons/warnings/evidence/vlm/scores), provider_health, sku_key, trace}
     warnings: رموز تحذير المراجعة للصورة المرشحة (مثل foreign_store) ليتحقق منها المراجع قبل الاعتماد.
+    found: قاموس اختياري يُعاد فيه best و trace كما هما (reject_image يحفظ منهما المرشحات الجديدة).
     """
     pipeline = _pipeline()
     product_name = _text(params, 'product_name')
@@ -288,6 +289,8 @@ def action_search(params, brand_mappings=None):
                 'failure_code': 'SEARCH_ERROR',
                 'selected_image': None, 'candidates': [], 'provider_health': [], 'sku_key': sku_key, 'trace': trace}
 
+    if found is not None:
+        found.update(best=best, trace=trace)
     outcome = trace.get('outcome') if isinstance(trace.get('outcome'), dict) else {}
     decision = (best or {}).get('decision') or outcome.get('decision')
     if best and not decision:
@@ -911,6 +914,72 @@ def _cell_holds(value, image_url):
     return value == image_url
 
 
+def _clear_rejected_cells(params, row_number, sku_key, image_url):
+    """
+    يفرّغ خلية الرابط التي تحمل الصورة المرفوضة (مع بادئة needs_review: أو بدونها) في صف المنتج وفي صفوفه
+    المكررة، كل كتابة بهوية صفها (الباركود والاسم والحجم والبراند). يعيد (فُرّغت خلية واحدة على الأقل، خطأ أو None).
+    """
+    rows = [{"row_number": row_number, "barcode": _text(params, 'barcode'), "product_name": _text(params, 'product_name'),
+             "size": _text(params, 'size') or None, "brand": _text(params, 'brand') or None}]
+    rows += _other_rows(sku_key, row_number)
+    cleared, error = False, None
+    queue_started = False
+    try:
+        google_sheets.init_async_queue(config.CREDENTIALS_FILE, config.SPREADSHEET_NAME_OR_URL)
+        queue_started = True
+        worksheet = _open_sheet()
+        link_column_index = google_sheets.find_link_column(worksheet, create=False)
+        if link_column_index >= 0:
+            for row in rows:
+                current = worksheet.cell(row["row_number"], link_column_index + 1).value
+                if not _cell_holds(current, image_url):
+                    continue
+                cleared = bool(google_sheets.update_image_link(
+                    worksheet, row["row_number"], link_column_index, "", barcode=row["barcode"] or None,
+                    product_name=row["product_name"] or None, size=row["size"], brand=row["brand"])) or cleared
+    except Exception:
+        error = "Could not update the sheet cell (details in temp/search.log)."
+        logger.exception("تعذر تحديث الشيت بعد الرفض")
+    finally:
+        if queue_started:
+            google_sheets.stop_async_queue()
+    return cleared, error
+
+
+def _save_research_candidates(found, row_number, product_name, brand, sku_key, rejected_url):
+    """
+    إعادة البحث بعد الرفض تحفظ مرشحاتها الجديدة بنفسها (عقد C2، بـ sku_key المنتج)، بدل أن تحفظها الصفحة.
+    لا شيء يُحفظ بلا نتيجة (لم يُعثر على شيء / المزودون معطلون): المرشحات الباقية تبقى. يعيد عدد المحفوظ.
+    """
+    best = found.get("best")
+    if not best:
+        return 0
+    candidates = [c for c in _pipeline().collect_candidates(best, found.get("trace"))
+                  if (c.get("url") or c.get("image_url")) != rejected_url]
+    if not candidates:
+        return 0
+    if not local_cache_db.save_curation_candidates(row_number, product_name, best.get("brand") or brand, candidates,
+                                                   best.get("url"), sku_key=sku_key,
+                                                   run_id=f"research-{uuid.uuid4().hex[:8]}"):
+        return 0
+    return len(candidates)
+
+
+def _set_review_queue_status(row_number, sku_key, product_name, status, reason_code, failure_code=None):
+    """حالة الطابور بعد الرفض (None = بلا تغيير). لا يُعاد كتابة نفس الحالة: توقيت الصف يبقى كما رأته الصفحة."""
+    if not status:
+        return
+    task = local_cache_db.get_task_by_row(row_number)
+    if _same_product_task(task, sku_key, product_name) and task.get("status") == status:
+        return
+    if status == "pending":
+        local_cache_db.update_task_status_by_row(row_number, "pending", f"rejected by reviewer: {reason_code}",
+                                                 failure_code="REJECTED", sku_key=sku_key)
+    else:
+        local_cache_db.update_task_status_by_row(row_number, status, None, failure_code=failure_code,
+                                                 sku_key=sku_key)
+
+
 def action_reject_image(params):
     image_url = _text(params, 'image_url')
     product_name = _text(params, 'product_name')
@@ -951,54 +1020,60 @@ def action_reject_image(params):
     approved = local_cache_db.get_cached_product(sku_key=sku_key)
     targets_approval = bool(approved) and image_url in (approved.get("original_url"), approved.get("cloudinary_url"))
     keep_approval = bool(approved) and approved.get("verification_status") == "human_approved" and not targets_approval
+    stored = local_cache_db.get_curation_candidates(row_number, sku_key=sku_key or None)
     _record_review("rejected", params, row_number, sku_key, image_url, reason_code=reason_code,
                    approval=approved if targets_approval else None)
-    superseded = 0
-    if not keep_approval:
-        superseded = local_cache_db.supersede_resolution(sku_key, barcode=barcode or None)
-    local_cache_db.delete_curation_candidates(row_number, sku_key=sku_key)
-    if not keep_approval:
-        local_cache_db.update_task_status_by_row(row_number, "pending", f"rejected by reviewer: {reason_code}",
-                                                 failure_code="REJECTED", sku_key=sku_key)
+    # المراجعة تبقى حية (عقد C2): تُستبعد الصورة المرفوضة وحدها، وباقي المرشحات تبقى للمراجع
+    rejected = next((c for c in stored if c.get("image_url") == image_url), None)
+    remaining = [c for c in stored if c.get("image_url") != image_url
+                 and c.get("status") not in ("rejected", "excluded")]
+    shown_status = rejected.get("status") if rejected else _text(params, 'candidate_status')
+    was_pick = targets_approval or shown_status == "preselected"
+    if rejected:
+        local_cache_db.exclude_curation_candidate(row_number, image_url, sku_key=sku_key)
     local_cache_db.save_feedback(str(uuid.uuid4()), image_url.split("/")[-1].split("?")[0], row_number,
                                  product_name, brand, image_url, [reason_code])
 
-    sheet_cleared = False
-    sheet_error = None
-    queue_started = False
-    try:
-        google_sheets.init_async_queue(config.CREDENTIALS_FILE, config.SPREADSHEET_NAME_OR_URL)
-        queue_started = True
-        worksheet = _open_sheet()
-        link_column_index = google_sheets.find_link_column(worksheet, create=False)
-        if link_column_index >= 0:
-            current = worksheet.cell(row_number, link_column_index + 1).value
-            if _cell_holds(current, image_url):
-                sheet_cleared = bool(google_sheets.update_image_link(
-                    worksheet, row_number, link_column_index, "", barcode=barcode or None,
-                    product_name=product_name or None, size=_text(params, 'size') or None, brand=brand or None))
-    except Exception:
-        sheet_error = "Could not update the sheet cell (details in temp/search.log)."
-        logger.exception("تعذر تحديث الشيت بعد الرفض")
-    finally:
-        if queue_started:
-            google_sheets.stop_async_queue()
-
-    if keep_approval and sheet_cleared:
-        # الخلية كانت تحمل الصورة المرفوضة: الاعتماد السابق لم يعد منشوراً، فيُلغى ويعاد الصف للطابور
+    sheet_cleared, sheet_error = _clear_rejected_cells(params, row_number, sku_key, image_url)
+    if sheet_cleared:
+        # الخلية كانت تحمل الصورة المرفوضة: هي المنشورة (أو المقترحة needs_review:)، فالاعتماد السابق لم يعد
+        # منشوراً ويُلغى
+        was_pick, keep_approval = True, False
+    superseded = 0
+    if targets_approval or (was_pick and not keep_approval):
         superseded = local_cache_db.supersede_resolution(sku_key, barcode=barcode or None)
-        local_cache_db.update_task_status_by_row(row_number, "pending", f"rejected by reviewer: {reason_code}",
-                                                 failure_code="REJECTED", sku_key=sku_key)
-        keep_approval = False
-    rejection = {'sku_key': sku_key, 'reason_code': reason_code, 'phash': phash, 'sheet_cleared': sheet_cleared,
-                 'superseded': superseded, 'sheet_error': sheet_error, 'approval_kept': keep_approval}
+
+    response = None
+    candidates_saved = 0
     if _as_bool(params.get('research', False)):
         search_params = dict(params, sku_key=sku_key, skip_cache=True,
                              exclude_urls=_merge_urls(params.get('exclude_urls'), [image_url]))
-        response = action_search(search_params, brand_mappings=brand_mappings)
+        found = {}
+        response = action_search(search_params, brand_mappings=brand_mappings, found=found)
+        candidates_saved = _save_research_candidates(found, row_number, product_name, brand, sku_key, image_url)
+
+    # حالة الطابور: الاعتماد البشري الباقي لا يُمس. مرشحات جديدة من إعادة البحث -> بانتظار المراجعة. رفض الاختيار
+    # (المسبق أو المعتمد أو المنشور) -> بانتظار المراجعة إن بقي مرشح مؤهل، وإلا يعود الصف للطابور، وكذلك رفض آخر
+    # مرشح مؤهل محفوظ (رُفض الاختيار قبله). رفض بديل وغيره باقٍ لا يغيّرها.
+    queue_status = None
+    if not keep_approval:
+        if candidates_saved:
+            queue_status = "ready_for_review"
+        elif was_pick or (rejected is not None and not remaining):
+            queue_status = "ready_for_review" if remaining else "pending"
+    _set_review_queue_status(row_number, sku_key, product_name, queue_status, reason_code,
+                             (response or {}).get('failure_code'))
+
+    rejection = {'sku_key': sku_key, 'reason_code': reason_code, 'phash': phash, 'sheet_cleared': sheet_cleared,
+                 'superseded': superseded, 'sheet_error': sheet_error, 'approval_kept': keep_approval,
+                 'candidates_left': len(remaining), 'queue_status': queue_status}
+    current, _ = _current_state(sku_key, row_number, product_name)
+    if response is not None:
         response['rejection'] = rejection
+        response['candidates_saved'] = candidates_saved
+        response['current'] = current
         return response
-    return dict({'status': 'success'}, **rejection)
+    return dict({'status': 'success', 'current': current}, **rejection)
 
 
 # ---------------------------------------------------------------------------
