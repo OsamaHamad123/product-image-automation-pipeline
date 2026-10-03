@@ -79,7 +79,8 @@ def test_provider_that_keeps_a_grey_card_on_an_opaque_photo_is_flagged(work, wit
     result, services = run(shot, work, photoroom=keeper, box=with_box)
 
     assert result.path and result.isolated is False
-    assert ip.FLAG_OPAQUE_BACKDROP in result.quality_flags
+    # full frame: the card around the bottle; the Gemini crop lies inside the card, so it comes back all opaque
+    assert result.quality_flags == [ip.FLAG_OPAQUE_FILL if with_box else ip.FLAG_OPAQUE_BACKDROP]
 
 
 def test_white_carton_on_an_opaque_photo_matches_the_gemini_box(work):
@@ -272,3 +273,54 @@ def test_small_web_image_publishes_with_an_upscale_note(work, long_side, flags, 
     assert result.isolated is (not flags)
     assert services.names() == ["photoroom"], "upscaling cannot be fixed by another provider"
     assert result.path and (result.width, result.height) == (800, 800)
+
+
+# ---------------------------------------------------------------------------
+# #6: no paid call for a result that can never publish (remove.bg configured in every case)
+# ---------------------------------------------------------------------------
+
+def _tagged_bottle():
+    bottle = ps.make("bottle", (700, 900))
+    tagged = ps.with_extras(bottle, "tagged", over=[ps.price_tag(bottle, share=0.04)])
+    return tagged, ps.truth_provider(tagged, keep=(tagged.extras_over[0],))
+
+
+def _cost_case(name):
+    """(shot, run options, expected provider calls, isolated, flags, notes)"""
+    if name == "second_object_no_box":
+        shot, keeper = _tagged_bottle()
+        return shot, dict(photoroom=keeper, box=False), ["photoroom"], False, [ip.FLAG_SECOND_OBJECT], []
+    if name == "second_object_inside_the_box":
+        shot, keeper = _tagged_bottle()
+        region = ps.product_box(np.asarray(shot.scene().getchannel("A")))
+        return (shot, dict(photoroom=keeper, gemini_box=ps.gemini_box_of(shot.alpha(), region=region)),
+                ["photoroom"], False, [ip.FLAG_SECOND_OBJECT], [])
+    if name == "second_object_in_source_alpha":
+        shot, _keeper = _tagged_bottle()
+        return ps.Shot("tagged_png", shot.scene(), None, box=shot.box), {}, [], False, [ip.FLAG_SECOND_OBJECT], []
+    if name == "small_two_pack_with_box":
+        # the reviewer's repro: was PhotoRoom crop, PhotoRoom full frame, remove.bg, then review
+        shot = ps.make_pack("bottle", (400, 400), gap=8, fill=0.75)
+        return shot, {}, ["photoroom"], True, [], [ip.NOTE_UPSCALED]
+    if name == "too_small_source_with_box":
+        shot = small_bottle(220)
+        return shot, {}, ["photoroom"], False, [ip.FLAG_UPSCALED], []
+    if name == "opaque_fill_on_the_box_crop":
+        shot = ps.make("bottle", (600, 900), bg=(150, 160, 170))
+        return (shot, dict(photoroom=ps.opaque_provider(shot)), ["photoroom", "remove_bg_api"], True, [], [])
+    raise KeyError(name)
+
+
+@pytest.mark.parametrize("name", ["second_object_no_box", "second_object_inside_the_box",
+                                  "second_object_in_source_alpha", "small_two_pack_with_box",
+                                  "too_small_source_with_box", "opaque_fill_on_the_box_crop"])
+def test_paid_calls_per_case(work, name):
+    shot, options, calls, isolated, flags, notes = _cost_case(name)
+
+    result, services = run(shot, work, remove_bg="truth", **options)
+
+    assert services.names() == calls
+    assert (result.isolated, result.quality_flags, result.quality_notes) == (isolated, flags, notes)
+    if name == "opaque_fill_on_the_box_crop":
+        # the box was not the problem: remove.bg gets the same crop, no PhotoRoom full-frame retry
+        assert services.calls[0][1] == services.calls[1][1] != shot.size

@@ -416,7 +416,64 @@ def test_p4_box_that_cuts_the_cap_is_retried_without_the_box(monkeypatch, tmp_pa
     assert y1 - y0 >= 700 and abs((x0 + x1) / 2 - 400) <= 1
 
 
+def haze_wisp(rgba):
+    """A faint wisp (alpha 12) attached to the product's base, widening its box by 100 px: alpha_haze."""
+    ys, xs = np.nonzero(rgba[..., 3] > 0)
+    bottom, left = int(ys.max()) + 1, int(xs.min())
+    rgba[bottom - 60:bottom, max(0, left - 100):left + 1, 3] = np.maximum(
+        rgba[bottom - 60:bottom, max(0, left - 100):left + 1, 3], 12)
+    return rgba
+
+
 def test_fallback_order_box_then_full_frame_then_the_other_paid_provider(monkeypatch, tmp_path):
+    # The box cuts the cap (edge_clipped: worth the full frame), PhotoRoom's full frame still has haze (worth the
+    # other provider), and remove.bg gets the full frame because the box was the problem.
+    monkeypatch.setattr(config, "REMOVE_BG_API_KEY", "test-removebg-key")
+    src = save(bottle(), tmp_path)
+    monkeypatch.setattr(image_processor, "_locate_product_box", lambda *a: [250, 300, 840, 700])
+    providers = Providers(monkeypatch, photoroom=keyer(WHITE, edit=haze_wisp), remove_bg=keyer(WHITE))
+
+    result = run(src)
+
+    names = [name for name, _size in providers.sizes()]
+    assert names == ["photoroom", "photoroom", "remove_bg_api"]
+    assert providers.sizes()[0][1] != (600, 900)
+    assert providers.sizes()[1][1] == (600, 900) and providers.sizes()[2][1] == (600, 900)
+    assert (result.isolated, result.provider, result.quality_flags) == (True, "remove_bg_api", [])
+
+
+def test_a_flag_the_box_did_not_cause_goes_straight_to_the_other_provider_with_the_box(monkeypatch, tmp_path):
+    monkeypatch.setattr(config, "REMOVE_BG_API_KEY", "test-removebg-key")
+    src = save(bottle(), tmp_path)
+    monkeypatch.setattr(image_processor, "_locate_product_box", lambda *a: [50, 250, 900, 750])
+    providers = Providers(monkeypatch, photoroom=keyer(WHITE, edit=haze_wisp), remove_bg=keyer(WHITE))
+
+    result = run(src)
+
+    names = [name for name, _size in providers.sizes()]
+    assert names == ["photoroom", "remove_bg_api"], "the full frame cannot fix PhotoRoom's haze"
+    crop_size = providers.sizes()[0][1]
+    assert crop_size != (600, 900) and providers.sizes()[1][1] == crop_size
+    assert (result.isolated, result.provider, result.quality_flags) == (True, "remove_bg_api", [])
+
+
+def test_still_flagged_after_every_fallback_returns_the_review_state(monkeypatch, tmp_path):
+    monkeypatch.setattr(config, "REMOVE_BG_API_KEY", "test-removebg-key")
+    src = save(bottle(), tmp_path)
+    monkeypatch.setattr(image_processor, "_locate_product_box", lambda *a: [50, 250, 900, 750])
+    providers = Providers(monkeypatch, photoroom=keyer(WHITE, edit=haze_wisp),
+                          remove_bg=keyer(WHITE, edit=haze_wisp))
+
+    result = run(src)
+
+    assert len(providers.calls) == 2
+    assert result.path and (result.width, result.height) == (800, 800)
+    assert result.isolated is False and result.error is None
+    assert result.quality_flags == [image_processor.FLAG_ALPHA_HAZE]
+
+
+def test_a_second_object_is_final_and_spends_no_fallback(monkeypatch, tmp_path):
+    # Another object in the picture cannot be fixed by re-isolating it: no full-frame retry, no remove.bg.
     monkeypatch.setattr(config, "REMOVE_BG_API_KEY", "test-removebg-key")
     src = save(bottle(), tmp_path)
     monkeypatch.setattr(image_processor, "_locate_product_box", lambda *a: [50, 250, 900, 750])
@@ -430,33 +487,8 @@ def test_fallback_order_box_then_full_frame_then_the_other_paid_provider(monkeyp
 
     result = run(src)
 
-    names = [name for name, _size in providers.sizes()]
-    assert names == ["photoroom", "photoroom", "remove_bg_api"]
-    crop_size = providers.sizes()[0][1]
-    assert providers.sizes()[1][1] == (600, 900)
-    # The box was not the problem (no edge_clipped), so remove.bg gets the cropped frame.
-    assert providers.sizes()[2][1] == crop_size
-    assert (result.isolated, result.provider, result.quality_flags) == (True, "remove_bg_api", [])
-
-
-def test_still_flagged_after_every_fallback_returns_the_review_state(monkeypatch, tmp_path):
-    monkeypatch.setattr(config, "REMOVE_BG_API_KEY", "test-removebg-key")
-    src = save(bottle(), tmp_path)
-    monkeypatch.setattr(image_processor, "_locate_product_box", lambda *a: [50, 250, 900, 750])
-
-    def blob(rgba):
-        h, w = rgba.shape[:2]
-        rgba[h - 40:h - 10, 10:110] = (0, 0, 0, 255)
-        return rgba
-
-    providers = Providers(monkeypatch, photoroom=keyer(WHITE, edit=blob), remove_bg=keyer(WHITE, edit=blob))
-
-    result = run(src)
-
-    assert len(providers.calls) == 3
-    assert result.path and (result.width, result.height) == (800, 800)
-    assert result.isolated is False and result.error is None
-    assert result.quality_flags == [image_processor.FLAG_SECOND_OBJECT]
+    assert [name for name, _size in providers.sizes()] == ["photoroom"]
+    assert result.isolated is False and result.quality_flags == [image_processor.FLAG_SECOND_OBJECT]
 
 
 def test_upscaled_alone_is_not_retried_with_a_paid_provider(monkeypatch, tmp_path):
@@ -514,7 +546,7 @@ def test_p5_transparent_png_with_a_grey_box_is_not_source_alpha(monkeypatch, tmp
     result = run(src)
     assert result.path and result.isolated is False
     assert image_processor.FLAG_OPAQUE_BACKDROP in result.quality_flags
-    assert len(providers.calls) == 2   # the box crop (clipped, opaque) and the full frame; no remove.bg key
+    assert len(providers.calls) == 1   # the box crop came back opaque; PhotoRoom again cannot fix that
 
     # Without a Gemini box, a provider that returns exactly the source's rectangle confirms it is the product
     # (two independent opinions: a printed carton, not a photo card): the free source alpha is used.

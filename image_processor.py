@@ -5,8 +5,9 @@
 #
 # المبادئ الملزمة:
 # - فشل عزل الخلفية يعيد isolated=False مع رمز خطأ، ولا يعيد الصورة الخام أبداً كأنها نجاح.
-# - كل قص يمر ببوابة جودة (assess_cutout)؛ عند علامة نعيد المحاولة بدون صندوق Gemini ثم بالمزوّد المدفوع
-#   الآخر المهيأ، وإذا بقيت العلامة تعود اللوحة isolated=False مع quality_flags (للمراجعة، لا نشر تلقائي).
+# - كل قص يمر ببوابة جودة (assess_cutout)؛ عند علامة نعيد المحاولة بما يمكن أن يصلحها فقط (جدول _FLAG_REMEDY:
+#   بدون صندوق Gemini، ثم المزوّد المدفوع الآخر المهيأ)، وإذا بقيت العلامة تعود اللوحة isolated=False مع
+#   quality_flags (للمراجعة، لا نشر تلقائي). ملاحظات لا تمنع النشر تعود في quality_notes.
 # - لا يتم تعديل config.BG_REMOVAL_METHOD إطلاقاً (الطريقة تمرر كمعامل).
 # - كل المعالجة في الذاكرة؛ الملف الوحيد المكتوب هو اللوحة النهائية باسم uuid داخل مجلد tempfile.mkdtemp().
 # - لا يوجد اقتصاص مربع تلقائي، ولا فحص ضبابية، ولا ملء للثقوب، ولا مسح للأطراف.
@@ -108,8 +109,30 @@ FLAG_KEPT_SHADOW = "kept_shadow"
 # ملاحظات لا تمنع النشر (ProcessResult.quality_notes): نفس رمز العلامة، لكن في القائمة غير الحاجبة
 NOTE_UPSCALED = FLAG_UPSCALED
 NON_BLOCKING_NOTES = frozenset({NOTE_UPSCALED})
-# علامات لا تصلحها إعادة العزل (المصدر نفسه صغير): لا نعيد المحاولة بمزوّد مدفوع من أجلها
-_UNFIXABLE_FLAGS = frozenset({FLAG_UPSCALED})
+# ما يمكن أن يصلح كل علامة حاجبة (جدول واحد يحكم المحاولات المدفوعة؛ لا نصرف على نتيجة لن تُنشر أبداً):
+#   العلامة              بدون صندوق Gemini    المزوّد الآخر   السبب
+#   edge_clipped         نعم                  نعم             الصندوق قص المنتج؛ الإطار الكامل يعيده
+#   too_small_on_canvas  نعم                  نعم             شيء آخر داخل إطار الصندوق يحدد الحجم
+#   opaque_fill          لا                   نعم             المزوّد لم يُزل خلفية التصوير
+#   opaque_backdrop      لا                   نعم             المزوّد أبقى ورقة التصوير (للمصدر خلفية حقيقية)
+#   alpha_haze           لا                   نعم             ضباب من قناع هذا المزوّد
+#   kept_shadow          لا                   نعم             ظل أبقاه هذا المزوّد
+#   second_object        لا                   لا              جسم آخر في الصورة نفسها: نهائي (ولشفافية المصدر)
+#   upscaled             لا                   لا              المصدر نفسه صغير: نهائي
+# مع edge_clipped كل علامات المحاولة نفسها مشكوك فيها (القص قد يفصل جزءاً أو يصغّر المنتج): يعاد الإطار الكامل.
+# مع opaque_fill لا يُفحص edge_clipped (الإطار المعتم كله يلمس خطوط القص): المزوّد الآخر بنفس الإطار المقصوص.
+_FLAG_REMEDY = {
+    FLAG_EDGE_CLIPPED: (True, True),
+    FLAG_TOO_SMALL: (True, True),
+    FLAG_OPAQUE_FILL: (False, True),
+    FLAG_OPAQUE_BACKDROP: (False, True),
+    FLAG_ALPHA_HAZE: (False, True),
+    FLAG_KEPT_SHADOW: (False, True),
+    FLAG_SECOND_OBJECT: (False, False),
+    FLAG_UPSCALED: (False, False),
+}
+# علامات تستحق إعادة نفس المزوّد على الإطار الكامل بدون صندوق Gemini
+_BOX_FLAGS = frozenset(flag for flag, (without_box, _other) in _FLAG_REMEDY.items() if without_box)
 # لاختيار أفضل محاولة عندما تبقى العلامات بعد كل البدائل (الأقل وزناً تُعرض على المراجع)
 _FLAG_WEIGHT = {FLAG_OPAQUE_FILL: 4, FLAG_OPAQUE_BACKDROP: 4, FLAG_EDGE_CLIPPED: 3, FLAG_KEPT_SHADOW: 3,
                 FLAG_SECOND_OBJECT: 2, FLAG_TOO_SMALL: 2, FLAG_ALPHA_HAZE: 1, FLAG_UPSCALED: 1}
@@ -901,8 +924,9 @@ def _assess(cutout: Image.Image, frame_size=None, crop_sides=_NO_CROP, canvas_si
 
     if _same_frame(rgba.size, frame_size):
         if float(solid.mean()) > OPAQUE_FILL_MAX and _uniform_backdrop_band(np.asarray(_flatten_on_white(rgba))):
+            # لم يُزل شيء: الإطار كله يلمس خطوط القص، فهذا لا يقول شيئاً عن صندوق Gemini
             flags.append(FLAG_OPAQUE_FILL)
-        if _edge_clipped(solid, crop_sides):
+        elif _edge_clipped(solid, crop_sides):
             flags.append(FLAG_EDGE_CLIPPED)
 
     box_w, box_h = box[2] - box[0], box[3] - box[1]
@@ -1021,8 +1045,15 @@ class _Attempt:
 
 
 def _flags_final(flags) -> bool:
-    """لا داعي لمحاولة أخرى: القص نظيف، أو علاماته لا تصلحها إعادة العزل."""
-    return set(flags) <= _UNFIXABLE_FLAGS
+    """
+    لا داعي لمحاولة مدفوعة أخرى: القص نظيف، أو فيه علامة لا تصلحها أي إعادة عزل (_FLAG_REMEDY) فلن يُنشر تلقائياً
+    مهما دفعنا. مع edge_clipped لا شيء نهائي بعد: الإطار الكامل قد يغيّر كل العلامات.
+    """
+    flags = set(flags)
+    if not flags or FLAG_EDGE_CLIPPED in flags:
+        return not flags
+    # علامة غير معروفة تُعامل كقابلة للإصلاح بمزوّد آخر
+    return any(not any(_FLAG_REMEDY.get(flag, (False, True))) for flag in flags)
 
 
 def _rect_iou(a, b) -> float:
@@ -1124,7 +1155,9 @@ def _isolate_checked(img: Image.Image, method: str, product_name, brand, canvas_
     يعزل المنتج ويمرر كل قص على بوابة الجودة. الترتيب:
     1. شفافية المصدر (source_alpha) إن وجدت؛ عند علامة تُعامل الصورة كما تبدو على الأبيض.
     2. كشف الخلفية البيضاء (WHITE_SOURCE_MODE): في 'on' يُستخدم القص المحلي النظيف دون Gemini ولا مزوّد مدفوع.
-    3. المزوّد المطلوب مع صندوق Gemini، ثم عند علامة بدون الصندوق، ثم المزوّد المدفوع الآخر المهيأ.
+    3. المزوّد المطلوب مع صندوق Gemini، ثم بدون الصندوق (فقط لعلامة يصلحها الإطار الكامل: edge_clipped أو
+       too_small_on_canvas)، ثم المزوّد المدفوع الآخر المهيأ. نتوقف عند أول قص نظيف، أو عند علامة لا يصلحها شيء
+       (_FLAG_REMEDY: second_object، upscaled): لا نصرف على نتيجة ستذهب للمراجعة على أي حال.
     فحص صندوق الخلفية يُجرى على كل مخرج، ويسقط إذا طابق القناع منطقة المنتج المعروفة (شفافية المصدر أو صندوق
     Gemini). إذا طابق مخرج المزوّد شفافية المصدر فالمصدر كان صحيحاً: تُقبل شفافيته (علبة مطبوعة، لا ورقة خلفية)،
     إلا إذا حدد صندوق Gemini المنتج داخل ذلك المستطيل (رأي ثالث يقول إنه ورقة خلفية).
@@ -1215,7 +1248,8 @@ def _isolate_checked(img: Image.Image, method: str, product_name, brand, canvas_
         return finish()
     logger.info("القص (%s) لم يجتز بوابة الجودة: %s؛ إعادة المحاولة", first.label, ",".join(first.flags))
 
-    if cropped is not None:
+    box_problem = bool(_BOX_FLAGS & set(first.flags))
+    if cropped is not None and box_problem:
         retry = attempt_with(full, method)
         if retry.cutout is None:
             logger.warning("فشلت إعادة العزل بدون صندوق Gemini: %s", retry.error)
@@ -1224,8 +1258,8 @@ def _isolate_checked(img: Image.Image, method: str, product_name, brand, canvas_
 
     fallback = _fallback_method(method)
     if fallback:
-        use_box = cropped is not None and FLAG_EDGE_CLIPPED not in first.flags
-        other = attempt_with(cropped if use_box else full, fallback)
+        # الصندوق لم يكن المشكلة: المزوّد الآخر يأخذ نفس الإطار المقصوص
+        other = attempt_with(cropped if cropped is not None and not box_problem else full, fallback)
         if other.cutout is None:
             logger.warning("فشل العزل بالمزوّد البديل %s: %s", fallback, other.error)
     return finish()
