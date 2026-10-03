@@ -666,14 +666,14 @@ _seq_lock = threading.Lock()
 _last_seq = 0
 
 
-def _next_seq():
+def _next_seq(floor=0):
     """
-    تسلسل الكتابة: وقت الجدولة بالنانوثانية، متزايد تماماً داخل العملية. الكتابات من كل العمليات والقنوات
-    تُرتب به، والمُفرِّغ لا يرسل قيمة seq أصغر من قيمة كُتبت بعدها لنفس الخلية ونفس المنتج.
+    تسلسل الكتابة: وقت الجدولة بالنانوثانية، متزايد تماماً داخل العملية ولا يقل عن floor. الكتابات من كل العمليات
+    والقنوات تُرتب به، والمُفرِّغ لا يرسل قيمة seq أصغر من قيمة كُتبت بعدها لنفس الخلية ونفس المنتج.
     """
     global _last_seq
     with _seq_lock:
-        _last_seq = max(time.time_ns(), _last_seq + 1)
+        _last_seq = max(time.time_ns(), _last_seq + 1, int(floor or 0))
         return _last_seq
 
 
@@ -729,6 +729,7 @@ class SQLiteTransactionQueue:
                 "ALTER TABLE sheet_updates ADD INDEX IF NOT EXISTS idx_sheet_updates_status (sync_status)",
                 "ALTER TABLE sheet_updates ADD INDEX IF NOT EXISTS idx_sheet_updates_ident (ident)",
                 "ALTER TABLE sheet_updates ADD INDEX IF NOT EXISTS idx_sheet_updates_row (`row_number`)",
+                "ALTER TABLE sheet_updates ADD INDEX IF NOT EXISTS idx_sheet_updates_seq (seq)",
             ):
                 cursor.execute(stmt)
             conn.commit()
@@ -739,18 +740,32 @@ class SQLiteTransactionQueue:
                       key_size=None, key_brand=None, col_key=None, seq=None):
         """
         جدولة كتابة خلية. col_key: المفتاح المنطقي للعمود ('link' أو 'meta:<key>') ويُحدد عموده وقت الكتابة؛
-        col_index/col_name للكتابات القديمة فقط. seq: تسلسل الجدولة (يُولَّد الآن إن لم يُمرر). يعيد معرّف الصف.
+        col_index/col_name للكتابات القديمة فقط. يعيد معرّف الصف.
+        seq: تسلسل كتابة نُقلت من Redis (بوقت جدولتها هناك)؛ نقلها مرة أخرى (نقل جزئي أو حمولة تغيرت أثناء النقل)
+        لا يكرر الصف. دونه يُولَّد الآن ولا يقل عن أكبر seq في الطابور + 1: الترتيب بين العمليات يبقى صحيحاً حتى
+        لو رجعت ساعة الجهاز أو وقعت كتابتان في نفس نبضة الساعة.
         """
         expect = _expectation(key_barcode, key_name, key_size, key_brand)
+        ident = _identity_hash(expect)
         conn = self._connect()
         try:
             cursor = conn.cursor()
+            if seq:
+                cursor.execute(
+                    "SELECT id FROM sheet_updates WHERE (`row_number` = %s OR relocated_from = %s) AND col_key <=> %s "
+                    "AND seq = %s AND ident <=> %s ORDER BY id LIMIT 1",
+                    (row_number, row_number, col_key, int(seq), ident))
+                existing = cursor.fetchone()
+                if existing:
+                    return existing["id"]
+            else:
+                cursor.execute("SELECT MAX(seq) AS top FROM sheet_updates")
+                seq = _next_seq(floor=int((cursor.fetchone() or {}).get("top") or 0) + 1)
             cursor.execute(
                 "INSERT INTO sheet_updates (`row_number`, `col_index`, `value`, col_name, col_key, seq, ident, "
                 "key_barcode, key_name, key_size, key_brand) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
                 (row_number, -1 if col_index is None else col_index, "" if value is None else str(value),
-                 col_name, col_key, int(seq or _next_seq()), _identity_hash(expect), key_barcode, key_name,
-                 key_size, key_brand)
+                 col_name, col_key, int(seq), ident, key_barcode, key_name, key_size, key_brand)
             )
             new_id = getattr(cursor, "lastrowid", None)
             conn.commit()

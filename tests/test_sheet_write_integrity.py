@@ -847,3 +847,51 @@ def test_older_value_never_wins_after_the_row_drifts_twice(gs, outbox):
     assert ws.value(5, "Drive Image Link") == "https://res/approved.png"
     assert statuses(gs) == {a: "SUPERSEDED", b: "SYNCED"}
     assert gs.reported == []
+
+
+def test_reforwarding_a_redis_payload_never_duplicates_outbox_rows(gs, outbox):
+    import sync_worker
+    payload = {"v": 2, "row_index": 2, "expect": {"barcode": MILK},
+               "updates": {"link": "https://res/milk.png", "meta:description_en": "Milk"},
+               "seqs": {"link": 11, "meta:description_en": 12}}
+    r = FakeRedis()
+    r.sadd("writebehind:dirty_set", "row_2")
+    r.set("product:data:row_2", json.dumps(payload))
+
+    class FailsOnSecond:
+        calls = 0
+
+        def append_update(self, *args, **kwargs):
+            FailsOnSecond.calls += 1
+            if FailsOnSecond.calls == 2:
+                raise RuntimeError("MariaDB went away")
+            return outbox.append_update(*args, **kwargs)
+
+    assert sync_worker.run_sync_cycle(None, r, queue=FailsOnSecond(), flush=False) == 0   # partial forward
+    assert sync_worker.run_sync_cycle(None, r, queue=outbox, flush=False) == 1
+    assert sorted((row["col_key"], row["seq"]) for row in rows_of(outbox).values()) == [
+        ("link", 11), ("meta:description_en", 12)]
+    ws = sheet()
+    ws.insert_column(6, "Description EN")
+    flush(gs, ws, outbox)
+    # the same payload forwarded again after it was written: not inserted, not re-sent over the owner's edit
+    ws.set(2, 6, "https://res/typed-by-owner.png")
+    r.sadd("writebehind:dirty_set", "row_2")
+    r.set("product:data:row_2", json.dumps(dict(payload, updates={"link": "https://res/milk.png"},
+                                                seqs={"link": 11})))
+    assert sync_worker.run_sync_cycle(ws, r, queue=outbox) == 1
+    assert len(rows_of(outbox)) == 2 and ws.value(2, "Drive Image Link") == "https://res/typed-by-owner.png"
+    assert gs.reported == []
+
+
+def test_queued_seq_never_goes_below_the_outbox_high_water_mark(gs, outbox):
+    """A clock step back (or two processes in one coarse clock tick) must not make a later write look older."""
+    import time as _time
+    ahead = _time.time_ns() + 10 * 1_000_000_000              # written by another process before the clock stepped back
+    first = outbox.append_update(2, 5, "https://res/a.png", col_key="link", key_barcode=MILK, seq=ahead)
+    later = outbox.append_update(2, 5, "https://res/b.png", col_key="link", key_barcode=MILK)
+    rows = rows_of(outbox)
+    assert rows[later]["seq"] > rows[first]["seq"]
+    ws = sheet()
+    flush(gs, ws, outbox)
+    assert ws.value(2, "Drive Image Link") == "https://res/b.png"
