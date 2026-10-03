@@ -43,6 +43,7 @@
         local: new Map(),          // key -> approving | approved | rejected | requeued (this page session)
         approved: new Map(),       // key -> { link, warning, url }
         session: new Map(),        // key -> search results, the reviewer's pick, pasted / uploaded images
+        keep: new Set(),           // keys requeued for review in this session (reject + research): stay in the chip
         openKey: null,
         open: null,                // identity of the open product (as in the sheet when it was opened)
         searchSeq: 0,
@@ -51,7 +52,7 @@
         ws: { key: null, state: 'none' },
         reasonsOpen: false,
         listLimit: LIST_PAGE,
-        bulk: { brand: '', filter: 'all', selected: new Set(), limit: 48, seeded: false },
+        bulk: { brand: '', filter: 'all', selected: new Set(), limit: 48, seeded: false, focus: null },
         runDiff: 0,
         dom: {},
         jobs: null
@@ -265,7 +266,8 @@
         const c = S.counts;
         let filter = S.cfg.filter && R.FILTERS.some(f => f.key === S.cfg.filter) ? S.cfg.filter : null;
         if (!filter) {
-            filter = c.proposed ? 'proposed' : c.none ? 'none' : c.not_found ? 'not_found' : c.failed ? 'failed' : 'all';
+            filter = c.proposed ? 'proposed' : c.none ? 'none' : c.bg_failed ? 'bg_failed' : c.not_found ? 'not_found'
+                : c.failed ? 'failed' : 'all';
         }
         S.filter = filter;
         let key = null;
@@ -292,12 +294,13 @@
     // -------------------------------------------------------------------------------------------------
 
     function visibleItems() {
-        return R.filterItems(S.items, S.filter, S.query);
+        return R.filterItems(S.items, S.filter, S.query, S.keep);
     }
     R.visibleItems = visibleItems;
 
     function setFilter(key) {
         if (!R.FILTERS.some(f => f.key === key)) return;
+        if (S.filter !== key) S.keep = new Set();
         S.filter = key;
         S.listLimit = LIST_PAGE;
         updateUrl(false);
@@ -353,7 +356,8 @@
         warning: 'ما في صور مقترحة فيها تحذير.',
         none: 'ما في منتجات بلا اقتراح.',
         not_found: 'ما في منتجات ما انلقت صورتها.',
-        failed: 'ما في أعطال مسجلة.'
+        failed: 'ما في أعطال مسجلة.',
+        bg_failed: 'لا توجد صور معتمدة لم تُعزل خلفيتها.'
     };
 
     // القائمة، ثم «N من M» في مساحة العمل (يتغير مع الفلتر والبحث وحالة المنتجات)
@@ -543,8 +547,12 @@
                     bdi(j.label || `صف ${j.row}`, 'rv-jobs__name'),
                     el('span', { className: 'rv-jobs__why', title: j.detail || null, text: ` — ${j.error}` })
                 ]),
-                el('button', { type: 'button', className: 'lq-btn lq-btn--secondary lq-btn--sm', text: 'أعد المحاولة',
-                               disabled: S.jobs.has(j.key), onclick: () => S.jobs.retry(j.id) })
+                // تغيّر المنتج بعد فتح الصفحة (C1): الإعادة كما هي تُرفض مرة أخرى؛ الاستبدال بتأكيد صريح فقط
+                j.stale
+                    ? el('button', { type: 'button', className: 'lq-btn lq-btn--danger lq-btn--sm rv-jobs__replace', text: 'استبدال المعتمدة…',
+                                     disabled: S.jobs.has(j.key), onclick: () => R.single.confirmReplace(j) })
+                    : el('button', { type: 'button', className: 'lq-btn lq-btn--secondary lq-btn--sm', text: 'أعد المحاولة',
+                                     disabled: S.jobs.has(j.key), onclick: () => S.jobs.retry(j.id) })
             ]))));
         }
         R.single.updateJobsOffset();
@@ -652,6 +660,8 @@
 
     // -------------------------------------------------------------------------------------------------
     // Keyboard: ↑ ↓ move, 1–9 select (never publish), Enter approves the visible selected image, X reject, S skip.
+    // Bulk mode (bulk.js onKey): arrows move between cards, Space ticks the focused card, A approves it (after its
+    // warnings), Shift+A is the «approve the pre-selected ones without a warning» button.
     // Ctrl / Cmd / Alt combinations and typing in a field are left to the browser.
     // -------------------------------------------------------------------------------------------------
 
@@ -681,7 +691,19 @@
             }
             return;
         }
-        if (typing || S.mode !== 'single' || R.bulk.dialogOpen()) return;
+        if (typing || R.bulk.dialogOpen()) return;
+        if (S.mode === 'bulk') {
+            // مسافة أو Enter على زر أو رابط أو مربع تحديد يفعّله المتصفح نفسه
+            if ((key === ' ' || key === 'Enter') && ['button', 'a', 'summary', 'label', 'input'].includes(tag)) return;
+            // التكرار يُقبل للأسهم فقط: A المضغوط باستمرار لا يعتمد البطاقة التالية قبل أن يراها المراجع
+            if (e.repeat && !/^Arrow/.test(key)) {
+                if (key === ' ' || key === 'a') e.preventDefault();
+                return;
+            }
+            if (R.bulk.onKey(key, e)) e.preventDefault();
+            return;
+        }
+        if (S.mode !== 'single') return;
         // مفتاح مضغوط باستمرار يكرر نفسه: بعد الاعتماد يفتح المنتج التالي، فالتكرار كان يعتمده قبل ما يشوفه المراجع.
         // التكرار يُقبل للأسهم فقط (التنقل بالقائمة)، ولا يضغط زراً مركّزاً مرة ثانية
         if (e.repeat && key !== 'ArrowDown' && key !== 'ArrowUp') {
@@ -690,7 +712,7 @@
         }
         if (S.reasonsOpen) {
             if (/^[1-9]$/.test(key)) {
-                const reason = R.REJECT_REASONS[parseInt(key, 10) - 1];
+                const reason = R.single.currentReasons()[parseInt(key, 10) - 1];
                 if (reason) {
                     e.preventDefault();
                     R.single.rejectCurrent(reason.code);

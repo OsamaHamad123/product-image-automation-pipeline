@@ -4,6 +4,10 @@
  * "اعتماد N صور مقترحة بلا تحذير" only ever takes images the system pre-selected WITHOUT a warning; a card with a
  * warning shows it and is approved on its own (after the warning is confirmed) or opened in single mode. Approvals
  * and rejections go through the same background queue as single mode: one request at a time.
+ *
+ * The cards come in order of confidence (pre-selected without a warning, the reviewer's earlier pick, with a warning,
+ * nothing proposed), each brand's cards together. Keys: arrows move between cards, Space ticks the focused card,
+ * A approves it (after its warnings, like its button), Shift+A is the bulk button (the ticked ones without warning).
  */
 (function (root) {
     'use strict';
@@ -28,10 +32,10 @@
         return String(v || '').toLowerCase().replace(/\s+/g, ' ').trim();
     }
 
-    // المنتجات التي تنتظر المراجعة (ومعها ما اعتُمد أو رُفض منها في هذه الجلسة، بحالته)
+    // المنتجات التي تنتظر المراجعة (ومعها ما اعتُمد أو رُفض منها في هذه الجلسة، بحالته)، بترتيب الثقة ثم الماركة
     function source() {
         return st().items.filter(it => R.WAITING.includes(it.base))
-            .sort((a, b) => (parseInt(a.product.row_number, 10) || 0) - (parseInt(b.product.row_number, 10) || 0));
+            .sort((a, b) => R.compareWaiting(a.product, b.product));
     }
 
     function brandOf(it) {
@@ -138,6 +142,10 @@
             d.bulkFilters,
             d.bulkExport
         ]);
+        d.bulkKeys = el('p', { className: 'rv-bulk__keys' }, [
+            R.kbd('← → ↑ ↓'), el('span', { text: ' للتنقل بين البطاقات · ' }), R.kbd('مسافة'), el('span', { text: ' للتحديد · ' }),
+            R.kbd('A'), el('span', { text: ' لاعتماد البطاقة · ' }), R.kbd('Shift+A'), el('span', { text: ' لاعتماد المحددة بلا تحذير' })
+        ]);
 
         d.bulkPickEligible = el('input', { type: 'checkbox', id: 'rvBulkEligible' });
         d.bulkPickEligible.addEventListener('change', () => {
@@ -162,7 +170,7 @@
         d.bulkGrid.addEventListener('click', onGridClick);
         d.bulkGrid.addEventListener('change', onGridChange);
         d.bulkMore = el('div', { className: 'rv-bulk__more' });
-        box.appendChild(el('div', { className: 'rv-bulk__top' }, [d.bulkHead, d.bulkTools, d.bulkBar]));
+        box.appendChild(el('div', { className: 'rv-bulk__top' }, [d.bulkHead, d.bulkTools, d.bulkBar, d.bulkKeys]));
         box.appendChild(d.bulkGrid);
         box.appendChild(d.bulkMore);
     }
@@ -189,7 +197,9 @@
         const name = p.product_name || p.product_name_ar || `صف ${p.row_number}`;
         const where = shown ? R.storeOf(shown) : null;
         const meta = [`صف ${p.row_number}`, R.sizeText(p.size), where ? where.store : ''].filter(Boolean).join(' · ');
-        const warn = sel && sel.warnings.length ? R.warningText(sel.warnings[0]) : '';
+        // كل تحذيرات الصورة المقترحة، لا أولها فقط
+        const warns = sel ? sel.warnings.map(w => R.warningText(w)) : [];
+        const focused = S.bulk.focus === it.key;
         const state = it.bucket;
         let overlay = null;
         if (state === 'approving' || state === 'rejecting') {
@@ -201,8 +211,10 @@
             overlay = el('span', { className: 'rv-card__overlay is-muted' }, [el('span', { text: 'رجعت للطابور' })]);
         }
         return el('article', {
-            className: 'rv-card' + (checked ? ' is-selected' : '') + (busyOrDone(it) ? ' is-done' : ''),
-            dataset: { key: it.key, kind: kindOf(it) }
+            className: 'rv-card' + (checked ? ' is-selected' : '') + (busyOrDone(it) ? ' is-done' : '') + (focused ? ' is-focused' : ''),
+            dataset: { key: it.key, kind: kindOf(it) },
+            tabindex: '-1',
+            'aria-current': focused ? 'true' : null
         }, [
             el('div', { className: 'rv-card__img' + (sel ? '' : ' is-unproposed'), title: sel ? null : 'ما في صورة مقترحة: هاي أول صورة لقاها البحث' }, [
                 shown ? R.img(shown.url, name, S.urls.imageProxy) : el('span', { className: 'rv-card__none' }, [icon('image', 26, 1.6), el('span', { text: 'بلا اقتراح' })]),
@@ -216,7 +228,9 @@
                 bdi(name, 'rv-card__name', p.product_name ? 'ltr' : 'auto'),
                 el('span', { className: 'rv-card__meta', text: meta }),
                 it.orphan ? el('span', { className: 'rv-card__warn' }, [icon('info', 14, 2), el('span', { text: 'مش موجود بالشيت الحالي' })]) : null,
-                warn ? el('span', { className: 'rv-card__warn' }, [icon('alert', 14, 2), el('span', { text: warn })]) : null,
+                warns.length ? el('ul', { className: 'rv-card__warns' },
+                                  warns.map(w => el('li', { className: 'rv-card__warn' }, [icon('alert', 14, 2), el('span', { text: w })]))) : null,
+                sel && R.explainList ? R.explainList(sel, true) : null,
                 el('div', { className: 'rv-card__actions' }, [
                     el('button', { type: 'button', className: 'lq-btn lq-btn--soft lq-btn--sm rv-card__approve', dataset: { approve: it.key },
                                    disabled: !can, text: 'اعتماد' }),
@@ -308,7 +322,15 @@
             ]));
             return;
         }
+        if (B.focus && !shown.some(it => it.key === B.focus)) B.focus = null;
         shown.forEach(it => d.bulkGrid.appendChild(card(it)));
+        if (B.focus && B.focusDom) {
+            // التنقل بالأسهم ينقل تركيز المتصفح إلى البطاقة (تظهر في الشاشة ويقرؤها قارئ الشاشة)
+            const node = Array.from(d.bulkGrid.querySelectorAll('.rv-card')).find(n => n.getAttribute('data-key') === B.focus);
+            if (node && typeof node.focus === 'function') node.focus();
+            if (node && typeof node.scrollIntoView === 'function') node.scrollIntoView({ block: 'nearest' });
+        }
+        B.focusDom = false;
         if (visible.length > B.limit) {
             d.bulkMore.appendChild(el('button', { type: 'button', className: 'lq-btn lq-btn--secondary lq-btn--sm',
                                                   text: `اعرض ${Math.min(PAGE, visible.length - B.limit)} كمان (من ${visible.length})`,
@@ -353,6 +375,7 @@
         const S = st();
         const sel = selectedOf(it);
         if (!sel || !selectable(it)) return false;
+        S.keep.delete(it.key);
         const job = S.jobs.enqueue(R.buildApproveJob(it, contextFor(it), sel));
         if (!job) return false;
         S.local.set(it.key, 'approving');
@@ -380,14 +403,78 @@
     function approveOne(key) {
         const S = st();
         const it = S.byKey.get(key);
-        if (!it || !selectable(it)) return;
+        if (!it || !selectable(it)) return false;
         const sel = selectedOf(it);
         const cautions = R.cautionsFor(sel);
-        if (cautions.length && !root.confirm(`تأكد قبل الاعتماد: ${cautions.join('، ')}. بدك تعتمدها وتنشرها؟`)) return;
+        if (cautions.length && !root.confirm(`تأكد قبل الاعتماد: ${cautions.join('، ')}. بدك تعتمدها وتنشرها؟`)) return false;
         enqueueApprove(it);
         R.rebuild();
         R.renderList();
         render();
+        return true;
+    }
+
+    // -------------------------------------------------------------------------------------------------
+    // Keyboard (app.js onKeyDown sends the keys here in bulk mode)
+    // -------------------------------------------------------------------------------------------------
+
+    // أعمدة الشبكة كما تظهر (بطاقات الصف الأول لها نفس الارتفاع عن أعلى الشبكة)؛ 1 بلا تخطيط
+    function columns(nodes) {
+        if (!nodes.length || typeof nodes[0].offsetTop !== 'number') return 1;
+        const top = nodes[0].offsetTop;
+        let n = 0;
+        while (n < nodes.length && nodes[n].offsetTop === top) n += 1;
+        return Math.max(1, n);
+    }
+
+    function focusCard(key) {
+        const B = st().bulk;
+        B.focus = key;
+        B.focusDom = true;
+        render();
+    }
+
+    // البطاقة التالية بعد المركّزة التي لم تُعتمد أو تُرفض بعد (مثل «بعد الاعتماد ننتقل للمنتج التالي»)
+    function nextOpen(list, from) {
+        for (let i = from + 1; i < list.length; i++) if (!busyOrDone(list[i])) return list[i].key;
+        for (let i = from - 1; i >= 0; i--) if (!busyOrDone(list[i])) return list[i].key;
+        return null;
+    }
+
+    function onKey(key, e) {
+        const S = st();
+        const B = S.bulk;
+        const list = shownCards();
+        if (!list.length) return false;
+        const idx = list.findIndex(it => it.key === B.focus);
+        if (/^Arrow(Up|Down|Left|Right)$/.test(key)) {
+            const cols = S.dom.bulkGrid ? columns(S.dom.bulkGrid.querySelectorAll('.rv-card')) : 1;
+            // الشبكة من اليمين لليسار: السهم الأيسر للبطاقة التالية
+            const step = { ArrowLeft: 1, ArrowRight: -1, ArrowDown: cols, ArrowUp: -cols }[key];
+            const target = idx < 0 ? 0 : Math.min(list.length - 1, Math.max(0, idx + step));
+            focusCard(list[target].key);
+            return true;
+        }
+        if (key === 'a' && e && e.shiftKey) {
+            if (S.dom.bulkApprove && !S.dom.bulkApprove.disabled) approveSelected();
+            return true;
+        }
+        if (idx < 0) return false;
+        const it = list[idx];
+        if (key === ' ') {
+            if (selectable(it)) {
+                if (B.selected.has(it.key)) B.selected.delete(it.key);
+                else B.selected.add(it.key);
+                B.focusDom = true;
+                render();
+            }
+            return true;
+        }
+        if (key === 'a') {
+            if (approveOne(it.key)) focusCard(nextOpen(shownCards(), idx) || it.key);
+            return true;
+        }
+        return false;
     }
 
     function onGridClick(e) {
@@ -499,6 +586,6 @@
 
     R.bulk = {
         build, render, approveSelected, approveOne, openRejectDialog, closeDialog, dialogOpen: () => dialogOpen,
-        visibleCards, shownCards, kindOf, seedSelection, rejectList
+        visibleCards, shownCards, kindOf, seedSelection, rejectList, onKey
     };
 })(typeof window !== 'undefined' ? window : globalThis);
