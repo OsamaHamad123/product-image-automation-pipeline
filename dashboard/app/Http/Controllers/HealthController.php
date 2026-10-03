@@ -54,7 +54,8 @@ class HealthController extends Controller
     }
 
     // ------------------------------------------------------------------
-    // Last run (package P4b): run_history written by run_report.py after every run
+    // Last run (package P4b): temp/nightly/last_report.json, which run_report.py writes after every run (the
+    // same report as the run_history row; this page reads no table directly)
     // ------------------------------------------------------------------
 
     /** النتيجة -> [النص، اللون] (run_report.OUTCOME_TEXT بلا رموز). */
@@ -67,20 +68,13 @@ class HealthController extends Controller
     ];
     public const RUN_TRIGGERS = ['nightly' => 'التشغيل الليلي', 'dashboard' => 'تشغيل من اللوحة', 'manual' => 'تشغيل يدوي'];
 
-    /** آخر صف في run_history، أو temp/nightly/last_report.json إذا تعذرت قراءة قاعدة البيانات. null إن لم يوجد. */
-    private static function lastRunRow(): ?array
+    /**
+     * آخر تقرير تشغيل (temp/nightly/last_report.json، يُكتب حتى عندما لا ترد قاعدة البيانات) بشكل صف run_history:
+     * {run_trigger, started_at, outcome, stop_reason, attempts, report_json, ...counts}، أو null إن لم يوجد.
+     */
+    public static function lastRunRow(?string $file = null): ?array
     {
-        try {
-            $rows = \DB::select('SELECT run_trigger, started_at, outcome, stop_reason, attempts, ready_for_review, not_found, '
-                . 'failed, pending_left, auto_published, report_json FROM run_history ORDER BY id DESC LIMIT 1');
-            if ($rows) {
-                return (array) $rows[0];
-            }
-            return null;
-        } catch (\Throwable $e) {
-            // run_history not created yet, or the database is down: the report file still says what happened
-        }
-        $file = base_path('../temp/nightly/last_report.json');
+        $file = $file ?? base_path('../temp/nightly/last_report.json');
         $report = is_file($file) ? json_decode((string) @file_get_contents($file), true) : null;
         if (!is_array($report)) {
             return null;

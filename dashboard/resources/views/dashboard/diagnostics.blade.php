@@ -4,7 +4,7 @@
       $services         HealthController::serviceCards(): the five service cards from that result
       $optional         configured optional services (proxy, legacy Custom Search), one muted line
       $checkedAt        epoch of the last check or null;  $allOk  false when a critical service failed
-      $lastRun          HealthController::lastRunCard(): the last run from run_history, or null
+      $lastRun          HealthController::lastRunCard(): the last run (temp/nightly/last_report.json), or null
     Opening the page never runs the check (a paid Serper query and a PhotoRoom call): the button does.
     public/js/health.js runs the check on click, loads «عمليات البحث» from GET /api/system/ops-health and
     the log tails from GET /api/view-pipeline-log, /api/view-laravel-log and /api/view-nightly-log.
@@ -65,7 +65,7 @@
     </p>
 
     @if ($lastRun ?? null)
-        {{-- آخر تشغيل (HealthController::lastRunCard من run_history الذي يكتبه run_report.py بعد كل تشغيل) --}}
+        {{-- آخر تشغيل (HealthController::lastRunCard من التقرير الذي يكتبه run_report.py بعد كل تشغيل) --}}
         <section class="lq-card lq-card--compact" aria-label="آخر تشغيل" data-health-last-run>
             <p class="lq-card__meta">آخر تشغيل @if ($lastRun['when'] !== '')· <time>{{ $lastRun['when'] }}</time>@endif</p>
             <h2 class="lq-card__title"><span class="lq-dot {{ $healthDots[$lastRun['tone']] ?? 'lq-dot--muted' }}" aria-hidden="true"></span> {{ $lastRun['title'] }}</h2>

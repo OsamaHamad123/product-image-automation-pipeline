@@ -1,7 +1,9 @@
-"""The health page's «آخر تشغيل» card (package P4b, item 4): the last run_history row, in plain Arabic.
+"""The health page's «آخر تشغيل» card (package P4b, item 4): the last run, in plain Arabic.
 
-HealthController::lastRunCard is a pure function run under the PHP CLI; the page is rendered through the Laravel
-kernel with a row written by local_cache_db.save_run_history (skipped without php, dashboard/vendor or MariaDB).
+run_report.py writes temp/nightly/last_report.json after every run (the same report as the run_history row, and
+written even when the database does not answer); HealthController reads that file, never a table (the health
+controller reads data only through files and the Python bridge). HealthController::lastRunRow / lastRunCard run
+under the PHP CLI; the page is rendered through the Laravel kernel (skipped without php or dashboard/vendor).
 """
 
 import json
@@ -17,15 +19,13 @@ ROOT = Path(__file__).resolve().parents[1]
 DASH = ROOT / "dashboard"
 HEALTH_PHP = DASH / "app" / "Http" / "Controllers" / "HealthController.php"
 PHP = shutil.which("php")
-RUN = "p4ops-card-"
 
 
-def _cards(rows):
+def _php(code):
     health = str(HEALTH_PHP).replace("\\", "/")
     script = ("<?php\nnamespace App\\Http\\Controllers { abstract class Controller {} }\nnamespace {\n"
-              f"require '{health}';\nuse App\\Http\\Controllers\\HealthController;\n"
-              f"$rows = json_decode({json.dumps(json.dumps(rows, ensure_ascii=False))}, true);\n"
-              "echo json_encode(array_map(fn ($r) => HealthController::lastRunCard($r), $rows), JSON_UNESCAPED_UNICODE);\n}\n")
+              f"require '{health}';\nuse App\\Http\\Controllers\\HealthController;\n$out = null;\n{code}\n"
+              "echo json_encode($out, JSON_UNESCAPED_UNICODE);\n}\n")
     with tempfile.NamedTemporaryFile("w", suffix=".php", delete=False, encoding="utf-8") as fh:
         fh.write(script)
         path = fh.name
@@ -35,6 +35,27 @@ def _cards(rows):
         os.unlink(path)
     assert result.returncode == 0, result.stdout + result.stderr
     return json.loads(result.stdout)
+
+
+def _cards(rows):
+    return _php(f"$rows = json_decode({json.dumps(json.dumps(rows, ensure_ascii=False))}, true);\n"
+                "$out = array_map(fn ($r) => HealthController::lastRunCard($r), $rows);")
+
+
+def _night_report(**extra):
+    """A night report as run_report.py writes it (offline: counts come from a stand-in database)."""
+    import run_report
+
+    class Db:
+        def run_outcome_counts(self, **kw):
+            return {"enqueued": 120, "searched": 118, "auto_published": 0, "ready_for_review": 90, "not_found": 20,
+                    "failed": 8, "provider_down": 0, "pending_left": 0}
+
+    attempts = extra.pop("attempts", [{"stop_reason": "provider_down", "run_id": "r1"},
+                                      {"stop_reason": None, "run_id": "r2"}])
+    report = run_report.build_report("nightly", attempts, 1_790_000_000, 1_790_004_320, db=Db(), sheets=object())
+    report.update(extra)
+    return report
 
 
 @pytest.mark.skipif(PHP is None, reason="php is not installed")
@@ -61,17 +82,33 @@ def test_last_run_card_texts():
     assert out[4] is None
 
 
+@pytest.mark.skipif(PHP is None, reason="php is not installed")
+def test_the_card_reads_the_report_python_writes(tmp_path):
+    import run_report
+
+    path = tmp_path / "last_report.json"
+    run_report.write_last_report(_night_report(), str(path))
+    card = _php(f"$out = HealthController::lastRunCard(HealthController::lastRunRow({json.dumps(str(path))}));")
+    assert card["title"] == "التشغيل الليلي: خلص" and card["tone"] == "success"
+    assert card["summary"] == "بانتظار المراجعة 90 · ما انلقت 20 · فشل 8 · انعاد التشغيل مرة بعد انقطاع"
+    assert _php(f"$out = HealthController::lastRunRow({json.dumps(str(tmp_path / 'none.json'))});") is None
+    (tmp_path / "bad.json").write_text("{not json", encoding="utf-8")
+    assert _php(f"$out = HealthController::lastRunRow({json.dumps(str(tmp_path / 'bad.json'))});") is None
+
+
+def test_the_health_controller_reads_no_table():
+    text = HEALTH_PHP.read_text(encoding="utf-8")
+    assert "DB::" not in text and "select(" not in text.lower()
+
+
 @pytest.mark.skipif(PHP is None or not (DASH / "vendor" / "autoload.php").exists(),
                     reason="php or dashboard/vendor is not installed")
-def test_the_health_page_shows_the_last_run(mariadb_or_skip, tmp_path):
-    db = mariadb_or_skip
-    entry = {"run_id": RUN + "1", "run_trigger": "nightly", "started_at": "2026-10-03 02:00:00",
-             "ended_at": "2026-10-03 03:12:00", "outcome": "done", "exit_code": 0, "attempts": 2,
-             "enqueued": 120, "searched": 118, "auto_published": 0, "ready_for_review": 90, "not_found": 20,
-             "failed": 8, "provider_down": 0, "pending_left": 0,
-             "report_json": {"reason_text": "", "outcome": "done"}}
-    row_id = db.save_run_history(entry)
-    assert row_id
+def test_the_health_page_shows_the_last_run(tmp_path):
+    import run_report
+
+    real = ROOT / "temp" / "nightly" / "last_report.json"
+    saved = real.read_bytes() if real.exists() else None
+    run_report.write_last_report(_night_report(), str(real))
     try:
         compiled = tmp_path / "views"
         compiled.mkdir()
@@ -101,12 +138,10 @@ echo json_encode(['status' => $response->getStatusCode(), 'body' => $response->g
         page = json.loads(result.stdout)
         assert page["status"] == 200, page["body"][:2000]
         body = page["body"]
-        assert "data-health-last-run" in body and "التشغيل الليلي: خلص" in body and "2026-10-03 02:00" in body
+        assert "data-health-last-run" in body and "التشغيل الليلي: خلص" in body
         assert "بانتظار المراجعة 90 · ما انلقت 20 · فشل 8 · انعاد التشغيل مرة بعد انقطاع" in body
     finally:
-        conn = db.get_db_connection()
-        try:
-            conn.cursor().execute("DELETE FROM run_history WHERE run_id LIKE %s", (RUN + "%",))
-            conn.commit()
-        finally:
-            conn.close()
+        if saved is None:
+            real.unlink()
+        else:
+            real.write_bytes(saved)
