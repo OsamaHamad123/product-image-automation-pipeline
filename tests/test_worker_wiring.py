@@ -509,3 +509,29 @@ def test_a_failed_auto_publish_after_an_approval_saves_no_candidates(race, monke
     result = main.pre_cache_product_candidates(task, worksheet=object(), link_column_index=5, sleep=lambda s: None)
     assert result == "success"
     assert rec["sheet"] == [] and rec["saved"] == [] and rec["status"] == []
+
+
+@pytest.mark.parametrize("owners, written, cached", [
+    ([], "https://res/a.png", True),
+    ([{"sku_key": "other", "product_name": "Other", "match": "url", "distance": 0}], "needs_review:https://res/a.png",
+     False),
+    (None, "needs_review:https://res/a.png", False),          # the check could not run: not published as final
+])
+def test_legacy_mode_marks_another_products_image_for_review(race, monkeypatch, owners, written, cached):
+    import config
+    import google_sheets
+    import image_search
+    import local_cache_db
+    import query_refiner
+    main, rec = race
+    monkeypatch.setattr(local_cache_db, "find_image_owners", lambda *a, **k: owners)
+    monkeypatch.setattr(query_refiner.QueryRefiner, "refine_product_metadata", staticmethod(lambda *a, **k: {}))
+    monkeypatch.setattr(google_sheets, "update_product_localization", lambda *a, **k: True)
+    monkeypatch.setattr(config, "CURATION_MODE", False, raising=False)
+    monkeypatch.setattr(config, "FORCE_OVERWRITE_IMAGES", False, raising=False)
+    monkeypatch.setattr(image_search, "search_best_product_image",
+                        _search_returning([(_best("AUTO_PUBLISH"), {"decision": "AUTO_PUBLISH"})], []))
+    prod = {"row_number": 17, "product_name": "Laban Up Strawberry 180ml", "brand": "Al Rawabi", "barcode": ""}
+    assert main.process_single_product(prod, object(), 5) == "success"
+    assert rec["sheet"][0] == ("link", written)
+    assert bool(rec["resolution"]) is cached

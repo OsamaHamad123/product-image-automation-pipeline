@@ -292,8 +292,10 @@ def publish_image(image_url, name, brand, row_number, worksheet, link_column_ind
     brand} بهويته هو: تُكتب فيها نفس القيمة والبيانات الوصفية، وكل كتابة يتحقق منها الشيت بهوية صفها.
     rows_written: الصفوف التي قُبلت كتابة رابطها؛ rows_failed: صفوف also_rows التي رُفضت.
     duplicates: صورة نُشرت لمنتج آخر (نفس رابط Cloudinary أو pHash اللوحة على مسافة 4 أو أقل، sku_key مختلف):
-    'block' (النشر التلقائي) لا يكتب شيئاً والحالة 'needs_review' (error='duplicate_image')؛ 'warn' (اعتماد
-    المراجع الصريح) يكتب ويعيد المالكين في duplicate_of. phash: بصمة اللوحة النهائية (تُخزن مع الحل المعتمد).
+    'block' (النشر التلقائي من الطابور) لا يكتب شيئاً والحالة 'needs_review' (error='duplicate_image')؛ 'review'
+    (الوضع التسلسلي القديم) يكتب الرابط ببادئة needs_review: فقط؛ 'warn' (اعتماد المراجع الصريح) يكتب كالمعتاد.
+    المالكون في duplicate_of، وتعذر التحقق يُعامل كتكرار في 'block' و 'review'.
+    phash: بصمة اللوحة النهائية (تُخزن مع الحل المعتمد).
     لا تكبير لاحق: اللوحة من image_processor نهائية. البيانات الوصفية تُكتب في الشيت فقط بعد نجاح الرفع.
     الحالة: 'published' (معزولة وليست للمراجعة) | 'needs_review' (رابط ببادئة needs_review:) | 'superseded'
     (لم يُكتب شيء) | 'failed'.
@@ -341,11 +343,12 @@ def publish_image(image_url, name, brand, row_number, worksheet, link_column_ind
     owners = local_cache_db.find_image_owners(link, phash, sku_key=sku_key, product_name=name)
     base["duplicate_of"] = list(owners or [])
     base["cloudinary_existing"] = getattr(link, "existing", None)
-    if duplicates == "block" and (owners is None or owners):
+    duplicate = owners is None or bool(owners)
+    if duplicates == "block" and duplicate:
         print(f"[Publish] صورة الصف {row_number} منشورة لمنتج آخر (أو تعذر التحقق)؛ لا نشر تلقائي، تُحال للمراجعة.")
         return dict(base, status="needs_review", error="duplicate_image", link=link)
 
-    review = force_review or not result.isolated
+    review = force_review or not result.isolated or (duplicates == "review" and duplicate)
     sheet_value = f"needs_review:{link}" if review else link
     identity = {"barcode": barcode, "product_name": name, "size": key_size, "brand": key_brand}
     with local_cache_db.sku_publish_lock(sku_key) as lock_state:
@@ -648,7 +651,8 @@ def process_single_product(prod, worksheet, link_column_index, brand_mappings=No
 
     res = publish_image(best["url"], name, brand, row_num, worksheet, link_column_index, barcode=barcode,
                         candidate_sha256=best.get("content_sha256"), profile=processing_profile.current(),
-                        force_review=decision != "AUTO_PUBLISH", key_size=payload["size"], key_brand=brand)
+                        force_review=decision != "AUTO_PUBLISH", key_size=payload["size"], key_brand=brand,
+                        sku_key=sku_key, duplicates="review")
     if res["status"] == "failed":
         config.log_and_fail(barcode, name, brand, f"فشل النشر: {res.get('error')}")
         return "failed"
