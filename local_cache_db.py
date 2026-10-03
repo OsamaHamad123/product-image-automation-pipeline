@@ -1662,14 +1662,24 @@ def add_to_queue(row_number, barcode, name, brand, query, payload=None, sku_key=
 CLAIMABLE_SQL = "(status='pending' OR (status='processing' AND (lease_until IS NULL OR lease_until<NOW())))"
 
 
+def _backoff_until(prefix, moment):
+    """
+    موعد المحاولة التالية بعد moment. صف بلا موعد (NULL) ليس مؤجلاً: «next_attempt_at > X» وحدها تعطي NULL له،
+    و NOT(NULL) يُخرجه من السحب ومن count_open_tasks بينما begin_run يحسبه (صفوف PROVIDER_DOWN القديمة).
+    """
+    return f"({prefix}next_attempt_at IS NOT NULL AND {prefix}next_attempt_at > {moment})"
+
+
 def _claimable(alias=""):
     """
     صف قابل للسحب: في الانتظار، أو قيد المعالجة انتهى حجزه؛ إلا صفاً أعاده انقطاع المزودين بموعد لم يحن بعد.
-    إعادة المحاولة من لوحة التحكم أو رفض المراجع تمسح رمز PROVIDER_DOWN فيُسحب الصف فوراً.
+    إعادة المحاولة من لوحة التحكم أو رفض المراجع تمسح رمز PROVIDER_DOWN فيُسحب الصف فوراً، وكذلك صف PROVIDER_DOWN
+    بلا موعد (تركه العامل القديم قبل عمود next_attempt_at).
     """
     p = f"{alias}." if alias else ""
     return (f"(({p}status='pending' OR ({p}status='processing' AND ({p}lease_until IS NULL OR {p}lease_until<NOW()))) "
-            f"AND NOT ({p}status='pending' AND {p}failure_code <=> 'PROVIDER_DOWN' AND {p}next_attempt_at > NOW()))")
+            f"AND NOT ({p}status='pending' AND {p}failure_code <=> 'PROVIDER_DOWN' "
+            f"AND {_backoff_until(p, 'NOW()')}))")
 
 
 # منتج واحد = بحث واحد: صف لمنتج له صف آخر قيد المعالجة بحجز ساري ينتظر نتيجته (تُطبق عليه عند انتهائه)
@@ -2068,7 +2078,7 @@ def count_open_tasks():
         cursor.execute(
             "SELECT COUNT(*) AS cnt FROM automation_queue WHERE status IN ('pending','processing') "
             "AND NOT (status = 'pending' AND failure_code <=> 'PROVIDER_DOWN' "
-            f"AND next_attempt_at > NOW() + INTERVAL {OPEN_TASK_HORIZON_MINUTES} MINUTE)")
+            f"AND {_backoff_until('', f'NOW() + INTERVAL {OPEN_TASK_HORIZON_MINUTES} MINUTE')})")
         row = cursor.fetchone()
     finally:
         _close(conn)
