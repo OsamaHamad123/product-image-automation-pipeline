@@ -577,7 +577,7 @@ def _isolate_photoroom(img: Image.Image):
         "format": "png",
         "channels": "rgba",
         "size": str(getattr(config, "PHOTOROOM_SIZE", "full") or "full"),
-        "crop": "true" if getattr(config, "PHOTOROOM_CROP", False) else "false",
+        "crop": "true" if _photoroom_crop() else "false",
         "despill": "true" if getattr(config, "PHOTOROOM_DESPILL", True) else "false",
     }
     try:
@@ -729,6 +729,11 @@ def _as_bool(value) -> bool:
     if isinstance(value, str):
         return value.strip().lower() in ("1", "true", "yes", "on")
     return bool(value)
+
+
+def _photoroom_crop() -> bool:
+    """PHOTOROOM_CROP: يطلب من PhotoRoom قص الهوامش الشفافة (مطفأ افتراضياً)."""
+    return _as_bool(getattr(config, "PHOTOROOM_CROP", False))
 
 
 def _flatten_on_white(img: Image.Image) -> Image.Image:
@@ -910,7 +915,8 @@ def assess_cutout(cutout: Image.Image, frame_size=None, crop_sides=_NO_CROP, can
 
 
 def _assess(cutout: Image.Image, frame_size=None, crop_sides=_NO_CROP, canvas_size=(800, 800),
-            fill: float = CANVAS_FILL_RATIO, check_backdrop: bool = False) -> _Assessment:
+            fill: float = CANVAS_FILL_RATIO, check_backdrop: bool = False, frame_checks: bool = True) -> _Assessment:
+    """assess_cutout مع ما يحتاجه مسار العزل. frame_checks=False: المزوّد طُلب منه قص الإطار (crop=true)."""
     import cv2
     import numpy as np
 
@@ -922,7 +928,7 @@ def _assess(cutout: Image.Image, frame_size=None, crop_sides=_NO_CROP, canvas_si
         return _Assessment([FLAG_ALPHA_HAZE])
     flags = []
 
-    if _same_frame(rgba.size, frame_size):
+    if frame_checks and _same_frame(rgba.size, frame_size):
         if float(solid.mean()) > OPAQUE_FILL_MAX and _uniform_backdrop_band(np.asarray(_flatten_on_white(rgba))):
             # لم يُزل شيء: الإطار كله يلمس خطوط القص، فهذا لا يقول شيئاً عن صندوق Gemini
             flags.append(FLAG_OPAQUE_FILL)
@@ -1100,15 +1106,16 @@ def _region_match(cutout, main_rect, frame_size, frame_rect, source_mask, produc
 
 
 def _gated(cutout, provider, frame_size, crop_sides, canvas_size, label, frame_rect=None, source_mask=None,
-           product_rect=None) -> _Attempt:
+           product_rect=None, frame_checks=True) -> _Attempt:
     """
     ينظف القناع ويمرره على البوابة (مع فحص صندوق الخلفية دائماً). source_mask: الجزء الصلب من شفافية المصدر
-    بإحداثيات صورة العمل؛ product_rect: صندوق Gemini بلا هامش. frame_rect: موضع الإطار المرسل في صورة العمل.
+    بإحداثيات صورة العمل؛ product_rect: صندوق Gemini بلا هامش. frame_rect: موضع الإطار المرسل في صورة العمل
+    (None إذا قص المزوّد الإطار: لا فحوص إطار ولا مقارنة بالمواضع).
     """
     cutout = EdgeShadowEngine.process_mask(cutout)
     if alpha_bbox(cutout) is None:
         return _Attempt(None, provider, [], f"{provider}_empty_cutout", label)
-    found = _assess(cutout, frame_size, crop_sides, canvas_size, check_backdrop=True)
+    found = _assess(cutout, frame_size, crop_sides, canvas_size, check_backdrop=True, frame_checks=frame_checks)
     flags = list(found.flags)
     matches_source = False
     if source_mask is not None or product_rect is not None:
@@ -1125,6 +1132,11 @@ def _provider_attempt(frame, method, crop_sides, frame_rect, canvas_size, source
     cutout, error = _isolate(frame, method)
     if cutout is None:
         return _Attempt(None, method, [], error, label)
+    if method == "photoroom" and _photoroom_crop():
+        # طلبنا من PhotoRoom القص: لمس الحواف والإطار المعتم طبيعيان، ونسبة الأبعاد لا تكشف ذلك (مع صندوق Gemini
+        # يكون للإطار نسبة أبعاد المنتج نفسها)، فلا فحوص إطار ولا مقارنة بالمواضع
+        return _gated(cutout, method, None, _NO_CROP, canvas_size, label, None, None, product_rect,
+                      frame_checks=False)
     return _gated(cutout, method, frame.size, crop_sides, canvas_size, label, frame_rect, source_mask, product_rect)
 
 

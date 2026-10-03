@@ -324,3 +324,34 @@ def test_paid_calls_per_case(work, name):
     if name == "opaque_fill_on_the_box_crop":
         # the box was not the problem: remove.bg gets the same crop, no PhotoRoom full-frame retry
         assert services.calls[0][1] == services.calls[1][1] != shot.size
+
+
+# ---------------------------------------------------------------------------
+# #9: PHOTOROOM_CROP=True (non-default)
+# ---------------------------------------------------------------------------
+
+CROPPED_KINDS = {
+    "bottle": lambda: ps.make("bottle", (600, 900)),
+    "can": lambda: ps.make("can", (600, 800)),
+    "carton": lambda: ps.make("carton", (800, 1000), gable=True),
+    "jar": lambda: ps.make("jar", (700, 700)),
+    "jerrycan": lambda: ps.make("jerrycan", (900, 1000)),
+    "juicebox": lambda: ps.make("juicebox", (600, 900)),
+    "square_carton_in_a_square_photo": lambda: ps.make("carton", (800, 800), fill=0.9, aspect=1.0,
+                                                       face=(220, 40, 120)),
+}
+
+
+@pytest.mark.parametrize("kind", sorted(CROPPED_KINDS))
+def test_photoroom_crop_true_costs_one_call(work, kind):
+    # With a Gemini box the crop frame has the product's aspect, so the old "same aspect = not cropped" guess ran
+    # the frame checks on PhotoRoom's cropped answer: edge_clipped every time (2 calls), and a square carton in a
+    # square photo looked opaque_fill and fell through to remove.bg.
+    shot = CROPPED_KINDS[kind]()
+
+    result, services = run(shot, work, crop=True, remove_bg="truth")
+
+    assert services.names() == ["photoroom"]
+    assert (result.isolated, result.provider, result.quality_flags) == (True, "photoroom", [])
+    expected = np.asarray(ip.compose_on_white_canvas(shot.product, (800, 800)))
+    assert ps.ink_box(ps.canvas_array(result)) == ps.ink_box(expected)
