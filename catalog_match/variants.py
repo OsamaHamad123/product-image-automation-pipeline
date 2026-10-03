@@ -130,8 +130,11 @@ def values_of(value: Optional[str]) -> Set[str]:
 
 
 def spec_context(spec) -> str:
-    """The SKU text that opens context-bound phrases when a candidate or a label is compared with it."""
-    parts = [getattr(spec, "raw_name", ""), getattr(spec, "name_ar", ""), getattr(spec, "category", "")]
+    """The SKU text that opens context-bound phrases when a candidate or a label is compared with it
+    (the sheet name as written and as the stores write it: 'SOLIDTUNA' holds the 'tuna' of 'SOLID TUNA')."""
+    from .sheet_names import spec_name      # sheet_names reads the lexicon's contexts through abbreviations
+    parts = [getattr(spec, "raw_name", ""), spec_name(spec), getattr(spec, "name_ar", ""),
+             getattr(spec, "category", "")]
     parts.extend(getattr(spec, "class_tokens", ()) or ())
     return " ".join(p for p in parts if p)
 

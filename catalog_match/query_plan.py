@@ -12,7 +12,8 @@ A staff custom_query REPLACES the plan: it is the only query, with query_id 'cus
 
 relaxations(spec) -> [R1 (variant words dropped), R2 (size dropped)], flagged relaxed.
 
-Name words are the sheet name's own words, in order, with every spelling of the
+Name words are the sheet name's own words, in order, as the stores write them (a size glued
+to a word split off and known sheet compounds and typos fixed: catalog_match.sheet_names), with every spelling of the
 target brand removed (the brand is written exactly once, as a prefix; a spelling
 glued or split differently, 'ALALALI' for 'AL ALALI', is the same brand) and, when the
 SKU has a size, every size / pack expression removed (the size is appended once as
@@ -37,6 +38,7 @@ from typing import Iterable, List, Optional, Sequence, Set, Tuple
 
 from . import abbreviations
 from . import settings
+from . import sheet_names
 from . import variants as variants_mod
 from .gtin import is_restricted, normalize_gtin
 from .models import PlannedQuery, Size, SkuSpec
@@ -310,11 +312,12 @@ def _analyse(spec: SkuSpec, name: str, brand: str, spellings: Sequence[str], lan
 
 
 def _primary_parts(spec: SkuSpec) -> _NameParts:
-    """Q1 comes from the sheet name; an Arabic-script sheet name gives an Arabic Q1 (hl=ar)."""
+    """Q1 comes from the sheet name as the stores write it (catalog_match.sheet_names: 'WATE3X185GM' ->
+    'WATER 3X185GM'); an Arabic-script sheet name gives an Arabic Q1 (hl=ar)."""
     brand_en, brand_ar = english_brand(spec), arabic_brand(spec)
     lang = _lang_of(spec.raw_name) if spec.raw_name else "en"
     brand = (brand_ar or brand_en) if lang == "ar" else (brand_en or brand_ar)
-    return _analyse(spec, spec.raw_name, brand, _brand_spellings(spec, brand_en, brand_ar), lang)
+    return _analyse(spec, sheet_names.spec_name(spec), brand, _brand_spellings(spec, brand_en, brand_ar), lang)
 
 
 def _lang_of(text: str) -> str:
