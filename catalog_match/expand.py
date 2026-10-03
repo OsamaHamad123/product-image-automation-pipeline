@@ -93,7 +93,7 @@ from .providers.serper_web import SerperWebProvider, site_query
 from .quality import LOW_RES_SHORT_SIDE
 from .query_plan import build_queries
 from .retrieve import norm_image_url
-from .score import rank, rank_key, score_candidate, trusted_domains
+from .score import IDENTITY_KEYS, rank, rank_key, score_candidate, trusted_domains
 from .text_norm import domain_matches, url_host
 
 logger = logging.getLogger(__name__)
@@ -803,8 +803,9 @@ def _append_health(report: RoundReport) -> None:
 
 
 def _identity_key(rc: RankedCandidate) -> Tuple:
-    """score.rank_key's identity part: tier, size, variants, class coverage, source trust (no quality)."""
-    return rank_key(rc.candidate, rc.score)[:5]
+    """score.rank_key's identity part: tier, size, variants, no soft conflict, class coverage, source trust
+    (no quality)."""
+    return rank_key(rc.candidate, rc.score)[:IDENTITY_KEYS]
 
 
 def _upgrade(inp: RoundInput, report: RoundReport) -> RoundReport:

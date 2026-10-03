@@ -57,7 +57,7 @@ Under 'strict' a GTIN match with brand OR class-coverage corroboration is tier 1
 GTIN match alone is tier 2 (the earlier rule).
 
 rank(scored, quality) sorts by the lexicographic key
-    tier > size match > variants matched > class coverage > source trust
+    tier > size match > variants matched > no soft conflict > class coverage > source trust
     > consensus_count > quality soft score
 so a sharper photo can only break ties between candidates with identical identity evidence.
 """
@@ -618,6 +618,22 @@ def _identity_score(tier, brand_ok, gtin_ok, size_status, n_matched, n_variants,
 # ---------------------------------------------------------------------------
 
 _SIZE_RANK = {"match": 2, "unknown": 1, "ambiguous": 1, "conflict": 0}
+# Doubts on a surviving candidate's own evidence that keep it out of tier 1 (the soft cap, a differing page
+# barcode, a common-word brand out of a brand position). Between two listings that tie on tier, size and the
+# variants they state, the one without such a doubt ranks first.
+SOFT_CONFLICTS = ("url_size_conflict", "url_pack_conflict", "image_variant_conflict", "soft_variant_conflict",
+                  "unstated_variant", "pack_ambiguous", "sub_brand_missing", "gtin_mismatch",
+                  "generic_brand_position")
+
+
+# rank_key's identity part (tier, size, variants, no soft conflict, coverage, trust): decide and expand compare a
+# larger copy of a pick on these keys only, never on consensus, quality or provider order.
+IDENTITY_KEYS = 6
+
+
+def has_soft_conflict(score: CandidateScore) -> bool:
+    """True when the score carries a soft doubt (SOFT_CONFLICTS) on the candidate's own evidence."""
+    return any(str(c).startswith(SOFT_CONFLICTS) for c in score.conflicts or ())
 
 
 def _quality_value(quality: Optional[Mapping], cand: Candidate) -> float:
@@ -640,7 +656,14 @@ def _quality_value(quality: Optional[Mapping], cand: Candidate) -> float:
 
 
 def rank_key(cand: Candidate, score: CandidateScore, quality_score: float = 0.0) -> Tuple:
-    """Ascending sort key implementing the D4 lexicographic order (best first)."""
+    """Ascending sort key implementing the D4 lexicographic order (best first).
+
+    The identity part is the first six keys (decide and expand compare copies on them): tier, size,
+    variants matched, no soft conflict, class coverage, source trust. The soft-conflict key keeps a
+    listing that states a variant the SKU does not (live run 2026-10-03, row 11: Lulu's 'Sunbulah Thin
+    French Fries 1 kg' for 'SUNBULAH FRENCH FRIES 1KG') below the plain listing it tied with, which it
+    beat on provider order alone.
+    """
     rejected = score.tier is None or bool(score.hard_reject)
     tier_rank = 0 if rejected else 4 - int(score.tier)
     matched = score.matched or {}
@@ -648,6 +671,7 @@ def rank_key(cand: Candidate, score: CandidateScore, quality_score: float = 0.0)
         -tier_rank,
         -_SIZE_RANK.get(score.size_status, 0),
         -len(matched.get("variants") or ()),
+        int(has_soft_conflict(score)),
         -float(matched.get("coverage") or 0.0),
         -int(matched.get("source_trust") or 0),
         -int(cand.consensus_count or 1),

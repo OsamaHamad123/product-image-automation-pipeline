@@ -275,3 +275,57 @@ def test_row12_a_listing_without_mm_covers_every_product_word():
     spec = spec_of("TOMEX FRENCH FRIES 9MM 1 KG", "TOMEX")
     s = score_candidate(spec, listing("Tomex French Fries 1kg | Example Mart", "https://www.example-mart.ae/tomex-fries"))
     assert s.matched["coverage"] == 1.0                                # was 0.67: 'mm' counted as a product word
+
+
+# ---------------------------------------------------------------------------
+# 4. A listing with a soft doubt ranks below the plain listing it ties with
+# ---------------------------------------------------------------------------
+
+SUNBULAH = ("SUNBULAH FRENCH FRIES 1KG", "SUNBULAH")                         # row 11
+LULU_KSA_THIN = listing("Sunbulah Thin French Fries 1 kg Online at Best Price | Lulu KSA",
+                        "https://gcc.luluhypermarket.com/en-sa/sunbulah-thin-french-fries-1-kg/p/136497",
+                        "https://bf1af2.akinoncloudcdn.com/products/2024/09/20/121771/491e497e.jpg")
+SPINNEYS = listing("Sunbulah Frozen French Fries 1kg",
+                   "https://www.spinneys.com/en-sa/catalogue/sunbulah-frozen-french-fries-1kg_89748/",
+                   "https://prod-spinneys-cdn-new.azureedge.net/media/images/products/2026/07/6281073151026.jpg")
+SHARJAH = listing("Sunbulah Sunbullah French Fries Potato 1Kg | Sharjah Co-operative Society",
+                  "https://www.sharjahcoop.ae/en/sunbulah-sunbullah-french-fries-potato-1kg/p/6281073151026",
+                  "https://www.sharjahcoop.ae/medias/6281073151026-1200Wx1200H-001.jpg")
+
+
+def _ranked_row11():
+    from catalog_match.score import rank
+
+    spec = spec_of(*SUNBULAH)
+    # the provider order of the live run: the thin listing came first
+    cands = [LULU_KSA_THIN, SPINNEYS, SHARJAH]
+    return spec, rank([(c, score_candidate(spec, c)) for c in cands])
+
+
+def test_row11_the_thin_fries_listing_ranks_below_the_plain_ones():
+    spec, ranked = _ranked_row11()
+    scores = {c.image_url: s for c, s in ranked}
+    assert all(s.tier == 2 for s in scores.values())
+    assert "unstated_variant:fries_cut" in scores[LULU_KSA_THIN.image_url].conflicts
+    assert [c.image_url for c, _ in ranked][-1] == LULU_KSA_THIN.image_url     # was first, on provider order
+
+
+def test_row11_the_plain_listing_is_preselected_when_every_one_reads_as_a_match():
+    from catalog_match import decide
+    from catalog_match.models import FetchedImage, ProviderHealth, QualityReport, RankedCandidate, VerificationResult
+
+    spec, ranked = _ranked_row11()
+    rcs = []
+    for c, s in ranked:
+        read = VlmImageVerdict(index=0, brand_text="Sunbulah", variant_text="French Fries", size_text="1 kg",
+                               view="front_packshot", brand_match="yes", variant_match="yes", size_match="yes",
+                               decision="MATCH")
+        rcs.append(RankedCandidate(candidate=c, score=s, verdict=read,
+                                   fetched=FetchedImage(candidate=c, ok=True, content_sha256=c.image_url[-8:] * 8,
+                                                        width=900, height=900, path_or_bytes=b"x"),
+                                   quality=QualityReport(hard_ok=True, quality_score=0.8)))
+    out = decide.route(spec, rcs, VerificationResult(status="ok", calls=1),
+                       [ProviderHealth(provider="serper", status="ok", query_id="Q1")])
+    assert out.decision == "REVIEW_PRESELECTED" and out.failure_code is None
+    assert out.winner is not None and out.winner.candidate is not LULU_KSA_THIN
+    assert not any(w.startswith("warn:sheet_silent") for w in out.winner.reasons)

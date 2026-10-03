@@ -99,7 +99,7 @@ from .models import (
     VerificationResult,
 )
 from .fetch import phash_distance
-from .score import page_host, rank_key, trusted_domains
+from .score import IDENTITY_KEYS, page_host, rank_key, trusted_domains
 from .sizes import compare, parse_sizes, product_size
 from .text_norm import brand_in, domain_matches, match_key, match_string, normalize, store_market, url_host, url_path_text
 
@@ -677,12 +677,12 @@ def _same_picture(a: RankedCandidate, b: RankedCandidate) -> bool:
 def _identity_not_weaker(copy: RankedCandidate, winner: RankedCandidate) -> bool:
     """The copy's own listing evidence is at least the winner's on every identity key and on source trust.
 
-    Keys (score.rank_key, lower is better): tier, size match, variants matched, class coverage,
-    source trust. A larger picture never buys a weaker listing.
+    Keys (score.rank_key, lower is better): tier, size match, variants matched, no soft conflict,
+    class coverage, source trust. A larger picture never buys a weaker listing.
     """
     kc = rank_key(copy.candidate, copy.score)
     kw = rank_key(winner.candidate, winner.score)
-    return all(c <= w for c, w in zip(kc[:5], kw[:5]))
+    return all(c <= w for c, w in zip(kc[:IDENTITY_KEYS], kw[:IDENTITY_KEYS]))
 
 
 def resolution_upgrade(spec: SkuSpec, winner: RankedCandidate, ranked: Sequence[RankedCandidate],
