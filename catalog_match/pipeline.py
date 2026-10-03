@@ -37,7 +37,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Iterable, List, Mapping, Optional, Sequence, Set, Tuple, Union
 
-from . import decide, expand as expand_mod, quality as quality_mod
+from . import brand_discovery, decide, expand as expand_mod, quality as quality_mod
 from .fetch import load_image, phash_distance
 from .models import (
     Candidate, CandidateScore, FetchedImage, RankedCandidate, SearchOutcome, SkuSpec,
@@ -249,6 +249,18 @@ def find_product_image(spec: Union[SkuSpec, Mapping[str, Any]], *, providers: Op
                           early_stop=t1_early_stop(spec, negatives))
     retrieval = retriever.run(custom)
 
+    # 1b. brand discovery: a sheet brand no listing writes the sheet's way ('RIO MARIE', 'SUP/T') but the
+    #     stores write one typo or abbreviation away ('Rio Mare', 'Super Tasty'): accept the store spelling
+    #     (never an auto-publish) and send the first query once more, written with it.
+    found = brand_discovery.discover(spec, retrieval.pool)
+    if found is not None:
+        spec = brand_discovery.apply(spec, found)
+        retriever.spec = spec
+        retriever.pool.spec = spec
+        extra = brand_discovery.corrected_query(spec, retrieval.queries) if not custom else None
+        if extra is not None:
+            retrieval = retriever.run_extra(extra)
+
     # 2. score
     scored = _score_pool(spec, retrieval.pool, negatives)
 
@@ -301,6 +313,7 @@ def find_product_image(spec: Union[SkuSpec, Mapping[str, Any]], *, providers: Op
         extra_queries = report.queries
         n_phash_dropped += report.phash_dropped
     outcome.queries = list(retrieval.queries) + extra_queries
+    outcome.discovered_brands = list(spec.discovered_brands)
     outcome.vlm_calls = sum(int(r.calls or 0) for r in results)
     # verifier package: per-model usage of every billed verifier call, and its dashboard notices
     outcome.vlm_usage = [dict(u) for r in results for u in (getattr(r, "usage", None) or []) if isinstance(u, dict)]

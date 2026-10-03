@@ -632,3 +632,84 @@ def test_eval_harness_is_untouched_by_the_round(monkeypatch):
     assert resolved and all(r is None for r in resolved)
     assert report["network_attempts"] == []
     assert all(o["decision"] != "ERROR" for o in report["outcomes"])
+
+
+# ---------------------------------------------------------------------------
+# X0 page recovery (free): the page names the product, the picture Google filed under it does not
+# (live run 2026-10-03: Ansar Gallery's Yumway page under a Mondelle pack, row 13; Tradeling's Green Farm
+# Meat Masala under Shan and Double Horse, row 36)
+# ---------------------------------------------------------------------------
+
+SHOP_PAGE = "https://www.example-mart.com/en/barts-traditional-fries-1kg"
+SHOP_LISTING_IMG = "https://img.example-cdn.com/related-emborg.jpg"     # a "related products" picture
+SHOP_OWN_IMG = "https://img.example-cdn.com/barts-traditional-fries-1kg-main.jpg"
+READ_EMBORG = dict(READ_MATCH, brand_text="Emborg", brand_match="no")
+
+
+def shop_listing(image=SHOP_LISTING_IMG, page=SHOP_PAGE, title="Barts Traditional Fries 1kg | Example Mart", n=1):
+    return cand(image, title, page, n=n)
+
+
+def test_x0_reads_the_page_of_a_listing_whose_picture_is_another_brand_and_needs_no_paid_call():
+    outcome, d = run([shop_listing()], web=[hit(LULU_PAGE, "Barts Traditional Fries 1kg")],
+                     docs={SHOP_PAGE: product_page("Barts Traditional Fries 1kg", SHOP_OWN_IMG, brand="Barts")},
+                     bodies={SHOP_LISTING_IMG: packshot_png(3), SHOP_OWN_IMG: packshot_png(5)},
+                     readings={SHOP_LISTING_IMG: READ_EMBORG, SHOP_OWN_IMG: READ_MATCH})
+    assert d["pages"].fetched == [SHOP_PAGE]
+    assert outcome.decision == "REVIEW_PRESELECTED"
+    win = outcome.winner.candidate
+    assert (win.image_url, win.provider, win.query_id, win.sanctioned) == (SHOP_OWN_IMG, "page", "X0", False)
+    assert d["web"].calls == [] and d["shop"].calls == []               # X0 was enough: no paid call
+    assert not any(h.provider in ("serper_web", "serper_shopping") for h in outcome.provider_health)
+
+
+@pytest.mark.parametrize("body", ["http_404", "not_image"])
+def test_x0_reads_the_page_when_the_listing_picture_cannot_be_downloaded(body):
+    outcome, d = run([shop_listing()],
+                     docs={SHOP_PAGE: product_page("Barts Traditional Fries 1kg", SHOP_OWN_IMG, brand="Barts")},
+                     bodies={SHOP_LISTING_IMG: body, SHOP_OWN_IMG: packshot_png(5)},
+                     readings={SHOP_OWN_IMG: READ_MATCH})
+    assert d["pages"].fetched == [SHOP_PAGE] and outcome.winner.candidate.image_url == SHOP_OWN_IMG
+
+
+def test_x0_leaves_a_page_whose_picture_is_the_right_brand_in_another_size():
+    # the label says Barts, front packshot, but 2.5 kg: the page itself sells the other size
+    read_other_size = dict(READ_MATCH, size_text="2.5 kg", size_match="no")
+    outcome, d = run([shop_listing()], bodies={SHOP_LISTING_IMG: packshot_png(3)},
+                     readings={SHOP_LISTING_IMG: read_other_size})
+    assert d["pages"].fetched == [] and d["web"].calls                 # the round ran; X0 left the page
+
+
+def test_x0_never_reads_social_networks_or_listings_of_another_size_or_brand():
+    insta = shop_listing(image="https://img.example-cdn.com/insta.jpg",
+                         page="https://www.instagram.com/p/barts-fries/", title="Barts Traditional Fries 1kg", n=1)
+    # the size is only in the link (a title stating it is already a hard reject): tier 2 with a URL size conflict
+    other_size = shop_listing(image="https://img.example-cdn.com/2kg.jpg",
+                              page="https://www.example-mart.com/barts-traditional-fries-2kg",
+                              title="Barts Traditional Fries | Example Mart", n=2)
+    other_brand = shop_listing(image="https://img.example-cdn.com/emb.jpg", page="https://www.example-mart.com/emborg",
+                               title="Emborg Fries 1kg | Example Mart", n=3)
+    outcome, d = run([insta, other_size, other_brand],
+                     bodies={c.image_url: "http_404" for c in (insta, other_size, other_brand)})
+    assert d["pages"].fetched == [] and d["web"].calls                 # the round ran; X0 read nothing
+
+
+def test_x0_reads_at_most_three_pages_best_first():
+    listings = [shop_listing(image=f"https://img.example-cdn.com/l{i}.jpg",
+                             page=f"https://www.example-mart.com/barts-traditional-fries-1kg-{i}", n=i + 1)
+                for i in range(5)]
+    outcome, d = run(listings, bodies={c.image_url: "http_404" for c in listings})
+    assert len(d["pages"].fetched) == expand.MAX_RECOVER_PAGES
+    assert d["pages"].fetched == [c.page_url for c in listings[:expand.MAX_RECOVER_PAGES]]
+
+
+def test_when_x0_finds_no_pick_the_paid_steps_still_run():
+    outcome, d = run([shop_listing()], web=[hit(LULU_PAGE, "Barts Traditional Fries 1kg")],
+                     docs={SHOP_PAGE: product_page("Barts Traditional Fries 1kg", SHOP_OWN_IMG, brand="Barts"),
+                           LULU_PAGE: lulu_html()},
+                     bodies={SHOP_LISTING_IMG: packshot_png(3), SHOP_OWN_IMG: packshot_png(5),
+                             LULU_IMAGE: packshot_png(7)},
+                     readings={SHOP_LISTING_IMG: READ_EMBORG, SHOP_OWN_IMG: READ_EMBORG, LULU_IMAGE: READ_MATCH})
+    assert d["pages"].fetched[0] == SHOP_PAGE and LULU_PAGE in d["pages"].fetched
+    assert len(d["web"].calls) == 1
+    assert outcome.decision == "REVIEW_PRESELECTED" and outcome.winner.candidate.image_url == LULU_IMAGE

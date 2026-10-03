@@ -354,6 +354,18 @@ class Retriever:
         self._log_summary("plan complete")
         return self.result
 
+    def run_extra(self, query: PlannedQuery) -> RetrievalResult:
+        """One more planned query into the same pool, within the query budget (not a relaxation)."""
+        if self._budget() <= 0:
+            logger.info("retrieve: query budget of %d reached; %s not sent", self.max_queries, query.query_id)
+            return self.result
+        with ThreadPoolExecutor(max_workers=self._workers) as ex:
+            ran = self._run_query(query, ex)
+        if ran is not None:
+            self._merge(ran)
+        self._log_summary(f"extra {query.query_id}")
+        return self.result
+
     def relax(self) -> RetrievalResult:
         """Run R1/R2 into the same pool, within the remaining query budget."""
         if self.custom_query:

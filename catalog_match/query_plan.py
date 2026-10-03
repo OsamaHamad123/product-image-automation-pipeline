@@ -148,9 +148,10 @@ def english_brand(spec: SkuSpec) -> str:
 
     Stray sheet punctuation is dropped ('SUPER T/' -> 'SUPER T') and a slash between
     letters becomes a space, as every search engine reads it ('SUPER/T' -> 'SUPER T',
-    'SUP/T' -> 'SUP T'). Letters are never added or changed.
+    'SUP/T' -> 'SUP T'). Letters are never added or changed. A store spelling found by
+    brand_discovery ('Rio Mare' for the sheet's 'RIO MARIE') is written first.
     """
-    for phrase in (spec.brand_canonical, spec.brand_raw) + tuple(spec.match_brands):
+    for phrase in tuple(spec.discovered_brands) + (spec.brand_canonical, spec.brand_raw) + tuple(spec.match_brands):
         if phrase and _has_latin(phrase) and not _has_arabic(phrase) and alnum_len(phrase) >= 2:
             return " ".join(_BRAND_SLASH_RE.sub(" ", phrase).split()).strip(_BRAND_EDGE_PUNCT + " ")
     return ""
