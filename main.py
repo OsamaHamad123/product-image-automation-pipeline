@@ -231,6 +231,23 @@ def custom_query_for(query, name, brand):
     return q
 
 
+def _with_warning_reasons(c):
+    """
+    تحذيرات العرض لكل مرشح (warnings من facade: للصورة المختارة وللبدائل) تُحفظ ضمن أسبابه بصيغة warn:<الرمز>،
+    لأن صف curation_candidates يحفظ الأسباب فقط، وشاشة المراجعة تقرأ warn:* منها. عرض فقط: لا يقرأها التوجيه.
+    """
+    warnings = c.get("warnings")
+    if not isinstance(warnings, list) or not warnings:
+        return c
+    reasons = [str(r) for r in (c.get("reasons") or [])]
+    for w in warnings:
+        tag = f"warn:{w}"
+        if w and tag not in reasons:
+            reasons.append(tag)
+    c["reasons"] = reasons
+    return c
+
+
 def collect_candidates(best, trace, limit=MAX_SAVED_CANDIDATES):
     """المرشحات التي تُعرض على المراجع، مع الحالة والأسباب والأدلة كما أعادها البحث."""
     if best.get("source") == "sqlite_cache":
@@ -254,7 +271,8 @@ def collect_candidates(best, trace, limit=MAX_SAVED_CANDIDATES):
                 if url and url not in seen:
                     seen.add(url)
                     cands.append(c)
-    out = [dict(c) for c in cands if isinstance(c, dict) and (c.get("url") or c.get("image_url"))]
+    out = [_with_warning_reasons(dict(c)) for c in cands
+           if isinstance(c, dict) and (c.get("url") or c.get("image_url"))]
     if best.get("preselect") and not any(c.get("status") == "preselected" for c in out):
         for c in out:
             if c.get("url") == best.get("url"):

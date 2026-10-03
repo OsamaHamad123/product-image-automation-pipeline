@@ -395,6 +395,29 @@ def test_research_saves_the_fresh_candidates_and_keeps_the_review(review, monkey
     assert result["rejection"]["queue_status"] == "ready_for_review"
 
 
+def test_research_saves_each_alternatives_own_warnings(review, monkeypatch):
+    """The server-side research save (contract C2) goes through main.collect_candidates: every fresh candidate
+    keeps its own display warnings as warn:<code> reasons, which the review screen reads."""
+    cli_bridge, google_sheets, calls = review
+    import image_search
+    calls["stored"] = _stored((PICK, "preselected"))
+    fresh = [{"url": ALT, "status": "preselected", "reasons": ["tier T1"], "warnings": ["size_unverified"]},
+             {"url": ALT2, "status": "eligible", "reasons": [], "warnings": ["foreign_store", "low_resolution"]}]
+
+    def fake_search(query, name, brand, **kwargs):
+        kwargs["trace"]["outcome"] = {"decision": "REVIEW_PRESELECTED", "failure_code": None}
+        return {"url": ALT, "decision": "REVIEW_PRESELECTED", "source": "serper", "preselect": True,
+                "candidates": fresh}
+
+    monkeypatch.setattr(image_search, "search_best_product_image", fake_search)
+    monkeypatch.setattr(google_sheets, "get_brand_mappings", lambda *a, **k: {})
+    assert _reject(cli_bridge, PICK, research=True)["candidates_saved"] == 2
+    (args, kwargs), = calls["saved"]
+    reasons = {c["url"]: c["reasons"] for c in args[3]}
+    assert reasons[ALT] == ["tier T1", "warn:size_unverified"]
+    assert reasons[ALT2] == ["warn:foreign_store", "warn:low_resolution"]
+
+
 def test_research_that_finds_nothing_keeps_the_remaining_candidates(review, monkeypatch):
     cli_bridge, google_sheets, calls = review
     import image_search

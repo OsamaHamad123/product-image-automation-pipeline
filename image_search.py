@@ -2015,7 +2015,8 @@ def search_best_product_image_v2(query, product_name, brand, **kwargs):
         exclude_urls=kwargs.get("exclude_urls") or (),
         exclude_phashes=kwargs.get("exclude_phashes") or (),
     )
-    return facade.outcome_to_legacy(outcome, trace)
+    # spec: تحذيرات العرض لكل مرشح (decide.candidate_warnings) وليس للمختارة فقط؛ لا تغيّر القرار
+    return facade.outcome_to_legacy(outcome, trace, spec=spec)
 
 
 def search_best_product_image_v1(query, product_name, brand, **kwargs):

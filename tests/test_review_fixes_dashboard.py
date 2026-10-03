@@ -256,13 +256,12 @@ def test_save_candidates_uses_the_shared_row_builder():
     assert "CandidateRow::optionalColumns($c, $skuKey, $runId)" in text
 
 
-def test_catalog_reject_with_research_persists_the_fresh_candidates():
+def test_catalog_reject_with_research_leaves_saving_the_fresh_candidates_to_the_server():
+    """Contract C2: reject_image with research=true saves the new candidates itself and puts the product back to
+    ready_for_review (candidates_saved). The page saved them a second time through save-candidates, from its own copy."""
     single = review_js("single")
     submit = single[single.index("async function rejectCurrent"):]
     submit = submit[: submit.index("function skip()")]
-    assert "await persistResearchCandidates(ctx, data, candidate.url)" in submit
-    persist = single[single.index("async function persistResearchCandidates"):]
-    persist = persist[: persist.index("\n    }\n")]
-    assert "/api/v1/curation/save-candidates" in persist
-    assert "c.url !== rejectedUrl" in persist
-    assert "sku_key: data.sku_key || ctx.sku_key" in persist
+    assert "persistResearchCandidates" not in single
+    assert "save-candidates" not in single and "saveCandidates" not in single
+    assert "requeueForReview(item, data, candidate.url)" in submit and "savedCount(data)" in submit

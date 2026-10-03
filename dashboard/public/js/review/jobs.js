@@ -4,6 +4,8 @@
  * The reviewer keeps working while approvals run: each approve / upload / bulk reject becomes a job, and the queue
  * sends exactly one request at a time, in order. A product has at most one job waiting or running (a second approve
  * of the same product is refused), and a failed job keeps its reason until the reviewer retries or dismisses it.
+ * An approval the server refused because the product changed since the page showed it (already_approved /
+ * state_changed, contract C1) keeps what changed (job.stale); only an explicit «replace» resends it, with replace.
  */
 (function (root) {
     'use strict';
@@ -39,11 +41,12 @@
             return jobs.some(j => j.state === 'waiting' || j.state === 'running');
         }
 
-        function errorOf(result) {
-            if (!result || result.network) return { text: 'ما قدرنا نوصل للخادم.', detail: 'network' };
+        function errorOf(result, job) {
+            if (!result || result.network) return { text: 'ما قدرنا نوصل للخادم.', detail: 'network', stale: null };
             const data = result.data || {};
-            const raw = String(data.error || data.message || (result.status ? `HTTP ${result.status}` : ''));
-            return { text: R.plainError(raw, 'ما انعتمدت.'), detail: raw };
+            const raw = String(data.error || data.message || data.error_code || (result.status ? `HTTP ${result.status}` : ''));
+            const stale = R.staleInfo ? R.staleInfo(data, job && job.expected) : null;
+            return { text: stale ? stale.text : R.plainError(raw, 'ما انعتمدت.'), detail: raw, stale: stale };
         }
 
         // job: { key, type: 'approve' | 'upload' | 'reject', label, ... } → the job, or null if this product already has one
@@ -73,10 +76,12 @@
             const success = !!(result && result.ok && result.data && result.data.status === 'success');
             next.result = result;
             next.state = success ? 'done' : 'failed';
+            next.stale = null;
             if (!success) {
-                const e = errorOf(result);
+                const e = errorOf(result, next);
                 next.error = e.text;
                 next.detail = e.detail;
+                next.stale = e.stale;
             }
             running = null;
             if (typeof options.onSettle === 'function') {
@@ -94,11 +99,13 @@
             }
         }
 
-        // إعادة طلب فشل: نفس الجسم، بشرط ألا يكون للمنتج طلب آخر جارٍ
-        function retry(id) {
+        // إعادة طلب فشل: نفس الجسم، بشرط ألا يكون للمنتج طلب آخر جارٍ. patch: ما يتغيّر في الطلب المعاد فقط
+        // (الاستبدال بعد تأكيد صريح: { replace: true, expected: ما يعرفه الخادم الآن })
+        function retry(id, patch) {
             const job = jobs.find(j => j.id === id && j.state === 'failed');
             if (!job || activeFor(job.key)) return false;
             if (typeof options.canRetry === 'function' && !options.canRetry(job)) return false;
+            if (patch && typeof patch === 'object') Object.assign(job, patch);
             startBatchIfIdle();
             job.batch = batch;
             job.state = 'waiting';

@@ -857,6 +857,55 @@
     line-height: 1.4;
 }
 
+/* every further warning of an alternative (the first one is .rv-alt__note) */
+.rv-alt__warns {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.rv-alt__warn {
+    color: var(--lq-warning);
+    font-size: var(--lq-fs-xs);
+    line-height: 1.4;
+}
+
+/* «لماذا هذه الصورة؟»: small evidence chips under the pick, each alternative and each bulk card */
+.rv-explain {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.rv-explain__chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border: 1px solid var(--lq-success-border);
+    border-radius: 999px;
+    background: var(--lq-success-bg);
+    color: var(--lq-success-ink);
+    font-size: var(--lq-fs-xs);
+    line-height: 1.5;
+}
+
+.rv-explain__chip .lq-icon {
+    flex-shrink: 0;
+}
+
+.rv-explain--compact {
+    gap: 4px;
+}
+
+.rv-explain--compact .rv-explain__chip {
+    padding: 1px 6px;
+    font-size: 11px;
+}
+
 /* "ما لقيت الصورة الصحيحة؟" */
 .rv-nf {
     gap: 10px;
@@ -1251,6 +1300,11 @@
     color: var(--lq-danger-text);
 }
 
+/* the product changed after the page showed it: replacing needs an explicit confirmation */
+.rv-jobs__replace {
+    flex-shrink: 0;
+}
+
 /* ==========================================================================
    Bulk mode
    ========================================================================== */
@@ -1314,6 +1368,14 @@
 
 .rv-bulk__export {
     margin-inline-start: auto;
+}
+
+/* the bulk keys, said once under the bar */
+.rv-bulk__keys {
+    margin: 0;
+    color: var(--lq-text-2);
+    font-size: var(--lq-fs-xs);
+    line-height: 1.8;
 }
 
 .rv-brand {
@@ -1599,6 +1661,31 @@
 .rv-card__warn .lq-icon {
     flex-shrink: 0;
     margin-top: 2px;
+}
+
+/* every warning of the card's pick, one per line */
+.rv-card__warns {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+/* the card the arrow keys moved to */
+.rv-card.is-focused {
+    border-color: var(--lq-teal-500);
+    box-shadow: 0 0 0 3px var(--lq-teal-glow);
+}
+
+.rv-card:focus {
+    outline: none;
+}
+
+.rv-card:focus-visible {
+    outline: 2px solid var(--lq-teal-700);
+    outline-offset: 2px;
 }
 
 .rv-card__actions {

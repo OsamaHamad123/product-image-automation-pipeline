@@ -418,8 +418,9 @@ await flush();
 out.max_in_flight = maxInFlight.select;
 out.total = requests('/api/select_image').length;
 """, tmp_path, fixture(products=READY, rows=queue_rows()))
-    # rows 19, 20: pre-selected, no warning (selected); 21: warning; 22: nothing proposed; 23: the reviewer's pick
-    assert out["cards"] == [["eligible", True], ["eligible", True], ["warning", False], ["none", False], ["proposed", False]]
+    # in order of confidence: rows 19, 20 pre-selected without a warning (selected); 23 the reviewer's earlier pick;
+    # 21 with a warning; 22 nothing proposed
+    assert out["cards"] == [["eligible", True], ["eligible", True], ["proposed", False], ["warning", False], ["none", False]]
     assert out["label"] == "اعتماد 2 صور مقترحة بلا تحذير" and out["count"] == "2 محددة من 5"
     assert out["label_after"] == "اعتماد 2 صور مقترحة بلا تحذير"
     assert out["note"] == "2 من المحددة ما بتنعتمد من هون (فيها تحذير أو مش من اقتراح النظام)"
@@ -492,7 +493,7 @@ def test_open_from_bulk_switches_to_the_single_product(tmp_path):
     out = page(r"""
 R.setMode('bulk');
 await flush();
-document.querySelectorAll('.rv-card__open')[2].click();
+document.querySelectorAll('.rv-card__open')[3].click();   // the card with the warning (confidence order)
 await flush();
 out.mode = S().mode;
 out.name = productName();

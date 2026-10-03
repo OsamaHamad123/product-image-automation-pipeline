@@ -75,6 +75,20 @@ double-check before approving. They never change the winner or the decision.
                                  It stays on once the spelling is learned, so a
                                  WRONG_BRAND rejection can still count against it
 
+Display-only warnings (candidate_warnings): the review screen shows warnings under every
+eligible candidate, not only the pick, so a reviewer who chooses an alternative sees the same
+cautions. They are computed after route() from the same evidence and are never written to
+RankedCandidate.reasons: route(), resolution_upgrade(), expand and every auto-publish rule never
+read them, and the winner, the tiers and the decision stay exactly as route() made them.
+Two codes exist only there:
+    size_unverified              the sheet states a size (or a pack count) and neither the
+                                 listing evidence (size / pack match, or the sheet's own
+                                 barcode on the page) nor the label reading ('yes') confirmed it,
+                                 e.g. a tier-2 pick the verifier read with size_match 'unsure'
+    variant_unverified           the sheet states a variant and neither the listing (every stated
+                                 axis matched, or the sheet's barcode) nor the label reading
+                                 confirmed it
+
 Best-resolution copy (resolution_upgrade): once the winner and the decision are fixed, a
 fetched copy of the same picture (pHash distance <= 6, aspect within 10 %) with a larger
 short side is published instead when its own listing evidence is no weaker and it adds no
@@ -112,9 +126,11 @@ DOWN_STATUSES = frozenset({"error", "quota", "blocked"})
 MATCH, MISMATCH, UNSURE, UNKNOWN = "MATCH", "MISMATCH", "UNSURE", "UNKNOWN"
 
 WARN_PREFIX = "warn:"
+# Display-only codes (candidate_warnings): shown to the reviewer, never read by routing.
+DISPLAY_ONLY_WARNING_CODES = ("size_unverified", "variant_unverified")
 # Every review warning code (the dashboard maps each one to an Arabic sentence).
 WARNING_CODES = ("sheet_silent", "vlm_unsure", "low_resolution", "chat_or_screenshot", "social_media",
-                 "foreign_store", "barcode_conflict", "brand_spelling")
+                 "foreign_store", "barcode_conflict", "brand_spelling") + DISPLAY_ONLY_WARNING_CODES
 
 RESOLUTION_PREFIX = "resolution_upgrade"
 # Reason prefixes written by route(); recomputed on every call so route() is idempotent.
@@ -457,6 +473,66 @@ def _brand_spelling_only(spec: SkuSpec, rc: RankedCandidate) -> bool:
 def warning_codes(reasons: Iterable[str]) -> List[str]:
     """The warning codes (without 'warn:') among a candidate's reasons."""
     return [str(r)[len(WARN_PREFIX):] for r in reasons or () if str(r).startswith(WARN_PREFIX)]
+
+
+# ---------------------------------------------------------------------------
+# Display-only warnings (the review screen; never read by routing)
+# ---------------------------------------------------------------------------
+
+def unverified_warnings(spec: SkuSpec, rc: RankedCandidate) -> List[str]:
+    """'size_unverified' / 'variant_unverified' for one candidate (display only, see candidate_warnings).
+
+    The sheet states a size (or a pack count) / a variant, and neither the candidate's listing evidence nor
+    the label reading (rc.verdict, 'yes') confirmed it. The sheet's own barcode on the page confirms both.
+    """
+    score = rc.score
+    matched = (score.matched or {}) if score is not None else {}
+    if matched.get("gtin") == "match":
+        return []
+    v = rc.verdict
+    out: List[str] = []
+    size_confirmed = (score is not None and score.size_status == "match") or (v is not None and v.size_match == "yes")
+    # the verifier reads the unit count apart from the net content (verify.build_prompt): its pack_count
+    pack_confirmed = matched.get("pack") == "match" or (v is not None and v.pack_count == spec.pack_count)
+    if (spec.size is not None and not size_confirmed) or (spec.pack_count and spec.pack_count > 1
+                                                          and not pack_confirmed):
+        out.append("size_unverified")
+    if spec.variants and len(matched.get("variants") or ()) < len(spec.variants) \
+            and not (v is not None and v.variant_match == "yes"):
+        out.append("variant_unverified")
+    return out
+
+
+def candidate_warnings(spec: SkuSpec, rc: RankedCandidate,
+                       reading_of: Optional[RankedCandidate] = None) -> List[str]:
+    """Display-only warning codes for one reviewable candidate: the pick and every eligible alternative.
+
+    The pre-checked candidate keeps exactly its 'warn:' reasons (route's review_warnings, with the reading the
+    decision rests on: reading_of, the replaced winner of a best-resolution copy) and gains the display-only
+    codes. An eligible alternative gets review_warnings() of its own evidence, without 'vlm_unsure' when the
+    verifier never read it (that is not a doubt of the reader). Rejected and excluded candidates get none: the
+    screen says why they were set aside.
+
+    Pure: it reads the candidate and never writes rc.reasons or rc.status, so it cannot change the winner,
+    the tiers, the decision or any auto-publish rule (route() and resolution_upgrade() never call it).
+    """
+    if rc.status not in ("preselected", "eligible") or _identity_rejected(rc):
+        return []
+    reading = reading_of if reading_of is not None else rc
+    if rc.status == "preselected":
+        out = warning_codes(rc.reasons)
+    else:
+        out = review_warnings(spec, rc, reading_of=reading_of)
+        if reading.verdict is None:
+            out = [w for w in out if w != "vlm_unsure"]
+    view = rc
+    if reading is not rc:
+        view = RankedCandidate(candidate=rc.candidate, score=rc.score, fetched=rc.fetched, quality=rc.quality,
+                               verdict=reading.verdict, status=rc.status)
+    for code in unverified_warnings(spec, view):
+        if code not in out:
+            out.append(code)
+    return out
 
 
 # ---------------------------------------------------------------------------

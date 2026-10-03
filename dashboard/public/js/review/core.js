@@ -29,7 +29,10 @@
         social_media: 'الصورة من مواقع التواصل الاجتماعي',
         foreign_store: 'الصورة من متجر خارج الإمارات (قد تختلف العبوة)',
         barcode_conflict: 'الباركود بالشيت مختلف عن باركود صفحة المتجر: تأكد من المنتج',
-        brand_spelling: 'المتاجر بتكتب اسم الماركة غير الشيت (غلطة إملائية أو اختصار): تأكد إنها نفس الماركة'
+        brand_spelling: 'المتاجر بتكتب اسم الماركة غير الشيت (غلطة إملائية أو اختصار): تأكد إنها نفس الماركة',
+        // للعرض فقط (decide.candidate_warnings): الشيت يذكر الحجم أو النوع ولم يؤكده دليل
+        size_unverified: 'الحجم غير مؤكد: لم تؤكده صفحة المتجر ولا قراءة الملصق',
+        variant_unverified: 'النوع غير مؤكد: لم تؤكده صفحة المتجر ولا قراءة الملصق'
     };
 
     const VARIANT_AXIS_LABELS = {
@@ -58,6 +61,10 @@
             const label = VARIANT_AXIS_LABELS[axis] ? `الشيت ما حدد ${VARIANT_AXIS_LABELS[axis]}` : REVIEW_WARNING_LABELS.sheet_silent;
             return `${label}: ${value}`;
         }
+        if (name === 'brand_spelling' && detail.trim()) {
+            // brand_spelling:<الكتابة>: الكتابة التي وجدتها المتاجر تظهر للمراجع
+            return `المتاجر تكتب الماركة «${detail.trim()}» بشكل مختلف عن الشيت: تأكد أنها الماركة نفسها`;
+        }
         return REVIEW_WARNING_LABELS[name] || code;
     }
 
@@ -72,8 +79,20 @@
         { code: 'LOW_QUALITY', label: 'جودة ضعيفة' }
     ];
 
+    // أسباب تجميلية تقبلها الواجهة الخلفية (local_cache_db.COSMETIC_REASON_CODES): تخص المعالجة لا هوية الصورة،
+    // فتُعرض أولاً لصورة اعتُمدت ولم تُعزل خلفيتها
+    const COSMETIC_REASONS = [
+        { code: 'HALO_ARTIFACT', label: 'هالة حول المنتج' },
+        { code: 'BACKGROUND_BLEED', label: 'بقايا من الخلفية' },
+        { code: 'CROP_MARGIN_CLIPPING', label: 'المنتج مقصوص من الأطراف' }
+    ];
+
+    function rejectReasonsFor(bucket) {
+        return bucket === 'bg_failed' ? COSMETIC_REASONS.concat(REJECT_REASONS) : REJECT_REASONS;
+    }
+
     function reasonLabel(code) {
-        const r = REJECT_REASONS.find(x => x.code === code);
+        const r = REJECT_REASONS.concat(COSMETIC_REASONS).find(x => x.code === code);
         return r ? r.label : 'سبب آخر';
     }
 
@@ -250,10 +269,21 @@
         });
     }
 
+    // صف محفوظ قبل أن يحسب الخادم «الحجم غير مؤكد» (decide.unverified_warnings): القاعدة نفسها من الأدلة المحفوظة.
+    // الشيت فيه حجم، وصفحة المتجر لم تطابقه، ولا باركود مطابق، ولا قراءة ملصق تقول «نعم». تضيف تحذيراً ولا تزيل شيئاً
+    function withDerivedWarnings(c, prod) {
+        const ev = c.evidence || {};
+        if (c.warnings.includes('size_unverified') || !['preselected', 'eligible'].includes(c.status)) return c;
+        if (!/\d/.test(String((prod && prod.size) || '')) || !['unknown', 'ambiguous'].includes(ev.size)) return c;
+        if (ev.gtin === 'match' || (c.vlm && c.vlm.size_match === 'yes')) return c;
+        c.warnings = c.warnings.concat(['size_unverified']);
+        return c;
+    }
+
     // المرشحون المحفوظون لمنتج (curation_candidates)، أو رابط needs_review القديم في الشيت
     function storedCandidates(prod) {
         const list = (prod && Array.isArray(prod.curation_candidates) ? prod.curation_candidates : [])
-            .map(normalizeCandidate).filter(c => c.url);
+            .map(normalizeCandidate).filter(c => c.url).map(c => withDerivedWarnings(c, prod));
         if (!list.length && prod && prod.needs_review_url) {
             list.push(normalizeCandidate({ url: prod.needs_review_url, status: prod.preselected ? 'preselected' : 'pending',
                                            is_selected: 1, title: '' }));
@@ -266,7 +296,7 @@
         return storedCandidates(prod).find(c => c.is_selected === 1) || null;
     }
 
-    // مؤهلة للاعتماد بالجملة: مقترحة من النظام وبلا أي تحذير
+    // مؤهلة للاعتماد بالجملة: مقترحة من النظام وبلا أي تحذير (ومنها «الحجم غير مؤكد» و«النوع غير مؤكد»)
     function bulkEligible(c) {
         return !!c && c.status === 'preselected' && c.is_selected !== 0 && !(c.warnings && c.warnings.length);
     }
@@ -298,6 +328,45 @@
         if (c.vlm && c.vlm.decision === 'UNSURE') return { text: 'نموذج القراءة مش متأكد', tone: 'muted', detail: detail };
         if (c.vlm && c.vlm.decision === 'MATCH') return { text: 'نموذج القراءة شافها مطابقة', tone: 'success', detail: detail };
         return { text: 'مطابقة محتملة', tone: 'muted', detail: detail };
+    }
+
+    const SOURCE_CLASS_TEXT = {
+        official: 'موقع الماركة الرسمي',
+        uae_retailer: 'متجر في الإمارات',
+        reviewed_source: 'موقع اعتُمدت صوره سابقاً',
+        structured: 'قاعدة بيانات منتجات'
+    };
+
+    function truthy(v) {
+        return v !== undefined && v !== null && v !== '' && v !== false;
+    }
+
+    // «لماذا هذه الصورة؟»: سطور قصيرة من الأدلة التي حسبها المحرك فعلاً (facade.evidence وقراءة الملصق)، بلا تخمين.
+    // لا يُقال شيء إذا لم يوجد دليل
+    function explainPick(c) {
+        if (!c) return [];
+        const ev = c.evidence || {};
+        const vlm = c.vlm || {};
+        const out = [];
+        if ((c.reasons || []).includes('cache_hit') || ev.source === 'cache') {
+            out.push({ key: 'cache', text: 'اعتُمدت لهذا المنتج سابقاً' });
+        }
+        if (ev.gtin === 'match') out.push({ key: 'gtin', text: 'باركود الصفحة يطابق الشيت' });
+        const n = parseInt(ev.consensus_count, 10);
+        if (n >= 2) out.push({ key: 'consensus', text: n === 2 ? 'الصورة نفسها في مصدرين' : `الصورة نفسها في ${n} مصادر` });
+        if (SOURCE_CLASS_TEXT[ev.source_class]) out.push({ key: 'source', text: SOURCE_CLASS_TEXT[ev.source_class] });
+        const page = [];
+        if (truthy(ev.brand)) page.push('الماركة');
+        if (ev.size === 'match' || ev.size === true) page.push('الحجم');
+        if (ev.pack === 'match') page.push('العبوات');
+        if (ev.variant_status === 'match') page.push('النوع');
+        if (page.length) out.push({ key: 'page', text: `الصفحة تذكر: ${page.join('، ')}` });
+        const label = [];
+        if (vlm.brand_match === 'yes') label.push('الماركة');
+        if (vlm.size_match === 'yes') label.push('الحجم');
+        if (vlm.variant_match === 'yes') label.push('النوع');
+        if (label.length) out.push({ key: 'label', text: `الملصق يطابق: ${label.join('، ')}` });
+        return out;
     }
 
     // -------------------------------------------------------------------------------------------------
@@ -483,6 +552,136 @@
         return !prod.needs_review && (String(prod.existing_image_link || '').trim() !== '' || !!prod.cached_image);
     }
 
+    // اعتماد رُفعت صورته ولم تُعزل خلفيتها: الشيت يحمل needs_review:<رابط Cloudinary> (main.publish_image)، ولا
+    // مرشحات محفوظة. يعيد الرابط، أو '' لغير ذلك
+    function bgFailedLink(prod) {
+        const raw = String((prod && prod.existing_image_link) || '').trim();
+        if (!raw.startsWith('needs_review:')) return '';
+        const link = raw.slice('needs_review:'.length).trim();
+        return /^https:\/\/res\.cloudinary\.com\//i.test(link) ? link : '';
+    }
+
+    // الصورة المعتمدة التي تعرضها الصفحة للمنتج (رابط الشيت، أو الاعتماد المحفوظ، أو اعتماد لم تُعزل خلفيته)
+    function shownApprovedUrl(prod) {
+        if (!prod) return '';
+        if (hasFinalImage(prod)) return String(prod.existing_image_link || prod.cached_image || '').trim();
+        return bgFailedLink(prod);
+    }
+
+    // ما رأته الصفحة عن المنتج عند الاعتماد (عقد C1: expected_state): حالة صف الطابور ووقت تحديثه والصورة المعتمدة.
+    // الخادم يرفض الاعتماد إذا تغيّر شيء منها (already_approved / state_changed) إلا بعد تأكيد صريح (replace)
+    function expectedState(item, approvedLink) {
+        const q = item && item.queue;
+        const url = String(approvedLink || shownApprovedUrl(item && item.product) || '').trim();
+        return {
+            queue_status: q && q.status ? String(q.status) : null,
+            queue_updated_at: q && q.updated_at ? String(q.updated_at) : null,
+            approved_url: url || null
+        };
+    }
+
+    const STALE_CODES = ['already_approved', 'state_changed'];
+    const QUEUE_STATUS_TEXT = {
+        ready_for_review: 'بانتظار المراجعة', pending: 'في الطابور', processing: 'قيد البحث', failed: 'فيه عطل',
+        completed: 'مكتمل'
+    };
+
+    function queueText(status) {
+        return status ? (QUEUE_STATUS_TEXT[status] || 'حالة غير معروفة') : 'ليس في الطابور';
+    }
+
+    // ما تغيّر منذ فتح الصفحة، بالعربي، من رد الخادم (error_code و current) وما أرسلته الصفحة (expected)؛ null لغيره
+    function staleInfo(data, expected) {
+        data = data || {};
+        const code = String(data.error_code || '');
+        if (!STALE_CODES.includes(code)) return null;
+        const cur = data.current && typeof data.current === 'object' && !Array.isArray(data.current) ? data.current : {};
+        const exp = expected || {};
+        const parts = [code === 'already_approved' ? 'اعتُمدت لهذا المنتج صورة بعد فتح الصفحة' : 'تغيّرت حالة المنتج بعد فتح الصفحة'];
+        const curUrl = String(cur.approved_url || '').trim();
+        const expUrl = String(exp.approved_url || '').trim();
+        if (curUrl && curUrl !== expUrl) parts.push(expUrl ? 'الصورة المعتمدة الآن غير التي ظهرت لك' : 'صار له صورة معتمدة');
+        else if (!curUrl && expUrl && 'approved_url' in cur) parts.push('الصورة المعتمدة التي ظهرت لك أُلغيت');
+        if ('queue_status' in cur && (cur.queue_status || null) !== (exp.queue_status || null)) {
+            parts.push(`حالته كانت «${queueText(exp.queue_status)}» وصارت «${queueText(cur.queue_status)}»`);
+        }
+        return { code: code, current: cur, approvedUrl: curUrl, text: parts.join('، ') + '.' };
+    }
+
+    // ما يُقال عن الشيت بعد الاعتماد (عقد C3: sheet = written | pending | conflict | unknown). لا يُقال «كُتب في الشيت»
+    // إلا إذا قال الخادم written
+    const SHEET_STATES = {
+        written: { tone: 'success', text: 'وكُتب رابطها في الشيت.' },
+        pending: { tone: 'warning', text: 'وكتابة رابطها في الشيت بالانتظار: ستُكتب عند توفر الشيت.' },
+        conflict: { tone: 'danger', text: 'ولم يُكتب رابطها في الشيت: الخلية تغيّرت وفيها قيمة أخرى. راجع الشيت.' },
+        unknown: { tone: 'warning', text: 'ولا نعرف إن كُتب رابطها في الشيت: تأكد من الشيت.' }
+    };
+
+    function sheetNote(sheet) {
+        const s = SHEET_STATES[String(sheet || '')];
+        return s ? { state: String(sheet), tone: s.tone, text: s.text } : { state: '', tone: 'success', text: '' };
+    }
+
+    // ما يعرفه الخادم بعد الاعتماد (current في كل استجابة): يصير ما «رأته الصفحة» للاعتماد التالي لنفس المنتج
+    function expectedFromCurrent(cur) {
+        cur = cur && typeof cur === 'object' ? cur : {};
+        return {
+            queue_status: cur.queue_status ? String(cur.queue_status) : null,
+            queue_updated_at: cur.queue_updated_at ? String(cur.queue_updated_at) : null,
+            approved_url: cur.approved_url ? String(cur.approved_url) : null
+        };
+    }
+
+    // علامات فحص القص (quality_flags، image_processor): لماذا لم تُعتبر الخلفية معزولة. الرمز يبقى في التلميح فقط
+    const QUALITY_FLAG_LABELS = {
+        opaque_fill: 'لم تُزل الخلفية (بقيت الصورة معتمة)',
+        opaque_backdrop: 'بقي صندوق خلفية معتم حول المنتج',
+        edge_clipped: 'المنتج مقصوص عند حافة الصورة',
+        alpha_haze: 'هالة أو ضباب حول حواف المنتج',
+        second_object: 'ظهر جسم آخر بجانب المنتج',
+        upscaled: 'الصورة المصدر صغيرة فكُبّرت',
+        too_small_on_canvas: 'المنتج صغير على اللوحة'
+    };
+
+    function qualityFlagText(code) {
+        return QUALITY_FLAG_LABELS[String(code || '')] || 'ملاحظة أخرى من فحص القص';
+    }
+
+    // ما يُقال للمراجع بعد اعتماد ناجح: الخلفية (background_not_removed)، الصورة نفسها لمنتج آخر (duplicate_image و
+    // duplicate_of)، وعلامات فحص القص
+    function approvalNotes(data) {
+        data = data || {};
+        const list = Array.isArray(data.warnings) ? data.warnings.map(w => String(w)) : (data.warning ? [String(data.warning)] : []);
+        const link = String(data.image_link || '');
+        const owners = Array.isArray(data.duplicate_of) ? data.duplicate_of : (data.duplicate_of ? [data.duplicate_of] : []);
+        const names = owners.map(o => (o && typeof o === 'object')
+            ? String(o.product_name || o.sku_key || o.cloudinary_url || '').trim() : String(o || '').trim()).filter(Boolean);
+        const flags = Array.isArray(data.quality_flags) ? data.quality_flags.map(f => String(f)) : [];
+        return {
+            bgFailed: list.includes('background_not_removed') || link.startsWith('needs_review:'),
+            duplicate: list.includes('duplicate_image') || owners.length > 0,
+            duplicateOf: names,
+            flags: flags,
+            flagTexts: Array.from(new Set(flags.map(qualityFlagText)))
+        };
+    }
+
+    // نتيجة الرفض كما قالها الخادم (عقد C2: rejection.queue_status و candidates_left). queue_status: 'pending' =
+    // رجع للطابور؛ 'ready_for_review' أو null (لم تتغير) = ما زال بانتظار المراجعة بصوره الباقية. خادم أقدم لا يرسلها:
+    // رفض اختيار النظام يعيده للطابور، ورفض غيره لا
+    function rejectionOutcome(data, alternative) {
+        data = data || {};
+        const r = data.rejection && typeof data.rejection === 'object' ? data.rejection : data;
+        const kept = !!r.approval_kept;
+        const n = parseInt(r.candidates_left, 10);
+        let requeued;
+        if (r.queue_status !== undefined) requeued = r.queue_status === 'pending';
+        else if (typeof r.requeued === 'boolean') requeued = r.requeued;
+        else requeued = !alternative;
+        return { kept: kept, requeued: requeued, left: isFinite(n) && n >= 0 ? n : null,
+                 queueStatus: r.queue_status === undefined ? undefined : (r.queue_status || null) };
+    }
+
     // مجموعة المنتج في القائمة. queueKnown=false: حالة الطابور غير معروفة (تُقدّر من المرشحين المحفوظين)
     function classify(prod, q, queueKnown) {
         const selected = storedSelected(prod);
@@ -493,6 +692,10 @@
         if (hasFinalImage(prod)) return 'approved';
         if (q && q.status === 'processing') return 'searching';
         if (q && q.status === 'pending') return q.failure_code ? 'requeued' : 'queued';
+        // اعتماد لم تُعزل خلفيته: رقاقة خاصة به بدل «نتائج سابقة» الظاهرة في «الكل» فقط
+        if (bgFailedLink(prod) && !(Array.isArray(prod.curation_candidates) && prod.curation_candidates.length)) {
+            return 'bg_failed';
+        }
         if (!queueKnown && (prod.needs_review || storedCandidates(prod).length)) return waitingBucket;
         if (storedCandidates(prod).length) return 'stale';
         return 'idle';
@@ -506,6 +709,7 @@
         none: { text: 'بلا اقتراح', chip: 'none' },
         not_found: { text: 'ما انلقت', chip: 'not-found' },
         failed: { text: 'عطل', chip: 'error' },
+        bg_failed: { text: 'الخلفية لم تُعزل', chip: 'warning' },
         approved: { text: 'معتمدة', chip: 'approved' },
         approving: { text: 'جاري الاعتماد', chip: 'approved' },
         rejecting: { text: 'جاري الرفض', chip: 'none' },
@@ -518,7 +722,7 @@
     };
 
     const BUCKET_RANK = {
-        proposed: 0, warning: 0, none: 1, not_found: 2, failed: 3, rejected: 4, requeued: 4, searching: 5,
+        proposed: 0, warning: 0, none: 1, bg_failed: 2, not_found: 2, failed: 3, rejected: 4, requeued: 4, searching: 5,
         queued: 6, stale: 6, idle: 7, rejecting: 8, approving: 8, approved: 9
     };
 
@@ -529,8 +733,42 @@
         { key: 'warning', label: 'فيها تحذير', buckets: ['warning'] },
         { key: 'none', label: 'بلا اقتراح', buckets: ['none'] },
         { key: 'not_found', label: 'ما انلقت', buckets: ['not_found'] },
-        { key: 'failed', label: 'أعطال', buckets: ['failed'] }
+        { key: 'failed', label: 'أعطال', buckets: ['failed'] },
+        { key: 'bg_failed', label: 'الخلفية لم تُعزل', buckets: ['bg_failed'] }
     ];
+
+    // ترتيب المنتظرة حسب الثقة: مقترحة من النظام بلا تحذير، ثم اختيار سابق بلا تحذير، ثم مقترحة فيها تحذير، ثم بلا
+    // اقتراح؛ وفي كل درجة منتجات الماركة الواحدة متتالية (ثم رقم الصف)
+    function confidenceRank(prod) {
+        const sel = storedSelected(prod);
+        if (!sel) return 3;
+        if (sel.warnings.length) return 2;
+        return bulkEligible(sel) ? 0 : 1;
+    }
+
+    // مفتاح الترتيب يُحسب مرة لكل منتج (لا لكل مقارنة): الدرجة، ثم الماركة، ثم رقم الصف
+    function waitingKey(prod) {
+        return { rank: confidenceRank(prod), brand: norm(prod.brand || prod.brand_ar), row: parseInt(prod.row_number, 10) || 0 };
+    }
+
+    function compareWaitingKeys(a, b) {
+        if (a.rank !== b.rank) return a.rank - b.rank;
+        if (a.brand !== b.brand) {
+            if (!a.brand || !b.brand) return a.brand ? -1 : 1;     // بلا ماركة آخراً
+            return a.brand < b.brand ? -1 : 1;
+        }
+        return a.row - b.row;
+    }
+
+    function compareWaiting(a, b) {
+        return compareWaitingKeys(waitingKey(a), waitingKey(b));
+    }
+
+    // منتجات بترتيب الثقة ثم الماركة (list: عناصر فيها product)
+    function sortWaiting(list) {
+        const keys = new Map(list.map(it => [it, waitingKey(it.product)]));
+        return list.sort((a, b) => compareWaitingKeys(keys.get(a), keys.get(b)));
+    }
 
     // عناصر القائمة من منتجات الشيت وحالة الطابور. local: حالة هذه الجلسة لكل مفتاح (approving / approved / rejected)
     function buildItems(products, queue, local) {
@@ -551,19 +789,23 @@
             const flag = local && typeof local.get === 'function' ? local.get(it.key) : null;
             it.bucket = flag && BUCKET_LABELS[flag] ? flag : it.base;
         });
+        const keys = new Map(items.filter(it => WAITING.includes(it.bucket)).map(it => [it, waitingKey(it.product)]));
         items.sort((a, b) => (BUCKET_RANK[a.bucket] - BUCKET_RANK[b.bucket])
+            || (keys.has(a) && keys.has(b) ? compareWaitingKeys(keys.get(a), keys.get(b)) : 0)
             || ((parseInt(a.product.row_number, 10) || 0) - (parseInt(b.product.row_number, 10) || 0)));
         return items;
     }
 
     function countBuckets(items) {
-        const c = { all: items.length, proposed: 0, warning: 0, none: 0, not_found: 0, failed: 0, waiting: 0, approved: 0 };
+        const c = { all: items.length, proposed: 0, warning: 0, none: 0, not_found: 0, failed: 0, bg_failed: 0, waiting: 0,
+                    approved: 0 };
         items.forEach(it => {
             if (it.bucket === 'proposed' || it.bucket === 'warning') c.proposed++;
             if (it.bucket === 'warning') c.warning++;
             if (it.bucket === 'none') c.none++;
             if (it.bucket === 'not_found') c.not_found++;
             if (it.bucket === 'failed') c.failed++;
+            if (it.bucket === 'bg_failed') c.bg_failed++;
             if (it.bucket === 'approved') c.approved++;
             if (WAITING.includes(it.bucket)) c.waiting++;
         });
@@ -587,9 +829,12 @@
         return [p.product_name, p.product_name_ar, p.brand, p.brand_ar, p.barcode].some(v => norm(v).includes(q));
     }
 
-    function filterItems(items, filterKey, query) {
+    // keep: مفاتيح منتجات تبقى في الرقاقة الحالية ما دامت بانتظار المراجعة، أياً كانت مجموعتها الجديدة (منتج رُفضت
+    // صورته وأُعيد البحث له فوراً)
+    function filterItems(items, filterKey, query, keep) {
         const f = FILTERS.find(x => x.key === filterKey) || FILTERS[0];
-        return items.filter(it => (!f.buckets || f.buckets.includes(it.bucket)) && matchesQuery(it, query));
+        const kept = it => !!(keep && keep.has(it.key)) && WAITING.includes(it.bucket);
+        return items.filter(it => (!f.buckets || f.buckets.includes(it.bucket) || kept(it)) && matchesQuery(it, query));
     }
 
     // -------------------------------------------------------------------------------------------------
@@ -706,13 +951,15 @@
     }
 
     Object.assign(R, {
-        REVIEW_WARNING_LABELS, VARIANT_AXIS_LABELS, REJECT_REASONS, FAILURE_TEXT, NOT_FOUND_CODES, VIEW_LABELS,
-        BUCKET_LABELS, FILTERS, WAITING, PRODUCT_CHANGED,
-        warningText, reasonLabel, failureInfo, plainError, hostOf, marketOf, storeOf,
-        normalizeCandidate, collectCandidates, storedCandidates, storedSelected, bulkEligible, candidateNote,
+        REVIEW_WARNING_LABELS, VARIANT_AXIS_LABELS, REJECT_REASONS, COSMETIC_REASONS, FAILURE_TEXT, NOT_FOUND_CODES,
+        VIEW_LABELS, BUCKET_LABELS, FILTERS, WAITING, PRODUCT_CHANGED, STALE_CODES,
+        warningText, reasonLabel, rejectReasonsFor, failureInfo, plainError, hostOf, marketOf, storeOf,
+        normalizeCandidate, collectCandidates, storedCandidates, storedSelected, bulkEligible, candidateNote, explainPick,
         productIdentity, sameProduct, itemKey, failureKey, reviewedCandidateView,
         searchBody, selectBody, rejectBody, uploadFields,
-        matchQueue, classify, hasFinalImage, buildItems, countBuckets, matchesQuery, filterItems,
+        matchQueue, classify, hasFinalImage, bgFailedLink, shownApprovedUrl, expectedState, staleInfo, queueText,
+        sheetNote, expectedFromCurrent, qualityFlagText, approvalNotes, rejectionOutcome,
+        confidenceRank, compareWaiting, sortWaiting, buildItems, countBuckets, matchesQuery, filterItems,
         sizeText, categoryPath, factsFor, checksFor, cautionsFor
     });
 

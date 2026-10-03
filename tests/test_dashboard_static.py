@@ -197,7 +197,8 @@ def test_fake_flows_removed():
     assert "data-healing-active" not in layout
 
     catalog = review_page()
-    assert "CLIP" not in catalog
+    # no CLIP score anywhere (the reject reason code CROP_MARGIN_CLIPPING is not one)
+    assert not re.search(r"\bCLIP\b|clip_score", catalog)
     assert "compareOverlay" not in catalog  # the raw-vs-raw compare slider is gone
 
 

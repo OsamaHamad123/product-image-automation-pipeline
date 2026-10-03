@@ -64,11 +64,14 @@ def test_the_pick_cards_show_the_notice():
     assert "c.warnings.map(w => warningText(w))" in cautions[:cautions.index("\n    }\n")]
     checks = single[single.index("function checksCard"):]
     assert "R.cautionsFor(pick)" in checks[:checks.index("function altButton")]
-    # every other image names its first warning, and each bulk card shows the pick's warning
+    # every other image names its first warning (and lists the others), and each bulk card shows every warning
     note = core[core.index("function candidateNote"):]
     assert "warningText(c.warnings[0])" in note[:note.index("\n    }\n")]
+    alt = single[single.index("function altButton"):]
+    assert "c.warnings.slice(1).map(w => el('span', { className: 'rv-alt__warn', text: R.warningText(w) })" in \
+        alt[:alt.index("function altsCard")]
     card = bulk[bulk.index("function card("):]
-    assert "R.warningText(sel.warnings[0])" in card[:card.index("function render(")]
+    assert "sel.warnings.map(w => R.warningText(w))" in card[:card.index("function render(")]
 
 
 @pytest.mark.skipif(NODE is None, reason="node is not installed")
