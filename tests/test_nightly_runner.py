@@ -154,8 +154,9 @@ def test_exit_code_follows_the_worker_state(nightly, status, notice, code):
 @pytest.mark.parametrize("stop_reason, outcome, code", [
     (None, "done", 0),
     ("stopped", "stopped", 3),
-    ("BUDGET_REACHED", "stopped", 3),          # a stop reason this runner does not know: shown as it is
+    ("BUDGET_REACHED", "stopped", 3),
     ("SERPER_CREDIT", "stopped", 3),
+    ("SOME_NEW_REASON", "stopped", 3),         # a stop reason this runner does not know: shown as it is
     ("sheet_config", "failed", 1),
 ])
 def test_exit_code_follows_the_worker_stop_reason(nightly, stop_reason, outcome, code):
@@ -166,7 +167,9 @@ def test_exit_code_follows_the_worker_stop_reason(nightly, stop_reason, outcome,
     assert (report["outcome"], report["exit_code"], report["stop_reason"]) == (outcome, code, stop_reason)
     assert rec["sleeps"] == [], "only an outage is retried"
     if stop_reason == "BUDGET_REACHED":
-        assert report["reason_text"] == "BUDGET_REACHED"
+        assert "DAILY_BUDGET_USD" in report["reason_text"] and report["reason_text"] != stop_reason
+    if stop_reason == "SOME_NEW_REASON":
+        assert report["reason_text"] == "SOME_NEW_REASON"
     assert _last_report()["exit_code"] == code
 
 

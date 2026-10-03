@@ -94,7 +94,7 @@ def is_outage(stop_reason):
 
 
 def reason_text(stop_reason):
-    """نص عربي للسبب، أو السبب نفسه كما كتبه العامل (مثل BUDGET_REACHED)؛ '' عند انتهاء الطابور."""
+    """نص عربي للسبب، أو السبب نفسه كما كتبه العامل إن لم يكن معروفًا؛ '' عند انتهاء الطابور."""
     key = _key(stop_reason)
     if key in DONE_REASONS:
         return ""

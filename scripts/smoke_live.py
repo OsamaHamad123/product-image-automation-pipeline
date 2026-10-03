@@ -1461,7 +1461,7 @@ def settings_drift(recorded):
     now = cassette.settings_snapshot()
     names = sorted(set(now["values"]) | set((recorded or {}).get("values", {})))
     changed = [n for n in names if now["values"].get(n) != (recorded or {}).get("values", {}).get(n)]
-    changed += [n for n, v in now["secrets"].items() if v != (recorded or {}).get("secrets", {}).get(n)]
+    changed += [n for n, v in now["configured"].items() if v != (recorded or {}).get("configured", {}).get(n)]
     return changed
 
 

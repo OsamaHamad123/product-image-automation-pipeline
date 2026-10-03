@@ -24,6 +24,7 @@ import time
 import types
 from pathlib import Path
 from unittest import mock
+from urllib.parse import urlsplit
 
 import numpy as np
 import pytest
@@ -133,7 +134,7 @@ class FakeWeb:
     def get(self, url, params=None, headers=None, timeout=None, **kwargs):
         with self.lock:
             self.calls.append(("GET", url, ""))
-        if "openfoodfacts.org" in url:
+        if (urlsplit(url).hostname or "").endswith("openfoodfacts.org"):
             return FakeResponse(404, b'{"status": 0, "status_verbose": "product not found"}')
         if url in self.slow:
             time.sleep(self.slow[url])
@@ -365,7 +366,7 @@ def test_the_recording_run_decides_as_the_fake_web_intends(recorded, recording):
     assert rows[5]["strong_calls"] == 1 and rows[5]["winner"] == "https://cdn.carrefouruae.com/k1.jpg"
     meta = json.loads((recorded["folder"] / "meta.json").read_text(encoding="utf-8"))
     assert meta["format"] == cassette.FORMAT and [r["row_number"] for r in meta["rows"]] == [2, 3, 4, 5]
-    assert meta["settings"]["secrets"]["SERPER_API_KEY"] is True
+    assert meta["settings"]["configured"]["SERPER_API_KEY"] is True
     assert "SERPER_API_KEY" not in meta["settings"]["values"]
     assert meta["versions"]["pillow"] and meta["run"]["expansion"] is True
     assert {f.name for f in recorded["folder"].iterdir()} >= {"meta.json", "http.jsonl", "verifier.jsonl",

@@ -1349,18 +1349,18 @@ def settings_snapshot() -> Dict[str, Any]:
     from . import settings
 
     values: Dict[str, Any] = {}
-    secrets: Dict[str, Any] = {}
+    configured: Dict[str, Any] = {}
     for name in sorted(settings.DEFAULTS):
         if name == "GOOGLE_SEARCH_API_KEYS":
-            secrets[name] = len(settings.google_search_api_keys())
+            configured[name] = len(settings.google_search_api_keys())
         elif name == "GOOGLE_SEARCH_CX_LIST":
-            secrets[name] = len(settings.google_search_cx_list())
+            configured[name] = len(settings.google_search_cx_list())
         elif is_secret_setting(name):
-            secrets[name] = bool(str(settings.get(name) or "").strip())
+            configured[name] = bool(str(settings.get(name) or "").strip())
         else:
             value = settings.get(name)
             values[name] = value if isinstance(value, (bool, int, float, str, list)) or value is None else str(value)
-    return {"values": values, "secrets": secrets}
+    return {"values": values, "configured": configured}
 
 
 def library_versions() -> Dict[str, Any]:

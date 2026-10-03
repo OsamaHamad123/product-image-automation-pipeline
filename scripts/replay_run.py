@@ -72,7 +72,7 @@ def replay_settings(meta, candidate_dir):
     """Setting name -> value for the replay: the recorded values, dummies for the secrets that were set."""
     snap = meta.get("settings") or {}
     values = dict(snap.get("values") or {})
-    for name, present in (snap.get("secrets") or {}).items():
+    for name, present in (snap.get("configured") or {}).items():
         if name in LIST_SECRETS:
             values[name] = [f"replay-{name.lower()}-{i + 1}" for i in range(int(present or 0))]
         elif name == "PROXY_URL":
