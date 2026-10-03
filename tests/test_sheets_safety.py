@@ -17,6 +17,9 @@ def gs(offline, monkeypatch, tmp_path):
     import google_sheets
     monkeypatch.setattr(google_sheets, "CACHE_DIR", str(tmp_path))      # never read the real products cache
     google_sheets._header_cache.clear()
+    google_sheets.reported = []                                          # unwritten outcomes, not the laravel log
+    monkeypatch.setattr(google_sheets, "_outcome_hook", google_sheets.reported.append)
+    monkeypatch.setattr(google_sheets, "_sleep", lambda seconds: None)
     return google_sheets
 
 
@@ -66,7 +69,9 @@ class FakeWorksheet:
         out = []
         for rng in ranges:
             start, end = rng.split(":")
-            (r1, c1), (r2, _) = gspread.utils.a1_to_rowcol(start), gspread.utils.a1_to_rowcol(end)
+            r1, c1 = gspread.utils.a1_to_rowcol(start)
+            # an open-ended range ('A2:A') runs to the last row of the sheet
+            r2 = gspread.utils.a1_to_rowcol(end)[0] if any(ch.isdigit() for ch in end) else len(self.rows)
             block = []
             for r in range(r1, r2 + 1):
                 row = self.rows[r - 1] if r - 1 < len(self.rows) else []
@@ -113,26 +118,33 @@ def test_headers_arabic_and_punctuation(gs):
 # outbox
 # ---------------------------------------------------------------------------
 
+# valid GTIN-13s (GS1 check digit): only a valid GTIN may be the sole identity key of a row
+MILK, LABAN, JUICE = "6281007000024", "6281007000031", "6294001819097"
+OTHER_SKU, MASAFI = "6281007000048", "6291003000010"
+
 SHEET = [
     ["Barcode", "Product Name", "Brand", "Drive Image Link"],
-    ["6281007000028", "Almarai Fresh Milk 1L", "Almarai", ""],        # row 2
-    ["6281007000035", "Almarai Laban 1L", "Almarai", ""],             # row 3
-    ["6294001819090", "Al Rawabi Juice", "Al Rawabi", ""],            # row 4
+    [MILK, "Almarai Fresh Milk 1L", "Almarai", ""],                    # row 2
+    [LABAN, "Almarai Laban 1L", "Almarai", ""],                        # row 3
+    [JUICE, "Al Rawabi Juice", "Al Rawabi", ""],                       # row 4
 ]
 
 
-def _outbox_row(id_, row, value, barcode=None, name=None, attempts=0, col_name="Drive Image Link", col_index=3,
-                size=None, brand=None):
+def _outbox_row(id_, row, value, barcode=None, name=None, attempts=0, col_name=None, col_index=3,
+                size=None, brand=None, col_key="link", seq=None):
     return {"id": id_, "row_number": row, "col_index": col_index, "value": value, "col_name": col_name,
+            "col_key": col_key, "seq": id_ if seq is None else seq, "ident": None, "relocated_from": None,
             "key_barcode": barcode, "key_name": name, "key_size": size, "key_brand": brand, "attempts": attempts}
 
 
-def _outbox_responder(pending, lock_free=True):
+def _outbox_responder(pending, lock_free=True, written=()):
     def respond(sql, params):
         if "GET_LOCK" in sql:
             return [{"got": 1 if lock_free else 0}]
         if "RELEASE_LOCK" in sql:
             return [{"released": 1}]
+        if "sync_status = 'SYNCED'" in sql:
+            return list(written)                  # values already written by earlier flushes
         return pending if sql.startswith("SELECT") else None
     return respond
 
@@ -157,15 +169,15 @@ def _final_status(conn):
             for rid in params[2:]:
                 status[rid] = params[0]
         elif sql.startswith("UPDATE sheet_updates SET attempts"):
-            status[params[3]] = (params[2], params[0])
+            status[params[4]] = (params[2], params[0])
     return status
 
 
 def test_outbox_identity_and_isolation(gs, fake_connection):
     ws = FakeWorksheet(SHEET)
     pending = [
-        _outbox_row(1, 2, "https://res/milk.png", barcode="6281007000028"),
-        _outbox_row(2, 3, "https://res/laban.png", barcode="6281007000042"),        # row 3 now holds another SKU
+        _outbox_row(1, 2, "https://res/milk.png", barcode=MILK),
+        _outbox_row(2, 3, "https://res/laban.png", barcode=OTHER_SKU),        # row 3 now holds another SKU
         _outbox_row(3, 4, "https://res/juice.png", name="Al Rawabi Juice"),
     ]
     conn = _flush(gs, ws, pending, fake_connection)
@@ -186,14 +198,17 @@ def test_outbox_identity_and_isolation(gs, fake_connection):
 def test_outbox_resolves_column_by_header_name_and_dedupes(gs, fake_connection):
     # the link column moved from D to E since the updates were queued (col_index 3 is stale)
     ws = FakeWorksheet([["Barcode", "Product Name", "Brand", "Notes", "Drive Image Link"],
-                        ["6281007000028", "Almarai Fresh Milk 1L", "Almarai", "", ""]])
-    pending = [_outbox_row(10, 2, "https://res/old.png", barcode="6281007000028"),
-               _outbox_row(11, 2, "https://res/new.png", barcode="6281007000028")]
-    conn = _flush(gs, ws, pending, fake_connection)
-    status = _final_status(conn)
-    assert status[10] == "SUPERSEDED" and status[11] == "SYNCED"
-    (body,) = ws.sent_bodies
-    assert body["data"] == [{"range": "'Products'!E2", "values": [["https://res/new.png"]]}]
+                        [MILK, "Almarai Fresh Milk 1L", "Almarai", "", ""]])
+    for logical in (True, False):                    # logical key 'link', and a legacy row queued with a header name
+        ws.sent_bodies.clear()
+        kind = {} if logical else {"col_key": None, "col_name": "Drive Image Link"}
+        pending = [_outbox_row(10, 2, "https://res/old.png", barcode=MILK, **kind),
+                   _outbox_row(11, 2, "https://res/new.png", barcode=MILK, **kind)]
+        conn = _flush(gs, ws, pending, fake_connection)
+        status = _final_status(conn)
+        assert status[10] == "SUPERSEDED" and status[11] == "SYNCED"
+        (body,) = ws.sent_bodies
+        assert body["data"] == [{"range": "'Products'!E2", "values": [["https://res/new.png"]]}]
 
 
 def test_outbox_poison_row_does_not_block_others_and_dies(gs, fake_connection):
@@ -201,18 +216,22 @@ def test_outbox_poison_row_does_not_block_others_and_dies(gs, fake_connection):
     ws.fail_whole_batch = True
     ws.poison = {"'Products'!D3"}
     pending = [
-        _outbox_row(1, 2, "https://res/milk.png", barcode="6281007000028"),
-        _outbox_row(2, 3, "https://res/laban.png", barcode="6281007000035", attempts=0),
-        _outbox_row(3, 4, "https://res/juice.png", barcode="6294001819090"),
+        _outbox_row(1, 2, "https://res/milk.png", barcode=MILK),
+        _outbox_row(2, 3, "https://res/laban.png", barcode=LABAN, attempts=0),
+        _outbox_row(3, 4, "https://res/juice.png", barcode=JUICE),
     ]
     status = _final_status(_flush(gs, ws, pending, fake_connection))
     assert status[1] == "SYNCED" and status[3] == "SYNCED"
     assert status[2] == ("FAILED", 1)
 
+    assert gs.reported == []                       # a FAILED write waits for its timed retry; nothing is final yet
+
     ws.sent_bodies.clear()
-    pending = [_outbox_row(2, 3, "https://res/laban.png", barcode="6281007000035", attempts=4)]
+    pending = [_outbox_row(2, 3, "https://res/laban.png", barcode=LABAN, attempts=4)]
     status = _final_status(_flush(gs, ws, pending, fake_connection))
     assert status[2] == ("DEAD", 5)
+    (dead,) = gs.reported                          # giving up is never silent
+    assert (dead["id"], dead["status"], dead["row"], dead["column_key"]) == (2, "DEAD", 3, "link")
 
 
 def test_outbox_identity_is_checked_per_write(gs, fake_connection):
@@ -221,8 +240,8 @@ def test_outbox_identity_is_checked_per_write(gs, fake_connection):
     ws = FakeWorksheet(SHEET)
     for stale_first in (True, False):
         ws.sent_bodies.clear()
-        stale = _outbox_row(1 if stale_first else 2, 3, "https://res/masafi.png", barcode="6291003000013")
-        good = _outbox_row(2 if stale_first else 1, 3, "https://res/laban.png", barcode="6281007000035")
+        stale = _outbox_row(1 if stale_first else 2, 3, "https://res/masafi.png", barcode=MASAFI)
+        good = _outbox_row(2 if stale_first else 1, 3, "https://res/laban.png", barcode=LABAN)
         status = _final_status(_flush(gs, ws, [stale, good], fake_connection))
         assert status[stale["id"]] == "CONFLICT" and status[good["id"]] == "SYNCED"
         written = [(d["range"], d["values"][0][0]) for body in ws.sent_bodies for d in body["data"]]
@@ -232,7 +251,7 @@ def test_outbox_identity_is_checked_per_write(gs, fake_connection):
 def test_outbox_single_flusher(gs, fake_connection):
     """A process that cannot take the flush lock sends nothing (a delayed flusher cannot erase a newer value)."""
     ws = FakeWorksheet(SHEET)
-    conn = _flush(gs, ws, [_outbox_row(1, 2, "", barcode="6281007000028")], fake_connection, lock_free=False)
+    conn = _flush(gs, ws, [_outbox_row(1, 2, "", barcode=MILK)], fake_connection, lock_free=False)
     assert ws.sent_bodies == []
     assert not any("FROM sheet_updates" in s for s, _ in conn.executed)
 
@@ -354,20 +373,22 @@ def test_redis_heartbeat_gate(gs, monkeypatch):
 
     no_beat = FakeRedis(heartbeat=False)
     monkeypatch.setattr(gs, "_get_redis", lambda: no_beat)
-    assert gs.update_image_link(ws, 2, 3, "https://res/milk.png", barcode="6281007000028") is True
+    assert gs.update_image_link(ws, 2, 3, "https://res/milk.png", barcode=MILK) is True
     (args, kwargs), = queue.appended
     assert args == (2, 3, "https://res/milk.png")
-    assert kwargs["col_name"] == "Drive Image Link" and kwargs["key_barcode"] == "6281007000028"
+    # the column travels as the logical key 'link' (resolved at write time), never as a header name or index
+    assert kwargs["col_key"] == "link" and "col_name" not in kwargs and kwargs["key_barcode"] == MILK
     assert no_beat.sets == {}
 
     live = FakeRedis(heartbeat=True)
     monkeypatch.setattr(gs, "_get_redis", lambda: live)
-    assert gs.update_image_link(ws, 3, 3, "https://res/laban.png", barcode="6281007000035") is True
+    assert gs.update_image_link(ws, 3, 3, "https://res/laban.png", barcode=LABAN) is True
     assert len(queue.appended) == 1                       # the outbox was not used this time
     payload = json.loads(live.kv["product:data:row_3"])
-    assert payload["row_index"] == 3
-    assert payload["updates"] == {"3": "https://res/laban.png"}
-    assert payload["expect"] == {"barcode": "6281007000035"}
+    assert payload["v"] == 2 and payload["row_index"] == 3
+    assert payload["updates"] == {"link": "https://res/laban.png"}
+    assert set(payload["seqs"]) == {"link"} and payload["seqs"]["link"] > 0
+    assert payload["expect"] == {"barcode": LABAN}
     assert live.sets["writebehind:dirty_set"] == {"row_3"}
 
 
@@ -390,108 +411,115 @@ def test_update_image_link_reraises_api_errors(gs, monkeypatch):
         gs.update_image_link(BrokenWS(SHEET), 2, 3, "https://res/milk.png")
 
 
-def test_sync_worker_keeps_unknown_payloads(gs):
+def _v2(row, updates, expect=None, seq=7):
+    payload = {"v": 2, "row_index": row, "updates": updates, "seqs": {k: seq for k in updates}}
+    if expect:
+        payload["expect"] = expect
+    return json.dumps(payload)
+
+
+def test_sync_worker_forwards_to_the_outbox_and_keeps_unknown_payloads(gs):
+    """sync_worker never writes the sheet itself: every Redis payload becomes outbox rows (one write channel)."""
     import sync_worker
 
     r = FakeRedis()
     r.sadd("writebehind:dirty_set", "row_2")
-    r.set("product:data:row_2", json.dumps({"row_index": 2, "updates": {"3": "https://res/milk.png"}}))
+    r.set("product:data:row_2", _v2(2, {"link": "https://res/milk.png"}, {"barcode": MILK}, seq=41))
     legacy = {"row_index": 5, "barcode": "", "cloudinary_url": "https://res/x.png"}   # old FastAPI shape
-    r.sadd("writebehind:dirty_set", "6281007000028")
-    r.set("product:data:6281007000028", json.dumps(legacy))
+    r.sadd("writebehind:dirty_set", MILK)
+    r.set(f"product:data:{MILK}", json.dumps(legacy))
+    queue = RecordingQueue()
 
-    ws = FakeWorksheet(SHEET)
-    sent = []
-    ws.batch_update = lambda data, value_input_option=None: sent.append(data)
+    assert sync_worker.run_sync_cycle(None, r, queue=queue, flush=False) == 1
 
-    written = sync_worker.run_sync_cycle(ws, r)
-
-    assert written == 1
     assert r.kv.get("writebehind:heartbeat")                       # the cycle refreshed the heartbeat
-    assert sent == [[{"range": "D2", "values": [["https://res/milk.png"]]}]]
-    assert "row_2" not in r.smembers("writebehind:dirty_set")
+    (args, kwargs), = queue.appended
+    assert args == (2, -1, "https://res/milk.png")
+    assert kwargs["col_key"] == "link" and kwargs["seq"] == 41 and kwargs["key_barcode"] == MILK
+    assert "row_2" not in r.smembers("writebehind:dirty_set") and "product:data:row_2" not in r.kv
     # the unknown payload is left exactly where it was
-    assert "6281007000028" in r.smembers("writebehind:dirty_set")
-    assert json.loads(r.kv["product:data:6281007000028"]) == legacy
+    assert MILK in r.smembers("writebehind:dirty_set")
+    assert json.loads(r.kv[f"product:data:{MILK}"]) == legacy
 
 
-def test_sync_worker_keeps_key_when_write_fails_and_refuses_conflicts(gs):
+def test_sync_worker_parks_legacy_positional_payloads(gs):
+    """A payload from before logical column keys names its column by position: it cannot be verified, so it is
+    parked and reported, never written."""
     import sync_worker
 
     r = FakeRedis()
+    raw = json.dumps({"row_index": 2, "updates": {"3": "https://res/milk.png"}, "expect": {"barcode": MILK}})
     r.sadd("writebehind:dirty_set", "row_2")
-    r.set("product:data:row_2", json.dumps({"row_index": 2, "updates": {"3": "https://res/a.png"}}))
-    r.sadd("writebehind:dirty_set", "row_3")
-    r.set("product:data:row_3", json.dumps({"row_index": 3, "updates": {"3": "https://res/b.png"},
-                                            "expect": {"barcode": "9999999999999"}}))
-    ws = FakeWorksheet(SHEET)
-
-    def boom(data, value_input_option=None):
-        raise RuntimeError("503 backend error")
-
-    ws.batch_update = boom
-    assert sync_worker.run_sync_cycle(ws, r) == 0
-    assert "row_2" in r.smembers("writebehind:dirty_set") and "product:data:row_2" in r.kv
-    assert "row_3" in r.smembers("writebehind:conflicts") and "row_3" not in r.smembers("writebehind:dirty_set")
+    r.set("product:data:row_2", raw)
+    queue = RecordingQueue()
+    assert sync_worker.run_sync_cycle(None, r, queue=queue, flush=False) == 0
+    assert queue.appended == []
+    assert "row_2" in r.smembers("writebehind:conflicts") and "row_2" not in r.smembers("writebehind:dirty_set")
+    assert r.kv["writebehind:conflict_payload:row_2"] == raw and "product:data:row_2" not in r.kv
+    (outcome,) = gs.reported
+    assert outcome["status"] == "CONFLICT" and outcome["row"] == 2 and "by position" in outcome["error"]
 
 
-def test_sync_worker_conflict_payload_is_not_merged_into_the_next_write(gs, monkeypatch):
-    """A conflicted payload for another product must not ride on a later, correct write to that row."""
+def test_sync_worker_keeps_key_when_forwarding_fails(gs):
+    import sync_worker
+
+    r = FakeRedis()
+    raw = _v2(2, {"link": "https://res/a.png"})
+    r.sadd("writebehind:dirty_set", "row_2")
+    r.set("product:data:row_2", raw)
+
+    class DownQueue:
+        def append_update(self, *args, **kwargs):
+            raise RuntimeError("MariaDB is down")
+
+    assert sync_worker.run_sync_cycle(None, r, queue=DownQueue(), flush=False) == 0
+    assert "row_2" in r.smembers("writebehind:dirty_set") and r.kv["product:data:row_2"] == raw
+    queue = RecordingQueue()                                       # the database is back: forwarded next cycle
+    assert sync_worker.run_sync_cycle(None, r, queue=queue, flush=False) == 1 and len(queue.appended) == 1
+
+
+def test_sync_worker_payload_of_another_product_is_not_merged_into_the_next_write(gs, monkeypatch):
+    """A pending payload for another product must not ride on a later write to that row."""
     import sync_worker
     r = FakeRedis(heartbeat=True)
     monkeypatch.setattr(gs, "_get_redis", lambda: r)
-    ws = FakeWorksheet(SHEET)             # row 3 holds Almarai Laban (6281007000035)
-    sent = []
-    ws.batch_update = lambda data, value_input_option=None: sent.append(data)
-    assert gs._redis_write_behind(3, {3: "https://res/masafi.png", 5: "Water (Masafi)"}, {"barcode": "6291003000013"})
-    assert sync_worker.run_sync_cycle(ws, r) == 0                     # identity conflict, nothing written
-    assert "row_3" in r.smembers("writebehind:conflicts")
-    # the reviewer now publishes the product that really is in row 3
-    assert gs._redis_write_behind(3, {3: "https://res/laban.png"}, {"barcode": "6281007000035"})
-    assert sync_worker.run_sync_cycle(ws, r) == 1
-    cells = {d["range"]: d["values"][0][0] for batch in sent for d in batch}
-    assert cells == {"D3": "https://res/laban.png"}
+    assert gs._redis_write_behind(3, {"link": "https://res/masafi.png", "meta:description_en": "Water"},
+                                  {"barcode": MASAFI})
+    queue = RecordingQueue()
+    assert sync_worker.run_sync_cycle(None, r, queue=queue, flush=False) == 1
+    # the reviewer now publishes the product that really is in row 3: a fresh payload with its own identity
+    assert gs._redis_write_behind(3, {"link": "https://res/laban.png"}, {"barcode": LABAN})
+    assert sync_worker.run_sync_cycle(None, r, queue=queue, flush=False) == 1
+    forwarded = [(a[2], k["col_key"], k["key_barcode"]) for a, k in queue.appended]
+    assert forwarded == [("https://res/masafi.png", "link", MASAFI), ("Water", "meta:description_en", MASAFI),
+                         ("https://res/laban.png", "link", LABAN)]
 
 
 def test_redis_write_behind_refuses_to_merge_other_identity(gs, monkeypatch):
     r = FakeRedis(heartbeat=True)
     monkeypatch.setattr(gs, "_get_redis", lambda: r)
-    assert gs._redis_write_behind(3, {3: "https://res/a.png"}, {"barcode": "6291003000013"})
-    assert gs._redis_write_behind(3, {3: "https://res/b.png"}, {"barcode": "6281007000035"}) is False
+    assert gs._redis_write_behind(3, {"link": "https://res/a.png"}, {"barcode": MASAFI})
+    assert gs._redis_write_behind(3, {"link": "https://res/b.png"}, {"barcode": LABAN}) is False
+    # a legacy positional payload pending for the row is never merged into either
+    r.set("product:data:row_4", json.dumps({"row_index": 4, "updates": {"3": "https://res/old.png"}}))
+    assert gs._redis_write_behind(4, {"link": "https://res/c.png"}, {"barcode": JUICE}) is False
 
 
-def test_sync_worker_keeps_an_update_that_arrived_during_the_write(gs):
+def test_sync_worker_keeps_an_update_that_arrived_during_the_forward(gs):
     import sync_worker
     r = FakeRedis()
     r.sadd("writebehind:dirty_set", "row_2")
-    r.set("product:data:row_2", json.dumps({"row_index": 2, "updates": {"3": "https://res/a.png"}}))
-    ws = FakeWorksheet(SHEET)
+    r.set("product:data:row_2", _v2(2, {"link": "https://res/a.png"}))
 
-    def write_and_race(data, value_input_option=None):
-        # metadata for the same row lands while the link is being written
-        r.set("product:data:row_2", json.dumps({"row_index": 2, "updates": {"3": "https://res/a.png", "4": "desc"}}))
+    class RacingQueue(RecordingQueue):
+        def append_update(self, *args, **kwargs):
+            super().append_update(*args, **kwargs)
+            # metadata for the same row lands while the link is being forwarded
+            r.set("product:data:row_2", _v2(2, {"link": "https://res/a.png", "meta:description_en": "desc"}))
 
-    ws.batch_update = write_and_race
-    sync_worker.run_sync_cycle(ws, r)
+    sync_worker.run_sync_cycle(None, r, queue=RacingQueue(), flush=False)
     assert "row_2" in r.smembers("writebehind:dirty_set")
-    assert json.loads(r.kv["product:data:row_2"])["updates"]["4"] == "desc"
-
-
-def test_sync_worker_parks_a_permanently_failing_key(gs):
-    import sync_worker
-    r = FakeRedis()
-    r.sadd("writebehind:dirty_set", "row_99")
-    r.set("product:data:row_99", json.dumps({"row_index": 99, "updates": {"3": "x"}}))
-    ws = FakeWorksheet(SHEET)
-
-    def boom(data, value_input_option=None):
-        raise RuntimeError("400 range exceeds grid limits")
-
-    ws.batch_update = boom
-    for _ in range(sync_worker.MAX_KEY_ATTEMPTS):
-        sync_worker.run_sync_cycle(ws, r)
-    assert "row_99" not in r.smembers("writebehind:dirty_set")
-    assert "row_99" in r.smembers("writebehind:dead")
+    assert json.loads(r.kv["product:data:row_2"])["updates"]["meta:description_en"] == "desc"
 
 
 # ---------------------------------------------------------------------------
@@ -524,15 +552,25 @@ def test_identity_without_barcode_compares_size_and_brand(gs):
     assert gs.find_record_conflicts(no_cols, {"w": (2, one_litre)}) == {}
 
 
-def test_outbox_sibling_write_with_stale_row_is_a_conflict(gs, fake_connection):
+def test_outbox_sibling_write_with_stale_row_is_relocated_or_a_conflict(gs, fake_connection):
     ws = FakeWorksheet(SIBLINGS)
     stale = _outbox_row(1, 3, "https://res/milk-1l.png", name="Fresh Milk", size="1L", brand="Almarai")
     good = _outbox_row(2, 3, "https://res/milk-2l.png", name="Fresh Milk", size="2L", brand="Almarai")
-    status = _final_status(_flush(gs, ws, [stale, good], fake_connection))
-    # the sibling's write is neither superseded by nor lent the verdict of the correct write
-    assert status[1] == "CONFLICT" and status[2] == "SYNCED"
-    written = [(d["range"], d["values"][0][0]) for body in ws.sent_bodies for d in body["data"]]
-    assert written == [("'Products'!D3", "https://res/milk-2l.png")]
+    conn = _flush(gs, ws, [stale, good], fake_connection)
+    status = _final_status(conn)
+    # the sibling's write is neither superseded by nor lent the verdict of the correct write: it goes to the one
+    # row that really holds the 1L product
+    assert status[1] == "SYNCED" and status[2] == "SYNCED"
+    written = sorted((d["range"], d["values"][0][0]) for body in ws.sent_bodies for d in body["data"])
+    assert written == [("'Products'!D2", "https://res/milk-1l.png"), ("'Products'!D3", "https://res/milk-2l.png")]
+    assert ("UPDATE sheet_updates SET `row_number` = %s, relocated_from = %s WHERE id = %s", (2, 3, 1)) in conn.executed
+
+    # without the size, the name and brand match two rows: never guessed, stays a CONFLICT
+    ws.sent_bodies.clear()
+    vague = _outbox_row(3, 4, "https://res/milk.png", name="Fresh Milk", brand="Almarai")
+    status = _final_status(_flush(gs, ws, [vague], fake_connection))
+    assert status[3] == "CONFLICT" and ws.sent_bodies == []
+    assert "2 rows match" in gs.reported[-1]["error"]
 
 
 def test_writes_carry_size_and_brand_to_outbox_and_redis(gs, monkeypatch):
@@ -550,14 +588,14 @@ def test_writes_carry_size_and_brand_to_outbox_and_redis(gs, monkeypatch):
 
     r = FakeRedis(heartbeat=True)
     monkeypatch.setattr(gs, "_get_redis", lambda: r)
-    sent = []
-    ws.batch_update = lambda data, value_input_option=None: sent.append(data)
     assert gs.update_image_link(ws, 3, 3, "https://res/milk-1l.png", product_name="Fresh Milk",
                                 size="1L", brand="Almarai") is True
     assert json.loads(r.kv["product:data:row_3"])["expect"] == {"name": "Fresh Milk", "size": "1L",
                                                                 "brand": "Almarai"}
-    assert sync_worker.run_sync_cycle(ws, r) == 0          # row 3 is the 2L sibling: parked, not written
-    assert "row_3" in r.smembers("writebehind:conflicts") and sent == []
+    forwarded = RecordingQueue()
+    assert sync_worker.run_sync_cycle(None, r, queue=forwarded, flush=False) == 1
+    (_, kwargs), = forwarded.appended                     # the outbox flush then verifies size and brand
+    assert (kwargs["key_name"], kwargs["key_size"], kwargs["key_brand"]) == ("Fresh Milk", "1L", "Almarai")
 
 
 def test_outbox_schema_stores_size_and_brand(gs, fake_connection):

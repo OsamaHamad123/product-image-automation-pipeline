@@ -4,10 +4,21 @@
 # قواعد الأمان (SHEET-1/2, SYNC-1/2, D12):
 # - الأعمدة تُحدد بأسماء العناوين (مع جدول مرادفات) ولا يوجد أي رجوع لمواقع ثابتة؛ غياب عمود الاسم خطأ صريح.
 # - لا يُخترع البراند من أول كلمة في الاسم: البراند الفارغ يبقى فارغاً.
-# - كل كتابة تحمل هوية المنتج (الباركود/الاسم). عند التفريغ نعيد قراءة عمود المفتاح للصف الهدف،
-#   وأي اختلاف يُسجل CONFLICT ولا يُكتب. عمود الهدف يُحدد باسم العنوان وقت التفريغ.
+# - كل كتابة تحمل هوية المنتج (الباركود/الاسم/الحجم/البراند). عند التفريغ نعيد قراءة أعمدة الهوية للصف الهدف،
+#   وأي اختلاف يُسجل CONFLICT ولا يُكتب. الباركود وحده مفتاح فقط إذا كان GTIN صالحاً (رقم تحقق GS1)؛
+#   'N/A' و'0' و'-' و'6.29E+12' ليست مفاتيح أبداً، فيُقارن الاسم مع الحجم والبراند.
+# - عند CONFLICT تُقرأ أعمدة الهوية للورقة كلها مرة واحدة: إذا طابق المنتجَ صفٌ واحد فقط تُنقل الكتابة إليه
+#   (صف أُدرج أو حُذف فوقه)، وإلا تبقى CONFLICT.
+# - عمود الهدف يُحمل كمفتاح منطقي ('link' أو 'meta:<key>') ويُحدد من العناوين وقت الكتابة، لا برقم العمود
+#   ولا باسم العنوان الذي كان في ذلك الموقع عند الجدولة (إدراج عمود أثناء التشغيل لا يغيّر العمود المكتوب).
+# - الكتابة الفاشلة تُعاد على مواعيد متباعدة (1 د، 5 د، 30 د، 2 س) عبر التشغيلات قبل أن تصبح DEAD؛
+#   كل كتابة تنتهي دون أن تُكتب (CONFLICT / DEAD / SKIPPED_OUT_OF_BOUNDS) تُبلَّغ عبر outcome hook،
+#   ونتائج الطابور تُقرأ عبر outbox_outcomes().
+# - الترتيب: كل كتابة تحمل seq (وقت الجدولة بالنانوثانية) والمُفرِّغ لا يرسل قيمة أقدم من قيمة كُتبت بعدها
+#   لنفس العمود ونفس المنتج. Redis ليس قناة كتابة ثانية: sync_worker ينقل حمولاته إلى هذا الطابور نفسه.
 # - الكتابة المؤجلة عبر Redis تُستخدم فقط إذا كان مفتاح نبض sync_worker موجوداً.
 
+import hashlib
 import json
 import logging
 import os
@@ -22,6 +33,7 @@ import pymysql
 from gspread.exceptions import APIError
 
 import config
+from catalog_match.gtin import normalize_gtin
 
 logger = logging.getLogger(__name__)
 
@@ -38,8 +50,20 @@ BRAND_CACHE_VERSION = 2
 HEARTBEAT_KEY = "writebehind:heartbeat"
 DIRTY_SET_KEY = "writebehind:dirty_set"
 CACHE_PREFIX = "product:data:"
-MAX_OUTBOX_ATTEMPTS = 5
+REDIS_PAYLOAD_VERSION = 2
+# مواعيد إعادة محاولة الكتابة الفاشلة (ثوانٍ) بعد المحاولات 1..4؛ فشل المحاولة الخامسة يجعلها DEAD
+RETRY_BACKOFF = (60, 300, 1800, 7200)
+MAX_OUTBOX_ATTEMPTS = len(RETRY_BACKOFF) + 1
 OUTBOX_BATCH = 200
+
+# المفاتيح المنطقية لأعمدة الكتابة: 'link' (عمود رابط الصورة بمرادفاته) و'meta:<key>' (أعمدة البيانات الوصفية)
+LINK_KEY = "link"
+META_PREFIX = "meta:"
+
+# أخطاء مؤقتة تُعاد محاولتها: تجاوز الحصة وأخطاء الخادم
+_TRANSIENT_CODES = (429, 500, 502, 503, 504)
+_sleep = time.sleep      # قابلة للاستبدال في الاختبارات
+_now = time.time
 
 
 class SheetConfigError(Exception):
@@ -48,6 +72,13 @@ class SheetConfigError(Exception):
 
 class SheetSchemaError(SheetConfigError):
     """عناوين الأعمدة لا تسمح بتحديد عمود إلزامي (مثل اسم المنتج)."""
+
+
+class SheetTransientError(Exception):
+    """
+    Google Sheets غير متاح مؤقتاً (429 / 5xx / انقطاع الاتصال) بعد استنفاد إعادة المحاولة.
+    ليس خطأ إعداد: الرابط والمشاركة سليمان، والحل الانتظار ثم إعادة المحاولة.
+    """
 
 
 # ---------------------------------------------------------------------------
@@ -98,13 +129,45 @@ def resolve_columns(headers):
     return out
 
 
+def resolve_column_key(headers, col_key):
+    """
+    فهرس العمود (0-based) لمفتاح منطقي حسب العناوين الحالية، أو -1. المفاتيح: مفاتيح COLUMN_SYNONYMS
+    (مثل 'link') و'meta:<key>' لأعمدة البيانات الوصفية (_METADATA_COLUMNS).
+    """
+    key = str(col_key or "").strip()
+    if key in COLUMN_SYNONYMS:
+        return resolve_columns(headers)[key]
+    if key.startswith(META_PREFIX) and key[len(META_PREFIX):] in _METADATA_COLUMNS:
+        target = normalize_header(_METADATA_COLUMNS[key[len(META_PREFIX):]])
+        normalized = [normalize_header(h) for h in headers or []]
+        return normalized.index(target) if target in normalized else -1
+    return -1
+
+
+def _col_key_for_header(header):
+    """المفتاح المنطقي لاسم عنوان (لكتابات قديمة في الطابور بلا col_key)، أو None."""
+    target = normalize_header(header)
+    if not target:
+        return None
+    for key, synonyms in COLUMN_SYNONYMS.items():
+        if target in (normalize_header(s) for s in synonyms):
+            return key
+    for key, name in _METADATA_COLUMNS.items():
+        if normalize_header(name) == target:
+            return f"{META_PREFIX}{key}"
+    return None
+
+
 def _cell(row, idx):
     return row[idx].strip() if 0 <= idx < len(row) else ""
 
 
-def _norm_barcode(value):
-    digits = re.sub(r"\D", "", str(value or ""))
-    return digits.lstrip("0")
+def _gtin(value):
+    """GTIN-14 لباركود صالح (طول ورقم تحقق GS1 صحيحان)، وإلا None: العناصر النائبة ليست مفاتيح أبداً."""
+    try:
+        return normalize_gtin(value)[0]
+    except Exception:
+        return None
 
 
 def _norm_name(value):
@@ -157,10 +220,37 @@ def _write_cache(name, payload, version):
 # إعادة المحاولة عند 429 / 5xx
 # ---------------------------------------------------------------------------
 
+def _is_transient(exc):
+    """
+    خطأ مؤقت يستحق إعادة المحاولة: APIError برمز 429/500/502/503/504 (أو 403 لتجاوز معدل Drive)،
+    أو انقطاع/مهلة اتصال. 'غير موجود' و'لا صلاحية' (404/403/SpreadsheetNotFound) ليست مؤقتة.
+    """
+    if isinstance(exc, APIError):
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+        code = getattr(exc, "code", None)
+        if code in _TRANSIENT_CODES or status in _TRANSIENT_CODES:
+            return True
+        return code == 403 and "ratelimitexceeded" in str(exc).replace(" ", "").casefold()
+    if isinstance(exc, (ConnectionError, TimeoutError)):
+        return True
+    try:
+        import requests
+        if isinstance(exc, (requests.exceptions.ConnectionError, requests.exceptions.Timeout,
+                            requests.exceptions.ChunkedEncodingError)):
+            return True
+    except ImportError:  # pragma: no cover - requests is a gspread dependency
+        pass
+    try:
+        from google.auth.exceptions import TransportError
+        return isinstance(exc, TransportError)
+    except ImportError:  # pragma: no cover
+        return False
+
+
 def retry_gspread_on_429(max_retries=5):
     """
-    مُزخرف لإعادة محاولة استدعاءات Google API عند 429 أو 500 أو 503 مع ارتداد أسّي عشوائي.
-    الأخطاء الأخرى تُرفع كما هي.
+    مُزخرف لإعادة محاولة استدعاءات Google API عند الأخطاء المؤقتة (429 و5xx وانقطاع الاتصال، انظر
+    _is_transient) مع ارتداد أسّي عشوائي. الأخطاء الأخرى تُرفع كما هي.
     """
     def decorator(func):
         def wrapper(*args, **kwargs):
@@ -168,20 +258,35 @@ def retry_gspread_on_429(max_retries=5):
             while True:
                 try:
                     return func(*args, **kwargs)
-                except APIError as e:
-                    code = getattr(e, "code", None)
-                    if code in (429, 500, 503) and retry < max_retries:
+                except Exception as e:
+                    if _is_transient(e) and retry < max_retries:
                         retry += 1
                         backoff = min((2 ** retry) + random.uniform(0.1, 1.0), 32)
-                        logger.warning("[Google Sheets API] خطأ %s؛ إعادة المحاولة %s/%s خلال %.2f ثانية",
-                                       code, retry, max_retries, backoff)
-                        time.sleep(backoff)
+                        logger.warning("[Google Sheets API] خطأ مؤقت (%s)؛ إعادة المحاولة %s/%s خلال %.2f ثانية",
+                                       _one_line(e), retry, max_retries, backoff)
+                        _sleep(backoff)
                         continue
                     raise
         wrapper.__wrapped__ = func
         wrapper.__name__ = getattr(func, "__name__", "wrapper")
         return wrapper
     return decorator
+
+
+def _retrying(func, *args, **kwargs):
+    """
+    استدعاء Google API مع إعادة المحاولة عند الأخطاء المؤقتة؛ إذا بقي الخطأ مؤقتاً بعد كل المحاولات يُرفع
+    SheetTransientError (رسالة واضحة أنه ليس خطأ في الرابط أو المشاركة).
+    """
+    try:
+        return retry_gspread_on_429()(func)(*args, **kwargs)
+    except Exception as e:
+        if _is_transient(e):
+            raise SheetTransientError(
+                "Google Sheets غير متاح مؤقتاً (تجاوز الحصة أو خطأ في خادم Google أو انقطاع الاتصال) بعد عدة "
+                f"محاولات: {_one_line(e)}. هذا ليس خطأ في رابط الشيت أو مشاركته؛ أعد المحاولة بعد دقائق."
+            ) from e
+        raise
 
 
 # ---------------------------------------------------------------------------
@@ -211,24 +316,30 @@ def _open_spreadsheet(client, sheet_name_or_url):
 def open_worksheet(client, sheet_name_or_url, worksheet_index=0):
     """
     فتح ورقة العمل. إذا كان SPREADSHEET_TAB_NAME مضبوطاً وغير موجود نرفع SheetConfigError
-    بدلاً من الكتابة بصمت في التبويب الأول. تعيد None إذا تعذر فتح الملف نفسه.
+    بدلاً من الكتابة بصمت في التبويب الأول. تعيد None إذا كان الملف غير موجود أو غير مشارك مع حساب الخدمة.
+    الأخطاء المؤقتة (429 / 5xx / انقطاع الاتصال) تُعاد محاولتها، وإذا استمرت يُرفع SheetTransientError
+    (لا None: رسالة 'الشيت غير موجود / تحقق من المشاركة' لا تصف خطأً مؤقتاً).
     """
     try:
-        sh = _open_spreadsheet(client, sheet_name_or_url)
+        sh = _retrying(_open_spreadsheet, client, sheet_name_or_url)
+    except SheetTransientError as e:
+        logger.error("تعذر فتح جدول البيانات '%s' مؤقتاً: %s", _one_line(sheet_name_or_url), e)
+        raise
     except Exception as e:
-        logger.error("فشل فتح جدول البيانات '%s': %s", _one_line(sheet_name_or_url), e)
+        logger.error("فشل فتح جدول البيانات '%s' (غير موجود أو غير مشارك مع حساب الخدمة): %s",
+                     _one_line(sheet_name_or_url), _one_line(e))
         return None
     tab_name = (getattr(config, "SPREADSHEET_TAB_NAME", "") or "").strip()
     if tab_name and worksheet_index == 0:
         try:
-            return sh.worksheet(tab_name)
+            return _retrying(sh.worksheet, tab_name)
         except gspread.exceptions.WorksheetNotFound:
             try:
                 titles = [ws.title for ws in sh.worksheets()]
             except Exception:
                 titles = []
             raise SheetConfigError(f"التبويب '{tab_name}' غير موجود في الشيت. التبويبات المتاحة: {titles}")
-    return sh.get_worksheet(worksheet_index)
+    return _retrying(sh.get_worksheet, worksheet_index)
 
 
 _HEADER_TTL = 60.0
@@ -251,15 +362,38 @@ def _worksheet_headers(worksheet, fresh=False):
 
 
 def find_link_column(worksheet, create=True):
-    """فهرس عمود رابط الصورة من العناوين الحالية؛ يُنشأ العمود في النهاية إن لم يوجد و create=True."""
-    headers = _worksheet_headers(worksheet, fresh=True)
+    """
+    فهرس عمود رابط الصورة من العناوين الحالية؛ يُنشأ العمود في النهاية إن لم يوجد و create=True.
+    الأخطاء المؤقتة تُعاد محاولتها (SheetTransientError إذا استمرت).
+    """
+    headers = _retrying(_worksheet_headers, worksheet, fresh=True)
     idx = resolve_columns(headers)["link"]
     if idx == -1 and create:
         idx = len(headers)
-        worksheet.update_cell(1, idx + 1, DEFAULT_LINK_HEADER)
-        _worksheet_headers(worksheet, fresh=True)
+        _retrying(worksheet.update_cell, 1, idx + 1, DEFAULT_LINK_HEADER)
+        _retrying(_worksheet_headers, worksheet, fresh=True)
         logger.info("تم إنشاء عمود '%s' في العمود رقم %s", DEFAULT_LINK_HEADER, idx + 1)
     return idx
+
+
+def _fresh_row_count(worksheet):
+    """
+    عدد صفوف الورقة الآن: gspread يحفظ row_count من لحظة فتح الورقة، فورقة كبرت أثناء التشغيل تبدو أصغر.
+    يُحدَّث row_count المحفوظ أيضاً. يعيد None إذا تعذرت القراءة (لا يُحكم على أي كتابة بأنها خارج الورقة).
+    """
+    try:
+        meta = _retrying(worksheet.spreadsheet.fetch_sheet_metadata)
+        for sheet in (meta or {}).get("sheets", []):
+            props = sheet.get("properties") or {}
+            if props.get("sheetId") == getattr(worksheet, "id", None):
+                stored = getattr(worksheet, "_properties", None)
+                if isinstance(stored, dict):
+                    stored.update(props)
+                return int(props["gridProperties"]["rowCount"])
+        logger.warning("[Google Sheets] الورقة %s غير موجودة في بيانات الشيت.", getattr(worksheet, "title", ""))
+    except Exception as e:
+        logger.warning("[Google Sheets] تعذر تحديث عدد صفوف الورقة: %s", _one_line(e))
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -269,13 +403,13 @@ def find_link_column(worksheet, create=True):
 def get_products(worksheet):
     """
     جلب كل المنتجات مع رقم الصف. الأعمدة تُحدد بالعناوين؛ يُرفع SheetSchemaError إذا لم يوجد عمود الاسم.
-    البراند الفارغ يبقى ''. تعيد (products, link_idx).
+    البراند الفارغ يبقى ''. تعيد (products, link_idx). الأخطاء المؤقتة تُعاد محاولتها (SheetTransientError إذا استمرت).
     """
     cached = _read_cache("products_cache.json", 3600, PRODUCTS_CACHE_VERSION)
     if cached:
         return cached["products"], cached["link_idx"]
 
-    rows = worksheet.get_all_values()
+    rows = _retrying(worksheet.get_all_values)
     if not rows or len(rows) <= 1:
         logger.warning("لا توجد بيانات في الشيت (أو يوجد صف العناوين فقط).")
         return [], -1
@@ -291,7 +425,7 @@ def get_products(worksheet):
     link_idx = cols["link"]
     if link_idx == -1:
         link_idx = len(headers)
-        worksheet.update_cell(1, link_idx + 1, DEFAULT_LINK_HEADER)
+        _retrying(worksheet.update_cell, 1, link_idx + 1, DEFAULT_LINK_HEADER)
         logger.info("تم إنشاء عمود جديد '%s' في العمود رقم %s", DEFAULT_LINK_HEADER, link_idx + 1)
 
     products = []
@@ -336,7 +470,7 @@ def get_products(worksheet):
 
 def _expectation(barcode=None, product_name=None, size=None, brand=None):
     """
-    هوية المنتج المتوقع في الصف. الحجم والبراند يُخزنان مع الاسم: بدون باركود، شقيقان بنفس الاسم
+    هوية المنتج المتوقع في الصف. الحجم والبراند يُخزنان مع الاسم: بدون باركود صالح، شقيقان بنفس الاسم
     (1L و 2L، أو نفس الاسم لبراندين) في صفين متجاورين يتميزان بهما فقط.
     """
     expect = {}
@@ -350,6 +484,52 @@ def _norm_size(value):
     return re.sub(r"\s+", "", unicodedata.normalize("NFKC", str(value or "")).casefold())
 
 
+# كيف تُقارن كل خانة هوية بين التوقع والشيت
+_IDENTITY_NORMS = {"barcode": _gtin, "name": _norm_name, "size": _norm_size, "brand": _norm_name}
+
+
+def _key_fields(expect, cols):
+    """
+    خانات الهوية التي تُقارن لتوقع معين: الباركود وحده إذا كان GTIN صالحاً وعموده موجوداً في الشيت، وإلا
+    الاسم مع الحجم والبراند (كل منهما إذا كان في التوقع وكان عموده موجوداً). [] إذا تعذر التحقق.
+    """
+    expect = expect or {}
+    if cols.get("barcode", -1) != -1 and _gtin(expect.get("barcode")):
+        return ["barcode"]
+    if expect.get("name") and cols.get("name", -1) != -1:
+        return ["name"] + [f for f in ("size", "brand") if expect.get(f) and cols.get(f, -1) != -1]
+    return []
+
+
+def _identity_mismatch(expect, cells, fields):
+    """سبب عدم تطابق خلايا صف ({field: القيمة}) مع التوقع في الخانات المحددة، أو None عند التطابق."""
+    for field in fields:
+        norm = _IDENTITY_NORMS[field]
+        if norm(cells.get(field)) != norm(expect[field]):
+            return f"{field} mismatch: sheet has {cells.get(field)!r}, expected {expect[field]!r}"
+    return None
+
+
+def _identity_key(expect):
+    """
+    هوية قانونية للتوقع (لدمج الكتابات وترتيبها): 'gtin:<GTIN-14>' لباركود صالح، وإلا
+    'name:<الاسم>|<الحجم>|<البراند>'؛ '' بلا توقع.
+    """
+    expect = expect or {}
+    gtin = _gtin(expect.get("barcode"))
+    if gtin:
+        return f"gtin:{gtin}"
+    if any(expect.get(f) for f in ("name", "size", "brand")):
+        return "name:" + "|".join((_norm_name(expect.get("name")), _norm_size(expect.get("size")),
+                                   _norm_name(expect.get("brand"))))
+    return f"raw:{expect.get('barcode')}" if expect else ""
+
+
+def _identity_hash(expect):
+    key = _identity_key(expect)
+    return hashlib.sha1(key.encode("utf-8")).hexdigest() if key else None
+
+
 def _outbox_keys(expect):
     """أعمدة الهوية في طابور MariaDB لتوقع معين."""
     expect = expect or {}
@@ -357,28 +537,36 @@ def _outbox_keys(expect):
             "key_size": expect.get("size"), "key_brand": expect.get("brand")}
 
 
-def _read_column_cells(worksheet, col_idx, rows):
-    """قيم عمود واحد لصفوف محددة عبر batch_get لنطاق واحد متصل."""
-    lo, hi = min(rows), max(rows)
-    letter_lo = gspread.utils.rowcol_to_a1(lo, col_idx + 1)
-    letter_hi = gspread.utils.rowcol_to_a1(hi, col_idx + 1)
-    result = worksheet.batch_get([f"{letter_lo}:{letter_hi}"])
-    values = list(result[0]) if result else []
+def _read_identity_cells(worksheet, columns, rows=None):
+    """
+    قيم عدة أعمدة عبر batch_get واحد. columns: {field: فهرس العمود}. rows: أرقام صفوف (يُقرأ النطاق المتصل
+    بين أصغرها وأكبرها)، أو None للعمود كله بدءاً من الصف 2. يعيد {field: {row: القيمة}}.
+    """
+    fields = list(columns)
+    if not fields:
+        return {}
+    lo, hi = (min(rows), max(rows)) if rows else (2, None)
+    ranges = []
+    for field in fields:
+        start = gspread.utils.rowcol_to_a1(lo, columns[field] + 1)
+        if hi is None:
+            ranges.append(f"{start}:{re.sub(r'[0-9]', '', start)}")
+        else:
+            ranges.append(f"{start}:{gspread.utils.rowcol_to_a1(hi, columns[field] + 1)}")
+    result = _retrying(worksheet.batch_get, ranges)
     out = {}
-    for r in rows:
-        offset = r - lo
-        cell = values[offset] if offset < len(values) else []
-        out[r] = str(cell[0]).strip() if cell else ""
+    for i, field in enumerate(fields):
+        values = list(result[i]) if result and i < len(result) else []
+        out[field] = {lo + offset: (str(cell[0]).strip() if cell else "") for offset, cell in enumerate(values)}
     return out
 
 
 def find_record_conflicts(worksheet, records, headers=None):
     """
     records: {record_id: (row_number, {'barcode': ..., 'name': ..., 'size': ..., 'brand': ...})}.
-    يعيد {record_id: سبب} لكل سجل لا يطابق عمود المفتاح في صفه هويته هو. التحقق لكل سجل على حدة:
+    يعيد {record_id: سبب} لكل سجل لا تطابق أعمدة الهوية في صفه هويته هو. التحقق لكل سجل على حدة:
     سجلان لمنتجين مختلفين على نفس رقم الصف (رقم صف قديم) لا يأخذ أحدهما حكم الآخر.
-    الباركود هو المفتاح عند توفره (في التوقع وفي الشيت)، وإلا الاسم مع الحجم والبراند (كل منهما
-    يُقارن إذا كان في التوقع وكان عموده موجوداً في الشيت).
+    الباركود هو المفتاح فقط إذا كان GTIN صالحاً (وعموده موجوداً)، وإلا الاسم مع الحجم والبراند (_key_fields).
     """
     records = {k: (row, e) for k, (row, e) in (records or {}).items() if e}
     if not records:
@@ -386,36 +574,49 @@ def find_record_conflicts(worksheet, records, headers=None):
     if headers is None:
         headers = _worksheet_headers(worksheet, fresh=True)
     cols = resolve_columns(headers)
-    barcode_ids = [k for k, (_, e) in records.items() if e.get("barcode") and cols["barcode"] != -1]
-    name_ids = [k for k, (_, e) in records.items()
-                if k not in barcode_ids and e.get("name") and cols["name"] != -1]
+    fields = {k: _key_fields(e, cols) for k, (_, e) in records.items()}
+    keyed = [k for k in records if fields[k]]
     conflicts = {}
-    if barcode_ids:
-        actual = _read_column_cells(worksheet, cols["barcode"], sorted({records[k][0] for k in barcode_ids}))
-        for k in barcode_ids:
+    if keyed:
+        needed = sorted({f for k in keyed for f in fields[k]})
+        cells = _read_identity_cells(worksheet, {f: cols[f] for f in needed}, [records[k][0] for k in keyed])
+        for k in keyed:
             row, e = records[k]
-            if _norm_barcode(actual.get(row)) != _norm_barcode(e["barcode"]):
-                conflicts[k] = f"barcode mismatch: sheet has {actual.get(row)!r}, expected {e['barcode']!r}"
-    if name_ids:
-        name_rows = sorted({records[k][0] for k in name_ids})
-        actual = _read_column_cells(worksheet, cols["name"], name_rows)
-        for k in name_ids:
-            row, e = records[k]
-            if _norm_name(actual.get(row)) != _norm_name(e["name"]):
-                conflicts[k] = f"name mismatch: sheet has {actual.get(row)!r}, expected {e['name']!r}"
-        for field, norm in (("size", _norm_size), ("brand", _norm_name)):
-            ids = [k for k in name_ids if k not in conflicts and records[k][1].get(field) and cols[field] != -1]
-            if not ids:
-                continue
-            actual = _read_column_cells(worksheet, cols[field], sorted({records[k][0] for k in ids}))
-            for k in ids:
-                row, e = records[k]
-                if norm(actual.get(row)) != norm(e[field]):
-                    conflicts[k] = f"{field} mismatch: sheet has {actual.get(row)!r}, expected {e[field]!r}"
+            reason = _identity_mismatch(e, {f: cells[f].get(row, "") for f in fields[k]}, fields[k])
+            if reason:
+                conflicts[k] = reason
     for k in records:
-        if k not in barcode_ids and k not in name_ids:
-            conflicts[k] = "no key column in sheet to verify row identity"
+        if not fields[k]:
+            conflicts[k] = ("no key column in sheet to verify row identity "
+                            "(the barcode is not a valid GTIN and there is no product name to compare)")
     return conflicts
+
+
+def find_identity_rows(worksheet, expectations, headers=None):
+    """
+    expectations: {record_id: expect}. يعيد {record_id: [أرقام كل الصفوف التي تطابق هوية المنتج]} بعد قراءة
+    أعمدة الهوية للورقة كلها مرة واحدة (batch_get واحد). توقع بلا مفتاح صالح يعيد [] (لا يُنقل أبداً).
+    """
+    expectations = {k: e for k, e in (expectations or {}).items() if e}
+    if not expectations:
+        return {}
+    if headers is None:
+        headers = _worksheet_headers(worksheet, fresh=True)
+    cols = resolve_columns(headers)
+    fields = {k: _key_fields(e, cols) for k, e in expectations.items()}
+    out = {k: [] for k in expectations}
+    needed = sorted({f for fs in fields.values() for f in fs})
+    if not needed:
+        return out
+    cells = _read_identity_cells(worksheet, {f: cols[f] for f in needed})
+    normalized = {f: {row: _IDENTITY_NORMS[f](value) for row, value in cells[f].items()} for f in needed}
+    all_rows = sorted({row for f in needed for row in cells[f]})
+    for k, e in expectations.items():
+        if not fields[k]:
+            continue
+        want = {f: _IDENTITY_NORMS[f](e[f]) for f in fields[k]}
+        out[k] = [row for row in all_rows if all(normalized[f].get(row) == want[f] for f in fields[k])]
+    return out
 
 
 def find_identity_conflicts(worksheet, expectations, headers=None):
@@ -431,6 +632,33 @@ def find_identity_conflicts(worksheet, expectations, headers=None):
 # طابور الكتابة في MariaDB (outbox)
 # ---------------------------------------------------------------------------
 
+_seq_lock = threading.Lock()
+_last_seq = 0
+
+
+def _next_seq():
+    """
+    تسلسل الكتابة: وقت الجدولة بالنانوثانية، متزايد تماماً داخل العملية. الكتابات من كل العمليات والقنوات
+    تُرتب به، والمُفرِّغ لا يرسل قيمة seq أصغر من قيمة كُتبت بعدها لنفس الخلية ونفس المنتج.
+    """
+    global _last_seq
+    with _seq_lock:
+        _last_seq = max(time.time_ns(), _last_seq + 1)
+        return _last_seq
+
+
+def _db_connect():
+    return pymysql.connect(
+        host=os.getenv("DB_HOST", "127.0.0.1"),
+        port=int(os.getenv("DB_PORT", "3306")),
+        user=os.getenv("DB_USERNAME", "root"),
+        password=os.getenv("DB_PASSWORD", ""),
+        database=os.getenv("DB_DATABASE", "automation_db"),
+        charset='utf8mb4',
+        cursorclass=pymysql.cursors.DictCursor
+    )
+
+
 class SQLiteTransactionQueue:
     """طابور الكتابة (outbox) في جدول sheet_updates على MariaDB (الاسم تاريخي)."""
 
@@ -438,15 +666,7 @@ class SQLiteTransactionQueue:
         self._setup_schema()
 
     def _connect(self):
-        return pymysql.connect(
-            host=os.getenv("DB_HOST", "127.0.0.1"),
-            port=int(os.getenv("DB_PORT", "3306")),
-            user=os.getenv("DB_USERNAME", "root"),
-            password=os.getenv("DB_PASSWORD", ""),
-            database=os.getenv("DB_DATABASE", "automation_db"),
-            charset='utf8mb4',
-            cursorclass=pymysql.cursors.DictCursor
-        )
+        return _db_connect()
 
     def _setup_schema(self):
         conn = self._connect()
@@ -470,7 +690,15 @@ class SQLiteTransactionQueue:
                 "ALTER TABLE sheet_updates ADD COLUMN IF NOT EXISTS key_brand VARCHAR(255) NULL",
                 "ALTER TABLE sheet_updates ADD COLUMN IF NOT EXISTS attempts INT NOT NULL DEFAULT 0",
                 "ALTER TABLE sheet_updates ADD COLUMN IF NOT EXISTS last_error TEXT NULL",
+                # المفتاح المنطقي للعمود، تسلسل الكتابة، بصمة الهوية، الصف عند الجدولة بعد النقل، موعد إعادة المحاولة
+                "ALTER TABLE sheet_updates ADD COLUMN IF NOT EXISTS col_key VARCHAR(64) NULL",
+                "ALTER TABLE sheet_updates ADD COLUMN IF NOT EXISTS seq BIGINT NULL",
+                "ALTER TABLE sheet_updates ADD COLUMN IF NOT EXISTS ident CHAR(40) NULL",
+                "ALTER TABLE sheet_updates ADD COLUMN IF NOT EXISTS relocated_from INT NULL",
+                "ALTER TABLE sheet_updates ADD COLUMN IF NOT EXISTS next_attempt_at BIGINT NULL",
                 "ALTER TABLE sheet_updates ADD INDEX IF NOT EXISTS idx_sheet_updates_status (sync_status)",
+                "ALTER TABLE sheet_updates ADD INDEX IF NOT EXISTS idx_sheet_updates_ident (ident)",
+                "ALTER TABLE sheet_updates ADD INDEX IF NOT EXISTS idx_sheet_updates_row (`row_number`)",
             ):
                 cursor.execute(stmt)
             conn.commit()
@@ -478,20 +706,28 @@ class SQLiteTransactionQueue:
             conn.close()
 
     def append_update(self, row_number, col_index, value, col_name=None, key_barcode=None, key_name=None,
-                      key_size=None, key_brand=None):
+                      key_size=None, key_brand=None, col_key=None, seq=None):
+        """
+        جدولة كتابة خلية. col_key: المفتاح المنطقي للعمود ('link' أو 'meta:<key>') ويُحدد عموده وقت الكتابة؛
+        col_index/col_name للكتابات القديمة فقط. seq: تسلسل الجدولة (يُولَّد الآن إن لم يُمرر). يعيد معرّف الصف.
+        """
+        expect = _expectation(key_barcode, key_name, key_size, key_brand)
         conn = self._connect()
         try:
             cursor = conn.cursor()
             cursor.execute(
-                "INSERT INTO sheet_updates (`row_number`, `col_index`, `value`, col_name, key_barcode, key_name, "
-                "key_size, key_brand) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
-                (row_number, col_index, "" if value is None else str(value), col_name, key_barcode, key_name,
+                "INSERT INTO sheet_updates (`row_number`, `col_index`, `value`, col_name, col_key, seq, ident, "
+                "key_barcode, key_name, key_size, key_brand) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                (row_number, -1 if col_index is None else col_index, "" if value is None else str(value),
+                 col_name, col_key, int(seq or _next_seq()), _identity_hash(expect), key_barcode, key_name,
                  key_size, key_brand)
             )
+            new_id = getattr(cursor, "lastrowid", None)
             conn.commit()
         finally:
             conn.close()
         clear_cache()
+        return new_id
 
 
 def _outbox_lock_name():
@@ -507,6 +743,95 @@ def _set_status(cursor, ids, status, error=None):
         f"UPDATE sheet_updates SET sync_status = %s, last_error = %s WHERE id IN ({placeholders})",
         (status, error) + tuple(ids),
     )
+
+
+# ---------------------------------------------------------------------------
+# نتائج الكتابات: لا تنتهي أي كتابة بصمت
+# ---------------------------------------------------------------------------
+
+# الحالات التي تنتهي فيها الكتابة دون أن تصل للشيت؛ كل منها يُبلَّغ عبر outcome hook
+UNWRITTEN_FINAL_STATUSES = ("CONFLICT", "DEAD", "SKIPPED_OUT_OF_BOUNDS")
+_outcome_hook = None
+
+
+def set_outcome_hook(hook):
+    """
+    hook(outcome) يُستدعى لكل كتابة انتهت دون أن تُكتب (CONFLICT / DEAD / SKIPPED_OUT_OF_BOUNDS).
+    outcome: {id, row, queued_row, column_key, status, error, attempts, value, barcode, product_name, brand}.
+    None يعيد الافتراضي: سطر خطأ في السجل وفي سجل لارافيل (صفحة الأخطاء). أخطاء الـ hook لا تُرفع أبداً.
+    """
+    global _outcome_hook
+    _outcome_hook = hook
+
+
+def _default_outcome_hook(outcome):
+    message = _one_line(
+        f"[Sheets Outbox] {outcome.get('status')}: الكتابة {outcome.get('id')} للصف {outcome.get('row')} "
+        f"(العمود {outcome.get('column_key')}) لم تُكتب في الشيت: {outcome.get('error')}")
+    logger.error("%s", message)
+    log = getattr(config, "log_error_to_laravel", None)
+    if callable(log):
+        try:
+            log(message, barcode=outcome.get("barcode") or None, product_name=outcome.get("product_name") or None,
+                brand=outcome.get("brand") or None, level="ERROR")
+        except Exception:
+            pass
+
+
+def _report_outcome(outcome):
+    """يبلّغ نتيجة كتابة لم تُكتب؛ لا يرفع أي خطأ أبداً."""
+    try:
+        (_outcome_hook or _default_outcome_hook)(dict(outcome))
+    except Exception as e:
+        logger.warning("[Sheets Outbox] تعذر إبلاغ نتيجة الكتابة %s: %s", outcome.get("id"), e)
+
+
+def _column_key_of(r):
+    return (r.get("col_key") or _col_key_for_header(r.get("col_name")) or r.get("col_name")
+            or str(r.get("col_index")))
+
+
+def _outcome(r, status, error):
+    return {"id": r.get("id"), "row": r.get("row_number"),
+            "queued_row": r.get("relocated_from") or r.get("row_number"), "column_key": _column_key_of(r),
+            "status": status, "error": error, "attempts": int(r.get("attempts") or 0), "value": r.get("value"),
+            "barcode": r.get("key_barcode"), "product_name": r.get("key_name"), "brand": r.get("key_brand")}
+
+
+def outbox_outcomes(row_numbers=None, since_id=None, limit=500):
+    """
+    نتائج الكتابات المجدولة كما في الطابور، بترتيب المعرّف: [{id, row, queued_row, column_key, status, error,
+    attempts, next_attempt_at, value}]. row: الصف الذي كُتبت (أو ستُكتب) فيه؛ queued_row: الصف عند الجدولة.
+    row_numbers: صفوف محددة (الحالي أو عند الجدولة). since_id: ما بعد معرّف معين (للمتابعة التدريجية)؛ دونه
+    تُعاد آخر limit نتيجة. الحالات: PENDING، FAILED (تنتظر next_attempt_at)، SYNCED، SUPERSEDED، CONFLICT،
+    DEAD، SKIPPED_OUT_OF_BOUNDS.
+    """
+    where, params = [], []
+    if row_numbers:
+        rows = sorted({int(r) for r in row_numbers})
+        marks = ",".join("%s" for _ in rows)
+        where.append(f"(`row_number` IN ({marks}) OR relocated_from IN ({marks}))")
+        params += rows + rows
+    if since_id is not None:
+        where.append("id > %s")
+        params.append(int(since_id))
+    sql = ("SELECT id, `row_number`, relocated_from, `col_index`, col_name, col_key, sync_status, last_error, "
+           "attempts, next_attempt_at, `value` FROM sheet_updates")
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    sql += " ORDER BY id " + ("ASC" if since_id is not None else "DESC") + " LIMIT %s"
+    params.append(int(limit))
+    conn = (_queue._connect if _queue is not None else _db_connect)()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(sql, tuple(params))
+        found = sorted(cursor.fetchall(), key=lambda r: r["id"])
+    finally:
+        conn.close()
+    return [{"id": r["id"], "row": r["row_number"], "queued_row": r.get("relocated_from") or r["row_number"],
+             "column_key": _column_key_of(r), "status": r.get("sync_status"), "error": r.get("last_error"),
+             "attempts": int(r.get("attempts") or 0), "next_attempt_at": r.get("next_attempt_at"),
+             "value": r.get("value")} for r in found]
 
 
 class GoogleSheetsBatchWorker(threading.Thread):
@@ -547,13 +872,18 @@ class GoogleSheetsBatchWorker(threading.Thread):
         """
         تفريغ طابور الكتابة:
         0. قفل MariaDB مسمى (GET_LOCK) يجعل المُفرِّغ واحداً في كل لحظة عبر كل العمليات (العامل وكل استدعاء
-           cli_bridge)؛ وإلا قد يرسل مُفرِّغ متأخر قيمة قديمة بعد أن كتب آخر القيمة الأحدث فيمحوها.
+           cli_bridge و sync_worker)؛ وإلا قد يرسل مُفرِّغ متأخر قيمة قديمة بعد أن كتب آخر القيمة الأحدث فيمحوها.
            من لم يحصل على القفل يتخطى هذه الدورة (الصفوف تبقى PENDING لمن يملكه).
-        1. قراءة الصفوف المعلقة بالترتيب (ORDER BY id) ودمج التكرارات على نفس الخلية ولنفس الهوية المتوقعة
-           فقط (الأحدث يفوز)؛ سجلات بهويات مختلفة تُفحص كل منها على حدة.
-        2. تحديد عمود الهدف باسم العنوان الآن، والتحقق من هوية كل سجل بقراءة عمود المفتاح (CONFLICT عند الاختلاف).
-        3. إرسال دفعة واحدة؛ عند فشلها نعيد المحاولة صفاً صفاً كي لا يوقف صف معطوب البقية.
-           كل فشل فردي يزيد attempts ويحفظ last_error، وبعد 5 محاولات تصبح الحالة DEAD.
+        1. قراءة الصفوف المستحقة (PENDING، و FAILED حلّ موعد إعادة محاولتها) ودمج التكرارات على نفس الخلية
+           ولنفس الهوية فقط (الأحدث بالتسلسل seq يفوز)؛ سجلات بهويات مختلفة تُفحص كل منها على حدة.
+        2. تحديد عمود الهدف بالمفتاح المنطقي من العناوين الآن، وتحديث عدد صفوف الورقة قبل الحكم على صف بأنه خارجها.
+        3. التحقق من هوية كل سجل بقراءة أعمدة الهوية؛ عند CONFLICT (أو صف خارج الورقة) تُقرأ أعمدة الهوية للورقة
+           كلها مرة واحدة وتُنقل الكتابة إلى الصف الوحيد الذي يطابق المنتج، وإلا تبقى CONFLICT.
+        4. لا تُرسل قيمة أقدم (seq أصغر) من قيمة كُتبت بعدها لنفس العمود ونفس المنتج (SUPERSEDED).
+        5. إرسال دفعة واحدة؛ عند فشل مؤقت (429/5xx/انقطاع) تنتظر كل الكتابات موعد إعادة محاولتها، وعند فشل آخر
+           نعيد المحاولة صفاً صفاً كي لا يوقف صف معطوب البقية. كل فشل يزيد attempts ويحدد next_attempt_at
+           (1 د، 5 د، 30 د، 2 س)، وبعد 5 محاولات تصبح الحالة DEAD.
+        كل CONFLICT / DEAD / SKIPPED_OUT_OF_BOUNDS يُبلَّغ عبر outcome hook.
         """
         conn = self.queue._connect()
         lock_name = _outbox_lock_name()
@@ -576,77 +906,118 @@ class GoogleSheetsBatchWorker(threading.Thread):
 
     def _flush_locked(self, worksheet, conn, cursor):
         """Body of one flush; the caller holds the outbox lock and closes the connection."""
+        now = _now()
         cursor.execute(
-            "SELECT id, `row_number`, `col_index`, `value`, col_name, key_barcode, key_name, key_size, key_brand, "
-            "attempts "
-            "FROM sheet_updates WHERE sync_status IN ('PENDING', 'FAILED') ORDER BY id LIMIT %s",
-            (OUTBOX_BATCH,),
+            "SELECT id, `row_number`, `col_index`, `value`, col_name, col_key, seq, ident, relocated_from, "
+            "key_barcode, key_name, key_size, key_brand, attempts "
+            "FROM sheet_updates WHERE sync_status = 'PENDING' "
+            "OR (sync_status = 'FAILED' AND (next_attempt_at IS NULL OR next_attempt_at <= %s)) "
+            "ORDER BY id LIMIT %s",
+            (int(now), OUTBOX_BATCH),
         )
         rows = list(cursor.fetchall())
         if not rows:
             return
+        for r in rows:
+            r["expect"] = _expectation(r.get("key_barcode"), r.get("key_name"), r.get("key_size"),
+                                       r.get("key_brand"))
+            r["ident"] = r.get("ident") or _identity_hash(r["expect"])
+
+        def order(r):
+            return int(r.get("seq") or 0), r["id"]
 
         # 1. الأحدث لكل خلية (صف، عمود) ولنفس الهوية المتوقعة يفوز؛ الأقدم يصبح SUPERSEDED.
         #    كتابة لمنتج آخر على نفس رقم الصف (رقم صف قديم) لا تُلغي كتابة المنتج الصحيح ولا العكس.
         latest = {}
         for r in rows:
-            cell_key = (r["row_number"], (r.get("col_name") or "").strip().casefold() or r["col_index"],
-                        _norm_barcode(r.get("key_barcode")), _norm_name(r.get("key_name")),
-                        _norm_size(r.get("key_size")), _norm_name(r.get("key_brand")))
-            if cell_key not in latest or r["id"] > latest[cell_key]["id"]:
+            cell_key = (r["row_number"], r.get("col_key") or normalize_header(r.get("col_name")) or r["col_index"],
+                        _identity_key(r["expect"]))
+            if cell_key not in latest or order(r) > order(latest[cell_key]):
                 latest[cell_key] = r
         keep_ids = {r["id"] for r in latest.values()}
-        superseded = [r["id"] for r in rows if r["id"] not in keep_ids]
-        _set_status(cursor, superseded, "SUPERSEDED")
-        rows = sorted(latest.values(), key=lambda r: r["id"])
+        _set_status(cursor, [r["id"] for r in rows if r["id"] not in keep_ids], "SUPERSEDED")
+        rows = sorted(latest.values(), key=order)
 
-        # 2. العمود بالاسم الآن + التحقق من الهوية
-        headers = worksheet.row_values(1)
+        # 2. العمود بالمفتاح المنطقي الآن + حدود الورقة (row_count يُحدَّث قبل الحكم بأن صفاً خارجها)
+        headers = _retrying(worksheet.row_values, 1)
         normalized_headers = [normalize_header(h) for h in headers]
-        ws_max_rows = worksheet.row_count
-        targets = []
-        conflicts = {}
-        out_of_bounds = []
+        cached_rows = worksheet.row_count
+        max_rows = cached_rows
+        if any(r["row_number"] > cached_rows for r in rows):
+            max_rows = _fresh_row_count(worksheet)
+        targets, conflicts, out_of_bounds, beyond = [], {}, {}, set()
         for r in rows:
-            col = r["col_index"]
-            if r.get("col_name"):
+            if r.get("col_key"):
+                col = resolve_column_key(headers, r["col_key"])
+                if col == -1:
+                    conflicts[r["id"]] = f"column '{r['col_key']}' not found in sheet headers"
+                    continue
+            elif r.get("col_name"):
                 wanted = normalize_header(r["col_name"])
                 if wanted not in normalized_headers:
                     conflicts[r["id"]] = f"column '{r['col_name']}' not found in sheet headers"
                     continue
                 col = normalized_headers.index(wanted)
-            if r["row_number"] <= 1 or col < 0 or r["row_number"] > ws_max_rows:
-                out_of_bounds.append(r["id"])
+            else:
+                col = r["col_index"]
+            if r["row_number"] <= 1 or col < 0:
+                out_of_bounds[r["id"]] = f"row {r['row_number']} / column index {col} is not a data cell"
                 continue
+            if r["row_number"] > cached_rows:
+                if max_rows is None:
+                    continue          # تعذر تحديث عدد الصفوف: تبقى PENDING للدورة التالية ولا يُحكم عليها
+                if r["row_number"] > max_rows:
+                    beyond.add(r["id"])
             targets.append((r, col))
 
-        records = {}
-        for r, _ in targets:
-            expect = _expectation(r.get("key_barcode"), r.get("key_name"), r.get("key_size"), r.get("key_brand"))
-            if expect:
-                records[r["id"]] = (r["row_number"], expect)
+        # 3. التحقق من الهوية؛ عند CONFLICT (أو صف خارج الورقة) نقل الكتابة إلى الصف الوحيد المطابق للمنتج
+        records = {r["id"]: (r["row_number"], r["expect"]) for r, _ in targets
+                   if r["expect"] and r["id"] not in beyond}
         record_conflicts = find_record_conflicts(worksheet, records, headers=headers) if records else {}
+        lost = {r["id"]: r["expect"] for r, _ in targets
+                if r["expect"] and (r["id"] in record_conflicts or r["id"] in beyond)}
+        found = find_identity_rows(worksheet, lost, headers=headers) if lost else {}
         ready = []
         for r, col in targets:
-            reason = record_conflicts.get(r["id"])
-            if reason:
-                conflicts[r["id"]] = reason
-            else:
+            if r["id"] not in record_conflicts and r["id"] not in beyond:
                 ready.append((r, col))
-        # بعد التحقق: خلية واحدة تُكتب مرة واحدة فقط (الأحدث)
+                continue
+            matches = found.get(r["id"]) or []
+            if len(matches) == 1:
+                self._relocate(cursor, r, matches[0])
+                ready.append((r, col))
+                continue
+            where = "no row matches" if not matches else f"{len(matches)} rows match"
+            if r["id"] in beyond:
+                out_of_bounds[r["id"]] = (f"row {r['row_number']} is outside the sheet ({max_rows} rows); "
+                                          f"{where} this product")
+            else:
+                conflicts[r["id"]] = f"{record_conflicts[r['id']]}; {where} this product"
+
+        # 4. بعد التحقق: خلية واحدة تُكتب مرة واحدة فقط (الأحدث)، ولا تُرسل قيمة أقدم مما كُتب بعدها
         newest = {}
         for r, col in ready:
-            if (r["row_number"], col) not in newest or r["id"] > newest[(r["row_number"], col)][0]["id"]:
+            if (r["row_number"], col) not in newest or order(r) > order(newest[(r["row_number"], col)][0]):
                 newest[(r["row_number"], col)] = (r, col)
-        dup_ids = [r["id"] for r, col in ready if newest[(r["row_number"], col)][0] is not r]
-        _set_status(cursor, dup_ids, "SUPERSEDED")
-        ready = sorted(newest.values(), key=lambda item: item[0]["id"])
+        _set_status(cursor, [r["id"] for r, col in ready if newest[(r["row_number"], col)][0] is not r],
+                    "SUPERSEDED")
+        ready = sorted(newest.values(), key=lambda item: order(item[0]))
+        stale = _older_than_written(cursor, ready)
+        _set_status(cursor, sorted(stale), "SUPERSEDED", "a newer value was already written to this cell")
+        ready = [(r, col) for r, col in ready if r["id"] not in stale]
 
+        unwritten = []
+        by_id = {r["id"]: r for r in rows}
         for rid, reason in conflicts.items():
             _set_status(cursor, [rid], "CONFLICT", reason[:1000])
             logger.warning("[Sheets Outbox] CONFLICT للتحديث %s: %s", rid, reason)
-        _set_status(cursor, out_of_bounds, "SKIPPED_OUT_OF_BOUNDS")
+            unwritten.append(_outcome(by_id[rid], "CONFLICT", reason))
+        for rid, reason in out_of_bounds.items():
+            _set_status(cursor, [rid], "SKIPPED_OUT_OF_BOUNDS", reason[:1000])
+            unwritten.append(_outcome(by_id[rid], "SKIPPED_OUT_OF_BOUNDS", reason))
         conn.commit()
+        for outcome in unwritten:
+            _report_outcome(outcome)
         if not ready:
             return
 
@@ -667,22 +1038,104 @@ class GoogleSheetsBatchWorker(threading.Thread):
             logger.info("[Sheets Outbox] تمت مزامنة %s خلية.", len(ready))
             return
         except Exception as e:
+            if _is_transient(e):
+                # الخدمة نفسها غير متاحة: الإرسال صفاً صفاً لن ينجح، وكل كتابة تنتظر موعد إعادة محاولتها
+                logger.warning("[Sheets Outbox] Google Sheets غير متاح الآن (%s)؛ إعادة المحاولة لاحقاً.", e)
+                self._record_failures(conn, cursor, [r for r, _ in ready], e, now)
+                return
             logger.warning("[Sheets Outbox] فشل الإرسال الجماعي (%s)؛ إعادة المحاولة صفاً صفاً.", e)
 
+        send_one = retry_gspread_on_429(max_retries=2)(worksheet.spreadsheet.values_batch_update)
         for r, col in ready:
             try:
-                send(body_for([(r, col)]))
+                send_one(body_for([(r, col)]))
                 _set_status(cursor, [r["id"]], "SYNCED")
+                conn.commit()
             except Exception as e:
-                attempts = int(r.get("attempts") or 0) + 1
-                status = "DEAD" if attempts >= MAX_OUTBOX_ATTEMPTS else "FAILED"
-                cursor.execute(
-                    "UPDATE sheet_updates SET attempts = %s, last_error = %s, sync_status = %s WHERE id = %s",
-                    (attempts, str(e)[:1000], status, r["id"]),
-                )
-                logger.warning("[Sheets Outbox] فشل التحديث %s (المحاولة %s): %s", r["id"], attempts, e)
-            conn.commit()
+                self._record_failures(conn, cursor, [r], e, now)
         clear_cache()
+
+    @staticmethod
+    def _relocate(cursor, r, new_row):
+        """نقل كتابة إلى صف المنتج الحالي (أُدرج أو حُذف صف فوقه)؛ relocated_from يحفظ الصف عند الجدولة."""
+        old_row = r["row_number"]
+        r["relocated_from"] = r.get("relocated_from") or old_row
+        r["row_number"] = new_row
+        cursor.execute("UPDATE sheet_updates SET `row_number` = %s, relocated_from = %s WHERE id = %s",
+                       (new_row, r["relocated_from"], r["id"]))
+        logger.warning("[Sheets Outbox] الكتابة %s: المنتج لم يعد في الصف %s؛ نُقلت إلى الصف %s (الصف الوحيد المطابق).",
+                       r["id"], old_row, new_row)
+
+    @staticmethod
+    def _record_failures(conn, cursor, items, error, now):
+        """
+        فشل إرسال: attempts+1 وموعد إعادة المحاولة التالي (RETRY_BACKOFF) عبر التشغيلات؛ عند MAX_OUTBOX_ATTEMPTS
+        تصبح DEAD وتُبلَّغ.
+        """
+        dead = []
+        for r in items:
+            attempts = int(r.get("attempts") or 0) + 1
+            if attempts >= MAX_OUTBOX_ATTEMPTS:
+                status, due = "DEAD", None
+            else:
+                status, due = "FAILED", int(now + RETRY_BACKOFF[attempts - 1])
+            cursor.execute(
+                "UPDATE sheet_updates SET attempts = %s, last_error = %s, sync_status = %s, next_attempt_at = %s "
+                "WHERE id = %s",
+                (attempts, str(error)[:1000], status, due, r["id"]),
+            )
+            logger.warning("[Sheets Outbox] فشل التحديث %s (المحاولة %s، الحالة %s): %s",
+                           r["id"], attempts, status, error)
+            if status == "DEAD":
+                dead.append(_outcome(dict(r, attempts=attempts), "DEAD", str(error)[:1000]))
+        conn.commit()
+        for outcome in dead:
+            _report_outcome(outcome)
+
+
+def _older_than_written(cursor, items):
+    """
+    معرّفات الكتابات التي كُتبت بعدها قيمة أحدث (seq أكبر) لنفس العمود ونفس المنتج في نفس الصف (الحالي أو
+    الصف عند الجدولة قبل النقل): لا تُرسل أبداً، كي لا تمحو قيمةٌ قديمة قيمةً أحدث (بين العمليات، وحمولات Redis
+    المنقولة متأخرة، وإعادة المحاولة المؤجلة). صفان مكرران لنفس المنتج لا يلغي أحدهما كتابة الآخر.
+    """
+    keyed = []
+    for r, _ in items:
+        col_key = r.get("col_key") or _col_key_for_header(r.get("col_name"))
+        if col_key:
+            keyed.append((r, col_key, {r["row_number"], r.get("relocated_from")} - {None}))
+    if not keyed:
+        return set()
+    idents = sorted({r["ident"] for r, _, _ in keyed if r.get("ident")})
+    rows = sorted({row for _, _, cells in keyed for row in cells})
+    clauses, params = [], [min(int(r.get("seq") or 0) for r, _, _ in keyed)]
+    if idents:
+        clauses.append("ident IN (" + ",".join("%s" for _ in idents) + ")")
+        params += idents
+    clauses.append("(ident IS NULL AND `row_number` IN (" + ",".join("%s" for _ in rows) + "))")
+    params += rows
+    cursor.execute(
+        "SELECT `row_number`, relocated_from, col_key, ident, seq FROM sheet_updates "
+        "WHERE sync_status = 'SYNCED' AND seq > %s AND (" + " OR ".join(clauses) + ")",
+        tuple(params),
+    )
+    written = [w for w in cursor.fetchall() if w.get("seq") is not None and w.get("col_key")]
+    stale = set()
+    for r, col_key, cells in keyed:
+        seq = int(r.get("seq") or 0)
+        for w in written:
+            if (w["col_key"] == col_key and int(w["seq"]) > seq
+                    and (w.get("ident") or None) == (r.get("ident") or None)
+                    and cells & ({w.get("row_number"), w.get("relocated_from")} - {None})):
+                stale.add(r["id"])
+                break
+    return stale
+
+
+def flush_outbox(worksheet, queue=None, lock_timeout=0):
+    """تفريغ واحد لطابور الكتابة من أي عملية (sync_worker أو سكربت): نفس القفل والقواعد مثل عامل الخلفية."""
+    queue = queue or _queue or SQLiteTransactionQueue()
+    GoogleSheetsBatchWorker(queue, None, None)._synchronize_pending_records(worksheet, lock_timeout=lock_timeout)
 
 
 def init_async_queue(creds_path, spreadsheet_name, sync_interval=5):
@@ -727,10 +1180,15 @@ def _get_redis():
         return None
 
 
-def _merged_payload(cached, row_number, updates, expect):
-    """الحمولة بعد الدمج، أو None إذا تعذر الدمج بأمان (صيغة غير معروفة أو هوية مختلفة)."""
-    payload = json.loads(cached) if cached else {"row_index": row_number, "updates": {}}
-    if not isinstance(payload, dict) or not isinstance(payload.get("updates"), dict):
+def _merged_payload(cached, row_number, updates, expect, seqs):
+    """
+    الحمولة بعد الدمج بالصيغة {'v': 2, 'row_index', 'updates': {col_key: value}, 'seqs': {col_key: seq},
+    'expect'}، أو None إذا تعذر الدمج بأمان (صيغة غير معروفة أو قديمة بأرقام أعمدة، أو هوية مختلفة).
+    """
+    payload = json.loads(cached) if cached else {"v": REDIS_PAYLOAD_VERSION, "row_index": row_number,
+                                                 "updates": {}, "seqs": {}}
+    if (not isinstance(payload, dict) or payload.get("v") != REDIS_PAYLOAD_VERSION
+            or not isinstance(payload.get("updates"), dict) or not isinstance(payload.get("seqs"), dict)):
         logger.warning("[Redis Write-Behind] صيغة غير معروفة للصف %s؛ استخدام طابور MariaDB.", row_number)
         return None
     if cached and (payload.get("expect") or None) != (expect or None):
@@ -738,18 +1196,19 @@ def _merged_payload(cached, row_number, updates, expect):
         logger.warning("[Redis Write-Behind] حمولة الصف %s تخص هوية أخرى؛ استخدام طابور MariaDB.", row_number)
         return None
     payload["row_index"] = row_number
-    for col, value in updates.items():
-        payload["updates"][str(col)] = value
+    for col_key, value in updates.items():
+        payload["updates"][str(col_key)] = value
+        payload["seqs"][str(col_key)] = seqs[col_key]
     if expect:
         payload["expect"] = expect
     return json.dumps(payload, ensure_ascii=False)
 
 
-def _redis_merge_payload(r, key, row_number, updates, expect):
+def _redis_merge_payload(r, key, row_number, updates, expect, seqs):
     """دمج ذري (WATCH/MULTI) لتحديثات الصف في حمولته؛ يعيد False ليُستخدم طابور MariaDB."""
     cache_key = f"{CACHE_PREFIX}{key}"
     if getattr(r, "pipeline", None) is None:
-        merged = _merged_payload(r.get(cache_key), row_number, updates, expect)
+        merged = _merged_payload(r.get(cache_key), row_number, updates, expect, seqs)
         if merged is None:
             return False
         r.set(cache_key, merged)
@@ -759,7 +1218,7 @@ def _redis_merge_payload(r, key, row_number, updates, expect):
         with r.pipeline() as p:
             try:
                 p.watch(cache_key)
-                merged = _merged_payload(p.get(cache_key), row_number, updates, expect)
+                merged = _merged_payload(p.get(cache_key), row_number, updates, expect, seqs)
                 if merged is None:
                     p.unwatch()
                     return False
@@ -774,7 +1233,8 @@ def _redis_merge_payload(r, key, row_number, updates, expect):
 
 def _redis_write_behind(row_number, updates, expect=None):
     """
-    جدولة تحديثات صف عبر Redis بالصيغة {'row_index', 'updates': {col: value}, 'expect': {...}}.
+    جدولة تحديثات صف عبر Redis؛ updates: {مفتاح منطقي للعمود: قيمة} (لا أرقام أعمدة: العمود يُحدد وقت الكتابة).
+    كل قيمة تحمل seq وقت جدولتها. sync_worker ينقل الحمولة إلى طابور MariaDB نفسه (قناة كتابة واحدة).
     تعيد False (ليُستخدم طابور MariaDB) إذا لم يكن Redis متاحاً أو لا يوجد نبض حي لـ sync_worker.
     """
     r = _get_redis()
@@ -784,7 +1244,8 @@ def _redis_write_behind(row_number, updates, expect=None):
         if not r.exists(HEARTBEAT_KEY):
             return False
         key = f"row_{row_number}"
-        if not _redis_merge_payload(r, key, row_number, updates, expect):
+        seqs = {col_key: _next_seq() for col_key in updates}
+        if not _redis_merge_payload(r, key, row_number, updates, expect, seqs):
             return False
         r.sadd(DIRTY_SET_KEY, key)
         return True
@@ -793,50 +1254,44 @@ def _redis_write_behind(row_number, updates, expect=None):
         return False
 
 
-def _header_name(worksheet, col_idx):
-    if worksheet is None:
-        return None
-    try:
-        headers = _worksheet_headers(worksheet)
-    except APIError:
-        raise
-    except Exception:
-        return None
-    return headers[col_idx] if 0 <= col_idx < len(headers) and str(headers[col_idx]).strip() else None
-
-
 @retry_gspread_on_429()
 def update_image_link(worksheet, row_number, link_column_index, image_link, barcode=None, product_name=None,
                       size=None, brand=None):
     """
     تحديث خلية رابط الصورة لصف منتج. barcode/product_name/size/brand هوية المنتج المتوقع في هذا الصف
-    (قيم خلايا الشيت نفسها):
-    عند التفريغ يُعاد التحقق منها، وأي اختلاف يُسجل CONFLICT ولا يُكتب.
-    أخطاء APIError تُرفع كي يعمل مُزخرف إعادة المحاولة.
+    (قيم خلايا الشيت نفسها): عند التفريغ يُعاد التحقق منها، وأي اختلاف يُسجل CONFLICT ولا يُكتب (أو تُنقل الكتابة
+    إلى الصف الوحيد المطابق للمنتج).
+    العمود يُحمل كمفتاح منطقي 'link' ويُحدد من العناوين وقت الكتابة: إدراج عمود أو حذفه يسار عمود الرابط أثناء
+    التشغيل لا يغيّر العمود المكتوب. link_column_index يبقى للتوافق مع المستدعين ولا يحدد العمود.
+    الأخطاء المؤقتة و APIError تُرفع كي يعمل مُزخرف إعادة المحاولة.
     """
     expect = _expectation(barcode, product_name, size, brand)
     try:
-        if _redis_write_behind(row_number, {link_column_index: image_link}, expect):
+        if _redis_write_behind(row_number, {LINK_KEY: image_link}, expect):
             logger.info("[Redis Write-Behind] جدولة رابط الصف %s.", row_number)
             return True
 
         if _queue is not None and _worker is not None:
-            _queue.append_update(row_number, link_column_index, image_link,
-                                 col_name=_header_name(worksheet, link_column_index), **_outbox_keys(expect))
+            _queue.append_update(row_number, link_column_index, image_link, col_key=LINK_KEY, **_outbox_keys(expect))
             logger.info("[Sheets Outbox] جدولة رابط الصف %s.", row_number)
             return True
 
+        headers = _worksheet_headers(worksheet, fresh=True)
+        col = resolve_column_key(headers, LINK_KEY)
+        if col == -1:
+            logger.error("[Google Sheets] لا يوجد عمود رابط الصورة في الشيت؛ لم يُكتب رابط الصف %s.", row_number)
+            return False
         if expect:
-            conflicts = find_identity_conflicts(worksheet, {row_number: expect})
+            conflicts = find_identity_conflicts(worksheet, {row_number: expect}, headers=headers)
             if row_number in conflicts:
                 logger.warning("[Google Sheets] رفض الكتابة في الصف %s: %s", row_number, conflicts[row_number])
                 return False
-        worksheet.update_cell(row_number, link_column_index + 1, image_link)
+        worksheet.update_cell(row_number, col + 1, image_link)
         clear_cache()
         return True
-    except APIError:
-        raise
     except Exception as e:
+        if isinstance(e, APIError) or _is_transient(e):
+            raise
         logger.error("فشل تحديث الرابط في الصف %s: %s", row_number, e)
         return False
 
@@ -861,7 +1316,8 @@ _METADATA_COLUMNS = {
 def update_product_metadata(worksheet, row_number, metadata, barcode=None, product_name=None,
                             size=None, brand=None):
     """
-    تحديث أعمدة البيانات الوصفية لصف (ينشئ العناوين الناقصة). نفس قواعد الهوية والطابور مثل update_image_link.
+    تحديث أعمدة البيانات الوصفية لصف (ينشئ العناوين الناقصة). نفس قواعد الهوية والطابور مثل update_image_link؛
+    كل عمود يُحمل كمفتاح منطقي 'meta:<key>' ويُحدد بعنوانه وقت الكتابة.
     """
     expect = _expectation(barcode, product_name, size, brand)
     try:
@@ -884,16 +1340,16 @@ def update_product_metadata(worksheet, row_number, metadata, barcode=None, produ
             col_indices[key] = new_idx
             logger.info("تم إنشاء عمود '%s' في العمود رقم %s", name, new_idx + 1)
         _worksheet_headers(worksheet, fresh=True)
-        updates = {col_indices[k]: str(metadata[k]) for k in col_indices}
-        if not updates:
+        if not col_indices:
             return True
 
-        if _redis_write_behind(row_number, updates, expect):
+        if _redis_write_behind(row_number, {f"{META_PREFIX}{k}": str(metadata[k]) for k in col_indices}, expect):
             return True
 
         if _queue is not None and _worker is not None:
-            for col, value in updates.items():
-                _queue.append_update(row_number, col, value, col_name=headers[col], **_outbox_keys(expect))
+            for key, col in col_indices.items():
+                _queue.append_update(row_number, col, str(metadata[key]), col_name=headers[col],
+                                     col_key=f"{META_PREFIX}{key}", **_outbox_keys(expect))
             return True
 
         if expect:
@@ -903,13 +1359,13 @@ def update_product_metadata(worksheet, row_number, metadata, barcode=None, produ
                                row_number, conflicts[row_number])
                 return False
         worksheet.batch_update([
-            {"range": gspread.utils.rowcol_to_a1(row_number, col + 1), "values": [[value]]}
-            for col, value in updates.items()
+            {"range": gspread.utils.rowcol_to_a1(row_number, col + 1), "values": [[str(metadata[key])]]}
+            for key, col in col_indices.items()
         ], value_input_option="RAW")
         return True
-    except APIError:
-        raise
     except Exception as e:
+        if isinstance(e, APIError) or _is_transient(e):
+            raise
         logger.error("فشل تحديث البيانات الوصفية في الصف %s: %s", row_number, e)
         return False
 
