@@ -96,6 +96,13 @@ _NO_CROP = (False, False, False, False)
 # البديل التلقائي عند علامة جودة: المزوّدان المدفوعان فقط (GrabCut/rembg لا تُستخدم كبديل أبداً)
 _PAID_METHODS = ("photoroom", "remove_bg_api")
 
+# مصدر بخلفية بيضاء نظيفة: قص محلي بدل المزوّد المدفوع (WHITE_SOURCE_MODE = off | log | on)
+WHITE_SOURCE_MODES = ("off", "log", "on")
+WHITE_SOURCE_MIN_CHANNEL = 248
+WHITE_SOURCE_BAND = 0.02
+WHITE_SOURCE_BORDER_MIN = 0.995
+WHITE_SOURCE_MAIN_SHARE = 0.98
+
 _ALLOWED_FORMATS = {"JPEG", "PNG", "WEBP", "GIF", "BMP", "TIFF", "MPO", "AVIF", "HEIF"}
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _METHOD_ALIASES = {
@@ -114,11 +121,13 @@ class ProcessResult:
     نتيجة معالجة صورة للنشر.
     path: مسار لوحة PNG النهائية (None عند أي فشل؛ لا يوجد ملف قابل للنشر).
     isolated: True فقط إذا تم عزل المنتج عن خلفيته فعلاً واجتاز القص بوابة الجودة.
-    provider: photoroom | remove_bg_api | grabcut | rembg | source_alpha | none | ...
+    provider: photoroom | remove_bg_api | grabcut | rembg | source_alpha | white_source | none | ...
     error: رمز خطأ واضح (مثل photoroom_402، download_not_image) أو None.
     width/height: أبعاد اللوحة النهائية (0 عند الفشل).
     quality_flags: علامات بوابة الجودة للوحة المعادة ([] = نظيفة). عند وجودها تكون isolated=False
         مع path موجود: نفس حالة "الخلفية لم تُعزل" (رابط needs_review: ولا نشر تلقائي).
+    white_source: ما فعله/كان سيفعله كشف الخلفية البيضاء: None (معطل أو لم يُفحص) | 'used' |
+        'eligible' (وضع log: كان سيُستخدم) | 'ineligible:<سبب>' | 'flagged:<علامات>'.
     """
 
     path: Optional[str]
@@ -128,6 +137,7 @@ class ProcessResult:
     width: int = 0
     height: int = 0
     quality_flags: List[str] = field(default_factory=list)
+    white_source: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -766,6 +776,59 @@ def assess_cutout(cutout: Image.Image, frame_size=None, crop_sides=_NO_CROP, can
 
 
 # ---------------------------------------------------------------------------
+# مصدر بخلفية بيضاء نظيفة: قص محلي بدون مزوّد مدفوع
+# ---------------------------------------------------------------------------
+
+def _white_source_mode() -> str:
+    """WHITE_SOURCE_MODE: off | log (افتراضي: يكشف ويسجل فقط) | on. قيمة غير معروفة = log."""
+    value = getattr(config, "WHITE_SOURCE_MODE", None)
+    if value is None:
+        value = os.getenv("WHITE_SOURCE_MODE", "log")
+    value = str(value or "").strip().lower()
+    return value if value in WHITE_SOURCE_MODES else "log"
+
+
+def _white_source_cutout(img: Image.Image):
+    """
+    إذا كانت الصورة لقطة منتج على خلفية بيضاء نظيفة يُبنى القص محلياً: الخلفية = البكسلات شبه البيضاء
+    المتصلة بالإطار (البياض داخل المنتج يبقى). الشروط: 99.5% من شريط 2% حول الإطار شبه أبيض، المنتج
+    لا يلمس الإطار، وجسم واحد يحمل 98% من المقدمة. يعيد (RGBA، None) أو (None، السبب).
+    """
+    import cv2
+    import numpy as np
+
+    rgb = np.asarray(_flatten_on_white(img))
+    h, w = rgb.shape[:2]
+    if min(h, w) < 16:
+        return None, "too_small"
+    band = max(2, int(round(WHITE_SOURCE_BAND * min(h, w))))
+    near_white = rgb.min(axis=2) >= WHITE_SOURCE_MIN_CHANNEL
+    border = np.concatenate([near_white[:band].ravel(), near_white[-band:].ravel(),
+                             near_white[band:-band, :band].ravel(), near_white[band:-band, -band:].ravel()])
+    if float(border.mean()) < WHITE_SOURCE_BORDER_MIN:
+        return None, "background_not_white"
+    _, labels = cv2.connectedComponents(near_white.astype(np.uint8), connectivity=4)
+    edge_labels = np.unique(np.concatenate([labels[0], labels[-1], labels[:, 0], labels[:, -1]]))
+    background = np.isin(labels, edge_labels[edge_labels != 0])
+    foreground = ~background
+    fg_box = _mask_bbox(foreground)
+    if fg_box is None:
+        return None, "empty"
+    if fg_box[0] < 2 or fg_box[1] < 2 or fg_box[2] > w - 2 or fg_box[3] > h - 2:
+        return None, "product_touches_frame"
+    _, _, stats, _ = cv2.connectedComponentsWithStats(foreground.astype(np.uint8), connectivity=8)
+    areas = stats[1:, cv2.CC_STAT_AREA]
+    if int(areas.max()) < WHITE_SOURCE_MAIN_SHARE * int(areas.sum()):
+        return None, "several_objects"
+    # قناع حاد بلا تنعيم: حواف المنتج في المصدر ممزوجة بالأبيض أصلاً، فتظهر على اللوحة البيضاء كما في المصدر
+    # (وتنعيم القناع كان سيضيف هالة بكسل تدخل في حساب حدود المنتج)
+    alpha = np.where(background, 0, 255).astype(np.uint8)
+    cutout = Image.fromarray(np.ascontiguousarray(rgb), "RGB").convert("RGBA")
+    cutout.putalpha(Image.fromarray(alpha))
+    return cutout, None
+
+
+# ---------------------------------------------------------------------------
 # العزل مع بوابة الجودة والبدائل التلقائية
 # ---------------------------------------------------------------------------
 
@@ -825,8 +888,9 @@ def _isolate_checked(img: Image.Image, method: str, product_name, brand, canvas_
     """
     يعزل المنتج ويمرر كل قص على بوابة الجودة. الترتيب:
     1. شفافية المصدر (source_alpha) إن وجدت؛ عند علامة تُعامل الصورة كما تبدو على الأبيض.
-    2. المزوّد المطلوب مع صندوق Gemini، ثم عند علامة بدون الصندوق، ثم المزوّد المدفوع الآخر المهيأ.
-    يعيد (المحاولة المختارة أو محاولة خطأ، isolated).
+    2. كشف الخلفية البيضاء (WHITE_SOURCE_MODE): في 'on' يُستخدم القص المحلي النظيف دون Gemini ولا مزوّد مدفوع.
+    3. المزوّد المطلوب مع صندوق Gemini، ثم عند علامة بدون الصندوق، ثم المزوّد المدفوع الآخر المهيأ.
+    يعيد (المحاولة المختارة أو محاولة خطأ، isolated، ملاحظة الخلفية البيضاء).
     """
     attempts: List[_Attempt] = []
     work, check_backdrop = img, False
@@ -834,15 +898,34 @@ def _isolate_checked(img: Image.Image, method: str, product_name, brand, canvas_
     if has_meaningful_transparency(img):
         source = _gated(img, "source_alpha", img.size, _NO_CROP, canvas_size, True, "source_alpha")
         if source.cutout is None:
-            return source, False
+            return source, False, None
         if not source.flags:
-            return source, True
+            return source, True, None
         attempts.append(source)
         if _flags_final(source.flags):
-            return source, False
+            return source, False, None
         logger.info("شفافية المصدر ليست قصاً نظيفاً للمنتج (%s)؛ سيتم عزله من جديد", ",".join(source.flags))
         check_backdrop = FLAG_OPAQUE_BACKDROP in source.flags
         work = _flatten_on_white(img)
+
+    white_note = None
+    mode = _white_source_mode()
+    if mode != "off":
+        white_cut, reason = _white_source_cutout(work)
+        if white_cut is None:
+            white_note = f"ineligible:{reason}"
+        else:
+            white = _gated(white_cut, "white_source", work.size, _NO_CROP, canvas_size, check_backdrop,
+                           "white_source")
+            if white.cutout is not None and not white.flags:
+                if mode == "on":
+                    return white, True, "used"
+                white_note = "eligible"
+            else:
+                white_note = "flagged:" + ",".join(white.flags or [white.error or "empty"])
+                if mode == "on" and white.cutout is not None:
+                    attempts.append(white)
+        logger.info("كشف الخلفية البيضاء (%s): %s", mode, white_note)
 
     box = _locate_product_box(work, product_name, brand)
     cropped = None
@@ -855,11 +938,11 @@ def _isolate_checked(img: Image.Image, method: str, product_name, brand, canvas_
     def finish(error_attempt=None):
         best = _best_attempt(attempts)
         if best is None:
-            return error_attempt, False
+            return error_attempt, False, white_note
         if best.flags:
             logger.warning("القص لم يجتز بوابة الجودة بعد كل البدائل (%s): %s؛ يحال للمراجعة",
                            " -> ".join(a.label for a in attempts), ",".join(best.flags))
-        return best, not best.flags
+        return best, not best.flags, white_note
 
     frame, sides = cropped or full
     first = _provider_attempt(frame, method, sides, canvas_size, check_backdrop)
@@ -919,17 +1002,17 @@ def process_product_image_result(image_url_or_path, product_name, brand, target_
             return ProcessResult(None, False, method, code)
         img = _limit_work_size(img)
 
-        flags = []
+        flags, white_note = [], None
         if method == "none":
             # 'none' تعني فعلاً بدون عزل: الصورة كما هي (بعد تصحيح الاتجاه) على اللوحة، ولا ندّعي العزل أبداً
             cutout, provider, isolated = EdgeShadowEngine.process_mask(img.convert("RGBA")), "none", False
             if alpha_bbox(cutout) is None:
                 return ProcessResult(None, False, provider, f"{provider}_empty_cutout")
         else:
-            attempt, isolated = _isolate_checked(img, method, product_name, brand, canvas_size)
+            attempt, isolated, white_note = _isolate_checked(img, method, product_name, brand, canvas_size)
             if attempt.cutout is None:
                 logger.warning("فشل عزل الخلفية بطريقة %s: %s", attempt.provider, attempt.error)
-                return ProcessResult(None, False, attempt.provider, attempt.error)
+                return ProcessResult(None, False, attempt.provider, attempt.error, white_source=white_note)
             cutout, provider, flags = attempt.cutout, attempt.provider, list(attempt.flags)
         if enhance:
             cutout = _enhance_rgb(cutout)
@@ -943,7 +1026,7 @@ def process_product_image_result(image_url_or_path, product_name, brand, target_
         out_path = os.path.join(job_dir, f"{uuid.uuid4().hex}.png")
         canvas.save(out_path, format="PNG")
         return ProcessResult(out_path, isolated, provider, None, canvas.width, canvas.height,
-                             quality_flags=flags)
+                             quality_flags=flags, white_source=white_note)
     except Exception as exc:  # noqa: BLE001 - لا نسمح لأي خطأ غير متوقع بأن يصبح نشراً صامتاً
         logger.exception("خطأ غير متوقع أثناء معالجة الصورة: %s", exc)
         return ProcessResult(None, False, method, "processing_failed")

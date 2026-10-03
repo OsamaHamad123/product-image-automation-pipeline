@@ -1,4 +1,4 @@
-"""Published image quality: cutout quality gate and automatic fallback.
+"""Published image quality: cutout quality gate, automatic fallback, clean white sources.
 
 The scenarios are the audit probes turned into tests (P1 opaque no-op segmentation, P2 faint alpha haze,
 P3 second object, P4 a Gemini box that cuts off the cap, P5 a transparent PNG with an opaque grey box).
@@ -57,6 +57,7 @@ def offline(monkeypatch, tmp_path):
     monkeypatch.setattr(config, "REMOVE_BG_API_KEY", "")
     monkeypatch.setattr(config, "BG_REMOVAL_METHOD", "photoroom")
     monkeypatch.setattr(config, "PHOTOROOM_CROP", False)
+    monkeypatch.setattr(config, "WHITE_SOURCE_MODE", "log", raising=False)
     monkeypatch.setattr(config, "ENABLE_STUDIO_SHADOWS", False)
     monkeypatch.setattr(config, "PROXY_URL", "")
     monkeypatch.setattr(config, "CANDIDATE_STORE_DIR", str(tmp_path / "candidates"), raising=False)
@@ -508,11 +509,11 @@ def test_rounded_corner_photo_is_not_taken_as_an_isolated_source(monkeypatch, tm
 def test_photoroom_crop_is_off_by_default():
     env = {k: v for k, v in os.environ.items() if k != "PHOTOROOM_CROP"}
     env.update({"DB_HOST": "127.0.0.1", "DB_PORT": "1", "DB_DATABASE": "no_such_database_for_this_test"})
-    code = "import config; print(config.PHOTOROOM_CROP)"
+    code = "import config; print(config.PHOTOROOM_CROP, config.WHITE_SOURCE_MODE)"
     out = subprocess.run([sys.executable, "-c", code], cwd=REPO_ROOT, env=env, capture_output=True, text=True,
                          timeout=60)
     assert out.returncode == 0, out.stderr
-    assert out.stdout.strip().splitlines()[-1] == "False"
+    assert out.stdout.strip().splitlines()[-1] == "False log"
 
 
 def _soft_bottle_cutout(size=(600, 900)):
@@ -541,4 +542,98 @@ def test_good_cutout_canvas_is_unchanged(monkeypatch, tmp_path, crop):
     assert providers.calls[0][2]["crop"] == ("true" if crop else "false")
     assert result.isolated is True
     assert np.array_equal(canvas_of(result), expected), "a clean cutout must be trimmed and centred exactly as before"
+
+
+# ---------------------------------------------------------------------------
+# Clean white-background sources (WHITE_SOURCE_MODE)
+# ---------------------------------------------------------------------------
+
+def test_white_source_cutout_rules():
+    cut, why = image_processor._white_source_cutout(bottle())
+    assert why is None
+    alpha = np.asarray(cut.getchannel("A"))
+    assert alpha[0, 0] == 0 and alpha[400, 300] == 255 and alpha[100, 300] == 255   # body and cap
+    assert alpha_bbox(cut) == (200, 90, 401, 751)
+
+    assert image_processor._white_source_cutout(bottle(bg=(250, 250, 250)))[1] is None
+    assert image_processor._white_source_cutout(bottle(bg=(238, 238, 238)))[1] == "background_not_white"
+    straw = bottle()
+    ImageDraw.Draw(straw).rectangle((299, 0, 301, 90), fill=(10, 10, 10))   # 3 px reach the top edge
+    assert image_processor._white_source_cutout(straw)[1] == "product_touches_frame"
+    two = bottle()
+    ImageDraw.Draw(two).rectangle((20, 800, 160, 880), fill=(10, 10, 10))
+    assert image_processor._white_source_cutout(two)[1] == "several_objects"
+
+    # A white bottle with a thin grey outline keeps its white inside (only white connected to the frame goes).
+    white_bottle = Image.new("RGB", (600, 900), WHITE)
+    ImageDraw.Draw(white_bottle).rectangle((200, 150, 400, 750), fill=(252, 252, 252), outline=(200, 200, 200),
+                                           width=2)
+    cut, why = image_processor._white_source_cutout(white_bottle)
+    assert why is None and np.asarray(cut.getchannel("A"))[450, 300] == 255
+
+
+def _counting_box(monkeypatch):
+    calls = []
+    monkeypatch.setattr(image_processor, "_locate_product_box", lambda img, n, b: calls.append(img.size) or None)
+    return calls
+
+
+def test_white_source_log_mode_records_but_still_uses_the_paid_path(monkeypatch, tmp_path):
+    src = save(bottle(), tmp_path)
+    boxes = _counting_box(monkeypatch)
+    providers = Providers(monkeypatch, photoroom=keyer(WHITE))
+
+    result = run(src)
+
+    assert len(providers.calls) == 1 and len(boxes) == 1
+    assert (result.isolated, result.provider, result.white_source) == (True, "photoroom", "eligible")
+
+
+def test_white_source_on_mode_skips_photoroom_and_the_gemini_box(monkeypatch, tmp_path):
+    monkeypatch.setattr(config, "WHITE_SOURCE_MODE", "on")
+    src = save(bottle(), tmp_path)
+    boxes = _counting_box(monkeypatch)
+    providers = Providers(monkeypatch)   # any call fails the test
+
+    result = run(src)
+
+    assert providers.calls == [] and boxes == []
+    assert (result.isolated, result.provider, result.white_source, result.quality_flags) == \
+        (True, "white_source", "used", [])
+    out = canvas_of(result)
+    x0, y0, x1, y1 = non_white_bbox(out)
+    assert y1 - y0 == 704 and abs((x0 + x1) / 2 - 400) <= 1 and abs((y0 + y1) / 2 - 400) <= 1
+    assert colour_count(out, CAP) > 3000
+
+
+def test_white_source_on_mode_uses_the_paid_path_when_the_source_is_not_clean(monkeypatch, tmp_path):
+    monkeypatch.setattr(config, "WHITE_SOURCE_MODE", "on")
+    grey = save(bottle(bg=GREY), tmp_path, "grey.png")
+    providers = Providers(monkeypatch, photoroom=keyer(GREY))
+    result = run(grey)
+    assert len(providers.calls) == 1
+    assert (result.provider, result.white_source) == ("photoroom", "ineligible:background_not_white")
+
+    # Eligible (one object holds 98.5%) but the gate sees a second object (1.5% of the main): paid path.
+    speck = bottle()
+    ImageDraw.Draw(speck).rectangle((20, 820, 69, 869), fill=(10, 10, 10))   # 2500 px vs ~142000 px
+    src = save(speck, tmp_path, "speck.png")
+
+    def clean(rgba):
+        rgba[800:890, 0:100] = 0
+        return rgba
+
+    providers = Providers(monkeypatch, photoroom=keyer(WHITE, edit=clean))
+    result = run(src)
+    assert len(providers.calls) == 1
+    assert (result.isolated, result.provider) == (True, "photoroom")
+    assert result.white_source == "flagged:" + image_processor.FLAG_SECOND_OBJECT
+
+
+def test_white_source_off_mode_does_not_look(monkeypatch, tmp_path):
+    monkeypatch.setattr(config, "WHITE_SOURCE_MODE", "off")
+    monkeypatch.setattr(image_processor, "_white_source_cutout", lambda img: pytest.fail("must not run when off"))
+    Providers(monkeypatch, photoroom=keyer(WHITE))
+    result = run(save(bottle(), tmp_path))
+    assert (result.isolated, result.white_source) == (True, None)
 
