@@ -1054,22 +1054,26 @@ def save_product_failure(barcode, product_name, brand, error_message, sku_key=No
 def delete_product_failure(barcode, sku_key=None, product_name=None, brand=None):
     """
     حذف سجل الفشل عند نجاح مطابقة المنتج لاحقاً: بالمفتاح الممرر (السلوك القديم)، وبـ sku_key،
-    وبمفتاح العرض failure_key عند تمرير الاسم.
+    وبمفتاح العرض failure_key عند تمرير الاسم. المطابقة بالمفتاح كاملاً فقط: سجل منتج آخر بنفس الاسم والبراند وحجم
+    آخر (ERR_<الاسم>_<البراند>#<sku_key الآخر>، أو المفتاح نفسه بـ sku_key آخر) لا يُحذف عند اعتماد هذا المنتج.
     """
     try:
         conn = get_db_connection()
         try:
             cursor = conn.cursor()
             barcode_clean = str(barcode).strip() if barcode else ""
+            sku = str(sku_key).strip() if sku_key else ""
             keys = [barcode_clean] if barcode_clean else []
             if product_name:
                 keys.append(failure_key(barcode, product_name, brand or ""))
             for key in dict.fromkeys(keys):
-                cursor.execute("DELETE FROM product_failures WHERE barcode = %s", (key,))
-                if key.startswith("ERR_"):
-                    cursor.execute("DELETE FROM product_failures WHERE barcode LIKE %s", (key + "%",))
-            if sku_key:
-                cursor.execute("DELETE FROM product_failures WHERE sku_key = %s", (str(sku_key).strip(),))
+                if sku:
+                    cursor.execute("DELETE FROM product_failures WHERE barcode = %s AND (sku_key IS NULL OR sku_key = %s)",
+                                   (key, sku))
+                else:
+                    cursor.execute("DELETE FROM product_failures WHERE barcode = %s", (key,))
+            if sku:
+                cursor.execute("DELETE FROM product_failures WHERE sku_key = %s", (sku,))
             conn.commit()
         finally:
             _close(conn)
@@ -1080,7 +1084,10 @@ def delete_product_failure(barcode, sku_key=None, product_name=None, brand=None)
 
 
 def get_product_failures():
-    """استرجاع كافة المنتجات الفاشلة كـ dict بمفتاح العرض (عمود barcode)، وبـ sku_key أيضاً للسجلات الجديدة."""
+    """
+    استرجاع كافة المنتجات الفاشلة كـ dict بمفتاح العرض (عمود barcode)، وبـ sku_key أيضاً للسجلات الجديدة.
+    كل سجل يحمل sku_key منتجه (None للسجلات القديمة): القارئ بمفتاح العرض يتحقق أنه لمنتج صفه.
+    """
     try:
         conn = get_db_connection()
         try:
@@ -1091,7 +1098,8 @@ def get_product_failures():
             _close(conn)
         out = {}
         for row in rows:
-            entry = {"error_message": row["error_message"], "failed_at": row["failed_at"]}
+            entry = {"error_message": row["error_message"], "failed_at": row["failed_at"],
+                     "sku_key": row.get("sku_key")}
             if row.get("sku_key"):
                 out.setdefault(row["sku_key"], entry)
             if row["barcode"]:

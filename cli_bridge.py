@@ -161,13 +161,27 @@ def action_get_products(params):
                     "category": prod.get("category", ""), "size": prod.get("size", "")}), brand_mappings)
         except Exception as e:
             logger.warning("تعذر حساب sku_key للصف %s: %s", prod.get("row_number"), e)
+        prod["has_error"], prod["error_message"] = _row_failure(failures, prod)
+    return {'status': 'success', 'products': products}
+
+
+def _row_failure(failures, prod):
+    """
+    سجل فشل الصف (local_cache_db.get_product_failures): بـ sku_key الصف أولاً (سجل لكل منتج، ومنه سجلات المفتاح
+    ERR_..#<sku_key> لحجم آخر بنفس الاسم والبراند)، ثم بمفتاح العرض (الباركود أو ERR_<الاسم>_<البراند>) لسجل قديم
+    بلا sku_key أو لسجل المنتج نفسه فقط: صف 2 لتر لا يعرض خطأ صف 1 لتر. تعيد (has_error, error_message).
+    """
+    sku = str(prod.get("sku_key") or "").strip()
+    failure = failures.get(sku) if sku else None
+    if failure is None:
         barcode = (prod.get("barcode") or "").strip()
         alt_barcode = f"ERR_{prod.get('product_name')}_{prod.get('brand')}".replace(" ", "_")
-        failure = failures.get(barcode) if barcode else None
-        failure = failure or failures.get(alt_barcode)
-        prod["has_error"] = bool(failure)
-        prod["error_message"] = failure["error_message"] if failure else ""
-    return {'status': 'success', 'products': products}
+        for key in (barcode, alt_barcode):
+            found = failures.get(key) if key else None
+            if found and (not sku or not found.get("sku_key") or found.get("sku_key") == sku):
+                failure = found
+                break
+    return bool(failure), (failure["error_message"] if failure else "")
 
 
 # ---------------------------------------------------------------------------

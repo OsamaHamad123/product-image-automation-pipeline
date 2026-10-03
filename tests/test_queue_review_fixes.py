@@ -684,6 +684,111 @@ def test_the_dashboard_reads_when_the_next_retry_is_due(db):
         os.unlink(path)
 
 
+# ---------------------------------------------------------------------------
+# C10: failure records of one name and brand in two sizes
+# ---------------------------------------------------------------------------
+
+def _juice(i, size):
+    return _prod(i, "P4F Juice", brand="B", size=size)
+
+
+def _failures(db):
+    return {r["barcode"]: (r["sku_key"], r["error_message"])
+            for r in _sql(db, "SELECT * FROM product_failures WHERE product_name LIKE 'P4F %%'")}
+
+
+@pytest.mark.parametrize("first", ["1L", "2L"])
+def test_approving_one_size_keeps_the_other_sizes_failure(db, first):
+    """delete_product_failure deleted LIKE '<key>%': approving the 1L removed ERR_..#<2L sku>; when the 2L failed
+    first and holds the plain key, the exact delete of the display key removed the 2L's record."""
+    one, two = _keys(_juice(0, "1L"))[0], _keys(_juice(1, "2L"))[0]
+    order = [("1L", one), ("2L", two)] if first == "1L" else [("2L", two), ("1L", one)]
+    for size, key in order:
+        assert db.save_product_failure("", "P4F Juice", "B", f"NO_RESULTS: {size}", sku_key=key)
+    assert len(_failures(db)) == 2
+    db.delete_product_failure("", sku_key=one, product_name="P4F Juice", brand="B")     # the 1L was approved
+    assert list(_failures(db).values()) == [(two, "NO_RESULTS: 2L")]
+    # '_' is not a wildcard and a key is not a prefix: «P4F A» / «B» never touches «P4F A» / «Bread»
+    assert db.save_product_failure("", "P4F A", "Bread", "NO_RESULTS: bread", sku_key=SKU + "bread")
+    db.delete_product_failure("", sku_key=SKU + "a", product_name="P4F A", brand="B")
+    db.delete_product_failure("ERR_P4F_A_B")
+    assert "ERR_P4F_A_Bread" in _failures(db)
+
+
+def test_the_products_list_shows_each_rows_own_failure(db, monkeypatch):
+    """cli_bridge.get_products looked failures up by barcode and the ERR_ key only: the 2L row showed the 1L row's
+    error and its own record (ERR_..#<2L sku>) was unreachable."""
+    import cli_bridge
+    import google_sheets
+    rows = [dict(_juice(0, "1L"), barcode=""), dict(_juice(1, "2L"), barcode="")]
+    one, two = _keys(rows[0])[0], _keys(rows[1])[0]
+    assert db.save_product_failure("", "P4F Juice", "B", "NO_RESULTS: 1L", sku_key=one)
+    assert db.save_product_failure("", "P4F Juice", "B", "ALL_CONFLICTED: 2L", sku_key=two)
+    monkeypatch.setattr(cli_bridge, "_open_sheet", lambda: object())
+    monkeypatch.setattr(google_sheets, "get_products", lambda ws: ([dict(r) for r in rows], 5))
+    monkeypatch.setattr(google_sheets, "get_sheets_client", lambda: None)
+    out = cli_bridge.action_get_products({})
+    shown = {p["sku_key"]: (p["has_error"], p["error_message"]) for p in out["products"]}
+    assert shown == {one: (True, "NO_RESULTS: 1L"), two: (True, "ALL_CONFLICTED: 2L")}
+    db.delete_product_failure("", sku_key=two, product_name="P4F Juice", brand="B")        # the 2L was approved
+    shown = {p["sku_key"]: p["has_error"] for p in cli_bridge.action_get_products({})["products"]}
+    assert shown == {one: True, two: False}                     # not the 1L's error under the shared display key
+
+
+@pytest.mark.skipif(not LARAVEL, reason="php or dashboard/vendor is not installed")
+def test_retry_from_the_errors_page_maps_each_record_to_its_own_row(db, tmp_path):
+    """ApiController::retryFailures could not map ERR_..#<sku_key> keys («not found in sheet»), and the shared display
+    key requeued whichever row came last under it."""
+    import sys
+    rows = [_juice(1, "1L"), _juice(2, "2L")]
+    for r in rows:
+        r["sku_key"] = _keys(r)[0]
+    one, two = rows[0]["sku_key"], rows[1]["sku_key"]
+    assert db.save_product_failure("", "P4F Juice", "B", "NO_RESULTS: 1L", sku_key=one)
+    assert db.save_product_failure("", "P4F Juice", "B", "NO_RESULTS: 2L", sku_key=two)
+    keys = {sku: key for key, (sku, _) in _failures(db).items()}
+    assert keys[two].endswith("#" + two)
+    stub = tmp_path / "stub_bridge.py"
+    stub.write_text("import json, sys\nprint(json.dumps({'status': 'success', 'products': "
+                    + repr(rows) + "}, ensure_ascii=False))\n", encoding="utf-8")
+    dash = str(DASH).replace("\\", "/")
+    script = f"""<?php
+require '{dash}/vendor/autoload.php';
+require_once '{dash}/app/Services/QueueStats.php';
+require_once '{dash}/app/Http/Controllers/ApiController.php';
+$app = require '{dash}/bootstrap/app.php';
+$kernel = $app->make(Illuminate\\Contracts\\Http\\Kernel::class);
+$out = [];
+foreach (json_decode($argv[1], true) as $keys) {{
+    $request = Illuminate\\Http\\Request::create('/api/failures/retry', 'POST', ['barcodes' => $keys], [], [],
+        ['HTTP_ACCEPT' => 'application/json']);
+    $out[] = json_decode($kernel->handle($request)->getContent(), true);
+}}
+echo json_encode($out, JSON_UNESCAPED_UNICODE);
+"""
+    env = dict(os.environ, APP_ENV="testing", APP_KEY="base64:" + "A" * 43 + "=", CACHE_STORE="array",
+               SESSION_DRIVER="array", LOG_CHANNEL="stderr", DB_CONNECTION="mariadb",
+               DB_HOST=os.getenv("DB_HOST", "127.0.0.1"), DB_PORT=os.getenv("DB_PORT", "3306"),
+               DB_DATABASE=os.environ["DB_DATABASE"], DB_USERNAME=os.getenv("DB_USERNAME", "root"),
+               DB_PASSWORD=os.getenv("DB_PASSWORD", ""), CLI_BRIDGE_PATH=str(stub), PYTHON_PATH=sys.executable,
+               VIEW_COMPILED_PATH=str(tmp_path))
+    with tempfile.NamedTemporaryFile("w", suffix=".php", delete=False, encoding="utf-8") as fh:
+        fh.write(script)
+        path = fh.name
+    try:
+        result = subprocess.run([PHP, path, json.dumps([[keys[two]], [keys[one]]])], cwd=DASH, env=env,
+                                capture_output=True, text=True, timeout=240, encoding="utf-8")
+    finally:
+        os.unlink(path)
+    assert result.returncode == 0, result.stdout[-3000:] + result.stderr[-3000:]
+    first, second = json.loads(result.stdout.strip().splitlines()[-1])
+    assert first["status"] == "success" and first["requeued"] == 1 and first["not_found"] == 0, first
+    assert second["status"] == "success" and second["requeued"] == 1, second
+    queued = {r["row_number"]: r["sku_key"] for r in _sql(db, "SELECT `row_number`, sku_key FROM automation_queue")}
+    assert queued == {ROW + 2: two, ROW + 1: one}                 # each record requeued its own row
+    assert _failures(db) == {}
+
+
 def test_stopping_from_the_dashboard_returns_unclaimed_rechecks_to_review(db):
     """The dashboard's stop ends the worker process (its finally may not run); stop_run settles the queue."""
     _verifier_down_review_row(db, 0)

@@ -647,14 +647,30 @@ class ApiController extends Controller
             }
 
             $productsByBarcode = [];
+            $productsBySku = [];
             foreach ($products as $p) {
                 $barcode = trim($p['barcode'] ?? '');
                 $altBarcode = 'ERR_' . str_replace(' ', '_', ($p['product_name'] ?? '') . '_' . ($p['brand'] ?? ''));
-                
+
                 if ($barcode) {
                     $productsByBarcode[$barcode] = $p;
                 }
                 $productsByBarcode[$altBarcode] = $p;
+                $sku = trim((string) ($p['sku_key'] ?? ''));
+                if ($sku !== '') {
+                    $productsBySku[$sku] = $p;
+                }
+            }
+            // منتج كل سجل فشل بـ sku_key أولاً (local_cache_db.save_product_failure): مفتاح ERR_..#<sku_key> لحجم آخر
+            // بنفس الاسم والبراند لا يطابقه أي مفتاح عرض، ومفتاح العرض نفسه قد يحمله منتج آخر بنفس الاسم والبراند
+            $failureSku = [];
+            try {
+                $failureSku = DB::table('product_failures')
+                    ->whereIn('barcode', array_values(array_unique(array_map(fn ($b) => trim((string) $b), $barcodes))))
+                    ->whereNotNull('sku_key')
+                    ->pluck('sku_key', 'barcode')->all();
+            } catch (\Throwable $e) {
+                $failureSku = [];      // قبل عمود sku_key: المطابقة بمفتاح العرض كما كانت
             }
 
             $hasSkuKey = Schema::hasColumn('automation_queue', 'sku_key');
@@ -667,10 +683,19 @@ class ApiController extends Controller
             $failureKeys = [];
             foreach ($barcodes as $b) {
                 $bClean = trim((string) $b);
-                if (!isset($productsByBarcode[$bClean])) {
+                $sku = trim((string) ($failureSku[$bClean] ?? ''));
+                $p = ($sku !== '' && isset($productsBySku[$sku])) ? $productsBySku[$sku] : null;
+                if ($p === null && isset($productsByBarcode[$bClean])) {
+                    $byKey = $productsByBarcode[$bClean];
+                    $rowSku = trim((string) ($byKey['sku_key'] ?? ''));
+                    // صف بمفتاح العرض نفسه لمنتج آخر (حجم آخر بنفس الاسم والبراند) ليس صاحب هذا السجل
+                    if ($sku === '' || $rowSku === '' || $rowSku === $sku) {
+                        $p = $byKey;
+                    }
+                }
+                if ($p === null) {
                     continue;
                 }
-                $p = $productsByBarcode[$bClean];
                 $row = [
                     'row_number' => (int) $p['row_number'],
                     'barcode' => $p['barcode'] ?? '',
