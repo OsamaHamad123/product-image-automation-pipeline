@@ -847,6 +847,55 @@ def test_the_sequential_mode_records_its_spend(offline, monkeypatch):
     assert recorded == ["sequential"]
 
 
+# ---------------------------------------------------------------------------
+# C3: the reconcile sees every row's link writes, not the newest 500
+# ---------------------------------------------------------------------------
+
+def test_the_reconcile_reads_every_outbox_page(mariadb_or_skip):
+    """main._outbox_records called google_sheets.outbox_outcomes(row_numbers) with its default limit=500 (the newest
+    records only): with many rows the older link writes were dropped silently and a dead write looked unknown."""
+    import google_sheets
+    import main
+
+    db = mariadb_or_skip
+    first, last = 990100, 990100 + 650
+    google_sheets._queue = None
+    google_sheets.SQLiteTransactionQueue()
+    conn = db.get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM sheet_updates WHERE `row_number` BETWEEN %s AND %s", (first, last))
+            cur.execute("INSERT INTO sheet_updates (`row_number`, `col_index`, `value`, sync_status, col_key) VALUES "
+                        "(%s, 0, 'https://res.cloudinary.com/x/dead.png', 'DEAD', 'link')", (first,))
+            newer = []
+            for row in range(first + 1, last + 1):
+                newer += [(row, f"https://res.cloudinary.com/x/{row}.png", "SYNCED", "link"),
+                          (row, "Dairy", "SYNCED", "meta:category_l1_en")]
+            cur.executemany("INSERT INTO sheet_updates (`row_number`, `col_index`, `value`, sync_status, col_key) "
+                            "VALUES (%s, 0, %s, %s, %s)", newer)
+        conn.commit()
+        calls = []
+        real = google_sheets.outbox_outcomes
+
+        def counted(*a, **k):
+            calls.append(k)
+            return real(*a, **k)
+
+        google_sheets.outbox_outcomes = counted
+        try:
+            records = main._outbox_records(list(range(first, last + 1)))
+        finally:
+            google_sheets.outbox_outcomes = real
+        assert main._link_write_state(records.get(first), "https://res.cloudinary.com/x/dead.png") == "DEAD"
+        assert len(records) == last - first + 1 and all(len(r) == 1 for r in records.values())   # links only
+        assert len(calls) >= 3 and all(k.get("since_id") is not None for k in calls)
+    finally:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM sheet_updates WHERE `row_number` BETWEEN %s AND %s", (first, last))
+        conn.commit()
+        conn.close()
+
+
 def test_stopping_from_the_dashboard_returns_unclaimed_rechecks_to_review(db):
     """The dashboard's stop ends the worker process (its finally may not run); stop_run settles the queue."""
     _verifier_down_review_row(db, 0)

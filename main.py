@@ -1079,19 +1079,57 @@ def _sizes_by_gtin(products):
     return out
 
 
+# google_sheets.outbox_outcomes: صفوف لكل استدعاء، ونتائج لكل صفحة (limit)
+OUTBOX_ROWS_PER_CALL = 500
+OUTBOX_PAGE = 500
+
+
+def _outbox_pages(fn, row_numbers):
+    """
+    كل نتائج كتابات الشيت لهذه الصفوف من outbox_outcomes. بلا since_id تعيد أحدث limit نتيجة فقط (500)، فمع صفوف
+    كثيرة (وكتابات بيانات وصفية لكل صف) تضيع كتابات الرابط الأقدم بصمت. لذلك تُقرأ الصفوف دفعات، وكل دفعة صفحات
+    تصاعدية بـ since_id حتى آخرها. شكل آخر للجواب (dict) يُعاد كما هو.
+    """
+    rows = sorted({int(r) for r in row_numbers})
+    out = []
+    for start in range(0, len(rows), OUTBOX_ROWS_PER_CALL):
+        part = rows[start:start + OUTBOX_ROWS_PER_CALL]
+        since = 0
+        while True:
+            page = fn(part, since_id=since, limit=OUTBOX_PAGE)
+            if not isinstance(page, (list, tuple)):
+                return page
+            out.extend(page)
+            ids = []
+            for r in page:
+                try:
+                    ids.append(int(r.get("id")))
+                except (AttributeError, TypeError, ValueError):
+                    pass
+            if len(page) < OUTBOX_PAGE or not ids or max(ids) <= since:
+                break
+            since = max(ids)
+    return out
+
+
 def _outbox_records(row_numbers):
     """
     كتابات الشيت لهذه الصفوف: {row_number: [{value, status, id}]} بالترتيب. من google_sheets.outbox_outcomes إن
-    وُجدت (حزمة الشيت)، وإلا قراءة طابور الكتابة مباشرة. أي خطأ يعيد {} (حالة الكتابة مجهولة).
+    وُجدت (حزمة الشيت، كل الصفحات: _outbox_pages)، وإلا قراءة طابور الكتابة مباشرة. أي خطأ يعيد {} (حالة الكتابة
+    مجهولة).
     """
     raw = None
     fn = getattr(google_sheets, "outbox_outcomes", None)
     if callable(fn):
         try:
             try:
-                raw = fn(list(row_numbers))
+                raw = _outbox_pages(fn, row_numbers)
             except TypeError:
-                raw = fn()
+                # دالة بتوقيع أقدم (بلا since_id / limit، أو بلا وسائط)
+                try:
+                    raw = fn(list(row_numbers))
+                except TypeError:
+                    raw = fn()
         except Exception as e:
             print(f"تنبيه: تعذر قراءة نتائج كتابات الشيت: {e}")
             raw = None
