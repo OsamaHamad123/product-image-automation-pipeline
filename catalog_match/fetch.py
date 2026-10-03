@@ -71,6 +71,16 @@ _MARKUP_PREFIXES = (b"<",)     # HTML, XML and SVG bodies all start with '<'
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
+def request_headers(page_url: Optional[str] = None) -> dict:
+    """The image request headers of this fetch (Accept with AVIF first; Referer = the candidate's page).
+    The publish-time re-download (image_processor) sends the same, so a CDN that picks the format per request
+    returns the bytes that were verified. The User-Agent is left to each client (it must match its TLS fingerprint)."""
+    headers = {"Accept": ACCEPT, "Accept-Language": "en-US,en;q=0.9,ar;q=0.8"}
+    if page_url:
+        headers["Referer"] = page_url
+    return headers
+
+
 def _store_dir(explicit: Optional[str]) -> Path:
     raw = explicit if explicit else settings.candidate_store_dir()
     path = Path(raw)
@@ -124,10 +134,7 @@ class HttpFetcher:
     # -- one candidate -------------------------------------------------------
 
     def _headers(self, cand: Candidate) -> dict:
-        headers = {"Accept": ACCEPT, "User-Agent": USER_AGENT, "Accept-Language": "en-US,en;q=0.9,ar;q=0.8"}
-        if cand.page_url:
-            headers["Referer"] = cand.page_url
-        return headers
+        return dict(request_headers(cand.page_url), **{"User-Agent": USER_AGENT})
 
     def _get(self, url: str, headers: dict, proxy: Optional[str] = None):
         kwargs = {"headers": dict(headers), "timeout": self.timeout, "stream": True, "allow_redirects": True}

@@ -366,18 +366,25 @@ def _load_from_candidate_store(candidate_sha256) -> Optional[bytes]:
     return None
 
 
-def _download_bytes(url: str) -> Tuple[Optional[bytes], Optional[str]]:
+def _download_bytes(url: str, page_url=None) -> Tuple[Optional[bytes], Optional[str]]:
+    """
+    نفس ترويسات تنزيل المرشح الأصلي (catalog_match.fetch.request_headers: Accept بـ AVIF أولاً، و Referer = صفحة
+    المرشح إن عُرفت): شبكات توزيع تختار الصيغة لكل طلب كانت تعيد بايتات أخرى فيفشل الاعتماد بـ source_changed.
+    """
+    from catalog_match.fetch import request_headers
     from http_client import ImpersonateClient
 
     proxy = settings.proxy_url()
     client = ImpersonateClient(use_proxy=bool(proxy), proxy_url=proxy or None)
-    fetched = client.fetch_image(url, timeout=15, max_bytes=MAX_DOWNLOAD_BYTES)
+    fetched = client.fetch_image(url, timeout=15, max_bytes=MAX_DOWNLOAD_BYTES,
+                                 headers=request_headers(str(page_url or "").strip() or None))
     if fetched.content is None:
         return None, f"download_{fetched.error or 'failed'}"
     return fetched.content, None
 
 
-def _load_source(image_url_or_path, candidate_sha256=None) -> Tuple[Optional[bytes], Optional[str], str]:
+def _load_source(image_url_or_path, candidate_sha256=None,
+                 page_url=None) -> Tuple[Optional[bytes], Optional[str], str]:
     """
     يعيد (البيانات، رمز الخطأ، نوع المصدر: candidate|download|local).
     إذا مُررت بصمة sha256 لبايتات تم التحقق منها ولم يوجد ملفها في مخزن المرشحات، تُقرأ الصورة من الرابط
@@ -387,7 +394,7 @@ def _load_source(image_url_or_path, candidate_sha256=None) -> Tuple[Optional[byt
     if data is not None:
         return data, None, "candidate"
 
-    data, error, origin = _read_source(image_url_or_path)
+    data, error, origin = _read_source(image_url_or_path, page_url)
     sha = str(candidate_sha256 or "").strip().lower()
     if data is not None and _SHA256_RE.match(sha) and hashlib.sha256(data).hexdigest() != sha:
         logger.warning("بايتات المصدر تغيرت منذ التحقق منها (البصمة لا تطابق)؛ لن تتم معالجتها: %s",
@@ -396,13 +403,13 @@ def _load_source(image_url_or_path, candidate_sha256=None) -> Tuple[Optional[byt
     return data, error, origin
 
 
-def _read_source(image_url_or_path) -> Tuple[Optional[bytes], Optional[str], str]:
+def _read_source(image_url_or_path, page_url=None) -> Tuple[Optional[bytes], Optional[str], str]:
     source = str(image_url_or_path or "").strip()
     if not source:
         return None, "source_missing", "local"
     lowered = source.lower()
     if lowered.startswith(("http://", "https://")):
-        data, err = _download_bytes(source)
+        data, err = _download_bytes(source, page_url)
         return data, err, "download"
     if "://" in source or lowered.startswith("data:"):
         return None, "download_bad_scheme", "download"
@@ -1352,19 +1359,20 @@ def _isolate_checked(img: Image.Image, method: str, product_name, brand, canvas_
 # ---------------------------------------------------------------------------
 
 def process_product_image_result(image_url_or_path, product_name, brand, target_width=0, target_height=0,
-                                 bg_method=None, candidate_sha256=None, enhance=False) -> ProcessResult:
+                                 bg_method=None, candidate_sha256=None, enhance=False, page_url=None) -> ProcessResult:
     """
     يحوّل صورة المنتج المعتمدة إلى لوحة نشر نهائية: PNG بخلفية بيضاء معتمة RGB بالأبعاد المطلوبة
     (0 أو 'dynamic' = OUTPUT_CANVAS_SIZE، افتراضياً 800x800) والمنتج يملأ 88% وموسّط.
     لا يرفع استثناءات: كل فشل يعود كـ ProcessResult(path=None, isolated=False, error=<رمز>).
     قص لم يجتز بوابة الجودة بعد كل البدائل يعود بلوحة (path) مع isolated=False و quality_flags.
     عند تمرير الأبعاد و enhance و bg_method صراحةً تكون اللوحة دالة لها وللمصدر فقط (ملف معالجة موحد).
+    page_url: صفحة المرشح (Referer لإعادة التنزيل كما في التنزيل الأصلي)؛ اختياري.
     """
     method = _normalise_method(bg_method)
     try:
         canvas_size = _resolve_canvas_size(target_width, target_height)
 
-        data, error, origin = _load_source(image_url_or_path, candidate_sha256)
+        data, error, origin = _load_source(image_url_or_path, candidate_sha256, page_url)
         if data is None:
             logger.warning("تعذر الحصول على الصورة المصدر: %s", error)
             return ProcessResult(None, False, method, error)

@@ -178,7 +178,8 @@ def draw_white_jar(L, x0, y0, w, h, lid=(40, 150, 60)):
         L.rect((left, y0 + 0.14 * h, left + w / len(bands) + 1, y0 + h), (value, value, value))
 
 
-DRAWERS = {"bottle": draw_bottle, "clear_bottle": draw_clear_bottle, "white_jar": draw_white_jar, "can": draw_can, "carton": draw_carton, "jar": draw_jar,
+DRAWERS = {"bottle": draw_bottle, "clear_bottle": draw_clear_bottle, "white_jar": draw_white_jar, "can": draw_can,
+           "carton": draw_carton, "jar": draw_jar,
            "jerrycan": draw_jerrycan, "juicebox": draw_juicebox, "white_bottle": draw_white_bottle}
 
 

@@ -743,6 +743,51 @@ def test_redownloaded_bytes_must_match_the_verified_sha256(monkeypatch, tmp_path
     assert run(str(local), candidate_sha256=sha).error == "source_changed"
 
 
+class FormatNegotiatingCdn:
+    """A CDN that picks the rendition per request: the AVIF-first Accept of the original fetch gets one body,
+    any other Accept another (same picture, different bytes)."""
+
+    def __init__(self, avif_first, other):
+        self.avif_first, self.other = avif_first, other
+        self.headers = []
+
+    def get(self, url, **kwargs):
+        headers = dict(kwargs.get("headers") or {})
+        self.headers.append(headers)
+        body = self.avif_first if headers.get("Accept", "").startswith("image/avif") else self.other
+        return FakeHttpResponse(200, body, {"Content-Type": "image/png"})
+
+
+def test_redownload_sends_the_headers_of_the_original_fetch(monkeypatch, tmp_path):
+    from catalog_match import fetch
+
+    picture = bottle()
+    verified = png_bytes(picture)
+    buf = io.BytesIO()
+    picture.save(buf, format="PNG", compress_level=1)
+    other = buf.getvalue()
+    assert other != verified
+    sha = hashlib.sha256(verified).hexdigest()
+    Providers(monkeypatch, photoroom=keyer(WHITE))
+
+    cdn = FormatNegotiatingCdn(verified, other)
+    monkeypatch.setattr(http_client, "_new_session", lambda: cdn)
+    result = run("https://cdn.example.ae/p/1", candidate_sha256=sha)
+    assert result.error is None and result.isolated is True, "the same Accept gets the verified rendition"
+    assert cdn.headers[0]["Accept"] == fetch.ACCEPT
+    assert cdn.headers[0]["Accept"] == fetch.request_headers()["Accept"]
+    assert "Referer" not in cdn.headers[0]
+
+    cdn = FormatNegotiatingCdn(verified, other)
+    monkeypatch.setattr(http_client, "_new_session", lambda: cdn)
+    result = run("https://cdn.example.ae/p/1", candidate_sha256=sha, page_url="https://shop.example.ae/p/milk")
+    assert result.isolated is True
+    assert cdn.headers[0]["Referer"] == "https://shop.example.ae/p/milk"
+    assert fetch.HttpFetcher()._headers(fetch.Candidate(image_url="https://cdn.example.ae/p/1",
+                                                        page_url="https://shop.example.ae/p/milk")) == \
+        dict(fetch.request_headers("https://shop.example.ae/p/milk"), **{"User-Agent": fetch.USER_AGENT})
+
+
 # ---------------------------------------------------------------------------
 # One processing profile: the canvas depends only on the explicit arguments
 # ---------------------------------------------------------------------------
