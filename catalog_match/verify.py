@@ -338,6 +338,9 @@ def build_prompt(spec: SkuSpec, n_images: int, focus: bool = False) -> str:
         f"- Arabic name: {spec.name_ar or '(none)'}",
         f"- Brand: {brand}; Arabic brand: {spec.brand_ar or '(none)'}; accepted brand/sub-brand names: {aliases}",
     ]
+    if spec.discovered_brands:
+        lines.append(f"- The sheet spells or abbreviates the brand differently from the stores; the stores write it "
+                     f"{', '.join(spec.discovered_brands)}. That spelling on the pack is the target brand.")
     if spec.required_brands:
         lines.append(f"- Sub-brand that MUST be printed: {', '.join(spec.required_brands)}. The parent brand alone "
                      "is not enough, and another sub-brand of the same company is a DIFFERENT product "

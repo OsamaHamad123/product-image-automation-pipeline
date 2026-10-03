@@ -63,6 +63,9 @@ double-check before approving. They never change the winner or the decision.
                                  section ('noon.com/saudi-en/'); never the brand's own site
     barcode_conflict             the page carries a valid barcode that differs from the
                                  sheet's (GTIN_POLICY 'evidence': tier 2 at most)
+    brand_spelling               the brand is confirmed only in the stores' spelling of a
+                                 sheet brand they write differently (brand_discovery:
+                                 'Rio Mare' for 'RIO MARIE', 'Super Tasty' for 'SUP/T')
 
 Best-resolution copy (resolution_upgrade): once the winner and the decision are fixed, a
 fetched copy of the same picture (pHash distance <= 6, aspect within 10 %) with a larger
@@ -90,7 +93,7 @@ from .models import (
 from .fetch import phash_distance
 from .score import page_host, rank_key, trusted_domains
 from .sizes import compare, parse_sizes, product_size
-from .text_norm import brand_in, domain_matches, normalize, store_market, url_host, url_path_text
+from .text_norm import brand_in, domain_matches, match_string, normalize, store_market, url_host, url_path_text
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +106,7 @@ MATCH, MISMATCH, UNSURE, UNKNOWN = "MATCH", "MISMATCH", "UNSURE", "UNKNOWN"
 WARN_PREFIX = "warn:"
 # Every review warning code (the dashboard maps each one to an Arabic sentence).
 WARNING_CODES = ("sheet_silent", "vlm_unsure", "low_resolution", "chat_or_screenshot", "social_media",
-                 "foreign_store", "barcode_conflict")
+                 "foreign_store", "barcode_conflict", "brand_spelling")
 
 RESOLUTION_PREFIX = "resolution_upgrade"
 # Reason prefixes written by route(); recomputed on every call so route() is idempotent.
@@ -409,7 +412,19 @@ def review_warnings(spec: SkuSpec, rc: RankedCandidate, reading_of: Optional[Ran
         out.append("foreign_store")
     if gtin_conflict(rc):
         out.append("barcode_conflict")
+    if _brand_spelling_only(spec, rc):
+        out.append("brand_spelling")
     return out
+
+
+def _brand_spelling_only(spec: SkuSpec, rc: RankedCandidate) -> bool:
+    """The brand evidence of this pick is only a store spelling brand_discovery found."""
+    if not spec.discovered_brands:
+        return False
+    found = {match_string(d) for d in spec.discovered_brands if d}
+    hits = {match_string(p) for p in ((rc.score.matched or {}).get("brand_fields") or {}).values()} \
+        if rc.score is not None else set()
+    return not (hits - found)
 
 
 def warning_codes(reasons: Iterable[str]) -> List[str]:

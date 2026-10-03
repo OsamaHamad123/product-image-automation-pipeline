@@ -58,6 +58,9 @@ class SkuSpec:
     sku_key: str = ""
     required_brands: Tuple[str, ...] = ()     # sub-brand the SKU names ('nido'); tier 1 needs it in evidence
     sibling_brands: Tuple[str, ...] = ()      # the family's other sub-brands ('everyday', 'nesquik')
+    # brand_discovery: how the stores write a sheet brand they spell differently ('Rio Mare' for 'RIO MARIE');
+    # its normalised phrase is in match_brands too. Never set for a mapped brand; never an auto-publish.
+    discovered_brands: Tuple[str, ...] = ()
 
     def __hash__(self) -> int:  # dict field makes the generated hash unusable
         return hash(self.sku_key or (self.raw_name, self.brand_raw))
@@ -254,6 +257,7 @@ class SearchOutcome:
     # verifier package: every billed verifier call of this search (VerificationResult.usage) and its notices
     vlm_usage: List[Dict[str, Any]] = field(default_factory=list)
     verifier_notices: List[str] = field(default_factory=list)
+    discovered_brands: List[str] = field(default_factory=list)    # brand_discovery: the store spelling used
 
 
 # ---------------------------------------------------------------------------

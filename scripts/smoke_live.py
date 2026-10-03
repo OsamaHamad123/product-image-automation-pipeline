@@ -516,6 +516,7 @@ def run_row(row, mappings, identity, pipeline, providers_mod, verify_mod, serp_c
     record = {
         "row": row["row_number"], "name": row["name"], "brand": row["brand"], "sku_key": spec.sku_key,
         "brand_conf": spec.brand_conf, "gtin_status": spec.gtin_status, "variants": dict(spec.variants),
+        "discovered_brands": list(getattr(outcome, "discovered_brands", None) or []),
         "queries": list(outcome.queries), "provider_calls": all_calls, "decision": outcome.decision,
         "failure_code": outcome.failure_code,
         "winner": outcome.winner.candidate.image_url if outcome.winner else None, "winner_detail": winner,
@@ -804,6 +805,8 @@ def print_row(r):
     variants = " ".join(f"{k}={v}" for k, v in sorted(r.get("variants", {}).items())) or "-"
     print(f"\n=== row {r['row']}: {r['name']} | brand {r['brand']} ({r['brand_conf']}) | gtin {r['gtin_status']}"
           f" | variants {variants}")
+    if r.get("discovered_brands"):
+        print(f"  brand  the stores write it {', '.join(r['discovered_brands'])} (brand discovery; review only)")
     for q in r["queries"]:
         print(f"  query  {q}")
     for c in r["provider_calls"]:
