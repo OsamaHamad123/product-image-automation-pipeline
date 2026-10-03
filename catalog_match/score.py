@@ -36,9 +36,10 @@ and a missing sub-brand the SKU names (parent-brand-only evidence).
 
 Brand evidence ignores store-name title segments ('- Shop on Carrefour UAE'), so a
 private-label SKU never matches another brand through the retailer's name. On a page of
-the brand's official site (or a learned source) the site's own name segment ('| Mehran
-Foods Korea' on mehranfoods.com) is ignored the same way, unless it names the product:
-the site's trust already counts, its name is no evidence of which brand the page shows.
+the brand's official site (or a learned source) a brand found only in the site's own name
+segment ('| Mehran Foods Korea' on mehranfoods.com) keeps the brand match but never makes
+tier 1 (conflict site_name_brand): the site's trust already counts, its name is no evidence
+of which brand the page shows. The label reader must still read the brand for a pick.
 
 A brand that is also an everyday listing word (brand_index.is_generic_brand: 'Freshly',
 'Family', 'Golden Prize') turns up in other brands' listings ('Seara Chicken Shawarma
@@ -179,7 +180,8 @@ def strip_site_suffix(text: str, site_names: Sequence[str] = (), names_product=N
     not count as the brand of a private-label SKU (brand 'Carrefour'), nor as a
     competitor of the target brand. site_names are the page's own domain labels when the
     page is on a site whose trust it raises (own_site_names): a segment that is only that
-    site's name ('| Mehran Foods Korea' on mehranfoods.com) is dropped the same way.
+    site's name ('| Mehran Foods Korea' on mehranfoods.com) is dropped the same way (the
+    caller uses that to keep such a brand hit out of tier 1).
     """
     if not text:
         return ""
@@ -195,8 +197,8 @@ def strip_site_suffix(text: str, site_names: Sequence[str] = (), names_product=N
 def own_site_names(spec: SkuSpec, cand: Candidate) -> Tuple[str, ...]:
     """The domain labels ('mehranfoods') of the brand-official or learned site the page is on, else ().
 
-    Such a site lifts the page's trust, so its own name in the title must not also be the brand
-    evidence: with the CSV's official domain mehranfoods.com (a Korean store), 'Buy DAWN BREAD Plain
+    Such a site lifts the page's trust, so its own name in the title must not also make the brand
+    evidence of a tier 1: with the CSV's official domain mehranfoods.com (a Korean store), 'Buy DAWN BREAD Plain
     Frozen Paratha Online | Mehran Foods Korea' scored tier 1 for 'MEHRAN PLAIN PARATHA 400GM 5S'
     (live run 2026-10-03, row 16).
     """
@@ -392,19 +394,28 @@ def score_candidate(spec: SkuSpec, cand: Candidate, negatives=None) -> Candidate
     soft_cap = False
 
     # --- brand -----------------------------------------------------------
-    # Store-name suffixes ('- Shop on Carrefour UAE') are not brand evidence, nor is the own name of an
-    # official or learned site the page is on ('| Mehran Foods Korea' on mehranfoods.com).
+    # Store-name suffixes ('- Shop on Carrefour UAE') are not brand evidence.
     brand_texts = dict(fields)
-    site_names = own_site_names(spec, cand)
-    namer = _product_namer(spec) if site_names else None
     for name in ("title", "page_title", "snippet"):
-        brand_texts[name] = strip_site_suffix(fields[name], site_names, namer)
+        brand_texts[name] = strip_site_suffix(fields[name])
     brand_fields: Dict[str, str] = {}
     for name in IDENTITY_FIELDS + ("snippet",):
         hit = any_brand_in(spec.match_brands, brand_texts[name]) if spec.match_brands else None
         if hit:
             brand_fields[name] = hit
     brand_ok = any(name in brand_fields for name in IDENTITY_FIELDS)
+    # The own name of the official (or learned) site the page is on ('| Mehran Foods Korea' on mehranfoods.com)
+    # keeps the brand match but never makes tier 1: the site's trust already counts, and its name says nothing
+    # about which brand the page shows (see own_site_names).
+    site_name_only = False
+    site_names = own_site_names(spec, cand) if brand_ok else ()
+    if site_names:
+        namer = _product_namer(spec)
+        strict = {name: strip_site_suffix(fields[name], site_names, namer) for name in TEXT_FIELDS}
+        site_name_only = not any(
+            any_brand_in(spec.match_brands, strict.get(name, brand_texts[name])) for name in IDENTITY_FIELDS)
+        if site_name_only:
+            conflicts.append("site_name_brand")
     if spec.match_brands and not brand_fields:
         for name in COMPETITOR_FIELDS:
             comp = any_brand_in(spec.competitors, brand_texts[name])
@@ -582,7 +593,7 @@ def score_candidate(spec: SkuSpec, cand: Candidate, negatives=None) -> Candidate
     if brand_ok and trust != TRUST_OFFICIAL:
         generic_weak = _generic_brand_weak_fields(spec, cand, brand_texts)
     conflicts.extend(f"generic_brand_position:{name}" for name in generic_weak)
-    brand_t1 = brand_ok and not generic_weak
+    brand_t1 = brand_ok and not generic_weak and not site_name_only
 
     coverage = class_coverage(spec, fields)
 
@@ -680,7 +691,7 @@ _SIZE_RANK = {"match": 2, "unknown": 1, "ambiguous": 1, "conflict": 0}
 # variants they state, the one without such a doubt ranks first.
 SOFT_CONFLICTS = ("url_size_conflict", "url_pack_conflict", "image_variant_conflict", "soft_variant_conflict",
                   "unstated_variant", "pack_ambiguous", "sub_brand_missing", "gtin_mismatch",
-                  "generic_brand_position")
+                  "generic_brand_position", "site_name_brand")
 
 
 # rank_key's identity part (tier, size, variants, no soft conflict, coverage, trust): decide and expand compare a

@@ -350,7 +350,7 @@ def test_row16_the_site_name_of_an_official_domain_is_not_the_brand():
     dawn = score_candidate(spec, listing("Buy DAWN BREAD Plain Frozen Paratha Online | Mehran Foods Korea", MEHRAN_PAGE,
                                          "https://cdn.shopify.com/s/files/1/0848/9110/7613/files/front-163.jpg"))
     assert dawn.matched["source_class"] == "official"
-    assert dawn.tier == 3 and not dawn.matched["brand"]                 # was tier 1 on the site's name alone
+    assert dawn.tier == 2 and "site_name_brand" in dawn.conflicts      # was tier 1 on the site's name alone
     # a page of that site that names the brand in the product part keeps it
     own = score_candidate(spec, listing("Mehran Plain Paratha (5 pieces) 400 g | Mehran Foods",
                                         "https://mehranfoods.com/products/mehran-plain-paratha-400g"))
@@ -359,6 +359,16 @@ def test_row16_the_site_name_of_an_official_domain_is_not_the_brand():
     other = score_candidate(spec, listing("Buy DAWN BREAD Plain Frozen Paratha Online | Mehran Foods Korea",
                                           "https://www.example-shop.com/dawn-bread-paratha"))
     assert other.matched["brand"]
+
+
+def test_row25_the_brands_real_site_keeps_its_listing_for_the_label_reader():
+    # with the suggested mapping (official alldefood.com) the live pick of row 25, 'products | Allde' read as
+    # Allde Meat Masala (MATCH), stays a brand listing (tier 2): the label reader still decides
+    spec = spec_of("ALLDE MEAT MASALA 160GM", "ALLDE", suggested_mappings())
+    s = score_candidate(spec, listing("products | Allde", "https://alldefood.com/products/",
+                                      "https://alldefood.com/wp-content/uploads/meat-masala.png"))
+    assert s.matched["source_class"] == "official" and s.matched["brand"]
+    assert s.tier == 2 and "site_name_brand" in s.conflicts
 
 
 def _paratha_only(text):

@@ -122,7 +122,8 @@ SMALL_IMAGE_REASONS = frozenset({"short_side<250"})
 SERPER_REFUSED_HTTP = (401, 403)
 # conflicts that mean more than 'the size is not stated' (a near-match must lack ONLY the size)
 _NOT_ONLY_SIZE = ("sub_brand_missing", "unstated_variant", "soft_variant_conflict", "image_variant_conflict",
-                  "url_size_conflict", "url_pack_conflict", "pack_ambiguous", "generic_brand_position")
+                  "url_size_conflict", "url_pack_conflict", "pack_ambiguous", "generic_brand_position",
+                  "site_name_brand")
 
 
 # ---------------------------------------------------------------------------
