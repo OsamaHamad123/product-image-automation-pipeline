@@ -503,12 +503,23 @@ def test_p5_transparent_png_with_a_grey_box_is_not_source_alpha(monkeypatch, tmp
     out = canvas_of(result)
     assert colour_count(out, (180, 180, 180), tol=20) == 0, "the grey box was published"
 
-    # A provider that keeps the grey box: never published as isolated.
-    Providers(monkeypatch, photoroom=keyer(WHITE))
+    assert sent[2]["crop"] == "false"
+
+    # A provider that keeps the grey box while the Gemini box puts the product inside it: never published.
+    monkeypatch.setattr(image_processor, "_locate_product_box", lambda *a: [250, 367, 800, 633])
+    providers = Providers(monkeypatch, photoroom=keyer(WHITE))
     result = run(src)
     assert result.path and result.isolated is False
-    assert result.quality_flags == [image_processor.FLAG_OPAQUE_BACKDROP]
-    assert sent[2]["crop"] == "false"
+    assert image_processor.FLAG_OPAQUE_BACKDROP in result.quality_flags
+    assert len(providers.calls) == 2   # the box crop (clipped, opaque) and the full frame; no remove.bg key
+
+    # Without a Gemini box, a provider that returns exactly the source's rectangle confirms it is the product
+    # (two independent opinions: a printed carton, not a photo card): the free source alpha is used.
+    monkeypatch.setattr(image_processor, "_locate_product_box", lambda *a: None)
+    providers = Providers(monkeypatch, photoroom=keyer(WHITE))
+    result = run(src)
+    assert (result.isolated, result.provider, result.quality_flags) == (True, "source_alpha", [])
+    assert len(providers.calls) == 1
 
 
 def test_rounded_corner_photo_is_not_taken_as_an_isolated_source(monkeypatch, tmp_path):

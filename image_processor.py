@@ -73,12 +73,17 @@ SECOND_OBJECT_MIN = 0.01        # جسم صلب ثانٍ بحجم 1% أو أكث
 MAX_UPSCALE = 2.0               # تكبير المنتج على اللوحة أكثر من الضعف
 MIN_MAIN_EXTENT = 0.80          # الجسم الرئيسي يشغل أقل من 80% من مساحة الإشغال المتاحة
 FRAME_ASPECT_TOLERANCE = 0.02   # مخرج المزوّد بنفس نسبة أبعاد الإطار المرسل (لم يقصه المزوّد)
-# خلفية معتمة داخل شفافية المصدر (صندوق رمادي حول المنتج في PNG شفاف)
+# خلفية معتمة بقيت حول المنتج (ورقة/صندوق تصوير رمادي في PNG شفاف أو في مخرج المزوّد)
 BACKDROP_RECT_MIN = 0.95
 BACKDROP_TOLERANCE = 16
 BACKDROP_RING_UNIFORM = 0.95
 BACKDROP_OBJECT_DIFF = 48
 BACKDROP_OBJECT_MIN = 0.05
+BACKDROP_CHROMA_MAX = 40        # لون الحافة محايد (رمادي/أبيض/أسود)؛ واجهة علبة مطبوعة بلون مشبع ليست خلفية
+BACKDROP_COVER_MIN = 0.50       # ولون الحافة نفسه يغطي نصف القناع على الأقل
+# مقارنة مخرج المزوّد بمنطقة المنتج المعروفة: شفافية المصدر نفسها، أو صندوق Gemini
+SOURCE_MATCH_IOU = 0.95
+BOX_MATCH_IOU = 0.85
 
 FLAG_OPAQUE_FILL = "opaque_fill"
 FLAG_EDGE_CLIPPED = "edge_clipped"
@@ -467,15 +472,15 @@ def _crop_to_box(img: Image.Image, box, margin: float = BOX_MARGIN_FRACTION) -> 
 
 def _crop_with_sides(img: Image.Image, box):
     """
-    يقص حسب صندوق Gemini ويعيد (الصورة المقصوصة، الجوانب التي هي خطوط قص داخلية (left, top, right, bottom)).
-    جانب عند حافة الصورة الأصلية ليس خط قص: لمس المنتج له لا يعني أن الصندوق قصه.
+    يقص حسب صندوق Gemini ويعيد (الصورة المقصوصة، الجوانب التي هي خطوط قص داخلية (left, top, right, bottom)،
+    مستطيل القص بإحداثيات الصورة). جانب عند حافة الصورة الأصلية ليس خط قص: لمس المنتج له لا يعني أن الصندوق قصه.
     يعيد None إذا كان الصندوق يغطي الصورة كلها (لا فائدة من محاولة منفصلة).
     """
     left, top, right, bottom = _box_rect(img.size, box)
     sides = (left > 0, top > 0, right < img.width, bottom < img.height)
     if not any(sides):
         return None
-    return img.crop((left, top, right, bottom)), sides
+    return img.crop((left, top, right, bottom)), sides, (left, top, right, bottom)
 
 
 def get_product_bounding_box(image_path, product_name, brand):
@@ -719,10 +724,16 @@ def _same_frame(cutout_size, frame_size) -> bool:
     return abs((cw / ch) / (fw / fh) - 1.0) <= FRAME_ASPECT_TOLERANCE
 
 
+def _chroma(colour) -> float:
+    """الفرق بين أعلى وأدنى قناة: 0 للرمادي والأبيض والأسود، كبير للون المشبع."""
+    return float(max(colour) - min(colour))
+
+
 def _has_opaque_backdrop(rgb, main_mask, bbox_area: int) -> bool:
     """
-    الجسم الرئيسي مستطيل معتم حوافه بلون واحد وبداخله جسم آخر مختلف اللون:
-    خلفية (صندوق صورة) بقيت داخل الشفافية وليست المنتج نفسه.
+    الجسم الرئيسي مستطيل معتم حوافه بلون واحد محايد (رمادي/أبيض/أسود) يغطي نصف القناع على الأقل، وبداخله جسم
+    آخر مختلف اللون: ورقة/صندوق تصوير بقي حول المنتج. علبة مطبوعة بحافة ملونة (أحمر، أزرق...) ليست خلفية.
+    علبة بيضاء مطبوعة تبقى ملتبسة هنا؛ يحسمها تطابق القناع مع منطقة المنتج المعروفة (_region_match).
     """
     import cv2
     import numpy as np
@@ -738,8 +749,19 @@ def _has_opaque_backdrop(rgb, main_mask, bbox_area: int) -> bool:
     ref = np.median(ring_rgb, axis=0)
     if (np.abs(ring_rgb - ref).max(axis=1) <= BACKDROP_TOLERANCE).mean() < BACKDROP_RING_UNIFORM:
         return False
-    distinct = main_mask & (np.abs(rgb.astype(np.int16) - ref).max(axis=2) > BACKDROP_OBJECT_DIFF)
+    if _chroma(ref) > BACKDROP_CHROMA_MAX:
+        return False
+    diff = np.abs(rgb.astype(np.int16) - ref).max(axis=2)
+    if int((main_mask & (diff <= BACKDROP_TOLERANCE)).sum()) < BACKDROP_COVER_MIN * area:
+        return False
+    distinct = main_mask & (diff > BACKDROP_OBJECT_DIFF)
     return int(distinct.sum()) >= BACKDROP_OBJECT_MIN * area
+
+
+@dataclass
+class _Assessment:
+    flags: List[str]
+    main_rect: Optional[Tuple[int, int, int, int]] = None   # حدود الجسم الرئيسي بإحداثيات القص
 
 
 def assess_cutout(cutout: Image.Image, frame_size=None, crop_sides=_NO_CROP, canvas_size=(800, 800),
@@ -756,8 +778,13 @@ def assess_cutout(cutout: Image.Image, frame_size=None, crop_sides=_NO_CROP, can
       second_object      جسم صلب آخر بحجم 1% أو أكثر من الجسم الرئيسي.
       upscaled           المنتج سيُكبّر أكثر من الضعف على اللوحة.
       too_small_on_canvas الجسم الرئيسي يشغل أقل من 80% من مساحة الإشغال (شيء آخر يحدد الحجم).
-      opaque_backdrop    (مع check_backdrop) صندوق خلفية معتم حول المنتج.
+      opaque_backdrop    (مع check_backdrop) ورقة/صندوق تصوير محايد اللون بقي حول المنتج.
     """
+    return _assess(cutout, frame_size, crop_sides, canvas_size, fill, check_backdrop).flags
+
+
+def _assess(cutout: Image.Image, frame_size=None, crop_sides=_NO_CROP, canvas_size=(800, 800),
+            fill: float = CANVAS_FILL_RATIO, check_backdrop: bool = False) -> _Assessment:
     import cv2
     import numpy as np
 
@@ -766,7 +793,7 @@ def assess_cutout(cutout: Image.Image, frame_size=None, crop_sides=_NO_CROP, can
     solid = alpha >= SOLID_ALPHA
     box = alpha_bbox(rgba)
     if box is None or not solid.any():
-        return [FLAG_ALPHA_HAZE]
+        return _Assessment([FLAG_ALPHA_HAZE])
     flags = []
 
     if _same_frame(rgba.size, frame_size):
@@ -796,6 +823,7 @@ def assess_cutout(cutout: Image.Image, frame_size=None, crop_sides=_NO_CROP, can
     scale = min(max_w / box_w, max_h / box_h)
     if scale > MAX_UPSCALE:
         flags.append(FLAG_UPSCALED)
+    main_x, main_y = int(stats[main, cv2.CC_STAT_LEFT]), int(stats[main, cv2.CC_STAT_TOP])
     main_w, main_h = int(stats[main, cv2.CC_STAT_WIDTH]), int(stats[main, cv2.CC_STAT_HEIGHT])
     if max(main_w * scale / max_w, main_h * scale / max_h) < MIN_MAIN_EXTENT:
         flags.append(FLAG_TOO_SMALL)
@@ -804,7 +832,7 @@ def assess_cutout(cutout: Image.Image, frame_size=None, crop_sides=_NO_CROP, can
         rgb = np.asarray(rgba.convert("RGB"))
         if _has_opaque_backdrop(rgb, labels == main, main_w * main_h):
             flags.append(FLAG_OPAQUE_BACKDROP)
-    return flags
+    return _Assessment(flags, (main_x, main_y, main_x + main_w, main_y + main_h))
 
 
 # ---------------------------------------------------------------------------
@@ -871,6 +899,8 @@ class _Attempt:
     flags: List[str] = field(default_factory=list)
     error: Optional[str] = None
     label: str = ""
+    matches_source: bool = False     # قناع المزوّد يطابق شفافية المصدر (IoU > 0.95)
+    main_rect: Optional[Tuple[int, int, int, int]] = None
 
 
 def _flags_final(flags) -> bool:
@@ -878,20 +908,76 @@ def _flags_final(flags) -> bool:
     return set(flags) <= _UNFIXABLE_FLAGS
 
 
-def _gated(cutout, provider, frame_size, crop_sides, canvas_size, check_backdrop, label) -> _Attempt:
+def _rect_iou(a, b) -> float:
+    ix = max(0, min(a[2], b[2]) - max(a[0], b[0]))
+    iy = max(0, min(a[3], b[3]) - max(a[1], b[1]))
+    inter = ix * iy
+    union = (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter
+    return inter / union if union > 0 else 0.0
+
+
+def _placed_mask(cutout: Image.Image, frame_size, frame_rect, shape):
+    """الجزء الصلب من مخرج المزوّد موضوعاً في مكان الإطار المرسل داخل صورة العمل (shape = (h, w))."""
+    import numpy as np
+
+    alpha = cutout.getchannel("A")
+    if alpha.size != tuple(frame_size):
+        alpha = alpha.resize(tuple(frame_size), Image.Resampling.NEAREST)
+    mask = np.zeros(shape, dtype=bool)
+    left, top, right, bottom = frame_rect
+    mask[top:bottom, left:right] = np.asarray(alpha) >= SOLID_ALPHA
+    return mask
+
+
+def _region_match(cutout, main_rect, frame_size, frame_rect, source_mask, product_rect):
+    """
+    (يطابق شفافية المصدر، يطابق صندوق Gemini). مخرج يطابق منطقة المنتج المعروفة ليس صندوق تصوير بقي حوله:
+    رأيان مستقلان (المصدر والمزوّد، أو Gemini والمزوّد) يريان نفس المستطيل منتجاً، أي علبة مطبوعة.
+    لا مقارنة إذا لم يكن الإطار معروفاً أو قصه المزوّد (PHOTOROOM_CROP): إحداثياته لم تعد إحداثيات الإطار.
+    """
+    if frame_rect is None or frame_size is None or not _same_frame(cutout.size, frame_size):
+        return False, False
+    matches_source = False
+    if source_mask is not None:
+        placed = _placed_mask(cutout, frame_size, frame_rect, source_mask.shape)
+        union = int((placed | source_mask).sum())
+        matches_source = union > 0 and int((placed & source_mask).sum()) / union > SOURCE_MATCH_IOU
+    matches_box = False
+    if product_rect is not None and main_rect is not None:
+        fx, fy = frame_size[0] / cutout.width, frame_size[1] / cutout.height
+        left, top = frame_rect[0], frame_rect[1]
+        rect = (left + main_rect[0] * fx, top + main_rect[1] * fy, left + main_rect[2] * fx, top + main_rect[3] * fy)
+        matches_box = _rect_iou(rect, product_rect) >= BOX_MATCH_IOU
+    return matches_source, matches_box
+
+
+def _gated(cutout, provider, frame_size, crop_sides, canvas_size, label, frame_rect=None, source_mask=None,
+           product_rect=None) -> _Attempt:
+    """
+    ينظف القناع ويمرره على البوابة (مع فحص صندوق الخلفية دائماً). source_mask: الجزء الصلب من شفافية المصدر
+    بإحداثيات صورة العمل؛ product_rect: صندوق Gemini بلا هامش. frame_rect: موضع الإطار المرسل في صورة العمل.
+    """
     cutout = EdgeShadowEngine.process_mask(cutout)
     if alpha_bbox(cutout) is None:
         return _Attempt(None, provider, [], f"{provider}_empty_cutout", label)
-    flags = assess_cutout(cutout, frame_size, crop_sides, canvas_size, check_backdrop=check_backdrop)
-    return _Attempt(cutout, provider, flags, None, label)
+    found = _assess(cutout, frame_size, crop_sides, canvas_size, check_backdrop=True)
+    flags = list(found.flags)
+    matches_source = False
+    if source_mask is not None or product_rect is not None:
+        matches_source, matches_box = _region_match(cutout, found.main_rect, frame_size, frame_rect, source_mask,
+                                                    product_rect)
+        if FLAG_OPAQUE_BACKDROP in flags and (matches_source or matches_box):
+            flags.remove(FLAG_OPAQUE_BACKDROP)
+    return _Attempt(cutout, provider, flags, None, label, matches_source, found.main_rect)
 
 
-def _provider_attempt(frame, method, crop_sides, canvas_size, check_backdrop) -> _Attempt:
+def _provider_attempt(frame, method, crop_sides, frame_rect, canvas_size, source_mask=None,
+                      product_rect=None) -> _Attempt:
     label = method + ("+box" if any(crop_sides) else "")
     cutout, error = _isolate(frame, method)
     if cutout is None:
         return _Attempt(None, method, [], error, label)
-    return _gated(cutout, method, frame.size, crop_sides, canvas_size, check_backdrop, label)
+    return _gated(cutout, method, frame.size, crop_sides, canvas_size, label, frame_rect, source_mask, product_rect)
 
 
 def _method_has_key(method: str) -> bool:
@@ -922,13 +1008,19 @@ def _isolate_checked(img: Image.Image, method: str, product_name, brand, canvas_
     1. شفافية المصدر (source_alpha) إن وجدت؛ عند علامة تُعامل الصورة كما تبدو على الأبيض.
     2. كشف الخلفية البيضاء (WHITE_SOURCE_MODE): في 'on' يُستخدم القص المحلي النظيف دون Gemini ولا مزوّد مدفوع.
     3. المزوّد المطلوب مع صندوق Gemini، ثم عند علامة بدون الصندوق، ثم المزوّد المدفوع الآخر المهيأ.
+    فحص صندوق الخلفية يُجرى على كل مخرج، ويسقط إذا طابق القناع منطقة المنتج المعروفة (شفافية المصدر أو صندوق
+    Gemini). إذا طابق مخرج المزوّد شفافية المصدر فالمصدر كان صحيحاً: تُقبل شفافيته (علبة مطبوعة، لا ورقة خلفية)،
+    إلا إذا حدد صندوق Gemini المنتج داخل ذلك المستطيل (رأي ثالث يقول إنه ورقة خلفية).
+    القص المحلي للخلفية البيضاء مشتق من بكسلات المصدر نفسها فلا يُحسب رأياً مستقلاً.
     يعيد (المحاولة المختارة أو محاولة خطأ، isolated، ملاحظة الخلفية البيضاء).
     """
+    import numpy as np
+
     attempts: List[_Attempt] = []
-    work, check_backdrop = img, False
+    work, source, source_mask = img, None, None
 
     if has_meaningful_transparency(img):
-        source = _gated(img, "source_alpha", img.size, _NO_CROP, canvas_size, True, "source_alpha")
+        source = _gated(img, "source_alpha", img.size, _NO_CROP, canvas_size, "source_alpha")
         if source.cutout is None:
             return source, False, None
         if not source.flags:
@@ -937,8 +1029,18 @@ def _isolate_checked(img: Image.Image, method: str, product_name, brand, canvas_
         if _flags_final(source.flags):
             return source, False, None
         logger.info("شفافية المصدر ليست قصاً نظيفاً للمنتج (%s)؛ سيتم عزله من جديد", ",".join(source.flags))
-        check_backdrop = FLAG_OPAQUE_BACKDROP in source.flags
+        source_mask = np.asarray(source.cutout.getchannel("A")) >= SOLID_ALPHA
         work = _flatten_on_white(img)
+    whole = (0, 0, work.width, work.height)
+
+    def source_accepted() -> bool:
+        return source is not None and not source.flags
+
+    def confirm_source(attempt: _Attempt) -> None:
+        # مزوّد مستقل رأى نفس شكل المصدر: علامة صندوق الخلفية على المصدر كانت خاطئة
+        if source is not None and attempt.matches_source and FLAG_OPAQUE_BACKDROP in source.flags:
+            source.flags.remove(FLAG_OPAQUE_BACKDROP)
+            logger.info("مخرج %s يطابق شفافية المصدر؛ المصدر ليس صندوق خلفية", attempt.label)
 
     white_note = None
     mode = _white_source_mode()
@@ -947,8 +1049,7 @@ def _isolate_checked(img: Image.Image, method: str, product_name, brand, canvas_
         if white_cut is None:
             white_note = f"ineligible:{reason}"
         else:
-            white = _gated(white_cut, "white_source", work.size, _NO_CROP, canvas_size, check_backdrop,
-                           "white_source")
+            white = _gated(white_cut, "white_source", work.size, _NO_CROP, canvas_size, "white_source")
             if white.cutout is not None and not white.flags:
                 if mode == "on":
                     return white, True, "used"
@@ -960,14 +1061,28 @@ def _isolate_checked(img: Image.Image, method: str, product_name, brand, canvas_
         logger.info("كشف الخلفية البيضاء (%s): %s", mode, white_note)
 
     box = _locate_product_box(work, product_name, brand)
-    cropped = None
+    cropped, product_rect = None, None
     if box is not None and _sane_box(box):
         cropped = _crop_with_sides(work, box)
+        product_rect = _box_rect(work.size, box, margin=0.0)
     elif box is not None:
         logger.info("تم تجاهل صندوق Gemini غير المعقول: %s", box)
-    full = (work, _NO_CROP)
+    full = (work, _NO_CROP, whole)
+    if source_mask is not None and product_rect is not None and source.main_rect is not None \
+            and _rect_iou(source.main_rect, product_rect) < BOX_MATCH_IOU:
+        source_mask = None   # Gemini يرى المنتج داخل مستطيل المصدر: مطابقة المصدر لا تثبت شيئاً
+
+    def attempt_with(spec, provider) -> _Attempt:
+        frame, sides, rect = spec
+        attempt = _provider_attempt(frame, provider, sides, rect, canvas_size, source_mask, product_rect)
+        if attempt.cutout is not None:
+            attempts.append(attempt)
+            confirm_source(attempt)
+        return attempt
 
     def finish(error_attempt=None):
+        if source_accepted():
+            return source, True, white_note
         best = _best_attempt(attempts)
         if best is None:
             return error_attempt, False, white_note
@@ -976,33 +1091,26 @@ def _isolate_checked(img: Image.Image, method: str, product_name, brand, canvas_
                            " -> ".join(a.label for a in attempts), ",".join(best.flags))
         return best, not best.flags, white_note
 
-    frame, sides = cropped or full
-    first = _provider_attempt(frame, method, sides, canvas_size, check_backdrop)
+    first = attempt_with(cropped or full, method)
     if first.cutout is None:
         return finish(first)
-    attempts.append(first)
-    if _flags_final(first.flags):
+    if source_accepted() or _flags_final(first.flags):
         return finish()
     logger.info("القص (%s) لم يجتز بوابة الجودة: %s؛ إعادة المحاولة", first.label, ",".join(first.flags))
 
     if cropped is not None:
-        retry = _provider_attempt(work, method, _NO_CROP, canvas_size, check_backdrop)
+        retry = attempt_with(full, method)
         if retry.cutout is None:
             logger.warning("فشلت إعادة العزل بدون صندوق Gemini: %s", retry.error)
-        else:
-            attempts.append(retry)
-            if _flags_final(retry.flags):
-                return finish()
+        elif source_accepted() or _flags_final(retry.flags):
+            return finish()
 
     fallback = _fallback_method(method)
     if fallback:
         use_box = cropped is not None and FLAG_EDGE_CLIPPED not in first.flags
-        frame, sides = cropped if use_box else full
-        other = _provider_attempt(frame, fallback, sides, canvas_size, check_backdrop)
+        other = attempt_with(cropped if use_box else full, fallback)
         if other.cutout is None:
             logger.warning("فشل العزل بالمزوّد البديل %s: %s", fallback, other.error)
-        else:
-            attempts.append(other)
     return finish()
 
 
