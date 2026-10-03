@@ -43,7 +43,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 from urllib.parse import urlsplit, urlunsplit
 
-from . import settings
+from . import cassette, settings
 from .gtin import is_global_gtin
 from .models import Candidate, CandidateScore, SkuSpec
 from .providers.base import BaseProvider, ProviderEmpty
@@ -450,6 +450,8 @@ class DbCatalogStore:
                 for r in found]
 
     def save_page(self, row_id: int, rec: PageRecord) -> None:
+        if cassette.replaying():      # a replayed page read is not news for the index
+            return
         conn = self._conn()
         try:
             with conn.cursor() as cur:
@@ -650,7 +652,7 @@ class LocalIndexProvider(BaseProvider):
     def _search(self, query: str, hl: str, spec: SkuSpec) -> List[Candidate]:
         if self.max_pages <= 0:
             return []
-        ranked = rank_rows(spec, self._rows(spec))
+        ranked = rank_rows(spec, cassette.local_index_rows(spec, lambda: self._rows(spec)))   # snapshot / replay
         if not ranked:
             raise ProviderEmpty("no indexed page of this brand and product")
         found: Dict[int, List[Candidate]] = {}
@@ -687,6 +689,7 @@ class LocalIndexProvider(BaseProvider):
         ex = ThreadPoolExecutor(max_workers=max(1, min(FETCH_WORKERS, len(todo))))
         futures = {ex.submit(self._read, i, row): i for i, row in todo}
         done, pending = wait(futures, timeout=READ_DEADLINE_S)
+        done, pending = cassette.local_index_deadline(futures, dict(todo), done, pending)   # the recorded run's
         # the reads still running finish in the background and save their record for the next run
         ex.shutdown(wait=False, cancel_futures=True)
         if pending:

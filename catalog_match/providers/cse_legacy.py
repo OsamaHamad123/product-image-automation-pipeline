@@ -18,7 +18,7 @@ from typing import Any, List, Optional, Sequence
 
 import requests
 
-from .. import settings
+from .. import cassette, settings
 from ..models import Candidate, SkuSpec
 from .base import BaseProvider, ProviderHTTPError, page_domain, response_text, to_int
 
@@ -92,7 +92,9 @@ class CseLegacyProvider(BaseProvider):
         statuses: List[int] = []
         for idx, key in enumerate(self.api_keys):
             cx = self.cx_list[idx] if idx < len(self.cx_list) else self.cx_list[0]
-            resp = http.get(CSE_URL, params=self.params_for(query, hl, key, cx), timeout=self.timeout)
+            params = self.params_for(query, hl, key, cx)   # the cassette stores them without key and cx
+            resp = cassette.http(self.name, "GET", CSE_URL,
+                                 lambda: http.get(CSE_URL, params=params, timeout=self.timeout), params=params)
             if resp.status_code == 200:
                 return parse_items(resp.json())
             body = response_text(resp)

@@ -45,7 +45,7 @@ try:  # browser TLS fingerprint; a hard dependency in requirements.txt, optional
 except Exception:  # pragma: no cover - depends on the environment
     _curl_requests = None
 
-from . import settings
+from . import cassette, settings
 from .models import Candidate, FetchedImage, SkuSpec
 
 logger = logging.getLogger(__name__)
@@ -141,7 +141,8 @@ class HttpFetcher:
             getter = requests.get
         if proxy:
             kwargs["proxies"] = {"http": proxy, "https": proxy}
-        return getter(url, **kwargs)
+        return cassette.http("fetch", "GET", url, lambda: getter(url, **kwargs), headers=headers, proxy=bool(proxy),
+                             stream=True, max_bytes=self.max_bytes)   # record / replay (no-op without a cassette)
 
     def _download(self, url: str, headers: dict, proxy: Optional[str] = None) -> Tuple[Optional[bytes], Optional[str], str]:
         """(body, error, content_type) for one attempt. Never raises."""
@@ -149,7 +150,7 @@ class HttpFetcher:
             resp = self._get(url, headers, proxy)
         except Exception as exc:
             logger.debug("fetch %s%s: %s", url, " via proxy" if proxy else "", type(exc).__name__)
-            return None, "timeout" if _is_timeout(exc) else "connection_error", ""
+            return None, cassette.miss_code(exc) or ("timeout" if _is_timeout(exc) else "connection_error"), ""
         try:
             status = int(getattr(resp, "status_code", 0) or 0)
             if status != 200:

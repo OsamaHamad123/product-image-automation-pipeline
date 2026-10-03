@@ -17,6 +17,7 @@ from typing import Any, List, Optional
 
 import requests
 
+from .. import cassette
 from ..gtin import gtin13, is_restricted, normalize_gtin
 from ..models import Candidate, ProviderResult, SkuSpec
 from .base import BaseProvider, ProviderEmpty, ProviderHTTPError, response_text
@@ -59,12 +60,12 @@ class OffProvider(BaseProvider):
             return []
         code = gtin13(gtin14)
         http = self._session or requests
-        resp = http.get(
+        resp = cassette.http(self.name, "GET", OFF_PRODUCT_URL.format(code=code), lambda: http.get(
             OFF_PRODUCT_URL.format(code=code),
             params={"fields": OFF_FIELDS},
             headers={"User-Agent": USER_AGENT, "Accept": "application/json"},
             timeout=self.timeout,
-        )
+        ), params={"fields": OFF_FIELDS})
         if resp.status_code != 200:
             raise ProviderHTTPError(resp.status_code, response_text(resp))
         return parse_product(resp.json(), gtin14)

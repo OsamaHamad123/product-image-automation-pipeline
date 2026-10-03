@@ -39,9 +39,28 @@ files that hold only the list of rows).
 
 Use it on ~30 rows before switching the live sheet to SEARCH_ENGINE=v2 (evaluation layer 4).
 This replaces scripts/verify_image_search.py, which counted "any image returned" as success.
+
+Record once, replay for free (catalog_match/cassette.py):
+
+    .venv\\Scripts\\python.exe scripts\\smoke_live.py --rows-file runs\\2026-10-03\\rows_2_61.csv ^
+        --brands-file runs\\2026-10-03\\brands_mapping_suggested.csv --dry-run --json runs\\after.json ^
+        --record runs\\cassette_2026-10 --record-shadow
+    python scripts/replay_run.py runs/cassette_2026-10 --json runs/replayed.json      # offline, any code version
+    python scripts/compare_runs.py runs/after.json runs/replayed.json
+
+--record DIR stores every answer the run gets from outside (search responses, image downloads, product
+pages, label-reader replies, the local-index rows and the wall-clock decisions) in the folder DIR, without
+any key, header or token; the run itself is unchanged. The folder holds 100-250 MB for 60 rows (about
+twice that with --record-shadow) and is ignored by version control (runs/ and cassette_*/): zip it to send it. --record-shadow also stores, after
+each row's decision is made, answers a later code version may ask for (every pooled image up to 24, the
+pages of the tier-1/2 listings, the retailer web search and the shopping search for a row without a pick,
+one label reading of every downloaded image); it costs a little more, printed at the end. A replay that
+missed answers writes a manifest; --record DIR --fill-misses MANIFEST then runs only those rows again,
+answering from the cassette where it can and paying only for the missing answers, which it adds to DIR.
 """
 
 import argparse
+import contextlib
 import datetime as dt
 import inspect
 import json
@@ -548,7 +567,7 @@ def _survives(status, reasons):
 
 
 def run_row(row, mappings, identity, pipeline, providers_mod, verify_mod, serp_cost, vlm_cost, expansion=None,
-            prices=None, secrets=None):
+            prices=None, secrets=None, after=None):
     prices = prices or provider_prices(serp_cost)
     calls = []
     providers = [CountingProvider(p, calls) for p in providers_mod.default_providers()]
@@ -613,6 +632,9 @@ def run_row(row, mappings, identity, pipeline, providers_mod, verify_mod, serp_c
     record["outage"] = outage_reason(record)
     record["unselected_reason"] = (None if record["outage"] or record["decision"] in PICK_DECISIONS
                                    else unselected_reason(record))
+    extra = after(spec, outcome) if after is not None else None      # --record-shadow, once the row is decided
+    if extra:
+        record["shadow"] = extra
     return record
 
 
@@ -1380,6 +1402,134 @@ def run_probe(args, http=None):
 
 
 # ---------------------------------------------------------------------------
+# --record / --record-shadow / --fill-misses (catalog_match.cassette)
+# ---------------------------------------------------------------------------
+
+def git_info(root=REPO_ROOT):
+    """The checkout's commit and whether tracked files were changed ({'commit': '', ...} without git)."""
+    import subprocess
+
+    def run(*cmd):
+        return subprocess.run(["git", "-C", root, *cmd], capture_output=True, text=True, timeout=15).stdout.strip()
+
+    try:
+        return {"commit": run("rev-parse", "HEAD"), "dirty": bool(run("status", "--porcelain", "--untracked-files=no"))}
+    except Exception:
+        return {"commit": "", "dirty": None}
+
+
+def strong_spend():
+    """This month's strong-reader spend and budget as the cascade reads them (strong_usd None when unreadable)."""
+    out = {"month": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m"), "strong_usd": None,
+           "budget_usd": accessor("verifier_monthly_budget_usd")}
+    try:
+        from catalog_match.verifiers import spend
+        out["strong_usd"] = float(spend.MariaDbSpendStore().role_spend("strong"))
+    except Exception as exc:
+        log.info("strong spend not readable (%s)", type(exc).__name__)
+    return out
+
+
+def recording_meta(args, rows, mappings, meta, expansion):
+    """meta.json of a new cassette: what a replay needs to run the same products the same way. No secret."""
+    from catalog_match import cassette
+    return {
+        "format": cassette.FORMAT, "created_at": dt.datetime.now().isoformat(timespec="seconds"),
+        "today": dt.date.today().isoformat(), "git": git_info(), "settings": cassette.settings_snapshot(),
+        "mappings": mappings, "rows": rows, "versions": cassette.library_versions(), "spend": strong_spend(),
+        "run": {"expansion": expansion, "serp_cost": args.serp_cost, "vlm_cost": args.vlm_cost,
+                "rows_spec": list(args.rows or []), "rows_file": os.path.basename(args.rows_file or ""),
+                "brands_file": os.path.basename(args.brands_file or ""), "shadow": bool(args.record_shadow)},
+        "run_meta": meta,
+    }
+
+
+def fill_inputs(args):
+    """(rows, mappings, cassette meta) of a --fill-misses run: the manifest's rows as the cassette holds them."""
+    with open(args.fill_misses, "r", encoding="utf-8-sig") as fh:
+        manifest = json.load(fh)
+    with open(os.path.join(args.record, "meta.json"), "r", encoding="utf-8") as fh:
+        meta = json.load(fh)
+    wanted = {int(n) for n in manifest.get("rows") or []}
+    rows = [r for r in meta.get("rows") or [] if int(r.get("row_number") or 0) in wanted]
+    return rows, meta.get("mappings") or {}, meta
+
+
+def settings_drift(recorded):
+    """Settings that differ from the cassette's (a fill run must ask what the replay asks)."""
+    from catalog_match import cassette
+    now = cassette.settings_snapshot()
+    names = sorted(set(now["values"]) | set((recorded or {}).get("values", {})))
+    changed = [n for n in names if now["values"].get(n) != (recorded or {}).get("values", {}).get(n)]
+    changed += [n for n, v in now["secrets"].items() if v != (recorded or {}).get("secrets", {}).get(n)]
+    return changed
+
+
+def _folder_mb(path):
+    total = 0
+    for base, _dirs, files in os.walk(path):
+        for name in files:
+            try:
+                total += os.path.getsize(os.path.join(base, name))
+            except OSError:
+                pass
+    return total / (1024 * 1024)
+
+
+def recorded_decisions(results):
+    """What each row decided live (a replay of the same code must decide the same): row -> decision and pick."""
+    return {str(r.get("row")): {"decision": r.get("decision", "ERROR"), "failure_code": r.get("failure_code"),
+                                "winner": r.get("winner"), "top": [c.get("image_url") for c in r.get("top") or []]}
+            for r in results}
+
+
+def start_cassette(args, rows, mappings, meta, expansion, secrets):
+    """Install the --record cassette (mode 'fill' with --fill-misses); None without --record."""
+    if not args.record:
+        return None
+    from catalog_match import cassette
+    mode = "fill" if args.fill_misses else "record"
+    cas = cassette.install(mode, args.record, redact=lambda text: redact(text, secrets, query_keys=False))
+    if mode == "record":
+        cas.write_meta(recording_meta(args, rows, mappings, meta, expansion))
+        print(f"recording every external answer into {args.record}"
+              f"{' (with shadow answers for later code versions)' if args.record_shadow else ''}")
+    else:
+        print(f"topping up the cassette {args.record}: recorded answers are reused, only missing ones are paid")
+    return cas
+
+
+def finish_cassette(cas, args, results):
+    """Write the cassette's closing meta, uninstall it and print where it is and how to replay it."""
+    from catalog_match import cassette
+    meta = cas.read_meta()
+    shadow = [r["shadow"] for r in results if isinstance(r.get("shadow"), dict)]
+    totals = {k: sum(int(s.get(k) or 0) for s in shadow) for k in ("downloads", "pages", "search_calls",
+                                                                    "verifier_calls")}
+    totals["cost_usd"] = round(sum(float(s.get("cost_usd") or 0.0) for s in shadow), 4)
+    totals["rows_stopped"] = [r.get("row") for r in results if (r.get("shadow") or {}).get("error")]
+    if cas.mode == "record":
+        meta.update(finished_at=dt.datetime.now().isoformat(timespec="seconds"),
+                    rows_recorded=[r.get("row") for r in results], answers=cas.counts["recorded"],
+                    shadow=totals if shadow else None, decisions=recorded_decisions(results))
+    else:
+        meta.setdefault("fills", []).append({
+            "at": dt.datetime.now().isoformat(timespec="seconds"), "git": git_info(),
+            "manifest": os.path.basename(args.fill_misses or ""), "rows": [r.get("row") for r in results],
+            "answers_added": cas.counts["recorded"], "answers_reused": cas.counts["served"]})
+    cas.write_meta(meta)
+    cassette.uninstall()
+    if shadow:
+        print(f"shadow recording: {int(totals['downloads'])} extra downloads, {int(totals['pages'])} page reads, "
+              f"{int(totals['search_calls'])} search calls, {int(totals['verifier_calls'])} label-reader calls, "
+              f"about ${totals['cost_usd']:.4f} on top of the estimated cost above")
+    verb = "recorded" if cas.mode == "record" else "added"
+    print(f"cassette {args.record}: {cas.counts['recorded']} answers {verb}, {_folder_mb(args.record):.1f} MB "
+          f"(keys and tokens are never stored). Zip the folder to send it; replay it offline with:\n"
+          f"    python scripts/replay_run.py {args.record} --json runs/replayed.json")
+
+
+# ---------------------------------------------------------------------------
 # The dry run
 # ---------------------------------------------------------------------------
 
@@ -1421,6 +1571,15 @@ def main(argv=None):
     parser.add_argument("--serp-cost", type=float, default=DEFAULT_SERP_COST, help="USD per Serper query")
     parser.add_argument("--vlm-cost", type=float, default=DEFAULT_VLM_COST,
                         help="USD per VLM call when the verifier reports no per-model usage")
+    parser.add_argument("--record", metavar="DIR",
+                        help="record every external answer of this run into the folder DIR (a cassette: no key, "
+                             "header or token is stored), to replay it offline with scripts/replay_run.py DIR")
+    parser.add_argument("--record-shadow", action="store_true",
+                        help="with --record: after each row is decided, also record answers later code may ask for "
+                             "(more images, pages, X1/X2, label readings); costs a little more, printed at the end")
+    parser.add_argument("--fill-misses", metavar="MANIFEST",
+                        help="with --record DIR (an existing cassette): run only the rows of this misses manifest "
+                             "(written by scripts/replay_run.py) and add the answers DIR does not hold yet")
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args(argv)
     _utf8_stdout()
@@ -1433,11 +1592,29 @@ def main(argv=None):
             parser.error(f"--json {args.json}: give a file name in a folder that exists")
     if args.probe:
         return run_probe(args)
-    if not args.rows and not args.rows_file:
+    if (args.record_shadow or args.fill_misses) and not args.record:
+        parser.error("--record-shadow and --fill-misses need --record <cassette folder>")
+    if args.record and not args.fill_misses and os.path.exists(os.path.join(args.record, "meta.json")):
+        parser.error(f"--record {args.record}: this folder already holds a cassette; record into a new folder "
+                     "(or top it up with --fill-misses <manifest>)")
+    if args.fill_misses and not os.path.exists(os.path.join(args.record, "meta.json")):
+        parser.error(f"--fill-misses: {args.record} holds no cassette (meta.json) to top up")
+    if not args.rows and not args.rows_file and not args.fill_misses:
         parser.error("--rows (or --rows-file) is required for a dry run (or use --probe)")
 
     identity, pipeline, providers_mod, settings, verify_mod = load_v2()
-    if args.rows_file:
+    if args.fill_misses:
+        try:
+            rows, mappings, recorded = fill_inputs(args)
+        except (OSError, ValueError) as exc:
+            parser.error(f"--fill-misses: cannot read the manifest or the cassette: {exc}")
+        drift = settings_drift(recorded.get("settings"))
+        if drift:
+            print(f"WARNING: these settings differ from the recording ({', '.join(drift)}): answers keyed on them "
+                  "may not be the ones the replay asks for")
+        print(f"rows {', '.join(str(r['row_number']) for r in rows) or '-'} from the misses manifest "
+              f"{args.fill_misses}, with the cassette's own rows and brand mappings")
+    elif args.rows_file:
         try:
             rows = read_rows_file(args.rows_file, parse_rows(args.rows) if args.rows else None)
             mappings = read_brands_file(args.brands_file) if args.brands_file else {}
@@ -1449,10 +1626,14 @@ def main(argv=None):
         spreadsheet, worksheet = open_sheet_read_only()
         rows = read_sheet_rows(worksheet, parse_rows(args.rows))
         mappings = read_brands_file(args.brands_file) if args.brands_file else read_brand_mappings(spreadsheet)
-    # what the reviewers taught, as the worker sees it (google_sheets.get_brand_mappings); none without a database
-    from catalog_match import learning
-    mappings = learning.load_and_apply(mappings)
     expansion = False if args.no_expansion else True
+    if args.fill_misses:
+        # the cassette's mappings already hold what the reviewers had taught at recording time
+        expansion = bool(((recorded.get("run") or {}).get("expansion", expansion)))
+    else:
+        # what the reviewers taught, as the worker sees it (google_sheets.get_brand_mappings); none without a database
+        from catalog_match import learning
+        mappings = learning.load_and_apply(mappings)
     meta = run_meta(args, settings, pipeline, expansion)
     print(f"dry run on {len(rows)} rows | Serper key {'set' if settings.serper_api_key() else 'MISSING'} | "
           f"Gemini key {'set' if settings.gemini_api_key() else 'MISSING'} | model {meta['gemini_model'] or '-'} | "
@@ -1463,22 +1644,32 @@ def main(argv=None):
     prices = provider_prices(args.serp_cost)
     secrets = secret_values()
     results, total = [], 0.0
-    for row in rows:
-        try:
-            r = run_row(row, mappings, identity, pipeline, providers_mod, verify_mod, args.serp_cost, args.vlm_cost,
-                        expansion=expansion, prices=prices, secrets=secrets)
-        except Exception as exc:
-            r = {"row": row["row_number"], "name": row["name"], "brand": row.get("brand", ""),
-                 "error": redact(f"{type(exc).__name__}: {exc}", secrets)}
-            # The exception text can hold a request URL with a key in it: only redacted text is logged
-            # (the traceback with -v, redacted as well), never log.exception's raw traceback.
-            log.error("row %s failed: %s", row["row_number"], r["error"])
-            log.debug("row %s traceback:\n%s", row["row_number"], redact(traceback.format_exc(), secrets))
-            print(f"\n=== row {row['row_number']}: {row['name']} -> ERROR {r['error']}")
-        else:
-            print_row(r)
-            total += r["cost_usd"]
-        results.append(r)
+    cas = start_cassette(args, rows, mappings, meta, expansion, secrets)
+    after = None
+    if cas is not None and args.record_shadow:
+        from catalog_match import cassette as cassette_mod
+        after = cassette_mod.shadow_record
+    try:
+        for row in rows:
+            with (cas.row_context(row["row_number"]) if cas is not None else contextlib.nullcontext()):
+                try:
+                    r = run_row(row, mappings, identity, pipeline, providers_mod, verify_mod, args.serp_cost,
+                                args.vlm_cost, expansion=expansion, prices=prices, secrets=secrets, after=after)
+                except Exception as exc:
+                    r = {"row": row["row_number"], "name": row["name"], "brand": row.get("brand", ""),
+                         "error": redact(f"{type(exc).__name__}: {exc}", secrets)}
+                    # The exception text can hold a request URL with a key in it: only redacted text is logged
+                    # (the traceback with -v, redacted as well), never log.exception's raw traceback.
+                    log.error("row %s failed: %s", row["row_number"], r["error"])
+                    log.debug("row %s traceback:\n%s", row["row_number"], redact(traceback.format_exc(), secrets))
+                    print(f"\n=== row {row['row_number']}: {row['name']} -> ERROR {r['error']}")
+                else:
+                    print_row(r)
+                    total += r["cost_usd"]
+            results.append(r)
+    finally:
+        if cas is not None:
+            finish_cassette(cas, args, results)
 
     decisions = {}
     for r in results:

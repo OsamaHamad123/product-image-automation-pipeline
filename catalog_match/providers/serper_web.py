@@ -24,7 +24,7 @@ from typing import Any, List, Optional, Sequence
 
 import requests
 
-from .. import settings
+from .. import cassette, settings
 from ..models import Candidate, SkuSpec
 from .base import BaseProvider, ProviderHTTPError, page_domain, response_text, to_int
 from .serper import SerperImagesProvider, _pattern_not_allowed, has_site_operators, without_site_operators
@@ -78,12 +78,12 @@ class SerperEndpoint(BaseProvider):
 
     def _post(self, key: str, payload: dict):
         http = self._session or requests
-        return http.post(
+        return cassette.http(self.name, "POST", self.endpoint, lambda: http.post(
             self.endpoint,
             headers={"X-API-KEY": key, "Content-Type": "application/json"},
             json=payload,
             timeout=self.timeout,
-        )
+        ), body=payload)
 
     def _request(self, query: str, hl: str) -> Any:
         """The decoded JSON body; site: refusals are retried once in the plain form."""
