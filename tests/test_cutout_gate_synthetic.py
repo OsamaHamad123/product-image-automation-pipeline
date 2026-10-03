@@ -184,3 +184,29 @@ def test_nothing_removed_on_a_studio_backdrop_is_still_opaque_fill(work, bg):
     result, services = run(shot, work, photoroom=ps.opaque_provider(shot), remove_bg="truth")
 
     assert (result.isolated, result.provider, result.quality_flags) == (True, "remove_bg_api", [])
+
+
+# ---------------------------------------------------------------------------
+# 7a: a thin part cut by the Gemini crop
+# ---------------------------------------------------------------------------
+
+def test_thin_straw_cut_by_the_gemini_box_is_edge_clipped(work):
+    # The box encloses the carton only: its top crop line cuts the 4 px straw (1.4% of the line, under the old 2%).
+    juice = ps.make("juicebox", (600, 900), straw_w=4.0)
+    alpha = juice.alpha()
+    left, top, right, bottom = ps.product_box(alpha)
+    box = ps.gemini_box_of(alpha, region=(left, top + int(round(0.22 * (bottom - top))), right, bottom))
+    rect = ip._box_rect(juice.size, box)
+    assert rect[1] > top + 10, "precondition: the crop line runs through the straw"
+    crop = juice.product.crop(rect)
+    sides = (rect[0] > 0, rect[1] > 0, rect[2] < juice.size[0], rect[3] < juice.size[1])
+    assert ip.assess_cutout(crop, frame_size=crop.size, crop_sides=sides) == [ip.FLAG_EDGE_CLIPPED]
+    # A product that does not reach the crop line is not clipped.
+    assert ip.assess_cutout(juice.product.crop(ip._box_rect(juice.size, juice.box)), crop_sides=(True,) * 4) == []
+
+    result, services = run(juice, work, gemini_box=box)
+
+    assert [size for _name, size, _rect in services.calls] == [crop.size, juice.size], "retried without the box"
+    assert (result.isolated, result.provider, result.quality_flags) == (True, "photoroom", [])
+    whole = ps.ink_box(np.asarray(ip.compose_on_white_canvas(juice.product, (800, 800))))
+    assert ps.ink_box(ps.canvas_array(result)) == whole, "the straw is whole on the canvas"

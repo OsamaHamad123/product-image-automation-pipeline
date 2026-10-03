@@ -68,6 +68,7 @@ SOLID_ALPHA = 128               # بكسل "صلب" من المنتج
 OPAQUE_FILL_MAX = 0.97          # أكثر من 97% من الإطار معتم: المزوّد لم يزل شيئاً...
 OPAQUE_FILL_BAND = 0.02         # ...إذا كان شريط الإطار (2%، و3 بكسل على الأقل) خلفية موحدة محايدة اللون
 EDGE_TOUCH_MIN = 0.02           # المنتج يغطي أكثر من 2% من خط قص داخلي: الصندوق قص جزءاً منه
+EDGE_RUN_MIN_PX = 3             # أو جزء رفيع (شفاطة) عرضه 3 بكسل يلمس الخط ويمتد 3 بكسل للداخل
 HAZE_GROWTH_MAX = 0.08          # البكسلات شبه الشفافة توسّع حدود المنتج بأكثر من 8% (و4 بكسل على الأقل)
 HAZE_GROWTH_MIN_PX = 4
 SECOND_OBJECT_MIN = 0.01        # الأجسام الأخرى معاً (غير المنتج ومجموعته) 1% أو أكثر من الجسم الرئيسي
@@ -733,6 +734,28 @@ def _chroma(colour) -> float:
     return float(max(colour) - min(colour))
 
 
+def _longest_run(line) -> int:
+    """أطول سلسلة True متتالية في مصفوفة أحادية."""
+    import numpy as np
+
+    if not line.any():
+        return 0
+    edges = np.diff(np.concatenate(([0], line.astype(np.int8), [0])))
+    return int((np.nonzero(edges == -1)[0] - np.nonzero(edges == 1)[0]).max())
+
+
+def _edge_clipped(solid, crop_sides) -> bool:
+    """
+    المنتج يلمس خط قص داخلي (left, top, right, bottom): أكثر من 2% من الخط صلب، أو سلسلة صلبة من 3 بكسل
+    متتالية على الخط تمتد 3 بكسل للداخل. نسبة 2% وحدها لا ترى شفاطة بعرض 4 بكسل على خط طوله 300 بكسل.
+    """
+    d = EDGE_RUN_MIN_PX
+    lines = (solid[:, 0], solid[0, :], solid[:, -1], solid[-1, :])
+    deep = (solid[:, :d].all(axis=1), solid[:d, :].all(axis=0), solid[:, -d:].all(axis=1), solid[-d:, :].all(axis=0))
+    return any(side and (float(line.mean()) > EDGE_TOUCH_MIN or _longest_run(run) >= d)
+               for side, line, run in zip(crop_sides, lines, deep))
+
+
 def _uniform_backdrop_band(rgb) -> bool:
     """
     شريط إطار الصورة (2%، و3 بكسل على الأقل) بلون واحد محايد (رمادي/أبيض): خلفية تصوير كان على المزوّد إزالتها.
@@ -812,7 +835,7 @@ def assess_cutout(cutout: Image.Image, frame_size=None, crop_sides=_NO_CROP, can
     العلامات:
       opaque_fill        أكثر من 97% من الإطار معتم وشريط الإطار خلفية موحدة محايدة: لم يُزل شيء. منتج يملأ
                          الإطار (علبة مقصوصة بإحكام) ليس "لم يُزل شيء".
-      edge_clipped       المنتج يلمس خط قص داخلي: الصندوق قص جزءاً منه (الغطاء مثلاً).
+      edge_clipped       المنتج يلمس خط قص داخلي: الصندوق قص جزءاً منه (الغطاء، أو شفاطة بعرض 3 بكسل فأكثر).
       alpha_haze         بكسلات شبه شفافة (غير مرئية تقريباً) توسّع حدود المنتج بوضوح.
       second_object      أجسام أخرى (مجموع مساحتها الصلبة) 1% أو أكثر من الجسم الرئيسي. قطع متقاربة الحجم
                          والارتفاع (عبوتان متجاورتان) مجموعة منتج واحدة وليست جسماً ثانياً.
@@ -839,8 +862,7 @@ def _assess(cutout: Image.Image, frame_size=None, crop_sides=_NO_CROP, canvas_si
     if _same_frame(rgba.size, frame_size):
         if float(solid.mean()) > OPAQUE_FILL_MAX and _uniform_backdrop_band(np.asarray(_flatten_on_white(rgba))):
             flags.append(FLAG_OPAQUE_FILL)
-        lines = (solid[:, 0], solid[0, :], solid[:, -1], solid[-1, :])
-        if any(side and float(line.mean()) > EDGE_TOUCH_MIN for side, line in zip(crop_sides, lines)):
+        if _edge_clipped(solid, crop_sides):
             flags.append(FLAG_EDGE_CLIPPED)
 
     box_w, box_h = box[2] - box[0], box[3] - box[1]
