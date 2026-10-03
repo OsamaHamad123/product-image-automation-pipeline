@@ -326,6 +326,36 @@ def test_placeholder_barcodes_never_identify_a_row(gs, offline):
     assert gs.find_record_conflicts(gtin_sheet, {"g": (2, gs._expectation(MILK, "Almarai Fresh Milk 1L"))}) == {}
 
 
+def test_review_publish_paths_pass_the_brand_into_the_row_identity(gs, offline, monkeypatch, tmp_path):
+    """Without a valid GTIN the row is identified by name + size + brand: the review paths must send the brand."""
+    import cli_bridge
+    import local_cache_db
+    seen = []
+
+    class Pipeline:
+        def publish_image(self, *args, **kwargs):
+            seen.append(kwargs)
+            return {"status": "failed", "error": "stop here"}
+
+    monkeypatch.setattr(cli_bridge, "LOG_PATH", str(tmp_path / "search.log"))
+    monkeypatch.setattr(cli_bridge, "_pipeline", lambda: Pipeline())
+    monkeypatch.setattr(cli_bridge, "_identity_problem", lambda params, row: ("SKU", "", None))
+    monkeypatch.setattr(cli_bridge, "_candidate_sha", lambda *a: None)
+    monkeypatch.setattr(cli_bridge, "_product_changed", lambda params, task: False)
+    monkeypatch.setattr(cli_bridge, "_open_sheet", lambda: object())
+    monkeypatch.setattr(gs, "init_async_queue", lambda *a, **k: None)
+    monkeypatch.setattr(gs, "stop_async_queue", lambda *a, **k: None)
+    monkeypatch.setattr(gs, "find_link_column", lambda ws, create=True: 3)
+    monkeypatch.setattr(local_cache_db, "get_task_by_row", lambda row: None)
+    params = {"image_url": "https://shop/x.jpg", "product_name": "Sunflower Oil 1.5L", "brand": "Afia",
+              "size": "1.5L", "row_number": 5, "sku_key": "SKU"}
+    cli_bridge.action_select_image(dict(params))
+    upload = tmp_path / "upload.png"
+    upload.write_bytes(b"x")
+    cli_bridge.action_upload_manual_image(dict(params, file_path=str(upload)))
+    assert [(k["key_size"], k["key_brand"]) for k in seen] == [("1.5L", "Afia"), ("1.5L", "Afia")]
+
+
 def test_placeholder_write_for_another_product_goes_to_that_products_row(gs, outbox):
     ws = Sheet(PLACEHOLDERS)
     assert gs.update_image_link(ws, 2, 3, "https://res/oil.png", barcode="-", product_name="Sunflower Oil 1.5L",
@@ -515,6 +545,25 @@ def test_open_worksheet_reports_not_found_distinctly_from_transient(gs, offline,
         gs.open_worksheet(client, "https://docs.google.com/x")
     assert "429" in str(exc.value) and "ليس خطأ في رابط الشيت" in str(exc.value)
     assert client.calls == 6
+
+
+def test_dashboard_product_list_says_transient_not_sharing(gs, offline, monkeypatch, tmp_path):
+    import cli_bridge
+    monkeypatch.setattr(cli_bridge, "LOG_PATH", str(tmp_path / "search.log"))
+
+    def busy():
+        raise gs.SheetTransientError("APIError: [429]: quota (secret detail)")
+
+    monkeypatch.setattr(cli_bridge, "_open_sheet", busy)
+    result = cli_bridge.action_get_products({})
+    assert result["status"] == "failed" and "temporarily unavailable" in result["error"]
+    assert "shared with the service account" not in result["error"] and "secret" not in result["error"]
+
+    def missing():
+        raise RuntimeError("Sheet not found: x")
+
+    monkeypatch.setattr(cli_bridge, "_open_sheet", missing)
+    assert "shared with the service account" in cli_bridge.action_get_products({})["error"]
 
 
 def test_get_products_and_find_link_column_retry_transient_errors(gs, offline):
