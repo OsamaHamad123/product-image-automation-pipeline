@@ -35,7 +35,8 @@ The round ('expand') starts with a free step:
         can read is not worth paying for). A page whose own picture has the same bytes
         (sha256) as the picture that failed shows the wrong product itself: that image is
         never read again and never picked (rejected, reason 'x0:store_image_wrong', counted
-        in the outcome's reject_counts).
+        in the outcome's reject_counts). A multipack's picture read as several products (UNSURE,
+        its normal picture) is not a failed picture: on its own page it is read like any other.
 Then, within EXPANSION_MAX_CALLS paid calls (every provider call counts):
     X1  serper_web: the SKU's Q1 text (or the staff's custom query) scoped with site: OR
         over the brand's official domains and the main UAE retailers; the result pages
@@ -416,6 +417,22 @@ def _image_failed(rc: RankedCandidate) -> bool:
         v.brand_match == "no" or v.view in RECOVER_VIEWS)
 
 
+def _picture_wrong(spec: SkuSpec, rc: RankedCandidate) -> bool:
+    """The failed picture is no picture to offer for this SKU on any page: it failed the quality gate, or it
+    was read as another product, another brand, or not a single front pack (RECOVER_VIEWS). A multipack read
+    as several products is its normal picture (verify.classify reads it UNSURE, not MISMATCH): the page's own
+    copy of it is read like any image, never marked STORE_IMAGE_WRONG."""
+    if rc.quality is not None and not rc.quality.hard_ok:
+        return True
+    v = rc.verdict
+    if v is None:
+        return False
+    if v.decision == decide.MISMATCH or v.brand_match == "no":
+        return True
+    multipack = (spec.pack_count or 1) > 1
+    return v.view in RECOVER_VIEWS and not (multipack and v.view == "multi_product")
+
+
 _TRACKING_PARAMS = frozenset({"srsltid", "gclid", "fbclid", "gbraid", "wbraid", "msclkid", "ref", "ref_"})
 
 
@@ -693,7 +710,8 @@ def _recover(inp: RoundInput, report: RoundReport, collector: "_Collector") -> O
         return None
     # the pictures that failed: a page whose own picture is one of them shows the wrong product itself
     failed = {rc.fetched.content_sha256 for rc in pages
-              if rc.fetched is not None and rc.fetched.ok and rc.fetched.content_sha256}
+              if rc.fetched is not None and rc.fetched.ok and rc.fetched.content_sha256
+              and _picture_wrong(inp.spec, rc)}
     everything, n_new, n_kept = _grow(inp, report, new, RECOVER_VERIFY_CALLS, new_first=True, failed_shas=failed)
     report.new_candidates += n_new
     logger.info("expand sku=%s: X0 read %d pages, %d new candidates (%d fetched, %d the same wrong picture) -> %s",

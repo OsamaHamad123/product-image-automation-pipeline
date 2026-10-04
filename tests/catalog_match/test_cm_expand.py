@@ -867,3 +867,47 @@ def test_x0_spends_no_verifier_call_on_the_failed_picture_under_another_address(
     assert not any(own_img in call for call in d["verifier"].calls)  # but never read
     own = next(rc for rc in outcome.ranked if rc.candidate.image_url == own_img)
     assert STORE_WRONG in own.reasons
+
+
+PEPSI_6 = build_sku_spec({"name": "PEPSI CAN 6X330ML", "brand": "PEPSI"},
+                         {"pepsi": {"brand": "Pepsi", "synonyms": ["PEPSI"], "excluded_competitors": ["Coca Cola"]}})
+READ_6PACK = {"brand_text": "Pepsi", "variant_text": "Cola", "size_text": "6 x 330 ml", "pack_count": 6,
+              "view": "multi_product", "brand_match": "yes", "variant_match": "yes", "size_match": "yes"}
+
+
+@pytest.mark.parametrize("page_name", ["Pepsi Cola Can 6 x 330ml", "Pepsi Cola Can 330ml x 6"])
+def test_x0_never_calls_a_multipacks_own_picture_the_stores_wrong_one(page_name):
+    # A 6-pack read as several products is its normal picture (UNSURE). The Carrefour listing names no size
+    # (tier 2); its page names the 6-pack (tier 1) and shows the same picture: it was rejected as
+    # x0:store_image_wrong and the row left unselected; the right 6-pack is now pre-selected.
+    page = "https://www.carrefouruae.com/mafuae/en/soft-drinks/pepsi-cola-cans/p/123456"
+    listing_img, own_img = "https://img.example-cdn.com/pepsi-6pack.jpg", "https://img.example-cdn.com/pepsi-6x330.jpg"
+    exp = expand.Expansion(web=StubProvider("serper_web", []), shopping=StubProvider("serper_shopping", []),
+                           visual=None, pages=StubPages({page: product_page(page_name, own_img, brand="Pepsi")}),
+                           max_calls=4)
+    body = packshot_png(9)
+    outcome = pipeline.find_product_image(
+        PEPSI_6, providers=[StubProvider("serper", [cand(listing_img, "Pepsi Cola Cans | Carrefour UAE", page)])],
+        fetcher=StubFetcher({listing_img: body, own_img: body}),
+        verifier=StubVerifier({listing_img: READ_6PACK, own_img: READ_6PACK}), expansion=exp)
+    own = next(rc for rc in outcome.ranked if rc.candidate.image_url == own_img)
+    assert STORE_WRONG not in own.reasons and own.score.tier == 1
+    assert outcome.decision == "REVIEW_PRESELECTED" and outcome.winner.candidate.image_url == own_img
+
+
+def test_x0_still_calls_a_single_cans_multipack_picture_wrong():
+    # the same reading for a single can is another product (MISMATCH): its page's copy stays rejected
+    single = build_sku_spec({"name": "PEPSI CAN 330ML", "brand": "PEPSI"}, {})
+    page = "https://www.carrefouruae.com/mafuae/en/soft-drinks/pepsi-cola-can/p/1234"
+    listing_img, own_img = "https://img.example-cdn.com/pepsi-can.jpg", "https://img.example-cdn.com/pepsi-can-330.jpg"
+    exp = expand.Expansion(web=StubProvider("serper_web", []), shopping=StubProvider("serper_shopping", []),
+                           visual=None, pages=StubPages({page: product_page("Pepsi Cola Can 330ml", own_img)}),
+                           max_calls=4)
+    body = packshot_png(9)
+    read = dict(READ_6PACK, size_text="330 ml", pack_count=None)
+    outcome = pipeline.find_product_image(
+        single, providers=[StubProvider("serper", [cand(listing_img, "Pepsi Cola Can | Carrefour UAE", page)])],
+        fetcher=StubFetcher({listing_img: body, own_img: body}),
+        verifier=StubVerifier({listing_img: read, own_img: read}), expansion=exp)
+    own = next(rc for rc in outcome.ranked if rc.candidate.image_url == own_img)
+    assert STORE_WRONG in own.reasons and outcome.winner is None
