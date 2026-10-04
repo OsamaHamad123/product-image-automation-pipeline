@@ -440,12 +440,16 @@ def test_row16_the_site_name_of_an_official_domain_is_not_the_brand():
 
 def test_row25_the_brands_real_site_keeps_its_listing_for_the_label_reader():
     # with the suggested mapping (official alldefood.com) the live pick of row 25, 'products | Allde' read as
-    # Allde Meat Masala (MATCH), stays a brand listing (tier 2): the label reader still decides
+    # Allde Meat Masala (MATCH), stays a brand listing (tier 2: it names no size): the label reader still decides.
+    # 'Allde' is the brand's own site name and nothing else stands where a brand would: no site_name_brand doubt.
     spec = spec_of("ALLDE MEAT MASALA 160GM", "ALLDE", suggested_mappings())
     s = score_candidate(spec, listing("products | Allde", "https://alldefood.com/products/",
                                       "https://alldefood.com/wp-content/uploads/meat-masala.png"))
     assert s.matched["source_class"] == "official" and s.matched["brand"]
-    assert s.tier == 2 and "site_name_brand" in s.conflicts
+    assert s.tier == 2 and "site_name_brand" not in s.conflicts
+    named = score_candidate(spec, listing("Meat Masala 160g | Allde", "https://alldefood.com/products/meat-masala",
+                                          "https://alldefood.com/wp-content/uploads/meat-masala.png"))
+    assert named.tier == 1
 
 
 def _paratha_only(text):

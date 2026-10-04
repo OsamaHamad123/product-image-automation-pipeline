@@ -207,3 +207,33 @@ def test_saltwater_is_brine_only_on_a_tuna():
     assert sheet_names.readable("SALTWATER TAFFY 200G") == "SALTWATER TAFFY 200G"   # was 'SALT WATER TAFFY'
     assert "SALT WATER" in sheet_names.readable("SUP/T WT/MEAT SOLIDTUNA SALTWATER 185GM")      # row 49
     assert spec_of("SUP/T WT/MEAT SOLIDTUNA SALTWATER 185GM", "SUP/T").variants.get("medium") == "brine"
+
+
+# ---------------------------------------------------------------------------
+# site_name_brand: a brand's own page naming its product keeps tier 1
+# ---------------------------------------------------------------------------
+
+MARMUM = {"marmum": {"brand": "Marmum", "synonyms": ["Marmum"], "official_domains": ["marmum.ae"]}}
+MARMUM_PAGE = "https://www.marmum.ae/products/fresh-milk-full-cream"
+MARMUM_IMG = "https://www.marmum.ae/wp-content/uploads/2020/08/fresh-milk-full-cream-1l.png"
+
+
+@pytest.mark.parametrize("title", [
+    "Fresh Milk Full Cream 1L - Marmum",                 # golden uae-009: was tier 2 (site_name_brand)
+    "Marmum | Fresh Milk Full Cream 1L",
+    "Fresh Milk Full Cream 1L | Marmum Dairy Farm LLC",
+])
+def test_the_brands_own_page_naming_its_product_keeps_tier1(title):
+    spec = spec_of("MARMUM FRESH MILK FULL CREAM 1L", "MARMUM", MARMUM)
+    s = score_candidate(spec, listing(title, MARMUM_PAGE, MARMUM_IMG))
+    assert s.tier == 1 and "site_name_brand" not in s.conflicts
+
+
+@pytest.mark.parametrize("title", [
+    "Fresh Milk Full Cream 1L | Marmum Korea",              # a store in another country under the brand's name
+    "Buy Lacnor Fresh Milk Full Cream 1L Online | Marmum",  # another brand where the brand stands
+])
+def test_a_site_name_that_is_no_evidence_of_the_brand_still_caps(title):
+    spec = spec_of("MARMUM FRESH MILK FULL CREAM 1L", "MARMUM", MARMUM)
+    s = score_candidate(spec, listing(title, MARMUM_PAGE, MARMUM_IMG))
+    assert s.tier == 2 and "site_name_brand" in s.conflicts

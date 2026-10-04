@@ -37,9 +37,12 @@ and a missing sub-brand the SKU names (parent-brand-only evidence).
 Brand evidence ignores store-name title segments ('- Shop on Carrefour UAE'), so a
 private-label SKU never matches another brand through the retailer's name. On a page of
 the brand's official site (or a learned source) a brand found only in the site's own name
-segment ('| Mehran Foods Korea' on mehranfoods.com) keeps the brand match but never makes
-tier 1 (conflict site_name_brand): the site's trust already counts, its name is no evidence
-of which brand the page shows. The label reader must still read the brand for a pick.
+segment keeps the brand match; it never makes tier 1 (conflict site_name_brand) when that
+segment adds more than the brand and a company suffix ('| Mehran Foods Korea' on
+mehranfoods.com: a store in Korea) or the product part opens with another brand-like word
+('Buy DAWN BREAD Plain Frozen Paratha'). A plain 'Product - Brand' on the brand's own site
+('Fresh Milk Full Cream 1L - Marmum' on marmum.ae) is the brand naming its product: tier 1
+stays possible. The label reader must still read the brand for a pick.
 
 A brand that is also an everyday listing word (brand_index.is_generic_brand: 'Freshly',
 'Family', 'Golden Prize') turns up in other brands' listings ('Seara Chicken Shawarma
@@ -77,7 +80,7 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set, 
 
 from . import settings
 from . import variants as variants_mod
-from .brand_index import is_generic_brand
+from .brand_index import is_common_word, is_generic_brand
 from .gtin import is_restricted, normalize_gtin
 from .models import Candidate, CandidateScore, SkuSpec
 from .sizes import compare, compare_pack, parse_sizes
@@ -192,6 +195,65 @@ def strip_site_suffix(text: str, site_names: Sequence[str] = (), names_product=N
     if m and (_site_only(m.group("rest")) or _own_site_name(m.group("rest"), site_names, names_product)):
         out = out[:m.start()]
     return out
+
+
+@lru_cache(maxsize=1)
+def _company_words() -> frozenset:
+    return frozenset(match_string(w) for w in trusted_domains().get("company_suffixes", []) if match_string(w))
+
+
+def _site_segments(text: str, site_names: Sequence[str], names_product) -> Tuple[List[str], List[str]]:
+    """(product-part segments, own-site-name segments) of a title; store-name segments are in neither."""
+    product: List[str] = []
+    site: List[str] = []
+    for seg in _SEGMENT_SPLIT_RE.split(text or ""):
+        if seg and not _site_only(seg):
+            (site if _own_site_name(seg, site_names, names_product) else product).append(seg)
+    if product:
+        m = _TRAILING_SITE_RE.search(product[-1])
+        if m and _own_site_name(m.group("rest"), site_names, names_product):
+            site.append(m.group("rest"))
+            product[-1] = product[-1][:m.start()]
+    return product, site
+
+
+def _lead_word(text: str) -> str:
+    """The first word of a title segment once store names and filler ('Buy', 'Shop on Carrefour') are skipped."""
+    names, filler = _retailer_vocab()
+    rest = match_string(text)
+    while rest:
+        store = next((n for n in names if rest == n or rest.startswith(n + " ")), None)
+        if store:
+            rest = rest[len(store):].lstrip()
+            continue
+        word, _, rest = rest.partition(" ")
+        if word not in filler:
+            return word
+    return ""
+
+
+def _site_name_doubt(spec: SkuSpec, fields: Mapping[str, str], site_names: Sequence[str], names_product) -> bool:
+    """True when the official site's own name segment, the only place the brand is found, is no evidence of the
+    product's brand: the segment adds a word beyond the brand and a company suffix ('| Mehran Foods Korea'), or
+    the product part puts another brand-like word where a brand stands ('Buy DAWN BREAD Plain Frozen Paratha').
+    'Fresh Milk Full Cream 1L - Marmum' on marmum.ae is the brand's own page naming its product: no doubt."""
+    brand_toks = {t for p in tuple(spec.match_brands) + (spec.brand_raw, spec.brand_canonical) if p
+                  for t in tokens(p, strip_clitics=True)}
+    company = _company_words()
+    for name in TEXT_FIELDS:
+        product, site = _site_segments(fields.get(name, ""), site_names, names_product)
+        for seg in site:
+            if any(len(t) > 1 and t not in brand_toks and t not in company
+                   and not any(label.startswith(t) for label in site_names)
+                   for t in tokens(seg, strip_clitics=True)):
+                return True
+        part = next((seg for seg in product if names_product(seg)), None)
+        lead = _lead_word(part) if part else ""
+        if lead and not lead[0].isdigit() and lead not in brand_toks and not is_common_word(lead) \
+                and not names_product(lead) \
+                and lead not in variants_mod.variant_tokens(part, variants_mod.spec_context(spec)):
+            return True
+    return False
 
 
 def own_site_names(spec: SkuSpec, cand: Candidate) -> Tuple[str, ...]:
@@ -405,15 +467,16 @@ def score_candidate(spec: SkuSpec, cand: Candidate, negatives=None) -> Candidate
             brand_fields[name] = hit
     brand_ok = any(name in brand_fields for name in IDENTITY_FIELDS)
     # The own name of the official (or learned) site the page is on ('| Mehran Foods Korea' on mehranfoods.com)
-    # keeps the brand match but never makes tier 1: the site's trust already counts, and its name says nothing
-    # about which brand the page shows (see own_site_names).
+    # keeps the brand match but never makes tier 1 when it is no evidence of the product's brand (a place in it,
+    # another brand where a brand stands: _site_name_doubt); 'Fresh Milk Full Cream 1L - Marmum' keeps tier 1.
     site_name_only = False
     site_names = own_site_names(spec, cand) if brand_ok else ()
     if site_names:
         namer = _product_namer(spec)
         strict = {name: strip_site_suffix(fields[name], site_names, namer) for name in TEXT_FIELDS}
         site_name_only = not any(
-            any_brand_in(spec.match_brands, strict.get(name, brand_texts[name])) for name in IDENTITY_FIELDS)
+            any_brand_in(spec.match_brands, strict.get(name, brand_texts[name])) for name in IDENTITY_FIELDS) \
+            and _site_name_doubt(spec, fields, site_names, namer)
         if site_name_only:
             conflicts.append("site_name_brand")
     if spec.match_brands and not brand_fields:
