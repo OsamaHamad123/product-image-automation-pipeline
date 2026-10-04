@@ -741,3 +741,146 @@ out.second = requests('/api/select_image')[1].body.expected_state;
 """.replace("__CUR__", js(current)), tmp_path, fixture([B, OTHER]))
     assert out["second"] == {"queue_status": "completed", "queue_updated_at": "2026-10-03 11:00:00",
                              "approved_url": "https://res.cloudinary.com/demo/b.png"}
+
+
+# ---------------------------------------------------------------------------
+# wp/p4-publish-fix: an image another reviewer rejected after the page opened (state_changed, image_rejected)
+# ---------------------------------------------------------------------------
+
+@NEEDS_NODE
+def test_an_image_another_reviewer_rejected_is_said_and_never_offered_for_replacement(tmp_path):
+    out = page(r"""
+openRow(9);
+press('Enter');
+await flush();
+answer(requests('/api/select_image')[0], { status: 'failed', error_code: 'state_changed', reason: 'image_rejected',
+    error: 'هذه الصورة رفضها مراجع آخر لهذا المنتج؛ اختر صورة أخرى',
+    current: { queue_status: 'ready_for_review', queue_updated_at: '2026-10-03 10:00:00', approved_url: null,
+               rejected_image: true } }, 500);
+await flush();
+out.toast = toasts.slice(-1)[0];
+out.panel = jobsText();
+out.buttons = document.querySelectorAll('#rvJobs button').map(b => b.textContent).filter(t => t);
+out.bucket = itemOf(9).bucket;
+""", tmp_path, fixture([B, OTHER]))
+    assert out["toast"]["variant"] == "danger"
+    assert "رفضها مراجع آخر لهذا المنتج" in out["toast"]["text"] and "استبدال" not in out["toast"]["text"]
+    assert "رفضها مراجع آخر لهذا المنتج" in out["panel"] and "تغيّرت حالة المنتج" not in out["panel"]
+    assert "استبدال المعتمدة…" not in out["buttons"] and "أعد المحاولة" not in out["buttons"]
+    assert out["bucket"] == "proposed"                          # nothing was published: still waiting
+
+
+# ---------------------------------------------------------------------------
+# wp/p4-publish-fix C: the cut-out check's flags are named, and presentation-only flags are published only after an
+# explicit confirmation (publish_anyway, the same pattern as replace)
+# ---------------------------------------------------------------------------
+
+@NEEDS_NODE
+def test_presentation_flags_are_named_and_published_only_after_an_explicit_confirmation(tmp_path):
+    out = page(r"""
+openRow(9);
+press('Enter');
+await flush();
+const first = requests('/api/select_image')[0];
+out.first_anyway = first.body.publish_anyway === undefined ? null : first.body.publish_anyway;
+answer(first, { status: 'failed', error_code: 'quality_flags', error: 'quality', quality_flags: ['upscaled', 'too_small_on_canvas'],
+                publish_anyway_allowed: true, current: { queue_status: 'ready_for_review' } }, 500);
+await flush();
+out.toast = toasts.slice(-1)[0];
+out.panel = jobsText();
+const anyway = () => document.querySelectorAll('#rvJobs button').find(b => b.textContent === 'انشرها رغم ذلك…');
+out.buttons = document.querySelectorAll('#rvJobs button').map(b => b.textContent).filter(t => t);
+out.bucket = itemOf(9).bucket;
+confirmAnswer = false;
+anyway().click();
+await flush();
+out.after_no = [requests('/api/select_image').length, confirms.slice(-1)[0]];
+confirmAnswer = true;
+anyway().click();
+await flush();
+const second = requests('/api/select_image')[1];
+out.second = [second.body.publish_anyway, second.body.replace === undefined, second.body.image_url];
+answer(second, { status: 'success', image_link: 'https://res.cloudinary.com/demo/b.png', isolated: false, sheet: 'written',
+                 published_anyway: true, warning: 'quality_flags', warnings: ['quality_flags'], quality_flags: ['upscaled'] });
+await flush();
+out.done = [itemOf(9).bucket, toasts.slice(-1)[0].text];
+""", tmp_path, fixture([B, OTHER]))
+    assert out["first_anyway"] is None                          # never sent without the reviewer's confirmation
+    assert out["toast"]["variant"] == "danger" and "لم تُنشر صورة" in out["toast"]["text"]
+    assert "الصورة المصدر صغيرة فكُبّرت" in out["panel"] and "المنتج صغير على اللوحة" in out["panel"]
+    assert "upscaled" not in out["panel"] and "لم تُعزل خلفية" not in out["panel"]
+    assert "انشرها رغم ذلك…" in out["buttons"] and "أعد المحاولة" not in out["buttons"]
+    assert out["bucket"] == "proposed"                          # nothing was published: still waiting
+    assert out["after_no"][0] == 1 and "الصورة المصدر صغيرة فكُبّرت" in out["after_no"][1]
+    assert out["second"] == [True, True, B_URLS[0]]
+    assert out["done"][0] == "approved" and "رغم ملاحظات فحص القص: الصورة المصدر صغيرة فكُبّرت" in out["done"][1]
+    assert "لم تُعزل خلفيتها" not in out["done"][1]
+
+
+@NEEDS_NODE
+def test_a_failed_background_removal_is_named_and_never_offered_for_publishing(tmp_path):
+    out = page(r"""
+openRow(9);
+press('Enter');
+await flush();
+answer(requests('/api/select_image')[0], { status: 'failed', error_code: 'background_failed', error: 'bg',
+                                           quality_flags: ['edge_clipped'], publish_anyway_allowed: false }, 500);
+await flush();
+out.toast = toasts.slice(-1)[0].text;
+out.panel = jobsText();
+out.buttons = document.querySelectorAll('#rvJobs button').map(b => b.textContent).filter(t => t);
+""", tmp_path, fixture([B, OTHER]))
+    assert "لم تُعزل خلفية الصورة (المنتج مقصوص عند حافة الصورة)" in out["panel"]
+    assert "edge_clipped" not in out["panel"] and "رغم ذلك" not in out["toast"]
+    assert "انشرها رغم ذلك…" not in out["buttons"] and "أعد المحاولة" not in out["buttons"]
+
+
+@NEEDS_NODE
+def test_an_upload_publishes_anyway_only_after_the_confirmation(tmp_path):
+    final = product(7, "Almarai Cheese 200g", existing_image_link="https://res.cloudinary.com/demo/c.png")
+    out = page(r"""
+openRow(7);
+openNotFound();
+const file = ws().querySelector('input[type="file"]');
+file.files = [new Blob(['png'], { type: 'image/png' })];
+dispatch(file, { type: 'change', bubbles: true });
+press('Enter');
+await flush();
+const first = requests('/api/upload_manual_image')[0];
+out.first = first.body.publish_anyway === undefined ? null : first.body.publish_anyway;
+answer(first, { status: 'failed', error_code: 'quality_flags', quality_flags: ['alpha_haze'], publish_anyway_allowed: true }, 500);
+await flush();
+confirmAnswer = true;
+document.querySelectorAll('#rvJobs button').find(b => b.textContent === 'انشرها رغم ذلك…').click();
+await flush();
+out.second = requests('/api/upload_manual_image')[1].body.publish_anyway;
+""", tmp_path, fixture([B, final], rows=ready_rows([B])))
+    assert out["first"] is None and out["second"] == "1"
+
+
+@NEEDS_NODE
+def test_a_kept_shadow_is_named_and_an_upscaled_note_is_a_note_not_a_warning(tmp_path):
+    out = page(r"""
+openRow(9);
+press('Enter');
+await flush();
+answer(requests('/api/select_image')[0], { status: 'failed', error_code: 'quality_flags', quality_flags: ['kept_shadow'],
+                                           publish_anyway_allowed: true }, 500);
+await flush();
+out.panel = jobsText();
+out.buttons = document.querySelectorAll('#rvJobs button').map(b => b.textContent).filter(t => t);
+openRow(8);
+press('Enter');
+await flush();
+answer(requests('/api/select_image')[1], { status: 'success', image_link: 'https://res.cloudinary.com/demo/l.png',
+                                           isolated: true, sheet: 'written', quality_notes: ['upscaled'] });
+await flush();
+out.toasts = toasts.map(t => [t.variant, t.text]);
+openRow(8);
+out.text = wsText();
+""", tmp_path, fixture([B, OTHER]))
+    assert "بقي ظل ظاهر مع المنتج" in out["panel"] and "kept_shadow" not in out["panel"]
+    assert "انشرها رغم ذلك…" in out["buttons"]
+    assert "ملاحظة من فحص القص:" in out["text"] and "الصورة المصدر صغيرة فكُبّرت لتملأ اللوحة" in out["text"]
+    assert "الخلفية لم تُعزل" not in out["text"]
+    assert not [t for v, t in out["toasts"] if "كُبّرت" in t]     # a note is not a warning toast

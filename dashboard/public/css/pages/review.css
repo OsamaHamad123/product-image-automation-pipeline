@@ -1300,8 +1300,10 @@
     color: var(--lq-danger-text);
 }
 
-/* the product changed after the page showed it: replacing needs an explicit confirmation */
-.rv-jobs__replace {
+/* the product changed after the page showed it: replacing needs an explicit confirmation; so does publishing a
+   cut-out with presentation-only flags from the quality check */
+.rv-jobs__replace,
+.rv-jobs__anyway {
     flex-shrink: 0;
 }
 

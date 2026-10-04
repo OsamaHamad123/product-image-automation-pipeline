@@ -81,13 +81,18 @@ def sheet(monkeypatch, tmp_path):
 
     def fake_publish(image_url, name, brand, row_number, worksheet, link_column_index, **kwargs):
         events.append(("publish", image_url))
-        return {"status": "published", "isolated": True, "provider": "photoroom", "metadata": {},
-                "width": 800, "height": 800, "link": LINK, "sheet_value": LINK}
+        res = {"status": "published", "isolated": True, "provider": "photoroom", "metadata": {},
+               "width": 800, "height": 800, "link": LINK, "sheet_value": LINK}
+        if kwargs.get("after_write"):
+            kwargs["after_write"](res)        # the decision is recorded under the publish lock
+        return res
 
     monkeypatch.setattr(cli_bridge, "LOG_PATH", str(tmp_path / "search.log"))
     monkeypatch.setattr(main, "publish_image", fake_publish)
     monkeypatch.setattr(google_sheets, "init_async_queue", lambda *a, **k: None)
     monkeypatch.setattr(google_sheets, "stop_async_queue", lambda *a, **k: None)
+    # the sheet outcome (C3) is not what these tests read: an empty outbox, not an offline database error
+    monkeypatch.setattr(google_sheets, "outbox_outcomes", lambda *a, **k: {}, raising=False)
     monkeypatch.setattr(google_sheets, "get_sheets_client", lambda: object())
     monkeypatch.setattr(google_sheets, "get_brand_mappings", lambda *a, **k: {})
     monkeypatch.setattr(google_sheets, "open_worksheet", lambda client, name: ws)
@@ -137,7 +142,7 @@ def recorder(sheet, offline, monkeypatch):
         return lambda *a, **k: events.append((name, a, k)) or result
 
     monkeypatch.setattr(local_cache_db, "get_task_by_row", lambda row: None)
-    monkeypatch.setattr(local_cache_db, "get_curation_candidates", lambda row, sku_key=None: list(state["candidates"]))
+    monkeypatch.setattr(local_cache_db, "get_curation_candidates", lambda row, sku_key=None, **k: list(state["candidates"]))
     monkeypatch.setattr(local_cache_db, "get_cached_product", lambda **k: state["approved"])
     monkeypatch.setattr(local_cache_db, "get_rejections", lambda sku: ([], []))
     for name in ("save_product_resolution", "update_task_status_by_row", "delete_curation_candidates",

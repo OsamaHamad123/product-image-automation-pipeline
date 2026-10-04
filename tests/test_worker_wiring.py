@@ -225,6 +225,7 @@ def test_auto_approve_not_isolated_is_not_cached(offline, monkeypatch, tmp_path)
     monkeypatch.setattr(local_cache_db, "save_product_resolution", lambda *a, **k: cached.append(k) or True)
     monkeypatch.setattr(local_cache_db, "get_cached_product", lambda **k: None)
     monkeypatch.setattr(local_cache_db, "find_image_owners", lambda *a, **k: [])
+    monkeypatch.setattr(local_cache_db, "get_rejections", lambda sku: ([], []))    # read under the publish lock
 
     status = main.auto_approve_product(_task(), _best("AUTO_PUBLISH"), object(), 5, sku_key="sku-laban-up")
 
@@ -256,6 +257,7 @@ def test_auto_approve_writes_with_size_and_brand_identity(offline, monkeypatch, 
     monkeypatch.setattr(local_cache_db, "delete_product_failure", lambda *a, **k: True)
     monkeypatch.setattr(local_cache_db, "get_cached_product", lambda **k: None)
     monkeypatch.setattr(local_cache_db, "find_image_owners", lambda *a, **k: [])
+    monkeypatch.setattr(local_cache_db, "get_rejections", lambda sku: ([], []))    # read under the publish lock
 
     status = main.auto_approve_product(_task(size="180ml"), _best("AUTO_PUBLISH"), object(), 5, sku_key="sku-laban-up")
 
@@ -480,7 +482,8 @@ def test_a_busy_publish_lock_writes_nothing(race, monkeypatch):
 
     monkeypatch.setattr(local_cache_db, "sku_publish_lock", busy)
     task = dict(_task(), worker_id="w1#claim")
-    assert main.auto_approve_product(task, _best("AUTO_PUBLISH"), object(), 5, sku_key="sku-laban-up") == "superseded"
+    # 'busy' (not 'superseded'): the worker puts the row back to the queue instead of leaving it processing
+    assert main.auto_approve_product(task, _best("AUTO_PUBLISH"), object(), 5, sku_key="sku-laban-up") == "busy"
     assert rec["sheet"] == [] and rec["resolution"] == []
 
 

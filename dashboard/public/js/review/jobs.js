@@ -6,6 +6,8 @@
  * of the same product is refused), and a failed job keeps its reason until the reviewer retries or dismisses it.
  * An approval the server refused because the product changed since the page showed it (already_approved /
  * state_changed, contract C1) keeps what changed (job.stale); only an explicit «replace» resends it, with replace.
+ * An approval refused because the cut-out failed its check (quality_flags / background_failed) keeps the flags
+ * (job.quality); presentation-only flags are published only by an explicit «publish anyway» (publish_anyway).
  */
 (function (root) {
     'use strict';
@@ -42,11 +44,13 @@
         }
 
         function errorOf(result, job) {
-            if (!result || result.network) return { text: 'ما قدرنا نوصل للخادم.', detail: 'network', stale: null };
+            if (!result || result.network) return { text: 'ما قدرنا نوصل للخادم.', detail: 'network', stale: null, quality: null };
             const data = result.data || {};
             const raw = String(data.error || data.message || data.error_code || (result.status ? `HTTP ${result.status}` : ''));
             const stale = R.staleInfo ? R.staleInfo(data, job && job.expected) : null;
-            return { text: stale ? stale.text : R.plainError(raw, 'ما انعتمدت.'), detail: raw, stale: stale };
+            const quality = R.qualityInfo ? R.qualityInfo(data) : null;
+            const text = stale ? stale.text : (quality ? quality.text : R.plainError(raw, 'ما انعتمدت.'));
+            return { text: text, detail: raw, stale: stale, quality: quality };
         }
 
         // job: { key, type: 'approve' | 'upload' | 'reject', label, ... } → the job, or null if this product already has one
@@ -77,11 +81,13 @@
             next.result = result;
             next.state = success ? 'done' : 'failed';
             next.stale = null;
+            next.quality = null;
             if (!success) {
                 const e = errorOf(result, next);
                 next.error = e.text;
                 next.detail = e.detail;
                 next.stale = e.stale;
+                next.quality = e.quality;
             }
             running = null;
             if (typeof options.onSettle === 'function') {

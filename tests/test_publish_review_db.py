@@ -578,12 +578,15 @@ def test_the_worker_taking_the_row_after_the_page_opened_refuses_the_approval(db
 
 
 def test_the_upload_endpoint_forwards_what_the_page_showed():
-    """ApiController::uploadManualImage passes only chosen fields to the bridge: C1's fields must be among them,
-    expected_state decoded from the form's JSON text and replace as a boolean (test_review_api_forwarding.py runs it)."""
+    """ApiController::uploadManualImage passes only chosen fields to the bridge: C1's fields (the decoded expected_state,
+    replace) and the reviewer's publish_anyway confirmation must be among them; selectImage forwards all fields and
+    reads both confirmations as booleans."""
     text = (ROOT / "dashboard" / "app" / "Http" / "Controllers" / "ApiController.php").read_text(encoding="utf-8")
     method = text[text.index("function uploadManualImage"):text.index("function clearProductsCache")]
-    assert "$params['expected_state'] = " in method
-    assert "$params['replace'] = $request->boolean('replace')" in method
+    for field in ("expected_state", "replace", "publish_anyway"):
+        assert f"$params['{field}']" in method, field
+    select = text[text.index("function selectImage"):text.index("function rejectImage")]
+    assert "$request->boolean('replace')" in select and "$request->boolean('publish_anyway')" in select
 
 
 # ---------------------------------------------------------------------------

@@ -106,7 +106,7 @@ def bridge(offline, monkeypatch, tmp_path):
     monkeypatch.setattr(cli_bridge, "LOG_PATH", str(tmp_path / "search.log"))
     monkeypatch.setattr(local_cache_db, "get_task_by_row", lambda row: {"sku_key": "06281007000024", "barcode": "6281007000024",
                                                                          "product_name": "Laban Up"})
-    monkeypatch.setattr(local_cache_db, "get_curation_candidates", lambda row, sku_key=None: [])
+    monkeypatch.setattr(local_cache_db, "get_curation_candidates", lambda row, sku_key=None, **k: [])
     monkeypatch.setattr(local_cache_db, "get_cached_product", lambda **k: calls["approved"])
     calls["approved"] = None
     calls["status"] = []
@@ -140,6 +140,9 @@ def test_reject_flow(bridge, monkeypatch):
     url = "https://www.carrefouruae.com/img/laban-up-strawberry.jpg"
     ws = FakeWorksheet(f"needs_review:{url}")
     monkeypatch.setattr(google_sheets, "open_worksheet", lambda client, name: ws)
+    # the published image is the rejected one (an approval is voided only when it is the rejected image)
+    calls["approved"] = {"original_url": url, "cloudinary_url": "https://res.cloudinary.com/demo/laban.png",
+                         "verification_status": "auto_verified"}
 
     result = _reject(cli_bridge, url)
 
@@ -282,9 +285,9 @@ def review(bridge, monkeypatch):
     calls["stored"] = []
     calls["excluded"] = []
     calls["saved"] = []
-    monkeypatch.setattr(local_cache_db, "get_curation_candidates", lambda row, sku_key=None: list(calls["stored"]))
+    monkeypatch.setattr(local_cache_db, "get_curation_candidates", lambda row, sku_key=None, **k: list(calls["stored"]))
     monkeypatch.setattr(local_cache_db, "exclude_curation_candidate",
-                        lambda row, url, sku_key=None: calls["excluded"].append((row, url, sku_key)) or 1)
+                        lambda row, url, sku_key=None, **k: calls["excluded"].append((row, url, sku_key)) or 1)
     monkeypatch.setattr(local_cache_db, "save_curation_candidates",
                         lambda *a, **k: calls["saved"].append((a, k)) or True)
     monkeypatch.setattr(local_cache_db, "get_tasks_by_sku", lambda sku: [])

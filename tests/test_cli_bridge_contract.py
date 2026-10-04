@@ -305,7 +305,7 @@ def test_an_explicit_approval_of_another_products_image_is_written_with_a_warnin
              "match": "phash", "distance": 2}
     seen = []
     monkeypatch.setattr(local_cache_db, "find_image_owners",
-                        lambda url, phash, sku_key=None, product_name=None: seen.append((url, sku_key)) or [owner])
+                        lambda url, phash, sku_key=None, product_name=None, **k: seen.append((url, sku_key)) or [owner])
     monkeypatch.setattr(main_module(), "_canvas_phash", lambda path: "00ff00ff00ff00ff")
     result = bridge.action_select_image(dict(SELECT_PARAMS))
     assert result["status"] == "success"
@@ -351,19 +351,21 @@ def test_a_product_on_two_rows_gets_the_approval_on_both(select_env, monkeypatch
     assert result["rows_written"] == [4, 9] and [e[1] for e in events if e[0] == "link"] == [4, 9]
 
 
-def test_select_not_isolated_writes_needs_review(select_env):
+def test_select_not_isolated_is_refused_and_writes_nothing(select_env):
+    """An approval whose background was not removed at all is not published (it used to be written needs_review:
+    while the approval was saved human_approved and the row completed): the product stays in review."""
     bridge, events, state = select_env
     state["isolated"] = False
-    result = bridge.action_select_image(dict(SELECT_PARAMS))
-    assert result["status"] == "success"
-    assert result["warning"] == "background_not_removed"
-    link = next(e for e in events if e[0] == "link")
-    assert link[3].startswith("needs_review:https://res.cloudinary.com/")
+    for anyway in (False, True):                      # a failed background removal is never published anyway
+        result = bridge.action_select_image(dict(SELECT_PARAMS, publish_anyway=anyway))
+        assert (result["status"], result["error_code"]) == ("failed", "background_failed")
+        assert result["publish_anyway_allowed"] is False and result["quality_flags"] == [] and result["error"]
+    assert not any(e[0] in ("upload", "link", "resolution") for e in events)
 
 
-def test_a_cutout_that_failed_the_quality_gate_stays_needs_review(select_env, monkeypatch):
-    """The image package returns a cutout that failed its quality gate as not isolated (with quality_flags when
-    it provides them): written with the needs_review: prefix, never as a clean publish, and the flags reach the page."""
+def test_a_cutout_that_failed_the_quality_gate_is_refused_with_its_flags(select_env, monkeypatch):
+    """The image package returns a cutout that failed its quality gate as not isolated (with quality_flags): never a
+    clean publish nor a needs_review: approval, and the flags reach the page."""
     import image_processor
     bridge, events, state = select_env
     original = image_processor.process_product_image_result
@@ -375,10 +377,10 @@ def test_a_cutout_that_failed_the_quality_gate_stays_needs_review(select_env, mo
         return result
 
     monkeypatch.setattr(image_processor, "process_product_image_result", gated)
-    result = bridge.action_select_image(dict(SELECT_PARAMS))
-    assert result["status"] == "success" and result["warning"] == "background_not_removed"
-    assert result["quality_flags"] == ["halo_fringe"]
-    assert next(e for e in events if e[0] == "link")[3].startswith("needs_review:")
+    result = bridge.action_select_image(dict(SELECT_PARAMS, publish_anyway=True))
+    assert (result["status"], result["error_code"]) == ("failed", "background_failed")
+    assert result["quality_flags"] == ["halo_fringe"] and result["publish_anyway_allowed"] is False
+    assert not any(e[0] in ("link", "resolution") for e in events)
 
 
 def test_select_requires_identity(select_env, monkeypatch):
@@ -456,7 +458,7 @@ def stale_env(select_env, monkeypatch):
     monkeypatch.setattr(local_cache_db, "get_cached_product", lambda **k: state["approval"])
     monkeypatch.setattr(local_cache_db, "get_task_by_row", lambda row: state["task"])
     monkeypatch.setattr(local_cache_db, "release_worker_claims",
-                        lambda row, sku_key=None: state["fenced"].append((row, sku_key)) or 1)
+                        lambda row, sku_key=None, **k: state["fenced"].append((row, sku_key)) or 1)
     state["now"] = datetime.datetime.now().replace(microsecond=0)
     return bridge, events, state
 

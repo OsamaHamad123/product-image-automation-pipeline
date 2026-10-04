@@ -594,12 +594,18 @@
         return status ? (QUEUE_STATUS_TEXT[status] || 'حالة غير معروفة') : 'ليس في الطابور';
     }
 
-    // ما تغيّر منذ فتح الصفحة، بالعربي، من رد الخادم (error_code و current) وما أرسلته الصفحة (expected)؛ null لغيره
+    // ما تغيّر منذ فتح الصفحة، بالعربي، من رد الخادم (error_code و current) وما أرسلته الصفحة (expected)؛ null لغيره.
+    // replaceable=false: لا يُعرض «استبدال المعتمدة»؛ الصورة نفسها رفضها مراجع آخر (reason=image_rejected) والخادم
+    // يرفض اعتمادها حتى مع replace
     function staleInfo(data, expected) {
         data = data || {};
         const code = String(data.error_code || '');
         if (!STALE_CODES.includes(code)) return null;
         const cur = data.current && typeof data.current === 'object' && !Array.isArray(data.current) ? data.current : {};
+        if (data.reason === 'image_rejected' || cur.rejected_image === true) {
+            return { code: code, reason: 'image_rejected', current: cur, approvedUrl: String(cur.approved_url || '').trim(),
+                     replaceable: false, text: 'هذه الصورة رفضها مراجع آخر لهذا المنتج بعد فتح الصفحة؛ اختر صورة أخرى.' };
+        }
         const exp = expected || {};
         const parts = [code === 'already_approved' ? 'اعتُمدت لهذا المنتج صورة بعد فتح الصفحة' : 'تغيّرت حالة المنتج بعد فتح الصفحة'];
         const curUrl = String(cur.approved_url || '').trim();
@@ -609,7 +615,7 @@
         if ('queue_status' in cur && (cur.queue_status || null) !== (exp.queue_status || null)) {
             parts.push(`حالته كانت «${queueText(exp.queue_status)}» وصارت «${queueText(cur.queue_status)}»`);
         }
-        return { code: code, current: cur, approvedUrl: curUrl, text: parts.join('، ') + '.' };
+        return { code: code, current: cur, approvedUrl: curUrl, replaceable: true, text: parts.join('، ') + '.' };
     }
 
     // ما يُقال عن الشيت بعد الاعتماد (عقد C3: sheet = written | pending | conflict | unknown). لا يُقال «كُتب في الشيت»
@@ -644,11 +650,36 @@
         alpha_haze: 'هالة أو ضباب حول حواف المنتج',
         second_object: 'ظهر جسم آخر بجانب المنتج',
         upscaled: 'الصورة المصدر صغيرة فكُبّرت',
-        too_small_on_canvas: 'المنتج صغير على اللوحة'
+        too_small_on_canvas: 'المنتج صغير على اللوحة',
+        kept_shadow: 'بقي ظل ظاهر مع المنتج'
+    };
+    // ملاحظات الفحص غير المانعة (quality_notes): تُعرض ملاحظةً لا تحذيراً، والصورة نُشرت نظيفة
+    const QUALITY_NOTE_LABELS = {
+        upscaled: 'الصورة المصدر صغيرة فكُبّرت لتملأ اللوحة'
     };
 
     function qualityFlagText(code) {
         return QUALITY_FLAG_LABELS[String(code || '')] || 'ملاحظة أخرى من فحص القص';
+    }
+
+    function qualityNoteText(code) {
+        return QUALITY_NOTE_LABELS[String(code || '')] || 'ملاحظة من فحص القص';
+    }
+
+    // اعتماد / رفع لم يُنشر لأن القص لم يجتز الفحص (error_code quality_flags أو background_failed): العلامات بالعربي، و
+    // allowed=true عندما تخص العرض فقط فيستطيع المراجع نشرها رغمها بعد تأكيد صريح (publish_anyway)؛ null لغيره
+    function qualityInfo(data) {
+        data = data || {};
+        const code = String(data.error_code || '');
+        if (code !== 'quality_flags' && code !== 'background_failed') return null;
+        const flags = Array.isArray(data.quality_flags) ? data.quality_flags.map(f => String(f)) : [];
+        const texts = Array.from(new Set(flags.map(qualityFlagText)));
+        const allowed = code === 'quality_flags' && data.publish_anyway_allowed === true;
+        const what = texts.length ? texts.join('، ') : 'لم تُعزل الخلفية';
+        const text = allowed
+            ? `فحص القص وجد في الصورة: ${what}. لم تُنشر بعد.`
+            : `لم تُعزل خلفية الصورة (${what}). لم تُنشر؛ اختر صورة أخرى أو ارفع صورة أوضح.`;
+        return { code: code, flags: flags, texts: texts, allowed: allowed, text: text };
     }
 
     // ما يُقال للمراجع بعد اعتماد ناجح: الخلفية (background_not_removed)، الصورة نفسها لمنتج آخر (duplicate_image و
@@ -661,12 +692,16 @@
         const names = owners.map(o => (o && typeof o === 'object')
             ? String(o.product_name || o.sku_key || o.cloudinary_url || '').trim() : String(o || '').trim()).filter(Boolean);
         const flags = Array.isArray(data.quality_flags) ? data.quality_flags.map(f => String(f)) : [];
+        const notes = Array.isArray(data.quality_notes) ? data.quality_notes.map(f => String(f)) : [];
         return {
             bgFailed: list.includes('background_not_removed') || link.startsWith('needs_review:'),
+            // نُشرت نظيفة رغم علامات العرض بعد تأكيد المراجع (publish_anyway)
+            publishedAnyway: data.published_anyway === true || list.includes('quality_flags'),
             duplicate: list.includes('duplicate_image') || owners.length > 0,
             duplicateOf: names,
             flags: flags,
-            flagTexts: Array.from(new Set(flags.map(qualityFlagText)))
+            flagTexts: Array.from(new Set(flags.map(qualityFlagText))),
+            noteTexts: Array.from(new Set(notes.map(qualityNoteText)))
         };
     }
 
@@ -962,7 +997,7 @@
         productIdentity, sameProduct, itemKey, failureKey, reviewedCandidateView,
         searchBody, selectBody, rejectBody, uploadFields,
         matchQueue, classify, hasFinalImage, bgFailedLink, shownApprovedUrl, expectedState, staleInfo, queueText,
-        sheetNote, expectedFromCurrent, qualityFlagText, approvalNotes, rejectionOutcome,
+        sheetNote, expectedFromCurrent, qualityFlagText, qualityNoteText, qualityInfo, approvalNotes, rejectionOutcome,
         confidenceRank, compareWaiting, sortWaiting, buildItems, countBuckets, matchesQuery, filterItems,
         sizeText, categoryPath, factsFor, checksFor, cautionsFor
     });
