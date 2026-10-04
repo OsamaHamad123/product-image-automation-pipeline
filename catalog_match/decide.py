@@ -785,8 +785,8 @@ def _same_picture(a: RankedCandidate, b: RankedCandidate) -> bool:
 def _identity_not_weaker(copy: RankedCandidate, winner: RankedCandidate) -> bool:
     """The copy's own listing evidence is at least the winner's on every identity key and on source trust.
 
-    Keys (score.rank_key, lower is better): tier, size match, variants matched, no soft conflict,
-    class coverage, source trust. A larger picture never buys a weaker listing.
+    Keys (score.rank_key, lower is better): tier, size match, variants matched, class coverage,
+    no soft conflict, source trust. A larger picture never buys a weaker listing.
     """
     kc = rank_key(copy.candidate, copy.score)
     kw = rank_key(winner.candidate, winner.score)

@@ -237,3 +237,32 @@ def test_a_site_name_that_is_no_evidence_of_the_brand_still_caps(title):
     spec = spec_of("MARMUM FRESH MILK FULL CREAM 1L", "MARMUM", MARMUM)
     s = score_candidate(spec, listing(title, MARMUM_PAGE, MARMUM_IMG))
     assert s.tier == 2 and "site_name_brand" in s.conflicts
+
+
+# ---------------------------------------------------------------------------
+# rank_key: product-type coverage before 'no soft conflict'
+# ---------------------------------------------------------------------------
+
+def test_a_listing_of_another_product_type_never_ranks_above_the_right_type():
+    # 'Aida Mixed Vegetables' (no product word) ranked above the crinkle-cut fries for the fries' soft doubt,
+    # and route() pre-selected the vegetables when both read MATCH
+    spec = spec_of("AIDA FRENCH FRIES 1KG", "AIDA")
+    fries = listing("Aida Crinkle Cut French Fries 1kg | Lulu UAE", image_url="https://i.example.com/fries.jpg")
+    veg = listing("Aida Mixed Vegetables 1kg | Carrefour UAE", "https://www.carrefouruae.com/mafuae/en/x/aida-veg/p/2",
+                  "https://i.example.com/veg.jpg")
+    assert rank_key(fries, score_candidate(spec, fries)) < rank_key(veg, score_candidate(spec, veg))
+    out = route(spec, [read_as_match(spec, veg, "a"), read_as_match(spec, fries, "b")])
+    assert out.winner is not None and out.winner.candidate.image_url == fries.image_url
+
+
+def test_the_official_milk_page_ranks_above_a_laban_listing_of_the_brand():
+    spec = spec_of("MARMUM FRESH MILK FULL CREAM 1L", "MARMUM", MARMUM)
+    page = listing("Milk Full Cream 1L | Marmum Korea", "https://www.marmum.ae/products/milk-full-cream",
+                   "https://www.marmum.ae/wp-content/uploads/milk-1l.png")                # capped: a soft doubt
+    laban = listing("Shop Marmum Laban Full Cream 1L online in Dubai, Abu Dhabi and all UAE",
+                    "https://www.noon.com/uae-en/laban-full-cream-1l/N20346969A/p/", "https://i.example.com/laban.jpg")
+    ps, ls = score_candidate(spec, page), score_candidate(spec, laban)
+    assert ps.tier == ls.tier == 2 and ps.matched["variants"] == ls.matched["variants"] == ["fat"]
+    assert "site_name_brand" in ps.conflicts and not ls.conflicts
+    assert ls.matched["coverage"] == 0.0 < ps.matched["coverage"]
+    assert rank_key(page, ps) < rank_key(laban, ls)                 # the laban (no 'milk') ranked first

@@ -64,7 +64,7 @@ Under 'strict' a GTIN match with brand OR class-coverage corroboration is tier 1
 GTIN match alone is tier 2 (the earlier rule).
 
 rank(scored, quality) sorts by the lexicographic key
-    tier > size match > variants matched > no soft conflict > class coverage > source trust
+    tier > size match > variants matched > class coverage > no soft conflict > source trust
     > consensus_count > quality soft score
 so a sharper photo can only break ties between candidates with identical identity evidence.
 """
@@ -765,7 +765,7 @@ SOFT_CONFLICTS = ("url_size_conflict", "url_pack_conflict", "image_variant_confl
                   "generic_brand_position", "site_name_brand")
 
 
-# rank_key's identity part (tier, size, variants, no soft conflict, coverage, trust): decide and expand compare a
+# rank_key's identity part (tier, size, variants, coverage, no soft conflict, trust): decide and expand compare a
 # larger copy of a pick on these keys only, never on consensus, quality or provider order.
 IDENTITY_KEYS = 6
 
@@ -798,10 +798,11 @@ def rank_key(cand: Candidate, score: CandidateScore, quality_score: float = 0.0)
     """Ascending sort key implementing the D4 lexicographic order (best first).
 
     The identity part is the first six keys (decide and expand compare copies on them): tier, size,
-    variants matched, no soft conflict, class coverage, source trust. The soft-conflict key keeps a
-    listing that states a variant the SKU does not (live run 2026-10-03, row 11: Lulu's 'Sunbulah Thin
-    French Fries 1 kg' for 'SUNBULAH FRENCH FRIES 1KG') below the plain listing it tied with, which it
-    beat on provider order alone.
+    variants matched, class coverage, no soft conflict, source trust. Coverage comes first: 'Aida Mixed
+    Vegetables 1kg' (no product word of 'AIDA FRENCH FRIES 1KG') never ranks above 'Aida Crinkle Cut French
+    Fries 1kg' for a soft doubt the fries listing carries. The soft-conflict key then keeps a listing that
+    states a variant the SKU does not (live run 2026-10-03, row 11: Lulu's 'Sunbulah Thin French Fries 1 kg'
+    for 'SUNBULAH FRENCH FRIES 1KG') below the plain listing it tied with, which it beat on provider order alone.
     """
     rejected = score.tier is None or bool(score.hard_reject)
     tier_rank = 0 if rejected else 4 - int(score.tier)
@@ -810,8 +811,8 @@ def rank_key(cand: Candidate, score: CandidateScore, quality_score: float = 0.0)
         -tier_rank,
         -_SIZE_RANK.get(score.size_status, 0),
         -len(matched.get("variants") or ()),
-        int(has_soft_conflict(score)),
         -float(matched.get("coverage") or 0.0),
+        int(has_soft_conflict(score)),
         -int(matched.get("source_trust") or 0),
         -int(cand.consensus_count or 1),
         -float(quality_score or 0.0),

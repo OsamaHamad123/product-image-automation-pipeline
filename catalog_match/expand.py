@@ -837,7 +837,7 @@ def _append_health(report: RoundReport) -> None:
 
 
 def _identity_key(rc: RankedCandidate) -> Tuple:
-    """score.rank_key's identity part: tier, size, variants, no soft conflict, class coverage, source trust
+    """score.rank_key's identity part: tier, size, variants, class coverage, no soft conflict, source trust
     (no quality)."""
     return rank_key(rc.candidate, rc.score)[:IDENTITY_KEYS]
 
