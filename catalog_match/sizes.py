@@ -14,6 +14,8 @@ parse_sizes(text, source_field) -> list[Size]
       "Q g N's" for a food sold by the piece        -> Q with pieces=N as well: 'PARATHA 400GM 5S'
                                                       is the same pack written the other way round
                                                       ('NOODLES 75G 5S' stays a pack of five)
+      "N x Q g M's" for a food sold by the piece    -> pack N of Q with pieces=M in each unit:
+                                                      'PARATHA 2X400GM 5S' is two packs of 5
       'N pcs' / 'N bags' ... with no measured size -> a count
       '1/2 kg', '½ L', '1 1/2 kg'                  -> fractions
       '2.5-3 kg'                                   -> a range: two sizes, so 'ambiguous'
@@ -264,6 +266,11 @@ def parse_sizes(text: Optional[str], source_field: str = "") -> List[Size]:
             if s.dimension != "mass":
                 pack_ns |= {n for p, n, _, kind in packs if n > 1 and kind == "n_s_piece"}
             if s.pack_count:
+                # 'PARATHA 2X400GM 5S': two 400 g packs, and the "N's" of a food sold by the piece counts the
+                # pieces in each one (live run 2026-10-04, row 15); the pack count stays the 'N x Q' one
+                unit_pieces = {n for p, n, _, kind in packs if n > 1 and kind == "n_s_piece"}
+                if s.dimension == "mass" and len(unit_pieces) == 1:
+                    s = replace(s, pieces=next(iter(unit_pieces)))
                 out.append(s)
             elif s.dimension == "mass":
                 if len(pack_ns) == 1:

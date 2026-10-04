@@ -24,6 +24,7 @@
     const REVIEW_WARNING_LABELS = {
         sheet_silent: 'الشيت ما حدد النوع',
         vlm_unsure: 'نموذج القراءة غير متأكد من المطابقة',
+        multipack_unit_image: 'الصورة لعبوة وحدة، والمنتج باكيت من أكثر من حبة: تأكد إنها مناسبة',
         low_resolution: 'صورة منخفضة الدقة (أقل من 500 بكسل)',
         chat_or_screenshot: 'صورة من واتساب أو لقطة شاشة',
         social_media: 'الصورة من مواقع التواصل الاجتماعي',

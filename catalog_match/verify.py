@@ -15,7 +15,8 @@ The CODE decides, never the model:
     MATCH     brand_match == 'yes', view == 'front_packshot', variant_match != 'no',
               size_match != 'no', and size_text (parsed with catalog_match.sizes)
               agrees with spec.size when both are known
-    MISMATCH  any 'no', or a parsed size_text that conflicts with spec.size
+    MISMATCH  any 'no', or a parsed size_text that conflicts with spec.size; except one unit
+              of a multipack SKU (multipack_unit_image: the size 'no' is only the pack), UNSURE
     UNSURE    anything else
 Every failure path (no key, transport error, non-200 after the retry, a response
 that is not the schema, a safety block) returns status 'unknown' with every
@@ -229,6 +230,40 @@ def _brand_reading(spec: SkuSpec, brand_text: str) -> str:
     return "unknown"
 
 
+def brand_confirmed(spec: SkuSpec, verdict: Optional[VlmImageVerdict]) -> bool:
+    """The label itself confirms the SKU's brand: brand_match 'yes' AND the printed brand_text reads as the
+    target (_brand_reading; the sub-brand the SKU names included). decide reads it where the listing text that
+    made a tier is not trusted (decide.brand_refuted) or does not make tier 1 (the tier-2 fallback)."""
+    return (verdict is not None and verdict.brand_match == "yes"
+            and _brand_reading(spec, verdict.brand_text) == "target")
+
+
+def multipack_unit_image(spec: SkuSpec, verdict: VlmImageVerdict) -> bool:
+    """True when the picture is ONE unit of a multipack SKU and only that made the reader answer size 'no'.
+
+    Stores show one can of 'SUPER TASTY ... 3X185GM' or one pack of 'MEHRAN PLAIN PARATHA 2X400GM 5S' (live run
+    2026-10-04, rows 15, 50 and 51): the reader printed '185 g' / '400g' and answered size_match 'no' because
+    the pack differs. All of these hold:
+      * the SKU is a multipack (pack_count > 1) of a measured size, not a counted one ('Eggs 30 pcs');
+      * size_match is the ONLY 'no' (brand and variant are not read as different);
+      * the printed size re-parses to the SKU's per-unit size (size_agreement 'match');
+      * the printed pack is one unit: no 'N x Q' in size_text ('6 x 185 g' is another multipack) and a
+        counted pack of 1, unknown, or the pieces one unit holds ('5S' parathas).
+    classify() reads such a picture UNSURE, never MATCH; decide warns 'multipack_unit_image'.
+    """
+    target_pack = spec.pack_count or 1
+    if target_pack <= 1 or spec.size is None or spec.size.dimension == "count":
+        return False
+    if verdict.size_match != "no" or "no" in (verdict.brand_match, verdict.variant_match):
+        return False
+    printed = [s for s in parse_sizes(verdict.size_text, "vlm") if s.dimension == spec.size.dimension]
+    if not printed or size_agreement(spec, verdict.size_text) != "match":
+        return False
+    if any((s.pack_count or 1) > 1 for s in printed):
+        return False
+    return verdict.pack_count in (None, 1) or verdict.pack_count == spec.size.pieces
+
+
 def classify(spec: SkuSpec, verdict: VlmImageVerdict) -> str:
     """MATCH / MISMATCH / UNSURE decided from the model's VERBATIM readings (decision D6).
 
@@ -236,13 +271,17 @@ def classify(spec: SkuSpec, verdict: VlmImageVerdict) -> str:
       * any 'no', a printed size / pack that conflicts, a printed brand that is another
         brand (or a sibling sub-brand), a printed variant that conflicts with the SKU, or a
         banner / not_product / multi_product view  -> MISMATCH;
+      * one exception to 'any no': ONE unit of a multipack SKU (multipack_unit_image: size_match
+        is the only 'no', the printed size is the SKU's per-unit size and the printed pack is
+        one unit) -> UNSURE, never MATCH; every other MISMATCH rule above still applies;
       * MATCH needs a front packshot, brand_match 'yes' with the brand (and the sub-brand
         the SKU names) readable in brand_text, a printed size that re-parses to the SKU
         size (and pack) when the SKU states one, and variant_match 'yes' with no
         conflicting printed variant when the SKU states variants; anything short of that
         is UNSURE (review, never auto-publish).
     """
-    if "no" in (verdict.brand_match, verdict.variant_match, verdict.size_match):
+    unit_of_multipack = multipack_unit_image(spec, verdict)
+    if "no" in (verdict.brand_match, verdict.variant_match, verdict.size_match) and not unit_of_multipack:
         return MISMATCH
     size_state = size_agreement(spec, verdict.size_text)
     if size_state == "conflict":
@@ -261,6 +300,8 @@ def classify(spec: SkuSpec, verdict: VlmImageVerdict) -> str:
         # a multipack SKU may legitimately be read as 'several products'
         multipack = (spec.pack_count or 1) > 1
         return UNSURE if (multipack and verdict.view == "multi_product") else MISMATCH
+    if unit_of_multipack:
+        return UNSURE                 # the picture shows one unit, the SKU is the pack: review, never MATCH
     if verdict.brand_match != "yes" or verdict.view != "front_packshot":
         return UNSURE
     if spec.match_brands and brand_state != "target":
