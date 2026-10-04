@@ -811,12 +811,15 @@ def unselected_reason(r):
         return "provider_down"
     if decision == "NOT_FOUND":
         return "not_found"
+    if code == "SOCIAL_ONLY":
+        return "only_social"
+    # as decide.route: with no pick, a label reader that did not answer comes before 'only social posts'
+    if decision == "VERIFIER_DOWN" or code == "VERIFIER_DOWN":
+        return "verifier_down"
     if _only_social(r):
         return "only_social"
     if code == "DOWNLOAD_FAILED":
         return "download_failed"
-    if decision == "VERIFIER_DOWN" or code == "VERIFIER_DOWN":
-        return "verifier_down"
     if _brand_found(r) is False:
         return "brand_not_found"
     verdicts = _verdicts(r)

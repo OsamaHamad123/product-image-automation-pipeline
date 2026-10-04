@@ -294,3 +294,14 @@ def test_outcome_summary_is_stamped_with_the_search_time():
     stamp = outcome_summary(SearchOutcome(decision="NOT_FOUND"))["searched_at"]
     when = datetime.fromisoformat(stamp)
     assert when.tzinfo is not None and abs((datetime.now(timezone.utc) - when).total_seconds()) < 60
+
+
+def test_outcome_summary_keeps_the_social_posts_for_the_reviewer():
+    # SOCIAL_ONLY rows had their post links in the outcome but not in the production trace
+    from catalog_match.facade import outcome_summary
+    from catalog_match.models import SearchOutcome
+
+    links = ["https://www.instagram.com/p/abc/", "https://www.facebook.com/kabani/photos/1"]
+    out = SearchOutcome(decision="REVIEW_UNSELECTED", failure_code="SOCIAL_ONLY", social_links=list(links))
+    assert outcome_summary(out)["social_links"] == links
+    assert outcome_summary(SearchOutcome(decision="NOT_FOUND"))["social_links"] == []
