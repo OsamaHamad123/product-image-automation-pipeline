@@ -408,6 +408,9 @@ def test_a_sibling_whose_link_cannot_be_queued_is_marked_for_a_rewrite(db, monke
 def test_verifier_down_rows_are_rechecked_twice_at_most_and_parked_while_the_reader_is_down(db):
     _add(db, 0)
     _claim_finish(db, "ready_for_review", "VERIFIER_DOWN")
+    # its candidates wait for the reviewer (only a row with candidates left is parked back into review)
+    assert db.save_curation_candidates(ROW, "Product 0", "Brand", [{"url": "https://p4q.example/c.jpg"}],
+                                       sku_key=f"{SKU}0")
     _add(db, 1)
     _claim_finish(db, "ready_for_review", None)                  # a normal review row is not touched
     assert db.park_verifier_rechecks() == 0

@@ -117,15 +117,23 @@ class QueueStats
         return $readyForReview > 0 ? 'review' : 'idle';
     }
 
-    public static function phaseText(string $phase, int $stopRequested, int $readyForReview): string
+    /**
+     * $pending: rows still waiting in the queue. A run that stopped early (daily budget, Serper credit, a stop) ends
+     * idle or in review with rows left; the text says they wait for the next run instead of «nothing waiting».
+     */
+    public static function phaseText(string $phase, int $stopRequested, int $readyForReview, int $pending = 0,
+                                     ?int $retryWaitS = null): string
     {
+        $left = $pending > 0 ? 'في الطابور ' . self::countText($pending) . ' بانتظار التشغيل التالي' : '';
         switch ($phase) {
             case 'starting':
                 return $stopRequested === 1
                     ? 'طلب الإيقاف مسجل: التشغيل ما زال يقرأ الشيت، وسيتوقف العامل فور بدئه قبل معالجة أي منتج.'
                     : 'جاري قراءة الشيت وتجهيز الطابور…';
             case 'running':
-                return 'جاري تحضير المرشحات…';
+                return $retryWaitS !== null
+                    ? 'مصادر البحث لم تستجب لبعض المنتجات؛ العامل ينتظر ويعيد المحاولة بعد ' . self::minutesText($retryWaitS) . '.'
+                    : 'جاري تحضير المرشحات…';
             case 'paused':
                 return 'الأتمتة موقوفة مؤقتاً.';
             case 'stopping':
@@ -133,9 +141,11 @@ class QueueStats
             case 'error':
                 return 'توقف التشغيل بسبب خطأ (السبب في الشريط الأحمر).';
             case 'review':
-                return "انتهى التحضير: {$readyForReview} منتج بانتظار المراجعة.";
+                return "انتهى التحضير: {$readyForReview} منتج بانتظار المراجعة" . ($left !== '' ? "، و{$left}." : '.');
             default:
-                return 'لا يوجد تشغيل حالياً، ولا توجد منتجات بانتظار المراجعة.';
+                return $left !== ''
+                    ? "لا يوجد تشغيل حالياً ولا منتجات بانتظار المراجعة؛ {$left}."
+                    : 'لا يوجد تشغيل حالياً، ولا توجد منتجات بانتظار المراجعة.';
         }
     }
 
@@ -234,6 +244,10 @@ class QueueStats
         'DOWNLOAD_FAILED' => 'ما قدرنا ننزّل الصور من مواقعها',
         'SOCIAL_ONLY' => 'المنتج ظاهر فقط بمنشورات تواصل اجتماعي ما بتنزل صورها',
         'VERIFIER_DOWN' => 'نموذج قراءة الملصق ما ردّ، فالاختيار بدّه عينك',
+        // a re-verification with a working label reader found nothing better: the earlier proposals wait for review
+        'RECHECK_NOT_FOUND' => 'رجعنا فحصنا بنموذج قراءة الملصق وما لقينا صورة أحسن، فالاقتراحات القديمة بتستنى عينك',
+        // an approved image whose link could not be queued for the sheet: the next run writes it without a search
+        'SHEET_WRITE_FAILED' => 'الصورة معتمدة بس ما قدرنا نكتب رابطها بالشيت، وبتنكتب بالتشغيل الجاي',
     ];
 
     /**
@@ -498,12 +512,28 @@ class QueueStats
         return $done > 0 ? 'كل المنتجات انبحث عنها بدون أعطال.' : '';
     }
 
+    /** "دقيقة" / "دقيقتين" / "5 دقائق" / "12 دقيقة" for a wait in seconds (at least one minute). */
+    public static function minutesText(int $seconds): string
+    {
+        $m = max(1, (int) ceil($seconds / 60));
+        if ($m === 1) {
+            return 'دقيقة';
+        }
+        if ($m === 2) {
+            return 'دقيقتين';
+        }
+        return $m . ' ' . ($m <= 10 ? 'دقائق' : 'دقيقة');
+    }
+
     /**
      * Why the run needs «إصلاح تشغيل عالق», in plain Arabic, or '' when it does not. $worker is the lock state
      * (starting | running | none) and $stateAgeS the seconds since automation_state last changed.
+     * $retryWaitS (retryWaitS(), only while no row is being searched): the worker waits for a row whose retry after
+     * a search-provider outage is due within the horizon. That wait is not «no progress»: «fix stuck run» would
+     * stop a healthy worker.
      */
     public static function stuckReason(string $phase, string $worker, string $status, int $processingRows,
-                                       ?int $stateAgeS, int $pauseRequested = 0): string
+                                       ?int $stateAgeS, int $pauseRequested = 0, ?int $retryWaitS = null): string
     {
         if ($phase === 'error') {
             return 'آخر تشغيل وقف بعطل وضلّت حالته معلّقة.';
@@ -517,7 +547,7 @@ class QueueStats
             return 'الحالة بتقول إنو في تشغيل، بس ما في عامل شغّال بالخلفية.';
         }
         if ($worker === 'running' && $phase === 'running' && $pauseRequested !== 1 && $stateAgeS !== null
-            && $stateAgeS > 600) {
+            && $stateAgeS > 600 && !($retryWaitS !== null && $processingRows === 0)) {
             return 'العامل شغّال بس ما تقدّم ولا منتج من ' . intdiv($stateAgeS, 60) . ' دقيقة.';
         }
         if ($worker === 'starting' && $phase === 'starting' && $stateAgeS !== null && $stateAgeS > 180) {
@@ -648,6 +678,28 @@ class QueueStats
         } catch (\Throwable $e) {
             return null;
         }
+    }
+
+    /** local_cache_db.OPEN_TASK_HORIZON_MINUTES: the worker waits only for a retry due within this horizon. */
+    public const RETRY_HORIZON_MINUTES = 45;
+
+    /**
+     * Seconds until the next retry the worker waits for: the earliest pending PROVIDER_DOWN row whose retry
+     * (next_attempt_at) is in the future and within the horizon, as local_cache_db.count_open_tasks keeps the
+     * worker alive for it. null without such a row or when the queue cannot be read.
+     */
+    public static function retryWaitS(): ?int
+    {
+        try {
+            $row = DB::selectOne(
+                "SELECT TIMESTAMPDIFF(SECOND, NOW(), MIN(next_attempt_at)) AS wait_s FROM automation_queue "
+                . "WHERE status = 'pending' AND failure_code = 'PROVIDER_DOWN' AND next_attempt_at IS NOT NULL "
+                . "AND next_attempt_at > NOW() AND next_attempt_at <= NOW() + INTERVAL "
+                . self::RETRY_HORIZON_MINUTES . " MINUTE");
+        } catch (\Throwable $e) {
+            return null;
+        }
+        return ($row && $row->wait_s !== null) ? max(0, (int) $row->wait_s) : null;
     }
 
     /** Rows waiting for review split by the engine decision: ['proposed' => n, 'none' => n], or null. */

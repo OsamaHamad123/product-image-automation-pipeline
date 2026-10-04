@@ -425,12 +425,18 @@ class ApiController extends Controller
             $run['failed'] = (int) ($state->failed_count ?? 0);
         }
         $phase = QueueStats::runPhase($process['state'], $status, $pauseRequested, $stopRequested, $readyForReview);
+        $processingRows = (int) ($counters['by_status']['processing'] ?? 0);
+        // العامل حي ولا يبحث الآن: ينتظر موعد إعادة محاولة بعد انقطاع المزودين (ليس عالقاً)
+        $retryWaitS = ($phase === 'running' && $processingRows === 0) ? QueueStats::retryWaitS() : null;
 
         $response = [
             'is_running' => $isRunning,
             // starting | running | paused | stopping | error | review | idle
             'phase' => $phase,
-            'phase_text' => QueueStats::phaseText($phase, $stopRequested, $readyForReview),
+            'phase_text' => QueueStats::phaseText($phase, $stopRequested, $readyForReview,
+                (int) ($counters['by_status']['pending'] ?? 0), $retryWaitS),
+            // ثوانٍ حتى المحاولة التالية التي ينتظرها العامل (null = لا ينتظر)
+            'retry_wait_s' => $retryWaitS,
             // الشريط الأحمر: خطأ التشغيل أو التنبيه بالعربية (فارغ إن لم يوجد)
             'alert' => QueueStats::alertText($status, $notice, $isRunning),
             'status' => $status,
@@ -452,9 +458,8 @@ class ApiController extends Controller
             // صفحة التشغيل (إضافة فقط): حالة قفل العامل، وسبب عرض «إصلاح تشغيل عالق» ('' = التشغيل غير عالق)
             'worker' => $process['state'],
             'state_age_s' => isset($state->lq_age_s) ? (int) $state->lq_age_s : null,
-            'stuck' => QueueStats::stuckReason($phase, $process['state'], $status,
-                (int) ($counters['by_status']['processing'] ?? 0),
-                isset($state->lq_age_s) ? (int) $state->lq_age_s : null, $pauseRequested),
+            'stuck' => QueueStats::stuckReason($phase, $process['state'], $status, $processingRows,
+                isset($state->lq_age_s) ? (int) $state->lq_age_s : null, $pauseRequested, $retryWaitS),
         ];
 
         return response()->json($response)->header('Cache-Control', 'no-store');
@@ -642,14 +647,30 @@ class ApiController extends Controller
             }
 
             $productsByBarcode = [];
+            $productsBySku = [];
             foreach ($products as $p) {
                 $barcode = trim($p['barcode'] ?? '');
                 $altBarcode = 'ERR_' . str_replace(' ', '_', ($p['product_name'] ?? '') . '_' . ($p['brand'] ?? ''));
-                
+
                 if ($barcode) {
                     $productsByBarcode[$barcode] = $p;
                 }
                 $productsByBarcode[$altBarcode] = $p;
+                $sku = trim((string) ($p['sku_key'] ?? ''));
+                if ($sku !== '') {
+                    $productsBySku[$sku] = $p;
+                }
+            }
+            // منتج كل سجل فشل بـ sku_key أولاً (local_cache_db.save_product_failure): مفتاح ERR_..#<sku_key> لحجم آخر
+            // بنفس الاسم والبراند لا يطابقه أي مفتاح عرض، ومفتاح العرض نفسه قد يحمله منتج آخر بنفس الاسم والبراند
+            $failureSku = [];
+            try {
+                $failureSku = DB::table('product_failures')
+                    ->whereIn('barcode', array_values(array_unique(array_map(fn ($b) => trim((string) $b), $barcodes))))
+                    ->whereNotNull('sku_key')
+                    ->pluck('sku_key', 'barcode')->all();
+            } catch (\Throwable $e) {
+                $failureSku = [];      // قبل عمود sku_key: المطابقة بمفتاح العرض كما كانت
             }
 
             $hasSkuKey = Schema::hasColumn('automation_queue', 'sku_key');
@@ -662,10 +683,19 @@ class ApiController extends Controller
             $failureKeys = [];
             foreach ($barcodes as $b) {
                 $bClean = trim((string) $b);
-                if (!isset($productsByBarcode[$bClean])) {
+                $sku = trim((string) ($failureSku[$bClean] ?? ''));
+                $p = ($sku !== '' && isset($productsBySku[$sku])) ? $productsBySku[$sku] : null;
+                if ($p === null && isset($productsByBarcode[$bClean])) {
+                    $byKey = $productsByBarcode[$bClean];
+                    $rowSku = trim((string) ($byKey['sku_key'] ?? ''));
+                    // صف بمفتاح العرض نفسه لمنتج آخر (حجم آخر بنفس الاسم والبراند) ليس صاحب هذا السجل
+                    if ($sku === '' || $rowSku === '' || $rowSku === $sku) {
+                        $p = $byKey;
+                    }
+                }
+                if ($p === null) {
                     continue;
                 }
-                $p = $productsByBarcode[$bClean];
                 $row = [
                     'row_number' => (int) $p['row_number'],
                     'barcode' => $p['barcode'] ?? '',

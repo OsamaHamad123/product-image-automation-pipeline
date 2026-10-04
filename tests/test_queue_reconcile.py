@@ -454,11 +454,15 @@ def test_serper_credit_rule_matches_ops_health(health, expected):
 
 
 def test_a_recheck_that_finds_nothing_goes_back_to_review(offline, monkeypatch):
+    """With its earlier candidates still saved; a healthy reader found nothing better, so it is not rechecked again
+    (RECHECK_NOT_FOUND, not VERIFIER_DOWN). Without candidates it is a normal NOT_FOUND (test_queue_review_fixes)."""
+    import local_cache_db
     import main
     rec = _wired(monkeypatch, {"decision": "NOT_FOUND", "failure_code": "NO_RESULTS", "provider_health": []})
+    monkeypatch.setattr(local_cache_db, "has_review_candidates", lambda row, sku=None: True)
     task = dict(TASK, requeue_reason="VERIFIER_RECHECK")
     assert main.pre_cache_product_candidates(task, sleep=lambda s: None) == "success"
-    assert rec["status"] == [("ready_for_review", "VERIFIER_DOWN")] and rec["failures"] == []
+    assert rec["status"] == [("ready_for_review", "RECHECK_NOT_FOUND")] and rec["failures"] == []
 
 
 def test_worker_parks_or_requeues_rechecks_by_the_reader_state(offline, monkeypatch):

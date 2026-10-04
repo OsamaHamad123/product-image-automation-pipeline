@@ -476,6 +476,9 @@ def _cache_row_to_dict(row):
         "approved_by": row.get("approved_by"),
         "perceptual_hash": row.get("perceptual_hash"),
         "resolved_at": row.get("resolved_at"),
+        # هوية السجل كما حُفظت (للمقارنة بصف الشيت: main._gtin_resolution_fits)
+        "product_name": row.get("product_name"),
+        "brand": row.get("brand"),
         "source": "mariadb_cache",
     }
 
@@ -1051,22 +1054,26 @@ def save_product_failure(barcode, product_name, brand, error_message, sku_key=No
 def delete_product_failure(barcode, sku_key=None, product_name=None, brand=None):
     """
     حذف سجل الفشل عند نجاح مطابقة المنتج لاحقاً: بالمفتاح الممرر (السلوك القديم)، وبـ sku_key،
-    وبمفتاح العرض failure_key عند تمرير الاسم.
+    وبمفتاح العرض failure_key عند تمرير الاسم. المطابقة بالمفتاح كاملاً فقط: سجل منتج آخر بنفس الاسم والبراند وحجم
+    آخر (ERR_<الاسم>_<البراند>#<sku_key الآخر>، أو المفتاح نفسه بـ sku_key آخر) لا يُحذف عند اعتماد هذا المنتج.
     """
     try:
         conn = get_db_connection()
         try:
             cursor = conn.cursor()
             barcode_clean = str(barcode).strip() if barcode else ""
+            sku = str(sku_key).strip() if sku_key else ""
             keys = [barcode_clean] if barcode_clean else []
             if product_name:
                 keys.append(failure_key(barcode, product_name, brand or ""))
             for key in dict.fromkeys(keys):
-                cursor.execute("DELETE FROM product_failures WHERE barcode = %s", (key,))
-                if key.startswith("ERR_"):
-                    cursor.execute("DELETE FROM product_failures WHERE barcode LIKE %s", (key + "%",))
-            if sku_key:
-                cursor.execute("DELETE FROM product_failures WHERE sku_key = %s", (str(sku_key).strip(),))
+                if sku:
+                    cursor.execute("DELETE FROM product_failures WHERE barcode = %s AND (sku_key IS NULL OR sku_key = %s)",
+                                   (key, sku))
+                else:
+                    cursor.execute("DELETE FROM product_failures WHERE barcode = %s", (key,))
+            if sku:
+                cursor.execute("DELETE FROM product_failures WHERE sku_key = %s", (sku,))
             conn.commit()
         finally:
             _close(conn)
@@ -1077,7 +1084,10 @@ def delete_product_failure(barcode, sku_key=None, product_name=None, brand=None)
 
 
 def get_product_failures():
-    """استرجاع كافة المنتجات الفاشلة كـ dict بمفتاح العرض (عمود barcode)، وبـ sku_key أيضاً للسجلات الجديدة."""
+    """
+    استرجاع كافة المنتجات الفاشلة كـ dict بمفتاح العرض (عمود barcode)، وبـ sku_key أيضاً للسجلات الجديدة.
+    كل سجل يحمل sku_key منتجه (None للسجلات القديمة): القارئ بمفتاح العرض يتحقق أنه لمنتج صفه.
+    """
     try:
         conn = get_db_connection()
         try:
@@ -1088,7 +1098,8 @@ def get_product_failures():
             _close(conn)
         out = {}
         for row in rows:
-            entry = {"error_message": row["error_message"], "failed_at": row["failed_at"]}
+            entry = {"error_message": row["error_message"], "failed_at": row["failed_at"],
+                     "sku_key": row.get("sku_key")}
             if row.get("sku_key"):
                 out.setdefault(row["sku_key"], entry)
             if row["barcode"]:
@@ -1516,7 +1527,8 @@ def plan_queue_row(old, new, reprocess=False):
     - حجز ساري لعامل: يبقى كما هو.
     - كتابة رابط معتمد (task_kind='relink'): تعود للانتظار مهما كانت الحالة.
     - جاهز للمراجعة: يبقى. مكتمل: يبقى، إلا إذا مُسح رابطه من الشيت (REOPEN_REASONS).
-    - فاشل بـ «لا نتيجة»: يبقى حتى يحين موعده (3 / 7 / 30 يوماً) أو يتغير مدخل البراند أو الفهرس المحلي.
+    - فاشل بـ «لا نتيجة»: يبقى حتى يحين موعده (3 / 7 / 30 يوماً) أو يتغير مدخل البراند أو الفهرس المحلي
+      (الفهرس المحلي لا يعيد صفاً استنفد محاولاته).
       فاشل لسبب آخر: يعود للانتظار (إعادة محاولة).
     - في الانتظار (أو حجز انتهى): يعود للانتظار بأولويته، والمحاولة التالية الآن.
     """
@@ -1546,7 +1558,11 @@ def plan_queue_row(old, new, reprocess=False):
             due = not exhausted and (not old.get("has_next") or bool(old.get("due")))
             if brand_changed:
                 reason = "BRAND_MAPPING_CHANGED"
-            elif reason != "LOCAL_INDEX_CHANGED":
+            elif reason == "LOCAL_INDEX_CHANGED":
+                if exhausted:
+                    # صفحات جديدة للبراند لا تتجاوز نهاية الجدول: صف استنفد محاولاته لا يُبحث عنه كل ليلة
+                    return "keep", None
+            else:
                 if not due:
                     return "keep", None
                 reason = "SCHEDULED_RETRY"
@@ -1662,14 +1678,24 @@ def add_to_queue(row_number, barcode, name, brand, query, payload=None, sku_key=
 CLAIMABLE_SQL = "(status='pending' OR (status='processing' AND (lease_until IS NULL OR lease_until<NOW())))"
 
 
+def _backoff_until(prefix, moment):
+    """
+    موعد المحاولة التالية بعد moment. صف بلا موعد (NULL) ليس مؤجلاً: «next_attempt_at > X» وحدها تعطي NULL له،
+    و NOT(NULL) يُخرجه من السحب ومن count_open_tasks بينما begin_run يحسبه (صفوف PROVIDER_DOWN القديمة).
+    """
+    return f"({prefix}next_attempt_at IS NOT NULL AND {prefix}next_attempt_at > {moment})"
+
+
 def _claimable(alias=""):
     """
     صف قابل للسحب: في الانتظار، أو قيد المعالجة انتهى حجزه؛ إلا صفاً أعاده انقطاع المزودين بموعد لم يحن بعد.
-    إعادة المحاولة من لوحة التحكم أو رفض المراجع تمسح رمز PROVIDER_DOWN فيُسحب الصف فوراً.
+    إعادة المحاولة من لوحة التحكم أو رفض المراجع تمسح رمز PROVIDER_DOWN فيُسحب الصف فوراً، وكذلك صف PROVIDER_DOWN
+    بلا موعد (تركه العامل القديم قبل عمود next_attempt_at).
     """
     p = f"{alias}." if alias else ""
     return (f"(({p}status='pending' OR ({p}status='processing' AND ({p}lease_until IS NULL OR {p}lease_until<NOW()))) "
-            f"AND NOT ({p}status='pending' AND {p}failure_code <=> 'PROVIDER_DOWN' AND {p}next_attempt_at > NOW()))")
+            f"AND NOT ({p}status='pending' AND {p}failure_code <=> 'PROVIDER_DOWN' "
+            f"AND {_backoff_until(p, 'NOW()')}))")
 
 
 # منتج واحد = بحث واحد: صف لمنتج له صف آخر قيد المعالجة بحجز ساري ينتظر نتيجته (تُطبق عليه عند انتهائه)
@@ -1822,10 +1848,24 @@ def outcome_schedule(row, status, failure_code, group_fail_count=0):
     return {"next_minutes": None, "fail_count": fail, "down_count": 0, "priority": priority}
 
 
+# حالات تنهي المهمة: سبب إدراجها (task_kind / requeue_reason) لم يعد يصفها
+FINISHED_STATUSES = ("completed", "failed", "ready_for_review")
+
+
+def _forget_reason_sql(status):
+    """
+    مهمة انتهت تنسى لماذا أُدرجت: task_kind='relink' أو requeue_reason='VERIFIER_RECHECK' القديمان لا يحكمان قراراً
+    لاحقاً (رفض مراجع يعيد الصف للانتظار ثم يُسحب ككتابة رابط أو كإعادة تحقق). العودة للانتظار (انقطاع المزودين)
+    تبقيهما: المحاولة التالية للمهمة نفسها. الإدراج التالي يحسب السبب من جديد.
+    """
+    return ", task_kind = NULL, requeue_reason = NULL" if status in FINISHED_STATUSES else ""
+
+
 def update_task_status(task_id, status, error_message=None, failure_code=None, trace=None, claim_id=None,
                        siblings=None):
     """
     تحديث حالة المهمة بعد المعالجة، مع رمز الفشل والـ trace وموعد المحاولة التالية (outcome_schedule)، وتحرير الحجز.
+    نهاية المهمة (مكتملة / فاشلة / للمراجعة) تمسح task_kind و requeue_reason (_forget_reason_sql).
     claim_id (معرف السحب من fetch_next_task): عند تمريره لا يُحدَّث الصف إلا إذا كان ما زال محجوزاً بهذا
     المعرف وفي حالة 'processing'؛ فلا تكتب نتيجة العامل فوق اعتماد بشري تم أثناء المعالجة أو فوق حجز
     أعيد سحبه بعد انتهائه. تعيد False إن لم يعد الحجز ملكاً للعامل.
@@ -1882,7 +1922,7 @@ def update_task_status(task_id, status, error_message=None, failure_code=None, t
                 "UPDATE automation_queue SET status = %s, error_message = %s, failure_code = %s, "
                 "trace_json = COALESCE(%s, trace_json), lease_until = NULL, "
                 f"next_attempt_at = {next_sql}, fail_count = %s, down_count = %s, priority = %s, "
-                "searched_at = NOW(), updated_at = CURRENT_TIMESTAMP WHERE id = %s",
+                f"searched_at = NOW(), updated_at = CURRENT_TIMESTAMP{_forget_reason_sql(status)} WHERE id = %s",
                 (status, error_message, failure_code, trace_json) + next_params + counters + (task_id,),
             )
             if sibling_rows:
@@ -1957,20 +1997,56 @@ def requeue_verifier_down(run_id=None, max_reverify=MAX_REVERIFY):
         return None
 
 
+# مرشحات ما زالت أمام المراجع لصف الطابور q (بنفس قاعدة _row_or_sku_clause): ما رفضه المراجع لا يُحسب
+_CANDIDATES_LEFT_SQL = (
+    "EXISTS (SELECT 1 FROM curation_candidates c WHERE (c.sku_key = q.sku_key OR (c.sku_key IS NULL "
+    "AND c.`row_number` = q.`row_number`)) AND COALESCE(c.status, '') NOT IN ('excluded', 'rejected'))")
+
+
+def has_review_candidates(row_number, sku_key=None):
+    """
+    هل بقي للمنتج مرشح أمام المراجع (غير مستبعد)؟ إعادة تحقق لم تجد شيئاً تعيد الصف للمراجعة فقط عندها؛ بدونها
+    يكون صفاً فارغاً في المراجعة. خطأ القراءة يُسجل ويعيد True (السلوك السابق: يعود للمراجعة ولا يُسجل فشلاً).
+    """
+    clause, params = _row_or_sku_clause(row_number, sku_key)
+    try:
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(f"SELECT COUNT(*) AS n FROM curation_candidates WHERE {clause} "
+                           "AND COALESCE(status, '') NOT IN ('excluded', 'rejected')", params)
+            row = cursor.fetchone() or {}
+        finally:
+            _close(conn)
+        return int(row.get("n") or 0) > 0
+    except Exception as e:
+        logger.warning("[Curation] تعذر عدّ مرشحات الصف %s: %s", row_number, e)
+        return True
+
+
+def _park_rechecks(cursor):
+    """
+    صفوف إعادة تحقق لم تُسحب تعود جاهزة للمراجعة بمرشحاتها (إعادة التحقق لم تحدث، فلا تُحسب من MAX_REVERIFY).
+    صف لم يبقَ له مرشح لا يُركن (كان صفاً فارغاً في المراجعة): يبقى في الانتظار ويبحث عنه العامل. تعيد العدد.
+    """
+    cursor.execute(
+        "UPDATE automation_queue q SET q.status = 'ready_for_review', q.failure_code = 'VERIFIER_DOWN', "
+        "q.reverify_count = GREATEST(q.reverify_count - 1, 0), q.updated_at = CURRENT_TIMESTAMP "
+        f"WHERE q.status = 'pending' AND q.requeue_reason = 'VERIFIER_RECHECK' AND {_CANDIDATES_LEFT_SQL}")
+    return cursor.rowcount
+
+
 def park_verifier_rechecks():
     """
-    قارئ الملصق ما زال معطلاً في هذا التشغيل: صفوف إعادة التحقق التي لم تُسحب بعد تعود جاهزة للمراجعة
-    (مرشحاتها ما زالت محفوظة)، فلا يُدفع بحث جديد سينتهي VERIFIER_DOWN مرة أخرى. تعيد العدد أو None عند خطأ.
+    صفوف إعادة التحقق التي لم تُسحب بعد تعود جاهزة للمراجعة بمرشحاتها (_park_rechecks): قارئ الملصق ما زال معطلاً
+    في هذا التشغيل (فلا يُدفع بحث جديد سينتهي VERIFIER_DOWN مرة أخرى)، أو توقف التشغيل قبل أن يصل إليها.
+    تعيد العدد أو None عند خطأ.
     """
     try:
         conn = get_db_connection()
         try:
             cursor = conn.cursor()
-            cursor.execute(
-                "UPDATE automation_queue SET status = 'ready_for_review', failure_code = 'VERIFIER_DOWN', "
-                "reverify_count = GREATEST(reverify_count - 1, 0), updated_at = CURRENT_TIMESTAMP "
-                "WHERE status = 'pending' AND requeue_reason = 'VERIFIER_RECHECK'")
-            count = cursor.rowcount
+            count = _park_rechecks(cursor)
             conn.commit()
             return count
         finally:
@@ -1993,16 +2069,21 @@ def update_task_status_by_row(row_number, status, error_message=None, failure_co
     تحديث حالة المهمة لمنتج: بـ sku_key عند تمريره (فلا يتأثر منتج آخر انتقل إلى رقم الصف نفسه
     بعد تعديل الشيت)، وبرقم الصف فقط للصفوف القديمة بلا sku_key.
     قرارات المراجع (اعتماد / رفض / رفع يدوي) تمر من هنا: إذا لم يبق صف جاهز للمراجعة تصبح الحالة خاملة.
+    تعارض أقفال مع سحب العامل أو كتابة نتيجته (1213 / 1205) يعيد المعاملة كما في update_task_status: قرار المراجع
+    لا يضيع بسبب تعارض عابر.
+    قرار المراجع يمسح task_kind و requeue_reason: صف رفضه مراجع يعود للانتظار كبحث عادي، لا ككتابة رابط معتمد
+    (relink) ولا كإعادة تحقق (VERIFIER_RECHECK) من إدراج سابق.
     """
     clause, params = _row_or_sku_clause(row_number, sku_key)
-    try:
+
+    def attempt():
         conn = get_db_connection()
         try:
             cursor = conn.cursor()
             cursor.execute(f"""
                 UPDATE automation_queue
                 SET status = %s, error_message = %s, failure_code = %s, lease_until = NULL,
-                    updated_at = CURRENT_TIMESTAMP
+                    task_kind = NULL, requeue_reason = NULL, updated_at = CURRENT_TIMESTAMP
                 WHERE {clause}
             """, (status, error_message, failure_code) + params)
             cursor.execute(_SETTLE_REVIEW_SQL)
@@ -2010,6 +2091,9 @@ def update_task_status_by_row(row_number, status, error_message=None, failure_co
         finally:
             _close(conn)
         return True
+
+    try:
+        return _retry_lock_conflicts(attempt)
     except Exception as e:
         logger.warning("[MariaDB Queue] فشل تحديث حالة المهمة للصف %s: %s", row_number, e)
         return False
@@ -2068,7 +2152,7 @@ def count_open_tasks():
         cursor.execute(
             "SELECT COUNT(*) AS cnt FROM automation_queue WHERE status IN ('pending','processing') "
             "AND NOT (status = 'pending' AND failure_code <=> 'PROVIDER_DOWN' "
-            f"AND next_attempt_at > NOW() + INTERVAL {OPEN_TASK_HORIZON_MINUTES} MINUTE)")
+            f"AND {_backoff_until('', f'NOW() + INTERVAL {OPEN_TASK_HORIZON_MINUTES} MINUTE')})")
         row = cursor.fetchone()
     finally:
         _close(conn)
@@ -2284,28 +2368,42 @@ def resolution_snapshot():
     return {"by_key": by_key, "by_url": by_url}
 
 
-def catalog_brand_news(tokens):
+def catalog_brand_news(phrases):
     """
-    {كلمة براند: أحدث first_seen} لصفوف الفهرس المحلي التي تحمل كل كلمة: متجر بدأ يعرض منتجات جديدة لهذا البراند.
-    {} عند الخطأ (يُسجل): لا إعادة بحث مبكرة، والجدول الزمني يبقى.
+    {عبارة براند: أحدث first_seen} لصفوف الفهرس المحلي التي تحمل كل كلمات العبارة: متجر بدأ يعرض منتجات جديدة لهذا
+    البراند. العبارة tuple كلمات مرتبة (نص = كلمة واحدة، ومفتاحه tuple من كلمة)؛ صفحة فيها كلمة واحدة من «Sun Top»
+    ('sun') ليست صفحة لهذا البراند. {} عند الخطأ (يُسجل): لا إعادة بحث مبكرة، والجدول الزمني يبقى.
     """
-    tokens = sorted({str(t) for t in tokens or [] if t})
+    wanted = set()
+    for p in phrases or []:
+        words = tuple(sorted({str(w) for w in ((p,) if isinstance(p, str) else p) if w}))
+        if words:
+            wanted.add(words)
     out = {}
-    if not tokens:
+    if not wanted:
         return out
     try:
         conn = get_db_connection()
         try:
             cursor = conn.cursor()
-            for start in range(0, len(tokens), 500):
-                part = tokens[start:start + 500]
+            singles = sorted(w[0] for w in wanted if len(w) == 1)
+            for start in range(0, len(singles), 500):
+                part = singles[start:start + 500]
                 cursor.execute(
                     "SELECT t.token, MAX(p.first_seen) AS newest FROM catalog_tokens t "
                     "JOIN catalog_products p ON p.id = t.product_id "
                     f"WHERE t.token IN ({','.join(['%s'] * len(part))}) GROUP BY t.token", tuple(part))
                 for r in cursor.fetchall() or []:
                     if r.get("newest") is not None:
-                        out[r["token"]] = r["newest"]
+                        out[(r["token"],)] = r["newest"]
+            for words in sorted(w for w in wanted if len(w) > 1):
+                cursor.execute(
+                    "SELECT MAX(p.first_seen) AS newest FROM catalog_products p JOIN (SELECT product_id "
+                    f"FROM catalog_tokens WHERE token IN ({','.join(['%s'] * len(words))}) GROUP BY product_id "
+                    "HAVING COUNT(DISTINCT token) = %s) t ON t.product_id = p.id", words + (len(words),))
+                row = cursor.fetchone() or {}
+                if row.get("newest") is not None:
+                    out[words] = row["newest"]
         finally:
             _close(conn)
     except Exception as e:
@@ -2741,8 +2839,9 @@ def stop_run(worker_active=False):
     زر «إيقاف التشغيل». لا يُحذف أي صف: الجاهز للمراجعة والمعتمد والفاشل والمنتظر يبقى كما هو مع مرشحاته.
     - worker_active=True (الإدراج ما زال يقرأ الشيت ولا عامل بعد، أو العامل ما زال حياً): يُسجل طلب إيقاف
       يلتزم به العامل بين المنتجات، أو عند بدئه قبل معالجة أي منتج؛ الحالة لا تتغير.
-    - worker_active=False (أُنهي العامل أو لم يكن يعمل): الصفوف في 'processing' تعود إلى 'pending'، ويُلغى طلبا
-      الإيقاف والإيقاف المؤقت، والحالة: بانتظار المراجعة إن بقي صف جاهز، وإلا خامل. التنبيه يبقى كما هو.
+    - worker_active=False (أُنهي العامل أو لم يكن يعمل): الصفوف في 'processing' تعود إلى 'pending'، وصفوف إعادة
+      التحقق التي لم يصل إليها العامل تعود للمراجعة بمرشحاتها (_park_rechecks)، ويُلغى طلبا الإيقاف والإيقاف المؤقت،
+      والحالة: بانتظار المراجعة إن بقي صف جاهز، وإلا خامل. التنبيه يبقى كما هو.
     تعيد {released, stop_requested, status, queue}. أخطاء قاعدة البيانات تُرفع.
     """
     conn = get_db_connection()
@@ -2753,6 +2852,7 @@ def stop_run(worker_active=False):
             cursor.execute("UPDATE automation_state SET stop_requested = 1 WHERE `key` = 'active_session'")
         else:
             released = _release_processing(cursor)
+            _park_rechecks(cursor)
             cursor.execute(
                 "UPDATE automation_state SET status = %s, stop_requested = 0, pause_requested = 0, "
                 "current_product_name = '', updated_at = CURRENT_TIMESTAMP WHERE `key` = 'active_session'",
@@ -2768,6 +2868,7 @@ def reset_run(worker_active=False):
     """
     زر «إصلاح تشغيل عالق»: يمسح حالة التشغيل العالقة فقط، ولا يحذف أي صف ولا يلمس curation_candidates
     ولا review_decisions ولا rejected_images ولا resolved_products. الصفوف في 'processing' تعود إلى 'pending'،
+    وصفوف إعادة التحقق التي لم تُسحب تعود للمراجعة بمرشحاتها (_park_rechecks)،
     ويُلغى الإيقاف المؤقت، ويُمسح التقدم (run_id والعدادات) والمنتج الحالي والتنبيه، والحالة: بانتظار المراجعة
     إن بقي صف جاهز، وإلا خامل. worker_active=True: قد يكون الإدراج ما زال يقرأ الشيت أو بقي عامل حياً، فيُسجل طلب
     إيقاف كي لا يبدأ المعالجة أو يتوقف بعد المنتجات الجارية؛ وإلا يُلغى طلب الإيقاف. تعيد
@@ -2777,6 +2878,7 @@ def reset_run(worker_active=False):
     try:
         cursor = conn.cursor()
         released = _release_processing(cursor)
+        _park_rechecks(cursor)
         cursor.execute(
             "UPDATE automation_state SET status = %s, stop_requested = %s, pause_requested = 0, run_id = NULL, "
             "notice = NULL, current_product_name = '', total_items = 0, processed_items = 0, success_count = 0, "

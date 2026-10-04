@@ -246,10 +246,15 @@ def test_alerts_use_the_newest_rows_whatever_the_input_order():
 
 
 def test_both_outages_are_reported_together():
+    # spent credit is Serper's 400 «Not enough credits»; a 429 rate limit is transient and raises no credit alert
     rows = [row(60 + i, outcome("REVIEW_UNSELECTED", "VERIFIER_DOWN", vlm_calls=1,
-                                providers=[health("serper", "quota", 429, "Q1"), health("bing_html", "ok")]))
+                                providers=[health("serper", "quota", 400, "Q1"), health("bing_html", "ok")]))
             for i in range(3)]
     assert _codes(rows) == ["SERPER_CREDIT", "GEMINI_DOWN"]
+    limited = [row(60 + i, outcome("REVIEW_UNSELECTED", "VERIFIER_DOWN", vlm_calls=1,
+                                   providers=[health("serper", "quota", 429, "Q1"), health("bing_html", "ok")]))
+               for i in range(3)]
+    assert _codes(limited) == ["GEMINI_DOWN"]
 
 
 def test_outage_notice_reads_only_this_workers_rows(monkeypatch):
