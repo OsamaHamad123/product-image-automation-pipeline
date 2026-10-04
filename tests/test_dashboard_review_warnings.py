@@ -83,7 +83,8 @@ def test_the_pick_cards_show_the_notice():
 def test_warning_sentences(path, tmp_path):
     codes = ["sheet_silent:fries_cut=thin", "sheet_silent:cheese_form=grated+shredded", "sheet_silent:new_axis=x",
              "vlm_unsure", "low_resolution", "chat_or_screenshot", "social_media", "foreign_store", "barcode_conflict",
-             "mystery_code", "duplicate_image", "multipack_unit_image", "size_close:840g/850g", "size_close"]
+             "mystery_code", "duplicate_image", "multipack_unit_image", "size_close:840g/850g", "size_close",
+             "listing_silent:flavour=chili", "listing_silent:new_axis=x", "listing_silent"]
     script = tmp_path / "labels.js"
     call = f"\nconsole.log(JSON.stringify({json.dumps(codes)}.map(warningText)));\n"
     script.write_text(label_code(read(path)) + call, encoding="utf-8")
@@ -107,6 +108,11 @@ def test_warning_sentences(path, tmp_path):
     # decide: the printed size is the sheet's within the tolerance, not exactly ('840ge' on an 850G SKU)
     assert out["size_close:840g/850g"] == "الحجم على العلبة قريب من الشيت بس مش نفسه (840g مقابل 850g): تأكد وصحّح الشيت"
     assert out["size_close"] == "الحجم على العلبة قريب من الشيت بس مش نفسه: تأكد وصحّح الشيت"
+    # decide: the sheet states a variant ("H/S" hot & spicy) the store page and the label do not show
+    assert out["listing_silent:flavour=chili"] == \
+        "الشيت بيقول النكهة: chili، بس صفحة المتجر والملصق ما بيبيّنوه: تأكد إنها نفس المنتج"
+    assert out["listing_silent:new_axis=x"] == "الشيت بيقول النوع: x، بس صفحة المتجر والملصق ما بيبيّنوه: تأكد إنها نفس المنتج"
+    assert out["listing_silent"] == "الشيت بيذكر نوع ما بيبيّنه المتجر ولا الملصق: تأكد إنها نفس النوع"
 
 
 def test_catalog_page_sends_the_reviewers_view_with_approve_reject_and_upload():

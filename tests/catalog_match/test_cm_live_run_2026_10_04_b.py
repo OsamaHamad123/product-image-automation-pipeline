@@ -585,3 +585,59 @@ def test_a_set_aside_reading_gets_no_second_look_and_seeds_no_visual_search():
     plain = row15()[0]
     assert needs_second_look(ROW15, plain.verdict) and not decide.no_set_aside(ROW15, plain)
     assert expand.near_matches(ROW15, [plain]) == [plain]
+
+
+# ---------------------------------------------------------------------------
+# 'H/S' is hot & spicy on a meat product; a pick that shows no such flavour is warned (16:19 run, rows 66/67/70)
+# ---------------------------------------------------------------------------
+
+def test_h_s_on_a_luncheon_meat_is_hot_and_spicy_in_identity_and_queries():
+    from catalog_match import abbreviations
+    s = spec_of("ZWAN CHICKEN LUNCHEON MEAT H/S 340GM", "ZWAN")
+    assert s.variants == {"flavour": "chili", "protein": "chicken"}
+    assert abbreviations.expand("ZWAN CHICKEN LUNCHEON MEAT H/S 340GM") == "ZWAN CHICKEN LUNCHEON MEAT HOT & SPICY 340GM"
+    # context-bound: elsewhere H/S stays as written and states no flavour
+    assert abbreviations.expand("BATH TOWEL H/S 2PCS") == "BATH TOWEL H/S 2PCS"
+    assert "flavour" not in spec_of("BATH TOWEL H/S 2PCS", "HOMEZ").variants
+
+
+def test_a_plain_luncheon_can_picked_for_an_h_s_sku_carries_listing_silent():
+    s = spec_of("ZWAN CHICKEN LUNCHEON MEAT H/S 340GM", "ZWAN")
+    rcs = [
+        listing(s, 1, "Zwan Chicken Luncheon Meat - Chicken Luncheon Meat 340g",
+                "https://sweetsbysvea.com/products/zwan-chicken-luncheon-meat",
+                "https://sweetsbysvea.com/cdn/shop/files/zwan-chicken-luncheon.jpg",
+                read("ZWAN", "CHICKEN LUNCHEON MEAT", "340ge", size_match="yes")),
+    ]
+    out = route(s, rcs)
+    assert out.decision == "REVIEW_PRESELECTED"
+    # the reader said variant 'yes', but neither the page nor the label shows hot & spicy: never an unwarned pick
+    assert "listing_silent:flavour=chili" in warns(out.winner)
+
+
+def test_a_hot_and_spicy_listing_for_an_h_s_sku_carries_no_listing_silent():
+    s = spec_of("ZWAN CHICKEN LUNCHEON MEAT H/S 340GM", "ZWAN")
+    rcs = [
+        listing(s, 1, "Zwan Chicken Luncheon Meat Hot & Spicy 340 g",
+                "https://gcc.luluhypermarket.com/en-ae/zwan-chicken-luncheon-meat-hot-spicy-340-g/p/65204",
+                "https://bf1af2.akinoncloudcdn.com/products/2024/09/07/65204/hot-spicy.jpg",
+                read("ZWAN", "CHICKEN LUNCHEON MEAT HOT & SPICY", "340g", size_match="yes")),
+    ]
+    out = route(s, rcs)
+    assert out.decision == "REVIEW_PRESELECTED"
+    assert not any(w.startswith("listing_silent") for w in warns(out.winner))
+
+
+def test_an_unmarked_stated_variant_raises_no_listing_silent():
+    # straight-cut is how fries come: a plain 'French Fries 1kg' listing is no doubt for 'REGULAR CUT'
+    s = spec_of("HUP HUP FRENCH FRIES REGULAR CUT 1 KG", "HUP HUP")
+    assert s.variants.get("fries_cut") == "straight"
+    rcs = [
+        listing(s, 1, "Hup Hup French Fries 1 kg",
+                "https://www.carrefouruae.com/mafuae/en/frozen-potatoes/hup-hup-french-fries-1kg/p/1",
+                "https://cdn.mafrservices.com/pim-content/UAE/media/product/1/hup-hup.jpg",
+                read("HUP HUP", "FRENCH FRIES", "1kg", size_match="yes")),
+    ]
+    out = route(s, rcs)
+    assert out.decision == "REVIEW_PRESELECTED"
+    assert not any(w.startswith("listing_silent") for w in warns(out.winner))

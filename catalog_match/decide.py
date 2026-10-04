@@ -98,6 +98,11 @@ double-check before approving. They never change the winner or the decision.
     sheet_silent:<axis>=<value>  the listing text (title, page title, the product's own
                                  slug) or the label reading states a marked variant on
                                  an axis the SKU does not state ('thin' fries, 'shredded')
+    listing_silent:<axis>=<value>  the reverse: the SKU states a marked variant ('H/S' hot &
+                                 spicy) that neither the listing text nor the label reading
+                                 shows (live run 2026-10-04, row 67: a plain 'Chicken Luncheon
+                                 Meat 340g' can was pre-checked, unwarned, for 'ZWAN CHICKEN
+                                 LUNCHEON MEAT H/S 340GM')
     vlm_unsure                   pre-checked without a MATCH (tier 1 UNSURE or UNKNOWN, or the
                                  corroborated tier-2 fallback)
     multipack_unit_image         the picture shows ONE unit of a multipack SKU (one can of
@@ -184,7 +189,7 @@ WARN_PREFIX = "warn:"
 # Display-only codes (candidate_warnings): shown to the reviewer, never read by routing.
 DISPLAY_ONLY_WARNING_CODES = ("size_unverified", "variant_unverified")
 # Every review warning code (the dashboard maps each one to an Arabic sentence).
-WARNING_CODES = ("sheet_silent", "vlm_unsure", "multipack_unit_image", "size_close", "low_resolution",
+WARNING_CODES = ("sheet_silent", "listing_silent", "vlm_unsure", "multipack_unit_image", "size_close", "low_resolution",
                  "chat_or_screenshot", "social_media", "foreign_store", "barcode_conflict",
                  "brand_spelling") + DISPLAY_ONLY_WARNING_CODES
 # Reason on a candidate whose label reading said 'no' to a flag its own verbatim text cannot support
@@ -541,6 +546,33 @@ def _reset(rc: RankedCandidate) -> bool:
 # Review warnings
 # ---------------------------------------------------------------------------
 
+def _found_variants(spec: SkuSpec, rc: RankedCandidate) -> Dict[str, str]:
+    """The variants the candidate's listing text and its label reading state, read like score_candidate."""
+    cand = rc.candidate
+    context = variants_mod.spec_context(spec)
+    # The product's own slug segment only: department breadcrumbs ('/fresh-food/') are not the product.
+    texts = (cand.title, cand.page_title, url_path_text(cand.page_url, product_segment=True),
+             rc.verdict.variant_text if rc.verdict is not None else "")
+    read_context = " ".join([context] + [t for t in texts if t])
+    brands = variants_mod.spec_brands(spec)
+    return variants_mod.merge(*(variants_mod.extract_variants(t, read_context, brands) for t in texts))
+
+
+def _listing_silent(spec: SkuSpec, rc: RankedCandidate) -> List[str]:
+    """'listing_silent:<axis>=<value>' for each marked variant the SKU states and neither the listing text nor the
+    label reading shows: the reader's 'yes' alone does not show a hot & spicy can to be one."""
+    if not spec.variants:
+        return []
+    context = variants_mod.spec_context(spec)
+    found = _found_variants(spec, rc)
+    out = []
+    for axis, value in sorted(spec.variants.items()):
+        marked = variants_mod.values_of(value) - variants_mod.unmarked_values(axis, context)
+        if marked and not marked & variants_mod.values_of(found.get(axis)):
+            out.append(f"listing_silent:{axis}={variants_mod.SEP.join(sorted(marked))}")
+    return out
+
+
 def _sheet_silent(spec: SkuSpec, rc: RankedCandidate) -> List[str]:
     """'sheet_silent:<axis>=<value>' for each marked variant the pick states and the SKU does not."""
     cand = rc.candidate
@@ -605,7 +637,7 @@ def review_warnings(spec: SkuSpec, rc: RankedCandidate, reading_of: Optional[Ran
     if reading_of is not None and reading_of is not rc:
         rc = RankedCandidate(candidate=rc.candidate, score=rc.score, fetched=rc.fetched, quality=rc.quality,
                              verdict=reading_of.verdict, status=rc.status)
-    out = _sheet_silent(spec, rc)
+    out = _sheet_silent(spec, rc) + _listing_silent(spec, rc)
     if _decision_of(rc) != MATCH:
         out.append("vlm_unsure")
     if rc.verdict is not None and multipack_unit_image(spec, rc.verdict):

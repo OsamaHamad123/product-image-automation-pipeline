@@ -51,6 +51,13 @@
         "ASST": "Assorted",
         "ASSTD": "Assorted"
       }
+    },
+    "hot_spicy": {
+      "why": "On a luncheon meat, masala, burger or sausage name H/S is hot & spicy (ZWAN CHICKEN LUNCHEON MEAT H/S 340GM, live run 2026-10-04); elsewhere H/S can mean other things, so it is context-bound.",
+      "context": "meat_products",
+      "expand": {
+        "H/S": "Hot & Spicy"
+      }
     }
   }
 }
