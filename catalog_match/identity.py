@@ -5,7 +5,17 @@ build_sku_spec(row, brand_mappings, size_text=None)
     barcode, category, size ('name_en' / 'product_name' are accepted for name).
 
 * raw_name is kept exactly as the sheet has it; nothing here rewrites it.
-* brand goes through the reverse brand index (mapped / sheet_raw / none).
+* brand goes through the reverse brand index (mapped / sheet_raw / none). A brand cell that only says the
+  product has none ('GENERIC / NO BRAND', 'N/A'; brand_index.is_placeholder_brand) is an empty cell: no brand
+  in the queries, the matching or the label prompt (brand_conf 'none'); the cell is kept in brand_placeholder
+  and in the sku_key.
+* an unmapped (sheet_raw) brand whose last word(s) begin a variant phrase that the name continues right after
+  the brand is matched without them: 'AMERICAN LIGHT' in 'AMERICAN LIGHT MEAT TUNA' is matched as 'AMERICAN'
+  ('LIGHT MEAT' is the tuna's meat grade, catalog_match.variants), so a label reading 'American' is the target
+  brand. brand_raw keeps the cell; nothing is trimmed from a mapped or learned brand, inside a word the cell
+  writes together ('X/LIGHT'), or down to a phrase evidence cannot be matched on ('SQ': brand_index.
+  matchable_brand). A brand that only holds such a word ('SUPER WHITE' before 'WHITE MEAT') stays whole: the
+  phrase must start in the brand and end after it.
 * size, variants and class_tokens are parsed from the READABLE names
   (catalog_match.sheet_names: a size glued to a word split off, 'MASALA160 GM' ->
   'MASALA 160 GM'; sheet compounds and typos fixed, 'SOLIDTUNA' -> 'SOLID TUNA').
@@ -26,16 +36,17 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import re
 from dataclasses import replace
 from typing import Any, List, Mapping, Optional, Sequence, Set, Tuple, Union
 
 from . import sheet_names
 from . import variants as variants_mod
-from .brand_index import BrandIndex, BrandResolution, build_index
+from .brand_index import BrandIndex, BrandResolution, build_index, is_placeholder_brand, matchable_brand
 from .gtin import normalize_gtin
 from .models import Size, SkuSpec
 from .sizes import compare, is_pack_count, parse_sizes, product_size
-from .text_norm import match_key, normalize, strip_arabic_clitics, tokens
+from .text_norm import is_arabic, match_key, normalize, strip_arabic_clitics, tokens
 
 logger = logging.getLogger(__name__)
 
@@ -164,6 +175,43 @@ def make_sku_key(gtin14: Optional[str], brand: str, raw_name: str, size: Optiona
     return hashlib.sha1(basis.encode("utf-8")).hexdigest()[:16]
 
 
+def _leading_words(phrase: str, n: int) -> str:
+    """The first n tokens of the phrase as it is written, cut only between two words it separates by a space
+    ('AMERICAN LIGHT', 1 -> 'AMERICAN'); '' when the cut falls inside a written word ('X/LIGHT')."""
+    count = 0
+    for chunk in re.finditer(r"\S+", phrase):
+        count += len(tokens(chunk.group(0)))
+        if count == n:
+            return phrase[:chunk.end()].rstrip(" /\\.,;:-_|&+")
+        if count > n:
+            return ""
+    return ""
+
+
+def matching_brand(brand: str, name: str, context: str = "") -> str:
+    """The sheet brand without its last word(s) when they begin a variant phrase the name continues right after
+    the brand ('AMERICAN LIGHT' + 'MEAT TUNA' -> 'AMERICAN'); '' when the brand stays whole (module docstring).
+
+    name is the readable sheet name (catalog_match.sheet_names), context opens the context-bound phrases.
+    Live run 2026-10-04, rows 27-28: the label reader read 'American' and 'american light' never matched it.
+    """
+    btoks = tokens(brand, strip_clitics=True)
+    if len(btoks) < 2 or any(is_arabic(t) for t in btoks):
+        return ""
+    ntoks = tokens(name, strip_clitics=True)
+    n = len(btoks)
+    start = next((i for i in range(len(ntoks) - n + 1) if ntoks[i:i + n] == btoks), None)
+    if start is None:
+        return ""
+    end = start + n
+    # a phrase that starts inside the brand (never on its first word) and ends after it
+    cuts = [a for _axis, _value, (a, b) in variants_mod.phrase_spans(name, context) if start < a < end < b]
+    if not cuts:
+        return ""
+    kept = _leading_words(" ".join(brand.split()), min(cuts) - start)
+    return kept if kept and matchable_brand(kept) else ""
+
+
 def _resolve_brand(index: BrandIndex, brand_raw: str, brand_ar: str, name: str, name_ar: str) -> BrandResolution:
     res = index.resolve(brand_raw, name, name_ar)
     if res.conf != "mapped" and brand_ar.strip():
@@ -178,8 +226,11 @@ def build_sku_spec(row: Mapping[str, Any], brand_mappings=None, size_text: Optio
     row = row or {}
     raw_name = _first(row, "name", "name_en", "product_name")
     name_ar = _first(row, "name_ar", "product_name_ar")
-    brand_raw = _first(row, "brand", "brand_en")
-    brand_ar_row = _first(row, "brand_ar")
+    brand_cell = _first(row, "brand", "brand_en")
+    brand_ar_cell = _first(row, "brand_ar")
+    # 'GENERIC / NO BRAND' is an empty cell for the search (the sku_key below still reads the cell)
+    brand_raw = "" if is_placeholder_brand(brand_cell) else brand_cell
+    brand_ar_row = "" if is_placeholder_brand(brand_ar_cell) else brand_ar_cell
     barcode = row.get("barcode")
     category = _first(row, "category")
     if size_text is None:
@@ -200,21 +251,30 @@ def build_sku_spec(row: Mapping[str, Any], brand_mappings=None, size_text: Optio
     key_size = _pick_size(size_text, raw_name, name_ar)
     # Both names and the category open context-bound phrases ('white' next to 'tuna').
     variant_context = " ".join(t for t in (name, name_ar_read, category) if t)
+    # 'AMERICAN LIGHT' + 'MEAT TUNA': the unmapped sheet brand is matched as 'AMERICAN' (its 'LIGHT' is the name's)
+    trimmed = matching_brand(brand_raw, name, variant_context) \
+        if res.conf == "sheet_raw" and brand_raw and res.canonical == brand_raw.strip() else ""
+    if trimmed:
+        res = index.unmapped(trimmed, brand_raw)
+    sheet_brand = trimmed or brand_raw
     # a brand name never states a protein ('LAMB WESTON BURGER FRIES'); variants_mod.spec_brands reads the same
-    brands = tuple(p for p in dict.fromkeys((brand_raw, res.canonical, brand_ar_row or res.brand_ar)
+    brands = tuple(p for p in dict.fromkeys((sheet_brand, res.canonical, brand_ar_row or res.brand_ar)
                                             + tuple(res.match_brands) + tuple(res.competitors)) if p)
     variants = variants_mod.sku_variants((name, name_ar_read), variant_context, brands)
 
     brand_words: Set[str] = set()
-    for phrase in (brand_raw, brand_ar_row, res.canonical, res.brand_ar) + tuple(res.match_brands) + tuple(res.family):
+    for phrase in (sheet_brand, brand_ar_row, res.canonical, res.brand_ar) + tuple(res.match_brands) + tuple(res.family):
         brand_words |= _token_set(phrase or "")
     class_tokens = _class_tokens((name, name_ar_read), brand_words, variant_context)
 
     # The key must not depend on the Brands Mapping sheet: editing it (or failing to load
     # it) would orphan approvals, rejections and queued review rows. Use the sheet's own
-    # brand cell (English, else Arabic), normalised inside make_sku_key.
+    # brand cell (English, else Arabic), normalised inside make_sku_key, as written: a
+    # placeholder ('GENERIC / NO BRAND') or a trimmed brand never moves a key.
     # Spaces and punctuation are dropped so 'Al Marai' / 'Al-Marai' / 'Almarai' share a key.
-    brand_for_key = match_key(brand_raw or brand_ar_row).replace(" ", "")
+    brand_for_key = match_key(brand_cell or brand_ar_cell).replace(" ", "")
+    placeholder = next((c for c in (brand_cell, brand_ar_cell) if is_placeholder_brand(c)), "") \
+        if res.conf == "none" else ""
     return SkuSpec(
         raw_name=raw_name,
         name_ar=name_ar,
@@ -238,4 +298,5 @@ def build_sku_spec(row: Mapping[str, Any], brand_mappings=None, size_text: Optio
         sku_key=make_sku_key(gtin14, brand_for_key, raw_name, key_size),
         required_brands=tuple(res.required),
         sibling_brands=tuple(res.siblings),
+        brand_placeholder=" ".join(placeholder.split()),
     )

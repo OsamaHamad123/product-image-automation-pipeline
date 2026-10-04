@@ -25,11 +25,44 @@ Decisions
                         conflict exists), else a tier 1 candidate the
                         verifier looked at and read as UNSURE, else (only while the
                         verifier is down for the whole SKU) a tier 1 candidate with
-                        UNKNOWN; that candidate is pre-checked ('preselected').
-                        The tier-1 fallback is off when the verifier read ANOTHER brand
-                        on a tier-1 candidate: the text evidence that made the tier is
-                        then not trustworthy for this SKU (a brand that is also a common
-                        word, e.g. 'Freshly', matched listings of other brands).
+                        UNKNOWN, else a corroborated tier-2 UNSURE candidate (below);
+                        that candidate is pre-checked ('preselected').
+                        When the verifier read ANOTHER brand on a tier-1 candidate
+                        (brand_refuted) the text evidence that made the tier is not
+                        trustworthy for this SKU (a brand that is also a common word,
+                        e.g. 'Freshly', matched listings of other brands): the fallback
+                        then takes only a candidate whose OWN label confirms the brand
+                        (brand_match 'yes' and the printed brand reads as the target,
+                        verify.brand_confirmed), else it is off ('vlm:tier1_brand_refuted').
+                        A store page that also shows a related product's picture (another
+                        brand's pack) no longer hides the right one (live run 2026-10-04,
+                        rows 76 and 83).
+                        Tier-2 fallback ('preselected:tier2_corroborated'; live run 2026-10-04,
+                        rows 62, 71 and 73: the net size is not legible on the front, the title
+                        lacks a variant word or the source is a generic store) - a tier-2
+                        UNSURE candidate with every one of the rules below; among several, a
+                        trusted page first, then a picture that is not low resolution, then
+                        rank order (row 73: Union Coop's picture, not a 619x368 one):
+                          * usable (eligible, fetched, quality hard_ok), no page barcode that
+                            differs from the sheet's, no variant doubt on its own listing
+                            (image file name, a related variant line);
+                          * its label carries the identity (label_carries_identity): the brand
+                            confirmed, a front packshot, the size not read as different (one
+                            unit of a multipack excepted) and any printed size agreeing, no
+                            printed variant conflict, the variant 'yes' when the SKU states one
+                            or the label prints a marked one the SKU does not (else not 'no'),
+                            and no other pack counted;
+                          * its listing text proves the size (listing_states_size): a size match
+                            in the title, page title or URL slug, never only the image file
+                            name, and no other size or pack in a URL;
+                          * corroborated: at least two distinct page domains among the usable
+                            tier 1/2 candidates whose label carries the identity, or its own
+                            page is trusted (brand-official, UAE retailer or structured:
+                            score.TRUST_STRUCTURED or above, as score's tier-1 'trusted_page');
+                          * brand_refuted applies with the same own-label exception (refuted_for);
+                            a label that carries the identity confirms the brand.
+                        It is never auto-published (tier 1 and MATCH stay required) and keeps
+                        every review warning.
     REVIEW_UNSELECTED   candidates exist but none qualifies; nothing is pre-checked.
     NOT_FOUND           providers were healthy and nothing survived the hard filters:
                         failure_code NO_RESULTS (empty pool) or ALL_CONFLICTED.
@@ -60,7 +93,11 @@ double-check before approving. They never change the winner or the decision.
     sheet_silent:<axis>=<value>  the listing text (title, page title, the product's own
                                  slug) or the label reading states a marked variant on
                                  an axis the SKU does not state ('thin' fries, 'shredded')
-    vlm_unsure                   pre-checked without a MATCH (tier 1, UNSURE or UNKNOWN)
+    vlm_unsure                   pre-checked without a MATCH (tier 1 UNSURE or UNKNOWN, or the
+                                 corroborated tier-2 fallback)
+    multipack_unit_image         the picture shows ONE unit of a multipack SKU (one can of
+                                 '3X185GM'): the label's only 'no' was the size, its printed size
+                                 is the per-unit size (verify.multipack_unit_image)
     low_resolution               the downloaded image's short side is below 500 px
     chat_or_screenshot           the image file is a chat or screenshot export
                                  ('WhatsApp Image ...', 'IMG-20251014-WA0003', 'Screenshot')
@@ -104,7 +141,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Dict, Iterable, List, Optional, Sequence, Set, Union
+from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple, Union
 from urllib.parse import unquote
 
 from . import quality as quality_mod
@@ -116,9 +153,10 @@ from .models import (
     VerificationResult,
 )
 from .fetch import phash_distance
-from .score import IDENTITY_KEYS, page_host, rank_key, trusted_domains
+from .score import IDENTITY_KEYS, TRUST_STRUCTURED, page_host, rank_key, trusted_domains
 from .sizes import compare, parse_sizes, product_size
 from .text_norm import brand_in, domain_matches, match_key, match_string, normalize, store_market, url_host, url_path_text
+from .verify import brand_confirmed, multipack_unit_image, size_agreement
 
 logger = logging.getLogger(__name__)
 
@@ -132,8 +170,8 @@ WARN_PREFIX = "warn:"
 # Display-only codes (candidate_warnings): shown to the reviewer, never read by routing.
 DISPLAY_ONLY_WARNING_CODES = ("size_unverified", "variant_unverified")
 # Every review warning code (the dashboard maps each one to an Arabic sentence).
-WARNING_CODES = ("sheet_silent", "vlm_unsure", "low_resolution", "chat_or_screenshot", "social_media",
-                 "foreign_store", "barcode_conflict", "brand_spelling") + DISPLAY_ONLY_WARNING_CODES
+WARNING_CODES = ("sheet_silent", "vlm_unsure", "multipack_unit_image", "low_resolution", "chat_or_screenshot",
+                 "social_media", "foreign_store", "barcode_conflict", "brand_spelling") + DISPLAY_ONLY_WARNING_CODES
 
 RESOLUTION_PREFIX = "resolution_upgrade"
 # Reason prefixes written by route(); recomputed on every call so route() is idempotent.
@@ -344,7 +382,8 @@ def brand_refuted(ranked: Sequence[RankedCandidate]) -> bool:
 
     Tier 1 rests on the brand being found in the listing text. When the label of such a
     listing shows another brand, that text evidence is unreliable for this SKU, so an
-    unconfirmed (UNSURE/UNKNOWN) tier-1 candidate must not be pre-checked either.
+    unconfirmed (UNSURE/UNKNOWN) candidate must not be pre-checked on it either: only one
+    whose own label confirms the brand may be (refuted_for).
     """
     for rc in ranked:
         v = rc.verdict
@@ -352,6 +391,113 @@ def brand_refuted(ranked: Sequence[RankedCandidate]) -> bool:
                 and rc.score is not None and rc.score.tier == 1 and not rc.score.hard_reject):
             return True
     return False
+
+
+def refuted_for(spec: SkuSpec, ranked: Sequence[RankedCandidate], rc: RankedCandidate) -> bool:
+    """True when brand_refuted keeps `rc` from being pre-checked without a MATCH: another brand was read on a
+    tier-1 listing and rc's OWN label does not confirm the brand (verify.brand_confirmed: brand_match 'yes'
+    and the printed brand reads as the target, the sub-brand the SKU names included).
+
+    Live run 2026-10-04, row 76 'ZWAN TURKEY LUNCHEON MEAT WITH HERB850GM': the Carrefour page also showed a
+    Bordon pack (a related product), which turned the fallback off for the whole SKU although Lulu's 'Zwan
+    Turkey Luncheon Meat With Herbs 850 g' label read ZWAN. A label with no brand read, or another one, is still
+    blocked: the 'Freshly' listings of other brands (live run 2026-09-30, row 34) stay unselected.
+    """
+    return brand_refuted(ranked) and not brand_confirmed(spec, rc.verdict)
+
+
+# ---------------------------------------------------------------------------
+# The tier-2 fallback (REVIEW_PRESELECTED 'preselected:tier2_corroborated')
+# ---------------------------------------------------------------------------
+
+# Listing fields whose size is the listing's own statement of the product (never only the image file name).
+_LISTING_SIZE_FIELDS = ("title", "page_title", "page_slug")
+# Variant doubts on a tier-2 listing's own evidence: another variant in its image file name, or a closely related
+# variant line (Diet vs Zero Sugar). The label reading that the fallback rests on is not asked to settle them.
+_TIER2_VARIANT_DOUBTS = ("image_variant_conflict", "soft_variant_conflict")
+
+
+def label_carries_identity(spec: SkuSpec, rc: RankedCandidate) -> bool:
+    """The label reading states the SKU's identity as far as the label is legible (the tier-2 fallback).
+
+    Every one of: the brand confirmed on the label (verify.brand_confirmed), a front packshot, size_match not
+    'no' (one unit of a multipack SKU excepted: verify.multipack_unit_image) and a printed size, when one was
+    read, that agrees with the SKU; no printed variant that conflicts (or nearly conflicts) with the SKU;
+    variant_match 'yes' when the SKU states a variant or the label prints a marked one the SKU does not state,
+    else not 'no'; and no other pack counted on the picture (the SKU's pack, the pieces one unit holds, or
+    unknown). Only a size the label does not show legibly is left open.
+    """
+    v = rc.verdict
+    if v is None or v.view != "front_packshot" or not brand_confirmed(spec, v):
+        return False
+    unit_of_multipack = multipack_unit_image(spec, v)
+    if v.size_match == "no" and not unit_of_multipack:
+        return False
+    if size_agreement(spec, v.size_text) not in ("match", "unknown"):
+        return False
+    context = variants_mod.spec_context(spec)
+    target = variants_mod.target_variants(spec, v.variant_text)
+    printed = variants_mod.extract_variants(v.variant_text, context, variants_mod.spec_brands(spec))
+    if variants_mod.conflicts(target, printed) or variants_mod.soft_conflicts(target, printed):
+        return False
+    # a variant the SKU states, or a marked one only the label states ('HOT & SPICY' under a sheet typo), needs the
+    # reader's 'yes' (it was shown the sheet's own name); otherwise it is enough that the variant is not read as 'no'
+    if spec.variants or variants_mod.unstated_marked(target, printed, context):
+        if v.variant_match != "yes":
+            return False
+    elif v.variant_match == "no":
+        return False
+    counted = spec.size is not None and spec.size.dimension == "count"
+    pieces = spec.size.pieces if spec.size is not None else None
+    return (counted or unit_of_multipack or v.pack_count in (None, spec.pack_count or 1)
+            or (pieces is not None and v.pack_count == pieces))
+
+
+def listing_states_size(rc: RankedCandidate) -> bool:
+    """The listing's own text proves the SKU's size: score size 'match' found in the title, the page title or the
+    page's URL slug (never only in the image file name), and no other size or pack in a URL
+    (score.url_only_size_conflict). Live run 2026-10-04, row 10 'MR JOHN FRENCH FRIES 900GM': the only Mr John
+    picture's file name says 2.5Kg and its page title states no size, so it stays unselected."""
+    score = rc.score
+    if score is None or score.size_status != "match" or score.url_only_size_conflict:
+        return False
+    fields = (score.matched or {}).get("size_fields") or {}
+    return any(fields.get(name) == "match" for name in _LISTING_SIZE_FIELDS)
+
+
+def _page_domain(rc: RankedCandidate) -> str:
+    return (rc.score.matched or {}).get("page_domain") or page_host(rc.candidate) or url_host(rc.candidate.image_url)
+
+
+def tier2_corroborated(spec: SkuSpec, verifiable: Sequence[RankedCandidate], ranked: Sequence[RankedCandidate]
+                       ) -> Optional[RankedCandidate]:
+    """The tier-2 UNSURE candidate the tier-2 fallback may pre-check, or None.
+
+    See the module docstring (REVIEW_PRESELECTED): usable, no differing page barcode and no variant doubt on its
+    own listing, label_carries_identity, listing_states_size, and corroborated by a second page domain whose label
+    carries the identity too, or by its own trusted page (official, UAE retailer, structured). The refined
+    brand_refuted rule applies as to the tier-1 fallback (refuted_for); a label that carries the identity
+    confirms the brand, so it is never what blocks this pick.
+    Among the candidates that qualify, a trusted page comes first, then a picture that is not low resolution,
+    then rank order: these pictures are all the same product, the reviewer should see the best copy (live run
+    2026-10-04, row 73: a 619x368 picture of a generic site ranked above Lulu's own picture).
+    """
+    readers = [rc for rc in verifiable if rc.score.tier in (1, 2) and label_carries_identity(spec, rc)]
+    domains = {d for d in (_page_domain(rc) for rc in readers) if d}
+    qualified: List[Tuple[bool, bool, int, RankedCandidate]] = []
+    for order, rc in enumerate(readers):
+        if rc.score.tier != 2 or _decision_of(rc) != UNSURE or gtin_conflict(rc):
+            continue
+        if any(str(c).startswith(_TIER2_VARIANT_DOUBTS) for c in rc.score.conflicts or ()):
+            continue
+        if not listing_states_size(rc) or refuted_for(spec, ranked, rc):
+            continue
+        trusted = int((rc.score.matched or {}).get("source_trust") or 0) >= TRUST_STRUCTURED
+        if trusted or len(domains) >= 2:
+            low_res = bool(rc.fetched is not None and rc.fetched.ok
+                           and quality_mod.low_resolution(rc.fetched.width, rc.fetched.height))
+            qualified.append((not trusted, low_res, order, rc))
+    return min(qualified, key=lambda q: q[:3])[3] if qualified else None
 
 
 def _add(counts: Dict[str, int], key: str) -> None:
@@ -437,6 +583,8 @@ def review_warnings(spec: SkuSpec, rc: RankedCandidate, reading_of: Optional[Ran
     out = _sheet_silent(spec, rc)
     if _decision_of(rc) != MATCH:
         out.append("vlm_unsure")
+    if rc.verdict is not None and multipack_unit_image(spec, rc.verdict):
+        out.append("multipack_unit_image")
     if rc.fetched is not None and rc.fetched.ok and quality_mod.low_resolution(rc.fetched.width, rc.fetched.height):
         out.append("low_resolution")
     if _chat_or_screenshot(cand.image_url):
@@ -676,13 +824,21 @@ def route(spec: SkuSpec, ranked: Sequence[RankedCandidate],
         # only while the verifier is down for the whole SKU. With the verifier up, UNKNOWN
         # means it never saw the image (a skipped image or a failed second call).
         fallback = (UNSURE, UNKNOWN) if verifier_down else (UNSURE,)
-        winner = next((rc for rc in verifiable if rc.score.tier == 1 and _decision_of(rc) in fallback
-                       and not gtin_conflict(rc)), None)
-        if winner is not None and brand_refuted(ranked):
-            winner.reasons.append("vlm:tier1_brand_refuted")
-            _add(reject_counts, "vlm:tier1_brand_refuted")
-            winner = None
+        tier1 = [rc for rc in verifiable if rc.score.tier == 1 and _decision_of(rc) in fallback
+                 and not gtin_conflict(rc)]
+        winner = tier1[0] if tier1 else None
+        if winner is not None and refuted_for(spec, ranked, winner):
+            # another brand was read on a tier-1 listing: only a candidate whose own label confirms the brand
+            confirmed = next((rc for rc in tier1 if not refuted_for(spec, ranked, rc)), None)
+            if confirmed is None:
+                winner.reasons.append("vlm:tier1_brand_refuted")
+                _add(reject_counts, "vlm:tier1_brand_refuted")
+            winner = confirmed
         why = f"tier1_{_decision_of(winner).lower()}" if winner is not None else ""
+    if winner is None and not verifier_down:
+        # a tier-2 label reading with corroborated listing evidence (never auto-published: not tier 1, not MATCH)
+        winner = tier2_corroborated(spec, verifiable, ranked)
+        why = "tier2_corroborated" if winner is not None else ""
     if winner is None:
         outcome.decision = "REVIEW_UNSELECTED"
         if social and not outcome.failure_code:

@@ -32,6 +32,10 @@ def _offline(monkeypatch):
     monkeypatch.setattr(settings, "_config", None)
     monkeypatch.setenv("AUTO_PUBLISH_ENABLED", "false")
     monkeypatch.setenv("AUTO_PUBLISH_BRANDS", "")
+    # each test is a run of its own: a spelling another test proved now plans this one's queries (planned_hint)
+    bd.forget_all()
+    yield
+    bd.forget_all()
 
 
 def spec(name, brand, mappings=None):

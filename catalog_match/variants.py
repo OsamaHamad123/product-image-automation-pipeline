@@ -248,6 +248,12 @@ def extract_variants(text: Optional[str], context: Optional[str] = None,
     return {axis: _join(vals) for axis, vals in per_axis.items()}
 
 
+def phrase_spans(text: Optional[str], context: Optional[str] = None) -> List[Tuple[str, str, Tuple[int, int]]]:
+    """(axis, value, (start, end)) for every variant phrase of the text, positions in its clitic-stripped tokens
+    (identity.py reads where a sheet brand's last words begin one: 'AMERICAN LIGHT' + 'MEAT TUNA')."""
+    return _scan(text, context)
+
+
 def variant_tokens(text: Optional[str], context: Optional[str] = None, brands: Iterable[str] = ()) -> Set[str]:
     """The (clitic-stripped) tokens of the text that belong to a variant phrase."""
     toks = tokens(text, strip_clitics=True)

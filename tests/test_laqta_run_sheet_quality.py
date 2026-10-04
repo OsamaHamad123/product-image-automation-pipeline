@@ -1,8 +1,9 @@
 """«جودة بيانات الشيت» on the Run page. Each test failed before its change (there was no card):
 
 * GET /api/run/sheet-quality reads only the sheet rows already cached (never the bridge or Google) unless asked to read
-  the sheet again, and groups the rows' sheet_issues (no size, barcode, unknown brand, typos, duplicate barcodes) with
-  their rows; rows cached before the check say so (the Laravel app through its HTTP kernel, stub cli_bridge);
+  the sheet again, and groups the rows' sheet_issues (no size, a size in MM, barcode, unknown brand, a product word in
+  the brand, typos, duplicate barcodes) with their rows, never a brand cell that says the product has none; rows cached
+  before the check say so (the Laravel app through its HTTP kernel, stub cli_bridge);
 * the card, loaded after «قبل ما تبدأ», lists each group's rows as links to the review screen, the brands of the
   unknown-brand group and how many rows are not listed (public/js/run.js under node).
 """
@@ -25,13 +26,45 @@ def test_sheet_quality_reads_only_cached_rows_unless_asked_to_read_again(mariadb
     assert [c[0] for c in bridge_calls(calls)] == ["get_products"]        # only the explicit «read again» used the bridge
     assert (data["status"], data["total"], data["checked"]) == ("success", 5, 5)
     groups = {g["key"]: g for g in data["groups"]}
-    assert [g["key"] for g in data["groups"]] == ["no_size", "no_barcode", "brand_unknown", "typo", "duplicate_barcode"]
+    assert [g["key"] for g in data["groups"]] == ["no_size", "size_unit_typo", "no_barcode", "brand_unknown",
+                                                  "brand_has_product_word", "typo", "duplicate_barcode"]
     assert (groups["no_size"]["count"], groups["no_barcode"]["count"], groups["brand_unknown"]["count"]) == (1, 2, 1)
     assert groups["typo"]["rows"] == [{"row": 3, "name": "TARGET CHICEKN LUNCHEN MEAT", "href": "/catalog?row=3",
                                        "text": "يمكن «CHICEKN» قصدك «CHICKEN»، يمكن «LUNCHEN» قصدك «LUNCHEON»"}]
     assert groups["typo"]["count"] == 1
     assert groups["brand_unknown"]["brands"] == [{"brand": "TARGET", "count": 1}]
     assert [r["row"] for r in groups["duplicate_barcode"]["rows"]] == [4, 5]
+
+
+@NEEDS_LARAVEL
+def test_a_size_in_mm_and_a_product_word_in_the_brand_have_groups_and_no_brand_is_not_a_gap(mariadb_or_skip,
+                                                                                               tmp_path):
+    # live run 2026-10-04: rows 4 ('900 MM'), 28 ('AMERICAN LIGHT'), 79 ('SQ SALITED') and 95 ('GENERIC / NO BRAND')
+    sheet = [
+        {"row_number": 4, "product_name": "BATO FRENCH FRIES 900 MM", "brand": "BATO", "barcode": "",
+         "sheet_issues": [{"key": "no_size", "text": "الحجم ناقص بالشيت"},
+                          {"key": "size_unit_typo", "word": "900 MM", "suggest": "900 GM",
+                           "text": "الحجم مكتوب «900 MM» — غالبًا قصدك «900 GM»"}]},
+        {"row_number": 28, "product_name": "AMERICAN LIGHT MEAT TUNA SOLID 185GM", "brand": "AMERICAN LIGHT",
+         "barcode": "", "sheet_issues": [{"key": "brand_has_product_word", "brand": "AMERICAN LIGHT",
+                                          "suggest": "AMERICAN", "word": "LIGHT", "known": True,
+                                          "text": "عمود الماركة فيه كلمة من اسم المنتج: «AMERICAN LIGHT» — الماركة "
+                                                  "غالبًا «AMERICAN»"}]},
+        {"row_number": 79, "product_name": "SQ SALITED DRY PRAWNS FISF", "brand": "SQ SALITED", "barcode": "",
+         "sheet_issues": [{"key": "brand_has_product_word", "brand": "SQ SALITED", "suggest": "SQ",
+                           "word": "SALITED", "fix": "SALTED", "known": False,
+                           "text": "عمود الماركة فيه كلمة من اسم المنتج: «SQ SALITED» — الماركة غالبًا «SQ»، "
+                                   "و«SALITED» قصدك «SALTED»"}]},
+        {"row_number": 95, "product_name": "ICE CREAM CANDY 13 GM", "brand": "GENERIC / NO BRAND", "barcode": "",
+         "sheet_issues": [{"key": "no_brand", "brand": "GENERIC / NO BRAND", "text": "المنتج بلا ماركة بالشيت"}]},
+    ]
+    env, _calls = stub_env(tmp_path, products=sheet)
+    (fresh,) = kernel(env, [["GET", "/api/run/sheet-quality?refresh=1"]])
+    groups = {g["key"]: g for g in json.loads(fresh["body"])["groups"]}
+    assert groups["size_unit_typo"]["count"] == 1 and groups["size_unit_typo"]["label"]
+    assert groups["size_unit_typo"]["rows"][0]["text"] == "الحجم مكتوب «900 MM» — غالبًا قصدك «900 GM»"
+    assert [r["row"] for r in groups["brand_has_product_word"]["rows"]] == [28, 79]
+    assert "no_brand" not in groups and groups["brand_unknown"]["count"] == 0     # the owner's answer, not a gap
 
 
 @NEEDS_LARAVEL

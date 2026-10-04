@@ -65,6 +65,9 @@ class SkuSpec:
     discovered_brands: Tuple[str, ...] = ()
     # learning: sites the reviewers keep approving this brand's images from (UAE-retailer trust, site: queries)
     learned_domains: Tuple[str, ...] = ()
+    # the sheet's brand cell when it only says the product has no brand ('GENERIC / NO BRAND'; brand_index.
+    # is_placeholder_brand): brand_raw is then '' and brand_conf 'none', and the product is searched by name only
+    brand_placeholder: str = ""
 
     def __hash__(self) -> int:  # dict field makes the generated hash unusable
         return hash(self.sku_key or (self.raw_name, self.brand_raw))

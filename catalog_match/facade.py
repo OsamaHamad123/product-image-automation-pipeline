@@ -18,7 +18,7 @@ outcome_to_legacy(outcome, trace=None, spec=None) -> dict | None
     Returns None for NOT_FOUND, PROVIDER_DOWN, or when there is no reviewable candidate.
 
     trace (when given) always receives
-        trace['outcome'] = {decision, failure_code, provider_health, queries, sku_key, ...}
+        trace['outcome'] = {decision, failure_code, provider_health, queries, sku_key, discovered_brands, ...}
     and one trace['steps'] entry, {'step_name', 'name', 'query', 'results_count',
     'candidates': [...]}, whose candidates carry url, title, page_url, domain, width,
     height, status, reasons, warnings, evidence, vlm and scores {identity_score,
@@ -230,6 +230,10 @@ def outcome_summary(outcome: SearchOutcome) -> Dict[str, Any]:
         "winner_url": outcome.winner.candidate.image_url if outcome.winner is not None else None,
         # SOCIAL_ONLY: the social-network posts that show the product, for the reviewer
         "social_links": list(getattr(outcome, "social_links", None) or []),
+        # brand_discovery: the stores' spelling the search used for the sheet brand ('Super Tasty' for 'SUPER T/').
+        # The run export and the stored no-pick reason read it here: a product without a pick carries no
+        # 'brand_spelling' warning to tell it (live run 2026-10-04, rows 49-51 were exported without it)
+        "discovered_brands": list(getattr(outcome, "discovered_brands", None) or []),
     }
 
 

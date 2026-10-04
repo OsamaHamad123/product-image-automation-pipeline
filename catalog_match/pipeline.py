@@ -10,7 +10,8 @@ Steps
                   Food Facts record alone never stops the search). When brand
                   discovery finds the stores' spelling of the sheet brand, the local
                   catalog index is asked again with it (free), alongside one corrected
-                  query.
+                  query. A spelling an earlier row of the run proved for the sheet brand
+                  writes the planned queries from Q1 (brand_discovery.planned_hint).
     2. score      every pooled candidate with score.score_candidate.
     3. relax      R1/R2 into the same pool, only when no candidate is tier 1 or 2
                   and there is no custom query (relaxed winners are capped at review).
@@ -250,18 +251,31 @@ def find_product_image(spec: Union[SkuSpec, Mapping[str, Any]], *, providers: Op
     negatives = {"urls": exclude_urls} if exclude_urls else None
     custom = custom_query.strip() if custom_query and custom_query.strip() else None
 
-    # 1. retrieve (early stop on tier 1)
-    retriever = Retriever(spec, providers, exclude_urls=exclude_urls, max_queries=MAX_QUERIES,
+    # 1. retrieve (early stop on tier 1). A spelling an earlier row of this run proved for the same (or a sibling)
+    #    sheet brand writes the planned queries from Q1 ('Super Tasty MEAT SOLID TUNA ...' for 'SUPER T/', never
+    #    'SUPER T MEAT ...' first): queries only, the brand evidence and the early stop stay the sheet's.
+    remembered = brand_discovery.planned_hint(spec) if not custom else None
+    plan_spec = brand_discovery.as_hint(spec, remembered) if remembered is not None else spec
+    retriever = Retriever(plan_spec, providers, exclude_urls=exclude_urls, max_queries=MAX_QUERIES,
                           early_stop=t1_early_stop(spec, negatives))
     retrieval = retriever.run(custom)
 
     # 1b. brand discovery: a sheet brand no listing writes the sheet's way ('RIO MARIE', 'SUP/T') but the
     #     stores write one typo or abbreviation away ('Rio Mare', 'Super Tasty'): accept the store spelling
     #     (never an auto-publish) and send the first query once more, written with it.
-    #     A spelling an earlier row of this run proved for the same (or a sibling) sheet brand is first only a
-    #     query hint: it counts once a listing this row gets names the product under it.
+    #     A remembered spelling counts once a listing this row gets names the product under it; when none does,
+    #     the first query is sent once the sheet's way (it was planned with the remembered spelling) or, when the
+    #     plan was the sheet's, once written with the remembered spelling (the hint).
     found = brand_discovery.find(spec, retrieval.pool)
-    hinted = brand_discovery.hint(spec, retrieval.pool) if found is None and not custom else None
+    if found is None and remembered is not None:
+        retriever.spec = spec
+        retriever.pool.spec = spec
+        extra = brand_discovery.sheet_query(spec, retrieval.queries) if not retriever.stopped else None
+        if extra is not None:
+            retrieval = retriever.run_extra(extra)
+            found = brand_discovery.find(spec, retrieval.pool)
+    hinted = brand_discovery.hint(spec, retrieval.pool) if found is None and not custom and remembered is None \
+        else None
     if hinted is not None:
         extra = brand_discovery.corrected_query(brand_discovery.as_hint(spec, hinted), retrieval.queries)
         if extra is not None:
