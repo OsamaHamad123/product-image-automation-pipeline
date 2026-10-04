@@ -21,7 +21,7 @@ from catalog_match.models import (
     Candidate, FetchedImage, ProviderHealth, QualityReport, RankedCandidate, VerificationResult,
 )
 from catalog_match.score import score_candidate
-from catalog_match.verify import MISMATCH, UNSURE, classify, make_verdict, multipack_unit_image
+from catalog_match.verify import MATCH, MISMATCH, UNSURE, classify, make_verdict, multipack_unit_image
 
 OK = VerificationResult(status="ok", calls=1)
 HEALTHY = [ProviderHealth("serper", "ok", 200, query_id="Q1")]
@@ -314,9 +314,9 @@ def test_row71_a_single_generic_store_without_corroboration_stays_unselected():
 ZWAN_TANDOORI = spec_of("ZWAN LUNCHEON MEAT TANDOORI 200GM", "ZWAN")
 
 
-def test_row73_tandoori_luncheon_meat_is_preselected_from_the_trusted_store_not_the_small_picture():
+def row73(union_reading=None):
     s = ZWAN_TANDOORI
-    rcs = [
+    return [
         listing(s, 1, "Magic Trading | Zwan luncheon meat tandoori 200g",
                 "https://magic-sl.com/zwan-luncheon-meat-tandoori-200g-",
                 "https://magic-sl.com/cache/original/product/11089/diGIUU1zrQKZsCpq97gJZUa5LRP136jj93Nh0Lev.jpg",
@@ -324,7 +324,7 @@ def test_row73_tandoori_luncheon_meat_is_preselected_from_the_trusted_store_not_
         listing(s, 2, "zwan chicken lanchon meat, 200 g Price | Buy Online in Dubai, UAE - Union  Coop",
                 "https://www.unioncoop.ae/luncheon-meat-chicken-200gm-2434830.html",
                 "https://www.unioncoop.ae/media/catalog/product/z/w/zwan-tandoori-chicken-luncheon-meat-200-g_hero.jpg",
-                read("ZWAN", "CHICKEN LUNCHEON MEAT TANDOORI", "200ge", size_match="yes")),
+                union_reading or read("ZWAN", "CHICKEN LUNCHEON MEAT TANDOORI", "200ge", size_match="yes")),
         listing(s, 4, "Zwan Chicken Tandoori Luncheon Meat 200 g",
                 "https://gcc.luluhypermarket.com/en-ae/zwan-chicken-tandoori-luncheon-meat-200-g/p/566018",
                 "https://bf1af2.akinoncloudcdn.com/products/2024/09/11/65060/46680861-6ee5-4a21-9515-c922ee68f5d9"
@@ -338,10 +338,26 @@ def test_row73_tandoori_luncheon_meat_is_preselected_from_the_trusted_store_not_
                 "https://bf1af2.akinoncloudcdn.com/products/2024/09/11/65060/888eb80b-dc7d-424c-b8dc-b54d1cf93066.jpg",
                 read("ZWAN", "TANDOORI"), (1500, 1500)),
     ]
+
+
+def test_row73_tandoori_luncheon_meat_is_preselected_from_the_trusted_store_not_the_small_picture():
+    # Union Coop's label prints '200ge' (the estimated sign): since the 2026-10-04 19:33 run it parses as 200 g, so
+    # the reading is a MATCH (tier 2: review, never auto-published) and it is the pick on its own
+    rcs = row73()
     assert [rc.score.tier for rc in rcs] == [2, 2, 2, 2, 2]
-    out = route(s, rcs)
+    assert [rc.verdict.decision for rc in rcs] == [UNSURE, MATCH, UNSURE, UNSURE, UNSURE]
+    out = route(ZWAN_TANDOORI, rcs)
+    assert out.decision == "REVIEW_PRESELECTED" and out.winner is rcs[1]
+    assert "preselected:vlm_match" in out.winner.reasons and "auto_blocked:not_tier1" in out.winner.reasons
+    assert "sheet_silent:protein=chicken" in warns(out.winner) and "vlm_unsure" not in warns(out.winner)
+
+
+def test_row73_the_tier2_fallback_prefers_the_trusted_store_to_the_small_picture():
+    # the same row with Union Coop's size not legible: the corroborated tier-2 fallback decides
+    rcs = row73(read("ZWAN", "CHICKEN LUNCHEON MEAT TANDOORI"))
+    out = route(ZWAN_TANDOORI, rcs)
     # magic-sl.com ranks first but is a generic site with a 619x368 picture: among the pictures the fallback may
-    # pre-check, Union Coop's (a UAE retailer, the size read on the pack) comes first
+    # pre-check, Union Coop's (a UAE retailer) comes first
     assert out.decision == "REVIEW_PRESELECTED" and out.winner is rcs[1]
     assert "preselected:tier2_corroborated" in out.winner.reasons
     assert {"vlm_unsure", "sheet_silent:protein=chicken"} <= set(warns(out.winner))

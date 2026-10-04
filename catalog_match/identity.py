@@ -168,6 +168,26 @@ def _class_tokens(texts: Sequence[str], exclude: Set[str], context: str = "") ->
     return tuple(out)
 
 
+def description_words(spec: SkuSpec, text: Optional[str] = None) -> Tuple[str, ...]:
+    """The words that describe the product in its readable sheet name (sheet_names.spec_name), in order and once:
+    without the brand's words (the brand, its mapped name and spellings, a sub-brand the SKU names), sizes and
+    units, and stop words ('in', 'with', 'and', 'of'); clitics stripped. Unlike class_tokens the variant words
+    stay: 'DEEP BLUE SHREDDED TUNA IN SUNFLOWER OIL 185G' -> ('shredded', 'tuna', 'sunflower', 'oil').
+    text, when given, is read by the same rules instead of the sheet name (a label's printed variant: 'DEEP blue
+    Tuna SHREDDED SUNFLOWER OIL' -> ('tuna', 'shredded', 'sunflower', 'oil')). verify.overruled_flags compares
+    the two to read a label's variant 'no'."""
+    brand_words: Set[str] = set()
+    for phrase in (spec.brand_canonical, spec.brand_ar) + tuple(spec.match_brands) + tuple(spec.required_brands):
+        brand_words |= _token_set(phrase or "")
+    out: List[str] = []
+    for tok in tokens(sheet_names.spec_name(spec) if text is None else text, strip_clitics=True):
+        if tok[0].isdigit() or len(tok) < 2 or tok in brand_words or tok in _STOPWORDS or tok in _UNIT_WORDS:
+            continue
+        if tok not in out:
+            out.append(tok)
+    return tuple(out)
+
+
 def make_sku_key(gtin14: Optional[str], brand: str, raw_name: str, size: Optional[Size]) -> str:
     if gtin14:
         return gtin14

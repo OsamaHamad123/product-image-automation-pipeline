@@ -37,6 +37,11 @@ Decisions
                         A store page that also shows a related product's picture (another
                         brand's pack) no longer hides the right one (live run 2026-10-04,
                         rows 76 and 83).
+                        Among several tier-1 UNSURE candidates, one the reader left UNSURE by
+                        itself comes before one whose 'no' the code set aside (a size within the
+                        tolerance, verify.size_close; a flag its own text cannot support,
+                        verify.overruled_flags), then rank order: the pick of a row that had
+                        one before stays the same (live run 2026-10-04 19:33, rows 5 and 9).
                         Tier-2 fallback ('preselected:tier2_corroborated'; live run 2026-10-04,
                         rows 62, 71 and 73: the net size is not legible on the front, the title
                         lacks a variant word or the source is a generic store) - a tier-2
@@ -93,11 +98,19 @@ double-check before approving. They never change the winner or the decision.
     sheet_silent:<axis>=<value>  the listing text (title, page title, the product's own
                                  slug) or the label reading states a marked variant on
                                  an axis the SKU does not state ('thin' fries, 'shredded')
+    listing_silent:<axis>=<value>  the reverse: the SKU states a marked variant ('H/S' hot &
+                                 spicy) that neither the listing text nor the label reading
+                                 shows (live run 2026-10-04, row 67: a plain 'Chicken Luncheon
+                                 Meat 340g' can was pre-checked, unwarned, for 'ZWAN CHICKEN
+                                 LUNCHEON MEAT H/S 340GM')
     vlm_unsure                   pre-checked without a MATCH (tier 1 UNSURE or UNKNOWN, or the
                                  corroborated tier-2 fallback)
     multipack_unit_image         the picture shows ONE unit of a multipack SKU (one can of
                                  '3X185GM'): the label's only 'no' was the size, its printed size
                                  is the per-unit size (verify.multipack_unit_image)
+    size_close:<printed>/<sheet> the label's only 'no' was the size and its printed size is the
+                                 sheet's within the size tolerance but not exactly ('840g/850g':
+                                 '840ge' on an 850G SKU, verify.size_close): check and fix the sheet
     low_resolution               the downloaded image's short side is below 500 px
     chat_or_screenshot           the image file is a chat or screenshot export
                                  ('WhatsApp Image ...', 'IMG-20251014-WA0003', 'Screenshot')
@@ -114,6 +127,12 @@ double-check before approving. They never change the winner or the decision.
                                  approving the pick teaches it (catalog_match.learning).
                                  It stays on once the spelling is learned, so a
                                  WRONG_BRAND rejection can still count against it
+
+Overruled flags ('vlm:flag_overruled:size' / 'vlm:flag_overruled:variant' reasons, not warnings): on every
+candidate whose reading is UNSURE only because verify.overruled_flags set aside a 'no' its own verbatim text
+cannot support (a size 'no' with nothing printed read, a variant 'no' whose printed text holds every word
+describing the SKU). The reader's doubt stays visible to the reviewer ('vlm_unsure' on a pick, the reason in
+the export and the review screen's detail line); it is never a MATCH, so never an auto-publish.
 
 Display-only warnings (candidate_warnings): the review screen shows warnings under every
 eligible candidate, not only the pick, so a reviewer who chooses an alternative sees the same
@@ -156,7 +175,7 @@ from .fetch import phash_distance
 from .score import IDENTITY_KEYS, TRUST_STRUCTURED, page_host, rank_key, trusted_domains
 from .sizes import compare, parse_sizes, product_size
 from .text_norm import brand_in, domain_matches, match_key, match_string, normalize, store_market, url_host, url_path_text
-from .verify import brand_confirmed, multipack_unit_image, size_agreement
+from .verify import brand_confirmed, multipack_unit_image, overruled_flags, size_agreement, size_close
 
 logger = logging.getLogger(__name__)
 
@@ -170,8 +189,12 @@ WARN_PREFIX = "warn:"
 # Display-only codes (candidate_warnings): shown to the reviewer, never read by routing.
 DISPLAY_ONLY_WARNING_CODES = ("size_unverified", "variant_unverified")
 # Every review warning code (the dashboard maps each one to an Arabic sentence).
-WARNING_CODES = ("sheet_silent", "vlm_unsure", "multipack_unit_image", "low_resolution", "chat_or_screenshot",
-                 "social_media", "foreign_store", "barcode_conflict", "brand_spelling") + DISPLAY_ONLY_WARNING_CODES
+WARNING_CODES = ("sheet_silent", "listing_silent", "vlm_unsure", "multipack_unit_image", "size_close", "low_resolution",
+                 "chat_or_screenshot", "social_media", "foreign_store", "barcode_conflict",
+                 "brand_spelling") + DISPLAY_ONLY_WARNING_CODES
+# Reason on a candidate whose label reading said 'no' to a flag its own verbatim text cannot support
+# (verify.overruled_flags): 'vlm:flag_overruled:size' / 'vlm:flag_overruled:variant'.
+FLAG_OVERRULED = "vlm:flag_overruled"
 
 RESOLUTION_PREFIX = "resolution_upgrade"
 # Reason prefixes written by route(); recomputed on every call so route() is idempotent.
@@ -500,6 +523,13 @@ def tier2_corroborated(spec: SkuSpec, verifiable: Sequence[RankedCandidate], ran
     return min(qualified, key=lambda q: q[:3])[3] if qualified else None
 
 
+def no_set_aside(spec: SkuSpec, rc: RankedCandidate) -> bool:
+    """The reader answered 'no' to a flag and only verify.size_close or verify.overruled_flags made it UNSURE."""
+    v = rc.verdict
+    return (v is not None and v.decision == UNSURE
+            and (size_close(spec, v) is not None or bool(overruled_flags(spec, v))))
+
+
 def _add(counts: Dict[str, int], key: str) -> None:
     counts[key] = counts.get(key, 0) + 1
 
@@ -515,6 +545,33 @@ def _reset(rc: RankedCandidate) -> bool:
 # ---------------------------------------------------------------------------
 # Review warnings
 # ---------------------------------------------------------------------------
+
+def _found_variants(spec: SkuSpec, rc: RankedCandidate) -> Dict[str, str]:
+    """The variants the candidate's listing text and its label reading state, read like score_candidate."""
+    cand = rc.candidate
+    context = variants_mod.spec_context(spec)
+    # The product's own slug segment only: department breadcrumbs ('/fresh-food/') are not the product.
+    texts = (cand.title, cand.page_title, url_path_text(cand.page_url, product_segment=True),
+             rc.verdict.variant_text if rc.verdict is not None else "")
+    read_context = " ".join([context] + [t for t in texts if t])
+    brands = variants_mod.spec_brands(spec)
+    return variants_mod.merge(*(variants_mod.extract_variants(t, read_context, brands) for t in texts))
+
+
+def _listing_silent(spec: SkuSpec, rc: RankedCandidate) -> List[str]:
+    """'listing_silent:<axis>=<value>' for each marked variant the SKU states and neither the listing text nor the
+    label reading shows: the reader's 'yes' alone does not show a hot & spicy can to be one."""
+    if not spec.variants:
+        return []
+    context = variants_mod.spec_context(spec)
+    found = _found_variants(spec, rc)
+    out = []
+    for axis, value in sorted(spec.variants.items()):
+        marked = variants_mod.values_of(value) - variants_mod.unmarked_values(axis, context)
+        if marked and not marked & variants_mod.values_of(found.get(axis)):
+            out.append(f"listing_silent:{axis}={variants_mod.SEP.join(sorted(marked))}")
+    return out
+
 
 def _sheet_silent(spec: SkuSpec, rc: RankedCandidate) -> List[str]:
     """'sheet_silent:<axis>=<value>' for each marked variant the pick states and the SKU does not."""
@@ -580,11 +637,14 @@ def review_warnings(spec: SkuSpec, rc: RankedCandidate, reading_of: Optional[Ran
     if reading_of is not None and reading_of is not rc:
         rc = RankedCandidate(candidate=rc.candidate, score=rc.score, fetched=rc.fetched, quality=rc.quality,
                              verdict=reading_of.verdict, status=rc.status)
-    out = _sheet_silent(spec, rc)
+    out = _sheet_silent(spec, rc) + _listing_silent(spec, rc)
     if _decision_of(rc) != MATCH:
         out.append("vlm_unsure")
     if rc.verdict is not None and multipack_unit_image(spec, rc.verdict):
         out.append("multipack_unit_image")
+    close = size_close(spec, rc.verdict) if rc.verdict is not None else None
+    if close is not None and spec.size is not None:
+        out.append(f"size_close:{close.canonical()}/{spec.size.canonical()}")
     if rc.fetched is not None and rc.fetched.ok and quality_mod.low_resolution(rc.fetched.width, rc.fetched.height):
         out.append("low_resolution")
     if _chat_or_screenshot(cand.image_url):
@@ -762,6 +822,8 @@ def route(spec: SkuSpec, ranked: Sequence[RankedCandidate],
                 _add(reject_counts, code)
         if rc.verdict is not None:
             rc.reasons.append(f"vlm:{rc.verdict.decision}")
+            if rc.verdict.decision == UNSURE:
+                rc.reasons.extend(f"{FLAG_OVERRULED}:{flag}" for flag in overruled_flags(spec, rc.verdict))
             if rc.verdict.decision == MISMATCH and rc.status != "rejected":
                 rc.status = "rejected"
                 _add(reject_counts, "vlm:MISMATCH")
@@ -826,6 +888,9 @@ def route(spec: SkuSpec, ranked: Sequence[RankedCandidate],
         fallback = (UNSURE, UNKNOWN) if verifier_down else (UNSURE,)
         tier1 = [rc for rc in verifiable if rc.score.tier == 1 and _decision_of(rc) in fallback
                  and not gtin_conflict(rc)]
+        # a reading whose 'no' was set aside (a size within the tolerance, a flag its own text cannot support)
+        # comes after one the reader left UNSURE by itself; rank order otherwise (a stable sort)
+        tier1.sort(key=lambda rc: no_set_aside(spec, rc))
         winner = tier1[0] if tier1 else None
         if winner is not None and refuted_for(spec, ranked, winner):
             # another brand was read on a tier-1 listing: only a candidate whose own label confirms the brand

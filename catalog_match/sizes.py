@@ -19,6 +19,8 @@ parse_sizes(text, source_field) -> list[Size]
       'N pcs' / 'N bags' ... with no measured size -> a count
       '1/2 kg', '½ L', '1 1/2 kg'                  -> fractions
       '2.5-3 kg'                                   -> a range: two sizes, so 'ambiguous'
+      '840 g ℮', '840g℮', '840ge'                  -> 840 g (the EU estimated sign; glued as 'e' only
+                                                      after g / gm / kg / ml / cl)
     Decimals use '.' or ','; ',ddd' is a thousands separator.
     Numbers that are nutrient amounts ('10g fibre', 'per 100g', '30g per serving')
     are ignored.
@@ -131,6 +133,10 @@ _FRACTION_RE = re.compile(
 _RANGE_RE = re.compile(
     _START + r"(?P<a>" + _NUM + r")\s*[-–]\s*(?P<b>" + _NUM + r")\s*(?P<u>" + _UNIT + r")" + _END
 )
+# The EU estimated sign printed after a net quantity ('840 g ℮'): the label reader writes it as a glued 'e'
+# ('840ge', live run 2026-10-04 19:33, row 9; NFKC turns a script 'ℯ' into 'e'). It is dropped after a metric
+# unit; '℮' itself is no letter, so '840g℮' already parsed. Never after a bare 'l' ('2 le' is French).
+_ESTIMATED_SIGN_RE = re.compile(r"(?<=\d)(?P<u>\s*(?:kg|gm|g|ml|cl))[e℮](?![^\W\d_])")
 _PACK_WORD_RE = re.compile(r"pack|pcs|pc\b|piece|pk|حب|قطع|عبو|علب")
 # Content counts: the product itself is counted ('100 tea bags', '30 capsules').
 _CONTENT_COUNT = re.compile(
@@ -200,7 +206,9 @@ def _fraction(m: "re.Match[str]") -> str:
 
 
 def _prepare(t: str) -> str:
-    """Rewrite fractions to decimals and 'a-b unit' ranges to two sizes (so the text is ambiguous)."""
+    """Rewrite fractions to decimals and 'a-b unit' ranges to two sizes (so the text is ambiguous), and drop the
+    estimated sign glued to a unit ('840ge' -> '840g')."""
+    t = _ESTIMATED_SIGN_RE.sub(r"\g<u>", t)
     t = _FRACTION_RE.sub(_fraction, t)
     return _RANGE_RE.sub(lambda m: f"{m.group('a')} {m.group('u')} / {m.group('b')} {m.group('u')}", t)
 

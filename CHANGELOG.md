@@ -426,6 +426,32 @@ learned ever auto-publishes.
 - `.gitignore` keeps ignoring HTML dumps but lets the offline test fixtures under `tests/catalog_match/fixtures`
   be added.
 
+### Fixed from the owner's second run export of 2026-10-04 (31 rows, 9 no-pick)
+
+`laqta_run_2026-10-04_1933.json` was run on the release above: 22 of 31 pre-selected. Four of the nine no-pick rows
+had the right picture. Re-routing the export offline gives 26 (rows 3, 5, 9, 15), loses none and auto-publishes
+nothing; the first export keeps its 74.
+
+- **Sharjah Co-op is a listed UAE retailer** (rows 3, 15). `sharjahcoop.ae` is in `uae_retailers`, and its store
+  names ('Sharjah Co-operative Society', 'Sharjah Coop'…) are dropped from titles before brand matching. Its
+  pictures were right in rows 8, 10, 12, 14 and 16 but counted as a generic site, so a lone Sharjah Co-op listing
+  was never corroboration. The expansion round's second store group now also covers it (no extra query); other
+  co-op sites are not listed.
+- **A close size is UNSURE, not MISMATCH** (row 9). Every store and the label say 840 g for 'AL TAGHZIAH CHICKEN
+  LUNCHEON MEAT 850G'. A label whose only 'no' is a size within the existing tolerance (but not equal) is UNSURE,
+  and a pick carries the warning `size_close:840g/850g` («صحّح الشيت»). The size parser reads the EU estimated
+  sign ('840ge', '840 g ℮').
+- **A 'no' the reader's own text cannot support is set aside** (row 5). A size 'no' with no size read at all, or a
+  variant 'no' whose printed words are exactly the sheet's description words, becomes UNSURE (never MATCH) and is
+  recorded as `vlm:flag_overruled:size|variant`. A brand 'no' is never set aside; such a reading comes after any
+  reading the reader left UNSURE itself, gets no strong second look and seeds no visual search.
+- **'H/S' is hot & spicy on a meat product** ('ZWAN CHICKEN LUNCHEON MEAT H/S 340GM'): read as flavour chili by the
+  variant lexicon and written out in the queries, context-bound so a towel's 'H/S' stays as written.
+- **New warning `listing_silent:<axis>=<value>`**, the reverse of `sheet_silent`: the sheet states a marked variant
+  (hot & spicy) that neither the store page nor the label shows. On the first export it flags exactly the three
+  H/S rows (66, 67, 70), whose picks were plain cans with no warning and could have been bulk-approved.
+- Eval gate unchanged: 58/58, 58/58, 52/58; preselect precision 100%, 100%, 96.3%; 0 wrong auto-publish.
+
 ### Fixed from the owner's run export of 2026-10-04 (32 no-pick rows)
 
 The owner sent `laqta_run_2026-10-04_1619.json` (100 real rows: 68 pre-selected, 32 «بلا اقتراح»). In about ten of

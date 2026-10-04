@@ -573,6 +573,13 @@
           "saffron",
           "زعفران"
         ]
+      },
+      "context_values": {
+        "meat_products": {
+          "chili": [
+            "h s"
+          ]
+        }
       }
     },
     "tuna_meat": {

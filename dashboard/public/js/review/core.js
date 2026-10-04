@@ -23,8 +23,12 @@
     // تحذيرات المراجعة (warnings في استجابة البحث، أو warn:<code> في أسباب المرشح المحفوظ): جملة عربية لكل رمز
     const REVIEW_WARNING_LABELS = {
         sheet_silent: 'الشيت ما حدد النوع',
+        // listing_silent:<axis>=<value>: الشيت يذكر نوعاً لا تُظهره صفحة المتجر ولا قراءة الملصق
+        listing_silent: 'الشيت بيذكر نوع ما بيبيّنه المتجر ولا الملصق: تأكد إنها نفس النوع',
         vlm_unsure: 'نموذج القراءة غير متأكد من المطابقة',
         multipack_unit_image: 'الصورة لعبوة وحدة، والمنتج باكيت من أكثر من حبة: تأكد إنها مناسبة',
+        // size_close:<الحجم على العلبة>/<حجم الشيت>: الحجمان متقاربان (ضمن السماحية) بس مش نفس الرقم
+        size_close: 'الحجم على العلبة قريب من الشيت بس مش نفسه: تأكد وصحّح الشيت',
         low_resolution: 'صورة منخفضة الدقة (أقل من 500 بكسل)',
         chat_or_screenshot: 'صورة من واتساب أو لقطة شاشة',
         social_media: 'الصورة من مواقع التواصل الاجتماعي',
@@ -66,6 +70,22 @@
             const value = (eq >= 0 ? detail.slice(eq + 1) : detail).split('+').join(' / ');
             const label = VARIANT_AXIS_LABELS[axis] ? `الشيت ما حدد ${VARIANT_AXIS_LABELS[axis]}` : REVIEW_WARNING_LABELS.sheet_silent;
             return `${label}: ${value}`;
+        }
+        if (name === 'listing_silent' && detail) {
+            // listing_silent:<axis>=<value> ('flavour=chili' لـ 'H/S'): الشيت يذكره، والصفحة والملصق ساكتان
+            const eq = detail.indexOf('=');
+            const axis = eq >= 0 ? detail.slice(0, eq) : '';
+            const value = (eq >= 0 ? detail.slice(eq + 1) : detail).split('+').join(' / ');
+            const what = VARIANT_AXIS_LABELS[axis] || 'النوع';
+            return `الشيت بيقول ${what}: ${value}، بس صفحة المتجر والملصق ما بيبيّنوه: تأكد إنها نفس المنتج`;
+        }
+        if (name === 'size_close' && detail.trim()) {
+            // size_close:<الحجم على العلبة>/<حجم الشيت> ('840g/850g')
+            const slash = detail.indexOf('/');
+            const printed = (slash >= 0 ? detail.slice(0, slash) : detail).trim();
+            const sheet = slash >= 0 ? detail.slice(slash + 1).trim() : '';
+            const sizes = sheet ? `${printed} مقابل ${sheet}` : printed;
+            return `الحجم على العلبة قريب من الشيت بس مش نفسه (${sizes}): تأكد وصحّح الشيت`;
         }
         if (name === 'brand_spelling' && detail.trim()) {
             // brand_spelling:<الكتابة>: الكتابة التي وجدتها المتاجر تظهر للمراجع
