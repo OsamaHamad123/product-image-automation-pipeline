@@ -1581,13 +1581,27 @@ def _lock_tmp(lock_file):
     return f"{lock_file}.{os.getpid()}.tmp"
 
 
-def _write_lock_file(lock_file, data):
-    """كتابة ذرية: ملف مؤقت ثم os.replace، فلا يقرأ أحد قفلاً نصف مكتوب."""
+def _write_lock_file(lock_file, data, attempts=5):
+    """
+    كتابة ذرية: ملف مؤقت ثم os.replace، فلا يقرأ أحد قفلاً نصف مكتوب. على ويندوز يفشل الاستبدال لحظة يكون القفل
+    مفتوحاً للقراءة (لوحة التحكم تقرؤه كل بضع ثوانٍ): يُعاد بعد لحظة، ثم يُرفع الخطأ.
+    """
     os.makedirs(os.path.dirname(lock_file) or ".", exist_ok=True)
     tmp = _lock_tmp(lock_file)
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False)
-    os.replace(tmp, lock_file)
+    for attempt in range(attempts):
+        try:
+            os.replace(tmp, lock_file)
+            return
+        except PermissionError:
+            if attempt == attempts - 1:
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    pass
+                raise
+            time.sleep(0.05)
 
 
 def _create_lock_file(lock_file, data):

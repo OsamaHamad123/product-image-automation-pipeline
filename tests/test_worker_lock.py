@@ -347,6 +347,29 @@ def test_the_lock_is_replaced_atomically_and_created_exclusively(main_mod, monke
     assert [p for p in os.listdir("temp") if p.endswith(".tmp")] == []
 
 
+
+def test_a_lock_rewrite_waits_for_a_reader_to_close_the_file(main_mod, monkeypatch):
+    """On Windows os.replace fails while another process (the dashboard polls the lock every few seconds) has the lock
+    open: the takeover of the dashboard's STARTING lock or a heartbeat is retried instead of being lost."""
+    real_replace = os.replace
+    busy = [2]
+
+    def replace(src, dst):
+        if busy[0]:
+            busy[0] -= 1
+            raise PermissionError(13, "The process cannot access the file because it is being used by another process")
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(main_mod.os, "replace", replace)
+    monkeypatch.setattr(main_mod.time, "sleep", lambda s: None)
+    _write(main_mod.LOCK_FILE, "STARTING")
+    assert main_mod.acquire_lock("worker", main_mod.LOCK_FILE) is True
+    assert main_mod.read_lock(main_mod.LOCK_FILE)["pid"] == os.getpid()
+    busy[0] = 99
+    with pytest.raises(PermissionError):
+        main_mod.write_lock("worker", main_mod.LOCK_FILE)
+    assert [p for p in os.listdir("temp") if p.endswith(".tmp")] == []
+
 def test_an_empty_lock_being_created_is_not_deleted(main_mod):
     """The exclusive-create fallback (no hard links) writes after creating: a reader may see it empty for a moment."""
     _write(main_mod.LOCK_FILE, "")
