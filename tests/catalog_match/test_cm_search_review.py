@@ -174,3 +174,36 @@ def test_a_brand_name_never_states_a_protein():
     assert "protein" not in spec.variants                         # was 'lamb'
     s = score_candidate(spec, listing("Lamb Weston Burger Fries 1kg"))
     assert s.tier == 1 and not any("protein" in c for c in s.conflicts)
+
+
+# ---------------------------------------------------------------------------
+# Medium: 'vegetable oil' covers soybean, sunflower, canola and corn oil (soft); 'SALTWATER' only on a tuna
+# ---------------------------------------------------------------------------
+
+def test_a_vegetable_oil_tuna_is_close_to_soybean_oil_never_rejected_for_it():
+    spec = spec_of("GOLDEN PRIZE L/ MEAT TUNA VEGE OIL 185GM", "GOLDEN PRIZE")                     # row 35
+    assert spec.variants.get("medium") == "vegetable_oil"
+    soya = score_candidate(spec, listing("Golden Prize Canned Skipjack Light Meat Tuna - Chunk In Soya Oil 185g"))
+    assert soya.tier == 2 and not soya.hard_reject                         # was variant_conflict:medium
+    assert any(c.startswith("soft_variant_conflict:medium") for c in soya.conflicts)
+    olive = score_candidate(spec, listing("Golden Prize Light Meat Tuna In Olive Oil 185g"))
+    assert "variant_conflict:medium" in olive.hard_reject
+    v = make_verdict(spec, 0, {"brand_text": "Golden Prize", "variant_text": "Light Meat Tuna in Soybean Oil",
+                               "size_text": "185g", "view": "front_packshot", "brand_match": "yes",
+                               "variant_match": "yes", "size_match": "yes"})
+    assert classify(spec, v) == "UNSURE"                                  # for the reviewer, never a MATCH
+
+
+def test_soybean_and_sunflower_oil_stay_apart():
+    spec = spec_of("SUPER/T LIGHT MEAT TUNA SOBEANOIL 185GM", "SUPER/T")                          # row 52
+    assert "variant_conflict:medium" in score_candidate(
+        spec, listing("Super Tasty Light Meat Tuna In Sunflower Oil 185g")).hard_reject
+    assert not score_candidate(spec, listing("Super Tasty Light Meat Tuna In Vegetable Oil 185g")).hard_reject
+
+
+def test_saltwater_is_brine_only_on_a_tuna():
+    from catalog_match import sheet_names
+
+    assert sheet_names.readable("SALTWATER TAFFY 200G") == "SALTWATER TAFFY 200G"   # was 'SALT WATER TAFFY'
+    assert "SALT WATER" in sheet_names.readable("SUP/T WT/MEAT SOLIDTUNA SALTWATER 185GM")      # row 49
+    assert spec_of("SUP/T WT/MEAT SOLIDTUNA SALTWATER 185GM", "SUP/T").variants.get("medium") == "brine"
