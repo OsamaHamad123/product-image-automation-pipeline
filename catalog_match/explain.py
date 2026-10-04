@@ -711,8 +711,6 @@ REASON_LABELS = {
     "provider_down": "البحث ما اشتغل",
 }
 REASON_KEYS = tuple(REASON_LABELS)
-# reasons outside the sheet: a sheet gap never replaces them
-OUTSIDE_SHEET = frozenset({"provider_down", "verifier_down", "download_failed", "only_social"})
 # a likely typo explains a name nothing (or only weak or other products' listings) matched; never a label reader's doubt
 _NAME_REASONS = frozenset({"not_found", "all_conflicted", "brand_not_found", "weak_only"})
 _CONFLICT_TEXT = (("size_conflict", "حجم مختلف"), ("pack_conflict", "عدد عبوات مختلف"),
@@ -847,9 +845,9 @@ def _fact_and_action(key: str, record, issues: Mapping[str, Mapping[str, Any]], 
 
 
 def choose_reason(engine: str, issues: Mapping[str, Mapping[str, Any]], record: Mapping[str, Any]) -> str:
-    """The engine reason, or the sheet gap that explains it (see the module docstring)."""
-    if engine in OUTSIDE_SHEET:
-        return engine
+    """The engine reason, or the sheet gap that explains it (see the module docstring). Each gap replaces only the
+    engine reasons it can explain, so a reason outside the sheet (provider_down, verifier_down, download_failed,
+    only_social) always stays."""
     typo = issues.get("typo")
     if typo is not None and not typo.get("known") and engine in _NAME_REASONS:
         return "typo"
