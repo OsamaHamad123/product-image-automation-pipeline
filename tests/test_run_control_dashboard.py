@@ -13,7 +13,9 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
+import time
 from pathlib import Path
 
 import pytest
@@ -56,8 +58,9 @@ def test_stop_and_reset_delete_nothing_and_use_the_bridge():
         assert "DB::" not in body, "queue state changes go through local_cache_db (run_control)"
     assert "$this->runPython('run_control', ['op' => 'stop', 'worker' => $worker])" in stop
     assert "$this->runPython('run_control', ['op' => 'reset', 'worker' => $worker])" in reset
-    # the process is still killed in PHP (it needs the OS), for both buttons
-    assert "$this->terminateWorker($process)" in stop and "$this->terminateWorker($process)" in reset
+    # the process is still stopped in PHP (it needs the OS), for both buttons: a stop request first, a kill only
+    # after the wait (review fix C5)
+    assert "$this->stopWorker($process)" in stop and "$this->stopWorker($process)" in reset
     helper = text[text.index("private function terminateWorker"):text.index("private function removeRunFiles")]
     assert "taskkill /F /PID" in helper and "kill -9" in helper
     # stop keeps the lock while the enqueue reads the sheet (the worker honours the request when it starts)
@@ -524,3 +527,130 @@ def test_confirm_texts_say_exactly_what_happens():
     # the page says the same next to the button, and the stop button exists only on the Run page
     assert "الإيقاف ما بيحذف شي" in batch
     assert "/api/stop-batch" not in index + read(JS / "home.js")
+
+
+# ---------------------------------------------------------------------------
+# Stop / «fix stuck run» stop a live worker gracefully (review fix C5)
+# ---------------------------------------------------------------------------
+
+# A stand-in worker: holds temp/pipeline.lock with its own PID and, like main.run_worker_mode, leaves (removing its
+# lock) once the stop request reaches it, unless IGNORE_STOP is set.
+FAKE_WORKER = r"""
+import json, os, sys, time
+root, ignore = sys.argv[1], sys.argv[2] == "1"
+lock = os.path.join(root, "temp", "pipeline.lock")
+with open(lock, "w") as fh:
+    json.dump({"pid": os.getpid(), "role": "worker"}, fh)
+while True:
+    if not ignore and os.path.exists(os.path.join(root, "temp", "stop_requested")):
+        os.remove(lock)
+        sys.exit(0)
+    time.sleep(0.05)
+"""
+
+STOP_HARNESS = r"""<?php
+namespace App\Http\Controllers {
+    class Controller {}
+    class ProductController { public static function forgetProductCaches() {} }
+}
+namespace Illuminate\Support\Facades {
+    class Cache {
+        public static function get($k, $d = null) { return $d; }
+        public static function put($k, $v, $ttl = null) { return true; }
+    }
+}
+namespace App\Services {
+    class PythonBridge {
+        public static $calls = [];
+        public static function run($action, $params = []) {
+            $root = getenv('HARNESS_ROOT');
+            if ($action === 'lock_state') {
+                return ['status' => 'success', 'state' => 'running', 'pid' => (int) getenv('WORKER_PID'),
+                        'verified' => getenv('VERIFIED') === '1'];
+            }
+            // what run_control saw: was the lock still there (the killed run's report is built from it)?
+            self::$calls[] = [$params['op'], $params['worker'], file_exists($root . '/temp/pipeline.lock')];
+            if ($params['op'] === 'stop' && $params['worker'] === 'running') {
+                touch($root . '/temp/stop_requested');
+            }
+            return ['status' => 'success', 'message' => 'ok'];
+        }
+        public static function pythonPath() { return 'python'; }
+    }
+    class QueueStats {}
+}
+namespace {
+    class FakeResponse { public $data; public function __construct($d) { $this->data = $d; } }
+    class FakeFactory { public function json($d, $s = 200) { return new FakeResponse($d); } }
+    function response() { return new FakeFactory(); }
+    function base_path($p = '') { return getenv('HARNESS_ROOT') . '/dashboard' . ($p !== '' ? '/' . $p : ''); }
+    require getenv('API_CONTROLLER');
+    App\Http\Controllers\ApiController::$stopWaitSeconds = (int) getenv('STOP_WAIT');
+    $api = new App\Http\Controllers\ApiController();
+    $started = microtime(true);
+    $r = getenv('BUTTON') === 'reset' ? $api->resetBatch() : $api->stopBatch();
+    echo json_encode(['worker' => $r->data['worker'] ?? null, 'calls' => App\Services\PythonBridge::$calls,
+                      'lock_left' => file_exists(getenv('HARNESS_ROOT') . '/temp/pipeline.lock'),
+                      'seconds' => microtime(true) - $started]);
+}
+"""
+
+
+def _press(tmp_path, button="stop", ignore_stop=False, verified=True, wait=5):
+    root = tmp_path / "root"
+    (root / "dashboard").mkdir(parents=True)
+    (root / "temp").mkdir()
+    worker_py = tmp_path / "fake_worker.py"
+    worker_py.write_text(FAKE_WORKER, encoding="utf-8")
+    worker = subprocess.Popen([sys.executable, str(worker_py), str(root), "1" if ignore_stop else "0"])
+    try:
+        lock = root / "temp" / "pipeline.lock"
+        for _ in range(200):
+            if lock.exists() and lock.read_text():
+                break
+            time.sleep(0.02)
+        script = tmp_path / "stop.php"
+        script.write_text(STOP_HARNESS, encoding="utf-8")
+        env = dict(os.environ, HARNESS_ROOT=str(root), API_CONTROLLER=str(CONTROLLER), WORKER_PID=str(worker.pid),
+                   VERIFIED="1" if verified else "0", STOP_WAIT=str(wait), BUTTON=button)
+        result = subprocess.run([PHP, str(script)], capture_output=True, text=True, timeout=120, encoding="utf-8",
+                                env=env)
+        assert result.returncode == 0, result.stdout + result.stderr
+        out = json.loads(result.stdout)
+        time.sleep(0.1)
+        out["exit"] = worker.poll()
+        return out
+    finally:
+        if worker.poll() is None:
+            worker.kill()
+        worker.wait()
+
+
+@pytest.mark.skipif(PHP is None or not hasattr(os, "kill"), reason="needs the PHP CLI")
+@pytest.mark.parametrize("button, final_op", [("stop", "stop"), ("reset", "reset")])
+def test_stop_lets_a_live_worker_finish_and_write_its_own_report(tmp_path, button, final_op):
+    """Review fix C5: Stop and «fix stuck run» sent taskkill /F / kill -9 at once, to the nightly runner too: the
+    worker's finally and run_nightly never ran (no report, no run_history row, cost lost), and Task Scheduler recorded
+    1. A live worker now gets the stop request and time to finish its products; it leaves by itself (exit 0)."""
+    out = _press(tmp_path, button=button)
+    assert out["worker"] == "exited" and out["exit"] == 0, out           # not killed
+    assert out["calls"] == [["stop", "running", True], [final_op, "exited", False]]
+    assert out["seconds"] < 5
+
+
+@pytest.mark.skipif(PHP is None or not hasattr(os, "kill"), reason="needs the PHP CLI")
+def test_a_worker_that_ignores_the_stop_is_killed_after_the_wait_and_reported(tmp_path):
+    out = _press(tmp_path, ignore_stop=True, wait=1)
+    assert out["worker"] == "killed" and out["exit"] is not None and out["exit"] != 0
+    # run_control (which writes the 'stopped' report from the lock) runs before the lock is removed
+    assert out["calls"] == [["stop", "running", True], ["stop", "killed", True]]
+    assert out["lock_left"] is False and out["seconds"] >= 1
+
+
+@pytest.mark.skipif(PHP is None or not hasattr(os, "kill"), reason="needs the PHP CLI")
+@pytest.mark.parametrize("button, final_op", [("stop", "stop"), ("reset", "reset")])
+def test_an_unconfirmed_worker_is_never_killed_and_keeps_its_lock(tmp_path, button, final_op):
+    out = _press(tmp_path, button=button, ignore_stop=True, verified=False, wait=1)
+    assert out["worker"] == "running" and out["exit"] is None
+    assert out["calls"] == [["stop", "running", True], [final_op, "running", True]]
+    assert out["lock_left"] is True

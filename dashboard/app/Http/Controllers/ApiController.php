@@ -357,6 +357,64 @@ class ApiController extends Controller
         return 'running';
     }
 
+    /**
+     * «إيقاف» و«إصلاح تشغيل عالق» لعامل حي: يُنتظر العامل حتى هذه المدة بعد طلب الإيقاف (ينهي المنتجات الجارية، ويكتب
+     * تقرير التشغيل وصفه في سجل التشغيلات، ويخرج التشغيل الليلي برمز 3)، ثم فقط يُنهى قسراً.
+     */
+    public static $stopWaitSeconds = 90;
+
+    /**
+     * يوقف عامل الخلفية بأمان ويعيد وصفه لإجراء run_control:
+     * starting | none كما في terminateWorker؛ لعامل حي: يُسجل طلب إيقاف (run_control stop / running) ثم يُنتظر حتى
+     * stopWaitSeconds: exited = توقف بنفسه وكتب تقريره؛ وإلا terminateWorker: killed (أُنهي؛ run_control يكتب تقرير
+     * «توقف» بدلاً منه) أو running (بقي حياً أو لم تتأكد هويته؛ طلب الإيقاف يبقى ويلتزم به بين المنتجات).
+     * $requested يعود برد run_control على طلب الإيقاف (null إن لم يُطلب).
+     */
+    private function stopWorker(array $process, ?array &$requested = null): string
+    {
+        $requested = null;
+        if ($process['state'] !== 'running') {
+            return $this->terminateWorker($process);
+        }
+        $requested = $this->runPython('run_control', ['op' => 'stop', 'worker' => 'running']);
+        if (($requested['status'] ?? '') === 'success') {
+            $wait = max(0, (int) self::$stopWaitSeconds);
+            $limit = (int) ini_get('max_execution_time');
+            if ($limit !== 0 && $limit < $wait + 120) {
+                @set_time_limit($wait + 120);
+            }
+            $deadline = microtime(true) + $wait;
+            while (true) {
+                if ($this->workerLeft($process)) {
+                    return 'exited';
+                }
+                if (microtime(true) >= $deadline) {
+                    break;
+                }
+                usleep(500000);
+            }
+        }
+        // طلب الإيقاف لم يُسجل (قاعدة البيانات لا ترد) أو لم يلتزم به العامل في المهلة
+        return $this->terminateWorker($process);
+    }
+
+    /** خرج العامل: القفل لم يعد يحمل رقم عمليته، أو عمليته انتهت. */
+    private function workerLeft(array $process): bool
+    {
+        clearstatcache();
+        $content = trim((string) @file_get_contents($process['lock']));
+        if ($content === '') {
+            return !file_exists($process['lock']);
+        }
+        $data = json_decode($content, true);
+        $lockPid = ctype_digit($content) ? $content
+            : (is_array($data) && is_numeric($data['pid'] ?? null) ? (string) (int) $data['pid'] : null);
+        if ($process['pid'] === null) {
+            return $lockPid === null;
+        }
+        return $lockPid !== $process['pid'] || !$this->processAlive($process['pid']);
+    }
+
     private function removeRunFiles(array $process): void
     {
         foreach ([$process['lock'], $this->automationPath('temp/batch_progress.json')] as $path) {
@@ -488,8 +546,9 @@ class ApiController extends Controller
 
     /**
      * «إصلاح تشغيل عالق»: يمسح حالة التشغيل العالقة فقط ولا يحذف أي عمل مراجعة.
-     * يُنهي عاملاً ما زال حياً (وإلا يبقى يعمل واللوحة تظن أنه متوقف)، ويحذف ملف القفل وملف التقدم،
-     * ثم run_control reset: الصفوف في 'processing' تعود إلى 'pending'، ويُمسح التقدم والتنبيه والإيقاف المؤقت.
+     * يوقف عاملاً ما زال حياً كما يفعل زر الإيقاف (stopWorker: طلب إيقاف ثم انتظار، والإنهاء فقط بعد المهلة)، ثم
+     * run_control reset: الصفوف في 'processing' تعود إلى 'pending'، ويُمسح التقدم والتنبيه والإيقاف المؤقت. يُحذف ملف
+     * القفل وملف التقدم إلا لعامل بقي حياً (لا يُفتح الباب لعامل ثانٍ فوقه).
      * لا يحذف أي صف من automation_queue ولا curation_candidates ولا review_decisions ولا rejected_images
      * ولا resolved_products. لا يوجد زر «تفريغ الطابور»: الإدراج التالي يحدّث الصفوف من الشيت (Upsert).
      */
@@ -498,8 +557,7 @@ class ApiController extends Controller
         try {
             $basePath = base_path('..');
             $process = $this->pipelineProcess();
-            $worker = $this->terminateWorker($process);
-            $this->removeRunFiles($process);
+            $worker = $this->stopWorker($process);
 
             // Clear Laravel cache
             ProductController::forgetProductCaches();
@@ -514,7 +572,11 @@ class ApiController extends Controller
                 @unlink($bCache);
             }
 
+            // run_control قبل حذف القفل: تقرير «توقف» لعامل أُنهي يُبنى من قفله
             $result = $this->runPython('run_control', ['op' => 'reset', 'worker' => $worker]);
+            if (in_array($worker, ['killed', 'none', 'starting'], true)) {
+                $this->removeRunFiles($process);
+            }
             if (($result['status'] ?? '') !== 'success') {
                 return response()->json(['status' => 'failed', 'error' => $result['error'] ?? 'تعذر إصلاح حالة التشغيل.'], 500);
             }
@@ -592,18 +654,21 @@ class ApiController extends Controller
     /**
      * «إيقاف التشغيل» بأمان، ولا يُحذف أي صف:
      * - الإدراج ما زال يقرأ الشيت (القفل 'STARTING'، لا PID بعد): يُسجل طلب إيقاف يلتزم به العامل فور بدئه.
-     * - عامل حي: يُنهى كما كان، وتعود صفوفه قيد المعالجة إلى الانتظار (إن بقي حياً يلتزم بطلب الإيقاف بين المنتجات).
+     * - عامل حي: يُسجل طلب إيقاف ويُنتظر العامل حتى stopWaitSeconds: ينهي المنتجات الجارية ويكتب تقرير التشغيل بنفسه
+     *   (exited؛ التشغيل الليلي يخرج برمز 3). لم يتوقف: يُنهى إن أكد بايثون هويته (killed) ويكتب run_control تقرير
+     *   «توقف» بدلاً منه وتعود صفوفه قيد المعالجة إلى الانتظار؛ وإلا يبقى طلب الإيقاف (running).
      * - لا تشغيل: قفل قديم يُحذف والصفوف العالقة في 'processing' تعود إلى الانتظار.
      * كل صف آخر (جاهز للمراجعة، معتمد، فاشل، في الانتظار) يبقى كما هو. الرسالة العربية من run_control.
      */
     public function stopBatch()
     {
         $process = $this->pipelineProcess();
-        $worker = $this->terminateWorker($process);
+        $worker = $this->stopWorker($process);
+        // run_control قبل حذف القفل: تقرير «توقف» لعامل أُنهي يُبنى من قفله
+        $result = $this->runPython('run_control', ['op' => 'stop', 'worker' => $worker]);
         if (in_array($worker, ['killed', 'none'], true)) {
             $this->removeRunFiles($process);
         }
-        $result = $this->runPython('run_control', ['op' => 'stop', 'worker' => $worker]);
         if (($result['status'] ?? '') !== 'success') {
             return response()->json(['status' => 'failed', 'error' => $result['error'] ?? 'تعذر إيقاف التشغيل.'], 500);
         }

@@ -1232,8 +1232,11 @@ def action_ops_health(params):
 # run_control (قراءة/كتابة): تشغيل جديد، إيقاف، إصلاح تشغيل عالق — لا يُحذف أي صف أبداً
 # ---------------------------------------------------------------------------
 
-# حالة عامل الخلفية كما رأتها لوحة التحكم (ApiController): العملية تُنهى في PHP لأنها تحتاج نظام التشغيل
-RUN_CONTROL_WORKERS = ("starting", "running", "killed", "none")
+# حالة عامل الخلفية كما رأتها لوحة التحكم (ApiController): العملية تُنهى في PHP لأنها تحتاج نظام التشغيل.
+# exited = توقف العامل بنفسه بعد طلب الإيقاف (وكتب تقريره)؛ killed = لم يتوقف في المهلة فأُنهي
+RUN_CONTROL_WORKERS = ("starting", "running", "exited", "killed", "none")
+# مهلة لوحة التحكم قبل إنهاء عامل لم يلتزم بطلب الإيقاف (ApiController::$stopWaitSeconds)
+STOP_WAIT_SECONDS = 90
 
 
 def _kept_rows_text(queue):
@@ -1251,19 +1254,25 @@ def _stop_message(worker, result):
         return ("سُجل طلب الإيقاف: سيتوقف العامل بعد إنهاء المنتجات الجارية، وتبقى باقي الصفوف في الانتظار. "
                 "لم يُحذف أي صف.")
     released = result["released"]
+    if worker == "exited":
+        return ("تم إيقاف التشغيل: أنهى العامل المنتجات الجارية ثم توقف وكتب تقرير التشغيل، وبقيت باقي الصفوف في "
+                "الانتظار. " + kept)
     if worker == "killed":
-        return (f"تم إيقاف التشغيل. أُعيد {released} صف كان قيد المعالجة إلى الانتظار ليُعالج في التشغيل القادم. "
-                + kept)
+        return (f"تم إيقاف التشغيل: لم يتوقف العامل خلال {STOP_WAIT_SECONDS} ثانية فأُنهي، وكُتب تقرير «توقف» للتشغيل. "
+                f"أُعيد {released} صف كان قيد المعالجة إلى الانتظار ليُعالج في التشغيل القادم. " + kept)
     if released:
         return f"لم يكن هناك تشغيل نشط. أُعيد {released} صف عالق في «قيد المعالجة» إلى الانتظار. " + kept
     return "لم يكن هناك تشغيل نشط لإيقافه، ولم يتغير أي صف."
 
 
 def _reset_message(worker, result):
-    parts = [f"تم إصلاح حالة التشغيل: حُذف ملف القفل، ومُسح التقدم والتنبيه والإيقاف المؤقت، وأُعيد "
+    lock = "بقي ملف القفل لأن العامل ما زال يعمل" if worker == "running" else "حُذف ملف القفل"
+    parts = [f"تم إصلاح حالة التشغيل: {lock}، ومُسح التقدم والتنبيه والإيقاف المؤقت، وأُعيد "
              f"{result['released']} صف من «قيد المعالجة» إلى الانتظار."]
-    if worker == "killed":
-        parts.append("وأُنهي العامل الذي كان ما زال يعمل.")
+    if worker == "exited":
+        parts.append("وتوقف العامل الذي كان ما زال يعمل بعد إنهاء المنتجات الجارية، وكتب تقرير التشغيل.")
+    elif worker == "killed":
+        parts.append(f"وأُنهي العامل الذي لم يتوقف خلال {STOP_WAIT_SECONDS} ثانية، وكُتب تقرير «توقف» للتشغيل.")
     elif worker == "starting":
         parts.append("وسُجل طلب إيقاف للتشغيل الذي كان يقرأ الشيت كي لا يبدأ المعالجة.")
     elif worker == "running":
@@ -1272,17 +1281,42 @@ def _reset_message(worker, result):
     return " ".join(parts)
 
 
+def _killed_run_report(op):
+    """
+    العامل أُنهي قسراً (taskkill /F أو kill -9) فلم تعمل كتلة finally فيه ولا التشغيل الليلي: لا تقرير ولا صف في سجل
+    التشغيلات ولا تكلفة. يكتب run_control تقرير «توقف» بدلاً منه من قفله (من بدأه ومتى، و run_id و worker_id اللذان
+    سجلهما العامل مع النبض)، قبل أن تحذف اللوحة القفل. تعيد رقم صف run_history أو None؛ لا ترفع أبداً.
+    """
+    try:
+        automation = _pipeline()
+        lock = automation.read_lock(automation.LOCK_FILE)
+        if not lock or lock.get("kind") not in ("json", "pid"):
+            return None
+        import run_report
+        trigger = lock.get("trigger") or ("nightly" if lock.get("role") == "nightly" else "dashboard")
+        info = {"stop_reason": "stopped", "run_id": lock.get("run_id"), "worker_id": lock.get("worker_id"),
+                "started_ts": lock.get("started_ts"), "ended_ts": time.time(),
+                "notice": f"STOPPED: لم يتوقف العامل خلال {STOP_WAIT_SECONDS} ثانية بعد طلب الإيقاف فأنهته لوحة "
+                          f"التحكم ({op})؛ عادت الصفوف قيد المعالجة إلى الانتظار"}
+        return run_report.report_worker_run(info, trigger=trigger).get("history_id")
+    except Exception:
+        logger.exception("run_control %s: the stopped run's report could not be written", op)
+        return None
+
+
 def action_run_control(params):
     """
     التحكم في تشغيل الأتمتة من لوحة التحكم (local_cache_db). op:
     - start: قبل إطلاق تشغيل جديد (prepare_run): حالة 'starting' بلا أرقام التشغيل السابق، وإلغاء طلبي
       الإيقاف والإيقاف المؤقت القديمين.
     - stop: زر «إيقاف التشغيل» (stop_run). worker: starting | running (العامل لم يبدأ أو ما زال حياً: طلب إيقاف
-      يلتزم به) أو killed | none (أُنهي أو لم يكن يعمل: الصفوف قيد المعالجة تعود للانتظار وتُضبط الحالة).
+      يلتزم به) أو exited | killed | none (توقف بنفسه، أو أُنهي، أو لم يكن يعمل: الصفوف قيد المعالجة تعود للانتظار
+      وتُضبط الحالة).
     - reset: زر «إصلاح تشغيل عالق» (reset_run). worker=starting | running يسجل طلب إيقاف للإدراج الذي قد يكون
       ما زال يعمل أو للعامل الذي لم يُنهَ.
+    worker=killed: يُكتب تقرير «توقف» للتشغيل (_killed_run_report)، فالعامل المُنهى لم يكتبه.
     لا يحذف أي صف أو مرشح أو قرار مراجعة. الاستجابة: {status, op, message (عربية), released, stop_requested,
-    state, queue}.
+    state, queue} و history_id لتقرير العامل المُنهى.
     """
     op = _text(params, 'op')
     worker = _text(params, 'worker') or "none"
@@ -1304,11 +1338,15 @@ def action_run_control(params):
             result = local_cache_db.reset_run(worker_active=worker_active)
             message = _reset_message(worker, result)
     except Exception:
+        if worker == "killed":
+            _killed_run_report(op)
         return _failure('failed', "تعذر تعديل حالة التشغيل في قاعدة البيانات؛ لم يتغير أي صف "
                                   "(التفاصيل في temp/search.log).", f"run_control {op} failed")
-    return {'status': 'success', 'op': op, 'message': message, 'released': result['released'],
-            'stop_requested': result['stop_requested'], 'state': result['status'], 'queue': result['queue']}
-
+    out = {'status': 'success', 'op': op, 'message': message, 'released': result['released'],
+           'stop_requested': result['stop_requested'], 'state': result['status'], 'queue': result['queue']}
+    if worker == "killed":
+        out['history_id'] = _killed_run_report(op)
+    return out
 
 
 # ---------------------------------------------------------------------------

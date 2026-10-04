@@ -31,7 +31,13 @@ health page). Exit code (Task Scheduler's "Last Run Result"):
     0  the queue was worked to the end, or another live worker holds the lock
     1  failed: a sheet setting is wrong or an unexpected error (see the log)
     2  an outage that was still there after the two retries
-    3  stopped before the queue was empty: the owner pressed stop, or a limit stopped the worker
+    3  stopped before the queue was empty: the owner pressed stop (the dashboard asks the worker to stop; it
+       finishes the products in progress, and this run writes the night's report and exits 3), or a limit stopped
+       the worker (daily budget, Serper credit)
+
+A worker that has not stopped 90 seconds after the stop request is ended by the dashboard: the process is killed, so
+Task Scheduler shows 1 (taskkill's code), but the night still gets its report, written by the dashboard
+(cli_bridge run_control) from the lock with the outcome "stopped".
 """
 
 import datetime

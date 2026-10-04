@@ -2076,7 +2076,7 @@ def run_worker_mode(trigger="manual", report=True):
         _refresh_state("pre_caching", run_id=run_id, notice=notice)
 
         worker_id = local_cache_db.new_claim_id().split("#")[0]
-        lock_heartbeat(worker_id=worker_id)
+        lock_heartbeat(worker_id=worker_id, run_id=run_id)   # منه يُكتب تقرير عامل أنهته اللوحة
         lock = threading.Lock()
         counters = {"provider_down_streak": 0, "credit_streak": 0}
         budget = _daily_budget()
