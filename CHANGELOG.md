@@ -426,6 +426,45 @@ learned ever auto-publishes.
 - `.gitignore` keeps ignoring HTML dumps but lets the offline test fixtures under `tests/catalog_match/fixtures`
   be added.
 
+### Fixed from the owner's run export of 2026-10-04 (32 no-pick rows)
+
+The owner sent `laqta_run_2026-10-04_1619.json` (100 real rows: 68 pre-selected, 32 «بلا اقتراح»). In about ten of
+the 32 rows the right picture was already among the candidates; a rule that was too strict for real store
+listings kept it from being pre-checked. Re-routing that export offline with the new rules gives 74 pre-selected
+(rows 28, 62, 71, 73, 76, 83), loses none and auto-publishes nothing.
+
+- **The label confirms the brand, a stray picture no longer blocks it** (rows 76, 83). When the label reader read
+  another brand on a tier-1 candidate (a related product's picture on the same store page), the tier-1 fallback
+  was off for the whole product. It now still takes a candidate whose own label prints the target brand
+  (`verify.brand_confirmed`); a candidate without that reading stays blocked (the 'Freshly' protection).
+- **Tier-2 fallback, `preselected:tier2_corroborated`** (rows 62, 71, 73). An UNSURE reading (most often the net
+  size is not legible on the front) on a tier-2 candidate is pre-checked when its label carries the identity
+  (brand confirmed, front packshot, no size or variant read as different, the variant read as 'yes' when the
+  sheet or the label states one), its listing text states the size (never only the image file name), its own
+  listing has no variant doubt or differing barcode, and a second store domain reads the same, or its page is
+  trusted (UAE retailer, official, structured). Among several, a trusted page and a sharp picture come first.
+  Never auto-published.
+- **One unit of a multipack** (rows 15, 50, 51). Stores show one pack of 'MEHRAN PLAIN PARATHA 2X400GM' or one
+  can of a 3x185g pack. A reading whose only disagreement is that pack, with the per-unit size printed, is UNSURE
+  instead of MISMATCH, and a pick carries the new warning `multipack_unit_image`
+  («الصورة لعبوة وحدة، والمنتج باكيت من أكثر من حبة»). '2X400GM 5S' now keeps its 5 pieces.
+- **No-brand cells** (rows 95–97). 'GENERIC / NO BRAND', 'N/A', '-', 'بدون ماركة'… are read as an empty brand
+  cell: nothing is searched or matched as a brand, and the reason is the new `no_brand`, not "add the brand to
+  Brands Mapping". sku_keys do not move.
+- **A product word in the brand cell** (rows 27–28). 'AMERICAN LIGHT' before 'MEAT TUNA' is matched as 'AMERICAN'
+  ('LIGHT MEAT' is the tuna grade), so a label reading 'American' is the brand. Only unmapped brands, never down
+  to a too-short brand; the cell, the key and the display are unchanged. New sheet note `brand_has_product_word`
+  (also for 'SQ SALITED', which is not trimmed).
+- **Store spellings are kept** (rows 49–52). The search did find 'Super Tasty' for 'SUPER T/' and 'SUP/T', but the
+  trace and the export dropped it, so row 49's reason wrongly said no store writes the brand. The trace keeps
+  `discovered_brands`, the export and the stored reason read it, and a spelling an earlier row proved writes the
+  first queries of a later row with the same or a sibling brand cell.
+- **Size unit typo** (row 4). 'BATO FRENCH FRIES 900 MM' raises the sheet note `size_unit_typo` («غالبًا قصدك
+  900 GM»); a real cut width ('9MM 1KG') raises nothing.
+- `scripts/reroute_export.py`: re-routes a run export offline with the current rules and prints the rows whose
+  decision changes (an approximation: recorded tiers, no page titles; no network, no database).
+- Eval gate unchanged: 58/58, 58/58, 52/58; preselect precision 100%, 100%, 96.3%; 0 wrong auto-publish.
+
 ### Added after phase 4: why a product has no pick, a run export, sheet data quality
 
 The owner's first dashboard run after phase 4 (100 real rows) left 32 products «بلا اقتراح»: the search found

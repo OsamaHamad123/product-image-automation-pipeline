@@ -39,8 +39,10 @@ Decisions
                         rows 76 and 83).
                         Tier-2 fallback ('preselected:tier2_corroborated'; live run 2026-10-04,
                         rows 62, 71 and 73: the net size is not legible on the front, the title
-                        lacks a variant word or the source is a generic store) - the first
-                        tier-2 UNSURE candidate in rank order with every one of:
+                        lacks a variant word or the source is a generic store) - a tier-2
+                        UNSURE candidate with every one of the rules below; among several, a
+                        trusted page first, then a picture that is not low resolution, then
+                        rank order (row 73: Union Coop's picture, not a 619x368 one):
                           * usable (eligible, fetched, quality hard_ok), no page barcode that
                             differs from the sheet's, no variant doubt on its own listing
                             (image file name, a related variant line);
@@ -139,7 +141,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Dict, Iterable, List, Optional, Sequence, Set, Union
+from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple, Union
 from urllib.parse import unquote
 
 from . import quality as quality_mod
@@ -469,17 +471,21 @@ def _page_domain(rc: RankedCandidate) -> str:
 
 def tier2_corroborated(spec: SkuSpec, verifiable: Sequence[RankedCandidate], ranked: Sequence[RankedCandidate]
                        ) -> Optional[RankedCandidate]:
-    """The first tier-2 UNSURE candidate (rank order) the tier-2 fallback may pre-check, or None.
+    """The tier-2 UNSURE candidate the tier-2 fallback may pre-check, or None.
 
     See the module docstring (REVIEW_PRESELECTED): usable, no differing page barcode and no variant doubt on its
     own listing, label_carries_identity, listing_states_size, and corroborated by a second page domain whose label
     carries the identity too, or by its own trusted page (official, UAE retailer, structured). The refined
     brand_refuted rule applies as to the tier-1 fallback (refuted_for); a label that carries the identity
     confirms the brand, so it is never what blocks this pick.
+    Among the candidates that qualify, a trusted page comes first, then a picture that is not low resolution,
+    then rank order: these pictures are all the same product, the reviewer should see the best copy (live run
+    2026-10-04, row 73: a 619x368 picture of a generic site ranked above Lulu's own picture).
     """
     readers = [rc for rc in verifiable if rc.score.tier in (1, 2) and label_carries_identity(spec, rc)]
     domains = {d for d in (_page_domain(rc) for rc in readers) if d}
-    for rc in readers:
+    qualified: List[Tuple[bool, bool, int, RankedCandidate]] = []
+    for order, rc in enumerate(readers):
         if rc.score.tier != 2 or _decision_of(rc) != UNSURE or gtin_conflict(rc):
             continue
         if any(str(c).startswith(_TIER2_VARIANT_DOUBTS) for c in rc.score.conflicts or ()):
@@ -488,8 +494,10 @@ def tier2_corroborated(spec: SkuSpec, verifiable: Sequence[RankedCandidate], ran
             continue
         trusted = int((rc.score.matched or {}).get("source_trust") or 0) >= TRUST_STRUCTURED
         if trusted or len(domains) >= 2:
-            return rc
-    return None
+            low_res = bool(rc.fetched is not None and rc.fetched.ok
+                           and quality_mod.low_resolution(rc.fetched.width, rc.fetched.height))
+            qualified.append((not trusted, low_res, order, rc))
+    return min(qualified, key=lambda q: q[:3])[3] if qualified else None
 
 
 def _add(counts: Dict[str, int], key: str) -> None:

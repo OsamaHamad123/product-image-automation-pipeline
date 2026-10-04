@@ -314,7 +314,7 @@ def test_row71_a_single_generic_store_without_corroboration_stays_unselected():
 ZWAN_TANDOORI = spec_of("ZWAN LUNCHEON MEAT TANDOORI 200GM", "ZWAN")
 
 
-def test_row73_tandoori_luncheon_meat_is_preselected_in_rank_order():
+def test_row73_tandoori_luncheon_meat_is_preselected_from_the_trusted_store_not_the_small_picture():
     s = ZWAN_TANDOORI
     rcs = [
         listing(s, 1, "Magic Trading | Zwan luncheon meat tandoori 200g",
@@ -340,11 +340,13 @@ def test_row73_tandoori_luncheon_meat_is_preselected_in_rank_order():
     ]
     assert [rc.score.tier for rc in rcs] == [2, 2, 2, 2, 2]
     out = route(s, rcs)
-    assert out.decision == "REVIEW_PRESELECTED" and out.winner is rcs[0]
+    # magic-sl.com ranks first but is a generic site with a 619x368 picture: among the pictures the fallback may
+    # pre-check, Union Coop's (a UAE retailer, the size read on the pack) comes first
+    assert out.decision == "REVIEW_PRESELECTED" and out.winner is rcs[1]
     assert "preselected:tier2_corroborated" in out.winner.reasons
-    # the small picture is pre-checked with its warnings; the reviewer may choose the larger Lulu one
-    assert {"vlm_unsure", "low_resolution", "sheet_silent:protein=chicken"} <= set(warns(out.winner))
-    assert rcs[4].status == "eligible"
+    assert {"vlm_unsure", "sheet_silent:protein=chicken"} <= set(warns(out.winner))
+    assert "low_resolution" not in warns(out.winner)
+    assert rcs[0].status == "eligible" and rcs[4].status == "eligible"
 
 
 def test_a_trusted_store_alone_corroborates_a_tier2_label():
@@ -532,3 +534,22 @@ def test_one_unit_of_a_multipack_gets_no_strong_second_look():
     assert unit.decision == UNSURE and not needs_second_look(MEHRAN_2X, unit)
     unreadable = make_verdict(MEHRAN_2X, 0, read("Mehran", "PLAIN PARATHA", "", pack=None))
     assert unreadable.decision == UNSURE and needs_second_look(MEHRAN_2X, unreadable)
+
+
+def test_the_tier2_fallback_prefers_a_sharp_picture_when_trust_ties():
+    # two generic stores corroborate each other; the first in rank order has a low-resolution picture
+    s = ZWAN_TANDOORI
+    rcs = [
+        listing(s, 1, "Magic Trading | Zwan luncheon meat tandoori 200g",
+                "https://magic-sl.com/zwan-luncheon-meat-tandoori-200g-",
+                "https://magic-sl.com/cache/original/product/11089/diGIUU1zrQKZsCpq97gJZUa5LRP136jj93Nh0Lev.jpg",
+                read("ZWAN", "CHICKEN LUNCHEON MEAT TANDOORI"), (619, 368)),
+        listing(s, 2, "Zwan Luncheon Meat Tandoori 200g – Bakkali",
+                "https://bakkali.app/products/zwan-luncheon-meat-tandoori-200g",
+                "https://bakkali.app/cdn/shop/products/zwan-tandoori.jpg",
+                read("ZWAN", "CHICKEN LUNCHEON MEAT TANDOORI"), (1200, 1200)),
+    ]
+    assert [rc.score.tier for rc in rcs] == [2, 2]
+    out = route(s, rcs)
+    assert out.decision == "REVIEW_PRESELECTED" and out.winner is rcs[1]
+    assert "preselected:tier2_corroborated" in out.winner.reasons
