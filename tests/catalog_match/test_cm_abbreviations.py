@@ -115,7 +115,8 @@ def test_every_expansion_reads_as_the_same_variant():
     """Identity reads the shorthand through the lexicon; the written-out words must say the same."""
     assert rules()
     for rule in rules():
-        ctx = "tuna" if rule.context is not None else None
+        # a context-bound rule is read next to a token of its own context (canned fish, meat products)
+        ctx = sorted(rule.context)[0] if rule.context is not None else None
         assert extract_variants(rule.key, ctx) == extract_variants(rule.words, ctx), rule
         # Written-out words are never shorthand themselves (expanding twice changes nothing).
         assert expand(rule.words, ctx) == rule.words, rule
