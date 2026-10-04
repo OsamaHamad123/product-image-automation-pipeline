@@ -2043,6 +2043,7 @@ def run_worker_mode(trigger="manual", report=True):
     start_notice = None          # سبب التوقف قبل أي منتج (للتقرير)
     rechecks_prepared = False    # إعادة التحقق تُجهز عند أول سحب (_prepare_verifier_rechecks)
     rechecks_requeued = 0
+    crash = None                 # خطأ أنهى العامل (لتنبيه WORKER_ERROR)
     try:
         if stop_reason == "db_unavailable":
             print(f"[Worker] قاعدة البيانات لا ترد ({state.get('db_error') or '-'})؛ لن يُعالج أي منتج.")
@@ -2175,6 +2176,15 @@ def run_worker_mode(trigger="manual", report=True):
                     time.sleep(5)
                     continue
                 time.sleep(1)
+    except BaseException as e:
+        # عامل انهار ليس «اكتمل»: خطأ غير متوقع = worker_error (رمز 1)، و Ctrl+C = stopped (رمز 3)
+        if isinstance(e, KeyboardInterrupt):
+            stop_reason = stop_reason or "stopped"
+        elif not (isinstance(e, SystemExit) and e.code in (0, None)):
+            stop_reason = stop_reason or "worker_error"
+            crash = f"{type(e).__name__}: {e}"[:200]
+            print(f"[Worker] خطأ غير متوقع أنهى العامل: {crash}")
+        raise
     finally:
         # سبب الانقطاع (رصيد Serper / Gemini) من صفوف هذا العامل فقط (worker_id)؛ None يترك التنبيه كما هو.
         # نهاية التشغيل تلغي طلب إيقاف وصل مع نهايته (stop_requested=0) كي لا يوقف عاملاً لاحقاً قبل أي منتج.
@@ -2204,6 +2214,11 @@ def run_worker_mode(trigger="manual", report=True):
                                                        notice=final_notice)
             elif stop_reason in ("sheets_unavailable", "sheet_config", "sheet_not_found"):
                 pass
+            elif stop_reason == "worker_error":
+                final_notice = _merge_notices(
+                    f"WORKER_ERROR: خطأ غير متوقع أوقف العامل ({crash or '-'})؛ بقيت الصفوف المتبقية في الانتظار", notice)
+                local_cache_db.update_automation_state(status="error", current_product="", stop_requested=0,
+                                                       notice=final_notice)
             else:
                 # الطابور انتهى، أو سبب توقف آخر (مثل حد الميزانية) يظهر نصه كما هو في التنبيه والتقرير
                 base = notice

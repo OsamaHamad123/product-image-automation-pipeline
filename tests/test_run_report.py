@@ -296,6 +296,78 @@ def test_send_telegram_alert_reports_a_refused_message(monkeypatch, caplog):
 # The worker reports every dashboard / manual run; the nightly reports once per night
 # ---------------------------------------------------------------------------
 
+def _crashing_worker(monkeypatch, tmp_path, raise_in):
+    """run_worker_mode offline, with `raise_in` (init_async_queue | fetch_next_task) raising the given exception."""
+    import config
+    import google_sheets
+    import local_cache_db
+    import main
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(config, "DAILY_BUDGET_USD", 0, raising=False)
+    monkeypatch.setattr(main, "load_run_config", lambda: None)
+    monkeypatch.setattr(main, "check_verifier", lambda: "")
+    monkeypatch.setattr(main.time, "sleep", lambda s: None)
+    monkeypatch.setattr(local_cache_db, "resume_automation", lambda: True)
+    monkeypatch.setattr(local_cache_db, "get_automation_state", lambda: {"stop_requested": 0, "pause_requested": 0,
+                                                                       "run_id": None})
+    states, stops = [], []
+    monkeypatch.setattr(local_cache_db, "update_automation_state", lambda *a, **k: states.append(k) or True)
+    monkeypatch.setattr(local_cache_db, "stop_run", lambda worker_active=False: stops.append(worker_active))
+    monkeypatch.setattr(local_cache_db, "get_ready_for_review_count", lambda: 0)
+    monkeypatch.setattr(local_cache_db, "get_queue_statistics", lambda: {"total": 1, "completed": 0, "failed": 0,
+                                                                         "ready_for_review": 0})
+    monkeypatch.setattr(local_cache_db, "count_open_tasks", lambda: 1)
+    monkeypatch.setattr(local_cache_db, "park_verifier_rechecks", lambda: 0)
+    monkeypatch.setattr(local_cache_db, "requeue_verifier_down", lambda run_id: 0)
+    monkeypatch.setattr(google_sheets, "get_sheets_client", lambda: object())
+    monkeypatch.setattr(google_sheets, "open_worksheet", lambda client, name: object())
+    monkeypatch.setattr(google_sheets, "find_link_column", lambda ws: 7)
+    monkeypatch.setattr(google_sheets, "get_brand_mappings", lambda *a: {})
+    monkeypatch.setattr(google_sheets, "stop_async_queue", lambda: None)
+    monkeypatch.setattr(google_sheets, "init_async_queue", lambda *a: None)
+
+    def boom(*args, **kwargs):
+        raise raise_in[1]
+
+    target = google_sheets if raise_in[0] == "init_async_queue" else local_cache_db
+    monkeypatch.setattr(target, raise_in[0], boom)
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123:test")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "42")
+    sent = []
+    monkeypatch.setattr(config, "send_telegram_alert", lambda text: sent.append(text) or True)
+    return main, states, stops, sent
+
+
+def test_a_crashed_dashboard_worker_is_reported_as_failed_not_done(offline, monkeypatch, tmp_path):
+    """Review fix C6: run_worker_mode's try had only a finally, so a worker that crashed (here init_async_queue raising
+    RuntimeError) kept stop_reason None: last_report.json said done, exit 0, and Telegram said «اكتمل»."""
+    main, states, _, sent = _crashing_worker(monkeypatch, tmp_path, ("init_async_queue", RuntimeError("queue thread")))
+
+    with pytest.raises(RuntimeError):
+        main.run_worker_mode(trigger="dashboard")
+
+    assert main.LAST_WORKER["stop_reason"] == "worker_error"
+    report = json.loads((tmp_path / "temp" / "nightly" / "last_report.json").read_text(encoding="utf-8"))
+    assert (report["outcome"], report["exit_code"], report["trigger"]) == ("failed", 1, "dashboard")
+    assert "RuntimeError: queue thread" in report["notices"][0] and report["notices"][0].startswith("WORKER_ERROR: ")
+    (text,) = sent
+    assert "❌ فشل" in text and "اكتمل" not in text
+    assert states[-1]["status"] == "error" and states[-1]["notice"].startswith("WORKER_ERROR: ")
+    assert not (tmp_path / "temp" / "pipeline.lock").exists()
+
+
+def test_ctrl_c_stops_a_manual_worker_as_stopped(offline, monkeypatch, tmp_path):
+    main, _, stops, sent = _crashing_worker(monkeypatch, tmp_path, ("fetch_next_task", KeyboardInterrupt()))
+
+    with pytest.raises(KeyboardInterrupt):
+        main.run_worker_mode(trigger="manual")
+
+    assert main.LAST_WORKER["stop_reason"] == "stopped" and stops == [False]   # processing rows back to pending
+    report = json.loads((tmp_path / "temp" / "nightly" / "last_report.json").read_text(encoding="utf-8"))
+    assert (report["outcome"], report["exit_code"]) == ("stopped", 3)
+
+
 def test_the_worker_reports_its_run_unless_the_nightly_does(offline, monkeypatch, tmp_path):
     import google_sheets
     import local_cache_db
