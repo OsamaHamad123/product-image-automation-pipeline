@@ -1646,6 +1646,52 @@ def action_explain_backfill(params):
 
 
 # ---------------------------------------------------------------------------
+# export_run: «تصدير تقرير للتحليل» (scripts/export_run.py) — قراءة فقط، بلا بحث وبلا تكلفة
+# ---------------------------------------------------------------------------
+
+EXPORT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "temp", "exports")
+EXPORT_KEEP_SECONDS = 3600
+
+
+def _clean_old_exports(now=None):
+    """تقارير قديمة بقيت في temp/exports (لوحة التحكم تحذف التقرير بعد تنزيله): تُحذف بعد ساعة."""
+    now = now or time.time()
+    try:
+        for name in os.listdir(EXPORT_DIR):
+            path = os.path.join(EXPORT_DIR, name)
+            if name.startswith("laqta_run_") and os.path.isfile(path) and now - os.path.getmtime(path) > EXPORT_KEEP_SECONDS:
+                os.remove(path)
+    except OSError:
+        pass
+
+
+def action_export_run(params):
+    """
+    ملف JSON واحد بكل صفوف آخر تشغيل (scope=latest)، أو تشغيل محدد (scope=run و run_id)، أو كل ما ينتظر المراجعة
+    (scope=review)، بشكل scripts/smoke_live.py --json: يُكتب في temp/exports وتعيد اسمه، ولوحة التحكم تنزّله وتحذفه.
+    يُقرأ من الطابور وما حُفظ فقط (لا بحث ولا تكلفة)، وكل قيمة سرية مضبوطة تُستبدل بـ [hidden].
+    """
+    scripts_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts")
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+    import export_run
+
+    scope = str(params.get('scope') or 'latest')
+    run_id = _text(params, 'run_id') or None
+    os.makedirs(EXPORT_DIR, exist_ok=True)
+    _clean_old_exports()
+    name = export_run.default_name()
+    try:
+        _path, rows = export_run.write_export(os.path.join(EXPORT_DIR, name), scope, run_id,
+                                              mappings=_brand_index(_load_brand_mappings()))
+    except ValueError:
+        return {'status': 'error', 'error': 'invalid scope or run id'}
+    except Exception:
+        return _failure('failed', "Could not export the run (details in temp/search.log).", "export_run failed")
+    return {'status': 'success', 'file': name, 'rows': rows}
+
+
+# ---------------------------------------------------------------------------
 # ops_health (قراءة فقط: صحة البحث وتكلفته لصفحة التشخيصات)
 # ---------------------------------------------------------------------------
 
@@ -1831,6 +1877,7 @@ ACTIONS = {
     'sheet-preview': action_sheet_preview,
     'sheet-save': action_sheet_save,
     'explain_backfill': action_explain_backfill,
+    'export_run': action_export_run,
     'lock_state': action_lock_state,
     'ops_health': action_ops_health,
     'run_control': action_run_control,

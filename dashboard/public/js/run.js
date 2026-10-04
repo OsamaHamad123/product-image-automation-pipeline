@@ -272,6 +272,17 @@
         };
     }
 
+    // «تصدير تقرير للتحليل»: الرابط حسب النطاق، واسم الملف من رد الخادم (Content-Disposition)
+    function exportQuery(scope) {
+        return '/api/run/export?scope=' + (scope === 'review' ? 'review' : 'latest');
+    }
+
+    function exportFileName(disposition) {
+        var m = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(String(disposition || ''));
+        var name = m ? m[1] : '';
+        return /^laqta_run_[0-9_-]+\.json$/.test(name) ? name : 'laqta_run.json';
+    }
+
     /*
      * deps: fetchJson(url, opts) -> Promise<{ok,status,data}>, renderLive(view), renderPlan(view), renderStart(view),
      * confirm(text) -> bool, toast(text, variant), now() -> epoch seconds, schedule(fn, ms) -> handle.
@@ -657,6 +668,49 @@
             }
         }
 
+        function exportRun() {
+            var btn = $('export');
+            var scope = $('export-scope').value;
+            C.setHidden($('export-error'), true);
+            C.setHidden($('export-done'), true);
+            btn.disabled = true;
+            btn.setAttribute('aria-busy', 'true');
+            C.setText($('export-text'), 'عم نجهّز التقرير…');
+            var finish = function (error, done) {
+                btn.disabled = false;
+                btn.setAttribute('aria-busy', 'false');
+                C.setText($('export-text'), 'تصدير تقرير للتحليل');
+                C.setText($('export-error'), error || '');
+                C.setHidden($('export-error'), !error);
+                C.setText($('export-done'), done || '');
+                C.setHidden($('export-done'), !done);
+            };
+            var generic = 'ما قدرنا نجهّز التقرير هلق. جرّب مرة ثانية.';
+            if (typeof root.fetch !== 'function') return Promise.resolve(finish(generic));
+            return root.fetch(exportQuery(scope), { credentials: 'same-origin', cache: 'no-store' }).then(function (res) {
+                var disposition = res.headers && res.headers.get ? (res.headers.get('Content-Disposition') || '') : '';
+                if (res.ok && /attachment/i.test(disposition)) {
+                    var name = exportFileName(disposition);
+                    var rows = res.headers.get('X-Laqta-Rows');
+                    return res.blob().then(function (blob) {
+                        var url = root.URL.createObjectURL(blob);
+                        var a = doc.createElement('a');
+                        a.setAttribute('href', url);
+                        a.setAttribute('download', name);
+                        doc.body.appendChild(a);
+                        a.click();
+                        doc.body.removeChild(a);
+                        root.setTimeout(function () { root.URL.revokeObjectURL(url); }, 4000);
+                        var count = rows !== null && rows !== undefined ? ' (' + C.countText(C.num(rows) || 0, 'صف', 'صفين', 'صفوف') + ')' : '';
+                        finish('', 'نزل الملف ' + name + count + '. ابعته للمطوّر.');
+                    });
+                }
+                return res.json().then(function (data) {
+                    finish(data && arabic(data.message) ? data.message : generic);
+                }, function () { finish(generic); });
+            }, function () { finish('ما قدرنا نوصل للخادم.'); });
+        }
+
         var controller = createController({
             fetchJson: C.fetchJson,
             renderLive: renderLive,
@@ -702,6 +756,7 @@
         });
         $('stop').addEventListener('click', function () { controller.stop(); });
         $('reset').addEventListener('click', function () { controller.reset(); });
+        $('export').addEventListener('click', function () { exportRun(); });
 
         var initial = null;
         var island = doc.getElementById('lq-run-initial');
@@ -725,6 +780,8 @@
         FORCE_CONFIRM_TEXT: FORCE_CONFIRM_TEXT,
         describeLive: describeLive,
         describePlan: describePlan,
+        exportQuery: exportQuery,
+        exportFileName: exportFileName,
         planQuery: planQuery,
         runBody: runBody,
         createController: createController,

@@ -313,8 +313,37 @@
     color: var(--lq-text-3);
 }
 
+/* The analysis report, under the run cards */
+.lq-run-export {
+    gap: var(--lq-space-3);
+}
+
+.lq-run-export__text {
+    margin: 0;
+    font-size: 13px;
+    line-height: 1.7;
+    color: var(--lq-text-2);
+}
+
+.lq-run__grid--tools {
+    grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+}
+
+.lq-run-export__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--lq-space-2);
+}
+
+.lq-run-export__done {
+    margin: 0;
+    font-size: 13px;
+    color: var(--lq-success-ink);
+}
+
 @media (max-width: 980px) {
-    .lq-run__grid {
+    .lq-run__grid,
+    .lq-run__grid--tools {
         grid-template-columns: minmax(0, 1fr);
     }
 

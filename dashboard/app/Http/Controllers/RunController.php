@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\PythonBridge;
 use App\Services\QueueStats;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -321,6 +322,42 @@ class RunController extends Controller
         }
         unset($item);
         return $list;
+    }
+
+    // ------------------------------------------------------------------
+    // «تصدير تقرير للتحليل»: one JSON file of a run (scripts/export_run.py through cli_bridge 'export_run')
+    // ------------------------------------------------------------------
+
+    public const EXPORT_SCOPES = ['latest', 'review', 'run'];
+
+    /**
+     * GET /api/run/export?scope=latest|review|run[&run_id=]: downloads laqta_run_<date>_<time>.json. Read only: the
+     * bridge reads the queue and what it stored (no search, no cost) and hides every configured secret; the file is
+     * written in temp/exports and deleted once sent. An Arabic JSON error when it cannot be made.
+     */
+    public function export(Request $request)
+    {
+        $scope = in_array($request->query('scope'), self::EXPORT_SCOPES, true) ? (string) $request->query('scope') : 'latest';
+        $runId = is_string($request->query('run_id')) ? trim((string) $request->query('run_id')) : '';
+        if ($scope === 'run' && !preg_match('/^[A-Za-z0-9_.:-]{1,64}$/', $runId)) {
+            return response()->json(['status' => 'error', 'message' => 'رقم التشغيل مش صحيح.'], 422)
+                ->header('Cache-Control', 'no-store');
+        }
+        $result = PythonBridge::run('export_run', ['scope' => $scope, 'run_id' => $runId]);
+        $name = (string) ($result['file'] ?? '');
+        $path = base_path('../temp/exports/' . $name);
+        if (($result['status'] ?? '') !== 'success' || !preg_match('/^laqta_run_[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{4}\.json$/', $name)
+            || !is_file($path)) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'ما قدرنا نجهّز التقرير هلق. تأكد إنو قاعدة البيانات شغّالة وجرّب مرة ثانية.',
+            ], 500)->header('Cache-Control', 'no-store');
+        }
+        return response()->download($path, $name, [
+            'Content-Type' => 'application/json; charset=UTF-8',
+            'Cache-Control' => 'no-store',
+            'X-Laqta-Rows' => (string) (int) ($result['rows'] ?? 0),
+        ])->deleteFileAfterSend(true);
     }
 
     /** Cost of one search over the last 7 days (ops_health), or null with too little history. */
