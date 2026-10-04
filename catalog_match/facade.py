@@ -110,15 +110,22 @@ def _dims(rc: RankedCandidate):
     return rc.candidate.width, rc.candidate.height
 
 
-def evidence(rc: RankedCandidate) -> Dict[str, Any]:
-    """Identity evidence chips for the review UI (GTIN, brand, size, variant, source)."""
+def evidence(rc: RankedCandidate, spec: Optional[SkuSpec] = None) -> Dict[str, Any]:
+    """Identity evidence chips for the review UI (GTIN, brand, size, variant, source).
+
+    variant_status is 'match' only when the page matched every variant axis the sheet states (spec.variants);
+    some of them is 'partial' (the review screen says «النوع» only for 'match').
+    """
     score = rc.score
     matched = dict(score.matched or {}) if score is not None else {}
     variants_matched = list(matched.get("variants") or [])
     variant_conflict = score is not None and any(
         str(r).startswith("variant_conflict") for r in tuple(score.hard_reject) + tuple(score.conflicts))
+    stated = set((spec.variants or {}) if spec is not None else ())
     if variant_conflict:
         variant_status = "conflict"
+    elif variants_matched and stated and not stated <= set(variants_matched):
+        variant_status = "partial"
     elif variants_matched:
         variant_status = "match"
     else:
@@ -187,7 +194,7 @@ def serialise_candidate(rc: RankedCandidate, spec: Optional[SkuSpec] = None,
         "status": rc.status,
         "reasons": [str(r) for r in rc.reasons],
         "warnings": display_warnings(rc, spec, reading_of),
-        "evidence": evidence(rc),
+        "evidence": evidence(rc, spec),
         "vlm": vlm_payload(rc),
         "quality": _json_safe(rc.quality) if rc.quality is not None else None,
         "content_sha256": rc.fetched.content_sha256 if rc.fetched is not None else None,
