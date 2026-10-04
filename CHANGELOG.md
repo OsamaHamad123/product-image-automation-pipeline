@@ -426,6 +426,21 @@ learned ever auto-publishes.
 - `.gitignore` keeps ignoring HTML dumps but lets the offline test fixtures under `tests/catalog_match/fixtures`
   be added.
 
+### Fixed: approvals that published nothing and said only «ما انعتمدت»
+
+The owner's bulk approval of 11 pre-selected products on 2026-10-04 failed for all 11 with no reason, and nothing
+reached the sheet.
+
+- **The publish-time download goes direct first.** When the verified bytes are not in the candidate store, the
+  approval downloads the picture again. With `PROXY_URL` set, that download went through the proxy only, so a slow
+  or dead proxy failed every approval, while the search itself goes direct and uses the proxy only as a fallback.
+  It now does the same: direct first, then the proxy after a timeout, a connection error, a 5xx, a 403 or a 429.
+- **The candidate store is read from the project folder** for a relative `CANDIDATE_STORE_DIR`, as
+  `catalog_match.fetch` writes it, whatever the process's working directory.
+- **Every image code an approval can fail with has an Arabic sentence** on the review screen (`source_changed`,
+  `download_*`, `not_image`, `source_missing`…); the code stays in the tooltip. They all showed «ما انعتمدت.».
+- **A failed approval is written to the Errors log** with its code and row, so the cause can be read later.
+
 ### Fixed from the owner's second run export of 2026-10-04 (31 rows, 9 no-pick)
 
 `laqta_run_2026-10-04_1933.json` was run on the release above: 22 of 31 pre-selected. Four of the nine no-pick rows
