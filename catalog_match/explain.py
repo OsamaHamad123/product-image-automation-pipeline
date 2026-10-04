@@ -1078,21 +1078,25 @@ def queue_sheet_row(queue_row: Mapping[str, Any]) -> Dict[str, str]:
             "size": str(payload.get("size") or "")}
 
 
-def _discovered(candidates) -> List[str]:
-    out = []
+def stored_discovered(trace: Optional[Mapping[str, Any]], candidates=()) -> List[str]:
+    """The stores' spellings of the brand a stored search used: its trace's outcome.discovered_brands, and a
+    candidate's 'warn:brand_spelling:' reason (a pick saved before the outcome kept them)."""
+    outcome = trace.get("outcome") if isinstance(trace, Mapping) else None
+    found = [str(d) for d in ((outcome or {}).get("discovered_brands") or []) if str(d or "").strip()] \
+        if isinstance(outcome, Mapping) else []
     for c in candidates or ():
         reasons = _loads(c.get("reasons", c.get("reasons_json")), [])
         for r in reasons if isinstance(reasons, list) else []:
             if str(r).startswith("warn:brand_spelling:"):
-                out.append(str(r).split(":", 2)[2])
-    return out
+                found.append(str(r).split(":", 2)[2])
+    return list(dict.fromkeys(found))
 
 
 def explain_stored(queue_row: Mapping[str, Any], candidates: Sequence[Mapping[str, Any]] = (), mappings=None,
                    vocab: Optional[Vocabulary] = None) -> Optional[Dict[str, Any]]:
     """The reason for a queue row saved earlier, from what is stored: its trace (outcome, and a failed row's
     candidates) and its review candidates. None when the stored result has a pick. A store spelling of the brand
-    shows on a candidate's 'warn:brand_spelling:' reason."""
+    is in the outcome's discovered_brands, or on a candidate's 'warn:brand_spelling:' reason (stored_discovered)."""
     from .identity import build_sku_spec
 
     trace = _loads(queue_row.get("trace_json"), {})
@@ -1106,6 +1110,6 @@ def explain_stored(queue_row: Mapping[str, Any], candidates: Sequence[Mapping[st
         return None
     row = queue_sheet_row(queue_row)
     spec = build_sku_spec(row, mappings)
-    issues = sheet_issues(row, spec=spec, vocab=vocab, discovered=_discovered(candidates))
+    issues = sheet_issues(row, spec=spec, vocab=vocab, discovered=stored_discovered(trace, candidates))
     return explain(record, issues, brand=row["brand"] or row["brand_ar"], size_text=_row_size_text(row, spec),
                    source="stored")

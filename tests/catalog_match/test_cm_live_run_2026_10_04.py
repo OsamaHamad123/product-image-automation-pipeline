@@ -9,23 +9,32 @@ Names, brands, titles, URLs and label readings are the run's own. Sockets are bl
   'american light' never matched (UNSURE). The brand is matched as 'AMERICAN' ('LIGHT MEAT' is the meat grade),
   with a sheet note. Brands whose last word is a product word that does not open a phrase of the name stay whole.
 * Row 79, brand 'SQ SALITED': only a sheet note ('SQ' is too short to match; 'SALITED' is 'SALTED').
+* Rows 49-52 (SUP/T, SUPER T/, SUPER/T): brand discovery did find Super Tasty in the run (each row's third query,
+  B1, and its expansion queries were written 'Super Tasty', and the label reader's 'Super Tasty' counted as the
+  brand); the export showed discovered_brands [] because the trace never kept them and the export wrote []. The
+  trace keeps them now, the export and the stored reason read them, and a remembered spelling writes the planned
+  queries from Q1 (no 'SUPER T MEAT ...' first).
 * Row 4, 'BATO FRENCH FRIES 900 MM': no size, so a 2.5 KG bag was pre-selected. A sheet note says '900 GM' is
   meant; a 9 mm cut ('FARMILA FRENCH FRIES 9MM 1KG') stays a cut and raises nothing.
 """
 
 import json
 import socket
+import sys
+from pathlib import Path
 
 import pytest
 
 from catalog_match import brand_discovery as bd
-from catalog_match import explain, pipeline, settings
+from catalog_match import explain, facade, pipeline, settings
 from catalog_match.brand_index import PLACEHOLDER_BRANDS, build_index, is_placeholder_brand
 from catalog_match.identity import build_sku_spec, matching_brand
 from catalog_match.models import Candidate, FetchedImage, ProviderResult, VerificationResult
 from catalog_match.query_plan import build_queries, relaxations
 from catalog_match.score import score_candidate
 from catalog_match.verify import MATCH, UNSURE, _brand_reading, build_prompt, make_verdict
+
+ROOT = Path(__file__).resolve().parents[2]
 
 
 @pytest.fixture(autouse=True)
@@ -335,6 +344,144 @@ def test_row79_the_brand_note_is_why_no_listing_names_the_brand():
     spec = spec_of(*ROW28)
     issues = explain.sheet_issues({"name": ROW28[0], "brand": ROW28[1]}, spec=spec, vocab=explain.Vocabulary())
     assert explain.explain(record, issues, brand=ROW28[1])["key"] == "brand_unknown"
+
+
+# ---------------------------------------------------------------------------
+# Rows 49-52: Super Tasty
+# ---------------------------------------------------------------------------
+
+ROW49 = ("SUP/T WT/MEAT SOLIDTUNA SALTWATER 185GM", "SUP/T")
+ROW50 = ("SUPER T/MEAT SOLID TUNA SALT WATE3X185GM", "SUPER T/")
+ROW51 = ("SUPER T/MEAT SOLID TUNA SUNFL OIL3X185GM", "SUPER T/")
+ROW52 = ("SUPER/T LIGHT MEAT TUNA SOBEANOIL 185GM", "SUPER/T")
+TRADELING = "https://www.tradeling.com/ae-en/product-details/"
+ROW50_POOL = [
+    listing("Super Tasty Meat Solid Tuna In Salt Water Light 185G |...",
+            "https://emiratescoop.suppy.app/shop/stores/147/AIRPORT%20VIEW/products/311803/"
+            "Super%20Tasty%20Meat%20Solid%20Tuna%20In%20Salt%20Water%20Light%20185G",
+            "https://suppystorage.blob.core.windows.net/valeur/items/FMCG_465092_1.jpg", 1),
+    listing("Buy Super Tasty Light Meat Solid Tuna In Salt Water 185g x 3 Pieces Online  in UAE | Tradeling",
+            TRADELING + "super-tasty-light-meat-solid-tuna-in-salt-water-185g-x-3-pieces-66cecc1a3af83dca028710e1-"
+                        "5fba0c6142480f001bed85d4",
+            "https://cfn-catalog-prod.tradeling.com/up/5fba0c6142480f001bed85d4/78c6699bd2074a977c9cab83a21b15d9.png", 2),
+    listing("Super Tasty Light Meat Solid Tuna in Salt Water, 3x185g",
+            "https://onmart.ae/product/super-tasty-light-meat-solid-tuna-in-salt-water-3x185g/",
+            "https://onmart.ae/wp-content/uploads/2026/05/image-removebg-preview-2026-01-06T132931.903.png", 3),
+]
+ROW51_POOL = [
+    listing("SUPER TASTY Light Meat Solid Tuna In Sunflower Oil 185g | Sharjah  Co-operative Society",
+            "https://www.sharjahcoop.ae/en/super-tasty-light-meat-solid-tuna-in-sunflower-oil-185g/p/6290360095158",
+            "https://www.sharjahcoop.ae/medias/300Wx300H-00000-6290360095158-001.jpg", 1),
+    listing("Buy Super Tasty White Meat Solid Premium Tuna In Sunflower Oil 185g x 3  Pieces Online in UAE | Tradeling",
+            TRADELING + "super-tasty-white-meat-solid-premium-tuna-in-sunflower-oil-185g-x-3-pieces-"
+                        "66cecc1a3af83dca02871825-5fba0c6142480f001bed85d4",
+            "https://c8n.tradeling.com/img/plain/pim/rs:auto:1600::0/f:webp/q:90/up/5fba0c6142480f001bed85d4/"
+            "403af066d1b25692bc6d35a00da83507.jpg", 2),
+    listing("SUPER TASTY W/M TUNA IN S/F OIL3X185G: Buy Online at Best Price in UAE -  Amazon.ae",
+            "https://www.amazon.ae/SUPER-TASTY-TUNA-OIL3X185G/dp/B09XVCS27X",
+            "https://m.media-amazon.com/images/I/516WVQJlopL.jpg", 3),
+]
+ROW52_POOL = [
+    listing("Super Tasty L.Meat Tuna In Soya Oil 185g | Sharjah Co-operative Society",
+            "https://www.sharjahcoop.ae/en/super-tasty-lmeat-tuna-in-soya-oil-185g/p/6290360090887",
+            "https://www.sharjahcoop.ae/medias/1200Wx1200H-00000-6290360090887-001.jpg", 1),
+    listing("SUPER TASTY LIGHT MEAT TUNA SHREDED IN SOYA BEAN OIL 185GM | Safari Online  - Shop Online from Safari "
+            "Hyermarket", "https://safarihypermarket.ae/en/products/super-tasty-light-meat-tuna-shreded-in-soya-bean-oil-185gm-1",
+            "https://qc-products-images-in.s3.ap-south-1.amazonaws.com/optimized-images/"
+            "optimized_0ded6ef9-0705-4148-91ab-f1d5fdded482.jpeg", 2),
+]
+# row 49's results in the run: other brands only
+ROW49_OTHERS = [
+    listing("Super White White Meat Tuna 185g – SuperDokan",
+            "https://superdokan.com/en-lb/collections/vendors/products/super-white-white-meat-tuna",
+            "https://superdokan.com/cdn/shop/products/12_b2e7b73c-b92a-478e-9d24-f7b00b6b7efd.jpg", 1),
+    listing("Aqua Premium Solid Tuna White | Gourmet Food Stores", "https://gourmetegypt.com/aqua-premium-solid-tuna-white",
+            "https://gourmetegypt.com/media/catalog/product/7/9/796520942738_2_1.jpg", 2),
+]
+
+
+@pytest.mark.parametrize("row, pool", [(ROW50, ROW50_POOL), (ROW51, ROW51_POOL), (ROW52, ROW52_POOL)])
+def test_super_t_and_super_slash_t_are_super_tasty_on_the_runs_own_listings(row, pool):
+    spec = spec_of(*row)
+    found = bd.find(spec, pool)
+    assert (found.display, found.kind) == ("Super Tasty", "abbreviation")
+    applied = bd.apply(spec, found)
+    assert applied.discovered_brands == ("Super Tasty",) and "super tasty" in applied.match_brands
+    # the run's readings on rows 50 / 51: 'Super Tasty' is the target brand once the spec carries it
+    assert _brand_reading(spec, "Super Tasty") == "unknown"
+    assert _brand_reading(applied, "Super Tasty") == "target"
+
+
+def test_rows_50_51_after_row_52_plan_their_queries_with_super_tasty():
+    bd.remember(spec_of(*ROW52), bd.discover(spec_of(*ROW52), ROW52_POOL))
+    for row in (ROW50, ROW51):
+        spec = spec_of(*row)
+        hint = bd.planned_hint(spec)
+        assert hint is not None and hint.display == "Super Tasty"
+        assert build_queries(bd.as_hint(spec, hint))[0].text.startswith("Super Tasty MEAT SOLID TUNA ")
+        assert bd.as_hint(spec, hint).match_brands == spec.match_brands          # queries only, never evidence
+    # row 49 ('SUP/T', searched again in the same run) is a sibling spelling: the same plan
+    assert build_queries(bd.as_hint(spec_of(*ROW49), bd.planned_hint(spec_of(*ROW49))))[0].text == \
+        "Super Tasty WHITE MEAT SOLID TUNA SALT WATER 185g"
+    # a mapped brand never takes a remembered spelling
+    mapped = spec_of(*ROW50, mappings={"super t": {"brand": "Super T", "synonyms": ["SUPER T/"]}})
+    assert bd.planned_hint(mapped) is None
+
+
+ST_ONMART_READ = reading("Super Tasty", "Light Meat Solid Tuna in Salt Water", "3 x 185 g", pack=3)
+
+
+def test_row50_after_row52_never_searches_super_t_and_reads_super_tasty_as_its_brand():
+    row52 = pipeline.find_product_image(spec_of(*ROW52), providers=[ByQuery([("", ROW52_POOL)])],
+                                        fetcher=Images(ROW52_POOL), verifier=Reads({}), expansion=False)
+    assert row52.discovered_brands == ["Super Tasty"]
+    search = ByQuery([("super tasty", ROW50_POOL)])                         # 'SUPER T ...' finds nothing
+    onmart = ROW50_POOL[2]
+    out = pipeline.find_product_image(spec_of(*ROW50), providers=[search], fetcher=Images(ROW50_POOL),
+                                      verifier=Reads({onmart.image_url: ST_ONMART_READ}), expansion=False)
+    assert search.queries[0] == "Super Tasty MEAT SOLID TUNA SALT WATER 3x185g"
+    assert not any(q.upper().startswith("SUPER T ") for q in search.queries), search.queries   # was Q1 and Q3
+    assert out.discovered_brands == ["Super Tasty"]
+    assert out.decision == "REVIEW_PRESELECTED" and out.winner.candidate.image_url == onmart.image_url
+    assert out.winner.verdict.decision == MATCH                            # the label's 'Super Tasty' is the brand
+    assert "auto_blocked:brand_conf_sheet_raw" in out.winner.reasons
+
+
+def test_a_remembered_spelling_this_row_does_not_name_sends_the_sheets_own_query_once():
+    bd.remember(spec_of(*ROW52), bd.discover(spec_of(*ROW52), ROW52_POOL))
+    search = ByQuery([("", ROW49_OTHERS)])                                 # row 49's results: other brands only
+    out = pipeline.find_product_image(spec_of(*ROW49), providers=[search], fetcher=Images(ROW49_OTHERS),
+                                      verifier=Reads({}), expansion=False)
+    assert search.queries[0].startswith("Super Tasty ")
+    sheet_way = [q for q in search.queries if q == "SUP T WHITE MEAT SOLID TUNA SALT WATER 185g"]
+    assert len(sheet_way) == 1                                              # the sheet's spelling is still searched
+    assert out.discovered_brands == []
+
+
+def test_the_trace_the_export_and_the_stored_reason_keep_the_discovered_spelling():
+    sys.path.insert(0, str(ROOT / "scripts"))
+    import export_run
+
+    spec = spec_of(*ROW50)
+    applied = bd.apply(spec, bd.find(spec, ROW50_POOL))
+    outcome = pipeline.SearchOutcome(decision="REVIEW_UNSELECTED", sku_key=spec.sku_key,
+                                     queries=["Super Tasty MEAT SOLID TUNA SALT WATER 3x185g"],
+                                     discovered_brands=list(applied.discovered_brands))
+    trace = {}
+    facade.outcome_to_legacy(outcome, trace, spec=spec)
+    assert trace["outcome"]["discovered_brands"] == ["Super Tasty"]       # was never stored
+    # the run's no-pick reason no longer says no store writes the brand
+    assert not any(i["key"] == "brand_unknown" for i in trace["outcome"]["explain"]["sheet"])
+    queue_row = {"row_number": 50, "product_name": ROW50[0], "brand": ROW50[1], "barcode": "",
+                 "status": "ready_for_review", "trace_json": json.dumps(trace), "payload_json": "{}",
+                 "sku_key": spec.sku_key}
+    del trace["outcome"]["explain"]                                         # a row saved before the reason
+    queue_row["trace_json"] = json.dumps(trace)
+    stored = explain.explain_stored(queue_row, [], mappings={}, vocab=explain.Vocabulary())
+    assert not any(s["key"] == "brand_unknown" for s in stored["sheet"])
+    row = export_run.export_row(queue_row, [], mappings={}, vocab=explain.Vocabulary(), prices={"serper": 0.001})
+    assert row["discovered_brands"] == ["Super Tasty"]                    # was always []
+    assert not any(i["key"] == "brand_unknown" for i in row["sheet_issues"])
 
 
 # ---------------------------------------------------------------------------

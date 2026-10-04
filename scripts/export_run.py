@@ -14,8 +14,9 @@ What a row holds (read from automation_queue, its stored trace and its stored re
 searched again): the sheet row number, product name, brand, size, the barcode (and whether it is a valid GTIN),
 the decision and failure code, why there is no pick (catalog_match.explain: the reason key and the Arabic
 sentence) and the sheet's gaps, the top 8 candidates (image and page URL, domain, title, identity tier, status,
-reasons and warnings, the label reader's reading, the size / variant evidence), the provider calls and the
-estimated cost when the trace says it. The run's metadata: the code version (git commit), every catalog_match
+reasons and warnings, the label reader's reading, the size / variant evidence), the stores' spelling of the
+brand the search used (discovered_brands: the trace's outcome, or an older pick's 'brand_spelling' warning), the
+provider calls and the estimated cost when the trace says it. The run's metadata: the code version (git commit), every catalog_match
 setting without any key (catalog_match.cassette.settings_snapshot: secret settings only as set / not set) and the
 run_history row of the run.
 
@@ -252,6 +253,8 @@ def export_row(row, candidates, mappings=None, vocab=None, prices=None, secret_v
     if no_pick is None and "explain" not in outcome and decision not in smoke_live.PICK_DECISIONS and decision:
         no_pick = explain.explain_stored(row, candidates, mappings, vocab)       # saved before it was computed
     barcode = str(row.get("barcode") or "")
+    # the stores' spelling of the brand the search used (outcome.discovered_brands, or an older pick's warning)
+    discovered = explain.stored_discovered(trace, candidates)
     out = {
         "row": row.get("row_number"), "name": str(row.get("product_name") or ""), "brand": str(row.get("brand") or ""),
         "name_ar": sheet["name_ar"], "brand_ar": sheet["brand_ar"], "category": sheet["category"], "size": sheet["size"],
@@ -267,12 +270,13 @@ def export_row(row, candidates, mappings=None, vocab=None, prices=None, secret_v
         "top": top, "reject_counts": dict(outcome.get("reject_counts") or {}),
         "vlm_calls": vlm_calls, "vlm_usage": usage, "strong_calls": sum(1 for u in usage if u.get("role") == "strong"),
         "social_links": list(outcome.get("social_links") or []),
-        "discovered_brands": [], "serp_calls": sum(1 for c in calls if c["provider"] not in smoke_live.FREE_PROVIDERS
-                                                   and c["status"] in smoke_live.ANSWERED_STATUSES),
+        "discovered_brands": discovered,
+        "serp_calls": sum(1 for c in calls if c["provider"] not in smoke_live.FREE_PROVIDERS
+                          and c["status"] in smoke_live.ANSWERED_STATUSES),
         "cost": {"search": round(search_cost, 4), "verifier": round(verifier_cost, 4)},
         "cost_usd": round(search_cost + verifier_cost, 4), "cost_known": bool(calls or usage or vlm_calls),
         "no_pick": no_pick,
-        "sheet_issues": explain.sheet_issues(sheet, spec=spec, vocab=vocab),
+        "sheet_issues": explain.sheet_issues(sheet, spec=spec, vocab=vocab, discovered=discovered),
     }
     out["expansion"] = smoke_live.expansion_info(out)
     out["outage"] = smoke_live.outage_reason(out)
