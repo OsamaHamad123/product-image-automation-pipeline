@@ -144,6 +144,56 @@ def test_only_a_size_is_split_off():
     assert sheet_names.split_glued_sizes("COKE ZERO1.5L") == "COKE ZERO 1.5L"
 
 
+@pytest.mark.parametrize("text", [
+    "PEPSI CAN 330ML B2G1", "LAYS CHIPS B1G1 50G", "PEPSI 2+1 330ML", "PAMPERS BABY DRY S4 L 52", "HUGGIES XL 4",
+    "FERRERO ROCHER T3", "OMEGA3 500G", "7UP 330ML", "KITKAT4F 41.5G", "OIL 5 L", "TUNA185 G", "حليب1 ل",
+    "500G+50G FREE", "COLA330ML6",
+])
+def test_a_promo_or_size_code_is_never_split(text):
+    assert sheet_names.split_glued_sizes(text) == text
+
+
+@pytest.mark.parametrize("text, split", [
+    ("RICE1KGx2", "RICE 1KGx2"), ("WATER2X1.5L", "WATER 2X1.5L"), ("OIL1,5L", "OIL 1,5L"), ("حليب1ل", "حليب 1ل"),
+    ("LABAN180MLX6", "LABAN 180MLX6"), ("MASALA160 GM", "MASALA 160 GM"),
+])
+def test_a_size_glued_to_a_word_is_split(text, split):
+    assert sheet_names.split_glued_sizes(text) == split
+
+
+@pytest.mark.parametrize("name, brand, size", [
+    ("PEPSI CAN 330ML B2G1", "PEPSI", "330ml"),            # was split to 'B 2G1': two sizes, none kept
+    ("LAYS CHIPS B1G1 50G", "LAYS", "50g"),
+    ("PAMPERS BABY DRY S4 L 52", "PAMPERS", None),         # was 'S 4 L': an invented 4 litres
+])
+def test_a_promo_code_never_changes_the_size(name, brand, size):
+    spec = spec_of(name, brand)
+    assert (spec.size.canonical() if spec.size else None) == size
+
+
+def test_a_promo_code_never_lets_another_size_be_preselected():
+    from catalog_match import decide
+    from catalog_match.models import FetchedImage, ProviderHealth, QualityReport, RankedCandidate, VerificationResult
+    from catalog_match.score import rank_key
+
+    spec = spec_of("PEPSI CAN 330ML B2G1", "PEPSI")
+    big = listing("Pepsi Cola 2.25L", "https://www.carrefouruae.com/mafuae/en/x/pepsi-2-25l/p/1",
+                  "https://i.example.com/big.jpg")
+    can = listing("Pepsi Cola Can 330ml", "https://www.noon.com/uae-en/pepsi-can/N1/p/", "https://i.example.com/can.jpg")
+    rcs = []
+    for c, sha in ((big, "a"), (can, "b")):
+        read = VlmImageVerdict(index=0, decision="MATCH")
+        rcs.append(RankedCandidate(candidate=c, score=score_candidate(spec, c), verdict=read,
+                                   fetched=FetchedImage(candidate=c, ok=True, content_sha256=sha * 64, width=800,
+                                                        height=800, path_or_bytes=b"x"),
+                                   quality=QualityReport(hard_ok=True)))
+    assert "size_conflict" in rcs[0].score.hard_reject
+    rcs.sort(key=lambda rc: rank_key(rc.candidate, rc.score))
+    out = decide.route(spec, rcs, VerificationResult(status="ok", calls=1),
+                       [ProviderHealth(provider="serper", status="ok", query_id="Q1")])
+    assert out.winner is not None and out.winner.candidate.image_url == can.image_url     # was the 2.25 L bottle
+
+
 def test_rows_50_and_51_keep_their_pack_of_3():
     spec = spec_of("SUPER T/MEAT SOLID TUNA SUNFL OIL3X185GM", "SUPER T/")
     q1 = build_queries(spec)[0].text
