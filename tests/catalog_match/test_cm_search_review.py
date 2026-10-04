@@ -467,3 +467,51 @@ def test_an_evaluation_run_starts_with_no_remembered_spelling():
     spec = _remember_one()
     harness.run_all("v2", sku_ids=["no-such-sku"])
     assert brand_discovery.recall(spec) is None
+
+
+# ---------------------------------------------------------------------------
+# The lookups asked again after brand discovery
+# ---------------------------------------------------------------------------
+
+class _Index:
+    kind, needs_gtin, sanctioned, name, lookup_query_id = "lookup", False, False, "local_index", "IDX"
+
+    def __init__(self):
+        self.asked = 0
+
+    def lookup(self, spec_):
+        from catalog_match.models import ProviderResult
+
+        self.asked += 1
+        return ProviderResult(provider="local_index", status="empty", candidates=[])
+
+
+class _Web:
+    kind, fallback, sanctioned, name = "search", False, True, "serper"
+
+    def __init__(self, cands):
+        self.cands = list(cands)
+
+    def search(self, query, hl, spec_):
+        from catalog_match.models import ProviderResult
+
+        return ProviderResult(provider="serper", status="ok", candidates=list(self.cands))
+
+
+def test_a_lookup_asked_again_keeps_one_health_entry_and_none_after_an_early_stop():
+    from catalog_match.retrieve import Retriever
+
+    spec = spec_of("ALMARAI FRESH MILK 1L", "ALMARAI")
+    index = _Index()
+    retriever = Retriever(spec, [_Web([listing("Almarai Fresh Milk 1L")]), index], max_queries=4)
+    retriever.run()
+    retriever.rerun_lookups()
+    assert index.asked == 2
+    assert [h.provider for h in retriever.result.health].count("local_index") == 1     # was 2
+    # after an early stop the pool already holds tier 1: the lookups are not asked again
+    stopped = Retriever(spec, [_Web([listing("Almarai Fresh Milk 1L")]), _Index()], max_queries=4,
+                        early_stop=lambda pool: True)
+    stopped.run()
+    asked = stopped.providers[1].asked
+    stopped.rerun_lookups()
+    assert stopped.stopped and stopped.providers[1].asked == asked                     # was asked again
