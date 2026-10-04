@@ -13,7 +13,7 @@
 # ضُبط TELEGRAM_BOT_TOKEN و TELEGRAM_CHAT_ID. رمز النتيجة في جدولة المهام (Last Run Result):
 #   0 اكتمل، أو كان تشغيل آخر يعمل · 1 فشل (إعداد الشيت أو خطأ) · 2 انقطاع بقي بعد إعادة المحاولتين
 #   3 توقف قبل نهاية الطابور: زر الإيقاف في اللوحة (يكمل العامل المنتجات الجارية ثم يتوقف ويُكتب التقرير)،
-#     أو حد (الميزانية اليومية، رصيد Serper)
+#     أو حد (الميزانية اليومية، رصيد Serper، مهلة المهمة -MaxHours)
 # عامل لم يتوقف خلال 90 ثانية من طلب الإيقاف تُنهيه اللوحة: تظهر النتيجة 1 في جدولة المهام، وتقرير الليلة
 # (تكتبه اللوحة من ملف القفل) يقول «توقف».
 # لا يحتاج هذا السكربت أي مفتاح: المفاتيح تُقرأ من .env وصفحة الإعدادات عند كل تشغيل.
@@ -64,7 +64,9 @@ if ($Time -notmatch '^([01]\d|2[0-3]):[0-5]\d$') {
 $at = [datetime]::ParseExact($Time, "HH:mm", [System.Globalization.CultureInfo]::InvariantCulture)
 
 # المسارات بين علامتي تنصيص (مجلد المشروع قد يحتوي مسافات). مجلد البدء (Start in) لا يقبل علامات التنصيص.
-$action = New-ScheduledTaskAction -Execute "`"$pythonPath`"" -Argument "-X utf8 `"$runnerPath`"" -WorkingDirectory $repoRoot
+# -MaxHours يصل للتشغيل الليلي أيضاً (--max-hours): لا يأخذ صفاً جديداً قبل الحد بربع ساعة ولا يعيد محاولة لا تتسع لها
+# المهلة، فيُكتب تقرير الليلة دائماً قبل أن تُنهي جدولة المهام المهمة.
+$action = New-ScheduledTaskAction -Execute "`"$pythonPath`"" -Argument "-X utf8 `"$runnerPath`" --max-hours $MaxHours" -WorkingDirectory $repoRoot
 $trigger = New-ScheduledTaskTrigger -Daily -At $at
 $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -MultipleInstances IgnoreNew `
     -ExecutionTimeLimit (New-TimeSpan -Hours $MaxHours) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries

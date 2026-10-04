@@ -455,6 +455,43 @@ def test_worker_stops_between_products(worker, monkeypatch):
     assert rec["run_stats"] and set(rec["run_stats"]) == {"run-w"}  # progress from this run's rows only
 
 
+
+def test_the_worker_stops_taking_rows_at_its_time_limit(worker, monkeypatch):
+    """Review fix C4: the nightly passes a deadline (Task Scheduler's limit minus a margin); after it the worker
+    claims no new row, finishes the products in progress and stops (time_limit, exit 3), so the night is reported
+    before Task Scheduler kills the process."""
+    import time as time_mod
+
+    import run_report
+
+    main, local_cache_db, rec = worker
+    states = []
+    monkeypatch.setattr(local_cache_db, "update_automation_state",
+                        lambda status=None, **kw: states.append(dict(kw, status=status)) or True)
+    real_time = time_mod.time
+    jump = [0.0]
+    monkeypatch.setattr(time_mod, "time", lambda: real_time() + jump[0])
+    deadline = real_time() + 3600
+
+    def fetch(worker_id):
+        rec["claims"].append(worker_id)
+        jump[0] = 3600 + 1                       # the first product takes the night past the deadline
+        return rec["tasks"].pop(0)
+
+    monkeypatch.setattr(local_cache_db, "fetch_next_task", fetch)
+
+    main.run_worker_mode(trigger="nightly", report=False, deadline_ts=deadline)
+
+    assert len(rec["claims"]) == 1 and rec["worked"] == [100] and len(rec["tasks"]) == 5
+    assert main.LAST_WORKER["stop_reason"] == "time_limit" and run_report.exit_code("time_limit") == 3
+    assert "حده الزمني" in run_report.reason_text("time_limit")
+    assert states[-1]["notice"].startswith("TIME_LIMIT: ") and states[-1]["stop_requested"] == 0
+
+    # a deadline already past: no row is claimed at all
+    monkeypatch.setattr(local_cache_db, "fetch_next_task", lambda worker_id: pytest.fail("no row after the deadline"))
+    main.run_worker_mode(trigger="nightly", report=False, deadline_ts=real_time() - 1)
+    assert main.LAST_WORKER["stop_reason"] == "time_limit"
+
 def test_a_stop_request_arriving_as_the_worker_finishes_does_not_outlive_the_run(worker, monkeypatch):
     """Review fix: the queue ran empty just as a stop was recorded (e.g. PHP could not kill the worker). The final
     state write clears the request, so it cannot stop the next worker started by hand before any product."""

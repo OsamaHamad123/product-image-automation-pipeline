@@ -2002,7 +2002,7 @@ def _prepare_verifier_rechecks(notice, run_id):
     return requeued or 0
 
 
-def run_worker_mode(trigger="manual", report=True):
+def run_worker_mode(trigger="manual", report=True, deadline_ts=None):
     """
     عامل الخلفية: يسحب المهام ذرياً ويعالجها بالتوازي (3 خيوط).
     يخرج فقط عندما ينجح COUNT(*) للمهام المفتوحة ويعيد 0، أو عند توقف المزودين (5 مهام متتالية PROVIDER_DOWN)،
@@ -2010,7 +2010,8 @@ def run_worker_mode(trigger="manual", report=True):
     local_cache_db.stop_run الصفوف العالقة للانتظار. طلب إيقاف سُجل أثناء الإدراج يُنفذ قبل معالجة أي منتج.
     قاعدة بيانات لا ترد عند البدء: يتوقف فوراً (db_unavailable) بدل اعتبار التشغيل منتهياً.
     النتيجة في LAST_WORKER؛ report=True يكتب تقرير التشغيل (run_report: سجل التشغيلات، last_report.json، Telegram).
-    التشغيل الليلي يمرر report=False ويكتب تقريراً واحداً لليلة بعد إعادة المحاولات.
+    التشغيل الليلي يمرر report=False ويكتب تقريراً واحداً لليلة بعد إعادة المحاولات، و deadline_ts (حد جدولة المهام
+    ناقص هامش): بعده لا يسحب العامل مهمة جديدة وينتهي بعد المنتجات الجارية (time_limit) قبل أن تُنهي جدولة المهام العملية.
     """
     from concurrent.futures import ThreadPoolExecutor
     import threading
@@ -2150,6 +2151,10 @@ def run_worker_mode(trigger="manual", report=True):
                         # لا مهمة جديدة؛ الخروج من المنفذ ينتظر المنتجات الجارية، والباقي يبقى في الانتظار
                         stop_reason = "stopped"
                         print("[Worker] طلب إيقاف من لوحة التحكم؛ ينتهي العامل بعد المنتجات الجارية.")
+                        break
+                    if deadline_ts is not None and time.time() >= deadline_ts:
+                        stop_reason = "time_limit"
+                        print("[Worker] بلغ التشغيل حده الزمني؛ لا مهمة جديدة، وينتهي العامل بعد المنتجات الجارية.")
                         break
                     if state.get("pause_requested") == 1:
                         time.sleep(1)
