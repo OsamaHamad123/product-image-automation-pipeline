@@ -115,6 +115,49 @@ def _mark_phrase(words: Sequence[_Word], phrase: str, marks: Set[int]) -> None:
             i += 1
 
 
+_SURFACE_TOKEN_RE = re.compile(r"\d+(?:\.\d+)?|[^\W\d_]+")      # text_norm's token rule, on the surface text
+
+
+def _split_word(word: _Word, k: int) -> Optional[Tuple[_Word, _Word]]:
+    """The word cut after its k-th token ('T/LIGHT', 1 -> 'T', 'LIGHT'); None when its surface does not show them."""
+    spans = list(_SURFACE_TOKEN_RE.finditer(word.text))
+    if len(spans) != len(word.keys) or not 0 < k < len(spans):
+        return None
+    head = word.text[:spans[k].start()].strip(_BRAND_EDGE_PUNCT)
+    tail = word.text[spans[k].start():].strip(_EDGE_PUNCT)
+    if not head or not tail:
+        return None
+    return _Word(head, word.keys[:k]), _Word(tail, word.keys[k:])
+
+
+def _split_at_phrase(words: List[_Word], phrase: str) -> List[_Word]:
+    """Split a word that an occurrence of the phrase covers only in part, so that only the phrase is stripped:
+    'SUPER T/' in 'SUPER T/LIGHT MEAT TUNA' leaves 'LIGHT' (it took the whole word 'T/LIGHT')."""
+    pkeys = tokens(phrase, strip_clitics=True)
+    n = len(pkeys)
+    if not n:
+        return words
+    for _ in range(len(words) + 1):
+        flat = _flat(words)
+        cut = None
+        for i in range(len(flat) - n + 1):
+            if all(flat[i + j][0] == pkeys[j] for j in range(n)):
+                for pos in (i, i + n):          # before the first token, after the last one
+                    if 0 < pos < len(flat) and flat[pos - 1][1] == flat[pos][1]:
+                        wi = flat[pos][1]
+                        parts = _split_word(words[wi], sum(1 for _, w in flat[:pos] if w == wi))
+                        if parts:
+                            cut = (wi, parts)
+                            break
+            if cut:
+                break
+        if cut is None:
+            return words
+        wi, parts = cut
+        words = words[:wi] + list(parts) + words[wi + 1:]
+    return words
+
+
 def _mark_joined(words: Sequence[_Word], phrase: str, marks: Set[int]) -> None:
     """Mark whole words that spell the phrase with other word breaks ('ALALALI' for 'AL ALALI', and back)."""
     target = _compact(phrase)
@@ -191,9 +234,12 @@ def _brand_spellings(spec: SkuSpec, brand_en: str, brand_ar: str) -> List[str]:
             out.append(phrase)
     uniq = list(dict.fromkeys(p for p in out if _compact(p)))
     keys = {p: tuple(tokens(p, strip_clitics=True)) for p in uniq}
+    # the canonical, English and Arabic brand are always stripped: the synonym 'Ferrero' must not keep
+    # 'Ferrero Rocher' in the name ('Ferrero Rocher Rocher Chocolate', golden uae-066)
+    always = {p for p in base if p}
     kept = [p for p in uniq
-            if not any(len(keys[q]) < len(keys[p]) and keys[q] and keys[p][:len(keys[q])] == keys[q]
-                       for q in uniq if q is not p)]
+            if p in always or not any(len(keys[q]) < len(keys[p]) and keys[q] and keys[p][:len(keys[q])] == keys[q]
+                                      for q in uniq if q is not p)]
     return sorted(kept, key=lambda p: -len(tokens(p)))
 
 
@@ -300,6 +346,8 @@ def _expand_shorthand(words: List[_Word], removed: Set[int], context: str) -> Tu
 
 def _analyse(spec: SkuSpec, name: str, brand: str, spellings: Sequence[str], lang: str) -> _NameParts:
     words = _words(name)
+    for phrase in spellings:
+        words = _split_at_phrase(words, phrase)
     removed: Set[int] = set()
     for phrase in spellings:
         _mark_phrase(words, phrase, removed)

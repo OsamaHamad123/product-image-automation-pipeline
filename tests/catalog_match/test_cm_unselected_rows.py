@@ -197,7 +197,7 @@ def test_a_promo_code_never_lets_another_size_be_preselected():
 def test_rows_50_and_51_keep_their_pack_of_3():
     spec = spec_of("SUPER T/MEAT SOLID TUNA SUNFL OIL3X185GM", "SUPER T/")
     q1 = build_queries(spec)[0].text
-    assert q1 == "SUPER T SOLID TUNA SUNFLOWER OIL 3x185g"            # was 'SUPER T SOLID TUNA SUNFLOWER OIL3X185GM'
+    assert q1 == "SUPER T MEAT SOLID TUNA SUNFLOWER OIL 3x185g"       # was 'SUPER T SOLID TUNA SUNFLOWER OIL3X185GM'
     page = "https://www.tradeling.com/ae-en/product/super-tasty-tuna"
     three = score_candidate(spec, listing("Buy Super Tasty White Meat Solid Premium Tuna In Sunflower Oil 185g x 3 "
                                           "Pieces Online in UAE | Tradeling", page))

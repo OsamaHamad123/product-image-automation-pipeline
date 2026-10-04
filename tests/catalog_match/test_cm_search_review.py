@@ -2,16 +2,21 @@
 
 Every case gave the wrong answer named in its comment before the fix. Sockets are blocked.
 """
+import csv
+import json
 import socket
+from pathlib import Path
 
 import pytest
 
-from catalog_match import brand_discovery, decide, settings
+from catalog_match import brand_discovery, decide, settings, sheet_names
 from catalog_match.identity import build_sku_spec
 from catalog_match.models import (
     Candidate, FetchedImage, ProviderHealth, QualityReport, RankedCandidate, VerificationResult, VlmImageVerdict,
 )
+from catalog_match.query_plan import build_queries
 from catalog_match.score import rank_key, score_candidate
+from catalog_match.text_norm import tokens
 from catalog_match.variants import extract_variants
 from catalog_match.verify import MISMATCH, classify, make_verdict
 
@@ -202,8 +207,6 @@ def test_soybean_and_sunflower_oil_stay_apart():
 
 
 def test_saltwater_is_brine_only_on_a_tuna():
-    from catalog_match import sheet_names
-
     assert sheet_names.readable("SALTWATER TAFFY 200G") == "SALTWATER TAFFY 200G"   # was 'SALT WATER TAFFY'
     assert "SALT WATER" in sheet_names.readable("SUP/T WT/MEAT SOLIDTUNA SALTWATER 185GM")      # row 49
     assert spec_of("SUP/T WT/MEAT SOLIDTUNA SALTWATER 185GM", "SUP/T").variants.get("medium") == "brine"
@@ -266,3 +269,91 @@ def test_the_official_milk_page_ranks_above_a_laban_listing_of_the_brand():
     assert "site_name_brand" in ps.conflicts and not ls.conflicts
     assert ls.matched["coverage"] == 0.0 < ps.matched["coverage"]
     assert rank_key(page, ps) < rank_key(laban, ls)                 # the laban (no 'milk') ranked first
+
+
+# ---------------------------------------------------------------------------
+# Q1: every brand spelling stripped once, nothing else
+# ---------------------------------------------------------------------------
+
+REPO = Path(__file__).resolve().parents[2]
+
+
+def suggested_mappings():
+    import google_sheets
+
+    with open(REPO / "runs" / "2026-10-03" / "brands_mapping_suggested.csv", encoding="utf-8-sig", newline="") as fh:
+        return google_sheets.parse_brand_mapping_rows([r for r in csv.reader(fh)])
+
+
+@pytest.mark.parametrize("name, brand, mappings, q1", [
+    ("FERRERO ROCHER T16 200G", "FERRERO ROCHER",
+     {"ferrero rocher": {"brand": "Ferrero Rocher", "synonyms": ["Ferrero Rocher", "Ferrero"]}},
+     "Ferrero Rocher T16 200g"),                                   # was 'Ferrero Rocher ROCHER T16 200g'
+    ("AL AIN FARMS FRESH MILK 1L", "AL AIN FARMS",
+     {"al ain farms": {"brand": "Al Ain Farms", "synonyms": ["Al Ain"]}},
+     "Al Ain Farms FRESH MILK 1L"),                                # was 'Al Ain Farms FARMS FRESH MILK 1L'
+])
+def test_q1_writes_a_brand_with_a_prefix_synonym_once(name, brand, mappings, q1):
+    assert build_queries(spec_of(name, brand, mappings))[0].text == q1
+
+
+@pytest.mark.parametrize("name, q1", [
+    ("SUPER T/LIGHT MEAT TUNA IN SUNFLOWER OIL 185GM", "Super Tasty LIGHT MEAT TUNA IN SUNFLOWER OIL 185g"),
+    ("SUPER T/WHITE MEAT TUNA IN SUNFLOWER OIL 185GM", "Super Tasty WHITE MEAT TUNA IN SUNFLOWER OIL 185g"),
+    ("SUPER T/MEAT SOLID TUNA SALT WATE3X185GM", "Super Tasty MEAT SOLID TUNA SALT WATER 3x185g"),   # row 50
+])
+def test_q1_strips_only_the_brand_glued_to_a_word(name, q1):
+    # 'SUPER T/' took the whole word 'T/LIGHT' with it: the meat grade was lost ('Super Tasty MEAT TUNA ...')
+    assert build_queries(spec_of(name, "SUPER T/", suggested_mappings()))[0].text == q1
+
+
+def _stem(tok):
+    return tok[:-1] if len(tok) > 3 and tok.endswith("s") and not tok.endswith("ss") else tok
+
+
+def _sheet_words(spec):
+    """The readable sheet name's own words (shorthand written out) without brand spellings and size words."""
+    from catalog_match import abbreviations, identity, query_plan
+    from catalog_match.variants import spec_context
+
+    text = sheet_names.spec_name(spec)
+    text = abbreviations.expand(text, spec_context(spec)) if query_plan._lang_of(spec.raw_name) == "en" else text
+    brand = set()
+    for p in (spec.brand_raw, spec.brand_canonical, spec.brand_ar) + tuple(spec.match_brands):
+        toks = tokens(p, strip_clitics=True)
+        brand.update(toks)
+        brand.add("".join(toks))
+    skip = brand | identity._UNIT_WORDS | query_plan._PACK_UNITS
+    return [t for t in tokens(text, strip_clitics=True) if len(t) > 1 and not t[0].isdigit() and t not in skip]
+
+
+def _golden_and_live_specs():
+    golden = json.loads((REPO / "tests" / "eval" / "fixtures" / "golden_skus.json").read_text(encoding="utf-8"))
+    maps = json.loads((REPO / "tests" / "eval" / "fixtures" / "brand_mappings.json").read_text(encoding="utf-8"))
+    for sku in golden["skus"]:
+        row = {"name": sku.get("name_en") or sku.get("name_ar") or "", "name_ar": sku.get("name_ar", ""),
+               "brand": sku.get("brand", ""), "brand_ar": sku.get("brand_ar", ""), "barcode": sku.get("barcode", ""),
+               "category": sku.get("category", ""), "size": sku.get("size", "")}
+        yield sku["id"], build_sku_spec(row, maps["mappings"])
+    suggested = suggested_mappings()
+    with open(REPO / "runs" / "2026-10-03" / "rows_2_61.csv", encoding="utf-8-sig", newline="") as fh:
+        for r in csv.DictReader(fh):
+            for mappings in ({}, suggested):
+                yield f"row {r['row']}", spec_of(r["name"], r["brand"], mappings)
+
+
+def test_no_q1_repeats_a_word_pair_or_loses_a_sheet_word():
+    # golden uae-066 'Ferrero Rocher Rocher Chocolate', uae-051 'Al Jadeed Bakery Bakery Arabic Bread', live rows
+    # 50 and 51 lost MEAT
+    bad = []
+    for sku_id, spec in _golden_and_live_specs():
+        q1 = build_queries(spec)[0].text
+        toks = tokens(q1, strip_clitics=True)
+        pairs = list(zip(toks, toks[1:]))
+        own = tokens(sheet_names.spec_name(spec), strip_clitics=True)
+        repeated = [p for p in pairs if (p[0] == p[1] or pairs.count(p) > 1) and p not in set(zip(own, own[1:]))]
+        bag = {_stem(t) for t in toks}
+        lost = [w for w in _sheet_words(spec) if _stem(w) not in bag]
+        if repeated or lost:
+            bad.append((sku_id, q1, repeated, lost))
+    assert not bad
