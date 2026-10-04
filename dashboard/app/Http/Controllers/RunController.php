@@ -361,7 +361,7 @@ class RunController extends Controller
     }
 
     // ------------------------------------------------------------------
-    // «جودة بيانات الشيت»: what the sheet rows lack (cli_bridge get_products: sheet_issues, catalog_match.explain)
+    // «جودة بيانات الشيت»: what the sheet rows lack (each cached row's sheet_issues, from catalog_match.explain)
     // ------------------------------------------------------------------
 
     /** The card's groups, in the order the owner fixes them, with their Arabic names. */
