@@ -357,3 +357,113 @@ def test_no_q1_repeats_a_word_pair_or_loses_a_sheet_word():
         if repeated or lost:
             bad.append((sku_id, q1, repeated, lost))
     assert not bad
+
+
+# ---------------------------------------------------------------------------
+# Brand-spelling memory: a hint, never this row's evidence; digits count; every run starts empty
+# ---------------------------------------------------------------------------
+
+MAYO = ("AMERICAN G/ MAYONNAISE 473ML", "AMERICAN G/")
+AG_MAYO = listing("American Garden Mayonnaise 473ml | Carrefour UAE",
+                  "https://www.carrefouruae.com/mafuae/en/x/american-garden-mayonnaise-473ml/p/1",
+                  "https://img.example-cdn.com/ag-mayo.jpg")
+TUNA = ("AMERICAN G/ LIGHT MEAT TUNA 185GM", "AMERICAN G/")
+AMERICANA_TUNA = listing("Americana Light Meat Tuna 185g | Lulu UAE", image_url="https://img.example-cdn.com/am.jpg")
+
+
+def test_a_spelling_proved_for_mayonnaise_is_only_a_hint_for_a_tuna_row():
+    assert brand_discovery.find(spec_of(*MAYO), [AG_MAYO]).display == "American Garden"
+    tuna = spec_of(*TUNA)
+    # was American Garden, added to the tuna row's brand phrases: a label reading 'American Garden' then
+    # confirmed a brand this row's own listings never showed
+    assert brand_discovery.find(tuna, [AMERICANA_TUNA]) is None
+    assert brand_discovery.hint(tuna, [AMERICANA_TUNA]).display == "American Garden"
+    hinted = brand_discovery.as_hint(tuna, brand_discovery.hint(tuna, [AMERICANA_TUNA]))
+    assert hinted.match_brands == tuna.match_brands and build_queries(hinted)[0].text.startswith("American Garden")
+    # a listing of this row naming the product under the spelling makes it this row's evidence
+    ag_tuna = listing("American Garden Light Meat Tuna 185g | Carrefour UAE",
+                      "https://www.carrefouruae.com/mafuae/en/x/american-garden-tuna/p/3")
+    assert brand_discovery.find(tuna, [AMERICANA_TUNA, ag_tuna]).display == "American Garden"
+
+
+def test_a_tuna_row_sends_the_hint_query_and_keeps_its_own_brand_evidence():
+    from catalog_match import pipeline
+
+    class Search:
+        kind, fallback, sanctioned, name = "search", False, True, "serper"
+
+        def __init__(self):
+            self.queries = []
+
+        def search(self, query, hl, spec_):
+            from catalog_match.models import ProviderResult
+
+            self.queries.append(query)
+            hits = [AG_MAYO] if "mayonnaise" in query.lower() else [AMERICANA_TUNA]
+            return ProviderResult(provider="serper", status="ok", candidates=hits)
+
+    class Reads:
+        def verify(self, spec_, images):
+            # the Americana can misread as American Garden
+            return VerificationResult(status="ok", calls=1, verdicts=[make_verdict(spec_, i, {
+                "brand_text": "American Garden", "variant_text": "Light Meat Tuna", "size_text": "185g",
+                "view": "front_packshot", "brand_match": "yes", "variant_match": "yes", "size_match": "yes"})
+                for i, _ in enumerate(images)])
+
+    class Images:
+        def fetch(self, cands, spec_):
+            return [FetchedImage(candidate=c, ok=True, width=800, height=800, content_sha256=c.image_url[-12:] * 6,
+                                 path_or_bytes=_packshot()) for c in cands]
+
+    search = Search()
+    mayo = pipeline.find_product_image(spec_of(*MAYO), providers=[search], fetcher=Images(), verifier=Reads(),
+                                       expansion=False)
+    assert mayo.discovered_brands == ["American Garden"]
+    out = pipeline.find_product_image(spec_of(*TUNA), providers=[search], fetcher=Images(), verifier=Reads(),
+                                      expansion=False)
+    assert "American Garden LIGHT MEAT TUNA 185g" in search.queries               # the hint is still searched
+    assert out.discovered_brands == []                                            # was ['American Garden']
+    assert out.winner is None
+
+
+def _packshot():
+    import io
+
+    from PIL import Image, ImageDraw
+
+    img = Image.new("RGB", (800, 800), (255, 255, 255))
+    ImageDraw.Draw(img).rectangle([220, 120, 580, 680], fill=(60, 80, 150))
+    buf = io.BytesIO()
+    img.save(buf, "PNG")
+    return buf.getvalue()
+
+
+def test_a_sheet_brand_with_digits_is_not_the_one_without():
+    assert brand_discovery.memory_key("7UP") != brand_discovery.memory_key("UP")              # both were 'up'
+    assert brand_discovery.memory_key("3 ROSES") != brand_discovery.memory_key("ROSES")
+
+
+def _remember_one():
+    spec = spec_of(*MAYO)
+    brand_discovery.remember(spec, brand_discovery.discover(spec, [AG_MAYO]))
+    assert brand_discovery.recall(spec) is not None
+    return spec
+
+
+def test_a_worker_run_starts_with_no_remembered_spelling():
+    import main
+
+    spec = _remember_one()
+    main._forget_brand_spellings()
+    assert brand_discovery.recall(spec) is None
+
+
+def test_an_evaluation_run_starts_with_no_remembered_spelling():
+    import sys
+
+    sys.path.insert(0, str(REPO / "tests" / "eval"))
+    import harness
+
+    spec = _remember_one()
+    harness.run_all("v2", sku_ids=["no-such-sku"])
+    assert brand_discovery.recall(spec) is None

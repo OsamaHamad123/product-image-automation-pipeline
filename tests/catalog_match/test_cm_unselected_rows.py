@@ -677,15 +677,19 @@ def test_the_memory_is_keyed_by_the_sheet_brand_letters_and_never_guesses():
     from catalog_match import brand_discovery as bd
 
     assert bd.memory_key("SUPER T/") == bd.memory_key("SUPER/T") == "supert" and bd.memory_key("SUP/T") == "supt"
+    assert bd.memory_key("7UP") == "7up" != bd.memory_key("UP")                     # digits count (was 'up')
     proved = bd.discover(spec_of(*ROW49), [SHARJAH_ST])
     assert proved is not None and proved.display == "Super Tasty"
     bd.remember(spec_of(*ROW49), proved)
-    # a sibling spelling recalls it; an unrelated or a mapped brand never does
-    assert bd.find(spec_of(*ROW52), []) == proved
-    assert bd.find(spec_of("SUPER T/MEAT SOLID TUNA SALT WATE3X185GM", "SUPER T/"), ROW52_OWN) == proved
-    assert bd.find(spec_of("AMERICAN G/ LIGHT MEAT TUNA 185GM", "AMERICAN G/"), ROW52_OWN) is None
+    # a sibling spelling recalls it, only as a query hint until its own listings name the product under it
+    assert bd.find(spec_of(*ROW52), []) is None and bd.hint(spec_of(*ROW52), []) == proved
+    super_t = spec_of("SUPER T/MEAT SOLID TUNA SALT WATE3X185GM", "SUPER T/")
+    assert bd.find(super_t, ROW52_OWN) is None and bd.hint(super_t, ROW52_OWN) == proved
+    assert bd.find(spec_of(*ROW52), [SHARJAH_ST]).phrase == "super tasty"
+    # an unrelated or a mapped brand never recalls it
+    assert bd.hint(spec_of("AMERICAN G/ LIGHT MEAT TUNA 185GM", "AMERICAN G/"), ROW52_OWN) is None
     mapped = spec_of(*ROW52, mappings={"super t": {"brand": "Super T", "synonyms": ["SUPER/T"]}})
-    assert bd.find(mapped, []) is None
+    assert bd.find(mapped, []) is None and bd.hint(mapped, []) is None
     # a row whose own listings prove another spelling gets neither: the owner's call
     other = listing("Super Taste Light Meat Tuna 185g | Union Coop", "https://www.unioncoop.ae/super-taste-tuna/p/9")
     assert bd.discover(spec_of(*ROW52), [other]) is not None
