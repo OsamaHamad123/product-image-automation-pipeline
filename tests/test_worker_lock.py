@@ -331,6 +331,10 @@ def test_the_lock_is_replaced_atomically_and_created_exclusively(main_mod, monke
     assert main_mod.acquire_lock("worker", main_mod.LOCK_FILE, trigger="dashboard") is True
     assert main_mod.read_lock(main_mod.LOCK_FILE)["pid"] == os.getpid()
     assert main_mod.acquire_lock("nightly", main_mod.LOCK_FILE) is True          # our own lock (the nightly's enqueue)
+    # the nightly never takes over a dashboard run that wrote STARTING after the nightly's own check
+    _write(main_mod.LOCK_FILE, "STARTING")
+    assert main_mod.acquire_lock("nightly", main_mod.LOCK_FILE, take_starting=False) is False
+    assert open(main_mod.LOCK_FILE, encoding="utf-8").read() == "STARTING"
 
     # the exclusive create loses a race it did not see: the lock appeared between the read and the create
     os.remove(main_mod.LOCK_FILE)

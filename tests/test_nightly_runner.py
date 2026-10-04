@@ -355,6 +355,25 @@ def test_the_time_limit_comes_from_the_scheduled_task(argv, env, hours):
     assert runner.max_hours_from(argv, env) == hours
 
 
+def test_a_dashboard_run_starting_between_the_check_and_the_lock_is_not_taken_over(nightly, monkeypatch):
+    """worker_busy saw no run, then the dashboard wrote STARTING before the nightly took the lock: the nightly hands
+    the night over instead of replacing the dashboard's lock (its enqueue and worker would then run twice)."""
+    runner, main, _, rec = nightly
+    real_busy = runner.worker_busy
+
+    def busy_then_starting(main_module, *a, **k):
+        answer = real_busy(main_module, *a, **k)
+        os.makedirs("temp", exist_ok=True)
+        with open(runner.LOCK_FILE, "w") as fh:
+            fh.write("STARTING")
+        return answer
+
+    monkeypatch.setattr(runner, "worker_busy", busy_then_starting)
+    assert runner.run() == 0
+    assert rec["calls"] == [] and open(runner.LOCK_FILE).read() == "STARTING"
+    assert rec["reports"][-1]["outcome"] == "skipped"
+
+
 def test_stale_starting_lock_does_not_block_the_run(nightly):
     runner, _, _, rec = nightly
     os.makedirs("temp", exist_ok=True)

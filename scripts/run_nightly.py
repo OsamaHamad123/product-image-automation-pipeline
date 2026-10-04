@@ -151,10 +151,14 @@ def worker_busy(main_module, lock_file=LOCK_FILE, now=time.time):
     return main_module._another_worker_running(lock_file)
 
 
-def _hold_lock(main_module, lock_file=LOCK_FILE):
+def _hold_lock(main_module, lock_file=LOCK_FILE, now=time.time):
     """Our lock during the enqueue, so the dashboard shows a run and refuses to start a second one.
-    False when another process took the lock first (it is created exclusively)."""
-    return main_module.acquire_lock("nightly", lock_file, trigger="nightly")
+    False when another process took the lock first (it is created exclusively), including a dashboard run whose
+    STARTING appeared after worker_busy looked; a STARTING older than STARTING_GRACE_S is an abandoned enqueue."""
+    lock = main_module.read_lock(lock_file)
+    if lock is not None and lock["kind"] == "starting" and now() - lock["mtime"] >= STARTING_GRACE_S:
+        main_module._remove_lock_if_unchanged(lock_file, lock["raw"])
+    return main_module.acquire_lock("nightly", lock_file, trigger="nightly", take_starting=False)
 
 
 def _release_lock(main_module, lock_file=LOCK_FILE):

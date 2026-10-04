@@ -1637,16 +1637,17 @@ def write_lock(role, lock_file=LOCK_FILE, trigger=None):
     _write_lock_file(lock_file, _lock_data(role, trigger))
 
 
-def acquire_lock(role, lock_file=LOCK_FILE, trigger=None):
+def acquire_lock(role, lock_file=LOCK_FILE, trigger=None, take_starting=True):
     """
-    يأخذ القفل: ينشئه حصرياً إن لم يوجد، أو يحل محل 'STARTING' (إدراج لوحة التحكم) أو قفل هذه العملية (التشغيل
-    الليلي أثناء الإدراج). True إذا صار القفل لهذه العملية، False إذا كان لعملية أخرى. أخطاء الكتابة تُرفع.
+    يأخذ القفل: ينشئه حصرياً إن لم يوجد، أو يحل محل قفل هذه العملية (التشغيل الليلي أثناء الإدراج) أو 'STARTING'
+    (إدراج لوحة التحكم يسلّم قفله لعامله؛ take_starting=False للتشغيل الليلي: STARTING تشغيلٌ آخر بدأ للتو).
+    True إذا صار القفل لهذه العملية، False إذا كان لعملية أخرى. أخطاء الكتابة تُرفع.
     """
     data = _lock_data(role, trigger)
     lock = read_lock(lock_file)
     if lock is None:
         return _create_lock_file(lock_file, data)
-    if lock["kind"] == "starting" or lock.get("pid") == os.getpid():
+    if (take_starting and lock["kind"] == "starting") or lock.get("pid") == os.getpid():
         _write_lock_file(lock_file, data)
         return True
     return False
