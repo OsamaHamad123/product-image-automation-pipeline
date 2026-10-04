@@ -75,6 +75,58 @@ def test_anything_but_a_date_is_refused(nightly_dir, date):
     assert code == 400 and body["status"] == "error" and "lines" not in body
 
 
+
+NIGHTLY_LOG_HARNESS = r"""<?php
+namespace App\Http\Controllers {
+    abstract class Controller {}
+    class SettingsController { public static function secretValues() { return []; } }
+}
+namespace Illuminate\Http {
+    class Request {
+        public $q;
+        public function __construct($q) { $this->q = $q; }
+        public function query($k, $d = null) { return array_key_exists($k, $this->q) ? $this->q[$k] : $d; }
+    }
+}
+namespace {
+    // like Laravel's HandleExceptions: a PHP warning ("Array to string conversion") becomes an exception (HTTP 500)
+    set_error_handler(function ($no, $str) { throw new ErrorException($str, 0, $no); });
+    class FakeResponse {
+        public $code;
+        public function __construct($body, $code) { $this->code = $code; }
+        public function header($k, $v) { return $this; }
+    }
+    class FakeFactory { public function json($b, $c = 200, $h = [], $o = 0) { return new FakeResponse($b, $c); } }
+    function response() { return new FakeFactory(); }
+    function base_path($p = '') { return getenv('HARNESS_ROOT') . '/dashboard' . ($p !== '' ? '/' . $p : ''); }
+    require getenv('HEALTH_CONTROLLER');
+    $out = [];
+    foreach ([['date' => ['x']], ['date' => ['2026-10-01']], ['date' => '2026-10-01'], []] as $q) {
+        try {
+            $out[] = (new App\Http\Controllers\HealthController())->nightlyLog(new Illuminate\Http\Request($q))->code;
+        } catch (\Throwable $e) {
+            $out[] = 500;
+        }
+    }
+    echo json_encode($out);
+}
+"""
+
+
+@pytest.mark.skipif(PHP is None, reason="php is not installed")
+def test_a_date_array_is_a_bad_request_not_a_server_error(nightly_dir, tmp_path):
+    """Review fix P7: ?date[]=x reached (string) $request->query('date') as an array: "Array to string conversion",
+    which Laravel turns into a 500. It is a 400 like any other date that is not a date."""
+    (tmp_path / "dashboard").mkdir()
+    script = tmp_path / "nightly_log.php"
+    script.write_text(NIGHTLY_LOG_HARNESS, encoding="utf-8")
+    env = dict(os.environ, HARNESS_ROOT=str(tmp_path), HEALTH_CONTROLLER=str(HEALTH_PHP))
+    result = subprocess.run([PHP, str(script)], capture_output=True, text=True, timeout=60, encoding="utf-8", env=env)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(result.stdout) == [400, 400, 200, 200]
+    code, body = _payload(nightly_dir, ["2026-10-01"])
+    assert code == 400 and "lines" not in body
+
 @pytest.mark.skipif(PHP is None or not hasattr(os, "symlink"), reason="needs php and symlinks")
 def test_a_symlink_out_of_the_folder_is_refused(nightly_dir, tmp_path):
     os.symlink(tmp_path / "secret.log", nightly_dir / "nightly_2026-10-03.log")

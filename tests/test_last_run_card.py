@@ -70,7 +70,10 @@ def test_last_run_card_texts():
                "report_json": {"reason_text": "تشغيل آخر يعمل الآن"}}
     budget = {"run_trigger": "dashboard", "started_at": None, "outcome": "stopped", "stop_reason": "BUDGET_REACHED",
               "ready_for_review": 0, "pending_left": 40}
-    out = _cards([done, outage, skipped, budget, None])
+    handed = {"run_trigger": "nightly", "started_at": "2026-10-03 02:00:05", "outcome": "handed_over", "attempts": 2,
+              "ready_for_review": 4, "pending_left": 0,
+              "report_json": {"reason_text": "توقف على انقطاع، وأثناء انتظار إعادة المحاولة بدأ تشغيل آخر وتولى إكمال الطابور"}}
+    out = _cards([done, outage, skipped, budget, None, handed])
     assert out[0] == {"title": "التشغيل الليلي: خلص", "tone": "success", "when": "2026-10-03 02:00",
                       "summary": "بانتظار المراجعة 90 · ما انلقت 20 · فشل 8"}
     assert out[1]["title"] == "التشغيل الليلي: انقطاع (قاعدة البيانات لا ترد)" and out[1]["tone"] == "danger"
@@ -80,6 +83,8 @@ def test_last_run_card_texts():
     assert out[3]["title"] == "تشغيل من اللوحة: وقف قبل ما يخلص الطابور (BUDGET_REACHED)"
     assert out[3]["summary"] == "بانتظار المراجعة 0 · بقي بالانتظار 40" and out[3]["when"] == ""
     assert out[4] is None
+    assert out[5]["title"].startswith("التشغيل الليلي: سلّم الطابور لتشغيل تاني بعد انقطاع (توقف على انقطاع")
+    assert out[5]["tone"] == "warning" and out[5]["summary"] == "بانتظار المراجعة 4"      # the hand-over is no re-run
 
 
 @pytest.mark.skipif(PHP is None, reason="php is not installed")

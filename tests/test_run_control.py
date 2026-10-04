@@ -11,6 +11,7 @@ bridge wiring tests are offline with recorders.
 """
 
 import base64
+import datetime
 import json
 import os
 
@@ -454,6 +455,43 @@ def test_worker_stops_between_products(worker, monkeypatch):
     assert rec["run_stats"] and set(rec["run_stats"]) == {"run-w"}  # progress from this run's rows only
 
 
+
+def test_the_worker_stops_taking_rows_at_its_time_limit(worker, monkeypatch):
+    """Review fix C4: the nightly passes a deadline (Task Scheduler's limit minus a margin); after it the worker
+    claims no new row, finishes the products in progress and stops (time_limit, exit 3), so the night is reported
+    before Task Scheduler kills the process."""
+    import time as time_mod
+
+    import run_report
+
+    main, local_cache_db, rec = worker
+    states = []
+    monkeypatch.setattr(local_cache_db, "update_automation_state",
+                        lambda status=None, **kw: states.append(dict(kw, status=status)) or True)
+    real_time = time_mod.time
+    jump = [0.0]
+    monkeypatch.setattr(time_mod, "time", lambda: real_time() + jump[0])
+    deadline = real_time() + 3600
+
+    def fetch(worker_id):
+        rec["claims"].append(worker_id)
+        jump[0] = 3600 + 1                       # the first product takes the night past the deadline
+        return rec["tasks"].pop(0)
+
+    monkeypatch.setattr(local_cache_db, "fetch_next_task", fetch)
+
+    main.run_worker_mode(trigger="nightly", report=False, deadline_ts=deadline)
+
+    assert len(rec["claims"]) == 1 and rec["worked"] == [100] and len(rec["tasks"]) == 5
+    assert main.LAST_WORKER["stop_reason"] == "time_limit" and run_report.exit_code("time_limit") == 3
+    assert "حده الزمني" in run_report.reason_text("time_limit")
+    assert states[-1]["notice"].startswith("TIME_LIMIT: ") and states[-1]["stop_requested"] == 0
+
+    # a deadline already past: no row is claimed at all
+    monkeypatch.setattr(local_cache_db, "fetch_next_task", lambda worker_id: pytest.fail("no row after the deadline"))
+    main.run_worker_mode(trigger="nightly", report=False, deadline_ts=real_time() - 1)
+    assert main.LAST_WORKER["stop_reason"] == "time_limit"
+
 def test_a_stop_request_arriving_as_the_worker_finishes_does_not_outlive_the_run(worker, monkeypatch):
     """Review fix: the queue ran empty just as a stop was recorded (e.g. PHP could not kill the worker). The final
     state write clears the request, so it cannot stop the next worker started by hand before any product."""
@@ -509,7 +547,8 @@ def test_bridge_stop_contract_against_the_database(db, bridge, capsys):
     assert code == 0 and out["status"] == "success" and out["op"] == "stop"
     assert out["released"] == 1 and out["stop_requested"] is False and out["state"] == "curation_pending"
     assert out["queue"]["total"] == 5
-    assert out["message"].startswith("تم إيقاف التشغيل. أُعيد 1 صف كان قيد المعالجة إلى الانتظار")
+    assert out["message"].startswith("تم إيقاف التشغيل: لم يتوقف العامل خلال 90 ثانية فأُنهي")
+    assert "أُعيد 1 صف كان قيد المعالجة إلى الانتظار" in out["message"]
     assert "لم يُحذف أي صف: 1 منتج بانتظار المراجعة، 2 صف في الانتظار، 1 معتمد، 1 فاشل." in out["message"]
     assert len(_queue(db)) == 5 and _review_work_counts(db)["curation_candidates"] == 2
 
@@ -530,11 +569,15 @@ def test_bridge_stop_contract_against_the_database(db, bridge, capsys):
 @pytest.mark.parametrize("worker, expected", [
     ("starting", "سُجل طلب الإيقاف: التشغيل ما زال يقرأ الشيت"),
     ("running", "سُجل طلب الإيقاف: سيتوقف العامل بعد إنهاء المنتجات الجارية"),
-    ("killed", "تم إيقاف التشغيل. أُعيد 2 صف"),
+    # review fix C5: a live worker is asked to stop and waited for; it is killed only when it does not stop in time
+    ("exited", "تم إيقاف التشغيل: أنهى العامل المنتجات الجارية ثم توقف وكتب تقرير التشغيل"),
+    ("killed", "تم إيقاف التشغيل: لم يتوقف العامل خلال 90 ثانية فأُنهي، وكُتب تقرير «توقف» للتشغيل. أُعيد 2 صف"),
     ("none", "لم يكن هناك تشغيل نشط. أُعيد 2 صف عالق"),
 ])
-def test_bridge_stop_messages(offline, bridge, monkeypatch, worker, expected):
+def test_bridge_stop_messages(offline, bridge, monkeypatch, tmp_path, worker, expected):
     import local_cache_db
+
+    monkeypatch.chdir(tmp_path)               # no lock here: a killed worker's report has nothing to read
 
     calls = []
     queue = {"total": 9, "pending": 4, "processing": 0, "ready_for_review": 3, "completed": 1, "failed": 1}
@@ -548,12 +591,15 @@ def test_bridge_stop_messages(offline, bridge, monkeypatch, worker, expected):
 
 @pytest.mark.parametrize("worker, stop_requested, expected", [
     ("none", False, None),
-    ("killed", False, "وأُنهي العامل الذي كان ما زال يعمل."),
+    ("exited", False, "وتوقف العامل الذي كان ما زال يعمل بعد إنهاء المنتجات الجارية، وكتب تقرير التشغيل."),
+    ("killed", False, "وأُنهي العامل الذي لم يتوقف خلال 90 ثانية، وكُتب تقرير «توقف» للتشغيل."),
     ("starting", True, "وسُجل طلب إيقاف للتشغيل الذي كان يقرأ الشيت"),
     ("running", True, "وسُجل طلب إيقاف للعامل الذي تعذر إنهاؤه"),       # PHP could not kill it
 ])
-def test_bridge_reset_messages(offline, bridge, monkeypatch, worker, stop_requested, expected):
+def test_bridge_reset_messages(offline, bridge, monkeypatch, tmp_path, worker, stop_requested, expected):
     import local_cache_db
+
+    monkeypatch.chdir(tmp_path)
 
     calls = []
     queue = {"total": 3, "pending": 1, "processing": 0, "ready_for_review": 1, "completed": 1, "failed": 0}
@@ -561,11 +607,54 @@ def test_bridge_reset_messages(offline, bridge, monkeypatch, worker, stop_reques
                         {"released": 1, "stop_requested": worker_active, "status": "curation_pending", "queue": queue})
     out = bridge.action_run_control({"op": "reset", "worker": worker})
     assert calls == [stop_requested] and out["stop_requested"] is stop_requested
-    assert out["message"].startswith("تم إصلاح حالة التشغيل: حُذف ملف القفل")
+    # a worker that is still alive keeps its lock (the dashboard no longer removes it: a second worker would start)
+    lock = "بقي ملف القفل لأن العامل ما زال يعمل" if worker == "running" else "حُذف ملف القفل"
+    assert out["message"].startswith(f"تم إصلاح حالة التشغيل: {lock}")
     assert out["message"].endswith("لم يُحذف أي صف: 1 منتج بانتظار المراجعة، 1 صف في الانتظار، 1 معتمد، 0 فاشل.")
     if expected:
         assert expected in out["message"]
 
+
+
+@pytest.mark.parametrize("op", ["stop", "reset"])
+def test_a_killed_worker_gets_a_stopped_report_from_its_lock(offline, bridge, monkeypatch, tmp_path, op):
+    """Review fix C5: a worker the dashboard had to kill never ran its finally (nor the nightly its report): no
+    report, no run_history row, the card showed the previous run. run_control writes the 'stopped' report from the
+    lock (who started the run and when, the run_id and worker_id the worker recorded with its heartbeat)."""
+    import local_cache_db
+    import main
+
+    monkeypatch.chdir(tmp_path)
+    os.makedirs("temp", exist_ok=True)
+    with open(main.LOCK_FILE, "w", encoding="utf-8") as fh:
+        json.dump({"pid": 4242, "role": "nightly", "trigger": "nightly", "run_id": "run-k", "worker_id": "host:9",
+                   "started_ts": 1_790_000_000, "heartbeat_ts": 1_790_000_100}, fh)
+    queue = {"total": 3, "pending": 2, "processing": 0, "ready_for_review": 1, "completed": 0, "failed": 0}
+    result = {"released": 1, "stop_requested": False, "status": "curation_pending", "queue": queue}
+    monkeypatch.setattr(local_cache_db, "stop_run", lambda worker_active=False: result)
+    monkeypatch.setattr(local_cache_db, "reset_run", lambda worker_active=False: result)
+    counted = []
+    monkeypatch.setattr(local_cache_db, "run_outcome_counts", lambda **kw: counted.append(kw) or {
+        "enqueued": 3, "searched": 1, "auto_published": 0, "ready_for_review": 1, "not_found": 0, "failed": 0,
+        "provider_down": 0, "pending_left": 2})
+    monkeypatch.setattr(local_cache_db, "save_run_history", lambda entry: 31)
+
+    out = bridge.action_run_control({"op": op, "worker": "killed"})
+
+    assert out["status"] == "success" and out["history_id"] == 31
+    with open(os.path.join("temp", "nightly", "last_report.json"), encoding="utf-8") as fh:
+        report = json.load(fh)
+    assert (report["trigger"], report["outcome"], report["exit_code"], report["stop_reason"]) == \
+        ("nightly", "stopped", 3, "stopped")
+    assert report["run_ids"] == ["run-k"] and counted[0]["worker_id"] == "host:9"
+    assert report["counts"]["pending_left"] == 2 and report["notices"][0].startswith("STOPPED: ")
+    assert report["started_at"] == datetime.datetime.fromtimestamp(1_790_000_000).isoformat(timespec="seconds")
+
+    # a worker that stopped by itself wrote its own report; no run, no report
+    os.remove(os.path.join("temp", "nightly", "last_report.json"))
+    for worker in ("exited", "none"):
+        assert "history_id" not in bridge.action_run_control({"op": op, "worker": worker})
+    assert not os.path.exists(os.path.join("temp", "nightly", "last_report.json"))
 
 def test_bridge_rejects_unknown_ops_and_reports_database_errors(offline, bridge, monkeypatch, capsys):
     import local_cache_db

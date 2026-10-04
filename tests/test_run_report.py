@@ -91,7 +91,8 @@ def test_worker_command_line_exits_2_and_writes_the_report_when_the_database_is_
 
 @pytest.mark.parametrize("reason, outcome, code", [
     (None, "done", 0), ("", "done", 0), ("another_worker", "skipped", 0),
-    ("db_unavailable", "outage", 2), ("sheets_unavailable", "outage", 2), ("sheet_not_found", "outage", 2),
+    ("db_unavailable", "outage", 2), ("sheets_unavailable", "outage", 2),
+    ("sheet_not_found", "failed", 1),         # review fix C3: not found / not shared is a setting, not an outage
     ("provider_down", "outage", 2),
     ("sheet_config", "failed", 1), ("enqueue_failed", "failed", 1), ("worker_error", "failed", 1),
     ("stopped", "stopped", 3), ("BUDGET_REACHED", "stopped", 3), ("SERPER_CREDIT", "stopped", 3),
@@ -175,6 +176,104 @@ def test_a_worker_run_is_written_to_run_history_and_last_report(db, tmp_path):
     assert saved["telegram_sent"] is False
 
 
+
+OLD_ROWS = tuple(range(941001, 941041))
+
+
+@pytest.fixture
+def old_run(mariadb_or_skip):
+    """40 queue rows of an earlier, finished run 'p4ops-old' (20 ready for review, 20 not found)."""
+    db = mariadb_or_skip
+
+    def wipe():
+        _sql(db, "DELETE FROM automation_queue WHERE `row_number` BETWEEN %s AND %s", (OLD_ROWS[0], OLD_ROWS[-1] + 10))
+        _sql(db, "DELETE FROM run_history WHERE notices LIKE %s", ("%p4ops-c8%",))
+
+    wipe()
+    for i, row in enumerate(OLD_ROWS):
+        _queue_row(db, row, "ready_for_review" if i < 20 else "failed", code=None if i < 20 else "NO_RESULTS",
+                   run_id="p4ops-old", worker="oldhost:1#c1")
+    yield db
+    wipe()
+
+
+def _idle_worker(monkeypatch, tmp_path, run_id):
+    """run_worker_mode over an empty queue, automation_state.run_id = run_id; the report goes to the test database."""
+    import google_sheets
+    import local_cache_db
+    import main
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(main, "load_run_config", lambda: None)
+    monkeypatch.setattr(main, "check_verifier", lambda: "VERIFIER_DOWN: p4ops-c8")
+    monkeypatch.setattr(local_cache_db, "resume_automation", lambda: True)
+    monkeypatch.setattr(local_cache_db, "get_automation_state", lambda: {"stop_requested": 0, "pause_requested": 0,
+                                                                       "run_id": run_id})
+    monkeypatch.setattr(local_cache_db, "update_automation_state", lambda *a, **k: True)
+    monkeypatch.setattr(local_cache_db, "fetch_next_task", lambda worker_id: None)
+    monkeypatch.setattr(local_cache_db, "count_open_tasks", lambda: 0)
+    monkeypatch.setattr(local_cache_db, "park_verifier_rechecks", lambda: 0)
+    monkeypatch.setattr(google_sheets, "get_sheets_client", lambda: object())
+    monkeypatch.setattr(google_sheets, "open_worksheet", lambda client, name: object())
+    monkeypatch.setattr(google_sheets, "find_link_column", lambda ws: 7)
+    monkeypatch.setattr(google_sheets, "get_brand_mappings", lambda *a: {})
+    monkeypatch.setattr(google_sheets, "init_async_queue", lambda *a: None)
+    monkeypatch.setattr(google_sheets, "stop_async_queue", lambda: None)
+    return main
+
+
+def test_a_manual_worker_does_not_report_the_previous_runs_counts(old_run, monkeypatch, tmp_path):
+    """Review fix C8: automation_state.run_id still named the last run, so a manual `main.py --worker` that processed
+    nothing reported enqueued 40, ready 20, not_found 20 (run_outcome_counts(run_ids=[that id])). It now counts by
+    worker_id unless its own enqueue created the run."""
+    main = _idle_worker(monkeypatch, tmp_path, "p4ops-old")
+    main.run_worker_mode(trigger="manual")
+    report = json.loads((tmp_path / "temp" / "nightly" / "last_report.json").read_text(encoding="utf-8"))
+    assert report["run_ids"] == [] and report["counts"]["enqueued"] == 0
+    assert report["counts"]["ready_for_review"] == 0 and report["counts"]["not_found"] == 0
+
+
+def test_a_worker_after_its_enqueue_reports_the_run_the_enqueue_created(old_run, monkeypatch, tmp_path):
+    for row in range(OLD_ROWS[-1] + 1, OLD_ROWS[-1] + 4):
+        _queue_row(old_run, row, "pending", run_id="p4ops-new", worker=None)
+    main = _idle_worker(monkeypatch, tmp_path, "p4ops-new")
+    main._write_run_handoff("p4ops-new")              # what run_enqueue_mode leaves after begin_run
+    main.run_worker_mode(trigger="dashboard")
+    report = json.loads((tmp_path / "temp" / "nightly" / "last_report.json").read_text(encoding="utf-8"))
+    assert report["run_ids"] == ["p4ops-new"] and report["counts"]["enqueued"] == 3
+    assert report["counts"]["pending_left"] == 3
+    assert not os.path.exists(os.path.join("temp", "run_handoff.json")), "the hand-off is used once"
+    # a stale hand-off (another run's id) is not taken either
+    main._write_run_handoff("p4ops-other")
+    main.run_worker_mode(trigger="manual")
+    report = json.loads((tmp_path / "temp" / "nightly" / "last_report.json").read_text(encoding="utf-8"))
+    assert report["run_ids"] == [] and report["counts"]["enqueued"] == 0
+
+
+def test_the_enqueue_hands_its_run_over(offline, monkeypatch, tmp_path):
+    import config
+    import google_sheets
+    import local_cache_db
+    import main
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(config, "ROW_FILTER", "")
+    monkeypatch.setattr(config, "BRAND_FILTER", "")
+    monkeypatch.setattr(main, "load_run_config", lambda: None)
+    monkeypatch.setattr(google_sheets, "clear_cache", lambda: None)
+    monkeypatch.setattr(google_sheets, "get_sheets_client", lambda: object())
+    monkeypatch.setattr(google_sheets, "open_worksheet", lambda c, n: object())
+    monkeypatch.setattr(google_sheets, "get_products", lambda ws: ([], 9))
+    monkeypatch.setattr(main, "plan_enqueue", lambda *a, **k: ([], {"skipped_final": 0, "relink": 0, "in_flight": 0,
+                                                                    "edited": 0, "cleared": 0, "missing": 0,
+                                                                    "index_changed": 0}))
+    monkeypatch.setattr(local_cache_db, "add_many_to_queue", lambda rows, **k: None)
+    monkeypatch.setattr(local_cache_db, "get_queue_statistics", lambda: None)
+    monkeypatch.setattr(local_cache_db, "new_run_id", lambda: "p4ops-run-h")
+    monkeypatch.setattr(local_cache_db, "begin_run", lambda run_id: 4)
+    main.run_enqueue_mode()
+    assert main._claim_run_handoff("p4ops-run-h") is True and main._claim_run_handoff("p4ops-run-h") is False
+
 # ---------------------------------------------------------------------------
 # Telegram: only when configured, Arabic, escaped
 # ---------------------------------------------------------------------------
@@ -224,6 +323,27 @@ def test_telegram_is_sent_only_when_configured(monkeypatch, tmp_path):
     assert "المدة 1 س 12 د" in text and "بقي في الانتظار 2" in text
 
 
+def test_another_run_taking_over_after_an_outage_is_not_a_night_that_did_not_start():
+    """Review fix C7: attempts [db_unavailable, another_worker] gave 'skipped' («لم يبدأ»), exit 0 and no counts."""
+    import run_report
+
+    attempts = [{"stop_reason": "db_unavailable", "run_id": "r1", "worker_id": "host:1"},
+                {"stop_reason": "another_worker"}]
+    report = run_report.build_report("nightly", attempts, 1_790_000_000, 1_790_000_900, db=FakeDb(COUNTS),
+                                     sheets=object())
+    assert (report["outcome"], report["exit_code"], report["stop_reason"]) == ("handed_over", 0, "another_worker")
+    assert report["attempts"] == 2 and report["attempt_reasons"] == ["db_unavailable"]
+    assert report["run_ids"] == ["r1"] and report["counts"] == COUNTS
+    assert report["reason_text"] == run_report.HANDED_OVER_TEXT
+    text = run_report.telegram_text(report)
+    assert "↪️ سلّم الطابور لتشغيل آخر" in text and "لم يبدأ" not in text and "بانتظار المراجعة 90" in text
+    assert "المحاولات" not in text                     # one run, then the hand-over: nothing was re-run
+    assert run_report.history_entry(report)["outcome"] == "handed_over"
+    # a night that found another run from the start still did not start
+    alone = run_report.build_report("nightly", [{"stop_reason": "another_worker"}], 1, 2, db=FakeDb(COUNTS))
+    assert (alone["outcome"], alone["exit_code"], alone["counts"]) == ("skipped", 0, None)
+
+
 def test_telegram_text_escapes_notices_and_says_when_the_database_is_down():
     import run_report
 
@@ -233,6 +353,34 @@ def test_telegram_text_escapes_notices_and_says_when_the_database_is_down():
     assert "&lt;b&gt;x&lt;/b&gt; &amp; y" in text and "<b>x</b>" not in text
     assert "🔌 انقطاع" in text and "قاعدة البيانات لا ترد" in text and "الأرقام غير متاحة" in text
 
+
+
+def test_report_texts_never_carry_secrets(monkeypatch, tmp_path):
+    """Review fix P6: worker notices and exception texts (run_nightly's traceback.format_exc(limit=1)) went to
+    Telegram, run_history and last_report.json unredacted. They pass through the log redaction now."""
+    import config
+    import run_report
+
+    monkeypatch.setattr(config, "SERPER_API_KEY", "SECRET-SERPER-123456")
+    monkeypatch.setattr(config, "TELEGRAM_BOT_TOKEN", "777:SECRET-BOT-TOKEN")
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "777:SECRET-BOT-TOKEN")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "42")
+    monkeypatch.setenv("DB_PASSWORD", "SECRET-DB-PASS")
+    attempts = [{"stop_reason": "worker_error", "message": "Traceback: requests.get('https://google.serper.dev/search"
+                 "?api_key=SECRET-SERPER-123456') failed"},
+                {"stop_reason": "worker_error", "notice": "WORKER_ERROR: OperationalError(1045, \"Access denied "
+                 "(using password: SECRET-DB-PASS)\") | GEMINI_DOWN: https://x/v1?key=AIzaSECRETVALUE123 refused"}]
+    db = FakeDb(COUNTS)
+    sent = []
+    path = tmp_path / "last_report.json"
+    report = run_report.build_report("nightly", attempts, 1_790_000_000, 1_790_000_060, db=db, sheets=object())
+    report["notices"].append("NO_RETRY: token 777:SECRET-BOT-TOKEN")              # added by the caller
+    run_report.publish(report, db=db, path=str(path), sender=lambda text: sent.append(text) or True)
+    texts = [path.read_text(encoding="utf-8"), json.dumps(db.saved, ensure_ascii=False, default=str), sent[0]]
+    for text in texts:
+        for secret in ("SECRET-SERPER-123456", "SECRET-BOT-TOKEN", "SECRET-DB-PASS", "AIzaSECRETVALUE123"):
+            assert secret not in text, (secret, text[:300])
+    assert "[REDACTED]" in texts[0] and "WORKER_ERROR: OperationalError" in texts[0]
 
 def test_a_report_never_breaks_when_the_database_is_down(tmp_path):
     import run_report
@@ -296,6 +444,81 @@ def test_send_telegram_alert_reports_a_refused_message(monkeypatch, caplog):
 # The worker reports every dashboard / manual run; the nightly reports once per night
 # ---------------------------------------------------------------------------
 
+def _crashing_worker(monkeypatch, tmp_path, raise_in):
+    """run_worker_mode offline, with `raise_in` (init_async_queue | fetch_next_task) raising the given exception."""
+    import config
+    import google_sheets
+    import local_cache_db
+    import main
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(config, "DAILY_BUDGET_USD", 0, raising=False)
+    monkeypatch.setattr(main, "load_run_config", lambda: None)
+    monkeypatch.setattr(main, "check_verifier", lambda: "")
+    monkeypatch.setattr(main.time, "sleep", lambda s: None)
+    monkeypatch.setattr(local_cache_db, "resume_automation", lambda: True)
+    monkeypatch.setattr(local_cache_db, "get_automation_state", lambda: {"stop_requested": 0, "pause_requested": 0,
+                                                                       "run_id": None})
+    states, stops = [], []
+    monkeypatch.setattr(local_cache_db, "update_automation_state", lambda *a, **k: states.append(k) or True)
+    monkeypatch.setattr(local_cache_db, "stop_run", lambda worker_active=False: stops.append(worker_active))
+    monkeypatch.setattr(local_cache_db, "get_ready_for_review_count", lambda: 0)
+    monkeypatch.setattr(local_cache_db, "get_queue_statistics", lambda: {"total": 1, "completed": 0, "failed": 0,
+                                                                         "ready_for_review": 0})
+    monkeypatch.setattr(local_cache_db, "count_open_tasks", lambda: 1)
+    monkeypatch.setattr(local_cache_db, "park_verifier_rechecks", lambda: 0)
+    monkeypatch.setattr(local_cache_db, "requeue_verifier_down", lambda run_id: 0)
+    monkeypatch.setattr(google_sheets, "get_sheets_client", lambda: object())
+    monkeypatch.setattr(google_sheets, "open_worksheet", lambda client, name: object())
+    monkeypatch.setattr(google_sheets, "find_link_column", lambda ws: 7)
+    monkeypatch.setattr(google_sheets, "get_brand_mappings", lambda *a: {})
+    monkeypatch.setattr(google_sheets, "stop_async_queue", lambda: None)
+    monkeypatch.setattr(google_sheets, "init_async_queue", lambda *a: None)
+
+    def boom(*args, **kwargs):
+        raise raise_in[1]
+
+    target = google_sheets if raise_in[0] == "init_async_queue" else local_cache_db
+    monkeypatch.setattr(target, raise_in[0], boom)
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123:test")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "42")
+    sent = []
+    monkeypatch.setattr(config, "send_telegram_alert", lambda text: sent.append(text) or True)
+    return main, states, stops, sent
+
+
+def test_a_crashed_dashboard_worker_is_reported_as_failed_not_done(offline, monkeypatch, tmp_path):
+    """Review fix C6: run_worker_mode's try had only a finally, so a worker that crashed (here init_async_queue raising
+    RuntimeError) kept stop_reason None: last_report.json said done, exit 0, and Telegram said «اكتمل»."""
+    main, states, _, sent = _crashing_worker(monkeypatch, tmp_path,
+                                            ("init_async_queue", RuntimeError("queue thread ?key=SECRET-Q-123456")))
+
+    with pytest.raises(RuntimeError):
+        main.run_worker_mode(trigger="dashboard")
+
+    assert main.LAST_WORKER["stop_reason"] == "worker_error"
+    report = json.loads((tmp_path / "temp" / "nightly" / "last_report.json").read_text(encoding="utf-8"))
+    assert (report["outcome"], report["exit_code"], report["trigger"]) == ("failed", 1, "dashboard")
+    assert "RuntimeError: queue thread" in report["notices"][0] and report["notices"][0].startswith("WORKER_ERROR: ")
+    (text,) = sent
+    assert "❌ فشل" in text and "اكتمل" not in text
+    assert states[-1]["status"] == "error" and states[-1]["notice"].startswith("WORKER_ERROR: ")
+    assert not (tmp_path / "temp" / "pipeline.lock").exists()
+    # review fix P6: the exception text is redacted in the dashboard notice, the report and Telegram
+    assert "SECRET-Q-123456" not in states[-1]["notice"] + json.dumps(report, ensure_ascii=False) + text
+
+
+def test_ctrl_c_stops_a_manual_worker_as_stopped(offline, monkeypatch, tmp_path):
+    main, _, stops, sent = _crashing_worker(monkeypatch, tmp_path, ("fetch_next_task", KeyboardInterrupt()))
+
+    with pytest.raises(KeyboardInterrupt):
+        main.run_worker_mode(trigger="manual")
+
+    assert main.LAST_WORKER["stop_reason"] == "stopped" and stops == [False]   # processing rows back to pending
+    report = json.loads((tmp_path / "temp" / "nightly" / "last_report.json").read_text(encoding="utf-8"))
+    assert (report["outcome"], report["exit_code"]) == ("stopped", 3)
+
+
 def test_the_worker_reports_its_run_unless_the_nightly_does(offline, monkeypatch, tmp_path):
     import google_sheets
     import local_cache_db
@@ -311,10 +534,12 @@ def test_the_worker_reports_its_run_unless_the_nightly_does(offline, monkeypatch
     monkeypatch.setattr(google_sheets, "get_sheets_client", lambda: None)
     reports = []
     monkeypatch.setattr(run_report, "report_worker_run", lambda info, trigger: reports.append((info, trigger)))
+    main._write_run_handoff("r1")               # the dashboard's `main.py --enqueue` created run r1
 
     main.run_worker_mode(trigger="dashboard")
     ((info, trigger),) = reports
-    assert trigger == "dashboard" and info["stop_reason"] == "sheets_unavailable" and info["run_id"] == "r1"
+    # no credentials (get_sheets_client None) is a setting since review fix C3 (it was sheets_unavailable, an outage)
+    assert trigger == "dashboard" and info["stop_reason"] == "sheet_config" and info["run_id"] == "r1"
 
     main.run_worker_mode(trigger="nightly", report=False)
     assert len(reports) == 1
@@ -322,13 +547,21 @@ def test_the_worker_reports_its_run_unless_the_nightly_does(offline, monkeypatch
 
 @pytest.mark.parametrize("failure, reason, code, notice", [
     ("tab", "sheet_config", 1, "SHEET_CONFIG: التبويب 'Products' غير موجود"),
-    ("none", "sheet_not_found", 2, "SHEET_CONFIG: sheet not found: My Sheet"),
+    # review fix C3: open_worksheet returns None only for a sheet that is not found or not shared (a transient error
+    # raises SheetTransientError), so it is a failure (exit 1), not an outage retried for 75 minutes
+    ("none", "sheet_not_found", 1, "SHEET_CONFIG: sheet not found: My Sheet"),
+    ("no_credentials", "sheet_config", 1, "SHEET_CONFIG: تعذر تحميل بيانات اعتماد Google من الملف «missing.json» "
+                                          "(مفقود أو تالف)"),
     ("busy", "sheets_unavailable", 2, "SHEETS_UNAVAILABLE: 503 busy"),
+    ("transient", "sheets_unavailable", 2, "SHEETS_UNAVAILABLE: Google Sheets غير متاح مؤقتاً"),
+    ("bug", "worker_error", 1, "WORKER_ERROR: خطأ غير متوقع أوقف العامل (KeyError: 'link')؛ بقيت الصفوف المتبقية في "
+                               "الانتظار"),
 ])
 def test_a_sheet_the_worker_cannot_open_is_reported_with_its_reason(offline, monkeypatch, tmp_path, failure, reason,
                                                                     code, notice):
-    """A wrong tab is a setting (exit 1, no retry); a sheet Google does not open or answer is an outage the nightly
-    retries (exit 2). The report carries the detail the dashboard shows."""
+    """A wrong tab, missing credentials or a sheet that is not found / not shared is a setting (exit 1, no retry); only
+    a Google that does not answer is an outage the nightly retries (exit 2); any other error is a worker error (exit 1).
+    The report carries the detail the dashboard shows."""
     import config
     import google_sheets
     import local_cache_db
@@ -339,18 +572,24 @@ def test_a_sheet_the_worker_cannot_open_is_reported_with_its_reason(offline, mon
     monkeypatch.setattr(main, "load_run_config", lambda: None)
     monkeypatch.setattr(main, "check_verifier", lambda: "")
     monkeypatch.setattr(config, "SPREADSHEET_NAME_OR_URL", "My Sheet")
+    monkeypatch.setattr(config, "CREDENTIALS_FILE", "missing.json")
     monkeypatch.setattr(local_cache_db, "resume_automation", lambda: True)
     monkeypatch.setattr(local_cache_db, "get_automation_state", lambda: {"stop_requested": 0, "run_id": None})
     states = []
     monkeypatch.setattr(local_cache_db, "update_automation_state", lambda *a, **k: states.append(k) or True)
-    monkeypatch.setattr(google_sheets, "get_sheets_client", lambda: object())
+    monkeypatch.setattr(local_cache_db, "get_ready_for_review_count", lambda: 0)
+    monkeypatch.setattr(google_sheets, "get_sheets_client", lambda: None if failure == "no_credentials" else object())
 
     def open_worksheet(client, name):
         if failure == "tab":
             raise google_sheets.SheetConfigError("التبويب 'Products' غير موجود")
+        if failure == "transient":
+            raise google_sheets.SheetTransientError("Google Sheets غير متاح مؤقتاً")
         return None if failure == "none" else object()
 
     def find_link_column(ws):
+        if failure == "bug":
+            raise KeyError("link")
         raise ConnectionError("503 busy")
 
     monkeypatch.setattr(google_sheets, "open_worksheet", open_worksheet)
@@ -364,15 +603,28 @@ def test_a_sheet_the_worker_cannot_open_is_reported_with_its_reason(offline, mon
 
 @pytest.mark.parametrize("case, reason", [
     ("bad_row_filter", "enqueue_failed"),
-    ("no_client", "sheets_unavailable"),
+    # review fix C3: a missing / broken credentials file is a setting (gspread.service_account makes no network call)
+    ("no_client", "sheet_config"),
     ("no_worksheet", "sheet_not_found"),
     ("schema", "sheet_config"),
     ("google_503", "sheets_unavailable"),
+    ("transient", "sheets_unavailable"),
+    ("requests_timeout", "sheets_unavailable"),
+    ("requests_connection", "sheets_unavailable"),
+    # review fix C3: every other exception was "sheets_unavailable" and retried twice over 75 minutes
+    ("type_error", "enqueue_failed"),
+    ("key_error", "enqueue_failed"),
+    ("permission_error", "enqueue_failed"),
     ("db_down", "db_unavailable"),
     ("queue_bug", "enqueue_failed"),
 ])
 def test_an_enqueue_failure_says_whether_it_is_an_outage(offline, monkeypatch, tmp_path, case, reason):
-    """The nightly retries an enqueue that failed on an outage (main.LAST_ENQUEUE['reason']), not a setting."""
+    """The nightly retries an enqueue that failed on an outage (main.LAST_ENQUEUE['reason']), not a setting or a bug;
+    run_report.is_outage agrees."""
+    import requests
+
+    import run_report
+
     import config
     import google_sheets
     import local_cache_db
@@ -388,11 +640,18 @@ def test_an_enqueue_failure_says_whether_it_is_an_outage(offline, monkeypatch, t
     monkeypatch.setattr(google_sheets, "open_worksheet", lambda c, n: None if case == "no_worksheet" else object())
     monkeypatch.setattr(google_sheets, "get_brand_mappings", lambda *a: {})
 
+    errors = {"schema": google_sheets.SheetSchemaError("no product name column"),
+              "google_503": ConnectionError("503 Service Unavailable"),
+              "transient": google_sheets.SheetTransientError("Google Sheets غير متاح مؤقتاً"),
+              "requests_timeout": requests.exceptions.ReadTimeout("read timed out"),
+              "requests_connection": requests.exceptions.ConnectionError("connection reset"),
+              "type_error": TypeError("'NoneType' object is not subscriptable"),
+              "key_error": KeyError("product_name"),
+              "permission_error": PermissionError(13, "Permission denied", "credentials.json")}
+
     def products(ws):
-        if case == "schema":
-            raise google_sheets.SheetSchemaError("no product name column")
-        if case == "google_503":
-            raise ConnectionError("503 Service Unavailable")
+        if case in errors:
+            raise errors[case]
         return [{"row_number": 5, "product_name": "Laban Up 180ml", "brand": "Al Rawabi", "barcode": ""}], 9
 
     def add(*a, **k):
@@ -407,6 +666,7 @@ def test_an_enqueue_failure_says_whether_it_is_an_outage(offline, monkeypatch, t
         main.run_enqueue_mode()
 
     assert exc.value.code == 1 and main.LAST_ENQUEUE["reason"] == reason and main.LAST_ENQUEUE["message"]
+    assert run_report.is_outage(reason) is (reason in ("sheets_unavailable", "db_unavailable"))
 
 
 @pytest.mark.parametrize("argv, trigger", [

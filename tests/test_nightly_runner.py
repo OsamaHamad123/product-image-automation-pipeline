@@ -78,9 +78,10 @@ def nightly(offline, monkeypatch, tmp_path):
             lock = json.load(fh)
         rec["calls"].append(("enqueue", lock["pid"], lock["role"], config.ROW_FILTER, config.FORCE_OVERWRITE_IMAGES))
 
-    def fake_worker(trigger="manual", report=True):
+    def fake_worker(trigger="manual", report=True, deadline_ts=None):
         main.load_run_config()
         rec["calls"].append(("worker", config.AUTO_PUBLISH_ENABLED, trigger, report))
+        rec.setdefault("deadlines", []).append(deadline_ts)
         if rec["workers"]:
             main.LAST_WORKER.update(rec["workers"].pop(0))
         os.remove(runner.LOCK_FILE)           # the real worker removes its lock in its finally block
@@ -216,7 +217,8 @@ def test_a_database_that_does_not_answer_is_never_a_finished_night(nightly):
 
 @pytest.mark.parametrize("reason, retried, code", [
     ("sheets_unavailable", True, 2),
-    ("sheet_not_found", True, 2),
+    ("sheet_not_found", False, 1),        # review fix C3: not found / not shared does not fix itself by waiting
+    ("sheet_config", False, 1),           # e.g. a missing credentials file
     ("db_unavailable", True, 2),
     ("enqueue_failed", False, 1),
 ])
@@ -263,7 +265,113 @@ def test_a_worker_started_during_the_wait_ends_the_night(nightly, monkeypatch):
     assert runner.run(sleep=sleep) == 0
     assert rec["sleeps"] == [15 * 60] and [c[0] for c in rec["calls"]] == ["enqueue", "worker"]
     report = rec["reports"][-1]
-    assert report["outcome"] == "skipped" and report["attempt_reasons"] == ["provider_down"]
+    # review fix C7: this used to be 'skipped' («لم يبدأ», no counts) although attempt 1 had worked the queue
+    assert report["outcome"] == "handed_over" and report["exit_code"] == 0
+    assert report["attempts"] == 2 and report["attempt_reasons"] == ["provider_down"]
+    assert report["run_ids"] == ["run-1"] and report["counts"]["ready_for_review"] == 2
+    assert "تشغيل آخر" in report["reason_text"] and _last_report()["outcome"] == "handed_over"
+
+
+class Clock:
+    """A fake clock: runner.run's now(); its sleep() records the wait and moves the clock on."""
+
+    def __init__(self, rec, start=1_790_000_000.0):
+        self.rec, self.t, self.start = rec, start, start
+
+    def now(self):
+        return self.t
+
+    def sleep(self, seconds):
+        self.rec["sleeps"].append(seconds)
+        self.t += seconds
+
+    def hours(self):
+        return (self.t - self.start) / 3600
+
+
+def _timed_workers(main, runner, clock, plan):
+    """run_worker_mode stand-in: each call works plan[i] = (hours, stop_reason) on the fake clock."""
+    deadlines = []
+
+    def worker(trigger="manual", report=True, deadline_ts=None):
+        hours, reason = plan.pop(0)
+        deadlines.append(deadline_ts)
+        clock.t += hours * 3600
+        main.LAST_WORKER.update(stop_reason=reason, run_id=f"run-{len(deadlines)}", worker_id="host:1")
+        os.remove(runner.LOCK_FILE)
+
+    return worker, deadlines
+
+
+def test_the_night_stays_inside_task_schedulers_time_limit(nightly, monkeypatch):
+    """Review fix C4: attempt 1 worked 6.5 h and stopped on provider_down; the runner slept 15 min and started attempt
+    2, which Task Scheduler killed at its 8-hour ExecutionTimeLimit: no run_history row, no Telegram, last_report.json
+    and the card showed the previous night, the lock and processing rows left behind. The worker now gets a deadline
+    15 minutes before the limit, and a retry that cannot start 45 minutes before it is skipped."""
+    runner, main, _, rec = nightly
+    clock = Clock(rec)
+    worker, deadlines = _timed_workers(main, runner, clock, [(6.5, "provider_down"), (0.25, "provider_down")])
+    monkeypatch.setattr(main, "run_worker_mode", worker)
+
+    assert runner.run(sleep=clock.sleep, now=clock.now, max_hours=8) == 2
+
+    limit = clock.start + 8 * 3600
+    # retry 1 starts at 6.75 h (before 7.25 h): it runs, with the same deadline (7.75 h) as attempt 1
+    assert rec["sleeps"] == [15 * 60] and deadlines == [limit - 15 * 60] * 2
+    # retry 2 would start at 8 h: skipped, and the night is reported at 7 h, well before the limit
+    report = rec["reports"][-1]
+    assert report["attempts"] == 2 and report["outcome"] == "outage" and report["exit_code"] == 2
+    assert any(n.startswith("NO_RETRY: ") and "8 ساعات" in n for n in report["notices"])
+    assert clock.hours() == pytest.approx(7.0) and _last_report()["attempts"] == 2
+
+
+def test_a_retry_that_cannot_start_in_time_is_skipped(nightly, monkeypatch):
+    runner, main, _, rec = nightly
+    clock = Clock(rec)
+    worker, deadlines = _timed_workers(main, runner, clock, [(7.5, "db_unavailable")])
+    monkeypatch.setattr(main, "run_worker_mode", worker)
+    assert runner.run(sleep=clock.sleep, now=clock.now, max_hours=8) == 2
+    assert rec["sleeps"] == [] and len(deadlines) == 1
+    # a longer limit leaves room for both retries
+    clock = Clock(rec)
+    rec["sleeps"] = []
+    worker, deadlines = _timed_workers(main, runner, clock, [(7.5, "db_unavailable"), (1, "provider_down"), (1, None)])
+    monkeypatch.setattr(main, "run_worker_mode", worker)
+    assert runner.run(sleep=clock.sleep, now=clock.now, max_hours=12) == 0
+    assert rec["sleeps"] == [15 * 60, 60 * 60] and deadlines == [clock.start + 12 * 3600 - 15 * 60] * 3
+
+
+@pytest.mark.parametrize("argv, env, hours", [
+    ([], {}, 8.0),
+    (["--max-hours", "12"], {}, 12.0),
+    (["--max-hours=3"], {"NIGHTLY_MAX_HOURS": "5"}, 3.0),
+    ([], {"NIGHTLY_MAX_HOURS": "5"}, 5.0),
+    (["--max-hours", "abc"], {}, 8.0),
+    (["--max-hours", "0"], {}, 8.0),
+    (["--max-hours", "40"], {"NIGHTLY_MAX_HOURS": "6"}, 6.0),
+])
+def test_the_time_limit_comes_from_the_scheduled_task(argv, env, hours):
+    runner = _load_runner()
+    assert runner.max_hours_from(argv, env) == hours
+
+
+def test_a_dashboard_run_starting_between_the_check_and_the_lock_is_not_taken_over(nightly, monkeypatch):
+    """worker_busy saw no run, then the dashboard wrote STARTING before the nightly took the lock: the nightly hands
+    the night over instead of replacing the dashboard's lock (its enqueue and worker would then run twice)."""
+    runner, main, _, rec = nightly
+    real_busy = runner.worker_busy
+
+    def busy_then_starting(main_module, *a, **k):
+        answer = real_busy(main_module, *a, **k)
+        os.makedirs("temp", exist_ok=True)
+        with open(runner.LOCK_FILE, "w") as fh:
+            fh.write("STARTING")
+        return answer
+
+    monkeypatch.setattr(runner, "worker_busy", busy_then_starting)
+    assert runner.run() == 0
+    assert rec["calls"] == [] and open(runner.LOCK_FILE).read() == "STARTING"
+    assert rec["reports"][-1]["outcome"] == "skipped"
 
 
 def test_stale_starting_lock_does_not_block_the_run(nightly):
@@ -318,8 +426,9 @@ def test_main_logs_to_temp_nightly_and_restores_the_console(nightly, monkeypatch
     runner, _, _, _ = nightly
     monkeypatch.setattr(runner, "REPO_ROOT", str(tmp_path))
 
-    def fake_run():
+    def fake_run(**kwargs):
         print("worker output line")
+        assert kwargs == {"max_hours": 8.0}
         return 0
 
     monkeypatch.setattr(runner, "run", fake_run)
@@ -354,7 +463,7 @@ def test_old_logs_are_pruned(tmp_path):
 def test_runner_reuses_main_entry_points_and_writes_no_sheet():
     text = RUNNER.read_text(encoding="utf-8")
     assert "main_module.run_enqueue_mode()" in text
-    assert 'main_module.run_worker_mode(trigger="nightly", report=False)' in text
+    assert 'main_module.run_worker_mode(trigger="nightly", report=False, deadline_ts=deadline_ts)' in text
     assert '"AUTO_PUBLISH_ENABLED": False' in text and '"FORCE_OVERWRITE_IMAGES": False' in text
     for forbidden in ("google_sheets", "update_image_link", "update_cell", "subprocess", "AUTO_PUBLISH_ENABLED\": True"):
         assert forbidden not in text, forbidden
@@ -378,7 +487,9 @@ def test_scheduler_uses_the_venv_python_from_the_repository_folder():
     assert 'Join-Path $repoRoot "scripts\\run_nightly.py"' in text
     # both paths quoted for a repository folder with spaces; 'Start in' must stay unquoted
     assert '-Execute "`"$pythonPath`""' in text
-    assert '-Argument "-X utf8 `"$runnerPath`""' in text
+    # Task Scheduler's limit reaches the runner, which stays inside it (review fix C4)
+    assert '-Argument "-X utf8 `"$runnerPath`" --max-hours $MaxHours"' in text
+    assert "-ExecutionTimeLimit (New-TimeSpan -Hours $MaxHours)" in text
     assert "-WorkingDirectory $repoRoot" in text
     assert "Register-ScheduledTask" in text and "Unregister-ScheduledTask" in text
     assert "New-ScheduledTaskTrigger -Daily -At $at" in text

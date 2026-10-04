@@ -53,6 +53,25 @@ def test_launchers_stop_only_their_own_servers_and_never_the_worker(path):
     assert "$cmd -notlike '*main.py*'" in block and "$cmd -notlike '*run_nightly.py*'" in block
 
 
+
+@pytest.mark.parametrize("path", [SETUP, DESKTOP], ids=lambda p: p.name)
+def test_launchers_stop_only_this_repositorys_sync_worker_and_the_dashboard_port(path):
+    """Review fix P7: the filter stopped any `artisan serve` / `sync_worker.py` on the machine (another project's
+    server or sync worker included). A sync worker is stopped only when its command line or program is inside this
+    repository; a dashboard server only when it is this repository's or listens on port 8000, which the new server
+    takes. Windows PowerShell 5.1 syntax only."""
+    text = read(path)
+    block = text[text.index("$repoPath = (Resolve-Path $PSScriptRoot).Path"):]
+    block = block[:block.index("ForEach-Object { Stop-Process -Id $_.ProcessId")]
+    assert "$cmd.IndexOf($repoPath, [StringComparison]::OrdinalIgnoreCase) -ge 0" in block
+    assert "$exe.IndexOf($repoPath, [StringComparison]::OrdinalIgnoreCase) -ge 0" in block
+    assert "$exe = [string]$_.ExecutablePath" in block
+    assert "$sync = ($cmd -like '*sync_worker.py*') -and $ours" in block
+    assert "-and ($ours -or $cmd -like '*:8000*' -or $cmd -like '*--port=8000*')" in block
+    assert "($server -or $sync) -and" in block
+    for newer_syntax in ("&&", "||", "??", "?.", " ? "):
+        assert newer_syntax not in block, newer_syntax
+
 def test_setup_and_launch_keeps_the_dashboard_server_it_starts():
     text = read(SETUP)
     stop_old = text.index("Get-CimInstance Win32_Process -Filter \"Name = 'php.exe'")

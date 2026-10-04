@@ -9,10 +9,13 @@
 # النتيجة ورمز الخروج (exit code) لكل سبب توقف (stop_reason):
 #   done     0  الطابور انتهى (أو لم يكن فيه شيء)
 #   skipped  0  تشغيل آخر حي يحمل القفل، فلم يبدأ هذا التشغيل
-#   failed   1  خطأ يحتاج تدخلاً: إعداد الشيت، أو خطأ غير متوقع
-#   outage   2  انقطاع: قاعدة البيانات، أو Google Sheets، أو محركات البحث (الليلي يعيد المحاولة بعد 15 ثم 60 دقيقة)
-#   stopped  3  توقف قبل نهاية الطابور: طلب إيقاف من اللوحة، أو أي سبب آخر يكتبه العامل (مثل BUDGET_REACHED
-#               أو SERPER_CREDIT) ويظهر نصه كما هو؛ الصفوف المتبقية تبقى في الانتظار
+#   handed_over 0  عمل التشغيل الليلي ثم توقف على انقطاع، وأثناء انتظار إعادة المحاولة بدأ تشغيل آخر وتولى الطابور:
+#               محاولاته وأرقامها تبقى في التقرير (ليس «لم يبدأ»)
+#   failed   1  خطأ يحتاج تدخلاً: إعداد الشيت أو بيانات الاعتماد، شيت غير موجود أو غير مشارك، أو خطأ غير متوقع
+#   outage   2  انقطاع قد يزول وحده: قاعدة البيانات، أو Google Sheets لا يرد (مهلة، انقطاع الاتصال، 429 / 5xx)، أو
+#               محركات البحث (الليلي يعيد المحاولة بعد 15 ثم 60 دقيقة)
+#   stopped  3  توقف قبل نهاية الطابور: طلب إيقاف من اللوحة، أو حد التشغيل الليلي الزمني (time_limit)، أو أي سبب
+#               آخر يكتبه العامل (مثل BUDGET_REACHED أو SERPER_CREDIT) ويظهر نصه كما هو؛ الصفوف المتبقية تبقى في الانتظار
 #
 # التكلفة: من سجل الصرف إن وُجد (أول دالة موجودة من SPEND_LEDGER_FUNCTIONS في local_cache_db، لكل run_id)،
 # وإلا تقدير ops_health من عمليات بحث هذا العامل يُحفظ مع التشغيل قبل أن يكتب تشغيل لاحق فوق trace الصفوف.
@@ -24,6 +27,7 @@ import html
 import json
 import logging
 import os
+import re
 import time
 
 logger = logging.getLogger(__name__)
@@ -31,12 +35,13 @@ logger = logging.getLogger(__name__)
 LAST_REPORT_PATH = os.path.join("temp", "nightly", "last_report.json")
 TELEGRAM_MAX_CHARS = 3500
 
-EXIT_CODES = {"done": 0, "skipped": 0, "failed": 1, "outage": 2, "stopped": 3}
+EXIT_CODES = {"done": 0, "skipped": 0, "handed_over": 0, "failed": 1, "outage": 2, "stopped": 3}
 DONE_REASONS = ("", "queue_empty")
 SKIP_REASONS = ("another_worker",)
-# انقطاع قد يزول وحده: التشغيل الليلي يعيد التشغيل كله بعد 15 ثم 60 دقيقة
-OUTAGE_REASONS = ("db_unavailable", "sheets_unavailable", "sheet_not_found", "provider_down")
-FAILED_REASONS = ("sheet_config", "enqueue_failed", "enqueue_error", "worker_error")
+# انقطاع قد يزول وحده: التشغيل الليلي يعيد التشغيل كله بعد 15 ثم 60 دقيقة. شيت غير موجود أو غير مشارك ليس منها:
+# open_worksheet يرفع SheetTransientError للانقطاع المؤقت ويعيد None لإعداد خاطئ فقط
+OUTAGE_REASONS = ("db_unavailable", "sheets_unavailable", "provider_down")
+FAILED_REASONS = ("sheet_config", "sheet_not_found", "enqueue_failed", "enqueue_error", "worker_error")
 SPEND_LEDGER_FUNCTIONS = ("run_spend", "get_run_spend", "spend_for_run")
 
 REASON_TEXT = {
@@ -52,15 +57,39 @@ REASON_TEXT = {
     "another_worker": "تشغيل آخر يعمل الآن",
     "budget_reached": "بلغ صرف اليوم الميزانية اليومية (DAILY_BUDGET_USD)",
     "serper_credit": "رصيد Serper انتهى أو مفتاحه مرفوض",
+    "time_limit": "بلغ التشغيل الليلي حده الزمني (MaxHours في جدولة المهام) فتوقف قبل نهاية الطابور",
 }
 OUTCOME_TEXT = {
     "done": "✅ اكتمل",
     "skipped": "⏭️ لم يبدأ",
+    "handed_over": "↪️ سلّم الطابور لتشغيل آخر",
     "stopped": "⏸️ توقف قبل نهاية الطابور",
     "outage": "🔌 انقطاع",
     "failed": "❌ فشل",
 }
 TRIGGER_TEXT = {"nightly": "التشغيل الليلي", "dashboard": "تشغيل من لوحة التحكم", "manual": "تشغيل يدوي"}
+HANDED_OVER_TEXT = "توقف على انقطاع، وأثناء انتظار إعادة المحاولة بدأ تشغيل آخر وتولى إكمال الطابور"
+
+
+# ---------------------------------------------------------------------------
+# إخفاء الأسرار: التنبيهات ونصوص الاستثناءات تذهب إلى Telegram و run_history و last_report.json
+# ---------------------------------------------------------------------------
+
+def redact(text):
+    """
+    النص بلا أسرار: قيم المفاتيح كما يخفيها verify_cloud_services._redact (وقيمة key= في الروابط)، وكلمة مرور قاعدة
+    البيانات. لا يرفع أبداً.
+    """
+    text = "" if text is None else str(text)
+    try:
+        from verify_cloud_services import _redact
+        text = _redact(text)
+    except Exception:
+        text = re.sub(r"(?i)((?:api_?)?key=)[^&\s'\"]+", r"\1[REDACTED]", text)
+    password = os.getenv("DB_PASSWORD", "") or ""
+    if len(password) >= 6:
+        text = text.replace(password, "[REDACTED]")
+    return text
 
 
 # ---------------------------------------------------------------------------
@@ -98,7 +127,7 @@ def reason_text(stop_reason):
     key = _key(stop_reason)
     if key in DONE_REASONS:
         return ""
-    return REASON_TEXT.get(key) or str(stop_reason)
+    return REASON_TEXT.get(key) or redact(stop_reason)
 
 
 # ---------------------------------------------------------------------------
@@ -172,6 +201,7 @@ def build_report(trigger, attempts, started_ts, ended_ts, health=None, db=None, 
     التقرير من محاولات التشغيل (قائمة {stop_reason, run_id, worker_id, notice}، الأخيرة هي النتيجة):
     {trigger, started_at, ended_at, duration_s, outcome, stop_reason, reason_text, exit_code, attempts,
      attempt_reasons, run_id, run_ids, counts, outbox, spend, notices, database}.
+    «تشغيل آخر يعمل» بعد محاولة عملت فعلاً ليس «لم يبدأ»: النتيجة handed_over بأرقام المحاولات السابقة.
     """
     if db is None:
         import local_cache_db as db
@@ -184,19 +214,22 @@ def build_report(trigger, attempts, started_ts, ended_ts, health=None, db=None, 
             run_ids.append(a["run_id"])
     notices = []
     for a in attempts:
-        for part in str(a.get("notice") or a.get("message") or "").split(" | "):
+        for part in redact(a.get("notice") or a.get("message") or "").split(" | "):
             part = part.strip()
             if part and part not in notices:
                 notices.append(part)
+    outcome, text = outcome_of(stop_reason), reason_text(stop_reason)
+    if outcome == "skipped" and any(_key(a.get("stop_reason")) not in SKIP_REASONS for a in attempts[:-1]):
+        outcome, text = "handed_over", HANDED_OVER_TEXT
     report = {
         "trigger": trigger if trigger in TRIGGER_TEXT else "manual",
         "started_at": _iso(started_ts),
         "ended_at": _iso(ended_ts),
         "duration_s": int(max(0, (ended_ts or 0) - (started_ts or 0))) if started_ts and ended_ts else None,
-        "outcome": outcome_of(stop_reason),
+        "outcome": outcome,
         "stop_reason": stop_reason,
-        "reason_text": reason_text(stop_reason),
-        "exit_code": exit_code(stop_reason),
+        "reason_text": text,
+        "exit_code": EXIT_CODES[outcome],
         "attempts": len(attempts),
         "attempt_reasons": [a.get("stop_reason") for a in attempts[:-1]],
         "run_id": run_ids[-1] if run_ids else None,
@@ -259,7 +292,7 @@ def history_entry(report):
         "outbox_dead": outbox.get("dead"),
         "spend_usd": spend.get("usd"),
         "spend_source": spend.get("source"),
-        "notices": " | ".join(report.get("notices") or []) or None,
+        "notices": redact(" | ".join(report.get("notices") or [])) or None,
         "report_json": report,
     }
     for key in ("enqueued", "searched", "auto_published", "ready_for_review", "not_found", "failed",
@@ -301,8 +334,10 @@ def telegram_text(report):
         lines.append(esc(when) + (f" · المدة {esc(duration)}" if duration else ""))
     if report.get("reason_text"):
         lines.append(f"السبب: {esc(report['reason_text'])}")
-    if (report.get("attempts") or 1) > 1:
-        lines.append(f"المحاولات: {report['attempts']} (أُعيد التشغيل بعد انقطاع)")
+    # آخر «محاولة» في handed_over هي التشغيل الآخر الذي تولى الطابور، لا إعادة تشغيل
+    runs = (report.get("attempts") or 1) - (1 if outcome == "handed_over" else 0)
+    if runs > 1:
+        lines.append(f"المحاولات: {runs} (أُعيد التشغيل بعد انقطاع)")
     counts = report.get("counts")
     if counts:
         lines.append(f"أُضيف للطابور {counts.get('enqueued', 0)} · بُحث {counts.get('searched', 0)}")
@@ -321,7 +356,7 @@ def telegram_text(report):
     if spend and spend.get("usd") is not None:
         lines.append(f"التكلفة: {spend['usd']:.2f}$" + (" (تقديرية)" if spend.get("source") == "estimate" else ""))
     for notice in (report.get("notices") or [])[:3]:
-        lines.append(f"⚠️ {esc(str(notice)[:200])}")
+        lines.append(f"⚠️ {esc(redact(notice)[:200])}")
     return "\n".join(lines)[:TELEGRAM_MAX_CHARS]
 
 
@@ -348,6 +383,7 @@ def publish(report, db=None, path=LAST_REPORT_PATH, sender=None, config_module=N
     except Exception as e:
         logger.warning("run_report: run_history not saved: %s", e)
     report["history_id"] = history_id
+    report["notices"] = [redact(n) for n in report.get("notices") or []]       # ما أضافه المستدعي بعد build_report
     report["telegram_sent"] = notify(report, sender=sender, config_module=config_module)
     write_last_report(report, path)
     counts = report.get("counts") or {}
