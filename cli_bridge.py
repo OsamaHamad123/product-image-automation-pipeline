@@ -154,16 +154,31 @@ def action_get_products(params):
             brand_mappings = BrandIndex.from_mappings(brand_mappings)   # يُبنى مرة واحدة لكل الصفوف
         except Exception as e:
             logger.warning("تعذر بناء فهرس البراندات: %s", e)
+    from catalog_match.identity import build_sku_spec
     for prod in products:
         try:
-            prod["sku_key"] = pipeline.compute_sku_key(pipeline.sku_row(
+            row = pipeline.sku_row(
                 prod.get("product_name"), prod.get("brand"), prod.get("barcode"), {
                     "name_ar": prod.get("product_name_ar", ""), "brand_ar": prod.get("brand_ar", ""),
-                    "category": prod.get("category", ""), "size": prod.get("size", "")}), brand_mappings)
+                    "category": prod.get("category", ""), "size": prod.get("size", "")})
+            # main.compute_sku_key هو build_sku_spec(...).sku_key: المواصفة نفسها تُقرأ مرة واحدة
+            spec = build_sku_spec(row, brand_mappings)
+            prod["sku_key"] = spec.sku_key
+            prod["sheet_states"] = _sheet_states(spec)
         except Exception as e:
             logger.warning("تعذر حساب sku_key للصف %s: %s", prod.get("row_number"), e)
         prod["has_error"], prod["error_message"] = _row_failure(failures, prod)
     return {'status': 'success', 'products': products}
+
+
+def _sheet_states(spec):
+    """
+    ما يذكره صف الشيت كما يقرؤه البحث (catalog_match.identity.build_sku_spec): حجم (size)، عدد العبوات (pack)، ومحاور
+    النوع (variants). شاشة المراجعة تشتق منه «الحجم / النوع غير مؤكد» لمرشحات حُفظت قبل أن يحسبها الخادم، بقاعدة
+    catalog_match.decide.unverified_warnings نفسها.
+    """
+    return {"size": spec.size is not None, "pack": int(spec.pack_count or 1),
+            "variants": sorted(str(axis) for axis in (spec.variants or {}))}
 
 
 def _row_failure(failures, prod):
@@ -423,16 +438,11 @@ def _identity_problem(params, row_number):
 
 def _candidate_sha(params, row_number, sku_key, image_url, identity=None):
     """
-    بصمة بايتات المرشح التي تم التحقق منها. الواجهة ترسل candidate_sha256 (والاسم القديم content_sha256)؛
-    عند غيابهما تُؤخذ من مرشحات هذا المنتج المحفوظة لنفس الرابط.
+    بصمة بايتات المرشح التي تم التحقق منها وتُنشر: بصمة مرشح هذا المنتج المحفوظ لنفس الرابط (_trusted_sha). البصمة
+    التي ترسلها الواجهة (candidate_sha256 أو الاسم القديم content_sha256) لا تختار بايتات من مخزن المرشحات إلا إذا
+    كانت بصمة ذلك المرشح؛ بلا مرشح محفوظ تُنزّل الصورة من رابطها (ما عرضته الصفحة).
     """
-    sha = _text(params, 'candidate_sha256') or _text(params, 'content_sha256')
-    if sha:
-        return sha
-    for c in local_cache_db.get_curation_candidates(row_number, sku_key=sku_key or None, identity=identity):
-        if c.get("image_url") == image_url and c.get("content_sha256"):
-            return c["content_sha256"]
-    return None
+    return _trusted_sha(params, row_number, sku_key, image_url, identity)
 
 
 def _candidate_page(params, row_number, sku_key, image_url, identity=None):
@@ -591,26 +601,79 @@ def _bare_link(value):
     return text
 
 
-def _current_state(sku_key, row_number, product_name):
+def _row_of(task):
+    try:
+        return int((task or {}).get("row_number"))
+    except (TypeError, ValueError):
+        return None
+
+
+def _review_scope(params, sku_key, row_number):
     """
-    (الحالة كما تعيدها الاستجابة، الحل المعتمد الحالي أو None). الحالة: صف الطابور لهذا المنتج عند رقم الصف
-    (queue_status / queue_updated_at)، والحل المعتمد (approved_url وهو رابط Cloudinary، approved_image_url
-    الصورة الأصلية، approval_status: human_approved | auto_verified، approved_by، approved_at).
+    ما يخص المنتج المطلوب في فحص C1: {identity, tasks, row}. identity و tasks من _product_scope (هويته وصفوف طابوره).
+    row: رقم صف الطابور الذي تعرض الصفحة حالته: صف الطلب نفسه إن كان صف طابوره لهذا المنتج؛ وإلا (أُزيح صف المنتج
+    في الشيت بعد إدراجه، والصفحة تطابق صف الطابور بـ sku_key) الصف الذي طابقته الصفحة (expected_state.queue_row) إن
+    كان من صفوف هذا المنتج، وإلا أول صف طابور لهذا المنتج. None: لا صف طابور لهذا المنتج.
     """
-    approval = local_cache_db.get_cached_product(sku_key=sku_key) if sku_key else None
     task = local_cache_db.get_task_by_row(row_number)
-    if not _same_product_task(task, sku_key, product_name):
+    own = task if _same_product_task(task, sku_key, _text(params, 'product_name')) else None
+    identity, tasks = _product_scope(params, sku_key, row_number, own=own, own_known=True)
+    row = int(row_number) if own is not None else None      # own: the queue row at the request's row number
+    if row is None and tasks:
+        seen = _row_of({"row_number": (_expected_state(params) or {}).get("queue_row")})
+        row = seen if seen in _rows_of(tasks) else _row_of(tasks[0])
+    return {"identity": identity, "tasks": tasks, "row": row}
+
+
+def _approval_is_this_products(approval, identity):
+    """
+    هل الحل المعتمد بمفتاح المنتج هو اعتماد هذا المنتج؟ منتجان مختلفان قد يتشاركان مفتاح GTIN (خلية باركود واحدة)،
+    فالمفتاح وحده لا يكفي: اسم وبراند السجل المعتمد يُقارنان بهوية المنتج المطلوب (local_cache_db.same_product، قاعدة
+    صفوف المنتج نفسها في _product_scope). عند الشك (سجل بلا اسم، أو طلب بلا هوية) يُعد اعتماد هذا المنتج: الحارس يبقى.
+    """
+    if not approval:
+        return False
+    name = str(approval.get("product_name") or "").strip()
+    identity = identity or {}
+    if not name or not identity.get("name"):
+        return True
+    if " ".join(name.lower().split()) == " ".join(str(identity["name"]).lower().split()):
+        return True
+    return local_cache_db.same_product(identity, {"name": name, "brand": str(approval.get("brand") or "").strip()})
+
+
+def _current_state(sku_key, row_number, product_name, scope=None):
+    """
+    (الحالة كما تعيدها الاستجابة، الحل المعتمد لهذا المنتج أو None). الحالة: صف طابور هذا المنتج (queue_status /
+    queue_updated_at، و queue_row رقمه: صف الطلب، أو صفه المزاح، _review_scope)، والحل المعتمد لهذا المنتج
+    (approved_url وهو رابط Cloudinary، approved_image_url الصورة الأصلية، approval_status: human_approved |
+    auto_verified، approved_by، approved_at، approved_for اسم المنتج الذي اعتُمد له). اعتماد منتج آخر يشارك المفتاح
+    (نفس خلية الباركود) ليس اعتماد هذا المنتج: لا يظهر في approved_url، ويُسمّى في key_approval_of.
+    scope: _review_scope (يُحسب هنا إن غاب)؛ صف الطابور يُقرأ من جديد في كل استدعاء.
+    """
+    if scope is None:
+        scope = _review_scope({"product_name": product_name, "sku_key": sku_key}, sku_key, row_number)
+    found = local_cache_db.get_cached_product(sku_key=sku_key) if sku_key else None
+    approval = found if _approval_is_this_products(found, scope.get("identity")) else None
+    task = local_cache_db.get_task_by_row(scope["row"]) if scope.get("row") is not None else None
+    if task is not None and _row_of(task) != scope["row"] and _row_of(task) is not None:
+        task = None
+    if task is not None and sku_key and (task.get("sku_key") or "").strip() not in ("", sku_key):
         task = None
     approval = approval or {}
     current = {
         "queue_status": (task or {}).get("status") or None,
         "queue_updated_at": _ts((task or {}).get("updated_at")),
+        "queue_row": _row_of(task) if task else None,
         "approved_url": approval.get("cloudinary_url") or None,
         "approved_image_url": approval.get("original_url") or None,
         "approval_status": approval.get("verification_status") or None,
         "approved_by": approval.get("approved_by") or None,
         "approved_at": _ts(approval.get("resolved_at")),
+        "approved_for": (str(approval.get("product_name") or "").strip() or None) if approval else None,
     }
+    if found and not approval:
+        current["key_approval_of"] = str(found.get("product_name") or "").strip() or None
     return current, (approval or None)
 
 
@@ -653,63 +716,106 @@ def _approval_age_seconds(approval):
     return abs(time.time() - resolved_at.timestamp())
 
 
-def _image_phash(params, row_number, sku_key, image_url):
-    """pHash الصورة المطلوب اعتمادها: المرسل، أو من بايتات المرشح المحفوظة (candidate_sha256 أو مرشحات المنتج)."""
-    sent = _text(params, 'phash')
-    if sent:
-        return sent
-    sha = _text(params, 'candidate_sha256') or _text(params, 'content_sha256')
-    if not sha:
-        for c in local_cache_db.get_curation_candidates(row_number, sku_key=sku_key or None):
-            if c.get("image_url") == image_url and c.get("content_sha256"):
-                sha = c["content_sha256"]
-                break
+def _trusted_sha(params, row_number, sku_key, image_url, identity=None):
+    """
+    بصمة بايتات المرشح الذي يُعتمد كما حفظها الخادم: content_sha256 لمرشح هذا المنتج المحفوظ بنفس الرابط، أو None.
+    بصمة يرسلها الطلب (candidate_sha256 / content_sha256) لا تُستخدم أبداً بدل ذلك: بها كانت المعالجة تنشر بايتات
+    مرشح آخر من مخزن المرشحات بينما يسمّي السجل image_url. بلا مرشح محفوظ بهذا الرابط (بحث مباشر من شاشة المراجعة)
+    تُنزّل الصورة من رابطها، وهي ما عرضته الصفحة للمراجع (/api/image-proxy).
+    """
+    if not image_url:
+        return None
+    sent = _text(params, 'candidate_sha256') or _text(params, 'content_sha256')
+    try:
+        stored = local_cache_db.get_curation_candidates(row_number, sku_key=sku_key or None, identity=identity)
+    except Exception:
+        # تعذرت القراءة: لا بايتات محفوظة موثوقة (تُنزّل الصورة من رابطها)، والاعتماد نفسه لا يفشل بسببها
+        logger.exception("تعذر قراءة المرشحات المحفوظة للصف %s", row_number)
+        return None
+    for c in stored:
+        if c.get("image_url") == image_url and c.get("content_sha256"):
+            if sent and sent.lower() != str(c["content_sha256"]).lower():
+                logger.warning("بصمة sha256 المرسلة للصف %s لا تطابق المرشح المحفوظ لنفس الرابط؛ تُهمل", row_number)
+            return c["content_sha256"]
+    return None
+
+
+def _image_phash(params, row_number, sku_key, image_url, identity=None):
+    """
+    pHash الصورة المطلوب اعتمادها لفحص الصور المرفوضة، من بايتات مرشح هذا المنتج المحفوظ لهذا الرابط (_trusted_sha) فقط،
+    ولا يؤخذ أبداً من الطلب (phash أو بصمة sha256 مرسلة كانا يتجاوزان نصف الفحص). صورة بلا مرشح محفوظ (بحث مباشر من
+    شاشة المراجعة) تُفحص برابطها: البحث نفسه استبعد الصور القريبة من بصمات الرفض (exclude_phashes) عند إيجادها.
+    """
+    sha = _trusted_sha(params, row_number, sku_key, image_url, identity)
     return _phash_of_stored(sha) if sha else None
 
 
-def _rejected_refusal(params, sku_key, row_number, product_name, image_url):
+def _has_phash_rejections(keys):
+    """هل رُفضت لهذا المنتج صور ببصمة pHash؟ (خطأ القراءة: نعم، فيُحسب pHash الصورة ويُفحص)."""
+    try:
+        return any(local_cache_db.get_rejections(key)[1] for key in dict.fromkeys(k for k in keys if k))
+    except Exception:
+        return True
+
+
+def _rejected_refusal(params, sku_key, row_number, product_name, image_url, scope=None):
     """
     رفض اعتماد صورة رفضها مراجع لهذا المنتج (رابطها أو pHash، بالمفتاح أو بمفتاح الصف البديل) بعد فتح الصفحة: الرفض لا
     يغيّر حالة الطابور ولا توقيته، فلا يراه expected_state. state_changed مع reason=image_rejected و
     current.rejected_image. replace لا يتجاوزه: الرفض دائم لهذه الصورة لهذا المنتج (ارفع الصورة يدوياً إن كان الرفض خطأ).
+    pHash الصورة من بايتات مرشحها المحفوظ (_image_phash)، ويُقرأ فقط عندما رُفضت لهذا المنتج صور ببصمتها.
     """
     if not image_url or not sku_key:
         return None
-    task = local_cache_db.get_task_by_row(row_number)
-    alt = (task or {}).get("alt_sku_key") if _same_product_task(task, sku_key, product_name) else None
-    rejected = local_cache_db.image_rejected((sku_key, alt), image_url)
-    if rejected is False:
-        rejected = local_cache_db.image_rejected((sku_key, alt), None,
-                                                 _image_phash(params, row_number, sku_key, image_url))
+    scope = scope or _review_scope(params, sku_key, row_number)
+    task = local_cache_db.get_task_by_row(scope["row"]) if scope.get("row") is not None else None
+    alt = (task or {}).get("alt_sku_key") if (task or {}).get("sku_key") in (None, "", sku_key) else None
+    keys = (sku_key, alt)
+    rejected = local_cache_db.image_rejected(keys, image_url)
+    if rejected is False and _has_phash_rejections(keys):
+        rejected = local_cache_db.image_rejected(
+            keys, None, _image_phash(params, row_number, sku_key, image_url, scope.get("identity")))
     if not rejected:
         return None
-    current = dict(_current_state(sku_key, row_number, product_name)[0], rejected_image=True)
+    current = dict(_current_state(sku_key, row_number, product_name, scope)[0], rejected_image=True)
     return {'status': 'failed', 'error_code': 'state_changed', 'reason': IMAGE_REJECTED,
             'error': IMAGE_REJECTED_ERROR, 'current': current}
 
 
-def _stale_refusal(params, sku_key, row_number, product_name, image_url=None):
+def _shows(shown, approval):
+    """هل الصورة المعتمدة التي عرضتها الصفحة (shown، بلا بادئة needs_review:) هي هذا الاعتماد؟"""
+    links = {_bare_link(approval.get("cloudinary_url")), _bare_link(approval.get("original_url"))}
+    if not _bare_link(approval.get("cloudinary_url")):
+        links.add("")       # اعتماد بلا رابط Cloudinary: current.approved_url كان null
+    return shown in links
+
+
+def _stale_refusal(params, sku_key, row_number, product_name, image_url=None, scope=None):
     """
-    رفض الاعتماد / الرفع فوق قرار لم يره المراجع (None = مسموح). replace=true يتجاوز الفحص، إلا رفض الصورة نفسها.
-    - الصورة رفضها مراجع لهذا المنتج -> state_changed (reason=image_rejected، _rejected_refusal)
-    expected_state (ما عرضته الصفحة: queue_status, queue_updated_at, approved_url):
-      - اعتماد بشري لم تعرضه الصفحة (رابطه غير approved_url) -> already_approved
-      - صف الطابور تغيّر منذ فتح الصفحة -> state_changed
-    بلا expected_state (عميل قديم): يبقى السلوك القديم، إلا أن اعتماداً بشرياً لصورة أخرى خلال آخر دقيقتين
-    (APPROVAL_GUARD_SECONDS) لا يُستبدل -> already_approved. الاستجابة تحمل current لتعرضه الصفحة.
+    رفض الاعتماد / الرفع فوق قرار لم يره المراجع (None = مسموح).
+    - الصورة رفضها مراجع لهذا المنتج -> state_changed (reason=image_rejected، _rejected_refusal)؛ replace لا يتجاوزه
+    expected_state (ما عرضته الصفحة: queue_status, queue_updated_at, approved_url، و queue_row صف الطابور الذي طابقته):
+      - اعتماد بشري لهذا المنتج لم تعرضه الصفحة (رابطه غير approved_url) -> already_approved
+      - صف طابور هذا المنتج تغيّر منذ فتح الصفحة -> state_changed
+    replace=true (تأكيد المراجع الصريح بالاستبدال) لا يتجاوز هذا الفحص: الصفحة ترسل معه ما عرضه التأكيد (current
+    الرفض السابق) في expected_state، فإن تغيّر شيء مرة أخرى بعد التأكيد يُرفض ويُعرض من جديد.
+    بلا expected_state (عميل قديم): يبقى السلوك القديم (replace يتجاوز)، إلا أن اعتماداً بشرياً لصورة أخرى خلال آخر
+    دقيقتين (APPROVAL_GUARD_SECONDS) لا يُستبدل بلا replace -> already_approved. الاستجابة تحمل current لتعرضه الصفحة.
+    اعتماد منتج آخر يشارك المفتاح ليس اعتماد هذا المنتج (_current_state): لا يرفض ولا يُعرض للاستبدال.
     """
-    refusal = _rejected_refusal(params, sku_key, row_number, product_name, image_url)
+    scope = scope or _review_scope(params, sku_key, row_number)
+    refusal = _rejected_refusal(params, sku_key, row_number, product_name, image_url, scope)
     if refusal:
         return refusal
-    if _as_bool(params.get('replace', False)):
-        return None
-    current, approval = _current_state(sku_key, row_number, product_name)
-    human = bool(approval) and approval.get("verification_status") == "human_approved"
     expected = _expected_state(params)
+    replace = _as_bool(params.get('replace', False))
+    if replace and expected is None:
+        return None
+    current, approval = _current_state(sku_key, row_number, product_name, scope)
+    human = bool(approval) and approval.get("verification_status") == "human_approved"
     code = None
     if expected is not None:
-        shown = _bare_link(expected.get("approved_url"))
-        if human and shown not in (approval.get("cloudinary_url"), approval.get("original_url")):
+        if human and not _shows(_bare_link(expected.get("approved_url")), approval):
             code = "already_approved"
         elif _queue_changed(expected, current):
             code = "state_changed"
@@ -722,14 +828,14 @@ def _stale_refusal(params, sku_key, row_number, product_name, image_url=None):
     return {'status': 'failed', 'error_code': code, 'error': STALE_ERRORS[code], 'current': current}
 
 
-def _reviewer_check(params, sku_key, row_number, product_name, image_url, out, rows=None):
+def _reviewer_check(params, sku_key, row_number, product_name, image_url, out, rows=None, scope=None):
     """
     before_write لاعتماد المراجع ورفعه (تحت قفل النشر للـ SKU، بعد المعالجة والرفع): يعيد فحص C1 لأن الحالة
     قد تتغير أثناء المعالجة، ثم يسحب حجز العامل عن صفوف المنتج (rows: صفوف هذا المنتج فقط، _product_scope) فلا
     ينشر العامل فوق هذا القرار بعد تحرير القفل.
     """
     def check():
-        refusal = _stale_refusal(params, sku_key, row_number, product_name, image_url)
+        refusal = _stale_refusal(params, sku_key, row_number, product_name, image_url, scope)
         if refusal:
             out["refusal"] = refusal
             return False
@@ -762,7 +868,7 @@ QUALITY_ERRORS = {
 }
 
 
-def _quality_refusal(res, sku_key, row_number, product_name):
+def _quality_refusal(res, sku_key, row_number, product_name, scope=None):
     """
     استجابة اعتماد / رفع لم يُنشر لأن القص لم يجتز الفحص: error_code quality_flags (علامات عرض فقط؛ يعيد المراجع الطلب
     مع publish_anyway=true بعد تأكيده) أو background_failed (لا نشر بهذه الصورة). quality_flags و quality_notes كما هي.
@@ -771,7 +877,7 @@ def _quality_refusal(res, sku_key, row_number, product_name):
     return {'status': 'failed', 'error_code': code, 'error': QUALITY_ERRORS[code],
             'quality_flags': list(res.get("quality_flags") or []), 'quality_notes': list(res.get("quality_notes") or []),
             'publish_anyway_allowed': bool(res.get("publish_anyway_allowed")), 'isolated': False,
-            'current': _current_state(sku_key, row_number, product_name)[0]}
+            'current': _current_state(sku_key, row_number, product_name, scope)[0]}
 
 
 def _not_written(res, out):
@@ -796,14 +902,16 @@ def _request_identity(params, task=None):
             "size": pick('size', 'size')}
 
 
-def _product_scope(params, sku_key, row_number):
+def _product_scope(params, sku_key, row_number, own=None, own_known=False):
     """
     (هوية المنتج، صفوف الطابور لهذا المنتج). sku_key وحده لا يكفي: منتجان مختلفان قد يتشاركان خلية باركود واحدة،
     والمفتاح بلا باركود لا يقرأ الاسم العربي. الصفوف: صفوف المفتاح التي تصف المنتج نفسه (local_cache_db.same_product)،
     وصف الطابور عند رقم صف الطلب إن كان لنفس المنتج (_same_product_task: هو الصف الذي تعرضه الصفحة).
+    own_known: own هو صف الطلب لنفس المنتج كما قرأه المستدعي (أو None)، فلا يُقرأ من جديد.
     """
-    task = local_cache_db.get_task_by_row(row_number)
-    own = task if _same_product_task(task, sku_key, _text(params, 'product_name')) else None
+    if not own_known:
+        task = local_cache_db.get_task_by_row(row_number)
+        own = task if _same_product_task(task, sku_key, _text(params, 'product_name')) else None
     identity = _request_identity(params, own)
     tasks = []
     for t in (local_cache_db.get_tasks_by_sku(sku_key) if sku_key else []):
@@ -968,12 +1076,13 @@ def action_select_image(params):
     sku_key, barcode, problem = _identity_problem(params, row_number)
     if problem:
         return {'status': 'failed', 'error': problem}
-    refusal = _stale_refusal(params, sku_key, row_number, product_name, image_url)
+    scope = _review_scope(params, sku_key, row_number)
+    refusal = _stale_refusal(params, sku_key, row_number, product_name, image_url, scope)
     if refusal:
         return refusal
 
     pipeline = _pipeline()
-    identity, tasks = _product_scope(params, sku_key, row_number)
+    identity, tasks = scope["identity"], scope["tasks"]
     rows = _rows_of(tasks)
     queue_started = False
     guard = {}
@@ -992,12 +1101,12 @@ def action_select_image(params):
             category_override={k: _text(params, k) for k in ('category_l1_en', 'category_l2_en', 'category_l3_en')},
             key_size=_text(params, 'size') or None, key_brand=brand or None, sku_key=sku_key,
             also_rows=_other_rows(sku_key, row_number, tasks),
-            before_write=_reviewer_check(params, sku_key, row_number, product_name, image_url, guard, rows),
+            before_write=_reviewer_check(params, sku_key, row_number, product_name, image_url, guard, rows, scope),
             after_write=_human_decision(barcode, product_name, brand, image_url, "human", sku_key, row_number, rows),
             unclean="refuse", publish_anyway=_as_bool(params.get('publish_anyway', False)),
         )
         if res["status"] == "quality_refused":
-            return _quality_refusal(res, sku_key, row_number, product_name)
+            return _quality_refusal(res, sku_key, row_number, product_name, scope)
         if res["status"] == "superseded":
             return _not_written(res, guard)
         if res["status"] == "failed":
@@ -1014,7 +1123,7 @@ def action_select_image(params):
         if queue_started:
             google_sheets.stop_async_queue()     # التفريغ الأخير لطابور الكتابة
     response['sheet'] = _sheet_outcome(response['rows_written'], outbox_since, response['sheet_value'])
-    response['current'] = _current_state(sku_key, row_number, product_name)[0]   # expected_state للطلب التالي
+    response['current'] = _current_state(sku_key, row_number, product_name, scope)[0]   # expected_state للطلب التالي
     return response
 
 
@@ -1040,10 +1149,11 @@ def action_upload_manual_image(params):
     if not sku_key:
         sku_key = (task or {}).get("sku_key") or pipeline.compute_sku_key(
             {"name": product_name, "brand": brand, "barcode": barcode}, _load_brand_mappings())
-    refusal = _stale_refusal(params, sku_key, row_number, product_name)
+    scope = _review_scope(params, sku_key, row_number)
+    refusal = _stale_refusal(params, sku_key, row_number, product_name, None, scope)
     if refusal:
         return refusal
-    identity, tasks = _product_scope(params, sku_key, row_number)
+    identity, tasks = scope["identity"], scope["tasks"]
     rows = _rows_of(tasks)
     queue_started = False
     guard = {}
@@ -1058,7 +1168,7 @@ def action_upload_manual_image(params):
             category_override={k: _text(params, k) for k in ('category_l1_en', 'category_l2_en', 'category_l3_en')},
             key_size=_text(params, 'size') or None, key_brand=brand or None, sku_key=sku_key,
             also_rows=_other_rows(sku_key, row_number, tasks),
-            before_write=_reviewer_check(params, sku_key, row_number, product_name, None, guard, rows),
+            before_write=_reviewer_check(params, sku_key, row_number, product_name, None, guard, rows, scope),
             after_write=_human_decision(barcode, product_name, brand, "manual_upload", "human_upload", sku_key,
                                         row_number, rows),
             unclean="refuse", publish_anyway=_as_bool(params.get('publish_anyway', False)),
@@ -1068,7 +1178,7 @@ def action_upload_manual_image(params):
         except OSError:
             pass
         if res["status"] == "quality_refused":
-            return _quality_refusal(res, sku_key, row_number, product_name)
+            return _quality_refusal(res, sku_key, row_number, product_name, scope)
         if res["status"] == "superseded":
             return _not_written(res, guard)
         if res["status"] == "failed":
@@ -1084,7 +1194,7 @@ def action_upload_manual_image(params):
         if queue_started:
             google_sheets.stop_async_queue()     # التفريغ الأخير لطابور الكتابة
     response['sheet'] = _sheet_outcome(response['rows_written'], outbox_since, response['sheet_value'])
-    response['current'] = _current_state(sku_key, row_number, product_name)[0]   # expected_state للطلب التالي
+    response['current'] = _current_state(sku_key, row_number, product_name, scope)[0]   # expected_state للطلب التالي
     return response
 
 
@@ -1292,7 +1402,8 @@ def action_reject_image(params):
         sku_key = _pipeline().compute_sku_key({"name": product_name, "brand": brand, "barcode": barcode},
                                               brand_mappings)
 
-    identity, tasks = _product_scope(params, sku_key, row_number)
+    scope = _review_scope(params, sku_key, row_number)
+    identity, tasks = scope["identity"], scope["tasks"]
     rows = _rows_of(tasks)
     # المفتاح البديل (قبل إضافة باركود صالح للصف): اعتماد حُفظ به يبقى اعتماداً لهذا المنتج
     alt_keys = sorted({str(t.get("alt_sku_key") or "").strip() for t in tasks} - {"", sku_key})
@@ -1303,7 +1414,7 @@ def action_reject_image(params):
             if lock_state == "busy":
                 # نشر لنفس المنتج ما زال يكتب: لا يُحكم على الخلية أو الاعتماد قبل أن يُسجل قراره
                 return {'status': 'error', 'error_code': 'busy', 'error': STALE_ERRORS["busy"],
-                        'current': _current_state(sku_key, row_number, product_name)[0]}
+                        'current': _current_state(sku_key, row_number, product_name, scope)[0]}
             if not local_cache_db.add_rejected_image(sku_key, image_url, page_url=page_url, phash=phash,
                                                      reason_code=reason_code):
                 return {'status': 'error', 'error': 'could not record the rejection'}
@@ -1387,7 +1498,7 @@ def action_reject_image(params):
     rejection = {'sku_key': sku_key, 'reason_code': reason_code, 'phash': phash, 'sheet_cleared': sheet_cleared,
                  'superseded': superseded, 'sheet_error': sheet_error, 'approval_kept': keep_approval,
                  'candidates_left': len(remaining), 'queue_status': queue_status}
-    current, _ = _current_state(sku_key, row_number, product_name)
+    current, _ = _current_state(sku_key, row_number, product_name, scope)
     if response is not None:
         response['rejection'] = rejection
         response['candidates_saved'] = candidates_saved

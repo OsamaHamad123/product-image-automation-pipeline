@@ -1,10 +1,12 @@
 """The dashboard forwards the stale-approval guard to the bridge (contract C1).
 
-select_image and upload_manual_image take expected_state (what the review page showed: the queue row's status and
-update time, and the approved image) and replace (the reviewer's explicit confirmation). select_image forwards the
-whole request; the upload has a whitelist, and its form fields are text, so the page sends expected_state as JSON.
-replace is always a boolean for the bridge ("0" would be truthy in Python). Run through the PHP CLI with small
-stand-ins for the framework (skipped without php).
+select_image and upload_manual_image take expected_state (what the review page showed: the queue row's status, update
+time and number, and the approved image) and replace (the reviewer's explicit confirmation). Both forward an explicit
+allow-list of the fields the review page sends: phash, content_sha256, category_l*_en or any other field never reaches
+the bridge (they skipped the pHash half of the rejected-image check, chose the published bytes from the candidate
+store, and set the Cloudinary folder and sheet metadata). The upload's form fields are text, so the page sends
+expected_state as JSON. replace is always a boolean for the bridge ("0" would be truthy in Python). Run through the PHP
+CLI with small stand-ins for the framework (skipped without php).
 """
 
 import json
@@ -63,8 +65,12 @@ namespace {
         'replace' => '1']));
     $api->uploadManualImage(new Illuminate\Http\Request(['row_number' => '9', 'product_name' => 'Milk', 'file' => 'x',
         'expected_state' => 'null']));
-    $api->selectImage(new Illuminate\Http\Request(['image_url' => 'u', 'replace' => true,
-        'expected_state' => ['queue_status' => null, 'queue_updated_at' => null, 'approved_url' => 'a']]));
+    $api->selectImage(new Illuminate\Http\Request(['image_url' => 'u', 'replace' => true, 'row_number' => '9',
+        'product_name' => 'Milk', 'sku_key' => 'k', 'candidate_sha256' => 'ab', 'candidate_warnings' => 'w',
+        'search_decision' => 'REVIEW_PRESELECTED', 'phash' => '0f0f0f0f0f0f0f0f', 'content_sha256' => 'cd',
+        'category_l1_en' => 'Evil', 'category_l2_en' => 'X', 'upscale' => true, 'enhance' => true, 'anything' => 1,
+        'expected_state' => ['queue_status' => null, 'queue_updated_at' => null, 'approved_url' => 'a', 'queue_row' => 9,
+                             'injected' => 1]]));
     echo json_encode(App\Services\PythonBridge::$calls);
 }
 """
@@ -87,4 +93,8 @@ def test_the_dashboard_forwards_expected_state_and_replace_to_the_bridge(tmp_pat
     assert upload[1]["replace"] is True
     assert "expected_state" not in plain[1] and "replace" not in plain[1]
     assert select[0] == "select_image" and select[1]["replace"] is True
-    assert select[1]["expected_state"] == {"queue_status": None, "queue_updated_at": None, "approved_url": "a"}
+    assert select[1]["expected_state"] == {"queue_status": None, "queue_updated_at": None, "approved_url": "a",
+                                           "queue_row": 9}
+    # the allow-list: what the review page sends, nothing else
+    assert set(select[1]) == {"image_url", "row_number", "product_name", "sku_key", "candidate_sha256",
+                              "candidate_warnings", "search_decision", "replace", "expected_state"}

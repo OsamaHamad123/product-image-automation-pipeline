@@ -197,7 +197,8 @@ def test_select_no_upscale(select_env):
     kinds = [e[0] for e in events]
     upload = next(e for e in events if e[0] == "upload")
     assert upload[1] == (800, 800), "the published file is the 800x800 canvas, not an upscaled copy"
-    assert events[0] == ("process", V2_RESULT["url"], "ab" * 32)
+    # no stored candidate for this URL: the content_sha256 the request sent never picks the published bytes
+    assert events[0] == ("process", V2_RESULT["url"], None)
     # metadata reaches the sheet only after the upload succeeded
     assert kinds.index("upload") < kinds.index("metadata_write")
     link = next(e for e in events if e[0] == "link")
@@ -408,13 +409,20 @@ def test_select_upload_failure_writes_nothing(select_env, monkeypatch):
     assert not any(e[0] in ("link", "metadata_write", "resolution") for e in events)
 
 
-def test_select_uses_the_ui_candidate_sha256(select_env):
-    """The dashboards post candidate_sha256: the verified bytes must be published, not a re-download."""
+def test_select_publishes_the_stored_candidates_bytes_never_a_sha256_from_the_request(select_env, monkeypatch):
+    """The verified bytes of the stored candidate for that URL are published, not a re-download; a candidate_sha256
+    the request sends never chooses bytes from the candidate store (another candidate's picture under this URL)."""
+    import local_cache_db
     bridge, events, state = select_env
     params = dict(SELECT_PARAMS)
     params["candidate_sha256"] = params.pop("content_sha256")
+    monkeypatch.setattr(local_cache_db, "get_curation_candidates",
+                        lambda *a, **k: [{"image_url": V2_RESULT["url"], "content_sha256": "cd" * 32}])
     assert bridge.action_select_image(params)["status"] == "success"
-    assert events[0] == ("process", V2_RESULT["url"], "ab" * 32)
+    assert events[0] == ("process", V2_RESULT["url"], "cd" * 32)
+    monkeypatch.setattr(local_cache_db, "get_curation_candidates", lambda *a, **k: [])
+    assert bridge.action_select_image(params)["status"] == "success"
+    assert [e for e in events if e[0] == "process"][-1] == ("process", V2_RESULT["url"], None)
 
 
 def test_select_ignores_a_queue_row_of_another_product(select_env, monkeypatch):
@@ -492,8 +500,12 @@ def test_an_approval_the_page_did_not_show_is_not_replaced(stale_env):
     # the page shows it (the sheet link, with or without the needs_review: prefix): the approval replaces it
     shown = dict(expected, approved_url="needs_review:" + HUMAN["cloudinary_url"])
     assert bridge.action_select_image(dict(SELECT_PARAMS, expected_state=shown))["status"] == "success"
-    # or the reviewer confirmed the replacement
-    assert bridge.action_select_image(dict(SELECT_PARAMS, expected_state=expected, replace=True))["status"] == "success"
+    # replace no longer skips the comparison: sent with the state the page showed before, it is refused again ...
+    again = bridge.action_select_image(dict(SELECT_PARAMS, expected_state=expected, replace=True))
+    assert again["error_code"] == "already_approved"
+    # ... and sent with what the confirmation showed (the refusal's current), the reviewer replaces it
+    assert bridge.action_select_image(dict(SELECT_PARAMS, expected_state=result["current"], replace=True))["status"] \
+        == "success"
 
 
 def test_a_queue_row_that_changed_since_the_page_opened_refuses(stale_env):
@@ -516,7 +528,10 @@ def test_a_queue_row_that_changed_since_the_page_opened_refuses(stale_env):
     assert bridge.action_select_image(dict(SELECT_PARAMS, expected_state=iso))["status"] == "success"
     assert state["fenced"] == [(4, SELECT_PARAMS["sku_key"])]
     state["task"] = _queue_row("processing", "2026-10-03 10:05:00")
-    assert bridge.action_select_image(dict(SELECT_PARAMS, expected_state=expected, replace="true"))["status"] == "success"
+    refused = bridge.action_select_image(dict(SELECT_PARAMS, expected_state=expected, replace="true"))
+    assert refused["error_code"] == "state_changed"              # replace compares what the reviewer confirmed
+    assert bridge.action_select_image(dict(SELECT_PARAMS, expected_state=refused["current"], replace="true"))["status"] \
+        == "success"
 
 
 def test_the_expected_state_may_arrive_as_json_text(stale_env):
@@ -571,7 +586,10 @@ def test_a_manual_upload_follows_the_same_rule(stale_env, tmp_path):
     expected = {"queue_status": None, "queue_updated_at": None, "approved_url": None}
     assert bridge.action_upload_manual_image(dict(params, expected_state=expected))["error_code"] == "already_approved"
     assert _writes(events) == []
-    assert bridge.action_upload_manual_image(dict(params, expected_state=expected, replace=True))["status"] == "success"
+    refused = bridge.action_upload_manual_image(dict(params, expected_state=expected, replace=True))
+    assert refused["error_code"] == "already_approved" and _writes(events) == []
+    assert bridge.action_upload_manual_image(dict(params, expected_state=refused["current"], replace=True))["status"] \
+        == "success"
 
 
 def test_a_publish_lock_held_elsewhere_writes_nothing(stale_env, monkeypatch):
