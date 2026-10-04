@@ -8,8 +8,10 @@ import json
 import logging
 import socket
 from pathlib import Path
+from urllib.parse import quote
 
 import pytest
+import requests
 
 from catalog_match import ratelimit
 from catalog_match.models import SkuSpec
@@ -150,3 +152,41 @@ def test_one_key_403_while_another_works_keeps_cse():
     res = make(session, keys=("a", "b")).search("q", "en", SPEC)
     assert res.status == "ok"
     assert make(FakeSession()) is not None
+
+
+class RaisingSession:
+    """A transport error whose text carries the full request URL, as requests' errors do."""
+
+    def __init__(self, exc_type, key, cx):
+        self.exc_type, self.key, self.cx = exc_type, key, cx
+
+    def get(self, url, **kwargs):
+        raise self.exc_type(f"HTTPSConnectionPool(host='www.googleapis.com'): Max retries exceeded with url: "
+                            f"/customsearch/v1?q=milk&cx={self.cx}&key={self.key}&searchType=image")
+
+
+@pytest.mark.parametrize("exc_type, status", [(requests.ConnectionError, "error"), (requests.Timeout, "error")])
+def test_a_transport_error_never_shows_the_key_or_the_engine_id(caplog, exc_type, status):
+    key, cx = "AIzaFAKE-cse-key-0001", "0123456789abcdef:fakeengine"
+    p = make(RaisingSession(exc_type, key, cx), keys=(key,), cxs=(cx,))
+    with caplog.at_level(logging.DEBUG):
+        res = p.search("milk", "en", SPEC)
+    assert res.status == status
+    shown = [res.error or ""] + [r.getMessage() for r in caplog.records]
+    for text in shown:
+        assert key not in text and cx not in text and quote(cx, safe="") not in text, text
+    if exc_type is requests.Timeout:
+        assert res.error == "timeout"                     # still read as a timeout
+    else:
+        assert "[REDACTED]" in res.error
+
+
+def test_an_error_body_that_echoes_the_request_hides_the_key_and_the_engine_id(caplog):
+    key, cx = "AIzaFAKE-cse-key-0002", "0123456789abcdef:otherengine"
+    body = f'{{"error": {{"code": 400, "message": "Bad request ?key={key}&cx={cx}", "cx": "{cx}"}}}}'
+    p = make(FakeSession(FakeResponse(400, text=body)), keys=(key,), cxs=(cx,))
+    with caplog.at_level(logging.WARNING):
+        res = p.search("milk", "en", SPEC)
+    assert res.status == "error"
+    for text in [res.error or ""] + [r.getMessage() for r in caplog.records]:
+        assert key not in text and cx not in text, text
