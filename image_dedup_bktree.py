@@ -12,6 +12,39 @@ def calculate_hamming_distance(hash_a: int, hash_b: int) -> int:
     return bin(hash_a ^ hash_b).count('1')
 
 
+# v2 (catalog_match.fetch.phash_hex) stores the hash as exactly 16 hex digits; the legacy v1
+# path stored str(int), a decimal number. calculate_phash never sets the top bit (63 bits).
+PHASH_HEX_DIGITS = 16
+_PHASH_LIMIT = 2 ** 63
+
+
+def parse_phash(value):
+    """
+    A stored pHash as an int, or None when it is missing or malformed.
+    Accepts an int, a v2 hex string ('0a1b...', 16 digits, optional '0x') and a legacy decimal string.
+    A 16-character string is read as hex (the current format) unless that value is too large to be a
+    pHash; any other all-digit string is the legacy decimal form.
+    """
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value > 0 else None
+    text = str(value).strip().lower()
+    if text.startswith("0x"):
+        text, base = text[2:], 16
+    elif any(c in "abcdef" for c in text):
+        base = 16
+    elif len(text) == PHASH_HEX_DIGITS and text.isdigit() and int(text, 16) < _PHASH_LIMIT:
+        base = 16
+    else:
+        base = 10
+    try:
+        parsed = int(text, base)
+    except ValueError:
+        return None
+    return parsed if parsed > 0 else None
+
+
 def calculate_phash(image_input) -> int:
     """
     حساب الهاش الإدراكي (Perceptual Hash - pHash) للصور:
@@ -153,9 +186,8 @@ def build_bktree_from_db():
         return tree
 
     for row in rows:
-        try:
-            phash_value = int(row["perceptual_hash"])
-        except (TypeError, ValueError):
+        phash_value = parse_phash(row["perceptual_hash"])
+        if phash_value is None:
             continue
         tree.insert_node(
             phash_value,
@@ -184,9 +216,8 @@ def remember_image(phash_value, image_id: str, cloudinary_url: str, product_name
     run is checked against it. Does nothing until the tree has been built: the
     first build reads this row from the database anyway.
     """
-    try:
-        phash_int = int(phash_value)
-    except (TypeError, ValueError):
+    phash_int = parse_phash(phash_value)
+    if phash_int is None:
         return
     with _shared_tree_lock:
         if _shared_tree is not None:
@@ -194,3 +225,74 @@ def remember_image(phash_value, image_id: str, cloudinary_url: str, product_name
                 phash_int, image_id, {"cloudinary_url": cloudinary_url, "product_name": product_name}
             )
 
+
+
+# ---------------------------------------------------------------------------
+# بصمة الألوان: pHash (32x32 رمادي) لا يرى اللون، فنفس العبوة بملصق أحمر وملصق أزرق مسافتها صفر
+# ---------------------------------------------------------------------------
+
+COLOR_SIGNATURE_VERSION = "h1"
+COLOR_BINS = 12               # مدرج تدرجات اللون (hue): 30 درجة لكل خانة، بتوزيع ناعم بين الخانتين الأقرب
+COLOR_SATURATION_MIN = 64     # بكسل «ملوّن»: تشبع وإضاءة كافيان (الأبيض والرمادي والأسود لا لون لها)
+COLOR_VALUE_MIN = 48
+COLOR_NEUTRAL = 0.03          # أقل من 3% من بكسلات المنتج ملوّنة: صورة بلا لون يُحتكم إليه
+COLOR_HIST_FAR = 1.0          # مسافة L1 بين المدرجين (0..2) فوقها يختلف لون المنتجين بوضوح (~15 درجة لملصق بلون واحد)
+_COLOR_LENGTH = len(COLOR_SIGNATURE_VERSION) + 2 + 2 * COLOR_BINS
+
+
+def color_signature(image_input):
+    """
+    بصمة ألوان اللوحة النهائية (نص 'h1' + نسبة البكسلات الملوّنة + مدرج تدرجات اللون، hex)، أو None عند الخطأ.
+    لا تعتمد على موضع المنتج في اللوحة ولا على إضاءته: مدرج تدرجات اللون للبكسلات الملوّنة فقط.
+    """
+    try:
+        img = Image.open(image_input) if isinstance(image_input, str) else image_input
+        hsv = np.asarray(img.convert("RGB").resize((64, 64), Image.Resampling.BOX).convert("HSV"), dtype=np.float64)
+        h, s, v = hsv[..., 0], hsv[..., 1], hsv[..., 2]
+        product = ~((s < 16) & (v > 240))                    # كل ما ليس خلفية بيضاء
+        colourful = (s >= COLOR_SATURATION_MIN) & (v >= COLOR_VALUE_MIN)
+        frac = float(colourful.sum()) / max(float(product.sum()), 1.0)
+        pos = h[colourful] / 256.0 * COLOR_BINS - 0.5        # مركز الخانة i عند i + 0.5
+        low = np.floor(pos)
+        upper_weight = pos - low
+        low = low.astype(int) % COLOR_BINS
+        hist = (np.bincount(low, weights=1.0 - upper_weight, minlength=COLOR_BINS)
+                + np.bincount((low + 1) % COLOR_BINS, weights=upper_weight, minlength=COLOR_BINS))
+        total = float(hist.sum())
+        hist = hist / total if total > 0 else hist
+        return (COLOR_SIGNATURE_VERSION + "%02x" % int(round(min(frac, 1.0) * 255))
+                + "".join("%02x" % int(round(x * 255)) for x in hist))
+    except Exception as e:
+        print(f"تنبيه: تعذر حساب بصمة الألوان: {e}")
+        return None
+
+
+def _parse_color(value):
+    text = str(value or "").strip().lower()
+    if len(text) != _COLOR_LENGTH or not text.startswith(COLOR_SIGNATURE_VERSION):
+        return None
+    try:
+        digits = text[len(COLOR_SIGNATURE_VERSION):]
+        frac = int(digits[:2], 16) / 255.0
+        hist = [int(digits[i:i + 2], 16) for i in range(2, len(digits), 2)]
+    except ValueError:
+        return None
+    total = float(sum(hist))
+    return frac, [x / total for x in hist] if total > 0 else [0.0] * COLOR_BINS
+
+
+def colors_differ(a, b):
+    """
+    هل تختلف ألوان صورتين بوضوح (بصمتا color_signature)؟ True فقط عند يقين: بصمة غائبة أو غير مقروءة، أو صورتان
+    بلا لون، أو فرق في المنطقة الرمادية = False (تبقيان «نفس الصورة» عند تطابق pHash: الأمان أولاً).
+    """
+    pa, pb = _parse_color(a), _parse_color(b)
+    if pa is None or pb is None:
+        return False
+    (fa, ha), (fb, hb) = pa, pb
+    if fa < COLOR_NEUTRAL and fb < COLOR_NEUTRAL:
+        return False
+    if fa < COLOR_NEUTRAL or fb < COLOR_NEUTRAL:
+        # صورة بلا لون وأخرى ملوّنة بوضوح
+        return max(fa, fb) >= 3 * COLOR_NEUTRAL
+    return sum(abs(x - y) for x, y in zip(ha, hb)) > COLOR_HIST_FAR

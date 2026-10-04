@@ -13,7 +13,9 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
+import time
 from pathlib import Path
 
 import pytest
@@ -56,8 +58,9 @@ def test_stop_and_reset_delete_nothing_and_use_the_bridge():
         assert "DB::" not in body, "queue state changes go through local_cache_db (run_control)"
     assert "$this->runPython('run_control', ['op' => 'stop', 'worker' => $worker])" in stop
     assert "$this->runPython('run_control', ['op' => 'reset', 'worker' => $worker])" in reset
-    # the process is still killed in PHP (it needs the OS), for both buttons
-    assert "$this->terminateWorker($process)" in stop and "$this->terminateWorker($process)" in reset
+    # the process is still stopped in PHP (it needs the OS), for both buttons: a stop request first, a kill only
+    # after the wait (review fix C5)
+    assert "$this->stopWorker($process)" in stop and "$this->stopWorker($process)" in reset
     helper = text[text.index("private function terminateWorker"):text.index("private function removeRunFiles")]
     assert "taskkill /F /PID" in helper and "kill -9" in helper
     # stop keeps the lock while the enqueue reads the sheet (the worker honours the request when it starts)
@@ -88,6 +91,82 @@ def test_batch_status_reports_the_run_and_the_phase():
     assert "'total' => $run['total']" in body and "'current' => $run['processed']" in body
 
 
+
+BATCH_STATUS_HARNESS = r"""<?php
+namespace App\Http\Controllers { class Controller {} }
+namespace App\Services {
+    class PythonBridge {
+        public static function run($action, $params = []) {
+            return ['status' => 'success', 'state' => getenv('WORKER_STATE'), 'pid' => 4242, 'verified' => true];
+        }
+        public static function pythonPath() { return 'python'; }
+    }
+    class QueueStats {
+        public static function counters() {
+            return ['by_status' => ['ready_for_review' => 0, 'processing' => 0, 'pending' => 3], 'by_failure_code' => []];
+        }
+        public static function run($runId) { return null; }
+        public static function runTotals($a, $b) {
+            return ['total' => 0, 'processed' => 0, 'failed' => 0, 'ready_for_review' => 0, 'completed' => 0];
+        }
+        public static function runPhase(...$a) { return 'idle'; }
+        public static function phaseText(...$a) { return ''; }
+        public static function alertText(...$a) { return ''; }
+        public static function stuckReason(...$a) { return ''; }
+        public static function retryWaitS() { return null; }
+    }
+}
+namespace {
+    class DB {
+        public static $updates = [];
+        public static function select($sql, $bindings = []) {
+            return [(object) ['status' => 'pre_caching', 'pause_requested' => 1, 'stop_requested' => 0, 'notice' => '',
+                'current_product_name' => 'P1', 'updated_at' => gmdate('Y-m-d H:i:s', time() - 600), 'lq_age_s' => 600,
+                'run_id' => null, 'total_items' => 0, 'processed_items' => 0, 'failed_count' => 0, 'success_count' => 0]];
+        }
+        public static function update($sql, $bindings = []) { self::$updates[] = $sql; return 1; }
+    }
+    class FakeResponse {
+        public $data;
+        public function __construct($d) { $this->data = $d; }
+        public function header($k, $v) { return $this; }
+    }
+    class FakeFactory { public function json($d, $s = 200) { return new FakeResponse($d); } }
+    function response() { return new FakeFactory(); }
+    function base_path($p = '') { return getenv('HARNESS_ROOT') . '/dashboard' . ($p !== '' ? '/' . $p : ''); }
+    require getenv('API_CONTROLLER');
+    $r = (new App\Http\Controllers\ApiController())->batchStatus();
+    echo json_encode(['pause_requested' => $r->data['pause_requested'], 'status' => $r->data['status'],
+                      'updates' => DB::$updates]);
+}
+"""
+
+
+@pytest.mark.skipif(PHP is None, reason="php is not installed")
+@pytest.mark.parametrize("lock, worker_state", [(None, "none"), ('{"pid": 4242}', "none"), ('{"pid": 4242}', "running")])
+def test_batch_status_never_clears_a_pause_request(tmp_path, lock, worker_state):
+    """Review fix C1: when the dashboard judged a live paused worker stopped (its 24-hour rule), the status poll's
+    self-healing UPDATE also set pause_requested = 0, and the paused worker silently resumed. The status poll may still
+    settle a stale 'pre_caching' status, but the pause request stays until the next run clears it."""
+    root = tmp_path / "root"
+    (root / "dashboard").mkdir(parents=True)
+    (root / "temp").mkdir()
+    if lock is not None:
+        (root / "temp" / "pipeline.lock").write_text(lock, encoding="utf-8")
+    script = tmp_path / "status.php"
+    script.write_text(BATCH_STATUS_HARNESS, encoding="utf-8")
+    env = dict(os.environ, HARNESS_ROOT=str(root), API_CONTROLLER=str(CONTROLLER), WORKER_STATE=worker_state)
+    result = subprocess.run([PHP, str(script)], capture_output=True, text=True, timeout=60, encoding="utf-8", env=env)
+    assert result.returncode == 0, result.stdout + result.stderr
+    out = json.loads(result.stdout)
+    assert out["pause_requested"] == 1
+    assert all("pause_requested" not in sql for sql in out["updates"]), out["updates"]
+    if worker_state == "none":
+        assert out["status"] == "idle" and len(out["updates"]) == 1        # the stale status itself is still settled
+    else:
+        assert out["updates"] == [] and out["status"] == "pre_caching"
+
+
 @pytest.mark.skipif(PHP is None or not os.path.isdir("/proc") or not hasattr(os, "fork"),
                     reason="needs the PHP CLI and a Linux /proc")
 def test_a_killed_worker_not_yet_reaped_counts_as_stopped():
@@ -101,6 +180,7 @@ def test_a_killed_worker_not_yet_reaped_counts_as_stopped():
     if zombie == 0:                       # the child exits at once and is not reaped: a zombie
         os._exit(0)
     alive = subprocess.Popen(["sleep", "30"])
+    unconfirmed = subprocess.Popen(["sleep", "30"])
     try:
         for _ in range(100):
             with open(f"/proc/{zombie}/stat") as fh:
@@ -120,15 +200,19 @@ $terminate->setAccessible(true);
 echo json_encode([
     'zombie' => $alive->invoke($c, '{zombie}'),
     'live' => $alive->invoke($c, '{alive.pid}'),
-    'kill' => $terminate->invoke($c, ['state' => 'running', 'pid' => '{alive.pid}']),
+    'kill' => $terminate->invoke($c, ['state' => 'running', 'pid' => '{alive.pid}', 'verified' => true]),
+    'unconfirmed' => $terminate->invoke($c, ['state' => 'running', 'pid' => '{unconfirmed.pid}', 'verified' => false]),
 ]);
 }}
 """)
+        # review fix C9: a PID whose identity Python did not confirm is never killed (it may be any program now)
+        assert unconfirmed.poll() is None
     finally:
-        alive.kill()
-        alive.wait()
+        for proc in (alive, unconfirmed):
+            proc.kill()
+            proc.wait()
         os.waitpid(zombie, 0)
-    assert out == {"zombie": False, "live": True, "kill": "killed"}
+    assert out == {"zombie": False, "live": True, "kill": "killed", "unconfirmed": "running"}
 
 def _run_php(script: str):
     with tempfile.NamedTemporaryFile("w", suffix=".php", delete=False, encoding="utf-8") as fh:
@@ -190,6 +274,9 @@ def test_alert_texts_are_arabic():
         "verifier": ("pre_caching", "VERIFIER_NOT_CONFIGURED: no Gemini key, every result goes to human review", True),
         "gemini": ("curation_pending", "GEMINI_DOWN: Gemini لا يستجيب", False),
         "unknown": ("idle", "SOMETHING_NEW: raw text", False),
+        "budget": ("idle", "BUDGET_REACHED: daily search budget 5.00 USD reached (spent 5.01); remaining rows stay "
+                           "pending", False),
+        "db": ("error", "DB_UNAVAILABLE: database unreachable", False),
         "error_without_notice": ("error", "", False),
         "idle": ("idle", "", False),
     }
@@ -204,6 +291,8 @@ def test_alert_texts_are_arabic():
     assert out["verifier"].startswith("لا يوجد مفتاح Gemini")
     assert out["gemini"] == "Gemini لا يستجيب"
     assert out["unknown"] == "SOMETHING_NEW: raw text"
+    assert out["budget"].startswith("بلغ صرف اليوم الميزانية اليومية") and "spent" not in out["budget"]
+    assert out["db"].startswith("تعذر الوصول إلى قاعدة البيانات")
     assert out["error_without_notice"].startswith("توقف التشغيل بسبب خطأ غير معروف")
     assert out["idle"] == ""
 
@@ -431,3 +520,124 @@ def test_confirm_texts_say_exactly_what_happens():
     # the page says the same next to the button, and the stop button exists only on the Run page
     assert "الإيقاف ما بيحذف شي" in batch
     assert "/api/stop-batch" not in index + read(JS / "home.js")
+
+
+# ---------------------------------------------------------------------------
+# Stop / «fix stuck run» stop a live worker gracefully (review fix C5)
+# ---------------------------------------------------------------------------
+
+# A stand-in worker: holds temp/pipeline.lock with its own PID and, like main.run_worker_mode, leaves (removing its
+# lock) once the stop request reaches it, unless IGNORE_STOP is set.
+FAKE_WORKER = r"""
+import json, os, sys, time
+root, ignore = sys.argv[1], sys.argv[2] == "1"
+lock = os.path.join(root, "temp", "pipeline.lock")
+with open(lock, "w") as fh:
+    json.dump({"pid": os.getpid(), "role": "worker"}, fh)
+while True:
+    if not ignore and os.path.exists(os.path.join(root, "temp", "stop_requested")):
+        os.remove(lock)
+        sys.exit(0)
+    time.sleep(0.05)
+"""
+
+STOP_HARNESS = r"""<?php
+namespace App\Http\Controllers {
+    class Controller {}
+    class ProductController { public static function forgetProductCaches() {} }
+}
+namespace App\Services {
+    class PythonBridge {
+        public static $calls = [];
+        public static function run($action, $params = []) {
+            $root = getenv('HARNESS_ROOT');
+            if ($action === 'lock_state') {
+                return ['status' => 'success', 'state' => 'running', 'pid' => (int) getenv('WORKER_PID'),
+                        'verified' => getenv('VERIFIED') === '1'];
+            }
+            // what run_control saw: was the lock still there (the killed run's report is built from it)?
+            self::$calls[] = [$params['op'], $params['worker'], file_exists($root . '/temp/pipeline.lock')];
+            if ($params['op'] === 'stop' && $params['worker'] === 'running') {
+                touch($root . '/temp/stop_requested');
+            }
+            return ['status' => 'success', 'message' => 'ok'];
+        }
+        public static function pythonPath() { return 'python'; }
+    }
+    class QueueStats {}
+}
+namespace {
+    class FakeResponse { public $data; public function __construct($d) { $this->data = $d; } }
+    class FakeFactory { public function json($d, $s = 200) { return new FakeResponse($d); } }
+    function response() { return new FakeFactory(); }
+    function base_path($p = '') { return getenv('HARNESS_ROOT') . '/dashboard' . ($p !== '' ? '/' . $p : ''); }
+    require getenv('API_CONTROLLER');
+    App\Http\Controllers\ApiController::$stopWaitSeconds = (int) getenv('STOP_WAIT');
+    $api = new App\Http\Controllers\ApiController();
+    $started = microtime(true);
+    $r = getenv('BUTTON') === 'reset' ? $api->resetBatch() : $api->stopBatch();
+    echo json_encode(['worker' => $r->data['worker'] ?? null, 'calls' => App\Services\PythonBridge::$calls,
+                      'lock_left' => file_exists(getenv('HARNESS_ROOT') . '/temp/pipeline.lock'),
+                      'seconds' => microtime(true) - $started]);
+}
+"""
+
+
+def _press(tmp_path, button="stop", ignore_stop=False, verified=True, wait=5):
+    root = tmp_path / "root"
+    (root / "dashboard").mkdir(parents=True)
+    (root / "temp").mkdir()
+    worker_py = tmp_path / "fake_worker.py"
+    worker_py.write_text(FAKE_WORKER, encoding="utf-8")
+    worker = subprocess.Popen([sys.executable, str(worker_py), str(root), "1" if ignore_stop else "0"])
+    try:
+        lock = root / "temp" / "pipeline.lock"
+        for _ in range(200):
+            if lock.exists() and lock.read_text():
+                break
+            time.sleep(0.02)
+        script = tmp_path / "stop.php"
+        script.write_text(STOP_HARNESS, encoding="utf-8")
+        env = dict(os.environ, HARNESS_ROOT=str(root), API_CONTROLLER=str(CONTROLLER), WORKER_PID=str(worker.pid),
+                   VERIFIED="1" if verified else "0", STOP_WAIT=str(wait), BUTTON=button)
+        result = subprocess.run([PHP, str(script)], capture_output=True, text=True, timeout=120, encoding="utf-8",
+                                env=env)
+        assert result.returncode == 0, result.stdout + result.stderr
+        out = json.loads(result.stdout)
+        time.sleep(0.1)
+        out["exit"] = worker.poll()
+        return out
+    finally:
+        if worker.poll() is None:
+            worker.kill()
+        worker.wait()
+
+
+@pytest.mark.skipif(PHP is None or not hasattr(os, "kill"), reason="needs the PHP CLI")
+@pytest.mark.parametrize("button, final_op", [("stop", "stop"), ("reset", "reset")])
+def test_stop_lets_a_live_worker_finish_and_write_its_own_report(tmp_path, button, final_op):
+    """Review fix C5: Stop and «fix stuck run» sent taskkill /F / kill -9 at once, to the nightly runner too: the
+    worker's finally and run_nightly never ran (no report, no run_history row, cost lost), and Task Scheduler recorded
+    1. A live worker now gets the stop request and time to finish its products; it leaves by itself (exit 0)."""
+    out = _press(tmp_path, button=button)
+    assert out["worker"] == "exited" and out["exit"] == 0, out           # not killed
+    assert out["calls"] == [["stop", "running", True], [final_op, "exited", False]]
+    assert out["seconds"] < 5
+
+
+@pytest.mark.skipif(PHP is None or not hasattr(os, "kill"), reason="needs the PHP CLI")
+def test_a_worker_that_ignores_the_stop_is_killed_after_the_wait_and_reported(tmp_path):
+    out = _press(tmp_path, ignore_stop=True, wait=1)
+    assert out["worker"] == "killed" and out["exit"] is not None and out["exit"] != 0
+    # run_control (which writes the 'stopped' report from the lock) runs before the lock is removed
+    assert out["calls"] == [["stop", "running", True], ["stop", "killed", True]]
+    assert out["lock_left"] is False and out["seconds"] >= 1
+
+
+@pytest.mark.skipif(PHP is None or not hasattr(os, "kill"), reason="needs the PHP CLI")
+@pytest.mark.parametrize("button, final_op", [("stop", "stop"), ("reset", "reset")])
+def test_an_unconfirmed_worker_is_never_killed_and_keeps_its_lock(tmp_path, button, final_op):
+    out = _press(tmp_path, button=button, ignore_stop=True, verified=False, wait=1)
+    assert out["worker"] == "running" and out["exit"] is None
+    assert out["calls"] == [["stop", "running", True], [final_op, "running", True]]
+    assert out["lock_left"] is True

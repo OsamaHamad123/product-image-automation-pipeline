@@ -48,3 +48,8 @@ human_feedback_local.json
 /runs/*
 !/runs/README.md
 !/runs/2026-10-03/
+
+# Record / replay cassettes of a live run (scripts/smoke_live.py --record, scripts/replay_run.py): 100-250 MB of
+# downloaded images and pages per 60 products, wherever they are written. They hold no key, but stay local.
+cassette_*/
+cassette_*.zip

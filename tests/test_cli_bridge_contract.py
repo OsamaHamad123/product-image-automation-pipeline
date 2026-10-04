@@ -197,7 +197,8 @@ def test_select_no_upscale(select_env):
     kinds = [e[0] for e in events]
     upload = next(e for e in events if e[0] == "upload")
     assert upload[1] == (800, 800), "the published file is the 800x800 canvas, not an upscaled copy"
-    assert events[0] == ("process", V2_RESULT["url"], "ab" * 32)
+    # no stored candidate for this URL: the content_sha256 the request sent never picks the published bytes
+    assert events[0] == ("process", V2_RESULT["url"], None)
     # metadata reaches the sheet only after the upload succeeded
     assert kinds.index("upload") < kinds.index("metadata_write")
     link = next(e for e in events if e[0] == "link")
@@ -215,8 +216,8 @@ def test_select_no_upscale(select_env):
 @pytest.mark.parametrize("sent, saved, used", [
     (None, True, True),        # the review page sends nothing: the saved «تحسين الألوان» setting applies
     (None, False, False),
-    ("false", True, False),    # an explicit value in the request still wins
-    ("true", False, True),
+    ("false", True, True),     # one processing profile: a value in the request no longer changes it
+    ("true", False, False),
 ])
 def test_select_uses_the_saved_enhancement_setting(select_env, monkeypatch, sent, saved, used):
     import config
@@ -239,14 +240,148 @@ def test_select_uses_the_saved_enhancement_setting(select_env, monkeypatch, sent
     assert seen["enhance"] is used
 
 
-def test_select_not_isolated_writes_needs_review(select_env):
+def test_one_processing_profile_for_auto_publish_approval_and_upload(select_env, monkeypatch, tmp_path):
+    """The worker's auto-publish, the reviewer's approval and a manual upload all process with the Settings
+    profile: the Settings canvas (not IMAGE_TARGET_SIZE), the saved enhancement and background method; what a
+    request asks for does not change it."""
+    import config
+    import image_processor
+    import local_cache_db
+    import main
+
     bridge, events, state = select_env
-    state["isolated"] = False
+    monkeypatch.setattr(config, "OUTPUT_CANVAS_SIZE", 1000, raising=False)
+    monkeypatch.setattr(config, "IMAGE_TARGET_SIZE", (800, 800), raising=False)
+    monkeypatch.setattr(config, "ENABLE_IMAGE_ENHANCEMENT", True, raising=False)
+    monkeypatch.setattr(config, "BG_REMOVAL_METHOD", "remove_bg_api", raising=False)
+    monkeypatch.setattr(local_cache_db, "get_cached_product", lambda **k: None)
+    monkeypatch.setattr(local_cache_db, "find_image_owners", lambda *a, **k: [])
+    monkeypatch.setattr(local_cache_db, "delete_product_failure", lambda *a, **k: True)
+    original = image_processor.process_product_image_result
+    seen = []
+
+    def spy(src, name, brand, target_width=0, target_height=0, bg_method=None, candidate_sha256=None, enhance=False):
+        seen.append((image_processor._resolve_canvas_size(target_width, target_height),
+                     image_processor._normalise_method(bg_method), enhance))
+        return original(src, name, brand, target_width=target_width, target_height=target_height,
+                        bg_method=bg_method, candidate_sha256=candidate_sha256, enhance=enhance)
+
+    monkeypatch.setattr(image_processor, "process_product_image_result", spy)
+    task = {"id": 7, "row_number": 4, "product_name": SELECT_PARAMS["product_name"], "brand": "Almarai",
+            "barcode": SELECT_PARAMS["barcode"], "payload_json": "{}", "sku_key": SELECT_PARAMS["sku_key"]}
+    assert main.auto_approve_product(task, {"url": V2_RESULT["url"]}, object(), 3,
+                                     sku_key=SELECT_PARAMS["sku_key"]) == "published"
+    sent = dict(SELECT_PARAMS, target_width=800, target_height=800, enhance="false", bg_removal_method="none")
+    assert bridge.action_select_image(sent)["status"] == "success"
+    upload = tmp_path / "manual.png"
+    _canvas(upload, (300, 300))
+    params = {k: SELECT_PARAMS[k] for k in ("row_number", "product_name", "brand", "barcode", "sku_key")}
+    assert bridge.action_upload_manual_image(dict(params, file_path=str(upload), enhance="false",
+                                                  target_width=640, target_height=640))["status"] == "success"
+    assert seen == [((1000, 1000), "remove_bg_api", True)] * 3
+
+
+def test_approval_and_upload_write_with_the_brand_identity(select_env, tmp_path):
+    """Without the brand in the row identity, a stale row number now holding a same-name product of another brand
+    would receive this image; the link and the metadata writes carry the sheet brand (as auto-publish does)."""
+    bridge, events, state = select_env
+    assert bridge.action_select_image(dict(SELECT_PARAMS, size="1L"))["status"] == "success"
+    upload = tmp_path / "manual.png"
+    _canvas(upload, (300, 300))
+    params = {k: SELECT_PARAMS[k] for k in ("row_number", "product_name", "brand", "barcode", "sku_key")}
+    assert bridge.action_upload_manual_image(dict(params, file_path=str(upload)))["status"] == "success"
+    writes = [e[-1] for e in events if e[0] in ("link", "metadata_write")]
+    assert len(writes) == 4
+    assert all(w["brand"] == "Almarai" and w["barcode"] == "6281007000024" for w in writes)
+    assert writes[0]["size"] == "1L"
+
+
+def test_an_explicit_approval_of_another_products_image_is_written_with_a_warning(select_env, monkeypatch):
+    """Auto-publish refuses an image another product already owns; the reviewer's explicit approval goes through
+    but names the other product, and the canvas hash is stored with the approval."""
+    import local_cache_db
+    bridge, events, state = select_env
+    owner = {"sku_key": "06291003000013", "product_name": "Masafi Water 1.5L", "brand": "Masafi",
+             "cloudinary_url": "https://res.cloudinary.com/demo/masafi.png", "verification_status": "human_approved",
+             "match": "phash", "distance": 2}
+    seen = []
+    monkeypatch.setattr(local_cache_db, "find_image_owners",
+                        lambda url, phash, sku_key=None, product_name=None, **k: seen.append((url, sku_key)) or [owner])
+    monkeypatch.setattr(main_module(), "_canvas_phash", lambda path: "00ff00ff00ff00ff")
     result = bridge.action_select_image(dict(SELECT_PARAMS))
     assert result["status"] == "success"
-    assert result["warning"] == "background_not_removed"
-    link = next(e for e in events if e[0] == "link")
-    assert link[3].startswith("needs_review:https://res.cloudinary.com/")
+    assert result["warning"] == "duplicate_image" and result["warnings"] == ["duplicate_image"]
+    assert result["duplicate_of"] == [owner]
+    assert seen == [(result["image_link"], "06281007000024")]
+    assert any(e[0] == "link" for e in events)
+    _, args, kwargs = next(e for e in events if e[0] == "resolution")
+    assert kwargs["perceptual_hash"] == "00ff00ff00ff00ff" and kwargs["verification_status"] == "human_approved"
+
+
+def main_module():
+    import main
+    return main
+
+
+def test_a_product_on_two_rows_gets_the_approval_on_both(select_env, monkeypatch, tmp_path):
+    """The same product twice in the sheet: the approval (and the upload) is written to every row of its key, each
+    write carrying that row's own identity, so the second row is not left empty while the queue says completed."""
+    import local_cache_db
+    bridge, events, state = select_env
+    sku = SELECT_PARAMS["sku_key"]
+    rows = [{"row_number": 4, "sku_key": sku, "barcode": "6281007000024", "product_name": "Fresh Milk Full Fat 1L",
+             "brand": "Almarai", "payload_json": '{"size": "1L"}'},
+            {"row_number": 9, "sku_key": sku, "barcode": "6281007000024", "product_name": "FRESH MILK FULL FAT 1 L",
+             "brand": "ALMARAI", "payload_json": '{"size": "1 L"}'}]
+    asked = []
+    monkeypatch.setattr(local_cache_db, "get_tasks_by_sku", lambda key: asked.append(key) or [dict(r) for r in rows])
+    result = bridge.action_select_image(dict(SELECT_PARAMS, size="1L"))
+    assert result["status"] == "success" and result["rows_written"] == [4, 9] and asked == [sku]
+    links = [(e[1], e[4]) for e in events if e[0] == "link"]
+    assert links == [(4, {"barcode": "6281007000024", "product_name": "Fresh Milk Full Fat 1L", "size": "1L",
+                          "brand": "Almarai"}),
+                     (9, {"barcode": "6281007000024", "product_name": "FRESH MILK FULL FAT 1 L", "size": "1 L",
+                          "brand": "ALMARAI"})]
+    assert [e[1] for e in events if e[0] == "metadata_write"] == [4, 9]
+
+    events.clear()
+    upload = tmp_path / "manual.png"
+    _canvas(upload, (300, 300))
+    params = {k: SELECT_PARAMS[k] for k in ("row_number", "product_name", "brand", "barcode", "sku_key")}
+    result = bridge.action_upload_manual_image(dict(params, file_path=str(upload)))
+    assert result["rows_written"] == [4, 9] and [e[1] for e in events if e[0] == "link"] == [4, 9]
+
+
+def test_select_not_isolated_is_refused_and_writes_nothing(select_env):
+    """An approval whose background was not removed at all is not published (it used to be written needs_review:
+    while the approval was saved human_approved and the row completed): the product stays in review."""
+    bridge, events, state = select_env
+    state["isolated"] = False
+    for anyway in (False, True):                      # a failed background removal is never published anyway
+        result = bridge.action_select_image(dict(SELECT_PARAMS, publish_anyway=anyway))
+        assert (result["status"], result["error_code"]) == ("failed", "background_failed")
+        assert result["publish_anyway_allowed"] is False and result["quality_flags"] == [] and result["error"]
+    assert not any(e[0] in ("upload", "link", "resolution") for e in events)
+
+
+def test_a_cutout_that_failed_the_quality_gate_is_refused_with_its_flags(select_env, monkeypatch):
+    """The image package returns a cutout that failed its quality gate as not isolated (with quality_flags): never a
+    clean publish nor a needs_review: approval, and the flags reach the page."""
+    import image_processor
+    bridge, events, state = select_env
+    original = image_processor.process_product_image_result
+
+    def gated(*a, **k):
+        result = original(*a, **k)
+        result.isolated = False
+        result.quality_flags = ["halo_fringe"]
+        return result
+
+    monkeypatch.setattr(image_processor, "process_product_image_result", gated)
+    result = bridge.action_select_image(dict(SELECT_PARAMS, publish_anyway=True))
+    assert (result["status"], result["error_code"]) == ("failed", "background_failed")
+    assert result["quality_flags"] == ["halo_fringe"] and result["publish_anyway_allowed"] is False
+    assert not any(e[0] in ("link", "resolution") for e in events)
 
 
 def test_select_requires_identity(select_env, monkeypatch):
@@ -274,13 +409,20 @@ def test_select_upload_failure_writes_nothing(select_env, monkeypatch):
     assert not any(e[0] in ("link", "metadata_write", "resolution") for e in events)
 
 
-def test_select_uses_the_ui_candidate_sha256(select_env):
-    """The dashboards post candidate_sha256: the verified bytes must be published, not a re-download."""
+def test_select_publishes_the_stored_candidates_bytes_never_a_sha256_from_the_request(select_env, monkeypatch):
+    """The verified bytes of the stored candidate for that URL are published, not a re-download; a candidate_sha256
+    the request sends never chooses bytes from the candidate store (another candidate's picture under this URL)."""
+    import local_cache_db
     bridge, events, state = select_env
     params = dict(SELECT_PARAMS)
     params["candidate_sha256"] = params.pop("content_sha256")
+    monkeypatch.setattr(local_cache_db, "get_curation_candidates",
+                        lambda *a, **k: [{"image_url": V2_RESULT["url"], "content_sha256": "cd" * 32}])
     assert bridge.action_select_image(params)["status"] == "success"
-    assert events[0] == ("process", V2_RESULT["url"], "ab" * 32)
+    assert events[0] == ("process", V2_RESULT["url"], "cd" * 32)
+    monkeypatch.setattr(local_cache_db, "get_curation_candidates", lambda *a, **k: [])
+    assert bridge.action_select_image(params)["status"] == "success"
+    assert [e for e in events if e[0] == "process"][-1] == ("process", V2_RESULT["url"], None)
 
 
 def test_select_ignores_a_queue_row_of_another_product(select_env, monkeypatch):
@@ -305,6 +447,243 @@ def test_select_after_owner_fixed_the_barcode(select_env, monkeypatch):
     monkeypatch.setattr(local_cache_db, "get_task_by_row",
                         lambda row: {"barcode": "6.28E+12", "sku_key": "06281007000024", "product_name": "Fresh Milk"})
     assert bridge.action_select_image(dict(SELECT_PARAMS))["status"] == "success"
+
+
+# ---------------------------------------------------------------------------
+# C1: an approval or upload never replaces a decision the reviewer's page did not show
+# ---------------------------------------------------------------------------
+
+HUMAN = {"cloudinary_url": "https://res.cloudinary.com/demo/other-reviewer.png", "original_url": "https://lulu.ae/x.jpg",
+         "verification_status": "human_approved", "approved_by": "human"}
+
+
+@pytest.fixture
+def stale_env(select_env, monkeypatch):
+    import datetime
+    import local_cache_db
+    bridge, events, state = select_env
+    state.update(approval=None, task=None, fenced=[])
+    monkeypatch.setattr(local_cache_db, "get_cached_product", lambda **k: state["approval"])
+    monkeypatch.setattr(local_cache_db, "get_task_by_row", lambda row: state["task"])
+    monkeypatch.setattr(local_cache_db, "release_worker_claims",
+                        lambda row, sku_key=None, **k: state["fenced"].append((row, sku_key)) or 1)
+    state["now"] = datetime.datetime.now().replace(microsecond=0)
+    return bridge, events, state
+
+
+def _approved(state, seconds_ago, **extra):
+    import datetime
+    return dict(HUMAN, resolved_at=state["now"] - datetime.timedelta(seconds=seconds_ago), **extra)
+
+
+def _queue_row(status="ready_for_review", updated_at="2026-10-03 10:00:00"):
+    return {"row_number": 4, "sku_key": SELECT_PARAMS["sku_key"], "product_name": SELECT_PARAMS["product_name"],
+            "barcode": SELECT_PARAMS["barcode"], "status": status, "updated_at": updated_at}
+
+
+def _writes(events):
+    return [e for e in events if e[0] in ("process", "link", "resolution")]
+
+
+def test_an_approval_the_page_did_not_show_is_not_replaced(stale_env):
+    bridge, events, state = stale_env
+    state["approval"] = _approved(state, 3600)
+    state["task"] = _queue_row("completed")
+    expected = {"queue_status": None, "queue_updated_at": None, "approved_url": None}
+    result = bridge.action_select_image(dict(SELECT_PARAMS, expected_state=expected))
+    assert result["status"] == "failed" and result["error_code"] == "already_approved" and result["error"]
+    assert result["current"]["approved_url"] == HUMAN["cloudinary_url"]
+    assert result["current"]["approval_status"] == "human_approved"
+    assert result["current"]["queue_status"] == "completed"
+    assert _writes(events) == [] and state["fenced"] == []
+
+    # the page shows it (the sheet link, with or without the needs_review: prefix): the approval replaces it
+    shown = dict(expected, approved_url="needs_review:" + HUMAN["cloudinary_url"])
+    assert bridge.action_select_image(dict(SELECT_PARAMS, expected_state=shown))["status"] == "success"
+    # replace no longer skips the comparison: sent with the state the page showed before, it is refused again ...
+    again = bridge.action_select_image(dict(SELECT_PARAMS, expected_state=expected, replace=True))
+    assert again["error_code"] == "already_approved"
+    # ... and sent with what the confirmation showed (the refusal's current), the reviewer replaces it
+    assert bridge.action_select_image(dict(SELECT_PARAMS, expected_state=result["current"], replace=True))["status"] \
+        == "success"
+
+
+def test_a_queue_row_that_changed_since_the_page_opened_refuses(stale_env):
+    bridge, events, state = stale_env
+    state["task"] = _queue_row("processing", "2026-10-03 10:05:00")
+    expected = {"queue_status": "ready_for_review", "queue_updated_at": "2026-10-03 10:00:00", "approved_url": None}
+    result = bridge.action_select_image(dict(SELECT_PARAMS, expected_state=expected))
+    assert result["error_code"] == "state_changed"
+    assert result["current"]["queue_status"] == "processing"
+    assert result["current"]["queue_updated_at"] == "2026-10-03 10:05:00"
+    assert _writes(events) == []
+
+    state["task"] = _queue_row("ready_for_review", "2026-10-03 10:07:00")      # same status, newer row
+    assert bridge.action_select_image(dict(SELECT_PARAMS, expected_state=expected))["error_code"] == "state_changed"
+
+    # unchanged (the page's ISO form of the same time), or replace: approved; the worker's claim is taken
+    import datetime
+    state["task"] = _queue_row("ready_for_review", datetime.datetime(2026, 10, 3, 10, 0, 0))
+    iso = dict(expected, queue_updated_at="2026-10-03T10:00:00")
+    assert bridge.action_select_image(dict(SELECT_PARAMS, expected_state=iso))["status"] == "success"
+    assert state["fenced"] == [(4, SELECT_PARAMS["sku_key"])]
+    state["task"] = _queue_row("processing", "2026-10-03 10:05:00")
+    refused = bridge.action_select_image(dict(SELECT_PARAMS, expected_state=expected, replace="true"))
+    assert refused["error_code"] == "state_changed"              # replace compares what the reviewer confirmed
+    assert bridge.action_select_image(dict(SELECT_PARAMS, expected_state=refused["current"], replace="true"))["status"] \
+        == "success"
+
+
+def test_the_expected_state_may_arrive_as_json_text(stale_env):
+    """The upload form posts fields as text."""
+    import json as _json
+    bridge, events, state = stale_env
+    state["approval"] = _approved(state, 3600)
+    expected = _json.dumps({"queue_status": None, "queue_updated_at": None, "approved_url": ""})
+    assert bridge.action_select_image(dict(SELECT_PARAMS, expected_state=expected))["error_code"] == "already_approved"
+
+
+@pytest.mark.parametrize("seconds_ago, same_image, refused", [
+    (30, False, True),           # another approval seconds ago: an old client may not replace it
+    (30, True, False),           # the same image approved again (a retried request)
+    (600, False, False),         # older than two minutes: the old behaviour
+])
+def test_an_old_client_never_replaces_a_fresh_approval(stale_env, seconds_ago, same_image, refused):
+    bridge, events, state = stale_env
+    state["approval"] = _approved(state, seconds_ago, **({"original_url": V2_RESULT["url"]} if same_image else {}))
+    result = bridge.action_select_image(dict(SELECT_PARAMS))
+    assert (result.get("error_code") == "already_approved") is refused
+    assert (result["status"] == "success") is (not refused)
+    assert bridge.action_select_image(dict(SELECT_PARAMS, replace=True))["status"] == "success"
+
+
+def test_an_approval_made_during_processing_is_not_overwritten(stale_env, monkeypatch):
+    """The re-check under the publish lock: another reviewer approved while this image was processed."""
+    import image_processor
+    bridge, events, state = stale_env
+    original = image_processor.process_product_image_result
+
+    def slow(*a, **k):
+        state["approval"] = _approved(state, 1)
+        return original(*a, **k)
+
+    monkeypatch.setattr(image_processor, "process_product_image_result", slow)
+    expected = {"queue_status": None, "queue_updated_at": None, "approved_url": None}
+    result = bridge.action_select_image(dict(SELECT_PARAMS, expected_state=expected))
+    assert result["error_code"] == "already_approved"
+    assert not any(e[0] in ("link", "metadata_write", "resolution") for e in events)
+    assert state["fenced"] == []
+
+
+def test_a_manual_upload_follows_the_same_rule(stale_env, tmp_path):
+    bridge, events, state = stale_env
+    state["approval"] = _approved(state, 10)
+    upload = tmp_path / "manual.png"
+    _canvas(upload, (300, 300))
+    params = {k: SELECT_PARAMS[k] for k in ("row_number", "product_name", "brand", "barcode", "sku_key")}
+    params["file_path"] = str(upload)
+    assert bridge.action_upload_manual_image(dict(params))["error_code"] == "already_approved"
+    expected = {"queue_status": None, "queue_updated_at": None, "approved_url": None}
+    assert bridge.action_upload_manual_image(dict(params, expected_state=expected))["error_code"] == "already_approved"
+    assert _writes(events) == []
+    refused = bridge.action_upload_manual_image(dict(params, expected_state=expected, replace=True))
+    assert refused["error_code"] == "already_approved" and _writes(events) == []
+    assert bridge.action_upload_manual_image(dict(params, expected_state=refused["current"], replace=True))["status"] \
+        == "success"
+
+
+def test_a_publish_lock_held_elsewhere_writes_nothing(stale_env, monkeypatch):
+    import contextlib
+    import local_cache_db
+    bridge, events, state = stale_env
+
+    @contextlib.contextmanager
+    def busy(sku_key, timeout=None):
+        yield "busy"
+
+    monkeypatch.setattr(local_cache_db, "sku_publish_lock", busy)
+    result = bridge.action_select_image(dict(SELECT_PARAMS))
+    assert result["status"] == "failed" and result["error_code"] == "busy"
+    assert not any(e[0] in ("link", "resolution") for e in events)
+
+
+# ---------------------------------------------------------------------------
+# C3: what happened to the sheet write, read after the outbox's final flush
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("answer, sheet", [
+    ({4: "written"}, "written"),
+    ({4: "SYNCED", 9: "synced"}, "written"),
+    ({4: "written", 9: "pending"}, "pending"),
+    ({4: "FAILED"}, "pending"),
+    ({4: "pending", 9: "conflict"}, "conflict"),
+    ({4: "DEAD"}, "conflict"),
+    ([{"row_number": 4, "outcome": "written"}], "written"),
+    ("conflict", "conflict"),
+    ({4: "something new"}, "unknown"),
+    ({}, "unknown"),
+])
+def test_the_sheet_outcome_follows_the_final_flush(select_env, monkeypatch, answer, sheet):
+    import google_sheets
+    import local_cache_db
+    bridge, events, state = select_env
+    monkeypatch.setattr(local_cache_db, "get_tasks_by_sku", lambda key: [
+        {"row_number": 9, "sku_key": key, "barcode": "6281007000024", "product_name": "Fresh Milk Full Fat 1L",
+         "brand": "Almarai", "payload_json": "{}"}])
+    monkeypatch.setattr(google_sheets, "stop_async_queue", lambda *a, **k: events.append(("flushed",)))
+    monkeypatch.setattr(google_sheets, "outbox_outcomes",
+                        lambda rows: events.append(("outcomes", list(rows))) or answer, raising=False)
+    result = bridge.action_select_image(dict(SELECT_PARAMS))
+    assert result["status"] == "success" and result["sheet"] == sheet
+    kinds = [e[0] for e in events]
+    assert kinds.index("flushed") < kinds.index("outcomes")         # read after the final flush
+    assert ("outcomes", [4, 9]) in events
+
+
+def test_the_sheet_outcome_reads_only_this_approvals_link_write_in_the_outbox_records(select_env, monkeypatch):
+    # google_sheets.outbox_outcomes returns every queued write of the rows: an old CONFLICT of row 4 from an earlier
+    # approval, and metadata writes, must not make this approval's (SYNCED) write look failed
+    import google_sheets
+    import local_cache_db
+    bridge, events, state = select_env
+    monkeypatch.setattr(local_cache_db, "get_tasks_by_sku", lambda key: [])
+    records = [
+        {"id": 3, "row": 4, "queued_row": 4, "column_key": "link", "status": "CONFLICT"},     # weeks ago
+        {"id": 40, "row": 4, "queued_row": 4, "column_key": "meta:category_l1_en", "status": "DEAD"},
+        {"id": 41, "row": 4, "queued_row": 4, "column_key": "link", "status": "SYNCED"},      # this approval
+    ]
+    monkeypatch.setattr(google_sheets, "outbox_outcomes", lambda rows: list(records), raising=False)
+    assert bridge.action_select_image(dict(SELECT_PARAMS))["sheet"] == "written"
+    records.append({"id": 42, "row": 4, "queued_row": 4, "column_key": "link", "status": "SUPERSEDED"})
+    assert bridge.action_select_image(dict(SELECT_PARAMS, replace=True))["sheet"] == "conflict"
+
+
+def test_the_sheet_outcome_is_unknown_without_the_outbox_api(select_env, monkeypatch, tmp_path):
+    import google_sheets
+    bridge, events, state = select_env
+    if hasattr(google_sheets, "outbox_outcomes"):
+        monkeypatch.setattr(google_sheets, "outbox_outcomes", None)
+    assert bridge.action_select_image(dict(SELECT_PARAMS))["sheet"] == "unknown"
+
+    def broken(rows):
+        raise RuntimeError("outbox unreadable")
+
+    monkeypatch.setattr(google_sheets, "outbox_outcomes", broken, raising=False)
+    upload = tmp_path / "manual.png"
+    _canvas(upload, (300, 300))
+    params = {k: SELECT_PARAMS[k] for k in ("row_number", "product_name", "brand", "barcode", "sku_key")}
+    result = bridge.action_upload_manual_image(dict(params, file_path=str(upload)))
+    assert result["status"] == "success" and result["sheet"] == "unknown"
+
+
+def test_the_upload_reports_the_sheet_outcome(select_env, monkeypatch, tmp_path):
+    import google_sheets
+    bridge, events, state = select_env
+    monkeypatch.setattr(google_sheets, "outbox_outcomes", lambda rows: {r: "conflict" for r in rows}, raising=False)
+    upload = tmp_path / "manual.png"
+    _canvas(upload, (300, 300))
+    params = {k: SELECT_PARAMS[k] for k in ("row_number", "product_name", "brand", "barcode", "sku_key")}
+    assert bridge.action_upload_manual_image(dict(params, file_path=str(upload)))["sheet"] == "conflict"
 
 
 # ---------------------------------------------------------------------------

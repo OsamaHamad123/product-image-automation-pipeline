@@ -24,8 +24,8 @@ class ReviewController extends Controller
 {
     public const MODES = ['single', 'bulk'];
 
-    /** قيم ?filter= المقبولة (رقاقات قائمة المراجعة). */
-    public const FILTERS = ['all', 'proposed', 'warning', 'none', 'not_found', 'failed'];
+    /** قيم ?filter= المقبولة (رقاقات قائمة المراجعة؛ bg_failed: اعتمادات لم تُعزل خلفيتها). */
+    public const FILTERS = ['all', 'proposed', 'warning', 'none', 'not_found', 'failed', 'bg_failed'];
 
     /** حالات الطابور التي تحتاجها الشاشة؛ الصفوف المعتمدة تُعرف من رابط الشيت واعتماد resolved_products. */
     public const QUEUE_STATUSES = ['ready_for_review', 'failed', 'pending', 'processing'];

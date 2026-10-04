@@ -45,7 +45,7 @@ try:  # browser TLS fingerprint; a hard dependency in requirements.txt, optional
 except Exception:  # pragma: no cover - depends on the environment
     _curl_requests = None
 
-from . import settings
+from . import cassette, settings
 from .models import Candidate, FetchedImage, SkuSpec
 
 logger = logging.getLogger(__name__)
@@ -69,6 +69,16 @@ _EXT = {
 }
 _MARKUP_PREFIXES = (b"<",)     # HTML, XML and SVG bodies all start with '<'
 _REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
+def request_headers(page_url: Optional[str] = None) -> dict:
+    """The image request headers of this fetch (Accept with AVIF first; Referer = the candidate's page).
+    The publish-time re-download (image_processor) sends the same, so a CDN that picks the format per request
+    returns the bytes that were verified. The User-Agent is left to each client (it must match its TLS fingerprint)."""
+    headers = {"Accept": ACCEPT, "Accept-Language": "en-US,en;q=0.9,ar;q=0.8"}
+    if page_url:
+        headers["Referer"] = page_url
+    return headers
 
 
 def _store_dir(explicit: Optional[str]) -> Path:
@@ -124,10 +134,7 @@ class HttpFetcher:
     # -- one candidate -------------------------------------------------------
 
     def _headers(self, cand: Candidate) -> dict:
-        headers = {"Accept": ACCEPT, "User-Agent": USER_AGENT, "Accept-Language": "en-US,en;q=0.9,ar;q=0.8"}
-        if cand.page_url:
-            headers["Referer"] = cand.page_url
-        return headers
+        return dict(request_headers(cand.page_url), **{"User-Agent": USER_AGENT})
 
     def _get(self, url: str, headers: dict, proxy: Optional[str] = None):
         kwargs = {"headers": dict(headers), "timeout": self.timeout, "stream": True, "allow_redirects": True}
@@ -141,7 +148,8 @@ class HttpFetcher:
             getter = requests.get
         if proxy:
             kwargs["proxies"] = {"http": proxy, "https": proxy}
-        return getter(url, **kwargs)
+        return cassette.http("fetch", "GET", url, lambda: getter(url, **kwargs), headers=headers, proxy=bool(proxy),
+                             stream=True, max_bytes=self.max_bytes)   # record / replay (no-op without a cassette)
 
     def _download(self, url: str, headers: dict, proxy: Optional[str] = None) -> Tuple[Optional[bytes], Optional[str], str]:
         """(body, error, content_type) for one attempt. Never raises."""
@@ -149,7 +157,7 @@ class HttpFetcher:
             resp = self._get(url, headers, proxy)
         except Exception as exc:
             logger.debug("fetch %s%s: %s", url, " via proxy" if proxy else "", type(exc).__name__)
-            return None, "timeout" if _is_timeout(exc) else "connection_error", ""
+            return None, cassette.miss_code(exc) or ("timeout" if _is_timeout(exc) else "connection_error"), ""
         try:
             status = int(getattr(resp, "status_code", 0) or 0)
             if status != 200:

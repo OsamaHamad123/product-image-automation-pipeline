@@ -32,7 +32,7 @@ from typing import Any, List, Optional
 
 import requests
 
-from .. import settings
+from .. import cassette, settings
 from ..models import Candidate, ProviderResult, SkuSpec
 from .base import BaseProvider, ProviderEmpty, ProviderHTTPError, page_domain, response_text, to_int
 from .serper_shopping import store_domain, unwrap_link
@@ -154,7 +154,8 @@ class SerpApiLensProvider(BaseProvider):
                   "api_key": key}
         http = self._session or requests
         try:
-            resp = http.get(SERPAPI_URL, params=params, timeout=self.timeout)
+            resp = cassette.http(self.name, "GET", SERPAPI_URL,
+                                 lambda: http.get(SERPAPI_URL, params=params, timeout=self.timeout), params=params)
         except Exception as exc:
             text = f"{type(exc).__name__}: {exc}"
             timed_out = "timeout" in text.lower() or "timed out" in text.lower()

@@ -10,6 +10,17 @@ use App\Services\QueueStats;
 
 class ApiController extends Controller
 {
+    /** حقول اعتماد صورة كما ترسلها شاشة المراجعة (review/core.js selectBody و reviewedCandidateView)، ولا غيرها. */
+    private const SELECT_FIELDS = [
+        'image_url', 'page_url', 'candidate_sha256', 'row_number', 'product_name', 'brand', 'barcode', 'sku_key',
+        'size', 'product_name_ar', 'brand_ar', 'category', 'sub_category', 'origin',
+        'search_decision', 'candidate_status', 'candidate_cache_hit', 'identity_tier', 'vlm_decision',
+        'candidate_warnings', 'target_width', 'target_height',
+    ];
+
+    /** ما رأته الصفحة (عقد C1): حالة صف الطابور ووقت تحديثه ورقمه، والصورة المعتمدة. */
+    private const EXPECTED_STATE_FIELDS = ['queue_status', 'queue_updated_at', 'approved_url', 'queue_row'];
+
     private function getPythonPath()
     {
         return PythonBridge::pythonPath();
@@ -48,11 +59,32 @@ class ApiController extends Controller
     }
 
     /**
-     * اعتماد صورة معينة وتحديث الشيت
+     * اعتماد صورة معينة وتحديث الشيت.
+     * expected_state (ما رأته الصفحة: حالة صف الطابور ووقت تحديثه والصورة المعتمدة) و replace (تأكيد المراجع الصريح
+     * باستبدال ما تغيّر) و publish_anyway (تأكيده نشر صورة فيها علامات عرض من فحص القص) تمر إلى الجسر ضمن الطلب؛
+     * replace و publish_anyway قيمتان منطقيتان فقط.
      */
     public function selectImage(Request $request)
     {
-        $result = $this->runPython('select_image', $request->all());
+        // قائمة صريحة بما ترسله شاشة المراجعة (review/core.js selectBody) مثل رفع الصورة: لا phash ولا content_sha256
+        // ولا category_l*_en ولا أي حقل آخر يمر إلى الجسر (كانت تتجاوز فحص الصور المرفوضة، وتختار بايتات مرشح آخر من
+        // مخزن المرشحات، وتغيّر مجلد Cloudinary وبيانات الشيت). candidate_sha256 يتحقق منه الجسر أمام المرشح المحفوظ
+        $params = $request->only(self::SELECT_FIELDS);
+        $expected = $request->input('expected_state');
+        if (is_string($expected)) {
+            $decoded = json_decode($expected, true);
+            $expected = is_array($decoded) ? $decoded : null;
+        }
+        if (is_array($expected)) {
+            $params['expected_state'] = array_intersect_key($expected, array_flip(self::EXPECTED_STATE_FIELDS));
+        }
+        if ($request->has('replace')) {
+            $params['replace'] = $request->boolean('replace');
+        }
+        if ($request->has('publish_anyway')) {
+            $params['publish_anyway'] = $request->boolean('publish_anyway');
+        }
+        $result = $this->runPython('select_image', $params);
 
         if (($result['status'] ?? '') === 'success') {
             // تفريغ كاش الكتالوج ليعاد قراءته بالشيت المحدث
@@ -103,6 +135,23 @@ class ApiController extends Controller
             'size', 'product_name_ar', 'brand_ar', 'category',
             'target_width', 'target_height', 'enhance', 'search_decision'
         ]);
+        // ما رأته الصفحة (expected_state) يصل نصاً JSON من نموذج الرفع، و replace تأكيد صريح بالاستبدال (قيمة منطقية)؛
+        // يقرؤهما cli_bridge._stale_refusal
+        $expected = $request->input('expected_state');
+        if (is_string($expected)) {
+            $decoded = json_decode($expected, true);
+            $expected = is_array($decoded) ? $decoded : null;
+        }
+        if (is_array($expected)) {
+            $params['expected_state'] = array_intersect_key($expected, array_flip(self::EXPECTED_STATE_FIELDS));
+        }
+        if ($request->has('replace')) {
+            $params['replace'] = $request->boolean('replace');
+        }
+        // تأكيد المراجع نشر صورة فيها علامات عرض من فحص القص (قيمة منطقية)
+        if ($request->has('publish_anyway')) {
+            $params['publish_anyway'] = $request->boolean('publish_anyway');
+        }
         $params['file_path'] = $targetPath;
 
         $result = $this->runPython('upload_manual_image', $params);
@@ -194,7 +243,7 @@ class ApiController extends Controller
                 $batContent .= "cd /d \"" . $basePath . "\"\r\n";
                 $batContent .= "\"" . $pythonPath . "\" \"" . $scriptPath . "\" --enqueue > \"" . $logPath . "\" 2>&1\r\n";
                 $batContent .= "if %errorlevel% equ 0 (\r\n";
-                $batContent .= "    \"" . $pythonPath . "\" -u \"" . $scriptPath . "\" --worker >> \"" . $logPath . "\" 2>&1\r\n";
+                $batContent .= "    \"" . $pythonPath . "\" -u \"" . $scriptPath . "\" --worker --trigger=dashboard >> \"" . $logPath . "\" 2>&1\r\n";
                 $batContent .= ")\r\n";
                 
                 $batFile = $tempDir . DIRECTORY_SEPARATOR . 'run_pipeline.bat';
@@ -214,7 +263,7 @@ class ApiController extends Controller
                 }
             } else {
                 // Linux background execution
-                $cmd = "cd \"" . $basePath . "\" && export PYTHONUTF8=1 PYTHONIOENCODING=utf-8 && \"" . $pythonPath . "\" \"" . $scriptPath . "\" --enqueue > \"" . $logPath . "\" 2>&1 && \"" . $pythonPath . "\" -u \"" . $scriptPath . "\" --worker >> \"" . $logPath . "\" 2>&1";
+                $cmd = "cd \"" . $basePath . "\" && export PYTHONUTF8=1 PYTHONIOENCODING=utf-8 && \"" . $pythonPath . "\" \"" . $scriptPath . "\" --enqueue > \"" . $logPath . "\" 2>&1 && \"" . $pythonPath . "\" -u \"" . $scriptPath . "\" --worker --trigger=dashboard >> \"" . $logPath . "\" 2>&1";
                 $linuxCmd = "nohup sh -c " . escapeshellarg($cmd) . " > /dev/null 2>&1 &";
                 shell_exec($linuxCmd);
             }
@@ -225,15 +274,22 @@ class ApiController extends Controller
         }
     }
 
+    /** حكم بايثون على القفل يُحفظ هذه المدة لاستعلامات الحالة المتكررة (الشريط الجانبي يسأل كل بضع ثوانٍ). */
+    private const LOCK_STATE_CACHE_S = 10;
+
     /**
-     * حالة عامل الخلفية من ملف القفل temp/pipeline.lock:
-     * starting = كتبت لوحة التحكم 'STARTING' والإدراج يقرأ الشيت (حتى 5 دقائق)، running = PID حي،
-     * none = لا قفل، أو قفل قديم، أو عملية انتهت.
+     * حالة عامل الخلفية من ملف القفل temp/pipeline.lock: starting = كتبت لوحة التحكم 'STARTING' والإدراج يقرأ الشيت
+     * (حتى 5 دقائق)، running = عامل حي، none = لا قفل أو قفل متروك. الحكم على قفل يحمل رقم عملية يأتي من بايثون
+     * (cli_bridge lock_state = main.lock_verdict: نبض القفل وهوية العملية واسم الجهاز)، فلا توجد قاعدة ثانية هنا
+     * تختلف عنها. verified: هوية العملية مؤكدة (سطر الأوامر ووقت البدء)، ووحدها تسمح بإنهائها. بايثون لم يرد:
+     * running بلا verified (لا تشغيل ثانٍ ولا إنهاء أي عملية). $fresh=false (batchStatus) يقبل حكماً عمره حتى
+     * LOCK_STATE_CACHE_S لمحتوى القفل نفسه.
      */
-    private function pipelineProcess(): array
+    private function pipelineProcess(bool $fresh = true): array
     {
         $lockFile = $this->automationPath('temp/pipeline.lock');
-        $process = ['state' => 'none', 'pid' => null, 'lock' => $lockFile, 'lock_exists' => file_exists($lockFile)];
+        $process = ['state' => 'none', 'pid' => null, 'verified' => false, 'reason' => '', 'role' => null,
+                    'lock' => $lockFile, 'lock_exists' => file_exists($lockFile)];
         if (!$process['lock_exists']) {
             return $process;
         }
@@ -242,13 +298,44 @@ class ApiController extends Controller
             if (time() - filemtime($lockFile) < 300) {
                 $process['state'] = 'starting';
             }
-        } elseif ($lockContent !== '' && ctype_digit($lockContent)) {
-            $process['pid'] = $lockContent;
-            if ($this->processAlive($lockContent)) {
-                $process['state'] = 'running';
-            }
+            return $process;
         }
+        $verdict = $fresh ? $this->lockVerdict($lockFile) : $this->cachedLockVerdict($lockFile, $lockContent);
+        $state = (string) ($verdict['state'] ?? 'running');
+        $process['state'] = in_array($state, ['none', 'starting', 'running'], true) ? $state : 'running';
+        $process['pid'] = is_numeric($verdict['pid'] ?? null) && (int) $verdict['pid'] > 1 ? (string) (int) $verdict['pid'] : null;
+        $process['verified'] = ($verdict['verified'] ?? false) === true && $process['pid'] !== null;
+        $process['reason'] = (string) ($verdict['reason'] ?? '');
+        $process['role'] = is_string($verdict['role'] ?? null) ? $verdict['role'] : null;
         return $process;
+    }
+
+    /** حكم بايثون على القفل (cli_bridge lock_state)؛ بلا رد صالح: قفل حي غير مؤكد (لا يُحذف ولا تُنهى عمليته). */
+    private function lockVerdict(string $lockFile): array
+    {
+        $result = $this->runPython('lock_state', ['lock' => $lockFile]);
+        if (($result['status'] ?? '') !== 'success') {
+            return ['state' => 'running', 'pid' => null, 'verified' => false, 'reason' => 'lock_state_unavailable'];
+        }
+        return $result;
+    }
+
+    /**
+     * lockVerdict محفوظ لمحتوى القفل نفسه حتى LOCK_STATE_CACHE_S في temp/lock_state.json (ملف واحد يُستبدل، لا مدخل
+     * لكل نبضة).
+     */
+    private function cachedLockVerdict(string $lockFile, string $lockContent): array
+    {
+        $cacheFile = $this->automationPath('temp/lock_state.json');
+        $key = md5($lockFile . "\n" . $lockContent);
+        $cached = json_decode((string) @file_get_contents($cacheFile), true);
+        if (is_array($cached) && ($cached['key'] ?? null) === $key && is_array($cached['verdict'] ?? null)
+            && time() - (int) ($cached['at'] ?? 0) < self::LOCK_STATE_CACHE_S) {
+            return $cached['verdict'];
+        }
+        $verdict = $this->lockVerdict($lockFile);
+        @file_put_contents($cacheFile, json_encode(['key' => $key, 'at' => time(), 'verdict' => $verdict]), LOCK_EX);
+        return $verdict;
     }
 
     private function processAlive(string $pid): bool
@@ -271,8 +358,9 @@ class ApiController extends Controller
     }
 
     /**
-     * يُنهي عامل الخلفية الحي (كما كان زر الإيقاف يفعل) ويعيد وصفه لإجراء run_control:
-     * starting (الإدراج يقرأ الشيت ولا PID بعد) | running (بقي حياً بعد الإنهاء) | killed | none.
+     * يُنهي عامل الخلفية الحي ويعيد وصفه لإجراء run_control:
+     * starting (الإدراج يقرأ الشيت ولا PID بعد) | running (بقي حياً، أو لم تتأكد هويته فلم يُنهَ) | killed | none.
+     * لا يُنهي أبداً عملية لم يؤكد بايثون هويتها (verified): رقم عملية أُعيد استخدامه قد يكون أي برنامج آخر.
      */
     private function terminateWorker(array $process): string
     {
@@ -281,6 +369,9 @@ class ApiController extends Controller
         }
         if ($process['state'] !== 'running') {
             return 'none';
+        }
+        if (($process['verified'] ?? false) !== true || $process['pid'] === null) {
+            return 'running';
         }
         if (strncasecmp(PHP_OS, 'WIN', 3) === 0) {
             shell_exec("taskkill /F /PID {$process['pid']} 2>&1");
@@ -295,6 +386,62 @@ class ApiController extends Controller
             }
         }
         return 'running';
+    }
+
+    /**
+     * «إيقاف» و«إصلاح تشغيل عالق» لعامل حي: يُنتظر العامل حتى هذه المدة بعد طلب الإيقاف (ينهي المنتجات الجارية، ويكتب
+     * تقرير التشغيل وصفه في سجل التشغيلات، ويخرج التشغيل الليلي برمز 3)، ثم فقط يُنهى قسراً.
+     */
+    public static $stopWaitSeconds = 90;
+
+    /**
+     * يوقف عامل الخلفية بأمان ويعيد وصفه لإجراء run_control:
+     * starting | none كما في terminateWorker؛ لعامل حي: يُسجل طلب إيقاف (run_control stop / running) ثم يُنتظر حتى
+     * stopWaitSeconds: exited = توقف بنفسه وكتب تقريره؛ وإلا terminateWorker: killed (أُنهي؛ run_control يكتب تقرير
+     * «توقف» بدلاً منه) أو running (بقي حياً أو لم تتأكد هويته؛ طلب الإيقاف يبقى ويلتزم به بين المنتجات).
+     */
+    private function stopWorker(array $process): string
+    {
+        if ($process['state'] !== 'running') {
+            return $this->terminateWorker($process);
+        }
+        $requested = $this->runPython('run_control', ['op' => 'stop', 'worker' => 'running']);
+        if (($requested['status'] ?? '') === 'success') {
+            $wait = max(0, (int) self::$stopWaitSeconds);
+            $limit = (int) ini_get('max_execution_time');
+            if ($limit !== 0 && $limit < $wait + 120) {
+                @set_time_limit($wait + 120);
+            }
+            $deadline = microtime(true) + $wait;
+            while (true) {
+                if ($this->workerLeft($process)) {
+                    return 'exited';
+                }
+                if (microtime(true) >= $deadline) {
+                    break;
+                }
+                usleep(500000);
+            }
+        }
+        // طلب الإيقاف لم يُسجل (قاعدة البيانات لا ترد) أو لم يلتزم به العامل في المهلة
+        return $this->terminateWorker($process);
+    }
+
+    /** خرج العامل: القفل لم يعد يحمل رقم عمليته، أو عمليته انتهت. */
+    private function workerLeft(array $process): bool
+    {
+        clearstatcache();
+        $content = trim((string) @file_get_contents($process['lock']));
+        if ($content === '') {
+            return !file_exists($process['lock']);
+        }
+        $data = json_decode($content, true);
+        $lockPid = ctype_digit($content) ? $content
+            : (is_array($data) && is_numeric($data['pid'] ?? null) ? (string) (int) $data['pid'] : null);
+        if ($process['pid'] === null) {
+            return $lockPid === null;
+        }
+        return $lockPid !== $process['pid'] || !$this->processAlive($process['pid']);
     }
 
     private function removeRunFiles(array $process): void
@@ -326,23 +473,24 @@ class ApiController extends Controller
         $stopRequested = (int) ($state->stop_requested ?? 0);
         $notice = (string) ($state->notice ?? '');
 
-        $process = $this->pipelineProcess();
+        $process = $this->pipelineProcess(false);
         $isRunning = $process['state'] !== 'none';
         $counters = QueueStats::counters();
         $readyForReview = (int) ($counters['by_status']['ready_for_review'] ?? 0);
 
         // Self-healing heartbeat: If status says a run is active but no worker is running,
         // settle it (review or idle) if it has been inactive for more than 45 seconds or if the lock file is missing.
+        // طلب الإيقاف المؤقت لا يُلغى هنا: لو أخطأ الحكم بأن العامل متوقف لاستأنف عاملٌ موقوف مؤقتاً العمل بصمت؛
+        // التشغيل التالي يلغيه (prepare_run، resume_automation)
         if (!$isRunning && in_array($status, ['pre_caching', 'running', 'starting'], true)) {
             $lastUpdated = isset($state->updated_at) ? strtotime($state->updated_at . ' UTC') : time();
             $diff = time() - $lastUpdated;
             if ($diff > 45 || !$process['lock_exists']) {
                 $settled = $readyForReview > 0 ? 'curation_pending' : 'idle';
                 try {
-                    \DB::update("UPDATE automation_state SET status = ?, total_items = 0, processed_items = 0, success_count = 0, failed_count = 0, current_product_name = '', pause_requested = 0 WHERE `key` = 'active_session'", [$settled]);
+                    \DB::update("UPDATE automation_state SET status = ?, total_items = 0, processed_items = 0, success_count = 0, failed_count = 0, current_product_name = '' WHERE `key` = 'active_session'", [$settled]);
                     $status = $settled;
                     $currentProduct = "";
-                    $pauseRequested = 0;
                 } catch (\Exception $e) {
                     // Ignore
                 }
@@ -359,12 +507,18 @@ class ApiController extends Controller
             $run['failed'] = (int) ($state->failed_count ?? 0);
         }
         $phase = QueueStats::runPhase($process['state'], $status, $pauseRequested, $stopRequested, $readyForReview);
+        $processingRows = (int) ($counters['by_status']['processing'] ?? 0);
+        // العامل حي ولا يبحث الآن: ينتظر موعد إعادة محاولة بعد انقطاع المزودين (ليس عالقاً)
+        $retryWaitS = ($phase === 'running' && $processingRows === 0) ? QueueStats::retryWaitS() : null;
 
         $response = [
             'is_running' => $isRunning,
             // starting | running | paused | stopping | error | review | idle
             'phase' => $phase,
-            'phase_text' => QueueStats::phaseText($phase, $stopRequested, $readyForReview),
+            'phase_text' => QueueStats::phaseText($phase, $stopRequested, $readyForReview,
+                (int) ($counters['by_status']['pending'] ?? 0), $retryWaitS),
+            // ثوانٍ حتى المحاولة التالية التي ينتظرها العامل (null = لا ينتظر)
+            'retry_wait_s' => $retryWaitS,
             // الشريط الأحمر: خطأ التشغيل أو التنبيه بالعربية (فارغ إن لم يوجد)
             'alert' => QueueStats::alertText($status, $notice, $isRunning),
             'status' => $status,
@@ -386,9 +540,8 @@ class ApiController extends Controller
             // صفحة التشغيل (إضافة فقط): حالة قفل العامل، وسبب عرض «إصلاح تشغيل عالق» ('' = التشغيل غير عالق)
             'worker' => $process['state'],
             'state_age_s' => isset($state->lq_age_s) ? (int) $state->lq_age_s : null,
-            'stuck' => QueueStats::stuckReason($phase, $process['state'], $status,
-                (int) ($counters['by_status']['processing'] ?? 0),
-                isset($state->lq_age_s) ? (int) $state->lq_age_s : null, $pauseRequested),
+            'stuck' => QueueStats::stuckReason($phase, $process['state'], $status, $processingRows,
+                isset($state->lq_age_s) ? (int) $state->lq_age_s : null, $pauseRequested, $retryWaitS),
         ];
 
         return response()->json($response)->header('Cache-Control', 'no-store');
@@ -422,8 +575,9 @@ class ApiController extends Controller
 
     /**
      * «إصلاح تشغيل عالق»: يمسح حالة التشغيل العالقة فقط ولا يحذف أي عمل مراجعة.
-     * يُنهي عاملاً ما زال حياً (وإلا يبقى يعمل واللوحة تظن أنه متوقف)، ويحذف ملف القفل وملف التقدم،
-     * ثم run_control reset: الصفوف في 'processing' تعود إلى 'pending'، ويُمسح التقدم والتنبيه والإيقاف المؤقت.
+     * يوقف عاملاً ما زال حياً كما يفعل زر الإيقاف (stopWorker: طلب إيقاف ثم انتظار، والإنهاء فقط بعد المهلة)، ثم
+     * run_control reset: الصفوف في 'processing' تعود إلى 'pending'، ويُمسح التقدم والتنبيه والإيقاف المؤقت. يُحذف ملف
+     * القفل وملف التقدم إلا لعامل بقي حياً (لا يُفتح الباب لعامل ثانٍ فوقه).
      * لا يحذف أي صف من automation_queue ولا curation_candidates ولا review_decisions ولا rejected_images
      * ولا resolved_products. لا يوجد زر «تفريغ الطابور»: الإدراج التالي يحدّث الصفوف من الشيت (Upsert).
      */
@@ -432,8 +586,7 @@ class ApiController extends Controller
         try {
             $basePath = base_path('..');
             $process = $this->pipelineProcess();
-            $worker = $this->terminateWorker($process);
-            $this->removeRunFiles($process);
+            $worker = $this->stopWorker($process);
 
             // Clear Laravel cache
             ProductController::forgetProductCaches();
@@ -448,7 +601,11 @@ class ApiController extends Controller
                 @unlink($bCache);
             }
 
+            // run_control قبل حذف القفل: تقرير «توقف» لعامل أُنهي يُبنى من قفله
             $result = $this->runPython('run_control', ['op' => 'reset', 'worker' => $worker]);
+            if (in_array($worker, ['killed', 'none', 'starting'], true)) {
+                $this->removeRunFiles($process);
+            }
             if (($result['status'] ?? '') !== 'success') {
                 return response()->json(['status' => 'failed', 'error' => $result['error'] ?? 'تعذر إصلاح حالة التشغيل.'], 500);
             }
@@ -526,18 +683,21 @@ class ApiController extends Controller
     /**
      * «إيقاف التشغيل» بأمان، ولا يُحذف أي صف:
      * - الإدراج ما زال يقرأ الشيت (القفل 'STARTING'، لا PID بعد): يُسجل طلب إيقاف يلتزم به العامل فور بدئه.
-     * - عامل حي: يُنهى كما كان، وتعود صفوفه قيد المعالجة إلى الانتظار (إن بقي حياً يلتزم بطلب الإيقاف بين المنتجات).
+     * - عامل حي: يُسجل طلب إيقاف ويُنتظر العامل حتى stopWaitSeconds: ينهي المنتجات الجارية ويكتب تقرير التشغيل بنفسه
+     *   (exited؛ التشغيل الليلي يخرج برمز 3). لم يتوقف: يُنهى إن أكد بايثون هويته (killed) ويكتب run_control تقرير
+     *   «توقف» بدلاً منه وتعود صفوفه قيد المعالجة إلى الانتظار؛ وإلا يبقى طلب الإيقاف (running).
      * - لا تشغيل: قفل قديم يُحذف والصفوف العالقة في 'processing' تعود إلى الانتظار.
      * كل صف آخر (جاهز للمراجعة، معتمد، فاشل، في الانتظار) يبقى كما هو. الرسالة العربية من run_control.
      */
     public function stopBatch()
     {
         $process = $this->pipelineProcess();
-        $worker = $this->terminateWorker($process);
+        $worker = $this->stopWorker($process);
+        // run_control قبل حذف القفل: تقرير «توقف» لعامل أُنهي يُبنى من قفله
+        $result = $this->runPython('run_control', ['op' => 'stop', 'worker' => $worker]);
         if (in_array($worker, ['killed', 'none'], true)) {
             $this->removeRunFiles($process);
         }
-        $result = $this->runPython('run_control', ['op' => 'stop', 'worker' => $worker]);
         if (($result['status'] ?? '') !== 'success') {
             return response()->json(['status' => 'failed', 'error' => $result['error'] ?? 'تعذر إيقاف التشغيل.'], 500);
         }
@@ -576,14 +736,30 @@ class ApiController extends Controller
             }
 
             $productsByBarcode = [];
+            $productsBySku = [];
             foreach ($products as $p) {
                 $barcode = trim($p['barcode'] ?? '');
                 $altBarcode = 'ERR_' . str_replace(' ', '_', ($p['product_name'] ?? '') . '_' . ($p['brand'] ?? ''));
-                
+
                 if ($barcode) {
                     $productsByBarcode[$barcode] = $p;
                 }
                 $productsByBarcode[$altBarcode] = $p;
+                $sku = trim((string) ($p['sku_key'] ?? ''));
+                if ($sku !== '') {
+                    $productsBySku[$sku] = $p;
+                }
+            }
+            // منتج كل سجل فشل بـ sku_key أولاً (local_cache_db.save_product_failure): مفتاح ERR_..#<sku_key> لحجم آخر
+            // بنفس الاسم والبراند لا يطابقه أي مفتاح عرض، ومفتاح العرض نفسه قد يحمله منتج آخر بنفس الاسم والبراند
+            $failureSku = [];
+            try {
+                $failureSku = DB::table('product_failures')
+                    ->whereIn('barcode', array_values(array_unique(array_map(fn ($b) => trim((string) $b), $barcodes))))
+                    ->whereNotNull('sku_key')
+                    ->pluck('sku_key', 'barcode')->all();
+            } catch (\Throwable $e) {
+                $failureSku = [];      // قبل عمود sku_key: المطابقة بمفتاح العرض كما كانت
             }
 
             $hasSkuKey = Schema::hasColumn('automation_queue', 'sku_key');
@@ -596,10 +772,19 @@ class ApiController extends Controller
             $failureKeys = [];
             foreach ($barcodes as $b) {
                 $bClean = trim((string) $b);
-                if (!isset($productsByBarcode[$bClean])) {
+                $sku = trim((string) ($failureSku[$bClean] ?? ''));
+                $p = ($sku !== '' && isset($productsBySku[$sku])) ? $productsBySku[$sku] : null;
+                if ($p === null && isset($productsByBarcode[$bClean])) {
+                    $byKey = $productsByBarcode[$bClean];
+                    $rowSku = trim((string) ($byKey['sku_key'] ?? ''));
+                    // صف بمفتاح العرض نفسه لمنتج آخر (حجم آخر بنفس الاسم والبراند) ليس صاحب هذا السجل
+                    if ($sku === '' || $rowSku === '' || $rowSku === $sku) {
+                        $p = $byKey;
+                    }
+                }
+                if ($p === null) {
                     continue;
                 }
-                $p = $productsByBarcode[$bClean];
                 $row = [
                     'row_number' => (int) $p['row_number'],
                     'barcode' => $p['barcode'] ?? '',

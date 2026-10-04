@@ -1183,7 +1183,9 @@ const ctl = LaqtaRunPage.createController(deps);
     console.log(JSON.stringify({ toasts }));
 })();
 """)
+    # review fix C5: Stop now waits up to 90 s for the worker to finish its products, so the page says so first
     assert out["toasts"] == [["انوقف التشغيل مؤقتاً.", "success"], ["رجع التشغيل يشتغل.", "success"],
+                             ["عم نوقف التشغيل: العامل بيكمّل المنتجات الجارية (حتى دقيقة ونص).", "info"],
                              ["تم إيقاف التشغيل. لم يُحذف أي صف.", "success"], ["ما قدرنا نصلّح التشغيل.", "danger"]]
 
 

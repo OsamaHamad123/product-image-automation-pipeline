@@ -38,10 +38,11 @@
    "unsure": 1,
    "download_failed": 0,
    "only_social": 1,
+   "brand_not_found": 1,
    "not_found": 1,
    "provider_down": 0,
    "verifier_down": 0,
-   "weak_only": 1
+   "weak_only": 0
   },
   "unselected_rows": {
    "verifier_mismatch": [
@@ -54,14 +55,15 @@
    "only_social": [
     30
    ],
+   "brand_not_found": [
+    55
+   ],
    "not_found": [
     50
    ],
    "provider_down": [],
    "verifier_down": [],
-   "weak_only": [
-    55
-   ]
+   "weak_only": []
   },
   "winner_providers": {
    "serper": 6,
@@ -1833,7 +1835,7 @@
    "winner_provider": null,
    "winner_domain": null,
    "outage": null,
-   "unselected_reason": "weak_only"
+   "unselected_reason": "brand_not_found"
   },
   {
    "row": 61,

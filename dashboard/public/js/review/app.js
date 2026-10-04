@@ -43,6 +43,14 @@
         local: new Map(),          // key -> approving | approved | rejected | requeued (this page session)
         approved: new Map(),       // key -> { link, warning, url }
         session: new Map(),        // key -> search results, the reviewer's pick, pasted / uploaded images
+        keep: new Set(),           // keys requeued for review in this session (reject + research): stay in the chip
+        // C1: key -> { expected, view, rebase }. expected: what an approval carries (the product as the reviewer was
+        // shown it when it was opened / its card was drawn, or what the server answered after the reviewer's own action);
+        // view: the page's reading at that moment. A quiet reload never moves either: it is compared with view instead
+        seen: new Map(),
+        moved: new Map(),          // key -> { before, after }: a reload changed the product after it was shown
+        shown: null,               // single mode: the pick on screen { key, url, loadedAt, failed }
+        settleTimer: null,
         openKey: null,
         open: null,                // identity of the open product (as in the sheet when it was opened)
         searchSeq: 0,
@@ -51,7 +59,10 @@
         ws: { key: null, state: 'none' },
         reasonsOpen: false,
         listLimit: LIST_PAGE,
-        bulk: { brand: '', filter: 'all', selected: new Set(), limit: 48, seeded: false },
+        // bulk: selected / seen / loaded / failed / inView / unticked hold '<key>\n<pick url>' (a tick belongs to the picture)
+        bulk: { brand: '', filter: 'all', selected: new Set(), limit: 48, seeded: false, focus: null, autoTick: true,
+                unticked: new Set(), seen: new Set(), loaded: new Set(), failed: new Set(), inView: new Set(), advancedAt: 0,
+                everSeen: new Set() },
         runDiff: 0,
         dom: {},
         jobs: null
@@ -219,6 +230,7 @@
         if (productsOk) settleLocalFlags();
         rebuild();
         if (productsOk) refreshOpenIdentity();
+        detectMoved();
         if (!S.seeded) {
             S.seeded = true;
             chooseInitial();
@@ -252,6 +264,72 @@
         R.toast('بيانات هالمنتج تغيّرت بالشيت، فعرضناه من جديد.', 'info');
     }
 
+    // -------------------------------------------------------------------------------------------------
+    // C1: what the reviewer was shown (expected_state) is a snapshot, never refreshed by a quiet reload
+    // -------------------------------------------------------------------------------------------------
+
+    function snapshot(item) {
+        if (!item) return;
+        const prev = S.seen.get(item.key);
+        // إجراء المراجع نفسه أُجيب ولم تأتِ القراءة التالية بعد: ما قاله الخادم (current) أدق مما في الصفحة
+        if (prev && prev.rebase) return;
+        // expected: بعد اعتماد في هذه الجلسة ما قاله الخادم عنه (current؛ رابطه قد لا يكون في الشيت بعد)، وإلا ما تعرضه
+        // الصفحة. view: ما في بيانات الصفحة وحدها، تُقارن به القراءات التالية
+        const approved = S.approved.get(item.key);
+        const expected = approved && approved.current ? R.expectedFromCurrent(approved.current)
+            : R.expectedState(item, approved && approved.link);
+        S.seen.set(item.key, { expected: expected, view: R.expectedState(item), rebase: false, known: queueKnown() });
+        S.moved.delete(item.key);
+    }
+    R.snapshot = snapshot;
+
+    function seenExpected(item) {
+        if (!S.seen.has(item.key)) snapshot(item);
+        return Object.assign({}, S.seen.get(item.key).expected);
+    }
+    R.seenExpected = seenExpected;
+
+    // بعد إجراء المراجع نفسه على المنتج (اعتماد، رفع، رفض، إعادة للطابور): ما قاله الخادم (current) هو ما يُرسل مع
+    // الاعتماد التالي، والقراءة التالية تُؤخذ كما هي (rebase) ولا تُعد «تغيّر بعد فتحه»
+    function settleSeen(key, current) {
+        const s = S.seen.get(key);
+        const expected = current && typeof current === 'object' ? R.expectedFromCurrent(current) : (s ? s.expected : null);
+        S.seen.set(key, { expected: expected || {}, view: s ? s.view : null, rebase: true, known: false });
+        S.moved.delete(key);
+    }
+    R.settleSeen = settleSeen;
+
+    function ownActionInFlight(key) {
+        const flag = S.local.get(key);
+        const sess = S.session.get(key);
+        return !!((S.jobs && S.jobs.has(key)) || flag === 'approving' || flag === 'rejecting' || (sess && sess.rejecting));
+    }
+
+    // بعد كل قراءة: منتج عُرض للمراجع وتغيّر صف طابوره أو صورته المعتمدة منذ ذلك (مراجع آخر، أو العامل) يُعلَّم، فلا
+    // يُعتمد قبل أن يُعرض من جديد
+    function queueKnown() {
+        return !!(S.queue && (S.queue.status === 'success' || S.queue.status === 'no_queue'));
+    }
+
+    function detectMoved() {
+        // طابور التشغيل لم يُقرأ هذه المرة (عطل مؤقت): لا يُحكم على أي منتج بأنه تغيّر
+        if (!queueKnown()) return;
+        S.seen.forEach((s, key) => {
+            const it = S.byKey.get(key);
+            if (!it || ownActionInFlight(key)) return;
+            const view = R.expectedState(it);
+            if (s.rebase || !s.view || !s.known) {
+                s.view = view;
+                s.rebase = false;
+                s.known = true;
+                return;
+            }
+            if (!R.sameExpected(s.view, view)) S.moved.set(key, { before: s.view, after: view });
+            else S.moved.delete(key);
+        });
+    }
+    R.detectMoved = detectMoved;
+
     function rebuild() {
         // الشيت ما انقرأ: صفوف الطابور وحدها لا تُعرض كأنها «مش موجودة بالشيت»
         const sheetUnread = S.load.state === 'error' && !S.products.length;
@@ -265,7 +343,8 @@
         const c = S.counts;
         let filter = S.cfg.filter && R.FILTERS.some(f => f.key === S.cfg.filter) ? S.cfg.filter : null;
         if (!filter) {
-            filter = c.proposed ? 'proposed' : c.none ? 'none' : c.not_found ? 'not_found' : c.failed ? 'failed' : 'all';
+            filter = c.proposed ? 'proposed' : c.none ? 'none' : c.bg_failed ? 'bg_failed' : c.not_found ? 'not_found'
+                : c.failed ? 'failed' : 'all';
         }
         S.filter = filter;
         let key = null;
@@ -292,12 +371,13 @@
     // -------------------------------------------------------------------------------------------------
 
     function visibleItems() {
-        return R.filterItems(S.items, S.filter, S.query);
+        return R.filterItems(S.items, S.filter, S.query, S.keep);
     }
     R.visibleItems = visibleItems;
 
     function setFilter(key) {
         if (!R.FILTERS.some(f => f.key === key)) return;
+        if (S.filter !== key) S.keep = new Set();
         S.filter = key;
         S.listLimit = LIST_PAGE;
         updateUrl(false);
@@ -353,7 +433,8 @@
         warning: 'ما في صور مقترحة فيها تحذير.',
         none: 'ما في منتجات بلا اقتراح.',
         not_found: 'ما في منتجات ما انلقت صورتها.',
-        failed: 'ما في أعطال مسجلة.'
+        failed: 'ما في أعطال مسجلة.',
+        bg_failed: 'لا توجد صور معتمدة لم تُعزل خلفيتها.'
     };
 
     // القائمة، ثم «N من M» في مساحة العمل (يتغير مع الفلتر والبحث وحالة المنتجات)
@@ -376,7 +457,9 @@
 
         clear(d.filters);
         R.FILTERS.forEach(f => {
-            const count = f.key === 'all' ? c.all : c[f.key];
+            // الرقاقة الحالية تعدّ ما تعرضه القائمة: ومعه منتجات بقيت فيها بعد الرفض (S.keep)
+            const count = f.key === S.filter && S.keep.size ? R.filterItems(S.items, f.key, '', S.keep).length
+                : (f.key === 'all' ? c.all : c[f.key]);
             d.filters.appendChild(el('button', { type: 'button', className: 'lq-filter rv-filter', dataset: { filter: f.key },
                                                  'aria-pressed': S.filter === f.key ? 'true' : 'false' }, [
                 el('span', { text: f.label }),
@@ -543,8 +626,20 @@
                     bdi(j.label || `صف ${j.row}`, 'rv-jobs__name'),
                     el('span', { className: 'rv-jobs__why', title: j.detail || null, text: ` — ${j.error}` })
                 ]),
-                el('button', { type: 'button', className: 'lq-btn lq-btn--secondary lq-btn--sm', text: 'أعد المحاولة',
-                               disabled: S.jobs.has(j.key), onclick: () => S.jobs.retry(j.id) })
+                // تغيّر المنتج بعد فتح الصفحة (C1): الإعادة كما هي تُرفض مرة أخرى؛ الاستبدال بتأكيد صريح فقط. صورة رفضها
+                // مراجع آخر لا تُستبدل ولا تُعاد (الخادم يرفضها دائماً): لا زر
+                // فحص القص (quality): علامات العرض تُنشر رغمها بتأكيد صريح فقط؛ عزل فشل لا يُنشر ولا يُعاد
+                j.quality
+                    ? (j.quality.allowed
+                        ? el('button', { type: 'button', className: 'lq-btn lq-btn--danger lq-btn--sm rv-jobs__anyway', text: 'انشرها رغم ذلك…',
+                                         disabled: S.jobs.has(j.key), onclick: () => R.single.confirmPublishAnyway(j) })
+                        : null)
+                    : j.stale
+                    ? (j.stale.replaceable === false ? null
+                        : el('button', { type: 'button', className: 'lq-btn lq-btn--danger lq-btn--sm rv-jobs__replace', text: 'استبدال المعتمدة…',
+                                         disabled: S.jobs.has(j.key), onclick: () => R.single.confirmReplace(j) }))
+                    : el('button', { type: 'button', className: 'lq-btn lq-btn--secondary lq-btn--sm', text: 'أعد المحاولة',
+                                     disabled: S.jobs.has(j.key), onclick: () => S.jobs.retry(j.id) })
             ]))));
         }
         R.single.updateJobsOffset();
@@ -651,7 +746,59 @@
     R.renderAll = renderAll;
 
     // -------------------------------------------------------------------------------------------------
+    // A confirmation that shows images (replace an approval): resolves true / false
+    // -------------------------------------------------------------------------------------------------
+
+    let activeDialog = null;
+
+    function askDialog(opts) {
+        opts = opts || {};
+        if (activeDialog) activeDialog.finish(false);
+        const d = S.dom;
+        return new Promise(resolve => {
+            const dlg = {};
+            dlg.finish = ok => {
+                if (activeDialog !== dlg) return;
+                activeDialog = null;
+                clear(d.dialog);
+                d.dialog.hidden = true;
+                resolve(!!ok);
+            };
+            activeDialog = dlg;
+            const yes = el('button', { type: 'button', id: 'rvAskConfirm', text: opts.confirmText || 'متأكد',
+                                       className: 'lq-btn ' + (opts.danger ? 'lq-btn--danger-solid' : 'lq-btn--primary'),
+                                       onclick: () => dlg.finish(true) });
+            const no = el('button', { type: 'button', id: 'rvAskCancel', className: 'lq-btn lq-btn--secondary',
+                                      text: opts.cancelText || 'إلغاء', onclick: () => dlg.finish(false) });
+            const images = (opts.images || []).filter(im => im && im.url);
+            clear(d.dialog);
+            d.dialog.appendChild(el('div', { className: 'rv-dialog', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'rvAskTitle' }, [
+                el('h2', { className: 'rv-dialog__title', id: 'rvAskTitle', text: opts.title || '' }),
+                images.length ? el('div', { className: 'rv-dialog__images' }, images.map(im => el('figure', { className: 'rv-dialog__figure' }, [
+                    el('div', { className: 'rv-dialog__img' }, [R.img(im.url, im.caption || '', S.urls.imageProxy)]),
+                    el('figcaption', { className: 'rv-dialog__cap' }, [bdi(im.caption || '', null, 'auto')])
+                ]))) : null,
+                el('p', { className: 'rv-dialog__text', text: opts.text || '' }),
+                el('div', { className: 'rv-dialog__actions' }, [yes, no])
+            ]));
+            d.dialog.hidden = false;
+            if (typeof no.focus === 'function') no.focus();
+        });
+    }
+    R.askDialog = askDialog;
+
+    function closeAskDialog() {
+        if (!activeDialog) return false;
+        activeDialog.finish(false);
+        return true;
+    }
+    R.closeAskDialog = closeAskDialog;
+    R.dialogActive = () => !!activeDialog;
+
+    // -------------------------------------------------------------------------------------------------
     // Keyboard: ↑ ↓ move, 1–9 select (never publish), Enter approves the visible selected image, X reject, S skip.
+    // Bulk mode (bulk.js onKey): arrows move between cards, Space ticks the focused card, A approves it (after its
+    // warnings), Shift+A is the «approve the pre-selected ones without a warning» button.
     // Ctrl / Cmd / Alt combinations and typing in a field are left to the browser.
     // -------------------------------------------------------------------------------------------------
 
@@ -674,6 +821,7 @@
             || tag === 'textarea' || tag === 'select' || !!(active && active.isContentEditable);
         const key = keyOf(e);
         if (key === 'Escape') {
+            if (closeAskDialog()) return;
             if (R.bulk.closeDialog()) return;
             if (S.reasonsOpen) {
                 R.single.closeReasons();
@@ -681,7 +829,19 @@
             }
             return;
         }
-        if (typing || S.mode !== 'single' || R.bulk.dialogOpen()) return;
+        if (typing || R.bulk.dialogOpen() || activeDialog) return;
+        if (S.mode === 'bulk') {
+            // مسافة أو Enter على زر أو رابط أو مربع تحديد يفعّله المتصفح نفسه
+            if ((key === ' ' || key === 'Enter') && ['button', 'a', 'summary', 'label', 'input'].includes(tag)) return;
+            // التكرار يُقبل للأسهم فقط: A المضغوط باستمرار لا يعتمد البطاقة التالية قبل أن يراها المراجع
+            if (e.repeat && !/^Arrow/.test(key)) {
+                if (key === ' ' || key === 'a') e.preventDefault();
+                return;
+            }
+            if (R.bulk.onKey(key, e)) e.preventDefault();
+            return;
+        }
+        if (S.mode !== 'single') return;
         // مفتاح مضغوط باستمرار يكرر نفسه: بعد الاعتماد يفتح المنتج التالي، فالتكرار كان يعتمده قبل ما يشوفه المراجع.
         // التكرار يُقبل للأسهم فقط (التنقل بالقائمة)، ولا يضغط زراً مركّزاً مرة ثانية
         if (e.repeat && key !== 'ArrowDown' && key !== 'ArrowUp') {
@@ -690,7 +850,7 @@
         }
         if (S.reasonsOpen) {
             if (/^[1-9]$/.test(key)) {
-                const reason = R.REJECT_REASONS[parseInt(key, 10) - 1];
+                const reason = R.single.currentReasons()[parseInt(key, 10) - 1];
                 if (reason) {
                     e.preventDefault();
                     R.single.rejectCurrent(reason.code);
@@ -761,6 +921,8 @@
         S.mode = cfg.mode === 'bulk' ? 'bulk' : 'single';
         S.cfg.canvas = parseInt(cfg.canvas, 10) || 800;
         S.cfg.autoSearchDelayMs = cfg.autoSearchDelayMs === undefined ? 700 : Math.max(0, parseInt(cfg.autoSearchDelayMs, 10) || 0);
+        // الاعتماد بعد ظهور الصورة بهذه المدة على الأقل (ضغطة ثانية سريعة بعد الاعتماد لا تعتمد المنتج التالي قبل رؤيته)
+        S.cfg.approveSettleMs = cfg.approveSettleMs === undefined ? 400 : Math.max(0, parseInt(cfg.approveSettleMs, 10) || 0);
     }
 
     function boot() {

@@ -7,7 +7,10 @@ find_product_image(spec, *, providers=None, fetcher=None, verifier=None,
 Steps
     1. retrieve   pooled retrieval over the query plan (or the staff custom query);
                   early stop as soon as a web-search candidate is tier 1 (an Open
-                  Food Facts record alone never stops the search).
+                  Food Facts record alone never stops the search). When brand
+                  discovery finds the stores' spelling of the sheet brand, the local
+                  catalog index is asked again with it (free), alongside one corrected
+                  query.
     2. score      every pooled candidate with score.score_candidate.
     3. relax      R1/R2 into the same pool, only when no candidate is tier 1 or 2
                   and there is no custom query (relaxed winners are capped at review).
@@ -255,7 +258,15 @@ def find_product_image(spec: Union[SkuSpec, Mapping[str, Any]], *, providers: Op
     # 1b. brand discovery: a sheet brand no listing writes the sheet's way ('RIO MARIE', 'SUP/T') but the
     #     stores write one typo or abbreviation away ('Rio Mare', 'Super Tasty'): accept the store spelling
     #     (never an auto-publish) and send the first query once more, written with it.
-    found = brand_discovery.discover(spec, retrieval.pool)
+    #     A spelling an earlier row of this run proved for the same (or a sibling) sheet brand is first only a
+    #     query hint: it counts once a listing this row gets names the product under it.
+    found = brand_discovery.find(spec, retrieval.pool)
+    hinted = brand_discovery.hint(spec, retrieval.pool) if found is None and not custom else None
+    if hinted is not None:
+        extra = brand_discovery.corrected_query(brand_discovery.as_hint(spec, hinted), retrieval.queries)
+        if extra is not None:
+            retrieval = retriever.run_extra(extra)
+            found = brand_discovery.find(spec, retrieval.pool)
     if found is not None:
         spec = brand_discovery.apply(spec, found)
         retriever.spec = spec
@@ -264,8 +275,8 @@ def find_product_image(spec: Union[SkuSpec, Mapping[str, Any]], *, providers: Op
         # the corrected query only when the listings found so far are not already tier 1 in the store spelling
         extra = brand_discovery.corrected_query(spec, retrieval.queries) \
             if not custom and not retriever.early_stop(list(retrieval.pool)) else None
-        if extra is not None:
-            retrieval = retriever.run_extra(extra)
+        # the local catalog index is asked again with the store spelling (free), alongside the corrected query
+        retrieval = retriever.rerun_lookups(extra)
 
     # 2. score
     scored = _score_pool(spec, retrieval.pool, negatives)
@@ -318,6 +329,9 @@ def find_product_image(spec: Union[SkuSpec, Mapping[str, Any]], *, providers: Op
         results = results + report.verify_results
         extra_queries = report.queries
         n_phash_dropped += report.phash_dropped
+        if report.store_image_wrong:
+            # X0: store pages whose own picture is the picture that failed (catalog_match.expand)
+            outcome.reject_counts[expand_mod.STORE_IMAGE_WRONG] = report.store_image_wrong
     outcome.queries = list(retrieval.queries) + extra_queries
     outcome.discovered_brands = list(spec.discovered_brands)
     outcome.vlm_calls = sum(int(r.calls or 0) for r in results)

@@ -4,9 +4,10 @@
       $services         HealthController::serviceCards(): the five service cards from that result
       $optional         configured optional services (proxy, legacy Custom Search), one muted line
       $checkedAt        epoch of the last check or null;  $allOk  false when a critical service failed
+      $lastRun          HealthController::lastRunCard(): the last run (temp/nightly/last_report.json), or null
     Opening the page never runs the check (a paid Serper query and a PhotoRoom call): the button does.
     public/js/health.js runs the check on click, loads «عمليات البحث» from GET /api/system/ops-health and
-    the log tails from GET /api/view-pipeline-log and /api/view-laravel-log.
+    the log tails from GET /api/view-pipeline-log, /api/view-laravel-log and /api/view-nightly-log.
 --}}
 @extends('layouts.laqta')
 
@@ -62,6 +63,15 @@
             <span class="lq-health__optional-item"><span class="lq-dot {{ $healthDots[$item['tone']] ?? 'lq-dot--muted' }}" aria-hidden="true"></span>{{ $item['name'] }} {{ $item['state'] }}</span>
         @endforeach
     </p>
+
+    @if ($lastRun ?? null)
+        {{-- آخر تشغيل (HealthController::lastRunCard من التقرير الذي يكتبه run_report.py بعد كل تشغيل) --}}
+        <section class="lq-card lq-card--compact" aria-label="آخر تشغيل" data-health-last-run>
+            <p class="lq-card__meta">آخر تشغيل @if ($lastRun['when'] !== '')· <time>{{ $lastRun['when'] }}</time>@endif</p>
+            <h2 class="lq-card__title"><span class="lq-dot {{ $healthDots[$lastRun['tone']] ?? 'lq-dot--muted' }}" aria-hidden="true"></span> {{ $lastRun['title'] }}</h2>
+            @if ($lastRun['summary'] !== '')<p class="lq-health__footnote">{{ $lastRun['summary'] }}</p>@endif
+        </section>
+    @endif
 
     <section class="lq-health__search" aria-labelledby="lq-health-search-title">
         <div class="lq-health__search-head">
@@ -127,6 +137,7 @@
             <div class="lq-health-log__tabs" role="tablist" aria-label="نوع السجل">
                 <button type="button" role="tab" class="lq-health-log__tab" id="tab-pipeline" data-log-tab="pipeline" aria-selected="true" aria-controls="lq-health-log-body">الأتمتة</button>
                 <button type="button" role="tab" class="lq-health-log__tab" id="tab-laravel" data-log-tab="laravel" aria-selected="false" aria-controls="lq-health-log-body" tabindex="-1">لوحة التحكم</button>
+                <button type="button" role="tab" class="lq-health-log__tab" id="tab-nightly" data-log-tab="nightly" aria-selected="false" aria-controls="lq-health-log-body" tabindex="-1">التشغيل الليلي</button>
             </div>
         </div>
         <div class="lq-health-log__body" id="lq-health-log-body" role="tabpanel" aria-labelledby="tab-pipeline" tabindex="0" data-health="log-body">

@@ -3,17 +3,20 @@
 #
 # - يضبط مفتاح النبض 'writebehind:heartbeat' (TTL 30 ثانية) في كل دورة؛ google_sheets لا يستخدم Redis
 #   إلا إذا وجد هذا النبض، وإلا يكتب عبر طابور MariaDB.
-# - لا يُحذف مفتاح من مجموعة dirty (SREM) إلا بعد نجاح الكتابة الفعلية.
+# - قناة كتابة واحدة: لا يكتب هذا العامل في الشيت مباشرة. ينقل كل حمولة Redis إلى طابور MariaDB (sheet_updates)
+#   ثم يفرّغ الطابور بنفس قفل وقواعد عامل الخلفية (google_sheets.flush_outbox): العمود بالمفتاح المنطقي وقت
+#   الكتابة، التحقق من الهوية ونقل الكتابة للصف الوحيد المطابق، إعادة المحاولة المؤجلة، إبلاغ النتائج، والترتيب
+#   بالتسلسل seq (قيمة أقدم لا تُكتب أبداً بعد قيمة أحدث، أياً كانت القناة التي حملتهما).
+# - لا يُحذف مفتاح من مجموعة dirty (SREM) إلا بعد نقل حمولته كاملة إلى الطابور، وفقط إذا لم تتغير أثناء النقل
+#   (تحديث وصل أثناءها يُنقل في الدورة التالية). تعذر النقل (قاعدة البيانات متوقفة) يُبقي الحمولة كما هي.
 # - الحمولات ذات الصيغة غير المعروفة تُترك كما هي وتُسجل في السجل؛ لا تُحذف أبداً.
-# - إذا حملت الحمولة هوية متوقعة ('expect') وتعارضت مع الشيت، تُنقل إلى 'writebehind:conflicts' دون كتابة،
-#   وتُنقل حمولتها إلى 'writebehind:conflict_payload:<key>' كي لا تُدمج في كتابة لاحقة صحيحة لنفس الصف.
-# - بعد الكتابة يُحذف المفتاح فقط إذا لم تتغير حمولته أثناء المزامنة (تحديث وصل أثناءها يُكتب في الدورة التالية).
-# - المفتاح الذي يفشل 5 مرات متتالية يُنقل إلى 'writebehind:dead' ولا يُعاد (كي لا يستهلك حصة الكتابة).
+# - الحمولات القديمة التي تحدد الأعمدة بأرقامها (قبل المفاتيح المنطقية) لا تُكتب: عمودها لا يمكن التحقق منه
+#   (إدراج عمود يغيّر معنى الرقم). تُنقل إلى 'writebehind:conflicts' وحمولتها إلى 'writebehind:conflict_payload:<key>'
+#   وتُبلَّغ عبر outcome hook (سجل الأخطاء)؛ الصف يُعاد نشره من الكاش في التشغيل التالي لأن خليته بقيت فارغة.
 
 import json
 import logging
 import os
-import random
 import sys
 import time
 
@@ -30,9 +33,6 @@ CACHE_PREFIX = google_sheets.CACHE_PREFIX
 HEARTBEAT_KEY = google_sheets.HEARTBEAT_KEY
 CONFLICT_SET_KEY = "writebehind:conflicts"
 CONFLICT_PAYLOAD_PREFIX = "writebehind:conflict_payload:"
-DEAD_SET_KEY = "writebehind:dead"
-ATTEMPTS_KEY = "writebehind:attempts"
-MAX_KEY_ATTEMPTS = 5
 HEARTBEAT_TTL = 30
 SYNC_INTERVAL = 10
 BATCH_SIZE = 100
@@ -51,49 +51,32 @@ def beat(r):
 
 
 def _parse_payload(raw):
-    """(row_index, updates, expect) أو None إذا كانت الصيغة غير معروفة."""
+    """
+    {'row_index', 'updates': {col_key: value}, 'seqs', 'expect', 'legacy'} أو None إذا كانت الصيغة غير معروفة.
+    legacy=True: حمولة قديمة تحدد الأعمدة بأرقامها.
+    """
     try:
         payload = json.loads(raw)
         row_index = int(payload["row_index"])
         updates = payload["updates"]
         if not isinstance(updates, dict) or row_index <= 1:
             return None
-        parsed = {int(col): val for col, val in updates.items()}
         expect = payload.get("expect") if isinstance(payload.get("expect"), dict) else None
-        return row_index, parsed, expect
+        if payload.get("v") == google_sheets.REDIS_PAYLOAD_VERSION:
+            seqs = payload.get("seqs") if isinstance(payload.get("seqs"), dict) else {}
+            return {"row_index": row_index, "updates": {str(k): v for k, v in updates.items()},
+                    "seqs": seqs, "expect": expect, "legacy": False}
+        if "v" not in payload and updates and all(str(k).lstrip("-").isdigit() for k in updates):
+            return {"row_index": row_index, "updates": updates, "seqs": {}, "expect": expect, "legacy": True}
+        return None
     except Exception:
         return None
-
-
-def _batch(row_index, updates):
-    import gspread
-    return [{"range": gspread.utils.rowcol_to_a1(row_index, col + 1), "values": [[str(val)]]}
-            for col, val in updates.items()]
-
-
-def _write(worksheet, data, max_retries=5):
-    """كتابة دفعة مع ارتداد أسّي عند تجاوز الحصة (429)."""
-    retry = 0
-    while True:
-        try:
-            worksheet.batch_update(data, value_input_option="RAW")
-            return
-        except Exception as err:
-            text = str(err)
-            if ("429" in text or "RESOURCE_EXHAUSTED" in text) and retry < max_retries:
-                sleep_time = min((2 ** retry) + random.uniform(0.1, 1.0), 32.0)
-                logger.warning("[Sync Worker] تجاوز الحصة؛ إعادة المحاولة %s/%s خلال %.1f ثانية",
-                               retry + 1, max_retries, sleep_time)
-                time.sleep(sleep_time)
-                retry += 1
-                continue
-            raise
 
 
 def _compare_and_delete(r, key, raw):
     """
     يحذف الحمولة ويزيل المفتاح من dirty فقط إذا كانت الحمولة ما زالت كما قُرئت. تحديث وصل أثناء
-    المزامنة يبقى ليُكتب في الدورة التالية (لا يضيع). ذري عبر WATCH/MULTI عند توفره.
+    النقل يبقى ليُنقل في الدورة التالية (لا يضيع). ذري عبر WATCH/MULTI عند توفره.
     """
     cache_key = f"{CACHE_PREFIX}{key}"
     pipeline = getattr(r, "pipeline", None)
@@ -109,7 +92,6 @@ def _compare_and_delete(r, key, raw):
                     p.multi()
                     p.delete(cache_key)
                     p.srem(DIRTY_SET_KEY, key)
-                    p.hdel(ATTEMPTS_KEY, key)
                     p.execute()
                     return True
                 except redis.WatchError:
@@ -120,38 +102,41 @@ def _compare_and_delete(r, key, raw):
         return False
     r.delete(cache_key)
     r.srem(DIRTY_SET_KEY, key)
-    _clear_attempts(r, key)
     return True
 
 
-def _clear_attempts(r, key):
-    try:
-        r.hdel(ATTEMPTS_KEY, key)
-    except Exception:
-        pass
+def _park_legacy(r, key, raw, parsed):
+    """حمولة قديمة بأرقام أعمدة: تُنقل جانباً دون كتابة وتُبلَّغ (عمودها لا يمكن التحقق منه)."""
+    r.set(f"{CONFLICT_PAYLOAD_PREFIX}{key}", raw)
+    r.delete(f"{CACHE_PREFIX}{key}")
+    r.smove(DIRTY_SET_KEY, CONFLICT_SET_KEY, key)
+    expect = parsed.get("expect") or {}
+    google_sheets._report_outcome({
+        "id": None, "row": parsed["row_index"], "queued_row": parsed["row_index"],
+        "column_key": ",".join(str(c) for c in parsed["updates"]), "status": "CONFLICT", "attempts": 0,
+        "error": f"legacy Redis payload {key} addresses columns by position; not written (parked in {CONFLICT_SET_KEY})",
+        "value": None, "barcode": expect.get("barcode"), "product_name": expect.get("name"),
+        "brand": expect.get("brand"),
+    })
 
 
-def _note_failure(r, key):
-    """يسجل فشلاً للمفتاح؛ بعد MAX_KEY_ATTEMPTS ينقله إلى المجموعة الميتة ولا يُعاد."""
-    try:
-        attempts = int(r.hincrby(ATTEMPTS_KEY, key, 1))
-    except Exception:
-        return
-    if attempts >= MAX_KEY_ATTEMPTS:
-        logger.error("[Sync Worker] المفتاح %s فشل %s مرات؛ نقله إلى %s.", key, attempts, DEAD_SET_KEY)
-        r.smove(DIRTY_SET_KEY, DEAD_SET_KEY, key)
-        _clear_attempts(r, key)
+def _forward(queue, parsed):
+    """كل خلية في الحمولة تصبح صفاً في طابور MariaDB بمفتاحها المنطقي وتسلسلها وهوية المنتج."""
+    keys = google_sheets._outbox_keys(parsed.get("expect"))
+    for col_key, value in parsed["updates"].items():
+        queue.append_update(parsed["row_index"], -1, value, col_key=col_key, seq=parsed["seqs"].get(col_key),
+                            **keys)
 
 
-def run_sync_cycle(worksheet, r=None):
-    """دورة مزامنة واحدة. تعيد عدد المفاتيح التي كُتبت بنجاح."""
+def run_sync_cycle(worksheet, r=None, queue=None, flush=True):
+    """
+    دورة مزامنة واحدة: نقل حمولات Redis إلى طابور MariaDB، ثم تفريغ الطابور في الشيت (flush=True).
+    تعيد عدد المفاتيح التي نُقلت بنجاح.
+    """
     r = r or _client()
     beat(r)
     keys = list(r.smembers(DIRTY_SET_KEY) or [])[:BATCH_SIZE]
-    if not keys:
-        return 0
-
-    jobs = []   # (key, row_index, updates, expect, raw)
+    forwarded = 0
     for key in sorted(keys):
         raw = r.get(f"{CACHE_PREFIX}{key}")
         parsed = _parse_payload(raw) if raw else None
@@ -160,50 +145,45 @@ def run_sync_cycle(worksheet, r=None):
                 _reported_unknown.add(key)
                 logger.warning("[Sync Worker] حمولة مفقودة أو بصيغة غير معروفة للمفتاح %s؛ تُترك كما هي.", key)
             continue
-        jobs.append((key,) + parsed + (raw,))
-    if not jobs:
-        return 0
+        if parsed["legacy"]:
+            logger.error("[Sync Worker] حمولة قديمة بأرقام أعمدة للمفتاح %s؛ نقلها إلى %s دون كتابة.",
+                         key, CONFLICT_SET_KEY)
+            _park_legacy(r, key, raw, parsed)
+            continue
+        try:
+            queue = queue or google_sheets.SQLiteTransactionQueue()
+            _forward(queue, parsed)
+        except Exception as e:
+            # تبقى الحمولة في dirty كما هي وتُنقل في الدورة التالية (التكرار يُدمج في الطابور: نفس seq)
+            logger.warning("[Sync Worker] تعذر نقل %s إلى طابور MariaDB: %s", key, e)
+            continue
+        if _compare_and_delete(r, key, raw):
+            forwarded += 1
+    if flush and worksheet is not None:
+        google_sheets.flush_outbox(worksheet, queue)
+    return forwarded
 
-    records = {key: (row, expect) for key, row, _, expect, _ in jobs if expect}
-    conflicts = google_sheets.find_record_conflicts(worksheet, records) if records else {}
-    ready = []
-    for key, row, updates, expect, raw in jobs:
-        if expect and key in conflicts:
-            logger.warning("[Sync Worker] تعارض هوية في الصف %s (%s)؛ نقل %s إلى %s دون كتابة.",
-                           row, conflicts[key], key, CONFLICT_SET_KEY)
-            # الحمولة تُنقل جانباً: كتابة لاحقة صحيحة لنفس الصف تبدأ من حمولة فارغة ولا ترث قيمها
-            r.set(f"{CONFLICT_PAYLOAD_PREFIX}{key}", raw)
-            r.delete(f"{CACHE_PREFIX}{key}")
-            r.smove(DIRTY_SET_KEY, CONFLICT_SET_KEY, key)
-            _clear_attempts(r, key)
-        else:
-            ready.append((key, row, updates, raw))
-    if not ready:
-        return 0
 
-    written = 0
-    try:
-        data = []
-        for _, row, updates, _ in ready:
-            data.extend(_batch(row, updates))
-        _write(worksheet, data)
-        for key, _, _, raw in ready:
-            _compare_and_delete(r, key, raw)
-        written = len(ready)
-    except Exception as err:
-        logger.warning("[Sync Worker] فشل الإرسال الجماعي (%s)؛ إعادة المحاولة مفتاحاً مفتاحاً.", err)
-        for key, row, updates, raw in ready:
+def _loop_once(r, state):
+    """
+    دورة واحدة من حلقة العامل: نقل حمولات Redis إلى الطابور أولاً (لا ينتظر فتح الشيت)، ثم فتح الشيت إن لزم
+    وتفريغ الطابور. فتح الشيت قد يطول (إعادة محاولة الأخطاء المؤقتة) فيُجدد النبض بعده.
+    state: {'queue', 'worksheet'} يبقى بين الدورات.
+    """
+    beat(r)
+    if state.get("queue") is None:
+        state["queue"] = google_sheets.SQLiteTransactionQueue()
+    run_sync_cycle(None, r, queue=state["queue"], flush=False)
+    if state.get("worksheet") is None:
+        client = google_sheets.get_sheets_client()
+        if client:
             try:
-                _write(worksheet, _batch(row, updates), max_retries=2)
-                _compare_and_delete(r, key, raw)
-                written += 1
-            except Exception as single_err:
-                # يبقى المفتاح في dirty وتبقى حمولته: يُعاد في الدورة التالية، حتى MAX_KEY_ATTEMPTS
-                logger.warning("[Sync Worker] فشل مزامنة %s: %s", key, single_err)
-                _note_failure(r, key)
-    if written:
-        google_sheets.clear_cache()
-    return written
+                state["worksheet"] = google_sheets.open_worksheet(client, config.SPREADSHEET_NAME_OR_URL)
+            finally:
+                beat(r)
+    if state.get("worksheet") is not None:
+        google_sheets.flush_outbox(state["worksheet"], state["queue"])
+        beat(r)
 
 
 def main():
@@ -216,19 +196,13 @@ def main():
         return
 
     logger.info("[Sync Worker] عامل المزامنة المؤجلة يعمل.")
-    worksheet = None
+    state = {}
     while True:
         try:
-            beat(r)
-            if worksheet is None:
-                client = google_sheets.get_sheets_client()
-                if client:
-                    worksheet = google_sheets.open_worksheet(client, config.SPREADSHEET_NAME_OR_URL)
-            if worksheet:
-                run_sync_cycle(worksheet, r)
+            _loop_once(r, state)
         except Exception as e:
             logger.exception("[Sync Worker] خطأ في الدورة: %s", e)
-            worksheet = None
+            state["worksheet"] = None
         time.sleep(SYNC_INTERVAL)
 
 

@@ -91,7 +91,9 @@ FAIL_SCENARIOS = {
     "http_429_twice": ([Resp(429, {}), Resp(429, {})], 2, "http_429"),
     "http_500_twice": ([Resp(500, {}), Resp(500, {})], 2, "http_500"),
     "http_500_then_timeout": ([Resp(503, {}), requests.Timeout("read timed out")], 2, "timeout"),
-    "timeout": ([requests.Timeout("read timed out")], 1, "timeout"),
+    # a timeout is sent once more (live run 2026-10-03, row 4); two in a row fail closed
+    "timeout_twice": ([requests.Timeout("read timed out"), requests.Timeout("read timed out")], 2, "timeout"),
+    "timeout_then_http_500": ([requests.Timeout("read timed out"), Resp(500, {})], 2, "http_500"),
     "connection_error": ([requests.ConnectionError("reset")], 1, "connection_error:ConnectionError"),
     "prose_not_json": ([Resp(200, {"candidates": [{"content": {"parts": [
         {"text": "Sure! Image 1 looks like Al Rawabi laban, it is valid."}]}}]})], 1, "parse_error"),
@@ -145,6 +147,35 @@ def test_429_then_ok_is_retried_once(monkeypatch, laban):
     assert result.status == "ok"
     assert result.verdicts[0].decision == "MATCH"
     assert len(poster.calls) == 2 and slept == [1.0]
+
+
+def test_a_timeout_then_ok_is_retried_once(monkeypatch, laban):
+    # live run 2026-10-03, row 4 (BATO FRENCH FRIES 900 MM): one Gemini timeout left the row VERIFIER_DOWN
+    poster = Poster([requests.Timeout("read timed out"), _reply([_entry(1)])])
+    monkeypatch.setattr(verify_mod.requests, "post", poster)
+    breaker = CircuitBreaker()
+    v = GeminiVerifier(api_key="k", model="m", breaker=breaker, sleep=lambda _s: None)
+    result = v.verify(laban, [_fetched()])
+    assert result.verdicts[0].decision == "MATCH"
+    assert len(poster.calls) == 2 and breaker.consecutive_unknown == 0
+    # both requests count: the timed-out one was most likely billed (was calls 1, the answered one's usage only)
+    assert result.status == "ok" and result.calls == 2
+    lost = [u for u in result.usage if u.get("timed_out")]
+    assert len(result.usage) == 2 and len(lost) == 1
+    assert lost[0]["estimated"] and lost[0]["images"] == 1 and lost[0]["input_tokens"] > 0
+
+
+@pytest.mark.parametrize("script, calls, lost", [
+    ([requests.Timeout("t"), requests.Timeout("t")], 2, 2),
+    ([requests.Timeout("t"), Resp(500, {})], 2, 1),
+    ([Resp(503, {}), requests.Timeout("t")], 1, 1),
+    ([Resp(500, {}), Resp(500, {})], 1, 0),
+])
+def test_a_timed_out_request_counts_in_the_failed_calls_too(monkeypatch, laban, script, calls, lost):
+    monkeypatch.setattr(verify_mod.requests, "post", Poster(script))
+    result = _verifier().verify(laban, [_fetched()])
+    assert result.status == "unknown" and result.calls == calls
+    assert [u.get("timed_out") for u in result.usage] == [True] * lost
 
 
 def test_code_decides(monkeypatch, laban):

@@ -74,6 +74,23 @@ LOCAL_INDEX_MAX_PAGES = os.getenv("LOCAL_INDEX_MAX_PAGES", "3").strip() or "3"
 LOCAL_INDEX_PAGE_TTL_DAYS = os.getenv("LOCAL_INDEX_PAGE_TTL_DAYS", "30").strip() or "30"
 # --- end sources package ---
 
+# --- queue package (P4a): حدود الصرف للعامل ---
+# DAILY_BUDGET_USD: أقصى صرف تقديري للبحث في اليوم (Serper / SerpApi / قراءة الملصق، بأسعار ops_health).
+#   يُفحص قبل سحب كل منتج؛ عند بلوغه يتوقف التشغيل (BUDGET_REACHED) وتبقى الصفوف في الانتظار. 0 = بلا حد.
+# SERPER_CREDIT_STOP_SEARCHES: يتوقف التشغيل بعد هذا العدد من عمليات البحث المتتالية التي رفض فيها Serper
+#   كل استعلاماته بسبب الرصيد أو المفتاح (quota / 401 / 403)، وتبقى الصفوف في الانتظار. 0 = لا إيقاف.
+def _number_env(name, default):
+    try:
+        return max(0.0, float(os.getenv(name, str(default)).strip() or default))
+    except ValueError:
+        logger.warning("قيمة %s غير صالحة؛ تُستخدم %s.", name, default)
+        return float(default)
+
+
+DAILY_BUDGET_USD = _number_env("DAILY_BUDGET_USD", 0)
+SERPER_CREDIT_STOP_SEARCHES = int(_number_env("SERPER_CREDIT_STOP_SEARCHES", 3))
+# --- end queue package ---
+
 # 4. إعدادات معالجة الصور وتحجيمها
 # الأبعاد الافتراضية المطلوبة لجميع الصور بشكل ديناميكي (مثال: 800×800)
 IMAGE_TARGET_SIZE = (800, 800)
@@ -102,8 +119,15 @@ PHOTOROOM_API_KEY = os.getenv("PHOTOROOM_API_KEY", "")
 
 # إعدادات واجهة برمجة تطبيقات إزالة الخلفية لـ PhotoRoom (v1/segment API)
 PHOTOROOM_SIZE = "full"       # دقة الصورة المستردة: preview, medium, hd, full
-PHOTOROOM_CROP = os.getenv("PHOTOROOM_CROP", "True").lower() == "true"        # قص الهوامش الشفافة الزائدة لجعل الكائن ممتداً على كامل الحدود (False لترك مساحة الحواف الأصلية)
+# قص PhotoRoom للهوامش الشفافة: مطفأ افتراضياً. اللوحة النهائية تقص المنتج وتوسّطه محلياً على أي حال،
+# والإطار الكامل يسمح لبوابة الجودة بكشف منتج قصه صندوق Gemini (مع القص يلمس كل منتج الحواف فلا يُكشف شيء)
+PHOTOROOM_CROP = os.getenv("PHOTOROOM_CROP", "False").lower() == "true"
 PHOTOROOM_DESPILL = True      # تفعيل تقنية تصحيح الحواف وإزالة تسرب الألوان من الخلفية الأصلية (Chroma key)
+
+# صور المصدر بخلفية بيضاء نظيفة (image_processor._white_source_cutout): قص محلي مجاني بدل المزوّد المدفوع.
+# 'off' = لا فحص | 'log' (افتراضي) = يكشف ويسجل ما كان سيفعله في نتيجة المعالجة لكن يبقى المزوّد المدفوع
+# | 'on' = يستخدم القص المحلي (بعد اجتيازه بوابة الجودة) دون PhotoRoom ولا صندوق Gemini
+WHITE_SOURCE_MODE = os.getenv("WHITE_SOURCE_MODE", "log").strip().lower()
 
 # 5. ملف اعتمادات Google Service Account
 CREDENTIALS_FILE = os.getenv("CREDENTIALS_FILE", os.path.join(os.path.dirname(os.path.abspath(__file__)), "credentials.json"))
@@ -277,12 +301,23 @@ def log_error_to_laravel(error_message, barcode=None, product_name=None, brand=N
         except Exception as e:
             logger.warning("فشل الكتابة في ملف سجلات لارافيل: %s", e)
 
+def _telegram_credentials():
+    return (os.getenv("TELEGRAM_BOT_TOKEN", TELEGRAM_BOT_TOKEN) or "").strip(), \
+        (os.getenv("TELEGRAM_CHAT_ID", TELEGRAM_CHAT_ID) or "").strip()
+
+
+def telegram_configured():
+    """هل ضُبط بوت Telegram (TELEGRAM_BOT_TOKEN و TELEGRAM_CHAT_ID)؟ تقرير كل تشغيل يُرسل فقط عندها."""
+    token, chat_id = _telegram_credentials()
+    return bool(token and chat_id)
+
+
 def send_telegram_alert(message):
     """
-    إرسال إشعار فوري عبر بوت Telegram للمشرف
+    إرسال إشعار فوري عبر بوت Telegram للمشرف. تعيد True فقط إذا قبل Telegram الرسالة (HTTP 2xx)؛
+    لا يُطبع المفتاح أبداً (الرابط يحتويه).
     """
-    token = os.getenv("TELEGRAM_BOT_TOKEN", TELEGRAM_BOT_TOKEN)
-    chat_id = os.getenv("TELEGRAM_CHAT_ID", TELEGRAM_CHAT_ID)
+    token, chat_id = _telegram_credentials()
     if not token or not chat_id:
         return False
     url = f"https://api.telegram.org/bot{token}/sendMessage"
@@ -293,9 +328,13 @@ def send_telegram_alert(message):
     }
     try:
         import requests
-        requests.post(url, json=payload, timeout=5)
-        return True
-    except Exception:
+        response = requests.post(url, json=payload, timeout=10)
+        if 200 <= int(getattr(response, "status_code", 0) or 0) < 300:
+            return True
+        logger.warning("Telegram رفض الرسالة (HTTP %s).", getattr(response, "status_code", "?"))
+        return False
+    except Exception as e:
+        logger.warning("تعذر إرسال رسالة Telegram (%s).", type(e).__name__)
         return False
 
 def log_and_fail(barcode, product_name, brand, error_message):
@@ -398,6 +437,23 @@ def _load_sources_settings(db_keys):
         except (TypeError, ValueError):
             logger.warning("قيمة local_index_max_pages غير صالحة: %r", db_keys["local_index_max_pages"])
 # --- end sources package ---
+
+
+# --- queue package (P4a): حدود الصرف من system_settings (daily_budget_usd، serper_credit_stop_searches) ---
+def _load_queue_settings(db_keys):
+    global DAILY_BUDGET_USD, SERPER_CREDIT_STOP_SEARCHES
+    for key, name in (("daily_budget_usd", "DAILY_BUDGET_USD"), ("serper_credit_stop_searches",
+                                                                 "SERPER_CREDIT_STOP_SEARCHES")):
+        value = db_keys.get(key)
+        if value is None or str(value).strip() == "":
+            continue
+        try:
+            number = max(0.0, float(str(value).strip()))
+        except ValueError:
+            logger.warning("قيمة %s غير صالحة: %r", key, value)
+            continue
+        globals()[name] = int(number) if name == "SERPER_CREDIT_STOP_SEARCHES" else number
+# --- end queue package ---
 
 
 def load_db_config():
@@ -512,6 +568,7 @@ def load_db_config():
 
 
             _load_sources_settings(db_keys)   # sources package (P3)
+            _load_queue_settings(db_keys)     # queue package (P4a)
 
             logger.info("[Config Loader] تم تحميل الإعدادات من قاعدة البيانات (تتجاوز قيم .env).")
         conn.close()
