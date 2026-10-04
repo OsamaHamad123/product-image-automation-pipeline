@@ -27,6 +27,7 @@ import html
 import json
 import logging
 import os
+import re
 import time
 
 logger = logging.getLogger(__name__)
@@ -71,6 +72,27 @@ HANDED_OVER_TEXT = "توقف على انقطاع، وأثناء انتظار إ�
 
 
 # ---------------------------------------------------------------------------
+# إخفاء الأسرار: التنبيهات ونصوص الاستثناءات تذهب إلى Telegram و run_history و last_report.json
+# ---------------------------------------------------------------------------
+
+def redact(text):
+    """
+    النص بلا أسرار: قيم المفاتيح كما يخفيها verify_cloud_services._redact (وقيمة key= في الروابط)، وكلمة مرور قاعدة
+    البيانات. لا يرفع أبداً.
+    """
+    text = "" if text is None else str(text)
+    try:
+        from verify_cloud_services import _redact
+        text = _redact(text)
+    except Exception:
+        text = re.sub(r"(?i)((?:api_?)?key=)[^&\s'\"]+", r"\1[REDACTED]", text)
+    password = os.getenv("DB_PASSWORD", "") or ""
+    if len(password) >= 6:
+        text = text.replace(password, "[REDACTED]")
+    return text
+
+
+# ---------------------------------------------------------------------------
 # سبب التوقف -> النتيجة ورمز الخروج
 # ---------------------------------------------------------------------------
 
@@ -105,7 +127,7 @@ def reason_text(stop_reason):
     key = _key(stop_reason)
     if key in DONE_REASONS:
         return ""
-    return REASON_TEXT.get(key) or str(stop_reason)
+    return REASON_TEXT.get(key) or redact(stop_reason)
 
 
 # ---------------------------------------------------------------------------
@@ -192,7 +214,7 @@ def build_report(trigger, attempts, started_ts, ended_ts, health=None, db=None, 
             run_ids.append(a["run_id"])
     notices = []
     for a in attempts:
-        for part in str(a.get("notice") or a.get("message") or "").split(" | "):
+        for part in redact(a.get("notice") or a.get("message") or "").split(" | "):
             part = part.strip()
             if part and part not in notices:
                 notices.append(part)
@@ -270,7 +292,7 @@ def history_entry(report):
         "outbox_dead": outbox.get("dead"),
         "spend_usd": spend.get("usd"),
         "spend_source": spend.get("source"),
-        "notices": " | ".join(report.get("notices") or []) or None,
+        "notices": redact(" | ".join(report.get("notices") or [])) or None,
         "report_json": report,
     }
     for key in ("enqueued", "searched", "auto_published", "ready_for_review", "not_found", "failed",
@@ -334,7 +356,7 @@ def telegram_text(report):
     if spend and spend.get("usd") is not None:
         lines.append(f"التكلفة: {spend['usd']:.2f}$" + (" (تقديرية)" if spend.get("source") == "estimate" else ""))
     for notice in (report.get("notices") or [])[:3]:
-        lines.append(f"⚠️ {esc(str(notice)[:200])}")
+        lines.append(f"⚠️ {esc(redact(notice)[:200])}")
     return "\n".join(lines)[:TELEGRAM_MAX_CHARS]
 
 
@@ -361,6 +383,7 @@ def publish(report, db=None, path=LAST_REPORT_PATH, sender=None, config_module=N
     except Exception as e:
         logger.warning("run_report: run_history not saved: %s", e)
     report["history_id"] = history_id
+    report["notices"] = [redact(n) for n in report.get("notices") or []]       # ما أضافه المستدعي بعد build_report
     report["telegram_sent"] = notify(report, sender=sender, config_module=config_module)
     write_last_report(report, path)
     counts = report.get("counts") or {}

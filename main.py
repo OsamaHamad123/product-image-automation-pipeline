@@ -1972,6 +1972,15 @@ def _sheet_failure_reason(error):
     return "enqueue_failed"
 
 
+def _redacted(text):
+    """نص خطأ بلا أسرار (run_report.redact) قبل أن يصل إلى تنبيه اللوحة والتقرير."""
+    try:
+        import run_report
+        return run_report.redact(text)
+    except Exception:
+        return str(text)
+
+
 def _cli_trigger(argv):
     """--trigger=dashboard|nightly|manual من سطر الأوامر؛ افتراضياً manual (تشغيل يدوي)."""
     for i, arg in enumerate(argv):
@@ -2127,7 +2136,7 @@ def run_worker_mode(trigger="manual", report=True, deadline_ts=None):
             stop_reason = stop_reason or ("worker_error" if reason == "enqueue_failed" else reason)
             print(f"[Worker] {e}")
             if stop_reason == "worker_error":
-                crash = f"{type(e).__name__}: {e}"[:200]          # التنبيه WORKER_ERROR يُكتب في finally
+                crash = _redacted(f"{type(e).__name__}: {e}")[:200]   # التنبيه WORKER_ERROR يُكتب في finally
                 return
             code = "SHEETS_UNAVAILABLE" if stop_reason == "sheets_unavailable" else "SHEET_CONFIG"
             start_notice = f"{code}: {e}"
@@ -2248,7 +2257,7 @@ def run_worker_mode(trigger="manual", report=True, deadline_ts=None):
             stop_reason = stop_reason or "stopped"
         elif not (isinstance(e, SystemExit) and e.code in (0, None)):
             stop_reason = stop_reason or "worker_error"
-            crash = f"{type(e).__name__}: {e}"[:200]
+            crash = _redacted(f"{type(e).__name__}: {e}")[:200]
             print(f"[Worker] خطأ غير متوقع أنهى العامل: {crash}")
         raise
     finally:

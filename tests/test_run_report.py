@@ -354,6 +354,34 @@ def test_telegram_text_escapes_notices_and_says_when_the_database_is_down():
     assert "🔌 انقطاع" in text and "قاعدة البيانات لا ترد" in text and "الأرقام غير متاحة" in text
 
 
+
+def test_report_texts_never_carry_secrets(monkeypatch, tmp_path):
+    """Review fix P6: worker notices and exception texts (run_nightly's traceback.format_exc(limit=1)) went to
+    Telegram, run_history and last_report.json unredacted. They pass through the log redaction now."""
+    import config
+    import run_report
+
+    monkeypatch.setattr(config, "SERPER_API_KEY", "SECRET-SERPER-123456")
+    monkeypatch.setattr(config, "TELEGRAM_BOT_TOKEN", "777:SECRET-BOT-TOKEN")
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "777:SECRET-BOT-TOKEN")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "42")
+    monkeypatch.setenv("DB_PASSWORD", "SECRET-DB-PASS")
+    attempts = [{"stop_reason": "worker_error", "message": "Traceback: requests.get('https://google.serper.dev/search"
+                 "?api_key=SECRET-SERPER-123456') failed"},
+                {"stop_reason": "worker_error", "notice": "WORKER_ERROR: OperationalError(1045, \"Access denied "
+                 "(using password: SECRET-DB-PASS)\") | GEMINI_DOWN: https://x/v1?key=AIzaSECRETVALUE123 refused"}]
+    db = FakeDb(COUNTS)
+    sent = []
+    path = tmp_path / "last_report.json"
+    report = run_report.build_report("nightly", attempts, 1_790_000_000, 1_790_000_060, db=db, sheets=object())
+    report["notices"].append("NO_RETRY: token 777:SECRET-BOT-TOKEN")              # added by the caller
+    run_report.publish(report, db=db, path=str(path), sender=lambda text: sent.append(text) or True)
+    texts = [path.read_text(encoding="utf-8"), json.dumps(db.saved, ensure_ascii=False, default=str), sent[0]]
+    for text in texts:
+        for secret in ("SECRET-SERPER-123456", "SECRET-BOT-TOKEN", "SECRET-DB-PASS", "AIzaSECRETVALUE123"):
+            assert secret not in text, (secret, text[:300])
+    assert "[REDACTED]" in texts[0] and "WORKER_ERROR: OperationalError" in texts[0]
+
 def test_a_report_never_breaks_when_the_database_is_down(tmp_path):
     import run_report
 
@@ -462,7 +490,8 @@ def _crashing_worker(monkeypatch, tmp_path, raise_in):
 def test_a_crashed_dashboard_worker_is_reported_as_failed_not_done(offline, monkeypatch, tmp_path):
     """Review fix C6: run_worker_mode's try had only a finally, so a worker that crashed (here init_async_queue raising
     RuntimeError) kept stop_reason None: last_report.json said done, exit 0, and Telegram said «اكتمل»."""
-    main, states, _, sent = _crashing_worker(monkeypatch, tmp_path, ("init_async_queue", RuntimeError("queue thread")))
+    main, states, _, sent = _crashing_worker(monkeypatch, tmp_path,
+                                            ("init_async_queue", RuntimeError("queue thread ?key=SECRET-Q-123456")))
 
     with pytest.raises(RuntimeError):
         main.run_worker_mode(trigger="dashboard")
@@ -475,6 +504,8 @@ def test_a_crashed_dashboard_worker_is_reported_as_failed_not_done(offline, monk
     assert "❌ فشل" in text and "اكتمل" not in text
     assert states[-1]["status"] == "error" and states[-1]["notice"].startswith("WORKER_ERROR: ")
     assert not (tmp_path / "temp" / "pipeline.lock").exists()
+    # review fix P6: the exception text is redacted in the dashboard notice, the report and Telegram
+    assert "SECRET-Q-123456" not in states[-1]["notice"] + json.dumps(report, ensure_ascii=False) + text
 
 
 def test_ctrl_c_stops_a_manual_worker_as_stopped(offline, monkeypatch, tmp_path):
