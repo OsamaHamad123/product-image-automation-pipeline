@@ -13,6 +13,8 @@ heartbeat_ts from its loop (also while paused or waiting for the database); a lo
 (command line and start time) is never aged out; a failed check is retried once and keeps the lock (only a positive
 "gone / another process" verdict frees it); a lock whose identity cannot be verified ages out by its heartbeat
 (LOCK_STALE_HEARTBEAT_SECONDS). The lock is written atomically and a new one is created exclusively.
+The dashboard (ApiController::pipelineProcess) asks Python for the verdict (cli_bridge lock_state) instead of
+re-implementing the rule (review fix C9); it is checked under the PHP CLI.
 
 Real processes are used where the platform allows it (/proc on Linux); the rest goes through an injected
 process_info, and the Windows probe through a fake subprocess.run.
@@ -538,10 +540,60 @@ def test_the_windows_probe_asks_for_utc_without_a_bom(main_mod, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Dashboard: ApiController::pipelineProcess follows the same rules
+# Dashboard: ApiController::pipelineProcess asks Python (cli_bridge lock_state), so both sides use one rule
 # ---------------------------------------------------------------------------
 
-def _pipeline_process(tmp_path, content, mtime=None):
+BRIDGE = ROOT / "cli_bridge.py"
+
+# Framework stand-ins: Cache is an in-memory store; PythonBridge runs the real cli_bridge.py (BRIDGE_MODE=real),
+# answers like a broken bridge (broken), or answers a fixed verdict from BRIDGE_VERDICT (fixed). It counts its calls.
+PHP_LOCK_HARNESS = r"""<?php
+namespace App\Http\Controllers { class Controller {} }
+namespace Illuminate\Support\Facades {
+    class Cache {
+        public static $store = [];
+        public static function get($k, $d = null) { return self::$store[$k] ?? $d; }
+        public static function put($k, $v, $ttl = null) { self::$store[$k] = $v; return true; }
+    }
+}
+namespace App\Services {
+    class PythonBridge {
+        public static $calls = [];
+        public static function run($action, $params = []) {
+            self::$calls[] = $action;
+            $mode = getenv('BRIDGE_MODE');
+            if ($mode === 'broken') { return ['status' => 'error', 'error' => 'Invalid JSON output from Python bridge']; }
+            if ($mode === 'fixed') { return json_decode(getenv('BRIDGE_VERDICT'), true); }
+            $cmd = escapeshellarg(getenv('PYTHON_BIN')) . ' ' . escapeshellarg(getenv('BRIDGE_PATH')) . ' '
+                . $action . ' ' . escapeshellarg(json_encode($params ?: new \stdClass()));
+            $lines = preg_split('/\r?\n/', trim((string) shell_exec($cmd . ' 2>/dev/null')));
+            return json_decode((string) end($lines), true) ?: ['status' => 'error'];
+        }
+        public static function pythonPath() { return 'python'; }
+    }
+    class QueueStats {}
+}
+namespace {
+    function base_path($p = '') { return getenv('HARNESS_ROOT') . '/dashboard' . ($p !== '' ? '/' . $p : ''); }
+    require getenv('API_CONTROLLER');
+    $c = new App\Http\Controllers\ApiController();
+    $m = new ReflectionMethod($c, 'pipelineProcess');
+    $m->setAccessible(true);
+    $out = [];
+    foreach (explode(',', getenv('CALLS') ?: 'fresh') as $call) {
+        if ($call === 'touch') {
+            file_put_contents(getenv('HARNESS_ROOT') . '/temp/pipeline.lock', getenv('LOCK_AFTER'));
+            continue;
+        }
+        $p = $m->invoke($c, $call === 'fresh');
+        $out[] = ['state' => $p['state'], 'pid' => $p['pid'], 'verified' => $p['verified']];
+    }
+    echo json_encode(['results' => $out, 'calls' => App\Services\PythonBridge::$calls]);
+}
+"""
+
+
+def _run_lock_harness(tmp_path, content, mtime=None, mode="real", verdict=None, calls="fresh", after=""):
     root = tmp_path / "php_root"
     (root / "dashboard").mkdir(parents=True, exist_ok=True)
     (root / "temp").mkdir(exist_ok=True)
@@ -549,45 +601,68 @@ def _pipeline_process(tmp_path, content, mtime=None):
     lock.write_text(content, encoding="utf-8")
     if mtime is not None:
         os.utime(lock, (mtime, mtime))
-    controller = str(CONTROLLER).replace("\\", "/")
-    base = str(root / "dashboard").replace("\\", "/")
-    script = f"""<?php
-namespace App\\Http\\Controllers {{ class Controller {{}} }}
-namespace {{
-function base_path($p = '') {{ return '{base}' . ($p !== '' ? '/' . $p : ''); }}
-require '{controller}';
-$c = new App\\Http\\Controllers\\ApiController();
-$m = new ReflectionMethod($c, 'pipelineProcess');
-$m->setAccessible(true);
-$p = $m->invoke($c);
-echo json_encode(['state' => $p['state'], 'pid' => $p['pid']]);
-}}
-"""
-    with tempfile.NamedTemporaryFile("w", suffix=".php", delete=False, encoding="utf-8") as fh:
-        fh.write(script)
-        path = fh.name
-    try:
-        result = subprocess.run([PHP, path], capture_output=True, text=True, timeout=60, encoding="utf-8")
-    finally:
-        os.unlink(path)
+    script = tmp_path / "lock_harness.php"
+    script.write_text(PHP_LOCK_HARNESS, encoding="utf-8")
+    env = dict(os.environ, HARNESS_ROOT=str(root), API_CONTROLLER=str(CONTROLLER), BRIDGE_MODE=mode,
+               BRIDGE_VERDICT=json.dumps(verdict or {}), PYTHON_BIN=sys.executable, BRIDGE_PATH=str(BRIDGE),
+               CALLS=calls, LOCK_AFTER=after)
+    result = subprocess.run([PHP, str(script)], capture_output=True, text=True, timeout=120, encoding="utf-8", env=env)
     assert result.returncode == 0, result.stdout + result.stderr
     return json.loads(result.stdout)
 
 
+def _pipeline_process(tmp_path, content, mtime=None, mode="real"):
+    return _run_lock_harness(tmp_path, content, mtime=mtime, mode=mode)["results"][0]
+
+
 @pytest.mark.skipif(PHP is None or not LINUX_PROC, reason="needs the PHP CLI and Linux /proc")
-def test_dashboard_reads_the_json_lock_with_the_same_rules(tmp_path, fake_worker_script):
+def test_dashboard_reads_the_lock_with_pythons_rule(tmp_path, fake_worker_script):
+    """Review fix C9 (and C1 on the dashboard side): ApiController re-implemented the rule (24-hour age, no start-time
+    check, every process 'automation' where /proc is missing). It now asks cli_bridge lock_state."""
     worker = fake_worker_script("main.py")
+    created = _proc_created(worker.pid)
     other = subprocess.Popen(["sleep", "30"])
     try:
-        assert _pipeline_process(tmp_path, _json_lock(worker.pid)) == {"state": "running", "pid": str(worker.pid)}
+        live = _json_lock(worker.pid, proc_created=created)
+        assert _pipeline_process(tmp_path, live) == {"state": "running", "pid": str(worker.pid), "verified": True}
         assert _pipeline_process(tmp_path, str(worker.pid))["state"] == "running"         # the old format
         assert _pipeline_process(tmp_path, _json_lock(other.pid))["state"] == "none"       # not a python worker
         assert _pipeline_process(tmp_path, _json_lock(worker.pid, host="OTHER-PC"))["state"] == "none"
+        # a worker running for two days is still running (the dashboard said 'none' after 24 h and Run started a
+        # second worker over the live one)
         old = time.time() - 2 * 86400
-        assert _pipeline_process(tmp_path, _json_lock(worker.pid, started_ts=old))["state"] == "none"
+        assert _pipeline_process(tmp_path, _json_lock(worker.pid, started_ts=old, heartbeat_ts=old,
+                                                      proc_created=created))["state"] == "running"
+        # a PID reused by another main.py-like process: the start time is not the lock writer's
+        assert _pipeline_process(tmp_path, _json_lock(worker.pid, proc_created=created - 3600))["state"] == "none"
         assert _pipeline_process(tmp_path, str(worker.pid), mtime=old)["state"] == "none"
         assert _pipeline_process(tmp_path, "STARTING")["state"] == "starting"
-        assert _pipeline_process(tmp_path, "garbage") == {"state": "none", "pid": None}
+        assert _pipeline_process(tmp_path, "garbage") == {"state": "none", "pid": None, "verified": False}
     finally:
         other.kill()
         other.wait()
+
+
+def _proc_created(pid):
+    import main
+    return main._proc_process_info(pid)["created"]
+
+
+@pytest.mark.skipif(PHP is None, reason="needs the PHP CLI")
+def test_dashboard_fails_closed_when_python_does_not_answer(tmp_path):
+    """No verdict from Python: a lock is a run (no second run starts) whose identity is not confirmed (nothing is
+    killed)."""
+    assert _pipeline_process(tmp_path, _json_lock(4242), mode="broken") == {"state": "running", "pid": None,
+                                                                            "verified": False}
+
+
+@pytest.mark.skipif(PHP is None, reason="needs the PHP CLI")
+def test_status_polls_reuse_the_verdict_for_the_same_lock_content(tmp_path):
+    """batchStatus (pipelineProcess(false)) is polled every few seconds by every page: one bridge call per lock
+    content and LOCK_STATE_CACHE_S; Run / Stop / Reset always ask afresh. No lock or STARTING needs no bridge."""
+    verdict = {"status": "success", "state": "running", "pid": 4242, "verified": True}
+    out = _run_lock_harness(tmp_path, _json_lock(4242), mode="fixed", verdict=verdict,
+                            calls="cached,cached,touch,cached,fresh", after=_json_lock(4242, heartbeat_ts=time.time() + 30))
+    assert [r["state"] for r in out["results"]] == ["running"] * 4
+    assert out["calls"] == ["lock_state"] * 3          # the second poll is cached; a new heartbeat and fresh ask again
+    assert _run_lock_harness(tmp_path, "STARTING", mode="broken")["calls"] == []

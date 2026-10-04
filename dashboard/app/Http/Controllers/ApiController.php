@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use App\Services\PythonBridge;
@@ -244,19 +245,23 @@ class ApiController extends Controller
         }
     }
 
-    /** قفل أقدم من هذا ليس لعامل حي (نفس main.MAX_LOCK_AGE_SECONDS). */
-    private const MAX_LOCK_AGE_S = 86400;
+    /** حكم بايثون على القفل يُحفظ هذه المدة لاستعلامات الحالة المتكررة (الشريط الجانبي يسأل كل بضع ثوانٍ). */
+    private const LOCK_STATE_CACHE_S = 10;
+    private const LOCK_STATE_CACHE_KEY = 'lq_pipeline_lock_state';
 
     /**
-     * حالة عامل الخلفية من ملف القفل temp/pipeline.lock (JSON يكتبه main.write_lock، أو رقم العملية فقط بالصيغة
-     * القديمة): starting = كتبت لوحة التحكم 'STARTING' والإدراج يقرأ الشيت (حتى 5 دقائق)، running = عملية بايثون
-     * حية للأتمتة على هذا الجهاز، none = لا قفل، أو قفل قديم، أو من جهاز آخر، أو عملية انتهت أو ليست العامل
-     * (نفس قواعد main._another_worker_running، فلا يرفض زر التشغيل بسبب رقم عملية أعيد استخدامه).
+     * حالة عامل الخلفية من ملف القفل temp/pipeline.lock: starting = كتبت لوحة التحكم 'STARTING' والإدراج يقرأ الشيت
+     * (حتى 5 دقائق)، running = عامل حي، none = لا قفل أو قفل متروك. الحكم على قفل يحمل رقم عملية يأتي من بايثون
+     * (cli_bridge lock_state = main.lock_verdict: نبض القفل وهوية العملية واسم الجهاز)، فلا توجد قاعدة ثانية هنا
+     * تختلف عنها. verified: هوية العملية مؤكدة (سطر الأوامر ووقت البدء)، ووحدها تسمح بإنهائها. بايثون لم يرد:
+     * running بلا verified (لا تشغيل ثانٍ ولا إنهاء أي عملية). $fresh=false (batchStatus) يقبل حكماً عمره حتى
+     * LOCK_STATE_CACHE_S لمحتوى القفل نفسه.
      */
-    private function pipelineProcess(): array
+    private function pipelineProcess(bool $fresh = true): array
     {
         $lockFile = $this->automationPath('temp/pipeline.lock');
-        $process = ['state' => 'none', 'pid' => null, 'lock' => $lockFile, 'lock_exists' => file_exists($lockFile)];
+        $process = ['state' => 'none', 'pid' => null, 'verified' => false, 'reason' => '', 'role' => null,
+                    'lock' => $lockFile, 'lock_exists' => file_exists($lockFile)];
         if (!$process['lock_exists']) {
             return $process;
         }
@@ -267,54 +272,39 @@ class ApiController extends Controller
             }
             return $process;
         }
-        $lock = self::parseLock($lockContent, (int) @filemtime($lockFile));
-        if ($lock !== null) {
-            $process['pid'] = $lock['pid'];
-            if (self::lockIsCurrent($lock, time(), (string) gethostname()) && $this->processAlive($lock['pid'])
-                && $this->runsAutomation($lock['pid'])) {
-                $process['state'] = 'running';
-            }
-        }
+        $verdict = $fresh ? $this->lockVerdict($lockFile) : $this->cachedLockVerdict($lockFile, $lockContent);
+        $state = (string) ($verdict['state'] ?? 'running');
+        $process['state'] = in_array($state, ['none', 'starting', 'running'], true) ? $state : 'running';
+        $process['pid'] = is_numeric($verdict['pid'] ?? null) && (int) $verdict['pid'] > 1 ? (string) (int) $verdict['pid'] : null;
+        $process['verified'] = ($verdict['verified'] ?? false) === true && $process['pid'] !== null;
+        $process['reason'] = (string) ($verdict['reason'] ?? '');
+        $process['role'] = is_string($verdict['role'] ?? null) ? $verdict['role'] : null;
         return $process;
     }
 
-    /** ['pid' => '123', 'host' => ?string, 'started' => epoch] من محتوى القفل، أو null لمحتوى غير مفهوم. */
-    public static function parseLock(string $content, int $mtime): ?array
+    /** حكم بايثون على القفل (cli_bridge lock_state)؛ بلا رد صالح: قفل حي غير مؤكد (لا يُحذف ولا تُنهى عمليته). */
+    private function lockVerdict(string $lockFile): array
     {
-        if ($content !== '' && ctype_digit($content)) {
-            return ['pid' => $content, 'host' => null, 'started' => $mtime];
+        $result = $this->runPython('lock_state', ['lock' => $lockFile]);
+        if (($result['status'] ?? '') !== 'success') {
+            return ['state' => 'running', 'pid' => null, 'verified' => false, 'reason' => 'lock_state_unavailable'];
         }
-        $data = json_decode($content, true);
-        if (!is_array($data) || !is_numeric($data['pid'] ?? null) || (int) $data['pid'] <= 1) {
-            return null;
-        }
-        $started = is_numeric($data['started_ts'] ?? null) ? (int) $data['started_ts'] : $mtime;
-        $host = is_string($data['host'] ?? null) && $data['host'] !== '' ? $data['host'] : null;
-        return ['pid' => (string) (int) $data['pid'], 'host' => $host, 'started' => $started];
+        return $result;
     }
 
-    /** القفل من هذا الجهاز وليس أقدم من MAX_LOCK_AGE_S. */
-    public static function lockIsCurrent(array $lock, int $now, string $host): bool
+    /** lockVerdict محفوظ لمحتوى القفل نفسه حتى LOCK_STATE_CACHE_S (مفتاح واحد في الكاش، لا مفتاح لكل نبضة). */
+    private function cachedLockVerdict(string $lockFile, string $lockContent): array
     {
-        if ($lock['host'] !== null && strcasecmp($lock['host'], $host) !== 0) {
-            return false;
+        $key = md5($lockFile . "\n" . $lockContent);
+        $cached = Cache::get(self::LOCK_STATE_CACHE_KEY);
+        if (is_array($cached) && ($cached['key'] ?? null) === $key && is_array($cached['verdict'] ?? null)
+            && time() - (int) ($cached['at'] ?? 0) < self::LOCK_STATE_CACHE_S) {
+            return $cached['verdict'];
         }
-        return $now - (int) $lock['started'] <= self::MAX_LOCK_AGE_S;
-    }
-
-    /**
-     * العملية تشغّل main.py أو run_nightly.py ببايثون (لينكس: /proc/PID/cmdline). حيث لا يُقرأ سطر الأوامر
-     * (ويندوز) يكفي ما يفحصه processAlive: اسم البرنامج python.
-     */
-    private function runsAutomation(string $pid): bool
-    {
-        $cmd = @file_get_contents("/proc/{$pid}/cmdline");
-        if (!is_string($cmd) || $cmd === '') {
-            return true;
-        }
-        $cmd = str_replace("\0", ' ', $cmd);
-        return stripos($cmd, 'python') !== false
-            && preg_match('#(^|[\\\\/\s"\'])(main|run_nightly)\.py($|[\s"\'])#i', $cmd) === 1;
+        $verdict = $this->lockVerdict($lockFile);
+        Cache::put(self::LOCK_STATE_CACHE_KEY, ['key' => $key, 'at' => time(), 'verdict' => $verdict],
+            self::LOCK_STATE_CACHE_S);
+        return $verdict;
     }
 
     private function processAlive(string $pid): bool
@@ -337,8 +327,9 @@ class ApiController extends Controller
     }
 
     /**
-     * يُنهي عامل الخلفية الحي (كما كان زر الإيقاف يفعل) ويعيد وصفه لإجراء run_control:
-     * starting (الإدراج يقرأ الشيت ولا PID بعد) | running (بقي حياً بعد الإنهاء) | killed | none.
+     * يُنهي عامل الخلفية الحي ويعيد وصفه لإجراء run_control:
+     * starting (الإدراج يقرأ الشيت ولا PID بعد) | running (بقي حياً، أو لم تتأكد هويته فلم يُنهَ) | killed | none.
+     * لا يُنهي أبداً عملية لم يؤكد بايثون هويتها (verified): رقم عملية أُعيد استخدامه قد يكون أي برنامج آخر.
      */
     private function terminateWorker(array $process): string
     {
@@ -347,6 +338,9 @@ class ApiController extends Controller
         }
         if ($process['state'] !== 'running') {
             return 'none';
+        }
+        if (($process['verified'] ?? false) !== true || $process['pid'] === null) {
+            return 'running';
         }
         if (strncasecmp(PHP_OS, 'WIN', 3) === 0) {
             shell_exec("taskkill /F /PID {$process['pid']} 2>&1");
@@ -392,23 +386,24 @@ class ApiController extends Controller
         $stopRequested = (int) ($state->stop_requested ?? 0);
         $notice = (string) ($state->notice ?? '');
 
-        $process = $this->pipelineProcess();
+        $process = $this->pipelineProcess(false);
         $isRunning = $process['state'] !== 'none';
         $counters = QueueStats::counters();
         $readyForReview = (int) ($counters['by_status']['ready_for_review'] ?? 0);
 
         // Self-healing heartbeat: If status says a run is active but no worker is running,
         // settle it (review or idle) if it has been inactive for more than 45 seconds or if the lock file is missing.
+        // طلب الإيقاف المؤقت لا يُلغى هنا: لو أخطأ الحكم بأن العامل متوقف لاستأنف عاملٌ موقوف مؤقتاً العمل بصمت؛
+        // التشغيل التالي يلغيه (prepare_run، resume_automation)
         if (!$isRunning && in_array($status, ['pre_caching', 'running', 'starting'], true)) {
             $lastUpdated = isset($state->updated_at) ? strtotime($state->updated_at . ' UTC') : time();
             $diff = time() - $lastUpdated;
             if ($diff > 45 || !$process['lock_exists']) {
                 $settled = $readyForReview > 0 ? 'curation_pending' : 'idle';
                 try {
-                    \DB::update("UPDATE automation_state SET status = ?, total_items = 0, processed_items = 0, success_count = 0, failed_count = 0, current_product_name = '', pause_requested = 0 WHERE `key` = 'active_session'", [$settled]);
+                    \DB::update("UPDATE automation_state SET status = ?, total_items = 0, processed_items = 0, success_count = 0, failed_count = 0, current_product_name = '' WHERE `key` = 'active_session'", [$settled]);
                     $status = $settled;
                     $currentProduct = "";
-                    $pauseRequested = 0;
                 } catch (\Exception $e) {
                     // Ignore
                 }

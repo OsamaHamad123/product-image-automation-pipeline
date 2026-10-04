@@ -88,6 +88,89 @@ def test_batch_status_reports_the_run_and_the_phase():
     assert "'total' => $run['total']" in body and "'current' => $run['processed']" in body
 
 
+
+BATCH_STATUS_HARNESS = r"""<?php
+namespace App\Http\Controllers { class Controller {} }
+namespace Illuminate\Support\Facades {
+    class Cache {
+        public static $store = [];
+        public static function get($k, $d = null) { return self::$store[$k] ?? $d; }
+        public static function put($k, $v, $ttl = null) { self::$store[$k] = $v; return true; }
+    }
+}
+namespace App\Services {
+    class PythonBridge {
+        public static function run($action, $params = []) {
+            return ['status' => 'success', 'state' => getenv('WORKER_STATE'), 'pid' => 4242, 'verified' => true];
+        }
+        public static function pythonPath() { return 'python'; }
+    }
+    class QueueStats {
+        public static function counters() {
+            return ['by_status' => ['ready_for_review' => 0, 'processing' => 0, 'pending' => 3], 'by_failure_code' => []];
+        }
+        public static function run($runId) { return null; }
+        public static function runTotals($a, $b) {
+            return ['total' => 0, 'processed' => 0, 'failed' => 0, 'ready_for_review' => 0, 'completed' => 0];
+        }
+        public static function runPhase(...$a) { return 'idle'; }
+        public static function phaseText(...$a) { return ''; }
+        public static function alertText(...$a) { return ''; }
+        public static function stuckReason(...$a) { return ''; }
+        public static function retryWaitS() { return null; }
+    }
+}
+namespace {
+    class DB {
+        public static $updates = [];
+        public static function select($sql, $bindings = []) {
+            return [(object) ['status' => 'pre_caching', 'pause_requested' => 1, 'stop_requested' => 0, 'notice' => '',
+                'current_product_name' => 'P1', 'updated_at' => gmdate('Y-m-d H:i:s', time() - 600), 'lq_age_s' => 600,
+                'run_id' => null, 'total_items' => 0, 'processed_items' => 0, 'failed_count' => 0, 'success_count' => 0]];
+        }
+        public static function update($sql, $bindings = []) { self::$updates[] = $sql; return 1; }
+    }
+    class FakeResponse {
+        public $data;
+        public function __construct($d) { $this->data = $d; }
+        public function header($k, $v) { return $this; }
+    }
+    class FakeFactory { public function json($d, $s = 200) { return new FakeResponse($d); } }
+    function response() { return new FakeFactory(); }
+    function base_path($p = '') { return getenv('HARNESS_ROOT') . '/dashboard' . ($p !== '' ? '/' . $p : ''); }
+    require getenv('API_CONTROLLER');
+    $r = (new App\Http\Controllers\ApiController())->batchStatus();
+    echo json_encode(['pause_requested' => $r->data['pause_requested'], 'status' => $r->data['status'],
+                      'updates' => DB::$updates]);
+}
+"""
+
+
+@pytest.mark.skipif(PHP is None, reason="php is not installed")
+@pytest.mark.parametrize("lock, worker_state", [(None, "none"), ('{"pid": 4242}', "none"), ('{"pid": 4242}', "running")])
+def test_batch_status_never_clears_a_pause_request(tmp_path, lock, worker_state):
+    """Review fix C1: when the dashboard judged a live paused worker stopped (its 24-hour rule), the status poll's
+    self-healing UPDATE also set pause_requested = 0, and the paused worker silently resumed. The status poll may still
+    settle a stale 'pre_caching' status, but the pause request stays until the next run clears it."""
+    root = tmp_path / "root"
+    (root / "dashboard").mkdir(parents=True)
+    (root / "temp").mkdir()
+    if lock is not None:
+        (root / "temp" / "pipeline.lock").write_text(lock, encoding="utf-8")
+    script = tmp_path / "status.php"
+    script.write_text(BATCH_STATUS_HARNESS, encoding="utf-8")
+    env = dict(os.environ, HARNESS_ROOT=str(root), API_CONTROLLER=str(CONTROLLER), WORKER_STATE=worker_state)
+    result = subprocess.run([PHP, str(script)], capture_output=True, text=True, timeout=60, encoding="utf-8", env=env)
+    assert result.returncode == 0, result.stdout + result.stderr
+    out = json.loads(result.stdout)
+    assert out["pause_requested"] == 1
+    assert all("pause_requested" not in sql for sql in out["updates"]), out["updates"]
+    if worker_state == "none":
+        assert out["status"] == "idle" and len(out["updates"]) == 1        # the stale status itself is still settled
+    else:
+        assert out["updates"] == [] and out["status"] == "pre_caching"
+
+
 @pytest.mark.skipif(PHP is None or not os.path.isdir("/proc") or not hasattr(os, "fork"),
                     reason="needs the PHP CLI and a Linux /proc")
 def test_a_killed_worker_not_yet_reaped_counts_as_stopped():
@@ -101,6 +184,7 @@ def test_a_killed_worker_not_yet_reaped_counts_as_stopped():
     if zombie == 0:                       # the child exits at once and is not reaped: a zombie
         os._exit(0)
     alive = subprocess.Popen(["sleep", "30"])
+    unconfirmed = subprocess.Popen(["sleep", "30"])
     try:
         for _ in range(100):
             with open(f"/proc/{zombie}/stat") as fh:
@@ -120,15 +204,19 @@ $terminate->setAccessible(true);
 echo json_encode([
     'zombie' => $alive->invoke($c, '{zombie}'),
     'live' => $alive->invoke($c, '{alive.pid}'),
-    'kill' => $terminate->invoke($c, ['state' => 'running', 'pid' => '{alive.pid}']),
+    'kill' => $terminate->invoke($c, ['state' => 'running', 'pid' => '{alive.pid}', 'verified' => true]),
+    'unconfirmed' => $terminate->invoke($c, ['state' => 'running', 'pid' => '{unconfirmed.pid}', 'verified' => false]),
 ]);
 }}
 """)
+        # review fix C9: a PID whose identity Python did not confirm is never killed (it may be any program now)
+        assert unconfirmed.poll() is None
     finally:
-        alive.kill()
-        alive.wait()
+        for proc in (alive, unconfirmed):
+            proc.kill()
+            proc.wait()
         os.waitpid(zombie, 0)
-    assert out == {"zombie": False, "live": True, "kill": "killed"}
+    assert out == {"zombie": False, "live": True, "kill": "killed", "unconfirmed": "running"}
 
 def _run_php(script: str):
     with tempfile.NamedTemporaryFile("w", suffix=".php", delete=False, encoding="utf-8") as fh:

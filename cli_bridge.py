@@ -40,6 +40,7 @@ if __name__ == "__main__":
 import base64
 import json
 import logging
+import time
 import traceback
 import uuid
 
@@ -1309,6 +1310,47 @@ def action_run_control(params):
             'stop_requested': result['stop_requested'], 'state': result['status'], 'queue': result['queue']}
 
 
+
+# ---------------------------------------------------------------------------
+# lock_state (قراءة فقط): حالة قفل العامل بقاعدة main.lock_verdict نفسها. لوحة التحكم تسأل هنا بدل أن تعيد كتابة
+# القاعدة في PHP (اختلفت القاعدتان: رقم عملية معاد كان «يعمل» في اللوحة و«متروكاً» في بايثون، فأُنهيت عملية أخرى)
+# ---------------------------------------------------------------------------
+
+# 'STARTING' (إدراج لوحة التحكم) يُعد تشغيلاً بهذا العمر فقط (نفس ApiController::pipelineProcess و run_nightly)
+STARTING_GRACE_S = 300
+
+
+def action_lock_state(params):
+    """
+    حالة temp/pipeline.lock كما يراها العامل والتشغيل الليلي. lock: مسار القفل (افتراضياً قفل هذا المشروع؛ يُقبل
+    ملف اسمه pipeline.lock فقط). لا يحذف القفل ولا يغير شيئاً. الاستجابة: {status, state: none | starting | running,
+    pid, verified (هوية العملية مؤكدة: سطر الأوامر ووقت البدء؛ وحدها تسمح للوحة بإنهائها), reason (سبب اعتبار القفل
+    متروكاً)، probe_error, role, trigger, run_id, worker_id, started_ts, heartbeat_age_s, lock_exists}.
+    """
+    automation = _pipeline()
+    path = _text(params, 'lock') or automation.LOCK_FILE
+    if os.path.basename(path) != "pipeline.lock":
+        return {'status': 'error', 'error': "lock must name a pipeline.lock file"}
+    lock = automation.read_lock(path)
+    out = {'status': 'success', 'state': 'none', 'pid': None, 'verified': False, 'reason': '', 'probe_error': None,
+           'role': None, 'trigger': None, 'run_id': None, 'worker_id': None, 'started_ts': None,
+           'heartbeat_age_s': None, 'lock_exists': lock is not None}
+    if lock is None:
+        return out
+    if lock['kind'] == 'starting':
+        if time.time() - lock['mtime'] < STARTING_GRACE_S:
+            out['state'] = 'starting'
+        else:
+            out['reason'] = f"STARTING أقدم من {STARTING_GRACE_S // 60} دقائق"
+        return out
+    verdict = automation.lock_verdict(lock)
+    age = verdict['heartbeat_age']
+    out.update(state='none' if verdict['stale'] else 'running', pid=lock.get('pid'), verified=verdict['verified'],
+               reason=verdict['stale'] or '', probe_error=verdict['probe_error'], role=lock.get('role'),
+               trigger=lock.get('trigger'), run_id=lock.get('run_id'), worker_id=lock.get('worker_id'),
+               started_ts=lock.get('started_ts'), heartbeat_age_s=None if age is None else int(age))
+    return out
+
 ACTIONS = {
     'get_products': action_get_products,
     'search': action_search,
@@ -1319,6 +1361,7 @@ ACTIONS = {
     'sheet-preview': action_sheet_preview,
     'sheet-save': action_sheet_save,
     'ops_health': action_ops_health,
+    'lock_state': action_lock_state,
     'run_control': action_run_control,
 }
 
