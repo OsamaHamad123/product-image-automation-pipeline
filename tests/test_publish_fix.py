@@ -615,7 +615,7 @@ def worker(db, monkeypatch, tmp_path):
             env["during"]()
         out = tmp_path / f"canvas_{os.urandom(3).hex()}.png"
         Image.new("RGB", (800, 800), "white").save(out)
-        return image_processor.ProcessResult(str(out), True, "photoroom", None, 800, 800)
+        return image_processor.ProcessResult(str(out), env.get("isolated", True), "photoroom", None, 800, 800)
 
     monkeypatch.setattr(image_search, "search_best_product_image", fake_search)
     monkeypatch.setattr(image_processor, "process_product_image_result", processing)
@@ -648,6 +648,22 @@ def test_the_worker_never_publishes_a_pick_rejected_while_it_was_processed(db, w
     # the remaining candidate waits for a reviewer, without the rejected pick
     assert _status(db, ROWS[0]) == "ready_for_review"
     assert _candidate_urls(db, ROWS[0]) == [ALT_PICK]
+
+
+@pytest.mark.parametrize("outcome", ["background_failed", "upload_failed"])
+def test_an_auto_publish_that_did_not_publish_leaves_the_candidates_for_review(db, worker, monkeypatch, outcome):
+    """A background that was not removed (needs_review:) or a failed upload is not a decision someone else made:
+    the row goes to review with its candidates instead of staying 'processing' until its lease ends."""
+    import cloudinary_storage
+    run, env, sku = worker
+    if outcome == "background_failed":
+        env["isolated"] = False
+    else:
+        monkeypatch.setattr(cloudinary_storage, "upload_product_image_to_cloudinary", lambda *a, **k: None)
+    assert run() == "success"
+    assert _status(db, ROWS[0]) == "ready_for_review"
+    assert set(_candidate_urls(db, ROWS[0])) == {PICK, ALT_PICK}
+    assert db.get_cached_product(sku_key=sku) is None
 
 
 def test_a_busy_publish_lock_requeues_the_row_instead_of_leaving_it_processing(db, worker, monkeypatch):

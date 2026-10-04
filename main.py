@@ -989,9 +989,10 @@ def pre_cache_product_candidates(task, worksheet=None, link_column_index=None, b
             # اعتمده مراجع أثناء المعالجة (دون أن يسحب الحجز): المنتج منتهٍ، ويُحرر الحجز
             _finish_task(task, "completed", failure_code=None, trace={"outcome": _outcome(trace)}, siblings=())
             return "success"
-        if status != "rejected" or not held:
+        if status in ("superseded", "busy") or not held:
             # قرار المراجع (أو حجز أحدث) أثناء المعالجة والرفع يبقى كما هو: لا مرشحات ولا حالة فوقه
             return "success"
+        # الخلفية لم تُعزل (needs_review) أو فشل النشر أو صورة مكررة: المرشحات للمراجعة كما في أي نتيجة غير منشورة؛
         # رفض مراجع الصورة المختارة أثناء المعالجة: باقي المرشحات (بدونها) للمراجعة
 
     candidates = collect_candidates(best, trace)
