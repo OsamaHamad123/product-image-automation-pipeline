@@ -537,6 +537,44 @@ was fixed with a regression test that fails when the fix is reverted. The eval g
   cassette write never changes the live run; a missing or damaged answer is a reported miss; `--strict` fails on
   any miss, crash or refused connection.
 
+#### Fixed in the reviews of the eight packages (before their first live run)
+
+Every package was reviewed adversarially; each confirmed defect below was reproduced first and has a test that
+fails without its fix.
+
+- Sheet writes: a write never relocates onto another product's row on a blank brand or size; an older value never
+  wins after an identity change or a row that moved twice.
+- Cut-out check: good transparent printed cartons, two-packs, tight crops and 300-500 px web images are no longer
+  sent to review after paid retries (on a synthetic packshot corpus: transparent PNGs flagged 4/7 -> 0/7, two-packs
+  7/10 -> 0/10 with paid calls 23 -> 5, damaged images caught 2/8 -> 8/8).
+- Publishing: two simultaneous approvals both succeeding; one product's image written into another product's row
+  when they share a barcode; a stale rejection voiding a fresh approval; an approval of an image another reviewer
+  had just rejected; a worker publishing a pick rejected while it was processed; an auto-publish whose background
+  removal failed leaving its row 'processing'.
+- Queue: a stale relink writing back a rejected image; review rows emptied by a recheck or by an early stop; legacy
+  PROVIDER_DOWN rows never claimed; one size's failure record deleting or shadowing another's; dashboard searches
+  outside the daily budget; the outbox reconcile reading only the newest 500 writes.
+- Nightly run and lock: a live worker judged stale after 24 hours and a failed process check freeing a live lock
+  (two workers at once); configuration errors retried as outages; Stop killing a run without a report; a crash
+  reported as done; the night overrunning Task Scheduler's limit.
+- Review screen: a quiet reload moving the approval guard; replace not re-checked on the server; approvals of
+  pictures that never rendered or of the next product on a quick second key press; Shift+A taking cards never
+  shown; «publish anyway» claiming a background was removed; select_image forwarding every field of the request.
+- Search: the alternative key drifting for rows given a barcode; promo codes (B2G1, S4 L) read as sizes; correct
+  meat masalas rejected; another product type outranking the right one; a brand's official page losing tier 1; a
+  brand spelling proved by one row lent to another without evidence; a multipack's own picture rejected.
+- Record and replay: keys and the Google engine id stored through response URLs and large bodies; answers lost on
+  Unicode line separators or a missing blob; a crashed row counted as complete; a local proxy letting traffic out.
+- Google CSE transport errors no longer print the key and the engine id in the console and the log file.
+
+#### Known limits after phase 4
+
+- Two different products that share one barcode still share one stored approval record (`resolved_products` is
+  keyed by sku_key); their sheet rows, candidates and queue rows are kept apart.
+- The Windows process probe and the PowerShell launchers are tested with recorded outputs only (no Windows here).
+- Approving a picture from a live search on the review screen (no stored candidate) checks earlier rejections by
+  its URL only; the search itself already excludes rejected pHashes.
+
 ### Removed
 
 - `verification_layer/` (87 modules) and the 23 test files that only exercised it or asserted nothing
