@@ -40,7 +40,7 @@ ALIASES = [("SUP/T", "Super Tasty"), ("SUPER T/", "Super Tasty"), ("RIO MARIE", 
 # (sheet brand, site, approved products, identity rejections), as local_cache_db.get_brand_source_counts gives them
 SOURCES = [("SUP/T", "www.tradeling.com", 2, 0), ("SUP/T", "www.instagram.com", 5, 0), ("SUP/T", "shutterstock.com", 3, 0),
            ("ALMARAI", "www.example-grocer.com", 2, 0), ("ALMARAI", "almarai.com", 4, 0),
-           ("KABANI", "sharjahcoop.ae", 2, 0), ("KABANI", "tradeling.com", 1, 0)]
+           ("KABANI", "ajmanmarkets.ae", 2, 0), ("KABANI", "tradeling.com", 1, 0)]
 
 
 def learned():
@@ -87,19 +87,19 @@ def test_the_sheet_always_wins():
 def test_sites_alone_give_an_unmapped_brand_no_identity_and_nothing_learned_changes_the_sku_key():
     kabani = build_sku_spec({"name": "KABANI MEAT MASALA 160 GM", "brand": "KABANI"}, learned())
     # the brand stays the sheet's (brand discovery still runs for it); only the sites are learned
-    assert (kabani.brand_conf, kabani.learned_domains) == ("sheet_raw", ("sharjahcoop.ae",))
+    assert (kabani.brand_conf, kabani.learned_domains) == ("sheet_raw", ("ajmanmarkets.ae",))
     plain = build_sku_spec({"name": "KABANI MEAT MASALA 160 GM", "brand": "KABANI"}, SHEET)
     assert plain.brand_conf == "sheet_raw" and plain.sku_key == kabani.sku_key
     assert plain.competitors == kabani.competitors
     rio = build_sku_spec({"name": "RIO MARIE TUNA 70G", "brand": "RIO MARIE"},
-                         learning.apply(SHEET, [], [("RIO MARIE", "sharjahcoop.ae", 3, 0)]))
-    assert rio.brand_conf == "sheet_raw" and rio.learned_domains == ("sharjahcoop.ae",)
+                         learning.apply(SHEET, [], [("RIO MARIE", "ajmanmarkets.ae", 3, 0)]))
+    assert rio.brand_conf == "sheet_raw" and rio.learned_domains == ("ajmanmarkets.ae",)
 
 
 def test_sites_learned_under_a_sheet_brand_never_override_the_sheets_name_rule():
     # brand cell 'NESTLE', product 'NIDO ...': the sheet maps Nido, so the product is Nido (tier 1 possible)
     sheet = {"nido": {"brand": "Nido", "synonyms": ["Nido"], "official_domains": ["nido.com"]}}
-    merged = learning.apply(sheet, [], [("NESTLE", "sharjahcoop.ae", 4, 0)])
+    merged = learning.apply(sheet, [], [("NESTLE", "ajmanmarkets.ae", 4, 0)])
     row = {"name": "NIDO FORTIFIED MILK POWDER 900G", "brand": "NESTLE"}
     spec = build_sku_spec(row, merged)
     assert (spec.brand_conf, spec.brand_canonical) == ("mapped", "Nido")
@@ -137,6 +137,7 @@ def test_nothing_learned_means_the_mappings_unchanged():
 
 @pytest.mark.parametrize("site", [
     "www.carrefouruae.com", "noon.com", "luluhypermarket.com",       # listed UAE retailers: trust already set
+    "www.sharjahcoop.ae",                                            # (Sharjah Co-op, listed since 2026-10-04)
     "openfoodfacts.org",                                             # structured source
     "carrefourksa.com", "amazon.com", "www.tesco.com",               # foreign stores (other_retail)
     "danube.sa", "shop.example.co.uk", "angola.desertcart.com",      # foreign country domain / country store
