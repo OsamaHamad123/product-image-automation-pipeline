@@ -216,7 +216,8 @@ def test_a_database_that_does_not_answer_is_never_a_finished_night(nightly):
 
 @pytest.mark.parametrize("reason, retried, code", [
     ("sheets_unavailable", True, 2),
-    ("sheet_not_found", True, 2),
+    ("sheet_not_found", False, 1),        # review fix C3: not found / not shared does not fix itself by waiting
+    ("sheet_config", False, 1),           # e.g. a missing credentials file
     ("db_unavailable", True, 2),
     ("enqueue_failed", False, 1),
 ])

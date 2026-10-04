@@ -1025,8 +1025,9 @@ def _enqueue_failed(message, reason="enqueue_failed"):
     """
     فشل الإدراج: رسالة عربية في automation_state.notice بحالة 'error' تعرضها اللوحة فوراً، وتحرير قفل 'STARTING'
     فوراً (لا تبقى اللوحة على «قيد التشغيل» وترفض تشغيلاً جديداً لخمس دقائق). العامل لا يبدأ (رمز الخروج 1).
-    reason (في LAST_ENQUEUE للتشغيل الليلي): sheets_unavailable / sheet_not_found / db_unavailable تُعاد محاولتها
-    ليلاً، وenqueue_failed / sheet_config خطأ إعداد.
+    reason (في LAST_ENQUEUE للتشغيل الليلي): sheets_unavailable / db_unavailable انقطاع تُعاد محاولته ليلاً؛
+    sheet_config (إعداد أو بيانات اعتماد) و sheet_not_found (الشيت غير موجود أو غير مشارك) و enqueue_failed فشل
+    لا تصلحه إعادة المحاولة (رمز 1).
     """
     LAST_ENQUEUE.update(reason=reason, message=message)
     print(f"[Enqueue Error] {message}")
@@ -1325,8 +1326,9 @@ def run_enqueue_mode():
 
         sheets_client = google_sheets.get_sheets_client()
         if not sheets_client:
-            _enqueue_failed("تعذر الاتصال بـ Google Sheets. تحقق من ملف بيانات الاعتماد والاتصال بالإنترنت. "
-                            "لم يتغير الطابور.", reason="sheets_unavailable")
+            # gspread.service_account لا يتصل بالشبكة: الفشل هنا ملف اعتماد مفقود أو تالف (إعداد، لا انقطاع)
+            _enqueue_failed(f"تعذر تحميل بيانات اعتماد Google من الملف «{config.CREDENTIALS_FILE}» (مفقود أو تالف). "
+                            "تحقق من ملف بيانات الاعتماد. لم يتغير الطابور.", reason="sheet_config")
         worksheet = google_sheets.open_worksheet(sheets_client, config.SPREADSHEET_NAME_OR_URL)
         if not worksheet:
             _enqueue_failed(f"لم يُعثر على الشيت «{config.SPREADSHEET_NAME_OR_URL}». تحقق من الرابط واسم ورقة "
@@ -1914,10 +1916,27 @@ DB_UNAVAILABLE_NOTICE = "DB_UNAVAILABLE: تعذر الوصول إلى قاعدة
 
 
 def _sheet_failure_reason(error):
-    """إعداد الشيت (تبويب أو عمود غير موجود) أم تعذر الوصول إليه (قد يزول وحده: يعيده التشغيل الليلي)."""
+    """
+    سبب فشل قراءة الشيت: sheet_config لإعداد خاطئ (تبويب أو عمود غير موجود)؛ sheets_unavailable فقط لانقطاع قد
+    يزول وحده فيعيده التشغيل الليلي (SheetTransientError، انقطاع الاتصال أو مهلته، 429 / 5xx)؛ و enqueue_failed لأي
+    خطأ آخر (TypeError، KeyError، PermissionError...): إعادة المحاولة بعد ساعة لا تصلحه.
+    """
     config_errors = tuple(c for c in (getattr(google_sheets, "SheetConfigError", None),
                                       getattr(google_sheets, "SheetSchemaError", None)) if isinstance(c, type))
-    return "sheet_config" if config_errors and isinstance(error, config_errors) else "sheets_unavailable"
+    if config_errors and isinstance(error, config_errors):
+        return "sheet_config"
+    transient = getattr(google_sheets, "SheetTransientError", None)
+    if isinstance(transient, type) and isinstance(error, transient):
+        return "sheets_unavailable"
+    if isinstance(error, (ConnectionError, TimeoutError)):
+        return "sheets_unavailable"
+    try:
+        # requests / google-auth: انقطاع الاتصال ومهلته، و APIError برمز 429 / 5xx
+        if google_sheets._is_transient(error):
+            return "sheets_unavailable"
+    except Exception:
+        pass
+    return "enqueue_failed"
 
 
 def _cli_trigger(argv):
@@ -2053,23 +2072,29 @@ def run_worker_mode(trigger="manual", report=True):
             return
         sheets_client = google_sheets.get_sheets_client()
         if not sheets_client:
-            stop_reason = "sheets_unavailable"
-            start_notice = "SHEETS_UNAVAILABLE: Google Sheets connection failed"
+            # ملف اعتماد مفقود أو تالف (gspread.service_account لا يتصل بالشبكة): إعداد، لا انقطاع يعيده الليلي
+            stop_reason = "sheet_config"
+            start_notice = (f"SHEET_CONFIG: تعذر تحميل بيانات اعتماد Google من الملف «{config.CREDENTIALS_FILE}» "
+                            "(مفقود أو تالف)")
             local_cache_db.update_automation_state(status="error", notice=start_notice)
             return
         try:
             worksheet = google_sheets.open_worksheet(sheets_client, config.SPREADSHEET_NAME_OR_URL)
             if not worksheet:
-                # فتح الملف نفسه فشل: إعداد خاطئ، أو انقطاع مؤقت لا تميزه open_worksheet (يعيده التشغيل الليلي)
+                # الملف غير موجود أو غير مشارك مع حساب الخدمة؛ الانقطاع المؤقت يرفع SheetTransientError ولا يصل هنا
                 stop_reason = "sheet_not_found"
                 raise google_sheets.SheetConfigError(f"sheet not found: {config.SPREADSHEET_NAME_OR_URL}")
             link_column_index = google_sheets.find_link_column(worksheet)
         except Exception as e:
-            stop_reason = stop_reason or _sheet_failure_reason(e)
+            reason = _sheet_failure_reason(e)
+            stop_reason = stop_reason or ("worker_error" if reason == "enqueue_failed" else reason)
+            print(f"[Worker] {e}")
+            if stop_reason == "worker_error":
+                crash = f"{type(e).__name__}: {e}"[:200]          # التنبيه WORKER_ERROR يُكتب في finally
+                return
             code = "SHEETS_UNAVAILABLE" if stop_reason == "sheets_unavailable" else "SHEET_CONFIG"
             start_notice = f"{code}: {e}"
             local_cache_db.update_automation_state(status="error", notice=start_notice)
-            print(f"[Worker] {e}")
             return
         brand_mappings = google_sheets.get_brand_mappings(sheets_client, config.SPREADSHEET_NAME_OR_URL)
         google_sheets.init_async_queue(config.CREDENTIALS_FILE, config.SPREADSHEET_NAME_OR_URL)

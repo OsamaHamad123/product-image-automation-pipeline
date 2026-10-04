@@ -9,8 +9,9 @@
 # النتيجة ورمز الخروج (exit code) لكل سبب توقف (stop_reason):
 #   done     0  الطابور انتهى (أو لم يكن فيه شيء)
 #   skipped  0  تشغيل آخر حي يحمل القفل، فلم يبدأ هذا التشغيل
-#   failed   1  خطأ يحتاج تدخلاً: إعداد الشيت، أو خطأ غير متوقع
-#   outage   2  انقطاع: قاعدة البيانات، أو Google Sheets، أو محركات البحث (الليلي يعيد المحاولة بعد 15 ثم 60 دقيقة)
+#   failed   1  خطأ يحتاج تدخلاً: إعداد الشيت أو بيانات الاعتماد، شيت غير موجود أو غير مشارك، أو خطأ غير متوقع
+#   outage   2  انقطاع قد يزول وحده: قاعدة البيانات، أو Google Sheets لا يرد (مهلة، انقطاع الاتصال، 429 / 5xx)، أو
+#               محركات البحث (الليلي يعيد المحاولة بعد 15 ثم 60 دقيقة)
 #   stopped  3  توقف قبل نهاية الطابور: طلب إيقاف من اللوحة، أو أي سبب آخر يكتبه العامل (مثل BUDGET_REACHED
 #               أو SERPER_CREDIT) ويظهر نصه كما هو؛ الصفوف المتبقية تبقى في الانتظار
 #
@@ -34,9 +35,10 @@ TELEGRAM_MAX_CHARS = 3500
 EXIT_CODES = {"done": 0, "skipped": 0, "failed": 1, "outage": 2, "stopped": 3}
 DONE_REASONS = ("", "queue_empty")
 SKIP_REASONS = ("another_worker",)
-# انقطاع قد يزول وحده: التشغيل الليلي يعيد التشغيل كله بعد 15 ثم 60 دقيقة
-OUTAGE_REASONS = ("db_unavailable", "sheets_unavailable", "sheet_not_found", "provider_down")
-FAILED_REASONS = ("sheet_config", "enqueue_failed", "enqueue_error", "worker_error")
+# انقطاع قد يزول وحده: التشغيل الليلي يعيد التشغيل كله بعد 15 ثم 60 دقيقة. شيت غير موجود أو غير مشارك ليس منها:
+# open_worksheet يرفع SheetTransientError للانقطاع المؤقت ويعيد None لإعداد خاطئ فقط
+OUTAGE_REASONS = ("db_unavailable", "sheets_unavailable", "provider_down")
+FAILED_REASONS = ("sheet_config", "sheet_not_found", "enqueue_failed", "enqueue_error", "worker_error")
 SPEND_LEDGER_FUNCTIONS = ("run_spend", "get_run_spend", "spend_for_run")
 
 REASON_TEXT = {

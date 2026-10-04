@@ -91,7 +91,8 @@ def test_worker_command_line_exits_2_and_writes_the_report_when_the_database_is_
 
 @pytest.mark.parametrize("reason, outcome, code", [
     (None, "done", 0), ("", "done", 0), ("another_worker", "skipped", 0),
-    ("db_unavailable", "outage", 2), ("sheets_unavailable", "outage", 2), ("sheet_not_found", "outage", 2),
+    ("db_unavailable", "outage", 2), ("sheets_unavailable", "outage", 2),
+    ("sheet_not_found", "failed", 1),         # review fix C3: not found / not shared is a setting, not an outage
     ("provider_down", "outage", 2),
     ("sheet_config", "failed", 1), ("enqueue_failed", "failed", 1), ("worker_error", "failed", 1),
     ("stopped", "stopped", 3), ("BUDGET_REACHED", "stopped", 3), ("SERPER_CREDIT", "stopped", 3),
@@ -386,7 +387,8 @@ def test_the_worker_reports_its_run_unless_the_nightly_does(offline, monkeypatch
 
     main.run_worker_mode(trigger="dashboard")
     ((info, trigger),) = reports
-    assert trigger == "dashboard" and info["stop_reason"] == "sheets_unavailable" and info["run_id"] == "r1"
+    # no credentials (get_sheets_client None) is a setting since review fix C3 (it was sheets_unavailable, an outage)
+    assert trigger == "dashboard" and info["stop_reason"] == "sheet_config" and info["run_id"] == "r1"
 
     main.run_worker_mode(trigger="nightly", report=False)
     assert len(reports) == 1
@@ -394,13 +396,21 @@ def test_the_worker_reports_its_run_unless_the_nightly_does(offline, monkeypatch
 
 @pytest.mark.parametrize("failure, reason, code, notice", [
     ("tab", "sheet_config", 1, "SHEET_CONFIG: التبويب 'Products' غير موجود"),
-    ("none", "sheet_not_found", 2, "SHEET_CONFIG: sheet not found: My Sheet"),
+    # review fix C3: open_worksheet returns None only for a sheet that is not found or not shared (a transient error
+    # raises SheetTransientError), so it is a failure (exit 1), not an outage retried for 75 minutes
+    ("none", "sheet_not_found", 1, "SHEET_CONFIG: sheet not found: My Sheet"),
+    ("no_credentials", "sheet_config", 1, "SHEET_CONFIG: تعذر تحميل بيانات اعتماد Google من الملف «missing.json» "
+                                          "(مفقود أو تالف)"),
     ("busy", "sheets_unavailable", 2, "SHEETS_UNAVAILABLE: 503 busy"),
+    ("transient", "sheets_unavailable", 2, "SHEETS_UNAVAILABLE: Google Sheets غير متاح مؤقتاً"),
+    ("bug", "worker_error", 1, "WORKER_ERROR: خطأ غير متوقع أوقف العامل (KeyError: 'link')؛ بقيت الصفوف المتبقية في "
+                               "الانتظار"),
 ])
 def test_a_sheet_the_worker_cannot_open_is_reported_with_its_reason(offline, monkeypatch, tmp_path, failure, reason,
                                                                     code, notice):
-    """A wrong tab is a setting (exit 1, no retry); a sheet Google does not open or answer is an outage the nightly
-    retries (exit 2). The report carries the detail the dashboard shows."""
+    """A wrong tab, missing credentials or a sheet that is not found / not shared is a setting (exit 1, no retry); only
+    a Google that does not answer is an outage the nightly retries (exit 2); any other error is a worker error (exit 1).
+    The report carries the detail the dashboard shows."""
     import config
     import google_sheets
     import local_cache_db
@@ -411,18 +421,24 @@ def test_a_sheet_the_worker_cannot_open_is_reported_with_its_reason(offline, mon
     monkeypatch.setattr(main, "load_run_config", lambda: None)
     monkeypatch.setattr(main, "check_verifier", lambda: "")
     monkeypatch.setattr(config, "SPREADSHEET_NAME_OR_URL", "My Sheet")
+    monkeypatch.setattr(config, "CREDENTIALS_FILE", "missing.json")
     monkeypatch.setattr(local_cache_db, "resume_automation", lambda: True)
     monkeypatch.setattr(local_cache_db, "get_automation_state", lambda: {"stop_requested": 0, "run_id": None})
     states = []
     monkeypatch.setattr(local_cache_db, "update_automation_state", lambda *a, **k: states.append(k) or True)
-    monkeypatch.setattr(google_sheets, "get_sheets_client", lambda: object())
+    monkeypatch.setattr(local_cache_db, "get_ready_for_review_count", lambda: 0)
+    monkeypatch.setattr(google_sheets, "get_sheets_client", lambda: None if failure == "no_credentials" else object())
 
     def open_worksheet(client, name):
         if failure == "tab":
             raise google_sheets.SheetConfigError("التبويب 'Products' غير موجود")
+        if failure == "transient":
+            raise google_sheets.SheetTransientError("Google Sheets غير متاح مؤقتاً")
         return None if failure == "none" else object()
 
     def find_link_column(ws):
+        if failure == "bug":
+            raise KeyError("link")
         raise ConnectionError("503 busy")
 
     monkeypatch.setattr(google_sheets, "open_worksheet", open_worksheet)
@@ -436,15 +452,28 @@ def test_a_sheet_the_worker_cannot_open_is_reported_with_its_reason(offline, mon
 
 @pytest.mark.parametrize("case, reason", [
     ("bad_row_filter", "enqueue_failed"),
-    ("no_client", "sheets_unavailable"),
+    # review fix C3: a missing / broken credentials file is a setting (gspread.service_account makes no network call)
+    ("no_client", "sheet_config"),
     ("no_worksheet", "sheet_not_found"),
     ("schema", "sheet_config"),
     ("google_503", "sheets_unavailable"),
+    ("transient", "sheets_unavailable"),
+    ("requests_timeout", "sheets_unavailable"),
+    ("requests_connection", "sheets_unavailable"),
+    # review fix C3: every other exception was "sheets_unavailable" and retried twice over 75 minutes
+    ("type_error", "enqueue_failed"),
+    ("key_error", "enqueue_failed"),
+    ("permission_error", "enqueue_failed"),
     ("db_down", "db_unavailable"),
     ("queue_bug", "enqueue_failed"),
 ])
 def test_an_enqueue_failure_says_whether_it_is_an_outage(offline, monkeypatch, tmp_path, case, reason):
-    """The nightly retries an enqueue that failed on an outage (main.LAST_ENQUEUE['reason']), not a setting."""
+    """The nightly retries an enqueue that failed on an outage (main.LAST_ENQUEUE['reason']), not a setting or a bug;
+    run_report.is_outage agrees."""
+    import requests
+
+    import run_report
+
     import config
     import google_sheets
     import local_cache_db
@@ -460,11 +489,18 @@ def test_an_enqueue_failure_says_whether_it_is_an_outage(offline, monkeypatch, t
     monkeypatch.setattr(google_sheets, "open_worksheet", lambda c, n: None if case == "no_worksheet" else object())
     monkeypatch.setattr(google_sheets, "get_brand_mappings", lambda *a: {})
 
+    errors = {"schema": google_sheets.SheetSchemaError("no product name column"),
+              "google_503": ConnectionError("503 Service Unavailable"),
+              "transient": google_sheets.SheetTransientError("Google Sheets غير متاح مؤقتاً"),
+              "requests_timeout": requests.exceptions.ReadTimeout("read timed out"),
+              "requests_connection": requests.exceptions.ConnectionError("connection reset"),
+              "type_error": TypeError("'NoneType' object is not subscriptable"),
+              "key_error": KeyError("product_name"),
+              "permission_error": PermissionError(13, "Permission denied", "credentials.json")}
+
     def products(ws):
-        if case == "schema":
-            raise google_sheets.SheetSchemaError("no product name column")
-        if case == "google_503":
-            raise ConnectionError("503 Service Unavailable")
+        if case in errors:
+            raise errors[case]
         return [{"row_number": 5, "product_name": "Laban Up 180ml", "brand": "Al Rawabi", "barcode": ""}], 9
 
     def add(*a, **k):
@@ -479,6 +515,7 @@ def test_an_enqueue_failure_says_whether_it_is_an_outage(offline, monkeypatch, t
         main.run_enqueue_mode()
 
     assert exc.value.code == 1 and main.LAST_ENQUEUE["reason"] == reason and main.LAST_ENQUEUE["message"]
+    assert run_report.is_outage(reason) is (reason in ("sheets_unavailable", "db_unavailable"))
 
 
 @pytest.mark.parametrize("argv, trigger", [

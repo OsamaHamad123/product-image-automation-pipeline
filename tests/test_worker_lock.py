@@ -444,7 +444,7 @@ def test_the_worker_takes_over_a_stale_lock_and_writes_the_json_lock(main_mod, m
     monkeypatch.setattr(google_sheets, "get_sheets_client", no_sheets)
     main_mod.run_worker_mode(report=False)
     assert seen["lock"]["kind"] == "json" and seen["lock"]["pid"] == os.getpid()
-    assert main_mod.LAST_WORKER["stop_reason"] == "sheets_unavailable"
+    assert main_mod.LAST_WORKER["stop_reason"] == "sheet_config"            # no credentials: a setting (C3)
     assert not os.path.exists(main_mod.LOCK_FILE)
 
 

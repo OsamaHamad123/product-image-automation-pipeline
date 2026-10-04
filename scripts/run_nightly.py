@@ -20,8 +20,10 @@ column header when it is missing); with auto-publish off the worker writes no im
 when a live worker already holds temp/pipeline.lock (main._another_worker_running: a stale lock left by a crashed
 or killed run, whose PID now belongs to another process, is removed and never skips a night).
 
-When a run stops on an outage (the database does not answer, Google Sheets cannot be reached, the search providers
-are down) the whole run starts again 15 minutes later, and once more 60 minutes after that. Then one report is
+When a run stops on an outage (the database does not answer, Google Sheets does not answer: a timeout, a lost
+connection, HTTP 429 / 5xx; the search providers are down) the whole run starts again 15 minutes later, and once more
+60 minutes after that. A missing or broken credentials file, a sheet that is not found or not shared with the service
+account, or any other error is a failure (exit 1) that waiting does not fix: it is not retried. Then one report is
 written for the night (run_report.py): a row in the run_history table, temp/nightly/last_report.json, and a short
 Arabic Telegram message when TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID are set.
 
