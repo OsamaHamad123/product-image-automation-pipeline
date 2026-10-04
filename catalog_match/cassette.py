@@ -122,7 +122,7 @@ _KEY_IN_TEXT_RE = re.compile(r"(?i)((?:(?:api_?)?key|(?<![a-z0-9])cx)(?:=|%3D))[
 _KEY_FIELD_RE = re.compile(r'(?i)("(?:api_?key|apikey|key|cx|x-api-key|x-goog-api-key)"\s*:\s*")'
                            r'(?:[^"\\]|\\.)*(")')
 # json.dumps(ensure_ascii=False) leaves these raw, and str.splitlines() (and some editors) split on them
-_LINE_BREAKS = {" ": "\\u2028", " ": "\\u2029", "\x85": "\\u0085"}
+_LINE_BREAKS = {"\u2028": "\\u2028", "\u2029": "\\u2029", "\x85": "\\u0085"}
 _FENCE_RE = re.compile(r"^\s*```(?:json)?\s*|\s*```\s*$", re.IGNORECASE)
 
 
@@ -904,7 +904,7 @@ class Cassette:
         evidence the replay must see unchanged, and those hosts are never sent a key)."""
         text = data.decode("utf-8", errors="surrogateescape")
         clean = self._scrub(text)
-        if "json" in (ctype or "").lower() or clean.lstrip("﻿ \t\r\n")[:1] in ("{", "["):
+        if "json" in (ctype or "").lower() or clean.lstrip("\ufeff \t\r\n")[:1] in ("{", "["):
             clean = _KEY_FIELD_RE.sub(r"\1" + HIDDEN + r"\2", clean)
         return data if clean == text else clean.encode("utf-8", errors="surrogateescape")
 
@@ -999,7 +999,7 @@ class Cassette:
 
     def _load(self) -> None:
         for name in (HTTP_FILE, VERIFIER_FILE, INDEX_FILE):
-            text = (self.store.read_text(name) or "").lstrip("﻿")
+            text = (self.store.read_text(name) or "").lstrip("\ufeff")
             # '\n' only: str.splitlines() also splits on U+2028, U+2029 and U+0085, which an older recording left
             # raw inside a title (a Windows copy's '\r\n' leaves a '\r', stripped)
             for number, line in enumerate(text.split("\n"), start=1):

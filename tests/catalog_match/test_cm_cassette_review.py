@@ -532,7 +532,7 @@ def test_each_layer_hides_keys_on_its_own(tmp_path):
 # C3: line separators inside a title
 # ---------------------------------------------------------------------------
 
-TRICKY = "Almarai Full Fat Fresh Milk 1L fresh\x85"
+TRICKY = "Almarai Full Fat Fresh Milk\u20281L\u2029fresh\x85"
 
 
 def _serper_titles(session, q="Almarai full fat milk 1L"):
@@ -546,7 +546,7 @@ def test_a_title_with_unicode_line_separators_is_written_escaped_and_replays(tmp
     live, _ = _record(folder, lambda: _serper_titles(web.session()))
     assert live[0] == "ok" and len(live[1]) == 5 and all("\u2028" in t and "\u2029" in t for t in live[1])
     raw = (folder / "http.jsonl").read_bytes()
-    for ch in "  \x85":
+    for ch in "\u2028\u2029\x85":
         assert ch.encode("utf-8") not in raw          # escaped: no editor or splitlines() breaks the line
     assert len(raw.decode("utf-8").splitlines()) == raw.count(b"\n") == 1
 
@@ -567,7 +567,7 @@ def test_an_older_cassette_with_raw_line_separators_and_a_crlf_zip_replay(tmp_pa
         cassette.uninstall()
     # what the first version wrote: the characters raw inside the line
     text = (folder / "http.jsonl").read_text(encoding="utf-8")
-    old = text.replace("\\u2028", " ").replace("\\u2029", " ").replace("\\u0085", "\x85")
+    old = text.replace("\\u2028", "\u2028").replace("\\u2029", "\u2029").replace("\\u0085", "\x85")
     assert old != text
     (folder / "http.jsonl").write_bytes(old.encode("utf-8"))
     cas = cassette.install("replay", str(folder))
