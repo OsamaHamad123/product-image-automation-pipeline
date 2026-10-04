@@ -176,6 +176,104 @@ def test_a_worker_run_is_written_to_run_history_and_last_report(db, tmp_path):
     assert saved["telegram_sent"] is False
 
 
+
+OLD_ROWS = tuple(range(941001, 941041))
+
+
+@pytest.fixture
+def old_run(mariadb_or_skip):
+    """40 queue rows of an earlier, finished run 'p4ops-old' (20 ready for review, 20 not found)."""
+    db = mariadb_or_skip
+
+    def wipe():
+        _sql(db, "DELETE FROM automation_queue WHERE `row_number` BETWEEN %s AND %s", (OLD_ROWS[0], OLD_ROWS[-1] + 10))
+        _sql(db, "DELETE FROM run_history WHERE notices LIKE %s", ("%p4ops-c8%",))
+
+    wipe()
+    for i, row in enumerate(OLD_ROWS):
+        _queue_row(db, row, "ready_for_review" if i < 20 else "failed", code=None if i < 20 else "NO_RESULTS",
+                   run_id="p4ops-old", worker="oldhost:1#c1")
+    yield db
+    wipe()
+
+
+def _idle_worker(monkeypatch, tmp_path, run_id):
+    """run_worker_mode over an empty queue, automation_state.run_id = run_id; the report goes to the test database."""
+    import google_sheets
+    import local_cache_db
+    import main
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(main, "load_run_config", lambda: None)
+    monkeypatch.setattr(main, "check_verifier", lambda: "VERIFIER_DOWN: p4ops-c8")
+    monkeypatch.setattr(local_cache_db, "resume_automation", lambda: True)
+    monkeypatch.setattr(local_cache_db, "get_automation_state", lambda: {"stop_requested": 0, "pause_requested": 0,
+                                                                       "run_id": run_id})
+    monkeypatch.setattr(local_cache_db, "update_automation_state", lambda *a, **k: True)
+    monkeypatch.setattr(local_cache_db, "fetch_next_task", lambda worker_id: None)
+    monkeypatch.setattr(local_cache_db, "count_open_tasks", lambda: 0)
+    monkeypatch.setattr(local_cache_db, "park_verifier_rechecks", lambda: 0)
+    monkeypatch.setattr(google_sheets, "get_sheets_client", lambda: object())
+    monkeypatch.setattr(google_sheets, "open_worksheet", lambda client, name: object())
+    monkeypatch.setattr(google_sheets, "find_link_column", lambda ws: 7)
+    monkeypatch.setattr(google_sheets, "get_brand_mappings", lambda *a: {})
+    monkeypatch.setattr(google_sheets, "init_async_queue", lambda *a: None)
+    monkeypatch.setattr(google_sheets, "stop_async_queue", lambda: None)
+    return main
+
+
+def test_a_manual_worker_does_not_report_the_previous_runs_counts(old_run, monkeypatch, tmp_path):
+    """Review fix C8: automation_state.run_id still named the last run, so a manual `main.py --worker` that processed
+    nothing reported enqueued 40, ready 20, not_found 20 (run_outcome_counts(run_ids=[that id])). It now counts by
+    worker_id unless its own enqueue created the run."""
+    main = _idle_worker(monkeypatch, tmp_path, "p4ops-old")
+    main.run_worker_mode(trigger="manual")
+    report = json.loads((tmp_path / "temp" / "nightly" / "last_report.json").read_text(encoding="utf-8"))
+    assert report["run_ids"] == [] and report["counts"]["enqueued"] == 0
+    assert report["counts"]["ready_for_review"] == 0 and report["counts"]["not_found"] == 0
+
+
+def test_a_worker_after_its_enqueue_reports_the_run_the_enqueue_created(old_run, monkeypatch, tmp_path):
+    for row in range(OLD_ROWS[-1] + 1, OLD_ROWS[-1] + 4):
+        _queue_row(old_run, row, "pending", run_id="p4ops-new", worker=None)
+    main = _idle_worker(monkeypatch, tmp_path, "p4ops-new")
+    main._write_run_handoff("p4ops-new")              # what run_enqueue_mode leaves after begin_run
+    main.run_worker_mode(trigger="dashboard")
+    report = json.loads((tmp_path / "temp" / "nightly" / "last_report.json").read_text(encoding="utf-8"))
+    assert report["run_ids"] == ["p4ops-new"] and report["counts"]["enqueued"] == 3
+    assert report["counts"]["pending_left"] == 3
+    assert not os.path.exists(os.path.join("temp", "run_handoff.json")), "the hand-off is used once"
+    # a stale hand-off (another run's id) is not taken either
+    main._write_run_handoff("p4ops-other")
+    main.run_worker_mode(trigger="manual")
+    report = json.loads((tmp_path / "temp" / "nightly" / "last_report.json").read_text(encoding="utf-8"))
+    assert report["run_ids"] == [] and report["counts"]["enqueued"] == 0
+
+
+def test_the_enqueue_hands_its_run_over(offline, monkeypatch, tmp_path):
+    import config
+    import google_sheets
+    import local_cache_db
+    import main
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(config, "ROW_FILTER", "")
+    monkeypatch.setattr(config, "BRAND_FILTER", "")
+    monkeypatch.setattr(main, "load_run_config", lambda: None)
+    monkeypatch.setattr(google_sheets, "clear_cache", lambda: None)
+    monkeypatch.setattr(google_sheets, "get_sheets_client", lambda: object())
+    monkeypatch.setattr(google_sheets, "open_worksheet", lambda c, n: object())
+    monkeypatch.setattr(google_sheets, "get_products", lambda ws: ([], 9))
+    monkeypatch.setattr(main, "plan_enqueue", lambda *a, **k: ([], {"skipped_final": 0, "relink": 0, "in_flight": 0,
+                                                                    "edited": 0, "cleared": 0, "missing": 0,
+                                                                    "index_changed": 0}))
+    monkeypatch.setattr(local_cache_db, "add_many_to_queue", lambda rows, **k: None)
+    monkeypatch.setattr(local_cache_db, "get_queue_statistics", lambda: None)
+    monkeypatch.setattr(local_cache_db, "new_run_id", lambda: "p4ops-run-h")
+    monkeypatch.setattr(local_cache_db, "begin_run", lambda run_id: 4)
+    main.run_enqueue_mode()
+    assert main._claim_run_handoff("p4ops-run-h") is True and main._claim_run_handoff("p4ops-run-h") is False
+
 # ---------------------------------------------------------------------------
 # Telegram: only when configured, Arabic, escaped
 # ---------------------------------------------------------------------------
@@ -405,6 +503,7 @@ def test_the_worker_reports_its_run_unless_the_nightly_does(offline, monkeypatch
     monkeypatch.setattr(google_sheets, "get_sheets_client", lambda: None)
     reports = []
     monkeypatch.setattr(run_report, "report_worker_run", lambda info, trigger: reports.append((info, trigger)))
+    main._write_run_handoff("r1")               # the dashboard's `main.py --enqueue` created run r1
 
     main.run_worker_mode(trigger="dashboard")
     ((info, trigger),) = reports

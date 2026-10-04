@@ -1038,6 +1038,38 @@ def _enqueue_failed(message, reason="enqueue_failed"):
     sys.exit(1)
 
 
+# الإدراج يسلّم التشغيل الذي أنشأه (run_id) للعامل التالي: التشغيل الليلي في العملية نفسها، ولوحة التحكم في عملية
+# `main.py --worker` التالية. عامل يدوي بلا إدراج لا يجد تسليماً، فلا يُنسب إليه التشغيل السابق في automation_state.
+RUN_HANDOFF_FILE = "temp/run_handoff.json"
+
+
+def _write_run_handoff(run_id, path=None):
+    path = path or RUN_HANDOFF_FILE
+    try:
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        tmp = f"{path}.{os.getpid()}.tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"run_id": run_id, "pid": os.getpid(), "ts": round(time.time(), 3)}, f)
+        os.replace(tmp, path)
+    except OSError as e:
+        print(f"[Enqueue] تنبيه: تعذر تسليم التشغيل {run_id} للعامل: {e}")
+
+
+def _claim_run_handoff(run_id, path=None):
+    """هل أنشأ إدراجٌ التشغيل run_id ولم يأخذه عامل بعد؟ يستهلك التسليم (يُحذف) في كل الأحوال."""
+    path = path or RUN_HANDOFF_FILE
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return False
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+    return bool(run_id) and isinstance(data, dict) and data.get("run_id") == run_id
+
+
 def _enqueue_payload(prod):
     return {
         "name_ar": prod.get("product_name_ar", ""),
@@ -1375,6 +1407,7 @@ def run_enqueue_mode():
         print("[Enqueue] تنبيه: تعذر تسجيل التشغيل الجديد؛ ستعرض اللوحة تقدم الطابور كله.")
     else:
         print(f"[Enqueue] التشغيل {run_id} سيعالج {run_rows} صف (الصفوف في الانتظار بما فيها ما بقي من تشغيل سابق).")
+        _write_run_handoff(run_id)
 
 
 # ---------------------------------------------------------------------------
@@ -2050,6 +2083,9 @@ def run_worker_mode(trigger="manual", report=True, deadline_ts=None):
     started_ts = time.time()
     state = local_cache_db.get_automation_state()
     run_id = state.get("run_id") or None
+    # التقرير يعد صفوف run_id فقط إن أنشأه إدراج هذا التشغيل؛ عامل يدوي بلا إدراج يُعد بصفوف worker_id (لا أرقام
+    # التشغيل السابق الذي بقي run_id في automation_state)
+    report_run_id = run_id if _claim_run_handoff(run_id) else None
     # طلب إيقاف وصل أثناء الإدراج (قبل وجود العامل): لا يُعالج أي منتج
     stop_reason = "stopped" if state.get("stop_requested") == 1 else None
     if state.get("status") == "db_unavailable":
@@ -2103,7 +2139,7 @@ def run_worker_mode(trigger="manual", report=True, deadline_ts=None):
         _refresh_state("pre_caching", run_id=run_id, notice=notice)
 
         worker_id = local_cache_db.new_claim_id().split("#")[0]
-        lock_heartbeat(worker_id=worker_id, run_id=run_id)   # منه يُكتب تقرير عامل أنهته اللوحة
+        lock_heartbeat(worker_id=worker_id, run_id=report_run_id)   # منه يُكتب تقرير عامل أنهته اللوحة
         lock = threading.Lock()
         counters = {"provider_down_streak": 0, "credit_streak": 0}
         budget = _daily_budget()
@@ -2274,8 +2310,9 @@ def run_worker_mode(trigger="manual", report=True, deadline_ts=None):
                 os.remove("temp/batch_progress.json")
         except Exception:
             pass
-        LAST_WORKER.update(stop_reason=stop_reason, run_id=run_id, worker_id=worker_id, started_ts=started_ts,
-                           ended_ts=time.time(), notice=final_notice or start_notice or notice or None, health=health)
+        LAST_WORKER.update(stop_reason=stop_reason, run_id=report_run_id, worker_id=worker_id,
+                           started_ts=started_ts, ended_ts=time.time(),
+                           notice=final_notice or start_notice or notice or None, health=health)
         if report:
             try:
                 import run_report
