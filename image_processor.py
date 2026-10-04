@@ -347,6 +347,9 @@ def _load_from_candidate_store(candidate_sha256) -> Optional[bytes]:
     if not _SHA256_RE.match(sha):
         return None
     store = settings.candidate_store_dir()
+    if store and not os.path.isabs(store):
+        # مثل catalog_match.fetch: المسار النسبي من مجلد المشروع، لا من مجلد العملية الحالي
+        store = os.path.join(os.path.dirname(os.path.abspath(__file__)), store)
     if not store or not os.path.isdir(store):
         return None
     matches = sorted(glob.glob(os.path.join(glob.escape(store), sha + ".*")))
@@ -367,18 +370,32 @@ def _load_from_candidate_store(candidate_sha256) -> Optional[bytes]:
     return None
 
 
+# أخطاء تنزيل قد ينجح بعدها طريق آخر (البروكسي): انقطاع، مهلة، 5xx، أو رفض المصدر لهذا العميل (403 / 429)
+_PROXY_MAY_HELP = ("timeout", "connection_error", "http_403", "http_429")
+
+
+def _proxy_may_help(error: Optional[str]) -> bool:
+    return bool(error) and (error in _PROXY_MAY_HELP or str(error).startswith("http_5"))
+
+
 def _download_bytes(url: str, page_url=None) -> Tuple[Optional[bytes], Optional[str]]:
     """
     نفس ترويسات تنزيل المرشح الأصلي (catalog_match.fetch.request_headers: Accept بـ AVIF أولاً، و Referer = صفحة
     المرشح إن عُرفت): شبكات توزيع تختار الصيغة لكل طلب كانت تعيد بايتات أخرى فيفشل الاعتماد بـ source_changed.
+    ونفس الطريق: المحاولة الأولى مباشرة دائماً، و PROXY_URL بديل بعد فشل أو رفض فقط (catalog_match.fetch). كان
+    التنزيل يمر بالبروكسي وحده عند ضبطه، فبروكسي بطيء أو معطل كان يُفشل كل اعتماد.
     """
     from catalog_match.fetch import request_headers
     from http_client import ImpersonateClient
 
+    headers = request_headers(str(page_url or "").strip() or None)
+    fetched = ImpersonateClient(use_proxy=False).fetch_image(url, timeout=15, max_bytes=MAX_DOWNLOAD_BYTES,
+                                                             headers=headers)
     proxy = settings.proxy_url()
-    client = ImpersonateClient(use_proxy=bool(proxy), proxy_url=proxy or None)
-    fetched = client.fetch_image(url, timeout=15, max_bytes=MAX_DOWNLOAD_BYTES,
-                                 headers=request_headers(str(page_url or "").strip() or None))
+    if fetched.content is None and proxy and _proxy_may_help(fetched.error):
+        logger.info("تنزيل الصورة المعتمدة فشل مباشرة (%s)؛ محاولة عبر البروكسي", fetched.error)
+        fetched = ImpersonateClient(use_proxy=True, proxy_url=proxy).fetch_image(
+            url, timeout=15, max_bytes=MAX_DOWNLOAD_BYTES, headers=headers)
     if fetched.content is None:
         return None, f"download_{fetched.error or 'failed'}"
     return fetched.content, None

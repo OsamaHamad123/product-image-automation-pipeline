@@ -1147,6 +1147,9 @@ def action_select_image(params):
         if res["status"] == "superseded":
             return _not_written(res, guard)
         if res["status"] == "failed":
+            # صفحة الأعطال تقول لماذا لم يُعتمد (الواجهة تترجم الرمز؛ هذا السطر يبقى للتشخيص)
+            config.log_error_to_laravel(f"Approval not published (row {row_number}): {res.get('error')}",
+                                        product_name=product_name, brand=brand, barcode=barcode, level="WARNING")
             return {'status': 'failed', 'error': res.get('error'), 'isolated': res.get('isolated', False)}
 
         _record_review("approved", params, row_number, sku_key, image_url, identity=identity)
