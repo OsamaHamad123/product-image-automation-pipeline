@@ -870,6 +870,63 @@
     line-height: 1.4;
 }
 
+/* a product without a pick: «لماذا لم تُختر» under each image (catalog_match.explain on the page) */
+.rv-alt__why {
+    font-size: var(--lq-fs-xs);
+    font-weight: 500;
+    line-height: 1.45;
+}
+
+.rv-alt__why-k {
+    color: var(--lq-text-3);
+    font-weight: 400;
+}
+
+.rv-alts--nopick .rv-alt__thumb {
+    height: 116px;
+}
+
+/* «ليش ما في اقتراح؟»: the reason sentence, and the sheet's other gaps under it */
+.rv-nopick .lq-alert__body > span:not(.lq-alert__title) {
+    line-height: 1.6;
+}
+
+.rv-nopick__sheet {
+    color: var(--lq-text-2);
+}
+
+/* the reason of a product without a pick in the review list (two words; the sentence is in the workspace) */
+.rv-item__why {
+    color: var(--lq-warning-ink);
+    font-size: 11px;
+    line-height: 1.4;
+    text-align: start;
+}
+
+/* «السبب:» chips under the list filters: the no-pick reasons (and the sheet's gaps) of the listed products */
+.rv-reasons-filter {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    padding-block-start: var(--lq-space-2);
+    border-block-start: 1px dashed var(--lq-border);
+}
+
+.rv-reasons-filter[hidden] {
+    display: none;
+}
+
+.rv-reasons-filter__label {
+    color: var(--lq-text-2);
+    font-size: 12px;
+}
+
+.lq-body .rv-reason-chip,
+.rv-reason-chip {
+    font-size: 12px;
+}
+
 /* «لماذا هذه الصورة؟»: small evidence chips under the pick, each alternative and each bulk card */
 .rv-explain {
     display: flex;
@@ -1663,6 +1720,17 @@
 .rv-card__warn .lq-icon {
     flex-shrink: 0;
     margin-top: 2px;
+}
+
+/* a card without a pick: why, in one sentence (catalog_match.explain) */
+.rv-card__why {
+    margin: 0;
+    padding: 6px var(--lq-space-2);
+    border-radius: var(--lq-radius-sm);
+    background: var(--lq-info-bg);
+    color: var(--lq-info-text);
+    font-size: 12px;
+    line-height: 1.55;
 }
 
 /* every warning of the card's pick, one per line */

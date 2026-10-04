@@ -2774,6 +2774,61 @@ def get_curation_candidates(row_number, sku_key=None, identity=None):
         return []
 
 
+# ---------------------------------------------------------------------------
+# لماذا لا توجد صورة مختارة (catalog_match.explain): outcome.explain في trace_json
+# ---------------------------------------------------------------------------
+
+# الصفوف التي تعرض شاشة المراجعة سببها: بانتظار المراجعة، أو فاشلة (ما انلقت)
+EXPLAIN_STATUSES = ("ready_for_review", "failed")
+EXPLAIN_BACKFILL_LIMIT = 2000
+
+
+def queue_rows_missing_explain(limit=EXPLAIN_BACKFILL_LIMIT):
+    """
+    صفوف الطابور (بانتظار المراجعة أو فاشلة) التي حُفظت نتيجتها قبل حساب السبب: لها trace_json فيه outcome بلا مفتاح
+    explain. الصف بلا trace (صف شقيق أخذ الحالة من صف المنتج نفسه) لا يُلمس: لا يُنشأ له trace (ops_health يعدّ
+    كل outcome بحثاً). أخطاء قاعدة البيانات تُرفع.
+    """
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        marks = ",".join(["%s"] * len(EXPLAIN_STATUSES))
+        cursor.execute(
+            "SELECT id, `row_number`, sku_key, status, failure_code, product_name, brand, barcode, payload_json, "
+            f"trace_json FROM automation_queue WHERE status IN ({marks}) AND trace_json IS NOT NULL "
+            "AND JSON_VALID(trace_json) AND JSON_CONTAINS_PATH(trace_json, 'one', '$.outcome') "
+            "AND NOT JSON_CONTAINS_PATH(trace_json, 'one', '$.outcome.explain') ORDER BY id LIMIT %s",
+            EXPLAIN_STATUSES + (int(limit),))
+        return [dict(r) for r in cursor.fetchall() or []]
+    finally:
+        _close(conn)
+
+
+def set_queue_explain(task_id, seen_trace_json, explain):
+    """
+    يكتب outcome.explain (None = للمنتج صورة مختارة: يُكتب null فلا يُعاد حسابه) في trace_json لصف الطابور، فقط إذا لم
+    يتغير trace_json منذ قراءته (العامل أو مراجع كتب نتيجة أحدث: لا يُكتب فوقها). لا يغيّر الحالة ولا updated_at (لقطة
+    الصفحة expected_state تقارن updated_at: تعبئة السبب ليست تغيّراً في المنتج). تعيد True إذا كُتب.
+    """
+    try:
+        trace = json.loads(seen_trace_json) if isinstance(seen_trace_json, str) else dict(seen_trace_json or {})
+    except ValueError:
+        return False
+    if not isinstance(trace, dict) or not isinstance(trace.get("outcome"), dict):
+        return False
+    trace["outcome"]["explain"] = explain
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE automation_queue SET trace_json = %s, updated_at = updated_at WHERE id = %s AND trace_json = %s",
+            (_trace_to_json(trace), int(task_id), seen_trace_json))
+        conn.commit()
+        return cursor.rowcount == 1
+    finally:
+        _close(conn)
+
+
 def _row_or_sku_clause(row_number, sku_key, rows=None):
     """
     شرط يحدد صفوف منتج واحد: بـ sku_key عند توفره (أرقام الصفوف تتغير عند تعديل الشيت)،

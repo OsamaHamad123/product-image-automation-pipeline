@@ -30,6 +30,10 @@ outcome_to_legacy(outcome, trace=None, spec=None) -> dict | None
     (size_unverified, variant_unverified), and each eligible alternative's own codes,
     so the review screen can warn about an alternative too. They are display-only:
     computed after routing, never written to the candidates' reasons.
+    With spec, a product without a pick also gets trace['outcome']['explain']
+    (catalog_match.explain): one reason key and one Arabic sentence (the fact, then what to do),
+    with the sheet row's gaps (no size, no barcode, unknown brand, a likely typo). The worker keeps
+    trace['outcome'] in automation_queue.trace_json, where the review screen reads it.
 """
 
 from __future__ import annotations
@@ -229,6 +233,20 @@ def outcome_summary(outcome: SearchOutcome) -> Dict[str, Any]:
     }
 
 
+def explain_no_pick(outcome: SearchOutcome, spec: Optional[SkuSpec]) -> Optional[Dict[str, Any]]:
+    """Why the product has no pick (catalog_match.explain), for trace['outcome']['explain']; None with a pick or
+    without the spec. Display only: computed after routing from what the search found, never read by it, and a
+    failure here never breaks the search result."""
+    if spec is None:
+        return None
+    try:
+        from .explain import explain_outcome
+        return explain_outcome(spec, outcome)
+    except Exception:
+        logger.exception("no-pick explanation failed for %s", outcome.sku_key)
+        return None
+
+
 # ---------------------------------------------------------------------------
 # Output side
 # ---------------------------------------------------------------------------
@@ -246,6 +264,9 @@ def outcome_to_legacy(outcome: SearchOutcome, trace: Optional[dict] = None,
 
     if trace is not None:
         trace["outcome"] = outcome_summary(outcome)
+        no_pick = explain_no_pick(outcome, spec)
+        if no_pick is not None:
+            trace["outcome"]["explain"] = no_pick
         trace.setdefault("steps", []).append({
             "step_name": STEP_NAME,
             "name": STEP_NAME,

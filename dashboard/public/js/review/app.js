@@ -13,6 +13,7 @@
         page: '/catalog',
         products: '/api/products-json',
         queueState: '/api/review/queue-state',
+        explainBackfill: '/api/review/explain-backfill',
         clearCache: '/api/clear-products-cache',
         search: '/api/search',
         select: '/api/select_image',
@@ -33,6 +34,8 @@
         urls: Object.assign({}, DEFAULT_URLS),
         mode: 'single',
         filter: 'all',
+        reason: '',                // رقاقة «السبب» (catalog_match.explain): '' = كل الأسباب
+        explainBackfill: false,    // طُلب حساب أسباب «بلا اقتراح» للصفوف المحفوظة قبلها (مرة في الجلسة)
         query: '',
         products: [],
         queue: null,
@@ -118,6 +121,7 @@
         d.search = el('input', { type: 'search', className: 'lq-search__input', id: 'rvSearch',
                                  placeholder: 'اسم، باركود، أو رقم صف', autocomplete: 'off', spellcheck: 'false' });
         d.filters = el('div', { className: 'rv-filters', role: 'group', 'aria-label': 'تصفية القائمة' });
+        d.reasonChips = el('div', { className: 'rv-reasons-filter', role: 'group', 'aria-label': 'تصفية حسب سبب «بلا اقتراح»', hidden: true });
         d.queueNote = el('div', { className: 'rv-queue__note' });
         d.list = el('ul', { className: 'rv-list', id: 'rvList', 'aria-label': 'المنتجات' });
         d.toBulk = el('a', { className: 'rv-queue__bulk', href: '?mode=bulk' }, [icon('grid', 16), el('span', { text: 'وضع الجملة' })]);
@@ -128,6 +132,7 @@
                 ]),
                 el('label', { className: 'lq-search rv-search' }, [icon('search', 18), el('span', { className: 'lq-sr-only', text: 'بحث بالقائمة' }), d.search]),
                 d.filters,
+                d.reasonChips,
                 d.queueNote
             ]),
             d.list,
@@ -156,6 +161,10 @@
         d.filters.addEventListener('click', e => {
             const btn = e.target && e.target.closest ? e.target.closest('[data-filter]') : null;
             if (btn) setFilter(btn.getAttribute('data-filter'));
+        });
+        d.reasonChips.addEventListener('click', e => {
+            const btn = e.target && e.target.closest ? e.target.closest('[data-nopick-reason]') : null;
+            if (btn) setReason(btn.getAttribute('data-nopick-reason'));
         });
         let searchTimer = null;
         d.search.addEventListener('input', () => {
@@ -228,6 +237,7 @@
             S.load.queueError = R.plainError(q.error, 'ما قدرنا نقرأ حالة طابور التشغيل.');
         }
         if (productsOk) settleLocalFlags();
+        maybeBackfillExplain(q);
         rebuild();
         if (productsOk) refreshOpenIdentity();
         detectMoved();
@@ -236,6 +246,16 @@
             chooseInitial();
         }
         renderAll();
+    }
+
+    // صفوف حُفظت قبل أن يحسب العامل سبب «بلا اقتراح» (queue-state: explain_missing): يُطلب حسابه مرة في الجلسة مما
+    // حُفظ (بلا بحث ولا تكلفة)، وتُقرأ القائمة بهدوء بعده. فشله لا يوقف شيئاً: المنتج يعرض جملة عامة صادقة
+    function maybeBackfillExplain(q) {
+        if (S.explainBackfill || !q || !(parseInt(q.explain_missing, 10) > 0) || !S.urls.explainBackfill) return;
+        S.explainBackfill = true;
+        R.requestJson(S.urls.explainBackfill, { method: 'POST', body: {} }).then(res => {
+            if (res && res.ok && res.data && parseInt(res.data.filled, 10) > 0) loadData({ quiet: true });
+        }).catch(() => {});
     }
 
     // حالات هذه الجلسة التي لحقتها قاعدة البيانات تُزال (القراءة الجديدة تقول الشيء نفسه)
@@ -342,6 +362,11 @@
     function chooseInitial() {
         const c = S.counts;
         let filter = S.cfg.filter && R.FILTERS.some(f => f.key === S.cfg.filter) ? S.cfg.filter : null;
+        // ?reason=no_size: منتجات هذا السبب في «الكل» (بلا اقتراح وما انلقت معاً) إلا إذا حُددت رقاقة
+        if (S.cfg.reason && /^[a-z_]{1,40}$/.test(String(S.cfg.reason))) {
+            S.reason = String(S.cfg.reason);
+            if (!filter) filter = 'all';
+        }
         if (!filter) {
             filter = c.proposed ? 'proposed' : c.none ? 'none' : c.bg_failed ? 'bg_failed' : c.not_found ? 'not_found'
                 : c.failed ? 'failed' : 'all';
@@ -353,7 +378,10 @@
                 || S.items.find(x => parseInt(x.product.row_number, 10) === S.cfg.row);
             if (it) {
                 key = it.key;
-                if (!R.filterItems([it], S.filter, '').length) S.filter = 'all';
+                if (!R.filterItems([it], S.filter, '', null, S.reason).length) {
+                    S.filter = 'all';
+                    S.reason = '';
+                }
             } else if (S.load.state === 'ready') {
                 R.toast(`ما لقينا الصف ${S.cfg.row} بالشيت.`, 'warning');
             }
@@ -371,13 +399,16 @@
     // -------------------------------------------------------------------------------------------------
 
     function visibleItems() {
-        return R.filterItems(S.items, S.filter, S.query, S.keep);
+        return R.filterItems(S.items, S.filter, S.query, S.keep, S.reason);
     }
     R.visibleItems = visibleItems;
 
     function setFilter(key) {
         if (!R.FILTERS.some(f => f.key === key)) return;
-        if (S.filter !== key) S.keep = new Set();
+        if (S.filter !== key) {
+            S.keep = new Set();
+            S.reason = '';
+        }
         S.filter = key;
         S.listLimit = LIST_PAGE;
         updateUrl(false);
@@ -390,6 +421,23 @@
         }
     }
     R.setFilter = setFilter;
+
+    // رقاقة «السبب»: الضغط عليها يعرض منتجاتها فقط، والضغط مرة ثانية (أو «كل الأسباب») يلغيها
+    function setReason(key) {
+        key = String(key || '');
+        if (key && !/^[a-z_]{1,40}$/.test(key)) return;
+        S.reason = key && key !== S.reason ? key : '';
+        S.listLimit = LIST_PAGE;
+        updateUrl(false);
+        renderList();
+        const list = visibleItems();
+        if (S.mode === 'single' && list.length && !list.some(it => it.key === S.openKey)) {
+            R.single.openItem(list[0].key, { from: 'filter' });
+        } else {
+            R.single.updateBar();
+        }
+    }
+    R.setReason = setReason;
 
     function thumbFor(item) {
         const p = item.product;
@@ -410,6 +458,8 @@
     function listItem(item) {
         const p = item.product;
         const size = R.sizeText(p.size);
+        // سبب «بلا اقتراح» بكلمتين تحت الاسم (الجملة كاملة في مساحة العمل)
+        const why = R.NO_PICK_BUCKETS.includes(item.bucket) ? R.noPickReason(item) : null;
         const active = item.key === S.openKey;
         const btn = el('button', { type: 'button', className: 'rv-item' + (active ? ' is-active' : ''), dataset: { key: item.key },
                                    'aria-current': active ? 'true' : null }, [
@@ -420,11 +470,31 @@
                     el('span', { text: `صف ${p.row_number}` }),
                     size ? el('span', { className: 'rv-item__dot', 'aria-hidden': 'true', text: '•' }) : null,
                     size ? el('span', { text: size }) : null
-                ])
+                ]),
+                why ? el('span', { className: 'rv-item__why', title: why.key, text: why.label }) : null
             ]),
             chipFor(item.bucket, true)
         ]);
         return el('li', {}, [btn]);
+    }
+
+    // رقاقات «السبب» تحت رقاقات القائمة: أسباب «بلا اقتراح» (وما ينقص الشيت) لمنتجات الرقاقة الحالية بعددها، حتى
+    // يصلح المالك مجموعة كاملة مرة واحدة (مثلاً كل «حجم ناقص بالشيت»)
+    function drawReasonChips(hide) {
+        const d = S.dom;
+        if (!d.reasonChips) return;
+        clear(d.reasonChips);
+        const counts = hide ? [] : R.reasonCounts(R.filterItems(S.items, S.filter, '', S.keep));
+        if (S.reason && !counts.some(c => c.key === S.reason)) counts.push({ key: S.reason, count: 0, label: R.noPickLabel(S.reason) });
+        d.reasonChips.hidden = !counts.length;
+        if (!counts.length) return;
+        d.reasonChips.appendChild(el('span', { className: 'rv-reasons-filter__label', text: 'السبب:' }));
+        d.reasonChips.appendChild(el('button', { type: 'button', className: 'lq-filter rv-filter rv-reason-chip', dataset: { nopickReason: '' },
+                                                  'aria-pressed': S.reason ? 'false' : 'true' }, [el('span', { text: 'كل الأسباب' })]));
+        counts.forEach(c => d.reasonChips.appendChild(el('button', {
+            type: 'button', className: 'lq-filter rv-filter rv-reason-chip', dataset: { nopickReason: c.key }, title: c.key,
+            'aria-pressed': S.reason === c.key ? 'true' : 'false'
+        }, [el('span', { text: c.label }), el('span', { className: 'lq-filter__count', text: String(c.count) })])));
     }
 
     const EMPTY_FILTER_TEXT = {
@@ -466,6 +536,8 @@
                 el('span', { className: 'lq-filter__count', text: loading ? '…' : unread ? '—' : String(count || 0) })
             ]));
         });
+
+        drawReasonChips(loading || unread);
 
         clear(d.queueNote);
         if (S.load.queueError) {
@@ -528,7 +600,8 @@
         }
         const list = visibleItems();
         if (!list.length) {
-            const text = S.query ? `ما في نتائج لـ «${S.query.trim()}» بهالفلتر.` : EMPTY_FILTER_TEXT[S.filter];
+            const text = S.query ? `ما في نتائج لـ «${S.query.trim()}» بهالفلتر.`
+                : S.reason ? `ما في منتجات سببها «${R.noPickLabel(S.reason)}» بهالرقاقة.` : EMPTY_FILTER_TEXT[S.filter];
             d.list.appendChild(el('li', { className: 'rv-list__state' }, [
                 el('p', { className: 'rv-list__empty', text: text }),
                 S.filter !== 'all' && S.query ? el('button', { type: 'button', className: 'lq-btn lq-btn--ghost lq-btn--sm',
@@ -686,6 +759,7 @@
         if (S.mode === 'bulk') params.set('mode', 'bulk');
         else if (S.openKey && S.byKey.get(S.openKey)) params.set('row', String(S.byKey.get(S.openKey).product.row_number));
         if (S.mode === 'single' && S.filter) params.set('filter', S.filter);
+        if (S.mode === 'single' && S.reason) params.set('reason', S.reason);
         return params;
     }
 

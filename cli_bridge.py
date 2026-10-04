@@ -155,6 +155,7 @@ def action_get_products(params):
         except Exception as e:
             logger.warning("تعذر بناء فهرس البراندات: %s", e)
     from catalog_match.identity import build_sku_spec
+    quality = _sheet_quality_inputs(products)
     for prod in products:
         try:
             row = pipeline.sku_row(
@@ -165,10 +166,44 @@ def action_get_products(params):
             spec = build_sku_spec(row, brand_mappings)
             prod["sku_key"] = spec.sku_key
             prod["sheet_states"] = _sheet_states(spec)
+            prod["sheet_issues"] = _sheet_issues(row, spec, quality, prod.get("row_number"))
         except Exception as e:
             logger.warning("تعذر حساب sku_key للصف %s: %s", prod.get("row_number"), e)
         prod["has_error"], prod["error_message"] = _row_failure(failures, prod)
     return {'status': 'success', 'products': products}
+
+
+def _sheet_quality_inputs(products):
+    """ما يحتاجه فحص جودة بيانات الشيت مرة واحدة لكل الصفوف: كلمات أسماء الشيت (لتمييز غلطة إملائية من كلمة تتكرر)
+    والصفوف التي يتكرر باركودها لمنتج آخر. لا قراءة إضافية للشيت."""
+    try:
+        from catalog_match import explain
+        return {"vocab": explain.Vocabulary.from_names([p.get("product_name") or "" for p in products]),
+                "duplicates": explain.duplicate_barcodes(products)}
+    except Exception as e:
+        logger.warning("تعذر تجهيز فحص جودة بيانات الشيت: %s", e)
+        return None
+
+
+def _sheet_issues(row, spec, quality, row_number):
+    """
+    ما ينقص صف الشيت لاختيار واثق (catalog_match.explain.sheet_issues): حجم، باركود صالح، ماركة في Brands Mapping،
+    غلطة إملائية محتملة، وباركود مكتوب لمنتج آخر. لوحة «جودة بيانات الشيت» في صفحة التشغيل تقرؤها من كاش المنتجات.
+    """
+    if quality is None:
+        return None
+    try:
+        from catalog_match import explain
+        issues = explain.sheet_issues(row, spec=spec, vocab=quality["vocab"])
+        others = quality["duplicates"].get(int(row_number or 0))
+        if others:
+            issue = {"key": "duplicate_barcode", "rows": others}
+            issue["text"] = explain.sheet_issue_text(issue)
+            issues.append(issue)
+        return issues
+    except Exception as e:
+        logger.warning("تعذر فحص جودة بيانات الصف %s: %s", row_number, e)
+        return None
 
 
 def _sheet_states(spec):
@@ -357,6 +392,8 @@ def action_search(params, brand_mappings=None, found=None):
         'exclusions': {'urls': len(exclude_urls), 'phashes': len(rejected_phashes)},
         'trace': trace,
         'brand': brand,
+        # لماذا لا توجد صورة مختارة (catalog_match.explain)، أو None عندما اختار البحث صورة
+        'explain': outcome.get('explain') if isinstance(outcome.get('explain'), dict) else None,
     }
 
 
@@ -1336,8 +1373,9 @@ def _clear_rejected_cells(params, row_number, sku_key, images, tasks=None, flush
 
 def _save_research_candidates(found, row_number, product_name, brand, sku_key, rejected_url, identity=None):
     """
-    إعادة البحث بعد الرفض تحفظ مرشحاتها الجديدة بنفسها (عقد C2، بـ sku_key المنتج)، بدل أن تحفظها الصفحة.
-    لا شيء يُحفظ بلا نتيجة (لم يُعثر على شيء / المزودون معطلون): المرشحات الباقية تبقى. يعيد عدد المحفوظ.
+    إعادة البحث بعد الرفض تحفظ مرشحاتها الجديدة بنفسها (عقد C2، بـ sku_key المنتج)، بدل أن تحفظها الصفحة، ومعها سبب
+    «بلا اقتراح» للبحث الجديد في trace صف الطابور. لا شيء يُحفظ بلا نتيجة (لم يُعثر على شيء / المزودون معطلون):
+    المرشحات الباقية تبقى. يعيد عدد المحفوظ.
     """
     best = found.get("best")
     if not best:
@@ -1350,7 +1388,24 @@ def _save_research_candidates(found, row_number, product_name, brand, sku_key, r
                                                    best.get("url"), sku_key=sku_key,
                                                    run_id=f"research-{uuid.uuid4().hex[:8]}", identity=identity):
         return 0
+    # the row's «why no pick» is now the new search's (None: it found a pick)
+    outcome = (found.get("trace") or {}).get("outcome")
+    _save_research_explain(row_number, sku_key, product_name,
+                           outcome.get("explain") if isinstance(outcome, dict) else None)
     return len(candidates)
+
+
+def _save_research_explain(row_number, sku_key, product_name, explain):
+    """
+    مرشحات إعادة البحث بعد الرفض حلّت محل السابقة: سبب «بلا اقتراح» في trace صف الطابور يصير سبب البحث الجديد
+    (None = البحث الجديد اختار صورة). لا يغيّر الحالة ولا يكتب فوق نتيجة أحدث للعامل.
+    """
+    try:
+        task = local_cache_db.get_task_by_row(row_number)
+        if task and task.get("trace_json") and _same_product_task(task, sku_key, product_name):
+            local_cache_db.set_queue_explain(task["id"], task["trace_json"], explain)
+    except Exception:
+        logger.exception("could not store the research's no-pick reason for row %s", row_number)
 
 
 def _set_review_queue_status(row_number, sku_key, product_name, status, reason_code, failure_code=None, rows=None):
@@ -1584,6 +1639,94 @@ def action_sheet_save(params):
 
 
 # ---------------------------------------------------------------------------
+# explain_backfill: لماذا لا توجد صورة مختارة، لصفوف حُفظت قبل أن يحسبه العامل
+# ---------------------------------------------------------------------------
+
+def _brand_index(mappings):
+    try:
+        from catalog_match.brand_index import BrandIndex
+        return BrandIndex.from_mappings(mappings or {})
+    except Exception as e:
+        logger.warning("تعذر بناء فهرس البراندات: %s", e)
+        return mappings or {}
+
+
+def action_explain_backfill(params):
+    """
+    يحسب outcome.explain (catalog_match.explain.explain_stored) لصفوف الطابور بانتظار المراجعة أو الفاشلة التي حُفظت
+    نتيجتها قبل أن يحسبه العامل، مما حُفظ فقط (trace الصف ومرشحاته وحمولة الصف): بلا بحث وبلا تكلفة. لا يغيّر حالة أي
+    صف ولا وقت تحديثه، ولا يكتب فوق نتيجة أحدث. تعيد {status, filled, checked}.
+    """
+    from catalog_match import explain
+    try:
+        rows = local_cache_db.queue_rows_missing_explain()
+    except Exception:
+        return _failure("failed", "Could not read the automation queue (details in temp/search.log).",
+                        "explain_backfill failed")
+    if not rows:
+        return {"status": "success", "filled": 0, "checked": 0}
+    mappings = _brand_index(_load_brand_mappings())
+    vocab = explain.default_vocabulary()
+    filled = 0
+    for row in rows:
+        try:
+            candidates = local_cache_db.get_curation_candidates(
+                row["row_number"], row.get("sku_key"), identity=local_cache_db.queue_row_identity(row))
+            data = explain.explain_stored(row, candidates, mappings, vocab)
+            if local_cache_db.set_queue_explain(row["id"], row["trace_json"], data):
+                filled += 1
+        except Exception:
+            logger.exception("explain_backfill: row %s", row.get("row_number"))
+    return {"status": "success", "filled": filled, "checked": len(rows)}
+
+
+# ---------------------------------------------------------------------------
+# export_run: «تصدير تقرير للتحليل» (scripts/export_run.py) — قراءة فقط، بلا بحث وبلا تكلفة
+# ---------------------------------------------------------------------------
+
+EXPORT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "temp", "exports")
+EXPORT_KEEP_SECONDS = 3600
+
+
+def _clean_old_exports(now=None):
+    """تقارير قديمة بقيت في temp/exports (لوحة التحكم تحذف التقرير بعد تنزيله): تُحذف بعد ساعة."""
+    now = now or time.time()
+    try:
+        for name in os.listdir(EXPORT_DIR):
+            path = os.path.join(EXPORT_DIR, name)
+            if name.startswith("laqta_run_") and os.path.isfile(path) and now - os.path.getmtime(path) > EXPORT_KEEP_SECONDS:
+                os.remove(path)
+    except OSError:
+        pass
+
+
+def action_export_run(params):
+    """
+    ملف JSON واحد بكل صفوف آخر تشغيل (scope=latest)، أو تشغيل محدد (scope=run و run_id)، أو كل ما ينتظر المراجعة
+    (scope=review)، بشكل scripts/smoke_live.py --json: يُكتب في temp/exports وتعيد اسمه، ولوحة التحكم تنزّله وتحذفه.
+    يُقرأ من الطابور وما حُفظ فقط (لا بحث ولا تكلفة)، وكل قيمة سرية مضبوطة تُستبدل بـ [hidden].
+    """
+    scripts_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts")
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+    import export_run
+
+    scope = str(params.get('scope') or 'latest')
+    run_id = _text(params, 'run_id') or None
+    os.makedirs(EXPORT_DIR, exist_ok=True)
+    _clean_old_exports()
+    name = export_run.default_name()
+    try:
+        _path, rows = export_run.write_export(os.path.join(EXPORT_DIR, name), scope, run_id,
+                                              mappings=_brand_index(_load_brand_mappings()))
+    except ValueError:
+        return {'status': 'error', 'error': 'invalid scope or run id'}
+    except Exception:
+        return _failure('failed', "Could not export the run (details in temp/search.log).", "export_run failed")
+    return {'status': 'success', 'file': name, 'rows': rows}
+
+
+# ---------------------------------------------------------------------------
 # ops_health (قراءة فقط: صحة البحث وتكلفته لصفحة التشخيصات)
 # ---------------------------------------------------------------------------
 
@@ -1768,6 +1911,8 @@ ACTIONS = {
     'review_stats': action_review_stats,
     'sheet-preview': action_sheet_preview,
     'sheet-save': action_sheet_save,
+    'explain_backfill': action_explain_backfill,
+    'export_run': action_export_run,
     'lock_state': action_lock_state,
     'ops_health': action_ops_health,
     'run_control': action_run_control,

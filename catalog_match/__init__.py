@@ -10,6 +10,7 @@ Stages, each in its own module:
     decide    - route to AUTO_PUBLISH / REVIEW_* / NOT_FOUND / *_DOWN
     pipeline  - wires the stages together
     facade    - adapts SearchOutcome to the legacy dict that main.py / cli_bridge.py expect
+    explain   - why a product has no pick, in one Arabic sentence (display only, never read by routing)
 
 The shared types live in catalog_match.models.
 """
