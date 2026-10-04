@@ -308,6 +308,8 @@
         const meta = [`صف ${p.row_number}`, R.sizeText(p.size), where ? where.store : ''].filter(Boolean).join(' · ');
         // كل تحذيرات الصورة المقترحة، لا أولها فقط
         const warns = sel ? sel.warnings.map(w => R.warningText(w)) : [];
+        // بطاقة «بلا اقتراح»: لماذا (catalog_match.explain) بجملة واحدة، والرمز في التلميح
+        const why = sel ? null : R.noPickReason(it);
         const focused = S.bulk.focus === it.key;
         const state = it.bucket;
         let overlay = null;
@@ -337,6 +339,8 @@
             el('div', { className: 'rv-card__body' }, [
                 bdi(name, 'rv-card__name', p.product_name ? 'ltr' : 'auto'),
                 el('span', { className: 'rv-card__meta', text: meta }),
+                !sel && !busyOrDone(it) ? el('p', { className: 'rv-card__why', title: why ? why.key : null,
+                                                    dataset: { nopick: why ? why.key : '' }, text: why ? why.text : R.NO_PICK_FALLBACK }) : null,
                 it.orphan ? el('span', { className: 'rv-card__warn' }, [icon('info', 14, 2), el('span', { text: 'مش موجود بالشيت الحالي' })]) : null,
                 moved ? el('div', { className: 'rv-card__warn rv-card__moved' }, [
                     icon('alert', 14, 2), el('span', { text: 'تغيّر هالمنتج بعد ما ظهر لك: ما بينعتمد قبل ما تعرضه من جديد. ' }),

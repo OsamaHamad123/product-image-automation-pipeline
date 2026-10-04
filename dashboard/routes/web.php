@@ -53,6 +53,8 @@ Route::post('/api/v1/curation/save-candidates', [CurationController::class, 'sav
 
 // حزمة المراجعة (P2 review): من ينتظر المراجعة حسب حالة صف الطابور، بنفس عدّ /api/batch-status
 Route::get('/api/review/queue-state', [ReviewController::class, 'queueState']);
+// سبب «بلا اقتراح» لصفوف حُفظت قبل أن يحسبه العامل: يُحسب مرة مما حُفظ (بلا بحث وبلا تكلفة)
+Route::post('/api/review/explain-backfill', [ReviewController::class, 'explainBackfill']);
 
 // حالة جسر بايثون وقاعدة البيانات
 Route::get('/api/system/status', [ApiController::class, 'systemStatus']);
@@ -66,5 +68,8 @@ Route::get('/api/view-nightly-log', [\App\Http\Controllers\HealthController::cla
 Route::get('/api/overview', [OverviewController::class, 'data']);
 Route::get('/api/run/live', [RunController::class, 'live']);
 Route::get('/api/run/plan', [RunController::class, 'plan']);
+// «تصدير تقرير للتحليل» (ملف JSON واحد لتشغيل، بلا بحث وبلا تكلفة) و«جودة بيانات الشيت» (من كاش صفوف الشيت)
+Route::get('/api/run/export', [RunController::class, 'export']);
+Route::get('/api/run/sheet-quality', [RunController::class, 'sheetQuality']);
 
 Route::view('/ui-kit', 'dashboard.ui_kit')->name('dashboard.ui_kit'); // مرجع مكوّنات هوية لقطة

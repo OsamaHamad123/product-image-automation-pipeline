@@ -153,6 +153,41 @@
             </div>
         </section>
     </div>
+
+    <div class="lq-run__grid lq-run__grid--tools">
+        {{-- Sheet data quality: from the sheet rows already cached (GET /api/run/sheet-quality) --}}
+        <section class="lq-card lq-run-quality" aria-labelledby="run-quality-title" data-run="quality" data-state="loading">
+            <div class="lq-run-quality__head">
+                <h2 class="lq-card__title" id="run-quality-title">جودة بيانات الشيت</h2>
+                <button type="button" class="lq-btn lq-btn--ghost lq-btn--sm" data-run="quality-refresh">
+                    <x-lq.icon name="refresh" :size="16" :stroke="2" />
+                    <span>اقرأ الشيت من جديد</span>
+                </button>
+            </div>
+            <p class="lq-run-quality__lead" data-run="quality-lead" aria-live="polite">لحظة، عم نقرأ صفوف الشيت…</p>
+            <div class="lq-run-quality__groups" data-run="quality-groups"></div>
+        </section>
+
+        {{-- One JSON file of a run for analysis (GET /api/run/export): no new search, no cost, no key --}}
+        <section class="lq-card lq-run-export" aria-labelledby="run-export-title">
+            <h2 class="lq-card__title" id="run-export-title">تقرير للتحليل</h2>
+            <p class="lq-run-export__text">ملف واحد فيه كل صفوف التشغيل: القرار، وليش ما في اقتراح، وأفضل 8 صور مع أدلتها، والتكلفة إذا معروفة. ما بيعمل بحث جديد وما بيكلّف شي، وما فيه أي مفتاح أو كلمة سر. ابعته للمطوّر بدل ما تبعت ملفات.</p>
+            <label class="lq-field">
+                <span class="lq-field__label">شو بدك تصدّر؟</span>
+                <select class="lq-select" data-run="export-scope">
+                    <option value="latest">آخر تشغيل</option>
+                    <option value="review">كل المنتجات اللي بانتظار المراجعة</option>
+                </select>
+            </label>
+            <div class="lq-run-export__actions">
+                <button type="button" class="lq-btn lq-btn--secondary" data-run="export">
+                    <span data-run="export-text">تصدير تقرير للتحليل</span>
+                </button>
+            </div>
+            <p class="lq-field__error" role="alert" data-run="export-error" hidden></p>
+            <p class="lq-run-export__done" role="status" data-run="export-done" hidden></p>
+        </section>
+    </div>
 </div>
 
 <script type="application/json" id="lq-run-initial">@json($live)</script>

@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\PythonBridge;
 use App\Services\QueueStats;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -44,6 +45,9 @@ class ReviewController extends Controller
         $rowParam = $request->query('row', '');
         $rowParam = is_string($rowParam) ? $rowParam : '';
         $row = ctype_digit($rowParam) && (int) $rowParam > 0 ? (int) $rowParam : null;
+        // ?reason=no_size: قائمة «بلا اقتراح» لسبب واحد (رمز السبب كما يكتبه catalog_match.explain)
+        $reasonParam = $request->query('reason', '');
+        $reason = is_string($reasonParam) && preg_match('/^[a-z_]{1,40}$/', $reasonParam) ? $reasonParam : null;
 
         $dbOnline = self::databaseOnline();
         $readyForReview = $dbOnline ? self::readyForReview() : null;
@@ -52,6 +56,7 @@ class ReviewController extends Controller
             'mode' => $mode,
             'filter' => $filter,
             'row' => $row,
+            'reason' => $reason,
             'canvas' => $dbOnline ? self::canvasSize() : self::envCanvasSize(),
             'db' => $dbOnline ? 'online' : 'offline',
             'readyForReview' => $readyForReview,
@@ -60,6 +65,7 @@ class ReviewController extends Controller
                 'page' => route('dashboard.catalog'),
                 'products' => url('/api/products-json'),
                 'queueState' => url('/api/review/queue-state'),
+                'explainBackfill' => url('/api/review/explain-backfill'),
                 'clearCache' => url('/api/clear-products-cache'),
                 'search' => url('/api/search'),
                 'select' => url('/api/select_image'),
@@ -98,6 +104,7 @@ class ReviewController extends Controller
         $counters = QueueStats::counters();
         $rows = [];
         $status = 'success';
+        $explainMissing = 0;
         try {
             if (!Schema::hasTable('automation_queue')) {
                 $status = 'no_queue';
@@ -108,12 +115,17 @@ class ReviewController extends Controller
                         $columns[] = $optional;
                     }
                 }
-                $rows = DB::table('automation_queue')
+                if (Schema::hasColumn('automation_queue', 'trace_json')) {
+                    $columns = array_merge($columns, self::explainColumns());
+                }
+                $raw = DB::table('automation_queue')
                     ->whereIn('status', self::QUEUE_STATUSES)
                     ->orderBy('row_number')
                     ->get($columns)
-                    ->map(fn ($r) => self::presentQueueRow((array) $r))
+                    ->map(fn ($r) => (array) $r)
                     ->all();
+                $explainMissing = count(array_filter($raw, fn ($r) => (int) ($r['explain_missing'] ?? 0) === 1));
+                $rows = self::withSiblingExplain(array_map([self::class, 'presentQueueRow'], $raw));
             }
         } catch (\Throwable $e) {
             return response()->json([
@@ -128,10 +140,32 @@ class ReviewController extends Controller
             'ready_for_review' => (int) ($counters['by_status']['ready_for_review'] ?? 0),
             'by_status' => $counters['by_status'],
             'rows' => $rows,
+            // صفوف حُفظت قبل أن يحسب العامل سبب «بلا اقتراح»: الشاشة تطلب حسابه مرة (explainBackfill)
+            'explain_missing' => $explainMissing,
         ])->header('Cache-Control', 'no-store');
     }
 
-    /** صف طابور كما تقرؤه الشاشة (بلا payload ولا trace ولا worker). */
+    /** حالات الطابور التي يُعرض سببها: بانتظار المراجعة بلا اقتراح، أو ما انلقت. */
+    public const EXPLAIN_STATUSES = ['ready_for_review', 'failed'];
+
+    /** أطول نص من سبب «بلا اقتراح» يصل الصفحة (الجملة والحقيقة والإجراء والكلمة المقترحة). */
+    public const EXPLAIN_MAX_TEXT = 600;
+
+    /**
+     * سبب «بلا اقتراح» من trace_json (outcome.explain، يكتبه العامل: catalog_match.explain) لصفوف المراجعة والفشل،
+     * ومعه هل الصف حُفظ قبل أن يُحسب (له outcome بلا explain). trace نفسه لا يصل الصفحة.
+     */
+    private static function explainColumns(): array
+    {
+        $in = "status IN ('" . implode("','", self::EXPLAIN_STATUSES) . "') AND JSON_VALID(trace_json)";
+        return [
+            DB::raw("CASE WHEN {$in} THEN JSON_EXTRACT(trace_json, '$.outcome.explain') END AS explain_json"),
+            DB::raw("CASE WHEN {$in} AND JSON_CONTAINS_PATH(trace_json, 'one', '$.outcome') "
+                . "AND NOT JSON_CONTAINS_PATH(trace_json, 'one', '$.outcome.explain') THEN 1 ELSE 0 END AS explain_missing"),
+        ];
+    }
+
+    /** صف طابور كما تقرؤه الشاشة (بلا payload ولا trace ولا worker)، ومعه سبب «بلا اقتراح» إن وُجد. */
     public static function presentQueueRow(array $row): array
     {
         return [
@@ -143,7 +177,91 @@ class ReviewController extends Controller
             'product_name' => (string) ($row['product_name'] ?? ''),
             'brand' => (string) ($row['brand'] ?? ''),
             'updated_at' => isset($row['updated_at']) ? (string) $row['updated_at'] : null,
+            'explain' => self::presentExplain($row['explain_json'] ?? null),
         ];
+    }
+
+    /**
+     * سبب «بلا اقتراح» كما تعرضه الصفحة، أو null: المفتاح (حروف صغيرة وشرطة سفلية فقط، يظهر في التلميح وحده) والجملة
+     * العربية وقطعتاها، وملاحظات الشيت. أي حقل آخر في trace لا يصل الصفحة.
+     */
+    public static function presentExplain($raw): ?array
+    {
+        $data = is_string($raw) ? json_decode($raw, true) : $raw;
+        if (!is_array($data)) {
+            return null;
+        }
+        $code = fn ($v) => is_string($v) && preg_match('/^[a-z_]{1,40}$/', $v) ? $v : null;
+        $text = fn ($v) => is_string($v) || is_numeric($v) ? mb_substr(trim((string) $v), 0, self::EXPLAIN_MAX_TEXT) : '';
+        $key = $code($data['key'] ?? null);
+        $sentence = $text($data['text'] ?? '');
+        if ($key === null || $sentence === '') {
+            return null;
+        }
+        $sheet = [];
+        foreach (is_array($data['sheet'] ?? null) ? $data['sheet'] : [] as $issue) {
+            if (!is_array($issue) || $code($issue['key'] ?? null) === null) {
+                continue;
+            }
+            $sheet[] = array_filter([
+                'key' => $issue['key'],
+                'text' => $text($issue['text'] ?? ''),
+                'word' => $text($issue['word'] ?? ''),
+                'suggest' => $text($issue['suggest'] ?? ''),
+                'known' => !empty($issue['known']),
+            ], fn ($v) => $v !== '');
+        }
+        return [
+            'key' => $key,
+            'label' => $text($data['label'] ?? ''),
+            'engine' => $code($data['engine'] ?? null),
+            'text' => $sentence,
+            'fact' => $text($data['fact'] ?? ''),
+            'action' => $text($data['action'] ?? ''),
+            'sheet' => $sheet,
+        ];
+    }
+
+    /**
+     * صف شقيق (نفس المنتج: نفس sku_key) أخذ حالته من صف المنتج الذي بُحث له، ولم يُكتب له trace: يأخذ سببه منه.
+     */
+    public static function withSiblingExplain(array $rows): array
+    {
+        $bySku = [];
+        foreach ($rows as $r) {
+            if ($r['explain'] !== null && $r['sku_key'] !== null && !isset($bySku[$r['sku_key'] . '|' . $r['status']])) {
+                $bySku[$r['sku_key'] . '|' . $r['status']] = $r['explain'];
+            }
+        }
+        foreach ($rows as &$r) {
+            if ($r['explain'] === null && $r['sku_key'] !== null && in_array($r['status'], self::EXPLAIN_STATUSES, true)) {
+                $r['explain'] = $bySku[$r['sku_key'] . '|' . $r['status']] ?? null;
+            }
+        }
+        unset($r);
+        return $rows;
+    }
+
+    /**
+     * يحسب سبب «بلا اقتراح» لصفوف حُفظت قبل أن يحسبه العامل، مما حُفظ فقط (cli_bridge explain_backfill: بلا بحث وبلا
+     * تكلفة، ولا يغيّر حالة أي صف ولا وقت تحديثه). الشاشة تطلبه مرة إذا قال queue-state إن صفوفاً تنقصها.
+     */
+    public function explainBackfill(): JsonResponse
+    {
+        if (!self::databaseOnline()) {
+            return response()->json(['status' => 'unavailable', 'error' => 'قاعدة البيانات غير متاحة.'], 503)
+                ->header('Cache-Control', 'no-store');
+        }
+        $result = PythonBridge::run('explain_backfill');
+        if (($result['status'] ?? '') !== 'success') {
+            return response()->json(['status' => 'failed', 'error' => 'ما قدرنا نحسب أسباب «بلا اقتراح» هلق.'], 500)
+                ->header('Cache-Control', 'no-store');
+        }
+        return response()->json([
+            'status' => 'success',
+            'filled' => (int) ($result['filled'] ?? 0),
+            'checked' => (int) ($result['checked'] ?? 0),
+        ])->header('Cache-Control', 'no-store');
     }
 
     /** عدد صفوف الطابور الجاهزة للمراجعة: نفس حساب /api/batch-status. */

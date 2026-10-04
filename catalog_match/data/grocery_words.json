@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "_doc": "Everyday English words of grocery product names, read ONLY by catalog_match.explain to spot a likely typo in a sheet product name ('CHICEKN' is one letter swap from 'chicken', 'WHTE' one missing letter from 'white') and to suggest the spelling in the review screen, the run export and the sheet data quality card. Display only: identity, scoring, queries and routing never read this file, so editing it never changes a search decision. A word here is also never reported as a typo itself. The variants lexicon, the abbreviations' expansions, data/sheet_spellings.json and data/common_words.json are read as well; list here only plain words those files lack.",
+  "words": [
+    "apple", "assorted", "baby", "bake", "baked", "baking", "banana", "barley", "basmati", "bean", "beans", "beef",
+    "beverage", "biscuit", "biscuits", "bites", "bitter", "boneless", "bottle", "bread", "breadcrumbs", "breakfast",
+    "breast", "brown", "burger", "butter", "cake", "cakes", "candy", "canned", "cappuccino", "cardamom", "carrot",
+    "carrots", "cashew", "cereal", "cheese", "cherry", "chewing", "chick", "chicken", "chickpeas", "chilled",
+    "chips", "chocolate", "chopped", "chunks", "cinnamon", "classic", "cleaner", "cocoa", "coconut", "coffee",
+    "cola", "concentrate", "condensed", "cooking", "corn", "cornflakes", "crackers", "cream", "creamy", "crisps",
+    "crispy", "croissant", "crushed", "cubes", "cucumber", "cumin", "curry", "custard", "dates", "detergent",
+    "diapers", "dish", "dough", "dressing", "dried", "drink", "drinking", "drumsticks", "dry", "eggs", "energy",
+    "evaporated", "extra", "family", "fillet", "fillets", "fish", "flakes", "flavour", "flavor", "flavoured",
+    "flavored", "flour", "french", "fresh", "fried", "fries", "frozen", "fruit", "fruits", "garlic", "ghee",
+    "ginger", "gluten", "golden", "grain", "grains", "green", "ground", "gum", "halal", "herbs", "honey", "hummus",
+    "instant", "jam", "jelly", "juice", "ketchup", "kidney", "labneh", "lamb", "lasagne", "leaves", "lemon",
+    "lentils", "light", "liquid", "loaf", "luncheon", "macaroni", "mango", "margarine", "marinated", "masala",
+    "mayonnaise", "meat", "milk", "minced", "mineral", "mint", "mix", "mixed", "mushroom", "mushrooms", "mustard",
+    "natural", "noodles", "nuggets", "nuts", "oats", "oil", "olive", "olives", "onion", "orange", "organic",
+    "original", "paneer", "paper", "paratha", "paste", "pasta", "peanut", "peas", "pepper", "pickles", "pieces",
+    "pizza", "plain", "popcorn", "potato", "potatoes", "poultry", "powder", "prawns", "premium", "rectangle",
+    "rectangular", "red", "regular", "rice", "roasted", "round", "salad", "salmon", "salt", "salted", "sandwich",
+    "sardines", "sauce", "sausage", "sausages", "seasoning", "seeds", "shampoo", "shredded", "shrimp", "skinless",
+    "sliced", "slices", "smoked", "snack", "snacks", "soap", "soda", "soft", "solid", "soup", "spaghetti",
+    "sparkling", "spices", "spicy", "spread", "spring", "square", "steak", "stew", "stock", "straight", "strawberry",
+    "stuffed", "sugar", "sunflower", "sweet", "sweetcorn", "syrup", "tahini", "tea", "thighs", "tissue", "toast",
+    "tomato", "tomatoes", "toothpaste", "tradition", "traditional", "tuna", "turkey", "vanilla", "vegetable",
+    "vegetables", "vermicelli", "vinegar", "wafer", "water", "wheat", "white", "whole", "wings", "wipes", "yeast",
+    "yogurt", "yoghurt"
+  ]
+}
