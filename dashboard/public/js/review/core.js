@@ -32,8 +32,12 @@
         brand_spelling: 'المتاجر بتكتب اسم الماركة غير الشيت (غلطة إملائية أو اختصار): تأكد إنها نفس الماركة',
         // للعرض فقط (decide.candidate_warnings): الشيت يذكر الحجم أو النوع ولم يؤكده دليل
         size_unverified: 'الحجم غير مؤكد: لم تؤكده صفحة المتجر ولا قراءة الملصق',
-        variant_unverified: 'النوع غير مؤكد: لم تؤكده صفحة المتجر ولا قراءة الملصق'
+        variant_unverified: 'النوع غير مؤكد: لم تؤكده صفحة المتجر ولا قراءة الملصق',
+        // main.DUPLICATE_WARNING: الصورة نفسها منشورة لمنتج آخر
+        duplicate_image: 'الصورة نفسها منشورة لمنتج آخر: تأكد إنها مش صورة منتج مختلف'
     };
+    // رمز تحذير لا تعرفه الصفحة بعد (حزمة أحدث في الخادم): جملة عامة، والرمز في التلميح فقط
+    const UNKNOWN_WARNING = 'تحذير آخر على هالصورة: راجعها بعناية قبل الاعتماد';
 
     const VARIANT_AXIS_LABELS = {
         fries_cut: 'طريقة التقطيع',
@@ -66,7 +70,7 @@
             // brand_spelling:<الكتابة>: الكتابة التي وجدتها المتاجر تظهر للمراجع
             return `المتاجر تكتب الماركة «${detail.trim()}» بشكل مختلف عن الشيت: تأكد أنها الماركة نفسها`;
         }
-        return REVIEW_WARNING_LABELS[name] || code;
+        return REVIEW_WARNING_LABELS[name] || UNKNOWN_WARNING;
     }
 
     // أسباب الرفض المرقّمة («ليش ترفضها؟»): رموز الهوية نفسها في cli_bridge و CurationController
@@ -191,12 +195,49 @@
         return m ? m[1].toLowerCase().replace(/^www\./, '') : '';
     }
 
+    // أقسام البلدان في مواقع المتاجر ('/en-kw/' في لولو، '/saudi-en/' في نون، '/kuwait/' في طلبات): نفس قاعدة الخادم
+    // (catalog_match.text_norm.store_market، تحذير foreign_store)، وتُفحص قبل اسم الموقع: لولو الكويت ليست الإمارات
+    const MARKET_WORDS = {
+        ae: 'الإمارات', uae: 'الإمارات',
+        sa: 'السعودية', ksa: 'السعودية', saudi: 'السعودية', kw: 'الكويت', kuwait: 'الكويت', qa: 'قطر', qatar: 'قطر',
+        om: 'عُمان', oman: 'عُمان', bh: 'البحرين', bahrain: 'البحرين', eg: 'مصر', egypt: 'مصر', jo: 'الأردن',
+        jordan: 'الأردن', in: 'الهند', india: 'الهند', pk: 'باكستان', pakistan: 'باكستان'
+    };
+    const UAE_MARKET_WORDS = ['ae', 'uae'];
+    const LOCALE_WORDS = ['en', 'ar'];
+    // نطاقات الدول (catalog_match.decide._FOREIGN_TLDS) بأسمائها
+    const MARKET_TLDS = { ae: 'الإمارات', sa: 'السعودية', kw: 'الكويت', qa: 'قطر', om: 'عُمان', bh: 'البحرين', eg: 'مصر',
+                          jo: 'الأردن', in: 'الهند', pk: 'باكستان' };
+
+    function pathOf(url) {
+        const m = /^[a-z][a-z0-9+.-]*:\/\/[^/?#]*([^?#]*)/i.exec(String(url || ''));
+        return m ? m[1] : '';
+    }
+
+    // 'foreign' أو 'uae' أو '' من أول قسمين في مسار الصفحة، بالضبط كما يقرؤهما الخادم (store_market)، مع اسم البلد
+    function storeMarket(url) {
+        const segs = pathOf(url).toLowerCase().split('/').filter(Boolean).slice(0, 2);
+        for (const seg of segs) {
+            const parts = seg.split(/[-_]/).filter(Boolean);
+            if (!parts.length || parts.length > 2 || !parts.every(p => MARKET_WORDS[p] || LOCALE_WORDS.includes(p))) {
+                return { market: '', name: '' };       // اسم منتج في الرابط، لا قسم بلد
+            }
+            const foreign = parts.find(p => MARKET_WORDS[p] && !UAE_MARKET_WORDS.includes(p));
+            if (foreign) return { market: 'foreign', name: MARKET_WORDS[foreign] };
+            if (parts.some(p => UAE_MARKET_WORDS.includes(p))) return { market: 'uae', name: 'الإمارات' };
+        }
+        return { market: '', name: '' };
+    }
+
     function marketOf(url) {
         const u = String(url || '').toLowerCase();
         if (!u) return '';
-        if (/saudi|\/ksa[/-]|\.sa(\/|$)|-sa\/|\/sa-|\/en-sa|\/ar-sa/.test(u)) return 'السعودية';
-        if (/\/uae[/-]|uae\.|\.ae(\/|$)|-ae\/|\/ae-|\/en-ae|\/ar-ae|carrefouruae|luluhypermarket/.test(u)) return 'الإمارات';
-        return '';
+        const section = storeMarket(u);
+        if (section.name) return section.name;
+        const host = hostOf(u);
+        if (/(^|\.)uae\.|carrefouruae|luluhypermarket/.test(host)) return 'الإمارات';
+        const tld = host.split('.').pop();
+        return MARKET_TLDS[tld] || '';
     }
 
     function storeOf(c) {
@@ -273,14 +314,64 @@
         });
     }
 
-    // صف محفوظ قبل أن يحسب الخادم «الحجم غير مؤكد» (decide.unverified_warnings): القاعدة نفسها من الأدلة المحفوظة.
-    // الشيت فيه حجم، وصفحة المتجر لم تطابقه، ولا باركود مطابق، ولا قراءة ملصق تقول «نعم». تضيف تحذيراً ولا تزيل شيئاً
-    function withDerivedWarnings(c, prod) {
+    // الأرقام الهندية والفارسية ('١ لتر') أرقاماً لاتينية
+    function digits(s) {
+        return String(s || '').replace(/[٠-٩]/g, d => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)))
+            .replace(/[۰-۹]/g, d => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d)));
+    }
+
+    // حجم في نص الشيت (خلية الحجم أو الاسم): رقم ثم وحدة (catalog_match.sizes يقرأ الصيغ نفسها وأكثر)
+    const SIZE_IN_TEXT = /(\d+(?:[.,]\d+)?)\s*(ml|mls|cl|l|lt|ltr|ltrs|litre|litres|liter|liters|g|gm|gms|gr|grm|gram|grams|kg|kgs|kilo|oz|lb|lbs|مل|ملل|مليلتر|لتر|ل|غ|غم|غرام|جم|جرام|كغ|كجم|كيلو)(?![a-z\u0600-\u06ff])/i;
+    // عدد العبوات: '6x330ml'، '6 × 330 مل'، 'pack of 6'، '6 pack'
+    const PACK_IN_TEXT = [/(\d+)\s*[x×*]\s*\d/i, /pack\s+of\s+(\d+)/i, /(\d+)\s*-?\s*(?:pack|pk|pcs)\b/i];
+
+    // ما يذكره صف الشيت كما قرأه الخادم (cli_bridge.get_products: sheet_states من catalog_match.identity)، وإلا يُقرأ
+    // هنا من خلية الحجم والاسم (بلا محاور النوع: معجمها في الخادم وحده)
+    function sheetStates(prod) {
+        prod = prod || {};
+        const st = prod.sheet_states;
+        if (st && typeof st === 'object' && !Array.isArray(st)) {
+            return { size: !!st.size, pack: parseInt(st.pack, 10) || 1,
+                     variants: Array.isArray(st.variants) ? st.variants.map(v => String(v)) : [] };
+        }
+        const text = digits([prod.size, prod.product_name, prod.product_name_ar].filter(Boolean).join(' '));
+        let pack = 1;
+        PACK_IN_TEXT.some(re => {
+            const m = re.exec(text);
+            if (m && parseInt(m[1], 10) > 1) pack = parseInt(m[1], 10);
+            return pack > 1;
+        });
+        return { size: SIZE_IN_TEXT.test(text) || /\d/.test(digits(prod.size)), pack: pack, variants: [] };
+    }
+
+    // «الحجم / النوع غير مؤكد» بقاعدة الخادم (catalog_match.decide.unverified_warnings) من الأدلة المحفوظة: الشيت يذكر
+    // حجماً (أو عدد عبوات) / نوعاً، ولم تؤكده صفحة المتجر ولا قراءة الملصق («نعم»)، ولا باركود الشيت على الصفحة.
+    // صف بلا دليل محفوظ (evidence فارغة) غير مؤكد
+    function unverifiedWarnings(c, prod) {
         const ev = c.evidence || {};
-        if (c.warnings.includes('size_unverified') || !['preselected', 'eligible'].includes(c.status)) return c;
-        if (!/\d/.test(String((prod && prod.size) || '')) || !['unknown', 'ambiguous'].includes(ev.size)) return c;
-        if (ev.gtin === 'match' || (c.vlm && c.vlm.size_match === 'yes')) return c;
-        c.warnings = c.warnings.concat(['size_unverified']);
+        const vlm = c.vlm || {};
+        if (ev.gtin === 'match') return [];
+        const st = sheetStates(prod);
+        const out = [];
+        const sizeOk = ev.size === 'match' || ev.size === true || vlm.size_match === 'yes';
+        const packOk = ev.pack === 'match' || (vlm.pack_count !== undefined && vlm.pack_count !== null
+                                               && parseInt(vlm.pack_count, 10) === st.pack);
+        if ((st.size && !sizeOk) || (st.pack > 1 && !packOk)) out.push('size_unverified');
+        if (st.variants.length) {
+            const matched = (Array.isArray(ev.variants_matched) ? ev.variants_matched : Array.isArray(ev.variants) ? ev.variants : [])
+                .map(a => String(a));
+            if (!st.variants.every(a => matched.includes(a)) && vlm.variant_match !== 'yes') out.push('variant_unverified');
+        }
+        return out;
+    }
+
+    // صف محفوظ قبل أن يحسب الخادم هذين التحذيرين: يُشتقان هنا. تضيف تحذيراً ولا تزيل شيئاً
+    function withDerivedWarnings(c, prod) {
+        if (!['preselected', 'eligible'].includes(c.status)) return c;
+        // صورة اعتمدها مراجع لهذا المنتج سابقاً (الكاش): هويتها مؤكدة بذلك الاعتماد
+        if (c.reasons.includes('cache_hit') || (c.evidence && c.evidence.source === 'cache')) return c;
+        const add = unverifiedWarnings(c, prod).filter(w => !c.warnings.includes(w));
+        if (add.length) c.warnings = c.warnings.concat(add);
         return c;
     }
 
@@ -348,7 +439,8 @@
     // «لماذا هذه الصورة؟»: سطور قصيرة من الأدلة التي حسبها المحرك فعلاً (facade.evidence وقراءة الملصق)، بلا تخمين.
     // لا يُقال شيء إذا لم يوجد دليل
     function explainPick(c) {
-        if (!c) return [];
+        // صورة استبعدها النظام أو رفضها مراجع: لا «لماذا هذه الصورة»
+        if (!c || c.status === 'rejected' || c.status === 'excluded') return [];
         const ev = c.evidence || {};
         const vlm = c.vlm || {};
         const out = [];
@@ -572,16 +664,27 @@
         return bgFailedLink(prod);
     }
 
-    // ما رأته الصفحة عن المنتج عند الاعتماد (عقد C1: expected_state): حالة صف الطابور ووقت تحديثه والصورة المعتمدة.
-    // الخادم يرفض الاعتماد إذا تغيّر شيء منها (already_approved / state_changed) إلا بعد تأكيد صريح (replace)
+    // ما تعرضه الصفحة عن المنتج (عقد C1: expected_state): حالة صف الطابور ووقت تحديثه ورقمه (queue_row: صف الطابور
+    // الذي طابقته الصفحة، وقد يكون صفاً مزاحاً عُرف بـ sku_key) والصورة المعتمدة. الخادم يرفض الاعتماد إذا تغيّر شيء
+    // منها (already_approved / state_changed). app.js يأخذ لقطة منها عند فتح المنتج ولا يحدّثها من القراءات الهادئة
     function expectedState(item, approvedLink) {
         const q = item && item.queue;
         const url = String(approvedLink || shownApprovedUrl(item && item.product) || '').trim();
+        const row = q ? parseInt(q.row_number, 10) : NaN;
         return {
             queue_status: q && q.status ? String(q.status) : null,
             queue_updated_at: q && q.updated_at ? String(q.updated_at) : null,
-            approved_url: url || null
+            approved_url: url || null,
+            queue_row: isFinite(row) && row > 0 ? row : null
         };
+    }
+
+    // هل تغيّر ما تعرضه الصفحة عن المنتج بين لقطتين (صف الطابور أو الصورة المعتمدة)؟
+    function sameExpected(a, b) {
+        a = a || {};
+        b = b || {};
+        return ['queue_status', 'queue_updated_at', 'approved_url', 'queue_row']
+            .every(k => (a[k] === undefined || a[k] === null ? null : String(a[k])) === (b[k] === undefined || b[k] === null ? null : String(b[k])));
     }
 
     const STALE_CODES = ['already_approved', 'state_changed'];
@@ -607,7 +710,9 @@
                      replaceable: false, text: 'هذه الصورة رفضها مراجع آخر لهذا المنتج بعد فتح الصفحة؛ اختر صورة أخرى.' };
         }
         const exp = expected || {};
-        const parts = [code === 'already_approved' ? 'اعتُمدت لهذا المنتج صورة بعد فتح الصفحة' : 'تغيّرت حالة المنتج بعد فتح الصفحة'];
+        const who = String(cur.approved_for || '').trim();
+        const parts = [code === 'already_approved' ? `اعتُمدت لهذا المنتج${who ? ` («${who}»)` : ''} صورة بعد فتح الصفحة`
+            : 'تغيّرت حالة المنتج بعد فتح الصفحة'];
         const curUrl = String(cur.approved_url || '').trim();
         const expUrl = String(exp.approved_url || '').trim();
         if (curUrl && curUrl !== expUrl) parts.push(expUrl ? 'الصورة المعتمدة الآن غير التي ظهرت لك' : 'صار له صورة معتمدة');
@@ -635,10 +740,12 @@
     // ما يعرفه الخادم بعد الاعتماد (current في كل استجابة): يصير ما «رأته الصفحة» للاعتماد التالي لنفس المنتج
     function expectedFromCurrent(cur) {
         cur = cur && typeof cur === 'object' ? cur : {};
+        const row = parseInt(cur.queue_row, 10);
         return {
             queue_status: cur.queue_status ? String(cur.queue_status) : null,
             queue_updated_at: cur.queue_updated_at ? String(cur.queue_updated_at) : null,
-            approved_url: cur.approved_url ? String(cur.approved_url) : null
+            approved_url: cur.approved_url ? String(cur.approved_url) : null,
+            queue_row: isFinite(row) && row > 0 ? row : null
         };
     }
 
@@ -652,6 +759,15 @@
         upscaled: 'الصورة المصدر صغيرة فكُبّرت',
         too_small_on_canvas: 'المنتج صغير على اللوحة',
         kept_shadow: 'بقي ظل ظاهر مع المنتج'
+    };
+    // علامات تخص شكل الصورة المنشورة فقط والخلفية معزولة (main.PRESENTATION_FLAGS): ما تعنيه لمن ينشرها رغمها.
+    // opaque_fill و opaque_backdrop و edge_clipped ليست منها: الخلفية لم تُعزل، ولا تُنشر «رغم ذلك» أبداً
+    const PRESENTATION_FLAG_TEXT = {
+        upscaled: 'الصورة المصدر صغيرة فكُبّرت، وقد تظهر أقل حدة',
+        too_small_on_canvas: 'المنتج سيظهر صغيراً على اللوحة البيضاء',
+        second_object: 'جسم آخر بجانب المنتج سيُنشر معه',
+        alpha_haze: 'هالة أو ضباب خفيف حول حواف المنتج سيظهر في الصورة',
+        kept_shadow: 'ظل المنتج سيبقى ظاهراً في الصورة'
     };
     // ملاحظات الفحص غير المانعة (quality_notes): تُعرض ملاحظةً لا تحذيراً، والصورة نُشرت نظيفة
     const QUALITY_NOTE_LABELS = {
@@ -674,12 +790,17 @@
         if (code !== 'quality_flags' && code !== 'background_failed') return null;
         const flags = Array.isArray(data.quality_flags) ? data.quality_flags.map(f => String(f)) : [];
         const texts = Array.from(new Set(flags.map(qualityFlagText)));
-        const allowed = code === 'quality_flags' && data.publish_anyway_allowed === true;
+        // «انشرها رغم ذلك» فقط لعلامات العرض: علامة لا تعرفها الصفحة أو تخص الخلفية لا تُعرض للنشر
+        const allowed = code === 'quality_flags' && data.publish_anyway_allowed === true && flags.length > 0
+            && flags.every(f => Object.prototype.hasOwnProperty.call(PRESENTATION_FLAG_TEXT, f));
+        const anywayTexts = allowed ? Array.from(new Set(flags.map(f => PRESENTATION_FLAG_TEXT[f]))) : [];
         const what = texts.length ? texts.join('، ') : 'لم تُعزل الخلفية';
         const text = allowed
             ? `فحص القص وجد في الصورة: ${what}. لم تُنشر بعد.`
-            : `لم تُعزل خلفية الصورة (${what}). لم تُنشر؛ اختر صورة أخرى أو ارفع صورة أوضح.`;
-        return { code: code, flags: flags, texts: texts, allowed: allowed, text: text };
+            : code === 'quality_flags'
+                ? `فحص القص وجد في الصورة: ${what}. لم تُنشر؛ اختر صورة أخرى أو ارفع صورة أوضح.`
+                : `لم تُعزل خلفية الصورة (${what}). لم تُنشر؛ اختر صورة أخرى أو ارفع صورة أوضح.`;
+        return { code: code, flags: flags, texts: texts, anywayTexts: anywayTexts, allowed: allowed, text: text };
     }
 
     // ما يُقال للمراجع بعد اعتماد ناجح: الخلفية (background_not_removed)، الصورة نفسها لمنتج آخر (duplicate_image و
@@ -851,11 +972,6 @@
         return c;
     }
 
-    function digits(s) {
-        return String(s || '').replace(/[٠-٩]/g, d => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)))
-            .replace(/[۰-۹]/g, d => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d)));
-    }
-
     // بحث القائمة: الاسم (إنجليزي أو عربي) أو البراند أو الباركود أو رقم الصف
     function matchesQuery(item, query) {
         const q = norm(digits(query));
@@ -992,11 +1108,12 @@
     Object.assign(R, {
         REVIEW_WARNING_LABELS, VARIANT_AXIS_LABELS, REJECT_REASONS, COSMETIC_REASONS, FAILURE_TEXT, NOT_FOUND_CODES,
         VIEW_LABELS, BUCKET_LABELS, FILTERS, WAITING, PRODUCT_CHANGED, STALE_CODES,
-        warningText, reasonLabel, rejectReasonsFor, failureInfo, plainError, hostOf, marketOf, storeOf,
+        warningText, reasonLabel, rejectReasonsFor, failureInfo, plainError, hostOf, marketOf, storeMarket, storeOf,
+        sheetStates, unverifiedWarnings, PRESENTATION_FLAG_TEXT,
         normalizeCandidate, collectCandidates, storedCandidates, storedSelected, bulkEligible, candidateNote, explainPick,
         productIdentity, sameProduct, itemKey, failureKey, reviewedCandidateView,
         searchBody, selectBody, rejectBody, uploadFields,
-        matchQueue, classify, hasFinalImage, bgFailedLink, shownApprovedUrl, expectedState, staleInfo, queueText,
+        matchQueue, classify, hasFinalImage, bgFailedLink, shownApprovedUrl, expectedState, sameExpected, staleInfo, queueText,
         sheetNote, expectedFromCurrent, qualityFlagText, qualityNoteText, qualityInfo, approvalNotes, rejectionOutcome,
         confidenceRank, compareWaiting, sortWaiting, buildItems, countBuckets, matchesQuery, filterItems,
         sizeText, categoryPath, factsFor, checksFor, cautionsFor

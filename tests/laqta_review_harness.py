@@ -4,6 +4,11 @@ The scripts run unchanged under node against a small DOM (elements, attributes, 
 simple selectors, focus) with a scripted fetch: each request is recorded, the page's data calls answer at once from
 FIXTURE, and search / approve / reject / upload wait until the test answers them. Used by
 tests/test_catalog_review_race.py (the review safety rules) and tests/test_laqta_review.py.
+
+Pictures: an <img> fires `load` as soon as it is attached to the document (a cached picture), or `error` when its src
+is in `imageFails`; with `imageMode = 'hold'` it fires nothing until the test calls `releaseImages()`. An
+IntersectionObserver reports every observed node as visible (`ioVisible(node)` decides; `ioRefresh()` reports again).
+The page boots with approveSettleMs 0 unless the test asks for the real delay.
 """
 
 import json
@@ -112,6 +117,7 @@ class ShimElement {
         if (n.parentNode) n.parentNode.removeChild(n);
         n.parentNode = this;
         this.childNodes.push(n);
+        fireImages(n);
         return n;
     }
     insertBefore(n, ref) {
@@ -119,6 +125,7 @@ class ShimElement {
         if (n.parentNode) n.parentNode.removeChild(n);
         n.parentNode = this;
         this.childNodes.splice(this.childNodes.indexOf(ref), 0, n);
+        fireImages(n);
         return n;
     }
     removeChild(n) {
@@ -168,6 +175,30 @@ class ShimElement {
         return this._descendants().filter(n => groups.some(chain => matchesChain(n, chain, this)));
     }
     querySelector(selector) { return this.querySelectorAll(selector)[0] || null; }
+}
+
+// Pictures attached to the document load at once (or fail when their src is in imageFails); 'hold' keeps them waiting
+let imageMode = 'auto';
+const imageFails = new Set();
+const heldImages = [];
+function fireImage(img) {
+    if (img._imgFired || !img.attrs.src) return;
+    img._imgFired = true;
+    if (imageMode === 'hold') { heldImages.push(img); return; }
+    const src = img.attrs.src;
+    const failed = [...imageFails].some(f => src === f || src.includes(encodeURIComponent(f)) || src.includes(f));
+    dispatch(img, { type: failed ? 'error' : 'load', bubbles: false });
+}
+function fireImages(n) {
+    if (!n || n.nodeType !== 1 || !n.isConnected) return;
+    const imgs = (n.tagName === 'IMG' ? [n] : []).concat(n._descendants().filter(c => c.tagName === 'IMG'));
+    imgs.forEach(fireImage);
+}
+function releaseImages() {
+    const mode = imageMode;
+    imageMode = 'auto';
+    heldImages.splice(0).forEach(img => { img._imgFired = false; fireImage(img); });
+    imageMode = mode;
 }
 
 function parseSelector(selector) {
@@ -267,6 +298,21 @@ globalThis.Laqta = {
 };
 globalThis.LAQTA_REVIEW_MANUAL_BOOT = true;
 
+// IntersectionObserver: every observed node is reported (asynchronously) as visible unless ioVisible says otherwise
+const ioObservers = [];
+let ioVisible = () => true;
+class ShimIntersectionObserver {
+    constructor(callback) { this.callback = callback; this.nodes = []; ioObservers.push(this); }
+    observe(node) {
+        this.nodes.push(node);
+        setImmediate(() => { if (this.nodes.includes(node)) this.callback([{ target: node, isIntersecting: !!ioVisible(node) }], this); });
+    }
+    unobserve(node) { this.nodes = this.nodes.filter(n => n !== node); }
+    disconnect() { this.nodes = []; const i = ioObservers.indexOf(this); if (i >= 0) ioObservers.splice(i, 1); }
+}
+globalThis.IntersectionObserver = ShimIntersectionObserver;
+const ioRefresh = () => ioObservers.slice().forEach(o => o.callback(o.nodes.map(n => ({ target: n, isIntersecting: !!ioVisible(n) })), o));
+
 // fetch: every request is recorded; the page's data calls answer at once from FIXTURE, search / select / reject /
 // upload wait until the test answers them (answer(call, data, status)).
 const FIXTURE = __FIXTURE__;
@@ -320,7 +366,7 @@ async function boot(config) {
     const root = document.createElement('div');
     root.setAttribute('id', 'rvApp');
     root.setAttribute('data-config', JSON.stringify(Object.assign({ mode: 'single', filter: 'all', canvas: 800, db: 'online',
-                                                                     autoSearchDelayMs: 0 }, config || {})));
+                                                                     autoSearchDelayMs: 0, approveSettleMs: 0 }, config || {})));
     document.body.appendChild(root);
     R.boot();
     await flush();

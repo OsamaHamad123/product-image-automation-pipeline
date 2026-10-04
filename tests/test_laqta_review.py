@@ -83,14 +83,15 @@ P1 = product(19, "AL ALALI FANCY TUNA WATER 170GM", curation_candidates=[
                                "variant_match": "yes", "view": "front_packshot", "size_text": "170g"}),
     cand("https://www.noon.com/p19b.jpg", reasons=["vlm:UNSURE"])], needs_review=True, preselected=True)
 P2 = product(20, "ALALALI FANCY TUNA S/F OIL 85GM", curation_candidates=[
-    cand("https://www.luluhypermarket.com/p20.jpg", "preselected", 1, reasons=["vlm:MATCH"])], needs_review=True, preselected=True)
+    cand("https://www.luluhypermarket.com/p20.jpg", "preselected", 1, reasons=["vlm:MATCH"], evidence={"size": "match"})],
+    needs_review=True, preselected=True)
 W = product(21, "ALALALI FANCY TUNA WATER 85GM", curation_candidates=[
     cand("https://www.carrefouruae.com/p21.jpg", "preselected", 1, reasons=["vlm:UNSURE", "warn:vlm_unsure"],
          vlm={"decision": "UNSURE", "size_match": "unsure"})], needs_review=True, preselected=True)
 N = product(22, "ALALALI WHITE TUNA S/F OIL 85GM", curation_candidates=[
     cand("https://www.amazon.ae/p22.jpg", "rejected", 0, reasons=["vlm:MISMATCH"])], needs_review=True)
 OWN = product(23, "ALALALI WHITE TUNA WATER 170GM", brand="Other Brand", curation_candidates=[
-    cand("https://www.talabat.com/p23.jpg", "eligible", 1)], needs_review=True)
+    cand("https://www.talabat.com/p23.jpg", "eligible", 1, evidence={"size": "match"})], needs_review=True)
 NF = product(30, "Healthy Farms Fresh Eggs 30 pcs", brand="Healthy Farms", has_error=True,
              error_message="NO_RESULTS: No acceptable image found (NO_RESULTS)")
 FAIL = product(31, "Broken Juice 1L", brand="Juicy", barcode="6291003000017", has_error=True,
@@ -479,7 +480,9 @@ out.overlays = document.querySelectorAll('.rv-card__overlay').map(o => o.textCon
 out.jobs = jobsText();
 """, tmp_path, fixture(products=READY, rows=queue_rows()))
     assert "ليش ترفضها؟" in out["dialog"]
-    assert "رح نرفض الصورة المقترحة لـ 2 منتجات" in out["dialog"] and "بترجع للطابور" in out["dialog"]
+    assert "رح نرفض الصورة المقترحة لـ 2 منتجات" in out["dialog"]
+    # C2: back to the queue only when no image is left; otherwise still waiting for review with the remaining ones
+    assert "بيضل بانتظار مراجعتك فيها" in out["dialog"] and "ما ضل إله صور بيرجع للطابور" in out["dialog"]
     assert "الصور المعتمدة قبل ما بتنلمس" in out["dialog"]
     assert out["confirm_disabled"] is True and out["confirm_enabled"] is True
     assert out["first"] == [["19", "WRONG_SIZE", False, "key-19", "https://www.luluhypermarket.com/p19.jpg"]]
@@ -776,7 +779,7 @@ out.searched = [productName(), pos(), R.visibleItems().map(it => it.product.row_
 def test_bulk_approval_takes_only_cards_the_reviewer_can_see(tmp_path):
     """With more waiting products than one page of cards, the hidden ones were selected and published too."""
     many = [product(100 + i, f"TUNA CHUNKS {i} 85GM", curation_candidates=[
-        cand(f"https://www.luluhypermarket.com/t{i}.jpg", "preselected", 1, reasons=["vlm:MATCH"])],
+        cand(f"https://www.luluhypermarket.com/t{i}.jpg", "preselected", 1, reasons=["vlm:MATCH"], evidence={"size": "match"})],
         needs_review=True, preselected=True) for i in range(52)]
     out = page(r"""
 R.setMode('bulk');

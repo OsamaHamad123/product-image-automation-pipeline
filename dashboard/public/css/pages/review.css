@@ -1704,6 +1704,20 @@
     border-color: var(--lq-border);
 }
 
+/* a reload changed the product after its card was shown: not approvable until it is shown again */
+.rv-card__moved {
+    flex-wrap: wrap;
+}
+
+.rv-card__reopen {
+    font-size: 12px;
+}
+
+/* single mode: the same banner's button */
+.rv-reopen {
+    margin-inline-start: var(--lq-space-2);
+}
+
 /* Bulk reject dialog */
 .rv-dialog-backdrop {
     position: fixed;
@@ -1780,6 +1794,44 @@
     display: flex;
     flex-wrap: wrap;
     gap: 10px;
+}
+
+/* the replace confirmation: the image approved now next to the reviewer's pick */
+.rv-dialog__images {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--lq-space-3);
+}
+
+.rv-dialog__figure {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin: 0;
+}
+
+.rv-dialog__img {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    aspect-ratio: 1 / 1;
+    overflow: hidden;
+    border: 1px solid var(--lq-border);
+    border-radius: var(--lq-radius-md);
+    background: var(--lq-surface-2);
+}
+
+.rv-dialog__img img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+}
+
+.rv-dialog__cap {
+    color: var(--lq-text-2);
+    font-size: 12px;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
 }
 
 /* ==========================================================================
