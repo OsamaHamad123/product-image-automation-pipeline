@@ -36,7 +36,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional
 
 from .. import settings
 from ..models import FetchedImage, SkuSpec, VerificationResult, VlmImageVerdict
-from ..verify import LONG_SIDE, MATCH, MAX_IMAGES, MISMATCH, UNKNOWN, UNSURE, GeminiVerifier
+from ..verify import LONG_SIDE, MATCH, MAX_IMAGES, MISMATCH, UNKNOWN, UNSURE, GeminiVerifier, multipack_unit_image
 from . import pricing
 from .registry import ModelRef, is_off, parse_model_id
 from .spend import MariaDbSpendStore, MemorySpendStore
@@ -76,10 +76,12 @@ def merge_verdict(primary: Optional[VlmImageVerdict], strong: Optional[VlmImageV
 
 
 def needs_second_look(spec: SkuSpec, verdict: Optional[VlmImageVerdict]) -> bool:
-    """UNSURE / UNKNOWN, or a reading without a size while the SKU states one (never a MISMATCH)."""
+    """UNSURE / UNKNOWN, or a reading without a size while the SKU states one (never a MISMATCH, and never one
+    unit of a multipack SKU read as such: verify.multipack_unit_image, a MISMATCH before it was UNSURE; a
+    second look cannot make one can the 3-can pack)."""
     if verdict is None:
         return True
-    if verdict.decision == MISMATCH:
+    if verdict.decision == MISMATCH or multipack_unit_image(spec, verdict):
         return False
     if verdict.decision in SECOND_LOOK:
         return True

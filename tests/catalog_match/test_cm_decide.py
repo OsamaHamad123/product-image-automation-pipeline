@@ -348,9 +348,11 @@ def test_match_with_a_failed_second_call_is_preselected_but_never_auto(monkeypat
 
 
 def test_another_brand_on_a_tier1_image_turns_the_tier1_fallback_off():
-    # The listing text named the brand, the label shows another one: tier 1 is not evidence here.
+    # The listing text named the brand, the label shows another one: tier 1 is not evidence here, and the
+    # fallback's own label does not read the brand either.
     other_brand = rc(t1(1), verdict("MISMATCH"))                  # brand_match 'no'
-    unsure = rc(t1(2), verdict("UNSURE"))
+    unsure = rc(t1(2), VlmImageVerdict(index=0, brand_text="", variant_text="Full Fat", size_text="1 L",
+                                       view="front_packshot", brand_match="unsure", decision="UNSURE"))
     out = decide.route(SPEC, ranked(other_brand, unsure), OK, HEALTHY, set())
     assert out.decision == "REVIEW_UNSELECTED" and out.winner is None
     assert "vlm:tier1_brand_refuted" in unsure.reasons
@@ -358,6 +360,17 @@ def test_another_brand_on_a_tier1_image_turns_the_tier1_fallback_off():
     # route() is idempotent: the reason is not duplicated on a second pass.
     decide.route(SPEC, out.ranked, OK, HEALTHY, set())
     assert unsure.reasons.count("vlm:tier1_brand_refuted") == 1
+
+
+def test_a_tier1_fallback_whose_own_label_reads_the_brand_is_still_preselected():
+    other_brand = rc(t1(1), verdict("MISMATCH"))
+    unread = rc(t1(2), VlmImageVerdict(index=0, brand_text="", view="front_packshot", brand_match="unsure",
+                                       decision="UNSURE"))
+    own = rc(t1(3), verdict("UNSURE"))                             # brand_match 'yes', 'Almarai' printed
+    out = decide.route(SPEC, ranked(other_brand, unread, own), OK, HEALTHY, set())
+    assert out.decision == "REVIEW_PRESELECTED" and out.winner is own
+    assert "preselected:tier1_unsure" in own.reasons and unread.status == "eligible"
+    assert "vlm:tier1_brand_refuted" not in out.reject_counts
 
 
 def test_a_verified_match_still_wins_when_another_tier1_shows_another_brand():

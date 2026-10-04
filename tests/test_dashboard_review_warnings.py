@@ -83,7 +83,7 @@ def test_the_pick_cards_show_the_notice():
 def test_warning_sentences(path, tmp_path):
     codes = ["sheet_silent:fries_cut=thin", "sheet_silent:cheese_form=grated+shredded", "sheet_silent:new_axis=x",
              "vlm_unsure", "low_resolution", "chat_or_screenshot", "social_media", "foreign_store", "barcode_conflict",
-             "mystery_code", "duplicate_image"]
+             "mystery_code", "duplicate_image", "multipack_unit_image"]
     script = tmp_path / "labels.js"
     call = f"\nconsole.log(JSON.stringify({json.dumps(codes)}.map(warningText)));\n"
     script.write_text(label_code(read(path)) + call, encoding="utf-8")
@@ -102,6 +102,8 @@ def test_warning_sentences(path, tmp_path):
     # a code the page does not know yet gets a generic Arabic sentence; the raw code stays in the tooltip only
     assert out["mystery_code"] == "تحذير آخر على هالصورة: راجعها بعناية قبل الاعتماد"
     assert out["duplicate_image"].startswith("الصورة نفسها منشورة لمنتج آخر")
+    # decide: one unit of a multipack SKU (one can of a 3-can pack)
+    assert out["multipack_unit_image"] == "الصورة لعبوة وحدة، والمنتج باكيت من أكثر من حبة: تأكد إنها مناسبة"
 
 
 def test_catalog_page_sends_the_reviewers_view_with_approve_reject_and_upload():

@@ -181,7 +181,7 @@ def test_paratha_listing_in_the_same_words_is_tier1_and_a_bundle_is_not():
     ("Tortilla Wraps 320G 8S", 320.0, None, 8),
     ("SAMOSA 500G 20S", 500.0, None, 20),
     ("INDOMIE NOODLES 75G 5S", 75.0, 5, None),            # not a food sold by the piece: still a pack
-    ("MEHRAN PLAIN PARATHA 2X400GM 5S", 400.0, 2, None),  # an explicit 2x pack keeps its pack count
+    ("MEHRAN PLAIN PARATHA 2X400GM 5S", 400.0, 2, 5),     # an explicit 2x pack keeps its pack count, 5 pieces in each
 ])
 def test_n_s_after_the_mass_of_a_food_sold_by_the_piece_counts_pieces(text, value, pack, pieces):
     (size,) = parse_sizes(text, "name")
