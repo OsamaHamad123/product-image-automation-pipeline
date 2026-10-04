@@ -163,7 +163,8 @@ class HealthController extends Controller
      */
     public function nightlyLog(Request $request)
     {
-        [$code, $body] = self::nightlyPayload(base_path('../temp/nightly'), (string) $request->query('date', ''),
+        // القيمة كما وصلت: ?date[]=x مصفوفة، وتحويلها إلى نص كان خطأ 500 بدل 400
+        [$code, $body] = self::nightlyPayload(base_path('../temp/nightly'), $request->query('date', ''),
             SettingsController::secretValues());
         return response()->json($body, $code, [], JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE)
             ->header('Cache-Control', 'no-store');
@@ -355,12 +356,18 @@ class HealthController extends Controller
     }
 
     /**
-     * [HTTP code, body] لسجل ليلة واحدة: $date فارغ = أحدث ليلة. أي تاريخ بغير صيغة YYYY-MM-DD يُرفض (400)،
+     * [HTTP code, body] لسجل ليلة واحدة: $date فارغ = أحدث ليلة. أي تاريخ ليس نصاً بصيغة YYYY-MM-DD (ومنه ?date[]=x) يُرفض (400)،
      * والملف المقروء يجب أن يبقى داخل $dir بعد حل الروابط (لا path traversal). لا سجل بعد: exists=false (200).
      * يضيف dates (الليالي المتاحة) و date (الليلة المعروضة).
      */
-    public static function nightlyPayload(string $dir, string $date, array $secrets = []): array
+    public static function nightlyPayload(string $dir, $date, array $secrets = []): array
     {
+        if ($date === null) {
+            $date = '';
+        }
+        if (!is_string($date)) {
+            return [400, ['status' => 'error', 'kind' => 'nightly', 'error' => 'تاريخ السجل غير صالح.']];
+        }
         $date = trim($date);
         $dates = self::nightlyDates($dir);
         if ($date !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {

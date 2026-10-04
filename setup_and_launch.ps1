@@ -358,13 +358,22 @@ if (Test-Path $dashboardEnv) {
 Write-Host ""
 Write-Host "[6/6] جاري تشغيل النظام وفتح لوحة التحكم..." -ForegroundColor Cyan
 
-# إيقاف خوادم هذا المشغل السابقة فقط لمنع التضارب: خادم لوحة التحكم (PHP على المنفذ 8000) وعامل مزامنة الشيت.
-# لا نوقف أي بايثون آخر أبداً: عامل الأتمتة (main.py) أو التشغيل الليلي (run_nightly.py) قد يعمل الآن ويحمل القفل.
+# إيقاف خوادم هذا المشغل السابقة فقط لمنع التضارب: خادم لوحة التحكم (لهذا المشروع أو على المنفذ 8000) وعامل
+# مزامنة الشيت لهذا المشروع. لا نوقف أي بايثون آخر أبداً: عامل الأتمتة (main.py) أو التشغيل الليلي (run_nightly.py)
+# قد يعمل الآن ويحمل القفل، ولا خادماً أو عامل مزامنة لمشروع آخر على الجهاز.
 Write-Host "⏳ جاري إغلاق خوادم لوحة التحكم السابقة (عامل الأتمتة والتشغيل الليلي لا يُوقفان)..." -ForegroundColor Yellow
+$repoPath = (Resolve-Path $PSScriptRoot).Path
 Get-CimInstance Win32_Process -Filter "Name = 'php.exe' OR Name = 'python.exe' OR Name = 'pythonw.exe'" -ErrorAction SilentlyContinue |
     Where-Object {
         $cmd = [string]$_.CommandLine
-        ($cmd -like '*dashboard/server.php*' -or $cmd -like '*dashboard\server.php*' -or $cmd -like '*artisan serve*' -or $cmd -like '*sync_worker.py*') -and
+        $exe = [string]$_.ExecutablePath
+        # من هذا المشروع: سطر الأوامر أو البرنامج (بايثون .venv أو php المحلي) داخل مجلده
+        $ours = ($cmd.IndexOf($repoPath, [StringComparison]::OrdinalIgnoreCase) -ge 0) -or ($exe.IndexOf($repoPath, [StringComparison]::OrdinalIgnoreCase) -ge 0)
+        # خادم لوحة التحكم: لهذا المشروع، أو على المنفذ 8000 الذي سيأخذه الخادم الجديد
+        $server = ($cmd -like '*artisan serve*' -or $cmd -like '*dashboard/server.php*' -or $cmd -like '*dashboard\server.php*') -and ($ours -or $cmd -like '*:8000*' -or $cmd -like '*--port=8000*')
+        # عامل مزامنة الشيت لهذا المشروع فقط
+        $sync = ($cmd -like '*sync_worker.py*') -and $ours
+        ($server -or $sync) -and
         $cmd -notlike '*main.py*' -and $cmd -notlike '*run_nightly.py*'
     } |
     ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }

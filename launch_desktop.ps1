@@ -15,12 +15,21 @@ if ($consolePtr -ne [IntPtr]::Zero) {
 $env:PYTHONUTF8 = "1"
 $env:PYTHONIOENCODING = "utf-8"
 
-# 1. إيقاف خوادم هذا المشغل القديمة فقط لتجنب تضارب المنافذ (خادم لوحة التحكم وعامل مزامنة الشيت).
-# لا نوقف أي بايثون آخر أبداً: عامل الأتمتة (main.py) أو التشغيل الليلي (run_nightly.py) قد يعمل الآن ويحمل القفل.
+# 1. إيقاف خوادم هذا المشغل القديمة فقط لتجنب تضارب المنافذ: خادم لوحة التحكم (لهذا المشروع أو على المنفذ 8000)
+# وعامل مزامنة الشيت لهذا المشروع. لا نوقف أي بايثون آخر أبداً: عامل الأتمتة (main.py) أو التشغيل الليلي
+# (run_nightly.py) قد يعمل الآن ويحمل القفل، ولا خادماً أو عامل مزامنة لمشروع آخر على الجهاز.
+$repoPath = (Resolve-Path $PSScriptRoot).Path
 Get-CimInstance Win32_Process -Filter "Name = 'php.exe' OR Name = 'python.exe' OR Name = 'pythonw.exe'" -ErrorAction SilentlyContinue |
     Where-Object {
         $cmd = [string]$_.CommandLine
-        ($cmd -like '*artisan serve*' -or $cmd -like '*dashboard/server.php*' -or $cmd -like '*dashboard\server.php*' -or $cmd -like '*sync_worker.py*') -and
+        $exe = [string]$_.ExecutablePath
+        # من هذا المشروع: سطر الأوامر أو البرنامج (بايثون .venv أو php المحلي) داخل مجلده
+        $ours = ($cmd.IndexOf($repoPath, [StringComparison]::OrdinalIgnoreCase) -ge 0) -or ($exe.IndexOf($repoPath, [StringComparison]::OrdinalIgnoreCase) -ge 0)
+        # خادم لوحة التحكم: لهذا المشروع، أو على المنفذ 8000 الذي سيأخذه الخادم الجديد
+        $server = ($cmd -like '*artisan serve*' -or $cmd -like '*dashboard/server.php*' -or $cmd -like '*dashboard\server.php*') -and ($ours -or $cmd -like '*:8000*' -or $cmd -like '*--port=8000*')
+        # عامل مزامنة الشيت لهذا المشروع فقط
+        $sync = ($cmd -like '*sync_worker.py*') -and $ours
+        ($server -or $sync) -and
         $cmd -notlike '*main.py*' -and $cmd -notlike '*run_nightly.py*'
     } |
     ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
