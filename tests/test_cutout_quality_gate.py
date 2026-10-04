@@ -281,7 +281,10 @@ def test_gate_too_small_on_canvas_when_something_else_sets_the_size():
     arr = np.array(ideal_cutout(bottle(size=(900, 1300), body=(350, 150, 550, 750))))
     arr[1100:1200, 400:500] = (90, 90, 90, 60)   # a visible grey ghost below (not haze, not solid)
     flags = image_processor.assess_cutout(Image.fromarray(arr, "RGBA"))
-    assert flags == [image_processor.FLAG_TOO_SMALL]
+    # it sets the size, and being shadow-grey beyond the solid product it is also a kept shadow
+    assert sorted(flags) == [image_processor.FLAG_KEPT_SHADOW, image_processor.FLAG_TOO_SMALL]
+    arr[1100:1200, 400:500] = (60, 140, 220, 60)  # a light blue ghost: something else sets the size, no shadow
+    assert image_processor.assess_cutout(Image.fromarray(arr, "RGBA")) == [image_processor.FLAG_TOO_SMALL]
 
 
 def test_gate_opaque_backdrop_p5():
@@ -413,7 +416,64 @@ def test_p4_box_that_cuts_the_cap_is_retried_without_the_box(monkeypatch, tmp_pa
     assert y1 - y0 >= 700 and abs((x0 + x1) / 2 - 400) <= 1
 
 
+def haze_wisp(rgba):
+    """A faint wisp (alpha 12) attached to the product's base, widening its box by 100 px: alpha_haze."""
+    ys, xs = np.nonzero(rgba[..., 3] > 0)
+    bottom, left = int(ys.max()) + 1, int(xs.min())
+    rgba[bottom - 60:bottom, max(0, left - 100):left + 1, 3] = np.maximum(
+        rgba[bottom - 60:bottom, max(0, left - 100):left + 1, 3], 12)
+    return rgba
+
+
 def test_fallback_order_box_then_full_frame_then_the_other_paid_provider(monkeypatch, tmp_path):
+    # The box cuts the cap (edge_clipped: worth the full frame), PhotoRoom's full frame still has haze (worth the
+    # other provider), and remove.bg gets the full frame because the box was the problem.
+    monkeypatch.setattr(config, "REMOVE_BG_API_KEY", "test-removebg-key")
+    src = save(bottle(), tmp_path)
+    monkeypatch.setattr(image_processor, "_locate_product_box", lambda *a: [250, 300, 840, 700])
+    providers = Providers(monkeypatch, photoroom=keyer(WHITE, edit=haze_wisp), remove_bg=keyer(WHITE))
+
+    result = run(src)
+
+    names = [name for name, _size in providers.sizes()]
+    assert names == ["photoroom", "photoroom", "remove_bg_api"]
+    assert providers.sizes()[0][1] != (600, 900)
+    assert providers.sizes()[1][1] == (600, 900) and providers.sizes()[2][1] == (600, 900)
+    assert (result.isolated, result.provider, result.quality_flags) == (True, "remove_bg_api", [])
+
+
+def test_a_flag_the_box_did_not_cause_goes_straight_to_the_other_provider_with_the_box(monkeypatch, tmp_path):
+    monkeypatch.setattr(config, "REMOVE_BG_API_KEY", "test-removebg-key")
+    src = save(bottle(), tmp_path)
+    monkeypatch.setattr(image_processor, "_locate_product_box", lambda *a: [50, 250, 900, 750])
+    providers = Providers(monkeypatch, photoroom=keyer(WHITE, edit=haze_wisp), remove_bg=keyer(WHITE))
+
+    result = run(src)
+
+    names = [name for name, _size in providers.sizes()]
+    assert names == ["photoroom", "remove_bg_api"], "the full frame cannot fix PhotoRoom's haze"
+    crop_size = providers.sizes()[0][1]
+    assert crop_size != (600, 900) and providers.sizes()[1][1] == crop_size
+    assert (result.isolated, result.provider, result.quality_flags) == (True, "remove_bg_api", [])
+
+
+def test_still_flagged_after_every_fallback_returns_the_review_state(monkeypatch, tmp_path):
+    monkeypatch.setattr(config, "REMOVE_BG_API_KEY", "test-removebg-key")
+    src = save(bottle(), tmp_path)
+    monkeypatch.setattr(image_processor, "_locate_product_box", lambda *a: [50, 250, 900, 750])
+    providers = Providers(monkeypatch, photoroom=keyer(WHITE, edit=haze_wisp),
+                          remove_bg=keyer(WHITE, edit=haze_wisp))
+
+    result = run(src)
+
+    assert len(providers.calls) == 2
+    assert result.path and (result.width, result.height) == (800, 800)
+    assert result.isolated is False and result.error is None
+    assert result.quality_flags == [image_processor.FLAG_ALPHA_HAZE]
+
+
+def test_a_second_object_is_final_and_spends_no_fallback(monkeypatch, tmp_path):
+    # Another object in the picture cannot be fixed by re-isolating it: no full-frame retry, no remove.bg.
     monkeypatch.setattr(config, "REMOVE_BG_API_KEY", "test-removebg-key")
     src = save(bottle(), tmp_path)
     monkeypatch.setattr(image_processor, "_locate_product_box", lambda *a: [50, 250, 900, 750])
@@ -427,33 +487,8 @@ def test_fallback_order_box_then_full_frame_then_the_other_paid_provider(monkeyp
 
     result = run(src)
 
-    names = [name for name, _size in providers.sizes()]
-    assert names == ["photoroom", "photoroom", "remove_bg_api"]
-    crop_size = providers.sizes()[0][1]
-    assert providers.sizes()[1][1] == (600, 900)
-    # The box was not the problem (no edge_clipped), so remove.bg gets the cropped frame.
-    assert providers.sizes()[2][1] == crop_size
-    assert (result.isolated, result.provider, result.quality_flags) == (True, "remove_bg_api", [])
-
-
-def test_still_flagged_after_every_fallback_returns_the_review_state(monkeypatch, tmp_path):
-    monkeypatch.setattr(config, "REMOVE_BG_API_KEY", "test-removebg-key")
-    src = save(bottle(), tmp_path)
-    monkeypatch.setattr(image_processor, "_locate_product_box", lambda *a: [50, 250, 900, 750])
-
-    def blob(rgba):
-        h, w = rgba.shape[:2]
-        rgba[h - 40:h - 10, 10:110] = (0, 0, 0, 255)
-        return rgba
-
-    providers = Providers(monkeypatch, photoroom=keyer(WHITE, edit=blob), remove_bg=keyer(WHITE, edit=blob))
-
-    result = run(src)
-
-    assert len(providers.calls) == 3
-    assert result.path and (result.width, result.height) == (800, 800)
-    assert result.isolated is False and result.error is None
-    assert result.quality_flags == [image_processor.FLAG_SECOND_OBJECT]
+    assert [name for name, _size in providers.sizes()] == ["photoroom"]
+    assert result.isolated is False and result.quality_flags == [image_processor.FLAG_SECOND_OBJECT]
 
 
 def test_upscaled_alone_is_not_retried_with_a_paid_provider(monkeypatch, tmp_path):
@@ -503,12 +538,23 @@ def test_p5_transparent_png_with_a_grey_box_is_not_source_alpha(monkeypatch, tmp
     out = canvas_of(result)
     assert colour_count(out, (180, 180, 180), tol=20) == 0, "the grey box was published"
 
-    # A provider that keeps the grey box: never published as isolated.
-    Providers(monkeypatch, photoroom=keyer(WHITE))
+    assert sent[2]["crop"] == "false"
+
+    # A provider that keeps the grey box while the Gemini box puts the product inside it: never published.
+    monkeypatch.setattr(image_processor, "_locate_product_box", lambda *a: [250, 367, 800, 633])
+    providers = Providers(monkeypatch, photoroom=keyer(WHITE))
     result = run(src)
     assert result.path and result.isolated is False
-    assert result.quality_flags == [image_processor.FLAG_OPAQUE_BACKDROP]
-    assert sent[2]["crop"] == "false"
+    assert image_processor.FLAG_OPAQUE_BACKDROP in result.quality_flags
+    assert len(providers.calls) == 1   # the box crop came back opaque; PhotoRoom again cannot fix that
+
+    # Without a Gemini box, a provider that returns exactly the source's rectangle confirms it is the product
+    # (two independent opinions: a printed carton, not a photo card): the free source alpha is used.
+    monkeypatch.setattr(image_processor, "_locate_product_box", lambda *a: None)
+    providers = Providers(monkeypatch, photoroom=keyer(WHITE))
+    result = run(src)
+    assert (result.isolated, result.provider, result.quality_flags) == (True, "source_alpha", [])
+    assert len(providers.calls) == 1
 
 
 def test_rounded_corner_photo_is_not_taken_as_an_isolated_source(monkeypatch, tmp_path):
@@ -695,6 +741,51 @@ def test_redownloaded_bytes_must_match_the_verified_sha256(monkeypatch, tmp_path
     local = tmp_path / "local.png"
     local.write_bytes(changed)
     assert run(str(local), candidate_sha256=sha).error == "source_changed"
+
+
+class FormatNegotiatingCdn:
+    """A CDN that picks the rendition per request: the AVIF-first Accept of the original fetch gets one body,
+    any other Accept another (same picture, different bytes)."""
+
+    def __init__(self, avif_first, other):
+        self.avif_first, self.other = avif_first, other
+        self.headers = []
+
+    def get(self, url, **kwargs):
+        headers = dict(kwargs.get("headers") or {})
+        self.headers.append(headers)
+        body = self.avif_first if headers.get("Accept", "").startswith("image/avif") else self.other
+        return FakeHttpResponse(200, body, {"Content-Type": "image/png"})
+
+
+def test_redownload_sends_the_headers_of_the_original_fetch(monkeypatch, tmp_path):
+    from catalog_match import fetch
+
+    picture = bottle()
+    verified = png_bytes(picture)
+    buf = io.BytesIO()
+    picture.save(buf, format="PNG", compress_level=1)
+    other = buf.getvalue()
+    assert other != verified
+    sha = hashlib.sha256(verified).hexdigest()
+    Providers(monkeypatch, photoroom=keyer(WHITE))
+
+    cdn = FormatNegotiatingCdn(verified, other)
+    monkeypatch.setattr(http_client, "_new_session", lambda: cdn)
+    result = run("https://cdn.example.ae/p/1", candidate_sha256=sha)
+    assert result.error is None and result.isolated is True, "the same Accept gets the verified rendition"
+    assert cdn.headers[0]["Accept"] == fetch.ACCEPT
+    assert cdn.headers[0]["Accept"] == fetch.request_headers()["Accept"]
+    assert "Referer" not in cdn.headers[0]
+
+    cdn = FormatNegotiatingCdn(verified, other)
+    monkeypatch.setattr(http_client, "_new_session", lambda: cdn)
+    result = run("https://cdn.example.ae/p/1", candidate_sha256=sha, page_url="https://shop.example.ae/p/milk")
+    assert result.isolated is True
+    assert cdn.headers[0]["Referer"] == "https://shop.example.ae/p/milk"
+    assert fetch.HttpFetcher()._headers(fetch.Candidate(image_url="https://cdn.example.ae/p/1",
+                                                        page_url="https://shop.example.ae/p/milk")) == \
+        dict(fetch.request_headers("https://shop.example.ae/p/milk"), **{"User-Agent": fetch.USER_AGENT})
 
 
 # ---------------------------------------------------------------------------
