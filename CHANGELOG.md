@@ -426,6 +426,32 @@ learned ever auto-publishes.
 - `.gitignore` keeps ignoring HTML dumps but lets the offline test fixtures under `tests/catalog_match/fixtures`
   be added.
 
+### Added after phase 4: why a product has no pick, a run export, sheet data quality
+
+The owner's first dashboard run after phase 4 (100 real rows) left 32 products «بلا اقتراح»: the search found
+candidates but none was confident enough to pre-select, and the review screen showed an empty panel with no reason.
+
+- Every product without a pick says why in one plain Arabic sentence, with the concrete fact and what to do. The
+  causes covered are: label reader unsure, brand on no page, only weak or social listings, conflicting sizes or
+  packs, search or label reader down, and sheet gaps (no size, no barcode, brand not in Brands Mapping, a likely
+  typo with the suggested spelling). The reason key shows only in a tooltip.
+- Such a product opens on its candidate images, best-ranked first and nothing pre-selected, each with its warnings
+  and a one-line «لماذا لم تُختر». Enter approves only after an explicit pick (1-9 or a click).
+- The bulk card shows the reason, and the review list filters by reason (chips, or a `?reason=` link).
+- The worker stores the reason with each result. Rows saved before this release get theirs from stored data the
+  first time the review screen opens, without touching `updated_at` and never over a newer result.
+- `catalog_match/explain.py` is the shared home of the no-pick reasons; `scripts/smoke_live.py` uses it and its
+  output is unchanged.
+- `scripts/export_run.py` and the Run page button «تصدير تقرير للتحليل» write one JSON file
+  (`laqta_run_<date>_<time>.json`) for the latest run, a run id, or everything awaiting review: rows, decisions,
+  reasons, the top 8 candidates with their evidence, cost when known, the git commit and the settings without keys.
+  It uses the smoke_live JSON format (compare_runs reads it), redacts every secret, and holds no image or HTML. No
+  search is run and nothing is spent.
+- The Run page card «جودة بيانات الشيت» counts and lists rows with no size, no barcode, a brand not in Brands
+  Mapping, a likely typo (with its correction) or a barcode shared by different products; each row opens in review.
+  It reads the cached sheet rows only.
+- No search decision changed (eval gate 58/58, 58/58, 52/58; 0 wrong auto-publish).
+
 ### Phase 4: reliable automation from the sheet row to the published link
 
 Phase 3 made the search pick the right image more often. Phase 4 makes every later step as careful: the
