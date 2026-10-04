@@ -1491,41 +1491,146 @@ def _refresh_state(status, run_id=None, **extra):
 
 # ---------------------------------------------------------------------------
 # قفل العامل (temp/pipeline.lock)
-# القفل JSON: {pid, host, started_at, started_ts, role, cmd}؛ الصيغة القديمة (رقم العملية فقط) ما زالت تُقرأ،
-# و'STARTING' تكتبه لوحة التحكم أثناء الإدراج. القفل يُعد حياً فقط إذا كانت عمليته بايثون تشغّل main.py أو
-# run_nightly.py على هذا الجهاز، وبدأت قبل كتابة القفل، والقفل أحدث من MAX_LOCK_AGE_SECONDS. غير ذلك قفل متروك
-# (عامل انهار أو أُنهي ثم أُعيد استخدام رقم عمليته): يُحذف ويُسجل السبب، فلا تضيع ليلة بسبب رقم عملية معاد.
-# نفس القواعد في لوحة التحكم (ApiController::pipelineProcess).
+# القفل JSON: {pid, host, started_at, started_ts, heartbeat_ts, proc_created, role, trigger, cmd} ويضيف العامل
+# run_id و worker_id مع النبض؛ الصيغة القديمة (رقم العملية فقط) ما زالت تُقرأ، و'STARTING' تكتبه لوحة التحكم أثناء
+# الإدراج. الكتابة ذرية (ملف مؤقت ثم os.replace)، وقفل جديد يُنشأ حصرياً (لا يأخذه عاملان معاً).
+# العامل يجدد heartbeat_ts من حلقته كل LOCK_HEARTBEAT_SECONDS (حتى أثناء الإيقاف المؤقت وانتظار قاعدة البيانات).
+# القفل متروك فقط بحكم إيجابي: من جهاز آخر، أو عمليته انتهت، أو ليست بايثون تشغّل main.py / run_nightly.py، أو بدأت في
+# وقت غير وقت صاحب القفل (رقم عملية أُعيد استخدامه). قفل تتأكد هوية عمليته (سطر الأوامر ووقت البدء) لا يتقادم أبداً
+# مهما طال التشغيل. فحص تعذر (PowerShell أو tasklist لا يرد) يُعاد مرة ولا يحذف القفل: يبقى حياً ما دام نبضه أحدث من
+# LOCK_STALE_HEARTBEAT_SECONDS، وكذلك قفل لا نعرف من عمليته إلا اسمها. لوحة التحكم تسأل بايثون (cli_bridge
+# lock_state) فلا توجد قاعدة ثانية.
 # ---------------------------------------------------------------------------
 
-# عامل أقدم من هذا يُعد عالقاً: التشغيل الليلي يتوقف بعد 8 ساعات (schedule_nightly.ps1 -MaxHours، حتى 23)
-MAX_LOCK_AGE_SECONDS = 24 * 3600
-# فرق مسموح بين وقت بدء العملية ووقت كتابة القفل (دقة ساعة النظام)
+# العامل يجدد نبض القفل بهذا الفاصل
+LOCK_HEARTBEAT_SECONDS = 30
+# قفل لا تتأكد هوية عمليته (فحص تعذر، أو الاسم فقط) يُعد متروكاً عندما يصبح نبضه أقدم من هذا
+LOCK_STALE_HEARTBEAT_SECONDS = 30 * 60
+# فرق مسموح بين وقتي بدء العملية (القراءة والكتابة) ووقت كتابة القفل (دقة ساعة النظام)
 LOCK_CLOCK_SLACK_SECONDS = 5
 LOCK_SCRIPTS = ("main.py", "run_nightly.py")
 _LOCK_SCRIPT_RE = re.compile(r"(?:^|[\\/\s\"'])(?:main|run_nightly)\.py(?=$|[\s\"'])", re.IGNORECASE)
+_OWN_PROCESS_CREATED = []
 
 
-def write_lock(role, lock_file=LOCK_FILE):
-    """يكتب قفل هذه العملية (role: worker | nightly). أخطاء الكتابة تُرفع."""
-    os.makedirs(os.path.dirname(lock_file) or ".", exist_ok=True)
-    now = time.time()
-    data = {
+def _own_process_created():
+    """
+    وقت بدء هذه العملية (ثوانٍ UTC) بالفحص نفسه الذي يقرأ به الآخرون القفل (_process_info)، فتكون المقارنة بين
+    قيمتين من المصدر نفسه (لا وقت النظام مقابل تحويل WMI، ولا أثر لتغيير التوقيت الصيفي). None إن تعذر الفحص.
+    """
+    if not _OWN_PROCESS_CREATED:
+        try:
+            created = _process_info(os.getpid()).get("created")
+        except Exception:
+            created = None
+        _OWN_PROCESS_CREATED.append(round(float(created), 3) if isinstance(created, (int, float)) else None)
+    return _OWN_PROCESS_CREATED[0]
+
+
+def _lock_data(role, trigger=None, now=None):
+    now = time.time() if now is None else now
+    return {
         "pid": os.getpid(),
         "host": socket.gethostname(),
         "started_at": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(now)),
         "started_ts": round(now, 3),
+        "heartbeat_ts": round(now, 3),
+        "proc_created": _own_process_created(),
         "role": role,
+        "trigger": trigger if trigger in WORKER_TRIGGERS else ("nightly" if role == "nightly" else None),
         "cmd": " ".join(sys.argv)[:300],
     }
-    with open(lock_file, "w", encoding="utf-8") as f:
+
+
+def _lock_tmp(lock_file):
+    return f"{lock_file}.{os.getpid()}.tmp"
+
+
+def _write_lock_file(lock_file, data):
+    """كتابة ذرية: ملف مؤقت ثم os.replace، فلا يقرأ أحد قفلاً نصف مكتوب."""
+    os.makedirs(os.path.dirname(lock_file) or ".", exist_ok=True)
+    tmp = _lock_tmp(lock_file)
+    with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False)
+    os.replace(tmp, lock_file)
+
+
+def _create_lock_file(lock_file, data):
+    """ينشئ القفل فقط إن لم يوجد، ذرياً وحصرياً (رابط صلب للملف المؤقت). False إذا سبقنا إليه أحد."""
+    os.makedirs(os.path.dirname(lock_file) or ".", exist_ok=True)
+    tmp = _lock_tmp(lock_file)
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False)
+    try:
+        try:
+            os.link(tmp, lock_file)
+            return True
+        except FileExistsError:
+            return False
+        except (OSError, AttributeError, NotImplementedError):
+            # نظام ملفات بلا روابط صلبة: إنشاء حصري (O_EXCL) ثم الكتابة
+            try:
+                fd = os.open(lock_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL)
+            except FileExistsError:
+                return False
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False)
+            return True
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+
+
+def write_lock(role, lock_file=LOCK_FILE, trigger=None):
+    """يكتب قفل هذه العملية (role: worker | nightly) ذرياً فوق أي قفل موجود. أخطاء الكتابة تُرفع."""
+    _write_lock_file(lock_file, _lock_data(role, trigger))
+
+
+def acquire_lock(role, lock_file=LOCK_FILE, trigger=None):
+    """
+    يأخذ القفل: ينشئه حصرياً إن لم يوجد، أو يحل محل 'STARTING' (إدراج لوحة التحكم) أو قفل هذه العملية (التشغيل
+    الليلي أثناء الإدراج). True إذا صار القفل لهذه العملية، False إذا كان لعملية أخرى. أخطاء الكتابة تُرفع.
+    """
+    data = _lock_data(role, trigger)
+    lock = read_lock(lock_file)
+    if lock is None:
+        return _create_lock_file(lock_file, data)
+    if lock["kind"] == "starting" or lock.get("pid") == os.getpid():
+        _write_lock_file(lock_file, data)
+        return True
+    return False
+
+
+def refresh_lock(lock_file=LOCK_FILE, now=None, **fields):
+    """
+    نبض العامل: يجدد heartbeat_ts (ويضيف fields مثل run_id و worker_id) في قفل هذه العملية فقط، ذرياً. لا يكتب
+    فوق قفل عملية أخرى ولا يعيد قفلاً حُذف. True عند الكتابة؛ لا يرفع أبداً.
+    """
+    try:
+        lock = read_lock(lock_file)
+        if lock is None or lock["kind"] != "json" or lock.get("pid") != os.getpid():
+            return False
+        data = json.loads(lock["raw"])
+        data.update(fields)
+        data["heartbeat_ts"] = round(time.time() if now is None else now, 3)
+        _write_lock_file(lock_file, data)
+        return True
+    except Exception as e:
+        print(f"[Lock] تعذر تجديد نبض القفل: {e}")
+        return False
+
+
+def _lock_number(value):
+    return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
 
 
 def read_lock(lock_file=LOCK_FILE):
     """
-    محتوى القفل: None إن لم يوجد، وإلا {raw, kind: json | pid | starting | invalid, pid, host, started_ts, role}.
-    started_ts للصيغة القديمة (أو JSON بلا وقت) هو وقت تعديل الملف.
+    محتوى القفل: None إن لم يوجد، وإلا {raw, kind: json | pid | starting | invalid, pid, host, started_ts,
+    heartbeat_ts, proc_created, role, trigger, run_id, worker_id, mtime}. started_ts و heartbeat_ts للصيغة القديمة
+    (أو JSON بلا وقت) هما وقت تعديل الملف.
     """
     try:
         with open(lock_file, "r", encoding="utf-8", errors="replace") as f:
@@ -1533,7 +1638,8 @@ def read_lock(lock_file=LOCK_FILE):
         mtime = os.path.getmtime(lock_file)
     except OSError:
         return None
-    lock = {"raw": raw, "kind": "invalid", "pid": None, "host": None, "started_ts": mtime, "role": None}
+    lock = {"raw": raw, "kind": "invalid", "pid": None, "host": None, "started_ts": mtime, "heartbeat_ts": mtime,
+            "proc_created": None, "role": None, "trigger": None, "run_id": None, "worker_id": None, "mtime": mtime}
     if raw == "STARTING":
         lock["kind"] = "starting"
     elif raw.isdigit():
@@ -1544,43 +1650,79 @@ def read_lock(lock_file=LOCK_FILE):
             pid = int(data.get("pid"))
         except (ValueError, TypeError, AttributeError):
             return lock
-        started = data.get("started_ts")
-        lock.update(kind="json", pid=pid, host=str(data.get("host") or "") or None, role=data.get("role"),
-                    started_ts=float(started) if isinstance(started, (int, float)) else mtime)
+        started = _lock_number(data.get("started_ts"))
+        beat = _lock_number(data.get("heartbeat_ts"))
+        text = lambda key: str(data.get(key) or "") or None  # noqa: E731
+        lock.update(kind="json", pid=pid, host=text("host"), role=data.get("role"), trigger=text("trigger"),
+                    run_id=text("run_id"), worker_id=text("worker_id"), proc_created=_lock_number(data.get("proc_created")),
+                    started_ts=started if started is not None else mtime, heartbeat_ts=beat if beat is not None else mtime)
     return lock
 
 
+_DEAD = {"alive": False, "name": None, "cmdline": None, "created": None}
+
+
+def _parse_windows_probe(raw):
+    """
+    مخرجات فحص PowerShell (PROBE=1 ثم NAME= / CREATED= / CMD= إن وُجدت العملية): BOM في أول سطر (UTF-8 مع BOM)
+    ونهايات CRLF مقبولة. None إذا لم يظهر PROBE (مخرجات غير مفهومة: لا نعرف، ولا نقول «العملية انتهت»).
+    """
+    text = raw.decode("utf-8-sig", errors="replace") if isinstance(raw, (bytes, bytearray)) else str(raw or "")
+    info, seen = dict(_DEAD), False
+    for line in text.splitlines():
+        key, _, value = line.strip().lstrip("﻿").partition("=")
+        key, value = key.strip().upper(), value.strip()
+        if key == "PROBE":
+            seen = True
+        elif key == "NAME" and value:
+            seen = True
+            info.update(alive=True, name=value)
+        elif key == "CREATED" and value.lstrip("-").isdigit():
+            info["created"] = float(value)
+        elif key == "CMD":
+            info["cmdline"] = value or None
+    return info if seen else None
+
+
 def _windows_process_info(pid):
-    """عملية على ويندوز: سطر الأوامر ووقت البدء من Win32_Process، أو اسم البرنامج فقط من tasklist."""
+    """
+    عملية على ويندوز: الاسم وسطر الأوامر ووقت البدء (UTC) من Win32_Process عبر PowerShell، أو الاسم فقط من tasklist.
+    فحص لم يكتمل (مهلة، خطأ، مخرجات غير مفهومة) يرفع RuntimeError: «لا نعرف» ليس «العملية انتهت».
+    """
     import subprocess
+    run = subprocess.run
     no_window = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-    script = (f"$p = Get-CimInstance Win32_Process -Filter 'ProcessId = {int(pid)}' -ErrorAction Stop; "
-              "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; "
-              "if ($p) { 'NAME=' + $p.Name; 'CREATED=' + ([DateTimeOffset]$p.CreationDate).ToUnixTimeSeconds(); "
+    script = ("[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false; "
+              f"$p = Get-CimInstance Win32_Process -Filter 'ProcessId = {int(pid)}' -ErrorAction Stop; "
+              "'PROBE=1'; "
+              "if ($p) { 'NAME=' + $p.Name; "
+              "'CREATED=' + ([DateTimeOffset]($p.CreationDate.ToUniversalTime())).ToUnixTimeSeconds(); "
               "'CMD=' + $p.CommandLine }")
+    problems = []
     try:
-        out = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
-                             capture_output=True, timeout=30, creationflags=no_window)
-        if out.returncode == 0:
-            info = {"alive": False, "name": None, "cmdline": None, "created": None}
-            for line in out.stdout.decode("utf-8", errors="replace").splitlines():
-                key, _, value = line.partition("=")
-                if key == "NAME":
-                    info.update(alive=True, name=value.strip())
-                elif key == "CREATED" and value.strip().isdigit():
-                    info["created"] = float(value.strip())
-                elif key == "CMD":
-                    info["cmdline"] = value.strip() or None
+        out = run(["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+                  capture_output=True, timeout=30, creationflags=no_window)
+        info = _parse_windows_probe(out.stdout) if out.returncode == 0 else None
+        if info is not None:
             return info
-    except Exception:
-        pass
-    out = subprocess.run(["tasklist", "/FI", f"PID eq {int(pid)}", "/FO", "CSV", "/NH"], capture_output=True,
-                         timeout=30, creationflags=no_window).stdout.decode(errors="replace")
-    for line in out.splitlines():
-        cells = [c.strip('"') for c in line.split('","')]
-        if len(cells) > 1 and cells[1].strip('"') == str(pid):
-            return {"alive": True, "name": cells[0], "cmdline": None, "created": None}
-    return {"alive": False, "name": None, "cmdline": None, "created": None}
+        problems.append(f"PowerShell exit {out.returncode}")
+    except Exception as e:
+        problems.append(f"PowerShell {type(e).__name__}")
+    try:
+        out = run(["tasklist", "/FI", f"PID eq {int(pid)}", "/FO", "CSV", "/NH"], capture_output=True,
+                  timeout=30, creationflags=no_window)
+    except Exception as e:
+        raise RuntimeError("; ".join(problems + [f"tasklist {type(e).__name__}"])) from e
+    if out.returncode != 0:
+        raise RuntimeError("; ".join(problems + [f"tasklist exit {out.returncode}"]))
+    raw = out.stdout
+    text = raw.decode("utf-8", errors="replace") if isinstance(raw, (bytes, bytearray)) else str(raw or "")
+    for line in text.splitlines():
+        cells = [c.strip().strip('"') for c in line.strip().lstrip("﻿").split('","')]
+        if len(cells) > 1 and cells[1].strip() == str(int(pid)):
+            return {"alive": True, "name": cells[0] or None, "cmdline": None, "created": None}
+    # tasklist أجاب بلا سطر لهذه العملية (رسالة «لا توجد مهام» بلغة النظام): العملية انتهت
+    return dict(_DEAD)
 
 
 def _proc_process_info(pid):
@@ -1590,10 +1732,10 @@ def _proc_process_info(pid):
         with open(f"{base}/stat", "r") as f:
             stat = f.read()
     except OSError:
-        return {"alive": False, "name": None, "cmdline": None, "created": None}
+        return dict(_DEAD)
     fields = stat.rsplit(")", 1)[-1].split()
     if fields and fields[0] == "Z":
-        return {"alive": False, "name": None, "cmdline": None, "created": None}
+        return dict(_DEAD)
     info = {"alive": True, "name": None, "cmdline": None, "created": None}
     try:
         with open(f"{base}/cmdline", "rb") as f:
@@ -1615,7 +1757,7 @@ def _proc_process_info(pid):
 def _process_info(pid):
     """
     {alive, name, cmdline, created} لعملية؛ None للحقل الذي لا يمكن معرفته. psutil إن كان مثبتاً، وإلا /proc
-    (لينكس)، وإلا Win32_Process / tasklist (ويندوز)، وإلا os.kill و ps.
+    (لينكس)، وإلا Win32_Process / tasklist (ويندوز)، وإلا os.kill و ps. فحص لم يكتمل يرفع (لا يعني «انتهت»).
     """
     try:
         import psutil
@@ -1625,7 +1767,7 @@ def _process_info(pid):
         try:
             p = psutil.Process(pid)
             if p.status() == psutil.STATUS_ZOMBIE:
-                return {"alive": False, "name": None, "cmdline": None, "created": None}
+                return dict(_DEAD)
             info = {"alive": True, "name": None, "cmdline": None, "created": None}
             for key, read in (("name", p.name), ("cmdline", lambda: " ".join(p.cmdline())), ("created", p.create_time)):
                 try:
@@ -1634,7 +1776,7 @@ def _process_info(pid):
                     pass
             return info
         except psutil.NoSuchProcess:
-            return {"alive": False, "name": None, "cmdline": None, "created": None}
+            return dict(_DEAD)
         except psutil.Error:
             pass
     if os.name == "nt":
@@ -1644,7 +1786,7 @@ def _process_info(pid):
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
-        return {"alive": False, "name": None, "cmdline": None, "created": None}
+        return dict(_DEAD)
     except OSError:
         pass
     info = {"alive": True, "name": None, "cmdline": None, "created": None}
@@ -1659,39 +1801,73 @@ def _process_info(pid):
     return info
 
 
-def stale_lock_reason(lock, now=None, process_info=None, host=None):
+def lock_verdict(lock, now=None, process_info=None, host=None):
     """
-    None إذا كان القفل لعامل أتمتة حي على هذا الجهاز، وإلا سبب اعتباره متروكاً (نص عربي للسجل).
-    process_info(pid) -> {alive, name, cmdline, created} (للاختبارات؛ افتراضياً _process_info).
+    حكم القفل: {stale: سبب عربي (للسجل) أو None لعامل حي، verified: هوية العملية مؤكدة (سطر الأوامر ووقت البدء)،
+    probe_error: فحص العملية تعذر مرتين (نص قصير) أو None، heartbeat_age: ثوانٍ منذ آخر نبض}.
+    فقط حكم إيجابي يجعل القفل متروكاً؛ فحص تعذر أو هوية ناقصة (الاسم فقط) تعني قفلاً حياً حتى يتقادم نبضه
+    (LOCK_STALE_HEARTBEAT_SECONDS). process_info(pid) -> {alive, name, cmdline, created} (للاختبارات).
     """
     now = time.time() if now is None else now
+    beat = lock.get("heartbeat_ts")
+    age = None if beat is None else max(0.0, now - beat)
+    verdict = {"stale": None, "verified": False, "probe_error": None, "heartbeat_age": age}
     pid = lock.get("pid")
     if lock.get("kind") not in ("json", "pid") or not isinstance(pid, int):
-        return f"محتوى غير مفهوم: «{str(lock.get('raw') or '')[:40]}»"
+        if lock.get("kind") == "invalid" and not lock.get("raw") and age is not None and age <= LOCK_CLOCK_SLACK_SECONDS:
+            return verdict          # قفل فارغ كُتب للتو: إنشاء حصري لم يكتمل بعد
+        verdict["stale"] = f"محتوى غير مفهوم: «{str(lock.get('raw') or '')[:40]}»"
+        return verdict
     if pid <= 1:
-        return f"رقم عملية غير صالح ({pid})"
+        verdict["stale"] = f"رقم عملية غير صالح ({pid})"
+        return verdict
     here = host or socket.gethostname()
     if lock.get("host") and lock["host"].lower() != here.lower():
-        return f"القفل من جهاز آخر ({lock['host']})"
-    started = lock.get("started_ts")
-    if started is not None and now - started > MAX_LOCK_AGE_SECONDS:
-        return f"عمره أكثر من {MAX_LOCK_AGE_SECONDS // 3600} ساعة"
-    try:
-        info = (process_info or _process_info)(pid)
-    except Exception as e:
-        return f"تعذر فحص العملية {pid}: {type(e).__name__}"
+        verdict["stale"] = f"القفل من جهاز آخر ({lock['host']})"
+        return verdict
+    info, problems = None, []
+    for _ in range(2):              # فحص تعذر يُعاد مرة واحدة
+        try:
+            info = (process_info or _process_info)(pid)
+            break
+        except Exception as e:
+            problems.append(f"{type(e).__name__}: {e}"[:200])
+    old_beat = age is not None and age > LOCK_STALE_HEARTBEAT_SECONDS
+    stale_minutes = LOCK_STALE_HEARTBEAT_SECONDS // 60
+    if info is None:
+        verdict["probe_error"] = problems[-1]
+        if old_beat:
+            verdict["stale"] = f"تعذر فحص العملية {pid} ونبض القفل أقدم من {stale_minutes} دقيقة"
+        return verdict
     if not info.get("alive"):
-        return f"العملية {pid} لم تعد تعمل"
+        verdict["stale"] = f"العملية {pid} لم تعد تعمل"
+        return verdict
     name = info.get("name")
     if name and "python" not in name.lower():
-        return f"العملية {pid} ليست بايثون ({name})"
+        verdict["stale"] = f"العملية {pid} ليست بايثون ({name})"
+        return verdict
     cmdline = info.get("cmdline")
     if cmdline and not _LOCK_SCRIPT_RE.search(cmdline):
-        return f"العملية {pid} ليست عامل الأتمتة (main.py / run_nightly.py)"
-    created = info.get("created")
-    if created is not None and started is not None and created > started + LOCK_CLOCK_SLACK_SECONDS:
-        return f"العملية {pid} بدأت بعد كتابة القفل (رقم عملية أُعيد استخدامه)"
-    return None
+        verdict["stale"] = f"العملية {pid} ليست عامل الأتمتة (main.py / run_nightly.py)"
+        return verdict
+    created, own, started = info.get("created"), lock.get("proc_created"), lock.get("started_ts")
+    if created is not None and own is not None:
+        # وقتا بدء العملية من الفحص نفسه (عند الكتابة والآن): أي فرق يعني عملية أخرى بالرقم نفسه
+        if abs(created - own) > LOCK_CLOCK_SLACK_SECONDS:
+            verdict["stale"] = f"العملية {pid} ليست العملية التي كتبت القفل (رقم عملية أُعيد استخدامه)"
+            return verdict
+    elif created is not None and started is not None and created > started + LOCK_CLOCK_SLACK_SECONDS:
+        verdict["stale"] = f"العملية {pid} بدأت بعد كتابة القفل (رقم عملية أُعيد استخدامه)"
+        return verdict
+    verdict["verified"] = bool(cmdline) and created is not None
+    if not verdict["verified"] and old_beat:
+        verdict["stale"] = (f"هوية العملية {pid} غير مؤكدة (الاسم فقط) ونبض القفل أقدم من {stale_minutes} دقيقة")
+    return verdict
+
+
+def stale_lock_reason(lock, now=None, process_info=None, host=None):
+    """None إذا كان القفل لعامل أتمتة حي على هذا الجهاز، وإلا سبب اعتباره متروكاً (نص عربي للسجل)."""
+    return lock_verdict(lock, now=now, process_info=process_info, host=host)["stale"]
 
 
 def _remove_lock_if_unchanged(lock_file, raw):
@@ -1709,16 +1885,19 @@ def _remove_lock_if_unchanged(lock_file, raw):
 def _another_worker_running(lock_file, now=None, process_info=None):
     """
     هل يحمل القفل عامل أتمتة حي آخر؟ لا قفل، أو 'STARTING' (العامل يأخذ القفل من الإدراج)، أو قفل هذه العملية
-    (التشغيل الليلي يحمله أثناء الإدراج): False. قفل متروك يُحذف ويُسجل السبب ثم False.
+    (التشغيل الليلي يحمله أثناء الإدراج): False. قفل متروك يُحذف ويُسجل السبب ثم False. فحص تعذر يُسجل ولا يحذف.
     """
     lock = read_lock(lock_file)
     if lock is None or lock["kind"] == "starting" or lock.get("pid") == os.getpid():
         return False
-    reason = stale_lock_reason(lock, now=now, process_info=process_info)
-    if reason is None:
+    verdict = lock_verdict(lock, now=now, process_info=process_info)
+    if verdict["probe_error"]:
+        print(f"[Lock] تعذر فحص العملية {lock.get('pid')} مرتين ({verdict['probe_error']})"
+              + ("." if verdict["stale"] else "؛ يُعد القفل حياً (لا يُحذف قفل لم يثبت أنه متروك)."))
+    if verdict["stale"] is None:
         return True
     removed = _remove_lock_if_unchanged(lock_file, lock["raw"])
-    print(f"[Lock] قفل متروك في {lock_file}: {reason}؛ "
+    print(f"[Lock] قفل متروك في {lock_file}: {verdict['stale']}؛ "
           + ("حُذف ويستمر التشغيل." if removed else "تغير أثناء الفحص فلم يُحذف."))
     return False
 
@@ -1825,9 +2004,21 @@ def run_worker_mode(trigger="manual", report=True):
         print("[Worker] معالج الخلفية يعمل بالفعل. خروج.")
         sys.exit(0)
     try:
-        write_lock("nightly" if trigger == "nightly" else "worker", lock_file)
-    except Exception:
-        pass
+        acquired = acquire_lock("nightly" if trigger == "nightly" else "worker", lock_file, trigger=trigger)
+    except Exception as e:
+        acquired = True          # تعذر كتابة القفل لا يمنع التشغيل (كما كان)
+        print(f"[Worker] تعذر كتابة القفل {lock_file}: {e}")
+    if not acquired:
+        LAST_WORKER.update(stop_reason="another_worker")
+        print("[Worker] عامل آخر أخذ القفل للتو. خروج.")
+        sys.exit(0)
+    lock_beat = [time.monotonic()]
+
+    def lock_heartbeat(**fields):
+        # نبض القفل: عامل حي لا يُعد قفله متروكاً مهما طال التشغيل (موقوف مؤقتاً، أو ينتظر قاعدة البيانات)
+        if fields or time.monotonic() - lock_beat[0] >= LOCK_HEARTBEAT_SECONDS:
+            lock_beat[0] = time.monotonic()
+            refresh_lock(lock_file, **fields)
 
     print("=" * 60)
     print("عامل البحث المسبق (Worker) قيد العمل...")
@@ -1885,6 +2076,7 @@ def run_worker_mode(trigger="manual", report=True):
         _refresh_state("pre_caching", run_id=run_id, notice=notice)
 
         worker_id = local_cache_db.new_claim_id().split("#")[0]
+        lock_heartbeat(worker_id=worker_id)
         lock = threading.Lock()
         counters = {"provider_down_streak": 0, "credit_streak": 0}
         budget = _daily_budget()
@@ -1911,6 +2103,7 @@ def run_worker_mode(trigger="manual", report=True):
         last_beat = time.monotonic()
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             while True:
+                lock_heartbeat()
                 active = [f for f in active if not f.done()]
                 with lock:
                     streak = counters["provider_down_streak"]

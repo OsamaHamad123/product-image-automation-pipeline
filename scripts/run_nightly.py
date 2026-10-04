@@ -111,8 +111,9 @@ def worker_busy(main_module, lock_file=LOCK_FILE, now=time.time):
 
 
 def _hold_lock(main_module, lock_file=LOCK_FILE):
-    """Our lock during the enqueue, so the dashboard shows a run and refuses to start a second one."""
-    main_module.write_lock("nightly", lock_file)
+    """Our lock during the enqueue, so the dashboard shows a run and refuses to start a second one.
+    False when another process took the lock first (it is created exclusively)."""
+    return main_module.acquire_lock("nightly", lock_file, trigger="nightly")
 
 
 def _release_lock(main_module, lock_file=LOCK_FILE):
@@ -144,7 +145,9 @@ def run_once(main_module, db):
     """
     main_module.LAST_ENQUEUE.clear()
     main_module.LAST_WORKER.clear()
-    _hold_lock(main_module)
+    if not _hold_lock(main_module):
+        say("another run took the lock just now; it works the queue")
+        return {"stop_reason": "another_worker"}
     # A new run, like the dashboard's run button: a stop or pause request left over from an earlier run must not
     # stop tonight's worker, and the dashboard shows 'reading the sheet' instead of the last run's numbers.
     if not db.prepare_run():
