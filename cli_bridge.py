@@ -357,6 +357,8 @@ def action_search(params, brand_mappings=None, found=None):
         'exclusions': {'urls': len(exclude_urls), 'phashes': len(rejected_phashes)},
         'trace': trace,
         'brand': brand,
+        # لماذا لا توجد صورة مختارة (catalog_match.explain)، أو None عندما اختار البحث صورة
+        'explain': outcome.get('explain') if isinstance(outcome.get('explain'), dict) else None,
     }
 
 
@@ -1336,8 +1338,9 @@ def _clear_rejected_cells(params, row_number, sku_key, images, tasks=None, flush
 
 def _save_research_candidates(found, row_number, product_name, brand, sku_key, rejected_url, identity=None):
     """
-    إعادة البحث بعد الرفض تحفظ مرشحاتها الجديدة بنفسها (عقد C2، بـ sku_key المنتج)، بدل أن تحفظها الصفحة.
-    لا شيء يُحفظ بلا نتيجة (لم يُعثر على شيء / المزودون معطلون): المرشحات الباقية تبقى. يعيد عدد المحفوظ.
+    إعادة البحث بعد الرفض تحفظ مرشحاتها الجديدة بنفسها (عقد C2، بـ sku_key المنتج)، بدل أن تحفظها الصفحة، ومعها سبب
+    «بلا اقتراح» للبحث الجديد في trace صف الطابور. لا شيء يُحفظ بلا نتيجة (لم يُعثر على شيء / المزودون معطلون):
+    المرشحات الباقية تبقى. يعيد عدد المحفوظ.
     """
     best = found.get("best")
     if not best:
@@ -1350,7 +1353,24 @@ def _save_research_candidates(found, row_number, product_name, brand, sku_key, r
                                                    best.get("url"), sku_key=sku_key,
                                                    run_id=f"research-{uuid.uuid4().hex[:8]}", identity=identity):
         return 0
+    # the row's «why no pick» is now the new search's (None: it found a pick)
+    outcome = (found.get("trace") or {}).get("outcome")
+    _save_research_explain(row_number, sku_key, product_name,
+                           outcome.get("explain") if isinstance(outcome, dict) else None)
     return len(candidates)
+
+
+def _save_research_explain(row_number, sku_key, product_name, explain):
+    """
+    مرشحات إعادة البحث بعد الرفض حلّت محل السابقة: سبب «بلا اقتراح» في trace صف الطابور يصير سبب البحث الجديد
+    (None = البحث الجديد اختار صورة). لا يغيّر الحالة ولا يكتب فوق نتيجة أحدث للعامل.
+    """
+    try:
+        task = local_cache_db.get_task_by_row(row_number)
+        if task and task.get("trace_json") and _same_product_task(task, sku_key, product_name):
+            local_cache_db.set_queue_explain(task["id"], task["trace_json"], explain)
+    except Exception:
+        logger.exception("could not store the research's no-pick reason for row %s", row_number)
 
 
 def _set_review_queue_status(row_number, sku_key, product_name, status, reason_code, failure_code=None, rows=None):
@@ -1584,6 +1604,48 @@ def action_sheet_save(params):
 
 
 # ---------------------------------------------------------------------------
+# explain_backfill: لماذا لا توجد صورة مختارة، لصفوف حُفظت قبل أن يحسبه العامل
+# ---------------------------------------------------------------------------
+
+def _brand_index(mappings):
+    try:
+        from catalog_match.brand_index import BrandIndex
+        return BrandIndex.from_mappings(mappings or {})
+    except Exception as e:
+        logger.warning("تعذر بناء فهرس البراندات: %s", e)
+        return mappings or {}
+
+
+def action_explain_backfill(params):
+    """
+    يحسب outcome.explain (catalog_match.explain.explain_stored) لصفوف الطابور بانتظار المراجعة أو الفاشلة التي حُفظت
+    نتيجتها قبل أن يحسبه العامل، مما حُفظ فقط (trace الصف ومرشحاته وحمولة الصف): بلا بحث وبلا تكلفة. لا يغيّر حالة أي
+    صف ولا وقت تحديثه، ولا يكتب فوق نتيجة أحدث. تعيد {status, filled, checked}.
+    """
+    from catalog_match import explain
+    try:
+        rows = local_cache_db.queue_rows_missing_explain()
+    except Exception:
+        return _failure("failed", "Could not read the automation queue (details in temp/search.log).",
+                        "explain_backfill failed")
+    if not rows:
+        return {"status": "success", "filled": 0, "checked": 0}
+    mappings = _brand_index(_load_brand_mappings())
+    vocab = explain.default_vocabulary()
+    filled = 0
+    for row in rows:
+        try:
+            candidates = local_cache_db.get_curation_candidates(
+                row["row_number"], row.get("sku_key"), identity=local_cache_db.queue_row_identity(row))
+            data = explain.explain_stored(row, candidates, mappings, vocab)
+            if local_cache_db.set_queue_explain(row["id"], row["trace_json"], data):
+                filled += 1
+        except Exception:
+            logger.exception("explain_backfill: row %s", row.get("row_number"))
+    return {"status": "success", "filled": filled, "checked": len(rows)}
+
+
+# ---------------------------------------------------------------------------
 # ops_health (قراءة فقط: صحة البحث وتكلفته لصفحة التشخيصات)
 # ---------------------------------------------------------------------------
 
@@ -1768,6 +1830,7 @@ ACTIONS = {
     'review_stats': action_review_stats,
     'sheet-preview': action_sheet_preview,
     'sheet-save': action_sheet_save,
+    'explain_backfill': action_explain_backfill,
     'lock_state': action_lock_state,
     'ops_health': action_ops_health,
     'run_control': action_run_control,

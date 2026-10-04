@@ -237,6 +237,8 @@
             result: result,
             decision: String(data.decision || ''),
             failureCode: String(data.failure_code || ''),
+            // لماذا لا اقتراح (catalog_match.explain): null عندما اختار البحث صورة
+            explain: data.explain && typeof data.explain === 'object' ? data.explain : null,
             error: String(data.error || data.message || (res && !res.ok && !data.status ? `HTTP ${res.status}` : ''))
         };
         if (['network', 'error', 'failed', 'provider_down'].includes(result) || info.decision === 'PROVIDER_DOWN') {
@@ -931,12 +933,16 @@
         ]);
     }
 
-    function altButton(item, c, i, pick, sysUrl) {
+    function altButton(item, c, i, pick, sysUrl, noPick) {
         const S = st();
         const on = !!pick && c.url === pick.url;
         const note = R.candidateNote(c, !!sysUrl && c.url === sysUrl);
         const where = R.storeOf(c);
         const dim = (c.status === 'rejected' || c.status === 'excluded') && !on;
+        // منتج بلا اقتراح: تحت كل صورة «لماذا لم تُختر» من أدلتها مكان الحالة العامة («مطابقة محتملة»)، مع تحذيراتها كما
+        // لأي صورة؛ الصورة التي استبعدها النظام يقول سطرها لماذا
+        const why = noPick && !isExtra(c) && !['rejected', 'excluded'].includes(c.status) ? R.whyNotPicked(c, item.product) : null;
+        const showNote = !isExtra(c) && (!why || c.warnings.length > 0);
         return el('button', {
             type: 'button',
             className: 'rv-alt' + (on ? ' is-selected' : '') + (dim ? ' is-dim' : ''),
@@ -951,7 +957,9 @@
         }, [
             el('span', { className: 'rv-alt__thumb' }, [R.img(c.url, '', S.urls.imageProxy), i < 9 ? el('span', { className: 'rv-alt__num', text: String(i + 1) }) : null]),
             el('span', { className: 'rv-alt__store', text: isExtra(c) ? note.text : [where.store, where.market].filter(Boolean).join(' · ') }),
-            isExtra(c) ? null : el('span', { className: `rv-alt__note rv-tone--${note.tone}`, text: note.text }),
+            showNote ? el('span', { className: `rv-alt__note rv-tone--${note.tone}`, text: note.text }) : null,
+            why ? el('span', { className: `rv-alt__why rv-tone--${why.tone}`, title: why.code }, [
+                el('span', { className: 'rv-alt__why-k', text: 'لماذا لم تُختر: ' }), el('span', { text: why.text })]) : null,
             // كل تحذيرات الصورة البديلة (الأول في السطر السابق)، وأدلتها
             !isExtra(c) && c.warnings.length > 1 && !['rejected', 'excluded'].includes(c.status)
                 ? el('span', { className: 'rv-alt__warns' }, c.warnings.slice(1).map(w => el('span', { className: 'rv-alt__warn', text: R.warningText(w) })))
@@ -960,15 +968,37 @@
         ]);
     }
 
-    function altsCard(item, cands, pick, sysUrl) {
+    // opts.grid: منتج بلا اقتراح ولم يختر المراجع صورة بعد: الشبكة أول ما في مساحة العمل (الأفضل ترتيباً أولاً)، ولا
+    // شيء مختار؛ الاعتماد بعد اختيار صريح فقط (1–9 أو ضغطة). opts.why: «لماذا لم تُختر» تحت كل صورة
+    function altsCard(item, cands, pick, sysUrl, opts) {
+        opts = opts || {};
+        const noPick = !!opts.grid;
         const n = Math.min(cands.length, 9);
-        return el('section', { className: 'rv-panel rv-alts', 'aria-label': 'صور أخرى وجدها البحث' }, [
+        const keys = n > 1 ? `1–${n}` : '1';
+        return el('section', { className: 'rv-panel rv-alts' + (noPick ? ' rv-alts--nopick' : ''), id: noPick ? 'rvNoPickGrid' : null,
+                               'aria-label': noPick ? 'الصور اللي لقاها البحث' : 'صور أخرى وجدها البحث' }, [
             el('div', { className: 'rv-alts__head' }, [
-                el('h3', { className: 'rv-h3', text: 'صور أخرى وجدها البحث' }),
-                el('span', { className: 'rv-alts__hint', text: n > 1 ? `اضغط 1–${n} لعرض صورة، و Enter لاعتمادها` : 'اضغط 1 لعرضها، و Enter لاعتمادها' })
+                el('h3', { className: 'rv-h3', text: noPick ? 'الصور اللي لقاها البحث' : 'صور أخرى وجدها البحث' }),
+                el('span', { className: 'rv-alts__hint', text: noPick ? `ما في صورة مختارة: اختار وحدة (${keys} أو اضغط عليها)، وبعدين Enter لاعتمادها`
+                    : n > 1 ? `اضغط 1–${n} لعرض صورة، و Enter لاعتمادها` : 'اضغط 1 لعرضها، و Enter لاعتمادها' })
             ]),
-            el('div', { className: 'rv-alts__grid' }, cands.map((c, i) => altButton(item, c, i, pick, sysUrl)))
+            el('div', { className: 'rv-alts__grid' }, cands.map((c, i) => altButton(item, c, i, pick, sysUrl, noPick || !!opts.why)))
         ]);
+    }
+
+    // «ليش ما في اقتراح؟»: جملة واحدة فيها الحقيقة وما العمل (catalog_match.explain)، وملاحظات الشيت الباقية تحتها.
+    // الرمز في التلميح فقط
+    function noPickBanner(explain, title) {
+        const notes = R.sheetNotes(explain);
+        const box = alertBox('info', title || 'ليش ما في اقتراح:', explain ? explain.text : R.NO_PICK_FALLBACK, [
+            notes.length ? el('span', { className: 'rv-alert__more rv-nopick__sheet', text: `وكمان بالشيت: ${notes.join('، ')}.` }) : null
+        ]);
+        box.classList.add('rv-nopick');
+        if (explain) {
+            box.setAttribute('title', [explain.key, explain.engine].filter((v, i, a) => v && a.indexOf(v) === i).join(' · '));
+            box.setAttribute('data-nopick', explain.key);
+        }
+        return box;
     }
 
     function notFoundPanel(item) {
@@ -1045,8 +1075,12 @@
         if (search) {
             const code = [search.decision, search.failureCode].filter(Boolean).join(' · ');
             if (search.note) out.push(alertBox('neutral', '', search.note));
+            const why = R.noPickReason(item, search);
             if (!hasCands) {
-                out.push(alertBox('info', 'ما انلقت:', 'ما لقينا صور مطابقة لهالمنتج. جرّب كلمات ثانية، أو حط رابط، أو ارفع صورة.'));
+                out.push(why ? noPickBanner(why, 'ما انلقت:')
+                    : alertBox('info', 'ما انلقت:', 'ما لقينا صور مطابقة لهالمنتج. جرّب كلمات ثانية، أو حط رابط، أو ارفع صورة.'));
+            } else if (!search.selectedUrl && why) {
+                out.push(noPickBanner(why));
             } else if (search.decision === 'VERIFIER_DOWN') {
                 out.push(alertBox('warning', 'نموذج القراءة مش متاح هلق:', 'ما في فحص بصري لهالنتائج، راجع الصور بنفسك قبل الاعتماد.'));
             } else if (search.decision === 'AUTO_PUBLISH') {
@@ -1054,19 +1088,26 @@
             } else if (!search.selectedUrl) {
                 out.push(alertBox('info', 'ما في صورة مؤكدة:', 'اختار وحدة من الصور تحت، أو دوّر بكلمات ثانية.'));
             }
-            if (code && out.length) out[out.length - 1].setAttribute('title', code);
+            if (code && out.length && !out[out.length - 1].classList.contains('rv-nopick')) out[out.length - 1].setAttribute('title', code);
             return out;
         }
         const p = item.product;
         const bucket = item.bucket;
         if (bucket === 'not_found' || bucket === 'failed') {
             const info = R.failureInfo(p.error_message, item.queue && item.queue.failure_code);
-            const box = alertBox(bucket === 'failed' ? 'danger' : 'info', bucket === 'failed' ? 'عطل:' : 'ما انلقت:', info.text, [
+            // ما انلقت: الجملة التي تقول لماذا (catalog_match.explain) بدل نص الرمز العام، إن حُفظت
+            const why = bucket === 'not_found' ? R.noPickReason(item) : null;
+            const box = alertBox(bucket === 'failed' ? 'danger' : 'info', bucket === 'failed' ? 'عطل:' : 'ما انلقت:', why ? why.text : info.text, [
                 el('span', { className: 'rv-alert__more', text: 'إعادة المحاولة بترجّعه للطابور، وبينبحث عنه بالتشغيل الجاي.' }),
                 p.has_error ? el('button', { type: 'button', className: 'lq-btn lq-btn--secondary lq-btn--sm rv-retry', text: 'إعادة المحاولة',
                                              onclick: () => retryFailures([item]) }) : null,
                 info.detail ? el('details', { className: 'rv-details' }, [el('summary', { text: 'التفاصيل التقنية' }), el('code', { dir: 'ltr', text: info.detail })]) : null
             ]);
+            if (why) {
+                box.classList.add('rv-nopick');
+                box.setAttribute('data-nopick', why.key);
+                box.setAttribute('title', why.key);
+            }
             out.push(box);
         } else if (bucket === 'rejected' || bucket === 'requeued') {
             if (!sess.note) out.push(alertBox('neutral', 'رجعت للطابور:', 'رح ينبحث عنها من جديد بالتشغيل الجاي. إذا بدك هلق: دوّر بكلمات ثانية، أو حط رابط، أو ارفع صورة.'));
@@ -1080,7 +1121,7 @@
         } else if (bucket === 'stale' && hasCands) {
             out.push(alertBox('neutral', 'نتائج بحث سابق:', 'هالمنتج مش بانتظار المراجعة بالطابور، بس فيك تعتمد صورة منها.'));
         } else if (bucket === 'none' && hasCands && !systemPickUrl(item)) {
-            out.push(alertBox('info', 'بلا اقتراح:', 'النظام ما اختار صورة؛ اختار وحدة من الصور تحت، أو دوّر بكلمات ثانية.'));
+            out.push(noPickBanner(R.noPickReason(item)));
         } else if (item.product.has_error && !R.WAITING.includes(bucket)) {
             const info = R.failureInfo(p.error_message, null);
             out.push(alertBox('warning', 'آخر محاولة:', info.text));
@@ -1304,11 +1345,17 @@
             S.ws.state = 'results';
             const pick = currentPick(item);
             const sysUrl = systemPickUrl(item);
-            body.appendChild(el('div', { className: 'rv-compare' }, [
-                pickCard(item, pick, sysUrl, cands.length, null),
-                el('div', { className: 'rv-side' }, [previewCard(pick), pick ? checksCard(item, pick) : null])
-            ]));
-            body.appendChild(altsCard(item, cands, pick, sysUrl));
+            if (!pick && !sysUrl) {
+                // بلا اقتراح ولا اختيار بعد: لا لوحة فارغة؛ الصور أول ما في مساحة العمل، كل وحدة مع «لماذا لم تُختر»
+                body.appendChild(altsCard(item, cands, null, '', { grid: true }));
+            } else {
+                body.appendChild(el('div', { className: 'rv-compare' }, [
+                    pickCard(item, pick, sysUrl, cands.length, null),
+                    el('div', { className: 'rv-side' }, [previewCard(pick), pick ? checksCard(item, pick) : null])
+                ]));
+                // بلا اقتراح والمراجع اختار صورة: الصور الباقية تبقى مع «لماذا لم تُختر»
+                body.appendChild(altsCard(item, cands, pick, sysUrl, { why: !sysUrl }));
+            }
         } else {
             S.ws.state = 'empty';
             if (!item.orphan && !sess.searchError) {

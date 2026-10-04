@@ -986,10 +986,12 @@
 
     // keep: مفاتيح منتجات تبقى في الرقاقة الحالية ما دامت بانتظار المراجعة، أياً كانت مجموعتها الجديدة (منتج رُفضت
     // صورته وأُعيد البحث له فوراً)
-    function filterItems(items, filterKey, query, keep) {
+    // reason: رقاقة «السبب» (catalog_match.explain): منتجات بلا اقتراح هذا سببها أو هذا ما ينقص صفها بالشيت
+    function filterItems(items, filterKey, query, keep, reason) {
         const f = FILTERS.find(x => x.key === filterKey) || FILTERS[0];
         const kept = it => !!(keep && keep.has(it.key)) && WAITING.includes(it.bucket);
-        return items.filter(it => (!f.buckets || f.buckets.includes(it.bucket) || kept(it)) && matchesQuery(it, query));
+        return items.filter(it => (!f.buckets || f.buckets.includes(it.bucket) || kept(it)) && matchesQuery(it, query)
+            && (!reason || itemReasonKeys(it).includes(reason)));
     }
 
     // -------------------------------------------------------------------------------------------------
@@ -1104,6 +1106,121 @@
         if (view && view !== 'front_packshot') out.push(`الصورة مش لواجهة المنتج (${VIEW_LABELS[view] || 'زاوية ثانية'})`);
         return out;
     }
+
+    // -------------------------------------------------------------------------------------------------
+    // No pick: why the engine chose nothing (catalog_match.explain, stored as outcome.explain and served by
+    // queue-state, or in a live search's answer) and, under each image, why it was not chosen
+    // -------------------------------------------------------------------------------------------------
+
+    // اسم كل سبب في رقاقات «السبب» وفي القائمة (نفس catalog_match.explain.REASON_LABELS)؛ الرمز في التلميح فقط
+    const NO_PICK_LABELS = {
+        typo: 'غلطة إملائية بالاسم',
+        brand_unknown: 'ماركة غير معروفة',
+        no_size: 'حجم ناقص بالشيت',
+        no_barcode: 'باركود ناقص بالشيت',
+        unsure: 'قارئ الملصق غير متأكد',
+        verifier_mismatch: 'قارئ الملصق شاف منتج ثاني',
+        brand_not_found: 'ولا صفحة بتذكر الماركة',
+        weak_only: 'صور ضعيفة بس',
+        all_conflicted: 'كل الصور لمنتج ثاني',
+        not_found: 'ما انلقت ولا صورة',
+        only_social: 'صور تواصل اجتماعي بس',
+        download_failed: 'الصور ما تحمّلت',
+        verifier_down: 'قارئ الملصق ما اشتغل',
+        provider_down: 'البحث ما اشتغل'
+    };
+    // منتج بلا اقتراح حُفظ بلا سبب (والحساب من المحفوظ لم ينجح بعد): جملة عامة صادقة
+    const NO_PICK_FALLBACK = 'النظام ما اختار صورة لهالمنتج، وسببه مش محفوظ. اختر من الصور تحت.';
+    // المجموعات التي يُعرض فيها السبب: بانتظار المراجعة بلا اقتراح، وما انلقت
+    const NO_PICK_BUCKETS = ['none', 'not_found'];
+    const CODE_RE = /^[a-z_]{1,40}$/;
+
+    function noPickLabel(key) {
+        return NO_PICK_LABELS[String(key || '')] || 'سبب آخر';
+    }
+
+    // السبب كما يصل (queue-state أو رد البحث) بعد التحقق منه، أو null
+    function validExplain(raw) {
+        if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+        const key = String(raw.key || '');
+        const text = String(raw.text || '').trim();
+        if (!CODE_RE.test(key) || !text) return null;
+        const sheet = (Array.isArray(raw.sheet) ? raw.sheet : [])
+            .filter(s => s && typeof s === 'object' && CODE_RE.test(String(s.key || '')))
+            .map(s => ({ key: String(s.key), text: String(s.text || ''), word: String(s.word || ''),
+                         suggest: String(s.suggest || ''), known: !!s.known }));
+        return { key: key, label: NO_PICK_LABELS[key] || String(raw.label || '') || noPickLabel(key),
+                 engine: CODE_RE.test(String(raw.engine || '')) ? String(raw.engine) : '', text: text, sheet: sheet };
+    }
+
+    // لماذا لا اقتراح لهذا المنتج: من بحث هذه الجلسة إن وُجد، وإلا مما حفظه العامل لصف طابوره
+    function noPickReason(item, search) {
+        if (search) return validExplain(search.explain);
+        return validExplain(item && item.queue ? item.queue.explain : null);
+    }
+
+    // مفاتيح رقاقات «السبب» لسبب واحد: السبب نفسه، ثم ما ينقص صف الشيت (حجم، باركود، ماركة، غلطة إملائية): منتج
+    // حجمه ناقص يظهر تحت «حجم ناقص بالشيت» أياً كان سببه، فيُصلح المالك المجموعة كلها مرة واحدة
+    function reasonKeys(explain) {
+        if (!explain) return [];
+        const keys = [explain.key];
+        explain.sheet.forEach(s => { if (!keys.includes(s.key)) keys.push(s.key); });
+        return keys;
+    }
+
+    function itemReasonKeys(item) {
+        return item && NO_PICK_BUCKETS.includes(item.bucket) ? reasonKeys(noPickReason(item)) : [];
+    }
+
+    // رقاقات «السبب» لعناصر القائمة: [{key, label, count}] الأكثر أولاً
+    function reasonCounts(items) {
+        const counts = new Map();
+        (items || []).forEach(it => itemReasonKeys(it).forEach(k => counts.set(k, (counts.get(k) || 0) + 1)));
+        return Array.from(counts, ([key, count]) => ({ key: key, count: count, label: noPickLabel(key) }))
+            .sort((a, b) => b.count - a.count || (a.label < b.label ? -1 : a.label > b.label ? 1 : 0));
+    }
+
+    // ملاحظات الشيت غير السبب نفسه، بجملة قصيرة لكل واحدة
+    function sheetNotes(explain) {
+        if (!explain) return [];
+        return explain.sheet.filter(s => s.key !== explain.key || s.known).map(s => s.text).filter(Boolean);
+    }
+
+    function tierOf(c) {
+        const n = parseInt(String(c && c.identity_tier !== null && c.identity_tier !== undefined ? c.identity_tier : '').replace(/^t/i, ''), 10);
+        return isFinite(n) ? n : null;
+    }
+
+    // «لماذا لم تُختر»: سطر واحد تحت كل صورة لمنتج بلا اقتراح، من أدلتها كما حسبها المحرك (قراءة الملصق، ذكر
+    // الماركة، الحجم في الصفحة، المتجر). { code, text, tone }، أو null لصورة أضافها المراجع
+    function whyNotPicked(c, prod) {
+        if (!c || c.source === 'manual' || c.source === 'upload') return null;
+        if (c.status === 'excluded' || c.status === 'rejected') {
+            return { code: c.status, text: candidateNote(c, false).text, tone: 'danger' };
+        }
+        const ev = c.evidence || {};
+        const vlm = c.vlm || {};
+        const decision = String(vlm.decision || '');
+        const tier = tierOf(c);
+        const warnings = (c.warnings || []).map(w => String(w).split(':')[0]);
+        const sizeOnPage = ev.size === 'match' || ev.size === true || ev.gtin === 'match';
+        const sheetSize = sheetStates(prod).size;
+        const sizeNote = !sheetSize ? 'والشيت ما فيه حجم' : (sizeOnPage ? '' : 'والحجم غير مكتوب في الصفحة');
+        const withSize = text => (sizeNote ? `${text}، ${sizeNote}` : text);
+        if (decision === 'MISMATCH') return { code: 'vlm_mismatch', text: 'قارئ الملصق شاف منتج ثاني', tone: 'danger' };
+        if (tier === 3 || ev.brand === false) return { code: 'no_brand', text: 'الصفحة ما بتذكر الماركة', tone: 'warning' };
+        if (decision === 'UNSURE') return { code: 'vlm_unsure', text: withSize('قارئ الملصق ما تأكد'), tone: 'warning' };
+        if (!decision || decision === 'UNKNOWN') return { code: 'vlm_unread', text: withSize('قارئ الملصق ما قرأها'), tone: 'warning' };
+        if (warnings.includes('barcode_conflict')) return { code: 'barcode_conflict', text: 'باركود الصفحة مختلف عن الشيت', tone: 'warning' };
+        if (warnings.includes('foreign_store')) return { code: 'foreign_store', text: 'متجر خارج الإمارات', tone: 'warning' };
+        if (warnings.includes('social_media')) return { code: 'social_media', text: 'صورة من مواقع التواصل', tone: 'warning' };
+        return { code: 'not_confident', text: 'ما وصلت للثقة اللي بتخلينا نختارها لحالنا', tone: 'muted' };
+    }
+
+    Object.assign(R, {
+        NO_PICK_LABELS, NO_PICK_FALLBACK, NO_PICK_BUCKETS, noPickLabel, validExplain, noPickReason, reasonKeys,
+        itemReasonKeys, reasonCounts, sheetNotes, whyNotPicked
+    });
 
     Object.assign(R, {
         REVIEW_WARNING_LABELS, VARIANT_AXIS_LABELS, REJECT_REASONS, COSMETIC_REASONS, FAILURE_TEXT, NOT_FOUND_CODES,

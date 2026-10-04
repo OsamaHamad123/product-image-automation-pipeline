@@ -109,8 +109,10 @@ out.social = [social.querySelector('.rv-alt__note').textContent, social.querySel
 press('3');
 out.picked_caution = caution();
 openRow(11);
-out.unselected = ws().querySelectorAll('.rv-alt').map(b => [b.querySelector('.rv-alt__note').textContent,
-                                                           b.querySelectorAll('.rv-alt__warn').map(w => w.textContent)]);
+// a product without a pick: under each image its first warning (if any), «لماذا لم تُختر», then the other warnings
+const noteOf = b => { const n = b.querySelector('.rv-alt__note'); return n ? n.textContent : null; };
+out.unselected = ws().querySelectorAll('.rv-alt').map(b => [noteOf(b), b.querySelectorAll('.rv-alt__warn').map(w => w.textContent),
+                                                           b.querySelector('.rv-alt__why') !== null]);
 press('1');
 out.unselected_caution = caution();
 """, tmp_path, fixture([MILK, LABAN]))
@@ -119,8 +121,8 @@ out.unselected_caution = caution();
     assert out["social"][0].startswith("الباركود بالشيت مختلف") and out["social"][1] == ["الصورة من مواقع التواصل الاجتماعي"]
     assert "الباركود بالشيت مختلف" in out["picked_caution"] and "مواقع التواصل" in out["picked_caution"]
     assert out["unselected"][0][0].startswith("الصورة من متجر خارج الإمارات")
-    assert out["unselected"][0][1] == ["صورة منخفضة الدقة (أقل من 500 بكسل)"]
-    assert out["unselected"][1] == ["مطابقة محتملة", []]
+    assert out["unselected"][0][1] == ["صورة منخفضة الدقة (أقل من 500 بكسل)"] and out["unselected"][0][2] is True
+    assert out["unselected"][1] == [None, [], True]          # no warning: «لماذا لم تُختر» says it all
     assert "خارج الإمارات" in out["unselected_caution"] and "منخفضة الدقة" in out["unselected_caution"]
 
 

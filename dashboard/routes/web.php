@@ -53,6 +53,8 @@ Route::post('/api/v1/curation/save-candidates', [CurationController::class, 'sav
 
 // حزمة المراجعة (P2 review): من ينتظر المراجعة حسب حالة صف الطابور، بنفس عدّ /api/batch-status
 Route::get('/api/review/queue-state', [ReviewController::class, 'queueState']);
+// سبب «بلا اقتراح» لصفوف حُفظت قبل أن يحسبه العامل: يُحسب مرة مما حُفظ (بلا بحث وبلا تكلفة)
+Route::post('/api/review/explain-backfill', [ReviewController::class, 'explainBackfill']);
 
 // حالة جسر بايثون وقاعدة البيانات
 Route::get('/api/system/status', [ApiController::class, 'systemStatus']);
