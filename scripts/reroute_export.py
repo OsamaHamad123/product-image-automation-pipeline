@@ -12,9 +12,11 @@ The export is scripts/export_run.py's file (format smoke_live/2, export laqta_ru
     store spellings the run searched under (discovered_brands, or the 'brand_spelling:<spelling>' warnings;
     brand_discovery.apply);
   * every top[] candidate becomes a RankedCandidate with its RECORDED listing evidence: tier, size and pack
-    status, conflicts, source class (and its trust), the url-only size conflict, a hard reject ('hard:*'), a
-    failed download (download_error or 'download:*') and a failed hard quality gate ('quality:*'). The size each
-    listing field states (title, URL slug, image file name) is parsed again from the recorded title and URLs;
+    status, conflicts, the url-only size conflict, a hard reject ('hard:*'), a failed download (download_error or
+    'download:*') and a failed hard quality gate ('quality:*'). The size each listing field states (title, URL
+    slug, image file name) is parsed again from the recorded title and URLs, and the page's source class (and
+    its trust) is read again from this checkout's trusted_domains.json (score.source_trust: a newly listed UAE
+    retailer counts), except a brand-official or reviewed source, which the export cannot rebuild (recorded);
   * the label reading (label_reader flags with the vlm brand / variant / size texts) is classified again with
     the CURRENT verify.classify;
   * the CURRENT decide.route decides, with the export's recorded auto-publish settings and provider answers.
@@ -39,11 +41,14 @@ if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
 APPROXIMATION = ("APPROXIMATION: recorded tiers and listing evidence, the top candidates of each row only, no page "
-                 "titles; the label readings are classified and every row routed again with this checkout's rules.")
+                 "titles; the label readings are classified, the page domains' trust read again and every row routed "
+                 "again with this checkout's rules.")
 PICK_DECISIONS = ("AUTO_PUBLISH", "REVIEW_PRESELECTED")
 NONE = "-"
 # the export's recorded settings that routing reads (everything else stays at its default: no DB, no .env)
 ROUTE_SETTINGS = ("AUTO_PUBLISH_ENABLED", "AUTO_PUBLISH_BRANDS", "GTIN_POLICY")
+# source classes that depend on the brand's mappings or the reviews (official sites, learned sources): kept as recorded
+PER_SKU_SOURCES = ("official", "reviewed_source")
 
 
 # ---------------------------------------------------------------------------
@@ -165,7 +170,7 @@ def _verdict(spec, index: int, entry: Mapping[str, Any]):
 def ranked_candidate(spec, entry: Mapping[str, Any], index: int):
     """One top[] entry as a RankedCandidate with its recorded score facts and a reading classified again."""
     from catalog_match.models import Candidate, CandidateScore, FetchedImage, QualityReport, RankedCandidate
-    from catalog_match.score import TRUST_NAMES, TRUST_UAE_RETAILER
+    from catalog_match.score import TRUST_NAMES, TRUST_UAE_RETAILER, source_trust
     from catalog_match.text_norm import url_host
 
     reasons = [str(r) for r in entry.get("reasons") or ()]
@@ -182,6 +187,9 @@ def ranked_candidate(spec, entry: Mapping[str, Any], index: int):
     source_class = str(entry.get("source_class") or bits.get("source_class") or "generic")
     trust = {name: level for level, name in TRUST_NAMES.items()}
     trust["reviewed_source"] = TRUST_UAE_RETAILER
+    level = trust.get(source_class, 0)
+    if source_class not in PER_SKU_SOURCES:
+        level, source_class = source_trust(spec, cand)      # the domain lists of this checkout
     tier = entry.get("tier")
     try:
         coverage = float(bits.get("coverage") or 0.0)
@@ -195,7 +203,7 @@ def ranked_candidate(spec, entry: Mapping[str, Any], index: int):
                  "size_fields": _size_fields(spec, title, page_url, image_url),
                  "pack": size_ev.get("pack") or "unknown", "variants": list(var_ev.get("matched") or ()),
                  "variants_found": dict(var_ev.get("found") or {}), "gtin": size_ev.get("gtin"),
-                 "coverage": coverage, "source_trust": trust.get(source_class, 0), "source_class": source_class,
+                 "coverage": coverage, "source_trust": level, "source_class": source_class,
                  "page_domain": url_host(page_url) or cand.domain},
         conflicts=tuple(str(c) for c in entry.get("conflicts") or ()),
         size_status=size_status,

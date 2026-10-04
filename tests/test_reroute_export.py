@@ -117,6 +117,19 @@ def test_recorded_failures_stay_failures(reroute):
     assert out.winner is ranked[0]
 
 
+def test_the_page_trust_is_read_again_from_this_checkouts_domain_lists(reroute):
+    # live run 2026-10-04 19:33: the export recorded sharjahcoop.ae as 'generic'; it is a listed UAE retailer now.
+    # A brand-official or a reviewed source depends on the brand's mappings: it stays as recorded.
+    spec = reroute.build_spec(export()["rows"][0])
+    sharjah = entry(1, "Zwan Luncheon Meat Beef Hot & Spicy 340g | Sharjah Co-operative Society",
+                    "https://www.sharjahcoop.ae/en/zwan-luncheon-meat-beef-hot-spicy-340g/p/8714555001239",
+                    "https://www.sharjahcoop.ae/medias/8714555001239-1200Wx1200H-001.jpg", ZWAN_UNSURE)
+    official = entry(2, "Zwan Luncheon Meat Beef Hot & Spicy 340g", "https://www.zwan.example/beef-hot-spicy-340g",
+                     "https://www.zwan.example/beef.jpg", ZWAN_UNSURE, source_class="official")
+    scored = [reroute.ranked_candidate(spec, e, i).score.matched for i, e in enumerate((sharjah, official))]
+    assert [(m["source_class"], m["source_trust"]) for m in scored] == [("uae_retailer", 3), ("official", 4)]
+
+
 def test_report_names_the_approximation_and_the_changed_rows_only(reroute):
     results = reroute.reroute(export())
     text = reroute.format_report(results)

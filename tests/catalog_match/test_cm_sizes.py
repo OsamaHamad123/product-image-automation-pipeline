@@ -71,6 +71,24 @@ def test_grammar_more_forms():
     assert parse_sizes("3 لبن", "title") == []
 
 
+@pytest.mark.parametrize("text, dimension, value, pack", [
+    # the EU estimated sign after the net quantity, as the label reader copies it (live run 2026-10-04 19:33, row 9)
+    ("840ge", "mass", 840.0, None), ("840 g e", "mass", 840.0, None), ("840g℮", "mass", 840.0, None),
+    ("840 g ℮", "mass", 840.0, None), ("840gℯ", "mass", 840.0, None), ("NET WT 840ge", "mass", 840.0, None),
+    ("1kge", "mass", 1000.0, None), ("500mle", "volume", 500.0, None), ("75cle", "volume", 750.0, None),
+    ("2X185ge", "mass", 185.0, 2), ("185ge x 3", "mass", 185.0, 3), ("1L℮", "volume", 1000.0, None),
+])
+def test_the_estimated_sign_after_a_unit(text, dimension, value, pack):
+    s = one(text, "vlm")
+    assert (s.dimension, s.base_value, s.pack_count) == (dimension, value, pack)
+
+
+def test_a_word_after_a_unit_is_no_estimated_sign():
+    # only a lone 'e' glued to g / gm / kg / ml / cl: never a word ('840 gen'), never after a bare 'l' (French 'le')
+    assert parse_sizes("840 gen", "title") == []
+    assert parse_sizes("2le", "title") == [] and parse_sizes("lot de 2 le", "title") == []
+
+
 def test_nutrient_context_ignored():
     assert [s.base_value for s in parse_sizes("Oats 500g - 10g fibre", "title")] == [500.0]
     assert [s.base_value for s in parse_sizes("Corn Flakes 500g | 20g per serving", "title")] == [500.0]

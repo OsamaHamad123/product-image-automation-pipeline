@@ -387,7 +387,10 @@ def _ranked_row11():
 def test_row11_the_thin_fries_listing_ranks_below_the_plain_ones():
     spec, ranked = _ranked_row11()
     scores = {c.image_url: s for c, s in ranked}
-    assert all(s.tier == 2 for s in scores.values())
+    # Sharjah Co-op is a listed UAE retailer (trusted_domains.json, since the 2026-10-04 19:33 run): its plain
+    # listing makes tier 1; the two others stay tier 2
+    assert {c.image_url: s.tier for c, s in ranked} == {LULU_KSA_THIN.image_url: 2, SPINNEYS.image_url: 2,
+                                                         SHARJAH.image_url: 1}
     assert "unstated_variant:fries_cut" in scores[LULU_KSA_THIN.image_url].conflicts
     assert [c.image_url for c, _ in ranked][-1] == LULU_KSA_THIN.image_url     # was first, on provider order
 

@@ -46,7 +46,9 @@ Then, within EXPANSION_MAX_CALLS paid calls (every provider call counts):
     X3, X4  visual search seeded by the best near-matches of the normal flow: brand-
         consistent tier 1/2 candidates the verifier read as UNSURE (or MATCH on an image
         too small to use), tier-1 or 'only the size is missing' tier-2 candidates it never
-        read, and right-brand images rejected only for being too small. SerpApi (about
+        read, and right-brand images rejected only for being too small; never a reading
+        whose 'no' only the code set aside (decide.no_set_aside: a MISMATCH, no seed, before
+        verify.size_close and verify.overruled_flags). SerpApi (about
         15x a Serper call) is asked for at most one seed per product;
     X5  serper_web over the other UAE retailers, only when calls remain, no seed existed
         and the first rounds found no tier 1/2 candidate.
@@ -512,6 +514,8 @@ def near_matches(spec: SkuSpec, ranked: Sequence[RankedCandidate]) -> List[Ranke
         v = rc.verdict
         if v is not None and (v.decision == decide.MISMATCH or v.brand_match == "no"):
             continue
+        if decide.no_set_aside(spec, rc):
+            continue                       # the reader's 'no' (a close size, an overruled flag): no paid seed
         if rc.fetched is not None and not rc.fetched.ok:
             continue                       # the image is not there (404, not an image)
         small = rc.quality is not None and not rc.quality.hard_ok
