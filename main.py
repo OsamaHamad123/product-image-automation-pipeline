@@ -512,9 +512,9 @@ def publish_image(image_url, name, brand, row_number, worksheet, link_column_ind
 
 
 # علامات بوابة القص التي تخص العرض فقط (الخلفية معزولة): المراجع يستطيع نشر اللوحة رغمها بعد أن يراها
-# (publish_anyway). edge_clipped و opaque_backdrop وأي علامة أخرى، وعزل فشل بلا علامات، لا يُنشر نظيفاً أبداً.
-PRESENTATION_FLAGS = frozenset({"upscaled", "too_small_on_canvas", "second_object", "opaque_fill", "alpha_haze",
-                                "kept_shadow"})
+# (publish_anyway). edge_clipped و opaque_backdrop و opaque_fill (لم يُزل شيء من الخلفية: image_processor) وأي علامة
+# أخرى، وعزل فشل بلا علامات، لا يُنشر نظيفاً أبداً: هي «الخلفية لم تُعزل» (background_failed).
+PRESENTATION_FLAGS = frozenset({"upscaled", "too_small_on_canvas", "second_object", "alpha_haze", "kept_shadow"})
 
 
 def _accepts(func, name):

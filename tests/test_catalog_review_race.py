@@ -688,6 +688,7 @@ document.getElementById('rvRejectResearch').checked = true;
 press('4');                                          // reject B's third image and search again
 await flush();
 R.setMode('bulk');
+await flush();                                       // its card is on screen and its picture loaded: approvable
 R.bulk.approveOne(itemOf(9).key);                    // approve B's system pick from bulk mode meanwhile
 await flush();
 answer(requests('/api/select_image')[0], __OK__);

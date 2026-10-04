@@ -571,10 +571,8 @@ def test_approving_an_image_another_reviewer_rejected_after_the_page_opened_is_r
     result = cli_bridge.action_select_image(_approve_params(row, MILK, pick, sku, GTIN, expected_state=seen,
                                                             replace=True))
     assert result["reason"] == "image_rejected"
-    # the same picture under another address (its pHash) is the rejected image too
-    result = cli_bridge.action_select_image(_approve_params(row, MILK, "https://mirror/pick.jpg", sku, GTIN,
-                                                            expected_state=seen, phash="0f0ff0f03c3ca5a4"))
-    assert result["reason"] == "image_rejected"
+    # the same picture under another address (its pHash, read from the stored candidate's bytes, never from a phash
+    # sent with the approval): tests/test_review_guards_bridge.py
     assert env["sheet"] == [] and db.get_cached_product(sku_key=sku) is None
     # another image of the product is approved as usual
     assert cli_bridge.action_select_image(_approve_params(row, MILK, other, sku, GTIN,

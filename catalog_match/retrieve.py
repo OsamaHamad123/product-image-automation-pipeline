@@ -19,7 +19,8 @@ retrieve(spec, providers, custom_query=None, exclude_urls=(), max_queries=4,
 * A provider that raises is isolated: its health is 'error' and the other
   providers' candidates remain.
 * Candidates are deduplicated on norm_image_url(); duplicates merge their page
-  evidence and raise consensus_count (one count per distinct provider + page).
+  evidence and raise consensus_count (one count per distinct page site: the same store
+  page found by two providers, or a hit without a page, is not a second source).
   An entry a page we read ourselves touched (the local catalog index, the expansion
   round's page reads: PAGE_READ_PROVIDERS) carries scraped evidence: it is never
   sanctioned, even when a search API also returns the image, so it never auto-publishes;
@@ -100,6 +101,12 @@ def _page_key(page_url: str) -> str:
     return norm_image_url(page_url) if page_url else ""
 
 
+def _page_site(page_url: str) -> str:
+    """The site of the page an image was found on ('' without a page): consensus counts sites, not providers."""
+    from .text_norm import url_host
+    return url_host(page_url) if page_url else ""
+
+
 # ---------------------------------------------------------------------------
 # Pool
 # ---------------------------------------------------------------------------
@@ -107,7 +114,7 @@ def _page_key(page_url: str) -> str:
 @dataclass
 class _Entry:
     cand: Candidate
-    sources: Set[Tuple[str, str]] = field(default_factory=set)
+    sources: Set[str] = field(default_factory=set)    # the page sites ('' = a hit without a page)
     page_read: bool = False         # a page we read ourselves gave evidence to this entry
 
 
@@ -157,7 +164,7 @@ class CandidatePool:
         if key in self.exclude:
             self.excluded += 1
             return False
-        source = (cand.provider, _page_key(cand.page_url))
+        source = _page_site(cand.page_url)
         entry = self._entries.get(key)
         if entry is None:
             page_read = _page_read(cand)
@@ -167,7 +174,7 @@ class CandidatePool:
         entry.sources.add(source)
         entry.page_read = entry.page_read or _page_read(cand)
         merged = self._merge(entry.cand, cand, relaxed, entry.page_read)
-        entry.cand = replace(merged, consensus_count=len(entry.sources))
+        entry.cand = replace(merged, consensus_count=max(1, len(entry.sources - {""})))
         return False
 
     def _trust(self, cand: Candidate) -> int:

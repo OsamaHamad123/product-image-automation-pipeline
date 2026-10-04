@@ -10,6 +10,17 @@ use App\Services\QueueStats;
 
 class ApiController extends Controller
 {
+    /** حقول اعتماد صورة كما ترسلها شاشة المراجعة (review/core.js selectBody و reviewedCandidateView)، ولا غيرها. */
+    private const SELECT_FIELDS = [
+        'image_url', 'page_url', 'candidate_sha256', 'row_number', 'product_name', 'brand', 'barcode', 'sku_key',
+        'size', 'product_name_ar', 'brand_ar', 'category', 'sub_category', 'origin',
+        'search_decision', 'candidate_status', 'candidate_cache_hit', 'identity_tier', 'vlm_decision',
+        'candidate_warnings', 'target_width', 'target_height',
+    ];
+
+    /** ما رأته الصفحة (عقد C1): حالة صف الطابور ووقت تحديثه ورقمه، والصورة المعتمدة. */
+    private const EXPECTED_STATE_FIELDS = ['queue_status', 'queue_updated_at', 'approved_url', 'queue_row'];
+
     private function getPythonPath()
     {
         return PythonBridge::pythonPath();
@@ -55,7 +66,18 @@ class ApiController extends Controller
      */
     public function selectImage(Request $request)
     {
-        $params = $request->all();
+        // قائمة صريحة بما ترسله شاشة المراجعة (review/core.js selectBody) مثل رفع الصورة: لا phash ولا content_sha256
+        // ولا category_l*_en ولا أي حقل آخر يمر إلى الجسر (كانت تتجاوز فحص الصور المرفوضة، وتختار بايتات مرشح آخر من
+        // مخزن المرشحات، وتغيّر مجلد Cloudinary وبيانات الشيت). candidate_sha256 يتحقق منه الجسر أمام المرشح المحفوظ
+        $params = $request->only(self::SELECT_FIELDS);
+        $expected = $request->input('expected_state');
+        if (is_string($expected)) {
+            $decoded = json_decode($expected, true);
+            $expected = is_array($decoded) ? $decoded : null;
+        }
+        if (is_array($expected)) {
+            $params['expected_state'] = array_intersect_key($expected, array_flip(self::EXPECTED_STATE_FIELDS));
+        }
         if ($request->has('replace')) {
             $params['replace'] = $request->boolean('replace');
         }
@@ -121,7 +143,7 @@ class ApiController extends Controller
             $expected = is_array($decoded) ? $decoded : null;
         }
         if (is_array($expected)) {
-            $params['expected_state'] = array_intersect_key($expected, array_flip(['queue_status', 'queue_updated_at', 'approved_url']));
+            $params['expected_state'] = array_intersect_key($expected, array_flip(self::EXPECTED_STATE_FIELDS));
         }
         if ($request->has('replace')) {
             $params['replace'] = $request->boolean('replace');

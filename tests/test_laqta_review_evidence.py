@@ -40,7 +40,10 @@ def js(value):
 
 
 def cand(url, status="eligible", selected=0, **extra):
-    row = {"image_url": url, "status": status, "is_selected": selected, "title": url.rsplit("/", 1)[-1], "reasons": []}
+    # the store page confirmed the sheet's size unless a test says otherwise: a saved row without evidence is
+    # «size unverified» (review/core.js unverifiedWarnings, tested on its own below)
+    row = {"image_url": url, "status": status, "is_selected": selected, "title": url.rsplit("/", 1)[-1], "reasons": [],
+           "evidence": {"size": "match"}}
     row.update(extra)
     return row
 
@@ -216,7 +219,7 @@ out.card = chips(document.querySelector('.rv-card'));
 """, tmp_path, fixture([MILK]))
     assert out["pick"] == ["gtin", "consensus", "source", "page", "label"]
     assert out["alts"][0] == ["gtin", "consensus", "source", "page", "label"]     # the system pick among the images
-    assert out["alts"][1] == ["page"] and out["alts"][2] == []
+    assert out["alts"][1] == ["page"] and out["alts"][2] == ["page"]
     assert out["card"] == ["gtin", "consensus", "source", "page", "label"]
 
 
@@ -347,7 +350,7 @@ def test_bulk_keys_move_tick_and_approve_like_the_buttons(tmp_path):
 R.setMode('bulk');
 await flush();
 const focused = () => { const c = document.querySelector('.rv-card.is-focused'); return c ? S().byKey.get(c.getAttribute('data-key')).product.row_number : null; };
-const ticked = () => Array.from(S().bulk.selected).map(k => S().byKey.get(k).product.row_number).sort();
+const ticked = () => R.bulk.tickedKeys().map(k => S().byKey.get(k).product.row_number).sort();
 out.start = [focused(), ticked()];
 press('ArrowDown');
 out.first = [focused(), document.activeElement.getAttribute('data-key') === itemOf(42).key];
@@ -387,7 +390,8 @@ out.all_sent = requests('/api/select_image').map(c => c.body.row_number);
     assert out["second"] == 40 and out["back"] == 42
     assert out["unticked"] == [40, 45] and out["reticked"] == [40, 42, 45]
     assert out["on_warning"] == 41
-    assert out["refused"][0] == 0 and out["refused"][1].startswith("تأكد قبل الاعتماد: نموذج القراءة غير متأكد")
+    # the confirmation names the product it is about
+    assert out["refused"][0] == 0 and out["refused"][1].startswith("«Alpha Laban»: تأكد قبل الاعتماد: نموذج القراءة غير متأكد")
     assert out["repeat"] == 0
     assert out["approved"] == [["42"], 40]                     # the next card is focused after an approval
     assert "رح ننشر 2 صور مقترحة بلا تحذير" in out["bulk_confirm"]
@@ -414,7 +418,7 @@ out.research = reject.body.research;
 // the server saved the new candidates (no pick this time) and put the product back to review
 const answerData = { status: 'review', decision: 'REVIEW_UNSELECTED', sku_key: 'key-9', candidates_saved: 1,
                      candidates: [{ url: 'https://www.lulu.com/b7.jpg', status: 'eligible', title: 'new', warnings: ['foreign_store'] }],
-                     rejection: { approval_kept: false } };
+                     rejection: { approval_kept: false, queue_status: 'ready_for_review', candidates_left: 0 } };
 FIXTURE.products[0].curation_candidates = [{ image_url: 'https://www.lulu.com/b7.jpg', status: 'eligible', is_selected: 0,
                                              reasons: ['warn:foreign_store'] }];
 answer(reject, answerData);
@@ -491,12 +495,17 @@ out.panel = jobsText();
 out.buttons = document.querySelectorAll('#rvJobs button').map(b => b.textContent);
 out.bucket = itemOf(9).bucket;
 const replace = () => document.querySelectorAll('#rvJobs button').find(b => b.textContent === 'استبدال المعتمدة…');
-confirmAnswer = false;
 replace().click();
 await flush();
-out.after_no = [requests('/api/select_image').length, confirms.slice(-1)[0]];
-confirmAnswer = true;
+// the confirmation shows the image approved now (and for which product) next to the reviewer's pick
+const dialog = document.getElementById('rvDialog');
+out.dialog = [dialog.hidden, dialog.textContent, imgSrcs(dialog)];
+document.getElementById('rvAskCancel').click();
+await flush();
+out.after_no = [requests('/api/select_image').length, dialog.hidden];
 replace().click();
+await flush();
+document.getElementById('rvAskConfirm').click();
 await flush();
 const second = requests('/api/select_image')[1];
 out.second = [second.body.replace, second.body.expected_state, second.body.image_url];
@@ -506,15 +515,21 @@ await flush();
 out.done = itemOf(9).bucket;
 """, tmp_path, fixture([B, OTHER]))
     assert out["expected"] == {"queue_status": "ready_for_review", "queue_updated_at": "2026-10-03 10:00:00",
-                               "approved_url": None}
+                               "approved_url": None, "queue_row": 9}
     assert out.get("replace") is None                          # never sent without the reviewer's confirmation
     assert out["toast"]["variant"] == "danger" and "اعتُمدت لهذا المنتج صورة بعد فتح الصفحة" in out["toast"]["text"]
     assert "صار له صورة معتمدة" in out["panel"] and "حالته كانت «بانتظار المراجعة» وصارت «ليس في الطابور»" in out["panel"]
     assert "استبدال المعتمدة…" in out["buttons"] and "أعد المحاولة" not in out["buttons"]
     assert out["bucket"] == "proposed"                          # still waiting: nothing was published
-    assert out["after_no"][0] == 1 and "هل تريد استبدال" in out["after_no"][1]
+    hidden, text, imgs = out["dialog"]
+    assert hidden is False and "استبدال صورة «Almarai Fresh Milk 2L»" in text
+    assert "المعتمدة الآن لـ «Almarai Fresh Milk 2L»" in text and "الصورة التي اخترتها" in text
+    assert imgs[0] == "https://res.cloudinary.com/demo/other.png" and "b1.jpg" in imgs[1]
+    assert out["after_no"] == [1, True]                         # cancelled: nothing sent
+    # what the confirmation showed is what the server compares (replace no longer skips the comparison)
     assert out["second"] == [True, {"queue_status": None, "queue_updated_at": None,
-                                    "approved_url": "https://res.cloudinary.com/demo/other.png"}, B_URLS[0]]
+                                    "approved_url": "https://res.cloudinary.com/demo/other.png", "queue_row": 9},
+                             B_URLS[0]]
     assert out["retry_bucket"] == "approving" and out["done"] == "approved"
 
 
@@ -543,7 +558,7 @@ out.upload_replace = upload.body.replace === undefined ? null : upload.body.repl
     assert "تغيّرت حالة المنتج بعد فتح الصفحة" in out["panel"]
     assert "حالته كانت «بانتظار المراجعة» وصارت «في الطابور»" in out["panel"]
     assert out["upload_expected"] == {"queue_status": None, "queue_updated_at": None,
-                                      "approved_url": "https://res.cloudinary.com/demo/c.png"}
+                                      "approved_url": "https://res.cloudinary.com/demo/c.png", "queue_row": None}
     assert out["upload_replace"] is None
 
 
@@ -740,7 +755,7 @@ await flush();
 out.second = requests('/api/select_image')[1].body.expected_state;
 """.replace("__CUR__", js(current)), tmp_path, fixture([B, OTHER]))
     assert out["second"] == {"queue_status": "completed", "queue_updated_at": "2026-10-03 11:00:00",
-                             "approved_url": "https://res.cloudinary.com/demo/b.png"}
+                             "approved_url": "https://res.cloudinary.com/demo/b.png", "queue_row": None}
 
 
 # ---------------------------------------------------------------------------
