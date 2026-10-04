@@ -249,9 +249,12 @@ def classify(spec: SkuSpec, verdict: VlmImageVerdict) -> str:
     brand_state = _brand_reading(spec, verdict.brand_text)
     if brand_state == "other":
         return MISMATCH
-    # The label reading ('White Meat') seldom repeats the product type, so the SKU supplies the context.
-    printed_variants = variants_mod.extract_variants(verdict.variant_text, variants_mod.spec_context(spec))
-    if variants_mod.conflicts(spec.variants, printed_variants):
+    # The label reading ('White Meat') seldom repeats the product type, so the SKU supplies the context; a
+    # context the reading opens re-reads the SKU too (variants.target_variants).
+    target = variants_mod.target_variants(spec, verdict.variant_text)
+    printed_variants = variants_mod.extract_variants(verdict.variant_text, variants_mod.spec_context(spec),
+                                                     variants_mod.spec_brands(spec))
+    if variants_mod.conflicts(target, printed_variants):
         return MISMATCH
     if verdict.view in REJECT_VIEWS:
         # a multipack SKU may legitimately be read as 'several products'
@@ -261,7 +264,7 @@ def classify(spec: SkuSpec, verdict: VlmImageVerdict) -> str:
         return UNSURE
     if spec.match_brands and brand_state != "target":
         return UNSURE
-    if variants_mod.soft_conflicts(spec.variants, printed_variants):
+    if variants_mod.soft_conflicts(target, printed_variants):
         return UNSURE
     if spec.variants and verdict.variant_match != "yes":
         return UNSURE

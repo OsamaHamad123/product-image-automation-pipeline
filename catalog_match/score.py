@@ -534,28 +534,35 @@ def score_candidate(spec: SkuSpec, cand: Candidate, negatives=None) -> Candidate
         soft_cap = True
 
     # --- variants --------------------------------------------------------
+    # Both sides are read with the same context: the SKU's text and the listing's own fields. A context only the
+    # listing opens ('... with Seasoning' for 'INDOMIE CHICKEN NOODLES') re-reads the SKU (variants.target_variants).
     context = variants_mod.spec_context(spec)
-    found_variants = {name: variants_mod.extract_variants(fields[name], context) for name in IDENTITY_FIELDS}
+    listing_texts = [fields[name] for name in IDENTITY_FIELDS]
+    read_context = " ".join([context] + listing_texts)
+    target = variants_mod.target_variants(spec, *listing_texts)
+    brands = variants_mod.spec_brands(spec)
+    found_variants = {name: variants_mod.extract_variants(fields[name], read_context, brands)
+                      for name in IDENTITY_FIELDS}
     hard_axes: List[str] = []
     for name in VARIANT_HARD_FIELDS:
-        for axis in variants_mod.conflicts(spec.variants, found_variants[name]):
+        for axis in variants_mod.conflicts(target, found_variants[name]):
             conflicts.append(f"variant_conflict:{axis}:{name}")
             if axis not in hard_axes:
                 hard_axes.append(axis)
     hard.extend(f"variant_conflict:{axis}" for axis in hard_axes)
-    for axis in variants_mod.conflicts(spec.variants, found_variants["image_file"]):
+    for axis in variants_mod.conflicts(target, found_variants["image_file"]):
         if axis not in hard_axes:
             conflicts.append(f"image_variant_conflict:{axis}")
             soft_cap = True
     for name in IDENTITY_FIELDS:
-        for axis in variants_mod.soft_conflicts(spec.variants, found_variants[name]):
+        for axis in variants_mod.soft_conflicts(target, found_variants[name]):
             conflicts.append(f"soft_variant_conflict:{axis}:{name}")   # Diet vs Zero Sugar
             soft_cap = True
     matched_axes: List[str] = []
-    for axis in spec.variants:
+    for axis in target:
         if axis in hard_axes:
             continue
-        if any(axis in variants_mod.matched_axes(spec.variants, found_variants[n]) for n in IDENTITY_FIELDS):
+        if any(axis in variants_mod.matched_axes(target, found_variants[n]) for n in IDENTITY_FIELDS):
             matched_axes.append(axis)
     unstated: List[str] = []
     for name in VARIANT_HARD_FIELDS:
@@ -563,16 +570,17 @@ def score_candidate(spec: SkuSpec, cand: Candidate, negatives=None) -> Candidate
         if name == "page_slug":
             # Retailers name departments after a form ('/fresh-food/' holds water, juice and laban):
             # an unstated form counts from the product's own slug segment, not the breadcrumbs.
-            own = variants_mod.extract_variants(url_path_text(cand.page_url, product_segment=True), context)
+            own = variants_mod.extract_variants(url_path_text(cand.page_url, product_segment=True), read_context,
+                                                 brands)
             found = {axis: value for axis, value in found.items() if axis not in DEPARTMENT_AXES}
             found.update({axis: value for axis, value in own.items() if axis in DEPARTMENT_AXES})
-        for axis in variants_mod.unstated_marked(spec.variants, found, context):
+        for axis in variants_mod.unstated_marked(target, found, context):
             if axis not in unstated:
                 unstated.append(axis)
     for axis in unstated:
         conflicts.append(f"unstated_variant:{axis}")
         soft_cap = True
-    variants_ok = len(matched_axes) == len(spec.variants)
+    variants_ok = len(matched_axes) == len(target)
 
     # --- source, stock, negatives ---------------------------------------
     trust, trust_name = source_trust(spec, cand)
@@ -658,7 +666,7 @@ def score_candidate(spec: SkuSpec, cand: Candidate, negatives=None) -> Candidate
         # the display score counts a GTIN match only where it counts for the tier
         identity_score=_identity_score(tier, brand_ok, gtin_ok and (policy == "strict" or brand_t1),
                                        size_status, len(matched_axes),
-                                       len(spec.variants), coverage, trust),
+                                       len(target), coverage, trust),
         hard_reject=tuple(dict.fromkeys(hard)),
         matched=matched,
         conflicts=tuple(dict.fromkeys(conflicts)),

@@ -320,7 +320,7 @@ def test_meat_in_luncheon_meat_is_the_product_not_the_protein():
 
 
 @pytest.mark.parametrize("text, context, protein", [
-    ("Mutton Meat Masala", None, "mutton"),             # 'meat' is generic: the animal wins
+    ("Mutton Meat Masala", None, "meat+mutton"),        # a listing keeps its 'meat masala' (the SKU side: mutton)
     ("Beef Luncheon Meat", None, "beef"),
     ("مرتديلا لحم بقري 340 جم", None, "beef"),
     ("ماسالا الدجاج", None, "chicken"),

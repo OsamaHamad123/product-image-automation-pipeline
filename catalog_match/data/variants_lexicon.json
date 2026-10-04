@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "_doc": "Mutually exclusive variant groups (axes). Each value lists English and Arabic phrases; phrases are matched on whole tokens after catalog_match.text_norm normalisation, longest phrase first. 'unmarked' lists the values that do NOT make a candidate suspicious when the target SKU does not state that axis (e.g. a retailer title adding 'Full Fat' to 'Almarai Fresh Milk'). 'soft_groups' lists sets of values of one axis that describe closely related but distinct lines (Diet vs Zero Sugar vs Sugar Free): a difference inside one set is a soft conflict (never tier 1, never auto-publish) instead of a hard reject, because retailers word the same line differently. The form axis has no unmarked values: fresh, long-life, frozen and powder are different SKUs, so a candidate stating a form the SKU does not state is capped below tier 1. The medium axis is the oil or liquid a product is packed in or made of (tuna in sunflower oil vs olive oil vs water; sunflower vs corn oil): different SKUs, so it has no unmarked value. 'contexts' names token sets; an axis's 'context_values' ({context: {value: [phrases]}}) are matched only when the text, or the SKU the text is compared with, contains a token of that context. 'White' is a meat grade on a tuna can and a colour anywhere else; 'water' is the packing medium of tuna and the product itself for a bottle. At equal phrase length a context-bound phrase wins ('light' on a tuna can is the meat grade, not low fat). 'fries_cut' (thin, crinkle, steak, ...) and 'cheese_form' (shredded, sliced, ...) are context-bound the same way: 'thin' is a cut only next to fries or potato, 'block' a form only next to cheese. Their default forms (straight-cut fries, a cheese block) are unmarked. An axis's 'context_unmarked' ({context: [values]}) lists values that are the normal state of products in that context, so stating them is not suspicious: fries, paratha, nuggets and shawarma are sold frozen, and 'Frozen French Fries' neither caps tier 1 nor warns the reviewer for 'AIDA FRENCH FRIES'. The protein axis (beef, chicken, mutton, lamb, fish) is read only next to a product made of one of them ('meat_products': luncheon meat, masala, burgers, sausages; live run 2026-10-03: 'ZWAN BEEF LUNCHEON MEAT' scored the Zwan Chicken listing tier 1, 'ALLDE MEAT MASALA' the Allde Chicken Masala one); its 'meat' value only in a spice mix ('MEAT MASALA', 'MEAT SPICE'), never in 'luncheon meat'. An axis's 'generic' values give way to a more specific value of the same axis stated in the same text: 'Mutton Meat Masala' is mutton.",
+  "_doc": "Mutually exclusive variant groups (axes). Each value lists English and Arabic phrases; phrases are matched on whole tokens after catalog_match.text_norm normalisation, longest phrase first. 'unmarked' lists the values that do NOT make a candidate suspicious when the target SKU does not state that axis (e.g. a retailer title adding 'Full Fat' to 'Almarai Fresh Milk'). 'soft_groups' lists sets of values of one axis that describe closely related but distinct lines (Diet vs Zero Sugar vs Sugar Free): a difference inside one set is a soft conflict (never tier 1, never auto-publish) instead of a hard reject, because retailers word the same line differently. The form axis has no unmarked values: fresh, long-life, frozen and powder are different SKUs, so a candidate stating a form the SKU does not state is capped below tier 1. The medium axis is the oil or liquid a product is packed in or made of (tuna in sunflower oil vs olive oil vs water; sunflower vs corn oil): different SKUs, so it has no unmarked value. 'contexts' names token sets; an axis's 'context_values' ({context: {value: [phrases]}}) are matched only when the text, or the SKU the text is compared with, contains a token of that context. 'White' is a meat grade on a tuna can and a colour anywhere else; 'water' is the packing medium of tuna and the product itself for a bottle. At equal phrase length a context-bound phrase wins ('light' on a tuna can is the meat grade, not low fat). 'fries_cut' (thin, crinkle, steak, ...) and 'cheese_form' (shredded, sliced, ...) are context-bound the same way: 'thin' is a cut only next to fries or potato, 'block' a form only next to cheese. Their default forms (straight-cut fries, a cheese block) are unmarked. An axis's 'context_unmarked' ({context: [values]}) lists values that are the normal state of products in that context, so stating them is not suspicious: fries, paratha, nuggets and shawarma are sold frozen, and 'Frozen French Fries' neither caps tier 1 nor warns the reviewer for 'AIDA FRENCH FRIES'. The protein axis (beef, chicken, mutton, lamb, fish) is read only next to a product made of one of them ('meat_products': luncheon meat, masala, burgers, sausages; live run 2026-10-03: 'ZWAN BEEF LUNCHEON MEAT' scored the Zwan Chicken listing tier 1, 'ALLDE MEAT MASALA' the Allde Chicken Masala one). An axis's 'bound_values' ({context: {value: [phrases]}}) count only right next to a token of that context: the next word (across 'and' and the axis's other values: 'Meat & Chicken Masala') or the word before ('بهارات لحم'), never after a 'bound_not_after' word. So 'meat' is a protein only in 'meat masala', 'meat spice', 'meat burger', never in 'luncheon meat' or 'luncheon meat with spices'. An axis's 'generic' values ({generic: [the specific values it covers]}) are a family: 'meat' covers beef, mutton and lamb. A generic value against values it covers is a soft conflict, never a hard one; on the SKU side a covered value stated next to it replaces it ('Mutton Meat Masala' is mutton); a listing keeps it ('Meat Masala for Mutton & Lamb' is that SKU's 'meat masala'). An axis with 'never_in_brand' reads no value inside a brand name ('Lamb Weston' fries are not lamb).",
   "contexts": {
     "canned_fish": [
       "tuna",
@@ -96,15 +96,19 @@
       "بهارات",
       "توابل"
     ],
-    "spice_mix": [
+    "meat_dish": [
       "masala",
       "spice",
       "spices",
       "seasoning",
+      "burger",
+      "burgers",
       "ماسالا",
       "مسالا",
       "بهارات",
-      "توابل"
+      "توابل",
+      "برجر",
+      "برغر"
     ]
   },
   "axes": {
@@ -753,24 +757,16 @@
       }
     },
     "protein": {
-      "_doc": "What a luncheon meat, a masala, a burger or a sausage is made of. Beef and chicken luncheon meat, meat and chicken masala are different products of one brand, so the values are exclusive; 'meat' (red meat in a spice mix) is close to beef, mutton and lamb, and mutton to lamb (soft). 'meat' is generic: a text that also names the animal states that animal.",
+      "_doc": "What a luncheon meat, a masala, a burger or a sausage is made of. Beef and chicken luncheon meat, meat and chicken masala are different products of one brand, so the values are exclusive; 'meat' (red meat: a meat masala, a meat burger) covers beef, mutton and lamb (soft against any of them), and mutton is close to lamb (soft). 'meat' counts only bound to its masala, spice or burger word.",
       "unmarked": [],
-      "generic": [
-        "meat"
-      ],
-      "soft_groups": [
-        [
-          "meat",
-          "beef"
-        ],
-        [
-          "meat",
-          "mutton"
-        ],
-        [
-          "meat",
+      "generic": {
+        "meat": [
+          "beef",
+          "mutton",
           "lamb"
-        ],
+        ]
+      },
+      "soft_groups": [
         [
           "mutton",
           "lamb"
@@ -808,15 +804,28 @@
             "fish",
             "سمك"
           ]
-        },
-        "spice_mix": {
+        }
+      },
+      "bound_values": {
+        "meat_dish": {
           "meat": [
             "meat",
             "لحم",
             "لحوم"
           ]
         }
-      }
+      },
+      "bound_bridges": [
+        "and",
+        "n",
+        "و"
+      ],
+      "bound_not_after": [
+        "luncheon",
+        "luncheons",
+        "لانشون"
+      ],
+      "never_in_brand": true
     }
   }
 }

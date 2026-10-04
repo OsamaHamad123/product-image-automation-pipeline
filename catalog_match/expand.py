@@ -478,7 +478,7 @@ def _lacks_only_size(spec: SkuSpec, rc: RankedCandidate) -> bool:
     s = rc.score
     matched = s.matched or {}
     return (s.tier == 2 and bool(matched.get("brand")) and s.size_status in ("unknown", "ambiguous")
-            and len(matched.get("variants") or ()) == len(spec.variants)
+            and set(spec.variants) <= set(matched.get("variants") or ())
             and float(matched.get("coverage") or 0.0) >= 0.5
             and not any(str(c).startswith(_NOT_ONLY_SIZE) for c in s.conflicts))
 
