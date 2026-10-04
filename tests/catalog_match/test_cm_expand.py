@@ -803,3 +803,111 @@ def test_when_x0s_verifier_call_gets_no_answer_no_paid_call_is_made():
     assert len(verifier.calls) == 2 and SHOP_OWN_IMG in verifier.calls[1]
     assert web_p.calls == [] and shop_p.calls == []
     assert outcome.failure_code == "VERIFIER_DOWN"
+
+
+# ---------------------------------------------------------------------------
+# X0: the store's own page shows the same picture that failed (same bytes): never read again, never picked
+# (live run 2026-10-03: Google filed Ansar Gallery's Yumway page and Tradeling's Green Farm page under
+# another product's pack, rows 13 and 36; a store whose own page shows that pack has the wrong image)
+# ---------------------------------------------------------------------------
+
+STORE_WRONG = "x0:store_image_wrong"
+
+
+def test_x0_records_a_store_page_that_shows_the_failed_picture_itself():
+    outcome, d = run([shop_listing()], web=[hit(LULU_PAGE, "Barts Traditional Fries 1kg")],
+                     docs={SHOP_PAGE: product_page("Barts Traditional Fries 1kg", SHOP_OWN_IMG, brand="Barts"),
+                           LULU_PAGE: lulu_html()},
+                     bodies={SHOP_LISTING_IMG: packshot_png(3), SHOP_OWN_IMG: packshot_png(3),
+                             LULU_IMAGE: packshot_png(7)},
+                     readings={SHOP_LISTING_IMG: READ_EMBORG, LULU_IMAGE: READ_MATCH})
+    own = next(rc for rc in outcome.ranked if rc.candidate.image_url == SHOP_OWN_IMG)
+    assert STORE_WRONG in own.reasons and own.status == "rejected"
+    assert outcome.reject_counts.get(STORE_WRONG) == 1
+    assert not any(SHOP_OWN_IMG in call for call in d["verifier"].calls)       # never read again
+    # the paid steps still look further: the Lulu page is the pick
+    assert outcome.decision == "REVIEW_PRESELECTED" and outcome.winner.candidate.image_url == LULU_IMAGE
+
+
+def test_x0_never_preselects_the_back_of_the_pack_its_page_shows_again():
+    # The Spinneys listing has no size in its title (tier 2) and its picture is the back of the pack (UNSURE,
+    # other_side). The page's own picture is the same image file under another address, and the page's
+    # name states the size (tier 1): the inherited UNSURE must not pre-check the back of the pack.
+    page = "https://www.spinneys.com/en-ae/catalogue/barts-traditional-fries_88/"
+    listing_img = "https://img.example-cdn.com/barts-back.jpg"
+    own_img = "https://img.example-cdn.com/barts-traditional-fries-1kg-back.jpg"
+    back = cand(listing_img, "Barts Traditional Fries | Spinneys", page)
+    read_back = dict(READ_MATCH, view="other_side")
+    outcome, d = run([back], docs={page: product_page("Barts Traditional Fries 1kg", own_img, brand="Barts")},
+                     bodies={listing_img: packshot_png(3), own_img: packshot_png(3)},
+                     readings={listing_img: read_back, own_img: read_back}, max_calls=1)
+    own = next(rc for rc in outcome.ranked if rc.candidate.image_url == own_img)
+    assert own.score.tier == 1 and STORE_WRONG in own.reasons
+    assert outcome.winner is None or outcome.winner.candidate.image_url != own_img
+    assert outcome.decision != "REVIEW_PRESELECTED"
+
+
+def test_x0_spends_no_verifier_call_on_the_failed_picture_under_another_address():
+    # The page's own picture was already in the pool under its address, below the 8 download slots of the
+    # normal flow; it is the same file as the failed listing picture. X0 downloads it and must not read it.
+    retail = [cand(f"https://img.example-cdn.com/o{i}.jpg", "Barts Traditional Fries | Carrefour UAE",
+                   f"https://www.carrefouruae.com/mafuae/en/fries/barts-traditional-fries-{i}/p/{i}", n=i + 1)
+              for i in range(1, 9)]
+    own_img = "https://img.example-cdn.com/p-77.jpg"                     # no product words in its address
+    same = cand(own_img, "Barts fries", "https://www.example-blog.com/barts", n=20)
+    read_no = dict(READ_MATCH, size_text="2.5 kg", size_match="no")
+    bodies = {c.image_url: packshot_png(40 + i) for i, c in enumerate(retail)}
+    bodies.update({SHOP_LISTING_IMG: packshot_png(3), own_img: packshot_png(3)})
+    readings = {c.image_url: read_no for c in retail}
+    readings.update({SHOP_LISTING_IMG: READ_EMBORG})
+    outcome, d = run([shop_listing()] + retail + [same],
+                     docs={SHOP_PAGE: product_page("Barts Traditional Fries 1kg", own_img, brand="Barts")},
+                     bodies=bodies, readings=readings, max_calls=1)
+    assert d["fetcher"].fetched.index(own_img) >= 8                 # downloaded by X0, not the normal flow
+    assert not any(own_img in call for call in d["verifier"].calls)  # but never read
+    own = next(rc for rc in outcome.ranked if rc.candidate.image_url == own_img)
+    assert STORE_WRONG in own.reasons
+
+
+PEPSI_6 = build_sku_spec({"name": "PEPSI CAN 6X330ML", "brand": "PEPSI"},
+                         {"pepsi": {"brand": "Pepsi", "synonyms": ["PEPSI"], "excluded_competitors": ["Coca Cola"]}})
+READ_6PACK = {"brand_text": "Pepsi", "variant_text": "Cola", "size_text": "6 x 330 ml", "pack_count": 6,
+              "view": "multi_product", "brand_match": "yes", "variant_match": "yes", "size_match": "yes"}
+
+
+@pytest.mark.parametrize("page_name", ["Pepsi Cola Can 6 x 330ml", "Pepsi Cola Can 330ml x 6"])
+def test_x0_never_calls_a_multipacks_own_picture_the_stores_wrong_one(page_name):
+    # A 6-pack read as several products is its normal picture (UNSURE). The Carrefour listing names no size
+    # (tier 2); its page names the 6-pack (tier 1) and shows the same picture: it was rejected as
+    # x0:store_image_wrong and the row left unselected; the right 6-pack is now pre-selected.
+    page = "https://www.carrefouruae.com/mafuae/en/soft-drinks/pepsi-cola-cans/p/123456"
+    listing_img, own_img = "https://img.example-cdn.com/pepsi-6pack.jpg", "https://img.example-cdn.com/pepsi-6x330.jpg"
+    exp = expand.Expansion(web=StubProvider("serper_web", []), shopping=StubProvider("serper_shopping", []),
+                           visual=None, pages=StubPages({page: product_page(page_name, own_img, brand="Pepsi")}),
+                           max_calls=4)
+    body = packshot_png(9)
+    outcome = pipeline.find_product_image(
+        PEPSI_6, providers=[StubProvider("serper", [cand(listing_img, "Pepsi Cola Cans | Carrefour UAE", page)])],
+        fetcher=StubFetcher({listing_img: body, own_img: body}),
+        verifier=StubVerifier({listing_img: READ_6PACK, own_img: READ_6PACK}), expansion=exp)
+    own = next(rc for rc in outcome.ranked if rc.candidate.image_url == own_img)
+    assert STORE_WRONG not in own.reasons and own.score.tier == 1
+    assert outcome.decision == "REVIEW_PRESELECTED" and outcome.winner.candidate.image_url == own_img
+
+
+def test_x0_still_calls_a_single_cans_multipack_picture_wrong():
+    # the same reading for a single can is another product (MISMATCH): its page's copy stays rejected
+    single = build_sku_spec({"name": "PEPSI CAN 330ML", "brand": "PEPSI"}, {})
+    page = "https://www.carrefouruae.com/mafuae/en/soft-drinks/pepsi-cola-can/p/1234"
+    listing_img, own_img = "https://img.example-cdn.com/pepsi-can.jpg", "https://img.example-cdn.com/pepsi-can-330.jpg"
+    exp = expand.Expansion(web=StubProvider("serper_web", []), shopping=StubProvider("serper_shopping", []),
+                           visual=None, pages=StubPages({page: product_page("Pepsi Cola Can 330ml", own_img)}),
+                           max_calls=4)
+    body = packshot_png(9)
+    read = dict(READ_6PACK, size_text="330 ml", pack_count=None)
+    outcome = pipeline.find_product_image(
+        single, providers=[StubProvider("serper", [cand(listing_img, "Pepsi Cola Can | Carrefour UAE", page)])],
+        fetcher=StubFetcher({listing_img: body, own_img: body}),
+        verifier=StubVerifier({listing_img: read, own_img: read}), expansion=exp)
+    own = next(rc for rc in outcome.ranked if rc.candidate.image_url == own_img)
+    assert STORE_WRONG in own.reasons and outcome.winner is None

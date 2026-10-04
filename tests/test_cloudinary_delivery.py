@@ -3,6 +3,7 @@
 cloudinary.uploader.upload is replaced by a fake; sockets are blocked, so nothing leaves the machine.
 """
 
+import hashlib
 import io
 import socket
 
@@ -181,3 +182,104 @@ def test_missing_or_non_image_file_is_not_uploaded(uploader, tmp_path):
     html.write_bytes(b"<html>not an image</html>")
     assert cloudinary_storage.upload_product_image_to_cloudinary(str(html), "M", "A") is None
     assert fake.calls == []
+
+
+# ---------------------------------------------------------------------------
+# Upload verification: the stored asset must be the bytes that were sent
+# ---------------------------------------------------------------------------
+
+class AccountUploader:
+    """A fake Cloudinary account: overwrite=False returns the stored asset flagged existing=True.
+    `describe(response, payload, options)` may change the fields a real upload would report."""
+
+    def __init__(self, describe=None):
+        self.assets = {}
+        self.calls = []
+        self.describe = describe
+
+    def __call__(self, file, **options):
+        payload = file.read() if hasattr(file, "read") else open(file, "rb").read()
+        self.calls.append(options)
+        pid = f"{options['folder']}/{options['public_id']}"
+        existing = pid in self.assets and not options.get("overwrite", True)
+        if not existing:
+            self.assets[pid] = payload
+        stored = self.assets[pid]
+        with Image.open(io.BytesIO(stored)) as img:
+            width, height = img.size
+        response = {"public_id": pid, "version": 1700000001, "bytes": len(stored), "width": width,
+                    "height": height, "etag": hashlib.md5(stored).hexdigest(), "existing": existing}
+        if self.describe:
+            response = self.describe(response, payload, options)
+        return response
+
+
+def test_verified_upload_reports_existing_for_the_same_bytes(monkeypatch, canvas_png):
+    account = AccountUploader()
+    monkeypatch.setattr(cloudinary.uploader, "upload", account)
+
+    first = cloudinary_storage.upload_product_image(canvas_png, "Almarai Milk 1L", "Almarai",
+                                                    folder="products/dairy/milk")
+    second = cloudinary_storage.upload_product_image(canvas_png, "Almarai Milk 2L", "Almarai",
+                                                     folder="products/dairy/milk")
+
+    with open(canvas_png, "rb") as fh:
+        md5 = hashlib.md5(fh.read()).hexdigest()
+    assert first.url and first.error is None and first.existing is False
+    assert second.url == first.url, "same bytes, same asset"
+    assert second.existing is True, "the caller must be able to see the same image published for two SKUs"
+    assert first.content_md5 == second.content_md5 == md5
+    assert first.public_id == f"products/dairy/milk/{md5}"
+    # The legacy wrapper keeps returning just the URL.
+    assert cloudinary_storage.upload_product_image_to_cloudinary(canvas_png, "M", "A",
+                                                                 folder="products/dairy/milk") == first.url
+
+
+@pytest.mark.parametrize("field, value, error", [
+    ("bytes", 12, "upload_bytes_mismatch"),
+    ("width", 64, "upload_size_mismatch"),
+    ("height", 64, "upload_size_mismatch"),
+    ("etag", "deadbeefdeadbeefdeadbeefdeadbeef", "upload_etag_mismatch"),
+])
+def test_upload_whose_stored_asset_differs_is_not_used(monkeypatch, canvas_png, field, value, error):
+    def lie(response, payload, options):
+        return dict(response, **{field: value})
+
+    monkeypatch.setattr(cloudinary.uploader, "upload", AccountUploader(lie))
+
+    result = cloudinary_storage.upload_product_image(canvas_png, "Milk", "Almarai")
+
+    assert (result.url, result.error) == (None, error)
+    assert cloudinary_storage.upload_product_image_to_cloudinary(canvas_png, "Milk", "Almarai") is None
+
+
+def test_an_existing_asset_with_other_bytes_is_not_used(monkeypatch, canvas_png):
+    # Another picture is stored under this public_id: overwrite=False hands it back.
+    def other(response, payload, options):
+        return dict(response, existing=True, bytes=len(payload) + 100, etag="0" * 32)
+
+    monkeypatch.setattr(cloudinary.uploader, "upload", AccountUploader(other))
+    result = cloudinary_storage.upload_product_image(canvas_png, "Milk", "Almarai")
+    assert result.url is None and result.existing is True and result.error == "upload_bytes_mismatch"
+
+
+def test_missing_or_unreadable_response_fields_keep_the_success_path(monkeypatch, canvas_png):
+    def sparse(response, payload, options):
+        return {"public_id": response["public_id"], "version": 1, "bytes": None, "width": "", "etag": "abc-2"}
+
+    monkeypatch.setattr(cloudinary.uploader, "upload", AccountUploader(sparse))
+    result = cloudinary_storage.upload_product_image(canvas_png, "Milk", "Almarai")
+    assert result.url and result.error is None and result.existing is False
+
+
+def test_flattened_upload_is_verified_against_the_flattened_bytes(monkeypatch, tmp_path):
+    cut = np.zeros((700, 330, 4), np.uint8)
+    cut[:, :] = (40, 70, 200, 255)
+    cut[300:400, 120:210] = (0, 0, 0, 0)
+    path = tmp_path / "cutout.png"
+    Image.fromarray(cut, "RGBA").save(path)
+    monkeypatch.setattr(cloudinary.uploader, "upload", AccountUploader())
+
+    result = cloudinary_storage.upload_product_image(str(path), "Milk", "Almarai")
+
+    assert result.url and result.error is None

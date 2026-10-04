@@ -32,7 +32,11 @@ The round ('expand') starts with a free step:
         is not enough). Their images go through the stages below with one verifier call,
         which reads the recovered pages' images first; when that gives a pick, the paid
         steps are skipped, and so they are when that call got no answer (a round nobody
-        can read is not worth paying for).
+        can read is not worth paying for). A page whose own picture has the same bytes
+        (sha256) as the picture that failed shows the wrong product itself: that image is
+        never read again and never picked (rejected, reason 'x0:store_image_wrong', counted
+        in the outcome's reject_counts). A multipack's picture read as several products (UNSURE,
+        its normal picture) is not a failed picture: on its own page it is read like any other.
 Then, within EXPANSION_MAX_CALLS paid calls (every provider call counts):
     X1  serper_web: the SKU's Q1 text (or the staff's custom query) scoped with site: OR
         over the brand's official domains and the main UAE retailers; the result pages
@@ -93,7 +97,7 @@ from .providers.serper_web import SerperWebProvider, site_query
 from .quality import LOW_RES_SHORT_SIDE
 from .query_plan import build_queries
 from .retrieve import norm_image_url
-from .score import rank, rank_key, score_candidate, trusted_domains
+from .score import IDENTITY_KEYS, rank, rank_key, score_candidate, trusted_domains
 from .text_norm import domain_matches, url_host
 
 logger = logging.getLogger(__name__)
@@ -111,13 +115,16 @@ MAX_RECOVER_PAGES = 3
 RECOVER_VERIFY_CALLS = 1
 # Readings that say the picture is not this product's single front pack, whatever its page says.
 RECOVER_VIEWS = frozenset({"multi_product", "banner", "not_product", "other_side", "lifestyle"})
+# X0: the page's own picture is byte for byte the picture that failed (the store shows the wrong image itself)
+STORE_IMAGE_WRONG = "x0:store_image_wrong"
 UPGRADE_PHASH_DISTANCE = 8
 UPGRADE_MAX_FETCH = 6
 SMALL_IMAGE_REASONS = frozenset({"short_side<250"})
 SERPER_REFUSED_HTTP = (401, 403)
 # conflicts that mean more than 'the size is not stated' (a near-match must lack ONLY the size)
 _NOT_ONLY_SIZE = ("sub_brand_missing", "unstated_variant", "soft_variant_conflict", "image_variant_conflict",
-                  "url_size_conflict", "url_pack_conflict", "pack_ambiguous", "generic_brand_position")
+                  "url_size_conflict", "url_pack_conflict", "pack_ambiguous", "generic_brand_position",
+                  "site_name_brand")
 
 
 # ---------------------------------------------------------------------------
@@ -203,6 +210,7 @@ class RoundReport:
     phash_dropped: int = 0
     pages_fetched: int = 0
     recovered_pages: int = 0                        # X0: free page reads of listings whose image failed
+    store_image_wrong: int = 0                      # X0: pages whose own picture is the failed picture itself
     new_candidates: int = 0
     upgraded: bool = False
 
@@ -409,6 +417,22 @@ def _image_failed(rc: RankedCandidate) -> bool:
         v.brand_match == "no" or v.view in RECOVER_VIEWS)
 
 
+def _picture_wrong(spec: SkuSpec, rc: RankedCandidate) -> bool:
+    """The failed picture is no picture to offer for this SKU on any page: it failed the quality gate, or it
+    was read as another product, another brand, or not a single front pack (RECOVER_VIEWS). A multipack read
+    as several products is its normal picture (verify.classify reads it UNSURE, not MISMATCH): the page's own
+    copy of it is read like any image, never marked STORE_IMAGE_WRONG."""
+    if rc.quality is not None and not rc.quality.hard_ok:
+        return True
+    v = rc.verdict
+    if v is None:
+        return False
+    if v.decision == decide.MISMATCH or v.brand_match == "no":
+        return True
+    multipack = (spec.pack_count or 1) > 1
+    return v.view in RECOVER_VIEWS and not (multipack and v.view == "multi_product")
+
+
 _TRACKING_PARAMS = frozenset({"srsltid", "gclid", "fbclid", "gbraid", "wbraid", "msclkid", "ref", "ref_"})
 
 
@@ -471,7 +495,7 @@ def _lacks_only_size(spec: SkuSpec, rc: RankedCandidate) -> bool:
     s = rc.score
     matched = s.matched or {}
     return (s.tier == 2 and bool(matched.get("brand")) and s.size_status in ("unknown", "ambiguous")
-            and len(matched.get("variants") or ()) == len(spec.variants)
+            and set(spec.variants) <= set(matched.get("variants") or ())
             and float(matched.get("coverage") or 0.0) >= 0.5
             and not any(str(c).startswith(_NOT_ONLY_SIZE) for c in s.conflicts))
 
@@ -585,11 +609,28 @@ def _inherit_readings(everything: List[RankedCandidate], fresh: List[RankedCandi
     return n
 
 
+def _mark_store_image_wrong(fetched_now: List[RankedCandidate], failed_shas: Set[str]) -> int:
+    """X0: an image downloaded now that is byte for byte the failed listing picture is the store's own wrong
+    picture. It is never read again (no verifier call) and never picked: rejected, with the reason
+    STORE_IMAGE_WRONG for the reviewer (the outcome counts it in reject_counts)."""
+    n = 0
+    for rc in fetched_now:
+        f = rc.fetched
+        if f is None or not f.ok or not f.content_sha256 or f.content_sha256 not in failed_shas:
+            continue
+        if STORE_IMAGE_WRONG not in rc.reasons:
+            rc.reasons.append(STORE_IMAGE_WRONG)
+            n += 1
+        rc.status = "rejected"
+    return n
+
+
 def _verify_new(inp: RoundInput, everything: List[RankedCandidate],
                 max_calls: int = MAX_VERIFY_CALLS, first_ids: Set[int] = frozenset()) -> List[VerificationResult]:
     """Read the unread usable tier-1/2 images, best first (the candidates in first_ids before the others)."""
     p = _stages()
-    todo = [rc for rc in everything if p._usable(rc) and rc.verdict is None and rc.score.tier in (1, 2)]
+    todo = [rc for rc in everything if p._usable(rc) and rc.verdict is None and rc.score.tier in (1, 2)
+            and STORE_IMAGE_WRONG not in rc.reasons]
     if first_ids:
         todo.sort(key=lambda rc: id(rc) not in first_ids)       # stable: rank order within each group
     out: List[VerificationResult] = []
@@ -618,13 +659,17 @@ def _record(report: RoundReport, res: ProviderResult, what: str) -> None:
 # ---------------------------------------------------------------------------
 
 def _grow(inp: RoundInput, report: RoundReport, new: List[Candidate],
-          verify_calls: int = MAX_VERIFY_CALLS, new_first: bool = False) -> Tuple[List[RankedCandidate], int, int]:
+          verify_calls: int = MAX_VERIFY_CALLS, new_first: bool = False,
+          failed_shas: Set[str] = frozenset()) -> Tuple[List[RankedCandidate], int, int]:
     """The normal stages over the pool grown by `new`: merge, download, quality, verify, route.
 
     report.outcome is re-decided over everything (the normal readings plus every reading of this
     round). new_first: the verifier reads the new candidates before older unread ones (X0's one call
-    is for the images the pages showed). Returns (every ranked candidate, how many were new, how
-    many of those were downloaded).
+    is for the images the pages showed). Every image downloaded now (a new candidate, or a pool
+    image a page's evidence lifted into the download slots) that is byte for byte an image the
+    verifier read inherits that reading; with failed_shas (X0: the failed listing pictures) it is
+    marked STORE_IMAGE_WRONG instead of being read. Returns (every ranked candidate, how many were
+    new, how many of those were downloaded).
     """
     spec = inp.spec
     p = _stages()
@@ -640,7 +685,9 @@ def _grow(inp: RoundInput, report: RoundReport, new: List[Candidate],
     report.phash_dropped += n_dropped
     p._assess(kept)
     everything = p._rerank(everything)
-    _inherit_readings(everything, fresh)
+    _inherit_readings(everything, kept)
+    if failed_shas:
+        report.store_image_wrong += _mark_store_image_wrong(kept, failed_shas)
     report.verify_results.extend(_verify_new(inp, everything, verify_calls,
                                              {id(rc) for rc in fresh} if new_first else frozenset()))
     report.outcome = decide.route(spec, everything, list(inp.results) + report.verify_results,
@@ -652,7 +699,8 @@ def _recover(inp: RoundInput, report: RoundReport, collector: "_Collector") -> O
     """X0 (free): read the pages of right-product listings whose image failed; None when nothing new."""
     if inp.exp.pages is None:
         return None
-    hits = [rc.candidate for rc in recovery_pages(inp.spec, inp.ranked)]
+    pages = recovery_pages(inp.spec, inp.ranked)
+    hits = [rc.candidate for rc in pages]
     if not hits:
         return None
     new = collector.follow(hits, "X0")
@@ -660,10 +708,14 @@ def _recover(inp: RoundInput, report: RoundReport, collector: "_Collector") -> O
     if not new:
         logger.info("expand sku=%s: X0 read %d pages, no image of their own", inp.spec.sku_key, len(hits))
         return None
-    everything, n_new, n_kept = _grow(inp, report, new, RECOVER_VERIFY_CALLS, new_first=True)
+    # the pictures that failed: a page whose own picture is one of them shows the wrong product itself
+    failed = {rc.fetched.content_sha256 for rc in pages
+              if rc.fetched is not None and rc.fetched.ok and rc.fetched.content_sha256
+              and _picture_wrong(inp.spec, rc)}
+    everything, n_new, n_kept = _grow(inp, report, new, RECOVER_VERIFY_CALLS, new_first=True, failed_shas=failed)
     report.new_candidates += n_new
-    logger.info("expand sku=%s: X0 read %d pages, %d new candidates (%d fetched) -> %s", inp.spec.sku_key,
-                len(hits), n_new, n_kept, report.outcome.decision)
+    logger.info("expand sku=%s: X0 read %d pages, %d new candidates (%d fetched, %d the same wrong picture) -> %s",
+                inp.spec.sku_key, len(hits), n_new, n_kept, report.store_image_wrong, report.outcome.decision)
     return everything
 
 
@@ -803,8 +855,9 @@ def _append_health(report: RoundReport) -> None:
 
 
 def _identity_key(rc: RankedCandidate) -> Tuple:
-    """score.rank_key's identity part: tier, size, variants, class coverage, source trust (no quality)."""
-    return rank_key(rc.candidate, rc.score)[:5]
+    """score.rank_key's identity part: tier, size, variants, class coverage, no soft conflict, source trust
+    (no quality)."""
+    return rank_key(rc.candidate, rc.score)[:IDENTITY_KEYS]
 
 
 def _upgrade(inp: RoundInput, report: RoundReport) -> RoundReport:

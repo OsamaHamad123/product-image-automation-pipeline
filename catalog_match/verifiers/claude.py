@@ -29,7 +29,7 @@ import threading
 import time
 from typing import Any, Callable, Dict, List, Optional
 
-from .. import settings
+from .. import cassette, settings
 from ..fetch import load_image
 from ..models import FetchedImage, SkuSpec, VerificationResult, VlmImageVerdict
 from ..verify import (
@@ -204,8 +204,8 @@ class ClaudeVerifier:
 
     def _send(self, client, kwargs: Dict[str, Any]):
         if self.thinking:
-            return client.beta.messages.create(**kwargs)
-        return client.messages.create(**kwargs)
+            return cassette.verifier(lambda: client.beta.messages.create(**kwargs))
+        return cassette.verifier(lambda: client.messages.create(**kwargs))
 
     def _retry_delay(self, exc: Exception, attempt: int) -> float:
         response = getattr(exc, "response", None)
@@ -255,6 +255,7 @@ class ClaudeVerifier:
         slots, dims, content, prompt = self._content(spec, images)
         if not slots:
             return self._unknown(n, "no_images")
+        cassette.verifier_scope(self.provider, self.model, self.focus, self.long_side, prompt, images, slots)
         try:
             client = self._client if self._client is not None else _client_for(key, self.timeout)
         except Exception as exc:
@@ -262,19 +263,35 @@ class ClaudeVerifier:
         kwargs = self._request(content)
 
         response = None
+        timed_out = 0       # requests sent and never answered: the API most likely billed them
         for attempt in (1, 2):
             try:
                 response = self._send(client, kwargs)
                 break
             except Exception as exc:  # every SDK error fails closed
                 code, retryable, notice = self._classify_error(sdk, exc)
+                timed_out += code == "timeout"
                 if retryable and attempt == 1:
-                    self.sleep(self._retry_delay(exc, attempt))
+                    cassette.retry_sleep(self._retry_delay(exc, attempt), self.sleep)   # no wait in a replay
                     continue
-                return self._fail(n, code, 1, notice)
+                return self._lost(self._fail(n, code, 1, notice), timed_out, int(code == "timeout"), len(slots),
+                                  prompt, dims)
 
         result = self._parse(spec, response, slots, n)
         result.usage.append(self._usage(response, len(slots), prompt, dims))
+        return self._lost(result, timed_out, 0, len(slots), prompt, dims)
+
+    def _lost(self, result: VerificationResult, timed_out: int, counted: int, n_images: int, prompt: str,
+              dims: List[tuple]) -> VerificationResult:
+        """The result with the requests that timed out (`counted` of them already in result.calls) added to its
+        calls and usage, with estimated tokens (estimated=True, timed_out=True): they were most likely billed."""
+        if timed_out:
+            from .pricing import estimate_tokens
+            result.calls = int(result.calls or 0) + timed_out - counted
+            tokens_in, tokens_out = estimate_tokens("claude", n_images, prompt, self.long_side, self.model, dims)
+            result.usage[:0] = [{"provider": "claude", "model": self.model, "images": n_images,
+                                 "input_tokens": tokens_in, "output_tokens": tokens_out, "estimated": True,
+                                 "timed_out": True} for _ in range(timed_out)]
         return result
 
     # -- response --------------------------------------------------------------

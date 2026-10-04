@@ -51,6 +51,8 @@ class SkuSpec:
     gtin_raw: str = ""
     gtin_status: str = "missing"              # 'ok' | 'missing' | 'bad_check_digit' | 'scientific_notation' | 'bad_length' | ...
     size: Optional[Size] = None
+    # the size the sku_key holds: parsed from the RAW names, never moved by a reading fix (identity.make_sku_key)
+    key_size: Optional[Size] = None
     pack_count: Optional[int] = None
     variants: Dict[str, str] = field(default_factory=dict)   # axis -> value, e.g. {'fat': 'full'}
     class_tokens: Tuple[str, ...] = ()        # product-type words, e.g. ('fresh', 'milk')
@@ -231,6 +233,7 @@ FAILURE_CODES = (
     "PROVIDER_DOWN",
     "VERIFIER_DOWN",
     "DOWNLOAD_FAILED",
+    "SOCIAL_ONLY",       # every brand listing is a social-network post whose picture cannot be downloaded
 )
 
 
@@ -260,6 +263,8 @@ class SearchOutcome:
     vlm_usage: List[Dict[str, Any]] = field(default_factory=list)
     verifier_notices: List[str] = field(default_factory=list)
     discovered_brands: List[str] = field(default_factory=list)    # brand_discovery: the store spelling used
+    # failure_code SOCIAL_ONLY: the links of the social-network posts that show the product, for the reviewer
+    social_links: List[str] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------

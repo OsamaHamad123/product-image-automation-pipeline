@@ -45,6 +45,9 @@ failure_code on review decisions
                         exist; a tier 1 candidate is still preselected. Also when one
                         of two verifier calls failed and nothing was read as MATCH.
     DOWNLOAD_FAILED     candidates survived the identity rules but every fetch failed.
+    SOCIAL_ONLY         every tier-1/2 survivor is a social-network post whose picture could
+                        not be downloaded (whatever happened to other brands' listings): the
+                        post links are in outcome.social_links for the reviewer.
 
 Only the winner of REVIEW_PRESELECTED / AUTO_PUBLISH has status 'preselected'. The
 others are 'eligible' or 'rejected' (with reasons) or stay 'excluded' when the
@@ -75,6 +78,20 @@ double-check before approving. They never change the winner or the decision.
                                  It stays on once the spelling is learned, so a
                                  WRONG_BRAND rejection can still count against it
 
+Display-only warnings (candidate_warnings): the review screen shows warnings under every
+eligible candidate, not only the pick, so a reviewer who chooses an alternative sees the same
+cautions. They are computed after route() from the same evidence and are never written to
+RankedCandidate.reasons: route(), resolution_upgrade(), expand and every auto-publish rule never
+read them, and the winner, the tiers and the decision stay exactly as route() made them.
+Two codes exist only there:
+    size_unverified              the sheet states a size (or a pack count) and neither the
+                                 listing evidence (size / pack match, or the sheet's own
+                                 barcode on the page) nor the label reading ('yes') confirmed it,
+                                 e.g. a tier-2 pick the verifier read with size_match 'unsure'
+    variant_unverified           the sheet states a variant and neither the listing (every stated
+                                 axis matched, or the sheet's barcode) nor the label reading
+                                 confirmed it
+
 Best-resolution copy (resolution_upgrade): once the winner and the decision are fixed, a
 fetched copy of the same picture (pHash distance <= 6, aspect within 10 %) with a larger
 short side is published instead when its own listing evidence is no weaker and it adds no
@@ -99,7 +116,7 @@ from .models import (
     VerificationResult,
 )
 from .fetch import phash_distance
-from .score import page_host, rank_key, trusted_domains
+from .score import IDENTITY_KEYS, page_host, rank_key, trusted_domains
 from .sizes import compare, parse_sizes, product_size
 from .text_norm import brand_in, domain_matches, match_key, match_string, normalize, store_market, url_host, url_path_text
 
@@ -112,9 +129,11 @@ DOWN_STATUSES = frozenset({"error", "quota", "blocked"})
 MATCH, MISMATCH, UNSURE, UNKNOWN = "MATCH", "MISMATCH", "UNSURE", "UNKNOWN"
 
 WARN_PREFIX = "warn:"
+# Display-only codes (candidate_warnings): shown to the reviewer, never read by routing.
+DISPLAY_ONLY_WARNING_CODES = ("size_unverified", "variant_unverified")
 # Every review warning code (the dashboard maps each one to an Arabic sentence).
 WARNING_CODES = ("sheet_silent", "vlm_unsure", "low_resolution", "chat_or_screenshot", "social_media",
-                 "foreign_store", "barcode_conflict", "brand_spelling")
+                 "foreign_store", "barcode_conflict", "brand_spelling") + DISPLAY_ONLY_WARNING_CODES
 
 RESOLUTION_PREFIX = "resolution_upgrade"
 # Reason prefixes written by route(); recomputed on every call so route() is idempotent.
@@ -358,9 +377,13 @@ def _sheet_silent(spec: SkuSpec, rc: RankedCandidate) -> List[str]:
     # The product's own slug segment only: department breadcrumbs ('/fresh-food/') are not the product.
     texts = (cand.title, cand.page_title, url_path_text(cand.page_url, product_segment=True),
              rc.verdict.variant_text if rc.verdict is not None else "")
-    found = variants_mod.merge(*(variants_mod.extract_variants(t, context) for t in texts))
+    # read like score_candidate: the listing's own context, and the SKU re-read in it
+    read_context = " ".join([context] + [t for t in texts if t])
+    brands = variants_mod.spec_brands(spec)
+    found = variants_mod.merge(*(variants_mod.extract_variants(t, read_context, brands) for t in texts))
+    target = variants_mod.target_variants(spec, *texts)
     out = []
-    for axis in sorted(variants_mod.unstated_marked(spec.variants, found, context)):
+    for axis in sorted(variants_mod.unstated_marked(target, found, context)):
         marked = variants_mod.values_of(found[axis]) - variants_mod.unmarked_values(axis, context)
         out.append(f"sheet_silent:{axis}={variants_mod.SEP.join(sorted(marked))}")
     return out
@@ -454,9 +477,89 @@ def _brand_spelling_only(spec: SkuSpec, rc: RankedCandidate) -> bool:
     return match_string(spec.brand_raw) not in hits
 
 
+def social_only_links(survivors: Sequence[RankedCandidate]) -> List[str]:
+    """The post links when every tier-1/2 survivor is a social-network post whose picture could not be
+    downloaded; [] otherwise (failure_code SOCIAL_ONLY).
+
+    Live run 2026-10-03, rows 29, 38 and 41 (CHALIYAR, KABANI, MAHRA MEAT MASALA): the brand was found only
+    in Instagram and Facebook posts, whose pictures those networks refuse to hand out. Row 29 read
+    DOWNLOAD_FAILED and rows 38 and 41 no failure at all (other brands' store listings had been read), so the
+    reviewer was never told where the product had been seen. The networks' blocking is never worked around.
+    """
+    brand = [rc for rc in survivors if rc.score is not None and rc.score.tier in (1, 2)]
+    if not brand or not all(_social_post(rc.candidate) and rc.fetched is not None and not rc.fetched.ok
+                            for rc in brand):
+        return []
+    return list(dict.fromkeys(rc.candidate.page_url or rc.candidate.image_url for rc in brand))
+
+
+def _social_post(cand: Candidate) -> bool:
+    return _social_host(url_host(cand.image_url)) or _social_host(page_host(cand))
+
+
 def warning_codes(reasons: Iterable[str]) -> List[str]:
     """The warning codes (without 'warn:') among a candidate's reasons."""
     return [str(r)[len(WARN_PREFIX):] for r in reasons or () if str(r).startswith(WARN_PREFIX)]
+
+
+# ---------------------------------------------------------------------------
+# Display-only warnings (the review screen; never read by routing)
+# ---------------------------------------------------------------------------
+
+def unverified_warnings(spec: SkuSpec, rc: RankedCandidate) -> List[str]:
+    """'size_unverified' / 'variant_unverified' for one candidate (display only, see candidate_warnings).
+
+    The sheet states a size (or a pack count) / a variant, and neither the candidate's listing evidence nor
+    the label reading (rc.verdict, 'yes') confirmed it. The sheet's own barcode on the page confirms both.
+    """
+    score = rc.score
+    matched = (score.matched or {}) if score is not None else {}
+    if matched.get("gtin") == "match":
+        return []
+    v = rc.verdict
+    out: List[str] = []
+    size_confirmed = (score is not None and score.size_status == "match") or (v is not None and v.size_match == "yes")
+    # the verifier reads the unit count apart from the net content (verify.build_prompt): its pack_count
+    pack_confirmed = matched.get("pack") == "match" or (v is not None and v.pack_count == spec.pack_count)
+    if (spec.size is not None and not size_confirmed) or (spec.pack_count and spec.pack_count > 1
+                                                          and not pack_confirmed):
+        out.append("size_unverified")
+    if spec.variants and not set(spec.variants) <= set(matched.get("variants") or ()) \
+            and not (v is not None and v.variant_match == "yes"):
+        out.append("variant_unverified")
+    return out
+
+
+def candidate_warnings(spec: SkuSpec, rc: RankedCandidate,
+                       reading_of: Optional[RankedCandidate] = None) -> List[str]:
+    """Display-only warning codes for one reviewable candidate: the pick and every eligible alternative.
+
+    The pre-checked candidate keeps exactly its 'warn:' reasons (route's review_warnings, with the reading the
+    decision rests on: reading_of, the replaced winner of a best-resolution copy) and gains the display-only
+    codes. An eligible alternative gets review_warnings() of its own evidence, without 'vlm_unsure' when the
+    verifier never read it (that is not a doubt of the reader). Rejected and excluded candidates get none: the
+    screen says why they were set aside.
+
+    Pure: it reads the candidate and never writes rc.reasons or rc.status, so it cannot change the winner,
+    the tiers, the decision or any auto-publish rule (route() and resolution_upgrade() never call it).
+    """
+    if rc.status not in ("preselected", "eligible") or _identity_rejected(rc):
+        return []
+    reading = reading_of if reading_of is not None else rc
+    if rc.status == "preselected":
+        out = warning_codes(rc.reasons)
+    else:
+        out = review_warnings(spec, rc, reading_of=reading_of)
+        if reading.verdict is None:
+            out = [w for w in out if w != "vlm_unsure"]
+    view = rc
+    if reading is not rc:
+        view = RankedCandidate(candidate=rc.candidate, score=rc.score, fetched=rc.fetched, quality=rc.quality,
+                               verdict=reading.verdict, status=rc.status)
+    for code in unverified_warnings(spec, view):
+        if code not in out:
+            out.append(code)
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -537,9 +640,12 @@ def route(spec: SkuSpec, ranked: Sequence[RankedCandidate],
         return outcome
 
     attempted = [rc for rc in survivors if rc.fetched is not None]
+    social = social_only_links(survivors)
     if attempted and not any(rc.fetched.ok for rc in attempted):
-        outcome.decision, outcome.failure_code = "REVIEW_UNSELECTED", "DOWNLOAD_FAILED"
-        logger.info("route %s: every download failed", spec.sku_key)
+        outcome.decision = "REVIEW_UNSELECTED"
+        outcome.failure_code = "SOCIAL_ONLY" if social else "DOWNLOAD_FAILED"
+        outcome.social_links = social
+        logger.info("route %s: every download failed%s", spec.sku_key, " (social-network posts only)" if social else "")
         return outcome
 
     def usable(rc: RankedCandidate) -> bool:
@@ -579,6 +685,8 @@ def route(spec: SkuSpec, ranked: Sequence[RankedCandidate],
         why = f"tier1_{_decision_of(winner).lower()}" if winner is not None else ""
     if winner is None:
         outcome.decision = "REVIEW_UNSELECTED"
+        if social and not outcome.failure_code:
+            outcome.failure_code, outcome.social_links = "SOCIAL_ONLY", social
         logger.info("route %s: REVIEW_UNSELECTED (%s)", spec.sku_key, outcome.failure_code or "no match")
         return outcome
 
@@ -678,11 +786,11 @@ def _identity_not_weaker(copy: RankedCandidate, winner: RankedCandidate) -> bool
     """The copy's own listing evidence is at least the winner's on every identity key and on source trust.
 
     Keys (score.rank_key, lower is better): tier, size match, variants matched, class coverage,
-    source trust. A larger picture never buys a weaker listing.
+    no soft conflict, source trust. A larger picture never buys a weaker listing.
     """
     kc = rank_key(copy.candidate, copy.score)
     kw = rank_key(winner.candidate, winner.score)
-    return all(c <= w for c, w in zip(kc[:5], kw[:5]))
+    return all(c <= w for c, w in zip(kc[:IDENTITY_KEYS], kw[:IDENTITY_KEYS]))
 
 
 def resolution_upgrade(spec: SkuSpec, winner: RankedCandidate, ranked: Sequence[RankedCandidate],

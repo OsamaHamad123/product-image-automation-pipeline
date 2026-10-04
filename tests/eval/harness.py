@@ -233,6 +233,10 @@ def run_all(engine: str = "v1", scenario: str = "normal", *, golden: Optional[Ma
     outcomes: List[metrics.Outcome] = []
     attempts: List[str] = []
     t0 = time.perf_counter()
+    if engine == "v2":
+        # no store spelling another run proved: the scorecard depends on this run's rows only
+        from catalog_match import brand_discovery
+        brand_discovery.forget_all()
     with runners.network_blocked(attempts):
         for i, sku in enumerate(skus, 1):
             outcome = run_one(sku, cassette, scenario=scenario, mappings=mappings)

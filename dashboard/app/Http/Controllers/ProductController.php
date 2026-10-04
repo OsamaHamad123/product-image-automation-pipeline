@@ -147,7 +147,17 @@ class ProductController extends Controller
         } catch (\Throwable $e) {
             // جدول بدون أعمدة الهوية بعد
         }
-        $resolved = $resolvedQuery->orderBy('id')->get()->keyBy('barcode');
+        $resolvedRows = $resolvedQuery->orderBy('id')->get();
+        $resolved = $resolvedRows->keyBy('barcode');
+        // منتج بلا باركود يُعرف اعتماده بـ sku_key (بصمة البراند|الاسم|الحجم): رابطه في الشيت قد يكون ما زال في طابور
+        // الكتابة، فبدونه يظهر «ما انبحث» وقد يبدأ له بحث تلقائي مدفوع
+        $resolvedBySku = [];
+        foreach ($resolvedRows as $row) {
+            $rowSku = trim((string) ($row->sku_key ?? ''));
+            if ($rowSku !== '') {
+                $resolvedBySku[$rowSku] = $row;     // ordered by id: the latest approval of the key wins
+            }
+        }
 
         // جلب مرشحات الصور المخزنة للفرز والاعتماد البصري.
         // الربط بالمنتج يتم عبر sku_key (وليس رقم الصف الذي يتغير عند تعديل الشيت)،
@@ -177,10 +187,17 @@ class ProductController extends Controller
 
         foreach ($products as &$prod) {
             $barcode = trim($prod['barcode'] ?? '');
+            $sku = trim((string) ($prod['sku_key'] ?? ''));
+            $hit = null;
             if ($barcode && isset($resolved[$barcode])) {
-                $prod['cached_image'] = $resolved[$barcode]->cloudinary_url;
-                $prod['verification_status'] = $resolved[$barcode]->verification_status ?? 'legacy';
-                $prod['resolved_at'] = $resolved[$barcode]->resolved_at ? $resolved[$barcode]->resolved_at->toIso8601String() : null;
+                $hit = $resolved[$barcode];
+            } elseif ($barcode === '' && $sku !== '' && isset($resolvedBySku[$sku])) {
+                $hit = $resolvedBySku[$sku];
+            }
+            if ($hit !== null) {
+                $prod['cached_image'] = $hit->cloudinary_url;
+                $prod['verification_status'] = $hit->verification_status ?? 'legacy';
+                $prod['resolved_at'] = $hit->resolved_at ? $hit->resolved_at->toIso8601String() : null;
             }
             if (is_array($failures)) {
                 // نفس مفاتيح get_products في cli_bridge.py: الباركود، أو ERR_<الاسم>_<البراند>

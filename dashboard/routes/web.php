@@ -60,6 +60,8 @@ Route::get('/api/system/status', [ApiController::class, 'systemStatus']);
 // حزمة الصحة والإعدادات (P2 health): آخر أسطر السجلين؛ ملف غير موجود حالة عادية (exists=false) وليس 404
 Route::get('/api/view-pipeline-log', [\App\Http\Controllers\HealthController::class, 'pipelineLog']);
 Route::get('/api/view-laravel-log', [\App\Http\Controllers\HealthController::class, 'laravelLog']);
+// حزمة التشغيل الليلي (P4b): سجل الليلة الأخيرة أو ?date=YYYY-MM-DD من temp/nightly (التاريخ فقط، لا مسار)
+Route::get('/api/view-nightly-log', [\App\Http\Controllers\HealthController::class, 'nightlyLog']);
 // p2-run (الرئيسية والتشغيل): بيانات للقراءة فقط؛ التشغيل والإيقاف يبقيان في ApiController
 Route::get('/api/overview', [OverviewController::class, 'data']);
 Route::get('/api/run/live', [RunController::class, 'live']);

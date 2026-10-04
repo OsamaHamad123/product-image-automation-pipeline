@@ -42,7 +42,7 @@ def test_rows_that_changed_decision_come_first(compare):
     by_row = {c["row"]: c for c in diff["changed"]}
     assert by_row[3]["old"]["reason"] == "verifier_mismatch" and by_row[3]["new"]["domain"] == "luluhypermarket.com"
     assert by_row[20]["old"]["outage"] is True and by_row[20]["new"]["warnings"] == ["vlm_unsure"]
-    assert by_row[55]["old"]["decision"] == "ERROR" and by_row[55]["new"]["reason"] == "weak_only"
+    assert by_row[55]["old"]["decision"] == "ERROR" and by_row[55]["new"]["reason"] == "brand_not_found"
     assert by_row[40]["old"]["domain"] == by_row[40]["new"]["domain"] == "amazon.ae"
 
 

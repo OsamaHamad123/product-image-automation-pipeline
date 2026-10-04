@@ -162,10 +162,10 @@ class ImpersonateClient:
         return response
 
     def fetch_image(self, url: str, timeout: float = 15, max_bytes: int = MAX_IMAGE_BYTES,
-                    referer: Optional[str] = None) -> FetchResult:
-        """تنزيل صورة مع حد أقصى للحجم وتحقق أولي من النوع. لا يرفع استثناءات."""
+                    referer: Optional[str] = None, headers: Optional[Dict[str, str]] = None) -> FetchResult:
+        """تنزيل صورة مع حد أقصى للحجم وتحقق أولي من النوع. لا يرفع استثناءات. headers تستبدل الترويسات الأساسية."""
         response, error, attempts = self._get_with_retries(
-            url, self._headers(None, referer), timeout, stream=True)
+            url, self._headers(headers, referer), timeout, stream=True)
         if response is None:
             return FetchResult(error=error or "connection_error", attempts=attempts)
         try:

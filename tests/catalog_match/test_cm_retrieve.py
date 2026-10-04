@@ -309,7 +309,8 @@ def test_sanctioned_duplicate_upgrades_a_scraped_candidate():
     assert c.sanctioned is True and c.provider == "serper"
     assert c.image_url == "https://cdn.example.com/p/milk.jpg"
     assert (c.width, c.height) == (1200, 1200)
-    assert c.consensus_count == 2
+    # one store page (the scraped hit has no page of its own): one source, not «the same image in two sources»
+    assert c.consensus_count == 1
 
 
 def test_garbage_from_a_provider_is_an_error_not_a_crash():

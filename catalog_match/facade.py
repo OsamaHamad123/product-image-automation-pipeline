@@ -4,7 +4,7 @@ to_sku_row(product_name, brand, kwargs) -> dict
     The sheet row that identity.build_sku_spec() expects, from the arguments of
     image_search.search_best_product_image(query, product_name, brand, **kwargs).
 
-outcome_to_legacy(outcome, trace=None) -> dict | None
+outcome_to_legacy(outcome, trace=None, spec=None) -> dict | None
     The dict main.py / cli_bridge.py / fastapi_server.py consume:
         url, title, width, height, source (provider), page_url, content_sha256,
         needs_review   decision != 'AUTO_PUBLISH'
@@ -25,6 +25,11 @@ outcome_to_legacy(outcome, trace=None) -> dict | None
     quality_score, relevance_score}, so the existing UI and save_curation_candidates
     keep working. warnings are the review warning codes of the pick (decide.route's
     'warn:' reasons without the prefix, e.g. 'foreign_store'); [] for the others.
+    With spec (the SkuSpec searched for), warnings are decide.candidate_warnings for
+    every candidate: the pick's 'warn:' codes plus the display-only ones
+    (size_unverified, variant_unverified), and each eligible alternative's own codes,
+    so the review screen can warn about an alternative too. They are display-only:
+    computed after routing, never written to the candidates' reasons.
 """
 
 from __future__ import annotations
@@ -34,8 +39,8 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Mapping, Optional
 
-from .decide import warning_codes
-from .models import RankedCandidate, SearchOutcome
+from .decide import RESOLUTION_PREFIX, candidate_warnings, warning_codes
+from .models import RankedCandidate, SearchOutcome, SkuSpec
 
 logger = logging.getLogger(__name__)
 
@@ -105,15 +110,22 @@ def _dims(rc: RankedCandidate):
     return rc.candidate.width, rc.candidate.height
 
 
-def evidence(rc: RankedCandidate) -> Dict[str, Any]:
-    """Identity evidence chips for the review UI (GTIN, brand, size, variant, source)."""
+def evidence(rc: RankedCandidate, spec: Optional[SkuSpec] = None) -> Dict[str, Any]:
+    """Identity evidence chips for the review UI (GTIN, brand, size, variant, source).
+
+    variant_status is 'match' only when the page matched every variant axis the sheet states (spec.variants);
+    some of them is 'partial' (the review screen says «النوع» only for 'match').
+    """
     score = rc.score
     matched = dict(score.matched or {}) if score is not None else {}
     variants_matched = list(matched.get("variants") or [])
     variant_conflict = score is not None and any(
         str(r).startswith("variant_conflict") for r in tuple(score.hard_reject) + tuple(score.conflicts))
+    stated = set((spec.variants or {}) if spec is not None else ())
     if variant_conflict:
         variant_status = "conflict"
+    elif variants_matched and stated and not stated <= set(variants_matched):
+        variant_status = "partial"
     elif variants_matched:
         variant_status = "match"
     else:
@@ -147,7 +159,23 @@ def vlm_payload(rc: RankedCandidate) -> Optional[Dict[str, Any]]:
     return _json_safe(dataclasses.asdict(rc.verdict))
 
 
-def serialise_candidate(rc: RankedCandidate) -> Dict[str, Any]:
+def display_warnings(rc: RankedCandidate, spec: Optional[SkuSpec] = None,
+                     reading_of: Optional[RankedCandidate] = None) -> List[str]:
+    """The warning codes the review screen shows under this candidate (see the module docstring).
+
+    Without spec: the pick's 'warn:' codes only. Display only: a failure here never breaks the search result.
+    """
+    if spec is None:
+        return warning_codes(rc.reasons)
+    try:
+        return candidate_warnings(spec, rc, reading_of)
+    except Exception:
+        logger.exception("display warnings failed for %s", rc.candidate.image_url)
+        return warning_codes(rc.reasons)
+
+
+def serialise_candidate(rc: RankedCandidate, spec: Optional[SkuSpec] = None,
+                        reading_of: Optional[RankedCandidate] = None) -> Dict[str, Any]:
     """One candidate in the legacy trace / curation shape plus the v2 evidence."""
     width, height = _dims(rc)
     identity_score = float(rc.score.identity_score) if rc.score is not None else 0.0
@@ -165,8 +193,8 @@ def serialise_candidate(rc: RankedCandidate) -> Dict[str, Any]:
         "height": height,
         "status": rc.status,
         "reasons": [str(r) for r in rc.reasons],
-        "warnings": warning_codes(rc.reasons),
-        "evidence": evidence(rc),
+        "warnings": display_warnings(rc, spec, reading_of),
+        "evidence": evidence(rc, spec),
         "vlm": vlm_payload(rc),
         "quality": _json_safe(rc.quality) if rc.quality is not None else None,
         "content_sha256": rc.fetched.content_sha256 if rc.fetched is not None else None,
@@ -196,6 +224,8 @@ def outcome_summary(outcome: SearchOutcome) -> Dict[str, Any]:
         "verifier_notices": list(getattr(outcome, "verifier_notices", None) or []),
         "reject_counts": dict(outcome.reject_counts),
         "winner_url": outcome.winner.candidate.image_url if outcome.winner is not None else None,
+        # SOCIAL_ONLY: the social-network posts that show the product, for the reviewer
+        "social_links": list(getattr(outcome, "social_links", None) or []),
     }
 
 
@@ -203,9 +233,17 @@ def outcome_summary(outcome: SearchOutcome) -> Dict[str, Any]:
 # Output side
 # ---------------------------------------------------------------------------
 
-def outcome_to_legacy(outcome: SearchOutcome, trace: Optional[dict] = None) -> Optional[Dict[str, Any]]:
+def outcome_to_legacy(outcome: SearchOutcome, trace: Optional[dict] = None,
+                      spec: Optional[SkuSpec] = None) -> Optional[Dict[str, Any]]:
     """Legacy result dict for a SearchOutcome (see the module docstring)."""
     ranked = list(outcome.ranked or [])
+    # a best-resolution copy is published on the reading of the winner it replaced (decide.route)
+    replaced = next((rc for rc in ranked if f"{RESOLUTION_PREFIX}:replaced" in rc.reasons), None)
+
+    def serialise(rc: RankedCandidate) -> Dict[str, Any]:
+        reading_of = replaced if (replaced is not None and rc.status == "preselected") else None
+        return serialise_candidate(rc, spec, reading_of)
+
     if trace is not None:
         trace["outcome"] = outcome_summary(outcome)
         trace.setdefault("steps", []).append({
@@ -213,7 +251,7 @@ def outcome_to_legacy(outcome: SearchOutcome, trace: Optional[dict] = None) -> O
             "name": STEP_NAME,
             "query": " | ".join(outcome.queries),
             "results_count": len(ranked),
-            "candidates": [serialise_candidate(rc) for rc in ranked],
+            "candidates": [serialise(rc) for rc in ranked],
         })
 
     if outcome.decision in NO_RESULT_DECISIONS:
@@ -249,7 +287,7 @@ def outcome_to_legacy(outcome: SearchOutcome, trace: Optional[dict] = None) -> O
         "failure_code": outcome.failure_code,
         "sku_key": outcome.sku_key,
         "status": winner.status if winner is not None else "review_unselected",
-        "candidates": [serialise_candidate(rc) for rc in top],
+        "candidates": [serialise(rc) for rc in top],
     }
     if winner is not None:
         width, height = _dims(winner)

@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import socket
+from unittest.mock import ANY
 
 import pytest
 
@@ -80,13 +81,18 @@ def sheet(monkeypatch, tmp_path):
 
     def fake_publish(image_url, name, brand, row_number, worksheet, link_column_index, **kwargs):
         events.append(("publish", image_url))
-        return {"status": "published", "isolated": True, "provider": "photoroom", "metadata": {},
-                "width": 800, "height": 800, "link": LINK, "sheet_value": LINK}
+        res = {"status": "published", "isolated": True, "provider": "photoroom", "metadata": {},
+               "width": 800, "height": 800, "link": LINK, "sheet_value": LINK}
+        if kwargs.get("after_write"):
+            kwargs["after_write"](res)        # the decision is recorded under the publish lock
+        return res
 
     monkeypatch.setattr(cli_bridge, "LOG_PATH", str(tmp_path / "search.log"))
     monkeypatch.setattr(main, "publish_image", fake_publish)
     monkeypatch.setattr(google_sheets, "init_async_queue", lambda *a, **k: None)
     monkeypatch.setattr(google_sheets, "stop_async_queue", lambda *a, **k: None)
+    # the sheet outcome (C3) is not what these tests read: an empty outbox, not an offline database error
+    monkeypatch.setattr(google_sheets, "outbox_outcomes", lambda *a, **k: {}, raising=False)
     monkeypatch.setattr(google_sheets, "get_sheets_client", lambda: object())
     monkeypatch.setattr(google_sheets, "get_brand_mappings", lambda *a, **k: {})
     monkeypatch.setattr(google_sheets, "open_worksheet", lambda client, name: ws)
@@ -136,11 +142,11 @@ def recorder(sheet, offline, monkeypatch):
         return lambda *a, **k: events.append((name, a, k)) or result
 
     monkeypatch.setattr(local_cache_db, "get_task_by_row", lambda row: None)
-    monkeypatch.setattr(local_cache_db, "get_curation_candidates", lambda row, sku_key=None: list(state["candidates"]))
+    monkeypatch.setattr(local_cache_db, "get_curation_candidates", lambda row, sku_key=None, **k: list(state["candidates"]))
     monkeypatch.setattr(local_cache_db, "get_cached_product", lambda **k: state["approved"])
     monkeypatch.setattr(local_cache_db, "get_rejections", lambda sku: ([], []))
     for name in ("save_product_resolution", "update_task_status_by_row", "delete_curation_candidates",
-                 "add_rejected_image", "save_feedback"):
+                 "exclude_curation_candidate", "add_rejected_image", "save_feedback"):
         monkeypatch.setattr(local_cache_db, name, record(name))
     monkeypatch.setattr(local_cache_db, "supersede_resolution", record("supersede_resolution", 1))
     monkeypatch.setattr(local_cache_db, "add_review_decision",
@@ -161,7 +167,8 @@ def test_approving_the_precheck_records_it_before_the_candidates_are_deleted(rec
     result = cli_bridge.action_select_image(_approve_params())
 
     assert result == {"status": "success", "image_link": LINK, "sheet_value": LINK, "isolated": True,
-                      "provider": "photoroom", "sku_key": SKU}
+                      "provider": "photoroom", "sku_key": SKU, "rows_written": [ROW],
+                      "sheet": "unknown", "current": ANY}
     (action, row), = _reviews(events)
     assert action == "approved"
     assert row == {"sku_key": SKU, "row_number": ROW, "brand": BRAND, "product_name": NAME, "image_url": PRE_URL,
@@ -213,7 +220,9 @@ def test_rejecting_the_precheck_records_the_reason(recorder):
     assert (row["was_preselected"], row["engine_decision"], row["page_domain"]) == (True, "REVIEW_PRESELECTED",
                                                                                    "luluhypermarket.com")
     names = _names(events)
-    assert names.index("add_review_decision") < names.index("delete_curation_candidates")
+    # recorded from the stored run before the rejected candidate is marked excluded (C2: only that one)
+    assert names.index("add_review_decision") < names.index("exclude_curation_candidate")
+    assert "delete_curation_candidates" not in names
     assert names.index("add_rejected_image") < names.index("add_review_decision")
 
 
@@ -239,7 +248,9 @@ def test_rejecting_a_human_approval_is_not_mistaken_for_auto_publish(recorder):
 def test_manual_upload_is_recorded_as_not_the_precheck(recorder, tmp_path):
     cli_bridge, events, state = recorder
     result = cli_bridge.action_upload_manual_image(_upload_params(tmp_path))
-    assert result == {"status": "success", "image_link": LINK, "sheet_value": LINK, "isolated": True, "sku_key": SKU}
+    assert result == {"status": "success", "image_link": LINK, "sheet_value": LINK, "isolated": True, "sku_key": SKU,
+                      "rows_written": [ROW],
+                      "sheet": "unknown", "current": ANY}
     (action, row), = _reviews(events)
     assert action == "manual_upload"
     assert (row["image_url"], row["page_domain"]) == (None, None)            # the local file path is never stored
@@ -322,7 +333,7 @@ def test_a_logging_failure_does_not_change_the_approval(recorder, monkeypatch, c
     assert result == expected
     assert {"save_product_resolution", "update_task_status_by_row", "delete_curation_candidates"} <= set(_names(events))
     logged = [r for r in caplog.records if r.name == "cli_bridge" and r.exc_info]
-    assert logged and "review_decisions is locked" in str(logged[-1].exc_info[1])
+    assert any("review_decisions is locked" in str(r.exc_info[1]) for r in logged)
 
 
 def test_a_logging_failure_does_not_change_the_rejection(recorder, monkeypatch, caplog):
@@ -334,7 +345,7 @@ def test_a_logging_failure_does_not_change_the_rejection(recorder, monkeypatch, 
     with caplog.at_level(logging.ERROR, logger="cli_bridge"):
         result = cli_bridge.action_reject_image(_reject_params())
     assert result == expected
-    assert {"supersede_resolution", "delete_curation_candidates", "update_task_status_by_row"} <= set(_names(events))
+    assert {"exclude_curation_candidate", "update_task_status_by_row"} <= set(_names(events))
     assert any(r.exc_info for r in caplog.records if r.name == "cli_bridge")
 
 
@@ -348,7 +359,7 @@ def test_a_logging_failure_does_not_change_the_upload(recorder, monkeypatch, tmp
         result = cli_bridge.action_upload_manual_image(_upload_params(tmp_path))
     assert result == expected and "delete_curation_candidates" in _names(events)
     logged = [r for r in caplog.records if r.name == "cli_bridge" and r.exc_info]
-    assert logged and "review_decisions is locked" in str(logged[-1].exc_info[1])
+    assert any("review_decisions is locked" in str(r.exc_info[1]) for r in logged)
 
 
 def test_nothing_is_recorded_when_the_approval_fails(recorder, monkeypatch):
@@ -501,7 +512,9 @@ def test_reject_writes_the_review_with_its_reason(db, sheet):
     assert (row["action"], row["reason_code"], row["image_url"]) == ("rejected", "WRONG_VARIANT", OTHER_URL)
     assert (row["engine_decision"], row["was_preselected"], row["page_domain"]) == ("REVIEW_PRESELECTED", 0,
                                                                                    "noon.com")
-    assert db.get_curation_candidates(ROW, sku_key=SKU) == []
+    # C2: only the rejected alternative is excluded, the review keeps the precheck
+    assert [(c["image_url"], c["status"]) for c in db.get_curation_candidates(ROW, sku_key=SKU)] == [
+        (PRE_URL, "preselected"), (OTHER_URL, "excluded")]
     assert db.get_rejections(SKU)[0] == [OTHER_URL]
 
 
@@ -540,7 +553,8 @@ def test_a_failing_insert_does_not_break_the_approval(db, sheet, monkeypatch, ca
     with caplog.at_level(logging.ERROR, logger="cli_bridge"):
         result = cli_bridge.action_select_image(_approve_params())
     assert result == {"status": "success", "image_link": LINK, "sheet_value": LINK, "isolated": True,
-                      "provider": "photoroom", "sku_key": SKU}
+                      "provider": "photoroom", "sku_key": SKU, "rows_written": [ROW],
+                      "sheet": "unknown", "current": ANY}
     assert _db_reviews(db) == []
     assert db.get_curation_candidates(ROW, sku_key=SKU) == []
     assert db.get_cached_product(sku_key=SKU)["verification_status"] == "human_approved"
@@ -563,12 +577,15 @@ def test_a_missing_table_does_not_break_approve_reject_or_upload(db, sheet, tmp_
             _db_candidates(db)
             rejected = cli_bridge.action_reject_image(_reject_params(OTHER_URL))
             _db_candidates(db)
-            uploaded = cli_bridge.action_upload_manual_image(_upload_params(tmp_path))
+            # replace: the approval above is seconds old (an old client may not overwrite it without replace)
+            uploaded = cli_bridge.action_upload_manual_image(_upload_params(tmp_path, replace=True))
         assert approved == {"status": "success", "image_link": LINK, "sheet_value": LINK, "isolated": True,
-                            "provider": "photoroom", "sku_key": SKU}
+                            "provider": "photoroom", "sku_key": SKU, "rows_written": [ROW],
+                      "sheet": "unknown", "current": ANY}
         assert rejected["status"] == "success" and rejected["reason_code"] == "WRONG_VARIANT"
         assert uploaded == {"status": "success", "image_link": LINK, "sheet_value": LINK, "isolated": True,
-                            "sku_key": SKU}
+                            "sku_key": SKU, "rows_written": [ROW],
+                      "sheet": "unknown", "current": ANY}
         assert db.get_curation_candidates(ROW, sku_key=SKU) == []
         failures = [r for r in caplog.records if r.name == "cli_bridge" and r.exc_info]
         assert len(failures) == 3 and all("review_decisions" in str(r.exc_info[1]) for r in failures)

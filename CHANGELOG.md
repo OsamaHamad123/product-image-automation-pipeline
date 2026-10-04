@@ -426,6 +426,155 @@ learned ever auto-publishes.
 - `.gitignore` keeps ignoring HTML dumps but lets the offline test fixtures under `tests/catalog_match/fixtures`
   be added.
 
+### Phase 4: reliable automation from the sheet row to the published link
+
+Phase 3 made the search pick the right image more often. Phase 4 makes every later step as careful: the
+sheet write, the cut-out, the publish, the queue, the nightly run, the review screen, and a way to replay a live
+run offline. Eight packages were built in parallel, each was reviewed adversarially, and every confirmed defect
+was fixed with a regression test that fails when the fix is reverted. The eval gate is unchanged throughout
+(58/58, 58/58, 52/58 correct picks; 0 wrong auto-publish).
+
+#### Sheet writes (outbox)
+
+- Every queued write has an outcome (`google_sheets.outbox_outcomes`, `outbox_summary`): PENDING, SYNCED,
+  SUPERSEDED, CONFLICT, DEAD or SKIPPED_OUT_OF_BOUNDS, per cell, with an outcome hook into the Laravel error log.
+- Writes are ordered by a sequence that never goes below the outbox's highest one, so an older value never lands
+  over a newer one, also after a Windows clock step back, an identity change (a barcode added later) or a row that
+  moved twice.
+- A write moves to another row only on a valid barcode or a complete identity (name, size and brand, a blank
+  matching only a blank) and never over a different value in the target cell; otherwise it is a reported CONFLICT.
+- The row identity includes the brand; forwarding a Redis payload twice inserts nothing new; product fields from
+  sheet cells stay on one log line.
+- `SheetTransientError` (Google busy or unreachable) is reported as such by every caller; the sync worker
+  forwards Redis payloads before it opens the sheet.
+
+#### Image processing and the cut-out check
+
+- Every cut-out goes through a quality check (`assess_cutout`, `ProcessResult.quality_flags`): edge_clipped,
+  opaque_backdrop, opaque_fill, alpha_haze, kept_shadow, second_object, too_small_on_canvas, upscaled. A flagged
+  cut-out is retried only with what can fix its flag (one table, `_FLAG_REMEDY`), and no paid call is spent on a
+  result that can never publish.
+- Printed cartons are not photo backdrops; two-packs are one product; several small stray pieces add up to a
+  second object; clear bottles stay one object; a thin part cut by the Gemini box is detected and the full frame
+  retried; a kept shadow is flagged.
+- Upscaling blocks only above 3x; between 2x and 3x the image publishes with the note `upscaled`
+  (`ProcessResult.quality_notes`).
+- `WHITE_SOURCE_MODE` (off | log | on, default log) uses a source already on white without a paid call; shadows,
+  reflections and white product parts make a source ineligible, and log mode analyses a small copy (~0.1 s).
+- Uploads are verified (`cloudinary_storage.upload_product_image`: bytes, size and MD5 of what Cloudinary stored);
+  the publish-time re-download sends the original fetch's Accept and Referer headers; `PHOTOROOM_CROP` defaults to
+  off and no longer doubles PhotoRoom calls.
+
+#### Publishing and approvals
+
+- One publish path (`main.publish_image`) and one processing profile for auto-publish, approvals and manual
+  uploads. A per-product lock (`sku_publish_lock`) is held until the approval record and the queue status are
+  written: of two reviewers approving at once the second is refused, and the database and the sheet always agree.
+- Contracts with the review screen: C1 (an approval carries the state the page saw; `already_approved`,
+  `state_changed`, `busy`; `replace` only after an explicit confirmation; an image another reviewer rejected is
+  refused and never offered for replacement), C2 (a rejection excludes only the rejected image and keeps the
+  product in review while candidates remain; a re-search saves its candidates on the server), C3 (the sheet
+  outcome `written | pending | conflict | unknown`, read only from this request's own link writes).
+- Products that share a barcode, or a name key with another Arabic variant, are separate products everywhere
+  (approvals, rejections, candidates, queue status, sibling rows).
+- A rejection voids only the approval of the rejected image (also under the pre-barcode key) and clears its
+  Cloudinary link from the sheet; the worker never publishes a pick rejected while it was processed.
+- Duplicate images across products are detected by pHash; a colour signature keeps label-colour variants of the
+  same bottle from counting as duplicates.
+- Human approvals name the cut-out check's flags in Arabic; presentation-only flags can be published after an
+  explicit «انشرها رغم ذلك…»; a failed background removal is never published.
+
+#### Queue and scheduling
+
+- New queue columns (`next_attempt_at`, `fail_count`, `down_count`, `reverify_count`, `priority`, `task_kind`,
+  `review_only`, `requeue_reason`, `brand_fp`, `alt_sku_key`, `searched_at`) and a batched enqueue.
+- NOT_FOUND rows are retried after 3, 7 and 30 days; PROVIDER_DOWN backs off 10 then 20 minutes, then parks for
+  12 hours; a Serper 429 backs off instead of stopping the run.
+- The enqueue reconciles the sheet: an approved image missing from its row is written again without a search
+  (relink), an edited row or a cleared link goes back to review, a lost write is retried, a brand-mapping or
+  local-index change reopens the rows it can help.
+- Daily budget (`DAILY_BUDGET_USD`) from a spend ledger (`search_spend`) that also counts dashboard searches and
+  re-searches after a rejection; a Serper credit stop (`SERPER_CREDIT_STOP_SEARCHES`).
+- A reviewer's decision outlives a stale relink or recheck; rows waiting for review stay there when a run stops
+  early; per-size failure records are kept, shown and retried for their own row.
+
+#### Nightly run, worker lock and reports
+
+- The worker lock is JSON (pid, host, start time, role, command line) with a heartbeat; a lock whose process
+  identity verifies is never aged out, a failed process check never frees it, and the dashboard reads the lock
+  state from Python's rule and kills only a confirmed worker.
+- Stop asks the worker to stop and waits up to 90 seconds; a run that had to be killed still gets a `stopped`
+  report.
+- Every run writes a report (`run_report.py`): `run_history` table, `temp/nightly/last_report.json`, a Telegram
+  message, and the Health page's «آخر تشغيل» card and nightly log viewer. Report texts are redacted.
+- Exit codes: 0 done / skipped / handed over, 1 failed, 2 outage, 3 stopped. Only a database or Google that does
+  not answer is an outage and is retried after 15 and 60 minutes; the night stays inside Task Scheduler's time
+  limit; a crash is a failure and Ctrl+C a stop.
+
+#### Review screen
+
+- Every candidate shows its own warnings; size or variant that nothing confirmed keeps a pick out of bulk
+  approval; «why this image» chips come from the engine's evidence; the preview is labelled as the source before
+  background removal.
+- A «الخلفية لم تُعزل» chip (`?filter=bg_failed`) for approvals whose cut-out failed; products ordered by
+  confidence and grouped by brand; bulk mode keys (arrows, Space, A, Shift+A).
+
+#### Search accuracy
+
+- Sheet names are read the way the stores write them, for parsing and queries only (glued sizes split, compounds
+  and typos fixed from `catalog_match/data/sheet_spellings.json`); the sku_key still comes from the raw name.
+- A protein variant axis (beef, chicken, mutton, lamb, fish) for luncheon meat, masala, burgers and sausages;
+  `mm` is a unit word; Q1 no longer repeats a mapped misspelling; the label reader retries a timeout once.
+- A discovered brand spelling is reused within the run and asked of the local index; page recovery never picks
+  the failed picture again; new failure code `SOCIAL_ONLY` with the social posts' links.
+
+#### Record and replay
+
+- `scripts/smoke_live.py --record <folder>` records every answer of a live dry run (searches, pages, downloads,
+  label readings, local index, spend) into a cassette; `scripts/replay_run.py` replays it offline and compares the
+  decisions; `--fill-misses` tops up what a newer version asks.
+- No API key, Google engine id (cx) or proxy password is ever stored, wherever an answer echoes it; a failing
+  cassette write never changes the live run; a missing or damaged answer is a reported miss; `--strict` fails on
+  any miss, crash or refused connection.
+
+#### Fixed in the reviews of the eight packages (before their first live run)
+
+Every package was reviewed adversarially; each confirmed defect below was reproduced first and has a test that
+fails without its fix.
+
+- Sheet writes: a write never relocates onto another product's row on a blank brand or size; an older value never
+  wins after an identity change or a row that moved twice.
+- Cut-out check: good transparent printed cartons, two-packs, tight crops and 300-500 px web images are no longer
+  sent to review after paid retries (on a synthetic packshot corpus: transparent PNGs flagged 4/7 -> 0/7, two-packs
+  7/10 -> 0/10 with paid calls 23 -> 5, damaged images caught 2/8 -> 8/8).
+- Publishing: two simultaneous approvals both succeeding; one product's image written into another product's row
+  when they share a barcode; a stale rejection voiding a fresh approval; an approval of an image another reviewer
+  had just rejected; a worker publishing a pick rejected while it was processed; an auto-publish whose background
+  removal failed leaving its row 'processing'.
+- Queue: a stale relink writing back a rejected image; review rows emptied by a recheck or by an early stop; legacy
+  PROVIDER_DOWN rows never claimed; one size's failure record deleting or shadowing another's; dashboard searches
+  outside the daily budget; the outbox reconcile reading only the newest 500 writes.
+- Nightly run and lock: a live worker judged stale after 24 hours and a failed process check freeing a live lock
+  (two workers at once); configuration errors retried as outages; Stop killing a run without a report; a crash
+  reported as done; the night overrunning Task Scheduler's limit.
+- Review screen: a quiet reload moving the approval guard; replace not re-checked on the server; approvals of
+  pictures that never rendered or of the next product on a quick second key press; Shift+A taking cards never
+  shown; «publish anyway» claiming a background was removed; select_image forwarding every field of the request.
+- Search: the alternative key drifting for rows given a barcode; promo codes (B2G1, S4 L) read as sizes; correct
+  meat masalas rejected; another product type outranking the right one; a brand's official page losing tier 1; a
+  brand spelling proved by one row lent to another without evidence; a multipack's own picture rejected.
+- Record and replay: keys and the Google engine id stored through response URLs and large bodies; answers lost on
+  Unicode line separators or a missing blob; a crashed row counted as complete; a local proxy letting traffic out.
+- Google CSE transport errors no longer print the key and the engine id in the console and the log file.
+
+#### Known limits after phase 4
+
+- Two different products that share one barcode still share one stored approval record (`resolved_products` is
+  keyed by sku_key); their sheet rows, candidates and queue rows are kept apart.
+- The Windows process probe and the PowerShell launchers are tested with recorded outputs only (no Windows here).
+- Approving a picture from a live search on the review screen (no stored candidate) checks earlier rejections by
+  its URL only; the search itself already excludes rejected pHashes.
+
 ### Removed
 
 - `verification_layer/` (87 modules) and the 23 test files that only exercised it or asserted nothing

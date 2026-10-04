@@ -16,7 +16,9 @@ Without the Google Sheet (a machine with the keys but no credentials.json, e.g. 
 brand_ar, barcode, category, size; the sheet's header synonyms work too) or from an earlier
 --json file (its rows' name and brand). --rows still picks rows from it. --brands-file reads a
 Brands Mapping CSV in the tab's layout (Brand, Synonyms, Excluded Competitors, Sub-brands,
-Official domains); without it a file run has no brand mappings (every brand is sheet_raw).
+Official domains); without it a file run has no brand mappings (every brand is sheet_raw). Every
+run prints how many Brands Mapping entries it uses and how many of its rows have a mapped brand, and
+warns when none has.
 
 --probe makes one cheap, read-only call per configured service (Serper images, web search,
 shopping and lens; SerpApi; the primary and the strong label-reading model; Anthropic;
@@ -39,10 +41,33 @@ files that hold only the list of rows).
 
 Use it on ~30 rows before switching the live sheet to SEARCH_ENGINE=v2 (evaluation layer 4).
 This replaces scripts/verify_image_search.py, which counted "any image returned" as success.
+
+Record once, replay for free (catalog_match/cassette.py):
+
+    .venv\\Scripts\\python.exe scripts\\smoke_live.py --rows-file runs\\2026-10-03\\rows_2_61.csv ^
+        --brands-file runs\\2026-10-03\\brands_mapping_suggested.csv --dry-run --json runs\\after.json ^
+        --record runs\\cassette_2026-10 --record-shadow
+    python scripts/replay_run.py runs/cassette_2026-10 --json runs/replayed.json      # offline, any code version
+    python scripts/compare_runs.py runs/after.json runs/replayed.json
+
+--record DIR stores every answer the run gets from outside (search responses, image downloads, product
+pages, label-reader replies, the local-index rows and the wall-clock decisions) in the folder DIR, without
+any key, header or token; the run itself is unchanged. The folder holds 100-250 MB for 60 rows (about
+twice that with --record-shadow) and is ignored by version control (runs/ and cassette_*/): zip it to send it. --record-shadow also stores, after
+each row's decision is made, answers a later code version may ask for (every pooled image up to 24, the
+pages of the tier-1/2 listings, the retailer web search and the shopping search for a row without a pick,
+one label reading of every downloaded image); it costs a little more, printed at the end. A replay that
+missed answers writes a manifest; --record DIR --fill-misses MANIFEST then runs only those rows again,
+answering from the cassette where it can and paying only for the missing answers, which it adds to DIR.
+The keys, the CSE engine ids and the proxy password are never written to the folder, wherever an answer
+echoes them. A write the folder refuses (a full disk, a file an antivirus holds) never changes the run: the
+row prints a CASSETTE line saying what was not stored, and the --json results are written in any case.
 """
 
 import argparse
+import contextlib
 import datetime as dt
+import functools
 import inspect
 import json
 import logging
@@ -52,7 +77,7 @@ import sys
 import time
 import traceback
 from collections import Counter
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO_ROOT not in sys.path:
@@ -83,12 +108,15 @@ _CONNECTIVITY_RE = re.compile(
 _LINK_DOWN_RE = re.compile(r"connection|connect|name resolution|getaddrinfo|unreachable|refused|ssl|proxy",
                            re.IGNORECASE)
 
-# Why a measured row has no pick, in the order they are tested, with the words the summary prints.
+# Why a measured row has no pick, with the words the summary prints (unselected_reason() tests them in its
+# own order). The label reader's readings count only on listings that name the brand (tier 1 or 2): another
+# brand's listing it rejected is not why the product had no pick.
 UNSELECTED_REASONS = (
     ("verifier_mismatch", "label reader saw another product"),
     ("unsure", "label reader was unsure"),
     ("download_failed", "every image download failed"),
     ("only_social", "only social-media images"),
+    ("brand_not_found", "brand not found (no listing names it)"),
     ("not_found", "nothing matched the name"),
     ("provider_down", "search service refused or failed"),
     ("verifier_down", "label reader unavailable"),
@@ -100,9 +128,11 @@ _SOCIAL_LABELS = frozenset({
 })
 _SOCIAL_DOMAINS = ("x.com", "fb.com", "t.co", "redd.it", "threads.net")
 
+# (the CSE engine ids are no key, but they identify the account and are hidden with the keys)
 SECRET_SETTINGS = ("SERPER_API_KEY", "GEMINI_API_KEY", "SERPAPI_API_KEY", "ANTHROPIC_API_KEY", "PHOTOROOM_API_KEY",
                    "CLOUDINARY_API_KEY", "CLOUDINARY_API_SECRET", "GOOGLE_SEARCH_API_KEYS", "GOOGLE_SEARCH_API_KEY",
-                   "REMOVE_BG_API_KEY", "TELEGRAM_BOT_TOKEN", "PROXY_URL")
+                   "GOOGLE_SEARCH_CX_LIST", "GOOGLE_SEARCH_CX", "REMOVE_BG_API_KEY", "TELEGRAM_BOT_TOKEN", "PROXY_URL")
+_QUERY_KEY_RE = re.compile(r"(?i)((?:(?:api_?)?key|(?<![a-z0-9])cx)(?:=|%3D))[^&\s'\"]+")
 
 WRITE_METHODS = ("update", "update_cell", "update_cells", "batch_update", "append_row", "append_rows", "insert_row",
                  "insert_rows", "delete_rows", "clear", "add_worksheet", "del_worksheet", "format", "update_acell")
@@ -169,12 +199,13 @@ def secret_values(lookup=None):
                 parts = urlsplit(item)
                 values.update(v for v in (parts.username, parts.password) if v and len(v) >= 4)
             if len(item) >= 6:
-                values.add(item)
+                values.update((item, quote(item, safe="")))      # as is, and as a URL query carries it
     return sorted(values, key=len, reverse=True)
 
 
 def redact(text, secrets=None, query_keys=True):
-    """text with every secret value replaced, and (query_keys) every 'key=...' / 'api_key=...' query value.
+    """text with every secret value replaced, and (query_keys) every 'key=...' / 'api_key=...' / 'cx=...' query
+    value.
 
     Error texts get both; a whole --json document only the secret values, so that image URLs with a
     harmless 'key=' parameter stay comparable between runs.
@@ -182,7 +213,7 @@ def redact(text, secrets=None, query_keys=True):
     text = "" if text is None else str(text)
     for secret in (secret_values() if secrets is None else secrets):
         text = text.replace(secret, "[hidden]")
-    return re.sub(r"(?i)((?:api_?)?key=)[^&\s'\"]+", r"\1[hidden]", text) if query_keys else text
+    return _QUERY_KEY_RE.sub(r"\1[hidden]", text) if query_keys else text
 
 
 def _utf8_stdout():
@@ -380,6 +411,31 @@ def read_brand_mappings(spreadsheet):
     return mappings
 
 
+def mapping_report(rows, mappings, identity):
+    """Lines saying how many Brands Mapping entries the run uses and how many of its rows have a mapped brand,
+    with a warning when none has: the live run of 2026-10-03 (smoke_6.json) ran without any mapping, so every
+    brand was 'sheet_raw' (no auto-publish, misspellings unfixed, no excluded competitors) and nothing said so."""
+    mappings = mappings or {}
+    learned = sum(1 for v in mappings.values() if isinstance(v, dict) and (v.get("learned") or v.get("sources_only")))
+    mapped = 0
+    for row in rows or []:
+        try:
+            spec = identity.build_sku_spec({k: row.get(k, "") for k in ("name", "name_ar", "brand", "brand_ar",
+                                                                        "barcode", "category", "size")}, mappings)
+        except Exception:      # a row the identity cannot read is reported by the run itself
+            continue
+        if getattr(spec, "brand_conf", "") in ("mapped", "learned"):
+            mapped += 1
+    n = len(rows or [])
+    entries = f"{len(mappings) - learned} entries" + (f" + {learned} learned from reviews" if learned else "")
+    lines = [f"Brands Mapping: {entries} loaded | {mapped} of {n} rows have a mapped brand"]
+    if n and not mapped:
+        lines.append("WARNING: none of this run's brands is in the Brands Mapping: every brand is searched as the "
+                     "sheet writes it (no auto-publish, sheet misspellings unfixed, no excluded competitors). Fill "
+                     "the 'Brands Mapping' tab or pass --brands-file (e.g. runs/2026-10-03/brands_mapping_suggested.csv).")
+    return lines
+
+
 def load_v2():
     """The catalog_match stages; a clear message when a stage is not merged yet."""
     try:
@@ -547,8 +603,14 @@ def _survives(status, reasons):
     return status != "excluded" and not any(str(x).startswith("hard:") for x in reasons or ())
 
 
+def forget_brand_spellings():
+    """A run starts with no store spelling an earlier run (or an earlier Brands Mapping) proved: brand_discovery."""
+    from catalog_match import brand_discovery
+    brand_discovery.forget_all()
+
+
 def run_row(row, mappings, identity, pipeline, providers_mod, verify_mod, serp_cost, vlm_cost, expansion=None,
-            prices=None, secrets=None):
+            prices=None, secrets=None, after=None):
     prices = prices or provider_prices(serp_cost)
     calls = []
     providers = [CountingProvider(p, calls) for p in providers_mod.default_providers()]
@@ -586,7 +648,9 @@ def run_row(row, mappings, identity, pipeline, providers_mod, verify_mod, serp_c
         position = next(i for i, rc in enumerate(outcome.ranked, 1) if rc is outcome.winner)
         winner = _describe(outcome.winner, position)
     survivors = [rc for rc in outcome.ranked if _survives(rc.status, rc.reasons)]
-    verdicts = Counter(rc.verdict.decision for rc in survivors if rc.verdict is not None)
+    # the listings that name the brand: why a row has no pick is read on them, never on another brand's listing
+    brand = [rc for rc in survivors if rc.score is not None and rc.score.tier in (1, 2)]
+    verdicts = Counter(rc.verdict.decision for rc in brand if rc.verdict is not None)
     record = {
         "row": row["row_number"], "name": row["name"], "brand": row["brand"], "sku_key": spec.sku_key,
         "brand_conf": spec.brand_conf, "gtin_status": spec.gtin_status, "variants": dict(spec.variants),
@@ -602,8 +666,10 @@ def run_row(row, mappings, identity, pipeline, providers_mod, verify_mod, serp_c
                             if k != "usage"} for entry in verifier.log],
         "vlm_usage": usage, "strong_calls": sum(1 for u in usage if u.get("role") == "strong"),
         "verdicts": dict(verdicts),
-        "only_social": bool(survivors) and all(is_social(rc.candidate.image_url, rc.candidate.page_url,
-                                                         rc.candidate.domain) for rc in survivors),
+        "brand_found": bool(brand),
+        "only_social": outcome.failure_code == "SOCIAL_ONLY" or (bool(brand) and all(
+            is_social(rc.candidate.image_url, rc.candidate.page_url, rc.candidate.domain) for rc in brand)),
+        "social_links": list(getattr(outcome, "social_links", None) or []),
         "expansion": {"ran": bool(exp), "kind": ("upgrade" if any(c.get("query_id") == "XU" for c in exp)
                                                  else "expand") if exp else "", "calls": len(exp)},
         "serp_calls": serp_calls,
@@ -613,6 +679,9 @@ def run_row(row, mappings, identity, pipeline, providers_mod, verify_mod, serp_c
     record["outage"] = outage_reason(record)
     record["unselected_reason"] = (None if record["outage"] or record["decision"] in PICK_DECISIONS
                                    else unselected_reason(record))
+    extra = after(spec, outcome) if after is not None else None      # --record-shadow, once the row is decided
+    if extra:
+        record["shadow"] = extra
     return record
 
 
@@ -622,6 +691,7 @@ def _describe(rc, position):
     v = rc.verdict
     return {
         "rank": position, "status": rc.status, "reasons": list(rc.reasons), "warnings": warning_codes(rc.reasons),
+        "tier": rc.score.tier if rc.score is not None else None,
         "provider": rc.candidate.provider, "domain": rc.candidate.domain, "query_id": rc.candidate.query_id,
         "sanctioned": rc.candidate.sanctioned, "title": rc.candidate.title or rc.candidate.page_title,
         "image_url": rc.candidate.image_url, "page_url": rc.candidate.page_url, "evidence": _evidence(rc),
@@ -664,37 +734,94 @@ def outage_reason(r):
     return None
 
 
+_TIER_RE = re.compile(r"\btier=(\d|None)\b")
+_UNKNOWN_TIER = "?"
+
+
+def _tier(c):
+    """A top-list entry's identity tier: its 'tier' field, else the 'tier=N' of its evidence text (older
+    files); _UNKNOWN_TIER when the file does not say."""
+    if "tier" in c:
+        return c["tier"]
+    m = _TIER_RE.search(str(c.get("evidence") or ""))
+    if m is None:
+        return _UNKNOWN_TIER
+    return None if m.group(1) == "None" else int(m.group(1))
+
+
+def _survivors(r):
+    return [c for c in r.get("top") or [] if _survives(c.get("status"), c.get("reasons"))]
+
+
+def _brand_survivors(r):
+    """The top list's survivors that name the brand (tier 1 or 2); None when the file does not say the tiers."""
+    survivors = _survivors(r)
+    tiers = [_tier(c) for c in survivors]
+    if any(t == _UNKNOWN_TIER for t in tiers):
+        return None
+    return [c for c, t in zip(survivors, tiers) if t in (1, 2)]
+
+
+def _brand_found(r):
+    """True / False when the row's record or its top list says whether any listing named the brand, else None."""
+    if "brand_found" in r:
+        return bool(r["brand_found"])
+    if not _survivors(r):
+        return None
+    brand = _brand_survivors(r)
+    return None if brand is None else bool(brand)
+
+
 def _only_social(r):
+    """Every listing that names the brand is a social-network post (live run 2026-10-03, rows 29, 38, 41: the
+    pipeline's failure code SOCIAL_ONLY when none of their pictures could be downloaded). Older files without
+    tiers: every survivor is a social post."""
+    if r.get("failure_code") == "SOCIAL_ONLY":
+        return True
     if "only_social" in r:
         return bool(r["only_social"])
-    survivors = [c for c in r.get("top") or [] if _survives(c.get("status"), c.get("reasons"))]
-    return bool(survivors) and all(is_social(c.get("image_url"), c.get("page_url"), c.get("domain"))
-                                   for c in survivors)
+    brand = _brand_survivors(r)
+    pool = brand if brand is not None else _survivors(r)
+    return bool(pool) and all(is_social(c.get("image_url"), c.get("page_url"), c.get("domain")) for c in pool)
 
 
 def _verdicts(r):
+    """The label reader's readings of the listings that name the brand (all survivors in a file without tiers)."""
     if isinstance(r.get("verdicts"), dict):
         return Counter(r["verdicts"])
-    found = Counter((c.get("vlm") or {}).get("decision") for c in r.get("top") or []
-                    if c.get("vlm") and _survives(c.get("status"), c.get("reasons")))
-    mismatches = int((r.get("reject_counts") or {}).get("vlm:MISMATCH") or 0)
-    found["MISMATCH"] = max(found.get("MISMATCH", 0), mismatches)
+    brand = _brand_survivors(r)
+    pool = brand if brand is not None else _survivors(r)
+    found = Counter((c.get("vlm") or {}).get("decision") for c in pool if c.get("vlm"))
+    if brand is None:
+        # no tiers in the file: the run's own count is the best it says (rows beyond the top 5 included)
+        mismatches = int((r.get("reject_counts") or {}).get("vlm:MISMATCH") or 0)
+        found["MISMATCH"] = max(found.get("MISMATCH", 0), mismatches)
     return found
 
 
 def unselected_reason(r):
-    """Why a row without a pick has none: one of UNSELECTED_REASONS' keys."""
+    """Why a row without a pick has none: one of UNSELECTED_REASONS' keys.
+
+    Computed over the listings that name the brand (tier 1 or 2): in the live run of 2026-10-03 rows 38
+    and 41 were 'label reader saw another product' because it rejected other brands' listings, while
+    only social-network posts had shown the product; rows 3 and 26 had no listing of the brand at all.
+    """
     decision, code = r.get("decision"), r.get("failure_code")
     if decision == "PROVIDER_DOWN":
         return "provider_down"
     if decision == "NOT_FOUND":
         return "not_found"
-    if code == "DOWNLOAD_FAILED":
-        return "download_failed"
+    if code == "SOCIAL_ONLY":
+        return "only_social"
+    # as decide.route: with no pick, a label reader that did not answer comes before 'only social posts'
     if decision == "VERIFIER_DOWN" or code == "VERIFIER_DOWN":
         return "verifier_down"
     if _only_social(r):
         return "only_social"
+    if code == "DOWNLOAD_FAILED":
+        return "download_failed"
+    if _brand_found(r) is False:
+        return "brand_not_found"
     verdicts = _verdicts(r)
     refuted = int((r.get("reject_counts") or {}).get("vlm:tier1_brand_refuted") or 0)
     if verdicts.get("UNSURE") and not refuted:
@@ -903,6 +1030,8 @@ def print_row(r):
         print(f"  OUTAGE {r['outage']} (left out of the coverage)")
     elif r.get("unselected_reason"):
         print(f"  NO PICK {dict(UNSELECTED_REASONS).get(r['unselected_reason'], r['unselected_reason'])}")
+    for link in r.get("social_links") or []:
+        print(f"  SOCIAL POST {link}")
     usage = r.get("vlm_usage") or []
     if usage:
         models = Counter(f"{u.get('provider')}:{u.get('model')}{' (strong)' if u.get('role') == 'strong' else ''}"
@@ -1380,6 +1509,158 @@ def run_probe(args, http=None):
 
 
 # ---------------------------------------------------------------------------
+# --record / --record-shadow / --fill-misses (catalog_match.cassette)
+# ---------------------------------------------------------------------------
+
+def git_info(root=REPO_ROOT):
+    """The checkout's commit and whether tracked files were changed ({'commit': '', ...} without git)."""
+    import subprocess
+
+    def run(*cmd):
+        return subprocess.run(["git", "-C", root, *cmd], capture_output=True, text=True, timeout=15).stdout.strip()
+
+    try:
+        return {"commit": run("rev-parse", "HEAD"), "dirty": bool(run("status", "--porcelain", "--untracked-files=no"))}
+    except Exception:
+        return {"commit": "", "dirty": None}
+
+
+def strong_spend():
+    """This month's strong-reader spend and budget as the cascade reads them (strong_usd None when unreadable)."""
+    out = {"month": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m"), "strong_usd": None,
+           "budget_usd": accessor("verifier_monthly_budget_usd")}
+    try:
+        from catalog_match.verifiers import spend
+        out["strong_usd"] = float(spend.MariaDbSpendStore().role_spend("strong"))
+    except Exception as exc:
+        log.info("strong spend not readable (%s)", type(exc).__name__)
+    return out
+
+
+def recording_meta(args, rows, mappings, meta, expansion):
+    """meta.json of a new cassette: what a replay needs to run the same products the same way. No secret."""
+    from catalog_match import cassette
+    return {
+        "format": cassette.FORMAT, "created_at": dt.datetime.now().isoformat(timespec="seconds"),
+        "today": dt.date.today().isoformat(), "git": git_info(), "settings": cassette.settings_snapshot(),
+        "mappings": mappings, "rows": rows, "versions": cassette.library_versions(), "spend": strong_spend(),
+        "run": {"expansion": expansion, "serp_cost": args.serp_cost, "vlm_cost": args.vlm_cost,
+                "rows_spec": list(args.rows or []), "rows_file": os.path.basename(args.rows_file or ""),
+                "brands_file": os.path.basename(args.brands_file or ""), "shadow": bool(args.record_shadow)},
+        "run_meta": meta,
+    }
+
+
+def fill_inputs(args):
+    """(rows, mappings, cassette meta) of a --fill-misses run: the manifest's rows as the cassette holds them."""
+    with open(args.fill_misses, "r", encoding="utf-8-sig") as fh:
+        manifest = json.load(fh)
+    with open(os.path.join(args.record, "meta.json"), "r", encoding="utf-8") as fh:
+        meta = json.load(fh)
+    wanted = {int(n) for n in manifest.get("rows") or []}
+    rows = [r for r in meta.get("rows") or [] if int(r.get("row_number") or 0) in wanted]
+    return rows, meta.get("mappings") or {}, meta
+
+
+def settings_drift(recorded):
+    """Settings that differ from the cassette's (a fill run must ask what the replay asks)."""
+    from catalog_match import cassette
+    now = cassette.settings_snapshot()
+    names = sorted(set(now["values"]) | set((recorded or {}).get("values", {})))
+    changed = [n for n in names if now["values"].get(n) != (recorded or {}).get("values", {}).get(n)]
+    changed += [n for n, v in now["configured"].items() if v != (recorded or {}).get("configured", {}).get(n)]
+    return changed
+
+
+def _folder_mb(path):
+    total = 0
+    for base, _dirs, files in os.walk(path):
+        for name in files:
+            try:
+                total += os.path.getsize(os.path.join(base, name))
+            except OSError:
+                pass
+    return total / (1024 * 1024)
+
+
+def recorded_decisions(results):
+    """What each row decided live (a replay of the same code must decide the same): row -> decision and pick."""
+    return {str(r.get("row")): {"decision": r.get("decision", "ERROR"), "failure_code": r.get("failure_code"),
+                                "winner": r.get("winner"), "top": [c.get("image_url") for c in r.get("top") or []]}
+            for r in results}
+
+
+def start_cassette(args, rows, mappings, meta, expansion, secrets):
+    """Install the --record cassette (mode 'fill' with --fill-misses); None without --record."""
+    if not args.record:
+        return None
+    from catalog_match import cassette
+    mode = "fill" if args.fill_misses else "record"
+    cas = cassette.install(mode, args.record, redact=lambda text: redact(text, secrets, query_keys=False))
+    if mode == "record":
+        try:
+            cas.write_meta(recording_meta(args, rows, mappings, meta, expansion))
+        except Exception as exc:
+            cassette.uninstall()
+            raise SystemExit(f"--record {args.record}: the cassette cannot be written "
+                             f"({redact(f'{type(exc).__name__}: {exc}', secrets)}); nothing was asked or paid yet")
+        print(f"recording every external answer into {args.record}"
+              f"{' (with shadow answers for later code versions)' if args.record_shadow else ''}")
+    else:
+        print(f"topping up the cassette {args.record}: recorded answers are reused, only missing ones are paid")
+    return cas
+
+
+def note_not_stored(record, report):
+    """A row whose answers the cassette could not all store (a full disk, a file held by an antivirus): said
+    under the row and kept in the --json row; the live result itself is unchanged."""
+    lost = report.get("not_stored") or []
+    if not lost:
+        return
+    record["cassette"] = {"complete": False, "not_stored": lost}
+    print(f"  CASSETTE: {len(lost)} answer(s) of this row not stored as usual ({lost[0]['what']}: "
+          f"{lost[0]['error'][:120]}); a replay reports what is missing, --fill-misses adds it")
+
+
+def finish_cassette(cas, args, results):
+    """Write the cassette's closing meta, uninstall it and print where it is and how to replay it."""
+    from catalog_match import cassette
+    try:
+        meta = cas.read_meta()
+        shadow = [r["shadow"] for r in results if isinstance(r.get("shadow"), dict)]
+        totals = {k: sum(int(s.get(k) or 0) for s in shadow) for k in ("downloads", "pages", "search_calls",
+                                                                        "verifier_calls")}
+        totals["cost_usd"] = round(sum(float(s.get("cost_usd") or 0.0) for s in shadow), 4)
+        totals["rows_stopped"] = [r.get("row") for r in results if (r.get("shadow") or {}).get("error")]
+        not_stored = {str(n): len(rep["not_stored"]) for n, rep in sorted(cas.reports.items()) if rep["not_stored"]}
+        if cas.mode == "record":
+            meta.update(finished_at=dt.datetime.now().isoformat(timespec="seconds"),
+                        rows_recorded=[r.get("row") for r in results], answers=cas.counts["recorded"],
+                        shadow=totals if shadow else None, decisions=recorded_decisions(results),
+                        not_stored=not_stored or None)
+        else:
+            meta.setdefault("fills", []).append({
+                "at": dt.datetime.now().isoformat(timespec="seconds"), "git": git_info(),
+                "manifest": os.path.basename(args.fill_misses or ""), "rows": [r.get("row") for r in results],
+                "answers_added": cas.counts["recorded"], "answers_reused": cas.counts["served"],
+                "not_stored": not_stored or None})
+        cas.write_meta(meta)
+    finally:
+        cassette.uninstall()        # the breaker / spend / index-size hooks never outlive the run
+    if not_stored:
+        print(f"WARNING: {sum(not_stored.values())} answer(s) of rows {', '.join(not_stored)} were not stored as "
+              f"usual (see the CASSETTE lines above); a replay lists what is missing")
+    if shadow:
+        print(f"shadow recording: {int(totals['downloads'])} extra downloads, {int(totals['pages'])} page reads, "
+              f"{int(totals['search_calls'])} search calls, {int(totals['verifier_calls'])} label-reader calls, "
+              f"about ${totals['cost_usd']:.4f} on top of the estimated cost above")
+    verb = "recorded" if cas.mode == "record" else "added"
+    print(f"cassette {args.record}: {cas.counts['recorded']} answers {verb}, {_folder_mb(args.record):.1f} MB "
+          f"(keys and tokens are never stored). Zip the folder to send it; replay it offline with:\n"
+          f"    python scripts/replay_run.py {args.record} --json runs/replayed.json")
+
+
+# ---------------------------------------------------------------------------
 # The dry run
 # ---------------------------------------------------------------------------
 
@@ -1421,6 +1702,15 @@ def main(argv=None):
     parser.add_argument("--serp-cost", type=float, default=DEFAULT_SERP_COST, help="USD per Serper query")
     parser.add_argument("--vlm-cost", type=float, default=DEFAULT_VLM_COST,
                         help="USD per VLM call when the verifier reports no per-model usage")
+    parser.add_argument("--record", metavar="DIR",
+                        help="record every external answer of this run into the folder DIR (a cassette: no key, "
+                             "header or token is stored), to replay it offline with scripts/replay_run.py DIR")
+    parser.add_argument("--record-shadow", action="store_true",
+                        help="with --record: after each row is decided, also record answers later code may ask for "
+                             "(more images, pages, X1/X2, label readings); costs a little more, printed at the end")
+    parser.add_argument("--fill-misses", metavar="MANIFEST",
+                        help="with --record DIR (an existing cassette): run only the rows of this misses manifest "
+                             "(written by scripts/replay_run.py) and add the answers DIR does not hold yet")
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args(argv)
     _utf8_stdout()
@@ -1433,11 +1723,29 @@ def main(argv=None):
             parser.error(f"--json {args.json}: give a file name in a folder that exists")
     if args.probe:
         return run_probe(args)
-    if not args.rows and not args.rows_file:
+    if (args.record_shadow or args.fill_misses) and not args.record:
+        parser.error("--record-shadow and --fill-misses need --record <cassette folder>")
+    if args.record and not args.fill_misses and os.path.exists(os.path.join(args.record, "meta.json")):
+        parser.error(f"--record {args.record}: this folder already holds a cassette; record into a new folder "
+                     "(or top it up with --fill-misses <manifest>)")
+    if args.fill_misses and not os.path.exists(os.path.join(args.record, "meta.json")):
+        parser.error(f"--fill-misses: {args.record} holds no cassette (meta.json) to top up")
+    if not args.rows and not args.rows_file and not args.fill_misses:
         parser.error("--rows (or --rows-file) is required for a dry run (or use --probe)")
 
     identity, pipeline, providers_mod, settings, verify_mod = load_v2()
-    if args.rows_file:
+    if args.fill_misses:
+        try:
+            rows, mappings, recorded = fill_inputs(args)
+        except (OSError, ValueError) as exc:
+            parser.error(f"--fill-misses: cannot read the manifest or the cassette: {exc}")
+        drift = settings_drift(recorded.get("settings"))
+        if drift:
+            print(f"WARNING: these settings differ from the recording ({', '.join(drift)}): answers keyed on them "
+                  "may not be the ones the replay asks for")
+        print(f"rows {', '.join(str(r['row_number']) for r in rows) or '-'} from the misses manifest "
+              f"{args.fill_misses}, with the cassette's own rows and brand mappings")
+    elif args.rows_file:
         try:
             rows = read_rows_file(args.rows_file, parse_rows(args.rows) if args.rows else None)
             mappings = read_brands_file(args.brands_file) if args.brands_file else {}
@@ -1449,10 +1757,16 @@ def main(argv=None):
         spreadsheet, worksheet = open_sheet_read_only()
         rows = read_sheet_rows(worksheet, parse_rows(args.rows))
         mappings = read_brands_file(args.brands_file) if args.brands_file else read_brand_mappings(spreadsheet)
-    # what the reviewers taught, as the worker sees it (google_sheets.get_brand_mappings); none without a database
-    from catalog_match import learning
-    mappings = learning.load_and_apply(mappings)
     expansion = False if args.no_expansion else True
+    if args.fill_misses:
+        # the cassette's mappings already hold what the reviewers had taught at recording time
+        expansion = bool(((recorded.get("run") or {}).get("expansion", expansion)))
+    else:
+        # what the reviewers taught, as the worker sees it (google_sheets.get_brand_mappings); none without a database
+        from catalog_match import learning
+        mappings = learning.load_and_apply(mappings)
+    for line in mapping_report(rows, mappings, identity):
+        print(line)
     meta = run_meta(args, settings, pipeline, expansion)
     print(f"dry run on {len(rows)} rows | Serper key {'set' if settings.serper_api_key() else 'MISSING'} | "
           f"Gemini key {'set' if settings.gemini_api_key() else 'MISSING'} | model {meta['gemini_model'] or '-'} | "
@@ -1463,22 +1777,44 @@ def main(argv=None):
     prices = provider_prices(args.serp_cost)
     secrets = secret_values()
     results, total = [], 0.0
-    for row in rows:
-        try:
-            r = run_row(row, mappings, identity, pipeline, providers_mod, verify_mod, args.serp_cost, args.vlm_cost,
-                        expansion=expansion, prices=prices, secrets=secrets)
-        except Exception as exc:
-            r = {"row": row["row_number"], "name": row["name"], "brand": row.get("brand", ""),
-                 "error": redact(f"{type(exc).__name__}: {exc}", secrets)}
-            # The exception text can hold a request URL with a key in it: only redacted text is logged
-            # (the traceback with -v, redacted as well), never log.exception's raw traceback.
-            log.error("row %s failed: %s", row["row_number"], r["error"])
-            log.debug("row %s traceback:\n%s", row["row_number"], redact(traceback.format_exc(), secrets))
-            print(f"\n=== row {row['row_number']}: {row['name']} -> ERROR {r['error']}")
-        else:
-            print_row(r)
-            total += r["cost_usd"]
-        results.append(r)
+    forget_brand_spellings()
+    cas = start_cassette(args, rows, mappings, meta, expansion, secrets)
+    after = None
+    if cas is not None and args.record_shadow:
+        from catalog_match import cassette as cassette_mod
+        after = functools.partial(cassette_mod.shadow_record, serp_cost=args.serp_cost)   # priced like the run
+    cassette_failed = None
+    try:
+        for row in rows:
+            with (cas.row_context(row["row_number"]) if cas is not None else contextlib.nullcontext()):
+                try:
+                    r = run_row(row, mappings, identity, pipeline, providers_mod, verify_mod, args.serp_cost,
+                                args.vlm_cost, expansion=expansion, prices=prices, secrets=secrets, after=after)
+                except Exception as exc:
+                    r = {"row": row["row_number"], "name": row["name"], "brand": row.get("brand", ""),
+                         "error": redact(f"{type(exc).__name__}: {exc}", secrets)}
+                    # The exception text can hold a request URL with a key in it: only redacted text is logged
+                    # (the traceback with -v, redacted as well), never log.exception's raw traceback.
+                    log.error("row %s failed: %s", row["row_number"], r["error"])
+                    log.debug("row %s traceback:\n%s", row["row_number"], redact(traceback.format_exc(), secrets))
+                    print(f"\n=== row {row['row_number']}: {row['name']} -> ERROR {r['error']}")
+                else:
+                    print_row(r)
+                    total += r["cost_usd"]
+            if cas is not None:
+                note_not_stored(r, cas.row_report(row["row_number"]))
+            results.append(r)
+    finally:
+        if cas is not None:
+            # the paid run's results come first: a cassette that cannot be finished is reported, never raised
+            try:
+                finish_cassette(cas, args, results)
+            except Exception as exc:
+                cassette_failed = redact(f"{type(exc).__name__}: {exc}", secrets)
+                log.error("the cassette %s could not be finished: %s", args.record, cassette_failed)
+            finally:
+                from catalog_match import cassette as cassette_final
+                cassette_final.uninstall()
 
     decisions = {}
     for r in results:
@@ -1491,6 +1827,10 @@ def main(argv=None):
         with open(args.json, "w", encoding="utf-8") as fh:
             fh.write(redact(json.dumps(doc, ensure_ascii=False, indent=1), secrets, query_keys=False))
         print(f"results written to {args.json}")
+    if cassette_failed:
+        print(f"WARNING: the cassette {args.record} could not be finished ({cassette_failed}). Its recorded answers "
+              "are kept; if the message names a .tmp file, rename it to meta.json before zipping the folder.")
+        return 1
     return 0
 
 

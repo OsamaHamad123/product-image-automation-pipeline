@@ -18,15 +18,20 @@ def flush():
         print("❌ Could not obtain Google Sheets client.")
         return
 
-    worksheet = google_sheets.open_worksheet(client, config.SPREADSHEET_NAME_OR_URL)
-    if not worksheet:
-        print("❌ Could not open worksheet.")
-        return
+    try:
+        worksheet = google_sheets.open_worksheet(client, config.SPREADSHEET_NAME_OR_URL)
+        if not worksheet:
+            print("❌ Could not open worksheet.")
+            return
 
-    queue = google_sheets.SQLiteTransactionQueue()
-    worker = google_sheets.GoogleSheetsBatchWorker(queue, config.CREDENTIALS_FILE, config.SPREADSHEET_NAME_OR_URL)
-    
-    worker._synchronize_pending_records(worksheet)
+        queue = google_sheets.SQLiteTransactionQueue()
+        worker = google_sheets.GoogleSheetsBatchWorker(queue, config.CREDENTIALS_FILE, config.SPREADSHEET_NAME_OR_URL)
+
+        worker._synchronize_pending_records(worksheet)
+    except google_sheets.SheetTransientError as e:
+        # Not a link or sharing problem: Google refused for now even after retrying. Pending writes stay queued.
+        print(f"⏳ Google Sheets غير متاح مؤقتاً؛ الكتابات المعلقة تبقى في الطابور. أعد المحاولة بعد دقائق. ({e})")
+        return
     print("✨ Flush process completed.")
 
 if __name__ == "__main__":

@@ -275,7 +275,8 @@ out.approve_url = approve.body.image_url;
     # the catalog stores no curation rows for a live search: the reject carries the bytes' sha for the bridge's pHash
     assert out["reject_bytes"] == ["a2" * 32, "https://www.carrefouruae.com/p/a2"]
     assert out["alts_after_reject"] == [A_URL]
-    assert "رجع للطابور" in out["text_after_reject"]
+    # an alternative, not the system pick: the pick and the other images stay for review (contract C2)
+    assert "باقي الصور ما زالت للمراجعة" in out["text_after_reject"] and "رجع للطابور" not in out["text_after_reject"]
     assert out["approve_identity"] == identity_of(A)
     assert out["approve_category"] == "Dairy" and out["approve_url"] == A_URL
 
@@ -687,6 +688,7 @@ document.getElementById('rvRejectResearch').checked = true;
 press('4');                                          // reject B's third image and search again
 await flush();
 R.setMode('bulk');
+await flush();                                       // its card is on screen and its picture loaded: approvable
 R.bulk.approveOne(itemOf(9).key);                    // approve B's system pick from bulk mode meanwhile
 await flush();
 answer(requests('/api/select_image')[0], __OK__);
@@ -736,7 +738,7 @@ out.approval = requests('/api/select_image').map(c => [c.body.row_number, c.body
 """.replace("__SKU__", js(B["sku_key"])), tmp_path)
     assert out["reject_body"] == [True, "WRONG_PRODUCT", B_URLS[0]]
     assert out["e_alts"] == E_URLS and out["e_name"] == E["product_name"]
-    assert out["saved"] == [9, B["sku_key"], ["https://www.lulu.com/b7.jpg"]]
+    assert out.get("saved") is None                       # the server saves the new candidates (contract C2)
     assert out["b_alts"] == ["https://www.lulu.com/b7.jpg"]
     assert out["approval"] == [["9", "https://www.lulu.com/b7.jpg"]]
 

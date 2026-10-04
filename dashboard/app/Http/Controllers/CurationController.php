@@ -177,10 +177,15 @@ class CurationController extends Controller
                 }
 
                 DB::transaction(function () use ($rowNumber, $skuKey, $hasSku, $rowsToInsert) {
+                    // نفس قاعدة بايثون (local_cache_db._row_or_sku_clause): مرشحات هذا الـ sku_key، ورقم الصف فقط
+                    // للصفوف القديمة بلا sku_key؛ فصف تغيّر رقمه بعد تعديل الشيت لا يمسح مرشحات منتج آخر
                     DB::table('curation_candidates')->where(function ($q) use ($rowNumber, $skuKey, $hasSku) {
-                        $q->where('row_number', $rowNumber);
                         if ($hasSku && $skuKey !== '') {
-                            $q->orWhere('sku_key', $skuKey);
+                            $q->where('sku_key', $skuKey)->orWhere(function ($legacy) use ($rowNumber) {
+                                $legacy->whereNull('sku_key')->where('row_number', $rowNumber);
+                            });
+                        } else {
+                            $q->where('row_number', $rowNumber);
                         }
                     })->delete();
 

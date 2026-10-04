@@ -258,7 +258,9 @@ def test_already_transparent_needs_more_than_one_pixel(monkeypatch, tmp_path):
     assert image_processor.is_background_already_removed(str(cutout_path)) is True
 
     calls = install_photoroom(monkeypatch, lambda _img: pytest.fail("PhotoRoom must not be called"))
-    result = image_processor.process_product_image_result(str(cutout_path), "Milk", "Almarai", bg_method="photoroom")
+    # (a 400 px canvas: on 800 px this 301 px product would be upscaled more than 2x and flagged)
+    result = image_processor.process_product_image_result(str(cutout_path), "Milk", "Almarai", 400, 400,
+                                                          bg_method="photoroom")
     assert calls == []
     assert (result.isolated, result.provider, result.error) == (True, "source_alpha", None)
     # An explicit 'none' never claims isolation, even for an already transparent source.
@@ -557,7 +559,8 @@ def test_config_not_mutated(monkeypatch, tmp_path):
     monkeypatch.setattr(cv2, "grabCut", spying_grabcut)
     before = config.BG_REMOVAL_METHOD
 
-    result = image_processor.process_product_image_result(str(src), "Milk", "Almarai", bg_method="grabcut")
+    # (a 400 px canvas: on 800 px this 180 px product would be upscaled more than 2x and flagged)
+    result = image_processor.process_product_image_result(str(src), "Milk", "Almarai", 400, 400, bg_method="grabcut")
 
     assert result.provider == "grabcut"
     assert result.isolated is True

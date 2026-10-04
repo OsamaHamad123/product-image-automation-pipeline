@@ -12,7 +12,8 @@ A staff custom_query REPLACES the plan: it is the only query, with query_id 'cus
 
 relaxations(spec) -> [R1 (variant words dropped), R2 (size dropped)], flagged relaxed.
 
-Name words are the sheet name's own words, in order, with every spelling of the
+Name words are the sheet name's own words, in order, as the stores write them (a size glued
+to a word split off and known sheet compounds and typos fixed: catalog_match.sheet_names), with every spelling of the
 target brand removed (the brand is written exactly once, as a prefix; a spelling
 glued or split differently, 'ALALALI' for 'AL ALALI', is the same brand) and, when the
 SKU has a size, every size / pack expression removed (the size is appended once as
@@ -37,6 +38,7 @@ from typing import Iterable, List, Optional, Sequence, Set, Tuple
 
 from . import abbreviations
 from . import settings
+from . import sheet_names
 from . import variants as variants_mod
 from .gtin import is_restricted, normalize_gtin
 from .models import PlannedQuery, Size, SkuSpec
@@ -113,6 +115,49 @@ def _mark_phrase(words: Sequence[_Word], phrase: str, marks: Set[int]) -> None:
             i += 1
 
 
+_SURFACE_TOKEN_RE = re.compile(r"\d+(?:\.\d+)?|[^\W\d_]+")      # text_norm's token rule, on the surface text
+
+
+def _split_word(word: _Word, k: int) -> Optional[Tuple[_Word, _Word]]:
+    """The word cut after its k-th token ('T/LIGHT', 1 -> 'T', 'LIGHT'); None when its surface does not show them."""
+    spans = list(_SURFACE_TOKEN_RE.finditer(word.text))
+    if len(spans) != len(word.keys) or not 0 < k < len(spans):
+        return None
+    head = word.text[:spans[k].start()].strip(_BRAND_EDGE_PUNCT)
+    tail = word.text[spans[k].start():].strip(_EDGE_PUNCT)
+    if not head or not tail:
+        return None
+    return _Word(head, word.keys[:k]), _Word(tail, word.keys[k:])
+
+
+def _split_at_phrase(words: List[_Word], phrase: str) -> List[_Word]:
+    """Split a word that an occurrence of the phrase covers only in part, so that only the phrase is stripped:
+    'SUPER T/' in 'SUPER T/LIGHT MEAT TUNA' leaves 'LIGHT' (it took the whole word 'T/LIGHT')."""
+    pkeys = tokens(phrase, strip_clitics=True)
+    n = len(pkeys)
+    if not n:
+        return words
+    for _ in range(len(words) + 1):
+        flat = _flat(words)
+        cut = None
+        for i in range(len(flat) - n + 1):
+            if all(flat[i + j][0] == pkeys[j] for j in range(n)):
+                for pos in (i, i + n):          # before the first token, after the last one
+                    if 0 < pos < len(flat) and flat[pos - 1][1] == flat[pos][1]:
+                        wi = flat[pos][1]
+                        parts = _split_word(words[wi], sum(1 for _, w in flat[:pos] if w == wi))
+                        if parts:
+                            cut = (wi, parts)
+                            break
+            if cut:
+                break
+        if cut is None:
+            return words
+        wi, parts = cut
+        words = words[:wi] + list(parts) + words[wi + 1:]
+    return words
+
+
 def _mark_joined(words: Sequence[_Word], phrase: str, marks: Set[int]) -> None:
     """Mark whole words that spell the phrase with other word breaks ('ALALALI' for 'AL ALALI', and back)."""
     target = _compact(phrase)
@@ -169,20 +214,33 @@ def arabic_brand(spec: SkuSpec) -> str:
 def _brand_spellings(spec: SkuSpec, brand_en: str, brand_ar: str) -> List[str]:
     """Every spelling of the target brand to strip from a name before prefixing the brand once.
 
-    A match phrase counts as the same brand only when its compact form equals the
-    canonical/English/Arabic brand's, so sub-brands such as 'Nido' stay in the query.
+    Every spelling of the resolved brand counts: the canonical, English and Arabic brand, each
+    Brands Mapping synonym the SKU matches and the sheet's own brand cell. With the mapping
+    Rio Mare <- 'RIO MARIE', Q1 was 'Rio Mare RIO MARIE LIGHT MEAT TUNA ...' and Super Tasty
+    <- 'SUP/T' gave 'Super Tasty SUP/T WT/MEAT ...' (live run 2026-10-03, rows 45 and 49): the
+    misspelling went to the search engine with the right name. Never stripped: a sub-brand the
+    SKU names or its siblings ('Nido' for Nestle stays in the query), and a synonym that only
+    adds words to a shorter spelling of the brand ('AMERICAN LIGHT' for American: 'LIGHT' is the
+    tuna's meat grade, and the shorter spelling is stripped anyway).
     A sheet brand shorter than 3 characters ('A/G') is always stripped.
     """
     base = [p for p in (brand_en, brand_ar, spec.brand_canonical) if p]
-    base_keys = {_compact(p) for p in base if _compact(p)}
+    subs = {_compact(p) for p in tuple(spec.required_brands) + tuple(spec.sibling_brands) if p}
     out = list(base)
     for phrase in tuple(spec.match_brands) + (spec.brand_raw,):
-        if not phrase:
+        if not phrase or not _compact(phrase):
             continue
-        if _compact(phrase) in base_keys or alnum_len(phrase) < 3:
+        if alnum_len(phrase) < 3 or _compact(phrase) not in subs:
             out.append(phrase)
     uniq = list(dict.fromkeys(p for p in out if _compact(p)))
-    return sorted(uniq, key=lambda p: -len(tokens(p)))
+    keys = {p: tuple(tokens(p, strip_clitics=True)) for p in uniq}
+    # the canonical, English and Arabic brand are always stripped: the synonym 'Ferrero' must not keep
+    # 'Ferrero Rocher' in the name ('Ferrero Rocher Rocher Chocolate', golden uae-066)
+    always = {p for p in base if p}
+    kept = [p for p in uniq
+            if p in always or not any(len(keys[q]) < len(keys[p]) and keys[q] and keys[p][:len(keys[q])] == keys[q]
+                                      for q in uniq if q is not p)]
+    return sorted(kept, key=lambda p: -len(tokens(p)))
 
 
 def _fmt(value: float) -> str:
@@ -288,6 +346,8 @@ def _expand_shorthand(words: List[_Word], removed: Set[int], context: str) -> Tu
 
 def _analyse(spec: SkuSpec, name: str, brand: str, spellings: Sequence[str], lang: str) -> _NameParts:
     words = _words(name)
+    for phrase in spellings:
+        words = _split_at_phrase(words, phrase)
     removed: Set[int] = set()
     for phrase in spellings:
         _mark_phrase(words, phrase, removed)
@@ -310,11 +370,12 @@ def _analyse(spec: SkuSpec, name: str, brand: str, spellings: Sequence[str], lan
 
 
 def _primary_parts(spec: SkuSpec) -> _NameParts:
-    """Q1 comes from the sheet name; an Arabic-script sheet name gives an Arabic Q1 (hl=ar)."""
+    """Q1 comes from the sheet name as the stores write it (catalog_match.sheet_names: 'WATE3X185GM' ->
+    'WATER 3X185GM'); an Arabic-script sheet name gives an Arabic Q1 (hl=ar)."""
     brand_en, brand_ar = english_brand(spec), arabic_brand(spec)
     lang = _lang_of(spec.raw_name) if spec.raw_name else "en"
     brand = (brand_ar or brand_en) if lang == "ar" else (brand_en or brand_ar)
-    return _analyse(spec, spec.raw_name, brand, _brand_spellings(spec, brand_en, brand_ar), lang)
+    return _analyse(spec, sheet_names.spec_name(spec), brand, _brand_spellings(spec, brand_en, brand_ar), lang)
 
 
 def _lang_of(text: str) -> str:

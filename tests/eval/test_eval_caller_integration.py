@@ -134,7 +134,8 @@ def test_cli_bridge_search_matches_pipeline(sku_id, wired, reference, mappings):
         ev = c["evidence"]
         # the keys the dashboard's evidence chips read
         assert ev["size"] in ("match", "conflict", "ambiguous", "unknown")
-        assert ev["variant_status"] in ("match", "conflict", "unknown")
+        # 'partial': the page matched some, not all, of the variant axes the sheet states (never «match»)
+        assert ev["variant_status"] in ("match", "partial", "conflict", "unknown")
         assert isinstance(ev["variants"], list)
         assert c["domain"]
         if c["vlm"] is not None:

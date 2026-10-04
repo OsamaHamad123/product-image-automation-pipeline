@@ -271,10 +271,14 @@ def test_gemini_box_sanity_check(monkeypatch, tmp_path):
 
     # A plausible box (40% of the frame) is applied, widened by the 6% safety margin.
     monkeypatch.setattr(image_processor, "_locate_product_box", lambda *a: [100, 250, 900, 750])
-    image_processor.process_product_image_result(src, "Water", "Masafi", 800, 800, bg_method="photoroom")
-    cropped = calls[-1]["image"].size
+    result = image_processor.process_product_image_result(src, "Water", "Masafi", 800, 800, bg_method="photoroom")
+    cropped = calls[0]["image"].size
     # x: 220..780 of 1000 -> 132..468 px = 336 ; y: 52..948 -> floor(62.4)=62 .. round(1137.6)=1138 = 1076
     assert cropped == (336, 1076)
+    # That crop still cuts 2 px off the cap (y 60..61) and the base (y 1138..1140): the quality gate sees
+    # the product touching the crop lines and the cutout is redone once on the full frame.
+    assert [c["image"].size for c in calls] == [(336, 1076), (600, 1200)]
+    assert result.isolated is True and result.quality_flags == []
 
     # A tiny box (1% of the frame, e.g. a sticker) is ignored: the full frame is used.
     monkeypatch.setattr(image_processor, "_locate_product_box", lambda *a: [0, 0, 100, 100])
