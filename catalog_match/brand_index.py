@@ -121,6 +121,13 @@ def is_generic_brand(phrase: Optional[str]) -> bool:
     return bool(significant) and all(_common(t, words) for t in significant)
 
 
+def is_common_word(tok: str) -> bool:
+    """True for a common listing word ('premium', 'fresh') or an ignored one ('the', 'al'): no brand by itself."""
+    words, ignored = _common_words()
+    tok = match_string(tok)
+    return tok in ignored or _common(tok, words)
+
+
 @dataclass(frozen=True)
 class BrandEntry:
     canonical: str

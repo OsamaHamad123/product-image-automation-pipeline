@@ -308,9 +308,15 @@ class Retriever:
             self.result.relaxed_ids.add(query.query_id)
         return results
 
-    def _merge(self, results: Iterable[ProviderResult], relaxed: bool = False) -> None:
+    def _merge(self, results: Iterable[ProviderResult], relaxed: bool = False, again: bool = False) -> None:
+        """Add answers to the pool and their health; again=True: a lookup asked once more replaces its entry."""
         for res in results:
-            self.result.health.append(res)
+            same = next((i for i, h in enumerate(self.result.health) if again
+                         and (h.provider, h.query_id) == (res.provider, res.query_id)), None)
+            if same is None:
+                self.result.health.append(res)
+            else:
+                self.result.health[same] = res
             for cand in res.candidates:
                 self.pool.add(cand, relaxed=relaxed)
         self.result.pool = self.pool.candidates()
@@ -394,9 +400,11 @@ class Retriever:
         Only the lookups that need no GTIN (the local catalog index): a GTIN lookup reads the barcode, which
         brand discovery never changes. After discovery the spec accepts the stores' spelling ('Rio Mare' for
         the sheet's 'RIO MARIE'), and the index rows written that way were never asked for in the first step
-        (live run 2026-10-03). Free: a local lookup and at most LOCAL_INDEX_MAX_PAGES page reads.
+        (live run 2026-10-03). Free: a local lookup and at most LOCAL_INDEX_MAX_PAGES page reads. Not after an
+        early stop (tier 1 is already in the pool); a lookup asked again replaces its first health entry.
         """
-        lookups = [p for p in self.providers if self._runs_lookup(p) and not getattr(p, "needs_gtin", True)]
+        lookups = [] if self.stopped else [p for p in self.providers
+                                           if self._runs_lookup(p) and not getattr(p, "needs_gtin", True)]
         query = extra
         if query is not None and self._budget() <= 0:
             logger.info("retrieve: query budget of %d reached; %s not sent", self.max_queries, query.query_id)
@@ -407,7 +415,7 @@ class Retriever:
             lookup_futs = [ex.submit(self._call, p, _lookup_query(p), True) for p in lookups]
             ran = self._run_query(query, ex) if query is not None else None
             lookup_results = [f.result() for f in lookup_futs]
-        self._merge(lookup_results)
+        self._merge(lookup_results, again=True)
         if ran is not None:
             self._merge(ran)
         self._log_summary(f"lookups again{' + ' + query.query_id if query is not None else ''}")

@@ -377,9 +377,13 @@ def _sheet_silent(spec: SkuSpec, rc: RankedCandidate) -> List[str]:
     # The product's own slug segment only: department breadcrumbs ('/fresh-food/') are not the product.
     texts = (cand.title, cand.page_title, url_path_text(cand.page_url, product_segment=True),
              rc.verdict.variant_text if rc.verdict is not None else "")
-    found = variants_mod.merge(*(variants_mod.extract_variants(t, context) for t in texts))
+    # read like score_candidate: the listing's own context, and the SKU re-read in it
+    read_context = " ".join([context] + [t for t in texts if t])
+    brands = variants_mod.spec_brands(spec)
+    found = variants_mod.merge(*(variants_mod.extract_variants(t, read_context, brands) for t in texts))
+    target = variants_mod.target_variants(spec, *texts)
     out = []
-    for axis in sorted(variants_mod.unstated_marked(spec.variants, found, context)):
+    for axis in sorted(variants_mod.unstated_marked(target, found, context)):
         marked = variants_mod.values_of(found[axis]) - variants_mod.unmarked_values(axis, context)
         out.append(f"sheet_silent:{axis}={variants_mod.SEP.join(sorted(marked))}")
     return out
@@ -520,7 +524,7 @@ def unverified_warnings(spec: SkuSpec, rc: RankedCandidate) -> List[str]:
     if (spec.size is not None and not size_confirmed) or (spec.pack_count and spec.pack_count > 1
                                                           and not pack_confirmed):
         out.append("size_unverified")
-    if spec.variants and len(matched.get("variants") or ()) < len(spec.variants) \
+    if spec.variants and not set(spec.variants) <= set(matched.get("variants") or ()) \
             and not (v is not None and v.variant_match == "yes"):
         out.append("variant_unverified")
     return out
@@ -781,8 +785,8 @@ def _same_picture(a: RankedCandidate, b: RankedCandidate) -> bool:
 def _identity_not_weaker(copy: RankedCandidate, winner: RankedCandidate) -> bool:
     """The copy's own listing evidence is at least the winner's on every identity key and on source trust.
 
-    Keys (score.rank_key, lower is better): tier, size match, variants matched, no soft conflict,
-    class coverage, source trust. A larger picture never buys a weaker listing.
+    Keys (score.rank_key, lower is better): tier, size match, variants matched, class coverage,
+    no soft conflict, source trust. A larger picture never buys a weaker listing.
     """
     kc = rank_key(copy.candidate, copy.score)
     kw = rank_key(winner.candidate, winner.score)

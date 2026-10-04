@@ -144,6 +144,9 @@ def test_reasons_in_their_order(script):
     assert script.unselected_reason(dict(base, verdicts={})) == "weak_only"
     social = dict(base, verdicts={"UNSURE": 1}, only_social=True)
     assert script.unselected_reason(social) == "only_social"
+    # as decide.route: with no pick, a label reader that did not answer comes first (was 'only_social')
+    assert script.unselected_reason(dict(social, failure_code="VERIFIER_DOWN")) == "verifier_down"
+    assert script.unselected_reason(dict(base, failure_code="SOCIAL_ONLY", only_social=False)) == "only_social"
 
 
 def test_only_social_from_the_top_list_of_an_older_file(script):

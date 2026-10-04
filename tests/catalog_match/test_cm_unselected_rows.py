@@ -94,6 +94,32 @@ def test_the_sku_key_of_every_live_row_is_unchanged():
             assert spec_of(row["name"], row["brand"], maps).sku_key == LIVE_KEYS[number], (number, row["name"])
 
 
+ALT_KEY_NAMES = [
+    ("SUPER T/MEAT SOLID TUNA SALT WATE3X185GM", "SUPER T/", ""),       # rows 50, 51: a glued pack read only now
+    ("KABANI MEAT MASALA160 GM", "KABANI", ""),
+    ("AL ALALI FANCY MEAT TUNA IN WATER170GM", "AL ALALI", ""),
+    ("ALMARAI MILK1L", "ALMARAI", ""),
+    ("حليب المراعي1ل", "", ""),
+    ("SUNFLOWER OIL1,5L", "AFIA", ""),
+    ("PEPSI CAN 330ML B2G1", "PEPSI", ""),
+    ("WATER2X1.5L", "MASAFI", "6 pcs"),
+    ("RICE1KGx2", "TILDA", "1kg"),
+]
+
+
+def test_the_alt_key_of_a_row_given_a_barcode_is_its_key_before_the_barcode():
+    # the alt key keeps approvals and rejections saved before a barcode was added: it must be that old key
+    # (live run 2026-10-03, rows 19, 38, 50, 51: it used the size read from the corrected name)
+    import main
+
+    rows = [(r["name"], r["brand"], "") for r in live_rows().values()] + ALT_KEY_NAMES
+    for name, brand, size in rows:
+        row = main.sku_row(name, brand, "", {"size": size})
+        before = main.compute_sku_key(row)
+        assert main.compute_alt_sku_key(dict(row, barcode="6291000000013")) == before, name
+        assert main.compute_alt_sku_key(row) == before, name
+
+
 # ---------------------------------------------------------------------------
 # 1. A size glued to the word before it ('MASALA160 GM', 'WATE3X185GM')
 # ---------------------------------------------------------------------------
@@ -118,10 +144,60 @@ def test_only_a_size_is_split_off():
     assert sheet_names.split_glued_sizes("COKE ZERO1.5L") == "COKE ZERO 1.5L"
 
 
+@pytest.mark.parametrize("text", [
+    "PEPSI CAN 330ML B2G1", "LAYS CHIPS B1G1 50G", "PEPSI 2+1 330ML", "PAMPERS BABY DRY S4 L 52", "HUGGIES XL 4",
+    "FERRERO ROCHER T3", "OMEGA3 500G", "7UP 330ML", "KITKAT4F 41.5G", "OIL 5 L", "TUNA185 G", "حليب1 ل",
+    "500G+50G FREE", "COLA330ML6",
+])
+def test_a_promo_or_size_code_is_never_split(text):
+    assert sheet_names.split_glued_sizes(text) == text
+
+
+@pytest.mark.parametrize("text, split", [
+    ("RICE1KGx2", "RICE 1KGx2"), ("WATER2X1.5L", "WATER 2X1.5L"), ("OIL1,5L", "OIL 1,5L"), ("حليب1ل", "حليب 1ل"),
+    ("LABAN180MLX6", "LABAN 180MLX6"), ("MASALA160 GM", "MASALA 160 GM"),
+])
+def test_a_size_glued_to_a_word_is_split(text, split):
+    assert sheet_names.split_glued_sizes(text) == split
+
+
+@pytest.mark.parametrize("name, brand, size", [
+    ("PEPSI CAN 330ML B2G1", "PEPSI", "330ml"),            # was split to 'B 2G1': two sizes, none kept
+    ("LAYS CHIPS B1G1 50G", "LAYS", "50g"),
+    ("PAMPERS BABY DRY S4 L 52", "PAMPERS", None),         # was 'S 4 L': an invented 4 litres
+])
+def test_a_promo_code_never_changes_the_size(name, brand, size):
+    spec = spec_of(name, brand)
+    assert (spec.size.canonical() if spec.size else None) == size
+
+
+def test_a_promo_code_never_lets_another_size_be_preselected():
+    from catalog_match import decide
+    from catalog_match.models import FetchedImage, ProviderHealth, QualityReport, RankedCandidate, VerificationResult
+    from catalog_match.score import rank_key
+
+    spec = spec_of("PEPSI CAN 330ML B2G1", "PEPSI")
+    big = listing("Pepsi Cola 2.25L", "https://www.carrefouruae.com/mafuae/en/x/pepsi-2-25l/p/1",
+                  "https://i.example.com/big.jpg")
+    can = listing("Pepsi Cola Can 330ml", "https://www.noon.com/uae-en/pepsi-can/N1/p/", "https://i.example.com/can.jpg")
+    rcs = []
+    for c, sha in ((big, "a"), (can, "b")):
+        read = VlmImageVerdict(index=0, decision="MATCH")
+        rcs.append(RankedCandidate(candidate=c, score=score_candidate(spec, c), verdict=read,
+                                   fetched=FetchedImage(candidate=c, ok=True, content_sha256=sha * 64, width=800,
+                                                        height=800, path_or_bytes=b"x"),
+                                   quality=QualityReport(hard_ok=True)))
+    assert "size_conflict" in rcs[0].score.hard_reject
+    rcs.sort(key=lambda rc: rank_key(rc.candidate, rc.score))
+    out = decide.route(spec, rcs, VerificationResult(status="ok", calls=1),
+                       [ProviderHealth(provider="serper", status="ok", query_id="Q1")])
+    assert out.winner is not None and out.winner.candidate.image_url == can.image_url     # was the 2.25 L bottle
+
+
 def test_rows_50_and_51_keep_their_pack_of_3():
     spec = spec_of("SUPER T/MEAT SOLID TUNA SUNFL OIL3X185GM", "SUPER T/")
     q1 = build_queries(spec)[0].text
-    assert q1 == "SUPER T SOLID TUNA SUNFLOWER OIL 3x185g"            # was 'SUPER T SOLID TUNA SUNFLOWER OIL3X185GM'
+    assert q1 == "SUPER T MEAT SOLID TUNA SUNFLOWER OIL 3x185g"       # was 'SUPER T SOLID TUNA SUNFLOWER OIL3X185GM'
     page = "https://www.tradeling.com/ae-en/product/super-tasty-tuna"
     three = score_candidate(spec, listing("Buy Super Tasty White Meat Solid Premium Tuna In Sunflower Oil 185g x 3 "
                                           "Pieces Online in UAE | Tradeling", page))
@@ -244,7 +320,7 @@ def test_meat_in_luncheon_meat_is_the_product_not_the_protein():
 
 
 @pytest.mark.parametrize("text, context, protein", [
-    ("Mutton Meat Masala", None, "mutton"),             # 'meat' is generic: the animal wins
+    ("Mutton Meat Masala", None, "meat+mutton"),        # a listing keeps its 'meat masala' (the SKU side: mutton)
     ("Beef Luncheon Meat", None, "beef"),
     ("مرتديلا لحم بقري 340 جم", None, "beef"),
     ("ماسالا الدجاج", None, "chicken"),
@@ -364,12 +440,16 @@ def test_row16_the_site_name_of_an_official_domain_is_not_the_brand():
 
 def test_row25_the_brands_real_site_keeps_its_listing_for_the_label_reader():
     # with the suggested mapping (official alldefood.com) the live pick of row 25, 'products | Allde' read as
-    # Allde Meat Masala (MATCH), stays a brand listing (tier 2): the label reader still decides
+    # Allde Meat Masala (MATCH), stays a brand listing (tier 2: it names no size): the label reader still decides.
+    # 'Allde' is the brand's own site name and nothing else stands where a brand would: no site_name_brand doubt.
     spec = spec_of("ALLDE MEAT MASALA 160GM", "ALLDE", suggested_mappings())
     s = score_candidate(spec, listing("products | Allde", "https://alldefood.com/products/",
                                       "https://alldefood.com/wp-content/uploads/meat-masala.png"))
     assert s.matched["source_class"] == "official" and s.matched["brand"]
-    assert s.tier == 2 and "site_name_brand" in s.conflicts
+    assert s.tier == 2 and "site_name_brand" not in s.conflicts
+    named = score_candidate(spec, listing("Meat Masala 160g | Allde", "https://alldefood.com/products/meat-masala",
+                                          "https://alldefood.com/wp-content/uploads/meat-masala.png"))
+    assert named.tier == 1
 
 
 def _paratha_only(text):
@@ -597,15 +677,19 @@ def test_the_memory_is_keyed_by_the_sheet_brand_letters_and_never_guesses():
     from catalog_match import brand_discovery as bd
 
     assert bd.memory_key("SUPER T/") == bd.memory_key("SUPER/T") == "supert" and bd.memory_key("SUP/T") == "supt"
+    assert bd.memory_key("7UP") == "7up" != bd.memory_key("UP")                     # digits count (was 'up')
     proved = bd.discover(spec_of(*ROW49), [SHARJAH_ST])
     assert proved is not None and proved.display == "Super Tasty"
     bd.remember(spec_of(*ROW49), proved)
-    # a sibling spelling recalls it; an unrelated or a mapped brand never does
-    assert bd.find(spec_of(*ROW52), []) == proved
-    assert bd.find(spec_of("SUPER T/MEAT SOLID TUNA SALT WATE3X185GM", "SUPER T/"), ROW52_OWN) == proved
-    assert bd.find(spec_of("AMERICAN G/ LIGHT MEAT TUNA 185GM", "AMERICAN G/"), ROW52_OWN) is None
+    # a sibling spelling recalls it, only as a query hint until its own listings name the product under it
+    assert bd.find(spec_of(*ROW52), []) is None and bd.hint(spec_of(*ROW52), []) == proved
+    super_t = spec_of("SUPER T/MEAT SOLID TUNA SALT WATE3X185GM", "SUPER T/")
+    assert bd.find(super_t, ROW52_OWN) is None and bd.hint(super_t, ROW52_OWN) == proved
+    assert bd.find(spec_of(*ROW52), [SHARJAH_ST]).phrase == "super tasty"
+    # an unrelated or a mapped brand never recalls it
+    assert bd.hint(spec_of("AMERICAN G/ LIGHT MEAT TUNA 185GM", "AMERICAN G/"), ROW52_OWN) is None
     mapped = spec_of(*ROW52, mappings={"super t": {"brand": "Super T", "synonyms": ["SUPER/T"]}})
-    assert bd.find(mapped, []) is None
+    assert bd.find(mapped, []) is None and bd.hint(mapped, []) is None
     # a row whose own listings prove another spelling gets neither: the owner's call
     other = listing("Super Taste Light Meat Tuna 185g | Union Coop", "https://www.unioncoop.ae/super-taste-tuna/p/9")
     assert bd.discover(spec_of(*ROW52), [other]) is not None

@@ -603,6 +603,12 @@ def _survives(status, reasons):
     return status != "excluded" and not any(str(x).startswith("hard:") for x in reasons or ())
 
 
+def forget_brand_spellings():
+    """A run starts with no store spelling an earlier run (or an earlier Brands Mapping) proved: brand_discovery."""
+    from catalog_match import brand_discovery
+    brand_discovery.forget_all()
+
+
 def run_row(row, mappings, identity, pipeline, providers_mod, verify_mod, serp_cost, vlm_cost, expansion=None,
             prices=None, secrets=None, after=None):
     prices = prices or provider_prices(serp_cost)
@@ -805,12 +811,15 @@ def unselected_reason(r):
         return "provider_down"
     if decision == "NOT_FOUND":
         return "not_found"
+    if code == "SOCIAL_ONLY":
+        return "only_social"
+    # as decide.route: with no pick, a label reader that did not answer comes before 'only social posts'
+    if decision == "VERIFIER_DOWN" or code == "VERIFIER_DOWN":
+        return "verifier_down"
     if _only_social(r):
         return "only_social"
     if code == "DOWNLOAD_FAILED":
         return "download_failed"
-    if decision == "VERIFIER_DOWN" or code == "VERIFIER_DOWN":
-        return "verifier_down"
     if _brand_found(r) is False:
         return "brand_not_found"
     verdicts = _verdicts(r)
@@ -1768,6 +1777,7 @@ def main(argv=None):
     prices = provider_prices(args.serp_cost)
     secrets = secret_values()
     results, total = [], 0.0
+    forget_brand_spellings()
     cas = start_cassette(args, rows, mappings, meta, expansion, secrets)
     after = None
     if cas is not None and args.record_shadow:

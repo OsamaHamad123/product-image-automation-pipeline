@@ -200,10 +200,10 @@ def build_sku_spec(row: Mapping[str, Any], brand_mappings=None, size_text: Optio
     key_size = _pick_size(size_text, raw_name, name_ar)
     # Both names and the category open context-bound phrases ('white' next to 'tuna').
     variant_context = " ".join(t for t in (name, name_ar_read, category) if t)
-    variants = variants_mod.merge(
-        variants_mod.extract_variants(name, variant_context),
-        variants_mod.extract_variants(name_ar_read, variant_context),
-    )
+    # a brand name never states a protein ('LAMB WESTON BURGER FRIES'); variants_mod.spec_brands reads the same
+    brands = tuple(p for p in dict.fromkeys((brand_raw, res.canonical, brand_ar_row or res.brand_ar)
+                                            + tuple(res.match_brands) + tuple(res.competitors)) if p)
+    variants = variants_mod.sku_variants((name, name_ar_read), variant_context, brands)
 
     brand_words: Set[str] = set()
     for phrase in (brand_raw, brand_ar_row, res.canonical, res.brand_ar) + tuple(res.match_brands) + tuple(res.family):
@@ -230,6 +230,7 @@ def build_sku_spec(row: Mapping[str, Any], brand_mappings=None, size_text: Optio
         gtin_raw="" if barcode is None else str(barcode),
         gtin_status=gtin_status,
         size=size,
+        key_size=key_size,
         pack_count=_pack_count(size),
         variants=variants,
         class_tokens=class_tokens,

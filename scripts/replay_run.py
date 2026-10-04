@@ -320,6 +320,7 @@ def run(args):
         prices = smoke_live.provider_prices(serp_cost)
         secrets = smoke_live.secret_values()
         cas = cassette.install("replay", args.cassette)
+        smoke_live.forget_brand_spellings()
         try:
             for row in rows:
                 before = len(attempts)

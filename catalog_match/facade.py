@@ -217,6 +217,8 @@ def outcome_summary(outcome: SearchOutcome) -> Dict[str, Any]:
         "verifier_notices": list(getattr(outcome, "verifier_notices", None) or []),
         "reject_counts": dict(outcome.reject_counts),
         "winner_url": outcome.winner.candidate.image_url if outcome.winner is not None else None,
+        # SOCIAL_ONLY: the social-network posts that show the product, for the reviewer
+        "social_links": list(getattr(outcome, "social_links", None) or []),
     }
 
 

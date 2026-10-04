@@ -4,7 +4,7 @@
   "entries": {
     "LIGHTMEAT": {"reads": "LIGHT MEAT", "why": "glued words; live 2026-10-03 rows 32 and 33 (FAMILY LIGHTMEAT ... TUNA): no light-meat grade was read and 'lightmeat' was a product word no listing has"},
     "SOLIDTUNA": {"reads": "SOLID TUNA", "why": "glued words; row 49 (SUP/T WT/MEAT SOLIDTUNA SALTWATER): no 'tuna' token, so no canned-fish context and WT/MEAT (white meat) went unread"},
-    "SALTWATER": {"reads": "SALT WATER", "why": "glued words; row 49: 'salt water' is the brine a tuna is packed in"},
+    "SALTWATER": {"reads": "SALT WATER", "why": "glued words; row 49: 'salt water' is the brine a tuna is packed in (a tuna only, like SALT WATE)", "context": "canned_fish"},
     "SALT WATE": {"reads": "SALT WATER", "why": "truncated word; row 50 (SUPER T/MEAT SOLID TUNA SALT WATE3X185GM): the brine medium was lost", "context": "canned_fish"},
     "CHICKN": {"reads": "CHICKEN", "why": "typo; row 53 (TARGET CHICKN LUNCHENMEAT RECTANGL 340GM): no listing writes 'chickn', product-word coverage 0"},
     "LUNCHENMEAT": {"reads": "LUNCHEON MEAT", "why": "typo and glued words; row 53: the listings say 'Luncheon Meat'"},

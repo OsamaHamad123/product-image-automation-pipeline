@@ -409,6 +409,26 @@ def test_the_replay_works_from_a_zip_of_the_cassette(recorded, tmp_path):
     assert all(r["replay"]["complete"] for r in doc["rows"])
 
 
+def test_a_replay_and_a_smoke_run_start_with_no_spelling_an_earlier_run_proved(recorded, tmp_path):
+    # the brand-spelling memory lived for the process: a replay or a second run inherited the spellings of the
+    # first, so its results depended on what ran before it
+    from catalog_match import brand_discovery as bd
+    from catalog_match.identity import build_sku_spec
+
+    spec = build_sku_spec({"name": "ZZ G/ MAYONNAISE 473ML", "brand": "ZZ G/"}, {})
+    proved = bd.Discovery(phrase="zz garden", display="Zz Garden", kind="abbreviation", sheet_phrase="zz g",
+                          domains=("example.ae",))
+    bd.remember(spec, proved)
+    code, _ = replay(recorded["folder"], tmp_path / "replayed.json")
+    assert code == 0 and bd.recall(spec) is None
+    bd.remember(spec, proved)
+    with live(recorded["world"], tmp_path), contextlib.redirect_stdout(io.StringIO()):
+        code = recorded["smoke"].main(["--rows-file", str(recorded["rows"]), "--dry-run",
+                                       "--json", str(tmp_path / "again.json")])
+        _wait_background_reads()
+    assert code == 0 and bd.recall(spec) is None
+
+
 def test_a_late_index_read_the_run_never_saw_finish_is_not_a_miss(recorded, tmp_path):
     # the run can end before a page read it gave up on finishes: the cassette then has no answer for it
     folder = tmp_path / "cassette_cut"

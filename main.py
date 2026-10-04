@@ -203,7 +203,8 @@ def compute_alt_sku_key(row, spec=None):
     if not spec.gtin:
         return spec.sku_key
     brand = next((str(row.get(k)) for k in ("brand", "brand_en", "brand_ar") if str(row.get(k) or "").strip()), "")
-    return make_sku_key(None, match_key(brand).replace(" ", ""), spec.raw_name, spec.size)
+    # الحجم المقروء من الاسم الخام كما في sku_key نفسه (key_size)، لا الحجم المقروء بعد تصحيح الاسم
+    return make_sku_key(None, match_key(brand).replace(" ", ""), spec.raw_name, spec.key_size)
 
 
 def brand_fingerprint(spec):
@@ -2173,6 +2174,18 @@ def _prepare_verifier_rechecks(notice, run_id):
     return requeued or 0
 
 
+def _forget_brand_spellings():
+    """
+    كل تشغيل يبدأ بلا كتابات ماركات أثبتتها صفوف تشغيل سابق أو ورقة Brands Mapping سابقة (catalog_match.brand_discovery):
+    العامل يعيش طويلاً، والذاكرة لا تُفرغ وحدها.
+    """
+    try:
+        from catalog_match import brand_discovery
+        brand_discovery.forget_all()
+    except Exception as e:
+        print(f"تنبيه: تعذر تفريغ ذاكرة كتابات الماركات: {e}")
+
+
 def run_worker_mode(trigger="manual", report=True, deadline_ts=None):
     """
     عامل الخلفية: يسحب المهام ذرياً ويعالجها بالتوازي (3 خيوط).
@@ -2272,6 +2285,7 @@ def run_worker_mode(trigger="manual", report=True, deadline_ts=None):
             local_cache_db.update_automation_state(status="error", notice=start_notice)
             return
         brand_mappings = google_sheets.get_brand_mappings(sheets_client, config.SPREADSHEET_NAME_OR_URL)
+        _forget_brand_spellings()
         google_sheets.init_async_queue(config.CREDENTIALS_FILE, config.SPREADSHEET_NAME_OR_URL)
         queue_started = True
         _refresh_state("pre_caching", run_id=run_id, notice=notice)
@@ -2490,6 +2504,7 @@ def run_automation_pipeline():
             print("لم يتم العثور على أي منتجات صالحة للمعالجة.")
             return
         brand_mappings = google_sheets.get_brand_mappings(sheets_client, config.SPREADSHEET_NAME_OR_URL)
+        _forget_brand_spellings()
 
         success_count = skipped_count = failed_count = 0
         save_progress(0, len(products), 0, 0, "بدء التشغيل...")

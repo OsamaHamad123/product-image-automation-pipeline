@@ -10,9 +10,10 @@ The owner's sheet glues a size to the word before it and runs words together or 
 the readable name, and query_plan writes it; the sku_key is still built from the raw sheet name and
 the size parsed from it (identity.make_sku_key), so nothing here can move an existing row's key.
 
-* split_glued_sizes puts a space between a letter and a size glued to it: a number (or 'N x Q')
-  directly followed by a unit of catalog_match.sizes and then by no letter. Only sizes are split:
-  'T3', 'B12', 'OMEGA3' and '7UP' stay as written.
+* split_glued_sizes puts a space between a word of two or more letters and a size glued to it: a
+  number (or 'N x Q', or 'Q x N') followed by a unit of catalog_match.sizes and then by no letter or
+  digit; a one-letter unit ('L', 'G', 'ل', 'غ') only directly after the number. Only sizes are split:
+  'T3', 'B12', 'OMEGA3', '7UP', promo codes ('B2G1', 'B1G1') and diaper sizes ('S4 L') stay as written.
 * The data file's keys match whole words (catalog_match.abbreviations.rewrite, the engine of the
   query shorthand), longest key first; every entry carries the live row it comes from.
 """
@@ -27,17 +28,25 @@ from pathlib import Path
 from typing import FrozenSet, List, Optional, Tuple
 
 from . import abbreviations
-from .sizes import _UNIT
+from .sizes import _UNITS
 from .text_norm import tokens
 
 logger = logging.getLogger(__name__)
 
 SPELLINGS_PATH = Path(__file__).resolve().parent / "data" / "sheet_spellings.json"
 
-# A size glued to the letter before it: 'WATER170GM', 'MASALA160 GM', 'WATE3X185GM', 'OIL3X185GM'
-# (the 'x' of '3X185GM' is the pack's multiplication sign, not a word: it stays glued).
+def _alternation(units) -> str:
+    return "(?:" + "|".join(re.escape(u).replace(r"\ ", r"\s*") for u in sorted(units, key=len, reverse=True)) + ")"
+
+
+# A size glued to the word before it: 'WATER170GM', 'MASALA160 GM', 'WATE3X185GM', 'OIL3X185GM'
+# (the 'x' of '3X185GM' is the pack's multiplication sign, not a word: it stays glued). Two letters
+# before the number, a one-letter unit glued to it, and no letter or digit after the unit: 'PEPSI CAN
+# 330ML B2G1' was split to 'B 2G1' (a second size, so none was read) and 'S4 L 52' to 'S 4 L' (4 litres).
 _GLUED_SIZE_RE = re.compile(
-    r"(?<=[^\W\d_])(?<!\d[x×])(?=(?:\d{1,3}\s*[x×*]\s*)?\d+(?:[.,]\d+)?\s*" + _UNIT + r"(?![^\W\d_]))",
+    r"(?<=[^\W\d_]{2})(?<!\d[x×])(?=(?:\d{1,3}\s*[x×*]\s*)?\d+(?:[.,]\d+)?"
+    r"(?:\s*" + _alternation(u for u in _UNITS if len(u) > 1) + "|" + _alternation(u for u in _UNITS if len(u) == 1)
+    + r")(?:\s*[x×*]\s*\d{1,3})?(?![^\W_]))",
     re.IGNORECASE)
 
 

@@ -31,7 +31,8 @@ check_model_available() calls models.get, for worker start-up and settings valid
 Shared with the other label readers (catalog_match.verifiers): build_prompt (focus=True adds the strong
 model's FOCUS_LINES for its one-image second look), parse_readings (reply -> verdicts, fail-closed on a
 foreign numbering), make_verdict / classify and the CircuitBreaker. Every answered Gemini call carries one
-VerificationResult.usage entry (tokens from usageMetadata, or estimated from the image count).
+VerificationResult.usage entry (tokens from usageMetadata, or estimated from the image count); a request
+that timed out (it was most likely billed) counts in calls with an estimated entry flagged timed_out.
 """
 
 from __future__ import annotations
@@ -249,9 +250,12 @@ def classify(spec: SkuSpec, verdict: VlmImageVerdict) -> str:
     brand_state = _brand_reading(spec, verdict.brand_text)
     if brand_state == "other":
         return MISMATCH
-    # The label reading ('White Meat') seldom repeats the product type, so the SKU supplies the context.
-    printed_variants = variants_mod.extract_variants(verdict.variant_text, variants_mod.spec_context(spec))
-    if variants_mod.conflicts(spec.variants, printed_variants):
+    # The label reading ('White Meat') seldom repeats the product type, so the SKU supplies the context; a
+    # context the reading opens re-reads the SKU too (variants.target_variants).
+    target = variants_mod.target_variants(spec, verdict.variant_text)
+    printed_variants = variants_mod.extract_variants(verdict.variant_text, variants_mod.spec_context(spec),
+                                                     variants_mod.spec_brands(spec))
+    if variants_mod.conflicts(target, printed_variants):
         return MISMATCH
     if verdict.view in REJECT_VIEWS:
         # a multipack SKU may legitimately be read as 'several products'
@@ -261,7 +265,7 @@ def classify(spec: SkuSpec, verdict: VlmImageVerdict) -> str:
         return UNSURE
     if spec.match_brands and brand_state != "target":
         return UNSURE
-    if variants_mod.soft_conflicts(spec.variants, printed_variants):
+    if variants_mod.soft_conflicts(target, printed_variants):
         return UNSURE
     if spec.variants and verdict.variant_match != "yes":
         return UNSURE
@@ -604,27 +608,30 @@ class GeminiVerifier:
         headers = {"x-goog-api-key": key, "Content-Type": "application/json"}
 
         resp = None
+        timed_out = 0       # requests sent and never answered: the API most likely billed them
         for attempt in (1, 2):
             try:
                 resp = self._post(url, headers, body)
             except requests.Timeout:
+                timed_out += 1
                 if attempt == 1:
                     logger.info("verify: the call timed out; sending it once more")
                     continue
-                return self._fail(n, "timeout", 1)
+                return self._lost(self._fail(n, "timeout", 1), timed_out, 1, len(slots), prompt)
             except requests.RequestException as exc:
-                return self._fail(n, f"connection_error:{type(exc).__name__}", 1)
+                return self._lost(self._fail(n, f"connection_error:{type(exc).__name__}", 1), timed_out, 0,
+                                  len(slots), prompt)
             except Exception as exc:  # a broken session or adapter must still fail closed
-                return self._fail(n, f"error:{type(exc).__name__}", 1)
+                return self._lost(self._fail(n, f"error:{type(exc).__name__}", 1), timed_out, 0, len(slots), prompt)
             status = int(getattr(resp, "status_code", 0) or 0)
             if status == 200:
                 break
             if (status == 429 or status >= 500) and attempt == 1:
                 cassette.retry_sleep(self._retry_delay(resp, attempt), self.sleep)   # no wait in a replay
                 continue
-            return self._fail(n, f"http_{status}", 1)
+            return self._lost(self._fail(n, f"http_{status}", 1), timed_out, 0, len(slots), prompt)
 
-        return self._parse(spec, resp, slots, n, prompt)
+        return self._lost(self._parse(spec, resp, slots, n, prompt), timed_out, 0, len(slots), prompt)
 
     # -- response parsing ------------------------------------------------------
 
@@ -642,6 +649,20 @@ class GeminiVerifier:
             est_in, est_out = estimate_tokens("gemini", n_images, prompt)
             entry.update(input_tokens=est_in, output_tokens=est_out, estimated=True)
         return entry
+
+    def _lost(self, result: VerificationResult, timed_out: int, counted: int, n_images: int,
+              prompt: str) -> VerificationResult:
+        """The result with the requests that timed out (`counted` of them already in result.calls) added to its
+        calls and usage: a timed-out request was most likely billed, so it counts, with estimated tokens
+        (estimated=True, timed_out=True). The breaker is not touched."""
+        if timed_out:
+            from .verifiers.pricing import estimate_tokens
+            result.calls = int(result.calls or 0) + timed_out - counted
+            est_in, est_out = estimate_tokens("gemini", n_images, prompt)
+            result.usage[:0] = [{"provider": "gemini", "model": self.model, "images": n_images,
+                                 "input_tokens": est_in, "output_tokens": est_out, "estimated": True,
+                                 "timed_out": True} for _ in range(timed_out)]
+        return result
 
     def _parse(self, spec: SkuSpec, resp, slots: List[int], n: int, prompt: str = "") -> VerificationResult:
         try:

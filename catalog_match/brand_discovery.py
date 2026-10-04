@@ -2,8 +2,11 @@
 
 discover(spec, candidates) -> Optional[Discovery]
 find(spec, candidates)     -> Optional[Discovery]   (discover() + the per-process memory, see find())
+hint(spec, candidates)     -> Optional[Discovery]   (a remembered spelling for one more query only)
 apply(spec, discovery)     -> SkuSpec
+as_hint(spec, discovery)   -> SkuSpec               (queries write the spelling; no brand evidence)
 corrected_query(spec)      -> Optional[PlannedQuery]
+forget_all()                                        (each run, and each Brands Mapping load, starts empty)
 
 The owner's sheet sometimes misspells a brand ('RIO MARIE' for Rio Mare, 'INA PARAMANS' for Ina
 Paarman's) or abbreviates it ('SUP/T', 'SUPER T/', 'SUPER/T' for Super Tasty). Without a Brands
@@ -36,10 +39,15 @@ whose brand evidence is only the store spelling carries the 'brand_spelling' rev
 (decide.review_warnings). corrected_query() is one more query written with the store spelling.
 
 find() is what the pipeline calls: discover() plus a per-process memory of the spellings rows proved,
-keyed by the sheet brand's letters ('SUPER T/' and 'SUPER/T' share one key). A row whose own listings
-prove nothing may use a spelling an earlier row proved for the same sheet brand, or for a sibling
-spelling of it by the same word rules ('SUPER/T' after 'SUP/T'); never when its own listings prove
-another spelling, never for a mapped or learned brand, and always review-only with the warning.
+keyed by the sheet brand's letters and digits ('SUPER T/' and 'SUPER/T' share one key; '7UP' is not 'UP').
+A spelling an earlier row proved for the same sheet brand, or for a sibling spelling of it by the same
+word rules ('SUPER/T' after 'SUP/T'), is only a query hint (hint(), as_hint()): it becomes this row's
+brand evidence (find(), apply()) only when this row's own listings name the product under it. 'AMERICAN
+G/ MAYONNAISE' proving American Garden never lets a label reading 'American Garden' confirm 'AMERICAN G/
+LIGHT MEAT TUNA', whose own listings show only Americana. Never when its own listings prove another
+spelling, never for a mapped or learned brand, and always review-only with the warning. The worker, the
+smoke run, the offline evaluation and the replay empty the memory when they start (forget_all), so a run
+never inherits a spelling from an earlier run or an earlier Brands Mapping sheet.
 """
 
 from __future__ import annotations
@@ -265,8 +273,8 @@ _memory_lock = threading.Lock()
 
 
 def memory_key(brand_raw: Optional[str]) -> str:
-    """The sheet brand's letters only: 'SUPER T/' and 'SUPER/T' are 'supert', 'SUP/T' is 'supt'."""
-    return "".join(ch for ch in normalize(brand_raw) if ch.isalpha())
+    """The sheet brand's letters and digits: 'SUPER T/' and 'SUPER/T' are 'supert', 'SUP/T' is 'supt', '7UP' '7up'."""
+    return "".join(ch for ch in normalize(brand_raw) if ch.isalnum())
 
 
 def remember(spec: SkuSpec, found: Discovery) -> None:
@@ -282,7 +290,7 @@ def remember(spec: SkuSpec, found: Discovery) -> None:
 
 
 def forget_all() -> None:
-    """Empty the memory (tests; a new process starts empty)."""
+    """Empty the memory: at the start of a run (worker, smoke run, evaluation, replay) and in tests."""
     with _memory_lock:
         _memory.clear()
 
@@ -320,30 +328,57 @@ def recall(spec: SkuSpec) -> Optional[Discovery]:
     return None
 
 
+def _named_under(spec: SkuSpec, found: Discovery, cands: Sequence[Candidate]) -> bool:
+    """One of this row's own listings opens with the spelling and names the product ('Super Tasty L.Meat Tuna')."""
+    store = tokens(found.phrase)
+    return bool(store) and any(_domain(c) and _leading(text)[:len(store)] == store and names_the_product(spec, text)
+                               for c in cands for text in _texts(c) if text)
+
+
+def _own_or_remembered(spec: SkuSpec, cands: List[Candidate]) -> Tuple[Optional[Discovery], Optional[Discovery]]:
+    """(this row's own discovery, the remembered one) once they agree; (None, None) when they differ."""
+    remembered = recall(spec)
+    own = discover(spec, cands)
+    if own is not None and remembered is not None and remembered.phrase != own.phrase:
+        logger.info("brand discovery sku=%s: %r is written %r here but %r in an earlier row; not guessed",
+                    spec.sku_key, spec.brand_raw, own.display, remembered.display)
+        return None, None
+    return own, remembered
+
+
 def find(spec: SkuSpec, cands: Iterable[Candidate]) -> Optional[Discovery]:
-    """discover(), with the per-process memory of spellings sibling rows proved (consulted first).
+    """The store spelling this row's own listings prove (discover()), or one an earlier row proved that this
+    row's own listings name the product under; None otherwise (the remembered spelling is then only hint()).
 
     Live run 2026-10-03: 'SUP/T', 'SUPER T/' and 'SUPER/T' (rows 49-52) are one brand, Super Tasty; row 52's
-    own results held no Super Tasty listing while row 49's did. A row may now use a spelling another row
-    proved on a UAE store (or on two sites): still review-only (brand_conf unchanged) and still with the
-    brand_spelling warning. When the row's own listings prove a different spelling than the memory holds,
-    neither is used: which brand the sheet means is the owner's call.
+    own results held no Super Tasty listing while row 49's did. Row 52 sends one query written 'Super Tasty'
+    (hint) and takes the spelling once a listing it gets names its product under it: still review-only
+    (brand_conf unchanged) and still with the brand_spelling warning. When the row's own listings prove a
+    different spelling than the memory holds, neither is used: which brand the sheet means is the owner's call.
     """
     cands = list(cands or ())
     if not _discovery_ok(spec, cands):
         return None
-    remembered = recall(spec)
-    own = discover(spec, cands)
+    own, remembered = _own_or_remembered(spec, cands)
     if own is not None:
-        if remembered is not None and remembered.phrase != own.phrase:
-            logger.info("brand discovery sku=%s: %r is written %r here but %r in an earlier row; not guessed",
-                        spec.sku_key, spec.brand_raw, own.display, remembered.display)
-            return None
         remember(spec, own)
         return own
-    if remembered is not None:
-        logger.info("brand discovery sku=%s: %r is written %r (proved by an earlier row on %s)", spec.sku_key,
-                    spec.brand_raw, remembered.display, ", ".join(remembered.domains) or "-")
+    if remembered is not None and _named_under(spec, remembered, cands):
+        logger.info("brand discovery sku=%s: %r is written %r (proved by an earlier row on %s, named here)",
+                    spec.sku_key, spec.brand_raw, remembered.display, ", ".join(remembered.domains) or "-")
+        return remembered
+    return None
+
+
+def hint(spec: SkuSpec, cands: Iterable[Candidate]) -> Optional[Discovery]:
+    """A spelling an earlier row proved for this sheet brand that this row's listings do not prove: worth one
+    query written with it (as_hint), never brand evidence by itself."""
+    cands = list(cands or ())
+    if not _discovery_ok(spec, cands):
+        return None
+    own, remembered = _own_or_remembered(spec, cands)
+    if own is not None or remembered is None or _named_under(spec, remembered, cands):
+        return None
     return remembered
 
 
@@ -351,6 +386,11 @@ def apply(spec: SkuSpec, found: Discovery) -> SkuSpec:
     """The spec that also accepts the store spelling (brand_conf unchanged: never an auto-publish)."""
     return replace(spec, match_brands=tuple(dict.fromkeys(tuple(spec.match_brands) + (found.phrase,))),
                    discovered_brands=tuple(dict.fromkeys(tuple(spec.discovered_brands) + (found.display,))))
+
+
+def as_hint(spec: SkuSpec, found: Discovery) -> SkuSpec:
+    """The spec whose queries write the store spelling; its brand evidence (match_brands) is unchanged."""
+    return replace(spec, discovered_brands=tuple(dict.fromkeys(tuple(spec.discovered_brands) + (found.display,))))
 
 
 def discovered_phrases(spec: SkuSpec) -> Set[str]:

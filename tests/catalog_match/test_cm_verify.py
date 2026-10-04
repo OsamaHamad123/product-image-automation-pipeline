@@ -156,9 +156,26 @@ def test_a_timeout_then_ok_is_retried_once(monkeypatch, laban):
     breaker = CircuitBreaker()
     v = GeminiVerifier(api_key="k", model="m", breaker=breaker, sleep=lambda _s: None)
     result = v.verify(laban, [_fetched()])
-    assert result.status == "ok" and result.calls == 1
     assert result.verdicts[0].decision == "MATCH"
     assert len(poster.calls) == 2 and breaker.consecutive_unknown == 0
+    # both requests count: the timed-out one was most likely billed (was calls 1, the answered one's usage only)
+    assert result.status == "ok" and result.calls == 2
+    lost = [u for u in result.usage if u.get("timed_out")]
+    assert len(result.usage) == 2 and len(lost) == 1
+    assert lost[0]["estimated"] and lost[0]["images"] == 1 and lost[0]["input_tokens"] > 0
+
+
+@pytest.mark.parametrize("script, calls, lost", [
+    ([requests.Timeout("t"), requests.Timeout("t")], 2, 2),
+    ([requests.Timeout("t"), Resp(500, {})], 2, 1),
+    ([Resp(503, {}), requests.Timeout("t")], 1, 1),
+    ([Resp(500, {}), Resp(500, {})], 1, 0),
+])
+def test_a_timed_out_request_counts_in_the_failed_calls_too(monkeypatch, laban, script, calls, lost):
+    monkeypatch.setattr(verify_mod.requests, "post", Poster(script))
+    result = _verifier().verify(laban, [_fetched()])
+    assert result.status == "unknown" and result.calls == calls
+    assert [u.get("timed_out") for u in result.usage] == [True] * lost
 
 
 def test_code_decides(monkeypatch, laban):
