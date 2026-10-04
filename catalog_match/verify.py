@@ -620,7 +620,7 @@ class GeminiVerifier:
             if status == 200:
                 break
             if (status == 429 or status >= 500) and attempt == 1:
-                self.sleep(self._retry_delay(resp, attempt))
+                cassette.retry_sleep(self._retry_delay(resp, attempt), self.sleep)   # no wait in a replay
                 continue
             return self._fail(n, f"http_{status}", 1)
 

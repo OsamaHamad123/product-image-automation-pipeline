@@ -6,16 +6,14 @@
 * a label-reader call is keyed on the image content; a batch the cassette does not hold is answered from the
   row's other readings (approximate) or fails closed (a miss), never invented;
 * Claude replies and SDK errors round-trip; the breaker, spend and index-size decisions replay as recorded;
-* no key, header or token ever reaches the cassette.
+* (no key, header or token ever reaches the cassette: tests/catalog_match/test_cm_cassette_review.py).
 """
 
 from __future__ import annotations
 
-import importlib.util
 import io
 import json
 import time
-from pathlib import Path
 
 import pytest
 import requests
@@ -25,25 +23,14 @@ from catalog_match import cassette, local_index, verify
 from catalog_match.fetch import HttpFetcher
 from catalog_match.models import Candidate, FetchedImage, SkuSpec
 from catalog_match.pages import PageFetcher
-from catalog_match.providers.cse_legacy import CseLegacyProvider
-from catalog_match.providers.lens import SerpApiLensProvider
 from catalog_match.ratelimit import UNLIMITED
 from catalog_match.verifiers import claude as claude_mod, spend as spend_mod
-
-REPO = Path(__file__).resolve().parents[2]
 
 
 @pytest.fixture(autouse=True)
 def _no_cassette_left():
     yield
     cassette.uninstall()
-
-
-def _smoke():
-    spec = importlib.util.spec_from_file_location("smoke_live_cassette_units", REPO / "scripts" / "smoke_live.py")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
 
 
 def jpeg(color, size=(640, 480)):
@@ -506,55 +493,3 @@ def test_index_rows_and_the_read_deadline_replay_without_the_database(tmp_path):
     # a replayed page read is not news for the index: nothing is written back
     store = local_index.DbCatalogStore(connect=lambda: pytest.fail("a replay wrote to the index"))
     store.save_page(1, local_index.PageRecord(status="ok", image_url="https://x/1.jpg"))
-
-
-# ---------------------------------------------------------------------------
-# Secrets
-# ---------------------------------------------------------------------------
-
-def test_no_key_reaches_the_cassette(tmp_path, monkeypatch):
-    smoke = _smoke()
-    serpapi_key, cse_keys, cse_cx = "serpapi-secret-9a8b7c6d", ["cse-key-111111", "cse-key-222222"], ["cx-aaaa", "cx-bbbb"]
-    secrets = smoke.secret_values(lambda name: {"SERPAPI_API_KEY": serpapi_key,
-                                                "GOOGLE_SEARCH_API_KEYS": cse_keys}.get(name, ""))
-    lens_url = "https://serpapi.com/search.json"
-    echo = {"search_metadata": {"json_endpoint": f"https://serpapi.com/searches/1.json?api_key={serpapi_key}"},
-            "visual_matches": [{"title": "Almarai Milk 1L", "link": "https://www.carrefouruae.com/p/1",
-                                "image": "https://cdn.carrefouruae.com/1.jpg", "position": 1}]}
-    cse_url = "https://www.googleapis.com/customsearch/v1"
-    cse_ok = {"items": [{"link": "https://cdn.example.ae/1.jpg", "title": "Almarai Milk",
-                         "image": {"contextLink": "https://www.example.ae/p/1", "width": 800, "height": 800}}]}
-    cut = requests.exceptions.ConnectionError(
-        f"HTTPSConnectionPool: Max retries exceeded with url: /search.json?engine=google_lens&api_key={serpapi_key}")
-    session = Session({lens_url: [Resp(200, json.dumps(echo).encode(), "application/json"), cut],
-                       cse_url: [Resp(403, f'{{"error": "key {cse_keys[0]} refused"}}'.encode(), "application/json"),
-                                 Resp(200, json.dumps(cse_ok).encode(), "application/json")]})
-    folder = tmp_path / "cas"
-    cassette.install("record", str(folder), redact=lambda text: smoke.redact(text, secrets, query_keys=False))
-    with cassette.row(2):
-        lens = SerpApiLensProvider(api_key=serpapi_key, session=session, bucket=UNLIMITED).search(
-            "https://cdn.example.ae/seed.jpg", "en", SPEC)
-        cse = CseLegacyProvider(cse_keys, cse_cx, session=session, bucket=UNLIMITED).search("Almarai milk", "en", SPEC)
-    # and without any redact function, a transport error's URL loses its key
-    cassette.uninstall()
-    cassette.install("fill", str(folder))
-    with cassette.row(3):
-        failed = SerpApiLensProvider(api_key=serpapi_key, session=session, bucket=UNLIMITED).search(
-            "https://cdn.example.ae/other.jpg", "en", SPEC)
-    cassette.uninstall()
-    assert lens.status == "ok" and cse.status == "ok" and failed.status == "error"
-    for path in folder.rglob("*"):
-        if path.is_file():
-            data = path.read_bytes()
-            for secret in [serpapi_key] + cse_keys + cse_cx:
-                assert secret.encode() not in data, (path.name, secret)
-
-    cassette.install("replay", str(folder))
-    with cassette.offline(), cassette.row(2):
-        dummy = ["dummy-key-1", "dummy-key-2"]
-        again = CseLegacyProvider(dummy, ["cx-1", "cx-2"], session=Session({}), bucket=UNLIMITED).search(
-            "Almarai milk", "en", SPEC)
-        lens2 = SerpApiLensProvider(api_key="dummy-serpapi", session=Session({}), bucket=UNLIMITED).search(
-            "https://cdn.example.ae/seed.jpg", "en", SPEC)
-    assert [c.image_url for c in again.candidates] == [c.image_url for c in cse.candidates]
-    assert [c.image_url for c in lens2.candidates] == [c.image_url for c in lens.candidates]

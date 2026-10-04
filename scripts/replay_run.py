@@ -17,12 +17,19 @@ Every row runs through scripts/smoke_live.py's own run_row(), so the --json file
 
     "replay": {"complete": true|false, "misses": [...], "approximate": true|false, "approximations": [...]}
 
-complete   every answer the code asked for was in the cassette;
+complete   every answer the code asked for was in the cassette, nothing tried to reach the network or the
+           database, and the row did not crash;
 misses     what it asked for and the cassette does not hold (a provider call fails with NotRecorded, a
-           download or page read with 'not_recorded', a label-reader call fails closed): the row's decision
-           may differ from what the live services would say. Never silent: each miss is printed and listed;
+           download or page read with 'not_recorded', a label-reader call fails closed), also a recorded answer
+           that cannot stand in (its blob is missing or damaged, or its body was cut at a smaller size limit):
+           the row's decision may differ from what the live services would say. Never silent: each miss is
+           printed and listed;
+blocked    the connections the row tried (network, a local proxy or the database), all refused;
+error      the row crashed in the replay (with --strict the exit code is then 1);
 approximate a label reading came from another recorded call of the same row and model (another batch or
-           prompt), or an index lookup or deadline was not recorded for exactly this request.
+           prompt), an index lookup or deadline was not recorded for exactly this request, or a breaker, spend
+           or index-size value was asked more often than recorded (the last recorded value is used);
+retry_wait_s the back-off waits of the recorded retries, skipped in the replay.
 
 The replay summary also counts the rows that decided as the recording did live (decision, pick and top 5,
 kept in the cassette's meta.json): with the recording's own code every complete row must.
@@ -37,7 +44,8 @@ providers and readers are built), the brand mappings are the recorded ones (afte
 do not wait, the local index answers from its recorded rows and deadline, the circuit breakers, the strong
 reader's month spend and the index size are the recorded values, the CSE sunset check uses the recording
 day, every process-wide switch starts as in a fresh worker, and the page cache is emptied for every row.
-Every socket and database connection is refused for the whole replay.
+Every socket and database connection is refused for the whole replay, a local one too, and the proxy
+settings of the environment (HTTP_PROXY, HTTPS_PROXY, ALL_PROXY) are removed.
 """
 
 import argparse
@@ -62,6 +70,7 @@ log = logging.getLogger("replay_run")
 
 DUMMY_PROXY = "http://replay-proxy.invalid:9"
 LIST_SECRETS = ("GOOGLE_SEARCH_API_KEYS", "GOOGLE_SEARCH_CX_LIST")
+PROXY_ENV = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy")
 
 
 # ---------------------------------------------------------------------------
@@ -133,6 +142,10 @@ def replay_environment(meta, candidate_dir):
                GOOGLE_SEARCH_CX=_env_text(values.get("GOOGLE_SEARCH_CX_LIST", [])))
     with contextlib.ExitStack() as stack:
         stack.enter_context(mock.patch.dict(os.environ, env))
+        # a proxy (one on this machine too) would carry a request out: none, and every host bypasses any other
+        for name in PROXY_ENV:
+            os.environ.pop(name, None)
+        os.environ["NO_PROXY"] = os.environ["no_proxy"] = "*"
         cfg = getattr(cm_settings, "_config", None)
         if cfg is not None:
             for name, value in values.items():
@@ -194,14 +207,29 @@ def _miss_text(miss):
     return f"{miss.get('kind')} {str(what)[:110]}"
 
 
+def row_replay(report, attempts, error=None):
+    """The row's replay report, with the connections it tried (all refused) and its crash: either one makes the
+    row incomplete (what it asked for is not in the cassette, or its decision is missing)."""
+    report = dict(report, blocked=list(attempts))
+    if error:
+        report["error"] = error
+    report["complete"] = bool(report["complete"] and not attempts and not error)
+    return report
+
+
 def print_replay(report):
     if report["complete"] and not report["approximate"]:
         print(f"  REPLAY complete ({report['answers']} recorded answers)")
         return
-    state = "complete" if report["complete"] else f"INCOMPLETE: {len(report['misses'])} answer(s) not recorded"
+    why = [f"{len(report['misses'])} answer(s) not recorded"] if report["misses"] else []
+    why += [f"{len(report['blocked'])} connection(s) refused"] if report.get("blocked") else []
+    why += ["the row crashed"] if report.get("error") else []
+    state = "complete" if report["complete"] else f"INCOMPLETE: {', '.join(why) or 'see above'}"
     print(f"  REPLAY {state}{', approximate' if report['approximate'] else ''}")
     for miss in report["misses"]:
-        print(f"    miss    {_miss_text(miss)}")
+        print(f"    miss    {_miss_text(miss)}{' (' + miss['reason'] + ')' if miss.get('reason') else ''}")
+    for attempt in report.get("blocked") or []:
+        print(f"    blocked {attempt[:120]}")
     for note in report["approximations"]:
         print(f"    approx  {note}")
 
@@ -219,6 +247,7 @@ def replay_summary(results):
     for r in rows:
         for miss in r["replay"]["misses"]:
             by_kind[miss.get("kind")] = by_kind.get(miss.get("kind"), 0) + 1
+    blocked = [a for r in rows for a in r["replay"].get("blocked") or []]
     return {
         "rows": len(rows),
         "complete": sum(1 for r in rows if r["replay"]["complete"]),
@@ -227,6 +256,9 @@ def replay_summary(results):
         "misses": sum(by_kind.values()),
         "misses_by_kind": dict(sorted(by_kind.items())),
         "crashed_rows": [r["row"] for r in results if "error" in r],
+        "blocked_rows": [r["row"] for r in rows if r["replay"].get("blocked")],
+        "database_attempts": sum(1 for a in blocked if a.startswith("pymysql")),
+        "retry_wait_skipped_s": round(sum(float(r["replay"].get("retry_wait_s") or 0.0) for r in rows), 1),
     }
 
 
@@ -241,6 +273,12 @@ def format_replay_summary(s):
                      "the decisions of those rows may differ from the live services'")
     else:
         lines.append("every answer the code asked for was in the cassette")
+    if s.get("crashed_rows"):
+        lines.append(f"CRASHED in the replay: {smoke_live._rows_text(s['crashed_rows'])} (no decision; the error "
+                     "is printed with each row)")
+    if s.get("blocked_rows"):
+        lines.append(f"connections refused in {smoke_live._rows_text(s['blocked_rows'])} "
+                     f"({s.get('database_attempts', 0)} to the database): what they asked for is not in the cassette")
     if s.get("compared_rows"):
         changed = sorted(s["changed_vs_recording"], key=int)
         lines.append(f"vs the recorded run: {s['compared_rows'] - len(changed)} of {s['compared_rows']} rows decided "
@@ -284,6 +322,7 @@ def run(args):
         cas = cassette.install("replay", args.cassette)
         try:
             for row in rows:
+                before = len(attempts)
                 with cas.row_context(int(row["row_number"])):
                     try:
                         r = smoke_live.run_row(row, mappings, identity, pipeline, providers, verify_mod, serp_cost,
@@ -295,9 +334,8 @@ def run(args):
                         print(f"\n=== row {row['row_number']}: {row.get('name', '')} -> ERROR {r['error']}")
                     else:
                         smoke_live.print_row(r)
-                r["replay"] = cas.row_report(int(row["row_number"]))
-                if "error" not in r:
-                    print_replay(r["replay"])
+                r["replay"] = row_replay(cas.row_report(int(row["row_number"])), attempts[before:], r.get("error"))
+                print_replay(r["replay"])
                 results.append(r)
             manifest = cas.misses_manifest([int(r["row_number"]) for r in rows])
         finally:
@@ -332,7 +370,8 @@ def run(args):
         with open(args.json, "w", encoding="utf-8") as fh:
             fh.write(json.dumps(doc, ensure_ascii=False, indent=1, default=str))
         print(f"results written to {args.json}")
-    return 1 if args.strict and (rsum["incomplete_rows"] or outbound) else 0
+    failed = rsum["incomplete_rows"] or rsum["crashed_rows"] or outbound or rsum["database_attempts"]
+    return 1 if args.strict and failed else 0
 
 
 def main(argv=None):
@@ -341,7 +380,8 @@ def main(argv=None):
     parser.add_argument("--json", help="write the replayed run (smoke_live's --json format) to this file")
     parser.add_argument("--rows", action="append", help="replay only these sheet rows, e.g. 2-10 (repeatable)")
     parser.add_argument("--misses", help="where to write the misses manifest (default: <--json name>.misses.json)")
-    parser.add_argument("--strict", action="store_true", help="exit with 1 when a row missed answers")
+    parser.add_argument("--strict", action="store_true",
+                        help="exit with 1 when a row missed answers, crashed or tried to connect anywhere")
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args(argv)
     smoke_live._utf8_stdout()

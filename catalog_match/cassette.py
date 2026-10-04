@@ -33,9 +33,17 @@ Layout of a cassette (a directory, or a zip of one; a zip is read-only):
     blobs/<sha256>     bodies of images; '<sha256>.gz' gzip-compressed pages and large API bodies
 
 Secrets never enter a cassette: requests are stored without headers; query and body parameters named like a
-key (api_key, key, cx, X-API-KEY, Authorization, token, ...) are dropped; an exception text loses any 'key=...'
-value; every stored line passes the caller's redact() (scripts/smoke_live.py passes its redact() over the
-configured secret values). meta.json keeps only whether each secret setting was set (or how many keys).
+key (api_key, key, cx, X-API-KEY, Authorization, token, ...) are dropped, also from a response's final URL; the
+configured keys, CSE engine ids and proxy credentials, and every value sent under such a parameter name, are
+replaced by '[hidden]' wherever they appear (stored lines, API bodies inline or in blobs, exception texts); an
+API JSON body loses its "cx" / "key" / "api_key" fields; an exception text loses any 'key=...' / 'cx=...' value;
+everything stored also passes the caller's redact() (scripts/smoke_live.py passes its redact() over the
+configured secret values). Downloaded images and pages are kept byte-exact (their hashes are evidence; those
+hosts never see a key). meta.json keeps only whether each secret setting was set (or how many keys).
+
+A write that fails while recording (a full disk, a file held by an antivirus) never changes the live run: the
+live answer is returned untouched, the failure is logged once and the row's cassette report says what was not
+stored. A blob whose final rename keeps failing stays under its temporary name and is still found by a replay.
 
 Keys: method + canonical URL (+ the JSON body of a POST); a search text ('q') is case-folded with its
 whitespace collapsed; an image download is also found under providers.base.canonical_image_url of its URL;
@@ -70,11 +78,13 @@ import os
 import re
 import socket
 import threading
+import time
 import uuid
 import zipfile
+import zlib
 from typing import Any, Callable, Dict, Iterable, Iterator, List, Mapping, Optional, Sequence, Tuple
 from unittest import mock
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, quote, unquote, urlencode, urlsplit, urlunsplit
 
 logger = logging.getLogger(__name__)
 
@@ -94,15 +104,25 @@ REPLAY_WAIT_S = 120.0           # replayed page reads answer at once; a fill run
 SHADOW_MAX_IMAGES = 24
 SHADOW_MAX_PAGES = 12
 SHADOW_VERIFY_BATCH = 4
+SHADOW_SERP_COST = 0.001         # USD per shadow search call when the run names no price
 READING_FIELDS = ("brand_text", "variant_text", "size_text", "pack_count", "view", "brand_match", "variant_match",
                   "size_match")
+HIDDEN = "[hidden]"
+MIN_HIDDEN_LEN = 6              # shorter values are no key (and would blank out ordinary text)
+REPLACE_WAITS = (0.05, 0.1, 0.2, 0.4, 0.8)   # a fresh file held by an antivirus / indexer on Windows: retry
 
 # Request parameters that carry a credential (or an account id) and never enter a cassette.
 _SECRET_PARAM_RE = re.compile(r"(?i)^(api_?key|apikey|key|cx|x-api-key|x-goog-api-key|authorization|token|"
                               r"access_token|secret|password|auth|signature)$")
 # Settings that are secrets: a cassette keeps only whether they were set (or how many there were).
 _SECRET_SETTING_RE = re.compile(r"(?i)(KEY|SECRET|TOKEN|PASSWORD|PROXY_URL|_CX)")
-_KEY_IN_TEXT_RE = re.compile(r"(?i)((?:api_?)?key=)[^&\s'\"]+")
+# 'key=', 'api_key=', 'cx=' values in a text (also URL-encoded, as in a URL inside another URL)
+_KEY_IN_TEXT_RE = re.compile(r"(?i)((?:(?:api_?)?key|(?<![a-z0-9])cx)(?:=|%3D))[^&\s'\"]+")
+# "cx": "...", "key": "...", "api_key": "..." fields of a JSON text (a CSE body names its engine id)
+_KEY_FIELD_RE = re.compile(r'(?i)("(?:api_?key|apikey|key|cx|x-api-key|x-goog-api-key)"\s*:\s*")'
+                           r'(?:[^"\\]|\\.)*(")')
+# json.dumps(ensure_ascii=False) leaves these raw, and str.splitlines() (and some editors) split on them
+_LINE_BREAKS = {"\u2028": "\\u2028", "\u2029": "\\u2029", "\x85": "\\u0085"}
 _FENCE_RE = re.compile(r"^\s*```(?:json)?\s*|\s*```\s*$", re.IGNORECASE)
 
 
@@ -112,6 +132,14 @@ class NotRecorded(Exception):
     def __init__(self, what: str = "") -> None:
         super().__init__(NOT_RECORDED)
         self.what = what
+
+
+class StorageError(OSError):
+    """A cassette file could not be written (the message says where its data was kept, if anywhere)."""
+
+
+class _Unusable(Exception):
+    """A recorded answer that cannot stand in for this request (its blob is gone, or its body was cut)."""
 
 
 # ---------------------------------------------------------------------------
@@ -224,6 +252,16 @@ def miss_code(exc: BaseException) -> Optional[str]:
     return NOT_RECORDED if isinstance(exc, NotRecorded) else None
 
 
+def retry_sleep(seconds: float, sleep: Callable[[float], None]) -> None:
+    """A retry's back-off: sleep(seconds), except in a replay, where the wait is only counted in the row report
+    (the answer after it is already recorded)."""
+    cas = _STATE
+    if cas is None or cas.mode != "replay":
+        sleep(seconds)
+        return
+    cas.skipped_sleep(seconds)
+
+
 # ---------------------------------------------------------------------------
 # Canonical requests and keys
 # ---------------------------------------------------------------------------
@@ -266,7 +304,7 @@ def canonical_request(kind: str, method: str, url: str, params: Any = None, body
                 pairs += list(params)
             url = urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(_clean_pairs(pairs)), ""))
         except ValueError:
-            pass
+            url = url.split("?", 1)[0]          # an unreadable query may hold a key: dropped
     request: Dict[str, Any] = {"kind": "fetch" if kind == "fetch" else "api", "method": method, "url": url}
     if body is not None:
         request["body"] = _clean_body(body)
@@ -278,6 +316,76 @@ def canonical_request(kind: str, method: str, url: str, params: Any = None, body
 def request_key(request: Mapping[str, Any]) -> str:
     text = json.dumps(request, sort_keys=True, ensure_ascii=False, default=str)
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:40]
+
+
+# ---------------------------------------------------------------------------
+# Keys never stored
+# ---------------------------------------------------------------------------
+
+def hide_keys_in_text(text: str) -> str:
+    """text without 'key=' / 'api_key=' / 'cx=' values and without "cx" / "key" / "api_key" JSON fields."""
+    text = _KEY_IN_TEXT_RE.sub(r"\1" + HIDDEN, text)
+    return _KEY_FIELD_RE.sub(r"\1" + HIDDEN + r"\2", text)
+
+
+def hidden_forms(values: Iterable[Any]) -> List[str]:
+    """Each value as it can appear in a stored text (as is, URL-encoded, JSON-escaped), longest first."""
+    forms = set()
+    for value in values:
+        value = str(value or "").strip()
+        if len(value) < MIN_HIDDEN_LEN:
+            continue
+        forms.update((value, quote(value, safe=""), json.dumps(value, ensure_ascii=False)[1:-1]))
+    return sorted(forms, key=len, reverse=True)
+
+
+def configured_hidden_values() -> List[str]:
+    """The configured keys, CSE engine ids and proxy password (and URL): never stored, wherever they appear."""
+    from . import settings
+
+    values: List[Any] = []
+    getters: List[Callable[[], Any]] = [lambda n=name: settings.get(n)
+                                        for name in sorted(settings.DEFAULTS) if is_secret_setting(name)]
+    getters += [settings.google_search_api_keys, settings.google_search_cx_list]
+    for getter in getters:
+        try:
+            raw = getter()
+        except Exception:  # pragma: no cover - a broken setting must not stop the run
+            logger.debug("cassette: a secret setting could not be read", exc_info=True)
+            continue
+        values += raw if isinstance(raw, (list, tuple, set)) else str(raw or "").split(",")
+    try:
+        proxy = urlsplit(settings.proxy_url())
+        # the user name is often a plain word: it is not a key, and blanking it could change stored answers
+        values += [proxy.password or "", unquote(proxy.password or "")]
+    except Exception:  # pragma: no cover - defensive
+        pass
+    return hidden_forms(values)
+
+
+def _sent_key_values(params: Any, body: Any) -> List[str]:
+    """The values a request sends under a key-like parameter name (SerpApi's api_key, CSE's key and cx)."""
+    found: List[str] = []
+    if isinstance(params, (str, bytes)):
+        params = parse_qsl(params.decode("utf-8", "replace") if isinstance(params, bytes) else params)
+    pairs = list(params.items()) if isinstance(params, Mapping) else list(params or [])
+
+    def walk(data: Any) -> None:
+        if isinstance(data, Mapping):
+            for k, v in data.items():
+                if _SECRET_PARAM_RE.match(str(k)) and isinstance(v, (str, int)):
+                    found.append(str(v))
+                else:
+                    walk(v)
+        elif isinstance(data, (list, tuple)):
+            for v in data:
+                walk(v)
+
+    for pair in pairs:
+        if isinstance(pair, (list, tuple)) and len(pair) == 2 and _SECRET_PARAM_RE.match(str(pair[0])):
+            found += [str(v) for v in (pair[1] if isinstance(pair[1], (list, tuple)) else [pair[1]])]
+    walk(body)
+    return found
 
 
 def _alias_url(url: str) -> str:
@@ -384,9 +492,9 @@ class Replayed:
         return None
 
 
-def _exc_info(exc: BaseException, redact: Callable[[str], str]) -> Dict[str, Any]:
-    # a transport error's text can hold the request URL, and SerpApi's carries the key in its query
-    message = _KEY_IN_TEXT_RE.sub(r"\1[hidden]", redact(str(exc)))[:500]
+def _exc_info(exc: BaseException, scrub: Callable[[str], str]) -> Dict[str, Any]:
+    # a transport error's text can hold the request URL: SerpApi's carries the key, CSE's the key and the cx
+    message = hide_keys_in_text(scrub(str(exc)))[:500]
     info: Dict[str, Any] = {"module": type(exc).__module__, "type": type(exc).__name__,
                             "mro": [c.__name__ for c in type(exc).__mro__], "message": message}
     status = getattr(exc, "status_code", None)
@@ -500,6 +608,50 @@ def _synthetic_reply(provider: str, model: str, entries: List[Dict[str, Any]]) -
 # Storage: a directory (read / write) or a zip of one (read only)
 # ---------------------------------------------------------------------------
 
+def _replace(tmp: str, target: str, content_addressed: bool = False) -> str:
+    """os.replace(tmp, target), retried: '' when done, else why not (the data then stays in tmp)."""
+    last: Optional[BaseException] = None
+    for wait in tuple(REPLACE_WAITS) + (None,):
+        try:
+            os.replace(tmp, target)
+            return ""
+        except OSError as exc:
+            last = exc
+            if content_addressed and os.path.exists(target):
+                # another thread stored the same bytes under the same name first
+                _remove_quietly(tmp)
+                return ""
+            if wait is None:
+                break
+            time.sleep(wait)
+    return f"{type(last).__name__}: {last}; kept as {os.path.basename(tmp)}"
+
+
+def _remove_quietly(path: str) -> None:
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
+def _open_append(path: str) -> Any:
+    """The file opened for appending lines; a last line an interrupted run left without its newline is closed
+    first (the next line would be glued to it and lost)."""
+    ends_open = False
+    try:
+        with open(path, "rb") as fh:
+            fh.seek(0, os.SEEK_END)
+            if fh.tell() > 0:
+                fh.seek(-1, os.SEEK_END)
+                ends_open = fh.read(1) != b"\n"
+    except FileNotFoundError:
+        pass
+    fh = open(path, "a", encoding="utf-8")
+    if ends_open:
+        fh.write("\n")
+    return fh
+
+
 class _Store:
     def __init__(self, path: str, writable: bool) -> None:
         self.path = str(path)
@@ -529,7 +681,11 @@ class _Store:
             if member is None:
                 return None
             with self._lock:
-                return self._zip.read(member)
+                try:
+                    return self._zip.read(member)
+                except (zipfile.BadZipFile, OSError, EOFError, ValueError, zlib.error):
+                    logger.warning("cassette: %s is damaged in the zip", name)
+                    return None
         try:
             with open(os.path.join(self.path, name), "rb") as fh:
                 return fh.read()
@@ -541,49 +697,88 @@ class _Store:
         return None if data is None else data.decode("utf-8", errors="replace")
 
     def write_text(self, name: str, text: str) -> None:
+        """Replace the file (atomically); StorageError when it cannot be, naming where the text was kept."""
         target = os.path.join(self.path, name)
         tmp = f"{target}.{uuid.uuid4().hex}.tmp"
         with open(tmp, "w", encoding="utf-8") as fh:
             fh.write(text)
-        os.replace(tmp, target)
+        problem = _replace(tmp, target)
+        if problem:
+            raise StorageError(f"{name} could not be replaced ({problem}): rename {tmp} to {name}")
 
     def append_line(self, name: str, line: str) -> None:
         with self._lock:
             if self.closed:
                 # a page read the last row left running finished after the run: kept, without a lingering handle
-                with open(os.path.join(self.path, name), "a", encoding="utf-8") as late:
+                with _open_append(os.path.join(self.path, name)) as late:
                     late.write(line + "\n")
                 return
             fh = self._handles.get(name)
             if fh is None:
-                fh = self._handles[name] = open(os.path.join(self.path, name), "a", encoding="utf-8")
+                fh = self._handles[name] = _open_append(os.path.join(self.path, name))
             fh.write(line + "\n")
             fh.flush()
 
     def blob_name(self, sha: str, gz: bool) -> str:
         return f"{BLOB_DIR}/{sha}{'.gz' if gz else ''}"
 
-    def write_blob(self, data: bytes, gz: bool) -> Tuple[str, int]:
+    def write_blob(self, data: bytes, gz: bool) -> Tuple[str, int, str]:
+        """(sha256, size, problem): problem is '' once the blob is in place, else why it stayed under its
+        temporary name (a replay still finds it there). OSError when it could not be written at all."""
         sha = hashlib.sha256(data).hexdigest()
-        name = self.blob_name(sha, gz)
-        target = os.path.join(self.path, name)
-        if not os.path.exists(target):
-            payload = gzip.compress(data, mtime=0) if gz else data
-            tmp = f"{target}.{uuid.uuid4().hex}.tmp"
+        target = os.path.join(self.path, self.blob_name(sha, gz))
+        if os.path.exists(target) and self._intact(self.blob_name(sha, gz), sha, gz):
+            return sha, len(data), ""          # a damaged one (a partial copy) is written again
+        payload = gzip.compress(data, mtime=0) if gz else data
+        tmp = f"{target}.{uuid.uuid4().hex}.tmp"
+        try:
             with open(tmp, "wb") as fh:
                 fh.write(payload)
+        except OSError:
+            _remove_quietly(tmp)        # a part of the bytes is no answer
+            raise
+        problem = _replace(tmp, target, content_addressed=True)
+        if problem:
+            logger.warning("cassette: blob %s not renamed (%s)", sha[:12], problem)
+        return sha, len(data), problem
+
+    def _kept_names(self, name: str) -> List[str]:
+        """Temporary files a failed rename left for this blob."""
+        pattern = re.compile(re.escape(name) + r"\.[0-9a-f]{32}\.tmp")
+        if self._zip is not None:
+            names = [n[len(self._prefix):] for n in self._names if n.startswith(self._prefix)]
+        else:
             try:
-                os.replace(tmp, target)
+                names = [f"{BLOB_DIR}/{n}" for n in os.listdir(os.path.join(self.path, BLOB_DIR))]
             except OSError:
-                if os.path.exists(tmp):
-                    os.remove(tmp)
-        return sha, len(data)
+                return []
+        return sorted(n for n in names if pattern.fullmatch(n))
+
+    def _checked(self, name: str, sha: str, gz: bool) -> Optional[bytes]:
+        """The bytes of one stored blob file when they hash to its name, else None."""
+        data = self.read_bytes(name)
+        if data is None:
+            return None
+        try:
+            data = gzip.decompress(data) if gz else data
+        except (OSError, EOFError, ValueError, zlib.error):
+            data = None
+        if data is not None and hashlib.sha256(data).hexdigest() == sha:
+            return data
+        logger.warning("cassette: %s is damaged (its content does not match its name)", name)
+        return None
+
+    def _intact(self, name: str, sha: str, gz: bool) -> bool:
+        return self._checked(name, sha, gz) is not None
 
     def read_blob(self, sha: str, gz: bool) -> Optional[bytes]:
-        data = self.read_bytes(self.blob_name(sha, gz))
-        if data is not None and gz:
-            data = gzip.decompress(data)
-        return data
+        """The blob's bytes, checked against its sha256 (a partial copy is no answer); None when missing."""
+        name = self.blob_name(sha, gz)
+        for candidate in [name] + self._kept_names(name):
+            data = self._checked(candidate, sha, gz)
+            if data is not None:
+                return data
+        return None
 
     def close(self) -> None:
         with self._lock:
@@ -629,9 +824,13 @@ class Cassette:
         self._events: Dict[Tuple[str, int], List[Any]] = {}
         self._event_pos: Dict[Tuple[str, int], int] = {}
         self.reports: Dict[int, Dict[str, Any]] = {}
-        self.counts = {"recorded": 0, "served": 0, "live": 0, "missed": 0}
+        self.counts = {"recorded": 0, "served": 0, "live": 0, "missed": 0, "not_stored": 0}
         self._shadow = False
+        self._storage_logged = False
+        self._hidden: Tuple[str, ...] = ()
         self._undo: List[Callable[[], None]] = []
+        if mode in ("record", "fill"):
+            self._hide(configured_hidden_values())
         if mode in ("replay", "fill"):
             self._load()
         self._patch()
@@ -676,15 +875,52 @@ class Cassette:
         return json.loads(text) if text else {}
 
     def write_meta(self, meta: Mapping[str, Any]) -> None:
-        line = self.redact(json.dumps(meta, ensure_ascii=False, indent=1, sort_keys=True, default=str))
+        """meta.json, replaced atomically; StorageError when it cannot be (the message says where it was kept)."""
+        line = self._scrub(json.dumps(meta, ensure_ascii=False, indent=1, sort_keys=True, default=str))
         self.store.write_text(META_FILE, line)
+
+    # -- keys never stored -------------------------------------------------------------
+
+    def _hide(self, values: Iterable[str]) -> None:
+        forms = set(hidden_forms(values))
+        if forms - set(self._hidden):
+            with self._lock:
+                self._hidden = tuple(sorted(set(self._hidden) | forms, key=len, reverse=True))
+
+    def _scrub(self, text: str) -> str:
+        """text without the hidden values, then through the caller's redact()."""
+        for value in self._hidden:
+            if value in text:
+                text = text.replace(value, HIDDEN)
+        return self.redact(text)
+
+    def _scrub_text(self, text: str) -> str:
+        """An error text: also without any 'key=' / 'cx=' value."""
+        return hide_keys_in_text(self._scrub(text))
+
+    def _scrub_api_body(self, data: bytes, ctype: str) -> bytes:
+        """An API body without any key: hidden values, the caller's redact() and a JSON body's key fields.
+        Only API bodies are scrubbed: a downloaded image or page stays byte-exact (its hash, pHash and HTML are
+        evidence the replay must see unchanged, and those hosts are never sent a key)."""
+        text = data.decode("utf-8", errors="surrogateescape")
+        clean = self._scrub(text)
+        if "json" in (ctype or "").lower() or clean.lstrip("\ufeff \t\r\n")[:1] in ("{", "["):
+            clean = _KEY_FIELD_RE.sub(r"\1" + HIDDEN + r"\2", clean)
+        return data if clean == text else clean.encode("utf-8", errors="surrogateescape")
+
+    def _line(self, entry: Mapping[str, Any]) -> str:
+        line = self._scrub(json.dumps(entry, ensure_ascii=False, sort_keys=True, default=str))
+        for raw, escaped in _LINE_BREAKS.items():
+            line = line.replace(raw, escaped)
+        return line
 
     # -- reports -------------------------------------------------------------------
 
     def _report(self, number: int) -> Dict[str, Any]:
         rep = self.reports.get(number)
         if rep is None:
-            rep = self.reports[number] = {"misses": [], "approximations": [], "served": 0, "live": 0, "_seen": set()}
+            rep = self.reports[number] = {"misses": [], "approximations": [], "not_stored": [], "served": 0,
+                                          "live": 0, "retry_wait_s": 0.0, "_seen": set()}
         return rep
 
     def _miss(self, kind: str, what: Mapping[str, Any], key: str) -> None:
@@ -695,15 +931,18 @@ class Cassette:
                 return
             rep["_seen"].add(("miss", kind, key))
             rep["misses"].append({"kind": kind, "key": key, **dict(what)})
-        logger.warning("cassette: row %s: no recorded answer for %s %s", self._row, kind,
-                       what.get("url") or what.get("model") or "")
+        logger.warning("cassette: row %s: no recorded answer for %s %s%s", self._row, kind,
+                       what.get("url") or (what.get("request") or {}).get("url") or what.get("model") or "",
+                       f" ({what['reason']})" if what.get("reason") else "")
 
     def _forget_misses(self, row: int, kind: str, urls: Iterable[str]) -> None:
         urls = set(urls)
         with self._lock:
             rep = self._report(row)
-            rep["misses"] = [m for m in rep["misses"]
-                             if not (m.get("kind") == kind and (m.get("request") or {}).get("url") in urls)]
+            gone = [m for m in rep["misses"] if m.get("kind") == kind and (m.get("request") or {}).get("url") in urls]
+            rep["misses"] = [m for m in rep["misses"] if not any(m is g for g in gone)]
+            for m in gone:          # a later ask of the same page in this row is a miss again, and listed
+                rep["_seen"].discard(("miss", m.get("kind"), m.get("key")))
 
     def _approx(self, text: str) -> None:
         with self._lock:
@@ -711,12 +950,43 @@ class Cassette:
             if text not in rep["approximations"]:
                 rep["approximations"].append(text)
 
+    def _storage_failed(self, row: int, what: str, error: Any) -> None:
+        """A live answer that could not be stored: listed in the row's report, logged once per run."""
+        text = error if isinstance(error, str) else f"{type(error).__name__}: {error}"
+        try:
+            text = self._scrub_text(text)[:300]
+        except Exception:  # pragma: no cover - a broken redact() must not hide the failure
+            text = type(error).__name__
+        with self._lock:
+            self._report(row)["not_stored"].append({"what": what, "error": text})
+            self.counts["not_stored"] += 1
+            first, self._storage_logged = not self._storage_logged, True
+        if first:
+            logger.error("cassette: row %s: %s could not be stored (%s); the live run goes on with the live answer, "
+                         "and the row's cassette report lists every answer not stored", row, what, text)
+        else:
+            logger.debug("cassette: row %s: %s could not be stored (%s)", row, what, text)
+
+    def _keep(self, row: int, what: str, store: Callable[[], Any]) -> None:
+        """store() files a live answer in the cassette; a failure never reaches the live run (see above)."""
+        try:
+            store()
+        except Exception as exc:
+            self._storage_failed(row, what, exc)
+
+    def skipped_sleep(self, seconds: float) -> None:
+        with self._lock:
+            rep = self._report(self._row)
+            rep["retry_wait_s"] = round(rep["retry_wait_s"] + max(0.0, float(seconds or 0.0)), 3)
+
     def row_report(self, number: int) -> Dict[str, Any]:
-        """{complete, misses, approximate, approximations, answers}: what the replay of one row could use."""
+        """{complete, misses, approximate, approximations, not_stored, answers, live_calls, retry_wait_s}: what the
+        replay of one row could use (or, recording, what of the row could not be stored)."""
         rep = self._report(int(number))
-        return {"complete": not rep["misses"], "misses": [dict(m) for m in rep["misses"]],
+        return {"complete": not rep["misses"] and not rep["not_stored"], "misses": [dict(m) for m in rep["misses"]],
                 "approximate": bool(rep["approximations"]), "approximations": list(rep["approximations"]),
-                "answers": rep["served"], "live_calls": rep["live"]}
+                "not_stored": [dict(s) for s in rep["not_stored"]], "answers": rep["served"],
+                "live_calls": rep["live"], "retry_wait_s": rep["retry_wait_s"]}
 
     def misses_manifest(self, rows: Optional[Iterable[int]] = None) -> Dict[str, Any]:
         """The misses of the replayed rows, for smoke_live.py --record <cassette> --fill-misses <manifest>."""
@@ -729,14 +999,19 @@ class Cassette:
 
     def _load(self) -> None:
         for name in (HTTP_FILE, VERIFIER_FILE, INDEX_FILE):
-            text = self.store.read_text(name) or ""
-            for number, line in enumerate(text.splitlines(), start=1):
+            text = (self.store.read_text(name) or "").lstrip("\ufeff")
+            # '\n' only: str.splitlines() also splits on U+2028, U+2029 and U+0085, which an older recording left
+            # raw inside a title (a Windows copy's '\r\n' leaves a '\r', stripped)
+            for number, line in enumerate(text.split("\n"), start=1):
+                line = line.rstrip("\r")
                 if not line.strip():
                     continue
                 try:
                     entry = json.loads(line)
                 except ValueError:
                     logger.warning("cassette: %s line %d is not JSON (an interrupted run?); skipped", name, number)
+                    continue
+                if not isinstance(entry, dict):
                     continue
                 self._index(entry)
                 self._seq = max(self._seq, int(entry.get("seq") or 0))
@@ -762,7 +1037,7 @@ class Cassette:
             entry["seq"] = self._seq
             if self._shadow:
                 entry["shadow"] = True
-            line = self.redact(json.dumps(entry, ensure_ascii=False, sort_keys=True, default=str))
+            line = self._line(entry)
             self.store.append_line(name, line)
             self._index(json.loads(line))
             if entry.get("kind") != "event":
@@ -790,7 +1065,8 @@ class Cassette:
 
     def _pick(self, entries: List[Dict[str, Any]], attempt: int) -> Tuple[Optional[Dict[str, Any]], str]:
         """The answer to the n-th ask among one row's entries for a key: '' exact, 'reused' or None."""
-        exact = next((e for e in entries if int(e.get("attempt") or 0) == attempt), None)
+        # the latest of equal attempts: a fill run re-records an answer whose blob was lost
+        exact = next((e for e in reversed(entries) if int(e.get("attempt") or 0) == attempt), None)
         if exact is not None:
             return exact, ""
         last = entries[-1]
@@ -827,14 +1103,22 @@ class Cassette:
         if values and n <= len(values):
             return self._event_value(values[n - 1])
         if self.mode == "replay":
-            return self._event_value(values[-1]) if values else default()
+            if values:
+                self._approx(f"{name}: asked more often than recorded; the row's last recorded value used")
+                return self._event_value(values[-1])
+            self._approx(f"{name}: not recorded for this row; the last known value used")
+            return default()
         try:
-            value = {"value": live()}
+            value = live()
         except Exception as exc:
-            text = _KEY_IN_TEXT_RE.sub(r"\1[hidden]", self.redact(str(exc)))[:200]
-            value = {"raise": f"{type(exc).__name__}: {text}"}
-        self._write(file, {"kind": "event", "name": name, "row": row, "n": n, "value": value})
-        return self._event_value(value)
+            text = f"{type(exc).__name__}: {exc}"
+            self._keep(row, f"event {name}", lambda: self._write(file, {
+                "kind": "event", "name": name, "row": row, "n": n,
+                "value": {"raise": self._scrub_text(text)[:200]}}))
+            raise           # the live run sees its own exception (a replay raises it as a RuntimeError)
+        self._keep(row, f"event {name}", lambda: self._write(file, {"kind": "event", "name": name, "row": row,
+                                                                    "n": n, "value": {"value": value}}))
+        return value
 
     @staticmethod
     def _event_value(value: Any) -> Any:
@@ -893,6 +1177,8 @@ class Cassette:
     def http(self, kind: str, method: str, url: str, send: Callable[[], Any], *, params: Any = None,
              body: Any = None, headers: Optional[Mapping[str, str]] = None, proxy: bool = False, stream: bool = False,
              max_bytes: Optional[int] = None) -> Any:
+        if kind != "fetch" and self.mode != "replay":
+            self._hide(_sent_key_values(params, body))       # SerpApi's api_key, CSE's key and cx, wherever echoed
         request = canonical_request(kind, method, url, params, body, proxy)
         key = request_key(request)
         row = self._row
@@ -903,30 +1189,44 @@ class Cassette:
         if self.mode == "record":
             return self._record_http(label, request, key, row, self._next_attempt(row, key), send, stream, max_bytes)
         entry, how = self._answer(key, row)
+        aliased = False
         if entry is None and kind == "fetch":
             alias = request_key(canonical_request("fetch", method, _alias_url(url), proxy=proxy))
             entry, how = self._answer(alias, row, self._aliases.get(alias, []))
-            if entry is not None:
-                self._approx(f"{label} answered under another rendition of its URL: {url[:120]}")
+            aliased = entry is not None
+        unusable = ""
         if entry is not None:
-            self._served()
-            return self._replay_http(entry, stream)
+            try:
+                answer = self._replay_http(entry, max_bytes)
+            except _Unusable as exc:
+                unusable = str(exc)
+            else:
+                self._served()
+                if aliased:
+                    self._approx(f"{label} answered under another rendition of its URL: {url[:120]}")
+                if isinstance(answer, BaseException):
+                    raise answer
+                return answer
         if self.mode == "fill":
             return self._record_http(label, request, key, row, self._attempts.get((row, key), 1), send, stream,
                                      max_bytes)
-        self._miss(label, {"request": request}, key)
+        self._miss(label, dict({"request": request}, **({"reason": unusable} if unusable else {})), key)
         raise NotRecorded(f"{label} {request.get('url', '')}")
 
-    def _body(self, data: bytes, ctype: str, fetch: bool) -> Optional[Dict[str, Any]]:
+    def _body(self, data: bytes, ctype: str, fetch: bool, row: int) -> Optional[Dict[str, Any]]:
         if not data:
             return None
         text = _textish(ctype, data)
-        if not fetch and text and len(data) <= INLINE_MAX:
-            try:
-                return {"text": data.decode("utf-8"), "size": len(data)}
-            except UnicodeDecodeError:
-                pass
-        sha, size = self.store.write_blob(data, gz=text)
+        if not fetch and text:
+            data = self._scrub_api_body(data, ctype)
+            if len(data) <= INLINE_MAX:
+                try:
+                    return {"text": data.decode("utf-8"), "size": len(data)}
+                except UnicodeDecodeError:
+                    pass
+        sha, size, problem = self.store.write_blob(data, gz=text)
+        if problem:
+            self._storage_failed(row, f"blob {sha[:12]} (kept under a temporary name a replay still reads)", problem)
         return {"blob": sha, "gz": text, "size": size}
 
     def _content(self, body: Optional[Mapping[str, Any]]) -> bytes:
@@ -934,41 +1234,66 @@ class Cassette:
             return b""
         if "text" in body:
             return str(body["text"]).encode("utf-8")
-        data = self.store.read_blob(str(body["blob"]), bool(body.get("gz")))
+        data = self.store.read_blob(str(body.get("blob")), bool(body.get("gz")))
         if data is None:
-            raise NotRecorded(f"blob {body.get('blob')}")
+            raise _Unusable(f"its body (blob {str(body.get('blob'))[:12]}) is missing or damaged in the cassette")
         return data
+
+    def _final_url(self, request: Mapping[str, Any], final: str) -> str:
+        """The response's own URL when a redirect moved it: an API URL cleaned like its request (requests puts the
+        whole query in it, key and cx included)."""
+        if not final:
+            return ""
+        if request.get("kind") != "fetch":
+            final = canonical_request("api", str(request.get("method") or "GET"), final)["url"]
+        return final if final != request.get("url") else ""
 
     def _record_http(self, label: str, request: Dict[str, Any], key: str, row: int, attempt: int,
                      send: Callable[[], Any], stream: bool, max_bytes: Optional[int]) -> Any:
         entry: Dict[str, Any] = {"kind": label, "key": key, "request": request, "row": row, "attempt": attempt}
+        what = f"{label} answer"
         try:
             resp = send()
         except Exception as exc:
-            entry["response"] = {"exception": _exc_info(exc, self.redact)}
-            self._write(HTTP_FILE, entry)
+            self._keep(row, what, lambda exc=exc: self._write(HTTP_FILE, dict(
+                entry, response={"exception": _exc_info(exc, self._scrub_text)})))
             raise
         status = int(getattr(resp, "status_code", 0) or 0)
         headers = _headers_of(resp)
         final = getattr(resp, "url", None)
         final = final.strip() if isinstance(final, str) and final.strip() else ""
         response: Dict[str, Any] = {"status": status, "headers": headers}
-        if final and final != request.get("url"):
-            response["url"] = final
+        ctype = headers.get("Content-Type", "")
         if not stream:
             data = self._plain_body(resp)
-            response["body"] = self._body(data, headers.get("Content-Type", ""), fetch=False)
-            entry["response"] = response
-            self._write(HTTP_FILE, entry)
+
+            def store_plain() -> None:
+                url = self._final_url(request, final)
+                if url:
+                    response["url"] = url
+                response["body"] = self._body(data, ctype, fetch=False, row=row)
+                self._write(HTTP_FILE, dict(entry, response=response))
+
+            self._keep(row, what, store_plain)
             return resp
-        data, error, truncated = self._read_stream(resp, status, headers, max_bytes)
-        response["body"] = self._body(data, headers.get("Content-Type", ""), fetch=True)
-        if error is not None:
-            response["stream_error"] = _exc_info(error, self.redact)
-        if truncated:
-            response["truncated"] = True
-        entry["response"] = response
-        self._write(HTTP_FILE, entry)
+        data, error, truncated, not_read = self._read_stream(resp, status, headers, max_bytes)
+
+        def store_stream() -> None:
+            url = self._final_url(request, final)
+            if url:
+                response["url"] = url
+            response["body"] = self._body(data, ctype, fetch=True, row=row)
+            if error is not None:
+                response["stream_error"] = _exc_info(error, self._scrub_text)
+            if max_bytes is not None:
+                response["max_bytes"] = int(max_bytes)
+            if truncated:
+                response["truncated"] = True
+            if not_read:
+                response["not_read"] = "too_large"
+            self._write(HTTP_FILE, dict(entry, response=response))
+
+        self._keep(row, what, store_stream)
         return Replayed(status, headers, data, final or request.get("url", ""), error)
 
     @staticmethod
@@ -992,20 +1317,20 @@ class Cassette:
 
     @staticmethod
     def _read_stream(resp: Any, status: int, headers: Mapping[str, str], max_bytes: Optional[int]
-                     ) -> Tuple[bytes, Optional[BaseException], bool]:
-        """The streamed body as the caller would read it: nothing for a refusal or a too-large Content-Length,
-        at most max_bytes + 1 bytes, and the exception that cut the stream."""
+                     ) -> Tuple[bytes, Optional[BaseException], bool, bool]:
+        """The streamed body as the caller would read it: nothing for a refusal or a too-large Content-Length
+        (not_read), at most max_bytes + 1 bytes (truncated), and the exception that cut the stream."""
         buf = bytearray()
         error: Optional[BaseException] = None
         truncated = False
         try:
             if status != 200:
-                return b"", None, False
+                return b"", None, False, False
             length = headers.get("Content-Length")
             if length is not None and max_bytes is not None:
                 try:
                     if int(length) > max_bytes:
-                        return b"", None, False
+                        return b"", None, False, True
                 except (TypeError, ValueError):
                     pass
             try:
@@ -1018,7 +1343,7 @@ class Cassette:
                         break
             except Exception as exc:
                 error = exc
-            return bytes(buf), error, truncated
+            return bytes(buf), error, truncated, False
         finally:
             close = getattr(resp, "close", None)
             if callable(close):
@@ -1027,14 +1352,39 @@ class Cassette:
                 except Exception:  # pragma: no cover - best effort
                     pass
 
-    def _replay_http(self, entry: Mapping[str, Any], stream: bool) -> Any:
+    @staticmethod
+    def _cut_short(response: Mapping[str, Any], max_bytes: Optional[int]) -> str:
+        """Why a recorded download's body is not what this code would read ('' when it is): the recording stopped
+        at its own size limit, and this code reads further."""
+        recorded = response.get("max_bytes")
+        if response.get("truncated"):
+            size = int((response.get("body") or {}).get("size") or 0)
+            limit = int(recorded) if recorded is not None else size - 1
+            if max_bytes is None or max_bytes > limit:
+                return f"its body was cut at {limit + 1} bytes when recorded; this code reads up to {max_bytes}"
+        elif response.get("not_read"):
+            try:
+                length = int(_Headers(response.get("headers") or {}).get("Content-Length"))
+            except (TypeError, ValueError):
+                length = None
+            if max_bytes is None or length is None or length <= max_bytes:
+                return (f"its body ({length} bytes) was over the recording's limit ({recorded}) and not read; this "
+                        f"code reads up to {max_bytes}")
+        return ""
+
+    def _replay_http(self, entry: Mapping[str, Any], max_bytes: Optional[int]) -> Any:
+        """The recorded response (or the recorded exception, returned); _Unusable when it cannot stand in."""
         response = entry.get("response") or {}
         if "exception" in response:
-            raise rebuild_exception(response["exception"])
+            return rebuild_exception(response["exception"])
+        why = self._cut_short(response, max_bytes)
+        if why:
+            raise _Unusable(why)
         request = entry.get("request") or {}
+        content = self._content(response.get("body"))
         error = rebuild_exception(response["stream_error"]) if response.get("stream_error") else None
-        return Replayed(int(response.get("status") or 0), response.get("headers") or {},
-                        self._content(response.get("body")), response.get("url") or request.get("url", ""), error)
+        return Replayed(int(response.get("status") or 0), response.get("headers") or {}, content,
+                        response.get("url") or request.get("url", ""), error)
 
     # -- label readers -------------------------------------------------------------------
 
@@ -1063,16 +1413,27 @@ class Cassette:
         if self.mode == "record":
             return self._record_verifier(scope, key, row, self._next_attempt(row, key), send)
         entry, how = self._answer(key, row)
+        unusable = ""
         if entry is not None:
-            self._served()
-            return self._replay_verifier(entry, request["provider"])
+            try:
+                answer = self._replay_verifier(entry, request["provider"])
+            except _Unusable as exc:
+                unusable = str(exc)
+            else:
+                self._served()
+                if isinstance(answer, BaseException):
+                    raise answer
+                return answer
         if self.mode == "fill":
             return self._record_verifier(scope, key, row, self._attempts.get((row, key), 1), send)
         reply = self._reading_fallback(request, key)
         if reply is not None:
             self._served()
             return reply
-        self._miss("verifier", {"request": dict(request, prompt=scope["prompt"])}, key)
+        what: Dict[str, Any] = {"request": dict(request, prompt=scope["prompt"])}
+        if unusable:
+            what["reason"] = unusable
+        self._miss("verifier", what, key)
         raise NotRecorded("verifier")
 
     def _record_verifier(self, scope: Mapping[str, Any], key: str, row: int, attempt: int,
@@ -1082,32 +1443,40 @@ class Cassette:
         try:
             resp = send()
         except Exception as exc:
-            entry["response"] = {"exception": _exc_info(exc, self.redact)}
-            self._write(VERIFIER_FILE, entry)
+            self._keep(row, "label-reader answer", lambda exc=exc: self._write(VERIFIER_FILE, dict(
+                entry, response={"exception": _exc_info(exc, self._scrub_text)})))
             raise
-        if request["provider"] == "claude":
-            response: Dict[str, Any] = {"message": _dump_message(resp)}
-        else:
-            response = {"status": int(getattr(resp, "status_code", 0) or 0), "headers": _headers_of(resp)}
-            try:
-                response["json"] = resp.json()
-            except Exception:
-                response["text"] = self._plain_body(resp).decode("utf-8", errors="replace")[:INLINE_MAX]
-        entry["response"] = response
-        entry["readings"] = readings_of(request["provider"], response, request["images"])
-        self._write(VERIFIER_FILE, entry)
+
+        def store() -> None:
+            if request["provider"] == "claude":
+                response: Dict[str, Any] = {"message": _dump_message(resp)}
+            else:
+                response = {"status": int(getattr(resp, "status_code", 0) or 0), "headers": _headers_of(resp)}
+                try:
+                    response["json"] = resp.json()
+                except Exception:
+                    response["text"] = self._plain_body(resp).decode("utf-8", errors="replace")[:INLINE_MAX]
+            self._write(VERIFIER_FILE, dict(entry, response=response,
+                                            readings=readings_of(request["provider"], response, request["images"])))
+
+        self._keep(row, "label-reader answer", store)
         return resp
 
     def _replay_verifier(self, entry: Mapping[str, Any], provider: str) -> Any:
+        """The recorded reply (or the recorded exception, returned); _Unusable for a damaged entry."""
         response = entry.get("response") or {}
         if "exception" in response:
-            raise rebuild_exception(response["exception"])
+            return rebuild_exception(response["exception"])
         if provider == "claude":
+            if not isinstance(response.get("message"), dict):
+                raise _Unusable("the recorded reply holds no message")
             return json.loads(json.dumps(response.get("message")))
         if "json" in response:
             content = json.dumps(response["json"]).encode("utf-8")
-        else:
+        elif "text" in response:
             content = str(response.get("text") or "").encode("utf-8")
+        else:
+            raise _Unusable("the recorded reply holds no body")
         return Replayed(int(response.get("status") or 0), response.get("headers") or {}, content)
 
     def _reading_fallback(self, request: Mapping[str, Any], key: str) -> Any:
@@ -1137,6 +1506,31 @@ class Cassette:
 
     # -- local index ---------------------------------------------------------------------
 
+    def _catalog_rows(self, records: Iterable[Mapping[str, Any]], request: Mapping[str, Any], key: str) -> List[Any]:
+        """CatalogRow objects from recorded rows: fields this code no longer has are dropped (approximate); rows
+        this code cannot build are a miss."""
+        import dataclasses
+
+        from . import local_index
+
+        known = {f.name for f in dataclasses.fields(local_index.CatalogRow)}
+        seen, out, dropped = set(), [], set()
+        for data in records:
+            if not isinstance(data, Mapping) or data.get("id") in seen:
+                continue
+            seen.add(data.get("id"))
+            dropped.update(k for k in data if k not in known)
+            try:
+                out.append(local_index.CatalogRow(**{k: v for k, v in data.items() if k in known}))
+            except TypeError as exc:
+                self._miss("local_index", {"request": dict(request), "reason": f"recorded rows do not fit this "
+                                                                               f"code: {exc}"[:200]}, key)
+                raise NotRecorded("local_index") from None
+        if dropped:
+            self._approx(f"local index rows: recorded fields this code no longer has dropped "
+                         f"({', '.join(sorted(dropped))})")
+        return out
+
     def local_index_rows(self, spec: Any, read: Callable[[], List[Any]]) -> List[Any]:
         from dataclasses import asdict
 
@@ -1159,14 +1553,11 @@ class Cassette:
                     entry = {"rows": [r for e in recorded for r in e.get("rows") or []]}
                     self._approx("local index rows of another lookup of this row (the brand or product words changed)")
             if entry is not None:
-                self._served()
                 if "exception" in (entry.get("response") or {}):
+                    self._served()
                     raise rebuild_exception(entry["response"]["exception"])
-                seen, out = set(), []
-                for data in entry.get("rows") or []:
-                    if data.get("id") not in seen:
-                        seen.add(data.get("id"))
-                        out.append(local_index.CatalogRow(**data))
+                out = self._catalog_rows(entry.get("rows") or [], request, key)
+                self._served()
                 return out
             if self.mode == "replay":
                 self._miss("local_index", {"request": request}, key)
@@ -1175,11 +1566,11 @@ class Cassette:
         try:
             rows = read()
         except Exception as exc:
-            entry["response"] = {"exception": _exc_info(exc, self.redact)}
-            self._write(INDEX_FILE, entry)
+            self._keep(row, "local index rows", lambda exc=exc: self._write(INDEX_FILE, dict(
+                entry, response={"exception": _exc_info(exc, self._scrub_text)})))
             raise
-        entry["rows"] = [asdict(r) for r in rows]
-        self._write(INDEX_FILE, entry)
+        self._keep(row, "local index rows", lambda: self._write(INDEX_FILE, dict(
+            entry, rows=[asdict(r) for r in rows])))
         return rows
 
     def local_index_deadline(self, futures: Mapping[Any, int], rows: Mapping[int, Any], done: set, pending: set
@@ -1207,14 +1598,16 @@ class Cassette:
                 # the run may have ended first) is not a miss
                 self._forget_misses(row, "page", {urls[f] for f in futures if f not in ready})
                 return ready, set(futures) - ready
-        self._write(INDEX_FILE, {"kind": "deadline", "key": key, "request": request, "row": row, "attempt": attempt,
-                                 "done": sorted(urls[f] for f in done)})
+        self._keep(row, "local index deadline", lambda: self._write(INDEX_FILE, {
+            "kind": "deadline", "key": key, "request": request, "row": row, "attempt": attempt,
+            "done": sorted(urls[f] for f in done)}))
         return done, pending
+
 
     # -- shadow recording (record mode, after a row's live decision) ------------------------
 
     def shadow(self, spec: Any, outcome: Any, max_images: int = SHADOW_MAX_IMAGES,
-               max_pages: int = SHADOW_MAX_PAGES) -> Dict[str, Any]:
+               max_pages: int = SHADOW_MAX_PAGES, serp_cost: float = SHADOW_SERP_COST) -> Dict[str, Any]:
         """Extra answers for later code: see shadow_record()."""
         from . import expand, pages, ratelimit, settings
         from .fetch import HttpFetcher
@@ -1314,10 +1707,10 @@ class Cassette:
                 report["verifier_calls"] += int(result.calls or 0)
                 for usage in result.usage or []:
                     report["cost_usd"] += float(pricing.usage_usd(usage, prices) or 0.0)
-            report["cost_usd"] = round(report["cost_usd"] + 0.001 * report["search_calls"], 6)
+            report["cost_usd"] = round(report["cost_usd"] + float(serp_cost) * report["search_calls"], 6)
         except Exception as exc:  # the shadow work never breaks the run
             logger.warning("cassette: shadow recording of row %s stopped (%s)", row, type(exc).__name__)
-            report["error"] = f"{type(exc).__name__}: {self.redact(str(exc))[:200]}"
+            report["error"] = f"{type(exc).__name__}: {self._scrub_text(str(exc))[:200]}"
         finally:
             self._shadow = False
             SerperImagesProvider.operators_blocked, SerperLensProvider.unsupported, \
@@ -1325,15 +1718,16 @@ class Cassette:
         return report
 
 
-def shadow_record(spec: Any, outcome: Any) -> Optional[Dict[str, Any]]:
+def shadow_record(spec: Any, outcome: Any, serp_cost: Optional[float] = None) -> Optional[Dict[str, Any]]:
     """Record extra answers for a finished row (record mode only; the live decision is already made):
     every pooled image up to SHADOW_MAX_IMAGES, the pages of its tier-1/2 listings (up to SHADOW_MAX_PAGES),
     X1 (retailer web search) and X2 (shopping) for a row without a pick, and one primary reading of every
-    downloaded image in batches of SHADOW_VERIFY_BATCH. Returns what it did and its estimated cost."""
+    downloaded image in batches of SHADOW_VERIFY_BATCH. Returns what it did and its estimated cost (search
+    calls at serp_cost USD each, the run's --serp-cost)."""
     cas = _STATE
     if cas is None or cas.mode != "record":
         return None
-    return cas.shadow(spec, outcome)
+    return cas.shadow(spec, outcome, serp_cost=SHADOW_SERP_COST if serp_cost is None else serp_cost)
 
 
 # ---------------------------------------------------------------------------
@@ -1386,23 +1780,33 @@ class NetworkBlocked(OSError):
 
 
 _LOOPBACK = ("127.", "::1", "localhost", "0:0:0:0:0:0:0:1")
+# what a client sends to a proxy: 'CONNECT host:443 HTTP/1.1', or a request line with an absolute URL
+_PROXY_REQUEST_RE = re.compile(rb"^(?:CONNECT [^\s]+|[A-Z]+ https?://[^\s]+) HTTP/")
 
 
 @contextlib.contextmanager
-def offline(attempts: Optional[List[str]] = None) -> Iterator[List[str]]:
-    """Refuse every outbound connection and every database connect for the duration; record the attempts."""
+def offline(attempts: Optional[List[str]] = None, allow_ports: Iterable[int] = ()) -> Iterator[List[str]]:
+    """Refuse every outbound connection and every database connect for the duration; record the attempts.
+
+    A loopback address is refused as well (a local proxy or database leads out of the replay), except a port this
+    process itself listens on (Python's socketpair() on Windows connects to one) or one in allow_ports; a request
+    sent through a proxy (CONNECT, or a request line with an absolute URL) is refused and counted too."""
     attempts = attempts if attempts is not None else []
+    own_ports = {int(p) for p in allow_ports}
     real_connect, real_connect_ex = socket.socket.connect, socket.socket.connect_ex
     real_getaddrinfo, real_create = socket.getaddrinfo, socket.create_connection
+    real_listen, real_send, real_sendall = socket.socket.listen, socket.socket.send, socket.socket.sendall
 
     def loopback(host: Any) -> bool:
         return isinstance(host, str) and (host.startswith(_LOOPBACK) or host == "")
 
     def guard(address: Any) -> None:
         host = address[0] if isinstance(address, tuple) and address else address
-        if not loopback(host):
-            attempts.append(f"connect {address!r}")
-            raise NetworkBlocked(f"replay: connection to {address!r} refused")
+        port = address[1] if isinstance(address, tuple) and len(address) > 1 else None
+        if loopback(host) and port in own_ports:
+            return
+        attempts.append(f"connect {address!r}")
+        raise NetworkBlocked(f"replay: connection to {address!r} refused")
 
     def connect(sock, address):  # type: ignore[no-untyped-def]
         guard(address)
@@ -1422,8 +1826,36 @@ def offline(attempts: Optional[List[str]] = None) -> Iterator[List[str]]:
         guard(address)
         return real_create(address, *args, **kwargs)
 
+    def listen(sock, *args):  # type: ignore[no-untyped-def]
+        result = real_listen(sock, *args)
+        try:
+            name = sock.getsockname()
+            if isinstance(name, tuple) and len(name) > 1:
+                own_ports.add(int(name[1]))
+        except (OSError, TypeError, ValueError):  # pragma: no cover - defensive
+            pass
+        return result
+
+    def through_proxy(data: Any) -> None:
+        head = bytes(data[:300]) if isinstance(data, (bytes, bytearray, memoryview)) else b""
+        if _PROXY_REQUEST_RE.match(head):
+            line = head.split(b"\r\n", 1)[0].decode("latin-1")[:120]
+            attempts.append(f"proxy {line!r}")
+            raise NetworkBlocked(f"replay: a request through a proxy refused ({line})")
+
+    def send(sock, data, *args):  # type: ignore[no-untyped-def]
+        through_proxy(data)
+        return real_send(sock, data, *args)
+
+    def sendall(sock, data, *args):  # type: ignore[no-untyped-def]
+        through_proxy(data)
+        return real_sendall(sock, data, *args)
+
     patches = [mock.patch.object(socket.socket, "connect", connect),
                mock.patch.object(socket.socket, "connect_ex", connect_ex),
+               mock.patch.object(socket.socket, "listen", listen),
+               mock.patch.object(socket.socket, "send", send),
+               mock.patch.object(socket.socket, "sendall", sendall),
                mock.patch.object(socket, "getaddrinfo", getaddrinfo),
                mock.patch.object(socket, "create_connection", create_connection)]
     try:
@@ -1440,4 +1872,3 @@ def offline(attempts: Optional[List[str]] = None) -> Iterator[List[str]]:
         for p in patches:
             stack.enter_context(p)
         yield attempts
-

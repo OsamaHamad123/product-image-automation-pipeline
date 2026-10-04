@@ -59,11 +59,15 @@ pages of the tier-1/2 listings, the retailer web search and the shopping search 
 one label reading of every downloaded image); it costs a little more, printed at the end. A replay that
 missed answers writes a manifest; --record DIR --fill-misses MANIFEST then runs only those rows again,
 answering from the cassette where it can and paying only for the missing answers, which it adds to DIR.
+The keys, the CSE engine ids and the proxy password are never written to the folder, wherever an answer
+echoes them. A write the folder refuses (a full disk, a file an antivirus holds) never changes the run: the
+row prints a CASSETTE line saying what was not stored, and the --json results are written in any case.
 """
 
 import argparse
 import contextlib
 import datetime as dt
+import functools
 import inspect
 import json
 import logging
@@ -73,7 +77,7 @@ import sys
 import time
 import traceback
 from collections import Counter
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO_ROOT not in sys.path:
@@ -124,9 +128,11 @@ _SOCIAL_LABELS = frozenset({
 })
 _SOCIAL_DOMAINS = ("x.com", "fb.com", "t.co", "redd.it", "threads.net")
 
+# (the CSE engine ids are no key, but they identify the account and are hidden with the keys)
 SECRET_SETTINGS = ("SERPER_API_KEY", "GEMINI_API_KEY", "SERPAPI_API_KEY", "ANTHROPIC_API_KEY", "PHOTOROOM_API_KEY",
                    "CLOUDINARY_API_KEY", "CLOUDINARY_API_SECRET", "GOOGLE_SEARCH_API_KEYS", "GOOGLE_SEARCH_API_KEY",
-                   "REMOVE_BG_API_KEY", "TELEGRAM_BOT_TOKEN", "PROXY_URL")
+                   "GOOGLE_SEARCH_CX_LIST", "GOOGLE_SEARCH_CX", "REMOVE_BG_API_KEY", "TELEGRAM_BOT_TOKEN", "PROXY_URL")
+_QUERY_KEY_RE = re.compile(r"(?i)((?:(?:api_?)?key|(?<![a-z0-9])cx)(?:=|%3D))[^&\s'\"]+")
 
 WRITE_METHODS = ("update", "update_cell", "update_cells", "batch_update", "append_row", "append_rows", "insert_row",
                  "insert_rows", "delete_rows", "clear", "add_worksheet", "del_worksheet", "format", "update_acell")
@@ -193,12 +199,13 @@ def secret_values(lookup=None):
                 parts = urlsplit(item)
                 values.update(v for v in (parts.username, parts.password) if v and len(v) >= 4)
             if len(item) >= 6:
-                values.add(item)
+                values.update((item, quote(item, safe="")))      # as is, and as a URL query carries it
     return sorted(values, key=len, reverse=True)
 
 
 def redact(text, secrets=None, query_keys=True):
-    """text with every secret value replaced, and (query_keys) every 'key=...' / 'api_key=...' query value.
+    """text with every secret value replaced, and (query_keys) every 'key=...' / 'api_key=...' / 'cx=...' query
+    value.
 
     Error texts get both; a whole --json document only the secret values, so that image URLs with a
     harmless 'key=' parameter stay comparable between runs.
@@ -206,7 +213,7 @@ def redact(text, secrets=None, query_keys=True):
     text = "" if text is None else str(text)
     for secret in (secret_values() if secrets is None else secrets):
         text = text.replace(secret, "[hidden]")
-    return re.sub(r"(?i)((?:api_?)?key=)[^&\s'\"]+", r"\1[hidden]", text) if query_keys else text
+    return _QUERY_KEY_RE.sub(r"\1[hidden]", text) if query_keys else text
 
 
 def _utf8_stdout():
@@ -1582,7 +1589,12 @@ def start_cassette(args, rows, mappings, meta, expansion, secrets):
     mode = "fill" if args.fill_misses else "record"
     cas = cassette.install(mode, args.record, redact=lambda text: redact(text, secrets, query_keys=False))
     if mode == "record":
-        cas.write_meta(recording_meta(args, rows, mappings, meta, expansion))
+        try:
+            cas.write_meta(recording_meta(args, rows, mappings, meta, expansion))
+        except Exception as exc:
+            cassette.uninstall()
+            raise SystemExit(f"--record {args.record}: the cassette cannot be written "
+                             f"({redact(f'{type(exc).__name__}: {exc}', secrets)}); nothing was asked or paid yet")
         print(f"recording every external answer into {args.record}"
               f"{' (with shadow answers for later code versions)' if args.record_shadow else ''}")
     else:
@@ -1590,26 +1602,45 @@ def start_cassette(args, rows, mappings, meta, expansion, secrets):
     return cas
 
 
+def note_not_stored(record, report):
+    """A row whose answers the cassette could not all store (a full disk, a file held by an antivirus): said
+    under the row and kept in the --json row; the live result itself is unchanged."""
+    lost = report.get("not_stored") or []
+    if not lost:
+        return
+    record["cassette"] = {"complete": False, "not_stored": lost}
+    print(f"  CASSETTE: {len(lost)} answer(s) of this row not stored as usual ({lost[0]['what']}: "
+          f"{lost[0]['error'][:120]}); a replay reports what is missing, --fill-misses adds it")
+
+
 def finish_cassette(cas, args, results):
     """Write the cassette's closing meta, uninstall it and print where it is and how to replay it."""
     from catalog_match import cassette
-    meta = cas.read_meta()
-    shadow = [r["shadow"] for r in results if isinstance(r.get("shadow"), dict)]
-    totals = {k: sum(int(s.get(k) or 0) for s in shadow) for k in ("downloads", "pages", "search_calls",
-                                                                    "verifier_calls")}
-    totals["cost_usd"] = round(sum(float(s.get("cost_usd") or 0.0) for s in shadow), 4)
-    totals["rows_stopped"] = [r.get("row") for r in results if (r.get("shadow") or {}).get("error")]
-    if cas.mode == "record":
-        meta.update(finished_at=dt.datetime.now().isoformat(timespec="seconds"),
-                    rows_recorded=[r.get("row") for r in results], answers=cas.counts["recorded"],
-                    shadow=totals if shadow else None, decisions=recorded_decisions(results))
-    else:
-        meta.setdefault("fills", []).append({
-            "at": dt.datetime.now().isoformat(timespec="seconds"), "git": git_info(),
-            "manifest": os.path.basename(args.fill_misses or ""), "rows": [r.get("row") for r in results],
-            "answers_added": cas.counts["recorded"], "answers_reused": cas.counts["served"]})
-    cas.write_meta(meta)
-    cassette.uninstall()
+    try:
+        meta = cas.read_meta()
+        shadow = [r["shadow"] for r in results if isinstance(r.get("shadow"), dict)]
+        totals = {k: sum(int(s.get(k) or 0) for s in shadow) for k in ("downloads", "pages", "search_calls",
+                                                                        "verifier_calls")}
+        totals["cost_usd"] = round(sum(float(s.get("cost_usd") or 0.0) for s in shadow), 4)
+        totals["rows_stopped"] = [r.get("row") for r in results if (r.get("shadow") or {}).get("error")]
+        not_stored = {str(n): len(rep["not_stored"]) for n, rep in sorted(cas.reports.items()) if rep["not_stored"]}
+        if cas.mode == "record":
+            meta.update(finished_at=dt.datetime.now().isoformat(timespec="seconds"),
+                        rows_recorded=[r.get("row") for r in results], answers=cas.counts["recorded"],
+                        shadow=totals if shadow else None, decisions=recorded_decisions(results),
+                        not_stored=not_stored or None)
+        else:
+            meta.setdefault("fills", []).append({
+                "at": dt.datetime.now().isoformat(timespec="seconds"), "git": git_info(),
+                "manifest": os.path.basename(args.fill_misses or ""), "rows": [r.get("row") for r in results],
+                "answers_added": cas.counts["recorded"], "answers_reused": cas.counts["served"],
+                "not_stored": not_stored or None})
+        cas.write_meta(meta)
+    finally:
+        cassette.uninstall()        # the breaker / spend / index-size hooks never outlive the run
+    if not_stored:
+        print(f"WARNING: {sum(not_stored.values())} answer(s) of rows {', '.join(not_stored)} were not stored as "
+              f"usual (see the CASSETTE lines above); a replay lists what is missing")
     if shadow:
         print(f"shadow recording: {int(totals['downloads'])} extra downloads, {int(totals['pages'])} page reads, "
               f"{int(totals['search_calls'])} search calls, {int(totals['verifier_calls'])} label-reader calls, "
@@ -1741,7 +1772,8 @@ def main(argv=None):
     after = None
     if cas is not None and args.record_shadow:
         from catalog_match import cassette as cassette_mod
-        after = cassette_mod.shadow_record
+        after = functools.partial(cassette_mod.shadow_record, serp_cost=args.serp_cost)   # priced like the run
+    cassette_failed = None
     try:
         for row in rows:
             with (cas.row_context(row["row_number"]) if cas is not None else contextlib.nullcontext()):
@@ -1759,10 +1791,20 @@ def main(argv=None):
                 else:
                     print_row(r)
                     total += r["cost_usd"]
+            if cas is not None:
+                note_not_stored(r, cas.row_report(row["row_number"]))
             results.append(r)
     finally:
         if cas is not None:
-            finish_cassette(cas, args, results)
+            # the paid run's results come first: a cassette that cannot be finished is reported, never raised
+            try:
+                finish_cassette(cas, args, results)
+            except Exception as exc:
+                cassette_failed = redact(f"{type(exc).__name__}: {exc}", secrets)
+                log.error("the cassette %s could not be finished: %s", args.record, cassette_failed)
+            finally:
+                from catalog_match import cassette as cassette_final
+                cassette_final.uninstall()
 
     decisions = {}
     for r in results:
@@ -1775,6 +1817,10 @@ def main(argv=None):
         with open(args.json, "w", encoding="utf-8") as fh:
             fh.write(redact(json.dumps(doc, ensure_ascii=False, indent=1), secrets, query_keys=False))
         print(f"results written to {args.json}")
+    if cassette_failed:
+        print(f"WARNING: the cassette {args.record} could not be finished ({cassette_failed}). Its recorded answers "
+              "are kept; if the message names a .tmp file, rename it to meta.json before zipping the folder.")
+        return 1
     return 0
 
 
