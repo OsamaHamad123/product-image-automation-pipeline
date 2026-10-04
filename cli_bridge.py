@@ -631,10 +631,10 @@ def _rejected_refusal(params, sku_key, row_number, product_name, image_url):
         return None
     task = local_cache_db.get_task_by_row(row_number)
     alt = (task or {}).get("alt_sku_key") if _same_product_task(task, sku_key, product_name) else None
-    pipeline = _pipeline()
-    rejected = pipeline.rejected_image(sku_key, alt, image_url)
+    rejected = local_cache_db.image_rejected((sku_key, alt), image_url)
     if rejected is False:
-        rejected = pipeline.rejected_image(sku_key, alt, None, _image_phash(params, row_number, sku_key, image_url))
+        rejected = local_cache_db.image_rejected((sku_key, alt), None,
+                                                 _image_phash(params, row_number, sku_key, image_url))
     if not rejected:
         return None
     current = dict(_current_state(sku_key, row_number, product_name)[0], rejected_image=True)

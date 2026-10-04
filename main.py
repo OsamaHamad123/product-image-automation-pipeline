@@ -661,30 +661,12 @@ def _rejections(sku_key, alt_key=None):
     return urls, phashes
 
 
-def _rejected_by(url, phash, urls, phashes):
-    """الصورة (رابطها بصيغة url_norm، أو pHash على مسافة استبعاد البحث نفسها) بين الصور المرفوضة urls / phashes؟"""
-    if url and local_cache_db.url_norm(url) in {local_cache_db.url_norm(u) for u in urls}:
-        return True
-    if phash and phashes:
-        from catalog_match.pipeline import _near_negative, _phash_hex
-        negatives = [h for h in (_phash_hex(p) for p in phashes) if h]
-        own = _phash_hex(phash)
-        if own and _near_negative(own, negatives) is not None:
-            return True
-    return False
-
-
 def rejected_image(sku_key, alt_key=None, url=None, phash=None):
     """
     هل رفض مراجعٌ هذه الصورة لهذا المنتج (بالمفتاح أو بالمفتاح البديل)؟ رابطها (بصيغة url_norm) أو pHash على مسافة
-    استبعاد البحث نفسها (catalog_match.pipeline.PHASH_EXCLUDE_DISTANCE). None عندما تعذرت قراءة الرفض.
+    استبعاد البحث نفسها (local_cache_db.image_rejected). None عندما تعذرت قراءة الرفض.
     """
-    try:
-        urls, phashes = _rejections(sku_key, alt_key)
-    except Exception as e:
-        print(f"تنبيه: تعذر قراءة رفض المراجعين للـ SKU {sku_key}: {e}")
-        return None
-    return _rejected_by(url, phash, urls, phashes)
+    return local_cache_db.image_rejected((sku_key, alt_key), url, phash)
 
 
 def _image_phash(best_image):
@@ -905,8 +887,8 @@ def pre_cache_product_candidates(task, worksheet=None, link_column_index=None, b
     candidates = collect_candidates(best, trace)
     try:
         rejected_urls, rejected_phashes = _rejections(sku_key, alt_key)
-        candidates = [c for c in candidates if not _rejected_by(c.get("url") or c.get("image_url"), c.get("phash"),
-                                                               rejected_urls, rejected_phashes)]
+        candidates = [c for c in candidates if not local_cache_db.rejected_among(
+            c.get("url") or c.get("image_url"), c.get("phash"), rejected_urls, rejected_phashes)]
     except Exception as e:
         print(f"تنبيه: تعذر قراءة رفض المراجعين قبل حفظ المرشحات: {e}")
     if status == "rejected" and not candidates:

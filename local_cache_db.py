@@ -1088,6 +1088,36 @@ def get_rejections(sku_key):
     return urls, phashes
 
 
+def rejected_among(url, phash, urls, phashes):
+    """الصورة (رابطها بصيغة url_norm، أو pHash على مسافة استبعاد البحث نفسها) بين الصور المرفوضة urls / phashes؟"""
+    if url and url_norm(url) in {url_norm(u) for u in urls or ()}:
+        return True
+    if phash and phashes:
+        from catalog_match.pipeline import _near_negative, _phash_hex
+        negatives = [h for h in (_phash_hex(p) for p in phashes) if h]
+        own = _phash_hex(phash)
+        if own and _near_negative(own, negatives) is not None:
+            return True
+    return False
+
+
+def image_rejected(sku_keys, url=None, phash=None):
+    """
+    هل رفض مراجعٌ هذه الصورة لهذا المنتج بأي من مفاتيحه sku_keys (المفتاح والمفتاح البديل قبل إضافة الباركود)؟
+    True / False، أو None عندما تعذرت قراءة الرفض.
+    """
+    urls, phashes = [], []
+    try:
+        for key in dict.fromkeys(str(k).strip() for k in sku_keys or () if k):
+            more_urls, more_phashes = get_rejections(key)
+            urls += list(more_urls)
+            phashes += list(more_phashes)
+    except Exception as e:
+        logger.warning("[MariaDB] تعذر قراءة رفض المراجعين للمفاتيح %s: %s", sku_keys, e)
+        return None
+    return rejected_among(url, phash, urls, phashes)
+
+
 # ---------------------------------------------------------------------------
 # أخطاء المنتجات والملاحظات
 # ---------------------------------------------------------------------------
