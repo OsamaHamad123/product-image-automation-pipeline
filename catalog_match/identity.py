@@ -230,6 +230,7 @@ def build_sku_spec(row: Mapping[str, Any], brand_mappings=None, size_text: Optio
         gtin_raw="" if barcode is None else str(barcode),
         gtin_status=gtin_status,
         size=size,
+        key_size=key_size,
         pack_count=_pack_count(size),
         variants=variants,
         class_tokens=class_tokens,

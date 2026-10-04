@@ -203,7 +203,8 @@ def compute_alt_sku_key(row, spec=None):
     if not spec.gtin:
         return spec.sku_key
     brand = next((str(row.get(k)) for k in ("brand", "brand_en", "brand_ar") if str(row.get(k) or "").strip()), "")
-    return make_sku_key(None, match_key(brand).replace(" ", ""), spec.raw_name, spec.size)
+    # الحجم المقروء من الاسم الخام كما في sku_key نفسه (key_size)، لا الحجم المقروء بعد تصحيح الاسم
+    return make_sku_key(None, match_key(brand).replace(" ", ""), spec.raw_name, spec.key_size)
 
 
 def brand_fingerprint(spec):

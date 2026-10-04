@@ -94,6 +94,32 @@ def test_the_sku_key_of_every_live_row_is_unchanged():
             assert spec_of(row["name"], row["brand"], maps).sku_key == LIVE_KEYS[number], (number, row["name"])
 
 
+ALT_KEY_NAMES = [
+    ("SUPER T/MEAT SOLID TUNA SALT WATE3X185GM", "SUPER T/", ""),       # rows 50, 51: a glued pack read only now
+    ("KABANI MEAT MASALA160 GM", "KABANI", ""),
+    ("AL ALALI FANCY MEAT TUNA IN WATER170GM", "AL ALALI", ""),
+    ("ALMARAI MILK1L", "ALMARAI", ""),
+    ("حليب المراعي1ل", "", ""),
+    ("SUNFLOWER OIL1,5L", "AFIA", ""),
+    ("PEPSI CAN 330ML B2G1", "PEPSI", ""),
+    ("WATER2X1.5L", "MASAFI", "6 pcs"),
+    ("RICE1KGx2", "TILDA", "1kg"),
+]
+
+
+def test_the_alt_key_of_a_row_given_a_barcode_is_its_key_before_the_barcode():
+    # the alt key keeps approvals and rejections saved before a barcode was added: it must be that old key
+    # (live run 2026-10-03, rows 19, 38, 50, 51: it used the size read from the corrected name)
+    import main
+
+    rows = [(r["name"], r["brand"], "") for r in live_rows().values()] + ALT_KEY_NAMES
+    for name, brand, size in rows:
+        row = main.sku_row(name, brand, "", {"size": size})
+        before = main.compute_sku_key(row)
+        assert main.compute_alt_sku_key(dict(row, barcode="6291000000013")) == before, name
+        assert main.compute_alt_sku_key(row) == before, name
+
+
 # ---------------------------------------------------------------------------
 # 1. A size glued to the word before it ('MASALA160 GM', 'WATE3X185GM')
 # ---------------------------------------------------------------------------
