@@ -1398,8 +1398,8 @@ ACTIONS = {
     'review_stats': action_review_stats,
     'sheet-preview': action_sheet_preview,
     'sheet-save': action_sheet_save,
-    'ops_health': action_ops_health,
     'lock_state': action_lock_state,
+    'ops_health': action_ops_health,
     'run_control': action_run_control,
 }
 

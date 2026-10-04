@@ -94,13 +94,6 @@ def test_batch_status_reports_the_run_and_the_phase():
 
 BATCH_STATUS_HARNESS = r"""<?php
 namespace App\Http\Controllers { class Controller {} }
-namespace Illuminate\Support\Facades {
-    class Cache {
-        public static $store = [];
-        public static function get($k, $d = null) { return self::$store[$k] ?? $d; }
-        public static function put($k, $v, $ttl = null) { self::$store[$k] = $v; return true; }
-    }
-}
 namespace App\Services {
     class PythonBridge {
         public static function run($action, $params = []) {
@@ -552,12 +545,6 @@ STOP_HARNESS = r"""<?php
 namespace App\Http\Controllers {
     class Controller {}
     class ProductController { public static function forgetProductCaches() {} }
-}
-namespace Illuminate\Support\Facades {
-    class Cache {
-        public static function get($k, $d = null) { return $d; }
-        public static function put($k, $v, $ttl = null) { return true; }
-    }
 }
 namespace App\Services {
     class PythonBridge {

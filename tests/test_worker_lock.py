@@ -572,17 +572,11 @@ def test_the_windows_probe_asks_for_utc_without_a_bom(main_mod, monkeypatch):
 
 BRIDGE = ROOT / "cli_bridge.py"
 
-# Framework stand-ins: Cache is an in-memory store; PythonBridge runs the real cli_bridge.py (BRIDGE_MODE=real),
-# answers like a broken bridge (broken), or answers a fixed verdict from BRIDGE_VERDICT (fixed). It counts its calls.
+# Framework stand-in: PythonBridge runs the real cli_bridge.py (BRIDGE_MODE=real), answers like a broken bridge
+# (broken), or answers a fixed verdict from BRIDGE_VERDICT (fixed). It counts its calls. Status polls keep the
+# verdict in temp/lock_state.json.
 PHP_LOCK_HARNESS = r"""<?php
 namespace App\Http\Controllers { class Controller {} }
-namespace Illuminate\Support\Facades {
-    class Cache {
-        public static $store = [];
-        public static function get($k, $d = null) { return self::$store[$k] ?? $d; }
-        public static function put($k, $v, $ttl = null) { self::$store[$k] = $v; return true; }
-    }
-}
 namespace App\Services {
     class PythonBridge {
         public static $calls = [];

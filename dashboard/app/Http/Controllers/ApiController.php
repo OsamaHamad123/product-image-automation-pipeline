@@ -3,7 +3,6 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use App\Services\PythonBridge;
@@ -247,7 +246,6 @@ class ApiController extends Controller
 
     /** حكم بايثون على القفل يُحفظ هذه المدة لاستعلامات الحالة المتكررة (الشريط الجانبي يسأل كل بضع ثوانٍ). */
     private const LOCK_STATE_CACHE_S = 10;
-    private const LOCK_STATE_CACHE_KEY = 'lq_pipeline_lock_state';
 
     /**
      * حالة عامل الخلفية من ملف القفل temp/pipeline.lock: starting = كتبت لوحة التحكم 'STARTING' والإدراج يقرأ الشيت
@@ -292,18 +290,21 @@ class ApiController extends Controller
         return $result;
     }
 
-    /** lockVerdict محفوظ لمحتوى القفل نفسه حتى LOCK_STATE_CACHE_S (مفتاح واحد في الكاش، لا مفتاح لكل نبضة). */
+    /**
+     * lockVerdict محفوظ لمحتوى القفل نفسه حتى LOCK_STATE_CACHE_S في temp/lock_state.json (ملف واحد يُستبدل، لا مدخل
+     * لكل نبضة).
+     */
     private function cachedLockVerdict(string $lockFile, string $lockContent): array
     {
+        $cacheFile = $this->automationPath('temp/lock_state.json');
         $key = md5($lockFile . "\n" . $lockContent);
-        $cached = Cache::get(self::LOCK_STATE_CACHE_KEY);
+        $cached = json_decode((string) @file_get_contents($cacheFile), true);
         if (is_array($cached) && ($cached['key'] ?? null) === $key && is_array($cached['verdict'] ?? null)
             && time() - (int) ($cached['at'] ?? 0) < self::LOCK_STATE_CACHE_S) {
             return $cached['verdict'];
         }
         $verdict = $this->lockVerdict($lockFile);
-        Cache::put(self::LOCK_STATE_CACHE_KEY, ['key' => $key, 'at' => time(), 'verdict' => $verdict],
-            self::LOCK_STATE_CACHE_S);
+        @file_put_contents($cacheFile, json_encode(['key' => $key, 'at' => time(), 'verdict' => $verdict]), LOCK_EX);
         return $verdict;
     }
 
@@ -368,11 +369,9 @@ class ApiController extends Controller
      * starting | none كما في terminateWorker؛ لعامل حي: يُسجل طلب إيقاف (run_control stop / running) ثم يُنتظر حتى
      * stopWaitSeconds: exited = توقف بنفسه وكتب تقريره؛ وإلا terminateWorker: killed (أُنهي؛ run_control يكتب تقرير
      * «توقف» بدلاً منه) أو running (بقي حياً أو لم تتأكد هويته؛ طلب الإيقاف يبقى ويلتزم به بين المنتجات).
-     * $requested يعود برد run_control على طلب الإيقاف (null إن لم يُطلب).
      */
-    private function stopWorker(array $process, ?array &$requested = null): string
+    private function stopWorker(array $process): string
     {
-        $requested = null;
         if ($process['state'] !== 'running') {
             return $this->terminateWorker($process);
         }
