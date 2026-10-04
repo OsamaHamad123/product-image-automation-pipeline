@@ -364,11 +364,16 @@ class RunController extends Controller
     // «جودة بيانات الشيت»: what the sheet rows lack (each cached row's sheet_issues, from catalog_match.explain)
     // ------------------------------------------------------------------
 
-    /** The card's groups, in the order the owner fixes them, with their Arabic names. */
+    /**
+     * The card's groups, in the order the owner fixes them, with their Arabic names. 'no_brand' (a brand cell that
+     * says the product has none, 'GENERIC / NO BRAND') is the owner's own answer, not a gap: it has no group.
+     */
     public const QUALITY_GROUPS = [
         'no_size' => 'حجم ناقص',
+        'size_unit_typo' => 'وحدة الحجم غلط (MM بدل GM)',
         'no_barcode' => 'باركود ناقص أو مش صالح',
         'brand_unknown' => 'ماركة مش موجودة في Brands Mapping',
+        'brand_has_product_word' => 'كلمة من اسم المنتج بعمود الماركة',
         'typo' => 'غلطة إملائية محتملة بالاسم',
         'duplicate_barcode' => 'باركود مكرر لمنتجات مختلفة',
     ];

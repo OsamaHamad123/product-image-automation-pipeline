@@ -58,6 +58,27 @@ def test_every_product_carries_what_its_sheet_row_lacks(bridge):
     assert all(p["sku_key"] and "sheet_states" in p and "has_error" in p for p in out["products"])
 
 
+def test_the_brand_column_and_a_size_in_mm_get_their_own_notes(bridge, monkeypatch):
+    # live run 2026-10-04 (every brand unmapped): rows 4, 28, 79 and 95 as the sheet has them
+    import google_sheets
+
+    rows = [_prod(4, "BATO FRENCH FRIES 900 MM", "BATO"),
+            _prod(28, "AMERICAN LIGHT MEAT TUNA SOLID 185GM", "AMERICAN LIGHT"),
+            _prod(79, "SQ SALITED DRY PRAWNS FISF", "SQ SALITED"),
+            _prod(95, "ICE CREAM CANDY 13 GM", "GENERIC / NO BRAND"),
+            _prod(5, "FARMILA FRENCH FRIES 9MM 1KG", "FARMILA")]
+    monkeypatch.setattr(google_sheets, "get_products", lambda ws: ([dict(p) for p in rows], 5))
+    out = bridge.action_get_products({})
+    issues = {p["row_number"]: {i["key"]: i for i in p["sheet_issues"]} for p in out["products"]}
+    assert issues[4]["size_unit_typo"]["text"] == "الحجم مكتوب «900 MM» — غالبًا قصدك «900 GM»"
+    assert issues[28]["brand_has_product_word"]["text"] == \
+        "عمود الماركة فيه كلمة من اسم المنتج: «AMERICAN LIGHT» — الماركة غالبًا «AMERICAN»"
+    assert issues[79]["brand_has_product_word"]["text"] == \
+        "عمود الماركة فيه كلمة من اسم المنتج: «SQ SALITED» — الماركة غالبًا «SQ»، و«SALITED» قصدك «SALTED»"
+    assert "no_brand" in issues[95] and "brand_unknown" not in issues[95]     # was 'add GENERIC / NO BRAND'
+    assert set(issues[5]) == {"no_barcode", "brand_unknown"}                  # a 9 mm cut with its 1 KG: no note
+
+
 def test_a_failing_check_never_hides_the_products(bridge, monkeypatch):
     from catalog_match import explain
 

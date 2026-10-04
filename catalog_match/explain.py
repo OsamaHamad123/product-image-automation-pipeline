@@ -13,9 +13,15 @@ Engine side (moved unchanged from scripts/smoke_live.py, which imports it from h
     brand_facts(ranked, code)   verdicts / brand_found / only_social over those listings (smoke_live's row fields).
 
 Sheet side (what the sheet row lacks for a confident pick)
-    sheet_issues(row, spec)     no_size (no size, so no listing can confirm it), no_barcode (missing or not a valid
-                                GTIN), brand_unknown (the brand is in no Brands Mapping entry, learned or not, and no
-                                store spelling was discovered), typo (a word one edit from a known word: 'CHICEKN' ->
+    sheet_issues(row, spec)     no_size (no size, so no listing can confirm it), size_unit_typo (a food's only size is
+                                'N MM' with N >= 50 and no weight or volume: '900 MM' fries, most likely '900 GM'; a
+                                '9MM' cut never), no_barcode (missing or not a valid GTIN), brand_unknown (the brand is
+                                in no Brands Mapping entry, learned or not, and no store spelling was discovered),
+                                no_brand (the brand cell says the product has none, 'GENERIC / NO BRAND': never
+                                brand_unknown), brand_has_product_word (the brand cell holds a word of the product
+                                name: 'AMERICAN LIGHT' before 'MEAT TUNA', which the search already matches as
+                                'AMERICAN' (known), or a last word that is a typo of a variant word, 'SQ SALITED'),
+                                typo (a word one edit from a known word: 'CHICEKN' ->
                                 'CHICKEN', or a sheet spelling the search already reads another way: 'LUNCHENMEAT').
     typo_suggestions(...)       the typo finder (Vocabulary: the lexicons, data/grocery_words.json and the words the
                                 sheet itself repeats, read from the products cache the worker already writes).
@@ -23,8 +29,10 @@ Sheet side (what the sheet row lacks for a confident pick)
 One reason
     explain(record, issues)     {'key', 'label', 'engine', 'fact', 'action', 'text', 'sheet': [...]}. The engine
                                 reason, unless a sheet gap explains it better: a likely typo (for a name nothing or
-                                only weak listings matched), an unknown brand (no listing names it), no size (the label
-                                reader could not confirm a listing and no listing could reach tier 1 without a size),
+                                only weak listings matched), no brand (a product the sheet says has none: searched by
+                                name only), an unknown brand (no listing names it; a word of the name in the brand
+                                cell when that is why), no size (the label reader could not confirm a listing and no
+                                listing could reach tier 1 without a size; a size written in MM when that is why),
                                 no barcode (only weak listings, none confirming the sheet's size, and no barcode to
                                 match instead). A reason outside the sheet (search or label reader down, downloads
                                 failed, only social posts) is never replaced; the other gaps are listed under 'sheet'.
@@ -614,10 +622,127 @@ def _quote(text) -> str:
     return f"«{' '.join(str(text or '').split())}»"
 
 
+MIN_MM_TYPO = 50          # '900 MM' fries are 900 g; a '9MM' or '12 MM' cut is a cut
+_MM_RE = re.compile(r"(?<![\w.,])(\d+(?:[.,]\d+)?)\s*(mm)(?![^\W\d_])", re.IGNORECASE)
+
+
+@lru_cache(maxsize=1)
+def food_words() -> frozenset:
+    """Words that name a food: data/grocery_words.json without its 'non_food' list, and the variants lexicon's
+    product contexts ('fries', 'tuna', 'masala')."""
+    from .text_norm import tokens
+
+    out = set()
+    try:
+        data = _json("grocery_words.json")
+        out.update(w for w in data.get("words") or [] if _WORD_RE.match(str(w)))
+        out.difference_update(data.get("non_food") or [])
+    except Exception:  # pragma: no cover
+        logger.debug("explain: grocery words unreadable", exc_info=True)
+    try:
+        for words in (_json("variants_lexicon.json").get("contexts") or {}).values():
+            out.update(t for w in words for t in tokens(w) if _WORD_RE.match(t))
+    except Exception:  # pragma: no cover
+        logger.debug("explain: variants lexicon unreadable", exc_info=True)
+    return frozenset(out)
+
+
+def _food(spec) -> bool:
+    """The product type is a food: its last product-type word names one ('FRENCH FRIES'; never 'ICE CREAM SCOOP'
+    or 'KITCHEN TISSUE'), or, with no such word, the name states a variant (a flavour, a fat level)."""
+    from .text_norm import tokens
+
+    words = [t for tok in getattr(spec, "class_tokens", ()) or () for t in tokens(tok)]
+    if not words:
+        return bool(getattr(spec, "variants", None))
+    head, food = words[-1], food_words()
+    return head in food or (len(head) > 3 and head.endswith("s") and head[:-1] in food)
+
+
+def size_unit_typo(row: Mapping[str, Any], spec) -> Optional[Dict[str, Any]]:
+    """{'key': 'size_unit_typo', 'word': '900 MM', 'suggest': '900 GM'} when a food's only size is written in
+    millimetres from MIN_MM_TYPO up (live run 2026-10-04, row 4: 'BATO FRENCH FRIES 900 MM' had no size, so a
+    2.5 KG bag was pre-selected); None otherwise. Display only: the search never reads '900 MM' as a weight."""
+    if getattr(spec, "size", None) is not None:
+        return None
+    found = [m for text in (str(row.get("size") or ""), str(getattr(spec, "raw_name", "") or row.get("name") or ""))
+             for m in _MM_RE.finditer(text)]
+    if len(found) != 1:
+        return None
+    number, unit = found[0].group(1), found[0].group(2)
+    try:
+        value = float(number.replace(",", "."))
+    except ValueError:
+        return None
+    if value < MIN_MM_TYPO or not _food(spec):
+        return None
+    return {"key": "size_unit_typo", "word": f"{number} {unit}", "suggest": f"{number} {_styled('gm', unit)}"}
+
+
+def brand_product_word(spec, vocab: Optional["Vocabulary"] = None) -> Optional[Dict[str, Any]]:
+    """{'key': 'brand_has_product_word', 'brand', 'suggest', 'word', 'fix'?, 'known'} for an unmapped sheet brand
+    that holds a word of the product name; None otherwise.
+
+    known=True: identity already matches the brand without the words that begin a variant phrase of the name
+    ('AMERICAN LIGHT' + 'MEAT TUNA' is matched as 'AMERICAN', live run 2026-10-04 rows 27-28): worth fixing in the
+    sheet, not why a product has no pick. known=False: the brand's last word is not a word but a typo of a variant
+    word of the name ('SQ SALITED DRY PRAWNS': 'SALITED' is 'SALTED', row 79); the brand is left whole (what remains,
+    'SQ', is too short to match), and that is why no listing names it.
+    """
+    from . import variants as variants_mod
+    from .sheet_names import spec_name
+    from .text_norm import is_arabic, tokens
+
+    brand = " ".join(str(getattr(spec, "brand_raw", "") or "").split())
+    if getattr(spec, "brand_conf", "") != "sheet_raw" or not brand:
+        return None
+    btoks = tokens(brand)
+    canonical = " ".join(str(getattr(spec, "brand_canonical", "") or "").split())
+    ctoks = tokens(canonical)
+    if ctoks and len(ctoks) < len(btoks) and btoks[:len(ctoks)] == ctoks:
+        return {"key": "brand_has_product_word", "brand": brand, "suggest": canonical,
+                "word": brand[len(canonical):].strip(" /\\.,;:-_|&+"), "known": True}
+    if len(btoks) < 2 or any(is_arabic(t) for t in btoks) or not _WORD_RE.match(btoks[-1]):
+        return None
+    vocab = vocab or default_vocabulary()
+    last = btoks[-1]
+    if last in vocab.known or len(last) < MIN_TYPO_LEN:
+        return None
+    fixed = _correction(last, vocab, lexicon_only=True)
+    if not fixed:
+        return None
+    name = spec_name(spec)
+    ntoks = tokens(name, strip_clitics=True)
+    n = len(btoks)
+    start = next((i for i in range(len(ntoks) - n + 1) if ntoks[i:i + n] == btoks), None)
+    if start is None:
+        return None
+    at = start + n - 1
+    text = " ".join(ntoks[:at] + [fixed] + ntoks[at + 1:])
+    if not any(a == at for _axis, _value, (a, _b) in variants_mod.phrase_spans(text, variants_mod.spec_context(spec))):
+        return None
+    written = _as_written(brand, last)
+    kept = brand[:brand.upper().rfind(written.upper())].strip(" /\\.,;:-_|&+")
+    if not kept:
+        return None
+    return {"key": "brand_has_product_word", "brand": brand, "suggest": kept, "word": written,
+            "fix": _styled(fixed, written), "known": False}
+
+
 def sheet_issue_text(issue: Mapping[str, Any]) -> str:
     key = issue.get("key")
     if key == "no_size":
         return "الحجم ناقص بالشيت"
+    if key == "size_unit_typo":
+        return f"الحجم مكتوب {_quote(issue.get('word'))} — غالبًا قصدك {_quote(issue.get('suggest'))}"
+    if key == "no_brand":
+        return "المنتج بلا ماركة بالشيت"
+    if key == "brand_has_product_word":
+        text = (f"عمود الماركة فيه كلمة من اسم المنتج: {_quote(issue.get('brand'))} — الماركة غالبًا "
+                f"{_quote(issue.get('suggest'))}")
+        if issue.get("fix"):
+            text += f"، و{_quote(issue.get('word'))} قصدك {_quote(issue.get('fix'))}"
+        return text
     if key == "no_barcode":
         status = str(issue.get("status") or "missing")
         return "الباركود ناقص بالشيت" if status == "missing" else \
@@ -642,7 +767,8 @@ def sheet_issues(row: Mapping[str, Any], spec=None, mappings=None, vocab: Option
 
     row: the sheet row as identity.build_sku_spec reads it (name, name_ar, brand, brand_ar, barcode, category, size).
     spec: its SkuSpec when the caller has it (else built with mappings). discovered: store spellings of the brand
-    the search found (brand_discovery): such a brand is not 'unknown'.
+    the search found (brand_discovery): such a brand is not 'unknown'. A brand cell that says the product has none
+    is 'no_brand', never 'brand_unknown' (the Run page's sheet card does not list it: the owner wrote it so).
     """
     from .identity import build_sku_spec
 
@@ -652,12 +778,21 @@ def sheet_issues(row: Mapping[str, Any], spec=None, mappings=None, vocab: Option
     gtin_ok = getattr(spec, "gtin_status", "") == "ok"
     if getattr(spec, "size", None) is None:
         out.append({"key": "no_size", "barcode": gtin_ok})
+        unit = size_unit_typo(row, spec)
+        if unit is not None:
+            out.append(unit)
     if not gtin_ok:
         out.append({"key": "no_barcode", "status": getattr(spec, "gtin_status", "") or "missing"})
     brand_raw = str(row.get("brand") or row.get("brand_ar") or "").strip()
-    if getattr(spec, "brand_conf", "") not in ("mapped", "learned") and not (
+    placeholder = getattr(spec, "brand_placeholder", "") if getattr(spec, "brand_conf", "") == "none" else ""
+    if placeholder:
+        out.append({"key": "no_brand", "brand": placeholder})
+    elif getattr(spec, "brand_conf", "") not in ("mapped", "learned") and not (
             tuple(getattr(spec, "discovered_brands", ()) or ()) or tuple(discovered or ())):
         out.append({"key": "brand_unknown", "brand": brand_raw, "empty": not brand_raw})
+    word = brand_product_word(spec, vocab)
+    if word is not None:
+        out.append(word)
     name = str(row.get("name") or row.get("product_name") or "")
     for typo in typo_suggestions(name, vocab, brand=brand_raw, name_ar=str(row.get("name_ar") or ""),
                                  category=str(row.get("category") or "")):
@@ -697,7 +832,10 @@ def duplicate_barcodes(products: Sequence[Mapping[str, Any]]) -> Dict[int, List[
 REASON_LABELS = {
     "typo": "غلطة إملائية بالاسم",
     "brand_unknown": "ماركة غير معروفة",
+    "brand_has_product_word": "كلمة من الاسم بعمود الماركة",
+    "no_brand": "منتج بلا ماركة",
     "no_size": "حجم ناقص بالشيت",
+    "size_unit_typo": "وحدة الحجم غلط",
     "no_barcode": "باركود ناقص بالشيت",
     "unsure": "قارئ الملصق غير متأكد",
     "verifier_mismatch": "قارئ الملصق شاف منتج ثاني",
@@ -713,6 +851,8 @@ REASON_LABELS = {
 REASON_KEYS = tuple(REASON_LABELS)
 # a likely typo explains a name nothing (or only weak or other products' listings) matched; never a label reader's doubt
 _NAME_REASONS = frozenset({"not_found", "all_conflicted", "brand_not_found", "weak_only"})
+# reasons no sheet gap can explain: the search or the label reader was down, nothing downloaded, only social posts
+_OUTSIDE_SHEET = frozenset({"provider_down", "verifier_down", "download_failed", "only_social"})
 _CONFLICT_TEXT = (("size_conflict", "حجم مختلف"), ("pack_conflict", "عدد عبوات مختلف"),
                   ("competitor_brand", "ماركة ثانية"), ("variant_conflict", "نوع مختلف"),
                   ("gtin_mismatch", "باركود مختلف"), ("stock_or_clipart", "صور مخزون"),
@@ -797,6 +937,20 @@ def _fact_and_action(key: str, record, issues: Mapping[str, Mapping[str, Any]], 
             return "خانة الماركة فاضية بالشيت، فما في ماركة نتأكد منها على الصور", "أضف الماركة في الشيت ثم أعد البحث."
         return (f"الماركة {_quote(brand)} مش موجودة في Brands Mapping، وما لقينا متجر بيكتبها",
                 "أضف الماركة في Brands Mapping (مع طريقة كتابتها بالمتاجر) ثم أعد البحث.")
+    if key == "brand_has_product_word":
+        word = issues.get("brand_has_product_word") or {}
+        fix = (f"، و{_quote(word.get('word'))} قصدك {_quote(word.get('fix'))}" if word.get("fix") else "")
+        return (f"عمود الماركة فيه كلمة من اسم المنتج: {_quote(word.get('brand') or brand)}، والماركة غالبًا "
+                f"{_quote(word.get('suggest'))}{fix}، فولا صفحة بتذكر الماركة متل ما هي مكتوبة",
+                "صحّح عمود الماركة بالشيت ثم أعد البحث" + ("، أو اختر من الصور تحت." if n_alive else "."))
+    if key == "no_brand":
+        return ("المنتج بلا ماركة بالشيت، فالبحث بالاسم بس وصعب نلاقي صورته الصحيحة",
+                "إذا إله ماركة اكتبها بعمود الماركة، " + ("أو اختر من الصور تحت، " if n_alive else "")
+                + "أو صوّره وارفع الصورة.")
+    if key == "size_unit_typo":
+        unit = issues.get("size_unit_typo") or {}
+        return (f"الحجم بالشيت مكتوب {_quote(unit.get('word'))}، وهاد طول مش وزن، فما في صورة قدرنا نتأكد إنها نفس "
+                "العبوة", f"صحّح الحجم في الشيت (غالبًا {_quote(unit.get('suggest'))}) ثم أعد البحث، أو اختر من الصور تحت.")
     if key == "no_size":
         what = "حجم" if issues["no_size"].get("barcode") else "حجم ولا باركود"
         unsure = int(verdicts.get("UNSURE") or 0)
@@ -851,12 +1005,16 @@ def choose_reason(engine: str, issues: Mapping[str, Mapping[str, Any]], record: 
     typo = issues.get("typo")
     if typo is not None and not typo.get("known") and engine in _NAME_REASONS:
         return "typo"
+    # no brand to search for or to confirm: whatever the search found, by name only, is unconfirmed
+    if "no_brand" in issues and engine not in _OUTSIDE_SHEET:
+        return "no_brand"
     if "brand_unknown" in issues and (engine in ("not_found", "brand_not_found") or (
             engine == "all_conflicted" and any(str(k).startswith("competitor_brand")
                                                for k in (record.get("reject_counts") or {})))):
-        return "brand_unknown"
+        word = issues.get("brand_has_product_word")
+        return "brand_has_product_word" if word is not None and not word.get("known") else "brand_unknown"
     if engine in ("unsure", "weak_only") and "no_size" in issues:
-        return "no_size"
+        return "size_unit_typo" if "size_unit_typo" in issues else "no_size"
     # weak listings and nothing to tell them apart: neither a page stating the size nor a barcode to match
     if engine == "weak_only" and "no_barcode" in issues and not _size_confirmed(record):
         return "no_barcode"
