@@ -305,6 +305,17 @@ def test_claude_retries_429_and_connection_errors_once(laban):
     assert v.verify(laban, [_fetched(1)]).notices == ["claude_model_not_found"]
 
 
+def test_claude_counts_a_timed_out_request_it_sent_again(laban):
+    # the timed-out request was most likely billed: it counts, with estimated tokens (was calls 1, one usage entry)
+    v, client = _claude([anthropic.APITimeoutError(request=REQ), message([_entry(1)])])
+    result = v.verify(laban, [_fetched(1)])
+    assert result.status == "ok" and len(client.messages.calls) == 2 and result.calls == 2
+    assert [(u["estimated"], u.get("timed_out", False)) for u in result.usage] == [(True, True), (False, False)]
+    v, client = _claude([anthropic.APITimeoutError(request=REQ), anthropic.APITimeoutError(request=REQ)])
+    result = v.verify(laban, [_fetched(1)])
+    assert (result.status, result.calls) == ("unknown", 2) and [u["timed_out"] for u in result.usage] == [True, True]
+
+
 def test_claude_without_key_makes_no_call(laban, monkeypatch):
     monkeypatch.setattr(claude_mod, "_client_for", lambda *a: pytest.fail("no client without a key"))
     v = ClaudeVerifier("claude-sonnet-5-5", breaker=CircuitBreaker())
