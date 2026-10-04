@@ -422,6 +422,28 @@ def test_rejecting_an_approved_image_by_its_source_url_clears_its_cloudinary_lin
     assert db.get_cached_product(sku_key=sku) is None
 
 
+def test_the_rejections_final_sheet_flush_runs_after_the_publish_lock_is_released(db, outbox, monkeypatch):
+    """The reject checks and writes under the publish lock, but the outbox's final flush (Google calls, up to a few
+    seconds) happens after it: another publish of the product does not wait for it."""
+    import google_sheets
+    cli_bridge, env = outbox
+    row = ROWS[0]
+    sku = _queue(db, row, MILK, GTIN, status="completed")
+    link = CLOUD + "x.png"
+    assert db.save_product_resolution(GTIN, MILK["product_name"], MILK["brand"], "https://x/x.jpg", link,
+                                      verification_status="human_approved", approved_by="human", sku_key=sku)
+    env["cells"][row] = link
+    seen = []
+
+    def flush(*a, **k):
+        with db.sku_publish_lock(sku, timeout=0) as state:
+            seen.append(state)
+
+    monkeypatch.setattr(google_sheets, "stop_async_queue", flush)
+    result = cli_bridge.action_reject_image(_reject_params(row, MILK, link, sku))
+    assert result["sheet_cleared"] is True and seen == ["held"]
+
+
 def test_a_rejection_voids_the_approval_stored_under_the_rows_key_before_its_barcode(db, outbox):
     import main
     cli_bridge, env = outbox

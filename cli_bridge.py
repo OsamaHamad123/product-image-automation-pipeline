@@ -1134,12 +1134,13 @@ def _pending_links(rows):
     return {int(row): str(rec.get("value") or "") for row, rec in latest.items()}
 
 
-def _clear_rejected_cells(params, row_number, sku_key, images, tasks=None):
+def _clear_rejected_cells(params, row_number, sku_key, images, tasks=None, flush=True):
     """
     يفرّغ خلية الرابط التي تحمل الصورة المرفوضة (images: رابطها، ورابطا الحل المعتمد إن كان هو المرفوض، مع بادئة
     needs_review: أو بدونها) في صف المنتج وفي صفوفه المكررة (tasks: صفوف هذا المنتج، _product_scope)، كل كتابة بهوية
     صفها (الباركود والاسم والحجم والبراند). ما في الخلية = آخر كتابة رابط معلقة في طابور الكتابة لهذا الصف إن وُجدت
-    (اعتماد صورة أخرى لم يُكتب بعد)، وإلا الخلية الحية. يُستدعى تحت قفل النشر للـ SKU.
+    (اعتماد صورة أخرى لم يُكتب بعد)، وإلا الخلية الحية. يُستدعى تحت قفل النشر للـ SKU؛ flush=False: التفريغ الأخير
+    لطابور الكتابة (اتصالات Google) يتركه للمستدعي بعد تحرير القفل.
     يعيد (فُرّغت خلية واحدة على الأقل، خطأ أو None).
     """
     rows = [{"row_number": row_number, "barcode": _text(params, 'barcode'), "product_name": _text(params, 'product_name'),
@@ -1171,7 +1172,7 @@ def _clear_rejected_cells(params, row_number, sku_key, images, tasks=None):
         error = "Could not update the sheet cell (details in temp/search.log)."
         logger.exception("تعذر تحديث الشيت بعد الرفض")
     finally:
-        if queue_started:
+        if queue_started and flush:
             google_sheets.stop_async_queue()
     return cleared, error
 
@@ -1250,66 +1251,71 @@ def action_reject_image(params):
     alt_keys = sorted({str(t.get("alt_sku_key") or "").strip() for t in tasks} - {"", sku_key})
     phash, page_url = _candidate_phash(row_number, image_url, params, sku_key, identity)
     page_url = page_url or _text(params, 'page_url') or None
-    with local_cache_db.sku_publish_lock(sku_key) as lock_state:
-        if lock_state == "busy":
-            # نشر لنفس المنتج ما زال يكتب: لا يُحكم على الخلية أو الاعتماد قبل أن يُسجل قراره
-            return {'status': 'error', 'error_code': 'busy', 'error': STALE_ERRORS["busy"],
-                    'current': _current_state(sku_key, row_number, product_name)[0]}
-        if not local_cache_db.add_rejected_image(sku_key, image_url, page_url=page_url, phash=phash,
-                                                 reason_code=reason_code):
-            return {'status': 'error', 'error': 'could not record the rejection'}
-        # رفض مرشح آخر لمنتج معتمد بشرياً لا يُلغي الاعتماد ولا يعيد الصف للطابور (وإلا قد ينشر العامل
-        # تلقائياً فوق الرابط المعتمد). يُلغى الاعتماد فقط إذا كان هو الصورة المرفوضة (الرابط أو رابط Cloudinary أو
-        # pHash)، بالمفتاح أو بالمفتاح البديل.
-        approvals = {sku_key: local_cache_db.get_cached_product(sku_key=sku_key)}
-        for key in alt_keys:
-            approvals[key] = local_cache_db.get_cached_product(sku_key=key)
-        approved = approvals[sku_key]
-        targeted = [key for key, found in approvals.items() if _approval_matches(found, image_url, phash)]
-        targets_approval = sku_key in targeted
-        target = approvals[targeted[0]] if targeted else None
-        keep_approval = (bool(approved) and approved.get("verification_status") == "human_approved"
-                         and not targets_approval)
-        stored = local_cache_db.get_curation_candidates(row_number, sku_key=sku_key or None, identity=identity)
-        _record_review("rejected", params, row_number, sku_key, image_url, reason_code=reason_code,
-                       approval=target, identity=identity)
-        # المراجعة تبقى حية (عقد C2): تُستبعد الصورة المرفوضة وحدها، وباقي المرشحات تبقى للمراجع
-        rejected = next((c for c in stored if c.get("image_url") == image_url), None)
-        remaining = [c for c in stored if c.get("image_url") != image_url
-                     and c.get("status") not in ("rejected", "excluded")]
-        shown_status = rejected.get("status") if rejected else _text(params, 'candidate_status')
-        was_pick = bool(targeted) or shown_status == "preselected"
-        if rejected:
-            local_cache_db.exclude_curation_candidate(row_number, image_url, sku_key=sku_key, identity=identity)
-        local_cache_db.save_feedback(str(uuid.uuid4()), image_url.split("/")[-1].split("?")[0], row_number,
-                                     product_name, brand, image_url, [reason_code])
+    try:
+        with local_cache_db.sku_publish_lock(sku_key) as lock_state:
+            if lock_state == "busy":
+                # نشر لنفس المنتج ما زال يكتب: لا يُحكم على الخلية أو الاعتماد قبل أن يُسجل قراره
+                return {'status': 'error', 'error_code': 'busy', 'error': STALE_ERRORS["busy"],
+                        'current': _current_state(sku_key, row_number, product_name)[0]}
+            if not local_cache_db.add_rejected_image(sku_key, image_url, page_url=page_url, phash=phash,
+                                                     reason_code=reason_code):
+                return {'status': 'error', 'error': 'could not record the rejection'}
+            # رفض مرشح آخر لمنتج معتمد بشرياً لا يُلغي الاعتماد ولا يعيد الصف للطابور (وإلا قد ينشر العامل
+            # تلقائياً فوق الرابط المعتمد). يُلغى الاعتماد فقط إذا كان هو الصورة المرفوضة (الرابط أو رابط Cloudinary أو
+            # pHash)، بالمفتاح أو بالمفتاح البديل.
+            approvals = {sku_key: local_cache_db.get_cached_product(sku_key=sku_key)}
+            for key in alt_keys:
+                approvals[key] = local_cache_db.get_cached_product(sku_key=key)
+            approved = approvals[sku_key]
+            targeted = [key for key, found in approvals.items() if _approval_matches(found, image_url, phash)]
+            targets_approval = sku_key in targeted
+            target = approvals[targeted[0]] if targeted else None
+            keep_approval = (bool(approved) and approved.get("verification_status") == "human_approved"
+                             and not targets_approval)
+            stored = local_cache_db.get_curation_candidates(row_number, sku_key=sku_key or None, identity=identity)
+            _record_review("rejected", params, row_number, sku_key, image_url, reason_code=reason_code,
+                           approval=target, identity=identity)
+            # المراجعة تبقى حية (عقد C2): تُستبعد الصورة المرفوضة وحدها، وباقي المرشحات تبقى للمراجع
+            rejected = next((c for c in stored if c.get("image_url") == image_url), None)
+            remaining = [c for c in stored if c.get("image_url") != image_url
+                         and c.get("status") not in ("rejected", "excluded")]
+            shown_status = rejected.get("status") if rejected else _text(params, 'candidate_status')
+            was_pick = bool(targeted) or shown_status == "preselected"
+            if rejected:
+                local_cache_db.exclude_curation_candidate(row_number, image_url, sku_key=sku_key, identity=identity)
+            local_cache_db.save_feedback(str(uuid.uuid4()), image_url.split("/")[-1].split("?")[0], row_number,
+                                         product_name, brand, image_url, [reason_code])
 
-        images = {_bare_link(image_url)}
-        for found in (approvals[key] for key in targeted):
-            images |= {u for u in (found.get("cloudinary_url"), found.get("original_url")) if u}
-        sheet_cleared, sheet_error = _clear_rejected_cells(params, row_number, sku_key, images, tasks)
-        if sheet_cleared:
-            # الخلية (أو كتابتها المعلقة) كانت تحمل الصورة المرفوضة: هي المنشورة أو المقترحة. اعتماد صورة أخرى يبقى
-            # (الإدراج التالي يعيد كتابة رابطه)؛ لا يُلغى إلا الاعتماد الذي هو الصورة المرفوضة
-            was_pick = True
-        superseded = 0
-        for key in targeted:
-            count = local_cache_db.supersede_resolution(key, barcode=(barcode or None) if key == sku_key else None)
-            superseded += count or 0
-            if key != sku_key:
-                local_cache_db.add_rejected_image(key, image_url, page_url=page_url, phash=phash,
-                                                  reason_code=reason_code)
+            images = {_bare_link(image_url)}
+            for found in (approvals[key] for key in targeted):
+                images |= {u for u in (found.get("cloudinary_url"), found.get("original_url")) if u}
+            sheet_cleared, sheet_error = _clear_rejected_cells(params, row_number, sku_key, images, tasks,
+                                                                     flush=False)
+            if sheet_cleared:
+                # الخلية (أو كتابتها المعلقة) كانت تحمل الصورة المرفوضة: هي المنشورة أو المقترحة. اعتماد صورة أخرى يبقى
+                # (الإدراج التالي يعيد كتابة رابطه)؛ لا يُلغى إلا الاعتماد الذي هو الصورة المرفوضة
+                was_pick = True
+            superseded = 0
+            for key in targeted:
+                count = local_cache_db.supersede_resolution(key, barcode=(barcode or None) if key == sku_key else None)
+                superseded += count or 0
+                if key != sku_key:
+                    local_cache_db.add_rejected_image(key, image_url, page_url=page_url, phash=phash,
+                                                      reason_code=reason_code)
 
-        # حالة الطابور: الاعتماد البشري الباقي لا يُمس. رفض الاختيار (المسبق أو المعتمد أو المنشور) -> بانتظار
-        # المراجعة إن بقي مرشح مؤهل، وإلا يعود الصف للطابور، وكذلك رفض آخر مرشح مؤهل محفوظ (رُفض الاختيار قبله).
-        # رفض بديل وغيره باقٍ لا يغيّرها. تُكتب تحت القفل: اعتماد ينتظر القفل يأتي بعدها فلا تمحوه. مع إعادة البحث
-        # تُكتب بعده (مرشحات جديدة -> بانتظار المراجعة)، فلا يسحب العامل الصف أثناءه.
-        queue_status = None
-        if not keep_approval and (was_pick or (rejected is not None and not remaining)):
-            queue_status = "ready_for_review" if remaining else "pending"
-        research = _as_bool(params.get('research', False))
-        if not research:
-            _set_review_queue_status(row_number, sku_key, product_name, queue_status, reason_code, None, rows)
+            # حالة الطابور: الاعتماد البشري الباقي لا يُمس. رفض الاختيار (المسبق أو المعتمد أو المنشور) -> بانتظار
+            # المراجعة إن بقي مرشح مؤهل، وإلا يعود الصف للطابور، وكذلك رفض آخر مرشح مؤهل محفوظ (رُفض الاختيار قبله).
+            # رفض بديل وغيره باقٍ لا يغيّرها. تُكتب تحت القفل: اعتماد ينتظر القفل يأتي بعدها فلا تمحوه. مع إعادة البحث
+            # تُكتب بعده (مرشحات جديدة -> بانتظار المراجعة)، فلا يسحب العامل الصف أثناءه.
+            queue_status = None
+            if not keep_approval and (was_pick or (rejected is not None and not remaining)):
+                queue_status = "ready_for_review" if remaining else "pending"
+            research = _as_bool(params.get('research', False))
+            if not research:
+                _set_review_queue_status(row_number, sku_key, product_name, queue_status, reason_code, None, rows)
+    finally:
+        # التفريغ الأخير لطابور الكتابة بعد تحرير قفل النشر: نشر آخر لنفس المنتج لا ينتظر اتصالات Google
+        google_sheets.stop_async_queue()
 
     response = None
     candidates_saved = 0
