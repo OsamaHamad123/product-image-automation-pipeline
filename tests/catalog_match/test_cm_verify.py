@@ -184,7 +184,9 @@ def test_code_decides(monkeypatch, laban):
         _entry(1, size_text="1L", overall="MATCH"),
         _entry(2, view="lifestyle"),
         _entry(3),
-        _entry(4, variant_match="no"),
+        # a variant 'no' its own printed text supports (a flavour the SKU does not state; a bare 'Laban Up' with a
+        # 'no' would be verify.overruled_flags' case: UNSURE)
+        _entry(4, variant_text="Laban Up Strawberry", variant_match="no"),
     ]
     monkeypatch.setattr(verify_mod.requests, "post", Poster([_reply(entries, best=1)]))
     images = [_fetched(seed=i) for i in range(4)]
