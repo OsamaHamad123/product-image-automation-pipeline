@@ -364,7 +364,7 @@ def _folder_and_tags(metadata):
 def publish_image(image_url, name, brand, row_number, worksheet, link_column_index, *, barcode="",
                   candidate_sha256=None, category_override=None, force_review=False, key_size=None,
                   key_brand=None, profile=None, sku_key=None, before_write=None, duplicates="warn",
-                  also_rows=None, after_write=None, unclean="review", publish_anyway=False):
+                  also_rows=None, after_write=None, unclean="review", publish_anyway=False, page_url=None):
     """
     معالجة الصورة المعتمدة إلى لوحة النشر النهائية ورفعها وكتابة رابطها في الشيت.
     key_size/key_brand: خلايا الحجم والبراند في الشيت لهذا المنتج، تُضاف إلى هوية الصف المتحقق منها
@@ -385,6 +385,7 @@ def publish_image(image_url, name, brand, row_number, worksheet, link_column_ind
     المالكون في duplicate_of، وتعذر التحقق يُعامل كتكرار في 'block' و 'review'.
     phash و color_signature: بصمتا اللوحة النهائية (pHash وبصمة الألوان، تُخزنان مع الحل المعتمد).
     quality_flags: علامات بوابة القص (image_processor) و quality_notes: ملاحظاتها غير المانعة، تعودان دائماً.
+    page_url: صفحة المرشح إن عُرفت؛ تُمرر للمعالجة (إن قبلتها) فيُعاد التنزيل بنفس Referer الجلب الأول.
     لوحة لم تُعزل خلفيتها (isolated=False): unclean='review' (العامل) تُكتب ببادئة needs_review:؛ unclean='refuse'
     (اعتماد المراجع ورفعه) لا يُرفع ولا يُكتب شيء والحالة 'quality_refused' (publish_anyway_allowed: علاماتها كلها
     للعرض فقط، PRESENTATION_FLAGS)، فلا يُسجل اعتماد بشري ورابط الشيت needs_review:. publish_anyway=True (تأكيد
@@ -395,17 +396,19 @@ def publish_image(image_url, name, brand, row_number, worksheet, link_column_ind
     """
     profile = profile or processing_profile.current()
     w, h = profile.target
+    extra = {"page_url": page_url} if page_url and _accepts(image_processor.process_product_image_result,
+                                                          "page_url") else {}
     result = image_processor.process_product_image_result(
         image_url, name, brand, target_width=w, target_height=h,
-        bg_method=profile.bg_method, candidate_sha256=candidate_sha256, enhance=profile.enhance,
+        bg_method=profile.bg_method, candidate_sha256=candidate_sha256, enhance=profile.enhance, **extra,
     )
     if not result.path:
         return {"status": "failed", "error": result.error or "processing_failed", "isolated": False,
                 "provider": result.provider, "profile": profile.as_dict()}
 
     flags = [str(f) for f in (getattr(result, "quality_flags", None) or [])]
-    # ملاحظات البوابة غير المانعة (إن أضافتها حزمة الصورة) تُعاد كما هي
-    notes = [str(n) for n in (getattr(result, "quality_notes", None) or getattr(result, "notes", None) or [])]
+    # ملاحظات البوابة غير المانعة (image_processor.NON_BLOCKING_NOTES، مثل upscaled) تُعاد كما هي ولا تمنع النشر
+    notes = [str(n) for n in (getattr(result, "quality_notes", None) or [])]
     unisolated = not result.isolated
     anyway_allowed = unisolated and bool(flags) and set(flags) <= PRESENTATION_FLAGS
     anyway = bool(publish_anyway) and anyway_allowed
@@ -494,7 +497,18 @@ def publish_image(image_url, name, brand, row_number, worksheet, link_column_ind
 
 # علامات بوابة القص التي تخص العرض فقط (الخلفية معزولة): المراجع يستطيع نشر اللوحة رغمها بعد أن يراها
 # (publish_anyway). edge_clipped و opaque_backdrop وأي علامة أخرى، وعزل فشل بلا علامات، لا يُنشر نظيفاً أبداً.
-PRESENTATION_FLAGS = frozenset({"upscaled", "too_small_on_canvas", "second_object", "opaque_fill", "alpha_haze"})
+PRESENTATION_FLAGS = frozenset({"upscaled", "too_small_on_canvas", "second_object", "opaque_fill", "alpha_haze",
+                                "kept_shadow"})
+
+
+def _accepts(func, name):
+    """هل تقبل الدالة الوسيط name (أو **kwargs)؟ لتمرير وسيط جديد لحزمة لم تُدمج بعد دون خطأ."""
+    import inspect
+    try:
+        params = inspect.signature(func).parameters
+    except (TypeError, ValueError):
+        return False
+    return name in params or any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values())
 
 
 def _write_metadata(worksheet, row_number, metadata, identity):
@@ -573,7 +587,7 @@ def auto_approve_product(task, best_image, worksheet, link_column_index, sku_key
     try:
         res = publish_image(
             best_image["url"], name, brand, task["row_number"], worksheet, link_column_index,
-            barcode=barcode, candidate_sha256=best_image.get("content_sha256"),
+            barcode=barcode, candidate_sha256=best_image.get("content_sha256"), page_url=best_image.get("page_url"),
             key_size=task_payload(task).get("size"), key_brand=brand, profile=processing_profile.current(),
             sku_key=sku_key, before_write=still_ours, duplicates="block", after_write=record,
         )

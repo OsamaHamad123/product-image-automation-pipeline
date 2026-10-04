@@ -600,15 +600,17 @@ def worker(db, monkeypatch, tmp_path):
     import main
     from PIL import Image
 
-    env = {"sheet": [], "during": None}
+    env = {"sheet": [], "during": None, "page_urls": []}
 
     def fake_search(query, name, brand, trace=None, **kw):
         trace["outcome"] = {"decision": "AUTO_PUBLISH"}
         return {"url": PICK, "decision": "AUTO_PUBLISH", "source": "serper", "phash": PICK_PHASH,
+                "page_url": "https://shop/p/milk",
                 "candidates": [{"url": PICK, "status": "preselected", "phash": PICK_PHASH},
                                {"url": ALT_PICK, "status": "eligible"}]}
 
     def processing(*a, **k):
+        env["page_urls"].append(k.get("page_url"))
         if env["during"]:
             env["during"]()
         out = tmp_path / f"canvas_{os.urandom(3).hex()}.png"
@@ -865,3 +867,55 @@ def test_an_upload_whose_background_removal_failed_is_never_recorded_as_approved
         "failed", "background_failed", False)
     assert env["sheet"] == [] and db.get_cached_product(sku_key=sku) is None
     assert _status(db, row) == "ready_for_review"
+
+
+# ---------------------------------------------------------------------------
+# Image-gate hand-offs: the candidate's page URL reaches the re-download, kept_shadow is presentation-only
+# ---------------------------------------------------------------------------
+
+def test_the_candidates_page_url_reaches_the_processing_when_it_accepts_one(db, bridge, monkeypatch, tmp_path):
+    import image_processor
+    from PIL import Image
+    cli_bridge, env = bridge
+    row = ROWS[0]
+    sku = _queue(db, row, MILK, GTIN)
+    assert db.save_curation_candidates(row, MILK["product_name"], MILK["brand"], [
+        {"url": "https://x/milk.jpg", "status": "preselected", "page_url": "https://shop/p/milk"}], sku_key=sku)
+    seen = []
+
+    def new_processing(image_url, product_name, brand, target_width=0, target_height=0, bg_method=None,
+                       candidate_sha256=None, enhance=False, page_url=None):
+        seen.append(page_url)
+        out = tmp_path / f"canvas_{os.urandom(3).hex()}.png"
+        Image.new("RGB", (800, 800), "white").save(out)
+        return image_processor.ProcessResult(str(out), True, "photoroom", None, 800, 800)
+
+    def old_processing(image_url, product_name, brand, target_width=0, target_height=0, bg_method=None,
+                       candidate_sha256=None, enhance=False):
+        return new_processing(image_url, product_name, brand)
+
+    monkeypatch.setattr(image_processor, "process_product_image_result", new_processing)
+    params = _approve_params(row, MILK, "https://x/milk.jpg", sku, GTIN)
+    assert cli_bridge.action_select_image(dict(params))["status"] == "success"
+    assert seen == ["https://shop/p/milk"]                      # from the stored candidate
+    # a processing that does not take page_url yet (before the image package's change) still works
+    monkeypatch.setattr(image_processor, "process_product_image_result", old_processing)
+    assert cli_bridge.action_select_image(dict(params, replace=True))["status"] == "success"
+    assert seen == ["https://shop/p/milk", None]
+
+
+def test_the_worker_passes_its_picks_page_url(db, worker):
+    run, env, sku = worker
+    assert run() == "success"
+    assert env["page_urls"] == ["https://shop/p/milk"]
+
+
+def test_a_kept_shadow_may_be_published_anyway_after_the_confirmation(db, bridge, gate):
+    cli_bridge, env = bridge
+    row = ROWS[0]
+    sku = _queue(db, row, MILK, GTIN)
+    gate["flags"] = ["kept_shadow"]
+    params = _approve_params(row, MILK, "https://x/bottle.jpg", sku, GTIN)
+    result = cli_bridge.action_select_image(dict(params))
+    assert (result["error_code"], result["publish_anyway_allowed"]) == ("quality_flags", True)
+    assert cli_bridge.action_select_image(dict(params, publish_anyway=True))["status"] == "success"

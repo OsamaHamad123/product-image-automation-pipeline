@@ -646,11 +646,20 @@
         alpha_haze: 'هالة أو ضباب حول حواف المنتج',
         second_object: 'ظهر جسم آخر بجانب المنتج',
         upscaled: 'الصورة المصدر صغيرة فكُبّرت',
-        too_small_on_canvas: 'المنتج صغير على اللوحة'
+        too_small_on_canvas: 'المنتج صغير على اللوحة',
+        kept_shadow: 'بقي ظل ظاهر مع المنتج'
+    };
+    // ملاحظات الفحص غير المانعة (quality_notes): تُعرض ملاحظةً لا تحذيراً، والصورة نُشرت نظيفة
+    const QUALITY_NOTE_LABELS = {
+        upscaled: 'الصورة المصدر صغيرة فكُبّرت لتملأ اللوحة'
     };
 
     function qualityFlagText(code) {
         return QUALITY_FLAG_LABELS[String(code || '')] || 'ملاحظة أخرى من فحص القص';
+    }
+
+    function qualityNoteText(code) {
+        return QUALITY_NOTE_LABELS[String(code || '')] || 'ملاحظة من فحص القص';
     }
 
     // اعتماد / رفع لم يُنشر لأن القص لم يجتز الفحص (error_code quality_flags أو background_failed): العلامات بالعربي، و
@@ -687,7 +696,8 @@
             duplicate: list.includes('duplicate_image') || owners.length > 0,
             duplicateOf: names,
             flags: flags,
-            flagTexts: Array.from(new Set(flags.concat(notes).map(qualityFlagText)))
+            flagTexts: Array.from(new Set(flags.map(qualityFlagText))),
+            noteTexts: Array.from(new Set(notes.map(qualityNoteText)))
         };
     }
 
@@ -983,7 +993,7 @@
         productIdentity, sameProduct, itemKey, failureKey, reviewedCandidateView,
         searchBody, selectBody, rejectBody, uploadFields,
         matchQueue, classify, hasFinalImage, bgFailedLink, shownApprovedUrl, expectedState, staleInfo, queueText,
-        sheetNote, expectedFromCurrent, qualityFlagText, qualityInfo, approvalNotes, rejectionOutcome,
+        sheetNote, expectedFromCurrent, qualityFlagText, qualityNoteText, qualityInfo, approvalNotes, rejectionOutcome,
         confidenceRank, compareWaiting, sortWaiting, buildItems, countBuckets, matchesQuery, filterItems,
         sizeText, categoryPath, factsFor, checksFor, cautionsFor
     });

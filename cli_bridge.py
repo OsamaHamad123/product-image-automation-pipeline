@@ -404,6 +404,21 @@ def _candidate_sha(params, row_number, sku_key, image_url, identity=None):
     return None
 
 
+def _candidate_page(params, row_number, sku_key, image_url, identity=None):
+    """صفحة المرشح الذي يُعتمد (page_url المرسل، وإلا من مرشحات المنتج المحفوظة لنفس الرابط)، أو None."""
+    sent = _text(params, 'page_url')
+    if sent:
+        return sent
+    try:
+        for c in local_cache_db.get_curation_candidates(row_number, sku_key=sku_key or None, identity=identity):
+            if c.get("image_url") == image_url and c.get("page_url"):
+                return c["page_url"]
+    except Exception:
+        # تحسين للتنزيل فقط (Referer): خطؤه لا يمنع الاعتماد
+        logger.exception("تعذر قراءة صفحة المرشح للصف %s", row_number)
+    return None
+
+
 def _page_domain(candidate, params):
     """نطاق الصفحة التي جاءت منها الصورة: من أدلة المرشح أو مصدره المحفوظ، وإلا من page_url المرسل."""
     for value in ((candidate.get("evidence") or {}).get("page_domain"), candidate.get("source_domain")):
@@ -942,6 +957,7 @@ def action_select_image(params):
         res = pipeline.publish_image(
             image_url, product_name, brand, row_number, worksheet, link_column_index,
             barcode=barcode, candidate_sha256=_candidate_sha(params, row_number, sku_key, image_url, identity),
+            page_url=_candidate_page(params, row_number, sku_key, image_url, identity),
             category_override={k: _text(params, k) for k in ('category_l1_en', 'category_l2_en', 'category_l3_en')},
             key_size=_text(params, 'size') or None, key_brand=brand or None, sku_key=sku_key,
             also_rows=_other_rows(sku_key, row_number, tasks),

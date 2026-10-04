@@ -856,3 +856,31 @@ await flush();
 out.second = requests('/api/upload_manual_image')[1].body.publish_anyway;
 """, tmp_path, fixture([B, final], rows=ready_rows([B])))
     assert out["first"] is None and out["second"] == "1"
+
+
+@NEEDS_NODE
+def test_a_kept_shadow_is_named_and_an_upscaled_note_is_a_note_not_a_warning(tmp_path):
+    out = page(r"""
+openRow(9);
+press('Enter');
+await flush();
+answer(requests('/api/select_image')[0], { status: 'failed', error_code: 'quality_flags', quality_flags: ['kept_shadow'],
+                                           publish_anyway_allowed: true }, 500);
+await flush();
+out.panel = jobsText();
+out.buttons = document.querySelectorAll('#rvJobs button').map(b => b.textContent).filter(t => t);
+openRow(8);
+press('Enter');
+await flush();
+answer(requests('/api/select_image')[1], { status: 'success', image_link: 'https://res.cloudinary.com/demo/l.png',
+                                           isolated: true, sheet: 'written', quality_notes: ['upscaled'] });
+await flush();
+out.toasts = toasts.map(t => [t.variant, t.text]);
+openRow(8);
+out.text = wsText();
+""", tmp_path, fixture([B, OTHER]))
+    assert "بقي ظل ظاهر مع المنتج" in out["panel"] and "kept_shadow" not in out["panel"]
+    assert "انشرها رغم ذلك…" in out["buttons"]
+    assert "ملاحظة من فحص القص:" in out["text"] and "الصورة المصدر صغيرة فكُبّرت لتملأ اللوحة" in out["text"]
+    assert "الخلفية لم تُعزل" not in out["text"]
+    assert not [t for v, t in out["toasts"] if "كُبّرت" in t]     # a note is not a warning toast

@@ -1073,13 +1073,16 @@
             // C3: ما حدث في الشيت كما قاله الخادم، بلا ادعاء
             const sheet = R.sheetNote(done.sheet);
             body.appendChild(alertBox(sheet.tone, 'تم الاعتماد.', sheet.text ? `رُفعت الصورة ${sheet.text}` : 'رُفعت الصورة.'));
-            const notes = done.notes || { flagTexts: [], duplicate: false, duplicateOf: [], flags: [] };
+            const notes = done.notes || { flagTexts: [], noteTexts: [], duplicate: false, duplicateOf: [], flags: [] };
             if (done.warning) {
                 const why = notes.flagTexts.length ? ` فحص القص: ${notes.flagTexts.join('، ')}.` : '';
                 const box = alertBox('warning', 'الخلفية لم تُعزل:', (sheet.state === 'written'
                     ? 'كُتب الرابط في الشيت بعلامة «بحاجة مراجعة».' : 'الصورة بحاجة مراجعة: تجدها في رقاقة «الخلفية لم تُعزل».') + why);
                 if (notes.flags.length) box.setAttribute('title', notes.flags.join(' · '));
                 body.appendChild(box);
+            }
+            if (notes.noteTexts && notes.noteTexts.length) {
+                body.appendChild(alertBox('info', 'ملاحظة من فحص القص:', `${notes.noteTexts.join('، ')}.`));
             }
             if (notes.duplicate) {
                 const who = notes.duplicateOf.length ? `: ${notes.duplicateOf.map(n => `«${n}»`).join('، ')}` : '';
