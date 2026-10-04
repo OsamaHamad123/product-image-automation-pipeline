@@ -360,6 +360,116 @@ class RunController extends Controller
         ])->deleteFileAfterSend(true);
     }
 
+    // ------------------------------------------------------------------
+    // «جودة بيانات الشيت»: what the sheet rows lack (cli_bridge get_products: sheet_issues, catalog_match.explain)
+    // ------------------------------------------------------------------
+
+    /** The card's groups, in the order the owner fixes them, with their Arabic names. */
+    public const QUALITY_GROUPS = [
+        'no_size' => 'حجم ناقص',
+        'no_barcode' => 'باركود ناقص أو مش صالح',
+        'brand_unknown' => 'ماركة مش موجودة في Brands Mapping',
+        'typo' => 'غلطة إملائية محتملة بالاسم',
+        'duplicate_barcode' => 'باركود مكرر لمنتجات مختلفة',
+    ];
+
+    /** Rows listed per group (the count is always the full number). */
+    public const QUALITY_ROWS = 200;
+
+    /**
+     * GET /api/run/sheet-quality: from the sheet rows already cached (never a Google read on page load); refresh=1
+     * reads them again through the bridge (its own products cache, else the sheet). not_loaded: no cached rows yet;
+     * stale: rows cached by a version that did not check them.
+     */
+    public function sheetQuality(Request $request)
+    {
+        $error = null;
+        $rows = $request->boolean('refresh') ? ProductController::sheetRows(true, $error) : self::cachedSheetRows();
+        if ($rows === null) {
+            return response()->json($request->boolean('refresh')
+                ? ['status' => 'error', 'message' => 'ما قدرنا نقرأ الشيت هلق. جرّب بعد شوي.']
+                : ['status' => 'not_loaded'], $request->boolean('refresh') ? 503 : 200)->header('Cache-Control', 'no-store');
+        }
+        return response()->json(self::sheetQualitySummary($rows))->header('Cache-Control', 'no-store');
+    }
+
+    /**
+     * The sheet rows ProductController::sheetRows cached, while products_cache.json (python's own cache of the sheet,
+     * deleted after every sheet write) is still the file they were read from; null otherwise. Never calls the bridge
+     * or Google: the same check sheetRows makes before serving its cache.
+     */
+    public static function cachedSheetRows(): ?array
+    {
+        $path = base_path('../products_cache.json');
+        clearstatcache(true, $path);
+        if (!is_file($path)) {
+            return null;
+        }
+        $cached = Cache::get(ProductController::SHEET_ROWS_CACHE_KEY);
+        $stamp = filemtime($path) . ':' . filesize($path);
+        return is_array($cached) && ($cached['stamp'] ?? null) === $stamp && is_array($cached['rows'] ?? null)
+            ? $cached['rows'] : null;
+    }
+
+    /**
+     * {status, total, checked, groups: [{key, label, count, rows: [{row, name, text, href}], brands?}]} from the
+     * sheet rows' sheet_issues; status 'stale' when no row was checked (rows cached before this version).
+     */
+    public static function sheetQualitySummary(array $sheet, int $limit = self::QUALITY_ROWS): array
+    {
+        $groups = [];
+        foreach (self::QUALITY_GROUPS as $key => $label) {
+            $groups[$key] = ['key' => $key, 'label' => $label, 'count' => 0, 'rows' => []];
+        }
+        $brands = [];
+        $checked = 0;
+        foreach ($sheet as $prod) {
+            if (!is_array($prod) || !is_array($prod['sheet_issues'] ?? null)) {
+                continue;
+            }
+            $checked++;
+            $row = (int) ($prod['row_number'] ?? 0);
+            $seen = [];
+            foreach ($prod['sheet_issues'] as $issue) {
+                $key = is_array($issue) ? (string) ($issue['key'] ?? '') : '';
+                if (!isset($groups[$key])) {
+                    continue;
+                }
+                if ($key === 'brand_unknown' && empty($issue['empty'])) {
+                    $brand = trim((string) ($issue['brand'] ?? ''));
+                    $brands[$brand] = ($brands[$brand] ?? 0) + 1;
+                }
+                $text = mb_substr(trim((string) ($issue['text'] ?? '')), 0, 300);
+                if (isset($seen[$key])) {
+                    // one line per row and group: a second typo joins the first
+                    $i = $seen[$key];
+                    if ($i !== null && $text !== '') {
+                        $groups[$key]['rows'][$i]['text'] .= '، ' . $text;
+                    }
+                    continue;
+                }
+                $groups[$key]['count']++;
+                $seen[$key] = null;
+                if (count($groups[$key]['rows']) < $limit) {
+                    $groups[$key]['rows'][] = ['row' => $row, 'name' => (string) ($prod['product_name'] ?? ''),
+                                               'text' => $text, 'href' => '/catalog?row=' . $row];
+                    $seen[$key] = count($groups[$key]['rows']) - 1;
+                }
+            }
+        }
+        if ($brands) {
+            arsort($brands);
+            $groups['brand_unknown']['brands'] = array_map(fn ($b, $n) => ['brand' => $b, 'count' => $n],
+                array_keys($brands), array_values($brands));
+        }
+        return [
+            'status' => $checked ? 'success' : 'stale',
+            'total' => count($sheet),
+            'checked' => $checked,
+            'groups' => array_values($groups),
+        ];
+    }
+
     /** Cost of one search over the last 7 days (ops_health), or null with too little history. */
     public static function costPerProduct(?array $opsHealth): ?float
     {

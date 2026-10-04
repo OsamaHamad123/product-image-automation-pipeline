@@ -68,7 +68,8 @@ Route::get('/api/view-nightly-log', [\App\Http\Controllers\HealthController::cla
 Route::get('/api/overview', [OverviewController::class, 'data']);
 Route::get('/api/run/live', [RunController::class, 'live']);
 Route::get('/api/run/plan', [RunController::class, 'plan']);
-// «تصدير تقرير للتحليل»: ملف JSON واحد لتشغيل، بلا بحث وبلا تكلفة
+// «تصدير تقرير للتحليل» (ملف JSON واحد لتشغيل، بلا بحث وبلا تكلفة) و«جودة بيانات الشيت» (من كاش صفوف الشيت)
 Route::get('/api/run/export', [RunController::class, 'export']);
+Route::get('/api/run/sheet-quality', [RunController::class, 'sheetQuality']);
 
 Route::view('/ui-kit', 'dashboard.ui_kit')->name('dashboard.ui_kit'); // مرجع مكوّنات هوية لقطة

@@ -155,6 +155,7 @@ def action_get_products(params):
         except Exception as e:
             logger.warning("تعذر بناء فهرس البراندات: %s", e)
     from catalog_match.identity import build_sku_spec
+    quality = _sheet_quality_inputs(products)
     for prod in products:
         try:
             row = pipeline.sku_row(
@@ -165,10 +166,44 @@ def action_get_products(params):
             spec = build_sku_spec(row, brand_mappings)
             prod["sku_key"] = spec.sku_key
             prod["sheet_states"] = _sheet_states(spec)
+            prod["sheet_issues"] = _sheet_issues(row, spec, quality, prod.get("row_number"))
         except Exception as e:
             logger.warning("تعذر حساب sku_key للصف %s: %s", prod.get("row_number"), e)
         prod["has_error"], prod["error_message"] = _row_failure(failures, prod)
     return {'status': 'success', 'products': products}
+
+
+def _sheet_quality_inputs(products):
+    """ما يحتاجه فحص جودة بيانات الشيت مرة واحدة لكل الصفوف: كلمات أسماء الشيت (لتمييز غلطة إملائية من كلمة تتكرر)
+    والصفوف التي يتكرر باركودها لمنتج آخر. لا قراءة إضافية للشيت."""
+    try:
+        from catalog_match import explain
+        return {"vocab": explain.Vocabulary.from_names([p.get("product_name") or "" for p in products]),
+                "duplicates": explain.duplicate_barcodes(products)}
+    except Exception as e:
+        logger.warning("تعذر تجهيز فحص جودة بيانات الشيت: %s", e)
+        return None
+
+
+def _sheet_issues(row, spec, quality, row_number):
+    """
+    ما ينقص صف الشيت لاختيار واثق (catalog_match.explain.sheet_issues): حجم، باركود صالح، ماركة في Brands Mapping،
+    غلطة إملائية محتملة، وباركود مكتوب لمنتج آخر. لوحة «جودة بيانات الشيت» في صفحة التشغيل تقرؤها من كاش المنتجات.
+    """
+    if quality is None:
+        return None
+    try:
+        from catalog_match import explain
+        issues = explain.sheet_issues(row, spec=spec, vocab=quality["vocab"])
+        others = quality["duplicates"].get(int(row_number or 0))
+        if others:
+            issue = {"key": "duplicate_barcode", "rows": others}
+            issue["text"] = explain.sheet_issue_text(issue)
+            issues.append(issue)
+        return issues
+    except Exception as e:
+        logger.warning("تعذر فحص جودة بيانات الصف %s: %s", row_number, e)
+        return None
 
 
 def _sheet_states(spec):

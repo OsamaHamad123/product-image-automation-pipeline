@@ -272,6 +272,41 @@
         };
     }
 
+    // «جودة بيانات الشيت» (GET /api/run/sheet-quality): view {state, lead, groups: [{key, label, count, rows, brands}]}.
+    // state: loading | ready | clean | not_loaded | stale | error. Only groups with rows are listed.
+    function describeQuality(res) {
+        var data = res && res.data;
+        if (!res || !data) return { state: 'error', lead: 'ما قدرنا نقرأ جودة بيانات الشيت هلق.', groups: [] };
+        if (data.status === 'not_loaded') {
+            return { state: 'not_loaded', lead: 'ما قرينا صفوف الشيت لسا بهالجلسة. اضغط «اقرأ الشيت من جديد».', groups: [] };
+        }
+        if (data.status === 'stale') {
+            return { state: 'stale', lead: 'صفوف الشيت المحفوظة انقرت قبل فحص الجودة. اضغط «اقرأ الشيت من جديد» ليظهر الفحص.', groups: [] };
+        }
+        if (!res.ok || data.status !== 'success' || !Array.isArray(data.groups)) {
+            return { state: 'error', lead: arabic(data.message) ? data.message : 'ما قدرنا نقرأ جودة بيانات الشيت هلق.', groups: [] };
+        }
+        var groups = data.groups.filter(function (g) { return g && C.num(g.count) > 0; }).map(function (g) {
+            return {
+                key: String(g.key || ''), label: String(g.label || ''), count: C.num(g.count),
+                rows: (Array.isArray(g.rows) ? g.rows : []).map(function (r) {
+                    var row = C.num(r.row) || 0;
+                    return { row: row, name: String(r.name || ''), text: String(r.text || ''), href: '/catalog?row=' + row };
+                }),
+                brands: (Array.isArray(g.brands) ? g.brands : []).map(function (b) {
+                    return { brand: String(b.brand || ''), count: C.num(b.count) || 0 };
+                })
+            };
+        });
+        var total = C.num(data.total) || 0;
+        if (!groups.length) {
+            return { state: 'clean', groups: [],
+                     lead: 'كل صفوف الشيت (' + C.countText(total, 'منتج', 'منتجين', 'منتجات') + ') فيها حجم وباركود وماركة معروفة، وما لقينا غلطة إملائية.' };
+        }
+        return { state: 'ready', groups: groups,
+                 lead: 'هالصفوف بتمنع اختيار واثق أو بتخلي البحث يغلط. صلّحها بالشيت (أو بـ Brands Mapping) وأعد البحث عنها.' };
+    }
+
     // «تصدير تقرير للتحليل»: الرابط حسب النطاق، واسم الملف من رد الخادم (Content-Disposition)
     function exportQuery(scope) {
         return '/api/run/export?scope=' + (scope === 'review' ? 'review' : 'latest');
@@ -668,6 +703,54 @@
             }
         }
 
+        function renderQuality(view) {
+            var card = $('quality');
+            card.setAttribute('data-state', view.state);
+            C.setText($('quality-lead'), view.lead || '');
+            var box = $('quality-groups');
+            C.clear(box);
+            view.groups.forEach(function (g) {
+                var group = C.el(doc, 'details', 'lq-run-quality__group');
+                group.setAttribute('data-issue', g.key);
+                var summary = C.el(doc, 'summary', 'lq-run-quality__summary');
+                summary.appendChild(C.el(doc, 'span', 'lq-run-quality__label', g.label));
+                summary.appendChild(C.el(doc, 'span', 'lq-run-quality__count lq-num', String(g.count)));
+                group.appendChild(summary);
+                if (g.brands.length) {
+                    group.appendChild(C.el(doc, 'p', 'lq-run-quality__brands', 'الماركات: ' + g.brands.map(function (b) {
+                        return b.brand + ' (' + b.count + ')';
+                    }).join('، ')));
+                }
+                var list = C.el(doc, 'ol', 'lq-run-quality__rows');
+                g.rows.forEach(function (r) {
+                    var li = C.el(doc, 'li', 'lq-run-quality__row');
+                    var link = C.el(doc, 'a', 'lq-link', 'صف ' + r.row);
+                    link.setAttribute('href', r.href);
+                    li.appendChild(link);
+                    var name = C.el(doc, 'bdi', 'lq-run-quality__name', r.name);
+                    name.setAttribute('dir', 'auto');
+                    li.appendChild(name);
+                    if (r.text) li.appendChild(C.el(doc, 'span', 'lq-run-quality__text', r.text));
+                    list.appendChild(li);
+                });
+                if (g.count > g.rows.length) {
+                    list.appendChild(C.el(doc, 'li', 'lq-run-quality__more', 'و' + (g.count - g.rows.length) + ' صف غيرهم'));
+                }
+                group.appendChild(list);
+                box.appendChild(group);
+            });
+        }
+
+        function loadQuality(refresh) {
+            var btn = $('quality-refresh');
+            btn.disabled = true;
+            if (refresh) renderQuality({ state: 'loading', lead: 'عم نقرأ صفوف الشيت…', groups: [] });
+            return C.fetchJson('/api/run/sheet-quality' + (refresh ? '?refresh=1' : '')).then(function (res) {
+                btn.disabled = false;
+                renderQuality(describeQuality(res));
+            });
+        }
+
         function exportRun() {
             var btn = $('export');
             var scope = $('export-scope').value;
@@ -756,6 +839,7 @@
         });
         $('stop').addEventListener('click', function () { controller.stop(); });
         $('reset').addEventListener('click', function () { controller.reset(); });
+        $('quality-refresh').addEventListener('click', function () { loadQuality(true); });
         $('export').addEventListener('click', function () { exportRun(); });
 
         var initial = null;
@@ -765,7 +849,8 @@
         } catch (e) {
             initial = null;
         }
-        controller.refreshPlan(false);
+        // «جودة بيانات الشيت» بعد «قبل ما تبدأ»: الخطة تقرأ صفوف الشيت (من كاشها)، والجودة تقرأ الكاش نفسه فقط
+        controller.refreshPlan(false).then(function () { return loadQuality(false); }, function () { return loadQuality(false); });
         if (initial) controller.handleLive(initial);
         controller.state.timer = root.setTimeout(controller.loop, initial ? POLL_ACTIVE_MS : 0);
         doc.addEventListener('visibilitychange', function () {
@@ -780,6 +865,7 @@
         FORCE_CONFIRM_TEXT: FORCE_CONFIRM_TEXT,
         describeLive: describeLive,
         describePlan: describePlan,
+        describeQuality: describeQuality,
         exportQuery: exportQuery,
         exportFileName: exportFileName,
         planQuery: planQuery,

@@ -313,11 +313,25 @@
     color: var(--lq-text-3);
 }
 
-/* The analysis report, under the run cards */
+/* Sheet data quality and the analysis report, under the run cards */
+.lq-run__grid--tools {
+    grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+}
+
+.lq-run-quality,
 .lq-run-export {
     gap: var(--lq-space-3);
 }
 
+.lq-run-quality__head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--lq-space-3);
+}
+
+.lq-run-quality__lead,
 .lq-run-export__text {
     margin: 0;
     font-size: 13px;
@@ -325,8 +339,77 @@
     color: var(--lq-text-2);
 }
 
-.lq-run__grid--tools {
-    grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+.lq-run-quality__groups {
+    display: flex;
+    flex-direction: column;
+    gap: var(--lq-space-2);
+}
+
+.lq-run-quality__group {
+    border: 1px solid var(--lq-border-soft);
+    border-radius: var(--lq-radius-md);
+    background: var(--lq-surface);
+}
+
+.lq-run-quality__summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--lq-space-3);
+    padding: 10px var(--lq-space-3);
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.lq-run-quality__label {
+    min-width: 0;
+}
+
+.lq-run-quality__count {
+    min-width: 28px;
+    padding: 1px 8px;
+    border-radius: var(--lq-radius-pill);
+    background: var(--lq-warning-bg);
+    color: var(--lq-warning-ink);
+    font-size: 12px;
+    text-align: center;
+}
+
+.lq-run-quality__brands {
+    margin: 0;
+    padding: 0 var(--lq-space-3) var(--lq-space-2);
+    font-size: 12px;
+    color: var(--lq-text-2);
+}
+
+.lq-run-quality__rows {
+    max-height: 280px;
+    margin: 0;
+    padding: 0 var(--lq-space-3) var(--lq-space-2);
+    overflow-y: auto;
+    list-style: none;
+}
+
+.lq-run-quality__row,
+.lq-run-quality__more {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px var(--lq-space-2);
+    padding: 6px 0;
+    border-block-start: 1px solid var(--lq-border-soft);
+    font-size: 13px;
+}
+
+.lq-run-quality__name {
+    font-weight: 500;
+}
+
+.lq-run-quality__text,
+.lq-run-quality__more {
+    color: var(--lq-text-2);
+    font-size: 12px;
 }
 
 .lq-run-export__actions {
