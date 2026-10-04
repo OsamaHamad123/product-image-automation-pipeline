@@ -225,6 +225,27 @@ def test_telegram_is_sent_only_when_configured(monkeypatch, tmp_path):
     assert "المدة 1 س 12 د" in text and "بقي في الانتظار 2" in text
 
 
+def test_another_run_taking_over_after_an_outage_is_not_a_night_that_did_not_start():
+    """Review fix C7: attempts [db_unavailable, another_worker] gave 'skipped' («لم يبدأ»), exit 0 and no counts."""
+    import run_report
+
+    attempts = [{"stop_reason": "db_unavailable", "run_id": "r1", "worker_id": "host:1"},
+                {"stop_reason": "another_worker"}]
+    report = run_report.build_report("nightly", attempts, 1_790_000_000, 1_790_000_900, db=FakeDb(COUNTS),
+                                     sheets=object())
+    assert (report["outcome"], report["exit_code"], report["stop_reason"]) == ("handed_over", 0, "another_worker")
+    assert report["attempts"] == 2 and report["attempt_reasons"] == ["db_unavailable"]
+    assert report["run_ids"] == ["r1"] and report["counts"] == COUNTS
+    assert report["reason_text"] == run_report.HANDED_OVER_TEXT
+    text = run_report.telegram_text(report)
+    assert "↪️ سلّم الطابور لتشغيل آخر" in text and "لم يبدأ" not in text and "بانتظار المراجعة 90" in text
+    assert "المحاولات" not in text                     # one run, then the hand-over: nothing was re-run
+    assert run_report.history_entry(report)["outcome"] == "handed_over"
+    # a night that found another run from the start still did not start
+    alone = run_report.build_report("nightly", [{"stop_reason": "another_worker"}], 1, 2, db=FakeDb(COUNTS))
+    assert (alone["outcome"], alone["exit_code"], alone["counts"]) == ("skipped", 0, None)
+
+
 def test_telegram_text_escapes_notices_and_says_when_the_database_is_down():
     import run_report
 

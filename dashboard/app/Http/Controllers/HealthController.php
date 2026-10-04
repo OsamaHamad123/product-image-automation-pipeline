@@ -62,6 +62,7 @@ class HealthController extends Controller
     public const RUN_OUTCOMES = [
         'done' => ['خلص', 'success'],
         'skipped' => ['ما بلّش لأنو في تشغيل تاني شغّال', 'muted'],
+        'handed_over' => ['سلّم الطابور لتشغيل تاني بعد انقطاع', 'warning'],
         'stopped' => ['وقف قبل ما يخلص الطابور', 'warning'],
         'outage' => ['انقطاع', 'danger'],
         'failed' => ['فشل', 'danger'],
@@ -109,7 +110,8 @@ class HealthController extends Controller
                 $parts[] = $text . ' ' . (int) $row[$key];
             }
         }
-        $retries = (int) ($row['attempts'] ?? 1) - 1;
+        // آخر «محاولة» في handed_over هي التشغيل الآخر الذي تولى الطابور، لا إعادة تشغيل
+        $retries = (int) ($row['attempts'] ?? 1) - 1 - (($row['outcome'] ?? '') === 'handed_over' ? 1 : 0);
         if ($retries > 0) {
             $parts[] = 'انعاد التشغيل ' . ($retries === 1 ? 'مرة' : ($retries === 2 ? 'مرتين' : $retries . ' مرات'))
                 . ' بعد انقطاع';

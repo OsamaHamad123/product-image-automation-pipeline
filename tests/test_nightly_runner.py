@@ -265,7 +265,11 @@ def test_a_worker_started_during_the_wait_ends_the_night(nightly, monkeypatch):
     assert runner.run(sleep=sleep) == 0
     assert rec["sleeps"] == [15 * 60] and [c[0] for c in rec["calls"]] == ["enqueue", "worker"]
     report = rec["reports"][-1]
-    assert report["outcome"] == "skipped" and report["attempt_reasons"] == ["provider_down"]
+    # review fix C7: this used to be 'skipped' («لم يبدأ», no counts) although attempt 1 had worked the queue
+    assert report["outcome"] == "handed_over" and report["exit_code"] == 0
+    assert report["attempts"] == 2 and report["attempt_reasons"] == ["provider_down"]
+    assert report["run_ids"] == ["run-1"] and report["counts"]["ready_for_review"] == 2
+    assert "تشغيل آخر" in report["reason_text"] and _last_report()["outcome"] == "handed_over"
 
 
 class Clock:

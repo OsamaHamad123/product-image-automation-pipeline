@@ -9,6 +9,8 @@
 # النتيجة ورمز الخروج (exit code) لكل سبب توقف (stop_reason):
 #   done     0  الطابور انتهى (أو لم يكن فيه شيء)
 #   skipped  0  تشغيل آخر حي يحمل القفل، فلم يبدأ هذا التشغيل
+#   handed_over 0  عمل التشغيل الليلي ثم توقف على انقطاع، وأثناء انتظار إعادة المحاولة بدأ تشغيل آخر وتولى الطابور:
+#               محاولاته وأرقامها تبقى في التقرير (ليس «لم يبدأ»)
 #   failed   1  خطأ يحتاج تدخلاً: إعداد الشيت أو بيانات الاعتماد، شيت غير موجود أو غير مشارك، أو خطأ غير متوقع
 #   outage   2  انقطاع قد يزول وحده: قاعدة البيانات، أو Google Sheets لا يرد (مهلة، انقطاع الاتصال، 429 / 5xx)، أو
 #               محركات البحث (الليلي يعيد المحاولة بعد 15 ثم 60 دقيقة)
@@ -32,7 +34,7 @@ logger = logging.getLogger(__name__)
 LAST_REPORT_PATH = os.path.join("temp", "nightly", "last_report.json")
 TELEGRAM_MAX_CHARS = 3500
 
-EXIT_CODES = {"done": 0, "skipped": 0, "failed": 1, "outage": 2, "stopped": 3}
+EXIT_CODES = {"done": 0, "skipped": 0, "handed_over": 0, "failed": 1, "outage": 2, "stopped": 3}
 DONE_REASONS = ("", "queue_empty")
 SKIP_REASONS = ("another_worker",)
 # انقطاع قد يزول وحده: التشغيل الليلي يعيد التشغيل كله بعد 15 ثم 60 دقيقة. شيت غير موجود أو غير مشارك ليس منها:
@@ -59,11 +61,13 @@ REASON_TEXT = {
 OUTCOME_TEXT = {
     "done": "✅ اكتمل",
     "skipped": "⏭️ لم يبدأ",
+    "handed_over": "↪️ سلّم الطابور لتشغيل آخر",
     "stopped": "⏸️ توقف قبل نهاية الطابور",
     "outage": "🔌 انقطاع",
     "failed": "❌ فشل",
 }
 TRIGGER_TEXT = {"nightly": "التشغيل الليلي", "dashboard": "تشغيل من لوحة التحكم", "manual": "تشغيل يدوي"}
+HANDED_OVER_TEXT = "توقف على انقطاع، وأثناء انتظار إعادة المحاولة بدأ تشغيل آخر وتولى إكمال الطابور"
 
 
 # ---------------------------------------------------------------------------
@@ -175,6 +179,7 @@ def build_report(trigger, attempts, started_ts, ended_ts, health=None, db=None, 
     التقرير من محاولات التشغيل (قائمة {stop_reason, run_id, worker_id, notice}، الأخيرة هي النتيجة):
     {trigger, started_at, ended_at, duration_s, outcome, stop_reason, reason_text, exit_code, attempts,
      attempt_reasons, run_id, run_ids, counts, outbox, spend, notices, database}.
+    «تشغيل آخر يعمل» بعد محاولة عملت فعلاً ليس «لم يبدأ»: النتيجة handed_over بأرقام المحاولات السابقة.
     """
     if db is None:
         import local_cache_db as db
@@ -191,15 +196,18 @@ def build_report(trigger, attempts, started_ts, ended_ts, health=None, db=None, 
             part = part.strip()
             if part and part not in notices:
                 notices.append(part)
+    outcome, text = outcome_of(stop_reason), reason_text(stop_reason)
+    if outcome == "skipped" and any(_key(a.get("stop_reason")) not in SKIP_REASONS for a in attempts[:-1]):
+        outcome, text = "handed_over", HANDED_OVER_TEXT
     report = {
         "trigger": trigger if trigger in TRIGGER_TEXT else "manual",
         "started_at": _iso(started_ts),
         "ended_at": _iso(ended_ts),
         "duration_s": int(max(0, (ended_ts or 0) - (started_ts or 0))) if started_ts and ended_ts else None,
-        "outcome": outcome_of(stop_reason),
+        "outcome": outcome,
         "stop_reason": stop_reason,
-        "reason_text": reason_text(stop_reason),
-        "exit_code": exit_code(stop_reason),
+        "reason_text": text,
+        "exit_code": EXIT_CODES[outcome],
         "attempts": len(attempts),
         "attempt_reasons": [a.get("stop_reason") for a in attempts[:-1]],
         "run_id": run_ids[-1] if run_ids else None,
@@ -304,8 +312,10 @@ def telegram_text(report):
         lines.append(esc(when) + (f" · المدة {esc(duration)}" if duration else ""))
     if report.get("reason_text"):
         lines.append(f"السبب: {esc(report['reason_text'])}")
-    if (report.get("attempts") or 1) > 1:
-        lines.append(f"المحاولات: {report['attempts']} (أُعيد التشغيل بعد انقطاع)")
+    # آخر «محاولة» في handed_over هي التشغيل الآخر الذي تولى الطابور، لا إعادة تشغيل
+    runs = (report.get("attempts") or 1) - (1 if outcome == "handed_over" else 0)
+    if runs > 1:
+        lines.append(f"المحاولات: {runs} (أُعيد التشغيل بعد انقطاع)")
     counts = report.get("counts")
     if counts:
         lines.append(f"أُضيف للطابور {counts.get('enqueued', 0)} · بُحث {counts.get('searched', 0)}")
