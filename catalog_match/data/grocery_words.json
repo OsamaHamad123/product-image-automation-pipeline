@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "_doc": "Everyday English words of grocery product names, read ONLY by catalog_match.explain to spot a likely typo in a sheet product name ('CHICEKN' is one letter swap from 'chicken', 'WHTE' one missing letter from 'white') and to suggest the spelling in the review screen, the run export and the sheet data quality card. Display only: identity, scoring, queries and routing never read this file, so editing it never changes a search decision. A word here is also never reported as a typo itself. The variants lexicon, the abbreviations' expansions, data/sheet_spellings.json and data/common_words.json are read as well; list here only plain words those files lack.",
+  "_doc": "Everyday English words of grocery product names, read ONLY by catalog_match.explain to spot a likely typo in a sheet product name ('CHICEKN' is one letter swap from 'chicken', 'WHTE' one missing letter from 'white') and to suggest the spelling in the review screen, the run export and the sheet data quality card. Display only: identity, scoring, queries and routing never read this file, so editing it never changes a search decision. A word here is also never reported as a typo itself. The variants lexicon, the abbreviations' expansions, data/sheet_spellings.json and data/common_words.json are read as well; list here only plain words those files lack. 'non_food' lists the words here that name no food (a sheet size of '230 MM' on a 'KITCHEN TISSUE' is its width, never a weight typo: explain.size_unit_typo).",
   "words": [
     "apple", "assorted", "baby", "bake", "baked", "baking", "banana", "barley", "basmati", "bean", "beans", "beef",
     "beverage", "biscuit", "biscuits", "bites", "bitter", "boneless", "bottle", "bread", "breadcrumbs", "breakfast",
@@ -27,5 +27,6 @@
     "tomato", "tomatoes", "toothpaste", "tradition", "traditional", "tuna", "turkey", "vanilla", "vegetable",
     "vegetables", "vermicelli", "vinegar", "wafer", "water", "wheat", "white", "whole", "wings", "wipes", "yeast",
     "yogurt", "yoghurt"
-  ]
+  ],
+  "non_food": ["cleaner", "detergent", "diapers", "dish", "paper", "shampoo", "soap", "tissue", "toothpaste", "wipes"]
 }

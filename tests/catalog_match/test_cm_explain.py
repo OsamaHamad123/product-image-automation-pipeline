@@ -209,7 +209,13 @@ def test_every_sentence_is_arabic_with_no_code_and_ends_with_what_to_do():
         issues = {"typo": [{"key": "typo", "word": "CHICEKN", "suggest": "CHICKEN", "known": False}],
                   "brand_unknown": [{"key": "brand_unknown", "brand": "X", "empty": False}],
                   "no_size": [{"key": "no_size", "barcode": False}],
-                  "no_barcode": [{"key": "no_barcode", "status": "missing"}]}.get(key, [])
+                  "no_barcode": [{"key": "no_barcode", "status": "missing"}],
+                  "no_brand": [{"key": "no_brand", "brand": "GENERIC / NO BRAND"}],
+                  "brand_has_product_word": [{"key": "brand_has_product_word", "brand": "SQ SALITED",
+                                              "suggest": "SQ", "word": "SALITED", "fix": "SALTED",
+                                              "known": False}],
+                  "size_unit_typo": [{"key": "no_size", "barcode": False},
+                                     {"key": "size_unit_typo", "word": "900 MM", "suggest": "900 GM"}]}.get(key, [])
         fact, action = explain._fact_and_action(key, record, {i["key"]: i for i in issues}, "X", "1L")
         assert fact and action.endswith(".") and not any("_" in part for part in (fact, action)), key
         assert key in explain.REASON_LABELS

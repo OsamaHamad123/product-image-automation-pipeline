@@ -663,11 +663,13 @@ def test_rows_49_and_52_one_spelling_proved_by_a_sibling_row(monkeypatch):
     # row 49: its own results hold the UAE store's Super Tasty listing: discovered there
     first = _row(ROW49, ByQuery([("", [SHARJAH_ST])]), Reads({}), bodies)
     assert first.discovered_brands == ["Super Tasty"]
-    # row 52: no Super Tasty listing of its own; the spelling row 49 proved sends B1 written with it
+    # row 52: no Super Tasty listing of its own; the spelling row 49 proved writes its planned queries from Q1
     search = ByQuery([("super tasty", [SHARJAH_ST]), ("", ROW52_OWN)])
     out = _row(ROW52, search, Reads({SHARJAH_ST.image_url: st_reading}), bodies)
     assert out.discovered_brands == ["Super Tasty"]                       # was [] (no pick, row left unselected)
-    assert search.queries[-1] == "Super Tasty LIGHT MEAT TUNA SOYBEAN OIL 185g"
+    assert search.queries[0] == "Super Tasty LIGHT MEAT TUNA SOYBEAN OIL 185g"
+    # was Q1 and Q3 'SUPER T LIGHT MEAT TUNA ...' first, then B1 written 'Super Tasty' (live run 2026-10-04)
+    assert not any(q.startswith("SUPER T ") for q in search.queries)
     assert out.decision == "REVIEW_PRESELECTED" and out.winner.candidate.image_url == SHARJAH_ST.image_url
     assert "warn:brand_spelling:Super Tasty" in out.winner.reasons
     assert "auto_blocked:brand_conf_sheet_raw" in out.winner.reasons      # never an auto-publish

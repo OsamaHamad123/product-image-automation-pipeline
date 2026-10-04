@@ -10,6 +10,9 @@ resolve(brand_raw, name_en, name_ar) -> BrandResolution
      synonym (EN+AR) and sub-brand: 'A/G', 'المراعي', 'Al Marai' all resolve;
   2. otherwise a known synonym or sub-brand phrase at the START of the name;
   3. otherwise conf 'sheet_raw' (brand kept as written) or 'none' (no brand).
+A sheet brand cell that only says the product has no brand ('GENERIC / NO BRAND', 'N/A', 'بدون ماركة',
+'-': PLACEHOLDER_BRANDS, is_placeholder_brand) is read as an empty cell: no brand to search for or to
+confirm (conf 'none' unless the name starts with a mapped brand, as for an empty cell).
 A store spelling the reviewers taught (catalog_match.learning) is an entry flagged 'learned': the
 sheet brand it was taught for (step 1 only) resolves to it with conf 'learned', like a mapped
 brand for search and scoring, never an auto-publish (decide.py). A lesson stays with the sheet
@@ -34,12 +37,18 @@ Short synonyms ('A/G', 'AG') can resolve a sheet brand but never match evidence.
 is_generic_brand(phrase) is True for a brand that is also an everyday listing word
 ('Freshly', 'Family', 'Golden Prize'): every significant token is in
 data/common_words.json. score.py trusts such a brand's hit only where a brand stands.
+
+unmapped(brand, sheet_brand) is the 'sheet_raw' resolution of a phrase the caller read off the sheet
+brand (identity.py: 'AMERICAN' for the sheet's 'AMERICAN LIGHT', whose 'LIGHT' begins the name's
+'LIGHT MEAT'); the reviewers' sources of the sheet brand still apply. matchable_brand(phrase) is True
+for a phrase evidence can be matched on: 3+ letters or digits and a significant token.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
@@ -51,6 +60,15 @@ logger = logging.getLogger(__name__)
 
 MIN_MATCH_ALNUM = 3
 COMMON_WORDS_PATH = Path(__file__).resolve().parent / "data" / "common_words.json"
+
+# A brand cell that says the product has none (live run 2026-10-04, rows 95-97: 'GENERIC / NO BRAND' was
+# searched as a brand). Compared without case, spaces or punctuation; a cell of several of them ('NO BRAND /
+# GENERIC') is one too, and so is a cell with no letter or digit at all ('-', '--').
+PLACEHOLDER_BRANDS = (
+    "GENERIC", "NO BRAND", "GENERIC / NO BRAND", "UNBRANDED", "N/A", "NA", "NONE", "-", "--",
+    "بدون ماركة", "بلا ماركة", "بدون براند",
+)
+_PLACEHOLDER_SPLIT_RE = re.compile(r"[/|,;]+|\s[-–—]+\s")
 
 
 def _as_list(value) -> List[str]:
@@ -126,6 +144,33 @@ def is_common_word(tok: str) -> bool:
     words, ignored = _common_words()
     tok = match_string(tok)
     return tok in ignored or _common(tok, words)
+
+
+def matchable_brand(phrase: Optional[str]) -> bool:
+    """A phrase brand evidence can be matched on: 3+ letters or digits and one significant token ('SQ', 'AL',
+    'THE' and 'A/G' are not)."""
+    _words, ignored = _common_words()
+    return _matchable(phrase or "") and any(t not in ignored and not (len(t) == 1 and t.isalpha())
+                                            for t in tokens(phrase, strip_clitics=True))
+
+
+@lru_cache(maxsize=1)
+def _placeholder_keys() -> FrozenSet[str]:
+    return frozenset(k for k in (_compact(match_key(p)) for p in PLACEHOLDER_BRANDS) if k)
+
+
+def is_placeholder_brand(text: Optional[str]) -> bool:
+    """True for a brand cell that only says the product has no brand (PLACEHOLDER_BRANDS); False for an empty one."""
+    raw = (text or "").strip()
+    if not raw:
+        return False
+    if not any(ch.isalnum() for ch in raw):
+        return True                                   # '-', '--', '/'
+    keys = _placeholder_keys()
+    if _compact(match_key(raw)) in keys:
+        return True
+    parts = [p for p in _PLACEHOLDER_SPLIT_RE.split(raw) if p.strip()]
+    return len(parts) > 1 and all(_compact(match_key(p)) in keys for p in parts)
 
 
 @dataclass(frozen=True)
@@ -269,6 +314,8 @@ class BrandIndex:
 
     def resolve(self, brand_raw: Optional[str], name_en: Optional[str] = "", name_ar: Optional[str] = "") -> BrandResolution:
         brand = (brand_raw or "").strip()
+        if is_placeholder_brand(brand):
+            brand = ""                       # 'GENERIC / NO BRAND' is no brand, never a brand to search for
         names = [n for n in (name_en or "", name_ar or "") if n and n.strip()]
         idx: Optional[int] = None
         forced_sub: List[str] = []
@@ -328,7 +375,12 @@ class BrandIndex:
             siblings=siblings,
         )
 
-    def _unmapped(self, brand: str) -> BrandResolution:
+    def unmapped(self, brand: str, sheet_brand: str = "") -> BrandResolution:
+        """The 'sheet_raw' resolution of `brand`, a phrase read off the sheet brand `sheet_brand` (identity.py);
+        the sites the reviewers keep approving for the sheet brand stay its learned_domains."""
+        return self._unmapped(brand, sheet_brand)
+
+    def _unmapped(self, brand: str, sheet_brand: str = "") -> BrandResolution:
         if not brand:
             return BrandResolution(conf="none")
         phrase = norm_phrase(brand)
@@ -339,7 +391,7 @@ class BrandIndex:
             match_brands=match_brands,
             competitors=comp,
             conf="sheet_raw",
-            learned_domains=self._raw_sources.get(match_key(brand), ()),
+            learned_domains=self._raw_sources.get(match_key(sheet_brand or brand), ()),
             brand_ar=brand if is_arabic(normalize(brand)[:1]) else "",
             family=(phrase,) if phrase else (),
         )

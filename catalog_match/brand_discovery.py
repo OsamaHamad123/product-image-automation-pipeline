@@ -3,9 +3,11 @@
 discover(spec, candidates) -> Optional[Discovery]
 find(spec, candidates)     -> Optional[Discovery]   (discover() + the per-process memory, see find())
 hint(spec, candidates)     -> Optional[Discovery]   (a remembered spelling for one more query only)
+planned_hint(spec)         -> Optional[Discovery]   (a remembered spelling the planned queries write from Q1)
 apply(spec, discovery)     -> SkuSpec
 as_hint(spec, discovery)   -> SkuSpec               (queries write the spelling; no brand evidence)
 corrected_query(spec)      -> Optional[PlannedQuery]
+sheet_query(spec)          -> Optional[PlannedQuery] (Q1 the sheet's way, after a remembered spelling found nothing)
 forget_all()                                        (each run, and each Brands Mapping load, starts empty)
 
 The owner's sheet sometimes misspells a brand ('RIO MARIE' for Rio Mare, 'INA PARAMANS' for Ina
@@ -48,6 +50,17 @@ LIGHT MEAT TUNA', whose own listings show only Americana. Never when its own lis
 spelling, never for a mapped or learned brand, and always review-only with the warning. The worker, the
 smoke run, the offline evaluation and the replay empty the memory when they start (forget_all), so a run
 never inherits a spelling from an earlier run or an earlier Brands Mapping sheet.
+
+The pipeline asks the memory before the first query (planned_hint): a remembered spelling writes the planned
+queries from Q1 (as_hint: 'Super Tasty MEAT SOLID TUNA ...' for 'SUPER T/' after 'SUPER/T' proved it, never
+'SUPER T MEAT ...' first). It still counts only as above, and when this row's listings do not name the product
+under it, Q1 is sent once more the sheet's way (sheet_query), so the sheet's own spelling is never left
+unsearched. A dashboard re-search runs in a process of its own (cli_bridge) and starts with an empty memory: a
+spelling a later row of the run proved ('SUPER/T', row 52, after 'SUP/T', row 49) reaches it only once a
+reviewer approves a pick that carries it (catalog_match.learning).
+
+What a row used is kept: SearchOutcome.discovered_brands, and the stored trace's outcome.discovered_brands
+(catalog_match.facade), which the run export and the stored no-pick reason read (catalog_match.explain).
 """
 
 from __future__ import annotations
@@ -67,6 +80,7 @@ from .text_norm import (
 logger = logging.getLogger(__name__)
 
 QUERY_ID = "B1"
+SHEET_QUERY_ID = "B2"            # the sheet's own spelling, after a remembered one found nothing (sheet_query)
 LEAD_SKIP = frozenset({"buy", "shop", "order", "new"})
 MIN_SPELLING_LETTERS = 7
 MIN_WORD_LETTERS = 4
@@ -380,6 +394,32 @@ def hint(spec: SkuSpec, cands: Iterable[Candidate]) -> Optional[Discovery]:
     if own is not None or remembered is None or _named_under(spec, remembered, cands):
         return None
     return remembered
+
+
+def planned_hint(spec: SkuSpec) -> Optional[Discovery]:
+    """The spelling an earlier row of this process proved for this sheet brand (or a sibling spelling of it:
+    recall()), to write this row's planned queries with from Q1 (as_hint), before anything is searched; None for
+    a mapped, learned or already discovered brand, or without one.
+
+    Before, a remembered spelling was only one more query after the plan: a 'SUPER T/' row searched after
+    'SUPER/T' proved Super Tasty sent Q1 and Q3 as 'SUPER T MEAT SOLID TUNA ...' first (live run 2026-10-04,
+    rows 49-52: each row's third query was the first one written 'Super Tasty').
+    """
+    if spec.brand_conf in ("mapped", "learned") or not spec.match_brands or spec.discovered_brands:
+        return None
+    return recall(spec)
+
+
+def sheet_query(spec: SkuSpec, already: Sequence[str] = ()) -> Optional[PlannedQuery]:
+    """Q1 written the sheet's way (SHEET_QUERY_ID), once: the planned queries used a remembered spelling
+    (planned_hint) and this row's listings do not name the product under it ('AMERICAN G/' proved American
+    Garden for a mayonnaise; the tuna row is searched as the sheet writes it too)."""
+    from .query_plan import build_queries
+
+    q1 = next((q for q in build_queries(spec) if q.query_id == "Q1"), None)
+    if q1 is None or not q1.text or q1.text in set(already):
+        return None
+    return PlannedQuery(query_id=SHEET_QUERY_ID, text=q1.text, hl=q1.hl)
 
 
 def apply(spec: SkuSpec, found: Discovery) -> SkuSpec:

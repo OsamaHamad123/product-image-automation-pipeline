@@ -1116,7 +1116,10 @@
     const NO_PICK_LABELS = {
         typo: 'غلطة إملائية بالاسم',
         brand_unknown: 'ماركة غير معروفة',
+        brand_has_product_word: 'كلمة من الاسم بعمود الماركة',
+        no_brand: 'منتج بلا ماركة',
         no_size: 'حجم ناقص بالشيت',
+        size_unit_typo: 'وحدة الحجم غلط',
         no_barcode: 'باركود ناقص بالشيت',
         unsure: 'قارئ الملصق غير متأكد',
         verifier_mismatch: 'قارئ الملصق شاف منتج ثاني',
