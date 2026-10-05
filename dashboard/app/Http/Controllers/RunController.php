@@ -541,6 +541,235 @@ class RunController extends Controller
         ];
     }
 
+    // ------------------------------------------------------------------
+    // «ماركات ناقصة من Brands Mapping»: the brands the queue names that the sheet has no entry for
+    // ------------------------------------------------------------------
+
+    public const BRAND_MAX_CHARS = 100;
+    public const BRAND_SYNONYM_MAX = 10;
+    public const BRAND_SYNONYM_CHARS = 80;
+    public const BRAND_DOMAINS_MAX = 3;
+    public const BRAND_ADD_ALL_MAX = 200;
+    public const BRAND_ADDED_TEXT = 'انضافت الماركة. التشغيل الجاي بيعرفها.';
+    private const BRAND_DOMAIN_PATTERN = '/^(?=.{4,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:[a-z]{2,63}|xn--[a-z0-9-]{2,59})$/';
+
+    /** What each refusal of the bridge or of this controller says (code => Arabic text, Levantine). */
+    public const BRAND_ERRORS = [
+        'invalid_brand' => 'اسم الماركة مش صالح: اكتبه بسطر واحد (لحد 100 حرف) وبدون «بدون ماركة».',
+        'invalid_synonym' => 'مرادف مش صالح: كل مرادف لحد 80 حرف وبدون فاصلة جواته.',
+        'too_many_synonyms' => 'أكثر شي 10 مرادفات للماركة.',
+        'invalid_domain' => 'الموقع لازم يكون اسم نطاق بس (متل almarai.com) بدون http ولا مسار.',
+        'blocked_domain' => 'هاد متجر أو موقع تواصل، مش موقع الماركة الرسمي.',
+        'too_many_brands' => 'عدد الماركات مش صحيح: من وحدة لحد 200 بالمرة.',
+        'duplicate' => 'هالماركة موجودة أصلاً بـ Brands Mapping.',
+    ];
+
+    /**
+     * GET /api/run/brand-suggestions: {status, count, rows, brands: [{brand, rows, brand_ar, synonyms, official_domain}]}.
+     * Read only: the bridge (brand_suggestions) reads the queue and the Brands Mapping sheet; no search, no cost, no write.
+     */
+    public function brandSuggestions(): \Illuminate\Http\JsonResponse
+    {
+        if (!self::databaseOnline()) {
+            return response()->json(['status' => 'unavailable', 'message' => 'قاعدة البيانات مش شغّالة هلق.'], 503)
+                ->header('Cache-Control', 'no-store');
+        }
+        $result = PythonBridge::run('brand_suggestions');
+        if (($result['status'] ?? '') !== 'success' || !is_array($result['brands'] ?? null)) {
+            return response()->json(['status' => 'error', 'message' => 'ما قدرنا نقرأ الماركات الناقصة هلق. جرّب بعد شوي.'], 502)
+                ->header('Cache-Control', 'no-store');
+        }
+        $brands = [];
+        foreach ($result['brands'] as $b) {
+            $name = is_array($b) && is_string($b['brand'] ?? null) ? trim($b['brand']) : '';
+            if ($name === '') {
+                continue;
+            }
+            $synonyms = array_values(array_filter(array_map(
+                fn ($x) => is_string($x) ? trim($x) : '', is_array($b['synonyms'] ?? null) ? $b['synonyms'] : []
+            ), fn ($x) => $x !== ''));
+            $brands[] = [
+                'brand' => $name,
+                'rows' => max(0, (int) ($b['rows'] ?? 0)),
+                'brand_ar' => is_string($b['brand_ar'] ?? null) ? trim($b['brand_ar']) : '',
+                'synonyms' => array_slice($synonyms, 0, self::BRAND_SYNONYM_MAX),
+                'official_domain' => '',
+            ];
+        }
+        return response()->json(['status' => 'success', 'count' => count($brands), 'rows' => (int) ($result['rows'] ?? 0),
+                                 'brands' => $brands])->header('Cache-Control', 'no-store');
+    }
+
+    /**
+     * POST /api/run/brand-official-site {brand}: «اقترح الموقع الرسمي». ONE Serper web query (cli_bridge
+     * brand_official_site, recorded in the spend ledger) and up to two sites that are not a store or a social network.
+     * Writes nothing; CSRF like every POST.
+     */
+    public function brandOfficialSite(Request $request): \Illuminate\Http\JsonResponse
+    {
+        $brand = self::cleanBrandName($request->input('brand'));
+        if ($brand === null) {
+            return self::brandError('invalid_brand', 422);
+        }
+        $result = PythonBridge::run('brand_official_site', ['brand' => $brand]);
+        $status = (string) ($result['status'] ?? '');
+        if ($status === 'invalid') {
+            return self::brandError((string) ($result['code'] ?? 'invalid_brand'), 422);
+        }
+        if ($status === 'unavailable') {
+            return response()->json(['status' => 'unavailable', 'message' => 'ما في مفتاح بحث (Serper) مضبوط بالإعدادات.'], 503)
+                ->header('Cache-Control', 'no-store');
+        }
+        if ($status !== 'success' || !is_array($result['candidates'] ?? null)) {
+            return response()->json(['status' => 'error', 'message' => 'ما قدرنا نبحث هلق. ما انحسب شي عليك. جرّب بعد شوي.'], 502)
+                ->header('Cache-Control', 'no-store');
+        }
+        $candidates = [];
+        foreach (array_slice($result['candidates'], 0, 2) as $c) {
+            $domain = is_array($c) && is_string($c['domain'] ?? null) ? strtolower(trim($c['domain'])) : '';
+            if (!preg_match(self::BRAND_DOMAIN_PATTERN, $domain)) {
+                continue;
+            }
+            $candidates[] = ['title' => is_string($c['title'] ?? null) ? mb_substr(trim($c['title']), 0, 200) : '', 'domain' => $domain];
+        }
+        return response()->json([
+            'status' => 'success',
+            'brand' => $brand,
+            'candidates' => $candidates,
+            'message' => $candidates ? '' : 'ما لقينا موقع رسمي واضح. اكتبه بإيدك إذا بتعرفه.',
+        ])->header('Cache-Control', 'no-store');
+    }
+
+    /**
+     * POST /api/run/brand-add {brand, synonyms[], official_domains[]}: يضيف صف واحد لورقة Brands Mapping (cli_bridge
+     * brand_add) بعد ما نتحقق هون: اسم غير فاضي، لحد 10 مرادفات، وكل موقع اسم نطاق بس. يكتب شيت المالك: بس من زر صريح.
+     * CSRF متل كل POST.
+     */
+    public function brandAdd(Request $request): \Illuminate\Http\JsonResponse
+    {
+        $item = self::brandItem($request->input('brand'), $request->input('synonyms'), $request->input('official_domains'));
+        if (is_string($item)) {
+            return self::brandError($item, 422);
+        }
+        return self::brandAdded(PythonBridge::run('brand_add', $item));
+    }
+
+    /**
+     * POST /api/run/brand-add-all {items: [{brand, synonyms[]}]}: «أضف الكل بدون مواقع». صف لكل ماركة بالمرادفات بس
+     * (أي موقع بالطلب بيتجاهل)، بطلب كتابة واحد. الماركة اللي صارت موجودة بتتخطى.
+     */
+    public function brandAddAll(Request $request): \Illuminate\Http\JsonResponse
+    {
+        $items = $request->input('items');
+        if (!is_array($items) || count($items) < 1 || count($items) > self::BRAND_ADD_ALL_MAX) {
+            return self::brandError('too_many_brands', 422);
+        }
+        $clean = [];
+        foreach ($items as $entry) {
+            $entry = is_array($entry) ? $entry : [];
+            $item = self::brandItem($entry['brand'] ?? null, $entry['synonyms'] ?? null, []);
+            if (is_string($item)) {
+                return self::brandError($item, 422);
+            }
+            $clean[] = $item;
+        }
+        return self::brandAdded(PythonBridge::run('brand_add', ['items' => $clean]));
+    }
+
+    /** One brand request, checked: the bridge's {brand, synonyms, official_domains}, or the error code as a string. */
+    public static function brandItem($brand, $synonyms, $domains)
+    {
+        $name = self::cleanBrandName($brand);
+        if ($name === null) {
+            return 'invalid_brand';
+        }
+        $syn = [];
+        foreach (self::splitList($synonyms) as $text) {
+            $text = trim(preg_replace('/\s+/u', ' ', $text));
+            if ($text === '') {
+                continue;
+            }
+            if (mb_strlen($text) > self::BRAND_SYNONYM_CHARS || preg_match('/[\x00-\x1F\x7F]/u', $text)) {
+                return 'invalid_synonym';
+            }
+            $syn[mb_strtolower($text)] ??= $text;      // the first spelling of a repeated one stays
+        }
+        unset($syn[mb_strtolower($name)]);
+        if (count($syn) > self::BRAND_SYNONYM_MAX) {
+            return 'too_many_synonyms';
+        }
+        $hosts = [];
+        foreach (self::splitList($domains) as $text) {
+            $host = strtolower(trim($text));
+            if ($host === '') {
+                continue;
+            }
+            if (!preg_match(self::BRAND_DOMAIN_PATTERN, $host)) {
+                return 'invalid_domain';
+            }
+            $hosts[$host] = $host;
+        }
+        if (count($hosts) > self::BRAND_DOMAINS_MAX) {
+            return 'invalid_domain';
+        }
+        return ['brand' => $name, 'synonyms' => array_values($syn), 'official_domains' => array_values($hosts)];
+    }
+
+    /** The brand cell: one line of 1..100 characters with no control character; null otherwise. */
+    public static function cleanBrandName($value): ?string
+    {
+        if (!is_string($value)) {
+            return null;
+        }
+        $name = trim(preg_replace('/\s+/u', ' ', $value));
+        if ($name === '' || mb_strlen($name) > self::BRAND_MAX_CHARS || preg_match('/[\x00-\x1F\x7F]/u', $name)) {
+            return null;
+        }
+        return $name;
+    }
+
+    /** A list given as an array or as text split on , ، ; and new lines; never anything but strings. */
+    private static function splitList($value): array
+    {
+        if (is_string($value)) {
+            $value = preg_split('/[,\x{060C};\r\n]+/u', $value) ?: [];
+        }
+        return is_array($value) ? array_values(array_filter($value, 'is_string')) : [];
+    }
+
+    private static function brandError(string $code, int $http): \Illuminate\Http\JsonResponse
+    {
+        return response()->json([
+            'status' => 'error',
+            'code' => $code,
+            'message' => self::BRAND_ERRORS[$code] ?? 'الطلب مش صالح.',
+        ], $http)->header('Cache-Control', 'no-store');
+    }
+
+    /** The answer to an add: the bridge's result as the page's JSON; the cached sheet rows are dropped on success. */
+    private static function brandAdded(array $result): \Illuminate\Http\JsonResponse
+    {
+        $status = (string) ($result['status'] ?? '');
+        if ($status === 'success' && is_array($result['added'] ?? null)) {
+            ProductController::forgetProductCaches();
+            return response()->json([
+                'status' => 'success',
+                'added' => array_values(array_filter($result['added'], 'is_string')),
+                'skipped' => is_array($result['skipped'] ?? null) ? count($result['skipped']) : 0,
+                'harvest_queued' => is_array($result['harvest_queued'] ?? null) ? count($result['harvest_queued']) : 0,
+                'message' => self::BRAND_ADDED_TEXT,
+            ])->header('Cache-Control', 'no-store');
+        }
+        if ($status === 'duplicate') {
+            return self::brandError('duplicate', 409);
+        }
+        if ($status === 'invalid') {
+            return self::brandError((string) ($result['code'] ?? ''), 422);
+        }
+        return response()->json(['status' => 'error', 'message' => 'ما قدرنا نكتب بورقة Brands Mapping هلق. ما انكتب شي. جرّب بعد شوي.'], 502)
+            ->header('Cache-Control', 'no-store');
+    }
+
     /** Cost of one search over the last 7 days (ops_health), or null with too little history. */
     public static function costPerProduct(?array $opsHealth): ?float
     {

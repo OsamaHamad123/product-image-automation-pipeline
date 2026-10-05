@@ -264,10 +264,10 @@ def test_brand_add_follows_the_sheets_own_column_order_and_adds_a_missing_domain
 
 def test_brand_add_reports_a_sheet_it_could_not_write_without_details(bridge, monkeypatch):
     def broken(*a, **k):
-        raise RuntimeError("secret detail: token abc")
+        raise RuntimeError("internal detail abc")
     bridge.sheet.append_rows = broken
     out = _call(bridge, "brand_add", {"brand": "Meliha"})
-    assert out["status"] == "failed" and "secret detail" not in json.dumps(out)
+    assert out["status"] == "failed" and "internal detail" not in json.dumps(out)
     assert bridge.queued == []
 
 
@@ -301,7 +301,7 @@ class SearchSpy:
         self.calls.append(query)
         self.hedge = provider.hedge
         if self.fail:
-            raise RuntimeError("HTTP 500 secret detail")
+            raise RuntimeError("HTTP 500 internal detail")
         return {"organic": [{"link": r["link"], "title": r["title"], "position": i + 1}
                             for i, r in enumerate(self.organic or [])]}
 
@@ -313,7 +313,7 @@ def paid(monkeypatch):
     import local_cache_db
 
     spent = []
-    monkeypatch.setattr(settings, "serper_api_key", lambda: "test-key")
+    monkeypatch.setattr(settings, "serper_api_key", lambda: "configured")
     monkeypatch.setattr(local_cache_db, "record_search_spend", lambda outcome, run_id=None: spent.append((outcome, run_id)))
 
     def install(spy):
@@ -341,11 +341,11 @@ def test_the_official_site_with_no_answer_costs_nothing_and_without_a_key_sends_
     from catalog_match import settings
     spy = paid(SearchSpy(fail=True))
     out = _call(bridge, "brand_official_site", {"brand": "Almarai"})
-    assert out["status"] == "failed" and "secret detail" not in json.dumps(out) and paid.spent == []   # not answered: not billed
+    assert out["status"] == "failed" and "internal detail" not in json.dumps(out) and paid.spent == []   # not answered: not billed
     monkeypatch.setattr(settings, "serper_api_key", lambda: "")
     spy.calls.clear()
     assert _call(bridge, "brand_official_site", {"brand": "Almarai"})["code"] == "no_key" and spy.calls == []
-    monkeypatch.setattr(settings, "serper_api_key", lambda: "test-key")
+    monkeypatch.setattr(settings, "serper_api_key", lambda: "configured")
     assert _call(bridge, "brand_official_site", {"brand": "GENERIC"})["status"] == "invalid" and spy.calls == []
 
 

@@ -307,6 +307,95 @@
                  lead: 'هالصفوف بتمنع اختيار واثق أو بتخلي البحث يغلط. صلّحها بالشيت (أو بـ Brands Mapping) وأعد البحث عنها.' };
     }
 
+    // «ماركات ناقصة من Brands Mapping» (GET /api/run/brand-suggestions): the brands the queue names that the sheet has no
+    // row for. Writes happen only through the two buttons of each brand («أضف») and «أضف الكل بدون مواقع».
+    var BRAND_SYNONYM_MAX = 10;
+    var BRANDS_LEAD = 'هالماركات بالطابور وما إلها صف بـ Brands Mapping، فالبحث بيعتبرها «ماركة غير معروفة» وما بينشر صورها لحاله. ' +
+        'راجع المرادفات (الاسم العربي وكتابات المتاجر اللي لقاها البحث) وأضفها: التشغيل الجاي بيعرفها.';
+    var BRANDS_CLEAN = 'كل ماركات الطابور موجودة بـ Brands Mapping.';
+    var BRANDS_ERROR = 'ما قدرنا نقرأ الماركات الناقصة هلق.';
+    var BRAND_ADDED_TEXT = 'انضافت الماركة. التشغيل الجاي بيعرفها.';
+    var SITE_COST_NOTE = 'بتكلّف بحث واحد';
+    var BRAND_REQUEST_ERROR = 'ما قدرنا نوصل للخادم. ما انكتب شي.';
+
+    function brandsTitle(count) {
+        return 'ماركات ناقصة من Brands Mapping (' + count + ')';
+    }
+
+    function brandRowsText(n) {
+        return n === 1 ? 'صف واحد' : (n === 2 ? 'صفين' : n + (n >= 3 && n <= 10 ? ' صفوف' : ' صف'));
+    }
+
+    function addedText(n) {
+        if (n <= 1) return BRAND_ADDED_TEXT;
+        if (n === 2) return 'انضافت ماركتين. التشغيل الجاي بيعرفهم.';
+        return 'انضافت ' + n + (n <= 10 ? ' ماركات' : ' ماركة') + '. التشغيل الجاي بيعرفها.';
+    }
+
+    function addAllConfirmText(count) {
+        return 'أضف الكل بدون مواقع:\n' +
+            '• بينكتب صف لكل ماركة (' + count + ') بورقة Brands Mapping بالشيت: الاسم ومرادفاته الظاهرة بالحقول، بدون موقع رسمي.\n' +
+            '• اللي صارت موجودة أصلاً بتنتخطى، وما بيتغير أي صف تاني بالشيت.\n\n' +
+            'بدك تضيفها؟';
+    }
+
+    // "a, b، c\n d" -> ['a', 'b', 'c', 'd'] without empty or repeated items (case-insensitive)
+    function splitList(text) {
+        var seen = {};
+        return String(text || '').split(/[,،;\n\r]+/).map(function (x) { return x.replace(/\s+/g, ' ').trim(); })
+            .filter(function (x) {
+                var key = x.toLowerCase();
+                if (!x || seen[key]) return false;
+                seen[key] = true;
+                return true;
+            });
+    }
+
+    // What the owner pasted into the site field as a bare host: «https://www.almarai.com/en?x=1» -> «www.almarai.com».
+    function bareHost(text) {
+        var t = String(text || '').trim().toLowerCase().replace(/^[a-z][a-z0-9+.-]*:\/\//, '');
+        return t.split(/[\/?#]/)[0].trim();
+    }
+
+    // The synonyms field of a brand: its Arabic name first, then the store spellings, without repeats or the brand itself.
+    function brandSynonymsText(b) {
+        var own = String(b.brand || '').toLowerCase();
+        return splitList([b.brand_ar].concat(Array.isArray(b.synonyms) ? b.synonyms : []).filter(Boolean).join(', '))
+            .filter(function (x) { return x.toLowerCase() !== own; }).slice(0, BRAND_SYNONYM_MAX).join('، ');
+    }
+
+    // POST /api/run/brand-add body from what the fields hold now; the server checks all of it again.
+    function brandBody(brand, synonymsText, siteText) {
+        var host = bareHost(siteText);
+        return { brand: String(brand || ''), synonyms: splitList(synonymsText), official_domains: host ? [host] : [] };
+    }
+
+    // POST /api/run/brand-add-all body: [{brand, synonymsText}] -> every brand with its synonyms only, never a site.
+    function addAllBody(rows) {
+        return { items: rows.map(function (r) { return { brand: String(r.brand || ''), synonyms: splitList(r.synonymsText) }; }) };
+    }
+
+    // view {state: ready | clean | error, count, title, lead, brands: [{brand, rows, rowsText, synonymsText}]}
+    function describeBrands(res) {
+        var data = res && res.data;
+        if (!res || !data || !res.ok || data.status !== 'success' || !Array.isArray(data.brands)) {
+            return { state: 'error', count: 0, title: brandsTitle(0), brands: [],
+                     lead: data && arabic(data.message) ? data.message : BRANDS_ERROR };
+        }
+        var brands = data.brands.filter(function (b) { return b && typeof b.brand === 'string' && b.brand.trim(); }).map(function (b) {
+            var rows = C.num(b.rows) || 0;
+            return { brand: b.brand.trim(), rows: rows, rowsText: brandRowsText(rows), synonymsText: brandSynonymsText(b) };
+        });
+        return { state: brands.length ? 'ready' : 'clean', count: brands.length, title: brandsTitle(brands.length),
+                 lead: brands.length ? BRANDS_LEAD : BRANDS_CLEAN, brands: brands };
+    }
+
+    // The message of a refused or failed brand request: the server's Arabic text, else the generic one.
+    function brandFailure(res) {
+        var data = res && res.data;
+        return data && arabic(data.message) ? data.message : (res && res.status ? 'ما قدرنا نكمّل هلق. ما انكتب شي. جرّب بعد شوي.' : BRAND_REQUEST_ERROR);
+    }
+
     // «تصدير تقرير للتحليل»: الرابط حسب النطاق، واسم الملف من رد الخادم (Content-Disposition)
     function exportQuery(scope) {
         return '/api/run/export?scope=' + (scope === 'review' ? 'review' : 'latest');
@@ -751,6 +840,215 @@
             });
         }
 
+        // «ماركات ناقصة»: one row per brand with its own fields; the rows live in brandRows so «أضف الكل» reads what they hold.
+        var brandRows = [];
+
+        function brandNote(text, kind) {
+            var done = kind === 'done';
+            C.setText($('brands-error'), done ? '' : text);
+            C.setHidden($('brands-error'), done || !text);
+            C.setText($('brands-done'), done ? text : '');
+            C.setHidden($('brands-done'), !done || !text);
+        }
+
+        function renderMissingHead(view) {
+            $('brands').setAttribute('data-state', view.state);
+            C.setText($('brands-title'), view.title);
+            C.setText($('brands-lead'), view.lead || '');
+            C.setHidden($('brands-foot'), !brandRows.length);
+        }
+
+        function refreshMissingHead() {
+            var left = brandRows.length;
+            renderMissingHead({ state: left ? 'ready' : 'clean', title: brandsTitle(left), lead: left ? BRANDS_LEAD : BRANDS_CLEAN });
+        }
+
+        function forgetBrandRow(row) {
+            var i = brandRows.indexOf(row);
+            if (i !== -1) brandRows.splice(i, 1);
+            if (row.el.parentNode) row.el.parentNode.removeChild(row.el);
+        }
+
+        function setBrandBusy(row, busy) {
+            row.busy = busy;
+            row.add.disabled = busy;
+            row.add.setAttribute('aria-busy', busy ? 'true' : 'false');
+            row.suggest.disabled = busy || row.searched;
+        }
+
+        function rowError(row, text) {
+            C.setText(row.error, text || '');
+            C.setHidden(row.error, !text);
+        }
+
+        function showCandidates(row, candidates) {
+            C.clear(row.candidates);
+            candidates.forEach(function (c) {
+                var chip = C.el(doc, 'button', 'lq-btn lq-btn--soft lq-btn--sm lq-run-brand__candidate');
+                chip.setAttribute('type', 'button');
+                chip.appendChild(C.el(doc, 'bdi', 'lq-run-brand__domain', c.domain));
+                if (c.title) chip.appendChild(C.el(doc, 'span', 'lq-run-brand__title', c.title));
+                chip.addEventListener('click', function () { row.site.value = c.domain; });
+                row.candidates.appendChild(chip);
+            });
+            C.setHidden(row.candidates, !candidates.length);
+        }
+
+        function suggestSite(row) {
+            if (row.searched || row.searching) return Promise.resolve();   // one search per click: never a second one by accident
+            row.searching = true;
+            rowError(row, '');
+            row.suggest.disabled = true;
+            C.setText(row.suggestText, 'عم نبحث…');
+            return C.fetchJson('/api/run/brand-official-site', { method: 'POST', body: { brand: row.brand } }).then(function (res) {
+                var data = res.data || {};
+                row.searching = false;
+                if (res.ok && data.status === 'success') {
+                    var found = (Array.isArray(data.candidates) ? data.candidates : []).filter(function (c) {
+                        return c && typeof c.domain === 'string' && c.domain;
+                    }).map(function (c) { return { domain: c.domain, title: String(c.title || '') }; });
+                    row.searched = true;
+                    C.setText(row.suggestText, 'تم البحث (بحث واحد)');
+                    showCandidates(row, found);
+                    if (found.length && !String(row.site.value || '').trim()) row.site.value = found[0].domain;
+                    rowError(row, found.length ? '' : (arabic(data.message) ? data.message : 'ما لقينا موقع رسمي واضح. اكتبه بإيدك إذا بتعرفه.'));
+                    return;
+                }
+                C.setText(row.suggestText, 'اقترح الموقع الرسمي');
+                row.suggest.disabled = row.busy;
+                rowError(row, brandFailure(res));
+            });
+        }
+
+        function addBrand(row) {
+            if (row.busy) return Promise.resolve();
+            rowError(row, '');
+            brandNote('');
+            setBrandBusy(row, true);
+            return C.fetchJson('/api/run/brand-add', { method: 'POST', body: brandBody(row.brand, row.syn.value, row.site.value) })
+                .then(function (res) {
+                    var data = res.data || {};
+                    if (res.ok && data.status === 'success') {
+                        forgetBrandRow(row);
+                        refreshMissingHead();
+                        brandNote(arabic(data.message) ? data.message : BRAND_ADDED_TEXT, 'done');
+                        C.toast(BRAND_ADDED_TEXT, 'success');
+                        return;
+                    }
+                    setBrandBusy(row, false);
+                    rowError(row, brandFailure(res));
+                });
+        }
+
+        function addAllBrands() {
+            if (!brandRows.length) return Promise.resolve();
+            if (!root.confirm(addAllConfirmText(brandRows.length))) return Promise.resolve();
+            brandNote('');
+            var btn = $('brands-add-all');
+            var rows = brandRows.slice();
+            btn.disabled = true;
+            btn.setAttribute('aria-busy', 'true');
+            rows.forEach(function (r) { setBrandBusy(r, true); });
+            var body = addAllBody(rows.map(function (r) { return { brand: r.brand, synonymsText: r.syn.value }; }));
+            return C.fetchJson('/api/run/brand-add-all', { method: 'POST', body: body }).then(function (res) {
+                var data = res.data || {};
+                btn.disabled = false;
+                btn.setAttribute('aria-busy', 'false');
+                if (res.ok && data.status === 'success') {
+                    rows.forEach(forgetBrandRow);          // the ones skipped are mapped now too
+                    refreshMissingHead();
+                    var n = Array.isArray(data.added) ? data.added.length : rows.length;
+                    brandNote(addedText(n), 'done');
+                    C.toast(addedText(n), 'success');
+                    return;
+                }
+                rows.forEach(function (r) { setBrandBusy(r, false); });
+                brandNote(brandFailure(res));
+            });
+        }
+
+        function brandRow(b) {
+            var el = C.el(doc, 'article', 'lq-run-brand');
+            el.setAttribute('data-brand', b.brand);
+            var head = C.el(doc, 'div', 'lq-run-brand__head');
+            var name = C.el(doc, 'bdi', 'lq-run-brand__name', b.brand);
+            name.setAttribute('dir', 'auto');
+            head.appendChild(name);
+            head.appendChild(C.el(doc, 'span', 'lq-run-brand__rows lq-num', b.rowsText));
+            el.appendChild(head);
+
+            var synField = C.el(doc, 'label', 'lq-field');
+            synField.appendChild(C.el(doc, 'span', 'lq-field__label', 'المرادفات (فاصلة بين كل واحد وواحد)'));
+            var syn = C.el(doc, 'input', 'lq-input lq-run-brand__syn');
+            syn.setAttribute('type', 'text');
+            syn.setAttribute('dir', 'auto');
+            syn.setAttribute('maxlength', '800');
+            syn.value = b.synonymsText;
+            synField.appendChild(syn);
+            el.appendChild(synField);
+
+            var siteField = C.el(doc, 'label', 'lq-field');
+            siteField.appendChild(C.el(doc, 'span', 'lq-field__label', 'الموقع الرسمي (اختياري)'));
+            var site = C.el(doc, 'input', 'lq-input lq-run-brand__site');
+            site.setAttribute('type', 'text');
+            site.setAttribute('inputmode', 'url');
+            site.setAttribute('dir', 'ltr');
+            site.setAttribute('placeholder', 'almarai.com');
+            site.setAttribute('maxlength', '253');
+            siteField.appendChild(site);
+            el.appendChild(siteField);
+
+            var candidates = C.el(doc, 'div', 'lq-run-brand__candidates');
+            candidates.setAttribute('hidden', '');
+            el.appendChild(candidates);
+
+            var actions = C.el(doc, 'div', 'lq-run-brand__actions');
+            var suggest = C.el(doc, 'button', 'lq-btn lq-btn--ghost lq-btn--sm');
+            suggest.setAttribute('type', 'button');
+            var suggestText = C.el(doc, 'span', '', 'اقترح الموقع الرسمي');
+            suggest.appendChild(suggestText);
+            actions.appendChild(suggest);
+            actions.appendChild(C.el(doc, 'span', 'lq-field__hint lq-run-brand__cost', SITE_COST_NOTE));
+            var add = C.el(doc, 'button', 'lq-btn lq-btn--primary lq-btn--sm lq-run-brand__add');
+            add.setAttribute('type', 'button');
+            add.appendChild(C.el(doc, 'span', '', 'أضف'));
+            actions.appendChild(add);
+            el.appendChild(actions);
+
+            var error = C.el(doc, 'p', 'lq-field__error');
+            error.setAttribute('role', 'alert');
+            error.setAttribute('hidden', '');
+            el.appendChild(error);
+
+            var row = { brand: b.brand, el: el, syn: syn, site: site, candidates: candidates, suggest: suggest,
+                        suggestText: suggestText, add: add, error: error, busy: false, searched: false, searching: false };
+            suggest.addEventListener('click', function () { suggestSite(row); });
+            add.addEventListener('click', function () { addBrand(row); });
+            return row;
+        }
+
+        function renderMissing(view) {
+            var box = $('brands-list');
+            C.clear(box);
+            brandRows = [];
+            view.brands.forEach(function (b) {
+                var row = brandRow(b);
+                brandRows.push(row);
+                box.appendChild(row.el);
+            });
+            renderMissingHead(view);
+        }
+
+        function loadMissing() {
+            var btn = $('brands-refresh');
+            btn.disabled = true;
+            brandNote('');
+            return C.fetchJson('/api/run/brand-suggestions').then(function (res) {
+                btn.disabled = false;
+                renderMissing(describeBrands(res));
+            });
+        }
+
         function exportRun() {
             var btn = $('export');
             var scope = $('export-scope').value;
@@ -840,6 +1138,8 @@
         $('stop').addEventListener('click', function () { controller.stop(); });
         $('reset').addEventListener('click', function () { controller.reset(); });
         $('quality-refresh').addEventListener('click', function () { loadQuality(true); });
+        $('brands-refresh').addEventListener('click', function () { loadMissing(); });
+        $('brands-add-all').addEventListener('click', function () { addAllBrands(); });
         $('export').addEventListener('click', function () { exportRun(); });
 
         var initial = null;
@@ -850,7 +1150,8 @@
             initial = null;
         }
         // «جودة بيانات الشيت» بعد «قبل ما تبدأ»: الخطة تقرأ صفوف الشيت (من كاشها)، والجودة تقرأ الكاش نفسه فقط
-        controller.refreshPlan(false).then(function () { return loadQuality(false); }, function () { return loadQuality(false); });
+        controller.refreshPlan(false).then(function () { return loadQuality(false); }, function () { return loadQuality(false); })
+            .then(function () { return loadMissing(); });
         if (initial) controller.handleLive(initial);
         controller.state.timer = root.setTimeout(controller.loop, initial ? POLL_ACTIVE_MS : 0);
         doc.addEventListener('visibilitychange', function () {
@@ -866,6 +1167,16 @@
         describeLive: describeLive,
         describePlan: describePlan,
         describeQuality: describeQuality,
+        describeBrands: describeBrands,
+        brandBody: brandBody,
+        addAllBody: addAllBody,
+        bareHost: bareHost,
+        splitList: splitList,
+        brandsTitle: brandsTitle,
+        addedText: addedText,
+        addAllConfirmText: addAllConfirmText,
+        BRAND_ADDED_TEXT: BRAND_ADDED_TEXT,
+        SITE_COST_NOTE: SITE_COST_NOTE,
         exportQuery: exportQuery,
         exportFileName: exportFileName,
         planQuery: planQuery,

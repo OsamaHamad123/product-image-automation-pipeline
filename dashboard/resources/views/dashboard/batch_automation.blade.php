@@ -162,6 +162,26 @@
     </div>
 
     <div class="lq-run__grid lq-run__grid--tools">
+        {{-- Brands the queue names that Brands Mapping has no row for: read from the queue and the sheet (GET /api/run/brand-suggestions);
+             the buttons write only when clicked (POST /api/run/brand-add, /brand-add-all) and «اقترح الموقع الرسمي» costs one search --}}
+        <section class="lq-card lq-run-brands" aria-labelledby="run-brands-title" data-run="brands" data-state="loading">
+            <div class="lq-run-brands__head">
+                <h2 class="lq-card__title" id="run-brands-title" data-run="brands-title">ماركات ناقصة من Brands Mapping</h2>
+                <button type="button" class="lq-btn lq-btn--ghost lq-btn--sm" data-run="brands-refresh">
+                    <x-lq.icon name="refresh" :size="16" :stroke="2" />
+                    <span>حدّث القائمة</span>
+                </button>
+            </div>
+            <p class="lq-run-brands__lead" data-run="brands-lead" aria-live="polite">لحظة، عم نقرأ الماركات…</p>
+            <div class="lq-run-brands__list" data-run="brands-list"></div>
+            <div class="lq-run-brands__foot" data-run="brands-foot" hidden>
+                <button type="button" class="lq-btn lq-btn--secondary" data-run="brands-add-all">أضف الكل بدون مواقع</button>
+                <span class="lq-field__hint">بيكتب كل ماركة بمرادفاتها بس، بدون موقع رسمي، بعد ما تأكّد.</span>
+            </div>
+            <p class="lq-field__error" role="alert" data-run="brands-error" hidden></p>
+            <p class="lq-run-brands__done" role="status" data-run="brands-done" hidden></p>
+        </section>
+
         {{-- Sheet data quality: from the sheet rows already cached (GET /api/run/sheet-quality) --}}
         <section class="lq-card lq-run-quality" aria-labelledby="run-quality-title" data-run="quality" data-state="loading">
             <div class="lq-run-quality__head">
