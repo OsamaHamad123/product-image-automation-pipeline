@@ -193,6 +193,21 @@ def clear_cache():
                 pass
 
 
+def clear_brand_cache():
+    """يحذف كاش ورقة Brands Mapping فقط (كاش صفوف المنتجات يبقى): التشغيل الجاي يقرأ الورقة من جديد."""
+    path = _cache_path("brand_mappings_cache.json")
+    try:
+        if os.path.exists(path):
+            os.remove(path)
+    except OSError:
+        pass
+    try:
+        from catalog_match import learning
+        learning.clear_cache()
+    except Exception:  # noqa: BLE001 - كاش التعلّم يُمسح إن أمكن؛ عمره ثوانٍ
+        pass
+
+
 def _read_cache(name, ttl, version):
     path = _cache_path(name)
     if not os.path.exists(path):
@@ -1568,33 +1583,118 @@ def _with_learning(mappings):
         return mappings
 
 
-def _sheet_brand_mappings(client, sheet_name_or_url):
+BRANDS_SHEET_TITLE = "Brands Mapping"
+BRANDS_SHEET_HEADERS = ["Brand", "Synonyms", "Excluded Competitors", "Sub-brands", "Official domains"]
+
+
+def _brands_worksheet(sh):
+    """ورقة 'Brands Mapping'؛ تُنشأ بالقيم الافتراضية إن لم توجد."""
+    try:
+        return sh.worksheet(BRANDS_SHEET_TITLE)
+    except gspread.exceptions.WorksheetNotFound:
+        logger.info("ورقة 'Brands Mapping' غير موجودة؛ إنشاؤها بالقيم الافتراضية.")
+        worksheet = sh.add_worksheet(title=BRANDS_SHEET_TITLE, rows="100", cols="5")
+        default_rows = [
+            BRANDS_SHEET_HEADERS,
+            ["Meliha", "Mleiha, مليحة, مليحه", "Almarai, Sutas, Koita, Lacnor, Baladna, Al Rawabi, Nadec, Nada", "", ""],
+            ["Saba Sanabel", "Sabaa Sanabel, سبع سنابل, صبا سنابل, سنابل", "Al Baker, Jenan, Grand Mills, Organic Larder", "", ""],
+            ["Mai Dubai", "May Dubai, ماي دبي, مي دبي, مياه دبي", "Masafi, Al Ain, Oasis, Arwa, Aquafina, Nestle Pure Life, Voss, Evian", "", ""],
+            ["Almarai", "Al Marai, المراعي", "Sutas, Koita, Lacnor, Baladna, Al Rawabi, Nadec, Nada, Meliha, Mleiha", "", ""],
+            ["Masafi", "مسافي", "Al Ain, Oasis, Arwa, Aquafina, Nestle Pure Life, Mai Dubai, Voss, Evian", "", ""],
+            ["Al Ain", "العين, alain", "Masafi, Oasis, Arwa, Aquafina, Nestle Pure Life, Mai Dubai, Voss, Evian", "", ""],
+        ]
+        worksheet.update("A1:E7", default_rows)
+        return worksheet
+
+
+def _read_brand_sheet(client, sheet_name_or_url):
+    """مرادفات ورقة Brands Mapping كما في الشيت (كاش 5 دقائق)؛ أي خطأ قراءة يُرفع."""
     cached = _read_cache("brand_mappings_cache.json", 300, BRAND_CACHE_VERSION)
     if cached:
         return cached["mappings"]
+    sh = _open_spreadsheet(client, sheet_name_or_url)
+    worksheet = _brands_worksheet(sh)
+    mappings = parse_brand_mapping_rows(worksheet.get_all_values())
+    _write_cache("brand_mappings_cache.json", {"mappings": mappings}, BRAND_CACHE_VERSION)
+    return mappings
+
+
+def _sheet_brand_mappings(client, sheet_name_or_url):
     try:
-        sh = _open_spreadsheet(client, sheet_name_or_url)
-        try:
-            worksheet = sh.worksheet("Brands Mapping")
-        except gspread.exceptions.WorksheetNotFound:
-            logger.info("ورقة 'Brands Mapping' غير موجودة؛ إنشاؤها بالقيم الافتراضية.")
-            worksheet = sh.add_worksheet(title="Brands Mapping", rows="100", cols="5")
-            default_rows = [
-                ["Brand", "Synonyms", "Excluded Competitors", "Sub-brands", "Official domains"],
-                ["Meliha", "Mleiha, مليحة, مليحه", "Almarai, Sutas, Koita, Lacnor, Baladna, Al Rawabi, Nadec, Nada", "", ""],
-                ["Saba Sanabel", "Sabaa Sanabel, سبع سنابل, صبا سنابل, سنابل", "Al Baker, Jenan, Grand Mills, Organic Larder", "", ""],
-                ["Mai Dubai", "May Dubai, ماي دبي, مي دبي, مياه دبي", "Masafi, Al Ain, Oasis, Arwa, Aquafina, Nestle Pure Life, Voss, Evian", "", ""],
-                ["Almarai", "Al Marai, المراعي", "Sutas, Koita, Lacnor, Baladna, Al Rawabi, Nadec, Nada, Meliha, Mleiha", "", ""],
-                ["Masafi", "مسافي", "Al Ain, Oasis, Arwa, Aquafina, Nestle Pure Life, Mai Dubai, Voss, Evian", "", ""],
-                ["Al Ain", "العين, alain", "Masafi, Oasis, Arwa, Aquafina, Nestle Pure Life, Mai Dubai, Voss, Evian", "", ""],
-            ]
-            worksheet.update("A1:E7", default_rows)
-        mappings = parse_brand_mapping_rows(worksheet.get_all_values())
-        _write_cache("brand_mappings_cache.json", {"mappings": mappings}, BRAND_CACHE_VERSION)
-        return mappings
+        return _read_brand_sheet(client, sheet_name_or_url)
     except Exception as e:
         logger.error("خطأ أثناء جلب مرادفات البراندات من الشيت: %s", e)
         return {}
+
+
+def sheet_brand_mappings(client, sheet_name_or_url):
+    """
+    ما في ورقة Brands Mapping وحده (بلا ما تعلّمه البحث من المراجعة)، من الكاش القصير نفسه الذي يقرؤه البحث. خطأ القراءة
+    يُرفع (ورقة فاضية تعيد {}، وورقة ما انقرت ما تعيد {}): «ماركات ناقصة» ما بتقترح كل الماركات لأن الشيت ما انقرا.
+    """
+    return _read_brand_sheet(client, sheet_name_or_url)
+
+
+def _brand_key(text):
+    """مفتاح مقارنة ماركة بلا اعتبار لحالة الأحرف أو الفراغات أو علامات الترقيم."""
+    return _NON_ALNUM_RE.sub("", unicodedata.normalize("NFKC", str(text or "")).casefold())
+
+
+def _brand_columns(headers):
+    """فهارس أعمدة ورقة Brands Mapping بعناوينها (نفس قراءة parse_brand_mapping_rows)؛ -1 لعمود غير موجود."""
+    normalized = [normalize_header(h) for h in headers]
+    cols = {}
+    for key, synonyms in _BRAND_SHEET_COLUMNS.items():
+        cols[key] = next((normalized.index(normalize_header(s)) for s in synonyms
+                          if normalize_header(s) in normalized), -1)
+    if cols["brand"] == -1:
+        cols.update({"brand": 0, "synonyms": 1, "competitors": 2})
+    return cols
+
+
+def add_brand_mappings(client, sheet_name_or_url, items):
+    """
+    يضيف ماركات لورقة 'Brands Mapping' بصف لكل ماركة، بطلب كتابة واحد (append_rows) بعد قراءة طازجة للورقة (لا كاش):
+    items [{brand, synonyms: [...], official_domains: [...]}] جاهزة التحقق (catalog_match.brand_assistant). ماركة مكتوبة
+    أصلاً (هي أو أحد مرادفاتها، بلا اعتبار للحالة أو الفراغات) أو مكررة بالقائمة نفسها تُتخطى مع سببها ولا تُكتب، ومرادف
+    مكتوب أصلاً لماركة ثانية لا يُكرر. تعيد {'added': [brand], 'skipped': [{'brand', 'reason': 'duplicate'}]}. الأخطاء
+    المؤقتة تُعاد محاولتها (SheetTransientError إن استمرت). كاش الماركات يُحذف بعد الكتابة كي يراها التشغيل الجاي.
+    """
+    sh = _retrying(_open_spreadsheet, client, sheet_name_or_url)
+    worksheet = _retrying(_brands_worksheet, sh)
+    rows = _retrying(worksheet.get_all_values)
+    headers = list(rows[0]) if rows else list(BRANDS_SHEET_HEADERS)
+    cols = _brand_columns(headers)
+    known = set()
+    for entry in parse_brand_mapping_rows(rows).values():
+        known.update(k for k in (_brand_key(x) for x in [entry["brand"]] + list(entry["synonyms"])) if k)
+    width = max(len(headers), 5)
+    if cols["official_domains"] == -1:
+        cols["official_domains"] = len(headers)
+        width = max(width, len(headers) + 1)
+        if rows and any(i.get("official_domains") for i in items):
+            _retrying(worksheet.update_cell, 1, len(headers) + 1, BRANDS_SHEET_HEADERS[4])
+    added, skipped, values = [], [], []
+    for item in items:
+        brand = str(item["brand"]).strip()
+        key = _brand_key(brand)
+        if not key or key in known:
+            skipped.append({"brand": brand, "reason": "duplicate"})
+            continue
+        synonyms = [x for x in item.get("synonyms") or [] if _brand_key(x) not in known and _brand_key(x) != key]
+        row = [""] * width
+        row[cols["brand"]] = brand
+        if cols["synonyms"] != -1:
+            row[cols["synonyms"]] = ", ".join(synonyms)
+        row[cols["official_domains"]] = ", ".join(item.get("official_domains") or [])
+        values.append(row)
+        added.append(brand)
+        known.add(key)
+        known.update(k for k in (_brand_key(x) for x in synonyms) if k)
+    if values:
+        _retrying(worksheet.append_rows, values, value_input_option="RAW")
+        clear_brand_cache()
+    return {"added": added, "skipped": skipped}
 
 
 # ---------------------------------------------------------------------------

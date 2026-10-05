@@ -80,5 +80,10 @@ Route::get('/api/run/plan', [RunController::class, 'plan']);
 // «تصدير تقرير للتحليل» (ملف JSON واحد لتشغيل، بلا بحث وبلا تكلفة) و«جودة بيانات الشيت» (من كاش صفوف الشيت)
 Route::get('/api/run/export', [RunController::class, 'export']);
 Route::get('/api/run/sheet-quality', [RunController::class, 'sheetQuality']);
+// «ماركات ناقصة من Brands Mapping»: القائمة قراءة فقط؛ «اقترح الموقع الرسمي» استعلام بحث واحد؛ «أضف» يكتب شيت المالك (CSRF)
+Route::get('/api/run/brand-suggestions', [RunController::class, 'brandSuggestions']);
+Route::post('/api/run/brand-official-site', [RunController::class, 'brandOfficialSite']);
+Route::post('/api/run/brand-add', [RunController::class, 'brandAdd']);
+Route::post('/api/run/brand-add-all', [RunController::class, 'brandAddAll']);
 
 Route::view('/ui-kit', 'dashboard.ui_kit')->name('dashboard.ui_kit'); // مرجع مكوّنات هوية لقطة

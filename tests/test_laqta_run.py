@@ -488,11 +488,14 @@ def test_estimates_and_auto_publish_text():
                "$out['rate'] = [RunController::medianRate(['a' => [0, 20, 40, 60], 'b' => [0, 10, 20], 'c' => [5, 5, 5], 'd' => [1, 2]]),"
                " RunController::medianRate([])];\n"
                "$out['auto'] = [RunController::autoPublishText(false, []), RunController::autoPublishText(true, []),"
-               " RunController::autoPublishText(true, ['*']), RunController::autoPublishText(true, ['Almarai', 'category:Dairy'])];\n"
+               " RunController::autoPublishText(true, ['*']), RunController::autoPublishText(true, ['Almarai', 'category:Dairy']),"
+               " RunController::autoPublishText(true, [], true), RunController::autoPublishText(false, [], true)];\n"
                "$out['defaults'] = [RunController::DEFAULT_SECONDS_PER_PRODUCT, RunController::DEFAULT_COST_PER_PRODUCT];")
     assert out["cost"] == [0.005, None, None]
     assert out["rate"] == [15.0, None]                     # median of 20 and 10; flat and short runs ignored
-    off, empty, star, some = out["auto"]
+    off, empty, star, some, lane, lane_off = out["auto"]
+    assert "لكل الماركات المؤكدة" in lane and "ما في ولا ماركة" not in lane     # the strict lane publishes unlisted brands
+    assert lane_off == off                                                      # the lane needs auto-publish on
     assert off.startswith("النشر الآلي مطفأ") and "مراجعتك" in off
     assert "ما في ولا ماركة مسموحة" in empty and "لكل الماركات" in star
     assert "Almarai" in some and "فئة Dairy" in some

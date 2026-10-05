@@ -39,6 +39,25 @@ auto-publish never ran. The evidence now also pools across brands, by the kind o
 - The lane publishes exactly what `AUTO_PUBLISH_BRANDS=*` publishes (tested on the golden set); the eval with the
   defaults is unchanged (58/58, 58/58, 52/58, no wrong auto-publish).
 
+### Added: «ماركات ناقصة من Brands Mapping», an assistant that fills the sheet's brand tab
+
+Every product of the owner's last 40 rows said `brand_unknown`, unmapped brands stayed `brand_conf = sheet_raw`
+(`auto_blocked:brand_conf_sheet_raw`) and their official sites were unknown, because the tab was filled by hand.
+
+- **`brand_suggestions`** (bridge, read only, no paid call): the queue's brands the sheet's own mapping does not know
+  (placeholders and empty cells are no brand), most rows first, with the row count, the Arabic `brand_ar` and the store
+  spellings the search discovered or learned as synonym suggestions. An unreadable sheet is an error, not «all missing».
+- **`brand_official_site`** (only on the click «اقترح الموقع الرسمي»): exactly one Serper web query, recorded in
+  `search_spend` (run `brand-site`) when answered; up to two sites that are not a retailer, marketplace, social or stock
+  site and whose host or title holds the brand's main word. Writes nothing.
+- **`brand_add`** (only on a click; POST `/api/run/brand-add`, `/brand-add-all`): appends one row per brand to
+  `Brands Mapping` after a fresh read, refusing a duplicate, a domain that is not a bare host and more than ten
+  synonyms (checked again on the server), and drops the brand cache so the next run sees it. A site is queued in
+  `system_settings.pending_harvest_domains` and indexed at the start of the next worker run behind
+  `LOCAL_INDEX_ENABLED` (`brand_assistant.harvest_pending`, at most 3 sites and 120 seconds a run).
+- **Run page card** with the row count, synonyms and site fields, «اقترح الموقع الرسمي» (one search) and «أضف» per
+  brand, and «أضف الكل بدون مواقع» after a confirm. `tests/test_brand_assistant.py`, `tests/test_laqta_run_brands.py`.
+
 ### Added: «تراجع عن الرفض», the store page's barcode, a page's gallery in X0, and the reviewers' decisions in the export
 
 The owner's last runs: a rejection made only to try the button could not be taken back (the image stayed excluded and

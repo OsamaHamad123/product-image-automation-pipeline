@@ -55,13 +55,14 @@ SHEET = [
 OLD_SHEET = [{k: v for k, v in p.items() if k != "sheet_issues"} for p in SHEET]
 
 
-def stub_env(tmp_path, products=SHEET, export=None):
+def stub_env(tmp_path, products=SHEET, export=None, extra=None):
     calls = tmp_path / "calls.txt"
     stub = tmp_path / "stub_bridge.py"
     exports = str(ROOT / "temp" / "exports")
     fixture = {"get_products": {"status": "success", "products": products},
                "explain_backfill": {"status": "success", "filled": 4, "checked": 5},
                "export_run": export or {"status": "success", "file": EXPORT_NAME, "rows": 3}}
+    fixture.update(extra or {})                      # more bridge actions (action -> answer) for one test
     stub.write_text(
         "import base64, json, os, sys\n"
         f"FIXTURE = json.loads({json.dumps(json.dumps(fixture, ensure_ascii=False))})\n"
