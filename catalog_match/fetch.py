@@ -24,8 +24,9 @@ Error codes: bad_url, timeout, connection_error, http_<status>, too_large,
 too_small, not_image, decode_error, host_slow.
 
 Slow-host breaker (HostBreaker, one per process, shared by every worker thread): a host whose downloads
-ended in 'timeout' or 'connection_error' twice within 15 minutes (three times for a UAE retailer of
-data/trusted_domains.json) is skipped for the next 15 minutes: its candidates come back at once as
+ended in 'timeout' or 'connection_error' twice within 15 minutes with no download of it coming back in between
+(three times for a UAE retailer of data/trusted_domains.json) is skipped for the next 15 minutes, except for a
+candidate whose page or image host is a UAE retailer, which is always downloaded (HostBreaker.exempt): its candidates come back at once as
 'host_slow' (counted in the outcome's reject_counts as 'download:host_slow', like any download error)
 instead of costing 10 s per attempt and a second attempt each, row after row. Other errors (a 403, a 404,
 a page that is not an image) mean the host answered and never count. The breaker is off whenever a
@@ -186,6 +187,19 @@ class HostBreaker:
             self._failures[host] = recent
             return False
 
+    def record_success(self, host: str) -> None:
+        """A download of the host came back: its earlier failures were a passing hiccup, not a slow host."""
+        if not host:
+            return
+        with self._lock:
+            self._failures.pop(host, None)
+
+    def exempt(self, *hosts: str) -> bool:
+        """A candidate from a UAE retailer (its page or its image host) is never skipped: the right picture is most
+        often there, and a CDN such as m.media-amazon.com or a retailer's image host is shared by every one of its
+        listings, so pausing it would drop the store from the rest of the run."""
+        return any(h and self._trusted(h) for h in hosts)
+
     def reset(self) -> None:
         with self._lock:
             self._failures.clear()
@@ -301,19 +315,23 @@ class HttpFetcher:
         if not url.lower().startswith(("http://", "https://")):
             return FetchedImage(candidate=cand, ok=False, error="bad_url")
         breaker, host = self._breaker(), url_host(url)
-        if breaker is not None and breaker.blocked(host):
+        # a UAE retailer's candidate is always downloaded (HostBreaker.exempt); others skip a paused host
+        skippable = breaker is not None and not breaker.exempt(host, url_host(cand.page_url or ""))
+        if skippable and breaker.blocked(host):
             return FetchedImage(candidate=cand, ok=False, error=HOST_SLOW)
         headers = self._headers(cand)
         proxy = settings.proxy_url() or None
         body, error, ctype = self._download(url, headers)
         if body is None and (_retryable(error) or (proxy and _blocked(error))) \
-                and not (breaker is not None and error in HOST_FAILURES and breaker.blocked(host)):
+                and not (skippable and error in HOST_FAILURES and breaker.blocked(host)):
             logger.debug("fetch %s: %s, retrying%s", url, error, " via proxy" if proxy else "")
             body, error, ctype = self._download(url, headers, proxy)
         if body is None:
             if breaker is not None and error in HOST_FAILURES:
                 breaker.record_failure(host)
             return FetchedImage(candidate=cand, ok=False, error=error or "error")
+        if breaker is not None:
+            breaker.record_success(host)
         return self._decode_and_store(cand, body, ctype)
 
     def _decode_and_store(self, cand: Candidate, body: bytes, ctype: str) -> FetchedImage:

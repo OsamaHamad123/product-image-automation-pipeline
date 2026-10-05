@@ -41,7 +41,10 @@ on 40% of the rows (119 extra calls), 3 of them rows whose brand is «GENERIC / 
   run): a host whose downloads ended in `timeout` or `connection_error` twice within 15 minutes (three for a UAE
   retailer of `trusted_domains.json`) is skipped for the next 15 minutes: its candidates come back at once as
   `host_slow`, counted in `reject_counts` as `download:host_slow`. A host that answers (403, 404, 5xx, not an image)
-  never counts; the breaker is off under a cassette. `download_host_slow` has Arabic sentences in the review screen and
+  never counts, and a download of it that comes back forgets its earlier failures. A candidate whose page or image
+  host is a UAE retailer is always downloaded (`HostBreaker.exempt`): an image CDN such as `m.media-amazon.com` is
+  shared by every listing of its store, so pausing it would drop the store for the rest of the run. The breaker is
+  off under a cassette. `download_host_slow` has Arabic sentences in the review screen and
   the publish check.
 - **Expansion**: a row with no usable brand (a placeholder such as «GENERIC / NO BRAND», or an empty cell with no brand
   in the name) no longer runs the round, since none of its listings can reach tier 1 or 2. The round now also stops

@@ -210,8 +210,9 @@ def test_the_skip_is_counted_in_reject_counts_like_any_download_error(breaker, m
     monkeypatch.setattr(fetch_mod.requests, "get", lambda *a, **k: pytest.fail("a paused host was requested"))
     for _ in range(2):
         breaker.record_failure("img.example-cdn.com")
-    pack = cand(2, "Buy Almarai Full Fat Fresh Milk 1L Online - Carrefour UAE",
-                "https://www.carrefouruae.com/mafuae/en/almarai-full-fat-fresh-milk-1l/p/108596")
+    # a store outside the UAE retailer list (a retailer's listing is never skipped: HostBreaker.exempt)
+    pack = cand(2, "Almarai Full Fat Fresh Milk 1L | Yasmin Store",
+                "https://www.yasminstore.com/almarai-full-fat-fresh-milk-1l")
     outcome = pipeline.find_product_image(
         SPEC, providers=[StubProvider("serper", [pack])], fetcher=HttpFetcher(store_dir=str(tmp_path), breaker=breaker),
         verifier=StubVerifier({pack.image_url: READ_MATCH}))
@@ -230,3 +231,31 @@ def test_a_new_run_starts_with_no_slow_host(monkeypatch):
     assert shared.blocked("run.example")
     main._forget_slow_hosts()
     assert not shared.blocked("run.example")
+
+
+# --- review fixes: a passing hiccup is forgotten, and a UAE retailer's candidate is never skipped ---------------
+
+def test_a_download_that_comes_back_forgets_the_hosts_earlier_failures(fake, breaker, tmp_path):
+    a, ok, b = "https://cdn.slowshop.ae/a.jpg", "https://cdn.slowshop.ae/ok.jpg", "https://cdn.slowshop.ae/b.jpg"
+    fake(dict(timeouts(a, b), **{ok: [FakeResponse(200, _jpeg(seed=3))]}))
+    assert fetch_one(breaker, a, tmp_path).error == "timeout"
+    assert fetch_one(breaker, ok, tmp_path).ok is True
+    assert fetch_one(breaker, b, tmp_path).error == "timeout"
+    assert not breaker.blocked("cdn.slowshop.ae")                 # one failure since the last answer, not two
+
+
+def test_a_uae_retailers_listing_is_downloaded_even_while_its_image_cdn_is_paused(fake, breaker, tmp_path):
+    cdn = "m.media-amazon.com"
+    slow = [f"https://{cdn}/images/I/{n}.jpg" for n in "ab"]
+    mine = f"https://{cdn}/images/I/mine.jpg"
+    other = f"https://{cdn}/images/I/other.jpg"
+    f = fake(dict(timeouts(*slow), **{mine: [FakeResponse(200, _jpeg(seed=4))]}))
+    for u in slow:                                                # the CDN itself is no UAE retailer: two pause it
+        fetch_one(breaker, u, tmp_path)
+    assert breaker.blocked(cdn)
+    [res] = HttpFetcher(store_dir=str(tmp_path), breaker=breaker).fetch(
+        [_cand(mine, "https://www.amazon.ae/Deep-Blue-Shredded-Tuna/dp/B0CTNL38Z8")], None)
+    assert res.ok is True and [u for u, _ in f.calls].count(mine) == 1
+    [res] = HttpFetcher(store_dir=str(tmp_path), breaker=breaker).fetch(
+        [_cand(other, "https://some-blog.example/tuna-review")], None)
+    assert res.error == "host_slow"                               # a non-retailer page on the same CDN is skipped
