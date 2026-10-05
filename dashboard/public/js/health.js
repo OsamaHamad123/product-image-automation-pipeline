@@ -9,7 +9,9 @@
  *   newest temp/nightly/nightly_YYYY-MM-DD.log); a missing file is the normal «لسا ما في سجل» state.
  * - «فحص النشر» starts from the saved result of the last publish rehearsal (#publish-check-initial); only its button
  *   POSTs /api/system/publish-check (publish_check.py through the bridge: it may cost one background-removal call).
- *   Step codes appear only in tooltips.
+ *   Step codes appear only in tooltips. When its processing step failed on PhotoRoom / remove.bg credit, key or quota,
+ *   «تجاوز عزل الخلفية» (after a confirm) POSTs /api/settings/bg-method {method: 'none'}; while background removal is
+ *   off, «رجّع عزل الخلفية (…)» restores the previous method. Neither runs the check again.
  * The view functions are pure (node tests call them through window.LaqtaHealth); the DOM code below only sets
  * textContent and attributes, never HTML.
  */
@@ -39,6 +41,14 @@
         warn: ['خلص فحص النشر: النشر لازم يمشي، بس في ملاحظات.', 'warning'],
         fail: ['خلص فحص النشر: في خطوة ما زبطت، شوف شو لازم تعمل.', 'danger']
     };
+
+    /* «تجاوز عزل الخلفية»: PhotoRoom / remove.bg credit, key or quota codes (publish_check.BG_SKIP_CODE_RE,
+       HealthController::BG_SKIP_PATTERN) and the method names (SettingsController::BG_METHOD_LABELS). */
+    var BG_METHOD_URL = '/api/settings/bg-method';
+    var BG_SKIP_RE = /^(photoroom|removebg)_(no_key|401|402|403|429)$/;
+    var BG_PROVIDERS = { photoroom: 'PhotoRoom', removebg: 'remove.bg' };
+    var BG_METHOD_LABELS = { photoroom: 'PhotoRoom', remove_bg_api: 'remove.bg', grabcut: 'GrabCut', rembg: 'rembg',
+        none: 'بدون عزل الخلفية' };
 
     var SERVICE_KEYS = ['google_sheets', 'serper', 'gemini', 'photoroom', 'cloudinary'];
     var OPTIONAL_SERVICES = { proxy: 'البروكسي', google_search: 'Google Custom Search (قديم)' };
@@ -501,6 +511,43 @@
         };
     }
 
+    /* «رصيد PhotoRoom خلص أو الاشتراك موقوف» for a code the skip helps with, else '' (HealthController::bgProblem). */
+    function bgProblem(code) {
+        var m = BG_SKIP_RE.exec(String(code || ''));
+        if (!m) return '';
+        var name = BG_PROVIDERS[m[1]];
+        if (m[2] === '402') return 'رصيد ' + name + ' خلص أو الاشتراك موقوف';
+        if (m[2] === '429') return name + ' رافض طلبات كتير هلق';
+        if (m[2] === 'no_key') return 'مفتاح ' + name + ' مش محفوظ';
+        return name + ' رفض المفتاح';
+    }
+
+    /* The «تجاوز عزل الخلفية» box of the card (HealthController::bgSkipView says the same): offer after a processing
+       step that failed on credit / key / quota, off while the method is «بدون عزل الخلفية», hidden otherwise or when
+       the method is unknown (bg null: the database did not answer, so nothing could be saved). */
+    function bgView(result, bg) {
+        var hidden = { state: 'hidden', text: '', restore: '', restore_label: '' };
+        if (!isObject(bg) || typeof bg.method !== 'string' || !bg.method) return hidden;
+        if (bg.method === 'none') {
+            var previous = BG_METHOD_LABELS[bg.previous] && bg.previous !== 'none' ? bg.previous : 'photoroom';
+            return { state: 'off',
+                text: 'عزل الخلفية متوقف: الصور اللي بتعتمدها بتنتشر متل ما هي على لوحة بيضا، بدون أي طلب عزل مدفوع.',
+                restore: previous, restore_label: 'رجّع عزل الخلفية (' + BG_METHOD_LABELS[previous] + ')' };
+        }
+        var steps = isObject(result) && Array.isArray(result.steps) ? result.steps : [];
+        for (var i = 0; i < steps.length; i++) {
+            var s = steps[i];
+            if (isObject(s) && s.key === 'process' && s.status === 'fail') {
+                var problem = bgProblem(s.code);
+                if (problem) {
+                    return { state: 'offer', text: problem + '، فكل اعتماد رح يفشل بنفس الشكل لحد ما ينحل. فيك تتجاوز '
+                        + 'عزل الخلفية هلق: الصور بتنتشر متل ما هي على لوحة بيضا.', restore: '', restore_label: '' };
+                }
+            }
+        }
+        return hidden;
+    }
+
     /* While the rehearsal runs: every step waits (the server answers once, at the end). */
     function publishRunningView() {
         return {
@@ -626,10 +673,12 @@
             setLogKind: setLogKind, state: state };
     }
 
-    /* «فحص النشر»: only run() (the button) POSTs; start() shows the saved result. Deps: fetchJson, renderPublish,
-       setPublishBusy, toast, now. */
+    /* «فحص النشر»: only run() (the button) POSTs the check; start() shows the saved result. Deps: fetchJson,
+       renderPublish, setPublishBusy, toast, now; for «تجاوز عزل الخلفية»: bg ({method, previous} or null), renderBg,
+       setBgBusy, confirm and confirmText. skipBg() asks first, then POSTs {method: 'none'}; restoreBg() POSTs the
+       previous method. Neither re-runs the check: the toast says to run it again. */
     function createPublishCheck(deps) {
-        var state = { last: deps.initial || null, running: false };
+        var state = { last: deps.initial || null, running: false, bg: isObject(deps.bg) ? deps.bg : null, saving: false };
 
         function now() {
             return deps.now ? deps.now() : Date.now();
@@ -637,6 +686,42 @@
 
         function show() {
             deps.renderPublish(publishView(state.last, now()));
+            if (deps.renderBg) deps.renderBg(bgView(state.last, state.bg));
+        }
+
+        function saveBg(method) {
+            if (state.saving || !state.bg) return Promise.resolve(false);
+            state.saving = true;
+            if (deps.setBgBusy) deps.setBgBusy(true);
+            return deps.fetchJson(BG_METHOD_URL, { method: 'POST', body: { method: method } }).then(function (res) {
+                var data = res && res.ok && isObject(res.data) && res.data.status === 'success' ? res.data : null;
+                if (data) {
+                    state.bg = { method: String(data.method || method), previous: String(data.previous || '') };
+                    show();
+                    deps.toast(String(data.message || 'انحفظ.'), 'success');
+                    return true;
+                }
+                deps.toast('ما انحفظ: ' + requestError(res, 'الخادم ما ردّ.'), 'danger');
+                return false;
+            }, function () {
+                deps.toast('ما قدرنا نوصل للخادم لنحفظ.', 'danger');
+                return false;
+            }).then(function (done) {
+                state.saving = false;
+                if (deps.setBgBusy) deps.setBgBusy(false);
+                return done;
+            });
+        }
+
+        function skipBg() {
+            if (bgView(state.last, state.bg).state !== 'offer') return Promise.resolve(false);
+            if (deps.confirm && !deps.confirm(deps.confirmText || 'تجاوز عزل الخلفية؟')) return Promise.resolve(false);
+            return saveBg('none');
+        }
+
+        function restoreBg() {
+            var view = bgView(state.last, state.bg);
+            return view.state === 'off' ? saveBg(view.restore) : Promise.resolve(false);
         }
 
         function run() {
@@ -667,11 +752,12 @@
             });
         }
 
-        return { start: show, run: run, state: state };
+        return { start: show, run: run, skipBg: skipBg, restoreBg: restoreBg, state: state };
     }
 
     var api = {
         publishView: publishView, publishRunningView: publishRunningView, createPublishCheck: createPublishCheck,
+        bgView: bgView, bgProblem: bgProblem, BG_SKIP_RE: BG_SKIP_RE, BG_METHOD_LABELS: BG_METHOD_LABELS,
         seconds: seconds, PUBLISH_STEPS: PUBLISH_STEPS, PUBLISH_STATUS: PUBLISH_STATUS,
         serviceView: serviceView, servicesView: servicesView, checkingView: checkingView, optionalView: optionalView,
         checkedView: checkedView, opsView: opsView, logView: logView, whenText: whenText, ageText: ageText,
@@ -1119,18 +1205,56 @@
         if (publishLabel) publishLabel.textContent = busy ? 'جاري الفحص…' : 'افحص النشر';
     }
 
+    // «تجاوز عزل الخلفية» / «رجّع عزل الخلفية (…)»: the method as the page was rendered (data-method, '' without the
+    // database), then what the endpoint answered
+    var bgBox = $('bg-box');
+    var bgSkip = $('bg-skip');
+    var bgRestore = $('bg-restore');
+
+    function readBg() {
+        var method = bgBox ? String(bgBox.getAttribute('data-method') || '') : '';
+        return method ? { method: method, previous: String(bgBox.getAttribute('data-previous') || '') } : null;
+    }
+
+    function renderBg(view) {
+        if (!bgBox) return;
+        bgBox.setAttribute('data-state', view.state);
+        setHidden(bgBox, view.state === 'hidden');
+        $('bg-text').textContent = view.text;
+        setHidden(bgSkip, view.state !== 'offer');
+        setHidden(bgRestore, view.state !== 'off');
+        if (bgRestore) bgRestore.setAttribute('data-method', view.restore);
+        $('bg-restore-label').textContent = view.restore_label;
+    }
+
+    function setBgBusy(busy) {
+        [bgSkip, bgRestore].forEach(function (button) {
+            if (!button) return;
+            button.disabled = busy;
+            if (busy) button.setAttribute('aria-busy', 'true');
+            else button.removeAttribute('aria-busy');
+        });
+    }
+
     if (publishCard) {
         var publish = createPublishCheck({
             initial: readPublishInitial(),
+            bg: readBg(),
             fetchJson: fetchJson,
             renderPublish: renderPublish,
+            renderBg: renderBg,
             setPublishBusy: setPublishBusy,
+            setBgBusy: setBgBusy,
+            confirm: function (text) { return window.confirm(text); },
+            confirmText: bgSkip ? bgSkip.getAttribute('data-confirm') : '',
             toast: function (text, variant) {
                 if (window.Laqta && window.Laqta.toast) window.Laqta.toast(text, { variant: variant });
             },
             now: function () { return Date.now(); }
         });
         publish.start();
+        if (bgSkip) bgSkip.addEventListener('click', function () { publish.skipBg(); });
+        if (bgRestore) bgRestore.addEventListener('click', function () { publish.restoreBg(); });
         if (publishButton) {
             publishButton.addEventListener('click', function () { publish.run(); });
             // from the review screen's failed approvals (/system-diagnostics#publish-check): the button is ready,

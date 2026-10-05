@@ -2,6 +2,7 @@
     لقطة · التشغيل (Run board). RunController::page renders it with:
       $live         RunController::snapshot(): /api/batch-status + the current/last run summary + latest rows
       $autoPublish  RunController::autoPublishState(): the worker's auto-publish setting in one sentence
+      $sheetTab     RunController::sheetTab(): «التشغيل بيقرأ من تبويب «X»» (configured, else the last read's first tab)
     public/js/run.js keeps it live from GET /api/run/live and fills «قبل ما تبدأ» from GET /api/run/plan.
     The review grid moved to the review page (/catalog?mode=bulk); the sheet connection moved to Settings.
 --}}
@@ -69,6 +70,12 @@
             <div class="lq-run-autopub" data-run="autopub" data-enabled="{{ $autoPublish['enabled'] ? 'true' : 'false' }}">
                 <x-lq.icon name="shield" :size="18" class="lq-run-autopub__icon" />
                 <span>{{ $autoPublish['text'] }} <a class="lq-link" href="{{ route('dashboard.settings') }}?tab=auto-publish">تغيير</a></span>
+            </div>
+
+            {{-- The tab the run reads (RunController::sheetTab, never a Google read): with no tab set it is the first tab --}}
+            <div class="lq-run-tab" data-run="sheet-tab" data-suspicious="{{ $sheetTab['suspicious'] ? 'true' : 'false' }}">
+                <x-lq.icon name="grid" :size="16" class="lq-run-tab__icon" />
+                <span><bdi>{{ $sheetTab['text'] }}</bdi>@if ($sheetTab['suspicious']) — إذا مش تبويب منتجاتك، اختار التبويب الصح من الإعدادات@endif <a class="lq-link" href="{{ route('dashboard.settings') }}?tab=sheet">تغيير</a></span>
             </div>
 
             <div class="lq-run-new__start">

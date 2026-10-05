@@ -7,6 +7,8 @@
       $lastRun          HealthController::lastRunCard(): the last run (temp/nightly/last_report.json), or null
       $lastPublishCheck the saved result of the last «فحص النشر» (temp/publish_check_last.json, redacted) or null
       $publish          HealthController::publishCheckView(): that result as the card's summary and four step rows
+      $bg, $bgView      SettingsController::currentBgState() (null without the database) and HealthController::bgSkipView():
+                        the «تجاوز عزل الخلفية» / «رجّع عزل الخلفية (…)» box of the card; $bgConfirm its confirm text
     Opening the page never runs the check (a paid Serper query and a PhotoRoom call): the button does. The same goes
     for «فحص النشر» (POST /api/system/publish-check: it may cost one background-removal call).
     public/js/health.js runs the check on click, loads «عمليات البحث» from GET /api/system/ops-health and
@@ -109,6 +111,17 @@
                 </li>
             @endforeach
         </ol>
+
+        {{-- «تجاوز عزل الخلفية» (HealthController::bgSkipView, the same as bgView in health.js): offer = the processing step
+             failed on PhotoRoom / remove.bg credit, key or quota; off = the method is «بدون عزل الخلفية», with a button that
+             restores the previous method. Both POST /api/settings/bg-method; nothing is re-checked automatically. --}}
+        <div class="lq-health-bg" data-health="bg-box" data-state="{{ $bgView['state'] }}" data-method="{{ $bg['method'] ?? '' }}" data-previous="{{ $bg['previous'] ?? '' }}" @if ($bgView['state'] === 'hidden') hidden @endif>
+            <p class="lq-health-bg__text" dir="auto" data-health="bg-text">{{ $bgView['text'] }}</p>
+            <div class="lq-health-bg__actions">
+                <button type="button" class="lq-btn lq-btn--danger lq-btn--sm" data-health="bg-skip" data-confirm="{{ $bgConfirm }}" @if ($bgView['state'] !== 'offer') hidden @endif>تجاوز عزل الخلفية</button>
+                <button type="button" class="lq-btn lq-btn--secondary lq-btn--sm" data-health="bg-restore" data-method="{{ $bgView['restore'] }}" @if ($bgView['state'] !== 'off') hidden @endif><span data-health="bg-restore-label">{{ $bgView['restore_label'] }}</span></button>
+            </div>
+        </div>
         <p class="lq-health__footnote" data-health="publish-notes">{{ implode(' ', $publish['notes']) }}</p>
     </section>
     <script type="application/json" id="publish-check-initial">@json($lastPublishCheck)</script>

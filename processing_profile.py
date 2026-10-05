@@ -11,10 +11,15 @@
 # - اللوحة: OUTPUT_CANVAS_SIZE كمربع (catalog_match.settings.output_canvas_size، افتراضياً 800).
 #   IMAGE_TARGET_SIZE (800x800 ثابتة في config.py) لم تعد تحدد لوحة النشر.
 # - قيم الطلب (target_width / target_height / enhance / bg_removal_method) لا تغيّر الملف.
+# - «بدون عزل الخلفية» (bg_removal_method = none، وزر «تجاوز عزل الخلفية» بصفحة الصحة): اختيار المالك نفسه، فلوحة
+#   النشر هي الصورة كما هي على لوحة بيضا وتُنشر نظيفة (main.publish_image: bg_skipped). skips_background يقولها.
 
 from dataclasses import dataclass
 
 import config
+
+# أسماء «بدون عزل» كما يوحدها image_processor._METHOD_ALIASES ('no' و 'off' تعني 'none')
+NO_REMOVAL_METHODS = frozenset({"none", "no", "off"})
 
 
 @dataclass(frozen=True)
@@ -26,6 +31,11 @@ class ProcessingProfile:
     @property
     def target(self):
         return (self.canvas, self.canvas)
+
+    @property
+    def skips_background(self):
+        """المالك اختار «بدون عزل الخلفية»: الصورة تُنشر كما هي على لوحة بيضا، وهذا ليس فشلاً في العزل."""
+        return str(self.bg_method or "").strip().lower() in NO_REMOVAL_METHODS
 
     def as_dict(self):
         return {"canvas": self.canvas, "enhance": self.enhance, "bg_method": self.bg_method}

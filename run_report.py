@@ -192,15 +192,27 @@ def outbox_counts(sheets=None, since_ts=None):
     return out or None
 
 
+def _count(value):
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+# صور نُشرت تلقائياً «بدون عزل الخلفية» (المالك أوقف عزل الخلفية بالإعدادات): سطر بالتقرير وبطاقة «آخر تشغيل»
+BG_SKIPPED_TEXT = "انتشر بدون عزل الخلفية"
+
+
 def _iso(ts):
     return datetime.datetime.fromtimestamp(ts).isoformat(timespec="seconds") if ts else None
 
 
 def build_report(trigger, attempts, started_ts, ended_ts, health=None, db=None, sheets=None):
     """
-    التقرير من محاولات التشغيل (قائمة {stop_reason, run_id, worker_id, notice}، الأخيرة هي النتيجة):
+    التقرير من محاولات التشغيل (قائمة {stop_reason, run_id, worker_id, notice, bg_skipped}، الأخيرة هي النتيجة):
     {trigger, started_at, ended_at, duration_s, outcome, stop_reason, reason_text, exit_code, attempts,
-     attempt_reasons, run_id, run_ids, counts, outbox, spend, notices, database}.
+     attempt_reasons, run_id, run_ids, counts, outbox, spend, notices, database, bg_skipped}.
+    bg_skipped: صور نشرها العامل تلقائياً «بدون عزل الخلفية» باختيار المالك (main.bg_skipped_count)، مجموع المحاولات.
     «تشغيل آخر يعمل» بعد محاولة عملت فعلاً ليس «لم يبدأ»: النتيجة handed_over بأرقام المحاولات السابقة.
     """
     if db is None:
@@ -239,6 +251,7 @@ def build_report(trigger, attempts, started_ts, ended_ts, health=None, db=None, 
         "spend": None,
         "notices": notices,
         "database": "unavailable" if _key(stop_reason) == "db_unavailable" else "ok",
+        "bg_skipped": sum(_count(a.get("bg_skipped")) for a in attempts),
     }
     if report["outcome"] == "skipped":
         return report
@@ -346,6 +359,8 @@ def telegram_text(report):
         if counts.get("pending_left"):
             lines.append(f"بقي في الانتظار {counts['pending_left']}"
                          + (f" (منها {counts['provider_down']} لأن محركات البحث لم ترد)" if counts.get("provider_down") else ""))
+    if report.get("bg_skipped"):
+        lines.append(f"{BG_SKIPPED_TEXT} {_count(report['bg_skipped'])} (عزل الخلفية متوقف بالإعدادات)")
     elif report.get("database") == "unavailable":
         lines.append("الأرقام غير متاحة (قاعدة البيانات لا ترد).")
     outbox = report.get("outbox")

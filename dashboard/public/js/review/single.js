@@ -457,6 +457,32 @@
         return S.jobs.retry(job.id, { publishAnyway: true, quality: null });
     }
 
+    // «تجاوز عزل الخلفية» من لوحة الاعتمادات اللي ما مشيت لأن رصيد أو مفتاح أو حصة PhotoRoom / remove.bg فشّل العزل
+    // (R.bgSkipCode): تأكيد صريح بنفس نص صفحة الصحة (cfg.bg.confirm، SettingsController::BG_SKIP_CONFIRM)، ثم
+    // POST /api/settings/bg-method {method: 'none'}. ما بيعيد أي اعتماد لحاله: «أعد المحاولة» على كل صورة بينشرها متل ما هي
+    async function confirmBgSkip() {
+        const S = st();
+        const bg = S.cfg.bg && typeof S.cfg.bg === 'object' ? S.cfg.bg : {};
+        if (!bg.method || bg.method === 'none' || S.bgSaving || !S.urls.bgMethod) return false;
+        if (!root.confirm(bg.confirm || 'تجاوز عزل الخلفية؟')) return false;
+        S.bgSaving = true;
+        R.renderJobs(S.jobs.state());
+        const res = await R.requestJson(S.urls.bgMethod, { method: 'POST', body: { method: 'none' } });
+        S.bgSaving = false;
+        const data = (res && res.data) || {};
+        const done = !!(res && res.ok && data.status === 'success');
+        if (done) {
+            S.cfg.bg = Object.assign({}, bg, { method: String(data.method || 'none'), previous: String(data.previous || '') });
+            R.toast('عزل الخلفية متوقف: اضغط «أعد المحاولة» على الصور اللي ما مشيت لتنتشر متل ما هي على لوحة بيضا.',
+                    'success', 9000);
+        } else {
+            R.toast(res && res.network ? 'ما قدرنا نوصل للخادم.' : `ما انحفظ: ${R.plainError(data.error, 'جرّب مرة ثانية.')}`,
+                    'danger', 9000);
+        }
+        R.renderJobs(S.jobs.state());
+        return done;
+    }
+
     function settleJob(job) {
         const S = st();
         const data = (job.result && job.result.data) || {};
@@ -490,6 +516,11 @@
                             'warning', 9000);
                 } else if (sheet.state && sheet.state !== 'written') {
                     R.toast(`اعتُمدت صورة «${job.label}» ${sheet.text}`, sheet.tone, 12000);
+                }
+                if (notes.bgSkipped && !S.bgSkippedSaid) {
+                    // مرة بالجلسة: كل اعتماد بعده بينتشر متل ما هو، واللوحة النهائية بتقولها لكل منتج
+                    S.bgSkippedSaid = true;
+                    R.toast(`انتشرت صورة «${job.label}» بدون عزل الخلفية (عزل الخلفية متوقف بالإعدادات).`, 'info', 9000);
                 }
                 if (notes.duplicate) {
                     const who = notes.duplicateOf.length ? `: ${notes.duplicateOf.map(n => `«${n}»`).join('، ')}` : '';
@@ -1281,6 +1312,10 @@
                 if (notes.flags.length) box.setAttribute('title', notes.flags.join(' · '));
                 body.appendChild(box);
             }
+            if (notes.bgSkipped) {
+                body.appendChild(alertBox('info', 'انتشرت بدون عزل الخلفية:',
+                                          'عزل الخلفية متوقف بالإعدادات، فالصورة انتشرت متل ما هي على لوحة بيضا.'));
+            }
             if (notes.noteTexts && notes.noteTexts.length) {
                 body.appendChild(alertBox('info', 'ملاحظة من فحص القص:', `${notes.noteTexts.join('، ')}.`));
             }
@@ -1436,7 +1471,7 @@
         sessionOf, currentItem, currentCandidates, currentPick, systemPickUrl, boundContext, openItem, startSearch, reopen,
         resetMoved, approveBlock,
         cancelPendingSearch, applySearchResponse, canApprove, canReject, selectByNumber, approveCurrent, sendJob,
-        settleJob, confirmReplace, confirmPublishAnyway, openReasons, closeReasons, currentReasons, rejectCurrent, skip, move, toggleNotFound,
+        settleJob, confirmReplace, confirmPublishAnyway, confirmBgSkip, openReasons, closeReasons, currentReasons, rejectCurrent, skip, move, toggleNotFound,
         previewUrl, chooseFile, retryFailures, renderWorkspace, updateBar, updateJobsOffset, isOpen, updatePosition
     };
 })(typeof window !== 'undefined' ? window : globalThis);

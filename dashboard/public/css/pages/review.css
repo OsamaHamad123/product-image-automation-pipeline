@@ -1369,6 +1369,16 @@
     flex-shrink: 0;
 }
 
+/* «تجاوز عزل الخلفية» after approvals failed on PhotoRoom / remove.bg credit, key or quota */
+.rv-jobs__skipbg {
+    flex-shrink: 0;
+}
+
+.rv-jobs__bgoff {
+    font-size: var(--lq-fs-sm);
+    color: var(--lq-text-2);
+}
+
 /* ==========================================================================
    Bulk mode
    ========================================================================== */

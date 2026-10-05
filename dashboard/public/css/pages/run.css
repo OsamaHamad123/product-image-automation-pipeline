@@ -115,6 +115,29 @@
     color: var(--lq-teal-700);
 }
 
+/* «التشغيل بيقرأ من تبويب «X»»: one short line; a proposals / backup looking tab is a warning */
+.lq-run-tab {
+    display: flex;
+    gap: var(--lq-space-2);
+    font-size: var(--lq-fs-sm);
+    line-height: 1.6;
+    color: var(--lq-text-2);
+}
+
+.lq-run-tab__icon {
+    flex-shrink: 0;
+    margin-top: 3px;
+    color: var(--lq-text-3);
+}
+
+.lq-run-tab[data-suspicious="true"] {
+    color: var(--lq-warning-ink);
+}
+
+.lq-run-tab[data-suspicious="true"] .lq-run-tab__icon {
+    color: var(--lq-warning);
+}
+
 .lq-run-new__start {
     display: flex;
     flex-direction: column;

@@ -41,8 +41,74 @@ class RunController extends Controller
         return view('dashboard.batch_automation', [
             'live' => $live,
             'autoPublish' => self::autoPublishState(),
+            'sheetTab' => self::sheetTab(),
             'lqReviewCount' => $live['batch']['ready_for_review'] ?? null,
         ]);
+    }
+
+    // ------------------------------------------------------------------
+    // «التشغيل بيقرأ من تبويب «X»»: with no SPREADSHEET_TAB_NAME the run reads and writes the FIRST tab, and on
+    // 2026-10-05 a proposals tab another tool created («منتجات جديدة مقترحة 2») had become the first tab. The page never
+    // asks Google: the configured name, else the tab of the last sheet read (ProductController::sheetRows cache) or of the
+    // last «فحص النشر», else «أول تبويب بالشيت».
+    // ------------------------------------------------------------------
+
+    /** نفس publish_check._BACKUP_* (اسم نسخة احتياطية أو تبويب اقتراحات). */
+    public const TAB_WARN_PREFIXES = ['backup', 'copy', 'archive', 'propos', 'suggest'];
+    public const TAB_WARN_WORDS = ['old', 'bak'];
+    public const TAB_WARN_PHRASES = ['new products', 'copy of'];
+    public const TAB_WARN_AR = ['نسخة', 'نسخه', 'احتياط', 'قديم', 'أرشيف', 'ارشيف', 'مقترح', 'اقتراح'];
+
+    /** {title, configured, text, suspicious}: السطر اللي بيقول من أي تبويب بيقرأ التشغيل. */
+    public static function sheetTab(?string $configured = null, ?string $known = null): array
+    {
+        $configured = trim($configured ?? (string) (SettingsController::envValues(['SPREADSHEET_TAB_NAME'])['SPREADSHEET_TAB_NAME'] ?? ''));
+        $title = $configured !== '' ? $configured : trim($known ?? (string) self::knownFirstTab());
+        if ($title === '') {
+            return ['title' => '', 'configured' => false, 'text' => 'التشغيل بيقرأ من أول تبويب بالشيت', 'suspicious' => false];
+        }
+        return ['title' => $title, 'configured' => $configured !== '',
+                'text' => 'التشغيل بيقرأ من تبويب «' . $title . '»' . ($configured !== '' ? '' : ' (أول تبويب بالشيت)'),
+                'suspicious' => self::looksLikeBackupTab($title)];
+    }
+
+    /** اسم أول تبويب كما عرفناه بلا طلب: كاش آخر قراءة للشيت، وإلا آخر «فحص النشر»؛ وإلا null. */
+    public static function knownFirstTab(): ?string
+    {
+        try {
+            $cached = Cache::get(ProductController::SHEET_ROWS_CACHE_KEY);
+            if (is_array($cached) && is_string($cached['tab'] ?? null) && trim($cached['tab']) !== '') {
+                return trim($cached['tab']);
+            }
+        } catch (\Throwable $e) {
+        }
+        $check = HealthController::lastPublishCheck();
+        $tab = is_array($check) && is_scalar($check['sheet_tab'] ?? null) ? trim((string) $check['sheet_tab']) : '';
+        return $tab !== '' ? $tab : null;
+    }
+
+    /** publish_check._looks_like_backup بنفس القواعد (بلا حالة أحرف). */
+    public static function looksLikeBackupTab(string $title): bool
+    {
+        $text = class_exists(\Normalizer::class) ? (string) \Normalizer::normalize($title, \Normalizer::FORM_KC) : $title;
+        $text = trim((string) preg_replace('/[^\p{L}\p{N}]+/u', ' ', mb_strtolower($text, 'UTF-8')));
+        $words = $text === '' ? [] : explode(' ', $text);
+        foreach ($words as $word) {
+            if (in_array($word, self::TAB_WARN_WORDS, true)) {
+                return true;
+            }
+            foreach (self::TAB_WARN_PREFIXES as $prefix) {
+                if (str_starts_with($word, $prefix)) {
+                    return true;
+                }
+            }
+        }
+        foreach (array_merge(self::TAB_WARN_PHRASES, self::TAB_WARN_AR) as $part) {
+            if (str_contains($text, $part) || str_contains($title, $part)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public function live()

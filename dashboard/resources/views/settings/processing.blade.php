@@ -1,6 +1,9 @@
 {{--
     Settings · معالجة الصور. $processing = SettingsController::processingData(): the saved output size, background
-    removal method and colour enhancement (system_settings keys that config.load_db_config reads before every run).
+    removal method and colour enhancement (system_settings keys that config.load_db_config reads before every run),
+    the methods this machine can run (GrabCut / rembg only when installed: cli_bridge bg_methods), and bg: the
+    «تجاوز عزل الخلفية» state (SettingsController::bgState). With the method «none» the tab says background removal
+    is off and offers «رجّع عزل الخلفية (…)», which POSTs /api/settings/bg-method (public/js/settings.js).
 --}}
 @php $pr = $processing; @endphp
 <form method="POST" action="{{ route('dashboard.save_settings') }}" class="lq-card lq-settings-card" aria-labelledby="lq-settings-processing-title">
@@ -10,6 +13,19 @@
         <h2 class="lq-section-title" id="lq-settings-processing-title">معالجة الصور</h2>
         <p class="lq-settings-card__intro">هاي الإعدادات بتنطبق على الصور اللي بتنعالج من التشغيل الجاي. الصور المنشورة من قبل ما بتتغير.</p>
     </div>
+
+    @if ($pr['bg']['off'])
+        <div class="lq-alert lq-alert--warning lq-settings-bgoff" role="status" data-bg-off>
+            <x-lq.icon name="alert" :size="18" class="lq-alert__icon" />
+            <div class="lq-alert__body">
+                <strong class="lq-alert__title">عزل الخلفية متوقف:</strong>
+                الصور اللي بتعتمدها بتنتشر متل ما هي على لوحة بيضا، بدون أي طلب عزل مدفوع.
+                <div class="lq-settings-bgoff__actions">
+                    <button type="button" class="lq-btn lq-btn--secondary lq-btn--sm" data-bg-restore="{{ $pr['bg']['previous'] }}" @disabled((bool) $dbError)>رجّع عزل الخلفية ({{ $pr['bg']['previous_label'] }})</button>
+                </div>
+            </div>
+        </div>
+    @endif
 
     <label class="lq-field">
         <span class="lq-field__label">مقاس الصورة النهائية</span>
@@ -29,7 +45,7 @@
                 <span>{{ $label }}</span>
             </label>
         @endforeach
-        <span class="lq-field__hint">إذا فشل العزل، الصورة ما بتنزل الشيت بصمت: بتستنى مراجعتك.</span>
+        <span class="lq-field__hint" data-bg-hint>{{ $pr['hint'] }}</span>
     </fieldset>
 
     <div class="lq-settings-switch-row">

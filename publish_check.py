@@ -6,14 +6,17 @@
 #      المرشحات ببصمتها (image_processor._load_from_candidate_store) ثم التنزيل الحقيقي (_download_bytes: مباشرة ثم
 #      البروكسي) ومطابقة البصمة. بلا منتج بانتظار المراجعة: الصورة التجريبية assets/selftest/publish_check_sample.png.
 #   2. process: image_processor.process_product_image_result بملف المعالجة الحالي (processing_profile.current())
-#      على ملف مؤقت: قد يكلّف طلب عزل خلفية واحد (وقراءة Gemini لصندوق المنتج إن كان مفتاحها محفوظاً).
+#      على ملف مؤقت: قد يكلّف طلب عزل خلفية واحد (وقراءة Gemini لصندوق المنتج إن كان مفتاحها محفوظاً). عزل الخلفية
+#      متوقف بالإعدادات (none): ✅ بلا أي طلب مدفوع، لأن الاعتماد ينشرها كما هي (main.publish_image: bg_skipped).
+#      فشل رصيد أو مفتاح أو حصة PhotoRoom / remove.bg (bg_skip_offered): البطاقة تعرض زر «تجاوز عزل الخلفية».
 #   3. upload: cloudinary_storage.upload_selftest_image (رافع النشر نفسه) إلى laqta_selftest/publish_check باسم ثابت
 #      يُستبدل، ثم destroy_selftest_image بعد كل رفع نجح: لا تبقى صورة، ولا تُلمس صورة منتج.
 #   4. sheet: الشيت كما يفتحه النشر (google_sheets.open_worksheet مع SPREADSHEET_TAB_NAME)، عمود الرابط بـ
 #      find_link_column(create=False)، ثم قراءة خلية عنوان عمود الرابط وكتابة القيمة نفسها بنفس طريقة طابور الكتابة
 #      (values_batch_update، RAW): يثبت صلاحية التعديل على التبويب الحقيقي بلا تغيير أي بيانات. عنوان ما انقرأ
 #      بشكل أكيد: لا كتابة، وملاحظة. ومعها اسم التبويب وتراكم طابور الكتابة (google_sheets.outbox_summary)؛ طابور
-#      لا يُقرأ (قاعدة البيانات) فشل، لأن الاعتماد يكتب بالشيت عن طريقه.
+#      لا يُقرأ (قاعدة البيانات) فشل، لأن الاعتماد يكتب بالشيت عن طريقه. تبويب اسمه نسخة أو اقتراحات
+#      (_looks_like_backup) ملاحظة ⚠️ تقول وين رح ينكتب، وبلا SPREADSHEET_TAB_NAME التفاصيل تقول إنو أول تبويب.
 # كل خطوة بمهلتها (خيط daemon)، والخطوة اللي بتحتاج نتيجة خطوة فشلت «ما انفحصت» (skipped) لا فشل. لا كتابة بأي صف
 # منتج، ولا طابور، ولا إعدادات، ولا أقفال؛ آمن أثناء تشغيل (ملاحظة فقط). كل نص بالنتيجة يمر على
 # verify_cloud_services._redact (لا يظهر أي مفتاح). آخر نتيجة تُحفظ في temp/publish_check_last.json لصفحة الصحة.
@@ -113,8 +116,25 @@ UPLOAD_CAUSES = {
 }
 UPLOAD_NETWORK = ("upload_failed", "Cloudinary ما ردّ.", "Cloudinary ما بيرد: تأكد من الإنترنت وأعد الفحص.")
 
-_BACKUP_WORDS = ("backup", "copy", "old", "archive")
-_BACKUP_AR = ("نسخة", "احتياط", "قديم", "أرشيف")
+# اسم تبويب مش تبويب المنتجات على الأغلب: نسخة احتياطية، أو تبويب اقتراحات عملته أداة تانية (فحص 2026-10-05: «منتجات
+# جديدة مقترحة 2» صار أول تبويب، وبلا SPREADSHEET_TAB_NAME النشر بيقرأ ويكتب بأول تبويب). كلمات إنكليزية (بداية كلمة،
+# بلا حالة أحرف)، وعبارات، وجذور عربية (جزء من النص)
+_BACKUP_PREFIXES = ("backup", "copy", "archive", "propos", "suggest")
+_BACKUP_WORDS = ("old", "bak")
+_BACKUP_PHRASES = ("new products", "copy of")
+_BACKUP_AR = ("نسخة", "نسخه", "احتياط", "قديم", "أرشيف", "ارشيف", "مقترح", "اقتراح")
+TAB_ACTION = "النشر رح يكتب بتبويب «{title}» — إذا مش تبويب منتجاتك، اختار التبويب الصح من الإعدادات (تبويب «الشيت»)"
+
+# فشل عزل الخلفية عند PhotoRoom أو remove.bg بسبب الرصيد أو المفتاح أو الحصة: «تجاوز عزل الخلفية» (bg_removal_method =
+# none) بيخلي الاعتماد يمشي لحد ما ينحل. نفس القاعدة بـ HealthController::BG_SKIP_PATTERN و health.js و review/core.js
+BG_SKIP_CODE_RE = r"^(photoroom|removebg)_(no_key|401|402|403|429)$"
+SKIP_ACTION = "اضغط «تجاوز عزل الخلفية»"
+BG_SKIPPED_NOTE = "عزل الخلفية متوقف بالإعدادات: الصورة بتنتشر متل ما هي"
+
+
+def bg_skip_offered(code):
+    """هل رمز فشل المعالجة رصيد أو مفتاح أو حصة مزوّد عزل، فينفع معه «تجاوز عزل الخلفية»؟"""
+    return bool(re.match(BG_SKIP_CODE_RE, str(code or "")))
 
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
@@ -144,14 +164,15 @@ def _process_error(code, method):
     name = _PROVIDER_LABELS.get(prefix)
     if name:
         rest = code[len(prefix) + 1:]
+        # رصيد أو مفتاح أو حصة (bg_skip_offered): كل اعتماد رح يفشل بنفس الشكل، فالبطاقة بتعرض «تجاوز عزل الخلفية»
         if rest == "no_key":
-            return (f"مفتاح {name} مش محفوظ.", f"ضيف مفتاح {name} بالإعدادات، أو اختار طريقة عزل تانية من تبويب «معالجة الصور».")
+            return (f"مفتاح {name} مش محفوظ.", f"ضيف مفتاح {name} بالإعدادات، أو {SKIP_ACTION}.")
         if rest in ("401", "403"):
-            return (f"{name} رفض المفتاح.", f"مفتاح {name} مرفوض: حدّثه بالإعدادات.")
+            return (f"{name} رفض المفتاح.", f"مفتاح {name} مرفوض: حدّثه بالإعدادات، أو {SKIP_ACTION}.")
         if rest == "402":
-            return (f"رصيد {name} خلص أو الاشتراك موقوف.", f"اشحن رصيد {name} أو حدّث مفتاحه بالإعدادات.")
+            return (f"رصيد {name} خلص أو الاشتراك موقوف.", f"اشحن رصيد {name}، أو {SKIP_ACTION}.")
         if rest == "429":
-            return (f"{name} رافض طلبات كتير هلق.", "استنى دقيقة وأعد الفحص.")
+            return (f"{name} رافض طلبات كتير هلق (الحصة خلصت).", f"استنى دقيقة وأعد الفحص، أو {SKIP_ACTION}.")
         if rest in ("timeout", "connection_error") or rest.startswith("5"):
             return (f"{name} ما ردّ.", f"{name} ما بيرد: تأكد من الإنترنت وأعد الفحص بعد شوي.")
         if rest == "bad_output":
@@ -333,6 +354,12 @@ def step_process(ctx):
     notes = [str(n) for n in (result.quality_notes or [])]
     data = {"canvas": result.path, "provider": result.provider, "isolated": bool(result.isolated),
             "quality_flags": flags}
+    skipped = str(method or "").strip().lower() in processing_profile.NO_REMOVAL_METHODS
+    if skipped and result.provider == "none" and not result.isolated:
+        # المالك أوقف عزل الخلفية (تبويب «معالجة الصور» أو «تجاوز عزل الخلفية»): الاعتماد بينشرها نظيفة (main.publish_image
+        # bg_skipped)، وما في أي طلب مدفوع
+        return _outcome(OK, f"{method_line} {BG_SKIPPED_NOTE} على {size}، بدون أي طلب عزل مدفوع. صورة خلفيتها "
+                        "مش بيضا بتبين خلفيتها.", "", "bg_skipped", **data)
     if result.isolated:
         detail = f"{method_line} انعزلت الخلفية بـ {provider}، و{size} جاهزة."
         if notes:
@@ -347,7 +374,8 @@ def step_process(ctx):
         return _outcome(WARN, detail, "إذا تكرر هالشي على صور كتير، جرّب مزوّد عزل تاني من تبويب «معالجة الصور».",
                         "quality_flags", **data)
     return _outcome(FAIL, f"{method_line} الصورة ما انعزلت خلفيتها، والاعتماد ما بينشر صورة خلفيتها ما انعزلت.",
-                    "اختار PhotoRoom أو remove.bg من تبويب «معالجة الصور» بالإعدادات.", "background_not_removed", **data)
+                    "اختار PhotoRoom أو remove.bg من تبويب «معالجة الصور» بالإعدادات، أو «بدون عزل الخلفية» لتنتشر الصور "
+                    "متل ما هي.", "background_not_removed", **data)
 
 
 # ---------------------------------------------------------------------------
@@ -407,9 +435,19 @@ def _a1(title, row, col):
 
 
 def _looks_like_backup(title):
-    words = set(google_sheets.normalize_header(title).split())
-    text = str(title or "")
-    return bool(words & set(_BACKUP_WORDS)) or any(w in text for w in _BACKUP_AR)
+    """اسم تبويب نسخة احتياطية أو اقتراحات (مش تبويب المنتجات على الأغلب)، بلا حالة أحرف: «Copy of Products»،
+    «Products backup»، «New Products»، «Suggested items»، «منتجات جديدة مقترحة 2»، «نسخة من المنتجات»."""
+    text = google_sheets.normalize_header(title)
+    words = text.split()
+    raw = str(title or "")
+    return (any(w.startswith(_BACKUP_PREFIXES) for w in words) or bool(set(words) & set(_BACKUP_WORDS))
+            or any(p in text for p in _BACKUP_PHRASES) or any(w in raw or w in text for w in _BACKUP_AR))
+
+
+def _tab_warning(lines, title, **data):
+    """⚠️: النشر رح يكتب بتبويب اسمه بيوحي إنو نسخة أو اقتراحات (_looks_like_backup)."""
+    detail = " ".join(lines + ["اسم التبويب بيوحي إنو نسخة أو تبويب اقتراحات، مش تبويب المنتجات."])
+    return _outcome(WARN, detail, TAB_ACTION.format(title=title), "sheet_tab_backup", tab=title, **data)
 
 
 def _outbox_line():
@@ -477,7 +515,9 @@ def _sheet_permission():
                         _share_action() + " وتأكد من رابط الشيت بالإعدادات.", "sheet_not_shared")
     title = str(getattr(worksheet, "title", "") or "")
     tab_name = (getattr(config, "SPREADSHEET_TAB_NAME", "") or "").strip()
-    lines = [f"النشر رح يكتب بتبويب «{title}»" + ("." if tab_name else " (أول تبويب، لأنو ما في تبويب محدد بالإعدادات).")]
+    lines = [f"النشر رح يكتب بتبويب «{title}»" + ("." if tab_name else " (أول تبويب، لأنو ما في تبويب محدد بالإعدادات): "
+                                                  "التشغيل والنشر بيقروا وبيكتبوا بأول تبويب بالشيت.")]
+    suspicious = _looks_like_backup(title)
     outbox, dead, outbox_ok = _outbox_line()
     try:
         idx = google_sheets.find_link_column(worksheet, create=False)
@@ -489,6 +529,9 @@ def _sheet_permission():
         return _outcome(FAIL, " ".join(lines) + " بس التبويب ما فيه عمود اسم المنتج، فالنشر ما بيلاقي المنتجات فيه.",
                         "اختار تبويب المنتجات الصح من تبويب «الشيت» بالإعدادات.", "sheet_no_name_column", tab=title)
     if idx == -1:
+        if suspicious:
+            return _tab_warning(lines + ["ما في عمود لرابط الصورة بهالتبويب؛ أول اعتماد بيضيفه، فما جرّبنا الكتابة.",
+                                         outbox], title, outbox_ok=outbox_ok)
         return _outcome(WARN, " ".join(lines + ["ما في عمود لرابط الصورة بهالتبويب؛ أول اعتماد بيضيفه، فما جرّبنا الكتابة.",
                                                 outbox]),
                         "إذا بدك تتأكد من صلاحية الكتابة، ضيف عمود اسمه Drive Image Link وأعد الفحص.",
@@ -505,6 +548,9 @@ def _sheet_permission():
     reliable = (isinstance(raw, str) and raw.strip() and not raw.startswith("=") and raw.strip() == shown
                 and google_sheets.resolve_columns([raw])["link"] == 0)
     if not reliable:
+        if suspicious:
+            return _tab_warning(lines + ["ما قدرنا نقرأ عنوان عمود رابط الصورة بشكل أكيد، فما جرّبنا الكتابة.", outbox],
+                                title, outbox_ok=outbox_ok)
         return _outcome(WARN, " ".join(lines + ["ما قدرنا نقرأ عنوان عمود رابط الصورة بشكل أكيد، فما جرّبنا الكتابة "
                                                 "عشان ما نغيّر شي بالشيت.", outbox]),
                         "أعد الفحص بعد شوي؛ وإذا تكرر، اكتب عنوان العمود كنص عادي (Drive Image Link).",
@@ -516,9 +562,8 @@ def _sheet_permission():
         return _sheet_failure(e, title)
     lines.append("حساب الخدمة بيقدر يكتب: كتبنا عنوان عمود رابط الصورة نفسه فوق حاله، وما تغيّر شي.")
     lines.append(outbox)
-    if _looks_like_backup(title):
-        return _outcome(WARN, " ".join(lines), f"اسم التبويب «{title}» بيوحي إنو نسخة احتياطية: تأكد إنو هاد تبويب "
-                        "المنتجات من تبويب «الشيت» بالإعدادات.", "sheet_tab_backup", tab=title, outbox_ok=outbox_ok)
+    if suspicious:
+        return _tab_warning(lines, title, outbox_ok=outbox_ok)
     if dead:
         return _outcome(WARN, " ".join(lines), "في روابط ما انكتبت بالشيت نهائياً: أعد اعتماد هالمنتجات من شاشة "
                         "المراجعة.", "sheet_outbox_dead", tab=title, outbox_ok=outbox_ok)
@@ -585,6 +630,9 @@ def _summary(steps):
     if warned:
         first = warned[0]
         return WARN, f"النشر لازم يمشي، بس في ملاحظة عند «{first['title_ar']}»: {first['action_ar'] or first['detail_ar']}"
+    if any(s.get("code") == "bg_skipped" for s in steps):
+        return OK, ("النشر شغّال بدون عزل الخلفية: نزّلنا الصورة، وحطيناها متل ما هي على لوحة بيضا (عزل الخلفية متوقف "
+                    "بالإعدادات)، ورفعناها على Cloudinary ومسحناها، وحساب الخدمة بيقدر يكتب بالشيت.")
     return OK, ("النشر شغّال: نزّلنا الصورة، وعزلنا خلفيتها، ورفعناها على Cloudinary ومسحناها، وحساب الخدمة "
                 "بيقدر يكتب بالشيت.")
 

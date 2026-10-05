@@ -149,6 +149,18 @@
     margin-block-start: 2px;
 }
 
+/* «عزل الخلفية متوقف» with «رجّع عزل الخلفية (…)» (processing tab) */
+.lq-settings-bgoff {
+    align-items: flex-start;
+}
+
+.lq-settings-bgoff__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--lq-space-2);
+    margin-block-start: var(--lq-space-2);
+}
+
 .lq-settings-switch-row {
     display: flex;
     flex-direction: column;

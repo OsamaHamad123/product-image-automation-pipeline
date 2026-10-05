@@ -213,3 +213,60 @@ def test_row16_paratha_query_asks_for_the_400g_pack():
     spec = build_sku_spec({"name": "MEHRAN PLAIN PARATHA 400GM 5S", "brand": "MEHRAN"}, {})
     assert (spec.size.base_value, spec.size.pieces, spec.pack_count) == (400.0, 5, None)
     assert build_queries(spec)[0].text == "MEHRAN PLAIN PARATHA 400g"
+
+
+# -- live check 2026-10-05 (WP-NOBG): 'FINE FACIAL TISSUE CLASSIC 5X170PCS' had «الحجم ناقص» --
+
+@pytest.mark.parametrize("text,value,pack", [
+    ("5X170PCS", 170.0, 5),                               # glued: was no size at all
+    ("FINE FACIAL TISSUE CLASSIC 5X170PCS", 170.0, 5),
+    ("5 x 170 PCS", 170.0, 5),                            # spaced: was 170 loose pieces without the pack
+    ("5 × 170 PCS", 170.0, 5),
+    ("5X170 PCS", 170.0, 5),
+    ("Fine Tissue 3 x 200 Sheets", 200.0, 3),
+    ("2x150 pieces", 150.0, 2),
+    ("6 x 100 pc", 100.0, 6),
+    ("CIGARETTE PAPERS 10 x 20s", 20.0, 10),
+    ("1 x 100 pcs", 100.0, None),                         # one pack is a single unit
+])
+def test_n_x_m_counted_units_are_a_count_with_its_pack(text, value, pack):
+    (size,) = parse_sizes(text, "name")
+    assert (size.dimension, size.base_value, size.pack_count) == ("count", value, pack)
+    assert size.canonical() == (f"{pack}x" if pack else "") + f"{value:g}pcs"
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("170PCS", ("count", 170.0, None, None)),
+    ("EGGS 30 pcs", ("count", 30.0, None, None)),
+    ("PARATHA 5S 400GM", ("mass", 400.0, None, 5)),       # pieces inside one pack, unchanged
+    ("16X25G", ("mass", 25.0, 16, None)),
+    ("Kinder 4 x 3 pcs 150g", ("mass", 150.0, None, 3)),  # a measured size keeps its pieces exactly as before
+    ("100 tea bags", ("count", 100.0, None, None)),
+])
+def test_the_multipack_count_leaves_the_other_forms_alone(text, expected):
+    (size,) = parse_sizes(text, "name")
+    assert (size.dimension, size.base_value, size.pack_count, size.pieces) == expected
+
+
+def test_a_multipack_count_is_a_pack_for_compare_pack_and_a_count_for_compare():
+    from catalog_match.sizes import is_pack_count
+
+    tissue = one("FINE FACIAL TISSUE 5X170PCS")
+    assert not is_pack_count(tissue) and is_pack_count(one("6 pcs"))     # 170 is the contents, not 170 packs
+    assert compare(tissue, parse_sizes("Fine tissues 170 pcs")) == "match"
+    assert compare(tissue, parse_sizes("Fine tissues 5 x 200 pcs")) == "conflict"
+    assert compare_pack(5, parse_sizes("Fine tissues 5x170pcs")) == "match"
+    assert compare_pack(5, parse_sizes("Fine tissues 3x170pcs")) == "conflict"
+
+
+def test_the_tissue_row_gets_its_size_and_pack_and_no_missing_size():
+    from catalog_match import explain
+    from catalog_match.identity import build_sku_spec
+
+    row = {"name": "FINE FACIAL TISSUE CLASSIC 5X170PCS", "brand": "FINE", "barcode": "", "size": ""}
+    spec = build_sku_spec(row, {})
+    assert (spec.size.dimension, spec.size.base_value, spec.pack_count) == ("count", 170.0, 5)
+    assert "no_size" not in [i["key"] for i in explain.sheet_issues(row, spec)]
+    # a size column with the count alone takes the name's pack
+    spec = build_sku_spec(dict(row, size="170 PCS"), {})
+    assert (spec.size.base_value, spec.pack_count) == (170.0, 5)

@@ -17,6 +17,8 @@ parse_sizes(text, source_field) -> list[Size]
       "N x Q g M's" for a food sold by the piece    -> pack N of Q with pieces=M in each unit:
                                                       'PARATHA 2X400GM 5S' is two packs of 5
       'N pcs' / 'N bags' ... with no measured size -> a count
+      'N x M pcs|pc|pieces|sheets|s' with no measured -> a count of M with pack N ('TISSUE 5X170PCS' is five
+        size                                            boxes of 170, like '16X25G' is 16 packs of 25 g)
       '1/2 kg', '½ L', '1 1/2 kg'                  -> fractions
       '2.5-3 kg'                                   -> a range: two sizes, so 'ambiguous'
       '840 g ℮', '840g℮', '840ge'                  -> 840 g (the EU estimated sign; glued as 'e' only
@@ -138,6 +140,12 @@ _RANGE_RE = re.compile(
 # unit; '℮' itself is no letter, so '840g℮' already parsed. Never after a bare 'l' ('2 le' is French).
 _ESTIMATED_SIGN_RE = re.compile(r"(?<=\d)(?P<u>\s*(?:kg|gm|g|ml|cl))[e℮](?![^\W\d_])")
 _PACK_WORD_RE = re.compile(r"pack|pcs|pc\b|piece|pk|حب|قطع|عبو|علب")
+# A multipack of counted units ('FINE FACIAL TISSUE CLASSIC 5X170PCS', live check 2026-10-05: «الحجم ناقص»): N packs
+# of M pieces / sheets each, glued or spaced, like '16X25G' is 16 packs of 25 g. Read only when the text states no
+# measured size, so '4 x 3 pcs 150g' keeps its pieces exactly as before.
+_MULTI_COUNT = re.compile(
+    _START + r"(?P<n>\d{1,3})\s*" + _TIMES + r"\s*(?P<q>\d{1,4})\s*(?:pcs|pc|pieces|piece|sheets|['’]?s)" + _END
+)
 # Content counts: the product itself is counted ('100 tea bags', '30 capsules').
 _CONTENT_COUNT = re.compile(
     _START + r"(?P<n>\d{1,4})\s*(?:tea\s*bags|teabags|bags|sachets|capsules|pods|tablets|rolls|sheets|count|ct|eggs|كيس|اكياس|كبسوله|كبسولات)" + _END
@@ -243,10 +251,21 @@ def parse_sizes(text: Optional[str], source_field: str = "") -> List[Size]:
             continue
         found.append((m.start(), size))
 
+    # 'N x M pcs' with no measured size: a count of M in a pack of N ('5x170pcs'); the pack and piece words below
+    # skip its numbers, so '5 x 170 pcs' is no longer read as 170 loose pieces
+    multi_counts: List[Tuple[Tuple[int, int], Size]] = []
+    if not found:
+        for m in _MULTI_COUNT.finditer(t):
+            n, q = int(m.group("n")), int(m.group("q"))
+            if q > 0 and n > 0 and not _overlaps(m.span(), taken):
+                multi_counts.append((m.span(), Size("count", float(q), m.group(0).strip(), n if n > 1 else None,
+                                                    source_field)))
+    counted = [span for span, _ in multi_counts]
+
     packs: List[Tuple[int, int, str, str]] = []          # (start, n, raw text, 'pack' | 'pieces' | 'n_s')
     for rx, kind in ((_PACK, "pack"), (_PIECES, "pieces")):
         for m in rx.finditer(t):
-            if _overlaps(m.span(), taken):
+            if _overlaps(m.span(), taken) or _overlaps(m.span(), counted):
                 continue
             n = next(int(g) for g in m.groups() if g)
             # "N's": a pack after a size ('75G 5S'); before a net mass it may count the pieces in one pack
@@ -292,20 +311,22 @@ def parse_sizes(text: Optional[str], source_field: str = "") -> List[Size]:
                 out.append(replace(s, pack_count=next(iter(both))) if len(both) == 1 else s)
         return out
 
-    counts: List[Size] = []
+    counts: List[Size] = [size for _, size in multi_counts]
     for _, n, raw, _kind in packs:
         if n > 0:
             counts.append(Size("count", float(n), raw.strip(), None, source_field))
     for m in _CONTENT_COUNT.finditer(t):
-        if _overlaps(m.span(), taken):
+        if _overlaps(m.span(), taken) or _overlaps(m.span(), counted):
             continue
         counts.append(Size("count", float(int(m.group("n"))), m.group(0).strip(), None, source_field))
     return counts
 
 
 def is_pack_count(size: Size) -> bool:
-    """A 'count' size that states a number of packs ('6 pcs') rather than contents ('100 bags')."""
-    return size.dimension == "count" and bool(_PACK_WORD_RE.search(size.unit_text))
+    """A 'count' size that states a number of packs ('6 pcs') rather than contents ('100 bags'). A multipack
+    count ('5x170pcs': pack_count 5) counts the contents of each pack, not packs."""
+    return (size.dimension == "count" and not (size.pack_count and size.pack_count > 1)
+            and bool(_PACK_WORD_RE.search(size.unit_text)))
 
 
 def _same_value(a: float, b: float, tol: float) -> bool:
@@ -368,7 +389,9 @@ def compare_pack(target_pack: Optional[int], found: Sequence[Size], target_piece
     pieces = set()
     for s in found:
         if s.dimension == "count":
-            if is_pack_count(s) and s.base_value >= 1:
+            if s.pack_count and s.pack_count > 1:
+                explicit.add(s.pack_count)          # '5x170pcs': five packs
+            elif is_pack_count(s) and s.base_value >= 1:
                 explicit.add(int(s.base_value))
             continue
         if s.pack_count and s.pack_count > 1:

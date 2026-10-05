@@ -25,7 +25,8 @@
         imageProxy: '/api/image-proxy',
         export: '/rich-catalog/export',
         run: '/batch-automation',
-        publishCheck: '/system-diagnostics#publish-check'
+        publishCheck: '/system-diagnostics#publish-check',
+        bgMethod: '/api/settings/bg-method'
     };
 
     const LIST_PAGE = 150;
@@ -688,9 +689,20 @@
         } else {
             // اعتماد أو رفع ما مشي: «فحص النشر» بصفحة الصحة بيجرّب سلسلة النشر كاملة على صورة تجريبية ويقول وين وقفت
             const publishFailed = st.jobs.some(j => j.state === 'failed' && j.type !== 'reject');
+            // رصيد أو مفتاح أو حصة PhotoRoom / remove.bg فشّل العزل (R.bgSkipCode): كل اعتماد رح يفشل بنفس الشكل، فاللوحة
+            // بتعرض «تجاوز عزل الخلفية» (نفس زر صفحة الصحة). عزل الخلفية متوقف: «أعد المحاولة» بينشرها متل ما هي
+            const bgFailed = st.jobs.some(j => j.state === 'failed' && j.type !== 'reject' && R.bgSkipCode(j.detail));
+            const bg = S.cfg.bg && typeof S.cfg.bg === 'object' ? S.cfg.bg : {};
+            const bgOff = bgFailed && bg.method === 'none';
             box.appendChild(el('div', { className: 'rv-jobs__head' }, [
                 el('span', { className: 'rv-jobs__warn' }, [icon('alert', 18, 2)]),
                 el('span', { className: 'rv-jobs__text', text: `خلصت: ${st.done} مشيت، و${plural(st.failedAll, 'وحدة ما مشيت', 'ما مشيت')}:` }),
+                bgFailed && bg.method && !bgOff && S.urls.bgMethod
+                    ? el('button', { type: 'button', className: 'lq-btn lq-btn--danger lq-btn--sm rv-jobs__skipbg', text: 'تجاوز عزل الخلفية…',
+                                     title: 'الصور بتنتشر متل ما هي على لوحة بيضا لحد ما ترجّع عزل الخلفية', disabled: !!S.bgSaving,
+                                     onclick: () => R.single.confirmBgSkip() })
+                    : null,
+                bgOff ? el('span', { className: 'rv-jobs__bgoff', text: 'عزل الخلفية متوقف هلق: «أعد المحاولة» بينشرها متل ما هي.' }) : null,
                 publishFailed
                     ? el('a', { className: 'lq-btn lq-btn--secondary lq-btn--sm rv-jobs__check', href: S.urls.publishCheck,
                                 title: 'بيجرّب النشر كامل على صورة تجريبية وبيقلك وين وقف وشو تعمل', text: 'افحص النشر' })

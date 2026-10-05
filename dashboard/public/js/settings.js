@@ -5,6 +5,7 @@
  *   «حفظ الربط» asks first (it clears the cached sheet, keeps every review) and POSTs /api/sheet/save.
  * - المفاتيح: «تغيير» reveals an empty, write-only form; clearing a stored key asks first.
  * - النشر الآلي: the switch says what it will do before it saves (AUTO_PUBLISH_ENABLED).
+ * - معالجة الصور: with background removal off, «رجّع عزل الخلفية (…)» POSTs /api/settings/bg-method {method}.
  * - متقدم: rolling back to the old search engine asks first.
  * View helpers are pure (window.LaqtaSettings, used by the node tests); the DOM code sets text only.
  */
@@ -13,6 +14,7 @@
 
     var PREVIEW_URL = '/api/sheet/preview';
     var SAVE_URL = '/api/sheet/save';
+    var BG_METHOD_URL = '/api/settings/bg-method';
 
     /* google_sheets.COLUMN_SYNONYMS keys in the order the owner thinks of them. */
     var COLUMNS = [
@@ -89,9 +91,16 @@
     var ROLLBACK_TEXT = 'رح يرجع البحث للنظام القديم: ما بيقرأ الملصق ولا بيتأكد من الحجم والنوع، فبتكتر الاقتراحات '
         + 'الغلط. الإعدادات التانية والمراجعات ما بتتغير. نكمّل؟';
 
+    /* A refused POST /api/settings/bg-method in plain Arabic (the server's own Arabic text when it has one). */
+    function bgMethodError(res) {
+        if (res && res.status === 419) return 'انتهت صلاحية الصفحة. حدّثها وجرّب مرة تانية.';
+        var text = res && isObject(res.data) && typeof res.data.error === 'string' ? res.data.error.trim() : '';
+        return text && /[؀-ۿ]/.test(text) ? text : 'ما انحفظ: جرّب مرة تانية.';
+    }
+
     var api = { columnsView: columnsView, previewView: previewView, sheetError: sheetError,
         saveConfirmText: saveConfirmText, clearConfirmText: clearConfirmText, ROLLBACK_TEXT: ROLLBACK_TEXT,
-        COLUMNS: COLUMNS };
+        bgMethodError: bgMethodError, COLUMNS: COLUMNS };
     if (typeof window !== 'undefined') window.LaqtaSettings = api;
 
     // ------------------------------------------------------------------
@@ -322,6 +331,26 @@
                     e.preventDefault();
                 }
             }
+        });
+    }
+
+    // --- معالجة الصور: «رجّع عزل الخلفية (…)» لما يكون عزل الخلفية متوقف ------------------------------
+    var bgRestore = page.querySelector('[data-bg-restore]');
+    if (bgRestore) {
+        bgRestore.addEventListener('click', function () {
+            setBusy(bgRestore, true);
+            postJson(BG_METHOD_URL, { method: bgRestore.getAttribute('data-bg-restore') }).then(function (res) {
+                if (res && res.ok && isObject(res.data) && res.data.status === 'success') {
+                    toast(String(res.data.message || 'رجع عزل الخلفية.'), 'success');
+                    setTimeout(function () { window.location.reload(); }, 900);
+                    return;
+                }
+                toast(bgMethodError(res), 'danger');
+                setBusy(bgRestore, false);
+            }, function () {
+                toast('ما قدرنا نوصل للخادم.', 'danger');
+                setBusy(bgRestore, false);
+            });
         });
     }
 

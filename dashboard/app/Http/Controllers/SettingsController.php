@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Services\PythonBridge;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -49,6 +50,25 @@ class SettingsController extends Controller
 
     /** نفس config.BG_REMOVAL_METHODS (و main.SUPPORTED_BG_METHODS). */
     public const BG_METHODS = ['photoroom', 'remove_bg_api', 'grabcut', 'rembg', 'none'];
+
+    /** اسم كل طريقة عزل للمالك (زر «رجّع عزل الخلفية (…)»)؛ نفس BG_METHOD_LABELS في health.js و review/app.js. */
+    public const BG_METHOD_LABELS = ['photoroom' => 'PhotoRoom', 'remove_bg_api' => 'remove.bg', 'grabcut' => 'GrabCut',
+                                     'rembg' => 'rembg', 'none' => 'بدون عزل الخلفية'];
+
+    /**
+     * «تجاوز عزل الخلفية»: الطريقة اللي كانت قبل ما يوقف المالك عزل الخلفية (bg_removal_method = none)، بيرجعها زر
+     * «رجّع عزل الخلفية». config.load_db_config ما بيقرأ هالمفتاح: هو للوحة بس.
+     */
+    public const BG_PREVIOUS_KEY = 'bg_removal_method_previous';
+
+    /** تأكيد «تجاوز عزل الخلفية» (صفحة الصحة وشاشة المراجعة): شو بيصير بعده. */
+    public const BG_SKIP_CONFIRM = 'تجاوز عزل الخلفية؟ الصور اللي بتعتمدها من هلق (والنشر التلقائي من التشغيل الجاي) '
+        . 'بتنتشر متل ما هي على لوحة بيضا بدون عزل خلفيتها: صورة خلفيتها مش بيضا بتبين خلفيتها بالشيت. ما بنعيد أي فحص '
+        . 'لحالنا، وفيك ترجّع عزل الخلفية من صفحة الصحة أو من الإعدادات (تبويب «معالجة الصور») بأي وقت.';
+
+    /** طرق العزل المحلية المنزّلة (cli_bridge bg_methods، image_processor.local_methods_available): 6 ساعات. */
+    public const LOCAL_METHODS_CACHE_KEY = 'laqta_bg_local_methods_v1';
+    public const LOCAL_METHODS_CACHE_SECONDS = 21600;
 
     /** config.SPREADSHEET_NAME_OR_URL when nothing is set. */
     public const DEFAULT_SHEET = 'automation sheet';
@@ -197,7 +217,7 @@ class SettingsController extends Controller
                 $data['autoPublish'] = self::autoPublishData($stored ?? [], $result);
                 break;
             case 'processing':
-                $data['processing'] = self::processingData($stored ?? []);
+                $data['processing'] = self::processingData($stored ?? [], self::localMethods());
                 break;
             case 'advanced':
                 $data['advanced'] = self::advancedData($stored ?? []);
@@ -314,6 +334,14 @@ class SettingsController extends Controller
                 $changes[$ck] = $request->has($ck) ? 'true' : 'false';
             }
 
+            // «بدون عزل الخلفية» من النموذج نفسه: الطريقة القديمة بتنحفظ لزر «رجّع عزل الخلفية» (متل setBgMethod)
+            if (($changes['bg_removal_method'] ?? null) === 'none') {
+                $current = self::currentBgMethod(self::storedValues(['bg_removal_method'])['bg_removal_method'] ?? '');
+                if ($current !== 'none') {
+                    $changes[self::BG_PREVIOUS_KEY] = $current;
+                }
+            }
+
             // النشر الآلي لا يُشغَّل بدون ماركة جاهزة مفعّلة (من أي نموذج، ومنه الحفظ القديم الكامل)
             if (($changes['auto_publish_enabled'] ?? null) === 'true') {
                 $current = self::storedValues(['auto_publish_enabled', 'auto_publish_brands']);
@@ -334,6 +362,50 @@ class SettingsController extends Controller
         } catch (\Throwable $e) {
             return self::back($tab, ['error' => 'ما انحفظت الإعدادات: قاعدة البيانات ما ردّت. جرّب كمان شوي.']);
         }
+    }
+
+    /**
+     * POST /api/settings/bg-method {method}: «تجاوز عزل الخلفية» (method = none) و«رجّع عزل الخلفية» (الطريقة القديمة)
+     * من صفحة الصحة وشاشة المراجعة وتبويب «معالجة الصور». method لازم يكون من BG_METHODS (غيره 422). الإيقاف بيحفظ
+     * الطريقة الحالية بـ BG_PREVIOUS_KEY؛ ما بيعيد أي فحص لحاله. الاعتماد (جسر جديد لكل طلب) بيشوف التغيير فوراً،
+     * والعامل من تشغيله الجاي. الرد: {status, method, previous, previous_label, changed, message}.
+     */
+    public function setBgMethod(Request $request)
+    {
+        $method = $request->input('method');
+        $method = is_string($method) ? strtolower(trim($method)) : '';
+        if (!in_array($method, self::BG_METHODS, true)) {
+            return self::jsonResponse(['status' => 'failed',
+                'error' => 'طريقة عزل الخلفية هاي مش مدعومة. حدّث الصفحة وجرّب مرة تانية.'], 422);
+        }
+        try {
+            $stored = self::storedValues(['bg_removal_method', self::BG_PREVIOUS_KEY]);
+            $current = self::currentBgMethod($stored['bg_removal_method'] ?? '');
+            $changes = [];
+            if ($method !== $current) {
+                $changes['bg_removal_method'] = $method;
+                if ($method === 'none') {
+                    $changes[self::BG_PREVIOUS_KEY] = $current;
+                }
+            }
+            self::write($changes);
+            $previous = $changes[self::BG_PREVIOUS_KEY] ?? ($stored[self::BG_PREVIOUS_KEY] ?? '');
+        } catch (\Throwable $e) {
+            return self::jsonResponse(['status' => 'failed',
+                'error' => 'ما انحفظ: قاعدة البيانات ما ردّت. جرّب كمان شوي.'], 503);
+        }
+        $state = self::bgState(['bg_removal_method' => ['value' => $method], self::BG_PREVIOUS_KEY => ['value' => $previous]]);
+        $message = $method === 'none'
+            ? 'عزل الخلفية متوقف: الصور اللي بتعتمدها من هلق بتنتشر متل ما هي على لوحة بيضا. اضغط «افحص النشر» مرة تانية لتتأكد إنو النشر صار يمشي.'
+            : 'رجع عزل الخلفية بـ ' . self::BG_METHOD_LABELS[$method] . '. اضغط «افحص النشر» مرة تانية لتتأكد إنه شغّال.';
+        return self::jsonResponse(['status' => 'success', 'method' => $state['method'], 'previous' => $state['previous'],
+            'previous_label' => $state['previous_label'], 'changed' => $changes !== [], 'message' => $message], 200);
+    }
+
+    private static function jsonResponse(array $body, int $code)
+    {
+        return response()->json($body, $code, [], JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE)
+            ->header('Cache-Control', 'no-store');
     }
 
     /**
@@ -660,35 +732,116 @@ class SettingsController extends Controller
         return 'النشر الآلي ضل مطفأ: لازم تفعّل ماركة جاهزة وحدة على الأقل قبل ما تشغّله.';
     }
 
-    public static function processingData(array $stored): array
+    /**
+     * تبويب «معالجة الصور». $local: طرق العزل المحلية المنزّلة ({grabcut, rembg}: true / false / null = ما منعرف)،
+     * من localMethods(). GrabCut و rembg بينذكروا وبينختاروا بس إذا منزّلين (لا وعد بشي مش موجود)، و remove.bg بس إذا
+     * مفتاحه بالبيئة أو هو المضبوط. «بدون عزل الخلفية» بتنشر الصورة متل ما هي (main.publish_image: bg_skipped).
+     */
+    public static function processingData(array $stored, ?array $local = null): array
     {
-        $env = self::envValues(['BG_REMOVAL_METHOD', 'OUTPUT_CANVAS_SIZE']);
+        $env = self::envValues(['OUTPUT_CANVAS_SIZE']);
         $size = trim((string) ($stored['output_canvas_size']['value'] ?? ''));
         if (!preg_match('/^\d+$/', $size)) {
             $size = preg_match('/^\d+$/', (string) ($env['OUTPUT_CANVAS_SIZE'] ?? '')) ? $env['OUTPUT_CANVAS_SIZE'] : '800';
         }
-        $method = strtolower(trim((string) ($stored['bg_removal_method']['value'] ?? '')));
-        if (!in_array($method, self::BG_METHODS, true)) {
-            $fromEnv = strtolower(trim((string) ($env['BG_REMOVAL_METHOD'] ?? '')));
-            $method = $fromEnv !== '' ? $fromEnv : 'photoroom';
-        }
+        $method = self::currentBgMethod($stored['bg_removal_method']['value'] ?? '');
         $sizes = self::CANVAS_SIZES;
         if (!in_array((int) $size, $sizes, true)) {
             $sizes[] = (int) $size;
             sort($sizes);
         }
-        $methods = ['photoroom' => 'PhotoRoom: عزل الخلفية سحابياً (الافتراضي)',
-                    'none' => 'بدون عزل: الصورة بتنحط متل ما هي وبتستنى مراجعتك'];
+        $local = ['grabcut' => $local['grabcut'] ?? null, 'rembg' => $local['rembg'] ?? null];
+        $methods = ['photoroom' => 'PhotoRoom: عزل الخلفية سحابياً (الافتراضي، من رصيد PhotoRoom)'];
+        if ($method === 'remove_bg_api' || self::envHas('REMOVE_BG_API_KEY')) {
+            $methods['remove_bg_api'] = 'remove.bg: عزل الخلفية سحابياً (من رصيد remove.bg)';
+        }
+        if ($local['grabcut'] === true || $method === 'grabcut') {
+            $methods['grabcut'] = 'GrabCut: عزل محلي مجاني على هالجهاز (أقل دقة)';
+        }
+        if ($local['rembg'] === true || $method === 'rembg') {
+            $methods['rembg'] = 'rembg: عزل محلي مجاني على هالجهاز';
+        }
+        $methods['none'] = 'بدون عزل الخلفية: الصورة متل ما هي على لوحة بيضا وبتنتشر مباشرة';
         if (!isset($methods[$method])) {
             $methods[$method] = $method . ' (المضبوط حالياً)';
+        }
+        $free = array_values(array_filter(['grabcut' => 'GrabCut', 'rembg' => 'rembg'],
+            fn ($k) => $local[$k] === true, ARRAY_FILTER_USE_KEY));
+        $hint = 'إذا فشل العزل، الصورة ما بتنزل الشيت بصمت: بتستنى مراجعتك. «بدون عزل الخلفية» بتنشر الصورة متل ما هي '
+            . 'بدون أي طلب مدفوع، فصورة خلفيتها مش بيضا بتبين خلفيتها بالشيت.';
+        if ($free) {
+            $hint .= ' ' . implode(' و', $free) . (count($free) > 1 ? ' طرق محلية مجانية منزّلة' : ' طريقة محلية مجانية منزّلة')
+                . ' على هالجهاز، بس دقتها أقل من PhotoRoom وفحص القص ممكن يرفض صور أكتر.';
         }
         return [
             'size' => (int) $size,
             'sizes' => $sizes,
             'method' => $method,
             'methods' => $methods,
+            'hint' => $hint,
+            'bg' => self::bgState($stored),
             'enhance' => strtolower(trim((string) ($stored['enable_image_enhancement']['value'] ?? ''))) === 'true',
         ];
+    }
+
+    /**
+     * الطريقة اللي بايثون رح يستعملها (config.load_db_config): المحفوظة إذا مدعومة، وإلا BG_REMOVAL_METHOD من البيئة،
+     * وإلا photoroom.
+     */
+    public static function currentBgMethod($stored): string
+    {
+        $method = strtolower(trim(is_scalar($stored) ? (string) $stored : ''));
+        if (in_array($method, self::BG_METHODS, true)) {
+            return $method;
+        }
+        $fromEnv = strtolower(trim((string) (self::envValues(['BG_REMOVAL_METHOD'])['BG_REMOVAL_METHOD'] ?? '')));
+        return $fromEnv !== '' ? $fromEnv : 'photoroom';
+    }
+
+    /**
+     * حالة «تجاوز عزل الخلفية» من system_settings (stored() أو قيم بنفس الشكل): {method, off, previous,
+     * previous_label}. previous: الطريقة اللي بيرجعها «رجّع عزل الخلفية» (المحفوظة قبل الإيقاف، وإلا PhotoRoom).
+     */
+    public static function bgState(array $stored): array
+    {
+        $method = self::currentBgMethod($stored['bg_removal_method']['value'] ?? '');
+        $previous = strtolower(trim((string) ($stored[self::BG_PREVIOUS_KEY]['value'] ?? '')));
+        if (!in_array($previous, self::BG_METHODS, true) || $previous === 'none') {
+            $previous = 'photoroom';
+        }
+        return ['method' => $method, 'off' => $method === 'none', 'previous' => $previous,
+                'previous_label' => self::BG_METHOD_LABELS[$previous]];
+    }
+
+    /** bgState من قاعدة البيانات، أو null إذا ما ردّت (البطاقات ما بتعرض زر ما بتقدر تحفظه). */
+    public static function currentBgState(): ?array
+    {
+        try {
+            $values = self::storedValues(['bg_removal_method', self::BG_PREVIOUS_KEY]);
+        } catch (\Throwable $e) {
+            return null;
+        }
+        return self::bgState(array_map(fn ($v) => ['value' => $v], $values));
+    }
+
+    /**
+     * طرق العزل المحلية المنزّلة على هالجهاز ({grabcut, rembg}) بنفس قرار image_processor (cli_bridge bg_methods)،
+     * مخزّنة 6 ساعات؛ الجسر ما ردّ: {null, null} (ما منذكر ولا وحدة) وما بينخزن.
+     */
+    public static function localMethods(): array
+    {
+        $cached = Cache::get(self::LOCAL_METHODS_CACHE_KEY);
+        if (is_array($cached)) {
+            return $cached;
+        }
+        $result = PythonBridge::run('bg_methods');
+        $local = is_array($result['local'] ?? null) ? $result['local'] : null;
+        if (($result['status'] ?? '') !== 'success' || $local === null) {
+            return ['grabcut' => null, 'rembg' => null];
+        }
+        $out = ['grabcut' => ($local['grabcut'] ?? null) === true, 'rembg' => ($local['rembg'] ?? null) === true];
+        Cache::put(self::LOCAL_METHODS_CACHE_KEY, $out, self::LOCAL_METHODS_CACHE_SECONDS);
+        return $out;
     }
 
     public static function advancedData(array $stored): array
