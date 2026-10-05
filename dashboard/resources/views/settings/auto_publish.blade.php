@@ -4,6 +4,9 @@
     per brand the reviewed suggestions (prechecked), precision, Wilson 95% lower bound and status.
     The global switch (AUTO_PUBLISH_ENABLED) cannot be turned on without a ready brand in AUTO_PUBLISH_BRANDS;
     «تفعيل» adds a ready brand, «إيقاف» removes any entry. The thresholds come from the bridge, never from here.
+    «النشر الآلي لكل الماركات المؤكدة» ($autoPublish['lane'] = SettingsController::laneData, review_stats.lanes): the
+    reviews of the strict lane (a pick every auto-publish rule passed but the brand setting) and its own switch
+    (section strict-lane), which the server turns on only when that lane is ready; the unsure lane is information only.
 --}}
 @php
     $ap = $autoPublish;
@@ -11,6 +14,9 @@
     $switchOnText = 'رح تنرفع صور الماركات المفعّلة (' . $readyNames . ') وتنكتب بالشيت بدون مراجعتك من التشغيل الجاي. باقي الماركات بتضل تستنى مراجعتك.';
     $switchOffText = 'كل النتائج رح ترجع تستنى مراجعتك قبل ما توصل الشيت. قائمة الماركات المفعّلة بتضل محفوظة.';
     $listedCount = count($ap['listed']);
+    $lane = $ap['lane'];
+    $laneOnText = 'الاقتراحات اللي بتعدّي كل قواعد النشر الآلي (قارئ الملصق أكّده، متجر موثوق، بلا أي تعارض) لأي ماركة مربوطة رح تنرفع وتنكتب بالشيت بدون مراجعتك، حتى لو الماركة مش مفعّلة بالجدول. باقي الاقتراحات بتضل تستنى مراجعتك.';
+    $laneOffText = 'بس الماركات المفعّلة بالجدول رح تضل تنرفع بدون مراجعة. باقي الاقتراحات بترجع تستنى مراجعتك.';
 @endphp
 <section class="lq-card lq-settings-card" aria-labelledby="lq-settings-ap-title">
     <div class="lq-autopub__head">
@@ -96,4 +102,36 @@
     @endif
 
     <p class="lq-autopub__criterion">{{ $ap['criterion'] }}</p>
+</section>
+
+<section class="lq-card lq-settings-card" aria-label="النشر الآلي لكل الماركات المؤكدة" data-autopub-lane>
+    <div class="lq-autopub__head">
+        <div class="lq-settings-card__head">
+            <h2 class="lq-section-title">النشر الآلي لكل الماركات المؤكدة</h2>
+            <p class="lq-settings-card__intro">بدل ما تستنى كل ماركة لحالها: الاقتراح اللي بيعدّي كل قواعد النشر الآلي (قارئ الملصق أكّده، متجر موثوق، بلا تعارض) لماركة مربوطة بينرفع بدون مراجعة، بس لما تثبت دقة هالفئة بمراجعاتك.</p>
+        </div>
+        <form method="POST" action="{{ route('dashboard.save_settings') }}" class="lq-autopub__switch" data-autopub-form>
+            @csrf
+            <input type="hidden" name="section" value="strict-lane">
+            <x-lq.switch name="auto_publish_strict_lane" value="true" label="النشر الآلي لكل الماركات المؤكدة" :checked="$lane['enabled']"
+                :disabled="(bool) $dbError || (!$lane['enabled'] && !$lane['can_enable'])"
+                data-autopub-switch :data-confirm-on="$laneOnText" :data-confirm-off="$laneOffText" />
+            <button type="submit" class="lq-btn lq-btn--secondary lq-btn--sm lq-autopub__save" data-autopub-save>حفظ</button>
+        </form>
+    </div>
+    @if ($lane['status'] === 'ok')
+        <div class="lq-autopub__lane">
+            <x-lq.chip :status="$lane['tone']" size="sm" :dot="false" :label="$lane['chip']" />
+            <strong>{{ $lane['text'] }}</strong>
+            @if ($lane['detail'] !== '')<span class="lq-autopub__lane-detail">{{ $lane['detail'] }}</span>@endif
+        </div>
+        <p class="lq-autopub__lane-detail">{{ $lane['unsure_text'] }}</p>
+        @if (!$lane['enabled'] && !$lane['can_enable'])
+            <p class="lq-autopub__hint">المفتاح بيتفعّل لما توصل هالفئة نفس معيار الماركات تحت.</p>
+        @elseif ($lane['enabled'] && !$ap['enabled'])
+            <p class="lq-autopub__hint">النشر الآلي كله مطفأ، فما رح ينرفع شي بدون مراجعة لحتى تشغّله من فوق.</p>
+        @endif
+    @else
+        <p class="lq-autopub__hint">ما قدرنا نحسب دقة هالفئة هلق، فالتشغيل موقّف لحتى نقدر نتأكد.</p>
+    @endif
 </section>

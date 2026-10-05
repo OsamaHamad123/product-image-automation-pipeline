@@ -49,6 +49,8 @@ SERPER_API_KEY = os.getenv("SERPER_API_KEY", "")
 # النشر التلقائي: معطل افتراضياً. يُفعّل فقط لبراندات محددة بعد أن تثبت مجموعة الاختبار الذهبية دقة >= 98%
 AUTO_PUBLISH_ENABLED = os.getenv("AUTO_PUBLISH_ENABLED", "False").strip().lower() in ("1", "true", "yes", "on")
 AUTO_PUBLISH_BRANDS = [b.strip() for b in os.getenv("AUTO_PUBLISH_BRANDS", "").split(",") if b.strip()]
+# النشر الآلي لكل الماركات المؤكدة (فئة strict في catalog_match.decide): تفتحه اللوحة فقط حين تثبت مراجعات الفئة دقتها
+AUTO_PUBLISH_STRICT_LANE = os.getenv("AUTO_PUBLISH_STRICT_LANE", "False").strip().lower() in ("1", "true", "yes", "on")
 
 # --- identity package (P3) --------------------------------------------------------------------
 # مدى الثقة بالباركود: 'evidence' (الافتراضي: البراند والاسم هما الهوية والباركود دليل مساعد فقط)،
@@ -507,6 +509,7 @@ def load_db_config():
             global GOOGLE_SEARCH_API_KEYS, GOOGLE_SEARCH_CX_LIST, GOOGLE_SEARCH_API_KEY, GOOGLE_SEARCH_CX
             global CLIP_RELEVANCE_THRESHOLD, CLIP_GREY_ZONE_THRESHOLD, STRICT_BRAND_MATCH, ENABLE_GEMINI_PRE_VALIDATION, FILTER_COMPETITORS, BYPASS_WHITE_BACKGROUND_CHECK, PROXY_URL
             global SEARCH_ENGINE, SERPER_API_KEY, AUTO_PUBLISH_ENABLED, AUTO_PUBLISH_BRANDS, OUTPUT_CANVAS_SIZE
+            global AUTO_PUBLISH_STRICT_LANE
             global BG_REMOVAL_METHOD, ENABLE_IMAGE_ENHANCEMENT
 
             if "photoroom_api_key" in db_keys and db_keys["photoroom_api_key"]:
@@ -556,6 +559,8 @@ def load_db_config():
                 AUTO_PUBLISH_ENABLED = str(db_keys["auto_publish_enabled"]).strip().lower() in ("1", "true", "yes", "on")
             if "auto_publish_brands" in db_keys and db_keys["auto_publish_brands"] is not None:
                 AUTO_PUBLISH_BRANDS = [b.strip() for b in str(db_keys["auto_publish_brands"]).split(",") if b.strip()]
+            if "auto_publish_strict_lane" in db_keys and db_keys["auto_publish_strict_lane"] is not None:
+                AUTO_PUBLISH_STRICT_LANE = str(db_keys["auto_publish_strict_lane"]).strip().lower() in ("1", "true", "yes", "on")
             if db_keys.get("output_canvas_size"):
                 try:
                     OUTPUT_CANVAS_SIZE = int(db_keys["output_canvas_size"])

@@ -389,12 +389,15 @@ def action_search(params, brand_mappings=None, found=None):
     if best and not decision:
         decision = "REVIEW_PRESELECTED"   # مسار v1: لا يُنشر تلقائياً أبداً
     failure_code = (best or {}).get('failure_code') or outcome.get('failure_code')
+    candidates = _candidates_for_response(best, trace)
     return {
         'status': _status_for(decision, bool(best)),
         'decision': decision,
         'failure_code': failure_code,
         'selected_image': best if (best and decision in SELECTABLE_DECISIONS) else None,
-        'candidates': _candidates_for_response(best, trace),
+        'candidates': candidates,
+        # فئة اختيار المحرك (strict | unsure | other، أو None بلا اختيار): ترسلها شاشة الكتالوج مع قرار المراجع
+        'lane': _pick_lane(candidates) if decision in local_cache_db.PICK_DECISIONS else None,
         'provider_health': outcome.get('provider_health') or [],
         'sku_key': (best or {}).get('sku_key') or outcome.get('sku_key') or sku_key,
         'exclusions': {'urls': len(exclude_urls), 'phashes': len(rejected_phashes)},
@@ -552,6 +555,17 @@ def _is_cache_hit(candidate):
 _VIEW_DECISIONS = ("AUTO_PUBLISH", "REVIEW_PRESELECTED", "REVIEW_UNSELECTED")
 
 
+def _pick_lane(candidates):
+    """
+    فئة اختيار المحرك (catalog_match.decide.lane_of: strict | unsure | other) من أسباب المرشح المختار مسبقاً بين
+    المرشحات، أو None بلا اختيار (أو لمرشح الكاش: اعتماد سابق وليس اختيار المحرك).
+    """
+    from catalog_match.decide import lane_of
+    pick = next((c for c in candidates or [] if isinstance(c, dict) and c.get("status") == "preselected"
+                 and not _is_cache_hit(c)), None)
+    return lane_of(pick.get("reasons") or []) if pick is not None else None
+
+
 def _reviewer_view(params, action):
     """
     (engine_decision, was_preselected) كما عرضتهما شاشة الكتالوج (search_decision و candidate_status)، أو None
@@ -583,10 +597,11 @@ def _record_review(action, params, row_number, sku_key, image_url=None, reason_c
         stored = local_cache_db.get_curation_candidates(row_number, sku_key=sku_key or None, identity=identity)
         candidates = [c for c in stored if not _is_cache_hit(c)]      # ما اختاره المحرك فقط
         acted = next((c for c in candidates if image_url and c.get("image_url") == image_url), None)
-        decision = was_preselected = None
+        decision = was_preselected = lane = None
         if candidates and (acted is not None or action == "manual_upload"):
             has_precheck = any(c.get("status") == "preselected" for c in candidates)
             decision = "REVIEW_PRESELECTED" if has_precheck else "REVIEW_UNSELECTED"
+            lane = _pick_lane(candidates)
         if acted is not None:
             was_preselected = acted.get("status") == "preselected"
         elif action == "manual_upload":
@@ -595,10 +610,16 @@ def _record_review(action, params, row_number, sku_key, image_url=None, reason_c
         if view is not None:
             # شاشة الكتالوج ترسل ما رآه المراجع فعلاً؛ قد يختلف عن آخر تشغيل محفوظ للعامل على نفس الصنف
             decision, was_preselected = view
+            # فئة الاختيار كما أرسلتها الشاشة مع نتيجة بحثها، وإلا فئة الاختيار المحفوظ (نفس المرشحات المعروضة)
+            shown = _text(params, 'search_lane')
+            lane = shown if shown in local_cache_db.LANES else (lane or _pick_lane(stored))
             acted = {"identity_tier": _text(params, 'identity_tier') or None,
                      "vlm": {"decision": _text(params, 'vlm_decision') or None}, "page_url": _text(params, 'page_url')}
         if approval and approval.get("verification_status") == "auto_verified":
-            decision, was_preselected = "AUTO_PUBLISH", True
+            # ما يُنشر آلياً تجاوز كل القواعد: فئته strict (catalog_match.decide.pick_lane)
+            decision, was_preselected, lane = "AUTO_PUBLISH", True, "strict"
+        if decision not in local_cache_db.PICK_DECISIONS:
+            lane = None                      # لا اختيار للمحرك: لا فئة
         acted = acted or {}
         first = stored[0] if stored else {}
         vlm = acted.get("vlm") if isinstance(acted.get("vlm"), dict) else {}
@@ -610,7 +631,7 @@ def _record_review(action, params, row_number, sku_key, image_url=None, reason_c
             image_url=image_url, page_domain=_page_domain(acted, params),
             identity_tier=acted.get("identity_tier") or (acted.get("evidence") or {}).get("tier"),
             engine_decision=decision, was_preselected=was_preselected, vlm_decision=vlm.get("decision"),
-            reason_code=reason_code,
+            reason_code=reason_code, lane=lane,
             # الكتابة التي يُحسب لها القرار أو عليها: التراجع عن الرفض (undo_reject) يُرجع عدّها
             **({"learned_alias": lesson[1]} if lesson else {}),
         )
@@ -2025,6 +2046,124 @@ def action_bg_methods(params):
     return {"status": "success", "local": image_processor.local_methods_available()}
 
 
+# ---------------------------------------------------------------------------
+# «ماركات ناقصة من Brands Mapping» (catalog_match/brand_assistant.py): brand_suggestions (قراءة فقط، بلا بحث مدفوع)،
+# brand_official_site (استعلام Serper واحد بزر صريح)، brand_add (يكتب شيت المالك، بزر صريح فقط)
+# ---------------------------------------------------------------------------
+
+def _brand_invalid(code, message, field=""):
+    return {"status": "invalid", "code": code, "field": field, "error": message}
+
+
+def action_brand_suggestions(params):
+    """
+    الماركات التي تذكرها صفوف الطابور وما لها صف في ورقة Brands Mapping: [{brand, rows, brand_ar, synonyms,
+    official_domain: ''}]، الأكثر صفوفاً أولاً. synonyms كتابات المتاجر التي اكتشفها البحث (trace outcome.
+    discovered_brands) أو تعلّمها من المراجعة. قراءة فقط: لا بحث مدفوع ولا كتابة بالشيت. ورقة ما انقرت = خطأ (ما نقترح
+    كل الماركات على أساس شيت ما شفناه).
+    """
+    from catalog_match import brand_assistant
+    try:
+        rows = local_cache_db.queue_brand_rows()
+    except Exception:
+        return _failure("failed", "Could not read the automation queue (details in temp/search.log).",
+                        "brand_suggestions failed")
+    try:
+        client = google_sheets.get_sheets_client()
+        if not client:
+            raise RuntimeError("Google Sheets API connection failed")
+        mappings = google_sheets.sheet_brand_mappings(client, config.SPREADSHEET_NAME_OR_URL) or {}
+    except Exception:
+        return _failure("failed", "Could not read the Brands Mapping sheet (details in temp/search.log).",
+                        "brand_suggestions sheet read failed")
+    try:
+        aliases = local_cache_db.get_learned_brand_aliases()
+    except Exception as e:
+        logger.warning("brand_suggestions: learned spellings unavailable: %s", e)
+        aliases = []
+    try:
+        brands = brand_assistant.suggestions(rows, mappings, aliases)
+    except Exception:
+        return _failure("failed", "Could not work out the missing brands (details in temp/search.log).",
+                        "brand_suggestions failed")
+    return {"status": "success", "brands": brands, "rows": len(rows)}
+
+
+def action_brand_official_site(params):
+    """
+    «اقترح الموقع الرسمي»: استعلام Serper ويب واحد بالضبط `"<brand>" official website` (بلا hedging، ويُسجل في سجل الصرف
+    مثل كل بحث؛ ما أُجيب عنه فقط يُحتسب)، ثم أول نتيجتين مو متجر ولا سوق ولا شبكة اجتماعية ولا موقع صور، وفي نطاقها أو
+    عنوان صفحتها كلمة الماركة الرئيسية: {status: success, brand, candidates: [{title, domain, url}], queries: 1}.
+    لا يكتب شيئاً.
+    """
+    from catalog_match import brand_assistant, settings as cm_settings
+    from catalog_match.providers.serper_web import SerperWebProvider, parse_organic
+    try:
+        brand = brand_assistant.clean_brand(_text(params, "brand"))
+    except brand_assistant.BrandRequestError as e:
+        return _brand_invalid(e.code, str(e), e.field)
+    if not cm_settings.serper_api_key():
+        return {"status": "unavailable", "code": "no_key", "error": "No Serper key is configured."}
+    provider = SerperWebProvider()
+    provider.hedge = False                           # exactly one query, one credit
+    try:
+        results = parse_organic(provider._request(brand_assistant.search_query(brand), "en"))
+    except Exception:
+        return _failure("failed", "The search did not answer (details in temp/search.log).", "brand_official_site failed")
+    local_cache_db.record_search_spend(
+        {"provider_health": [{"provider": "serper_web", "status": "ok" if results else "empty", "hedges": 0}]},
+        brand_assistant.OFFICIAL_SITE_SPEND_RUN)
+    candidates = brand_assistant.official_site_candidates(
+        [{"link": c.page_url, "title": c.title} for c in results], brand)
+    return {"status": "success", "brand": brand, "candidates": candidates, "queries": 1}
+
+
+def action_brand_add(params):
+    """
+    يضيف ماركة لورقة 'Brands Mapping' بصف واحد (Brand, Synonyms, ..., Official domains): {brand, synonyms: [...],
+    official_domains: [...]} أو {items: [{...}, ...]} لـ «أضف الكل» (صف لكل ماركة، بطلب كتابة واحد). يكتب شيت المالك:
+    يُستدعى فقط من زر صريح. يتحقق: الماركة غير فاضية ولا مكتوبة أصلاً (بعد قراءة طازجة للورقة، بلا اعتبار للحالة أو
+    الفراغات)، كل موقع نطاق صرف بلا بروتوكول ولا مسار، وعشرة مرادفات كحد أقصى. كاش الماركات يُحذف ليراها التشغيل
+    الجاي، ومواقع الماركات تنضاف لطابور الفهرسة (system_settings.pending_harvest_domains) لتفهرس أول التشغيل الجاي.
+    """
+    from catalog_match import brand_assistant as ba
+    raw = params.get("items") if isinstance(params.get("items"), list) else [params]
+    if not raw or len(raw) > ba.MAX_BATCH:
+        return _brand_invalid("too_many_brands", "Between 1 and %d brands at a time." % ba.MAX_BATCH, "items")
+    items = []
+    try:
+        for entry in raw:
+            if not isinstance(entry, dict):
+                return _brand_invalid("invalid_brand", "Each brand must be an object.", "brand")
+            items.append(ba.validate_brand_request(entry))
+    except ba.BrandRequestError as e:
+        return _brand_invalid(e.code, str(e), e.field)
+    try:
+        client = google_sheets.get_sheets_client()
+        if not client:
+            raise RuntimeError("Google Sheets API connection failed")
+        res = google_sheets.add_brand_mappings(client, config.SPREADSHEET_NAME_OR_URL, items)
+    except google_sheets.SheetTransientError:
+        return _failure("failed", "Google Sheets is temporarily unavailable (quota or a Google server error). "
+                                  "Nothing was written; try again in a minute.", "brand_add failed")
+    except Exception:
+        return _failure("failed", "Could not write the Brands Mapping sheet. Check that it is shared with the service "
+                                  "account (details in temp/search.log).", "brand_add failed")
+    added = res.get("added") or []
+    if not added:
+        return {"status": "duplicate", "code": "duplicate", "error": "The brand is already in Brands Mapping.",
+                "skipped": res.get("skipped") or []}
+    domains = [d for item in items if item["brand"] in added for d in item["official_domains"]]
+    queued = []
+    if domains:
+        try:
+            local_cache_db.add_pending_harvest_domains(domains)
+            queued = domains
+        except Exception as e:
+            logger.warning("brand_add: the sites could not be queued for indexing: %s", e)
+    return {"status": "success", "added": added, "skipped": res.get("skipped") or [], "harvest_queued": queued}
+
+
 ACTIONS = {
     'get_products': action_get_products,
     'search': action_search,
@@ -2036,6 +2175,9 @@ ACTIONS = {
     'sheet-preview': action_sheet_preview,
     'sheet-save': action_sheet_save,
     'explain_backfill': action_explain_backfill,
+    'brand_suggestions': action_brand_suggestions,
+    'brand_official_site': action_brand_official_site,
+    'brand_add': action_brand_add,
     'export_run': action_export_run,
     'lock_state': action_lock_state,
     'publish_check': action_publish_check,

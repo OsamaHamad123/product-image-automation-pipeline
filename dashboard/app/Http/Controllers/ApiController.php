@@ -14,7 +14,7 @@ class ApiController extends Controller
     private const SELECT_FIELDS = [
         'image_url', 'page_url', 'candidate_sha256', 'row_number', 'product_name', 'brand', 'barcode', 'sku_key',
         'size', 'product_name_ar', 'brand_ar', 'category', 'sub_category', 'origin',
-        'search_decision', 'candidate_status', 'candidate_cache_hit', 'identity_tier', 'vlm_decision',
+        'search_decision', 'search_lane', 'candidate_status', 'candidate_cache_hit', 'identity_tier', 'vlm_decision',
         'candidate_warnings', 'target_width', 'target_height', 'page_gtin',
     ];
 
@@ -133,7 +133,7 @@ class ApiController extends Controller
         $params = $request->only([
             'row_number', 'product_name', 'brand', 'barcode', 'sku_key',
             'size', 'product_name_ar', 'brand_ar', 'category',
-            'target_width', 'target_height', 'enhance', 'search_decision'
+            'target_width', 'target_height', 'enhance', 'search_decision', 'search_lane'
         ]);
         // ما رأته الصفحة (expected_state) يصل نصاً JSON من نموذج الرفع، و replace تأكيد صريح بالاستبدال (قيمة منطقية)؛
         // يقرؤهما cli_bridge._stale_refusal

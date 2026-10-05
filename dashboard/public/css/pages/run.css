@@ -447,6 +447,130 @@
     color: var(--lq-success-ink);
 }
 
+/* Brands Mapping assistant: one card across the tools grid, one block per missing brand */
+.lq-run-brands {
+    grid-column: 1 / -1;
+    gap: var(--lq-space-3);
+}
+
+.lq-run-brands__head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--lq-space-3);
+}
+
+.lq-run-brands__lead {
+    margin: 0;
+    font-size: 13px;
+    line-height: 1.7;
+    color: var(--lq-text-2);
+}
+
+.lq-run-brands__list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr));
+    gap: var(--lq-space-3);
+    max-height: 560px;
+    overflow-y: auto;
+}
+
+.lq-run-brands__list:empty {
+    display: none;
+}
+
+.lq-run-brands__foot {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--lq-space-3);
+}
+
+.lq-run-brands__done {
+    margin: 0;
+    font-size: 13px;
+    color: var(--lq-success-ink);
+}
+
+.lq-run-brand {
+    display: flex;
+    flex-direction: column;
+    gap: var(--lq-space-2);
+    padding: var(--lq-space-3);
+    border: 1px solid var(--lq-border-soft);
+    border-radius: var(--lq-radius-md);
+    background: var(--lq-surface);
+}
+
+.lq-run-brand__head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--lq-space-3);
+}
+
+.lq-run-brand__name {
+    min-width: 0;
+    font-size: 15px;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+
+.lq-run-brand__rows {
+    flex: none;
+    padding: 1px 8px;
+    border-radius: var(--lq-radius-pill);
+    background: var(--lq-warning-bg);
+    color: var(--lq-warning-ink);
+    font-size: 12px;
+}
+
+.lq-run-brand__candidates {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--lq-space-2);
+}
+
+.lq-run-brand__candidate {
+    max-width: 100%;
+    gap: var(--lq-space-2);
+}
+
+.lq-run-brand__title {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--lq-text-2);
+    font-size: 12px;
+}
+
+.lq-run-brand__actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--lq-space-2);
+}
+
+.lq-run-brand__syn,
+.lq-run-brand__site {
+    width: 100%;
+}
+
+.lq-run-brand__domain {
+    font-weight: 600;
+    unicode-bidi: isolate;
+}
+
+.lq-run-brand__cost {
+    flex: 1 1 auto;
+}
+
+.lq-run-brand__add {
+    margin-inline-start: auto;
+}
+
 @media (max-width: 980px) {
     .lq-run__grid,
     .lq-run__grid--tools {

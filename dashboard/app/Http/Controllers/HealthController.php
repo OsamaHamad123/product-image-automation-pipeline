@@ -20,6 +20,9 @@ class HealthController extends Controller
 {
     public const CACHE_KEY = 'ops_health_v1';
     public const CACHE_SECONDS = 60;
+    /** «دقة الاقتراحات الحقيقية»: review_stats.lanes، بنفس تخزين ops_health المؤقت. */
+    public const LANES_CACHE_KEY = 'review_lanes_v1';
+    public const LANES = ['strict', 'unsure', 'other'];
 
     /** آخر أسطر السجل التي تُرسل للصفحة، وأقصى ما يُقرأ من نهاية الملف. */
     public const LOG_LINES = 200;
@@ -431,6 +434,45 @@ class HealthController extends Controller
         }
         Cache::put(self::CACHE_KEY, $result, self::CACHE_SECONDS);
         return response()->json($result)->header('Cache-Control', 'no-store');
+    }
+
+    /**
+     * GET /api/system/review-lanes: لكل فئة اختيار (catalog_match.decide.pick_lane) الاقتراحات المراجعة والمعتمد منها
+     * والحد المضمون، من review_stats (نفس أرقام تبويب «النشر الآلي»)، مخزّنة CACHE_SECONDS متل ops-health.
+     */
+    public function reviewLanes(Request $request)
+    {
+        if (!$request->boolean('refresh')) {
+            $cached = Cache::get(self::LANES_CACHE_KEY);
+            if (is_array($cached)) {
+                return response()->json($cached)->header('Cache-Control', 'no-store');
+            }
+        }
+        $result = PythonBridge::run('review_stats');
+        if (($result['status'] ?? '') !== 'success') {
+            return response()->json(['status' => 'error', 'error' => 'جسر بايثون أو قاعدة البيانات ما ردّ.'], 500)
+                ->header('Cache-Control', 'no-store');
+        }
+        $body = self::lanesPayload($result);
+        Cache::put(self::LANES_CACHE_KEY, $body, self::CACHE_SECONDS);
+        return response()->json($body)->header('Cache-Control', 'no-store');
+    }
+
+    /** الأرقام اللي بتحتاجها البطاقة بس (لا أسماء ماركات ولا روابط). */
+    public static function lanesPayload(array $stats): array
+    {
+        $lanes = [];
+        foreach (self::LANES as $lane) {
+            $row = (array) (((array) ($stats['lanes'] ?? []))[$lane] ?? []);
+            $lanes[$lane] = [
+                'prechecked' => (int) ($row['prechecked'] ?? 0),
+                'accepted' => (int) ($row['accepted'] ?? 0),
+                'lower_bound' => is_numeric($row['lower_bound'] ?? null) ? (float) $row['lower_bound'] : null,
+                'ready' => ($row['status'] ?? '') === 'ready',
+            ];
+        }
+        return ['status' => 'success', 'lanes' => $lanes,
+                'unlaned' => (int) ($stats['unlaned_prechecked'] ?? 0)];
     }
 
     /** آخر أسطر سجل الأتمتة (temp/pipeline.log الذي يكتبه التشغيل). */

@@ -11,6 +11,53 @@ causes: the quality gate threw away white-background packshots, an unverified "l
 success, siblings of the right product outranked it, and reviewers' rejections were never remembered. The search
 core was rebuilt and wired into the queue, the dashboard actions and the sheet writes. Every claim below has a test.
 
+### Added: auto-publish earned across brands (lanes, shadow mode first)
+
+With about 20 products per brand no brand ever reached the 30 reviewed pre-checks (189 for a 98% lower bound), so
+auto-publish never ran. The evidence now also pools across brands, by the kind of pick:
+
+- **Lanes**: `catalog_match.decide.pick_lane` puts every pick in lane `strict` (its only auto blockers are
+  `auto_publish_disabled`, `auto_publish_off_for_brand` and `brand_conf_*`: every other rule passed), `unsure`
+  (`preselected:tier1_unsure`, display only) or `other`, and route() writes `lane:<name>` on the pick. A pick with
+  any review warning (low resolution, foreign store, a variant only one side states, ...) is `other`: lane `strict`
+  is the pick with nothing left for the reviewer to check, and the lane never auto-publishes a warned pick
+  (`auto_blocked:review_warning`).
+- **Recorded on every review**: new nullable `review_decisions.lane` (idempotent schema migration); approve, reject and
+  manual upload store the lane of the engine's pick (from the stored candidates, the catalog screen's live search via
+  `search_lane`, or `strict` for an auto-published image). Picks stored before the lanes get theirs from their
+  `auto_blocked:*` reasons. Undone decisions never count.
+- **Lane stats**: `review_stats` (bridge, settings, `scripts/review_stats.py`) adds per lane the reviewed pre-checks,
+  accepted, replaced, rejected, precision, Wilson lower bound and readiness on the brand thresholds.
+- **Settings «النشر الآلي»**: a section «النشر الآلي لكل الماركات المؤكدة» with lane `strict`'s numbers
+  («من 12 اقتراح بهالفئة، اعتمدت 12») and a switch the server turns on only when the lane is ready; lane `unsure`
+  is shown as information. New setting `AUTO_PUBLISH_STRICT_LANE` (default off; .env, system_settings,
+  run_config.json). With it on (and auto-publish on), a strict pick of a mapped brand auto-publishes without its brand
+  in `AUTO_PUBLISH_BRANDS`; every other blocker stays, an unmapped brand never auto-publishes. With it on and ready,
+  the main switch may open without a listed brand.
+- **Health page**: card «دقة الاقتراحات الحقيقية» (accepted / reviewed and the lower bound per lane) from GET
+  `/api/system/review-lanes`, cached 60 s like ops-health.
+- The lane publishes exactly what `AUTO_PUBLISH_BRANDS=*` publishes (tested on the golden set); the eval with the
+  defaults is unchanged (58/58, 58/58, 52/58, no wrong auto-publish).
+
+### Added: «ماركات ناقصة من Brands Mapping», an assistant that fills the sheet's brand tab
+
+Every product of the owner's last 40 rows said `brand_unknown`, unmapped brands stayed `brand_conf = sheet_raw`
+(`auto_blocked:brand_conf_sheet_raw`) and their official sites were unknown, because the tab was filled by hand.
+
+- **`brand_suggestions`** (bridge, read only, no paid call): the queue's brands the sheet's own mapping does not know
+  (placeholders and empty cells are no brand), most rows first, with the row count, the Arabic `brand_ar` and the store
+  spellings the search discovered or learned as synonym suggestions. An unreadable sheet is an error, not «all missing».
+- **`brand_official_site`** (only on the click «اقترح الموقع الرسمي»): exactly one Serper web query, recorded in
+  `search_spend` (run `brand-site`) when answered; up to two sites that are not a retailer, marketplace, social or stock
+  site and whose host or title holds the brand's main word. Writes nothing.
+- **`brand_add`** (only on a click; POST `/api/run/brand-add`, `/brand-add-all`): appends one row per brand to
+  `Brands Mapping` after a fresh read, refusing a duplicate, a domain that is not a bare host and more than ten
+  synonyms (checked again on the server), and drops the brand cache so the next run sees it. A site is queued in
+  `system_settings.pending_harvest_domains` and indexed at the start of the next worker run behind
+  `LOCAL_INDEX_ENABLED` (`brand_assistant.harvest_pending`, at most 3 sites and 120 seconds a run).
+- **Run page card** with the row count, synonyms and site fields, «اقترح الموقع الرسمي» (one search) and «أضف» per
+  brand, and «أضف الكل بدون مواقع» after a confirm. `tests/test_brand_assistant.py`, `tests/test_laqta_run_brands.py`.
+
 ### Added: «تراجع عن الرفض», the store page's barcode, a page's gallery in X0, and the reviewers' decisions in the export
 
 The owner's last runs: a rejection made only to try the button could not be taken back (the image stayed excluded and

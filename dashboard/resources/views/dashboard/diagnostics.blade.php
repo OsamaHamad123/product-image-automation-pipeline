@@ -135,6 +135,15 @@
         </section>
     @endif
 
+    {{-- «دقة الاقتراحات الحقيقية»: health.js reads /api/system/review-lanes (review_stats.lanes, cached) --}}
+    <section class="lq-card lq-card--compact" aria-label="دقة الاقتراحات الحقيقية">
+        <h2 class="lq-card__title">دقة الاقتراحات الحقيقية</h2>
+        <p class="lq-card__meta">من مراجعاتك للصور اللي اقترحها البحث، حسب نوع الاقتراح.</p>
+        <div class="lq-health-lanes" data-health="lanes" aria-busy="true" aria-live="polite">
+            <span class="lq-skeleton lq-health__skel-inline" aria-hidden="true"></span>
+        </div>
+    </section>
+
     <section class="lq-health__search" aria-labelledby="lq-health-search-title">
         <div class="lq-health__search-head">
             <h2 class="lq-section-title" id="lq-health-search-title">عمليات البحث</h2>

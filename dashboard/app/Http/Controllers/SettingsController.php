@@ -16,6 +16,8 @@ use Illuminate\Support\Facades\DB;
  *   المرحلة الأولى كاملة بنفس القواعد (LEGACY).
  * - النشر الآلي: مفتاح عام لا يُشغَّل إلا مع ماركة جاهزة مفعّلة (review_stats من cli_bridge، نفس حساب
  *   scripts/review_stats.py)، و«تفعيل» لا يضيف إلى AUTO_PUBLISH_BRANDS إلا ماركة جاهزة، و«إيقاف» يزيل أي مدخل.
+ * - «النشر الآلي لكل الماركات المؤكدة» (auto_publish_strict_lane): مفتاح لا يُشغَّل إلا لما تكون فئة strict جاهزة
+ *   (review_stats.lanes، نفس عتبات الماركة)، والمفتاح العام يقبل التشغيل معه بدل ماركة جاهزة.
  */
 class SettingsController extends Controller
 {
@@ -27,6 +29,9 @@ class SettingsController extends Controller
         'processing' => ['label' => 'معالجة الصور', 'hint' => 'المقاس وعزل الخلفية'],
         'advanced' => ['label' => 'متقدم', 'hint' => 'الرجوع للنظام القديم'],
     ];
+
+    /** النشر الآلي لكل الماركات المؤكدة (AUTO_PUBLISH_STRICT_LANE): نموذجه الخاص (section=strict-lane). */
+    public const STRICT_LANE_KEY = 'auto_publish_strict_lane';
 
     /** قائمة المرحلة الأولى (ProductController) كما هي: الحفظ بلا قسم يلتزم بها حرفياً. */
     public const SECRET_KEYS = [
@@ -246,6 +251,9 @@ class SettingsController extends Controller
         if ($section === 'models') {
             return $this->saveModels($request);
         }
+        if ($section === 'strict-lane') {
+            return $this->toggleStrictLane($request);
+        }
         if ($section === '') {
             $spec = ['tab' => 'keys', 'secret' => self::SECRET_KEYS, 'text' => self::TEXT_KEYS,
                      'checkbox' => self::CHECKBOX_KEYS];
@@ -362,10 +370,11 @@ class SettingsController extends Controller
 
             // النشر الآلي لا يُشغَّل بدون ماركة جاهزة مفعّلة (من أي نموذج، ومنه الحفظ القديم الكامل)
             if (($changes['auto_publish_enabled'] ?? null) === 'true') {
-                $current = self::storedValues(['auto_publish_enabled', 'auto_publish_brands']);
+                $current = self::storedValues(['auto_publish_enabled', 'auto_publish_brands', self::STRICT_LANE_KEY]);
                 if (($current['auto_publish_enabled'] ?? '') !== 'true') {
                     $brands = $changes['auto_publish_brands'] ?? ($current['auto_publish_brands'] ?? '');
-                    $why = self::autoPublishBlocker(self::brandList($brands), PythonBridge::run('review_stats'));
+                    $why = self::autoPublishBlocker(self::brandList($brands), PythonBridge::run('review_stats'),
+                        ($current[self::STRICT_LANE_KEY] ?? '') === 'true');
                     if ($why !== null) {
                         $changes['auto_publish_enabled'] = 'false';
                         $warnings[] = $why;
@@ -427,6 +436,51 @@ class SettingsController extends Controller
     }
 
     /**
+     * «النشر الآلي لكل الماركات المؤكدة» (auto_publish_strict_lane): الإطفاء دايماً، والتشغيل بس لما تكون فئة strict
+     * جاهزة بـ review_stats (نفس رفض ماركة مش جاهزة). config.load_db_config بيقرأ المفتاح، و catalog_match.decide
+     * بينشر اقتراح هالفئة لماركة مربوطة بس لما يكون النشر الآلي كله شغّال.
+     */
+    private function toggleStrictLane(Request $request)
+    {
+        $on = $request->has(self::STRICT_LANE_KEY);
+        try {
+            $current = self::storedValues(['auto_publish_enabled', self::STRICT_LANE_KEY]);
+            if (!$on) {
+                self::write([self::STRICT_LANE_KEY => 'false']);
+                return self::back('auto-publish', ['success' => 'وقّفنا النشر الآلي لكل الماركات المؤكدة. بس الماركات المفعّلة بالجدول بتنرفع بدون مراجعة.']);
+            }
+            if (($current[self::STRICT_LANE_KEY] ?? '') === 'true') {
+                return self::back('auto-publish', ['success' => 'النشر الآلي لكل الماركات المؤكدة شغّال من قبل.']);
+            }
+            $why = self::strictLaneBlocker(PythonBridge::run('review_stats'));
+            if ($why !== null) {
+                return self::back('auto-publish', ['error' => $why]);
+            }
+            self::write([self::STRICT_LANE_KEY => 'true']);
+            $message = 'شغّلنا النشر الآلي لكل الماركات المؤكدة.';
+            $message .= ($current['auto_publish_enabled'] ?? '') === 'true'
+                ? ' الاقتراحات اللي بتعدّي كل القواعد لماركة مربوطة رح تنرفع بدون مراجعة من التشغيل الجاي.'
+                : ' النشر الآلي كله لسا مطفأ: شغّله من المفتاح فوق لما تكون جاهز.';
+            return self::back('auto-publish', ['success' => $message]);
+        } catch (\Throwable $e) {
+            return self::back('auto-publish', ['error' => 'ما انحفظ التغيير: قاعدة البيانات ما ردّت. جرّب كمان شوي.']);
+        }
+    }
+
+    /** سبب منع تشغيل النشر الآلي لكل الماركات المؤكدة، أو null لما تكون فئة strict جاهزة. */
+    public static function strictLaneBlocker(array $stats): ?string
+    {
+        if (($stats['status'] ?? '') !== 'success') {
+            return 'ما قدرنا نتأكد إن الفئة جاهزة، فما شغّلناها. جرّب كمان شوي.';
+        }
+        $strict = (array) (((array) ($stats['lanes'] ?? []))['strict'] ?? []);
+        if (($strict['status'] ?? '') !== 'ready') {
+            return 'الاقتراحات المؤكدة لسا مش جاهزة: دقتها ما ثبتت بمراجعات كافية، فما شغّلنا النشر الآلي لكل الماركات المؤكدة.';
+        }
+        return null;
+    }
+
+    /**
      * «تفعيل» / «إيقاف» لماركة في AUTO_PUBLISH_BRANDS. التفعيل لماركة جاهزة فقط (review_stats)، والإيقاف لأي مدخل.
      * إيقاف آخر ماركة والنشر الآلي شغّال يطفئ المفتاح العام أيضاً، والرسالة تقول ذلك.
      */
@@ -439,7 +493,7 @@ class SettingsController extends Controller
         }
 
         try {
-            $current = self::storedValues(['auto_publish_enabled', 'auto_publish_brands']);
+            $current = self::storedValues(['auto_publish_enabled', 'auto_publish_brands', self::STRICT_LANE_KEY]);
             $list = self::brandList($current['auto_publish_brands'] ?? '');
             $key = self::brandKey($brand);
 
@@ -450,7 +504,8 @@ class SettingsController extends Controller
                 }
                 $changes = ['auto_publish_brands' => implode(', ', $kept)];
                 $message = 'وقّفنا النشر الآلي لـ «' . $brand . '». صورها رح تستنى مراجعتك.';
-                if ($kept === [] && ($current['auto_publish_enabled'] ?? '') === 'true') {
+                if ($kept === [] && ($current['auto_publish_enabled'] ?? '') === 'true'
+                        && ($current[self::STRICT_LANE_KEY] ?? '') !== 'true') {
                     $changes['auto_publish_enabled'] = 'false';
                     $message .= ' وطفينا النشر الآلي كله لأنه ما ضل ولا ماركة مفعّلة.';
                 }
@@ -645,6 +700,7 @@ class SettingsController extends Controller
 
         $minBound = is_numeric($thresholds['min_lower_bound'] ?? null) ? (float) $thresholds['min_lower_bound'] : null;
         $perfect = is_numeric($thresholds['perfect_record_reviews'] ?? null) ? (int) $thresholds['perfect_record_reviews'] : null;
+        $lane = self::laneData($stored, $stats);
         return [
             'status' => $ok ? 'ok' : 'error',
             'enabled' => $enabled,
@@ -653,8 +709,67 @@ class SettingsController extends Controller
             'ready_listed' => $readyListed,
             'ready_count' => count(array_filter($rows, fn ($r) => $r['ready'])),
             'reviews' => $ok ? (int) ($stats['overall']['actions'] ?? 0) : null,
-            'can_enable' => $ok && $readyListed !== [],
+            // the main switch opens with a ready brand switched on, or with the strict lane switched on and ready
+            'can_enable' => $ok && ($readyListed !== [] || ($lane['enabled'] && $lane['ready'])),
             'criterion' => self::criterionText($minBound, $perfect),
+            'lane' => $lane,
+        ];
+    }
+
+    /**
+     * «النشر الآلي لكل الماركات المؤكدة» من review_stats.lanes: أرقام فئة strict (اقتراح عدّى كل قواعد النشر الآلي إلا
+     * إعداد الماركة) وحالتها، ومفتاحها (auto_publish_strict_lane) بيتشغّل بس لما تكون جاهزة؛ وفئة unsure للعلم بس.
+     */
+    public static function laneData(array $stored, array $stats): array
+    {
+        $on = strtolower(trim((string) ($stored[self::STRICT_LANE_KEY]['value'] ?? ''))) === 'true';
+        $ok = ($stats['status'] ?? '') === 'success' && is_array($stats['lanes'] ?? null);
+        $strict = $ok ? (array) ($stats['lanes']['strict'] ?? []) : [];
+        $unsure = $ok ? (array) ($stats['lanes']['unsure'] ?? []) : [];
+        $n = (int) ($strict['prechecked'] ?? 0);
+        $accepted = (int) ($strict['accepted'] ?? 0);
+        $status = (string) ($strict['status'] ?? 'needs_reviews');
+        $ready = $ok && $status === 'ready';
+        $needed = is_numeric($strict['reviews_needed'] ?? null) ? (int) $strict['reviews_needed'] : null;
+
+        if (!$ok) {
+            [$chip, $tone] = ['ما منعرف هلق', 'none'];
+        } elseif ($ready) {
+            [$chip, $tone] = $on ? ['شغّال', 'approved'] : ['جاهزة', 'proposed'];
+        } elseif ($status === 'low_precision') {
+            [$chip, $tone] = ['دقة أقل من المطلوب', 'error'];
+        } elseif ($needed === null) {
+            [$chip, $tone] = ['بعيدة عن المطلوب', 'none'];
+        } else {
+            [$chip, $tone] = ['تحتاج ' . max(1, $needed - $n) . ' مراجعة', 'none'];
+        }
+        $text = $n === 0 ? 'لسا ما راجعت ولا اقتراح بهالفئة.' : 'من ' . $n . ' اقتراح بهالفئة، اعتمدت ' . $accepted . '.';
+        $details = [];
+        if ($n > 0) {
+            $details[] = 'الحد المضمون ' . self::pct($strict['lower_bound'] ?? null);
+            if ((int) ($strict['replaced'] ?? 0) > 0) {
+                $details[] = 'بدّلت ' . (int) $strict['replaced'];
+            }
+            if ((int) ($strict['rejected'] ?? 0) > 0) {
+                $details[] = 'رفضت ' . (int) $strict['rejected'];
+            }
+        }
+        $un = (int) ($unsure['prechecked'] ?? 0);
+        $unsureText = 'القارئ مش متأكد بس العنوان بيأكد: '
+            . ($un === 0 ? 'لسا ما راجعت ولا اقتراح من هالنوع.' : 'اعتمدت ' . (int) ($unsure['accepted'] ?? 0) . ' من ' . $un . '.')
+            . ' للعلم بس: هالنوع ما بينتشر آلياً.';
+        return [
+            'status' => $ok ? 'ok' : 'error',
+            'enabled' => $on,
+            'ready' => $ready,
+            'can_enable' => $ready,
+            'reviews' => $n,
+            'accepted' => $accepted,
+            'text' => $text,
+            'detail' => implode(' · ', $details),
+            'chip' => $chip,
+            'tone' => $tone,
+            'unsure_text' => $ok ? $unsureText : '',
         ];
     }
 
@@ -730,11 +845,17 @@ class SettingsController extends Controller
         ];
     }
 
-    /** سبب منع تشغيل النشر الآلي، أو null إذا في ماركة جاهزة مفعّلة. */
-    public static function autoPublishBlocker(array $brands, array $stats): ?string
+    /**
+     * سبب منع تشغيل النشر الآلي، أو null إذا في ماركة جاهزة مفعّلة (أو النشر الآلي لكل الماركات المؤكدة شغّال وفئته
+     * لسا جاهزة).
+     */
+    public static function autoPublishBlocker(array $brands, array $stats, bool $strictLane = false): ?string
     {
         if (($stats['status'] ?? '') !== 'success') {
             return 'ما قدرنا نتأكد من جاهزية الماركات، فالنشر الآلي ضل مطفأ.';
+        }
+        if ($strictLane && self::strictLaneBlocker($stats) === null) {
+            return null;
         }
         $ready = [];
         foreach ((array) ($stats['brands'] ?? []) as $b) {
