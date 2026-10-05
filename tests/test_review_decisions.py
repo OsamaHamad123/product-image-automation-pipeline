@@ -460,7 +460,7 @@ def test_table_is_created_idempotently_with_its_indexes(db):
         conn.close()
     assert columns == {"id", "created_at", "action", "sku_key", "row_number", "brand", "product_name", "image_url",
                        "page_domain", "identity_tier", "engine_decision", "was_preselected", "vlm_decision",
-                       "reason_code"}
+                       "reason_code", "undone_at", "learned_alias"}
     assert {"sku_key", "brand", "created_at"} <= indexed
 
 

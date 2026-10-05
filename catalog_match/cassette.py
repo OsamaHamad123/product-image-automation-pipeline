@@ -192,6 +192,19 @@ def replaying() -> bool:
     return cas is not None and cas.mode in ("replay", "fill")
 
 
+def can_download(url: str) -> bool:
+    """False only while a replay cassette holds no answer for downloading this URL (any row, any rendition of it):
+    a caller with an optional extra download (X0's gallery images) leaves it out instead of reporting a miss.
+    True without a cassette, while recording and while filling (that mode makes the call and stores it)."""
+    cas = _STATE
+    if cas is None or cas.mode != "replay":
+        return True
+    try:
+        return cas.holds_download(url)
+    except Exception:  # pragma: no cover - defensive: an unreadable cassette means no extra download
+        return False
+
+
 @contextlib.contextmanager
 def row(number: int) -> Iterator[None]:
     """The sheet row every answer inside belongs to (no-op without a cassette)."""
@@ -1053,6 +1066,15 @@ class Cassette:
     def asked(self, row: int, key: str) -> bool:
         """True when this row already holds an answer for the key."""
         return any(int(e.get("row") or 0) == row for e in self._entries.get(key, ()))
+
+    def holds_download(self, url: str) -> bool:
+        """True when some row holds an answer for a GET of this URL (or of its canonical rendition), direct or proxied."""
+        for proxy in (False, True):
+            if self._entries.get(request_key(canonical_request("fetch", "GET", url, proxy=proxy))):
+                return True
+            if self._aliases.get(request_key(canonical_request("fetch", "GET", _alias_url(url), proxy=proxy))):
+                return True
+        return False
 
     @staticmethod
     def _succeeded(entry: Mapping[str, Any]) -> bool:

@@ -11,6 +11,34 @@ causes: the quality gate threw away white-background packshots, an unverified "l
 success, siblings of the right product outranked it, and reviewers' rejections were never remembered. The search
 core was rebuilt and wired into the queue, the dashboard actions and the sheet writes. Every claim below has a test.
 
+### Added: «تراجع عن الرفض», the store page's barcode, a page's gallery in X0, and the reviewers' decisions in the export
+
+The owner's last runs: a rejection made only to try the button could not be taken back (the image stayed excluded and
+counted in the stats); none of the 120 products has a barcode in the sheet although store pages state one; X0 only
+tried a page's main image (Golden Prize 185g on carrefouruae shows a twin pack, Emirates Coop its placeholder logo);
+and the export never said whether the reviewer took the pre-checked pick.
+
+- **Undo a rejection**: `local_cache_db.undo_rejection` removes one `rejected_images` row (sku_key + image URL), marks
+  the matching `review_decisions` row with the new nullable `undone_at` (and gives a WRONG_BRAND rejection back to the
+  store spelling it counted against, the new `learned_alias`), and puts the excluded candidate back among the
+  suggestions. `get_review_decisions`, `review_stats` and the learned brand sources skip undone rows. Bridge action
+  `undo_reject`, POST `/api/review/undo-reject` (CSRF like the other POSTs); the review screen lists the product's
+  rejected images with «تراجع عن الرفض» after the confirm «ترجع هالصورة للاقتراحات؟».
+- **Barcode from the store page**: candidate evidence carries `page_gtin` (the page's GTIN when checksum-valid and
+  globally unique). An approval or auto-publish of that image for a sheet row without a valid barcode stores it in
+  `resolved_products.page_gtin` / `page_gtin_url`; the review card shows «الباركود من صفحة المتجر: …» with a copy
+  button; `scripts/export_barcodes.py` writes a CSV (row, name, brand, page_gtin, source page, approved,
+  `duplicate_gtin` when two approved products got the same GTIN). The sheet is never written.
+- **A page's gallery in X0**: when a recovered page's main image is no good for the SKU (the picture that failed, by
+  address or bytes, or read as wrong), up to 2 more images of its own product gallery (JSON-LD / embedded product
+  JSON; never og:image duplicates or recommendation carousels) are offered as `page` candidates marked `page_gallery`,
+  within X0's one verifier call, and pre-checked only on a MATCH. `MAX_IMAGES_PER_PAGE` stays 1. A replay cassette
+  without the gallery image's download leaves it out (no miss). The review marks it «صورة ثانية من معرض صفحة المتجر».
+- **Review outcomes in the export**: each row has `review` (latest decision, image, domain, was_preselected, label
+  reader, reason, time), `approval` (the published link) and `page_gtin`; `summary.review` counts the decisions and
+  splits the pre-checked picks into accepted / replaced / rejected / pending, also by the pick's warning set. An old
+  database gives an empty block. bg_skipped is not stored per approval, so it is not exported per row.
+
 ### Added: faster runs («كم منتج بيشتغل بنفس الوقت»), stage timings, a hedged Serper request and a slow-host breaker
 
 The owner's three exports (151 rows) showed 100 rows taking 18.3 minutes with 3 rows in parallel, about 33 s a row:

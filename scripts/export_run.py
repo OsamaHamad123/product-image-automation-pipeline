@@ -19,7 +19,23 @@ brand the search used (discovered_brands: the trace's outcome, or an older pick'
 provider calls and the estimated cost when the trace says it, and the search's wall time per stage ('timings',
 milliseconds: retrieval, fetch, quality, verify, expansion when the round ran, total; a row saved before the
 timings were recorded has an empty one). The summary adds 'timings': p50 / p90 / total seconds per stage over the
-rows that have them. The run's metadata: the code version (git commit), every catalog_match
+rows that have them.
+
+What the reviewers did (review_decisions, a rejection taken back with «تراجع عن الرفض» left out): per row 'review',
+the latest decision for the row's sku_key (else its row number): decision (approved | rejected | manual_upload), the
+image and its page domain, was_preselected, the engine's decision, the label reader's decision, the reject reason and
+the time, plus how many decisions the row has; None without one. A row with a current approval (resolved_products)
+gets 'approval': the published link (the Cloudinary URL the sheet holds), the source image, human_approved or
+auto_verified and when; and 'page_gtin' / 'page_gtin_page': the barcode the approved image's store page stated for a
+row without one (scripts/export_barcodes.py lists them). Whether an approval went out without background removal
+(bg_skipped) is not recorded per approval, only counted per run (run_report), so it is not in the row.
+summary.review: counts of the rows' latest decisions (approved / rejected / manual_upload; pending = waiting for
+review without one; no_decision = the rest; undone = rejections taken back), and for the rows whose engine pick was
+pre-checked (AUTO_PUBLISH / REVIEW_PRESELECTED) whether the reviewer accepted it, replaced it (another image or an
+upload), rejected it or not yet, also split by the pick's warning set (no_warning, vlm_unsure only, other, unknown
+when the export no longer has the pick's warnings). A database without review rows gives an empty block.
+
+The run's metadata: the code version (git commit), every catalog_match
 setting without any key (catalog_match.cassette.settings_snapshot: secret settings only as set / not set) and the
 run_history row of the run.
 
@@ -343,6 +359,156 @@ def export_row(row, candidates, mappings=None, vocab=None, prices=None, secret_v
 
 
 # ---------------------------------------------------------------------------
+# What the reviewers did (review_decisions) and the current approvals (resolved_products)
+# ---------------------------------------------------------------------------
+
+REVIEW_COLUMNS = ("id, created_at, action, sku_key, `row_number`, image_url, page_domain, engine_decision, "
+                  "was_preselected, vlm_decision, reason_code")
+REVIEW_ACTIONS = ("approved", "rejected", "manual_upload")
+PICK_VERDICTS = ("accepted", "replaced", "rejected", "pending")
+WARNING_SETS = ("no_warning", "vlm_unsure", "other", "unknown")
+
+
+def review_decisions():
+    """(by_sku, by_row, undone) of the reviewers' decisions in time order: lists of rows keyed by sku_key, and by row
+    number for the rows saved without one; undone counts the rejections taken back per key ('sku:<key>' / 'row:<n>').
+    A database without the table (or without undone_at) answers what it has; nothing at all gives empty maps."""
+    try:
+        rows = _query(f"SELECT {REVIEW_COLUMNS}, undone_at FROM review_decisions ORDER BY created_at, id")
+    except Exception:
+        try:
+            rows = _query(f"SELECT {REVIEW_COLUMNS} FROM review_decisions ORDER BY created_at, id")
+        except Exception:
+            rows = []
+    by_sku, by_row, undone = {}, {}, Counter()
+    for r in rows:
+        sku = str(r.get("sku_key") or "").strip()
+        key = f"sku:{sku}" if sku else f"row:{r.get('row_number')}"
+        if r.get("undone_at"):
+            undone[key] += 1
+            continue
+        if sku:
+            by_sku.setdefault(sku, []).append(r)
+        elif r.get("row_number") is not None:
+            by_row.setdefault(int(r["row_number"]), []).append(r)
+    return by_sku, by_row, undone
+
+
+def current_approvals():
+    """{sku_key: the current approval} (human_approved / auto_verified; the latest per key); {} when unreadable."""
+    base = ("SELECT sku_key, cloudinary_url, original_url, verification_status, resolved_at{} FROM resolved_products "
+            "WHERE verification_status IN ('human_approved', 'auto_verified') AND sku_key IS NOT NULL "
+            "AND sku_key <> '' ORDER BY id")
+    for extra in (", page_gtin, page_gtin_url", ""):
+        try:
+            return {str(r["sku_key"]).strip(): r for r in _query(base.format(extra))}
+        except Exception:
+            continue
+    return {}
+
+
+def _ts(value):
+    return str(value) if value is not None else None
+
+
+def row_decisions(out_row, by_sku, by_row):
+    sku = str(out_row.get("sku_key") or "").strip()
+    found = by_sku.get(sku) if sku else None
+    return list(found or by_row.get(out_row.get("row")) or [])
+
+
+def review_block(decisions):
+    """The row's latest review decision (see the module docstring), or None."""
+    if not decisions:
+        return None
+    last = decisions[-1]
+    pre = last.get("was_preselected")
+    return {"decision": last.get("action"), "image_url": last.get("image_url"), "domain": last.get("page_domain"),
+            "was_preselected": None if pre is None else bool(pre), "engine_decision": last.get("engine_decision"),
+            "vlm_decision": last.get("vlm_decision"), "reason_code": last.get("reason_code"),
+            "at": _ts(last.get("created_at")), "decisions": len(decisions)}
+
+
+def approval_block(approval):
+    if not approval:
+        return None
+    return {"link": approval.get("cloudinary_url"), "image_url": approval.get("original_url"),
+            "status": approval.get("verification_status"), "at": _ts(approval.get("resolved_at"))}
+
+
+def pick_verdict(decisions, winner_url=None):
+    """What the reviewer did with a pre-checked pick: accepted | replaced | rejected | pending (the latest that
+    counts: an approval of the pick, an approval of another image or an upload, a rejection of the pick)."""
+    verdict = "pending"
+    for d in decisions:
+        action, pre = d.get("action"), d.get("was_preselected")
+        if action == "approved":
+            verdict = "accepted" if pre is not None and int(pre) == 1 else "replaced"
+        elif action == "manual_upload":
+            verdict = "replaced"
+        elif action == "rejected" and ((pre is not None and int(pre) == 1)
+                                        or (winner_url and d.get("image_url") == winner_url)):
+            verdict = "rejected"
+    return verdict
+
+
+def warning_set(out_row, decisions):
+    """The pick's warning set: no_warning, vlm_unsure (that one only), other, or unknown when the export no longer
+    has the pick (an approved row's candidates are gone) and the review rows cannot tell."""
+    if out_row.get("winner_detail"):
+        codes = {str(w).split(":", 1)[0] for w in out_row.get("warnings") or []}
+        return "no_warning" if not codes else "vlm_unsure" if codes == {"vlm_unsure"} else "other"
+    read = next((d.get("vlm_decision") for d in reversed(decisions) if d.get("vlm_decision")
+                 and d.get("was_preselected") is not None and int(d["was_preselected"]) == 1), None)
+    return "vlm_unsure" if read and read != "MATCH" else "unknown"
+
+
+def review_summary(out_rows, by_row_decisions, undone=0):
+    """summary.review (see the module docstring); {} when no exported row has a review decision."""
+    if not any(by_row_decisions.values()) and not undone:
+        return {}
+    counts = Counter({k: 0 for k in REVIEW_ACTIONS + ("pending", "no_decision")})
+    pre = Counter({k: 0 for k in PICK_VERDICTS})
+    by_warning = {w: Counter({k: 0 for k in PICK_VERDICTS}) for w in WARNING_SETS}
+    for out_row in out_rows:
+        decisions = by_row_decisions.get(id(out_row)) or []
+        if decisions:
+            counts[decisions[-1].get("action")] += 1
+        elif out_row.get("queue_status") == "ready_for_review":
+            counts["pending"] += 1
+        else:
+            counts["no_decision"] += 1
+        if out_row.get("decision") in smoke_live.PICK_DECISIONS:
+            verdict = pick_verdict(decisions, out_row.get("winner"))
+            pre[verdict] += 1
+            by_warning[warning_set(out_row, decisions)][verdict] += 1
+    return {"counts": dict(counts), "undone": int(undone), "preselected": dict(pre),
+            "preselected_by_warning": {w: dict(c) for w, c in by_warning.items()}}
+
+
+def add_review(out_rows, by_sku=None, by_row=None, undone=None, approvals=None):
+    """Each exported row's 'review', 'approval' and 'page_gtin' (read once for the whole export); returns
+    summary.review."""
+    if by_sku is None:
+        by_sku, by_row, undone = review_decisions()
+    approvals = current_approvals() if approvals is None else approvals
+    found, undone_here = {}, 0
+    for out_row in out_rows:
+        if "error" in out_row:
+            continue
+        decisions = row_decisions(out_row, by_sku, by_row or {})
+        found[id(out_row)] = decisions
+        sku = str(out_row.get("sku_key") or "").strip()
+        undone_here += (undone or {}).get(f"sku:{sku}" if sku else f"row:{out_row.get('row')}", 0)
+        out_row["review"] = review_block(decisions)
+        approval = approvals.get(sku) if sku else None
+        out_row["approval"] = approval_block(approval)
+        out_row["page_gtin"] = (approval or {}).get("page_gtin") or None
+        out_row["page_gtin_page"] = (approval or {}).get("page_gtin_url") or None if out_row["page_gtin"] else None
+    return review_summary([r for r in out_rows if "error" not in r], found, undone_here)
+
+
+# ---------------------------------------------------------------------------
 # The document
 # ---------------------------------------------------------------------------
 
@@ -397,8 +563,10 @@ def build_export(scope="latest", run_id=None, mappings=None, now=None):
         "git": smoke_live.git_info(), "settings": cassette.settings_snapshot(), "run_history": run_history(run_id),
         "note": "Read from the queue, its stored traces and review candidates: nothing was searched again.",
     }
+    review = add_review(out_rows)
     summary = smoke_live.summarize(out_rows)
     summary["timings"] = timings_summary(out_rows)
+    summary["review"] = review
     return {"format": smoke_live.JSON_FORMAT, "export": EXPORT_FORMAT, "meta": meta,
             "summary": summary, "rows": out_rows}, hidden
 
