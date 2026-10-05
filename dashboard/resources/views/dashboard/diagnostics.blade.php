@@ -5,7 +5,10 @@
       $optional         configured optional services (proxy, legacy Custom Search), one muted line
       $checkedAt        epoch of the last check or null;  $allOk  false when a critical service failed
       $lastRun          HealthController::lastRunCard(): the last run (temp/nightly/last_report.json), or null
-    Opening the page never runs the check (a paid Serper query and a PhotoRoom call): the button does.
+      $lastPublishCheck the saved result of the last «فحص النشر» (temp/publish_check_last.json, redacted) or null
+      $publish          HealthController::publishCheckView(): that result as the card's summary and four step rows
+    Opening the page never runs the check (a paid Serper query and a PhotoRoom call): the button does. The same goes
+    for «فحص النشر» (POST /api/system/publish-check: it may cost one background-removal call).
     public/js/health.js runs the check on click, loads «عمليات البحث» from GET /api/system/ops-health and
     the log tails from GET /api/view-pipeline-log, /api/view-laravel-log and /api/view-nightly-log.
 --}}
@@ -63,6 +66,52 @@
             <span class="lq-health__optional-item"><span class="lq-dot {{ $healthDots[$item['tone']] ?? 'lq-dot--muted' }}" aria-hidden="true"></span>{{ $item['name'] }} {{ $item['state'] }}</span>
         @endforeach
     </p>
+
+    {{-- «فحص النشر»: بروفة النشر الحقيقي على صورة تجريبية (HealthController::runPublishCheck -> cli_bridge publish_check).
+         الزر وحده يشغّله؛ البطاقة تبدأ من آخر نتيجة محفوظة (HealthController::publishCheckView). شاشة المراجعة تربط
+         هون (#publish-check) بعد اعتماد ما مشي. --}}
+    <section class="lq-card lq-health-publish" id="publish-check" aria-labelledby="publish-check-title" data-health="publish" data-tone="{{ $publish['tone'] }}">
+        <div class="lq-health-publish__head">
+            <div class="lq-health-publish__intro">
+                <h2 class="lq-card__title" id="publish-check-title">فحص النشر</h2>
+                <p class="lq-health-publish__desc">بيجرّب النشر كامل على صورة تجريبية بدون ما يلمس منتجاتك: التنزيل، عزل الخلفية، الرفع، والكتابة بالشيت.</p>
+            </div>
+            <div class="lq-health-publish__action">
+                <x-lq.button variant="primary" icon="play" data-health="publish-run"><span data-health="publish-run-label">افحص النشر</span></x-lq.button>
+                <span class="lq-health-publish__cost" id="publishCheckNote">ممكن يكلّف طلب عزل خلفية واحد (ونادراً أكتر إذا ما زبط العزل من أول مرة) وقراءة Gemini وحدة إذا مفتاحها محفوظ. الصورة التجريبية بتنرفع على Cloudinary وبتنمسح، وبالشيت منكتب عنوان عمود الرابط نفسه فوق حاله. عادةً بيخلص بأقل من دقيقة، وما بيطول أكتر من 7 دقايق.</span>
+            </div>
+        </div>
+
+        <div class="lq-health-publish__summary" data-health="publish-summary-box" role="status" aria-live="polite">
+            <span class="lq-dot lq-dot--lg {{ $healthDots[$publish['tone']] ?? 'lq-dot--muted' }}" data-health="publish-dot" aria-hidden="true"></span>
+            <div class="lq-health-publish__summary-text">
+                <strong data-health="publish-summary">{{ $publish['summary'] }}</strong>
+                <span class="lq-health-publish__meta" data-health="publish-meta">@if ($publish['when'] !== '')آخر فحص للنشر: <time>{{ $publish['when'] }}</time>@if ($publish['sample'] !== '') · {{ $publish['sample'] }}@endif @endif</span>
+            </div>
+        </div>
+
+        <ol class="lq-health-publish__steps" data-health="publish-steps">
+            @foreach ($publish['steps'] as $step)
+                <li class="lq-health-step" data-step="{{ $step['key'] }}" data-status="{{ $step['status'] }}" @if ($step['code'] !== '') title="{{ $step['code'] }}" @endif>
+                    <span class="lq-health-step__icon lq-health-step__icon--{{ $step['tone'] }}" role="img" aria-label="{{ $step['label'] }}" data-step-icon><x-lq.icon :name="$step['icon']" :size="14" :stroke="2.4" /></span>
+                    <div class="lq-health-step__body">
+                        <div class="lq-health-step__head">
+                            <span class="lq-health-step__title" data-step-title>{{ $step['title'] }}</span>
+                            <span class="lq-health-step__state" data-step-state>{{ $step['label'] }}</span>
+                            <span class="lq-health-step__time" data-step-time>{{ $step['time'] }}</span>
+                        </div>
+                        <p class="lq-health-step__detail" dir="auto" data-step-detail @if ($step['detail'] === '') hidden @endif>{{ $step['detail'] }}</p>
+                        <p class="lq-health-step__todo" dir="auto" data-step-action @if ($step['action'] === '') hidden @endif>{{ $step['action'] }}</p>
+                        @if ($step['key'] === 'process')
+                            <p class="lq-health-step__hint">هالخطوة ممكن تكلّف طلب عزل خلفية واحد.</p>
+                        @endif
+                    </div>
+                </li>
+            @endforeach
+        </ol>
+        <p class="lq-health__footnote" data-health="publish-notes">{{ implode(' ', $publish['notes']) }}</p>
+    </section>
+    <script type="application/json" id="publish-check-initial">@json($lastPublishCheck)</script>
 
     @if ($lastRun ?? null)
         {{-- آخر تشغيل (HealthController::lastRunCard من التقرير الذي يكتبه run_report.py بعد كل تشغيل) --}}

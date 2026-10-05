@@ -11,6 +11,27 @@ causes: the quality gate threw away white-background packshots, an unverified "l
 success, siblings of the right product outranked it, and reviewers' rejections were never remembered. The search
 core was rebuilt and wired into the queue, the dashboard actions and the sheet writes. Every claim below has a test.
 
+### Added: «فحص النشر» on the Health page (a publish rehearsal)
+
+The owner's 11 bulk approvals failed with no visible reason, and «فحص الاتصالات» only asks each service whether it
+answers. The new check runs the real publish chain on a test image, step by step, without touching any product.
+
+- **Four steps, each with its own timeout** (`publish_check.py`, bridge action `publish_check`, `POST
+  /api/system/publish-check`, `scripts/publish_check.py [--json] [--no-save]`): the image of the first pre-selected
+  candidate waiting for review (candidate store by its sha256, then the real `_download_bytes`, which now reports
+  whether it went direct or through the proxy; the bundled `assets/selftest/publish_check_sample.png` when nothing
+  waits for review), background removal with the current processing profile, an upload with the publish uploader
+  to `laqta_selftest/publish_check` (fixed name, overwritten) that is deleted right after, and the products tab
+  opened as publishing opens it, where the link column's header cell is read and the same value written back
+  (`values_batch_update`, RAW, like the outbox); a header that cannot be read for sure is not written.
+- **Each step says ✅ / ⚠️ / ❌ with its time and what to do in Arabic** («البروكسي ما بيرد: افحصه بصفحة الإعدادات أو
+  شيله», «مفتاح Cloudinary مرفوض: حدّثه بالإعدادات», «حساب الخدمة ما عنده صلاحية تعديل على الشيت: شارك الشيت معه
+  كمحرر»); a step that needs a failed one is «ما انفحصت». The tab title and the outbox backlog are shown. The codes
+  stay in the tooltips, every text passes `verify_cloud_services._redact`, and the last result is kept in
+  `temp/publish_check_last.json`. No product row, queue row, setting or lock is touched; a running worker gets a
+  note only. It may cost one background-removal call (and one Gemini read).
+- The review screen's failed-approvals panel links to the check («افحص النشر» → `/system-diagnostics#publish-check`).
+
 ### Added
 
 - **`catalog_match/` search core** (behind the unchanged `image_search.search_best_product_image`, `SEARCH_ENGINE=v2`):

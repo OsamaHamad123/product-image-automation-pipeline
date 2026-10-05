@@ -24,7 +24,8 @@
         retry: '/api/failures/retry',
         imageProxy: '/api/image-proxy',
         export: '/rich-catalog/export',
-        run: '/batch-automation'
+        run: '/batch-automation',
+        publishCheck: '/system-diagnostics#publish-check'
     };
 
     const LIST_PAGE = 150;
@@ -685,9 +686,15 @@
                 if (!S.jobs.busy() && !S.jobs.state().failedAll) S.jobs.dismiss();
             }, 6000);
         } else {
+            // اعتماد أو رفع ما مشي: «فحص النشر» بصفحة الصحة بيجرّب سلسلة النشر كاملة على صورة تجريبية ويقول وين وقفت
+            const publishFailed = st.jobs.some(j => j.state === 'failed' && j.type !== 'reject');
             box.appendChild(el('div', { className: 'rv-jobs__head' }, [
                 el('span', { className: 'rv-jobs__warn' }, [icon('alert', 18, 2)]),
                 el('span', { className: 'rv-jobs__text', text: `خلصت: ${st.done} مشيت، و${plural(st.failedAll, 'وحدة ما مشيت', 'ما مشيت')}:` }),
+                publishFailed
+                    ? el('a', { className: 'lq-btn lq-btn--secondary lq-btn--sm rv-jobs__check', href: S.urls.publishCheck,
+                                title: 'بيجرّب النشر كامل على صورة تجريبية وبيقلك وين وقف وشو تعمل', text: 'افحص النشر' })
+                    : null,
                 el('button', { type: 'button', className: 'rv-jobs__close', 'aria-label': 'إغلاق', onclick: () => S.jobs.dismiss() }, [icon('x', 16, 2)])
             ]));
         }

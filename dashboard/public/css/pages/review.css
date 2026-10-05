@@ -1364,6 +1364,11 @@
     flex-shrink: 0;
 }
 
+/* an approval that published nothing: «افحص النشر» opens the publish rehearsal on the Health page */
+.rv-jobs__check {
+    flex-shrink: 0;
+}
+
 /* ==========================================================================
    Bulk mode
    ========================================================================== */
