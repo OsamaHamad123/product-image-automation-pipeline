@@ -185,6 +185,7 @@
         [/^download_(timeout|connection_error|http_5\d\d|failed)$/i, 'ما قدرنا ننزّل الصورة من موقع المتجر (الاتصال أو البروكسي): جرّب مرة ثانية.'],
         [/^download_http_(403|429)$/i, 'موقع المتجر رفض تنزيل الصورة: جرّب مرة ثانية، وإذا تكرر جرّب صورة من متجر ثاني.'],
         [/^download_http_(404|410)$/i, 'الصورة انشالت من موقع المتجر: أعد البحث أو اختر صورة ثانية.'],
+        [/^download_host_slow$/i, 'موقع المتجر بطيء أو ما بيرد هلق وتخطّيناه مؤقتاً: جرّب بعد شوي أو اختر صورة من متجر ثاني.'],
         [/^download_|^(not_image|image_too_large|source_too_large)$/i, 'الرابط ما عاد صورة صالحة: اختر صورة ثانية أو أعد البحث.'],
         [/^(source_missing|source_not_found|source_unreadable)$/i, 'الصورة مش موجودة على الجهاز: اختر صورة ثانية أو أعد البحث.'],
         [/barcode is required/i, 'الباركود ناقص بالطلب: حدّث الصفحة وجرّب مرة ثانية.'],
@@ -457,6 +458,7 @@
             const r = c.reasons;
             let text = 'استبعدها النظام';
             if (r.some(x => /^vlm:MISMATCH/.test(x))) text = 'نموذج القراءة شاف منتج مختلف';
+            else if (r.some(x => /^download:host_slow$/.test(x))) text = 'موقع المتجر بطيء: تخطّيناها';
             else if (r.some(x => /^download:/.test(x))) text = 'ما قدرنا نحمّلها';
             else if (r.some(x => /^quality:/.test(x))) text = 'جودة ضعيفة';
             else if (r.some(x => /size/.test(x))) text = 'حجم مختلف';

@@ -23,6 +23,20 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ["DB_DATABASE"] = os.environ.get("TEST_DB_DATABASE", "automation_test")
 
 
+@pytest.fixture(autouse=True)
+def _fresh_host_breaker():
+    """catalog_match.fetch keeps a process-wide record of hosts whose downloads timed out; a test must not inherit
+    (or leave) another test's slow hosts."""
+    try:
+        from catalog_match import fetch
+    except Exception:  # pragma: no cover - a test environment without the image libraries
+        yield
+        return
+    fetch.reset_host_breaker()
+    yield
+    fetch.reset_host_breaker()
+
+
 @pytest.fixture
 def offline(monkeypatch):
     """Refuse every socket connection (network and database)."""
