@@ -690,6 +690,30 @@
     }
 }
 
+/* «دقة الاقتراحات الحقيقية»: one line per lane */
+.lq-health-lanes {
+    display: grid;
+    gap: var(--lq-space-2);
+    margin-block-start: var(--lq-space-2);
+}
+
+.lq-health-lane {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 10px;
+}
+
+.lq-health-lane__label {
+    min-inline-size: 14em;
+    color: var(--lq-text-2);
+}
+
+.lq-health-lane__bound {
+    font-size: var(--lq-fs-sm);
+    color: var(--lq-text-3);
+}
+
 @media (max-width: 980px) {
     .lq-health__services {
         grid-template-columns: repeat(2, minmax(0, 1fr));

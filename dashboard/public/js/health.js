@@ -24,6 +24,10 @@
         nightly: '/api/view-nightly-log' };
     var LOG_POLL_MS = 5000;
     var PUBLISH_CHECK_URL = '/api/system/publish-check';
+    var LANES_URL = '/api/system/review-lanes';
+    /* «دقة الاقتراحات الحقيقية»: the lanes of catalog_match.decide.pick_lane (HealthController::lanesPayload). */
+    var LANES = [['strict', 'عدّى كل قواعد النشر الآلي'], ['unsure', 'القارئ مش متأكد بس العنوان بيأكد'],
+        ['other', 'باقي الاقتراحات']];
 
     /* «فحص النشر»: the four steps of publish_check.py and the words of each status (HealthController::PUBLISH_STEP_*). */
     var PUBLISH_STEPS = [['download', 'تنزيل الصورة'], ['process', 'عزل الخلفية والمعالجة'],
@@ -755,7 +759,28 @@
         return { start: show, run: run, skipBg: skipBg, restoreBg: restoreBg, state: state };
     }
 
+    /* One row per lane: «اعتمدت X من Y» and the guaranteed lower bound. null payload: the bridge did not answer. */
+    function lanesView(payload) {
+        if (!isObject(payload) || payload.status !== 'success' || !isObject(payload.lanes)) {
+            return { kind: 'error', text: 'ما قدرنا نحسب دقة الاقتراحات هلق.', rows: [] };
+        }
+        var rows = LANES.map(function (pair) {
+            var lane = isObject(payload.lanes[pair[0]]) ? payload.lanes[pair[0]] : {};
+            var n = count(lane.prechecked);
+            var bound = num(lane.lower_bound);
+            return {
+                key: pair[0],
+                label: pair[1],
+                text: n ? 'اعتمدت ' + count(lane.accepted) + ' من ' + n : 'لسا ما في مراجعات',
+                bound: n && bound !== null ? 'الحد المضمون ' + (100 * bound).toFixed(1) + '%' : '',
+                ready: lane.ready === true
+            };
+        });
+        return { kind: 'ok', text: '', rows: rows };
+    }
+
     var api = {
+        lanesView: lanesView, LANES: LANES,
         publishView: publishView, publishRunningView: publishRunningView, createPublishCheck: createPublishCheck,
         bgView: bgView, bgProblem: bgProblem, BG_SKIP_RE: BG_SKIP_RE, BG_METHOD_LABELS: BG_METHOD_LABELS,
         seconds: seconds, PUBLISH_STEPS: PUBLISH_STEPS, PUBLISH_STATUS: PUBLISH_STATUS,
@@ -1233,6 +1258,35 @@
             button.disabled = busy;
             if (busy) button.setAttribute('aria-busy', 'true');
             else button.removeAttribute('aria-busy');
+        });
+    }
+
+    // «دقة الاقتراحات الحقيقية»: one read when the page opens (cached on the server like ops-health)
+    var lanesBox = $('lanes');
+
+    function renderLanes(view) {
+        if (!lanesBox) return;
+        clear(lanesBox);
+        lanesBox.removeAttribute('aria-busy');
+        if (view.kind !== 'ok') {
+            lanesBox.appendChild(make('p', 'lq-health__footnote', view.text));
+            return;
+        }
+        view.rows.forEach(function (row) {
+            var line = make('div', 'lq-health-lane');
+            line.setAttribute('data-lane', row.key);
+            line.appendChild(make('span', 'lq-health-lane__label', row.label));
+            line.appendChild(make('strong', '', row.text));
+            if (row.bound) line.appendChild(make('span', 'lq-health-lane__bound', row.bound));
+            lanesBox.appendChild(line);
+        });
+    }
+
+    if (lanesBox) {
+        fetchJson(LANES_URL, { method: 'GET' }).then(function (res) {
+            renderLanes(lanesView(res && res.ok ? res.data : null));
+        }, function () {
+            renderLanes(lanesView(null));
         });
     }
 
