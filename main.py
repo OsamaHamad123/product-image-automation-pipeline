@@ -612,6 +612,8 @@ def auto_approve_product(task, best_image, worksheet, link_column_index, sku_key
             return False
         return True
 
+    page_gtin, page_gtin_url = page_barcode(best_image, barcode)
+
     def record(res):
         # تحت قفل النشر: الحل التلقائي يُحفظ قبل أن يرى مراجع ينتظر القفل حالة المنتج
         if res["status"] == "published":
@@ -619,6 +621,7 @@ def auto_approve_product(task, best_image, worksheet, link_column_index, sku_key
                 barcode, name, brand, best_image["url"], res["link"], None, res.get("metadata"),
                 perceptual_hash=res.get("phash"), verification_status="auto_verified",
                 approved_by="auto", sku_key=sku_key, color_signature=res.get("color_signature"),
+                **({"page_gtin": page_gtin, "page_gtin_url": page_gtin_url} if page_gtin else {}),
             )
 
     try:
@@ -672,6 +675,25 @@ def bg_skipped_count(reset=False):
 
 
 DUPLICATE_WARNING = "warn:duplicate_image"
+
+
+def page_barcode(best_image, barcode):
+    """
+    (page_gtin, صفحته) للاعتماد: الباركود الذي ذكرته صفحة متجر الصورة المنشورة (evidence.page_gtin لمرشحها، GTIN صالح
+    وعالمي) عندما لا يوجد باركود صالح في الشيت (catalog_match.gtin.barcode_from_page)، وإلا (None, None). يُحفظ مع
+    الاعتماد للمالك (scripts/export_barcodes.py)؛ لا يُكتب في الشيت أبداً.
+    """
+    from catalog_match.gtin import barcode_from_page
+
+    url = best_image.get("url")
+    for c in [best_image] + [c for c in best_image.get("candidates") or [] if isinstance(c, dict)]:
+        if c is not best_image and not (url and (c.get("url") or c.get("image_url")) == url):
+            continue
+        evidence = c.get("evidence") if isinstance(c.get("evidence"), dict) else {}
+        found = barcode_from_page(barcode, evidence.get("page_gtin"))
+        if found:
+            return found, (c.get("page_url") or best_image.get("page_url") or None)
+    return None, None
 
 
 def _warn_duplicate(best_image):
@@ -1149,9 +1171,11 @@ def process_single_product(prod, worksheet, link_column_index, brand_mappings=No
         config.log_and_fail(barcode, name, brand, f"فشل النشر: {res.get('error')}")
         return "failed"
     if res["status"] == "published":
+        page_gtin, page_gtin_url = page_barcode(best, barcode)
         local_cache_db.save_product_resolution(
             barcode, name, brand, best["url"], res["link"], None, res.get("metadata"),
-            verification_status="auto_verified", approved_by="auto", sku_key=sku_key)
+            verification_status="auto_verified", approved_by="auto", sku_key=sku_key,
+            **({"page_gtin": page_gtin, "page_gtin_url": page_gtin_url} if page_gtin else {}))
     return "success"
 
 

@@ -14,6 +14,7 @@
         products: '/api/products-json',
         queueState: '/api/review/queue-state',
         explainBackfill: '/api/review/explain-backfill',
+        undoReject: '/api/review/undo-reject',
         clearCache: '/api/clear-products-cache',
         search: '/api/search',
         select: '/api/select_image',

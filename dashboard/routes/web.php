@@ -60,6 +60,8 @@ Route::post('/api/v1/curation/save-candidates', [CurationController::class, 'sav
 Route::get('/api/review/queue-state', [ReviewController::class, 'queueState']);
 // سبب «بلا اقتراح» لصفوف حُفظت قبل أن يحسبه العامل: يُحسب مرة مما حُفظ (بلا بحث وبلا تكلفة)
 Route::post('/api/review/explain-backfill', [ReviewController::class, 'explainBackfill']);
+// «تراجع عن الرفض»: يشيل رفض صورة لمنتج (cli_bridge.undo_reject) فترجع للاقتراحات ولا تنحسب بالإحصائيات
+Route::post('/api/review/undo-reject', [ReviewController::class, 'undoReject']);
 
 // حالة جسر بايثون وقاعدة البيانات
 Route::get('/api/system/status', [ApiController::class, 'systemStatus']);

@@ -40,6 +40,16 @@ The round ('expand') starts with a free step:
         never read again and never picked (rejected, reason 'x0:store_image_wrong', counted
         in the outcome's reject_counts). A multipack's picture read as several products (UNSURE,
         its normal picture) is not a failed picture: on its own page it is read like any other.
+        A page whose main image is no good for the SKU (the picture that failed, by address
+        or bytes, or read as wrong: _picture_wrong) offers up to pages.MAX_GALLERY_IMAGES more
+        images of its own product gallery (JSON-LD / embedded product JSON image list; never
+        og:image duplicates, never a recommendation carousel): provider 'page', page_gallery
+        True, through the same stages within X0's RECOVER_VERIFY_CALLS (with no call left they
+        are offered unread), pre-checked only on a MATCH (decide.route). A listing that is the
+        page's own image (local index) gets its page read for the gallery only when that image
+        is wrong. Live misses: Golden Prize 185g (carrefouruae's main image a twin pack) and
+        Emirates Coop (the store's placeholder logo). Under a replay cassette a gallery image
+        it holds no download of is left out (cassette.can_download): no gallery, never a miss.
 Then, within EXPANSION_MAX_CALLS paid calls (every provider call counts):
     X1  serper_web: the SKU's Q1 text (or the staff's custom query) scoped with site: OR
         over the brand's official domains and the main UAE retailers; the result pages
@@ -100,7 +110,8 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 from . import decide, settings
 from .fetch import phash_distance
 from .models import Candidate, ProviderResult, RankedCandidate, SearchOutcome, SkuSpec, VerificationResult
-from .pages import PROVIDER as PAGE_PROVIDER, PageFetcher, is_thumbnail, page_candidates
+from .pages import (MAX_GALLERY_IMAGES, PROVIDER as PAGE_PROVIDER, PageFetcher, gallery_candidates, is_thumbnail,
+                    page_candidates)
 from .providers.lens import build_visual_search
 from .providers.serper_shopping import SerperShoppingProvider
 from .providers.serper_web import SerperWebProvider, site_query
@@ -223,6 +234,7 @@ class RoundReport:
     pages_fetched: int = 0
     recovered_pages: int = 0                        # X0: free page reads of listings whose image failed
     store_image_wrong: int = 0                      # X0: pages whose own picture is the failed picture itself
+    gallery_images: int = 0                         # X0: gallery images offered for pages whose main image failed
     new_candidates: int = 0
     upgraded: bool = False
 
@@ -365,6 +377,7 @@ class _Collector:
         self.report = report
         self.spec = inp.spec
         self.seen_pages: Set[str] = set()
+        self.infos: Dict[str, Tuple[Candidate, Any]] = {}     # page_key -> (listing, PageInfo) of each page read
 
     def _fetch_pages(self, hits: List[Candidate]) -> List[Candidate]:
         pages = self.inp.exp.pages
@@ -379,6 +392,7 @@ class _Collector:
                 return []
             if info is None or not getattr(info, "ok", False):
                 return []
+            self.infos[page_key(hit.page_url)] = (hit, info)
             return page_candidates(info, title=hit.title, snippet=hit.snippet, query_id=hit.query_id, rank=hit.rank)
 
         with ThreadPoolExecutor(max_workers=max(1, min(PAGE_WORKERS, len(hits)))) as ex:
@@ -485,8 +499,8 @@ def recovery_pages(spec: SkuSpec, ranked: Sequence[RankedCandidate]) -> List[Ran
         s, cand = rc.score, rc.candidate
         if s is None or s.tier not in (1, 2) or s.hard_reject or rc.status == "excluded":
             continue
-        if (cand.provider or "") in (PAGE_PROVIDER, "local_index"):
-            continue                       # already the image the page itself shows
+        if (cand.provider or "") in (PAGE_PROVIDER, "local_index") and not _picture_wrong(spec, rc):
+            continue                       # already the image the page itself shows (read again only for its gallery)
         if not cand.page_url.lower().startswith(("http://", "https://")):
             continue
         host = url_host(cand.page_url)
@@ -658,6 +672,8 @@ def _verify_new(inp: RoundInput, everything: List[RankedCandidate],
     if first_ids:
         todo.sort(key=lambda rc: id(rc) not in first_ids)       # stable: rank order within each group
     out: List[VerificationResult] = []
+    if max_calls <= 0 or not todo:
+        return out
     first = todo[:VERIFY_BATCH]
     res = p._verify(inp.spec, inp.verifier, first)
     if res is None:
@@ -719,27 +735,92 @@ def _grow(inp: RoundInput, report: RoundReport, new: List[Candidate],
     return everything, len(fresh), len(kept)
 
 
+def _main_image_key(listing: Candidate, info: Any) -> str:
+    main = page_candidates(info, title=listing.title, snippet=listing.snippet, max_images=1)
+    return norm_image_url(main[0].image_url) if main else ""
+
+
+def _gallery_of(collector: "_Collector", keys: Sequence[str]) -> List[Candidate]:
+    """X0: up to MAX_GALLERY_IMAGES gallery images of each of these pages (pages.gallery_candidates). Under a replay
+    cassette an image it holds no download of is left out (no gallery, never a miss)."""
+    from . import cassette
+
+    out: List[Candidate] = []
+    for key in keys:
+        listing, info = collector.infos[key]
+        for cand in gallery_candidates(info, title=listing.title, snippet=listing.snippet, query_id="X0",
+                                       rank=listing.rank, max_images=MAX_GALLERY_IMAGES):
+            if cassette.can_download(cand.image_url):
+                out.append(cand)
+    return out
+
+
+def _main_failed(spec: SkuSpec, everything: Sequence[RankedCandidate], main_key: str) -> bool:
+    """The page's main image, as the first X0 pass left it, is no picture for this SKU: the same bytes as the
+    picture that failed (STORE_IMAGE_WRONG), or read / checked as wrong (_picture_wrong)."""
+    rc = next((r for r in everything if norm_image_url(r.candidate.image_url) == main_key), None)
+    return rc is not None and (STORE_IMAGE_WRONG in rc.reasons or _picture_wrong(spec, rc))
+
+
 def _recover(inp: RoundInput, report: RoundReport, collector: "_Collector") -> Optional[List[RankedCandidate]]:
-    """X0 (free): read the pages of right-product listings whose image failed; None when nothing new."""
+    """X0 (free): read the pages of right-product listings whose image failed; None when nothing new.
+
+    A page whose main image is no good for the SKU offers up to MAX_GALLERY_IMAGES more images of its own
+    product gallery (provider 'page', page_gallery True, pre-checked only on a MATCH reading): with the main
+    images when the main image is known bad before any reading (it is the picture that failed, or the listing
+    was the page's own image), else in a second pass once the first pass read it as wrong. Both passes share
+    X0's RECOVER_VERIFY_CALLS; a gallery pass with no call left still downloads and offers its images (the
+    paid steps' reads, within their own budgets, may read them; unread they are never pre-checked).
+    """
     if inp.exp.pages is None:
         return None
-    pages = recovery_pages(inp.spec, inp.ranked)
+    spec = inp.spec
+    pages = recovery_pages(spec, inp.ranked)
     hits = [rc.candidate for rc in pages]
     if not hits:
         return None
     new = collector.follow(hits, "X0")
     report.recovered_pages = len(hits)
     if not new:
-        logger.info("expand sku=%s: X0 read %d pages, no image of their own", inp.spec.sku_key, len(hits))
+        logger.info("expand sku=%s: X0 read %d pages, no image of their own", spec.sku_key, len(hits))
         return None
     # the pictures that failed: a page whose own picture is one of them shows the wrong product itself
     failed = {rc.fetched.content_sha256 for rc in pages
               if rc.fetched is not None and rc.fetched.ok and rc.fetched.content_sha256
-              and _picture_wrong(inp.spec, rc)}
-    everything, n_new, n_kept = _grow(inp, report, new, RECOVER_VERIFY_CALLS, new_first=True, failed_shas=failed)
+              and _picture_wrong(spec, rc)}
+    main_keys: Dict[str, str] = {}
+    known_bad: List[str] = []
+    for rc in pages:
+        key = page_key(rc.candidate.page_url)
+        if key not in collector.infos or key in main_keys:
+            continue
+        main_keys[key] = _main_image_key(*collector.infos[key])
+        own = (rc.candidate.provider or "") in (PAGE_PROVIDER, "local_index")
+        if main_keys[key] and (own or main_keys[key] == norm_image_url(rc.candidate.image_url)):
+            known_bad.append(key)
+    first_gallery = _gallery_of(collector, known_bad)
+    calls_before = len(report.verify_results)
+    everything, n_new, n_kept = _grow(inp, report, new + first_gallery, RECOVER_VERIFY_CALLS, new_first=True,
+                                      failed_shas=failed)
     report.new_candidates += n_new
-    logger.info("expand sku=%s: X0 read %d pages, %d new candidates (%d fetched, %d the same wrong picture) -> %s",
-                inp.spec.sku_key, len(hits), n_new, n_kept, report.store_image_wrong, report.outcome.decision)
+    report.gallery_images += len(first_gallery)
+    logger.info("expand sku=%s: X0 read %d pages, %d new candidates (%d fetched, %d the same wrong picture, "
+                "%d gallery) -> %s", spec.sku_key, len(hits), n_new, n_kept, report.store_image_wrong,
+                len(first_gallery), report.outcome.decision)
+    if report.outcome.decision in PICK_DECISIONS or report.outcome.failure_code == "VERIFIER_DOWN":
+        return everything
+    later = [key for key, main in main_keys.items()
+             if key not in known_bad and main and _main_failed(spec, everything, main)]
+    second_gallery = _gallery_of(collector, later)
+    if not second_gallery:
+        return everything
+    calls_left = max(0, RECOVER_VERIFY_CALLS - (len(report.verify_results) - calls_before))
+    everything, n_new, n_kept = _grow(replace(inp, ranked=everything), report, second_gallery, calls_left,
+                                      new_first=True, failed_shas=failed)
+    report.new_candidates += n_new
+    report.gallery_images += len(second_gallery)
+    logger.info("expand sku=%s: X0 gallery of %d pages whose main image failed, %d images (%d fetched, %d verifier "
+                "calls left) -> %s", spec.sku_key, len(later), n_new, n_kept, calls_left, report.outcome.decision)
     return everything
 
 

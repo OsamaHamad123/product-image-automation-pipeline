@@ -28,6 +28,10 @@ for it. decide.py blocks auto-publish for brand_conf 'learned' and for a pick wh
 only 'reviewed_source', and keeps the 'brand_spelling' warning on a pick whose brand evidence is
 only a learned spelling, so a WRONG_BRAND rejection can still count against it.
 
+A rejection the reviewer took back (the review screen's «تراجع عن الرفض»: review_decisions.undone_at, with the
+spelling it counted against in learned_alias) counts for neither lesson: local_cache_db.undo_rejection gives the
+spelling its rejection back and get_brand_source_counts skips the row.
+
 load_and_apply(mappings) reads both lessons (cached LEARN_CACHE_S per process) and never raises:
 without a database the mappings come back unchanged.
 """

@@ -42,6 +42,14 @@ page_candidates(info, title=..., snippet=..., query_id=..., rank=...) -> [Candid
         gtin_on_page only when the page states exactly ONE valid, globally unique GTIN.
     Thumbnails (Google's encrypted-tbn images, data: URIs, images known to be under
     MIN_IMAGE_SIDE px) are never returned.
+
+gallery_candidates(info, ...) -> [Candidate]   (expand.py's X0 page recovery only)
+    Up to MAX_GALLERY_IMAGES more images of the page's OWN product gallery, after its main
+    image: the image list of the page's Product in JSON-LD or of the product object in the
+    embedded page JSON (gallery_images). Never an og:image / twitter:image / <link> image
+    (nor a gallery entry that is one of them), never an <img> of the page (recommendation
+    carousels), never a thumbnail. Each is the main candidate's evidence (title, page title,
+    GTIN, domain) with page_gallery True and a rank right after the main image.
 """
 
 from __future__ import annotations
@@ -53,7 +61,7 @@ import re
 import threading
 import time
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from html.parser import HTMLParser
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 from urllib.parse import unquote, urljoin, urlsplit
@@ -78,6 +86,8 @@ CACHE_TTL_S = 30 * 60.0
 CACHE_FAIL_TTL_S = 5 * 60.0
 CACHE_MAX = 512
 MAX_IMAGES_PER_PAGE = 1           # the main product image only: a back-of-pack shot must never be pre-checked
+MAX_GALLERY_IMAGES = 2            # X0 only: more images of the page's own gallery when its main image failed
+_GALLERY_SOURCES = ("jsonld", "next_data")      # the product's own image list (og / twitter / link / <img> never)
 MIN_IMAGE_SIDE = 300           # a page image known to be smaller is a thumbnail
 MAX_JSON_NODES = 20000
 MAX_JSON_DEPTH = 14
@@ -582,6 +592,41 @@ def page_candidates(info: Optional[PageInfo], *, title: str = "", snippet: str =
             sanctioned=False,
         ))
     return out
+
+
+def gallery_images(info: Optional[PageInfo], max_images: int = MAX_GALLERY_IMAGES) -> List[PageImage]:
+    """More images of the page's own product gallery after its main image (see gallery_candidates)."""
+    if info is None or not info.ok or max_images <= 0:
+        return []
+    ordered = _ordered_images(info)
+    if len(ordered) < 2:
+        return []
+
+    def keys(want_gallery: bool) -> set:
+        return {norm_image_url(canonical_image_url(img.url)) for img in info.images
+                if (img.source in _GALLERY_SOURCES) is want_gallery}
+
+    gallery, elsewhere = keys(True), keys(False)
+    out: List[PageImage] = []
+    for img in ordered[1:]:
+        key = norm_image_url(img.url)
+        if key in gallery and key not in elsewhere:
+            out.append(img)
+            if len(out) >= max_images:
+                break
+    return out
+
+
+def gallery_candidates(info: Optional[PageInfo], *, title: str = "", snippet: str = "", query_id: str = "",
+                       rank: int = 0, max_images: int = MAX_GALLERY_IMAGES) -> List[Candidate]:
+    """Gallery images of one extracted page as candidates (see the module docstring)."""
+    main = page_candidates(info, title=title, snippet=snippet, query_id=query_id, rank=rank, max_images=1)
+    if not main:
+        return []
+    base = main[0]
+    return [replace(base, image_url=img.url, width=img.width, height=img.height, rank=base.rank + 1 + i,
+                    page_gallery=True)
+            for i, img in enumerate(gallery_images(info, max_images))]
 
 
 # ---------------------------------------------------------------------------

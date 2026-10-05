@@ -186,6 +186,21 @@ class ProductController extends Controller
             // الجدول غير موجود بعد: تبقى قيم get_products
         }
 
+        // الصور التي رفضها المراجعون لكل منتج (rejected_images بـ sku_key): شاشة المراجعة تعرضها مع «تراجع عن الرفض»
+        $rejectedBySku = [];
+        try {
+            foreach (DB::table('rejected_images')->orderBy('id')->get(['sku_key', 'original_url', 'reason_code', 'created_at']) as $r) {
+                $rejSku = trim((string) ($r->sku_key ?? ''));
+                $rejUrl = trim((string) ($r->original_url ?? ''));
+                if ($rejSku !== '' && $rejUrl !== '') {
+                    $rejectedBySku[$rejSku][$rejUrl] = ['url' => $rejUrl, 'reason_code' => (string) ($r->reason_code ?? ''),
+                                                        'at' => $r->created_at ? (string) $r->created_at : null];
+                }
+            }
+        } catch (\Throwable $e) {
+            // الجدول غير موجود بعد: لا صور مرفوضة
+        }
+
         foreach ($products as &$prod) {
             $barcode = trim($prod['barcode'] ?? '');
             $sku = trim((string) ($prod['sku_key'] ?? ''));
@@ -195,10 +210,13 @@ class ProductController extends Controller
             } elseif ($barcode === '' && $sku !== '' && isset($resolvedBySku[$sku])) {
                 $hit = $resolvedBySku[$sku];
             }
+            $prod['rejected_images'] = $sku !== '' ? array_values($rejectedBySku[$sku] ?? []) : [];
             if ($hit !== null) {
                 $prod['cached_image'] = $hit->cloudinary_url;
                 $prod['verification_status'] = $hit->verification_status ?? 'legacy';
                 $prod['resolved_at'] = $hit->resolved_at ? $hit->resolved_at->toIso8601String() : null;
+                // «الباركود من صفحة المتجر» للصف بلا باركود (يُحفظ مع الاعتماد، لا يُكتب في الشيت)
+                $prod['page_gtin'] = isset($hit->page_gtin) && $hit->page_gtin !== '' ? (string) $hit->page_gtin : null;
             }
             if (is_array($failures)) {
                 // نفس مفاتيح get_products في cli_bridge.py: الباركود، أو ERR_<الاسم>_<البراند>
