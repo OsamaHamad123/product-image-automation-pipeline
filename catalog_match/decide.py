@@ -9,7 +9,9 @@ Per-candidate verdicts are read from RankedCandidate.verdict.
 Decisions
     AUTO_PUBLISH        every one of:
                           * settings.auto_publish_enabled() and the brand (or 'category:<name>')
-                            is in AUTO_PUBLISH_BRANDS, or the list is '*';
+                            is in AUTO_PUBLISH_BRANDS, or the list is '*'; or, with
+                            AUTO_PUBLISH_STRICT_LANE on, a pick of lane 'strict' (below) of a
+                            mapped brand, whatever the list;
                           * the winner is tier 1 with VLM verdict MATCH;
                           * the winner's source is sanctioned;
                           * spec.brand_conf == 'mapped' (never 'learned');
@@ -19,6 +21,12 @@ Decisions
                           * not a cache hit;
                           * the winner's page barcode does not differ from the sheet's;
                           * no other MATCH candidate with a conflicting parsed identity.
+    Lanes (shadow mode): every pick carries 'lane:<name>' (pick_lane). 'strict' when the only
+    auto_blocked reasons are the settings (auto_publish_disabled, auto_publish_off_for_brand) and
+    brand_conf_*, i.e. every other rule above passed (an AUTO_PUBLISH pick is 'strict' too);
+    'unsure' for a 'preselected:tier1_unsure' pick (display only, never auto); 'other' for the
+    rest. The reviews of each lane (local_cache_db.review_stats) are the evidence that opens
+    AUTO_PUBLISH_STRICT_LANE in the settings.
     REVIEW_PRESELECTED  a tier 1/2 candidate with MATCH (one whose page barcode differs
                         from the sheet's only when the verifier read brand, size and
                         variant as 'yes', and only when no MATCH without that
@@ -198,8 +206,17 @@ FLAG_OVERRULED = "vlm:flag_overruled"
 
 RESOLUTION_PREFIX = "resolution_upgrade"
 # Reason prefixes written by route(); recomputed on every call so route() is idempotent.
+# The lane of a pick (pick_lane): 'lane:strict' | 'lane:unsure' | 'lane:other'.
+LANE_PREFIX = "lane:"
+LANES = ("strict", "unsure", "other")
+# Blockers that only say auto-publish is not switched on (for this brand): a pick blocked by nothing else, or by
+# brand_conf_*, passed every other rule (lane 'strict').
+_SETTING_BLOCKERS = ("auto_publish_disabled", "auto_publish_off_for_brand")
+# The reason on a pick that auto-publishes through AUTO_PUBLISH_STRICT_LANE rather than AUTO_PUBLISH_BRANDS.
+LANE_PUBLISH_REASON = "auto_publish_lane:strict"
+# Reason prefixes written by route(); recomputed on every call so route() is idempotent.
 _ROUTE_PREFIXES = ("hard:", "download:", "quality:", "vlm:", "preselected:", "auto_blocked:", "auto_publish",
-                   "gtin:", RESOLUTION_PREFIX, WARN_PREFIX)
+                   "gtin:", LANE_PREFIX, RESOLUTION_PREFIX, WARN_PREFIX)
 
 # Best-resolution copy: another fetched copy of the winning image is published instead when it
 # is the same picture (pHash distance and aspect ratio) with a larger short side.
@@ -331,6 +348,26 @@ def auto_publish_allowed(spec: SkuSpec) -> bool:
         elif normalize(entry) in brands:
             return True
     return False
+
+
+def pick_lane(why: str, blockers: Sequence[str]) -> str:
+    """The lane of a pick pre-selected as `why` ('vlm_match', 'tier1_unsure', ...) with these auto blockers."""
+    if all(b in _SETTING_BLOCKERS or str(b).startswith("brand_conf_") for b in blockers):
+        return "strict"
+    return "unsure" if why == "tier1_unsure" else "other"
+
+
+def lane_of(reasons: Sequence[str]) -> Optional[str]:
+    """The lane a stored candidate's reasons record ('lane:<name>'); for a pick stored before the lanes, the lane its
+    'preselected:' and 'auto_blocked:' reasons give. None for a candidate that is not the engine's pick."""
+    reasons = [str(r) for r in reasons or []]
+    for r in reasons:
+        if r.startswith(LANE_PREFIX) and r[len(LANE_PREFIX):] in LANES:
+            return r[len(LANE_PREFIX):]
+    why = next((r.split(":", 1)[1] for r in reasons if r.startswith("preselected:")), None)
+    if why is None:
+        return None
+    return pick_lane(why, [r.split(":", 1)[1] for r in reasons if r.startswith("auto_blocked:")])
 
 
 def _gallery(rc: RankedCandidate) -> bool:
@@ -950,17 +987,28 @@ def route(spec: SkuSpec, ranked: Sequence[RankedCandidate],
     if clash:
         blockers.append(f"conflicting_match:{clash}")
 
+    lane = pick_lane(why, blockers)
+    winner.reasons.append(LANE_PREFIX + lane)
+    # AUTO_PUBLISH_STRICT_LANE: a strict pick of a mapped brand is not held back only because the brand is not in
+    # AUTO_PUBLISH_BRANDS. Every other blocker stays; an unmapped brand ('brand_conf_*') never gets here.
+    by_lane = (lane == "strict" and blockers == ["auto_publish_off_for_brand"] and spec.brand_conf == "mapped"
+               and settings.auto_publish_enabled() and settings.auto_publish_strict_lane())
+    if by_lane:
+        blockers = []
     if blockers:
         winner.reasons.extend(f"auto_blocked:{b}" for b in blockers)
     else:
         outcome.decision = "AUTO_PUBLISH"
         winner.reasons.append("auto_publish")
+        if by_lane:
+            winner.reasons.append(LANE_PUBLISH_REASON)
 
     # Best-resolution copy: the same picture, larger, from a page that is no weaker.
     published = winner
     copy = resolution_upgrade(spec, winner, ranked, relaxed_ids, outcome.decision)
     if copy is not None:
-        moved = [r for r in winner.reasons if r.startswith(("preselected:", "auto_blocked:", "auto_publish"))]
+        moved = [r for r in winner.reasons if r.startswith(("preselected:", "auto_blocked:", "auto_publish",
+                                                            LANE_PREFIX))]
         winner.reasons[:] = [r for r in winner.reasons if r not in moved]
         winner.reasons.append(f"{RESOLUTION_PREFIX}:replaced")
         winner.status = "eligible"

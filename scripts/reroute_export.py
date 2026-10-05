@@ -46,7 +46,7 @@ APPROXIMATION = ("APPROXIMATION: recorded tiers and listing evidence, the top ca
 PICK_DECISIONS = ("AUTO_PUBLISH", "REVIEW_PRESELECTED")
 NONE = "-"
 # the export's recorded settings that routing reads (everything else stays at its default: no DB, no .env)
-ROUTE_SETTINGS = ("AUTO_PUBLISH_ENABLED", "AUTO_PUBLISH_BRANDS", "GTIN_POLICY")
+ROUTE_SETTINGS = ("AUTO_PUBLISH_ENABLED", "AUTO_PUBLISH_BRANDS", "AUTO_PUBLISH_STRICT_LANE", "GTIN_POLICY")
 # source classes that depend on the brand's mappings or the reviews (official sites, learned sources): kept as recorded
 PER_SKU_SOURCES = ("official", "reviewed_source")
 

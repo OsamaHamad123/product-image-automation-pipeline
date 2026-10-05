@@ -625,6 +625,7 @@
         const cacheHit = c.reasons.includes('cache_hit') || c.source === 'cache' || (c.evidence && c.evidence.source === 'cache');
         return {
             search_decision: ctx.search_decision || '',
+            search_lane: ctx.search_lane || '',
             candidate_status: c.status,
             candidate_cache_hit: cacheHit,
             identity_tier: c.identity_tier === null || c.identity_tier === undefined ? '' : String(c.identity_tier),
@@ -711,6 +712,7 @@
             ['barcode', ctx.barcode],
             ['sku_key', ctx.sku_key],
             ['search_decision', ctx.search_decision || ''],
+            ['search_lane', ctx.search_lane || ''],
             // الحجم والاسم والبراند بالعربية يدخلون في sku_key الذي يتحقق منه الجسر
             ['size', ctx.size],
             ['product_name_ar', ctx.product_name_ar],
