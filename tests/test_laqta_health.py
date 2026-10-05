@@ -427,6 +427,80 @@ def test_auto_publish_blocker_and_brand_list(offline):
     assert [b.strip() for b in value.split(",") if b.strip()] == out["list"] == ["Almarai", "Masafi", "category:Dairy"]
 
 
+def _lane_rows(plan):
+    """_review_rows with the lane of each pick: [(brand, good, bad, lane)]."""
+    rows = []
+    for brand, good, bad, lane in plan:
+        rows += [dict(r, lane=lane) for r in _review_rows([(brand, good, bad)])]
+    for n, r in enumerate(rows, 1):
+        r["id"] = n
+    return rows
+
+
+@NEEDS_PHP
+def test_strict_lane_section_reads_the_lane_stats(offline):
+    """«النشر الآلي لكل الماركات المؤكدة»: lane strict in plain words, its switch only when ready, unsure as info."""
+    import local_cache_db
+
+    stats = dict({"status": "success"}, **local_cache_db.review_stats(
+        _lane_rows([("ALMARAI", 12, 0, "strict"), ("ALMARAI-U", 4, 1, "unsure")])))
+    stored = {"auto_publish_enabled": {"value": "true"}, "auto_publish_brands": {"value": ""},
+              "auto_publish_strict_lane": {"value": "false"}}
+    out = _php(f"$out = SettingsController::autoPublishData({php_value(stored)}, {php_value(stats)});"
+               f"$out['why'] = SettingsController::strictLaneBlocker({php_value(stats)});"
+               "$out['down'] = SettingsController::strictLaneBlocker(['status' => 'failed']);")
+    lane = out["lane"]
+    assert lane["text"] == "من 12 اقتراح بهالفئة، اعتمدت 12."
+    assert lane["unsure_text"].startswith("القارئ مش متأكد بس العنوان بيأكد: اعتمدت 4 من 5.")
+    assert (lane["ready"], lane["can_enable"], lane["enabled"]) == (False, False, False)
+    assert lane["chip"] == "تحتاج 177 مراجعة" and "الحد المضمون" in lane["detail"]
+    assert "لسا مش جاهزة" in out["why"] and "ما قدرنا نتأكد" in out["down"]
+    assert out["can_enable"] is False                       # no ready brand, the lane is not ready either
+
+    ready = dict({"status": "success"}, **local_cache_db.review_stats(
+        _lane_rows([("ALMARAI", 189, 0, "strict")])))
+    stored["auto_publish_strict_lane"] = {"value": "true"}
+    out = _php(f"$out = SettingsController::autoPublishData({php_value(stored)}, {php_value(ready)});"
+               f"$out['why'] = SettingsController::strictLaneBlocker({php_value(ready)});"
+               f"$out['main'] = SettingsController::autoPublishBlocker([], {php_value(ready)}, true);"
+               f"$out['main_off'] = SettingsController::autoPublishBlocker([], {php_value(ready)}, false);")
+    assert out["why"] is None and out["main"] is None and "ماركة جاهزة" in out["main_off"]
+    assert (out["lane"]["ready"], out["lane"]["chip"], out["can_enable"]) == (True, "شغّال", True)
+    assert out["lane"]["text"] == "من 189 اقتراح بهالفئة، اعتمدت 189."
+    out = _php(f"$out = SettingsController::autoPublishData({php_value(stored)}, ['status' => 'error']);")
+    assert out["lane"]["status"] == "error" and out["lane"]["can_enable"] is False
+
+
+@NEEDS_PHP
+def test_health_lanes_payload(offline):
+    import local_cache_db
+
+    stats = dict({"status": "success"}, **local_cache_db.review_stats(
+        _lane_rows([("A", 11, 0, "strict"), ("B", 3, 1, "unsure"), ("C", 0, 0, "other"), ("D", 2, 0, None)])))
+    out = _php(f"$out = HealthController::lanesPayload({php_value(stats)});")
+    assert out["status"] == "success" and out["unlaned"] == 2
+    assert {k: (v["accepted"], v["prechecked"]) for k, v in out["lanes"].items()} == {
+        "strict": (11, 11), "unsure": (3, 4), "other": (0, 0)}
+    assert out["lanes"]["other"]["lower_bound"] is None and out["lanes"]["strict"]["ready"] is False
+    assert "brands" not in out and "domains" not in out                  # only the card's numbers leave the server
+
+
+@NEEDS_NODE
+def test_health_lanes_view():
+    out = _node(_js(HEALTH_JS) + """
+const H = window.LaqtaHealth;
+const ok = H.lanesView({status: 'success', lanes: {strict: {prechecked: 12, accepted: 12, lower_bound: 0.7575},
+    unsure: {prechecked: 0, accepted: 0, lower_bound: null}}});
+console.log(JSON.stringify({ok: ok, down: H.lanesView(null)}));
+""")
+    rows = {r["key"]: r for r in out["ok"]["rows"]}
+    assert [r["key"] for r in out["ok"]["rows"]] == ["strict", "unsure", "other"]
+    assert (rows["strict"]["text"], rows["strict"]["bound"]) == ("اعتمدت 12 من 12", "الحد المضمون 75.8%")
+    assert (rows["unsure"]["text"], rows["unsure"]["bound"]) == ("لسا ما في مراجعات", "")
+    assert rows["unsure"]["label"] == "القارئ مش متأكد بس العنوان بيأكد"
+    assert out["down"]["kind"] == "error" and out["down"]["rows"] == []
+
+
 def test_background_methods_match_python():
     import config
     import main
@@ -696,7 +770,7 @@ TOUCHED = list(SECRETS) + ["auto_publish_enabled", "auto_publish_brands", "searc
                            "verifier_strong", "verifier_monthly_budget_usd", "model_prices", "expansion_enabled",
                            "expansion_max_calls", "visual_search", "serpapi_lens_price_usd", "gtin_policy",
                            "local_index_enabled", "local_index_max_pages", "bg_removal_method_previous",
-                           "worker_concurrency"]
+                           "worker_concurrency", "auto_publish_strict_lane"]
 
 
 def _sql(db, statement, params=()):
@@ -727,14 +801,18 @@ def app_env(mariadb_or_skip, tmp_path):
         pytest.skip("php or dashboard/vendor is not installed")
     db = mariadb_or_skip
     saved = {k: v for k, v in _settings(db).items() if k in TOUCHED}
-    _put(db, dict(SECRETS, auto_publish_enabled="false", auto_publish_brands="", search_engine="v2",
+    _put(db, dict(SECRETS, auto_publish_enabled="false", auto_publish_brands="", auto_publish_strict_lane="false",
+                  search_engine="v2",
                   gemini_model="gemini-3.1-flash-lite", strict_brand_match="true", output_canvas_size="800",
                   cloudinary_cloud_name="laqta-test"))
 
     import local_cache_db
     stats = dict({"status": "success"}, **local_cache_db.review_stats(
         _review_rows([("ALMARAI", 189, 0), ("AL ALALI", 12, 0)])))
-    fixture = {"review_stats": stats, "ops_health": {"status": "success", "scanned": 0, "windows": {}, "alerts": []},
+    lane_ready = dict({"status": "success"}, **local_cache_db.review_stats(
+        [dict(r, lane="strict") for r in _review_rows([("ALMARAI", 189, 0)])]))
+    fixture = {"review_stats": stats, "lane_ready": lane_ready,
+               "ops_health": {"status": "success", "scanned": 0, "windows": {}, "alerts": []},
                "bg_methods": {"status": "success", "local": {"grabcut": True, "rembg": False}}}
     calls = tmp_path / "calls.txt"
     stub = tmp_path / "stub_bridge.py"
@@ -745,6 +823,8 @@ def app_env(mariadb_or_skip, tmp_path):
         f"open({str(calls)!r}, 'a').write(action + '\\n')\n"
         "if os.environ.get('LQ_STUB_MODE') == 'down':\n"
         "    print(json.dumps({'status': 'failed', 'error': 'stub bridge is down'}))\n"
+        "elif os.environ.get('LQ_STUB_MODE') == 'lane_ready' and action == 'review_stats':\n"
+        "    print(json.dumps(FIXTURE['lane_ready'], ensure_ascii=False))\n"
         "else:\n"
         "    print(json.dumps(FIXTURE.get(action, {'status': 'error', 'error': 'unexpected action'}), ensure_ascii=False))\n",
         encoding="utf-8")
@@ -934,6 +1014,52 @@ def test_auto_publish_rules_on_the_server(app_env):
     assert "ALMARAI" in down[2]["body"] and 'name="op" value="disable"' in down[2]["body"]
     assert re.search(r'name="auto_publish_enabled"[^>]*disabled', down[2]["body"])
     assert _settings(db)["auto_publish_enabled"] == "false"
+
+
+def test_strict_lane_switch_is_refused_until_the_lane_is_ready(app_env):
+    """«النشر الآلي لكل الماركات المؤكدة»: the server refuses the switch while lane strict is not ready (like an
+    unready brand); once ready it turns on, and the main switch may then open without a listed brand."""
+    db, env = app_env["db"], app_env["env"]
+    out = _kernel(env, [
+        ["POST", "/settings", {"section": "strict-lane", "auto_publish_strict_lane": "true"}],
+        ["GET", "/settings?tab=auto-publish", {}],
+    ])
+    assert "لسا مش جاهزة" in out[0]["flash"]["error"]
+    assert _settings(db)["auto_publish_strict_lane"] == "false"
+    page = out[1]["body"]
+    assert "النشر الآلي لكل الماركات المؤكدة" in page and "لسا ما راجعت ولا اقتراح بهالفئة." in page
+    assert "القارئ مش متأكد بس العنوان بيأكد" in page
+    assert re.search(r'name="auto_publish_strict_lane"[^>]*disabled', page)
+
+    down = _kernel(dict(env, LQ_STUB_MODE="down"), [
+        ["POST", "/settings", {"section": "strict-lane", "auto_publish_strict_lane": "true"}]])
+    assert "ما قدرنا نتأكد" in down[0]["flash"]["error"] and _settings(db)["auto_publish_strict_lane"] == "false"
+
+    ready = _kernel(dict(env, LQ_STUB_MODE="lane_ready"), [
+        ["POST", "/settings", {"section": "strict-lane", "auto_publish_strict_lane": "true"}],
+        ["POST", "/settings", {"section": "auto-publish", "auto_publish_enabled": "true"}],     # no brand listed
+        ["GET", "/settings?tab=auto-publish", {}],
+    ])
+    assert "شغّلنا النشر الآلي لكل الماركات المؤكدة" in ready[0]["flash"]["success"]
+    assert ready[1]["flash"]["warnings"] in (None, [])
+    after = _settings(db)
+    assert (after["auto_publish_strict_lane"], after["auto_publish_enabled"], after["auto_publish_brands"]) == (
+        "true", "true", "")
+    page = ready[2]["body"]
+    assert "من 189 اقتراح بهالفئة، اعتمدت 189." in page
+    assert re.search(r'name="auto_publish_strict_lane"[^>]*checked', page)
+
+    off = _kernel(env, [["POST", "/settings", {"section": "strict-lane"}]])
+    assert "وقّفنا" in off[0]["flash"]["success"] and _settings(db)["auto_publish_strict_lane"] == "false"
+
+
+def test_health_lanes_endpoint_reads_the_bridge_once_and_caches(app_env):
+    out = _kernel(app_env["env"], [["GET", "/api/system/review-lanes", {}], ["GET", "/api/system/review-lanes", {}]])
+    first, second = (json.loads(o["body"]) for o in out)
+    assert out[0]["status"] == 200 and first == second and set(first["lanes"]) == {"strict", "unsure", "other"}
+    assert app_env["calls"].read_text().split().count("review_stats") == 1
+    down = _kernel(dict(app_env["env"], LQ_STUB_MODE="down"), [["GET", "/api/system/review-lanes?refresh=1", {}]])
+    assert down[0]["status"] == 500 and json.loads(down[0]["body"])["status"] == "error"
 
 
 def test_extra_sources_form_saves_checks_and_shows_its_section(app_env):

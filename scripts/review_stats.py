@@ -12,6 +12,11 @@ per page domain the approvals and rejections. A brand is ready for auto-publish
 when at least AUTO_PUBLISH_MIN_REVIEWED pre-checks were reviewed and the lower
 bound is at least AUTO_PUBLISH_MIN_LOWER_BOUND (both in local_cache_db).
 
+Per lane (catalog_match.decide.pick_lane: 'strict' = every auto-publish rule passed but
+the brand setting, 'unsure' = tier 1 the label reader was unsure of, 'other') the same
+numbers with the replaced and rejected pre-checks; lane 'strict' is ready for
+AUTO_PUBLISH_STRICT_LANE on the same thresholds as a brand.
+
 Read-only: the script only runs SELECT and prints a suggested AUTO_PUBLISH_BRANDS
 value; it never changes a setting (paste the value in the Settings page yourself).
 """
@@ -68,6 +73,13 @@ def format_report(stats):
               _pct(b["lower_bound"]), _status(b),
               ", ".join(f"{code} {n}" for code, n in b["top_reject_reasons"]) or "-")
              for b in stats["brands"]])]
+        lanes = stats.get("lanes") or {}
+        out += ["", "Per lane (decisions recorded before the lanes count in none: "
+                    f"{stats.get('unlaned_prechecked', 0)})", _table(
+            ("lane", "pre-checks", "accepted", "replaced", "rejected", "precision", "lower bound", "status"),
+            [(name, lane["prechecked"], lane["accepted"], lane["replaced"], lane["rejected"], _pct(lane["precision"]),
+              _pct(lane["lower_bound"]), _status(lane) if name == "strict" else "display only")
+             for name, lane in lanes.items()])]
         if stats["domains"]:
             out += ["", "Per page domain", _table(
                 ("domain", "approved", "rejected"),
@@ -77,6 +89,8 @@ def format_report(stats):
         out.append(f"Suggested AUTO_PUBLISH_BRANDS={stats['suggested_auto_publish_brands']}")
     else:
         out.append("Suggested AUTO_PUBLISH_BRANDS= (empty: no brand is ready yet)")
+    if (stats.get("lanes") or {}).get("strict", {}).get("ready"):
+        out.append("Lane 'strict' is ready: AUTO_PUBLISH_STRICT_LANE can be switched on in the Settings page.")
     out.append("This script changes nothing; set the value in the dashboard Settings page.")
     return "\n".join(out)
 

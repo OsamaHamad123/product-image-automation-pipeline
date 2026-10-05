@@ -29,6 +29,8 @@ Route::post('/api/clear-products-cache', [ApiController::class, 'clearProductsCa
 Route::post('/api/system/run-diagnostics', [ProductController::class, 'runDiagnosticsJson']);
 // صحة البحث وتكلفته من سجل الطابور (قراءة فقط عبر cli_bridge.ops_health)
 Route::get('/api/system/ops-health', [\App\Http\Controllers\HealthController::class, 'summary']);
+// «دقة الاقتراحات الحقيقية»: أرقام كل فئة اختيار من قرارات المراجعين (قراءة فقط عبر cli_bridge.review_stats)
+Route::get('/api/system/review-lanes', [\App\Http\Controllers\HealthController::class, 'reviewLanes']);
 // «فحص النشر»: بروفة النشر على صورة تجريبية (cli_bridge.publish_check) بزر صريح؛ GET يرجع آخر نتيجة محفوظة فقط
 Route::post('/api/system/publish-check', [\App\Http\Controllers\HealthController::class, 'runPublishCheck']);
 Route::get('/api/system/publish-check', [\App\Http\Controllers\HealthController::class, 'lastPublishCheckJson']);

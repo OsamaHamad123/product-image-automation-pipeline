@@ -389,12 +389,15 @@ def action_search(params, brand_mappings=None, found=None):
     if best and not decision:
         decision = "REVIEW_PRESELECTED"   # مسار v1: لا يُنشر تلقائياً أبداً
     failure_code = (best or {}).get('failure_code') or outcome.get('failure_code')
+    candidates = _candidates_for_response(best, trace)
     return {
         'status': _status_for(decision, bool(best)),
         'decision': decision,
         'failure_code': failure_code,
         'selected_image': best if (best and decision in SELECTABLE_DECISIONS) else None,
-        'candidates': _candidates_for_response(best, trace),
+        'candidates': candidates,
+        # فئة اختيار المحرك (strict | unsure | other، أو None بلا اختيار): ترسلها شاشة الكتالوج مع قرار المراجع
+        'lane': _pick_lane(candidates) if decision in local_cache_db.PICK_DECISIONS else None,
         'provider_health': outcome.get('provider_health') or [],
         'sku_key': (best or {}).get('sku_key') or outcome.get('sku_key') or sku_key,
         'exclusions': {'urls': len(exclude_urls), 'phashes': len(rejected_phashes)},
@@ -552,6 +555,17 @@ def _is_cache_hit(candidate):
 _VIEW_DECISIONS = ("AUTO_PUBLISH", "REVIEW_PRESELECTED", "REVIEW_UNSELECTED")
 
 
+def _pick_lane(candidates):
+    """
+    فئة اختيار المحرك (catalog_match.decide.lane_of: strict | unsure | other) من أسباب المرشح المختار مسبقاً بين
+    المرشحات، أو None بلا اختيار (أو لمرشح الكاش: اعتماد سابق وليس اختيار المحرك).
+    """
+    from catalog_match.decide import lane_of
+    pick = next((c for c in candidates or [] if isinstance(c, dict) and c.get("status") == "preselected"
+                 and not _is_cache_hit(c)), None)
+    return lane_of(pick.get("reasons") or []) if pick is not None else None
+
+
 def _reviewer_view(params, action):
     """
     (engine_decision, was_preselected) كما عرضتهما شاشة الكتالوج (search_decision و candidate_status)، أو None
@@ -583,10 +597,11 @@ def _record_review(action, params, row_number, sku_key, image_url=None, reason_c
         stored = local_cache_db.get_curation_candidates(row_number, sku_key=sku_key or None, identity=identity)
         candidates = [c for c in stored if not _is_cache_hit(c)]      # ما اختاره المحرك فقط
         acted = next((c for c in candidates if image_url and c.get("image_url") == image_url), None)
-        decision = was_preselected = None
+        decision = was_preselected = lane = None
         if candidates and (acted is not None or action == "manual_upload"):
             has_precheck = any(c.get("status") == "preselected" for c in candidates)
             decision = "REVIEW_PRESELECTED" if has_precheck else "REVIEW_UNSELECTED"
+            lane = _pick_lane(candidates)
         if acted is not None:
             was_preselected = acted.get("status") == "preselected"
         elif action == "manual_upload":
@@ -595,10 +610,16 @@ def _record_review(action, params, row_number, sku_key, image_url=None, reason_c
         if view is not None:
             # شاشة الكتالوج ترسل ما رآه المراجع فعلاً؛ قد يختلف عن آخر تشغيل محفوظ للعامل على نفس الصنف
             decision, was_preselected = view
+            # فئة الاختيار كما أرسلتها الشاشة مع نتيجة بحثها، وإلا فئة الاختيار المحفوظ (نفس المرشحات المعروضة)
+            shown = _text(params, 'search_lane')
+            lane = shown if shown in local_cache_db.LANES else (lane or _pick_lane(stored))
             acted = {"identity_tier": _text(params, 'identity_tier') or None,
                      "vlm": {"decision": _text(params, 'vlm_decision') or None}, "page_url": _text(params, 'page_url')}
         if approval and approval.get("verification_status") == "auto_verified":
-            decision, was_preselected = "AUTO_PUBLISH", True
+            # ما يُنشر آلياً تجاوز كل القواعد: فئته strict (catalog_match.decide.pick_lane)
+            decision, was_preselected, lane = "AUTO_PUBLISH", True, "strict"
+        if decision not in local_cache_db.PICK_DECISIONS:
+            lane = None                      # لا اختيار للمحرك: لا فئة
         acted = acted or {}
         first = stored[0] if stored else {}
         vlm = acted.get("vlm") if isinstance(acted.get("vlm"), dict) else {}
@@ -610,7 +631,7 @@ def _record_review(action, params, row_number, sku_key, image_url=None, reason_c
             image_url=image_url, page_domain=_page_domain(acted, params),
             identity_tier=acted.get("identity_tier") or (acted.get("evidence") or {}).get("tier"),
             engine_decision=decision, was_preselected=was_preselected, vlm_decision=vlm.get("decision"),
-            reason_code=reason_code,
+            reason_code=reason_code, lane=lane,
             # الكتابة التي يُحسب لها القرار أو عليها: التراجع عن الرفض (undo_reject) يُرجع عدّها
             **({"learned_alias": lesson[1]} if lesson else {}),
         )

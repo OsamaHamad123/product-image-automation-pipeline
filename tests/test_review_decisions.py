@@ -173,7 +173,7 @@ def test_approving_the_precheck_records_it_before_the_candidates_are_deleted(rec
     assert action == "approved"
     assert row == {"sku_key": SKU, "row_number": ROW, "brand": BRAND, "product_name": NAME, "image_url": PRE_URL,
                    "page_domain": "luluhypermarket.com", "identity_tier": "1", "engine_decision": "REVIEW_PRESELECTED",
-                   "was_preselected": True, "vlm_decision": "MATCH", "reason_code": None}
+                   "was_preselected": True, "vlm_decision": "MATCH", "reason_code": None, "lane": None}
     names = _names(events)
     assert names.index("add_review_decision") < names.index("delete_curation_candidates")
 
@@ -460,7 +460,7 @@ def test_table_is_created_idempotently_with_its_indexes(db):
         conn.close()
     assert columns == {"id", "created_at", "action", "sku_key", "row_number", "brand", "product_name", "image_url",
                        "page_domain", "identity_tier", "engine_decision", "was_preselected", "vlm_decision",
-                       "reason_code", "undone_at", "learned_alias"}
+                       "reason_code", "undone_at", "learned_alias", "lane"}
     assert {"sku_key", "brand", "created_at"} <= indexed
 
 
@@ -662,3 +662,81 @@ def test_a_cache_hit_or_unknown_decision_from_the_page_is_not_evidence(recorder,
     cli_bridge.action_select_image(_approve_params("https://www.carrefouruae.com/img/live.jpg", **view))
     (action, row), = _reviews(events)
     assert (row["engine_decision"], row["was_preselected"]) == (None, None)
+
+
+# ---------------------------------------------------------------------------
+# Lanes: every review records the lane of the engine's pick (catalog_match.decide.pick_lane)
+# ---------------------------------------------------------------------------
+
+STRICT_REASONS = ["preselected:vlm_match", "lane:strict", "auto_blocked:auto_publish_disabled"]
+
+
+def _laned(lane_reasons=STRICT_REASONS):
+    return _stored([dict(CANDIDATES[0], reasons=list(lane_reasons)), CANDIDATES[1]])
+
+
+def test_the_lane_is_recorded_on_approve_reject_and_upload(recorder, tmp_path):
+    cli_bridge, events, state = recorder
+    state["candidates"] = _laned()
+    cli_bridge.action_select_image(_approve_params())
+    cli_bridge.action_reject_image(_reject_params(OTHER_URL))
+    cli_bridge.action_upload_manual_image(_upload_params(tmp_path))
+    assert [(action, row["lane"]) for action, row in _reviews(events)] == [
+        ("approved", "strict"), ("rejected", "strict"), ("manual_upload", "strict")]
+
+
+def test_a_pick_stored_before_the_lanes_gets_its_lane_from_its_blockers(recorder):
+    cli_bridge, events, state = recorder
+    state["candidates"] = _laned(["preselected:tier1_unsure", "auto_blocked:auto_publish_disabled",
+                                  "auto_blocked:not_vlm_match"])
+    cli_bridge.action_select_image(_approve_params())
+    (action, row), = _reviews(events)
+    assert row["lane"] == "unsure"
+
+
+def test_no_pick_or_a_cache_hit_has_no_lane(recorder, tmp_path):
+    cli_bridge, events, state = recorder
+    state["candidates"] = _stored([dict(CANDIDATES[0], status="eligible", reasons=["lane:strict"]), CANDIDATES[1]])
+    cli_bridge.action_select_image(_approve_params())
+    state["candidates"] = _cache_hit_candidates()
+    cli_bridge.action_upload_manual_image(_upload_params(tmp_path))
+    assert [row["lane"] for _, row in _reviews(events)] == [None, None]
+
+
+def test_rejecting_an_auto_published_image_is_a_strict_lane_review(recorder):
+    cli_bridge, events, state = recorder
+    state["candidates"] = []
+    state["approved"] = {"cloudinary_url": LINK, "original_url": PRE_URL, "verification_status": "auto_verified"}
+    cli_bridge.action_reject_image(_reject_params(LINK, reason="WRONG_PRODUCT"))
+    (action, row), = _reviews(events)
+    assert (row["engine_decision"], row["lane"]) == ("AUTO_PUBLISH", "strict")
+
+
+def test_the_catalog_page_sends_the_lane_of_its_live_search(recorder):
+    cli_bridge, events, state = recorder
+    state["candidates"] = []
+    cli_bridge.action_select_image(_approve_params("https://www.carrefouruae.com/img/live.jpg",
+                                                   search_lane="unsure", **LIVE))
+    cli_bridge.action_select_image(_approve_params("https://www.carrefouruae.com/img/live.jpg",
+                                                   search_lane="bogus", **LIVE))
+    assert [row["lane"] for _, row in _reviews(events)] == ["unsure", None]
+
+
+def test_lanes_round_trip_and_an_undone_rejection_never_counts(db, sheet):
+    """Approve the strict pick of one SKU, reject the strict pick of another and undo that: one strict review."""
+    cli_bridge, events, ws = sheet
+    url_b = "https://www.luluhypermarket.com/medias/virginia-lmeat-tuna-oil.jpg"
+    laned = [dict(CANDIDATES[0], reasons=list(STRICT_REASONS)), CANDIDATES[1]]
+    _db_candidates(db, candidates=laned)
+    _db_candidates(db, ROW_B, SKU_B, NAME_B, BRAND_B, [dict(CANDIDATES[0], url=url_b, reasons=list(STRICT_REASONS))])
+    assert cli_bridge.action_select_image(_approve_params())["status"] == "success"
+    assert cli_bridge.action_reject_image(dict(_reject_params(url_b, reason="WRONG_SIZE"), row_number=ROW_B,
+                                               sku_key=SKU_B, product_name=NAME_B, brand=BRAND_B))["status"] == "success"
+    mine = lambda: [r for r in db.get_review_decisions() if r["sku_key"] in (SKU, SKU_B)]
+    assert sorted(r["lane"] for r in mine()) == ["strict", "strict"]
+    strict = db.review_stats(mine())["lanes"]["strict"]
+    assert (strict["prechecked"], strict["accepted"], strict["rejected"]) == (2, 1, 1)
+
+    assert db.undo_rejection(SKU_B, url_b, row_number=ROW_B)["decision_undone"] is True
+    strict = db.review_stats(mine())["lanes"]["strict"]
+    assert (strict["prechecked"], strict["accepted"], strict["rejected"]) == (1, 1, 0)

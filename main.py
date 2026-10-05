@@ -111,6 +111,8 @@ def load_run_config():
             val = overrides["auto_publish_brands"]
             items = val if isinstance(val, (list, tuple)) else str(val or "").split(",")
             config.AUTO_PUBLISH_BRANDS = [str(b).strip() for b in items if str(b).strip()]
+        if "auto_publish_strict_lane" in overrides:
+            config.AUTO_PUBLISH_STRICT_LANE = bool(overrides["auto_publish_strict_lane"])
         for retired in ("ignoreUnitClash", "auto_approve_threshold", "aiUpscale", "padding_ratio"):
             if retired in overrides:
                 print(f"تنبيه: الخيار '{retired}' في run_config.json لم يعد مدعوماً وتم تجاهله.")

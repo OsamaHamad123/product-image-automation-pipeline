@@ -435,6 +435,18 @@
     margin: 0;
 }
 
+.lq-autopub__lane {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+}
+
+.lq-autopub__lane-detail {
+    font-size: var(--lq-fs-sm);
+    color: var(--lq-text-3);
+}
+
 .lq-autopub__criterion {
     font-size: var(--lq-fs-sm);
     line-height: 1.7;

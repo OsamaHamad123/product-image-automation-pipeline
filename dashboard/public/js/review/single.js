@@ -230,6 +230,8 @@
             if (item && !item.product.sku_key) item.product.sku_key = S.open.sku_key;
         }
         target.search_decision = String(data.decision || '');
+        // فئة اختيار المحرك (strict | unsure | other): تُسجّل مع قرار المراجع دليلاً لدقة كل فئة
+        target.search_lane = String(data.lane || '');
         const sess = sessionOf(key);
         const pending = sess.search && sess.search.status === 'searching' ? sess.search : null;
         const result = res && res.network ? 'network' : String(data.status || 'error');

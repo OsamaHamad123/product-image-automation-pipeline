@@ -140,6 +140,9 @@ _SCHEMA_MIGRATIONS = [
     # التي حُسب لها القرار أو عليها (learned_brand_aliases) كي يُرجع التراجع عدّها
     "ALTER TABLE review_decisions ADD COLUMN IF NOT EXISTS undone_at DATETIME NULL",
     "ALTER TABLE review_decisions ADD COLUMN IF NOT EXISTS learned_alias VARCHAR(255) NULL",
+    # review_decisions: فئة اختيار المحرك (catalog_match.decide.pick_lane: strict | unsure | other)، دليل فتح
+    # النشر الآلي لكل الماركات المؤكدة (AUTO_PUBLISH_STRICT_LANE)
+    "ALTER TABLE review_decisions ADD COLUMN IF NOT EXISTS lane VARCHAR(16) NULL",
 ]
 
 
@@ -427,6 +430,7 @@ def init_db():
             "search_engine": getattr(config, "SEARCH_ENGINE", "v2"),
             "auto_publish_enabled": "false",
             "auto_publish_brands": "",
+            "auto_publish_strict_lane": "false",
             "output_canvas_size": str(getattr(config, "OUTPUT_CANVAS_SIZE", 800)),
             "strict_brand_match": "true",
         }
@@ -1316,6 +1320,10 @@ PICK_DECISIONS = ("AUTO_PUBLISH", "REVIEW_PRESELECTED")
 # لنسبة قبولها 98%. عملياً: مع قبول كل الاختيارات يلزم 189 مراجعة لبلوغ 98%.
 AUTO_PUBLISH_MIN_REVIEWED = 30
 AUTO_PUBLISH_MIN_LOWER_BOUND = 0.98
+# فئات اختيار المحرك (نفس catalog_match.decide.LANES): strict = لم يمنع نشره آلياً إلا الإعداد أو ربط الماركة،
+# unsure = القارئ مش متأكد بس العنوان بيأكد (tier1_unsure، عرض فقط)، other = الباقي. فئة strict تجهز للنشر الآلي
+# لكل الماركات المؤكدة (AUTO_PUBLISH_STRICT_LANE) بنفس عتبات البراند.
+LANES = ("strict", "unsure", "other")
 WILSON_Z = 1.96
 TOP_REJECT_REASONS = 3
 _REVIEWS_NEEDED_CAP = 100000
@@ -1328,12 +1336,12 @@ def _clip(value, limit):
 
 def add_review_decision(action, sku_key=None, row_number=None, brand=None, product_name=None, image_url=None,
                         page_domain=None, identity_tier=None, engine_decision=None, was_preselected=None,
-                        vlm_decision=None, reason_code=None, learned_alias=None):
+                        vlm_decision=None, reason_code=None, learned_alias=None, lane=None):
     """
     تسجيل قرار مراجع واحد (approved | rejected | manual_upload). was_preselected: هل الصورة هي التي اختارها
     المحرك مسبقاً (None عند عدم المعرفة). learned_alias: كتابة الماركة التي حُسب لها القرار أو عليها
-    (learned_brand_aliases)، كي يُرجع التراجع عن الرفض عدّها. أخطاء قاعدة البيانات تُرفع؛ cli_bridge يلتقطها كي لا
-    يتعطل الاعتماد.
+    (learned_brand_aliases)، كي يُرجع التراجع عن الرفض عدّها. lane: فئة اختيار المحرك لهذا المنتج (LANES، وغيرها
+    يُحفظ None). أخطاء قاعدة البيانات تُرفع؛ cli_bridge يلتقطها كي لا يتعطل الاعتماد.
     """
     if action not in REVIEW_ACTIONS:
         raise ValueError(f"action غير صالح: {action!r}")
@@ -1343,13 +1351,13 @@ def add_review_decision(action, sku_key=None, row_number=None, brand=None, produ
         cursor.execute("""
             INSERT INTO review_decisions (action, sku_key, `row_number`, brand, product_name, image_url, page_domain,
                                           identity_tier, engine_decision, was_preselected, vlm_decision, reason_code,
-                                          learned_alias)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                          learned_alias, lane)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """, (
             action, _clip(sku_key, 64), _as_int(row_number), _clip(brand, 255), _clip(product_name, 255),
             image_url or None, _clip(page_domain, 255), _clip(identity_tier, 8), _clip(engine_decision, 32),
             None if was_preselected is None else int(bool(was_preselected)), _clip(vlm_decision, 16),
-            _clip(reason_code, 32), _clip(learned_alias, 255),
+            _clip(reason_code, 32), _clip(learned_alias, 255), lane if lane in LANES else None,
         ))
         conn.commit()
     finally:
@@ -1527,7 +1535,7 @@ def get_review_decisions():
         cursor = conn.cursor()
         cursor.execute(
             "SELECT id, created_at, action, sku_key, `row_number`, brand, product_name, image_url, page_domain, "
-            "identity_tier, engine_decision, was_preselected, vlm_decision, reason_code "
+            "identity_tier, engine_decision, was_preselected, vlm_decision, reason_code, lane "
             "FROM review_decisions WHERE undone_at IS NULL ORDER BY created_at, id"
         )
         rows = cursor.fetchall()
@@ -1604,20 +1612,34 @@ def _precheck_verdict(rows):
     True إذا اعتُمدت الصورة المختارة مسبقاً؛ None إذا لم يحكم المراجع على اختيار مسبق.
     رفض لاحق لرابط اعتُمد كاختيار مسبق يُعد رفضاً للاختيار المسبق حتى لو لم تُعرف حالته عند الرفض.
     """
+    return _precheck_outcome(rows)[0]
+
+
+def _row_lane(row):
+    lane = row.get("lane")
+    return lane if lane in LANES else None
+
+
+def _precheck_outcome(rows):
+    """
+    (الحكم كما في _precheck_verdict، نوعه: accepted | rejected (رُفض الاختيار) | replaced (اعتُمدت صورة أخرى أو رُفعت
+    يدوياً)، وفئة اختيار المحرك: من الصف الذي حسم الحكم، وإلا آخر فئة مسجلة للـ SKU). كله None بلا حكم.
+    """
     prechecked = {url_norm(r.get("image_url")) for r in rows if r.get("was_preselected") == 1 and r.get("image_url")}
-    verdict = None
+    last_lane = next((_row_lane(r) for r in reversed(rows) if _row_lane(r)), None)
+    outcome = (None, None, None)
     for r in rows:
         flag = r.get("was_preselected")
         on_precheck = flag == 1 or (flag is None and bool(r.get("image_url"))
                                     and url_norm(r.get("image_url")) in prechecked)
         action = r.get("action")
         if action == "rejected" and on_precheck:
-            return False
+            return False, "rejected", _row_lane(r) or last_lane
         if action == "approved" and on_precheck:
-            verdict = True
+            outcome = (True, "accepted", _row_lane(r) or last_lane)
         elif action in ("approved", "manual_upload") and flag == 0 and r.get("engine_decision") in PICK_DECISIONS:
-            return False
-    return verdict
+            return False, "replaced", _row_lane(r) or last_lane
+    return outcome
 
 
 def _ratio(num, den):
@@ -1630,12 +1652,31 @@ def _lower_bound(accepted, prechecked):
     return None if lower is None else max(0.0, lower)
 
 
+def _lane_row(counts):
+    """أرقام فئة واحدة: الاختيارات المسبقة المراجعة، والمقبول والمستبدل والمرفوض، والدقة وحد ويلسون والجاهزية (نفس
+    brand_status وعتباته)."""
+    prechecked, accepted = counts["prechecked"], counts["accepted"]
+    return {
+        "prechecked": prechecked,
+        "accepted": accepted,
+        "replaced": counts["replaced"],
+        "rejected": counts["rejected"],
+        "precision": _ratio(accepted, prechecked),
+        "lower_bound": _lower_bound(accepted, prechecked),
+        "status": brand_status(prechecked, accepted),
+        "ready": brand_status(prechecked, accepted) == "ready",
+        "reviews_needed": reviews_needed(prechecked, accepted),
+    }
+
+
 def review_stats(rows):
     """
     إحصائيات قرارات المراجعين (دالة نقية على صفوف review_decisions):
     - brands: لكل براند المنتجات المراجعة (SKU)، والاختيارات المسبقة المراجعة (prechecked)، والمقبول منها،
       والدقة، والحد الأدنى لفاصل ويلسون 95%، والحالة (brand_status)، وعدد المراجعات اللازم، وأكثر أسباب الرفض.
     - domains: الاعتمادات والرفض لكل نطاق صفحة.
+    - lanes: نفس الأرقام لكل فئة اختيار (LANES، _lane_row)؛ unlaned_prechecked: أحكام سُجّلت قبل الفئات (لا تُحسب
+      لأي فئة).
     - overall، والبراندات الجاهزة، وقيمة AUTO_PUBLISH_BRANDS المقترحة (لا تُكتب في أي إعداد).
     الحكم على الاختيار المسبق يُحسب مرة واحدة لكل SKU (_precheck_verdict)؛ البراند يُجمع بـ normalize كما يطابقه
     catalog_match.decide.auto_publish_allowed.
@@ -1648,16 +1689,23 @@ def review_stats(rows):
         by_sku.setdefault(sku, []).append(r)
 
     brands = {}
+    lanes = {lane: Counter() for lane in LANES}
+    unlaned = 0
     for sku_rows in by_sku.values():
         brand = next((r["brand"].strip() for r in reversed(sku_rows) if (r.get("brand") or "").strip()), "")
         entry = brands.setdefault(_brand_key(brand), {"brand": brand, "reviewed_skus": 0, "prechecked": 0,
                                                       "accepted": 0, "reasons": Counter()})
         entry["brand"] = entry["brand"] or brand
         entry["reviewed_skus"] += 1
-        verdict = _precheck_verdict(sku_rows)
+        verdict, kind, lane = _precheck_outcome(sku_rows)
         if verdict is not None:
             entry["prechecked"] += 1
             entry["accepted"] += int(verdict)
+            if lane is None:
+                unlaned += 1        # قرار سُجّل قبل الفئات
+            else:
+                lanes[lane]["prechecked"] += 1
+                lanes[lane][kind] += 1
         entry["reasons"].update(r["reason_code"] for r in sku_rows
                                 if r.get("action") == "rejected" and r.get("reason_code"))
 
@@ -1705,6 +1753,8 @@ def review_stats(rows):
             "lower_bound": _lower_bound(accepted, prechecked),
         },
         "brands": brand_rows,
+        "lanes": {lane: _lane_row(counts) for lane, counts in lanes.items()},
+        "unlaned_prechecked": unlaned,
         "domains": domain_rows,
         "ready_brands": ready,
         "suggested_auto_publish_brands": ", ".join(ready),

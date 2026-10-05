@@ -355,8 +355,8 @@
     }
 
     // --- النشر الآلي ---------------------------------------------------------
-    var apForm = page.querySelector('[data-autopub-form]');
-    if (apForm) {
+    // the main switch and «النشر الآلي لكل الماركات المؤكدة» (the strict lane): each asks, then saves its own form
+    Array.prototype.forEach.call(page.querySelectorAll('[data-autopub-form]'), function (apForm) {
         var apSwitch = apForm.querySelector('[data-autopub-switch]');
         var apSave = apForm.querySelector('[data-autopub-save]');
         setHidden(apSave, true);
@@ -372,5 +372,5 @@
                 else apForm.submit();
             });
         }
-    }
+    });
 })();
