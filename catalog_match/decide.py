@@ -333,6 +333,12 @@ def auto_publish_allowed(spec: SkuSpec) -> bool:
     return False
 
 
+def _gallery(rc: RankedCandidate) -> bool:
+    """X0's extra image of a page's own gallery (pages.gallery_candidates): it may be the back of the pack or a
+    nutrition panel, so it is pre-checked only on a MATCH reading (a front packshot of the right product)."""
+    return bool(getattr(rc.candidate, "page_gallery", False))
+
+
 def _decision_of(rc: RankedCandidate) -> str:
     return rc.verdict.decision if rc.verdict is not None else UNKNOWN
 
@@ -887,7 +893,7 @@ def route(spec: SkuSpec, ranked: Sequence[RankedCandidate],
         # means it never saw the image (a skipped image or a failed second call).
         fallback = (UNSURE, UNKNOWN) if verifier_down else (UNSURE,)
         tier1 = [rc for rc in verifiable if rc.score.tier == 1 and _decision_of(rc) in fallback
-                 and not gtin_conflict(rc)]
+                 and not gtin_conflict(rc) and not _gallery(rc)]
         # a reading whose 'no' was set aside (a size within the tolerance, a flag its own text cannot support)
         # comes after one the reader left UNSURE by itself; rank order otherwise (a stable sort)
         tier1.sort(key=lambda rc: no_set_aside(spec, rc))
@@ -902,7 +908,7 @@ def route(spec: SkuSpec, ranked: Sequence[RankedCandidate],
         why = f"tier1_{_decision_of(winner).lower()}" if winner is not None else ""
     if winner is None and not verifier_down:
         # a tier-2 label reading with corroborated listing evidence (never auto-published: not tier 1, not MATCH)
-        winner = tier2_corroborated(spec, verifiable, ranked)
+        winner = tier2_corroborated(spec, [rc for rc in verifiable if not _gallery(rc)], ranked)
         why = "tier2_corroborated" if winner is not None else ""
     if winner is None:
         outcome.decision = "REVIEW_UNSELECTED"

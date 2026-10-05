@@ -95,6 +95,9 @@ class Candidate:
     gtin_on_page: Optional[str] = None
     sanctioned: bool = True          # False for scraped sources: never eligible for AUTO_PUBLISH
     consensus_count: int = 1
+    # X0 only (expand.py): another image of the page's own product gallery, offered because the page's main image
+    # failed; pre-checked only on a MATCH reading (decide.route), never as a tier-1 UNSURE fallback
+    page_gallery: bool = False
 
 
 @dataclass(frozen=True)

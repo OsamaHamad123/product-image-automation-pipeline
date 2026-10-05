@@ -37,6 +37,7 @@ outcome_to_legacy(outcome, trace=None, spec=None) -> dict | None
     evidence.page_gtin is the barcode the candidate's page stated (gtin_on_page) when it is a valid, globally
     unique GTIN (display form, gtin.display_gtin), else None: an approval of that image keeps it for a sheet row
     without a barcode (resolved_products.page_gtin), shown on the review card and exported, never written to the sheet.
+    evidence.page_gallery is True for X0's extra image of a page's own gallery (expand.py), which the review marks.
 """
 
 from __future__ import annotations
@@ -160,6 +161,8 @@ def evidence(rc: RankedCandidate, spec: Optional[SkuSpec] = None) -> Dict[str, A
         "sanctioned": rc.candidate.sanctioned,
         # the barcode the page stated (valid and globally unique only): kept with an approval when the sheet has none
         "page_gtin": display_gtin(rc.candidate.gtin_on_page) if is_global_gtin(rc.candidate.gtin_on_page) else None,
+        # X0: another image of the page's own gallery, offered because its main image failed (the review says so)
+        "page_gallery": bool(getattr(rc.candidate, "page_gallery", False)),
     })
 
 

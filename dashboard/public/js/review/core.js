@@ -171,6 +171,14 @@
         return /^\d{8,14}$/.test(gtin) && sheetLacksBarcode(product) ? gtin : '';
     }
 
+    // صورة ثانية من معرض صفحة المتجر (evidence.page_gallery): البحث جابها لأن الصورة الرئيسية للصفحة غلط (عبوتين، لوغو المتجر)
+    const GALLERY_NOTE = 'صورة ثانية من معرض صفحة المتجر';
+
+    function galleryNote(c) {
+        const ev = (c && c.evidence && typeof c.evidence === 'object') ? c.evidence : {};
+        return ev.page_gallery === true ? GALLERY_NOTE : '';
+    }
+
     // سبب الفشل بالعربي: رمز الطابور (failure_code) أو بادئة رسالة product_failures ("NO_RESULTS: ...")
     const NOT_FOUND_CODES = ['NO_RESULTS', 'NO_MATCH', 'ALL_CONFLICTED', 'NOT_FOUND'];
     const FAILURE_TEXT = {
@@ -1337,7 +1345,7 @@
         REVIEW_WARNING_LABELS, VARIANT_AXIS_LABELS, REJECT_REASONS, COSMETIC_REASONS, FAILURE_TEXT, NOT_FOUND_CODES,
         VIEW_LABELS, BUCKET_LABELS, FILTERS, WAITING, PRODUCT_CHANGED, STALE_CODES,
         warningText, reasonLabel, rejectReasonsFor, UNDO_REJECT_LABEL, UNDO_REJECT_CONFIRM, rejectedImages, undoRejectBody,
-        forgetRejection, PAGE_GTIN_LABEL, sheetLacksBarcode, pageGtinOf, failureInfo, plainError, hostOf, marketOf, storeMarket, storeOf,
+        forgetRejection, PAGE_GTIN_LABEL, sheetLacksBarcode, pageGtinOf, GALLERY_NOTE, galleryNote, failureInfo, plainError, hostOf, marketOf, storeMarket, storeOf,
         sheetStates, unverifiedWarnings, PRESENTATION_FLAG_TEXT, BG_SKIP_RE, bgSkipCode,
         normalizeCandidate, collectCandidates, storedCandidates, storedSelected, bulkEligible, candidateNote, explainPick,
         productIdentity, sameProduct, itemKey, failureKey, reviewedCandidateView,

@@ -953,7 +953,8 @@
                 el('div', { className: 'rv-pick__who' }, [
                     el('span', { className: 'rv-badge' + (isSystem ? '' : ' rv-badge--own') }, [icon('check', 14, 2.2), el('span', { text: badgeText })]),
                     isExtra(pick) ? null : el('span', { className: 'rv-pick__store', title: where.host || null,
-                                                        text: [where.store, where.market].filter(Boolean).join(' · ') })
+                                                        text: [where.store, where.market].filter(Boolean).join(' · ') }),
+                    R.galleryNote(pick) ? el('span', { className: 'rv-gallery', text: R.galleryNote(pick) }) : null
                 ]),
                 source ? el('a', { className: 'rv-pick__source', href: source, target: '_blank', rel: 'noopener noreferrer' },
                             [el('span', { text: 'صفحة المصدر' }), icon('external', 14)]) : null
@@ -1064,6 +1065,7 @@
         }, [
             el('span', { className: 'rv-alt__thumb' }, [R.img(c.url, '', S.urls.imageProxy), i < 9 ? el('span', { className: 'rv-alt__num', text: String(i + 1) }) : null]),
             el('span', { className: 'rv-alt__store', text: isExtra(c) ? note.text : [where.store, where.market].filter(Boolean).join(' · ') }),
+            R.galleryNote(c) ? el('span', { className: 'rv-gallery', text: R.galleryNote(c) }) : null,
             showNote ? el('span', { className: `rv-alt__note rv-tone--${note.tone}`, text: note.text }) : null,
             why ? el('span', { className: `rv-alt__why rv-tone--${why.tone}`, title: why.code }, [
                 el('span', { className: 'rv-alt__why-k', text: 'لماذا لم تُختر: ' }), el('span', { text: why.text })]) : null,
