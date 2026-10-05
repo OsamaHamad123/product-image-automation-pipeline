@@ -23,7 +23,8 @@ Decisions
                           * no other MATCH candidate with a conflicting parsed identity.
     Lanes (shadow mode): every pick carries 'lane:<name>' (pick_lane). 'strict' when the only
     auto_blocked reasons are the settings (auto_publish_disabled, auto_publish_off_for_brand) and
-    brand_conf_*, i.e. every other rule above passed (an AUTO_PUBLISH pick is 'strict' too);
+    brand_conf_*, i.e. every other rule above passed (an AUTO_PUBLISH pick is 'strict' too), and
+    the pick carries no review warning (a warned pick is 'other' and never published by the lane);
     'unsure' for a 'preselected:tier1_unsure' pick (display only, never auto); 'other' for the
     rest. The reviews of each lane (local_cache_db.review_stats) are the evidence that opens
     AUTO_PUBLISH_STRICT_LANE in the settings.
@@ -367,7 +368,10 @@ def lane_of(reasons: Sequence[str]) -> Optional[str]:
     why = next((r.split(":", 1)[1] for r in reasons if r.startswith("preselected:")), None)
     if why is None:
         return None
-    return pick_lane(why, [r.split(":", 1)[1] for r in reasons if r.startswith("auto_blocked:")])
+    lane = pick_lane(why, [r.split(":", 1)[1] for r in reasons if r.startswith("auto_blocked:")])
+    if lane == "strict" and any(r.startswith(WARN_PREFIX) for r in reasons):
+        return "other"                       # a review warning keeps a pick out of 'strict' (route)
+    return lane
 
 
 def _gallery(rc: RankedCandidate) -> bool:
@@ -1018,6 +1022,15 @@ def route(spec: SkuSpec, ranked: Sequence[RankedCandidate],
         outcome.winner = published = copy
     warnings = review_warnings(spec, published, reading_of=winner)
     published.reasons.extend(WARN_PREFIX + w for w in warnings)
+    if warnings and LANE_PREFIX + "strict" in published.reasons:
+        # lane 'strict' is the pick with nothing left for the reviewer to check: a review warning (low resolution,
+        # a foreign store, a variant only one side states, ...) puts it in 'other', and the lane never publishes it
+        published.reasons[:] = [r for r in published.reasons if r != LANE_PREFIX + "strict"]
+        published.reasons.append(LANE_PREFIX + "other")
+        if by_lane:
+            outcome.decision = "REVIEW_PRESELECTED"
+            published.reasons[:] = [r for r in published.reasons if r not in ("auto_publish", LANE_PUBLISH_REASON)]
+            published.reasons.append("auto_blocked:review_warning")
     logger.info("route %s: %s winner=%s warnings=%s", spec.sku_key, outcome.decision,
                 published.candidate.image_url, ",".join(warnings) or "-")
     return outcome

@@ -296,3 +296,30 @@ def test_script_prints_the_lanes(ldb):
     assert "strict  189         189       0         0         100.0%" in text
     assert "unsure  2           1         0         1         50.0%" in text and "display only" in text
     assert "Lane 'strict' is ready" in text
+
+
+# ---------------------------------------------------------------------------
+# A review warning keeps a pick out of 'strict' (integration review)
+# ---------------------------------------------------------------------------
+
+def test_a_pick_with_a_review_warning_is_lane_other_and_never_published_by_the_lane(monkeypatch):
+    monkeypatch.setattr(decide, "review_warnings", lambda spec, rc, reading_of=None: ["low_resolution"])
+    _set(monkeypatch, enabled=True, brands="", lane=True)
+    win = _rc(_cand(1))
+    out = decide.route(SPEC, [win], OK, HEALTHY, set())
+    assert out.decision == "REVIEW_PRESELECTED" and out.winner is win
+    assert _lanes(win) == ["lane:other"] and "auto_blocked:review_warning" in win.reasons
+    assert "auto_publish" not in win.reasons and decide.LANE_PUBLISH_REASON not in win.reasons
+    assert "warn:low_resolution" in win.reasons
+
+
+def test_a_warned_pick_with_the_lane_off_is_recorded_as_other(monkeypatch):
+    monkeypatch.setattr(decide, "review_warnings", lambda spec, rc, reading_of=None: ["foreign_store"])
+    win = _rc(_cand(1))
+    assert decide.route(SPEC, [win], OK, HEALTHY, set()).decision == "REVIEW_PRESELECTED"
+    assert _lanes(win) == ["lane:other"] and "auto_blocked:review_warning" not in win.reasons
+
+
+def test_lane_of_a_stored_pick_with_a_warning_is_other():
+    assert decide.lane_of(["preselected:vlm_match", "auto_blocked:auto_publish_disabled",
+                           "warn:sheet_silent:flavour=chili"]) == "other"

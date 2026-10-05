@@ -18,7 +18,10 @@ auto-publish never ran. The evidence now also pools across brands, by the kind o
 
 - **Lanes**: `catalog_match.decide.pick_lane` puts every pick in lane `strict` (its only auto blockers are
   `auto_publish_disabled`, `auto_publish_off_for_brand` and `brand_conf_*`: every other rule passed), `unsure`
-  (`preselected:tier1_unsure`, display only) or `other`, and route() writes `lane:<name>` on the pick.
+  (`preselected:tier1_unsure`, display only) or `other`, and route() writes `lane:<name>` on the pick. A pick with
+  any review warning (low resolution, foreign store, a variant only one side states, ...) is `other`: lane `strict`
+  is the pick with nothing left for the reviewer to check, and the lane never auto-publishes a warned pick
+  (`auto_blocked:review_warning`).
 - **Recorded on every review**: new nullable `review_decisions.lane` (idempotent schema migration); approve, reject and
   manual upload store the lane of the engine's pick (from the stored candidates, the catalog screen's live search via
   `search_lane`, or `strict` for an auto-published image). Picks stored before the lanes get theirs from their
