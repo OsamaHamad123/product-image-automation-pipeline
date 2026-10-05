@@ -114,6 +114,9 @@ class ProviderHealth:
     latency_ms: Optional[int] = None
     error: Optional[str] = None
     query_id: str = ""
+    # extra requests this call sent after the first one stayed unanswered (providers/serper.py hedging): each is
+    # one more credit, so cost accounting counts 1 + hedges answered requests for the call
+    hedges: int = 0
 
 
 @dataclass
@@ -125,6 +128,7 @@ class ProviderResult:
     candidates: List[Candidate] = field(default_factory=list)
     error: Optional[str] = None
     query_id: str = ""
+    hedges: int = 0
 
     def health(self) -> ProviderHealth:
         return ProviderHealth(
@@ -134,6 +138,7 @@ class ProviderResult:
             latency_ms=self.latency_ms,
             error=self.error,
             query_id=self.query_id,
+            hedges=self.hedges,
         )
 
 
@@ -268,6 +273,9 @@ class SearchOutcome:
     discovered_brands: List[str] = field(default_factory=list)    # brand_discovery: the store spelling used
     # failure_code SOCIAL_ONLY: the links of the social-network posts that show the product, for the reviewer
     social_links: List[str] = field(default_factory=list)
+    # wall time of this search per stage in whole milliseconds (pipeline.find_product_image): retrieval, fetch,
+    # quality, verify, expansion (only when the round ran) and total
+    timings: Dict[str, int] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------

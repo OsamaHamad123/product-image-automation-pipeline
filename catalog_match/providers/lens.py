@@ -62,6 +62,7 @@ def lens_unsupported(status: int, body: str) -> bool:
 class SerperLensProvider(SerperEndpoint):
     name = "lens_serper"
     endpoint = SERPER_LENS_URL
+    hedge = False            # visual search answers slowly by nature and costs more: never sent twice
     # Learned once per process: this Serper plan has no Lens endpoint.
     unsupported = False
 

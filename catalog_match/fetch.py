@@ -21,7 +21,17 @@ HttpFetcher.fetch(cands, spec) -> list[FetchedImage]
 
 The result list has one FetchedImage per attempted candidate, in input order.
 Error codes: bad_url, timeout, connection_error, http_<status>, too_large,
-too_small, not_image, decode_error.
+too_small, not_image, decode_error, host_slow.
+
+Slow-host breaker (HostBreaker, one per process, shared by every worker thread): a host whose downloads
+ended in 'timeout' or 'connection_error' twice within 15 minutes with no download of it coming back in between
+(three times for a UAE retailer of data/trusted_domains.json) is skipped for the next 15 minutes, except for a
+candidate whose page or image host is a UAE retailer, which is always downloaded (HostBreaker.exempt): its candidates come back at once as
+'host_slow' (counted in the outcome's reject_counts as 'download:host_slow', like any download error)
+instead of costing 10 s per attempt and a second attempt each, row after row. Other errors (a 403, a 404,
+a page that is not an image) mean the host answered and never count. The breaker is off whenever a
+cassette is installed: a recorded run must see every download, and a replay must not skip one the
+recording answered. reset_host_breaker() clears it (tests, a fresh run).
 
 load_image(fetched) re-opens a stored image for later stages (quality, verify).
 """
@@ -32,10 +42,12 @@ import hashlib
 import io
 import logging
 import os
+import threading
+import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 import requests
 from PIL import Image, ImageOps, UnidentifiedImageError
@@ -47,6 +59,7 @@ except Exception:  # pragma: no cover - depends on the environment
 
 from . import cassette, settings
 from .models import Candidate, FetchedImage, SkuSpec
+from .text_norm import domain_matches, url_host
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +75,14 @@ TIMEOUT_S = 10.0
 MIN_BYTES = 3 * 1024
 MAX_BYTES = 15 * 1024 * 1024
 CHUNK = 64 * 1024
+
+# slow-host breaker (HostBreaker)
+HOST_SLOW = "host_slow"
+HOST_FAILURES = ("timeout", "connection_error")      # the download errors that say the host did not answer
+HOST_FAIL_LIMIT = 2                                   # failures within HOST_WINDOW_S that pause a host
+HOST_FAIL_LIMIT_TRUSTED = 3                           # the same for a UAE retailer (data/trusted_domains.json)
+HOST_WINDOW_S = 15 * 60
+HOST_PAUSE_S = 15 * 60
 
 _EXT = {
     "JPEG": "jpg", "MPO": "jpg", "PNG": "png", "WEBP": "webp", "GIF": "gif", "BMP": "bmp",
@@ -104,13 +125,108 @@ def _blocked(error: Optional[str]) -> bool:
     return error in ("http_403", "http_429")
 
 
+def _trusted_retailer(host: str) -> bool:
+    try:
+        from .score import trusted_domains
+        return domain_matches(host, trusted_domains().get("uae_retailers") or [])
+    except Exception:  # an unreadable list only means the stricter limit for everyone
+        return False
+
+
+class HostBreaker:
+    """Per host: remembers downloads that timed out or lost the connection and pauses a host that keeps doing so.
+
+    record_failure(host) after a download ended in a HOST_FAILURES error; blocked(host) before starting one.
+    HOST_FAIL_LIMIT failures within HOST_WINDOW_S pause the host for HOST_PAUSE_S (HOST_FAIL_LIMIT_TRUSTED for a
+    UAE retailer); when the pause is over the host starts again with a clean record. Thread-safe; the clock is
+    injectable, so tests never sleep.
+    """
+
+    def __init__(self, clock: Callable[[], float] = time.monotonic,
+                 trusted: Callable[[str], bool] = _trusted_retailer) -> None:
+        self._clock = clock
+        self._trusted = trusted
+        self._lock = threading.Lock()
+        self._failures: Dict[str, List[float]] = {}
+        self._until: Dict[str, float] = {}
+
+    def limit(self, host: str) -> int:
+        return HOST_FAIL_LIMIT_TRUSTED if self._trusted(host) else HOST_FAIL_LIMIT
+
+    def blocked(self, host: str) -> bool:
+        if not host:
+            return False
+        with self._lock:
+            until = self._until.get(host)
+            if until is None:
+                return False
+            if self._clock() >= until:
+                del self._until[host]
+                return False
+            return True
+
+    def record_failure(self, host: str) -> bool:
+        """Count one failed download of the host; True when it just paused the host."""
+        if not host:
+            return False
+        limit = self.limit(host)
+        with self._lock:
+            now = self._clock()
+            until = self._until.get(host)
+            if until is not None and now < until:
+                return False                     # already paused: a download that was in flight before it
+            recent = [t for t in self._failures.get(host, ()) if now - t < HOST_WINDOW_S]
+            recent.append(now)
+            if len(recent) >= limit:
+                self._failures.pop(host, None)
+                self._until[host] = now + HOST_PAUSE_S
+                logger.warning("fetch: %s failed %d downloads within %d min (timeout / connection error); "
+                               "its downloads are skipped for %d min", host, len(recent), HOST_WINDOW_S // 60,
+                               HOST_PAUSE_S // 60)
+                return True
+            self._failures[host] = recent
+            return False
+
+    def record_success(self, host: str) -> None:
+        """A download of the host came back: its earlier failures were a passing hiccup, not a slow host."""
+        if not host:
+            return
+        with self._lock:
+            self._failures.pop(host, None)
+
+    def exempt(self, *hosts: str) -> bool:
+        """A candidate from a UAE retailer (its page or its image host) is never skipped: the right picture is most
+        often there, and a CDN such as m.media-amazon.com or a retailer's image host is shared by every one of its
+        listings, so pausing it would drop the store from the rest of the run."""
+        return any(h and self._trusted(h) for h in hosts)
+
+    def reset(self) -> None:
+        with self._lock:
+            self._failures.clear()
+            self._until.clear()
+
+
+_HOST_BREAKER = HostBreaker()
+
+
+def host_breaker() -> HostBreaker:
+    """The process-wide breaker every HttpFetcher uses unless it was given its own."""
+    return _HOST_BREAKER
+
+
+def reset_host_breaker() -> None:
+    """Forget every host's failures and pauses (tests; the start of a fresh run)."""
+    _HOST_BREAKER.reset()
+
+
 class HttpFetcher:
     """Fetcher protocol implementation over plain `requests`."""
 
     def __init__(self, store_dir: Optional[str] = None, max_items: int = MAX_FETCH,
                  workers: int = WORKERS, timeout: float = TIMEOUT_S,
                  min_bytes: int = MIN_BYTES, max_bytes: int = MAX_BYTES,
-                 session: Optional[requests.Session] = None):
+                 session: Optional[requests.Session] = None, breaker: Optional[HostBreaker] = None):
+        self.breaker = breaker
         self.store_dir = store_dir
         self.max_items = max_items
         self.workers = workers
@@ -190,18 +306,32 @@ class HttpFetcher:
                 except Exception:  # pragma: no cover - best effort
                     pass
 
+    def _breaker(self) -> Optional[HostBreaker]:
+        """The slow-host breaker in use; None while a cassette is installed (it must see every download)."""
+        return None if cassette.active() is not None else (self.breaker or _HOST_BREAKER)
+
     def _fetch_one(self, cand: Candidate) -> FetchedImage:
         url = (cand.image_url or "").strip()
         if not url.lower().startswith(("http://", "https://")):
             return FetchedImage(candidate=cand, ok=False, error="bad_url")
+        breaker, host = self._breaker(), url_host(url)
+        # a UAE retailer's candidate is always downloaded (HostBreaker.exempt); others skip a paused host
+        skippable = breaker is not None and not breaker.exempt(host, url_host(cand.page_url or ""))
+        if skippable and breaker.blocked(host):
+            return FetchedImage(candidate=cand, ok=False, error=HOST_SLOW)
         headers = self._headers(cand)
         proxy = settings.proxy_url() or None
         body, error, ctype = self._download(url, headers)
-        if body is None and (_retryable(error) or (proxy and _blocked(error))):
+        if body is None and (_retryable(error) or (proxy and _blocked(error))) \
+                and not (skippable and error in HOST_FAILURES and breaker.blocked(host)):
             logger.debug("fetch %s: %s, retrying%s", url, error, " via proxy" if proxy else "")
             body, error, ctype = self._download(url, headers, proxy)
         if body is None:
+            if breaker is not None and error in HOST_FAILURES:
+                breaker.record_failure(host)
             return FetchedImage(candidate=cand, ok=False, error=error or "error")
+        if breaker is not None:
+            breaker.record_success(host)
         return self._decode_and_store(cand, body, ctype)
 
     def _decode_and_store(self, cand: Candidate, body: bytes, ctype: str) -> FetchedImage:

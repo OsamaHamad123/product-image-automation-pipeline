@@ -39,6 +39,7 @@ strong second look inside a call: VERIFIER_STRONG_MAX_CALLS per SKU).
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any, Iterable, List, Mapping, Optional, Sequence, Set, Tuple, Union
 
 from . import brand_discovery, decide, expand as expand_mod, quality as quality_mod
@@ -57,6 +58,35 @@ MAX_FETCH = 8
 VERIFY_BATCH = 4
 MAX_VERIFY_CALLS = 2
 PHASH_EXCLUDE_DISTANCE = 6
+
+
+def _now() -> float:
+    return time.monotonic()
+
+
+class _StageTimer:
+    """Wall time of one search per stage, in whole milliseconds (time.monotonic).
+
+    lap(stage) adds the time since the previous lap (or the start) to the stage, so a stage that runs twice
+    (two verifier calls) adds up; skip() drops the time since the previous lap (it still counts in 'total').
+    """
+
+    def __init__(self) -> None:
+        self._start = self._last = _now()
+        self._ms: dict = {}
+
+    def lap(self, stage: str) -> None:
+        now = _now()
+        self._ms[stage] = self._ms.get(stage, 0.0) + max(0.0, now - self._last) * 1000.0
+        self._last = now
+
+    def skip(self) -> None:
+        self._last = _now()
+
+    def result(self) -> dict:
+        out = {stage: int(round(ms)) for stage, ms in self._ms.items()}
+        out["total"] = int(round(max(0.0, _now() - self._start) * 1000.0))
+        return out
 
 
 # ---------------------------------------------------------------------------
@@ -250,6 +280,7 @@ def find_product_image(spec: Union[SkuSpec, Mapping[str, Any]], *, providers: Op
     phash_negatives = [h for h in (_phash_hex(p) for p in (exclude_phashes or ())) if h]
     negatives = {"urls": exclude_urls} if exclude_urls else None
     custom = custom_query.strip() if custom_query and custom_query.strip() else None
+    timer = _StageTimer()
 
     # 1. retrieve (early stop on tier 1). A spelling an earlier row of this run proved for the same (or a sibling)
     #    sheet brand writes the planned queries from Q1 ('Super Tasty MEAT SOLID TUNA ...' for 'SUPER T/', never
@@ -299,14 +330,17 @@ def find_product_image(spec: Union[SkuSpec, Mapping[str, Any]], *, providers: Op
     if not custom and not _has_t1_t2(scored) and not retriever.stopped:
         retrieval = retriever.relax()
         scored = _score_pool(spec, retrieval.pool, negatives)
+    timer.lap("retrieval")
 
     # 4. rank and fetch
     ranked = [RankedCandidate(candidate=c, score=s) for c, s in rank(scored)]
     ranked, n_phash_dropped = _fetch(spec, fetcher, ranked, phash_negatives) if ranked else (ranked, 0)
+    timer.lap("fetch")
 
     # 5. soft quality (hard failures stay visible, decide marks them rejected)
     _assess(ranked)
     ranked = _rerank(ranked)
+    timer.lap("quality")
 
     # 6. first verifier call on the top 4 usable candidates
     results: List[VerificationResult] = []
@@ -327,9 +361,11 @@ def find_product_image(spec: Union[SkuSpec, Mapping[str, Any]], *, providers: Op
             res2 = _verify(spec, verifier, rest[:VERIFY_BATCH])
             if res2 is not None:
                 results.append(res2)
+    timer.lap("verify")
 
     # 8. decide
     outcome = decide.route(spec, ranked, results, retrieval.health, retrieval.relaxed_ids)
+    timer.skip()
 
     # 9. expansion round (sources package): only when nothing confident was picked
     extra_queries: List[str] = []
@@ -340,6 +376,8 @@ def find_product_image(spec: Union[SkuSpec, Mapping[str, Any]], *, providers: Op
             fetcher=fetcher, verifier=verifier, phash_negatives=phash_negatives, negatives=negatives,
             custom_query=custom))
         outcome = report.outcome
+        if report.ran:
+            timer.lap("expansion")
         results = results + report.verify_results
         extra_queries = report.queries
         n_phash_dropped += report.phash_dropped
@@ -347,6 +385,7 @@ def find_product_image(spec: Union[SkuSpec, Mapping[str, Any]], *, providers: Op
             # X0: store pages whose own picture is the picture that failed (catalog_match.expand)
             outcome.reject_counts[expand_mod.STORE_IMAGE_WRONG] = report.store_image_wrong
     outcome.queries = list(retrieval.queries) + extra_queries
+    outcome.timings = timer.result()
     outcome.discovered_brands = list(spec.discovered_brands)
     outcome.vlm_calls = sum(int(r.calls or 0) for r in results)
     # verifier package: per-model usage of every billed verifier call, and its dashboard notices

@@ -350,7 +350,8 @@ class QueueStats
                 continue;
             }
             if (in_array($provider, self::SERPER_BILLED_PROVIDERS, true)) {
-                $serper++;
+                // a request Python sent a second time because it was slow (hedges) is one more Serper credit
+                $serper += 1 + max(0, (int) ($item['hedges'] ?? 0));
             } elseif ($provider === 'lens_serpapi') {
                 $serpapi++;
             }

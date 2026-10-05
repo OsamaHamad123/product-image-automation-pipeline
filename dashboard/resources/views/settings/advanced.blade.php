@@ -9,7 +9,27 @@
     (catalog_match/local_index.py) and says what the index holds ($advanced['local_index'] =
     SettingsController::localIndexStats(), null before scripts/build_catalog_index.py first ran).
 --}}
-@php $adv = $advanced; $src = $advanced['sources']; $idx = $advanced['local_index'] ?? null; @endphp
+@php $adv = $advanced; $src = $advanced['sources']; $spd = $advanced['speed']; $idx = $advanced['local_index'] ?? null; @endphp
+{{-- «السرعة»: section=speed, $advanced['speed'] = SettingsController::speedData(). WORKER_CONCURRENCY, 1..8 (also checked server side). --}}
+<form method="POST" action="{{ route('dashboard.save_settings') }}" class="lq-card lq-settings-card" aria-labelledby="lq-settings-speed-title" autocomplete="off" data-speed-form>
+    @csrf
+    <input type="hidden" name="section" value="speed">
+    <div class="lq-settings-card__head">
+        <h2 class="lq-section-title" id="lq-settings-speed-title">سرعة التشغيل</h2>
+        <p class="lq-settings-card__intro">كم منتج بيدوّر عليه النظام بنفس الوقت. الرقم الأعلى بيخلص التشغيل أسرع، بس بيصرف رصيد البحث أسرع كمان.</p>
+    </div>
+
+    <label class="lq-field">
+        <span class="lq-field__label">كم منتج بيشتغل بنفس الوقت</span>
+        <input type="number" class="lq-input lq-settings-field__control" name="worker_concurrency" min="{{ \App\Http\Controllers\SettingsController::WORKER_CONCURRENCY_MIN }}" max="{{ \App\Http\Controllers\SettingsController::WORKER_CONCURRENCY_MAX }}" step="1" value="{{ $spd['workers'] }}" dir="ltr" inputmode="numeric" @disabled((bool) $dbError)>
+        <span class="lq-field__hint">من 1 لـ {{ \App\Http\Controllers\SettingsController::WORKER_CONCURRENCY_MAX }}، والمعتاد 5. الأعلى أسرع، بس بيستهلك رصيد البحث أسرع. بينطبق من التشغيل الجاي.</span>
+    </label>
+
+    <div class="lq-settings-card__actions">
+        <x-lq.button type="submit" icon="check" :disabled="(bool) $dbError">حفظ</x-lq.button>
+    </div>
+</form>
+
 <form method="POST" action="{{ route('dashboard.save_settings') }}" class="lq-card lq-settings-card" aria-labelledby="lq-settings-sources-title" autocomplete="off" data-sources-form>
     @csrf
     <input type="hidden" name="section" value="sources">

@@ -11,6 +11,46 @@ causes: the quality gate threw away white-background packshots, an unverified "l
 success, siblings of the right product outranked it, and reviewers' rejections were never remembered. The search
 core was rebuilt and wired into the queue, the dashboard actions and the sheet writes. Every claim below has a test.
 
+### Added: faster runs («كم منتج بيشتغل بنفس الوقت»), stage timings, a hedged Serper request and a slow-host breaker
+
+The owner's three exports (151 rows) showed 100 rows taking 18.3 minutes with 3 rows in parallel, about 33 s a row:
+Serper answered in 2.2 s at the median but 6.2 s at p90 and timed out 7 times in 176 calls; the expansion round ran
+on 40% of the rows (119 extra calls), 3 of them rows whose brand is «GENERIC / NO BRAND» that can never be picked; and
+29 image downloads timed out, mostly the same two hosts again and again (shops.ae, shinjukuhalalfood.com).
+
+- **Stage timings in every row**: `pipeline.find_product_image` measures the wall time of retrieval, fetch, quality,
+  verify, the expansion round (only when it ran) and the total with `time.monotonic`; `facade.outcome_summary`
+  stores it as `trace.outcome.timings` (ms) next to `provider_health`. `scripts/export_run.py` exports it per row as
+  `timings` and adds `summary.timings` (rows, and p50 / p90 / total seconds per stage). A row saved before this has
+  `timings: {}` and is left out of the summary, so old exports and traces stay readable.
+- **`WORKER_CONCURRENCY`** (default 5, clamped to 1..8; it was a hard-coded 3): read like the other worker settings
+  (`system_settings.worker_concurrency` through `config.load_db_config`, else `.env`, through
+  `catalog_match.settings.worker_concurrency`). Settings → «متقدم» → «سرعة التشغيل» has the field «كم منتج بيشتغل بنفس
+  الوقت» (1..8, checked on the server) with the hint that more is faster but spends the search quota faster. Rate
+  limiting was checked and is already process-wide: every provider name owns one token bucket that all worker threads
+  and all per-row provider objects share, so five workers cannot exceed a provider's per-minute limit.
+- **Hedged Serper request** (`SERPER_HEDGE_AFTER_S`, default 4.5, 0 = off): a Serper images / web / shopping request
+  that has not answered after that long is sent once more and the first HTTP 200 answer is used; the late one is
+  closed and ignored. A fast failure is not hedged; the duplicate takes a token from the shared bucket without waiting.
+  Visual search is never hedged. The per-request timeout of these endpoints is now 10 s (was 15 s). The duplicate is
+  one more Serper credit and is counted wherever credits are: the call records `hedges` (`provider_health`, `hedged` +
+  `hedges` in the run export), and `spend_from_outcome`, the health counters, the dashboard's run cost and the dry-run
+  cost count `1 + hedges` for an answered call. Hedging is off whenever a cassette is installed (record, replay, fill),
+  so a recording never gains a request it does not hold and a replayed call is never counted twice.
+- **Slow-host breaker** (`catalog_match.fetch.HostBreaker`, one per process, thread-safe, cleared at the start of each
+  run): a host whose downloads ended in `timeout` or `connection_error` twice within 15 minutes (three for a UAE
+  retailer of `trusted_domains.json`) is skipped for the next 15 minutes: its candidates come back at once as
+  `host_slow`, counted in `reject_counts` as `download:host_slow`. A host that answers (403, 404, 5xx, not an image)
+  never counts, and a download of it that comes back forgets its earlier failures. A candidate whose page or image
+  host is a UAE retailer is always downloaded (`HostBreaker.exempt`): an image CDN such as `m.media-amazon.com` is
+  shared by every listing of its store, so pausing it would drop the store for the rest of the run. The breaker is
+  off under a cassette. `download_host_slow` has Arabic sentences in the review screen and
+  the publish check.
+- **Expansion**: a row with no usable brand (a placeholder such as «GENERIC / NO BRAND», or an empty cell with no brand
+  in the name) no longer runs the round, since none of its listings can reach tier 1 or 2. The round now also stops
+  as soon as it has a winner: after X1 + X2 their finds go through the normal stages at once, and a pick the label
+  reader read as MATCH spares the visual searches and X5 (a weaker, UNSURE pick does not stop it).
+
 ### Added: «تجاوز عزل الخلفية», the tab the run reads, and 'N X M PCS' multipacks
 
 «فحص النشر» showed the owner that PhotoRoom's credit had run out (`photoroom_402`): every approval failed and nothing

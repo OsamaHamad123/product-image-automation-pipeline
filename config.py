@@ -91,6 +91,15 @@ DAILY_BUDGET_USD = _number_env("DAILY_BUDGET_USD", 0)
 SERPER_CREDIT_STOP_SEARCHES = int(_number_env("SERPER_CREDIT_STOP_SEARCHES", 3))
 # --- end queue package ---
 
+# --- speed package: سرعة العامل ---
+# WORKER_CONCURRENCY: كم منتج بيشتغل بنفس الوقت (1 إلى 8، الافتراضي 5)؛ الأعلى أسرع لكن يصرف رصيد البحث أسرع.
+#   من system_settings.worker_concurrency (لوحة التحكم، تبويب «متقدم»)، وإلا من .env.
+# SERPER_HEDGE_AFTER_S: طلب Serper ما رد خلال هالمدة بيُرسل مرة تانية ويُستخدم أول رد سليم (0 = موقف). الطلب الثاني
+#   رصيد إضافي من Serper ومسجل بالمكالمة (hedges).
+WORKER_CONCURRENCY = os.getenv("WORKER_CONCURRENCY", "5").strip() or "5"
+SERPER_HEDGE_AFTER_S = os.getenv("SERPER_HEDGE_AFTER_S", "4.5").strip() or "4.5"
+# --- end speed package ---
+
 # 4. إعدادات معالجة الصور وتحجيمها
 # الأبعاد الافتراضية المطلوبة لجميع الصور بشكل ديناميكي (مثال: 800×800)
 IMAGE_TARGET_SIZE = (800, 800)
@@ -453,6 +462,12 @@ def _load_queue_settings(db_keys):
             logger.warning("قيمة %s غير صالحة: %r", key, value)
             continue
         globals()[name] = int(number) if name == "SERPER_CREDIT_STOP_SEARCHES" else number
+    global WORKER_CONCURRENCY
+    if db_keys.get("worker_concurrency") not in (None, ""):
+        try:
+            WORKER_CONCURRENCY = str(min(8, max(1, int(str(db_keys["worker_concurrency"]).strip()))))
+        except (TypeError, ValueError):
+            logger.warning("قيمة worker_concurrency غير صالحة: %r", db_keys["worker_concurrency"])
 # --- end queue package ---
 
 

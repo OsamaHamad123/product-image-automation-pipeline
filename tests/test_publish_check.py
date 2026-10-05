@@ -813,7 +813,8 @@ def test_download_sentences_are_the_review_screens(tmp_path):
     from laqta_review_harness import run as harness_run
     codes = ["source_changed", "download_timeout", "download_connection_error", "download_http_503",
              "download_failed", "download_http_403", "download_http_429", "download_http_404", "download_http_410",
-             "download_not_image", "download_too_large", "download_bad_scheme", "not_image", "image_too_large"]
+             "download_not_image", "download_too_large", "download_bad_scheme", "download_host_slow", "not_image",
+             "image_too_large"]
     texts = harness_run(f"out.texts = {json.dumps(codes)}.map(c => R.plainError(c, ''));",
                         tmp_path, {"products": [], "queue": {"status": "success", "ready_for_review": 0, "rows": []}})
     assert dict(zip(codes, texts["texts"])) == {code: pc.download_error_text(code) for code in codes}

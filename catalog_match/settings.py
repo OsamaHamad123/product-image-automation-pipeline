@@ -283,3 +283,37 @@ def local_index_page_ttl_days() -> int:
     value = value if isinstance(value, int) else int(DEFAULTS["LOCAL_INDEX_PAGE_TTL_DAYS"])
     return min(365, max(0, value))
 # --- end local catalog index ---
+
+
+# --- speed package: how many products the worker searches at once, and the hedged Serper request ---
+# WORKER_CONCURRENCY    products searched in parallel by the worker (main.run_worker_mode); clamped to 1..8.
+#                       Higher is faster but spends the search quota faster (every provider's token bucket in
+#                       catalog_match.ratelimit is shared by all of them, so a provider's per-minute limit holds).
+# SERPER_HEDGE_AFTER_S  a Serper request still unanswered after this many seconds is sent once more and the
+#                       first good answer is used (providers/serper.py); 0 turns it off. The second request is
+#                       a second credit, recorded on the call (provider_health hedges).
+DEFAULTS.update({
+    "WORKER_CONCURRENCY": 5,
+    "SERPER_HEDGE_AFTER_S": "4.5",
+})
+WORKER_CONCURRENCY_MIN = 1
+WORKER_CONCURRENCY_MAX = 8
+
+
+def worker_concurrency() -> int:
+    """Products searched at once: WORKER_CONCURRENCY clamped to 1..8 (the default 5 for a missing or bad value)."""
+    value = get("WORKER_CONCURRENCY")
+    value = value if isinstance(value, int) else int(DEFAULTS["WORKER_CONCURRENCY"])
+    return min(WORKER_CONCURRENCY_MAX, max(WORKER_CONCURRENCY_MIN, value))
+
+
+def serper_hedge_after_s() -> float:
+    """Seconds before a slow Serper request is sent a second time; 0 = never (a bad value is the default 4.5)."""
+    try:
+        value = float(str(get("SERPER_HEDGE_AFTER_S")).strip())
+    except (TypeError, ValueError):
+        value = float(DEFAULTS["SERPER_HEDGE_AFTER_S"])
+    if value != value or value < 0:       # NaN or negative
+        value = float(DEFAULTS["SERPER_HEDGE_AFTER_S"])
+    return min(60.0, value)
+# --- end speed package ---

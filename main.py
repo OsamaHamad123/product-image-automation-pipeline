@@ -2179,6 +2179,12 @@ def _daily_budget():
         return 0.0
 
 
+def _worker_concurrency():
+    """WORKER_CONCURRENCY (لوحة التحكم أو .env): كم منتج بيشتغل بنفس الوقت، 1 إلى 8، الافتراضي 5."""
+    from catalog_match import settings as cm_settings
+    return cm_settings.worker_concurrency()
+
+
 def _credit_stop_searches():
     """SERPER_CREDIT_STOP_SEARCHES (0 = لا إيقاف بسبب رصيد Serper)."""
     try:
@@ -2230,9 +2236,20 @@ def _forget_brand_spellings():
         print(f"تنبيه: تعذر تفريغ ذاكرة كتابات الماركات: {e}")
 
 
+def _forget_slow_hosts():
+    """
+    كل تشغيل يبدأ بلا ذاكرة مواقع بطيئة (catalog_match.fetch.HostBreaker): موقع تجاوزناه في تشغيل سابق يُجرَّب من جديد.
+    """
+    try:
+        from catalog_match import fetch
+        fetch.reset_host_breaker()
+    except Exception as e:
+        print(f"تنبيه: تعذر تفريغ ذاكرة المواقع البطيئة: {e}")
+
+
 def run_worker_mode(trigger="manual", report=True, deadline_ts=None):
     """
-    عامل الخلفية: يسحب المهام ذرياً ويعالجها بالتوازي (3 خيوط).
+    عامل الخلفية: يسحب المهام ذرياً ويعالجها بالتوازي (WORKER_CONCURRENCY منتجاً بنفس الوقت، 5 افتراضياً).
     يخرج فقط عندما ينجح COUNT(*) للمهام المفتوحة ويعيد 0، أو عند توقف المزودين (5 مهام متتالية PROVIDER_DOWN)،
     أو عند طلب إيقاف من لوحة التحكم (stop_requested): لا يسحب مهمة جديدة، ينهي المنتجات الجارية، ثم يعيد
     local_cache_db.stop_run الصفوف العالقة للانتظار. طلب إيقاف سُجل أثناء الإدراج يُنفذ قبل معالجة أي منتج.
@@ -2331,6 +2348,7 @@ def run_worker_mode(trigger="manual", report=True, deadline_ts=None):
             return
         brand_mappings = google_sheets.get_brand_mappings(sheets_client, config.SPREADSHEET_NAME_OR_URL)
         _forget_brand_spellings()
+        _forget_slow_hosts()
         google_sheets.init_async_queue(config.CREDENTIALS_FILE, config.SPREADSHEET_NAME_OR_URL)
         queue_started = True
         _refresh_state("pre_caching", run_id=run_id, notice=notice)
@@ -2357,7 +2375,8 @@ def run_worker_mode(trigger="manual", report=True, deadline_ts=None):
                 counters["credit_streak"] = _next_credit_streak(counters["credit_streak"], report)
             _refresh_state("pre_caching", run_id=run_id)
 
-        max_workers = 3
+        max_workers = _worker_concurrency()
+        print(f"[Worker] {max_workers} منتجات بالتوازي (WORKER_CONCURRENCY).")
         active = []
         db_outage_since = None
         last_beat = time.monotonic()
@@ -2551,6 +2570,7 @@ def run_automation_pipeline():
             return
         brand_mappings = google_sheets.get_brand_mappings(sheets_client, config.SPREADSHEET_NAME_OR_URL)
         _forget_brand_spellings()
+        _forget_slow_hosts()
 
         success_count = skipped_count = failed_count = 0
         save_progress(0, len(products), 0, 0, "بدء التشغيل...")

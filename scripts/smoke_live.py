@@ -445,9 +445,12 @@ class CountingProvider:
     def search(self, query, hl, spec):
         t0 = time.perf_counter()
         result = self._inner.search(query, hl, spec)
-        self._log.append({"provider": self.name, "query": query, "hl": hl, "status": result.status,
-                          "http_status": result.http_status, "count": len(result.candidates),
-                          "ms": int(1000 * (time.perf_counter() - t0)), "error": result.error})
+        call = {"provider": self.name, "query": query, "hl": hl, "status": result.status,
+                "http_status": result.http_status, "count": len(result.candidates),
+                "ms": int(1000 * (time.perf_counter() - t0)), "error": result.error}
+        if getattr(result, "hedges", 0):
+            call.update(hedged=True, hedges=int(result.hedges))
+        self._log.append(call)
         return result
 
     def __getattr__(self, name):          # e.g. Open Food Facts lookup(spec)
@@ -519,7 +522,15 @@ def provider_prices(serp_cost=DEFAULT_SERP_COST):
 def call_cost(call, prices):
     if call.get("query") == "lookup" or call.get("status") not in ANSWERED_STATUSES:
         return 0.0
-    return float(prices.get(call.get("provider"), prices.get("_default", DEFAULT_SERP_COST)))
+    return credits(call) * float(prices.get(call.get("provider"), prices.get("_default", DEFAULT_SERP_COST)))
+
+
+def credits(call):
+    """What one recorded call spent: 1, plus one per hedged request (providers/serper.py sent it a second time)."""
+    try:
+        return 1 + max(0, int(call.get("hedges") or 0))
+    except (TypeError, ValueError):
+        return 1
 
 
 def expansion_calls(outcome):
@@ -529,10 +540,13 @@ def expansion_calls(outcome):
         provider = getattr(h, "provider", "") or ""
         query_id = getattr(h, "query_id", "") or ""
         if provider in EXPANSION_PROVIDERS or _EXPANSION_QUERY_RE.match(query_id):
-            out.append({"provider": provider, "query": query_id or "expansion", "query_id": query_id, "hl": "",
-                        "status": getattr(h, "status", ""), "http_status": getattr(h, "http_status", None),
-                        "count": None, "ms": getattr(h, "latency_ms", None), "error": getattr(h, "error", None),
-                        "round": "expansion"})
+            call = {"provider": provider, "query": query_id or "expansion", "query_id": query_id, "hl": "",
+                    "status": getattr(h, "status", ""), "http_status": getattr(h, "http_status", None),
+                    "count": None, "ms": getattr(h, "latency_ms", None), "error": getattr(h, "error", None),
+                    "round": "expansion"}
+            if getattr(h, "hedges", 0):
+                call.update(hedged=True, hedges=int(h.hedges))
+            out.append(call)
     return out
 
 
@@ -581,7 +595,7 @@ def run_row(row, mappings, identity, pipeline, providers_mod, verify_mod, serp_c
         if c.get("error"):
             c["error"] = redact(c["error"], secrets)
     search_cost = sum(call_cost(c, prices) for c in all_calls)
-    serp_calls = sum(1 for c in all_calls if c["provider"] not in FREE_PROVIDERS and c["query"] != "lookup"
+    serp_calls = sum(credits(c) for c in all_calls if c["provider"] not in FREE_PROVIDERS and c["query"] != "lookup"
                      and c["status"] in ANSWERED_STATUSES)
     usage = [u for entry in verifier.log for u in entry["usage"]]
     vlm_calls = sum(entry["calls"] for entry in verifier.log) if verifier.log else int(outcome.vlm_calls or 0)

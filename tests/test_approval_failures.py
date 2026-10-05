@@ -109,8 +109,8 @@ def test_a_relative_candidate_store_is_read_from_the_project_folder(tmp_path, mo
 @pytest.mark.skipif(NODE is None, reason="node is not installed")
 def test_every_image_code_an_approval_fails_with_has_an_arabic_sentence(tmp_path):
     codes = ["source_changed", "download_timeout", "download_connection_error", "download_http_503", "download_failed",
-             "download_http_403", "download_http_429", "download_http_404", "download_not_image", "download_too_large",
-             "download_bad_scheme", "not_image", "image_too_large", "source_too_large", "source_missing",
+             "download_http_403", "download_http_429", "download_http_404", "download_host_slow", "download_not_image",
+             "download_too_large", "download_bad_scheme", "not_image", "image_too_large", "source_too_large", "source_missing",
              "source_not_found", "source_unreadable", "processing_failed", "upload_failed", "sheet_write_failed",
              "something_new"]
     texts = harness_run(f"out.texts = {json.dumps(codes)}.map(c => R.plainError(c, 'ما انعتمدت.'));",
@@ -123,6 +123,7 @@ def test_every_image_code_an_approval_fails_with_has_an_arabic_sentence(tmp_path
     assert out["download_timeout"].startswith("ما قدرنا ننزّل الصورة")
     assert out["download_http_403"].startswith("موقع المتجر رفض تنزيل الصورة")
     assert out["download_http_404"].startswith("الصورة انشالت")
+    assert out["download_host_slow"].startswith("موقع المتجر بطيء")      # the slow-host breaker's code, not "not an image"
     assert out["not_image"].startswith("الرابط ما عاد صورة صالحة")
     # a code the page does not know yet keeps the caller's fallback
     assert out["something_new"] == "ما انعتمدت."

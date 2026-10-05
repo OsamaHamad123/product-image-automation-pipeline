@@ -180,6 +180,25 @@ def test_the_export_holds_every_row_of_the_latest_run_and_no_secret(run_rows, tm
     assert doc["summary"]["unselected"]["unsure"] == 1 and doc["summary"]["unselected"]["not_found"] == 1
 
 
+def test_a_stored_search_exports_its_stage_timings_and_an_older_one_has_none(run_rows):
+    """The outcome's per-stage milliseconds come out as the row's 'timings'; a trace saved before they were recorded
+    gives {} and is left out of the summary block (p50 / p90 / total seconds per stage)."""
+    import export_run
+
+    timed = {"outcome": dict(OLD_OUTCOME, decision="NOT_FOUND", timings={
+        "retrieval": 9000, "fetch": 4500, "quality": 200, "verify": 6000, "total": 20000})}
+    _sql(run_rows, "UPDATE automation_queue SET trace_json = %s WHERE `row_number` = %s", (json.dumps(timed), ROW + 1))
+    doc, _hidden = export_run.build_export("run", RUN_ID, mappings=MAPPINGS)
+    rows = {r["row"] - ROW: r for r in doc["rows"]}
+    assert rows[1]["timings"] == {"retrieval": 9000, "fetch": 4500, "quality": 200, "verify": 6000, "total": 20000}
+    assert rows[0]["timings"] == {} and rows[2]["timings"] == {}
+    summary = doc["summary"]["timings"]
+    assert summary["rows"] == 1
+    assert summary["stages"]["fetch"] == {"rows": 1, "p50_s": 4.5, "p90_s": 4.5, "total_s": 4.5}
+    assert summary["stages"]["total"]["total_s"] == 20.0
+    assert list(summary["stages"]) == ["retrieval", "fetch", "quality", "verify", "total"]
+
+
 def test_compare_runs_reads_an_export(run_rows, tmp_path, capsys):
     import compare_runs
     import export_run

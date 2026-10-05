@@ -14,6 +14,9 @@ When it runs
     * 'upgrade'  the decision is REVIEW_PRESELECTED / AUTO_PUBLISH but the pick carries the
                  low_resolution warning: one visual search for the same packshot at a higher
                  resolution;
+    * never for a row with no usable brand (no_usable_brand: a 'GENERIC / NO BRAND' or empty brand cell and no
+      brand found in the name): without a brand nothing can reach tier 1 or 2, so no page or listing the round
+      finds could ever be picked, and its paid calls would only be spent (RoundReport.skipped = 'no_brand');
     * never when the caller injected providers or a verifier (tests, the offline eval),
       unless it also passed an Expansion explicitly (pipeline.find_product_image).
 
@@ -55,6 +58,11 @@ Then, within EXPANSION_MAX_CALLS paid calls (every provider call counts):
     Page links of web results are fetched only on UAE retailer, brand-official or known
     retail hosts (and any .ae host); hits whose own title or URL already breaks a hard
     identity rule are never fetched.
+
+The round stops as soon as it has a winner: X0 returns on a pick, and so does the step after X1 + X2 (their
+candidates go through the stages below first; with a pick whose own label the verifier read as MATCH, the visual
+searches X3 / X4 and X5 are not made). A weaker pick (tier 1 left UNSURE) does not stop it: the visual
+searches may still find a picture that reads as a MATCH.
 
 Then everything goes through the normal stages with the normal rules: the new candidates
 join the SAME pool (deduplicated, evidence merged, reviewer negatives excluded), every
@@ -105,6 +113,7 @@ from .text_norm import domain_matches, url_host
 logger = logging.getLogger(__name__)
 
 PICK_DECISIONS = ("REVIEW_PRESELECTED", "AUTO_PUBLISH")
+NO_BRAND = "no_brand"          # RoundReport.skipped for a SKU with no usable brand
 WEB_GROUP_1 = ("luluhypermarket.com", "carrefouruae.com", "amazon.ae", "noon.com", "talabat.com")
 MAX_OFFICIAL_SITES = 2
 MAX_PAGES = {"web": 5, "shopping": 4, "lens": 4}
@@ -206,6 +215,7 @@ class RoundInput:
 class RoundReport:
     outcome: SearchOutcome
     ran: str = ""                                   # '' | 'expand' | 'upgrade'
+    skipped: str = ""                               # why a round that would have run did not: 'no_brand'
     health: List[ProviderResult] = field(default_factory=list)
     queries: List[str] = field(default_factory=list)
     verify_results: List[VerificationResult] = field(default_factory=list)
@@ -251,8 +261,18 @@ def _visual_ready(exp: Expansion) -> bool:
     return visual is not None and bool(getattr(visual, "available", lambda: True)())
 
 
+def no_usable_brand(spec: SkuSpec) -> bool:
+    """True when there is no brand to look for: a placeholder cell ('GENERIC / NO BRAND', brand_placeholder) or an
+    empty one, with no brand found in the name or learned. Such a SKU is searched by name only, every listing stays
+    at tier 3 and none can be picked (decision brand_not_found), so more paid calls cannot help. The one exception
+    is GTIN_POLICY 'strict' with a valid barcode, where a page that carries the same GTIN is tier 2 without a brand."""
+    if spec.match_brands or spec.discovered_brands or spec.brand_raw or spec.brand_canonical:
+        return False
+    return not (spec.gtin and settings.gtin_policy() == "strict")
+
+
 def trigger(outcome: SearchOutcome, exp: Optional[Expansion]) -> str:
-    """'expand' | 'upgrade' | '' (see the module docstring)."""
+    """'expand' | 'upgrade' | '' (see the module docstring); run_round also skips a SKU with no usable brand."""
     if exp is None or not exp.active():
         return ""
     if outcome.decision in PICK_DECISIONS:
@@ -723,6 +743,15 @@ def _recover(inp: RoundInput, report: RoundReport, collector: "_Collector") -> O
     return everything
 
 
+def _winner_read_as_match(outcome: SearchOutcome) -> bool:
+    """A pick whose own label the verifier read as MATCH: the product is found, more paid calls cannot improve it.
+    A weaker pick (a tier-1 candidate left UNSURE, a corroborated tier-2 one) is not: the visual searches may still
+    find a picture that reads as a MATCH, so the round goes on, as it always did."""
+    w = outcome.winner
+    return (outcome.decision in PICK_DECISIONS and w is not None and w.verdict is not None
+            and w.verdict.decision == decide.MATCH)
+
+
 def _expand(inp: RoundInput, report: RoundReport) -> RoundReport:
     exp, spec = inp.exp, inp.spec
     collector = _Collector(inp, report)
@@ -760,6 +789,26 @@ def _expand(inp: RoundInput, report: RoundReport) -> RoundReport:
     # X3, X4: visual search from the normal flow's near-matches
     seeds = _distinct(near_matches(spec, inp.ranked), MAX_LENS_SEEDS) if _visual_ready(exp) else []
     skip = ("lens_serper",) if not serper_ok else ()
+
+    # Stop as soon as there is a winner: when a paid step could still follow (a visual search, or X5), what X1 + X2
+    # found goes through the normal stages now, and a pick spares those calls (each a paid call and seconds of
+    # waiting). Without a pick the round goes on: the seeds above stay the normal flow's near-matches, and the
+    # later finds are grown over the pool as it is now. With no step left to spare, one grow at the end, as ever.
+    visual_next = bool(seeds) and _next_backend(exp.visual, skip) is not None
+    x5_next = (not seeds and bool(text) and serper_ok and exp.web is not None and len(groups) > 1 and bool(groups[1])
+               and not _promising(spec, new, inp.negatives))
+    found_early: List[Candidate] = []
+    routed = 0                                  # paid calls the outcome's re-route already holds
+    if new and budget.left > 0 and (visual_next or x5_next):
+        everything, n_new, n_kept = _grow(inp, report, new)
+        report.new_candidates += n_new
+        routed = len(report.health)
+        logger.info("expand sku=%s: X1/X2 %d calls, %d pages, %d new candidates (%d fetched) -> %s",
+                    spec.sku_key, report.calls, report.pages_fetched, n_new, n_kept, report.outcome.decision)
+        if _winner_read_as_match(report.outcome) or report.outcome.failure_code == "VERIFIER_DOWN":
+            return report                       # a winner: no more paid calls (the re-route holds the ones made)
+        found_early, new = new, []
+        inp = replace(inp, ranked=everything)
     serpapi_used = 0
     for i, seed in enumerate(seeds):
         if budget.left <= 0:
@@ -776,14 +825,14 @@ def _expand(inp: RoundInput, report: RoundReport) -> RoundReport:
 
     # X5: the other UAE retailers, only when nothing promising turned up
     if (not seeds and text and serper_ok and exp.web is not None and len(groups) > 1 and groups[1]
-            and budget.left > 0 and not _promising(spec, new, inp.negatives) and budget.take()):
+            and budget.left > 0 and not _promising(spec, found_early + new, inp.negatives) and budget.take()):
         query = site_query(text, groups[1])
         res = _call(exp.web, query, hl, spec, "X5")
         _record(report, res, query)
         new.extend(collector.collect([res], "web"))
 
     if not new:
-        _append_health(report)
+        _append_health(report, routed)
         logger.info("expand sku=%s: %d calls, nothing new", spec.sku_key, report.calls)
         return report
 
@@ -852,10 +901,11 @@ def _stamp(res: ProviderResult, query_id: str) -> ProviderResult:
     return replace(res, query_id=query_id, candidates=cands)
 
 
-def _append_health(report: RoundReport) -> None:
-    """Paid calls of a round that did not re-route still belong in the outcome's provider_health."""
-    if report.health:
-        report.outcome.provider_health.extend(r.health() for r in report.health)
+def _append_health(report: RoundReport, skip: int = 0) -> None:
+    """Paid calls of a round that did not re-route still belong in the outcome's provider_health. skip: how many of
+    report.health an earlier re-route (decide.route over the pool grown by them) already put there."""
+    if report.health[skip:]:
+        report.outcome.provider_health.extend(r.health() for r in report.health[skip:])
 
 
 def _identity_key(rc: RankedCandidate) -> Tuple:
@@ -939,6 +989,11 @@ def run_round(inp: RoundInput) -> RoundReport:
     """Run the expansion round when the outcome calls for it (see the module docstring). Never raises."""
     report = RoundReport(outcome=inp.outcome)
     kind = trigger(inp.outcome, inp.exp)
+    if kind == "expand" and no_usable_brand(inp.spec):
+        report.skipped = NO_BRAND
+        logger.info("expand sku=%s: skipped, no usable brand (nothing the stores list could be picked)",
+                    inp.spec.sku_key)
+        return report
     if not kind:
         return report
     report.ran = kind

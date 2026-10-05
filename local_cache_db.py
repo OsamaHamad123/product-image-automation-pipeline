@@ -2395,7 +2395,12 @@ def spend_from_outcome(outcome):
         provider = str(item.get("provider") or "").strip().lower()
         status = str(item.get("status") or "").strip().lower()
         if provider in ops_health.PAID_PROVIDERS and status in ops_health.ANSWERED_STATUSES:
-            add(provider, 1, float(prices.get(provider) or 0.0))
+            # a hedged request (providers/serper.py) sent the query twice: two credits for one answer
+            try:
+                n = 1 + max(0, int(item.get("hedges") or 0))
+            except (TypeError, ValueError):
+                n = 1
+            add(provider, n, n * float(prices.get(provider) or 0.0))
     usage = [u for u in (outcome.get("vlm_usage") or []) if isinstance(u, dict)]
     for u in usage:
         provider = "claude" if str(u.get("provider") or "").strip().lower() == "claude" else "gemini"
