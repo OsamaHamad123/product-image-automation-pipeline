@@ -113,7 +113,7 @@ from .text_norm import domain_matches, url_host
 logger = logging.getLogger(__name__)
 
 PICK_DECISIONS = ("REVIEW_PRESELECTED", "AUTO_PUBLISH")
-NO_BRAND = "no_brand"          # trigger()'s answer for a SKU with no usable brand: the round is skipped
+NO_BRAND = "no_brand"          # RoundReport.skipped for a SKU with no usable brand
 WEB_GROUP_1 = ("luluhypermarket.com", "carrefouruae.com", "amazon.ae", "noon.com", "talabat.com")
 MAX_OFFICIAL_SITES = 2
 MAX_PAGES = {"web": 5, "shopping": 4, "lens": 4}
@@ -271,8 +271,8 @@ def no_usable_brand(spec: SkuSpec) -> bool:
     return not (spec.gtin and settings.gtin_policy() == "strict")
 
 
-def trigger(outcome: SearchOutcome, exp: Optional[Expansion], spec: Optional[SkuSpec] = None) -> str:
-    """'expand' | 'upgrade' | '' (see the module docstring). With the spec, a SKU with no usable brand gets ''."""
+def trigger(outcome: SearchOutcome, exp: Optional[Expansion]) -> str:
+    """'expand' | 'upgrade' | '' (see the module docstring); run_round also skips a SKU with no usable brand."""
     if exp is None or not exp.active():
         return ""
     if outcome.decision in PICK_DECISIONS:
@@ -284,8 +284,6 @@ def trigger(outcome: SearchOutcome, exp: Optional[Expansion], spec: Optional[Sku
         return ""
     if outcome.decision == "PROVIDER_DOWN" or outcome.failure_code == "VERIFIER_DOWN":
         return ""
-    if spec is not None and no_usable_brand(spec):
-        return NO_BRAND
     return "expand"
 
 
@@ -990,8 +988,8 @@ def _upgrade(inp: RoundInput, report: RoundReport) -> RoundReport:
 def run_round(inp: RoundInput) -> RoundReport:
     """Run the expansion round when the outcome calls for it (see the module docstring). Never raises."""
     report = RoundReport(outcome=inp.outcome)
-    kind = trigger(inp.outcome, inp.exp, inp.spec)
-    if kind == NO_BRAND:
+    kind = trigger(inp.outcome, inp.exp)
+    if kind == "expand" and no_usable_brand(inp.spec):
         report.skipped = NO_BRAND
         logger.info("expand sku=%s: skipped, no usable brand (nothing the stores list could be picked)",
                     inp.spec.sku_key)

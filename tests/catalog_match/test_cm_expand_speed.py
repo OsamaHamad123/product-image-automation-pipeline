@@ -68,9 +68,7 @@ def test_a_row_with_no_usable_brand_makes_no_paid_call(row):
 def test_the_skipped_round_says_why_and_a_branded_row_still_runs():
     exp = expand.Expansion(web=StubProvider("serper_web", []), max_calls=4)
     outcome = SearchOutcome(decision="NOT_FOUND", failure_code="NO_RESULTS")
-    assert expand.trigger(outcome, exp, spec_of(NO_BRAND_ROW)) == expand.NO_BRAND
-    assert expand.trigger(outcome, exp, SPEC) == "expand"
-    assert expand.trigger(outcome, exp) == "expand"                    # no spec given: the earlier behaviour
+    assert expand.trigger(outcome, exp) == "expand"                    # trigger() itself reads no brand
     from catalog_match.expand import RoundInput, run_round
 
     def inp(spec):
@@ -78,8 +76,9 @@ def test_the_skipped_round_says_why_and_a_branded_row_still_runs():
                           pool=None, fetcher=None, verifier=None)
 
     skipped = run_round(inp(spec_of(NO_BRAND_ROW)))
-    assert (skipped.ran, skipped.skipped, skipped.calls) == ("", "no_brand", 0)
+    assert (skipped.ran, skipped.skipped, skipped.calls) == ("", expand.NO_BRAND, 0)
     assert skipped.outcome is outcome
+    assert exp.web.calls == []
 
 
 def test_a_valid_barcode_under_the_strict_policy_still_lets_a_brandless_row_expand(monkeypatch):
