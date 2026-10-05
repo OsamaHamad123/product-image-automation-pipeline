@@ -353,8 +353,8 @@ def test_the_bundled_sample_is_a_small_opaque_product_picture():
 
 
 @pytest.mark.parametrize("code, action", [
-    ("photoroom_402", "اشحن رصيد PhotoRoom"),
-    ("photoroom_401", "مفتاح PhotoRoom مرفوض: حدّثه بالإعدادات."),
+    ("photoroom_402", "اشحن رصيد PhotoRoom، أو اضغط «تجاوز عزل الخلفية»"),
+    ("photoroom_401", "مفتاح PhotoRoom مرفوض: حدّثه بالإعدادات، أو اضغط «تجاوز عزل الخلفية»"),
     ("photoroom_no_key", "ضيف مفتاح PhotoRoom بالإعدادات"),
     ("photoroom_timeout", "PhotoRoom ما بيرد"),
     ("removebg_403", "مفتاح remove.bg مرفوض"),
@@ -381,12 +381,46 @@ def test_quality_flags_are_a_warning_and_the_upload_still_runs(world, tmp_path):
     assert by["upload"]["status"] == "ok" and world.uploaded
 
 
-def test_no_background_removal_fails_because_approvals_refuse_it(world, tmp_path):
-    world.profile = processing_profile.ProcessingProfile(canvas=800, enhance=False, bg_method="none")
+@pytest.mark.parametrize("method", ["none", "off"])
+def test_background_removal_turned_off_in_settings_passes_without_a_paid_call(world, tmp_path, method):
+    # the owner chose «بدون عزل الخلفية» (or pressed «تجاوز عزل الخلفية»): approvals publish the picture as it is
+    world.profile = processing_profile.ProcessingProfile(canvas=800, enhance=False, bg_method=method)
+    world.process_result = lambda: image_processor.ProcessResult(_canvas(tmp_path), False, "none", None, 800, 800)
+    result = world.run()
+    by = steps(result)
+    assert by["process"]["status"] == "ok" and by["process"]["code"] == "bg_skipped"
+    assert pc.BG_SKIPPED_NOTE == "عزل الخلفية متوقف بالإعدادات: الصورة بتنتشر متل ما هي"
+    assert pc.BG_SKIPPED_NOTE in by["process"]["detail_ar"] and "بدون أي طلب عزل مدفوع" in by["process"]["detail_ar"]
+    assert by["process"]["action_ar"] == ""
+    assert world.processed[0]["bg_method"] == method                     # the profile's own method, nothing paid
+    assert by["upload"]["status"] == "ok" and world.uploaded               # the canvas still goes up and is deleted
+    assert result["overall"] == "ok" and result["summary_ar"].startswith("النشر شغّال بدون عزل الخلفية")
+
+
+def test_an_unisolated_canvas_under_a_paid_method_still_fails(world, tmp_path):
+    # isolation that did not happen under PhotoRoom is a failure, never «published without removal»
     world.process_result = lambda: image_processor.ProcessResult(_canvas(tmp_path), False, "none", None, 800, 800)
     by = steps(world.run())
     assert by["process"]["status"] == "fail" and by["process"]["code"] == "background_not_removed"
-    assert "بدون عزل" in by["process"]["detail_ar"] and "معالجة الصور" in by["process"]["action_ar"]
+    assert "معالجة الصور" in by["process"]["action_ar"] and "بدون عزل الخلفية" in by["process"]["action_ar"]
+
+
+# provider code -> is «تجاوز عزل الخلفية» offered (credit, key or quota: every approval fails the same way)
+SKIP_CODES = {"photoroom_402": True, "photoroom_401": True, "photoroom_403": True, "photoroom_429": True,
+              "photoroom_no_key": True, "removebg_402": True, "removebg_401": True, "removebg_403": True,
+              "removebg_429": True, "removebg_no_key": True, "photoroom_timeout": False,
+              "photoroom_connection_error": False, "photoroom_500": False, "removebg_timeout": False,
+              "photoroom_bad_output": False, "rembg_not_installed": False, "processing_failed": False, "": False,
+              "photoroom_4020": False, "xphotoroom_402": False}
+
+
+@pytest.mark.parametrize("code", list(SKIP_CODES))
+def test_the_skip_is_offered_for_credit_key_and_quota_failures_only(world, code):
+    assert pc.bg_skip_offered(code) is SKIP_CODES[code]
+    if pc.bg_skip_offered(code):
+        world.process_result = lambda: image_processor.ProcessResult(None, False, "photoroom", code)
+        by = steps(world.run())
+        assert by["process"]["status"] == "fail" and "اضغط «تجاوز عزل الخلفية»" in by["process"]["action_ar"]
 
 
 # ---------------------------------------------------------------------------
@@ -577,11 +611,47 @@ def test_a_tab_without_product_names_is_not_the_products_tab(world):
     assert "«Sheet2»" in by["sheet"]["detail_ar"]
 
 
+# tab title -> does it look like a backup or a proposals tab (not the products tab)?
+TAB_TITLES = {"Products backup": True, "Copy of Products": True, "COPY OF PRODUCTS": True, "Products (copy)": True,
+              "New Products": True, "new products 2": True, "Proposals": True, "Proposed items": True,
+              "Suggested items": True, "SUGGESTIONS": True, "Old stock": True, "Archive 2025": True,
+              "منتجات جديدة مقترحة 2": True, "مقترحات": True, "اقتراحات الأسبوع": True, "نسخة من المنتجات": True,
+              "احتياطي": True, "Products": False, "Sheet1": False, "Gold products": False, "منتجات": False,
+              "Almarai Dairy": False, "Bakery": False}
+
+
+@pytest.mark.parametrize("title", list(TAB_TITLES))
+def test_backup_and_proposal_tab_names(title):
+    assert pc._looks_like_backup(title) is TAB_TITLES[title]
+
+
 def test_a_backup_looking_tab_is_called_out(world):
     world.sheet = FakeWorksheet(title="Products backup")
     by = steps(world.run())
     assert by["sheet"]["status"] == "warn" and by["sheet"]["code"] == "sheet_tab_backup"
-    assert "نسخة احتياطية" in by["sheet"]["action_ar"]
+    assert by["sheet"]["action_ar"] == ("النشر رح يكتب بتبويب «Products backup» — إذا مش تبويب منتجاتك، اختار التبويب "
+                                        "الصح من الإعدادات (تبويب «الشيت»)")
+    assert "حساب الخدمة بيقدر يكتب" in by["sheet"]["detail_ar"]
+
+
+@pytest.mark.parametrize("variant", ["written", "no_link_column", "unreadable_header"])
+def test_a_proposals_tab_that_became_the_first_tab_is_a_warning(world, monkeypatch, variant):
+    # live check 2026-10-05: «منتجات جديدة مقترحة 2» (made by another tool) became the first tab, and with no tab set
+    # the system reads and writes the first tab
+    monkeypatch.setattr(config, "SPREADSHEET_TAB_NAME", "")
+    world.sheet = FakeWorksheet(title="منتجات جديدة مقترحة 2")
+    if variant == "no_link_column":
+        world.sheet.headers = ["Barcode", "Product Name", "Brand"]
+    elif variant == "unreadable_header":
+        world.sheet.raw_header = "=IMAGE(A1)"
+    result = world.run()
+    by = steps(result)
+    assert by["sheet"]["status"] == "warn" and by["sheet"]["code"] == "sheet_tab_backup"
+    assert by["sheet"]["action_ar"].startswith("النشر رح يكتب بتبويب «منتجات جديدة مقترحة 2» — إذا مش تبويب منتجاتك")
+    assert "أول تبويب" in by["sheet"]["detail_ar"] and "مش تبويب المنتجات" in by["sheet"]["detail_ar"]
+    assert result["sheet_tab"] == "منتجات جديدة مقترحة 2" and result["overall"] == "warn"
+    writes = [c for c in world.sheet.calls if c[0] == "values_batch_update"]
+    assert len(writes) == (1 if variant == "written" else 0)
 
 
 def test_dead_writes_in_the_outbox_are_a_warning(world):
@@ -638,6 +708,10 @@ def test_the_tab_title_says_when_no_tab_is_set(world, monkeypatch):
     monkeypatch.setattr(config, "SPREADSHEET_TAB_NAME", "")
     by = steps(world.run())
     assert "أول تبويب، لأنو ما في تبويب محدد بالإعدادات" in by["sheet"]["detail_ar"]
+    assert "بأول تبويب بالشيت" in by["sheet"]["detail_ar"] and by["sheet"]["status"] == "ok"
+    monkeypatch.setattr(config, "SPREADSHEET_TAB_NAME", "Products")
+    by = steps(world.run())
+    assert "أول تبويب" not in by["sheet"]["detail_ar"]
 
 
 # ---------------------------------------------------------------------------

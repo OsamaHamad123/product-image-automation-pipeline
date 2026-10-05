@@ -18,6 +18,8 @@ Route::get('/batch-automation', [RunController::class, 'page'])->name('dashboard
 Route::get('/system-diagnostics', [\App\Http\Controllers\HealthController::class, 'page'])->name('dashboard.diagnostics'); // p2-health: الصحة والتكلفة
 Route::get('/settings', [\App\Http\Controllers\SettingsController::class, 'show'])->name('dashboard.settings'); // p2-health: ?tab=
 Route::post('/settings', [\App\Http\Controllers\SettingsController::class, 'save'])->name('dashboard.save_settings'); // p2-health
+// «تجاوز عزل الخلفية» / «رجّع عزل الخلفية» (صفحة الصحة، شاشة المراجعة، تبويب «معالجة الصور»): {method} من BG_METHODS
+Route::post('/api/settings/bg-method', [\App\Http\Controllers\SettingsController::class, 'setBgMethod']);
 Route::get('/rich-catalog/export', [ProductController::class, 'exportRichCatalog'])->name('dashboard.rich_catalog.export');
 Route::post('/api/failures/retry', [ApiController::class, 'retryFailures']);
 

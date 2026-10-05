@@ -170,7 +170,15 @@ def action_get_products(params):
         except Exception as e:
             logger.warning("تعذر حساب sku_key للصف %s: %s", prod.get("row_number"), e)
         prod["has_error"], prod["error_message"] = _row_failure(failures, prod)
-    return {'status': 'success', 'products': products}
+    # اسم التبويب الذي قُرئت منه الصفوف (open_worksheet فتحه، فلا طلب إضافي): صفحة التشغيل تعرضه من كاش هذه القراءة
+    return {'status': 'success', 'products': products, 'sheet_tab': _tab_title(worksheet)}
+
+
+def _tab_title(worksheet):
+    try:
+        return str(getattr(worksheet, "title", "") or "")
+    except Exception:       # noqa: BLE001 - اسم التبويب للعرض فقط
+        return ""
 
 
 def _sheet_quality_inputs(products):
@@ -1076,6 +1084,7 @@ def _published_response(res, sku_key, row_number, **extra):
     استجابة الاعتماد / الرفع الناجح. warnings: background_not_removed (كُتب needs_review:)، quality_flags (نُشرت
     رغم علامات العرض بعد تأكيد المراجع، published_anyway)، و duplicate_image (نفس الصورة منشورة لمنتج آخر،
     duplicate_of يسمّيه؛ الاعتماد الصريح يُكتب مع ذلك). warning: أول تحذير. quality_flags / quality_notes: فحص القص.
+    bg_skipped: انتشرت بدون عزل الخلفية لأن المالك أوقفه بالإعدادات (main.publish_image)؛ ليس تحذيراً، فالرابط نظيف.
     """
     response = dict({'status': 'success', 'image_link': res["link"], 'sheet_value': res["sheet_value"],
                      'isolated': res["isolated"], 'sku_key': sku_key,
@@ -1087,6 +1096,8 @@ def _published_response(res, sku_key, row_number, **extra):
         response['quality_flags'] = list(res["quality_flags"])     # فحص جودة القص (لماذا لم تُعزل الخلفية)
     if res.get("quality_notes"):
         response['quality_notes'] = list(res["quality_notes"])     # ملاحظات الفحص غير المانعة
+    if res.get("bg_skipped"):
+        response['bg_skipped'] = True       # «انتشرت بدون عزل الخلفية» (عزل الخلفية متوقف بالإعدادات)
     warnings = []
     if str(res.get("sheet_value") or "").startswith("needs_review:"):
         warnings.append('background_not_removed')
@@ -1925,6 +1936,14 @@ def action_publish_check(params):
     return dict({"status": "success"}, **result)
 
 
+def action_bg_methods(params):
+    """
+    طرق عزل الخلفية المحلية المجانية المنزّلة على هالجهاز (image_processor.local_methods_available): {status, local:
+    {grabcut, rembg}}. تبويب «معالجة الصور» يذكر GrabCut و rembg فقط إذا كانت هون (لا وعد بشي مش منزّل). للقراءة فقط.
+    """
+    return {"status": "success", "local": image_processor.local_methods_available()}
+
+
 ACTIONS = {
     'get_products': action_get_products,
     'search': action_search,
@@ -1938,6 +1957,7 @@ ACTIONS = {
     'export_run': action_export_run,
     'lock_state': action_lock_state,
     'publish_check': action_publish_check,
+    'bg_methods': action_bg_methods,
     'ops_health': action_ops_health,
     'run_control': action_run_control,
 }

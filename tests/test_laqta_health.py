@@ -695,7 +695,7 @@ TOUCHED = list(SECRETS) + ["auto_publish_enabled", "auto_publish_brands", "searc
                            "filter_competitors", "bypass_white_background_check", "verifier_primary",
                            "verifier_strong", "verifier_monthly_budget_usd", "model_prices", "expansion_enabled",
                            "expansion_max_calls", "visual_search", "serpapi_lens_price_usd", "gtin_policy",
-                           "local_index_enabled", "local_index_max_pages"]
+                           "local_index_enabled", "local_index_max_pages", "bg_removal_method_previous"]
 
 
 def _sql(db, statement, params=()):
@@ -733,7 +733,8 @@ def app_env(mariadb_or_skip, tmp_path):
     import local_cache_db
     stats = dict({"status": "success"}, **local_cache_db.review_stats(
         _review_rows([("ALMARAI", 189, 0), ("AL ALALI", 12, 0)])))
-    fixture = {"review_stats": stats, "ops_health": {"status": "success", "scanned": 0, "windows": {}, "alerts": []}}
+    fixture = {"review_stats": stats, "ops_health": {"status": "success", "scanned": 0, "windows": {}, "alerts": []},
+               "bg_methods": {"status": "success", "local": {"grabcut": True, "rembg": False}}}
     calls = tmp_path / "calls.txt"
     stub = tmp_path / "stub_bridge.py"
     stub.write_text(
@@ -830,8 +831,9 @@ def test_routes_render_redirect_and_never_show_a_stored_key(app_env):
     assert keys.count('type="password"') == 7                      # one empty, write-only field per stored key
     assert len(re.findall(r'type="password"[^>]*value=""', keys)) == 7
     assert "محفوظ" in keys and "غير محفوظ" not in keys
-    # the auto-publish tab reads the bridge; nothing else on these pages does
-    assert set(app_env["calls"].read_text().split()) == {"review_stats"}
+    # the auto-publish tab reads the bridge, and the processing tab asks once which local background-removal methods
+    # are installed (bg_methods, cached); nothing else on these pages does
+    assert set(app_env["calls"].read_text().split()) == {"review_stats", "bg_methods"}
 
 
 def test_each_form_saves_only_its_own_section(app_env):

@@ -8,13 +8,15 @@
 # - رفض المراجعين (روابط + pHash) يُمرر للبحث كاستبعادات لكل SKU.
 # - اللوحة المنشورة بيضاء من image_processor بدون أي تكبير لاحق، بملف المعالجة الواحد (processing_profile:
 #   أبعاد اللوحة وتحسين الألوان وطريقة العزل من صفحة الإعدادات) لكل مسارات النشر؛ إذا لم تُعزل الخلفية
-#   يُكتب الرابط ببادئة needs_review: ولا يُخزن كحل معتمد.
+#   يُكتب الرابط ببادئة needs_review: ولا يُخزن كحل معتمد، إلا إذا اختار المالك «بدون عزل الخلفية» بالإعدادات
+#   (bg_removal_method = none، زر «تجاوز عزل الخلفية»): عندها تُنشر الصورة كما هي نظيفة مع العلامة bg_skipped.
 
 import json
 import os
 import re
 import socket
 import sys
+import threading
 import time
 import uuid
 
@@ -406,9 +408,14 @@ def publish_image(image_url, name, brand, row_number, worksheet, link_column_ind
     (اعتماد المراجع ورفعه) لا يُرفع ولا يُكتب شيء والحالة 'quality_refused' (publish_anyway_allowed: علاماتها كلها
     للعرض فقط، PRESENTATION_FLAGS)، فلا يُسجل اعتماد بشري ورابط الشيت needs_review:. publish_anyway=True (تأكيد
     المراجع بعد رؤية العلامات) يكتب اللوحة نظيفة عندما تسمح علاماتها بذلك؛ عزل فشل (بلا علامات أو بعلامة مانعة) أبداً.
+    «تجاوز عزل الخلفية»: المالك اختار بالإعدادات «بدون عزل الخلفية» (profile.bg_method = 'none'، مثلاً لما رصيد PhotoRoom
+    خلص) والمعالجة أعادت لوحة بلا عزل (provider 'none'): هذا اختياره لا فشل، فتُنشر اللوحة نظيفة في كل المسارات (بلا
+    needs_review: ولا quality_refused، والعامل ينشر تلقائياً كالمعتاد) و bg_skipped=True في النتيجة، لتقول استجابة
+    الاعتماد وتقرير التشغيل «انتشرت بدون عزل الخلفية». فشل عزل حقيقي بأي طريقة أخرى (photoroom_402، أو لوحة بعلامات)
+    يبقى كما هو أعلاه.
     لا تكبير لاحق: اللوحة من image_processor نهائية. البيانات الوصفية تُكتب في الشيت فقط بعد نجاح الرفع.
-    الحالة: 'published' (معزولة وليست للمراجعة، أو نُشرت رغم علامات العرض) | 'needs_review' (رابط ببادئة
-    needs_review:) | 'quality_refused' | 'superseded' (لم يُكتب شيء) | 'failed'.
+    الحالة: 'published' (معزولة وليست للمراجعة، أو نُشرت رغم علامات العرض، أو بدون عزل باختيار المالك) |
+    'needs_review' (رابط ببادئة needs_review:) | 'quality_refused' | 'superseded' (لم يُكتب شيء) | 'failed'.
     """
     profile = profile or processing_profile.current()
     w, h = profile.target
@@ -425,7 +432,9 @@ def publish_image(image_url, name, brand, row_number, worksheet, link_column_ind
     flags = [str(f) for f in (getattr(result, "quality_flags", None) or [])]
     # ملاحظات البوابة غير المانعة (image_processor.NON_BLOCKING_NOTES، مثل upscaled) تُعاد كما هي ولا تمنع النشر
     notes = [str(n) for n in (getattr(result, "quality_notes", None) or [])]
-    unisolated = not result.isolated
+    # المالك اختار «بدون عزل الخلفية»: لوحة provider 'none' هي ما طلبه، لا «الخلفية لم تُعزل»
+    bg_skipped = _bg_skipped(profile, result)
+    unisolated = not result.isolated and not bg_skipped
     anyway_allowed = unisolated and bool(flags) and set(flags) <= PRESENTATION_FLAGS
     anyway = bool(publish_anyway) and anyway_allowed
     if unisolated and not anyway and unclean == "refuse":
@@ -461,7 +470,8 @@ def publish_image(image_url, name, brand, row_number, worksheet, link_column_ind
 
     base = {"isolated": bool(result.isolated), "provider": result.provider, "metadata": metadata,
             "width": result.width, "height": result.height, "profile": profile.as_dict(), "phash": phash,
-            "color_signature": color, "quality_flags": flags, "quality_notes": notes, "published_anyway": anyway}
+            "color_signature": color, "quality_flags": flags, "quality_notes": notes, "published_anyway": anyway,
+            "bg_skipped": bg_skipped}
     if not link:
         return dict(base, status="failed", error="upload_failed")
 
@@ -509,6 +519,16 @@ def publish_image(image_url, name, brand, row_number, worksheet, link_column_ind
         if after_write is not None:
             after_write(outcome)
     return outcome
+
+
+def _bg_skipped(profile, result):
+    """
+    هل اللوحة «بدون عزل الخلفية» باختيار المالك؟ ملف المعالجة يقول none (processing_profile.skips_background) والمعالجة
+    أعادت لوحة بلا عزل من الطريقة none نفسها. أي لوحة أخرى لم تُعزل (فشل مزوّد أو علامات فحص القص) ليست كذلك.
+    """
+    method = str(getattr(profile, "bg_method", "") or "").strip().lower()
+    return (method in processing_profile.NO_REMOVAL_METHODS and bool(getattr(result, "path", None))
+            and not getattr(result, "isolated", False) and str(getattr(result, "provider", "") or "") == "none")
 
 
 # علامات بوابة القص التي تخص العرض فقط (الخلفية معزولة): المراجع يستطيع نشر اللوحة رغمها بعد أن يراها
@@ -573,7 +593,8 @@ def auto_approve_product(task, best_image, worksheet, link_column_index, sku_key
     نشر نتيجة AUTO_PUBLISH مباشرة. تعيد 'published' أو 'needs_review' (الخلفية لم تُعزل) أو 'superseded'
     (مراجع اعتمد المنتج أثناء المعالجة والرفع، أو لم يعد الصف محجوزاً لهذا العامل: لم يُكتب شيء) أو 'rejected'
     (مراجع رفض هذه الصورة لهذا المنتج أثناء المعالجة: لم يُكتب شيء) أو 'busy' (قفل النشر بقي عند غيرنا حتى المهلة)
-    أو 'failed'. الحل يُخزن auto_verified فقط عند النشر الفعلي بلوحة معزولة.
+    أو 'failed'. الحل يُخزن auto_verified فقط عند النشر الفعلي: بلوحة معزولة، أو «بدون عزل الخلفية» باختيار المالك
+    (bg_skipped، تُعد لتقرير التشغيل: bg_skipped_count).
     """
     name = task["product_name"]
     brand = task.get("brand") or ""
@@ -623,9 +644,31 @@ def auto_approve_product(task, best_image, worksheet, link_column_index, sku_key
         _warn_duplicate(best_image)
     if res["status"] == "published":
         local_cache_db.delete_product_failure(barcode)
+        if res.get("bg_skipped"):
+            _count_bg_skipped()
+            print(f"[Auto-Publish] الصف {task['row_number']}: انتشرت بدون عزل الخلفية (عزل الخلفية متوقف بالإعدادات).")
     elif res["status"] == "failed":
         print(f"[Auto-Publish] تعذر النشر لـ [{name}] ({res.get('error')}); يحال للمراجعة.")
     return res["status"]
+
+
+# صور نشرها هذا العامل تلقائياً «بدون عزل الخلفية» باختيار المالك (تقرير التشغيل: run_report bg_skipped)
+_BG_SKIPPED = {"count": 0}
+_BG_SKIPPED_LOCK = threading.Lock()
+
+
+def _count_bg_skipped():
+    with _BG_SKIPPED_LOCK:
+        _BG_SKIPPED["count"] += 1
+
+
+def bg_skipped_count(reset=False):
+    """عدد الصور التي نشرها العامل بدون عزل الخلفية منذ آخر تصفير (reset=True يصفّر بعد القراءة)."""
+    with _BG_SKIPPED_LOCK:
+        n = _BG_SKIPPED["count"]
+        if reset:
+            _BG_SKIPPED["count"] = 0
+        return n
 
 
 DUPLICATE_WARNING = "warn:duplicate_image"
@@ -1119,7 +1162,8 @@ def process_single_product(prod, worksheet, link_column_index, brand_mappings=No
 LOCK_FILE = "temp/pipeline.lock"
 
 # نتيجة آخر عامل في هذه العملية (يقرؤها التشغيل الليلي و`python main.py --worker` لرمز الخروج):
-# {stop_reason, run_id, worker_id, started_ts, ended_ts, notice, health}. stop_reason None = الطابور انتهى.
+# {stop_reason, run_id, worker_id, started_ts, ended_ts, notice, health, bg_skipped}. stop_reason None = الطابور انتهى.
+# bg_skipped: صور نُشرت تلقائياً بدون عزل الخلفية باختيار المالك في هذا التشغيل.
 LAST_WORKER = {}
 # سبب فشل آخر إدراج في هذه العملية (_enqueue_failed): {reason, message}
 LAST_ENQUEUE = {}
@@ -2201,6 +2245,7 @@ def run_worker_mode(trigger="manual", report=True, deadline_ts=None):
     import threading
 
     LAST_WORKER.clear()
+    bg_skipped_count(reset=True)
     lock_file = LOCK_FILE
     os.makedirs("temp", exist_ok=True)
     if _another_worker_running(lock_file):
@@ -2464,7 +2509,8 @@ def run_worker_mode(trigger="manual", report=True, deadline_ts=None):
             pass
         LAST_WORKER.update(stop_reason=stop_reason, run_id=report_run_id, worker_id=worker_id,
                            started_ts=started_ts, ended_ts=time.time(),
-                           notice=final_notice or start_notice or notice or None, health=health)
+                           notice=final_notice or start_notice or notice or None, health=health,
+                           bg_skipped=bg_skipped_count())
         if report:
             try:
                 import run_report

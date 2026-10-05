@@ -215,6 +215,35 @@
     flex-shrink: 0;
 }
 
+/* «تجاوز عزل الخلفية» / «رجّع عزل الخلفية (…)» under the steps of «فحص النشر» */
+.lq-health-bg {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--lq-space-2) var(--lq-space-3);
+    padding: var(--lq-space-3) var(--lq-space-4);
+    border: 1px solid var(--lq-warning-border);
+    border-radius: var(--lq-radius-lg);
+    background: var(--lq-warning-bg);
+}
+
+.lq-health-bg[hidden] {
+    display: none;
+}
+
+.lq-health-bg__text {
+    flex: 1 1 260px;
+    margin: 0;
+    color: var(--lq-warning-ink);
+    line-height: 1.6;
+}
+
+.lq-health-bg__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--lq-space-2);
+}
+
 .lq-health-publish__summary-text {
     display: flex;
     flex-direction: column;

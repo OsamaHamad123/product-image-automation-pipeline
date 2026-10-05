@@ -350,6 +350,7 @@ globalThis.fetch = (url, init = {}) => {
         else if (path === '/api/review/queue-state') data = JSON.parse(JSON.stringify(FIXTURE.queue));
         else if (path === '/api/failures/retry') data = FIXTURE.retry || { status: 'success', requeued: (call.body.barcodes || []).length, not_found: 0 };
         else if (path === '/api/review/explain-backfill') data = FIXTURE.backfill || { status: 'success', filled: 0, checked: 0 };
+        else if (path === '/api/settings/bg-method') data = FIXTURE.bgMethod || { status: 'success', method: (call.body || {}).method, previous: 'photoroom' };
         call.resolve(response(data, FIXTURE.status && FIXTURE.status[path] || 200));
     }
     return call.promise;

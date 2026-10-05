@@ -44,6 +44,7 @@ class HealthController extends Controller
     {
         $last = ProductController::lastDiagnostics();
         $publish = self::publicPublishCheck(self::lastPublishCheck(), SettingsController::secretValues());
+        $bg = SettingsController::currentBgState();
         return view('dashboard.diagnostics', [
             'lastDiagnostics' => self::publicResult($last),
             'services' => self::serviceCards($last, self::serviceContext()),
@@ -53,7 +54,69 @@ class HealthController extends Controller
             'lastRun' => self::lastRunCard(self::lastRunRow()),
             'lastPublishCheck' => $publish,
             'publish' => self::publishCheckView($publish),
+            'bg' => $bg,
+            'bgView' => self::bgSkipView($publish, $bg),
+            'bgConfirm' => SettingsController::BG_SKIP_CONFIRM,
         ]);
+    }
+
+    // ------------------------------------------------------------------
+    // «تجاوز عزل الخلفية» on the «فحص النشر» card: when the processing step failed on PhotoRoom / remove.bg credit, key
+    // or quota (publish_check.BG_SKIP_CODE_RE), a button sets bg_removal_method = none through POST
+    // /api/settings/bg-method; with the method none the card says background removal is off and offers to restore the
+    // previous method. The same view in public/js/health.js (bgView).
+    // ------------------------------------------------------------------
+
+    /** نفس publish_check.BG_SKIP_CODE_RE و BG_SKIP_RE في health.js و review/core.js. */
+    public const BG_SKIP_PATTERN = '/^(photoroom|removebg)_(no_key|401|402|403|429)$/';
+    public const BG_PROVIDERS = ['photoroom' => 'PhotoRoom', 'removebg' => 'remove.bg'];
+
+    /** «رصيد PhotoRoom خلص أو الاشتراك موقوف» لرمز ينفع معه التجاوز، وإلا ''. */
+    public static function bgProblem(string $code): string
+    {
+        if (!preg_match(self::BG_SKIP_PATTERN, $code, $m)) {
+            return '';
+        }
+        $name = self::BG_PROVIDERS[$m[1]];
+        return match ($m[2]) {
+            '402' => 'رصيد ' . $name . ' خلص أو الاشتراك موقوف',
+            '429' => $name . ' رافض طلبات كتير هلق',
+            'no_key' => 'مفتاح ' . $name . ' مش محفوظ',
+            default => $name . ' رفض المفتاح',
+        };
+    }
+
+    /**
+     * {state: hidden | offer | off, text, restore, restore_label}: offer = آخر فحص فشل بخطوة العزل برمز رصيد / مفتاح /
+     * حصة والطريقة مش none؛ off = عزل الخلفية متوقف (زر «رجّع عزل الخلفية (…)»). $bg = SettingsController::bgState()
+     * أو null (قاعدة البيانات ما ردّت: ولا زر، لأنو الحفظ رح يفشل).
+     */
+    public static function bgSkipView(?array $result, ?array $bg): array
+    {
+        $hidden = ['state' => 'hidden', 'text' => '', 'restore' => '', 'restore_label' => ''];
+        if (!is_array($bg) || !is_string($bg['method'] ?? null) || $bg['method'] === '') {
+            return $hidden;
+        }
+        if ($bg['method'] === 'none') {
+            $previous = (string) ($bg['previous'] ?? '');
+            $previous = isset(SettingsController::BG_METHOD_LABELS[$previous]) && $previous !== 'none' ? $previous : 'photoroom';
+            return ['state' => 'off',
+                    'text' => 'عزل الخلفية متوقف: الصور اللي بتعتمدها بتنتشر متل ما هي على لوحة بيضا، بدون أي طلب عزل مدفوع.',
+                    'restore' => $previous,
+                    'restore_label' => 'رجّع عزل الخلفية (' . SettingsController::BG_METHOD_LABELS[$previous] . ')'];
+        }
+        foreach ((array) ($result['steps'] ?? []) as $step) {
+            if (is_array($step) && ($step['key'] ?? '') === 'process' && ($step['status'] ?? '') === 'fail') {
+                $problem = self::bgProblem((string) ($step['code'] ?? ''));
+                if ($problem !== '') {
+                    return ['state' => 'offer',
+                            'text' => $problem . '، فكل اعتماد رح يفشل بنفس الشكل لحد ما ينحل. فيك تتجاوز عزل الخلفية هلق: '
+                                . 'الصور بتنتشر متل ما هي على لوحة بيضا.',
+                            'restore' => '', 'restore_label' => ''];
+                }
+            }
+        }
+        return $hidden;
     }
 
     // ------------------------------------------------------------------
@@ -330,6 +393,10 @@ class HealthController extends Controller
             if (is_numeric($row[$key] ?? null) && ((int) $row[$key] > 0 || $key === 'ready_for_review')) {
                 $parts[] = $text . ' ' . (int) $row[$key];
             }
+        }
+        // صور نُشرت تلقائياً بدون عزل الخلفية (المالك أوقفه بالإعدادات): run_report.BG_SKIPPED_TEXT
+        if (is_numeric($report['bg_skipped'] ?? null) && (int) $report['bg_skipped'] > 0) {
+            $parts[] = 'انتشر بدون عزل الخلفية ' . (int) $report['bg_skipped'];
         }
         // آخر «محاولة» في handed_over هي التشغيل الآخر الذي تولى الطابور، لا إعادة تشغيل
         $retries = (int) ($row['attempts'] ?? 1) - 1 - (($row['outcome'] ?? '') === 'handed_over' ? 1 : 0);

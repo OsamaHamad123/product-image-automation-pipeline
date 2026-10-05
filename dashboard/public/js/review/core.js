@@ -163,6 +163,23 @@
         [/^upload_failed$/i, 'فشل رفع الصورة على Cloudinary.'],
         [/^sheet_write_failed$/i, 'انرفعت الصورة، بس ما انكتب رابطها بالشيت.'],
         [/^processing_failed$/i, 'فشلت معالجة الصورة (عزل الخلفية).'],
+        // مزوّد عزل الخلفية (image_processor: photoroom_* و removebg_*): ما انعزلت الخلفية فما نُشر شيء. الرصيد والمفتاح
+        // والحصة (BG_SKIP_RE) بيفشّلوا كل اعتماد بنفس الشكل: اللوحة بتعرض «تجاوز عزل الخلفية»
+        [/^photoroom_402$/i, 'رصيد PhotoRoom خلص أو الاشتراك موقوف، فما انعزلت الخلفية وما انتشرت الصورة.'],
+        [/^photoroom_(401|403)$/i, 'PhotoRoom رفض المفتاح، فما انعزلت الخلفية: حدّث مفتاح PhotoRoom بالإعدادات.'],
+        [/^photoroom_429$/i, 'PhotoRoom رافض طلبات كتير هلق، فما انعزلت الخلفية: استنى دقيقة وأعد المحاولة.'],
+        [/^photoroom_no_key$/i, 'مفتاح PhotoRoom مش محفوظ بالإعدادات، فما انعزلت الخلفية.'],
+        [/^photoroom_(timeout|connection_error|5\d\d)$/i, 'PhotoRoom ما ردّ، فما انعزلت الخلفية: تأكد من الإنترنت وأعد المحاولة.'],
+        [/^photoroom_/i, 'PhotoRoom رجّع خطأ، فما انعزلت الخلفية: أعد المحاولة.'],
+        [/^removebg_402$/i, 'رصيد remove.bg خلص، فما انعزلت الخلفية وما انتشرت الصورة.'],
+        [/^removebg_(401|403)$/i, 'remove.bg رفض المفتاح، فما انعزلت الخلفية: حدّث مفتاح remove.bg.'],
+        [/^removebg_429$/i, 'remove.bg رافض طلبات كتير هلق، فما انعزلت الخلفية: استنى دقيقة وأعد المحاولة.'],
+        [/^removebg_no_key$/i, 'مفتاح remove.bg مش محفوظ، فما انعزلت الخلفية.'],
+        [/^removebg_(timeout|connection_error|5\d\d)$/i, 'remove.bg ما ردّ، فما انعزلت الخلفية: تأكد من الإنترنت وأعد المحاولة.'],
+        [/^removebg_/i, 'remove.bg رجّع خطأ، فما انعزلت الخلفية: أعد المحاولة.'],
+        [/^rembg_not_installed$/i, 'مكتبة rembg مش منزّلة على هالجهاز: اختار طريقة عزل ثانية من الإعدادات (تبويب «معالجة الصور»).'],
+        [/^(grabcut|rembg)_|_empty_cutout$/i, 'عزل الخلفية المحلي ما طلّع المنتج من الصورة: اختر صورة ثانية أو طريقة عزل ثانية.'],
+        [/^(bria_rmbg_unsupported|unknown_bg_method)$/i, 'طريقة عزل الخلفية المختارة مش مدعومة: اختار PhotoRoom من الإعدادات (تبويب «معالجة الصور»).'],
         // رموز تجهيز الصورة المعتمدة (image_processor): ما نُشر شيء
         [/^source_changed$/i, 'الصورة على موقع المتجر تغيّرت من وقت ما انفحصت، فما نشرناها: أعد البحث عن المنتج.'],
         [/^download_(timeout|connection_error|http_5\d\d|failed)$/i, 'ما قدرنا ننزّل الصورة من موقع المتجر (الاتصال أو البروكسي): جرّب مرة ثانية.'],
@@ -180,6 +197,14 @@
         [/CSRF token mismatch|Page Expired|HTTP 419/i, 'انتهت صلاحية الصفحة: حدّثها وجرّب مرة ثانية.'],
         [/HTTP 5\d\d|Server Error/i, 'الخادم ما رد صح. جرّب مرة ثانية.']
     ];
+
+    // رموز فشل عزل الخلفية اللي بيحلها «تجاوز عزل الخلفية» (رصيد أو مفتاح أو حصة): نفس publish_check.BG_SKIP_CODE_RE
+    // و HealthController::BG_SKIP_PATTERN و health.js
+    const BG_SKIP_RE = /^(photoroom|removebg)_(no_key|401|402|403|429)$/;
+
+    function bgSkipCode(code) {
+        return BG_SKIP_RE.test(String(code || '').trim());
+    }
 
     function plainError(text, fallback) {
         text = String(text === undefined || text === null ? '' : text).trim();
@@ -850,7 +875,9 @@
             duplicateOf: names,
             flags: flags,
             flagTexts: Array.from(new Set(flags.map(qualityFlagText))),
-            noteTexts: Array.from(new Set(notes.map(qualityNoteText)))
+            noteTexts: Array.from(new Set(notes.map(qualityNoteText))),
+            // انتشرت بدون عزل الخلفية لأن المالك أوقفه بالإعدادات (main.publish_image bg_skipped): ملاحظة، لا تحذير
+            bgSkipped: data.bg_skipped === true
         };
     }
 
@@ -1257,7 +1284,7 @@
         REVIEW_WARNING_LABELS, VARIANT_AXIS_LABELS, REJECT_REASONS, COSMETIC_REASONS, FAILURE_TEXT, NOT_FOUND_CODES,
         VIEW_LABELS, BUCKET_LABELS, FILTERS, WAITING, PRODUCT_CHANGED, STALE_CODES,
         warningText, reasonLabel, rejectReasonsFor, failureInfo, plainError, hostOf, marketOf, storeMarket, storeOf,
-        sheetStates, unverifiedWarnings, PRESENTATION_FLAG_TEXT,
+        sheetStates, unverifiedWarnings, PRESENTATION_FLAG_TEXT, BG_SKIP_RE, bgSkipCode,
         normalizeCandidate, collectCandidates, storedCandidates, storedSelected, bulkEligible, candidateNote, explainPick,
         productIdentity, sameProduct, itemKey, failureKey, reviewedCandidateView,
         searchBody, selectBody, rejectBody, uploadFields,

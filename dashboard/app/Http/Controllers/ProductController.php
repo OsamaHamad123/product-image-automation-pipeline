@@ -95,8 +95,9 @@ class ProductController extends Controller
             $error = (string) ($result['error'] ?? 'Unknown error');
             return null;
         }
-        \Cache::put(self::SHEET_ROWS_CACHE_KEY, ['stamp' => self::sheetStamp(), 'rows' => $result['products']],
-            self::PRODUCTS_CACHE_SECONDS);
+        // tab: اسم التبويب اللي انقرت منه الصفوف (cli_bridge get_products sheet_tab)، لسطر صفحة التشغيل بلا طلب جديد
+        \Cache::put(self::SHEET_ROWS_CACHE_KEY, ['stamp' => self::sheetStamp(), 'rows' => $result['products'],
+            'tab' => is_string($result['sheet_tab'] ?? null) ? $result['sheet_tab'] : null], self::PRODUCTS_CACHE_SECONDS);
         return $result['products'];
     }
 

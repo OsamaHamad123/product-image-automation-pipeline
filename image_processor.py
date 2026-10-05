@@ -717,6 +717,23 @@ def _isolate_rembg(img: Image.Image):
         return None, "rembg_failed"
 
 
+def local_methods_available() -> dict:
+    """
+    طرق العزل المحلية المجانية التي تعمل على هذا الجهاز، بنفس ما يقرره _isolate عند الاستدعاء: GrabCut يحتاج OpenCV
+    (cv2، من requirements.txt، وفحص القص نفسه يستعمله) و rembg مكتبة اختيارية (بدونها rembg_not_installed).
+    find_spec فقط: لا يُستورد أي نموذج ولا مكتبة ثقيلة. صفحة الإعدادات لا تَعِد بطريقة غير منزّلة.
+    """
+    import importlib.util
+
+    def installed(name):
+        try:
+            return importlib.util.find_spec(name) is not None
+        except (ImportError, ValueError):
+            return False
+
+    return {"grabcut": installed("cv2"), "rembg": installed("rembg")}
+
+
 def _isolate(img: Image.Image, method: str):
     """يستدعي مزوّد العزل المطلوب. الطرق غير المدعومة تفشل بوضوح ولا تنسخ الأصل أبداً."""
     if method == "photoroom":

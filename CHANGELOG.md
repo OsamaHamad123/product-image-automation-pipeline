@@ -11,6 +11,37 @@ causes: the quality gate threw away white-background packshots, an unverified "l
 success, siblings of the right product outranked it, and reviewers' rejections were never remembered. The search
 core was rebuilt and wired into the queue, the dashboard actions and the sheet writes. Every claim below has a test.
 
+### Added: «تجاوز عزل الخلفية», the tab the run reads, and 'N X M PCS' multipacks
+
+«فحص النشر» showed the owner that PhotoRoom's credit had run out (`photoroom_402`): every approval failed and nothing
+reached the sheet, and choosing «بدون عزل» in Settings did not help (approvals refused it as «الخلفية لم تُعزل»).
+
+- **Publishing without background removal when the owner chooses it**: with the Settings method `none`
+  (`processing_profile.skips_background`) and a canvas the method `none` returned, `main.publish_image` publishes it
+  clean on every path (approval, manual upload, the worker's auto-publish, the sequential mode) and returns
+  `bg_skipped=True`; the approval response carries `bg_skipped` («انتشرت بدون عزل الخلفية» on the review screen) and
+  the run report counts them (`bg_skipped`, a Telegram line and the Health page's last-run card). An isolation that
+  failed under any other method (`photoroom_402`, an unisolated canvas) is refused / `needs_review:` as before.
+- **«تجاوز عزل الخلفية»**: `POST /api/settings/bg-method {method}` (method from `BG_METHODS`, 422 otherwise; CSRF like
+  every POST) stores the previous method in `system_settings.bg_removal_method_previous`. The «فحص النشر» card offers
+  the button, after a confirm that says what it does, when the processing step failed on PhotoRoom / remove.bg
+  credit, key or quota (`publish_check.BG_SKIP_CODE_RE`), and «رجّع عزل الخلفية (<previous>)» while removal is off;
+  nothing is re-checked automatically. The review screen's failed-approvals panel says what happened for every
+  `photoroom_*` / `removebg_*` code («رصيد PhotoRoom خلص…») and offers the same skip; «أعد المحاولة» then publishes.
+- **Settings → «معالجة الصور»**: «بدون عزل الخلفية: الصورة متل ما هي على لوحة بيضا وبتنتشر مباشرة» with a hint that a
+  picture whose background is not white shows it; GrabCut / rembg are offered and named as free local methods only
+  when installed (`image_processor.local_methods_available`, bridge action `bg_methods`, cached 6 h); the tab says
+  «عزل الخلفية متوقف» with the restore button. `publish_check` step 2 with `none` is ✅ («عزل الخلفية متوقف بالإعدادات:
+  الصورة بتنتشر متل ما هي», no paid call); its credit / key / quota failures say «… أو اضغط «تجاوز عزل الخلفية»».
+- **The tab the sheet is written to**: the sheet step warns (⚠️) when the tab looks like a backup or a proposals tab
+  («منتجات جديدة مقترحة 2», «Copy of Products», «New Products», مقترح/اقتراح/نسخة/احتياط, case-insensitive) with
+  «النشر رح يكتب بتبويب «X» — إذا مش تبويب منتجاتك، اختار التبويب الصح من الإعدادات (تبويب «الشيت»)», and says the
+  first tab is used when no tab is set. The Run page shows «التشغيل بيقرأ من تبويب «X»» from the configured tab, the
+  last sheet read (`get_products` now returns `sheet_tab`) or the last check, never a new Google read.
+- **Sizes**: `'5X170PCS'` / `'5 x 170 PCS'` / `'3 x 200 sheets'` / `"10 x 20's"` parse as a count of M with
+  `pack_count` N (like `'16X25G'`), only when the text states no measured size; `'170PCS'`, `'PARATHA 5S 400GM'` and
+  `'30 pcs'` are unchanged. 'FINE FACIAL TISSUE CLASSIC 5X170PCS' gets size and pack (no more «الحجم ناقص»).
+
 ### Added: «فحص النشر» on the Health page (a publish rehearsal)
 
 The owner's 11 bulk approvals failed with no visible reason, and «فحص الاتصالات» only asks each service whether it

@@ -79,7 +79,11 @@ class ReviewController extends Controller
                 'run' => route('dashboard.batch_automation'),
                 // «افحص النشر» بلوحة الاعتمادات اللي ما مشيت: بطاقة «فحص النشر» بصفحة الصحة
                 'publishCheck' => route('dashboard.diagnostics') . '#publish-check',
+                // «تجاوز عزل الخلفية» بنفس اللوحة (رصيد أو مفتاح أو حصة PhotoRoom / remove.bg): SettingsController::setBgMethod
+                'bgMethod' => url('/api/settings/bg-method'),
             ],
+            // طريقة عزل الخلفية الحالية ونص تأكيد التجاوز؛ null بلا قاعدة بيانات (ما في زر لأن الحفظ رح يفشل)
+            'bg' => $dbOnline ? self::bgConfig() : null,
         ];
 
         return view('dashboard.catalog', [
@@ -289,6 +293,13 @@ class ReviewController extends Controller
             // جدول الإعدادات غير موجود بعد
         }
         return self::envCanvasSize();
+    }
+
+    /** {method, previous, previous_label, off, confirm} لزر «تجاوز عزل الخلفية» بلوحة الاعتمادات، أو null. */
+    public static function bgConfig(): ?array
+    {
+        $state = SettingsController::currentBgState();
+        return $state === null ? null : $state + ['confirm' => SettingsController::BG_SKIP_CONFIRM];
     }
 
     public static function envCanvasSize(): int
