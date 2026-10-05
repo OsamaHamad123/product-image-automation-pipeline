@@ -221,6 +221,13 @@ def provider_calls(outcome, secret_values):
                 "ms": h.get("latency_ms"), "error": smoke_live.redact(h["error"], secret_values) if h.get("error") else None}
         if provider in smoke_live.EXPANSION_PROVIDERS or _EXPANSION_QUERY_RE.match(query_id):
             call["round"] = "expansion"
+        try:
+            hedges = max(0, int(h.get("hedges") or 0))
+        except (TypeError, ValueError):
+            hedges = 0
+        if hedges:                    # the request was sent a second time (one more credit, counted in the cost)
+            call["hedged"] = True
+            call["hedges"] = hedges
         out.append(call)
     return out
 
@@ -321,7 +328,7 @@ def export_row(row, candidates, mappings=None, vocab=None, prices=None, secret_v
         "vlm_calls": vlm_calls, "vlm_usage": usage, "strong_calls": sum(1 for u in usage if u.get("role") == "strong"),
         "social_links": list(outcome.get("social_links") or []),
         "discovered_brands": discovered,
-        "serp_calls": sum(1 for c in calls if c["provider"] not in smoke_live.FREE_PROVIDERS
+        "serp_calls": sum(smoke_live.credits(c) for c in calls if c["provider"] not in smoke_live.FREE_PROVIDERS
                           and c["status"] in smoke_live.ANSWERED_STATUSES),
         "cost": {"search": round(search_cost, 4), "verifier": round(verifier_cost, 4)},
         "cost_usd": round(search_cost + verifier_cost, 4), "cost_known": bool(calls or usage or vlm_calls),

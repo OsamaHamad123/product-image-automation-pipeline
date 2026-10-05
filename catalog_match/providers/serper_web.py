@@ -27,7 +27,7 @@ import requests
 from .. import cassette, settings
 from ..models import Candidate, SkuSpec
 from .base import BaseProvider, ProviderHTTPError, page_domain, response_text, to_int
-from .serper import SerperImagesProvider, _pattern_not_allowed, has_site_operators, without_site_operators
+from .serper import SerperImagesProvider, _pattern_not_allowed, has_site_operators, hedged_http, without_site_operators
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +53,7 @@ class SerperEndpoint(BaseProvider):
     endpoint = ""
     rate_per_min = 120.0
     burst = 5
-    timeout = 15.0
+    timeout = 10.0
 
     def __init__(self, api_key: Optional[str] = None, session: Any = None, bucket: Any = None,
                  timeout: Optional[float] = None, num: int = MAX_RESULTS, gl: str = "ae") -> None:
@@ -78,12 +78,12 @@ class SerperEndpoint(BaseProvider):
 
     def _post(self, key: str, payload: dict):
         http = self._session or requests
-        return cassette.http(self.name, "POST", self.endpoint, lambda: http.post(
+        return hedged_http(self, self.endpoint, payload, lambda: http.post(
             self.endpoint,
             headers={"X-API-KEY": key, "Content-Type": "application/json"},
             json=payload,
             timeout=self.timeout,
-        ), body=payload)
+        ))
 
     def _request(self, query: str, hl: str) -> Any:
         """The decoded JSON body; site: refusals are retried once in the plain form."""

@@ -311,6 +311,23 @@ def test_run_cost_counts_what_ops_health_bills():
 
 
 @NEEDS_PHP
+def test_a_hedged_serper_request_is_one_more_query_in_the_run_cost_like_ops_health():
+    """providers/serper.py sends a slow request a second time and records `hedges` on the call: a credit more."""
+    import ops_health
+
+    health = [{"provider": "serper", "status": "ok", "hedges": 1}, {"provider": "serper", "status": "empty"},
+              {"provider": "serper", "status": "error", "hedges": 1},
+              {"provider": "serper_web", "status": "ok", "hedges": "junk"}]
+    outcome = {"decision": "NOT_FOUND", "failure_code": None, "provider_health": health, "vlm_calls": 0}
+    out = _php("$use = QueueStats::outcomeUsage(" + php_value(outcome) + "); $out['n'] = $use['serper_queries'];")
+    entry = ops_health.entry_from_row({"status": "ready_for_review", "failure_code": None, "age_s": 30,
+                                       "outcome_json": json.dumps(outcome), "has_trace": True})
+    billed = sum(1 for p, s, _h in entry["providers"] if p in ops_health.SERPER_BILLED_PROVIDERS
+                 and s in ops_health.ANSWERED_STATUSES)
+    assert out["n"] == billed == 4          # serper ok x2 (one hedge), serper empty, serper_web ok (a bad count is 0)
+
+
+@NEEDS_PHP
 def test_run_summary_counts_and_explains():
     t0 = datetime(2026, 9, 30, 9, 40, tzinfo=timezone.utc)
     iso = lambda s: (t0 + timedelta(seconds=s)).isoformat(timespec="seconds")

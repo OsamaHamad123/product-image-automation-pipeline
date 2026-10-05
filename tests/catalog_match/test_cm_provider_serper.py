@@ -98,7 +98,7 @@ def test_parse_ok():
     assert url == SERPER_IMAGES_URL
     assert kwargs["headers"]["X-API-KEY"] == "test-serper-key"
     assert kwargs["json"] == {"q": "Almarai Fresh Milk Full Fat 1L", "gl": "ae", "hl": "en", "num": 20}
-    assert kwargs["timeout"] == 15
+    assert kwargs["timeout"] == 10
 
     session_ar = FakeSession(FakeResponse(200, load("serper_images_ok.json")))
     provider(session_ar).search("المراعي حليب طازج 1 لتر", "ar", SPEC)

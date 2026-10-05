@@ -14,6 +14,7 @@ raising ProviderHTTPError for a non-200 response. BaseProvider.search():
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from dataclasses import replace
 from typing import Any, List, Optional
@@ -27,6 +28,21 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 logger = logging.getLogger("catalog_match.providers")
 
 STATUSES = ("ok", "empty", "error", "quota", "blocked")
+
+# Extra requests the call being made on THIS thread has sent (a hedged Serper request, providers/serper.py). search()
+# reads and clears it, so the count lands on that call's ProviderResult and nowhere else.
+_calls = threading.local()
+
+
+def note_hedge(n: int = 1) -> None:
+    """The provider call running on this thread sent n more request(s) than the one it was asked for."""
+    _calls.hedges = getattr(_calls, "hedges", 0) + int(n)
+
+
+def _take_hedges() -> int:
+    n = getattr(_calls, "hedges", 0)
+    _calls.hedges = 0
+    return n
 
 
 class ProviderHTTPError(Exception):
@@ -153,6 +169,7 @@ class BaseProvider:
         cands: List[Candidate] = []
         body = ""
         start = time.monotonic()
+        _take_hedges()                       # nothing left over from a call that never reached its end
         try:
             self.bucket().acquire()
             start = time.monotonic()  # latency is the source's, not our own rate-limit wait
@@ -174,12 +191,14 @@ class BaseProvider:
             status = "error"
             error = "timeout" if is_timeout(exc) else f"{type(exc).__name__}: {exc}"[:300]
         latency_ms = int((time.monotonic() - start) * 1000)
+        hedges = _take_hedges()
         level = logging.INFO if status in ("ok", "empty") else logging.WARNING
         logger.log(
             level,
-            "provider=%s status=%s count=%d latency_ms=%d http_status=%s error=%s query=%r%s",
+            "provider=%s status=%s count=%d latency_ms=%d http_status=%s error=%s query=%r%s%s",
             self.name, status, len(cands), latency_ms, http_status, error, query,
             f" body={body!r}" if body and status not in ("ok", "empty") else "",
+            f" hedges={hedges}" if hedges else "",
         )
         return ProviderResult(
             provider=self.name,
@@ -188,4 +207,5 @@ class BaseProvider:
             latency_ms=latency_ms,
             candidates=cands,
             error=error,
+            hedges=hedges,
         )

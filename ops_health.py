@@ -135,7 +135,12 @@ def _provider_calls(outcome):
             continue
         provider = str(item.get("provider") or "").strip() or "unknown"
         status = str(item.get("status") or "").strip().lower()
-        calls.append((provider, status, _as_int(item.get("http_status"))))
+        http = _as_int(item.get("http_status"))
+        calls.append((provider, status, http))
+        # a request sent a second time (hedging, providers/serper.py) is one more credit: an answered call counts once
+        # more per hedge, so the Serper query count and its cost stay what Serper bills
+        if status in ANSWERED_STATUSES:
+            calls.extend([(provider, status, http)] * max(0, _as_int(item.get("hedges")) or 0))
     return calls
 
 

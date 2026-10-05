@@ -11,14 +11,16 @@ Every image keeps the page evidence Google returned with it:
 from __future__ import annotations
 
 import logging
+import queue
 import re
-from typing import Any, List, Optional
+import threading
+from typing import Any, Callable, List, Optional
 
 import requests
 
 from .. import cassette, settings
 from ..models import Candidate, SkuSpec
-from .base import BaseProvider, ProviderHTTPError, page_domain, response_text, to_int
+from .base import BaseProvider, ProviderHTTPError, note_hedge, page_domain, response_text, to_int
 
 logger = logging.getLogger(__name__)
 
@@ -42,12 +44,91 @@ def _pattern_not_allowed(status: int, body: str) -> bool:
     return status == 400 and "not allowed" in (body or "").lower()
 
 
+# ---------------------------------------------------------------------------
+# Hedged request (SERPER_HEDGE_AFTER_S): the slow tail of Serper's answers (p90 6 s, p95 7 s, 7 timeouts in 176
+# calls on the owner's runs) is cut by asking a second time instead of waiting for the first to time out.
+# ---------------------------------------------------------------------------
+
+def _close(resp: Any) -> None:
+    try:
+        resp.close()
+    except Exception:
+        pass
+
+
+def hedged_http(provider: Any, url: str, payload: Any, send: Callable[[], Any]) -> Any:
+    """send() (one Serper POST) through the cassette, hedged when it is slow.
+
+    When the first request has not answered after SERPER_HEDGE_AFTER_S seconds, ONE duplicate is sent and the first
+    answer with HTTP 200 is used; the other request is left to finish on its own thread and its answer is closed
+    and ignored. A request that failed first (an exception, a non-200 answer) waits for the other one; when both
+    fail, an HTTP answer is returned in preference to an exception so the caller's own status handling runs.
+    The duplicate takes a token from the provider's shared bucket without waiting (none left: no duplicate) and is
+    counted with base.note_hedge, so the call's record says it cost one more credit.
+
+    Off (a plain cassette.http call) when SERPER_HEDGE_AFTER_S is 0, for a provider with hedge = False (visual
+    search, whose answers are slower by nature and dearer) and whenever a cassette is installed: a recorded
+    or replayed run keys every answer by its request, row and attempt, and a second request would add an answer
+    that the recording never saw (a replayed call must not be counted twice).
+    """
+    after = settings.serper_hedge_after_s() if getattr(provider, "hedge", True) else 0.0
+    if after <= 0 or cassette.active() is not None:
+        return cassette.http(provider.name, "POST", url, send, body=payload)
+    answers: "queue.Queue" = queue.Queue()
+    settled = threading.Event()
+
+    def run(n: int) -> None:
+        try:
+            item = (n, send(), None)
+        except BaseException as exc:         # delivered to the waiting caller, never lost on this thread
+            item = (n, None, exc)
+        if settled.is_set() and item[2] is None:
+            _close(item[1])                  # the answer that came too late is not used
+        answers.put(item)
+
+    def start(n: int) -> None:
+        threading.Thread(target=run, args=(n,), name=f"{provider.name}-request-{n}", daemon=True).start()
+
+    start(0)
+    try:
+        item = answers.get(timeout=after)
+    except queue.Empty:
+        item = None
+    if item is not None:                     # answered in time (well or badly): no second request
+        settled.set()
+        if item[2] is not None:
+            raise item[2]
+        return item[1]
+    pending = 1
+    try:
+        if provider.bucket().try_acquire():
+            start(1)
+            note_hedge()
+            pending = 2
+            logger.info("%s: no answer after %.1fs; sent the request a second time", provider.name, after)
+    except Exception:                        # a broken bucket never stops the request already sent
+        logger.exception("%s: hedge skipped", provider.name)
+    failures = []
+    while pending:
+        n, resp, exc = answers.get()
+        pending -= 1
+        if exc is None and getattr(resp, "status_code", None) == 200:
+            settled.set()
+            return resp
+        failures.append((resp, exc))
+    settled.set()
+    for resp, exc in failures:
+        if exc is None:
+            return resp
+    raise failures[0][1]
+
+
 class SerperImagesProvider(BaseProvider):
     name = "serper"
     sanctioned = True
     rate_per_min = 120.0
     burst = 5
-    timeout = 15.0
+    timeout = 10.0
     # Learned once per process: this account refuses site: operators, so send the plain form directly.
     operators_blocked = False
 
@@ -72,12 +153,12 @@ class SerperImagesProvider(BaseProvider):
     def _post(self, key: str, query: str, hl: str):
         payload = {"q": query, "gl": self.gl, "hl": hl or "en", "num": self.num}
         http = self._session or requests
-        return cassette.http(self.name, "POST", SERPER_IMAGES_URL, lambda: http.post(
+        return hedged_http(self, SERPER_IMAGES_URL, payload, lambda: http.post(
             SERPER_IMAGES_URL,
             headers={"X-API-KEY": key, "Content-Type": "application/json"},
             json=payload,
             timeout=self.timeout,
-        ), body=payload)
+        ))
 
     def _search(self, query: str, hl: str, spec: SkuSpec) -> List[Candidate]:
         key = self.api_key()
