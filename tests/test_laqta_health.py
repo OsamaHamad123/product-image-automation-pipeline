@@ -126,7 +126,7 @@ def test_classes_and_tokens_exist():
     ids = {"lq-health-initial", "lq-health-search-title", "lq-health-results-title", "lq-health-cost-title",
            "lq-health-reasons-title", "lq-health-log-title", "lq-health-log-body", "lq-settings-sheet-title",
            "lq-settings-keys-title", "lq-settings-ap-title", "lq-settings-processing-title",
-           "lq-settings-advanced-title", "lq-settings-models-title", "lq-settings-sources-title", "lq-key-form", "lq-page-health", "lq-page-settings", "lq-health-spin"}
+           "lq-settings-advanced-title", "lq-settings-models-title", "lq-settings-sources-title", "lq-settings-speed-title", "lq-key-form", "lq-page-health", "lq-page-settings", "lq-health-spin"}
     # classes built at runtime: 'lq-tone--' + tone, 'lq-dot--' + tone, '...--' + tone
     runtime = {"lq-tone", "lq-dot", "lq-keys__state", "lq-settings-columns__item", "lq-settings-form__status",
                "lq-health-provider__problems", "lq-alert", "lq-toast", "lq-dot lq-dot", "lq-skeleton"}
@@ -695,7 +695,8 @@ TOUCHED = list(SECRETS) + ["auto_publish_enabled", "auto_publish_brands", "searc
                            "filter_competitors", "bypass_white_background_check", "verifier_primary",
                            "verifier_strong", "verifier_monthly_budget_usd", "model_prices", "expansion_enabled",
                            "expansion_max_calls", "visual_search", "serpapi_lens_price_usd", "gtin_policy",
-                           "local_index_enabled", "local_index_max_pages", "bg_removal_method_previous"]
+                           "local_index_enabled", "local_index_max_pages", "bg_removal_method_previous",
+                           "worker_concurrency"]
 
 
 def _sql(db, statement, params=()):

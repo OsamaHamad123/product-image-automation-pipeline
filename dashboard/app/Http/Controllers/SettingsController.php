@@ -79,6 +79,10 @@ class SettingsController extends Controller
     public const VISUAL_SEARCH_MODES = ['auto', 'off', 'serper', 'serpapi'];
     public const GTIN_POLICIES = ['evidence', 'strict', 'off'];
     public const EXPANSION_MAX_CALLS_LIMIT = 8;
+    /** كم منتج بيشتغل بنفس الوقت (config.WORKER_CONCURRENCY، catalog_match/settings.py worker_concurrency). */
+    public const WORKER_CONCURRENCY_MIN = 1;
+    public const WORKER_CONCURRENCY_MAX = 8;
+    public const WORKER_CONCURRENCY_DEFAULT = 5;
     /** صفحات الفهرس المحلي اللي بتنقرا لكل منتج (catalog_match/settings.py LOCAL_INDEX_MAX_PAGES_LIMIT). */
     public const LOCAL_INDEX_MAX_PAGES_LIMIT = 8;
     public const CANVAS_MIN = 300;
@@ -100,6 +104,8 @@ class SettingsController extends Controller
         'sources' => ['tab' => 'advanced', 'text' => ['expansion_max_calls', 'visual_search', 'serpapi_lens_price_usd',
                                                      'gtin_policy', 'local_index_max_pages'],
                       'checkbox' => ['expansion_enabled', 'local_index_enabled']],
+        // سرعة التشغيل (حزمة السرعة): كم منتج بيشتغل بنفس الوقت، بتبويب «متقدم»، نموذج منفصل
+        'speed' => ['tab' => 'advanced', 'text' => ['worker_concurrency']],
         // نموذج Gemini صار بتبويب «نماذج التحقق» (saveModels): «متقدم» ما بيكتبه
         'advanced' => ['tab' => 'advanced', 'secret' => ['google_search_api_key', 'proxy_url'],
                        'text' => ['search_engine', 'google_search_cx'],
@@ -178,7 +184,7 @@ class SettingsController extends Controller
         'OUTPUT_CANVAS_SIZE', 'GEMINI_MODEL', 'SEARCH_ENGINE',
         'VERIFIER_PRIMARY', 'VERIFIER_STRONG', 'VERIFIER_MONTHLY_BUDGET_USD', 'MODEL_PRICES',
         'EXPANSION_ENABLED', 'EXPANSION_MAX_CALLS', 'VISUAL_SEARCH', 'SERPAPI_LENS_PRICE_USD', 'GTIN_POLICY',
-        'LOCAL_INDEX_ENABLED', 'LOCAL_INDEX_MAX_PAGES',
+        'LOCAL_INDEX_ENABLED', 'LOCAL_INDEX_MAX_PAGES', 'WORKER_CONCURRENCY',
     ];
 
     public function show(Request $request)
@@ -290,6 +296,18 @@ class SettingsController extends Controller
                     if (!preg_match('/^\d{1,2}$/', $val) || (int) $val > self::EXPANSION_MAX_CALLS_LIMIT) {
                         $warnings[] = 'عدد الطلبات الإضافية لازم يكون رقم من 0 لـ ' . self::EXPANSION_MAX_CALLS_LIMIT
                             . '؛ ما تغيّر الرقم المحفوظ.';
+                        continue;
+                    }
+                    $val = (string) (int) $val;
+                }
+                if ($k === 'worker_concurrency') {
+                    if ($val === '') {
+                        continue;   // حقل غايب (نموذج أقدم): الرقم المحفوظ بيضل
+                    }
+                    if (!preg_match('/^\d{1,2}$/', $val) || (int) $val < self::WORKER_CONCURRENCY_MIN
+                        || (int) $val > self::WORKER_CONCURRENCY_MAX) {
+                        $warnings[] = 'عدد المنتجات بنفس الوقت لازم يكون رقم من ' . self::WORKER_CONCURRENCY_MIN . ' لـ '
+                            . self::WORKER_CONCURRENCY_MAX . '؛ ما تغيّر الرقم المحفوظ.';
                         continue;
                     }
                     $val = (string) (int) $val;
@@ -868,7 +886,24 @@ class SettingsController extends Controller
             ],
             'secrets' => $secrets,
             'sources' => self::sourcesData($stored),
+            'speed' => self::speedData($stored),
             'local_index' => self::localIndexStats(),
+        ];
+    }
+
+    /**
+     * «السرعة»: كم منتج بيشتغل بنفس الوقت كما يقرؤه config.py (المحفوظ، وإلا .env، وإلا 5)، ضمن 1..8.
+     */
+    public static function speedData(array $stored): array
+    {
+        $env = self::envValues(['WORKER_CONCURRENCY']);
+        $v = trim((string) ($stored['worker_concurrency']['value'] ?? ''));
+        if ($v === '') {
+            $v = trim((string) ($env['WORKER_CONCURRENCY'] ?? ''));
+        }
+        $n = preg_match('/^-?\d+$/', $v) ? (int) $v : self::WORKER_CONCURRENCY_DEFAULT;
+        return [
+            'workers' => min(self::WORKER_CONCURRENCY_MAX, max(self::WORKER_CONCURRENCY_MIN, $n)),
         ];
     }
 
@@ -1273,6 +1308,7 @@ class SettingsController extends Controller
             'sources' => ($changes['expansion_enabled'] ?? '') === 'true'
                 ? 'انحفظ. الجولة الإضافية بتشتغل للمنتجات اللي ما انحسمت، من التشغيل الجاي.'
                 : 'انحفظ. الجولة الإضافية مطفأة: البحث بيضل على صور جوجل بس.',
+            'speed' => 'انحفظ. العدد الجديد بيشتغل من التشغيل الجاي.',
             default => 'انحفظت الإعدادات.',
         };
     }

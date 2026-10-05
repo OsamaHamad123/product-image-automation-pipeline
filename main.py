@@ -2179,6 +2179,12 @@ def _daily_budget():
         return 0.0
 
 
+def _worker_concurrency():
+    """WORKER_CONCURRENCY (لوحة التحكم أو .env): كم منتج بيشتغل بنفس الوقت، 1 إلى 8، الافتراضي 5."""
+    from catalog_match import settings as cm_settings
+    return cm_settings.worker_concurrency()
+
+
 def _credit_stop_searches():
     """SERPER_CREDIT_STOP_SEARCHES (0 = لا إيقاف بسبب رصيد Serper)."""
     try:
@@ -2357,7 +2363,8 @@ def run_worker_mode(trigger="manual", report=True, deadline_ts=None):
                 counters["credit_streak"] = _next_credit_streak(counters["credit_streak"], report)
             _refresh_state("pre_caching", run_id=run_id)
 
-        max_workers = 3
+        max_workers = _worker_concurrency()
+        print(f"[Worker] {max_workers} منتجات بالتوازي (WORKER_CONCURRENCY).")
         active = []
         db_outage_since = None
         last_beat = time.monotonic()
