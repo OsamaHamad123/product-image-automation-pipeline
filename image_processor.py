@@ -378,26 +378,35 @@ def _proxy_may_help(error: Optional[str]) -> bool:
     return bool(error) and (error in _PROXY_MAY_HELP or str(error).startswith("http_5"))
 
 
-def _download_bytes(url: str, page_url=None) -> Tuple[Optional[bytes], Optional[str]]:
+def _download_bytes(url: str, page_url=None, info=None) -> Tuple[Optional[bytes], Optional[str]]:
     """
     نفس ترويسات تنزيل المرشح الأصلي (catalog_match.fetch.request_headers: Accept بـ AVIF أولاً، و Referer = صفحة
     المرشح إن عُرفت): شبكات توزيع تختار الصيغة لكل طلب كانت تعيد بايتات أخرى فيفشل الاعتماد بـ source_changed.
     ونفس الطريق: المحاولة الأولى مباشرة دائماً، و PROXY_URL بديل بعد فشل أو رفض فقط (catalog_match.fetch). كان
     التنزيل يمر بالبروكسي وحده عند ضبطه، فبروكسي بطيء أو معطل كان يُفشل كل اعتماد.
+    info: قاموس اختياري يملؤه التنزيل بالطريق الذي جرّبه (فحص النشر، publish_check): route (direct | proxy | None)،
+    direct_error، proxy_tried، proxy_error. القيمة المعادة لا تتغير.
     """
     from catalog_match.fetch import request_headers
     from http_client import ImpersonateClient
 
+    trace = info if isinstance(info, dict) else {}
+    trace.update(route=None, direct_error=None, proxy_tried=False, proxy_error=None)
     headers = request_headers(str(page_url or "").strip() or None)
     fetched = ImpersonateClient(use_proxy=False).fetch_image(url, timeout=15, max_bytes=MAX_DOWNLOAD_BYTES,
                                                              headers=headers)
+    route = "direct"
+    trace["direct_error"] = None if fetched.content is not None else (fetched.error or "failed")
     proxy = settings.proxy_url()
     if fetched.content is None and proxy and _proxy_may_help(fetched.error):
         logger.info("تنزيل الصورة المعتمدة فشل مباشرة (%s)؛ محاولة عبر البروكسي", fetched.error)
+        trace["proxy_tried"], route = True, "proxy"
         fetched = ImpersonateClient(use_proxy=True, proxy_url=proxy).fetch_image(
             url, timeout=15, max_bytes=MAX_DOWNLOAD_BYTES, headers=headers)
+        trace["proxy_error"] = None if fetched.content is not None else (fetched.error or "failed")
     if fetched.content is None:
         return None, f"download_{fetched.error or 'failed'}"
+    trace["route"] = route
     return fetched.content, None
 
 

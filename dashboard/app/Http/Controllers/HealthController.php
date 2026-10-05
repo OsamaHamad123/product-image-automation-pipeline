@@ -43,6 +43,7 @@ class HealthController extends Controller
     public function page()
     {
         $last = ProductController::lastDiagnostics();
+        $publish = self::publicPublishCheck(self::lastPublishCheck(), SettingsController::secretValues());
         return view('dashboard.diagnostics', [
             'lastDiagnostics' => self::publicResult($last),
             'services' => self::serviceCards($last, self::serviceContext()),
@@ -50,7 +51,227 @@ class HealthController extends Controller
             'checkedAt' => self::checkedAt($last),
             'allOk' => is_array($last) ? ($last['all_ok'] ?? null) : null,
             'lastRun' => self::lastRunCard(self::lastRunRow()),
+            'lastPublishCheck' => $publish,
+            'publish' => self::publishCheckView($publish),
         ]);
+    }
+
+    // ------------------------------------------------------------------
+    // «فحص النشر»: the publish chain rehearsed on a test image (publish_check.py through the bridge action
+    // 'publish_check'). Only the button runs it (it may cost one background-removal call); opening the page shows
+    // the last saved result (temp/publish_check_last.json) and calls nothing.
+    // ------------------------------------------------------------------
+
+    /** آخر نتيجة يحفظها publish_check.py. */
+    public const PUBLISH_CHECK_FILE = '../temp/publish_check_last.json';
+
+    /**
+     * حد أقصى يُنهى بعده الفحص: مهل خطوات بايثون (publish_check.STEP_TIMEOUTS) مجموعها 380 ثانية، وفوقها هامش
+     * لاختيار الصورة وبدء بايثون. خادم PHP المدمج يخدم طلباً واحداً في كل مرة، فالفحص لا يبقى معلقاً بلا حد.
+     */
+    public const PUBLISH_CHECK_KILL_SECONDS = 420;
+
+    public const PUBLISH_CHECK_STATUSES = ['ok', 'warn', 'fail', 'skipped'];
+    public const PUBLISH_CHECK_STEPS = ['download', 'process', 'upload', 'sheet'];
+
+    /** آخر نتيجة لفحص النشر (temp/publish_check_last.json) أو null. */
+    public static function lastPublishCheck(?string $file = null): ?array
+    {
+        $file = $file ?? base_path(self::PUBLISH_CHECK_FILE);
+        $decoded = is_file($file) ? json_decode((string) @file_get_contents($file), true) : null;
+        return is_array($decoded) && is_array($decoded['steps'] ?? null) ? $decoded : null;
+    }
+
+    /**
+     * ما تعرضه الصفحة من نتيجة فحص النشر فقط: الحالة العامة والملخص والوقت وكل خطوة {key, status, ms, title_ar,
+     * detail_ar, action_ar, code}، بعد حجب القيم السرية مرة ثانية (بايثون يحجبها أولاً). أي حقل آخر لا يمر.
+     */
+    public static function publicPublishCheck(?array $result, array $secrets = []): ?array
+    {
+        if (!is_array($result) || !is_array($result['steps'] ?? null)) {
+            return null;
+        }
+        $text = fn ($value, int $max = 1200) => self::redact(mb_substr(is_scalar($value) ? (string) $value : '', 0, $max), $secrets);
+        $steps = [];
+        foreach ($result['steps'] as $step) {
+            if (!is_array($step) || !in_array($step['key'] ?? null, self::PUBLISH_CHECK_STEPS, true)) {
+                continue;
+            }
+            $status = (string) ($step['status'] ?? '');
+            $steps[] = [
+                'key' => (string) $step['key'],
+                'status' => in_array($status, self::PUBLISH_CHECK_STATUSES, true) ? $status : 'fail',
+                'ms' => is_numeric($step['ms'] ?? null) ? max(0, (int) $step['ms']) : 0,
+                'title_ar' => $text($step['title_ar'] ?? '', 120),
+                'detail_ar' => $text($step['detail_ar'] ?? ''),
+                'action_ar' => $text($step['action_ar'] ?? '', 400),
+                'code' => $text($step['code'] ?? '', 120),
+            ];
+        }
+        $overall = (string) ($result['overall'] ?? '');
+        $sample = is_array($result['sample'] ?? null) ? $result['sample'] : [];
+        return [
+            'ok' => (bool) ($result['ok'] ?? false),
+            'overall' => in_array($overall, ['ok', 'warn', 'fail'], true) ? $overall : 'fail',
+            'started_at' => is_string($result['started_at'] ?? null) ? $result['started_at'] : null,
+            'finished_at' => is_string($result['finished_at'] ?? null) ? $result['finished_at'] : null,
+            'duration_ms' => is_numeric($result['duration_ms'] ?? null) ? max(0, (int) $result['duration_ms']) : 0,
+            'summary_ar' => $text($result['summary_ar'] ?? ''),
+            'failed_step' => in_array($result['failed_step'] ?? null, self::PUBLISH_CHECK_STEPS, true) ? $result['failed_step'] : null,
+            'sheet_tab' => isset($result['sheet_tab']) && is_scalar($result['sheet_tab']) ? $text($result['sheet_tab'], 200) : null,
+            'sample' => [
+                'kind' => ($sample['kind'] ?? '') === 'review' ? 'review' : 'bundled',
+                'product_name' => $text($sample['product_name'] ?? '', 300),
+                'row_number' => is_numeric($sample['row_number'] ?? null) ? (int) $sample['row_number'] : null,
+            ],
+            'run_active' => (bool) ($result['run_active'] ?? false),
+            'notes' => array_values(array_map(fn ($n) => $text($n, 600),
+                array_filter((array) ($result['notes'] ?? []), 'is_scalar'))),
+            'steps' => $steps,
+        ];
+    }
+
+    /** حالة الخطوة -> [الكلمة، اللون، الأيقونة] (نفس PUBLISH_STATUS في public/js/health.js). */
+    public const PUBLISH_STEP_STATUS = [
+        'ok' => ['نجحت', 'success', 'check'],
+        'warn' => ['فيها ملاحظة', 'warning', 'exclamation'],
+        'fail' => ['ما زبطت', 'danger', 'x'],
+        'skipped' => ['ما انفحصت', 'muted', 'minus'],
+        'idle' => ['لسا ما انفحصت', 'muted', 'minus'],
+    ];
+    public const PUBLISH_STEP_TITLES = ['download' => 'تنزيل الصورة', 'process' => 'عزل الخلفية والمعالجة',
+                                        'upload' => 'الرفع على Cloudinary', 'sheet' => 'الكتابة بالشيت'];
+    public const PUBLISH_OVERALL = ['ok' => 'success', 'warn' => 'warning', 'fail' => 'danger'];
+
+    /** «1.2 ث» من ميلي ثانية (أعشار مقربة بالعدد الصحيح، مثل seconds() في health.js). */
+    public static function stepSeconds(int $ms): string
+    {
+        $tenths = (int) round(max(0, $ms) / 100);
+        return intdiv($tenths, 10) . '.' . ($tenths % 10) . ' ث';
+    }
+
+    /**
+     * بطاقة «فحص النشر» من آخر نتيجة (publicPublishCheck): {state: never | ok | warn | fail, tone, summary, sample,
+     * notes, steps: [{key, status, label, tone, icon, title, time, detail, action, code}], when}. لا نتيجة: الخطوات
+     * الأربع «لسا ما انفحصت». نفس publishView في health.js (والوقت هناك نسبي: «اليوم 09:12»).
+     */
+    public static function publishCheckView(?array $result): array
+    {
+        $byKey = [];
+        foreach ((array) ($result['steps'] ?? []) as $step) {
+            if (is_array($step) && isset($step['key'])) {
+                $byKey[$step['key']] = $step;
+            }
+        }
+        $steps = [];
+        foreach (self::PUBLISH_STEP_TITLES as $key => $title) {
+            $step = $byKey[$key] ?? null;
+            $status = is_array($step) && isset(self::PUBLISH_STEP_STATUS[$step['status'] ?? '']) ? $step['status'] : 'idle';
+            [$label, $tone, $icon] = self::PUBLISH_STEP_STATUS[$status];
+            $ran = in_array($status, ['ok', 'warn', 'fail'], true);
+            $steps[] = [
+                'key' => $key, 'status' => $status, 'label' => $label, 'tone' => $tone, 'icon' => $icon,
+                'title' => is_array($step) && ($step['title_ar'] ?? '') !== '' ? (string) $step['title_ar'] : $title,
+                'time' => $ran ? self::stepSeconds((int) ($step['ms'] ?? 0)) : '',
+                'detail' => is_array($step) ? (string) ($step['detail_ar'] ?? '') : '',
+                'action' => $ran && $status !== 'ok' ? (string) ($step['action_ar'] ?? '') : '',
+                'code' => is_array($step) ? (string) ($step['code'] ?? '') : '',
+            ];
+        }
+        if (!is_array($result)) {
+            return ['state' => 'never', 'tone' => 'muted', 'summary' => 'لسا ما انعمل فحص للنشر.', 'sample' => '',
+                    'notes' => [], 'steps' => $steps, 'when' => ''];
+        }
+        $overall = (string) ($result['overall'] ?? 'fail');
+        $sample = is_array($result['sample'] ?? null) ? $result['sample'] : [];
+        $name = trim((string) ($sample['product_name'] ?? ''));
+        $row = $sample['row_number'] ?? null;
+        $sampleText = ($sample['kind'] ?? '') === 'review' && $name !== ''
+            ? 'الصورة: ' . $name . (is_int($row) ? ' (صف ' . $row . ')' : '')
+            : 'الصورة: الصورة التجريبية';
+        $finished = strtotime((string) ($result['finished_at'] ?? ''));
+        return [
+            'state' => isset(self::PUBLISH_OVERALL[$overall]) ? $overall : 'fail',
+            'tone' => self::PUBLISH_OVERALL[$overall] ?? 'danger',
+            'summary' => (string) ($result['summary_ar'] ?? ''),
+            'sample' => $sampleText,
+            'notes' => array_values(array_map('strval', (array) ($result['notes'] ?? []))),
+            'steps' => $steps,
+            'when' => $finished ? date('Y-m-d H:i', $finished) : '',
+        ];
+    }
+
+    /** GET /api/system/publish-check: آخر نتيجة محفوظة (بلا أي فحص جديد). */
+    public function lastPublishCheckJson()
+    {
+        $result = self::publicPublishCheck(self::lastPublishCheck(), SettingsController::secretValues());
+        return response()->json(['status' => 'success', 'result' => $result], 200, [], JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE)
+            ->header('Cache-Control', 'no-store');
+    }
+
+    /**
+     * POST /api/system/publish-check: يشغّل «فحص النشر» (cli_bridge.py publish_check) ويرجع نتيجته. مثل فحص
+     * الاتصالات: المخرجات إلى ملف مؤقت لا إلى أنبوب (قراءة الأنابيب بلا انتظار لا تعمل على ويندوز)، وحد أقصى
+     * PUBLISH_CHECK_KILL_SECONDS يُنهى بعده الفحص.
+     */
+    public function runPublishCheck()
+    {
+        @set_time_limit(self::PUBLISH_CHECK_KILL_SECONDS + 30);
+        $outFile = null;
+        try {
+            putenv('PYTHONUTF8=1');
+            putenv('PYTHONIOENCODING=utf-8');
+            $command = [PythonBridge::pythonPath(), PythonBridge::bridgePath(), 'publish_check', base64_encode('{}')];
+            $outFile = tempnam(sys_get_temp_dir(), 'pubcheck');
+            $nullDevice = strncasecmp(PHP_OS, 'WIN', 3) === 0 ? 'NUL' : '/dev/null';
+            $process = proc_open($command, [
+                0 => ['file', $nullDevice, 'r'],
+                1 => ['file', $outFile, 'w'],
+                2 => ['file', $nullDevice, 'w'],
+            ], $pipes, base_path('..'));
+            if (!is_resource($process)) {
+                throw new \RuntimeException('proc_open failed');
+            }
+
+            $timedOut = false;
+            $killAt = microtime(true) + self::PUBLISH_CHECK_KILL_SECONDS;
+            while (proc_get_status($process)['running']) {
+                if (microtime(true) >= $killAt) {
+                    proc_terminate($process, 9);
+                    $timedOut = true;
+                    break;
+                }
+                usleep(250000);
+            }
+            proc_close($process);
+
+            if ($timedOut) {
+                return self::publishCheckError('فحص النشر أخد أكتر من ' . intdiv(self::PUBLISH_CHECK_KILL_SECONDS, 60)
+                    . ' دقايق فوقفناه. في خدمة ما بترد: جرّب «فحص الاتصالات الآن» لتعرف أي وحدة.', 504);
+            }
+            $decoded = PythonBridge::decodeOutput((string) @file_get_contents($outFile));
+            $result = is_array($decoded) ? self::publicPublishCheck($decoded, SettingsController::secretValues()) : null;
+            if ($result !== null) {
+                return response()->json(['status' => 'success', 'result' => $result], 200, [],
+                    JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE)->header('Cache-Control', 'no-store');
+            }
+            $error = is_array($decoded) ? trim((string) ($decoded['error'] ?? '')) : '';
+            return self::publishCheckError(preg_match('/[\x{0600}-\x{06FF}]/u', $error) ? $error
+                : 'فحص النشر ما رجّع نتيجة: تأكد من بيئة بايثون ومكتباتها ثم أعد الفحص.', 500);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('publish check failed to start: ' . $e->getMessage());
+            return self::publishCheckError('ما قدرنا نشغّل فحص النشر: تأكد من بيئة بايثون ثم أعد الفحص.', 500);
+        } finally {
+            if ($outFile && file_exists($outFile)) {
+                @unlink($outFile);
+            }
+        }
+    }
+
+    private static function publishCheckError(string $message, int $code)
+    {
+        return response()->json(['status' => 'failed', 'error' => $message], $code, [],
+            JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE)->header('Cache-Control', 'no-store');
     }
 
     // ------------------------------------------------------------------

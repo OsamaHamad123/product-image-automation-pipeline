@@ -62,6 +62,8 @@ class UploadResult:
     content_md5: بصمة md5 للبايتات المرسلة (نفسها اسم الأصل)؛ تكشف نفس الصورة عبر مجلدات مختلفة.
     error: upload_file_missing | upload_not_image | upload_failed | upload_bytes_mismatch |
            upload_size_mismatch | upload_etag_mismatch، أو None.
+    cause: اسم صنف آخر استثناء أفشل الرفع (مثل AuthorizationRequired: المفتاح مرفوض)، مع upload_failed فقط؛
+           فحص النشر (publish_check) يقول منه ما العمل.
     """
 
     url: Optional[str]
@@ -69,6 +71,7 @@ class UploadResult:
     existing: bool = False
     content_md5: Optional[str] = None
     error: Optional[str] = None
+    cause: Optional[str] = None
 
 
 _MD5_RE = re.compile(r"^[0-9a-f]{32}$")
@@ -166,7 +169,9 @@ def _verify_upload(response: dict, data: bytes, size: Tuple[int, int], md5: str)
     return None
 
 
-def _upload_with_retries(source, options: dict):
+def _upload_with_retries(source, options: dict, failure: Optional[dict] = None):
+    """الاستجابة، أو None عند الفشل؛ failure (قاموس اختياري) يأخذ آخر استثناء في 'exception'."""
+    failure = failure if failure is not None else {}
     attempts = 1 + UPLOAD_RETRIES
     for attempt in range(attempts):
         is_last = attempt == attempts - 1
@@ -178,9 +183,11 @@ def _upload_with_retries(source, options: dict):
                 raise cloudinary.exceptions.Error("upload response without public_id")
             return response
         except _NON_RETRYABLE as exc:
+            failure["exception"] = exc
             logger.error("[Cloudinary] رفض نهائي للرفع (بدون إعادة محاولة): %s", exc)
             return None
         except Exception as exc:  # noqa: BLE001 - أخطاء الشبكة و5xx تعاد محاولتها
+            failure["exception"] = exc
             if is_last:
                 logger.error("[Cloudinary] فشل الرفع بعد %d محاولات: %s", attempts, exc)
                 return None
@@ -202,10 +209,13 @@ def delivery_url(public_id: str, version=None) -> str:
 
 
 def upload_product_image(local_path, product_name, brand, folder=None,
-                         tags: Optional[Iterable[str]] = None) -> UploadResult:
+                         tags: Optional[Iterable[str]] = None, *, public_id=None, overwrite=False,
+                         timeout=None) -> UploadResult:
     """
     يرفع اللوحة النهائية ويتحقق من استجابة Cloudinary، ويعيد UploadResult (url=None عند أي فشل).
     existing=True: نفس البايتات مرفوعة سابقاً في نفس المجلد (قد تكون صورة منتج آخر).
+    public_id / overwrite / timeout لفحص النشر فقط (upload_selftest_image: اسم ثابت يُستبدل في مجلد الفحص)؛ النشر
+    يتركها: الاسم md5 البايتات، بلا استبدال، ومهلة UPLOAD_TIMEOUT_SECONDS.
     """
     if not local_path or not os.path.exists(local_path):
         logger.error("[Cloudinary] ملف الصورة المحلي غير موجود: %s", local_path)
@@ -221,20 +231,22 @@ def upload_product_image(local_path, product_name, brand, folder=None,
 
     md5 = hashlib.md5(data).hexdigest()
     options = {
-        "public_id": md5,
+        "public_id": public_id or md5,
         "folder": slugify_folder(folder or DEFAULT_FOLDER),
-        "overwrite": False,
+        "overwrite": bool(overwrite),
         "invalidate": True,
         "resource_type": "image",
-        "timeout": UPLOAD_TIMEOUT_SECONDS,
+        "timeout": timeout or UPLOAD_TIMEOUT_SECONDS,
     }
     tag_list = [str(t).strip() for t in (tags or []) if str(t).strip()]
     if tag_list:
         options["tags"] = tag_list
 
-    response = _upload_with_retries(source, options)
+    failure = {}
+    response = _upload_with_retries(source, options, failure)
     if response is None:
-        return UploadResult(None, content_md5=md5, error="upload_failed")
+        cause = type(failure["exception"]).__name__ if failure.get("exception") is not None else None
+        return UploadResult(None, content_md5=md5, error="upload_failed", cause=cause)
 
     existing = response.get("existing") is True or str(response.get("existing")).strip().lower() == "true"
     mismatch = _verify_upload(response, data, size, md5)
@@ -265,3 +277,44 @@ def upload_product_image_to_cloudinary(local_path, product_name, brand, folder=N
     اللوحة (الأبعاد، الإشغال 88%، الخلفية البيضاء) تُبنى محلياً في image_processor.
     """
     return upload_product_image(local_path, product_name, brand, folder=folder, tags=tags).url
+
+
+# ---------------------------------------------------------------------------
+# فحص النشر (publish_check): رفع اللوحة التجريبية إلى مكان ثابت ثم مسحها، بنفس مسار رفع النشر
+# ---------------------------------------------------------------------------
+
+SELFTEST_FOLDER = "laqta_selftest"
+SELFTEST_PUBLIC_ID = "publish_check"
+SELFTEST_TIMEOUT_SECONDS = 20
+# المعرّفات الوحيدة التي يقبل destroy_selftest_image مسحها: مع المجلدات الثابتة يحمل المعرّف اسم المجلد، ومع
+# المجلدات الديناميكية قد يعيده Cloudinary بلا مجلد. صور المنتجات اسمها md5 بايتاتها فلا تطابق أياً منهما.
+SELFTEST_PUBLIC_IDS = (f"{SELFTEST_FOLDER}/{SELFTEST_PUBLIC_ID}", SELFTEST_PUBLIC_ID)
+
+
+def upload_selftest_image(local_path) -> UploadResult:
+    """
+    يرفع لوحة فحص النشر بـ upload_product_image نفسها (نفس التجهيز والإعادة والتحقق من الاستجابة) إلى
+    laqta_selftest/publish_check، باسم ثابت يُستبدل كل مرة: لا تتراكم صور تجريبية حتى لو تعذر مسح إحداها.
+    """
+    return upload_product_image(local_path, "publish check", "", folder=SELFTEST_FOLDER,
+                                public_id=SELFTEST_PUBLIC_ID, overwrite=True, timeout=SELFTEST_TIMEOUT_SECONDS)
+
+
+def destroy_selftest_image(public_id) -> Optional[str]:
+    """
+    يمسح صورة فحص النشر من Cloudinary. يرفض أي معرّف غير SELFTEST_PUBLIC_IDS (لا يلمس صورة منتج أبداً).
+    يعيد None عند المسح، أو رمزاً: destroy_refused | destroy_not_found | destroy_<اسم الاستثناء>.
+    """
+    if str(public_id or "") not in SELFTEST_PUBLIC_IDS:
+        logger.error("[Cloudinary] رُفض مسح معرّف ليس صورة فحص النشر: %s", public_id)
+        return "destroy_refused"
+    try:
+        response = cloudinary.uploader.destroy(public_id, resource_type="image", invalidate=True,
+                                               timeout=SELFTEST_TIMEOUT_SECONDS)
+    except Exception as exc:  # noqa: BLE001 - يُبلَّغ كرمز؛ فحص النشر يقول ما العمل
+        logger.warning("[Cloudinary] تعذر مسح صورة فحص النشر: %s", exc)
+        return f"destroy_{type(exc).__name__}"
+    result = str((response or {}).get("result") or "") if isinstance(response, dict) else ""
+    if result == "ok":
+        return None
+    return "destroy_not_found" if result == "not found" else "destroy_failed"

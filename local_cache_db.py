@@ -2774,6 +2774,30 @@ def get_curation_candidates(row_number, sku_key=None, identity=None):
         return []
 
 
+def first_review_candidate():
+    """
+    أول صورة مختارة مسبقاً (is_selected=1) لمنتج بانتظار المراجعة: صورة «فحص النشر» (publish_check) الحقيقية.
+    قراءة فقط. {row_number, sku_key, product_name, brand, image_url, content_sha256, page_url} أو None إن لم يوجد؛
+    أخطاء قاعدة البيانات تُرفع (الفحص يقولها ويكمل بالصورة التجريبية).
+    """
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT c.`row_number`, c.sku_key, c.product_name, c.brand, c.image_url, c.content_sha256, c.page_url "
+            "FROM curation_candidates c JOIN automation_queue q ON q.`row_number` = c.`row_number` "
+            "WHERE q.status = 'ready_for_review' AND c.is_selected = 1 "
+            "AND (c.sku_key IS NULL OR q.sku_key IS NULL OR c.sku_key = q.sku_key) "
+            "ORDER BY q.updated_at DESC, c.id ASC LIMIT 1")
+        row = cursor.fetchone()
+    finally:
+        _close(conn)
+    if not row:
+        return None
+    return {key: row.get(key) for key in ("row_number", "sku_key", "product_name", "brand", "image_url",
+                                          "content_sha256", "page_url")}
+
+
 # ---------------------------------------------------------------------------
 # لماذا لا توجد صورة مختارة (catalog_match.explain): outcome.explain في trace_json
 # ---------------------------------------------------------------------------

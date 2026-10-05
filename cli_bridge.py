@@ -1905,6 +1905,26 @@ def action_lock_state(params):
                started_ts=lock.get('started_ts'), heartbeat_age_s=None if age is None else int(age))
     return out
 
+
+# ---------------------------------------------------------------------------
+# publish_check («فحص النشر» بصفحة الصحة): بروفة سلسلة النشر على صورة تجريبية بدون ما يلمس أي منتج
+# ---------------------------------------------------------------------------
+
+def action_publish_check(params):
+    """
+    publish_check.run_publish_check: تنزيل صورة منتج بانتظار المراجعة (أو الصورة التجريبية)، عزل خلفيتها بملف
+    المعالجة، رفعها إلى laqta_selftest/publish_check ثم مسحها، وكتابة عنوان عمود الرابط بالشيت بقيمته نفسها. لا يكتب
+    بأي صف منتج ولا طابور ولا إعدادات. الاستجابة: {status: success, ok, overall, steps, summary_ar, ...} (عربية،
+    بلا أي مفتاح)، وتُحفظ في temp/publish_check_last.json.
+    """
+    import publish_check
+    try:
+        result = publish_check.run_publish_check()
+    except Exception:
+        return _failure("failed", "ما قدرنا نشغّل فحص النشر (التفاصيل في temp/search.log).", "publish_check failed")
+    return dict({"status": "success"}, **result)
+
+
 ACTIONS = {
     'get_products': action_get_products,
     'search': action_search,
@@ -1917,6 +1937,7 @@ ACTIONS = {
     'explain_backfill': action_explain_backfill,
     'export_run': action_export_run,
     'lock_state': action_lock_state,
+    'publish_check': action_publish_check,
     'ops_health': action_ops_health,
     'run_control': action_run_control,
 }

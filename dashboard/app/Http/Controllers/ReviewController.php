@@ -77,6 +77,8 @@ class ReviewController extends Controller
                 'imageProxy' => url('/api/image-proxy'),
                 'export' => route('dashboard.rich_catalog.export'),
                 'run' => route('dashboard.batch_automation'),
+                // «افحص النشر» بلوحة الاعتمادات اللي ما مشيت: بطاقة «فحص النشر» بصفحة الصحة
+                'publishCheck' => route('dashboard.diagnostics') . '#publish-check',
             ],
         ];
 

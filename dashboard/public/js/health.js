@@ -7,6 +7,9 @@
  *   split in plain Arabic; decision and failure codes appear only in tooltips.
  * - «السجل» shows the tails of GET /api/view-pipeline-log, /api/view-laravel-log and /api/view-nightly-log (the
  *   newest temp/nightly/nightly_YYYY-MM-DD.log); a missing file is the normal «لسا ما في سجل» state.
+ * - «فحص النشر» starts from the saved result of the last publish rehearsal (#publish-check-initial); only its button
+ *   POSTs /api/system/publish-check (publish_check.py through the bridge: it may cost one background-removal call).
+ *   Step codes appear only in tooltips.
  * The view functions are pure (node tests call them through window.LaqtaHealth); the DOM code below only sets
  * textContent and attributes, never HTML.
  */
@@ -18,6 +21,24 @@
     var LOG_URLS = { pipeline: '/api/view-pipeline-log', laravel: '/api/view-laravel-log',
         nightly: '/api/view-nightly-log' };
     var LOG_POLL_MS = 5000;
+    var PUBLISH_CHECK_URL = '/api/system/publish-check';
+
+    /* «فحص النشر»: the four steps of publish_check.py and the words of each status (HealthController::PUBLISH_STEP_*). */
+    var PUBLISH_STEPS = [['download', 'تنزيل الصورة'], ['process', 'عزل الخلفية والمعالجة'],
+        ['upload', 'الرفع على Cloudinary'], ['sheet', 'الكتابة بالشيت']];
+    var PUBLISH_STATUS = {
+        ok: ['نجحت', 'success', 'check'],
+        warn: ['فيها ملاحظة', 'warning', 'exclamation'],
+        fail: ['ما زبطت', 'danger', 'x'],
+        skipped: ['ما انفحصت', 'muted', 'minus'],
+        idle: ['لسا ما انفحصت', 'muted', 'minus']
+    };
+    var PUBLISH_OVERALL = { ok: 'success', warn: 'warning', fail: 'danger' };
+    var PUBLISH_DONE = {
+        ok: ['خلص فحص النشر: كل الخطوات نجحت.', 'success'],
+        warn: ['خلص فحص النشر: النشر لازم يمشي، بس في ملاحظات.', 'warning'],
+        fail: ['خلص فحص النشر: في خطوة ما زبطت، شوف شو لازم تعمل.', 'danger']
+    };
 
     var SERVICE_KEYS = ['google_sheets', 'serper', 'gemini', 'photoroom', 'cloudinary'];
     var OPTIONAL_SERVICES = { proxy: 'البروكسي', google_search: 'Google Custom Search (قديم)' };
@@ -429,6 +450,69 @@
         return { kind: 'ok', text: '', lines: lines, meta: meta };
     }
 
+    /* «1.2 ث» from milliseconds (whole tenths, as HealthController::stepSeconds). */
+    function seconds(ms) {
+        var tenths = Math.round(Math.max(0, num(ms) || 0) / 100);
+        return Math.floor(tenths / 10) + '.' + (tenths % 10) + ' ث';
+    }
+
+    /* The «فحص النشر» card for a saved or fresh result (HealthController::publishCheckView says the same). */
+    function publishView(result, nowMs) {
+        var byKey = {};
+        var valid = isObject(result) && Array.isArray(result.steps);
+        if (valid) {
+            result.steps.forEach(function (s) {
+                if (isObject(s) && s.key) byKey[s.key] = s;
+            });
+        }
+        var steps = PUBLISH_STEPS.map(function (pair) {
+            var step = byKey[pair[0]] || null;
+            var status = step && PUBLISH_STATUS[step.status] ? step.status : 'idle';
+            var meta = PUBLISH_STATUS[status];
+            var ran = status === 'ok' || status === 'warn' || status === 'fail';
+            return {
+                key: pair[0], status: status, label: meta[0], tone: meta[1], icon: meta[2],
+                title: step && step.title_ar ? String(step.title_ar) : pair[1],
+                time: ran ? seconds(step.ms) : '',
+                detail: step ? String(step.detail_ar || '') : '',
+                action: ran && status !== 'ok' ? String(step.action_ar || '') : '',
+                code: step ? String(step.code || '') : ''
+            };
+        });
+        if (!valid) {
+            return { state: 'never', tone: 'muted', summary: 'لسا ما انعمل فحص للنشر.', sample: '', notes: [],
+                steps: steps, when: '' };
+        }
+        var overall = PUBLISH_OVERALL[result.overall] ? result.overall : 'fail';
+        var sample = isObject(result.sample) ? result.sample : {};
+        var name = String(sample.product_name || '').trim();
+        var row = sample.row_number;
+        var finished = typeof result.finished_at === 'string' ? Date.parse(result.finished_at) : NaN;
+        return {
+            state: overall,
+            tone: PUBLISH_OVERALL[overall],
+            summary: String(result.summary_ar || ''),
+            sample: sample.kind === 'review' && name
+                ? 'الصورة: ' + name + (typeof row === 'number' && isFinite(row) ? ' (صف ' + row + ')' : '')
+                : 'الصورة: الصورة التجريبية',
+            notes: (Array.isArray(result.notes) ? result.notes : []).map(String),
+            steps: steps,
+            when: isFinite(finished) ? whenText(finished, nowMs) : ''
+        };
+    }
+
+    /* While the rehearsal runs: every step waits (the server answers once, at the end). */
+    function publishRunningView() {
+        return {
+            state: 'running', tone: 'muted', sample: '', notes: [], when: '',
+            summary: 'جاري الفحص… الخطوات بتمشي ورا بعض، وعادةً بيخلص بأقل من دقيقة.',
+            steps: PUBLISH_STEPS.map(function (pair) {
+                return { key: pair[0], status: 'running', label: 'جاري الفحص…', tone: 'muted', icon: 'spinner',
+                    title: pair[1], time: '', detail: '', action: '', code: '' };
+            })
+        };
+    }
+
     function requestError(res, fallback) {
         if (res && res.status === 419) return 'انتهت صلاحية الصفحة. حدّثها وجرّب مرة تانية.';
         var data = res && isObject(res.data) ? res.data : null;
@@ -542,7 +626,53 @@
             setLogKind: setLogKind, state: state };
     }
 
+    /* «فحص النشر»: only run() (the button) POSTs; start() shows the saved result. Deps: fetchJson, renderPublish,
+       setPublishBusy, toast, now. */
+    function createPublishCheck(deps) {
+        var state = { last: deps.initial || null, running: false };
+
+        function now() {
+            return deps.now ? deps.now() : Date.now();
+        }
+
+        function show() {
+            deps.renderPublish(publishView(state.last, now()));
+        }
+
+        function run() {
+            if (state.running) return Promise.resolve(false);
+            state.running = true;
+            deps.setPublishBusy(true);
+            deps.renderPublish(publishRunningView());
+            return deps.fetchJson(PUBLISH_CHECK_URL, { method: 'POST', body: {} }).then(function (res) {
+                var result = res && res.ok && isObject(res.data) && isObject(res.data.result) ? res.data.result : null;
+                if (result && Array.isArray(result.steps)) {
+                    state.last = result;
+                    show();
+                    var done = PUBLISH_DONE[result.overall] || PUBLISH_DONE.fail;
+                    deps.toast(done[0], done[1]);
+                    return true;
+                }
+                show();
+                deps.toast('ما خلص فحص النشر: ' + requestError(res, 'الخادم ما رجّع نتيجة.'), 'danger');
+                return false;
+            }, function () {
+                show();
+                deps.toast('ما قدرنا نوصل للخادم لنفحص النشر.', 'danger');
+                return false;
+            }).then(function (done) {
+                state.running = false;
+                deps.setPublishBusy(false);
+                return done;
+            });
+        }
+
+        return { start: show, run: run, state: state };
+    }
+
     var api = {
+        publishView: publishView, publishRunningView: publishRunningView, createPublishCheck: createPublishCheck,
+        seconds: seconds, PUBLISH_STEPS: PUBLISH_STEPS, PUBLISH_STATUS: PUBLISH_STATUS,
         serviceView: serviceView, servicesView: servicesView, checkingView: checkingView, optionalView: optionalView,
         checkedView: checkedView, opsView: opsView, logView: logView, whenText: whenText, ageText: ageText,
         usd: usd, usdPrecise: usdPrecise, requestError: requestError, createController: createController,
@@ -900,4 +1030,112 @@
     });
 
     controller.start();
+
+    // ------------------------------------------------------------------
+    // «فحص النشر»
+    // ------------------------------------------------------------------
+
+    var publishCard = $('publish');
+    var publishButton = $('publish-run');
+    var publishLabel = $('publish-run-label');
+    /* The same paths as resources/views/components/lq/icon.blade.php */
+    var ICON_PATHS = { check: 'M5 12.5 10 17.5 19 7', x: 'M6 6l12 12M18 6 6 18', exclamation: 'M12 7v6M12 16.5v.5',
+        minus: 'M6 12h12' };
+
+    function svgIcon(name) {
+        var ns = 'http://www.w3.org/2000/svg';
+        var svg = document.createElementNS(ns, 'svg');
+        var attrs = { 'class': 'lq-icon', width: '14', height: '14', viewBox: '0 0 24 24', fill: 'none',
+            stroke: 'currentColor', 'stroke-width': '2.4', 'stroke-linecap': 'round', 'stroke-linejoin': 'round',
+            focusable: 'false', 'aria-hidden': 'true' };
+        Object.keys(attrs).forEach(function (k) { svg.setAttribute(k, attrs[k]); });
+        var path = document.createElementNS(ns, 'path');
+        path.setAttribute('d', ICON_PATHS[name] || ICON_PATHS.minus);
+        svg.appendChild(path);
+        return svg;
+    }
+
+    function readPublishInitial() {
+        var holder = document.getElementById('publish-check-initial');
+        if (!holder) return null;
+        try {
+            var data = JSON.parse(holder.textContent || 'null');
+            return isObject(data) && Array.isArray(data.steps) ? data : null;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    function renderPublish(view) {
+        if (!publishCard) return;
+        publishCard.setAttribute('data-tone', view.tone);
+        var dot = $('publish-dot');
+        if (dot) dot.className = 'lq-dot lq-dot--lg ' + (DOTS[view.tone] || DOTS.muted);
+        $('publish-summary').textContent = view.summary;
+        var meta = $('publish-meta');
+        clear(meta);
+        if (view.when) {
+            meta.appendChild(document.createTextNode('آخر فحص للنشر: '));
+            meta.appendChild(make('time', '', view.when));
+            if (view.sample) meta.appendChild(document.createTextNode(' · ' + view.sample));
+        }
+        $('publish-notes').textContent = view.notes.join(' ');
+        view.steps.forEach(function (step) {
+            var li = publishCard.querySelector('[data-step="' + step.key + '"]');
+            if (!li) return;
+            li.setAttribute('data-status', step.status);
+            if (step.code) li.title = step.code;
+            else li.removeAttribute('title');
+            var icon = li.querySelector('[data-step-icon]');
+            if (icon) {
+                icon.className = 'lq-health-step__icon lq-health-step__icon--' + step.tone;
+                icon.setAttribute('aria-label', step.label);
+                clear(icon);
+                if (step.icon === 'spinner') {
+                    var spin = make('span', 'lq-spinner');
+                    spin.setAttribute('aria-hidden', 'true');
+                    icon.appendChild(spin);
+                } else {
+                    icon.appendChild(svgIcon(step.icon));
+                }
+            }
+            li.querySelector('[data-step-title]').textContent = step.title;
+            li.querySelector('[data-step-state]').textContent = step.label;
+            li.querySelector('[data-step-time]').textContent = step.time;
+            var detail = li.querySelector('[data-step-detail]');
+            detail.textContent = step.detail;
+            setHidden(detail, !step.detail);
+            var action = li.querySelector('[data-step-action]');
+            action.textContent = step.action;
+            setHidden(action, !step.action);
+        });
+    }
+
+    function setPublishBusy(busy) {
+        if (!publishButton) return;
+        publishButton.disabled = busy;
+        if (busy) publishButton.setAttribute('aria-busy', 'true');
+        else publishButton.removeAttribute('aria-busy');
+        if (publishLabel) publishLabel.textContent = busy ? 'جاري الفحص…' : 'افحص النشر';
+    }
+
+    if (publishCard) {
+        var publish = createPublishCheck({
+            initial: readPublishInitial(),
+            fetchJson: fetchJson,
+            renderPublish: renderPublish,
+            setPublishBusy: setPublishBusy,
+            toast: function (text, variant) {
+                if (window.Laqta && window.Laqta.toast) window.Laqta.toast(text, { variant: variant });
+            },
+            now: function () { return Date.now(); }
+        });
+        publish.start();
+        if (publishButton) {
+            publishButton.addEventListener('click', function () { publish.run(); });
+            // from the review screen's failed approvals (/system-diagnostics#publish-check): the button is ready,
+            // never pressed for the owner (the check may cost a background-removal call)
+            if (window.location && window.location.hash === '#publish-check') publishButton.focus();
+        }
+    }
 })();
