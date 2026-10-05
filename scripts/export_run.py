@@ -16,7 +16,10 @@ the decision and failure code, why there is no pick (catalog_match.explain: the 
 sentence) and the sheet's gaps, the top 8 candidates (image and page URL, domain, title, identity tier, status,
 reasons and warnings, the label reader's reading, the size / variant evidence), the stores' spelling of the
 brand the search used (discovered_brands: the trace's outcome, or an older pick's 'brand_spelling' warning), the
-provider calls and the estimated cost when the trace says it. The run's metadata: the code version (git commit), every catalog_match
+provider calls and the estimated cost when the trace says it, and the search's wall time per stage ('timings',
+milliseconds: retrieval, fetch, quality, verify, expansion when the round ran, total; a row saved before the
+timings were recorded has an empty one). The summary adds 'timings': p50 / p90 / total seconds per stage over the
+rows that have them. The run's metadata: the code version (git commit), every catalog_match
 setting without any key (catalog_match.cassette.settings_snapshot: secret settings only as set / not set) and the
 run_history row of the run.
 
@@ -222,6 +225,53 @@ def provider_calls(outcome, secret_values):
     return out
 
 
+TIMING_STAGES = ("retrieval", "fetch", "quality", "verify", "expansion", "total")
+
+
+def row_timings(outcome):
+    """{stage: ms} the search stored in its outcome; {} for a row saved before timings were recorded."""
+    raw = outcome.get("timings") if isinstance(outcome, dict) else None
+    out = {}
+    if isinstance(raw, dict):
+        for stage, value in raw.items():
+            try:
+                ms = int(value)
+            except (TypeError, ValueError):
+                continue
+            if ms >= 0:
+                out[str(stage)] = ms
+    return out
+
+
+def _percentile(sorted_values, q):
+    """Nearest-rank percentile (q in 0..100) of a sorted, non-empty list."""
+    rank = max(1, -(-len(sorted_values) * q // 100))
+    return sorted_values[int(rank) - 1]
+
+
+def timings_summary(rows):
+    """{rows, stages: {stage: {rows, p50_s, p90_s, total_s}}} over the rows that carry timings; rows without
+    them (older exports and traces) are left out, and no row with timings gives {rows: 0, stages: {}}."""
+    per_stage = {}
+    n = 0
+    for r in rows:
+        t = r.get("timings") if isinstance(r, dict) else None
+        if not isinstance(t, dict) or not t:
+            continue
+        n += 1
+        for stage, ms in t.items():
+            if isinstance(ms, (int, float)) and not isinstance(ms, bool) and ms >= 0:
+                per_stage.setdefault(str(stage), []).append(float(ms))
+    order = [st for st in TIMING_STAGES if st in per_stage] + sorted(set(per_stage) - set(TIMING_STAGES))
+    stages = {}
+    for stage in order:
+        values = sorted(per_stage[stage])
+        stages[stage] = {"rows": len(values), "p50_s": round(_percentile(values, 50) / 1000.0, 2),
+                         "p90_s": round(_percentile(values, 90) / 1000.0, 2),
+                         "total_s": round(sum(values) / 1000.0, 1)}
+    return {"rows": n, "stages": stages}
+
+
 def export_row(row, candidates, mappings=None, vocab=None, prices=None, secret_values=()):
     """One queue row as a smoke_live --json row (the fields compare_runs and smoke_live.summarize read) plus the
     no-pick reason, the sheet's gaps and the queue state."""
@@ -262,7 +312,7 @@ def export_row(row, candidates, mappings=None, vocab=None, prices=None, secret_v
         "sku_key": row.get("sku_key") or spec.sku_key, "brand_conf": spec.brand_conf, "gtin_status": spec.gtin_status,
         "variants": dict(spec.variants), "queue_status": row.get("status"), "run_id": row.get("run_id"),
         "searched_at": outcome.get("searched_at") or (str(row["searched_at"]) if row.get("searched_at") else None),
-        "queries": list(outcome.get("queries") or []), "provider_calls": calls,
+        "queries": list(outcome.get("queries") or []), "provider_calls": calls, "timings": row_timings(outcome),
         "decision": decision, "failure_code": outcome.get("failure_code") or row.get("failure_code"),
         "winner": winner_url, "winner_detail": detail,
         "winner_provider": (detail or {}).get("provider") or None, "winner_domain": (detail or {}).get("domain") or None,
@@ -340,8 +390,10 @@ def build_export(scope="latest", run_id=None, mappings=None, now=None):
         "git": smoke_live.git_info(), "settings": cassette.settings_snapshot(), "run_history": run_history(run_id),
         "note": "Read from the queue, its stored traces and review candidates: nothing was searched again.",
     }
+    summary = smoke_live.summarize(out_rows)
+    summary["timings"] = timings_summary(out_rows)
     return {"format": smoke_live.JSON_FORMAT, "export": EXPORT_FORMAT, "meta": meta,
-            "summary": smoke_live.summarize(out_rows), "rows": out_rows}, hidden
+            "summary": summary, "rows": out_rows}, hidden
 
 
 def export_text(doc, hidden):

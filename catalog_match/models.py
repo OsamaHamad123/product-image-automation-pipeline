@@ -268,6 +268,9 @@ class SearchOutcome:
     discovered_brands: List[str] = field(default_factory=list)    # brand_discovery: the store spelling used
     # failure_code SOCIAL_ONLY: the links of the social-network posts that show the product, for the reviewer
     social_links: List[str] = field(default_factory=list)
+    # wall time of this search per stage in whole milliseconds (pipeline.find_product_image): retrieval, fetch,
+    # quality, verify, expansion (only when the round ran) and total
+    timings: Dict[str, int] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------

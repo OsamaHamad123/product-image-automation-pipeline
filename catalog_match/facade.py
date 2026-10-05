@@ -234,6 +234,8 @@ def outcome_summary(outcome: SearchOutcome) -> Dict[str, Any]:
         # The run export and the stored no-pick reason read it here: a product without a pick carries no
         # 'brand_spelling' warning to tell it (live run 2026-10-04, rows 49-51 were exported without it)
         "discovered_brands": list(getattr(outcome, "discovered_brands", None) or []),
+        # wall time of the search per stage in milliseconds (pipeline.find_product_image); older traces have none
+        "timings": {str(k): int(v) for k, v in (getattr(outcome, "timings", None) or {}).items()},
     }
 
 
