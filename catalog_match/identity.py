@@ -98,6 +98,7 @@ def _pick_size(size_text: Optional[str], name: str, name_ar: str) -> Optional[Si
     correct multipack a hard reject and the single unit tier 1, so they are merged:
       * column measured, no pack + name states the same measure with a pack -> column + pack;
       * column is a pack count ('6 pcs') + name states a measure -> name measure x count;
+      * column counts the units ('170 PCS') + name states the same count in packs ('5X170PCS') -> column + pack;
       * column and name measured in different dimensions -> the name wins;
       * otherwise the column wins; with no usable column, the English then Arabic name.
     """
@@ -133,6 +134,9 @@ def _pick_size(size_text: Optional[str], name: str, name_ar: str) -> Optional[Si
         if not name_size.pack_count or name_size.pack_count == n:
             return replace(name_size, pack_count=n)
         return name_size
+    if (col.dimension == name_size.dimension == "count" and not col.pack_count and name_size.pack_count
+            and compare(col, [name_size]) == "match"):
+        return replace(col, pack_count=name_size.pack_count)            # column '170 PCS', name '... 5X170PCS'
     return col
 
 
