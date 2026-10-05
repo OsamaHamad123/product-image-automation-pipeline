@@ -15,7 +15,7 @@ class ApiController extends Controller
         'image_url', 'page_url', 'candidate_sha256', 'row_number', 'product_name', 'brand', 'barcode', 'sku_key',
         'size', 'product_name_ar', 'brand_ar', 'category', 'sub_category', 'origin',
         'search_decision', 'candidate_status', 'candidate_cache_hit', 'identity_tier', 'vlm_decision',
-        'candidate_warnings', 'target_width', 'target_height',
+        'candidate_warnings', 'target_width', 'target_height', 'page_gtin',
     ];
 
     /** ما رأته الصفحة (عقد C1): حالة صف الطابور ووقت تحديثه ورقمه، والصورة المعتمدة. */

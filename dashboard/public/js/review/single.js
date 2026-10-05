@@ -505,6 +505,7 @@
                 const sheet = R.sheetNote(data.sheet);
                 S.approved.set(job.key, { link: rawLink.replace(/^needs_review:/, ''), warning: notes.bgFailed ? 'background_not_removed' : '',
                                           url: job.candidate.url, sheet: sheet.state, notes: notes,
+                                          pageGtin: String(data.page_gtin || ''),
                                           current: data.current && typeof data.current === 'object' ? data.current : null });
                 const flagsPart = notes.flagTexts.length ? ` فحص القص: ${notes.flagTexts.join('، ')}.` : '';
                 if (notes.publishedAnyway) {
@@ -963,8 +964,32 @@
                 overlay || null
             ]),
             pick.title ? bdi(pick.title, 'rv-pick__title') : null,
+            pageGtinLine(R.pageGtinOf(item.product, pick)),
             explainList(pick, false)
         ]);
+    }
+
+    // «الباركود من صفحة المتجر: …» مع زر نسخ، ليلصقه المالك بالشيت بإيده (ما منكتب بالشيت تلقائياً)
+    function pageGtinLine(gtin) {
+        const code = String(gtin || '').trim();
+        if (!code) return null;
+        return el('div', { className: 'rv-gtin', dataset: { pageGtin: code } }, [
+            el('span', { className: 'rv-gtin__label', text: R.PAGE_GTIN_LABEL }),
+            el('bdi', { className: 'rv-gtin__code', dir: 'ltr', text: code }),
+            el('button', { type: 'button', className: 'lq-btn lq-btn--ghost lq-btn--sm', dataset: { copyGtin: code },
+                           'aria-label': `انسخ الباركود ${code}`, text: 'انسخ', onclick: () => copyText(code) })
+        ]);
+    }
+    R.pageGtinLine = pageGtinLine;
+
+    function copyText(text) {
+        const nav = root.navigator;
+        if (nav && nav.clipboard && typeof nav.clipboard.writeText === 'function') {
+            nav.clipboard.writeText(text).then(() => R.toast('نسخنا الباركود.', 'success'),
+                                               () => R.toast(`انسخه بإيدك: ${text}`, 'info', 9000));
+        } else {
+            R.toast(`انسخه بإيدك: ${text}`, 'info', 9000);
+        }
     }
 
     function pickImage(item, pick) {
@@ -1378,6 +1403,7 @@
                 el('div', { className: 'rv-final__stage' }, [R.img(done.link || done.url, 'الصورة المعتمدة', S.urls.imageProxy)]),
                 el('div', { className: 'rv-final__text' }, [
                     el('strong', { className: 'rv-h3', text: 'الصورة المنشورة' }),
+                    pageGtinLine(done.pageGtin),
                     el('span', { text: 'بدك صورة غيرها؟ دوّر من جديد (كل بحث بيكلف من رصيد البحث).' }),
                     searchButton(item, 'دوّر على صورة بديلة')
                 ])
@@ -1423,6 +1449,7 @@
                 el('div', { className: 'rv-final__stage' }, [R.img(link, 'الصورة الحالية بالشيت', S.urls.imageProxy)]),
                 el('div', { className: 'rv-final__text' }, [
                     el('strong', { className: 'rv-h3', text: 'الصورة الحالية بالشيت' }),
+                    pageGtinLine(item.product.page_gtin),
                     el('span', { text: 'لهالمنتج صورة نهائية بالشيت، فما دوّرنا تلقائياً (كل بحث بيكلف من رصيد البحث).' }),
                     searchButton(item, 'دوّر على صورة بديلة')
                 ])

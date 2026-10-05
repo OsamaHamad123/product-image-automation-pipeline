@@ -812,6 +812,27 @@
     opacity: 0.62;
 }
 
+/* «الباركود من صفحة المتجر: …» مع زر نسخ */
+.rv-gtin {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--lq-space-2);
+    font-size: 0.875rem;
+    color: var(--lq-text-2);
+}
+
+.rv-gtin__label {
+    white-space: nowrap;
+}
+
+.rv-gtin__code {
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+    color: var(--lq-text);
+    letter-spacing: 0.02em;
+}
+
 /* «صور رفضتها لهالمنتج»: كل صورة مرفوضة بزر «تراجع عن الرفض» */
 .rv-rejected {
     display: flex;

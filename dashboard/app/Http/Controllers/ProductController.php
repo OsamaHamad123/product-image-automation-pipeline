@@ -215,6 +215,8 @@ class ProductController extends Controller
                 $prod['cached_image'] = $hit->cloudinary_url;
                 $prod['verification_status'] = $hit->verification_status ?? 'legacy';
                 $prod['resolved_at'] = $hit->resolved_at ? $hit->resolved_at->toIso8601String() : null;
+                // «الباركود من صفحة المتجر» للصف بلا باركود (يُحفظ مع الاعتماد، لا يُكتب في الشيت)
+                $prod['page_gtin'] = isset($hit->page_gtin) && $hit->page_gtin !== '' ? (string) $hit->page_gtin : null;
             }
             if (is_array($failures)) {
                 // نفس مفاتيح get_products في cli_bridge.py: الباركود، أو ERR_<الاسم>_<البراند>

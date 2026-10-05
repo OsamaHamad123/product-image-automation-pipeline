@@ -505,6 +505,30 @@ def _candidate_page(params, row_number, sku_key, image_url, identity=None):
     return None
 
 
+def _approval_page_gtin(params, row_number, sku_key, image_url, barcode, identity=None):
+    """
+    (page_gtin, صفحته) للاعتماد: الباركود الذي ذكرته صفحة متجر الصورة المعتمدة عندما لا يوجد باركود صالح في الشيت
+    (catalog_match.gtin.barcode_from_page: GTIN صالح بالـ checksum وعالمي). من أدلة المرشح المحفوظ لنفس الرابط
+    (evidence.page_gtin)، وإلا مما عرضته شاشة المراجعة (page_gtin: بحث مباشر لا تُحفظ مرشحاته). (None, None) بدونه.
+    لا يُكتب في الشيت أبداً: المالك ينسخه (scripts/export_barcodes.py). لا يُرفع أي خطأ.
+    """
+    try:
+        from catalog_match.gtin import barcode_from_page, is_valid_gtin
+
+        if is_valid_gtin(barcode):
+            return None, None          # الشيت فيه باركود صالح
+        for c in local_cache_db.get_curation_candidates(row_number, sku_key=sku_key or None, identity=identity):
+            if c.get("image_url") == image_url:
+                found = barcode_from_page(barcode, (c.get("evidence") or {}).get("page_gtin"))
+                if found:
+                    return found, c.get("page_url") or _text(params, 'page_url') or None
+        found = barcode_from_page(barcode, _text(params, 'page_gtin'))
+        return (found, _text(params, 'page_url') or None) if found else (None, None)
+    except Exception:
+        logger.exception("تعذر قراءة باركود صفحة المتجر للصف %s", row_number)
+        return None, None
+
+
 def _page_domain(candidate, params):
     """نطاق الصفحة التي جاءت منها الصورة: من أدلة المرشح أو مصدره المحفوظ، وإلا من page_url المرسل."""
     for value in ((candidate.get("evidence") or {}).get("page_domain"), candidate.get("source_domain")):
@@ -907,10 +931,12 @@ def _reviewer_check(params, sku_key, row_number, product_name, image_url, out, r
     return check
 
 
-def _human_decision(barcode, product_name, brand, original_url, approved_by, sku_key, row_number, rows):
+def _human_decision(barcode, product_name, brand, original_url, approved_by, sku_key, row_number, rows,
+                    page_gtin=None, page_gtin_url=None):
     """
     after_write لاعتماد المراجع ورفعه: الحل المعتمد بشرياً وحالة صفوف المنتج (مكتملة) تُكتب قبل تحرير قفل النشر،
     فمراجع آخر ينتظر القفل يرى هذا الاعتماد في إعادة فحص C1 (already_approved) ولا يكتب فوقه في صمت.
+    page_gtin / page_gtin_url: باركود صفحة المتجر لصف بلا باركود (_approval_page_gtin)، يُحفظ مع الاعتماد.
     """
     def record(res):
         if res.get("status") != "published":
@@ -919,6 +945,7 @@ def _human_decision(barcode, product_name, brand, original_url, approved_by, sku
             barcode, product_name, brand, original_url, res["link"], None, res.get("metadata"),
             perceptual_hash=res.get("phash"), verification_status="human_approved", approved_by=approved_by,
             sku_key=sku_key, color_signature=res.get("color_signature"),
+            **({"page_gtin": page_gtin, "page_gtin_url": page_gtin_url} if page_gtin else {}),
         )
         local_cache_db.update_task_status_by_row(row_number, "completed", sku_key=sku_key, rows=rows)
     return record
@@ -1150,6 +1177,8 @@ def action_select_image(params):
     pipeline = _pipeline()
     identity, tasks = scope["identity"], scope["tasks"]
     rows = _rows_of(tasks)
+    # الباركود الذي ذكرته صفحة المتجر لصف بلا باركود: يُقرأ قبل حذف المرشحات ويُحفظ مع الاعتماد
+    page_gtin, page_gtin_url = _approval_page_gtin(params, row_number, sku_key, image_url, barcode, identity)
     queue_started = False
     guard = {}
     try:
@@ -1168,7 +1197,8 @@ def action_select_image(params):
             key_size=_text(params, 'size') or None, key_brand=brand or None, sku_key=sku_key,
             also_rows=_other_rows(sku_key, row_number, tasks),
             before_write=_reviewer_check(params, sku_key, row_number, product_name, image_url, guard, rows, scope),
-            after_write=_human_decision(barcode, product_name, brand, image_url, "human", sku_key, row_number, rows),
+            after_write=_human_decision(barcode, product_name, brand, image_url, "human", sku_key, row_number, rows,
+                                        page_gtin, page_gtin_url),
             unclean="refuse", publish_anyway=_as_bool(params.get('publish_anyway', False)),
         )
         if res["status"] == "quality_refused":
@@ -1183,7 +1213,9 @@ def action_select_image(params):
 
         _record_review("approved", params, row_number, sku_key, image_url, identity=identity)
         local_cache_db.delete_curation_candidates(row_number, sku_key=sku_key, identity=identity)
-        response = _published_response(res, sku_key, row_number, provider=res.get("provider"))
+        # «الباركود من صفحة المتجر» على بطاقة الصورة المعتمدة (اعتماد فعلي فقط، لا رابط needs_review:)
+        extra = {"page_gtin": page_gtin} if page_gtin and res.get("status") == "published" else {}
+        response = _published_response(res, sku_key, row_number, provider=res.get("provider"), **extra)
     except Exception as e:
         config.log_error_to_laravel(f"CLI action_select_image exception: {e}\n{traceback.format_exc()}",
                                     product_name=product_name, brand=brand, barcode=barcode, level="ERROR")

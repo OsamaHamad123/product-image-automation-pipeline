@@ -109,3 +109,20 @@ def is_global_gtin(raw) -> bool:
     """A valid GTIN that is also globally unique (not a restricted-circulation number)."""
     gtin14, status = normalize_gtin(raw)
     return status == "ok" and not is_restricted(gtin14)
+
+
+def display_gtin(raw) -> Optional[str]:
+    """A valid GTIN the way a sheet writes it: GTIN-8 as 8 digits, else EAN-13 (GTIN-14 when its indicator is set)."""
+    gtin14, status = normalize_gtin(raw)
+    if status != "ok" or not gtin14:
+        return None
+    return gtin14[6:] if gtin14.startswith("000000") else gtin13(gtin14)
+
+
+def barcode_from_page(sheet_barcode, page_value) -> Optional[str]:
+    """The barcode a store page stated, worth keeping with an approval: only when the sheet's barcode is missing or
+    not a valid GTIN (the sheet's 'no_barcode' gap), and the page's value is a valid, globally unique GTIN
+    (checksum-valid, not an in-store code). Display form (display_gtin); None otherwise. Never written to the sheet."""
+    if is_valid_gtin(sheet_barcode) or not is_global_gtin(page_value):
+        return None
+    return display_gtin(page_value)

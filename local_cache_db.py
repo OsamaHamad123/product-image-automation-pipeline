@@ -85,6 +85,10 @@ _SCHEMA_MIGRATIONS = [
     "ALTER TABLE resolved_products ADD INDEX IF NOT EXISTS idx_resolved_sku (sku_key)",
     # بصمة ألوان اللوحة (image_dedup_bktree.color_signature): تطابق pHash بلون مختلف بوضوح ليس الصورة نفسها
     "ALTER TABLE resolved_products ADD COLUMN IF NOT EXISTS color_signature VARCHAR(64) NULL",
+    # الباركود الذي ذكرته صفحة المتجر للصورة المعتمدة (GTIN صالح وعالمي) عندما لا يوجد باركود صالح في الشيت، وصفحته:
+    # للمالك كي ينسخه للشيت (scripts/export_barcodes.py)؛ لا يُكتب في الشيت تلقائياً أبداً
+    "ALTER TABLE resolved_products ADD COLUMN IF NOT EXISTS page_gtin VARCHAR(14) NULL",
+    "ALTER TABLE resolved_products ADD COLUMN IF NOT EXISTS page_gtin_url TEXT NULL",
     # automation_queue
     "ALTER TABLE automation_queue ADD COLUMN IF NOT EXISTS sku_key VARCHAR(64) NULL",
     "ALTER TABLE automation_queue ADD COLUMN IF NOT EXISTS payload_json LONGTEXT NULL",
@@ -482,6 +486,9 @@ def _cache_row_to_dict(row):
         "approved_by": row.get("approved_by"),
         "perceptual_hash": row.get("perceptual_hash"),
         "color_signature": row.get("color_signature"),
+        # باركود صفحة المتجر المحفوظ مع الاعتماد (صف بلا باركود في الشيت) وصفحته
+        "page_gtin": row.get("page_gtin"),
+        "page_gtin_url": row.get("page_gtin_url"),
         "resolved_at": row.get("resolved_at"),
         # هوية السجل كما حُفظت (للمقارنة بصف الشيت: main._gtin_resolution_fits)
         "product_name": row.get("product_name"),
@@ -752,9 +759,12 @@ def _remember_phash(hash_str, row_id, cloudinary_url, product_name):
 
 def save_product_resolution(barcode, product_name, brand, original_url, cloudinary_url, clip_score=None,
                             metadata=None, clip_embedding=None, perceptual_hash=None,
-                            verification_status="legacy", approved_by=None, sku_key=None, color_signature=None):
+                            verification_status="legacy", approved_by=None, sku_key=None, color_signature=None,
+                            page_gtin=None, page_gtin_url=None):
     """
     حفظ أو تحديث الحل المعتمد لمنتج (Upsert بـ sku_key، أو بالباركود إن لم يوجد sku_key).
+    page_gtin / page_gtin_url: الباركود الذي ذكرته صفحة متجر الصورة المعتمدة وصفحته، عندما لا يوجد باركود صالح في
+    الشيت (catalog_match.gtin.barcode_from_page)؛ يتبعان هذا الاعتماد (اعتماد صورة أخرى بلا باركود يمحوهما).
     أحدث سجل مطابق يُحدّث، وأي سجلات مطابقة أخرى تصبح superseded.
     حل auto_verified لا يحل أبداً محل اعتماد بشري (human_approved): إذا كان أي سجل مطابق معتمداً بشرياً
     لا يُكتب شيء وتعيد False (مراجع اعتمد أثناء نشر العامل التلقائي). الفحص والكتابة في معاملة واحدة تقفل السجلات
@@ -770,7 +780,9 @@ def save_product_resolution(barcode, product_name, brand, original_url, cloudina
     hash_str = str(perceptual_hash) if perceptual_hash is not None else ""
     values = (barcode_raw, product_name, brand, original_url, cloudinary_url, clip_score,
               metadata_str, embedding_str, hash_str, sku_clean or None, verification_status, approved_by,
-              str(color_signature)[:64] if color_signature else None)
+              str(color_signature)[:64] if color_signature else None,
+              str(page_gtin).strip()[:14] if page_gtin else None, (str(page_gtin_url).strip() or None)
+              if page_gtin and page_gtin_url else None)
 
     def attempt():
         conn = get_db_connection()
@@ -797,7 +809,7 @@ def save_product_resolution(barcode, product_name, brand, original_url, cloudina
                     SET barcode = %s, product_name = %s, brand = %s, original_url = %s, cloudinary_url = %s,
                         clip_score = %s, metadata_json = %s, clip_embedding_json = %s, perceptual_hash = %s,
                         sku_key = %s, verification_status = %s, approved_by = %s, color_signature = %s,
-                        resolved_at = CURRENT_TIMESTAMP
+                        page_gtin = %s, page_gtin_url = %s, resolved_at = CURRENT_TIMESTAMP
                     WHERE id = %s
                 """, values + (existing[0],))
                 saved_id = existing[0]
@@ -812,8 +824,8 @@ def save_product_resolution(barcode, product_name, brand, original_url, cloudina
                 cursor.execute("""
                     INSERT INTO resolved_products (barcode, product_name, brand, original_url, cloudinary_url,
                         clip_score, metadata_json, clip_embedding_json, perceptual_hash, sku_key,
-                        verification_status, approved_by, color_signature)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        verification_status, approved_by, color_signature, page_gtin, page_gtin_url)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """, values)
                 saved_id = cursor.lastrowid
             conn.commit()
@@ -1343,6 +1355,29 @@ def add_review_decision(action, sku_key=None, row_number=None, brand=None, produ
     finally:
         _close(conn)
     return True
+
+
+def get_page_barcodes():
+    """
+    الاعتمادات الحالية (human_approved / auto_verified) التي حُفظ معها باركود صفحة المتجر (page_gtin، لصف بلا باركود
+    في الشيت)، مع رقم صف الطابور الأحدث لنفس sku_key: [{row_number, sku_key, product_name, brand, page_gtin,
+    page_gtin_url, verification_status, resolved_at}] (scripts/export_barcodes.py). أخطاء قاعدة البيانات تُرفع.
+    """
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT (SELECT q.`row_number` FROM automation_queue q WHERE q.sku_key = r.sku_key
+                    ORDER BY q.id DESC LIMIT 1) AS `row_number`,
+                   r.sku_key, r.product_name, r.brand, r.page_gtin, r.page_gtin_url, r.verification_status, r.resolved_at
+            FROM resolved_products r
+            WHERE r.page_gtin IS NOT NULL AND r.page_gtin <> ''
+              AND r.verification_status IN ('human_approved', 'auto_verified')
+            ORDER BY r.id
+        """)
+        return [dict(r) for r in cursor.fetchall() or []]
+    finally:
+        _close(conn)
 
 
 def undo_rejection(sku_key, image_url, row_number=None):

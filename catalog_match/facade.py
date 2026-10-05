@@ -34,6 +34,9 @@ outcome_to_legacy(outcome, trace=None, spec=None) -> dict | None
     (catalog_match.explain): one reason key and one Arabic sentence (the fact, then what to do),
     with the sheet row's gaps (no size, no barcode, unknown brand, a likely typo). The worker keeps
     trace['outcome'] in automation_queue.trace_json, where the review screen reads it.
+    evidence.page_gtin is the barcode the candidate's page stated (gtin_on_page) when it is a valid, globally
+    unique GTIN (display form, gtin.display_gtin), else None: an approval of that image keeps it for a sheet row
+    without a barcode (resolved_products.page_gtin), shown on the review card and exported, never written to the sheet.
 """
 
 from __future__ import annotations
@@ -44,6 +47,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Mapping, Optional
 
 from .decide import RESOLUTION_PREFIX, candidate_warnings, warning_codes
+from .gtin import display_gtin, is_global_gtin
 from .models import RankedCandidate, SearchOutcome, SkuSpec
 
 logger = logging.getLogger(__name__)
@@ -154,6 +158,8 @@ def evidence(rc: RankedCandidate, spec: Optional[SkuSpec] = None) -> Dict[str, A
         "url_only_size_conflict": bool(score.url_only_size_conflict) if score is not None else False,
         "consensus_count": rc.candidate.consensus_count,
         "sanctioned": rc.candidate.sanctioned,
+        # the barcode the page stated (valid and globally unique only): kept with an approval when the sheet has none
+        "page_gtin": display_gtin(rc.candidate.gtin_on_page) if is_global_gtin(rc.candidate.gtin_on_page) else None,
     })
 
 
