@@ -132,6 +132,10 @@ _SCHEMA_MIGRATIONS = [
     # automation_state: التشغيل الحالي، وطلب الإيقاف من لوحة التحكم (يلتزم به العامل بين المنتجات أو عند بدئه)
     "ALTER TABLE automation_state ADD COLUMN IF NOT EXISTS run_id VARCHAR(64) NULL",
     "ALTER TABLE automation_state ADD COLUMN IF NOT EXISTS stop_requested INT DEFAULT 0",
+    # review_decisions: رفض تراجع عنه المراجع (undo_rejection) لا يُحسب في الإحصائيات ولا في التعلّم، وكتابة الماركة
+    # التي حُسب لها القرار أو عليها (learned_brand_aliases) كي يُرجع التراجع عدّها
+    "ALTER TABLE review_decisions ADD COLUMN IF NOT EXISTS undone_at DATETIME NULL",
+    "ALTER TABLE review_decisions ADD COLUMN IF NOT EXISTS learned_alias VARCHAR(255) NULL",
 ]
 
 
@@ -1312,10 +1316,12 @@ def _clip(value, limit):
 
 def add_review_decision(action, sku_key=None, row_number=None, brand=None, product_name=None, image_url=None,
                         page_domain=None, identity_tier=None, engine_decision=None, was_preselected=None,
-                        vlm_decision=None, reason_code=None):
+                        vlm_decision=None, reason_code=None, learned_alias=None):
     """
     تسجيل قرار مراجع واحد (approved | rejected | manual_upload). was_preselected: هل الصورة هي التي اختارها
-    المحرك مسبقاً (None عند عدم المعرفة). أخطاء قاعدة البيانات تُرفع؛ cli_bridge يلتقطها كي لا يتعطل الاعتماد.
+    المحرك مسبقاً (None عند عدم المعرفة). learned_alias: كتابة الماركة التي حُسب لها القرار أو عليها
+    (learned_brand_aliases)، كي يُرجع التراجع عن الرفض عدّها. أخطاء قاعدة البيانات تُرفع؛ cli_bridge يلتقطها كي لا
+    يتعطل الاعتماد.
     """
     if action not in REVIEW_ACTIONS:
         raise ValueError(f"action غير صالح: {action!r}")
@@ -1324,18 +1330,85 @@ def add_review_decision(action, sku_key=None, row_number=None, brand=None, produ
         cursor = conn.cursor()
         cursor.execute("""
             INSERT INTO review_decisions (action, sku_key, `row_number`, brand, product_name, image_url, page_domain,
-                                          identity_tier, engine_decision, was_preselected, vlm_decision, reason_code)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                          identity_tier, engine_decision, was_preselected, vlm_decision, reason_code,
+                                          learned_alias)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """, (
             action, _clip(sku_key, 64), _as_int(row_number), _clip(brand, 255), _clip(product_name, 255),
             image_url or None, _clip(page_domain, 255), _clip(identity_tier, 8), _clip(engine_decision, 32),
             None if was_preselected is None else int(bool(was_preselected)), _clip(vlm_decision, 16),
-            _clip(reason_code, 32),
+            _clip(reason_code, 32), _clip(learned_alias, 255),
         ))
         conn.commit()
     finally:
         _close(conn)
     return True
+
+
+def undo_rejection(sku_key, image_url, row_number=None):
+    """
+    التراجع عن رفض صورة لهذا الـ SKU (زر «تراجع عن الرفض»، مثلاً رفض للتجربة): يُحذف صف rejected_images واحد (الأحدث،
+    بالرابط بصيغة url_norm أو كما هو)، ويُعلَّم قرار الرفض المطابق في review_decisions بـ undone_at فلا تحسبه
+    الإحصائيات (get_review_decisions) ولا التعلّم (get_brand_source_counts)، ويُرجع عدّ رفض كتابة الماركة إن حُسب عليها
+    (learned_alias مع WRONG_BRAND). مرشح المنتج الذي استبعده الرفض ('excluded') يرجع 'eligible'، فتعود الصورة
+    للاقتراحات، والبحث التالي لا يستبعدها (get_rejections). لا يغيّر الشيت ولا الاعتماد ولا حالة الطابور.
+    تعيد {removed, reason_code, decision_undone, alias_restored, still_rejected, candidates_restored}؛ removed = 0
+    عندما لا يوجد رفض مسجل لهذه الصورة. أخطاء قاعدة البيانات تُرفع.
+    """
+    sku = str(sku_key or "").strip()
+    url = str(image_url or "").strip()
+    if not sku or not url:
+        raise ValueError("sku_key و image_url مطلوبان للتراجع عن الرفض")
+    key = url_norm(url)
+    out = {"removed": 0, "reason_code": None, "decision_undone": False, "alias_restored": False,
+           "still_rejected": False, "candidates_restored": 0}
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, reason_code FROM rejected_images WHERE sku_key = %s AND (url_norm = %s "
+                       "OR original_url = %s) ORDER BY id DESC LIMIT 1 FOR UPDATE", (sku, key, url))
+        found = cursor.fetchone()
+        if not found:
+            conn.rollback()
+            return out
+        cursor.execute("DELETE FROM rejected_images WHERE id = %s", (found["id"],))
+        out.update(removed=1, reason_code=found.get("reason_code"))
+        cursor.execute("SELECT id, brand, image_url, reason_code, learned_alias FROM review_decisions "
+                       "WHERE action = 'rejected' AND sku_key = %s AND undone_at IS NULL ORDER BY id DESC",
+                       (sku[:64],))
+        decision = next((d for d in cursor.fetchall() or [] if d.get("image_url") == url
+                         or url_norm(d.get("image_url")) == key), None)
+        if decision is not None:
+            cursor.execute("UPDATE review_decisions SET undone_at = NOW() WHERE id = %s", (decision["id"],))
+            out["decision_undone"] = True
+            alias = str(decision.get("learned_alias") or "").strip()
+            if alias and decision.get("reason_code") == "WRONG_BRAND" and decision.get("brand"):
+                cursor.execute("UPDATE learned_brand_aliases SET rejections = GREATEST(rejections - 1, 0) "
+                               "WHERE brand_key = %s AND alias = %s AND rejections > 0",
+                               (_alias_key(decision["brand"]), _clip(alias, 255)))
+                out["alias_restored"] = bool(cursor.rowcount)
+        cursor.execute("SELECT COUNT(*) AS n FROM rejected_images WHERE sku_key = %s AND (url_norm = %s "
+                       "OR original_url = %s)", (sku, key, url))
+        out["still_rejected"] = int((cursor.fetchone() or {}).get("n") or 0) > 0
+        if not out["still_rejected"]:
+            clause, params = _row_or_sku_clause(_as_int(row_number), sku)
+            cursor.execute(f"SELECT id, image_url FROM curation_candidates WHERE {clause} AND status = 'excluded'",
+                           tuple(params))
+            ids = [r["id"] for r in cursor.fetchall() or [] if url_norm(r.get("image_url")) == key]
+            if ids:
+                marks = ",".join(["%s"] * len(ids))
+                cursor.execute(f"UPDATE curation_candidates SET status = 'eligible' WHERE id IN ({marks})", tuple(ids))
+                out["candidates_restored"] = int(cursor.rowcount or 0)
+        conn.commit()
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise
+    finally:
+        _close(conn)
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -1385,7 +1458,7 @@ def get_brand_source_counts():
     """
     [(ماركة الشيت, الموقع, عدد المنتجات المعتمدة منه, عدد رفض الهوية)] لكل ماركة وموقع في review_decisions.
     المنتجات المعتمدة تُعد مرة واحدة لكل منتج (sku_key، وإلا اسم المنتج أو الصورة): إعادة اعتماد المنتج نفسه لا تُحسب
-    مرتين. رفض الهوية: منتج أو ماركة أو نوع أو حجم أو عبوة مختلفة. التجميع حسب الماركة كما يفهمها البحث (فتهجئتان في
+    مرتين. رفض الهوية: منتج أو ماركة أو نوع أو حجم أو عبوة مختلفة. رفض تراجع عنه المراجع (undone_at) لا يُحسب. التجميع حسب الماركة كما يفهمها البحث (فتهجئتان في
     الشيت لماركة واحدة تُحسبان معاً) يجري في catalog_match.learning.apply. أخطاء قاعدة البيانات تُرفع.
     """
     identity = ",".join(["%s"] * len(IDENTITY_REASON_CODES[:5]))
@@ -1400,6 +1473,7 @@ def get_brand_source_counts():
                    SUM(action = 'rejected' AND reason_code IN ({identity})) AS identity_rejections
             FROM review_decisions
             WHERE brand IS NOT NULL AND TRIM(brand) <> '' AND page_domain IS NOT NULL AND TRIM(page_domain) <> ''
+              AND undone_at IS NULL
             GROUP BY LOWER(TRIM(brand)), LOWER(TRIM(page_domain))
         """, tuple(IDENTITY_REASON_CODES[:5]))
         return [(r["brand"], r["domain"], int(r["approvals"] or 0), int(r["identity_rejections"] or 0))
@@ -1409,14 +1483,17 @@ def get_brand_source_counts():
 
 
 def get_review_decisions():
-    """كل قرارات المراجعين بالترتيب الزمني (مدخل review_stats). أخطاء قاعدة البيانات تُرفع."""
+    """
+    كل قرارات المراجعين بالترتيب الزمني (مدخل review_stats و scripts/eval_record.py)، بلا الرفض الذي تراجع عنه
+    المراجع (undone_at، undo_rejection). أخطاء قاعدة البيانات تُرفع.
+    """
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
         cursor.execute(
             "SELECT id, created_at, action, sku_key, `row_number`, brand, product_name, image_url, page_domain, "
             "identity_tier, engine_decision, was_preselected, vlm_decision, reason_code "
-            "FROM review_decisions ORDER BY created_at, id"
+            "FROM review_decisions WHERE undone_at IS NULL ORDER BY created_at, id"
         )
         rows = cursor.fetchall()
     finally:
@@ -1528,7 +1605,8 @@ def review_stats(rows):
     الحكم على الاختيار المسبق يُحسب مرة واحدة لكل SKU (_precheck_verdict)؛ البراند يُجمع بـ normalize كما يطابقه
     catalog_match.decide.auto_publish_allowed.
     """
-    rows = sorted((dict(r) for r in rows or []), key=lambda r: (str(r.get("created_at") or ""), r.get("id") or 0))
+    rows = sorted((dict(r) for r in rows or [] if not dict(r).get("undone_at")),      # رفض تراجع عنه المراجع
+                  key=lambda r: (str(r.get("created_at") or ""), r.get("id") or 0))
     by_sku = {}
     for r in rows:
         sku = (r.get("sku_key") or "").strip() or f"row:{r.get('row_number')}"

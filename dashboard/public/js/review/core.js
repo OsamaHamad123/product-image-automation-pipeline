@@ -122,6 +122,39 @@
         return r ? r.label : 'سبب آخر';
     }
 
+    // «تراجع عن الرفض»: صور هالمنتج اللي رفضها مراجع (rejected_images من /api/products-json) واللي رفضتها بهالجلسة،
+    // كل رابط مرة وحدة. الزر يبعت undoRejectBody لـ POST /api/review/undo-reject (cli_bridge.undo_reject)
+    const UNDO_REJECT_LABEL = 'تراجع عن الرفض';
+    const UNDO_REJECT_CONFIRM = 'ترجع هالصورة للاقتراحات؟';
+
+    function rejectedImages(product, sessionUrls, sessionReasons) {
+        const out = [];
+        const seen = new Set();
+        const add = (url, code) => {
+            const u = String(url || '').trim();
+            if (!u || seen.has(u) || !/^https?:\/\//i.test(u)) return;
+            seen.add(u);
+            out.push({ url: u, reason_code: String(code || '') });
+        };
+        (Array.isArray(product && product.rejected_images) ? product.rejected_images : [])
+            .forEach(r => add(r && r.url, r && r.reason_code));
+        (sessionUrls ? Array.from(sessionUrls) : []).forEach(u => add(u, sessionReasons && sessionReasons.get ? sessionReasons.get(u) : ''));
+        return out;
+    }
+
+    function undoRejectBody(ctx, url) {
+        return { sku_key: ctx.sku_key, image_url: url, row_number: ctx.row_number };
+    }
+
+    // بعد التراجع: الصورة تطلع من قائمة المرفوضة، ومرشحها المستبعد ('excluded') يرجع للاقتراحات متل ما عمل الخادم
+    function forgetRejection(product, url) {
+        if (!product) return;
+        if (Array.isArray(product.rejected_images)) product.rejected_images = product.rejected_images.filter(r => !r || r.url !== url);
+        (Array.isArray(product.curation_candidates) ? product.curation_candidates : []).forEach(c => {
+            if (c && (c.image_url === url || c.url === url) && c.status === 'excluded') c.status = 'eligible';
+        });
+    }
+
     // سبب الفشل بالعربي: رمز الطابور (failure_code) أو بادئة رسالة product_failures ("NO_RESULTS: ...")
     const NOT_FOUND_CODES = ['NO_RESULTS', 'NO_MATCH', 'ALL_CONFLICTED', 'NOT_FOUND'];
     const FAILURE_TEXT = {
@@ -1285,7 +1318,8 @@
     Object.assign(R, {
         REVIEW_WARNING_LABELS, VARIANT_AXIS_LABELS, REJECT_REASONS, COSMETIC_REASONS, FAILURE_TEXT, NOT_FOUND_CODES,
         VIEW_LABELS, BUCKET_LABELS, FILTERS, WAITING, PRODUCT_CHANGED, STALE_CODES,
-        warningText, reasonLabel, rejectReasonsFor, failureInfo, plainError, hostOf, marketOf, storeMarket, storeOf,
+        warningText, reasonLabel, rejectReasonsFor, UNDO_REJECT_LABEL, UNDO_REJECT_CONFIRM, rejectedImages, undoRejectBody,
+        forgetRejection, failureInfo, plainError, hostOf, marketOf, storeMarket, storeOf,
         sheetStates, unverifiedWarnings, PRESENTATION_FLAG_TEXT, BG_SKIP_RE, bgSkipCode,
         normalizeCandidate, collectCandidates, storedCandidates, storedSelected, bulkEligible, candidateNote, explainPick,
         productIdentity, sameProduct, itemKey, failureKey, reviewedCandidateView,

@@ -66,6 +66,7 @@ class ReviewController extends Controller
                 'products' => url('/api/products-json'),
                 'queueState' => url('/api/review/queue-state'),
                 'explainBackfill' => url('/api/review/explain-backfill'),
+                'undoReject' => url('/api/review/undo-reject'),
                 'clearCache' => url('/api/clear-products-cache'),
                 'search' => url('/api/search'),
                 'select' => url('/api/select_image'),
@@ -268,6 +269,54 @@ class ReviewController extends Controller
             'filled' => (int) ($result['filled'] ?? 0),
             'checked' => (int) ($result['checked'] ?? 0),
         ])->header('Cache-Control', 'no-store');
+    }
+
+    /**
+     * «تراجع عن الرفض» (POST /api/review/undo-reject {sku_key, image_url, row_number?}): رفض بالغلط أو للتجربة. الجسر
+     * (cli_bridge undo_reject) يشيل صف rejected_images واحد لهالمنتج وهالصورة ويعلّم قرار الرفض بـ undone_at، فما بينحسب
+     * بالإحصائيات ولا بالتعلّم، و«دوّر مرة ثانية» بيقدر يلاقي الصورة. CSRF متل كل POST. الشيت والاعتماد ما بيتغيروا.
+     */
+    public function undoReject(Request $request): JsonResponse
+    {
+        $sku = $request->input('sku_key');
+        $url = $request->input('image_url');
+        $row = $request->input('row_number');
+        if (!is_string($sku) || trim($sku) === '' || mb_strlen(trim($sku)) > 64
+            || !is_string($url) || !preg_match('#^https?://#i', trim($url)) || mb_strlen($url) > 4000
+            || ($row !== null && $row !== '' && !ctype_digit((string) $row))) {
+            return response()->json(['status' => 'failed', 'error' => 'ناقص المنتج أو رابط الصورة.'], 422)
+                ->header('Cache-Control', 'no-store');
+        }
+        if (!self::databaseOnline()) {
+            return response()->json(['status' => 'unavailable', 'error' => 'قاعدة البيانات غير متاحة.'], 503)
+                ->header('Cache-Control', 'no-store');
+        }
+        $params = ['sku_key' => trim($sku), 'image_url' => trim($url)];
+        if ($row !== null && $row !== '') {
+            $params['row_number'] = (int) $row;
+        }
+        $result = PythonBridge::run('undo_reject', $params);
+        $status = (string) ($result['status'] ?? '');
+        if ($status === 'success') {
+            ProductController::forgetProductCaches();
+            return response()->json([
+                'status' => 'success',
+                'sku_key' => $params['sku_key'],
+                'image_url' => $params['image_url'],
+                'reason_code' => $result['reason_code'] ?? null,
+                'decision_undone' => (bool) ($result['decision_undone'] ?? false),
+                'still_rejected' => (bool) ($result['still_rejected'] ?? false),
+                'candidates_restored' => (int) ($result['candidates_restored'] ?? 0),
+                'message' => 'رجعت الصورة للاقتراحات. «دوّر مرة ثانية» بيقدر يلاقيها.',
+            ])->header('Cache-Control', 'no-store');
+        }
+        if ($status === 'not_found') {
+            ProductController::forgetProductCaches();
+            return response()->json(['status' => 'not_found', 'error' => 'ما في رفض مسجل لهالصورة لهالمنتج.'], 404)
+                ->header('Cache-Control', 'no-store');
+        }
+        return response()->json(['status' => 'failed', 'error' => 'ما قدرنا نتراجع عن الرفض هلق.'], 500)
+            ->header('Cache-Control', 'no-store');
     }
 
     /** عدد صفوف الطابور الجاهزة للمراجعة: نفس حساب /api/batch-status. */

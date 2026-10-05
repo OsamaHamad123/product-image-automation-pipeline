@@ -812,6 +812,48 @@
     opacity: 0.62;
 }
 
+/* «صور رفضتها لهالمنتج»: كل صورة مرفوضة بزر «تراجع عن الرفض» */
+.rv-rejected {
+    display: flex;
+    flex-direction: column;
+    gap: var(--lq-space-3);
+}
+
+.rv-rejected__grid {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: var(--lq-space-3);
+}
+
+.rv-rejected__item {
+    display: flex;
+    flex-direction: column;
+    gap: var(--lq-space-2);
+    min-width: 0;
+    padding: var(--lq-space-2);
+    border: 1px dashed var(--lq-border);
+    border-radius: var(--lq-radius-lg);
+    background: var(--lq-surface);
+}
+
+.rv-rejected__thumb {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 72px;
+    padding: 6px;
+    overflow: hidden;
+    border-radius: var(--lq-radius-sm);
+    background: var(--lq-bg);
+    opacity: 0.62;
+}
+
+.rv-rejected__thumb img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+}
+
 .rv-alt__thumb {
     position: relative;
     display: flex;
@@ -1926,7 +1968,8 @@
         grid-template-columns: repeat(3, minmax(0, 1fr));
     }
 
-    .rv-alts__grid {
+    .rv-alts__grid,
+    .rv-rejected__grid {
         grid-template-columns: repeat(4, minmax(0, 1fr));
     }
 }
@@ -2036,7 +2079,8 @@
         height: 88px;
     }
 
-    .rv-alts__grid {
+    .rv-alts__grid,
+    .rv-rejected__grid {
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 

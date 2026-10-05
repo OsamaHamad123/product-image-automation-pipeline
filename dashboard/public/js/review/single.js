@@ -31,7 +31,7 @@
     function sessionOf(key) {
         const S = st();
         if (!S.session.has(key)) {
-            S.session.set(key, { search: null, prev: null, searchError: null, pick: null, extras: [], rejected: new Set(),
+            S.session.set(key, { search: null, prev: null, searchError: null, pick: null, extras: [], rejected: new Set(), rejectedWhy: new Map(), undoing: null,
                                  nfOpen: false, customQuery: null, urlDraft: '', rejecting: false, note: '' });
         }
         return S.session.get(key);
@@ -651,6 +651,7 @@
             return;
         }
         sess.rejected.add(candidate.url);
+        sess.rejectedWhy.set(candidate.url, reasonCode);
         if (sess.pick === candidate.url) sess.pick = null;
         R.settleSeen(item.key, data.current || null);
         const flag = S.local.get(item.key);
@@ -700,6 +701,56 @@
         R.markActive();
         // الخادم هو المرجع: قراءة هادئة تأتي بما حفظه فعلاً (المرشحون وحالة الطابور)
         if (!settled) R.loadData({ quiet: true });
+    }
+
+    // «تراجع عن الرفض»: بعد تأكيد، الخادم يشيل رفض الصورة (cli_bridge.undo_reject) فترجع للاقتراحات وما تنحسب
+    // بالإحصائيات، و«دوّر مرة ثانية» بيقدر يلاقيها. الشيت والاعتماد ما بيتغيروا
+    async function undoReject(item, url) {
+        const S = st();
+        const sess = sessionOf(item.key);
+        if (!item || !url || sess.undoing || !S.urls.undoReject) return false;
+        if (!root.confirm(R.UNDO_REJECT_CONFIRM)) return false;
+        sess.undoing = url;
+        if (S.openKey === item.key) renderWorkspace();
+        const res = await R.requestJson(S.urls.undoReject, { method: 'POST', body: R.undoRejectBody(boundContext(item), url) });
+        sess.undoing = null;
+        const data = (res && res.data) || {};
+        const done = !!(res && res.ok && data.status === 'success');
+        if (done || data.status === 'not_found') {
+            sess.rejected.delete(url);
+            sess.rejectedWhy.delete(url);
+            R.forgetRejection(item.product, url);
+            R.toast(done ? (data.still_rejected ? 'انشال رفض واحد، بس الصورة مرفوضة مرة ثانية لهالمنتج.'
+                                                : 'رجعت الصورة للاقتراحات. «دوّر مرة ثانية» بيقدر يلاقيها.')
+                         : 'ما في رفض مسجل لهالصورة.', done ? 'success' : 'info');
+            R.loadData({ quiet: true });
+        } else {
+            R.toast(res && res.network ? 'ما قدرنا نوصل للخادم.' : `ما رجعت الصورة: ${R.plainError(data.error, 'جرّب مرة ثانية.')}`,
+                    'danger', 9000);
+        }
+        if (S.openKey === item.key) renderWorkspace();
+        return done;
+    }
+
+    // الصور اللي رفضها مراجع لهالمنتج، كل وحدة بزر «تراجع عن الرفض»
+    function rejectedPanel(item) {
+        const S = st();
+        const sess = sessionOf(item.key);
+        const list = R.rejectedImages(item.product, sess.rejected, sess.rejectedWhy);
+        if (!list.length || !S.urls.undoReject || item.orphan) return null;
+        return el('section', { className: 'rv-panel rv-rejected', id: 'rvRejected', 'aria-label': 'صور رفضتها لهالمنتج' }, [
+            el('div', { className: 'rv-alts__head' }, [
+                el('h3', { className: 'rv-h3', text: 'صور رفضتها لهالمنتج' }),
+                el('span', { className: 'rv-alts__hint', text: 'رفضت وحدة بالغلط أو للتجربة؟ رجّعها للاقتراحات.' })
+            ]),
+            el('div', { className: 'rv-rejected__grid' }, list.map(r => el('div', { className: 'rv-rejected__item', dataset: { url: r.url } }, [
+                el('span', { className: 'rv-rejected__thumb' }, [R.img(r.url, '', S.urls.imageProxy)]),
+                el('span', { className: 'rv-alt__note rv-tone--danger', text: r.reason_code ? `مرفوضة: ${R.reasonLabel(r.reason_code)}` : 'مرفوضة' }),
+                el('button', { type: 'button', className: 'lq-btn lq-btn--secondary lq-btn--sm', dataset: { undoReject: r.url },
+                               disabled: !!sess.undoing, text: sess.undoing === r.url ? 'عم نرجّعها…' : R.UNDO_REJECT_LABEL,
+                               onclick: () => undoReject(item, r.url) })
+            ])))
+        ]);
     }
 
     function skip() {
@@ -1397,6 +1448,8 @@
                 body.appendChild(el('div', { className: 'rv-empty-actions' }, [searchButton(item, 'دوّر على صور هلق')]));
             }
         }
+        const rejected = rejectedPanel(item);
+        if (rejected) body.appendChild(rejected);
         if (!item.orphan && (sess.nfOpen || S.ws.state === 'empty')) body.appendChild(notFoundPanel(item));
         updateBar();
     }
@@ -1471,7 +1524,7 @@
         sessionOf, currentItem, currentCandidates, currentPick, systemPickUrl, boundContext, openItem, startSearch, reopen,
         resetMoved, approveBlock,
         cancelPendingSearch, applySearchResponse, canApprove, canReject, selectByNumber, approveCurrent, sendJob,
-        settleJob, confirmReplace, confirmPublishAnyway, confirmBgSkip, openReasons, closeReasons, currentReasons, rejectCurrent, skip, move, toggleNotFound,
+        settleJob, confirmReplace, confirmPublishAnyway, confirmBgSkip, undoReject, rejectedPanel, openReasons, closeReasons, currentReasons, rejectCurrent, skip, move, toggleNotFound,
         previewUrl, chooseFile, retryFailures, renderWorkspace, updateBar, updateJobsOffset, isOpen, updatePosition
     };
 })(typeof window !== 'undefined' ? window : globalThis);

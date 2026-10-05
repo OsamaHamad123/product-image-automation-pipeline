@@ -554,7 +554,7 @@ def _record_review(action, params, row_number, sku_key, image_url=None, reason_c
     رفض صورة نُشرت تلقائياً هو رفض لاختيار المحرك (AUTO_PUBLISH).
     أي خطأ هنا يُسجل في السجل ولا يغير نتيجة الإجراء.
     """
-    acted, first = None, {}
+    acted, first, lesson = None, {}, None
     try:
         stored = local_cache_db.get_curation_candidates(row_number, sku_key=sku_key or None, identity=identity)
         candidates = [c for c in stored if not _is_cache_hit(c)]      # ما اختاره المحرك فقط
@@ -578,6 +578,7 @@ def _record_review(action, params, row_number, sku_key, image_url=None, reason_c
         acted = acted or {}
         first = stored[0] if stored else {}
         vlm = acted.get("vlm") if isinstance(acted.get("vlm"), dict) else {}
+        lesson = _learned_spelling(action, params, acted, reason_code, first_brand=first.get("brand"))
         local_cache_db.add_review_decision(
             action, sku_key=sku_key, row_number=row_number,
             brand=_text(params, 'brand') or first.get("brand"),
@@ -586,28 +587,45 @@ def _record_review(action, params, row_number, sku_key, image_url=None, reason_c
             identity_tier=acted.get("identity_tier") or (acted.get("evidence") or {}).get("tier"),
             engine_decision=decision, was_preselected=was_preselected, vlm_decision=vlm.get("decision"),
             reason_code=reason_code,
+            # الكتابة التي يُحسب لها القرار أو عليها: التراجع عن الرفض (undo_reject) يُرجع عدّها
+            **({"learned_alias": lesson[1]} if lesson else {}),
         )
     except Exception:
         logger.exception("تعذر تسجيل قرار المراجع (%s) للصف %s", action, row_number)
     _learn_brand_spelling(action, params, acted, reason_code, first_brand=(first or {}).get("brand"))
 
 
-def _learn_brand_spelling(action, params, acted, reason_code, first_brand=None):
+def _learned_spelling(action, params, acted, reason_code, first_brand=None):
     """
-    التعلّم من المراجعة (catalog_match/learning.py): صورة ماركتها مؤكدة فقط بكتابة المتاجر (تنبيه
-    brand_spelling:<الكتابة>) يعلّم اعتمادُها البحثَ هذه الكتابة لماركة الشيت، ورفضها بسبب WRONG_BRAND يُحسب ضدها.
+    (ماركة الشيت، كتابة المتاجر) التي يعلّمها هذا القرار للبحث أو يُحسب ضدها، أو None: صورة ماركتها مؤكدة فقط بكتابة
+    المتاجر (تنبيه brand_spelling:<الكتابة>) يعلّم اعتمادُها البحثَ هذه الكتابة، ورفضها بسبب WRONG_BRAND يُحسب ضدها.
     التحذيرات من المرشح المحفوظ (أسبابه) أو مما أرسلته شاشة المراجعة (candidate_warnings). لا يُرفع أي خطأ.
     """
     try:
         if action not in ("approved", "rejected") or (action == "rejected" and reason_code != "WRONG_BRAND"):
-            return
+            return None
         from catalog_match import learning
 
         spelling = learning.spelling_from((acted or {}).get("reasons") or []) \
             or learning.spelling_from(params.get('candidate_warnings'))
         brand = _text(params, 'brand') or (first_brand or "")
-        if spelling and brand:
-            local_cache_db.record_brand_alias(brand, spelling, approved=(action == "approved"))
+        return (brand, spelling) if spelling and brand else None
+    except Exception:
+        logger.exception("تعذر قراءة ما يعلّمه قرار المراجع (%s) للبحث", action)
+        return None
+
+
+def _learn_brand_spelling(action, params, acted, reason_code, first_brand=None):
+    """
+    التعلّم من المراجعة (catalog_match/learning.py): الكتابة التي يعلّمها القرار (_learned_spelling) تُحسب لماركة
+    الشيت عند الاعتماد وضدها عند رفض WRONG_BRAND. لا يُرفع أي خطأ.
+    """
+    try:
+        lesson = _learned_spelling(action, params, acted, reason_code, first_brand)
+        if lesson:
+            from catalog_match import learning
+
+            local_cache_db.record_brand_alias(lesson[0], lesson[1], approved=(action == "approved"))
             learning.clear_cache()
     except Exception:
         logger.exception("تعذر تسجيل ما تعلّمه البحث من قرار المراجع (%s)", action)
@@ -1577,6 +1595,37 @@ def action_reject_image(params):
 
 
 # ---------------------------------------------------------------------------
+# undo_reject: «تراجع عن الرفض» (رفض بالغلط أو للتجربة)
+# ---------------------------------------------------------------------------
+
+def action_undo_reject(params):
+    """
+    التراجع عن رفض صورة لمنتج (POST /api/review/undo-reject): يُحذف صف rejected_images واحد لهذا الـ sku_key والرابط،
+    ويُعلَّم قرار الرفض في review_decisions بـ undone_at فلا تحسبه إحصائيات المراجعة ولا التعلّم
+    (local_cache_db.undo_rejection). بعدها «دوّر مرة ثانية» يقدر يلاقي الصورة. لا يغيّر الشيت ولا الاعتماد ولا الطابور.
+    {status: success, ...} أو not_found (ما في رفض مسجل لهالصورة) أو error.
+    """
+    sku_key = _text(params, 'sku_key')
+    image_url = _text(params, 'image_url')
+    if not sku_key or not image_url:
+        return {'status': 'error', 'error': 'sku_key and image_url are required'}
+    try:
+        result = local_cache_db.undo_rejection(sku_key, image_url, row_number=params.get('row_number'))
+    except Exception:
+        return _failure('failed', "Could not undo the rejection (details in temp/search.log).", "undo_reject failed")
+    if not result.get("removed"):
+        return dict({'status': 'not_found', 'error': "ما في رفض مسجل لهالصورة لهالمنتج", 'sku_key': sku_key,
+                     'image_url': image_url}, **result)
+    if result.get("alias_restored"):
+        try:
+            from catalog_match import learning
+            learning.clear_cache()
+        except Exception:
+            logger.exception("تعذر تفريغ كاش التعلّم بعد التراجع عن الرفض")
+    return dict({'status': 'success', 'sku_key': sku_key, 'image_url': image_url}, **result)
+
+
+# ---------------------------------------------------------------------------
 # review_stats (قراءة فقط: دليل النشر الآلي من قرارات المراجعين)
 # ---------------------------------------------------------------------------
 
@@ -1950,6 +1999,7 @@ ACTIONS = {
     'select_image': action_select_image,
     'upload_manual_image': action_upload_manual_image,
     'reject_image': action_reject_image,
+    'undo_reject': action_undo_reject,
     'review_stats': action_review_stats,
     'sheet-preview': action_sheet_preview,
     'sheet-save': action_sheet_save,
