@@ -2271,6 +2271,22 @@ def _forget_slow_hosts():
         print(f"تنبيه: تعذر تفريغ ذاكرة المواقع البطيئة: {e}")
 
 
+def _harvest_pending_brand_sites():
+    """
+    مواقع ماركات أضافها المالك بزر «أضف» في «ماركات ناقصة» (system_settings.pending_harvest_domains) تُفهرس أول التشغيل
+    بنفس حصّاد الخرائط للمتاجر (catalog_match.brand_assistant.harvest_pending)، فقط إذا LOCAL_INDEX_ENABLED شغّال:
+    بحد أقصى 3 مواقع و120 ثانية، والباقي ينتظر التشغيل اللي بعده. لا يرفع أبداً.
+    """
+    try:
+        from catalog_match import brand_assistant, settings as cm_settings
+        if not cm_settings.local_index_enabled():
+            return
+        for r in brand_assistant.harvest_pending():
+            print(f"[BrandSites] {r['domain']}: {r['status']} ({r['urls']} صفحة منتج)")
+    except Exception as e:
+        print(f"تنبيه: تعذر فهرسة مواقع الماركات المضافة: {e}")
+
+
 def run_worker_mode(trigger="manual", report=True, deadline_ts=None):
     """
     عامل الخلفية: يسحب المهام ذرياً ويعالجها بالتوازي (WORKER_CONCURRENCY منتجاً بنفس الوقت، 5 افتراضياً).
@@ -2373,6 +2389,7 @@ def run_worker_mode(trigger="manual", report=True, deadline_ts=None):
         brand_mappings = google_sheets.get_brand_mappings(sheets_client, config.SPREADSHEET_NAME_OR_URL)
         _forget_brand_spellings()
         _forget_slow_hosts()
+        _harvest_pending_brand_sites()
         google_sheets.init_async_queue(config.CREDENTIALS_FILE, config.SPREADSHEET_NAME_OR_URL)
         queue_started = True
         _refresh_state("pre_caching", run_id=run_id, notice=notice)

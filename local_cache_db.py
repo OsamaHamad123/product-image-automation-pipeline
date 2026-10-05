@@ -3433,5 +3433,95 @@ def get_run_history(limit=20):
         _close(conn)
 
 
+# ---------------------------------------------------------------------------
+# «ماركات ناقصة» (catalog_match/brand_assistant.py): ما في الطابور عن ماركات الشيت، ومواقع ماركات ما زال فهرسها بالانتظار
+# ---------------------------------------------------------------------------
+
+PENDING_HARVEST_KEY = "pending_harvest_domains"     # system_settings: قائمة JSON بمواقع ماركات أضافها المالك بزر «أضف»
+PENDING_HARVEST_MAX = 50
+
+
+def _json_or(value, default):
+    try:
+        return json.loads(value) if isinstance(value, (str, bytes)) and value else default
+    except ValueError:
+        return default
+
+
+def queue_brand_rows():
+    """
+    [{row_number, name, brand, brand_ar, name_ar, discovered}] لكل صفوف الطابور (قراءة فقط): ماركة الشيت كما حُفظت،
+    اسمها العربي واسم المنتج العربي من حمولة الصف، وكتابات المتاجر التي اكتشفها البحث (trace_json.outcome.
+    discovered_brands). حمولة أو trace غير صالحين تُقرآن فارغتين. أخطاء قاعدة البيانات تُرفع.
+    """
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT `row_number`, product_name, brand, "
+            "CASE WHEN payload_json IS NOT NULL AND JSON_VALID(payload_json) "
+            "THEN JSON_UNQUOTE(JSON_EXTRACT(payload_json, '$.brand_ar')) END AS brand_ar, "
+            "CASE WHEN payload_json IS NOT NULL AND JSON_VALID(payload_json) "
+            "THEN JSON_UNQUOTE(JSON_EXTRACT(payload_json, '$.name_ar')) END AS name_ar, "
+            "CASE WHEN trace_json IS NOT NULL AND JSON_VALID(trace_json) "
+            "THEN JSON_EXTRACT(trace_json, '$.outcome.discovered_brands') END AS discovered "
+            "FROM automation_queue ORDER BY `row_number`")
+        rows = cursor.fetchall() or []
+    finally:
+        _close(conn)
+    out = []
+    for r in rows:
+        found = _json_or(r.get("discovered"), [])
+        out.append({"row_number": r["row_number"], "name": r.get("product_name") or "", "brand": r.get("brand") or "",
+                    "brand_ar": r.get("brand_ar") or "", "name_ar": r.get("name_ar") or "",
+                    "discovered": [str(d) for d in found if str(d or "").strip()] if isinstance(found, list) else []})
+    return out
+
+
+def pending_harvest_domains():
+    """مواقع الماركات التي أضافها المالك وما انفهرست بعد (system_settings.pending_harvest_domains). أخطاء قاعدة البيانات تُرفع."""
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT `value` FROM system_settings WHERE `key` = %s", (PENDING_HARVEST_KEY,))
+        row = cursor.fetchone()
+    finally:
+        _close(conn)
+    found = _json_or((row or {}).get("value"), [])
+    return [str(d) for d in found if str(d or "").strip()] if isinstance(found, list) else []
+
+
+def _change_pending_harvest(change):
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("INSERT IGNORE INTO system_settings (`key`, `value`) VALUES (%s, '[]')", (PENDING_HARVEST_KEY,))
+        cursor.execute("SELECT `value` FROM system_settings WHERE `key` = %s FOR UPDATE", (PENDING_HARVEST_KEY,))
+        found = _json_or((cursor.fetchone() or {}).get("value"), [])
+        current = [str(d) for d in found if str(d or "").strip()] if isinstance(found, list) else []
+        updated = list(dict.fromkeys(change(current)))[-PENDING_HARVEST_MAX:]
+        cursor.execute("UPDATE system_settings SET `value` = %s WHERE `key` = %s",
+                       (json.dumps(updated, ensure_ascii=False), PENDING_HARVEST_KEY))
+        conn.commit()
+        return updated
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        _close(conn)
+
+
+def add_pending_harvest_domains(domains):
+    """يضيف مواقع لقائمة ما ينتظر الفهرسة (بلا تكرار)؛ تعيد القائمة بعد الإضافة. أخطاء قاعدة البيانات تُرفع."""
+    wanted = [str(d).strip().lower() for d in domains or [] if str(d or "").strip()]
+    return _change_pending_harvest(lambda current: current + wanted)
+
+
+def remove_pending_harvest_domains(domains):
+    """يشيل مواقع فُهرست (أو ما عاد لها لزوم) من القائمة؛ تعيد ما بقي. أخطاء قاعدة البيانات تُرفع."""
+    gone = {str(d).strip().lower() for d in domains or []}
+    return _change_pending_harvest(lambda current: [d for d in current if d.lower() not in gone])
+
+
 # تهيئة قاعدة البيانات تلقائياً عند استيراد الموديول للمرة الأولى
 init_db()

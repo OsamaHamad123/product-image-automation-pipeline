@@ -2025,6 +2025,124 @@ def action_bg_methods(params):
     return {"status": "success", "local": image_processor.local_methods_available()}
 
 
+# ---------------------------------------------------------------------------
+# «ماركات ناقصة من Brands Mapping» (catalog_match/brand_assistant.py): brand_suggestions (قراءة فقط، بلا بحث مدفوع)،
+# brand_official_site (استعلام Serper واحد بزر صريح)، brand_add (يكتب شيت المالك، بزر صريح فقط)
+# ---------------------------------------------------------------------------
+
+def _brand_invalid(code, message, field=""):
+    return {"status": "invalid", "code": code, "field": field, "error": message}
+
+
+def action_brand_suggestions(params):
+    """
+    الماركات التي تذكرها صفوف الطابور وما لها صف في ورقة Brands Mapping: [{brand, rows, brand_ar, synonyms,
+    official_domain: ''}]، الأكثر صفوفاً أولاً. synonyms كتابات المتاجر التي اكتشفها البحث (trace outcome.
+    discovered_brands) أو تعلّمها من المراجعة. قراءة فقط: لا بحث مدفوع ولا كتابة بالشيت. ورقة ما انقرت = خطأ (ما نقترح
+    كل الماركات على أساس شيت ما شفناه).
+    """
+    from catalog_match import brand_assistant
+    try:
+        rows = local_cache_db.queue_brand_rows()
+    except Exception:
+        return _failure("failed", "Could not read the automation queue (details in temp/search.log).",
+                        "brand_suggestions failed")
+    try:
+        client = google_sheets.get_sheets_client()
+        if not client:
+            raise RuntimeError("Google Sheets API connection failed")
+        mappings = google_sheets.sheet_brand_mappings(client, config.SPREADSHEET_NAME_OR_URL) or {}
+    except Exception:
+        return _failure("failed", "Could not read the Brands Mapping sheet (details in temp/search.log).",
+                        "brand_suggestions sheet read failed")
+    try:
+        aliases = local_cache_db.get_learned_brand_aliases()
+    except Exception as e:
+        logger.warning("brand_suggestions: learned spellings unavailable: %s", e)
+        aliases = []
+    try:
+        brands = brand_assistant.suggestions(rows, mappings, aliases)
+    except Exception:
+        return _failure("failed", "Could not work out the missing brands (details in temp/search.log).",
+                        "brand_suggestions failed")
+    return {"status": "success", "brands": brands, "rows": len(rows)}
+
+
+def action_brand_official_site(params):
+    """
+    «اقترح الموقع الرسمي»: استعلام Serper ويب واحد بالضبط `"<brand>" official website` (بلا hedging، ويُسجل في سجل الصرف
+    مثل كل بحث؛ ما أُجيب عنه فقط يُحتسب)، ثم أول نتيجتين مو متجر ولا سوق ولا شبكة اجتماعية ولا موقع صور، وفي نطاقها أو
+    عنوان صفحتها كلمة الماركة الرئيسية: {status: success, brand, candidates: [{title, domain, url}], queries: 1}.
+    لا يكتب شيئاً.
+    """
+    from catalog_match import brand_assistant, settings as cm_settings
+    from catalog_match.providers.serper_web import SerperWebProvider, parse_organic
+    try:
+        brand = brand_assistant.clean_brand(_text(params, "brand"))
+    except brand_assistant.BrandRequestError as e:
+        return _brand_invalid(e.code, str(e), e.field)
+    if not cm_settings.serper_api_key():
+        return {"status": "unavailable", "code": "no_key", "error": "No Serper key is configured."}
+    provider = SerperWebProvider()
+    provider.hedge = False                           # exactly one query, one credit
+    try:
+        results = parse_organic(provider._request(brand_assistant.search_query(brand), "en"))
+    except Exception:
+        return _failure("failed", "The search did not answer (details in temp/search.log).", "brand_official_site failed")
+    local_cache_db.record_search_spend(
+        {"provider_health": [{"provider": "serper_web", "status": "ok" if results else "empty", "hedges": 0}]},
+        brand_assistant.OFFICIAL_SITE_SPEND_RUN)
+    candidates = brand_assistant.official_site_candidates(
+        [{"link": c.page_url, "title": c.title} for c in results], brand)
+    return {"status": "success", "brand": brand, "candidates": candidates, "queries": 1}
+
+
+def action_brand_add(params):
+    """
+    يضيف ماركة لورقة 'Brands Mapping' بصف واحد (Brand, Synonyms, ..., Official domains): {brand, synonyms: [...],
+    official_domains: [...]} أو {items: [{...}, ...]} لـ «أضف الكل» (صف لكل ماركة، بطلب كتابة واحد). يكتب شيت المالك:
+    يُستدعى فقط من زر صريح. يتحقق: الماركة غير فاضية ولا مكتوبة أصلاً (بعد قراءة طازجة للورقة، بلا اعتبار للحالة أو
+    الفراغات)، كل موقع نطاق صرف بلا بروتوكول ولا مسار، وعشرة مرادفات كحد أقصى. كاش الماركات يُحذف ليراها التشغيل
+    الجاي، ومواقع الماركات تنضاف لطابور الفهرسة (system_settings.pending_harvest_domains) لتفهرس أول التشغيل الجاي.
+    """
+    from catalog_match import brand_assistant as ba
+    raw = params.get("items") if isinstance(params.get("items"), list) else [params]
+    if not raw or len(raw) > ba.MAX_BATCH:
+        return _brand_invalid("too_many_brands", "Between 1 and %d brands at a time." % ba.MAX_BATCH, "items")
+    items = []
+    try:
+        for entry in raw:
+            if not isinstance(entry, dict):
+                return _brand_invalid("invalid_brand", "Each brand must be an object.", "brand")
+            items.append(ba.validate_brand_request(entry))
+    except ba.BrandRequestError as e:
+        return _brand_invalid(e.code, str(e), e.field)
+    try:
+        client = google_sheets.get_sheets_client()
+        if not client:
+            raise RuntimeError("Google Sheets API connection failed")
+        res = google_sheets.add_brand_mappings(client, config.SPREADSHEET_NAME_OR_URL, items)
+    except google_sheets.SheetTransientError:
+        return _failure("failed", "Google Sheets is temporarily unavailable (quota or a Google server error). "
+                                  "Nothing was written; try again in a minute.", "brand_add failed")
+    except Exception:
+        return _failure("failed", "Could not write the Brands Mapping sheet. Check that it is shared with the service "
+                                  "account (details in temp/search.log).", "brand_add failed")
+    added = res.get("added") or []
+    if not added:
+        return {"status": "duplicate", "code": "duplicate", "error": "The brand is already in Brands Mapping.",
+                "skipped": res.get("skipped") or []}
+    domains = [d for item in items if item["brand"] in added for d in item["official_domains"]]
+    queued = []
+    if domains:
+        try:
+            local_cache_db.add_pending_harvest_domains(domains)
+            queued = domains
+        except Exception as e:
+            logger.warning("brand_add: the sites could not be queued for indexing: %s", e)
+    return {"status": "success", "added": added, "skipped": res.get("skipped") or [], "harvest_queued": queued}
+
+
 ACTIONS = {
     'get_products': action_get_products,
     'search': action_search,
@@ -2036,6 +2154,9 @@ ACTIONS = {
     'sheet-preview': action_sheet_preview,
     'sheet-save': action_sheet_save,
     'explain_backfill': action_explain_backfill,
+    'brand_suggestions': action_brand_suggestions,
+    'brand_official_site': action_brand_official_site,
+    'brand_add': action_brand_add,
     'export_run': action_export_run,
     'lock_state': action_lock_state,
     'publish_check': action_publish_check,
