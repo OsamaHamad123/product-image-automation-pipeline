@@ -1025,8 +1025,8 @@ def route(spec: SkuSpec, ranked: Sequence[RankedCandidate],
     if warnings and LANE_PREFIX + "strict" in published.reasons:
         # lane 'strict' is the pick with nothing left for the reviewer to check: a review warning (low resolution,
         # a foreign store, a variant only one side states, ...) puts it in 'other', and the lane never publishes it
-        published.reasons[:] = [r for r in published.reasons if r != LANE_PREFIX + "strict"]
-        published.reasons.append(LANE_PREFIX + "other")
+        published.reasons[:] = [LANE_PREFIX + "other" if r == LANE_PREFIX + "strict" else r
+                                for r in published.reasons]          # in place: the reasons keep their order
         if by_lane:
             outcome.decision = "REVIEW_PRESELECTED"
             published.reasons[:] = [r for r in published.reasons if r not in ("auto_publish", LANE_PUBLISH_REASON)]
