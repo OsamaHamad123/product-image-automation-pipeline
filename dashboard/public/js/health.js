@@ -940,6 +940,190 @@
         return { run: run, state: state };
     }
 
+    // ------------------------------------------------------------------
+    // متقدم: «صور قديمة بخلفية بيضا» (RecutController): «احسب» POSTs the dry run (it changes nothing), «ابدأ» POSTs a
+    // capped batch that runs in the background, and GET /api/system/reprocess follows it every few seconds while it runs
+    // ------------------------------------------------------------------
+
+    var REPROCESS_PLAN_URL = '/api/system/reprocess/plan';
+    var REPROCESS_START_URL = '/api/system/reprocess/start';
+    var REPROCESS_STATUS_URL = '/api/system/reprocess';
+    var REPROCESS_POLL_MS = 5000;
+    var REPROCESS_DEFAULT_MAX = 20;
+    var REPROCESS_ENDED = {
+        done: 'آخر دفعة خلصت',
+        max: 'آخر دفعة وقفت عند عدد الصور اللي حددته',
+        budget: 'آخر دفعة وقفت عند أقصى تكلفة حددتها',
+        stopped: 'آخر دفعة وقفت بخطأ',
+        stale: 'آخر دفعة انقطعت بالنص'
+    };
+    var REPROCESS_ERRORS = [
+        [/^photoroom_402$/, 'رصيد PhotoRoom خلص أو الاشتراك موقوف'],
+        [/^photoroom_(401|403|no_key)$/, 'مفتاح PhotoRoom مش شغّال'],
+        [/^photoroom_429$/, 'PhotoRoom رافض طلبات كتير هلق'],
+        [/timeout|connection_error|_5\d\d$/, 'الخدمة ما ردّت (انقطاع أو بطء)'],
+        [/^upload_/, 'الرفع على Cloudinary ما زبط'],
+        [/^(download_|source_|candidate_)/, 'ما قدرنا ننزّل الصورة المنشورة'],
+        [/^outbox_unreadable$/, 'ما قدرنا نقرا طابور الكتابة بالشيت']
+    ];
+
+    function pictures(n) {
+        return plural(count(n), 'صورة', 'صورتين', 'صور', 'صورة وحدة');
+    }
+
+    function reprocessError(code) {
+        code = String(code || '');
+        for (var i = 0; i < REPROCESS_ERRORS.length; i++) {
+            if (REPROCESS_ERRORS[i][0].test(code)) return REPROCESS_ERRORS[i][1];
+        }
+        return 'صار خطأ (التفاصيل بسجل الأتمتة)';
+    }
+
+    /* The status line of the last batch (RecutController::batchState), '' when there was none. */
+    function reprocessBatchText(batch) {
+        if (!isObject(batch) || !batch.state || batch.state === 'none') return '';
+        var done = count(batch.done);
+        var money = usd(batch.spent_usd);
+        if (batch.running && batch.state === 'starting') return 'عم تبلّش الدفعة…';
+        if (batch.running) {
+            return 'عم نعيد القص: خلص ' + done + ' من ' + count(batch.planned > 0 ? Math.min(batch.planned, batch.max || batch.planned) : batch.max)
+                + '، والتكلفة لهلق ' + money + '.' + (batch.current ? ' هلق: «' + batch.current + '».' : '');
+        }
+        var text = (REPROCESS_ENDED[batch.state] || 'آخر دفعة خلصت') + ': انعادت ' + pictures(done) + ' شفافة، والتكلفة ' + money + '.';
+        if (count(batch.needs_look) > 0) {
+            text += ' ' + pictures(batch.needs_look) + ' طلع قصها بملاحظات وبدها عينك بـ«فحص القص».';
+        }
+        if (batch.state === 'stopped') {
+            text += ' وقفت لأنو ' + reprocessError(batch.last_error) + (batch.last_item ? ' (عند «' + batch.last_item + '»)' : '')
+                + '. اضغط «ابدأ» مرة تانية بعد ما ينحل لتكمّل من وين وقفت.';
+        } else if (batch.state === 'stale') {
+            text += ' اضغط «ابدأ» لتكمّل من وين وقفت.';
+        }
+        return text;
+    }
+
+    /* «احسب»'s answer: {text, tone, form (show «ابدأ»), max (the suggested batch size)}. */
+    function reprocessPlanView(res) {
+        var data = res && isObject(res.data) ? res.data : null;
+        if (!data || !res.ok || data.status !== 'success' || !isObject(data.plan)) {
+            return { text: requestError(res, 'ما قدرنا نعدّ الصور: الخادم ما ردّ.'), tone: 'danger', form: false, max: 0 };
+        }
+        var plan = data.plan;
+        if (data.bg_off) {
+            return { text: 'عزل الخلفية متوقف بالإعدادات، فما منقدر نعيد قص الصور هلق. رجّعه أول من تبويب «معالجة الصور».',
+                tone: 'warning', form: false, max: 0 };
+        }
+        if (data.white_output) {
+            return { text: 'الإعدادات بتنشر الصور على خلفية بيضا، فالصور البيضا مش غلط وما في شي نعيده.',
+                tone: 'muted', form: false, max: 0 };
+        }
+        var todo = count(plan.todo);
+        var parts = [];
+        if (todo === 0) {
+            parts.push('ما في صور بيضا لازم تنعاد: كل الصور اللي بالشيت شفافة.');
+        } else {
+            parts.push('في ' + pictures(todo) + ' بخلفية بيضا لازم تنعاد.');
+            if (num(plan.price) > 0) {
+                parts.push('التكلفة التقريبية ' + usd(plan.usd) + ' (' + plan.calls + ' طلب عزل × ' + usdPrecise(plan.price)
+                    + ')، ولو بعض الصور احتاجت إعادة ممكن توصل لـ ' + usd(plan.worst_usd) + '.');
+            } else {
+                parts.push('ما في تكلفة: القص بطريقة محلية مجانية.');
+            }
+        }
+        if (count(plan.transparent) > 0) parts.push(pictures(plan.transparent) + ' شفافة أصلاً.');
+        if (count(plan.not_in_sheet) > 0) parts.push(pictures(plan.not_in_sheet) + ' ما عادت بالشيت أو غيّرتها بإيدك، فما رح نلمسها.');
+        if (count(plan.skipped_before) > 0) parts.push(pictures(plan.skipped_before) + ' وقفت عندها دفعة قبل وبدها عينك بـ«فحص القص».');
+        if (count(plan.probe_failed) > 0) parts.push('ما قدرنا نفحص ' + pictures(plan.probe_failed) + ' هلق.');
+        return { text: parts.join(' '), tone: todo > 0 ? 'warning' : 'success', form: todo > 0,
+            max: Math.max(1, Math.min(todo, REPROCESS_DEFAULT_MAX, count(data.batch_max) || REPROCESS_DEFAULT_MAX)) };
+    }
+
+    /* plan() and start(max, usd) POST once each (a second click while one works does nothing); while a batch runs the
+       status line follows GET /api/system/reprocess. Deps: fetchJson, render({text, busy, form, max}), toast, confirm,
+       schedule. */
+    function createReprocess(deps) {
+        var state = { busy: false, running: false, timer: null, planText: '' };
+
+        function show(view) {
+            deps.render(view);
+        }
+
+        function watch() {
+            if (state.timer === null && state.running) state.timer = deps.schedule(poll, REPROCESS_POLL_MS);
+        }
+
+        function follow(batch) {
+            state.running = isObject(batch) && batch.running === true;
+            var line = reprocessBatchText(batch);
+            show({ text: [state.planText, line].filter(Boolean).join(' '), busy: state.running, form: !state.running && state.form });
+            watch();
+        }
+
+        function poll() {
+            state.timer = null;
+            return deps.fetchJson(REPROCESS_STATUS_URL, { method: 'GET' }).then(function (res) {
+                if (res && res.ok && isObject(res.data)) follow(res.data.batch);
+                else watch();
+            }, function () {
+                watch();
+            });
+        }
+
+        function plan() {
+            if (state.busy || state.running) return Promise.resolve(null);
+            state.busy = true;
+            show({ text: 'عم نعدّ الصور… ممكن ياخد دقيقة.', busy: true, form: false });
+            return deps.fetchJson(REPROCESS_PLAN_URL, { method: 'POST', body: {} }).then(function (res) {
+                return [reprocessPlanView(res), res && res.data];
+            }, function () {
+                return [reprocessPlanView(null), null];
+            }).then(function (pair) {
+                var view = pair[0];
+                state.busy = false;
+                state.form = view.form;
+                state.planText = view.text;
+                show({ text: view.text, busy: false, form: view.form, max: view.max, tone: view.tone });
+                if (isObject(pair[1]) && isObject(pair[1].batch) && pair[1].batch.running) follow(pair[1].batch);
+                return view;
+            });
+        }
+
+        function start(max, money) {
+            if (state.busy || state.running) return Promise.resolve(false);
+            var n = count(max);
+            var cap = num(money);
+            if (n < 1 || cap === null || cap <= 0) {
+                deps.toast('اكتب كم صورة وأقصى تكلفة أكبر من صفر.', 'warning');
+                return Promise.resolve(false);
+            }
+            return Promise.resolve(deps.confirm('رح نعيد قص لحد ' + pictures(n) + ' شفافة، وما منتعدّى ' + usd(cap)
+                + '. الصورة الجديدة بتنكتب بالشيت بس إذا لسا الرابط القديم بخليتها. متأكد؟')).then(function (ok) {
+                if (!ok) return false;
+                state.busy = true;
+                show({ text: 'عم تبلّش الدفعة…', busy: true, form: false });
+                return deps.fetchJson(REPROCESS_START_URL, { method: 'POST', body: { max: n, max_usd: cap } }).then(function (res) {
+                    var data = res && res.ok && isObject(res.data) && res.data.status === 'success' ? res.data : null;
+                    state.busy = false;
+                    if (data && data.started) {
+                        deps.toast(String(data.message || 'بلّشت الدفعة بالخلفية.'), 'success');
+                        follow(isObject(data.batch) ? data.batch : { state: 'starting', running: true });
+                        return true;
+                    }
+                    var text = data ? String(data.message || 'ما بلّشت الدفعة.') : requestError(res, 'ما بلّشت الدفعة: الخادم ما ردّ.');
+                    show({ text: text, busy: false, form: state.form });
+                    deps.toast(text, data ? 'warning' : 'danger');
+                    return false;
+                }, function () {
+                    state.busy = false;
+                    show({ text: 'ما قدرنا نوصل للخادم لنبدأ الدفعة.', busy: false, form: state.form });
+                    return false;
+                });
+            });
+        }
+
+        return { plan: plan, start: start, poll: poll, state: state };
+    }
+
     var api = {
         lanesView: lanesView, LANES: LANES,
         publishView: publishView, publishRunningView: publishRunningView, createPublishCheck: createPublishCheck,
@@ -955,6 +1139,9 @@
     api.createLocalIndex = createLocalIndex;
     api.evalExportView = evalExportView;
     api.createEvalExport = createEvalExport;
+    api.reprocessPlanView = reprocessPlanView;
+    api.reprocessBatchText = reprocessBatchText;
+    api.createReprocess = createReprocess;
 
     // ------------------------------------------------------------------
     // DOM
@@ -1542,5 +1729,50 @@
             }
         });
         evalButton.addEventListener('click', function () { evalExport.run(); });
+    }
+
+    // متقدم: «صور قديمة بخلفية بيضا»: «احسب» counts and prices, «ابدأ» starts a capped batch, the line follows it
+    var reprocessButton = $('reprocess-plan');
+    var reprocessStatus = $('reprocess-status');
+    var reprocessLabel = $('reprocess-plan-label');
+    var reprocessForm = $('reprocess-form');
+    var reprocessMax = $('reprocess-max');
+    var reprocessUsd = $('reprocess-usd');
+    var reprocessStart = $('reprocess-start');
+
+    function renderReprocess(view) {
+        if (reprocessStatus) reprocessStatus.textContent = view.text || '';
+        if (reprocessLabel) reprocessLabel.textContent = view.busy ? 'عم يشتغل…' : 'احسب';
+        if (reprocessButton) {
+            reprocessButton.disabled = !!view.busy;
+            if (view.busy) reprocessButton.setAttribute('aria-busy', 'true');
+            else reprocessButton.removeAttribute('aria-busy');
+        }
+        if (reprocessStart) reprocessStart.disabled = !!view.busy;
+        setHidden(reprocessForm, !view.form);
+        if (reprocessMax && view.max) reprocessMax.value = String(view.max);
+    }
+
+    if (reprocessButton) {
+        var reprocess = createReprocess({
+            fetchJson: fetchJson,
+            render: renderReprocess,
+            toast: function (text, variant) {
+                if (window.Laqta && window.Laqta.toast) window.Laqta.toast(text, { variant: variant });
+            },
+            confirm: function (text) {
+                return window.Laqta && window.Laqta.ask ? window.Laqta.ask({ title: 'نبلّش الدفعة؟', text: text, confirmText: 'ابدأ' })
+                    : window.confirm(text);
+            },
+            schedule: function (fn, ms) { return window.setTimeout(fn, ms); }
+        });
+        reprocessButton.addEventListener('click', function () { reprocess.plan(); });
+        if (reprocessForm) {
+            reprocessForm.addEventListener('submit', function (event) {
+                event.preventDefault();
+                reprocess.start(reprocessMax ? reprocessMax.value : 0, reprocessUsd ? reprocessUsd.value : 0);
+            });
+        }
+        reprocess.poll();
     }
 })();

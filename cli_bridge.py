@@ -996,6 +996,12 @@ def _reviewer_check(params, sku_key, row_number, product_name, image_url, out, r
     return check
 
 
+def _master_facts(res):
+    """خلفية الأصل المرفوع وفحص قصه للحل المعتمد (main.master_facts؛ قاموس فاضي إذا ما انعرف)."""
+    master_facts = getattr(_pipeline(), "master_facts", None)
+    return master_facts(res) if callable(master_facts) else {}
+
+
 def _human_decision(barcode, product_name, brand, original_url, approved_by, sku_key, row_number, rows,
                     page_gtin=None, page_gtin_url=None):
     """
@@ -1009,7 +1015,7 @@ def _human_decision(barcode, product_name, brand, original_url, approved_by, sku
         local_cache_db.save_product_resolution(
             barcode, product_name, brand, original_url, res["link"], None, res.get("metadata"),
             perceptual_hash=res.get("phash"), verification_status="human_approved", approved_by=approved_by,
-            sku_key=sku_key, color_signature=res.get("color_signature"),
+            sku_key=sku_key, color_signature=res.get("color_signature"), **_master_facts(res),
             **({"page_gtin": page_gtin, "page_gtin_url": page_gtin_url} if page_gtin else {}),
         )
         local_cache_db.update_task_status_by_row(row_number, "completed", sku_key=sku_key, rows=rows)
@@ -2830,6 +2836,232 @@ def action_barcode_write(params):
     return out
 
 
+# ---------------------------------------------------------------------------
+# «أعد معالجتها شفافة» (بطاقة بالقسم المتقدم بصفحة الصحة) و«فحص القص» (صفحة المراجعة): recut.py
+# ---------------------------------------------------------------------------
+
+def _reprocess_script():
+    """scripts/reprocess_transparent.py كموديول (بالمسار: scripts/ على sys.path بيغطي موديولات بنفس الاسم)."""
+    import importlib.util
+
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts", "reprocess_transparent.py")
+    spec = importlib.util.spec_from_file_location("reprocess_transparent", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _reprocess_state_view(state):
+    """حالة آخر دفعة (temp/reprocess_state.json) بالحقول اللي بتعرضها البطاقة."""
+    keys = ("state", "trigger", "started_at", "updated_at", "finished_at", "max", "max_usd", "planned", "done",
+            "skipped", "needs_look", "busy", "queued", "calls", "spent_usd", "last_error", "last_item", "current")
+    return {k: state.get(k) for k in keys if k in state}
+
+
+def action_reprocess_plan(params):
+    """
+    التجربة (dry run) لـ «أعد معالجتها شفافة»: كم صورة منشورة أصلها لسا أبيض وبالشيت، وكم بتكلّف إعادة قصها (طلبات
+    العزل × السعر)، مع حالة آخر دفعة. ما بيغيّر شي: لا صورة ولا رابط ولا خلية ولا طلب مدفوع (فحص الأصل تنزيل مجاني).
+    الاستجابة: {status, plan: {todo, transparent, not_in_sheet, skipped_before, probe_failed, pictures, method,
+    estimate: {calls, price, usd, worst_usd}, samples}, running, state, bg_off, batch_max}.
+    """
+    import processing_profile
+    from catalog_match import settings
+
+    rpt = _reprocess_script()
+    state = rpt.read_state()
+    out = {"status": "success", "running": rpt.running(state), "state": _reprocess_state_view(state),
+           "bg_off": processing_profile.current().skips_background, "white_output": rpt.white_output(),
+           "batch_max": settings.recut_batch_max()}
+    try:
+        found = rpt.build_plan(_open_sheet(), retry_skipped=_as_bool(params.get("retry_skipped")))
+    except Exception:
+        return _failure("failed", "Could not read the sheet or the database (details in temp/search.log).",
+                        "reprocess_plan failed")
+    out["plan"] = _recut().json_safe(rpt.summary(found))
+    return out
+
+
+def action_reprocess_start(params):
+    """
+    «ابدأ»: دفعة بسقف (max صورة، max_usd دولار) كعملية مستقلة (scripts/reprocess_transparent.py --apply)، والبطاقة
+    بتتابع temp/reprocess_state.json. {status, started, reason: started | running | run_active | bg_off | unavailable}.
+    """
+    from catalog_match import settings
+
+    try:
+        count = int(params.get("max") or 0)
+        usd = float(params.get("max_usd") or 0)
+    except (TypeError, ValueError):
+        return {"status": "invalid", "error": "max and max_usd must be numbers"}
+    if count < 1 or count > settings.recut_batch_max() or not (0 < usd <= 100):
+        return {"status": "invalid", "error": "max or max_usd out of range", "batch_max": settings.recut_batch_max()}
+    result = _reprocess_script().start_detached(count, usd)
+    return {"status": "success", "started": bool(result.get("started")), "reason": result.get("reason")}
+
+
+def _recut():
+    import recut
+    return recut
+
+
+def action_cutout_gallery(params):
+    """
+    صفحة «فحص القص»: الصور المنشورة الأحدث (resolved_products) مع علامات القص (recut.GALLERY_FLAGS) والصفحة المطلوبة،
+    بعد ما يفحص لحد 24 صورة ما انفحصت (measure، تنزيل مجاني من Cloudinary بينحفظ)، وآخر التبديلات (للتراجع)، وشو
+    الطرق المتاحة لـ «أعد القص». ما بيكتب بالشيت ولا بيصرف شي.
+    """
+    import cutout_finish
+
+    recut = _recut()
+    flag = _text(params, "flag") or None
+    if flag is not None and flag not in recut.GALLERY_FLAGS:
+        return {"status": "invalid", "error": f"unknown flag {flag!r}", "allowed": list(recut.GALLERY_FLAGS)}
+    try:
+        page = int(params.get("page") or 1)
+    except (TypeError, ValueError):
+        page = 1
+    try:
+        found = recut.gallery(flag=flag, page=page, measure=_as_bool(params.get("measure", True)))
+        recent = local_cache_db.recut_entries(statuses=("done", "undone"), limit=20)
+    except Exception:
+        return _failure("failed", "Could not read the published pictures (details in temp/search.log).",
+                        "cutout_gallery failed")
+    replaced = [{"id": e["id"], "product_name": e.get("product_name"), "brand": e.get("brand"),
+                 "origin": e.get("origin"), "status": e.get("status"), "created_at": str(e.get("created_at") or ""),
+                 "old_url": recut.delivery_urls.canonical_delivery_url(e.get("old_url")),
+                 "new_url": e.get("new_url"), "rows": [r.get("row_number") for r in e.get("rows") or []]}
+                for e in recent]
+    photoroom = cutout_finish.photoroom_ready()
+    return recut.json_safe(dict({"status": "success", "flag": flag, "replaced": replaced,
+                                 "methods": {"photoroom": photoroom is None, "photoroom_reason": photoroom,
+                                             "local": bool(image_processor.local_methods_available().get("rembg"))}},
+                                **found))
+
+
+RECUT_METHODS = {"photoroom": "photoroom", "local": "rembg"}
+
+
+def action_recut_try(params):
+    """
+    «أعد القص بـPhotoRoom» (method=photoroom، طلب مدفوع واحد بالعادة) أو «جرّب القص المحلي» (method=local: rembg بموديل
+    BiRefNet، مجاني، بس إذا منزّل): قص جديد للصورة المنشورة id من مصدرها (recut.recut) بيستنى بـ temp/recut لحد ما المالك
+    يقرر. ما بيرفع ولا بيكتب شي. {status, token, preview, provider, flags, notes, source, paid_calls, clean, can_apply}.
+    """
+    recut = _recut()
+    method = RECUT_METHODS.get(_text(params, "method"))
+    if method is None:
+        return {"status": "invalid", "error": "method must be photoroom or local"}
+    if method == "rembg" and not image_processor.local_methods_available().get("rembg"):
+        return {"status": "failed", "error_code": "local_missing"}
+    try:
+        row = local_cache_db.published_master(int(params.get("id")))
+    except (TypeError, ValueError):
+        return {"status": "invalid", "error": "id must be a number"}
+    if row is None:
+        return {"status": "failed", "error_code": "not_published"}
+    result = recut.recut(row, method=method)
+    if result.path is None:
+        return {"status": "failed", "error_code": result.error or "recut_failed", "paid_calls": result.paid_calls}
+    saved = recut.save_try(row, result, method)
+    anyway = set(getattr(_pipeline(), "PRESENTATION_FLAGS", ()) or ())
+    can_apply = saved["clean"] or (bool(saved["flags"]) and set(saved["flags"]) <= anyway)
+    return recut.json_safe({"status": "success", "token": saved["token"], "preview": f"/api/cutout/preview/{saved['token']}",
+                            "provider": saved["provider"], "flags": saved["flags"], "notes": saved["notes"],
+                            "source": saved["source"], "paid_calls": saved["paid_calls"], "clean": saved["clean"],
+                            "can_apply": can_apply, "finish": saved["finish"]})
+
+
+def _flush_and_count(worksheet, outbox):
+    """يفرّغ طابور الكتابة ويعدّ كتابات هالطلب: {written, pending, conflict}."""
+    counts = {"written": 0, "pending": 0, "conflict": 0}
+    if not outbox:
+        return counts
+    try:
+        google_sheets.flush_outbox(worksheet, lock_timeout=30)
+    except Exception:
+        logger.exception("recut: the flush failed; the writes stay in the outbox")
+    ids = {int(v) for v in outbox.values()}
+    try:
+        found = {o["id"]: o for o in google_sheets.outbox_outcomes(since_id=min(ids) - 1, limit=len(ids) * 4 + 50)}
+    except Exception:
+        found = {}
+    bucket = {"SYNCED": "written", "PENDING": "pending", "FAILED": "pending"}
+    for wid in ids:
+        counts[bucket.get(str((found.get(wid) or {}).get("status") or "PENDING").upper(), "conflict")] += 1
+    return counts
+
+
+def action_recut_apply(params):
+    """
+    «اعتمد الجديد»: القص المحفوظ (token) بينشر كنسخة جديدة بنفس طريق «أعد معالجتها شفافة» (recut.publish: أصل جديد
+    برقم نسخة جديد، الحل المعتمد بيلحقه، والرابط الجديد للخلايا اللي لسا فيها القديم عبر طابور الكتابة)، وبيتسجّل للتراجع.
+    {status, new_url, log_id, rows, sheet: {written, pending, conflict}} أو failed مع error_code.
+    """
+    recut = _recut()
+    meta = recut.load_try(_text(params, "token"))
+    if meta is None:
+        return {"status": "failed", "error_code": "expired"}
+    anyway = set(getattr(_pipeline(), "PRESENTATION_FLAGS", ()) or ())
+    if meta.get("flags") and not set(meta["flags"]) <= anyway:
+        return {"status": "failed", "error_code": "not_publishable"}
+    row = local_cache_db.published_master(meta["row_id"])
+    if row is None or not recut.delivery_urls.same_delivery_asset(row.get("cloudinary_url"), meta.get("old_url")):
+        return {"status": "failed", "error_code": "changed_meanwhile"}
+    try:
+        rows = [r for r in local_cache_db.published_masters()
+                if recut.delivery_urls.same_delivery_asset(r.get("cloudinary_url"), row["cloudinary_url"])]
+        worksheet = _open_sheet()
+        _, links = recut.sheet_links(google_sheets._retrying(worksheet.get_all_values))
+        cells = links.get(recut.delivery_urls.canonical_delivery_url(row["cloudinary_url"]), [])
+        busy = recut.busy_rows([c["row_number"] for c in cells]) or set()
+        cells = [c for c in cells if c["row_number"] not in busy]
+        facts = {"provider": meta.get("provider"), "flags": meta.get("flags") or [], "notes": meta.get("notes") or [],
+                 "canvas": [meta.get("width"), meta.get("height")], "finish": meta.get("finish") or {},
+                 "recut_source": meta.get("source")}
+        outcome = recut.publish(rows or [row], meta["canvas_path"], facts, "gallery", cells,
+                                provider=meta.get("provider"), source=meta.get("source"),
+                                paid_calls=meta.get("paid_calls") or 0)
+    except Exception:
+        return _failure("failed", "Publishing the new cut failed (details in temp/search.log).", "recut_apply failed")
+    if outcome["status"] != "done":
+        return {"status": "failed", "error_code": outcome.get("code") or outcome["status"]}
+    recut.discard_try(meta["token"])
+    return {"status": "success", "new_url": outcome["new_url"], "log_id": outcome["log_id"],
+            "rows": [c["row_number"] for c in cells], "busy": sorted(busy),
+            "sheet": _flush_and_count(worksheet, outcome.get("outbox"))}
+
+
+def action_recut_discard(params):
+    """«خلّي القديم»: بيمسح القص المحفوظ (ما في شي انرفع ولا انكتب)."""
+    return {"status": "success", "removed": _recut().discard_try(_text(params, "token"))}
+
+
+def action_recut_undo(params):
+    """
+    «رجّع القديم» لتبديل مسجّل (log_id): الحل المعتمد بيرجع للأصل القديم، والرابط القديم بيروح للخلايا اللي لسا فيها
+    الجديد. {status, sheet} أو failed مع error_code (not_found | status_<حالة> | changed_meanwhile).
+    """
+    try:
+        log_id = int(params.get("log_id"))
+    except (TypeError, ValueError):
+        return {"status": "invalid", "error": "log_id must be a number"}
+    try:
+        outcome = _recut().undo(log_id)
+    except Exception:
+        return _failure("failed", "Undoing the new cut failed (details in temp/search.log).", "recut_undo failed")
+    if outcome["status"] != "undone":
+        return {"status": "failed", "error_code": outcome.get("code")}
+    sheet = {"written": 0, "pending": 0, "conflict": 0}
+    if outcome.get("outbox"):
+        try:
+            sheet = _flush_and_count(_open_sheet(), outcome["outbox"])
+        except Exception:
+            logger.exception("recut_undo: the sheet could not be opened; the writes stay in the outbox")
+            sheet["pending"] = len(outcome["outbox"])
+    return {"status": "success", "sheet": sheet}
+
+
 ACTIONS = {
     'get_products': action_get_products,
     'search': action_search,
@@ -2856,6 +3088,13 @@ ACTIONS = {
     'publish_check': action_publish_check,
     'bg_methods': action_bg_methods,
     'local_index_refresh': action_local_index_refresh,
+    'reprocess_plan': action_reprocess_plan,
+    'reprocess_start': action_reprocess_start,
+    'cutout_gallery': action_cutout_gallery,
+    'recut_try': action_recut_try,
+    'recut_apply': action_recut_apply,
+    'recut_discard': action_recut_discard,
+    'recut_undo': action_recut_undo,
     'ops_health': action_ops_health,
     'run_control': action_run_control,
 }

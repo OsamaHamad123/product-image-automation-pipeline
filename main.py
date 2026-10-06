@@ -612,6 +612,19 @@ def _write_metadata(worksheet, row_number, metadata, identity):
         print(f"تنبيه: تعذر كتابة البيانات الوصفية للصف {row_number}: {e}")
 
 
+def master_facts(res):
+    """
+    خلفية الأصل المرفوع وما قاله فحص القص عنه (recut.master_facts: master_background و cutout) لـ
+    save_product_resolution: «أعد معالجتها شفافة» و«فحص القص» بيعرفوا منها الصور البيضا والقصات المشكوك فيها.
+    """
+    try:
+        import recut
+        return recut.master_facts(res)
+    except Exception as e:  # noqa: BLE001 - معلومة إضافية، ما بتوقف الاعتماد
+        print(f"تنبيه: تعذر تلخيص فحص القص للحل المعتمد: {e}")
+        return {}
+
+
 def _canvas_phash(path):
     """pHash اللوحة النهائية (16 خانة hex مثل catalog_match.fetch.phash_hex)، أو None."""
     try:
@@ -714,7 +727,7 @@ def auto_approve_product(task, best_image, worksheet, link_column_index, sku_key
             local_cache_db.save_product_resolution(
                 barcode, name, brand, best_image["url"], res["link"], None, res.get("metadata"),
                 perceptual_hash=res.get("phash"), verification_status="auto_verified",
-                approved_by="auto", sku_key=sku_key, color_signature=res.get("color_signature"),
+                approved_by="auto", sku_key=sku_key, color_signature=res.get("color_signature"), **master_facts(res),
                 **({"page_gtin": page_gtin, "page_gtin_url": page_gtin_url} if page_gtin else {}),
             )
 
@@ -1330,7 +1343,7 @@ def process_single_product(prod, worksheet, link_column_index, brand_mappings=No
         page_gtin, page_gtin_url = page_barcode(best, barcode)
         local_cache_db.save_product_resolution(
             barcode, name, brand, best["url"], res["link"], None, res.get("metadata"),
-            verification_status="auto_verified", approved_by="auto", sku_key=sku_key,
+            verification_status="auto_verified", approved_by="auto", sku_key=sku_key, **master_facts(res),
             **({"page_gtin": page_gtin, "page_gtin_url": page_gtin_url} if page_gtin else {}))
         _remember_look(sku_key, brand, res, best)
     return "success"

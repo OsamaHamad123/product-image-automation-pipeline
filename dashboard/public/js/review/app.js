@@ -177,7 +177,10 @@
                 el('label', { className: 'lq-search rv-search' }, [icon('search', 18), el('span', { className: 'lq-sr-only', text: 'بحث بالقائمة' }), d.search]),
                 d.filters,
                 d.reasonChips,
-                d.queueNote
+                d.queueNote,
+                // «فحص القص»: الصور المنشورة على الغامق والفاتح والمربعات (RecutController)
+                S.urls.cutoutCheck ? el('a', { className: 'lq-link', href: S.urls.cutoutCheck,
+                                               text: 'فحص القص: الصور المنشورة على الغامق والفاتح' }) : null
             ]),
             d.list,
             el('div', { className: 'rv-queue__foot rv-keyhint' }, [el('span', { text: '↑ ↓ للتنقل بين المنتجات · Z لتكبير الصورة · ? للاختصارات' })])

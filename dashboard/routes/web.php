@@ -101,4 +101,18 @@ Route::post('/api/run/brand-undo', [RunController::class, 'brandUndo']);
 Route::get('/api/run/barcode-suggestions', [RunController::class, 'barcodeSuggestions']);
 Route::post('/api/run/barcode-write', [RunController::class, 'barcodeWrite']);
 
+// «أعد القص» (RecutController): بطاقة «صور قديمة بخلفية بيضا» بالقسم المتقدم بصفحة الصحة (التجربة ما بتغيّر شي؛ «ابدأ»
+// دفعة بسقف عدد وتكلفة بالخلفية)، وصفحة «فحص القص» (كل تبديل بكبسة المالك وبيتسجّل للتراجع)
+Route::post('/api/system/reprocess/plan', [\App\Http\Controllers\RecutController::class, 'plan']);
+Route::post('/api/system/reprocess/start', [\App\Http\Controllers\RecutController::class, 'start']);
+Route::get('/api/system/reprocess', [\App\Http\Controllers\RecutController::class, 'batchStatus']);
+Route::get('/cutout-check', [\App\Http\Controllers\RecutController::class, 'page'])->name('dashboard.cutout_check');
+Route::get('/api/cutout/gallery', [\App\Http\Controllers\RecutController::class, 'gallery']);
+Route::post('/api/cutout/try', [\App\Http\Controllers\RecutController::class, 'tryCut']);
+Route::post('/api/cutout/apply', [\App\Http\Controllers\RecutController::class, 'apply']);
+Route::post('/api/cutout/discard', [\App\Http\Controllers\RecutController::class, 'discard']);
+Route::post('/api/cutout/undo', [\App\Http\Controllers\RecutController::class, 'undo']);
+Route::get('/api/cutout/preview/{token}', [\App\Http\Controllers\RecutController::class, 'preview'])
+    ->where('token', '[0-9a-f]{32}');
+
 Route::view('/ui-kit', 'dashboard.ui_kit')->name('dashboard.ui_kit'); // مرجع مكوّنات هوية لقطة
