@@ -85,7 +85,9 @@ def _wizard_fixture(app, pages_dir):
         ["POST", "/api/setup/check", {"step": "run"}], ["POST", "/api/setup/progress", {"action": "run_started", "rows": "2, 4-7"}]])
     report = ROOT / "temp" / "nightly" / "last_report.json"
     report.parent.mkdir(parents=True, exist_ok=True)
-    report.write_text(json.dumps(LAST_REPORT, ensure_ascii=False), encoding="utf-8")
+    # the run started now, after the wizard saved its start (a report older than that start does not describe it)
+    run_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    report.write_text(json.dumps(dict(LAST_REPORT, started_at=run_at), ensure_ascii=False), encoding="utf-8")
     (final,) = _kernel(env, [["GET", "/api/setup/state", {}]])
     answers = {"check": {"keys": json.loads(keys["body"]), "publish": json.loads(publish["body"]),
                          "run": json.loads(plan["body"])},
