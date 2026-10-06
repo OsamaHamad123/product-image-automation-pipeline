@@ -1703,7 +1703,8 @@ def add_brand_mappings(client, sheet_name_or_url, items):
     يضيف ماركات لورقة 'Brands Mapping' بصف لكل ماركة، بطلب كتابة واحد (append_rows) بعد قراءة طازجة للورقة (لا كاش):
     items [{brand, synonyms: [...], official_domains: [...]}] جاهزة التحقق (catalog_match.brand_assistant). ماركة مكتوبة
     أصلاً (هي أو أحد مرادفاتها، بلا اعتبار للحالة أو الفراغات) أو مكررة بالقائمة نفسها تُتخطى مع سببها ولا تُكتب، ومرادف
-    مكتوب أصلاً لماركة ثانية لا يُكرر. تعيد {'added': [brand], 'skipped': [{'brand', 'reason': 'duplicate'}]}. الأخطاء
+    مكتوب أصلاً لماركة ثانية لا يُكرر. تعيد {'added': [brand], 'skipped': [{'brand', 'reason': 'duplicate'}],
+    'written': {brand: {'synonyms': نص الخلية, 'official_domains': نص الخلية}}} (اللي انكتب فعلاً، للتراجع). الأخطاء
     المؤقتة تُعاد محاولتها (SheetTransientError إن استمرت). كاش الماركات يُحذف بعد الكتابة كي يراها التشغيل الجاي.
     """
     sh = _retrying(_open_spreadsheet, client, sheet_name_or_url)
@@ -1720,7 +1721,7 @@ def add_brand_mappings(client, sheet_name_or_url, items):
         width = max(width, len(headers) + 1)
         if rows and any(i.get("official_domains") for i in items):
             _retrying(worksheet.update_cell, 1, len(headers) + 1, BRANDS_SHEET_HEADERS[4])
-    added, skipped, values = [], [], []
+    added, skipped, values, written = [], [], [], {}
     for item in items:
         brand = str(item["brand"]).strip()
         key = _brand_key(brand)
@@ -1735,12 +1736,48 @@ def add_brand_mappings(client, sheet_name_or_url, items):
         row[cols["official_domains"]] = ", ".join(item.get("official_domains") or [])
         values.append(row)
         added.append(brand)
+        written[brand] = {"synonyms": ", ".join(synonyms) if cols["synonyms"] != -1 else "",
+                          "official_domains": row[cols["official_domains"]]}
         known.add(key)
         known.update(k for k in (_brand_key(x) for x in synonyms) if k)
     if values:
         _retrying(worksheet.append_rows, values, value_input_option="RAW")
         clear_brand_cache()
-    return {"added": added, "skipped": skipped}
+    return {"added": added, "skipped": skipped, "written": written}
+
+
+def remove_brand_mapping(client, sheet_name_or_url, entry):
+    """
+    تراجع «عبّي جدول الماركات» عن ماركة واحدة: يمسح صفها من ورقة 'Brands Mapping' بعد قراءة طازجة، بس إذا الصف لسا
+    متل ما كتبه المساعد بالضبط (entry {brand, synonyms, official_domains}: نص الخلايا متل ما انكتب، بلا اعتبار للفراغات
+    حول الفواصل) وما في غيره بنفس الماركة. تعيد 'removed' | 'missing' (ما في صف للماركة) | 'changed' (المالك عدّل
+    الصف أو في أكتر من صف: ما منمسح شي). طلب كتابة واحد (حذف الصف)؛ كاش الماركات بينحذف بعده.
+    """
+    def same(a, b):
+        return [x.strip() for x in str(a or "").replace("،", ",").split(",") if x.strip()] == \
+            [x.strip() for x in str(b or "").replace("،", ",").split(",") if x.strip()]
+
+    sh = _retrying(_open_spreadsheet, client, sheet_name_or_url)
+    worksheet = _retrying(_brands_worksheet, sh)
+    rows = _retrying(worksheet.get_all_values)
+    if not rows:
+        return "missing"
+    cols = _brand_columns(rows[0])
+    key = _brand_key(entry.get("brand"))
+    matches = [i for i, r in enumerate(rows[1:], start=2) if key and _brand_key(_cell(r, cols["brand"])) == key]
+    if not matches:
+        return "missing"
+    if len(matches) > 1:
+        return "changed"
+    row = rows[matches[0] - 1]
+    if str(_cell(row, cols["brand"])).strip() != str(entry.get("brand") or "").strip() \
+            or not same(_cell(row, cols["synonyms"]) if cols["synonyms"] != -1 else "", entry.get("synonyms")) \
+            or not same(_cell(row, cols["official_domains"]) if cols["official_domains"] != -1 else "",
+                        entry.get("official_domains")):
+        return "changed"
+    _retrying(worksheet.delete_rows, matches[0])
+    clear_brand_cache()
+    return "removed"
 
 
 # ---------------------------------------------------------------------------

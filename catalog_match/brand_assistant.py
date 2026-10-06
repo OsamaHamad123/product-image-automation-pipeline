@@ -11,6 +11,12 @@ Three steps, each one behind an explicit click on the Run page (cli_bridge actio
   add_brand_mappings). A domain the owner gave is queued in system_settings.pending_harvest_domains and indexed
   by harvest_pending() at the start of the next worker run (LOCAL_INDEX_ENABLED), the way a store of
   catalog_stores.json is, with a generic product page pattern (BRAND_SITE_PRODUCT_PATH).
+* bulk_suggestions(): «عبّي جدول الماركات», one proposed Brands Mapping row for EVERY missing brand at once, built
+  from evidence only (approved reviews and the spellings they taught, the local index's product pages named after
+  the brand and their stores, the cached official site of an earlier search, the store spellings the search saw),
+  with a confidence and each piece of evidence in plain Levantine: 'high' (two kinds of evidence, or two approved
+  images) is pre-ticked, 'low' (one kind) needs the owner's own tick, 'none' («ما لقينا دليل كافي») cannot be
+  ticked. The bridge writes only what this function proposes for a ticked brand, never what the page sends.
 
 Nothing here writes the sheet or calls a provider by itself.
 """
@@ -183,15 +189,15 @@ def _compact(text: str) -> str:
     return re.sub(r"\s+", "", match_key(text))
 
 
-def suggestions(queue_rows: Iterable[Mapping[str, Any]], mappings: Optional[Mapping[str, Any]],
-                aliases: Iterable[Sequence[Any]] = ()) -> List[Dict[str, Any]]:
-    """
-    [{brand, rows, brand_ar, synonyms, official_domain: ''}] for every sheet brand the queue's rows name that the
-    Brands Mapping sheet does not map (a row whose name starts with a mapped brand is mapped, as the search reads it),
-    most rows first. A 'no brand' placeholder and an empty cell are no brand. synonyms: the store spellings the search
-    discovered for the brand (most rows first) and the ones learned from review (learned_brand_aliases rows
-    (sheet_brand, alias, ...)), minus the brand and its Arabic name. mappings: the sheet's own, not what review taught.
-    """
+def brand_key(brand: str) -> str:
+    """The key a brand is grouped, cached (brand_sites) and logged (brand_writes) under: its match key, no spaces."""
+    return _compact(brand)[:191]
+
+
+def _missing_groups(queue_rows: Iterable[Mapping[str, Any]], mappings: Optional[Mapping[str, Any]]
+                    ) -> List[Dict[str, Any]]:
+    """The sheet brands the rows name that Brands Mapping does not map: [{key, rows, spellings, ar, found}] (Counters
+    of the brand cell's spellings, its Arabic names and the store spellings the search discovered)."""
     index = BrandIndex.from_mappings(mappings or {})
     groups: Dict[str, Dict[str, Any]] = {}
     for row in queue_rows or ():
@@ -219,30 +225,256 @@ def suggestions(queue_rows: Iterable[Mapping[str, Any]], mappings: Optional[Mapp
             found = str(found or "").strip()
             if found:
                 group["found"][found] += 1
-    learned: Dict[str, List[str]] = {}
+    return [dict(group, key=key) for key, group in groups.items() if not group.get("mapped")]
+
+
+def _learned_by_key(aliases: Iterable[Sequence[Any]]) -> Dict[str, List[Tuple[str, int]]]:
+    """learned_brand_aliases rows (sheet_brand, alias[, approvals, ...]) as {brand key: [(alias, approvals)]}."""
+    learned: Dict[str, List[Tuple[str, int]]] = {}
     for alias_row in aliases or ():
         sheet_brand, alias = str(alias_row[0] or ""), str(alias_row[1] or "").strip()
+        approvals = int(alias_row[2] or 0) if len(alias_row) > 2 and str(alias_row[2] or "").strip().isdigit() else 0
         if alias:
-            learned.setdefault(_compact(sheet_brand), []).append(alias)
-    out: List[Dict[str, Any]] = []
-    for key, group in groups.items():
-        if group.get("mapped"):
-            continue
-        brand = group["spellings"].most_common(1)[0][0]
-        brand_ar = group["ar"].most_common(1)[0][0] if group["ar"] else ""
-        if not brand_ar and any("؀" <= ch <= "ۿ" for ch in brand):
-            brand_ar = brand
-        spellings: List[str] = []
-        seen = {key, _compact(brand_ar)} if brand_ar else {key}
-        for spelling in [s for s, _n in group["found"].most_common()] + learned.get(key, []):
-            k = _compact(spelling)
-            if k and k not in seen:
-                seen.add(k)
-                spellings.append(spelling)
-        out.append({"brand": brand, "rows": group["rows"], "brand_ar": brand_ar if brand_ar != brand else "",
-                    "synonyms": spellings[:SUGGESTED_SYNONYMS], "official_domain": ""})
+            learned.setdefault(_compact(sheet_brand), []).append((alias, approvals))
+    return learned
+
+
+def _group_view(group: Mapping[str, Any], learned: Sequence[str]) -> Dict[str, Any]:
+    key = group["key"]
+    brand = group["spellings"].most_common(1)[0][0]
+    brand_ar = group["ar"].most_common(1)[0][0] if group["ar"] else ""
+    if not brand_ar and any("؀" <= ch <= "ۿ" for ch in brand):
+        brand_ar = brand
+    spellings: List[str] = []
+    seen = {key, _compact(brand_ar)} if brand_ar else {key}
+    for spelling in [s for s, _n in group["found"].most_common()] + list(learned):
+        k = _compact(spelling)
+        if k and k not in seen:
+            seen.add(k)
+            spellings.append(spelling)
+    return {"brand": brand, "rows": group["rows"], "brand_ar": brand_ar if brand_ar != brand else "",
+            "synonyms": spellings[:SUGGESTED_SYNONYMS], "official_domain": ""}
+
+
+def suggestions(queue_rows: Iterable[Mapping[str, Any]], mappings: Optional[Mapping[str, Any]],
+                aliases: Iterable[Sequence[Any]] = ()) -> List[Dict[str, Any]]:
+    """
+    [{brand, rows, brand_ar, synonyms, official_domain: ''}] for every sheet brand the queue's rows name that the
+    Brands Mapping sheet does not map (a row whose name starts with a mapped brand is mapped, as the search reads it),
+    most rows first. A 'no brand' placeholder and an empty cell are no brand. synonyms: the store spellings the search
+    discovered for the brand (most rows first) and the ones learned from review (learned_brand_aliases rows
+    (sheet_brand, alias, ...)), minus the brand and its Arabic name. mappings: the sheet's own, not what review taught.
+    """
+    learned = _learned_by_key(aliases)
+    out = [_group_view(group, [a for a, _n in learned.get(group["key"], [])])
+           for group in _missing_groups(queue_rows, mappings)]
     out.sort(key=lambda b: (-b["rows"], match_key(b["brand"])))
     return out
+
+
+# ---------------------------------------------------------------------------
+# «عبّي جدول الماركات»: one suggestion for every missing brand, from evidence only
+# ---------------------------------------------------------------------------
+
+HIGH, LOW, NONE = "high", "low", "none"
+CONFIDENCE_ORDER = {HIGH: 0, LOW: 1, NONE: 2}
+NO_EVIDENCE_TEXT = "ما لقينا دليل كافي"
+BULK_SITE_LOOKUPS = 10          # official-site searches one «دوّر عالمواقع الرسمية» click may send (one query each)
+INDEX_MIN_PRODUCTS = 2          # product pages of the local index named after the brand that count as evidence
+INDEX_ROWS = 60                 # index rows read per brand
+APPROVALS_HIGH = 2              # approved images of the brand that make a suggestion 'high' on their own
+EVIDENCE_LIST = 3               # names shown in one evidence sentence
+
+
+def _ar_count(n: int, one: str, two: str, few: str, many: str) -> str:
+    """'صورة وحدة' / 'صورتين' / '3 صور' / '11 صورة' (Levantine number agreement)."""
+    if n == 1:
+        return one
+    if n == 2:
+        return two
+    return f"{n} {few if 3 <= n <= 10 else many}"
+
+
+def _listing(names: Sequence[str]) -> str:
+    shown = [str(n) for n in names[:EVIDENCE_LIST]]
+    more = len(names) - len(shown)
+    return "، ".join(shown) + (f" و{more} غيرها" if more > 0 else "")
+
+
+def host_carries_brand(host: str, brand: str) -> bool:
+    """True when the host's registrable name starts with the brand's main word, holds the whole brand, or holds a
+    long (5+ letters) main word: 'almarai.com' for Almarai. The same test official_site_candidates ranks first."""
+    main = main_token(brand)
+    label = re.sub(r"[^a-z0-9]", "", _registrable_label(host or ""))
+    if not main or not label:
+        return False
+    brand_compact = _compact(brand)
+    return bool(brand_compact and brand_compact in label) or label.startswith(main) or (len(main) >= 5 and main in label)
+
+
+def site_for_cache(candidates: Sequence[Mapping[str, Any]], brand: str) -> str:
+    """The official site a search's candidates (official_site_candidates) give for the cache: the first one whose
+    host carries the brand (never a page that only names it in its title), else ''."""
+    for c in candidates or ():
+        domain = clean_domain(c.get("domain"))
+        if domain and not blocked_site(domain) and host_carries_brand(domain, brand):
+            return domain
+    return ""
+
+
+def index_evidence(brand: str, find, limit: int = INDEX_ROWS) -> Dict[str, Any]:
+    """
+    {products, stores} of the local index's product pages named after the brand: its whole name on token boundaries
+    in the page's slug words or its title (text_norm.phrase_in), read through find(required_keys, extra, limit) (the
+    local_index store's own lookup: rows holding every 3+ letter word of the brand). stores: the pages' hosts, most
+    pages first. Errors are raised (the caller treats them as 'index not available').
+    """
+    from .local_index import index_keys
+
+    keys = index_keys(brand)
+    required = [k for k in keys if len(k) >= 3] or keys
+    if not required:
+        return {"products": 0, "stores": []}
+    hits = [r for r in find(required, [], limit) or ()
+            if phrase_in(brand, getattr(r, "slug_text", "")) or phrase_in(brand, getattr(r, "page_title", ""))]
+    stores = Counter(url_host(getattr(r, "url", "")) or str(getattr(r, "store", "")) for r in hits)
+    return {"products": len(hits), "stores": [h for h, _n in stores.most_common() if h]}
+
+
+def _approvals_by_key(approvals: Iterable[Sequence[Any]]) -> Dict[str, Dict[str, Any]]:
+    """local_cache_db.get_brand_source_counts rows (brand, domain, approvals, identity_rejections) per brand key:
+    {n, domains: Counter}."""
+    out: Dict[str, Dict[str, Any]] = {}
+    for row in approvals or ():
+        brand, domain = str(row[0] or ""), str(row[1] or "").strip().lower()
+        n = int(row[2] or 0)
+        key = _compact(brand)
+        if not key or n <= 0:
+            continue
+        entry = out.setdefault(key, {"n": 0, "domains": Counter()})
+        entry["n"] += n
+        if domain:
+            entry["domains"][domain] += n
+    return out
+
+
+def bulk_suggestions(queue_rows: Iterable[Mapping[str, Any]], mappings: Optional[Mapping[str, Any]],
+                     aliases: Iterable[Sequence[Any]] = (), approvals: Iterable[Sequence[Any]] = (),
+                     index_lookup=None, sites: Optional[Mapping[str, Mapping[str, Any]]] = None
+                     ) -> List[Dict[str, Any]]:
+    """
+    One proposed Brands Mapping row for every brand the rows name that the sheet's mapping does not know (the same
+    brands as suggestions()), each {brand, rows, brand_ar, synonyms, official_domain, confidence, evidence: [{kind,
+    text}], selectable, checked, site_searched}, from evidence only:
+
+    * reviews:   images of the brand reviewers approved (approvals: get_brand_source_counts rows) and the spellings
+                 approvals taught (aliases: learned_brand_aliases rows);
+    * index:     the local index's product pages named after the brand and their stores (index_lookup(brand) ->
+                 index_evidence's {products, stores}; None or an error = the index says nothing);
+    * site:      the official site an earlier search found (sites: {brand key: {domain}} from the cache; a site is
+                 used only when its host carries the brand, host_carries_brand), never a new search here;
+    * spellings: the store spellings the search discovered for the brand's rows.
+
+    confidence: 'high' with two kinds of evidence, or APPROVALS_HIGH approved images (pre-ticked); 'low' with one
+    kind (the owner ticks it); 'none' without any (shown with «ما لقينا دليل كافي», never selectable). The brand is
+    the sheet's own cell; synonyms are the sheet's Arabic name, the store spellings and the learned ones (each in the
+    evidence); official_domain is the cached site or ''. High first, then most rows.
+    """
+    learned = _learned_by_key(aliases)
+    approved = _approvals_by_key(approvals)
+    out: List[Dict[str, Any]] = []
+    for group in _missing_groups(queue_rows, mappings):
+        key = group["key"]
+        taught = learned.get(key, [])
+        view = _group_view(group, [a for a, _n in taught])
+        brand = view["brand"]
+        evidence: List[Dict[str, str]] = []
+        kinds = set()
+        seen = approved.get(key)
+        n_approved = seen["n"] if seen else 0
+        if n_approved:
+            kinds.add("reviews")
+            where = [d for d, _n in seen["domains"].most_common()]
+            evidence.append({"kind": "reviews", "text": "اعتمدت " + _ar_count(n_approved, "صورة وحدة", "صورتين", "صور", "صورة")
+                             + " لهالماركة بالمراجعة" + (f" (من {_listing(where)})" if where else "") + "."})
+        spellings_taught = [a for a, _n in taught if _compact(a) != key]
+        if spellings_taught:
+            kinds.add("reviews")
+            evidence.append({"kind": "aliases", "text": "المراجعة علّمتنا إنها بتنكتب كمان: " + _listing(spellings_taught) + "."})
+        idx = None
+        if index_lookup is not None:
+            try:
+                idx = index_lookup(brand)
+            except Exception as exc:  # noqa: BLE001 - an index that cannot be read says nothing
+                logger.warning("brand bulk: the local index could not be read for one brand (%s)", type(exc).__name__)
+                idx = None
+        products = int((idx or {}).get("products") or 0)
+        if products:
+            stores = list((idx or {}).get("stores") or [])
+            if products >= INDEX_MIN_PRODUCTS:
+                kinds.add("index")
+            evidence.append({"kind": "index", "text": "لقينا " + _ar_count(products, "منتج واحد", "منتجين", "منتجات", "منتج")
+                             + " باسمها بفهرس المتاجر" + (f" ({_listing(stores)})" if stores else "") + "."})
+        site = (sites or {}).get(key)
+        domain = clean_domain((site or {}).get("domain"))
+        if domain and (blocked_site(domain) or not host_carries_brand(domain, brand)):
+            domain = ""
+        if domain:
+            kinds.add("site")
+            evidence.append({"kind": "site", "text": f"موقعها الرسمي: {domain}."})
+        found = [s for s, _n in group["found"].most_common() if _compact(s) != key]
+        if found:
+            kinds.add("spellings")
+            evidence.append({"kind": "spellings", "text": "البحث لقاها بالمتاجر مكتوبة: " + _listing(found) + "."})
+        confidence = HIGH if (n_approved >= APPROVALS_HIGH or len(kinds) >= 2) else (LOW if kinds else NONE)
+        if confidence == NONE:
+            evidence = [{"kind": "none", "text": NO_EVIDENCE_TEXT}]
+        out.append(dict(view, official_domain=domain, confidence=confidence, evidence=evidence,
+                        selectable=confidence != NONE, checked=confidence == HIGH, site_searched=site is not None))
+    out.sort(key=lambda b: (CONFIDENCE_ORDER[b["confidence"]], -b["rows"], match_key(b["brand"])))
+    return out
+
+
+def bulk_items(proposals: Sequence[Mapping[str, Any]], requested: Iterable[Any]
+               ) -> Tuple[List[Dict[str, Any]], List[Dict[str, str]]]:
+    """
+    (items to write, skipped) for the brands the owner ticked (requested: brand names as the page shows them): each
+    item is the proposal's own {brand, synonyms, official_domains} (its Arabic name first), validated like «أضف»;
+    never what the page sends. skipped [{brand, reason}]: 'gone' (mapped meanwhile, or no longer in the sheet),
+    'no_evidence' (confidence none), 'invalid' (the proposal fails the checks), 'repeated'.
+    """
+    by_key = {_compact(p["brand"]): p for p in proposals or ()}
+    items: List[Dict[str, Any]] = []
+    skipped: List[Dict[str, str]] = []
+    done = set()
+    for raw in requested or ():
+        if not isinstance(raw, str):
+            continue
+        name = " ".join(raw.split())
+        key = _compact(name)
+        if not key:
+            continue
+        if key in done:
+            skipped.append({"brand": name, "reason": "repeated"})
+            continue
+        done.add(key)
+        proposal = by_key.get(key)
+        if proposal is None:
+            skipped.append({"brand": name, "reason": "gone"})
+            continue
+        if not proposal.get("selectable"):
+            skipped.append({"brand": proposal["brand"], "reason": "no_evidence"})
+            continue
+        synonyms = ([proposal["brand_ar"]] if proposal.get("brand_ar") else []) + list(proposal.get("synonyms") or [])
+        try:
+            item = validate_brand_request({"brand": proposal["brand"], "synonyms": synonyms[:SYNONYM_LIMIT],
+                                           "official_domains": [proposal["official_domain"]]
+                                           if proposal.get("official_domain") else []})
+        except BrandRequestError:
+            skipped.append({"brand": proposal["brand"], "reason": "invalid"})
+            continue
+        items.append(item)
+    return items, skipped
 
 
 # ---------------------------------------------------------------------------
@@ -271,7 +503,6 @@ def official_site_candidates(results: Iterable[Mapping[str, Any]], brand: str,
     main = main_token(brand)
     if not main:
         return []
-    brand_compact = _compact(brand)
     scored: List[Tuple[int, int, Dict[str, str]]] = []
     seen = set()
     for position, item in enumerate(results or ()):
@@ -280,9 +511,7 @@ def official_site_candidates(results: Iterable[Mapping[str, Any]], brand: str,
         if not host or host in seen or not clean_domain(host) or blocked_site(host):
             continue
         title = " ".join(str(item.get("title") or "").split())
-        label = re.sub(r"[^a-z0-9]", "", _registrable_label(host))
-        host_hit = bool(label) and (brand_compact and brand_compact in label or label.startswith(main)
-                                    or (len(main) >= 5 and main in label))
+        host_hit = host_carries_brand(host, brand)
         title_hit = phrase_in(main, title)
         if not (host_hit or title_hit):
             continue

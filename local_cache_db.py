@@ -429,6 +429,10 @@ def init_db():
         # 13. سجل الصرف اليومي للبحث (P4a): استدعاءات كل مزود مدفوع وتكلفتها التقديرية لكل يوم وتشغيل،
         # يُقرأ قبل كل سحب مهمة عند ضبط DAILY_BUDGET_USD
         cursor.execute(SPEND_TABLE_SQL)
+        # 14. «عبّي جدول الماركات» (catalog_match.brand_assistant): الموقع الرسمي اللي لقاه بحث «اقترح الموقع الرسمي» لكل
+        # ماركة (كاش: ما منعيد البحث المدفوع)، والماركات اللي كتبها المساعد بالشيت مع اللي انكتب فعلاً (للتراجع)
+        cursor.execute(BRAND_SITES_TABLE_SQL)
+        cursor.execute(BRAND_WRITES_TABLE_SQL)
 
         # القيم الافتراضية المبدئية من ملف .env (INSERT IGNORE لا يغير القيم الموجودة)
         import config
@@ -3677,6 +3681,101 @@ def remove_pending_harvest_domains(domains):
     """يشيل مواقع فُهرست (أو ما عاد لها لزوم) من القائمة؛ تعيد ما بقي. أخطاء قاعدة البيانات تُرفع."""
     gone = {str(d).strip().lower() for d in domains or []}
     return _change_pending_harvest(lambda current: [d for d in current if d.lower() not in gone])
+
+
+# ---------------------------------------------------------------------------
+# «عبّي جدول الماركات»: كاش المواقع الرسمية، وسجل الماركات اللي كتبها المساعد (للتراجع)
+# ---------------------------------------------------------------------------
+
+BRAND_SITES_TABLE_SQL = """
+    CREATE TABLE IF NOT EXISTS brand_sites (
+        brand_key VARCHAR(191) PRIMARY KEY,
+        brand VARCHAR(255) NOT NULL,
+        domain VARCHAR(253) NOT NULL DEFAULT '',
+        searched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
+"""
+BRAND_WRITES_TABLE_SQL = """
+    CREATE TABLE IF NOT EXISTS brand_writes (
+        id BIGINT AUTO_INCREMENT PRIMARY KEY,
+        brand_key VARCHAR(191) NOT NULL,
+        brand VARCHAR(255) NOT NULL,
+        synonyms TEXT NULL,
+        official_domains TEXT NULL,
+        added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        undone_at DATETIME NULL,
+        INDEX idx_brand_writes_key (brand_key)
+    ) ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
+"""
+
+
+def brand_sites():
+    """{brand_key: {brand, domain, searched_at}} لكل ماركة انبحث عن موقعها الرسمي (domain '' = ما لقينا موقع واضح).
+    أخطاء قاعدة البيانات تُرفع."""
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT brand_key, brand, domain, searched_at FROM brand_sites")
+        rows = cursor.fetchall() or []
+    finally:
+        _close(conn)
+    return {r["brand_key"]: {"brand": r["brand"], "domain": r["domain"] or "",
+                             "searched_at": str(r["searched_at"] or "")} for r in rows}
+
+
+def save_brand_site(brand_key, brand, domain):
+    """يحفظ نتيجة بحث الموقع الرسمي لماركة (domain '' = ما لقينا). الحفظ التاني بيبدّل الأول. أخطاء قاعدة البيانات تُرفع."""
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("INSERT INTO brand_sites (brand_key, brand, domain) VALUES (%s, %s, %s) "
+                       "ON DUPLICATE KEY UPDATE brand = VALUES(brand), domain = VALUES(domain), searched_at = NOW()",
+                       (str(brand_key)[:191], str(brand)[:255], str(domain or "")[:253]))
+        conn.commit()
+    finally:
+        _close(conn)
+
+
+def log_brand_writes(entries):
+    """يسجّل الماركات اللي كتبها المساعد بالشيت متل ما انكتبت: entries [{brand_key, brand, synonyms, official_domains}]
+    (النص بالخلايا). أخطاء قاعدة البيانات تُرفع."""
+    rows = [(str(e["brand_key"])[:191], str(e["brand"])[:255], str(e.get("synonyms") or ""),
+             str(e.get("official_domains") or "")) for e in entries or []]
+    if not rows:
+        return 0
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.executemany("INSERT INTO brand_writes (brand_key, brand, synonyms, official_domains) "
+                           "VALUES (%s, %s, %s, %s)", rows)
+        conn.commit()
+        return len(rows)
+    finally:
+        _close(conn)
+
+
+def last_brand_write(brand_key):
+    """آخر كتابة للمساعد لهالماركة ما انتراجع عنها: {id, brand, synonyms, official_domains}، وإلا None."""
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, brand, synonyms, official_domains FROM brand_writes "
+                       "WHERE brand_key = %s AND undone_at IS NULL ORDER BY id DESC LIMIT 1", (str(brand_key)[:191],))
+        row = cursor.fetchone()
+    finally:
+        _close(conn)
+    return dict(row) if row else None
+
+
+def mark_brand_write_undone(write_id):
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("UPDATE brand_writes SET undone_at = NOW() WHERE id = %s AND undone_at IS NULL", (int(write_id),))
+        conn.commit()
+        return cursor.rowcount == 1
+    finally:
+        _close(conn)
 
 
 # تهيئة قاعدة البيانات تلقائياً عند استيراد الموديول للمرة الأولى
