@@ -1210,6 +1210,9 @@ def action_select_image(params):
     row_number = params.get('row_number')
     if not image_url or not product_name or not row_number:
         return {'status': 'failed', 'error': 'image_url, product_name and row_number are required'}
+    # رابط http(s) فقط: مسار ملف على الخادم كان يُقرأ ويُنشر (أي صورة على الجهاز). الرفع اليدوي له مساره الخاص
+    if not image_url.lower().startswith(("http://", "https://")):
+        return {'status': 'failed', 'error': 'image_url must be an http(s) link', 'error_code': 'bad_image_url'}
     row_number = int(row_number)
     sku_key, barcode, problem = _identity_problem(params, row_number)
     if problem:
@@ -1277,13 +1280,34 @@ def action_select_image(params):
 # upload_manual_image
 # ---------------------------------------------------------------------------
 
+# لوحة التحكم تحفظ الصورة المرفوعة في temp/ بالمشروع (ApiController::uploadManualImage). لا يُقرأ ملف خارجه ولا
+# يُحذف بعد النشر: مسار آخر كان يسمح بنشر أي صورة على الخادم وبحذف أي ملف يقدر البايثون يحذفه.
+UPLOAD_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "temp")
+
+
+def _upload_path(value):
+    """المسار الحقيقي (realpath، بعد حل الروابط الرمزية و ..) لملف داخل UPLOAD_DIR، أو None."""
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        root = os.path.realpath(UPLOAD_DIR)
+        real = os.path.realpath(text)
+        inside = real != root and os.path.commonpath([real, root]) == root
+    except (OSError, ValueError):       # قرص آخر على ويندوز، أو مسار فيه محرف غير صالح
+        return None
+    return real if inside and os.path.isfile(real) else None
+
+
 def action_upload_manual_image(params):
-    file_path = params.get('file_path')
+    file_path = _upload_path(params.get('file_path'))
     row_number = params.get('row_number')
     product_name = _text(params, 'product_name')
     brand = _text(params, 'brand')
     barcode = _text(params, 'barcode')
-    if not file_path or not row_number or not product_name or not os.path.exists(file_path):
+    if params.get('file_path') and not file_path:
+        logger.warning("upload_manual_image: refused a file outside %s", UPLOAD_DIR)
+    if not file_path or not row_number or not product_name:
         return {'status': 'failed', 'error': 'Missing parameters or local file path not found'}
     row_number = int(row_number)
     task = local_cache_db.get_task_by_row(row_number)

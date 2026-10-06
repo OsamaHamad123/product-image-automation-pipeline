@@ -330,6 +330,7 @@ def test_review_publish_paths_pass_the_brand_into_the_row_identity(gs, offline, 
     """Without a valid GTIN the row is identified by name + size + brand: the review paths must send the brand."""
     import cli_bridge
     import local_cache_db
+    monkeypatch.setattr(cli_bridge, "UPLOAD_DIR", str(tmp_path))     # tmp_path plays the dashboard's temp/ folder
     seen = []
 
     class Pipeline:

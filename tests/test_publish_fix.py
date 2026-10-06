@@ -108,6 +108,7 @@ def bridge(db, monkeypatch, tmp_path):
     import google_sheets
     import image_processor
     from PIL import Image
+    monkeypatch.setattr(cli_bridge, "UPLOAD_DIR", str(tmp_path))     # tmp_path plays the dashboard's temp/ folder
 
     env = {"sheet": [], "cells": {}, "link": CLOUD + "milk.png", "write_delay": 0.0, "color": "white"}
 

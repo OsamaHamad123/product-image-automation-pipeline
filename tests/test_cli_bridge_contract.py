@@ -13,6 +13,7 @@ def bridge(offline, monkeypatch, tmp_path):
     import cli_bridge
     import google_sheets
     import local_cache_db
+    monkeypatch.setattr(cli_bridge, "UPLOAD_DIR", str(tmp_path))     # tmp_path plays the dashboard's temp/ folder
 
     monkeypatch.setattr(cli_bridge, "LOG_PATH", str(tmp_path / "search.log"))
     monkeypatch.setattr(google_sheets, "get_sheets_client", lambda: object())
