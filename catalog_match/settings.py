@@ -78,6 +78,16 @@ DEFAULTS.update({
     "SERPAPI_LENS_PRICE_USD": "0.015",
 })
 VISUAL_SEARCH_MODES = ("auto", "off", "serper", "serpapi")
+# PAGE_MAIN_IMAGES_MAX_PAGES  the normal flow reads the pages of this many tier-1/2 listings on trusted hosts (the
+#                             brand's site, a UAE retailer) for their own main image, read like any candidate
+#                             (catalog_match.expand P0, free); 0 turns it off, at most 3
+# PAGE_MAIN_IMAGES_WAIT_S     how long the search waits for those pages after it starts reading them (they load
+#                             while the listings' pictures download); a page still loading is left out
+DEFAULTS.update({
+    "PAGE_MAIN_IMAGES_MAX_PAGES": 2,
+    "PAGE_MAIN_IMAGES_WAIT_S": "3",
+})
+PAGE_MAIN_IMAGES_MAX_PAGES_LIMIT = 3
 # --- end sources package ---
 
 _TRUE = {"1", "true", "yes", "on"}
@@ -308,6 +318,18 @@ def serpapi_lens_price_usd() -> float:
     except (TypeError, ValueError):
         price = float(DEFAULTS["SERPAPI_LENS_PRICE_USD"])
     return price if price >= 0 else float(DEFAULTS["SERPAPI_LENS_PRICE_USD"])
+
+
+def page_main_images_max_pages() -> int:
+    """Trusted listing pages read per product for their own main image (0 = off, at most 3)."""
+    value = get("PAGE_MAIN_IMAGES_MAX_PAGES")
+    value = value if isinstance(value, int) else int(DEFAULTS["PAGE_MAIN_IMAGES_MAX_PAGES"])
+    return min(PAGE_MAIN_IMAGES_MAX_PAGES_LIMIT, max(0, value))
+
+
+def page_main_images_wait_s() -> float:
+    """Seconds the search waits for those pages (0..10; a bad value is the default)."""
+    return _number("PAGE_MAIN_IMAGES_WAIT_S", 0.0, 10.0)
 # --- end sources package ---
 
 

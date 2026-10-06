@@ -18,6 +18,9 @@ Steps
     4. fetch      the top 8 identity survivors by rank. Failed downloads stay in the
                   ranked list (decide marks them 'rejected'); images within pHash
                   distance 6 of a reviewer negative are dropped from the outcome.
+                  Meanwhile (P0, free) the pages of the best trusted tier-1/2 listings are
+                  read and each page's own main image joins as one more candidate
+                  (catalog_match.expand.PageMainImages).
     5. quality    soft assessment; a hard quality failure is 'rejected' but kept so a
                   reviewer can still see it.
     6. verify     the top 4 usable candidates in one comparative call.
@@ -265,15 +268,18 @@ def _verify(spec: SkuSpec, verifier, batch: List[RankedCandidate]) -> Optional[V
 def find_product_image(spec: Union[SkuSpec, Mapping[str, Any]], *, providers: Optional[Sequence] = None,
                        fetcher=None, verifier=None, custom_query: Optional[str] = None,
                        exclude_urls: Iterable[str] = (), exclude_phashes: Iterable[Any] = (),
-                       brand_index=None, expansion: Any = None) -> SearchOutcome:
+                       brand_index=None, expansion: Any = None, pages: Any = None) -> SearchOutcome:
     """Find, check and route the image for one SKU. Never returns an unchecked pick as final.
 
     expansion: None (default: the configured round, only when neither providers nor a
     verifier were injected), False (never), True (the configured round even with injected
     stages) or an expand.Expansion.
+    pages: the page reader of the free P0 step (expand.resolve_pages): None (default: a PageFetcher, only when
+    neither providers nor a verifier were injected), False (never) or a reader with fetch_page().
     """
     spec = _as_spec(spec, brand_index)
     exp = expand_mod.resolve(expansion, injected=providers is not None or verifier is not None)
+    page_reader = expand_mod.resolve_pages(pages, injected=providers is not None or verifier is not None)
     providers = list(providers) if providers is not None else _default_providers()
     fetcher = fetcher if fetcher is not None else _default_fetcher()
     verifier = verifier if verifier is not None else _default_verifier()
@@ -333,10 +339,16 @@ def find_product_image(spec: Union[SkuSpec, Mapping[str, Any]], *, providers: Op
         scored = _score_pool(spec, retrieval.pool, negatives)
     timer.lap("retrieval")
 
-    # 4. rank and fetch
+    # 4. rank and fetch; meanwhile the pages of the best trusted listings are read for their own main image (P0)
     ranked = [RankedCandidate(candidate=c, score=s) for c, s in rank(scored)]
+    main_images = expand_mod.PageMainImages.start(spec, ranked, page_reader, retriever.pool, fetcher,
+                                                  phash_negatives, negatives)
     ranked, n_phash_dropped = _fetch(spec, fetcher, ranked, phash_negatives) if ranked else (ranked, 0)
     timer.lap("fetch")
+    if main_images.listings:
+        ranked, n_page_dropped = main_images.join(ranked, retriever.pool)
+        n_phash_dropped += n_page_dropped
+        timer.lap("page_images")
 
     # 5. soft quality (hard failures stay visible, decide marks them rejected)
     _assess(ranked)

@@ -98,6 +98,10 @@ Every paid call is recorded: provider calls in the outcome's provider_health (pr
 'serper_web' | 'serper_shopping' | 'lens_serper' | 'lens_serpapi', query_id X1..X5 / XU),
 verifier calls in RoundReport.verify_results (the pipeline adds them to vlm_calls). Page
 fetches are free and are logged, not recorded as provider calls.
+
+P0 is not part of the round: the normal flow (pipeline step 4) reads the pages of its best trusted tier-1/2
+listings while their pictures download and offers each page's own main image next to the listing's picture
+(PageMainImages, PAGE_MAIN_IMAGES_MAX_PAGES / PAGE_MAIN_IMAGES_WAIT_S); X0 later finds those pages in the cache.
 """
 
 from __future__ import annotations
@@ -521,6 +525,170 @@ def recovery_pages(spec: SkuSpec, ranked: Sequence[RankedCandidate]) -> List[Ran
         if len(out) >= MAX_RECOVER_PAGES:
             break
     return out
+
+
+# ---------------------------------------------------------------------------
+# P0 (normal flow, free): the page's own main image next to a trusted listing's picture
+# ---------------------------------------------------------------------------
+# Run exports 2026-10-04/05: in 35 % of the rows a tier-1/2 listing's picture was another brand's pack (Yumway
+# read as 'Max Foods', Dr Bone as 'LOCK&LOCK', Fine tissue as Kleenex), 17 of the 48 rows with no pick among
+# them; X0 reads such a page only after nothing was picked. P0 reads the pages of the best trusted listings
+# while the normal flow downloads their pictures, and offers each page's own main image (JSON-LD image, else
+# og:image: pages.page_candidates) as one more candidate, so the reader verifies it in the same batches.
+
+SAME_PICTURE_DISTANCE = 6          # decide.RESOLUTION_PHASH_MAX: the page shows the listing's own picture
+
+
+def resolve_pages(pages: Any, injected: bool) -> Any:
+    """The page reader of P0: None (the default) -> a PageFetcher, unless the caller injected providers or a
+    verifier (tests, the offline eval) or PAGE_MAIN_IMAGES_MAX_PAGES is 0; False -> none; anything else ->
+    itself (a test double, a dry run)."""
+    if pages is False or (pages is None and (injected or settings.page_main_images_max_pages() <= 0)):
+        return None
+    return PageFetcher() if pages is None else pages
+
+
+def main_image_pages(ranked: Sequence[RankedCandidate], max_pages: int) -> List[RankedCandidate]:
+    """P0: up to max_pages listings, best first, one per page: tier 1/2, not hard-rejected, on a trusted host (the
+    brand's own site, a UAE retailer or a reviewed source: score.source_trust >= TRUST_UAE_RETAILER, never another
+    country's section of a store), found by a search, and not a page we read ourselves already (its main image is
+    in the pool: local index, page)."""
+    from .retrieve import PAGE_READ_PROVIDERS
+    from .score import TRUST_UAE_RETAILER
+
+    read = {page_key(rc.candidate.page_url) for rc in ranked
+            if (rc.candidate.provider or "").lower() in PAGE_READ_PROVIDERS and rc.candidate.page_url}
+    out: List[RankedCandidate] = []
+    for rc in ranked:
+        if len(out) >= max_pages:
+            break
+        s, cand = rc.score, rc.candidate
+        if s is None or s.tier not in (1, 2) or s.hard_reject or rc.status == "excluded":
+            continue
+        if (cand.provider or "").lower() in PAGE_READ_PROVIDERS:
+            continue
+        if not cand.page_url.lower().startswith(("http://", "https://")):
+            continue
+        if int((s.matched or {}).get("source_trust") or 0) < TRUST_UAE_RETAILER:
+            continue
+        key = page_key(cand.page_url)
+        if key in read:
+            continue
+        read.add(key)
+        out.append(rc)
+    return out
+
+
+def _shows_listing_picture(page_rc: RankedCandidate, listing: RankedCandidate) -> bool:
+    """The page's main image is the listing's own picture (same bytes, or the same pHash family), and the listing's
+    copy is not a low-resolution one a larger page copy would improve on: offering it again only spends a reading."""
+    a, b = listing.fetched, page_rc.fetched
+    if a is None or not a.ok or b is None or not b.ok:
+        return False
+    if a.content_sha256 and a.content_sha256 == b.content_sha256:
+        return True
+    a_short, b_short = min(a.width or 0, a.height or 0), min(b.width or 0, b.height or 0)
+    if a_short < LOW_RES_SHORT_SIDE and b_short > a_short:
+        return False
+    dist = phash_distance(a.phash, b.phash)
+    return dist is not None and dist <= SAME_PICTURE_DISTANCE
+
+
+class PageMainImages:
+    """P0: start() reads the pages of main_image_pages() in background threads (pages.PageFetcher: its rate limits
+    and its page cache, which X0 and the expansion round reuse), each thread downloading its page's main image as
+    soon as the page is read, while the normal flow downloads the listings' pictures. The image offered is the
+    page's own main image: provider 'page', sanctioned False (pre-checked at most, never auto-published), scored
+    like any candidate (tier 1/2 kept), not already in the pool, not a reviewer negative (URL or pHash). join()
+    waits for the threads until PAGE_MAIN_IMAGES_WAIT_S after the start (a page still loading is left out, its
+    thread fills the cache), leaves out an image that is the listing's own picture (_shows_listing_picture) and
+    hands the rest to the normal stages (quality, rank, the reader)."""
+
+    def __init__(self, spec: SkuSpec, pages: Any = None, listings: Sequence[RankedCandidate] = (),
+                 wait_s: float = 0.0, pool: Any = None, fetcher: Any = None, phash_negatives: Sequence[str] = (),
+                 negatives: Any = None) -> None:
+        import threading
+        import time
+
+        self.spec = spec
+        self.listings = list(listings) if pages is not None else []
+        self.deadline = time.monotonic() + max(0.0, float(wait_s))
+        self.results: Dict[int, Tuple[List[RankedCandidate], int]] = {}   # listing -> (downloaded images, dropped)
+        self.offered = 0
+        self.late = 0
+        self._pages, self._fetcher, self._negatives = pages, fetcher, negatives
+        self._phash_negatives = list(phash_negatives or ())
+        self._pool = pool
+        self._known = {key for key, _ in pool.entries()} if pool is not None else set()
+        self._threads = []
+        for i in range(len(self.listings)):
+            thread = threading.Thread(target=self._read, args=(i,), daemon=True, name="p0-page")
+            thread.start()
+            self._threads.append(thread)
+
+    @classmethod
+    def start(cls, spec: SkuSpec, ranked: Sequence[RankedCandidate], pages: Any, pool: Any = None,
+              fetcher: Any = None, phash_negatives: Sequence[str] = (), negatives: Any = None) -> "PageMainImages":
+        if pages is None or pool is None or fetcher is None:
+            return cls(spec)
+        max_pages = settings.page_main_images_max_pages()
+        listings = main_image_pages(ranked, max_pages) if max_pages > 0 else []
+        return cls(spec, pages, listings, settings.page_main_images_wait_s(), pool, fetcher, phash_negatives,
+                   negatives)
+
+    def _read(self, i: int) -> None:
+        """One listing's page: read it, then download its main image when that image is worth offering."""
+        listing = self.listings[i].candidate
+        # never queue behind the host's page rate limit (the expansion round's reads keep their turn)
+        read = getattr(self._pages, "fetch_page_now", None) or self._pages.fetch_page
+        try:
+            info = read(listing.page_url, "")
+            todo: List[RankedCandidate] = []
+            for cand in page_candidates(info, title=listing.title, snippet=listing.snippet,
+                                        query_id=listing.query_id, rank=listing.rank):
+                key = norm_image_url(cand.image_url)
+                if not key or key in self._known or self._pool.is_excluded(cand.image_url):
+                    continue
+                score = score_candidate(self.spec, cand, self._negatives)
+                if score.tier in (1, 2) and not score.hard_reject:
+                    todo.append(RankedCandidate(candidate=cand, score=score))
+            if todo:
+                self.results[i] = _stages()._fetch(self.spec, self._fetcher, todo, self._phash_negatives)
+        except Exception as exc:  # a broken page or download must not lose the search
+            logger.warning("pages: P0 page read raised %s for %s", type(exc).__name__, url_host(listing.page_url))
+
+    def join(self, ranked: List[RankedCandidate], pool: Any) -> Tuple[List[RankedCandidate], int]:
+        """(ranked plus the offered page images, how many page images were reviewer negatives by pHash). Call it
+        after the listings' pictures are downloaded (the listing's own picture is compared with the page's)."""
+        import time
+
+        if not self.listings:
+            return ranked, 0
+        for thread in self._threads:
+            thread.join(max(0.0, self.deadline - time.monotonic()))
+        self.late = sum(1 for thread in self._threads if thread.is_alive())
+        known = {norm_image_url(rc.candidate.image_url) for rc in ranked} | {key for key, _ in pool.entries()}
+        kept: List[RankedCandidate] = []
+        dropped = same = 0
+        for i, listing in enumerate(self.listings):
+            if self._threads[i].is_alive() or i not in self.results:
+                continue                       # still loading (left out), or nothing worth offering
+            fetched, n_dropped = self.results[i]
+            dropped += n_dropped
+            for rc in fetched:
+                key = norm_image_url(rc.candidate.image_url)
+                if key in known:
+                    continue                   # two pages showing one image: offered once
+                known.add(key)
+                pool.add(rc.candidate)         # a pool entry the ranked list lacks counts as dropped for the round
+                if _shows_listing_picture(rc, listing):
+                    same += 1
+                    continue
+                kept.append(rc)
+        self.offered = len(kept)
+        logger.info("pages sku=%s: P0 read %d trusted listing pages (%d late), %d main images offered, %d the "
+                    "listing's own picture", self.spec.sku_key, len(self.listings), self.late, len(kept), same)
+        return list(ranked) + kept, dropped
 
 
 # ---------------------------------------------------------------------------
