@@ -1,0 +1,747 @@
+{
+ "version": 1,
+ "description": "Live sheet rows a regression test under tests/ is named after (scripts/eval_split.py --tuned-from). They are never in the held-out split (tests/eval/metrics.split_of).",
+ "generated": "2026-10-06",
+ "rows": [
+  {
+   "name": "AIDA FRENCH FRIES 1KG",
+   "brand": "AIDA",
+   "tests": [
+    "tests/catalog_match/test_cm_local_index.py",
+    "tests/catalog_match/test_cm_page_main_images.py",
+    "tests/catalog_match/test_cm_review_warnings.py",
+    "tests/catalog_match/test_cm_search_review.py",
+    "tests/catalog_match/test_cm_sitemaps.py"
+   ]
+  },
+  {
+   "name": "AJMI MEAT MASALA 160GM",
+   "brand": "AJMI",
+   "tests": [
+    "tests/catalog_match/test_cm_pages.py",
+    "tests/catalog_match/test_cm_search_review.py"
+   ]
+  },
+  {
+   "name": "AL ALALI FANCY MEAT TUNA IN WATER170GM",
+   "brand": "AL ALALI",
+   "tests": [
+    "tests/catalog_match/test_cm_sitemaps.py",
+    "tests/catalog_match/test_cm_unselected_rows.py",
+    "tests/test_catalog_index_db.py"
+   ]
+  },
+  {
+   "name": "AL RAWABI MOZZARELLA CHEESE 200GM",
+   "brand": "AL RAWABI",
+   "tests": [
+    "tests/catalog_match/test_cm_review_warnings.py"
+   ]
+  },
+  {
+   "name": "AL TAGHZIAH CHICKEN LUNCHEON MEAT 850G",
+   "brand": "AL TAGHZIAH",
+   "tests": [
+    "tests/catalog_match/test_cm_live_run_2026_10_04_b.py"
+   ]
+  },
+  {
+   "name": "ALALALI FANCY MEAT TUNA IN SUNFLOWER OIL 85GM",
+   "brand": "AL ALALI",
+   "tests": [
+    "tests/catalog_match/test_cm_query_plan.py"
+   ]
+  },
+  {
+   "name": "ALALALI FANCY MEAT TUNA IN WATER 85GM",
+   "brand": "AL ALALI",
+   "tests": [
+    "tests/catalog_match/test_cm_query_plan.py"
+   ]
+  },
+  {
+   "name": "ALLDE MEAT MASALA 160GM",
+   "brand": "ALLDE",
+   "tests": [
+    "tests/catalog_match/test_cm_unselected_rows.py"
+   ]
+  },
+  {
+   "name": "AMERICAN GOLD LGT MEAT TUNA FLAKE IN SUNFLOWER OIL 160GM",
+   "brand": "AMERICAN GOLD",
+   "tests": [
+    "tests/catalog_match/test_cm_live_run_2026_10_04.py"
+   ]
+  },
+  {
+   "name": "AMERICAN LIGHT MEAT TUNA 185 GM",
+   "brand": "AMERICAN LIGHT",
+   "tests": [
+    "tests/catalog_match/test_cm_brand_discovery.py",
+    "tests/catalog_match/test_cm_live_run_2026_10_04.py",
+    "tests/catalog_match/test_cm_search_review.py",
+    "tests/catalog_match/test_cm_unselected_rows.py",
+    "tests/catalog_match/test_cm_variants.py"
+   ]
+  },
+  {
+   "name": "AMERICAN LIGHT MEAT TUNA SOLID 185GM",
+   "brand": "AMERICAN LIGHT",
+   "tests": [
+    "tests/catalog_match/test_cm_brand_discovery.py",
+    "tests/catalog_match/test_cm_live_run_2026_10_04.py",
+    "tests/catalog_match/test_cm_search_review.py",
+    "tests/catalog_match/test_cm_unselected_rows.py",
+    "tests/catalog_match/test_cm_variants.py"
+   ]
+  },
+  {
+   "name": "ASHOKA PLAIN PARATHA 5S 400GM",
+   "brand": "ASHOKA",
+   "tests": [
+    "tests/catalog_match/test_cm_abbreviations.py",
+    "tests/catalog_match/test_cm_local_index.py",
+    "tests/catalog_match/test_cm_provider_serper.py",
+    "tests/catalog_match/test_cm_sitemaps.py",
+    "tests/catalog_match/test_cm_sizes.py"
+   ]
+  },
+  {
+   "name": "BARTS TRADITON FRENCH FRIES STRAIGHT CUT 1KG",
+   "brand": "BARTS TRADITON",
+   "tests": [
+    "tests/catalog_match/test_cm_explain.py",
+    "tests/catalog_match/test_cm_live_run_2026_10_04.py",
+    "tests/catalog_match/test_cm_unselected_rows.py"
+   ]
+  },
+  {
+   "name": "BATO FRENCH FRIES 900 MM",
+   "brand": "BATO",
+   "tests": [
+    "tests/catalog_match/test_cm_live_run_2026_10_04.py",
+    "tests/catalog_match/test_cm_review_warnings.py",
+    "tests/catalog_match/test_cm_unselected_rows.py",
+    "tests/catalog_match/test_cm_verify.py",
+    "tests/test_laqta_run_sheet_quality.py"
+   ]
+  },
+  {
+   "name": "BORDON CHICKEN LUNCHEON MEAT 320G",
+   "brand": "BORDON",
+   "tests": [
+    "tests/catalog_match/test_cm_pick_rows_2026_10_04.py"
+   ]
+  },
+  {
+   "name": "DEEP BLUE SHREDDED TUNA IN SUNFLOWER OIL 185G",
+   "brand": "DEEP BLUE",
+   "tests": [
+    "tests/catalog_match/test_cm_fetch_host_breaker.py",
+    "tests/catalog_match/test_cm_live_run_2026_10_04_b.py"
+   ]
+  },
+  {
+   "name": "DELCASA ICE CREAM SCOOPER",
+   "brand": "DELCASA",
+   "tests": [
+    "tests/catalog_match/test_cm_live_run_2026_10_04.py"
+   ]
+  },
+  {
+   "name": "DOUBLE HORSE MEAT MASALA 140GM",
+   "brand": "DOUBLE HORSE",
+   "tests": [
+    "tests/catalog_match/test_cm_expand.py",
+    "tests/catalog_match/test_cm_live_run_2026_10_04.py"
+   ]
+  },
+  {
+   "name": "FAMILY LIGHT TUNA MEAT CHUNK IN BRINE 185GM",
+   "brand": "FAMILY",
+   "tests": [
+    "tests/catalog_match/test_cm_pages.py",
+    "tests/catalog_match/test_cm_pick_rows_2026_10_04.py",
+    "tests/catalog_match/test_cm_score.py",
+    "tests/catalog_match/test_cm_unselected_rows.py"
+   ]
+  },
+  {
+   "name": "FAMILY LIGHTMEAT SKIPJACK CHUNKS TUNA 185GM",
+   "brand": "FAMILY",
+   "tests": [
+    "tests/catalog_match/test_cm_unselected_rows.py"
+   ]
+  },
+  {
+   "name": "FAMILY LIGHTMEAT TUNA SPRING WATER 185GM",
+   "brand": "FAMILY",
+   "tests": [
+    "tests/catalog_match/test_cm_unselected_rows.py"
+   ]
+  },
+  {
+   "name": "FARMILA FRENCH FRIES 9MM 1KG",
+   "brand": "FARMILA",
+   "tests": [
+    "tests/catalog_match/test_cm_live_run_2026_10_04.py",
+    "tests/catalog_match/test_cm_unselected_rows.py",
+    "tests/test_sheet_quality.py"
+   ]
+  },
+  {
+   "name": "FINE FACIAL TISSUE CLASSIC 5X170PCS",
+   "brand": "FINE",
+   "tests": [
+    "tests/catalog_match/test_cm_sizes.py"
+   ]
+  },
+  {
+   "name": "FRESHLY CHICKEN SHAWARMA MEAT 350GM",
+   "brand": "FRESHLY",
+   "tests": [
+    "tests/catalog_match/test_cm_generic_brands.py",
+    "tests/catalog_match/test_cm_gtin_evidence.py",
+    "tests/catalog_match/test_cm_pick_rows_2026_10_04.py",
+    "tests/catalog_match/test_cm_pipeline.py",
+    "tests/catalog_match/test_cm_score.py"
+   ]
+  },
+  {
+   "name": "GOLDEN PRIZE L/ MEAT TUNA VEGE OIL 185GM",
+   "brand": "GOLDEN PRIZE",
+   "tests": [
+    "tests/catalog_match/test_cm_live_run_2026_10_04.py",
+    "tests/catalog_match/test_cm_search_review.py",
+    "tests/catalog_match/test_cm_unselected_rows.py",
+    "tests/catalog_match/test_cm_x0_gallery.py"
+   ]
+  },
+  {
+   "name": "GREEN FARM MEAT MASALA 200GM",
+   "brand": "GREEN FARM",
+   "tests": [
+    "tests/catalog_match/test_cm_live_run_2026_10_04.py"
+   ]
+  },
+  {
+   "name": "HUP HUP FRENCH FRIES REGULAR CUT 1 KG",
+   "brand": "HUP HUP",
+   "tests": [
+    "tests/catalog_match/test_cm_explain.py",
+    "tests/catalog_match/test_cm_live_run_2026_10_04.py",
+    "tests/catalog_match/test_cm_live_run_2026_10_04_b.py"
+   ]
+  },
+  {
+   "name": "ICE CREAM CANDY 13 GM",
+   "brand": "GENERIC / NO BRAND",
+   "tests": [
+    "tests/catalog_match/test_cm_live_run_2026_10_04.py",
+    "tests/test_laqta_run_sheet_quality.py",
+    "tests/test_sheet_quality.py"
+   ]
+  },
+  {
+   "name": "ICE CREAM CONE MARSHAMELLOW",
+   "brand": "GENERIC / NO BRAND",
+   "tests": [
+    "tests/catalog_match/test_cm_live_run_2026_10_04.py",
+    "tests/test_laqta_run_sheet_quality.py",
+    "tests/test_sheet_quality.py"
+   ]
+  },
+  {
+   "name": "ICE CREAM MARSHAMALLO JELLY FILLING 12GM",
+   "brand": "GENERIC / NO BRAND",
+   "tests": [
+    "tests/catalog_match/test_cm_live_run_2026_10_04.py",
+    "tests/test_laqta_run_sheet_quality.py",
+    "tests/test_sheet_quality.py"
+   ]
+  },
+  {
+   "name": "INA PARAMANS SEASOING MEAT SPICE 200ML",
+   "brand": "INA PARAMANS",
+   "tests": [
+    "tests/catalog_match/test_cm_brand_discovery.py",
+    "tests/catalog_match/test_cm_unselected_rows.py"
+   ]
+  },
+  {
+   "name": "KABANI MEAT MASALA160 GM",
+   "brand": "KABANI",
+   "tests": [
+    "tests/catalog_match/test_cm_learning.py",
+    "tests/catalog_match/test_cm_search_review.py",
+    "tests/catalog_match/test_cm_unselected_rows.py",
+    "tests/test_learning_db.py"
+   ]
+  },
+  {
+   "name": "KITCHEN TREASURE MEAT MASALA 160GM",
+   "brand": "KITCHEN TREASURE",
+   "tests": [
+    "tests/catalog_match/test_cm_live_run_2026_10_03.py",
+    "tests/catalog_match/test_cm_live_run_2026_10_04.py",
+    "tests/catalog_match/test_cm_local_index.py",
+    "tests/catalog_match/test_cm_unselected_rows.py"
+   ]
+  },
+  {
+   "name": "MARA MIXED VEGETABLES 400GM",
+   "brand": "MARA",
+   "tests": [
+    "tests/catalog_match/test_cm_live_run_2026_10_04_b.py",
+    "tests/catalog_match/test_cm_pick_rows_2026_10_04.py"
+   ]
+  },
+  {
+   "name": "MCCAIN FRENCH FRIES GOLDEN LONG 750GM",
+   "brand": "MCCAIN",
+   "tests": [
+    "tests/catalog_match/test_cm_live_run_2026_10_04.py",
+    "tests/catalog_match/test_cm_sitemaps.py"
+   ]
+  },
+  {
+   "name": "MCCAIN FRENCH FRIES TRADITION 750GM",
+   "brand": "MCCAIN",
+   "tests": [
+    "tests/catalog_match/test_cm_live_run_2026_10_04.py",
+    "tests/catalog_match/test_cm_sitemaps.py"
+   ]
+  },
+  {
+   "name": "MEHRAN PLAIN PARATHA 2X400GM 5S",
+   "brand": "MEHRAN",
+   "tests": [
+    "tests/catalog_match/test_cm_pages.py",
+    "tests/catalog_match/test_cm_pick_rows_2026_10_04.py",
+    "tests/catalog_match/test_cm_provider_sources.py",
+    "tests/catalog_match/test_cm_sizes.py",
+    "tests/catalog_match/test_cm_unselected_rows.py"
+   ]
+  },
+  {
+   "name": "MEHRAN PLAIN PARATHA 400GM 5S",
+   "brand": "MEHRAN",
+   "tests": [
+    "tests/catalog_match/test_cm_pages.py",
+    "tests/catalog_match/test_cm_pick_rows_2026_10_04.py",
+    "tests/catalog_match/test_cm_provider_sources.py",
+    "tests/catalog_match/test_cm_sizes.py",
+    "tests/catalog_match/test_cm_unselected_rows.py"
+   ]
+  },
+  {
+   "name": "MR JOHN FRENCH FRIES 900GM",
+   "brand": "MR JOHN",
+   "tests": [
+    "tests/catalog_match/test_cm_explain.py",
+    "tests/catalog_match/test_cm_pick_rows_2026_10_04.py",
+    "tests/laqta_kernel.py",
+    "tests/test_export_run.py",
+    "tests/test_laqta_review_no_pick.py"
+   ]
+  },
+  {
+   "name": "NELLARA MEAT MASALA 165GM",
+   "brand": "NELLARA",
+   "tests": [
+    "tests/catalog_match/test_cm_search_review.py"
+   ]
+  },
+  {
+   "name": "NILE GARDENS FROZEN MIXED VEGETABLES 400 G",
+   "brand": "NILE GARDENS",
+   "tests": [
+    "tests/catalog_match/test_cm_live_run_2026_10_04.py"
+   ]
+  },
+  {
+   "name": "ORGANIC SPICES PRAWNS MASALA 200GM",
+   "brand": "ORGANIC SPICES",
+   "tests": [
+    "tests/catalog_match/test_cm_live_run_2026_10_04.py"
+   ]
+  },
+  {
+   "name": "RIO MARIE LIGHT MEAT TUNA IN SUN OIL 3X70GM",
+   "brand": "RIO MARIE",
+   "tests": [
+    "tests/catalog_match/test_cm_brand_discovery.py",
+    "tests/catalog_match/test_cm_explain.py",
+    "tests/catalog_match/test_cm_learning.py",
+    "tests/catalog_match/test_cm_live_run_2026_10_03.py",
+    "tests/catalog_match/test_cm_unselected_rows.py"
+   ]
+  },
+  {
+   "name": "ROBERT CHICKEN LUNCHEON MEAT 340G",
+   "brand": "ROBERT",
+   "tests": [
+    "tests/catalog_match/test_cm_live_run_2026_10_04_b.py"
+   ]
+  },
+  {
+   "name": "SADIA CHICKEN NUGGETS 400G",
+   "brand": "SADIA",
+   "tests": [
+    "tests/catalog_match/test_cm_live_run_2026_10_04_b.py"
+   ]
+  },
+  {
+   "name": "SARAS MEAT MASALA 160GM",
+   "brand": "SARAS",
+   "tests": [
+    "tests/catalog_match/test_cm_live_run_2026_10_03.py",
+    "tests/catalog_match/test_cm_search_review.py"
+   ]
+  },
+  {
+   "name": "SHAMA ARABIC CHICKEN MASALA 225G",
+   "brand": "SHAMA",
+   "tests": [
+    "tests/catalog_match/test_cm_live_run_2026_10_04_b.py"
+   ]
+  },
+  {
+   "name": "SHAN MEAT MASALA 100GM",
+   "brand": "SHAN",
+   "tests": [
+    "tests/catalog_match/test_cm_expand.py",
+    "tests/catalog_match/test_cm_quality.py",
+    "tests/catalog_match/test_cm_search_review.py",
+    "tests/test_queue_reconcile.py"
+   ]
+  },
+  {
+   "name": "SHAN VEGETABLE MASALA 200G",
+   "brand": "SHAN",
+   "tests": [
+    "tests/catalog_match/test_cm_search_review.py"
+   ]
+  },
+  {
+   "name": "SQ SALITED DRY PRAWNS FISF",
+   "brand": "SQ SALITED",
+   "tests": [
+    "tests/catalog_match/test_cm_live_run_2026_10_04.py",
+    "tests/test_laqta_run_sheet_quality.py",
+    "tests/test_sheet_quality.py"
+   ]
+  },
+  {
+   "name": "SUNBULAH FRENCH FRIES 1KG",
+   "brand": "SUNBULAH",
+   "tests": [
+    "tests/catalog_match/test_cm_review_warnings.py",
+    "tests/catalog_match/test_cm_sitemaps.py",
+    "tests/catalog_match/test_cm_unselected_rows.py",
+    "tests/test_cli_bridge_warnings.py"
+   ]
+  },
+  {
+   "name": "SUP/T WT/MEAT SOLIDTUNA SALTWATER 185GM",
+   "brand": "SUP/T",
+   "tests": [
+    "tests/catalog_match/test_cm_brand_discovery.py",
+    "tests/catalog_match/test_cm_learning.py",
+    "tests/catalog_match/test_cm_live_run_2026_10_04.py",
+    "tests/catalog_match/test_cm_search_review.py",
+    "tests/catalog_match/test_cm_unselected_rows.py"
+   ]
+  },
+  {
+   "name": "SUPER/T LIGHT MEAT TUNA SOBEANOIL 185GM",
+   "brand": "SUPER/T",
+   "tests": [
+    "tests/catalog_match/test_cm_brand_discovery.py",
+    "tests/catalog_match/test_cm_learning.py",
+    "tests/catalog_match/test_cm_live_run_2026_10_04.py",
+    "tests/catalog_match/test_cm_live_run_2026_10_04_b.py",
+    "tests/catalog_match/test_cm_pick_rows_2026_10_04.py"
+   ]
+  },
+  {
+   "name": "SUPER T/MEAT SOLID TUNA SALT WATE3X185GM",
+   "brand": "SUPER T/",
+   "tests": [
+    "tests/catalog_match/test_cm_brand_discovery.py",
+    "tests/catalog_match/test_cm_learning.py",
+    "tests/catalog_match/test_cm_live_run_2026_10_04.py",
+    "tests/catalog_match/test_cm_live_run_2026_10_04_b.py",
+    "tests/catalog_match/test_cm_pick_rows_2026_10_04.py"
+   ]
+  },
+  {
+   "name": "SUPER T/MEAT SOLID TUNA SUNFL OIL3X185GM",
+   "brand": "SUPER T/",
+   "tests": [
+    "tests/catalog_match/test_cm_brand_discovery.py",
+    "tests/catalog_match/test_cm_learning.py",
+    "tests/catalog_match/test_cm_live_run_2026_10_04.py",
+    "tests/catalog_match/test_cm_live_run_2026_10_04_b.py",
+    "tests/catalog_match/test_cm_pick_rows_2026_10_04.py"
+   ]
+  },
+  {
+   "name": "TARGET CHICKN LUNCHENMEAT RECTANGL 340GM",
+   "brand": "TARGET",
+   "tests": [
+    "tests/catalog_match/test_cm_explain.py",
+    "tests/catalog_match/test_cm_search_review.py",
+    "tests/catalog_match/test_cm_unselected_rows.py"
+   ]
+  },
+  {
+   "name": "TASTY FOOD MEAT MASALA 160 GM",
+   "brand": "TASTY FOOD",
+   "tests": [
+    "tests/catalog_match/test_cm_live_run_2026_10_04.py",
+    "tests/catalog_match/test_cm_search_review.py"
+   ]
+  },
+  {
+   "name": "TASTY FOOD MEAT MASALA 160GM",
+   "brand": "TASTY FOOD",
+   "tests": [
+    "tests/catalog_match/test_cm_live_run_2026_10_04.py",
+    "tests/catalog_match/test_cm_search_review.py"
+   ]
+  },
+  {
+   "name": "TOMEX FRENCH FRIES 9MM 1 KG",
+   "brand": "TOMEX",
+   "tests": [
+    "tests/catalog_match/test_cm_live_run_2026_10_04.py",
+    "tests/catalog_match/test_cm_unselected_rows.py"
+   ]
+  },
+  {
+   "name": "VIRGINIA L/MEAT TUNA IN S/F OIL 170GM",
+   "brand": "VIRGINIA",
+   "tests": [
+    "tests/catalog_match/test_cm_abbreviations.py",
+    "tests/catalog_match/test_cm_explain.py",
+    "tests/catalog_match/test_cm_live_run_2026_10_04_b.py",
+    "tests/catalog_match/test_cm_query_plan.py",
+    "tests/catalog_match/test_cm_variants.py"
+   ]
+  },
+  {
+   "name": "VIRGINIA L/MEAT TUNA IN WATER 170GM",
+   "brand": "VIRGINIA",
+   "tests": [
+    "tests/catalog_match/test_cm_abbreviations.py",
+    "tests/catalog_match/test_cm_explain.py",
+    "tests/catalog_match/test_cm_live_run_2026_10_04_b.py",
+    "tests/catalog_match/test_cm_query_plan.py",
+    "tests/catalog_match/test_cm_variants.py"
+   ]
+  },
+  {
+   "name": "VIRGINIA TUNA IN SUNFLOWER OIL WITH CHILLI 2X185G",
+   "brand": "VIRGINIA",
+   "tests": [
+    "tests/catalog_match/test_cm_live_run_2026_10_04_b.py",
+    "tests/catalog_match/test_cm_query_plan.py",
+    "tests/catalog_match/test_cm_variants.py",
+    "tests/catalog_match/test_cm_verify.py"
+   ]
+  },
+  {
+   "name": "VIRGINIA WHITE MEAT TUNA IN WATER 170GM",
+   "brand": "VIRGINIA",
+   "tests": [
+    "tests/catalog_match/test_cm_abbreviations.py",
+    "tests/catalog_match/test_cm_explain.py",
+    "tests/catalog_match/test_cm_live_run_2026_10_04_b.py",
+    "tests/catalog_match/test_cm_variants.py",
+    "tests/catalog_match/test_cm_verify.py"
+   ]
+  },
+  {
+   "name": "VIRGINIA WHTE MEAT TUNA IN S/F OIL 170GM",
+   "brand": "VIRGINIA",
+   "tests": [
+    "tests/catalog_match/test_cm_explain.py"
+   ]
+  },
+  {
+   "name": "YUMWAY STRAIGHT CUT FRENCH FRIES 2.5 KG",
+   "brand": "YUMWAY",
+   "tests": [
+    "tests/catalog_match/test_cm_page_main_images.py"
+   ]
+  },
+  {
+   "name": "ZWAN BEEF LUNCHEON MEAT 850GM",
+   "brand": "ZWAN",
+   "tests": [
+    "tests/catalog_match/test_cm_pick_rows_2026_10_04.py",
+    "tests/catalog_match/test_cm_search_review.py",
+    "tests/catalog_match/test_cm_sitemaps.py",
+    "tests/catalog_match/test_cm_unselected_rows.py",
+    "tests/catalog_match/test_cm_verifiers.py"
+   ]
+  },
+  {
+   "name": "ZWAN CHICEKN LUNCHEON MEAT HOT&SPIC850GM",
+   "brand": "ZWAN",
+   "tests": [
+    "tests/catalog_match/test_cm_explain.py",
+    "tests/catalog_match/test_cm_pick_rows_2026_10_04.py"
+   ]
+  },
+  {
+   "name": "ZWAN CHICKEN LUNCHEON MEAT 200GM",
+   "brand": "ZWAN",
+   "tests": [
+    "tests/catalog_match/test_cm_live_run_2026_10_04_b.py",
+    "tests/catalog_match/test_cm_pick_rows_2026_10_04.py",
+    "tests/catalog_match/test_cm_search_review.py",
+    "tests/catalog_match/test_cm_unselected_rows.py",
+    "tests/catalog_match/test_cm_verifiers.py"
+   ]
+  },
+  {
+   "name": "ZWAN CHICKEN LUNCHEON MEAT 340GM",
+   "brand": "ZWAN",
+   "tests": [
+    "tests/catalog_match/test_cm_live_run_2026_10_04_b.py",
+    "tests/catalog_match/test_cm_pick_rows_2026_10_04.py",
+    "tests/catalog_match/test_cm_search_review.py",
+    "tests/catalog_match/test_cm_unselected_rows.py",
+    "tests/catalog_match/test_cm_verifiers.py"
+   ]
+  },
+  {
+   "name": "ZWAN CHICKEN LUNCHEON MEAT 340GM X2",
+   "brand": "ZWAN",
+   "tests": [
+    "tests/catalog_match/test_cm_live_run_2026_10_04_b.py",
+    "tests/catalog_match/test_cm_pick_rows_2026_10_04.py",
+    "tests/catalog_match/test_cm_search_review.py",
+    "tests/catalog_match/test_cm_unselected_rows.py",
+    "tests/catalog_match/test_cm_verifiers.py"
+   ]
+  },
+  {
+   "name": "ZWAN CHICKEN LUNCHEON MEAT H/S 200GM",
+   "brand": "ZWAN",
+   "tests": [
+    "tests/catalog_match/test_cm_live_run_2026_10_04_b.py",
+    "tests/catalog_match/test_cm_pick_rows_2026_10_04.py",
+    "tests/catalog_match/test_cm_search_review.py",
+    "tests/catalog_match/test_cm_unselected_rows.py",
+    "tests/catalog_match/test_cm_verifiers.py"
+   ]
+  },
+  {
+   "name": "ZWAN CHICKEN LUNCHEON MEAT H/S 340GM",
+   "brand": "ZWAN",
+   "tests": [
+    "tests/catalog_match/test_cm_live_run_2026_10_04_b.py",
+    "tests/catalog_match/test_cm_pick_rows_2026_10_04.py",
+    "tests/catalog_match/test_cm_search_review.py",
+    "tests/catalog_match/test_cm_unselected_rows.py",
+    "tests/catalog_match/test_cm_verifiers.py"
+   ]
+  },
+  {
+   "name": "ZWAN CHICKEN LUNCHEON MEAT WITH OLIVES 200GM",
+   "brand": "ZWAN",
+   "tests": [
+    "tests/catalog_match/test_cm_live_run_2026_10_04_b.py",
+    "tests/catalog_match/test_cm_pick_rows_2026_10_04.py",
+    "tests/catalog_match/test_cm_search_review.py",
+    "tests/catalog_match/test_cm_unselected_rows.py",
+    "tests/catalog_match/test_cm_verifiers.py"
+   ]
+  },
+  {
+   "name": "ZWAN LUNCHEON MEAT BEEF 200GM",
+   "brand": "ZWAN",
+   "tests": [
+    "tests/catalog_match/test_cm_explain.py",
+    "tests/catalog_match/test_cm_live_run_2026_10_04_b.py",
+    "tests/catalog_match/test_cm_pick_rows_2026_10_04.py",
+    "tests/catalog_match/test_cm_search_review.py",
+    "tests/catalog_match/test_cm_sitemaps.py"
+   ]
+  },
+  {
+   "name": "ZWAN LUNCHEON MEAT BEEF H/S 850GM",
+   "brand": "ZWAN",
+   "tests": [
+    "tests/catalog_match/test_cm_explain.py",
+    "tests/catalog_match/test_cm_live_run_2026_10_04_b.py",
+    "tests/catalog_match/test_cm_pick_rows_2026_10_04.py",
+    "tests/catalog_match/test_cm_search_review.py",
+    "tests/catalog_match/test_cm_sitemaps.py"
+   ]
+  },
+  {
+   "name": "ZWAN LUNCHEON MEAT BEEF HOT&SPICY 340GM",
+   "brand": "ZWAN",
+   "tests": [
+    "tests/catalog_match/test_cm_explain.py",
+    "tests/catalog_match/test_cm_live_run_2026_10_04_b.py",
+    "tests/catalog_match/test_cm_pick_rows_2026_10_04.py",
+    "tests/catalog_match/test_cm_search_review.py",
+    "tests/catalog_match/test_cm_sitemaps.py"
+   ]
+  },
+  {
+   "name": "ZWAN LUNCHEON MEAT CHICKEN 850GM",
+   "brand": "ZWAN",
+   "tests": [
+    "tests/catalog_match/test_cm_explain.py",
+    "tests/catalog_match/test_cm_live_run_2026_10_04_b.py",
+    "tests/catalog_match/test_cm_pick_rows_2026_10_04.py",
+    "tests/catalog_match/test_cm_search_review.py",
+    "tests/catalog_match/test_cm_sitemaps.py"
+   ]
+  },
+  {
+   "name": "ZWAN LUNCHEON MEAT TANDOORI 200GM",
+   "brand": "ZWAN",
+   "tests": [
+    "tests/catalog_match/test_cm_explain.py",
+    "tests/catalog_match/test_cm_live_run_2026_10_04_b.py",
+    "tests/catalog_match/test_cm_pick_rows_2026_10_04.py",
+    "tests/catalog_match/test_cm_search_review.py",
+    "tests/catalog_match/test_cm_sitemaps.py"
+   ]
+  },
+  {
+   "name": "ZWAN LUNCHEON MEAT TURKEY WITH HERB340GM",
+   "brand": "ZWAN",
+   "tests": [
+    "tests/catalog_match/test_cm_explain.py",
+    "tests/catalog_match/test_cm_live_run_2026_10_04_b.py",
+    "tests/catalog_match/test_cm_pick_rows_2026_10_04.py",
+    "tests/catalog_match/test_cm_search_review.py",
+    "tests/catalog_match/test_cm_sitemaps.py"
+   ]
+  },
+  {
+   "name": "ZWAN TURKEY LUNCHEON MEAT 200GM",
+   "brand": "ZWAN",
+   "tests": [
+    "tests/catalog_match/test_cm_live_run_2026_10_04_b.py",
+    "tests/catalog_match/test_cm_pick_rows_2026_10_04.py"
+   ]
+  },
+  {
+   "name": "ZWAN TURKEY LUNCHEON MEAT WITH HERB850GM",
+   "brand": "ZWAN",
+   "tests": [
+    "tests/catalog_match/test_cm_live_run_2026_10_04_b.py",
+    "tests/catalog_match/test_cm_pick_rows_2026_10_04.py"
+   ]
+  }
+ ]
+}

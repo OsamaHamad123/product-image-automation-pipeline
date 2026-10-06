@@ -41,6 +41,26 @@ same image (the same sha256 in image_file) get the same label. An approval label
 correct_exact; a rejection is labelled by its reason code (REVIEW_LABELS below; LOW_QUALITY -> unusable).
 Cosmetic rejections (halo, background bleed, cropped margin) say nothing about the product and stay empty.
 Labels already in the file are never overwritten; the rest stays empty for the owner to fill in.
+
+One step, from what the database already holds (no search, no paid call, no sheet access; the dashboard's
+«صدّر مجموعة اختبار» on the Health page runs the same through cli_bridge.py 'eval_export'):
+
+    python scripts/eval_record.py --from-db [--zip laqta_eval_set.zip] [--max-side 384]
+
+Every product with a review decision (review_decisions: approvals and rejections, a rejection taken back left out)
+becomes one SKU: the sheet row as it was queued (automation_queue and its payload), the candidates still stored for
+review (curation_candidates: the engine's pick and the alternatives, with titles, page links and domains, the
+label reader's reading), plus each reviewed image and the engine's recorded pick when they are no longer stored
+(an approval removes the product's candidates). Labels come from the reviews exactly as --prefill-labels-from-db
+gives them (the same file gets the same label); everything else stays unlabelled for labels.csv. Each candidate's
+image is the candidate store's file (temp/candidates/<sha256>.<ext>) downscaled to --max-side px into blobs/; the
+replay serves it back at its recorded size. The folder is tests/eval/fixtures/recorded/<date>/ (<date>-2 ... when
+that exists) with golden_skus.json, vlm_cassette.json, brand_mappings.json (the dashboard's Brands Mapping cache),
+labels.csv and manifest.json (counts, what was stripped). Every configured secret value is replaced by [hidden] and
+link query parameters that can carry a credential or a signed session are dropped; the database keeps no reviewer
+identity. Replay it with the recorded readings (no model is called):
+
+    python scripts/eval_report.py --engine v2 --golden tests/eval/fixtures/recorded/<date>/golden_skus.json
 """
 
 import argparse
@@ -53,6 +73,7 @@ import os
 import re
 import sys
 import tempfile
+from collections import Counter
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -476,9 +497,489 @@ def run_prefill(csv_path):
     return 0
 
 
+# ---------------------------------------------------------------------------
+# --from-db: the reviewed products of the dashboard's database as a labelled set, in one step
+# ---------------------------------------------------------------------------
+
+DB_SET_MAX_SIDE = 384               # blobs are downscaled to this long side: a set of a few hundred products stays small
+DB_SET_JPEG_QUALITY = 82
+DB_SET_PREFIX = "db"
+RECORDED_DIR = Path(REPO_ROOT) / "tests" / "eval" / "fixtures" / "recorded"
+_IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".webp", ".gif", ".avif", ".bmp", ".tif", ".tiff", "")
+# query parameters that can carry a credential or a signed session in an image or page link
+_SECRET_QUERY_KEYS = frozenset({
+    "key", "api_key", "apikey", "token", "access_token", "auth", "authorization", "sig", "signature", "secret",
+    "client_secret", "cx", "session", "sessionid", "x-amz-signature", "x-amz-credential", "x-amz-security-token",
+    "x-goog-signature", "x-goog-credential", "expires", "x-amz-expires", "policy", "key-pair-id",
+})
+
+
+class DbReader:
+    """Read-only access to the dashboard's database for --from-db (tests pass their own object with these methods)."""
+
+    def review_decisions(self):
+        return load_review_decisions()
+
+    def _select(self, sql):
+        import local_cache_db
+
+        conn = local_cache_db.get_db_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(sql)
+            return [dict(r) for r in cursor.fetchall()]
+        finally:
+            local_cache_db._close(conn)
+
+    def queue_rows(self):
+        return self._select(
+            "SELECT id, `row_number`, barcode, product_name, brand, payload_json, sku_key, alt_sku_key, status, "
+            "failure_code, trace_json, searched_at FROM automation_queue ORDER BY id")
+
+    def curation_rows(self):
+        return self._select(
+            "SELECT id, `row_number`, product_name, brand, image_url, title, width, height, source_domain, "
+            "is_selected, status, sku_key, reasons_json, evidence_json, vlm_json, content_sha256, identity_tier, "
+            "page_url FROM curation_candidates ORDER BY is_selected DESC, id")
+
+
+def _json_field(value, default):
+    if isinstance(value, (dict, list)):
+        return value
+    try:
+        return json.loads(value) if value else default
+    except (TypeError, ValueError):
+        return default
+
+
+def clean_url(url):
+    """The link without query parameters that could carry a credential or a signed session."""
+    url = str(url or "").strip()
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return url
+    if not parts.query:
+        return url
+    from urllib.parse import parse_qsl, urlencode, urlunsplit
+
+    kept = [(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True) if k.lower() not in _SECRET_QUERY_KEYS]
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(kept), parts.fragment))
+
+
+def _secret_values():
+    try:
+        import smoke_live
+        return [v for v in smoke_live.secret_values() if v]
+    except Exception:
+        return []
+
+
+def _redact(doc, secrets):
+    """Every configured secret value replaced by [hidden], wherever a string carries it."""
+    if not secrets:
+        return doc
+    if isinstance(doc, dict):
+        return {k: _redact(v, secrets) for k, v in doc.items()}
+    if isinstance(doc, list):
+        return [_redact(v, secrets) for v in doc]
+    if isinstance(doc, str):
+        for value in secrets:
+            if value in doc:
+                doc = doc.replace(value, "[hidden]")
+    return doc
+
+
+def _host(url):
+    try:
+        return (urlsplit(str(url or "")).netloc or "").lower().replace("www.", "")
+    except ValueError:
+        return ""
+
+
+def stored_image(store_dir, sha):
+    """The candidate store's file of this sha256 (temp/candidates/<sha>.<ext>), or None."""
+    sha = str(sha or "").strip().lower()
+    if not _SHA_RE.match(sha) or not store_dir:
+        return None
+    for ext in _IMAGE_EXTS:
+        path = Path(store_dir) / f"{sha}{ext}"
+        if path.is_file():
+            return path
+    return None
+
+
+def small_blob(path, out_dir, max_side=DB_SET_MAX_SIDE):
+    """A copy of the image at most max_side px on its long side, in blobs/ (JPEG, PNG when it has transparency).
+    Returns (relative path, mime, (width, height) of the original), or None for a file that does not decode."""
+    from PIL import Image, ImageOps
+    import io
+
+    try:
+        with Image.open(path) as im:
+            im.load()
+            im = ImageOps.exif_transpose(im)
+            size = im.size
+            alpha = im.mode in ("RGBA", "LA") or (im.mode == "P" and "transparency" in im.info)
+            im = im.convert("RGBA" if alpha else "RGB")
+            im.thumbnail((max_side, max_side), Image.Resampling.LANCZOS)
+            buf = io.BytesIO()
+            if alpha:
+                im.save(buf, format="PNG", optimize=True)
+            else:
+                im.save(buf, format="JPEG", quality=DB_SET_JPEG_QUALITY, optimize=True)
+    except Exception:
+        return None
+    data = buf.getvalue()
+    ext, mime = ("png", "image/png") if alpha else ("jpg", "image/jpeg")
+    rel = Path("blobs") / f"{hashlib.sha256(data).hexdigest()}.{ext}"
+    target = Path(out_dir) / rel
+    if not target.exists():
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(data)
+    return rel.as_posix(), mime, size
+
+
+def _product_key(row):
+    key = str(row.get("sku_key") or "").strip()
+    return key if key else f"row:{_row_text(row.get('row_number'))}"
+
+
+def _decision_label(decision):
+    label = review_label(decision)
+    if label is None:
+        return None
+    action = str(decision.get("action") or "").strip().lower()
+    why = "approved" if action == "approved" else f"rejected {str(decision.get('reason_code') or '').strip().upper()}"
+    return label, why
+
+
+def _same_image(a, b):
+    a, b = str(a or "").strip(), str(b or "").strip()
+    if not a or not b:
+        return False
+    return a == b or (bool(_near_key(a)) and _near_key(a) == _near_key(b))
+
+
+def _pick_lane(reasons):
+    try:
+        from catalog_match.decide import lane_of
+        return lane_of(reasons or [])
+    except Exception:
+        return None
+
+
+def build_db_product(key, decisions, queue_row, curation, store_dir, out_dir, max_side, counts):
+    """One reviewed product as (golden SKU, its cassette readings)."""
+    from catalog_match import explain
+
+    trace = _json_field((queue_row or {}).get("trace_json"), {})
+    outcome = trace.get("outcome") if isinstance(trace, dict) and isinstance(trace.get("outcome"), dict) else {}
+    first = decisions[-1] if decisions else {}
+    if queue_row:
+        sheet = explain.queue_sheet_row(queue_row)
+        row_number = queue_row.get("row_number")
+    else:
+        sheet = {"name": str(first.get("product_name") or ""), "brand": str(first.get("brand") or "")}
+        row_number = first.get("row_number")
+    row_text = _row_text(row_number) or "0"
+
+    entries = []                           # (candidate dict, reading or None)
+    for c in curation:
+        evidence = _json_field(c.get("evidence_json"), {})
+        reasons = _json_field(c.get("reasons_json"), [])
+        vlm = _json_field(c.get("vlm_json"), None)
+        sanctioned = bool(evidence.get("sanctioned")) if isinstance(evidence, dict) else False
+        entries.append(({
+            "provider": "serper" if sanctioned else "page", "image_url": clean_url(c.get("image_url")),
+            "page_url": clean_url(c.get("page_url")), "title": str(c.get("title") or ""),
+            "page_title": str(c.get("title") or ""),
+            "domain": str(c.get("source_domain") or (evidence or {}).get("page_domain") or _host(c.get("page_url"))),
+            "width": c.get("width"), "height": c.get("height"),
+            "gtin_on_page": (evidence or {}).get("page_gtin") if isinstance(evidence, dict) else None,
+            "recorded_status": str(c.get("status") or ""), "recorded_reasons": [str(r) for r in reasons or []],
+            "identity_tier": c.get("identity_tier"), "_sha": c.get("content_sha256"),
+        }, vlm if isinstance(vlm, dict) else None))
+    for d in decisions:
+        url = clean_url(d.get("image_url"))
+        if not url or any(_same_image(e["image_url"], url) for e, _ in entries):
+            continue
+        entries.append(({"provider": "page", "image_url": url, "page_url": "", "title": "", "page_title": "",
+                         "domain": str(d.get("page_domain") or ""), "width": None, "height": None,
+                         "gtin_on_page": None, "recorded_status": "reviewed", "recorded_reasons": [],
+                         "identity_tier": d.get("identity_tier"), "_sha": None},
+                        {"decision": d.get("vlm_decision")} if d.get("vlm_decision") else None))
+    winner = clean_url(outcome.get("winner_url"))
+    if winner and not any(_same_image(e["image_url"], winner) for e, _ in entries):
+        entries.append(({"provider": "page", "image_url": winner, "page_url": "", "title": "", "page_title": "",
+                         "domain": _host(winner), "width": None, "height": None, "gtin_on_page": None,
+                         "recorded_status": "preselected", "recorded_reasons": [], "identity_tier": None,
+                         "_sha": None}, None))
+
+    # labels: every usable review of the product, the later one wins; the same downloaded file gets the same label
+    labels = {}
+    for d in decisions:
+        hit = _decision_label(d)
+        if hit is None:
+            counts["decisions_without_label"] += 1
+            continue
+        matched = [i for i, (e, _) in enumerate(entries) if _same_image(e["image_url"], d.get("image_url"))]
+        for i in matched:
+            labels[i] = hit
+        counts["decisions_used"] += 1 if matched else 0
+    by_sha = {}
+    for i, (e, _) in enumerate(entries):
+        if e["_sha"]:
+            by_sha.setdefault(str(e["_sha"]).lower(), []).append(i)
+    for idxs in by_sha.values():
+        known = {labels[i][0] for i in idxs if i in labels}
+        if len(known) == 1:
+            label = next(iter(known))
+            for i in idxs:
+                labels.setdefault(i, (label, "same image file as a reviewed candidate"))
+
+    sku_id = f"{DB_SET_PREFIX}-{int(row_text):05d}-{re.sub(r'[^0-9a-z]+', '', key.lower())[:16] or 'nokey'}"
+    candidates, readings = [], {}
+    pick = None
+    for i, (e, vlm) in enumerate(entries):
+        cid = f"c{i + 1}"
+        sha = e.pop("_sha")
+        cand = dict(e, id=cid, rank=i + 1, surfaced_by=["text"], image_recipe=None,
+                    label=labels.get(i, ("", ""))[0], note=labels.get(i, ("", ""))[1])
+        path = stored_image(store_dir, sha)
+        blob = small_blob(path, out_dir, max_side) if path is not None else None
+        if blob is not None:
+            rel, mime, size = blob
+            cand.update(image_file=rel, mime=mime, download="ok", recorded_size=list(size))
+            cand["width"] = cand["width"] or size[0]
+            cand["height"] = cand["height"] or size[1]
+            counts["images"] += 1
+        else:
+            cand["download"] = "not_recorded"
+            counts["images_missing"] += 1
+        if vlm:
+            fields = {k: vlm.get(k) for k in VERDICT_FIELDS if k in vlm}
+            reading = dict(fields)
+            if vlm.get("decision"):
+                reading["recorded_decision"] = str(vlm["decision"])
+            if reading:
+                readings[cid] = reading
+                counts["readings"] += 1
+        if cand["recorded_status"] == "preselected" and pick is None:
+            pick = cid
+        candidates.append(cand)
+        counts["candidates"] += 1
+        counts["labelled"] += 1 if cand["label"] else 0
+    if pick is None and winner:
+        pick = next((c["id"] for c in candidates if _same_image(c["image_url"], winner)), None)
+    pick_reasons = next((c["recorded_reasons"] for c in candidates if c["id"] == pick), [])
+    engine_decision = outcome.get("decision") or next((d.get("engine_decision") for d in reversed(decisions)
+                                                       if d.get("engine_decision")), None)
+    lane = _pick_lane(pick_reasons) if pick_reasons else next(
+        (d.get("lane") for d in reversed(decisions) if d.get("lane")), None)
+    sku = {
+        "id": sku_id, "stratum": "recorded_db", "named_case": None, "named_case_title": None,
+        "name_en": sheet.get("name", ""), "name_ar": sheet.get("name_ar", ""), "brand": sheet.get("brand", ""),
+        "brand_ar": sheet.get("brand_ar", ""), "barcode": str(sheet.get("barcode") or ""),
+        "category": sheet.get("category", ""), "size": sheet.get("size", ""),
+        "no_correct_candidate": not any(c["label"] == "correct_exact" for c in candidates), "expected_v2": None,
+        "row_number": int(row_text), "sku_key": key if not key.startswith("row:") else "",
+        "recorded": {"decision": engine_decision, "pick": pick if engine_decision in ("AUTO_PUBLISH",
+                                                                                      "REVIEW_PRESELECTED") else None,
+                     "lane": lane, "queries": list(outcome.get("queries") or []),
+                     "reviews": [{"action": d.get("action"), "reason_code": d.get("reason_code"),
+                                  "candidate": next((c["id"] for c in candidates
+                                                     if _same_image(c["image_url"], d.get("image_url"))), None),
+                                  "was_preselected": d.get("was_preselected"), "lane": d.get("lane")}
+                                 for d in decisions]},
+        "candidates": candidates,
+    }
+    return sku, readings
+
+
+def _eval_metrics():
+    """tests/eval/metrics.py loaded by path (the held-out split), without putting tests/eval on sys.path."""
+    import importlib.util
+
+    name = "_laqta_eval_metrics"
+    if name in sys.modules:
+        return sys.modules[name]
+    spec = importlib.util.spec_from_file_location(name, Path(REPO_ROOT) / "tests" / "eval" / "metrics.py")
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[name] = mod                      # dataclasses resolve their module through sys.modules
+    try:
+        spec.loader.exec_module(mod)
+    except Exception:
+        sys.modules.pop(name, None)
+        raise
+    return mod
+
+
+def _next_free(folder):
+    folder = Path(folder)
+    if not folder.exists():
+        return folder
+    n = 2
+    while Path(f"{folder}-{n}").exists():
+        n += 1
+    return Path(f"{folder}-{n}")
+
+
+def load_cached_mappings():
+    """The Brands Mapping tab as the dashboard last read it (google_sheets' local cache), without asking Google."""
+    try:
+        import google_sheets
+        cached = google_sheets._read_cache("brand_mappings_cache.json", float("inf"), google_sheets.BRAND_CACHE_VERSION)
+        mappings = (cached or {}).get("mappings")
+        return mappings if isinstance(mappings, dict) else {}
+    except Exception:
+        return {}
+
+
+def export_from_db(out_dir=None, reader=None, store_dir=None, mappings=None, max_side=DB_SET_MAX_SIDE,
+                   zip_path=None, today=None, secrets=None):
+    """Write the reviewed products of the database as a labelled set; returns the manifest (with 'folder', 'zip').
+
+    Read only: the database, the candidate store (temp/candidates) and the Brands Mapping cache are only read.
+    """
+    reader = reader or DbReader()
+    today = today or dt.date.today().isoformat()
+    out_dir = Path(out_dir) if out_dir else _next_free(RECORDED_DIR / today)
+    if store_dir is None:
+        try:
+            from catalog_match import fetch
+            store_dir = fetch._store_dir(None)
+        except Exception:
+            store_dir = Path(REPO_ROOT) / "temp" / "candidates"
+    decisions = [d for d in (reader.review_decisions() or []) if str(d.get("action") or "").lower()
+                 in ("approved", "rejected")]
+    queue = list(reader.queue_rows() or [])
+    curation = list(reader.curation_rows() or [])
+    q_by_key, q_by_row = {}, {}
+    for row in queue:
+        for k in (row.get("sku_key"), row.get("alt_sku_key")):
+            if k:
+                q_by_key.setdefault(str(k), row)
+        q_by_row.setdefault(_row_text(row.get("row_number")), row)
+
+    def resolved_key(d):
+        """sku_key of the review, else the key of the queued row of its sheet row, else 'row:<n>'."""
+        key = _product_key(d)
+        if key.startswith("row:"):
+            row = q_by_row.get(_row_text(d.get("row_number")))
+            if row and row.get("sku_key"):
+                return str(row["sku_key"])
+        return key
+
+    products = {}                                   # key -> decisions, oldest first
+    ordered = sorted(enumerate(decisions), key=lambda p: (str(p[1].get("created_at") or ""),
+                                                          int(_row_text(p[1].get("id")) or 0), p[0]))
+    for _i, d in ordered:
+        products.setdefault(resolved_key(d), []).append(d)
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    counts = Counter()
+    golden = {"version": 1, "labels": list(LABELS), "named_cases": {}, "skus": [],
+              "description": (f"Reviewed products of the dashboard's database on {today} (scripts/eval_record.py "
+                              "--from-db): the sheet row as it was queued, the engine's pick and the alternatives it "
+                              "kept for review, each labelled by the reviewers' approvals and rejections, and the "
+                              "label reader's recorded readings. Images are downscaled copies of the candidate store "
+                              f"(long side <= {max_side} px). Every candidate is served to every text query about the "
+                              "product (the database does not keep which query found it).")}
+    cassette = {"version": 1, "description": "Label-reader readings recorded in the database with each candidate",
+                "schema": list(VERDICT_FIELDS), "missing": "UNKNOWN",
+                "scenarios": {"gemini_down": {"decision": "UNKNOWN"}}, "verdicts": {}}
+    for key, decs in products.items():
+        row_text = _row_text(decs[-1].get("row_number"))
+        queue_row = q_by_key.get(key) if not key.startswith("row:") else None
+        queue_row = queue_row or q_by_row.get(row_text)
+        # the product's stored candidates: its sku_key, or its sheet row for a candidate saved without one
+        cur = [c for c in curation if (str(c.get("sku_key") or "") == key) or
+               (not c.get("sku_key") and _row_text(c.get("row_number")) == row_text)]
+        sku, readings = build_db_product(key, decs, queue_row, cur, store_dir, out_dir, max_side, counts)
+        if not sku["candidates"]:
+            continue
+        golden["skus"].append(sku)
+        cassette["verdicts"][sku["id"]] = readings
+    golden["skus"].sort(key=lambda s: (s["row_number"], s["id"]))
+
+    secrets = _secret_values() if secrets is None else list(secrets)
+    golden, cassette = _redact(golden, secrets), _redact(cassette, secrets)
+    mappings = load_cached_mappings() if mappings is None else mappings
+    splits = Counter()
+    try:
+        metrics = _eval_metrics()
+        for sku in golden["skus"]:
+            splits[metrics.split_of(sku)] += 1
+    except Exception:
+        pass
+    manifest = {
+        "format": "laqta_eval_set/1", "source": "database", "created": dt.datetime.now().isoformat(timespec="seconds"),
+        "products": len(golden["skus"]), "review_decisions": len(decisions),
+        "decisions_used": counts["decisions_used"], "decisions_without_label": counts["decisions_without_label"],
+        "candidates": counts["candidates"], "labelled": counts["labelled"], "images": counts["images"],
+        "images_missing": counts["images_missing"], "readings": counts["readings"],
+        "labels": dict(Counter(c["label"] or "unlabelled" for s in golden["skus"] for c in s["candidates"])),
+        "split": dict(splits), "max_side": max_side, "brand_mappings": len(mappings),
+        "stripped": ["configured secret values (keys, tokens, the database and proxy credentials) -> [hidden]",
+                     "link query parameters that can carry a credential or a signed session"],
+        "not_included": ["reviewer identity (the database keeps none)", "full-size images", "page bodies",
+                         "settings, keys and the Google credentials"],
+        "replay": "python scripts/eval_report.py --engine v2 --golden <folder>/golden_skus.json",
+        "files": ["golden_skus.json", "vlm_cassette.json", "brand_mappings.json", "labels.csv", "manifest.json",
+                  "blobs/"],
+    }
+    for name, doc in (("golden_skus.json", golden), ("vlm_cassette.json", cassette),
+                      ("brand_mappings.json", {"version": 1, "description": "Brands Mapping (the dashboard's cache)",
+                                               "mappings": mappings})):
+        (out_dir / name).write_text(json.dumps(doc, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+    write_labelling_csv(golden, cassette, out_dir / "labels.csv")
+    (out_dir / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=1) + "\n",
+                                           encoding="utf-8")
+    manifest["folder"] = str(out_dir)
+    if zip_path:
+        manifest["zip"] = str(zip_folder(out_dir, zip_path))
+    return manifest
+
+
+def zip_folder(folder, zip_path):
+    """One file to send: the set's folder as a zip (written next to it first, then moved into place)."""
+    import zipfile
+
+    folder, zip_path = Path(folder), Path(zip_path)
+    zip_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = zip_path.with_name(zip_path.name + ".part")
+    with zipfile.ZipFile(tmp, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for path in sorted(folder.rglob("*")):
+            if path.is_file():
+                zf.write(path, Path(folder.name) / path.relative_to(folder))
+    os.replace(tmp, zip_path)
+    return zip_path
+
+
+def run_from_db(args):
+    try:
+        manifest = export_from_db(args.out, max_side=args.max_side, zip_path=args.zip)
+    except Exception as exc:
+        print(f"could not read the dashboard's database ({type(exc).__name__}): is MariaDB running, and is "
+              "DB_DATABASE in .env the dashboard's database? Nothing was written", file=sys.stderr)
+        return 1
+    print(f"{manifest['products']} reviewed products, {manifest['candidates']} candidates ({manifest['labelled']} "
+          f"labelled, {manifest['images']} images, {manifest['readings']} recorded readings) in {manifest['folder']}")
+    if manifest.get("zip"):
+        print(f"one file to send: {manifest['zip']}")
+    print(f"replay: python scripts/eval_report.py --engine v2 --golden {manifest['folder']}/golden_skus.json")
+    return 0
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--rows", action="append", help="sheet rows to record, e.g. 2-201 (repeatable)")
+    parser.add_argument("--from-db", action="store_true",
+                        help="write the dashboard's reviewed products as a labelled set (no search, no paid call)")
+    parser.add_argument("--max-side", type=int, default=DB_SET_MAX_SIDE,
+                        help=f"--from-db: long side of the stored image copies (default {DB_SET_MAX_SIDE} px)")
+    parser.add_argument("--zip", help="--from-db: also write the folder as one zip file to send")
     parser.add_argument("--out", help="output folder (default tests/eval/fixtures/recorded/<today>)")
     parser.add_argument("--import-labels", metavar="CSV", help="merge a filled-in labels.csv and exit")
     parser.add_argument("--prefill-labels-from-db", metavar="CSV",
@@ -492,6 +993,8 @@ def main(argv=None):
             sys.stdout.reconfigure(encoding="utf-8", errors="replace")   # Arabic names on a Windows console
         except Exception:
             pass
+    if args.from_db:
+        return run_from_db(args)
     if args.prefill_labels_from_db:
         return run_prefill(args.prefill_labels_from_db)
     if args.import_labels:

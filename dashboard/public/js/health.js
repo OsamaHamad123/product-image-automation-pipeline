@@ -894,6 +894,52 @@
         return { run: run, poll: poll, start: watch, state: state };
     }
 
+    // ------------------------------------------------------------------
+    // متقدم: «صدّر مجموعة اختبار» (HealthController::exportEvalSet): one POST, then where the file is and its link
+    // ------------------------------------------------------------------
+
+    var EVAL_EXPORT_URL = '/api/system/eval-export';
+    var EVAL_EXPORT_LABEL = 'صدّر مجموعة اختبار';
+
+    /* The status line, the button and the download link from the endpoint's answer (null: no answer yet). */
+    function evalExportView(res) {
+        var data = res && isObject(res.data) ? res.data : null;
+        if (data && res.ok && data.status === 'success') {
+            var link = data.products > 0 && typeof data.download === 'string' ? data.download : '';
+            return { text: String(data.message || ''), link: link, label: EVAL_EXPORT_LABEL, disabled: false,
+                tone: link ? 'success' : 'warning' };
+        }
+        var why = data && typeof data.error === 'string' && data.error ? data.error
+            : 'ما قدرنا نجهّز مجموعة الاختبار: ' + requestError(res, 'الخادم ما ردّ.');
+        return { text: why, link: '', label: EVAL_EXPORT_LABEL, disabled: false, tone: 'danger' };
+    }
+
+    /* run() (the button) POSTs once (a second click while it works does nothing) and renders the answer. Deps:
+       fetchJson, render, toast. */
+    function createEvalExport(deps) {
+        var state = { busy: false };
+
+        function run() {
+            if (state.busy) return Promise.resolve(null);
+            state.busy = true;
+            deps.render({ text: 'عم نجهّز الملف… ممكن ياخد دقيقة.', link: '', label: 'عم يجهّز…', disabled: true,
+                tone: 'muted' });
+            return deps.fetchJson(EVAL_EXPORT_URL, { method: 'POST', body: {} }).then(function (res) {
+                return evalExportView(res);
+            }, function () {
+                return evalExportView(null);
+            }).then(function (view) {
+                state.busy = false;
+                deps.render(view);
+                deps.toast(view.tone === 'success' ? 'مجموعة الاختبار جاهزة.' : view.text,
+                    view.tone === 'success' ? 'success' : (view.tone === 'warning' ? 'warning' : 'danger'));
+                return view;
+            });
+        }
+
+        return { run: run, state: state };
+    }
+
     var api = {
         lanesView: lanesView, LANES: LANES,
         publishView: publishView, publishRunningView: publishRunningView, createPublishCheck: createPublishCheck,
@@ -907,6 +953,8 @@
     if (typeof window !== 'undefined') window.LaqtaHealth = api;
     api.localIndexView = localIndexView;
     api.createLocalIndex = createLocalIndex;
+    api.evalExportView = evalExportView;
+    api.createEvalExport = createEvalExport;
 
     // ------------------------------------------------------------------
     // DOM
@@ -1464,5 +1512,35 @@
         });
         indexButton.addEventListener('click', function () { localIndex.run(); });
         localIndex.start();
+    }
+
+    // متقدم: «صدّر مجموعة اختبار» writes the set and says where the file is, with its download link
+    var evalButton = $('eval-export');
+    var evalStatus = $('eval-export-status');
+    var evalLabel = $('eval-export-label');
+    var evalLink = $('eval-export-link');
+
+    function renderEvalExport(view) {
+        if (evalStatus) evalStatus.textContent = view.text;
+        if (evalLabel) evalLabel.textContent = view.label;
+        if (evalLink) {
+            if (view.link) evalLink.setAttribute('href', view.link);
+            setHidden(evalLink, !view.link);
+        }
+        if (!evalButton) return;
+        evalButton.disabled = view.disabled;
+        if (view.disabled) evalButton.setAttribute('aria-busy', 'true');
+        else evalButton.removeAttribute('aria-busy');
+    }
+
+    if (evalButton) {
+        var evalExport = createEvalExport({
+            fetchJson: fetchJson,
+            render: renderEvalExport,
+            toast: function (text, variant) {
+                if (window.Laqta && window.Laqta.toast) window.Laqta.toast(text, { variant: variant });
+            }
+        });
+        evalButton.addEventListener('click', function () { evalExport.run(); });
     }
 })();

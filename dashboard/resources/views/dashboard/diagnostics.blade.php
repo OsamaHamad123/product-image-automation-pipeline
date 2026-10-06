@@ -248,6 +248,21 @@
         </div>
         <span class="lq-health-log__meta" data-health="log-meta"></span>
     </section>
+
+    {{-- متقدم: «صدّر مجموعة اختبار» (HealthController::exportEvalSet -> cli_bridge eval_export -> scripts/eval_record.py
+         --from-db). الزر وحده يشغّله؛ بيرجع وين الملف ورابط تنزيله (health.js createEvalExport). --}}
+    <details class="lq-card lq-card--compact lq-health-advanced" data-health="advanced">
+        <summary class="lq-health-advanced__summary">متقدم</summary>
+        <div class="lq-health-advanced__body">
+            <h2 class="lq-card__title">مجموعة اختبار من مراجعاتك</h2>
+            <p class="lq-card__meta">بتجمع المنتجات اللي راجعتها (اللي اعتمدتها واللي رفضتها) مع الصور اللي عرضها البحث، بنسخ صغيرة، بملف واحد بتبعته للفريق ليقيسوا دقة البحث على منتجاتك الحقيقية. ما بتعمل أي بحث ولا بتكلّف شي، وما بيطلع فيها أي مفتاح أو بيانات دخول.</p>
+            <div class="lq-card__header">
+                <p class="lq-health__footnote" data-health="eval-export-status" role="status" aria-live="polite" dir="auto"></p>
+                <x-lq.button variant="secondary" size="sm" icon="upload" data-health="eval-export"><span data-health="eval-export-label">صدّر مجموعة اختبار</span></x-lq.button>
+            </div>
+            <a class="lq-link" data-health="eval-export-link" href="#" download hidden>نزّل الملف</a>
+        </div>
+    </details>
 </div>
 @endsection
 

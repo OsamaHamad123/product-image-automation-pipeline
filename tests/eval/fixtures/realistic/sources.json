@@ -1,0 +1,494 @@
+{
+ "skus": {
+  "real-13-kabani-chicken-masala-160-gm": {
+   "candidates": [
+    {
+     "id": "x1",
+     "provider": "serper_web",
+     "rank": 1,
+     "image_url": "https://gcc.luluhypermarket.com/medias/77120-kabani-chicken-masala.jpg",
+     "page_url": "https://gcc.luluhypermarket.com/en-ae/kabani-chicken-masala-160g/p/77120",
+     "title": "Kabani Chicken Masala 160g | Lulu UAE",
+     "page_title": "Kabani Chicken Masala 160g | Lulu UAE",
+     "domain": "gcc.luluhypermarket.com",
+     "width": 1200,
+     "height": 1200,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "X1"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1200,
+       1200
+      ],
+      "shape": "pouch",
+      "label_text": "KABANI|CHICKEN MASALA|160G",
+      "accent_color": "#2e7d32",
+      "body_color": "#ffeb3b"
+     },
+     "download": "ok",
+     "label": "correct_exact",
+     "note": "X1: Lulu lists the pouch; its page's main image is the packshot."
+    },
+    {
+     "id": "x2",
+     "provider": "serper_shopping",
+     "rank": 1,
+     "image_url": "https://images.deliveryhero.io/image/talabat-nv/66001.jpg",
+     "page_url": "https://www.talabat.com/uae/grocery/66001/kabani-meat-masala",
+     "title": "Kabani Meat Masala 160g",
+     "page_title": "Kabani Meat Masala 160g",
+     "domain": "talabat.com",
+     "width": 1000,
+     "height": 1000,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "X2"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1000,
+       1000
+      ],
+      "shape": "pouch",
+      "label_text": "KABANI|MEAT MASALA|160G",
+      "accent_color": "#4e342e",
+      "body_color": "#ffeb3b"
+     },
+     "download": "ok",
+     "label": "wrong_variant",
+     "note": "X2: the meat masala sibling."
+    },
+    {
+     "id": "i1",
+     "provider": "local_index",
+     "rank": 1,
+     "image_url": "https://www.unioncoop.ae/media/catalog/product/u/55012.jpg",
+     "page_url": "https://www.unioncoop.ae/kabani-chicken-masala-160g-55012.html",
+     "title": "Kabani Chicken Masala 160g | Union Coop",
+     "page_title": "Kabani Chicken Masala 160g | Union Coop",
+     "domain": "unioncoop.ae",
+     "width": 1000,
+     "height": 1000,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "IDX"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1000,
+       1000
+      ],
+      "shape": "pouch",
+      "label_text": "KABANI|CHICKEN MASALA|160G",
+      "accent_color": "#2e7d32",
+      "body_color": "#ffeb3b",
+      "quality": 84
+     },
+     "download": "ok",
+     "label": "correct_exact",
+     "note": "Local index: Union Coop's page shows the same pouch."
+    }
+   ]
+  },
+  "real-03-hup-hup-fries-steakhouse-cut-1-kg": {
+   "candidates": [
+    {
+     "id": "p1",
+     "provider": "page",
+     "rank": 1,
+     "image_url": "https://gcc.luluhypermarket.com/medias/hup-hup-steakhouse-1kg-white.jpg",
+     "page_url": "https://gcc.luluhypermarket.com/en-ae/hup-hup-steakhouse-cut-fries-1kg/p/41296",
+     "title": "Hup Hup Steakhouse Cut Fries 1kg",
+     "page_title": "Hup Hup Steakhouse Cut Fries 1kg",
+     "domain": "gcc.luluhypermarket.com",
+     "width": 1500,
+     "height": 1500,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "P0"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1500,
+       1500
+      ],
+      "shape": "bag",
+      "label_text": "HUP HUP|STEAKHOUSE CUT|1KG",
+      "accent_color": "#ffeb3b",
+      "body_color": "#d84315"
+     },
+     "download": "ok",
+     "label": "correct_exact",
+     "note": "P0: Lulu's page's own main image is the bag on white (its search thumbnail is the blue-sweep shot)."
+    }
+   ]
+  },
+  "real-10-golden-prize-l-meat-tuna-chilli-185gm": {
+   "candidates": [
+    {
+     "id": "p1",
+     "provider": "page",
+     "rank": 1,
+     "image_url": "https://cdn.mafrservices.com/sys-master-root/h1/42073_main.jpg?im=Resize=1200&page=1",
+     "page_url": "https://www.carrefouruae.com/mafuae/en/golden-prize-light-meat-tuna-with-chilli-185g/p/42073",
+     "title": "Golden Prize Light Meat Tuna with Chilli 185g",
+     "page_title": "Golden Prize Light Meat Tuna with Chilli 185g",
+     "domain": "carrefouruae.com",
+     "width": 1200,
+     "height": 1200,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "P0"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1200,
+       1200
+      ],
+      "shape": "box",
+      "label_text": "GOLDEN PRIZE|LIGHT MEAT TUNA CHILLI|2X185G",
+      "accent_color": "#f57f17",
+      "body_color": "#ffffff"
+     },
+     "download": "ok",
+     "label": "wrong_pack",
+     "note": "P0: Carrefour's page shows the twin pack too (the store's own wrong picture).",
+     "seed_of": "c1"
+    }
+   ]
+  },
+  "real-12-eastern-sambar-powder-160g": {
+   "candidates": [
+    {
+     "id": "i1",
+     "provider": "local_index",
+     "rank": 1,
+     "image_url": "https://cdn.mafrservices.com/sys-master-root/h1/88231_main.jpg",
+     "page_url": "https://www.carrefouruae.com/mafuae/en/spices/eastern-sambar-powder-160g/p/88231",
+     "title": "Eastern Sambar Powder 160g",
+     "page_title": "Eastern Sambar Powder 160g",
+     "domain": "carrefouruae.com",
+     "width": 1200,
+     "height": 1200,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "IDX"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1200,
+       1200
+      ],
+      "shape": "pouch",
+      "label_text": "EASTERN|SAMBAR POWDER",
+      "accent_color": "#ad1457",
+      "body_color": "#fff8e1",
+      "quality": 86
+     },
+     "download": "ok",
+     "label": "correct_exact",
+     "note": "Local index: Carrefour's page; the size is in its title, not on the pouch's front."
+    },
+    {
+     "id": "i2",
+     "provider": "local_index",
+     "rank": 1,
+     "image_url": "https://cdn.mafrservices.com/sys-master-root/h1/88232_main.jpg",
+     "page_url": "https://www.carrefouruae.com/mafuae/en/spices/eastern-sambar-powder-500g/p/88232",
+     "title": "Eastern Sambar Powder 500g",
+     "page_title": "Eastern Sambar Powder 500g",
+     "domain": "carrefouruae.com",
+     "width": 1200,
+     "height": 1200,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "IDX"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1200,
+       1200
+      ],
+      "shape": "pouch",
+      "label_text": "EASTERN|SAMBAR POWDER|500G",
+      "accent_color": "#ad1457",
+      "body_color": "#fff8e1"
+     },
+     "download": "ok",
+     "label": "wrong_size",
+     "note": "Local index: the 500 g pouch (its URL states the size)."
+    }
+   ]
+  },
+  "real-04-tomex-french-fries-6mm-1-kg": {
+   "candidates": [
+    {
+     "id": "i1",
+     "provider": "local_index",
+     "rank": 1,
+     "image_url": "https://cdn.mafrservices.com/sys-master-root/h1/70114_main.jpg",
+     "page_url": "https://www.carrefouruae.com/mafuae/en/frozen/tomex-french-fries-9mm-1kg/p/70114",
+     "title": "Tomex French Fries 9mm 1kg",
+     "page_title": "Tomex French Fries 9mm 1kg",
+     "domain": "carrefouruae.com",
+     "width": 1200,
+     "height": 1200,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "IDX"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1200,
+       1200
+      ],
+      "shape": "bag",
+      "label_text": "TOMEX|FRENCH FRIES 9MM|1KG",
+      "accent_color": "#e65100",
+      "body_color": "#ffffff"
+     },
+     "download": "ok",
+     "label": "wrong_variant",
+     "note": "Local index: the 9 mm cut."
+    },
+    {
+     "id": "i2",
+     "provider": "local_index",
+     "rank": 1,
+     "image_url": "https://gcc.luluhypermarket.com/medias/70115-tomex-6mm.jpg",
+     "page_url": "https://gcc.luluhypermarket.com/en-ae/tomex-french-fries-6mm-1kg/p/70115",
+     "title": "Tomex French Fries 6mm 1kg",
+     "page_title": "Tomex French Fries 6mm 1kg",
+     "domain": "gcc.luluhypermarket.com",
+     "width": 1200,
+     "height": 1200,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "IDX"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1200,
+       1200
+      ],
+      "shape": "bag",
+      "label_text": "TOMEX|FRENCH FRIES 6MM|1KG",
+      "accent_color": "#e65100",
+      "body_color": "#ffffff"
+     },
+     "download": "ok",
+     "label": "correct_exact",
+     "note": "Local index: the 6 mm bag on white."
+    }
+   ]
+  },
+  "real-07-sup-t-l-meat-tuna-brine-3x170gm": {
+   "candidates": [
+    {
+     "id": "i1",
+     "provider": "local_index",
+     "rank": 1,
+     "image_url": "https://gcc.luluhypermarket.com/medias/61009-super-tasty-3x170.jpg",
+     "page_url": "https://gcc.luluhypermarket.com/en-ae/super-tasty-light-meat-tuna-brine-3x170g/p/61009",
+     "title": "Super Tasty Light Meat Tuna Brine 3x170g",
+     "page_title": "Super Tasty Light Meat Tuna Brine 3x170g",
+     "domain": "gcc.luluhypermarket.com",
+     "width": 1200,
+     "height": 1200,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "IDX"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1200,
+       1200
+      ],
+      "shape": "box",
+      "label_text": "SUPER TASTY|LIGHT MEAT TUNA|BRINE|3X170G",
+      "accent_color": "#0277bd",
+      "body_color": "#ffffff",
+      "quality": 88
+     },
+     "download": "ok",
+     "label": "correct_exact",
+     "note": "Local index: found only once the stores' spelling of SUP/T is known."
+    }
+   ]
+  },
+  "real-28-ferns-n-petals-pink-roses-bouquet-12pcs": {
+   "candidates": [
+    {
+     "id": "x1",
+     "provider": "serper_shopping",
+     "rank": 1,
+     "image_url": "https://www.fnp.ae/images/pr/l/pink-roses-12-shop.jpg",
+     "page_url": "https://www.fnp.ae/gift/pink-roses-bouquet-12",
+     "title": "Pink Roses Bouquet 12 Stems",
+     "page_title": "Pink Roses Bouquet 12 Stems",
+     "domain": "fnp.ae",
+     "width": 1000,
+     "height": 1000,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "X2"
+     ],
+     "image_recipe": {
+      "kind": "lifestyle_clutter",
+      "size": [
+       1000,
+       1000
+      ],
+      "shape": "bottle",
+      "label_text": "PINK ROSES",
+      "accent_color": "#e91e63",
+      "body_color": "#f8bbd0"
+     },
+     "download": "ok",
+     "label": "not_packshot",
+     "note": "X2: another bouquet photo; nothing to find for a flower row, the calls are spent anyway."
+    }
+   ]
+  }
+ },
+ "readings": {
+  "real-13-kabani-chicken-masala-160-gm": {
+   "x1": {
+    "brand_text": "Kabani",
+    "variant_text": "Chicken Masala",
+    "size_text": "160g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "x2": {
+    "brand_text": "Kabani",
+    "variant_text": "Meat Masala",
+    "size_text": "160g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   },
+   "i1": {
+    "brand_text": "Kabani",
+    "variant_text": "Chicken Masala",
+    "size_text": "160g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   }
+  },
+  "real-03-hup-hup-fries-steakhouse-cut-1-kg": {
+   "p1": {
+    "brand_text": "Hup Hup",
+    "variant_text": "Steakhouse Cut",
+    "size_text": "1kg",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   }
+  },
+  "real-10-golden-prize-l-meat-tuna-chilli-185gm": {
+   "p1": {
+    "brand_text": "Golden Prize",
+    "variant_text": "Light Meat Tuna with Chilli",
+    "size_text": "2x185g",
+    "pack_count": 2,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   }
+  },
+  "real-12-eastern-sambar-powder-160g": {
+   "i1": {
+    "brand_text": "Eastern",
+    "variant_text": "Sambar Powder",
+    "size_text": "",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "unsure"
+   },
+   "i2": {
+    "brand_text": "Eastern",
+    "variant_text": "Sambar Powder",
+    "size_text": "500g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   }
+  },
+  "real-04-tomex-french-fries-6mm-1-kg": {
+   "i1": {
+    "brand_text": "Tomex",
+    "variant_text": "French Fries",
+    "size_text": "1kg",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "unsure",
+    "size_match": "yes"
+   },
+   "i2": {
+    "brand_text": "Tomex",
+    "variant_text": "French Fries 6mm",
+    "size_text": "1kg",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   }
+  },
+  "real-07-sup-t-l-meat-tuna-brine-3x170gm": {
+   "i1": {
+    "brand_text": "Super Tasty",
+    "variant_text": "Light Meat Tuna in Brine",
+    "size_text": "3x170g",
+    "pack_count": 3,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   }
+  },
+  "real-28-ferns-n-petals-pink-roses-bouquet-12pcs": {
+   "x1": {
+    "brand_text": "",
+    "variant_text": "Pink Roses Bouquet",
+    "size_text": "12",
+    "pack_count": 1,
+    "view": "lifestyle",
+    "brand_match": "unsure",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   }
+  }
+ },
+ "version": 1,
+ "description": "Sources overlay of the realistic set (tests/eval/sources.py): what the expansion round, the P0 page reads and the local catalog index would add. Read only with eval_report --set realistic --expansion / --local-index."
+}

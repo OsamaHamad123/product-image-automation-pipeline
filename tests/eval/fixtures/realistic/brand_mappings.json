@@ -1,0 +1,110 @@
+{
+ "version": 1,
+ "description": "Brands Mapping of the realistic set: the owner's tab lists only some of the brands (most live rows are 'sheet_raw'), so do these rows.",
+ "mappings": {
+  "mccain": {
+   "brand": "McCain",
+   "synonyms": [
+    "McCain",
+    "Mc Cain",
+    "MCCAIN"
+   ],
+   "excluded_competitors": [
+    "Farm Frites",
+    "Lamb Weston"
+   ]
+  },
+  "california garden": {
+   "brand": "California Garden",
+   "synonyms": [
+    "California Garden",
+    "Cal Garden",
+    "CAL GARDEN",
+    "C/GARDEN"
+   ],
+   "excluded_competitors": [
+    "Virginia",
+    "Goody"
+   ]
+  },
+  "al alali": {
+   "brand": "Al Alali",
+   "synonyms": [
+    "Al Alali",
+    "Alalali",
+    "ALALALI",
+    "Al-Alali"
+   ],
+   "excluded_competitors": [
+    "Americana"
+   ]
+  },
+  "shan": {
+   "brand": "Shan",
+   "synonyms": [
+    "Shan",
+    "SHAN"
+   ],
+   "excluded_competitors": [
+    "National",
+    "Mehran",
+    "Laziza"
+   ]
+  },
+  "mdh": {
+   "brand": "MDH",
+   "synonyms": [
+    "MDH",
+    "M.D.H."
+   ],
+   "excluded_competitors": [
+    "Everest"
+   ]
+  },
+  "zwan": {
+   "brand": "Zwan",
+   "synonyms": [
+    "Zwan",
+    "ZWAN"
+   ],
+   "excluded_competitors": [
+    "Al Taghziah",
+    "Bordon"
+   ]
+  },
+  "americana": {
+   "brand": "Americana",
+   "synonyms": [
+    "Americana",
+    "AMERICANA"
+   ],
+   "excluded_competitors": [
+    "Sadia",
+    "Al Kabeer"
+   ]
+  },
+  "al kabeer": {
+   "brand": "Al Kabeer",
+   "synonyms": [
+    "Al Kabeer",
+    "Alkabeer",
+    "AL KABEER"
+   ],
+   "excluded_competitors": [
+    "Americana",
+    "Sadia"
+   ]
+  },
+  "fairy": {
+   "brand": "Fairy",
+   "synonyms": [
+    "Fairy",
+    "FAIRY"
+   ],
+   "excluded_competitors": [
+    "Pril",
+    "Lux"
+   ]
+  }
+ }
+}

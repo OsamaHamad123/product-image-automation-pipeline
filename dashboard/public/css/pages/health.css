@@ -684,6 +684,28 @@
     display: none;
 }
 
+/* متقدم: «صدّر مجموعة اختبار» */
+.lq-health-advanced {
+    display: block;
+}
+
+.lq-health-advanced__summary {
+    font-size: var(--lq-fs-md);
+    font-weight: 500;
+    cursor: pointer;
+}
+
+.lq-health-advanced__body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--lq-space-3);
+    margin-top: var(--lq-space-3);
+}
+
+.lq-health-advanced__body .lq-health__footnote {
+    overflow-wrap: anywhere;
+}
+
 @media (max-width: 1240px) {
     .lq-health__services {
         grid-template-columns: repeat(3, minmax(0, 1fr));

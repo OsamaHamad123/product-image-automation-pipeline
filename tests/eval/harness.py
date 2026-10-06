@@ -12,6 +12,7 @@ scripts/eval_report.py --engine v1 --write-baseline.
 
 from __future__ import annotations
 
+import contextlib
 import datetime as _dt
 import hashlib
 import json
@@ -51,6 +52,11 @@ SCENARIOS = ("normal", "gemini_down", "vlm_noisy")
 PROVIDER_SETS = runners.PROVIDER_SETS
 VLM_NOISY_PATH = FIXTURES / "vlm_noisy.json"
 ADVERSARIAL_PATH = FIXTURES / "adversarial_skus.json"
+# Named sets (eval_report --set): each folder holds golden_skus.json with its own vlm_cassette.json and
+# brand_mappings.json (and vlm_noisy.json when it records misreads). 'golden' is the committed 63-SKU set whose
+# numbers the merge gate pins; 'realistic' is modelled on the owner's live rows (fixtures/realistic).
+REALISTIC_PATH = FIXTURES / "realistic" / "golden_skus.json"
+SETS = {"golden": GOLDEN_PATH, "realistic": REALISTIC_PATH}
 
 # Source files whose behaviour the v1 baseline records. When any of them
 # changes (for example the v1 rollback hot-fixes), the live v1 run is no
@@ -90,6 +96,20 @@ def overlay_readings(cassette: Mapping[str, Any], readings: Mapping[str, Mapping
 def noisy_cassette(cassette: Mapping[str, Any], path: Optional[os.PathLike] = None) -> Dict[str, Any]:
     """The 'vlm_noisy' scenario: the recorded readings with the misreads of vlm_noisy.json laid over them."""
     return overlay_readings(cassette, _read_json(Path(path or VLM_NOISY_PATH))["misreads"])
+
+
+def set_paths(name_or_path: Any) -> Dict[str, Optional[Path]]:
+    """{golden, cassette, mappings, noisy} of a named set (SETS) or of a golden_skus.json path; None = not there."""
+    golden = SETS.get(str(name_or_path), None) if not isinstance(name_or_path, Path) else None
+    golden = Path(golden or name_or_path)
+    folder = golden.parent
+
+    def near(name: str) -> Optional[Path]:
+        path = folder / name
+        return path if path.exists() else None
+
+    return {"golden": golden, "cassette": near("vlm_cassette.json"), "mappings": near("brand_mappings.json"),
+            "noisy": near("vlm_noisy.json")}
 
 
 def correct_absent(golden: Mapping[str, Any], cassette: Mapping[str, Any]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
@@ -204,12 +224,20 @@ def run_all(engine: str = "v1", scenario: str = "normal", *, golden: Optional[Ma
             cassette: Optional[Mapping[str, Any]] = None, mappings: Optional[Dict[str, Any]] = None,
             sku_ids: Optional[Iterable[str]] = None,
             progress: Optional[Callable[[int, int, metrics.Outcome], None]] = None,
-            provider_set: str = "serper") -> Dict[str, Any]:
+            provider_set: str = "serper", set_name: str = "golden",
+            noisy_path: Optional[os.PathLike] = None, sources: Optional[Mapping[str, Any]] = None,
+            verifier_factory: Optional[Callable[[Mapping[str, Any]], Any]] = None,
+            allow_network: bool = False) -> Dict[str, Any]:
     """Replay every golden SKU through one engine with the network blocked; return a report dict.
 
     provider_set ("serper" | "bing_only") picks the production provider set v2 runs with.
-    The 'vlm_noisy' scenario lays vlm_noisy.json over the cassette (the committed one
-    unless a cassette is passed) and then replays like 'normal'.
+    The 'vlm_noisy' scenario lays vlm_noisy.json (noisy_path, default the committed one) over the
+    cassette (the committed one unless a cassette is passed) and then replays like 'normal'.
+    set_name only labels the report (SETS: 'golden', 'realistic', or a recorded folder's name).
+    sources ({"expansion": bool, "index": bool}): run the expansion round / the local index through the fakes of
+    tests/eval/sources.py (the set must already hold its sources overlay: sources.apply_overlay). None: neither,
+    the default replay. verifier_factory(sku) -> a verifier instead of the cassette (compare_verifiers);
+    allow_network only for a live reader the caller confirmed (the providers and downloads stay fixtures).
     """
     if engine not in ENGINES:
         raise ValueError(f"engine must be one of {ENGINES}")
@@ -220,7 +248,7 @@ def run_all(engine: str = "v1", scenario: str = "normal", *, golden: Optional[Ma
     golden = golden or load_golden()
     cassette = cassette or load_cassette()
     if scenario == "vlm_noisy":
-        cassette = noisy_cassette(cassette)
+        cassette = noisy_cassette(cassette, noisy_path)
     mappings = mappings if mappings is not None else load_mappings()
     wanted = set(sku_ids) if sku_ids else None
     skus = [s for s in golden["skus"] if wanted is None or s["id"] in wanted]
@@ -228,7 +256,13 @@ def run_all(engine: str = "v1", scenario: str = "normal", *, golden: Optional[Ma
         run_one = runners.run_legacy
     else:
         def run_one(sku, cassette, scenario, mappings):  # type: ignore[no-untyped-def]
-            return runners.run_v2(sku, cassette, scenario=scenario, mappings=mappings, provider_set=provider_set)
+            extra: Dict[str, Any] = {}
+            if sources:
+                extra["sources"] = sources
+            if verifier_factory is not None:
+                extra["verifier"] = verifier_factory(sku)
+            return runners.run_v2(sku, cassette, scenario=scenario, mappings=mappings, provider_set=provider_set,
+                                  **extra)
 
     outcomes: List[metrics.Outcome] = []
     attempts: List[str] = []
@@ -237,7 +271,7 @@ def run_all(engine: str = "v1", scenario: str = "normal", *, golden: Optional[Ma
         # no store spelling another run proved: the scorecard depends on this run's rows only
         from catalog_match import brand_discovery
         brand_discovery.forget_all()
-    with runners.network_blocked(attempts):
+    with (contextlib.nullcontext(attempts) if allow_network else runners.network_blocked(attempts)):
         for i, sku in enumerate(skus, 1):
             outcome = run_one(sku, cassette, scenario=scenario, mappings=mappings)
             outcomes.append(outcome)
@@ -248,6 +282,7 @@ def run_all(engine: str = "v1", scenario: str = "normal", *, golden: Optional[Ma
     labels = metrics.labels_from_golden({"skus": skus})
     report = {
         "engine": engine,
+        "set": set_name,
         "scenario": scenario,
         "provider_set": provider_set if engine == "v2" else None,
         "generated_at": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"),
@@ -257,6 +292,12 @@ def run_all(engine: str = "v1", scenario: str = "normal", *, golden: Optional[Ma
         "metrics": metrics.compute(outcomes, labels),
         "outcomes": [o.to_dict() for o in outcomes],
     }
+    if sources:
+        import sources as sources_mod
+        report["sources"] = dict(sources)
+        report["sources_summary"] = sources_mod.summarize(report["outcomes"])
+    if allow_network:
+        report["network_allowed"] = True
     if engine == "v1":
         report["legacy_fingerprint"] = legacy_fingerprint()
     report["fixture_fingerprint"] = fixture_fingerprint()
@@ -271,7 +312,8 @@ def report_dir() -> Path:
 
 def write_report(report: Mapping[str, Any], path: Optional[os.PathLike] = None) -> Path:
     stamp = _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
-    target = Path(path) if path else report_dir() / f"{report['engine']}-{report['scenario']}-{stamp}.json"
+    label = report["scenario"] if report.get("set", "golden") == "golden" else f"{report['set']}-{report['scenario']}"
+    target = Path(path) if path else report_dir() / f"{report['engine']}-{label}-{stamp}.json"
     target.parent.mkdir(parents=True, exist_ok=True)
     with open(target, "w", encoding="utf-8", newline="\n") as fh:
         json.dump(report, fh, ensure_ascii=False, indent=1)
@@ -364,4 +406,23 @@ def stratum_table(m: Mapping[str, Any]) -> str:
         lines.append(row(stratum, data))
     lines.append("-" * len(head))
     lines.append(row("ALL", m))
+    return "\n".join(lines)
+
+
+def lane_table(m: Mapping[str, Any]) -> str:
+    """Plain-text per-lane table (metrics.lane_table) for ALL and each held-out split half."""
+    head = (f"{'rows':15s}{'lane':9s}{'picks':>7s}{'coverage':>10s}{'precision':>11s}{'Wilson 95% low':>16s}"
+            f"{'auto':>6s}{'wrong auto':>12s}")
+    lines = [head, "-" * len(head)]
+    groups = [("ALL", m.get("n_skus"), m.get("per_lane", {}))]
+    for split, data in (m.get("per_split") or {}).items():
+        groups.append((split, data.get("n_skus"), data.get("per_lane", {})))
+    for name, n, lanes in groups:
+        for lane, row in lanes.items():
+            if lane == metrics.NO_LANE and not row.get("n_picks"):
+                continue
+            lines.append(f"{(name + f' ({n})') if lane == 'strict' else '':15s}{lane:9s}{row['n_picks']:7d}"
+                         f"{fmt_rate(row['coverage']):>10s}{fmt_rate(row['precision']):>11s}"
+                         f"{fmt_rate(row['precision_wilson_lower']):>16s}{row['n_auto']:6d}"
+                         f"{row['n_auto_wrong']:6d} {fmt_rate(row['wrong_auto_rate']):>5s}")
     return "\n".join(lines)
