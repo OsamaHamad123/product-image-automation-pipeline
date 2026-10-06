@@ -555,3 +555,36 @@ def healthcheck_url() -> str:
     value = str(get("HEALTHCHECK_URL") or "").strip().rstrip("/")
     return value if value.lower().startswith(("https://", "http://")) and " " not in value else ""
 # --- end runtime package ---
+
+
+# --- embeddings package: CPU image embeddings, evidence only (catalog_match.embeddings) ---
+# EMBEDDINGS            'off' (default) | 'dinov2' | 'siglip2': the model that reads the downloaded pictures for the
+#                       brand look check (a review warning, never a decision) and the near-duplicate cosine. 'off'
+#                       never imports onnxruntime, never loads a model and never reads the approved_embeddings table.
+#                       deploy/ubuntu/install.sh --with-embeddings installs onnxruntime, downloads the model and turns
+#                       it on ('dinov2'); an unknown value reads as 'off'.
+# EMBEDDINGS_MODEL_DIR  folder of the pinned model files; '' = <U2NET_HOME>/embeddings when U2NET_HOME is set (the
+#                       shared models folder of the server's units and dashboard), else temp/models in the repository
+DEFAULTS.update({
+    "EMBEDDINGS": "off",
+    "EMBEDDINGS_MODEL_DIR": "",
+})
+EMBEDDINGS_MODES = ("off", "dinov2", "siglip2")
+
+
+def embeddings_mode() -> str:
+    """'off' (default), 'dinov2' or 'siglip2'; anything else reads as 'off' (never a surprise model download)."""
+    value = str(get("EMBEDDINGS") or "").strip().lower()
+    return value if value in EMBEDDINGS_MODES else "off"
+
+
+def embeddings_model_dir() -> str:
+    """Absolute folder of the embedding model files (EMBEDDINGS_MODEL_DIR, see above)."""
+    value = str(get("EMBEDDINGS_MODEL_DIR") or "").strip()
+    if not value:
+        shared = os.getenv("U2NET_HOME", "").strip()
+        value = os.path.join(shared, "embeddings") if shared else os.path.join("temp", "models")
+    if not os.path.isabs(value):
+        value = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), value)
+    return value
+# --- end embeddings package ---

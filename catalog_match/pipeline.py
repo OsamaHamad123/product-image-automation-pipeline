@@ -57,8 +57,8 @@ import logging
 import time
 from typing import Any, Iterable, List, Mapping, Optional, Sequence, Set, Tuple, Union
 
-from . import brand_discovery, decide, expand as expand_mod, normalizer as normalizer_mod, quality as quality_mod
-from . import query_plan, url_gtin
+from . import brand_discovery, decide, embeddings, expand as expand_mod, normalizer as normalizer_mod
+from . import quality as quality_mod, query_plan, url_gtin
 from .fetch import load_image, phash_distance
 from .gtin import is_global_gtin
 from .models import (
@@ -228,7 +228,7 @@ def _fetch(spec: SkuSpec, fetcher, ranked: List[RankedCandidate], phash_negative
     return kept, len(dropped)
 
 
-def _assess(ranked: Sequence[RankedCandidate]) -> None:
+def _assess(ranked: Sequence[RankedCandidate], spec: Optional[SkuSpec] = None) -> None:
     for rc in ranked:
         if rc.fetched is None or not rc.fetched.ok:
             continue
@@ -242,6 +242,8 @@ def _assess(ranked: Sequence[RankedCandidate]) -> None:
         except Exception:  # assess never raises by contract; stay defensive
             logger.exception("pipeline: quality assessment failed for %s", rc.candidate.image_url)
             rc.quality = None
+    if spec is not None:      # expand's new candidates: their brand look evidence too (nothing with EMBEDDINGS off)
+        embeddings.annotate(spec, ranked)
 
 
 def _rerank(ranked: List[RankedCandidate]) -> List[RankedCandidate]:
@@ -406,6 +408,10 @@ def find_product_image(spec: Union[SkuSpec, Mapping[str, Any]], *, providers: Op
     _assess(ranked)
     ranked = _rerank(ranked)
     timer.lap("quality")
+    # 5b. brand look evidence (EMBEDDINGS on, a brand with approved pictures): a review warning only, the order and
+    #     every status stay as they are
+    if embeddings.annotate(spec, ranked):
+        timer.lap("embeddings")
 
     # 6. first verifier call on the top 4 usable candidates
     results: List[VerificationResult] = []

@@ -184,6 +184,8 @@ def evidence(rc: RankedCandidate, spec: Optional[SkuSpec] = None) -> Dict[str, A
         # for a copy the reader did not read, the image read in its place
         "same_picture_domains": list(getattr(rc, "same_picture_domains", None) or []),
         "copy_of": getattr(rc, "copy_of", None),
+        # catalog_match.embeddings (EMBEDDINGS on): the brand look cosines, kept with the review for re-tuning
+        **({"look": dict(rc.fetched.look)} if rc.fetched is not None and getattr(rc.fetched, "look", None) else {}),
     })
 
 

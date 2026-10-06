@@ -653,6 +653,22 @@ def _write_still_allowed(before_write):
 # الاعتماد التلقائي والبحث المسبق
 # ---------------------------------------------------------------------------
 
+def _remember_look(sku_key, brand, res, best):
+    """
+    متجه الصورة المنشورة تلقائياً لفحص شكل العبوة (catalog_match.embeddings، الإعداد EMBEDDINGS): من بايتات المرشح
+    المحفوظ. EMBEDDINGS=off لا يفعل شيئاً، ولا يُرفع أي خطأ ولا يغيّر النشر.
+    """
+    try:
+        from catalog_match import embeddings
+
+        if res.get("status") == "published" and embeddings.enabled():
+            embeddings.remember_approval(sku_key=sku_key, brand=brand, cloudinary_url=res.get("link"),
+                                         sha256=best.get("content_sha256"), url=best.get("url"),
+                                         page_url=best.get("page_url"), allow_model_download=True)
+    except Exception as e:
+        print(f"[Embeddings] تعذر حفظ متجه الصورة المنشورة للمنتج {sku_key}: {e}")
+
+
 def publish_report(res):
     """ما يُحفظ من نتيجة النشر في trace صف الطابور (publish) لتقرير التحليل (scripts/export_run.py)."""
     finish = dict(res.get("finish") or {})
@@ -727,6 +743,7 @@ def auto_approve_product(task, best_image, worksheet, link_column_index, sku_key
     if res.get("error") == "duplicate_image":
         _warn_duplicate(best_image)
     if res["status"] == "published":
+        _remember_look(sku_key, brand, res, best_image)
         local_cache_db.delete_product_failure(barcode)
         if res.get("bg_skipped"):
             _count_bg_skipped()
@@ -1315,6 +1332,7 @@ def process_single_product(prod, worksheet, link_column_index, brand_mappings=No
             barcode, name, brand, best["url"], res["link"], None, res.get("metadata"),
             verification_status="auto_verified", approved_by="auto", sku_key=sku_key,
             **({"page_gtin": page_gtin, "page_gtin_url": page_gtin_url} if page_gtin else {}))
+        _remember_look(sku_key, brand, res, best)
     return "success"
 
 
