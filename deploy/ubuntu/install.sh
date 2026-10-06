@@ -41,7 +41,7 @@ Options
       --gpu            ...rembg[gpu] (needs an NVIDIA GPU with CUDA libraries)
   --with-embeddings    pip install onnxruntime, download the DINOv2-small model (25 MB) and turn EMBEDDINGS on: the
                        brand look check, a review warning only (catalog_match/embeddings.py)
-  --with-redis        also install redis-server (only if you use Redis); --enable-units then starts the sync worker
+  --with-redis         also install redis-server (only if you use Redis); --enable-units then starts the sync worker
   --enable-units       enable and start the nightly, backup and sheet-flush timers (and the sync worker with --with-redis)
   --reset-auth         type a new password for the dashboard login (nginx basic auth)
   --auth-user NAME     login name for the dashboard (default: admin)

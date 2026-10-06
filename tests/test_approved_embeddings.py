@@ -122,7 +122,9 @@ def test_a_database_or_model_failure_is_logged_never_raised(fake, monkeypatch, t
     embeddings.set_embedder(None)
     monkeypatch.setattr(embeddings, "onnxruntime_module", lambda: None)
     monkeypatch.setenv("EMBEDDINGS_MODEL_DIR", str(tmp_path / "models"))
-    assert embeddings.remember_approval(sku_key="s1", brand="Puck", cloudinary_url=LINK, path=str(upload)) is False
+    monkeypatch.setattr(embeddings, "approved_picture", lambda *a, **k: pytest.fail("a picture read for nothing"))
+    assert embeddings.remember_approval(sku_key="s1", brand="Puck", cloudinary_url=LINK, path=str(upload),
+                                        url="https://x.ae/a.jpg") is False
     assert not (tmp_path / "models").exists()          # the approval path never downloads the model
 
 

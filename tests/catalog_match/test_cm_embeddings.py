@@ -165,6 +165,22 @@ def test_a_local_file_with_another_sha256_is_never_loaded(tmp_path):
         embeddings.ensure_model(spec, str(tmp_path), allow_download=False)
 
 
+def test_a_local_file_with_another_sha256_is_replaced_when_downloads_are_on(tmp_path, monkeypatch):
+    body = b"pinned-model" * 10
+    spec = _spec_for(body)
+    embeddings.model_path(spec, str(tmp_path)).write_bytes(b"something else")
+    fetched = []
+
+    def download(s, d):
+        fetched.append(s.sha256)
+        embeddings.model_path(s, d).write_bytes(body)
+        return embeddings.model_path(s, d)
+
+    monkeypatch.setattr(embeddings, "download_model", download)
+    assert embeddings.ensure_model(spec, str(tmp_path), allow_download=True).read_bytes() == body
+    assert fetched == [spec.sha256]
+
+
 def test_a_missing_file_is_not_downloaded_when_downloads_are_off(tmp_path):
     with pytest.raises(embeddings.ModelUnavailable, match="missing"):
         embeddings.ensure_model(embeddings.MODELS["dinov2"], str(tmp_path), allow_download=False)

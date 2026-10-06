@@ -216,14 +216,6 @@ def _fetch(spec: SkuSpec, fetcher, ranked: List[RankedCandidate], phash_negative
 
 
 def _assess(ranked: Sequence[RankedCandidate], spec: Optional[SkuSpec] = None) -> None:
-    """Soft quality of every downloaded candidate; with the spec (expand's new candidates), also their brand look
-    evidence (embeddings.annotate: nothing with EMBEDDINGS off)."""
-    _quality(ranked)
-    if spec is not None:
-        embeddings.annotate(spec, ranked)
-
-
-def _quality(ranked: Sequence[RankedCandidate]) -> None:
     for rc in ranked:
         if rc.fetched is None or not rc.fetched.ok:
             continue
@@ -237,6 +229,8 @@ def _quality(ranked: Sequence[RankedCandidate]) -> None:
         except Exception:  # assess never raises by contract; stay defensive
             logger.exception("pipeline: quality assessment failed for %s", rc.candidate.image_url)
             rc.quality = None
+    if spec is not None:      # expand's new candidates: their brand look evidence too (nothing with EMBEDDINGS off)
+        embeddings.annotate(spec, ranked)
 
 
 def _rerank(ranked: List[RankedCandidate]) -> List[RankedCandidate]:

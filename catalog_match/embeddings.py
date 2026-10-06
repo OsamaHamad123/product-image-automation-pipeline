@@ -350,7 +350,10 @@ def ensure_model(spec: ModelSpec, model_dir: Optional[str] = None, allow_downloa
             raise ModelUnavailable(f"{path} is missing (scripts/backfill_embeddings.py --setup downloads it)")
         path = download_model(spec, model_dir)
     if _sha256_of(path) != spec.sha256:
-        raise ModelUnavailable(f"{path}: sha256 differs from the pinned one; not used")
+        if not allow_download:
+            raise ModelUnavailable(f"{path}: sha256 differs from the pinned one; not used")
+        logger.warning("embeddings: %s does not match its pinned sha256; downloading it again", path)
+        path = download_model(spec, model_dir)          # replaced atomically, and checked again while downloading
     return path
 
 
@@ -899,8 +902,8 @@ def remember_approval(*, sku_key: Optional[str], brand: Optional[str], cloudinar
         return False
     try:
         embedder = embedder or get_embedder(allow_download=allow_model_download)
-        if embedder is None:
-            return False
+        if embedder is None or not getattr(embedder, "available", lambda: True)():
+            return False                     # the model cannot run: no picture is read or downloaded for nothing
         img, source = approved_picture(sha256, path, url, page_url, cloudinary_url)
         if img is None:
             logger.info("embeddings: the approved picture of %s could not be read; the backfill will try again",
