@@ -2702,6 +2702,14 @@ def spend_from_outcome(outcome):
             calls = 0
         if calls:
             add("gemini", calls, calls * ops_health.GEMINI_COST_PER_CALL)
+    # قارئ أسماء الشيت (catalog_match.normalizer): استدعاء Gemini مدفوع واحد بتكلفته المسجلة، إن لم تأتِ القراءة من الكاش
+    normalizer = outcome.get("query_normalizer")
+    if isinstance(normalizer, dict) and isinstance(normalizer.get("usage"), dict):
+        try:
+            usd = max(0.0, float(normalizer["usage"].get("usd") or 0.0))
+        except (TypeError, ValueError):
+            usd = 0.0
+        add("gemini", 1, usd)
     return [(p, c, round(u, 6)) for p, (c, u) in sorted(totals.items()) if c > 0]
 
 

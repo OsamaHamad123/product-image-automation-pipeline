@@ -75,6 +75,8 @@ def _token_set(raw: str) -> Set[str]:
 
 _STOPWORDS = _token_set(_STOPWORDS_RAW)
 _UNIT_WORDS = _token_set(_UNIT_WORDS_RAW)
+# words that never name the product (function, packaging and unit words): query_plan compares two queries without them
+FILLER_WORDS = frozenset(_STOPWORDS | _UNIT_WORDS)
 
 
 def _first(row: Mapping[str, Any], *keys: str) -> str:

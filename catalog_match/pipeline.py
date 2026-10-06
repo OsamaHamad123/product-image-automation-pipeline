@@ -12,6 +12,9 @@ Steps
                   catalog index is asked again with it (free), alongside one corrected
                   query. A spelling an earlier row of the run proved for the sheet brand
                   writes the planned queries from Q1 (brand_discovery.planned_hint).
+                  The query normaliser (catalog_match.normalizer, QUERY_NORMALIZER) reads an
+                  abbreviated sheet name first, for the queries only: N1 takes Q3's place.
+                  Scoring, verification and routing never see the reading.
     2. score      every pooled candidate with score.score_candidate.
     3. relax      R1/R2 into the same pool, only when no candidate is tier 1 or 2
                   and there is no custom query (relaxed winners are capped at review).
@@ -46,7 +49,8 @@ import logging
 import time
 from typing import Any, Iterable, List, Mapping, Optional, Sequence, Set, Tuple, Union
 
-from . import brand_discovery, decide, expand as expand_mod, quality as quality_mod
+from . import brand_discovery, decide, expand as expand_mod, normalizer as normalizer_mod, quality as quality_mod
+from . import query_plan
 from .fetch import load_image, phash_distance
 from .models import (
     Candidate, CandidateScore, FetchedImage, RankedCandidate, SearchOutcome, SkuSpec,
@@ -268,7 +272,8 @@ def _verify(spec: SkuSpec, verifier, batch: List[RankedCandidate]) -> Optional[V
 def find_product_image(spec: Union[SkuSpec, Mapping[str, Any]], *, providers: Optional[Sequence] = None,
                        fetcher=None, verifier=None, custom_query: Optional[str] = None,
                        exclude_urls: Iterable[str] = (), exclude_phashes: Iterable[Any] = (),
-                       brand_index=None, expansion: Any = None, pages: Any = None) -> SearchOutcome:
+                       brand_index=None, expansion: Any = None, pages: Any = None,
+                       normalizer: Any = None) -> SearchOutcome:
     """Find, check and route the image for one SKU. Never returns an unchecked pick as final.
 
     expansion: None (default: the configured round, only when neither providers nor a
@@ -276,10 +281,14 @@ def find_product_image(spec: Union[SkuSpec, Mapping[str, Any]], *, providers: Op
     stages) or an expand.Expansion.
     pages: the page reader of the free P0 step (expand.resolve_pages): None (default: a PageFetcher, only when
     neither providers nor a verifier were injected), False (never) or a reader with fetch_page().
+    normalizer: the query normaliser (normalizer.resolve): None (default: the configured one, only when neither
+    providers nor a verifier were injected), False (never), True (the configured one even then) or an object with
+    normalize(spec) -> normalizer.Reading.
     """
     spec = _as_spec(spec, brand_index)
     exp = expand_mod.resolve(expansion, injected=providers is not None or verifier is not None)
     page_reader = expand_mod.resolve_pages(pages, injected=providers is not None or verifier is not None)
+    norm = normalizer_mod.resolve(normalizer, injected=providers is not None or verifier is not None)
     providers = list(providers) if providers is not None else _default_providers()
     fetcher = fetcher if fetcher is not None else _default_fetcher()
     verifier = verifier if verifier is not None else _default_verifier()
@@ -289,11 +298,20 @@ def find_product_image(spec: Union[SkuSpec, Mapping[str, Any]], *, providers: Op
     custom = custom_query.strip() if custom_query and custom_query.strip() else None
     timer = _StageTimer()
 
+    # 0. the query normaliser reads an abbreviated sheet name (cached; skipped silently when it is off, down, slow or
+    #    over the run's budget). Its words go only to the retriever's planning copy of the spec (N1 in Q3's place):
+    #    `spec` itself, which scores, verifies, routes and keys the row, never carries them.
+    reading = norm.normalize(spec) if norm is not None and not custom else None
+    hint = normalizer_mod.hint_of(reading)
+    if reading is not None:
+        timer.lap("normalizer")
+
     # 1. retrieve (early stop on tier 1). A spelling an earlier row of this run proved for the same (or a sibling)
     #    sheet brand writes the planned queries from Q1 ('Super Tasty MEAT SOLID TUNA ...' for 'SUPER T/', never
     #    'SUPER T MEAT ...' first): queries only, the brand evidence and the early stop stay the sheet's.
     remembered = brand_discovery.planned_hint(spec) if not custom else None
     plan_spec = brand_discovery.as_hint(spec, remembered) if remembered is not None else spec
+    plan_spec = query_plan.with_hint(plan_spec, hint)
     retriever = Retriever(plan_spec, providers, exclude_urls=exclude_urls, max_queries=MAX_QUERIES,
                           early_stop=t1_early_stop(spec, negatives))
     retrieval = retriever.run(custom)
@@ -397,6 +415,10 @@ def find_product_image(spec: Union[SkuSpec, Mapping[str, Any]], *, providers: Op
         if report.store_image_wrong:
             # X0: store pages whose own picture is the picture that failed (catalog_match.expand)
             outcome.reject_counts[expand_mod.STORE_IMAGE_WRONG] = report.store_image_wrong
+    if reading is not None:
+        n1 = {q.text for q in query_plan.build_queries(plan_spec) if q.query_id == query_plan.NORMALIZED_QUERY_ID}
+        used = [query_plan.NORMALIZED_QUERY_ID] if n1 & set(retrieval.queries) else []
+        outcome.query_normalizer = normalizer_mod.trace_entry(reading, used)
     outcome.queries = list(retrieval.queries) + extra_queries
     outcome.timings = timer.result()
     outcome.discovered_brands = list(spec.discovered_brands)
