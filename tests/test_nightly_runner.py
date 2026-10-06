@@ -51,7 +51,7 @@ def nightly(offline, monkeypatch, tmp_path):
     # restored after the test: pin_nightly_settings replaces main.load_run_config
     monkeypatch.setattr(main, "load_run_config", main.load_run_config)
     for name in ("ROW_FILTER", "BRAND_FILTER", "FORCE_OVERWRITE_IMAGES", "AUTO_PUBLISH_ENABLED", "AUTO_PUBLISH_BRANDS",
-                 "BG_REMOVAL_METHOD", "CURATION_MODE"):
+                 "AUTO_PUBLISH_STRICT_LANE", "BG_REMOVAL_METHOD", "CURATION_MODE"):
         monkeypatch.setattr(config, name, getattr(config, name, None))
     monkeypatch.setattr(main, "_another_worker_running", lambda lock: False)
     monkeypatch.setattr(local_cache_db, "get_automation_state", lambda: dict(rec["state"]))
@@ -100,6 +100,7 @@ def _owner_settings(monkeypatch, main, config):
 
     def load_db_config():
         config.AUTO_PUBLISH_ENABLED = True
+        config.AUTO_PUBLISH_STRICT_LANE = True
 
     monkeypatch.setattr(config, "load_db_config", load_db_config)
 
@@ -120,6 +121,8 @@ def test_pinned_settings_win_over_db_settings_and_the_last_run_config(nightly, m
     runner.pin_nightly_settings(main, config)
     main.load_run_config()
     assert config.AUTO_PUBLISH_ENABLED is False and settings.auto_publish_enabled() is False
+    # nor through the strict lane, which publishes without AUTO_PUBLISH_ENABLED once its reviews prove it
+    assert config.AUTO_PUBLISH_STRICT_LANE is False and settings.auto_publish_strict_lane() is False
     assert config.ROW_FILTER == "" and config.BRAND_FILTER == "" and config.FORCE_OVERWRITE_IMAGES is False
     # the owner's other run preferences still apply
     assert config.BG_REMOVAL_METHOD == "grabcut" and config.CURATION_MODE is True
@@ -465,6 +468,7 @@ def test_runner_reuses_main_entry_points_and_writes_no_sheet():
     assert "main_module.run_enqueue_mode()" in text
     assert 'main_module.run_worker_mode(trigger="nightly", report=False, deadline_ts=deadline_ts)' in text
     assert '"AUTO_PUBLISH_ENABLED": False' in text and '"FORCE_OVERWRITE_IMAGES": False' in text
+    assert '"AUTO_PUBLISH_STRICT_LANE": False' in text
     for forbidden in ("google_sheets", "update_image_link", "update_cell", "subprocess", "AUTO_PUBLISH_ENABLED\": True"):
         assert forbidden not in text, forbidden
     assert 'os.path.join("temp", "nightly")' in text

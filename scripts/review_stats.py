@@ -90,7 +90,8 @@ def format_report(stats):
     else:
         out.append("Suggested AUTO_PUBLISH_BRANDS= (empty: no brand is ready yet)")
     if (stats.get("lanes") or {}).get("strict", {}).get("ready"):
-        out.append("Lane 'strict' is ready: AUTO_PUBLISH_STRICT_LANE can be switched on in the Settings page.")
+        out.append("Lane 'strict' is ready: with AUTO_PUBLISH_STRICT_LANE on (the default) the worker now auto-publishes "
+                   "its picks; switch it off in the Settings page to keep reviewing them.")
     out.append("This script changes nothing; set the value in the dashboard Settings page.")
     return "\n".join(out)
 

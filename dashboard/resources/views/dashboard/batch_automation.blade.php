@@ -185,6 +185,32 @@
             </div>
             <p class="lq-field__error" role="alert" data-run="brands-error" hidden></p>
             <p class="lq-run-brands__done" role="status" data-run="brands-done" hidden></p>
+
+            {{-- «عبّي جدول الماركات»: one proposal for every missing brand from evidence only (GET /api/run/brand-bulk, no
+                 search, no cost); strong ones ticked, weak ones need a tick, none without evidence can be ticked.
+                 «اعتمد المحدد» writes the ticked brands' own proposals (POST /api/run/brand-bulk-add), «تراجع» removes one
+                 the assistant wrote (POST /api/run/brand-undo), «دوّر عالمواقع الرسمية» costs up to 10 searches --}}
+            <div class="lq-run-bulk" data-run="bulk" data-state="idle">
+                <div class="lq-run-brands__foot">
+                    <button type="button" class="lq-btn lq-btn--primary" data-run="bulk-open">عبّي جدول الماركات</button>
+                    <span class="lq-field__hint">اقتراح لكل الماركات الناقصة مرة وحدة، من الأدلة اللي عنا بس (المراجعات، فهرس المتاجر، المواقع اللي لقيناها). ما بيصرف أي بحث.</span>
+                </div>
+                <div class="lq-run-bulk__panel" data-run="bulk-panel" hidden>
+                    <p class="lq-run-brands__lead" data-run="bulk-lead" aria-live="polite"></p>
+                    <div class="lq-run-brands__foot" data-run="bulk-tools" hidden>
+                        <button type="button" class="lq-btn lq-btn--ghost lq-btn--sm" data-run="bulk-sites">دوّر عالمواقع الرسمية</button>
+                        <span class="lq-field__hint" data-run="bulk-sites-note"></span>
+                    </div>
+                    <div class="lq-run-barcodes__list lq-run-bulk__list" data-run="bulk-list"></div>
+                    <div class="lq-run-brands__foot" data-run="bulk-foot" hidden>
+                        <button type="button" class="lq-btn lq-btn--primary" data-run="bulk-approve">اعتمد المحدد</button>
+                        <span class="lq-field__hint" data-run="bulk-count"></span>
+                    </div>
+                    <div class="lq-run-bulk__added-list" data-run="bulk-added" hidden></div>
+                    <p class="lq-field__error" role="alert" data-run="bulk-error" hidden></p>
+                    <p class="lq-run-brands__done" role="status" data-run="bulk-done" hidden></p>
+                </div>
+            </div>
         </section>
 
         {{-- Barcodes the store pages stated for approved rows with an empty barcode cell: read from the approvals and the

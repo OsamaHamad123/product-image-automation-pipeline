@@ -1754,14 +1754,17 @@ def action_undo_reject(params):
 def action_review_stats(params):
     """
     دقة الاختيار المسبق لكل براند ونطاق من review_decisions (local_cache_db.review_stats، نفس حساب
-    scripts/review_stats.py). لا يغير أي إعداد.
+    scripts/review_stats.py). لا يغير أي إعداد. strict_lane_enabled: مفتاح «النشر الآلي لكل الماركات المؤكدة» متل ما
+    بيقرأه العامل (catalog_match.settings: المحفوظ بالإعدادات، وإلا .env، وإلا الافتراضي شغّال).
     """
+    from catalog_match import settings as cm_settings
     try:
         rows = local_cache_db.get_review_decisions()
     except Exception:
         return _failure('failed', "Could not read the review decisions (details in temp/search.log).",
                         "review_stats failed")
-    return dict({'status': 'success'}, **local_cache_db.review_stats(rows))
+    return dict({'status': 'success'}, **local_cache_db.review_stats(rows),
+                strict_lane_enabled=bool(cm_settings.auto_publish_strict_lane()))
 
 
 # ---------------------------------------------------------------------------
@@ -2259,7 +2262,18 @@ def action_brand_official_site(params):
         brand_assistant.OFFICIAL_SITE_SPEND_RUN)
     candidates = brand_assistant.official_site_candidates(
         [{"link": c.page_url, "title": c.title} for c in results], brand)
+    _cache_brand_site(brand, candidates)
     return {"status": "success", "brand": brand, "candidates": candidates, "queries": 1}
+
+
+def _cache_brand_site(brand, candidates):
+    """«عبّي جدول الماركات» بيقرأ الموقع من هالكاش بدل بحث مدفوع تاني: أول موقع اسمه بيحمل الماركة، وإلا ''."""
+    from catalog_match import brand_assistant
+    try:
+        local_cache_db.save_brand_site(brand_assistant.brand_key(brand), brand,
+                                       brand_assistant.site_for_cache(candidates, brand))
+    except Exception as e:
+        logger.warning("brand site cache: not saved: %s", e)
 
 
 def action_brand_add(params):
@@ -2306,6 +2320,243 @@ def action_brand_add(params):
         except Exception as e:
             logger.warning("brand_add: the sites could not be queued for indexing: %s", e)
     return {"status": "success", "added": added, "skipped": res.get("skipped") or [], "harvest_queued": queued}
+
+
+# ---------------------------------------------------------------------------
+# «عبّي جدول الماركات»: brand_bulk_suggestions (قراءة فقط)، brand_bulk_sites (بحث مدفوع بسقف، بزر صريح)،
+# brand_bulk_add («اعتمد المحدد»: يكتب شيت المالك)، brand_undo (تراجع عن ماركة كتبها المساعد)
+# ---------------------------------------------------------------------------
+
+def _sheet_rows_for_brands(queue_rows):
+    """صفوف الطابور، وصفوف الشيت المخزنة (google_sheets.cached_products، بلا طلب لـ Google) اللي مش بالطابور، كي تنعد
+    كل ماركات الشيت. الكاش ما بينقرا = صفوف الطابور بس."""
+    rows = list(queue_rows or [])
+    try:
+        products = google_sheets.cached_products()
+    except Exception as e:
+        logger.warning("brand bulk: the cached sheet rows could not be read: %s", e)
+        products = None
+    seen = {r.get("row_number") for r in rows}
+    for prod in products or ():
+        if prod.get("row_number") in seen:
+            continue
+        rows.append({"row_number": prod.get("row_number"), "name": prod.get("name") or "",
+                     "brand": prod.get("brand") or "", "brand_ar": prod.get("brand_ar") or "",
+                     "name_ar": prod.get("name_ar") or "", "discovered": []})
+    return rows
+
+
+def _brand_bulk_proposals():
+    """(proposals, rows, index_available) من الطابور وصفوف الشيت والمراجعات وفهرس المتاجر وكاش المواقع؛ أو رد خطأ."""
+    from catalog_match import brand_assistant
+    try:
+        rows = _sheet_rows_for_brands(local_cache_db.queue_brand_rows())
+    except Exception:
+        return _failure("failed", "Could not read the automation queue (details in temp/search.log).",
+                        "brand_bulk failed")
+    try:
+        client = google_sheets.get_sheets_client()
+        if not client:
+            raise RuntimeError("Google Sheets API connection failed")
+        mappings = google_sheets.sheet_brand_mappings(client, config.SPREADSHEET_NAME_OR_URL) or {}
+    except Exception:
+        return _failure("failed", "Could not read the Brands Mapping sheet (details in temp/search.log).",
+                        "brand_bulk sheet read failed")
+    evidence = {}
+    for name, read in (("aliases", local_cache_db.get_learned_brand_aliases),
+                       ("approvals", local_cache_db.get_brand_source_counts),
+                       ("sites", local_cache_db.brand_sites)):
+        try:
+            evidence[name] = read()
+        except Exception as e:
+            logger.warning("brand bulk: %s unavailable: %s", name, e)
+            evidence[name] = {} if name == "sites" else []
+    index_lookup = None
+    try:
+        from catalog_match.local_index import DbCatalogStore
+        store = DbCatalogStore()
+        if store.count() > 0:
+            index_lookup = lambda brand: brand_assistant.index_evidence(brand, store.find)  # noqa: E731
+    except Exception as e:
+        logger.warning("brand bulk: the local index is not available: %s", e)
+    try:
+        proposals = brand_assistant.bulk_suggestions(rows, mappings, evidence["aliases"], evidence["approvals"],
+                                                     index_lookup, evidence["sites"])
+    except Exception:
+        return _failure("failed", "Could not work out the missing brands (details in temp/search.log).",
+                        "brand_bulk failed")
+    return proposals, rows, index_lookup is not None
+
+
+def action_brand_bulk_suggestions(params):
+    """
+    «عبّي جدول الماركات»: اقتراح واحد لكل ماركة بالشيت ما إلها صف بـ Brands Mapping، من الأدلة بس (catalog_match.
+    brand_assistant.bulk_suggestions): {brands: [{brand, rows, brand_ar, synonyms, official_domain, confidence,
+    evidence, selectable, checked, site_searched}], counts: {high, low, none}, sites_left, site_cap, index}. قراءة
+    فقط: لا بحث مدفوع ولا كتابة بالشيت (الموقع الرسمي من كاش بحث سابق بس).
+    """
+    from catalog_match import brand_assistant
+    out = _brand_bulk_proposals()
+    if isinstance(out, dict):
+        return out
+    proposals, rows, index_ok = out
+    counts = {k: sum(1 for b in proposals if b["confidence"] == k) for k in ("high", "low", "none")}
+    unsearched = sum(1 for b in proposals if not b["site_searched"])
+    return {"status": "success", "brands": proposals, "rows": len(rows), "counts": counts, "index": index_ok,
+            "sites_left": unsearched, "site_cap": brand_assistant.BULK_SITE_LOOKUPS}
+
+
+def action_brand_bulk_sites(params):
+    """
+    «دوّر عالمواقع الرسمية»: لحد BULK_SITE_LOOKUPS ماركة (الأكثر صفوفاً، اللي ما انبحث عن موقعها قبل) استعلام Serper
+    واحد لكل وحدة، نفس brand_official_site بالضبط (بلا hedging، بسجل الصرف)، والنتيجة بتنحفظ بكاش المواقع. بيوقف عند
+    أول بحث ما ردّ. لا يكتب الشيت. {status, searched, found, left, queries}.
+    """
+    from catalog_match import brand_assistant, settings as cm_settings
+    from catalog_match.providers.serper_web import SerperWebProvider, parse_organic
+    if not cm_settings.serper_api_key():
+        return {"status": "unavailable", "code": "no_key", "error": "No Serper key is configured."}
+    try:
+        cap = max(1, min(int(params.get("limit") or brand_assistant.BULK_SITE_LOOKUPS),
+                         brand_assistant.BULK_SITE_LOOKUPS))
+    except (TypeError, ValueError):
+        cap = brand_assistant.BULK_SITE_LOOKUPS
+    try:
+        rows = _sheet_rows_for_brands(local_cache_db.queue_brand_rows())
+        client = google_sheets.get_sheets_client()
+        if not client:
+            raise RuntimeError("Google Sheets API connection failed")
+        mappings = google_sheets.sheet_brand_mappings(client, config.SPREADSHEET_NAME_OR_URL) or {}
+        sites = local_cache_db.brand_sites()
+    except Exception:
+        return _failure("failed", "Could not read the queue, the sheet or the site cache (details in temp/search.log).",
+                        "brand_bulk_sites failed")
+    todo = [b for b in brand_assistant.suggestions(rows, mappings)
+            if brand_assistant.brand_key(b["brand"]) not in sites and brand_assistant.main_token(b["brand"])]
+    provider = SerperWebProvider()
+    provider.hedge = False                           # exactly one query, one credit per brand
+    searched, found = [], []
+    for b in todo[:cap]:
+        brand = b["brand"]
+        try:
+            results = parse_organic(provider._request(brand_assistant.search_query(brand), "en"))
+        except Exception:
+            logger.warning("brand_bulk_sites: the search did not answer; %d searched", len(searched))
+            break
+        local_cache_db.record_search_spend(
+            {"provider_health": [{"provider": "serper_web", "status": "ok" if results else "empty", "hedges": 0}]},
+            brand_assistant.OFFICIAL_SITE_SPEND_RUN)
+        candidates = brand_assistant.official_site_candidates(
+            [{"link": c.page_url, "title": c.title} for c in results], brand)
+        _cache_brand_site(brand, candidates)
+        searched.append(brand)
+        if brand_assistant.site_for_cache(candidates, brand):
+            found.append(brand)
+    return {"status": "success", "searched": len(searched), "found": len(found),
+            "left": max(0, len(todo) - len(searched)), "queries": len(searched)}
+
+
+BRAND_BULK_MAX = 500
+
+
+def action_brand_bulk_add(params):
+    """
+    «اعتمد المحدد»: {brands: [اسم الماركة متل ما بتظهر]}. بيحسب الاقتراحات من جديد ويكتب لكل ماركة محددة اقتراحها هو
+    (الاسم، مرادفاته، موقعها الرسمي إذا في) — مش أي شي بيبعته المتصفح — وما بيكتب ماركة بلا دليل أبداً. الكتابة بدفعات
+    (brand_assistant.MAX_BATCH، قراءة طازجة وطلب كتابة واحد لكل دفعة، google_sheets.add_brand_mappings)، والماركة
+    المكتوبة أصلاً بتتخطى (تكرار الضغطة ما بيكتب شي جديد). كل ماركة انكتبت بتنسجّل (brand_writes) للتراجع، ومواقعها
+    بتنضاف لطابور الفهرسة. {status, added, skipped: [{brand, reason}], harvest_queued}.
+    """
+    from catalog_match import brand_assistant as ba
+    requested = params.get("brands")
+    if not isinstance(requested, list) or not requested or len(requested) > BRAND_BULK_MAX:
+        return _brand_invalid("too_many_brands", "Between 1 and %d brands at a time." % BRAND_BULK_MAX, "brands")
+    out = _brand_bulk_proposals()
+    if isinstance(out, dict):
+        return out
+    proposals = out[0]
+    items, skipped = ba.bulk_items(proposals, [b for b in requested if isinstance(b, str)])
+    added, written = [], {}
+    try:
+        client = google_sheets.get_sheets_client() if items else None
+        if items and not client:
+            raise RuntimeError("Google Sheets API connection failed")
+        for start in range(0, len(items), ba.MAX_BATCH):
+            res = google_sheets.add_brand_mappings(client, config.SPREADSHEET_NAME_OR_URL,
+                                                   items[start:start + ba.MAX_BATCH])
+            added.extend(res.get("added") or [])
+            written.update(res.get("written") or {})
+            skipped.extend({"brand": x.get("brand"), "reason": "duplicate"} for x in res.get("skipped") or [])
+    except google_sheets.SheetTransientError:
+        failure = _failure("failed", "Google Sheets is temporarily unavailable (quota or a Google server error). "
+                                     "Try again in a minute.", "brand_bulk_add failed")
+        return dict(failure, added=added)
+    except Exception:
+        failure = _failure("failed", "Could not write the Brands Mapping sheet. Check that it is shared with the "
+                                     "service account (details in temp/search.log).", "brand_bulk_add failed")
+        return dict(failure, added=added)
+    finally:
+        if added:
+            try:
+                local_cache_db.log_brand_writes([
+                    {"brand_key": ba.brand_key(b), "brand": b, "synonyms": (written.get(b) or {}).get("synonyms", ""),
+                     "official_domains": (written.get(b) or {}).get("official_domains", "")} for b in added])
+            except Exception as e:
+                logger.warning("brand_bulk_add: the undo log was not written: %s", e)
+    domains = [d for item in items if item["brand"] in added for d in item["official_domains"]]
+    queued = []
+    if domains:
+        try:
+            local_cache_db.add_pending_harvest_domains(domains)
+            queued = domains
+        except Exception as e:
+            logger.warning("brand_bulk_add: the sites could not be queued for indexing: %s", e)
+    return {"status": "success", "added": added, "skipped": skipped, "harvest_queued": queued}
+
+
+def action_brand_undo(params):
+    """
+    تراجع عن ماركة كتبها «عبّي جدول الماركات»: بيمسح صفها من Brands Mapping بس إذا لسا متل ما كتبه المساعد بالضبط
+    (google_sheets.remove_brand_mapping)، وبيشيل موقعها من طابور الفهرسة إذا لسا ما انفهرس. ماركة أضافها المالك
+    بإيده، أو صف عدّله: ما منمسح شي. {status: success, brand} | {status: invalid, code: not_ours | changed | missing}.
+    """
+    from catalog_match import brand_assistant as ba
+    try:
+        brand = ba.clean_brand(_text(params, "brand"))
+    except ba.BrandRequestError as e:
+        return _brand_invalid(e.code, str(e), e.field)
+    try:
+        entry = local_cache_db.last_brand_write(ba.brand_key(brand))
+    except Exception:
+        return _failure("failed", "Could not read the assistant's log (details in temp/search.log).", "brand_undo failed")
+    if not entry:
+        return _brand_invalid("not_ours", "This brand was not added by the assistant.", "brand")
+    try:
+        client = google_sheets.get_sheets_client()
+        if not client:
+            raise RuntimeError("Google Sheets API connection failed")
+        result = google_sheets.remove_brand_mapping(client, config.SPREADSHEET_NAME_OR_URL, entry)
+    except google_sheets.SheetTransientError:
+        return _failure("failed", "Google Sheets is temporarily unavailable. Nothing was removed; try again in a minute.",
+                        "brand_undo failed")
+    except Exception:
+        return _failure("failed", "Could not change the Brands Mapping sheet (details in temp/search.log).",
+                        "brand_undo failed")
+    if result != "removed":
+        if result == "missing":
+            try:
+                local_cache_db.mark_brand_write_undone(entry["id"])
+            except Exception as e:
+                logger.warning("brand_undo: the log was not updated: %s", e)
+        return _brand_invalid(result, "The row is not the one the assistant wrote.", "brand")
+    try:
+        local_cache_db.mark_brand_write_undone(entry["id"])
+        domains = [d.strip() for d in str(entry.get("official_domains") or "").split(",") if d.strip()]
+        if domains:
+            local_cache_db.remove_pending_harvest_domains(domains)
+    except Exception as e:
+        logger.warning("brand_undo: the log or the indexing queue was not updated: %s", e)
+    return {"status": "success", "brand": entry["brand"]}
 
 
 # ---------------------------------------------------------------------------
@@ -2538,6 +2789,10 @@ ACTIONS = {
     'brand_suggestions': action_brand_suggestions,
     'brand_official_site': action_brand_official_site,
     'brand_add': action_brand_add,
+    'brand_bulk_suggestions': action_brand_bulk_suggestions,
+    'brand_bulk_sites': action_brand_bulk_sites,
+    'brand_bulk_add': action_brand_bulk_add,
+    'brand_undo': action_brand_undo,
     'barcode_suggestions': action_barcode_suggestions,
     'barcode_write': action_barcode_write,
     'export_run': action_export_run,

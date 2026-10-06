@@ -6,17 +6,20 @@
     «تفعيل» adds a ready brand, «إيقاف» removes any entry. The thresholds come from the bridge, never from here.
     «النشر الآلي لكل الماركات المؤكدة» ($autoPublish['lane'] = SettingsController::laneData, review_stats.lanes): the
     reviews of the strict lane (a pick every auto-publish rule passed but the brand setting) and its own switch
-    (section strict-lane), which the server turns on only when that lane is ready; the unsure lane is information only.
+    (section strict-lane), on by default and free to switch either way: the worker publishes nothing from the lane
+    before it is ready (catalog_match.decide.strict_lane_readiness), and it does not need the switch above (that one
+    is the brand table's). $lane['state'] says whether it is on and after how many more approvals it publishes by
+    itself; $lane['how'] how to switch it off (or back on). The unsure lane is information only.
 --}}
 @php
     $ap = $autoPublish;
     $readyNames = implode('، ', $ap['ready_listed']);
     $switchOnText = 'رح تنرفع صور الماركات المفعّلة (' . $readyNames . ') وتنكتب بالشيت بدون مراجعتك من التشغيل الجاي. باقي الماركات بتضل تستنى مراجعتك.';
-    $switchOffText = 'كل النتائج رح ترجع تستنى مراجعتك قبل ما توصل الشيت. قائمة الماركات المفعّلة بتضل محفوظة.';
+    $switchOffText = 'صور الماركات المفعّلة بالجدول رح ترجع تستنى مراجعتك قبل ما توصل الشيت. قائمة الماركات المفعّلة بتضل محفوظة. (النشر الآلي لكل الماركات المؤكدة إله مفتاحه لحاله تحت.)';
     $listedCount = count($ap['listed']);
     $lane = $ap['lane'];
-    $laneOnText = 'الاقتراحات اللي بتعدّي كل قواعد النشر الآلي (قارئ الملصق أكّده، متجر موثوق، بلا أي تعارض) لأي ماركة مربوطة رح تنرفع وتنكتب بالشيت بدون مراجعتك، حتى لو الماركة مش مفعّلة بالجدول. باقي الاقتراحات بتضل تستنى مراجعتك.';
-    $laneOffText = 'بس الماركات المفعّلة بالجدول رح تضل تنرفع بدون مراجعة. باقي الاقتراحات بترجع تستنى مراجعتك.';
+    $laneOnText = 'الاقتراحات اللي بتعدّي كل قواعد النشر الآلي (قارئ الملصق أكّده، متجر موثوق، بلا أي تعارض) لأي ماركة مربوطة رح تنرفع وتنكتب بالشيت بدون مراجعتك، حتى لو الماركة مش مفعّلة بالجدول، بس بعد ما تثبت دقة هالفئة بمراجعاتك. لحد هداك الوقت كل شي بيستنى مراجعتك.';
+    $laneOffText = 'كل الاقتراحات المؤكدة رح ترجع تستنى مراجعتك. بس الماركات المفعّلة بالجدول بتضل تنرفع بدون مراجعة.';
 @endphp
 <section class="lq-card lq-settings-card" aria-labelledby="lq-settings-ap-title">
     <div class="lq-autopub__head">
@@ -108,7 +111,7 @@
     <div class="lq-autopub__head">
         <div class="lq-settings-card__head">
             <h2 class="lq-section-title">النشر الآلي لكل الماركات المؤكدة</h2>
-            <p class="lq-settings-card__intro">بدل ما تستنى كل ماركة لحالها: الاقتراح اللي بيعدّي كل قواعد النشر الآلي (قارئ الملصق أكّده، متجر موثوق، بلا تعارض) لماركة مربوطة بينرفع بدون مراجعة، بس لما تثبت دقة هالفئة بمراجعاتك.</p>
+            <p class="lq-settings-card__intro">بدل ما تستنى كل ماركة لحالها: الاقتراح اللي بيعدّي كل قواعد النشر الآلي (قارئ الملصق أكّده، متجر موثوق، بلا تعارض) لماركة موجودة بـ Brands Mapping بينرفع بدون مراجعة، بس لما تثبت دقة هالفئة بمراجعاتك. شغّال من الأساس، وما بيحتاج مفتاح «تفعيل النشر الآلي» فوق.</p>
         </div>
         <form method="POST" action="{{ route('dashboard.save_settings') }}" class="lq-autopub__switch" data-autopub-form>
             @csrf
@@ -125,13 +128,11 @@
             <strong>{{ $lane['text'] }}</strong>
             @if ($lane['detail'] !== '')<span class="lq-autopub__lane-detail">{{ $lane['detail'] }}</span>@endif
         </div>
+        <p class="lq-autopub__lane-detail" data-autopub-lane-state>{{ $lane['state'] }}</p>
+        <p class="lq-autopub__hint">{{ $lane['how'] }}</p>
         <p class="lq-autopub__lane-detail">{{ $lane['unsure_text'] }}</p>
-        @if (!$lane['enabled'] && !$lane['can_enable'])
-            <p class="lq-autopub__hint">المفتاح بيتفعّل لما توصل هالفئة نفس معيار الماركات تحت.</p>
-        @elseif ($lane['enabled'] && !$ap['enabled'])
-            <p class="lq-autopub__hint">النشر الآلي كله مطفأ، فما رح ينرفع شي بدون مراجعة لحتى تشغّله من فوق.</p>
-        @endif
     @else
-        <p class="lq-autopub__hint">ما قدرنا نحسب دقة هالفئة هلق، فالتشغيل موقّف لحتى نقدر نتأكد.</p>
+        <p class="lq-autopub__lane-detail" data-autopub-lane-state>{{ $lane['state'] }}</p>
+        <p class="lq-autopub__hint">ما قدرنا نحسب دقة هالفئة هلق، فما رح ينشر منها شي لحالها لحتى نتأكد إنها جاهزة. {{ $lane['how'] }}</p>
     @endif
 </section>

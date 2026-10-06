@@ -571,6 +571,88 @@
     margin-inline-start: auto;
 }
 
+/* «عبّي جدول الماركات»: one checkbox row per missing brand (the barcode rows' layout), its confidence and evidence */
+.lq-run-bulk {
+    display: flex;
+    flex-direction: column;
+    gap: var(--lq-space-3);
+    padding-top: var(--lq-space-3);
+    border-top: 1px dashed var(--lq-border-soft);
+}
+
+.lq-run-bulk__panel {
+    display: flex;
+    flex-direction: column;
+    gap: var(--lq-space-3);
+}
+
+.lq-run-bulk__list {
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr));
+    max-height: 600px;
+}
+
+.lq-run-bulk__head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--lq-space-2);
+}
+
+.lq-run-bulk__chip {
+    flex: none;
+    padding: 1px 8px;
+    border-radius: var(--lq-radius-pill);
+    font-size: 12px;
+    background: var(--lq-surface-2);
+    color: var(--lq-text-2);
+}
+
+.lq-run-bulk__chip--high {
+    background: var(--lq-success-bg);
+    color: var(--lq-success-ink);
+}
+
+.lq-run-bulk__chip--low {
+    background: var(--lq-warning-bg);
+    color: var(--lq-warning-ink);
+}
+
+.lq-run-bulk__syn,
+.lq-run-bulk__site {
+    overflow-wrap: anywhere;
+    unicode-bidi: isolate;
+}
+
+.lq-run-bulk__evidence {
+    margin: 0;
+    padding-inline-start: 18px;
+    font-size: 12px;
+    line-height: 1.7;
+    color: var(--lq-text-2);
+}
+
+.lq-run-bulk__added-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--lq-space-2);
+}
+
+.lq-run-bulk__added {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--lq-space-2);
+    padding: 2px 4px 2px 10px;
+    border: 1px solid var(--lq-border-soft);
+    border-radius: var(--lq-radius-pill);
+    background: var(--lq-surface);
+    font-size: 13px;
+}
+
+.lq-run-bulk__added-name {
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+
 /* «باركودات لقيناها من صفحات المتاجر» */
 .lq-run-barcodes {
     grid-column: 1 / -1;

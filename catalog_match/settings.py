@@ -33,8 +33,9 @@ DEFAULTS = {
     "AUTO_PUBLISH_ENABLED": False,
     "AUTO_PUBLISH_BRANDS": [],
     # a pick of lane 'strict' (catalog_match.decide.pick_lane) of a mapped brand auto-publishes whatever
-    # AUTO_PUBLISH_BRANDS says; the dashboard turns it on only once that lane's reviews prove it
-    "AUTO_PUBLISH_STRICT_LANE": False,
+    # AUTO_PUBLISH_BRANDS says, and only once that lane's own reviews prove it (decide.strict_lane_readiness 'ready');
+    # on by default (the owner's approval), the value saved in the Settings page wins
+    "AUTO_PUBLISH_STRICT_LANE": True,
     "CANDIDATE_STORE_DIR": os.path.join("temp", "candidates"),
     "PROXY_URL": "",
     # the canvas side is adaptive (image_processor._adaptive_canvas): round(product long side / fill) clamped to
