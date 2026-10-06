@@ -2703,9 +2703,9 @@ def run_worker_mode(trigger="manual", report=True, deadline_ts=None):
             return
         brand_mappings = google_sheets.get_brand_mappings(sheets_client, config.SPREADSHEET_NAME_OR_URL)
         _start_local_index_refresh(trigger)      # in the background: the search never waits for it
+        _start_normalizer_run()
         _forget_brand_spellings()
         _forget_slow_hosts()
-        _start_normalizer_run()
         _harvest_pending_brand_sites()
         google_sheets.init_async_queue(config.CREDENTIALS_FILE, config.SPREADSHEET_NAME_OR_URL)
         queue_started = True
@@ -2979,9 +2979,9 @@ def run_automation_pipeline():
             print("لم يتم العثور على أي منتجات صالحة للمعالجة.")
             return
         brand_mappings = google_sheets.get_brand_mappings(sheets_client, config.SPREADSHEET_NAME_OR_URL)
+        _start_normalizer_run()
         _forget_brand_spellings()
         _forget_slow_hosts()
-        _start_normalizer_run()
 
         success_count = skipped_count = failed_count = 0
         save_progress(0, len(products), 0, 0, "بدء التشغيل...")

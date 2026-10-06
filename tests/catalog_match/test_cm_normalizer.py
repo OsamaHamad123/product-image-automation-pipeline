@@ -367,3 +367,15 @@ def test_the_database_cache_round_trip(mariadb_or_skip, monkeypatch):
     assert normaliser(client, cache=cache, memo=nz._Memo()).normalize(SUPT).status == "cache"
     assert len(client.prompts) == 1
 
+
+
+def test_each_worker_run_starts_with_a_fresh_budget():
+    import main
+
+    nz.RUN.add(1.0)
+    for _ in range(nz.BREAKER_THRESHOLD):
+        nz.BREAKER.record(False)
+    main._start_normalizer_run()
+    assert nz.RUN.spent == 0.0 and not nz.BREAKER.is_open()
+    source = open(main.__file__, encoding="utf-8").read()
+    assert source.count("_start_normalizer_run()\n        _forget_brand_spellings()\n") == 2   # worker and sequential
