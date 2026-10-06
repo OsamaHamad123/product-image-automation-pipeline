@@ -45,3 +45,34 @@ jobs:
 
       - name: Run tests
         run: pytest
+
+  # Dependency advisories for the Python requirements and the dashboard's
+  # composer.lock. NON-BLOCKING FOR NOW (continue-on-error on the job and on each
+  # step): an advisory published today for a package a change never touched must
+  # not turn its PR red, and laravel/framework still has advisories that need a
+  # Laravel upgrade of their own. Read this job's log on every PR; make it blocking
+  # (remove continue-on-error) once that backlog is cleared.
+  audit:
+    name: dependency audit (non-blocking)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: pip-audit (requirements.txt, requirements-dev.txt)
+        continue-on-error: true
+        run: |
+          pip install pip-audit
+          pip-audit -r requirements.txt -r requirements-dev.txt
+
+      # The runner image ships PHP and Composer; --locked reads composer.lock only
+      # (no vendor/ install needed).
+      - name: composer audit (dashboard/composer.lock)
+        continue-on-error: true
+        working-directory: dashboard
+        run: composer audit --locked --no-interaction
