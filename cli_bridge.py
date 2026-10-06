@@ -165,6 +165,8 @@ def action_get_products(params):
             # main.compute_sku_key هو build_sku_spec(...).sku_key: المواصفة نفسها تُقرأ مرة واحدة
             spec = build_sku_spec(row, brand_mappings)
             prod["sku_key"] = spec.sku_key
+            # المفتاح بلا باركود (main.compute_alt_sku_key): صف كُتب له باركود بعد اعتماده يجد اعتماده ورفضه به
+            prod["alt_sku_key"] = pipeline.compute_alt_sku_key(row, spec)
             prod["sheet_states"] = _sheet_states(spec)
             prod["sheet_issues"] = _sheet_issues(row, spec, quality, prod.get("row_number"))
         except Exception as e:
@@ -762,6 +764,11 @@ def _current_state(sku_key, row_number, product_name, scope=None):
     if scope is None:
         scope = _review_scope({"product_name": product_name, "sku_key": sku_key}, sku_key, row_number)
     found = local_cache_db.get_cached_product(sku_key=sku_key) if sku_key else None
+    # صف صار له باركود بعد اعتماده: الاعتماد محفوظ بالمفتاح القديم، مفتاح صفوف طابوره البديل
+    for alt in ([] if found or not sku_key else _alt_keys(sku_key, scope.get("tasks"))):
+        found = local_cache_db.get_cached_product(sku_key=alt)
+        if found:
+            break
     approval = found if _approval_is_this_products(found, scope.get("identity")) else None
     task = local_cache_db.get_task_by_row(scope["row"]) if scope.get("row") is not None else None
     if task is not None and _row_of(task) != scope["row"] and _row_of(task) is not None:
@@ -783,6 +790,15 @@ def _current_state(sku_key, row_number, product_name, scope=None):
     if found and not approval:
         current["key_approval_of"] = str(found.get("product_name") or "").strip() or None
     return current, (approval or None)
+
+
+def _alt_keys(sku_key, tasks=None):
+    """
+    المفاتيح البديلة لمنتج (alt_sku_key لصفوف طابوره، main.compute_alt_sku_key): مفتاحه قبل أن يُكتب له باركود صالح؛
+    اعتماده ورفضه المحفوظان به يبقيان له. tasks: صفوف طابور المنتج (وإلا تُقرأ بالمفتاح).
+    """
+    tasks = local_cache_db.get_tasks_by_sku(sku_key) if tasks is None else tasks
+    return sorted({str(t.get("alt_sku_key") or "").strip() for t in tasks or ()} - {"", str(sku_key or "")})
 
 
 def _expected_state(params):
@@ -1151,6 +1167,10 @@ def _published_response(res, sku_key, row_number, **extra):
     رغم علامات العرض بعد تأكيد المراجع، published_anyway)، و duplicate_image (نفس الصورة منشورة لمنتج آخر،
     duplicate_of يسمّيه؛ الاعتماد الصريح يُكتب مع ذلك). warning: أول تحذير. quality_flags / quality_notes: فحص القص.
     bg_skipped: انتشرت بدون عزل الخلفية لأن المالك أوقفه بالإعدادات (main.publish_image)؛ ليس تحذيراً، فالرابط نظيف.
+    bg_fallback: {provider, from, code}: خلص رصيد المزوّد السحابي (from) فعزلتها rembg المحلية المجانية (provider: rembg،
+    موديل BiRefNet) واجتازت فحص القص؛ ليس تحذيراً، فالرابط نظيف والخلفية معزولة (main.publish_image).
+    white_url: النسخة البيضا المعتمة (JPEG) من نفس الأصل (cloudinary_storage.white_version_url)، للتطبيق متى بده مربع
+    أبيض؛ image_link هو الأصل الشفاف (OUTPUT_BACKGROUND = transparent).
     """
     response = dict({'status': 'success', 'image_link': res["link"], 'sheet_value': res["sheet_value"],
                      'isolated': res["isolated"], 'sku_key': sku_key,
@@ -1164,6 +1184,10 @@ def _published_response(res, sku_key, row_number, **extra):
         response['quality_notes'] = list(res["quality_notes"])     # ملاحظات الفحص غير المانعة
     if res.get("bg_skipped"):
         response['bg_skipped'] = True       # «انتشرت بدون عزل الخلفية» (عزل الخلفية متوقف بالإعدادات)
+    if res.get("bg_fallback"):
+        response['bg_fallback'] = dict(res["bg_fallback"])   # «انعزلت الخلفية بطريقة محلية لأن رصيد المزوّد خلص»
+    if res.get("white_url"):
+        response['white_url'] = res["white_url"]   # النسخة البيضا من نفس الأصل (b_white,f_jpg)
     warnings = []
     if str(res.get("sheet_value") or "").startswith("needs_review:"):
         warnings.append('background_not_removed')
@@ -1664,6 +1688,12 @@ def action_undo_reject(params):
         return {'status': 'error', 'error': 'sku_key and image_url are required'}
     try:
         result = local_cache_db.undo_rejection(sku_key, image_url, row_number=params.get('row_number'))
+        # رفض حُفظ قبل أن يُكتب للصف باركود: محفوظ بالمفتاح البديل
+        for alt in ([] if result.get("removed") else _alt_keys(sku_key)):
+            again = local_cache_db.undo_rejection(alt, image_url, row_number=params.get('row_number'))
+            if again.get("removed"):
+                result = again
+                break
     except Exception:
         return _failure('failed', "Could not undo the rejection (details in temp/search.log).", "undo_reject failed")
     if not result.get("removed"):
@@ -2047,6 +2077,30 @@ def action_bg_methods(params):
 
 
 # ---------------------------------------------------------------------------
+# local_index_refresh («حدّث الفهرس هلق» ببطاقة «فهرس المتاجر المحلي» بصفحة الصحة): تحديث الفهرس المحلي كمهمة خلفية
+# ---------------------------------------------------------------------------
+
+def action_local_index_refresh(params):
+    """
+    يبدأ نفس تحديث الفهرس المحلي اللي بيشغّله التشغيل الليلي والعامل (catalog_match.index_refresh) كمهمة بعملية مستقلة
+    (scripts/build_catalog_index.py --refresh --force) ويرجع فوراً: {status: success, started, running, message_ar}.
+    started=False مع running=True: في تحديث شغّال أصلاً. بيقرأ خرايط المتاجر بس (robots.txt وCrawl-delay محفوظين، متجر
+    رد «ممنوع» بيتخطى 7 أيام)؛ ما بيكتب بالشيت ولا بـ Cloudinary ولا بيصرف أي بحث مدفوع. التقدم بيظهر بالبطاقة عند التحديث.
+    """
+    from catalog_match import index_refresh
+
+    result = index_refresh.start_detached(trigger="dashboard", force=True)
+    messages = {
+        "started": "بلّش تحديث الفهرس بالخلفية. افتح الصفحة بعد شوي لتشوف التقدم.",
+        "running": "في تحديث للفهرس شغّال هلق. افتح الصفحة بعد شوي لتشوف التقدم.",
+        "disabled": "الفهرس المحلي مطفي بالإعدادات: شغّله أول من تبويب «متقدم».",
+        "unavailable": "ما قدرنا نبدأ تحديث الفهرس: شوف صفحة الأخطاء.",
+    }
+    return {"status": "success", "started": bool(result.get("started")), "running": bool(result.get("running")),
+            "reason": result.get("reason"), "message_ar": messages.get(result.get("reason"), "")}
+
+
+# ---------------------------------------------------------------------------
 # «ماركات ناقصة من Brands Mapping» (catalog_match/brand_assistant.py): brand_suggestions (قراءة فقط، بلا بحث مدفوع)،
 # brand_official_site (استعلام Serper واحد بزر صريح)، brand_add (يكتب شيت المالك، بزر صريح فقط)
 # ---------------------------------------------------------------------------
@@ -2164,6 +2218,222 @@ def action_brand_add(params):
     return {"status": "success", "added": added, "skipped": res.get("skipped") or [], "harvest_queued": queued}
 
 
+# ---------------------------------------------------------------------------
+# «باركودات من صفحات المتاجر»: barcode_suggestions (قراءة فقط) و barcode_write (طابور كتابة الشيت)
+# ---------------------------------------------------------------------------
+
+BARCODE_WRITE_MAX = 300
+NO_BARCODE_COLUMN_ERROR = "الشيت ما فيه عمود باركود (Barcode أو EAN أو GTIN). ما كتبنا شي، وما منضيف أعمدة للشيت."
+
+
+def _barcode_entry(row_number, sku_key, name, brand, size, barcode, record, gtin):
+    from catalog_match.text_norm import url_host
+    page = str(record.get("page_gtin_url") or "").strip()
+    return {"row": int(row_number), "sku_key": sku_key, "name": str(name or "").strip(),
+            "brand": str(brand or "").strip(), "size": str(size or "").strip(), "gtin": gtin,
+            "domain": (url_host(page) or "") if page else "", "page_url": page,
+            "sheet_barcode": str(barcode or "").strip(), "duplicate": False, "reason": None}
+
+
+def _barcode_plan(records):
+    """
+    الصفوف المعتمدة التي حُفظ معها باركود صفحة المتجر (records: local_cache_db.get_page_barcodes) وخلية باركودها في
+    الشيت ما زالت فارغة أو غير صالحة، من صفوف الشيت المخزنة (google_sheets.cached_products، بلا طلب لـ Google)، وإلا من
+    هوية صفوف الطابور. {source, rows, duplicates, filled}: rows تُكتب؛ duplicates باركود يتشاركه صفان (أو مكتوب لصف
+    آخر بالشيت): لا يُكتب؛ filled خلية فيها نص غير باركود: لا يُكتب فوقها.
+    """
+    from catalog_match.gtin import display_gtin, is_global_gtin, normalize_gtin
+    pipeline = _pipeline()
+    approvals = {}
+    for rec in records or ():
+        gtin = display_gtin(rec.get("page_gtin"))
+        if gtin and is_global_gtin(gtin) and rec.get("sku_key"):
+            approvals[str(rec["sku_key"])] = (rec, gtin)
+    products = google_sheets.cached_products()
+    source = "sheet_cache" if products is not None else "queue"
+    found, taken = [], {}
+    if products is not None:
+        for prod in products:
+            barcode = str(prod.get("barcode") or "").strip()
+            gtin14 = normalize_gtin(barcode)[0] if barcode else None
+            if gtin14:
+                taken.setdefault(gtin14, set()).add(prod.get("row_number"))
+                continue                                     # the row has a valid barcode already
+            if not approvals or prod.get("row_number") is None:
+                continue
+            try:
+                key = pipeline.compute_sku_key(pipeline.sku_row(
+                    prod.get("product_name"), prod.get("brand"), barcode, {
+                        "name_ar": prod.get("product_name_ar", ""), "brand_ar": prod.get("brand_ar", ""),
+                        "category": prod.get("category", ""), "size": prod.get("size", "")}))
+            except Exception as e:
+                logger.warning("barcode_suggestions: no sku_key for row %s: %s", prod.get("row_number"), e)
+                continue
+            if key in approvals:
+                rec, gtin = approvals[key]
+                found.append(_barcode_entry(prod["row_number"], key, prod.get("product_name"), prod.get("brand"),
+                                            prod.get("size"), barcode, rec, gtin))
+    else:
+        for key, (rec, gtin) in approvals.items():
+            barcode = str(rec.get("queue_barcode") or "").strip()
+            if rec.get("row_number") is None or (barcode and normalize_gtin(barcode)[0]):
+                continue
+            payload = pipeline.task_payload({"payload_json": rec.get("queue_payload")})
+            found.append(_barcode_entry(rec["row_number"], key, rec.get("queue_name") or rec.get("product_name"),
+                                        rec.get("queue_brand") or rec.get("brand"), payload.get("size"), barcode, rec,
+                                        gtin))
+    counts = {}
+    for e in found:
+        e["gtin14"] = normalize_gtin(e["gtin"])[0]
+        counts[e["gtin14"]] = counts.get(e["gtin14"], 0) + 1
+    for e in found:
+        gtin14 = e.pop("gtin14")
+        if counts[gtin14] > 1 or taken.get(gtin14):
+            e["duplicate"], e["reason"] = True, "duplicate"
+        elif e["sheet_barcode"]:
+            e["reason"] = "cell_not_empty"
+    found.sort(key=lambda e: (e["row"], e["name"]))
+    return {"source": source, "rows": [e for e in found if not e["reason"]],
+            "duplicates": [e for e in found if e["reason"] == "duplicate"],
+            "filled": [e for e in found if e["reason"] == "cell_not_empty"]}
+
+
+def action_barcode_suggestions(params):
+    """
+    «باركودات لقيناها من صفحات المتاجر»: الصفوف المعتمدة التي ذكرت صفحة متجر صورتها باركوداً صالحاً عالمياً
+    (resolved_products.page_gtin) وخلية باركودها في الشيت فارغة أو غير صالحة: {status, source, count, rows,
+    duplicates, filled}، كل صف {row, sku_key, name, brand, size, gtin, domain, page_url, sheet_barcode, duplicate,
+    reason}. قراءة فقط: صفوف الشيت المخزنة، بلا طلب لـ Google وبلا كتابة.
+    """
+    try:
+        plan = _barcode_plan(local_cache_db.get_page_barcodes())
+    except Exception:
+        return _failure("failed", "Could not read the approved barcodes (details in temp/search.log).",
+                        "barcode_suggestions failed")
+    count = len(plan["rows"]) + len(plan["duplicates"]) + len(plan["filled"])
+    return dict({"status": "success", "count": count}, **plan)
+
+
+def _barcode_items(raw):
+    """[{row, sku_key, gtin}] من الطلب، أو None لطلب غير صالح."""
+    if not isinstance(raw, list) or not 1 <= len(raw) <= BARCODE_WRITE_MAX:
+        return None
+    items = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            return None
+        try:
+            row = int(entry.get("row"))
+        except (TypeError, ValueError):
+            return None
+        sku = str(entry.get("sku_key") or "").strip()
+        gtin = str(entry.get("gtin") or "").strip()
+        if row < 2 or not sku or len(sku) > 64 or not gtin or len(gtin) > 32:
+            return None
+        items.append({"row": row, "sku_key": sku, "gtin": gtin})
+    return items
+
+
+def _barcode_outcome(outcome):
+    """(written | queued | skipped، سبب التخطي) لنتيجة كتابة في الطابور (google_sheets.outbox_outcomes)."""
+    status = str((outcome or {}).get("status") or "").upper()
+    if status == "SYNCED":
+        return "written", None
+    if status in ("", "PENDING", "FAILED"):
+        return "queued", None
+    error = str(outcome.get("error") or "")
+    if error.startswith("cell_not_empty"):
+        return "skipped", "cell_not_empty"
+    if "mismatch" in error or "match" in error or status == "SKIPPED_OUT_OF_BOUNDS":
+        return "skipped", "row_changed"
+    return "skipped", "sheet_refused"
+
+
+def action_barcode_write(params):
+    """
+    «اكتب الباركودات المختارة بالشيت»: {items: [{row, sku_key, gtin}]}. لكل صف: الباركود صالح (رقم التحقق) ويساوي
+    page_gtin المحفوظ مع اعتماد هذا الـ sku_key، والصف ما زال من اقتراحات barcode_suggestions (خلية فارغة، بلا صف آخر
+    يتشارك الباركود). عمود الباركود بعنوانه (google_sheets.resolve_columns)؛ بدونه رفض واضح ولا يُضاف عمود. كتابة
+    واحدة لكل صف في طابور الشيت بهوية الصف (الاسم والحجم والبراند)، ثم تفريغ: صف تغيّر منتجه أو صارت خلية باركوده غير
+    فارغة يُتخطى ولا يُكتب فوقه. صف كُتب: صف الطابور يأخذ مفتاح الباركود (local_cache_db.rekey_queue_rows).
+    {status, written, queued, skipped: [{row, sku_key, gtin, reason}], rows_written}.
+    """
+    from catalog_match.gtin import display_gtin, is_global_gtin, normalize_gtin
+    items = _barcode_items(params.get("items"))
+    if items is None:
+        return {"status": "invalid", "code": "bad_items",
+                "error": "items must be 1 to %d rows of {row, sku_key, gtin}" % BARCODE_WRITE_MAX}
+    try:
+        records = local_cache_db.get_page_barcodes()
+        plan = _barcode_plan(records)
+    except Exception:
+        return _failure("failed", "Could not read the approved barcodes (details in temp/search.log).",
+                        "barcode_write failed")
+    stored = {str(rec.get("sku_key")): display_gtin(rec.get("page_gtin")) for rec in records}
+    listed = {(e["row"], e["sku_key"]): e for e in plan["rows"] + plan["duplicates"] + plan["filled"]}
+    skipped, ready, seen = [], [], set()
+    for it in items:
+        gtin14 = normalize_gtin(it["gtin"])[0]
+        entry = listed.get((it["row"], it["sku_key"]))
+        if not gtin14 or not is_global_gtin(gtin14):
+            reason = "bad_checksum"
+        elif not stored.get(it["sku_key"]) or stored[it["sku_key"]] != display_gtin(gtin14):
+            reason = "gtin_mismatch"
+        elif it["row"] in seen:
+            reason = "repeated"
+        elif entry is None:
+            reason = "row_changed"
+        else:
+            reason = entry["reason"]
+        if reason:
+            skipped.append({"row": it["row"], "sku_key": it["sku_key"], "gtin": it["gtin"], "reason": reason})
+            continue
+        seen.add(it["row"])
+        ready.append(entry)
+    out = {"status": "success", "written": 0, "queued": 0, "skipped": skipped, "rows_written": []}
+    if not ready:
+        return out
+    try:
+        worksheet = _open_sheet()
+        headers = google_sheets._worksheet_headers(worksheet, fresh=True)
+    except Exception:
+        return _failure("failed", "Could not open the Google Sheet; nothing was written (details in temp/search.log).",
+                        "barcode_write sheet open failed")
+    if google_sheets.resolve_columns(headers).get("barcode", -1) == -1:
+        return {"status": "refused", "code": "no_barcode_column", "error": NO_BARCODE_COLUMN_ERROR}
+    since = local_cache_db.outbox_max_id()
+    ids = google_sheets.queue_barcode_writes([
+        {"row_number": e["row"], "value": e["gtin"], "barcode": e["sheet_barcode"], "product_name": e["name"],
+         "size": e["size"], "brand": e["brand"]} for e in ready])
+    try:
+        google_sheets.flush_outbox(worksheet, lock_timeout=30)
+    except Exception:
+        logger.exception("barcode_write: the flush failed; the writes stay in the outbox")
+    try:
+        outcomes = {o["id"]: o for o in google_sheets.outbox_outcomes(
+            sorted(ids), since_id=since, limit=len(ids) * 4 + 200)}
+    except Exception:
+        logger.exception("barcode_write: the outbox outcomes could not be read")
+        outcomes = {}
+    rekey = []
+    for e in ready:
+        found = outcomes.get(ids.get(e["row"]))
+        kind, reason = _barcode_outcome(found)
+        if kind == "skipped":
+            skipped.append({"row": e["row"], "sku_key": e["sku_key"], "gtin": e["gtin"], "reason": reason})
+            continue
+        out[kind] += 1
+        if kind == "written":
+            out["rows_written"].append(found.get("row") or e["row"])
+            rekey.append((e["row"], e["sku_key"], normalize_gtin(e["gtin"])[0], e["gtin"]))
+    if rekey:
+        try:
+            local_cache_db.rekey_queue_rows(rekey)
+        except Exception:
+            logger.exception("barcode_write: the queue rows keep their old key until the next run")
+    return out
+
+
 ACTIONS = {
     'get_products': action_get_products,
     'search': action_search,
@@ -2178,10 +2448,13 @@ ACTIONS = {
     'brand_suggestions': action_brand_suggestions,
     'brand_official_site': action_brand_official_site,
     'brand_add': action_brand_add,
+    'barcode_suggestions': action_barcode_suggestions,
+    'barcode_write': action_barcode_write,
     'export_run': action_export_run,
     'lock_state': action_lock_state,
     'publish_check': action_publish_check,
     'bg_methods': action_bg_methods,
+    'local_index_refresh': action_local_index_refresh,
     'ops_health': action_ops_health,
     'run_control': action_run_control,
 }

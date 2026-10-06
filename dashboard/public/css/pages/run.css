@@ -571,6 +571,94 @@
     margin-inline-start: auto;
 }
 
+/* «باركودات لقيناها من صفحات المتاجر» */
+.lq-run-barcodes {
+    grid-column: 1 / -1;
+    gap: var(--lq-space-3);
+}
+
+.lq-run-barcodes__list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
+    gap: var(--lq-space-2);
+    max-height: 480px;
+    overflow-y: auto;
+}
+
+.lq-run-barcodes__list:empty {
+    display: none;
+}
+
+.lq-run-barcodes__apart {
+    padding-top: var(--lq-space-2);
+    border-top: 1px dashed var(--lq-border-soft);
+}
+
+.lq-run-barcodes__apart-title {
+    grid-column: 1 / -1;
+    margin: 0;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--lq-text-2);
+}
+
+.lq-run-barcode {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--lq-space-2);
+    padding: var(--lq-space-2) var(--lq-space-3);
+    border: 1px solid var(--lq-border-soft);
+    border-radius: var(--lq-radius-md);
+    background: var(--lq-surface);
+    cursor: pointer;
+}
+
+.lq-run-barcode--apart {
+    cursor: default;
+    background: var(--lq-warning-bg);
+}
+
+.lq-run-barcode__check {
+    flex: none;
+    margin-top: 3px;
+}
+
+.lq-run-barcode__body {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.lq-run-barcode__name {
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+
+.lq-run-barcode__meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--lq-space-2);
+    font-size: 12px;
+    color: var(--lq-text-2);
+}
+
+.lq-run-barcode__gtin {
+    font-weight: 600;
+    color: var(--lq-text);
+    unicode-bidi: isolate;
+}
+
+.lq-run-barcode__store,
+.lq-run-barcode__row {
+    overflow-wrap: anywhere;
+}
+
+.lq-run-barcode__note {
+    font-size: 12px;
+    color: var(--lq-warning-ink);
+}
+
 @media (max-width: 980px) {
     .lq-run__grid,
     .lq-run__grid--tools {

@@ -34,6 +34,9 @@ Route::get('/api/system/review-lanes', [\App\Http\Controllers\HealthController::
 // «فحص النشر»: بروفة النشر على صورة تجريبية (cli_bridge.publish_check) بزر صريح؛ GET يرجع آخر نتيجة محفوظة فقط
 Route::post('/api/system/publish-check', [\App\Http\Controllers\HealthController::class, 'runPublishCheck']);
 Route::get('/api/system/publish-check', [\App\Http\Controllers\HealthController::class, 'lastPublishCheckJson']);
+// «فهرس المتاجر المحلي»: التحديث كمهمة خلفية بزر صريح (cli_bridge.local_index_refresh)؛ GET يرجع حالة البطاقة فقط
+Route::get('/api/system/local-index', [\App\Http\Controllers\LocalIndexController::class, 'status']);
+Route::post('/api/system/local-index/refresh', [\App\Http\Controllers\LocalIndexController::class, 'refresh']);
 
 // جسر بايثون (cli_bridge.py مباشرة، بدون خادم FastAPI)
 Route::post('/api/search', [ApiController::class, 'search']);
@@ -85,5 +88,8 @@ Route::get('/api/run/brand-suggestions', [RunController::class, 'brandSuggestion
 Route::post('/api/run/brand-official-site', [RunController::class, 'brandOfficialSite']);
 Route::post('/api/run/brand-add', [RunController::class, 'brandAdd']);
 Route::post('/api/run/brand-add-all', [RunController::class, 'brandAddAll']);
+// «باركودات من صفحات المتاجر»: القائمة قراءة فقط؛ «اكتب الباركودات المختارة» يجدول كتابة مُتحقق منها بعمود الباركود (CSRF)
+Route::get('/api/run/barcode-suggestions', [RunController::class, 'barcodeSuggestions']);
+Route::post('/api/run/barcode-write', [RunController::class, 'barcodeWrite']);
 
 Route::view('/ui-kit', 'dashboard.ui_kit')->name('dashboard.ui_kit'); // مرجع مكوّنات هوية لقطة

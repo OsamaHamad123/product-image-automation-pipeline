@@ -1,0 +1,30 @@
+# One nightly run (scripts/run_nightly.py): queue the sheet rows without a final image link, work the queue,
+# never auto-publish, write the night's report. Started by laqta-nightly.timer; the Windows equivalent is
+# scripts/schedule_nightly.ps1. Hours come from NIGHTLY_MAX_HOURS below (passed as --max-hours: the worker takes
+# no new row 15 minutes before the limit). To change it:  systemctl edit laqta-nightly
+# and add  [Service] / Environment=NIGHTLY_MAX_HOURS=6  (raise TimeoutStartSec too when going above 9).
+# The @NAME@ words are filled in by install.sh.
+[Unit]
+Description=Laqta nightly image run (scripts/run_nightly.py)
+After=network-online.target mariadb.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=@APP_USER@
+Group=@APP_USER@
+WorkingDirectory=@APP_DIR@
+Environment=PYTHONUTF8=1
+Environment=PYTHONIOENCODING=utf-8
+Environment=NIGHTLY_MAX_HOURS=8
+Environment=U2NET_HOME=@MODELS_DIR@
+ExecStart=@APP_DIR@/.venv/bin/python -X utf8 @APP_DIR@/scripts/run_nightly.py --max-hours ${NIGHTLY_MAX_HOURS}
+# Exit codes follow run_nightly.py: 0 done, 1 failed, 2 outage after retries, 3 stopped early (stop button or a
+# limit). 3 is a normal outcome, not a unit failure.
+SuccessExitStatus=3
+# Hard backstop above NIGHTLY_MAX_HOURS: a hung run must not block every later night.
+TimeoutStartSec=10h
+Nice=10
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full

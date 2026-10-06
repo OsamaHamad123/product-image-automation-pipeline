@@ -241,6 +241,23 @@ def run_once(main_module, db, deadline_ts=None):
     return info
 
 
+def start_index_refresh():
+    """
+    The local catalog index is refreshed in the background when a store's last complete harvest is older than
+    LOCAL_INDEX_REFRESH_DAYS (catalog_match.index_refresh): a thread that never delays the enqueue or the search, within
+    LOCAL_INDEX_REFRESH_MAX_S seconds. Returns the thread, or None (off, or nothing to start). Never raises.
+    """
+    try:
+        from catalog_match import index_refresh
+        thread = index_refresh.start_background("nightly")
+        if thread is not None:
+            say("local catalog index: refreshing stale stores in the background")
+        return thread
+    except Exception as exc:
+        say(f"local catalog index: the refresh could not start ({type(exc).__name__})")
+        return None
+
+
 def run(sleep=time.sleep, now=time.time, sender=None, max_hours=DEFAULT_MAX_HOURS):
     """
     Enqueue, then work the queue until it is empty; the whole run again after an outage (RETRY_WAITS_S).
@@ -264,6 +281,7 @@ def run(sleep=time.sleep, now=time.time, sender=None, max_hours=DEFAULT_MAX_HOUR
         attempts.append({"stop_reason": "another_worker"})
     else:
         pin_nightly_settings(main, config)
+        start_index_refresh()
         for number in range(1, len(RETRY_WAITS_S) + 2):
             attempt = run_once(main, local_cache_db, deadline_ts=worker_deadline)
             attempts.append(attempt)

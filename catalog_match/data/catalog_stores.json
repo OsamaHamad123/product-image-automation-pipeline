@@ -55,6 +55,17 @@
       "note": "e.g. /uae/talabat-mart/product/ashoka-plain-paratha-400-g/s/905099 (UAE only, not /bahrain/)"
     },
     {
+      "key": "sharjahcoop",
+      "name": "Sharjah Co-op",
+      "base_url": "https://www.sharjahcoop.ae",
+      "hosts": ["www.sharjahcoop.ae", "sharjahcoop.ae"],
+      "product_path": "^/en/[^/]+/p/[A-Za-z0-9]+/?$",
+      "sitemaps": ["https://www.sharjahcoop.ae/en/sitemap.xml"],
+      "sitemap_include": "/sitemaps/Product-en-AED-\\d+\\.xml$",
+      "enabled": true,
+      "note": "e.g. /en/dahabi-slicesd-bread-brown-700g/p/9501100306746 (English pages only: the Product-ar sitemaps repeat the same products; loose items have ids like D000000000002). robots.txt asks for a 10 second Crawl-delay (kept: about 16 requests, 3 minutes) and Visit-time 0400-0845 UTC (kept: outside that window the store is skipped for the refresh, asked again at the next one)"
+    },
+    {
       "key": "noon_uae",
       "name": "noon UAE",
       "base_url": "https://www.noon.com",

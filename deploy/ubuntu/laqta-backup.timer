@@ -1,0 +1,12 @@
+# Backup every night at 01:30, before the 02:00 run.
+[Unit]
+Description=Laqta MariaDB backup, every night at 01:30
+
+[Timer]
+OnCalendar=*-*-* 01:30:00
+Persistent=true
+RandomizedDelaySec=5min
+Unit=laqta-backup.service
+
+[Install]
+WantedBy=timers.target

@@ -21,6 +21,8 @@ Only what a store publishes for crawlers is read, and nothing is worked around:
   is reported otherwise. A sitemap its rules disallow is not read. Its Crawl-delay is kept between
   requests (at least MIN_DELAY_S); a store asking for more than MAX_DELAY_S is skipped, never read
   faster than it asks. A robots.txt that answers 5xx stops the store (RFC 9309: assume disallowed).
+  Its Visit-time (a UTC window such as 0400-0845, also across midnight) is kept too: outside it the store is not
+  read at all (status 'outside_visit_time', neither blocked nor failed: the next refresh asks again).
 * An answer of 401, 403 or 429 stops the store: it is reported 'blocked' and skipped. So is an HTML
   page at every starting point before any sitemap was read (a bot check); later, an HTML page, a
   redirect to the home page or off the store's hosts is one sitemap that failed. No proxy, no
@@ -43,6 +45,7 @@ import time
 import xml.etree.ElementTree as ET
 import zlib
 from collections import deque
+from datetime import datetime, timezone
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
@@ -229,9 +232,46 @@ class Robots:
     sitemaps: List[str] = field(default_factory=list)
     crawl_delay: Optional[float] = None
     rules: List[Tuple[bool, str]] = field(default_factory=list)   # (allow, path pattern) of the group that applies
+    visit_times: List[Tuple[int, int]] = field(default_factory=list)   # Visit-time windows: UTC minutes (start, end)
 
     def allowed(self, url: str) -> bool:
         return robots_allowed(self.rules, url)
+
+    def visit_allowed(self, now: datetime) -> bool:
+        """True without a Visit-time, else when `now` (UTC; a naive time is taken as UTC) is inside a window:
+        start <= now < end, and a window whose start is after its end crosses midnight."""
+        if not self.visit_times:
+            return True
+        now = now.astimezone(timezone.utc) if now.tzinfo else now
+        minute = now.hour * 60 + now.minute
+        for start, end in self.visit_times:
+            if start == end:
+                return True                     # an empty or full-day window: no restriction
+            if (start <= minute < end) if start < end else (minute >= start or minute < end):
+                return True
+        return False
+
+
+_VISIT_TIME_RE = re.compile(r"(\d{1,2}):?(\d{2})\s*-\s*(\d{1,2}):?(\d{2})")
+
+
+def parse_visit_time(value: str) -> Optional[Tuple[int, int]]:
+    """'0400-0845' (or '04:00-08:45') -> (240, 525) UTC minutes since midnight; None for anything else."""
+    match = _VISIT_TIME_RE.fullmatch(value.strip())
+    if not match:
+        return None
+    h1, m1, h2, m2 = (int(g) for g in match.groups())
+    start, end = h1 * 60 + m1, h2 * 60 + m2
+    if m1 > 59 or m2 > 59 or start > 1440 or end > 1440:
+        return None
+    return start, end
+
+
+def visit_text(windows: Sequence[Sequence[int]]) -> str:
+    """'04:00-08:45 UTC' for the console and the harvest report."""
+    def clock(m: int) -> str:
+        return f"{m // 60 % 24:02d}:{m % 60:02d}"
+    return ", ".join(f"{clock(a)}-{clock(b)} UTC" for a, b in windows)
 
 
 def _agent_matches(value: str) -> bool:
@@ -241,9 +281,9 @@ def _agent_matches(value: str) -> bool:
 
 def parse_robots(text: str) -> Robots:
     """RFC 9309: the groups naming ROBOTS_AGENT (case-insensitive), else the '*' groups; Sitemap: lines anywhere."""
-    groups: List[Tuple[List[str], List[Tuple[bool, str]], List[float]]] = []
+    groups: List[Tuple[List[str], List[Tuple[bool, str]], List[float], List[Tuple[int, int]]]] = []
     sitemaps: List[str] = []
-    current: Optional[Tuple[List[str], List[Tuple[bool, str]], List[float]]] = None
+    current: Optional[Tuple[List[str], List[Tuple[bool, str]], List[float], List[Tuple[int, int]]]] = None
     agent_line = False
     for raw in text.lstrip("\ufeff").splitlines():
         line = raw.split("#", 1)[0].strip()
@@ -257,7 +297,7 @@ def parse_robots(text: str) -> Robots:
             continue
         if key == "user-agent":
             if current is None or not agent_line:        # a user-agent line after rules starts a new group
-                current = ([], [], [])
+                current = ([], [], [], [])
                 groups.append(current)
             current[0].append(value)
             agent_line = True
@@ -273,11 +313,15 @@ def parse_robots(text: str) -> Robots:
                 current[2].append(float(value))
             except ValueError:
                 pass
+        elif key == "visit-time":
+            window = parse_visit_time(value)
+            if window is not None:
+                current[3].append(window)
     chosen = [g for g in groups if any(_agent_matches(a) for a in g[0])] \
         or [g for g in groups if any(a.strip() == "*" for a in g[0])]
     delays = [d for g in chosen for d in g[2] if d >= 0]
     return Robots(status="ok", sitemaps=sitemaps, crawl_delay=max(delays) if delays else None,
-                  rules=[r for g in chosen for r in g[1]])
+                  rules=[r for g in chosen for r in g[1]], visit_times=[w for g in chosen for w in g[3]])
 
 
 def _rule_matches(pattern: str, path: str) -> bool:
@@ -333,7 +377,7 @@ def robots_allowed(rules: Sequence[Tuple[bool, str]], url: str) -> bool:
 @dataclass
 class HarvestReport:
     store: str
-    status: str = "ok"                # ok | partial | empty | blocked | error
+    status: str = "ok"                # ok | partial | empty | blocked | error | outside_visit_time
     error: str = ""
     robots: str = ""                  # robots.txt status
     crawl_delay: float = MIN_DELAY_S
@@ -346,6 +390,7 @@ class HarvestReport:
     new_urls: int = 0
     pruned: int = 0
     truncated: bool = False
+    visit_window: Optional[List[List[int]]] = None    # robots.txt Visit-time windows (UTC minutes); None: unknown
     product_samples: List[str] = field(default_factory=list)
     other_samples: List[str] = field(default_factory=list)
 
@@ -358,13 +403,14 @@ class SitemapHarvester:
 
     def __init__(self, http: Any = None, sleep: Callable[[float], None] = time.sleep,
                  clock: Callable[[], float] = time.monotonic, timeout: float = TIMEOUT_S,
-                 max_bytes: int = MAX_DOWNLOAD_BYTES) -> None:
+                 max_bytes: int = MAX_DOWNLOAD_BYTES, utc_now: Optional[Callable[[], datetime]] = None) -> None:
         if http is None:
             import requests
             http = requests.Session()
         self.http = http
         self._sleep = sleep
         self._clock = clock
+        self._utc_now = utc_now or (lambda: datetime.now(timezone.utc))
         self.timeout = timeout
         self.max_bytes = max_bytes
         self.delay = MIN_DELAY_S
@@ -430,13 +476,21 @@ class SitemapHarvester:
     # -- harvest ------------------------------------------------------------
     def harvest(self, store: StoreConfig, on_urls: Optional[Callable[[List[Tuple[str, Optional[str]]]], Any]] = None,
                 max_urls: Optional[int] = None, max_sitemaps: Optional[int] = None,
-                discover: bool = False) -> HarvestReport:
+                discover: bool = False, should_stop: Optional[Callable[[], bool]] = None) -> HarvestReport:
+        """should_stop: asked before every sitemap file is read; True ends the harvest there (status partial,
+        'truncated': the automatic refresh's time budget, catalog_match.index_refresh)."""
         rep = HarvestReport(store=store.key)
         robots = self.robots(store)
         rep.robots = robots.status if robots.http_status is None else f"{robots.status} (http {robots.http_status})"
         if robots.status in ("blocked", "error"):
             rep.status = robots.status
             rep.error = f"robots.txt answered {robots.http_status or 'nothing'}: store skipped"
+            return rep
+        rep.visit_window = [list(w) for w in robots.visit_times]
+        if not robots.visit_allowed(self._utc_now()):
+            rep.status = "outside_visit_time"
+            rep.error = (f"robots.txt allows visits only at {visit_text(robots.visit_times)}: store not read now, "
+                         "asked again at the next refresh")
             return rep
         if robots.crawl_delay is not None and robots.crawl_delay > MAX_DELAY_S:
             rep.status = "blocked"
@@ -480,6 +534,11 @@ class SitemapHarvester:
                 rep.truncated = True
                 rep.skipped.append((url, "not read (--max-sitemaps)"))
                 continue
+            if should_stop is not None and should_stop():
+                rep.truncated = True
+                rep.error = rep.error or "stopped at the time budget"
+                rep.skipped.append((url, "not read (time budget)"))
+                break
             body, status, error = self.get(url, store)
             if status in BLOCK_STATUSES:
                 rep.status, rep.error = "blocked", f"http_{status} on {url}: store skipped"

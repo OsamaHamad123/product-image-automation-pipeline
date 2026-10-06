@@ -1,0 +1,13 @@
+# Starts laqta-nightly.service every night (server time; set it with: timedatectl set-timezone Asia/Dubai).
+# Persistent=true: a night missed while the server was off runs once at the next boot, like Task Scheduler's
+# "start when available". Change the hour with: systemctl edit laqta-nightly.timer
+[Unit]
+Description=Laqta nightly image run, every night at 02:00
+
+[Timer]
+OnCalendar=*-*-* 02:00:00
+Persistent=true
+Unit=laqta-nightly.service
+
+[Install]
+WantedBy=timers.target

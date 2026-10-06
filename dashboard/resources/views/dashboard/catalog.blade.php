@@ -28,6 +28,8 @@
 @endsection
 
 @push('scripts')
+{{-- «غامق / فاتح / مربعات» خلف الصورة المنشورة (single.js بيستدعيه وقت الرسم) --}}
+<script src="{{ $rvVersion('js/review/theme_preview.js') }}"></script>
 @foreach (['core', 'ui', 'jobs', 'single', 'bulk', 'app'] as $rvScript)
 <script src="{{ $rvVersion('js/review/' . $rvScript . '.js') }}"></script>
 @endforeach

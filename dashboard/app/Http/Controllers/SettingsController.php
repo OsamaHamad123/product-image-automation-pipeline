@@ -50,8 +50,17 @@ class SettingsController extends Controller
     ];
 
     /** إعدادات معالجة الصور التي يقرؤها config.load_db_config من system_settings. */
-    public const PROCESSING_TEXT_KEYS = ['output_canvas_size', 'bg_removal_method'];
+    public const PROCESSING_TEXT_KEYS = ['output_canvas_size', 'bg_removal_method', 'output_background'];
+
+    /**
+     * خلفية لوحة النشر (output_background، config.OUTPUT_BACKGROUNDS): شفافة (الافتراضي، PNG للتطبيق بالوضع الغامق
+     * والفاتح، والنسخة البيضا برابط) أو بيضا (اللوحة المعتمة متل قبل).
+     */
+    public const OUTPUT_BACKGROUNDS = ['transparent' => 'خلفية شفافة (للتطبيق: وضع غامق وفاتح)', 'white' => 'خلفية بيضا'];
     public const PROCESSING_CHECKBOX_KEYS = ['enable_image_enhancement'];
+
+    /** نفس config.BG_FALLBACKS: «لما يخلص رصيد خدمة العزل» (system_settings.bg_fallback). local هو الافتراضي. */
+    public const BG_FALLBACKS = ['local', 'off'];
 
     /** نفس config.BG_REMOVAL_METHODS (و main.SUPPORTED_BG_METHODS). */
     public const BG_METHODS = ['photoroom', 'remove_bg_api', 'grabcut', 'rembg', 'none'];
@@ -103,7 +112,7 @@ class SettingsController extends Controller
         'anthropic' => ['tab' => 'keys', 'secret' => ['anthropic_api_key']],
         'serpapi' => ['tab' => 'keys', 'secret' => ['serpapi_api_key']],
         'auto-publish' => ['tab' => 'auto-publish', 'checkbox' => ['auto_publish_enabled']],
-        'processing' => ['tab' => 'processing', 'text' => ['output_canvas_size', 'bg_removal_method'],
+        'processing' => ['tab' => 'processing', 'text' => ['output_canvas_size', 'bg_removal_method', 'output_background'],
                          'checkbox' => ['enable_image_enhancement']],
         // مصادر البحث الإضافية وسياسة الباركود (المرحلة الثالثة): بتبويب «متقدم»، نموذج منفصل
         'sources' => ['tab' => 'advanced', 'text' => ['expansion_max_calls', 'visual_search', 'serpapi_lens_price_usd',
@@ -185,8 +194,8 @@ class SettingsController extends Controller
 
     /** متغيرات .env الجذر غير السرية التي يجوز للصفحة قراءة قيمتها. */
     private const READABLE_ENV = [
-        'SPREADSHEET_NAME_OR_URL', 'SPREADSHEET_TAB_NAME', 'CREDENTIALS_FILE', 'BG_REMOVAL_METHOD',
-        'OUTPUT_CANVAS_SIZE', 'GEMINI_MODEL', 'SEARCH_ENGINE',
+        'SPREADSHEET_NAME_OR_URL', 'SPREADSHEET_TAB_NAME', 'CREDENTIALS_FILE', 'BG_REMOVAL_METHOD', 'BG_FALLBACK',
+        'OUTPUT_CANVAS_SIZE', 'OUTPUT_BACKGROUND', 'GEMINI_MODEL', 'SEARCH_ENGINE',
         'VERIFIER_PRIMARY', 'VERIFIER_STRONG', 'VERIFIER_MONTHLY_BUDGET_USD', 'MODEL_PRICES',
         'EXPANSION_ENABLED', 'EXPANSION_MAX_CALLS', 'VISUAL_SEARCH', 'SERPAPI_LENS_PRICE_USD', 'GTIN_POLICY',
         'LOCAL_INDEX_ENABLED', 'LOCAL_INDEX_MAX_PAGES', 'WORKER_CONCURRENCY',
@@ -349,6 +358,15 @@ class SettingsController extends Controller
                     $warnings[] = 'سياسة الباركود هاي مش مدعومة؛ ما تغيّرت المحفوظة.';
                     continue;
                 }
+                if ($k === 'output_background') {
+                    if ($val === '') {
+                        continue;   // حقل غايب (نموذج أقدم): الخلفية المحفوظة بتضل
+                    }
+                    if (!array_key_exists($val, self::OUTPUT_BACKGROUNDS)) {
+                        $warnings[] = 'خلفية الصورة هاي مش مدعومة؛ ما تغيّرت المحفوظة.';
+                        continue;
+                    }
+                }
                 if ($k === 'bg_removal_method' && !in_array($val, self::BG_METHODS, true)) {
                     $warnings[] = 'طريقة عزل الخلفية هاي مش مدعومة؛ ما تغيّرت الطريقة المحفوظة.';
                     continue;
@@ -358,6 +376,13 @@ class SettingsController extends Controller
 
             foreach ($spec['checkbox'] ?? [] as $ck) {
                 $changes[$ck] = $request->has($ck) ? 'true' : 'false';
+            }
+
+            // «لما يخلص رصيد خدمة العزل: جرّب طريقة محلية مجانية» (bg_fallback = local | off): المفتاح بيظهر بالنموذج بس لما في
+            // طريقة محلية منزّلة، وحقل bg_fallback_shown بيقول إنه انعرض. بدونه (نموذج أقدم، أو ما في طريقة محلية) القيمة
+            // المحفوظة بتضل متل ما هي بدل ما يطفيها حفظ ما شاف المفتاح.
+            if ($section === 'processing' && $request->has('bg_fallback_shown')) {
+                $changes['bg_fallback'] = $request->has('bg_fallback') ? 'local' : 'off';
             }
 
             // «بدون عزل الخلفية» من النموذج نفسه: الطريقة القديمة بتنحفظ لزر «رجّع عزل الخلفية» (متل setBgMethod)
@@ -918,9 +943,26 @@ class SettingsController extends Controller
             'method' => $method,
             'methods' => $methods,
             'hint' => $hint,
+            // مفتاح العزل المحلي البديل بيظهر بس لما rembg منزّلة (البديل التلقائي rembg بموديل BiRefNet فقط، GrabCut ما بيدخل
+            // أبداً؛ لا وعد بشي مش موجود)؛ إطفاؤه محفوظ بـ 'off'
+            'fallback' => ['show' => $local['rembg'] === true, 'on' => self::currentBgFallback($stored['bg_fallback']['value'] ?? '') === 'local'],
             'bg' => self::bgState($stored),
             'enhance' => strtolower(trim((string) ($stored['enable_image_enhancement']['value'] ?? ''))) === 'true',
+            'background' => self::currentBackground($stored['output_background']['value'] ?? ''),
+            'backgrounds' => self::OUTPUT_BACKGROUNDS,
         ];
+    }
+
+    /** الخلفية اللي بايثون رح يستعملها: المحفوظة إذا مدعومة، وإلا OUTPUT_BACKGROUND من البيئة، وإلا شفافة. */
+    public static function currentBackground($stored): string
+    {
+        foreach ([$stored, self::envValues(['OUTPUT_BACKGROUND'])['OUTPUT_BACKGROUND'] ?? ''] as $value) {
+            $value = strtolower(trim((string) $value));
+            if (array_key_exists($value, self::OUTPUT_BACKGROUNDS)) {
+                return $value;
+            }
+        }
+        return 'transparent';
     }
 
     /**
@@ -935,6 +977,17 @@ class SettingsController extends Controller
         }
         $fromEnv = strtolower(trim((string) (self::envValues(['BG_REMOVAL_METHOD'])['BG_REMOVAL_METHOD'] ?? '')));
         return $fromEnv !== '' ? $fromEnv : 'photoroom';
+    }
+
+    /** القيمة اللي بايثون رح يستعملها (config.load_db_config): المحفوظة إذا مدعومة، وإلا BG_FALLBACK من البيئة، وإلا local. */
+    public static function currentBgFallback($stored): string
+    {
+        $value = strtolower(trim(is_scalar($stored) ? (string) $stored : ''));
+        if (in_array($value, self::BG_FALLBACKS, true)) {
+            return $value;
+        }
+        $fromEnv = strtolower(trim((string) (self::envValues(['BG_FALLBACK'])['BG_FALLBACK'] ?? '')));
+        return in_array($fromEnv, self::BG_FALLBACKS, true) ? $fromEnv : 'local';
     }
 
     /**

@@ -1,8 +1,12 @@
 # cloudinary_storage.py
-# رفع لوحة المنتج النهائية (800x800 بيضاء معتمة) إلى Cloudinary وتوليد رابط التسليم.
+# رفع لوحة المنتج النهائية إلى Cloudinary وتوليد رابط التسليم.
 #
 # - اللوحة جاهزة محلياً، لذلك رابط التسليم يحتوي فقط q_auto,f_auto
 #   (بدون e_trim / c_fit / c_pad / e_sharpen، وبدون مشتقات eager).
+# - OUTPUT_BACKGROUND = transparent (الافتراضي): اللوحة PNG شفافة (RGBA) وتُرفع كما هي بلا تسطيح؛ f_auto يسلّمها
+#   WebP أو AVIF بشفافيتها (و PNG لمتصفح ما بيدعمهم، ولا مرة JPEG لصورة فيها شفافية). النسخة البيضا بالطلب:
+#   white_version_url (b_white,q_auto,f_jpg بنفس الأصل). OUTPUT_BACKGROUND = white: صورة فيها شفافية تُسطّح على لوحة
+#   بيضاء قبل الرفع متل قبل.
 # - مهلة 60 ثانية لكل رفع، وإعادة المحاولة مرتين عند الاستثناءات المؤقتة أو أخطاء 5xx.
 # - مقاطع المجلد تحوَّل إلى [a-z0-9_-] فقط ('100% Juice' -> '100_juice').
 # - استجابة الرفع تُفحص: الحجم بالبايت والأبعاد و etag (بصمة md5) يجب أن تطابق ما أُرسل عندما تذكرها
@@ -32,6 +36,8 @@ UPLOAD_TIMEOUT_SECONDS = 60
 UPLOAD_RETRIES = 2
 RETRY_BACKOFF_SECONDS = 1.5
 DELIVERY_TRANSFORMATION = "q_auto,f_auto"
+# النسخة البيضا المعتمة من نفس الأصل الشفاف (للتطبيق أو أي مكان بده مربع أبيض): الخلفية بيضا، و JPEG ما فيه شفافية
+WHITE_TRANSFORMATION = "b_white,q_auto,f_jpg"
 DEFAULT_FOLDER = "products"
 
 # أخطاء نهائية من جهة العميل (400/401/403/404/409): إعادة المحاولة لن تغير النتيجة
@@ -105,8 +111,9 @@ def product_folder(category_l1=None, category_l2=None, root: str = DEFAULT_FOLDE
 
 def _prepare_payload(local_path: str):
     """
-    يقرأ الملف ويتأكد أنه صورة. إذا كان يحتوي شفافية (مثلاً من مسار الرفع اليدوي القديم)
-    يتم تسطيحه محلياً على لوحة بيضاء معتمة بالحجم القياسي، لأن التسليم لم يعد يضيف خلفية.
+    يقرأ الملف ويتأكد أنه صورة. اللوحة الشفافة (OUTPUT_BACKGROUND = transparent) تُرفع كما هي؛ صورة شفافة بالكامل
+    (بلا منتج) لا تُرفع. مع OUTPUT_BACKGROUND = white، صورة فيها شفافية (مثلاً من مسار الرفع اليدوي القديم) تُسطّح
+    محلياً على لوحة بيضاء معتمة بالحجم القياسي، لأن التسليم لا يضيف خلفية.
     يعيد (مصدر الرفع، البيانات، (العرض، الارتفاع)) أو (None، None، None) إذا لم يكن الملف صورة.
     """
     from PIL import Image
@@ -128,6 +135,12 @@ def _prepare_payload(local_path: str):
 
     from catalog_match import settings
     from edge_shadow_engine import compose_on_white_canvas
+
+    if settings.output_background() == "transparent":
+        if rgba.getchannel("A").getextrema()[1] == 0:
+            logger.error("[Cloudinary] الصورة شفافة بالكامل (بلا منتج) ولن يتم رفعها: %s", local_path)
+            return None, None, None
+        return local_path, data, size      # PNG شفافة كما هي: التطبيق بيعرضها على الغامق والفاتح
 
     side = settings.output_canvas_size()
     try:
@@ -206,6 +219,20 @@ def delivery_url(public_id: str, version=None) -> str:
         raw_transformation=DELIVERY_TRANSFORMATION,
     )
     return url
+
+
+def white_version_url(url) -> Optional[str]:
+    """
+    رابط النسخة البيضا المعتمة (JPEG) من رابط تسليم Cloudinary لنفس الأصل: q_auto,f_auto يصير b_white,q_auto,f_jpg.
+    التطبيق بيطلبها هيك متى بده مربع أبيض (مشاركة، طباعة). None إذا الرابط مش رابط تسليم منعرفه.
+    """
+    text = str(url or "").strip()
+    if text.startswith("needs_review:"):
+        text = text[len("needs_review:"):]
+    marker = f"/image/upload/{DELIVERY_TRANSFORMATION}/"
+    if marker not in text:
+        return None
+    return text.replace(marker, f"/image/upload/{WHITE_TRANSFORMATION}/", 1)
 
 
 def upload_product_image(local_path, product_name, brand, folder=None,

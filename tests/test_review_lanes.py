@@ -278,7 +278,7 @@ def test_no_rows_give_empty_lanes(ldb):
     assert set(stats["lanes"]) == {"strict", "unsure", "other"}
     assert stats["lanes"]["strict"] == {"prechecked": 0, "accepted": 0, "replaced": 0, "rejected": 0,
                                         "precision": None, "lower_bound": None, "status": "needs_reviews",
-                                        "ready": False, "reviews_needed": 189}
+                                        "ready": False, "reviews_needed": 189, "more_needed": 189}
     assert stats["unlaned_prechecked"] == 0
 
 

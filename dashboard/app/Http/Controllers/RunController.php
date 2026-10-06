@@ -770,6 +770,194 @@ class RunController extends Controller
             ->header('Cache-Control', 'no-store');
     }
 
+    // ------------------------------------------------------------------
+    // «باركودات من صفحات المتاجر»: the barcode a store page stated for an approved row whose barcode cell is empty
+    // ------------------------------------------------------------------
+
+    public const BARCODE_WRITE_MAX = 300;
+    public const BARCODE_SKIP_TEXTS = [
+        'bad_checksum' => 'رقم التحقق بالباركود غلط',
+        'gtin_mismatch' => 'الباركود مش نفس اللي انحفظ مع الاعتماد',
+        'duplicate' => 'نفس الباركود لأكتر من صف',
+        'cell_not_empty' => 'خلية الباركود مش فاضية',
+        'row_changed' => 'الصف تغيّر أو انتقل بالشيت',
+        'repeated' => 'الصف مكرر بالطلب',
+        'sheet_refused' => 'الشيت رفض الكتابة',
+    ];
+    public const BARCODE_ERRORS = [
+        'bad_items' => 'اختار صف واحد عالأقل، ولحد 300 صف بالمرة.',
+        'bad_gtin' => 'في باركود مش أرقام بس (من 8 لـ 14 رقم).',
+        'no_barcode_column' => 'الشيت ما فيه عمود باركود (Barcode أو EAN أو GTIN). ما كتبنا شي، وما منضيف أعمدة للشيت.',
+    ];
+
+    /**
+     * GET /api/run/barcode-suggestions: {status, count, rows, duplicates, filled}, each {row, sku_key, name, brand, gtin,
+     * domain, duplicate, sheet_barcode}. Read only: the bridge (barcode_suggestions) reads the approvals and the cached
+     * sheet rows; nothing is searched or written.
+     */
+    public function barcodeSuggestions(): \Illuminate\Http\JsonResponse
+    {
+        if (!self::databaseOnline()) {
+            return response()->json(['status' => 'unavailable', 'message' => 'قاعدة البيانات مش شغّالة هلق.'], 503)
+                ->header('Cache-Control', 'no-store');
+        }
+        $result = PythonBridge::run('barcode_suggestions');
+        if (($result['status'] ?? '') !== 'success' || !is_array($result['rows'] ?? null)) {
+            return response()->json(['status' => 'error', 'message' => 'ما قدرنا نقرأ الباركودات هلق. جرّب بعد شوي.'], 502)
+                ->header('Cache-Control', 'no-store');
+        }
+        $rows = self::barcodeRows($result['rows']);
+        $duplicates = self::barcodeRows($result['duplicates'] ?? []);
+        $filled = self::barcodeRows($result['filled'] ?? []);
+        return response()->json([
+            'status' => 'success',
+            'count' => count($rows) + count($duplicates) + count($filled),
+            'rows' => $rows,
+            'duplicates' => $duplicates,
+            'filled' => $filled,
+        ])->header('Cache-Control', 'no-store');
+    }
+
+    /** The bridge's suggestion rows, checked and trimmed to what the card shows. */
+    private static function barcodeRows($list): array
+    {
+        $out = [];
+        foreach (is_array($list) ? $list : [] as $r) {
+            if (!is_array($r)) {
+                continue;
+            }
+            $row = filter_var($r['row'] ?? null, FILTER_VALIDATE_INT);
+            $sku = is_string($r['sku_key'] ?? null) ? trim($r['sku_key']) : '';
+            $gtin = is_string($r['gtin'] ?? null) ? trim($r['gtin']) : '';
+            if ($row === false || $row < 2 || $sku === '' || strlen($sku) > 64 || !preg_match('/^\d{8,14}$/', $gtin)) {
+                continue;
+            }
+            $text = fn ($v, $max) => is_string($v) ? mb_substr(trim($v), 0, $max) : '';
+            $out[] = [
+                'row' => $row,
+                'sku_key' => $sku,
+                'name' => $text($r['name'] ?? null, 300),
+                'brand' => $text($r['brand'] ?? null, 120),
+                'gtin' => $gtin,
+                'domain' => $text($r['domain'] ?? null, 253),
+                'duplicate' => (bool) ($r['duplicate'] ?? false),
+                'sheet_barcode' => $text($r['sheet_barcode'] ?? null, 60),
+            ];
+        }
+        return $out;
+    }
+
+    /**
+     * POST /api/run/barcode-write {items: [{row, sku_key, gtin}]}: «اكتب الباركودات المختارة بالشيت». Checked here (1 to
+     * 300 rows, each a sheet row, a key and 8 to 14 digits, no row twice), then the bridge (barcode_write) checks each
+     * barcode again against the approval, queues one identity-checked write per row and never writes over a barcode.
+     * CSRF like every POST.
+     */
+    public function barcodeWrite(Request $request): \Illuminate\Http\JsonResponse
+    {
+        $items = $request->input('items');
+        if (!is_array($items) || count($items) < 1 || count($items) > self::BARCODE_WRITE_MAX) {
+            return self::barcodeError('bad_items', 422);
+        }
+        $clean = [];
+        $rows = [];
+        foreach ($items as $entry) {
+            $entry = is_array($entry) ? $entry : [];
+            $row = filter_var($entry['row'] ?? null, FILTER_VALIDATE_INT);
+            $sku = is_string($entry['sku_key'] ?? null) ? trim($entry['sku_key']) : '';
+            $gtin = is_string($entry['gtin'] ?? null) ? trim($entry['gtin']) : '';
+            if ($row === false || $row < 2 || $sku === '' || strlen($sku) > 64 || preg_match('/[\x00-\x1F\x7F]/', $sku)
+                || isset($rows[$row])) {
+                return self::barcodeError('bad_items', 422);
+            }
+            if (!preg_match('/^\d{8,14}$/', $gtin)) {
+                return self::barcodeError('bad_gtin', 422);
+            }
+            $rows[$row] = true;
+            $clean[] = ['row' => $row, 'sku_key' => $sku, 'gtin' => $gtin];
+        }
+        if (!self::databaseOnline()) {
+            return response()->json(['status' => 'unavailable', 'message' => 'قاعدة البيانات مش شغّالة هلق. ما انكتب شي.'], 503)
+                ->header('Cache-Control', 'no-store');
+        }
+        $result = PythonBridge::run('barcode_write', ['items' => $clean]);
+        $status = (string) ($result['status'] ?? '');
+        if ($status === 'refused' && ($result['code'] ?? '') === 'no_barcode_column') {
+            return self::barcodeError('no_barcode_column', 409);
+        }
+        if ($status === 'invalid') {
+            return self::barcodeError('bad_items', 422);
+        }
+        if ($status !== 'success') {
+            return response()->json(['status' => 'error', 'message' => 'ما قدرنا نكتب بالشيت هلق. ما انكتب شي. جرّب بعد شوي.'], 502)
+                ->header('Cache-Control', 'no-store');
+        }
+        $written = max(0, (int) ($result['written'] ?? 0));
+        $queued = max(0, (int) ($result['queued'] ?? 0));
+        $skipped = [];
+        foreach (is_array($result['skipped'] ?? null) ? $result['skipped'] : [] as $s) {
+            $reason = is_array($s) && is_string($s['reason'] ?? null) && isset(self::BARCODE_SKIP_TEXTS[$s['reason']])
+                ? $s['reason'] : 'sheet_refused';
+            $skipped[] = ['row' => is_array($s) ? (int) ($s['row'] ?? 0) : 0, 'reason' => $reason,
+                          'text' => self::BARCODE_SKIP_TEXTS[$reason]];
+        }
+        if ($written || $queued) {
+            ProductController::forgetProductCaches();
+        }
+        return response()->json([
+            'status' => 'success',
+            'written' => $written,
+            'queued' => $queued,
+            'skipped' => $skipped,
+            'message' => self::barcodeResultText($written, $queued, $skipped),
+        ])->header('Cache-Control', 'no-store');
+    }
+
+    /** 1 => «صف واحد», 2 => «صفين», 3..10 => «N صفوف», else «N صف». */
+    private static function rowsText(int $n): string
+    {
+        return $n === 1 ? 'صف واحد' : ($n === 2 ? 'صفين' : $n . ($n >= 3 && $n <= 10 ? ' صفوف' : ' صف'));
+    }
+
+    /** «بصف واحد», «بصفين», «بـ 3 صفوف». */
+    private static function inRows(int $n): string
+    {
+        return ($n <= 2 ? 'ب' : 'بـ ') . self::rowsText($n);
+    }
+
+    /** What a barcode write did, in the owner's words: written, queued and skipped (with why, row by row). */
+    public static function barcodeResultText(int $written, int $queued, array $skipped): string
+    {
+        $parts = [];
+        if ($written) {
+            $parts[] = 'انكتب الباركود ' . self::inRows($written) . ' بالشيت.';
+        }
+        if ($queued) {
+            $parts[] = self::rowsText($queued) . ' بالطابور: رح ينكتبوا أول ما يرد الشيت.';
+        }
+        if ($skipped) {
+            $why = [];
+            foreach ($skipped as $s) {
+                $why[$s['text']][] = $s['row'];
+            }
+            $lines = [];
+            foreach ($why as $text => $rows) {
+                $lines[] = $text . ' (صف ' . implode('، ', array_slice($rows, 0, 8)) . (count($rows) > 8 ? '…' : '') . ')';
+            }
+            $parts[] = 'ما كتبنا ' . self::inRows(count($skipped)) . ': ' . implode('؛ ', $lines) . '.';
+        }
+        return $parts ? implode(' ', $parts) : 'ما انكتب شي.';
+    }
+
+    private static function barcodeError(string $code, int $http): \Illuminate\Http\JsonResponse
+    {
+        return response()->json([
+            'status' => 'error',
+            'code' => $code,
+            'message' => self::BARCODE_ERRORS[$code] ?? 'الطلب مش صالح.',
+        ], $http)->header('Cache-Control', 'no-store');
+    }
+
     /** Cost of one search over the last 7 days (ops_health), or null with too little history. */
     public static function costPerProduct(?array $opsHealth): ?float
     {
