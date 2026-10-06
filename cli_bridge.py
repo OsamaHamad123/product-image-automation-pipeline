@@ -40,6 +40,7 @@ if __name__ == "__main__":
 import base64
 import json
 import logging
+import re
 import time
 import traceback
 import uuid
@@ -1753,11 +1754,64 @@ def action_review_stats(params):
 # إعدادات الشيت
 # ---------------------------------------------------------------------------
 
-def action_sheet_preview(params):
-    spreadsheet_url = _text(params, "spreadsheet_url")
-    tab_name = _text(params, "tab_name")
+# رابط الشيت أو اسمه واسم التبويب يُكتبان في .env كسطر KEY="VALUE": سطر جديد أو علامة تنصيص فيهما كانت تضيف مفاتيح
+# أخرى للملف. نفس القواعد في ApiController::sheetParams.
+SHEET_URL_RE = re.compile(r"^https://docs\.google\.com/spreadsheets/(?:u/\d+/)?d/[A-Za-z0-9_-]{20,}(?:[/?#][^\s\"'\\]*)?\Z")
+_SHEET_FORBIDDEN_RE = re.compile(r"[\x00-\x1f\x7f\"'\\]")
+SHEET_URL_MAX, SHEET_TAB_MAX = 500, 100
+ENV_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+INVALID_SHEET = ("Invalid spreadsheet URL or tab name: use a https://docs.google.com/spreadsheets/d/... link or a "
+                 "sheet name, with no quotes, backslashes or line breaks")
+
+
+def _sheet_inputs(params):
+    """(رابط الشيت أو اسمه، اسم التبويب، رد الرفض أو None). رابط http يجب أن يكون رابط Google Sheets."""
+    raw_url, raw_tab = params.get("spreadsheet_url"), params.get("tab_name")
+    if not isinstance(raw_url, (str, type(None))) or not isinstance(raw_tab, (str, type(None))):
+        return "", "", {"status": "failed", "error": INVALID_SHEET, "error_code": "invalid_sheet"}
+    spreadsheet_url, tab_name = (raw_url or "").strip(), (raw_tab or "").strip()
     if not spreadsheet_url:
-        return {"status": "failed", "error": "Spreadsheet URL or name is required"}
+        return "", "", {"status": "failed", "error": "Spreadsheet URL or name is required"}
+    bad = (len(spreadsheet_url) > SHEET_URL_MAX or len(tab_name) > SHEET_TAB_MAX
+           or _SHEET_FORBIDDEN_RE.search(spreadsheet_url) or _SHEET_FORBIDDEN_RE.search(tab_name)
+           or (spreadsheet_url.lower().startswith(("http://", "https://")) and not SHEET_URL_RE.match(spreadsheet_url)))
+    if bad:
+        return "", "", {"status": "failed", "error": INVALID_SHEET, "error_code": "invalid_sheet"}
+    return spreadsheet_url, tab_name, None
+
+
+def _replace_file(path, text):
+    """يكتب الملف كاملاً أو لا يكتبه: ملف مؤقت بجانبه ثم os.replace، وصلاحيات الملف ومالكه تبقى كما كانت (.env فيه
+    كل المفاتيح: انقطاع في منتصف الكتابة بـ open(..., "w") كان يتركه فاضياً)."""
+    import stat
+    import tempfile
+
+    before = os.stat(path)
+    fd, tmp = tempfile.mkstemp(prefix=".env.", suffix=".tmp", dir=os.path.dirname(path) or ".")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(tmp, stat.S_IMODE(before.st_mode))
+        if hasattr(os, "chown"):
+            try:
+                os.chown(tmp, before.st_uid, before.st_gid)
+            except OSError:          # غير الجذر لا يقدر يغيّر المالك، والملف المؤقت لنفس المستخدم أصلاً
+                pass
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def action_sheet_preview(params):
+    spreadsheet_url, tab_name, refused = _sheet_inputs(params)
+    if refused:
+        return refused
     try:
         sheets_client = google_sheets.get_sheets_client()
         if not sheets_client:
@@ -1776,12 +1830,11 @@ def action_sheet_preview(params):
 
 
 def action_sheet_save(params):
-    spreadsheet_url = _text(params, "spreadsheet_url")
-    tab_name = _text(params, "tab_name")
-    if not spreadsheet_url:
-        return {"status": "failed", "error": "Spreadsheet URL or name is required"}
+    spreadsheet_url, tab_name, refused = _sheet_inputs(params)
+    if refused:
+        return refused
     try:
-        env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+        env_path = ENV_PATH
         if os.path.exists(env_path):
             with open(env_path, "r", encoding="utf-8") as f:
                 lines = f.readlines()
@@ -1797,8 +1850,7 @@ def action_sheet_save(params):
                 lines.append(f"\nSPREADSHEET_NAME_OR_URL=\"{spreadsheet_url}\"\n")
             if not updated_tab:
                 lines.append(f"SPREADSHEET_TAB_NAME=\"{tab_name}\"\n")
-            with open(env_path, "w", encoding="utf-8") as f:
-                f.writelines(lines)
+            _replace_file(env_path, "".join(lines))
         config.SPREADSHEET_NAME_OR_URL = spreadsheet_url
         config.SPREADSHEET_TAB_NAME = tab_name
         google_sheets.clear_cache()
