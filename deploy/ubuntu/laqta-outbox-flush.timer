@@ -1,0 +1,14 @@
+# Flush the sheet outbox every 2 minutes (see laqta-outbox-flush.service). OnUnitActiveSec counts from the last start,
+# and a start that comes while the previous flush is still running is ignored: the runs never pile up.
+# Change the interval with:  systemctl edit laqta-outbox-flush.timer
+[Unit]
+Description=Laqta sheet outbox flush, every 2 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=2min
+AccuracySec=10s
+Unit=laqta-outbox-flush.service
+
+[Install]
+WantedBy=timers.target

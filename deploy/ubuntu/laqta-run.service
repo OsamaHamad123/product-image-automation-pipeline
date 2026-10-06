@@ -1,0 +1,37 @@
+# A run started from the dashboard («شغّل»): enqueue the sheet rows, then work the queue (main.py --worker
+# --trigger=dashboard), as the app user. Started by laqta-run.path, never by hand and never by a timer.
+#
+# Why this exists: php-fpm used to start the worker itself (nohup sh -c ... &) inside php-fpm's own cgroup, so an
+# unattended php-fpm restart or package upgrade killed a run in progress. Here the run lives in this unit's cgroup:
+# `systemctl restart php8.3-fpm` does not touch it. The stop button keeps working as before (the worker's pid and
+# heartbeat are in temp/pipeline.lock, php-fpm runs as the same user and may stop it); `systemctl stop
+# laqta-run` stops it from a shell. Output goes to temp/pipeline.log, which the dashboard rotates at each start.
+# The nightly run (laqta-nightly.service) is not affected: both use the same temp/pipeline.lock, only one can work.
+# MemoryMax is filled in by install.sh like in laqta-nightly.service; a run killed for memory is the only failure and
+# the dashboard shows it in the run state. Exit codes: killed by the stop button (KILL) or stopped on purpose (TERM)
+# are normal. No OnFailure alert here: a stop would raise a false alarm, and the run report goes out by itself.
+# The @NAME@ words are filled in by install.sh.
+[Unit]
+Description=Laqta run started from the dashboard (main.py --enqueue, then --worker)
+After=network-online.target mariadb.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=@APP_USER@
+Group=@APP_USER@
+WorkingDirectory=@APP_DIR@
+Environment=PYTHONUTF8=1
+Environment=PYTHONIOENCODING=utf-8
+Environment=U2NET_HOME=@MODELS_DIR@
+ExecStart=/bin/bash @APP_DIR@/deploy/ubuntu/run-launcher.sh @APP_DIR@
+SuccessExitStatus=KILL TERM
+# Hard backstop (a run is hours at most): a hung run must not block the launcher for ever.
+TimeoutStartSec=12h
+Nice=5
+MemoryMax=@MEMORY_MAX@
+OOMPolicy=kill
+OOMScoreAdjust=300
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full

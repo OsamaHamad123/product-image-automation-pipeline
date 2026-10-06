@@ -2,11 +2,14 @@
 # Needed ONLY when Redis is used (install.sh --with-redis). Without Redis the worker exits at once
 # ("no Redis, nothing to do") and sheet writes go straight through the MariaDB outbox from the bridge process,
 # so leave this unit disabled in that case (the Windows start_all.bat starts it only when Redis answers).
+# Memory cap and failure alert: same as laqta-nightly.service (MemoryMax is filled in by install.sh). Restart=always
+# brings the worker back after an OOM kill; OnFailure only fires when it keeps failing (systemd's start limit).
 # The @NAME@ words are filled in by install.sh.
 [Unit]
 Description=Laqta sheet outbox worker (sync_worker.py)
 After=network-online.target mariadb.service redis-server.service
 Wants=network-online.target
+OnFailure=laqta-alert@%n.service
 
 [Service]
 Type=simple
@@ -19,6 +22,9 @@ Environment=U2NET_HOME=@MODELS_DIR@
 ExecStart=@APP_DIR@/.venv/bin/python -u @APP_DIR@/sync_worker.py
 Restart=always
 RestartSec=15
+MemoryMax=@MEMORY_MAX@
+OOMPolicy=kill
+OOMScoreAdjust=300
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full

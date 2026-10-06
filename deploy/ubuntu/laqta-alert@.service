@@ -1,0 +1,21 @@
+# Failure alert: a short Telegram message that names the failed unit (scripts/unit_alert.py).
+# Started by OnFailure=laqta-alert@%n.service of the nightly run, the sync worker and the backup; %i is the failed
+# unit's name. The message holds the unit name, the host name and systemd's result word, nothing from .env.
+# No OnFailure here: an alert that fails must never raise another alert. Telegram settings are read from .env like
+# everywhere else (TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID); without them the unit only writes a line to the journal.
+# The @NAME@ words are filled in by install.sh.
+[Unit]
+Description=Laqta failure alert for %i
+
+[Service]
+Type=oneshot
+User=@APP_USER@
+Group=@APP_USER@
+WorkingDirectory=@APP_DIR@
+Environment=PYTHONUTF8=1
+Environment=PYTHONIOENCODING=utf-8
+ExecStart=@APP_DIR@/.venv/bin/python -X utf8 @APP_DIR@/scripts/unit_alert.py %i
+TimeoutStartSec=90
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
