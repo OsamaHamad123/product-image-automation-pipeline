@@ -293,6 +293,60 @@ def test_the_fake_embedder_sees_pack_colours():
 
 
 # ---------------------------------------------------------------------------
+# Near duplicates: the cosine next to pHash
+# ---------------------------------------------------------------------------
+
+def _fetched(img, phash):
+    import io
+
+    from catalog_match.models import Candidate, FetchedImage
+
+    buf = io.BytesIO()
+    img.save(buf, "PNG")
+    return FetchedImage(candidate=Candidate(image_url=f"https://x.ae/{phash}.png"), ok=True, phash=phash,
+                        path_or_bytes=buf.getvalue(), width=img.width, height=img.height)
+
+
+def test_pair_similarity_reports_the_cosine_next_to_phash(monkeypatch):
+    a = _fetched(packshot((200, 20, 20)), "ffff0000ffff0000")
+    b = _fetched(packshot((205, 25, 15), size=(800, 900)), "ffff0000ffff00ff")
+    c = _fetched(packshot((20, 20, 200)), "0000ffff0000ffff")
+    # off: pHash only, nothing embedded
+    assert embeddings.pair_similarity(a, b, embed_missing=True) == {"phash_distance": 8, "cosine": None,
+                                                                       "near_duplicate": None}
+    assert a.embedding is None
+    monkeypatch.setenv("EMBEDDINGS", "dinov2")
+    fake = ColourEmbedder()
+    embeddings.set_embedder(fake)
+    same = embeddings.pair_similarity(a, b, embed_missing=True)
+    assert same["phash_distance"] == 8 and same["cosine"] > 0.99 and same["near_duplicate"] is True
+    assert fake.calls == [2]                                    # one batch for both
+    other = embeddings.pair_similarity(a, c, embed_missing=True)
+    assert other["near_duplicate"] is False and other["cosine"] < 0
+    assert fake.calls == [2, 1]                                 # a kept its vector
+    # without embed_missing a picture without a vector gives no cosine
+    d = _fetched(packshot((200, 20, 20)), None)
+    assert embeddings.pair_similarity(a, d) == {"phash_distance": None, "cosine": None, "near_duplicate": None}
+    assert embeddings.near_duplicate_min() == embeddings.THRESHOLDS["dinov2"].near_dup
+
+
+def test_ensure_vectors_skips_failed_downloads_and_never_raises(monkeypatch):
+    from catalog_match.models import Candidate, FetchedImage
+
+    monkeypatch.setenv("EMBEDDINGS", "dinov2")
+
+    class Broken(ColourEmbedder):
+        def embed(self, images):
+            raise RuntimeError("onnx")
+
+    failed = FetchedImage(candidate=Candidate(image_url="https://x.ae/1.png"), ok=False, error="http_404")
+    embeddings.set_embedder(ColourEmbedder())
+    assert embeddings.ensure_vectors([failed, None]) == 0
+    embeddings.set_embedder(Broken())
+    assert embeddings.ensure_vectors([_fetched(packshot((1, 2, 3)), "00")]) == 0
+
+
+# ---------------------------------------------------------------------------
 # No onnxruntime, EMBEDDINGS off: no import errors, nothing loaded
 # ---------------------------------------------------------------------------
 

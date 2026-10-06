@@ -746,6 +746,59 @@ def look_mismatch(fetched) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Near duplicates: the cosine next to pHash (a helper for a dedupe; it never drops anything itself)
+# ---------------------------------------------------------------------------
+
+def ensure_vectors(fetched_list: Sequence[Any]) -> int:
+    """Embed, in one batch, every downloaded picture of the list without a vector (fetched.embedding); how many.
+    0 with EMBEDDINGS off or no embedder; never raises."""
+    embedder = get_embedder()
+    if embedder is None:
+        return 0
+    try:
+        from .fetch import load_image
+
+        todo = [f for f in fetched_list or () if f is not None and getattr(f, "ok", False)
+                and getattr(f, "embedding", None) is None]
+        if todo:
+            for f, v in zip(todo, embedder.embed([load_image(f) for f in todo])):
+                f.embedding = v
+        return len(todo)
+    except Exception:
+        logger.exception("embeddings: the near-duplicate vectors failed")
+        return 0
+
+
+def near_duplicate_min(embedder=None) -> float:
+    """The cosine at or above which two pictures are the same picture, for the model in use."""
+    return _thresholds_of(embedder or get_embedder()).near_dup
+
+
+def pair_similarity(a, b, embed_missing: bool = False) -> dict:
+    """How alike two downloaded pictures (FetchedImage) are, for a dedupe that reports both signals:
+
+        {'phash_distance': Hamming distance of the 64-bit pHashes (None when either is missing),
+         'cosine': cosine of the embeddings (None with EMBEDDINGS off or without vectors),
+         'near_duplicate': cosine >= the model's near_dup threshold (None without a cosine)}
+
+    embed_missing: embed a picture that has no vector yet (one batch for both). The cosine is evidence next to pHash:
+    the dedupe's own pHash rule stays what decides (pHash misses a re-cropped or re-coloured copy that the cosine
+    sees, and the cosine calls two flavours of one pack design alike that pHash keeps apart).
+    """
+    from .fetch import phash_distance
+
+    out = {"phash_distance": phash_distance(getattr(a, "phash", None), getattr(b, "phash", None)),
+           "cosine": None, "near_duplicate": None}
+    if embed_missing:
+        ensure_vectors([a, b])
+    c = cosine(getattr(a, "embedding", None), getattr(b, "embedding", None))
+    if c is not None:
+        out["cosine"] = round(c, 4)
+        out["near_duplicate"] = c >= near_duplicate_min()
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Storing an approval's vector
 # ---------------------------------------------------------------------------
 
