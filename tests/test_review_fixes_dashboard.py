@@ -265,3 +265,27 @@ def test_catalog_reject_with_research_leaves_saving_the_fresh_candidates_to_the_
     assert "persistResearchCandidates" not in single
     assert "save-candidates" not in single and "saveCandidates" not in single
     assert "requeueForReview(item, data, candidate.url)" in submit and "savedCount(data)" in submit
+
+
+@pytest.mark.skipif(PHP is None, reason="php is not installed")
+def test_save_candidates_keeps_the_provider_query_and_phash():
+    """The Python writer stores where a candidate came from (provider, query id) and its pHash; the dashboard's
+    save-candidates keeps them too, cut to the column widths, and leaves them NULL when unknown."""
+    service = str(DASH / "app" / "Services" / "CandidateRow.php").replace("\\", "/")
+    candidates = [
+        {"url": "https://lulu.ae/a.jpg", "provider": "serper_shopping", "query_id": "X2", "phash": "c3c3a5a55a5a3c3c"},
+        {"url": "https://lulu.ae/b.jpg", "provider": "  ", "query_id": None},
+        {"url": "https://lulu.ae/c.jpg", "provider": "p" * 40, "query_id": "Q" * 20},
+    ]
+    script = f"""<?php
+require '{service}';
+use App\\Services\\CandidateRow;
+$cands = json_decode({json.dumps(json.dumps(candidates))}, true);
+$out = [];
+foreach ($cands as $c) {{ $out[] = CandidateRow::optionalColumns($c, 'sku123', 'ui-run'); }}
+echo json_encode($out);
+"""
+    rows = _run_php(script)
+    assert (rows[0]["provider"], rows[0]["query_id"], rows[0]["phash"]) == ("serper_shopping", "X2", "c3c3a5a55a5a3c3c")
+    assert (rows[1]["provider"], rows[1]["query_id"], rows[1]["phash"]) == (None, None, None)
+    assert len(rows[2]["provider"]) == 32 and len(rows[2]["query_id"]) == 16

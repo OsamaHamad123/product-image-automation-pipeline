@@ -14,12 +14,13 @@ What a row holds (read from automation_queue, its stored trace and its stored re
 searched again): the sheet row number, product name, brand, size, the barcode (and whether it is a valid GTIN),
 the decision and failure code, why there is no pick (catalog_match.explain: the reason key and the Arabic
 sentence) and the sheet's gaps, the top 8 candidates (image and page URL, domain, title, identity tier, status,
-reasons and warnings, the label reader's reading, the size / variant evidence), the stores' spelling of the
-brand the search used (discovered_brands: the trace's outcome, or an older pick's 'brand_spelling' warning), the
-provider calls and the estimated cost when the trace says it, and the search's wall time per stage ('timings',
-milliseconds: retrieval, fetch, quality, verify, expansion when the round ran, total; a row saved before the
-timings were recorded has an empty one). The summary adds 'timings': p50 / p90 / total seconds per stage over the
-rows that have them.
+reasons and warnings, the label reader's reading, the size / variant evidence, the provider and query id that found
+it and its pHash; read from curation_candidates, or for a published or approved row whose review candidates are
+gone, from the stored outcome's own top list), the stores' spelling of the brand the search used
+(discovered_brands: the trace's outcome, or an older pick's 'brand_spelling' warning), the provider calls and the
+estimated cost when the trace says it, and the search's wall time per stage ('timings', milliseconds: retrieval,
+fetch, quality, verify, expansion when the round ran, total; a row saved before the timings were recorded has an
+empty one). The summary adds 'timings': p50 / p90 / total seconds per stage over the rows that have them.
 
 What the reviewers did (review_decisions, a rejection taken back with «تراجع عن الرفض» left out): per row 'review',
 the latest decision for the row's sku_key (else its row number): decision (approved | rejected | manual_upload), the
@@ -221,7 +222,7 @@ def describe(c, rank):
         "variant_evidence": {"status": ev.get("variant_status"), "matched": ev.get("variants_matched") or [],
                              "found": ev.get("variants_found") or {}},
         "source_class": ev.get("source_class"), "conflicts": ev.get("conflicts") or [],
-        "download_error": c.get("download_error"),
+        "download_error": c.get("download_error"), "phash": c.get("phash") or None,
         "width": c.get("width"), "height": c.get("height"),
     }
 
@@ -311,7 +312,9 @@ def export_row(row, candidates, mappings=None, vocab=None, prices=None, secret_v
     decision = record["decision"]
     steps = [c for step in trace.get("steps") or [] if isinstance(step, dict)
              for c in step.get("candidates") or [] if isinstance(c, dict)]
-    source = (steps or list(candidates or ()))[:TOP_N]
+    # a published or approved row has no review candidates left: the outcome's own top list (facade) keeps them
+    kept = [c for c in outcome.get("top") or [] if isinstance(c, dict)]
+    source = (steps or list(candidates or ()) or kept)[:TOP_N]
     top = [describe(c, i) for i, c in enumerate(source, 1)]
     winner_url = outcome.get("winner_url") if decision in smoke_live.PICK_DECISIONS else None
     if decision in smoke_live.PICK_DECISIONS and not winner_url:

@@ -39,6 +39,10 @@ outcome_to_legacy(outcome, trace=None, spec=None) -> dict | None
     without a barcode (resolved_products.page_gtin), shown on the review card and exported; the sheet
     gets it only from the Run page card (cli_bridge barcode_write).
     evidence.page_gallery is True for X0's extra image of a page's own gallery (expand.py), which the review marks.
+    trace['outcome']['top'] keeps the top LEGACY_TOP_N reviewable candidates (the pick first when it ranks lower)
+    without their quality and score blocks: the worker stores only trace['outcome'] for a published or reviewed row
+    and its review candidates go once a reviewer approves, so the run export (scripts/export_run.py) reads the
+    pick's provider, query id and evidence there.
 """
 
 from __future__ import annotations
@@ -267,6 +271,23 @@ def explain_no_pick(outcome: SearchOutcome, spec: Optional[SkuSpec]) -> Optional
 # Output side
 # ---------------------------------------------------------------------------
 
+_TRACE_DROPPED = ("quality", "scores")
+
+
+def _compact(entry: Dict[str, Any]) -> Dict[str, Any]:
+    """A serialised candidate for trace['outcome']['top']: without the quality and score blocks."""
+    return {k: v for k, v in entry.items() if k not in _TRACE_DROPPED}
+
+
+def _top_with_winner(outcome: SearchOutcome, ranked: List[RankedCandidate]) -> List[RankedCandidate]:
+    """The first LEGACY_TOP_N reviewable candidates, with the pick in front when it ranks below them."""
+    top = [rc for rc in ranked if _reviewable(rc)][:LEGACY_TOP_N]
+    winner = outcome.winner if outcome.decision in PICK_DECISIONS else None
+    if winner is not None and winner not in top and _reviewable(winner):
+        top = [winner] + top[:LEGACY_TOP_N - 1]
+    return top
+
+
 def outcome_to_legacy(outcome: SearchOutcome, trace: Optional[dict] = None,
                       spec: Optional[SkuSpec] = None) -> Optional[Dict[str, Any]]:
     """Legacy result dict for a SearchOutcome (see the module docstring)."""
@@ -280,6 +301,7 @@ def outcome_to_legacy(outcome: SearchOutcome, trace: Optional[dict] = None,
 
     if trace is not None:
         trace["outcome"] = outcome_summary(outcome)
+        trace["outcome"]["top"] = [_compact(serialise(rc)) for rc in _top_with_winner(outcome, ranked)]
         no_pick = explain_no_pick(outcome, spec)
         if no_pick is not None:
             trace["outcome"]["explain"] = no_pick
