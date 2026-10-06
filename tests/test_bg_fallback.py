@@ -596,8 +596,9 @@ def test_a_locally_isolated_canvas_that_failed_the_gate_is_refused_and_still_say
     refused = run(unclean="refuse")
     assert refused["status"] == "quality_refused" and sheet == []
     assert refused["bg_fallback"] == {"provider": "rembg", "from": "photoroom", "code": "photoroom_402"}
-    review = run(unclean="review")                                              # the worker: needs_review, as always
-    assert review["status"] == "needs_review" and sheet == ["needs_review:" + CLOUD_LINK]
+    review = run(unclean="review")                    # the worker: a review in the queue, nothing in the image cell
+    assert review["status"] == "needs_review" and sheet == []
+    assert review["bg_fallback"] == {"provider": "rembg", "from": "photoroom", "code": "photoroom_402"}
 
 
 @pytest.mark.usefixtures("offline")

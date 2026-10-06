@@ -8,8 +8,9 @@
 # - رفض المراجعين (روابط + pHash) يُمرر للبحث كاستبعادات لكل SKU.
 # - اللوحة المنشورة بيضاء من image_processor بدون أي تكبير لاحق، بملف المعالجة الواحد (processing_profile:
 #   أبعاد اللوحة وتحسين الألوان وطريقة العزل من صفحة الإعدادات) لكل مسارات النشر؛ إذا لم تُعزل الخلفية
-#   يُكتب الرابط ببادئة needs_review: ولا يُخزن كحل معتمد، إلا إذا اختار المالك «بدون عزل الخلفية» بالإعدادات
-#   (bg_removal_method = none، زر «تجاوز عزل الخلفية»): عندها تُنشر الصورة كما هي نظيفة مع العلامة bg_skipped.
+#   لا يُرفع ولا يُكتب شيء بالشيت (خلية الصورة بتضل على قيمتها: التطبيق بيقرا منها رابط نظيف بس) والمراجعة بالطابور،
+#   إلا إذا اختار المالك «بدون عزل الخلفية» بالإعدادات (bg_removal_method = none، زر «تجاوز عزل الخلفية»): عندها
+#   تُنشر الصورة كما هي نظيفة مع العلامة bg_skipped. خلايا قديمة فيها needs_review:<رابط> بتنقرا كمراجعة معلقة.
 
 import json
 import os
@@ -387,7 +388,8 @@ def _folder_and_tags(metadata):
 def publish_image(image_url, name, brand, row_number, worksheet, link_column_index, *, barcode="",
                   candidate_sha256=None, category_override=None, force_review=False, key_size=None,
                   key_brand=None, profile=None, sku_key=None, before_write=None, duplicates="warn",
-                  also_rows=None, after_write=None, unclean="review", publish_anyway=False, page_url=None):
+                  also_rows=None, after_write=None, unclean="review", publish_anyway=False, page_url=None,
+                  category_hint=()):
     """
     معالجة الصورة المعتمدة إلى لوحة النشر النهائية ورفعها وكتابة رابطها في الشيت.
     key_size/key_brand: خلايا الحجم والبراند في الشيت لهذا المنتج، تُضاف إلى هوية الصف المتحقق منها
@@ -403,16 +405,23 @@ def publish_image(image_url, name, brand, row_number, worksheet, link_column_ind
     قراره (الحل المعتمد وحالة الطابور)، فمن ينتظر القفل (مراجع آخر أو العامل) يرى القرار في إعادة تحققه. خطؤه يُرفع.
     duplicates: صورة نُشرت لمنتج آخر (نفس رابط Cloudinary، أو pHash اللوحة على مسافة 4 أو أقل بألوان غير مختلفة
     بوضوح: local_cache_db.find_image_owners؛ sku_key مختلف):
-    'block' (النشر التلقائي من الطابور) لا يكتب شيئاً والحالة 'needs_review' (error='duplicate_image')؛ 'review'
-    (الوضع التسلسلي القديم) يكتب الرابط ببادئة needs_review: فقط؛ 'warn' (اعتماد المراجع الصريح) يكتب كالمعتاد.
-    المالكون في duplicate_of، وتعذر التحقق يُعامل كتكرار في 'block' و 'review'.
+    'block' (النشر التلقائي من الطابور) و 'review' (الوضع التسلسلي القديم) لا يكتبان شيئاً والحالة 'needs_review'
+    (error='duplicate_image')؛ 'warn' (اعتماد المراجع الصريح) يكتب كالمعتاد.
+    المالكون في duplicate_of، وتعذر التحقق يُعامل كتكرار في 'block' و 'review'. المطابقة بالرابط تشمل رابط التسليم
+    القديم لنفس الأصل (delivery_urls.delivery_variants).
     phash و color_signature: بصمتا اللوحة النهائية (pHash وبصمة الألوان، تُخزنان مع الحل المعتمد).
     quality_flags: علامات بوابة القص (image_processor) و quality_notes: ملاحظاتها غير المانعة، تعودان دائماً.
     page_url: صفحة المرشح إن عُرفت؛ تُمرر للمعالجة (إن قبلتها) فيُعاد التنزيل بنفس Referer الجلب الأول.
-    لوحة لم تُعزل خلفيتها (isolated=False): unclean='review' (العامل) تُكتب ببادئة needs_review:؛ unclean='refuse'
-    (اعتماد المراجع ورفعه) لا يُرفع ولا يُكتب شيء والحالة 'quality_refused' (publish_anyway_allowed: علاماتها كلها
-    للعرض فقط، PRESENTATION_FLAGS)، فلا يُسجل اعتماد بشري ورابط الشيت needs_review:. publish_anyway=True (تأكيد
-    المراجع بعد رؤية العلامات) يكتب اللوحة نظيفة عندما تسمح علاماتها بذلك؛ عزل فشل (بلا علامات أو بعلامة مانعة) أبداً.
+    category_hint: تصنيف المنتج من الشيت (category، sub_category...)؛ مع category_override يقرر إذا العبوة شفافة أو زجاج
+    (categories.is_clear_packaging): التشطيب ما بيسد ثقوبها.
+    لوحة لم تُعزل خلفيتها (isolated=False): unclean='review' (العامل) لا تُرفع ولا يُكتب شيء والحالة 'needs_review'
+    (error='background_not_removed')؛ unclean='refuse' (اعتماد المراجع ورفعه) لا يُرفع ولا يُكتب شيء والحالة
+    'quality_refused' (publish_anyway_allowed: علاماتها كلها للعرض فقط، PRESENTATION_FLAGS)، فلا يُسجل اعتماد بشري.
+    publish_anyway=True (تأكيد المراجع بعد رؤية العلامات) يكتب اللوحة نظيفة عندما تسمح علاماتها بذلك؛ عزل فشل (بلا
+    علامات أو بعلامة مانعة) أبداً. force_review (الوضع التسلسلي القديم لاختيار غير AUTO_PUBLISH): نفس الشي،
+    'needs_review' (error='review_required') بلا رفع ولا كتابة.
+    خلية الصورة بالشيت ما بتحمل غير رابط نظيف: لا needs_review:<رابط> ولا أي بادئة. المراجعة المعلقة مكانها الطابور
+    وقاعدة البيانات (المستدعي يحفظ المرشحات والحالة ready_for_review)، والخلية بتضل على قيمتها السابقة لحد الاعتماد.
     «تجاوز عزل الخلفية»: المالك اختار بالإعدادات «بدون عزل الخلفية» (profile.bg_method = 'none'، مثلاً لما رصيد PhotoRoom
     خلص) والمعالجة أعادت لوحة بلا عزل (provider 'none'): هذا اختياره لا فشل، فتُنشر اللوحة نظيفة في كل المسارات (بلا
     needs_review: ولا quality_refused، والعامل ينشر تلقائياً كالمعتاد) و bg_skipped=True في النتيجة، لتقول استجابة
@@ -423,7 +432,7 @@ def publish_image(image_url, name, brand, row_number, worksheet, link_column_ind
     ليس فشلاً ولا «بدون عزل»: اللوحة معزولة ومنشورة نظيفة، والاعتماد وتقرير التشغيل يقولان إنها عزلت محلياً.
     لا تكبير لاحق: اللوحة من image_processor نهائية. البيانات الوصفية تُكتب في الشيت فقط بعد نجاح الرفع.
     الحالة: 'published' (معزولة وليست للمراجعة، أو نُشرت رغم علامات العرض، أو بدون عزل باختيار المالك) |
-    'needs_review' (رابط ببادئة needs_review:) | 'quality_refused' | 'superseded' (لم يُكتب شيء) | 'failed'.
+    'needs_review' (لم يُكتب شيء: بانتظار مراجعة) | 'quality_refused' | 'superseded' (لم يُكتب شيء) | 'failed'.
     """
     profile = profile or processing_profile.current()
     w, h = profile.target
@@ -431,6 +440,10 @@ def publish_image(image_url, name, brand, row_number, worksheet, link_column_ind
                                                           "page_url") else {}
     if getattr(profile, "background", None) and _accepts(image_processor.process_product_image_result, "background"):
         extra["background"] = profile.background
+    import categories
+    if categories.is_clear_packaging(*(category_hint or ()), *(category_override or {}).values()) \
+            and _accepts(image_processor.process_product_image_result, "clear"):
+        extra["clear"] = True
     result = image_processor.process_product_image_result(
         image_url, name, brand, target_width=w, target_height=h,
         bg_method=profile.bg_method, candidate_sha256=candidate_sha256, enhance=profile.enhance, **extra,
@@ -454,7 +467,19 @@ def publish_image(image_url, name, brand, row_number, worksheet, link_column_ind
         return {"status": "quality_refused", "error": "quality_flags" if anyway_allowed else "background_failed",
                 "isolated": False, "provider": result.provider, "profile": profile.as_dict(),
                 "quality_flags": flags, "quality_notes": notes, "publish_anyway_allowed": anyway_allowed,
-                "bg_fallback": bg_fallback}
+                "bg_fallback": bg_fallback, "finish": dict(getattr(result, "finish", None) or {})}
+    if force_review or (unisolated and not anyway):
+        # بانتظار مراجعة: لا رفع ولا قراءة بيانات وصفية ولا كتابة بالشيت. خلية الصورة بتضل على قيمتها السابقة (التطبيق
+        # بيقرا منها رابط نظيف بس)، والمستدعي بيحفظ المراجعة بالطابور (ready_for_review مع المرشحات)
+        image_processor.cleanup_processed_image(result.path)
+        why = "background_not_removed" if unisolated else "review_required"
+        print(f"[Publish] الصف {row_number} بانتظار مراجعة ({why}{': ' + ', '.join(flags) if flags else ''})؛ "
+              "الشيت ما انكتب.")
+        return {"status": "needs_review", "error": why, "isolated": bool(result.isolated), "provider": result.provider,
+                "width": result.width, "height": result.height,
+                "profile": profile.as_dict(), "quality_flags": flags, "quality_notes": notes,
+                "bg_skipped": bg_skipped, "bg_fallback": bg_fallback,
+                "finish": dict(getattr(result, "finish", None) or {})}
 
     metadata = {}
     try:
@@ -487,21 +512,21 @@ def publish_image(image_url, name, brand, row_number, worksheet, link_column_ind
             "finish": dict(getattr(result, "finish", None) or {})}
     if not link:
         return dict(base, status="failed", error="upload_failed")
-    # النسخة البيضا المعتمة من نفس الأصل (b_white,f_jpg): التطبيق بيطلبها متى بده مربع أبيض
+    # النسخة البيضا المعتمة من نفس الأصل (b_white,...,f_jpg): التطبيق بيطلبها متى بده مربع أبيض
     base["white_url"] = cloudinary_storage.white_version_url(link)
 
-    # نفس الصورة منشورة لمنتج آخر؟ الرفع الموجود مسبقاً (existing من Cloudinary) دليل إضافي فقط
+    # نفس الصورة منشورة لمنتج آخر؟ الرفع الموجود مسبقاً (existing من Cloudinary) دليل إضافي فقط. رابط منتج قديم محفوظ
+    # بتحويل التسليم القديم (q_auto,f_auto) هو نفس الأصل
     owners = local_cache_db.find_image_owners(link, phash, sku_key=sku_key, product_name=name,
                                               color_signature=color)
     base["duplicate_of"] = list(owners or [])
     base["cloudinary_existing"] = getattr(link, "existing", None)
     duplicate = owners is None or bool(owners)
-    if duplicates == "block" and duplicate:
+    if duplicates in ("block", "review") and duplicate:
         print(f"[Publish] صورة الصف {row_number} منشورة لمنتج آخر (أو تعذر التحقق)؛ لا نشر تلقائي، تُحال للمراجعة.")
         return dict(base, status="needs_review", error="duplicate_image", link=link)
 
-    review = force_review or (unisolated and not anyway) or (duplicates == "review" and duplicate)
-    sheet_value = f"needs_review:{link}" if review else link
+    sheet_value = link      # رابط نظيف دائماً: المراجعة المعلقة ما بتنكتب بالشيت
     identity = {"barcode": barcode, "product_name": name, "size": key_size, "brand": key_brand}
     with local_cache_db.sku_publish_lock(sku_key) as lock_state:
         if before_write is not None:
@@ -529,7 +554,7 @@ def publish_image(image_url, name, brand, row_number, worksheet, link_column_ind
                 continue
             written.append(other_row)
             _write_metadata(worksheet, other_row, metadata, other_identity)
-        outcome = dict(base, status="needs_review" if review else "published", link=link, sheet_value=sheet_value,
+        outcome = dict(base, status="published", link=link, sheet_value=sheet_value,
                        rows_written=written, rows_failed=failed)
         if after_write is not None:
             after_write(outcome)
@@ -562,8 +587,10 @@ def _bg_fallback(result):
 # (publish_anyway). edge_clipped و opaque_backdrop و opaque_fill (لم يُزل شيء من الخلفية: image_processor) وأي علامة
 # أخرى، وعزل فشل بلا علامات، لا يُنشر نظيفاً أبداً: هي «الخلفية لم تُعزل» (background_failed).
 # dark_halo (اللوحة الشفافة، cutout_finish): حواف فاتحة بتبين على الوضع الغامق بالتطبيق.
+# photoroom_unsure: PhotoRoom نفسه مش متأكد من حدود المنتج (x-uncertainty-score، image_processor).
+# dark_rim (cutout_finish): حواف غامقة بتبين على الوضع الفاتح بالتطبيق.
 PRESENTATION_FLAGS = frozenset({"upscaled", "too_small_on_canvas", "second_object", "alpha_haze", "kept_shadow",
-                                "dark_halo"})
+                                "dark_halo", "photoroom_unsure", "dark_rim"})
 
 
 def _accepts(func, name):
@@ -626,13 +653,26 @@ def _write_still_allowed(before_write):
 # الاعتماد التلقائي والبحث المسبق
 # ---------------------------------------------------------------------------
 
-def auto_approve_product(task, best_image, worksheet, link_column_index, sku_key=None):
+def publish_report(res):
+    """ما يُحفظ من نتيجة النشر في trace صف الطابور (publish) لتقرير التحليل (scripts/export_run.py)."""
+    finish = dict(res.get("finish") or {})
+    return {"status": res.get("status"), "error": res.get("error"), "provider": res.get("provider"),
+            "isolated": res.get("isolated"), "quality_flags": list(res.get("quality_flags") or []),
+            "quality_notes": list(res.get("quality_notes") or []), "uncertainty": finish.get("uncertainty"),
+            "canvas": [res.get("width"), res.get("height")] if res.get("width") else None,
+            "finish": {k: v for k, v in finish.items() if k in ("background", "halo", "halo_retry", "dark_rim",
+                                                              "holes_filled", "holes_left", "hole_fill")}}
+
+
+def auto_approve_product(task, best_image, worksheet, link_column_index, sku_key=None, report=None):
     """
-    نشر نتيجة AUTO_PUBLISH مباشرة. تعيد 'published' أو 'needs_review' (الخلفية لم تُعزل) أو 'superseded'
+    نشر نتيجة AUTO_PUBLISH مباشرة. تعيد 'published' أو 'needs_review' (الخلفية لم تُعزل أو الصورة مكررة: لم يُكتب شيء
+    بالشيت، والمرشحات للمراجعة عند المستدعي) أو 'superseded'
     (مراجع اعتمد المنتج أثناء المعالجة والرفع، أو لم يعد الصف محجوزاً لهذا العامل: لم يُكتب شيء) أو 'rejected'
     (مراجع رفض هذه الصورة لهذا المنتج أثناء المعالجة: لم يُكتب شيء) أو 'busy' (قفل النشر بقي عند غيرنا حتى المهلة)
     أو 'failed'. الحل يُخزن auto_verified فقط عند النشر الفعلي: بلوحة معزولة، أو «بدون عزل الخلفية» باختيار المالك
     (bg_skipped، تُعد لتقرير التشغيل: bg_skipped_count).
+    report (dict اختياري): يأخذ publish_report للنتيجة (المزوّد والعلامات و x-uncertainty-score) لـ trace الصف.
     """
     name = task["product_name"]
     brand = task.get("brand") or ""
@@ -666,12 +706,15 @@ def auto_approve_product(task, best_image, worksheet, link_column_index, sku_key
         res = publish_image(
             best_image["url"], name, brand, task["row_number"], worksheet, link_column_index,
             barcode=barcode, candidate_sha256=best_image.get("content_sha256"), page_url=best_image.get("page_url"),
+            category_hint=(task_payload(task).get("category"), task_payload(task).get("sub_category")),
             key_size=task_payload(task).get("size"), key_brand=brand, profile=processing_profile.current(),
             sku_key=sku_key, before_write=still_ours, duplicates="block", after_write=record,
         )
     except Exception as e:
         print(f"[Auto-Publish Error] فشل النشر التلقائي لـ [{name}]: {e}")
         return "failed"
+    if report is not None:
+        report.update(publish_report(res))
     if res["status"] == "superseded":
         if res.get("error") == "publish_busy":
             return "busy"
@@ -1100,13 +1143,18 @@ def pre_cache_product_candidates(task, worksheet=None, link_column_index=None, b
               "لا نشر تلقائي.")
         decision = "REVIEW_PRESELECTED"
     status = None
+    publish_trace = {}       # publish_report للنشر التلقائي (حتى لو انحال للمراجعة): تقرير التحليل بيقرأه من trace
     if (decision == "AUTO_PUBLISH" and best.get("source") != "sqlite_cache"
             and worksheet is not None and link_column_index is not None):
-        status = auto_approve_product(task, best, worksheet, link_column_index, sku_key=sku_key)
+        published = {}
+        extra = {"report": published} if _accepts(auto_approve_product, "report") else {}
+        status = auto_approve_product(task, best, worksheet, link_column_index, sku_key=sku_key, **extra)
+        if published:
+            publish_trace["publish"] = published
         if status == "published":
             written = _publish_to_siblings(task, sku_key, worksheet, link_column_index)
             _finish_task(task, "completed", failure_code=None,
-                         trace={"outcome": _outcome(trace)}, siblings=written)
+                         trace=dict(publish_trace, outcome=_outcome(trace)), siblings=written)
             print(f"[Auto-Publish] تم نشر الصف {row_number} تلقائياً (قرار AUTO_PUBLISH).")
             return "success"
         held = local_cache_db.is_claim_held(task["id"], task.get("worker_id"))
@@ -1146,7 +1194,7 @@ def pre_cache_product_candidates(task, worksheet=None, link_column_index=None, b
                      failure_code="CANDIDATE_SAVE_FAILED", trace=trace)
         return "failed"
     _finish_task(task, "ready_for_review", None,
-                 failure_code=best.get("failure_code"), trace={"outcome": _outcome(trace)})
+                 failure_code=best.get("failure_code"), trace=dict(publish_trace, outcome=_outcome(trace)))
     print(f"[Pre-Cache] {len(candidates)} مرشح للصف {row_number} (القرار: {decision or 'v1'}).")
     return "success"
 
@@ -1155,23 +1203,49 @@ def pre_cache_product_candidates(task, worksheet=None, link_column_index=None, b
 # الوضع التسلسلي القديم (بدون طابور)
 # ---------------------------------------------------------------------------
 
+def _review_pending(row_number, sku_key):
+    """
+    هل للصف مراجعة معلقة بقاعدة البيانات (مرشحات محفوظة مش مستبعدة)؟ خطأ القراءة = لا: الوضع القديم بيبحث متل قبل
+    (كان يبحث كل مرة عن صف خليته needs_review:).
+    """
+    try:
+        return bool(local_cache_db.has_review_candidates(row_number, sku_key, on_error=False))
+    except Exception as e:
+        print(f"تنبيه: تعذر قراءة مرشحات المراجعة للصف {row_number}: {e}")
+        return False
+
+
 def process_single_product(prod, worksheet, link_column_index, brand_mappings=None):
     """
     معالجة منتج واحد مباشرة (الوضع القديم). الاسم والبراند يُمرران كما هما في الشيت؛
     QueryRefiner يُستخدم فقط لكتابة الاسم/البراند العربي الناقص في الشيت.
+    نتيجة للمراجعة (اختيار غير AUTO_PUBLISH، خلفية ما انعزلت، صورة منتج تاني، كاش رمادي) ما بتنكتب بالشيت: المرشحات
+    بتنحفظ للمراجعة وخلية الصورة بتضل على قيمتها. صف بانتظار مراجعة (مرشحات محفوظة، أو خلية قديمة needs_review:)
+    ما بينبحث عنه من جديد (لا صرف) إلا مع FORCE_OVERWRITE_IMAGES.
     """
     row_num = prod["row_number"]
     name = prod["product_name"]
     brand = prod.get("brand") or ""
     barcode = prod.get("barcode") or ""
-    if prod.get("existing_image_link") and not config.FORCE_OVERWRITE_IMAGES:
+    force = bool(getattr(config, "FORCE_OVERWRITE_IMAGES", False))
+    if prod.get("existing_image_link") and not force:
         print(f"تخطي الصف {row_num}: يحتوي بالفعل على رابط صورة نهائي.")
+        return "skipped"
+    if prod.get("needs_review") and not force:
+        print(f"تخطي الصف {row_num}: بانتظار مراجعة (خلية قديمة needs_review:)؛ الاعتماد بلوحة التحكم بيكتب الرابط النظيف.")
         return "skipped"
 
     # الاسم/البراند العربي للبحث يأتيان من الشيت فقط. ناتج QueryRefiner (تخمين نموذج لغوي) يُكتب في الشيت
     # للتعريب ولا يدخل هوية البحث أبداً (D8/D9): وإلا صار تخمين البراند العربي 'mapped' وقابلاً للنشر التلقائي.
     product_name_ar = prod.get("product_name_ar", "")
     brand_ar = prod.get("brand_ar", "")
+    payload = {"name_ar": product_name_ar, "brand_ar": brand_ar, "category": prod.get("category", ""),
+               "sub_category": prod.get("sub_category", ""), "origin": prod.get("origin", ""),
+               "size": prod.get("size", "")}
+    sku_key = compute_sku_key(sku_row(name, brand, barcode, payload), brand_mappings)
+    if not force and _review_pending(row_num, sku_key):
+        print(f"تخطي الصف {row_num}: بانتظار مراجعة (مرشحاته محفوظة)؛ ما في بحث مدفوع من جديد.")
+        return "skipped"
     try:
         from query_refiner import QueryRefiner
         refined = QueryRefiner.refine_product_metadata(name, brand, prod.get("category", ""))
@@ -1180,10 +1254,6 @@ def process_single_product(prod, worksheet, link_column_index, brand_mappings=No
     except Exception as e:
         print(f"تنبيه: فشل التعريب المسبق عبر Gemini: {e}")
 
-    payload = {"name_ar": product_name_ar, "brand_ar": brand_ar, "category": prod.get("category", ""),
-               "sub_category": prod.get("sub_category", ""), "origin": prod.get("origin", ""),
-               "size": prod.get("size", "")}
-    sku_key = compute_sku_key(sku_row(name, brand, barcode, payload), brand_mappings)
     exclude_urls, exclude_phashes = local_cache_db.get_rejections(sku_key)
     query = default_query(name, brand)
     search_kwargs = {
@@ -1206,35 +1276,39 @@ def process_single_product(prod, worksheet, link_column_index, brand_mappings=No
         config.log_and_fail(barcode, name, brand, f"{code}: لم يتم العثور على صورة مقبولة.")
         return "failed"
 
-    # REVIEW_UNSELECTED (url=None): لا يوجد اختيار مسبق؛ تُحفظ المرشحات للمراجعة ولا يُنشر ولا يُكتب شيء في الشيت
-    if getattr(config, 'CURATION_MODE', False) or not best.get("url"):
+    def keep_for_review(why):
+        # المراجعة المعلقة بقاعدة البيانات (المرشحات)، والشيت ما بينكتب: التطبيق بيقرا من الخلية رابط نظيف بس
         candidates = collect_candidates(best, trace)
         if not local_cache_db.save_curation_candidates(row_num, name, brand, candidates, best.get("url"),
                                                        sku_key=sku_key, run_id=uuid.uuid4().hex[:16],
                                                        identity=dict(payload, name=name, brand=brand)):
             config.log_and_fail(barcode, name, brand, "CANDIDATE_SAVE_FAILED: تعذر حفظ المرشحات.")
             return "failed"
-        if not best.get("url"):
-            print(f"الصف {row_num}: لا يوجد مرشح مؤكد ({best.get('decision')}); المرشحات محفوظة للمراجعة.")
-            return "success"
-        ok = google_sheets.update_image_link(worksheet, row_num, link_column_index, f"needs_review:{best['url']}",
-                                             barcode=barcode, product_name=name, size=payload["size"], brand=brand)
-        return "success" if ok else "failed"
+        print(f"الصف {row_num}: المرشحات محفوظة للمراجعة ({why})؛ الشيت ما انكتب لحد الاعتماد.")
+        return "success"
+
+    # REVIEW_UNSELECTED (url=None): لا يوجد اختيار مسبق؛ تُحفظ المرشحات للمراجعة ولا يُنشر ولا يُكتب شيء في الشيت
+    if getattr(config, 'CURATION_MODE', False) or not best.get("url"):
+        return keep_for_review(best.get("decision") or "curation")
 
     decision = best.get("decision")
     if best.get("source") == "sqlite_cache":
-        value = f"needs_review:{best['url']}" if best.get("needs_review", True) else best["url"]
-        ok = google_sheets.update_image_link(worksheet, row_num, link_column_index, value,
+        if best.get("needs_review", True):
+            return keep_for_review("cache")
+        ok = google_sheets.update_image_link(worksheet, row_num, link_column_index, best["url"],
                                              barcode=barcode, product_name=name, size=payload["size"], brand=brand)
         return "success" if ok else "failed"
 
     res = publish_image(best["url"], name, brand, row_num, worksheet, link_column_index, barcode=barcode,
                         candidate_sha256=best.get("content_sha256"), profile=processing_profile.current(),
                         force_review=decision != "AUTO_PUBLISH", key_size=payload["size"], key_brand=brand,
-                        sku_key=sku_key, duplicates="review")
+                        sku_key=sku_key, duplicates="review",
+                        category_hint=(payload["category"], payload["sub_category"]))
     if res["status"] == "failed":
         config.log_and_fail(barcode, name, brand, f"فشل النشر: {res.get('error')}")
         return "failed"
+    if res["status"] == "needs_review":
+        return keep_for_review(res.get("error") or decision or "review")
     if res["status"] == "published":
         page_gtin, page_gtin_url = page_barcode(best, barcode)
         local_cache_db.save_product_resolution(
@@ -1463,8 +1537,21 @@ def _outbox_records(row_numbers):
 
 
 def _link_write_state(records, link):
-    """حالة آخر كتابة لهذا الرابط في هذا الصف (PENDING / FAILED / SYNCED / CONFLICT / DEAD ...)، أو None."""
-    matching = [r for r in records or [] if r.get("value") in (None, link)]
+    """
+    حالة آخر كتابة لهذا الرابط في هذا الصف (PENDING / FAILED / SYNCED / CONFLICT / DEAD ...)، أو None. رابط التسليم
+    القديم (q_auto,f_auto) المحفوظ بالاعتماد والجديد المكتوب بالشيت لنفس الأصل نفس الرابط (google_sheets.update_image_link
+    بيكتب القديم بالشكل الجديد).
+    """
+    from delivery_urls import REVIEW_PREFIX, canonical_delivery_url
+
+    def same(value):
+        if value is None or value == link:
+            return True
+        text = str(value)
+        return (bool(link) and not text.startswith(REVIEW_PREFIX) and not str(link).startswith(REVIEW_PREFIX)
+                and canonical_delivery_url(text) == canonical_delivery_url(link))
+
+    matching = [r for r in records or [] if same(r.get("value"))]
     return matching[-1]["status"] if matching else None
 
 

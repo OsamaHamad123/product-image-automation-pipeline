@@ -172,10 +172,12 @@ def test_a_published_cutout_is_an_rgba_png_with_no_shadow(monkeypatch, tmp_path)
     assert len(calls) == 1 and result.isolated is True and result.provider == "photoroom"
     with Image.open(result.path) as out:
         out.load()
-        assert out.format == "PNG" and out.mode == "RGBA" and out.size == (800, 800)
+        # adaptive canvas: the 600x1200 source keeps its pixels (side = product height / 0.88), not 800
+        side = out.size[0]
+        assert out.format == "PNG" and out.mode == "RGBA" and out.size == (side, side) and 800 < side <= 2048
         alpha = np.asarray(out.getchannel("A"))
     left, top, right, bottom = Image.fromarray(alpha).getbbox()
-    assert bottom - top == 704 and abs((top + bottom) - 800) <= 1
+    assert bottom - top == int(side * 0.88) and abs((top + bottom) - side) <= 1
     assert alpha[: top].max() == 0 and alpha[bottom:].max() == 0                 # nothing below the product: no shadow
     assert result.finish["background"] == "transparent" and result.finish["halo"] <= cf.HALO_MAX
     assert result.quality_flags == []
@@ -427,9 +429,10 @@ def test_the_transparent_master_is_uploaded_unchanged(monkeypatch, rgba_png):
     with Image.open(io.BytesIO(sent)) as img:
         assert img.mode == "RGBA" and img.getchannel("A").getextrema() == (0, 255)
     url = result.url
-    assert re.search(r"/image/upload/q_auto,f_auto/v\d+/products/dairy/[0-9a-f]{32}$", url), url
-    for part in ("b_", "f_jpg", "f_png", "fl_", "c_pad", "e_"):
-        assert part not in url.split("/image/upload/")[1].split("/")[0]       # f_auto alone: alpha-capable formats
+    # WebP keeps the alpha for every native client (f_auto answered okhttp / CFNetwork / Dart with a JPEG), width capped
+    assert re.search(r"/image/upload/c_limit,w_1200,f_webp,q_auto/v\d+/products/dairy/[0-9a-f]{32}$", url), url
+    for part in ("b_", "f_jpg", "f_png", "f_auto", "fl_", "c_pad", "e_"):
+        assert part not in url.split("/image/upload/")[1].split("/")[0]
 
 
 def test_the_upload_is_verified_against_the_transparent_bytes(monkeypatch, rgba_png):
@@ -450,10 +453,22 @@ def test_a_fully_transparent_file_is_not_uploaded(monkeypatch, tmp_path):
 def test_the_white_version_is_the_same_asset_on_white_as_jpeg():
     url = cloudinary_storage.delivery_url("products/dairy/abc", 1700000000)
     white = cloudinary_storage.white_version_url(url)
-    assert white == url.replace("/image/upload/q_auto,f_auto/", "/image/upload/b_white,q_auto,f_jpg/")
+    assert white == url.replace("/image/upload/c_limit,w_1200,f_webp,q_auto/",
+                                "/image/upload/b_white,c_limit,w_1200,f_jpg,q_auto/")
     assert cloudinary_storage.white_version_url("needs_review:" + url) == white
     assert cloudinary_storage.white_version_url("https://example.com/x.png") is None
     assert cloudinary_storage.white_version_url(None) is None
+
+
+def test_the_white_version_of_an_old_link_is_capped_too():
+    old = "https://res.cloudinary.com/demo/image/upload/q_auto,f_auto/v1700000000/products/dairy/abc"
+    white = "https://res.cloudinary.com/demo/image/upload/b_white,c_limit,w_1200,f_jpg,q_auto/v1700000000/products/dairy/abc"
+    assert cloudinary_storage.white_version_url(old) == white
+    assert cloudinary_storage.white_version_url("needs_review:" + old) == white
+    # a white link, a foreign transformation or a bare upload path is not a delivery link we know
+    assert cloudinary_storage.white_version_url(white) is None
+    assert cloudinary_storage.white_version_url(old.replace("q_auto,f_auto", "w_300")) is None
+    assert cloudinary_storage.white_version_url(old.replace("q_auto,f_auto/", "")) is None
 
 
 def test_the_approval_result_carries_the_white_url():
@@ -505,7 +520,8 @@ def test_publish_image_returns_the_white_url(monkeypatch, tmp_path):
     monkeypatch.setattr(main.local_cache_db, "sku_publish_lock", lambda key: Lock())
     out = main.publish_image(src, "Almarai Milk 1L", "Almarai", 2, None, 5, sku_key="k")
     assert out["status"] == "published" and uploaded == ["RGBA"]
-    assert out["white_url"] == "https://res.cloudinary.com/demo/image/upload/b_white,q_auto,f_jpg/v1/products/abc"
+    # an old-form link (q_auto,f_auto) still gets its white version, capped like the new one
+    assert out["white_url"] == "https://res.cloudinary.com/demo/image/upload/b_white,c_limit,w_1200,f_jpg,q_auto/v1/products/abc"
     assert out["profile"]["background"] == "transparent" and out["finish"]["background"] == "transparent"
 
 
@@ -630,3 +646,60 @@ out.blockedClick = stage().getAttribute('class');
     assert out["light"][1] == "light" and out["noRequests"] is True
     assert "rv-theme--light" in out["reopened"]                                 # remembered
     assert "rv-theme--dark" in out["blocked"] and "rv-theme--checker" in out["blockedClick"]   # storage blocked: still works
+
+
+# ---------------------------------------------------------------------------
+# Adaptive master resolution: side = clamp(round(product long side / fill), OUTPUT_CANVAS_SIZE, OUTPUT_CANVAS_MAX)
+# ---------------------------------------------------------------------------
+
+def _canvas_of(monkeypatch, tmp_path, w, h, name="src.png"):
+    src = bottle_source(tmp_path / name, w, h)
+    install_photoroom(monkeypatch, clean_segmenter())
+    result = image_processor.process_product_image_result(src, "Almarai Milk 1L", "Almarai", 800, 800,
+                                                          bg_method="photoroom")
+    with Image.open(result.path) as out:
+        out.load()
+        arr = np.asarray(out).copy()
+    image_processor.cleanup_processed_image(result.path)
+    return result, arr
+
+
+def test_a_small_source_gets_exactly_the_canvas_it_got_before(monkeypatch, tmp_path):
+    adaptive, arr = _canvas_of(monkeypatch, tmp_path, 300, 600)          # product 540 px tall: below 800 * 0.88
+    monkeypatch.setattr(config, "OUTPUT_CANVAS_MAX", 800, raising=False)  # the fixed canvas of before
+    fixed, before = _canvas_of(monkeypatch, tmp_path, 300, 600, "again.png")
+    assert (adaptive.width, adaptive.height) == (fixed.width, fixed.height) == (800, 800)
+    assert np.array_equal(arr, before) and adaptive.quality_flags == fixed.quality_flags
+
+
+def test_a_detailed_source_keeps_its_pixels_up_to_the_cap(monkeypatch, tmp_path):
+    result, arr = _canvas_of(monkeypatch, tmp_path, 700, 1400)           # product 1260 px tall
+    alpha = arr[..., 3]
+    top, bottom = np.nonzero(alpha.max(axis=1))[0][[0, -1]]
+    side = result.width
+    assert result.height == side and abs(side - round((bottom - top + 1) / 0.88)) <= 2
+    assert abs((bottom - top + 1) - 1260) <= 2                          # the product is not scaled down to 704 px
+    assert result.isolated and result.quality_flags == []
+
+    capped, _ = _canvas_of(monkeypatch, tmp_path, 1500, 2800, "huge.png")   # product 2520 px: 2864 > 2048
+    assert (capped.width, capped.height) == (2048, 2048)
+
+
+def test_the_cap_setting_turns_the_adaptive_canvas_off(monkeypatch, tmp_path):
+    from catalog_match import settings
+
+    monkeypatch.setattr(config, "OUTPUT_CANVAS_MAX", 600, raising=False)          # below the 800 minimum
+    assert settings.output_canvas_max() == 800
+    result, _ = _canvas_of(monkeypatch, tmp_path, 700, 1400)
+    assert (result.width, result.height) == (800, 800)
+    monkeypatch.setattr(config, "OUTPUT_CANVAS_MAX", 9000, raising=False)
+    assert settings.output_canvas_max() == 4000
+    monkeypatch.setattr(config, "OUTPUT_CANVAS_MAX", "junk", raising=False)
+    assert settings.output_canvas_max() == 2048
+
+
+def test_an_explicit_non_square_canvas_is_not_adapted():
+    cut = Image.new("RGBA", (300, 1500), (10, 20, 30, 255))
+    assert image_processor._adaptive_canvas(cut, (800, 600), 0.88) == (800, 600)
+    assert image_processor._adaptive_canvas(cut, (800, 800), 0.88) == (1705, 1705)
+    assert image_processor._adaptive_canvas(Image.new("RGBA", (50, 50)), (800, 800), 0.88) == (800, 800)

@@ -41,9 +41,11 @@ def test_good_packshots_publish_clean_with_the_expected_paid_calls(tmp_path, set
         if not result.isolated or result.quality_flags or services.paid != expected:
             problems.append((shot.name, result.provider, result.quality_flags, services.names()))
             continue
-        # published as the product itself: centred and filling the 88% box on its long side
+        # published as the product itself: centred and filling the 88% box on its long side (of the adaptive canvas)
         x0, y0, x1, y1 = ps.ink_box(ps.canvas_array(result))
-        if max(x1 - x0, y1 - y0) < 700 or abs((x0 + x1) / 2 - 400) > 2 or abs((y0 + y1) / 2 - 400) > 2:
+        side = result.width
+        if (result.height != side or side < 800 or max(x1 - x0, y1 - y0) < side * 0.875
+                or abs((x0 + x1) / 2 - side / 2) > 2 or abs((y0 + y1) / 2 - side / 2) > 2):
             problems.append((shot.name, "canvas", (x0, y0, x1, y1)))
     assert problems == []
 
@@ -61,7 +63,7 @@ def test_damaged_packshots_are_flagged(tmp_path, name):
         # the crop attempt was flagged, so the full frame was tried and the whole product published
         assert [size for _name, size, _rect in services.calls][-1] == shot.size and services.paid == 2
         assert result.isolated is True
-        whole = ps.ink_box(np.asarray(ip.compose_on_white_canvas(shot.product, (800, 800))))
+        whole = ps.ink_box(np.asarray(ip.compose_on_white_canvas(shot.product, (result.width, result.height))))
         assert ps.ink_box(ps.canvas_array(result)) == whole
 
 

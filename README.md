@@ -90,9 +90,11 @@ The dashboard shows every candidate's `status`, `reasons` and `evidence`, and wh
 
 ## Publishing
 
-`image_processor.process_product_image_result()` returns `ProcessResult(path, isolated, provider, error, width, height)`. The published file is always an opaque white RGB PNG, 800×800 by default (`OUTPUT_CANVAS_SIZE`), with the product filling 88% of it. The image is turned upright from its EXIF data and is never cropped square or upscaled.
+`image_processor.process_product_image_result()` returns `ProcessResult(path, isolated, provider, error, width, height)`. The published file is a square PNG with the product filling 88% of it (`OUTPUT_PRODUCT_FILL`). Its side follows the product's own pixels: round(product long side / 0.88), at least `OUTPUT_CANVAS_SIZE` (800 by default, the Settings page's size) and at most `OUTPUT_CANVAS_MAX` (2048 by default; set it to the minimum for a fixed canvas). A small source gets exactly the 800 px canvas it got before; a detailed one keeps its detail for a 3x phone screen (~1170 px wide). The quality gate still judges the cutout at the minimum size, so its flags do not change. The image is turned upright from its EXIF data and is never cropped square or upscaled.
 
-If background removal fails, the result is `isolated=False`. The raw photo is never published as if it were clean: the link is written as `needs_review:<url>` and is not cached as verified. Cloudinary delivers the canvas with `q_auto,f_auto` only.
+If background removal fails, the result is `isolated=False`. The raw photo is never published as if it were clean: nothing is uploaded, the image cell keeps its previous value (the app reads that cell directly, so it only ever holds a clean link) and the row waits for review in the queue with its candidates. A cell that still holds an old `needs_review:<url>` value reads as a pending review; approving or rejecting it writes a clean link or empties it.
+
+Cloudinary delivers the canvas with `c_limit,w_1200,f_webp,q_auto` only: WebP keeps the transparency for native app clients (with `f_auto` the Android, iOS and Dart HTTP clients were sent a JPEG without alpha, a white box in dark mode), and the width is capped at 1200 px. The opaque white version of the same asset is `b_white,c_limit,w_1200,f_jpg,q_auto`. Older `q_auto,f_auto` links keep working and count as the same image; `python scripts/migrate_delivery_urls.py` rewrites the ones already in the sheet (dry run by default, `--apply` queues the writes).
 
 ## Google Sheets
 

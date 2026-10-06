@@ -34,7 +34,12 @@ DEFAULTS = {
     "AUTO_PUBLISH_STRICT_LANE": False,
     "CANDIDATE_STORE_DIR": os.path.join("temp", "candidates"),
     "PROXY_URL": "",
+    # the canvas side is adaptive (image_processor._adaptive_canvas): round(product long side / fill) clamped to
+    # [OUTPUT_CANVAS_SIZE, OUTPUT_CANVAS_MAX], so a detailed source keeps its pixels for a 3x phone screen
+    # (~1170 px) and a small source gets exactly the canvas it got before. OUTPUT_CANVAS_MAX <= OUTPUT_CANVAS_SIZE
+    # turns it off (a fixed canvas).
     "OUTPUT_CANVAS_SIZE": 800,
+    "OUTPUT_CANVAS_MAX": 2048,
     # image_processor: when a cloud isolation method fails on credit / key / quota, 'local' isolates with rembg
     "BG_FALLBACK": "local",
     # the rembg model of that fallback: BiRefNet keeps white packaging that u2net / isnet eat
@@ -44,6 +49,9 @@ DEFAULTS = {
     # side fills on the transparent canvas (the white canvas keeps edge_shadow_engine.CANVAS_FILL_RATIO).
     "OUTPUT_BACKGROUND": "transparent",
     "OUTPUT_PRODUCT_FILL": "0.88",
+    # PhotoRoom's x-uncertainty-score header (0 = confident, 1 = unsure): above this the cutout gets the review flag
+    # 'photoroom_unsure' (image_processor); no paid retry
+    "PHOTOROOM_UNCERTAINTY_MAX": "0.5",
 }
 REMBG_MODELS = ("birefnet-general", "birefnet-general-lite")
 OUTPUT_BACKGROUNDS = ("transparent", "white")
@@ -154,6 +162,25 @@ def proxy_url() -> str:
 def output_canvas_size() -> int:
     size = get("OUTPUT_CANVAS_SIZE")
     return size if size and size > 0 else DEFAULTS["OUTPUT_CANVAS_SIZE"]
+
+
+def output_canvas_max() -> int:
+    """The largest adaptive canvas side: OUTPUT_CANVAS_MAX (default 2048), at least output_canvas_size(), at most 4000."""
+    value = get("OUTPUT_CANVAS_MAX")
+    if not value or value <= 0:
+        value = DEFAULTS["OUTPUT_CANVAS_MAX"]
+    return max(output_canvas_size(), min(4000, int(value)))
+
+
+def photoroom_uncertainty_max() -> float:
+    """PHOTOROOM_UNCERTAINTY_MAX clamped to 0..1 (default 0.5); an unreadable value reads as the default."""
+    try:
+        value = float(str(get("PHOTOROOM_UNCERTAINTY_MAX")).strip())
+    except (TypeError, ValueError):
+        value = float(DEFAULTS["PHOTOROOM_UNCERTAINTY_MAX"])
+    if value != value:  # NaN
+        value = float(DEFAULTS["PHOTOROOM_UNCERTAINTY_MAX"])
+    return max(0.0, min(1.0, value))
 
 
 def bg_fallback() -> str:

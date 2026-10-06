@@ -1786,3 +1786,35 @@ def normalize_category_path(l1_en, l2_en, l3_en):
         "category_l3_en": matched_l3,
         "category_l3_ar": matched_l3_ar
     }
+
+
+# ---------------------------------------------------------------------------
+# عبوات شفافة أو زجاج: سد الثقوب (cutout_finish) بيحوّل الجزء الشفاف من العبوة لبلاطة رمادية معتمة، فما بيصير لها
+# ---------------------------------------------------------------------------
+
+import re as _re
+
+# أسماء تصنيفات كاملة (بأي مستوى، إنكليزي أو عربي): المي والزجاج والزجاجات والمرطبانات الزجاجية
+CLEAR_PACKAGING_NAMES = frozenset({
+    "glass", "bottles", "glass jars", "feed bottles", "water", "sparkling water", "flavored water",
+    "زجاج", "زجاجات", "مرطبانات زجاجية", "زجاجات الرضاعة", "ماء", "مياه", "مياه غازية", "مياه بنكهة",
+})
+# كلمات بأي تصنيف (كلمة كاملة بالإنكليزي): زجاج أو زجاجة أو مرطبان أو شفاف
+_CLEAR_WORDS_RE = _re.compile(r"\b(glass|glasses|bottle|bottles|bottled|jar|jars|clear|transparent)\b", _re.I)
+_CLEAR_AR = ("زجاج", "مرطبان", "شفاف")
+_SPLIT_RE = _re.compile(r"\s*(?:>|›|/|\||,|;|،)\s*")
+
+
+def is_clear_packaging(*texts) -> bool:
+    """
+    هل تصنيف المنتج (نصوص الشيت: category و sub_category و sub_sub_category، أو مسار L1/L2/L3) عبوة شفافة أو زجاج؟
+    اسم تصنيف كامل من CLEAR_PACKAGING_NAMES، أو كلمة زجاج / زجاجة / مرطبان / شفاف. لا تصنيف: لا.
+    """
+    for text in texts:
+        for part in _SPLIT_RE.split(str(text or "").strip()):
+            name = " ".join(part.lower().split())
+            if not name:
+                continue
+            if name in CLEAR_PACKAGING_NAMES or _CLEAR_WORDS_RE.search(name) or any(w in name for w in _CLEAR_AR):
+                return True
+    return False

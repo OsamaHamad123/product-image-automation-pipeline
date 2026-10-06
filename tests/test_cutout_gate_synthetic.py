@@ -384,7 +384,8 @@ def test_photoroom_crop_true_costs_one_call(work, kind):
 
     assert services.names() == ["photoroom"]
     assert (result.isolated, result.provider, result.quality_flags) == (True, "photoroom", [])
-    expected = np.asarray(ip.compose_on_white_canvas(shot.product, (800, 800)))
+    # the canvas side follows the product's pixels (adaptive, 800 at least): compare at the canvas published
+    expected = np.asarray(ip.compose_on_white_canvas(shot.product, (result.width, result.height)))
     assert ps.ink_box(ps.canvas_array(result)) == ps.ink_box(expected)
 
 
@@ -418,7 +419,7 @@ def test_white_source_refuses_shadows_reflections_and_white_parts(work, name):
     result, services = run(shot, work, white_mode="on")
     assert result.white_source == f"ineligible:{reason}"
     assert (result.isolated, result.provider, result.quality_flags) == (True, "photoroom", [])
-    expected = np.asarray(ip.compose_on_white_canvas(shot.product, (800, 800)))
+    expected = np.asarray(ip.compose_on_white_canvas(shot.product, (result.width, result.height)))
     assert _near(ps.ink_box(ps.canvas_array(result)), ps.ink_box(expected))
 
 
@@ -433,7 +434,7 @@ def test_white_source_keeps_clean_packshots_free(work, name):
     assert (result.isolated, result.provider, result.white_source, result.quality_flags) == \
         (True, "white_source", "used", [])
     assert services.paid == 0 and services.box_calls == 0
-    expected = np.asarray(ip.compose_on_white_canvas(shot.product, (800, 800)))
+    expected = np.asarray(ip.compose_on_white_canvas(shot.product, (result.width, result.height)))
     assert _near(ps.ink_box(ps.canvas_array(result)), ps.ink_box(expected))
 
 

@@ -1435,8 +1435,13 @@ def update_image_link(worksheet, row_number, link_column_index, image_link, barc
     إلى الصف الوحيد المطابق للمنتج).
     العمود يُحمل كمفتاح منطقي 'link' ويُحدد من العناوين وقت الكتابة: إدراج عمود أو حذفه يسار عمود الرابط أثناء
     التشغيل لا يغيّر العمود المكتوب. link_column_index يبقى للتوافق مع المستدعين ولا يحدد العمود.
+    رابط تسليم Cloudinary إلنا بالتحويل القديم (q_auto,f_auto: اعتماد محفوظ قبل f_webp، يكتبه relink أو الصفوف المكررة)
+    بينكتب بالتحويل الجديد لنفس الأصل (delivery_urls.migrated_delivery_url): التطبيق ما بياخد JPEG بلا شفافية.
     الأخطاء المؤقتة و APIError تُرفع كي يعمل مُزخرف إعادة المحاولة.
     """
+    from delivery_urls import migrated_delivery_url
+
+    image_link = migrated_delivery_url(image_link) or image_link
     expect = _expectation(barcode, product_name, size, brand)
     try:
         if _redis_write_behind(row_number, {LINK_KEY: image_link}, expect):
@@ -1466,6 +1471,22 @@ def update_image_link(worksheet, row_number, link_column_index, image_link, barc
             raise
         logger.error("فشل تحديث الرابط في الصف %s: %s", row_number, e)
         return False
+
+
+def queue_link_writes(items):
+    """
+    يجدول كتابة رابط صورة لكل صف في طابور MariaDB (outbox) مباشرة، بلا Redis وبلا كتابة مباشرة في الشيت (ترحيل روابط
+    التسليم: scripts/migrate_delivery_urls.py): items [{row_number, value, barcode, product_name, size, brand}]؛ الهوية
+    كما في الشيت، والتفريغ يتخطى الصف الذي تغيّر منتجه (CONFLICT) أو كتابة أقدم من كتابة أحدث لنفس الخلية. يعيد
+    {row: معرّف}.
+    """
+    queue = _queue or SQLiteTransactionQueue()
+    out = {}
+    for item in items or ():
+        expect = _expectation(item.get("barcode"), item.get("product_name"), item.get("size"), item.get("brand"))
+        out[int(item["row_number"])] = queue.append_update(int(item["row_number"]), None, str(item["value"]),
+                                                           col_key=LINK_KEY, **_outbox_keys(expect))
+    return out
 
 
 def queue_barcode_writes(items):

@@ -53,12 +53,16 @@ def _close(conn):
 
 
 def url_norm(url):
-    """الصيغة المقارنة لرابط الصورة (المضيف + المسار، بدون www والاستعلام)."""
+    """
+    الصيغة المقارنة لرابط الصورة (المضيف + المسار، بدون www والاستعلام). رابط تسليم Cloudinary إلنا بالتحويل القديم
+    (q_auto,f_auto) أو الجديد هو نفس الصورة: بيتقارن بالتحويل الجديد (delivery_urls.canonical_delivery_url).
+    """
     if not url:
         return ""
     try:
         from catalog_match.text_norm import url_key
-        return url_key(url)[:768]
+        from delivery_urls import canonical_delivery_url
+        return url_key(canonical_delivery_url(url) or url)[:768]
     except Exception:
         return str(url).strip().lower()[:768]
 
@@ -918,10 +922,14 @@ def find_image_owners(cloudinary_url=None, phash=None, sku_key=None, product_nam
     (human_approved / auto_verified). «منتج آخر» = sku_key مختلف؛ سجل قديم بلا sku_key يُعد منتجاً آخر إذا اختلف
     اسمه. تعيد [{sku_key, product_name, brand, cloudinary_url, verification_status, match, distance}] (منتج واحد
     لكل مالك، الأقرب أولاً)، أو None عند خطأ قاعدة البيانات (النشر التلقائي يعامله كتكرار).
+    رابط التسليم بالتحويل القديم (q_auto,f_auto) أو الجديد لنفس الأصل نفس الصورة (delivery_urls.delivery_variants).
     """
+    from delivery_urls import delivery_variants
+
     url = str(cloudinary_url or "").strip()
+    urls = delivery_variants(url)
     target = _phash_int(phash)
-    if not url and target is None:
+    if not urls and target is None:
         return []
     sku = str(sku_key or "").strip()
     name = " ".join(str(product_name or "").lower().split())
@@ -931,9 +939,9 @@ def find_image_owners(cloudinary_url=None, phash=None, sku_key=None, product_nam
             cursor = conn.cursor()
             cursor.execute(
                 "SELECT sku_key, product_name, brand, cloudinary_url, perceptual_hash, verification_status, "
-                f"color_signature FROM resolved_products WHERE {_SERVABLE_SQL} AND (cloudinary_url = %s "
-                "OR (perceptual_hash IS NOT NULL AND perceptual_hash <> ''))",
-                (url,),
+                f"color_signature FROM resolved_products WHERE {_SERVABLE_SQL} AND (cloudinary_url IN "
+                f"({','.join(['%s'] * max(1, len(urls)))}) OR (perceptual_hash IS NOT NULL AND perceptual_hash <> ''))",
+                tuple(urls or [""]),
             )
             rows = cursor.fetchall()
         finally:
@@ -951,7 +959,7 @@ def find_image_owners(cloudinary_url=None, phash=None, sku_key=None, product_nam
         elif owner_name == name:
             continue
         match, distance = None, None
-        if url and str(r.get("cloudinary_url") or "").strip() == url:
+        if urls and str(r.get("cloudinary_url") or "").strip() in urls:
             match, distance = "url", 0
         else:
             other = _phash_int(r.get("perceptual_hash"))
@@ -2441,10 +2449,11 @@ _CANDIDATES_LEFT_SQL = (
     "AND c.`row_number` = q.`row_number`)) AND COALESCE(c.status, '') NOT IN ('excluded', 'rejected'))")
 
 
-def has_review_candidates(row_number, sku_key=None):
+def has_review_candidates(row_number, sku_key=None, on_error=True):
     """
     هل بقي للمنتج مرشح أمام المراجع (غير مستبعد)؟ إعادة تحقق لم تجد شيئاً تعيد الصف للمراجعة فقط عندها؛ بدونها
-    يكون صفاً فارغاً في المراجعة. خطأ القراءة يُسجل ويعيد True (السلوك السابق: يعود للمراجعة ولا يُسجل فشلاً).
+    يكون صفاً فارغاً في المراجعة. خطأ القراءة يُسجل ويعيد on_error (افتراضياً True، السلوك السابق: يعود للمراجعة ولا
+    يُسجل فشلاً).
     """
     clause, params = _row_or_sku_clause(row_number, sku_key)
     try:
@@ -2459,7 +2468,7 @@ def has_review_candidates(row_number, sku_key=None):
         return int(row.get("n") or 0) > 0
     except Exception as e:
         logger.warning("[Curation] تعذر عدّ مرشحات الصف %s: %s", row_number, e)
-        return True
+        return on_error
 
 
 def _park_rechecks(cursor):

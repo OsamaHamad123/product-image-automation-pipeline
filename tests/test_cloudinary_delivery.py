@@ -94,8 +94,8 @@ def test_upload_uses_timeout_slug_folder_and_plain_delivery(uploader, canvas_png
     assert "background_removal" not in options
     assert options["tags"] == ["Juice"]
 
-    assert url.startswith("https://res.cloudinary.com/demo/image/upload/")
-    assert "q_auto" in url and "f_auto" in url
+    assert url.startswith("https://res.cloudinary.com/demo/image/upload/c_limit,w_1200,f_webp,q_auto/")
+    assert "f_auto" not in url          # f_auto gives native apps a JPEG without alpha
     for part in FORBIDDEN_DELIVERY_PARTS:
         assert part not in url, f"{part} must not be in the delivery URL: {url}"
     # the caller's (legacy) file-derived target size no longer shapes the output

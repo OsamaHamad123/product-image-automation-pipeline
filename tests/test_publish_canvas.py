@@ -262,7 +262,7 @@ def test_no_square_crop_with_method_none(monkeypatch, tmp_path):
     assert result.provider == "none"
     assert result.error is None
     out, _ = open_output(result)
-    assert out.size == (800, 800)
+    assert out.size == (1364, 1364)          # adaptive: the 1200 px tall photo / 0.88, never cropped square
     assert colour_count(out, RED) > 500
     assert colour_count(out, GREEN) > 500
 

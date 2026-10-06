@@ -711,6 +711,15 @@ def _bare_link(value):
     return text
 
 
+def _same_image(value):
+    """
+    الرابط بصيغة المقارنة: بلا بادئة needs_review:، ورابط تسليم Cloudinary إلنا بالتحويل الجديد (القديم q_auto,f_auto
+    نفس الصورة: الشيت بعد scripts/migrate_delivery_urls.py والاعتماد المحفوظ قبله، delivery_urls.canonical_delivery_url).
+    """
+    from delivery_urls import canonical_delivery_url
+    return canonical_delivery_url(_bare_link(value))
+
+
 def _row_of(task):
     try:
         return int((task or {}).get("row_number"))
@@ -908,10 +917,10 @@ def _rejected_refusal(params, sku_key, row_number, product_name, image_url, scop
 
 def _shows(shown, approval):
     """هل الصورة المعتمدة التي عرضتها الصفحة (shown، بلا بادئة needs_review:) هي هذا الاعتماد؟"""
-    links = {_bare_link(approval.get("cloudinary_url")), _bare_link(approval.get("original_url"))}
+    links = {_same_image(approval.get("cloudinary_url")), _same_image(approval.get("original_url"))}
     if not _bare_link(approval.get("cloudinary_url")):
         links.add("")       # اعتماد بلا رابط Cloudinary: current.approved_url كان null
-    return shown in links
+    return _same_image(shown) in links
 
 
 def _stale_refusal(params, sku_key, row_number, product_name, image_url=None, scope=None):
@@ -977,7 +986,7 @@ def _human_decision(barcode, product_name, brand, original_url, approved_by, sku
     """
     def record(res):
         if res.get("status") != "published":
-            return      # رابط needs_review: ليس اعتماداً: لا يُسجل اعتماد بشري ولا يكتمل الصف (الشيت وقاعدة البيانات متفقان)
+            return      # نتيجة غير منشورة ليست اعتماداً: لا يُسجل اعتماد بشري ولا يكتمل الصف (الشيت وقاعدة البيانات متفقان)
         local_cache_db.save_product_resolution(
             barcode, product_name, brand, original_url, res["link"], None, res.get("metadata"),
             perceptual_hash=res.get("phash"), verification_status="human_approved", approved_by=approved_by,
@@ -1163,7 +1172,7 @@ def _sheet_outcome(rows, since_id=None, value=None):
 
 def _published_response(res, sku_key, row_number, **extra):
     """
-    استجابة الاعتماد / الرفع الناجح. warnings: background_not_removed (كُتب needs_review:)، quality_flags (نُشرت
+    استجابة الاعتماد / الرفع الناجح. warnings: background_not_removed (خلية needs_review: قديمة)، quality_flags (نُشرت
     رغم علامات العرض بعد تأكيد المراجع، published_anyway)، و duplicate_image (نفس الصورة منشورة لمنتج آخر،
     duplicate_of يسمّيه؛ الاعتماد الصريح يُكتب مع ذلك). warning: أول تحذير. quality_flags / quality_notes: فحص القص.
     bg_skipped: انتشرت بدون عزل الخلفية لأن المالك أوقفه بالإعدادات (main.publish_image)؛ ليس تحذيراً، فالرابط نظيف.
@@ -1187,7 +1196,7 @@ def _published_response(res, sku_key, row_number, **extra):
     if res.get("bg_fallback"):
         response['bg_fallback'] = dict(res["bg_fallback"])   # «انعزلت الخلفية بطريقة محلية لأن رصيد المزوّد خلص»
     if res.get("white_url"):
-        response['white_url'] = res["white_url"]   # النسخة البيضا من نفس الأصل (b_white,f_jpg)
+        response['white_url'] = res["white_url"]   # النسخة البيضا من نفس الأصل (b_white,...,f_jpg)
     warnings = []
     if str(res.get("sheet_value") or "").startswith("needs_review:"):
         warnings.append('background_not_removed')
@@ -1239,6 +1248,7 @@ def action_select_image(params):
             barcode=barcode, candidate_sha256=_candidate_sha(params, row_number, sku_key, image_url, identity),
             page_url=_candidate_page(params, row_number, sku_key, image_url, identity),
             category_override={k: _text(params, k) for k in ('category_l1_en', 'category_l2_en', 'category_l3_en')},
+            category_hint=(_text(params, 'category'), _text(params, 'sub_category')),
             key_size=_text(params, 'size') or None, key_brand=brand or None, sku_key=sku_key,
             also_rows=_other_rows(sku_key, row_number, tasks),
             before_write=_reviewer_check(params, sku_key, row_number, product_name, image_url, guard, rows, scope),
@@ -1312,6 +1322,7 @@ def action_upload_manual_image(params):
         res = pipeline.publish_image(
             file_path, product_name, brand, row_number, worksheet, link_column_index, barcode=barcode,
             category_override={k: _text(params, k) for k in ('category_l1_en', 'category_l2_en', 'category_l3_en')},
+            category_hint=(_text(params, 'category'), _text(params, 'sub_category')),
             key_size=_text(params, 'size') or None, key_brand=brand or None, sku_key=sku_key,
             also_rows=_other_rows(sku_key, row_number, tasks),
             before_write=_reviewer_check(params, sku_key, row_number, product_name, None, guard, rows, scope),
@@ -1389,10 +1400,13 @@ def _candidate_phash(row_number, image_url, params=None, sku_key=None, identity=
 
 
 def _cell_holds(value, images):
-    """هل تحمل قيمة الخلية (مع بادئة needs_review: أو بدونها) إحدى صور images (رابط واحد أو مجموعة)؟"""
-    value = _bare_link(value)
+    """
+    هل تحمل قيمة الخلية (مع بادئة needs_review: أو بدونها) إحدى صور images (رابط واحد أو مجموعة)؟ رابط التسليم القديم
+    والجديد لنفس الأصل نفس الصورة (_same_image).
+    """
+    value = _same_image(value)
     images = {images} if isinstance(images, str) else set(images or ())
-    return bool(value) and value in images
+    return bool(value) and value in {_same_image(i) for i in images}
 
 
 def _approval_matches(approval, image_url, phash):

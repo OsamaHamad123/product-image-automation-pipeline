@@ -146,6 +146,7 @@ def test_install_dry_run_default_plan():
 def test_install_dry_run_birefnet_variants():
     cpu = run_install("--dry-run", str(REPO), "--with-birefnet").stdout
     assert "rembg\\[cpu\\]" in cpu and "birefnet-general" in cpu and "birefnet-general-lite" not in cpu
+    assert "rembg\\[cpu\\]==2.0.85" in cpu          # pinned: remove(decontaminate=True) needs rembg 2.0.79+
     assert "U2NET_HOME=/var/lib/laqta/models" in cpu
     lite = run_install("--dry-run", str(REPO), "--with-birefnet", "--lite").stdout
     assert "birefnet-general-lite" in lite
