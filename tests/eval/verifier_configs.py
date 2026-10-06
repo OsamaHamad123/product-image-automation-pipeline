@@ -82,7 +82,9 @@ def readings_for(cassette: Mapping[str, Any], model: str) -> Dict[str, Dict[str,
 class RecordedReader:
     """A reader (catalog_match.models.Verifier) answering from one model's recorded readings, through the same
     code decision (verify.make_verdict) a live answer gets. Each call carries the usage entry a live call of that
-    model would bill (tokens estimated from the image count), so the cascade prices it like a live one."""
+    model would bill for every image it was asked about (tokens estimated from the image count, recorded or not),
+    so the cascade prices it like a live one. live: a real reader of the same model that reads the images with no
+    recorded answer (one call per batch, merged back in place, billed with its own usage)."""
 
     def __init__(self, model_id: str, readings: Mapping[str, Any], sku: Mapping[str, Any], scenario: str = "normal",
                  long_side: Optional[int] = None, live: Any = None):
@@ -126,10 +128,12 @@ class RecordedReader:
             else:
                 verdicts[i] = make_verdict(spec, i, entry)
         usage: List[Dict[str, Any]] = []
-        recorded = len(images) - len(missing)
-        if recorded:
-            tokens_in, tokens_out = pricing.estimate_tokens(self.provider, recorded, "", self.long_side, self.model)
-            usage.append({"provider": self.provider, "model": self.model, "images": recorded,
+        # what a live call of this model would bill for the images it is asked about (an unrecorded one too: the
+        # config's cost must not look lower because its answers were not recorded); a live call bills its own
+        priced = len(images) - (len(missing) if self.live is not None else 0)
+        if priced:
+            tokens_in, tokens_out = pricing.estimate_tokens(self.provider, priced, "", self.long_side, self.model)
+            usage.append({"provider": self.provider, "model": self.model, "images": priced,
                           "input_tokens": tokens_in, "output_tokens": tokens_out, "estimated": True})
         if missing and self.live is not None:
             # the images nobody recorded an answer for: one real call of the same model, merged back in place
