@@ -13,8 +13,11 @@ Steps
                   query. A spelling an earlier row of the run proved for the sheet brand
                   writes the planned queries from Q1 (brand_discovery.planned_hint).
                   The query normaliser (catalog_match.normalizer, QUERY_NORMALIZER) reads an
-                  abbreviated sheet name first, for the queries only: N1 takes Q3's place.
-                  Scoring, verification and routing never see the reading.
+                  abbreviated sheet name first, for the queries only: N1 takes Q3's place, and
+                  when the sheet brand is unknown or no listing names it (and no store spelling
+                  was discovered) its brand guess is tried once (NB) in the place of the last
+                  relaxation; such a search's pick goes to review. Scoring, verification and
+                  routing never see the reading.
     2. score      every pooled candidate with score.score_candidate.
     3. relax      R1/R2 into the same pool, only when no candidate is tier 1 or 2
                   and there is no custom query (relaxed winners are capped at review).
@@ -337,6 +340,20 @@ def find_product_image(spec: Union[SkuSpec, Mapping[str, Any]], *, providers: Op
         if extra is not None:
             retrieval = retriever.run_extra(extra)
             found = brand_discovery.find(spec, retrieval.pool)
+    # 1c. brand-not-found rescue (catalog_match.normalizer): no brand in the sheet, or no listing names it and no store
+    #     spelling was discovered: the normaliser's brand guess is tried once (NB) in the place of the last relaxation.
+    #     Its listings are scored against the sheet row like any other; brand discovery may prove a store spelling
+    #     from them, and the pick of this search goes to review (mark_rescued below).
+    rescued = False
+    if found is None and not custom and not retriever.stopped \
+            and normalizer_mod.needs_rescue(spec, hint, retrieval.pool):
+        extra = query_plan.rescue_query(spec, hint, retrieval.queries)
+        if extra is not None:
+            sent = len(retrieval.queries)
+            retrieval = retriever.run_extra(extra)
+            rescued = len(retrieval.queries) > sent
+            if rescued:
+                found = brand_discovery.find(spec, retrieval.pool)
     if found is not None:
         spec = brand_discovery.apply(spec, found)
         retriever.spec = spec
@@ -353,6 +370,10 @@ def find_product_image(spec: Union[SkuSpec, Mapping[str, Any]], *, providers: Op
 
     # 3. relaxations only when the pool has no tier-1/2 candidate
     if not custom and not _has_t1_t2(scored) and not retriever.stopped:
+        if rescued:
+            # the brand-guess query took the last relaxation's place: never more queries than the search had without it
+            retriever.max_queries = min(retriever.max_queries, len(retrieval.queries)
+                                        + max(0, len(query_plan.relaxations(retriever.spec)) - 1))
         retrieval = retriever.relax()
         scored = _score_pool(spec, retrieval.pool, negatives)
     timer.lap("retrieval")
@@ -415,10 +436,13 @@ def find_product_image(spec: Union[SkuSpec, Mapping[str, Any]], *, providers: Op
         if report.store_image_wrong:
             # X0: store pages whose own picture is the picture that failed (catalog_match.expand)
             outcome.reject_counts[expand_mod.STORE_IMAGE_WRONG] = report.store_image_wrong
+    if rescued:
+        normalizer_mod.mark_rescued(outcome)          # the model's brand guess was searched: review, never auto
     if reading is not None:
         n1 = {q.text for q in query_plan.build_queries(plan_spec) if q.query_id == query_plan.NORMALIZED_QUERY_ID}
-        used = [query_plan.NORMALIZED_QUERY_ID] if n1 & set(retrieval.queries) else []
-        outcome.query_normalizer = normalizer_mod.trace_entry(reading, used)
+        used = ([query_plan.NORMALIZED_QUERY_ID] if n1 & set(retrieval.queries) else []) \
+            + ([query_plan.RESCUE_QUERY_ID] if rescued else [])
+        outcome.query_normalizer = normalizer_mod.trace_entry(reading, used, rescued)
     outcome.queries = list(retrieval.queries) + extra_queries
     outcome.timings = timer.result()
     outcome.discovered_brands = list(spec.discovered_brands)
