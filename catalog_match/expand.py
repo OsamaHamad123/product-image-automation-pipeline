@@ -18,7 +18,11 @@ When it runs
       brand found in the name): without a brand nothing can reach tier 1 or 2, so no page or listing the round
       finds could ever be picked, and its paid calls would only be spent (RoundReport.skipped = 'no_brand');
     * never when the caller injected providers or a verifier (tests, the offline eval),
-      unless it also passed an Expansion explicitly (pipeline.find_product_image).
+      unless it also passed an Expansion explicitly (pipeline.find_product_image);
+    * the paid steps X1-X5 (not X0) only where they can find a pick (scope_gate, EXPANSION_SCOPE_GATE, on by
+      default): none for an out-of-scope product (a florist's bouquet, data/expansion_gate.json), one Google
+      Shopping probe for an unmapped brand no listing names on a store or brand site, the rest of the round only
+      when the probe names it (live runs 2026-10-04/05: 9 bouquet and typo-brand rows spent 27 calls, no pick).
 
 The round ('expand') starts with a free step:
     X0  page recovery: the normal flow's listings whose page names the right product (tier
@@ -774,7 +778,8 @@ def _verify_new(inp: RoundInput, everything: List[RankedCandidate],
                 max_calls: int = MAX_VERIFY_CALLS, first_ids: Set[int] = frozenset()) -> List[VerificationResult]:
     """Read the unread usable tier-1/2 images, best first (the candidates in first_ids before the others)."""
     p = _stages()
-    # one copy per picture (retrieve.reader_queue): a near-copy of an image read MATCH or MISMATCH is not read again
+    # one copy per picture first (retrieve.reader_queue): a near-copy waits behind the other pictures, and one of an
+    # image read MATCH is not read at all
     todo = [rc for rc in reader_queue([rc for rc in everything if p._usable(rc)])
             if rc.verdict is None and rc.score.tier in (1, 2) and STORE_IMAGE_WRONG not in rc.reasons]
     if first_ids:

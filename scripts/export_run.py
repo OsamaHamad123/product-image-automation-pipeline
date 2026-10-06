@@ -224,6 +224,9 @@ def describe(c, rank):
                              "found": ev.get("variants_found") or {}},
         "source_class": ev.get("source_class"), "conflicts": ev.get("conflicts") or [],
         "download_error": c.get("download_error"), "phash": c.get("phash") or None,
+        # the same picture under other URLs (retrieve.reader_queue) and the barcode the store wrote in a URL (url_gtin)
+        "same_picture_domains": list(ev.get("same_picture_domains") or []), "copy_of": ev.get("copy_of"),
+        "url_gtin": ev.get("url_gtin"),
         "width": c.get("width"), "height": c.get("height"),
     }
 

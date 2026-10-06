@@ -263,7 +263,9 @@ def test_the_pick_keeps_its_provider_query_and_phash_even_after_its_candidates_a
                         "provider_health": [{"provider": "serper", "status": "ok", "query_id": "Q1"}],
                         "top": [{"url": "https://cdn.x.ae/milk.jpg", "status": "preselected", "domain": "x.ae",
                                  "provider": "serper", "query_id": "Q1", "phash": "0f0f0f0f0f0f0f0f",
-                                 "reasons": ["vlm:MATCH", "auto_publish"], "evidence": {"tier": 1, "size": "match"},
+                                 "reasons": ["vlm:MATCH", "auto_publish"],
+                                 "evidence": {"tier": 1, "size": "match", "url_gtin": "6281007035309",
+                                              "same_picture_domains": ["noon.com", "x.ae"]},
                                  "vlm": {"decision": "MATCH", "brand_match": "yes"}}]}}
     _sql(run_rows, "UPDATE automation_queue SET trace_json = %s WHERE `row_number` = %s", (json.dumps(auto), ROW + 2))
     doc, _hidden = export_run.build_export("run", RUN_ID, mappings=MAPPINGS)
@@ -272,5 +274,7 @@ def test_the_pick_keeps_its_provider_query_and_phash_even_after_its_candidates_a
         ("serper_shopping", "X2", "c3c3a5a55a5a3c3c")
     assert rows[2]["top"] and rows[2]["winner_detail"]["tier"] == 1
     assert (rows[2]["winner_provider"], rows[2]["winner_detail"]["query_id"]) == ("serper", "Q1")
+    assert rows[2]["winner_detail"]["url_gtin"] == "6281007035309"
+    assert rows[2]["winner_detail"]["same_picture_domains"] == ["noon.com", "x.ae"]
     assert doc["summary"]["winner_providers"] == {"serper_shopping": 1, "serper": 1}
     assert doc["summary"]["expansion"]["winners"] == 1          # the shopping pick is the round's

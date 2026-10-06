@@ -12,6 +12,9 @@ Steps
                   catalog index is asked again with it (free), alongside one corrected
                   query. A spelling an earlier row of the run proved for the sheet brand
                   writes the planned queries from Q1 (brand_discovery.planned_hint).
+                  A row without a valid barcode asks the local index for the barcodes
+                  that listings with an agreeing title carry in their own URLs
+                  (url_gtin; free, never evidence by itself).
     2. score      every pooled candidate with score.score_candidate.
     3. relax      R1/R2 into the same pool, only when no candidate is tier 1 or 2
                   and there is no custom query (relaxed winners are capped at review).
@@ -20,8 +23,9 @@ Steps
                   distance 6 of a reviewer negative are dropped from the outcome.
     5. quality    soft assessment; a hard quality failure is 'rejected' but kept so a
                   reviewer can still see it.
-    6. verify     the top 4 usable candidates in one comparative call, one copy per picture (retrieve.reader_queue:
-                  a near-copy, pHash distance <= 6 and alike colours, of a candidate read in its place is not read).
+    6. verify     the top 4 usable candidates in one comparative call, one copy of each picture first
+                  (retrieve.reader_queue: a near-copy, pHash distance <= 6 and alike colours, waits behind the
+                  other pictures and only fills a batch with room; a copy of an image read MATCH is not read).
     7. verify #2  when nothing is MATCH yet and unverified tier-1/2 candidates remain,
                   one more call on the next 4 (never more than 2 calls per SKU).
     8. decide     decide.route() maps everything to a decision.
