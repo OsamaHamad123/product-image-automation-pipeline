@@ -286,8 +286,8 @@ def ping_healthcheck(kind="", url=None, get=None):
     label = kind or "success"
     try:
         if url is None:
-            from catalog_match import settings
-            url = settings.healthcheck_url()
+            from catalog_match import settings as cm_settings
+            url = cm_settings.healthcheck_url()
         if not url:
             return False
         if get is None:
@@ -317,11 +317,11 @@ def prune_storage(seconds_left=None, prune=None):
     stopped, or it failed). Never raises.
     """
     try:
-        from catalog_match import settings
-        if not settings.nightly_prune_enabled():
+        from catalog_match import settings as cm_settings
+        if not cm_settings.nightly_prune_enabled():
             say("storage cleanup: off (NIGHTLY_PRUNE_ENABLED)")
             return None
-        cap = float(settings.prune_max_seconds())
+        cap = float(cm_settings.prune_max_seconds())
         if seconds_left is not None:
             cap = min(cap, seconds_left - 60)
         if cap < 10:
