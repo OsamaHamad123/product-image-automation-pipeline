@@ -122,6 +122,14 @@ class FakeApiError(Exception):
         self.code = code
 
 
+def _image_bytes(fmt="WEBP", size=(800, 800), alpha=True):
+    img = Image.new("RGBA" if alpha else "RGB", size, (255, 255, 255, 0) if alpha else (255, 255, 255))
+    img.paste((200, 30, 30, 255) if alpha else (200, 30, 30), (size[0] // 4, size[1] // 4, size[0] // 2, size[1] // 2))
+    buf = io.BytesIO()
+    img.save(buf, format=fmt)
+    return buf.getvalue()
+
+
 def _canvas(tmp_path):
     folder = tmp_path / "imgproc_test"
     folder.mkdir(exist_ok=True)
@@ -150,6 +158,8 @@ def world(monkeypatch, tmp_path, offline):
     w.uploaded = []
     w.destroy = None
     w.destroyed = []
+    w.delivered = lambda name, headers: (200, _image_bytes())          # what Cloudinary sends each native client
+    w.fetched = []
     w.sheet = FakeWorksheet()
     w.open_error = None
     w.outbox = {"pending": 0, "conflict": 0, "dead": 0, "written": 5}
@@ -182,6 +192,11 @@ def world(monkeypatch, tmp_path, offline):
         w.destroyed.append(public_id)
         return w.destroy
 
+    def fetch_delivered(url, headers):
+        name = next(n for n, h in pc.NATIVE_CLIENTS if h == headers)
+        w.fetched.append((url, name, dict(headers), list(w.destroyed)))
+        return w.delivered(name, headers)
+
     def open_worksheet(client, name, worksheet_index=0):
         assert name == config.SPREADSHEET_NAME_OR_URL and worksheet_index == 0
         if w.open_error:
@@ -201,6 +216,7 @@ def world(monkeypatch, tmp_path, offline):
     monkeypatch.setattr(image_processor, "process_product_image_result", process)
     monkeypatch.setattr(cloudinary_storage, "upload_selftest_image", upload)
     monkeypatch.setattr(cloudinary_storage, "destroy_selftest_image", destroy)
+    monkeypatch.setattr(pc, "_fetch_delivered", fetch_delivered)
     monkeypatch.setattr(google_sheets, "get_sheets_client", lambda: object())
     monkeypatch.setattr(google_sheets, "open_worksheet", open_worksheet)
     monkeypatch.setattr(google_sheets, "outbox_summary", outbox_summary)
@@ -462,6 +478,87 @@ def test_a_failed_delete_is_a_warning(world):
     assert by["upload"]["status"] == "warn" and by["upload"]["code"] == "destroy_NotAllowed"
     assert "laqta_selftest/publish_check" in by["upload"]["action_ar"] and "النشر نفسه شغّال" in by["upload"]["action_ar"]
     assert world.destroyed == ["laqta_selftest/publish_check"] and result["overall"] == "warn"
+
+
+# ---------------------------------------------------------------------------
+# The delivered link as the native app fetches it: WebP / PNG with alpha, at most DELIVERY_MAX_WIDTH wide
+# ---------------------------------------------------------------------------
+
+def _rgba_canvas(tmp_path):
+    folder = tmp_path / "imgproc_rgba"
+    folder.mkdir(exist_ok=True)
+    path = folder / "canvas.png"
+    Image.open(io.BytesIO(_image_bytes("PNG"))).save(path)
+    return str(path)
+
+
+def test_the_delivered_link_is_fetched_like_each_native_app_before_the_delete(world, tmp_path):
+    world.process_result = lambda: image_processor.ProcessResult(_rgba_canvas(tmp_path), True, "photoroom", None,
+                                                                 800, 800)
+    by = steps(world.run())
+    assert by["upload"]["status"] == "ok" and "WEBP" in by["upload"]["detail_ar"]
+    assert [name for _u, name, _h, _d in world.fetched] == ["أندرويد", "آيفون", "Flutter"]
+    assert all(url == world.upload.url and deleted == [] for url, _n, _h, deleted in world.fetched)
+    headers = {name: h for _u, name, h, _d in world.fetched}
+    assert headers["أندرويد"] == {"User-Agent": "okhttp/4.12.0", "Accept": "image/*"}
+    assert "CFNetwork" in headers["آيفون"]["User-Agent"] and headers["Flutter"]["User-Agent"].startswith("Dart/")
+    assert world.destroyed == ["laqta_selftest/publish_check"]
+
+
+def test_a_jpeg_without_alpha_for_the_app_fails_in_plain_words(world, tmp_path):
+    """What f_auto did: okhttp's `Accept: image/*` got a JPEG, a white box in dark mode."""
+    world.process_result = lambda: image_processor.ProcessResult(_rgba_canvas(tmp_path), True, "photoroom", None,
+                                                                 800, 800)
+    world.delivered = lambda name, headers: ((200, _image_bytes("JPEG", alpha=False)) if name == "أندرويد"
+                                             else (200, _image_bytes()))
+    result = world.run()
+    by = steps(result)
+    assert by["upload"]["status"] == "fail" and by["upload"]["code"] == "delivery_no_alpha"
+    assert "أندرويد" in by["upload"]["detail_ar"] and "مربع أبيض بالوضع الغامق" in by["upload"]["detail_ar"]
+    assert "Cloudinary" in by["upload"]["action_ar"] and result["overall"] == "fail"
+    assert world.destroyed == ["laqta_selftest/publish_check"]                    # still deleted
+
+
+def test_webp_that_lost_its_alpha_fails_but_an_opaque_canvas_needs_none(world, tmp_path):
+    world.delivered = lambda name, headers: (200, _image_bytes(alpha=False))
+    assert steps(world.run())["upload"]["status"] == "ok"                          # the canvas itself is opaque
+    world.process_result = lambda: image_processor.ProcessResult(_rgba_canvas(tmp_path), True, "photoroom", None,
+                                                                 800, 800)
+    by = steps(world.run())
+    assert (by["upload"]["status"], by["upload"]["code"]) == ("fail", "delivery_no_alpha")
+
+
+def test_a_link_wider_than_the_cap_fails(world):
+    world.delivered = lambda name, headers: (200, _image_bytes(size=(1600, 1600)))
+    by = steps(world.run())
+    assert (by["upload"]["status"], by["upload"]["code"]) == ("fail", "delivery_too_wide")
+    assert "1600" in by["upload"]["detail_ar"] and "1200" in by["upload"]["detail_ar"]
+
+
+def test_a_link_that_cannot_be_fetched_is_a_warning(world):
+    def down(name, headers):
+        raise ConnectionError("no route")
+
+    world.delivered = down
+    by = steps(world.run())
+    assert (by["upload"]["status"], by["upload"]["code"]) == ("warn", "delivery_unchecked")
+    world.delivered = lambda name, headers: (404, b"")
+    assert steps(world.run())["upload"]["code"] == "delivery_unchecked"
+
+
+def test_the_fetch_sends_the_apps_headers_with_a_timeout(monkeypatch):
+    import requests
+
+    seen = []
+
+    class Response:
+        status_code = 200
+        content = b"x"
+
+    monkeypatch.setattr(requests, "get", lambda url, headers=None, timeout=None: seen.append((url, headers, timeout))
+                        or Response())
+    assert pc._fetch_delivered("https://res.cloudinary.com/x", {"Accept": "image/*"}) == (200, b"x")
+    assert seen == [("https://res.cloudinary.com/x", {"Accept": "image/*"}, pc.DELIVERY_FETCH_TIMEOUT)]
 
 
 def test_missing_cloudinary_settings_fail_before_any_upload(world, monkeypatch):
