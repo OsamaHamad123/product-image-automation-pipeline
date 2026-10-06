@@ -107,6 +107,7 @@ QUALITY_FLAG_TEXT = {
     "kept_shadow": "بقي ظل ظاهر مع المنتج",
     "dark_halo": "حواف فاتحة بتبين على الوضع الغامق",
     "photoroom_unsure": "PhotoRoom مش متأكد من حدود المنتج",
+    "dark_rim": "حواف غامقة بتبين على الوضع الفاتح",
 }
 METHOD_NAMES = {"photoroom": "PhotoRoom", "remove_bg_api": "remove.bg", "grabcut": "GrabCut (محلي)",
                 "rembg": "rembg (محلي)", "bria_rmbg": "Bria (محلي)", "none": "بدون عزل"}

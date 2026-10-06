@@ -317,3 +317,104 @@ def test_the_published_canvas_of_a_p3_photo_is_srgb(monkeypatch, tmp_path):
         assert "icc_profile" not in out.info                     # no profile: sRGB, as the app reads it
     assert "icc_profile" not in sent[0]["image"].info            # PhotoRoom got the sRGB pixels
     image_processor.cleanup_processed_image(result.path)
+
+
+# ---------------------------------------------------------------------------
+# e. the mirror of the halo check: dark rims on white (light mode), review flag only
+# ---------------------------------------------------------------------------
+
+from test_transparent_canvas import carton, clean_disc_rgba, disc  # noqa: E402
+
+
+def dark_ringed():
+    """A light product with a 2-px dark outline left from a dark backdrop."""
+    _src, cut, r = disc(colour=(235, 235, 232), backdrop=30)
+    arr = np.asarray(cut).copy()
+    ring = (r >= 78.5) & (r < 80.5)
+    arr[ring, :3] = 35
+    arr[ring, 3] = 255
+    return Image.fromarray(arr, "RGBA")
+
+
+def test_the_dark_rim_score_sees_dark_rims_on_a_light_product_only():
+    assert cf.dark_rim_score(cf.transparent_canvas(dark_ringed(), (400, 400))) > cf.DARK_RIM_MAX
+    assert cf.dark_rim_score(cf.transparent_canvas(clean_disc_rgba(), (400, 400))) == 0.0     # dark all the way in
+    light = np.asarray(dark_ringed()).copy()
+    light[..., :3] = 235
+    assert cf.dark_rim_score(cf.transparent_canvas(Image.fromarray(light, "RGBA"), (400, 400))) == 0.0
+    assert cf.DARK_RIM_STEP > cf.HALO_STEP and cf.DARK_RIM_MAX > cf.HALO_MAX                  # the conservative side
+
+
+def test_a_dark_rim_is_flagged_for_review_without_a_paid_call(monkeypatch):
+    monkeypatch.setattr(image_processor, "_isolate", lambda *a, **k: pytest.fail("no paid re-isolation"))
+    src = Image.new("RGB", (240, 240), (30, 30, 30))
+    done = cf.finish(src, dark_ringed(), None, "photoroom", True, [], [], (400, 400))
+    assert done.isolated is False and done.flags == [cf.FLAG_DARK_RIM] and done.info["dark_rim"] > cf.DARK_RIM_MAX
+
+
+def test_dark_rim_is_a_presentation_flag_with_one_arabic_sentence():
+    assert "dark_rim" in main.PRESENTATION_FLAGS
+    assert publish_check.QUALITY_FLAG_TEXT["dark_rim"] == "حواف غامقة بتبين على الوضع الفاتح"
+
+
+def test_the_clean_corpus_stays_far_from_the_dark_rim_threshold(tmp_path):
+    import packshot_synth as ps
+
+    scores = []
+    for name, items in ps.good_corpus().items():
+        for shot, _options in items:
+            result, _services = ps.run_shot(image_processor, config, shot, tmp_path, remove_bg="truth",
+                                            background="transparent")
+            scores.append((result.finish.get("dark_rim", 0.0), name, shot.name, result.quality_flags))
+            image_processor.cleanup_processed_image(result.path)
+    assert all(flags == [] for _s, _n, _shot, flags in scores)
+    assert max(scores)[0] <= cf.DARK_RIM_MAX / 2, max(scores)
+
+
+# ---------------------------------------------------------------------------
+# f. no hole-fill for glass and clear packaging
+# ---------------------------------------------------------------------------
+
+import categories  # noqa: E402
+
+
+@pytest.mark.parametrize("texts, clear", [
+    (("Beverages", "water"), True),
+    (("Beverages > water > Glass",), True),
+    (("Home & Living", "Food Storage", "Glass Jars"), True),
+    (("Baby products", "Bottles"), True),
+    (("مشروبات", "ماء"), True),
+    (("أدوات المطبخ", "مرطبانات زجاجية"), True),
+    (("Beverages", "Bottled Water"), True),
+    (("Dairy", "Milk"), False),
+    (("Beverages", "Coconut Water"), False),          # a carton: its eaten white panels still get filled
+    (("Fashion", "Sunglasses"), False),
+    (("", None), False),
+])
+def test_clear_packaging_comes_from_the_category(texts, clear):
+    assert categories.is_clear_packaging(*texts) is clear
+
+
+def test_a_clear_product_keeps_its_holes_open():
+    src, cut = carton()
+    filled_out, filled = cf.finish_cutout(src, cut, None, "rembg")
+    clear_out, kept = cf.finish_cutout(src, cut, None, "rembg", fill_holes=False)
+    assert filled["holes_filled"] == 1 and np.asarray(filled_out)[100, 100, 3] == 255
+    assert (kept["holes_filled"], kept["holes_left"], kept["hole_fill"]) == (0, 1, "skipped_clear")
+    assert np.asarray(clear_out)[100, 100, 3] == 0                            # no grey slab: still see-through
+    done = cf.finish(src, cut, None, "rembg", True, [], [], (400, 400), clear=True)
+    assert done.info["hole_fill"] == "skipped_clear" and done.info["holes_filled"] == 0
+
+
+def test_publish_tells_the_processing_when_the_product_is_clear(monkeypatch, tmp_path):
+    seen = []
+
+    def process(*a, **k):
+        seen.append(k.get("clear"))
+        return image_processor.ProcessResult(None, False, "photoroom", "photoroom_402")
+
+    monkeypatch.setattr(image_processor, "process_product_image_result", process)
+    for hint, override in ((("Beverages", "water"), None), (("Dairy", "Milk"), None),
+                           ((), {"category_l1_en": "Home & Living", "category_l3_en": "Glass Jars"})):
+        main.publish_image("https://x/a.jpg", "P", "B", 2, None, 5, category_hint=hint, category_override=override)
+    assert seen == [True, None, True]

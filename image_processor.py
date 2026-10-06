@@ -1705,7 +1705,7 @@ def _isolate_checked(img: Image.Image, method: str, product_name, brand, canvas_
 
 def process_product_image_result(image_url_or_path, product_name, brand, target_width=0, target_height=0,
                                  bg_method=None, candidate_sha256=None, enhance=False, page_url=None,
-                                 background=None) -> ProcessResult:
+                                 background=None, clear=False) -> ProcessResult:
     """
     يحوّل صورة المنتج المعتمدة إلى لوحة نشر نهائية بالأبعاد المطلوبة (0 أو 'dynamic' = OUTPUT_CANVAS_SIZE، افتراضياً
     800x800). اللوحة المربعة بتكبر مع دقة المنتج لحد OUTPUT_CANVAS_MAX (_adaptive_canvas): الضلع المطلوب هو الأدنى، ومصدر
@@ -1716,6 +1716,7 @@ def process_product_image_result(image_url_or_path, product_name, brand, target_
     قص لم يجتز بوابة الجودة بعد كل البدائل يعود بلوحة (path) مع isolated=False و quality_flags.
     عند تمرير الأبعاد و enhance و bg_method صراحةً تكون اللوحة دالة لها وللمصدر فقط (ملف معالجة موحد).
     page_url: صفحة المرشح (Referer لإعادة التنزيل كما في التنزيل الأصلي)؛ اختياري.
+    clear: عبوة شفافة أو زجاج (categories.is_clear_packaging من تصنيف المنتج): التشطيب ما بيسد الثقوب (cutout_finish).
     """
     method = _normalise_method(bg_method)
     try:
@@ -1757,7 +1758,7 @@ def process_product_image_result(image_url_or_path, product_name, brand, target_
             # PNG شفافة بلا ظل: سد الثقوب، إزالة التسرب، فحص الهالة (وعزل واحد بـ PhotoRoom لها) ثم اللوحة
             isolated_by = provider
             done = cutout_finish.finish(img, cutout, attempt, provider, isolated, flags, notes, canvas_size,
-                                        enhance=_as_bool(enhance), method=method)
+                                        enhance=_as_bool(enhance), method=method, clear=bool(clear))
             canvas, provider, isolated, flags, notes, finish = (done.canvas, done.provider, done.isolated,
                                                                 done.flags, done.notes, done.info)
             if provider != isolated_by:

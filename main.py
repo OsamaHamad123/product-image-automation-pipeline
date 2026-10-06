@@ -386,7 +386,8 @@ def _folder_and_tags(metadata):
 def publish_image(image_url, name, brand, row_number, worksheet, link_column_index, *, barcode="",
                   candidate_sha256=None, category_override=None, force_review=False, key_size=None,
                   key_brand=None, profile=None, sku_key=None, before_write=None, duplicates="warn",
-                  also_rows=None, after_write=None, unclean="review", publish_anyway=False, page_url=None):
+                  also_rows=None, after_write=None, unclean="review", publish_anyway=False, page_url=None,
+                  category_hint=()):
     """
     معالجة الصورة المعتمدة إلى لوحة النشر النهائية ورفعها وكتابة رابطها في الشيت.
     key_size/key_brand: خلايا الحجم والبراند في الشيت لهذا المنتج، تُضاف إلى هوية الصف المتحقق منها
@@ -409,6 +410,8 @@ def publish_image(image_url, name, brand, row_number, worksheet, link_column_ind
     phash و color_signature: بصمتا اللوحة النهائية (pHash وبصمة الألوان، تُخزنان مع الحل المعتمد).
     quality_flags: علامات بوابة القص (image_processor) و quality_notes: ملاحظاتها غير المانعة، تعودان دائماً.
     page_url: صفحة المرشح إن عُرفت؛ تُمرر للمعالجة (إن قبلتها) فيُعاد التنزيل بنفس Referer الجلب الأول.
+    category_hint: تصنيف المنتج من الشيت (category، sub_category...)؛ مع category_override يقرر إذا العبوة شفافة أو زجاج
+    (categories.is_clear_packaging): التشطيب ما بيسد ثقوبها.
     لوحة لم تُعزل خلفيتها (isolated=False): unclean='review' (العامل) لا تُرفع ولا يُكتب شيء والحالة 'needs_review'
     (error='background_not_removed')؛ unclean='refuse' (اعتماد المراجع ورفعه) لا يُرفع ولا يُكتب شيء والحالة
     'quality_refused' (publish_anyway_allowed: علاماتها كلها للعرض فقط، PRESENTATION_FLAGS)، فلا يُسجل اعتماد بشري.
@@ -435,6 +438,10 @@ def publish_image(image_url, name, brand, row_number, worksheet, link_column_ind
                                                           "page_url") else {}
     if getattr(profile, "background", None) and _accepts(image_processor.process_product_image_result, "background"):
         extra["background"] = profile.background
+    import categories
+    if categories.is_clear_packaging(*(category_hint or ()), *(category_override or {}).values()) \
+            and _accepts(image_processor.process_product_image_result, "clear"):
+        extra["clear"] = True
     result = image_processor.process_product_image_result(
         image_url, name, brand, target_width=w, target_height=h,
         bg_method=profile.bg_method, candidate_sha256=candidate_sha256, enhance=profile.enhance, **extra,
@@ -578,8 +585,9 @@ def _bg_fallback(result):
 # أخرى، وعزل فشل بلا علامات، لا يُنشر نظيفاً أبداً: هي «الخلفية لم تُعزل» (background_failed).
 # dark_halo (اللوحة الشفافة، cutout_finish): حواف فاتحة بتبين على الوضع الغامق بالتطبيق.
 # photoroom_unsure: PhotoRoom نفسه مش متأكد من حدود المنتج (x-uncertainty-score، image_processor).
+# dark_rim (cutout_finish): حواف غامقة بتبين على الوضع الفاتح بالتطبيق.
 PRESENTATION_FLAGS = frozenset({"upscaled", "too_small_on_canvas", "second_object", "alpha_haze", "kept_shadow",
-                                "dark_halo", "photoroom_unsure"})
+                                "dark_halo", "photoroom_unsure", "dark_rim"})
 
 
 def _accepts(func, name):
@@ -695,6 +703,7 @@ def auto_approve_product(task, best_image, worksheet, link_column_index, sku_key
         res = publish_image(
             best_image["url"], name, brand, task["row_number"], worksheet, link_column_index,
             barcode=barcode, candidate_sha256=best_image.get("content_sha256"), page_url=best_image.get("page_url"),
+            category_hint=(task_payload(task).get("category"), task_payload(task).get("sub_category")),
             key_size=task_payload(task).get("size"), key_brand=brand, profile=processing_profile.current(),
             sku_key=sku_key, before_write=still_ours, duplicates="block", after_write=record,
         )
@@ -1286,7 +1295,8 @@ def process_single_product(prod, worksheet, link_column_index, brand_mappings=No
     res = publish_image(best["url"], name, brand, row_num, worksheet, link_column_index, barcode=barcode,
                         candidate_sha256=best.get("content_sha256"), profile=processing_profile.current(),
                         force_review=decision != "AUTO_PUBLISH", key_size=payload["size"], key_brand=brand,
-                        sku_key=sku_key, duplicates="review")
+                        sku_key=sku_key, duplicates="review",
+                        category_hint=(payload["category"], payload["sub_category"]))
     if res["status"] == "failed":
         config.log_and_fail(barcode, name, brand, f"فشل النشر: {res.get('error')}")
         return "failed"

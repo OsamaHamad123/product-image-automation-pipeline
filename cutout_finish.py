@@ -15,6 +15,10 @@
 #   3. فحص الهالة على الغامق (halo_score على #121212): حافة فاتحة حول المنتج بتبين بالوضع الغامق. فوق الحد: إذا
 #      المزوّد مش PhotoRoom و PhotoRoom مهيأ ومش موقوف برصيد، عزل واحد جديد بـ PhotoRoom (image_processor._isolate)؛
 #      وإلا العلامة dark_halo (للمراجعة: «حواف فاتحة بتبين على الوضع الغامق»).
+#   4. والعكس على الأبيض (dark_rim_score): حافة غامقة حول منتج فاتح بتبين بالوضع الفاتح (بقايا خلفية غامقة). بحد أحفظ
+#      من الهالة؛ فوقه العلامة dark_rim للمراجعة بس، بلا أي طلب عزل مدفوع.
+# عبوة شفافة أو زجاج (categories.is_clear_packaging، clear=True): ما في سد ثقوب، لأن المصدر جوّا الثقب هو الخلفية
+# شايفينها من ورا الزجاج، وسدها بيعمل بلاطة رمادية معتمة. الثقوب بتضل شفافة متل ما أعادها المزوّد.
 # صورة بلا عزل (الطريقة none، bg_skipped) ما بتصير شفافة: بتضل معتمة على لوحة بيضا مع الملاحظة not_cut_out.
 
 import logging
@@ -34,6 +38,8 @@ WHITE = "white"
 DARK_PREVIEW = (18, 18, 18)        # #121212: خلفية الوضع الغامق اللي بنفحص عليها الهالة
 NOTE_NOT_CUT_OUT = "not_cut_out"   # ملاحظة: الصورة انتشرت بلا عزل فبتبين بخلفيتها بالتطبيق
 FLAG_DARK_HALO = "dark_halo"       # علامة عرض: حواف فاتحة بتبين على الوضع الغامق (للمراجعة)
+FLAG_DARK_RIM = "dark_rim"         # علامة عرض: حواف غامقة بتبين على الوضع الفاتح (للمراجعة)
+LIGHT_PREVIEW = (255, 255, 255)    # خلفية الوضع الفاتح اللي بنفحص عليها الحافة الغامقة
 
 HOLE_ALPHA = 16            # بكسل شفافيته أقل من هيك شفاف (جزء من ثقب)
 HOLE_LEVEL_TOL = 2.5       # الثقب بمستوى الخلفية: وسيط ألوانه ضمن ~2 درجة من لون الخلفية...
@@ -50,6 +56,9 @@ HALO_STEP = 24             # بكسل الحافة على #121212 أفتح من 
 HALO_VISIBLE = 48          # ...وفاتح بشكل ظاهر
 HALO_MAX = 0.10            # نسبة بكسلات الحافة الفاتحة: فوقها dark_halo
 HALO_MIN_RIM = 20          # أقل من هيك بكسلات حافة: ما في شي نقيسه
+DARK_RIM_STEP = 48         # بكسل الحافة على الأبيض أغمق من المنتج جنبه بـ 48 درجة (ضعف خطوة الهالة: حذر)...
+DARK_RIM_VISIBLE = 128     # ...وغامق بشكل ظاهر (أقل من 128)
+DARK_RIM_MAX = 0.15        # نسبة بكسلات الحافة الغامقة: فوقها dark_rim (أعلى من HALO_MAX: إطار مطبوع مش هالة)
 BLEED_RADIUS = 2           # ألوان البكسلات الشفافة تماماً جنب المنتج = لون حافته (بلا هالة عند التحجيم)
 
 
@@ -204,10 +213,10 @@ def defringe(rgba: np.ndarray, backdrop: Optional[Backdrop]):
     return out, int(take.sum())
 
 
-def halo_score(canvas: Image.Image) -> float:
+def _rim_on(canvas: Image.Image, backdrop):
     """
-    نسبة بكسلات حافة المنتج اللي بتبان على #121212 أفتح بوضوح من المنتج جنبها (HALO_STEP، وفاتحة HALO_VISIBLE)، على
-    اللوحة كما تنشر. 0 لمنتج بلا حافة كافية للقياس.
+    (حافة المنتج المقيسة، سطوعها على backdrop، سطوع المنتج المعتم جنبها) على اللوحة كما تنشر، أو None لمنتج بلا حافة
+    كافية للقياس (أقل من HALO_MIN_RIM بكسل).
     """
     import cv2
 
@@ -216,23 +225,47 @@ def halo_score(canvas: Image.Image) -> float:
     alpha = rgba[..., 3]
     visible = alpha >= 8
     if not visible.any():
-        return 0.0
+        return None
     dist = cv2.distanceTransform(visible.astype(np.uint8), cv2.DIST_L2, 3)
     rim = visible & (dist <= HALO_RIM_PX)
     inner = visible & (dist > HALO_INNER_PX[0]) & (dist <= HALO_INNER_PX[1]) & (alpha >= OPAQUE_ALPHA)
     lum = _luminance(rgba[..., :3])
     a = alpha / 255.0
-    dark = _luminance(np.asarray(DARK_PREVIEW, dtype=np.float32))
-    on_dark = a * lum + (1.0 - a) * dark
+    behind = _luminance(np.asarray(backdrop, dtype=np.float32))
+    on_backdrop = a * lum + (1.0 - a) * behind
     size = (2 * int(HALO_INNER_PX[1]) + 1,) * 2
     den = cv2.boxFilter(inner.astype(np.float32), -1, size, normalize=False)
     near = cv2.boxFilter(np.where(inner, lum, 0).astype(np.float32), -1, size, normalize=False) / np.maximum(den, 1e-6)
     measured = rim & (den > 0)
-    total = int(measured.sum())
-    if total < HALO_MIN_RIM:
+    if int(measured.sum()) < HALO_MIN_RIM:
+        return None
+    return measured, on_backdrop, near
+
+
+def halo_score(canvas: Image.Image) -> float:
+    """
+    نسبة بكسلات حافة المنتج اللي بتبان على #121212 أفتح بوضوح من المنتج جنبها (HALO_STEP، وفاتحة HALO_VISIBLE)، على
+    اللوحة كما تنشر. 0 لمنتج بلا حافة كافية للقياس.
+    """
+    found = _rim_on(canvas, DARK_PREVIEW)
+    if found is None:
         return 0.0
+    measured, on_dark, near = found
     bright = measured & (on_dark - near > HALO_STEP) & (on_dark > HALO_VISIBLE)
-    return float(bright.sum()) / total
+    return float(bright.sum()) / int(measured.sum())
+
+
+def dark_rim_score(canvas: Image.Image) -> float:
+    """
+    المرآة: نسبة بكسلات حافة المنتج اللي بتبان على الأبيض أغمق بوضوح من المنتج جنبها (DARK_RIM_STEP، وغامقة
+    DARK_RIM_VISIBLE): بقايا خلفية غامقة حول منتج فاتح بتبين بالوضع الفاتح. منتج غامق للآخر ما إله حافة أغمق منه: 0.
+    """
+    found = _rim_on(canvas, LIGHT_PREVIEW)
+    if found is None:
+        return 0.0
+    measured, on_white, near = found
+    dark = measured & (near - on_white > DARK_RIM_STEP) & (on_white < DARK_RIM_VISIBLE)
+    return float(dark.sum()) / int(measured.sum())
 
 
 def _bleed(canvas: Image.Image) -> Image.Image:
@@ -266,16 +299,22 @@ def transparent_canvas(cutout, canvas_size: Tuple[int, int], fill: Optional[floa
     return _bleed(canvas)
 
 
-def finish_cutout(work: Image.Image, cutout: Image.Image, attempt, provider: str, backdrop=None):
-    """سد الثقوب ثم إزالة التسرب على القص بدقته الأصلية. يعيد (القص RGBA، info)."""
+def finish_cutout(work: Image.Image, cutout: Image.Image, attempt, provider: str, backdrop=None,
+                  fill_holes: bool = True):
+    """
+    سد الثقوب ثم إزالة التسرب على القص بدقته الأصلية. يعيد (القص RGBA، info). fill_holes=False (عبوة شفافة أو زجاج):
+    الثقوب بتنعد بس وبتضل شفافة (hole_fill: skipped_clear).
+    """
     backdrop = backdrop if backdrop is not None else estimate_backdrop(work)
     rgba = np.asarray(cutout.convert("RGBA"), dtype=np.uint8)
-    source = aligned_source(work, attempt, cutout, provider)
-    rgba, filled, left = fill_enclosed_holes(rgba, source, backdrop)
+    source = aligned_source(work, attempt, cutout, provider) if fill_holes else None
+    rgba, filled, left = fill_enclosed_holes(rgba, source, backdrop if fill_holes else None)
     rgba, changed = defringe(rgba, backdrop)
     out = Image.fromarray(np.ascontiguousarray(rgba), "RGBA")
     info = {"holes_filled": filled, "holes_left": left, "defringed": changed,
             "backdrop": [int(round(v)) for v in backdrop.colour] if backdrop is not None else None}
+    if not fill_holes:
+        info["hole_fill"] = "skipped_clear"
     return out, info
 
 
@@ -317,10 +356,10 @@ def _photoroom_retry(work: Image.Image, canvas_size):
     return attempt, None
 
 
-def _render(work, cutout, attempt, provider, canvas_size, enhance, backdrop):
+def _render(work, cutout, attempt, provider, canvas_size, enhance, backdrop, fill_holes=True):
     import image_processor as ip
 
-    finished, info = finish_cutout(work, cutout, attempt, provider, backdrop)
+    finished, info = finish_cutout(work, cutout, attempt, provider, backdrop, fill_holes=fill_holes)
     if enhance:
         finished = ip._enhance_rgb(finished)
     canvas = transparent_canvas(finished, canvas_size)
@@ -329,10 +368,11 @@ def _render(work, cutout, attempt, provider, canvas_size, enhance, backdrop):
 
 
 def finish(img: Image.Image, cutout: Image.Image, attempt, provider: str, isolated: bool, flags, notes,
-           canvas_size, enhance: bool = False, method: Optional[str] = None) -> Finished:
+           canvas_size, enhance: bool = False, method: Optional[str] = None, clear: bool = False) -> Finished:
     """
     لوحة النشر الشفافة لقص معزول (أو لوحة بيضا معتمة لصورة بلا عزل، method none). img: الصورة المصدر كما دخلت العزل؛
     attempt: محاولة العزل المختارة (frame_rect / frame_size)، أو None. enhance: تحسين الألوان بعد التشطيب.
+    clear: عبوة شفافة أو زجاج (categories.is_clear_packaging): بلا سد ثقوب.
     """
     import image_processor as ip
 
@@ -344,9 +384,27 @@ def finish(img: Image.Image, cutout: Image.Image, attempt, provider: str, isolat
             notes.append(NOTE_NOT_CUT_OUT)
         return Finished(canvas, rgba, provider, isolated, flags, notes, {"background": "opaque"})
 
+    done = _finish_transparent(img, cutout, attempt, provider, isolated, flags, notes, canvas_size, enhance,
+                               fill_holes=not clear)
+    # المرآة على الأبيض: حافة غامقة بتبين بالوضع الفاتح. للمراجعة بس، بلا أي عزل مدفوع
+    score = dark_rim_score(done.canvas)
+    done.info["dark_rim"] = round(score, 4)
+    if score > DARK_RIM_MAX:
+        logger.info("حواف غامقة على الأبيض (dark_rim=%.3f، %s)", score, done.provider)
+        if FLAG_DARK_RIM not in done.flags:
+            done.flags.append(FLAG_DARK_RIM)
+        done.isolated = False
+    return done
+
+
+def _finish_transparent(img, cutout, attempt, provider, isolated, flags, notes, canvas_size, enhance,
+                        fill_holes=True) -> Finished:
+    """التشطيب واللوحة الشفافة وفحص الهالة (وعزل PhotoRoom الواحد لها)، لقص معزول."""
+    import image_processor as ip
+
     work = ip._flatten_on_white(img) if ip.has_meaningful_transparency(img) else img.convert("RGB")
     backdrop = estimate_backdrop(work)
-    finished, canvas, info = _render(work, cutout, attempt, provider, canvas_size, enhance, backdrop)
+    finished, canvas, info = _render(work, cutout, attempt, provider, canvas_size, enhance, backdrop, fill_holes)
     info["background"] = TRANSPARENT
     if info["halo"] <= HALO_MAX:
         return Finished(canvas, finished, provider, isolated, flags, notes, info)
@@ -358,7 +416,7 @@ def finish(img: Image.Image, cutout: Image.Image, attempt, provider: str, isolat
         retry, error = _photoroom_retry(work, canvas_size)
         if retry is not None:
             r_finished, r_canvas, r_info = _render(work, retry.cutout, retry, "photoroom", canvas_size, enhance,
-                                                   backdrop)
+                                                   backdrop, fill_holes)
             if r_info["halo"] <= HALO_MAX:
                 logger.info("أُعيد العزل بـ PhotoRoom بسبب حواف فاتحة (%s: %.3f -> %.3f)", provider, info["halo"],
                             r_info["halo"])

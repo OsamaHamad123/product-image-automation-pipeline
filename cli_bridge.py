@@ -1248,6 +1248,7 @@ def action_select_image(params):
             barcode=barcode, candidate_sha256=_candidate_sha(params, row_number, sku_key, image_url, identity),
             page_url=_candidate_page(params, row_number, sku_key, image_url, identity),
             category_override={k: _text(params, k) for k in ('category_l1_en', 'category_l2_en', 'category_l3_en')},
+            category_hint=(_text(params, 'category'), _text(params, 'sub_category')),
             key_size=_text(params, 'size') or None, key_brand=brand or None, sku_key=sku_key,
             also_rows=_other_rows(sku_key, row_number, tasks),
             before_write=_reviewer_check(params, sku_key, row_number, product_name, image_url, guard, rows, scope),
@@ -1321,6 +1322,7 @@ def action_upload_manual_image(params):
         res = pipeline.publish_image(
             file_path, product_name, brand, row_number, worksheet, link_column_index, barcode=barcode,
             category_override={k: _text(params, k) for k in ('category_l1_en', 'category_l2_en', 'category_l3_en')},
+            category_hint=(_text(params, 'category'), _text(params, 'sub_category')),
             key_size=_text(params, 'size') or None, key_brand=brand or None, sku_key=sku_key,
             also_rows=_other_rows(sku_key, row_number, tasks),
             before_write=_reviewer_check(params, sku_key, row_number, product_name, None, guard, rows, scope),
