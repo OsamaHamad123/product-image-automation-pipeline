@@ -382,3 +382,77 @@ def serper_hedge_after_s() -> float:
         value = float(DEFAULTS["SERPER_HEDGE_AFTER_S"])
     return min(60.0, value)
 # --- end speed package ---
+
+
+# --- runtime package: the worker on a server (stops, hangs, memory, storage, dead-man's switch) ---
+# PRODUCT_DEADLINE_MINUTES  a product still running after this many minutes is given up: its row goes back to the
+#                           queue like a provider outage (PROVIDER_DOWN: retried 10, then 20 minutes later, parked
+#                           after 3 in a run) and the worker takes the next row; clamped to 1..60
+# SHUTDOWN_GRACE_S          on SIGTERM / SIGHUP (systemctl stop, a reboot) the products in progress get this many
+#                           seconds to finish; the rows still running then go back to the queue; clamped to 0..600
+# REMBG_MAX_PARALLEL        local BiRefNet cutouts (rembg) run at once; each one takes 2-3 GB of memory on CPU; 1..8
+# NIGHTLY_PRUNE_ENABLED     the nightly run ends with the storage cleanup (scripts/prune_storage.py --apply): old
+#                           candidate files no review row uses, superseded synced sheet writes, temp/search.log rotation
+# PRUNE_MAX_SECONDS         time cap of that cleanup (10..3600)
+# PRUNE_KEEP_DAYS           files and synced writes younger than this are never removed (7..3650)
+# SEARCH_LOG_MAX_MB         temp/search.log is rotated above this size (1..10240)
+# SEARCH_LOG_KEEP           rotated copies kept: search.log.1 .. search.log.N (1..20)
+# HEALTHCHECK_URL           optional healthchecks.io-style ping URL (a URL, not an API key): the nightly run pings
+#                           <url>/start, then <url> or <url>/fail; '' = off
+DEFAULTS.update({
+    "PRODUCT_DEADLINE_MINUTES": "8",
+    "SHUTDOWN_GRACE_S": 45,
+    "REMBG_MAX_PARALLEL": 1,
+    "NIGHTLY_PRUNE_ENABLED": True,
+    "PRUNE_MAX_SECONDS": 300,
+    "PRUNE_KEEP_DAYS": 30,
+    "SEARCH_LOG_MAX_MB": 50,
+    "SEARCH_LOG_KEEP": 3,
+    "HEALTHCHECK_URL": "",
+})
+
+
+def _clamped_int(name: str, low: int, high: int) -> int:
+    value = get(name)
+    value = value if isinstance(value, int) and not isinstance(value, bool) else int(DEFAULTS[name])
+    return min(high, max(low, value))
+
+
+def product_deadline_s() -> float:
+    """Seconds one product may run before the worker gives it up (PRODUCT_DEADLINE_MINUTES, 1..60, default 8)."""
+    return _number("PRODUCT_DEADLINE_MINUTES", 1.0, 60.0) * 60.0
+
+
+def shutdown_grace_s() -> int:
+    return _clamped_int("SHUTDOWN_GRACE_S", 0, 600)
+
+
+def rembg_max_parallel() -> int:
+    return _clamped_int("REMBG_MAX_PARALLEL", 1, 8)
+
+
+def nightly_prune_enabled() -> bool:
+    return bool(get("NIGHTLY_PRUNE_ENABLED"))
+
+
+def prune_max_seconds() -> int:
+    return _clamped_int("PRUNE_MAX_SECONDS", 10, 3600)
+
+
+def prune_keep_days() -> int:
+    return _clamped_int("PRUNE_KEEP_DAYS", 7, 3650)
+
+
+def search_log_max_mb() -> int:
+    return _clamped_int("SEARCH_LOG_MAX_MB", 1, 10240)
+
+
+def search_log_keep() -> int:
+    return _clamped_int("SEARCH_LOG_KEEP", 1, 20)
+
+
+def healthcheck_url() -> str:
+    """The ping URL without a trailing '/', or '' when unset or not an http(s) URL (never a surprise request)."""
+    value = str(get("HEALTHCHECK_URL") or "").strip().rstrip("/")
+    return value if value.lower().startswith(("https://", "http://")) and " " not in value else ""
+# --- end runtime package ---
