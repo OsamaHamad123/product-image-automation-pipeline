@@ -12,8 +12,9 @@ This script lists them, one line per approved product: row, name, brand, page_gt
 (human / auto) and duplicate_gtin ('yes' when another approved product got the same GTIN: check both rows
 before pasting, one of the two pages is wrong).
 
-Read-only: the script only runs SELECT. Nothing is ever written to the sheet automatically; paste the
-column yourself (format the barcode column as plain text first, so a leading zero is kept).
+Read-only: the script only runs SELECT. Paste the column yourself (format the barcode column as plain text
+first, so a leading zero is kept), or write them from the Run page card «باركودات لقيناها من صفحات المتاجر»
+(cli_bridge barcode_write: identity-checked outbox writes into empty barcode cells only).
 """
 
 import argparse

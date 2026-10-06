@@ -27,7 +27,8 @@
         export: '/rich-catalog/export',
         run: '/batch-automation',
         publishCheck: '/system-diagnostics#publish-check',
-        bgMethod: '/api/settings/bg-method'
+        bgMethod: '/api/settings/bg-method',
+        reviewLanes: '/api/system/review-lanes'
     };
 
     const LIST_PAGE = 150;

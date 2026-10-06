@@ -182,6 +182,28 @@
             <p class="lq-run-brands__done" role="status" data-run="brands-done" hidden></p>
         </section>
 
+        {{-- Barcodes the store pages stated for approved rows with an empty barcode cell: read from the approvals and the
+             cached sheet rows (GET /api/run/barcode-suggestions); written only by the button, after a confirm, through the
+             identity-checked sheet outbox (POST /api/run/barcode-write), never over a cell that holds a barcode --}}
+        <section class="lq-card lq-run-barcodes" aria-labelledby="run-barcodes-title" data-run="barcodes" data-state="loading">
+            <div class="lq-run-brands__head">
+                <h2 class="lq-card__title" id="run-barcodes-title" data-run="barcodes-title">باركودات لقيناها من صفحات المتاجر</h2>
+                <button type="button" class="lq-btn lq-btn--ghost lq-btn--sm" data-run="barcodes-refresh">
+                    <x-lq.icon name="refresh" :size="16" :stroke="2" />
+                    <span>حدّث القائمة</span>
+                </button>
+            </div>
+            <p class="lq-run-brands__lead" data-run="barcodes-lead" aria-live="polite">لحظة، عم نقرأ الباركودات…</p>
+            <div class="lq-run-barcodes__list" data-run="barcodes-list"></div>
+            <div class="lq-run-barcodes__list lq-run-barcodes__apart" data-run="barcodes-apart" hidden></div>
+            <div class="lq-run-brands__foot" data-run="barcodes-foot" hidden>
+                <button type="button" class="lq-btn lq-btn--primary" data-run="barcodes-write">اكتب الباركودات المختارة بالشيت</button>
+                <span class="lq-field__hint" data-run="barcodes-count"></span>
+            </div>
+            <p class="lq-field__error" role="alert" data-run="barcodes-error" hidden></p>
+            <p class="lq-run-brands__done" role="status" data-run="barcodes-done" hidden></p>
+        </section>
+
         {{-- Sheet data quality: from the sheet rows already cached (GET /api/run/sheet-quality) --}}
         <section class="lq-card lq-run-quality" aria-labelledby="run-quality-title" data-run="quality" data-state="loading">
             <div class="lq-run-quality__head">

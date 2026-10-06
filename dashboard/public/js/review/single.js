@@ -87,6 +87,11 @@
     }
 
     // نتيجة بحث طلبه المراجع بعد اعتماد المنتج (لاستبدال الصورة المعتمدة)
+    // «غامق / فاتح / مربعات» خلف الصورة المنشورة (theme_preview.js): بيغيّر خلفية المعاينة بس، بلا أي طلب
+    function themeToggle(stage) {
+        return R.themePreview ? R.themePreview.control(stage) : null;
+    }
+
     function approvedResearch(item) {
         const search = liveSearch(item);
         return !!(search && search.afterApproval);
@@ -525,6 +530,11 @@
                     S.bgSkippedSaid = true;
                     R.toast(`انتشرت صورة «${job.label}» بدون عزل الخلفية (عزل الخلفية متوقف بالإعدادات).`, 'info', 9000);
                 }
+                if (notes.bgFallback && !S.bgFallbackSaid) {
+                    // مرة بالجلسة: كل اعتماد بعده بيعزل محلياً لحد ما ينشحن الرصيد، واللوحة النهائية بتقولها لكل منتج
+                    S.bgFallbackSaid = true;
+                    R.toast(`${notes.bgFallback.text} (صورة «${job.label}»). اشحن الرصيد لجودة أحسن.`, 'info', 9000);
+                }
                 if (notes.duplicate) {
                     const who = notes.duplicateOf.length ? `: ${notes.duplicateOf.map(n => `«${n}»`).join('، ')}` : '';
                     R.toast(`صورة «${job.label}» نفسها منشورة لمنتج آخر${who}. تأكد أنها ليست صورة منتج مختلف.`, 'warning', 12000);
@@ -954,6 +964,7 @@
             el('div', { className: 'rv-pick__head' }, [
                 el('div', { className: 'rv-pick__who' }, [
                     el('span', { className: 'rv-badge' + (isSystem ? '' : ' rv-badge--own') }, [icon('check', 14, 2.2), el('span', { text: badgeText })]),
+                    isSystem ? R.laneBadge(pick) : null,
                     isExtra(pick) ? null : el('span', { className: 'rv-pick__store', title: where.host || null,
                                                         text: [where.store, where.market].filter(Boolean).join(' · ') }),
                     R.galleryNote(pick) ? el('span', { className: 'rv-gallery', text: R.galleryNote(pick) }) : null
@@ -1396,6 +1407,10 @@
                 body.appendChild(alertBox('info', 'انتشرت بدون عزل الخلفية:',
                                           'عزل الخلفية متوقف بالإعدادات، فالصورة انتشرت متل ما هي على لوحة بيضا.'));
             }
+            if (notes.bgFallback) {
+                body.appendChild(alertBox('info', 'عزل محلي:', `${notes.bgFallback.text}، فانعزلت بـ ${notes.bgFallback.local}. `
+                                          + 'اشحن الرصيد لجودة أحسن.'));
+            }
             if (notes.noteTexts && notes.noteTexts.length) {
                 body.appendChild(alertBox('info', 'ملاحظة من فحص القص:', `${notes.noteTexts.join('، ')}.`));
             }
@@ -1403,10 +1418,12 @@
                 const who = notes.duplicateOf.length ? `: ${notes.duplicateOf.map(n => `«${n}»`).join('، ')}` : '';
                 body.appendChild(alertBox('warning', 'الصورة نفسها لمنتج آخر:', `هذه الصورة منشورة أيضاً لمنتج آخر${who}. تأكد أنها ليست صورة منتج مختلف.`));
             }
+            const doneStage = el('div', { className: 'rv-final__stage' }, [R.img(done.link || done.url, 'الصورة المعتمدة', S.urls.imageProxy)]);
             body.appendChild(el('section', { className: 'rv-panel rv-final', dataset: { url: done.link } }, [
-                el('div', { className: 'rv-final__stage' }, [R.img(done.link || done.url, 'الصورة المعتمدة', S.urls.imageProxy)]),
+                doneStage,
                 el('div', { className: 'rv-final__text' }, [
                     el('strong', { className: 'rv-h3', text: 'الصورة المنشورة' }),
+                    themeToggle(doneStage),
                     pageGtinLine(done.pageGtin),
                     el('span', { text: 'بدك صورة غيرها؟ دوّر من جديد (كل بحث بيكلف من رصيد البحث).' }),
                     searchButton(item, 'دوّر على صورة بديلة')
@@ -1449,10 +1466,12 @@
             // صورة نهائية في الشيت: تُعرض بلا بحث تلقائي، والبحث بطلب صريح فقط
             S.ws.state = 'final';
             const link = String(item.product.existing_image_link || item.product.cached_image || '');
+            const sheetStage = el('div', { className: 'rv-final__stage' }, [R.img(link, 'الصورة الحالية بالشيت', S.urls.imageProxy)]);
             body.appendChild(el('section', { className: 'rv-panel rv-final', id: 'rvCurrentSheetImage', dataset: { url: link } }, [
-                el('div', { className: 'rv-final__stage' }, [R.img(link, 'الصورة الحالية بالشيت', S.urls.imageProxy)]),
+                sheetStage,
                 el('div', { className: 'rv-final__text' }, [
                     el('strong', { className: 'rv-h3', text: 'الصورة الحالية بالشيت' }),
+                    themeToggle(sheetStage),
                     pageGtinLine(item.product.page_gtin),
                     el('span', { text: 'لهالمنتج صورة نهائية بالشيت، فما دوّرنا تلقائياً (كل بحث بيكلف من رصيد البحث).' }),
                     searchButton(item, 'دوّر على صورة بديلة')

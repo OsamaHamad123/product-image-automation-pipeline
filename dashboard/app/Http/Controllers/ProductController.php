@@ -204,13 +204,20 @@ class ProductController extends Controller
         foreach ($products as &$prod) {
             $barcode = trim($prod['barcode'] ?? '');
             $sku = trim((string) ($prod['sku_key'] ?? ''));
+            // المفتاح بلا باركود (get_products alt_sku_key): صف كُتب له باركود بعد اعتماده («باركودات من صفحات
+            // المتاجر» أو بالإيد) يبقى اعتماده ورفضه محفوظين بمفتاحه القديم
+            $alt = trim((string) ($prod['alt_sku_key'] ?? ''));
+            $alt = $alt !== $sku ? $alt : '';
             $hit = null;
             if ($barcode && isset($resolved[$barcode])) {
                 $hit = $resolved[$barcode];
             } elseif ($barcode === '' && $sku !== '' && isset($resolvedBySku[$sku])) {
                 $hit = $resolvedBySku[$sku];
+            } elseif ($alt !== '' && isset($resolvedBySku[$alt])) {
+                $hit = $resolvedBySku[$alt];
             }
-            $prod['rejected_images'] = $sku !== '' ? array_values($rejectedBySku[$sku] ?? []) : [];
+            $prod['rejected_images'] = $sku !== ''
+                ? array_values(array_merge($rejectedBySku[$alt] ?? [], $rejectedBySku[$sku] ?? [])) : [];
             if ($hit !== null) {
                 $prod['cached_image'] = $hit->cloudinary_url;
                 $prod['verification_status'] = $hit->verification_status ?? 'legacy';

@@ -35,7 +35,18 @@ DEFAULTS = {
     "CANDIDATE_STORE_DIR": os.path.join("temp", "candidates"),
     "PROXY_URL": "",
     "OUTPUT_CANVAS_SIZE": 800,
+    # image_processor: when a cloud isolation method fails on credit / key / quota, 'local' isolates with rembg
+    "BG_FALLBACK": "local",
+    # the rembg model of that fallback: BiRefNet keeps white packaging that u2net / isnet eat
+    "REMBG_MODEL": "birefnet-general",
+    # 'transparent' (default): RGBA PNG master, product trimmed and centred, no shadow (the app themes it);
+    # 'white': the earlier opaque white canvas. OUTPUT_PRODUCT_FILL: share of the square the product's longer
+    # side fills on the transparent canvas (the white canvas keeps edge_shadow_engine.CANVAS_FILL_RATIO).
+    "OUTPUT_BACKGROUND": "transparent",
+    "OUTPUT_PRODUCT_FILL": "0.88",
 }
+REMBG_MODELS = ("birefnet-general", "birefnet-general-lite")
+OUTPUT_BACKGROUNDS = ("transparent", "white")
 
 # --- identity package (P3): how far a barcode is trusted ----------------------------------------
 # GTIN_POLICY
@@ -143,6 +154,35 @@ def proxy_url() -> str:
 def output_canvas_size() -> int:
     size = get("OUTPUT_CANVAS_SIZE")
     return size if size and size > 0 else DEFAULTS["OUTPUT_CANVAS_SIZE"]
+
+
+def bg_fallback() -> str:
+    """'local' (default) or 'off'; anything else reads as the default."""
+    value = str(get("BG_FALLBACK")).strip().lower()
+    return value if value in ("local", "off") else DEFAULTS["BG_FALLBACK"]
+
+
+def rembg_model() -> str:
+    """'birefnet-general' (default) or 'birefnet-general-lite'; anything else (u2net, a typo) reads as the default."""
+    value = str(get("REMBG_MODEL")).strip().lower()
+    return value if value in REMBG_MODELS else DEFAULTS["REMBG_MODEL"]
+
+
+def output_background() -> str:
+    """'transparent' (default) or 'white'; an unknown value falls back to the default."""
+    value = str(get("OUTPUT_BACKGROUND") or "").strip().lower()
+    return value if value in OUTPUT_BACKGROUNDS else DEFAULTS["OUTPUT_BACKGROUND"]
+
+
+def output_product_fill() -> float:
+    """Share of the transparent square the product's longer side fills, clamped to 0.5-1.0 (default 0.88)."""
+    try:
+        value = float(str(get("OUTPUT_PRODUCT_FILL")).strip())
+    except (TypeError, ValueError):
+        value = float(DEFAULTS["OUTPUT_PRODUCT_FILL"])
+    if value != value:  # NaN
+        value = float(DEFAULTS["OUTPUT_PRODUCT_FILL"])
+    return max(0.5, min(1.0, value))
 
 
 def enable_bing_html_fallback() -> bool:
@@ -267,10 +307,16 @@ def serpapi_lens_price_usd() -> float:
 #                            it only runs once the index has rows
 # LOCAL_INDEX_MAX_PAGES      indexed product pages read per product (0 turns the lookup off); reads are free
 # LOCAL_INDEX_PAGE_TTL_DAYS  how long what a page said (image, name, GTIN) is reused before it is read again
+# LOCAL_INDEX_REFRESH_DAYS   a store whose newest complete harvest is older than this is read again, in the
+#                            background, at the start of a nightly or worker run (catalog_match.index_refresh)
+# LOCAL_INDEX_REFRESH_MAX_S  seconds one refresh may run (the stores are read one after the other and the refresh
+#                            stops at this budget); 0 turns the automatic refresh off
 DEFAULTS.update({
     "LOCAL_INDEX_ENABLED": True,
     "LOCAL_INDEX_MAX_PAGES": 3,
     "LOCAL_INDEX_PAGE_TTL_DAYS": 30,
+    "LOCAL_INDEX_REFRESH_DAYS": 7,
+    "LOCAL_INDEX_REFRESH_MAX_S": 300,
 })
 LOCAL_INDEX_MAX_PAGES_LIMIT = 8
 
@@ -289,6 +335,18 @@ def local_index_page_ttl_days() -> int:
     value = get("LOCAL_INDEX_PAGE_TTL_DAYS")
     value = value if isinstance(value, int) else int(DEFAULTS["LOCAL_INDEX_PAGE_TTL_DAYS"])
     return min(365, max(0, value))
+
+
+def local_index_refresh_days() -> int:
+    value = get("LOCAL_INDEX_REFRESH_DAYS")
+    value = value if isinstance(value, int) else int(DEFAULTS["LOCAL_INDEX_REFRESH_DAYS"])
+    return min(365, max(1, value))
+
+
+def local_index_refresh_max_s() -> int:
+    value = get("LOCAL_INDEX_REFRESH_MAX_S")
+    value = value if isinstance(value, int) else int(DEFAULTS["LOCAL_INDEX_REFRESH_MAX_S"])
+    return min(3600, max(0, value))
 # --- end local catalog index ---
 
 

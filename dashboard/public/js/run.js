@@ -396,6 +396,67 @@
         return data && arabic(data.message) ? data.message : (res && res.status ? 'ما قدرنا نكمّل هلق. ما انكتب شي. جرّب بعد شوي.' : BRAND_REQUEST_ERROR);
     }
 
+    // «باركودات لقيناها من صفحات المتاجر» (GET /api/run/barcode-suggestions): approved rows whose store page stated a
+    // barcode while the sheet's barcode cell is empty. Writes happen only through «اكتب الباركودات المختارة بالشيت».
+    var BARCODES_LEAD = 'صفحة المتجر للصورة المعتمدة ذكرت باركود صالح، وخلية الباركود بالشيت فاضية. علّم الصفوف اللي بدك ياها ' +
+        'ومنكتب الباركود بعمود الباركود بس.';
+    var BARCODES_CLEAN = 'ما في باركودات جديدة من صفحات المتاجر لصفوف بلا باركود.';
+    var BARCODES_ERROR = 'ما قدرنا نقرأ الباركودات هلق.';
+    var BARCODE_CONFIRM_TEXT = 'رح ننكتب الباركود بعمود الباركود للصفوف المختارة بس، وما منغيّر أي خلية فيها باركود';
+    var BARCODE_DUPLICATE_NOTE = 'نفس الباركود لأكتر من صف: ما منكتبه. راجع الصفحتين.';
+    var BARCODE_WRITE_ERROR = 'ما قدرنا نوصل للخادم. ما انكتب شي.';
+
+    function barcodesTitle(count) {
+        return 'باركودات لقيناها من صفحات المتاجر (' + count + ')';
+    }
+
+    function filledNote(value) {
+        return 'خلية الباركود فيها «' + value + '»: ما منكتب فوقها.';
+    }
+
+    // view {state: ready | clean | error, count, title, lead, rows: [...], apart: [...]}; a row {row, sku_key, name, brand,
+    // gtin, domain, checked, note}. rows can be written (all ticked); apart are duplicates or a filled cell (never sent).
+    function describeBarcodes(res) {
+        var data = res && res.data;
+        if (!res || !data || !res.ok || data.status !== 'success' || !Array.isArray(data.rows)) {
+            return { state: 'error', count: 0, title: barcodesTitle(0), rows: [], apart: [],
+                     lead: data && arabic(data.message) ? data.message : BARCODES_ERROR };
+        }
+        var pick = function (list, checked, note) {
+            return (Array.isArray(list) ? list : []).filter(function (r) {
+                return r && C.num(r.row) && typeof r.sku_key === 'string' && r.sku_key && /^\d{8,14}$/.test(String(r.gtin || ''));
+            }).map(function (r) {
+                return { row: C.num(r.row), sku_key: r.sku_key, name: String(r.name || ''), brand: String(r.brand || ''),
+                         gtin: String(r.gtin), domain: String(r.domain || ''), checked: checked,
+                         note: typeof note === 'function' ? note(r) : note };
+            });
+        };
+        var rows = pick(data.rows, true, '');
+        var apart = pick(data.duplicates, false, BARCODE_DUPLICATE_NOTE)
+            .concat(pick(data.filled, false, function (r) { return filledNote(String(r.sheet_barcode || '')); }));
+        var count = rows.length + apart.length;
+        return { state: count ? 'ready' : 'clean', count: count, title: barcodesTitle(count),
+                 lead: count ? BARCODES_LEAD : BARCODES_CLEAN, rows: rows, apart: apart };
+    }
+
+    // POST /api/run/barcode-write body: the ticked rows that can be written; never a row listed apart.
+    function barcodeWriteBody(rows) {
+        return { items: rows.filter(function (r) { return r.checked && !r.note; }).map(function (r) {
+            return { row: r.row, sku_key: r.sku_key, gtin: r.gtin };
+        }) };
+    }
+
+    // The result of a write: the server's Levantine text, else the counts.
+    function barcodeResult(res) {
+        var data = res && res.data;
+        if (res && res.ok && data && data.status === 'success') {
+            var done = (C.num(data.written) || 0) + (C.num(data.queued) || 0);
+            return { ok: done > 0, text: arabic(data.message) ? data.message : (done ? 'انكتبت الباركودات.' : 'ما انكتب شي.') };
+        }
+        return { ok: false, text: data && arabic(data.message) ? data.message
+            : (res && res.status ? 'ما قدرنا نكتب بالشيت هلق. ما انكتب شي. جرّب بعد شوي.' : BARCODE_WRITE_ERROR) };
+    }
+
     // «تصدير تقرير للتحليل»: الرابط حسب النطاق، واسم الملف من رد الخادم (Content-Disposition)
     function exportQuery(scope) {
         return '/api/run/export?scope=' + (scope === 'review' ? 'review' : 'latest');
@@ -1049,6 +1110,106 @@
             });
         }
 
+        // «باركودات من صفحات المتاجر»: one row per sheet row with its checkbox; the rows live in barcodeRows so the write
+        // button reads what is ticked now. Rows listed apart (a shared barcode, a filled cell) have no live checkbox.
+        var barcodeRows = [];
+
+        function barcodeNote(text, kind) {
+            var done = kind === 'done';
+            C.setText($('barcodes-error'), done ? '' : text);
+            C.setHidden($('barcodes-error'), done || !text);
+            C.setText($('barcodes-done'), done ? text : '');
+            C.setHidden($('barcodes-done'), !done || !text);
+        }
+
+        function refreshBarcodeButton() {
+            var ticked = barcodeWriteBody(barcodeRows).items.length;
+            $('barcodes-write').disabled = !ticked;
+            C.setText($('barcodes-count'), ticked ? 'اخترت ' + C.countText(ticked, 'صف', 'صفين', 'صفوف') : 'ما اخترت ولا صف');
+        }
+
+        function barcodeRow(r) {
+            var el = C.el(doc, 'label', 'lq-run-barcode' + (r.note ? ' lq-run-barcode--apart' : ''));
+            el.setAttribute('data-row', String(r.row));
+            var box = C.el(doc, 'input', 'lq-run-barcode__check');
+            box.setAttribute('type', 'checkbox');
+            box.checked = r.checked;
+            box.disabled = !!r.note;
+            el.appendChild(box);
+            var body = C.el(doc, 'span', 'lq-run-barcode__body');
+            var name = C.el(doc, 'bdi', 'lq-run-barcode__name', r.name);
+            name.setAttribute('dir', 'auto');
+            body.appendChild(name);
+            var meta = C.el(doc, 'span', 'lq-run-barcode__meta');
+            var gtin = C.el(doc, 'bdi', 'lq-run-barcode__gtin lq-num', r.gtin);
+            gtin.setAttribute('dir', 'ltr');
+            meta.appendChild(gtin);
+            meta.appendChild(C.el(doc, 'span', 'lq-run-barcode__store', r.domain ? 'من ' + r.domain : 'من صفحة المتجر'));
+            meta.appendChild(C.el(doc, 'span', 'lq-run-barcode__row lq-num', 'صف ' + r.row + (r.brand ? ' · ' + r.brand : '')));
+            body.appendChild(meta);
+            if (r.note) body.appendChild(C.el(doc, 'span', 'lq-run-barcode__note', r.note));
+            el.appendChild(body);
+            var row = { row: r.row, sku_key: r.sku_key, gtin: r.gtin, note: r.note, checked: r.checked, el: el, box: box };
+            box.addEventListener('change', function () {
+                row.checked = !!box.checked;
+                refreshBarcodeButton();
+            });
+            return row;
+        }
+
+        function renderBarcodes(view) {
+            var box = $('barcodes-list');
+            var apart = $('barcodes-apart');
+            C.clear(box);
+            C.clear(apart);
+            barcodeRows = [];
+            view.rows.forEach(function (r) {
+                var row = barcodeRow(r);
+                barcodeRows.push(row);
+                box.appendChild(row.el);
+            });
+            if (view.apart.length) {
+                apart.appendChild(C.el(doc, 'p', 'lq-run-barcodes__apart-title', 'ما منكتبها (' + view.apart.length + ')'));
+                view.apart.forEach(function (r) { apart.appendChild(barcodeRow(r).el); });
+            }
+            C.setHidden(apart, !view.apart.length);
+            $('barcodes').setAttribute('data-state', view.state);
+            C.setText($('barcodes-title'), view.title);
+            C.setText($('barcodes-lead'), view.lead || '');
+            C.setHidden($('barcodes-foot'), !barcodeRows.length);
+            refreshBarcodeButton();
+        }
+
+        function loadBarcodes() {
+            var btn = $('barcodes-refresh');
+            btn.disabled = true;
+            return C.fetchJson('/api/run/barcode-suggestions').then(function (res) {
+                btn.disabled = false;
+                renderBarcodes(describeBarcodes(res));
+            });
+        }
+
+        function writeBarcodes() {
+            var body = barcodeWriteBody(barcodeRows);
+            if (!body.items.length) return Promise.resolve();
+            if (!root.confirm(BARCODE_CONFIRM_TEXT)) return Promise.resolve();
+            barcodeNote('');
+            var btn = $('barcodes-write');
+            btn.disabled = true;
+            btn.setAttribute('aria-busy', 'true');
+            return C.fetchJson('/api/run/barcode-write', { method: 'POST', body: body }).then(function (res) {
+                btn.setAttribute('aria-busy', 'false');
+                var result = barcodeResult(res);
+                if (!res.ok) {
+                    refreshBarcodeButton();
+                    barcodeNote(result.text);
+                    return;
+                }
+                if (result.ok) C.toast(result.text, 'success');
+                return loadBarcodes().then(function () { barcodeNote(result.text, result.ok ? 'done' : ''); });
+            });
+        }
+
         function exportRun() {
             var btn = $('export');
             var scope = $('export-scope').value;
@@ -1140,6 +1301,8 @@
         $('quality-refresh').addEventListener('click', function () { loadQuality(true); });
         $('brands-refresh').addEventListener('click', function () { loadMissing(); });
         $('brands-add-all').addEventListener('click', function () { addAllBrands(); });
+        $('barcodes-refresh').addEventListener('click', function () { barcodeNote(''); loadBarcodes(); });
+        $('barcodes-write').addEventListener('click', function () { writeBarcodes(); });
         $('export').addEventListener('click', function () { exportRun(); });
 
         var initial = null;
@@ -1151,7 +1314,7 @@
         }
         // «جودة بيانات الشيت» بعد «قبل ما تبدأ»: الخطة تقرأ صفوف الشيت (من كاشها)، والجودة تقرأ الكاش نفسه فقط
         controller.refreshPlan(false).then(function () { return loadQuality(false); }, function () { return loadQuality(false); })
-            .then(function () { return loadMissing(); });
+            .then(function () { return loadMissing(); }).then(function () { return loadBarcodes(); });
         if (initial) controller.handleLive(initial);
         controller.state.timer = root.setTimeout(controller.loop, initial ? POLL_ACTIVE_MS : 0);
         doc.addEventListener('visibilitychange', function () {
@@ -1176,6 +1339,11 @@
         addedText: addedText,
         addAllConfirmText: addAllConfirmText,
         BRAND_ADDED_TEXT: BRAND_ADDED_TEXT,
+        describeBarcodes: describeBarcodes,
+        barcodeWriteBody: barcodeWriteBody,
+        barcodeResult: barcodeResult,
+        barcodesTitle: barcodesTitle,
+        BARCODE_CONFIRM_TEXT: BARCODE_CONFIRM_TEXT,
         SITE_COST_NOTE: SITE_COST_NOTE,
         exportQuery: exportQuery,
         exportFileName: exportFileName,

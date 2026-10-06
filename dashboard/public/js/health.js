@@ -12,6 +12,9 @@
  *   Step codes appear only in tooltips. When its processing step failed on PhotoRoom / remove.bg credit, key or quota,
  *   «تجاوز عزل الخلفية» (after a confirm) POSTs /api/settings/bg-method {method: 'none'}; while background removal is
  *   off, «رجّع عزل الخلفية (…)» restores the previous method. Neither runs the check again.
+ * - «فهرس المتاجر المحلي»: the rows are rendered by the server (LocalIndexController); «حدّث الفهرس هلق» POSTs
+ *   /api/system/local-index/refresh (a background job started through the bridge, it answers at once) and, while it
+ *   runs, GET /api/system/local-index feeds the status line until the page reloads with the new numbers.
  * The view functions are pure (node tests call them through window.LaqtaHealth); the DOM code below only sets
  * textContent and attributes, never HTML.
  */
@@ -779,6 +782,85 @@
         return { kind: 'ok', text: '', rows: rows };
     }
 
+    // ------------------------------------------------------------------
+    // «فهرس المتاجر المحلي» (LocalIndexController): the refresh button and its progress line. Its own URLs, view
+    // function and controller; the rows are rendered by the server and read again on reload.
+    // ------------------------------------------------------------------
+
+    var LOCAL_INDEX_URL = '/api/system/local-index';
+    var LOCAL_INDEX_REFRESH_URL = '/api/system/local-index/refresh';
+    var LOCAL_INDEX_POLL_MS = 4000;
+
+    /* The button and the status line from LocalIndexController::card (GET /api/system/local-index -> card). */
+    function localIndexView(card) {
+        var refresh = isObject(card) && isObject(card.refresh) ? card.refresh : {};
+        var running = refresh.running === true;
+        return { running: running, text: String(refresh.text || ''), disabled: running,
+            label: running ? 'عم يحدّث…' : 'حدّث الفهرس هلق' };
+    }
+
+    /* run() (the button) POSTs the refresh job and returns at once; the page then asks GET /api/system/local-index every
+       few seconds while it runs, and reloads once it is over so the rows show the new numbers. Deps: fetchJson, render,
+       toast, schedule, reload; running: the page was opened while a refresh was running. */
+    function createLocalIndex(deps) {
+        var state = { running: deps.running === true, busy: false, timer: null };
+
+        function show(view) {
+            state.running = view.running;
+            deps.render(view);
+        }
+
+        function watch() {
+            if (state.timer === null && state.running) state.timer = deps.schedule(poll, LOCAL_INDEX_POLL_MS);
+        }
+
+        function poll() {
+            state.timer = null;
+            return deps.fetchJson(LOCAL_INDEX_URL, { method: 'GET' }).then(function (res) {
+                var card = res && res.ok && isObject(res.data) && isObject(res.data.card) ? res.data.card : null;
+                if (card) {
+                    var was = state.running;
+                    var view = localIndexView(card);
+                    show(view);
+                    if (was && !view.running) {
+                        deps.reload();
+                        return;
+                    }
+                }
+                watch();
+            }, function () {
+                watch();
+            });
+        }
+
+        function run() {
+            if (state.busy || state.running) return Promise.resolve(false);
+            state.busy = true;
+            show({ running: true, text: 'عم يبلّش تحديث الفهرس…', label: 'عم يحدّث…', disabled: true });
+            return deps.fetchJson(LOCAL_INDEX_REFRESH_URL, { method: 'POST', body: {} }).then(function (res) {
+                var data = res && res.ok && isObject(res.data) && res.data.status === 'success' ? res.data : null;
+                if (data && data.running === true) {
+                    deps.toast(String(data.message || 'بلّش تحديث الفهرس بالخلفية.'), 'success');
+                    watch();
+                    return true;
+                }
+                show(localIndexView(null));
+                if (data) deps.toast(String(data.message || 'ما بلّش التحديث.'), 'warning');
+                else deps.toast('ما بلّش التحديث: ' + requestError(res, 'الخادم ما ردّ.'), 'danger');
+                return false;
+            }, function () {
+                show(localIndexView(null));
+                deps.toast('ما قدرنا نوصل للخادم لنبدأ التحديث.', 'danger');
+                return false;
+            }).then(function (started) {
+                state.busy = false;
+                return started;
+            });
+        }
+
+        return { run: run, poll: poll, start: watch, state: state };
+    }
+
     var api = {
         lanesView: lanesView, LANES: LANES,
         publishView: publishView, publishRunningView: publishRunningView, createPublishCheck: createPublishCheck,
@@ -790,6 +872,8 @@
         SERVICE_KEYS: SERVICE_KEYS, RESULT_BUCKETS: RESULT_BUCKETS, REASONS: REASONS
     };
     if (typeof window !== 'undefined') window.LaqtaHealth = api;
+    api.localIndexView = localIndexView;
+    api.createLocalIndex = createLocalIndex;
 
     // ------------------------------------------------------------------
     // DOM
@@ -1315,5 +1399,34 @@
             // never pressed for the owner (the check may cost a background-removal call)
             if (window.location && window.location.hash === '#publish-check') publishButton.focus();
         }
+    }
+
+    // «فهرس المتاجر المحلي»: «حدّث الفهرس هلق» starts the background refresh; while one runs the status line follows it
+    var indexButton = $('index-refresh');
+    var indexStatus = $('index-status');
+    var indexLabel = $('index-refresh-label');
+
+    function renderLocalIndex(view) {
+        if (indexStatus) indexStatus.textContent = view.text;
+        if (indexLabel) indexLabel.textContent = view.label;
+        if (!indexButton) return;
+        indexButton.disabled = view.disabled;
+        if (view.disabled) indexButton.setAttribute('aria-busy', 'true');
+        else indexButton.removeAttribute('aria-busy');
+    }
+
+    if (indexButton) {
+        var localIndex = createLocalIndex({
+            running: indexButton.disabled === true,
+            fetchJson: fetchJson,
+            render: renderLocalIndex,
+            toast: function (text, variant) {
+                if (window.Laqta && window.Laqta.toast) window.Laqta.toast(text, { variant: variant });
+            },
+            schedule: function (fn, ms) { return window.setTimeout(fn, ms); },
+            reload: function () { window.location.reload(); }
+        });
+        indexButton.addEventListener('click', function () { localIndex.run(); });
+        localIndex.start();
     }
 })();

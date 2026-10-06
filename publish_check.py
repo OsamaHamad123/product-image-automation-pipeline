@@ -9,6 +9,8 @@
 #      على ملف مؤقت: قد يكلّف طلب عزل خلفية واحد (وقراءة Gemini لصندوق المنتج إن كان مفتاحها محفوظاً). عزل الخلفية
 #      متوقف بالإعدادات (none): ✅ بلا أي طلب مدفوع، لأن الاعتماد ينشرها كما هي (main.publish_image: bg_skipped).
 #      فشل رصيد أو مفتاح أو حصة PhotoRoom / remove.bg (bg_skip_offered): البطاقة تعرض زر «تجاوز عزل الخلفية».
+#      إلا إذا عزلتها طريقة محلية منزّلة (BG_FALLBACK=local، image_processor): ✅ بالرمز bg_fallback مع «رصيد PhotoRoom
+#      خلص، والعزل مشي بـ rembg» ونصيحة الشحن؛ وبلا طريقة محلية يبقى الفشل وزر التجاوز.
 #   3. upload: cloudinary_storage.upload_selftest_image (رافع النشر نفسه) إلى laqta_selftest/publish_check باسم ثابت
 #      يُستبدل، ثم destroy_selftest_image بعد كل رفع نجح: لا تبقى صورة، ولا تُلمس صورة منتج.
 #   4. sheet: الشيت كما يفتحه النشر (google_sheets.open_worksheet مع SPREADSHEET_TAB_NAME)، عمود الرابط بـ
@@ -100,6 +102,7 @@ QUALITY_FLAG_TEXT = {
     "upscaled": "الصورة المصدر صغيرة فكُبّرت",
     "too_small_on_canvas": "المنتج صغير على اللوحة",
     "kept_shadow": "بقي ظل ظاهر مع المنتج",
+    "dark_halo": "حواف فاتحة بتبين على الوضع الغامق",
 }
 METHOD_NAMES = {"photoroom": "PhotoRoom", "remove_bg_api": "remove.bg", "grabcut": "GrabCut (محلي)",
                 "rembg": "rembg (محلي)", "bria_rmbg": "Bria (محلي)", "none": "بدون عزل"}
@@ -129,9 +132,35 @@ TAB_ACTION = "النشر رح يكتب بتبويب «{title}» — إذا مش 
 
 # فشل عزل الخلفية عند PhotoRoom أو remove.bg بسبب الرصيد أو المفتاح أو الحصة: «تجاوز عزل الخلفية» (bg_removal_method =
 # none) بيخلي الاعتماد يمشي لحد ما ينحل. نفس القاعدة بـ HealthController::BG_SKIP_PATTERN و health.js و review/core.js
-BG_SKIP_CODE_RE = r"^(photoroom|removebg)_(no_key|401|402|403|429)$"
+# (القاعدة نفسها بـ image_processor.BILLING_CODE_RE: هي اللي بتفعّل العزل المحلي البديل BG_FALLBACK)
+BG_SKIP_CODE_RE = image_processor.BILLING_CODE_RE
 SKIP_ACTION = "اضغط «تجاوز عزل الخلفية»"
 BG_SKIPPED_NOTE = "عزل الخلفية متوقف بالإعدادات: الصورة بتنتشر متل ما هي"
+
+
+_LOCAL_NAMES = {"rembg": "rembg", "grabcut": "GrabCut"}
+
+
+def _fallback_note(fell, provider):
+    """
+    (الملاحظة، نصيحة الشحن) لما فشل المزوّد السحابي برصيد أو مفتاح أو حصة (fell = ProcessResult.fallback_from) وعزلت
+    الصورة طريقة محلية مجانية (BG_FALLBACK=local): «رصيد PhotoRoom خلص، والعزل مشي بـ rembg» ثم نصيحة الشحن لأفضل جودة.
+    النصيحة جزء من نص الخطوة لأن بطاقة الصحة ما بتعرض «ما العمل» لخطوة ✅.
+    """
+    method = str(fell.get("method") or "")
+    name = METHOD_NAMES.get(method, method or "؟")
+    rest = str(fell.get("code") or "").split("_", 1)[-1]
+    local = _LOCAL_NAMES.get(provider, PROVIDER_NAMES.get(provider, provider))
+    if rest == "no_key":
+        why, advice = f"مفتاح {name} مش محفوظ", f"ضيف مفتاح {name} بالإعدادات"
+    elif rest in ("401", "403"):
+        why, advice = f"{name} رفض المفتاح", f"حدّث مفتاح {name} بالإعدادات"
+    elif rest == "429":
+        why, advice = f"حصة {name} خلصت", f"استنى شوي أو زد حصة {name}"
+    else:
+        why, advice = f"رصيد {name} خلص", f"اشحن رصيد {name}"
+    return (f"{why}، والعزل مشي بـ {local}",
+            f"{advice} لأفضل جودة: العزل المحلي أقل دقة، وفحص القص ممكن يرفض صور أكتر.")
 
 
 def bg_skip_offered(code):
@@ -362,15 +391,23 @@ def step_process(ctx):
         # bg_skipped)، وما في أي طلب مدفوع
         return _outcome(OK, f"{method_line} {BG_SKIPPED_NOTE} على {size}، بدون أي طلب عزل مدفوع. صورة خلفيتها "
                         "مش بيضا بتبين خلفيتها.", "", "bg_skipped", **data)
+    fell = getattr(result, "fallback_from", None)
+    fell = fell if isinstance(fell, dict) and fell.get("method") else None
+    fb_note, fb_advice = _fallback_note(fell, result.provider) if fell else ("", "")
+    if fell:
+        data["fallback_from"] = {"method": str(fell["method"]), "code": str(fell.get("code") or "")}
     if result.isolated:
-        detail = f"{method_line} انعزلت الخلفية بـ {provider}، و{size} جاهزة."
+        if fell:
+            detail = f"{method_line} {fb_note}، و{size} جاهزة. {fb_advice}"
+        else:
+            detail = f"{method_line} انعزلت الخلفية بـ {provider}، و{size} جاهزة."
         if notes:
             detail += f" ملاحظة: {_flags_text(notes)}."
-        return _outcome(OK, detail, "", "", **data)
+        return _outcome(OK, detail, "", "bg_fallback" if fell else "", **data)
     if flags:
         import main as automation
         allowed = set(flags) <= automation.PRESENTATION_FLAGS
-        detail = (f"{method_line} العزل اشتغل بـ {provider}، بس فحص القص لقى على هالصورة: {_flags_text(flags)}. "
+        detail = (f"{method_line} {fb_note + '. ' if fb_note else ''}العزل اشتغل بـ {provider}، بس فحص القص لقى على هالصورة: {_flags_text(flags)}. "
                   + ("بالاعتماد بتنطلب منك موافقة لتنشرها رغم ذلك." if allowed
                      else "بالاعتماد هالصورة بالذات ما بتنتشر (الخلفية ما انعزلت منيح)."))
         return _outcome(WARN, detail, "إذا تكرر هالشي على صور كتير، جرّب مزوّد عزل تاني من تبويب «معالجة الصور».",
@@ -635,6 +672,9 @@ def _summary(steps):
     if any(s.get("code") == "bg_skipped" for s in steps):
         return OK, ("النشر شغّال بدون عزل الخلفية: نزّلنا الصورة، وحطيناها متل ما هي على لوحة بيضا (عزل الخلفية متوقف "
                     "بالإعدادات)، ورفعناها على Cloudinary ومسحناها، وحساب الخدمة بيقدر يكتب بالشيت.")
+    if any(s.get("code") == "bg_fallback" for s in steps):
+        return OK, ("النشر شغّال: رصيد مزوّد العزل خلص فعزلنا الخلفية بطريقة محلية مجانية (اشحن الرصيد لأفضل جودة)، "
+                    "ورفعنا الصورة على Cloudinary ومسحناها، وحساب الخدمة بيقدر يكتب بالشيت.")
     return OK, ("النشر شغّال: نزّلنا الصورة، وعزلنا خلفيتها، ورفعناها على Cloudinary ومسحناها، وحساب الخدمة "
                 "بيقدر يكتب بالشيت.")
 

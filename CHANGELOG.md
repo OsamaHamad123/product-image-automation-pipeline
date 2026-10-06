@@ -11,6 +11,157 @@ causes: the quality gate threw away white-background packshots, an unverified "l
 success, siblings of the right product outranked it, and reviewers' rejections were never remembered. The search
 core was rebuilt and wired into the queue, the dashboard actions and the sheet writes. Every claim below has a test.
 
+### Added: lane badge, «مؤكدة تماماً» filter and progress line in the review screen
+
+The lane of every engine pick (`lane:strict|unsure|other`, `catalog_match.decide.lane_of`) is now visible to the reviewer:
+
+- **Badge**: a bulk card and the single-product pick show «مؤكدة تماماً» (strict, green) or «القارئ مش متأكد»
+  (unsure, amber), and nothing for lane `other`, a plain candidate or a cache hit. The screen reads the lane from the
+  `lane:<name>` reason it already receives (`R.laneOf`, the same rule as `decide.lane_of`, also for picks stored before
+  the lanes); a pick that carries a review warning is never shown as strict.
+- **Filter**: bulk mode gets «مؤكدة تماماً» (strict picks only) next to «مقترحة بلا تحذير».
+- **Progress line** at the top of bulk mode: «لحتى ينفتح النشر التلقائي لكل الماركات المؤكدة: اعتمدت X من Y اقتراح
+  مؤكد تماماً، وبعد Z اعتماد متتالي بلا رفض»; when lane `strict` is ready it says «النشر التلقائي جاهز للتشغيل من
+  الإعدادات ← النشر الآلي». Z is `local_cache_db.more_needed` (reviews_needed minus reviewed: the same Wilson formula and
+  thresholds as the brands), added to `review_stats.lanes.*.more_needed` and to the cached
+  `/api/system/review-lanes` (cache key `review_lanes_v2`); the screen reuses that call (once per minute at most, only in
+  bulk mode), no new bridge call. No numbers (call failed) means no line.
+
+### Added: free local fallback when a cloud isolation method runs out of credit
+
+When PhotoRoom's credit ran out every approval failed until the owner pressed «تجاوز عزل الخلفية» on the Health page.
+New setting `BG_FALLBACK` (Settings → «معالجة الصور», shown only when rembg is installed, with the hint «عزل محلي بموديل
+BiRefNet (لازم يكون منزّل)»; `system_settings.bg_fallback`, `config.BG_FALLBACK`, `catalog_match.settings.bg_fallback()`,
+`processing_profile.bg_fallback`):
+
+- **`local` (default)**: when PhotoRoom or remove.bg fails with a credit / key / quota code (`photoroom_no_key|401|402|403|429`,
+  the same rule as `publish_check.BG_SKIP_CODE_RE`), `image_processor` isolates the same image with **rembg and the BiRefNet
+  model** (`REMBG_MODEL`: `birefnet-general` by default, `birefnet-general-lite` allowed; anything else reads as the default;
+  `config.REMBG_MODEL`, `system_settings.rembg_model`, `catalog_match.settings.rembg_model()`), through one
+  `rembg.new_session(model)` per process that is reused (a model that cannot be prepared is tried once per worker run, not once
+  per product). GrabCut and the small u2net-style models eat white packaging such as milk cartons, so they are **never** part
+  of the automatic fallback: GrabCut and the plain rembg choice stay manual Settings choices (the manual rembg choice keeps its
+  own model). The result goes through the same crop gate as any isolation: a cut that fails the gate is refused or sent to
+  review like a normal one. A timeout, a network error, a 5xx or a bad output never falls back. **`off`** is the old
+  behaviour; so is `local` with rembg not installed (the original error comes back, with the skip button), or when rembg
+  itself fails. It never falls back to «no isolation»: that stays the owner's button.
+- **Billing breaker**: after such a failure the cloud method is skipped for 30 minutes in the process
+  (`image_processor.CloudBreaker`: thread-safe, injectable clock, `reset_cloud_breaker()` and `reset_rembg_sessions()` called at
+  the start of every worker run), so a run of 100 products pays the failed call once. A missing key is not paused (it costs nothing), the breaker is
+  off under a cassette like `fetch.HostBreaker`, and it is not used at all when the fallback is off or rembg is not installed.
+- **Records**: `ProcessResult.provider` is `rembg` and `fallback_from` is `{method, code}`; `main.publish_image`
+  returns `bg_fallback` `{provider, from, code}`, the approval response carries it and the toast says «انعزلت الخلفية بطريقة
+  محلية لأن رصيد PhotoRoom خلص» (remove.bg likewise); the worker counts them into the run report (Telegram line and the
+  Health «آخر تشغيل» card, like `bg_skipped`).
+- **«فحص النشر» step 2** is ✅ (`bg_fallback`) with «رصيد PhotoRoom خلص، والعزل مشي بـ rembg» and the advice to top up for
+  best quality; with no local method it keeps today's message and the «تجاوز عزل الخلفية» button.
+- The test suite pins `BG_FALLBACK=off` in `tests/conftest.py` so it does not depend on what is installed; the new tests
+  (`tests/test_bg_fallback.py`) stub the rembg module and its session and download nothing.
+
+### Added: the local catalog index refreshes itself, and Sharjah Co-op joins it
+
+The index was built by a manual command the owner never ran, so it was empty or stale while the owner's winners came
+from sharjahcoop.ae (9 of 20), amazon.ae, lulu and carrefour.
+
+- **Sharjah Co-op** in `catalog_stores.json`, enabled: `python scripts/build_catalog_index.py --discover` found
+  `https://www.sharjahcoop.ae/en/sitemap.xml` (46 sitemap files; the English `Product-en-AED-0..13.xml` hold about
+  70,000 product pages `/en/<slug>/p/<id>`; the Arabic ones repeat them). Its robots.txt asks for a 10 second
+  Crawl-delay, which the harvester keeps (a full read is about 16 requests, 3 minutes), and a `Visit-time: 0400-0845`
+  (UTC) window, which the harvester keeps too: it parses `Visit-time` (also a window across midnight), and outside it
+  reads nothing but robots.txt and reports the store `outside_visit_time`. That is neither blocked nor failed: no
+  `catalog_harvests` row, no retry wait, asked again at the next refresh; the button follows the same rule. The card
+  says «بيسمح بالقراءة بين 08:00 و12:45 بتوقيت الإمارات» (the window from `temp/local_index_robots.json`, in Asia/Dubai).
+- **`catalog_match/index_refresh.py`**: at the start of a nightly run and of every worker run, a background thread
+  (never awaited, a daemon) reads again the enabled stores whose newest complete harvest is older than
+  `LOCAL_INDEX_REFRESH_DAYS` (7) or that were never harvested, never-harvested first, then the stalest, within
+  `LOCAL_INDEX_REFRESH_MAX_S` (300 s per refresh; the store being read stops at its next sitemap file and is recorded
+  `partial`; 0 turns it off), behind `LOCAL_INDEX_ENABLED`. A store that answered BLOCKED is skipped for 7 days (a
+  button click does not push it either); a partial or failed one is retried after 6 hours. One refresh at a time across
+  processes (`temp/local_index_refresh.lock`); every harvest is a `catalog_harvests` row like the script's.
+  `harvest(should_stop=...)` in `catalog_match/sitemaps.py`; `DbCatalogStore.harvest_ages()`;
+  `build_catalog_index.py --refresh [--force]` runs the same refresh in the foreground.
+- **Health card «فهرس المتاجر المحلي»** (`LocalIndexController`, `health.js` `createLocalIndex`): per store the pages,
+  «من 3 أيام» since the last successful harvest and the status (تمام / ممنوع / ما انجمع أبداً / جزئي / فشل / موقوف);
+  **«حدّث الفهرس هلق»** (POST `/api/system/local-index/refresh`, CSRF like every POST) starts the same refresh as a
+  detached job through the bridge action `local_index_refresh` and answers at once; the progress shows on reload
+  (`temp/local_index_refresh.json`, GET `/api/system/local-index`).
+- **Run report**: new `local_index: {answered, asked}` (`local_cache_db.run_local_index_answers`: products whose
+  `provider_health` holds a `local_index` call that returned candidates), shown on the card as «الفهرس جاوب على 14 من 58
+  منتج بآخر تشغيل». Settings `LOCAL_INDEX_REFRESH_DAYS` and `LOCAL_INDEX_REFRESH_MAX_S` (.env, `catalog_match.settings`).
+- Tests: `tests/catalog_match/test_cm_index_refresh.py` (decision, budget, thread, blocked store, stores file; no
+  network), `tests/test_local_index_card.py` (PHP helpers, page script under node, the Laravel kernel). The test suite
+  runs with the automatic refresh off (`tests/conftest.py`).
+
+### Added: «باركودات من صفحات المتاجر» writes the store pages' barcodes into the sheet on request
+
+The barcodes the store pages stated for approved rows without one (`resolved_products.page_gtin`) no longer need
+copy-pasting from `scripts/export_barcodes.py`:
+
+- **Bridge `barcode_suggestions`** (read only, from the cached sheet rows, else the queue's copy of each row; never
+  Google): approved rows with a `page_gtin` whose barcode cell is empty, with row, name, brand, GTIN and store domain.
+  A row with a valid barcode is left out; a GTIN two rows share (or another row already holds) and a cell holding
+  text are listed apart and never written.
+- **Bridge `barcode_write {items: [{row, sku_key, gtin}]}`**: checks each checksum again and that it equals the stored
+  `page_gtin`; finds the barcode column by its header (`resolve_columns`; no column: refused, none added); queues one
+  MariaDB outbox write per row with the row's identity (name, size, brand), never through Redis or a direct write;
+  returns written, queued and skipped (with the reason). The flush writes a `barcode` cell only when it is empty at
+  write time (`google_sheets.FILL_ONLY_KEYS`), and a moved or changed row is a CONFLICT, not an overwrite.
+- **Run page card** «باركودات لقيناها من صفحات المتاجر (N)»: rows ticked, duplicates and filled cells apart, the button
+  «اكتب الباركودات المختارة بالشيت» behind a confirm, the result in Levantine Arabic. `GET /api/run/barcode-suggestions`,
+  `POST /api/run/barcode-write` (CSRF, rows checked on the server).
+- **Lookups after a barcode is added**: a written row's queue row takes the barcode key with the old one as
+  `alt_sku_key` (`local_cache_db.rekey_queue_rows`; the nightly enqueue does the same for a barcode pasted by hand),
+  `get_products` returns `alt_sku_key`, and the catalog (approval, rejected images), the review approval guard,
+  «تراجع عن الرفض» and `get_page_barcodes` look under both keys, so approvals, rejections and review decisions stay
+  with the product.
+
+### Added: Ubuntu server deployment kit (`deploy/ubuntu/`, `docs/deploy_ubuntu.md`)
+
+The owner runs everything on Windows today and will deploy from GitHub to Ubuntu 22.04 / 24.04. Nothing in the
+pipeline or the dashboard changed; the kit only adds files:
+
+- `install.sh`: idempotent (`--dry-run` previews it). Packages (PHP 8.3, from ppa:ondrej/php on 22.04), `laqta` user,
+  `.venv` + `requirements.txt`, `composer install --no-dev`, `key:generate` only when `APP_KEY` is empty,
+  `config:cache` / `route:cache`, MariaDB database and user from `LAQTA_DB_*` variables, `local_cache_db.init_db()`,
+  units, a php-fpm pool running as `laqta`, the nginx site. It never creates or edits `.env`; it prints which keys
+  of `.env.example` are missing (by name). `--with-birefnet [--lite] [--gpu]` installs rembg and downloads the model.
+  `PythonBridge` already prefers `<repo>/.venv/bin/python`, so no PHP change was needed.
+- systemd: `laqta-nightly.service` + `.timer` (`run_nightly.py --max-hours ${NIGHTLY_MAX_HOURS}`, 02:00),
+  `laqta-sync-worker.service` (Redis only, `Restart=always`), `laqta-backup.service` + `.timer` (gzip dump, 14 days).
+- nginx `laqta.conf`: HTTP basic auth on every request (the dashboard has no login of its own), dotfiles,
+  `/storage`, `/vendor` and everything outside `public/` denied, HTTPS through certbot (`certonly --webroot`; a re-run
+  of `install.sh` renders the 443 server), or `--local-only` for an SSH tunnel / Tailscale.
+- `scripts/server_check.py`: read-only Arabic health check (✅ / ⚠️ / ❌, exit 1 on failure): Python and venv,
+  `.env` key names, database and tables, sheet access (read-only), Cloudinary, background removal, disk, units, nginx.
+- Tests: `tests/test_deploy_ubuntu.py`, `tests/test_server_check.py`.
+
+
+### Added: transparent publish master for the app's dark and light themes
+
+The published image is no longer flattened onto a white square, which looked broken in dark mode.
+
+- **`OUTPUT_BACKGROUND`**: `transparent` (new default) or `white` (the earlier canvas, unchanged). It flows like
+  `OUTPUT_CANVAS_SIZE` through `.env`, `system_settings.output_background`, `catalog_match.settings` and
+  `processing_profile` (`background`). Settings «معالجة الصور» has one select, validated on the server.
+- **Transparent canvas** (`cutout_finish.py`, called once from `image_processor.process_product_image_result`): an
+  RGBA PNG square of `OUTPUT_CANVAS_SIZE`, with the product trimmed to its alpha box, its longer side filling
+  `OUTPUT_PRODUCT_FILL` (default 0.88), and centred. There is no shadow; the app adds its own per theme.
+- **Cloudinary**: the PNG is uploaded as is (no flattening). Delivery stays `q_auto,f_auto`, which serves WebP or AVIF
+  with alpha and never JPEG for a transparent asset. `cloudinary_storage.white_version_url` builds the white JPEG of
+  the same asset (`b_white,q_auto,f_jpg`), and approvals return it as `white_url`. Duplicate fingerprints (pHash,
+  colour signature) read the canvas as it looks on white, so they still match images published before.
+- **Finishing for every isolated cutout**: an enclosed transparent hole whose source pixels differ from the source
+  backdrop (estimated from the frame ring) is filled from the source, for example a white panel the cutout model ate
+  from a milk carton. A hole within about 2 levels of a flat backdrop stays open, for example a jug handle.
+  Background spill on soft edges is un-blended: `F = (C − (1−a)·B)/a`.
+- **Halo check on #121212**: a light rim that would show in dark mode leads to one PhotoRoom re-isolation when another
+  provider made the cutout and PhotoRoom is configured and not paused. Otherwise the image goes to review with the
+  presentation flag `dark_halo` («حواف فاتحة بتبين على الوضع الغامق»), and the reviewer can publish it anyway.
+- **Not cut out**: an image published with the method `none` stays opaque on white and carries the note
+  `not_cut_out` («الصورة مش مقصوصة: رح تبين بخلفيتها بالتطبيق»).
+- **Review**: the published image has a «غامق / فاتح / مربعات» toggle (`js/review/theme_preview.js`). It changes
+  only the preview background, makes no request, and is remembered in localStorage.
+
 ### Added: auto-publish earned across brands (lanes, shadow mode first)
 
 With about 20 products per brand no brand ever reached the 30 reviewed pre-checks (189 for a 98% lower bound), so

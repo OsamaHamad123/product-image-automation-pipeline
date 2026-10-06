@@ -158,5 +158,12 @@
         return null;
     }
 
-    Object.assign(R, { ICONS, icon, el, bdi, clear, safeHttpUrl, imageUrl, img, csrfToken, requestJson, toast });
+    // شارة فئة اختيار المحرك (R.laneOf): «مؤكدة تماماً» أخضر، «القارئ مش متأكد» عنبري، ولا شي لباقي الاقتراحات
+    function laneBadge(c) {
+        const lane = R.laneOf(c);
+        if (!lane || !R.LANE_TEXT[lane]) return null;
+        return el('span', { className: `rv-lane rv-lane--${lane}`, dataset: { lane: lane }, title: R.LANE_TITLE[lane], text: R.LANE_TEXT[lane] });
+    }
+
+    Object.assign(R, { ICONS, icon, el, bdi, clear, safeHttpUrl, imageUrl, img, csrfToken, requestJson, toast, laneBadge });
 })(typeof window !== 'undefined' ? window : globalThis);

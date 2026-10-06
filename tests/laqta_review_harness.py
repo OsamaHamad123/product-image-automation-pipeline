@@ -18,7 +18,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 REVIEW_JS = ROOT / "dashboard" / "public" / "js" / "review"
-SCRIPTS = ["core", "ui", "jobs", "single", "bulk", "app"]
+# theme_preview.js first, as catalog.blade.php loads it (single.js calls it while drawing the published image)
+SCRIPTS = ["theme_preview", "core", "ui", "jobs", "single", "bulk", "app"]
 NODE = shutil.which("node")
 
 
@@ -349,6 +350,7 @@ globalThis.fetch = (url, init = {}) => {
         if (path === '/api/products-json') data = { status: 'success', products: JSON.parse(JSON.stringify(FIXTURE.products)) };
         else if (path === '/api/review/queue-state') data = JSON.parse(JSON.stringify(FIXTURE.queue));
         else if (path === '/api/failures/retry') data = FIXTURE.retry || { status: 'success', requeued: (call.body.barcodes || []).length, not_found: 0 };
+        else if (path === '/api/system/review-lanes') data = FIXTURE.lanes || { status: 'success' };
         else if (path === '/api/review/explain-backfill') data = FIXTURE.backfill || { status: 'success', filled: 0, checked: 0 };
         else if (path === '/api/settings/bg-method') data = FIXTURE.bgMethod || { status: 'success', method: (call.body || {}).method, previous: 'photoroom' };
         call.resolve(response(data, FIXTURE.status && FIXTURE.status[path] || 200));

@@ -770,7 +770,7 @@ TOUCHED = list(SECRETS) + ["auto_publish_enabled", "auto_publish_brands", "searc
                            "verifier_strong", "verifier_monthly_budget_usd", "model_prices", "expansion_enabled",
                            "expansion_max_calls", "visual_search", "serpapi_lens_price_usd", "gtin_policy",
                            "local_index_enabled", "local_index_max_pages", "bg_removal_method_previous",
-                           "worker_concurrency", "auto_publish_strict_lane"]
+                           "worker_concurrency", "auto_publish_strict_lane", "bg_fallback"]
 
 
 def _sql(db, statement, params=()):
@@ -1058,8 +1058,16 @@ def test_health_lanes_endpoint_reads_the_bridge_once_and_caches(app_env):
     first, second = (json.loads(o["body"]) for o in out)
     assert out[0]["status"] == 200 and first == second and set(first["lanes"]) == {"strict", "unsure", "other"}
     assert app_env["calls"].read_text().split().count("review_stats") == 1
+    # the bulk review screen reads its «لحتى ينفتح النشر التلقائي» line from this same cached call
+    assert first["lanes"]["strict"]["more_needed"] == 189 and first["lanes"]["strict"]["ready"] is False
     down = _kernel(dict(app_env["env"], LQ_STUB_MODE="down"), [["GET", "/api/system/review-lanes?refresh=1", {}]])
     assert down[0]["status"] == 500 and json.loads(down[0]["body"])["status"] == "error"
+
+
+def test_health_lanes_endpoint_says_a_ready_lane_needs_no_more_reviews(app_env):
+    out = _kernel(dict(app_env["env"], LQ_STUB_MODE="lane_ready"), [["GET", "/api/system/review-lanes", {}]])
+    strict = json.loads(out[0]["body"])["lanes"]["strict"]
+    assert (strict["prechecked"], strict["accepted"], strict["ready"], strict["more_needed"]) == (189, 189, True, 0)
 
 
 def test_extra_sources_form_saves_checks_and_shows_its_section(app_env):

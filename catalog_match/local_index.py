@@ -264,6 +264,9 @@ class MemoryCatalogStore:
         if rec.page_title:
             self._add_tokens(row_id, rec.page_title)
 
+    def harvest_ages(self) -> Dict[str, Dict[str, Any]]:
+        return {}              # the memory store keeps no harvest log
+
     def stats(self) -> List[Dict[str, Any]]:
         by_store: Dict[str, Dict[str, Any]] = {}
         for r in self.rows.values():
@@ -406,6 +409,31 @@ class DbCatalogStore:
             conn.commit()
         finally:
             conn.close()
+
+    def harvest_ages(self) -> Dict[str, Dict[str, Any]]:
+        """Per store, from the harvest log, in the database's own clock (no time zone to get wrong):
+        {ok_age_s: seconds since the newest complete harvest (status ok / empty) or None,
+         last_status, last_age_s: the newest harvest of any status}. Used by catalog_match.index_refresh."""
+        conn = self._conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT store, TIMESTAMPDIFF(SECOND, MAX(finished_at), NOW()) AS age_s "
+                            "FROM catalog_harvests WHERE status IN ('ok', 'empty') AND finished_at IS NOT NULL "
+                            "GROUP BY store")
+                ok = {r["store"]: r["age_s"] for r in cur.fetchall()}
+                cur.execute("SELECT h.store, h.status, TIMESTAMPDIFF(SECOND, h.finished_at, NOW()) AS age_s "
+                            "FROM catalog_harvests h JOIN (SELECT store, MAX(id) AS id FROM catalog_harvests "
+                            "GROUP BY store) m ON m.id = h.id")
+                last = {r["store"]: r for r in cur.fetchall()}
+        finally:
+            conn.close()
+        out: Dict[str, Dict[str, Any]] = {}
+        for store in set(ok) | set(last):
+            h = last.get(store) or {}
+            out[store] = {"ok_age_s": None if ok.get(store) is None else max(0, int(ok[store])),
+                          "last_status": str(h.get("status") or ""),
+                          "last_age_s": None if h.get("age_s") is None else max(0, int(h["age_s"]))}
+        return out
 
     # -- search -------------------------------------------------------------
     _ROW_COLUMNS = ("p.id, p.store, p.url, p.slug_text, p.page_title, p.image_url, p.image_width, p.image_height, "
