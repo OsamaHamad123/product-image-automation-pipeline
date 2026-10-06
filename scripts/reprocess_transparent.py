@@ -97,6 +97,13 @@ def running(state, now=None) -> bool:
     return state.get("state") in ("starting", "running") and now - float(state.get("updated_at") or 0) < STALE_S
 
 
+def white_output() -> bool:
+    """The owner publishes white canvases (OUTPUT_BACKGROUND = white): a white master is then no mistake to redo."""
+    from catalog_match import settings
+
+    return settings.output_background() != "transparent"
+
+
 def run_active():
     """Is an automation run holding the lock (main.read_lock / lock_verdict, as migrate_delivery_urls reads it)?"""
     import main
@@ -262,6 +269,9 @@ def apply(args, worksheet=None, probe_fn=None, recut_fn=None, publish_fn=None, s
     if processing_profile.current().skips_background:
         _log("Background removal is off in the settings (bg_removal_method = none): nothing can be cut out.")
         return 2
+    if white_output():
+        _log("OUTPUT_BACKGROUND is 'white' in the settings: the owner publishes white canvases, nothing is redone.")
+        return 2
     previous = read_state(state_path)
     if running(previous) and previous.get("pid") != os.getpid():
         _log("Another reprocess batch is running; wait for it to end.")
@@ -318,6 +328,8 @@ def start_detached(max_pictures, max_usd, popen=None, python=None, state_path=ST
     try:
         if processing_profile.current().skips_background:
             return {"started": False, "reason": "bg_off"}
+        if white_output():
+            return {"started": False, "reason": "white_output"}
         if running(read_state(state_path)):
             return {"started": False, "reason": "running"}
         if run_active():

@@ -104,6 +104,8 @@ class ReviewController extends Controller
                 'bgMethod' => url('/api/settings/bg-method'),
                 // سطر «النشر التلقائي لكل الماركات المؤكدة» بوضع الجملة: أرقام فئة strict من بطاقة الصحة (HealthController::reviewLanes)
                 'reviewLanes' => url('/api/system/review-lanes'),
+                // «فحص القص» (RecutController): الصور المنشورة على الغامق والفاتح والمربعات، رابط تحت فلاتر القائمة
+                'cutoutCheck' => route('dashboard.cutout_check'),
             ],
             // طريقة عزل الخلفية الحالية ونص تأكيد التجاوز؛ null بلا قاعدة بيانات (ما في زر لأن الحفظ رح يفشل)
             'bg' => $dbOnline ? self::bgConfig() : null,

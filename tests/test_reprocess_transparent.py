@@ -501,6 +501,10 @@ def test_apply_refuses_during_a_run_and_while_another_batch_runs(world, monkeypa
     rpt.write_state({"state": "running", "pid": -1}, str(world["state"]))
     assert world["run"](["--apply"])[0] == 2
     assert "Another reprocess batch is running" in capsys.readouterr().out
+    import config
+    monkeypatch.setattr(config, "OUTPUT_BACKGROUND", "white")            # the owner publishes white: a white master is no mistake
+    assert world["run"](["--apply"])[0] == 2
+    assert "OUTPUT_BACKGROUND is 'white'" in capsys.readouterr().out and world["cloud"].uploads == []
 
 
 def test_a_busy_row_is_left_for_the_next_run(world):

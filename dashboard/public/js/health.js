@@ -1013,6 +1013,10 @@
             return { text: 'عزل الخلفية متوقف بالإعدادات، فما منقدر نعيد قص الصور هلق. رجّعه أول من تبويب «معالجة الصور».',
                 tone: 'warning', form: false, max: 0 };
         }
+        if (data.white_output) {
+            return { text: 'الإعدادات بتنشر الصور على خلفية بيضا، فالصور البيضا مش غلط وما في شي نعيده.',
+                tone: 'muted', form: false, max: 0 };
+        }
         var todo = count(plan.todo);
         var parts = [];
         if (todo === 0) {

@@ -11,10 +11,7 @@ actions reprocess_plan / reprocess_start.
 
 import importlib.util
 import json
-import os
 import subprocess
-import sys
-from pathlib import Path
 
 import pytest
 from laqta_review_harness import NODE
@@ -88,6 +85,7 @@ out.many = plan({ todo: 75, transparent: 0, calls: 75, price: 0.02, usd: 1.5, wo
 out.none = plan({ todo: 0, transparent: 12 });
 out.local = plan({ todo: 3, price: 0, calls: 0, usd: 0 });
 out.off = plan({ todo: 9 }, { bg_off: true });
+out.white = plan({ todo: 9 }, { white_output: true });
 out.expired = H.reprocessPlanView({ ok: false, status: 419, data: null });
 out.running = H.reprocessBatchText({ state: 'running', running: true, done: 3, planned: 50, max: 20, spent_usd: 0.06, current: 'Almarai Laban' });
 out.done = H.reprocessBatchText({ state: 'max', running: false, done: 20, spent_usd: 0.4, needs_look: 2 });
@@ -103,6 +101,7 @@ console.log(JSON.stringify(out));
     assert out["none"]["form"] is False and "كل الصور اللي بالشيت شفافة" in out["none"]["text"]
     assert "ما في تكلفة" in out["local"]["text"]
     assert out["off"]["form"] is False and "عزل الخلفية متوقف" in out["off"]["text"]
+    assert out["white"]["form"] is False and "خلفية بيضا" in out["white"]["text"]
     assert "انتهت صلاحية الصفحة" in out["expired"]["text"]
     assert out["running"] == "عم نعيد القص: خلص 3 من 20، والتكلفة لهلق \u2066$0.06\u2069. هلق: «Almarai Laban»."
     assert out["done"].startswith("آخر دفعة وقفت عند عدد الصور اللي حددته: انعادت 20 صورة شفافة")
@@ -304,6 +303,7 @@ def test_start_detached_launches_one_capped_apply_and_refuses_while_one_runs(mon
 
     rpt = script_module()
     monkeypatch.setattr(config, "BG_REMOVAL_METHOD", "photoroom", raising=False)
+    monkeypatch.setattr(config, "OUTPUT_BACKGROUND", "transparent", raising=False)
     monkeypatch.setattr(rpt, "run_active", lambda: False)
     launched = []
     state, log = tmp_path / "state.json", tmp_path / "rp.log"
@@ -321,6 +321,9 @@ def test_start_detached_launches_one_capped_apply_and_refuses_while_one_runs(mon
     monkeypatch.setattr(rpt, "run_active", lambda: True)
     assert rpt.start_detached(5, 1, popen=lambda *a, **k: pytest.fail("during a run"), state_path=str(state),
                               log_path=str(log))["reason"] == "run_active"
+    monkeypatch.setattr(config, "OUTPUT_BACKGROUND", "white")
+    assert rpt.start_detached(5, 1, popen=lambda *a, **k: pytest.fail("white output"), state_path=str(state),
+                              log_path=str(log))["reason"] == "white_output"
     monkeypatch.setattr(config, "BG_REMOVAL_METHOD", "none")
     assert rpt.start_detached(5, 1, popen=lambda *a, **k: pytest.fail("bg off"), state_path=str(state),
                               log_path=str(log))["reason"] == "bg_off"
