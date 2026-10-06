@@ -31,7 +31,7 @@ Only what a store publishes for crawlers is read, and nothing is worked around:
 * Sitemap indexes are followed to MAX_DEPTH. A .gz sitemap is decompressed to at most MAX_XML_BYTES.
   A document with a DOCTYPE, or not UTF-8 (the sitemap protocol's encoding), is refused (no entity
   expansion), and only <loc> / <lastmod> are read. A broken file is one failed sitemap, never the
-  end of the run.
+  end of the run; MAX_UNANSWERED files in a row without any answer (timeouts) end that store's turn ('error').
 * Only URLs on the store's hosts whose path matches its product pattern are kept.
 """
 
@@ -49,7 +49,7 @@ from collections import deque
 from datetime import datetime, timezone
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Collection, Dict, List, Optional, Sequence, Tuple
 from urllib.parse import urljoin, urlsplit
 
 logger = logging.getLogger(__name__)
@@ -68,6 +68,7 @@ BLOCK_STATUSES = (401, 403, 429)
 DISCOVER_URLSETS = 3
 SAMPLES = 5
 BATCH = 1000
+MAX_UNANSWERED = 3           # sitemap files in a row that timed out or lost the connection: the store stopped answering
 
 _DOCTYPE_RE = re.compile(rb"<!DOCTYPE", re.I)
 _HTML_START_RE = re.compile(rb"<(?:!doctype\s+html|html)\b", re.I)
@@ -477,9 +478,13 @@ class SitemapHarvester:
     # -- harvest ------------------------------------------------------------
     def harvest(self, store: StoreConfig, on_urls: Optional[Callable[[List[Tuple[str, Optional[str]]]], Any]] = None,
                 max_urls: Optional[int] = None, max_sitemaps: Optional[int] = None,
-                discover: bool = False, should_stop: Optional[Callable[[], bool]] = None) -> HarvestReport:
-        """should_stop: asked before every sitemap file is read; True ends the harvest there (status partial,
-        'truncated': the automatic refresh's time budget, catalog_match.index_refresh)."""
+                discover: bool = False, should_stop: Optional[Callable[[], bool]] = None,
+                skip_urls: Optional[Collection[str]] = None) -> HarvestReport:
+        """should_stop: asked before every sitemap file is read and between the batches of a long URL list; True ends
+        the harvest there (status partial, 'truncated': the automatic refresh's time budget, catalog_match.index_refresh;
+        a list cut part-way is marked 'stopped' in the tree). skip_urls: URL lists an unfinished refresh already read
+        (index_refresh's resume): they are not read again, the indexes still are.
+        MAX_UNANSWERED sitemap files in a row without an answer (timeout, lost connection) end the store as 'error'."""
         rep = HarvestReport(store=store.key)
         robots = self.robots(store)
         rep.robots = robots.status if robots.http_status is None else f"{robots.status} (http {robots.http_status})"
@@ -513,7 +518,7 @@ class SitemapHarvester:
         queue = deque((url, 0) for url in starts)
         seen = set()
         parent_of: Dict[str, str] = {}       # a child sitemap -> the index that listed it (the tree's 'parent')
-        emitted = urlsets = failed = 0
+        emitted = urlsets = failed = unanswered = 0
         start_answers: List[str] = []        # why each starting point gave nothing, while nothing was read
         while queue or (guesses and rep.sitemaps_read == 0 and len(rep.started_from) < len(guesses)
                         and "html" not in start_answers):      # an HTML page at the first guess: a bot check
@@ -528,6 +533,9 @@ class SitemapHarvester:
             why = self._skip_reason(store, robots, url, depth)
             if why:
                 rep.skipped.append((url, why))
+                continue
+            if skip_urls and url in skip_urls:
+                rep.skipped.append((url, "read by the last refresh"))
                 continue
             if discover and urlsets >= DISCOVER_URLSETS and "index" not in url.lower():
                 rep.skipped.append((url, "not read (discover)"))
@@ -544,6 +552,11 @@ class SitemapHarvester:
             body, status, error = self.get(url, store)
             if status in BLOCK_STATUSES:
                 rep.status, rep.error = "blocked", f"http_{status} on {url}: store skipped"
+                break
+            unanswered = unanswered + 1 if body is None and error in ("timeout", "connection_error") else 0
+            if unanswered >= MAX_UNANSWERED:          # a slow store gives up its turn, the next store is read
+                rep.skipped.append((url, error))
+                rep.status, rep.error = "error", f"{unanswered} sitemap files in a row got no answer ({error}): stopped"
                 break
             try:
                 if body is None:
@@ -586,10 +599,20 @@ class SitemapHarvester:
             if max_urls is not None and emitted + len(products) > max_urls:
                 products = products[:max(0, max_urls - emitted)]
                 rep.truncated = True         # products were cut
+                rep.tree[-1]["stopped"] = True
             emitted += len(products)
+            cut = False
             if on_urls is not None:
                 for i in range(0, len(products), BATCH):
+                    if i and should_stop is not None and should_stop():     # one big list cannot overrun the budget
+                        cut = True
+                        break
                     rep.new_urls += int(on_urls(products[i:i + BATCH]) or 0)
+            if cut:
+                rep.truncated = True
+                rep.error = rep.error or "stopped at the time budget"
+                rep.tree[-1]["stopped"] = True
+                break
             if max_urls is not None and emitted >= max_urls:
                 if queue:
                     rep.truncated = True     # sitemaps left unread

@@ -8,7 +8,16 @@ read again. The search never waits for it and uses whatever the index holds at t
 Rules (all of them are tested without a network, with a fake harvester):
   - One refresh at a time, across processes: temp/local_index_refresh.lock (its modification time is the heartbeat).
   - A time budget (LOCAL_INDEX_REFRESH_MAX_S, default 300 s per refresh): no store starts after it, and the store being
-    read stops at its next sitemap file (that harvest is recorded as 'partial').
+    read stops at its next sitemap file or batch of URLs (that harvest is recorded as 'partial').
+  - Stores take turns (plan): never asked first, then the one asked longest ago, so a store the budget cut short goes
+    to the back and one slow store never keeps the others waiting. A store that stops answering (3 sitemap files in a
+    row without an answer) gives up its turn ('error').
+  - A store bigger than one budget is read to the end over a few refreshes: the URL lists an unfinished harvest read
+    are kept in temp/local_index_resume.json and the next one reads the rest (resume_from, at most
+    LOCAL_INDEX_REFRESH_DAYS old: after that it starts again).
+  - The refresh never holds a run up: a thread of the run's process. At that process's exit it is stopped cleanly and
+    records what it read (a worker run waits at most EXIT_GRACE_S for that); the unattended nightly run waits for it
+    within its own budget (_at_exit).
   - A store that answered BLOCKED (401 / 403 / 429 or a bot check) is left alone for 7 days; a store whose last
     harvest was partial or failed is retried after 6 hours, not at every run.
   - Every harvest is recorded in catalog_harvests exactly as scripts/build_catalog_index.py records it, so the
@@ -27,6 +36,7 @@ the progress the card shows on reload.
 
 from __future__ import annotations
 
+import atexit
 import json
 import logging
 import os
@@ -46,7 +56,9 @@ STATE_PATH = ROOT / "temp" / "local_index_refresh.json"
 LOCK_PATH = ROOT / "temp" / "local_index_refresh.lock"
 LOG_PATH = ROOT / "temp" / "local_index_refresh.log"
 ROBOTS_PATH = ROOT / "temp" / "local_index_robots.json"      # {store: {visit_time: [[start, end], ...], checked_at}}
+RESUME_PATH = ROOT / "temp" / "local_index_resume.json"      # {store: {read: [URL lists read], since}}: unfinished
 OUTSIDE_VISIT_TIME = "outside_visit_time"
+EXIT_GRACE_S = 10.0                   # at a worker's exit, the refresh still running gets this long to stop and record
 
 BLOCKED_SKIP_S = 7 * 24 * 3600        # a store that answered BLOCKED is not asked again for this long
 RETRY_AFTER_S = 6 * 3600              # a partial or failed harvest is retried after this long, not at every run
@@ -87,19 +99,19 @@ def decide(ages: Optional[Mapping[str, Any]], refresh_days: int, force: bool = F
 
 def plan(stores: Sequence[Any], ages: Mapping[str, Mapping[str, Any]], refresh_days: int, force: bool = False
          ) -> Tuple[List[Tuple[Any, str]], List[Tuple[Any, str]]]:
-    """(to refresh, left alone), each a list of (StoreConfig, why). Never-harvested stores come first, then the
-    stalest, so a refresh the budget cuts short goes on with the stores it did not reach at the next run."""
+    """(to refresh, left alone), each a list of (StoreConfig, why). The stores never asked come first, then the one
+    asked longest ago, whatever it answered: a store the budget cut short (or that keeps failing) goes to the back,
+    so one slow store never keeps the others waiting, and the stores a refresh did not reach go first next time."""
     todo, skipped = [], []
     for store in stores:
         refresh, why = decide(ages.get(store.key), refresh_days, force)
         (todo if refresh else skipped).append((store, why))
 
-    def stalest(item):
-        entry = ages.get(item[0].key) or {}
-        ok_age = entry.get("ok_age_s")
-        return (0, 0) if ok_age is None else (1, -int(ok_age))
+    def asked_longest_ago(item):
+        last_age = (ages.get(item[0].key) or {}).get("last_age_s")
+        return (0, 0) if last_age is None else (1, -int(last_age))
 
-    todo.sort(key=stalest)         # stable: the stores file's order breaks ties
+    todo.sort(key=asked_longest_ago)         # stable: the stores file's order breaks ties
     return todo, skipped
 
 
@@ -205,16 +217,21 @@ def _enabled_stores() -> List[Any]:
     return sitemaps.enabled_stores(sitemaps.load_stores())
 
 
-def _harvest_one(store: Any, db: Any, harvester: Any, should_stop: Callable[[], bool]) -> Dict[str, Any]:
+def _harvest_one(store: Any, db: Any, harvester: Any, should_stop: Callable[[], bool], skip: Sequence[str] = (),
+                 ended: Callable[[], bool] = lambda: False) -> Dict[str, Any]:
     """One store's harvest and its catalog_harvests row (scripts/build_catalog_index.py does the same); an
-    unexpected failure is that store's 'error' and the next store is still read."""
+    unexpected failure is that store's 'error' and the next store is still read. skip: the URL lists an unfinished
+    refresh of the store already read (resume); ended(): the process is ending (the stop at its exit)."""
     from . import sitemaps
 
     started = None
     try:
         started = db.begin_harvest(store.key)
+        resume = {"skip_urls": frozenset(skip)} if skip else {}     # a harvester without resume still works
         rep = harvester.harvest(store, on_urls=lambda batch, key=store.key: db.upsert(key, batch), max_urls=MAX_URLS,
-                                max_sitemaps=MAX_SITEMAPS, should_stop=should_stop)
+                                max_sitemaps=MAX_SITEMAPS, should_stop=should_stop, **resume)
+        if rep.truncated and ended():
+            rep.error = "stopped before the end: the run ended (the next refresh goes on from there)"
     except Exception as exc:  # noqa: BLE001 - one store's failure must not stop the next one
         logger.warning("index refresh: %s failed (%s)", store.key, type(exc).__name__)
         rep = sitemaps.HarvestReport(store=store.key, status="error", error=f"{type(exc).__name__}: {exc}"[:240])
@@ -226,7 +243,43 @@ def _harvest_one(store: Any, db: Any, harvester: Any, should_stop: Callable[[], 
             rep.status, rep.error = "error", f"the index could not be updated: {type(exc).__name__}"
     return {"store": store.key, "status": rep.status, "product_urls": int(rep.product_urls),
             "new_urls": int(rep.new_urls), "truncated": bool(rep.truncated), "error": str(rep.error or "")[:200],
-            "visit_window": rep.visit_window}
+            "visit_window": rep.visit_window,
+            "lists_read": [n["url"] for n in rep.tree if n.get("kind") == "urlset" and not n.get("stopped")]}
+
+
+def resume_from(store: str, refresh_days: int, resume_path: Path = RESUME_PATH,
+                now: Callable[[], float] = time.time) -> List[str]:
+    """The URL lists an unfinished refresh of the store read within the last refresh_days (none after that: the
+    store is read from the start again, so a list read long ago is never left out of a complete harvest)."""
+    entry = (_read_json(resume_path) or {}).get(store)
+    if not isinstance(entry, dict):
+        return []
+    try:
+        since = float(entry.get("since") or 0)
+    except (TypeError, ValueError):
+        return []
+    if now() - since >= max(1, int(refresh_days)) * 86400:
+        return []
+    return [str(u) for u in entry.get("read") or [] if isinstance(u, str)]
+
+
+def remember_resume(store: str, skip: Sequence[str], lists_read: Sequence[str], status: str,
+                    resume_path: Path = RESUME_PATH, now: Callable[[], float] = time.time) -> None:
+    """After a harvest: a complete one (ok / empty, with what earlier unfinished ones read) clears the store's resume;
+    an unfinished one (the budget, the run's end, a failure on the way) adds the URL lists it read in full, so the
+    next refresh reads only the rest. A store bigger than one budget is still read to the end over a few refreshes."""
+    data = _read_json(resume_path) or {}
+    if status in COMPLETE_STATUSES:
+        if store in data:
+            del data[store]
+            _write_json(resume_path, data)
+        return
+    if status == OUTSIDE_VISIT_TIME or not lists_read:
+        return
+    entry = data.get(store) if skip else None              # no resume this time: a new one starts now
+    since = (entry or {}).get("since") or now()
+    data[store] = {"read": list(dict.fromkeys(list(skip) + list(lists_read))), "since": since}
+    _write_json(resume_path, data)
 
 
 def remember_visit_windows(store: str, windows: Optional[Sequence[Sequence[int]]], robots_path: Path = ROBOTS_PATH,
@@ -243,13 +296,19 @@ def remember_visit_windows(store: str, windows: Optional[Sequence[Sequence[int]]
 def refresh(db: Any = None, harvester: Any = None, stores: Optional[Sequence[Any]] = None, *, trigger: str = "worker",
             force: bool = False, budget_s: Optional[float] = None, refresh_days: Optional[int] = None,
             clock: Callable[[], float] = time.monotonic, now: Callable[[], float] = time.time,
-            state_path: Path = STATE_PATH, lock_path: Path = LOCK_PATH, robots_path: Path = ROBOTS_PATH
-            ) -> Dict[str, Any]:
+            state_path: Path = STATE_PATH, lock_path: Path = LOCK_PATH, robots_path: Path = ROBOTS_PATH,
+            resume_path: Optional[Path] = None, stop: Optional[threading.Event] = None) -> Dict[str, Any]:
     """
     Reads again, one after the other, the stores that are due (decide / plan), within budget_s seconds. Blocks until it is
     done: callers that must not wait use start_background. Never raises. Returns {started, reason, results, skipped,
     elapsed_s}; reason: done | budget | nothing_due | running | off | unavailable.
+    A store an unfinished refresh did not read to the end goes on from the URL lists it had not read (resume_from).
+    stop: set by the process's exit (start_background): the store being read stops at its next file or batch and is
+    recorded partial, no other store starts (reason 'budget', as for the time budget: the rest next time).
+    resume_path: by default next to state_path.
     """
+    if resume_path is None:
+        resume_path = RESUME_PATH if state_path == STATE_PATH else state_path.with_name(RESUME_PATH.name)
     budget = float(settings.local_index_refresh_max_s() if budget_s is None else budget_s)
     if not settings.local_index_enabled() or budget <= 0:
         return {"started": False, "reason": "off", "results": [], "skipped": [], "elapsed_s": 0}
@@ -268,9 +327,12 @@ def refresh(db: Any = None, harvester: Any = None, stores: Optional[Sequence[Any
             last_beat[0] = clock()
             _touch(lock_path)
 
+    def ended() -> bool:
+        return stop is not None and stop.is_set()
+
     def should_stop() -> bool:
         beat()
-        return clock() >= deadline
+        return clock() >= deadline or ended()
 
     def save() -> None:
         state["updated_at"] = now()
@@ -304,17 +366,21 @@ def refresh(db: Any = None, harvester: Any = None, stores: Optional[Sequence[Any
             harvester = sitemaps.SitemapHarvester()
         reason = "done"
         for store, why in todo:
-            if clock() >= deadline:
+            if clock() >= deadline or ended():
                 reason = "budget"
                 state["skipped"].append({"store": store.key, "reason": "budget"})
                 continue
             state["current"] = store.key
             save()
-            result = _harvest_one(store, db, harvester, should_stop)
+            skip = resume_from(store.key, days, resume_path, now)
+            result = _harvest_one(store, db, harvester, should_stop, skip, ended)
             result["reason"] = why
+            if skip:
+                result["resumed_lists"] = len(skip)
+            remember_resume(store.key, skip, result.pop("lists_read", []), result["status"], resume_path, now)
             remember_visit_windows(store.key, result.pop("visit_window", None), robots_path, now)
             state["results"].append(result)
-            if result["truncated"] and clock() >= deadline:
+            if result["truncated"] and (clock() >= deadline or ended()):
                 reason = "budget"
             save()
         state.update(state="idle", current=None, finished_at=now(), ended=reason)
@@ -336,6 +402,30 @@ def refresh(db: Any = None, harvester: Any = None, stores: Optional[Sequence[Any
 # ---------------------------------------------------------------------------
 
 _THREAD: Optional[threading.Thread] = None
+_STOP = threading.Event()                 # set at the process's exit (_at_exit): the thread's refresh stops cleanly
+_EXIT: Dict[str, Optional[float]] = {"wait_until": None}   # the nightly's exit waits for its refresh until then
+
+
+def _at_exit() -> None:
+    """
+    At the process's exit (atexit) a refresh still running in this process's thread is not cut off in the middle of a
+    file (no harvest record, a lock left behind for minutes, the same files read again next time). The nightly run,
+    which nobody waits for, gives it the rest of its own budget first. A worker run asks it to stop at once: it stops
+    at its next sitemap file or batch of URLs, records the store's harvest as partial with what it read in full (the
+    next refresh goes on from there, resume_from) and releases the lock; the exit waits at most EXIT_GRACE_S for that.
+    """
+    thread = _THREAD
+    if thread is None or not thread.is_alive():
+        return
+    until = _EXIT.get("wait_until")
+    if until is not None:
+        thread.join(max(0.0, until - time.monotonic()))
+    if thread.is_alive():
+        _STOP.set()
+        thread.join(EXIT_GRACE_S)
+
+
+atexit.register(_at_exit)
 
 
 def start_background(trigger: str = "worker", **kwargs: Any) -> Optional[threading.Thread]:
@@ -343,15 +433,20 @@ def start_background(trigger: str = "worker", **kwargs: Any) -> Optional[threadi
     Starts refresh() in a daemon thread and returns at once: the caller (the nightly run, the worker) never waits for
     it, not even for the database read that decides what is stale. None when the automatic refresh is off
     (LOCAL_INDEX_ENABLED, LOCAL_INDEX_REFRESH_MAX_S = 0) or a refresh of this process still runs. Never raises.
+    At the process's exit the refresh is stopped cleanly, or waited for by the nightly run (_at_exit).
     kwargs: refresh()'s (the tests' fakes).
     """
     global _THREAD
     try:
         budget = kwargs.get("budget_s")
-        if not settings.local_index_enabled() or (settings.local_index_refresh_max_s() if budget is None else budget) <= 0:
+        budget = settings.local_index_refresh_max_s() if budget is None else budget
+        if not settings.local_index_enabled() or budget <= 0:
             return None
         if _THREAD is not None and _THREAD.is_alive():
             return None
+        _STOP.clear()
+        kwargs.setdefault("stop", _STOP)
+        _EXIT["wait_until"] = time.monotonic() + float(budget) + EXIT_GRACE_S if trigger == "nightly" else None
 
         def run() -> None:
             try:
