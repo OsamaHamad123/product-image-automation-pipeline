@@ -712,6 +712,7 @@ MANUAL_REMBG_MODEL = "birefnet-general"       # الافتراضي فقط: rembg
 _REMBG_SESSIONS: Dict[str, object] = {}         # الجلسة تُنشأ مرة بالعملية لكل موديل وتُعاد استعمالها (تحميل الموديل ثقيل)
 _REMBG_FAILED: set = set()                      # موديل فشل إنشاء جلسته (غير منزّل، لا إنترنت): لا نعيد المحاولة كل منتج
 _REMBG_LOCK = threading.Lock()
+_REMBG_SLOTS: list = []                         # REMBG_MAX_PARALLEL استدلالاً بنفس الوقت (ذاكرة BiRefNet على المعالج)
 
 
 def _rembg_session(model: str):
@@ -741,7 +742,12 @@ def _isolate_rembg(img: Image.Image, model: str = MANUAL_REMBG_MODEL):
         if session is None:
             return None, "rembg_failed"
         data, _, _ = _encode_for_upload(img)
-        output = remove(data, session=session)
+        with _REMBG_LOCK:
+            if not _REMBG_SLOTS:
+                _REMBG_SLOTS.append(threading.BoundedSemaphore(settings.rembg_max_parallel()))
+            slots = _REMBG_SLOTS[0]
+        with slots:
+            output = remove(data, session=session)
         cutout = _decode_cutout(output if isinstance(output, (bytes, bytearray)) else b"")
         if cutout is None and isinstance(output, Image.Image):
             cutout = output.convert("RGBA")
@@ -868,6 +874,7 @@ def reset_rembg_sessions(everything: bool = False) -> None:
     """ينسى إنشاء جلسة فشل (بداية تشغيل جديد: ربما نُزّل الموديل)؛ الجلسات الجاهزة تبقى محمّلة إلا مع everything (الاختبارات)."""
     with _REMBG_LOCK:
         _REMBG_FAILED.clear()
+        _REMBG_SLOTS.clear()                    # REMBG_MAX_PARALLEL يُقرأ من جديد في التشغيل التالي
         if everything:
             _REMBG_SESSIONS.clear()
 

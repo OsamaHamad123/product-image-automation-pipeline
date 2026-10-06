@@ -148,7 +148,16 @@ def test_a_status_write_is_retried_after_a_deadlock(ldb, monkeypatch, fake_conne
     conns.clear()
     monkeypatch.setattr(ldb, "get_db_connection", lambda: conns.append(fake_connection(broken)) or conns[-1])
     assert ldb.update_task_status(7, "ready_for_review", claim_id="host:1#c") is False
-    assert len(conns) == 1                                   # other errors are not retried
+    # a lost connection is retried with a short backoff (runtime item 3), then the result is reported as lost
+    assert len(conns) == 1 + len(ldb.STATUS_WRITE_RETRY_DELAYS_S)
+
+    def bad_sql(sql, params):
+        raise pymysql.err.ProgrammingError(1064, "You have an error in your SQL syntax")
+
+    conns.clear()
+    monkeypatch.setattr(ldb, "get_db_connection", lambda: conns.append(fake_connection(bad_sql)) or conns[-1])
+    assert ldb.update_task_status(7, "ready_for_review", claim_id="host:1#c") is False
+    assert len(conns) == 1                                   # an error that waiting cannot fix is not retried
 
 
 def test_queue_upserts_are_sent_as_one_multi_row_statement():

@@ -28,6 +28,10 @@ os.environ["BG_FALLBACK"] = "off"
 # The nightly run and the worker refresh the local catalog index in a background thread (catalog_match.index_refresh);
 # no test may start one by accident (it would read real sites). The tests of the refresh turn it on by themselves.
 os.environ["LOCAL_INDEX_REFRESH_MAX_S"] = "0"
+# The nightly run ends with the storage cleanup (scripts/prune_storage.py --apply) and pings HEALTHCHECK_URL: no test
+# may clean the developer's temp/ folder or ping the owner's real check. The tests of both turn them on by themselves.
+os.environ["NIGHTLY_PRUNE_ENABLED"] = "0"
+os.environ["HEALTHCHECK_URL"] = ""
 
 
 @pytest.fixture(autouse=True)

@@ -18,6 +18,8 @@ from collections import Counter
 
 import pymysql
 
+import db_connect
+
 logger = logging.getLogger(__name__)
 
 # حالات الحل المعتمد في resolved_products
@@ -37,17 +39,10 @@ LEASE_MINUTES = 15
 MAX_TITLE_CHARS = 250
 
 
-# إعداد الاتصال باستخدام المتغيرات البيئية (تُقرأ عند كل اتصال حتى تعمل الاختبارات على automation_test)
+# إعداد الاتصال باستخدام المتغيرات البيئية (تُقرأ عند كل اتصال حتى تعمل الاختبارات على automation_test)،
+# بمهل اتصال وقراءة وكتابة (db_connect): قاعدة بيانات علّقت لا تعلّق العامل
 def get_db_connection():
-    return pymysql.connect(
-        host=os.getenv("DB_HOST", "127.0.0.1"),
-        port=int(os.getenv("DB_PORT", "3306")),
-        user=os.getenv("DB_USERNAME", "root"),
-        password=os.getenv("DB_PASSWORD", ""),
-        database=os.getenv("DB_DATABASE", "automation_db"),
-        charset='utf8mb4',
-        cursorclass=pymysql.cursors.DictCursor
-    )
+    return db_connect.connect()
 
 
 def _close(conn):
@@ -153,13 +148,7 @@ def init_db():
     """
     try:
         # الاتصال بخادم MariaDB دون تحديد قاعدة البيانات لإنشائها أولاً إن لم تكن موجودة
-        conn = pymysql.connect(
-            host=os.getenv("DB_HOST", "127.0.0.1"),
-            port=int(os.getenv("DB_PORT", "3306")),
-            user=os.getenv("DB_USERNAME", "root"),
-            password=os.getenv("DB_PASSWORD", ""),
-            connect_timeout=5,
-        )
+        conn = db_connect.connect(database=False, dict_cursor=False, connect_timeout=5)
         cursor = conn.cursor()
         db_name = os.getenv("DB_DATABASE", "automation_db")
         cursor.execute(f"CREATE DATABASE IF NOT EXISTS `{db_name}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
@@ -1829,6 +1818,10 @@ QUEUE_BATCH = 500
 # تُعاد المعاملة حتى LOCK_RETRIES مرات
 LOCK_CONFLICT_CODES = (1205, 1213)
 LOCK_RETRIES = 3
+# الحالة النهائية لمهمة (update_task_status): انقطاع قاعدة البيانات لحظة (اتصال ضاع، مهلة) يُعاد بعد هذه الانتظارات؛
+# نتيجة لم تُحفظ تعني بحثاً مدفوعاً ثانياً بعد انتهاء الحجز
+STATUS_WRITE_RETRY_DELAYS_S = (1, 3, 6)
+TRANSIENT_DB_ERRORS = (pymysql.err.OperationalError, pymysql.err.InterfaceError, OSError)
 
 _QUEUE_COLUMNS = ("`row_number`", "barcode", "product_name", "brand", "search_query", "status", "attempts",
                   "sku_key", "alt_sku_key", "payload_json", "brand_fp", "priority", "task_kind", "review_only",
@@ -2230,6 +2223,8 @@ def update_task_status(task_id, status, error_message=None, failure_code=None, t
     في المعاملة نفسها. siblings=None: كلها، إلا عند 'completed' (النشر يكتب رابط كل صف أولاً ويمرر معرفاته)؛
     siblings=[ids]: هذه الصفوف فقط؛ siblings=(): لا شيء. صف مكتمل أو جاهز للمراجعة أو قيد المعالجة لا يُلمس،
     ونتيجة عابرة (انقطاع المزودين، خطأ بحث) لا تغيّر صفاً فاشلاً ينتظر موعده.
+    انقطاع قاعدة البيانات (اتصال ضاع، مهلة) يُعاد بعد STATUS_WRITE_RETRY_DELAYS_S؛ إن بقي يُسجل خطأً واضحاً
+    (RESULT NOT SAVED) وتعيد False.
     """
     trace_json = _trace_to_json(trace)
 
@@ -2246,6 +2241,14 @@ def update_task_status(task_id, status, error_message=None, failure_code=None, t
             cursor.execute(sql + " FOR UPDATE", params)
             row = cursor.fetchone()
             if row is None:
+                if claim_id and retried:
+                    # إعادة بعد اتصال ضاع: ربما وصل الـ COMMIT السابق قبل ضياع الرد، فالحالة محفوظة بحجزنا
+                    cursor.execute("SELECT status FROM automation_queue WHERE id = %s AND worker_id = %s",
+                                   (task_id, claim_id))
+                    saved = cursor.fetchone()
+                    if saved and saved.get("status") == status:
+                        conn.rollback()
+                        return True
                 conn.rollback()
                 if claim_id:
                     logger.warning("[MariaDB Queue] المهمة %s لم تعد محجوزة بـ %s؛ لم تُكتب الحالة %s",
@@ -2299,11 +2302,81 @@ def update_task_status(task_id, status, error_message=None, failure_code=None, t
             _close(conn)
         return True
 
+    import time
+    error = None
+    retried = False
+    for n in range(len(STATUS_WRITE_RETRY_DELAYS_S) + 1):
+        try:
+            return _retry_lock_conflicts(attempt)
+        except TRANSIENT_DB_ERRORS as e:
+            error = e
+            if n < len(STATUS_WRITE_RETRY_DELAYS_S):
+                delay = STATUS_WRITE_RETRY_DELAYS_S[n]
+                logger.warning("[MariaDB Queue] تعذر حفظ حالة المهمة %s (%s): %s؛ إعادة المحاولة بعد %s ثانية (%s/%s).",
+                               task_id, status, e, delay, n + 1, len(STATUS_WRITE_RETRY_DELAYS_S))
+                time.sleep(delay)
+                retried = True
+                continue
+        except Exception as e:
+            error = e
+        break
+    # النتيجة ضاعت: الصف يبقى 'processing' حتى ينتهي حجزه ثم يُبحث عنه من جديد (بحث مدفوع ثانٍ)
+    logger.error("[MariaDB Queue] !!! RESULT NOT SAVED: لم تُحفظ الحالة %s للمهمة %s بعد %s محاولة: %s. "
+                 "سيُعاد البحث عن الصف بعد انتهاء حجزه.", status, task_id, n + 1, error)
+    return False
+
+
+def renew_leases(claim_ids, minutes=LEASE_MINUTES):
+    """
+    نبض الحجز: الصفوف التي ما زال هذا العامل يعالجها (status='processing' بمعرف سحب من claim_ids) يمتد حجزها
+    LEASE_MINUTES من الآن، فلا يسحبها عامل آخر ولا تُهمل نتيجتها مهما طال المنتج. صف أخذه غيره أو انتهى لا يُلمس.
+    تعيد عدد الصفوف، 0 بلا معرفات (بلا اتصال)، أو None عند خطأ قاعدة البيانات (يُسجل).
+    """
+    ids = sorted({str(c) for c in claim_ids or () if c})
+    if not ids:
+        return 0
     try:
-        return _retry_lock_conflicts(attempt)
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                f"UPDATE automation_queue SET lease_until = NOW() + INTERVAL {int(minutes)} MINUTE "
+                f"WHERE status = 'processing' AND worker_id IN ({','.join(['%s'] * len(ids))})", tuple(ids))
+            renewed = cursor.rowcount
+            conn.commit()
+        finally:
+            _close(conn)
+        return renewed
     except Exception as e:
-        logger.warning("[MariaDB Queue] فشل تحديث حالة المهمة %s: %s", task_id, e)
-        return False
+        logger.warning("[MariaDB Queue] تعذر تجديد حجز %s صف: %s", len(ids), e)
+        return None
+
+
+def release_claims(claim_ids):
+    """
+    عامل يتوقف (SIGTERM، إعادة تشغيل الجهاز) ومنتجاته ما زالت جارية: صفوفه 'processing' بهذه المعرفات تعود إلى
+    'pending' بلا حجز، فيأخذها التشغيل التالي فوراً بدل انتظار انتهاء الحجز. صفوف غيره لا تُلمس.
+    تعيد عدد الصفوف، أو None عند خطأ قاعدة البيانات (يُسجل؛ الحجز ينتهي وحده بعد LEASE_MINUTES).
+    """
+    ids = sorted({str(c) for c in claim_ids or () if c})
+    if not ids:
+        return 0
+    try:
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE automation_queue SET status = 'pending', worker_id = NULL, lease_until = NULL, "
+                f"updated_at = CURRENT_TIMESTAMP WHERE status = 'processing' AND worker_id IN "
+                f"({','.join(['%s'] * len(ids))})", tuple(ids))
+            released = cursor.rowcount
+            conn.commit()
+        finally:
+            _close(conn)
+        return released
+    except Exception as e:
+        logger.warning("[MariaDB Queue] تعذر إعادة %s صف للانتظار: %s", len(ids), e)
+        return None
 
 
 def get_sku_siblings(task_id, sku_key):

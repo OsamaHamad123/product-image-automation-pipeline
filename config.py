@@ -497,24 +497,10 @@ def load_db_config():
     """
     تحميل الإعدادات ديناميكياً من قاعدة البيانات لتجنب تعديل ملفات البيئة يدوياً.
     """
-    import os
-    db_host = os.getenv("DB_HOST", "127.0.0.1")
-    db_port = int(os.getenv("DB_PORT", "3306"))
-    db_user = os.getenv("DB_USERNAME", "root")
-    db_pass = os.getenv("DB_PASSWORD", "")
-    db_name = os.getenv("DB_DATABASE", "automation_db")
-    
     try:
-        import pymysql
-        conn = pymysql.connect(
-            host=db_host,
-            port=db_port,
-            user=db_user,
-            password=db_pass,
-            database=db_name,
-            charset='utf8mb4',
-            cursorclass=pymysql.cursors.DictCursor
-        )
+        # اتصال المشروع الموحد بإعدادات DB_* ومهل الاتصال والقراءة والكتابة
+        import db_connect
+        conn = db_connect.connect()
         cursor = conn.cursor()
         cursor.execute("SHOW TABLES LIKE 'system_settings'")
         if cursor.fetchone():

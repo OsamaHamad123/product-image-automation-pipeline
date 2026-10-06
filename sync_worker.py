@@ -13,6 +13,8 @@
 # - الحمولات القديمة التي تحدد الأعمدة بأرقامها (قبل المفاتيح المنطقية) لا تُكتب: عمودها لا يمكن التحقق منه
 #   (إدراج عمود يغيّر معنى الرقم). تُنقل إلى 'writebehind:conflicts' وحمولتها إلى 'writebehind:conflict_payload:<key>'
 #   وتُبلَّغ عبر outcome hook (سجل الأخطاء)؛ الصف يُعاد نشره من الكاش في التشغيل التالي لأن خليته بقيت فارغة.
+# - إيقاف نظيف (SIGTERM / SIGHUP: systemctl stop، إعادة تشغيل السيرفر؛ stop_signals): الدورة الجارية تكمل، ثم يُحذف
+#   مفتاح النبض (الكتّاب ينتقلون فوراً إلى طابور MariaDB) وتُنقل آخر حمولات Redis إلى الطابور، فلا يبقى شيء عالقاً.
 
 import json
 import logging
@@ -25,6 +27,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 import config
 import google_sheets
+import stop_signals
 
 logger = logging.getLogger("sync_worker")
 
@@ -128,13 +131,14 @@ def _forward(queue, parsed):
                             **keys)
 
 
-def run_sync_cycle(worksheet, r=None, queue=None, flush=True):
+def run_sync_cycle(worksheet, r=None, queue=None, flush=True, heartbeat=True):
     """
     دورة مزامنة واحدة: نقل حمولات Redis إلى طابور MariaDB، ثم تفريغ الطابور في الشيت (flush=True).
-    تعيد عدد المفاتيح التي نُقلت بنجاح.
+    heartbeat=False: بلا نبض (الدورة الأخيرة عند الإيقاف بعد حذف النبض). تعيد عدد المفاتيح التي نُقلت بنجاح.
     """
     r = r or _client()
-    beat(r)
+    if heartbeat:
+        beat(r)
     keys = list(r.smembers(DIRTY_SET_KEY) or [])[:BATCH_SIZE]
     forwarded = 0
     for key in sorted(keys):
@@ -195,15 +199,44 @@ def main():
         logger.info("[Sync Worker] Redis غير متاح محلياً؛ لا حاجة لهذا العامل (الكتابة تتم عبر طابور MariaDB).")
         return
 
+    stop_signals.install()
     logger.info("[Sync Worker] عامل المزامنة المؤجلة يعمل.")
     state = {}
-    while True:
+    try:
+        while not stop_signals.requested():
+            try:
+                with stop_signals.deferred():       # إشارة إيقاف أثناء الدورة لا تقطع كتابة جارية
+                    _loop_once(r, state)
+            except Exception as e:
+                logger.exception("[Sync Worker] خطأ في الدورة: %s", e)
+                state["worksheet"] = None
+            if stop_signals.requested():
+                break
+            time.sleep(SYNC_INTERVAL)
+    except KeyboardInterrupt:
+        pass
+    shutdown(r, state)
+
+
+def shutdown(r, state):
+    """
+    إيقاف نظيف: حذف النبض أولاً (google_sheets يكتب بعدها في طابور MariaDB مباشرة)، ثم نقل ما بقي في Redis إلى
+    الطابور بلا نبض جديد. لا يرفع أبداً؛ ما تعذر نقله يبقى في Redis وينقله التشغيل التالي.
+    """
+    with stop_signals.deferred():
+        logger.info("[Sync Worker] إيقاف (%s): نقل ما بقي في Redis إلى طابور MariaDB.",
+                    stop_signals.requested() or "KeyboardInterrupt")
         try:
-            _loop_once(r, state)
+            r.delete(HEARTBEAT_KEY)
         except Exception as e:
-            logger.exception("[Sync Worker] خطأ في الدورة: %s", e)
-            state["worksheet"] = None
-        time.sleep(SYNC_INTERVAL)
+            logger.warning("[Sync Worker] تعذر حذف مفتاح النبض: %s", e)
+        try:
+            if state.get("queue") is None:
+                state["queue"] = google_sheets.SQLiteTransactionQueue()
+            run_sync_cycle(None, r, queue=state["queue"], flush=False, heartbeat=False)
+        except Exception as e:
+            logger.warning("[Sync Worker] تعذر نقل آخر الحمولات (تبقى في Redis للتشغيل التالي): %s", e)
+        logger.info("[Sync Worker] توقف.")
 
 
 if __name__ == "__main__":

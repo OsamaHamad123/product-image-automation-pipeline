@@ -263,8 +263,11 @@ def expected_tables(root=REPO_ROOT):
 
 
 def _default_connect(**kwargs):
-    import pymysql
-    return pymysql.connect(**kwargs)
+    """The project's one connection helper (db_connect: connect, read and write timeouts) with the .env values."""
+    if REPO_ROOT not in sys.path:
+        sys.path.insert(0, REPO_ROOT)
+    import db_connect
+    return db_connect.connect(dict_cursor=False, **kwargs)
 
 
 def check_db(env, root=REPO_ROOT, connect=None):
