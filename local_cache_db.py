@@ -407,6 +407,8 @@ def init_db():
         # 13. سجل الصرف اليومي للبحث (P4a): استدعاءات كل مزود مدفوع وتكلفتها التقديرية لكل يوم وتشغيل،
         # يُقرأ قبل كل سحب مهمة عند ضبط DAILY_BUDGET_USD
         cursor.execute(SPEND_TABLE_SQL)
+        # 14. متجهات الصور المعتمدة (catalog_match.embeddings): مراجع فحص شكل العبوة، دليل فقط
+        cursor.execute(APPROVED_EMBEDDINGS_SQL)
 
         # القيم الافتراضية المبدئية من ملف .env (INSERT IGNORE لا يغير القيم الموجودة)
         import config
@@ -1050,6 +1052,108 @@ def find_visual_duplicate(target_embedding, threshold=0.96):
     except Exception as e:
         logger.warning("[MariaDB Cache] خطأ أثناء كشف التكرار البصري: %s", e)
     return None
+
+
+# ---------------------------------------------------------------------------
+# متجهات الصور المعتمدة (approved_embeddings): مراجع فحص شكل العبوة (catalog_match.embeddings، EMBEDDINGS)
+# صف لكل اعتماد (بشري أو تلقائي) لكل موديل: متجه صورته وماركة الشيت. يتبع الصف اعتماده في resolved_products
+# (نفس sku_key ونفس رابط Cloudinary)، فاعتماد صورة أخرى أو رفض الصورة المعتمدة (superseded) يُخرجه من المراجع
+# تلقائياً بدون حذف. متجهات موديلين مختلفين لا تلتقي أبداً (العمود model).
+# ---------------------------------------------------------------------------
+
+APPROVED_EMBEDDINGS_SQL = """
+    CREATE TABLE IF NOT EXISTS approved_embeddings (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        model VARCHAR(64) NOT NULL,
+        sku_key VARCHAR(64) NOT NULL,
+        brand_key VARCHAR(255) NOT NULL,
+        brand VARCHAR(255) NULL,
+        cloudinary_url TEXT NOT NULL,
+        url_hash CHAR(40) NOT NULL,
+        source VARCHAR(16) NOT NULL,
+        content_sha256 CHAR(64) NULL,
+        dim SMALLINT NOT NULL,
+        vector BLOB NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_approved_embedding (model, sku_key, url_hash),
+        INDEX idx_approved_embedding_brand (model, brand_key)
+    ) ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
+"""
+
+
+def save_approved_embedding(model, sku_key, brand_key, brand, cloudinary_url, source, vector, dim,
+                            content_sha256=None):
+    """
+    حفظ متجه صورة معتمدة (vector: بايتات float32، embeddings.to_blob). نفس الاعتماد لنفس الموديل يُحدّث صفه.
+    أخطاء قاعدة البيانات تُرفع؛ المستدعي (embeddings.remember_approval) يلتقطها كي لا يتعطل الاعتماد.
+    """
+    import hashlib
+    url = str(cloudinary_url or "").strip()
+    if not (model and sku_key and brand_key and url and vector):
+        raise ValueError("model, sku_key, brand_key, cloudinary_url and vector are required")
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO approved_embeddings (model, sku_key, brand_key, brand, cloudinary_url, url_hash, source,
+                                             content_sha256, dim, vector)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON DUPLICATE KEY UPDATE brand_key = VALUES(brand_key), brand = VALUES(brand), source = VALUES(source),
+                content_sha256 = VALUES(content_sha256), dim = VALUES(dim), vector = VALUES(vector),
+                created_at = CURRENT_TIMESTAMP
+        """, (str(model)[:64], str(sku_key)[:64], str(brand_key)[:255], _clip(brand, 255), url,
+              hashlib.sha1(url.encode("utf-8")).hexdigest(), str(source or "")[:16],
+              (str(content_sha256).lower()[:64] if content_sha256 else None), int(dim), bytes(vector)))
+        conn.commit()
+    finally:
+        _close(conn)
+    return True
+
+
+def get_approved_embeddings(model):
+    """
+    [{sku_key, brand_key, brand, vector, dim}] لكل اعتماد ما زال يُخدم (human_approved / auto_verified) بهذا الموديل.
+    أخطاء قاعدة البيانات تُرفع (المستدعي يعامل المراجع كأنها غير موجودة: لا تحذير).
+    """
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(f"""
+            SELECT e.sku_key, e.brand_key, e.brand, e.vector, e.dim
+            FROM approved_embeddings e
+            JOIN resolved_products r ON r.sku_key = e.sku_key AND r.cloudinary_url = e.cloudinary_url
+            WHERE e.model = %s AND r.{_SERVABLE_SQL}
+        """, (str(model),))
+        return list(cursor.fetchall() or [])
+    finally:
+        _close(conn)
+
+
+def approvals_missing_embedding(model, limit=None):
+    """
+    الاعتمادات التي تُخدم ولا متجه لها بهذا الموديل (للتعبئة اللاحقة: scripts/backfill_embeddings.py)، الأحدث أولاً:
+    [{id, sku_key, brand, original_url, cloudinary_url, verification_status}]. أخطاء قاعدة البيانات تُرفع.
+    """
+    sql = f"""
+        SELECT r.id, r.sku_key, r.brand, r.original_url, r.cloudinary_url, r.verification_status
+        FROM resolved_products r
+        LEFT JOIN approved_embeddings e
+            ON e.model = %s AND e.sku_key = r.sku_key AND e.cloudinary_url = r.cloudinary_url
+        WHERE r.{_SERVABLE_SQL} AND r.sku_key IS NOT NULL AND r.sku_key <> '' AND e.id IS NULL
+            AND r.cloudinary_url IS NOT NULL AND r.cloudinary_url <> ''
+        ORDER BY r.resolved_at DESC, r.id DESC
+    """
+    params = [str(model)]
+    if limit is not None:
+        sql += " LIMIT %s"
+        params.append(max(0, int(limit)))
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(sql, tuple(params))
+        return list(cursor.fetchall() or [])
+    finally:
+        _close(conn)
 
 
 # ---------------------------------------------------------------------------

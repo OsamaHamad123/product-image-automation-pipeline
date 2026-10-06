@@ -473,7 +473,205 @@ def set_embedder(embedder) -> None:
 
 
 def reset() -> None:
-    """Forget the fake and every loaded model (tests)."""
+    """Forget the fake and every loaded model, and the cached references (tests)."""
     with _STATE_LOCK:
         _STATE["override"] = None
         _STATE["embedders"].clear()
+    set_reference_loader(None)
+
+
+# ---------------------------------------------------------------------------
+# Approved pictures: the references of the brand look check
+# ---------------------------------------------------------------------------
+
+# the approved pictures are read from the database at most this often per process (an approval made by this process
+# clears the cache at once; the dashboard's approvals reach a running worker within this time)
+REFERENCE_TTL_S = 600.0
+# a failed read is retried after this long (meanwhile there are no references: no warning)
+REFERENCE_RETRY_S = 60.0
+
+
+def brand_key(text: Any) -> str:
+    """The brand as approvals and searches both key it: the sheet's brand cell, folded (text_norm.match_key)."""
+    from .text_norm import match_key
+    return match_key(str(text or ""))
+
+
+@dataclass
+class Reference:
+    sku_key: str
+    brand_key: str
+    brand: str
+    vector: Any
+
+
+class ReferenceSet:
+    """The approved pictures of one model, grouped by brand key, as one matrix per brand."""
+
+    def __init__(self, refs: Sequence[Reference] = ()):
+        np = _np()
+        groups: dict = {}
+        for ref in refs or ():
+            v = unit(ref.vector)
+            if v is None or not ref.brand_key:
+                continue
+            groups.setdefault(ref.brand_key, ([], []))
+            groups[ref.brand_key][0].append(v)
+            groups[ref.brand_key][1].append(ref.brand or ref.brand_key)
+        self._dims = {len(vs[0]) for vs, _ in groups.values()}
+        self._brands = {k: (np.stack(vs), names) for k, (vs, names) in groups.items()}
+
+    def __len__(self) -> int:
+        return sum(len(names) for _, names in self._brands.values())
+
+    def keys(self) -> List[str]:
+        return list(self._brands)
+
+    def count(self, keys) -> int:
+        return sum(len(self._brands[k][1]) for k in keys if k in self._brands)
+
+    def best(self, vector, keys) -> Tuple[Optional[float], str]:
+        """(highest cosine to an approved picture of these brand keys, that picture's brand); (None, '') for none."""
+        v = unit(vector)
+        best, name = None, ""
+        if v is None:
+            return None, ""
+        for k in keys:
+            entry = self._brands.get(k)
+            if entry is None or entry[0].shape[1] != v.shape[0]:
+                continue
+            sims = entry[0] @ v
+            i = int(sims.argmax())
+            if best is None or float(sims[i]) > best:
+                best, name = float(sims[i]), entry[1][i]
+        return best, name
+
+
+def _db_references(model_id: str) -> List[Reference]:
+    import local_cache_db
+
+    return [Reference(sku_key=str(r.get("sku_key") or ""), brand_key=str(r.get("brand_key") or ""),
+                      brand=str(r.get("brand") or ""), vector=from_blob(r.get("vector"), r.get("dim")))
+            for r in local_cache_db.get_approved_embeddings(model_id)]
+
+
+_REFS: dict = {"loader": None, "cache": {}}
+_REFS_LOCK = threading.Lock()
+
+
+def set_reference_loader(loader) -> None:
+    """loader(model_id) -> [Reference] instead of the database (tests, a calibration run); None restores it. Clears
+    the cache."""
+    with _REFS_LOCK:
+        _REFS["loader"] = loader
+        _REFS["cache"].clear()
+
+
+def clear_references() -> None:
+    with _REFS_LOCK:
+        _REFS["cache"].clear()
+
+
+def references(model_id: str, clock=time.monotonic) -> ReferenceSet:
+    """The approved pictures of this model (cached REFERENCE_TTL_S); an empty set when they cannot be read."""
+    now = clock()
+    with _REFS_LOCK:
+        hit = _REFS["cache"].get(model_id)
+        if hit is not None and hit[0] > now:
+            return hit[1]
+        loader = _REFS["loader"] or _db_references
+    try:
+        refs, ttl = ReferenceSet(loader(model_id)), REFERENCE_TTL_S
+    except Exception as exc:
+        logger.warning("embeddings: the approved pictures could not be read (%s); no brand look check for now",
+                       type(exc).__name__)
+        refs, ttl = ReferenceSet(), REFERENCE_RETRY_S
+    with _REFS_LOCK:
+        _REFS["cache"][model_id] = (now + ttl, refs)
+    return refs
+
+
+# ---------------------------------------------------------------------------
+# Storing an approval's vector
+# ---------------------------------------------------------------------------
+
+def _decode(data: Optional[bytes]):
+    if not data:
+        return None
+    import io
+    from PIL import Image, ImageOps
+
+    try:
+        with Image.open(io.BytesIO(data)) as probe:
+            probe.verify()
+        img = Image.open(io.BytesIO(data))
+        img.load()
+        return ImageOps.exif_transpose(img)
+    except Exception:
+        return None
+
+
+def approved_picture(sha256: Optional[str] = None, path: Optional[str] = None, url: Optional[str] = None,
+                     page_url: Optional[str] = None, cloudinary_url: Optional[str] = None) -> Tuple[Any, str]:
+    """(the approved picture, where it came from) or (None, ''): the verified candidate bytes in the candidate store
+    (sha256), else a local file (an upload), else a download of the source URL, else of the Cloudinary copy. The
+    downloads go through image_processor._download_bytes (http_client with net_guard: the SSRF guard)."""
+    import image_processor
+
+    if sha256:
+        img = _decode(image_processor._load_from_candidate_store(sha256))
+        if img is not None:
+            return img, "candidate"
+    if path:
+        try:
+            img = _decode(Path(path).read_bytes()) if Path(path).is_file() else None
+        except OSError:
+            img = None
+        if img is not None:
+            return img, "upload"
+    for link, source in ((url, "original"), (cloudinary_url, "cloudinary")):
+        if link and str(link).lower().startswith(("http://", "https://")):
+            data, _error = image_processor._download_bytes(str(link), page_url if source == "original" else None)
+            img = _decode(data)
+            if img is not None:
+                return img, source
+    return None, ""
+
+
+def remember_approval(*, sku_key: Optional[str], brand: Optional[str], cloudinary_url: Optional[str],
+                      sha256: Optional[str] = None, path: Optional[str] = None, url: Optional[str] = None,
+                      page_url: Optional[str] = None, allow_model_download: bool = False, embedder=None) -> bool:
+    """Store the vector of a published approval (a reviewer's or the worker's AUTO_PUBLISH) in approved_embeddings.
+
+    Called after the approval is written; it never raises and never changes the approval. False (nothing stored)
+    when EMBEDDINGS is off, the approval has no SKU, brand or Cloudinary link, the picture cannot be read or the
+    model is not ready (the dashboard never downloads it: allow_model_download False). scripts/backfill_embeddings.py
+    fills in what was skipped.
+    """
+    if not enabled():
+        return False
+    key = brand_key(brand)
+    if not (sku_key and key and cloudinary_url):
+        return False
+    try:
+        embedder = embedder or get_embedder(allow_download=allow_model_download)
+        if embedder is None:
+            return False
+        img, source = approved_picture(sha256, path, url, page_url, cloudinary_url)
+        if img is None:
+            logger.info("embeddings: the approved picture of %s could not be read; the backfill will try again",
+                        sku_key)
+            return False
+        vector = embedder.embed([img])[0]
+        if vector is None:
+            return False
+        import local_cache_db
+
+        local_cache_db.save_approved_embedding(embedder.model_id, sku_key, key, brand, cloudinary_url, source,
+                                               to_blob(vector), len(vector),
+                                               content_sha256=sha256 if source == "candidate" else None)
+        clear_references()
+        return True
+    except Exception:
+        logger.exception("embeddings: the vector of the approval of %s was not stored", sku_key)
+        return False

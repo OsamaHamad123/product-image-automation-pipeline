@@ -643,6 +643,24 @@ def _record_review(action, params, row_number, sku_key, image_url=None, reason_c
     _learn_brand_spelling(action, params, acted, reason_code, first_brand=(first or {}).get("brand"))
 
 
+def _remember_look(sku_key, brand, res, sha=None, **source):
+    """
+    متجه الصورة المعتمدة لفحص شكل العبوة (catalog_match.embeddings، الإعداد EMBEDDINGS): يُحفظ للاعتماد المنشور فقط،
+    بلا تنزيل للموديل (ملف ناقص أو صورة تعذرت قراءتها يعبّيها scripts/backfill_embeddings.py لاحقاً). sha: دالة تعيد
+    بصمة بايتات المرشح المحفوظ (تُقرأ فقط والإعداد مفعّل). EMBEDDINGS=off لا يفعل شيئاً، ولا يُرفع أي خطأ ولا يغيّر
+    نتيجة الاعتماد.
+    """
+    try:
+        from catalog_match import embeddings
+
+        if res.get("status") != "published" or not embeddings.enabled():
+            return
+        embeddings.remember_approval(sku_key=sku_key, brand=brand, cloudinary_url=res.get("link"),
+                                     sha256=sha() if callable(sha) else sha, **source)
+    except Exception:
+        logger.exception("تعذر حفظ متجه الصورة المعتمدة للمنتج %s", sku_key)
+
+
 def _learned_spelling(action, params, acted, reason_code, first_brand=None):
     """
     (ماركة الشيت، كتابة المتاجر) التي يعلّمها هذا القرار للبحث أو يُحسب ضدها، أو None: صورة ماركتها مؤكدة فقط بكتابة
@@ -1271,6 +1289,9 @@ def action_select_image(params):
             return {'status': 'failed', 'error': res.get('error'), 'isolated': res.get('isolated', False)}
 
         _record_review("approved", params, row_number, sku_key, image_url, identity=identity)
+        # قبل حذف المرشحات: بايتات المرشح المحفوظ هي الصورة التي تم التحقق منها
+        _remember_look(sku_key, brand, res, url=image_url, page_url=_text(params, 'page_url') or None,
+                       sha=lambda: _trusted_sha(params, row_number, sku_key, image_url, identity))
         local_cache_db.delete_curation_candidates(row_number, sku_key=sku_key, identity=identity)
         # «الباركود من صفحة المتجر» على بطاقة الصورة المعتمدة (اعتماد فعلي فقط، لا رابط needs_review:)
         extra = {"page_gtin": page_gtin} if page_gtin and res.get("status") == "published" else {}
@@ -1355,6 +1376,7 @@ def action_upload_manual_image(params):
                                         row_number, rows),
             unclean="refuse", publish_anyway=_as_bool(params.get('publish_anyway', False)),
         )
+        _remember_look(sku_key, brand, res, path=file_path)     # قبل حذف الملف المرفوع
         try:
             os.remove(file_path)
         except OSError:
