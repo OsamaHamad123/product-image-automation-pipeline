@@ -21,7 +21,12 @@ HttpFetcher.fetch(cands, spec) -> list[FetchedImage]
 
 The result list has one FetchedImage per attempted candidate, in input order.
 Error codes: bad_url, timeout, connection_error, http_<status>, too_large,
-too_small, not_image, decode_error, host_slow.
+too_small, not_image, decode_error, host_slow, blocked_url.
+
+SSRF guard (net_guard): redirects are not left to the client. The URL and every redirect hop are checked before
+they are requested (http(s) only, a host that resolves to public addresses only); a refused URL is 'blocked_url',
+never retried and never counted by the slow-host breaker. A direct curl_cffi request is pinned to the addresses
+that were checked (no second DNS answer). The hops of one attempt share its timeout.
 
 Slow-host breaker (HostBreaker, one per process, shared by every worker thread): a host whose downloads
 ended in 'timeout' or 'connection_error' twice within 15 minutes with no download of it coming back in between
@@ -56,6 +61,8 @@ try:  # browser TLS fingerprint; a hard dependency in requirements.txt, optional
     from curl_cffi import requests as _curl_requests
 except Exception:  # pragma: no cover - depends on the environment
     _curl_requests = None
+
+import net_guard
 
 from . import cassette, settings
 from .models import Candidate, FetchedImage, SkuSpec
@@ -253,24 +260,43 @@ class HttpFetcher:
         return dict(request_headers(cand.page_url), **{"User-Agent": USER_AGENT})
 
     def _get(self, url: str, headers: dict, proxy: Optional[str] = None):
-        kwargs = {"headers": dict(headers), "timeout": self.timeout, "stream": True, "allow_redirects": True}
+        # redirects are followed by net_guard, which checks the URL and every hop before requesting it (SSRF)
+        kwargs = {"headers": dict(headers), "timeout": self.timeout, "stream": True, "allow_redirects": False}
+        pin = False
         if self.session is not None:
             getter = self.session.get
         elif _curl_requests is not None:
             getter = _curl_requests.get
             kwargs["impersonate"] = IMPERSONATE
             kwargs["headers"].pop("User-Agent", None)   # the impersonated browser sends its own, matching the TLS fingerprint
+            pin = not proxy                             # direct: curl connects to the checked addresses only
         else:
             getter = requests.get
         if proxy:
             kwargs["proxies"] = {"http": proxy, "https": proxy}
-        return cassette.http("fetch", "GET", url, lambda: getter(url, **kwargs), headers=headers, proxy=bool(proxy),
-                             stream=True, max_bytes=self.max_bytes)   # record / replay (no-op without a cassette)
+        deadline: List[float] = []
+
+        def hop(hop_url: str, target: net_guard.Target):
+            timeout = self.timeout
+            if deadline:                                 # a redirect: the hops share the attempt's timeout
+                timeout = deadline[0] - time.monotonic()
+                if timeout <= 0:
+                    raise TimeoutError(f"timed out after redirects: {hop_url[:120]}")
+            else:
+                deadline.append(time.monotonic() + self.timeout)
+            pinned = net_guard.curl_resolve(target) if pin else {}
+            return getter(hop_url, **dict(kwargs, timeout=timeout, **({"curl_options": pinned} if pinned else {})))
+
+        return cassette.http("fetch", "GET", url, lambda: net_guard.follow(url, hop), headers=headers,
+                             proxy=bool(proxy), stream=True, max_bytes=self.max_bytes)   # record / replay
 
     def _download(self, url: str, headers: dict, proxy: Optional[str] = None) -> Tuple[Optional[bytes], Optional[str], str]:
         """(body, error, content_type) for one attempt. Never raises."""
         try:
             resp = self._get(url, headers, proxy)
+        except net_guard.BlockedURL as exc:
+            logger.info("fetch: refused, %s", exc)
+            return None, net_guard.BLOCKED, ""
         except Exception as exc:
             logger.debug("fetch %s%s: %s", url, " via proxy" if proxy else "", type(exc).__name__)
             return None, cassette.miss_code(exc) or ("timeout" if _is_timeout(exc) else "connection_error"), ""

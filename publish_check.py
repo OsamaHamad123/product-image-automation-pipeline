@@ -85,6 +85,8 @@ DOWNLOAD_ERROR_TEXT = (
     (r"^download_http_(404|410)$", "الصورة انشالت من موقع المتجر: أعد البحث أو اختر صورة ثانية."),
     (r"^download_host_slow$",
      "موقع المتجر بطيء أو ما بيرد هلق وتخطّيناه مؤقتاً: جرّب بعد شوي أو اختر صورة من متجر ثاني."),
+    (r"^download_blocked_url$",
+     "رابط الصورة بيودّي على عنوان داخلي أو مش آمن، فما نزّلناه: اختر صورة ثانية."),
     (r"^download_|^(not_image|image_too_large|source_too_large)$",
      "الرابط ما عاد صورة صالحة: اختر صورة ثانية أو أعد البحث."),
 )
@@ -289,6 +291,8 @@ def fetch_error_word(error):
         return "الرد مش صورة"
     if error == "too_large":
         return "الصورة أكبر من الحد"
+    if error == "blocked_url":
+        return "رابط مش آمن"
     return "خطأ"
 
 

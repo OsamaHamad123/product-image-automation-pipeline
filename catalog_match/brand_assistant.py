@@ -314,6 +314,23 @@ def store_for_domain(domain: str):
                        note="official site added from the Brands Mapping assistant (Run page)")
 
 
+def _not_public(store, sitemaps):
+    """A 'blocked' HarvestReport when the site's name resolves to this server or a private network (net_guard): it is
+    never read and leaves the queue. None otherwise; a name that does not resolve now is left to the harvester (it
+    fails to answer and the site stays queued)."""
+    import net_guard
+
+    try:
+        net_guard.assert_public_url(store.base_url)
+    except net_guard.BlockedURL as exc:
+        logger.warning("brand sites: %s refused (%s)", store.name, exc)
+        return sitemaps.HarvestReport(store=store.key, status="blocked",
+                                      error="the site's address is not on the public internet: never read")
+    except Exception:  # noqa: BLE001 - HostLookupFailed and the like: the harvester's own request reports it
+        pass
+    return None
+
+
 def harvest_pending(max_domains: int = HARVEST_MAX_DOMAINS, budget_s: float = HARVEST_BUDGET_S, harvester=None,
                     db=None, clock=time.monotonic, pending=None, finish=None) -> List[Dict[str, Any]]:
     """
@@ -350,8 +367,9 @@ def harvest_pending(max_domains: int = HARVEST_MAX_DOMAINS, budget_s: float = HA
         store = store_for_domain(domain)
         try:
             began = db.begin_harvest(store.key)
-            report = harvester.harvest(store, on_urls=lambda batch, key=store.key: db.upsert(key, batch),
-                                       max_urls=HARVEST_MAX_URLS, max_sitemaps=HARVEST_MAX_SITEMAPS)
+            report = _not_public(store, sitemaps) or harvester.harvest(
+                store, on_urls=lambda batch, key=store.key: db.upsert(key, batch),
+                max_urls=HARVEST_MAX_URLS, max_sitemaps=HARVEST_MAX_SITEMAPS)
             if report.status != "outside_visit_time":      # robots.txt Visit-time: not read now, stays queued
                 db.finish_harvest(store.key, began, report.as_dict())
             status, urls = report.status, report.product_urls

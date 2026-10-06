@@ -59,6 +59,74 @@ def _fresh_cloud_breaker():
         module.reset_rembg_sessions(everything=True)
 
 
+# What every host name resolves to under the fixture below: a public address (no test reaches it, the HTTP clients
+# are fakes). An IP literal resolves to itself and 'localhost' to 127.0.0.1, so the guard still refuses those.
+PUBLIC_TEST_ADDRESS = "93.184.216.34"
+
+
+def fake_getaddrinfo(names=None):
+    """A stand-in for net_guard.getaddrinfo: names maps a host to its addresses (a str or a list) or to an exception
+    to raise; every other name is PUBLIC_TEST_ADDRESS. Never looks anything up."""
+    import ipaddress
+
+    names = {k.lower(): v for k, v in (names or {}).items()}
+
+    def literal(host):
+        try:
+            return str(ipaddress.ip_address(host.split("%", 1)[0]))
+        except ValueError:
+            pass
+        if re.fullmatch(r"[0-9a-fA-Fx.]+", host):       # 2130706433, 0x7f.1, 127.1: what inet_aton (and curl) accept
+            try:
+                return socket.inet_ntoa(socket.inet_aton(host))
+            except OSError:
+                pass
+        return None
+
+    def getaddrinfo(host):
+        key = str(host).lower().rstrip(".")
+        if key in names:
+            value = names[key]
+            if isinstance(value, BaseException):
+                raise value
+            addresses = [value] if isinstance(value, str) else list(value)
+        else:
+            found = literal(key)
+            addresses = [found] if found else (["127.0.0.1"] if key == "localhost" else [PUBLIC_TEST_ADDRESS])
+        return [(socket.AF_INET6 if ":" in a else socket.AF_INET, socket.SOCK_STREAM, 6, "",
+                 (a, 0, 0, 0) if ":" in a else (a, 0)) for a in addresses]
+
+    return getaddrinfo
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _public_dns():
+    """net_guard (the SSRF guard) resolves the host of every URL a download may reach. No test looks a name up for
+    real: every name is a public address here (fake_getaddrinfo), for the whole session, so module-scoped fixtures
+    (a recording run) see it too. A test of the guard sets its own mapping with monkeypatch."""
+    try:
+        import net_guard
+    except Exception:  # pragma: no cover - a checkout without the module
+        yield
+        return
+    real = net_guard.getaddrinfo
+    net_guard.getaddrinfo = fake_getaddrinfo()
+    yield
+    net_guard.getaddrinfo = real
+
+
+@pytest.fixture(autouse=True)
+def _fresh_dns_cache():
+    """net_guard caches DNS answers for a minute; a test must not inherit (or leave) another test's answers."""
+    module = sys.modules.get("net_guard")
+    if module is not None:
+        module.reset_cache()
+    yield
+    module = sys.modules.get("net_guard")
+    if module is not None:
+        module.reset_cache()
+
+
 @pytest.fixture
 def offline(monkeypatch):
     """Refuse every socket connection (network and database)."""
