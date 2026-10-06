@@ -261,6 +261,22 @@
                 <x-lq.button variant="secondary" size="sm" icon="upload" data-health="eval-export"><span data-health="eval-export-label">صدّر مجموعة اختبار</span></x-lq.button>
             </div>
             <a class="lq-link" data-health="eval-export-link" href="#" download hidden>نزّل الملف</a>
+
+            {{-- «صور قديمة بخلفية بيضا» (RecutController -> cli_bridge reprocess_plan / reprocess_start ->
+                 scripts/reprocess_transparent.py; health.js createReprocess). «احسب» ما بيغيّر شي؛ «ابدأ» دفعة بسقف. --}}
+            <section class="lq-health-reprocess" aria-labelledby="reprocess-title" data-health="reprocess">
+                <h2 class="lq-card__title" id="reprocess-title">صور قديمة بخلفية بيضا</h2>
+                <p class="lq-card__meta">الصور اللي انتشرت قبل الخلفية الشفافة بتبين مربع أبيض بالوضع الغامق بالتطبيق. «احسب» بيعدّها وبيقلك قديش بتكلّف نعيد قصها شفافة، بدون ما يغيّر شي. الصف اللي غيّرت صورته بإيدك ما منلمسه، وكل صورة بتنعاد بتنسجّل.</p>
+                <div class="lq-card__header">
+                    <p class="lq-health__footnote" data-health="reprocess-status" role="status" aria-live="polite" dir="auto"></p>
+                    <x-lq.button variant="secondary" size="sm" icon="search" data-health="reprocess-plan"><span data-health="reprocess-plan-label">احسب</span></x-lq.button>
+                </div>
+                <form class="lq-health-reprocess__form" data-health="reprocess-form" hidden>
+                    <label class="lq-field"><span class="lq-field__label">كم صورة بهالدفعة</span><input type="number" class="lq-input lq-input--sm" name="max" min="1" max="200" step="1" value="20" dir="ltr" inputmode="numeric" data-health="reprocess-max"></label>
+                    <label class="lq-field"><span class="lq-field__label">أقصى تكلفة (دولار)</span><input type="number" class="lq-input lq-input--sm" name="max_usd" min="0.01" max="100" step="0.01" value="1" dir="ltr" inputmode="decimal" data-health="reprocess-usd"></label>
+                    <x-lq.button variant="primary" size="sm" icon="play" type="submit" data-health="reprocess-start"><span data-health="reprocess-start-label">ابدأ</span></x-lq.button>
+                </form>
+            </section>
         </div>
     </details>
 </div>

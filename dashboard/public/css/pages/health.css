@@ -706,6 +706,38 @@
     overflow-wrap: anywhere;
 }
 
+/* متقدم: «صور قديمة بخلفية بيضا» (health.js createReprocess) */
+.lq-health-reprocess {
+    display: flex;
+    flex-direction: column;
+    gap: var(--lq-space-3);
+    padding-block-start: var(--lq-space-3);
+    border-block-start: 1px solid var(--lq-border);
+}
+
+.lq-health-reprocess__form {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: var(--lq-space-3);
+}
+
+.lq-health-reprocess__form[hidden] {
+    display: none;
+}
+
+.lq-health-reprocess__form .lq-field {
+    flex: 0 1 180px;
+}
+
+@media (max-width: 560px) {
+    .lq-health-reprocess__form .lq-field,
+    .lq-health-reprocess__form .lq-btn {
+        flex: 1 1 100%;
+        width: 100%;
+    }
+}
+
 @media (max-width: 1240px) {
     .lq-health__services {
         grid-template-columns: repeat(3, minmax(0, 1fr));

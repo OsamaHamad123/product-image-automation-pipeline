@@ -588,3 +588,28 @@ def embeddings_model_dir() -> str:
         value = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), value)
     return value
 # --- end embeddings package ---
+
+
+# --- recut package: «أعد معالجتها شفافة» and «فحص القص» (recut.py, scripts/reprocess_transparent.py) ---
+# PHOTOROOM_PRICE_USD   what one PhotoRoom segment call costs on the owner's plan: the reprocess estimate (calls x price)
+#                       and its --max-usd cap count with it
+# REMOVEBG_PRICE_USD    the same for remove.bg (when it is the configured method)
+# RECUT_BATCH_MAX       the most pictures one dashboard batch («ابدأ» on the Health card) may redo
+DEFAULTS.update({
+    "PHOTOROOM_PRICE_USD": "0.02",
+    "REMOVEBG_PRICE_USD": "0.2",
+    "RECUT_BATCH_MAX": 200,
+})
+
+
+def isolation_price_usd(method: str) -> float:
+    """Estimated USD of one background-removal call of `method` (0 for the free local methods and 'none')."""
+    name = {"photoroom": "PHOTOROOM_PRICE_USD", "remove_bg_api": "REMOVEBG_PRICE_USD"}.get(str(method or ""))
+    return _number(name, 0.0, 10.0) if name else 0.0
+
+
+def recut_batch_max() -> int:
+    """The most pictures one dashboard reprocess batch may redo (RECUT_BATCH_MAX, 1..5000)."""
+    value = get("RECUT_BATCH_MAX")
+    return max(1, min(5000, value if isinstance(value, int) else int(DEFAULTS["RECUT_BATCH_MAX"])))
+# --- end recut package ---

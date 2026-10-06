@@ -88,6 +88,11 @@ _SCHEMA_MIGRATIONS = [
     # للمالك كي ينسخه للشيت (scripts/export_barcodes.py)؛ لا يُكتب في الشيت تلقائياً أبداً
     "ALTER TABLE resolved_products ADD COLUMN IF NOT EXISTS page_gtin VARCHAR(14) NULL",
     "ALTER TABLE resolved_products ADD COLUMN IF NOT EXISTS page_gtin_url TEXT NULL",
+    # خلفية الأصل المنشور على Cloudinary (recut.py): 'transparent' (PNG شفافة) | 'white' (لوحة بيضا قبل الشفافية أو
+    # OUTPUT_BACKGROUND = white) | 'opaque' (انتشرت بدون عزل)؛ NULL = ما منعرف بعد (اعتماد قبل هالعمود: بينفحص الأصل).
+    # cutout_json: ما قاله فحص القص عن هالصورة (المزوّد، العلامات، الهالة، الحافة الغامقة، عدم تأكد PhotoRoom، اللوحة)
+    "ALTER TABLE resolved_products ADD COLUMN IF NOT EXISTS master_background VARCHAR(16) NULL",
+    "ALTER TABLE resolved_products ADD COLUMN IF NOT EXISTS cutout_json TEXT NULL",
     # automation_queue
     "ALTER TABLE automation_queue ADD COLUMN IF NOT EXISTS sku_key VARCHAR(64) NULL",
     "ALTER TABLE automation_queue ADD COLUMN IF NOT EXISTS payload_json LONGTEXT NULL",
@@ -437,6 +442,8 @@ def init_db():
         cursor.execute(BRAND_WRITES_TABLE_SQL)
         # 15. متجهات الصور المعتمدة (catalog_match.embeddings): مراجع فحص شكل العبوة، دليل فقط
         cursor.execute(APPROVED_EMBEDDINGS_SQL)
+        # 16. سجل «أعد القص» (recut.py): كل صورة انبدلت بنسخة جديدة (شفافة أو قص أحسن)، للتراجع
+        cursor.execute(RECUT_LOG_SQL)
 
         # القيم الافتراضية المبدئية من ملف .env (INSERT IGNORE لا يغير القيم الموجودة)
         import config
@@ -789,11 +796,13 @@ def _remember_phash(hash_str, row_id, cloudinary_url, product_name):
 def save_product_resolution(barcode, product_name, brand, original_url, cloudinary_url, clip_score=None,
                             metadata=None, clip_embedding=None, perceptual_hash=None,
                             verification_status="legacy", approved_by=None, sku_key=None, color_signature=None,
-                            page_gtin=None, page_gtin_url=None):
+                            page_gtin=None, page_gtin_url=None, master_background=None, cutout=None):
     """
     حفظ أو تحديث الحل المعتمد لمنتج (Upsert بـ sku_key، أو بالباركود إن لم يوجد sku_key).
     page_gtin / page_gtin_url: الباركود الذي ذكرته صفحة متجر الصورة المعتمدة وصفحته، عندما لا يوجد باركود صالح في
     الشيت (catalog_match.gtin.barcode_from_page)؛ يتبعان هذا الاعتماد (اعتماد صورة أخرى بلا باركود يمحوهما).
+    master_background / cutout: خلفية الأصل المرفوع ('transparent' | 'white' | 'opaque') وما قاله فحص القص عنه
+    (recut.facts_from_publish)؛ None = ما منعرف (recut.py بيفحص الأصل نفسه وقت يلزم).
     أحدث سجل مطابق يُحدّث، وأي سجلات مطابقة أخرى تصبح superseded.
     حل auto_verified لا يحل أبداً محل اعتماد بشري (human_approved): إذا كان أي سجل مطابق معتمداً بشرياً
     لا يُكتب شيء وتعيد False (مراجع اعتمد أثناء نشر العامل التلقائي). الفحص والكتابة في معاملة واحدة تقفل السجلات
@@ -811,7 +820,9 @@ def save_product_resolution(barcode, product_name, brand, original_url, cloudina
               metadata_str, embedding_str, hash_str, sku_clean or None, verification_status, approved_by,
               str(color_signature)[:64] if color_signature else None,
               str(page_gtin).strip()[:14] if page_gtin else None, (str(page_gtin_url).strip() or None)
-              if page_gtin and page_gtin_url else None)
+              if page_gtin and page_gtin_url else None,
+              str(master_background)[:16] if master_background else None,
+              json.dumps(cutout, ensure_ascii=False, default=str) if cutout else None)
 
     def attempt():
         conn = get_db_connection()
@@ -838,7 +849,8 @@ def save_product_resolution(barcode, product_name, brand, original_url, cloudina
                     SET barcode = %s, product_name = %s, brand = %s, original_url = %s, cloudinary_url = %s,
                         clip_score = %s, metadata_json = %s, clip_embedding_json = %s, perceptual_hash = %s,
                         sku_key = %s, verification_status = %s, approved_by = %s, color_signature = %s,
-                        page_gtin = %s, page_gtin_url = %s, resolved_at = CURRENT_TIMESTAMP
+                        page_gtin = %s, page_gtin_url = %s, master_background = %s, cutout_json = %s,
+                        resolved_at = CURRENT_TIMESTAMP
                     WHERE id = %s
                 """, values + (existing[0],))
                 saved_id = existing[0]
@@ -853,8 +865,9 @@ def save_product_resolution(barcode, product_name, brand, original_url, cloudina
                 cursor.execute("""
                     INSERT INTO resolved_products (barcode, product_name, brand, original_url, cloudinary_url,
                         clip_score, metadata_json, clip_embedding_json, perceptual_hash, sku_key,
-                        verification_status, approved_by, color_signature, page_gtin, page_gtin_url)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        verification_status, approved_by, color_signature, page_gtin, page_gtin_url,
+                        master_background, cutout_json)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """, values)
                 saved_id = cursor.lastrowid
             conn.commit()
@@ -3988,6 +4001,295 @@ def mark_brand_write_undone(write_id):
         cursor.execute("UPDATE brand_writes SET undone_at = NOW() WHERE id = %s AND undone_at IS NULL", (int(write_id),))
         conn.commit()
         return cursor.rowcount == 1
+    finally:
+        _close(conn)
+
+
+# ---------------------------------------------------------------------------
+# «أعد القص» (recut.py): الأصول المنشورة وخلفيتها، وسجل كل صورة انبدلت بنسخة جديدة (للتراجع)
+# ---------------------------------------------------------------------------
+
+RECUT_LOG_SQL = """
+    CREATE TABLE IF NOT EXISTS recut_log (
+        id BIGINT AUTO_INCREMENT PRIMARY KEY,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        batch_id VARCHAR(32) NULL,
+        origin VARCHAR(16) NOT NULL,
+        status VARCHAR(16) NOT NULL,
+        code VARCHAR(64) NULL,
+        resolved_ids VARCHAR(255) NULL,
+        sku_key VARCHAR(64) NULL,
+        product_name VARCHAR(255) NULL,
+        brand VARCHAR(255) NULL,
+        old_url TEXT NOT NULL,
+        old_url_hash CHAR(40) NOT NULL,
+        new_url TEXT NULL,
+        old_background VARCHAR(16) NULL,
+        old_cutout_json TEXT NULL,
+        new_cutout_json TEXT NULL,
+        provider VARCHAR(32) NULL,
+        source VARCHAR(16) NULL,
+        paid_calls INT NOT NULL DEFAULT 0,
+        rows_json TEXT NULL,
+        outbox_json TEXT NULL,
+        undone_at DATETIME NULL,
+        INDEX idx_recut_old (old_url_hash),
+        INDEX idx_recut_status (status),
+        INDEX idx_recut_batch (batch_id)
+    ) ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
+"""
+# uploaded: النسخة الجديدة انرفعت وما خلصت الكتابة (التشغيل الجاي بيكمّلها) | done | skipped: ما انبدل شي (code السبب)
+# | failed: وقف بخطأ | undone: المالك رجّع القديم
+RECUT_STATUSES = ("uploaded", "done", "skipped", "failed", "undone")
+_RECUT_FIELDS = ("batch_id", "origin", "status", "code", "resolved_ids", "sku_key", "product_name", "brand",
+                 "old_url", "new_url", "old_background", "old_cutout_json", "new_cutout_json", "provider", "source",
+                 "paid_calls", "rows_json", "outbox_json")
+_RECUT_JSON = ("rows_json", "outbox_json", "old_cutout_json", "new_cutout_json")
+
+
+def recut_url_hash(url):
+    """بصمة الرابط للبحث بسجل «أعد القص»: نفس الأصل بالتحويل القديم أو الجديد بيعطي نفس البصمة."""
+    import hashlib
+    from delivery_urls import canonical_delivery_url
+    return hashlib.sha1(canonical_delivery_url(url).encode("utf-8")).hexdigest()
+
+
+_MASTER_COLUMNS = ("id, sku_key, barcode, product_name, brand, original_url, cloudinary_url, verification_status, "
+                   "master_background, cutout_json, metadata_json, perceptual_hash, color_signature, resolved_at")
+
+
+def published_masters(limit=None, offset=0):
+    """
+    الصور المنشورة اللي بتنخدم (human_approved / auto_verified)، الأحدث أولاً: [{id, sku_key, barcode, product_name,
+    brand, original_url, cloudinary_url, verification_status, master_background, cutout_json, metadata_json,
+    perceptual_hash, color_signature, resolved_at}]. قراءة فقط؛ أخطاء قاعدة البيانات تُرفع.
+    """
+    sql = (f"SELECT {_MASTER_COLUMNS} FROM resolved_products WHERE {_SERVABLE_SQL} AND cloudinary_url IS NOT NULL "
+           "AND cloudinary_url <> '' ORDER BY resolved_at DESC, id DESC")
+    params = []
+    if limit is not None:
+        sql += " LIMIT %s OFFSET %s"
+        params += [max(0, int(limit)), max(0, int(offset or 0))]
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(sql, tuple(params))
+        return [dict(r) for r in cursor.fetchall() or []]
+    finally:
+        _close(conn)
+
+
+def published_master(row_id):
+    """صف واحد من published_masters بمعرّفه، أو None (مش موجود أو ما عاد بينخدم)."""
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(f"SELECT {_MASTER_COLUMNS} FROM resolved_products WHERE id = %s AND {_SERVABLE_SQL}",
+                       (int(row_id),))
+        row = cursor.fetchone()
+    finally:
+        _close(conn)
+    return dict(row) if row else None
+
+
+def set_master_facts(row_ids, cloudinary_url, background=None, cutout=None):
+    """
+    يحفظ ما عرفناه عن الأصل المنشور (خلفيته و/أو فحص القص) لهالصفوف، بس إذا لسا رابطها هو نفسه (اعتماد صورة تانية
+    بالنص ما بينكتب فوقه). يعيد عدد الصفوف. أخطاء قاعدة البيانات تُرفع.
+    """
+    from delivery_urls import delivery_variants
+
+    ids = sorted({int(i) for i in row_ids or []})
+    urls = delivery_variants(cloudinary_url)
+    sets, params = [], []
+    if background:
+        sets.append("master_background = %s")
+        params.append(str(background)[:16])
+    if cutout is not None:
+        sets.append("cutout_json = %s")
+        params.append(json.dumps(cutout, ensure_ascii=False, default=str))
+    if not ids or not urls or not sets:
+        return 0
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            f"UPDATE resolved_products SET {', '.join(sets)}, resolved_at = resolved_at "
+            f"WHERE id IN ({','.join(['%s'] * len(ids))}) AND cloudinary_url IN ({','.join(['%s'] * len(urls))})",
+            tuple(params) + tuple(ids) + tuple(urls))
+        conn.commit()
+        return cursor.rowcount
+    finally:
+        _close(conn)
+
+
+def replace_master(row_ids, old_url, new_url, background=None, cutout=None, perceptual_hash=None,
+                   color_signature=None):
+    """
+    يبدّل الأصل المنشور لهالصفوف بالنسخة الجديدة (recut.publish، أو التراجع عنها) بمعاملة وحدة: بس الصفوف اللي لسا
+    بتنخدم ورابطها لسا old_url (بأي شكل تسليم)؛ وقت الاعتماد (resolved_at) والحالة والمراجِع ما بيتغيروا. متجهات فحص شكل
+    العبوة (approved_embeddings) بتلحق الرابط الجديد (نفس الصورة). يعيد عدد صفوف resolved_products. الأخطاء تُرفع.
+    """
+    import hashlib
+    from delivery_urls import delivery_variants
+
+    ids = sorted({int(i) for i in row_ids or []})
+    urls = delivery_variants(old_url)
+    new = str(new_url or "").strip()
+    if not ids or not urls or not new:
+        return 0
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            f"UPDATE resolved_products SET cloudinary_url = %s, master_background = %s, cutout_json = %s, "
+            f"perceptual_hash = COALESCE(%s, perceptual_hash), color_signature = COALESCE(%s, color_signature), "
+            f"resolved_at = resolved_at WHERE id IN ({','.join(['%s'] * len(ids))}) AND {_SERVABLE_SQL} "
+            f"AND cloudinary_url IN ({','.join(['%s'] * len(urls))})",
+            (new, str(background)[:16] if background else None,
+             json.dumps(cutout, ensure_ascii=False, default=str) if cutout else None,
+             str(perceptual_hash) if perceptual_hash else None,
+             str(color_signature)[:64] if color_signature else None) + tuple(ids) + tuple(urls))
+        changed = cursor.rowcount
+        if changed:
+            cursor.execute(
+                f"UPDATE IGNORE approved_embeddings SET cloudinary_url = %s, url_hash = %s "
+                f"WHERE cloudinary_url IN ({','.join(['%s'] * len(urls))})",
+                (new, hashlib.sha1(new.encode("utf-8")).hexdigest()) + tuple(urls))
+        conn.commit()
+        return changed
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise
+    finally:
+        _close(conn)
+
+
+def approval_source_sha(sku_key, cloudinary_url):
+    """
+    بصمة sha256 لبايتات الصورة المصدر اللي انعتمدت لهالأصل (approved_embeddings.content_sha256 لما المتجه انحسب من ملف
+    مخزن المرشحات)، أو None. إعادة القص بتقرا الملف المخزن بهالبصمة، أو بتنزّل الرابط وبتتأكد إنه نفس البايتات.
+    """
+    from delivery_urls import delivery_variants
+
+    urls = delivery_variants(cloudinary_url)
+    if not sku_key or not urls:
+        return None
+    try:
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                f"SELECT content_sha256 FROM approved_embeddings WHERE sku_key = %s AND content_sha256 IS NOT NULL "
+                f"AND cloudinary_url IN ({','.join(['%s'] * len(urls))}) ORDER BY id DESC LIMIT 1",
+                (str(sku_key),) + tuple(urls))
+            row = cursor.fetchone()
+        finally:
+            _close(conn)
+    except Exception as e:
+        logger.warning("[Recut] تعذر قراءة بصمة الصورة المصدر: %s", e)
+        return None
+    return str(row["content_sha256"]).lower() if row and row.get("content_sha256") else None
+
+
+def _recut_values(fields):
+    values = dict(fields)
+    for key in _RECUT_JSON:
+        if values.get(key) is not None and not isinstance(values[key], str):
+            values[key] = json.dumps(values[key], ensure_ascii=False, default=str)
+    if isinstance(values.get("resolved_ids"), (list, tuple, set)):
+        values["resolved_ids"] = ",".join(str(int(i)) for i in values["resolved_ids"])[:255]
+    for key, limit in (("product_name", 255), ("brand", 255), ("code", 64), ("sku_key", 64), ("provider", 32),
+                       ("source", 16), ("batch_id", 32), ("origin", 16), ("old_background", 16)):
+        if values.get(key) is not None:
+            values[key] = str(values[key])[:limit]
+    if "status" in values and values["status"] not in RECUT_STATUSES:
+        raise ValueError(f"recut status غير صالح: {values['status']!r}")
+    return values
+
+
+def log_recut(entry):
+    """يسجّل إعادة قص (entry: حقول _RECUT_FIELDS، والقوائم والقواميس بتنحفظ JSON). يعيد المعرّف. الأخطاء تُرفع."""
+    values = _recut_values({k: entry.get(k) for k in _RECUT_FIELDS})
+    values["old_url"] = str(values.get("old_url") or "")
+    values["paid_calls"] = int(values.get("paid_calls") or 0)
+    cols = list(values) + ["old_url_hash"]
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(f"INSERT INTO recut_log ({', '.join(cols)}) VALUES ({', '.join(['%s'] * len(cols))})",
+                       tuple(values.values()) + (recut_url_hash(values["old_url"]),))
+        conn.commit()
+        return cursor.lastrowid
+    finally:
+        _close(conn)
+
+
+def update_recut(log_id, undone=False, **fields):
+    """يحدّث حقول سجل إعادة قص (status، code، new_url، outbox_json...)؛ undone=True بيسجّل وقت التراجع. True إذا انحدّث."""
+    values = _recut_values({k: v for k, v in fields.items() if k in _RECUT_FIELDS})
+    sets = [f"{k} = %s" for k in values] + (["undone_at = NOW()"] if undone else [])
+    if not sets:
+        return False
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(f"UPDATE recut_log SET {', '.join(sets)} WHERE id = %s",
+                       tuple(values.values()) + (int(log_id),))
+        conn.commit()
+        return cursor.rowcount == 1
+    finally:
+        _close(conn)
+
+
+def _recut_row(row):
+    out = dict(row)
+    for key in _RECUT_JSON:
+        out[key[:-len("_json")]] = _loads(out.pop(key, None), None)
+    out["resolved_ids"] = [int(i) for i in str(out.get("resolved_ids") or "").split(",") if i.strip().isdigit()]
+    return out
+
+
+def recut_entry(log_id):
+    """سجل إعادة قص واحد (الحقول JSON مقروءة: rows، outbox، old_cutout، new_cutout)، أو None."""
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM recut_log WHERE id = %s", (int(log_id),))
+        row = cursor.fetchone()
+    finally:
+        _close(conn)
+    return _recut_row(row) if row else None
+
+
+def recut_entries(statuses=None, origin=None, old_urls=None, limit=50):
+    """سجلات إعادة القص، الأحدث أولاً، بحسب الحالة و/أو المصدر و/أو الأصل القديم (old_urls بأي شكل تسليم)."""
+    where, params = [], []
+    if statuses:
+        where.append(f"status IN ({','.join(['%s'] * len(statuses))})")
+        params += list(statuses)
+    if origin:
+        where.append("origin = %s")
+        params.append(str(origin))
+    if old_urls is not None:
+        hashes = sorted({recut_url_hash(u) for u in old_urls if u})
+        if not hashes:
+            return []
+        where.append(f"old_url_hash IN ({','.join(['%s'] * len(hashes))})")
+        params += hashes
+    sql = "SELECT * FROM recut_log" + (" WHERE " + " AND ".join(where) if where else "") + " ORDER BY id DESC"
+    if limit is not None:
+        sql += " LIMIT %s"
+        params.append(max(1, int(limit)))
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(sql, tuple(params))
+        return [_recut_row(r) for r in cursor.fetchall() or []]
     finally:
         _close(conn)
 

@@ -101,4 +101,10 @@ Route::post('/api/run/brand-undo', [RunController::class, 'brandUndo']);
 Route::get('/api/run/barcode-suggestions', [RunController::class, 'barcodeSuggestions']);
 Route::post('/api/run/barcode-write', [RunController::class, 'barcodeWrite']);
 
+// «أعد القص» (RecutController): بطاقة «صور قديمة بخلفية بيضا» بالقسم المتقدم بصفحة الصحة (التجربة ما بتغيّر شي؛ «ابدأ»
+// دفعة بسقف عدد وتكلفة بالخلفية)
+Route::post('/api/system/reprocess/plan', [\App\Http\Controllers\RecutController::class, 'plan']);
+Route::post('/api/system/reprocess/start', [\App\Http\Controllers\RecutController::class, 'start']);
+Route::get('/api/system/reprocess', [\App\Http\Controllers\RecutController::class, 'batchStatus']);
+
 Route::view('/ui-kit', 'dashboard.ui_kit')->name('dashboard.ui_kit'); // مرجع مكوّنات هوية لقطة

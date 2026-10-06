@@ -996,6 +996,12 @@ def _reviewer_check(params, sku_key, row_number, product_name, image_url, out, r
     return check
 
 
+def _master_facts(res):
+    """خلفية الأصل المرفوع وفحص قصه للحل المعتمد (main.master_facts؛ قاموس فاضي إذا ما انعرف)."""
+    master_facts = getattr(_pipeline(), "master_facts", None)
+    return master_facts(res) if callable(master_facts) else {}
+
+
 def _human_decision(barcode, product_name, brand, original_url, approved_by, sku_key, row_number, rows,
                     page_gtin=None, page_gtin_url=None):
     """
@@ -1009,7 +1015,7 @@ def _human_decision(barcode, product_name, brand, original_url, approved_by, sku
         local_cache_db.save_product_resolution(
             barcode, product_name, brand, original_url, res["link"], None, res.get("metadata"),
             perceptual_hash=res.get("phash"), verification_status="human_approved", approved_by=approved_by,
-            sku_key=sku_key, color_signature=res.get("color_signature"),
+            sku_key=sku_key, color_signature=res.get("color_signature"), **_master_facts(res),
             **({"page_gtin": page_gtin, "page_gtin_url": page_gtin_url} if page_gtin else {}),
         )
         local_cache_db.update_task_status_by_row(row_number, "completed", sku_key=sku_key, rows=rows)
@@ -2830,6 +2836,74 @@ def action_barcode_write(params):
     return out
 
 
+# ---------------------------------------------------------------------------
+# «أعد معالجتها شفافة» (بطاقة بالقسم المتقدم بصفحة الصحة): recut.py
+# ---------------------------------------------------------------------------
+
+def _reprocess_script():
+    """scripts/reprocess_transparent.py كموديول (بالمسار: scripts/ على sys.path بيغطي موديولات بنفس الاسم)."""
+    import importlib.util
+
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts", "reprocess_transparent.py")
+    spec = importlib.util.spec_from_file_location("reprocess_transparent", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _reprocess_state_view(state):
+    """حالة آخر دفعة (temp/reprocess_state.json) بالحقول اللي بتعرضها البطاقة."""
+    keys = ("state", "trigger", "started_at", "updated_at", "finished_at", "max", "max_usd", "planned", "done",
+            "skipped", "needs_look", "busy", "queued", "calls", "spent_usd", "last_error", "last_item", "current")
+    return {k: state.get(k) for k in keys if k in state}
+
+
+def action_reprocess_plan(params):
+    """
+    التجربة (dry run) لـ «أعد معالجتها شفافة»: كم صورة منشورة أصلها لسا أبيض وبالشيت، وكم بتكلّف إعادة قصها (طلبات
+    العزل × السعر)، مع حالة آخر دفعة. ما بيغيّر شي: لا صورة ولا رابط ولا خلية ولا طلب مدفوع (فحص الأصل تنزيل مجاني).
+    الاستجابة: {status, plan: {todo, transparent, not_in_sheet, skipped_before, probe_failed, pictures, method,
+    estimate: {calls, price, usd, worst_usd}, samples}, running, state, bg_off, batch_max}.
+    """
+    import processing_profile
+    from catalog_match import settings
+
+    rpt = _reprocess_script()
+    state = rpt.read_state()
+    out = {"status": "success", "running": rpt.running(state), "state": _reprocess_state_view(state),
+           "bg_off": processing_profile.current().skips_background, "batch_max": settings.recut_batch_max()}
+    try:
+        found = rpt.build_plan(_open_sheet(), retry_skipped=_as_bool(params.get("retry_skipped")))
+    except Exception:
+        return _failure("failed", "Could not read the sheet or the database (details in temp/search.log).",
+                        "reprocess_plan failed")
+    out["plan"] = _recut().json_safe(rpt.summary(found))
+    return out
+
+
+def action_reprocess_start(params):
+    """
+    «ابدأ»: دفعة بسقف (max صورة، max_usd دولار) كعملية مستقلة (scripts/reprocess_transparent.py --apply)، والبطاقة
+    بتتابع temp/reprocess_state.json. {status, started, reason: started | running | run_active | bg_off | unavailable}.
+    """
+    from catalog_match import settings
+
+    try:
+        count = int(params.get("max") or 0)
+        usd = float(params.get("max_usd") or 0)
+    except (TypeError, ValueError):
+        return {"status": "invalid", "error": "max and max_usd must be numbers"}
+    if count < 1 or count > settings.recut_batch_max() or not (0 < usd <= 100):
+        return {"status": "invalid", "error": "max or max_usd out of range", "batch_max": settings.recut_batch_max()}
+    result = _reprocess_script().start_detached(count, usd)
+    return {"status": "success", "started": bool(result.get("started")), "reason": result.get("reason")}
+
+
+def _recut():
+    import recut
+    return recut
+
+
 ACTIONS = {
     'get_products': action_get_products,
     'search': action_search,
@@ -2856,6 +2930,8 @@ ACTIONS = {
     'publish_check': action_publish_check,
     'bg_methods': action_bg_methods,
     'local_index_refresh': action_local_index_refresh,
+    'reprocess_plan': action_reprocess_plan,
+    'reprocess_start': action_reprocess_start,
     'ops_health': action_ops_health,
     'run_control': action_run_control,
 }

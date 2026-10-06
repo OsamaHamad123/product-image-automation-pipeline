@@ -750,6 +750,9 @@ class SQLiteTransactionQueue:
                 "ALTER TABLE sheet_updates ADD COLUMN IF NOT EXISTS ident CHAR(40) NULL",
                 "ALTER TABLE sheet_updates ADD COLUMN IF NOT EXISTS relocated_from INT NULL",
                 "ALTER TABLE sheet_updates ADD COLUMN IF NOT EXISTS next_attempt_at BIGINT NULL",
+                # «بدّل بس إذا»: الكتابة بتنكتب بس إذا الخلية لسا فيها هالقيمة (نفس الأصل بأي شكل تسليم): إعادة القص
+                # (recut.py) ما بتكتب أبداً فوق رابط غيّره المالك بإيده من بعد ما كتبناه
+                "ALTER TABLE sheet_updates ADD COLUMN IF NOT EXISTS expect_value TEXT NULL",
                 "ALTER TABLE sheet_updates ADD INDEX IF NOT EXISTS idx_sheet_updates_status (sync_status)",
                 "ALTER TABLE sheet_updates ADD INDEX IF NOT EXISTS idx_sheet_updates_ident (ident)",
                 "ALTER TABLE sheet_updates ADD INDEX IF NOT EXISTS idx_sheet_updates_row (`row_number`)",
@@ -761,10 +764,12 @@ class SQLiteTransactionQueue:
             conn.close()
 
     def append_update(self, row_number, col_index, value, col_name=None, key_barcode=None, key_name=None,
-                      key_size=None, key_brand=None, col_key=None, seq=None):
+                      key_size=None, key_brand=None, col_key=None, seq=None, expect_value=None):
         """
         جدولة كتابة خلية. col_key: المفتاح المنطقي للعمود ('link' أو 'meta:<key>') ويُحدد عموده وقت الكتابة؛
         col_index/col_name للكتابات القديمة فقط. يعيد معرّف الصف.
+        expect_value: الكتابة بتنكتب بس إذا الخلية وقت التفريغ لسا فيها هالقيمة (رابط تسليم إلنا لنفس الأصل بأي شكل
+        بيحسب نفسه)، وإلا CONFLICT (cell_changed) بلا كتابة.
         seq: تسلسل كتابة نُقلت من Redis (بوقت جدولتها هناك)؛ نقلها مرة أخرى (نقل جزئي أو حمولة تغيرت أثناء النقل)
         لا يكرر الصف. دونه يُولَّد الآن ولا يقل عن أكبر seq في الطابور + 1: الترتيب بين العمليات يبقى صحيحاً حتى
         لو رجعت ساعة الجهاز أو وقعت كتابتان في نفس نبضة الساعة.
@@ -787,9 +792,11 @@ class SQLiteTransactionQueue:
                 seq = _next_seq(floor=int((cursor.fetchone() or {}).get("top") or 0) + 1)
             cursor.execute(
                 "INSERT INTO sheet_updates (`row_number`, `col_index`, `value`, col_name, col_key, seq, ident, "
-                "key_barcode, key_name, key_size, key_brand) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                "expect_value, key_barcode, key_name, key_size, key_brand) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
                 (row_number, -1 if col_index is None else col_index, "" if value is None else str(value),
-                 col_name, col_key, int(seq), ident, key_barcode, key_name, key_size, key_brand)
+                 col_name, col_key, int(seq), ident, None if expect_value is None else str(expect_value),
+                 key_barcode, key_name, key_size, key_brand)
             )
             new_id = getattr(cursor, "lastrowid", None)
             conn.commit()
@@ -1026,7 +1033,7 @@ class GoogleSheetsBatchWorker(threading.Thread):
         now = _now()
         cursor.execute(
             "SELECT id, `row_number`, `col_index`, `value`, col_name, col_key, seq, ident, relocated_from, "
-            "key_barcode, key_name, key_size, key_brand, attempts "
+            "key_barcode, key_name, key_size, key_brand, attempts, expect_value "
             "FROM sheet_updates WHERE sync_status = 'PENDING' "
             "OR (sync_status = 'FAILED' AND (next_attempt_at IS NULL OR next_attempt_at <= %s)) "
             "ORDER BY id LIMIT %s",
@@ -1132,7 +1139,8 @@ class GoogleSheetsBatchWorker(threading.Thread):
             held = _read_cells(worksheet, [(r["row_number"], col) for r, col in relocated])
             for r, col in relocated:
                 current = held.get((r["row_number"], col), "")
-                if current and current != str(r["value"]).strip():
+                replaces = r.get("expect_value") is not None and _cell_holds(current, r["expect_value"])
+                if current and current != str(r["value"]).strip() and not replaces:
                     conflicts[r["id"]] = (f"the product moved from row {moved[r['id']][0]} to row {r['row_number']}, "
                                           f"whose cell already holds a different value ({current[:200]!r}); not moved")
                     r["row_number"], r["relocated_from"] = moved[r["id"]]
@@ -1153,6 +1161,23 @@ class GoogleSheetsBatchWorker(threading.Thread):
                 elif current:
                     conflicts[r["id"]] = (f"cell_not_empty: the {r['col_key']} cell of row {r['row_number']} already "
                                           f"holds {current[:60]!r}; not overwritten")
+            _set_status(cursor, already, "SYNCED")
+            ready = [(r, col) for r, col in ready if r["id"] not in conflicts and r["id"] not in already]
+
+        # 6ب. «بدّل بس إذا» (expect_value، إعادة القص recut.py): خلية الهدف تُقرأ الآن؛ بتنكتب بس إذا لسا فيها القيمة
+        #     اللي منبدّلها (نفس الأصل بأي شكل تسليم). المالك غيّرها بإيده: CONFLICT بلا كتابة. القيمة الجديدة نفسها: SYNCED
+        swap = [(r, col) for r, col in ready if r.get("expect_value") is not None]
+        if swap:
+            held = _read_cells(worksheet, [(r["row_number"], col) for r, col in swap])
+            already = []
+            for r, col in swap:
+                current = held.get((r["row_number"], col), "")
+                if current == str(r["value"]).strip():
+                    already.append(r["id"])
+                elif not _cell_holds(current, r["expect_value"]):
+                    conflicts[r["id"]] = (f"cell_changed: the {r.get('col_key') or 'target'} cell of row "
+                                          f"{r['row_number']} now holds {current[:200]!r}, not the value this write "
+                                          "replaces; not overwritten")
             _set_status(cursor, already, "SYNCED")
             ready = [(r, col) for r, col in ready if r["id"] not in conflicts and r["id"] not in already]
 
@@ -1241,6 +1266,20 @@ class GoogleSheetsBatchWorker(threading.Thread):
         conn.commit()
         for outcome in dead:
             _report_outcome(outcome)
+
+
+def _cell_holds(current, expected):
+    """
+    هل خلية الشيت لسا فيها القيمة المتوقعة (expect_value)؟ نفس النص، أو رابطا تسليم إلنا لنفس الأصل والنسخة (القديم
+    q_auto,f_auto والجديد: delivery_urls.same_delivery_asset). خلية مراجعة معلقة (needs_review:) بتساوي حالها بس.
+    """
+    cur, exp = str(current or "").strip(), str(expected or "").strip()
+    if cur == exp:
+        return True
+    from delivery_urls import REVIEW_PREFIX, same_delivery_asset
+    if not cur or not exp or cur.startswith(REVIEW_PREFIX) or exp.startswith(REVIEW_PREFIX):
+        return False
+    return same_delivery_asset(cur, exp)
 
 
 def _read_cells(worksheet, cells):
@@ -1497,13 +1536,16 @@ def queue_link_writes(items):
     التسليم: scripts/migrate_delivery_urls.py): items [{row_number, value, barcode, product_name, size, brand}]؛ الهوية
     كما في الشيت، والتفريغ يتخطى الصف الذي تغيّر منتجه (CONFLICT) أو كتابة أقدم من كتابة أحدث لنفس الخلية. يعيد
     {row: معرّف}.
+    replace (اختياري لكل item): الرابط اللي لازم يكون لسا بالخلية وقت التفريغ (إعادة القص، recut.py): إذا المالك غيّره
+    بإيده الكتابة بتصير CONFLICT ولا شي بينكتب (expect_value).
     """
     queue = _queue or SQLiteTransactionQueue()
     out = {}
     for item in items or ():
         expect = _expectation(item.get("barcode"), item.get("product_name"), item.get("size"), item.get("brand"))
+        extra = {"expect_value": str(item["replace"])} if item.get("replace") is not None else {}
         out[int(item["row_number"])] = queue.append_update(int(item["row_number"]), None, str(item["value"]),
-                                                           col_key=LINK_KEY, **_outbox_keys(expect))
+                                                           col_key=LINK_KEY, **_outbox_keys(expect), **extra)
     return out
 
 

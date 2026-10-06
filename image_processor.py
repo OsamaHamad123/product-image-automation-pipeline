@@ -706,6 +706,7 @@ def _isolate_photoroom(img: Image.Image):
         "crop": "true" if _photoroom_crop() else "false",
         "despill": "true" if getattr(config, "PHOTOROOM_DESPILL", True) else "false",
     }
+    _count_paid_call("photoroom")
     try:
         response = requests.post(
             PHOTOROOM_URL,
@@ -736,6 +737,7 @@ def _isolate_remove_bg(img: Image.Image):
     if not api_key:
         return None, "removebg_no_key"
     data, mime, filename = _encode_for_upload(img)
+    _count_paid_call("remove_bg_api")
     try:
         response = requests.post(
             REMOVE_BG_URL,
@@ -1028,6 +1030,27 @@ def _enhance_rgb(rgba: Image.Image) -> Image.Image:
     out = rgb.convert("RGBA")
     out.putalpha(alpha)
     return out
+
+
+# طلبات العزل المدفوعة اللي انبعتت فعلاً بهالعملية (config.METRICS): «أعد القص» (recut.py) بيحسب منها التكلفة وبيوقف عند
+# سقفها. الطلب بينعد لما ينبعت، نجح أو فشل (PhotoRoom بيحاسب على الطلب)
+PAID_CALL_METRICS = {"photoroom": "photoroom_calls", "remove_bg_api": "removebg_calls"}
+
+
+def _count_paid_call(method: str) -> None:
+    key = PAID_CALL_METRICS.get(method)
+    if not key:
+        return
+    try:
+        config.METRICS[key] = int(config.METRICS.get(key) or 0) + 1
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def paid_calls() -> Dict[str, int]:
+    """كم طلب عزل مدفوع انبعت بهالعملية لكل طريقة: {photoroom, remove_bg_api}."""
+    metrics = getattr(config, "METRICS", None) or {}
+    return {method: int(metrics.get(key) or 0) for method, key in PAID_CALL_METRICS.items()}
 
 
 def _count_gemini_call() -> None:
