@@ -1440,8 +1440,13 @@ def update_image_link(worksheet, row_number, link_column_index, image_link, barc
     إلى الصف الوحيد المطابق للمنتج).
     العمود يُحمل كمفتاح منطقي 'link' ويُحدد من العناوين وقت الكتابة: إدراج عمود أو حذفه يسار عمود الرابط أثناء
     التشغيل لا يغيّر العمود المكتوب. link_column_index يبقى للتوافق مع المستدعين ولا يحدد العمود.
+    رابط تسليم Cloudinary إلنا بالتحويل القديم (q_auto,f_auto: اعتماد محفوظ قبل f_webp، يكتبه relink أو الصفوف المكررة)
+    بينكتب بالتحويل الجديد لنفس الأصل (delivery_urls.migrated_delivery_url): التطبيق ما بياخد JPEG بلا شفافية.
     الأخطاء المؤقتة و APIError تُرفع كي يعمل مُزخرف إعادة المحاولة.
     """
+    from delivery_urls import migrated_delivery_url
+
+    image_link = migrated_delivery_url(image_link) or image_link
     expect = _expectation(barcode, product_name, size, brand)
     try:
         if _redis_write_behind(row_number, {LINK_KEY: image_link}, expect):

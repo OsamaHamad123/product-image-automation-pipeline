@@ -711,6 +711,15 @@ def _bare_link(value):
     return text
 
 
+def _same_image(value):
+    """
+    الرابط بصيغة المقارنة: بلا بادئة needs_review:، ورابط تسليم Cloudinary إلنا بالتحويل الجديد (القديم q_auto,f_auto
+    نفس الصورة: الشيت بعد scripts/migrate_delivery_urls.py والاعتماد المحفوظ قبله، delivery_urls.canonical_delivery_url).
+    """
+    from delivery_urls import canonical_delivery_url
+    return canonical_delivery_url(_bare_link(value))
+
+
 def _row_of(task):
     try:
         return int((task or {}).get("row_number"))
@@ -908,10 +917,10 @@ def _rejected_refusal(params, sku_key, row_number, product_name, image_url, scop
 
 def _shows(shown, approval):
     """هل الصورة المعتمدة التي عرضتها الصفحة (shown، بلا بادئة needs_review:) هي هذا الاعتماد؟"""
-    links = {_bare_link(approval.get("cloudinary_url")), _bare_link(approval.get("original_url"))}
+    links = {_same_image(approval.get("cloudinary_url")), _same_image(approval.get("original_url"))}
     if not _bare_link(approval.get("cloudinary_url")):
         links.add("")       # اعتماد بلا رابط Cloudinary: current.approved_url كان null
-    return shown in links
+    return _same_image(shown) in links
 
 
 def _stale_refusal(params, sku_key, row_number, product_name, image_url=None, scope=None):
@@ -1187,7 +1196,7 @@ def _published_response(res, sku_key, row_number, **extra):
     if res.get("bg_fallback"):
         response['bg_fallback'] = dict(res["bg_fallback"])   # «انعزلت الخلفية بطريقة محلية لأن رصيد المزوّد خلص»
     if res.get("white_url"):
-        response['white_url'] = res["white_url"]   # النسخة البيضا من نفس الأصل (b_white,f_jpg)
+        response['white_url'] = res["white_url"]   # النسخة البيضا من نفس الأصل (b_white,...,f_jpg)
     warnings = []
     if str(res.get("sheet_value") or "").startswith("needs_review:"):
         warnings.append('background_not_removed')
@@ -1389,10 +1398,13 @@ def _candidate_phash(row_number, image_url, params=None, sku_key=None, identity=
 
 
 def _cell_holds(value, images):
-    """هل تحمل قيمة الخلية (مع بادئة needs_review: أو بدونها) إحدى صور images (رابط واحد أو مجموعة)؟"""
-    value = _bare_link(value)
+    """
+    هل تحمل قيمة الخلية (مع بادئة needs_review: أو بدونها) إحدى صور images (رابط واحد أو مجموعة)؟ رابط التسليم القديم
+    والجديد لنفس الأصل نفس الصورة (_same_image).
+    """
+    value = _same_image(value)
     images = {images} if isinstance(images, str) else set(images or ())
-    return bool(value) and value in images
+    return bool(value) and value in {_same_image(i) for i in images}
 
 
 def _approval_matches(approval, image_url, phash):

@@ -1,12 +1,14 @@
 # cloudinary_storage.py
 # رفع لوحة المنتج النهائية إلى Cloudinary وتوليد رابط التسليم.
 #
-# - اللوحة جاهزة محلياً، لذلك رابط التسليم يحتوي فقط q_auto,f_auto
-#   (بدون e_trim / c_fit / c_pad / e_sharpen، وبدون مشتقات eager).
-# - OUTPUT_BACKGROUND = transparent (الافتراضي): اللوحة PNG شفافة (RGBA) وتُرفع كما هي بلا تسطيح؛ f_auto يسلّمها
-#   WebP أو AVIF بشفافيتها (و PNG لمتصفح ما بيدعمهم، ولا مرة JPEG لصورة فيها شفافية). النسخة البيضا بالطلب:
-#   white_version_url (b_white,q_auto,f_jpg بنفس الأصل). OUTPUT_BACKGROUND = white: صورة فيها شفافية تُسطّح على لوحة
-#   بيضاء قبل الرفع متل قبل.
+# - اللوحة جاهزة محلياً، لذلك رابط التسليم فيه بس سقف العرض والصيغة والجودة: c_limit,w_1200,f_webp,q_auto
+#   (بدون e_trim / c_fit / c_pad / e_sharpen، وبدون مشتقات eager). c_limit بيصغّر الأعرض من 1200 بس، وما بيكبّر أبداً.
+# - ليش f_webp مش f_auto: التطبيق الأصلي (okhttp على أندرويد بـ Accept: image/*، و CFNetwork على iOS، و Dart) بياخد من
+#   f_auto صورة JPEG بلا شفافية (فحص حي على حساب demo العام)، فبيطلع مربع أبيض بالوضع الغامق. f_webp بيحفظ الشفافية
+#   (~18 KB) لكل العملاء. الروابط القديمة (q_auto,f_auto) بتضل شغّالة، و scripts/migrate_delivery_urls.py بيبدّلها بالشيت.
+# - OUTPUT_BACKGROUND = transparent (الافتراضي): اللوحة PNG شفافة (RGBA) وتُرفع كما هي بلا تسطيح؛ التسليم WebP
+#   بشفافيتها. النسخة البيضا بالطلب: white_version_url (b_white,c_limit,w_1200,f_jpg,q_auto بنفس الأصل، JPEG معتم)،
+#   من الرابط الجديد أو القديم. OUTPUT_BACKGROUND = white: صورة فيها شفافية تُسطّح على لوحة بيضاء قبل الرفع متل قبل.
 # - مهلة 60 ثانية لكل رفع، وإعادة المحاولة مرتين عند الاستثناءات المؤقتة أو أخطاء 5xx.
 # - مقاطع المجلد تحوَّل إلى [a-z0-9_-] فقط ('100% Juice' -> '100_juice').
 # - استجابة الرفع تُفحص: الحجم بالبايت والأبعاد و etag (بصمة md5) يجب أن تطابق ما أُرسل عندما تذكرها
@@ -29,15 +31,26 @@ import cloudinary.uploader
 import cloudinary.utils
 
 import config
+# شكل روابط التسليم ومقارنتها وتحويلها (نص بس): DELIVERY_TRANSFORMATION = c_limit,w_1200,f_webp,q_auto
+from delivery_urls import (  # noqa: F401 - واجهة هالملف للمستدعين
+    DELIVERY_MAX_WIDTH,
+    DELIVERY_TRANSFORMATION,
+    LEGACY_DELIVERY_TRANSFORMATIONS,
+    LEGACY_WHITE_TRANSFORMATIONS,
+    WHITE_TRANSFORMATION,
+    canonical_delivery_url,
+    delivery_variants,
+    migrated_delivery_url,
+    same_delivery_asset,
+    split_delivery_url,
+    white_version_url,
+)
 
 logger = logging.getLogger(__name__)
 
 UPLOAD_TIMEOUT_SECONDS = 60
 UPLOAD_RETRIES = 2
 RETRY_BACKOFF_SECONDS = 1.5
-DELIVERY_TRANSFORMATION = "q_auto,f_auto"
-# النسخة البيضا المعتمة من نفس الأصل الشفاف (للتطبيق أو أي مكان بده مربع أبيض): الخلفية بيضا، و JPEG ما فيه شفافية
-WHITE_TRANSFORMATION = "b_white,q_auto,f_jpg"
 DEFAULT_FOLDER = "products"
 
 # أخطاء نهائية من جهة العميل (400/401/403/404/409): إعادة المحاولة لن تغير النتيجة
@@ -211,7 +224,7 @@ def _upload_with_retries(source, options: dict, failure: Optional[dict] = None):
 
 
 def delivery_url(public_id: str, version=None) -> str:
-    """رابط التسليم النهائي: q_auto,f_auto فقط (اللوحة نهائية ولا تحتاج تحويلات هندسية)."""
+    """رابط التسليم النهائي: DELIVERY_TRANSFORMATION فقط (سقف العرض و WebP بشفافيته؛ اللوحة نهائية بلا تحويلات هندسية)."""
     url, _ = cloudinary.utils.cloudinary_url(
         public_id,
         secure=True,
@@ -219,20 +232,6 @@ def delivery_url(public_id: str, version=None) -> str:
         raw_transformation=DELIVERY_TRANSFORMATION,
     )
     return url
-
-
-def white_version_url(url) -> Optional[str]:
-    """
-    رابط النسخة البيضا المعتمة (JPEG) من رابط تسليم Cloudinary لنفس الأصل: q_auto,f_auto يصير b_white,q_auto,f_jpg.
-    التطبيق بيطلبها هيك متى بده مربع أبيض (مشاركة، طباعة). None إذا الرابط مش رابط تسليم منعرفه.
-    """
-    text = str(url or "").strip()
-    if text.startswith("needs_review:"):
-        text = text[len("needs_review:"):]
-    marker = f"/image/upload/{DELIVERY_TRANSFORMATION}/"
-    if marker not in text:
-        return None
-    return text.replace(marker, f"/image/upload/{WHITE_TRANSFORMATION}/", 1)
 
 
 def upload_product_image(local_path, product_name, brand, folder=None,

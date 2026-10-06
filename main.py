@@ -485,7 +485,7 @@ def publish_image(image_url, name, brand, row_number, worksheet, link_column_ind
             "finish": dict(getattr(result, "finish", None) or {})}
     if not link:
         return dict(base, status="failed", error="upload_failed")
-    # النسخة البيضا المعتمة من نفس الأصل (b_white,f_jpg): التطبيق بيطلبها متى بده مربع أبيض
+    # النسخة البيضا المعتمة من نفس الأصل (b_white,...,f_jpg): التطبيق بيطلبها متى بده مربع أبيض
     base["white_url"] = cloudinary_storage.white_version_url(link)
 
     # نفس الصورة منشورة لمنتج آخر؟ الرفع الموجود مسبقاً (existing من Cloudinary) دليل إضافي فقط
@@ -1457,8 +1457,21 @@ def _outbox_records(row_numbers):
 
 
 def _link_write_state(records, link):
-    """حالة آخر كتابة لهذا الرابط في هذا الصف (PENDING / FAILED / SYNCED / CONFLICT / DEAD ...)، أو None."""
-    matching = [r for r in records or [] if r.get("value") in (None, link)]
+    """
+    حالة آخر كتابة لهذا الرابط في هذا الصف (PENDING / FAILED / SYNCED / CONFLICT / DEAD ...)، أو None. رابط التسليم
+    القديم (q_auto,f_auto) المحفوظ بالاعتماد والجديد المكتوب بالشيت لنفس الأصل نفس الرابط (google_sheets.update_image_link
+    بيكتب القديم بالشكل الجديد).
+    """
+    from delivery_urls import REVIEW_PREFIX, canonical_delivery_url
+
+    def same(value):
+        if value is None or value == link:
+            return True
+        text = str(value)
+        return (bool(link) and not text.startswith(REVIEW_PREFIX) and not str(link).startswith(REVIEW_PREFIX)
+                and canonical_delivery_url(text) == canonical_delivery_url(link))
+
+    matching = [r for r in records or [] if same(r.get("value"))]
     return matching[-1]["status"] if matching else None
 
 

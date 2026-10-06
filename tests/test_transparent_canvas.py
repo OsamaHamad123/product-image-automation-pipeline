@@ -427,9 +427,10 @@ def test_the_transparent_master_is_uploaded_unchanged(monkeypatch, rgba_png):
     with Image.open(io.BytesIO(sent)) as img:
         assert img.mode == "RGBA" and img.getchannel("A").getextrema() == (0, 255)
     url = result.url
-    assert re.search(r"/image/upload/q_auto,f_auto/v\d+/products/dairy/[0-9a-f]{32}$", url), url
-    for part in ("b_", "f_jpg", "f_png", "fl_", "c_pad", "e_"):
-        assert part not in url.split("/image/upload/")[1].split("/")[0]       # f_auto alone: alpha-capable formats
+    # WebP keeps the alpha for every native client (f_auto answered okhttp / CFNetwork / Dart with a JPEG), width capped
+    assert re.search(r"/image/upload/c_limit,w_1200,f_webp,q_auto/v\d+/products/dairy/[0-9a-f]{32}$", url), url
+    for part in ("b_", "f_jpg", "f_png", "f_auto", "fl_", "c_pad", "e_"):
+        assert part not in url.split("/image/upload/")[1].split("/")[0]
 
 
 def test_the_upload_is_verified_against_the_transparent_bytes(monkeypatch, rgba_png):
@@ -450,10 +451,22 @@ def test_a_fully_transparent_file_is_not_uploaded(monkeypatch, tmp_path):
 def test_the_white_version_is_the_same_asset_on_white_as_jpeg():
     url = cloudinary_storage.delivery_url("products/dairy/abc", 1700000000)
     white = cloudinary_storage.white_version_url(url)
-    assert white == url.replace("/image/upload/q_auto,f_auto/", "/image/upload/b_white,q_auto,f_jpg/")
+    assert white == url.replace("/image/upload/c_limit,w_1200,f_webp,q_auto/",
+                                "/image/upload/b_white,c_limit,w_1200,f_jpg,q_auto/")
     assert cloudinary_storage.white_version_url("needs_review:" + url) == white
     assert cloudinary_storage.white_version_url("https://example.com/x.png") is None
     assert cloudinary_storage.white_version_url(None) is None
+
+
+def test_the_white_version_of_an_old_link_is_capped_too():
+    old = "https://res.cloudinary.com/demo/image/upload/q_auto,f_auto/v1700000000/products/dairy/abc"
+    white = "https://res.cloudinary.com/demo/image/upload/b_white,c_limit,w_1200,f_jpg,q_auto/v1700000000/products/dairy/abc"
+    assert cloudinary_storage.white_version_url(old) == white
+    assert cloudinary_storage.white_version_url("needs_review:" + old) == white
+    # a white link, a foreign transformation or a bare upload path is not a delivery link we know
+    assert cloudinary_storage.white_version_url(white) is None
+    assert cloudinary_storage.white_version_url(old.replace("q_auto,f_auto", "w_300")) is None
+    assert cloudinary_storage.white_version_url(old.replace("q_auto,f_auto/", "")) is None
 
 
 def test_the_approval_result_carries_the_white_url():
@@ -505,7 +518,8 @@ def test_publish_image_returns_the_white_url(monkeypatch, tmp_path):
     monkeypatch.setattr(main.local_cache_db, "sku_publish_lock", lambda key: Lock())
     out = main.publish_image(src, "Almarai Milk 1L", "Almarai", 2, None, 5, sku_key="k")
     assert out["status"] == "published" and uploaded == ["RGBA"]
-    assert out["white_url"] == "https://res.cloudinary.com/demo/image/upload/b_white,q_auto,f_jpg/v1/products/abc"
+    # an old-form link (q_auto,f_auto) still gets its white version, capped like the new one
+    assert out["white_url"] == "https://res.cloudinary.com/demo/image/upload/b_white,c_limit,w_1200,f_jpg,q_auto/v1/products/abc"
     assert out["profile"]["background"] == "transparent" and out["finish"]["background"] == "transparent"
 
 
