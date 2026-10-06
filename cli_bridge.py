@@ -986,7 +986,7 @@ def _human_decision(barcode, product_name, brand, original_url, approved_by, sku
     """
     def record(res):
         if res.get("status") != "published":
-            return      # رابط needs_review: ليس اعتماداً: لا يُسجل اعتماد بشري ولا يكتمل الصف (الشيت وقاعدة البيانات متفقان)
+            return      # نتيجة غير منشورة ليست اعتماداً: لا يُسجل اعتماد بشري ولا يكتمل الصف (الشيت وقاعدة البيانات متفقان)
         local_cache_db.save_product_resolution(
             barcode, product_name, brand, original_url, res["link"], None, res.get("metadata"),
             perceptual_hash=res.get("phash"), verification_status="human_approved", approved_by=approved_by,
@@ -1172,7 +1172,7 @@ def _sheet_outcome(rows, since_id=None, value=None):
 
 def _published_response(res, sku_key, row_number, **extra):
     """
-    استجابة الاعتماد / الرفع الناجح. warnings: background_not_removed (كُتب needs_review:)، quality_flags (نُشرت
+    استجابة الاعتماد / الرفع الناجح. warnings: background_not_removed (خلية needs_review: قديمة)، quality_flags (نُشرت
     رغم علامات العرض بعد تأكيد المراجع، published_anyway)، و duplicate_image (نفس الصورة منشورة لمنتج آخر،
     duplicate_of يسمّيه؛ الاعتماد الصريح يُكتب مع ذلك). warning: أول تحذير. quality_flags / quality_notes: فحص القص.
     bg_skipped: انتشرت بدون عزل الخلفية لأن المالك أوقفه بالإعدادات (main.publish_image)؛ ليس تحذيراً، فالرابط نظيف.

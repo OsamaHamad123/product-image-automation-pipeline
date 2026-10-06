@@ -2376,10 +2376,11 @@ _CANDIDATES_LEFT_SQL = (
     "AND c.`row_number` = q.`row_number`)) AND COALESCE(c.status, '') NOT IN ('excluded', 'rejected'))")
 
 
-def has_review_candidates(row_number, sku_key=None):
+def has_review_candidates(row_number, sku_key=None, on_error=True):
     """
     هل بقي للمنتج مرشح أمام المراجع (غير مستبعد)؟ إعادة تحقق لم تجد شيئاً تعيد الصف للمراجعة فقط عندها؛ بدونها
-    يكون صفاً فارغاً في المراجعة. خطأ القراءة يُسجل ويعيد True (السلوك السابق: يعود للمراجعة ولا يُسجل فشلاً).
+    يكون صفاً فارغاً في المراجعة. خطأ القراءة يُسجل ويعيد on_error (افتراضياً True، السلوك السابق: يعود للمراجعة ولا
+    يُسجل فشلاً).
     """
     clause, params = _row_or_sku_clause(row_number, sku_key)
     try:
@@ -2394,7 +2395,7 @@ def has_review_candidates(row_number, sku_key=None):
         return int(row.get("n") or 0) > 0
     except Exception as e:
         logger.warning("[Curation] تعذر عدّ مرشحات الصف %s: %s", row_number, e)
-        return True
+        return on_error
 
 
 def _park_rechecks(cursor):
