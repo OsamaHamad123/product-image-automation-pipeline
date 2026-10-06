@@ -101,12 +101,6 @@ def timed_run(engine: str, scenario: str = "normal", **kwargs: Any) -> Tuple[Dic
 
 
 @pytest.fixture(scope="session")
-def legacy_run() -> Tuple[Dict[str, Any], float, List[str]]:
-    """One offline replay of legacy v1 over the whole golden set, shared by the baseline tests."""
-    return timed_run("v1")
-
-
-@pytest.fixture(scope="session")
 def v2_run() -> Tuple[Dict[str, Any], float, List[str]]:
     """catalog_match over the golden set, auto-publish enabled for every brand."""
     return timed_run("v2")

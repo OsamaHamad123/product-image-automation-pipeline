@@ -28,7 +28,7 @@ class SettingsController extends Controller
         'models' => ['label' => 'نماذج التحقق', 'hint' => 'مين بيقرأ الملصق وبكم'],
         'auto-publish' => ['label' => 'النشر الآلي', 'hint' => 'الماركات الجاهزة'],
         'processing' => ['label' => 'معالجة الصور', 'hint' => 'المقاس وعزل الخلفية'],
-        'advanced' => ['label' => 'متقدم', 'hint' => 'الرجوع للنظام القديم'],
+        'advanced' => ['label' => 'متقدم', 'hint' => 'مصادر البحث والسرعة'],
     ];
 
     /** النشر الآلي لكل الماركات المؤكدة (AUTO_PUBLISH_STRICT_LANE): نموذجه الخاص (section=strict-lane). */
@@ -43,13 +43,11 @@ class SettingsController extends Controller
     ];
 
     public const TEXT_KEYS = [
-        'gemini_model', 'cloudinary_cloud_name', 'google_search_cx', 'search_engine', 'auto_publish_brands',
+        'gemini_model', 'cloudinary_cloud_name', 'google_search_cx', 'auto_publish_brands',
     ];
 
     public const CHECKBOX_KEYS = [
         'strict_brand_match', 'auto_publish_enabled',
-        // مفاتيح محرك البحث القديم v1 فقط (للتراجع المؤقت)
-        'enable_gemini_pre_validation', 'filter_competitors', 'bypass_white_background_check',
     ];
 
     /** إعدادات معالجة الصور التي يقرؤها config.load_db_config من system_settings. */
@@ -125,9 +123,8 @@ class SettingsController extends Controller
         'speed' => ['tab' => 'advanced', 'text' => ['worker_concurrency']],
         // نموذج Gemini صار بتبويب «نماذج التحقق» (saveModels): «متقدم» ما بيكتبه
         'advanced' => ['tab' => 'advanced', 'secret' => ['google_search_api_key', 'proxy_url'],
-                       'text' => ['search_engine', 'google_search_cx'],
-                       'checkbox' => ['strict_brand_match', 'enable_gemini_pre_validation', 'filter_competitors',
-                                      'bypass_white_background_check']],
+                       'text' => ['google_search_cx'],
+                       'checkbox' => ['strict_brand_match']],
     ];
 
     /** مزودو تبويب المفاتيح: مفاتيح الإعداد، ومتغيرات البيئة المقابلة في config.py، وخدمة فحص الاتصالات. */
@@ -206,7 +203,7 @@ class SettingsController extends Controller
     /** متغيرات .env الجذر غير السرية التي يجوز للصفحة قراءة قيمتها. */
     private const READABLE_ENV = [
         'SPREADSHEET_NAME_OR_URL', 'SPREADSHEET_TAB_NAME', 'CREDENTIALS_FILE', 'BG_REMOVAL_METHOD', 'BG_FALLBACK',
-        'OUTPUT_CANVAS_SIZE', 'OUTPUT_BACKGROUND', 'GEMINI_MODEL', 'SEARCH_ENGINE',
+        'OUTPUT_CANVAS_SIZE', 'OUTPUT_BACKGROUND', 'GEMINI_MODEL',
         'VERIFIER_PRIMARY', 'VERIFIER_STRONG', 'VERIFIER_MONTHLY_BUDGET_USD', 'MODEL_PRICES',
         'EXPANSION_ENABLED', 'EXPANSION_MAX_CALLS', 'VISUAL_SEARCH', 'SERPAPI_LENS_PRICE_USD', 'GTIN_POLICY',
         'LOCAL_INDEX_ENABLED', 'LOCAL_INDEX_MAX_PAGES', 'WORKER_CONCURRENCY', 'QUERY_NORMALIZER',
@@ -302,9 +299,6 @@ class SettingsController extends Controller
 
             foreach ($spec['text'] ?? [] as $k) {
                 $val = self::field($request, $k);
-                if ($k === 'search_engine' && !in_array($val, ['v2', 'v1'], true)) {
-                    $val = 'v2';
-                }
                 if ($k === 'gemini_model' && !array_key_exists($val, ProductController::SUPPORTED_GEMINI_MODELS)) {
                     $warnings[] = "نموذج Gemini '{$val}' غير مدعوم؛ لم يتم تغيير النموذج المحفوظ.";
                     continue;
@@ -1100,7 +1094,6 @@ class SettingsController extends Controller
     public static function advancedData(array $stored): array
     {
         $value = fn (string $k) => trim((string) ($stored[$k]['value'] ?? ''));
-        $engine = $value('search_engine') === 'v1' ? 'v1' : 'v2';
         $model = $value('gemini_model') !== '' ? $value('gemini_model') : 'gemini-3.1-flash-lite';
         $secrets = [];
         foreach (self::LEGACY_SECRETS as $k => $meta) {
@@ -1108,17 +1101,11 @@ class SettingsController extends Controller
         }
         $strict = $value('strict_brand_match');
         return [
-            'engine' => $engine,
             'model' => $model,
             'models' => ProductController::SUPPORTED_GEMINI_MODELS,
             'model_supported' => array_key_exists($model, ProductController::SUPPORTED_GEMINI_MODELS),
             'cx' => $value('google_search_cx'),
             'strict' => $strict === '' ? true : $strict === 'true',
-            'v1' => [
-                'enable_gemini_pre_validation' => $value('enable_gemini_pre_validation') === 'true',
-                'filter_competitors' => $value('filter_competitors') === 'true',
-                'bypass_white_background_check' => $value('bypass_white_background_check') === 'true',
-            ],
             'secrets' => $secrets,
             'sources' => self::sourcesData($stored),
             'speed' => self::speedData($stored),

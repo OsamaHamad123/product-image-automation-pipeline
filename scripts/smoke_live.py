@@ -39,7 +39,7 @@ rounds, strong-model calls, the estimated cost in total and per measured product
 are in the total, not in the average), and the review warnings on the picks. scripts/compare_runs.py compares two such files (also the older
 files that hold only the list of rows).
 
-Use it on ~30 rows before switching the live sheet to SEARCH_ENGINE=v2 (evaluation layer 4).
+Use it on ~30 rows to check the live search end to end (evaluation layer 4).
 This replaces scripts/verify_image_search.py, which counted "any image returned" as success.
 
 Record once, replay for free (catalog_match/cassette.py):

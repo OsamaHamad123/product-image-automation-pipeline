@@ -5,7 +5,7 @@ to_sku_row(product_name, brand, kwargs) -> dict
     image_search.search_best_product_image(query, product_name, brand, **kwargs).
 
 outcome_to_legacy(outcome, trace=None, spec=None) -> dict | None
-    The dict main.py / cli_bridge.py / fastapi_server.py consume:
+    The dict main.py / cli_bridge.py consume:
         url, title, width, height, source (provider), page_url, content_sha256,
         needs_review   decision != 'AUTO_PUBLISH'
         preselect      True only for a REVIEW_PRESELECTED / AUTO_PUBLISH winner

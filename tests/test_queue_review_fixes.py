@@ -866,11 +866,9 @@ def test_dashboard_searches_and_research_after_a_reject_count_against_the_budget
 def test_the_sequential_mode_records_its_spend(offline, monkeypatch):
     import local_cache_db
     import main
-    from query_refiner import QueryRefiner
     recorded = []
     monkeypatch.setattr(local_cache_db, "record_search_spend", lambda outcome, run_id=None: recorded.append(run_id))
     monkeypatch.setattr(local_cache_db, "get_rejections", lambda sku: ([], []))
-    monkeypatch.setattr(QueryRefiner, "refine_product_metadata", staticmethod(lambda *a, **k: {}))
 
     def search(query, name, brand, kwargs, on_attempt=None, **kw):
         if on_attempt is not None:

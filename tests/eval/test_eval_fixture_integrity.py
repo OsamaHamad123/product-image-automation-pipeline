@@ -319,14 +319,3 @@ def test_verdict_decision_rules():
     assert runners.decide_verdict(dict(base, variant_match="no"), None) == "MISMATCH"
     assert runners.decide_verdict(dict(base, view="banner"), None) == "UNSURE"
     assert runners.decide_verdict(dict(base, brand_match="unsure"), None) == "UNSURE"
-
-
-def test_legacy_reason_parsing():
-    rules = runners.legacy_rules([
-        "مستبعدة: فشل التحقق الهندسي لجودة الصورة (Image too blurry: Laplacian variance 11.00 (Threshold: 100.0), "
-        "Image overexposed)",
-        "تطابق مع منافس مستبعد: 'nada'",
-        "مقبولة: كخيار بديل أخير من نتائج التصفية الأولية",
-        "مستبعدة: فشل التحميل المتوازي أو التحقق من الحجم/النوع (REJECTED_STATUS_403)",
-    ])
-    assert rules == ["Image overexposed", "Image too blurry", "competitor_substring", "download_failed"]

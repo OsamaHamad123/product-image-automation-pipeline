@@ -1,4 +1,4 @@
-"""image_search.search_best_product_image on SEARCH_ENGINE=v2, and catalog_match.facade.
+"""image_search.search_best_product_image (catalog_match, the only engine), and catalog_match.facade.
 
 The pipeline is stubbed where the test is about the adapter (the outcome it returns is
 built from REAL scores of real candidates); one test runs the real pipeline behind the
@@ -43,22 +43,18 @@ READ_MATCH = {"brand_text": "Almarai", "variant_text": "Full Fat Milk", "size_te
 
 @pytest.fixture(autouse=True)
 def _v2(monkeypatch):
-    """SEARCH_ENGINE=v2, no network, no cache hit, no Sheets; Gemini brand alignment must never run."""
+    """No network, no cache hit, no Sheets."""
     def refuse(*args, **kwargs):
         raise AssertionError(f"network access attempted: {args!r}")
 
     monkeypatch.setattr(socket.socket, "connect", refuse)
     monkeypatch.setattr(socket, "getaddrinfo", refuse)
     monkeypatch.setattr(settings, "_config", None)
-    monkeypatch.setenv("SEARCH_ENGINE", "v2")
     monkeypatch.setenv("AUTO_PUBLISH_ENABLED", "false")
     monkeypatch.setenv("AUTO_PUBLISH_BRANDS", "")
     monkeypatch.setattr(local_cache_db, "get_cached_product", mock.Mock(return_value=None))
-    align = mock.Mock(side_effect=AssertionError("align_brand_via_gemini must not run on the v2 path"))
-    monkeypatch.setattr(google_sheets, "align_brand_via_gemini", align)
     monkeypatch.setattr(google_sheets, "get_sheets_client", mock.Mock(return_value=object()))
     monkeypatch.setattr(google_sheets, "get_brand_mappings", mock.Mock(return_value=MAPPINGS))
-    return align
 
 
 def ranked_row(cand, status, verdict=None, fetched=True, reasons=()):
@@ -106,7 +102,8 @@ def test_v2_returns_legacy_dict_with_decision(monkeypatch, _v2):
     assert kwargs["custom_query"] == "almarai red cap milk"
     assert list(kwargs["exclude_urls"]) == ["https://x/y.jpg"]
     assert list(kwargs["exclude_phashes"]) == ["00ff00ff00ff00ff"]
-    _v2.assert_not_called()
+    # the v1 Gemini brand alignment is gone with the v1 engine: the sheet's brand is the brand (D8)
+    assert not hasattr(google_sheets, "align_brand_via_gemini")
     google_sheets.get_brand_mappings.assert_called_once()     # mappings were not passed: loaded once
     # staff steering (custom query / exclusions) must run the search, never serve the cache
     local_cache_db.get_cached_product.assert_not_called()
@@ -174,14 +171,17 @@ def test_v2_cache_hit_is_review_only_and_skip_cache(monkeypatch):
     find.assert_called_once()
 
 
-def test_search_engine_switch_selects_v1(monkeypatch):
+def test_no_engine_switch_catalog_match_always_runs(monkeypatch):
+    """SEARCH_ENGINE is gone: a leftover SEARCH_ENGINE=v1 in .env (or the settings table) changes nothing."""
     monkeypatch.setenv("SEARCH_ENGINE", "v1")
-    v1 = mock.Mock(return_value={"url": "legacy"})
-    v2 = mock.Mock(side_effect=AssertionError("v2 must not run"))
-    monkeypatch.setattr(image_search, "search_best_product_image_v1", v1)
-    monkeypatch.setattr(image_search, "search_best_product_image_v2", v2)
-    assert image_search.search_best_product_image("q", NAME, BRAND, barcode="1") == {"url": "legacy"}
-    v1.assert_called_once_with("q", NAME, BRAND, barcode="1")
+    find = mock.Mock(return_value=preselected_outcome())
+    monkeypatch.setattr(pipeline, "find_product_image", find)
+    result = image_search.search_best_product_image("q", NAME, BRAND, barcode="", brand_mappings=MAPPINGS)
+    find.assert_called_once()
+    assert result["decision"] == "REVIEW_PRESELECTED" and result["url"] == PACKSHOT.image_url
+    assert "SEARCH_ENGINE" not in settings.DEFAULTS and not hasattr(settings, "search_engine")
+    for name in ("search_best_product_image_v1", "search_best_product_image_v2", "evaluate_and_choose_best_image"):
+        assert not hasattr(image_search, name), name
 
 
 def test_v2_real_pipeline_behind_public_function(monkeypatch):

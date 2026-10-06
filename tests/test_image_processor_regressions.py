@@ -597,7 +597,7 @@ def test_import_without_taxonomy_classifier(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Legacy entry points used by main.py / cli_bridge.py / fastapi_server.py
+# Legacy entry points used by main.py / cli_bridge.py
 # ---------------------------------------------------------------------------
 
 def test_legacy_entry_points(monkeypatch, tmp_path):

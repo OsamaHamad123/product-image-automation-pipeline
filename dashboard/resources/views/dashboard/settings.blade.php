@@ -8,7 +8,7 @@
     Stored keys are never printed, not even in part: the keys tab shows «محفوظ / غير محفوظ» and an empty,
     write-only field; an empty field keeps the stored key. Each form saves only its own section.
     public/js/settings.js: the sheet preview/save (POST /api/sheet/preview, /api/sheet/save), the key forms,
-    and the confirmations of the auto-publish switch and the search-engine rollback.
+    and the confirmation of the auto-publish switch.
 --}}
 @extends('layouts.laqta')
 
