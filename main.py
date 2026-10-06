@@ -474,6 +474,7 @@ def publish_image(image_url, name, brand, row_number, worksheet, link_column_ind
         print(f"[Publish] الصف {row_number} بانتظار مراجعة ({why}{': ' + ', '.join(flags) if flags else ''})؛ "
               "الشيت ما انكتب.")
         return {"status": "needs_review", "error": why, "isolated": bool(result.isolated), "provider": result.provider,
+                "width": result.width, "height": result.height,
                 "profile": profile.as_dict(), "quality_flags": flags, "quality_notes": notes,
                 "bg_skipped": bg_skipped, "bg_fallback": bg_fallback,
                 "finish": dict(getattr(result, "finish", None) or {})}

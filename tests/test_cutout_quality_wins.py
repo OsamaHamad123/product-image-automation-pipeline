@@ -418,3 +418,30 @@ def test_publish_tells_the_processing_when_the_product_is_clear(monkeypatch, tmp
                            ((), {"category_l1_en": "Home & Living", "category_l3_en": "Glass Jars"})):
         main.publish_image("https://x/a.jpg", "P", "B", 2, None, 5, category_hint=hint, category_override=override)
     assert seen == [True, None, True]
+
+
+# ---------------------------------------------------------------------------
+# the worker keeps the auto-publish details in the queue row's trace (scripts/export_run.py reads 'publish')
+# ---------------------------------------------------------------------------
+
+from test_worker_wiring import _task, race  # noqa: E402,F401 - fixture
+
+
+def test_the_auto_publish_details_reach_the_queue_trace(race, monkeypatch):
+    import local_cache_db
+
+    main_module, rec = race
+    traces = []
+
+    def auto(task, best, worksheet, link_column_index, sku_key=None, report=None):
+        report.update({"status": "needs_review", "quality_flags": ["photoroom_unsure"], "uncertainty": 0.7})
+        return "needs_review"
+
+    monkeypatch.setattr(main_module, "auto_approve_product", auto)
+    monkeypatch.setattr(local_cache_db, "update_task_status",
+                        lambda task_id, status, *a, **k: traces.append((status, k.get("trace"))) or True)
+    task = dict(_task(), worker_id="w1#claim")
+    assert main_module.pre_cache_product_candidates(task, worksheet=object(), link_column_index=5,
+                                                    sleep=lambda s: None) == "success"
+    status, trace = traces[-1]
+    assert status == "ready_for_review" and trace["publish"]["uncertainty"] == 0.7 and "outcome" in trace
