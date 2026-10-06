@@ -18,6 +18,8 @@ from pathlib import Path
 
 import pytest
 
+from test_health_attention import MARK, _sql, _v, health_app  # noqa: F401 - fixture
+from test_health_attention import _facts as _attention_facts, _php as _attention_php
 from test_setup_wizard import (DIAGNOSTICS, ROOT, _kernel, aside_results, setup_app)  # noqa: F401 - fixtures
 
 DASH = ROOT / "dashboard"
@@ -222,5 +224,164 @@ def test_the_wizard_in_a_browser(setup_app, tmp_path):
     posts = [p[0] for p in out["posts"]]
     assert "/api/run-all" in posts and json.loads(dict(out["posts"])["/api/run-all"])["row_filter"] == "2, 4-7"
     for name in list(WIZARD) + ["setup_keys_tested", "setup_publish_done", "setup_run_plan", "setup_run_done"]:
+        for width in (1440, 390):
+            assert (shots / f"{name}_{width}.png").stat().st_size > 1000, (name, width)
+
+
+# ---------------------------------------------------------------------------
+# The Health page: «كلشي تمام» / «شو بدو منك» on top, «تفاصيل متقدمة» collapsed
+# ---------------------------------------------------------------------------
+
+PUBLISH_FAILED = dict(PUBLISH_RESULT, ok=False, overall="fail", failed_step="upload",
+                      summary_ar="الرفع على Cloudinary ما زبط: المفتاح مرفوض.",
+                      steps=[dict(s, status="fail", action_ar="غيّر مفتاح Cloudinary من الإعدادات وافحص من جديد.",
+                                  code="upload_auth") if s["key"] == "upload" else s for s in PUBLISH_RESULT["steps"]])
+OPS_QUIET = {"status": "success", "scanned": 40, "truncated": False, "limit": 2000, "latest_age_s": 600,
+             "windows": {"24h": {"searches": 40, "decisions": {"REVIEW_PRESELECTED": 30, "NOT_FOUND": 10},
+                                 "providers": {"serper": {"ok": 120, "empty": 3}}, "serper_queries": 123,
+                                 "cost_usd": {"serper": 0.123, "gemini": 0.04, "total": 0.163},
+                                 "verifier": {"calls": 40}, "failure_codes": [{"code": "NO_MATCH", "count": 10}]},
+                         "7d": {"searches": 40}},
+             "alerts": [], "prices": {"serper_per_query": 0.001, "gemini_per_call": 0.001}}
+OPS_ALERT = dict(OPS_QUIET, alerts=[{"code": "SERPER_CREDIT", "message": "رصيد Serper انتهى أو المفتاح مرفوض",
+                                     "searches": 3, "detail": ""}])
+COMMON = {"/api/system/review-lanes": {"status": "success", "lanes": {"strict": {"prechecked": 41, "accepted": 40},
+                                                                    "unsure": {"prechecked": 0}, "other": {"prechecked": 0}}},
+          "/api/view-pipeline-log": {"status": "success", "kind": "pipeline", "exists": True,
+                                     "lines": ["[Worker] بلّش التشغيل", "[Worker] خلص"], "updated_at": None},
+          "/api/view-nightly-log": {"status": "success", "kind": "nightly", "exists": False, "lines": []},
+          "/api/batch-status": {"status": "idle", "phase": "idle", "ready_for_review": 0}}
+
+
+def _health_fixture(app, pages_dir):
+    env = app["env"]
+    (ok_page,) = _kernel(env, [["GET", "/system-diagnostics", {}]])
+    (pages_dir / "health_ok.html").write_text(ok_page["body"], encoding="utf-8")
+    # trouble: a DEAD sheet write, a failed rehearsal, and (through ops-health) Serper's credit
+    _sql(app["db"], "INSERT INTO sheet_updates (`row_number`, `col_index`, `value`, sync_status) VALUES (7, 3, %s, 'DEAD')",
+         (MARK,))
+    publish_file = ROOT / "temp" / "publish_check_last.json"
+    publish_file.parent.mkdir(parents=True, exist_ok=True)
+    publish_file.write_text(json.dumps(PUBLISH_FAILED, ensure_ascii=False), encoding="utf-8")
+    page, _, attention = _kernel(env, [["GET", "/system-diagnostics", {}], ["GET", "/api/system/ops-health", {}],
+                                       ["GET", "/api/system/attention?after=1", {}]])
+    (pages_dir / "health_attention.html").write_text(page["body"], encoding="utf-8")
+    ok = _attention_php(f"$out = A::view({_v(_attention_facts())}, null, true);")
+    return {"health_ok": dict(COMMON, **{"/api/system/ops-health": OPS_QUIET, "/api/system/attention": ok}),
+            "health_attention": dict(COMMON, **{"/api/system/ops-health": OPS_ALERT,
+                                                "/api/system/attention": json.loads(attention["body"])})}
+
+
+HEALTH_DRIVER = r"""
+const { chromium } = require(__PLAYWRIGHT__);
+const fs = require('fs');
+const path = require('path');
+const PUB = __PUBLIC__, API = __API__, SHOTS = __SHOTS__, DIR = __DIR__;
+const MIME = { '.css': 'text/css', '.js': 'application/javascript', '.svg': 'image/svg+xml', '.png': 'image/png' };
+const out = { errors: {}, overflow: {} };
+(async () => {
+  const browser = await chromium.launch({ executablePath: __CHROME__ });
+  async function open(name, width, hash) {
+    const ctx = await browser.newContext({ viewport: { width, height: width === 390 ? 844 : 900 }, deviceScaleFactor: 1 });
+    const page = await ctx.newPage();
+    const errors = out.errors[`${name}${hash || ''}@${width}`] = [];
+    page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
+    page.on('pageerror', e => errors.push('pageerror: ' + e.message));
+    await page.route('**/*', async route => {
+      const req = route.request();
+      const u = new URL(req.url());
+      if (u.hostname !== 'localhost') return route.fulfill({ contentType: 'text/css', body: '' });
+      if (req.resourceType() === 'document') {
+        return route.fulfill({ contentType: 'text/html', body: fs.readFileSync(path.join(DIR, name + '.html'), 'utf8') });
+      }
+      const file = path.join(PUB, u.pathname);
+      if (/^\/(css|js)\//.test(u.pathname) && fs.existsSync(file)) {
+        return route.fulfill({ contentType: MIME[path.extname(file)] || 'text/plain', body: fs.readFileSync(file) });
+      }
+      if (API[name][u.pathname]) return route.fulfill({ json: API[name][u.pathname] });
+      return route.fulfill({ json: { status: 'success' } });
+    });
+    await page.goto('http://localhost/system-diagnostics' + (hash || ''));
+    await page.waitForSelector('[data-health="now"]:not([data-state="checking"])', { timeout: 5000 });
+    await page.waitForTimeout(300);
+    out.overflow[`${name}@${width}`] = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    return { page, ctx };
+  }
+  const shot = (page, file, full) => page.screenshot({ path: path.join(SHOTS, file), fullPage: !!full });
+  const top = page => page.evaluate(() => ({
+    state: document.querySelector('[data-health="now"]').getAttribute('data-state'),
+    title: document.querySelector('[data-health="now-title"]').textContent,
+    items: [...document.querySelectorAll('[data-health="now-items"] li')].map(li => [li.getAttribute('data-item'),
+      li.querySelector('.lq-health-todo__fix').textContent]),
+    open: document.querySelector('[data-health="advanced"]').open }));
+  for (const width of [1440, 390]) {
+    {
+      const { page, ctx } = await open('health_ok', width);
+      out[`ok@${width}`] = await top(page);
+      await shot(page, `health_ok_${width}.png`, true);
+      await page.click('[data-health="advanced"] > summary');
+      await page.waitForTimeout(400);
+      await shot(page, `health_ok_advanced_${width}.png`, true);
+      out[`okOpened@${width}`] = await page.evaluate(() => document.querySelector('[data-health="advanced"]').open);
+      await ctx.close();
+    }
+    {
+      const { page, ctx } = await open('health_attention', width);
+      out[`attention@${width}`] = await top(page);
+      await shot(page, `health_attention_${width}.png`, true);
+      // the rehearsal's fix: the section opens on «فحص النشر» with the focus on its button
+      await page.click('[data-health-goto="publish-check"]');
+      await page.waitForTimeout(800);
+      out[`goto@${width}`] = await page.evaluate(() => [document.querySelector('[data-health="advanced"]').open,
+        document.activeElement && document.activeElement.getAttribute('data-health'),
+        Math.round(document.getElementById('publish-check').getBoundingClientRect().top)]);
+      await shot(page, `health_attention_fix_${width}.png`);
+      await ctx.close();
+    }
+  }
+  {
+    // the review screen's link to the rehearsal still lands on it
+    const { page, ctx } = await open('health_attention', 1440, '#publish-check');
+    out.hash = await page.evaluate(() => [document.querySelector('[data-health="advanced"]').open,
+      document.activeElement && document.activeElement.getAttribute('data-health')]);
+    await ctx.close();
+  }
+  await browser.close();
+  console.log('__OUT__' + JSON.stringify(out));
+})().catch(e => { console.error(e && e.stack || e); process.exit(3); });
+"""
+
+
+def test_the_health_page_in_a_browser(health_app, aside_results, tmp_path):
+    pages = tmp_path / "pages"
+    pages.mkdir()
+    api = _health_fixture(health_app, pages)
+    shots = Path(os.environ.get("LAQTA_ONBOARD_SHOTS") or (tmp_path / "shots"))
+    shots.mkdir(parents=True, exist_ok=True)
+    script = HEALTH_DRIVER.replace("__PLAYWRIGHT__", json.dumps(PLAYWRIGHT)).replace("__PUBLIC__", json.dumps(str(PUBLIC))) \
+        .replace("__API__", json.dumps(api, ensure_ascii=False)).replace("__SHOTS__", json.dumps(str(shots))) \
+        .replace("__CHROME__", json.dumps(CHROME[-1])).replace("__DIR__", json.dumps(str(pages)))
+    path = tmp_path / "health_browser.js"
+    path.write_text(script, encoding="utf-8")
+    res = subprocess.run([NODE, str(path)], capture_output=True, text=True, timeout=400,
+                         env=dict(os.environ, PLAYWRIGHT_BROWSERS_PATH=BROWSERS), encoding="utf-8")
+    assert res.returncode == 0, res.stderr[-4000:]
+    out = json.loads(next(line for line in res.stdout.splitlines() if line.startswith("__OUT__"))[len("__OUT__"):])
+
+    assert all(not errs for errs in out["errors"].values()), out["errors"]
+    assert all(v <= 0 for v in out["overflow"].values()), out["overflow"]
+    for width in (1440, 390):
+        ok = out[f"ok@{width}"]
+        assert (ok["state"], ok["title"], ok["items"], ok["open"]) == ("ok", "كلشي تمام", [], False)
+        assert out[f"okOpened@{width}"] is True
+        trouble = out[f"attention@{width}"]
+        assert trouble["state"] == "attention" and trouble["title"] == "شو بدو منك" and trouble["open"] is False
+        keys = [k for k, _ in trouble["items"]]
+        assert {"ops_serper_credit", "outbox", "publish"} <= set(keys), keys
+        assert dict(trouble["items"])["publish"] == "افحص النشر"
+        opened, focused, card_top = out[f"goto@{width}"]
+        assert opened is True and focused == "publish-run" and card_top < 900
+    assert out["hash"] == [True, "publish-run"]
+    for name in ("health_ok", "health_ok_advanced", "health_attention", "health_attention_fix"):
         for width in (1440, 390):
             assert (shots / f"{name}_{width}.png").stat().st_size > 1000, (name, width)

@@ -123,7 +123,8 @@ def _css_classes(*paths):
 
 def test_classes_and_tokens_exist():
     defined = _css_classes(LAQTA_CSS, HEALTH_CSS, SETTINGS_CSS)
-    ids = {"lq-health-initial", "lq-health-search-title", "lq-health-results-title", "lq-health-cost-title",
+    ids = {"lq-health-initial", "lq-health-attention-initial", "lq-health-now-title", "lq-health-eval-title",
+           "lq-health-search-title", "lq-health-results-title", "lq-health-cost-title",
            "lq-health-reasons-title", "lq-health-log-title", "lq-health-log-body", "lq-settings-sheet-title",
            "lq-settings-keys-title", "lq-settings-ap-title", "lq-settings-processing-title",
            "lq-settings-advanced-title", "lq-settings-models-title", "lq-settings-sources-title", "lq-settings-speed-title", "lq-key-form", "lq-page-health", "lq-page-settings", "lq-health-spin"}

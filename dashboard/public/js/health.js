@@ -15,6 +15,11 @@
  * - «فهرس المتاجر المحلي»: the rows are rendered by the server (LocalIndexController); «حدّث الفهرس هلق» POSTs
  *   /api/system/local-index/refresh (a background job started through the bridge, it answers at once) and, while it
  *   runs, GET /api/system/local-index feeds the status line until the page reloads with the new numbers.
+ * - The top of the page («كلشي تمام» / «شو بدو منك», HealthAttentionController) starts from #lq-health-attention-initial
+ *   and is read again from GET /api/system/attention once «عمليات البحث» answered (provider outages come from it) and
+ *   after a check, a rehearsal or a background-removal change. An item's button is a link, or data-health-goto: it
+ *   opens «تفاصيل متقدمة» (collapsed by default) on the card that holds the fix and puts the focus on its button.
+ *   A link to a card inside it (/system-diagnostics#publish-check) opens it too; the log is not polled while it is shut.
  * The view functions are pure (node tests call them through window.LaqtaHealth); the DOM code below only sets
  * textContent and attributes, never HTML.
  */
@@ -940,7 +945,36 @@
         return { run: run, state: state };
     }
 
+    // ------------------------------------------------------------------
+    // «كلشي تمام» / «شو بدو منك» (HealthAttentionController): the server says it; the page renders it
+    // ------------------------------------------------------------------
+
+    var ATTENTION_URL = '/api/system/attention';
+    var ATTENTION_STATES = ['ok', 'attention', 'checking'];
+    /* data-health-goto -> [the card to open on, the button to focus] inside «تفاصيل متقدمة» */
+    var GOTO = {
+        services: ['#services', '[data-health="run-check"]'],
+        'publish-check': ['#publish-check', '[data-health="publish-run"]'],
+        'bg-restore': ['#publish-check', '[data-health="bg-restore"]'],
+        'index-card': ['[data-health="index-card"]', '[data-health="index-refresh"]'],
+        'log-nightly': ['#lq-health-log-title', '#tab-nightly']
+    };
+
+    /* The top of the page from the endpoint's answer (or the embedded one), or null when it is not one. */
+    function attentionView(data) {
+        if (!isObject(data) || ATTENTION_STATES.indexOf(data.state) === -1) return null;
+        var items = (Array.isArray(data.items) ? data.items : []).filter(isObject).map(function (item) {
+            var action = isObject(item.action) ? item.action : {};
+            return { key: String(item.key || ''), tone: String(item.tone || 'muted'), title: String(item.title || ''),
+                text: String(item.text || ''), action: { label: String(action.label || ''), href: String(action.href || ''),
+                    goto: String(action.goto || '') } };
+        });
+        return { state: data.state, title: String(data.title || ''), text: String(data.text || ''), items: items,
+            note: String(data.note || ''), pending: data.pending === true };
+    }
+
     var api = {
+        attentionView: attentionView, GOTO: GOTO, ATTENTION_URL: ATTENTION_URL,
         lanesView: lanesView, LANES: LANES,
         publishView: publishView, publishRunningView: publishRunningView, createPublishCheck: createPublishCheck,
         bgView: bgView, bgProblem: bgProblem, BG_SKIP_RE: BG_SKIP_RE, BG_METHOD_LABELS: BG_METHOD_LABELS,
@@ -1023,6 +1057,123 @@
         }
     }
 
+    // --- «كلشي تمام» / «شو بدو منك» and «تفاصيل متقدمة» ---------------------------
+    var advanced = $('advanced');
+    var nowCard = $('now');
+    /* The same paths as resources/views/components/lq/icon.blade.php (check, alert, refresh) */
+    var NOW_ICON_PATHS = { ok: 'M5 12.5 10 17.5 19 7', attention: 'M12 4 2.5 20h19zM12 10v4.5M12 17.5v.5',
+        checking: 'M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6' };
+
+    function openAdvanced() {
+        if (advanced && !advanced.open) advanced.open = true;
+    }
+
+    // a link to a card inside «تفاصيل متقدمة» (#publish-check from the review screen) opens it first
+    (function () {
+        var hash = window.location && window.location.hash ? window.location.hash.slice(1) : '';
+        var target = hash ? document.getElementById(hash) : null;
+        if (target && advanced && advanced.contains(target)) openAdvanced();
+    })();
+
+    /* An item's button: open the section on the card that holds the fix and put the focus on its button. */
+    function goTo(where) {
+        if (where === 'reload') {
+            window.location.reload();
+            return;
+        }
+        var spec = GOTO[where];
+        if (!spec) return;
+        openAdvanced();
+        var card = page.querySelector(spec[0]);
+        var button = page.querySelector(spec[1]);
+        if (where === 'log-nightly' && button) button.click();
+        if (where === 'bg-restore' && (!button || button.hasAttribute('hidden'))) button = page.querySelector(GOTO['publish-check'][1]);
+        if (card && card.scrollIntoView) card.scrollIntoView({ block: 'start', behavior: 'smooth' });
+        if (button) button.focus({ preventScroll: true });
+    }
+
+    function nowIcon(state) {
+        var ns = 'http://www.w3.org/2000/svg';
+        var svg = document.createElementNS(ns, 'svg');
+        var attrs = { 'class': 'lq-icon', width: '22', height: '22', viewBox: '0 0 24 24', fill: 'none',
+            stroke: 'currentColor', 'stroke-width': '2.2', 'stroke-linecap': 'round', 'stroke-linejoin': 'round',
+            focusable: 'false', 'aria-hidden': 'true' };
+        Object.keys(attrs).forEach(function (k) { svg.setAttribute(k, attrs[k]); });
+        var path = document.createElementNS(ns, 'path');
+        path.setAttribute('d', NOW_ICON_PATHS[state] || NOW_ICON_PATHS.checking);
+        svg.appendChild(path);
+        return svg;
+    }
+
+    function renderAttention(view) {
+        if (!nowCard || !view) return;
+        nowCard.setAttribute('data-state', view.state);
+        var icon = nowCard.querySelector('.lq-health-now__icon');
+        if (icon) {
+            clear(icon);
+            icon.appendChild(nowIcon(view.state));
+        }
+        $('now-title').textContent = view.title;
+        $('now-text').textContent = view.text;
+        var list = $('now-items');
+        clear(list);
+        view.items.forEach(function (item) {
+            var li = make('li', 'lq-health-todo');
+            li.setAttribute('data-item', item.key);
+            li.setAttribute('data-tone', item.tone);
+            var dot = make('span', 'lq-dot lq-dot--lg ' + (DOTS[item.tone] || DOTS.muted));
+            dot.setAttribute('aria-hidden', 'true');
+            li.appendChild(dot);
+            var body = make('div', 'lq-health-todo__body');
+            var title = make('strong', 'lq-health-todo__title', item.title);
+            title.setAttribute('dir', 'auto');
+            body.appendChild(title);
+            var text = make('p', 'lq-health-todo__text', item.text);
+            text.setAttribute('dir', 'auto');
+            body.appendChild(text);
+            li.appendChild(body);
+            var fix;
+            if (item.action.href) {
+                fix = make('a', 'lq-btn lq-btn--secondary lq-btn--sm lq-health-todo__fix', item.action.label);
+                fix.setAttribute('href', item.action.href);
+            } else {
+                fix = make('button', 'lq-btn lq-btn--secondary lq-btn--sm lq-health-todo__fix', item.action.label);
+                fix.setAttribute('type', 'button');
+                fix.setAttribute('data-health-goto', item.action.goto);
+            }
+            li.appendChild(fix);
+            list.appendChild(li);
+        });
+        setHidden(list, view.items.length === 0);
+        $('now-note').textContent = view.note;
+    }
+
+    var attentionSeq = 0;
+    /* The top again, after «عمليات البحث» answered (?after=1: a missing ops-health is now a failure, not «عم نتأكد»). */
+    function loadAttention() {
+        var seq = ++attentionSeq;
+        return fetchJson(ATTENTION_URL + '?after=1', { method: 'GET' }).then(function (res) {
+            if (seq !== attentionSeq) return;
+            var view = res && res.ok ? attentionView(res.data) : null;
+            if (view) renderAttention(view);
+            else if (nowCard && nowCard.getAttribute('data-state') === 'checking') {
+                renderAttention({ state: 'checking', title: 'ما قدرنا نتأكد', text: 'ما قدرنا نوصل للخادم. حدّث الصفحة بعد شوي.',
+                    items: [], note: '', pending: false });
+            }
+        }, function () {});
+    }
+
+    page.addEventListener('click', function (e) {
+        var button = e.target && e.target.closest ? e.target.closest('[data-health-goto]') : null;
+        if (button) goTo(button.getAttribute('data-health-goto'));
+    });
+    if (advanced) {
+        // the log is read only while the section is open (deps.isHidden); opening it reads it at once
+        advanced.addEventListener('toggle', function () {
+            if (advanced.open) controller.loadLog();
+        });
+    }
+
     function renderServices(views) {
         Object.keys(views).forEach(function (key) {
             var card = page.querySelector('[data-service="' + key + '"]');
@@ -1071,6 +1222,7 @@
         if (busy) runButton.setAttribute('aria-busy', 'true');
         else runButton.removeAttribute('aria-busy');
         if (runLabel) runLabel.textContent = busy ? 'عم نفحص…' : 'فحص الاتصالات الآن';
+        if (!busy) loadAttention();
     }
 
     function skeletonRows(holder, n, extra) {
@@ -1251,6 +1403,7 @@
         if (nearBottom || wasHidden) logBody.scrollTop = logBody.scrollHeight;
     }
 
+    var opsAnswered = false;
     var controller = createController({
         initial: readInitial(),
         fetchJson: fetchJson,
@@ -1258,14 +1411,21 @@
         renderChecked: renderChecked,
         renderOptional: renderOptional,
         setChecking: setChecking,
-        renderOps: renderOps,
+        // the first answer of «عمليات البحث» (or its failure) lets the top say what ops-health says
+        renderOps: function (view) {
+            renderOps(view);
+            if (view.kind !== 'loading' && !opsAnswered) {
+                opsAnswered = true;
+                loadAttention();
+            }
+        },
         renderLog: renderLog,
         toast: function (text, variant) {
             if (window.Laqta && window.Laqta.toast) window.Laqta.toast(text, { variant: variant });
         },
         now: function () { return Date.now(); },
         schedule: function (fn, ms) { return setTimeout(fn, ms); },
-        isHidden: function () { return document.hidden; }
+        isHidden: function () { return document.hidden || (advanced !== null && !advanced.open); }
     });
 
     if (runButton) {
@@ -1278,7 +1438,12 @@
         });
     }
     var retry = $('ops-retry');
-    if (retry) retry.addEventListener('click', function () { controller.loadOps(true); });
+    if (retry) {
+        retry.addEventListener('click', function () {
+            opsAnswered = false;
+            controller.loadOps(true);
+        });
+    }
 
     var tabs = page.querySelectorAll('[data-log-tab]');
     function selectTab(tab) {
@@ -1393,6 +1558,7 @@
         if (busy) publishButton.setAttribute('aria-busy', 'true');
         else publishButton.removeAttribute('aria-busy');
         if (publishLabel) publishLabel.textContent = busy ? 'جاري الفحص…' : 'افحص النشر';
+        if (!busy) loadAttention();
     }
 
     // «تجاوز عزل الخلفية» / «رجّع عزل الخلفية (…)»: the method as the page was rendered (data-method, '' without the
@@ -1424,6 +1590,7 @@
             if (busy) button.setAttribute('aria-busy', 'true');
             else button.removeAttribute('aria-busy');
         });
+        if (!busy) loadAttention();
     }
 
     // «دقة الاقتراحات الحقيقية»: one read when the page opens (cached on the server like ops-health)
@@ -1481,7 +1648,13 @@
             publishButton.addEventListener('click', function () { publish.run(); });
             // from the review screen's failed approvals (/system-diagnostics#publish-check): the button is ready,
             // never pressed for the owner (the check may cost a background-removal call)
-            if (window.location && window.location.hash === '#publish-check') publishButton.focus();
+            // (after the load: the browser's own jump to #publish-check drops a focus given earlier)
+            var afterLoad = function (fn) {
+                var go = function () { window.setTimeout(fn, 0); };
+                if (document.readyState === 'complete') go();
+                else window.addEventListener('load', go);
+            };
+            if (window.location && window.location.hash === '#publish-check') afterLoad(function () { publishButton.focus(); });
         }
     }
 
