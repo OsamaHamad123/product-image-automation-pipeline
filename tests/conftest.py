@@ -32,6 +32,9 @@ os.environ["LOCAL_INDEX_REFRESH_MAX_S"] = "0"
 # may clean the developer's temp/ folder or ping the owner's real check. The tests of both turn them on by themselves.
 os.environ["NIGHTLY_PRUNE_ENABLED"] = "0"
 os.environ["HEALTHCHECK_URL"] = ""
+# The default pipeline asks the query normaliser (catalog_match.normalizer), a paid model call: no test may make one
+# by accident (the owner's .env or a stored key). Its own tests inject a fake or turn it on by themselves.
+os.environ["QUERY_NORMALIZER"] = "off"
 
 
 @pytest.fixture(autouse=True)
@@ -46,6 +49,20 @@ def _fresh_host_breaker():
     fetch.reset_host_breaker()
     yield
     fetch.reset_host_breaker()
+
+
+@pytest.fixture(autouse=True)
+def _no_query_normalizer(monkeypatch):
+    """QUERY_NORMALIZER stays 'off' even when a test loaded system_settings into config; the normaliser's run budget,
+    breaker and memo start empty."""
+    module = sys.modules.get("config")
+    if module is not None:
+        monkeypatch.setattr(module, "QUERY_NORMALIZER", "off", raising=False)
+    normalizer = sys.modules.get("catalog_match.normalizer")
+    if normalizer is not None:
+        normalizer.start_run()
+        normalizer.MEMO.clear()
+    yield
 
 
 @pytest.fixture(autouse=True)

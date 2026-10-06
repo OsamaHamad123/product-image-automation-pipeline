@@ -266,6 +266,9 @@ def outcome_summary(outcome: SearchOutcome) -> Dict[str, Any]:
         "discovered_brands": list(getattr(outcome, "discovered_brands", None) or []),
         # wall time of the search per stage in milliseconds (pipeline.find_product_image); older traces have none
         "timings": {str(k): int(v) for k, v in (getattr(outcome, "timings", None) or {}).items()},
+        # catalog_match.normalizer: the model's reading of the sheet name, the queries it wrote, its billed call
+        # (the day's search spend counts it); {} when it did not run. Search words only, never evidence
+        "query_normalizer": _json_safe(dict(getattr(outcome, "query_normalizer", None) or {})),
     }
 
 

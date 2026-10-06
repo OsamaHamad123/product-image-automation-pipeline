@@ -2440,6 +2440,18 @@ def _forget_slow_hosts():
         print(f"تنبيه: تعذر تفريغ ذاكرة المزودين المرفوضين: {e}")
 
 
+def _start_normalizer_run():
+    """
+    كل تشغيل يبدأ بميزانية قارئ أسماء الشيت كاملة (QUERY_NORMALIZER_RUN_BUDGET_USD) وبلا مانع فشل من تشغيل سابق
+    (catalog_match.normalizer): العامل يعيش طويلاً. القراءات المحفوظة تبقى، فكل منتج يُدفع عنه مرة وحدة.
+    """
+    try:
+        from catalog_match import normalizer
+        normalizer.start_run()
+    except Exception as e:
+        print(f"تنبيه: تعذر تصفير ميزانية قارئ أسماء الشيت: {e}")
+
+
 def _harvest_pending_brand_sites():
     """
     مواقع ماركات أضافها المالك بزر «أضف» في «ماركات ناقصة» (system_settings.pending_harvest_domains) تُفهرس أول التشغيل
@@ -2712,6 +2724,7 @@ def run_worker_mode(trigger="manual", report=True, deadline_ts=None):
             return
         brand_mappings = google_sheets.get_brand_mappings(sheets_client, config.SPREADSHEET_NAME_OR_URL)
         _start_local_index_refresh(trigger)      # in the background: the search never waits for it
+        _start_normalizer_run()
         _forget_brand_spellings()
         _forget_slow_hosts()
         _harvest_pending_brand_sites()
@@ -2988,6 +3001,7 @@ def run_automation_pipeline():
             print("لم يتم العثور على أي منتجات صالحة للمعالجة.")
             return
         brand_mappings = google_sheets.get_brand_mappings(sheets_client, config.SPREADSHEET_NAME_OR_URL)
+        _start_normalizer_run()
         _forget_brand_spellings()
         _forget_slow_hosts()
 

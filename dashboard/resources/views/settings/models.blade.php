@@ -2,7 +2,8 @@
     Settings · نماذج التحقق. $models = SettingsController::modelsData(): the label reader for every product
     (verifier_primary), the strong second look (verifier_strong, or 'off'), its monthly budget
     (verifier_monthly_budget_usd) with this month's spend from verifier_spend, and the editable prices per 1M tokens
-    (model_prices) with the estimated cost per 100 products. Saving accepts only the supported list
+    (model_prices) with the estimated cost per 100 products, and the reading of abbreviated sheet names
+    (query_normalizer: gemini | off, catalog_match/normalizer.py). Saving accepts only the supported list
     (SettingsController::VERIFIER_MODELS = catalog_match/verifiers/registry.SUPPORTED_MODELS). No key is read here:
     a missing Gemini / Anthropic key for a chosen model is only said.
 --}}
@@ -55,6 +56,19 @@
             @endif
         </label>
     </div>
+
+    <label class="lq-field">
+        <span class="lq-field__label">قراءة أسماء الشيت المختصرة</span>
+        <select name="query_normalizer" class="lq-select lq-settings-field__control" @disabled((bool) $dbError)>
+            <option value="gemini" @selected($md['normalizer_on'])>شغّالة · Gemini 3.1 Flash-Lite · حوالي {{ $md['normalizer_per100_text'] }} لكل 100 منتج</option>
+            <option value="off" @selected(!$md['normalizer_on'])>موقّفة (البحث بكلمات الشيت بس)</option>
+        </select>
+        @if ($md['normalizer_on'] && !$md['normalizer_key_saved'])
+            <span class="lq-field__error">بتحتاج مفتاح Gemini وهو مش محفوظ: ضيفه من «المفاتيح». لحد ما تضيفه، البحث بيكمل بكلمات الشيت بس.</span>
+        @else
+            <span class="lq-field__hint">بتفك اختصارات أسماء الشيت (مثلاً LGT بتصير Light) لتكتب كلمات بحث أوضح، مرة وحدة لكل منتج وبتنحفظ. ما بتقرر شي: الصورة بتنقبل بس إذا طابقت اسم الشيت نفسه. وإذا ما لقينا الماركة وجربنا الماركة اللي خمّنتها، الصورة اللي بتطلع بتستنى مراجعتك دايماً.</span>
+        @endif
+    </label>
 
     <label class="lq-field">
         <span class="lq-field__label">الميزانية الشهرية للنموذج القوي (دولار)</span>

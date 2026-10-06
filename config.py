@@ -439,6 +439,9 @@ VERIFIER_STRONG_MAX_CALLS = os.getenv("VERIFIER_STRONG_MAX_CALLS", "1")
 # إعادة حكم واحدة بالنموذج القوي لكل منتج على MISMATCH سببه الوحيد variant/size (1 = شغّال، 0 = موقّف، الحد 1)
 VERIFIER_REJUDGE_MAX_CALLS = os.getenv("VERIFIER_REJUDGE_MAX_CALLS", "1")
 MODEL_PRICES = os.getenv("MODEL_PRICES", "")                         # JSON: دولار لكل مليون token (إدخال/إخراج)
+# قارئ أسماء الشيت المختصرة (catalog_match.normalizer): gemini أو off. يكتب كلمات بحث أفضل فقط، ولا يُعدّ دليلاً أبداً
+QUERY_NORMALIZER = os.getenv("QUERY_NORMALIZER", "gemini")
+QUERY_NORMALIZER_RUN_BUDGET_USD = os.getenv("QUERY_NORMALIZER_RUN_BUDGET_USD", "0.5")   # سقف تكلفته لكل تشغيل
 
 # مفاتيح system_settings التي تكتبها صفحة الإعدادات -> اسم الإعداد هنا
 VERIFIER_DB_KEYS = {
@@ -449,6 +452,8 @@ VERIFIER_DB_KEYS = {
     "verifier_strong_max_calls": "VERIFIER_STRONG_MAX_CALLS",
     "verifier_rejudge_max_calls": "VERIFIER_REJUDGE_MAX_CALLS",
     "model_prices": "MODEL_PRICES",
+    "query_normalizer": "QUERY_NORMALIZER",
+    "query_normalizer_run_budget_usd": "QUERY_NORMALIZER_RUN_BUDGET_USD",
 }
 
 

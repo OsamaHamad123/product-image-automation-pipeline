@@ -142,6 +142,10 @@ double-check before approving. They never change the winner or the decision.
                                  approving the pick teaches it (catalog_match.learning).
                                  It stays on once the spelling is learned, so a
                                  WRONG_BRAND rejection can still count against it
+    brand_from_normaliser        the search tried the query normaliser's brand guess (the sheet
+                                 brand was unknown or no listing named it): written by
+                                 catalog_match.normalizer.mark_rescued after routing, with
+                                 'auto_blocked:brand_from_normaliser'; never strict, never auto
 
 Overruled flags ('vlm:flag_overruled:size' / 'vlm:flag_overruled:variant' reasons, not warnings): on every
 candidate whose reading is UNSURE only because verify.overruled_flags set aside a 'no' its own verbatim text
@@ -208,7 +212,7 @@ DISPLAY_ONLY_WARNING_CODES = ("size_unverified", "variant_unverified")
 # Every review warning code (the dashboard maps each one to an Arabic sentence).
 WARNING_CODES = ("sheet_silent", "listing_silent", "vlm_unsure", "multipack_unit_image", "size_close", "low_resolution",
                  "chat_or_screenshot", "social_media", "foreign_store", "barcode_conflict",
-                 "brand_spelling") + DISPLAY_ONLY_WARNING_CODES
+                 "brand_spelling", "brand_from_normaliser") + DISPLAY_ONLY_WARNING_CODES
 # Reason on a candidate whose label reading said 'no' to a flag its own verbatim text cannot support
 # (verify.overruled_flags): 'vlm:flag_overruled:size' / 'vlm:flag_overruled:variant'.
 FLAG_OVERRULED = "vlm:flag_overruled"
