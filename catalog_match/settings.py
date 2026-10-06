@@ -230,6 +230,10 @@ DEFAULTS.update({
     "VERIFIER_STRONG": "gemini:gemini-3.5-flash",   # or "claude:<model>", or "off"
     "VERIFIER_MONTHLY_BUDGET_USD": "5",             # month cap (UTC) for the strong model's estimated spend
     "VERIFIER_STRONG_MAX_CALLS": "1",               # strong calls per product
+    # strong re-judges of a cheap MISMATCH that rests only on a variant / size 'no' (tier 1), per product: 1 = on,
+    # 0 = off, capped at 1; besides the second looks, within the same month budget, off with the strong model
+    # (VERIFIER_STRONG 'off' or VERIFIER_STRONG_MAX_CALLS 0) (verifiers.cascade)
+    "VERIFIER_REJUDGE_MAX_CALLS": "1",
     "MODEL_PRICES": "",                             # JSON {model id: {input, output}} USD per 1M tokens; '' = built-in
 })
 
@@ -264,6 +268,11 @@ def verifier_monthly_budget_usd() -> float:
 
 def verifier_strong_max_calls() -> int:
     return int(_number("VERIFIER_STRONG_MAX_CALLS", 0.0, 4.0))
+
+
+def verifier_rejudge_max_calls() -> int:
+    """Strong re-judges per product: 0 (off) or 1 (the default); a larger value is capped at 1."""
+    return int(_number("VERIFIER_REJUDGE_MAX_CALLS", 0.0, 1.0))
 
 
 def model_prices_text() -> str:

@@ -33,7 +33,8 @@ Steps
 Nothing wins by arriving first: every query's candidates are pooled and ranked once.
 The per-SKU caps are 4 provider queries (the Open Food Facts lookup is not a query)
 and 2 verifier calls (the default verifier, catalog_match.verifiers, may add one budgeted
-strong second look inside a call: VERIFIER_STRONG_MAX_CALLS per SKU).
+strong second look inside a call: VERIFIER_STRONG_MAX_CALLS per SKU, and one strong re-judge per SKU:
+VERIFIER_REJUDGE_MAX_CALLS).
 """
 
 from __future__ import annotations
