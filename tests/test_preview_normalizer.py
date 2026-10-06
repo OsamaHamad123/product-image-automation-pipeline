@@ -115,3 +115,21 @@ def test_the_sheet_is_opened_read_only(wired, monkeypatch, capsys):
     assert "sheet rows 2-2" in out and "NB  Super Tasty" in out
     with pytest.raises(PermissionError):
         smoke_live.ReadOnly(Sheet()).update_cell(1, 1, "x")
+
+
+def test_the_site_clause_is_shortened_in_one_pass():
+    """The store clause the query plan appends reads '(N stores)'. It is parsed by hand: the regular expression it
+    replaced (an optional ' OR ' between items) backtracked exponentially on a long clause that does not match
+    (CodeQL py/redos on PR #30)."""
+    import time
+
+    pn = _load()
+    assert pn.short("tomex fries 6mm (site:carrefouruae.com OR site:noon.com OR site:luluhypermarket.com)") \
+        == "tomex fries 6mm (3 stores)"
+    assert pn.short("almarai milk 1l  (site:noon.com)") == "almarai milk 1l (1 stores)"
+    for unchanged in ("no clause", "", None, "x (site:)", "x (site:a b)", "x (site:a.com OR site:b.com",
+                      "x (site:a.com OR site:b.com) tail", "x (site:a.com OR )"):
+        assert pn.short(unchanged) == unchanged
+    started = time.monotonic()
+    assert pn.short("(site:" + "!site:" * 20000) == "(site:" + "!site:" * 20000
+    assert time.monotonic() - started < 1.0

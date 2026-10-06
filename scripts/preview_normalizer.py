@@ -26,7 +26,6 @@ import argparse
 import json
 import logging
 import os
-import re
 import sys
 
 SCRIPTS = os.path.dirname(os.path.abspath(__file__))
@@ -39,16 +38,24 @@ if SCRIPTS not in sys.path:
 
 log = logging.getLogger("preview_normalizer")
 
-_SITE_RE = re.compile(r"\s*\((?:site:[^\s()]+(?: OR )?)+\)$")
 JSON_FORMAT = "preview_normalizer/1"
 
 
+def _site_item(part):
+    return len(part) > len("site:") and part.startswith("site:") and not any(c.isspace() or c in "()" for c in part)
+
+
 def short(text):
-    """A query as the owner reads it: the long site: clause becomes '(N stores)'."""
-    match = _SITE_RE.search(text or "")
-    if not match:
+    """A query as the owner reads it: the long site: clause at its end, '(site:a OR site:b ...)', becomes
+    '(N stores)'. Parsed by hand in one pass (a regular expression with an optional ' OR ' between items
+    backtracks exponentially on a long clause that does not match)."""
+    start = (text or "").rfind("(site:")
+    if start < 0 or not text.endswith(")"):
         return text
-    return f"{text[:match.start()]} ({match.group(0).count('site:')} stores)"
+    parts = text[start + 1:-1].split(" OR ")
+    if not all(_site_item(part) for part in parts):
+        return text
+    return f"{text[:start].rstrip()} ({len(parts)} stores)"
 
 
 def read_rows(args, smoke):
