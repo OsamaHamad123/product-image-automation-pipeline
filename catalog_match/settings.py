@@ -70,12 +70,17 @@ GTIN_POLICIES = ("evidence", "strict", "off")
 # --- sources package (P3): expansion round, product pages, shopping and visual search ---
 # EXPANSION_ENABLED    one extra search round for SKUs with no confident pick (catalog_match.expand)
 # EXPANSION_MAX_CALLS  paid calls the round may make per product (web, shopping, visual search)
+# EXPANSION_SCOPE_GATE skip the round's paid steps (X1-X5; the free X0 page recovery still runs) for products they
+#                      cannot help: bouquets and other out-of-scope kinds (data/expansion_gate.json), and a brand no
+#                      listing names on a store or brand site, which gets one Google Shopping probe only
+#                      (catalog_match.expand.scope_gate). On by default
 # VISUAL_SEARCH        'auto' (Serper lens, then SerpApi when SERPAPI_API_KEY is set) | 'off' | 'serper' | 'serpapi'
 # SERPAPI_API_KEY      secret; written only through the dashboard's write-only field
 # SERPAPI_LENS_PRICE_USD  what one SerpApi Google Lens search costs on the owner's plan (ops_health pricing)
 DEFAULTS.update({
     "EXPANSION_ENABLED": True,
     "EXPANSION_MAX_CALLS": 4,
+    "EXPANSION_SCOPE_GATE": True,
     "VISUAL_SEARCH": "auto",
     "SERPAPI_API_KEY": "",
     "SERPAPI_LENS_PRICE_USD": "0.015",
@@ -289,6 +294,11 @@ def expansion_max_calls() -> int:
     """Paid calls the expansion round may make per product (0 turns the round off)."""
     value = get("EXPANSION_MAX_CALLS")
     return max(0, int(value)) if isinstance(value, int) else int(DEFAULTS["EXPANSION_MAX_CALLS"])
+
+
+def expansion_scope_gate() -> bool:
+    """True (default): the expansion round's paid steps skip out-of-scope products (expand.scope_gate)."""
+    return bool(get("EXPANSION_SCOPE_GATE"))
 
 
 def visual_search_mode() -> str:
