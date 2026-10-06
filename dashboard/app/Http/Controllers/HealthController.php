@@ -489,10 +489,28 @@ class HealthController extends Controller
         return self::logResponse('pipeline', base_path('../temp/pipeline.log'));
     }
 
-    /** آخر أسطر سجل لوحة التحكم (storage/logs/laravel.log). */
+    /**
+     * آخر أسطر سجل لوحة التحكم: الأحدث بين storage/logs/laravel.log (يكتبه بايثون دائماً ولارافيل بقناة single) وملفات
+     * laravel-YYYY-MM-DD.log (قناة daily: LOG_STACK=daily بقالب سيرفر أوبونتو deploy/ubuntu/dashboard.env.example).
+     */
     public function laravelLog()
     {
-        return self::logResponse('laravel', storage_path('logs/laravel.log'));
+        return self::logResponse('laravel', self::newestLaravelLog(storage_path('logs')));
+    }
+
+    /** ملف سجل لارافيل الأحدث (آخر تعديل) في $dir؛ بلا ملفات: المسار الافتراضي laravel.log (الصفحة تقول «غير موجود»). */
+    public static function newestLaravelLog(string $dir): string
+    {
+        $dir = rtrim($dir, '/\\');
+        $newest = $dir . '/laravel.log';
+        $newestTime = is_file($newest) ? (int) @filemtime($newest) : -1;
+        foreach (glob($dir . '/laravel-*.log') ?: [] as $candidate) {
+            $time = is_file($candidate) ? (int) @filemtime($candidate) : -1;
+            if ($time > $newestTime) {
+                [$newest, $newestTime] = [$candidate, $time];
+            }
+        }
+        return $newest;
     }
 
     /**

@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Schema;
 use App\Services\ImageProxy;
 use App\Services\PythonBridge;
 use App\Services\QueueStats;
+use App\Services\RunLauncher;
 
 class ApiController extends Controller
 {
@@ -232,9 +233,8 @@ class ApiController extends Controller
 
             file_put_contents($lockFile, 'STARTING');
 
-            if (file_exists($logPath)) {
-                @unlink($logPath);
-            }
+            // سجل التشغيل السابق يُدوَّر (pipeline.log.1 .. .5) بدل أن يُحذف: أخطاء تشغيل الأمس تبقى متاحة
+            RunLauncher::rotateLog($logPath, RunLauncher::LOG_KEEP);
 
             $pythonPath = $this->getPythonPath();
 
@@ -268,6 +268,10 @@ class ApiController extends Controller
                     $popenCmd = "start /B \"\" {$cmd}";
                     pclose(popen($popenCmd, "r"));
                 }
+            } elseif (RunLauncher::mode() === 'systemd' && RunLauncher::requestRun($tempDir)) {
+                // سيرفر أوبونتو: laqta-run.path استلمت الطلب وتشغّل laqta-run.service الأمرين نفسيهما بمستخدم التطبيق
+                // خارج cgroup الـ php-fpm، فإعادة تشغيل php-fpm لا تقتل التشغيل (deploy/ubuntu/run-launcher.sh).
+                // لم تستلمه خلال المهلة: سُحب الطلب بنقل ذري ونكمل بالطريقة القديمة أدناه (لا تشغيل مزدوج).
             } else {
                 // Linux background execution
                 $cmd = "cd \"" . $basePath . "\" && export PYTHONUTF8=1 PYTHONIOENCODING=utf-8 && \"" . $pythonPath . "\" \"" . $scriptPath . "\" --enqueue > \"" . $logPath . "\" 2>&1 && \"" . $pythonPath . "\" -u \"" . $scriptPath . "\" --worker --trigger=dashboard >> \"" . $logPath . "\" 2>&1";

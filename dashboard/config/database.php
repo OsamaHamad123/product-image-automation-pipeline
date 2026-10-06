@@ -46,14 +46,9 @@ return [
             'busy_timeout' => 10000,
             'journal_mode' => 'WAL',
             'synchronous' => 'NORMAL',
-            'after' => function ($connection) {
-                try {
-                    $pdo = $connection->getPdo();
-                    $pdo->exec("PRAGMA journal_mode = WAL;");
-                    $pdo->exec("PRAGMA busy_timeout = 10000;");
-                    $pdo->exec("PRAGMA synchronous = NORMAL;");
-                } catch (\Exception $e) {}
-            },
+            // No 'after' closure here: Laravel's sqlite connector already applies busy_timeout, journal_mode and
+            // synchronous from the three keys above, and a Closure in a config file makes `artisan config:cache`
+            // fail with "Your configuration files are not serializable" (install.sh runs config:cache).
         ],
 
         'mysql' => [

@@ -1,9 +1,12 @@
 # Daily MariaDB dump (gzip), 14 days kept. Runs as root with root's ~/.my.cnf (see docs/deploy_ubuntu.md).
 # install.sh copies the script to /usr/local/sbin so the app user can never edit what root runs.
 # Optional settings in /etc/default/laqta-backup:  DB_NAME=automation_db  BACKUP_DIR=/var/backups/laqta  KEEP_DAYS=14
+# Encryption and the offsite copy are switched on in /etc/default/laqta-backup (BACKUP_AGE_RECIPIENT,
+# BACKUP_RCLONE_REMOTE). A failed backup (or a failed offsite copy) sends a Telegram message through OnFailure.
 [Unit]
 Description=Laqta MariaDB backup
 After=mariadb.service
+OnFailure=laqta-alert@%n.service
 
 [Service]
 Type=oneshot

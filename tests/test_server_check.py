@@ -387,7 +387,8 @@ def fake_systemctl(active=(), enabled=(), fpm="php8.3-fpm.service"):
     return run
 
 
-ALL_ACTIVE = ("laqta-nightly.timer", "laqta-backup.timer", "nginx.service", "mariadb.service", "php8.3-fpm.service")
+ALL_ACTIVE = ("laqta-nightly.timer", "laqta-backup.timer", "laqta-outbox-flush.timer", "nginx.service",
+              "mariadb.service", "php8.3-fpm.service")
 
 
 def test_units_all_running():
@@ -466,6 +467,77 @@ def test_web_check_fails_without_basic_auth_or_users(tmp_path):
     assert no_users[0].status == sc.FAIL
     (tmp_path / "d").mkdir()
     assert sc.check_web(nginx_dir(tmp_path / "d", site=None))[0].status == sc.FAIL
+
+
+def test_outbox_flush_timer_is_required():
+    out = sc.check_units(run=fake_systemctl(active=tuple(u for u in ALL_ACTIVE if u != "laqta-outbox-flush.timer")))
+    failed = [r.text for r in out if r.status == sc.FAIL]
+    assert len(failed) == 1 and "laqta-outbox-flush.timer" in failed[0]
+
+
+def test_run_launcher_is_ok_warned_or_just_mentioned():
+    on = sc.check_units(run=fake_systemctl(active=ALL_ACTIVE + ("laqta-run.path",), enabled=("laqta-run.path",)))
+    assert sc.FAIL not in statuses(on) and sc.WARN not in statuses(on)
+    assert any(r.status == sc.OK and "laqta-run.path" in r.text for r in on)
+    stopped = sc.check_units(run=fake_systemctl(active=ALL_ACTIVE, enabled=("laqta-run.path",)))
+    warn = [r for r in stopped if r.status == sc.WARN]
+    assert len(warn) == 1 and "laqta-run.path" in warn[0].text and sc.FAIL not in statuses(stopped)   # runs still work
+    absent = sc.check_units(run=fake_systemctl(active=ALL_ACTIVE))
+    assert any(r.status == sc.INFO and "laqta-run.path" in r.text for r in absent) and sc.WARN not in statuses(absent)
+
+
+def write_cached_config(root, env="production", debug="false", secure="NULL"):
+    """The lines `artisan config:cache` writes (checked against a real cache file of this dashboard)."""
+    cache = Path(root) / "dashboard" / "bootstrap" / "cache"
+    cache.mkdir(parents=True, exist_ok=True)
+    (cache / "config.php").write_text(
+        "<?php return array (\n  'app' => \n  array (\n    'name' => 'Laqta',\n    'env' => '%s',\n"
+        "    'debug' => %s,\n    'url' => 'http://localhost',\n  ),\n  'session' => \n  array (\n"
+        "    'driver' => 'file',\n    'secure' => %s,\n    'same_site' => 'lax',\n  ),\n);\n" % (env, debug, secure))
+
+
+def test_frozen_config_with_debug_on_is_a_failure_even_when_env_says_false(tmp_path):
+    root = make_root(tmp_path)                                       # dashboard/.env: APP_DEBUG=false
+    write_cached_config(root, debug="true")
+    out = sc.check_env(str(root), environ={})
+    assert any(r.status == sc.FAIL and "APP_DEBUG" in r.text and "config:cache" in r.text for r in out)
+    write_cached_config(root, debug="false")
+    assert not any(r.status == sc.FAIL and "APP_DEBUG" in r.text for r in sc.check_env(str(root), environ={}))
+
+
+def test_app_env_is_judged_by_what_the_installer_froze(tmp_path):
+    """install.sh bakes APP_ENV=production into the cached config even when dashboard/.env leaves the key out."""
+    base = {"APP_KEY": "base64:abcdefghij", "APP_DEBUG": "false", "DB_HOST": "127.0.0.1", "DB_PORT": "3306",
+            "DB_DATABASE": "automation_db", "DB_USERNAME": "laqta_app", "DB_PASSWORD": SECRETS["DB_PASSWORD"]}
+    root = make_root(tmp_path / "a", dash=base)                      # no APP_ENV line at all
+    assert any(r.status == sc.WARN and "APP_ENV" in r.text for r in sc.check_env(str(root), environ={}))
+    write_cached_config(root, env="production")
+    assert not any("APP_ENV" in r.text for r in sc.check_env(str(root), environ={}))
+    write_cached_config(root, env="local")
+    assert any(r.status == sc.WARN and "APP_ENV" in r.text for r in sc.check_env(str(root), environ={}))
+
+
+def test_cached_config_reader_gives_none_without_a_cache(tmp_path):
+    assert sc.cached_config(str(tmp_path)) == {"env": None, "debug": None, "secure": None}
+    write_cached_config(tmp_path, env="production", debug="false", secure="true")
+    assert sc.cached_config(str(tmp_path)) == {"env": "production", "debug": False, "secure": True}
+
+
+def test_https_site_needs_a_secure_session_cookie(tmp_path):
+    https = SITE.replace("listen 80;", "listen 443 ssl;\n    ssl_certificate /x.pem;")
+    (tmp_path / "web").mkdir()
+    web = nginx_dir(tmp_path / "web", https)
+    root = make_root(tmp_path / "app")                               # dashboard/.env has no SESSION_SECURE_COOKIE
+    warn = [r for r in sc.check_web(web, root=str(root)) if r.status == sc.WARN]
+    assert len(warn) == 1 and "SESSION_SECURE_COOKIE" in warn[0].text
+    write_cached_config(root, secure="true")                         # frozen by install.sh on the HTTPS path
+    assert statuses(sc.check_web(web, root=str(root))) == [sc.OK, sc.OK]
+    write_cached_config(root, secure="NULL")                         # frozen without it
+    assert any(r.status == sc.WARN for r in sc.check_web(web, root=str(root)))
+    assert statuses(sc.check_web(web)) == [sc.OK, sc.OK]             # no root given: the old behaviour
+    local = SITE.replace("listen 80;", "listen 127.0.0.1:8080;")    # a tunnel on plain http: no Secure cookie wanted
+    (tmp_path / "web2").mkdir()
+    assert statuses(sc.check_web(nginx_dir(tmp_path / "web2", local), root=str(root))) == [sc.OK, sc.OK]
 
 
 # ------------------------------------------------------------------ the whole run
