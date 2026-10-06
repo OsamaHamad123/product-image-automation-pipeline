@@ -416,7 +416,9 @@ VERIFIER_PRIMARY = os.getenv("VERIFIER_PRIMARY", "")                  # فارغ
 VERIFIER_STRONG = os.getenv("VERIFIER_STRONG", "gemini:gemini-3.5-flash")   # أو "claude:<model>" أو "off"
 VERIFIER_MONTHLY_BUDGET_USD = os.getenv("VERIFIER_MONTHLY_BUDGET_USD", "5")
 VERIFIER_STRONG_MAX_CALLS = os.getenv("VERIFIER_STRONG_MAX_CALLS", "1")
-MODEL_PRICES = os.getenv("MODEL_PRICES", "")                          # JSON: دولار لكل مليون token (إدخال/إخراج)
+# إعادة حكم واحدة بالنموذج القوي لكل منتج على MISMATCH سببه الوحيد variant/size (1 = شغّال، 0 = موقّف، الحد 1)
+VERIFIER_REJUDGE_MAX_CALLS = os.getenv("VERIFIER_REJUDGE_MAX_CALLS", "1")
+MODEL_PRICES = os.getenv("MODEL_PRICES", "")                         # JSON: دولار لكل مليون token (إدخال/إخراج)
 
 # مفاتيح system_settings التي تكتبها صفحة الإعدادات -> اسم الإعداد هنا
 VERIFIER_DB_KEYS = {
@@ -425,6 +427,7 @@ VERIFIER_DB_KEYS = {
     "verifier_strong": "VERIFIER_STRONG",
     "verifier_monthly_budget_usd": "VERIFIER_MONTHLY_BUDGET_USD",
     "verifier_strong_max_calls": "VERIFIER_STRONG_MAX_CALLS",
+    "verifier_rejudge_max_calls": "VERIFIER_REJUDGE_MAX_CALLS",
     "model_prices": "MODEL_PRICES",
 }
 

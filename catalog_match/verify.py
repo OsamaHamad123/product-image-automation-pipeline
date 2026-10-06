@@ -241,6 +241,13 @@ def brand_confirmed(spec: SkuSpec, verdict: Optional[VlmImageVerdict]) -> bool:
             and _brand_reading(spec, verdict.brand_text) == "target")
 
 
+def other_brand_printed(spec: SkuSpec, verdict: Optional[VlmImageVerdict]) -> bool:
+    """The printed brand_text reads as ANOTHER brand (a competitor, or a sibling sub-brand when the SKU names one):
+    classify() makes such a reading MISMATCH whatever the flags say, so it refutes the brand like a brand 'no'
+    (the strong re-judge of catalog_match.verifiers.cascade never re-reads it)."""
+    return verdict is not None and _brand_reading(spec, verdict.brand_text) == "other"
+
+
 def multipack_unit_image(spec: SkuSpec, verdict: VlmImageVerdict) -> bool:
     """True when the picture is ONE unit of a multipack SKU and only that made the reader answer size 'no'.
 

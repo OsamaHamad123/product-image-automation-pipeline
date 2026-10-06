@@ -11,11 +11,23 @@ verify(spec, images) -> VerificationResult (the Verifier protocol of catalog_mat
 3. The strong verdict replaces that image's verdict only when the strong call succeeded, and never
    overrides a primary MISMATCH (merge_verdict): the strong model can turn UNSURE into MATCH or
    MISMATCH, never MISMATCH into MATCH.
+3b. The one exception, the RE-JUDGE (VERIFIER_REJUDGE_MAX_CALLS, default 1, at most 1 per product): when the
+   batch still has no tier-1/2 MATCH, the top-ranked TIER-1 image whose primary verdict is a MISMATCH that
+   rests only on a variant and/or size 'no' (needs_rejudge: the brand not read as 'no' nor printed as another
+   brand, not a banner / not_product / multi_product view) gets one strong reading of its own, and that
+   reading replaces the MISMATCH (merge_verdict(rejudge=True)): MATCH, UNSURE or MISMATCH exactly as a
+   second look would give, through the same reader, prompt and code-side decision. Run exports 2026-10-04/05:
+   533 vlm:MISMATCH rejects, 'Buy Zwan Chicken Luncheon Meat 340 g' (talabat) read as 'LUNCHEON' with variant
+   'no'. A brand 'no' stays final. A re-judge is a strong call of its own kind: VERIFIER_STRONG_MAX_CALLS
+   counts the second looks, the re-judge has its own allowance of one per product, and it comes after the
+   batch's second look (only while that left no MATCH). Everything else is the second look's: no re-judge
+   when VERIFIER_STRONG is 'off' or VERIFIER_STRONG_MAX_CALLS is 0, the same month budget check and notices
+   (point 4), recorded as role 'strong' in the spend table and the usage (usage entry 'rejudge': True).
 4. No second look when VERIFIER_STRONG is 'off', after VERIFIER_STRONG_MAX_CALLS looks for this product
    (default 1), or when this month's strong spend plus the estimate of the call would pass
    VERIFIER_MONTHLY_BUDGET_USD (notice 'strong_budget_exhausted'), when that budget is 0, the owner's
    "no second look" (notice 'strong_budget_zero', no alert), or when the spend cannot be read
-   (notice 'strong_budget_unknown').
+   (notice 'strong_budget_unknown'). The same budget rules hold for a re-judge.
 
 Every billed call is a usage entry {role, provider, model, input_tokens, output_tokens, estimated, usd,
 images} on the result (outcome.vlm_usage in the trace) and a row in the month spend table. calls counts
@@ -37,8 +49,8 @@ from typing import Any, Callable, Dict, List, Mapping, Optional
 from .. import settings
 from ..models import FetchedImage, SkuSpec, VerificationResult, VlmImageVerdict
 from ..verify import (
-    LONG_SIDE, MATCH, MAX_IMAGES, MISMATCH, UNKNOWN, UNSURE, GeminiVerifier, multipack_unit_image, overruled_flags,
-    size_close,
+    LONG_SIDE, MATCH, MAX_IMAGES, MISMATCH, REJECT_VIEWS, UNKNOWN, UNSURE, GeminiVerifier, multipack_unit_image,
+    other_brand_printed, overruled_flags, size_close,
 )
 from . import pricing
 from .registry import ModelRef, is_off, parse_model_id
@@ -48,6 +60,8 @@ logger = logging.getLogger(__name__)
 
 STRONG_IMAGES = 1
 SECOND_LOOK = (UNSURE, UNKNOWN)
+REJUDGE_TIER = 1                  # only a tier-1 listing's MISMATCH is worth a paid re-judge
+MAX_REJUDGES = 1                  # VERIFIER_REJUDGE_MAX_CALLS is capped here (per product)
 _PRODUCT_MEMORY = 256
 
 # Machine notices (outcome.verifier_notices); ops_health and the dashboard map them to Arabic text.
@@ -61,15 +75,16 @@ STRONG_NOTICE_PREFIX = "strong:"
 
 
 def merge_verdict(primary: Optional[VlmImageVerdict], strong: Optional[VlmImageVerdict],
-                  index: Optional[int] = None) -> Optional[VlmImageVerdict]:
+                  index: Optional[int] = None, rejudge: bool = False) -> Optional[VlmImageVerdict]:
     """The verdict an image keeps after a strong second look.
 
-    * a primary MISMATCH is final: the strong model never overrides it (into MATCH or anything else);
+    * a primary MISMATCH is final: the strong model never overrides it (into MATCH or anything else), except
+      in a re-judge (rejudge=True: the cascade asked for it because the MISMATCH qualifies, needs_rejudge);
     * a missing or UNKNOWN strong verdict (failed call, skipped image) changes nothing;
     * otherwise the strong reading replaces the primary one, re-indexed to the image's position
       (`index`, else the primary verdict's index).
     """
-    if primary is not None and primary.decision == MISMATCH:
+    if primary is not None and primary.decision == MISMATCH and not rejudge:
         return primary
     if strong is None or strong.decision not in (MATCH, MISMATCH, UNSURE):
         return primary
@@ -95,6 +110,22 @@ def needs_second_look(spec: SkuSpec, verdict: Optional[VlmImageVerdict]) -> bool
     return spec.size is not None and not (verdict.size_text or "").strip()
 
 
+def needs_rejudge(spec: SkuSpec, verdict: Optional[VlmImageVerdict]) -> bool:
+    """A primary MISMATCH worth one strong re-judge: it rests ONLY on a variant and/or size 'no'.
+
+    Not when the brand was read as 'no' or the printed brand reads as another brand (verify.other_brand_printed):
+    a brand refutation is final. Not for a banner / not_product / multi_product view either (the MISMATCH is the
+    picture, not a flag). The caller adds the listing side: a tier-1 image, no tier-1/2 MATCH in the batch.
+    """
+    if verdict is None or verdict.decision != MISMATCH:
+        return False
+    if verdict.brand_match == "no" or "no" not in (verdict.variant_match, verdict.size_match):
+        return False
+    if verdict.view in REJECT_VIEWS:
+        return False
+    return not other_brand_printed(spec, verdict)
+
+
 def _default_tier(spec: SkuSpec, fetched: FetchedImage) -> Optional[int]:
     from ..score import score_candidate
     score = score_candidate(spec, fetched.candidate)
@@ -104,40 +135,49 @@ def _default_tier(spec: SkuSpec, fetched: FetchedImage) -> Optional[int]:
 
 
 class CascadeVerifier:
-    """Primary reader for every batch, plus at most `max_strong_calls` strong second looks per product."""
+    """Primary reader for every batch, plus at most `max_strong_calls` strong second looks per product and at
+    most `max_rejudges` (capped at MAX_REJUDGES) strong re-judges of a qualifying MISMATCH."""
 
     name = "cascade"
 
     def __init__(self, primary, strong=None, *, primary_ref: Optional[ModelRef] = None,
                  strong_ref: Optional[ModelRef] = None, max_strong_calls: int = 1, budget_usd: float = 5.0,
                  spend_store=None, prices: Optional[Mapping[str, Mapping[str, float]]] = None,
-                 tier_of: Optional[Callable[[SkuSpec, FetchedImage], Optional[int]]] = None):
+                 tier_of: Optional[Callable[[SkuSpec, FetchedImage], Optional[int]]] = None,
+                 max_rejudges: int = 0):
         self.primary = primary
         self.strong = strong
         self.primary_ref = primary_ref
         self.strong_ref = strong_ref
         self.max_strong_calls = max(0, int(max_strong_calls))
+        self.max_rejudges = min(MAX_REJUDGES, max(0, int(max_rejudges)))
         self.budget_usd = max(0.0, float(budget_usd))
         self.spend_store = spend_store if spend_store is not None else MemorySpendStore()
         self.prices = dict(prices) if prices is not None else dict(pricing.DEFAULT_PRICES)
         self.tier_of = tier_of or _default_tier
         self._lock = threading.Lock()
-        self._strong_used: "OrderedDict[int, list]" = OrderedDict()   # id(spec) -> [spec, looks]
+        self._strong_used: "OrderedDict[int, list]" = OrderedDict()   # id(spec) -> [spec, looks, re-judges]
 
-    # -- per-product counter (the pipeline calls verify() up to twice per SKU) --------
+    # -- per-product counters (the pipeline calls verify() up to twice per SKU, the expansion round more) --------
 
-    def _looks(self, spec: SkuSpec) -> int:
+    def _used(self, spec: SkuSpec, slot: int) -> int:
         with self._lock:
             item = self._strong_used.get(id(spec))
-            return item[1] if item is not None and item[0] is spec else 0
+            return item[slot] if item is not None and item[0] is spec else 0
 
-    def _count_look(self, spec: SkuSpec) -> None:
+    def _looks(self, spec: SkuSpec) -> int:
+        return self._used(spec, 1)
+
+    def _rejudges(self, spec: SkuSpec) -> int:
+        return self._used(spec, 2)
+
+    def _count_look(self, spec: SkuSpec, rejudge: bool = False) -> None:
         with self._lock:
             item = self._strong_used.get(id(spec))
             if item is None or item[0] is not spec:
-                item = [spec, 0]          # holding spec keeps its id from being reused while remembered
+                item = [spec, 0, 0]       # holding spec keeps its id from being reused while remembered
                 self._strong_used[id(spec)] = item
-            item[1] += 1
+            item[2 if rejudge else 1] += 1
             self._strong_used.move_to_end(id(spec))
             while len(self._strong_used) > _PRODUCT_MEMORY:
                 self._strong_used.popitem(last=False)
@@ -197,6 +237,24 @@ class CascadeVerifier:
                 candidates.append(pos)
         return candidates[0] if candidates else None
 
+    def pick_rejudge(self, spec: SkuSpec, images: List[FetchedImage], result: VerificationResult) -> Optional[int]:
+        """Position of the image that gets the re-judge, or None: the top-ranked tier-1 image whose MISMATCH
+        qualifies (needs_rejudge), only while no tier-1/2 image of the batch is MATCH."""
+        by_index = {v.index: v for v in (result.verdicts or []) if isinstance(v, VlmImageVerdict)}
+        found = None
+        for pos, fetched in enumerate(images):
+            if fetched is None or not fetched.ok:
+                continue
+            tier = self._tier(spec, fetched)
+            if tier not in (1, 2):
+                continue
+            verdict = by_index.get(pos)
+            if verdict is not None and verdict.decision == MATCH:
+                return None                   # the batch already has its pick
+            if found is None and tier == REJUDGE_TIER and needs_rejudge(spec, verdict):
+                found = pos
+        return found
+
     # -- main entry -------------------------------------------------------------
 
     def verify(self, spec: SkuSpec, images: List[FetchedImage]) -> VerificationResult:
@@ -206,37 +264,56 @@ class CascadeVerifier:
         if result.status != "ok" or self.strong is None or self.max_strong_calls <= 0:
             return result
         pos = self.pick(spec, images, result)
-        if pos is None or self._looks(spec) >= self.max_strong_calls:
+        if pos is not None and self._looks(spec) < self.max_strong_calls:
+            notice = self._budget_notice(images[pos])
+            if notice:
+                logger.info("verifiers: no second look for %s (%s)", spec.sku_key, notice)
+                result.notices.append(notice)
+                return result
+            result = self._strong_look(spec, images, result, pos)
+        # the re-judge (its own allowance per product), after the batch's second look
+        if self.max_rejudges <= 0 or self._rejudges(spec) >= self.max_rejudges:
             return result
-
+        pos = self.pick_rejudge(spec, images, result)
+        if pos is None:
+            return result
         notice = self._budget_notice(images[pos])
         if notice:
-            logger.info("verifiers: no second look for %s (%s)", spec.sku_key, notice)
-            result.notices.append(notice)
+            logger.info("verifiers: no re-judge for %s (%s)", spec.sku_key, notice)
+            if notice not in result.notices:
+                result.notices.append(notice)
             return result
+        return self._strong_look(spec, images, result, pos, rejudge=True)
 
-        self._count_look(spec)
+    def _strong_look(self, spec: SkuSpec, images: List[FetchedImage], result: VerificationResult, pos: int,
+                     rejudge: bool = False) -> VerificationResult:
+        """One strong reading of images[pos], merged into the batch's result (merge_verdict)."""
+        self._count_look(spec, rejudge=rejudge)
         strong = self._run(self.strong, spec, [images[pos]])
         before = next((v for v in result.verdicts if v.index == pos), None)
         after = next((v for v in strong.verdicts if isinstance(v, VlmImageVerdict) and v.index == 0), None) \
             if strong.status == "ok" else None
-        merged = merge_verdict(before, after, index=pos)
+        merged = merge_verdict(before, after, index=pos, rejudge=rejudge)
         applied = merged is not before
-        self._account(strong, "strong", {
+        extra = {
             "image_index": pos,
             "primary_decision": before.decision if before is not None else UNKNOWN,
             "strong_decision": after.decision if after is not None else UNKNOWN,
             "applied": applied,
-        })
+        }
+        if rejudge:
+            extra["rejudge"] = True
+        self._account(strong, "strong", extra)
         strong_notices = [STRONG_NOTICE_PREFIX + str(n) for n in strong.notices]
         notices = list(result.notices) + [n for n in strong_notices if n not in result.notices]
-        if strong.status != "ok" and not strong.notices and strong.error != "no_images":
+        if strong.status != "ok" and not strong.notices and strong.error != "no_images" \
+                and NOTICE_STRONG_FAILED not in notices:
             notices.append(NOTICE_STRONG_FAILED)
         verdicts = [merged if (v.index == pos and merged is not None) else v for v in result.verdicts]
         if merged is not None and not any(v.index == pos for v in result.verdicts):
             verdicts.append(merged)
-        logger.info("verifiers: second look for %s image #%d: %s -> %s (%s)", spec.sku_key, pos,
-                    before.decision if before is not None else UNKNOWN,
+        logger.info("verifiers: %s for %s image #%d: %s -> %s (%s)", "re-judge" if rejudge else "second look",
+                    spec.sku_key, pos, before.decision if before is not None else UNKNOWN,
                     merged.decision if merged is not None else UNKNOWN,
                     "applied" if applied else (strong.error or "kept"))
         return VerificationResult(status="ok", verdicts=verdicts, calls=int(result.calls or 0) + int(strong.calls or 0),
@@ -314,4 +391,5 @@ def default_verifier() -> CascadeVerifier:
         budget_usd=settings.verifier_monthly_budget_usd(),
         spend_store=MariaDbSpendStore(),
         prices=pricing.load_prices(),
+        max_rejudges=settings.verifier_rejudge_max_calls(),
     )
