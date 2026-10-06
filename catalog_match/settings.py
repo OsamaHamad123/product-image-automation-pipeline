@@ -317,6 +317,28 @@ def model_prices_text() -> str:
     return value if isinstance(value, str) else ("" if value is None else str(value))
 
 
+# --- query normaliser: a cheap model reads an abbreviated sheet name for the search queries only ------------
+# QUERY_NORMALIZER                  'gemini' (default): one small Gemini Flash-Lite call per product (cached in the
+#                                   database), whose reading writes better search words (catalog_match.normalizer);
+#                                   'off': today's queries only. Never evidence, never identity.
+# QUERY_NORMALIZER_RUN_BUDGET_USD   what those calls may cost in one run (estimated USD); past it they are skipped
+DEFAULTS.update({
+    "QUERY_NORMALIZER": "gemini",
+    "QUERY_NORMALIZER_RUN_BUDGET_USD": "0.5",
+})
+QUERY_NORMALIZER_MODES = ("gemini", "off")
+
+
+def query_normalizer() -> str:
+    """'gemini' (default) or 'off'; an unknown value is 'off' (never a surprise paid call)."""
+    value = str(get("QUERY_NORMALIZER") or "").strip().lower() or DEFAULTS["QUERY_NORMALIZER"]
+    return value if value in QUERY_NORMALIZER_MODES else "off"
+
+
+def query_normalizer_run_budget_usd() -> float:
+    return _number("QUERY_NORMALIZER_RUN_BUDGET_USD", 0.0, 1000.0)
+
+
 # --- sources package (P3): accessors ---
 
 def expansion_enabled() -> bool:

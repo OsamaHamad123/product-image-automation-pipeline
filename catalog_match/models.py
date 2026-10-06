@@ -35,6 +35,18 @@ class Size:
 
 
 @dataclass(frozen=True)
+class QueryHint:
+    """The query normaliser's reading of an abbreviated sheet name (catalog_match.normalizer): search words ONLY.
+
+    Never identity and never evidence: only the retriever's planning copy of the spec carries it (query_plan writes
+    N1 and the brand-guess query NB from it); the spec the search scores, verifies, routes and writes with has none.
+    """
+
+    expanded_name: str = ""   # the name with its shorthand and typos written out ('American Gold Light Meat Tuna')
+    brand: str = ""           # the model's brand guess: only the brand-not-found query (NB) writes it
+
+
+@dataclass(frozen=True)
 class SkuSpec:
     """Everything we know about the product we are looking for, normalised once."""
 
@@ -68,6 +80,9 @@ class SkuSpec:
     # the sheet's brand cell when it only says the product has no brand ('GENERIC / NO BRAND'; brand_index.
     # is_placeholder_brand): brand_raw is then '' and brand_conf 'none', and the product is searched by name only
     brand_placeholder: str = ""
+    # catalog_match.normalizer: set only on the retriever's planning copy (query_plan.with_hint), never read by
+    # scoring, verification or routing
+    query_hint: Optional[QueryHint] = None
 
     def __hash__(self) -> int:  # dict field makes the generated hash unusable
         return hash(self.sku_key or (self.raw_name, self.brand_raw))
@@ -102,7 +117,7 @@ class Candidate:
 
 @dataclass(frozen=True)
 class PlannedQuery:
-    query_id: str        # 'Q1'..'Q4', 'R1', 'R2' or 'custom'
+    query_id: str        # 'Q1'..'Q4', 'R1', 'R2', 'custom'; 'N1' / 'NB' (catalog_match.normalizer)
     text: str
     hl: str = "en"
     providers_hint: Tuple[str, ...] = ()   # empty = every provider; e.g. ('serper',) for site: queries
@@ -279,6 +294,9 @@ class SearchOutcome:
     # wall time of this search per stage in whole milliseconds (pipeline.find_product_image): retrieval, fetch,
     # quality, verify, expansion (only when the round ran) and total
     timings: Dict[str, int] = field(default_factory=dict)
+    # catalog_match.normalizer: what the query normaliser read for this search and which queries it wrote
+    # ({status, brand, expanded_name, ..., used, rescue, usage}); {} when it did not run
+    query_normalizer: Dict[str, Any] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
