@@ -106,8 +106,11 @@ def test_a_reading_is_cleaned_for_a_search_query():
     assert '"' not in value.expanded_name and " -" not in value.expanded_name
     assert value.expanded_name.startswith("noon.com Super Tasty Tuna White Meat")
     assert len(value.expanded_name) <= 160
-    assert nz.parse_fields({"expanded_name": "", "brand": "X"}) is None
-    assert nz.parse_fields(["not", "an", "object"]) is None
+    assert nz.parse_fields({"brand": "X"}) is None and nz.parse_fields(["not", "an", "object"]) is None
+    # a well-formed answer that writes nothing out is an answer (cached, paid once), never a query
+    empty = nz.parse_fields({"expanded_name": "", "brand": "X", "confidence": 0.9})
+    assert empty.expanded_name == "" and nz.hint_of(nz.Reading("ok", empty)) is None
+    assert nz.parse_fields({"expanded_name": "تونة", "confidence": 0.9}).expanded_name == ""
     assert nz.parse_fields({"expanded_name": "Tuna", "confidence": "high"}).confidence == 0.0
     assert nz.parse_fields({"expanded_name": "Tuna", "confidence": 7}).confidence == 1.0
 
@@ -153,6 +156,14 @@ def test_a_new_prompt_version_is_paid_again(monkeypatch):
     normaliser(client, cache=cache).normalize(SUPT)
     monkeypatch.setattr(nz, "PROMPT_VERSION", "qn-next")
     assert normaliser(client, cache=cache).normalize(SUPT).status == "ok" and len(client.prompts) == 2
+
+
+def test_an_answer_that_writes_nothing_out_is_cached_too():
+    client, cache = FakeClient(reading={"brand": "", "product_type": "", "variant": "", "size": "", "pack": "",
+                                        "expanded_name": "", "confidence": 0.2}), nz.MemoryNormalizerCache()
+    assert normaliser(client, cache=cache).normalize(PRAWNS).status == "ok" and len(cache.rows) == 1
+    reading = normaliser(client, cache=cache).normalize(PRAWNS)
+    assert reading.status == "cache" and nz.hint_of(reading) is None and len(client.prompts) == 1
 
 
 def test_an_unreadable_cache_asks_the_model_and_a_failed_answer_is_not_cached():

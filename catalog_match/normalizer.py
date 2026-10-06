@@ -187,12 +187,15 @@ def _confidence(value: Any) -> float:
 
 
 def parse_fields(data: Any) -> Optional[Normalized]:
-    """A Normalized from the model's JSON object, or None when it is not one (or names nothing)."""
-    if not isinstance(data, Mapping):
+    """A Normalized from the model's JSON object, or None when it is not one (no object, no expanded_name field).
+
+    A well-formed answer that writes nothing out (an empty or non-Latin expanded_name) is still an answer: it is
+    cached like any other, so the product is not paid again, and hint_of() uses nothing of it."""
+    if not isinstance(data, Mapping) or "expanded_name" not in data:
         return None
     out = {name: _clean(data.get(name), limit) for name, limit in _LIMITS.items()}
-    if not out["expanded_name"] or not (_LATIN_RE.search(out["expanded_name"]) or out["expanded_name"].isdigit()):
-        return None
+    if not (_LATIN_RE.search(out["expanded_name"]) or out["expanded_name"].isdigit()):
+        out["expanded_name"] = ""
     return Normalized(confidence=_confidence(data.get("confidence")), **out)
 
 
