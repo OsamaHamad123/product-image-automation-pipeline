@@ -298,6 +298,41 @@ def _to_rgb_or_rgba(img: Image.Image) -> Image.Image:
     return img.convert("RGBA") if has_alpha else img.convert("RGB")
 
 
+def _to_srgb(img: Image.Image) -> Image.Image:
+    """
+    صورة فيها بروفايل ألوان مضمّن (CMYK، Display P3، Adobe RGB...) بتتحوّل لـ sRGB (PIL.ImageCms، relative colorimetric)
+    قبل العزل، فاللوحة المنشورة sRGB متل ما بيفترض التطبيق والمتصفح (بلا بروفايل = sRGB). بروفايل sRGB نفسه أو بلا بروفايل:
+    الصورة كما هي (CMYK بلا بروفايل بتتحوّل بعدين متل قبل). بروفايل تالف أو تحويل فشل: الصورة كما هي، مع سطر بالسجل.
+    """
+    icc = img.info.get("icc_profile")
+    if not icc:
+        return img
+    try:
+        from PIL import ImageCms
+
+        source = ImageCms.ImageCmsProfile(io.BytesIO(icc))
+        if "srgb" in str(ImageCms.getProfileDescription(source) or "").lower():
+            out = img.copy()
+        else:
+            if img.mode in ("P", "PA"):
+                img = img.convert("RGBA" if img.mode == "PA" or "transparency" in img.info else "RGB")
+            alpha = img.getchannel("A") if img.mode in ("RGBA", "LA") else None
+            base = img.convert("L" if img.mode == "LA" else "RGB") if alpha is not None else img
+            out = ImageCms.profileToProfile(base, source, ImageCms.createProfile("sRGB"), outputMode="RGB",
+                                            renderingIntent=ImageCms.Intent.RELATIVE_COLORIMETRIC)
+            if out is None:
+                return img
+            if alpha is not None:
+                out.putalpha(alpha)
+            logger.info("تحويل ألوان المصدر (%s, %s) إلى sRGB", img.mode,
+                        str(ImageCms.getProfileDescription(source) or "").strip())
+    except Exception as exc:  # noqa: BLE001 - بروفايل مش مقروء: الصورة كما هي
+        logger.info("تعذر تحويل بروفايل الألوان المضمّن إلى sRGB (%s)؛ الصورة كما هي", type(exc).__name__)
+        return img
+    out.info.pop("icc_profile", None)
+    return out
+
+
 def _decode_image(data: bytes) -> Tuple[Optional[Image.Image], Optional[str]]:
     """يتحقق من أن البيانات صورة نقطية حقيقية ويعيدها بعد تصحيح اتجاه EXIF."""
     if not data:
@@ -314,7 +349,7 @@ def _decode_image(data: bytes) -> Tuple[Optional[Image.Image], Optional[str]]:
             img = ImageOps.exif_transpose(img)
         except Exception:  # noqa: BLE001 - بيانات EXIF تالفة لا تجعل الصورة غير صالحة
             logger.info("تعذر قراءة اتجاه EXIF؛ سيتم استخدام الصورة كما خُزّنت")
-        img = _to_rgb_or_rgba(img)
+        img = _to_rgb_or_rgba(_to_srgb(img))
         if img.width < 1 or img.height < 1:
             return None, "not_image"
         return img, None

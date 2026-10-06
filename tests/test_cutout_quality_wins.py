@@ -189,3 +189,131 @@ def test_the_ubuntu_install_pins_a_rembg_with_decontaminate():
 
     text = (Path(__file__).resolve().parents[1] / "deploy" / "ubuntu" / "install.sh").read_text(encoding="utf-8")
     assert 'REMBG_VERSION="2.0.85"' in text and '"rembg[$extra]==$REMBG_VERSION"' in text
+
+
+# ---------------------------------------------------------------------------
+# d. colour management: an embedded profile (CMYK, Display P3, Adobe RGB) is converted to sRGB before isolation
+# ---------------------------------------------------------------------------
+
+def _s15(v):
+    import struct
+    return struct.pack(">i", int(round(v * 65536)))
+
+
+def icc_rgb_profile(name, red, green, blue, gamma=2.2):
+    """A minimal ICC v2 matrix/TRC display profile (primaries already adapted to D50), built in the test."""
+    import struct
+
+    def xyz(v):
+        return b"XYZ " + b"\0" * 4 + b"".join(_s15(c) for c in v)
+
+    text = name.encode("ascii") + b"\0"
+    desc = (b"desc" + b"\0" * 4 + struct.pack(">I", len(text)) + text + struct.pack(">II", 0, 0)
+            + struct.pack(">HB", 0, 0) + b"\0" * 67)
+    curve = b"curv" + b"\0" * 4 + struct.pack(">IH", 1, int(round(gamma * 256))) + b"\0\0"
+    tags = [(b"desc", desc), (b"wtpt", xyz((0.9642, 1.0, 0.8249))), (b"rXYZ", xyz(red)), (b"gXYZ", xyz(green)),
+            (b"bXYZ", xyz(blue)), (b"rTRC", curve), (b"gTRC", curve), (b"bTRC", curve)]
+    offset = 128 + 4 + 12 * len(tags)
+    table, blob = b"", b""
+    for sig, data in tags:
+        data += b"\0" * (-len(data) % 4)
+        table += sig + struct.pack(">II", offset + len(blob), len(data))
+        blob += data
+    size = offset + len(blob)
+    header = (struct.pack(">I", size) + b"\0" * 4 + struct.pack(">I", 0x02100000) + b"mntrRGB XYZ " + b"\0" * 12
+              + b"acsp" + b"\0" * 24 + struct.pack(">I", 0) + _s15(0.9642) + _s15(1.0) + _s15(0.8249))
+    header += b"\0" * (128 - len(header))
+    return header + struct.pack(">I", len(tags)) + table + blob
+
+
+# Display P3 primaries, Bradford-adapted to D50 (as Apple's Display P3 profile)
+P3 = icc_rgb_profile("Display P3 (test)", (0.5151, 0.2412, -0.0011), (0.2920, 0.6922, 0.0419),
+                     (0.1571, 0.0666, 0.7841))
+
+
+def test_a_display_p3_photo_is_converted_to_srgb():
+    from PIL import ImageCms
+
+    src = Image.new("RGB", (64, 64), (200, 120, 40))
+    buf = io.BytesIO()
+    src.save(buf, format="PNG", icc_profile=P3)
+    expected = ImageCms.profileToProfile(src, ImageCms.ImageCmsProfile(io.BytesIO(P3)), ImageCms.createProfile("sRGB"),
+                                         outputMode="RGB").getpixel((5, 5))
+    img, error = image_processor._decode_image(buf.getvalue())
+    assert error is None and img.mode == "RGB" and "icc_profile" not in img.info
+    assert img.getpixel((5, 5)) == expected != (200, 120, 40)
+    assert expected[0] > 200                       # a saturated P3 orange is redder than the same numbers in sRGB
+
+
+def test_alpha_survives_the_conversion():
+    src = Image.new("RGBA", (32, 32), (200, 120, 40, 0))
+    src.paste((200, 120, 40, 255), (8, 8, 24, 24))
+    buf = io.BytesIO()
+    src.save(buf, format="PNG", icc_profile=P3)
+    img, _error = image_processor._decode_image(buf.getvalue())
+    assert img.mode == "RGBA" and img.getpixel((0, 0))[3] == 0 and img.getpixel((16, 16))[3] == 255
+    assert img.getpixel((16, 16))[:3] != (200, 120, 40)
+
+
+def test_an_srgb_or_unprofiled_photo_is_left_alone():
+    from PIL import ImageCms
+
+    srgb = ImageCms.ImageCmsProfile(ImageCms.createProfile("sRGB")).tobytes()
+    for icc in (srgb, None):
+        buf = io.BytesIO()
+        Image.new("RGB", (16, 16), (200, 120, 40)).save(buf, format="PNG", **({"icc_profile": icc} if icc else {}))
+        img, _error = image_processor._decode_image(buf.getvalue())
+        assert img.getpixel((3, 3)) == (200, 120, 40) and "icc_profile" not in img.info
+
+
+def test_a_cmyk_photo_is_converted_with_its_profile(monkeypatch):
+    """A CMYK JPEG with an embedded CMYK profile goes through ImageCms to sRGB (LittleCMS does the colour maths)."""
+    from PIL import ImageCms
+
+    calls = []
+
+    def spy(im, source, target, **kw):                     # the test has no CMYK profile: LittleCMS is not called
+        calls.append((im.mode, source, kw.get("outputMode")))
+        out = Image.new("RGB", im.size, (230, 25, 30))
+        out.info["icc_profile"] = b"srgb-bytes"
+        return out
+
+    monkeypatch.setattr(ImageCms, "profileToProfile", spy)
+    monkeypatch.setattr(ImageCms, "ImageCmsProfile", lambda f: "cmyk-profile")
+    monkeypatch.setattr(ImageCms, "getProfileDescription", lambda p: "Coated FOGRA39 (test)")
+    cmyk = Image.new("CMYK", (16, 16), (0, 255, 255, 0))                                   # pure red ink
+    buf = io.BytesIO()
+    cmyk.save(buf, format="JPEG", quality=95, icc_profile=b"not-a-real-profile")
+    img, error = image_processor._decode_image(buf.getvalue())
+    assert error is None and calls == [("CMYK", "cmyk-profile", "RGB")]
+    assert img.mode == "RGB" and img.getpixel((3, 3)) == (230, 25, 30) and "icc_profile" not in img.info
+
+
+def test_a_cmyk_photo_without_a_profile_converts_as_before():
+    cmyk = Image.new("CMYK", (16, 16), (0, 255, 255, 0))
+    buf = io.BytesIO()
+    cmyk.save(buf, format="JPEG", quality=95)
+    img, _error = image_processor._decode_image(buf.getvalue())
+    r, g, b = img.getpixel((8, 8))
+    assert img.mode == "RGB" and r > 200 and g < 60 and b < 60
+
+
+def test_a_broken_profile_never_breaks_the_decode():
+    buf = io.BytesIO()
+    Image.new("RGB", (16, 16), (10, 20, 30)).save(buf, format="PNG", icc_profile=b"\0" * 200)
+    img, error = image_processor._decode_image(buf.getvalue())
+    assert error is None and img.getpixel((1, 1)) == (10, 20, 30)
+
+
+def test_the_published_canvas_of_a_p3_photo_is_srgb(monkeypatch, tmp_path):
+    src = Image.new("RGB", (600, 1200), (225, 225, 225))
+    src.paste((40, 70, 200), (180, 60, 420, 1140))
+    path = tmp_path / "p3.png"
+    src.save(path, format="PNG", icc_profile=P3)
+    sent = install_photoroom(monkeypatch, clean_segmenter())
+    result = image_processor.process_product_image_result(str(path), "Milk", "Almarai", bg_method="photoroom")
+    with Image.open(result.path) as out:
+        out.load()
+        assert "icc_profile" not in out.info                     # no profile: sRGB, as the app reads it
+    assert "icc_profile" not in sent[0]["image"].info            # PhotoRoom got the sRGB pixels
+    image_processor.cleanup_processed_image(result.path)
