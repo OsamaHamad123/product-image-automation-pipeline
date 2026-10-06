@@ -2,7 +2,8 @@
 
 Usage (from the repository root):
 
-    python scripts/build_catalog_index.py --discover                  # look first: no database writes
+    python scripts/build_catalog_index.py --discover                  # look first: no database writes; prints the
+                                                                      # store's sitemaps / sitemap_include to paste
     python scripts/build_catalog_index.py --dry-run                   # read every sitemap, count, write nothing
     python scripts/build_catalog_index.py                             # build / refresh the index
     python scripts/build_catalog_index.py --stores lulu,spinneys      # some stores only (disabled ones too)
@@ -139,7 +140,8 @@ def main(argv=None) -> int:
     blocked = [r.store for r in reports if r.status in ("blocked", "error")]
     waiting = [r.store for r in reports if r.status == "outside_visit_time"]
     if args.discover:
-        print("Discovery only: nothing was written. Send this output (or the --json file) to adjust the store patterns.")
+        print("Discovery only: nothing was written. Paste each store's 'paste these lines' block into its entry of "
+              "catalog_match/data/catalog_stores.json (or send this output, or the --json file).")
     elif args.dry_run:
         print(f"Dry run: {sum(r.product_urls for r in reports)} product pages found, nothing was written.")
     else:

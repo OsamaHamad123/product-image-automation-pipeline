@@ -10,7 +10,8 @@ SitemapHarvester().harvest(store, on_urls=None, max_urls=None, max_sitemaps=None
     in batches (on_urls returns how many were new). With discover=True the sitemap indexes are read
     first (children named '...index...' before the others, and past the cap) but at most
     DISCOVER_URLSETS lists of URLs, and samples of matching and non-matching URLs are kept, so the
-    store's patterns can be checked before a full harvest.
+    store's patterns can be checked before a full harvest. Its report ends with the store's 'sitemaps' and
+    'sitemap_include' lines ready to paste into the stores file (suggest_config, paste_lines).
 
 Only what a store publishes for crawlers is read, and nothing is worked around:
 * robots.txt first (RFC 9309: the group naming ROBOTS_AGENT, else '*'; the longest matching rule
@@ -30,7 +31,7 @@ Only what a store publishes for crawlers is read, and nothing is worked around:
 * Sitemap indexes are followed to MAX_DEPTH. A .gz sitemap is decompressed to at most MAX_XML_BYTES.
   A document with a DOCTYPE, or not UTF-8 (the sitemap protocol's encoding), is refused (no entity
   expansion), and only <loc> / <lastmod> are read. A broken file is one failed sitemap, never the
-  end of the run.
+  end of the run; MAX_UNANSWERED files in a row without any answer (timeouts) end that store's turn ('error').
 * Only URLs on the store's hosts whose path matches its product pattern are kept.
 * SSRF guard (net_guard): redirects are not left to the client; every request and every redirect hop goes only to
   an http(s) host whose addresses are all public. A refused URL is the error 'blocked_url'.
@@ -50,7 +51,7 @@ from collections import deque
 from datetime import datetime, timezone
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Collection, Dict, List, Optional, Sequence, Tuple
 from urllib.parse import urljoin, urlsplit
 
 import net_guard
@@ -71,6 +72,7 @@ BLOCK_STATUSES = (401, 403, 429)
 DISCOVER_URLSETS = 3
 SAMPLES = 5
 BATCH = 1000
+MAX_UNANSWERED = 3           # sitemap files in a row that timed out or lost the connection: the store stopped answering
 
 _DOCTYPE_RE = re.compile(rb"<!DOCTYPE", re.I)
 _HTML_START_RE = re.compile(rb"<(?:!doctype\s+html|html)\b", re.I)
@@ -484,9 +486,13 @@ class SitemapHarvester:
     # -- harvest ------------------------------------------------------------
     def harvest(self, store: StoreConfig, on_urls: Optional[Callable[[List[Tuple[str, Optional[str]]]], Any]] = None,
                 max_urls: Optional[int] = None, max_sitemaps: Optional[int] = None,
-                discover: bool = False, should_stop: Optional[Callable[[], bool]] = None) -> HarvestReport:
-        """should_stop: asked before every sitemap file is read; True ends the harvest there (status partial,
-        'truncated': the automatic refresh's time budget, catalog_match.index_refresh)."""
+                discover: bool = False, should_stop: Optional[Callable[[], bool]] = None,
+                skip_urls: Optional[Collection[str]] = None) -> HarvestReport:
+        """should_stop: asked before every sitemap file is read and between the batches of a long URL list; True ends
+        the harvest there (status partial, 'truncated': the automatic refresh's time budget, catalog_match.index_refresh;
+        a list cut part-way is marked 'stopped' in the tree). skip_urls: URL lists an unfinished refresh already read
+        (index_refresh's resume): they are not read again, the indexes still are.
+        MAX_UNANSWERED sitemap files in a row without an answer (timeout, lost connection) end the store as 'error'."""
         rep = HarvestReport(store=store.key)
         robots = self.robots(store)
         rep.robots = robots.status if robots.http_status is None else f"{robots.status} (http {robots.http_status})"
@@ -519,7 +525,8 @@ class SitemapHarvester:
         rep.started_from = list(starts)
         queue = deque((url, 0) for url in starts)
         seen = set()
-        emitted = urlsets = failed = 0
+        parent_of: Dict[str, str] = {}       # a child sitemap -> the index that listed it (the tree's 'parent')
+        emitted = urlsets = failed = unanswered = 0
         start_answers: List[str] = []        # why each starting point gave nothing, while nothing was read
         while queue or (guesses and rep.sitemaps_read == 0 and len(rep.started_from) < len(guesses)
                         and "html" not in start_answers):      # an HTML page at the first guess: a bot check
@@ -534,6 +541,9 @@ class SitemapHarvester:
             why = self._skip_reason(store, robots, url, depth)
             if why:
                 rep.skipped.append((url, why))
+                continue
+            if skip_urls and url in skip_urls:
+                rep.skipped.append((url, "read by the last refresh"))
                 continue
             if discover and urlsets >= DISCOVER_URLSETS and "index" not in url.lower():
                 rep.skipped.append((url, "not read (discover)"))
@@ -551,6 +561,11 @@ class SitemapHarvester:
             if status in BLOCK_STATUSES:
                 rep.status, rep.error = "blocked", f"http_{status} on {url}: store skipped"
                 break
+            unanswered = unanswered + 1 if body is None and error in ("timeout", "connection_error") else 0
+            if unanswered >= MAX_UNANSWERED:          # a slow store gives up its turn, the next store is read
+                rep.skipped.append((url, error))
+                rep.status, rep.error = "error", f"{unanswered} sitemap files in a row got no answer ({error}): stopped"
+                break
             try:
                 if body is None:
                     raise SitemapError(error or "error")
@@ -564,8 +579,11 @@ class SitemapHarvester:
                 continue
             rep.sitemaps_read += 1
             if kind == "index":
-                rep.tree.append({"depth": depth, "url": url, "kind": "index", "entries": len(entries)})
+                rep.tree.append({"depth": depth, "url": url, "kind": "index", "entries": len(entries),
+                                 "parent": parent_of.get(url)})
                 children = [loc for loc, _ in entries]
+                for child in children:
+                    parent_of.setdefault(child, url)
                 if discover:     # the indexes first (the store's structure), then the product lists
                     children.sort(key=lambda u: 0 if "index" in u.lower() else 1 if "product" in u.lower() else 2)
                 if depth + 1 > MAX_DEPTH:
@@ -576,7 +594,7 @@ class SitemapHarvester:
             urlsets += 1
             products = [(loc, lastmod) for loc, lastmod in entries if store.is_product(loc)]
             rep.tree.append({"depth": depth, "url": url, "kind": "urlset", "entries": len(entries),
-                             "products": len(products)})
+                             "products": len(products), "parent": parent_of.get(url)})
             rep.urls_seen += len(entries)
             rep.product_urls += len(products)
             for loc, _ in products[:SAMPLES - len(rep.product_samples)]:
@@ -589,10 +607,20 @@ class SitemapHarvester:
             if max_urls is not None and emitted + len(products) > max_urls:
                 products = products[:max(0, max_urls - emitted)]
                 rep.truncated = True         # products were cut
+                rep.tree[-1]["stopped"] = True
             emitted += len(products)
+            cut = False
             if on_urls is not None:
                 for i in range(0, len(products), BATCH):
+                    if i and should_stop is not None and should_stop():     # one big list cannot overrun the budget
+                        cut = True
+                        break
                     rep.new_urls += int(on_urls(products[i:i + BATCH]) or 0)
+            if cut:
+                rep.truncated = True
+                rep.error = rep.error or "stopped at the time budget"
+                rep.tree[-1]["stopped"] = True
+                break
             if max_urls is not None and emitted >= max_urls:
                 if queue:
                     rep.truncated = True     # sitemaps left unread
@@ -658,7 +686,83 @@ def format_report(rep: HarvestReport, store: Optional[StoreConfig] = None, disco
     if discover:
         lines.extend(["   other url samples (not product pages by the pattern):"]
                      + [f"     - {u}" for u in rep.other_samples[:SAMPLES]])
+        lines.extend(paste_lines(rep))
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# What a --discover run found, ready to paste into the stores file
+# ---------------------------------------------------------------------------
+
+_REGEX_SPECIAL = frozenset(".^$*+?{}[]\\|()")
+
+
+def _path_pattern(url: str) -> str:
+    """A sitemap URL's path as a regular expression with its numbers generalised, so the other files of the same
+    series match it too: '/sitemaps/Product-en-AED-12.xml' -> '/sitemaps/Product-en-AED-\\d+\\.xml$'."""
+    out = []
+    for part in re.split(r"(\d+)", urlsplit(url).path or "/"):
+        out.append(r"\d+" if part.isdigit() else "".join("\\" + ch if ch in _REGEX_SPECIAL else ch for ch in part))
+    return "".join(out) + "$"
+
+
+def suggest_config(rep: HarvestReport) -> Optional[Dict[str, Any]]:
+    """The stores-file values a discovery found: {sitemaps, sitemap_include, listed, kept, also_empty}; None when no
+    URL list that was read held a product page.
+
+    sitemaps: the starting points the product pages were found under (not the other countries' or languages').
+    sitemap_include: the files on the way from them to the URL lists that held product pages, numbers generalised
+    (the unread files of the same series match too); '' when it would keep every file the indexes list anyway.
+    listed / kept: the files the indexes list and how many of them the include keeps; also_empty: URL lists that were
+    read, held no product page and still match it (the file names cannot tell them apart)."""
+    nodes = {n["url"]: n for n in rep.tree}
+    roots: List[str] = []
+    chain: List[str] = []
+    for node in rep.tree:
+        if node["kind"] != "urlset" or not node.get("products"):
+            continue
+        hops = 0
+        while node.get("parent") in nodes and hops <= MAX_DEPTH:      # up to the starting point
+            if node["url"] not in chain:
+                chain.append(node["url"])
+            node, hops = nodes[node["parent"]], hops + 1
+        if node["url"] not in roots:
+            roots.append(node["url"])
+    if not roots:
+        return None
+    listed = list(dict.fromkeys([n["url"] for n in rep.tree if n.get("parent")]
+                                + [u for u, why in rep.skipped if why == "not read (discover)"]))
+    patterns = list(dict.fromkeys(_path_pattern(u) for u in chain))
+    include = (patterns[0] if len(patterns) == 1 else "(?:" + "|".join(p[:-1] for p in patterns) + ")$") \
+        if patterns else ""
+    regex = re.compile(include) if include else None
+    kept = [u for u in listed if regex is None or regex.search(u)]
+    if len(kept) == len(listed):
+        include = ""                         # every listed file is read anyway: nothing to filter
+    also_empty = sum(1 for n in rep.tree if n.get("parent") and n["kind"] == "urlset" and not n.get("products")
+                     and (not include or (regex is not None and regex.search(n["url"]))))
+    return {"sitemaps": roots, "sitemap_include": include, "listed": len(listed), "kept": len(kept),
+            "also_empty": also_empty}
+
+
+def paste_lines(rep: HarvestReport) -> List[str]:
+    """The console lines of suggest_config: exactly what to paste into the store's entry of catalog_stores.json."""
+    found = suggest_config(rep)
+    if found is None:
+        why = ("the store did not give its sitemaps" if rep.status in ("blocked", "error", "outside_visit_time")
+               else "no page of the URL lists read matched product_path: compare the samples above with it")
+        return [f"   nothing to paste ({why})"]
+    lines = [f'   paste these lines into the store "{rep.store}" of catalog_match/data/catalog_stores.json:',
+             f'     "sitemaps": {json.dumps(found["sitemaps"])},',
+             f'     "sitemap_include": {json.dumps(found["sitemap_include"])},',
+             '     "enabled": true,']
+    if found["listed"]:
+        lines.append(f"   (the include keeps {found['kept']} of the {found['listed']} sitemaps the indexes list)")
+    if found["also_empty"]:
+        lines.append(f"   note: {found['also_empty']} sitemap(s) read without a product page are kept as well")
+    if rep.status in ("blocked", "error"):
+        lines.append(f"   note: the store stopped answering part way ({rep.status}): run --discover again before pasting")
+    return lines
 
 
 def enabled_stores(stores: Sequence[StoreConfig], keys: Optional[Sequence[str]] = None) -> List[StoreConfig]:

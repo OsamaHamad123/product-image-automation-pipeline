@@ -336,15 +336,16 @@ def test_the_health_page_shows_each_store_with_its_pages_last_harvest_and_status
     _pages(db, "sharjahcoop", 2)
     _harvest(db, "lulu", "3 DAY", "ok")
     _harvest(db, "spinneys", "1 DAY", "blocked")
-    _harvest(db, "carrefour_uae", "5 HOUR", "partial")
+    _harvest(db, "sharjahcoop", "5 HOUR", "partial")
     (page,) = _kernel(env, [["GET", "/system-diagnostics", {}]])
     body = page["body"]
     lulu = re.search(r'data-store="lulu" data-state="ok".*?</div>', body, re.S).group(0)
     assert "3 صفحات" in lulu and "تمام" in lulu and "آخر جمع ناجح من 3 أيام" in lulu
     spinneys = re.search(r'data-store="spinneys" data-state="blocked".*?</div>', body, re.S).group(0)
     assert "ممنوع" in spinneys and "ما بنسأله قبل 6 أيام" in spinneys
-    assert 'data-store="carrefour_uae" data-state="partial"' in body and "من 5 ساعات" in body
-    assert 'data-store="sharjahcoop" data-state="never"' in body and 'data-store="noon_uae" data-state="off"' in body
+    # the shipped stores file has Carrefour UAE and talabat mart off (their sitemaps are not usable yet)
+    assert 'data-store="sharjahcoop" data-state="partial"' in body and "من 5 ساعات" in body
+    assert 'data-store="carrefour_uae" data-state="off"' in body and 'data-store="noon_uae" data-state="off"' in body
     assert "بالفهرس 5 صفحات" in body
     # opening the page never starts a refresh and never calls the bridge for it
     assert not index_app["calls"].exists()

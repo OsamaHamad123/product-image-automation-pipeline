@@ -1,11 +1,14 @@
 {
   "_about": [
     "Stores the local catalog index reads (catalog_match/sitemaps.py, scripts/build_catalog_index.py).",
-    "product_path: a regular expression the PATH of a product page matches. The patterns come from the",
-    "product pages the live runs of 2026-10-03 found (runs/2026-10-03/smoke_*.json). The sitemap",
-    "locations are not known yet: run 'python scripts/build_catalog_index.py --discover' and adjust",
-    "sitemaps / sitemap_include from what it prints. A store whose page slugs often leave out the brand",
-    "(noon, Union Coop) is disabled: the index finds rows by the brand's words.",
+    "product_path: a regular expression the PATH of a product page matches (English UAE pages only: the other",
+    "countries and the Arabic pages repeat the same products). The patterns match the product pages of the live runs",
+    "(exports of 2026-10-03 to 2026-10-05) and of the stores' own sitemaps (checked 2026-10-06).",
+    "sitemaps: where a harvest starts (else the Sitemap: lines of robots.txt). sitemap_include: the child sitemaps",
+    "of an index that are read (the others are skipped). 'python scripts/build_catalog_index.py --discover --stores <key>'",
+    "prints both, ready to paste, from what the store publishes.",
+    "A store is disabled when it publishes no product sitemap, when robots.txt forbids it, or when its page slugs",
+    "often leave out the brand (noon, Union Coop): the index finds rows by the brand's words. Its note says why.",
     "sitemap_hosts (optional): other hosts that serve the store's sitemaps (a CDN its robots.txt points to);",
     "their files are read, but product pages still have to be on 'hosts'."
   ],
@@ -16,10 +19,10 @@
       "base_url": "https://gcc.luluhypermarket.com",
       "hosts": ["gcc.luluhypermarket.com"],
       "product_path": "^/en-ae/[^/]+/p/\\d+/?$",
-      "sitemaps": [],
+      "sitemaps": ["https://gcc.luluhypermarket.com/en-ae/sitemap.xml"],
       "sitemap_include": "",
       "enabled": true,
-      "note": "e.g. /en-ae/al-alali-fancy-meat-tuna-in-water-170-g/p/14751"
+      "note": "e.g. /en-ae/al-alali-fancy-meat-tuna-in-water-170-g/p/14751. robots.txt (2026-10-06): '*' may read the sitemaps, Crawl-delay 1, one sitemap per country and language (only en-ae is read). Slugs lead with the brand (64 of the 65 product pages the live runs kept). From the build machine the en-ae sitemap answered 403 (Cloudflare) to the index's User-Agent, so its size and children are not known yet: where that happens the refresh records the store BLOCKED and asks again after 7 days, nothing is worked around. Run '--discover --stores lulu' on the server and paste the sitemap_include it prints."
     },
     {
       "key": "carrefour_uae",
@@ -29,8 +32,8 @@
       "product_path": "^/mafuae/en/(?:[^/]+/)*[^/]+/p/\\d+/?$",
       "sitemaps": [],
       "sitemap_include": "",
-      "enabled": true,
-      "note": "e.g. /mafuae/en/beef-luncheon/zwan-beef-luncheon-meat-850gr/p/10937 (English pages only)"
+      "enabled": false,
+      "note": "e.g. /mafuae/en/beef-luncheon/zwan-beef-luncheon-meat-850gr/p/10937 (English pages only). Disabled until its sitemaps are known: from the build machine (2026-10-06) robots.txt came back as an empty HTML page (Akamai), so where its sitemaps are is not known. On the server run 'python scripts/build_catalog_index.py --discover --stores carrefour_uae', paste the three lines it prints (sitemaps, sitemap_include, enabled) here, and check that its product page samples match product_path."
     },
     {
       "key": "spinneys",
@@ -38,10 +41,10 @@
       "base_url": "https://www.spinneys.com",
       "hosts": ["www.spinneys.com", "spinneys.com"],
       "product_path": "^/en-ae/catalogue/[^/]+_\\d+/?$",
-      "sitemaps": [],
+      "sitemaps": ["https://www.spinneys.com/en-ae/sitemap.xml"],
       "sitemap_include": "",
       "enabled": true,
-      "note": "e.g. /en-ae/catalogue/mccain-golden-long-french-fries-750g_22359/"
+      "note": "e.g. /en-ae/catalogue/mccain-golden-long-french-fries-750g_22359/. robots.txt (2026-10-06): sitemaps allowed, no Crawl-delay (1 s kept). One urlset of 7.4 MB: 54,619 URLs, 51,214 product pages (the rest are recipes, lifestyle and news); a full harvest takes about 30 s. Slugs lead with the brand (91 of 100 sampled; most of the others are loose produce)."
     },
     {
       "key": "talabat_mart_uae",
@@ -51,19 +54,19 @@
       "product_path": "^/uae/talabat-mart/product/[^/]+/s/\\d+/?$",
       "sitemaps": [],
       "sitemap_include": "",
-      "enabled": true,
-      "note": "e.g. /uae/talabat-mart/product/ashoka-plain-paratha-400-g/s/905099 (UAE only, not /bahrain/)"
+      "enabled": false,
+      "note": "e.g. /uae/talabat-mart/product/ashoka-plain-paratha-400-g/s/905099 (UAE only, not /bahrain/). Disabled: talabat publishes no sitemap of its mart's product pages. robots.txt (2026-10-06) lists /sitemap/sitemap.xml.gz and /_sitemap/sitemap.xml.gz (which redirects to it): restaurants, cuisines, areas, cities, grocery / pharmacy / flower areas and static pages of every country, no /talabat-mart/product/ page; /sitemap.xml is 404. Reading it would cost about 125 files for no product."
     },
     {
       "key": "sharjahcoop",
       "name": "Sharjah Co-op",
       "base_url": "https://www.sharjahcoop.ae",
       "hosts": ["www.sharjahcoop.ae", "sharjahcoop.ae"],
-      "product_path": "^/en/[^/]+/p/[A-Za-z0-9]+/?$",
+      "product_path": "^/en/[^/]+/p/[A-Za-z0-9_]+/?$",
       "sitemaps": ["https://www.sharjahcoop.ae/en/sitemap.xml"],
       "sitemap_include": "/sitemaps/Product-en-AED-\\d+\\.xml$",
       "enabled": true,
-      "note": "e.g. /en/dahabi-slicesd-bread-brown-700g/p/9501100306746 (English pages only: the Product-ar sitemaps repeat the same products; loose items have ids like D000000000002). robots.txt asks for a 10 second Crawl-delay (kept: about 16 requests, 3 minutes) and Visit-time 0400-0845 UTC (kept: outside that window the store is skipped for the refresh, asked again at the next one)"
+      "note": "e.g. /en/dahabi-slicesd-bread-brown-700g/p/9501100306746 (English pages only: the Product-ar sitemaps repeat the same products; loose items have ids like D000000000002, a vendor's items like V00236_6291104180277NLR).robots.txt asks for a 10 second Crawl-delay (kept: about 16 requests, 3 minutes) and Visit-time 0400-0845 UTC (kept: outside that window the store is skipped for the refresh, asked again at the next one)"
     },
     {
       "key": "noon_uae",

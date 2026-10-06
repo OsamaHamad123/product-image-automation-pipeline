@@ -46,6 +46,8 @@ def _index_on(monkeypatch):
     monkeypatch.setattr(config, "LOCAL_INDEX_REFRESH_DAYS", "7", raising=False)
     monkeypatch.setattr(config, "LOCAL_INDEX_REFRESH_MAX_S", "300", raising=False)
     monkeypatch.setattr(index_refresh, "_THREAD", None)
+    monkeypatch.setattr(index_refresh, "_STOP", threading.Event())
+    monkeypatch.setattr(index_refresh, "_EXIT", {"wait_until": None})
 
 
 class Clock:
@@ -747,3 +749,188 @@ def test_the_script_says_a_store_outside_its_window_is_not_a_failure(monkeypatch
     rep = build_catalog_index._harvest_one(harvester, lulu(), db, Args())
     assert rep.status == "outside_visit_time" and db.finished == []                  # nothing recorded
     assert "OUTSIDE_VISIT_TIME" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------
+# Five stores in one budget: turns, resume, a store that stops answering, the run's exit
+# ---------------------------------------------------------------------------
+
+def later(db, seconds):
+    """Time passes for the harvest log of a FakeDb (the next run is `seconds` later)."""
+    for entry in db.ages.values():
+        for key in ("ok_age_s", "last_age_s"):
+            if entry.get(key) is not None:
+                entry[key] += seconds
+
+
+def test_the_plan_puts_the_store_asked_most_recently_last():
+    stores = [Store(k) for k in ("big", "stale", "new")]
+    state = {"big": ages(ok=None, last_status="partial", last=7 * HOUR), "stale": ages(ok=8 * DAY)}
+    todo, _ = plan(stores, state, 7)
+    assert [(s.key, why) for s, why in todo] == [("new", NEVER), ("stale", STALE), ("big", NEVER)]
+
+
+def test_a_store_bigger_than_the_budget_never_keeps_the_others_waiting(tmp_path):
+    # the old order (never completed first) put 'big' first at every nightly run: 'a' and 'b' were never read
+    clock = Clock()
+    db = FakeDb()
+    stores = [Store("big"), Store("a"), Store("b")]
+
+    class Harvester(FakeHarvester):
+        def harvest(self, store, **kw):
+            self.sitemaps_per_store = 14 if store.key == "big" else 1     # 'big' needs 1,400 s, the others 100 s
+            return super().harvest(store, **kw)
+
+    harvester = Harvester(clock=clock, cost=100.0)
+    first = run(db, harvester, stores, tmp_path, clock=clock, budget_s=300)
+    assert [r["store"] for r in first["results"]] == ["big"] and first["reason"] == "budget"
+    later(db, DAY)                                                     # the next night
+    second = run(db, harvester, stores, tmp_path, clock=clock, budget_s=300)
+    assert [(r["store"], r["status"]) for r in second["results"]][:2] == [("a", "ok"), ("b", "ok")]
+    assert second["results"][-1]["store"] == "big"                     # then 'big' with what is left of the budget
+
+
+class TimedHttp:
+    """test_cm_sitemaps.FakeHttp whose every sitemap file costs `cost` seconds of the refresh's fake clock."""
+
+    def __init__(self, pages, clock, cost):
+        from test_cm_sitemaps import FakeHttp
+        self.http, self.clock, self.cost = FakeHttp(pages), clock, cost
+        self.calls = self.http.calls
+
+    def get(self, url, **kw):
+        if not url.endswith("/robots.txt"):
+            self.clock.t += self.cost
+        return self.http.get(url, **kw)
+
+
+def big_store_pages(lists=6):
+    from test_cm_sitemaps import BASE, index_of, urlset
+    urls = [BASE + f"/sitemaps/products-{i}.xml" for i in range(1, lists + 1)]
+    pages = {BASE + "/robots.txt": (200, f"User-agent: *\nSitemap: {BASE}/sitemaps/index.xml\n".encode()),
+             BASE + "/sitemaps/index.xml": (200, index_of(*urls))}
+    for i, url in enumerate(urls, 1):
+        pages[url] = (200, urlset(BASE + f"/en-ae/item-{i}/p/{i}"))
+    return pages, urls
+
+
+def test_a_store_bigger_than_one_budget_is_read_to_the_end_over_a_few_refreshes(tmp_path):
+    from test_cm_sitemaps import lulu
+    clock, db = Clock(), FakeDb()
+    pages, urls = big_store_pages(6)                                   # the index and 6 lists of 100 s each
+    http = TimedHttp(pages, clock, 100.0)
+    harvester = sitemaps.SitemapHarvester(http=http, sleep=lambda s: None, clock=lambda: 0.0)
+    resume = tmp_path / index_refresh.RESUME_PATH.name                 # next to the state file
+    statuses = []
+    for _ in range(3):
+        result = run(db, harvester, [lulu()], tmp_path, clock=clock, budget_s=300)
+        statuses.append(result["results"][0]["status"])
+        later(db, DAY)
+    assert statuses == ["partial", "partial", "ok"]
+    assert sorted(u for _, u in db.rows) == sorted(f"https://gcc.luluhypermarket.com/en-ae/item-{i}/p/{i}"
+                                                   for i in range(1, 7))   # every list, each read once
+    assert [http.calls.count(u) for u in urls] == [1] * 6
+    assert not json.loads(resume.read_text(encoding="utf-8"))                # done: nothing left to resume
+
+
+OUTSIDE = index_refresh.OUTSIDE_VISIT_TIME
+
+
+def test_resume_is_kept_only_for_lists_read_in_full_and_for_refresh_days(tmp_path):
+    path = tmp_path / "resume.json"
+    now = [1000.0]
+
+    def clock():
+        return now[0]
+
+    index_refresh.remember_resume("big", [], ["l1", "l2"], "partial", path, clock)
+    assert index_refresh.resume_from("big", 7, path, clock) == ["l1", "l2"]
+    now[0] += 3 * DAY
+    index_refresh.remember_resume("big", ["l1", "l2"], ["l3"], "error", path, clock)    # a failure on the way: kept
+    assert index_refresh.resume_from("big", 7, path, clock) == ["l1", "l2", "l3"]
+    index_refresh.remember_resume("big", ["l1"], ["l9"], OUTSIDE, path, clock)          # not a harvest: unchanged
+    assert index_refresh.resume_from("big", 7, path, clock) == ["l1", "l2", "l3"]
+    now[0] += 4 * DAY                                                   # older than the refresh days: from the start
+    assert index_refresh.resume_from("big", 7, path, clock) == []
+    index_refresh.remember_resume("big", [], ["l1"], "partial", path, clock)
+    index_refresh.remember_resume("big", ["l1"], ["l2"], "ok", path, clock)            # complete: cleared
+    assert index_refresh.resume_from("big", 7, path, clock) == []
+    assert "big" not in json.loads(path.read_text(encoding="utf-8"))
+
+
+def test_a_long_url_list_stops_at_the_budget_between_batches_and_is_not_counted_as_read():
+    from test_cm_sitemaps import BASE, FakeHttp, lulu, urlset
+    products = [BASE + f"/en-ae/item-{i}/p/{i}" for i in range(2500)]
+    pages = {BASE + "/robots.txt": (404, b""), BASE + "/sitemap.xml": (200, urlset(*products))}
+    harvester = sitemaps.SitemapHarvester(http=FakeHttp(pages), sleep=lambda s: None, clock=lambda: 0.0)
+    asked, got = [], []
+
+    def stop():
+        asked.append(1)
+        return len(asked) > 2                    # before the file, after its first batch: go on; then stop
+
+    rep = harvester.harvest(lulu(), on_urls=lambda batch: (got.extend(batch), len(batch))[1], should_stop=stop)
+    assert len(got) == 2 * sitemaps.BATCH and rep.truncated and rep.status == "partial"
+    assert rep.tree[-1]["stopped"] is True and "time budget" in rep.error
+
+
+def test_a_store_that_stops_answering_gives_up_its_turn():
+    from test_cm_sitemaps import FakeHttp, lulu
+    pages, urls = big_store_pages(6)
+    for url in urls[1:4]:
+        pages[url] = (TimeoutError("read timed out"), b"")             # three files in a row get no answer
+    http = FakeHttp(pages)
+    rep = sitemaps.SitemapHarvester(http=http, sleep=lambda s: None, clock=lambda: 0.0).harvest(lulu())
+    assert rep.status == "error" and "3 sitemap files in a row got no answer (timeout)" in rep.error
+    assert urls[4] not in http.calls and rep.product_urls == 1
+    pages[urls[1]] = pages[urls[3]] = pages[urls[0]]                     # an answer between two: not a stopped store
+    rep = sitemaps.SitemapHarvester(http=FakeHttp(pages), sleep=lambda s: None, clock=lambda: 0.0).harvest(lulu())
+    assert rep.status == "partial" and rep.sitemaps_read == 6
+
+
+class WaitingHarvester(FakeHarvester):
+    """A store that takes `files` sitemap files of 50 ms each, asking should_stop before each one."""
+
+    def __init__(self, files=200):
+        super().__init__()
+        self.files = files
+
+    def harvest(self, store, on_urls=None, should_stop=None, **kw):
+        self.calls.append(store.key)
+        rep = HarvestReport(store=store.key)
+        for _ in range(self.files):
+            if should_stop is not None and should_stop():
+                rep.truncated, rep.status, rep.error = True, "partial", "stopped at the time budget"
+                break
+            time.sleep(0.05)
+            rep.sitemaps_read += 1
+        return rep
+
+
+def test_at_a_workers_exit_the_refresh_stops_cleanly_and_records_what_it_read(tmp_path):
+    db, harvester = FakeDb(), WaitingHarvester()
+    thread = index_refresh.start_background("worker", db=db, harvester=harvester, stores=[Store("a"), Store("b")],
+                                            budget_s=300, **paths(tmp_path))
+    time.sleep(0.3)
+    began = time.monotonic()
+    index_refresh._at_exit()                                            # what the process's exit runs
+    assert time.monotonic() - began < index_refresh.EXIT_GRACE_S and not thread.is_alive()
+    (key, report), = db.finished
+    assert key == "a" and report["status"] == "partial" and "the run ended" in report["error"]
+    assert harvester.calls == ["a"] and not (tmp_path / "state.lock").exists()     # 'b' waits; the lock is free
+    state = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
+    assert state["state"] == "idle" and {"store": "b", "reason": "budget"} in state["skipped"]
+
+
+def test_at_the_nightlys_exit_the_refresh_is_waited_for_within_its_budget(tmp_path):
+    db, harvester = FakeDb(), WaitingHarvester(files=8)                # 0.4 s: well inside the budget
+    thread = index_refresh.start_background("nightly", db=db, harvester=harvester, stores=[Store("a")],
+                                            budget_s=300, **paths(tmp_path))
+    index_refresh._at_exit()
+    assert not thread.is_alive() and not index_refresh._STOP.is_set()
+    assert [(k, r["status"]) for k, r in db.finished] == [("a", "ok")]
+
+
+def test_the_exit_does_nothing_without_a_running_refresh():
+    index_refresh._at_exit()
+    assert not index_refresh._STOP.is_set()
