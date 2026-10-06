@@ -13,7 +13,7 @@ import pytest
 from test_cli_bridge_contract import SELECT_PARAMS, _canvas, bridge, select_env  # noqa: F401 - fixtures
 
 
-@pytest.mark.parametrize("image_url", ["/etc/passwd", "temp/manual.png", "C:\\Users\\owner\\secret.png",
+@pytest.mark.parametrize("image_url", ["/etc/hosts", "temp/manual.png", "C:\\Users\\owner\\secret.png",
                                        "file:///etc/hostname", "ftp://example.com/a.jpg", "data:image/png;base64,AA",
                                        "../credentials.json"])
 def test_select_image_takes_an_http_link_only(select_env, image_url):

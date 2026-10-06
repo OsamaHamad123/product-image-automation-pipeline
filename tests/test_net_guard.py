@@ -93,7 +93,7 @@ class Web:
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("url", [
-    "file:///etc/passwd", "ftp://example.com/a.jpg", "gopher://example.com/", "data:image/png;base64,AAAA",
+    "file:///etc/hosts", "ftp://example.com/a.jpg", "gopher://example.com/", "data:image/png;base64,AAAA",
     "javascript:alert(1)", "//example.com/a.jpg", "", "https://", "http://[::1", "C:\\temp\\a.jpg",
 ])
 def test_only_http_and_https_urls_with_a_host_pass(dns, url):
