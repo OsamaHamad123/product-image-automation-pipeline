@@ -48,8 +48,10 @@ def test_routes_hooks_and_one_script():
     assert f"Route::post('/api/system/eval-export', [{c}::class, 'exportEvalSet']);" in routes
     assert f"Route::get('/api/system/eval-export/{{file}}', [{c}::class, 'downloadEvalSet'])" in routes
     view, js = read(HEALTH_VIEW), read(HEALTH_JS)
-    assert '<details class="lq-card lq-card--compact lq-health-advanced" data-health="advanced">' in view
-    assert ">متقدم</summary>" in view and "صدّر مجموعة اختبار" in view
+    # the export is a card of the Health page's advanced section («تفاصيل متقدمة», collapsed by default)
+    advanced = view[view.index('<details class="lq-health-advanced" data-health="advanced">'):view.rindex("</details>")]
+    assert '<span class="lq-health-advanced__label">تفاصيل متقدمة</span>' in advanced
+    assert "صدّر مجموعة اختبار" in advanced and 'data-health="eval-card"' in advanced
     for hook in ("eval-export", "eval-export-status", "eval-export-label", "eval-export-link"):
         assert f'data-health="{hook}"' in view, hook
     assert "function evalExportView(" in js and "function createEvalExport(" in js

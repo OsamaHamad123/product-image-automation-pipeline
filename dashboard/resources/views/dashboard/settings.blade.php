@@ -22,7 +22,9 @@
 
 @section('content')
 <div class="lq-settings" data-settings-page data-tab="{{ $tab }}">
-    <x-lq.page-header title="الإعدادات" />
+    <x-lq.page-header title="الإعدادات">
+        <x-slot:actions><x-lq.button variant="secondary" icon="sparkle" :href="route('dashboard.setup')">جهّز لقطة خطوة بخطوة</x-lq.button></x-slot:actions>
+    </x-lq.page-header>
 
     @if (!empty($flash['success']))
         <x-lq.alert variant="success" role="status">{{ $flash['success'] }}</x-lq.alert>

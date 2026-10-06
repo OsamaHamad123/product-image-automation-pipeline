@@ -61,6 +61,8 @@ class HealthController extends Controller
             'bg' => $bg,
             'bgView' => self::bgSkipView($publish, $bg),
             'bgConfirm' => SettingsController::BG_SKIP_CONFIRM,
+            // «كلشي تمام» / «شو بدو منك» فوق الصفحة (بلا بايثون: ops-health من الكاش بس)
+            'attention' => HealthAttentionController::current(),
         ]);
     }
 

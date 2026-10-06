@@ -29,6 +29,8 @@ Route::post('/api/clear-products-cache', [ApiController::class, 'clearProductsCa
 Route::post('/api/system/run-diagnostics', [ProductController::class, 'runDiagnosticsJson']);
 // صحة البحث وتكلفته من سجل الطابور (قراءة فقط عبر cli_bridge.ops_health)
 Route::get('/api/system/ops-health', [\App\Http\Controllers\HealthController::class, 'summary']);
+// رأس صفحة الصحة: «كلشي تمام» أو «شو بدو منك» (HealthAttentionController، قراءة فقط وبلا بايثون)
+Route::get('/api/system/attention', [\App\Http\Controllers\HealthAttentionController::class, 'show']);
 // «دقة الاقتراحات الحقيقية»: أرقام كل فئة اختيار من قرارات المراجعين (قراءة فقط عبر cli_bridge.review_stats)
 Route::get('/api/system/review-lanes', [\App\Http\Controllers\HealthController::class, 'reviewLanes']);
 // «فحص النشر»: بروفة النشر على صورة تجريبية (cli_bridge.publish_check) بزر صريح؛ GET يرجع آخر نتيجة محفوظة فقط
@@ -114,5 +116,10 @@ Route::post('/api/cutout/discard', [\App\Http\Controllers\RecutController::class
 Route::post('/api/cutout/undo', [\App\Http\Controllers\RecutController::class, 'undo']);
 Route::get('/api/cutout/preview/{token}', [\App\Http\Controllers\RecutController::class, 'preview'])
     ->where('token', '[0-9a-f]{32}');
+// «جهّز لقطة»: معالج التجهيز لأول مرة (SetupController). فتح الصفحة ما بيشغّل أي فحص: كل فحص بزر صريح، والتقدّم بـ system_settings
+Route::get('/setup', [\App\Http\Controllers\SetupController::class, 'page'])->name('dashboard.setup');
+Route::get('/api/setup/state', [\App\Http\Controllers\SetupController::class, 'state']);
+Route::post('/api/setup/check', [\App\Http\Controllers\SetupController::class, 'check']);
+Route::post('/api/setup/progress', [\App\Http\Controllers\SetupController::class, 'progress']);
 
 Route::view('/ui-kit', 'dashboard.ui_kit')->name('dashboard.ui_kit'); // مرجع مكوّنات هوية لقطة

@@ -2255,6 +2255,32 @@ def action_local_index_refresh(params):
 
 
 # ---------------------------------------------------------------------------
+# «جهّز لقطة» (dashboard SetupController): الخطوة 3، جدول الماركات. قراءة بس، بلا بحث مدفوع
+# ---------------------------------------------------------------------------
+
+def action_setup_brands(params):
+    """
+    هل تبويب «Brands Mapping» موجود بالشيت المضبوط، وكم ماركة فيه: {status, found, title, brands}. قراءة بس: ما بينشئ
+    التبويب (متل google_sheets._brands_worksheet وقت البحث) ولا بيكتب أي شي، وما بيقرأ كاش الماركات (الفحص للشيت الحي).
+    """
+    title = google_sheets.BRANDS_SHEET_TITLE
+    try:
+        client = google_sheets.get_sheets_client()
+        if not client:
+            raise RuntimeError("Google Sheets API connection failed")
+        sh = google_sheets._retrying(google_sheets._open_spreadsheet, client, config.SPREADSHEET_NAME_OR_URL)
+        titles = [ws.title for ws in google_sheets._retrying(sh.worksheets)]
+        if title not in titles:
+            return {"status": "success", "found": False, "title": title, "brands": 0}
+        rows = google_sheets._retrying(google_sheets._retrying(sh.worksheet, title).get_all_values)
+    except Exception:
+        return _failure("failed", "Could not read the Brands Mapping sheet (details in temp/search.log).",
+                        "setup_brands failed")
+    return {"status": "success", "found": True, "title": title,
+            "brands": len(google_sheets.parse_brand_mapping_rows(rows))}
+
+
+# ---------------------------------------------------------------------------
 # «ماركات ناقصة من Brands Mapping» (catalog_match/brand_assistant.py): brand_suggestions (قراءة فقط، بلا بحث مدفوع)،
 # brand_official_site (استعلام Serper واحد بزر صريح)، brand_add (يكتب شيت المالك، بزر صريح فقط)
 # ---------------------------------------------------------------------------
@@ -3095,6 +3121,7 @@ ACTIONS = {
     'recut_apply': action_recut_apply,
     'recut_discard': action_recut_discard,
     'recut_undo': action_recut_undo,
+    'setup_brands': action_setup_brands,
     'ops_health': action_ops_health,
     'run_control': action_run_control,
 }

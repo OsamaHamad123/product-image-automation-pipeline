@@ -55,7 +55,8 @@ def test_routes_and_the_card_inside_the_advanced_section():
                  "reprocess-max", "reprocess-usd", "reprocess-start"):
         assert f'data-health="{hook}"' in advanced, hook
     assert "صور قديمة بخلفية بيضا" in advanced and "بدون ما يغيّر شي" in advanced
-    assert advanced.count("<section") == 1                     # one card, in the advanced section
+    # one card, in the advanced section («تفاصيل متقدمة» now holds every detailed card: wp/onboard)
+    assert advanced.count('data-health="reprocess"') == 1 and 'class="lq-card lq-card--compact lq-health-reprocess"' in advanced
     js = read(HEALTH_JS)
     assert "function createReprocess(" in js and "'/api/system/reprocess/plan'" in js
     assert len([line for line in view.splitlines() if "asset('js/" in line and ".js" in line]) == 1
