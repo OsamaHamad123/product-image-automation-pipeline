@@ -1150,7 +1150,7 @@ def get_approved_embeddings(model):
     try:
         cursor = conn.cursor()
         cursor.execute(f"""
-            SELECT e.sku_key, e.brand_key, e.brand, e.embedding AS vector, e.dim
+            SELECT e.sku_key, e.brand_key, e.brand, e.embedding AS `vector`, e.dim
             FROM approved_embeddings e
             JOIN resolved_products r ON r.sku_key = e.sku_key AND r.cloudinary_url = e.cloudinary_url
             WHERE e.model = %s AND r.{_SERVABLE_SQL}
