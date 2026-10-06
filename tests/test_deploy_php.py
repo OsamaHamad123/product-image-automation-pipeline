@@ -15,6 +15,7 @@ test database. Nothing reaches the network and no real worker is started: the no
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -423,6 +424,20 @@ echo json_encode($out);
         os.unlink(path)
     assert done.returncode == 0, done.stdout[-3000:] + done.stderr[-3000:]
     return json.loads(done.stdout)
+
+
+def test_healthz_route_lives_in_its_own_file_and_web_php_stays_free_of_middleware_switches():
+    """routes/web.php must not switch any protection off (and keeps the ui-kit route last): the monitor route that
+    does has its own file, loaded by bootstrap/app.php right after web.php."""
+    web = (DASH / "routes" / "web.php").read_text(encoding="utf-8")
+    assert "healthz" not in web and "withoutMiddleware" not in web
+    own = (DASH / "routes" / "healthz.php").read_text(encoding="utf-8")
+    assert "Route::get('/healthz', [HealthzController::class, 'show'])" in own
+    assert len(re.findall(r"(?m)^Route::", own)) == 1                # one read-only GET route, nothing else
+    boot = (DASH / "bootstrap" / "app.php").read_text(encoding="utf-8")
+    assert "routes/web.php', __DIR__.'/../routes/healthz.php'" in boot
+    folders = {"storage", "vendor", "bootstrap", "app", "config", "database", "routes", "tests", "temp", "runs"}
+    assert "healthz" not in folders                                  # laqta.conf's folder deny rules never catch it
 
 
 @NEEDS_LARAVEL

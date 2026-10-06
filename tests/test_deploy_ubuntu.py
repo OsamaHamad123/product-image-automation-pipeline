@@ -1151,6 +1151,35 @@ def test_launcher_script_does_not_start_the_worker_when_the_enqueue_fails(tmp_pa
 
 
 @needs_bash
+def test_the_worker_keeps_the_launchers_pid_so_the_stop_button_still_reaches_it(tmp_path):
+    """The dashboard stops a run with `kill -9 <pid in temp/pipeline.lock>` (ApiController::terminateWorker). The lock
+    holds the worker's own pid, so the launcher must exec the worker (same pid as the unit's main process): killing it
+    is then what systemd sees as 'KILL', which laqta-run.service lists in SuccessExitStatus (no false failure)."""
+    app, calls = launcher_app(tmp_path)
+    worker_pid = tmp_path / "worker.pid"
+    python = app / ".venv" / "bin" / "python"
+    python.write_text(
+        "#!/bin/bash\n"
+        f'echo "$*" >> "{calls}"\n'
+        f'case "$*" in *--worker*) echo $$ > "{worker_pid}"; sleep 60;; esac\n')
+    (app / "temp" / "run_request.json").write_text("{}")
+    proc = subprocess.Popen([BASH, str(DEPLOY / "run-launcher.sh"), str(app)], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        for _ in range(100):
+            if worker_pid.exists() and worker_pid.read_text().strip():
+                break
+            time.sleep(0.05)
+        assert int(worker_pid.read_text()) == proc.pid, "the worker must be the launcher process itself (exec)"
+        os.kill(proc.pid, 9)                                       # exactly what terminateWorker runs: kill -9 <pid>
+        assert proc.wait(timeout=10) == -9                         # systemd calls this result "KILL"
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+    assert "KILL" in values(rendered_unit("laqta-run.service"), "Service", "SuccessExitStatus")[0].split()
+
+
+@needs_bash
 def test_launcher_script_never_reads_the_request_content(tmp_path):
     app, calls = launcher_app(tmp_path)
     (app / "temp" / "run_request.json").write_text('$(touch /tmp/laqta-pwned); `id`; --worker --evil')
