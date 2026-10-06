@@ -126,9 +126,12 @@ def _blocked(error: Optional[str]) -> bool:
 
 
 def _trusted_retailer(host: str) -> bool:
+    """A UAE retailer's page host, or the image CDN its own product pages use (uae_retailer_image_hosts)."""
     try:
         from .score import trusted_domains
-        return domain_matches(host, trusted_domains().get("uae_retailers") or [])
+        data = trusted_domains()
+        hosts = list(data.get("uae_retailers") or []) + list(data.get("uae_retailer_image_hosts") or [])
+        return domain_matches(host, hosts)
     except Exception:  # an unreadable list only means the stricter limit for everyone
         return False
 

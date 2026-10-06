@@ -178,6 +178,81 @@ def test_carrefour_answers_an_empty_html_page_so_it_stays_off_until_discover_run
     assert rep.robots == "missing (http 200)" and rep.status == "blocked" and "bot check" in rep.error
 
 
+# ---------------------------------------------------------------------------
+# Trusted hosts: an index hit ranks as a UAE retailer's, and the stores' image CDNs are never skipped as slow
+# ---------------------------------------------------------------------------
+
+INDEX_HITS = [   # (store, a real product page, the sheet row it is the product of)
+    ("lulu", "https://gcc.luluhypermarket.com/en-ae/shan-meat-masala-100-g/p/22596", "SHAN MEAT MASALA 100GM", "SHAN"),
+    ("spinneys", "https://www.spinneys.com/en-ae/catalogue/zwan-chicken-luncheon-200g_5651/",
+     "ZWAN CHICKEN LUNCHEON MEAT 200GM", "ZWAN"),
+    ("sharjahcoop", "https://www.sharjahcoop.ae/en/eastern-kabsa-masala-200g/p/8901440206897",
+     "EASTERN KABSA MASALA 200G", "EASTERN"),
+    ("carrefour_uae", "https://www.carrefouruae.com/mafuae/en/masala-and-mix/mehran-meat-masala-100g/p/1533388",
+     "MEHRAN MEAT MASALA 100G", "MEHRAN"),
+    ("talabat_mart_uae", "https://www.talabat.com/uae/talabat-mart/product/al-kabeer-frozen-punjabi-samosa-900g/s/500273",
+     "AL KABEER PUNJABI SAMOSA 900G", "AL KABEER"),
+]
+
+
+@pytest.mark.parametrize("key,url,name,brand", INDEX_HITS)
+def test_an_index_hit_from_each_store_is_a_tier_1_uae_retailer_candidate(key, url, name, brand):
+    from catalog_match.identity import build_sku_spec
+    from catalog_match.local_index import MemoryCatalogStore, rank_rows, search_keys
+    spec = build_sku_spec({"name": name, "brand": brand})
+    index = MemoryCatalogStore()
+    index.upsert(key, [(url, None)])
+    groups, extra = search_keys(spec)
+    [(row, score)] = rank_rows(spec, [r for required in groups for r in index.find(required, extra)])
+    assert row.url == url and score.tier == 1 and score.matched["source_class"] == "uae_retailer"
+
+
+@pytest.mark.parametrize("key", sorted(SAMPLES))
+def test_every_store_host_is_a_uae_retailer_in_source_trust_and_its_other_countries_are_not(key):
+    from catalog_match.identity import build_sku_spec
+    from catalog_match.models import Candidate
+    from catalog_match.score import TRUST_OTHER_RETAIL, TRUST_UAE_RETAILER, source_trust
+    spec = build_sku_spec({"name": "ZWAN LUNCHEON MEAT 200GM", "brand": "ZWAN"})
+    s = store(key)
+    for host in s.hosts:
+        assert source_trust(spec, Candidate(image_url="https://img.example/a.jpg",
+                                            page_url=f"https://{host}/x"))[0] == TRUST_UAE_RETAILER, host
+    for url in SAMPLES[key]["product"]:
+        assert source_trust(spec, Candidate(image_url="https://img.example/a.jpg", page_url=url))[0] \
+            == TRUST_UAE_RETAILER, url
+    for url in SAMPLES[key]["not_product"]:          # another country's section sells the foreign pack
+        if any(part in url for part in ("/en-kw/", "/en-om/", "/en-sa/", "/en-bh/", "/ar-bh/", "/kuwait/",
+                                        "/bahrain/", "/oman/")):
+            assert source_trust(spec, Candidate(image_url="https://img.example/a.jpg", page_url=url))[0] \
+                == TRUST_OTHER_RETAIL, url
+
+
+@pytest.mark.parametrize("key", sorted(SAMPLES))
+def test_the_image_hosts_of_each_stores_own_pages_are_never_skipped_as_slow(key):
+    from catalog_match.fetch import HOST_FAIL_LIMIT_TRUSTED, HostBreaker
+    from catalog_match.text_norm import url_host
+    breaker = HostBreaker()
+    for page, image in SAMPLES[key]["image_pairs"]:
+        host = url_host(image)
+        assert breaker.exempt(host, url_host(page)) and breaker.exempt(host, ""), image   # with or without its page
+        assert breaker.limit(host) == HOST_FAIL_LIMIT_TRUSTED, host
+
+
+def test_a_retailer_image_host_gives_no_source_trust_and_other_tenants_of_a_shared_cdn_are_not_exempt():
+    from catalog_match.fetch import HostBreaker
+    from catalog_match.identity import build_sku_spec
+    from catalog_match.models import Candidate
+    from catalog_match.score import TRUST_GENERIC, source_trust, trusted_domains
+    spec = build_sku_spec({"name": "ZWAN LUNCHEON MEAT 200GM", "brand": "ZWAN"})
+    for host in trusted_domains()["uae_retailer_image_hosts"]:
+        cand = Candidate(image_url=f"https://{host}/products/zwan.jpg", page_url="", domain=host)
+        assert source_trust(spec, cand)[0] == TRUST_GENERIC, host     # trust stays keyed on the page domain
+    breaker = HostBreaker()
+    for host in ("other.akinoncloudcdn.com", "akinoncloudcdn.com", "someone.azureedge.net", "hungerstation.dhmedia.io",
+                 "m.media-amazon.com"):
+        assert not breaker.exempt(host, "some-blog.example"), host
+
+
 def test_a_store_configured_from_robots_reads_what_robots_lists():
     # the same Carrefour entry once its robots.txt answers on the server: the Sitemap: lines are the starting points
     s = store("carrefour_uae")

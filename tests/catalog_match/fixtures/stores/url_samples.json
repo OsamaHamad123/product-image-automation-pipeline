@@ -1,5 +1,5 @@
 {
- "_about": "Real URLs only (no page bodies): product pages and other pages of each store, from its sitemap (2026-10-06) and from the live runs' exports (2026-10-03 to 2026-10-05).",
+ "_about": "Real URLs only (no page bodies): product pages and other pages of each store, from its sitemap (2026-10-06) and from the live runs' exports (2026-10-03 to 2026-10-05); image_pairs: one product page per image host the store's own pages used in those runs.",
  "stores": {
   "lulu": {
    "product": [
@@ -17,6 +17,16 @@
     "https://gcc.luluhypermarket.com/en-kw/california-garden-white-tuna-in-sunflower-oil-185-g/p/295369",
     "https://gcc.luluhypermarket.com/en-kw/goody-light-meat-tuna-in-sunflower-oil-160-g/p/1603206",
     "https://gcc.luluhypermarket.com/en-kw/kitchen-treasures-meat-masala-160-g/p/1429444"
+   ],
+   "image_pairs": [
+    [
+     "https://gcc.luluhypermarket.com/en-ae/california-garden-canned-white-tuna-solid-in-olive-oil-185-g/p/94621",
+     "https://bf1af2.akinoncloudcdn.com/products/2024/09/11/65153/af0db6b2-4d2f-427a-ac8a-2a6db9b263ab_size1920x1920_cropCenter.jpg"
+    ],
+    [
+     "https://gcc.luluhypermarket.com/en-ae/unium-luncheon-meat-mixed-800-g/p/865143/",
+     "https://bf1af2.a-cdn.akinoncloud.com/products/2024/09/10/65048/bad743df-797c-4351-a501-e38a323820c4_size3840_cropCenter.jpg"
+    ]
    ]
   },
   "spinneys": {
@@ -38,6 +48,12 @@
     "https://www.spinneys.com/en-ae/",
     "https://www.spinneys.com/en-ae/recipes/",
     "https://www.spinneys.com/en-ae/recipes/raspberry-and-banana-smoothie/"
+   ],
+   "image_pairs": [
+    [
+     "https://www.spinneys.com/en-ae/catalogue/california-garden-white-tuna-in-olive-oil-185g_1380/",
+     "https://prod-spinneys-cdn-new.azureedge.net/media/cache/7b/c0/7bc0b7c89317983081d3a202e855382e.jpg"
+    ]
    ]
   },
   "talabat_mart_uae": {
@@ -56,6 +72,16 @@
     "https://www.talabat.com/kuwait/talabat-mart/product/zwan-chicken-luncheon-meat-340g/s/924930",
     "https://www.talabat.com/oman/talabat-mart/product/americana-heroz-happy-chicken-nuggets-400g/s/UN1AEJ",
     "https://www.talabat.com/uae/ferns-n-petals"
+   ],
+   "image_pairs": [
+    [
+     "https://www.talabat.com/kuwait/talabat-mart/product/unium-chicken-luncheon-meat-800-g/s/935359",
+     "https://talabat.dhmedia.io/image/darkstores-jo/Jordan%20Items/JOR-6253005314601.JPG"
+    ],
+    [
+     "https://www.talabat.com/uae/ferns-n-petals",
+     "https://www.talabat.com/assets/images/Tlogo-500.png"
+    ]
    ]
   },
   "carrefour_uae": {
@@ -71,6 +97,16 @@
     "https://www.carrefouruae.com/mafuae/ar/facial-tissues/fine-tissues-steripro-100/p/1792",
     "https://www.carrefouruae.com/mafuae/ar/masala-and-mix/bayara-arabic-mix-masala-200gr/p/1082051",
     "https://www.carrefouruae.com/mafuae/en/p/1167184"
+   ],
+   "image_pairs": [
+    [
+     "https://www.carrefouruae.com/mafuae/en/tuna/cg-gold-tuna-gourmet-sfo-185g/p/1163628",
+     "https://cdn.mafrservices.com/pim-content/UAE/media/product/1163628/1749376805/1163628_main.jpg"
+    ],
+    [
+     "https://www.carrefouruae.com/mafuae/en/date-fruit-filled/alseedawi-choc-maamoul16x25-g/p/1859087",
+     "https://cdnprod.mafretailproxy.com/assets/images/Bulk_Buy_Icon_1_b03d92859e.png"
+    ]
    ]
   },
   "sharjahcoop": {
@@ -85,6 +121,12 @@
    ],
    "not_product": [
     "https://www.sharjahcoop.ae/al-kabeer-punjabi-samosa-900g/p/5033712451018"
+   ],
+   "image_pairs": [
+    [
+     "https://www.sharjahcoop.ae/en/california-garden-white-tuna-solid-olive-oil-185g/p/32894020840",
+     "https://www.sharjahcoop.ae/medias/0032894020840-1200Wx1200H-002.jpg"
+    ]
    ]
   }
  }
