@@ -706,7 +706,8 @@ def _isolate_remove_bg(img: Image.Image):
             REMOVE_BG_URL,
             headers={"X-Api-Key": api_key},
             files={"image_file": (filename, data, mime)},
-            data={"size": "auto", "format": "png"},
+            # type=product: remove.bg بيعامل الصورة كصورة منتج (عبوة بلا أشخاص)، مجاناً بنفس الطلب
+            data={"size": "auto", "format": "png", "type": "product"},
             timeout=REMOVE_BG_TIMEOUT,
         )
     except requests.exceptions.Timeout:
@@ -776,6 +777,20 @@ def _rembg_session(model: str):
         return session
 
 
+def _accepts_decontaminate(remove) -> bool:
+    """
+    هل remove() بنسخة rembg المنزّلة فيها الوسيط decontaminate باسمه (2.0.79 وأحدث)؟ **kwargs لحالها ما بتكفي: النسخ الأقدم
+    بتمررها لـ session.predict فبتفشل أو بتنتجاهل.
+    """
+    import inspect
+
+    try:
+        param = inspect.signature(remove).parameters.get("decontaminate")
+    except (TypeError, ValueError):
+        return False
+    return param is not None and param.kind in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
+
+
 def _isolate_rembg(img: Image.Image, model: str = MANUAL_REMBG_MODEL):
     try:
         from rembg import remove
@@ -786,7 +801,9 @@ def _isolate_rembg(img: Image.Image, model: str = MANUAL_REMBG_MODEL):
         if session is None:
             return None, "rembg_failed"
         data, _, _ = _encode_for_upload(img)
-        output = remove(data, session=session)
+        # decontaminate: بيشيل لون الخلفية عن حواف القص (مجاني، محلي)، بس إذا النسخة المنزّلة بتعرفه
+        extra = {"decontaminate": True} if _accepts_decontaminate(remove) else {}
+        output = remove(data, session=session, **extra)
         cutout = _decode_cutout(output if isinstance(output, (bytes, bytearray)) else b"")
         if cutout is None and isinstance(output, Image.Image):
             cutout = output.convert("RGBA")

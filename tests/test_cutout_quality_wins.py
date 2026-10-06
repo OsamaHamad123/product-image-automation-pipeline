@@ -102,3 +102,90 @@ def test_the_worker_keeps_the_publish_details_for_the_export(monkeypatch):
         == "needs_review"
     assert report["uncertainty"] == 0.8 and report["quality_flags"] == ["photoroom_unsure"]
     assert report["canvas"] == [1228, 1228] and report["finish"] == {"background": "transparent"}
+
+
+# ---------------------------------------------------------------------------
+# b. remove.bg: type=product
+# ---------------------------------------------------------------------------
+
+def test_remove_bg_is_asked_for_a_product_cutout(monkeypatch):
+    sent = []
+
+    def post(url, headers=None, files=None, data=None, timeout=None, **_kw):
+        sent.append((url, dict(data or {})))
+        return FakeResponse(200, png_bytes(Image.new("RGBA", (40, 40), (200, 30, 30, 255))))
+
+    monkeypatch.setattr(config, "REMOVE_BG_API_KEY", "-".join(("tst", "rbg", "7f3c9a1e")))
+    monkeypatch.setattr(image_processor.requests, "post", post)
+    cutout, error = image_processor._isolate_remove_bg(Image.new("RGB", (40, 40), "white"))
+    assert cutout is not None and error is None
+    assert sent == [(image_processor.REMOVE_BG_URL, {"size": "auto", "format": "png", "type": "product"})]
+
+
+# ---------------------------------------------------------------------------
+# c. local rembg: decontaminate=True only when the installed remove() names it; the model is always ours
+# ---------------------------------------------------------------------------
+
+def _fake_rembg(monkeypatch, remove):
+    import sys
+    import types
+
+    module = types.ModuleType("rembg")
+    module.remove = remove
+    module.new_session = lambda model: ("session", model)
+    monkeypatch.setitem(sys.modules, "rembg", module)
+    image_processor.reset_rembg_sessions(everything=True)
+
+
+def _rgba_png(img):
+    out = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    out.paste((200, 30, 30, 255), (5, 5, 30, 30))
+    return png_bytes(out)
+
+
+def test_a_rembg_that_knows_decontaminate_gets_it(monkeypatch):
+    seen = []
+
+    def remove(data, alpha_matting=False, session=None, decontaminate=False, **kwargs):
+        seen.append({"session": session, "decontaminate": decontaminate, "kwargs": kwargs})
+        return _rgba_png(Image.open(io.BytesIO(data)))
+
+    _fake_rembg(monkeypatch, remove)
+    cutout, error = image_processor._isolate_rembg(Image.new("RGB", (40, 40), "white"), "birefnet-general")
+    assert cutout is not None and error is None
+    assert seen == [{"session": ("session", "birefnet-general"), "decontaminate": True, "kwargs": {}}]
+    image_processor.reset_rembg_sessions(everything=True)
+
+
+def test_an_older_rembg_is_called_as_before(monkeypatch):
+    seen = []
+
+    def remove(data, alpha_matting=False, session=None, *args, **kwargs):      # before 2.0.79: no decontaminate
+        seen.append(dict(kwargs))
+        return _rgba_png(Image.open(io.BytesIO(data)))
+
+    _fake_rembg(monkeypatch, remove)
+    cutout, _error = image_processor._isolate_rembg(Image.new("RGB", (40, 40), "white"), "birefnet-general")
+    assert cutout is not None and seen == [{}]
+    image_processor.reset_rembg_sessions(everything=True)
+
+
+def test_rembg_never_runs_its_own_default_model(monkeypatch):
+    """rembg's default bria-rmbg weights are CC BY-NC: the session is always one of REMBG_MODELS."""
+    from catalog_match import settings
+
+    models = []
+    _fake_rembg(monkeypatch, lambda data, session=None, **k: models.append(session) or _rgba_png(
+        Image.open(io.BytesIO(data))))
+    monkeypatch.setattr(config, "REMBG_MODEL", "bria-rmbg", raising=False)
+    assert settings.rembg_model() == "birefnet-general"
+    image_processor._isolate(Image.new("RGB", (40, 40), "white"), "rembg")
+    assert models == [("session", "birefnet-general")] and "bria-rmbg" not in settings.REMBG_MODELS
+    image_processor.reset_rembg_sessions(everything=True)
+
+
+def test_the_ubuntu_install_pins_a_rembg_with_decontaminate():
+    from pathlib import Path
+
+    text = (Path(__file__).resolve().parents[1] / "deploy" / "ubuntu" / "install.sh").read_text(encoding="utf-8")
+    assert 'REMBG_VERSION="2.0.85"' in text and '"rembg[$extra]==$REMBG_VERSION"' in text

@@ -95,7 +95,7 @@ sudo --preserve-env=LAQTA_DB_PASSWORD bash /opt/laqta/deploy/ubuntu/install.sh /
 | `APP_DIR` (أول وسيط) | مجلد الكلون، الافتراضي المجلد اللي فيه السكربت |
 | `--server-name HOST` | اسم الدومين لـ nginx (لازم لـ HTTPS) |
 | `--local-only` | nginx بيسمع على `127.0.0.1:8080` بس (القسم 7) |
-| `--with-birefnet` | بيركّب `rembg[cpu]` وبينزّل موديل `birefnet-general` |
+| `--with-birefnet` | بيركّب `rembg[cpu]==2.0.85` (فيه تنضيف لون الخلفية عن الحواف) وبينزّل موديل `birefnet-general` |
 | `--with-birefnet --lite` | نفس الشي بس الموديل الأصغر `birefnet-general-lite` (للرام القليلة) |
 | `--with-birefnet --gpu` | `rembg[gpu]` (بدك كرت NVIDIA ودرايفر ومكتبات CUDA مناسبة) |
 | `--with-redis` | بينصّب redis-server (فقط إذا بتستعمل Redis) |

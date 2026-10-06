@@ -264,13 +264,18 @@ step_python() {
 }
 
 # ---------------------------------------------------------------- 4. local background removal (optional)
+REMBG_VERSION="2.0.85"
+
 step_birefnet() {
     if ((!WITH_BIREFNET)); then return 0; fi
     log "4/10 rembg + BiRefNet model"
     local extra="cpu" model="birefnet-general"
     if ((GPU)); then extra="gpu"; fi
     if ((LITE)); then model="birefnet-general-lite"; fi
-    run as_app "$VENV/bin/python" -m pip install --quiet --disable-pip-version-check "rembg[$extra]"
+    # pinned: rembg 2.0.79+ has remove(decontaminate=True) (image_processor passes it when remove() accepts it); 2.0.85
+    # is the release checked. The model is always ours (birefnet-general[-lite]): never rembg's own default bria-rmbg
+    # (CC BY-NC weights).
+    run as_app "$VENV/bin/python" -m pip install --quiet --disable-pip-version-check "rembg[$extra]==$REMBG_VERSION"
     # Download into the shared models folder and prove the model loads (needs RAM: the plain model is large).
     run as_app env "U2NET_HOME=$MODELS_DIR" "$VENV/bin/python" -c \
         'import sys; from rembg import new_session; new_session(sys.argv[1]); print("    model ready:", sys.argv[1])' "$model"
