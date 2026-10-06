@@ -49,8 +49,10 @@ SERPER_API_KEY = os.getenv("SERPER_API_KEY", "")
 # النشر التلقائي: معطل افتراضياً. يُفعّل فقط لبراندات محددة بعد أن تثبت مجموعة الاختبار الذهبية دقة >= 98%
 AUTO_PUBLISH_ENABLED = os.getenv("AUTO_PUBLISH_ENABLED", "False").strip().lower() in ("1", "true", "yes", "on")
 AUTO_PUBLISH_BRANDS = [b.strip() for b in os.getenv("AUTO_PUBLISH_BRANDS", "").split(",") if b.strip()]
-# النشر الآلي لكل الماركات المؤكدة (فئة strict في catalog_match.decide): تفتحه اللوحة فقط حين تثبت مراجعات الفئة دقتها
-AUTO_PUBLISH_STRICT_LANE = os.getenv("AUTO_PUBLISH_STRICT_LANE", "False").strip().lower() in ("1", "true", "yes", "on")
+# النشر الآلي لكل الماركات المؤكدة (فئة strict في catalog_match.decide): شغّال افتراضياً (موافقة المالك)، بس الفئة ما
+# بتنشر شي لحالها قبل ما تثبت مراجعاتها دقتها (decide.strict_lane_readiness: 30 مراجعة عالأقل وحد ويلسون >= 98%).
+# القيمة اللي بيحفظها المالك من الإعدادات (system_settings.auto_publish_strict_lane) بتغلب هالافتراضي
+AUTO_PUBLISH_STRICT_LANE = os.getenv("AUTO_PUBLISH_STRICT_LANE", "True").strip().lower() in ("1", "true", "yes", "on")
 
 # --- identity package (P3) --------------------------------------------------------------------
 # مدى الثقة بالباركود: 'evidence' (الافتراضي: البراند والاسم هما الهوية والباركود دليل مساعد فقط)،
@@ -580,7 +582,8 @@ def load_db_config():
                 AUTO_PUBLISH_ENABLED = str(db_keys["auto_publish_enabled"]).strip().lower() in ("1", "true", "yes", "on")
             if "auto_publish_brands" in db_keys and db_keys["auto_publish_brands"] is not None:
                 AUTO_PUBLISH_BRANDS = [b.strip() for b in str(db_keys["auto_publish_brands"]).split(",") if b.strip()]
-            if "auto_publish_strict_lane" in db_keys and db_keys["auto_publish_strict_lane"] is not None:
+            # خلية فاضية = ما حفظ المالك شي: الافتراضي (شغّال) بيضل
+            if str(db_keys.get("auto_publish_strict_lane") or "").strip():
                 AUTO_PUBLISH_STRICT_LANE = str(db_keys["auto_publish_strict_lane"]).strip().lower() in ("1", "true", "yes", "on")
             if db_keys.get("output_canvas_size"):
                 try:

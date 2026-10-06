@@ -146,10 +146,48 @@ def test_route_writes_the_lane_on_every_pick():
     assert _lanes(strict) == ["lane:strict"]
 
 
-def test_the_lane_is_off_by_default():
-    assert settings.DEFAULTS["AUTO_PUBLISH_STRICT_LANE"] is False and settings.auto_publish_strict_lane() is False
+def test_the_lane_is_on_by_default_and_a_saved_value_wins(monkeypatch):
+    # the owner approved it: on by default, publishing only once ready (above); the Settings page's value wins
+    assert settings.DEFAULTS["AUTO_PUBLISH_STRICT_LANE"] is True and settings.auto_publish_strict_lane() is True
     import config
-    assert getattr(config, "AUTO_PUBLISH_STRICT_LANE", False) is False
+    text = (ROOT / "config.py").read_text(encoding="utf-8")
+    assert 'os.getenv("AUTO_PUBLISH_STRICT_LANE", "True")' in text
+    monkeypatch.setattr(settings, "_config", config)
+    monkeypatch.setattr(config, "AUTO_PUBLISH_STRICT_LANE", False, raising=False)     # what the owner saved
+    assert settings.auto_publish_strict_lane() is False
+    assert "AUTO_PUBLISH_STRICT_LANE=True" in (ROOT / ".env.example").read_text(encoding="utf-8")
+
+
+def test_an_empty_saved_value_keeps_the_default(monkeypatch):
+    import config
+    import pymysql
+
+    monkeypatch.setattr(config, "AUTO_PUBLISH_STRICT_LANE", True, raising=False)
+    rows = [{"key": "auto_publish_strict_lane", "value": ""}]
+
+    class Cursor:
+        def execute(self, statement, *args):
+            pass
+
+        def fetchone(self):
+            return {"table": "system_settings"}
+
+        def fetchall(self):
+            return rows
+
+    class Conn:
+        def cursor(self):
+            return Cursor()
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(pymysql, "connect", lambda **kw: Conn())
+    config.load_db_config()
+    assert config.AUTO_PUBLISH_STRICT_LANE is True
+    rows[0]["value"] = "false"
+    config.load_db_config()
+    assert config.AUTO_PUBLISH_STRICT_LANE is False
 
 
 def test_a_strict_pick_of_a_mapped_brand_auto_publishes_only_with_the_lane_on(monkeypatch):

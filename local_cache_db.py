@@ -146,6 +146,21 @@ _SCHEMA_MIGRATIONS = [
 ]
 
 
+# «النشر الآلي لكل الماركات المؤكدة» صار شغّال افتراضياً (موافقة المالك). قبل هيك كانت البذرة تكتب 'false'، ومفتاح
+# الإعدادات ما كان بيقبل التشغيل قبل ما تجهز الفئة، فالـ 'false' المحفوظ هو البذرة القديمة مش اختيار. مرة وحدة بس
+# (علامة STRICT_LANE_DEFAULT_MARKER) بيصير 'true'؛ بعدها أي قيمة بيحفظها المالك من الإعدادات بتغلب. الفئة ما بتنشر شي
+# لحالها قبل ما تثبت مراجعاتها دقتها (catalog_match.decide.strict_lane_readiness).
+STRICT_LANE_DEFAULT_MARKER = "migration_strict_lane_default_on"
+
+
+def _strict_lane_default_on(cursor):
+    cursor.execute("INSERT IGNORE INTO system_settings (`key`, `value`) VALUES (%s, %s)",
+                   (STRICT_LANE_DEFAULT_MARKER, "1"))
+    if cursor.rowcount == 1:
+        cursor.execute("UPDATE system_settings SET `value` = 'true' WHERE `key` = 'auto_publish_strict_lane' "
+                       "AND LOWER(TRIM(COALESCE(`value`, ''))) IN ('false', '0', 'no', 'off', '')")
+
+
 def init_db():
     """
     إنشاء قاعدة البيانات وجداولها إن لم تكن موجودة وتطبيق الترقيات بشكل Idempotent.
@@ -430,13 +445,14 @@ def init_db():
             "search_engine": getattr(config, "SEARCH_ENGINE", "v2"),
             "auto_publish_enabled": "false",
             "auto_publish_brands": "",
-            "auto_publish_strict_lane": "false",
+            "auto_publish_strict_lane": "true",
             "output_canvas_size": str(getattr(config, "OUTPUT_CANVAS_SIZE", 800)),
             "output_background": str(getattr(config, "OUTPUT_BACKGROUND", "transparent")),
             "strict_brand_match": "true",
         }
         for k, v in default_settings.items():
             cursor.execute("INSERT IGNORE INTO system_settings (`key`, `value`) VALUES (%s, %s)", (k, v))
+        _strict_lane_default_on(cursor)
 
         for stmt in _SCHEMA_MIGRATIONS:
             cursor.execute(stmt)

@@ -1715,14 +1715,17 @@ def action_undo_reject(params):
 def action_review_stats(params):
     """
     دقة الاختيار المسبق لكل براند ونطاق من review_decisions (local_cache_db.review_stats، نفس حساب
-    scripts/review_stats.py). لا يغير أي إعداد.
+    scripts/review_stats.py). لا يغير أي إعداد. strict_lane_enabled: مفتاح «النشر الآلي لكل الماركات المؤكدة» متل ما
+    بيقرأه العامل (catalog_match.settings: المحفوظ بالإعدادات، وإلا .env، وإلا الافتراضي شغّال).
     """
+    from catalog_match import settings as cm_settings
     try:
         rows = local_cache_db.get_review_decisions()
     except Exception:
         return _failure('failed', "Could not read the review decisions (details in temp/search.log).",
                         "review_stats failed")
-    return dict({'status': 'success'}, **local_cache_db.review_stats(rows))
+    return dict({'status': 'success'}, **local_cache_db.review_stats(rows),
+                strict_lane_enabled=bool(cm_settings.auto_publish_strict_lane()))
 
 
 # ---------------------------------------------------------------------------
