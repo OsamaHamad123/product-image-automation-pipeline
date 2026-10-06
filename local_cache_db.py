@@ -435,8 +435,10 @@ def init_db():
         # ماركة (كاش: ما منعيد البحث المدفوع)، والماركات اللي كتبها المساعد بالشيت مع اللي انكتب فعلاً (للتراجع)
         cursor.execute(BRAND_SITES_TABLE_SQL)
         cursor.execute(BRAND_WRITES_TABLE_SQL)
-        # 15. متجهات الصور المعتمدة (catalog_match.embeddings): مراجع فحص شكل العبوة، دليل فقط
+        # 15. متجهات الصور المعتمدة (catalog_match.embeddings): مراجع فحص شكل العبوة، دليل فقط. العمود embedding لا
+        # vector: VECTOR نوع بيانات محجوز من MariaDB 11.7 (خطأ 1064 بإنشاء الجدول)؛ جدول قديم أُنشئ بالاسم القديم يُعاد تسميته
         cursor.execute(APPROVED_EMBEDDINGS_SQL)
+        cursor.execute("ALTER TABLE approved_embeddings CHANGE COLUMN IF EXISTS `vector` embedding BLOB NOT NULL")
 
         # القيم الافتراضية المبدئية من ملف .env (INSERT IGNORE لا يغير القيم الموجودة)
         import config
@@ -1102,7 +1104,7 @@ APPROVED_EMBEDDINGS_SQL = """
         source VARCHAR(16) NOT NULL,
         content_sha256 CHAR(64) NULL,
         dim SMALLINT NOT NULL,
-        vector BLOB NOT NULL,
+        embedding BLOB NOT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         UNIQUE KEY uq_approved_embedding (model, sku_key, url_hash),
         INDEX idx_approved_embedding_brand (model, brand_key)
@@ -1125,10 +1127,10 @@ def save_approved_embedding(model, sku_key, brand_key, brand, cloudinary_url, so
         cursor = conn.cursor()
         cursor.execute("""
             INSERT INTO approved_embeddings (model, sku_key, brand_key, brand, cloudinary_url, url_hash, source,
-                                             content_sha256, dim, vector)
+                                             content_sha256, dim, embedding)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON DUPLICATE KEY UPDATE brand_key = VALUES(brand_key), brand = VALUES(brand), source = VALUES(source),
-                content_sha256 = VALUES(content_sha256), dim = VALUES(dim), vector = VALUES(vector),
+                content_sha256 = VALUES(content_sha256), dim = VALUES(dim), embedding = VALUES(embedding),
                 created_at = CURRENT_TIMESTAMP
         """, (str(model)[:64], str(sku_key)[:64], str(brand_key)[:255], _clip(brand, 255), url,
               hashlib.sha1(url.encode("utf-8")).hexdigest(), str(source or "")[:16],
@@ -1148,7 +1150,7 @@ def get_approved_embeddings(model):
     try:
         cursor = conn.cursor()
         cursor.execute(f"""
-            SELECT e.sku_key, e.brand_key, e.brand, e.vector, e.dim
+            SELECT e.sku_key, e.brand_key, e.brand, e.embedding AS vector, e.dim
             FROM approved_embeddings e
             JOIN resolved_products r ON r.sku_key = e.sku_key AND r.cloudinary_url = e.cloudinary_url
             WHERE e.model = %s AND r.{_SERVABLE_SQL}

@@ -203,7 +203,7 @@ def cosine(a: Any, b: Any) -> Optional[float]:
 
 
 def to_blob(vector: Any) -> bytes:
-    """float32 little-endian bytes of a vector (the approved_embeddings.vector column)."""
+    """float32 little-endian bytes of a vector (the approved_embeddings.embedding column)."""
     np = _np()
     return np.asarray(vector, dtype="<f4").reshape(-1).tobytes()
 
