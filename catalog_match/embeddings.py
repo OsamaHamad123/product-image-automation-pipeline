@@ -18,9 +18,44 @@ Model choice: DINOv2-small ('dinov2', the default of --with-embeddings), Apache-
     only help a query by words, which the search already does. DINOv2-small is also ~4x cheaper on a CPU (22M
     parameters, 384-d vectors) than SigLIP2-base's vision tower (86M, 768-d). 'siglip2' is kept as a pinned option
     for an experiment; its thresholds are not calibrated (see THRESHOLDS below).
-    Both are the int8 ONNX exports of onnx-community (dynamic quantisation): on a 4-core CPU a batch of 8 pictures
-    takes about 0.25 s with DINOv2-small int8 against 0.7 s for its fp32 export, and its vectors agree with fp32's
-    (see Thresholds below).
+    Both are the int8 ONNX exports of onnx-community (dynamic quantisation). Measured on the shared 4-core sandbox
+    (load average 3-4), the brand look check of one SKU (8 downloaded pictures: decode, preprocess, one batch) takes
+    0.28 s median (p90 0.33 s) with DINOv2-small int8 on 2 threads, against 1.1 s for the fp32 export; the first SKU
+    of a process adds ~0.4-0.65 s (session load and the sha256 check). Brands with fewer than 3 approved pictures
+    cost nothing (the model is not even loaded). The int8 vectors agree with fp32's (cosine median 0.98, p5 0.96 on
+    159 real packshots) and separate brands as well (see Thresholds).
+
+Uses (all evidence only; none picks, flips or rejects anything):
+    BrandLook / annotate()   the brand look check of a SKU's downloaded candidates -> FetchedImage.look, read by
+                             decide ('brand_look_mismatch': a review warning and an auto-publish blocker)
+    remember_approval()      the vector of every approved picture (approved_embeddings), the check's references
+    pair_similarity()        the cosine next to pHash, for a near-duplicate dedupe
+    scripts/backfill_embeddings.py  vectors for the approvals made before, --setup, --calibrate
+
+Thresholds (THRESHOLDS, per model; cosines of unit vectors)
+    dinov2: same_max 0.45, other_min 0.70, margin 0.20, near_dup 0.90. Calibrated in the sandbox on 159 public front
+    packshots of 13 brands (Open Food Facts, fetched at test time, never committed), int8, CLS token (it separated
+    brands slightly better than CLS + mean of the patch tokens):
+      * closest approved picture of the SAME brand (another product of it): median 0.70, p25 0.56, p5 0.37;
+      * closest picture of ANOTHER brand: median 0.62, p95 0.79;
+      * the same picture re-encoded / resized / re-cropped / padded / rotated: min 0.82, p5 0.86, median 0.96;
+        two different products reach 0.90 in 0.15 % of the pairs (near_dup 0.90);
+      * the rule (same < 0.45 and other >= 0.70 and other - same >= 0.20, with >= 3 approved pictures of the brand)
+        warned on 2 of 159 right-brand pictures: one was the same Pringles photo filed under 'kelloggs' and
+        'pringles' (a parent brand: real approvals file it under one sheet brand), one a real look-alike (Milka
+        hazelnut next to Nutella). A pack of another brand was warned in 67 % of the trials when that very picture
+        is approved under its own brand (stores reuse packshots), 28 % when only other products of it are.
+    The synthetic tests (tests/catalog_match/test_cm_brand_look.py) pin the rule itself with the colour fake.
+    siglip2: not calibrated; its cosines run higher for any two packshots, so its values are kept strict.
+    Re-tuning once real approvals accumulate (a few hundred, several brands with 10+):
+      1. python3 scripts/backfill_embeddings.py --apply (vectors for every approval), then --calibrate: it prints the
+         closest same-brand and other-brand cosines of the approved pictures (leave one out) and how many of them
+         the rule would flag; every flag there is a false warning. Keep that under ~1 %.
+      2. The reviews tell the rest: the candidates' evidence carries 'look' (same, other, other_brand), so the
+         stored candidates of approvals and of WRONG_BRAND rejections (review_decisions) give the cosines of right
+         and wrong picks. Raise same_max / lower other_min while WRONG_BRAND rejections are still missed, lower
+         same_max when right picks get the warning. Change THRESHOLDS here; a new model file (a new sha256) starts
+         a new set of vectors (model_id), so re-run the backfill after changing the model, not after a threshold.
 
 The model file is pinned: Hugging Face repository + commit + file + sha256 (ModelSpec). It is downloaded once into
 settings.embeddings_model_dir() (install.sh does it ahead of time; otherwise the worker does it on first use),
@@ -30,8 +65,8 @@ committed. A file whose sha256 differs is never loaded.
 Embedder interface: .model_id (the pinned file, stored next to every vector: vectors of two models never meet),
 .dim, .embed(images) -> one unit vector (numpy float32) or None per picture. OnnxEmbedder loads the session lazily
 on the first embed() and runs one inference at a time in the process (a semaphore: the worker searches several
-products at once and each inference already uses every core it is given); pictures go through in batches of
-BATCH_SIZE. get_embedder() is the process-wide embedder of the setting, or None.
+products at once and each inference already uses the threads it is given, half the cores); pictures go through in
+batches of BATCH_SIZE. get_embedder() is the process-wide embedder of the setting, or None.
 
 Preprocessing (preprocess): a transparent picture is put on white, the near-white margin is trimmed, the pack is
 centred on a white square and resized to the model's input. A raw store packshot and an approved cutout (trimmed,
@@ -46,7 +81,7 @@ import os
 import threading
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, List, Optional, Sequence, Tuple
 
@@ -344,7 +379,9 @@ class OnnxEmbedder:
         self.spec = spec
         self.model_dir = model_dir
         self.allow_download = allow_download
-        self.threads = threads or max(1, min(4, os.cpu_count() or 1))
+        # half the cores: the worker searches several products at once and may run rembg; on a busy 4-core machine
+        # 2 threads embed 8 pictures in ~0.34 s where 4 threads (oversubscribed) take ~0.76 s
+        self.threads = threads or max(1, min(4, (os.cpu_count() or 2) // 2))
         self._clock = clock
         self._lock = threading.Lock()
         self._session = None

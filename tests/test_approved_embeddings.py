@@ -11,12 +11,11 @@ import hashlib
 import io
 
 import pytest
-from PIL import Image
 
 from catalog_match import embeddings, settings
 from embed_fakes import ColourEmbedder, packshot
 from test_review_decisions import (  # noqa: F401  (the bridge with the sheet and the processing replaced)
-    BRAND, CANDIDATES, LINK, NAME, PRE_URL, ROW, SKU, _approve_params, _upload_params, db_only, recorder, sheet,
+    BRAND, CANDIDATES, LINK, PRE_URL, SKU, _approve_params, _upload_params, db_only, recorder, sheet,
 )
 from test_worker_wiring import _best, _task, race  # noqa: F401  (the worker's real auto-publish path)
 

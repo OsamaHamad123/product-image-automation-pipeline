@@ -215,7 +215,7 @@ def main(argv=None):
         verb = "embedded" if args.apply else "would embed (dry run)"
         _log(f"embeddings backfill: {summary['missing']} approvals without a vector (cap {args.max}); {verb} "
              f"{summary['embedded'] if args.apply else summary['missing']}, unreadable {summary['unreadable']}, "
-             f"without a brand {summary['skipped']}" + (f", stopped at the time cap" if summary["stopped"] else ""))
+             f"without a brand {summary['skipped']}" + (", stopped at the time cap" if summary["stopped"] else ""))
         return 0
     except Exception as exc:  # noqa: BLE001 - the message names the type only
         _log(f"embeddings backfill failed: {type(exc).__name__}: {exc}")
