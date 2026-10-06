@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use App\Services\ImageProxy;
 use App\Services\PythonBridge;
 use App\Services\QueueStats;
 
@@ -55,6 +56,12 @@ class ApiController extends Controller
     public function search(Request $request)
     {
         $result = $this->runPython('search', $request->all());
+        // مضيفو صور النتيجة: شاشة الكتالوج تعرضها عبر /api/image-proxy ولا تحفظها في curation_candidates
+        $urls = [is_array($result['selected_image'] ?? null) ? ($result['selected_image']['url'] ?? null) : null];
+        foreach (is_array($result['candidates'] ?? null) ? $result['candidates'] : [] as $candidate) {
+            $urls[] = is_array($candidate) ? ($candidate['url'] ?? null) : null;
+        }
+        ImageProxy::rememberHosts($urls);
         return response()->json($result, PythonBridge::httpStatus($result));
     }
 
@@ -618,11 +625,12 @@ class ApiController extends Controller
     /**
      * جلب الصور الخارجية وتخطي حظر الـ Hotlinking.
      * يقبل http/https فقط ولا يعيد إلا محتوى صورة نقطية (raster) بنوع image/* صحيح،
-     * حتى لا تُخدم صفحة HTML أو SVG من نطاق لوحة التحكم.
+     * حتى لا تُخدم صفحة HTML أو SVG من نطاق لوحة التحكم. ImageProxy: مضيف عرفه النظام فقط (مرشح أو صورة محفوظة أو
+     * نتيجة بحث أو رابط الشيت، و Cloudinary)، بشهادة TLS متحقق منها، وعناوين عامة فقط حتى بعد كل تحويل، و 15MB حداً.
      */
     public function imageProxy(Request $request)
     {
-        $url = (string) $request->query('url', '');
+        $url = trim((string) $request->query('url', ''));
         if ($url === '') {
             return response('Missing URL', 400);
         }
@@ -630,28 +638,24 @@ class ApiController extends Controller
         if (!in_array($scheme, ['http', 'https'], true)) {
             return response('Unsupported URL scheme', 400);
         }
-        try {
-            $response = \Illuminate\Support\Facades\Http::withoutVerifying()->withHeaders([
-                'User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Accept' => 'image/webp,image/png,image/jpeg,image/*;q=0.8'
-            ])->timeout(10)->get($url);
-
-            if (!$response->successful()) {
-                return response('Error fetching image', $response->status());
-            }
-            $body = $response->body();
-            $info = @getimagesizefromstring($body);
-            $mime = is_array($info) ? ($info['mime'] ?? '') : '';
-            if ($mime === '' || strpos($mime, 'image/') !== 0 || stripos($mime, 'svg') !== false) {
-                return response('Upstream content is not a raster image', 415);
-            }
-            return response($body, 200)
-                ->header('Content-Type', $mime)
-                ->header('X-Content-Type-Options', 'nosniff')
-                ->header('Cache-Control', 'private, max-age=3600');
-        } catch (\Exception $e) {
-            return response('Error: ' . $e->getMessage(), 502);
+        if (!ImageProxy::allowedHost((string) parse_url($url, PHP_URL_HOST))) {
+            return response('Image host not allowed', 403)->header('Cache-Control', 'no-store');
         }
+        $fetched = ImageProxy::fetch($url);
+        if (!isset($fetched['body'])) {
+            // رمز عام فقط: لا نص استثناء ولا تفاصيل الشبكة الداخلية
+            return response('Image unavailable', $fetched['status'])->header('Cache-Control', 'no-store');
+        }
+        $body = $fetched['body'];
+        $info = @getimagesizefromstring($body);
+        $mime = is_array($info) ? ($info['mime'] ?? '') : '';
+        if ($mime === '' || strpos($mime, 'image/') !== 0 || stripos($mime, 'svg') !== false) {
+            return response('Upstream content is not a raster image', 415)->header('Cache-Control', 'no-store');
+        }
+        return response($body, 200)
+            ->header('Content-Type', $mime)
+            ->header('X-Content-Type-Options', 'nosniff')
+            ->header('Cache-Control', ImageProxy::cacheControl($url));
     }
 
     /**
@@ -861,7 +865,11 @@ class ApiController extends Controller
      */
     public function previewSheet(Request $request)
     {
-        $result = $this->runPython('sheet-preview', $request->all());
+        $params = self::sheetParams($request);
+        if (isset($params['error'])) {
+            return response()->json($params, 422);
+        }
+        $result = $this->runPython('sheet-preview', $params);
         if (isset($result['status']) && $result['status'] === 'success') {
             return response()->json($result, 200);
         }
@@ -873,11 +881,45 @@ class ApiController extends Controller
      */
     public function saveSheetConfig(Request $request)
     {
+        $params = self::sheetParams($request);
+        if (isset($params['error'])) {
+            return response()->json($params, 422);
+        }
         ProductController::forgetProductCaches();
-        $result = $this->runPython('sheet-save', $request->all());
+        $result = $this->runPython('sheet-save', $params);
         if (isset($result['status']) && $result['status'] === 'success') {
             return response()->json($result, 200);
         }
         return response()->json($result, 500);
+    }
+
+    /** رابط شيت Google، كما يقبله cli_bridge.SHEET_URL_RE (رابط http(s) غيره مرفوض؛ النص بلا http اسم شيت). */
+    private const SHEET_URL_RE = '~^https://docs\.google\.com/spreadsheets/(?:u/\d+/)?d/[A-Za-z0-9_-]{20,}(?:[/?#][^\s"\'\\\\]*)?$~D';
+
+    /**
+     * {spreadsheet_url, tab_name} فقط، بنفس قواعد cli_bridge._sheet_inputs: القيمتان تُكتبان في .env كسطر KEY="VALUE"،
+     * فلا سطر جديد ولا محرف تحكم ولا علامة تنصيص ولا \. وإلا {status: failed, error, error_code}.
+     */
+    public static function sheetParams(Request $request): array
+    {
+        $url = $request->input('spreadsheet_url');
+        $tab = $request->input('tab_name');
+        $invalid = ['status' => 'failed', 'error_code' => 'invalid_sheet',
+                    'error' => 'Invalid spreadsheet URL or tab name: use a https://docs.google.com/spreadsheets/d/... '
+                        . 'link or a sheet name, with no quotes, backslashes or line breaks'];
+        if (!(is_string($url) || $url === null) || !(is_string($tab) || $tab === null)) {
+            return $invalid;
+        }
+        $url = trim((string) $url);
+        $tab = trim((string) $tab);
+        if ($url === '') {
+            return ['status' => 'failed', 'error' => 'Spreadsheet URL or name is required'];
+        }
+        $forbidden = '/[\x00-\x1f\x7f"\'\\\\]/';
+        if (mb_strlen($url) > 500 || mb_strlen($tab) > 100 || preg_match($forbidden, $url) || preg_match($forbidden, $tab)
+            || (preg_match('~^https?://~i', $url) && !preg_match(self::SHEET_URL_RE, $url))) {
+            return $invalid;
+        }
+        return ['spreadsheet_url' => $url, 'tab_name' => $tab];
     }
 }

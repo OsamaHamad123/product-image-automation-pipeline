@@ -72,6 +72,10 @@
         if (res && res.status === 419) return { text: 'انتهت صلاحية الصفحة. حدّثها وجرّب مرة تانية.', detail: '' };
         var data = res && isObject(res.data) ? res.data : {};
         var detail = typeof data.error === 'string' ? data.error : '';
+        if (data.error_code === 'invalid_sheet') {
+            return { text: 'الرابط أو اسم التبويب مش مقبول: حط رابط شيت Google (بيبلّش بـ https://docs.google.com/spreadsheets/d/) '
+                + 'أو اسم الشيت، بدون علامات تنصيص ولا سطر جديد.', detail: detail };
+        }
         if (/required/i.test(detail)) return { text: 'اكتب رابط الشيت أو اسمه أول.', detail: detail };
         if (saving) return { text: 'ما انحفظ الربط. تأكد إن ملف .env بمجلد المشروع قابل للكتابة وجرّب مرة تانية.', detail: detail };
         return { text: 'ما قدرنا نفتح الشيت. تأكد من الرابط أو الاسم، ومن إنه مشارك مع حساب الخدمة.', detail: detail };
