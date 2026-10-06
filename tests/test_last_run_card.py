@@ -74,12 +74,13 @@ def test_last_run_card_texts():
               "ready_for_review": 4, "pending_left": 0,
               "report_json": {"reason_text": "توقف على انقطاع، وأثناء انتظار إعادة المحاولة بدأ تشغيل آخر وتولى إكمال الطابور"}}
     out = _cards([done, outage, skipped, budget, None, handed])
-    assert out[0] == {"title": "التشغيل الليلي: خلص", "tone": "success", "when": "2026-10-03 02:00",
+    # started_at is the server's UTC; the card says it in the shop's time (config app.display_timezone, Asia/Dubai: +4)
+    assert out[0] == {"title": "التشغيل الليلي: خلص", "tone": "success", "when": "2026-10-03 06:00",
                       "summary": "بانتظار المراجعة 90 · ما انلقت 20 · فشل 8"}
     assert out[1]["title"] == "التشغيل الليلي: انقطاع (قاعدة البيانات لا ترد)" and out[1]["tone"] == "danger"
     assert out[1]["summary"] == "انعاد التشغيل مرتين بعد انقطاع"
     assert out[2] == {"title": "التشغيل الليلي: ما بلّش لأنو في تشغيل تاني شغّال", "tone": "muted",
-                      "when": "2026-10-03 02:00", "summary": ""}
+                      "when": "2026-10-03 06:00", "summary": ""}
     assert out[3]["title"] == "تشغيل من اللوحة: وقف قبل ما يخلص الطابور (BUDGET_REACHED)"
     assert out[3]["summary"] == "بانتظار المراجعة 0 · بقي بالانتظار 40" and out[3]["when"] == ""
     assert out[4] is None

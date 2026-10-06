@@ -793,8 +793,8 @@ const ctl = LaqtaRunPage.createController(deps);
                             "/api/batch/resume"]
     force, _, stop, reset, stop2, reset2 = out["confirms"]
     assert "الصور المنشورة بالشيت بتضل مكانها" in force and "ما بينكتب أبداً فوق صورة اعتمدها مراجع" in force
-    assert "لا يُحذف أي صف" in stop and stop == stop2
-    assert "لا يُحذف أي منتج جاهز للمراجعة أو معتمد أو فاشل" in reset and reset == reset2
+    assert "ما في ولا صف بينمسح" in stop and stop == stop2
+    assert "ما في ولا منتج جاهز للمراجعة أو معتمد أو فاشل بينمسح" in reset and reset == reset2
     assert any(t[0] == "رسالة الخادم" for t in out["toasts"])        # the server's own Arabic message is shown
 
 
@@ -1205,7 +1205,7 @@ const ctl = LaqtaRunPage.createController(deps);
 """)
     # review fix C5: Stop now waits up to 90 s for the worker to finish its products, so the page says so first
     assert out["toasts"] == [["انوقف التشغيل مؤقتاً.", "success"], ["رجع التشغيل يشتغل.", "success"],
-                             ["عم نوقف التشغيل: العامل بيكمّل المنتجات الجارية (حتى دقيقة ونص).", "info"],
+                             ["عم نوقف التشغيل: العامل بيكمّل المنتجات اللي بإيده (حتى دقيقة ونص).", "info"],
                              ["تم إيقاف التشغيل. لم يُحذف أي صف.", "success"], ["ما قدرنا نصلّح التشغيل.", "danger"]]
 
 

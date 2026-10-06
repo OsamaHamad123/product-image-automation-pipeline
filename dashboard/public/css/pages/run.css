@@ -696,3 +696,15 @@
         flex: 1 1 auto;
     }
 }
+
+/* «راجع الجاهز هلق (N)» while the run goes, and «نبّهني لما يخلص» */
+.lq-run-handoff {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+}
+
+.lq-run-handoff:not(:has(> :not([hidden]))) {
+    display: none;
+}

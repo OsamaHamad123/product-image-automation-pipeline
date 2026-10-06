@@ -155,6 +155,39 @@
         };
     }
 
+    /*
+     * «شو الخطوة الجاية؟»: one step, the first that applies. waiting: the review count (the sidebar badge's number);
+     * brands: the count of brands missing from «جدول الماركات» (/api/run/brand-suggestions, read only when nothing waits),
+     * null while unknown; notFound: the KPI. Returns null while it cannot tell yet.
+     */
+    function nextStep(waiting, brands, notFound, phase) {
+        var w = C.num(waiting);
+        if (w !== null && w > 0) {
+            return { key: 'review', title: C.countText(w, 'صورة', 'صورتين', 'صور') + ' جاهزة للمراجعة.',
+                     text: 'راجعها بالجملة: المقترحة بلا تحذير بتنعتمد بضغطة.', action: 'راجعها هلق', href: '/catalog?mode=bulk' };
+        }
+        if (w === null) return null;
+        var b = C.num(brands);
+        if (b === null && brands !== false) return null;
+        if (b > 0) {
+            return { key: 'brands', title: C.countText(b, 'ماركة', 'ماركتين', 'ماركات') + ' ناقصة من جدول الماركات.',
+                     text: 'البحث ما بيعرفها، فما بينشر صورها لحاله. ضيفها قبل التشغيل الجاي.', action: 'ضيف الماركات',
+                     href: '/batch-automation#run-brands' };
+        }
+        var nf = C.num(notFound);
+        if (nf !== null && nf > 0) {
+            return { key: 'not_found', title: C.countText(nf) + ' ما انلقت إلها صورة.',
+                     text: 'شوفها ورجّعها للطابور، أو دوّر عليها بكلمات ثانية.', action: 'شوف اللي ما انلقت',
+                     href: '/catalog?filter=not_found' };
+        }
+        if (C.isActive(phase)) {
+            return { key: 'running', title: 'التشغيل شغّال.', text: 'الصور بتوصل لقائمة المراجعة وهو شغّال.',
+                     action: 'تفاصيل التشغيل', href: '/batch-automation' };
+        }
+        return { key: 'run', title: 'كل شي مراجَع.', text: 'ابدأ تشغيل جديد ليجيب صور للمنتجات الباقية.',
+                 action: 'ابدأ تشغيل', href: '/batch-automation' };
+    }
+
     /* One banner for everything that needs attention: the run's alert first, then provider alerts (ops_health). */
     function mergeBanner(liveBanner, alerts) {
         var items = [];
@@ -184,7 +217,7 @@
      * now() -> epoch seconds, schedule(fn, ms).
      */
     function createController(deps) {
-        var state = { lastPhase: null, overview: null, live: null, liveBanner: null };
+        var state = { lastPhase: null, overview: null, live: null, liveBanner: null, brands: null, brandsAsked: false };
 
         function now() {
             return deps.now ? deps.now() : Date.now() / 1000;
@@ -192,6 +225,24 @@
 
         function banner() {
             deps.renderBanner(mergeBanner(state.liveBanner, state.overview ? state.overview.alerts : []));
+            step();
+        }
+
+        // the next step; the missing brands are read (once) only when nothing waits for review
+        function step() {
+            if (!deps.renderNext) return;
+            var waiting = state.live && C.num(state.live.waiting) !== null ? state.live.waiting
+                : (state.overview ? (state.overview.kpis.filter(function (k) { return k.key === 'waiting'; })[0] || {}).value : null);
+            var notFound = state.overview ? (state.overview.kpis.filter(function (k) { return k.key === 'not_found'; })[0] || {}).value : null;
+            if (C.num(waiting) === 0 && !state.brandsAsked && deps.fetchJson) {
+                state.brandsAsked = true;
+                deps.fetchJson('/api/run/brand-suggestions').then(function (res) {
+                    var data = res && res.ok && res.data && res.data.status === 'success' ? res.data : null;
+                    state.brands = data ? (C.num(data.count) || 0) : false;
+                    step();
+                });
+            }
+            deps.renderNext(nextStep(waiting, state.brands, notFound, state.live ? state.live.phase : null));
         }
 
         function loadOverview(fresh) {
@@ -241,7 +292,7 @@
             });
         }
 
-        return { state: state, loadOverview: loadOverview, handleLive: handleLive, poll: poll, loop: loop };
+        return { state: state, loadOverview: loadOverview, handleLive: handleLive, poll: poll, loop: loop, step: step };
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -258,7 +309,7 @@
         var greetingEl = $('greeting');
         var today = new Date();
         C.setText($('date'), C.dateLine(today));
-        C.setText(greetingEl, C.greeting(today.getHours(), greetingEl.getAttribute('data-owner') || ''));
+        C.setText(greetingEl, C.greeting(C.zoneHour(today), greetingEl.getAttribute('data-owner') || ''));
 
         function renderOverview(view) {
             view.kpis.forEach(function (k) {
@@ -393,6 +444,18 @@
             }
         }
 
+        function renderNext(view) {
+            var box = $('next');
+            C.setHidden(box, !view);
+            if (!view) return;
+            box.setAttribute('data-step', view.key);
+            C.setText($('next-title'), view.title);
+            C.setText($('next-text'), view.text);
+            var go = $('next-action');
+            C.setText(go, view.action);
+            go.setAttribute('href', view.href);
+        }
+
         function renderBanner(view) {
             var box = $('alert');
             C.setHidden(box, !view.visible);
@@ -408,6 +471,7 @@
             renderOverview: renderOverview,
             renderLive: renderLive,
             renderBanner: renderBanner,
+            renderNext: renderNext,
             toast: C.toast,
             now: function () { return Date.now() / 1000; },
             schedule: function (fn, ms) { return root.setTimeout(fn, ms); }
@@ -433,6 +497,7 @@
         describeOverview: describeOverview,
         describeHomeLive: describeHomeLive,
         mergeBanner: mergeBanner,
+        nextStep: nextStep,
         createController: createController,
         mount: mount
     };

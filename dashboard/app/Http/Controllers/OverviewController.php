@@ -58,7 +58,8 @@ class OverviewController extends Controller
     public function index()
     {
         $live = RunController::snapshot();
-        $now = now();
+        // the greeting and the date line in the shop's time zone (home.js rewrites them in the same zone)
+        $now = now()->setTimezone(ReviewController::displayTimezone());
         $owner = trim((string) env('LAQTA_OWNER_NAME', ''));
         return view('dashboard.index', [
             'live' => $live,
@@ -190,13 +191,13 @@ class OverviewController extends Controller
      * both read this list.
      */
     public const KPI_TILES = [
-        'waiting' => ['label' => 'بانتظار مراجعتك', 'dot' => 'saffron', 'href' => '/catalog',
+        'waiting' => ['label' => 'بانتظار مراجعتك', 'dot' => 'saffron', 'href' => '/catalog?mode=bulk',
                       'source' => 'automation_queue ready_for_review (QueueStats::counters, same as /api/batch-status)'],
         'published' => ['label' => 'منشورة بالشيت', 'dot' => 'teal', 'href' => '/catalog',
                         'source' => 'sheet funnel stage published (OverviewController::funnel)'],
-        'not_found' => ['label' => 'ما انلقت إلها صورة', 'dot' => 'info', 'href' => '/catalog',
+        'not_found' => ['label' => 'ما انلقت إلها صورة', 'dot' => 'info', 'href' => '/catalog?filter=not_found',
                         'source' => 'sheet funnel stage not_found (OverviewController::funnel)'],
-        'failed' => ['label' => 'أعطال مؤقتة', 'dot' => 'danger', 'href' => '/system-diagnostics',
+        'failed' => ['label' => 'أعطال مؤقتة', 'dot' => 'danger', 'href' => '/catalog?filter=failed',
                      'source' => 'sheet funnel stage failed (OverviewController::funnel)'],
     ];
 

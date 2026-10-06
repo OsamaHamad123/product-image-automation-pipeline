@@ -2731,6 +2731,19 @@ body.rv-lb-open {
         display: none;
     }
 
+    /* the chips in one row that scrolls sideways (inside the row, never the page) */
+    .rv-bulk__filters {
+        flex-wrap: nowrap;
+        margin-inline: calc(var(--lq-space-4) * -1);
+        padding-inline: var(--lq-space-4);
+        overflow-x: auto;
+        scrollbar-width: none;
+    }
+
+    .rv-bulk__filters > * {
+        flex-shrink: 0;
+    }
+
     .rv-bulkbar__count {
         flex-basis: 100%;
     }

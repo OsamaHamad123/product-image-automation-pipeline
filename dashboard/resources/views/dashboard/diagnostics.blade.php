@@ -36,7 +36,7 @@
         <div class="lq-page-header__text">
             <h1 class="lq-page-title">الصحة والتكلفة</h1>
             <p class="lq-page-header__desc" data-health="checked-line">
-                <span data-health="checked-text">@if ($checkedAt)آخر فحص للاتصالات: <time datetime="{{ gmdate('c', $checkedAt) }}" data-health="checked-at">{{ date('Y-m-d H:i', $checkedAt) }}</time>@else لسا ما انعمل فحص للاتصالات.@endif</span><span class="lq-health__warn" data-health="checked-warn" @if ($allOk !== false) hidden @endif> في خدمات أساسية ما بتردّ.</span>
+                <span data-health="checked-text">@if ($checkedAt)آخر فحص للاتصالات: <time datetime="{{ gmdate('c', $checkedAt) }}" data-health="checked-at">{{ \App\Http\Controllers\HealthController::stamp((int) $checkedAt) }}</time>@else لسا ما انعمل فحص للاتصالات.@endif</span><span class="lq-health__warn" data-health="checked-warn" @if ($allOk !== false) hidden @endif> في خدمات أساسية ما بتردّ.</span>
                 الفحص ما بيشتغل لحاله لما تفتح الصفحة.
             </p>
         </div>

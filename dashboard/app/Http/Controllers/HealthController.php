@@ -264,8 +264,24 @@ class HealthController extends Controller
             'sample' => $sampleText,
             'notes' => array_values(array_map('strval', (array) ($result['notes'] ?? []))),
             'steps' => $steps,
-            'when' => $finished ? date('Y-m-d H:i', $finished) : '',
+            'when' => $finished ? self::stamp($finished) : '',
         ];
+    }
+
+    /** وقت كما يقرؤه المالك: بتوقيت المحل (config app.display_timezone، دبي)، مش بتوقيت الخادم (UTC). */
+    public static function stamp(int $ts): string
+    {
+        return (new \DateTimeImmutable('@' . $ts))
+            ->setTimezone(new \DateTimeZone(self::displayZone()))
+            ->format('Y-m-d H:i');
+    }
+
+    /** منطقة وقت المالك (نفس ReviewController::displayTimezone، بدون Laravel كمان: LAQTA_TIMEZONE، دبي افتراضياً). */
+    public static function displayZone(): string
+    {
+        $tz = function_exists('config') ? (string) config('app.display_timezone', 'Asia/Dubai')
+            : ((string) getenv('LAQTA_TIMEZONE') ?: 'Asia/Dubai');
+        return in_array($tz, \DateTimeZone::listIdentifiers(), true) ? $tz : 'Asia/Dubai';
     }
 
     /** GET /api/system/publish-check: آخر نتيجة محفوظة (بلا أي فحص جديد). */
@@ -415,7 +431,7 @@ class HealthController extends Controller
         return [
             'title' => $title,
             'tone' => $tone,
-            'when' => $started ? date('Y-m-d H:i', $started) : '',
+            'when' => $started ? self::stamp($started) : '',
             'summary' => $parts ? implode(' · ', $parts) : (($row['outcome'] ?? '') === 'skipped' ? '' : 'الأرقام مش متاحة.'),
         ];
     }
@@ -443,7 +459,7 @@ class HealthController extends Controller
 
     /**
      * GET /api/system/review-lanes: لكل فئة اختيار (catalog_match.decide.pick_lane) الاقتراحات المراجعة والمعتمد منها
-     * والحد المضمون وكم اعتماداً بقي لتجهز (more_needed)، من review_stats (نفس أرقام تبويب «النشر الآلي»)، مخزّنة
+     * وأقل دقة متوقعة وكم اعتماداً بقي لتجهز (more_needed)، من review_stats (نفس أرقام تبويب «النشر الآلي»)، مخزّنة
      * CACHE_SECONDS متل ops-health. شاشة المراجعة بالجملة تقرأ منها سطر التقدم نحو النشر الآلي (بلا نداء جديد).
      */
     public function reviewLanes(Request $request)

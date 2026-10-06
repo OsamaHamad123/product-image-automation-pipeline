@@ -688,7 +688,7 @@ class SettingsController extends Controller
     }
 
     /**
-     * جدول النشر الآلي من review_stats: لكل ماركة المراجعات والدقة والحد المضمون وحالتها، مع مدخلات
+     * جدول النشر الآلي من review_stats: لكل ماركة المراجعات والدقة وأقل دقة متوقعة (الحد الأدنى لويلسون) وحالتها، مع مدخلات
      * AUTO_PUBLISH_BRANDS التي لا تظهر في الإحصاءات (تبقى ظاهرة وقابلة للإيقاف).
      */
     public static function autoPublishData(array $stored, array $stats): array
@@ -771,7 +771,7 @@ class SettingsController extends Controller
         $text = $n === 0 ? 'لسا ما راجعت ولا اقتراح بهالفئة.' : 'من ' . $n . ' اقتراح بهالفئة، اعتمدت ' . $accepted . '.';
         $details = [];
         if ($n > 0) {
-            $details[] = 'الحد المضمون ' . self::pct($strict['lower_bound'] ?? null);
+            $details[] = 'أقل دقة متوقعة ' . self::pct($strict['lower_bound'] ?? null);
             if ((int) ($strict['replaced'] ?? 0) > 0) {
                 $details[] = 'بدّلت ' . (int) $strict['replaced'];
             }

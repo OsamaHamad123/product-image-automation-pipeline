@@ -1985,6 +1985,56 @@ a.lq-btn[aria-disabled="true"] {
 }
 
 /* ==========================================================================
+   14b. Questions in the page (Laqta.ask, instead of window.confirm)
+   ========================================================================== */
+
+.lq-dialog-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 90;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--lq-space-4);
+    background: rgba(11, 34, 38, 0.45);
+}
+
+.lq-dialog {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    width: min(520px, 100%);
+    max-height: calc(100vh - 32px);
+    padding: var(--lq-space-6);
+    overflow-y: auto;
+    border-radius: var(--lq-radius-xl);
+    background: var(--lq-surface);
+    box-shadow: var(--lq-shadow-toast);
+}
+
+.lq-body .lq-dialog__title,
+.lq-dialog__title {
+    margin: 0;
+    font-family: var(--lq-font-display);
+    font-size: var(--lq-fs-xl);
+    font-weight: 600;
+    line-height: 1.4;
+}
+
+.lq-dialog__text {
+    margin: 0;
+    color: var(--lq-text-2);
+    line-height: 1.8;
+    white-space: pre-line;
+}
+
+.lq-dialog__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--lq-space-3);
+}
+
+/* ==========================================================================
    15. Responsive: the shell stacks at 980px
    ========================================================================== */
 

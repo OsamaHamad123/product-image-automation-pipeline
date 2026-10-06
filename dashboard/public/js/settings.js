@@ -13,6 +13,26 @@
     'use strict';
 
     var PREVIEW_URL = '/api/sheet/preview';
+
+    /* A question before a change: the page's own dialog (Laqta.ask) when it is there, answered later; without it
+       (an old page, the node tests) window.confirm, answered at once (askNow()). ask(texts, then): then(true) after
+       every question was answered «أكيد», then(false) otherwise. */
+    function askNow() {
+        return !(window.Laqta && typeof window.Laqta.ask === 'function');
+    }
+
+    function ask(texts, then) {
+        texts = texts.filter(Boolean);
+        if (askNow()) {
+            then(texts.every(function (t) { return window.confirm(t); }));
+            return;
+        }
+        var chain = Promise.resolve(true);
+        texts.forEach(function (t) {
+            chain = chain.then(function (ok) { return ok ? window.Laqta.ask(t) : false; });
+        });
+        chain.then(then);
+    }
     var SAVE_URL = '/api/sheet/save';
     var BG_METHOD_URL = '/api/settings/bg-method';
 
@@ -249,7 +269,12 @@
                 urlInput.focus();
                 return;
             }
-            if (!window.confirm(saveConfirmText(body.spreadsheet_url, body.tab_name))) return;
+            ask([saveConfirmText(body.spreadsheet_url, body.tab_name)], function (ok) {
+                if (ok) saveSheet(body);
+            });
+        });
+
+        var saveSheet = function (body) {
             setBusy(saveBtn, true);
             showStatus('لحظة، عم نحفظ الربط…', '');
             postJson(SAVE_URL, body).then(function (res) {
@@ -266,7 +291,7 @@
                 showStatus('ما قدرنا نوصل للخادم.', 'danger');
                 setBusy(saveBtn, false);
             });
-        });
+        };
 
         sheetForm.addEventListener('submit', function (e) { e.preventDefault(); });
     }
@@ -315,22 +340,35 @@
         });
     }
 
-    /* No silent destructive save: clearing a stored key asks first (key forms and «متقدم»). */
+    /* No silent destructive save: clearing a stored key asks first (key forms and «متقدم»). With the page's dialog the
+       submit waits for the answer, then goes again once «أكيد». */
     var forms = page.querySelectorAll('form');
     for (var f = 0; f < forms.length; f++) {
         forms[f].addEventListener('submit', function (e) {
             var form = e.currentTarget;
-            if (form.querySelector('[data-key-clear]:checked')
-                && !window.confirm(clearConfirmText(form.getAttribute('data-key-name') || ''))) {
-                e.preventDefault();
+            if (form.__lqConfirmed) {
+                form.__lqConfirmed = false;
                 return;
             }
+            var questions = [];
+            if (form.querySelector('[data-key-clear]:checked')) questions.push(clearConfirmText(form.getAttribute('data-key-name') || ''));
             if (form.hasAttribute('data-advanced-form') && form.getAttribute('data-engine') !== 'v1') {
                 var v1 = form.querySelector('[data-engine-v1]');
-                if (v1 && v1.checked && !window.confirm(ROLLBACK_TEXT)) {
-                    e.preventDefault();
-                }
+                if (v1 && v1.checked) questions.push(ROLLBACK_TEXT);
             }
+            if (!questions.length) return;
+            var now = askNow();
+            if (!now) e.preventDefault();            // the dialog answers later: the submit goes again after «أكيد»
+            ask(questions, function (ok) {
+                if (!ok) {
+                    if (now) e.preventDefault();
+                    return;
+                }
+                if (now) return;                      // window.confirm said yes: the submit goes on as it is
+                form.__lqConfirmed = true;
+                if (form.requestSubmit) form.requestSubmit();
+                else form.submit();
+            });
         });
     }
 
@@ -361,15 +399,22 @@
         var apSave = apForm.querySelector('[data-autopub-save]');
         setHidden(apSave, true);
         if (apSwitch) {
+            // the switch saves itself right after «أكيد» (no «حفظ» button); «لا» puts it back
             apSwitch.addEventListener('change', function () {
                 var text = apSwitch.checked ? apSwitch.getAttribute('data-confirm-on') : apSwitch.getAttribute('data-confirm-off');
-                if (text && !window.confirm(text)) {
-                    apSwitch.checked = !apSwitch.checked;
+                var submit = function () {
+                    apSwitch.disabled = false;
+                    if (apForm.requestSubmit) apForm.requestSubmit();
+                    else apForm.submit();
+                };
+                if (!text) {
+                    submit();
                     return;
                 }
-                apSwitch.disabled = false;
-                if (apForm.requestSubmit) apForm.requestSubmit();
-                else apForm.submit();
+                ask([text], function (ok) {
+                    if (ok) submit();
+                    else apSwitch.checked = !apSwitch.checked;
+                });
             });
         }
     });

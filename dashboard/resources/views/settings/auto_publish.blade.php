@@ -59,7 +59,7 @@
                         <th scope="col">الماركة</th>
                         <th scope="col">مراجعات الاقتراح</th>
                         <th scope="col">الدقة</th>
-                        <th scope="col">الحد المضمون</th>
+                        <th scope="col">أقل دقة متوقعة</th>
                         <th scope="col">الحالة</th>
                     </tr>
                 </thead>
@@ -69,7 +69,7 @@
                             <td class="lq-table__strong lq-autopub__brand"><bdi dir="ltr">{{ $row['label'] }}</bdi></td>
                             <td class="lq-table__num" data-label="مراجعات">{{ $row['reviews'] ?? '—' }}</td>
                             <td class="lq-table__num" data-label="الدقة"><bdi dir="ltr">{{ $row['precision'] }}</bdi></td>
-                            <td class="lq-table__num" data-label="المضمون"><bdi dir="ltr">{{ $row['lower_bound'] }}</bdi></td>
+                            <td class="lq-table__num" data-label="أقل دقة متوقعة"><bdi dir="ltr">{{ $row['lower_bound'] }}</bdi></td>
                             <td class="lq-autopub__cell-status">
                                 <span class="lq-autopub__status">
                                     <x-lq.chip :status="$row['tone']" size="sm" :dot="false" :label="$row['chip']" />

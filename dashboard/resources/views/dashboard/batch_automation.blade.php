@@ -132,13 +132,18 @@
                     </button>
                     <span class="lq-run-controls__note">الإيقاف ما بيحذف شي: المنتج اللي قيد البحث بيرجع للطابور.</span>
                 </div>
+                {{-- ما خلص التشغيل، بس في صور جاهزة: المراجعة بتبلّش هلق (run.js: progress.reviewNow) --}}
+                <div class="lq-run-handoff">
+                    <a class="lq-btn lq-btn--primary lq-btn--sm" href="{{ route('dashboard.catalog') }}?mode=bulk" data-run="review-now" hidden><x-lq.icon name="review" :size="16" :stroke="2" /><span data-run="review-now-text">راجع الجاهز هلق</span></a>
+                    <button type="button" class="lq-btn lq-btn--ghost lq-btn--sm" data-run="notify" hidden>نبّهني لما يخلص</button>
+                </div>
             </div>
 
             <div class="lq-run-finished" data-run="finished" hidden>
                 <p class="lq-run-finished__title" data-run="finished-title"></p>
                 <div class="lq-run-tiles" data-run="tiles"></div>
                 <p class="lq-run-finished__explain" data-run="explain" hidden></p>
-                <x-lq.button variant="primary" icon="review" href="{{ route('dashboard.catalog') }}" data-run="review" hidden><span data-run="review-text">راجع النتائج</span></x-lq.button>
+                <x-lq.button variant="primary" icon="review" href="{{ route('dashboard.catalog') }}?mode=bulk" data-run="review" hidden><span data-run="review-text">راجع النتائج</span></x-lq.button>
             </div>
 
             <div class="lq-alert lq-alert--warning" data-run="stuck" hidden>
@@ -164,9 +169,9 @@
     <div class="lq-run__grid lq-run__grid--tools">
         {{-- Brands the queue names that Brands Mapping has no row for: read from the queue and the sheet (GET /api/run/brand-suggestions);
              the buttons write only when clicked (POST /api/run/brand-add, /brand-add-all) and «اقترح الموقع الرسمي» costs one search --}}
-        <section class="lq-card lq-run-brands" aria-labelledby="run-brands-title" data-run="brands" data-state="loading">
+        <section class="lq-card lq-run-brands" id="run-brands" aria-labelledby="run-brands-title" data-run="brands" data-state="loading">
             <div class="lq-run-brands__head">
-                <h2 class="lq-card__title" id="run-brands-title" data-run="brands-title">ماركات ناقصة من Brands Mapping</h2>
+                <h2 class="lq-card__title" id="run-brands-title" data-run="brands-title">ماركات ناقصة من جدول الماركات</h2>
                 <button type="button" class="lq-btn lq-btn--ghost lq-btn--sm" data-run="brands-refresh">
                     <x-lq.icon name="refresh" :size="16" :stroke="2" />
                     <span>حدّث القائمة</span>

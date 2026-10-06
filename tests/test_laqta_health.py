@@ -453,7 +453,7 @@ def test_strict_lane_section_reads_the_lane_stats(offline):
     assert lane["text"] == "من 12 اقتراح بهالفئة، اعتمدت 12."
     assert lane["unsure_text"].startswith("القارئ مش متأكد بس العنوان بيأكد: اعتمدت 4 من 5.")
     assert (lane["ready"], lane["can_enable"], lane["enabled"]) == (False, False, False)
-    assert lane["chip"] == "تحتاج 177 مراجعة" and "الحد المضمون" in lane["detail"]
+    assert lane["chip"] == "تحتاج 177 مراجعة" and "أقل دقة متوقعة" in lane["detail"]
     assert "لسا مش جاهزة" in out["why"] and "ما قدرنا نتأكد" in out["down"]
     assert out["can_enable"] is False                       # no ready brand, the lane is not ready either
 
@@ -495,7 +495,7 @@ console.log(JSON.stringify({ok: ok, down: H.lanesView(null)}));
 """)
     rows = {r["key"]: r for r in out["ok"]["rows"]}
     assert [r["key"] for r in out["ok"]["rows"]] == ["strict", "unsure", "other"]
-    assert (rows["strict"]["text"], rows["strict"]["bound"]) == ("اعتمدت 12 من 12", "الحد المضمون 75.8%")
+    assert (rows["strict"]["text"], rows["strict"]["bound"]) == ("اعتمدت 12 من 12", "أقل دقة متوقعة 75.8%")
     assert (rows["unsure"]["text"], rows["unsure"]["bound"]) == ("لسا ما في مراجعات", "")
     assert rows["unsure"]["label"] == "القارئ مش متأكد بس العنوان بيأكد"
     assert out["down"]["kind"] == "error" and out["down"]["rows"] == []
