@@ -110,6 +110,10 @@ FLAG_UPSCALED = "upscaled"
 FLAG_TOO_SMALL = "too_small_on_canvas"
 FLAG_OPAQUE_BACKDROP = "opaque_backdrop"
 FLAG_KEPT_SHADOW = "kept_shadow"
+# PhotoRoom قال إنو مش متأكد من حدود المنتج (ترويسة x-uncertainty-score فوق PHOTOROOM_UNCERTAINTY_MAX): للمراجعة، بلا
+# أي إعادة عزل مدفوعة. 0 = متأكد، 1 = مش متأكد، -1 = ما في تقدير
+FLAG_PHOTOROOM_UNSURE = "photoroom_unsure"
+UNCERTAINTY_HEADER = "x-uncertainty-score"
 # ملاحظات لا تمنع النشر (ProcessResult.quality_notes): نفس رمز العلامة، لكن في القائمة غير الحاجبة
 NOTE_UPSCALED = FLAG_UPSCALED
 NON_BLOCKING_NOTES = frozenset({NOTE_UPSCALED})
@@ -186,6 +190,8 @@ class ProcessResult:
         'eligible' (وضع log: كان سيُستخدم) | 'ineligible:<سبب>' | 'flagged:<علامات>'.
     fallback_from: None، أو {"method": الطريقة السحابية، "code": رمز فشلها} لما خلص رصيدها أو مفتاحها أو حصتها فعزلت
         طريقة محلية مجانية (BG_FALLBACK=local) بدلاً منها: provider عندها rembg أو grabcut، واللوحة اجتازت بوابة القص نفسها.
+    uncertainty_score: تقدير PhotoRoom لعدم تأكده من القص المنشور (ترويسة x-uncertainty-score، 0..1)، أو None (مزوّد
+        تاني، أو ما في تقدير). فوق PHOTOROOM_UNCERTAINTY_MAX: العلامة photoroom_unsure و isolated=False (للمراجعة).
     finish: تشطيب اللوحة الشفافة (cutout_finish.finish): background، holes_filled، holes_left، defringed، halo،
         halo_retry. فارغ للوحة البيضا (OUTPUT_BACKGROUND = white).
     """
@@ -201,6 +207,7 @@ class ProcessResult:
     quality_notes: List[str] = field(default_factory=list)
     fallback_from: Optional[Dict[str, str]] = None
     finish: dict = field(default_factory=dict)
+    uncertainty_score: Optional[float] = None
 
 
 # ---------------------------------------------------------------------------
@@ -267,9 +274,63 @@ def _resolve_canvas_size(target_width, target_height) -> Tuple[int, int]:
     return w, h
 
 
+def _adaptive_canvas(cutout: Image.Image, canvas_size: Tuple[int, int], fill: float) -> Tuple[int, int]:
+    """
+    ضلع اللوحة حسب دقة المنتج نفسه: round(الضلع الأطول للمنتج بالبكسل / fill) محصوراً بين الضلع المطلوب (OUTPUT_CANVAS_SIZE،
+    افتراضياً 800) و OUTPUT_CANVAS_MAX (افتراضياً 2048). مصدر كبير بيحتفظ بتفاصيله لشاشة موبايل 3x (~1170 بكسل)، ومصدر صغير
+    بياخد نفس اللوحة متل قبل بالضبط (ما في تكبير زيادة). لوحة مش مربعة (أبعاد صريحة قديمة) بتضل متل ما هي.
+    """
+    w, h = int(canvas_size[0]), int(canvas_size[1])
+    top = settings.output_canvas_max()
+    if w != h or top <= w:
+        return w, h
+    box = alpha_bbox(cutout)
+    if box is None:
+        return w, h
+    long_side = max(box[2] - box[0], box[3] - box[1])
+    side = int(round(long_side / max(float(fill), 1e-6)))
+    side = max(w, min(top, MAX_CANVAS_SIDE, side))
+    return side, side
+
+
 def _to_rgb_or_rgba(img: Image.Image) -> Image.Image:
     has_alpha = img.mode in ("RGBA", "LA", "PA", "RGBa", "La") or "transparency" in img.info
     return img.convert("RGBA") if has_alpha else img.convert("RGB")
+
+
+def _to_srgb(img: Image.Image) -> Image.Image:
+    """
+    صورة فيها بروفايل ألوان مضمّن (CMYK، Display P3، Adobe RGB...) بتتحوّل لـ sRGB (PIL.ImageCms، relative colorimetric)
+    قبل العزل، فاللوحة المنشورة sRGB متل ما بيفترض التطبيق والمتصفح (بلا بروفايل = sRGB). بروفايل sRGB نفسه أو بلا بروفايل:
+    الصورة كما هي (CMYK بلا بروفايل بتتحوّل بعدين متل قبل). بروفايل تالف أو تحويل فشل: الصورة كما هي، مع سطر بالسجل.
+    """
+    icc = img.info.get("icc_profile")
+    if not icc:
+        return img
+    try:
+        from PIL import ImageCms
+
+        source = ImageCms.ImageCmsProfile(io.BytesIO(icc))
+        if "srgb" in str(ImageCms.getProfileDescription(source) or "").lower():
+            out = img.copy()
+        else:
+            if img.mode in ("P", "PA"):
+                img = img.convert("RGBA" if img.mode == "PA" or "transparency" in img.info else "RGB")
+            alpha = img.getchannel("A") if img.mode in ("RGBA", "LA") else None
+            base = img.convert("L" if img.mode == "LA" else "RGB") if alpha is not None else img
+            out = ImageCms.profileToProfile(base, source, ImageCms.createProfile("sRGB"), outputMode="RGB",
+                                            renderingIntent=ImageCms.Intent.RELATIVE_COLORIMETRIC)
+            if out is None:
+                return img
+            if alpha is not None:
+                out.putalpha(alpha)
+            logger.info("تحويل ألوان المصدر (%s, %s) إلى sRGB", img.mode,
+                        str(ImageCms.getProfileDescription(source) or "").strip())
+    except Exception as exc:  # noqa: BLE001 - بروفايل مش مقروء: الصورة كما هي
+        logger.info("تعذر تحويل بروفايل الألوان المضمّن إلى sRGB (%s)؛ الصورة كما هي", type(exc).__name__)
+        return img
+    out.info.pop("icc_profile", None)
+    return out
 
 
 def _decode_image(data: bytes) -> Tuple[Optional[Image.Image], Optional[str]]:
@@ -288,7 +349,7 @@ def _decode_image(data: bytes) -> Tuple[Optional[Image.Image], Optional[str]]:
             img = ImageOps.exif_transpose(img)
         except Exception:  # noqa: BLE001 - بيانات EXIF تالفة لا تجعل الصورة غير صالحة
             logger.info("تعذر قراءة اتجاه EXIF؛ سيتم استخدام الصورة كما خُزّنت")
-        img = _to_rgb_or_rgba(img)
+        img = _to_rgb_or_rgba(_to_srgb(img))
         if img.width < 1 or img.height < 1:
             return None, "not_image"
         return img, None
@@ -617,6 +678,22 @@ def _save_lossless(img: Image.Image, output_path: str) -> None:
 # مزوّدو عزل الخلفية: كل دالة تعيد (صورة RGBA، None) أو (None، رمز خطأ)
 # ---------------------------------------------------------------------------
 
+def _uncertainty_score(response) -> Optional[float]:
+    """ترويسة x-uncertainty-score من رد PhotoRoom كرقم بين 0 و 1، أو None (-1 = ما في تقدير، أو غايبة أو مش رقم)."""
+    headers = getattr(response, "headers", None) or {}
+    raw = None
+    try:
+        raw = headers.get(UNCERTAINTY_HEADER)
+        if raw is None and isinstance(headers, dict):
+            raw = next((v for k, v in headers.items() if str(k).lower() == UNCERTAINTY_HEADER), None)
+        value = float(str(raw).strip())
+    except (TypeError, ValueError, AttributeError):
+        return None
+    if value != value or value < 0 or value > 1:
+        return None
+    return value
+
+
 def _isolate_photoroom(img: Image.Image):
     api_key = str(getattr(config, "PHOTOROOM_API_KEY", "") or "").strip()
     if not api_key:
@@ -648,6 +725,9 @@ def _isolate_photoroom(img: Image.Image):
     cutout = _decode_cutout(response.content)
     if cutout is None:
         return None, "photoroom_bad_output"
+    score = _uncertainty_score(response)
+    if score is not None:
+        cutout.info["uncertainty_score"] = score      # يمشي مع القص لحد المحاولة (_provider_attempt)
     return cutout, None
 
 
@@ -661,7 +741,8 @@ def _isolate_remove_bg(img: Image.Image):
             REMOVE_BG_URL,
             headers={"X-Api-Key": api_key},
             files={"image_file": (filename, data, mime)},
-            data={"size": "auto", "format": "png"},
+            # type=product: remove.bg بيعامل الصورة كصورة منتج (عبوة بلا أشخاص)، مجاناً بنفس الطلب
+            data={"size": "auto", "format": "png", "type": "product"},
             timeout=REMOVE_BG_TIMEOUT,
         )
     except requests.exceptions.Timeout:
@@ -712,6 +793,7 @@ MANUAL_REMBG_MODEL = "birefnet-general"       # الافتراضي فقط: rembg
 _REMBG_SESSIONS: Dict[str, object] = {}         # الجلسة تُنشأ مرة بالعملية لكل موديل وتُعاد استعمالها (تحميل الموديل ثقيل)
 _REMBG_FAILED: set = set()                      # موديل فشل إنشاء جلسته (غير منزّل، لا إنترنت): لا نعيد المحاولة كل منتج
 _REMBG_LOCK = threading.Lock()
+_REMBG_SLOTS: list = []                         # REMBG_MAX_PARALLEL استدلالاً بنفس الوقت (ذاكرة BiRefNet على المعالج)
 
 
 def _rembg_session(model: str):
@@ -731,6 +813,20 @@ def _rembg_session(model: str):
         return session
 
 
+def _accepts_decontaminate(remove) -> bool:
+    """
+    هل remove() بنسخة rembg المنزّلة فيها الوسيط decontaminate باسمه (2.0.79 وأحدث)؟ **kwargs لحالها ما بتكفي: النسخ الأقدم
+    بتمررها لـ session.predict فبتفشل أو بتنتجاهل.
+    """
+    import inspect
+
+    try:
+        param = inspect.signature(remove).parameters.get("decontaminate")
+    except (TypeError, ValueError):
+        return False
+    return param is not None and param.kind in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
+
+
 def _isolate_rembg(img: Image.Image, model: str = MANUAL_REMBG_MODEL):
     try:
         from rembg import remove
@@ -741,7 +837,14 @@ def _isolate_rembg(img: Image.Image, model: str = MANUAL_REMBG_MODEL):
         if session is None:
             return None, "rembg_failed"
         data, _, _ = _encode_for_upload(img)
-        output = remove(data, session=session)
+        # decontaminate: بيشيل لون الخلفية عن حواف القص (مجاني، محلي)، بس إذا النسخة المنزّلة بتعرفه
+        extra = {"decontaminate": True} if _accepts_decontaminate(remove) else {}
+        with _REMBG_LOCK:
+            if not _REMBG_SLOTS:
+                _REMBG_SLOTS.append(threading.BoundedSemaphore(settings.rembg_max_parallel()))
+            slots = _REMBG_SLOTS[0]
+        with slots:
+            output = remove(data, session=session, **extra)
         cutout = _decode_cutout(output if isinstance(output, (bytes, bytearray)) else b"")
         if cutout is None and isinstance(output, Image.Image):
             cutout = output.convert("RGBA")
@@ -868,6 +971,7 @@ def reset_rembg_sessions(everything: bool = False) -> None:
     """ينسى إنشاء جلسة فشل (بداية تشغيل جديد: ربما نُزّل الموديل)؛ الجلسات الجاهزة تبقى محمّلة إلا مع everything (الاختبارات)."""
     with _REMBG_LOCK:
         _REMBG_FAILED.clear()
+        _REMBG_SLOTS.clear()                    # REMBG_MAX_PARALLEL يُقرأ من جديد في التشغيل التالي
         if everything:
             _REMBG_SESSIONS.clear()
 
@@ -1329,6 +1433,7 @@ class _Attempt:
     frame_size: Optional[Tuple[int, int]] = None              # الإطار المرسل وموضعه في صورة العمل
     frame_rect: Optional[Tuple[int, int, int, int]] = None
     fallback_from: Optional[Dict[str, str]] = None            # الطريقة السحابية التي خلص رصيدها وهذه بديلتها المحلية
+    uncertainty: Optional[float] = None                       # x-uncertainty-score لقص PhotoRoom (_uncertainty_score)
 
 
 def _flags_final(flags) -> bool:
@@ -1432,13 +1537,17 @@ def _provider_attempt(frame, method, crop_sides, frame_rect, canvas_size, source
     label = provider + ("+box" if any(crop_sides) else "")
     if cutout is None:
         return _Attempt(None, method, [], error, label)
+    score = cutout.info.get("uncertainty_score") if provider == "photoroom" else None
     if provider == "photoroom" and _photoroom_crop():
         # طلبنا من PhotoRoom القص: لمس الحواف والإطار المعتم طبيعيان، ونسبة الأبعاد لا تكشف ذلك (مع صندوق Gemini
         # يكون للإطار نسبة أبعاد المنتج نفسها)، فلا فحوص إطار ولا مقارنة بالمواضع
-        return _gated(cutout, provider, None, _NO_CROP, canvas_size, label, None, None, product_rect,
-                      frame_checks=False)
+        attempt = _gated(cutout, provider, None, _NO_CROP, canvas_size, label, None, None, product_rect,
+                         frame_checks=False)
+        attempt.uncertainty = score
+        return attempt
     attempt = _gated(cutout, provider, frame.size, crop_sides, canvas_size, label, frame_rect, source_mask,
                      product_rect)
+    attempt.uncertainty = score
     if fallback_from is not None:
         if attempt.cutout is None:
             # البديل المحلي لم ينتج قصاً (قناع فارغ): يبقى الفشل الأصلي برصيد المزوّد، ومعه زر «تجاوز عزل الخلفية»
@@ -1603,16 +1712,18 @@ def _isolate_checked(img: Image.Image, method: str, product_name, brand, canvas_
 
 def process_product_image_result(image_url_or_path, product_name, brand, target_width=0, target_height=0,
                                  bg_method=None, candidate_sha256=None, enhance=False, page_url=None,
-                                 background=None) -> ProcessResult:
+                                 background=None, clear=False) -> ProcessResult:
     """
     يحوّل صورة المنتج المعتمدة إلى لوحة نشر نهائية بالأبعاد المطلوبة (0 أو 'dynamic' = OUTPUT_CANVAS_SIZE، افتراضياً
-    800x800). background (None = OUTPUT_BACKGROUND): 'transparent' = PNG شفافة RGBA بلا ظل، المنتج مقصوص ومشطّب
+    800x800). اللوحة المربعة بتكبر مع دقة المنتج لحد OUTPUT_CANVAS_MAX (_adaptive_canvas): الضلع المطلوب هو الأدنى، ومصدر
+    صغير بياخده متل قبل. background (None = OUTPUT_BACKGROUND): 'transparent' = PNG شفافة RGBA بلا ظل، المنتج مقصوص ومشطّب
     (cutout_finish) ويملأ OUTPUT_PRODUCT_FILL وموسّط؛ صورة بلا عزل (none) بتضل معتمة على الأبيض. 'white' = PNG بخلفية
     بيضاء معتمة RGB والمنتج يملأ 88% وموسّط (متل قبل).
     لا يرفع استثناءات: كل فشل يعود كـ ProcessResult(path=None, isolated=False, error=<رمز>).
     قص لم يجتز بوابة الجودة بعد كل البدائل يعود بلوحة (path) مع isolated=False و quality_flags.
     عند تمرير الأبعاد و enhance و bg_method صراحةً تكون اللوحة دالة لها وللمصدر فقط (ملف معالجة موحد).
     page_url: صفحة المرشح (Referer لإعادة التنزيل كما في التنزيل الأصلي)؛ اختياري.
+    clear: عبوة شفافة أو زجاج (categories.is_clear_packaging من تصنيف المنتج): التشطيب ما بيسد الثقوب (cutout_finish).
     """
     method = _normalise_method(bg_method)
     try:
@@ -1630,7 +1741,7 @@ def process_product_image_result(image_url_or_path, product_name, brand, target_
             return ProcessResult(None, False, method, code)
         img = _limit_work_size(img)
 
-        flags, notes, white_note, fallback_from = [], [], None, None
+        flags, notes, white_note, fallback_from, uncertainty = [], [], None, None, None
         if method == "none":
             # 'none' تعني فعلاً بدون عزل: الصورة كما هي (بعد تصحيح الاتجاه) على اللوحة، ولا ندّعي العزل أبداً
             cutout, provider, isolated = EdgeShadowEngine.process_mask(img.convert("RGBA")), "none", False
@@ -1643,17 +1754,23 @@ def process_product_image_result(image_url_or_path, product_name, brand, target_
                 logger.warning("فشل عزل الخلفية بطريقة %s: %s", attempt.provider, attempt.error)
                 return ProcessResult(None, False, attempt.provider, attempt.error, white_source=white_note)
             cutout, provider, flags, notes = attempt.cutout, attempt.provider, list(attempt.flags), list(attempt.notes)
-            fallback_from = attempt.fallback_from
+            fallback_from, uncertainty = attempt.fallback_from, getattr(attempt, "uncertainty", None)
         finish = {}
-        if cutout_finish.output_background(background) == cutout_finish.TRANSPARENT:
+        transparent = cutout_finish.output_background(background) == cutout_finish.TRANSPARENT
+        # بوابة القص فحصت بالضلع الأدنى (العلامات متل قبل)؛ اللوحة نفسها بدقة المنتج (_adaptive_canvas)
+        fill = settings.output_product_fill() if transparent and method != "none" and provider != "none" \
+            else CANVAS_FILL_RATIO
+        canvas_size = _adaptive_canvas(cutout, canvas_size, fill)
+        if transparent:
             # PNG شفافة بلا ظل: سد الثقوب، إزالة التسرب، فحص الهالة (وعزل واحد بـ PhotoRoom لها) ثم اللوحة
             isolated_by = provider
             done = cutout_finish.finish(img, cutout, attempt, provider, isolated, flags, notes, canvas_size,
-                                        enhance=_as_bool(enhance), method=method)
+                                        enhance=_as_bool(enhance), method=method, clear=bool(clear))
             canvas, provider, isolated, flags, notes, finish = (done.canvas, done.provider, done.isolated,
                                                                 done.flags, done.notes, done.info)
             if provider != isolated_by:
                 fallback_from = None     # إعادة العزل للهالة (PhotoRoom) استبدلت عزل البديل المحلي
+                uncertainty = finish.get("uncertainty")
         else:
             if _as_bool(enhance):
                 cutout = _enhance_rgb(cutout)
@@ -1663,12 +1780,18 @@ def process_product_image_result(image_url_or_path, product_name, brand, target_
             else:
                 canvas = compose_on_white_canvas(cutout, canvas_size, CANVAS_FILL_RATIO)
 
+        if uncertainty is not None:
+            finish = dict(finish, uncertainty=uncertainty)
+            if uncertainty > settings.photoroom_uncertainty_max() and FLAG_PHOTOROOM_UNSURE not in flags:
+                # PhotoRoom نفسه مش متأكد: للمراجعة (علامة عرض: المراجع بيقدر ينشرها بعد ما يشوفها)، بلا إعادة عزل
+                flags.append(FLAG_PHOTOROOM_UNSURE)
+                isolated = False
         job_dir = tempfile.mkdtemp(prefix="imgproc_")
         out_path = os.path.join(job_dir, f"{uuid.uuid4().hex}.png")
         canvas.save(out_path, format="PNG")
         return ProcessResult(out_path, isolated, provider, None, canvas.width, canvas.height,
                              quality_flags=flags, white_source=white_note, quality_notes=notes,
-                             fallback_from=fallback_from, finish=finish)
+                             fallback_from=fallback_from, finish=finish, uncertainty_score=uncertainty)
     except Exception as exc:  # noqa: BLE001 - لا نسمح لأي خطأ غير متوقع بأن يصبح نشراً صامتاً
         logger.exception("خطأ غير متوقع أثناء معالجة الصورة: %s", exc)
         return ProcessResult(None, False, method, "processing_failed")

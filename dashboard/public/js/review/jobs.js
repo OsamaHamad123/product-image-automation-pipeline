@@ -2,8 +2,17 @@
  * لقطة · المراجعة — background queue for approvals (and bulk rejections).
  *
  * The reviewer keeps working while approvals run: each approve / upload / bulk reject becomes a job, and the queue
- * sends exactly one request at a time, in order. A product has at most one job waiting or running (a second approve
- * of the same product is refused), and a failed job keeps its reason until the reviewer retries or dismisses it.
+ * sends at most `concurrency` requests at a time (2 for approvals: the server serialises each product under its own
+ * publish lock, local_cache_db.sku_publish_lock, and every sheet write carries the row's identity), in order. A
+ * product has at most one job held, waiting or running (a second approve of the same product is refused), and a
+ * failed job keeps its reason until the reviewer retries or dismisses it.
+ *
+ * Undo: an approval can be held for a few seconds (enqueue(spec, { holdMs })) before it is sent, so «تراجع» takes it
+ * back (cancel(group)). A held approval is never lost silently: when the page is hidden or closed (flush(), wired to
+ * visibilitychange / pagehide by app.js) every held or waiting job is sent at once with fetch keepalive, which the
+ * browser completes even after the page is gone, as far as the keepalive budget allows; the rest stay queued and the
+ * page's beforeunload prompt covers them.
+ *
  * An approval the server refused because the product changed since the page showed it (already_approved /
  * state_changed, contract C1) keeps what changed (job.stale); only an explicit «replace» resends it, with replace.
  * An approval refused because the cut-out failed its check (quality_flags / background_failed) keeps the flags
@@ -14,17 +23,33 @@
 
     const R = root.LaqtaReview = root.LaqtaReview || {};
 
+    // keepalive requests of one page may carry 64 KB of body in flight together: a margin under it
+    const KEEPALIVE_BUDGET = 60000;
+
     function createJobQueue(options) {
         options = options || {};
         const jobs = [];
-        let running = null;
+        const running = new Set();
         let seq = 0;
+        let groupSeq = 0;
         // الدفعة الحالية: «جاري اعتماد N · i من N» يعدّ طلباتها فقط، وفشل دفعة سابقة يبقى ظاهراً بزر إعادته
         let batch = 0;
+        let keepaliveBytes = 0;
+        const timers = new Map();      // group -> release timer
+
+        function concurrency() {
+            const raw = typeof options.concurrency === 'function' ? options.concurrency() : options.concurrency;
+            const n = parseInt(raw, 10);
+            return isFinite(n) && n > 0 ? Math.min(n, 4) : 1;
+        }
+
+        function sentOrQueued(j) {
+            return j.state === 'waiting' || j.state === 'running';
+        }
 
         // طلب جديد والطابور فاضي يبدأ دفعة جديدة: الطلبات الناجحة من الدفعة السابقة تُزال، والفاشلة تبقى
         function startBatchIfIdle() {
-            if (busy()) return;
+            if (jobs.some(sentOrQueued)) return;
             for (let i = jobs.length - 1; i >= 0; i--) {
                 if (jobs[i].state === 'done') jobs.splice(i, 1);
             }
@@ -36,11 +61,12 @@
         }
 
         function activeFor(key) {
-            return jobs.find(j => j.key === key && (j.state === 'waiting' || j.state === 'running')) || null;
+            return jobs.find(j => j.key === key && (j.state === 'held' || j.state === 'waiting' || j.state === 'running')) || null;
         }
 
+        // شي لسا ما خلص: محجوز للتراجع، أو بالدور، أو عم ينبعت
         function busy() {
-            return jobs.some(j => j.state === 'waiting' || j.state === 'running');
+            return jobs.some(j => j.state === 'held' || sentOrQueued(j));
         }
 
         function errorOf(result, job) {
@@ -53,46 +79,152 @@
             return { text: text, detail: raw, stale: stale, quality: quality };
         }
 
-        // job: { key, type: 'approve' | 'upload' | 'reject', label, ... } → the job, or null if this product already has one
-        function enqueue(spec) {
-            if (!spec || !spec.key || activeFor(spec.key)) return null;
-            startBatchIfIdle();
-            const job = Object.assign({}, spec, { id: ++seq, batch: batch, state: 'waiting', error: '', detail: '', result: null });
-            jobs.push(job);
-            notify();
-            pump();
-            return job;
+        // specs: [{ key, type: 'approve' | 'upload' | 'reject', label, ... }] → the jobs queued (a product that already has
+        // one is skipped). opts.holdMs > 0: the jobs wait that long (one group, cancel(group) takes them back) before
+        // they are sent; uploads are never held (a file cannot go out with keepalive when the page closes)
+        function enqueueMany(specs, opts) {
+            opts = opts || {};
+            const holdMs = Math.max(0, parseInt(opts.holdMs, 10) || 0);
+            const out = [];
+            let group = null;
+            (specs || []).forEach(spec => {
+                if (!spec || !spec.key || activeFor(spec.key)) return;
+                const hold = holdMs > 0 && spec.type === 'approve';
+                if (hold && group === null) group = ++groupSeq;
+                if (!hold) startBatchIfIdle();
+                const job = Object.assign({}, spec, { id: ++seq, batch: hold ? 0 : batch, state: hold ? 'held' : 'waiting',
+                                                      group: hold ? group : null, releaseAt: hold ? Date.now() + holdMs : 0,
+                                                      error: '', detail: '', result: null });
+                jobs.push(job);
+                out.push(job);
+            });
+            if (group !== null) timers.set(group, setTimeout(() => release(group), holdMs));
+            if (out.length) {
+                notify();
+                pump();
+            }
+            return out;
         }
 
-        async function pump() {
-            if (running) return;
-            const next = jobs.find(j => j.state === 'waiting');
-            if (!next) return;
-            running = next;
-            next.state = 'running';
+        function enqueue(spec, opts) {
+            return enqueueMany([spec], opts)[0] || null;
+        }
+
+        // انتهت مهلة التراجع: تدخل الدور بترتيبها
+        function release(group) {
+            clearTimeout(timers.get(group));
+            timers.delete(group);
+            const held = jobs.filter(j => j.state === 'held' && j.group === group);
+            if (!held.length) return;
+            startBatchIfIdle();
+            held.forEach(j => {
+                j.state = 'waiting';
+                j.batch = batch;
+            });
+            notify();
+            pump();
+        }
+
+        // «تراجع»: طلبات المجموعة اللي لسا محجوزة تنشال (ما انبعت منها شي) → الطلبات اللي انشالت
+        function cancel(group) {
+            clearTimeout(timers.get(group));
+            timers.delete(group);
+            const taken = [];
+            for (let i = jobs.length - 1; i >= 0; i--) {
+                if (jobs[i].state === 'held' && jobs[i].group === group) taken.unshift(jobs.splice(i, 1)[0]);
+            }
+            if (taken.length) {
+                if (typeof options.onCancel === 'function') {
+                    try {
+                        options.onCancel(taken);
+                    } catch (err) {
+                        if (root.console) root.console.error(err);
+                    }
+                }
+                notify();
+            }
+            return taken;
+        }
+
+        function bodySize(job) {
+            if (typeof options.bodySize !== 'function') return null;
+            const n = options.bodySize(job);
+            return typeof n === 'number' && isFinite(n) && n >= 0 ? n : null;
+        }
+
+        // الصفحة عم تختفي (تبويب ثاني، أو عم تتسكّر): كل طلب محجوز أو بالدور بينبعت هلق مع keepalive (المتصفح بيكمّله ولو
+        // انسكّرت الصفحة)، قد ما بتسمح ميزانية keepalive؛ والباقي بيضل بالدور
+        function flush() {
+            const held = jobs.filter(j => j.state === 'held');
+            if (held.length) {
+                startBatchIfIdle();
+                held.forEach(j => {
+                    clearTimeout(timers.get(j.group));
+                    timers.delete(j.group);
+                    j.state = 'waiting';
+                    j.batch = batch;
+                });
+            }
+            jobs.filter(j => j.state === 'waiting').forEach(j => {
+                if (j.state !== 'waiting' || conflicts(j)) return;
+                const size = bodySize(j);
+                if (size === null || keepaliveBytes + size > KEEPALIVE_BUDGET) return;
+                start(j, { keepalive: true, size: size });
+            });
+            notify();
+            pump();
+            return held.length;
+        }
+
+        // طلب بالدور لمنتج (conflictKey، sku_key) عم ينبعت له طلب ثاني: بيستنى دوره، والطلب اللي بعده بيمشي
+        function conflicts(job) {
+            if (typeof options.conflictKey !== 'function') return false;
+            const k = options.conflictKey(job);
+            return !!k && Array.from(running).some(r => options.conflictKey(r) === k);
+        }
+
+        function pump() {
+            while (running.size < concurrency()) {
+                const next = jobs.find(j => j.state === 'waiting' && !conflicts(j));
+                if (!next) return;
+                // صفحة مخفية: الطلب بيروح مع keepalive إذا بتسمح الميزانية، فما بيضيع إذا انسكّرت
+                const hidden = typeof options.hidden === 'function' && options.hidden();
+                const size = hidden ? bodySize(next) : null;
+                const keep = size !== null && keepaliveBytes + size <= KEEPALIVE_BUDGET;
+                start(next, keep ? { keepalive: true, size: size } : {});
+            }
+        }
+
+        async function start(job, sendOpts) {
+            sendOpts = sendOpts || {};
+            running.add(job);
+            job.state = 'running';
+            job.keepalive = !!sendOpts.keepalive;
+            if (sendOpts.keepalive) keepaliveBytes += sendOpts.size || 0;
             notify();
             let result;
             try {
-                result = await options.send(next);
+                result = await options.send(job, { keepalive: !!sendOpts.keepalive });
             } catch (err) {
                 result = { ok: false, status: 0, network: true, data: { status: 'error', error: String(err && err.message || err) } };
             }
+            if (sendOpts.keepalive) keepaliveBytes = Math.max(0, keepaliveBytes - (sendOpts.size || 0));
+            running.delete(job);
             const success = !!(result && result.ok && result.data && result.data.status === 'success');
-            next.result = result;
-            next.state = success ? 'done' : 'failed';
-            next.stale = null;
-            next.quality = null;
+            job.result = result;
+            job.state = success ? 'done' : 'failed';
+            job.stale = null;
+            job.quality = null;
             if (!success) {
-                const e = errorOf(result, next);
-                next.error = e.text;
-                next.detail = e.detail;
-                next.stale = e.stale;
-                next.quality = e.quality;
+                const e = errorOf(result, job);
+                job.error = e.text;
+                job.detail = e.detail;
+                job.stale = e.stale;
+                job.quality = e.quality;
             }
-            running = null;
             if (typeof options.onSettle === 'function') {
                 try {
-                    options.onSettle(next);
+                    options.onSettle(job);
                 } catch (err) {
                     if (root.console) root.console.error(err);
                 }
@@ -100,7 +232,7 @@
             notify();
             if (jobs.some(j => j.state === 'waiting')) {
                 pump();
-            } else if (typeof options.onDrain === 'function') {
+            } else if (!running.size && typeof options.onDrain === 'function') {
                 options.onDrain(state());
             }
         }
@@ -137,13 +269,20 @@
             notify();
         }
 
-        // jobs: كل ما يظهر في اللوحة (الدفعة الحالية وفشل الدفعات السابقة). total/done/failed/settled: الدفعة الحالية
-        // فقط، فـ«i من N» لا يعدّ طلباً فشل قبلها. failedAll: كل الفاشلة الظاهرة بزر إعادتها
+        // jobs: كل ما يظهر في اللوحة (الدفعة الحالية وفشل الدفعات السابقة؛ المحجوز للتراجع مش منها). total/done/failed/
+        // settled: الدفعة الحالية فقط، فـ«i من N» لا يعدّ طلباً فشل قبلها. failedAll: كل الفاشلة الظاهرة بزر إعادتها.
+        // held: مجموعات «تراجع» اللي لسا محجوزة، الأحدث آخراً { group, jobs, releaseAt }
         function state() {
-            const current = jobs.filter(j => j.batch === batch);
+            const shown = jobs.filter(j => j.state !== 'held');
+            const current = shown.filter(j => j.batch === batch);
             const count = s => current.filter(j => j.state === s).length;
+            const groups = new Map();
+            jobs.filter(j => j.state === 'held').forEach(j => {
+                if (!groups.has(j.group)) groups.set(j.group, { group: j.group, jobs: [], releaseAt: j.releaseAt });
+                groups.get(j.group).jobs.push(j);
+            });
             return {
-                jobs: jobs.slice(),
+                jobs: shown,
                 batchJobs: current,
                 total: current.length,
                 done: count('done'),
@@ -151,13 +290,17 @@
                 waiting: count('waiting'),
                 running: count('running'),
                 settled: count('done') + count('failed'),
-                failedAll: jobs.filter(j => j.state === 'failed').length,
-                busy: busy()
+                failedAll: shown.filter(j => j.state === 'failed').length,
+                busy: shown.some(sentOrQueued),
+                held: Array.from(groups.values()).sort((a, b) => a.group - b.group),
+                heldCount: jobs.filter(j => j.state === 'held').length
             };
         }
 
-        return { enqueue, retry, dismiss, state, busy, activeFor, has: key => !!activeFor(key) };
+        return { enqueue, enqueueMany, release, cancel, flush, retry, dismiss, state, busy, activeFor,
+                 has: key => !!activeFor(key), sending: () => jobs.some(sentOrQueued) };
     }
 
     R.createJobQueue = createJobQueue;
+    R.KEEPALIVE_BUDGET = KEEPALIVE_BUDGET;
 })(typeof window !== 'undefined' ? window : globalThis);

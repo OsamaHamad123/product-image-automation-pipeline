@@ -1,0 +1,41 @@
+# logrotate drop-in for the Laqta logs. install.sh copies it to /etc/logrotate.d/laqta; logrotate runs it daily.
+#
+#   dashboard/storage/logs/laravel.log  written by Laravel (single channel) and by the Python pipeline (config.log_error_to_laravel)
+#   temp/*.log                          pipeline.log (dashboard run), local index refresh, ...
+#   temp/nightly/*.log                  one nightly_YYYY-MM-DD.log per night
+#
+# First block: a log is rotated when it is a week old or bigger than 50 MB, whichever comes first; 8 old copies stay.
+# copytruncate: the writers keep the file open (a run can last for hours), so the file is copied and emptied instead
+# of renamed. dateext: the old copies are named ...log-20261006.gz and can never collide with the numbered
+# pipeline.log.1 .. pipeline.log.5 that the dashboard keeps by itself at every run start.
+# Laravel's own daily channel (LOG_STACK=daily in dashboard/.env, see deploy/ubuntu/dashboard.env.example) writes
+# laravel-YYYY-MM-DD.log and deletes those itself after LOG_DAILY_DAYS days, so they are not listed here.
+#
+# Second block: a nightly log is written once, on its own night, so it is NOT rotated or emptied (the dashboard's
+# log viewer reads those files as they are): `rotate 0` + `minage 60` just deletes a nightly log once it is 60 days old.
+# The @NAME@ words are filled in by install.sh.
+@APP_DIR@/dashboard/storage/logs/laravel.log
+@APP_DIR@/temp/*.log
+{
+    su @APP_USER@ @APP_USER@
+    weekly
+    maxsize 50M
+    rotate 8
+    maxage 60
+    dateext
+    compress
+    delaycompress
+    copytruncate
+    missingok
+    notifempty
+}
+
+@APP_DIR@/temp/nightly/*.log
+{
+    su @APP_USER@ @APP_USER@
+    daily
+    rotate 0
+    minage 60
+    missingok
+    notifempty
+}

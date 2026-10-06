@@ -176,7 +176,7 @@ out.sent = requests('/api/select_image').map(c => c.body.row_number);
     assert out["eligible"] == [True, False, False, False]
     assert out["buckets"] == ["proposed", "warning", "warning", "warning"]
     assert out["cards"][0] == ["eligible", True] and all(k == ["warning", False] for k in out["cards"][1:])
-    assert out["label"] == "اعتماد صورة وحدة مقترحة بلا تحذير"
+    assert out["label"] == "اعتماد صورة وحدة بلا تحذير"
     assert out["sent"] == ["20"]
 
 
@@ -396,7 +396,7 @@ out.all_sent = requests('/api/select_image').map(c => c.body.row_number);
     assert out["refused"][0] == 0 and out["refused"][1].startswith("«Alpha Laban»: تأكد قبل الاعتماد: نموذج القراءة غير متأكد")
     assert out["repeat"] == 0
     assert out["approved"] == [["42"], 40]                     # the next card is focused after an approval
-    assert "رح ننشر 2 صور مقترحة بلا تحذير" in out["bulk_confirm"]
+    assert out["bulk_confirm"].startswith("اعتماد صورتين؟")
     assert out["all_sent"] == ["42", "40", "45"]
 
 
@@ -805,7 +805,7 @@ answer(first, { status: 'failed', error_code: 'quality_flags', error: 'quality',
 await flush();
 out.toast = toasts.slice(-1)[0];
 out.panel = jobsText();
-const anyway = () => document.querySelectorAll('#rvJobs button').find(b => b.textContent === 'انشرها رغم ذلك…');
+const anyway = () => document.querySelectorAll('#rvJobs button').find(b => b.textContent === 'اعتمدها رغم هيك…');
 out.buttons = document.querySelectorAll('#rvJobs button').map(b => b.textContent).filter(t => t);
 out.bucket = itemOf(9).bucket;
 confirmAnswer = false;
@@ -823,10 +823,10 @@ await flush();
 out.done = [itemOf(9).bucket, toasts.slice(-1)[0].text];
 """, tmp_path, fixture([B, OTHER]))
     assert out["first_anyway"] is None                          # never sent without the reviewer's confirmation
-    assert out["toast"]["variant"] == "danger" and "لم تُنشر صورة" in out["toast"]["text"]
+    assert out["toast"]["variant"] == "danger" and "ما انعتمدت صورة" in out["toast"]["text"]
     assert "الصورة المصدر صغيرة فكُبّرت" in out["panel"] and "المنتج صغير على اللوحة" in out["panel"]
-    assert "upscaled" not in out["panel"] and "لم تُعزل خلفية" not in out["panel"]
-    assert "انشرها رغم ذلك…" in out["buttons"] and "أعد المحاولة" not in out["buttons"]
+    assert "upscaled" not in out["panel"] and "ما انعزلت خلفية" not in out["panel"]
+    assert "اعتمدها رغم هيك…" in out["buttons"] and "أعد المحاولة" not in out["buttons"]
     assert out["bucket"] == "proposed"                          # nothing was published: still waiting
     assert out["after_no"][0] == 1 and "الصورة المصدر صغيرة فكُبّرت" in out["after_no"][1]
     assert out["second"] == [True, True, B_URLS[0]]
@@ -847,9 +847,9 @@ out.toast = toasts.slice(-1)[0].text;
 out.panel = jobsText();
 out.buttons = document.querySelectorAll('#rvJobs button').map(b => b.textContent).filter(t => t);
 """, tmp_path, fixture([B, OTHER]))
-    assert "لم تُعزل خلفية الصورة (المنتج مقصوص عند حافة الصورة)" in out["panel"]
-    assert "edge_clipped" not in out["panel"] and "رغم ذلك" not in out["toast"]
-    assert "انشرها رغم ذلك…" not in out["buttons"] and "أعد المحاولة" not in out["buttons"]
+    assert "ما انعزلت خلفية الصورة (المنتج مقصوص عند حافة الصورة)" in out["panel"]
+    assert "edge_clipped" not in out["panel"] and "رغم هيك" not in out["toast"]
+    assert "اعتمدها رغم هيك…" not in out["buttons"] and "أعد المحاولة" not in out["buttons"]
 
 
 @NEEDS_NODE
@@ -868,7 +868,7 @@ out.first = first.body.publish_anyway === undefined ? null : first.body.publish_
 answer(first, { status: 'failed', error_code: 'quality_flags', quality_flags: ['alpha_haze'], publish_anyway_allowed: true }, 500);
 await flush();
 confirmAnswer = true;
-document.querySelectorAll('#rvJobs button').find(b => b.textContent === 'انشرها رغم ذلك…').click();
+document.querySelectorAll('#rvJobs button').find(b => b.textContent === 'اعتمدها رغم هيك…').click();
 await flush();
 out.second = requests('/api/upload_manual_image')[1].body.publish_anyway;
 """, tmp_path, fixture([B, final], rows=ready_rows([B])))
@@ -897,7 +897,24 @@ openRow(8);
 out.text = wsText();
 """, tmp_path, fixture([B, OTHER]))
     assert "بقي ظل ظاهر مع المنتج" in out["panel"] and "kept_shadow" not in out["panel"]
-    assert "انشرها رغم ذلك…" in out["buttons"]
+    assert "اعتمدها رغم هيك…" in out["buttons"]
     assert "ملاحظة من فحص القص:" in out["text"] and "الصورة المصدر صغيرة فكُبّرت لتملأ اللوحة" in out["text"]
     assert "الخلفية لم تُعزل" not in out["text"]
     assert not [t for v, t in out["toasts"] if "كُبّرت" in t]     # a note is not a warning toast
+
+
+@NEEDS_NODE
+def test_explain_pick_shows_the_same_picture_sites_and_a_corroborated_size(tmp_path):
+    """The same picture under other URLs on other sites counts as sources (retrieve.reader_queue), and a pick whose
+    label left the size open while two trusted stores state it says so (reason size_corroborated, record only)."""
+    out = run(r"""
+out.sites = R.explainPick(R.normalizeCandidate({ url: 'https://x/1.jpg', evidence: {
+    consensus_count: 1, same_picture_domains: ['carrefouruae.com', 'luluhypermarket.com', 'noon.com'] } }));
+out.one = R.explainPick(R.normalizeCandidate({ url: 'https://x/2.jpg', evidence: {
+    consensus_count: 1, same_picture_domains: ['noon.com'] } }));
+out.size = R.explainPick(R.normalizeCandidate({ url: 'https://x/3.jpg', reasons: ['vlm:UNSURE', 'size_corroborated'],
+    evidence: {} }));
+""", tmp_path, fixture([]))
+    assert out["sites"] == [{"key": "consensus", "text": "الصورة نفسها في 3 مصادر"}]
+    assert out["one"] == []
+    assert out["size"] == [{"key": "size_corroborated", "text": "الحجم مأكد من موقعين"}]

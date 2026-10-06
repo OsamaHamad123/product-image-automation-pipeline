@@ -32,7 +32,9 @@ import gspread
 import pymysql
 from gspread.exceptions import APIError
 
+import atomic_file
 import config
+import db_connect
 from catalog_match.gtin import normalize_gtin
 
 logger = logging.getLogger(__name__)
@@ -239,8 +241,8 @@ def cached_products():
 def _write_cache(name, payload, version):
     try:
         payload = dict(payload, timestamp=time.time(), version=version)
-        with open(_cache_path(name), "w", encoding="utf-8") as f:
-            json.dump(payload, f, ensure_ascii=False, indent=2)
+        # ذرياً: الجسر واللوحة يقرآن الكاش أثناء كتابته، وانقطاع الكهرباء لا يترك ملفاً نصف مكتوب
+        atomic_file.write_json(_cache_path(name), payload, ensure_ascii=False, indent=2)
     except Exception as ce:
         logger.warning("[Google Sheets Cache] تعذر كتابة %s: %s", name, ce)
 
@@ -707,15 +709,8 @@ def _next_seq(floor=0):
 
 
 def _db_connect():
-    return pymysql.connect(
-        host=os.getenv("DB_HOST", "127.0.0.1"),
-        port=int(os.getenv("DB_PORT", "3306")),
-        user=os.getenv("DB_USERNAME", "root"),
-        password=os.getenv("DB_PASSWORD", ""),
-        database=os.getenv("DB_DATABASE", "automation_db"),
-        charset='utf8mb4',
-        cursorclass=pymysql.cursors.DictCursor
-    )
+    # اتصال واحد لكل الموديولات بمهل اتصال وقراءة وكتابة (db_connect)
+    return db_connect.connect()
 
 
 class SQLiteTransactionQueue:
@@ -936,6 +931,24 @@ def outbox_summary(since_ts=None):
         if key:
             out[key] += int(r.get("n") or 0)
     return out
+
+
+def outbox_due_count(now=None):
+    """
+    كم كتابة تنتظر التفريغ الآن: PENDING، و FAILED حلّ موعد إعادة محاولتها (نفس شرط _flush_locked). صفر = لا داعي
+    لفتح الشيت: مؤقت التفريغ بين التشغيلات (laqta-outbox-flush.timer) يتخطى Google حينها فلا يستهلك حصته.
+    أخطاء قاعدة البيانات تُرفع.
+    """
+    conn = (_queue._connect if _queue is not None else _db_connect)()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT COUNT(*) AS n FROM sheet_updates WHERE sync_status = 'PENDING' "
+            "OR (sync_status = 'FAILED' AND (next_attempt_at IS NULL OR next_attempt_at <= %s))",
+            (int(_now() if now is None else now),))
+        return int((cursor.fetchone() or {}).get("n") or 0)
+    finally:
+        conn.close()
 
 
 class GoogleSheetsBatchWorker(threading.Thread):
@@ -1440,8 +1453,13 @@ def update_image_link(worksheet, row_number, link_column_index, image_link, barc
     إلى الصف الوحيد المطابق للمنتج).
     العمود يُحمل كمفتاح منطقي 'link' ويُحدد من العناوين وقت الكتابة: إدراج عمود أو حذفه يسار عمود الرابط أثناء
     التشغيل لا يغيّر العمود المكتوب. link_column_index يبقى للتوافق مع المستدعين ولا يحدد العمود.
+    رابط تسليم Cloudinary إلنا بالتحويل القديم (q_auto,f_auto: اعتماد محفوظ قبل f_webp، يكتبه relink أو الصفوف المكررة)
+    بينكتب بالتحويل الجديد لنفس الأصل (delivery_urls.migrated_delivery_url): التطبيق ما بياخد JPEG بلا شفافية.
     الأخطاء المؤقتة و APIError تُرفع كي يعمل مُزخرف إعادة المحاولة.
     """
+    from delivery_urls import migrated_delivery_url
+
+    image_link = migrated_delivery_url(image_link) or image_link
     expect = _expectation(barcode, product_name, size, brand)
     try:
         if _redis_write_behind(row_number, {LINK_KEY: image_link}, expect):
@@ -1471,6 +1489,22 @@ def update_image_link(worksheet, row_number, link_column_index, image_link, barc
             raise
         logger.error("فشل تحديث الرابط في الصف %s: %s", row_number, e)
         return False
+
+
+def queue_link_writes(items):
+    """
+    يجدول كتابة رابط صورة لكل صف في طابور MariaDB (outbox) مباشرة، بلا Redis وبلا كتابة مباشرة في الشيت (ترحيل روابط
+    التسليم: scripts/migrate_delivery_urls.py): items [{row_number, value, barcode, product_name, size, brand}]؛ الهوية
+    كما في الشيت، والتفريغ يتخطى الصف الذي تغيّر منتجه (CONFLICT) أو كتابة أقدم من كتابة أحدث لنفس الخلية. يعيد
+    {row: معرّف}.
+    """
+    queue = _queue or SQLiteTransactionQueue()
+    out = {}
+    for item in items or ():
+        expect = _expectation(item.get("barcode"), item.get("product_name"), item.get("size"), item.get("brand"))
+        out[int(item["row_number"])] = queue.append_update(int(item["row_number"]), None, str(item["value"]),
+                                                           col_key=LINK_KEY, **_outbox_keys(expect))
+    return out
 
 
 def queue_barcode_writes(items):
@@ -1703,7 +1737,8 @@ def add_brand_mappings(client, sheet_name_or_url, items):
     يضيف ماركات لورقة 'Brands Mapping' بصف لكل ماركة، بطلب كتابة واحد (append_rows) بعد قراءة طازجة للورقة (لا كاش):
     items [{brand, synonyms: [...], official_domains: [...]}] جاهزة التحقق (catalog_match.brand_assistant). ماركة مكتوبة
     أصلاً (هي أو أحد مرادفاتها، بلا اعتبار للحالة أو الفراغات) أو مكررة بالقائمة نفسها تُتخطى مع سببها ولا تُكتب، ومرادف
-    مكتوب أصلاً لماركة ثانية لا يُكرر. تعيد {'added': [brand], 'skipped': [{'brand', 'reason': 'duplicate'}]}. الأخطاء
+    مكتوب أصلاً لماركة ثانية لا يُكرر. تعيد {'added': [brand], 'skipped': [{'brand', 'reason': 'duplicate'}],
+    'written': {brand: {'synonyms': نص الخلية, 'official_domains': نص الخلية}}} (اللي انكتب فعلاً، للتراجع). الأخطاء
     المؤقتة تُعاد محاولتها (SheetTransientError إن استمرت). كاش الماركات يُحذف بعد الكتابة كي يراها التشغيل الجاي.
     """
     sh = _retrying(_open_spreadsheet, client, sheet_name_or_url)
@@ -1720,7 +1755,7 @@ def add_brand_mappings(client, sheet_name_or_url, items):
         width = max(width, len(headers) + 1)
         if rows and any(i.get("official_domains") for i in items):
             _retrying(worksheet.update_cell, 1, len(headers) + 1, BRANDS_SHEET_HEADERS[4])
-    added, skipped, values = [], [], []
+    added, skipped, values, written = [], [], [], {}
     for item in items:
         brand = str(item["brand"]).strip()
         key = _brand_key(brand)
@@ -1735,12 +1770,48 @@ def add_brand_mappings(client, sheet_name_or_url, items):
         row[cols["official_domains"]] = ", ".join(item.get("official_domains") or [])
         values.append(row)
         added.append(brand)
+        written[brand] = {"synonyms": ", ".join(synonyms) if cols["synonyms"] != -1 else "",
+                          "official_domains": row[cols["official_domains"]]}
         known.add(key)
         known.update(k for k in (_brand_key(x) for x in synonyms) if k)
     if values:
         _retrying(worksheet.append_rows, values, value_input_option="RAW")
         clear_brand_cache()
-    return {"added": added, "skipped": skipped}
+    return {"added": added, "skipped": skipped, "written": written}
+
+
+def remove_brand_mapping(client, sheet_name_or_url, entry):
+    """
+    تراجع «عبّي جدول الماركات» عن ماركة واحدة: يمسح صفها من ورقة 'Brands Mapping' بعد قراءة طازجة، بس إذا الصف لسا
+    متل ما كتبه المساعد بالضبط (entry {brand, synonyms, official_domains}: نص الخلايا متل ما انكتب، بلا اعتبار للفراغات
+    حول الفواصل) وما في غيره بنفس الماركة. تعيد 'removed' | 'missing' (ما في صف للماركة) | 'changed' (المالك عدّل
+    الصف أو في أكتر من صف: ما منمسح شي). طلب كتابة واحد (حذف الصف)؛ كاش الماركات بينحذف بعده.
+    """
+    def same(a, b):
+        return [x.strip() for x in str(a or "").replace("،", ",").split(",") if x.strip()] == \
+            [x.strip() for x in str(b or "").replace("،", ",").split(",") if x.strip()]
+
+    sh = _retrying(_open_spreadsheet, client, sheet_name_or_url)
+    worksheet = _retrying(_brands_worksheet, sh)
+    rows = _retrying(worksheet.get_all_values)
+    if not rows:
+        return "missing"
+    cols = _brand_columns(rows[0])
+    key = _brand_key(entry.get("brand"))
+    matches = [i for i, r in enumerate(rows[1:], start=2) if key and _brand_key(_cell(r, cols["brand"])) == key]
+    if not matches:
+        return "missing"
+    if len(matches) > 1:
+        return "changed"
+    row = rows[matches[0] - 1]
+    if str(_cell(row, cols["brand"])).strip() != str(entry.get("brand") or "").strip() \
+            or not same(_cell(row, cols["synonyms"]) if cols["synonyms"] != -1 else "", entry.get("synonyms")) \
+            or not same(_cell(row, cols["official_domains"]) if cols["official_domains"] != -1 else "",
+                        entry.get("official_domains")):
+        return "changed"
+    _retrying(worksheet.delete_rows, matches[0])
+    clear_brand_cache()
+    return "removed"
 
 
 # ---------------------------------------------------------------------------

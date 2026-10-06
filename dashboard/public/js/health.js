@@ -29,7 +29,7 @@
     var PUBLISH_CHECK_URL = '/api/system/publish-check';
     var LANES_URL = '/api/system/review-lanes';
     /* «دقة الاقتراحات الحقيقية»: the lanes of catalog_match.decide.pick_lane (HealthController::lanesPayload). */
-    var LANES = [['strict', 'عدّى كل قواعد النشر الآلي'], ['unsure', 'القارئ مش متأكد بس العنوان بيأكد'],
+    var LANES = [['strict', 'عدّى كل قواعد النشر الآلي'], ['unsure', 'الملصق مش واضح بس الاسم مطابق'],
         ['other', 'باقي الاقتراحات']];
 
     /* «فحص النشر»: the four steps of publish_check.py and the words of each status (HealthController::PUBLISH_STEP_*). */
@@ -195,16 +195,47 @@
         return plural(Math.round(seconds / 86400), 'يوم', 'يومين', 'أيام', 'يوم');
     }
 
-    /* "اليوم 09:12" / "مبارح 18:40" / "28 أيلول 09:12" in the viewer's local time. */
+    // The owner's time zone (layouts/laqta.blade.php body[data-lq-tz], config app.display_timezone, Asia/Dubai): every
+    // time on the pages is said in it, whatever the viewer's computer is set to. Without it (node tests), local time.
+    var zoneFormats = {};
+    function displayZone() {
+        var doc = window.document;
+        var body = doc && doc.body;
+        var tz = body && typeof body.getAttribute === 'function' ? body.getAttribute('data-lq-tz') : '';
+        return tz || '';
+    }
+
+    // { y, mo (0-11), d, h, mi, wd (0 = Sunday) } of an instant (ms) in the display zone
+    function zoneParts(ms) {
+        var tz = displayZone();
+        if (tz && window.Intl && typeof window.Intl.DateTimeFormat === 'function') {
+            try {
+                var f = zoneFormats[tz] || (zoneFormats[tz] = new window.Intl.DateTimeFormat('en-US', {
+                    timeZone: tz, year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric',
+                    weekday: 'short', hourCycle: 'h23' }));
+                var p = {};
+                f.formatToParts(new Date(ms)).forEach(function (x) { p[x.type] = x.value; });
+                var wd = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(p.weekday);
+                return { y: +p.year, mo: +p.month - 1, d: +p.day, h: (+p.hour) % 24, mi: +p.minute, wd: wd };
+            } catch (e) {
+                // an unknown zone: local time
+            }
+        }
+        var dt = new Date(ms);
+        return { y: dt.getFullYear(), mo: dt.getMonth(), d: dt.getDate(), h: dt.getHours(), mi: dt.getMinutes(), wd: dt.getDay() };
+    }
+
+    /* "اليوم 09:12" / "مبارح 18:40" / "28 أيلول 09:12" in the owner's time zone (displayZone). */
     function whenText(ms, nowMs) {
-        var d = new Date(ms);
-        var now = new Date(nowMs);
-        var clock = pad(d.getHours()) + ':' + pad(d.getMinutes());
-        var startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-        if (ms >= startOfToday && ms < startOfToday + 86400000) return 'اليوم ' + clock;
-        if (ms >= startOfToday - 86400000 && ms < startOfToday) return 'مبارح ' + clock;
-        var text = d.getDate() + ' ' + MONTHS[d.getMonth()];
-        if (d.getFullYear() !== now.getFullYear()) text += ' ' + d.getFullYear();
+        var d = zoneParts(ms);
+        var now = zoneParts(nowMs);
+        var yesterday = zoneParts(nowMs - (now.h * 60 + now.mi) * 60000 - 12 * 3600000);
+        var same = function (a, b) { return a.y === b.y && a.mo === b.mo && a.d === b.d; };
+        var clock = pad(d.h) + ':' + pad(d.mi);
+        if (same(d, now)) return 'اليوم ' + clock;
+        if (same(d, yesterday)) return 'مبارح ' + clock;
+        var text = d.d + ' ' + MONTHS[d.mo];
+        if (d.y !== now.y) text += ' ' + d.y;
         return text + ' ' + clock;
     }
 
@@ -363,7 +394,7 @@
             }
             if (isObject(prices)) {
                 note.push('الأسعار تقديرية: Serper ' + price(prices.serper_per_query) + ' لكل استعلام بيرد عليه، ونماذج القراءة '
-                    + 'حسب الـ tokens بأسعار تبويب «نماذج التحقق».');
+                    + 'حسب الاستهلاك بأسعار تبويب «نماذج التحقق».');
             }
         }
         if (lens && isObject(sourcePrices) && num(sourcePrices.lens_serpapi) !== null) {
@@ -630,7 +661,7 @@
                     deps.renderOps(opsView(state.report, state.windowName));
                 } else {
                     state.report = null;
-                    deps.renderOps({ kind: 'error', text: requestError(res, 'جسر بايثون أو قاعدة البيانات ما ردّ.') });
+                    deps.renderOps({ kind: 'error', text: requestError(res, 'ما قدرنا نوصل لبيانات النظام. جرّب بعد شوي، وإذا ضل بلّغ المطوّر.') });
                 }
             }, function () {
                 if (seq !== state.opsSeq) return;
@@ -722,8 +753,10 @@
 
         function skipBg() {
             if (bgView(state.last, state.bg).state !== 'offer') return Promise.resolve(false);
-            if (deps.confirm && !deps.confirm(deps.confirmText || 'تجاوز عزل الخلفية؟')) return Promise.resolve(false);
-            return saveBg('none');
+            // deps.confirm: true / false، أو Promise (سؤال الصفحة Laqta.ask)
+            return Promise.resolve(deps.confirm ? deps.confirm(deps.confirmText || 'تجاوز عزل الخلفية؟') : true).then(function (ok) {
+                return ok ? saveBg('none') : false;
+            });
         }
 
         function restoreBg() {
@@ -775,7 +808,7 @@
                 key: pair[0],
                 label: pair[1],
                 text: n ? 'اعتمدت ' + count(lane.accepted) + ' من ' + n : 'لسا ما في مراجعات',
-                bound: n && bound !== null ? 'الحد المضمون ' + (100 * bound).toFixed(1) + '%' : '',
+                bound: n && bound !== null ? 'أقل دقة متوقعة ' + (100 * bound).toFixed(1) + '%' : '',
                 ready: lane.ready === true
             };
         });
@@ -1116,7 +1149,7 @@
             setHidden(grid, true);
             setHidden(empty, true);
             setHidden(error, false);
-            $('ops-error-text').textContent = view.text || 'جسر بايثون أو قاعدة البيانات ما ردّ.';
+            $('ops-error-text').textContent = view.text || 'ما قدرنا نوصل لبيانات النظام. جرّب بعد شوي، وإذا ضل بلّغ المطوّر.';
             return;
         }
         setHidden(error, true);
@@ -1383,7 +1416,10 @@
             renderBg: renderBg,
             setPublishBusy: setPublishBusy,
             setBgBusy: setBgBusy,
-            confirm: function (text) { return window.confirm(text); },
+            confirm: function (text) {
+                return window.Laqta && window.Laqta.ask ? window.Laqta.ask({ title: 'تجاوز عزل الخلفية؟', text: text, confirmText: 'تجاوز', danger: true })
+                    : window.confirm(text);
+            },
             confirmText: bgSkip ? bgSkip.getAttribute('data-confirm') : '',
             toast: function (text, variant) {
                 if (window.Laqta && window.Laqta.toast) window.Laqta.toast(text, { variant: variant });

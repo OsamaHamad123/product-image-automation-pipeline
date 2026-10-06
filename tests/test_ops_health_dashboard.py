@@ -72,7 +72,7 @@ def _render(report, window="24h"):
     harness = "globalThis.window = globalThis;\n" + read(JS) + f"""
 console.log(JSON.stringify(window.LaqtaHealth.opsView({json.dumps(report, ensure_ascii=False)}, {json.dumps(window)})));
 """
-    result = subprocess.run([NODE, "-e", harness], capture_output=True, text=True, timeout=60, encoding="utf-8")
+    result = subprocess.run([NODE, "-"], input=harness, capture_output=True, text=True, timeout=60, encoding="utf-8")
     assert result.returncode == 0, result.stderr
     return json.loads(result.stdout.strip().splitlines()[-1])
 

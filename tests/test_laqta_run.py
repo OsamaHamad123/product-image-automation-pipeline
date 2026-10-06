@@ -489,13 +489,17 @@ def test_estimates_and_auto_publish_text():
                " RunController::medianRate([])];\n"
                "$out['auto'] = [RunController::autoPublishText(false, []), RunController::autoPublishText(true, []),"
                " RunController::autoPublishText(true, ['*']), RunController::autoPublishText(true, ['Almarai', 'category:Dairy']),"
-               " RunController::autoPublishText(true, [], true), RunController::autoPublishText(false, [], true)];\n"
+               " RunController::autoPublishText(true, [], true), RunController::autoPublishText(false, [], true),"
+               " RunController::autoPublishText(true, ['Almarai'], true)];\n"
                "$out['defaults'] = [RunController::DEFAULT_SECONDS_PER_PRODUCT, RunController::DEFAULT_COST_PER_PRODUCT];")
     assert out["cost"] == [0.005, None, None]
     assert out["rate"] == [15.0, None]                     # median of 20 and 10; flat and short runs ignored
-    off, empty, star, some, lane, lane_off = out["auto"]
+    off, empty, star, some, lane, lane_off, both = out["auto"]
+    assert both.startswith("النشر الآلي شغّال لـ Almarai") and "لكل الماركات المؤكدة شغّال كمان" in both
     assert "لكل الماركات المؤكدة" in lane and "ما في ولا ماركة" not in lane     # the strict lane publishes unlisted brands
-    assert lane_off == off                                                      # the lane needs auto-publish on
+    # the lane has its own switch (on by default) and publishes only once its reviews prove it: it does not need the
+    # brand list's switch, and the sentence says it waits for the reviews
+    assert lane_off == lane and "بعد ما تثبت دقته بمراجعاتك" in lane and "بيستنى مراجعتك" in lane
     assert off.startswith("النشر الآلي مطفأ") and "مراجعتك" in off
     assert "ما في ولا ماركة مسموحة" in empty and "لكل الماركات" in star
     assert "Almarai" in some and "فئة Dairy" in some
@@ -563,7 +567,7 @@ def test_services_greeting_date_and_alerts():
 # ---------------------------------------------------------------------------
 
 def _node(script: str):
-    result = subprocess.run([NODE, "-e", script], capture_output=True, text=True, timeout=60, encoding="utf-8")
+    result = subprocess.run([NODE, "-"], input=script, capture_output=True, text=True, timeout=60, encoding="utf-8")
     assert result.returncode == 0, result.stderr
     return json.loads(result.stdout.strip().splitlines()[-1])
 
@@ -793,8 +797,8 @@ const ctl = LaqtaRunPage.createController(deps);
                             "/api/batch/resume"]
     force, _, stop, reset, stop2, reset2 = out["confirms"]
     assert "الصور المنشورة بالشيت بتضل مكانها" in force and "ما بينكتب أبداً فوق صورة اعتمدها مراجع" in force
-    assert "لا يُحذف أي صف" in stop and stop == stop2
-    assert "لا يُحذف أي منتج جاهز للمراجعة أو معتمد أو فاشل" in reset and reset == reset2
+    assert "ما في ولا صف بينمسح" in stop and stop == stop2
+    assert "ما في ولا منتج جاهز للمراجعة أو معتمد أو فاشل بينمسح" in reset and reset == reset2
     assert any(t[0] == "رسالة الخادم" for t in out["toasts"])        # the server's own Arabic message is shown
 
 
@@ -1131,6 +1135,7 @@ def test_unavailable_sources_are_said_never_zero(app_env):
     island = re.search(r'id="lq-home-initial">(.*?)</script>', out["/"]["body"], re.DOTALL).group(1)
     assert json.loads(island)["error"] == "database_unavailable"            # the embedded snapshot says why
     assert "قاعدة البيانات مش متاحة" in json.loads(island)["message"]
+    assert "بلّغ المطوّر" in json.loads(island)["message"] and "MariaDB" not in json.loads(island)["message"]
     assert re.search(r'data-home="review-count">—<', out["/"]["body"])      # «—», not 0
 
 
@@ -1205,7 +1210,7 @@ const ctl = LaqtaRunPage.createController(deps);
 """)
     # review fix C5: Stop now waits up to 90 s for the worker to finish its products, so the page says so first
     assert out["toasts"] == [["انوقف التشغيل مؤقتاً.", "success"], ["رجع التشغيل يشتغل.", "success"],
-                             ["عم نوقف التشغيل: العامل بيكمّل المنتجات الجارية (حتى دقيقة ونص).", "info"],
+                             ["عم نوقف التشغيل: العامل بيكمّل المنتجات اللي بإيده (حتى دقيقة ونص).", "info"],
                              ["تم إيقاف التشغيل. لم يُحذف أي صف.", "success"], ["ما قدرنا نصلّح التشغيل.", "danger"]]
 
 

@@ -718,10 +718,29 @@ class PageFetcher(HttpFetcher):
             _cache_put(key, info, self._clock())
         return info
 
+    def fetch_page_now(self, url: str, referer: str = "") -> PageInfo:
+        """fetch_page() that never waits for the host's rate limit (expand P0, the normal flow's own reads): the
+        cached PageInfo, else one read when the host has a page left right now, else PageInfo(ok=False,
+        error='rate_limited'), not cached (a later read waits for its turn as usual)."""
+        url = (url or "").strip()
+        if url.lower().startswith(("http://", "https://")) and _cache_get(_cache_key(url), self._clock()) is None:
+            try:
+                ready = self._bucket_factory(url_host(url)).try_acquire()
+            except Exception:  # pragma: no cover - a broken bucket must not stop the fetch
+                ready = True
+            if not ready:
+                return PageInfo(url=url, ok=False, error="rate_limited")
+            self._local.token_taken = True
+        try:
+            return self.fetch_page(url, referer)
+        finally:
+            self._local.token_taken = False
+
     def _fetch_uncached(self, url: str, referer: str) -> PageInfo:
         host = url_host(url)
         try:
-            self._bucket_factory(host).acquire()
+            if not getattr(self._local, "token_taken", False):      # fetch_page_now took it already
+                self._bucket_factory(host).acquire()
         except Exception:  # pragma: no cover - a broken bucket must not stop the fetch
             logger.debug("pages: rate limiter failed for %s", host, exc_info=True)
         headers = self._page_headers(referer)

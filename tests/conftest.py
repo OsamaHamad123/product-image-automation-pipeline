@@ -28,6 +28,10 @@ os.environ["BG_FALLBACK"] = "off"
 # The nightly run and the worker refresh the local catalog index in a background thread (catalog_match.index_refresh);
 # no test may start one by accident (it would read real sites). The tests of the refresh turn it on by themselves.
 os.environ["LOCAL_INDEX_REFRESH_MAX_S"] = "0"
+# The nightly run ends with the storage cleanup (scripts/prune_storage.py --apply) and pings HEALTHCHECK_URL: no test
+# may clean the developer's temp/ folder or ping the owner's real check. The tests of both turn them on by themselves.
+os.environ["NIGHTLY_PRUNE_ENABLED"] = "0"
+os.environ["HEALTHCHECK_URL"] = ""
 
 
 @pytest.fixture(autouse=True)
@@ -57,6 +61,35 @@ def _fresh_cloud_breaker():
     if module is not None:
         module.reset_cloud_breaker()
         module.reset_rembg_sessions(everything=True)
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _public_dns():
+    """net_guard (the SSRF guard) resolves the host of every URL a download may reach. No test looks a name up for
+    real: every name is a public address here (fake_getaddrinfo), for the whole session, so module-scoped fixtures
+    (a recording run) see it too. A test of the guard sets its own mapping with monkeypatch."""
+    try:
+        import net_guard
+        from net_fakes import fake_getaddrinfo
+    except Exception:  # pragma: no cover - a checkout without the module
+        yield
+        return
+    real = net_guard.getaddrinfo
+    net_guard.getaddrinfo = fake_getaddrinfo()
+    yield
+    net_guard.getaddrinfo = real
+
+
+@pytest.fixture(autouse=True)
+def _fresh_dns_cache():
+    """net_guard caches DNS answers for a minute; a test must not inherit (or leave) another test's answers."""
+    module = sys.modules.get("net_guard")
+    if module is not None:
+        module.reset_cache()
+    yield
+    module = sys.modules.get("net_guard")
+    if module is not None:
+        module.reset_cache()
 
 
 @pytest.fixture

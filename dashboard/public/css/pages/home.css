@@ -252,3 +252,18 @@
         margin-inline-start: 0;
     }
 }
+
+/* «شو الخطوة الجاية؟»: one step with its button */
+.lq-home-next {
+    align-items: center;
+}
+
+.lq-home-next[hidden] {
+    display: none;
+}
+
+/bin/bash: line 1: unalias: unsetenv: not found
+.lq-home-next__go {
+    flex-shrink: 0;
+    margin-inline-start: auto;
+}

@@ -21,7 +21,7 @@
         ['key' => 'home', 'route' => 'dashboard.index', 'label' => 'الرئيسية', 'icon' => 'home'],
         ['key' => 'review', 'route' => 'dashboard.catalog', 'label' => 'المراجعة', 'icon' => 'review', 'badge' => true],
         ['key' => 'run', 'route' => 'dashboard.batch_automation', 'label' => 'التشغيل', 'icon' => 'run'],
-        ['key' => 'health', 'route' => 'dashboard.diagnostics', 'label' => 'الصحة والتكلفة', 'icon' => 'health'],
+        ['key' => 'health', 'route' => 'dashboard.diagnostics', 'label' => 'الصحة والتكلفة', 'short' => 'الصحة', 'icon' => 'health'],
         ['key' => 'settings', 'route' => 'dashboard.settings', 'label' => 'الإعدادات', 'icon' => 'settings'],
     ];
     $lqActive = trim($__env->yieldContent('lq_nav'));
@@ -43,6 +43,7 @@
     <meta name="csrf-token" content="{{ csrf_token() }}">
     <meta name="color-scheme" content="light">
     <meta name="theme-color" content="#0B2226">
+    <link rel="icon" type="image/svg+xml" href="{{ asset('favicon.svg') }}">
     <title>@hasSection('title')@yield('title') · لقطة@else لقطة · استوديو صور المنتجات@endif</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -51,7 +52,7 @@
     @yield('styles')
     @stack('styles')
 </head>
-<body class="lq-body @yield('body_class')" data-lq-status-url="{{ url('/api/batch-status') }}">
+<body class="lq-body @yield('body_class')" data-lq-status-url="{{ url('/api/batch-status') }}" data-lq-review-url="{{ route('dashboard.catalog') }}" data-lq-tz="{{ \App\Http\Controllers\ReviewController::displayTimezone() }}">
     <a class="lq-skip-link" href="#lq-main">تخطَّ إلى المحتوى</a>
 
     <div class="lq-shell">
@@ -70,6 +71,7 @@
                         <a href="{{ route($lqItem['route']) }}" @class(['lq-nav__item', 'is-active' => $lqActive === $lqItem['key']]) @if ($lqActive === $lqItem['key']) aria-current="page" @endif>
                             <x-lq.icon :name="$lqItem['icon']" />
                             <span class="lq-nav__label">{{ $lqItem['label'] }}</span>
+                            @if (! empty($lqItem['short']))<span class="lq-nav__short" aria-hidden="true">{{ $lqItem['short'] }}</span>@endif
                             @if (! empty($lqItem['badge']))
                                 <span class="lq-nav__badge" data-lq-review-count @if ($lqReviewSeed === null || $lqReviewSeed === 0) hidden @endif>{{ $lqReviewSeed }}</span>
                             @endif
@@ -101,9 +103,9 @@
         var PHASES = { starting: 'running', running: 'running', paused: 'paused', stopping: 'stopping',
                        error: 'error', review: 'idle', idle: 'idle' };
         var COPY = {
-            loading: { label: 'لحظة…', text: 'جارٍ قراءة حالة التشغيل…', link: 'صفحة التشغيل ←' },
-            idle: { label: 'جاهز', text: 'لا يوجد تشغيل الآن', link: 'ابدأ تشغيلاً جديداً ←' },
-            running: { label: 'يعمل', text: 'جارٍ تجهيز التشغيل…', link: 'عرض التفاصيل ←' },
+            loading: { label: 'لحظة…', text: 'لحظة، عم نقرأ حالة التشغيل…', link: 'صفحة التشغيل ←' },
+            idle: { label: 'جاهز', text: 'ما في تشغيل هلق', link: 'ابدأ تشغيل جديد ←' },
+            running: { label: 'يعمل', text: 'عم نجهّز التشغيل…', link: 'عرض التفاصيل ←' },
             paused: { label: 'متوقف مؤقتاً', text: 'التشغيل متوقف مؤقتاً', link: 'عرض التفاصيل ←' },
             stopping: { label: 'عم يوقف', text: 'بيكمّل المنتج الحالي وبيوقف', link: 'عرض التفاصيل ←' },
             error: { label: 'توقف بعطل', text: 'توقف التشغيل بسبب عطل.', link: 'عرض التفاصيل ←' },
@@ -276,7 +278,47 @@
                 badges[i].textContent = count > 0 ? String(count) : '';
                 setHidden(badges[i], !(count > 0));
             }
+            // the tab says it too: «(12) المراجعة · لقطة»
+            var base = document.title.replace(/^\(\d+\)\s*/, '');
+            document.title = count > 0 ? '(' + count + ') ' + base : base;
         }
+
+        // «نبّهني لما يخلص»: a browser notification when a run ends while this tab is in the background. Permission
+        // is asked only from the owner's own click (Laqta.runNotice.request, the Run page's button).
+        var RUN_ACTIVE = { running: 1, paused: 1, stopping: 1 };
+        var noticeState = null;
+        function noticeSupported() {
+            return typeof window.Notification === 'function';
+        }
+        function maybeNotifyRunEnd(n) {
+            var was = noticeState;
+            noticeState = n.state;
+            if (!was || !RUN_ACTIVE[was] || RUN_ACTIVE[n.state] || n.state === 'unknown') return;
+            if (!noticeSupported() || window.Notification.permission !== 'granted' || !document.hidden) return;
+            try {
+                var note = new window.Notification(n.state === 'error' ? 'وقف التشغيل بعطل' : 'خلص التشغيل', {
+                    body: n.reviewCount > 0 ? n.reviewCount + ' بانتظار مراجعتك.' : 'ما في شي جديد بانتظار مراجعتك.',
+                    tag: 'laqta-run'
+                });
+                note.onclick = function () {
+                    window.focus();
+                    window.location.href = document.body.getAttribute('data-lq-review-url') || '/catalog';
+                };
+            } catch (e) { /* a browser that refuses page notifications: the toast on the page still says it */ }
+        }
+        var runNotice = {
+            supported: noticeSupported,
+            permission: function () { return noticeSupported() ? window.Notification.permission : 'denied'; },
+            request: function () {
+                if (!noticeSupported()) return Promise.resolve('denied');
+                try {
+                    var asked = window.Notification.requestPermission();
+                    return asked && typeof asked.then === 'function' ? asked : Promise.resolve(window.Notification.permission);
+                } catch (e) {
+                    return Promise.resolve('denied');
+                }
+            }
+        };
 
         var lastStatus = null;
         var timer = null;
@@ -296,6 +338,7 @@
             lastStatus = n;
             renderRunCard(describeRunStatus(n));
             renderReviewCount(n.reviewCount);
+            maybeNotifyRunEnd(n);
             try {
                 document.dispatchEvent(new CustomEvent('lq:run-status', { detail: n }));
             } catch (e) { /* very old browsers: no CustomEvent constructor */ }
@@ -390,6 +433,95 @@
             };
         }
 
+        // Questions in the page instead of window.confirm: Laqta.ask(text | {title, text, confirmText, cancelText,
+        // danger}) resolves true / false. A plain text is split into its question (the last line ending in «؟») and
+        // what it explains. Enter confirms (not a held key, not in the first 400 ms), Esc cancels, Tab stays inside,
+        // and the focus goes back to where it was.
+        var activeAsk = null;
+
+        function askParts(opts) {
+            if (typeof opts !== 'string') return opts || {};
+            var lines = opts.split('\n');
+            var last = lines.length ? lines[lines.length - 1].trim() : '';
+            if (lines.length > 1 && /[؟?]$/.test(last)) return { title: last, text: lines.slice(0, -1).join('\n').trim() };
+            return opts.length <= 140 && lines.length === 1 ? { title: opts } : { title: 'متأكد؟', text: opts };
+        }
+
+        function ask(opts) {
+            opts = askParts(opts);
+            if (activeAsk) activeAsk.finish(false);
+            var opener = document.activeElement;
+            return new Promise(function (resolve) {
+                var back = document.createElement('div');
+                back.className = 'lq-dialog-backdrop';
+                var box = document.createElement('div');
+                box.className = 'lq-dialog';
+                box.setAttribute('role', 'alertdialog');
+                box.setAttribute('aria-modal', 'true');
+                box.setAttribute('aria-labelledby', 'lqAskTitle');
+                var title = document.createElement('h2');
+                title.className = 'lq-dialog__title';
+                title.id = 'lqAskTitle';
+                title.textContent = String(opts.title || '');
+                box.appendChild(title);
+                if (opts.text) {
+                    var text = document.createElement('p');
+                    text.className = 'lq-dialog__text';
+                    text.id = 'lqAskText';
+                    text.textContent = String(opts.text);
+                    box.setAttribute('aria-describedby', 'lqAskText');
+                    box.appendChild(text);
+                }
+                var actions = document.createElement('div');
+                actions.className = 'lq-dialog__actions';
+                var yes = document.createElement('button');
+                yes.type = 'button';
+                yes.id = 'lqAskConfirm';
+                yes.className = 'lq-btn ' + (opts.danger ? 'lq-btn--danger-solid' : 'lq-btn--primary');
+                yes.textContent = opts.confirmText || 'أكيد';
+                var no = document.createElement('button');
+                no.type = 'button';
+                no.id = 'lqAskCancel';
+                no.className = 'lq-btn lq-btn--secondary';
+                no.textContent = opts.cancelText || 'لا، رجوع';
+                actions.appendChild(yes);
+                actions.appendChild(no);
+                box.appendChild(actions);
+                back.appendChild(box);
+                var dlg = { openedAt: Date.now() };
+                function onKey(e) {
+                    if (activeAsk !== dlg) return;
+                    if (e.key === 'Escape') {
+                        e.preventDefault();
+                        dlg.finish(false);
+                    } else if (e.key === 'Enter') {
+                        e.preventDefault();
+                        if (document.activeElement === no) dlg.finish(false);
+                        else if (!e.repeat && Date.now() - dlg.openedAt >= 400) dlg.finish(true);
+                    } else if (e.key === 'Tab') {
+                        e.preventDefault();
+                        (document.activeElement === yes ? no : yes).focus();
+                    }
+                    e.stopPropagation();
+                }
+                dlg.finish = function (ok) {
+                    if (activeAsk !== dlg) return;
+                    activeAsk = null;
+                    document.removeEventListener('keydown', onKey, true);
+                    if (back.parentNode) back.parentNode.removeChild(back);
+                    if (opener && typeof opener.focus === 'function' && document.contains(opener)) opener.focus();
+                    resolve(!!ok);
+                };
+                yes.addEventListener('click', function () { dlg.finish(true); });
+                no.addEventListener('click', function () { dlg.finish(false); });
+                back.addEventListener('click', function (e) { if (e.target === back) dlg.finish(false); });
+                activeAsk = dlg;
+                document.addEventListener('keydown', onKey, true);
+                document.body.appendChild(back);
+                yes.focus();
+            });
+        }
+
         window.Laqta = {
             normalizeRunStatus: normalizeRunStatus,
             describeRunStatus: describeRunStatus,
@@ -400,18 +532,28 @@
                 document.addEventListener('lq:run-status', function (e) { fn(e.detail); });
                 if (lastStatus) fn(lastStatus);
             },
-            toast: toast
+            toast: toast,
+            ask: ask,
+            runNotice: runNotice
         };
 
         // No silent destructive action: anything with data-lq-confirm asks first (capture phase, so it runs
-        // before the element's own click handlers and before a form submits).
+        // before the element's own click handlers and before a form submits). After «أكيد» the same element is
+        // clicked again and goes through.
         document.addEventListener('click', function (e) {
             var target = e.target && e.target.closest ? e.target.closest('[data-lq-confirm]') : null;
             if (!target || target.disabled) return;
-            if (!window.confirm(target.getAttribute('data-lq-confirm'))) {
-                e.preventDefault();
-                e.stopPropagation();
+            if (target.__lqConfirmed) {
+                target.__lqConfirmed = false;
+                return;
             }
+            e.preventDefault();
+            e.stopPropagation();
+            ask(target.getAttribute('data-lq-confirm')).then(function (ok) {
+                if (!ok) return;
+                target.__lqConfirmed = true;
+                target.click();
+            });
         }, true);
 
         // Segmented controls in button mode keep exactly one pressed item and announce the change.

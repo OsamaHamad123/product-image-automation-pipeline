@@ -132,3 +132,21 @@ def test_the_row_count_is_cached_and_an_upsert_refreshes_it(store):
     assert store.count() == 0
     store.upsert("lulu", [(LULU.format("ashoka-plain-paratha-400-g", 1), None)])
     assert store.count() == 1
+
+
+def test_a_product_url_that_is_its_barcode_is_found_by_the_barcode_before_any_read(store, mariadb_or_skip):
+    """Sharjah Co-op files a product under '/p/<GTIN>' (catalog_match.url_gtin): the harvest keeps it in url_gtin, so
+    by_gtin finds the page before it was ever read, and a page read that states no barcode does not lose it."""
+    sharjah = "https://www.sharjahcoop.ae/en/chicken-luncheon-meat-850g/p/5283002830089"
+    loose = "https://www.sharjahcoop.ae/en/loose-tomatoes/p/D000000000002"
+    store.upsert("sharjahcoop", [(sharjah, None), (loose, None)])
+    rows = _sql(mariadb_or_skip, "SELECT url, url_gtin FROM catalog_products ORDER BY id")
+    assert [r["url_gtin"] for r in rows] == ["05283002830089", None]
+    (row,) = store.by_gtin("05283002830089")
+    assert (row.url, row.url_gtin, row.gtin, row.page_status) == (sharjah, "05283002830089", None, "")
+    store.save_page(row.id, PageRecord(status="ok", page_title="Al Taghziah Chicken Luncheon Meat 850g",
+                                       image_url="https://x/i.jpg", width=900, height=900, gtin=None))
+    assert [r.id for r in store.by_gtin("05283002830089")] == [row.id]
+    # a page that states the same barcode is one row, not two
+    store.save_page(row.id, PageRecord(status="ok", page_title="x", image_url="https://x/i.jpg", gtin="05283002830089"))
+    assert [r.id for r in store.by_gtin("05283002830089")] == [row.id]

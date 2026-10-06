@@ -12,7 +12,9 @@
 #      إلا إذا عزلتها طريقة محلية منزّلة (BG_FALLBACK=local، image_processor): ✅ بالرمز bg_fallback مع «رصيد PhotoRoom
 #      خلص، والعزل مشي بـ rembg» ونصيحة الشحن؛ وبلا طريقة محلية يبقى الفشل وزر التجاوز.
 #   3. upload: cloudinary_storage.upload_selftest_image (رافع النشر نفسه) إلى laqta_selftest/publish_check باسم ثابت
-#      يُستبدل، ثم destroy_selftest_image بعد كل رفع نجح: لا تبقى صورة، ولا تُلمس صورة منتج.
+#      يُستبدل، ثم destroy_selftest_image بعد كل رفع نجح: لا تبقى صورة، ولا تُلمس صورة منتج. قبل المسح بنجيب رابط
+#      التسليم متل ما بيجيبه التطبيق (okhttp بـ Accept: image/*، و CFNetwork على iOS، و Dart: NATIVE_CLIENTS): لازم
+#      يوصل WebP أو PNG بشفافيته (إذا اللوحة شفافة) وبعرض DELIVERY_MAX_WIDTH أو أقل، وإلا فشل بجملة واضحة.
 #   4. sheet: الشيت كما يفتحه النشر (google_sheets.open_worksheet مع SPREADSHEET_TAB_NAME)، عمود الرابط بـ
 #      find_link_column(create=False)، ثم قراءة خلية عنوان عمود الرابط وكتابة القيمة نفسها بنفس طريقة طابور الكتابة
 #      (values_batch_update، RAW): يثبت صلاحية التعديل على التبويب الحقيقي بلا تغيير أي بيانات. عنوان ما انقرأ
@@ -63,7 +65,8 @@ STEP_NEEDS = {"download": None, "process": ("bytes", "download"), "upload": ("ca
 # مهلة كل خطوة بالثواني، بحسب مهل النشر نفسه: التنزيل مباشرة ثم البروكسي (3 محاولات × 15 ث لكل طريق)، العزل حتى
 # 3 محاولات (30 ث لكل مزوّد) مع صندوق Gemini، الرفع 3 محاولات × 20 ث ثم المسح، وفتح الشيت مع إعادة المحاولة.
 # مجموعها (380 ث) أقل من مهلة لوحة التحكم (HealthController::PUBLISH_CHECK_KILL_SECONDS).
-STEP_TIMEOUTS = {"download": 110, "process": 120, "upload": 90, "sheet": 60}
+# الرفع: 3 محاولات × 20 ث والمسح 20 ث، ومعها جلب رابط التسليم لـ 3 تطبيقات × DELIVERY_FETCH_TIMEOUT.
+STEP_TIMEOUTS = {"download": 110, "process": 120, "upload": 110, "sheet": 60}
 TIMEOUT_ACTIONS = {
     "download": "موقع المتجر أو البروكسي بطيء كتير: افحص البروكسي بصفحة الإعدادات أو شيله، وأعد الفحص.",
     "process": "خدمة عزل الخلفية بطيئة أو ما بترد: أعد الفحص بعد شوي.",
@@ -85,6 +88,8 @@ DOWNLOAD_ERROR_TEXT = (
     (r"^download_http_(404|410)$", "الصورة انشالت من موقع المتجر: أعد البحث أو اختر صورة ثانية."),
     (r"^download_host_slow$",
      "موقع المتجر بطيء أو ما بيرد هلق وتخطّيناه مؤقتاً: جرّب بعد شوي أو اختر صورة من متجر ثاني."),
+    (r"^download_blocked_url$",
+     "رابط الصورة بيودّي على عنوان داخلي أو مش آمن، فما نزّلناه: اختر صورة ثانية."),
     (r"^download_|^(not_image|image_too_large|source_too_large)$",
      "الرابط ما عاد صورة صالحة: اختر صورة ثانية أو أعد البحث."),
 )
@@ -103,6 +108,8 @@ QUALITY_FLAG_TEXT = {
     "too_small_on_canvas": "المنتج صغير على اللوحة",
     "kept_shadow": "بقي ظل ظاهر مع المنتج",
     "dark_halo": "حواف فاتحة بتبين على الوضع الغامق",
+    "photoroom_unsure": "PhotoRoom مش متأكد من حدود المنتج",
+    "dark_rim": "حواف غامقة بتبين على الوضع الفاتح",
 }
 METHOD_NAMES = {"photoroom": "PhotoRoom", "remove_bg_api": "remove.bg", "grabcut": "GrabCut (محلي)",
                 "rembg": "rembg (محلي)", "bria_rmbg": "Bria (محلي)", "none": "بدون عزل"}
@@ -120,6 +127,17 @@ UPLOAD_CAUSES = {
     "RateLimited": ("upload_rate_limited", "Cloudinary رافض طلبات كتير هلق.", "استنى شوي وأعد الفحص."),
 }
 UPLOAD_NETWORK = ("upload_failed", "Cloudinary ما ردّ.", "Cloudinary ما بيرد: تأكد من الإنترنت وأعد الفحص.")
+
+# رابط التسليم كما يطلبه التطبيق الأصلي (فحص حي: f_auto كان يعطيهم JPEG بلا شفافية): (الاسم كما يقرؤه المالك، الترويسات)
+NATIVE_CLIENTS = (
+    ("أندرويد", {"User-Agent": "okhttp/4.12.0", "Accept": "image/*"}),
+    ("آيفون", {"User-Agent": "Laqta/1 CFNetwork/1494.0.7 Darwin/23.4.0", "Accept": "image/*,*/*;q=0.8"}),
+    ("Flutter", {"User-Agent": "Dart/3.4 (dart:io)", "Accept": "*/*"}),
+)
+DELIVERY_FETCH_TIMEOUT = 6
+DELIVERY_ALPHA_FORMATS = ("WEBP", "PNG")
+DELIVERY_ACTION = ("تأكد إنو ما في إعداد رفع أو تحويل افتراضي بحساب Cloudinary (upload preset أو named transformation) "
+                   "بيغيّر الصيغة أو المقاس، وإنو نسخة المشروع محدّثة، وأعد الفحص.")
 
 # اسم تبويب مش تبويب المنتجات على الأغلب: نسخة احتياطية، أو تبويب اقتراحات عملته أداة تانية (فحص 2026-10-05: «منتجات
 # جديدة مقترحة 2» صار أول تبويب، وبلا SPREADSHEET_TAB_NAME النشر بيقرأ ويكتب بأول تبويب). كلمات إنكليزية (بداية كلمة،
@@ -289,6 +307,8 @@ def fetch_error_word(error):
         return "الرد مش صورة"
     if error == "too_large":
         return "الصورة أكبر من الحد"
+    if error == "blocked_url":
+        return "رابط مش آمن"
     return "خطأ"
 
 
@@ -421,6 +441,77 @@ def step_process(ctx):
 # 3. الرفع على Cloudinary ثم المسح
 # ---------------------------------------------------------------------------
 
+def _fetch_delivered(url, headers):
+    """(كود HTTP، البايتات) لرابط التسليم بترويسات تطبيق؛ يرفع استثناء الشبكة كما هو."""
+    import requests
+
+    response = requests.get(url, headers=headers, timeout=DELIVERY_FETCH_TIMEOUT)
+    return response.status_code, response.content
+
+
+def _has_alpha(img):
+    if img.mode in ("RGBA", "LA", "PA") or "transparency" in img.info:
+        return img.convert("RGBA").getchannel("A").getextrema()[0] < 255
+    return False
+
+
+def check_delivery(url, canvas_path):
+    """
+    رابط التسليم كما يجيبه كل تطبيق بـ NATIVE_CLIENTS. يعيد (المشاكل، اللي ما انفحصوا، المقاس الواصل): المشاكل
+    [(نوع، اسم التطبيق، قيمة)] بالأنواع format (مش WebP ولا PNG)، alpha (اللوحة شفافة ووصلت بلا شفافية)، width (أعرض من
+    DELIVERY_MAX_WIDTH)؛ اللي ما انفحصوا: أسماء التطبيقات اللي ما رجع لها رد صورة (شبكة أو كود مش 200).
+    """
+    import io
+
+    from PIL import Image
+
+    try:
+        with Image.open(canvas_path) as canvas:
+            canvas.load()
+            wants_alpha = _has_alpha(canvas)
+    except Exception:  # noqa: BLE001 - لوحة ما انقرت: ما منطلب شفافية
+        wants_alpha = False
+    problems, unchecked, seen = [], [], None
+    for name, headers in NATIVE_CLIENTS:
+        try:
+            status, body = _fetch_delivered(url, headers)
+        except Exception as e:  # noqa: BLE001 - الشبكة: ما انفحص، مش فشل للصيغة
+            logger.warning("publish_check: delivery fetch for %s failed: %s", name, type(e).__name__)
+            unchecked.append(name)
+            continue
+        if status != 200:
+            unchecked.append(name)
+            continue
+        try:
+            with Image.open(io.BytesIO(body)) as img:
+                img.load()
+                fmt, width, alpha = (img.format or "").upper(), img.width, _has_alpha(img)
+        except Exception:  # noqa: BLE001 - الرد مش صورة
+            problems.append(("format", name, "?"))
+            continue
+        seen = seen or (fmt, width)
+        if fmt not in DELIVERY_ALPHA_FORMATS:
+            problems.append(("format", name, fmt or "?"))
+        elif wants_alpha and not alpha:
+            problems.append(("alpha", name, fmt))
+        elif width > cloudinary_storage.DELIVERY_MAX_WIDTH:
+            problems.append(("width", name, width))
+    return problems, unchecked, seen
+
+
+def _delivery_problem_text(problems):
+    kind, name, value = problems[0]
+    names = "، ".join(dict.fromkeys(n for k, n, _v in problems if k == kind))
+    if kind == "width":
+        return ("delivery_too_wide", f"الصورة بتوصل لتطبيق {names} بعرض {value} بكسل، أعرض من "
+                f"{cloudinary_storage.DELIVERY_MAX_WIDTH}: تحميلها أبطأ على الموبايل.")
+    if kind == "alpha":
+        return ("delivery_no_alpha", f"Cloudinary بيبعت الصورة لتطبيق {names} بصيغة {value} بلا شفافية، فبتطلع مربع "
+                "أبيض بالوضع الغامق.")
+    return ("delivery_no_alpha", f"Cloudinary بيبعت الصورة لتطبيق {names} بصيغة {value} (مش WebP ولا PNG)، فبتضيع "
+            "شفافيتها وبتطلع مربع أبيض بالوضع الغامق.")
+
+
 def step_upload(ctx):
     if not (config.CLOUDINARY_CLOUD_NAME and config.CLOUDINARY_API_KEY and config.CLOUDINARY_API_SECRET):
         return _outcome(FAIL, "إعدادات Cloudinary ناقصة (اسم الحساب أو المفتاح أو السر).",
@@ -433,6 +524,8 @@ def step_upload(ctx):
             code, detail, action = (result.error, "اللوحة ما انقرت قبل الرفع.", "أعد الفحص؛ التفاصيل بسجل الأتمتة تحت.")
         return _outcome(FAIL, f"ما انرفعت الصورة التجريبية: {detail}", action, code, cause=result.cause)
 
+    # رابط التسليم متل ما بيجيبه التطبيق، قبل المسح (الأصل لازم يكون موجود)
+    delivery = check_delivery(result.url, ctx["canvas"]) if result.url else ([], [], None)
     # كل رفع وصل لـ Cloudinary يُمسح، حتى لو ما طابق ما انبعت (الأصل موجود هناك)
     destroy_error = cloudinary_storage.destroy_selftest_image(result.public_id)
     if not result.url:
@@ -441,12 +534,25 @@ def step_upload(ctx):
         cleanup = "وانمسحت الصورة التجريبية." if destroy_error is None else "وما قدرنا نمسح الصورة التجريبية."
         return _outcome(FAIL, f"{detail} {cleanup}", "شيل إعداد الرفع الافتراضي من حساب Cloudinary وأعد الفحص.",
                         str(result.error or "upload_mismatch"), deleted=destroy_error is None)
-    if destroy_error is None:
-        return _outcome(OK, "انرفعت الصورة التجريبية على Cloudinary بمجلد الفحص وانمسحت، وما ضل شي منها.", "", "",
-                        deleted=True)
-    return _outcome(WARN, "الرفع شغّال، بس ما قدرنا نمسح الصورة التجريبية بعد الرفع. الفحص الجاي بيكتب فوقها.",
-                    f"النشر نفسه شغّال؛ إذا بدك امسح الصورة {target} من حساب Cloudinary.", destroy_error,
-                    deleted=False)
+    problems, unchecked, seen = delivery
+    cleanup = "وانمسحت الصورة التجريبية." if destroy_error is None else "وما قدرنا نمسح الصورة التجريبية."
+    if problems:
+        code, detail = _delivery_problem_text(problems)
+        return _outcome(FAIL, f"انرفعت الصورة، بس {detail} {cleanup}", DELIVERY_ACTION, code,
+                        deleted=destroy_error is None, delivery=[list(p) for p in problems])
+    unchecked_text = (f"ما قدرنا نجيبها متل ما بيجيبها تطبيق {'، '.join(unchecked)} لنتأكد إنها بتوصل WebP بشفافيتها."
+                      if unchecked else "")
+    if destroy_error is not None:
+        return _outcome(WARN, "الرفع شغّال، بس ما قدرنا نمسح الصورة التجريبية بعد الرفع. الفحص الجاي بيكتب فوقها."
+                        + (f" وكمان {unchecked_text}" if unchecked else ""),
+                        f"النشر نفسه شغّال؛ إذا بدك امسح الصورة {target} من حساب Cloudinary.", destroy_error,
+                        deleted=False)
+    if unchecked:
+        return _outcome(WARN, f"انرفعت الصورة التجريبية {cleanup} بس {unchecked_text}",
+                        "تأكد من الإنترنت وأعد الفحص.", "delivery_unchecked", deleted=True)
+    reached = f" ووصلت للتطبيق {seen[0]} بعرض {seen[1]} بكسل" if seen else ""
+    return _outcome(OK, f"انرفعت الصورة التجريبية على Cloudinary بمجلد الفحص{reached}، وانمسحت وما ضل شي منها.",
+                    "", "", deleted=True)
 
 
 # ---------------------------------------------------------------------------

@@ -10,8 +10,13 @@ Decisions
     AUTO_PUBLISH        every one of:
                           * settings.auto_publish_enabled() and the brand (or 'category:<name>')
                             is in AUTO_PUBLISH_BRANDS, or the list is '*'; or, with
-                            AUTO_PUBLISH_STRICT_LANE on, a pick of lane 'strict' (below) of a
-                            mapped brand, whatever the list;
+                            AUTO_PUBLISH_STRICT_LANE on (the default) AND the lane's own reviews
+                            proven (strict_lane_readiness() == 'ready': at least 30 reviewed
+                            pre-checks and a Wilson 95% lower bound >= 0.98), a pick of lane
+                            'strict' (below) of a mapped brand, whatever the list and the
+                            AUTO_PUBLISH_ENABLED switch (that one governs the brand list only);
+                            before the lane is ready the pick carries
+                            'auto_blocked:strict_lane_not_ready' and waits for review;
                           * the winner is tier 1 with VLM verdict MATCH;
                           * the winner's source is sanctioned;
                           * spec.brand_conf == 'mapped' (never 'learned');
@@ -27,7 +32,8 @@ Decisions
     the pick carries no review warning (a warned pick is 'other' and never published by the lane);
     'unsure' for a 'preselected:tier1_unsure' pick (display only, never auto); 'other' for the
     rest. The reviews of each lane (local_cache_db.review_stats) are the evidence that opens
-    AUTO_PUBLISH_STRICT_LANE in the settings.
+    AUTO_PUBLISH_STRICT_LANE: the switch says the owner wants it, the readiness says the lane
+    has earned it, and the lane publishes only with both.
     REVIEW_PRESELECTED  a tier 1/2 candidate with MATCH (one whose page barcode differs
                         from the sheet's only when the verifier read brand, size and
                         variant as 'yes', and only when no MATCH without that
@@ -169,7 +175,9 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple, Union
+import threading
+import time
+from typing import Callable, Dict, Iterable, List, Optional, Sequence, Set, Tuple, Union
 from urllib.parse import unquote
 
 from . import quality as quality_mod
@@ -215,6 +223,8 @@ LANES = ("strict", "unsure", "other")
 _SETTING_BLOCKERS = ("auto_publish_disabled", "auto_publish_off_for_brand")
 # The reason on a pick that auto-publishes through AUTO_PUBLISH_STRICT_LANE rather than AUTO_PUBLISH_BRANDS.
 LANE_PUBLISH_REASON = "auto_publish_lane:strict"
+# The blocker on a strict pick the lane would publish while its reviews have not proven it yet.
+LANE_NOT_READY = "strict_lane_not_ready"
 # Reason prefixes written by route(); recomputed on every call so route() is idempotent.
 _ROUTE_PREFIXES = ("hard:", "download:", "quality:", "vlm:", "preselected:", "auto_blocked:", "auto_publish",
                    "gtin:", LANE_PREFIX, RESOLUTION_PREFIX, WARN_PREFIX)
@@ -372,6 +382,55 @@ def lane_of(reasons: Sequence[str]) -> Optional[str]:
     if lane == "strict" and any(r.startswith(WARN_PREFIX) for r in reasons):
         return "other"                       # a review warning keeps a pick out of 'strict' (route)
     return lane
+
+
+# ---------------------------------------------------------------------------
+# Readiness of lane 'strict' (AUTO_PUBLISH_STRICT_LANE publishes only while it reads 'ready')
+# ---------------------------------------------------------------------------
+
+# One read of the reviews per STRICT_LANE_READINESS_TTL_S per process: a reviewer's rejection closes the lane again
+# within that time, and a run of thousands of rows reads review_decisions a few times, not once per row.
+STRICT_LANE_READINESS_TTL_S = 120.0
+LANE_READINESS_UNKNOWN = "unknown"
+_lane_lock = threading.Lock()
+_lane_reader: Optional[Callable[[], str]] = None
+_lane_cache: Dict[str, object] = {"status": None, "at": 0.0}
+
+
+def set_strict_lane_reader(reader: Optional[Callable[[], str]]) -> None:
+    """The function that reads lane 'strict''s readiness ('ready' | 'needs_reviews' | 'low_precision'), e.g.
+    local_cache_db.strict_lane_status. The worker's search entry (image_search) wires it; None unwires it. Without a
+    reader (tests, the eval, offline scripts) the lane reads 'unknown' and publishes nothing, and no database is
+    touched."""
+    global _lane_reader
+    with _lane_lock:
+        if reader is not _lane_reader:
+            _lane_reader = reader
+            _lane_cache.update(status=None, at=0.0)
+
+
+def strict_lane_readiness(clock: Callable[[], float] = time.monotonic) -> str:
+    """'ready' only when the wired reader says the lane's reviewed pre-checks reached the brand thresholds
+    (local_cache_db.brand_status: >= AUTO_PUBLISH_MIN_REVIEWED and a Wilson 95% lower bound >= 0.98). No reader, a
+    reader that fails or answers something else: 'unknown' (fail closed). Cached STRICT_LANE_READINESS_TTL_S."""
+    with _lane_lock:
+        reader = _lane_reader
+        if reader is None:
+            return LANE_READINESS_UNKNOWN
+        now = clock()
+        cached = _lane_cache["status"]
+        if cached is not None and now - float(_lane_cache["at"]) < STRICT_LANE_READINESS_TTL_S:
+            return str(cached)
+    try:
+        status = str(reader() or LANE_READINESS_UNKNOWN)
+    except Exception as exc:  # noqa: BLE001 - a lane that cannot be checked never publishes
+        logger.warning("strict lane: the reviews could not be read (%s); nothing is published by the lane",
+                       type(exc).__name__)
+        status = LANE_READINESS_UNKNOWN
+    with _lane_lock:
+        if _lane_reader is reader:
+            _lane_cache.update(status=status, at=now)
+    return status
 
 
 def _gallery(rc: RankedCandidate) -> bool:
@@ -994,11 +1053,17 @@ def route(spec: SkuSpec, ranked: Sequence[RankedCandidate],
     lane = pick_lane(why, blockers)
     winner.reasons.append(LANE_PREFIX + lane)
     # AUTO_PUBLISH_STRICT_LANE: a strict pick of a mapped brand is not held back only because the brand is not in
-    # AUTO_PUBLISH_BRANDS. Every other blocker stays; an unmapped brand ('brand_conf_*') never gets here.
-    by_lane = (lane == "strict" and blockers == ["auto_publish_off_for_brand"] and spec.brand_conf == "mapped"
-               and settings.auto_publish_enabled() and settings.auto_publish_strict_lane())
+    # AUTO_PUBLISH_BRANDS (or AUTO_PUBLISH_ENABLED, the brand list's switch, is off), once the lane's own reviews
+    # prove it (strict_lane_readiness 'ready'; read last, so no other pick ever reads the reviews). Every other
+    # blocker stays; an unmapped brand ('brand_conf_*') never gets here. Not ready yet: the pick waits for review
+    # with 'auto_blocked:strict_lane_not_ready' (its lane stays 'strict': the review counts toward readiness).
+    lane_wants = (lane == "strict" and len(blockers) == 1 and blockers[0] in _SETTING_BLOCKERS
+                  and spec.brand_conf == "mapped" and settings.auto_publish_strict_lane())
+    by_lane = lane_wants and strict_lane_readiness() == "ready"
     if by_lane:
         blockers = []
+    elif lane_wants:
+        blockers.append(LANE_NOT_READY)
     if blockers:
         winner.reasons.extend(f"auto_blocked:{b}" for b in blockers)
     else:

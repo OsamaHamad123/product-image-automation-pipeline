@@ -163,10 +163,11 @@ def test_publish_image_with_method_none_publishes_clean_and_records_bg_skipped(p
 
 
 def test_publish_image_under_photoroom_keeps_needs_review_for_the_worker(publish):
+    # a review waits in the queue: the image cell (read by the app) is left as it was, no needs_review:<link>
     run, sheet, state = publish
     res = run("photoroom", unclean="review")
-    assert res["status"] == "needs_review" and res["bg_skipped"] is False
-    assert sheet == ["needs_review:" + CLOUD_LINK]
+    assert (res["status"], res["error"]) == ("needs_review", "background_not_removed") and res["bg_skipped"] is False
+    assert sheet == [] and "sheet_value" not in res
 
 
 def test_publish_image_under_photoroom_refuses_the_approval(publish):
@@ -184,10 +185,11 @@ def test_publish_image_with_a_provider_failure_fails_whatever_the_method(publish
 
 
 def test_review_flags_still_apply_to_a_skipped_background(publish):
-    # force_review (the sequential mode's non-AUTO_PUBLISH pick) still writes needs_review: the skip is not a review
+    # force_review (the sequential mode's non-AUTO_PUBLISH pick) is still a review: the skip does not publish it,
+    # and the review writes nothing into the image cell
     run, sheet, state = publish
     res = run("none", unclean="review", force_review=True)
-    assert res["status"] == "needs_review" and sheet == ["needs_review:" + CLOUD_LINK]
+    assert (res["status"], res["error"]) == ("needs_review", "review_required") and sheet == []
 
 
 # ---------------------------------------------------------------------------

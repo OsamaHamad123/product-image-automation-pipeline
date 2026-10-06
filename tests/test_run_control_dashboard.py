@@ -302,7 +302,7 @@ def test_alert_texts_are_arabic():
 # ---------------------------------------------------------------------------
 
 def _node(script: str):
-    result = subprocess.run([NODE, "-e", script], capture_output=True, text=True, timeout=60, encoding="utf-8")
+    result = subprocess.run([NODE, "-"], input=script, capture_output=True, text=True, timeout=60, encoding="utf-8")
     assert result.returncode == 0, result.stderr
     return json.loads(result.stdout.strip().splitlines()[-1])
 
@@ -509,13 +509,14 @@ def test_confirm_texts_say_exactly_what_happens():
     run_js, batch, index = read(JS / "run.js"), read(BATCH), read(INDEX)
     stop = run_js[run_js.index("var STOP_CONFIRM_TEXT"):]
     stop = stop[:stop.index(";\n")]
-    assert "تعود الصفوف التي كانت قيد المعالجة إلى الانتظار" in stop
-    assert "لا يُحذف أي صف" in stop
+    # plain Levantine: what keeps going, what comes back, and that nothing is deleted
+    assert "الصفوف اللي كانت عم تتعالج بترجع تستنى" in stop
+    assert "ما في ولا صف بينمسح" in stop
     for text in (run_js, batch, index, read(JS / "home.js")):
         assert "إنهاء قسري" not in text
     reset = run_js[run_js.index("var RESET_CONFIRM_TEXT"):]
     reset = reset[:reset.index(";\n")]
-    assert "لا يُحذف أي منتج جاهز للمراجعة أو معتمد أو فاشل، ولا أي مرشح أو قرار مراجعة" in reset
+    assert "ما في ولا منتج جاهز للمراجعة أو معتمد أو فاشل بينمسح، ولا أي اقتراح أو قرار مراجعة" in reset
     assert "إصلاح تشغيل عالق" in batch and "تصفير وإعادة تعيين الحالة" not in batch + run_js
     # the page says the same next to the button, and the stop button exists only on the Run page
     assert "الإيقاف ما بيحذف شي" in batch

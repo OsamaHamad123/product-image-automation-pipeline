@@ -7,8 +7,10 @@ that refuses (401 / 403 / 429, a bot-check page, a robots.txt 5xx) is skipped, n
 import gzip
 import json
 import os
+import re
 import socket
 import sys
+from dataclasses import replace
 
 import pytest
 
@@ -74,8 +76,21 @@ class FakeHttp:
         return Resp(status, body, final[0] if final else url)
 
 
+def robots_listed(stores):
+    """The stores without their configured starting sitemaps: these tests serve stores whose robots.txt lists them
+    (the shipped starting points are checked against the stores' real robots.txt in test_cm_store_sitemaps.py)."""
+    return [replace(s, sitemaps=()) for s in stores]
+
+
+@pytest.fixture
+def robots_listed_stores(monkeypatch):
+    """scripts/build_catalog_index.py reads robots_listed() stores (load_stores, wrapped)."""
+    shipped = sitemaps.load_stores
+    monkeypatch.setattr(sitemaps, "load_stores", lambda path=None: robots_listed(shipped(path)))
+
+
 def lulu():
-    return next(s for s in load_stores() if s.key == "lulu")
+    return next(s for s in robots_listed(load_stores()) if s.key == "lulu")
 
 
 def harvester(pages, waits=None):
@@ -139,11 +154,13 @@ def test_categories_other_countries_and_other_languages_are_not_product_pages(ke
     assert not store.is_product(url)
 
 
-def test_stores_whose_slugs_leave_out_the_brand_are_off_unless_asked_for():
+def test_stores_that_cannot_be_used_are_off_unless_asked_for():
+    # noon / Union Coop: slugs leave out the brand; talabat: no product sitemap; Carrefour: sitemaps not known yet
     stores = load_stores()
-    assert [s.key for s in enabled_stores(stores)] == ["lulu", "carrefour_uae", "spinneys", "talabat_mart_uae",
-                                                       "sharjahcoop"]
+    assert [s.key for s in enabled_stores(stores)] == ["lulu", "spinneys", "sharjahcoop"]
     assert [s.key for s in enabled_stores(stores, ["noon_uae"])] == ["noon_uae"]
+    assert [s.key for s in enabled_stores(stores, ["carrefour_uae", "talabat_mart_uae"])] == ["carrefour_uae",
+                                                                                            "talabat_mart_uae"]
     with pytest.raises(KeyError):
         enabled_stores(stores, ["lulu", "nope"])
 
@@ -305,6 +322,66 @@ def test_discover_reads_the_indexes_but_only_a_few_url_lists():
     assert "product page samples" in text and "/en-ae/cat-0/c/0" in text
 
 
+def pasted(lines, store):
+    """The store as it is after its 'paste these lines' block went into its entry of the stores file."""
+    start = next(i for i, line in enumerate(lines) if "paste these lines" in line)
+    values = json.loads("{" + "\n".join(lines[start + 1:start + 4]).rstrip(",") + "}")
+    assert set(values) == {"sitemaps", "sitemap_include", "enabled"}
+    return replace(store, sitemaps=tuple(values["sitemaps"]), enabled=values["enabled"],
+                   include=sitemaps._pattern(values["sitemap_include"]))
+
+
+def test_discover_prints_the_starting_sitemap_and_the_include_to_paste():
+    rep = harvester(full_store()).harvest(lulu(), discover=True)
+    found = sitemaps.suggest_config(rep)
+    assert found == {"sitemaps": [BASE + "/sitemaps/index.xml"], "sitemap_include": r"/sitemaps/products-\d+\.xml\.gz$",
+                     "listed": 2, "kept": 1, "also_empty": 0}          # categories.xml held no product page
+    lines = sitemaps.format_report(rep, lulu(), discover=True).splitlines()
+    assert '     "sitemap_include": "/sitemaps/products-\\\\d+\\\\.xml\\\\.gz$",' in lines     # JSON, as in the file
+    store = pasted(lines, lulu())
+    h = harvester(full_store())
+    again = h.harvest(store)
+    assert again.status == "ok" and again.product_urls == 2
+    assert BASE + "/sitemaps/categories.xml" not in h.http.calls       # the include leaves it out now
+
+
+def test_discover_follows_nested_indexes_and_keeps_only_the_paths_to_the_product_lists():
+    root = BASE + "/sitemap.xml"
+    en, ar = BASE + "/sitemaps/sitemap_index_en.xml", BASE + "/sitemaps/sitemap_index_ar.xml"
+    lists = [BASE + f"/sitemaps/en/products_{i}.xml" for i in range(1, 6)]
+    pages = {BASE + "/robots.txt": (200, f"User-agent: *\nSitemap: {root}\n".encode()),
+             root: (200, index_of(ar, en, BASE + "/sitemaps/pages.xml")),
+             en: (200, index_of(*lists, BASE + "/sitemaps/en/categories.xml")),
+             ar: (200, index_of(BASE + "/sitemaps/ar/products_1.xml")),
+             BASE + "/sitemaps/ar/products_1.xml": (200, urlset(BASE + "/ar-ae/x/p/1")),
+             BASE + "/sitemaps/pages.xml": (200, urlset(BASE + "/en-ae/about")),
+             BASE + "/sitemaps/en/categories.xml": (200, urlset(BASE + "/en-ae/frozen/c/1"))}
+    for i, url in enumerate(lists, 1):
+        pages[url] = (200, urlset(BASE + f"/en-ae/item-{i}/p/{i}"))
+    rep = harvester(pages).harvest(lulu(), discover=True)
+    found = sitemaps.suggest_config(rep)
+    assert found["sitemaps"] == [root]
+    include = re.compile(found["sitemap_include"])
+    assert all(include.search(u) for u in [en] + lists)                 # the unread lists of the series too
+    assert not any(include.search(u) for u in (ar, BASE + "/sitemaps/en/categories.xml", BASE + "/sitemaps/pages.xml"))
+    full = harvester(pages).harvest(pasted(sitemaps.paste_lines(rep), lulu()))
+    assert full.status == "ok" and full.product_urls == 5 and full.sitemaps_read == 7     # root, en and its 5 lists
+
+
+def test_a_single_url_list_needs_no_include_and_nothing_found_says_why():
+    pages = {BASE + "/robots.txt": (200, f"User-agent: *\nSitemap: {BASE}/en-ae/sitemap.xml\n".encode()),
+             BASE + "/en-ae/sitemap.xml": (200, urlset(PRODUCT_1, BASE + "/en-ae/recipes/x"))}
+    rep = harvester(pages).harvest(lulu(), discover=True)
+    assert sitemaps.suggest_config(rep) == {"sitemaps": [BASE + "/en-ae/sitemap.xml"], "sitemap_include": "",
+                                            "listed": 0, "kept": 0, "also_empty": 0}
+    pages[BASE + "/en-ae/sitemap.xml"] = (200, urlset(BASE + "/en-ae/recipes/x"))
+    rep = harvester(pages).harvest(lulu(), discover=True)
+    assert sitemaps.suggest_config(rep) is None
+    assert "nothing to paste (no page of the URL lists read matched product_path" in sitemaps.paste_lines(rep)[0]
+    rep = harvester({BASE + "/robots.txt": (403, b"")}).harvest(lulu(), discover=True)
+    assert sitemaps.paste_lines(rep) == ["   nothing to paste (the store did not give its sitemaps)"]
+
+
 def test_nested_indexes_stop_at_max_depth(monkeypatch):
     monkeypatch.setattr(sitemaps, "MAX_DEPTH", 1)
     pages = {BASE + "/robots.txt": (404, b""),
@@ -320,7 +397,7 @@ def test_nested_indexes_stop_at_max_depth(monkeypatch):
 # ---------------------------------------------------------------------------
 
 @pytest.fixture
-def fake_web(monkeypatch):
+def fake_web(monkeypatch, robots_listed_stores):
     http = FakeHttp(full_store())
 
     class Harvester(SitemapHarvester):
@@ -337,6 +414,8 @@ def test_cli_discover_writes_nothing_and_needs_no_database(fake_web, monkeypatch
     code = build_catalog_index.main(["--discover", "--stores", "lulu", "--json", str(out)])
     text = capsys.readouterr().out
     assert code == 0 and "nothing was written" in text and "product page samples" in text
+    assert 'paste these lines into the store "lulu"' in text
+    assert f'     "sitemaps": ["{BASE}/sitemaps/index.xml"],' in text and '     "enabled": true,' in text
     assert json.loads(out.read_text(encoding="utf-8"))[0]["product_urls"] == 2
 
 
@@ -486,7 +565,8 @@ def test_a_bad_pattern_or_a_byte_order_mark_in_the_stores_file(tmp_path):
     assert build_catalog_index.main(["--discover", "--config", str(bad)]) == 2
 
 
-def test_cli_one_store_failing_never_stops_the_others_and_the_json_is_written(monkeypatch, capsys, tmp_path):
+def test_cli_one_store_failing_never_stops_the_others_and_the_json_is_written(monkeypatch, capsys, tmp_path,
+                                                                             robots_listed_stores):
     pages = full_store()
     spinneys = next(s for s in load_stores() if s.key == "spinneys")
     pages[spinneys.base_url + "/robots.txt"] = (404, b"")

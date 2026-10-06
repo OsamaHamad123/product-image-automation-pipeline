@@ -6,7 +6,7 @@ repository root:
     .venv\\Scripts\\python.exe -X utf8 scripts\\run_nightly.py [--max-hours 8]
 
 It reuses main.py's entry points in one process and in the same order as the dashboard's "run all" button:
-main.run_enqueue_mode(), then main.run_worker_mode() when the enqueue succeeded. Four settings are pinned right
+main.run_enqueue_mode(), then main.run_worker_mode() when the enqueue succeeded. Five settings are pinned right
 after main.load_run_config(), so neither .env, the settings page nor the last dashboard run's
 temp/run_config.json can change them:
 
@@ -14,6 +14,8 @@ temp/run_config.json can change them:
     BRAND_FILTER = ''                every brand
     FORCE_OVERWRITE_IMAGES = False   a row that already has a final image link is never queued
     AUTO_PUBLISH_ENABLED = False     never publishes: results wait for review in the dashboard
+    AUTO_PUBLISH_STRICT_LANE = False nor through the strict lane (on by default for the dashboard's runs, and it
+                                     publishes without AUTO_PUBLISH_ENABLED once its reviews prove it)
 
 The run writes nothing to the sheet beyond what those entry points already write (the enqueue adds the image-link
 column header when it is missing); with auto-publish off the worker writes no image link at all. It is skipped
@@ -45,6 +47,15 @@ health page). Exit code (Task Scheduler's "Last Run Result"):
 A worker that has not stopped 90 seconds after the stop request is ended by the dashboard: the process is killed, so
 Task Scheduler shows 1 (taskkill's code), but the night still gets its report, written by the dashboard
 (cli_bridge run_control) from the lock with the outcome "stopped".
+
+On a server (systemd): SIGTERM / SIGHUP (systemctl stop, a reboot) stop the night like the stop button, at once: the
+worker takes no new row, gives the products in progress SHUTDOWN_GRACE_S seconds and hands the rest back to the queue;
+there is no retry, the night's report is written (stop reason 'shutdown') and the exit code is 3.
+
+After the report, the storage cleanup runs (scripts/prune_storage.py --apply; NIGHTLY_PRUNE_ENABLED, on by default)
+within PRUNE_MAX_SECONDS and inside the time limit. With HEALTHCHECK_URL set (a healthchecks.io-style ping URL), the
+night pings <url>/start when it starts, then <url> when it ends with exit code 0 or 3, or <url>/fail with 1 or 2
+(5-second timeout; a ping that fails never changes the night).
 """
 
 import datetime
@@ -58,6 +69,8 @@ import traceback
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
+
+import stop_signals  # noqa: E402  (no import side effects; config is imported later, after the log is open)
 
 LOG_DIR = os.path.join("temp", "nightly")
 KEEP_LOGS = 30
@@ -75,11 +88,16 @@ RETRY_MARGIN_S = 45 * 60
 # and the worker takes no new row this long before the limit (the products in progress finish, the report is written).
 FINISH_MARGIN_S = 15 * 60
 
+HEALTHCHECK_TIMEOUT_S = 5
+# the night's exit codes that ping the healthcheck as a success: the queue was worked, or a limit / stop ended it
+HEALTHY_EXIT_CODES = (0, 3)
+
 NIGHTLY_SETTINGS = {
     "ROW_FILTER": "",
     "BRAND_FILTER": "",
     "FORCE_OVERWRITE_IMAGES": False,
     "AUTO_PUBLISH_ENABLED": False,
+    "AUTO_PUBLISH_STRICT_LANE": False,
 }
 
 
@@ -205,6 +223,15 @@ def run_once(main_module, db, deadline_ts=None):
     try:
         say("enqueue: reading the sheet")
         main_module.run_enqueue_mode()
+    except KeyboardInterrupt:
+        say("stop signal during the enqueue; the worker is not started")
+        _release_lock(main_module)
+        with stop_signals.deferred():
+            try:
+                db.stop_run(worker_active=False)
+            except Exception:
+                say("could not settle the run state after the stop:\n" + traceback.format_exc())
+        return {"stop_reason": _stop_reason()}
     except SystemExit as exc:
         if exc.code not in (0, None):
             reason = main_module.LAST_ENQUEUE.get("reason") or "enqueue_failed"
@@ -219,8 +246,13 @@ def run_once(main_module, db, deadline_ts=None):
 
     say("worker: searching the queued rows")
     crashed = None
+    stopped = False
     try:
         main_module.run_worker_mode(trigger="nightly", report=False, deadline_ts=deadline_ts)
+    except KeyboardInterrupt:
+        # the worker handed the rows in progress back and settled the run state (its "stopped" path)
+        say("stop signal: the worker stopped")
+        stopped = True
     except SystemExit as exc:
         if exc.code not in (0, None):
             say(f"worker exited with {exc.code}")
@@ -234,11 +266,81 @@ def run_once(main_module, db, deadline_ts=None):
     info.pop("health", None)
     if crashed:
         info["stop_reason"] = crashed
+    elif stopped and not info.get("stop_reason"):
+        info["stop_reason"] = _stop_reason()
     elif not info:
         state = db.get_automation_state()
         info = {"stop_reason": reason_from_state(state), "run_id": state.get("run_id"), "notice": state.get("notice")}
     say(f"worker finished: stop={info.get('stop_reason') or 'queue empty'} notice={info.get('notice') or '-'}")
     return info
+
+
+def _stop_reason():
+    """'shutdown' after SIGTERM / SIGHUP, 'stopped' after Ctrl+C."""
+    return "shutdown" if stop_signals.requested() else "stopped"
+
+
+def ping_healthcheck(kind="", url=None, get=None):
+    """
+    Dead-man's switch: GET <HEALTHCHECK_URL>/start, <HEALTHCHECK_URL> (success) or <HEALTHCHECK_URL>/fail, with a
+    HEALTHCHECK_TIMEOUT_S timeout. No URL: nothing is sent. Returns True on a 2xx answer; never raises, and the URL
+    is never logged (it identifies the check).
+    """
+    label = kind or "success"
+    try:
+        if url is None:
+            from catalog_match import settings as cm_settings
+            url = cm_settings.healthcheck_url()
+        if not url:
+            return False
+        if get is None:
+            import requests
+            get = requests.get
+        response = get(url.rstrip("/") + (f"/{kind}" if kind else ""), timeout=HEALTHCHECK_TIMEOUT_S)
+        status = int(getattr(response, "status_code", 0) or 0)
+        say(f"healthcheck ping ({label}): HTTP {status}")
+        return 200 <= status < 300
+    except Exception as exc:  # noqa: BLE001 - a ping never changes the night
+        say(f"healthcheck ping ({label}) failed ({type(exc).__name__}); the run is not affected")
+        return False
+
+
+def _load_prune():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("prune_storage", os.path.join(REPO_ROOT, "scripts", "prune_storage.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def prune_storage(seconds_left=None, prune=None):
+    """
+    The storage cleanup at the end of the night (scripts/prune_storage.py --apply) when NIGHTLY_PRUNE_ENABLED, within
+    PRUNE_MAX_SECONDS and the seconds left before the task's time limit. Returns its summary, or None (off, no time,
+    stopped, or it failed). Never raises.
+    """
+    try:
+        from catalog_match import settings as cm_settings
+        if not cm_settings.nightly_prune_enabled():
+            say("storage cleanup: off (NIGHTLY_PRUNE_ENABLED)")
+            return None
+        cap = float(cm_settings.prune_max_seconds())
+        if seconds_left is not None:
+            cap = min(cap, seconds_left - 60)
+        if cap < 10:
+            say("storage cleanup: skipped, too close to the task's time limit")
+            return None
+        if stop_signals.requested():
+            say("storage cleanup: skipped after the stop signal")
+            return None
+        prune = prune or _load_prune().prune
+        return prune(apply=True, max_seconds=cap, log=say)
+    except KeyboardInterrupt:
+        say("storage cleanup: stopped by a stop signal")
+        return None
+    except Exception:
+        say("storage cleanup failed:\n" + traceback.format_exc())
+        return None
 
 
 def start_index_refresh():
@@ -283,9 +385,17 @@ def run(sleep=time.sleep, now=time.time, sender=None, max_hours=DEFAULT_MAX_HOUR
         pin_nightly_settings(main, config)
         start_index_refresh()
         for number in range(1, len(RETRY_WAITS_S) + 2):
-            attempt = run_once(main, local_cache_db, deadline_ts=worker_deadline)
+            try:
+                attempt = run_once(main, local_cache_db, deadline_ts=worker_deadline)
+            except KeyboardInterrupt:
+                say("stop signal: the night stops")
+                attempts.append({"stop_reason": _stop_reason()})
+                break
             attempts.append(attempt)
             reason = attempt.get("stop_reason")
+            if stop_signals.requested():
+                say("stop signal: no retry tonight")
+                break
             if not run_report.is_outage(reason) or number > len(RETRY_WAITS_S):
                 break
             wait = RETRY_WAITS_S[number - 1]
@@ -296,17 +406,25 @@ def run(sleep=time.sleep, now=time.time, sender=None, max_hours=DEFAULT_MAX_HOUR
                              f"دقيقة من حد جدولة المهام ({max_hours:g} ساعات)")
                 break
             say(f"attempt {number} stopped on an outage ({reason}); the whole run starts again in {wait // 60} minutes")
-            sleep(wait)
+            try:
+                sleep(wait)
+            except KeyboardInterrupt:
+                say("stop signal while waiting for the retry: the night stops")
+                attempts.append({"stop_reason": _stop_reason()})
+                break
             if worker_busy(main):
                 say("a worker started while we waited; it works the queue, nothing more to do tonight")
                 attempts.append({"stop_reason": "another_worker"})
                 break
-    worker_id = next((a.get("worker_id") for a in reversed(attempts) if a.get("worker_id")), None)
-    ended = now()
-    health = run_report.worker_health(worker_id, ended - started + 60)
-    report = run_report.build_report("nightly", attempts, started, ended, health=health)
-    report["notices"].extend(notes)
-    run_report.publish(report, sender=sender)
+    # the report is written whatever happens now: a stop signal is recorded, not raised (stop_signals.deferred)
+    with stop_signals.deferred():
+        worker_id = next((a.get("worker_id") for a in reversed(attempts) if a.get("worker_id")), None)
+        ended = now()
+        health = run_report.worker_health(worker_id, ended - started + 60)
+        report = run_report.build_report("nightly", attempts, started, ended, health=health)
+        report["notices"].extend(notes)
+        run_report.publish(report, sender=sender)
+    prune_storage(seconds_left=limit - now())
     return report["exit_code"]
 
 
@@ -319,14 +437,30 @@ def main(argv=None):
     handler = logging.StreamHandler(log_stream)
     handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
     logging.getLogger().addHandler(handler)
+    import run_report
+    run_report.install_log_redaction()       # no key or password reaches the night's log
     try:
         say(f"nightly run started in {REPO_ROOT} with {sys.executable}; log {path}")
+        installed = stop_signals.install()
+        if installed:
+            say(f"stop signals handled: {', '.join(installed)} (a clean stop: report written, exit 3)")
         started = time.time()
+        ping_healthcheck("start")
         try:
             hours = max_hours_from(argv)
             say(f"time limit: {hours:g} hours (Task Scheduler's -MaxHours); no new row after "
                 f"{hours * 60 - FINISH_MARGIN_S // 60:g} minutes")
             code = run(max_hours=hours)
+        except KeyboardInterrupt:
+            say("stop signal: the nightly run stopped")
+            code = 3
+            with stop_signals.deferred():
+                try:
+                    import run_report
+                    run_report.publish(run_report.build_report(
+                        "nightly", [{"stop_reason": _stop_reason()}], started, time.time()))
+                except Exception:
+                    say("the night's report could not be written:\n" + traceback.format_exc())
         except Exception:
             say("nightly run failed:\n" + traceback.format_exc())
             code = 1
@@ -337,6 +471,8 @@ def main(argv=None):
                     started, time.time()))
             except Exception:
                 say("the night's report could not be written:\n" + traceback.format_exc())
+        with stop_signals.deferred():
+            ping_healthcheck("" if code in HEALTHY_EXIT_CODES else "fail")
         say(f"nightly run finished (exit {code})")
         return code
     finally:
@@ -346,4 +482,8 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    exit_code = main()
+    worker_module = sys.modules.get("main")
+    if worker_module is not None and hasattr(worker_module, "exit_process"):
+        worker_module.exit_process(exit_code)       # never waits for a product thread left hung
+    sys.exit(exit_code)

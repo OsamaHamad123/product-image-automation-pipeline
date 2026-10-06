@@ -453,7 +453,7 @@
         <div class="lq-table-wrap">
             <table class="lq-table">
                 <thead>
-                    <tr><th scope="col">الماركة</th><th scope="col">مراجعات الاقتراح</th><th scope="col">الدقة</th><th scope="col">الحد المضمون</th><th scope="col">الحالة</th></tr>
+                    <tr><th scope="col">الماركة</th><th scope="col">مراجعات الاقتراح</th><th scope="col">الدقة</th><th scope="col">أقل دقة متوقعة</th><th scope="col">الحالة</th></tr>
                 </thead>
                 <tbody>
                     @foreach ($kitBrands as $kitBrand)

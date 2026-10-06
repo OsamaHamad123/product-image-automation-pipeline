@@ -67,26 +67,57 @@
         return (n < 10 ? '0' : '') + n;
     }
 
+    // The owner's time zone (layouts/laqta.blade.php body[data-lq-tz], config app.display_timezone, Asia/Dubai): every
+    // time on the pages is said in it, whatever the viewer's computer is set to. Without it (node tests), local time.
+    var zoneFormats = {};
+    function displayZone() {
+        var doc = root.document;
+        var body = doc && doc.body;
+        var tz = body && typeof body.getAttribute === 'function' ? body.getAttribute('data-lq-tz') : '';
+        return tz || '';
+    }
+
+    // { y, mo (0-11), d, h, mi, wd (0 = Sunday) } of an instant (ms) in the display zone
+    function zoneParts(ms) {
+        var tz = displayZone();
+        if (tz && root.Intl && typeof root.Intl.DateTimeFormat === 'function') {
+            try {
+                var f = zoneFormats[tz] || (zoneFormats[tz] = new root.Intl.DateTimeFormat('en-US', {
+                    timeZone: tz, year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric',
+                    weekday: 'short', hourCycle: 'h23' }));
+                var p = {};
+                f.formatToParts(new Date(ms)).forEach(function (x) { p[x.type] = x.value; });
+                var wd = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(p.weekday);
+                return { y: +p.year, mo: +p.month - 1, d: +p.day, h: (+p.hour) % 24, mi: +p.minute, wd: wd };
+            } catch (e) {
+                // an unknown zone: local time
+            }
+        }
+        var dt = new Date(ms);
+        return { y: dt.getFullYear(), mo: dt.getMonth(), d: dt.getDate(), h: dt.getHours(), mi: dt.getMinutes(), wd: dt.getDay() };
+    }
+
     function clockText(epoch) {
         epoch = num(epoch);
         if (epoch === null) return '';
-        var d = new Date(epoch * 1000);
-        return pad(d.getHours()) + ':' + pad(d.getMinutes());
+        var d = zoneParts(epoch * 1000);
+        return pad(d.h) + ':' + pad(d.mi);
     }
 
     function sameDay(a, b) {
-        return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+        return a.y === b.y && a.mo === b.mo && a.d === b.d;
     }
 
-    // "اليوم 09:40", "مبارح 21:10", "28 أيلول 09:40" in the viewer's own time zone.
+    // "اليوم 09:40", "مبارح 21:10", "28 أيلول 09:40" in the owner's time zone (displayZone).
     function whenText(epoch, nowMs) {
         epoch = num(epoch);
         if (epoch === null) return '';
-        var d = new Date(epoch * 1000);
-        var now = new Date(typeof nowMs === 'number' ? nowMs : Date.now());
-        var yesterday = new Date(now.getTime());
-        yesterday.setDate(now.getDate() - 1);
-        var day = sameDay(d, now) ? 'اليوم' : (sameDay(d, yesterday) ? 'مبارح' : d.getDate() + ' ' + MONTHS[d.getMonth()]);
+        var d = zoneParts(epoch * 1000);
+        var nowAt = typeof nowMs === 'number' ? nowMs : Date.now();
+        var now = zoneParts(nowAt);
+        // yesterday: the day before today's date in the zone (noon of today minus a day stays clear of DST edges)
+        var yesterday = zoneParts(nowAt - (now.h * 60 + now.mi) * 60000 - 12 * 3600000);
+        var day = sameDay(d, now) ? 'اليوم' : (sameDay(d, yesterday) ? 'مبارح' : d.d + ' ' + MONTHS[d.mo]);
         return day + ' ' + clockText(epoch);
     }
 
@@ -102,9 +133,15 @@
         return whenText(epoch, (typeof nowSec === 'number' ? nowSec : Date.now() / 1000) * 1000);
     }
 
-    // "الأربعاء، 30 أيلول"
+    // "الأربعاء، 30 أيلول" (in the owner's time zone)
     function dateLine(date) {
-        return WEEKDAYS[date.getDay()] + '، ' + date.getDate() + ' ' + MONTHS[date.getMonth()];
+        var p = zoneParts(date.getTime());
+        return WEEKDAYS[p.wd] + '، ' + p.d + ' ' + MONTHS[p.mo];
+    }
+
+    // the hour now in the owner's time zone (the greeting)
+    function zoneHour(date) {
+        return zoneParts((date || new Date()).getTime()).h;
     }
 
     function greeting(hour, name) {
@@ -200,6 +237,13 @@
         });
     }
 
+    // A question before an action that changes something: the page's own dialog (Laqta.ask, layouts/laqta.blade.php)
+    // when it is there, else window.confirm. Always a Promise of true / false.
+    function ask(text) {
+        if (root.Laqta && typeof root.Laqta.ask === 'function') return root.Laqta.ask(text);
+        return Promise.resolve(typeof root.confirm === 'function' ? !!root.confirm(text) : false);
+    }
+
     function toast(message, variant) {
         if (root.Laqta && typeof root.Laqta.toast === 'function') {
             return root.Laqta.toast(message, { variant: variant || 'info' });
@@ -230,6 +274,9 @@
     }
 
     root.LaqtaRunCommon = {
+        zoneParts: zoneParts,
+        zoneHour: zoneHour,
+        displayZone: displayZone,
         ACTIVE_PHASES: ACTIVE_PHASES,
         MONTHS: MONTHS,
         WEEKDAYS: WEEKDAYS,
@@ -251,6 +298,7 @@
         runMeta: runMeta,
         fetchJson: fetchJson,
         toast: toast,
+        ask: ask,
         el: el,
         setHidden: setHidden,
         setText: setText,

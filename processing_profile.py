@@ -8,7 +8,8 @@
 # متى تُقرأ: كل عملية تقرأ صفحة الإعدادات مرة عند بدئها. الجسر (cli_bridge) عملية جديدة لكل طلب، فيرى آخر حفظ؛
 # العامل يقرؤها عند بدء التشغيل (main.load_run_config، ومعها تجاوزات run_config.json: aiEnhance و bgRemovalMethod)،
 # فتغيير الإعدادات أثناء تشغيل العامل يسري على تشغيله التالي ولا تختلف لوحات التشغيل الواحد.
-# - اللوحة: OUTPUT_CANVAS_SIZE كمربع (catalog_match.settings.output_canvas_size، افتراضياً 800).
+# - اللوحة: OUTPUT_CANVAS_SIZE كمربع (catalog_match.settings.output_canvas_size، افتراضياً 800) هو الضلع الأدنى؛
+#   image_processor بيكبّرها مع دقة المنتج لحد OUTPUT_CANVAS_MAX (افتراضياً 2048، _adaptive_canvas).
 #   IMAGE_TARGET_SIZE (800x800 ثابتة في config.py) لم تعد تحدد لوحة النشر.
 # - قيم الطلب (target_width / target_height / enhance / bg_removal_method) لا تغيّر الملف.
 # - bg_fallback (تبويب «معالجة الصور»: system_settings.bg_fallback، config.BG_FALLBACK، catalog_match.settings.bg_fallback):

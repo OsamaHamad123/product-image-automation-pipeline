@@ -18,6 +18,8 @@ from collections import Counter
 
 import pymysql
 
+import db_connect
+
 logger = logging.getLogger(__name__)
 
 # حالات الحل المعتمد في resolved_products
@@ -37,17 +39,10 @@ LEASE_MINUTES = 15
 MAX_TITLE_CHARS = 250
 
 
-# إعداد الاتصال باستخدام المتغيرات البيئية (تُقرأ عند كل اتصال حتى تعمل الاختبارات على automation_test)
+# إعداد الاتصال باستخدام المتغيرات البيئية (تُقرأ عند كل اتصال حتى تعمل الاختبارات على automation_test)،
+# بمهل اتصال وقراءة وكتابة (db_connect): قاعدة بيانات علّقت لا تعلّق العامل
 def get_db_connection():
-    return pymysql.connect(
-        host=os.getenv("DB_HOST", "127.0.0.1"),
-        port=int(os.getenv("DB_PORT", "3306")),
-        user=os.getenv("DB_USERNAME", "root"),
-        password=os.getenv("DB_PASSWORD", ""),
-        database=os.getenv("DB_DATABASE", "automation_db"),
-        charset='utf8mb4',
-        cursorclass=pymysql.cursors.DictCursor
-    )
+    return db_connect.connect()
 
 
 def _close(conn):
@@ -58,12 +53,16 @@ def _close(conn):
 
 
 def url_norm(url):
-    """الصيغة المقارنة لرابط الصورة (المضيف + المسار، بدون www والاستعلام)."""
+    """
+    الصيغة المقارنة لرابط الصورة (المضيف + المسار، بدون www والاستعلام). رابط تسليم Cloudinary إلنا بالتحويل القديم
+    (q_auto,f_auto) أو الجديد هو نفس الصورة: بيتقارن بالتحويل الجديد (delivery_urls.canonical_delivery_url).
+    """
     if not url:
         return ""
     try:
         from catalog_match.text_norm import url_key
-        return url_key(url)[:768]
+        from delivery_urls import canonical_delivery_url
+        return url_key(canonical_delivery_url(url) or url)[:768]
     except Exception:
         return str(url).strip().lower()[:768]
 
@@ -130,6 +129,15 @@ _SCHEMA_MIGRATIONS = [
     "ALTER TABLE curation_candidates ADD COLUMN IF NOT EXISTS identity_tier VARCHAR(8) NULL",
     "ALTER TABLE curation_candidates ADD COLUMN IF NOT EXISTS page_url TEXT NULL",
     "ALTER TABLE curation_candidates ADD INDEX IF NOT EXISTS idx_curation_row (`row_number`)",
+    # مصدر المرشح (المزود، الاستعلام Q1..X5 / IDX) وبصمة pHash لصورته: تقارير التشغيل تنسب الاختيار لمصدره
+    # (winner_providers وجولة التوسيع) وتعدّ النسخ المتقاربة، حتى بعد حذف خطوات البحث من trace_json
+    "ALTER TABLE curation_candidates ADD COLUMN IF NOT EXISTS provider VARCHAR(32) NULL",
+    "ALTER TABLE curation_candidates ADD COLUMN IF NOT EXISTS query_id VARCHAR(16) NULL",
+    "ALTER TABLE curation_candidates ADD COLUMN IF NOT EXISTS phash VARCHAR(32) NULL",
+    # الباركود الذي يكتبه المتجر في رابط المنتج نفسه (catalog_match.url_gtin: الشارقة التعاونية '/p/<GTIN>'):
+    # يُقرأ عند جمع الخرائط بلا أي طلب، فيجد local_index.by_gtin صفحة الباركود قبل قراءتها
+    "ALTER TABLE catalog_products ADD COLUMN IF NOT EXISTS url_gtin VARCHAR(14) NULL",
+    "ALTER TABLE catalog_products ADD INDEX IF NOT EXISTS idx_catalog_url_gtin (url_gtin)",
     "ALTER TABLE curation_candidates ADD INDEX IF NOT EXISTS idx_curation_sku (sku_key)",
     # automation_state: رسالة تنبيه مرئية للوحة التحكم (مثل عدم توفر نموذج Gemini)
     "ALTER TABLE automation_state ADD COLUMN IF NOT EXISTS notice VARCHAR(255) NULL",
@@ -146,6 +154,21 @@ _SCHEMA_MIGRATIONS = [
 ]
 
 
+# «النشر الآلي لكل الماركات المؤكدة» صار شغّال افتراضياً (موافقة المالك). قبل هيك كانت البذرة تكتب 'false'، ومفتاح
+# الإعدادات ما كان بيقبل التشغيل قبل ما تجهز الفئة، فالـ 'false' المحفوظ هو البذرة القديمة مش اختيار. مرة وحدة بس
+# (علامة STRICT_LANE_DEFAULT_MARKER) بيصير 'true'؛ بعدها أي قيمة بيحفظها المالك من الإعدادات بتغلب. الفئة ما بتنشر شي
+# لحالها قبل ما تثبت مراجعاتها دقتها (catalog_match.decide.strict_lane_readiness).
+STRICT_LANE_DEFAULT_MARKER = "migration_strict_lane_default_on"
+
+
+def _strict_lane_default_on(cursor):
+    cursor.execute("INSERT IGNORE INTO system_settings (`key`, `value`) VALUES (%s, %s)",
+                   (STRICT_LANE_DEFAULT_MARKER, "1"))
+    if cursor.rowcount == 1:
+        cursor.execute("UPDATE system_settings SET `value` = 'true' WHERE `key` = 'auto_publish_strict_lane' "
+                       "AND LOWER(TRIM(COALESCE(`value`, ''))) IN ('false', '0', 'no', 'off', '')")
+
+
 def init_db():
     """
     إنشاء قاعدة البيانات وجداولها إن لم تكن موجودة وتطبيق الترقيات بشكل Idempotent.
@@ -153,13 +176,7 @@ def init_db():
     """
     try:
         # الاتصال بخادم MariaDB دون تحديد قاعدة البيانات لإنشائها أولاً إن لم تكن موجودة
-        conn = pymysql.connect(
-            host=os.getenv("DB_HOST", "127.0.0.1"),
-            port=int(os.getenv("DB_PORT", "3306")),
-            user=os.getenv("DB_USERNAME", "root"),
-            password=os.getenv("DB_PASSWORD", ""),
-            connect_timeout=5,
-        )
+        conn = db_connect.connect(database=False, dict_cursor=False, connect_timeout=5)
         cursor = conn.cursor()
         db_name = os.getenv("DB_DATABASE", "automation_db")
         cursor.execute(f"CREATE DATABASE IF NOT EXISTS `{db_name}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
@@ -414,6 +431,10 @@ def init_db():
         # 13. سجل الصرف اليومي للبحث (P4a): استدعاءات كل مزود مدفوع وتكلفتها التقديرية لكل يوم وتشغيل،
         # يُقرأ قبل كل سحب مهمة عند ضبط DAILY_BUDGET_USD
         cursor.execute(SPEND_TABLE_SQL)
+        # 14. «عبّي جدول الماركات» (catalog_match.brand_assistant): الموقع الرسمي اللي لقاه بحث «اقترح الموقع الرسمي» لكل
+        # ماركة (كاش: ما منعيد البحث المدفوع)، والماركات اللي كتبها المساعد بالشيت مع اللي انكتب فعلاً (للتراجع)
+        cursor.execute(BRAND_SITES_TABLE_SQL)
+        cursor.execute(BRAND_WRITES_TABLE_SQL)
 
         # القيم الافتراضية المبدئية من ملف .env (INSERT IGNORE لا يغير القيم الموجودة)
         import config
@@ -430,13 +451,14 @@ def init_db():
             "search_engine": getattr(config, "SEARCH_ENGINE", "v2"),
             "auto_publish_enabled": "false",
             "auto_publish_brands": "",
-            "auto_publish_strict_lane": "false",
+            "auto_publish_strict_lane": "true",
             "output_canvas_size": str(getattr(config, "OUTPUT_CANVAS_SIZE", 800)),
             "output_background": str(getattr(config, "OUTPUT_BACKGROUND", "transparent")),
             "strict_brand_match": "true",
         }
         for k, v in default_settings.items():
             cursor.execute("INSERT IGNORE INTO system_settings (`key`, `value`) VALUES (%s, %s)", (k, v))
+        _strict_lane_default_on(cursor)
 
         for stmt in _SCHEMA_MIGRATIONS:
             cursor.execute(stmt)
@@ -929,10 +951,14 @@ def find_image_owners(cloudinary_url=None, phash=None, sku_key=None, product_nam
     (human_approved / auto_verified). «منتج آخر» = sku_key مختلف؛ سجل قديم بلا sku_key يُعد منتجاً آخر إذا اختلف
     اسمه. تعيد [{sku_key, product_name, brand, cloudinary_url, verification_status, match, distance}] (منتج واحد
     لكل مالك، الأقرب أولاً)، أو None عند خطأ قاعدة البيانات (النشر التلقائي يعامله كتكرار).
+    رابط التسليم بالتحويل القديم (q_auto,f_auto) أو الجديد لنفس الأصل نفس الصورة (delivery_urls.delivery_variants).
     """
+    from delivery_urls import delivery_variants
+
     url = str(cloudinary_url or "").strip()
+    urls = delivery_variants(url)
     target = _phash_int(phash)
-    if not url and target is None:
+    if not urls and target is None:
         return []
     sku = str(sku_key or "").strip()
     name = " ".join(str(product_name or "").lower().split())
@@ -942,9 +968,9 @@ def find_image_owners(cloudinary_url=None, phash=None, sku_key=None, product_nam
             cursor = conn.cursor()
             cursor.execute(
                 "SELECT sku_key, product_name, brand, cloudinary_url, perceptual_hash, verification_status, "
-                f"color_signature FROM resolved_products WHERE {_SERVABLE_SQL} AND (cloudinary_url = %s "
-                "OR (perceptual_hash IS NOT NULL AND perceptual_hash <> ''))",
-                (url,),
+                f"color_signature FROM resolved_products WHERE {_SERVABLE_SQL} AND (cloudinary_url IN "
+                f"({','.join(['%s'] * max(1, len(urls)))}) OR (perceptual_hash IS NOT NULL AND perceptual_hash <> ''))",
+                tuple(urls or [""]),
             )
             rows = cursor.fetchall()
         finally:
@@ -962,7 +988,7 @@ def find_image_owners(cloudinary_url=None, phash=None, sku_key=None, product_nam
         elif owner_name == name:
             continue
         match, distance = None, None
-        if url and str(r.get("cloudinary_url") or "").strip() == url:
+        if urls and str(r.get("cloudinary_url") or "").strip() in urls:
             match, distance = "url", 0
         else:
             other = _phash_int(r.get("perceptual_hash"))
@@ -1802,6 +1828,16 @@ def review_stats(rows):
     }
 
 
+def strict_lane_status():
+    """
+    جاهزية فئة strict (review_stats.lanes.strict.status: ready | low_precision | needs_reviews) من قرارات المراجعين،
+    بنفس عتبات البراند. catalog_match.decide بيقرأها (العامل بيربطها، main.wire_strict_lane_readiness) قبل ما ينشر
+    اقتراح هالفئة آلياً: «النشر الآلي لكل الماركات المؤكدة» بينشر بس لما تكون ready. أخطاء قاعدة البيانات تُرفع
+    (decide بيعتبرها «مش معروفة» وما بينشر).
+    """
+    return review_stats(get_review_decisions())["lanes"]["strict"]["status"]
+
+
 # ---------------------------------------------------------------------------
 # طابور المهام (automation_queue)
 # ---------------------------------------------------------------------------
@@ -1829,6 +1865,10 @@ QUEUE_BATCH = 500
 # تُعاد المعاملة حتى LOCK_RETRIES مرات
 LOCK_CONFLICT_CODES = (1205, 1213)
 LOCK_RETRIES = 3
+# الحالة النهائية لمهمة (update_task_status): انقطاع قاعدة البيانات لحظة (اتصال ضاع، مهلة) يُعاد بعد هذه الانتظارات؛
+# نتيجة لم تُحفظ تعني بحثاً مدفوعاً ثانياً بعد انتهاء الحجز
+STATUS_WRITE_RETRY_DELAYS_S = (1, 3, 6)
+TRANSIENT_DB_ERRORS = (pymysql.err.OperationalError, pymysql.err.InterfaceError, OSError)
 
 _QUEUE_COLUMNS = ("`row_number`", "barcode", "product_name", "brand", "search_query", "status", "attempts",
                   "sku_key", "alt_sku_key", "payload_json", "brand_fp", "priority", "task_kind", "review_only",
@@ -2230,6 +2270,8 @@ def update_task_status(task_id, status, error_message=None, failure_code=None, t
     في المعاملة نفسها. siblings=None: كلها، إلا عند 'completed' (النشر يكتب رابط كل صف أولاً ويمرر معرفاته)؛
     siblings=[ids]: هذه الصفوف فقط؛ siblings=(): لا شيء. صف مكتمل أو جاهز للمراجعة أو قيد المعالجة لا يُلمس،
     ونتيجة عابرة (انقطاع المزودين، خطأ بحث) لا تغيّر صفاً فاشلاً ينتظر موعده.
+    انقطاع قاعدة البيانات (اتصال ضاع، مهلة) يُعاد بعد STATUS_WRITE_RETRY_DELAYS_S؛ إن بقي يُسجل خطأً واضحاً
+    (RESULT NOT SAVED) وتعيد False.
     """
     trace_json = _trace_to_json(trace)
 
@@ -2246,6 +2288,14 @@ def update_task_status(task_id, status, error_message=None, failure_code=None, t
             cursor.execute(sql + " FOR UPDATE", params)
             row = cursor.fetchone()
             if row is None:
+                if claim_id and retried:
+                    # إعادة بعد اتصال ضاع: ربما وصل الـ COMMIT السابق قبل ضياع الرد، فالحالة محفوظة بحجزنا
+                    cursor.execute("SELECT status FROM automation_queue WHERE id = %s AND worker_id = %s",
+                                   (task_id, claim_id))
+                    saved = cursor.fetchone()
+                    if saved and saved.get("status") == status:
+                        conn.rollback()
+                        return True
                 conn.rollback()
                 if claim_id:
                     logger.warning("[MariaDB Queue] المهمة %s لم تعد محجوزة بـ %s؛ لم تُكتب الحالة %s",
@@ -2299,11 +2349,81 @@ def update_task_status(task_id, status, error_message=None, failure_code=None, t
             _close(conn)
         return True
 
+    import time
+    error = None
+    retried = False
+    for n in range(len(STATUS_WRITE_RETRY_DELAYS_S) + 1):
+        try:
+            return _retry_lock_conflicts(attempt)
+        except TRANSIENT_DB_ERRORS as e:
+            error = e
+            if n < len(STATUS_WRITE_RETRY_DELAYS_S):
+                delay = STATUS_WRITE_RETRY_DELAYS_S[n]
+                logger.warning("[MariaDB Queue] تعذر حفظ حالة المهمة %s (%s): %s؛ إعادة المحاولة بعد %s ثانية (%s/%s).",
+                               task_id, status, e, delay, n + 1, len(STATUS_WRITE_RETRY_DELAYS_S))
+                time.sleep(delay)
+                retried = True
+                continue
+        except Exception as e:
+            error = e
+        break
+    # النتيجة ضاعت: الصف يبقى 'processing' حتى ينتهي حجزه ثم يُبحث عنه من جديد (بحث مدفوع ثانٍ)
+    logger.error("[MariaDB Queue] !!! RESULT NOT SAVED: لم تُحفظ الحالة %s للمهمة %s بعد %s محاولة: %s. "
+                 "سيُعاد البحث عن الصف بعد انتهاء حجزه.", status, task_id, n + 1, error)
+    return False
+
+
+def renew_leases(claim_ids, minutes=LEASE_MINUTES):
+    """
+    نبض الحجز: الصفوف التي ما زال هذا العامل يعالجها (status='processing' بمعرف سحب من claim_ids) يمتد حجزها
+    LEASE_MINUTES من الآن، فلا يسحبها عامل آخر ولا تُهمل نتيجتها مهما طال المنتج. صف أخذه غيره أو انتهى لا يُلمس.
+    تعيد عدد الصفوف، 0 بلا معرفات (بلا اتصال)، أو None عند خطأ قاعدة البيانات (يُسجل).
+    """
+    ids = sorted({str(c) for c in claim_ids or () if c})
+    if not ids:
+        return 0
     try:
-        return _retry_lock_conflicts(attempt)
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                f"UPDATE automation_queue SET lease_until = NOW() + INTERVAL {int(minutes)} MINUTE "
+                f"WHERE status = 'processing' AND worker_id IN ({','.join(['%s'] * len(ids))})", tuple(ids))
+            renewed = cursor.rowcount
+            conn.commit()
+        finally:
+            _close(conn)
+        return renewed
     except Exception as e:
-        logger.warning("[MariaDB Queue] فشل تحديث حالة المهمة %s: %s", task_id, e)
-        return False
+        logger.warning("[MariaDB Queue] تعذر تجديد حجز %s صف: %s", len(ids), e)
+        return None
+
+
+def release_claims(claim_ids):
+    """
+    عامل يتوقف (SIGTERM، إعادة تشغيل الجهاز) ومنتجاته ما زالت جارية: صفوفه 'processing' بهذه المعرفات تعود إلى
+    'pending' بلا حجز، فيأخذها التشغيل التالي فوراً بدل انتظار انتهاء الحجز. صفوف غيره لا تُلمس.
+    تعيد عدد الصفوف، أو None عند خطأ قاعدة البيانات (يُسجل؛ الحجز ينتهي وحده بعد LEASE_MINUTES).
+    """
+    ids = sorted({str(c) for c in claim_ids or () if c})
+    if not ids:
+        return 0
+    try:
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE automation_queue SET status = 'pending', worker_id = NULL, lease_until = NULL, "
+                f"updated_at = CURRENT_TIMESTAMP WHERE status = 'processing' AND worker_id IN "
+                f"({','.join(['%s'] * len(ids))})", tuple(ids))
+            released = cursor.rowcount
+            conn.commit()
+        finally:
+            _close(conn)
+        return released
+    except Exception as e:
+        logger.warning("[MariaDB Queue] تعذر إعادة %s صف للانتظار: %s", len(ids), e)
+        return None
 
 
 def get_sku_siblings(task_id, sku_key):
@@ -2368,10 +2488,11 @@ _CANDIDATES_LEFT_SQL = (
     "AND c.`row_number` = q.`row_number`)) AND COALESCE(c.status, '') NOT IN ('excluded', 'rejected'))")
 
 
-def has_review_candidates(row_number, sku_key=None):
+def has_review_candidates(row_number, sku_key=None, on_error=True):
     """
     هل بقي للمنتج مرشح أمام المراجع (غير مستبعد)؟ إعادة تحقق لم تجد شيئاً تعيد الصف للمراجعة فقط عندها؛ بدونها
-    يكون صفاً فارغاً في المراجعة. خطأ القراءة يُسجل ويعيد True (السلوك السابق: يعود للمراجعة ولا يُسجل فشلاً).
+    يكون صفاً فارغاً في المراجعة. خطأ القراءة يُسجل ويعيد on_error (افتراضياً True، السلوك السابق: يعود للمراجعة ولا
+    يُسجل فشلاً).
     """
     clause, params = _row_or_sku_clause(row_number, sku_key)
     try:
@@ -2386,7 +2507,7 @@ def has_review_candidates(row_number, sku_key=None):
         return int(row.get("n") or 0) > 0
     except Exception as e:
         logger.warning("[Curation] تعذر عدّ مرشحات الصف %s: %s", row_number, e)
-        return True
+        return on_error
 
 
 def _park_rechecks(cursor):
@@ -2849,6 +2970,12 @@ def _candidate_score(c):
     return None
 
 
+def _short_text(value, limit):
+    """نص قصير لعمود VARCHAR (المزود، الاستعلام، pHash) أو None."""
+    text = str(value).strip() if value is not None else ""
+    return text[:limit] or None
+
+
 def _as_int(value):
     try:
         return int(value) if value not in (None, "") else None
@@ -2904,14 +3031,16 @@ def save_curation_candidates(row_number, product_name, brand, candidates, best_u
                 INSERT INTO curation_candidates (
                     `row_number`, product_name, brand, image_url, title, width, height, clip_score, source_domain,
                     is_selected, status, sku_key, run_id, reasons_json, evidence_json, vlm_json, content_sha256,
-                    identity_tier, page_url
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    identity_tier, page_url, provider, query_id, phash
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (
                 row_number, product_name, brand, url, title, _as_int(c.get("width")), _as_int(c.get("height")),
                 _candidate_score(c), str(domain)[:255], 1 if status == "preselected" else 0, status[:255],
                 sku_key, run_id, _json_or_none(c.get("reasons")), _json_or_none(evidence),
                 _json_or_none(c.get("vlm")), c.get("content_sha256") or None,
                 (str(tier)[:8] if tier is not None else None), page_url,
+                _short_text(c.get("provider") or c.get("source"), 32), _short_text(c.get("query_id"), 16),
+                _short_text(c.get("phash"), 32),
             ))
         conn.commit()
         return True
@@ -2976,6 +3105,9 @@ def get_curation_candidates(row_number, sku_key=None, identity=None):
                 "content_sha256": r.get("content_sha256"),
                 "identity_tier": r.get("identity_tier"),
                 "page_url": r.get("page_url"),
+                "provider": r.get("provider"),
+                "query_id": r.get("query_id"),
+                "phash": r.get("phash"),
             })
         return out
     except Exception as e:
@@ -3651,6 +3783,101 @@ def remove_pending_harvest_domains(domains):
     """يشيل مواقع فُهرست (أو ما عاد لها لزوم) من القائمة؛ تعيد ما بقي. أخطاء قاعدة البيانات تُرفع."""
     gone = {str(d).strip().lower() for d in domains or []}
     return _change_pending_harvest(lambda current: [d for d in current if d.lower() not in gone])
+
+
+# ---------------------------------------------------------------------------
+# «عبّي جدول الماركات»: كاش المواقع الرسمية، وسجل الماركات اللي كتبها المساعد (للتراجع)
+# ---------------------------------------------------------------------------
+
+BRAND_SITES_TABLE_SQL = """
+    CREATE TABLE IF NOT EXISTS brand_sites (
+        brand_key VARCHAR(191) PRIMARY KEY,
+        brand VARCHAR(255) NOT NULL,
+        domain VARCHAR(253) NOT NULL DEFAULT '',
+        searched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
+"""
+BRAND_WRITES_TABLE_SQL = """
+    CREATE TABLE IF NOT EXISTS brand_writes (
+        id BIGINT AUTO_INCREMENT PRIMARY KEY,
+        brand_key VARCHAR(191) NOT NULL,
+        brand VARCHAR(255) NOT NULL,
+        synonyms TEXT NULL,
+        official_domains TEXT NULL,
+        added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        undone_at DATETIME NULL,
+        INDEX idx_brand_writes_key (brand_key)
+    ) ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
+"""
+
+
+def brand_sites():
+    """{brand_key: {brand, domain, searched_at}} لكل ماركة انبحث عن موقعها الرسمي (domain '' = ما لقينا موقع واضح).
+    أخطاء قاعدة البيانات تُرفع."""
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT brand_key, brand, domain, searched_at FROM brand_sites")
+        rows = cursor.fetchall() or []
+    finally:
+        _close(conn)
+    return {r["brand_key"]: {"brand": r["brand"], "domain": r["domain"] or "",
+                             "searched_at": str(r["searched_at"] or "")} for r in rows}
+
+
+def save_brand_site(brand_key, brand, domain):
+    """يحفظ نتيجة بحث الموقع الرسمي لماركة (domain '' = ما لقينا). الحفظ التاني بيبدّل الأول. أخطاء قاعدة البيانات تُرفع."""
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("INSERT INTO brand_sites (brand_key, brand, domain) VALUES (%s, %s, %s) "
+                       "ON DUPLICATE KEY UPDATE brand = VALUES(brand), domain = VALUES(domain), searched_at = NOW()",
+                       (str(brand_key)[:191], str(brand)[:255], str(domain or "")[:253]))
+        conn.commit()
+    finally:
+        _close(conn)
+
+
+def log_brand_writes(entries):
+    """يسجّل الماركات اللي كتبها المساعد بالشيت متل ما انكتبت: entries [{brand_key, brand, synonyms, official_domains}]
+    (النص بالخلايا). أخطاء قاعدة البيانات تُرفع."""
+    rows = [(str(e["brand_key"])[:191], str(e["brand"])[:255], str(e.get("synonyms") or ""),
+             str(e.get("official_domains") or "")) for e in entries or []]
+    if not rows:
+        return 0
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.executemany("INSERT INTO brand_writes (brand_key, brand, synonyms, official_domains) "
+                           "VALUES (%s, %s, %s, %s)", rows)
+        conn.commit()
+        return len(rows)
+    finally:
+        _close(conn)
+
+
+def last_brand_write(brand_key):
+    """آخر كتابة للمساعد لهالماركة ما انتراجع عنها: {id, brand, synonyms, official_domains}، وإلا None."""
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, brand, synonyms, official_domains FROM brand_writes "
+                       "WHERE brand_key = %s AND undone_at IS NULL ORDER BY id DESC LIMIT 1", (str(brand_key)[:191],))
+        row = cursor.fetchone()
+    finally:
+        _close(conn)
+    return dict(row) if row else None
+
+
+def mark_brand_write_undone(write_id):
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("UPDATE brand_writes SET undone_at = NOW() WHERE id = %s AND undone_at IS NULL", (int(write_id),))
+        conn.commit()
+        return cursor.rowcount == 1
+    finally:
+        _close(conn)
 
 
 # تهيئة قاعدة البيانات تلقائياً عند استيراد الموديول للمرة الأولى

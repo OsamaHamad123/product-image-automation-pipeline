@@ -18,7 +18,11 @@ When it runs
       brand found in the name): without a brand nothing can reach tier 1 or 2, so no page or listing the round
       finds could ever be picked, and its paid calls would only be spent (RoundReport.skipped = 'no_brand');
     * never when the caller injected providers or a verifier (tests, the offline eval),
-      unless it also passed an Expansion explicitly (pipeline.find_product_image).
+      unless it also passed an Expansion explicitly (pipeline.find_product_image);
+    * the paid steps X1-X5 (not X0) only where they can find a pick (scope_gate, EXPANSION_SCOPE_GATE, on by
+      default): none for an out-of-scope product (a florist's bouquet, data/expansion_gate.json), one Google
+      Shopping probe for an unmapped brand no listing names on a store or brand site, the rest of the round only
+      when the probe names it (live runs 2026-10-04/05: 9 bouquet and typo-brand rows spent 27 calls, no pick).
 
 The round ('expand') starts with a free step:
     X0  page recovery: the normal flow's listings whose page names the right product (tier
@@ -98,13 +102,21 @@ Every paid call is recorded: provider calls in the outcome's provider_health (pr
 'serper_web' | 'serper_shopping' | 'lens_serper' | 'lens_serpapi', query_id X1..X5 / XU),
 verifier calls in RoundReport.verify_results (the pipeline adds them to vlm_calls). Page
 fetches are free and are logged, not recorded as provider calls.
+
+P0 is not part of the round: the normal flow (pipeline step 4) reads the pages of its best trusted tier-1/2
+listings while their pictures download and offers each page's own main image next to the listing's picture
+(PageMainImages, PAGE_MAIN_IMAGES_MAX_PAGES / PAGE_MAIN_IMAGES_WAIT_S); X0 later finds those pages in the cache.
 """
 
 from __future__ import annotations
 
+import json
 import logging
+import re
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
+from functools import lru_cache
+from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 from . import decide, settings
@@ -117,14 +129,18 @@ from .providers.serper_shopping import SerperShoppingProvider
 from .providers.serper_web import SerperWebProvider, site_query
 from .quality import LOW_RES_SHORT_SIDE
 from .query_plan import build_queries
-from .retrieve import norm_image_url
+from .retrieve import norm_image_url, reader_queue
 from .score import IDENTITY_KEYS, rank, rank_key, score_candidate, trusted_domains
-from .text_norm import domain_matches, url_host
+from .text_norm import domain_matches, tokens, url_host
 
 logger = logging.getLogger(__name__)
 
 PICK_DECISIONS = ("REVIEW_PRESELECTED", "AUTO_PUBLISH")
 NO_BRAND = "no_brand"          # RoundReport.skipped for a SKU with no usable brand
+# scope_gate (EXPANSION_SCOPE_GATE): RoundReport.skipped when the paid steps X1-X5 were not (all) made
+BRAND_NOT_FOUND = "brand_not_found"     # no listing names the brand on a store or brand site: one shopping probe only
+OUT_OF_SCOPE_PREFIX = "out_of_scope:"   # 'out_of_scope:flowers' (data/expansion_gate.json)
+EXPANSION_GATE_PATH = Path(__file__).resolve().parent / "data" / "expansion_gate.json"
 WEB_GROUP_1 = ("luluhypermarket.com", "carrefouruae.com", "amazon.ae", "noon.com", "talabat.com")
 MAX_OFFICIAL_SITES = 2
 MAX_PAGES = {"web": 5, "shopping": 4, "lens": 4}
@@ -281,6 +297,105 @@ def no_usable_brand(spec: SkuSpec) -> bool:
     if spec.match_brands or spec.discovered_brands or spec.brand_raw or spec.brand_canonical:
         return False
     return not (spec.gtin and settings.gtin_policy() == "strict")
+
+
+# ---------------------------------------------------------------------------
+# Scope gate (EXPANSION_SCOPE_GATE): the paid steps X1-X5 only where they can find a pick
+# ---------------------------------------------------------------------------
+
+@lru_cache(maxsize=1)
+def _out_of_scope_rules() -> Tuple[Tuple[str, frozenset, frozenset], ...]:
+    try:
+        with open(EXPANSION_GATE_PATH, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):             # pragma: no cover - the file ships with the code
+        logger.exception("expand: %s unreadable; no product is out of scope", EXPANSION_GATE_PATH.name)
+        return ()
+    rules = []
+    for entry in data.get("out_of_scope") or []:
+        words = frozenset(t for w in entry.get("words") or [] for t in tokens(w))
+        unless = frozenset(t for w in entry.get("unless") or [] for t in tokens(w))
+        if entry.get("key") and words:
+            rules.append((str(entry["key"]), words, unless))
+    return tuple(rules)
+
+
+def out_of_scope(spec: SkuSpec) -> str:
+    """The data/expansion_gate.json kind the product is ('flowers'), or '' (a grocery the round may help)."""
+    words = set(tokens(spec.raw_name)) | set(tokens(spec.name_ar))
+    for key, hits, unless in _out_of_scope_rules():
+        if words & hits and not words & unless:
+            return key
+    return ""
+
+
+def _compact(text: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", (text or "").lower())
+
+
+def host_names_brand(spec: SkuSpec, host: str) -> bool:
+    """The site is named after the brand ('bisbell.ae', 'nellara.com', 'shop.nellarafoods.com'): a host label holds
+    one of the SKU's brand phrases written without spaces (4+ letters, Latin script)."""
+    labels = [_compact(label) for label in (host or "").lower().split(".") if label]
+    phrases = [c for c in (_compact(p) for p in spec.match_brands) if len(c) >= 4]
+    return any(p in label for p in phrases for label in labels)
+
+
+def names_brand(spec: SkuSpec, cand: Candidate, score: Optional[Any] = None) -> bool:
+    """The listing names the SKU's brand anywhere: an identity field or the snippet (score.matched brand_fields, a
+    hard-rejected listing too), or the page / image host is the brand's own site."""
+    score = score if score is not None else score_candidate(spec, cand)
+    if (score.matched or {}).get("brand_fields"):
+        return True
+    return any(host_names_brand(spec, url_host(u)) for u in (cand.page_url, cand.image_url) if u)
+
+
+def _store_or_brand_site(spec: SkuSpec, cand: Candidate) -> bool:
+    """A UAE retailer, a known retailer, the brand's own (or a learned) site, any .ae host, or a site named after the
+    brand: where the paid steps (site: web search, shopping) would look for the product."""
+    for url in (cand.page_url, cand.image_url):
+        host = url_host(url)
+        if host and (_fetchable(spec, url) or domain_matches(host, spec.learned_domains)
+                     or host_names_brand(spec, host)):
+            return True
+    return False
+
+
+def brand_on_a_store(spec: SkuSpec, ranked: Sequence[RankedCandidate]) -> bool:
+    """A listing of the pool (hard-rejected ones too) names the brand on a store or brand site."""
+    return any(rc.status != "excluded" and names_brand(spec, rc.candidate, rc.score)
+               and _store_or_brand_site(spec, rc.candidate) for rc in ranked)
+
+
+def _brand_found(ranked: Sequence[RankedCandidate]) -> bool:
+    """A listing names the brand and survives the identity rules (tier 1 or 2): explain's brand_not_found reversed."""
+    return any(rc.status != "excluded" and rc.score is not None and rc.score.tier in (1, 2)
+               and not rc.score.hard_reject for rc in ranked)
+
+
+def scope_gate(spec: SkuSpec, ranked: Sequence[RankedCandidate]) -> str:
+    """Why the paid steps X1-X5 should not run as usual for this product, or '' (they run). Read after X0.
+
+    'out_of_scope:<kind>'  a product no store lists as one pack (a florist's bouquet; data/expansion_gate.json): no
+                           paid step.
+    'brand_not_found'      a brand the Brands Mapping does not know (brand_conf 'sheet_raw', no official site) that
+                           no listing names: none survives with it (tier 1/2) and no listing of the pool, hard-
+                           rejected ones included, names it on a store or brand site. The brand cell is most likely
+                           a typo or an abbreviation the same query text would not find either ('BARTS TRADITON',
+                           'SUP/T', 'SQ SALITED'; live runs 2026-10-04/05: no pick in any such row). One Google
+                           Shopping probe (X2) still runs: it alone found the brand's own store for 'BISBELL BB2208
+                           ...' (row 91), and the rest of the round follows only when it brings a listing that names
+                           the brand. A mapped or learned brand is never gated this way: it exists, and a store
+                           page Google Images did not rank is what the round is for.
+    A product with no usable brand at all never gets here (run_round skips the round: no_usable_brand).
+    """
+    kind = out_of_scope(spec)
+    if kind:
+        return OUT_OF_SCOPE_PREFIX + kind
+    known = spec.brand_conf in ("mapped", "learned") or bool(spec.official_domains)
+    if not known and not _brand_found(ranked) and not brand_on_a_store(spec, ranked):
+        return BRAND_NOT_FOUND
+    return ""
 
 
 def trigger(outcome: SearchOutcome, exp: Optional[Expansion]) -> str:
@@ -524,6 +639,170 @@ def recovery_pages(spec: SkuSpec, ranked: Sequence[RankedCandidate]) -> List[Ran
 
 
 # ---------------------------------------------------------------------------
+# P0 (normal flow, free): the page's own main image next to a trusted listing's picture
+# ---------------------------------------------------------------------------
+# Run exports 2026-10-04/05: in 35 % of the rows a tier-1/2 listing's picture was another brand's pack (Yumway
+# read as 'Max Foods', Dr Bone as 'LOCK&LOCK', Fine tissue as Kleenex), 17 of the 48 rows with no pick among
+# them; X0 reads such a page only after nothing was picked. P0 reads the pages of the best trusted listings
+# while the normal flow downloads their pictures, and offers each page's own main image (JSON-LD image, else
+# og:image: pages.page_candidates) as one more candidate, so the reader verifies it in the same batches.
+
+SAME_PICTURE_DISTANCE = 6          # decide.RESOLUTION_PHASH_MAX: the page shows the listing's own picture
+
+
+def resolve_pages(pages: Any, injected: bool) -> Any:
+    """The page reader of P0: None (the default) -> a PageFetcher, unless the caller injected providers or a
+    verifier (tests, the offline eval) or PAGE_MAIN_IMAGES_MAX_PAGES is 0; False -> none; anything else ->
+    itself (a test double, a dry run)."""
+    if pages is False or (pages is None and (injected or settings.page_main_images_max_pages() <= 0)):
+        return None
+    return PageFetcher() if pages is None else pages
+
+
+def main_image_pages(ranked: Sequence[RankedCandidate], max_pages: int) -> List[RankedCandidate]:
+    """P0: up to max_pages listings, best first, one per page: tier 1/2, not hard-rejected, on a trusted host (the
+    brand's own site, a UAE retailer or a reviewed source: score.source_trust >= TRUST_UAE_RETAILER, never another
+    country's section of a store), found by a search, and not a page we read ourselves already (its main image is
+    in the pool: local index, page)."""
+    from .retrieve import PAGE_READ_PROVIDERS
+    from .score import TRUST_UAE_RETAILER
+
+    read = {page_key(rc.candidate.page_url) for rc in ranked
+            if (rc.candidate.provider or "").lower() in PAGE_READ_PROVIDERS and rc.candidate.page_url}
+    out: List[RankedCandidate] = []
+    for rc in ranked:
+        if len(out) >= max_pages:
+            break
+        s, cand = rc.score, rc.candidate
+        if s is None or s.tier not in (1, 2) or s.hard_reject or rc.status == "excluded":
+            continue
+        if (cand.provider or "").lower() in PAGE_READ_PROVIDERS:
+            continue
+        if not cand.page_url.lower().startswith(("http://", "https://")):
+            continue
+        if int((s.matched or {}).get("source_trust") or 0) < TRUST_UAE_RETAILER:
+            continue
+        key = page_key(cand.page_url)
+        if key in read:
+            continue
+        read.add(key)
+        out.append(rc)
+    return out
+
+
+def _shows_listing_picture(page_rc: RankedCandidate, listing: RankedCandidate) -> bool:
+    """The page's main image is the listing's own picture (same bytes, or the same pHash family), and the listing's
+    copy is not a low-resolution one a larger page copy would improve on: offering it again only spends a reading."""
+    a, b = listing.fetched, page_rc.fetched
+    if a is None or not a.ok or b is None or not b.ok:
+        return False
+    if a.content_sha256 and a.content_sha256 == b.content_sha256:
+        return True
+    a_short, b_short = min(a.width or 0, a.height or 0), min(b.width or 0, b.height or 0)
+    if a_short < LOW_RES_SHORT_SIDE and b_short > a_short:
+        return False
+    dist = phash_distance(a.phash, b.phash)
+    return dist is not None and dist <= SAME_PICTURE_DISTANCE
+
+
+class PageMainImages:
+    """P0: start() reads the pages of main_image_pages() in background threads (pages.PageFetcher: its rate limits
+    and its page cache, which X0 and the expansion round reuse), each thread downloading its page's main image as
+    soon as the page is read, while the normal flow downloads the listings' pictures. The image offered is the
+    page's own main image: provider 'page', sanctioned False (pre-checked at most, never auto-published), scored
+    like any candidate (tier 1/2 kept), not already in the pool, not a reviewer negative (URL or pHash). join()
+    waits for the threads until PAGE_MAIN_IMAGES_WAIT_S after the start (a page still loading is left out, its
+    thread fills the cache), leaves out an image that is the listing's own picture (_shows_listing_picture) and
+    hands the rest to the normal stages (quality, rank, the reader)."""
+
+    def __init__(self, spec: SkuSpec, pages: Any = None, listings: Sequence[RankedCandidate] = (),
+                 wait_s: float = 0.0, pool: Any = None, fetcher: Any = None, phash_negatives: Sequence[str] = (),
+                 negatives: Any = None) -> None:
+        import threading
+        import time
+
+        self.spec = spec
+        self.listings = list(listings) if pages is not None else []
+        self.deadline = time.monotonic() + max(0.0, float(wait_s))
+        self.results: Dict[int, Tuple[List[RankedCandidate], int]] = {}   # listing -> (downloaded images, dropped)
+        self.offered = 0
+        self.late = 0
+        self._pages, self._fetcher, self._negatives = pages, fetcher, negatives
+        self._phash_negatives = list(phash_negatives or ())
+        self._pool = pool
+        self._known = {key for key, _ in pool.entries()} if pool is not None else set()
+        self._threads = []
+        for i in range(len(self.listings)):
+            thread = threading.Thread(target=self._read, args=(i,), daemon=True, name="p0-page")
+            thread.start()
+            self._threads.append(thread)
+
+    @classmethod
+    def start(cls, spec: SkuSpec, ranked: Sequence[RankedCandidate], pages: Any, pool: Any = None,
+              fetcher: Any = None, phash_negatives: Sequence[str] = (), negatives: Any = None) -> "PageMainImages":
+        if pages is None or pool is None or fetcher is None:
+            return cls(spec)
+        max_pages = settings.page_main_images_max_pages()
+        listings = main_image_pages(ranked, max_pages) if max_pages > 0 else []
+        return cls(spec, pages, listings, settings.page_main_images_wait_s(), pool, fetcher, phash_negatives,
+                   negatives)
+
+    def _read(self, i: int) -> None:
+        """One listing's page: read it, then download its main image when that image is worth offering."""
+        listing = self.listings[i].candidate
+        # never queue behind the host's page rate limit (the expansion round's reads keep their turn)
+        read = getattr(self._pages, "fetch_page_now", None) or self._pages.fetch_page
+        try:
+            info = read(listing.page_url, "")
+            todo: List[RankedCandidate] = []
+            for cand in page_candidates(info, title=listing.title, snippet=listing.snippet,
+                                        query_id=listing.query_id, rank=listing.rank):
+                key = norm_image_url(cand.image_url)
+                if not key or key in self._known or self._pool.is_excluded(cand.image_url):
+                    continue
+                score = score_candidate(self.spec, cand, self._negatives)
+                if score.tier in (1, 2) and not score.hard_reject:
+                    todo.append(RankedCandidate(candidate=cand, score=score))
+            if todo:
+                self.results[i] = _stages()._fetch(self.spec, self._fetcher, todo, self._phash_negatives)
+        except Exception as exc:  # a broken page or download must not lose the search
+            logger.warning("pages: P0 page read raised %s for %s", type(exc).__name__, url_host(listing.page_url))
+
+    def join(self, ranked: List[RankedCandidate], pool: Any) -> Tuple[List[RankedCandidate], int]:
+        """(ranked plus the offered page images, how many page images were reviewer negatives by pHash). Call it
+        after the listings' pictures are downloaded (the listing's own picture is compared with the page's)."""
+        import time
+
+        if not self.listings:
+            return ranked, 0
+        for thread in self._threads:
+            thread.join(max(0.0, self.deadline - time.monotonic()))
+        self.late = sum(1 for thread in self._threads if thread.is_alive())
+        known = {norm_image_url(rc.candidate.image_url) for rc in ranked} | {key for key, _ in pool.entries()}
+        kept: List[RankedCandidate] = []
+        dropped = same = 0
+        for i, listing in enumerate(self.listings):
+            if self._threads[i].is_alive() or i not in self.results:
+                continue                       # still loading (left out), or nothing worth offering
+            fetched, n_dropped = self.results[i]
+            dropped += n_dropped
+            for rc in fetched:
+                key = norm_image_url(rc.candidate.image_url)
+                if key in known:
+                    continue                   # two pages showing one image: offered once
+                known.add(key)
+                pool.add(rc.candidate)         # a pool entry the ranked list lacks counts as dropped for the round
+                if _shows_listing_picture(rc, listing):
+                    same += 1
+                    continue
+                kept.append(rc)
+        self.offered = len(kept)
+        logger.info("pages sku=%s: P0 read %d trusted listing pages (%d late), %d main images offered, %d the "
+                    "listing's own picture", self.spec.sku_key, len(self.listings), self.late, len(kept), same)
+        return list(ranked) + kept, dropped
+
+
+# ---------------------------------------------------------------------------
 # Seeds for visual search
 # ---------------------------------------------------------------------------
 
@@ -667,8 +946,10 @@ def _verify_new(inp: RoundInput, everything: List[RankedCandidate],
                 max_calls: int = MAX_VERIFY_CALLS, first_ids: Set[int] = frozenset()) -> List[VerificationResult]:
     """Read the unread usable tier-1/2 images, best first (the candidates in first_ids before the others)."""
     p = _stages()
-    todo = [rc for rc in everything if p._usable(rc) and rc.verdict is None and rc.score.tier in (1, 2)
-            and STORE_IMAGE_WRONG not in rc.reasons]
+    # one copy per picture first (retrieve.reader_queue): a near-copy waits behind the other pictures, and one of an
+    # image read MATCH is not read at all
+    todo = [rc for rc in reader_queue([rc for rc in everything if p._usable(rc)])
+            if rc.verdict is None and rc.score.tier in (1, 2) and STORE_IMAGE_WRONG not in rc.reasons]
     if first_ids:
         todo.sort(key=lambda rc: id(rc) not in first_ids)       # stable: rank order within each group
     out: List[VerificationResult] = []
@@ -846,19 +1127,33 @@ def _expand(inp: RoundInput, report: RoundReport) -> RoundReport:
             return report
         inp = replace(inp, ranked=recovered)
 
+    # the paid steps only where they can find a pick (EXPANSION_SCOPE_GATE; X0 above is free and always ran)
+    gate = scope_gate(spec, inp.ranked) if settings.expansion_scope_gate() else ""
+    if gate.startswith(OUT_OF_SCOPE_PREFIX):
+        report.skipped = gate
+        logger.info("expand sku=%s: paid steps skipped (%s)", spec.sku_key, gate)
+        _append_health(report)
+        return report
+    probe = gate == BRAND_NOT_FOUND
+
     budget = _Budget(exp.max_calls)
     serper_ok = not _serper_refused(inp.health)
     text, hl = text_query(spec, inp.custom_query)
     groups = site_groups(spec)
     new: List[Candidate] = []
 
-    # X1 + X2 in parallel
+    # X1 + X2 in parallel (a brand no store names: the X2 probe alone first, X1 only once it names the brand)
     jobs: List[Tuple[str, Any, str, str]] = []
     if text and serper_ok:
-        if exp.web is not None and groups[0] and budget.take():
+        if exp.web is not None and groups[0] and not probe and budget.take():
             jobs.append(("X1", exp.web, site_query(text, groups[0]), "web"))
         if exp.shopping is not None and budget.take():
             jobs.append(("X2", exp.shopping, text, "shopping"))
+    if probe and not jobs:
+        report.skipped = gate
+        logger.info("expand sku=%s: paid steps skipped (%s, no shopping probe)", spec.sku_key, gate)
+        _append_health(report)
+        return report
     if jobs:
         with ThreadPoolExecutor(max_workers=len(jobs)) as ex:
             futs = [(qid, query, kind, ex.submit(_call, prov, query, hl, spec, qid)) for qid, prov, query, kind in jobs]
@@ -866,6 +1161,19 @@ def _expand(inp: RoundInput, report: RoundReport) -> RoundReport:
         for qid, query, kind, res in done:
             _record(report, res, query)
             new.extend(collector.collect([res], kind))
+    if probe:
+        hits = [c for res in report.health for c in res.candidates]
+        if not any(names_brand(spec, c) for c in hits + new):
+            report.skipped = gate
+            logger.info("expand sku=%s: the shopping probe names the brand nowhere either; the other paid steps "
+                        "skipped (%s)", spec.sku_key, gate)
+            _append_health(report)
+            return report
+        if exp.web is not None and groups[0] and budget.take():
+            query = site_query(text, groups[0])
+            res = _call(exp.web, query, hl, spec, "X1")
+            _record(report, res, query)
+            new.extend(collector.collect([res], "web"))
 
     # X3, X4: visual search from the normal flow's near-matches
     seeds = _distinct(near_matches(spec, inp.ranked), MAX_LENS_SEEDS) if _visual_ready(exp) else []

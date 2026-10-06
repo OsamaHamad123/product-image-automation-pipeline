@@ -121,6 +121,7 @@ def sheet(monkeypatch, tmp_path):
     import cli_bridge
     import google_sheets
     import image_search
+    monkeypatch.setattr(cli_bridge, "UPLOAD_DIR", str(tmp_path))     # tmp_path plays the dashboard's temp/ folder
 
     writes = []
 

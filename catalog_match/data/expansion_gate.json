@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "_doc": "Products the paid steps of the expansion round (X1-X5: web search, Google Shopping, visual search) are not spent on (catalog_match.expand.scope_gate, setting EXPANSION_SCOPE_GATE). The free X0 page recovery still runs. Each entry names a kind of product no store lists as a front packshot of one pack: a florist's bouquet is photographed as an arrangement, and its 'brand' is the shop that made it. A product name (or Arabic name) is out of scope when one of its whole words (catalog_match.text_norm.tokens, so Arabic is normalised: 'باقة' is 'باقه') is in 'words' and none is in 'unless': rose water, rose syrup, flower honey and flower tea are groceries and keep the round. Only plural flower words are listed: a singular 'rose' or 'flower' is often a flavour. Live runs 2026-10-05: five bouquet rows spent 15 paid calls and got no pick.",
+  "out_of_scope": [
+    {
+      "key": "flowers",
+      "words": ["bouquet", "bouquets", "roses", "orchids", "tulips", "lilies", "carnations", "peonies", "gerberas",
+                "chrysanthemums", "flowers", "باقه", "باقات", "ورود", "زهور"],
+      "unless": ["water", "syrup", "jam", "tea", "honey", "oil", "extract", "essence", "soap", "shampoo", "lotion",
+                 "cream", "perfume", "fragrance", "jelly", "candy", "chocolate", "sweets", "cake", "seeds", "vinegar",
+                 "ماء", "مياه", "شراب", "مربى", "شاي", "عسل", "زيت"]
+    }
+  ]
+}

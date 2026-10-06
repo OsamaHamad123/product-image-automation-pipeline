@@ -14,7 +14,8 @@
 #   failed   1  خطأ يحتاج تدخلاً: إعداد الشيت أو بيانات الاعتماد، شيت غير موجود أو غير مشارك، أو خطأ غير متوقع
 #   outage   2  انقطاع قد يزول وحده: قاعدة البيانات، أو Google Sheets لا يرد (مهلة، انقطاع الاتصال، 429 / 5xx)، أو
 #               محركات البحث (الليلي يعيد المحاولة بعد 15 ثم 60 دقيقة)
-#   stopped  3  توقف قبل نهاية الطابور: طلب إيقاف من اللوحة، أو حد التشغيل الليلي الزمني (time_limit)، أو أي سبب
+#   stopped  3  توقف قبل نهاية الطابور: طلب إيقاف من اللوحة، أو إيقاف العملية (shutdown: SIGTERM / SIGHUP، إعادة
+#               تشغيل السيرفر)، أو حد التشغيل الليلي الزمني (time_limit)، أو أي سبب
 #               آخر يكتبه العامل (مثل BUDGET_REACHED أو SERPER_CREDIT) ويظهر نصه كما هو؛ الصفوف المتبقية تبقى في الانتظار
 #
 # التكلفة: من سجل الصرف إن وُجد (أول دالة موجودة من SPEND_LEDGER_FUNCTIONS في local_cache_db، لكل run_id)،
@@ -54,6 +55,7 @@ REASON_TEXT = {
     "enqueue_error": "خطأ غير متوقع أثناء تجهيز الطابور",
     "worker_error": "خطأ غير متوقع في العامل",
     "stopped": "أُوقف من لوحة التحكم",
+    "shutdown": "وقف التشغيل لأن السيرفر انطفى أو انعادت تشغيل الخدمة؛ الصفوف اللي ما خلصت رجعت للانتظار",
     "another_worker": "تشغيل آخر يعمل الآن",
     "budget_reached": "بلغ صرف اليوم الميزانية اليومية (DAILY_BUDGET_USD)",
     "serper_credit": "رصيد Serper انتهى أو مفتاحه مرفوض",
@@ -90,6 +92,45 @@ def redact(text):
     if len(password) >= 6:
         text = text.replace(password, "[REDACTED]")
     return text
+
+
+class RedactingFilter(logging.Filter):
+    """
+    كل سطر سجل بلا أسرار (redact): الرسالة بعد دمج وسائطها، ونص الاستثناء (traceback) ونص المكدس. لا يحجب سطراً ولا
+    يرفع أبداً. install_log_redaction يضعه على المسجل الجذر وعلى كل معالجاته.
+    """
+
+    def filter(self, record):
+        try:
+            message = record.getMessage()
+            clean = redact(message)
+            if clean != message:
+                record.msg, record.args = clean, ()
+            if record.exc_info and not record.exc_text:
+                record.exc_text = logging.Formatter().formatException(record.exc_info)
+            if record.exc_text:
+                record.exc_text = redact(record.exc_text)
+            if record.stack_info:
+                record.stack_info = redact(record.stack_info)
+        except Exception:  # noqa: BLE001 - a log line is never lost because of the filter
+            pass
+        return True
+
+
+_REDACTING_FILTER = RedactingFilter()
+
+
+def install_log_redaction():
+    """
+    يضع RedactingFilter على المسجل الجذر وعلى كل معالجاته الحالية وعلى logging.lastResort (ما يُطبع حين لا يوجد
+    معالج). فلتر المسجل الجذر وحده لا يرى أسطر المسجلات الأبناء، لذلك يوضع على المعالجات أيضاً؛ يُستدعى بعد إضافة
+    المعالجات (cli_bridge._configure_logging، scripts/run_nightly.py، main.py). آمن للاستدعاء أكثر من مرة.
+    """
+    root = logging.getLogger()
+    for target in [root, *root.handlers, logging.lastResort]:
+        if target is not None and not any(isinstance(f, RedactingFilter) for f in target.filters):
+            target.addFilter(_REDACTING_FILTER)
+    return _REDACTING_FILTER
 
 
 # ---------------------------------------------------------------------------

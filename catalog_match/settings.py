@@ -27,14 +27,23 @@ DEFAULTS = {
     "GOOGLE_SEARCH_API_KEYS": [],
     "GOOGLE_SEARCH_CX_LIST": [],
     "CSE_SUNSET_DATE": "2026-12-31",
+    # the legacy Google CSE adapter joins the provider chain only when switched on here (and a key and a cx exist):
+    # every live run since 2026-10-04 got HTTP 403 on every call (Custom Search JSON API closed to the project)
+    "CSE_LEGACY_ENABLED": False,
     "AUTO_PUBLISH_ENABLED": False,
     "AUTO_PUBLISH_BRANDS": [],
     # a pick of lane 'strict' (catalog_match.decide.pick_lane) of a mapped brand auto-publishes whatever
-    # AUTO_PUBLISH_BRANDS says; the dashboard turns it on only once that lane's reviews prove it
-    "AUTO_PUBLISH_STRICT_LANE": False,
+    # AUTO_PUBLISH_BRANDS says, and only once that lane's own reviews prove it (decide.strict_lane_readiness 'ready');
+    # on by default (the owner's approval), the value saved in the Settings page wins
+    "AUTO_PUBLISH_STRICT_LANE": True,
     "CANDIDATE_STORE_DIR": os.path.join("temp", "candidates"),
     "PROXY_URL": "",
+    # the canvas side is adaptive (image_processor._adaptive_canvas): round(product long side / fill) clamped to
+    # [OUTPUT_CANVAS_SIZE, OUTPUT_CANVAS_MAX], so a detailed source keeps its pixels for a 3x phone screen
+    # (~1170 px) and a small source gets exactly the canvas it got before. OUTPUT_CANVAS_MAX <= OUTPUT_CANVAS_SIZE
+    # turns it off (a fixed canvas).
     "OUTPUT_CANVAS_SIZE": 800,
+    "OUTPUT_CANVAS_MAX": 2048,
     # image_processor: when a cloud isolation method fails on credit / key / quota, 'local' isolates with rembg
     "BG_FALLBACK": "local",
     # the rembg model of that fallback: BiRefNet keeps white packaging that u2net / isnet eat
@@ -44,6 +53,9 @@ DEFAULTS = {
     # side fills on the transparent canvas (the white canvas keeps edge_shadow_engine.CANVAS_FILL_RATIO).
     "OUTPUT_BACKGROUND": "transparent",
     "OUTPUT_PRODUCT_FILL": "0.88",
+    # PhotoRoom's x-uncertainty-score header (0 = confident, 1 = unsure): above this the cutout gets the review flag
+    # 'photoroom_unsure' (image_processor); no paid retry
+    "PHOTOROOM_UNCERTAINTY_MAX": "0.5",
 }
 REMBG_MODELS = ("birefnet-general", "birefnet-general-lite")
 OUTPUT_BACKGROUNDS = ("transparent", "white")
@@ -67,17 +79,32 @@ GTIN_POLICIES = ("evidence", "strict", "off")
 # --- sources package (P3): expansion round, product pages, shopping and visual search ---
 # EXPANSION_ENABLED    one extra search round for SKUs with no confident pick (catalog_match.expand)
 # EXPANSION_MAX_CALLS  paid calls the round may make per product (web, shopping, visual search)
+# EXPANSION_SCOPE_GATE skip the round's paid steps (X1-X5; the free X0 page recovery still runs) for products they
+#                      cannot help: bouquets and other out-of-scope kinds (data/expansion_gate.json), and a brand no
+#                      listing names on a store or brand site, which gets one Google Shopping probe only
+#                      (catalog_match.expand.scope_gate). On by default
 # VISUAL_SEARCH        'auto' (Serper lens, then SerpApi when SERPAPI_API_KEY is set) | 'off' | 'serper' | 'serpapi'
 # SERPAPI_API_KEY      secret; written only through the dashboard's write-only field
 # SERPAPI_LENS_PRICE_USD  what one SerpApi Google Lens search costs on the owner's plan (ops_health pricing)
 DEFAULTS.update({
     "EXPANSION_ENABLED": True,
     "EXPANSION_MAX_CALLS": 4,
+    "EXPANSION_SCOPE_GATE": True,
     "VISUAL_SEARCH": "auto",
     "SERPAPI_API_KEY": "",
     "SERPAPI_LENS_PRICE_USD": "0.015",
 })
 VISUAL_SEARCH_MODES = ("auto", "off", "serper", "serpapi")
+# PAGE_MAIN_IMAGES_MAX_PAGES  the normal flow reads the pages of this many tier-1/2 listings on trusted hosts (the
+#                             brand's site, a UAE retailer) for their own main image, read like any candidate
+#                             (catalog_match.expand P0, free); 0 turns it off, at most 3
+# PAGE_MAIN_IMAGES_WAIT_S     how long the search waits for those pages after it starts reading them (they load
+#                             while the listings' pictures download); a page still loading is left out
+DEFAULTS.update({
+    "PAGE_MAIN_IMAGES_MAX_PAGES": 2,
+    "PAGE_MAIN_IMAGES_WAIT_S": "3",
+})
+PAGE_MAIN_IMAGES_MAX_PAGES_LIMIT = 3
 # --- end sources package ---
 
 _TRUE = {"1", "true", "yes", "on"}
@@ -156,6 +183,25 @@ def output_canvas_size() -> int:
     return size if size and size > 0 else DEFAULTS["OUTPUT_CANVAS_SIZE"]
 
 
+def output_canvas_max() -> int:
+    """The largest adaptive canvas side: OUTPUT_CANVAS_MAX (default 2048), at least output_canvas_size(), at most 4000."""
+    value = get("OUTPUT_CANVAS_MAX")
+    if not value or value <= 0:
+        value = DEFAULTS["OUTPUT_CANVAS_MAX"]
+    return max(output_canvas_size(), min(4000, int(value)))
+
+
+def photoroom_uncertainty_max() -> float:
+    """PHOTOROOM_UNCERTAINTY_MAX clamped to 0..1 (default 0.5); an unreadable value reads as the default."""
+    try:
+        value = float(str(get("PHOTOROOM_UNCERTAINTY_MAX")).strip())
+    except (TypeError, ValueError):
+        value = float(DEFAULTS["PHOTOROOM_UNCERTAINTY_MAX"])
+    if value != value:  # NaN
+        value = float(DEFAULTS["PHOTOROOM_UNCERTAINTY_MAX"])
+    return max(0.0, min(1.0, value))
+
+
 def bg_fallback() -> str:
     """'local' (default) or 'off'; anything else reads as the default."""
     value = str(get("BG_FALLBACK")).strip().lower()
@@ -198,6 +244,11 @@ def google_search_cx_list() -> List[str]:
     return get("GOOGLE_SEARCH_CX_LIST") or as_list(os.getenv("GOOGLE_SEARCH_CX"))
 
 
+def cse_legacy_enabled() -> bool:
+    """True only when CSE_LEGACY_ENABLED is set: the legacy Google CSE adapter is out of the default chain."""
+    return bool(get("CSE_LEGACY_ENABLED"))
+
+
 def cse_sunset_date() -> _dt.date:
     """Last day the legacy Google CSE adapter may run (inclusive)."""
     value = get("CSE_SUNSET_DATE")
@@ -230,6 +281,10 @@ DEFAULTS.update({
     "VERIFIER_STRONG": "gemini:gemini-3.5-flash",   # or "claude:<model>", or "off"
     "VERIFIER_MONTHLY_BUDGET_USD": "5",             # month cap (UTC) for the strong model's estimated spend
     "VERIFIER_STRONG_MAX_CALLS": "1",               # strong calls per product
+    # strong re-judges of a cheap MISMATCH that rests only on a variant / size 'no' (tier 1), per product: 1 = on,
+    # 0 = off, capped at 1; besides the second looks, within the same month budget, off with the strong model
+    # (VERIFIER_STRONG 'off' or VERIFIER_STRONG_MAX_CALLS 0) (verifiers.cascade)
+    "VERIFIER_REJUDGE_MAX_CALLS": "1",
     "MODEL_PRICES": "",                             # JSON {model id: {input, output}} USD per 1M tokens; '' = built-in
 })
 
@@ -266,6 +321,11 @@ def verifier_strong_max_calls() -> int:
     return int(_number("VERIFIER_STRONG_MAX_CALLS", 0.0, 4.0))
 
 
+def verifier_rejudge_max_calls() -> int:
+    """Strong re-judges per product: 0 (off) or 1 (the default); a larger value is capped at 1."""
+    return int(_number("VERIFIER_REJUDGE_MAX_CALLS", 0.0, 1.0))
+
+
 def model_prices_text() -> str:
     value = get("MODEL_PRICES")
     return value if isinstance(value, str) else ("" if value is None else str(value))
@@ -281,6 +341,11 @@ def expansion_max_calls() -> int:
     """Paid calls the expansion round may make per product (0 turns the round off)."""
     value = get("EXPANSION_MAX_CALLS")
     return max(0, int(value)) if isinstance(value, int) else int(DEFAULTS["EXPANSION_MAX_CALLS"])
+
+
+def expansion_scope_gate() -> bool:
+    """True (default): the expansion round's paid steps skip out-of-scope products (expand.scope_gate)."""
+    return bool(get("EXPANSION_SCOPE_GATE"))
 
 
 def visual_search_mode() -> str:
@@ -299,6 +364,18 @@ def serpapi_lens_price_usd() -> float:
     except (TypeError, ValueError):
         price = float(DEFAULTS["SERPAPI_LENS_PRICE_USD"])
     return price if price >= 0 else float(DEFAULTS["SERPAPI_LENS_PRICE_USD"])
+
+
+def page_main_images_max_pages() -> int:
+    """Trusted listing pages read per product for their own main image (0 = off, at most 3)."""
+    value = get("PAGE_MAIN_IMAGES_MAX_PAGES")
+    value = value if isinstance(value, int) else int(DEFAULTS["PAGE_MAIN_IMAGES_MAX_PAGES"])
+    return min(PAGE_MAIN_IMAGES_MAX_PAGES_LIMIT, max(0, value))
+
+
+def page_main_images_wait_s() -> float:
+    """Seconds the search waits for those pages (0..10; a bad value is the default)."""
+    return _number("PAGE_MAIN_IMAGES_WAIT_S", 0.0, 10.0)
 # --- end sources package ---
 
 
@@ -382,3 +459,77 @@ def serper_hedge_after_s() -> float:
         value = float(DEFAULTS["SERPER_HEDGE_AFTER_S"])
     return min(60.0, value)
 # --- end speed package ---
+
+
+# --- runtime package: the worker on a server (stops, hangs, memory, storage, dead-man's switch) ---
+# PRODUCT_DEADLINE_MINUTES  a product still running after this many minutes is given up: its row goes back to the
+#                           queue like a provider outage (PROVIDER_DOWN: retried 10, then 20 minutes later, parked
+#                           after 3 in a run) and the worker takes the next row; clamped to 1..60
+# SHUTDOWN_GRACE_S          on SIGTERM / SIGHUP (systemctl stop, a reboot) the products in progress get this many
+#                           seconds to finish; the rows still running then go back to the queue; clamped to 0..600
+# REMBG_MAX_PARALLEL        local BiRefNet cutouts (rembg) run at once; each one takes 2-3 GB of memory on CPU; 1..8
+# NIGHTLY_PRUNE_ENABLED     the nightly run ends with the storage cleanup (scripts/prune_storage.py --apply): old
+#                           candidate files no review row uses, superseded synced sheet writes, temp/search.log rotation
+# PRUNE_MAX_SECONDS         time cap of that cleanup (10..3600)
+# PRUNE_KEEP_DAYS           files and synced writes younger than this are never removed (7..3650)
+# SEARCH_LOG_MAX_MB         temp/search.log is rotated above this size (1..10240)
+# SEARCH_LOG_KEEP           rotated copies kept: search.log.1 .. search.log.N (1..20)
+# HEALTHCHECK_URL           optional healthchecks.io-style ping URL (a URL, not an API key): the nightly run pings
+#                           <url>/start, then <url> or <url>/fail; '' = off
+DEFAULTS.update({
+    "PRODUCT_DEADLINE_MINUTES": "8",
+    "SHUTDOWN_GRACE_S": 45,
+    "REMBG_MAX_PARALLEL": 1,
+    "NIGHTLY_PRUNE_ENABLED": True,
+    "PRUNE_MAX_SECONDS": 300,
+    "PRUNE_KEEP_DAYS": 30,
+    "SEARCH_LOG_MAX_MB": 50,
+    "SEARCH_LOG_KEEP": 3,
+    "HEALTHCHECK_URL": "",
+})
+
+
+def _clamped_int(name: str, low: int, high: int) -> int:
+    value = get(name)
+    value = value if isinstance(value, int) and not isinstance(value, bool) else int(DEFAULTS[name])
+    return min(high, max(low, value))
+
+
+def product_deadline_s() -> float:
+    """Seconds one product may run before the worker gives it up (PRODUCT_DEADLINE_MINUTES, 1..60, default 8)."""
+    return _number("PRODUCT_DEADLINE_MINUTES", 1.0, 60.0) * 60.0
+
+
+def shutdown_grace_s() -> int:
+    return _clamped_int("SHUTDOWN_GRACE_S", 0, 600)
+
+
+def rembg_max_parallel() -> int:
+    return _clamped_int("REMBG_MAX_PARALLEL", 1, 8)
+
+
+def nightly_prune_enabled() -> bool:
+    return bool(get("NIGHTLY_PRUNE_ENABLED"))
+
+
+def prune_max_seconds() -> int:
+    return _clamped_int("PRUNE_MAX_SECONDS", 10, 3600)
+
+
+def prune_keep_days() -> int:
+    return _clamped_int("PRUNE_KEEP_DAYS", 7, 3650)
+
+
+def search_log_max_mb() -> int:
+    return _clamped_int("SEARCH_LOG_MAX_MB", 1, 10240)
+
+
+def search_log_keep() -> int:
+    return _clamped_int("SEARCH_LOG_KEEP", 1, 20)
+
+
+def healthcheck_url() -> str:
+    """The ping URL without a trailing '/', or '' when unset or not an http(s) URL (never a surprise request)."""
+    value = str(get("HEALTHCHECK_URL") or "").strip().rstrip("/")
+    return value if value.lower().startswith(("https://", "http://")) and " " not in value else ""
+# --- end runtime package ---

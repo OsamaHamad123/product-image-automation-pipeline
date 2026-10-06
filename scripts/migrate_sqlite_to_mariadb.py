@@ -28,15 +28,13 @@ load_env()
 SQLITE_DB = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "local_cache.db")
 
 def get_mariadb_connection():
-    return pymysql.connect(
-        host=os.getenv("DB_HOST", "127.0.0.1"),
-        port=int(os.getenv("DB_PORT", "3306")),
-        user=os.getenv("DB_USERNAME", "root"),
-        password=os.getenv("DB_PASSWORD", ""),
-        database=os.getenv("DB_DATABASE", "automation_db"),
-        charset='utf8mb4',
-        cursorclass=pymysql.cursors.DictCursor
-    )
+    # اتصال المشروع الموحد (db_connect) بمهل اتصال وقراءة وكتابة
+    import sys
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    import db_connect
+    return db_connect.connect()
 
 def migrate_table(sqlite_conn, maria_conn, table_name, unique_key=None):
     print(f"⏳ جاري ترحيل جدول: {table_name}...")

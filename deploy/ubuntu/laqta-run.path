@@ -1,0 +1,13 @@
+# Starts laqta-run.service when the dashboard asks for a run: ApiController::runAll writes
+# temp/run_request.json (see dashboard/app/Services/RunLauncher.php). Enabled by install.sh.
+# The file is only a trigger: nothing in it is ever executed, and only the app user can write it.
+# The @NAME@ words are filled in by install.sh.
+[Unit]
+Description=Laqta run request from the dashboard (temp/run_request.json)
+
+[Path]
+PathExists=@APP_DIR@/temp/run_request.json
+Unit=laqta-run.service
+
+[Install]
+WantedBy=multi-user.target

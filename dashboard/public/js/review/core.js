@@ -222,13 +222,13 @@
         [/^processing_failed$/i, 'فشلت معالجة الصورة (عزل الخلفية).'],
         // مزوّد عزل الخلفية (image_processor: photoroom_* و removebg_*): ما انعزلت الخلفية فما نُشر شيء. الرصيد والمفتاح
         // والحصة (BG_SKIP_RE) بيفشّلوا كل اعتماد بنفس الشكل: اللوحة بتعرض «تجاوز عزل الخلفية»
-        [/^photoroom_402$/i, 'رصيد PhotoRoom خلص أو الاشتراك موقوف، فما انعزلت الخلفية وما انتشرت الصورة.'],
+        [/^photoroom_402$/i, 'رصيد PhotoRoom خلص أو الاشتراك موقوف، فما انعزلت الخلفية وما انعتمدت الصورة.'],
         [/^photoroom_(401|403)$/i, 'PhotoRoom رفض المفتاح، فما انعزلت الخلفية: حدّث مفتاح PhotoRoom بالإعدادات.'],
         [/^photoroom_429$/i, 'PhotoRoom رافض طلبات كتير هلق، فما انعزلت الخلفية: استنى دقيقة وأعد المحاولة.'],
         [/^photoroom_no_key$/i, 'مفتاح PhotoRoom مش محفوظ بالإعدادات، فما انعزلت الخلفية.'],
         [/^photoroom_(timeout|connection_error|5\d\d)$/i, 'PhotoRoom ما ردّ، فما انعزلت الخلفية: تأكد من الإنترنت وأعد المحاولة.'],
         [/^photoroom_/i, 'PhotoRoom رجّع خطأ، فما انعزلت الخلفية: أعد المحاولة.'],
-        [/^removebg_402$/i, 'رصيد remove.bg خلص، فما انعزلت الخلفية وما انتشرت الصورة.'],
+        [/^removebg_402$/i, 'رصيد remove.bg خلص، فما انعزلت الخلفية وما انعتمدت الصورة.'],
         [/^removebg_(401|403)$/i, 'remove.bg رفض المفتاح، فما انعزلت الخلفية: حدّث مفتاح remove.bg.'],
         [/^removebg_429$/i, 'remove.bg رافض طلبات كتير هلق، فما انعزلت الخلفية: استنى دقيقة وأعد المحاولة.'],
         [/^removebg_no_key$/i, 'مفتاح remove.bg مش محفوظ، فما انعزلت الخلفية.'],
@@ -243,6 +243,7 @@
         [/^download_http_(403|429)$/i, 'موقع المتجر رفض تنزيل الصورة: جرّب مرة ثانية، وإذا تكرر جرّب صورة من متجر ثاني.'],
         [/^download_http_(404|410)$/i, 'الصورة انشالت من موقع المتجر: أعد البحث أو اختر صورة ثانية.'],
         [/^download_host_slow$/i, 'موقع المتجر بطيء أو ما بيرد هلق وتخطّيناه مؤقتاً: جرّب بعد شوي أو اختر صورة من متجر ثاني.'],
+        [/^download_blocked_url$/i, 'رابط الصورة بيودّي على عنوان داخلي أو مش آمن، فما نزّلناه: اختر صورة ثانية.'],
         [/^download_|^(not_image|image_too_large|source_too_large)$/i, 'الرابط ما عاد صورة صالحة: اختر صورة ثانية أو أعد البحث.'],
         [/^(source_missing|source_not_found|source_unreadable)$/i, 'الصورة مش موجودة على الجهاز: اختر صورة ثانية أو أعد البحث.'],
         [/barcode is required/i, 'الباركود ناقص بالطلب: حدّث الصفحة وجرّب مرة ثانية.'],
@@ -516,6 +517,7 @@
             let text = 'استبعدها النظام';
             if (r.some(x => /^vlm:MISMATCH/.test(x))) text = 'نموذج القراءة شاف منتج مختلف';
             else if (r.some(x => /^download:host_slow$/.test(x))) text = 'موقع المتجر بطيء: تخطّيناها';
+            else if (r.some(x => /^download:blocked_url$/.test(x))) text = 'رابطها مش آمن: ما نزّلناها';
             else if (r.some(x => /^download:/.test(x))) text = 'ما قدرنا نحمّلها';
             else if (r.some(x => /^quality:/.test(x))) text = 'جودة ضعيفة';
             else if (r.some(x => /size/.test(x))) text = 'حجم مختلف';
@@ -548,6 +550,8 @@
         return v !== undefined && v !== null && v !== '' && v !== false;
     }
 
+    const SIZE_CORROBORATED_TEXT = 'الحجم مأكد من موقعين';
+
     // «لماذا هذه الصورة؟»: سطور قصيرة من الأدلة التي حسبها المحرك فعلاً (facade.evidence وقراءة الملصق)، بلا تخمين.
     // لا يُقال شيء إذا لم يوجد دليل
     function explainPick(c) {
@@ -560,8 +564,14 @@
             out.push({ key: 'cache', text: 'اعتُمدت لهذا المنتج سابقاً' });
         }
         if (ev.gtin === 'match') out.push({ key: 'gtin', text: 'باركود الصفحة يطابق الشيت' });
-        const n = parseInt(ev.consensus_count, 10);
+        // نفس الرابط من أكثر من موقع (consensus_count)، أو نفس الصورة بروابط ثانية على مواقع مختلفة (same_picture_domains)
+        const sameSites = Array.isArray(ev.same_picture_domains) ? ev.same_picture_domains.length : 0;
+        const n = Math.max(parseInt(ev.consensus_count, 10) || 0, sameSites);
         if (n >= 2) out.push({ key: 'consensus', text: n === 2 ? 'الصورة نفسها في مصدرين' : `الصورة نفسها في ${n} مصادر` });
+        // الملصق ما بيّن الحجم، بس موقعين موثوقين بيذكروه بعنوان نفس الصورة (للعرض فقط: ما بيغيّر الاقتراح)
+        if ((c.reasons || []).includes('size_corroborated')) {
+            out.push({ key: 'size_corroborated', text: SIZE_CORROBORATED_TEXT });
+        }
         if (SOURCE_CLASS_TEXT[ev.source_class]) out.push({ key: 'source', text: SOURCE_CLASS_TEXT[ev.source_class] });
         const page = [];
         if (truthy(ev.brand)) page.push('الماركة');
@@ -875,7 +885,9 @@
         upscaled: 'الصورة المصدر صغيرة فكُبّرت',
         too_small_on_canvas: 'المنتج صغير على اللوحة',
         kept_shadow: 'بقي ظل ظاهر مع المنتج',
-        dark_halo: 'حواف فاتحة بتبين على الوضع الغامق'
+        dark_halo: 'حواف فاتحة بتبين على الوضع الغامق',
+        photoroom_unsure: 'PhotoRoom مش متأكد من حدود المنتج',
+        dark_rim: 'حواف غامقة بتبين على الوضع الفاتح'
     };
     // علامات تخص شكل الصورة المنشورة فقط والخلفية معزولة (main.PRESENTATION_FLAGS): ما تعنيه لمن ينشرها رغمها.
     // opaque_fill و opaque_backdrop و edge_clipped ليست منها: الخلفية لم تُعزل، ولا تُنشر «رغم ذلك» أبداً
@@ -885,7 +897,9 @@
         second_object: 'جسم آخر بجانب المنتج سيُنشر معه',
         alpha_haze: 'هالة أو ضباب خفيف حول حواف المنتج سيظهر في الصورة',
         kept_shadow: 'ظل المنتج سيبقى ظاهراً في الصورة',
-        dark_halo: 'حواف فاتحة حول المنتج رح تبين بالتطبيق على الوضع الغامق'
+        dark_halo: 'حواف فاتحة حول المنتج رح تبين بالتطبيق على الوضع الغامق',
+        photoroom_unsure: 'PhotoRoom ما كان متأكد من حدود المنتج: تأكد إنو ما في جزء ناقص أو زيادة',
+        dark_rim: 'حواف غامقة حول المنتج رح تبين بالتطبيق على الوضع الفاتح'
     };
     // ملاحظات الفحص غير المانعة (quality_notes): تُعرض ملاحظةً لا تحذيراً، والصورة نُشرت نظيفة
     const QUALITY_NOTE_LABELS = {
@@ -916,10 +930,10 @@
         const anywayTexts = allowed ? Array.from(new Set(flags.map(f => PRESENTATION_FLAG_TEXT[f]))) : [];
         const what = texts.length ? texts.join('، ') : 'لم تُعزل الخلفية';
         const text = allowed
-            ? `فحص القص وجد في الصورة: ${what}. لم تُنشر بعد.`
+            ? `فحص القص لقى بالصورة: ${what}. ما انعتمدت بعد.`
             : code === 'quality_flags'
-                ? `فحص القص وجد في الصورة: ${what}. لم تُنشر؛ اختر صورة أخرى أو ارفع صورة أوضح.`
-                : `لم تُعزل خلفية الصورة (${what}). لم تُنشر؛ اختر صورة أخرى أو ارفع صورة أوضح.`;
+                ? `فحص القص لقى بالصورة: ${what}. ما انعتمدت؛ اختار صورة ثانية أو ارفع صورة أوضح.`
+                : `ما انعزلت خلفية الصورة (${what}). ما انعتمدت؛ اختار صورة ثانية أو ارفع صورة أوضح.`;
         return { code: code, flags: flags, texts: texts, anywayTexts: anywayTexts, allowed: allowed, text: text };
     }
 
@@ -1026,16 +1040,27 @@
         queued: 6, stale: 6, idle: 7, rejecting: 8, approving: 8, approved: 9
     };
 
-    // رقاقات قائمة المراجعة (?filter=)
+    // رقاقات المراجعة (?filter=): نفس المجموعة بوضع «منتج واحد» و«بالجملة»، والاختيار بيضل لما تبدّل الوضع.
+    // eligible: مقترحة من النظام بلا أي تحذير (اللي بينعتمدوا بالجملة)؛ strict: فئة «مؤكدة تماماً» (R.laneOf).
+    // waiting: الرقاقة من المنتظرة؛ بوضع الجملة الرقاقات الثانية (ما انلقت، أعطال، الخلفية) بتعرض بطاقات للفتح بس
     const FILTERS = [
-        { key: 'all', label: 'الكل', buckets: null },
-        { key: 'proposed', label: 'مقترحة', buckets: ['proposed', 'warning'] },
-        { key: 'warning', label: 'فيها تحذير', buckets: ['warning'] },
-        { key: 'none', label: 'بلا اقتراح', buckets: ['none'] },
+        { key: 'all', label: 'الكل', buckets: null, waiting: true },
+        { key: 'proposed', label: 'مقترحة', buckets: ['proposed', 'warning'], waiting: true },
+        { key: 'eligible', label: 'مقترحة بلا تحذير', test: it => WAITING.includes(it.bucket) && bulkEligible(storedSelected(it.product)),
+          waiting: true },
+        { key: 'strict', label: 'مؤكدة تماماً', test: it => WAITING.includes(it.bucket) && laneOf(storedSelected(it.product)) === 'strict',
+          waiting: true },
+        { key: 'warning', label: 'فيها تحذير', buckets: ['warning'], waiting: true },
+        { key: 'none', label: 'بلا اقتراح', buckets: ['none'], waiting: true },
         { key: 'not_found', label: 'ما انلقت', buckets: ['not_found'] },
         { key: 'failed', label: 'أعطال', buckets: ['failed'] },
         { key: 'bg_failed', label: 'الخلفية لم تُعزل', buckets: ['bg_failed'] }
     ];
+
+    function filterMatches(f, it) {
+        if (f.buckets) return f.buckets.includes(it.bucket);
+        return typeof f.test === 'function' ? !!f.test(it) : true;
+    }
 
     // ترتيب المنتظرة حسب الثقة: مقترحة من النظام بلا تحذير، ثم اختيار سابق بلا تحذير، ثم مقترحة فيها تحذير، ثم بلا
     // اقتراح؛ وفي كل درجة منتجات الماركة الواحدة متتالية (ثم رقم الصف)
@@ -1097,9 +1122,15 @@
     }
 
     function countBuckets(items) {
-        const c = { all: items.length, proposed: 0, warning: 0, none: 0, not_found: 0, failed: 0, bg_failed: 0, waiting: 0,
-                    approved: 0 };
+        const c = { all: items.length, proposed: 0, eligible: 0, strict: 0, warning: 0, none: 0, not_found: 0, failed: 0,
+                    bg_failed: 0, waiting: 0, approved: 0 };
+        const eligible = FILTERS.find(f => f.key === 'eligible');
+        const strict = FILTERS.find(f => f.key === 'strict');
         items.forEach(it => {
+            if (it.bucket === 'proposed' || it.bucket === 'warning') {
+                if (filterMatches(eligible, it)) c.eligible++;
+                if (filterMatches(strict, it)) c.strict++;
+            }
             if (it.bucket === 'proposed' || it.bucket === 'warning') c.proposed++;
             if (it.bucket === 'warning') c.warning++;
             if (it.bucket === 'none') c.none++;
@@ -1130,7 +1161,7 @@
     function filterItems(items, filterKey, query, keep, reason) {
         const f = FILTERS.find(x => x.key === filterKey) || FILTERS[0];
         const kept = it => !!(keep && keep.has(it.key)) && WAITING.includes(it.bucket);
-        return items.filter(it => (!f.buckets || f.buckets.includes(it.bucket) || kept(it)) && matchesQuery(it, query)
+        return items.filter(it => (filterMatches(f, it) || kept(it)) && matchesQuery(it, query)
             && (!reason || itemReasonKeys(it).includes(reason)));
     }
 
@@ -1368,10 +1399,10 @@
     // فئة اختيار المحرك (catalog_match.decide.lane_of): strict | unsure | other، من سبب lane:<name> المحفوظ مع الاختيار،
     // ولاختيار حُفظ قبل الفئات من preselected: و auto_blocked: (نفس قاعدة بايثون). strict لا تجتمع مع تحذير مراجعة.
     // null لما ليس اختيار المحرك: مرشح عادي، أو اعتماد سابق من الكاش
-    const LANE_TEXT = { strict: 'مؤكدة تماماً', unsure: 'القارئ مش متأكد' };
+    const LANE_TEXT = { strict: 'مؤكدة تماماً', unsure: 'الملصق مش واضح' };
     const LANE_TITLE = {
         strict: 'اقتراح عدّى كل قواعد النشر الآلي بلا أي تحذير',
-        unsure: 'القارئ مش متأكد من الصورة، بس عنوان الصفحة بيأكد المنتج'
+        unsure: 'الملصق مش واضح بالصورة، بس اسم المنتج بالصفحة مطابق'
     };
     const LANE_SETTING_BLOCKERS = ['auto_publish_disabled', 'auto_publish_off_for_brand'];
 
@@ -1406,7 +1437,7 @@
         searchBody, selectBody, rejectBody, uploadFields,
         matchQueue, classify, hasFinalImage, bgFailedLink, shownApprovedUrl, expectedState, sameExpected, staleInfo, queueText,
         sheetNote, expectedFromCurrent, qualityFlagText, qualityNoteText, qualityInfo, approvalNotes, rejectionOutcome,
-        confidenceRank, compareWaiting, sortWaiting, buildItems, countBuckets, matchesQuery, filterItems,
+        confidenceRank, compareWaiting, sortWaiting, buildItems, countBuckets, matchesQuery, filterItems, filterMatches,
         sizeText, categoryPath, factsFor, checksFor, cautionsFor
     });
 

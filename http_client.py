@@ -5,12 +5,16 @@
 # - إعادة المحاولة فقط عند 429 أو أخطاء 5xx أو انتهاء المهلة، بحد أقصى محاولتين إضافيتين،
 #   ولا يوجد انتظار بعد المحاولة الأخيرة.
 # - حد أقصى لحجم الملف المنزّل.
+# - حماية SSRF (net_guard): التحويلات (redirects) لا يتبعها العميل وحده؛ يُفحص الرابط وكل تحويل قبل طلبه
+#   (http/https فقط، ومضيف عناوينه عامة فقط). الرابط المرفوض خطؤه blocked_url ولا يُعاد.
 
 import logging
 import random
 import time
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Tuple
+
+import net_guard
 
 try:  # curl_cffi يحاكي بصمة TLS لمتصفح Chrome ويتحقق من الشهادات افتراضياً
     from curl_cffi import requests as _http
@@ -49,7 +53,7 @@ class FetchResult:
     content: Optional[bytes] = None
     status: Optional[int] = None
     content_type: str = ""
-    error: Optional[str] = None      # http_<code> | timeout | connection_error | too_large | not_image
+    error: Optional[str] = None      # http_<code> | timeout | connection_error | too_large | not_image | blocked_url
     attempts: int = 0
 
 
@@ -102,7 +106,7 @@ class ImpersonateClient:
         return headers
 
     def _request_kwargs(self, headers: Dict[str, str], timeout: float, stream: bool) -> Dict[str, Any]:
-        kwargs: Dict[str, Any] = {"headers": headers, "timeout": timeout, "allow_redirects": True}
+        kwargs: Dict[str, Any] = {"headers": headers, "timeout": timeout, "allow_redirects": False}  # net_guard.follow
         if stream:
             kwargs["stream"] = True
         if self.use_proxy and self.proxy_url:
@@ -132,7 +136,10 @@ class ImpersonateClient:
         for attempt in range(total):
             is_last = attempt == total - 1
             try:
-                response = self.session.get(url, **kwargs)
+                response = net_guard.follow(url, lambda hop, _target: self.session.get(hop, **kwargs))
+            except net_guard.BlockedURL as exc:
+                logger.warning("[HTTP Client] رابط مرفوض (عنوان غير عام أو بروتوكول غير مسموح): %s", exc)
+                return None, net_guard.BLOCKED, attempt + 1
             except Exception as exc:  # noqa: BLE001 - نصنّف الخطأ ثم نقرر
                 if _is_timeout(exc):
                     if is_last:

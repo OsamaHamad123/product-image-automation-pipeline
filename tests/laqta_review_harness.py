@@ -8,7 +8,12 @@ tests/test_catalog_review_race.py (the review safety rules) and tests/test_laqta
 Pictures: an <img> fires `load` as soon as it is attached to the document (a cached picture), or `error` when its src
 is in `imageFails`; with `imageMode = 'hold'` it fires nothing until the test calls `releaseImages()`. An
 IntersectionObserver reports every observed node as visible (`ioVisible(node)` decides; `ioRefresh()` reports again).
-The page boots with approveSettleMs 0 unless the test asks for the real delay.
+The page boots with approveSettleMs 0 and approveUndoMs 0 (an approval is sent at once, no «تراجع» hold) unless the
+test asks for the real delays, and with the mode it is given (modeExplicit) unless the test asks for the automatic choice.
+
+Questions (R.ask, the review screen's in-page confirmation that replaced window.confirm) are answered like the old
+confirm: the question (title and text) is recorded in `confirms`, and «متأكد» or «إلغاء» is clicked by `confirmAnswer`
+(at the time of asking) unless `askAuto = false`, when the test clicks it itself.
 """
 
 import json
@@ -366,11 +371,30 @@ const requests = path => calls.filter(c => c.url.split('?')[0] === path);
 HELPERS = r"""
 const R = window.LaqtaReview;
 const S = () => R.S;
+let askAuto = true;
+const asked = [];
+const askNative = R.ask;
+R.ask = opts => {
+    const o = typeof opts === 'string' ? { title: opts } : (opts || {});
+    // «العنوان: النص» (متل نص confirm القديم)، أو «العنوان؟ النص» لما العنوان سؤال
+    confirms.push(o.title && o.text ? o.title + (/[؟?.:]$/.test(o.title) ? ' ' : ': ') + o.text : (o.title || o.text || ''));
+    asked.push(o);
+    const promise = askNative(opts);
+    const answerNow = confirmAnswer;
+    if (askAuto) {
+        setImmediate(() => {
+            const b = document.getElementById(answerNow ? 'rvAskConfirm' : 'rvAskCancel');
+            if (b) b.click();
+        });
+    }
+    return promise;
+};
 async function boot(config) {
     const root = document.createElement('div');
     root.setAttribute('id', 'rvApp');
     root.setAttribute('data-config', JSON.stringify(Object.assign({ mode: 'single', filter: 'all', canvas: 800, db: 'online',
-                                                                     autoSearchDelayMs: 0, approveSettleMs: 0 }, config || {})));
+                                                                     autoSearchDelayMs: 0, approveSettleMs: 0, approveUndoMs: 0,
+                                                                     modeExplicit: true }, config || {})));
     document.body.appendChild(root);
     R.boot();
     await flush();

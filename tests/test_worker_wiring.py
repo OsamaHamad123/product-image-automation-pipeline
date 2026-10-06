@@ -206,7 +206,8 @@ def test_candidate_save_failure_marks_failed(wiring, monkeypatch):
 
 
 def test_auto_approve_not_isolated_is_not_cached(offline, monkeypatch, tmp_path):
-    """AUTO_PUBLISH whose background removal failed is written as needs_review: and never cached."""
+    """AUTO_PUBLISH whose background removal failed is never cached, uploaded or written: the image cell feeds the app
+    and keeps its previous value (it used to get needs_review:<link>); the review waits in the queue."""
     import main
     import local_cache_db
     import google_sheets
@@ -219,7 +220,9 @@ def test_auto_approve_not_isolated_is_not_cached(offline, monkeypatch, tmp_path)
     monkeypatch.setattr(image_processor, "process_product_image_result",
                         lambda *a, **k: image_processor.ProcessResult(str(canvas), False, "none", None, 800, 800))
     monkeypatch.setattr(image_processor, "extract_metadata_from_image", lambda *a, **k: None)
-    monkeypatch.setattr(cloudinary_storage, "upload_product_image_to_cloudinary", lambda *a, **k: "https://res/x.png")
+    uploads = []
+    monkeypatch.setattr(cloudinary_storage, "upload_product_image_to_cloudinary",
+                        lambda *a, **k: uploads.append(a) or "https://res/x.png")
     written, cached = [], []
     monkeypatch.setattr(google_sheets, "update_image_link", lambda ws, row, col, value, **k: written.append(value) or True)
     monkeypatch.setattr(local_cache_db, "save_product_resolution", lambda *a, **k: cached.append(k) or True)
@@ -230,7 +233,7 @@ def test_auto_approve_not_isolated_is_not_cached(offline, monkeypatch, tmp_path)
     status = main.auto_approve_product(_task(), _best("AUTO_PUBLISH"), object(), 5, sku_key="sku-laban-up")
 
     assert status == "needs_review"
-    assert written == ["needs_review:https://res/x.png"]
+    assert written == [] and uploads == []
     assert cached == []
 
 
@@ -521,10 +524,10 @@ def test_a_failed_auto_publish_after_an_approval_saves_no_candidates(race, monke
 
 
 @pytest.mark.parametrize("owners, written, cached", [
-    ([], "https://res/a.png", True),
-    ([{"sku_key": "other", "product_name": "Other", "match": "url", "distance": 0}], "needs_review:https://res/a.png",
-     False),
-    (None, "needs_review:https://res/a.png", False),          # the check could not run: not published as final
+    ([], [("link", "https://res/a.png")], True),
+    # another product's image: nothing in the sheet (it used to get needs_review:<link>), the candidates wait for review
+    ([{"sku_key": "other", "product_name": "Other", "match": "url", "distance": 0}], [], False),
+    (None, [], False),          # the check could not run: not published as final
 ])
 def test_legacy_mode_marks_another_products_image_for_review(race, monkeypatch, owners, written, cached):
     import config
@@ -542,5 +545,96 @@ def test_legacy_mode_marks_another_products_image_for_review(race, monkeypatch, 
                         _search_returning([(_best("AUTO_PUBLISH"), {"decision": "AUTO_PUBLISH"})], []))
     prod = {"row_number": 17, "product_name": "Laban Up Strawberry 180ml", "brand": "Al Rawabi", "barcode": ""}
     assert main.process_single_product(prod, object(), 5) == "success"
-    assert rec["sheet"][0] == ("link", written)
+    assert [w for w in rec["sheet"] if w[0] == "link"] == written
     assert bool(rec["resolution"]) is cached
+    assert bool(rec["saved"]) is not cached           # a review waits in the database, not in the image cell
+
+
+# ---------------------------------------------------------------------------
+# The image cell feeds the app: a review never writes needs_review:<link> into it
+# ---------------------------------------------------------------------------
+
+def test_an_unisolated_auto_publish_waits_for_review_in_the_queue_and_leaves_the_cell(race, monkeypatch, tmp_path):
+    """The worker's AUTO_PUBLISH whose background was not removed: no upload, no sheet write, the candidates are saved
+    and the row is ready_for_review (the pending state lives in the database, so it is not searched or paid again)."""
+    import image_processor
+    from PIL import Image
+    main, rec = race
+    canvas = tmp_path / "flat.png"
+    Image.new("RGB", (800, 800), "white").save(canvas)
+    monkeypatch.setattr(image_processor, "process_product_image_result",
+                        lambda *a, **k: image_processor.ProcessResult(str(canvas), False, "photoroom", None, 800, 800,
+                                                                      quality_flags=["opaque_fill"]))
+    task = dict(_task(), worker_id="w1#claim")
+    assert main.pre_cache_product_candidates(task, worksheet=object(), link_column_index=5,
+                                             sleep=lambda s: None) == "success"
+    assert rec["sheet"] == [] and rec["resolution"] == []
+    assert rec["saved"] and rec["status"][-1] == "ready_for_review"
+    assert not canvas.exists()                                                  # the canvas was cleaned up
+
+
+def _sequential(monkeypatch, best, pending=False):
+    import config
+    import google_sheets
+    import image_search
+    import local_cache_db
+    import main
+    import query_refiner
+    rec = {"sheet": [], "saved": [], "searched": [], "publish": []}
+    monkeypatch.setattr(config, "CURATION_MODE", False, raising=False)
+    monkeypatch.setattr(config, "FORCE_OVERWRITE_IMAGES", False, raising=False)
+    monkeypatch.setattr(config, "log_and_fail", lambda *a, **k: None, raising=False)
+    monkeypatch.setattr(query_refiner.QueryRefiner, "refine_product_metadata", staticmethod(lambda *a, **k: {}))
+    monkeypatch.setattr(google_sheets, "update_product_localization", lambda *a, **k: True)
+    monkeypatch.setattr(google_sheets, "update_image_link",
+                        lambda ws, row, col, value, **k: rec["sheet"].append(value) or True)
+    monkeypatch.setattr(local_cache_db, "get_rejections", lambda sku: ([], []))
+    monkeypatch.setattr(local_cache_db, "has_review_candidates", lambda row, sku=None, **k: pending)
+    monkeypatch.setattr(local_cache_db, "save_curation_candidates", lambda *a, **k: rec["saved"].append(a) or True)
+    monkeypatch.setattr(image_search, "search_best_product_image",
+                        _search_returning([(best, {"decision": (best or {}).get("decision")})], rec["searched"]))
+    monkeypatch.setattr(main, "publish_image", lambda *a, **k: rec["publish"].append(k) or {"status": "failed"})
+    return main, rec
+
+
+PROD = {"row_number": 17, "product_name": "Laban Up Strawberry 180ml", "brand": "Al Rawabi", "barcode": ""}
+
+
+@pytest.mark.parametrize("best", [
+    _best("REVIEW_PRESELECTED", source="sqlite_cache", needs_review=True),     # a grey-zone cache hit
+    _best("REVIEW_PRESELECTED"),                                               # CURATION_MODE
+])
+def test_the_sequential_mode_keeps_a_review_out_of_the_image_cell(monkeypatch, best):
+    import config
+    main, rec = _sequential(monkeypatch, best)
+    if best.get("source") != "sqlite_cache":
+        monkeypatch.setattr(config, "CURATION_MODE", True, raising=False)
+    assert main.process_single_product(dict(PROD), object(), 5) == "success"
+    assert rec["sheet"] == [] and rec["publish"] == [] and len(rec["saved"]) == 1
+
+
+def test_the_sequential_mode_saves_candidates_when_publish_says_review(monkeypatch):
+    main, rec = _sequential(monkeypatch, _best("REVIEW_PRESELECTED"))
+    monkeypatch.setattr(main, "publish_image", lambda *a, **k: rec["publish"].append(k)
+                        or {"status": "needs_review", "error": "review_required"})
+    assert main.process_single_product(dict(PROD), object(), 5) == "success"
+    assert rec["publish"][0]["force_review"] is True and rec["sheet"] == [] and len(rec["saved"]) == 1
+
+
+@pytest.mark.parametrize("prod, pending", [
+    (dict(PROD, needs_review=True, needs_review_url="https://res.cloudinary.com/d/image/upload/q_auto,f_auto/v1/x"),
+     False),                                                    # a legacy needs_review: cell is a pending review
+    (dict(PROD), True),                                         # saved candidates wait for a reviewer
+])
+def test_a_row_waiting_for_review_is_not_searched_again(monkeypatch, prod, pending):
+    main, rec = _sequential(monkeypatch, _best("AUTO_PUBLISH"), pending=pending)
+    assert main.process_single_product(prod, object(), 5) == "skipped"
+    assert rec["searched"] == [] and rec["sheet"] == [] and rec["publish"] == []
+
+
+def test_force_overwrite_searches_a_pending_row_again(monkeypatch):
+    import config
+    main, rec = _sequential(monkeypatch, _best("AUTO_PUBLISH"), pending=True)
+    monkeypatch.setattr(config, "FORCE_OVERWRITE_IMAGES", True, raising=False)
+    main.process_single_product(dict(PROD), object(), 5)
+    assert len(rec["searched"]) == 1

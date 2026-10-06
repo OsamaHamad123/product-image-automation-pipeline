@@ -147,6 +147,43 @@ def test_403_on_every_key_disables_cse_for_the_rest_of_the_run(caplog):
     assert any("skipped for the rest of this run" in r.getMessage() for r in caplog.records)
 
 
+def test_401_on_every_key_disables_cse_once_with_one_log_line(caplog):
+    session = FakeSession(FakeResponse(401, text="unauthorized"), FakeResponse(401, text="unauthorized"))
+    p = make(session, keys=("a", "b"))
+    with caplog.at_level(logging.WARNING):
+        res = p.search("q", "en", SPEC)
+        again = p.search("q2", "en", SPEC)
+    assert res.status == "error" and res.http_status == 401
+    assert [call[1]["params"]["key"] for call in session.calls] == ["a", "b"]     # 401 rotates to the next key
+    # the instance already in a provider list answers at once, without a request
+    assert again.status == "error" and again.http_status == 401 and len(session.calls) == 2
+    assert p.disabled_for_run() is True
+    assert make(FakeSession()) is None
+    assert sum("skipped for the rest of this run" in r.getMessage() for r in caplog.records) == 1
+
+
+def test_a_refused_cse_is_never_asked_again_by_the_retriever():
+    from catalog_match.models import Candidate, ProviderResult
+    from catalog_match.retrieve import Retriever
+
+    class Serper:
+        name, kind, sanctioned, fallback = "serper", "search", True, False
+
+        def search(self, query, hl, spec):
+            return ProviderResult(provider="serper", status="ok", candidates=[
+                Candidate(image_url=f"https://img.example.com/{abs(hash(query))}.jpg")])
+
+    session = FakeSession(FakeResponse(403, text="denied"))
+    cse = make(session)
+    first = Retriever(SPEC, [Serper(), cse], max_queries=4).run()
+    assert [h.provider for h in first.health].count("cse_legacy") == 1        # refused on the first query only
+    second = Retriever(SPEC, [Serper(), cse], max_queries=4).run()             # the next row of the run
+    assert "cse_legacy" not in [h.provider for h in second.health]
+    assert len(session.calls) == 1
+    CseLegacyProvider.reset_run_state()                                        # a new run asks again
+    assert cse.disabled_for_run() is False and make(FakeSession()) is not None
+
+
 def test_one_key_403_while_another_works_keeps_cse():
     session = FakeSession(FakeResponse(403, text="denied"), FakeResponse(200, ok_body()))
     res = make(session, keys=("a", "b")).search("q", "en", SPEC)

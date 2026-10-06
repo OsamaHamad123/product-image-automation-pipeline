@@ -21,7 +21,7 @@ class HealthController extends Controller
     public const CACHE_KEY = 'ops_health_v1';
     public const CACHE_SECONDS = 60;
     /** «دقة الاقتراحات الحقيقية»: review_stats.lanes، بنفس تخزين ops_health المؤقت. */
-    public const LANES_CACHE_KEY = 'review_lanes_v2';
+    public const LANES_CACHE_KEY = 'review_lanes_v3';
     public const LANES = ['strict', 'unsure', 'other'];
 
     /** آخر أسطر السجل التي تُرسل للصفحة، وأقصى ما يُقرأ من نهاية الملف. */
@@ -264,8 +264,24 @@ class HealthController extends Controller
             'sample' => $sampleText,
             'notes' => array_values(array_map('strval', (array) ($result['notes'] ?? []))),
             'steps' => $steps,
-            'when' => $finished ? date('Y-m-d H:i', $finished) : '',
+            'when' => $finished ? self::stamp($finished) : '',
         ];
+    }
+
+    /** وقت كما يقرؤه المالك: بتوقيت المحل (config app.display_timezone، دبي)، مش بتوقيت الخادم (UTC). */
+    public static function stamp(int $ts): string
+    {
+        return (new \DateTimeImmutable('@' . $ts))
+            ->setTimezone(new \DateTimeZone(self::displayZone()))
+            ->format('Y-m-d H:i');
+    }
+
+    /** منطقة وقت المالك (نفس ReviewController::displayTimezone، بدون Laravel كمان: LAQTA_TIMEZONE، دبي افتراضياً). */
+    public static function displayZone(): string
+    {
+        $tz = function_exists('config') ? (string) config('app.display_timezone', 'Asia/Dubai')
+            : ((string) getenv('LAQTA_TIMEZONE') ?: 'Asia/Dubai');
+        return in_array($tz, \DateTimeZone::listIdentifiers(), true) ? $tz : 'Asia/Dubai';
     }
 
     /** GET /api/system/publish-check: آخر نتيجة محفوظة (بلا أي فحص جديد). */
@@ -415,7 +431,7 @@ class HealthController extends Controller
         return [
             'title' => $title,
             'tone' => $tone,
-            'when' => $started ? date('Y-m-d H:i', $started) : '',
+            'when' => $started ? self::stamp($started) : '',
             'summary' => $parts ? implode(' · ', $parts) : (($row['outcome'] ?? '') === 'skipped' ? '' : 'الأرقام مش متاحة.'),
         ];
     }
@@ -443,7 +459,7 @@ class HealthController extends Controller
 
     /**
      * GET /api/system/review-lanes: لكل فئة اختيار (catalog_match.decide.pick_lane) الاقتراحات المراجعة والمعتمد منها
-     * والحد المضمون وكم اعتماداً بقي لتجهز (more_needed)، من review_stats (نفس أرقام تبويب «النشر الآلي»)، مخزّنة
+     * وأقل دقة متوقعة وكم اعتماداً بقي لتجهز (more_needed)، من review_stats (نفس أرقام تبويب «النشر الآلي»)، مخزّنة
      * CACHE_SECONDS متل ops-health. شاشة المراجعة بالجملة تقرأ منها سطر التقدم نحو النشر الآلي (بلا نداء جديد).
      */
     public function reviewLanes(Request $request)
@@ -456,7 +472,7 @@ class HealthController extends Controller
         }
         $result = PythonBridge::run('review_stats');
         if (($result['status'] ?? '') !== 'success') {
-            return response()->json(['status' => 'error', 'error' => 'جسر بايثون أو قاعدة البيانات ما ردّ.'], 500)
+            return response()->json(['status' => 'error', 'error' => 'ما قدرنا نوصل لبيانات النظام. جرّب بعد شوي، وإذا ضل بلّغ المطوّر.'], 500)
                 ->header('Cache-Control', 'no-store');
         }
         $body = self::lanesPayload($result);
@@ -464,21 +480,37 @@ class HealthController extends Controller
         return response()->json($body)->header('Cache-Control', 'no-store');
     }
 
-    /** الأرقام اللي بتحتاجها البطاقة بس (لا أسماء ماركات ولا روابط). */
+    /** حالات جاهزية الفئة (local_cache_db.brand_status)؛ أي شي تاني من الجسر بينقرأ needs_reviews. */
+    public const LANE_STATUSES = ['ready', 'needs_reviews', 'low_precision'];
+
+    /**
+     * الأرقام اللي بتحتاجها البطاقة وسطر التقدم بشاشة المراجعة بس (لا أسماء ماركات ولا روابط)، للقراءة فقط. لكل فئة:
+     * prechecked (الاقتراحات المراجعة)، accepted (المعتمد منها)، lower_bound (حد ويلسون 95% الأدنى، null بلا مراجعات)،
+     * status (ready | needs_reviews | low_precision)، ready، reviews_needed (عدد الاقتراحات المراجعة الكلي اللي بتجهز
+     * عنده الفئة لو انقبل كل الجاي، local_cache_db.reviews_needed؛ null = ما بتوصل بحد معقول) و more_needed (الباقي منه:
+     * اعتمادات متتالية بلا رفض). فئة strict كمان: enabled (مفتاح «النشر الآلي لكل الماركات المؤكدة» متل ما بيقرأه
+     * العامل، null لما الجسر ما قاله) و publishing (enabled وجاهزة: عم ينشر لحاله).
+     */
     public static function lanesPayload(array $stats): array
     {
         $lanes = [];
         foreach (self::LANES as $lane) {
             $row = (array) (((array) ($stats['lanes'] ?? []))[$lane] ?? []);
+            $status = in_array($row['status'] ?? null, self::LANE_STATUSES, true) ? $row['status'] : 'needs_reviews';
             $lanes[$lane] = [
                 'prechecked' => (int) ($row['prechecked'] ?? 0),
                 'accepted' => (int) ($row['accepted'] ?? 0),
                 'lower_bound' => is_numeric($row['lower_bound'] ?? null) ? (float) $row['lower_bound'] : null,
-                'ready' => ($row['status'] ?? '') === 'ready',
+                'status' => $status,
+                'ready' => $status === 'ready',
+                'reviews_needed' => is_numeric($row['reviews_needed'] ?? null) ? max(0, (int) $row['reviews_needed']) : null,
                 // كم اعتماداً متتالياً بلا رفض بعد لتجهز الفئة (local_cache_db.more_needed)؛ null = الدقة أقل من العتبة
                 'more_needed' => is_numeric($row['more_needed'] ?? null) ? max(0, (int) $row['more_needed']) : null,
             ];
         }
+        $switch = array_key_exists('strict_lane_enabled', $stats) ? (bool) $stats['strict_lane_enabled'] : null;
+        $lanes['strict']['enabled'] = $switch;
+        $lanes['strict']['publishing'] = $switch === true && $lanes['strict']['ready'];
         return ['status' => 'success', 'lanes' => $lanes,
                 'unlaned' => (int) ($stats['unlaned_prechecked'] ?? 0)];
     }
@@ -489,10 +521,28 @@ class HealthController extends Controller
         return self::logResponse('pipeline', base_path('../temp/pipeline.log'));
     }
 
-    /** آخر أسطر سجل لوحة التحكم (storage/logs/laravel.log). */
+    /**
+     * آخر أسطر سجل لوحة التحكم: الأحدث بين storage/logs/laravel.log (يكتبه بايثون دائماً ولارافيل بقناة single) وملفات
+     * laravel-YYYY-MM-DD.log (قناة daily: LOG_STACK=daily بقالب سيرفر أوبونتو deploy/ubuntu/dashboard.env.example).
+     */
     public function laravelLog()
     {
-        return self::logResponse('laravel', storage_path('logs/laravel.log'));
+        return self::logResponse('laravel', self::newestLaravelLog(storage_path('logs')));
+    }
+
+    /** ملف سجل لارافيل الأحدث (آخر تعديل) في $dir؛ بلا ملفات: المسار الافتراضي laravel.log (الصفحة تقول «غير موجود»). */
+    public static function newestLaravelLog(string $dir): string
+    {
+        $dir = rtrim($dir, '/\\');
+        $newest = $dir . '/laravel.log';
+        $newestTime = is_file($newest) ? (int) @filemtime($newest) : -1;
+        foreach (glob($dir . '/laravel-*.log') ?: [] as $candidate) {
+            $time = is_file($candidate) ? (int) @filemtime($candidate) : -1;
+            if ($time > $newestTime) {
+                [$newest, $newestTime] = [$candidate, $time];
+            }
+        }
+        return $newest;
     }
 
     /**

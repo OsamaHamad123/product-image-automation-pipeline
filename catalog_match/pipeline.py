@@ -12,15 +12,23 @@ Steps
                   catalog index is asked again with it (free), alongside one corrected
                   query. A spelling an earlier row of the run proved for the sheet brand
                   writes the planned queries from Q1 (brand_discovery.planned_hint).
+                  A row without a valid barcode asks the local index for the barcodes
+                  that listings with an agreeing title carry in their own URLs
+                  (url_gtin; free, never evidence by itself).
     2. score      every pooled candidate with score.score_candidate.
     3. relax      R1/R2 into the same pool, only when no candidate is tier 1 or 2
                   and there is no custom query (relaxed winners are capped at review).
     4. fetch      the top 8 identity survivors by rank. Failed downloads stay in the
                   ranked list (decide marks them 'rejected'); images within pHash
                   distance 6 of a reviewer negative are dropped from the outcome.
+                  Meanwhile (P0, free) the pages of the best trusted tier-1/2 listings are
+                  read and each page's own main image joins as one more candidate
+                  (catalog_match.expand.PageMainImages).
     5. quality    soft assessment; a hard quality failure is 'rejected' but kept so a
                   reviewer can still see it.
-    6. verify     the top 4 usable candidates in one comparative call.
+    6. verify     the top 4 usable candidates in one comparative call, one copy of each picture first
+                  (retrieve.reader_queue: a near-copy, pHash distance <= 6 and alike colours, waits behind the
+                  other pictures and only fills a batch with room; a copy of an image read MATCH is not read).
     7. verify #2  when nothing is MATCH yet and unverified tier-1/2 candidates remain,
                   one more call on the next 4 (never more than 2 calls per SKU).
     8. decide     decide.route() maps everything to a decision.
@@ -33,7 +41,8 @@ Steps
 Nothing wins by arriving first: every query's candidates are pooled and ranked once.
 The per-SKU caps are 4 provider queries (the Open Food Facts lookup is not a query)
 and 2 verifier calls (the default verifier, catalog_match.verifiers, may add one budgeted
-strong second look inside a call: VERIFIER_STRONG_MAX_CALLS per SKU).
+strong second look inside a call: VERIFIER_STRONG_MAX_CALLS per SKU, and one strong re-judge per SKU:
+VERIFIER_REJUDGE_MAX_CALLS).
 """
 
 from __future__ import annotations
@@ -42,13 +51,14 @@ import logging
 import time
 from typing import Any, Iterable, List, Mapping, Optional, Sequence, Set, Tuple, Union
 
-from . import brand_discovery, decide, expand as expand_mod, quality as quality_mod
+from . import brand_discovery, decide, expand as expand_mod, quality as quality_mod, url_gtin
 from .fetch import load_image, phash_distance
+from .gtin import is_global_gtin
 from .models import (
     Candidate, CandidateScore, FetchedImage, RankedCandidate, SearchOutcome, SkuSpec,
     VerificationResult, VlmImageVerdict,
 )
-from .retrieve import NO_EARLY_STOP_PROVIDERS, Retriever, t1_early_stop
+from .retrieve import NO_EARLY_STOP_PROVIDERS, Retriever, annotate_copies, reader_queue, t1_early_stop
 from .score import rank, score_candidate
 
 logger = logging.getLogger(__name__)
@@ -264,15 +274,18 @@ def _verify(spec: SkuSpec, verifier, batch: List[RankedCandidate]) -> Optional[V
 def find_product_image(spec: Union[SkuSpec, Mapping[str, Any]], *, providers: Optional[Sequence] = None,
                        fetcher=None, verifier=None, custom_query: Optional[str] = None,
                        exclude_urls: Iterable[str] = (), exclude_phashes: Iterable[Any] = (),
-                       brand_index=None, expansion: Any = None) -> SearchOutcome:
+                       brand_index=None, expansion: Any = None, pages: Any = None) -> SearchOutcome:
     """Find, check and route the image for one SKU. Never returns an unchecked pick as final.
 
     expansion: None (default: the configured round, only when neither providers nor a
     verifier were injected), False (never), True (the configured round even with injected
     stages) or an expand.Expansion.
+    pages: the page reader of the free P0 step (expand.resolve_pages): None (default: a PageFetcher, only when
+    neither providers nor a verifier were injected), False (never) or a reader with fetch_page().
     """
     spec = _as_spec(spec, brand_index)
     exp = expand_mod.resolve(expansion, injected=providers is not None or verifier is not None)
+    page_reader = expand_mod.resolve_pages(pages, injected=providers is not None or verifier is not None)
     providers = list(providers) if providers is not None else _default_providers()
     fetcher = fetcher if fetcher is not None else _default_fetcher()
     verifier = verifier if verifier is not None else _default_verifier()
@@ -323,6 +336,13 @@ def find_product_image(spec: Union[SkuSpec, Mapping[str, Any]], *, providers: Op
         # the local catalog index is asked again with the store spelling (free), alongside the corrected query
         retrieval = retriever.rerun_lookups(extra)
 
+    # 1c. a row without a valid barcode: the barcodes stores wrote in their own URLs (only listings whose title agrees
+    #     with the row: url_gtin) find the local index's pages of the same barcode (free; never evidence by itself)
+    if not (spec.gtin and is_global_gtin(spec.gtin)) and not retriever.stopped:
+        hints = url_gtin.agreeing_gtins(rank(_score_pool(spec, retrieval.pool, negatives)))
+        if hints:
+            retrieval = retriever.lookup_gtins(hints)
+
     # 2. score
     scored = _score_pool(spec, retrieval.pool, negatives)
 
@@ -332,10 +352,16 @@ def find_product_image(spec: Union[SkuSpec, Mapping[str, Any]], *, providers: Op
         scored = _score_pool(spec, retrieval.pool, negatives)
     timer.lap("retrieval")
 
-    # 4. rank and fetch
+    # 4. rank and fetch; meanwhile the pages of the best trusted listings are read for their own main image (P0)
     ranked = [RankedCandidate(candidate=c, score=s) for c, s in rank(scored)]
+    main_images = expand_mod.PageMainImages.start(spec, ranked, page_reader, retriever.pool, fetcher,
+                                                  phash_negatives, negatives)
     ranked, n_phash_dropped = _fetch(spec, fetcher, ranked, phash_negatives) if ranked else (ranked, 0)
     timer.lap("fetch")
+    if main_images.listings:
+        ranked, n_page_dropped = main_images.join(ranked, retriever.pool)
+        n_phash_dropped += n_page_dropped
+        timer.lap("page_images")
 
     # 5. soft quality (hard failures stay visible, decide marks them rejected)
     _assess(ranked)
@@ -344,7 +370,7 @@ def find_product_image(spec: Union[SkuSpec, Mapping[str, Any]], *, providers: Op
 
     # 6. first verifier call on the top 4 usable candidates
     results: List[VerificationResult] = []
-    usable = [rc for rc in ranked if _usable(rc)]
+    usable = reader_queue([rc for rc in ranked if _usable(rc)])
     first = usable[:VERIFY_BATCH]
     res = _verify(spec, verifier, first)
     if res is not None:
@@ -356,7 +382,8 @@ def find_product_image(spec: Union[SkuSpec, Mapping[str, Any]], *, providers: Op
     if res is not None and res.status == "ok" and len(results) < MAX_VERIFY_CALLS:
         matched = any(rc.verdict is not None and rc.verdict.decision == decide.MATCH
                       and (not decide.gtin_conflict(rc) or decide.full_match(spec, rc)) for rc in first)
-        rest = [rc for rc in usable[VERIFY_BATCH:] if rc.verdict is None and rc.score.tier in (1, 2)]
+        rest = [rc for rc in reader_queue([rc for rc in ranked if _usable(rc)])
+                if rc.verdict is None and rc.score.tier in (1, 2)]
         if not matched and rest:
             res2 = _verify(spec, verifier, rest[:VERIFY_BATCH])
             if res2 is not None:
@@ -384,6 +411,8 @@ def find_product_image(spec: Union[SkuSpec, Mapping[str, Any]], *, providers: Op
         if report.store_image_wrong:
             # X0: store pages whose own picture is the picture that failed (catalog_match.expand)
             outcome.reject_counts[expand_mod.STORE_IMAGE_WRONG] = report.store_image_wrong
+    # evidence only, after every decision: the page domains showing each picture, SIZE_CORROBORATED on a label
+    annotate_copies(spec, outcome.ranked)
     outcome.queries = list(retrieval.queries) + extra_queries
     outcome.timings = timer.result()
     outcome.discovered_brands = list(spec.discovered_brands)

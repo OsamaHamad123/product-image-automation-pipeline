@@ -49,8 +49,10 @@ SERPER_API_KEY = os.getenv("SERPER_API_KEY", "")
 # النشر التلقائي: معطل افتراضياً. يُفعّل فقط لبراندات محددة بعد أن تثبت مجموعة الاختبار الذهبية دقة >= 98%
 AUTO_PUBLISH_ENABLED = os.getenv("AUTO_PUBLISH_ENABLED", "False").strip().lower() in ("1", "true", "yes", "on")
 AUTO_PUBLISH_BRANDS = [b.strip() for b in os.getenv("AUTO_PUBLISH_BRANDS", "").split(",") if b.strip()]
-# النشر الآلي لكل الماركات المؤكدة (فئة strict في catalog_match.decide): تفتحه اللوحة فقط حين تثبت مراجعات الفئة دقتها
-AUTO_PUBLISH_STRICT_LANE = os.getenv("AUTO_PUBLISH_STRICT_LANE", "False").strip().lower() in ("1", "true", "yes", "on")
+# النشر الآلي لكل الماركات المؤكدة (فئة strict في catalog_match.decide): شغّال افتراضياً (موافقة المالك)، بس الفئة ما
+# بتنشر شي لحالها قبل ما تثبت مراجعاتها دقتها (decide.strict_lane_readiness: 30 مراجعة عالأقل وحد ويلسون >= 98%).
+# القيمة اللي بيحفظها المالك من الإعدادات (system_settings.auto_publish_strict_lane) بتغلب هالافتراضي
+AUTO_PUBLISH_STRICT_LANE = os.getenv("AUTO_PUBLISH_STRICT_LANE", "True").strip().lower() in ("1", "true", "yes", "on")
 
 # --- identity package (P3) --------------------------------------------------------------------
 # مدى الثقة بالباركود: 'evidence' (الافتراضي: البراند والاسم هما الهوية والباركود دليل مساعد فقط)،
@@ -185,7 +187,7 @@ MAX_ASPECT_RATIO = 2.5
 # إعدادات تحسين الجودة سحابياً عبر Cloudinary
 CLOUDINARY_QUALITY = "auto:best" # درجة جودة الضغط سحابياً (مثل auto أو auto:best أو auto:good للمحافظة على أقصى دقة)
 CLOUDINARY_AUTO_QUALITY = True  # تفعيل الضغط والتحسين التلقائي للحجم (q_auto)
-CLOUDINARY_AUTO_FORMAT = True   # تفعيل تحويل الصيغة التلقائي للأسرع للويب (f_auto)
+CLOUDINARY_AUTO_FORMAT = True   # قديم وما إله أثر: التسليم WebP ثابت (f_webp، delivery_urls) لأن f_auto بيعطي التطبيق JPEG بلا شفافية
 CLOUDINARY_AI_ENHANCE = False    # إيقاف تحسين الألوان السحابي التلقائي لمنع التشويه والألوان الفاقعة
 CLOUDINARY_SHARPEN = 20          # قوة حدة الصورة سحابياً (0 للإيقاف، تم استخدام 20 لإبراز تفاصيل النصوص دون التسبب بتشويه)
 CLOUDINARY_TRIM_TOLERANCE = 5  # سماحية الاقتصاص لـ Cloudinary لمنع قص حواف المنتجات اللامعة أو الدائرية (0-100)
@@ -264,7 +266,8 @@ def log_runner(*args):
     from datetime import datetime
     import builtins
     import json
-    msg = " ".join(str(a) for a in args)
+    # كل طباعة main.py تمر من هنا (print = config.log_runner): نص استثناء قد يحمل مفتاحاً أو رابطاً بمفتاحه
+    msg = redact(" ".join(str(a) for a in args))
     time_str = datetime.now().strftime("%H:%M:%S")
     formatted = f"[{time_str}] {msg}"
     builtins.print(formatted)
@@ -287,16 +290,30 @@ def log_runner(*args):
             _redis_available = False
             logger.debug("Redis غير متصل محلياً؛ تم إيقاف بث السجل المباشر.")
 
+def redact(text):
+    """النص بلا أسرار (run_report.redact: قيم المفاتيح، key= في الروابط، كلمة مرور قاعدة البيانات). لا يرفع أبداً."""
+    text = "" if text is None else str(text)
+    try:
+        import run_report       # عند الاستدعاء: run_report -> verify_cloud_services -> config
+        return run_report.redact(text)
+    except Exception:
+        import re
+        return re.sub(r"(?i)((?:api_?)?key=)[^&\s'\"]+", r"\1[REDACTED]", text)
+
+
+# ملف سجلات لارافيل (صفحة الأعطال تقرؤه)، بمسار نسبي لمجلد المشروع
+LARAVEL_LOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dashboard", "storage", "logs", "laravel.log")
+
+
 def log_error_to_laravel(error_message, barcode=None, product_name=None, brand=None, level="ERROR"):
     """
     تدوين رسائل الأخطاء وتفاصيلها مباشرة في ملف سجلات لارافيل `dashboard/storage/logs/laravel.log`.
+    السطر يمر على redact: نصوص الاستثناءات قد تحمل رابطاً بمفتاحه أو قيمة مفتاح.
     """
     import threading
     from datetime import datetime
     
-    # تحديد مسار ملف السجلات بشكل نسبي
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    log_file_path = os.path.join(base_dir, "dashboard", "storage", "logs", "laravel.log")
+    log_file_path = LARAVEL_LOG_PATH
     
     # التأكد من وجود المجلد
     log_dir = os.path.dirname(log_file_path)
@@ -319,7 +336,7 @@ def log_error_to_laravel(error_message, barcode=None, product_name=None, brand=N
     context_str = f" - [{', '.join(prod_details)}]" if prod_details else ""
     
     # صياغة السطر بتنسيق لارافيل
-    formatted_log = f"[{time_str}] local.{level}: Python Pipeline{context_str}: {error_message}\n"
+    formatted_log = redact(f"[{time_str}] local.{level}: Python Pipeline{context_str}: {error_message}") + "\n"
     
     # استخدام قفل محلي لحماية الكتابة المتزامنة في نفس العملية
     if not hasattr(log_error_to_laravel, "_lock"):
@@ -370,8 +387,11 @@ def send_telegram_alert(message):
 
 def log_and_fail(barcode, product_name, brand, error_message):
     """
-    تدوين الخطأ في الكونسول وتخزينه في جدول أخطاء SQLite.
+    تدوين الخطأ في الكونسول وتخزينه في جدول أخطاء SQLite. النص يمر على redact قبل أي مكان (السجل، الجدول، Telegram)،
+    ورسالة Telegram (parse_mode HTML) تُهرَّب قيمها: اسم منتج أو خطأ فيه < أو & كان يكسر الرسالة أو يغيّر تنسيقها.
     """
+    import html
+    error_message = redact(error_message)
     log_runner(f"❌ فشل أتمتة المنتج '{product_name}': {error_message}")
     
     # تدوين الفشل في ملف سجلات لارافيل
@@ -389,10 +409,10 @@ def log_and_fail(barcode, product_name, brand, error_message):
     if any(k in lower_err for k in quota_keywords):
         alert_msg = (
             f"🚨 <b>تنبيه خطأ أتمتة حرج (Subscription/API Error)</b>\n\n"
-            f"📦 <b>المنتج:</b> {product_name}\n"
-            f"🏷️ <b>الماركة:</b> {brand}\n"
-            f"🔢 <b>الباركود:</b> {barcode or 'N/A'}\n"
-            f"❌ <b>الخطأ المكتشف:</b> <code>{error_message}</code>\n\n"
+            f"📦 <b>المنتج:</b> {html.escape(str(product_name or ''))}\n"
+            f"🏷️ <b>الماركة:</b> {html.escape(str(brand or ''))}\n"
+            f"🔢 <b>الباركود:</b> {html.escape(str(barcode or 'N/A'))}\n"
+            f"❌ <b>الخطأ المكتشف:</b> <code>{html.escape(error_message)}</code>\n\n"
             f"💡 <i>يرجى مراجعة إعدادات الاشتراك أو مفاتيح الـ API في ملف .env لحل المشكلة.</i>"
         )
         send_telegram_alert(alert_msg)
@@ -416,7 +436,9 @@ VERIFIER_PRIMARY = os.getenv("VERIFIER_PRIMARY", "")                  # فارغ
 VERIFIER_STRONG = os.getenv("VERIFIER_STRONG", "gemini:gemini-3.5-flash")   # أو "claude:<model>" أو "off"
 VERIFIER_MONTHLY_BUDGET_USD = os.getenv("VERIFIER_MONTHLY_BUDGET_USD", "5")
 VERIFIER_STRONG_MAX_CALLS = os.getenv("VERIFIER_STRONG_MAX_CALLS", "1")
-MODEL_PRICES = os.getenv("MODEL_PRICES", "")                          # JSON: دولار لكل مليون token (إدخال/إخراج)
+# إعادة حكم واحدة بالنموذج القوي لكل منتج على MISMATCH سببه الوحيد variant/size (1 = شغّال، 0 = موقّف، الحد 1)
+VERIFIER_REJUDGE_MAX_CALLS = os.getenv("VERIFIER_REJUDGE_MAX_CALLS", "1")
+MODEL_PRICES = os.getenv("MODEL_PRICES", "")                         # JSON: دولار لكل مليون token (إدخال/إخراج)
 
 # مفاتيح system_settings التي تكتبها صفحة الإعدادات -> اسم الإعداد هنا
 VERIFIER_DB_KEYS = {
@@ -425,6 +447,7 @@ VERIFIER_DB_KEYS = {
     "verifier_strong": "VERIFIER_STRONG",
     "verifier_monthly_budget_usd": "VERIFIER_MONTHLY_BUDGET_USD",
     "verifier_strong_max_calls": "VERIFIER_STRONG_MAX_CALLS",
+    "verifier_rejudge_max_calls": "VERIFIER_REJUDGE_MAX_CALLS",
     "model_prices": "MODEL_PRICES",
 }
 
@@ -497,24 +520,10 @@ def load_db_config():
     """
     تحميل الإعدادات ديناميكياً من قاعدة البيانات لتجنب تعديل ملفات البيئة يدوياً.
     """
-    import os
-    db_host = os.getenv("DB_HOST", "127.0.0.1")
-    db_port = int(os.getenv("DB_PORT", "3306"))
-    db_user = os.getenv("DB_USERNAME", "root")
-    db_pass = os.getenv("DB_PASSWORD", "")
-    db_name = os.getenv("DB_DATABASE", "automation_db")
-    
     try:
-        import pymysql
-        conn = pymysql.connect(
-            host=db_host,
-            port=db_port,
-            user=db_user,
-            password=db_pass,
-            database=db_name,
-            charset='utf8mb4',
-            cursorclass=pymysql.cursors.DictCursor
-        )
+        # اتصال المشروع الموحد بإعدادات DB_* ومهل الاتصال والقراءة والكتابة
+        import db_connect
+        conn = db_connect.connect()
         cursor = conn.cursor()
         cursor.execute("SHOW TABLES LIKE 'system_settings'")
         if cursor.fetchone():
@@ -580,7 +589,8 @@ def load_db_config():
                 AUTO_PUBLISH_ENABLED = str(db_keys["auto_publish_enabled"]).strip().lower() in ("1", "true", "yes", "on")
             if "auto_publish_brands" in db_keys and db_keys["auto_publish_brands"] is not None:
                 AUTO_PUBLISH_BRANDS = [b.strip() for b in str(db_keys["auto_publish_brands"]).split(",") if b.strip()]
-            if "auto_publish_strict_lane" in db_keys and db_keys["auto_publish_strict_lane"] is not None:
+            # خلية فاضية = ما حفظ المالك شي: الافتراضي (شغّال) بيضل
+            if str(db_keys.get("auto_publish_strict_lane") or "").strip():
                 AUTO_PUBLISH_STRICT_LANE = str(db_keys["auto_publish_strict_lane"]).strip().lower() in ("1", "true", "yes", "on")
             if db_keys.get("output_canvas_size"):
                 try:

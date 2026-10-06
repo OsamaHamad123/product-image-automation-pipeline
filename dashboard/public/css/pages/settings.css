@@ -61,7 +61,7 @@
 }
 
 .lq-settings__tab-hint {
-    font-size: 12px;
+    font-size: 13px;
     line-height: 1.45;
     color: var(--lq-text-3);
 }
@@ -201,7 +201,7 @@
     background: var(--lq-surface);
     color: var(--lq-text);
     font-family: var(--lq-font-mono);
-    font-size: 12.5px;
+    font-size: 13px;
     overflow-wrap: anywhere;
 }
 
@@ -290,7 +290,7 @@
 }
 
 .lq-settings-columns__value {
-    font-size: 12px;
+    font-size: 13px;
     color: var(--lq-text-3);
     overflow-wrap: anywhere;
 }
@@ -333,7 +333,7 @@
 }
 
 .lq-keys__use {
-    font-size: 12px;
+    font-size: 13px;
     color: var(--lq-text-3);
 }
 
@@ -351,7 +351,7 @@
 .lq-keys__state--warning { color: var(--lq-warning); }
 
 .lq-keys__source {
-    font-size: 12px;
+    font-size: 13px;
     color: var(--lq-text-3);
 }
 

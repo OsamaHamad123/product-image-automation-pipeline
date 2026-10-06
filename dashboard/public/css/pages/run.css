@@ -90,7 +90,7 @@
 .lq-run-advanced__hint {
     margin-bottom: 6px;
     padding-inline-start: 28px;
-    font-size: 12px;
+    font-size: 13px;
     line-height: 1.6;
     color: var(--lq-text-3);
 }
@@ -145,7 +145,7 @@
 }
 
 .lq-run-new__note {
-    font-size: 12px;
+    font-size: 13px;
     color: var(--lq-text-3);
 }
 
@@ -255,7 +255,7 @@
 
 .lq-run-stuck__what {
     margin: 6px 0 10px;
-    font-size: 12.5px;
+    font-size: 13px;
 }
 
 /* Latest results */
@@ -324,7 +324,7 @@
 }
 
 .lq-run-recent__ago {
-    font-size: 12px;
+    font-size: 13px;
     color: var(--lq-text-3);
     white-space: nowrap;
 }
@@ -395,14 +395,14 @@
     border-radius: var(--lq-radius-pill);
     background: var(--lq-warning-bg);
     color: var(--lq-warning-ink);
-    font-size: 12px;
+    font-size: 13px;
     text-align: center;
 }
 
 .lq-run-quality__brands {
     margin: 0;
     padding: 0 var(--lq-space-3) var(--lq-space-2);
-    font-size: 12px;
+    font-size: 13px;
     color: var(--lq-text-2);
 }
 
@@ -432,7 +432,7 @@
 .lq-run-quality__text,
 .lq-run-quality__more {
     color: var(--lq-text-2);
-    font-size: 12px;
+    font-size: 13px;
 }
 
 .lq-run-export__actions {
@@ -523,7 +523,7 @@
     border-radius: var(--lq-radius-pill);
     background: var(--lq-warning-bg);
     color: var(--lq-warning-ink);
-    font-size: 12px;
+    font-size: 13px;
 }
 
 .lq-run-brand__candidates {
@@ -543,7 +543,7 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     color: var(--lq-text-2);
-    font-size: 12px;
+    font-size: 13px;
 }
 
 .lq-run-brand__actions {
@@ -569,6 +569,88 @@
 
 .lq-run-brand__add {
     margin-inline-start: auto;
+}
+
+/* «عبّي جدول الماركات»: one checkbox row per missing brand (the barcode rows' layout), its confidence and evidence */
+.lq-run-bulk {
+    display: flex;
+    flex-direction: column;
+    gap: var(--lq-space-3);
+    padding-top: var(--lq-space-3);
+    border-top: 1px dashed var(--lq-border-soft);
+}
+
+.lq-run-bulk__panel {
+    display: flex;
+    flex-direction: column;
+    gap: var(--lq-space-3);
+}
+
+.lq-run-bulk__list {
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr));
+    max-height: 600px;
+}
+
+.lq-run-bulk__head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--lq-space-2);
+}
+
+.lq-run-bulk__chip {
+    flex: none;
+    padding: 1px 8px;
+    border-radius: var(--lq-radius-pill);
+    font-size: 12px;
+    background: var(--lq-surface-2);
+    color: var(--lq-text-2);
+}
+
+.lq-run-bulk__chip--high {
+    background: var(--lq-success-bg);
+    color: var(--lq-success-ink);
+}
+
+.lq-run-bulk__chip--low {
+    background: var(--lq-warning-bg);
+    color: var(--lq-warning-ink);
+}
+
+.lq-run-bulk__syn,
+.lq-run-bulk__site {
+    overflow-wrap: anywhere;
+    unicode-bidi: isolate;
+}
+
+.lq-run-bulk__evidence {
+    margin: 0;
+    padding-inline-start: 18px;
+    font-size: 12px;
+    line-height: 1.7;
+    color: var(--lq-text-2);
+}
+
+.lq-run-bulk__added-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--lq-space-2);
+}
+
+.lq-run-bulk__added {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--lq-space-2);
+    padding: 2px 4px 2px 10px;
+    border: 1px solid var(--lq-border-soft);
+    border-radius: var(--lq-radius-pill);
+    background: var(--lq-surface);
+    font-size: 13px;
+}
+
+.lq-run-bulk__added-name {
+    font-weight: 600;
+    overflow-wrap: anywhere;
 }
 
 /* «باركودات لقيناها من صفحات المتاجر» */
@@ -639,7 +721,7 @@
     display: flex;
     flex-wrap: wrap;
     gap: var(--lq-space-2);
-    font-size: 12px;
+    font-size: 13px;
     color: var(--lq-text-2);
 }
 
@@ -655,7 +737,7 @@
 }
 
 .lq-run-barcode__note {
-    font-size: 12px;
+    font-size: 13px;
     color: var(--lq-warning-ink);
 }
 
@@ -695,4 +777,16 @@
     .lq-run-controls .lq-btn {
         flex: 1 1 auto;
     }
+}
+
+/* «راجع الجاهز هلق (N)» while the run goes, and «نبّهني لما يخلص» */
+.lq-run-handoff {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+}
+
+.lq-run-handoff:not(:has(> :not([hidden]))) {
+    display: none;
 }

@@ -108,6 +108,7 @@ def bridge(db, monkeypatch, tmp_path):
     import google_sheets
     import image_processor
     from PIL import Image
+    monkeypatch.setattr(cli_bridge, "UPLOAD_DIR", str(tmp_path))     # tmp_path plays the dashboard's temp/ folder
 
     env = {"sheet": [], "cells": {}, "link": CLOUD + "milk.png", "write_delay": 0.0, "color": "white"}
 
@@ -836,11 +837,13 @@ def test_publish_image_for_a_human_names_the_flags_and_publishes_clean_only_when
     gate["flags"] = ["upscaled", "edge_clipped"]
     res = publish(publish_anyway=True)
     assert (res["status"], res["publish_anyway_allowed"]) == ("quality_refused", False)
-    # the worker path is unchanged: written needs_review:, flags returned
+    # the worker path: a review, flags returned, nothing uploaded and nothing in the image cell (no needs_review:)
     gate["flags"], gate["notes"] = ["alpha_haze"], ["soft_shadow"]
+    uploads = gate["uploads"]
     res = main.publish_image("https://x/bottle.jpg", MILK["product_name"], MILK["brand"], ROWS[0], object(), 3,
                              sku_key=KEYS[0])
-    assert res["status"] == "needs_review" and res["sheet_value"].startswith("needs_review:")
+    assert res["status"] == "needs_review" and "sheet_value" not in res
+    assert sheet == [CLOUD + "bottle.png"] and gate["uploads"] == uploads
     assert res["quality_flags"] == ["alpha_haze"] and res["quality_notes"] == ["soft_shadow"]
 
 

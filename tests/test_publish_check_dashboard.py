@@ -190,7 +190,8 @@ out.links = document.querySelectorAll('.rv-jobs__check').map(a => [a.getAttribut
 out.text = jobsText();
 """, tmp_path, fixture([picked(30, "Almarai Milk 1L"), picked(31, "Almarai Laban 1L")]), config={"row": 30})
     assert out["links"] == [["/system-diagnostics#publish-check", "افحص النشر", "A"]]
-    assert "ما مشيت" in out["text"] and "ما قدرنا ننزّل الصورة" in out["text"]
+    # «وحدة فشلت: أعد المحاولة» (was «خلصت: 0 مشيت، ووحدة ما مشيت»)
+    assert "وحدة فشلت: أعد المحاولة" in out["text"] and "ما قدرنا ننزّل الصورة" in out["text"]
 
 
 # ---------------------------------------------------------------------------

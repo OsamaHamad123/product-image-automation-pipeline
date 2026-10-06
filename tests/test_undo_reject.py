@@ -240,7 +240,9 @@ def test_the_route_is_registered_and_the_screen_knows_it():
     products = (DASH / "app" / "Http" / "Controllers" / "ProductController.php").read_text(encoding="utf-8")
     assert "$prod['rejected_images']" in products
     single = SINGLE_JS.read_text(encoding="utf-8")
-    assert "root.confirm(R.UNDO_REJECT_CONFIRM)" in single and "rejectedPanel(item)" in single
+    # asked in the page (R.ask, the in-page confirmation of the review screen), never with window.confirm
+    assert "R.ask({ title: R.UNDO_REJECT_CONFIRM" in single and "rejectedPanel(item)" in single
+    assert "root.confirm(" not in single
 
 
 @pytest.mark.skipif(NODE is None, reason="node is not installed")

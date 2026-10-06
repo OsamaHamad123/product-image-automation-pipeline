@@ -51,7 +51,12 @@ const FX = __FIXTURE__;
 const PNG = Buffer.from(__PNG__, 'base64');
 const html = cfg => `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="csrf-token" content="t"><style>${css}</style></head>
 <body class="page-review"><main class="lq-main lq-main--flush"><div id="rvApp" class="rv-app" data-config='${JSON.stringify(cfg)}'></div></main>
-<script>window.__confirms=[];window.confirm=m=>{window.__confirms.push(m);return true};window.Laqta={toast(){return {close(){},update(){}}},onRunStatus(){}};</script>
+<script>window.__confirms=[];window.Laqta={toast(){return {close(){},update(){}}},onRunStatus(){}};
+// the review screen asks in the page (R.ask): the question is recorded and «متأكد» clicked, like confirm() returning true
+new MutationObserver(() => { const b = document.getElementById('rvAskConfirm'); if (!b || b.__auto) return; b.__auto = 1;
+  const t = (document.getElementById('rvAskTitle') || {}).textContent || '', x = (document.getElementById('rvAskText') || {}).textContent || '';
+  window.__confirms.push(t && x ? t + (/[؟?.:]$/.test(t) ? ' ' : ': ') + x : (t || x)); setTimeout(() => b.click(), 0);
+}).observe(document.documentElement, { childList: true, subtree: true });</script>
 ${scripts.map(s => `<script>${s}</script>`).join('\n')}</body></html>`;
 const out = {};
 (async () => {
@@ -79,7 +84,7 @@ const out = {};
 
   // bulk: only the cards seen on screen, never a broken picture
   {
-    const { page } = await open({ mode: 'bulk', filter: 'all', canvas: 800, db: 'online', autoSearchDelayMs: 0, urls: {} });
+    const { page } = await open({ mode: 'bulk', filter: 'all', canvas: 800, db: 'online', autoSearchDelayMs: 0, approveUndoMs: 0, urls: {} });
     await page.waitForSelector('.rv-card[data-key] img');
     await page.waitForTimeout(600);
     out.rendered = await page.evaluate(() => document.querySelectorAll('.rv-card').length);
@@ -95,7 +100,7 @@ const out = {};
   }
   // bulk: two quick A presses approve one card
   {
-    const { page } = await open({ mode: 'bulk', filter: 'all', canvas: 800, db: 'online', autoSearchDelayMs: 0, urls: {} });
+    const { page } = await open({ mode: 'bulk', filter: 'all', canvas: 800, db: 'online', autoSearchDelayMs: 0, approveUndoMs: 0, urls: {} });
     await page.waitForSelector('.rv-card[data-key] img');
     await page.waitForTimeout(600);
     await page.keyboard.press('ArrowLeft');
@@ -108,7 +113,7 @@ const out = {};
   // single: Enter, Enter at once; then the next product (with a warning) after it has been on screen
   {
     const { page, selects } = await open({ mode: 'single', filter: 'all', row: 10, canvas: 800, db: 'online',
-                                           autoSearchDelayMs: 0, urls: {} });
+                                           autoSearchDelayMs: 0, approveUndoMs: 0, urls: {} });
     await page.waitForSelector('.rv-pick img');
     await page.waitForTimeout(600);
     await page.keyboard.press('Enter');
@@ -135,7 +140,7 @@ const out = {};
   // single: a reload that changes the open product blocks approval until it is shown again
   {
     const { page, selects } = await open({ mode: 'single', filter: 'all', row: 12, canvas: 800, db: 'online',
-                                           autoSearchDelayMs: 0, urls: {} });
+                                           autoSearchDelayMs: 0, approveUndoMs: 0, urls: {} });
     await page.waitForSelector('.rv-pick img');
     await page.waitForTimeout(600);
     FX.queue.rows = FX.queue.rows.map(r => r.row_number === 12 ? Object.assign({}, r, { updated_at: '2026-10-03 10:30:00' }) : r);

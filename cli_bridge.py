@@ -40,6 +40,7 @@ if __name__ == "__main__":
 import base64
 import json
 import logging
+import re
 import time
 import traceback
 import uuid
@@ -711,6 +712,15 @@ def _bare_link(value):
     return text
 
 
+def _same_image(value):
+    """
+    الرابط بصيغة المقارنة: بلا بادئة needs_review:، ورابط تسليم Cloudinary إلنا بالتحويل الجديد (القديم q_auto,f_auto
+    نفس الصورة: الشيت بعد scripts/migrate_delivery_urls.py والاعتماد المحفوظ قبله، delivery_urls.canonical_delivery_url).
+    """
+    from delivery_urls import canonical_delivery_url
+    return canonical_delivery_url(_bare_link(value))
+
+
 def _row_of(task):
     try:
         return int((task or {}).get("row_number"))
@@ -908,10 +918,10 @@ def _rejected_refusal(params, sku_key, row_number, product_name, image_url, scop
 
 def _shows(shown, approval):
     """هل الصورة المعتمدة التي عرضتها الصفحة (shown، بلا بادئة needs_review:) هي هذا الاعتماد؟"""
-    links = {_bare_link(approval.get("cloudinary_url")), _bare_link(approval.get("original_url"))}
+    links = {_same_image(approval.get("cloudinary_url")), _same_image(approval.get("original_url"))}
     if not _bare_link(approval.get("cloudinary_url")):
         links.add("")       # اعتماد بلا رابط Cloudinary: current.approved_url كان null
-    return shown in links
+    return _same_image(shown) in links
 
 
 def _stale_refusal(params, sku_key, row_number, product_name, image_url=None, scope=None):
@@ -977,7 +987,7 @@ def _human_decision(barcode, product_name, brand, original_url, approved_by, sku
     """
     def record(res):
         if res.get("status") != "published":
-            return      # رابط needs_review: ليس اعتماداً: لا يُسجل اعتماد بشري ولا يكتمل الصف (الشيت وقاعدة البيانات متفقان)
+            return      # نتيجة غير منشورة ليست اعتماداً: لا يُسجل اعتماد بشري ولا يكتمل الصف (الشيت وقاعدة البيانات متفقان)
         local_cache_db.save_product_resolution(
             barcode, product_name, brand, original_url, res["link"], None, res.get("metadata"),
             perceptual_hash=res.get("phash"), verification_status="human_approved", approved_by=approved_by,
@@ -1163,7 +1173,7 @@ def _sheet_outcome(rows, since_id=None, value=None):
 
 def _published_response(res, sku_key, row_number, **extra):
     """
-    استجابة الاعتماد / الرفع الناجح. warnings: background_not_removed (كُتب needs_review:)، quality_flags (نُشرت
+    استجابة الاعتماد / الرفع الناجح. warnings: background_not_removed (خلية needs_review: قديمة)، quality_flags (نُشرت
     رغم علامات العرض بعد تأكيد المراجع، published_anyway)، و duplicate_image (نفس الصورة منشورة لمنتج آخر،
     duplicate_of يسمّيه؛ الاعتماد الصريح يُكتب مع ذلك). warning: أول تحذير. quality_flags / quality_notes: فحص القص.
     bg_skipped: انتشرت بدون عزل الخلفية لأن المالك أوقفه بالإعدادات (main.publish_image)؛ ليس تحذيراً، فالرابط نظيف.
@@ -1187,7 +1197,7 @@ def _published_response(res, sku_key, row_number, **extra):
     if res.get("bg_fallback"):
         response['bg_fallback'] = dict(res["bg_fallback"])   # «انعزلت الخلفية بطريقة محلية لأن رصيد المزوّد خلص»
     if res.get("white_url"):
-        response['white_url'] = res["white_url"]   # النسخة البيضا من نفس الأصل (b_white,f_jpg)
+        response['white_url'] = res["white_url"]   # النسخة البيضا من نفس الأصل (b_white,...,f_jpg)
     warnings = []
     if str(res.get("sheet_value") or "").startswith("needs_review:"):
         warnings.append('background_not_removed')
@@ -1210,6 +1220,9 @@ def action_select_image(params):
     row_number = params.get('row_number')
     if not image_url or not product_name or not row_number:
         return {'status': 'failed', 'error': 'image_url, product_name and row_number are required'}
+    # رابط http(s) فقط: مسار ملف على الخادم كان يُقرأ ويُنشر (أي صورة على الجهاز). الرفع اليدوي له مساره الخاص
+    if not image_url.lower().startswith(("http://", "https://")):
+        return {'status': 'failed', 'error': 'image_url must be an http(s) link', 'error_code': 'bad_image_url'}
     row_number = int(row_number)
     sku_key, barcode, problem = _identity_problem(params, row_number)
     if problem:
@@ -1239,6 +1252,7 @@ def action_select_image(params):
             barcode=barcode, candidate_sha256=_candidate_sha(params, row_number, sku_key, image_url, identity),
             page_url=_candidate_page(params, row_number, sku_key, image_url, identity),
             category_override={k: _text(params, k) for k in ('category_l1_en', 'category_l2_en', 'category_l3_en')},
+            category_hint=(_text(params, 'category'), _text(params, 'sub_category')),
             key_size=_text(params, 'size') or None, key_brand=brand or None, sku_key=sku_key,
             also_rows=_other_rows(sku_key, row_number, tasks),
             before_write=_reviewer_check(params, sku_key, row_number, product_name, image_url, guard, rows, scope),
@@ -1277,13 +1291,34 @@ def action_select_image(params):
 # upload_manual_image
 # ---------------------------------------------------------------------------
 
+# لوحة التحكم تحفظ الصورة المرفوعة في temp/ بالمشروع (ApiController::uploadManualImage). لا يُقرأ ملف خارجه ولا
+# يُحذف بعد النشر: مسار آخر كان يسمح بنشر أي صورة على الخادم وبحذف أي ملف يقدر البايثون يحذفه.
+UPLOAD_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "temp")
+
+
+def _upload_path(value):
+    """المسار الحقيقي (realpath، بعد حل الروابط الرمزية و ..) لملف داخل UPLOAD_DIR، أو None."""
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        root = os.path.realpath(UPLOAD_DIR)
+        real = os.path.realpath(text)
+        inside = real != root and os.path.commonpath([real, root]) == root
+    except (OSError, ValueError):       # قرص آخر على ويندوز، أو مسار فيه محرف غير صالح
+        return None
+    return real if inside and os.path.isfile(real) else None
+
+
 def action_upload_manual_image(params):
-    file_path = params.get('file_path')
+    file_path = _upload_path(params.get('file_path'))
     row_number = params.get('row_number')
     product_name = _text(params, 'product_name')
     brand = _text(params, 'brand')
     barcode = _text(params, 'barcode')
-    if not file_path or not row_number or not product_name or not os.path.exists(file_path):
+    if params.get('file_path') and not file_path:
+        logger.warning("upload_manual_image: refused a file outside %s", UPLOAD_DIR)
+    if not file_path or not row_number or not product_name:
         return {'status': 'failed', 'error': 'Missing parameters or local file path not found'}
     row_number = int(row_number)
     task = local_cache_db.get_task_by_row(row_number)
@@ -1312,6 +1347,7 @@ def action_upload_manual_image(params):
         res = pipeline.publish_image(
             file_path, product_name, brand, row_number, worksheet, link_column_index, barcode=barcode,
             category_override={k: _text(params, k) for k in ('category_l1_en', 'category_l2_en', 'category_l3_en')},
+            category_hint=(_text(params, 'category'), _text(params, 'sub_category')),
             key_size=_text(params, 'size') or None, key_brand=brand or None, sku_key=sku_key,
             also_rows=_other_rows(sku_key, row_number, tasks),
             before_write=_reviewer_check(params, sku_key, row_number, product_name, None, guard, rows, scope),
@@ -1389,10 +1425,13 @@ def _candidate_phash(row_number, image_url, params=None, sku_key=None, identity=
 
 
 def _cell_holds(value, images):
-    """هل تحمل قيمة الخلية (مع بادئة needs_review: أو بدونها) إحدى صور images (رابط واحد أو مجموعة)؟"""
-    value = _bare_link(value)
+    """
+    هل تحمل قيمة الخلية (مع بادئة needs_review: أو بدونها) إحدى صور images (رابط واحد أو مجموعة)؟ رابط التسليم القديم
+    والجديد لنفس الأصل نفس الصورة (_same_image).
+    """
+    value = _same_image(value)
     images = {images} if isinstance(images, str) else set(images or ())
-    return bool(value) and value in images
+    return bool(value) and value in {_same_image(i) for i in images}
 
 
 def _approval_matches(approval, image_url, phash):
@@ -1715,25 +1754,81 @@ def action_undo_reject(params):
 def action_review_stats(params):
     """
     دقة الاختيار المسبق لكل براند ونطاق من review_decisions (local_cache_db.review_stats، نفس حساب
-    scripts/review_stats.py). لا يغير أي إعداد.
+    scripts/review_stats.py). لا يغير أي إعداد. strict_lane_enabled: مفتاح «النشر الآلي لكل الماركات المؤكدة» متل ما
+    بيقرأه العامل (catalog_match.settings: المحفوظ بالإعدادات، وإلا .env، وإلا الافتراضي شغّال).
     """
+    from catalog_match import settings as cm_settings
     try:
         rows = local_cache_db.get_review_decisions()
     except Exception:
         return _failure('failed', "Could not read the review decisions (details in temp/search.log).",
                         "review_stats failed")
-    return dict({'status': 'success'}, **local_cache_db.review_stats(rows))
+    return dict({'status': 'success'}, **local_cache_db.review_stats(rows),
+                strict_lane_enabled=bool(cm_settings.auto_publish_strict_lane()))
 
 
 # ---------------------------------------------------------------------------
 # إعدادات الشيت
 # ---------------------------------------------------------------------------
 
-def action_sheet_preview(params):
-    spreadsheet_url = _text(params, "spreadsheet_url")
-    tab_name = _text(params, "tab_name")
+# رابط الشيت أو اسمه واسم التبويب يُكتبان في .env كسطر KEY="VALUE": سطر جديد أو علامة تنصيص فيهما كانت تضيف مفاتيح
+# أخرى للملف. نفس القواعد في ApiController::sheetParams.
+SHEET_URL_RE = re.compile(r"^https://docs\.google\.com/spreadsheets/(?:u/\d+/)?d/[A-Za-z0-9_-]{20,}(?:[/?#][^\s\"'\\]*)?\Z")
+_SHEET_FORBIDDEN_RE = re.compile(r"[\x00-\x1f\x7f\"'\\]")
+SHEET_URL_MAX, SHEET_TAB_MAX = 500, 100
+ENV_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+INVALID_SHEET = ("Invalid spreadsheet URL or tab name: use a https://docs.google.com/spreadsheets/d/... link or a "
+                 "sheet name, with no quotes, backslashes or line breaks")
+
+
+def _sheet_inputs(params):
+    """(رابط الشيت أو اسمه، اسم التبويب، رد الرفض أو None). رابط http يجب أن يكون رابط Google Sheets."""
+    raw_url, raw_tab = params.get("spreadsheet_url"), params.get("tab_name")
+    if not isinstance(raw_url, (str, type(None))) or not isinstance(raw_tab, (str, type(None))):
+        return "", "", {"status": "failed", "error": INVALID_SHEET, "error_code": "invalid_sheet"}
+    spreadsheet_url, tab_name = (raw_url or "").strip(), (raw_tab or "").strip()
     if not spreadsheet_url:
-        return {"status": "failed", "error": "Spreadsheet URL or name is required"}
+        return "", "", {"status": "failed", "error": "Spreadsheet URL or name is required"}
+    bad = (len(spreadsheet_url) > SHEET_URL_MAX or len(tab_name) > SHEET_TAB_MAX
+           or _SHEET_FORBIDDEN_RE.search(spreadsheet_url) or _SHEET_FORBIDDEN_RE.search(tab_name)
+           or (spreadsheet_url.lower().startswith(("http://", "https://")) and not SHEET_URL_RE.match(spreadsheet_url)))
+    if bad:
+        return "", "", {"status": "failed", "error": INVALID_SHEET, "error_code": "invalid_sheet"}
+    return spreadsheet_url, tab_name, None
+
+
+def _replace_file(path, text):
+    """يكتب الملف كاملاً أو لا يكتبه: ملف مؤقت بجانبه ثم os.replace، وصلاحيات الملف ومالكه تبقى كما كانت (.env فيه
+    كل المفاتيح: انقطاع في منتصف الكتابة بـ open(..., "w") كان يتركه فاضياً)."""
+    import stat
+    import tempfile
+
+    before = os.stat(path)
+    fd, tmp = tempfile.mkstemp(prefix=".env.", suffix=".tmp", dir=os.path.dirname(path) or ".")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(tmp, stat.S_IMODE(before.st_mode))
+        if hasattr(os, "chown"):
+            try:
+                os.chown(tmp, before.st_uid, before.st_gid)
+            except OSError:          # غير الجذر لا يقدر يغيّر المالك، والملف المؤقت لنفس المستخدم أصلاً
+                pass
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def action_sheet_preview(params):
+    spreadsheet_url, tab_name, refused = _sheet_inputs(params)
+    if refused:
+        return refused
     try:
         sheets_client = google_sheets.get_sheets_client()
         if not sheets_client:
@@ -1752,12 +1847,11 @@ def action_sheet_preview(params):
 
 
 def action_sheet_save(params):
-    spreadsheet_url = _text(params, "spreadsheet_url")
-    tab_name = _text(params, "tab_name")
-    if not spreadsheet_url:
-        return {"status": "failed", "error": "Spreadsheet URL or name is required"}
+    spreadsheet_url, tab_name, refused = _sheet_inputs(params)
+    if refused:
+        return refused
     try:
-        env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+        env_path = ENV_PATH
         if os.path.exists(env_path):
             with open(env_path, "r", encoding="utf-8") as f:
                 lines = f.readlines()
@@ -1773,8 +1867,7 @@ def action_sheet_save(params):
                 lines.append(f"\nSPREADSHEET_NAME_OR_URL=\"{spreadsheet_url}\"\n")
             if not updated_tab:
                 lines.append(f"SPREADSHEET_TAB_NAME=\"{tab_name}\"\n")
-            with open(env_path, "w", encoding="utf-8") as f:
-                f.writelines(lines)
+            _replace_file(env_path, "".join(lines))
         config.SPREADSHEET_NAME_OR_URL = spreadsheet_url
         config.SPREADSHEET_TAB_NAME = tab_name
         google_sheets.clear_cache()
@@ -2169,7 +2262,18 @@ def action_brand_official_site(params):
         brand_assistant.OFFICIAL_SITE_SPEND_RUN)
     candidates = brand_assistant.official_site_candidates(
         [{"link": c.page_url, "title": c.title} for c in results], brand)
+    _cache_brand_site(brand, candidates)
     return {"status": "success", "brand": brand, "candidates": candidates, "queries": 1}
+
+
+def _cache_brand_site(brand, candidates):
+    """«عبّي جدول الماركات» بيقرأ الموقع من هالكاش بدل بحث مدفوع تاني: أول موقع اسمه بيحمل الماركة، وإلا ''."""
+    from catalog_match import brand_assistant
+    try:
+        local_cache_db.save_brand_site(brand_assistant.brand_key(brand), brand,
+                                       brand_assistant.site_for_cache(candidates, brand))
+    except Exception as e:
+        logger.warning("brand site cache: not saved: %s", e)
 
 
 def action_brand_add(params):
@@ -2216,6 +2320,243 @@ def action_brand_add(params):
         except Exception as e:
             logger.warning("brand_add: the sites could not be queued for indexing: %s", e)
     return {"status": "success", "added": added, "skipped": res.get("skipped") or [], "harvest_queued": queued}
+
+
+# ---------------------------------------------------------------------------
+# «عبّي جدول الماركات»: brand_bulk_suggestions (قراءة فقط)، brand_bulk_sites (بحث مدفوع بسقف، بزر صريح)،
+# brand_bulk_add («اعتمد المحدد»: يكتب شيت المالك)، brand_undo (تراجع عن ماركة كتبها المساعد)
+# ---------------------------------------------------------------------------
+
+def _sheet_rows_for_brands(queue_rows):
+    """صفوف الطابور، وصفوف الشيت المخزنة (google_sheets.cached_products، بلا طلب لـ Google) اللي مش بالطابور، كي تنعد
+    كل ماركات الشيت. الكاش ما بينقرا = صفوف الطابور بس."""
+    rows = list(queue_rows or [])
+    try:
+        products = google_sheets.cached_products()
+    except Exception as e:
+        logger.warning("brand bulk: the cached sheet rows could not be read: %s", e)
+        products = None
+    seen = {r.get("row_number") for r in rows}
+    for prod in products or ():
+        if prod.get("row_number") in seen:
+            continue
+        rows.append({"row_number": prod.get("row_number"), "name": prod.get("name") or "",
+                     "brand": prod.get("brand") or "", "brand_ar": prod.get("brand_ar") or "",
+                     "name_ar": prod.get("name_ar") or "", "discovered": []})
+    return rows
+
+
+def _brand_bulk_proposals():
+    """(proposals, rows, index_available) من الطابور وصفوف الشيت والمراجعات وفهرس المتاجر وكاش المواقع؛ أو رد خطأ."""
+    from catalog_match import brand_assistant
+    try:
+        rows = _sheet_rows_for_brands(local_cache_db.queue_brand_rows())
+    except Exception:
+        return _failure("failed", "Could not read the automation queue (details in temp/search.log).",
+                        "brand_bulk failed")
+    try:
+        client = google_sheets.get_sheets_client()
+        if not client:
+            raise RuntimeError("Google Sheets API connection failed")
+        mappings = google_sheets.sheet_brand_mappings(client, config.SPREADSHEET_NAME_OR_URL) or {}
+    except Exception:
+        return _failure("failed", "Could not read the Brands Mapping sheet (details in temp/search.log).",
+                        "brand_bulk sheet read failed")
+    evidence = {}
+    for name, read in (("aliases", local_cache_db.get_learned_brand_aliases),
+                       ("approvals", local_cache_db.get_brand_source_counts),
+                       ("sites", local_cache_db.brand_sites)):
+        try:
+            evidence[name] = read()
+        except Exception as e:
+            logger.warning("brand bulk: %s unavailable: %s", name, e)
+            evidence[name] = {} if name == "sites" else []
+    index_lookup = None
+    try:
+        from catalog_match.local_index import DbCatalogStore
+        store = DbCatalogStore()
+        if store.count() > 0:
+            index_lookup = lambda brand: brand_assistant.index_evidence(brand, store.find)  # noqa: E731
+    except Exception as e:
+        logger.warning("brand bulk: the local index is not available: %s", e)
+    try:
+        proposals = brand_assistant.bulk_suggestions(rows, mappings, evidence["aliases"], evidence["approvals"],
+                                                     index_lookup, evidence["sites"])
+    except Exception:
+        return _failure("failed", "Could not work out the missing brands (details in temp/search.log).",
+                        "brand_bulk failed")
+    return proposals, rows, index_lookup is not None
+
+
+def action_brand_bulk_suggestions(params):
+    """
+    «عبّي جدول الماركات»: اقتراح واحد لكل ماركة بالشيت ما إلها صف بـ Brands Mapping، من الأدلة بس (catalog_match.
+    brand_assistant.bulk_suggestions): {brands: [{brand, rows, brand_ar, synonyms, official_domain, confidence,
+    evidence, selectable, checked, site_searched}], counts: {high, low, none}, sites_left, site_cap, index}. قراءة
+    فقط: لا بحث مدفوع ولا كتابة بالشيت (الموقع الرسمي من كاش بحث سابق بس).
+    """
+    from catalog_match import brand_assistant
+    out = _brand_bulk_proposals()
+    if isinstance(out, dict):
+        return out
+    proposals, rows, index_ok = out
+    counts = {k: sum(1 for b in proposals if b["confidence"] == k) for k in ("high", "low", "none")}
+    unsearched = sum(1 for b in proposals if not b["site_searched"])
+    return {"status": "success", "brands": proposals, "rows": len(rows), "counts": counts, "index": index_ok,
+            "sites_left": unsearched, "site_cap": brand_assistant.BULK_SITE_LOOKUPS}
+
+
+def action_brand_bulk_sites(params):
+    """
+    «دوّر عالمواقع الرسمية»: لحد BULK_SITE_LOOKUPS ماركة (الأكثر صفوفاً، اللي ما انبحث عن موقعها قبل) استعلام Serper
+    واحد لكل وحدة، نفس brand_official_site بالضبط (بلا hedging، بسجل الصرف)، والنتيجة بتنحفظ بكاش المواقع. بيوقف عند
+    أول بحث ما ردّ. لا يكتب الشيت. {status, searched, found, left, queries}.
+    """
+    from catalog_match import brand_assistant, settings as cm_settings
+    from catalog_match.providers.serper_web import SerperWebProvider, parse_organic
+    if not cm_settings.serper_api_key():
+        return {"status": "unavailable", "code": "no_key", "error": "No Serper key is configured."}
+    try:
+        cap = max(1, min(int(params.get("limit") or brand_assistant.BULK_SITE_LOOKUPS),
+                         brand_assistant.BULK_SITE_LOOKUPS))
+    except (TypeError, ValueError):
+        cap = brand_assistant.BULK_SITE_LOOKUPS
+    try:
+        rows = _sheet_rows_for_brands(local_cache_db.queue_brand_rows())
+        client = google_sheets.get_sheets_client()
+        if not client:
+            raise RuntimeError("Google Sheets API connection failed")
+        mappings = google_sheets.sheet_brand_mappings(client, config.SPREADSHEET_NAME_OR_URL) or {}
+        sites = local_cache_db.brand_sites()
+    except Exception:
+        return _failure("failed", "Could not read the queue, the sheet or the site cache (details in temp/search.log).",
+                        "brand_bulk_sites failed")
+    todo = [b for b in brand_assistant.suggestions(rows, mappings)
+            if brand_assistant.brand_key(b["brand"]) not in sites and brand_assistant.main_token(b["brand"])]
+    provider = SerperWebProvider()
+    provider.hedge = False                           # exactly one query, one credit per brand
+    searched, found = [], []
+    for b in todo[:cap]:
+        brand = b["brand"]
+        try:
+            results = parse_organic(provider._request(brand_assistant.search_query(brand), "en"))
+        except Exception:
+            logger.warning("brand_bulk_sites: the search did not answer; %d searched", len(searched))
+            break
+        local_cache_db.record_search_spend(
+            {"provider_health": [{"provider": "serper_web", "status": "ok" if results else "empty", "hedges": 0}]},
+            brand_assistant.OFFICIAL_SITE_SPEND_RUN)
+        candidates = brand_assistant.official_site_candidates(
+            [{"link": c.page_url, "title": c.title} for c in results], brand)
+        _cache_brand_site(brand, candidates)
+        searched.append(brand)
+        if brand_assistant.site_for_cache(candidates, brand):
+            found.append(brand)
+    return {"status": "success", "searched": len(searched), "found": len(found),
+            "left": max(0, len(todo) - len(searched)), "queries": len(searched)}
+
+
+BRAND_BULK_MAX = 500
+
+
+def action_brand_bulk_add(params):
+    """
+    «اعتمد المحدد»: {brands: [اسم الماركة متل ما بتظهر]}. بيحسب الاقتراحات من جديد ويكتب لكل ماركة محددة اقتراحها هو
+    (الاسم، مرادفاته، موقعها الرسمي إذا في) — مش أي شي بيبعته المتصفح — وما بيكتب ماركة بلا دليل أبداً. الكتابة بدفعات
+    (brand_assistant.MAX_BATCH، قراءة طازجة وطلب كتابة واحد لكل دفعة، google_sheets.add_brand_mappings)، والماركة
+    المكتوبة أصلاً بتتخطى (تكرار الضغطة ما بيكتب شي جديد). كل ماركة انكتبت بتنسجّل (brand_writes) للتراجع، ومواقعها
+    بتنضاف لطابور الفهرسة. {status, added, skipped: [{brand, reason}], harvest_queued}.
+    """
+    from catalog_match import brand_assistant as ba
+    requested = params.get("brands")
+    if not isinstance(requested, list) or not requested or len(requested) > BRAND_BULK_MAX:
+        return _brand_invalid("too_many_brands", "Between 1 and %d brands at a time." % BRAND_BULK_MAX, "brands")
+    out = _brand_bulk_proposals()
+    if isinstance(out, dict):
+        return out
+    proposals = out[0]
+    items, skipped = ba.bulk_items(proposals, [b for b in requested if isinstance(b, str)])
+    added, written = [], {}
+    try:
+        client = google_sheets.get_sheets_client() if items else None
+        if items and not client:
+            raise RuntimeError("Google Sheets API connection failed")
+        for start in range(0, len(items), ba.MAX_BATCH):
+            res = google_sheets.add_brand_mappings(client, config.SPREADSHEET_NAME_OR_URL,
+                                                   items[start:start + ba.MAX_BATCH])
+            added.extend(res.get("added") or [])
+            written.update(res.get("written") or {})
+            skipped.extend({"brand": x.get("brand"), "reason": "duplicate"} for x in res.get("skipped") or [])
+    except google_sheets.SheetTransientError:
+        failure = _failure("failed", "Google Sheets is temporarily unavailable (quota or a Google server error). "
+                                     "Try again in a minute.", "brand_bulk_add failed")
+        return dict(failure, added=added)
+    except Exception:
+        failure = _failure("failed", "Could not write the Brands Mapping sheet. Check that it is shared with the "
+                                     "service account (details in temp/search.log).", "brand_bulk_add failed")
+        return dict(failure, added=added)
+    finally:
+        if added:
+            try:
+                local_cache_db.log_brand_writes([
+                    {"brand_key": ba.brand_key(b), "brand": b, "synonyms": (written.get(b) or {}).get("synonyms", ""),
+                     "official_domains": (written.get(b) or {}).get("official_domains", "")} for b in added])
+            except Exception as e:
+                logger.warning("brand_bulk_add: the undo log was not written: %s", e)
+    domains = [d for item in items if item["brand"] in added for d in item["official_domains"]]
+    queued = []
+    if domains:
+        try:
+            local_cache_db.add_pending_harvest_domains(domains)
+            queued = domains
+        except Exception as e:
+            logger.warning("brand_bulk_add: the sites could not be queued for indexing: %s", e)
+    return {"status": "success", "added": added, "skipped": skipped, "harvest_queued": queued}
+
+
+def action_brand_undo(params):
+    """
+    تراجع عن ماركة كتبها «عبّي جدول الماركات»: بيمسح صفها من Brands Mapping بس إذا لسا متل ما كتبه المساعد بالضبط
+    (google_sheets.remove_brand_mapping)، وبيشيل موقعها من طابور الفهرسة إذا لسا ما انفهرس. ماركة أضافها المالك
+    بإيده، أو صف عدّله: ما منمسح شي. {status: success, brand} | {status: invalid, code: not_ours | changed | missing}.
+    """
+    from catalog_match import brand_assistant as ba
+    try:
+        brand = ba.clean_brand(_text(params, "brand"))
+    except ba.BrandRequestError as e:
+        return _brand_invalid(e.code, str(e), e.field)
+    try:
+        entry = local_cache_db.last_brand_write(ba.brand_key(brand))
+    except Exception:
+        return _failure("failed", "Could not read the assistant's log (details in temp/search.log).", "brand_undo failed")
+    if not entry:
+        return _brand_invalid("not_ours", "This brand was not added by the assistant.", "brand")
+    try:
+        client = google_sheets.get_sheets_client()
+        if not client:
+            raise RuntimeError("Google Sheets API connection failed")
+        result = google_sheets.remove_brand_mapping(client, config.SPREADSHEET_NAME_OR_URL, entry)
+    except google_sheets.SheetTransientError:
+        return _failure("failed", "Google Sheets is temporarily unavailable. Nothing was removed; try again in a minute.",
+                        "brand_undo failed")
+    except Exception:
+        return _failure("failed", "Could not change the Brands Mapping sheet (details in temp/search.log).",
+                        "brand_undo failed")
+    if result != "removed":
+        if result == "missing":
+            try:
+                local_cache_db.mark_brand_write_undone(entry["id"])
+            except Exception as e:
+                logger.warning("brand_undo: the log was not updated: %s", e)
+        return _brand_invalid(result, "The row is not the one the assistant wrote.", "brand")
+    try:
+        local_cache_db.mark_brand_write_undone(entry["id"])
+        domains = [d.strip() for d in str(entry.get("official_domains") or "").split(",") if d.strip()]
+        if domains:
+            local_cache_db.remove_pending_harvest_domains(domains)
+    except Exception as e:
+        logger.warning("brand_undo: the log or the indexing queue was not updated: %s", e)
+    return {"status": "success", "brand": entry["brand"]}
 
 
 # ---------------------------------------------------------------------------
@@ -2448,6 +2789,10 @@ ACTIONS = {
     'brand_suggestions': action_brand_suggestions,
     'brand_official_site': action_brand_official_site,
     'brand_add': action_brand_add,
+    'brand_bulk_suggestions': action_brand_bulk_suggestions,
+    'brand_bulk_sites': action_brand_bulk_sites,
+    'brand_bulk_add': action_brand_bulk_add,
+    'brand_undo': action_brand_undo,
     'barcode_suggestions': action_barcode_suggestions,
     'barcode_write': action_barcode_write,
     'export_run': action_export_run,
@@ -2471,6 +2816,8 @@ def _configure_logging(stream):
     root.addHandler(handler)
     if root.level > logging.INFO or root.level == logging.NOTSET:
         root.setLevel(logging.INFO)
+    import run_report
+    run_report.install_log_redaction()       # لا مفتاح ولا كلمة مرور في temp/search.log
     return handler
 
 

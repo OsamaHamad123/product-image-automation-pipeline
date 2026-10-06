@@ -235,6 +235,8 @@ class ProductController extends Controller
             }
         }
         unset($prod);
+        // الصورة الحالية بالشيت تُعرض عبر /api/image-proxy: مضيفها (أي رابط كتبه المالك بالشيت) مسموح للوكيل
+        \App\Services\ImageProxy::rememberHosts(array_column($products, 'existing_image_link'));
 
         \Cache::put(self::REVIEW_PRODUCTS_CACHE_KEY,
             ['version' => $version, 'stamp' => self::sheetStamp(), 'products' => $products],

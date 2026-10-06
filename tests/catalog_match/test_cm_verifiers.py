@@ -26,7 +26,7 @@ from catalog_match.models import Candidate, FetchedImage, ProviderResult, Verifi
 from catalog_match.verifiers import cascade as cascade_mod
 from catalog_match.verifiers import claude as claude_mod
 from catalog_match.verifiers import pricing, registry
-from catalog_match.verifiers.cascade import CascadeVerifier, merge_verdict, needs_second_look
+from catalog_match.verifiers.cascade import CascadeVerifier, merge_verdict, needs_rejudge, needs_second_look
 from catalog_match.verifiers.claude import ClaudeVerifier
 from catalog_match.verifiers.spend import MemorySpendStore
 from catalog_match.verify import CircuitBreaker, GeminiVerifier, make_verdict
@@ -42,7 +42,7 @@ def _offline(monkeypatch):
     monkeypatch.setattr(socket.socket, "connect", refuse)
     monkeypatch.setattr(settings, "_config", None)
     for name in ("VERIFIER_PRIMARY", "VERIFIER_STRONG", "VERIFIER_MONTHLY_BUDGET_USD", "VERIFIER_STRONG_MAX_CALLS",
-                 "MODEL_PRICES", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", "GEMINI_MODEL"):
+                 "VERIFIER_REJUDGE_MAX_CALLS", "MODEL_PRICES", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", "GEMINI_MODEL"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setattr(claude_mod, "_CLIENTS", {})
 
@@ -634,3 +634,189 @@ def test_usage_and_notices_reach_the_outcome_trace(monkeypatch, laban):
     assert [u["model"] for u in summary["vlm_usage"]] == ["gemini-3.1-flash-lite", "claude-sonnet-5-5"]
     assert summary["verifier_notices"] == []
     json.dumps(summary)                              # trace-safe
+
+
+# ---------------------------------------------------------------------------
+# The strong re-judge of a cheap MISMATCH that rests only on a variant / size 'no' (VERIFIER_REJUDGE_MAX_CALLS)
+# Run exports 2026-10-04/05: 'Buy Zwan Chicken Luncheon Meat 340 g' (talabat, tier 1) was read 'ZWAN' / 'LUNCHEON',
+# variant 'no', and rejected for good.
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def zwan():
+    return build_sku_spec({"name": "ZWAN CHICKEN LUNCHEON MEAT 340GM", "brand": "ZWAN"}, {})
+
+
+def _zwan(i, **over):
+    """The cheap reading of the talabat listing: brand yes, variant 'LUNCHEON' read as 'no', size unreadable."""
+    e = {"image_index": i, "brand_text": "ZWAN", "variant_text": "LUNCHEON", "size_text": "", "pack_count": 1,
+         "view": "front_packshot", "brand_match": "yes", "variant_match": "no", "size_match": "unsure"}
+    e.update(over)
+    return e
+
+
+ZWAN_FULL = {"variant_text": "Chicken Luncheon Meat", "size_text": "340 g", "variant_match": "yes", "size_match": "yes"}
+
+
+def test_needs_rejudge_only_for_a_variant_or_size_no(zwan, laban):
+    assert needs_rejudge(zwan, make_verdict(zwan, 0, _zwan(1)))
+    assert needs_rejudge(zwan, make_verdict(zwan, 0, _zwan(1, size_text="200 g", size_match="no", variant_match="yes")))
+    assert needs_rejudge(zwan, make_verdict(zwan, 0, _zwan(1, size_text="200 g", size_match="no")))
+    assert not needs_rejudge(zwan, make_verdict(zwan, 0, _zwan(1, brand_match="no")))            # brand 'no' is final
+    assert not needs_rejudge(zwan, make_verdict(zwan, 0, _zwan(1, view="banner")))               # the picture, not a flag
+    assert not needs_rejudge(zwan, make_verdict(zwan, 0, _zwan(1, **ZWAN_FULL)))                 # a MATCH
+    assert not needs_rejudge(zwan, make_verdict(zwan, 0, _zwan(1, variant_match="unsure")))      # UNSURE: a second look
+    assert not needs_rejudge(zwan, None)
+    # a competitor printed on the pack refutes the brand like a brand 'no', whatever its flag says
+    competitor = make_verdict(laban, 0, _entry(1, brand_text="Almarai", brand_match="unsure", variant_match="no"))
+    assert competitor.decision == "MISMATCH" and not needs_rejudge(laban, competitor)
+
+
+def test_merge_verdict_lets_only_a_rejudge_replace_a_mismatch(zwan):
+    cheap = make_verdict(zwan, 2, _zwan(1))
+    strong = make_verdict(zwan, 0, _zwan(1, **ZWAN_FULL))
+    assert merge_verdict(cheap, strong) is cheap
+    merged = merge_verdict(cheap, strong, index=2, rejudge=True)
+    assert merged.decision == "MATCH" and merged.index == 2
+    assert merge_verdict(cheap, None, rejudge=True) is cheap                                     # a failed call
+    assert merge_verdict(cheap, VlmImageVerdict(index=0, decision="UNKNOWN"), rejudge=True) is cheap
+
+
+def test_rejudge_replaces_the_cheap_mismatch_with_the_strong_reading(zwan):
+    images = _images(2)
+    c, primary, strong, store = _cascade([[_zwan(1), _zwan(2, brand_text="Bordon", brand_match="no")]],
+                                         [[_zwan(1, **ZWAN_FULL)]], max_rejudges=1)
+    result = c.verify(zwan, images)
+    assert result.status == "ok" and result.calls == 2
+    assert [v.decision for v in result.verdicts] == ["MATCH", "MISMATCH"]
+    assert result.verdicts[0].variant_text == "Chicken Luncheon Meat" and result.verdicts[0].index == 0
+    assert strong.calls == [[images[0].candidate.image_url]]
+    use = result.usage[-1]
+    assert use["role"] == "strong" and use["rejudge"] is True and use["applied"] is True
+    assert use["primary_decision"] == "MISMATCH" and use["strong_decision"] == "MATCH"
+    assert store.role_spend("strong") == pytest.approx(use["usd"])                    # the month budget counts it
+
+
+def test_rejudge_gives_only_what_the_strong_reader_gives(zwan):
+    """The strong reading may confirm the MISMATCH (a printed variant the SKU does not name) or leave it UNSURE."""
+    tandoori = _zwan(1, variant_text="Chicken Luncheon Meat Tandoori", size_text="340 g", size_match="yes")
+    c, *_ = _cascade([[_zwan(1)]], [[tandoori]], max_rejudges=1)
+    assert c.verify(zwan, _images(1)).verdicts[0].decision == "MISMATCH"
+    beef = _zwan(1, variant_text="Beef Luncheon Meat", size_text="340 g", variant_match="yes", size_match="yes")
+    c, *_ = _cascade([[_zwan(1)]], [[beef]], max_rejudges=1)
+    assert c.verify(zwan, _images(1)).verdicts[0].decision == "MISMATCH"                 # the code still decides
+    c, *_ = _cascade([[_zwan(1)]], [[_zwan(1, variant_text="Chicken Luncheon Meat", variant_match="yes")]],
+                     max_rejudges=1)
+    assert c.verify(zwan, _images(1)).verdicts[0].decision == "UNSURE"                   # the size still unread
+    failed = VerificationResult(status="unknown", calls=1, error="http_500",
+                                verdicts=[VlmImageVerdict(index=0, decision="UNKNOWN")])
+    c, *_ = _cascade([[_zwan(1)]], [failed], max_rejudges=1)
+    result = c.verify(zwan, _images(1))
+    assert result.verdicts[0].decision == "MISMATCH" and result.notices == ["strong_failed"]
+    assert result.calls == 2
+
+
+def test_no_rejudge_for_a_brand_no_a_tier2_listing_or_a_batch_with_its_match(zwan):
+    c, _, strong, _ = _cascade([[_zwan(1, brand_match="no", brand_text="Bordon")]], [[_zwan(1, **ZWAN_FULL)]],
+                               max_rejudges=1)
+    assert c.verify(zwan, _images(1)).verdicts[0].decision == "MISMATCH" and strong.calls == []
+    images = _images(1)
+    c, _, strong, _ = _cascade([[_zwan(1)]], [[_zwan(1, **ZWAN_FULL)]], max_rejudges=1,
+                               tiers={images[0].candidate.image_url: 2})
+    assert c.verify(zwan, images).verdicts[0].decision == "MISMATCH" and strong.calls == []
+    c, _, strong, _ = _cascade([[_zwan(1), _zwan(2, **ZWAN_FULL)]], [[_zwan(1, **ZWAN_FULL)]], max_rejudges=1)
+    assert [v.decision for v in c.verify(zwan, _images(2)).verdicts] == ["MISMATCH", "MATCH"] and strong.calls == []
+
+
+def test_rejudge_is_off_by_setting_and_never_more_than_one_per_product(zwan):
+    c, _, strong, _ = _cascade([[_zwan(1)]], [[_zwan(1, **ZWAN_FULL)]])                  # max_rejudges=0: off
+    assert c.verify(zwan, _images(1)).verdicts[0].decision == "MISMATCH" and strong.calls == []
+    images = _images(2)
+    c, _, strong, _ = _cascade([[_zwan(1)], [_zwan(1)]], [[_zwan(1, variant_match="no")], [_zwan(1, **ZWAN_FULL)]],
+                               max_rejudges=5, max_strong_calls=4)
+    assert c.max_rejudges == 1                                                             # capped at 1
+    c.verify(zwan, images[:1])
+    second = c.verify(zwan, images[1:])                     # the pipeline's second batch for the same SKU
+    assert len(strong.calls) == 1 and second.verdicts[0].decision == "MISMATCH"
+
+
+def test_rejudge_has_its_own_allowance_after_the_second_look(zwan):
+    """VERIFIER_STRONG_MAX_CALLS counts the second looks, the re-judge has its own one per product: the batch's
+    second look goes first, the re-judge follows only while the batch has no MATCH; a strong model that is off
+    (0 strong calls) makes neither."""
+    images = _images(2)
+    unread_size = {"variant_text": "Chicken Luncheon Meat", "variant_match": "yes"}
+    batch = [[_zwan(1), _zwan(2, **unread_size)]]
+    c, _, strong, store = _cascade(batch, [[_zwan(1, **unread_size)], [_zwan(1, **ZWAN_FULL)]], max_rejudges=1)
+    result = c.verify(zwan, images)
+    assert strong.calls == [[images[1].candidate.image_url], [images[0].candidate.image_url]]
+    assert [v.decision for v in result.verdicts] == ["MATCH", "UNSURE"] and result.calls == 3
+    assert [u.get("rejudge", False) for u in result.usage] == [False, False, True]
+    assert [e["role"] for e in store.added] == ["primary", "strong", "strong"]
+    # the second look found the MATCH: nothing left to re-judge
+    c, _, strong, _ = _cascade(batch, [[_zwan(1, **ZWAN_FULL)], [_zwan(1, **ZWAN_FULL)]], max_rejudges=1)
+    assert [v.decision for v in c.verify(zwan, images).verdicts] == ["MISMATCH", "MATCH"]
+    assert strong.calls == [[images[1].candidate.image_url]]
+    # the first batch's re-judge leaves the second batch its second look
+    c, _, strong, _ = _cascade([[_zwan(1)], [_zwan(1, **unread_size)]],
+                               [[_zwan(1, variant_match="no")], [_zwan(1, **ZWAN_FULL)]], max_rejudges=1)
+    c.verify(zwan, images[:1])
+    assert c.verify(zwan, images[1:]).verdicts[0].decision == "MATCH" and len(strong.calls) == 2
+    c, _, strong, _ = _cascade([[_zwan(1)]], [[_zwan(1, **ZWAN_FULL)]], max_rejudges=1, max_strong_calls=0)
+    assert c.verify(zwan, _images(1)).verdicts[0].decision == "MISMATCH" and strong.calls == []
+
+
+def test_rejudge_respects_the_month_budget(zwan):
+    c, _, strong, _ = _cascade([[_zwan(1)]], [[_zwan(1, **ZWAN_FULL)]], spent=4.999, max_rejudges=1)
+    result = c.verify(zwan, _images(1))
+    assert strong.calls == [] and result.notices == ["strong_budget_exhausted"]
+    assert result.verdicts[0].decision == "MISMATCH" and result.calls == 1
+    c, _, strong, _ = _cascade([[_zwan(1)]], [[_zwan(1, **ZWAN_FULL)]], budget=0, max_rejudges=1)
+    assert c.verify(zwan, _images(1)).notices == ["strong_budget_zero"] and strong.calls == []
+    c, _, strong, _ = _cascade([[_zwan(1)]], [[_zwan(1, **ZWAN_FULL)]], store=MemorySpendStore(fail_reads=True),
+                               max_rejudges=1)
+    assert c.verify(zwan, _images(1)).notices == ["strong_budget_unknown"] and strong.calls == []
+
+
+def test_default_verifier_rejudges_once_unless_turned_off(monkeypatch):
+    assert settings.verifier_rejudge_max_calls() == 1
+    assert cascade_mod.default_verifier().max_rejudges == 1
+    monkeypatch.setenv("VERIFIER_REJUDGE_MAX_CALLS", "3")
+    assert settings.verifier_rejudge_max_calls() == 1 and cascade_mod.default_verifier().max_rejudges == 1
+    monkeypatch.setenv("VERIFIER_REJUDGE_MAX_CALLS", "0")
+    assert cascade_mod.default_verifier().max_rejudges == 0
+    monkeypatch.setenv("VERIFIER_REJUDGE_MAX_CALLS", "lots")
+    assert settings.verifier_rejudge_max_calls() == 1                    # unreadable: the default
+
+
+def test_rejudged_listing_becomes_the_pick(monkeypatch, zwan):
+    """End to end: the talabat listing the cheap reader rejected is pre-checked once the strong model re-reads it;
+    with the re-judge off the row has no pick (the live run's outcome)."""
+    img = _fetched(7)
+    c = Candidate(image_url=img.candidate.image_url,
+                  page_url="https://www.talabat.com/uae/grocery/600123/zwan-chicken-luncheon-meat-340-g",
+                  title="Buy Zwan Chicken Luncheon Meat 340 g", page_title="Buy Zwan Chicken Luncheon Meat 340 g",
+                  provider="serper", domain="talabat.com")
+
+    class Provider:
+        name, sanctioned, kind, fallback = "serper", True, "search", False
+
+        def search(self, query, hl, spec):
+            return ProviderResult(provider="serper", status="ok", http_status=200, candidates=[c])
+
+    class Fetcher:
+        def fetch(self, cands, spec):
+            return [FetchedImage(candidate=x, ok=True, width=800, height=800, path_or_bytes=_packshot(),
+                                 content_sha256="z") for x in cands]
+
+    outcomes = {}
+    for label, rejudges in (("off", 0), ("on", 1)):
+        built, *_ = _cascade([[_zwan(1)]], [[_zwan(1, **ZWAN_FULL)]], max_rejudges=rejudges)
+        monkeypatch.setattr(cascade_mod, "default_verifier", lambda built=built: built)
+        outcomes[label] = pipeline.find_product_image(zwan, providers=[Provider()], fetcher=Fetcher())
+    assert outcomes["off"].decision == "REVIEW_UNSELECTED" and outcomes["off"].vlm_calls == 1
+    on = outcomes["on"]
+    assert on.ranked[0].score.tier == 1
+    assert on.decision in ("REVIEW_PRESELECTED", "AUTO_PUBLISH") and on.winner.candidate.image_url == c.image_url
+    assert on.winner.verdict.decision == "MATCH" and on.vlm_calls == 2
+    assert [u.get("rejudge", False) for u in on.vlm_usage] == [False, True]

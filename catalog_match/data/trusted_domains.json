@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "_doc": "Source trust for catalog_match.score, keyed on the PAGE domain (sub-domains match). Order of trust: brand official (per SKU, from the Brands Mapping sheet) > uae_retailers > structured > other_retail > generic. stock_or_clipart domains (page or image host) and keywords are hard rejects. retailer_names are store names that appear in listing titles ('... - Shop on Carrefour UAE'); a title segment made only of a retailer name and site_filler words is dropped before brand matching, so a private-label SKU (brand 'Carrefour') never matches another brand's listing through the store name. company_suffixes are the words a company's own name adds to its brand ('Mehran Foods', 'Marmum Dairy Farm L.L.C'): on the brand's official site a title whose only brand is the site's own name segment keeps tier 1 when that segment is the brand plus such words and the product part does not open with another brand-like word; a place ('Mehran Foods Korea') or another brand in the brand position ('Buy DAWN BREAD ...') caps it (score.py, site_name_brand).",
+  "_doc": "Source trust for catalog_match.score, keyed on the PAGE domain (sub-domains match). Order of trust: brand official (per SKU, from the Brands Mapping sheet) > uae_retailers > structured > other_retail > generic. stock_or_clipart domains (page or image host) and keywords are hard rejects. uae_retailer_image_hosts are the image CDNs the uae_retailers' own product pages use (Lulu, Carrefour UAE, Spinneys, talabat; from the live runs' candidates; only the store's own tenant of a shared CDN, never all of akinoncloudcdn.com or azureedge.net): fetch.HostBreaker treats them as UAE retailer hosts (never skipped as slow), they give NO source trust (that stays keyed on the page domain). retailer_names are store names that appear in listing titles ('... - Shop on Carrefour UAE'); a title segment made only of a retailer name and site_filler words is dropped before brand matching, so a private-label SKU (brand 'Carrefour') never matches another brand's listing through the store name. company_suffixes are the words a company's own name adds to its brand ('Mehran Foods', 'Marmum Dairy Farm L.L.C'): on the brand's official site a title whose only brand is the site's own name segment keeps tier 1 when that segment is the brand plus such words and the product part does not open with another brand-like word; a place ('Mehran Foods Korea') or another brand in the brand position ('Buy DAWN BREAD ...') caps it (score.py, site_name_brand).",
   "uae_retailers": [
     "carrefouruae.com",
     "noon.com",
@@ -12,6 +12,14 @@
     "unioncoop.ae",
     "choithrams.com",
     "sharjahcoop.ae"
+  ],
+  "uae_retailer_image_hosts": [
+    "bf1af2.akinoncloudcdn.com",
+    "bf1af2.a-cdn.akinoncloud.com",
+    "cdn.mafrservices.com",
+    "cdnprod.mafretailproxy.com",
+    "prod-spinneys-cdn-new.azureedge.net",
+    "talabat.dhmedia.io"
   ],
   "structured": [
     "openfoodfacts.org"
