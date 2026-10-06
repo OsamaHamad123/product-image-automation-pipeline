@@ -18,7 +18,7 @@
                     </div>
                 </header>
                 @unless ($dbOnline)
-                    <x-lq.alert variant="danger" title="قاعدة البيانات مش متاحة:">ما بنقدر نعرف مين بانتظار المراجعة ولا نجيب الصور المقترحة هلق. تأكد إن MariaDB شغالة وحدّث الصفحة.</x-lq.alert>
+                    <x-lq.alert variant="danger" title="قاعدة البيانات مش متاحة:">ما بنقدر نعرف مين بانتظار المراجعة ولا نجيب الصور المقترحة هلق. قاعدة البيانات مش شغّالة. بلّغ المطوّر.</x-lq.alert>
                 @endunless
             </div>
             <div class="rv-cards" aria-hidden="true">
@@ -32,7 +32,7 @@
             <section class="rv-ws" aria-label="مساحة المراجعة">
                 <div class="rv-ws__body">
                     @unless ($dbOnline)
-                        <x-lq.alert variant="danger" title="قاعدة البيانات مش متاحة:">ما بنقدر نعرف مين بانتظار المراجعة ولا نجيب الصور المقترحة هلق. تأكد إن MariaDB شغالة وحدّث الصفحة.</x-lq.alert>
+                        <x-lq.alert variant="danger" title="قاعدة البيانات مش متاحة:">ما بنقدر نعرف مين بانتظار المراجعة ولا نجيب الصور المقترحة هلق. قاعدة البيانات مش شغّالة. بلّغ المطوّر.</x-lq.alert>
                     @endunless
                     <div class="rv-skeleton" aria-hidden="true">
                         <div class="rv-panel rv-skeleton__head"><span class="lq-skeleton lq-skeleton--title"></span><span class="lq-skeleton lq-skeleton--short"></span></div>

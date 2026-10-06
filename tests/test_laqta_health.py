@@ -451,7 +451,7 @@ def test_strict_lane_section_reads_the_lane_stats(offline):
                "$out['down'] = SettingsController::strictLaneBlocker(['status' => 'failed']);")
     lane = out["lane"]
     assert lane["text"] == "من 12 اقتراح بهالفئة، اعتمدت 12."
-    assert lane["unsure_text"].startswith("القارئ مش متأكد بس العنوان بيأكد: اعتمدت 4 من 5.")
+    assert lane["unsure_text"].startswith("الملصق مش واضح بس الاسم مطابق: اعتمدت 4 من 5.")
     assert (lane["ready"], lane["can_enable"], lane["enabled"]) == (False, False, False)
     assert lane["chip"] == "تحتاج 177 مراجعة" and "أقل دقة متوقعة" in lane["detail"]
     assert "لسا مش جاهزة" in out["why"] and "ما قدرنا نتأكد" in out["down"]
@@ -497,7 +497,7 @@ console.log(JSON.stringify({ok: ok, down: H.lanesView(null)}));
     assert [r["key"] for r in out["ok"]["rows"]] == ["strict", "unsure", "other"]
     assert (rows["strict"]["text"], rows["strict"]["bound"]) == ("اعتمدت 12 من 12", "أقل دقة متوقعة 75.8%")
     assert (rows["unsure"]["text"], rows["unsure"]["bound"]) == ("لسا ما في مراجعات", "")
-    assert rows["unsure"]["label"] == "القارئ مش متأكد بس العنوان بيأكد"
+    assert rows["unsure"]["label"] == "الملصق مش واضح بس الاسم مطابق"
     assert out["down"]["kind"] == "error" and out["down"]["rows"] == []
 
 
@@ -1028,7 +1028,7 @@ def test_strict_lane_switch_is_refused_until_the_lane_is_ready(app_env):
     assert _settings(db)["auto_publish_strict_lane"] == "false"
     page = out[1]["body"]
     assert "النشر الآلي لكل الماركات المؤكدة" in page and "لسا ما راجعت ولا اقتراح بهالفئة." in page
-    assert "القارئ مش متأكد بس العنوان بيأكد" in page
+    assert "الملصق مش واضح بس الاسم مطابق" in page
     assert re.search(r'name="auto_publish_strict_lane"[^>]*disabled', page)
 
     down = _kernel(dict(env, LQ_STUB_MODE="down"), [

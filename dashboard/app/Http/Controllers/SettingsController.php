@@ -780,7 +780,7 @@ class SettingsController extends Controller
             }
         }
         $un = (int) ($unsure['prechecked'] ?? 0);
-        $unsureText = 'القارئ مش متأكد بس العنوان بيأكد: '
+        $unsureText = 'الملصق مش واضح بس الاسم مطابق: '
             . ($un === 0 ? 'لسا ما راجعت ولا اقتراح من هالنوع.' : 'اعتمدت ' . (int) ($unsure['accepted'] ?? 0) . ' من ' . $un . '.')
             . ' للعلم بس: هالنوع ما بينتشر آلياً.';
         return [

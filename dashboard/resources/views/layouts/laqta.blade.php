@@ -102,9 +102,9 @@
         var PHASES = { starting: 'running', running: 'running', paused: 'paused', stopping: 'stopping',
                        error: 'error', review: 'idle', idle: 'idle' };
         var COPY = {
-            loading: { label: 'لحظة…', text: 'جارٍ قراءة حالة التشغيل…', link: 'صفحة التشغيل ←' },
-            idle: { label: 'جاهز', text: 'لا يوجد تشغيل الآن', link: 'ابدأ تشغيلاً جديداً ←' },
-            running: { label: 'يعمل', text: 'جارٍ تجهيز التشغيل…', link: 'عرض التفاصيل ←' },
+            loading: { label: 'لحظة…', text: 'لحظة، عم نقرأ حالة التشغيل…', link: 'صفحة التشغيل ←' },
+            idle: { label: 'جاهز', text: 'ما في تشغيل هلق', link: 'ابدأ تشغيل جديد ←' },
+            running: { label: 'يعمل', text: 'عم نجهّز التشغيل…', link: 'عرض التفاصيل ←' },
             paused: { label: 'متوقف مؤقتاً', text: 'التشغيل متوقف مؤقتاً', link: 'عرض التفاصيل ←' },
             stopping: { label: 'عم يوقف', text: 'بيكمّل المنتج الحالي وبيوقف', link: 'عرض التفاصيل ←' },
             error: { label: 'توقف بعطل', text: 'توقف التشغيل بسبب عطل.', link: 'عرض التفاصيل ←' },

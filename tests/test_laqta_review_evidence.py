@@ -823,9 +823,9 @@ await flush();
 out.done = [itemOf(9).bucket, toasts.slice(-1)[0].text];
 """, tmp_path, fixture([B, OTHER]))
     assert out["first_anyway"] is None                          # never sent without the reviewer's confirmation
-    assert out["toast"]["variant"] == "danger" and "لم تُنشر صورة" in out["toast"]["text"]
+    assert out["toast"]["variant"] == "danger" and "ما انعتمدت صورة" in out["toast"]["text"]
     assert "الصورة المصدر صغيرة فكُبّرت" in out["panel"] and "المنتج صغير على اللوحة" in out["panel"]
-    assert "upscaled" not in out["panel"] and "لم تُعزل خلفية" not in out["panel"]
+    assert "upscaled" not in out["panel"] and "ما انعزلت خلفية" not in out["panel"]
     assert "اعتمدها رغم هيك…" in out["buttons"] and "أعد المحاولة" not in out["buttons"]
     assert out["bucket"] == "proposed"                          # nothing was published: still waiting
     assert out["after_no"][0] == 1 and "الصورة المصدر صغيرة فكُبّرت" in out["after_no"][1]
@@ -847,8 +847,8 @@ out.toast = toasts.slice(-1)[0].text;
 out.panel = jobsText();
 out.buttons = document.querySelectorAll('#rvJobs button').map(b => b.textContent).filter(t => t);
 """, tmp_path, fixture([B, OTHER]))
-    assert "لم تُعزل خلفية الصورة (المنتج مقصوص عند حافة الصورة)" in out["panel"]
-    assert "edge_clipped" not in out["panel"] and "رغم ذلك" not in out["toast"]
+    assert "ما انعزلت خلفية الصورة (المنتج مقصوص عند حافة الصورة)" in out["panel"]
+    assert "edge_clipped" not in out["panel"] and "رغم هيك" not in out["toast"]
     assert "اعتمدها رغم هيك…" not in out["buttons"] and "أعد المحاولة" not in out["buttons"]
 
 

@@ -349,10 +349,10 @@ openRow(31);
 out.approved_view = wsText();
 """.replace("__OPAQUE__", js(refused)), tmp_path,
                fixture([picked(30, "Almarai Milk 1L"), picked(31, "Almarai Laban 1L")]), config={"row": 30})
-    assert out["opaque"][0] == 0 and "لم تُنشر" in out["opaque"][1]
+    assert out["opaque"][0] == 0 and "ما انعتمدت" in out["opaque"][1]
     assert "الخلفية معزولة" not in out["confirm"]
     assert "هالة أو ضباب خفيف حول حواف المنتج" in out["confirm"] and "ظل المنتج سيبقى ظاهراً" in out["confirm"]
-    assert "نُشرت رغم ملاحظات فحص القص:" in out["approved_view"]
+    assert "انعتمدت رغم ملاحظات فحص القص:" in out["approved_view"]
     assert "هالة أو ضباب حول حواف المنتج" in out["approved_view"]
 
 

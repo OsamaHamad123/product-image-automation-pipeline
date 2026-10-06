@@ -1663,7 +1663,7 @@
     margin-inline-start: auto;
 }
 
-/* the lane of the engine's pick (R.laneBadge): «مؤكدة تماماً» green, «القارئ مش متأكد» amber, nothing for the rest */
+/* the lane of the engine's pick (R.laneBadge): «مؤكدة تماماً» green, «الملصق مش واضح» amber, nothing for the rest */
 .rv-lane {
     display: inline-flex;
     align-items: center;

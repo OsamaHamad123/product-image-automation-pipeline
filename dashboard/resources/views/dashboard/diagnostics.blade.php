@@ -226,7 +226,7 @@
 
         <div class="lq-alert lq-alert--danger" role="alert" data-health="ops-error" hidden>
             <x-lq.icon name="alert" :size="18" class="lq-alert__icon" />
-            <div class="lq-alert__body"><strong class="lq-alert__title">ما قدرنا نقرأ سجل البحث:</strong> <span data-health="ops-error-text">جسر بايثون أو قاعدة البيانات ما ردّ.</span></div>
+            <div class="lq-alert__body"><strong class="lq-alert__title">ما قدرنا نقرأ سجل البحث:</strong> <span data-health="ops-error-text">ما قدرنا نوصل لبيانات النظام. جرّب بعد شوي، وإذا ضل بلّغ المطوّر.</span></div>
             <button type="button" class="lq-alert__action lq-health__retry" data-health="ops-retry">جرّب مرة تانية</button>
         </div>
 

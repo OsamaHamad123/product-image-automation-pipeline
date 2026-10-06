@@ -472,7 +472,7 @@ class HealthController extends Controller
         }
         $result = PythonBridge::run('review_stats');
         if (($result['status'] ?? '') !== 'success') {
-            return response()->json(['status' => 'error', 'error' => 'جسر بايثون أو قاعدة البيانات ما ردّ.'], 500)
+            return response()->json(['status' => 'error', 'error' => 'ما قدرنا نوصل لبيانات النظام. جرّب بعد شوي، وإذا ضل بلّغ المطوّر.'], 500)
                 ->header('Cache-Control', 'no-store');
         }
         $body = self::lanesPayload($result);

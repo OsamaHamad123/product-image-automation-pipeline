@@ -458,15 +458,15 @@
                            approved_url: pick('approved_url'), queue_row: pick('queue_row') };
         const approvedNow = String(expected.approved_url || '').replace(/^needs_review:/, '');
         const who = String(cur.approved_for || '').trim() || job.label;
-        const by = cur.approved_by === 'auto' || cur.approval_status === 'auto_verified' ? 'نشرها النظام تلقائياً'
+        const by = cur.approved_by === 'auto' || cur.approval_status === 'auto_verified' ? 'اعتمدها النظام تلقائياً'
             : cur.approved_by ? 'اعتمدها مراجع' : '';
         const images = [];
         if (approvedNow) images.push({ url: approvedNow, caption: `المعتمدة الآن لـ «${who}»${by ? ` (${by})` : ''}` });
         if (job.candidate && job.candidate.url) images.push({ url: job.candidate.url, caption: 'الصورة التي اخترتها' });
         const ok = await R.askDialog({
             title: `استبدال صورة «${job.label}»؟`,
-            text: `${job.stale.text || ''} ${approvedNow ? 'إذا استبدلتها، تُلغى الصورة المعتمدة الآن وتُنشر صورتك مكانها.'
-                : 'لا توجد صورة معتمدة له الآن؛ إذا أكملت تُنشر صورتك.'}`.trim(),
+            text: `${job.stale.text || ''} ${approvedNow ? 'إذا استبدلتها، بتنلغى الصورة المعتمدة هلق وبتنعتمد صورتك مكانها.'
+                : 'ما في صورة معتمدة إله هلق؛ إذا كمّلت بتنعتمد صورتك.'}`.trim(),
             images: images,
             confirmText: 'استبدلها بصورتي',
             cancelText: 'إلغاء',
@@ -506,7 +506,7 @@
         const done = !!(res && res.ok && data.status === 'success');
         if (done) {
             S.cfg.bg = Object.assign({}, bg, { method: String(data.method || 'none'), previous: String(data.previous || '') });
-            R.toast('عزل الخلفية متوقف: اضغط «أعد المحاولة» على الصور اللي ما مشيت لتنتشر متل ما هي على لوحة بيضا.',
+            R.toast('عزل الخلفية متوقف: اضغط «أعد المحاولة» على الصور اللي فشلت لتنعتمد متل ما هي على لوحة بيضا.',
                     'success', 9000);
         } else {
             R.toast(res && res.network ? 'ما قدرنا نوصل للخادم.' : `ما انحفظ: ${R.plainError(data.error, 'جرّب مرة ثانية.')}`,
@@ -543,7 +543,7 @@
                                           current: data.current && typeof data.current === 'object' ? data.current : null });
                 const flagsPart = notes.flagTexts.length ? ` فحص القص: ${notes.flagTexts.join('، ')}.` : '';
                 if (notes.publishedAnyway) {
-                    R.toast(`نُشرت صورة «${job.label}» رغم ملاحظات فحص القص: ${notes.flagTexts.join('، ') || 'ملاحظات العرض'}.`
+                    R.toast(`انعتمدت صورة «${job.label}» رغم ملاحظات فحص القص: ${notes.flagTexts.join('، ') || 'ملاحظات العرض'}.`
                             + (sheet.state && sheet.state !== 'written' ? ` ${sheet.text}` : ''), 'warning', 9000);
                 } else if (notes.bgFailed) {
                     const sheetPart = sheet.state === 'written' ? 'وكُتب رابطها في الشيت بعلامة «بحاجة مراجعة».' : sheet.text;
@@ -555,7 +555,7 @@
                 if (notes.bgSkipped && !S.bgSkippedSaid) {
                     // مرة بالجلسة: كل اعتماد بعده بينتشر متل ما هو، واللوحة النهائية بتقولها لكل منتج
                     S.bgSkippedSaid = true;
-                    R.toast(`انتشرت صورة «${job.label}» بدون عزل الخلفية (عزل الخلفية متوقف بالإعدادات).`, 'info', 9000);
+                    R.toast(`انعتمدت صورة «${job.label}» بدون عزل الخلفية (عزل الخلفية متوقف بالإعدادات).`, 'info', 9000);
                 }
                 if (notes.bgFallback && !S.bgFallbackSaid) {
                     // مرة بالجلسة: كل اعتماد بعده بيعزل محلياً لحد ما ينشحن الرصيد، واللوحة النهائية بتقولها لكل منتج
@@ -570,8 +570,8 @@
         } else {
             if (['approving', 'rejecting'].includes(S.local.get(job.key))) S.local.delete(job.key);
             if (job.quality) {
-                R.toast(`لم تُنشر صورة «${job.label}»: ${job.quality.text}`
-                        + (job.quality.allowed ? ' تستطيع نشرها رغم ذلك من لوحة الاعتمادات بعد مراجعتها.' : ''), 'danger', 12000);
+                R.toast(`ما انعتمدت صورة «${job.label}»: ${job.quality.text}`
+                        + (job.quality.allowed ? ' بتقدر تعتمدها رغم هيك من لوحة الاعتمادات بعد ما تراجعها.' : ''), 'danger', 12000);
             } else if (job.stale && job.stale.replaceable === false) {
                 R.toast(`لم تُعتمد صورة «${job.label}»: ${job.stale.text}`, 'danger', 12000);
             } else if (job.stale) {
@@ -904,7 +904,7 @@
         match: ['lq-check-row__status--match', 'check', 'مطابق'],
         unsure: ['lq-check-row__status--unsure', 'exclamation', 'تأكد بنفسك'],
         mismatch: ['lq-check-row__status--mismatch', 'x', 'غير مطابق'],
-        unknown: ['lq-check-row__status--unknown', 'minus', 'لا توجد معلومة']
+        unknown: ['lq-check-row__status--unknown', 'minus', 'ما في معلومة']
     };
 
     function alertBox(variant, title, text, extra) {
@@ -1438,14 +1438,14 @@
             }
             if (notes.publishedAnyway) {
                 // نُشرت رغم ملاحظات فحص القص بعد تأكيد المراجع: الملاحظة تبقى ظاهرة على الصورة المعتمدة
-                const box = alertBox('warning', 'نُشرت رغم ملاحظات فحص القص:',
-                                     `${notes.flagTexts.join('، ') || 'ملاحظات على شكل الصورة'}. راجع الصورة المنشورة.`);
+                const box = alertBox('warning', 'انعتمدت رغم ملاحظات فحص القص:',
+                                     `${notes.flagTexts.join('، ') || 'ملاحظات على شكل الصورة'}. راجع الصورة المعتمدة.`);
                 if (notes.flags.length) box.setAttribute('title', notes.flags.join(' · '));
                 body.appendChild(box);
             }
             if (notes.bgSkipped) {
-                body.appendChild(alertBox('info', 'انتشرت بدون عزل الخلفية:',
-                                          'عزل الخلفية متوقف بالإعدادات، فالصورة انتشرت متل ما هي على لوحة بيضا.'));
+                body.appendChild(alertBox('info', 'انعتمدت بدون عزل الخلفية:',
+                                          'عزل الخلفية متوقف بالإعدادات، فالصورة انعتمدت متل ما هي على لوحة بيضا.'));
             }
             if (notes.bgFallback) {
                 body.appendChild(alertBox('info', 'عزل محلي:', `${notes.bgFallback.text}، فانعزلت بـ ${notes.bgFallback.local}. `
@@ -1462,7 +1462,7 @@
             body.appendChild(el('section', { className: 'rv-panel rv-final', dataset: { url: done.link } }, [
                 doneStage,
                 el('div', { className: 'rv-final__text' }, [
-                    el('strong', { className: 'rv-h3', text: 'الصورة المنشورة' }),
+                    el('strong', { className: 'rv-h3', text: 'الصورة المعتمدة' }),
                     themeToggle(doneStage),
                     pageGtinLine(done.pageGtin),
                     el('span', { text: 'بدك صورة غيرها؟ دوّر من جديد (كل بحث بيكلف من رصيد البحث).' }),

@@ -29,7 +29,7 @@
     var PUBLISH_CHECK_URL = '/api/system/publish-check';
     var LANES_URL = '/api/system/review-lanes';
     /* «دقة الاقتراحات الحقيقية»: the lanes of catalog_match.decide.pick_lane (HealthController::lanesPayload). */
-    var LANES = [['strict', 'عدّى كل قواعد النشر الآلي'], ['unsure', 'القارئ مش متأكد بس العنوان بيأكد'],
+    var LANES = [['strict', 'عدّى كل قواعد النشر الآلي'], ['unsure', 'الملصق مش واضح بس الاسم مطابق'],
         ['other', 'باقي الاقتراحات']];
 
     /* «فحص النشر»: the four steps of publish_check.py and the words of each status (HealthController::PUBLISH_STEP_*). */
@@ -394,7 +394,7 @@
             }
             if (isObject(prices)) {
                 note.push('الأسعار تقديرية: Serper ' + price(prices.serper_per_query) + ' لكل استعلام بيرد عليه، ونماذج القراءة '
-                    + 'حسب الـ tokens بأسعار تبويب «نماذج التحقق».');
+                    + 'حسب الاستهلاك بأسعار تبويب «نماذج التحقق».');
             }
         }
         if (lens && isObject(sourcePrices) && num(sourcePrices.lens_serpapi) !== null) {
@@ -661,7 +661,7 @@
                     deps.renderOps(opsView(state.report, state.windowName));
                 } else {
                     state.report = null;
-                    deps.renderOps({ kind: 'error', text: requestError(res, 'جسر بايثون أو قاعدة البيانات ما ردّ.') });
+                    deps.renderOps({ kind: 'error', text: requestError(res, 'ما قدرنا نوصل لبيانات النظام. جرّب بعد شوي، وإذا ضل بلّغ المطوّر.') });
                 }
             }, function () {
                 if (seq !== state.opsSeq) return;
@@ -1149,7 +1149,7 @@
             setHidden(grid, true);
             setHidden(empty, true);
             setHidden(error, false);
-            $('ops-error-text').textContent = view.text || 'جسر بايثون أو قاعدة البيانات ما ردّ.';
+            $('ops-error-text').textContent = view.text || 'ما قدرنا نوصل لبيانات النظام. جرّب بعد شوي، وإذا ضل بلّغ المطوّر.';
             return;
         }
         setHidden(error, true);

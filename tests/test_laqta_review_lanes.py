@@ -1,7 +1,7 @@
 """Lane badge, the «مؤكدة تماماً» filter and the progress line of the review screen.
 
 * every engine pick carries its lane (catalog_match.decide.lane_of, stored as 'lane:<name>' in the candidate's reasons);
-  the screen shows «مؤكدة تماماً» (strict, green) or «القارئ مش متأكد» (unsure) on a bulk card and in single mode,
+  the screen shows «مؤكدة تماماً» (strict, green) or «الملصق مش واضح» (unsure) on a bulk card and in single mode,
   and nothing for lane other / a plain candidate / a cache hit; the JS reading is the same as decide.lane_of;
 * the bulk filter «مؤكدة تماماً» keeps strict picks only;
 * the progress line at the top of bulk mode takes the strict lane's numbers from /api/system/review-lanes: accepted,
@@ -59,7 +59,7 @@ out.cards = document.querySelectorAll('.rv-card').map(c => [c.querySelector('.rv
     badges = {name: b for name, b in out["cards"]}
     assert badges["ALALI STRICT TUNA 170GM"] == [["مؤكدة تماماً", "strict", True]]
     assert badges["ALALI STRICT TUNA 85GM"] == [["مؤكدة تماماً", "strict", True]]
-    assert badges["ALALI UNSURE TUNA 170GM"] == [["القارئ مش متأكد", "unsure", False]]
+    assert badges["ALALI UNSURE TUNA 170GM"] == [["الملصق مش واضح", "unsure", False]]
     assert badges["ALALI OTHER TUNA 170GM"] == []                # lane other: no badge
     assert badges["ALALI PLAIN TUNA 170GM"] == []                # not stored with a lane / preselected reason
 
@@ -77,7 +77,7 @@ out.other = badge();
 openRow(55);
 out.plain = badge();
 """, tmp_path, lanes_fx())
-    assert out["strict"] == ["مؤكدة تماماً"] and out["unsure"] == ["القارئ مش متأكد"]
+    assert out["strict"] == ["مؤكدة تماماً"] and out["unsure"] == ["الملصق مش واضح"]
     assert out["other"] == [] and out["plain"] == []
 
 

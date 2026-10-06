@@ -222,13 +222,13 @@
         [/^processing_failed$/i, 'فشلت معالجة الصورة (عزل الخلفية).'],
         // مزوّد عزل الخلفية (image_processor: photoroom_* و removebg_*): ما انعزلت الخلفية فما نُشر شيء. الرصيد والمفتاح
         // والحصة (BG_SKIP_RE) بيفشّلوا كل اعتماد بنفس الشكل: اللوحة بتعرض «تجاوز عزل الخلفية»
-        [/^photoroom_402$/i, 'رصيد PhotoRoom خلص أو الاشتراك موقوف، فما انعزلت الخلفية وما انتشرت الصورة.'],
+        [/^photoroom_402$/i, 'رصيد PhotoRoom خلص أو الاشتراك موقوف، فما انعزلت الخلفية وما انعتمدت الصورة.'],
         [/^photoroom_(401|403)$/i, 'PhotoRoom رفض المفتاح، فما انعزلت الخلفية: حدّث مفتاح PhotoRoom بالإعدادات.'],
         [/^photoroom_429$/i, 'PhotoRoom رافض طلبات كتير هلق، فما انعزلت الخلفية: استنى دقيقة وأعد المحاولة.'],
         [/^photoroom_no_key$/i, 'مفتاح PhotoRoom مش محفوظ بالإعدادات، فما انعزلت الخلفية.'],
         [/^photoroom_(timeout|connection_error|5\d\d)$/i, 'PhotoRoom ما ردّ، فما انعزلت الخلفية: تأكد من الإنترنت وأعد المحاولة.'],
         [/^photoroom_/i, 'PhotoRoom رجّع خطأ، فما انعزلت الخلفية: أعد المحاولة.'],
-        [/^removebg_402$/i, 'رصيد remove.bg خلص، فما انعزلت الخلفية وما انتشرت الصورة.'],
+        [/^removebg_402$/i, 'رصيد remove.bg خلص، فما انعزلت الخلفية وما انعتمدت الصورة.'],
         [/^removebg_(401|403)$/i, 'remove.bg رفض المفتاح، فما انعزلت الخلفية: حدّث مفتاح remove.bg.'],
         [/^removebg_429$/i, 'remove.bg رافض طلبات كتير هلق، فما انعزلت الخلفية: استنى دقيقة وأعد المحاولة.'],
         [/^removebg_no_key$/i, 'مفتاح remove.bg مش محفوظ، فما انعزلت الخلفية.'],
@@ -916,10 +916,10 @@
         const anywayTexts = allowed ? Array.from(new Set(flags.map(f => PRESENTATION_FLAG_TEXT[f]))) : [];
         const what = texts.length ? texts.join('، ') : 'لم تُعزل الخلفية';
         const text = allowed
-            ? `فحص القص وجد في الصورة: ${what}. لم تُنشر بعد.`
+            ? `فحص القص لقى بالصورة: ${what}. ما انعتمدت بعد.`
             : code === 'quality_flags'
-                ? `فحص القص وجد في الصورة: ${what}. لم تُنشر؛ اختر صورة أخرى أو ارفع صورة أوضح.`
-                : `لم تُعزل خلفية الصورة (${what}). لم تُنشر؛ اختر صورة أخرى أو ارفع صورة أوضح.`;
+                ? `فحص القص لقى بالصورة: ${what}. ما انعتمدت؛ اختار صورة ثانية أو ارفع صورة أوضح.`
+                : `ما انعزلت خلفية الصورة (${what}). ما انعتمدت؛ اختار صورة ثانية أو ارفع صورة أوضح.`;
         return { code: code, flags: flags, texts: texts, anywayTexts: anywayTexts, allowed: allowed, text: text };
     }
 
@@ -1385,10 +1385,10 @@
     // فئة اختيار المحرك (catalog_match.decide.lane_of): strict | unsure | other، من سبب lane:<name> المحفوظ مع الاختيار،
     // ولاختيار حُفظ قبل الفئات من preselected: و auto_blocked: (نفس قاعدة بايثون). strict لا تجتمع مع تحذير مراجعة.
     // null لما ليس اختيار المحرك: مرشح عادي، أو اعتماد سابق من الكاش
-    const LANE_TEXT = { strict: 'مؤكدة تماماً', unsure: 'القارئ مش متأكد' };
+    const LANE_TEXT = { strict: 'مؤكدة تماماً', unsure: 'الملصق مش واضح' };
     const LANE_TITLE = {
         strict: 'اقتراح عدّى كل قواعد النشر الآلي بلا أي تحذير',
-        unsure: 'القارئ مش متأكد من الصورة، بس عنوان الصفحة بيأكد المنتج'
+        unsure: 'الملصق مش واضح بالصورة، بس اسم المنتج بالصفحة مطابق'
     };
     const LANE_SETTING_BLOCKERS = ['auto_publish_disabled', 'auto_publish_off_for_brand'];
 
