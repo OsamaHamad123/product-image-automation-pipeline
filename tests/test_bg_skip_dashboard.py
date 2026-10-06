@@ -407,11 +407,11 @@ out.retried = requests('/api/select_image').length;
                config={"row": 30, "bg": {"method": "photoroom", "previous": "photoroom", "confirm": "CONFIRM-SKIP"}})
     assert PROVIDER_TEXT[code] in out["text"] and code not in out["text"]
     assert "تجاوز عزل الخلفية…" in out["buttons"] and "أعد المحاولة" in out["buttons"]
-    assert out["confirms"] == ["CONFIRM-SKIP"] and out["saved"] == [{"method": "none"}]
+    assert out["confirms"] == ["تجاوز عزل الخلفية؟ CONFIRM-SKIP"] and out["saved"] == [{"method": "none"}]
     assert ["success", "عزل الخلفية متوقف: اضغط «أعد المحاولة» على الصور اللي ما مشيت لتنتشر متل ما هي على لوحة بيضا."] \
         in out["toasts"]
     assert "تجاوز عزل الخلفية…" not in out["afterButtons"]
-    assert "عزل الخلفية متوقف هلق: «أعد المحاولة» بينشرها متل ما هي." in out["after"]
+    assert "عزل الخلفية متوقف هلق: «أعد المحاولة» بيعتمدها متل ما هي." in out["after"]
     assert out["retried"] == 2                                            # «أعد المحاولة» sends the approval again
 
 

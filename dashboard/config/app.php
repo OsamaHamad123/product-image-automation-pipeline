@@ -68,6 +68,12 @@ return [
     'timezone' => env('APP_TIMEZONE', 'UTC'),
 
     /*
+    | لقطة: the zone every time the owner sees is shown in (Health, the review recap «اليوم», Home's greeting), and the
+    | zone of «today». The server keeps UTC; the pages say the shop's local time.
+    */
+    'display_timezone' => env('LAQTA_TIMEZONE', 'Asia/Dubai'),
+
+    /*
     |--------------------------------------------------------------------------
     | Application Locale Configuration
     |--------------------------------------------------------------------------

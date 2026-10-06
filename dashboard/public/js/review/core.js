@@ -1026,16 +1026,27 @@
         queued: 6, stale: 6, idle: 7, rejecting: 8, approving: 8, approved: 9
     };
 
-    // رقاقات قائمة المراجعة (?filter=)
+    // رقاقات المراجعة (?filter=): نفس المجموعة بوضع «منتج واحد» و«بالجملة»، والاختيار بيضل لما تبدّل الوضع.
+    // eligible: مقترحة من النظام بلا أي تحذير (اللي بينعتمدوا بالجملة)؛ strict: فئة «مؤكدة تماماً» (R.laneOf).
+    // waiting: الرقاقة من المنتظرة؛ بوضع الجملة الرقاقات الثانية (ما انلقت، أعطال، الخلفية) بتعرض بطاقات للفتح بس
     const FILTERS = [
-        { key: 'all', label: 'الكل', buckets: null },
-        { key: 'proposed', label: 'مقترحة', buckets: ['proposed', 'warning'] },
-        { key: 'warning', label: 'فيها تحذير', buckets: ['warning'] },
-        { key: 'none', label: 'بلا اقتراح', buckets: ['none'] },
+        { key: 'all', label: 'الكل', buckets: null, waiting: true },
+        { key: 'proposed', label: 'مقترحة', buckets: ['proposed', 'warning'], waiting: true },
+        { key: 'eligible', label: 'مقترحة بلا تحذير', test: it => WAITING.includes(it.bucket) && bulkEligible(storedSelected(it.product)),
+          waiting: true },
+        { key: 'strict', label: 'مؤكدة تماماً', test: it => WAITING.includes(it.bucket) && laneOf(storedSelected(it.product)) === 'strict',
+          waiting: true },
+        { key: 'warning', label: 'فيها تحذير', buckets: ['warning'], waiting: true },
+        { key: 'none', label: 'بلا اقتراح', buckets: ['none'], waiting: true },
         { key: 'not_found', label: 'ما انلقت', buckets: ['not_found'] },
         { key: 'failed', label: 'أعطال', buckets: ['failed'] },
         { key: 'bg_failed', label: 'الخلفية لم تُعزل', buckets: ['bg_failed'] }
     ];
+
+    function filterMatches(f, it) {
+        if (f.buckets) return f.buckets.includes(it.bucket);
+        return typeof f.test === 'function' ? !!f.test(it) : true;
+    }
 
     // ترتيب المنتظرة حسب الثقة: مقترحة من النظام بلا تحذير، ثم اختيار سابق بلا تحذير، ثم مقترحة فيها تحذير، ثم بلا
     // اقتراح؛ وفي كل درجة منتجات الماركة الواحدة متتالية (ثم رقم الصف)
@@ -1097,9 +1108,15 @@
     }
 
     function countBuckets(items) {
-        const c = { all: items.length, proposed: 0, warning: 0, none: 0, not_found: 0, failed: 0, bg_failed: 0, waiting: 0,
-                    approved: 0 };
+        const c = { all: items.length, proposed: 0, eligible: 0, strict: 0, warning: 0, none: 0, not_found: 0, failed: 0,
+                    bg_failed: 0, waiting: 0, approved: 0 };
+        const eligible = FILTERS.find(f => f.key === 'eligible');
+        const strict = FILTERS.find(f => f.key === 'strict');
         items.forEach(it => {
+            if (it.bucket === 'proposed' || it.bucket === 'warning') {
+                if (filterMatches(eligible, it)) c.eligible++;
+                if (filterMatches(strict, it)) c.strict++;
+            }
             if (it.bucket === 'proposed' || it.bucket === 'warning') c.proposed++;
             if (it.bucket === 'warning') c.warning++;
             if (it.bucket === 'none') c.none++;
@@ -1130,7 +1147,7 @@
     function filterItems(items, filterKey, query, keep, reason) {
         const f = FILTERS.find(x => x.key === filterKey) || FILTERS[0];
         const kept = it => !!(keep && keep.has(it.key)) && WAITING.includes(it.bucket);
-        return items.filter(it => (!f.buckets || f.buckets.includes(it.bucket) || kept(it)) && matchesQuery(it, query)
+        return items.filter(it => (filterMatches(f, it) || kept(it)) && matchesQuery(it, query)
             && (!reason || itemReasonKeys(it).includes(reason)));
     }
 
@@ -1406,7 +1423,7 @@
         searchBody, selectBody, rejectBody, uploadFields,
         matchQueue, classify, hasFinalImage, bgFailedLink, shownApprovedUrl, expectedState, sameExpected, staleInfo, queueText,
         sheetNote, expectedFromCurrent, qualityFlagText, qualityNoteText, qualityInfo, approvalNotes, rejectionOutcome,
-        confidenceRank, compareWaiting, sortWaiting, buildItems, countBuckets, matchesQuery, filterItems,
+        confidenceRank, compareWaiting, sortWaiting, buildItems, countBuckets, matchesQuery, filterItems, filterMatches,
         sizeText, categoryPath, factsFor, checksFor, cautionsFor
     });
 

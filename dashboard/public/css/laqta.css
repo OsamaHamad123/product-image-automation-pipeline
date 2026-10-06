@@ -91,10 +91,10 @@
     --lq-font-ui: 'Readex Pro', 'Noto Sans Arabic', sans-serif;
     --lq-font-display: 'Alexandria', 'Readex Pro', 'Noto Sans Arabic', sans-serif;
     --lq-font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
-    --lq-fs-xs: 11.5px;
-    --lq-fs-sm: 12.5px;
-    --lq-fs-md: 13.5px;
-    --lq-fs-base: 14px;
+    --lq-fs-xs: 13px;
+    --lq-fs-sm: 13px;
+    --lq-fs-md: 14px;
+    --lq-fs-base: 15px;
     --lq-fs-lg: 16px;
     --lq-fs-xl: 20px;
     --lq-fs-2xl: 26px;
@@ -132,6 +132,8 @@
 
     /* Shell */
     --lq-sidebar-width: 236px;
+    /* the bottom tab bar that replaces the sidebar at 980px and below (0 above it) */
+    --lq-tabbar-h: 0px;
 }
 
 /* ==========================================================================
@@ -413,13 +415,18 @@ html:has(.lq-body) {
     flex-grow: 1;
 }
 
+/* the tab bar's short label (980px and below) */
+.lq-nav__short {
+    display: none;
+}
+
 .lq-nav__badge {
     min-width: 22px;
     padding: 2px var(--lq-space-2);
     border-radius: var(--lq-radius-pill);
     background: var(--lq-saffron-500);
     color: var(--lq-saffron-ink);
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 600;
     line-height: 1.5;
     text-align: center;
@@ -454,7 +461,7 @@ html:has(.lq-body) {
 }
 
 .lq-runcard__title {
-    font-size: 12px;
+    font-size: 13px;
     color: var(--lq-ink-muted);
     white-space: nowrap;
 }
@@ -463,7 +470,7 @@ html:has(.lq-body) {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    font-size: 12px;
+    font-size: 13px;
     color: var(--lq-ink-muted);
     white-space: nowrap;
 }
@@ -508,7 +515,7 @@ html:has(.lq-body) {
 .lq-body .lq-runcard__link,
 .lq-runcard__link {
     align-self: flex-start;
-    font-size: 12px;
+    font-size: 13px;
     color: var(--lq-ink-muted);
     text-decoration: none;
 }
@@ -609,10 +616,10 @@ html:has(.lq-body) {
     font-weight: 600;
 }
 
-/* Sticky action bar at the bottom of a work screen */
+/* Sticky action bar at the bottom of a work screen (above the phone tab bar) */
 .lq-actionbar {
     position: sticky;
-    inset-block-end: 0;
+    inset-block-end: var(--lq-tabbar-h);
     display: flex;
     flex-wrap: wrap;
     align-items: center;
@@ -629,7 +636,7 @@ html:has(.lq-body) {
     flex-direction: column;
     align-items: flex-end;
     gap: 2px;
-    font-size: 12px;
+    font-size: 13px;
     color: var(--lq-text-3);
 }
 
@@ -1018,7 +1025,7 @@ a.lq-btn[aria-disabled="true"] {
     background: var(--lq-bg);
     color: var(--lq-text);
     font-family: inherit;
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 500;
     line-height: 1.3;
     text-align: center;
@@ -1253,12 +1260,12 @@ a.lq-btn[aria-disabled="true"] {
 }
 
 .lq-field__hint {
-    font-size: 12px;
+    font-size: 13px;
     color: var(--lq-text-3);
 }
 
 .lq-field__error {
-    font-size: 12px;
+    font-size: 13px;
     color: var(--lq-danger-text);
 }
 
@@ -1652,7 +1659,7 @@ a.lq-btn[aria-disabled="true"] {
 }
 
 .lq-progress-block__note {
-    font-size: 12px;
+    font-size: 13px;
     color: var(--lq-text-2);
 }
 
@@ -1965,7 +1972,7 @@ a.lq-btn[aria-disabled="true"] {
     padding: 0;
     color: var(--lq-ink-text);
     font-family: var(--lq-font-mono);
-    font-size: 12px;
+    font-size: 13px;
     line-height: 1.8;
     direction: ltr;
     text-align: left;
@@ -1981,54 +1988,103 @@ a.lq-btn[aria-disabled="true"] {
    15. Responsive: the shell stacks at 980px
    ========================================================================== */
 
+/* 980px and below: the sidebar becomes a bottom tab bar with the five destinations (icon over a short label); the
+   brand and the run card leave it (the Run page and Home show the run). Content keeps clear of it with
+   --lq-tabbar-h, which sticky bars at the bottom of a page add to their offset. */
 @media (max-width: 980px) {
+    :root {
+        --lq-tabbar-h: calc(64px + env(safe-area-inset-bottom, 0px));
+    }
+
     .lq-shell {
         flex-direction: column;
+        padding-block-end: var(--lq-tabbar-h);
     }
 
     .lq-sidebar {
+        position: fixed;
+        inset-inline: 0;
+        inset-block-end: 0;
+        z-index: 60;
         width: auto;
+        height: var(--lq-tabbar-h);
+        padding-block-end: env(safe-area-inset-bottom, 0px);
+        border-block-start: 1px solid var(--lq-ink-800);
     }
 
     .lq-sidebar__inner {
         position: static;
-        height: auto;
-        gap: 14px;
-        padding: 14px var(--lq-space-4);
+        height: 100%;
+        gap: 0;
+        padding: 0;
         overflow: visible;
+    }
+
+    .lq-sidebar .lq-brand,
+    .lq-sidebar__spacer,
+    .lq-sidebar .lq-runcard {
+        display: none;
     }
 
     .lq-nav {
         flex-direction: row;
-        gap: var(--lq-space-1);
-        margin-inline: calc(var(--lq-space-4) * -1);
-        padding-inline: var(--lq-space-4);
-        overflow-x: auto;
-        scrollbar-width: none;
-    }
-
-    .lq-nav::-webkit-scrollbar {
-        display: none;
+        align-items: stretch;
+        gap: 0;
+        height: 100%;
     }
 
     .lq-body .lq-nav__item,
     .lq-nav__item {
-        flex-shrink: 0;
-        gap: var(--lq-space-2);
-        padding: 9px var(--lq-space-3);
+        position: relative;
+        flex: 1 1 0;
+        flex-direction: column;
+        justify-content: center;
+        gap: 2px;
+        min-width: 0;
+        padding: 6px 2px;
+        border-radius: 0;
+        font-size: 13px;
+        line-height: 1.2;
+        text-align: center;
         white-space: nowrap;
+    }
+
+    .lq-body .lq-nav__item.is-active,
+    .lq-body .lq-nav__item[aria-current="page"],
+    .lq-nav__item.is-active,
+    .lq-nav__item[aria-current="page"] {
+        background: transparent;
+        color: var(--lq-running-on-dark);
+        box-shadow: inset 0 3px 0 var(--lq-running-on-dark);
     }
 
     .lq-nav__label {
         flex-grow: 0;
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
 
-    .lq-sidebar__spacer {
-        display: none;
+    /* a long label gives its place to its short form; the full one stays for screen readers */
+    .lq-nav__item:has(.lq-nav__short) .lq-nav__label {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip-path: inset(50%);
+        white-space: nowrap;
     }
 
-    .lq-runcard {
-        padding: var(--lq-space-3);
+    .lq-nav__short {
+        display: block;
+    }
+
+    .lq-nav__badge {
+        position: absolute;
+        inset-block-start: 4px;
+        inset-inline-start: calc(50% + 6px);
+        min-width: 20px;
+        padding: 0 5px;
     }
 
     .lq-main {
@@ -2061,7 +2117,7 @@ a.lq-btn[aria-disabled="true"] {
 
     .lq-toast-region {
         inset-inline: var(--lq-space-4);
-        inset-block-end: var(--lq-space-4);
+        inset-block-end: calc(var(--lq-space-4) + var(--lq-tabbar-h));
         align-items: stretch;
     }
 }

@@ -293,8 +293,8 @@ out.jobs = S().jobs.state().jobs.map(j => j.ctx.row_number);
 """, tmp_path, fixture(prods), config={"mode": "bulk"})
     assert out["missing"] == 2
     assert out["ticked"] == [10, 13] and out["disabled"] == [True, True]
-    assert out["label"] == "اعتماد 2 صور مقترحة بلا تحذير"
-    assert out["jobs"] == ["10", "13"] and "رح ننشر 2 صور مقترحة" in out["confirm"]
+    assert out["label"] == "اعتماد صورتين بلا تحذير"
+    assert out["jobs"] == ["10", "13"] and out["confirm"].startswith("اعتماد صورتين؟")
 
 
 @NEEDS_NODE
@@ -313,7 +313,8 @@ await flush();
 out.later = requests('/api/select_image').length + S().jobs.state().jobs.length;
 """, tmp_path, fixture(prods), config={"mode": "bulk", "approveSettleMs": 400})
     assert out["fast"] == ["10"]
-    assert out["later"] == 1 + 2                                # the third press (after the delay) approved card 11
+    # the third press (after the delay) approved card 11: two requests (two products may go out together), two jobs
+    assert out["later"] == 2 + 2
 
 
 # ---------------------------------------------------------------------------
@@ -431,7 +432,7 @@ ioRefresh();
 await flush();
 out.later = R.bulk.tickedKeys().length;
 """, tmp_path, fixture(prods))
-    assert out["ticked"] == 8 and out["label"] == "اعتماد 8 صور مقترحة بلا تحذير"
+    assert out["ticked"] == 8 and out["label"] == "اعتماد 8 صور بلا تحذير"
     assert "12 مقترحة بلا تحذير ما ظهرت صورتها لك بعد" in out["note"]
     assert "12 مقترحة ما ظهرت صورتها لك بعد، فما رح تنعتمد هلق" in out["confirm"]
     assert out["jobs"] == list(range(100, 108))

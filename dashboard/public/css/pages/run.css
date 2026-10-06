@@ -90,7 +90,7 @@
 .lq-run-advanced__hint {
     margin-bottom: 6px;
     padding-inline-start: 28px;
-    font-size: 12px;
+    font-size: 13px;
     line-height: 1.6;
     color: var(--lq-text-3);
 }
@@ -145,7 +145,7 @@
 }
 
 .lq-run-new__note {
-    font-size: 12px;
+    font-size: 13px;
     color: var(--lq-text-3);
 }
 
@@ -255,7 +255,7 @@
 
 .lq-run-stuck__what {
     margin: 6px 0 10px;
-    font-size: 12.5px;
+    font-size: 13px;
 }
 
 /* Latest results */
@@ -324,7 +324,7 @@
 }
 
 .lq-run-recent__ago {
-    font-size: 12px;
+    font-size: 13px;
     color: var(--lq-text-3);
     white-space: nowrap;
 }
@@ -395,14 +395,14 @@
     border-radius: var(--lq-radius-pill);
     background: var(--lq-warning-bg);
     color: var(--lq-warning-ink);
-    font-size: 12px;
+    font-size: 13px;
     text-align: center;
 }
 
 .lq-run-quality__brands {
     margin: 0;
     padding: 0 var(--lq-space-3) var(--lq-space-2);
-    font-size: 12px;
+    font-size: 13px;
     color: var(--lq-text-2);
 }
 
@@ -432,7 +432,7 @@
 .lq-run-quality__text,
 .lq-run-quality__more {
     color: var(--lq-text-2);
-    font-size: 12px;
+    font-size: 13px;
 }
 
 .lq-run-export__actions {
@@ -523,7 +523,7 @@
     border-radius: var(--lq-radius-pill);
     background: var(--lq-warning-bg);
     color: var(--lq-warning-ink);
-    font-size: 12px;
+    font-size: 13px;
 }
 
 .lq-run-brand__candidates {
@@ -543,7 +543,7 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     color: var(--lq-text-2);
-    font-size: 12px;
+    font-size: 13px;
 }
 
 .lq-run-brand__actions {
@@ -639,7 +639,7 @@
     display: flex;
     flex-wrap: wrap;
     gap: var(--lq-space-2);
-    font-size: 12px;
+    font-size: 13px;
     color: var(--lq-text-2);
 }
 
@@ -655,7 +655,7 @@
 }
 
 .lq-run-barcode__note {
-    font-size: 12px;
+    font-size: 13px;
     color: var(--lq-warning-ink);
 }
 

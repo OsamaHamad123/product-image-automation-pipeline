@@ -124,7 +124,8 @@
         return meta ? (meta.getAttribute('content') || meta.content || '') : '';
     }
 
-    // طلب JSON بمهلة وبنتيجة موحدة: { ok, status, data } — لا يرمي إلا عند الإلغاء (AbortError)
+    // طلب JSON بمهلة وبنتيجة موحدة: { ok, status, data } — لا يرمي إلا عند الإلغاء (AbortError).
+    // options.keepalive: الطلب بيكمل ولو انسكّرت الصفحة (اعتماد محجوز للتراجع وقت الصفحة تختفي)
     async function requestJson(url, options) {
         options = options || {};
         const headers = Object.assign({ Accept: 'application/json', 'X-CSRF-TOKEN': csrfToken() }, options.headers || {});
@@ -135,8 +136,10 @@
         }
         let res;
         try {
-            res = await fetch(url, { method: options.method || (body ? 'POST' : 'GET'), headers: headers, body: body,
-                                     signal: options.signal, credentials: 'same-origin', cache: 'no-store' });
+            const init = { method: options.method || (body ? 'POST' : 'GET'), headers: headers, body: body,
+                           signal: options.signal, credentials: 'same-origin', cache: 'no-store' };
+            if (options.keepalive) init.keepalive = true;
+            res = await fetch(url, init);
         } catch (err) {
             if (err && err.name === 'AbortError') throw err;
             return { ok: false, status: 0, data: { status: 'error', error: 'network' }, network: true };

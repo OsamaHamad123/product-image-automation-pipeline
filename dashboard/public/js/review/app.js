@@ -32,6 +32,15 @@
     };
 
     const LIST_PAGE = 150;
+    // «بالجملة» بيفتح لحاله لما يكون في هالعدد من الصور المقترحة بلا تحذير (والمراجع ما اختار وضع قبل)
+    const BULK_DEFAULT_MIN = 10;
+    // عرض الشاشة اللي تحته القائمة بتنزل تحت مساحة العمل (review.css @media (max-width: 980px))
+    const STACK_PX = 980;
+    // آخر وضع اختاره المراجع بزر «منتج واحد | بالجملة» (localStorage، لهالمتصفح بس)
+    const MODE_STORE = 'laqta.review.mode';
+    // طلبات الاعتماد اللي بتنبعت سوا: الخادم بيقفل كل منتج لحاله وقت الكتابة بالشيت (local_cache_db.sku_publish_lock)
+    // وكل كتابة بالشيت بتتأكد من هوية صفها، فاعتمادين لمنتجين مختلفين ما بيتداخلوا
+    const APPROVE_CONCURRENCY = 2;
 
     const S = R.S = {
         cfg: {},
@@ -66,10 +75,16 @@
         ws: { key: null, state: 'none' },
         reasonsOpen: false,
         listLimit: LIST_PAGE,
-        // bulk: selected / seen / loaded / failed / inView / unticked hold '<key>\n<pick url>' (a tick belongs to the picture)
-        bulk: { brand: '', filter: 'all', selected: new Set(), limit: 48, seeded: false, focus: null, autoTick: true,
+        // bulk: selected / seen / loaded / failed / inView / unticked hold '<key>\n<pick url>' (a tick belongs to the picture).
+        // The status filter is S.filter, shared with single mode (a mode switch keeps it)
+        bulk: { brand: '', selected: new Set(), limit: 48, seeded: false, focus: null, autoTick: true,
                 unticked: new Set(), seen: new Set(), loaded: new Set(), failed: new Set(), inView: new Set(), advancedAt: 0,
-                everSeen: new Set() },
+                everSeen: new Set(), anchor: null, startedAt: 0, reviewed: new Set() },
+        // the mode came from the URL (?mode=) or the reviewer's own toggle: no automatic choice over it
+        modeExplicit: false,
+        modeChosen: false,
+        // what the reviewer did today (this browser): the «all done» recap
+        today: { approved: 0, rejected: 0 },
         runDiff: 0,
         dom: {},
         jobs: null
@@ -89,6 +104,23 @@
     }
     R.kbd = kbd;
 
+    // «منتج واحد | بالجملة»: نفس الزر برأس الوضعين؛ التبديل بيحفظ الفلتر والماركة، وبيتذكّر آخر وضع اختاره المراجع
+    function modeToggle(current) {
+        const item = (mode, label, iconName) => el('button', {
+            type: 'button', className: 'lq-segmented__item rv-modes__item' + (mode === current ? ' is-active' : ''),
+            dataset: { mode: mode }, 'aria-pressed': mode === current ? 'true' : 'false'
+        }, [icon(iconName, 16), el('span', { text: label })]);
+        const box = el('div', { className: 'lq-segmented lq-segmented--sm rv-modes', role: 'group', 'aria-label': 'طريقة العرض' }, [
+            item('single', 'منتج واحد', 'image'), item('bulk', 'بالجملة', 'grid')
+        ]);
+        box.addEventListener('click', e => {
+            const b = e.target && e.target.closest ? e.target.closest('[data-mode]') : null;
+            if (b && b.getAttribute('data-mode') !== S.mode) chooseMode(b.getAttribute('data-mode'));
+        });
+        return box;
+    }
+    R.modeToggle = modeToggle;
+
     function buildShell(rootEl) {
         clear(rootEl);
         rootEl.removeAttribute('aria-busy');
@@ -99,21 +131,29 @@
         d.reasons = el('div', { className: 'rv-reasons', role: 'group', 'aria-label': 'سبب الرفض', hidden: true });
         d.approveBtn = el('button', { type: 'button', className: 'lq-btn lq-btn--primary lq-btn--lg rv-approve', id: 'rvApprove',
                                       'aria-keyshortcuts': 'Enter', disabled: true },
-                          [icon('check', 18, 2.2), el('span', { text: 'اعتماد ونشر' }), kbd('Enter')]);
+                          [icon('check', 18, 2.2), el('span', { text: 'اعتماد' }), kbd('Enter')]);
         d.rejectBtn = el('button', { type: 'button', className: 'lq-btn lq-btn--danger lq-btn--lg rv-reject', id: 'rvReject',
-                                     'aria-keyshortcuts': 'X', 'aria-expanded': 'false', disabled: true },
-                         [icon('x', 18, 2.2), el('span', { text: 'رفض' }), kbd('X')]);
+                                     'aria-keyshortcuts': 'X', 'aria-expanded': 'false', 'aria-label': 'رفض', disabled: true },
+                         [icon('x', 18, 2.2), el('span', { className: 'rv-reject__text', text: 'رفض' }), kbd('X')]);
         d.skipBtn = el('button', { type: 'button', className: 'lq-btn lq-btn--secondary lq-btn--lg rv-skip', id: 'rvSkip',
                                    'aria-keyshortcuts': 'S', disabled: true },
                        [el('span', { text: 'تخطي' }), kbd('S')]);
         d.nfBtn = el('button', { type: 'button', className: 'lq-btn lq-btn--ghost rv-nf-toggle', id: 'rvNotFoundToggle',
                                  'aria-expanded': 'false', disabled: true, text: 'ما لقيت الصورة الصحيحة؟' });
+        // على الموبايل: الشريط سطر واحد (اعتماد + أيقونة رفض)، و«تخطي» و«ما لقيت الصورة الصحيحة؟» بقائمة «⋯»
+        d.moreBtn = el('button', { type: 'button', className: 'lq-btn lq-btn--secondary lq-btn--lg rv-more', id: 'rvMore',
+                                   'aria-haspopup': 'true', 'aria-expanded': 'false', 'aria-controls': 'rvMoreMenu', 'aria-label': 'المزيد',
+                                   text: '⋯' });
+        d.moreSkip = el('button', { type: 'button', className: 'rv-menu__item', role: 'menuitem', text: 'تخطي هالمنتج' });
+        d.moreNf = el('button', { type: 'button', className: 'rv-menu__item', role: 'menuitem', text: 'ما لقيت الصورة الصحيحة؟' });
+        d.moreMenu = el('div', { className: 'rv-menu', id: 'rvMoreMenu', role: 'menu', hidden: true }, [d.moreSkip, d.moreNf]);
         d.nextName = bdi('', 'rv-next__name');
-        d.nextHint = el('span', { className: 'rv-next__hint', text: 'بعد الاعتماد بننتقل تلقائياً للمنتج التالي' });
+        d.nextHint = el('span', { className: 'rv-next__hint rv-keyhint', text: 'بعد الاعتماد بننتقل تلقائياً للمنتج التالي' });
         d.bar = el('div', { className: 'lq-actionbar rv-actionbar', id: 'rvActionbar' }, [
             d.reasons,
             el('div', { className: 'rv-actionbar__row' }, [
                 d.approveBtn, d.rejectBtn, d.skipBtn, d.nfBtn,
+                el('span', { className: 'rv-more__wrap' }, [d.moreBtn, d.moreMenu]),
                 el('span', { className: 'lq-actionbar__aside rv-next' }, [d.nextHint, d.nextName])
             ])
         ]);
@@ -128,29 +168,32 @@
         d.reasonChips = el('div', { className: 'rv-reasons-filter', role: 'group', 'aria-label': 'تصفية حسب سبب «بلا اقتراح»', hidden: true });
         d.queueNote = el('div', { className: 'rv-queue__note' });
         d.list = el('ul', { className: 'rv-list', id: 'rvList', 'aria-label': 'المنتجات' });
-        d.toBulk = el('a', { className: 'rv-queue__bulk', href: '?mode=bulk' }, [icon('grid', 16), el('span', { text: 'وضع الجملة' })]);
         d.queue = el('aside', { className: 'rv-queue', 'aria-label': 'قائمة المراجعة' }, [
             el('div', { className: 'rv-queue__head' }, [
                 el('div', { className: 'rv-queue__title' }, [
                     el('h1', { className: 'rv-queue__h1', text: 'قائمة المراجعة' }), d.waiting, d.refreshBtn
                 ]),
+                modeToggle('single'),
                 el('label', { className: 'lq-search rv-search' }, [icon('search', 18), el('span', { className: 'lq-sr-only', text: 'بحث بالقائمة' }), d.search]),
                 d.filters,
                 d.reasonChips,
                 d.queueNote
             ]),
             d.list,
-            el('div', { className: 'rv-queue__foot' }, [el('span', { text: '↑ ↓ للتنقل بين المنتجات' }), d.toBulk])
+            el('div', { className: 'rv-queue__foot rv-keyhint' }, [el('span', { text: '↑ ↓ للتنقل بين المنتجات · Z لتكبير الصورة · ? للاختصارات' })])
         ]);
         d.single = el('div', { className: 'rv-single' }, [d.ws, d.queue]);
 
         d.bulk = el('section', { className: 'rv-bulk', 'aria-label': 'المراجعة بالجملة', hidden: true });
         d.jobs = el('div', { className: 'rv-jobs', id: 'rvJobs', role: 'status', 'aria-live': 'polite', hidden: true });
+        // «تراجع» عن اعتماد لسا ما انبعت (jobs.js holdMs): فوق لوحة الاعتمادات بنفس المكان
+        d.undo = el('div', { className: 'rv-undo', id: 'rvUndo', role: 'status', 'aria-live': 'polite', hidden: true });
+        d.float = el('div', { className: 'rv-float' }, [d.undo, d.jobs]);
         d.dialog = el('div', { className: 'rv-dialog-backdrop', id: 'rvDialog', hidden: true });
 
         rootEl.appendChild(d.single);
         rootEl.appendChild(d.bulk);
-        rootEl.appendChild(d.jobs);
+        rootEl.appendChild(d.float);
         rootEl.appendChild(d.dialog);
 
         d.list.addEventListener('click', e => {
@@ -180,15 +223,48 @@
             }, 120);
         });
         d.refreshBtn.addEventListener('click', () => loadData({ refresh: true }));
-        d.toBulk.addEventListener('click', e => {
-            e.preventDefault();
-            setMode('bulk');
-        });
         d.approveBtn.addEventListener('click', () => R.single.approveCurrent());
         d.rejectBtn.addEventListener('click', () => (S.reasonsOpen ? R.single.closeReasons() : R.single.openReasons()));
         d.skipBtn.addEventListener('click', () => R.single.skip());
         d.nfBtn.addEventListener('click', () => R.single.toggleNotFound());
+        d.moreBtn.addEventListener('click', () => toggleMoreMenu());
+        d.moreSkip.addEventListener('click', () => {
+            toggleMoreMenu(false);
+            R.single.skip();
+        });
+        d.moreNf.addEventListener('click', () => {
+            toggleMoreMenu(false);
+            R.single.toggleNotFound();
+        });
+        document.addEventListener('click', e => {
+            if (!S.dom.moreMenu || S.dom.moreMenu.hidden) return;
+            const t = e.target;
+            if (t && t.closest && (t.closest('#rvMoreMenu') || t.closest('#rvMore'))) return;
+            toggleMoreMenu(false);
+        });
     }
+
+    // قائمة «⋯» بشريط الموبايل: «تخطي» و«ما لقيت الصورة الصحيحة؟»
+    function toggleMoreMenu(open) {
+        const d = S.dom;
+        if (!d.moreMenu) return false;
+        const want = open === undefined ? d.moreMenu.hidden : !!open;
+        if (!want && d.moreMenu.hidden) return false;
+        d.moreMenu.hidden = !want;
+        d.moreBtn.setAttribute('aria-expanded', want ? 'true' : 'false');
+        if (want) {
+            d.moreSkip.disabled = !!d.skipBtn.disabled;
+            d.moreNf.disabled = !!d.nfBtn.disabled;
+            d.moreNf.textContent = d.nfBtn.getAttribute('aria-expanded') === 'true' ? 'سكّر «ما لقيت الصورة الصحيحة؟»'
+                : 'ما لقيت الصورة الصحيحة؟';
+            const first = [d.moreSkip, d.moreNf].find(b => !b.disabled);
+            if (first && typeof first.focus === 'function') first.focus();
+        } else if (typeof d.moreBtn.focus === 'function' && d.moreMenu.contains(document.activeElement)) {
+            d.moreBtn.focus();
+        }
+        return true;
+    }
+    R.toggleMoreMenu = toggleMoreMenu;
 
     // -------------------------------------------------------------------------------------------------
     // Data
@@ -371,10 +447,19 @@
             S.reason = String(S.cfg.reason);
             if (!filter) filter = 'all';
         }
+        // الوضع: الرابط (?mode= أو ?row=) أولاً، بعده آخر وضع اختاره المراجع بنفسه، وإلا «بالجملة» لما يكون في 10 صور مقترحة
+        // بلا تحذير أو أكثر (شغل الـ 100+ منتج)
+        if (!S.modeExplicit && !S.modeChosen && S.load.state === 'ready') {
+            const want = c.eligible >= BULK_DEFAULT_MIN ? 'bulk' : 'single';
+            if (want !== S.mode) setMode(want, { auto: true });
+        }
         if (!filter) {
-            filter = c.proposed ? 'proposed' : c.none ? 'none' : c.bg_failed ? 'bg_failed' : c.not_found ? 'not_found'
+            filter = S.mode === 'bulk' ? (c.eligible ? 'eligible' : 'all')
+                : c.proposed ? 'proposed' : c.none ? 'none' : c.bg_failed ? 'bg_failed' : c.not_found ? 'not_found'
                 : c.failed ? 'failed' : 'all';
         }
+        // وضع الجملة بيعرض المنتظرة بس: رقاقة «ما انلقت» أو «أعطال» بتنفتح بوضع منتج واحد
+        if (S.mode === 'bulk' && !filterOf(filter).waiting) filter = 'all';
         S.filter = filter;
         let key = null;
         if (S.cfg.row) {
@@ -396,7 +481,13 @@
         }
         if (S.mode === 'single' && key) R.single.openItem(key, { from: 'initial', replaceUrl: !!S.cfg.row });
         else if (key) S.openKey = key;
+        if (S.mode === 'bulk') updateUrl(false);
     }
+
+    function filterOf(key) {
+        return R.FILTERS.find(f => f.key === key) || R.FILTERS[0];
+    }
+    R.filterOf = filterOf;
 
     // -------------------------------------------------------------------------------------------------
     // Queue column
@@ -407,6 +498,8 @@
     }
     R.visibleItems = visibleItems;
 
+    // رقاقة من المجموعة المشتركة بين الوضعين. بوضع الجملة رقاقة مش من المنتظرة (ما انلقت، أعطال، الخلفية) بتفتح وضع
+    // منتج واحد عليها، لأن كل منتج فيها بده شغل لحاله
     function setFilter(key) {
         if (!R.FILTERS.some(f => f.key === key)) return;
         if (S.filter !== key) {
@@ -415,6 +508,15 @@
         }
         S.filter = key;
         S.listLimit = LIST_PAGE;
+        if (S.mode === 'bulk') {
+            if (!filterOf(key).waiting) {
+                chooseMode('single');
+                return;
+            }
+            updateUrl(false);
+            R.bulk.onFilter();
+            return;
+        }
         updateUrl(false);
         renderList();
         const list = visibleItems();
@@ -515,6 +617,7 @@
     function renderList() {
         drawList();
         if (R.single && typeof R.single.updatePosition === 'function') R.single.updatePosition();
+        updateTitle();
     }
 
     function drawList() {
@@ -623,6 +726,38 @@
     }
     R.renderList = renderList;
 
+    // «خلصت المراجعة»: شو انعمل اليوم (review_decisions من queue-state، بتوقيت دبي) والخطوة الجاية، بدل صفحة فاضية.
+    // «اليوم: اعتمدت 87، رفضت 6، 4 ما انلقت»
+    function doneRecap() {
+        const t = S.queue && S.queue.today && typeof S.queue.today === 'object' ? S.queue.today : null;
+        const approved = t && isFinite(parseInt(t.approved, 10)) ? parseInt(t.approved, 10) : S.today.approved;
+        const rejected = t && isFinite(parseInt(t.rejected, 10)) ? parseInt(t.rejected, 10) : S.today.rejected;
+        const notFound = S.items.filter(it => it.bucket === 'not_found' && !it.orphan);
+        const parts = [`اعتمدت ${approved}`, `رفضت ${rejected}`];
+        if (notFound.length) parts.push(`${notFound.length} ما انلقت`);
+        const retryable = notFound.filter(it => it.product.has_error);
+        const actions = [];
+        if (retryable.length) {
+            actions.push(el('button', { type: 'button', className: 'lq-btn lq-btn--primary', id: 'rvRetryNotFound',
+                                        text: `رجّع اللي ما انلقت للطابور (${retryable.length})`,
+                                        onclick: () => R.single.retryFailures(retryable) }));
+        } else if (notFound.length) {
+            actions.push(el('button', { type: 'button', className: 'lq-btn lq-btn--secondary', text: `شوف اللي ما انلقت (${notFound.length})`,
+                                        onclick: () => setFilter('not_found') }));
+        }
+        actions.push(el('a', { className: 'lq-btn lq-btn--secondary', href: `${S.urls.run}#run-brands`, text: 'صلّح الماركات الناقصة' }));
+        actions.push(el('a', { className: 'lq-btn lq-btn--secondary', href: S.urls.run, text: 'تشغيل جديد' }));
+        return el('div', { className: 'lq-empty rv-empty rv-done', id: 'rvDone' }, [
+            el('span', { className: 'lq-empty__icon rv-done__icon' }, [icon('check', 24, 2.2)]),
+            el('h2', { className: 'lq-empty__title', text: 'خلصت المراجعة' }),
+            el('p', { className: 'lq-empty__text rv-done__today', text: `اليوم: ${parts.join('، ')}` }),
+            el('p', { className: 'lq-empty__text', text: retryable.length ? 'الخطوة الجاية: رجّع اللي ما انلقت للطابور، وصلّح الماركات الناقصة قبل التشغيل الجاي.'
+                : 'الخطوة الجاية: شغّل تشغيل جديد ليجيب نتائج جديدة.' }),
+            el('div', { className: 'lq-empty__actions' }, actions)
+        ]);
+    }
+    R.doneRecap = doneRecap;
+
     // يضمن أن عنصر المنتج المفتوح مرسوم في القائمة (التنقل بالأسهم بعد أول 150)
     function ensureListed(key) {
         const list = visibleItems();
@@ -635,15 +770,27 @@
     }
     R.ensureListed = ensureListed;
 
+    // القائمة تحت مساحة العمل (شاشة ضيقة): مش عمود جانبي بيتمرّر لحاله
+    function listStacked() {
+        try {
+            return !!(root.matchMedia && root.matchMedia(`(max-width: ${STACK_PX}px)`).matches);
+        } catch (e) {
+            return false;
+        }
+    }
+    R.listStacked = listStacked;
+
     function markActive() {
         const d = S.dom;
         if (!d.list) return;
+        // القائمة مكدّسة تحت مساحة العمل: scrollIntoView كان يمرّر الصفحة كلها لتحت (الصفحة تفتح على القائمة مش المنتج)
+        const scroll = !listStacked();
         d.list.querySelectorAll('.rv-item').forEach(node => {
             const on = node.getAttribute('data-key') === S.openKey;
             node.classList.toggle('is-active', on);
             if (on) {
                 node.setAttribute('aria-current', 'true');
-                if (typeof node.scrollIntoView === 'function') node.scrollIntoView({ block: 'nearest' });
+                if (scroll && typeof node.scrollIntoView === 'function') node.scrollIntoView({ block: 'nearest' });
             } else {
                 node.removeAttribute('aria-current');
             }
@@ -652,18 +799,62 @@
     R.markActive = markActive;
 
     // -------------------------------------------------------------------------------------------------
-    // Background approvals panel
+    // Background approvals panel, and «تراجع» while an approval is held (jobs.js holdMs)
     // -------------------------------------------------------------------------------------------------
 
     let jobsHideTimer = null;
+    let undoTicker = null;
+
+    // «صورة وحدة»، «صورتين»، «5 صور»، «12 صورة» (العدد بالعربي)
+    function imagesText(n) {
+        if (n === 1) return 'صورة وحدة';
+        if (n === 2) return 'صورتين';
+        return n >= 3 && n <= 10 ? `${n} صور` : `${n} صورة`;
+    }
+    R.imagesText = imagesText;
+
+    function renderUndo(st) {
+        const box = S.dom.undo;
+        if (!box) return;
+        clear(box);
+        const groups = st && st.held ? st.held.slice(-3).reverse() : [];
+        box.hidden = !groups.length;
+        clearInterval(undoTicker);
+        undoTicker = null;
+        if (!groups.length) return;
+        groups.forEach(g => {
+            const n = g.jobs.length;
+            const left = Math.max(0, Math.ceil((g.releaseAt - Date.now()) / 1000));
+            const what = n === 1 ? ['اعتمدت ', bdi(g.jobs[0].label || `صف ${g.jobs[0].row}`, 'rv-undo__name', 'auto')]
+                : [`اعتمدت ${imagesText(n)}`];
+            box.appendChild(el('div', { className: 'rv-undo__row', dataset: { group: String(g.group) } }, [
+                el('span', { className: 'rv-undo__ok' }, [icon('check', 18, 2.2)]),
+                el('span', { className: 'rv-undo__text' }, what.concat([
+                    el('span', { className: 'rv-undo__left', text: ` · بتنبعت بعد ${left} ث` })
+                ])),
+                el('button', { type: 'button', className: 'lq-btn lq-btn--secondary lq-btn--sm rv-undo__btn', dataset: { undo: String(g.group) },
+                               text: 'تراجع', onclick: () => S.jobs.cancel(g.group) })
+            ]));
+        });
+        // العدّ التنازلي: النص بس، بلا إعادة رسم الأزرار (التركيز ما بيضيع)
+        undoTicker = setInterval(() => {
+            box.querySelectorAll('.rv-undo__row').forEach(row => {
+                const g = groups.find(x => String(x.group) === row.getAttribute('data-group'));
+                const span = row.querySelector('.rv-undo__left');
+                if (g && span) span.textContent = ` · بتنبعت بعد ${Math.max(0, Math.ceil((g.releaseAt - Date.now()) / 1000))} ث`;
+            });
+        }, 500);
+    }
 
     function renderJobs(st) {
+        renderUndo(st);
         const box = S.dom.jobs;
         if (!box) return;
         clearTimeout(jobsHideTimer);
         clear(box);
         if (!st || !st.jobs.length) {
             box.hidden = true;
+            R.single.updateJobsOffset();
             return;
         }
         box.hidden = false;
@@ -671,12 +862,12 @@
         const onlyApprovals = st.batchJobs.every(j => j.type !== 'reject');
         const n = st.total;
         if (st.busy) {
-            const what = onlyApprovals ? `جاري اعتماد ${plural(n, 'صورة وحدة', 'صور')} بالخلفية` : `جاري تنفيذ ${plural(n, 'طلب واحد', 'طلبات')} بالخلفية`;
+            const what = onlyApprovals ? `جاري اعتماد ${imagesText(n)} بالخلفية` : `جاري تنفيذ ${plural(n, 'طلب واحد', 'طلبات')} بالخلفية`;
             box.appendChild(el('div', { className: 'rv-jobs__head' }, [
                 el('span', { className: 'lq-spinner', 'aria-hidden': 'true' }),
                 el('span', { className: 'rv-jobs__text' }, [
                     `${what} · `, el('strong', { text: `${st.settled} من ${n}` }), ' جاهزة. بتقدر تكمل شغلك.',
-                    st.failed ? el('span', { className: 'rv-jobs__bad', text: ` · ${st.failed} ما مشيت` }) : null
+                    st.failed ? el('span', { className: 'rv-jobs__bad', text: ` · ${st.failed} فشلت` }) : null
                 ])
             ]));
         } else if (!st.failedAll) {
@@ -686,28 +877,31 @@
                 el('button', { type: 'button', className: 'rv-jobs__close', 'aria-label': 'إغلاق', onclick: () => S.jobs.dismiss() }, [icon('x', 16, 2)])
             ]));
             jobsHideTimer = setTimeout(() => {
-                if (!S.jobs.busy() && !S.jobs.state().failedAll) S.jobs.dismiss();
+                if (!S.jobs.sending() && !S.jobs.state().failedAll) S.jobs.dismiss();
             }, 6000);
         } else {
             // اعتماد أو رفع ما مشي: «فحص النشر» بصفحة الصحة بيجرّب سلسلة النشر كاملة على صورة تجريبية ويقول وين وقفت
             const publishFailed = st.jobs.some(j => j.state === 'failed' && j.type !== 'reject');
             // رصيد أو مفتاح أو حصة PhotoRoom / remove.bg فشّل العزل (R.bgSkipCode): كل اعتماد رح يفشل بنفس الشكل، فاللوحة
-            // بتعرض «تجاوز عزل الخلفية» (نفس زر صفحة الصحة). عزل الخلفية متوقف: «أعد المحاولة» بينشرها متل ما هي
+            // بتعرض «تجاوز عزل الخلفية» (نفس زر صفحة الصحة). عزل الخلفية متوقف: «أعد المحاولة» بيعتمدها متل ما هي
             const bgFailed = st.jobs.some(j => j.state === 'failed' && j.type !== 'reject' && R.bgSkipCode(j.detail));
             const bg = S.cfg.bg && typeof S.cfg.bg === 'object' ? S.cfg.bg : {};
             const bgOff = bgFailed && bg.method === 'none';
+            // «انعتمد 3، ووحدة فشلت: أعد المحاولة»
+            const failText = st.failedAll === 1 ? 'وحدة فشلت' : `${st.failedAll} فشلت`;
+            const doneText = st.done > 0 ? `${onlyApprovals ? 'انعتمد' : 'خلص'} ${st.done}، و` : '';
             box.appendChild(el('div', { className: 'rv-jobs__head' }, [
                 el('span', { className: 'rv-jobs__warn' }, [icon('alert', 18, 2)]),
-                el('span', { className: 'rv-jobs__text', text: `خلصت: ${st.done} مشيت، و${plural(st.failedAll, 'وحدة ما مشيت', 'ما مشيت')}:` }),
+                el('span', { className: 'rv-jobs__text', text: `${doneText}${failText}: أعد المحاولة` }),
                 bgFailed && bg.method && !bgOff && S.urls.bgMethod
                     ? el('button', { type: 'button', className: 'lq-btn lq-btn--danger lq-btn--sm rv-jobs__skipbg', text: 'تجاوز عزل الخلفية…',
-                                     title: 'الصور بتنتشر متل ما هي على لوحة بيضا لحد ما ترجّع عزل الخلفية', disabled: !!S.bgSaving,
+                                     title: 'الصور بتنعتمد متل ما هي على لوحة بيضا لحد ما ترجّع عزل الخلفية', disabled: !!S.bgSaving,
                                      onclick: () => R.single.confirmBgSkip() })
                     : null,
-                bgOff ? el('span', { className: 'rv-jobs__bgoff', text: 'عزل الخلفية متوقف هلق: «أعد المحاولة» بينشرها متل ما هي.' }) : null,
+                bgOff ? el('span', { className: 'rv-jobs__bgoff', text: 'عزل الخلفية متوقف هلق: «أعد المحاولة» بيعتمدها متل ما هي.' }) : null,
                 publishFailed
                     ? el('a', { className: 'lq-btn lq-btn--secondary lq-btn--sm rv-jobs__check', href: S.urls.publishCheck,
-                                title: 'بيجرّب النشر كامل على صورة تجريبية وبيقلك وين وقف وشو تعمل', text: 'افحص النشر' })
+                                title: 'بيجرّب الاعتماد كامل على صورة تجريبية وبيقلك وين وقف وشو تعمل', text: 'افحص النشر' })
                     : null,
                 el('button', { type: 'button', className: 'rv-jobs__close', 'aria-label': 'إغلاق', onclick: () => S.jobs.dismiss() }, [icon('x', 16, 2)])
             ]));
@@ -722,10 +916,10 @@
                 ]),
                 // تغيّر المنتج بعد فتح الصفحة (C1): الإعادة كما هي تُرفض مرة أخرى؛ الاستبدال بتأكيد صريح فقط. صورة رفضها
                 // مراجع آخر لا تُستبدل ولا تُعاد (الخادم يرفضها دائماً): لا زر
-                // فحص القص (quality): علامات العرض تُنشر رغمها بتأكيد صريح فقط؛ عزل فشل لا يُنشر ولا يُعاد
+                // فحص القص (quality): علامات العرض تُعتمد رغمها بتأكيد صريح فقط؛ عزل فشل لا يُعتمد ولا يُعاد
                 j.quality
                     ? (j.quality.allowed
-                        ? el('button', { type: 'button', className: 'lq-btn lq-btn--danger lq-btn--sm rv-jobs__anyway', text: 'انشرها رغم ذلك…',
+                        ? el('button', { type: 'button', className: 'lq-btn lq-btn--danger lq-btn--sm rv-jobs__anyway', text: 'اعتمدها رغم هيك…',
                                          disabled: S.jobs.has(j.key), onclick: () => R.single.confirmPublishAnyway(j) })
                         : null)
                     : j.stale
@@ -739,11 +933,46 @@
         R.single.updateJobsOffset();
     }
 
+    // الصفحة مخفية (تبويب ثاني، التطبيق بالخلفية على الموبايل، أو عم تتسكّر)
+    function pageHidden() {
+        return !!(document && (document.visibilityState === 'hidden' || document.hidden === true));
+    }
+
+    // «تراجع»: الاعتمادات اللي لسا ما انبعتت بترجع متل ما كانت (ولا طلب وصل للخادم)
+    function undoApprovals(jobs) {
+        jobs.forEach(job => {
+            if (S.local.get(job.key) === 'approving') S.local.delete(job.key);
+            if (job.tick) S.bulk.selected.add(job.tick);
+            S.bulk.reviewed.delete(job.key);
+        });
+        rebuild();
+        if (S.mode === 'single') {
+            renderList();
+            // وضع منتج واحد: بنرجع للمنتج اللي تراجعت عنه
+            const back = jobs.length === 1 && S.byKey.get(jobs[0].key) ? jobs[0].key : null;
+            if (back) R.single.openItem(back, { from: 'undo' });
+            else {
+                R.single.renderWorkspace();
+                markActive();
+            }
+        } else {
+            renderList();
+            R.bulk.render();
+        }
+        R.toast(jobs.length === 1 ? 'تراجعت: ما انعتمدت.' : `تراجعت: ما انعتمد ولا وحدة من ${imagesText(jobs.length)}.`, 'info');
+    }
+
     function setupJobs() {
         S.jobs = R.createJobQueue({
-            send: job => R.single.sendJob(job),
+            concurrency: APPROVE_CONCURRENCY,
+            // نفس المنتج (sku_key) ما بيتعتمد بطلبين سوا ولو كان بصفين بالشيت
+            conflictKey: job => (job.ctx && job.ctx.sku_key) || null,
+            send: (job, opts) => R.single.sendJob(job, opts),
+            bodySize: job => R.single.jobBodySize(job),
+            hidden: pageHidden,
             onSettle: job => R.single.settleJob(job),
             onDrain: () => loadData({ quiet: true }),
+            onCancel: undoApprovals,
             canRetry: job => S.local.get(job.key) !== 'approved',
             // طلب يُعاد: منتجه «جاري الاعتماد» (أو «جاري الرفض») من جديد، فلا يظهر بانتظار المراجعة وهو عم ينعتمد
             onRetry: job => {
@@ -761,6 +990,16 @@
             },
             onUpdate: renderJobs
         });
+        // اعتماد محجوز للتراجع ما بيضيع أبداً: لما الصفحة تختفي (تبويب ثاني، قفل الموبايل، أو عم تتسكّر) كل محجوز بينبعت
+        // هلق بـ fetch keepalive لنفس الـ endpoint، والمتصفح بيكمّل الطلب ولو انسكّرت الصفحة. visibilitychange بيوصل قبل
+        // pagehide بكل المتصفحات (وهو الوحيد الموثوق على الموبايل)، و pagehide للاحتياط. اللي ما وسعته ميزانية keepalive
+        // (64KB) بيضل بالدور، و beforeunload بيسأل قبل ما تطلع
+        document.addEventListener('visibilitychange', () => {
+            if (pageHidden() && S.jobs) S.jobs.flush();
+        });
+        root.addEventListener('pagehide', () => {
+            if (S.jobs) S.jobs.flush();
+        });
         root.addEventListener('beforeunload', e => {
             if (S.jobs && S.jobs.busy()) {
                 e.preventDefault();
@@ -777,10 +1016,14 @@
 
     function currentParams() {
         const params = new URLSearchParams();
-        if (S.mode === 'bulk') params.set('mode', 'bulk');
-        else if (S.openKey && S.byKey.get(S.openKey)) params.set('row', String(S.byKey.get(S.openKey).product.row_number));
-        if (S.mode === 'single' && S.filter) params.set('filter', S.filter);
-        if (S.mode === 'single' && S.reason) params.set('reason', S.reason);
+        if (S.mode === 'bulk') {
+            params.set('mode', 'bulk');
+            if (S.filter && S.filter !== 'all') params.set('filter', S.filter);
+            return params;
+        }
+        if (S.openKey && S.byKey.get(S.openKey)) params.set('row', String(S.byKey.get(S.openKey).product.row_number));
+        if (S.filter) params.set('filter', S.filter);
+        if (S.reason) params.set('reason', S.reason);
         return params;
     }
 
@@ -797,6 +1040,28 @@
     }
     R.updateUrl = updateUrl;
 
+    function readStoredMode() {
+        try {
+            const v = root.localStorage ? root.localStorage.getItem(MODE_STORE) : null;
+            return v === 'single' || v === 'bulk' ? v : null;
+        } catch (e) {
+            return null;      // نافذة خاصة أو تخزين ممنوع: الصفحة بتشتغل بدونه
+        }
+    }
+
+    // المراجع ضغط «منتج واحد» أو «بالجملة»: الوضع بينحفظ لهالمتصفح، والفلتر والماركة بيضلّوا
+    function chooseMode(mode, opts) {
+        if (!['single', 'bulk'].includes(mode)) return;
+        S.modeChosen = true;
+        try {
+            if (root.localStorage) root.localStorage.setItem(MODE_STORE, mode);
+        } catch (e) {
+            // تخزين ممنوع: الاختيار بيضل لهالجلسة بس
+        }
+        setMode(mode, opts);
+    }
+    R.chooseMode = chooseMode;
+
     function setMode(mode, opts) {
         opts = opts || {};
         if (!['single', 'bulk'].includes(mode)) return;
@@ -805,19 +1070,31 @@
         d.root.setAttribute('data-mode', mode);
         d.single.hidden = mode !== 'single';
         d.bulk.hidden = mode !== 'bulk';
+        d.root.querySelectorAll('.rv-modes__item').forEach(b => {
+            const on = b.getAttribute('data-mode') === mode;
+            b.classList.toggle('is-active', on);
+            b.setAttribute('aria-pressed', on ? 'true' : 'false');
+        });
         R.single.closeReasons();
+        toggleMoreMenu(false);
+        // وضع الجملة بيعرض المنتظرة بس
+        if (mode === 'bulk' && !filterOf(S.filter).waiting) {
+            S.filter = 'all';
+            S.reason = '';
+        }
         if (mode === 'single') {
             const key = opts.key || S.openKey || (visibleItems()[0] || {}).key;
             if (opts.key && !visibleItems().some(it => it.key === opts.key)) S.filter = 'all';
             renderList();
-            if (key) R.single.openItem(key, { from: 'mode', noUrl: true });
+            if (key && S.byKey.get(key)) R.single.openItem(key, { from: 'mode', noUrl: true });
             else R.single.renderWorkspace();
         } else {
+            renderList();
             R.bulk.render();
         }
-        if (!opts.fromPop) updateUrl(true);
+        if (!opts.fromPop) updateUrl(!opts.auto);
         R.single.updateJobsOffset();
-        if (typeof root.scrollTo === 'function') root.scrollTo(0, 0);
+        if (!opts.auto && typeof root.scrollTo === 'function') root.scrollTo(0, 0);
     }
     R.setMode = setMode;
 
@@ -825,6 +1102,8 @@
         const params = new URLSearchParams(root.location.search);
         const mode = params.get('mode') === 'bulk' ? 'bulk' : 'single';
         const row = parseInt(params.get('row') || '', 10);
+        const filter = params.get('filter');
+        if (filter && R.FILTERS.some(f => f.key === filter)) S.filter = filter;
         const it = row ? S.items.find(x => parseInt(x.product.row_number, 10) === row) : null;
         setMode(mode, { fromPop: true, key: it ? it.key : null });
     }
@@ -837,50 +1116,130 @@
         } else {
             R.bulk.render();
         }
+        updateTitle();
     }
     R.renderAll = renderAll;
 
+    // عنوان التبويب: «(12) المراجعة · لقطة» بعدد المنتظرة (نفس رقم الشارة)
+    let baseTitle = null;
+    function updateTitle() {
+        if (!document || typeof document.title !== 'string') return;
+        if (baseTitle === null) baseTitle = document.title.replace(/^\(\d+\)\s*/, '');
+        const n = S.load.state === 'ready' ? S.counts.waiting : 0;
+        document.title = n > 0 ? `(${n}) ${baseTitle}` : baseTitle;
+    }
+
     // -------------------------------------------------------------------------------------------------
-    // A confirmation that shows images (replace an approval): resolves true / false
+    // Confirmations: askDialog (with images, e.g. replace an approval) and R.ask (a plain question, every former
+    // window.confirm of the review screen). Enter confirms, Esc cancels, Tab stays inside, and the focus goes back to
+    // where it was. Resolves true / false
     // -------------------------------------------------------------------------------------------------
 
     let activeDialog = null;
+    // Enter بعد فتح السؤال بهالمدة بس: ضغطة Enter ثانية سريعة (اللي فتحت السؤال) ما بتأكد شي ما قراه المراجع
+    const DIALOG_ENTER_GUARD_MS = 400;
+
+    function focusables(box) {
+        if (!box || typeof box.querySelectorAll !== 'function') return [];
+        return Array.from(box.querySelectorAll('button, a, input, select, textarea'))
+            .filter(n => !n.disabled && !n.hidden && n.getAttribute('tabindex') !== '-1');
+    }
+
+    // Tab و Shift+Tab بيلفّوا جوّا الصندوق
+    function trapTab(e, box) {
+        const list = focusables(box);
+        if (!list.length) return;
+        const i = list.indexOf(document.activeElement);
+        const next = e.shiftKey ? (i <= 0 ? list.length - 1 : i - 1) : (i < 0 || i === list.length - 1 ? 0 : i + 1);
+        e.preventDefault();
+        if (typeof list[next].focus === 'function') list[next].focus();
+    }
+    R.trapTab = trapTab;
+
+    function restoreFocus(node) {
+        if (node && node.isConnected !== false && typeof node.focus === 'function') {
+            try {
+                node.focus();
+            } catch (e) {
+                // the opener was redrawn: nothing to give the focus back to
+            }
+        }
+    }
+    R.restoreFocus = restoreFocus;
 
     function askDialog(opts) {
         opts = opts || {};
         if (activeDialog) activeDialog.finish(false);
         const d = S.dom;
+        const opener = document.activeElement;
         return new Promise(resolve => {
-            const dlg = {};
+            const dlg = { openedAt: Date.now(), kind: opts.kind || 'dialog' };
             dlg.finish = ok => {
                 if (activeDialog !== dlg) return;
                 activeDialog = null;
                 clear(d.dialog);
                 d.dialog.hidden = true;
+                restoreFocus(opener);
                 resolve(!!ok);
             };
             activeDialog = dlg;
             const yes = el('button', { type: 'button', id: 'rvAskConfirm', text: opts.confirmText || 'متأكد',
                                        className: 'lq-btn ' + (opts.danger ? 'lq-btn--danger-solid' : 'lq-btn--primary'),
                                        onclick: () => dlg.finish(true) });
-            const no = el('button', { type: 'button', id: 'rvAskCancel', className: 'lq-btn lq-btn--secondary',
-                                      text: opts.cancelText || 'إلغاء', onclick: () => dlg.finish(false) });
+            const no = opts.noCancel ? null : el('button', { type: 'button', id: 'rvAskCancel', className: 'lq-btn lq-btn--secondary',
+                                                             text: opts.cancelText || 'إلغاء', onclick: () => dlg.finish(false) });
             const images = (opts.images || []).filter(im => im && im.url);
             clear(d.dialog);
-            d.dialog.appendChild(el('div', { className: 'rv-dialog', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'rvAskTitle' }, [
+            dlg.box = el('div', { className: 'rv-dialog' + (opts.wide ? ' rv-dialog--wide' : ''), role: opts.noCancel ? 'dialog' : 'alertdialog',
+                                  'aria-modal': 'true', 'aria-labelledby': 'rvAskTitle', 'aria-describedby': 'rvAskText' }, [
                 el('h2', { className: 'rv-dialog__title', id: 'rvAskTitle', text: opts.title || '' }),
                 images.length ? el('div', { className: 'rv-dialog__images' }, images.map(im => el('figure', { className: 'rv-dialog__figure' }, [
                     el('div', { className: 'rv-dialog__img' }, [R.img(im.url, im.caption || '', S.urls.imageProxy)]),
                     el('figcaption', { className: 'rv-dialog__cap' }, [bdi(im.caption || '', null, 'auto')])
                 ]))) : null,
-                el('p', { className: 'rv-dialog__text', text: opts.text || '' }),
+                opts.text ? el('p', { className: 'rv-dialog__text', id: 'rvAskText', text: opts.text }) : null,
+                opts.body || null,
                 el('div', { className: 'rv-dialog__actions' }, [yes, no])
-            ]));
+            ]);
+            d.dialog.appendChild(dlg.box);
             d.dialog.hidden = false;
-            if (typeof no.focus === 'function') no.focus();
+            if (typeof yes.focus === 'function') yes.focus();
         });
     }
     R.askDialog = askDialog;
+
+    // سؤال قصير بدل window.confirm: { title, text, confirmText, cancelText, danger }، أو نص لحاله
+    function ask(opts) {
+        if (typeof opts === 'string') opts = { title: opts };
+        return R.askDialog(Object.assign({ kind: 'confirm' }, opts || {}));
+    }
+    R.ask = ask;
+
+    // مفاتيح السؤال المفتوح: Enter يأكد (مش التكرار، ومش أول لحظة بعد فتحه)، Esc يلغي، Tab يضل جوّا
+    function dialogKey(e, key) {
+        if (!activeDialog) return false;
+        if (key === 'Escape') {
+            e.preventDefault();
+            activeDialog.finish(false);
+            return true;
+        }
+        if (key === 'Tab') {
+            trapTab(e, activeDialog.box);
+            return true;
+        }
+        if (key === 'Enter') {
+            e.preventDefault();
+            const t = document.activeElement;
+            // Enter على «إلغاء» المركّز = إلغاء (متل ما بيتوقع المتصفح)
+            if (t && t.id === 'rvAskCancel') {
+                activeDialog.finish(false);
+                return true;
+            }
+            if (!e.repeat && Date.now() - activeDialog.openedAt >= DIALOG_ENTER_GUARD_MS) activeDialog.finish(true);
+            return true;
+        }
+        return true;      // باقي المفاتيح ما بتوصل للصفحة تحت السؤال
+    }
 
     function closeAskDialog() {
         if (!activeDialog) return false;
@@ -890,33 +1249,278 @@
     R.closeAskDialog = closeAskDialog;
     R.dialogActive = () => !!activeDialog;
 
+    // «?»: الاختصارات حسب الوضع
+    const SHORTCUTS = {
+        single: [
+            ['Enter', 'اعتماد الصورة المختارة'], ['X', 'رفض (وبعدها 1–9 للسبب)'], ['S', 'تخطي للمنتج التالي'],
+            ['↑ ↓', 'المنتج اللي قبل / بعد'], ['1–9', 'اختيار صورة من تحت (بدون اعتماد)'], ['Z', 'تكبير الصورة ومقارنتها بالشيت'],
+            ['Esc', 'سكّر أي نافذة'], ['?', 'هالقائمة']
+        ],
+        bulk: [
+            ['← → ↑ ↓', 'التنقل بين البطاقات'], ['مسافة', 'تحديد البطاقة'], ['Shift + ضغطة', 'تحديد كل اللي بيناتهم'],
+            ['A', 'اعتماد البطاقة'], ['Shift+A', 'اعتماد المحددة بلا تحذير'], ['R أو X', 'رفض البطاقة (وبعدها 1–7 للسبب)'],
+            ['Z', 'تكبير الصورة ومقارنتها بالشيت'], ['Esc', 'سكّر أي نافذة'], ['?', 'هالقائمة']
+        ]
+    };
+
+    function showShortcuts() {
+        const rows = SHORTCUTS[S.mode] || SHORTCUTS.single;
+        const body = el('dl', { className: 'rv-keys' }, rows.reduce((acc, [k, v]) => acc.concat([
+            el('dt', { className: 'rv-keys__k' }, [kbd(k)]), el('dd', { className: 'rv-keys__v', text: v })
+        ]), []));
+        return R.askDialog({ title: 'اختصارات لوحة المفاتيح', body: body, confirmText: 'تمام', noCancel: true, kind: 'keys' });
+    }
+    R.showShortcuts = showShortcuts;
+
     // -------------------------------------------------------------------------------------------------
-    // Keyboard: ↑ ↓ move, 1–9 select (never publish), Enter approves the visible selected image, X reject, S skip.
-    // Bulk mode (bulk.js onKey): arrows move between cards, Space ticks the focused card, A approves it (after its
-    // warnings), Shift+A is the «approve the pre-selected ones without a warning» button.
-    // Ctrl / Cmd / Alt combinations and typing in a field are left to the browser.
+    // Lightbox: the pick large, beside the image in the sheet now. Wheel / pinch / double-click zoom, drag to pan,
+    // ← → across the candidates (RTL: ← is the next one), Esc closes and the focus goes back to the opener
+    // -------------------------------------------------------------------------------------------------
+
+    const LB_MAX = 6;
+    let lightbox = null;
+
+    // opts: { items: [{ url, caption, note }], index, compare: { url, caption } | (index) => that, title,
+    //         onChoose(index) (optional «اختارها»), chosen(index) → bool }
+    function openLightbox(opts) {
+        opts = opts || {};
+        const items = (opts.items || []).filter(it => it && it.url);
+        if (!items.length) return false;
+        closeLightbox(true);
+        const opener = document.activeElement;
+        const lb = { items: items, index: Math.min(Math.max(0, opts.index || 0), items.length - 1), opener: opener, opts: opts,
+                     scale: 1, x: 0, y: 0, pointers: new Map(), pinch: null, drag: null };
+        lightbox = lb;
+        lb.stage = el('div', { className: 'rv-lb__stage' });
+        lb.caption = el('div', { className: 'rv-lb__caption' });
+        lb.count = el('span', { className: 'rv-lb__count', 'aria-live': 'polite' });
+        lb.side = el('aside', { className: 'rv-lb__side', 'aria-label': 'الصورة الحالية بالشيت' });
+        lb.prev = el('button', { type: 'button', className: 'rv-lb__nav rv-lb__nav--prev', 'aria-label': 'الصورة اللي قبل', title: 'اللي قبل (→)',
+                                 onclick: () => stepLightbox(-1) }, [icon('arrow-left', 22, 2)]);
+        lb.next = el('button', { type: 'button', className: 'rv-lb__nav rv-lb__nav--next', 'aria-label': 'الصورة اللي بعد', title: 'اللي بعد (←)',
+                                 onclick: () => stepLightbox(1) }, [icon('arrow-left', 22, 2)]);
+        lb.choose = opts.onChoose ? el('button', { type: 'button', className: 'lq-btn lq-btn--primary lq-btn--sm rv-lb__choose', id: 'rvLbChoose',
+                                                   text: 'اختارها', onclick: () => {
+                                                       const i = lb.index;
+                                                       closeLightbox();
+                                                       opts.onChoose(i);
+                                                   } }) : null;
+        lb.close = el('button', { type: 'button', className: 'rv-lb__close', id: 'rvLbClose', 'aria-label': 'سكّر (Esc)',
+                                  onclick: () => closeLightbox() }, [icon('x', 22, 2)]);
+        lb.box = el('div', { className: 'rv-lb', id: 'rvLightbox', role: 'dialog', 'aria-modal': 'true', 'aria-label': opts.title || 'تكبير الصورة' }, [
+            el('div', { className: 'rv-lb__bar' }, [
+                el('strong', { className: 'rv-lb__title' }, [bdi(opts.title || '', null, 'auto')]), lb.count,
+                el('span', { className: 'rv-lb__hint rv-keyhint', text: 'دولاب الماوس أو قرصة للتكبير · ← → للتنقل' }),
+                lb.choose, lb.close
+            ]),
+            el('div', { className: 'rv-lb__body' }, [
+                el('div', { className: 'rv-lb__main' }, [lb.stage, lb.prev, lb.next, lb.caption]),
+                lb.side
+            ])
+        ]);
+        lb.box.addEventListener('click', e => {
+            if (e.target === lb.box) closeLightbox();
+        });
+        lb.stage.addEventListener('wheel', e => {
+            e.preventDefault();
+            zoomLightbox(e.deltaY < 0 ? 1.2 : 1 / 1.2);
+        }, { passive: false });
+        lb.stage.addEventListener('dblclick', () => zoomLightbox(lb.scale > 1 ? 0 : 2.5));
+        lb.stage.addEventListener('pointerdown', e => {
+            lb.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+            if (typeof lb.stage.setPointerCapture === 'function') {
+                try {
+                    lb.stage.setPointerCapture(e.pointerId);
+                } catch (err) {
+                    // a synthetic pointer: no capture
+                }
+            }
+            if (lb.pointers.size === 2) {
+                const [a, b] = Array.from(lb.pointers.values());
+                lb.pinch = { dist: Math.hypot(a.x - b.x, a.y - b.y) || 1, scale: lb.scale };
+                lb.drag = null;
+            } else if (lb.pointers.size === 1 && lb.scale > 1) {
+                lb.drag = { x: e.clientX - lb.x, y: e.clientY - lb.y };
+            }
+        });
+        lb.stage.addEventListener('pointermove', e => {
+            if (!lb.pointers.has(e.pointerId)) return;
+            lb.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+            if (lb.pinch && lb.pointers.size === 2) {
+                const [a, b] = Array.from(lb.pointers.values());
+                setZoom(lb.pinch.scale * (Math.hypot(a.x - b.x, a.y - b.y) / lb.pinch.dist));
+            } else if (lb.drag) {
+                lb.x = e.clientX - lb.drag.x;
+                lb.y = e.clientY - lb.drag.y;
+                applyZoom();
+            }
+        });
+        const up = e => {
+            lb.pointers.delete(e.pointerId);
+            if (lb.pointers.size < 2) lb.pinch = null;
+            if (!lb.pointers.size) lb.drag = null;
+        };
+        lb.stage.addEventListener('pointerup', up);
+        lb.stage.addEventListener('pointercancel', up);
+        S.dom.root.appendChild(lb.box);
+        if (document.body && document.body.classList) document.body.classList.add('rv-lb-open');
+        drawLightbox();
+        if (typeof lb.close.focus === 'function') lb.close.focus();
+        return true;
+    }
+    R.openLightbox = openLightbox;
+
+    function drawLightbox() {
+        const lb = lightbox;
+        if (!lb) return;
+        const it = lb.items[lb.index];
+        lb.scale = 1;
+        lb.x = 0;
+        lb.y = 0;
+        clear(lb.stage);
+        lb.img = R.img(it.url, it.caption || '', S.urls.imageProxy, 'rv-lb__img');
+        if (lb.img && lb.img.setAttribute) {
+            lb.img.setAttribute('draggable', 'false');
+            lb.img.removeAttribute('loading');
+        }
+        lb.stage.appendChild(lb.img);
+        applyZoom();
+        clear(lb.caption);
+        if (it.caption) lb.caption.appendChild(bdi(it.caption, 'rv-lb__cap', 'auto'));
+        if (it.note) lb.caption.appendChild(el('span', { className: 'rv-lb__note', text: it.note }));
+        if (lb.opts.chosen && lb.opts.chosen(lb.index)) lb.caption.appendChild(el('span', { className: 'rv-badge', text: 'المختارة' }));
+        lb.count.textContent = lb.items.length > 1 ? `${lb.index + 1} من ${lb.items.length}` : '';
+        lb.prev.disabled = lb.index === 0;
+        lb.next.disabled = lb.index === lb.items.length - 1;
+        lb.prev.hidden = lb.next.hidden = lb.items.length < 2;
+        const cmp = typeof lb.opts.compare === 'function' ? lb.opts.compare(lb.index) : lb.opts.compare;
+        clear(lb.side);
+        lb.side.appendChild(el('span', { className: 'rv-lb__side-k', text: (cmp && cmp.caption) || 'الصورة الحالية بالشيت' }));
+        lb.side.appendChild(cmp && cmp.url
+            ? el('div', { className: 'rv-lb__cmp' }, [R.img(cmp.url, 'الصورة الحالية بالشيت', S.urls.imageProxy)])
+            : el('div', { className: 'rv-lb__cmp is-empty' }, [icon('image', 22), el('span', { text: 'ما في صورة بالشيت' })]));
+        if (lb.choose) lb.choose.hidden = !!(lb.opts.chosen && lb.opts.chosen(lb.index));
+    }
+
+    function applyZoom() {
+        const lb = lightbox;
+        if (!lb || !lb.img || !lb.img.style) return;
+        if (lb.scale <= 1) {
+            lb.x = 0;
+            lb.y = 0;
+        }
+        lb.img.style.transform = `translate(${lb.x}px, ${lb.y}px) scale(${lb.scale})`;
+        if (lb.stage.classList) lb.stage.classList.toggle('is-zoomed', lb.scale > 1);
+    }
+
+    function setZoom(s) {
+        if (!lightbox) return;
+        lightbox.scale = Math.min(LB_MAX, Math.max(1, s));
+        applyZoom();
+    }
+
+    // factor 0: رجوع للحجم الطبيعي
+    function zoomLightbox(factor) {
+        if (!lightbox) return;
+        setZoom(factor === 0 ? 1 : (factor >= 2 && lightbox.scale === 1 ? factor : lightbox.scale * factor));
+    }
+
+    function stepLightbox(delta) {
+        const lb = lightbox;
+        if (!lb) return false;
+        const next = lb.index + delta;
+        if (next < 0 || next >= lb.items.length) return false;
+        lb.index = next;
+        drawLightbox();
+        return true;
+    }
+    R.stepLightbox = stepLightbox;
+
+    function closeLightbox(silent) {
+        const lb = lightbox;
+        if (!lb) return false;
+        lightbox = null;
+        if (lb.box.parentNode) lb.box.parentNode.removeChild(lb.box);
+        if (document.body && document.body.classList) document.body.classList.remove('rv-lb-open');
+        if (!silent) restoreFocus(lb.opener);
+        return true;
+    }
+    R.closeLightbox = closeLightbox;
+    R.lightboxOpen = () => (lightbox ? { index: lightbox.index, count: lightbox.items.length, scale: lightbox.scale,
+                                        url: lightbox.items[lightbox.index].url } : null);
+
+    // الصفحة RTL: السهم الأيسر للصورة التالية والأيمن للي قبلها (متل الشبكة بوضع الجملة)
+    function lightboxKey(e, key) {
+        if (!lightbox) return false;
+        if (key === 'Escape' || key === 'z') {
+            e.preventDefault();
+            closeLightbox();
+        } else if (key === 'ArrowLeft' || key === 'ArrowRight') {
+            e.preventDefault();
+            stepLightbox(key === 'ArrowLeft' ? 1 : -1);
+        } else if (key === '+' || key === '=') {
+            e.preventDefault();
+            zoomLightbox(1.25);
+        } else if (key === '-') {
+            e.preventDefault();
+            zoomLightbox(1 / 1.25);
+        } else if (key === '0') {
+            e.preventDefault();
+            zoomLightbox(0);
+        } else if (key === 'Tab') {
+            trapTab(e, lightbox.box);
+        } else if (key === 'Enter' && lightbox.choose && !lightbox.choose.hidden && document.activeElement === lightbox.choose) {
+            return false;     // الزر نفسه
+        } else if (key === 'Enter') {
+            e.preventDefault();       // Enter ما بيعتمد شي من ورا التكبير
+        }
+        return true;
+    }
+
+    // -------------------------------------------------------------------------------------------------
+    // Keyboard: ↑ ↓ move, 1–9 select (never approve), Enter approves the visible selected image, X reject, S skip,
+    // Z the lightbox, ? the shortcuts. Bulk mode (bulk.js onKey): arrows move between cards, Space ticks the focused
+    // card, A approves it (after its warnings), Shift+A is the «approve the pre-selected ones without a warning»
+    // button, R / X rejects the focused card. Ctrl / Cmd / Alt combinations and typing in a field are left to the browser.
     // -------------------------------------------------------------------------------------------------
 
     function keyOf(e) {
         const code = String(e.code || '');
         if (/^Key[A-Z]$/.test(code)) return code.slice(3).toLowerCase();
-        if (/^(Digit|Numpad)[0-9]$/.test(code)) return code.slice(-1);
+        if (/^(Digit|Numpad)[0-9]$/.test(code) && !(code.startsWith('Digit') && e.shiftKey && /^[^0-9٠-٩]$/.test(String(e.key || '')))) {
+            return code.slice(-1);
+        }
         const k = String(e.key || '');
         if (/^[٠-٩]$/.test(k)) return String('٠١٢٣٤٥٦٧٨٩'.indexOf(k));
+        if (k === '؟') return '?';
         return k.length === 1 ? k.toLowerCase() : k;
     }
+    R.keyOf = keyOf;
 
     function onKeyDown(e) {
         if (!e || e.defaultPrevented) return;
+        const key = keyOf(e);
+        if (activeDialog) {
+            if (!e.ctrlKey && !e.metaKey && !e.altKey) dialogKey(e, key);
+            return;
+        }
+        if (lightbox) {
+            if (!e.ctrlKey && !e.metaKey && !e.altKey) lightboxKey(e, key);
+            return;
+        }
+        // نافذة رفض البطاقات: 1–7 للسبب
+        if (R.bulk.dialogOpen()) {
+            if (!e.ctrlKey && !e.metaKey && !e.altKey) R.bulk.dialogKey(e, key);
+            return;
+        }
         if (e.ctrlKey || e.metaKey || e.altKey) return;
         const active = document.activeElement;
         const tag = active && active.tagName ? String(active.tagName).toLowerCase() : '';
         const inputType = tag === 'input' ? String(active.type || active.getAttribute('type') || 'text').toLowerCase() : '';
         const typing = (tag === 'input' && !['checkbox', 'radio', 'button', 'submit', 'reset', 'range', 'color', 'file'].includes(inputType))
             || tag === 'textarea' || tag === 'select' || !!(active && active.isContentEditable);
-        const key = keyOf(e);
         if (key === 'Escape') {
-            if (closeAskDialog()) return;
+            if (toggleMoreMenu(false)) return;
             if (R.bulk.closeDialog()) return;
             if (S.reasonsOpen) {
                 R.single.closeReasons();
@@ -924,7 +1528,12 @@
             }
             return;
         }
-        if (typing || R.bulk.dialogOpen() || activeDialog) return;
+        if (typing) return;
+        if (key === '?' && !e.repeat) {
+            e.preventDefault();
+            showShortcuts();
+            return;
+        }
         if (S.mode === 'bulk') {
             // مسافة أو Enter على زر أو رابط أو مربع تحديد يفعّله المتصفح نفسه
             if ((key === ' ' || key === 'Enter') && ['button', 'a', 'summary', 'label', 'input'].includes(tag)) return;
@@ -940,7 +1549,7 @@
         // مفتاح مضغوط باستمرار يكرر نفسه: بعد الاعتماد يفتح المنتج التالي، فالتكرار كان يعتمده قبل ما يشوفه المراجع.
         // التكرار يُقبل للأسهم فقط (التنقل بالقائمة)، ولا يضغط زراً مركّزاً مرة ثانية
         if (e.repeat && key !== 'ArrowDown' && key !== 'ArrowUp') {
-            if (key === 'Enter' || key === ' ' || /^[1-9xs]$/.test(key)) e.preventDefault();
+            if (key === 'Enter' || key === ' ' || /^[1-9xsz]$/.test(key)) e.preventDefault();
             return;
         }
         if (S.reasonsOpen) {
@@ -973,6 +1582,8 @@
         } else if (key === 's') {
             e.preventDefault();
             R.single.skip();
+        } else if (key === 'z') {
+            if (R.single.openLightbox()) e.preventDefault();
         }
     }
     R.onKeyDown = onKeyDown;
@@ -1014,7 +1625,18 @@
         S.cfg = cfg;
         S.urls = Object.assign({}, DEFAULT_URLS, cfg.urls || {});
         S.mode = cfg.mode === 'bulk' ? 'bulk' : 'single';
+        // ?mode= أو ?row= بالرابط: الوضع محدد. وإلا آخر وضع اختاره المراجع (localStorage)، وإلا بيقرر chooseInitial
+        S.modeExplicit = !!cfg.modeExplicit || cfg.mode === 'bulk' || !!cfg.row;
+        if (!S.modeExplicit) {
+            const stored = readStoredMode();
+            if (stored) {
+                S.mode = stored;
+                S.modeChosen = true;
+            }
+        }
         S.cfg.canvas = parseInt(cfg.canvas, 10) || 800;
+        // الاعتماد بيستنى هالمدة قبل ما ينبعت، و«تراجع» بيرجّعه (0 = بينبعت فوراً)
+        S.cfg.approveUndoMs = cfg.approveUndoMs === undefined ? 8000 : Math.max(0, parseInt(cfg.approveUndoMs, 10) || 0);
         S.cfg.autoSearchDelayMs = cfg.autoSearchDelayMs === undefined ? 700 : Math.max(0, parseInt(cfg.autoSearchDelayMs, 10) || 0);
         // الاعتماد بعد ظهور الصورة بهذه المدة على الأقل (ضغطة ثانية سريعة بعد الاعتماد لا تعتمد المنتج التالي قبل رؤيته)
         S.cfg.approveSettleMs = cfg.approveSettleMs === undefined ? 400 : Math.max(0, parseInt(cfg.approveSettleMs, 10) || 0);
@@ -1032,12 +1654,20 @@
         document.addEventListener('keydown', onKeyDown);
         root.addEventListener('popstate', onPopState);
         root.addEventListener('resize', () => R.single.updateJobsOffset());
+        // النقرة على الصورة المختارة بتفتح التكبير (بطاقات الجملة: bulk.js onGridClick)
+        rootEl.addEventListener('click', e => {
+            const t = e.target;
+            if (S.mode !== 'single' || !t || !t.closest || t.closest('#rvLightbox')) return;
+            const stage = t.closest('[data-zoom]');
+            if (!stage || t.closest('button, a, input, label')) return;
+            if (R.single.openLightbox()) e.preventDefault();
+        });
         if (root.Laqta && typeof root.Laqta.onRunStatus === 'function') root.Laqta.onRunStatus(onRunStatus);
         loadData({});
         return true;
     }
 
-    Object.assign(R, { boot, loadData, renderJobs, setupJobs });
+    Object.assign(R, { boot, loadData, renderJobs, setupJobs, pageHidden, undoApprovals, updateTitle });
 
     if (!root.LAQTA_REVIEW_MANUAL_BOOT) {
         if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);

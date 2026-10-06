@@ -21,7 +21,7 @@
         ['key' => 'home', 'route' => 'dashboard.index', 'label' => 'الرئيسية', 'icon' => 'home'],
         ['key' => 'review', 'route' => 'dashboard.catalog', 'label' => 'المراجعة', 'icon' => 'review', 'badge' => true],
         ['key' => 'run', 'route' => 'dashboard.batch_automation', 'label' => 'التشغيل', 'icon' => 'run'],
-        ['key' => 'health', 'route' => 'dashboard.diagnostics', 'label' => 'الصحة والتكلفة', 'icon' => 'health'],
+        ['key' => 'health', 'route' => 'dashboard.diagnostics', 'label' => 'الصحة والتكلفة', 'short' => 'الصحة', 'icon' => 'health'],
         ['key' => 'settings', 'route' => 'dashboard.settings', 'label' => 'الإعدادات', 'icon' => 'settings'],
     ];
     $lqActive = trim($__env->yieldContent('lq_nav'));
@@ -70,6 +70,7 @@
                         <a href="{{ route($lqItem['route']) }}" @class(['lq-nav__item', 'is-active' => $lqActive === $lqItem['key']]) @if ($lqActive === $lqItem['key']) aria-current="page" @endif>
                             <x-lq.icon :name="$lqItem['icon']" />
                             <span class="lq-nav__label">{{ $lqItem['label'] }}</span>
+                            @if (! empty($lqItem['short']))<span class="lq-nav__short" aria-hidden="true">{{ $lqItem['short'] }}</span>@endif
                             @if (! empty($lqItem['badge']))
                                 <span class="lq-nav__badge" data-lq-review-count @if ($lqReviewSeed === null || $lqReviewSeed === 0) hidden @endif>{{ $lqReviewSeed }}</span>
                             @endif

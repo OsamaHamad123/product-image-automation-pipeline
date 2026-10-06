@@ -25,8 +25,11 @@ class ReviewController extends Controller
 {
     public const MODES = ['single', 'bulk'];
 
-    /** قيم ?filter= المقبولة (رقاقات قائمة المراجعة؛ bg_failed: اعتمادات لم تُعزل خلفيتها). */
-    public const FILTERS = ['all', 'proposed', 'warning', 'none', 'not_found', 'failed', 'bg_failed'];
+    /**
+     * قيم ?filter= المقبولة: رقاقات المراجعة، نفس المجموعة بالوضعين (core.js FILTERS). eligible: مقترحة بلا تحذير،
+     * strict: مؤكدة تماماً، bg_failed: اعتمادات لم تُعزل خلفيتها.
+     */
+    public const FILTERS = ['all', 'proposed', 'eligible', 'strict', 'warning', 'none', 'not_found', 'failed', 'bg_failed'];
 
     /** حالات الطابور التي تحتاجها الشاشة؛ الصفوف المعتمدة تُعرف من رابط الشيت واعتماد resolved_products. */
     public const QUEUE_STATUSES = ['ready_for_review', 'failed', 'pending', 'processing'];
@@ -36,6 +39,19 @@ class ReviewController extends Controller
 
     /** مهلة البحث التلقائي لمنتج لم يُبحث له بعد: التنقل السريع بالأسهم لا يطلق بحثاً مدفوعاً لكل منتج يمر عليه. */
     public const AUTO_SEARCH_DELAY_MS = 700;
+
+    /**
+     * الاعتماد بيستنى هالمدة بالصفحة قبل ما ينبعت، و«تراجع» بيرجّعه (jobs.js). ما بيضيع: لما الصفحة تختفي أو تتسكّر
+     * بينبعت فوراً (fetch keepalive لنفس /api/select_image). الخادم ما بيتغيّر: بيوصله نفس الطلب بس متأخر.
+     */
+    public const APPROVE_UNDO_MS = 8000;
+
+    /** منطقة الوقت اللي بتنعرض فيها الأوقات وبينحسب فيها «اليوم» (config/app.php display_timezone). */
+    public static function displayTimezone(): string
+    {
+        $tz = (string) config('app.display_timezone', 'Asia/Dubai');
+        return in_array($tz, \DateTimeZone::listIdentifiers(), true) ? $tz : 'Asia/Dubai';
+    }
 
     public function page(Request $request)
     {
@@ -54,6 +70,9 @@ class ReviewController extends Controller
 
         $config = [
             'mode' => $mode,
+            // ?mode= أو ?row= بالرابط: الوضع محدد. بدونهم الصفحة بتختار (آخر وضع اختاره المراجع، أو «بالجملة» لما يكون
+            // في 10 صور مقترحة بلا تحذير أو أكثر)
+            'modeExplicit' => in_array($request->query('mode'), self::MODES, true) || $row !== null,
             'filter' => $filter,
             'row' => $row,
             'reason' => $reason,
@@ -61,6 +80,7 @@ class ReviewController extends Controller
             'db' => $dbOnline ? 'online' : 'offline',
             'readyForReview' => $readyForReview,
             'autoSearchDelayMs' => self::AUTO_SEARCH_DELAY_MS,
+            'approveUndoMs' => self::APPROVE_UNDO_MS,
             'urls' => [
                 'page' => route('dashboard.catalog'),
                 'products' => url('/api/products-json'),
@@ -151,7 +171,36 @@ class ReviewController extends Controller
             'rows' => $rows,
             // صفوف حُفظت قبل أن يحسب العامل سبب «بلا اقتراح»: الشاشة تطلب حسابه مرة (explainBackfill)
             'explain_missing' => $explainMissing,
+            // «اليوم: اعتمدت 87، رفضت 6» لما تخلص المراجعة
+            'today' => self::todayDecisions(),
         ])->header('Cache-Control', 'no-store');
+    }
+
+    /**
+     * قرارات المراجعين اليوم (من منتصف الليل بتوقيت displayTimezone) من review_decisions: approved (ومعه
+     * manual_upload) و rejected. null لما الجدول مش موجود أو ما انقرأ (الشاشة بتعدّ قرارات هالجلسة بدالها).
+     */
+    public static function todayDecisions(): ?array
+    {
+        try {
+            if (!Schema::hasTable('review_decisions')) {
+                return null;
+            }
+            $midnight = (new \DateTimeImmutable('today', new \DateTimeZone(self::displayTimezone())))->getTimestamp();
+            $rows = DB::table('review_decisions')
+                ->where('created_at', '>=', DB::raw('FROM_UNIXTIME(' . (int) $midnight . ')'))
+                ->whereIn('action', ['approved', 'manual_upload', 'rejected'])
+                ->selectRaw('action, COUNT(*) AS n')
+                ->groupBy('action')
+                ->pluck('n', 'action')
+                ->all();
+        } catch (\Throwable $e) {
+            return null;
+        }
+        return [
+            'approved' => (int) ($rows['approved'] ?? 0) + (int) ($rows['manual_upload'] ?? 0),
+            'rejected' => (int) ($rows['rejected'] ?? 0),
+        ];
     }
 
     /** حالات الطابور التي يُعرض سببها: بانتظار المراجعة بلا اقتراح، أو ما انلقت. */

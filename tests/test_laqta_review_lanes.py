@@ -148,8 +148,8 @@ out.strict = names();
 out.pressed = strictBtn().getAttribute('aria-pressed');
 out.cards = document.querySelectorAll('.rv-card').map(c => c.getAttribute('data-kind'));
 """, tmp_path, lanes_fx())
-    # «مؤكدة تماماً» sits right after «مقترحة بلا تحذير»
-    assert [f[0] for f in out["filters"]] == ["الكل", "مقترحة بلا تحذير", "مؤكدة تماماً", "فيها تحذير", "بلا اقتراح"]
+    # the review screen's one filter set (the same chips as single mode); «مؤكدة تماماً» right after «مقترحة بلا تحذير»
+    assert [f[0] for f in out["filters"]] == ["الكل", "مقترحة", "مقترحة بلا تحذير", "مؤكدة تماماً", "فيها تحذير", "بلا اقتراح"]
     assert dict(out["filters"])["مؤكدة تماماً"] == "2"
     assert sorted(out["strict"]) == ["ALALI STRICT TUNA 170GM", "ALALI STRICT TUNA 85GM"]
     assert out["pressed"] == "true" and out["cards"] == ["eligible", "eligible"]
@@ -159,7 +159,7 @@ out.cards = document.querySelectorAll('.rv-card').map(c => c.getAttribute('data-
 # The progress line
 # ---------------------------------------------------------------------------
 
-HEAD = "لحتى ينفتح النشر التلقائي لكل الماركات المؤكدة: "
+HEAD = "النشر الآلي للماركات المؤكدة"
 
 
 @NEEDS_NODE
@@ -170,6 +170,8 @@ R.setMode('bulk');
 await flush();
 const line = document.querySelector('.rv-bulk__lane');
 out.text = line.textContent;
+out.title = line.getAttribute('title');
+out.meter = line.querySelector('[role="progressbar"]').getAttribute('aria-valuenow');
 out.hidden = line.hidden;
 out.calls = requests('/api/system/review-lanes').length;
 R.bulk.render();
@@ -177,7 +179,10 @@ R.bulk.render();
 await flush();
 out.calls_after = requests('/api/system/review-lanes').length;
 """, tmp_path, lanes_fx(strict))
-    assert out["text"] == HEAD + "اعتمدت 39 من 40 اقتراح مؤكد تماماً، وبعد 150 اعتماد متتالي بلا رفض"
+    # a meter: «39 / 40 · باقي 150 اعتماد», the sentence in its tooltip, the bar at 39 of the 189 needed
+    assert out["text"] == HEAD + "39 / 40 · باقي 150 اعتماد"
+    assert out["title"] == "اعتمدت 39 من 40 اقتراح مؤكد تماماً، وبعد 150 اعتماد متتالي بلا رفض بينفتح النشر الآلي"
+    assert out["meter"] == "21"
     assert out["hidden"] is False and out["calls"] == 1 and out["calls_after"] == 1      # one cached call, not one per redraw
 
 
@@ -191,7 +196,7 @@ const line = document.querySelector('.rv-bulk__lane');
 out.text = line.textContent;
 out.ready_class = line.classList.contains('is-ready');
 """, tmp_path, lanes_fx(ready))
-    assert out["text"] == "النشر التلقائي جاهز للتشغيل من الإعدادات ← النشر الآلي" and out["ready_class"] is True
+    assert out["text"] == HEAD + "جاهز: شغّله من الإعدادات ← النشر الآلي" and out["ready_class"] is True
 
     # no numbers (the call failed, or the bridge sent none): no line rather than an invented figure
     down = page(r"""
@@ -207,8 +212,7 @@ out.cases = [R.bulk.laneLine({ prechecked: 0, accepted: 0, ready: false, more_ne
              R.bulk.laneLine({ prechecked: 100, accepted: 50, ready: false, more_needed: null }),
              R.bulk.laneLine(null), R.bulk.laneLine({})];
 """, tmp_path, fixture(products=[]))
-    assert out["cases"] == [HEAD + "اعتمدت 0 من 0 اقتراح مؤكد تماماً، وبعد 189 اعتماد متتالي بلا رفض",
-                            HEAD + "اعتمدت 50 من 100 اقتراح مؤكد تماماً، بس دقتها هلق أقل من الحد المطلوب", None, None]
+    assert out["cases"] == ["0 / 0 · باقي 189 اعتماد", "50 / 100 · الدقة هلق أقل من المطلوب", None, None]
 
 
 @NEEDS_NODE

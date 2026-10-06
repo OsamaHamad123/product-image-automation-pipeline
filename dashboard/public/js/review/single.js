@@ -374,22 +374,28 @@
     }
     R.buildApproveJob = buildJob;
 
-    // اعتماد الصورة الظاهرة المختارة: يدخل طابور الخلفية (طلب واحد في كل مرة) وننتقل للمنتج التالي
+    // اعتماد الصورة الظاهرة المختارة: يدخل طابور الخلفية (محجوز approveUndoMs لـ«تراجع»، بعدها طلبين بالأكثر سوا)
+    // وننتقل للمنتج التالي. false لما ما بينعتمد هلق؛ Promise لما في سؤال قبل (صورة عليها تحذير)
     function approveCurrent() {
-        const S = st();
         if (!canApprove()) return false;
         const item = currentItem();
         const candidate = currentPick(item);
         // مثل وضع الجملة: صورة عليها تحذير (أو استبعدها النظام / رُفضت قبل) تُعتمد بعد تأكيد يسمّي المنتج
         const cautions = R.cautionsFor(candidate);
-        if (cautions.length && !root.confirm(`«${productLabel(item)}»: تأكد قبل الاعتماد: ${cautions.join('، ')}. متأكد إنك بدك تعتمد هالصورة وتنشرها؟`)) {
-            return false;
-        }
-        if (!canApprove()) return false;      // تغيّر شيء أثناء التأكيد
+        if (!cautions.length) return enqueueCurrent(item, candidate);
+        return R.ask({ title: `«${productLabel(item)}»: تأكد قبل الاعتماد`, text: `${cautions.join('، ')}. بدك تعتمدها؟`,
+                       confirmText: 'اعتمدها', cancelText: 'لا، رجوع' })
+            .then(ok => ok && enqueueCurrent(item, candidate));
+    }
+
+    function enqueueCurrent(item, candidate) {
+        const S = st();
+        // تغيّر شيء أثناء التأكيد (منتج ثاني انفتح، أو الصورة تغيّرت): ما في اعتماد
+        if (!canApprove() || currentItem() !== item || (currentPick(item) || {}).url !== candidate.url) return false;
         const ctx = boundContext(item);
         const next = neighbour(item.key, 1, true);
         cancelPendingSearch();
-        if (!S.jobs.enqueue(buildJob(item, ctx, candidate))) return false;
+        if (!S.jobs.enqueue(buildJob(item, ctx, candidate), { holdMs: S.cfg.approveUndoMs })) return false;
         S.local.set(item.key, 'approving');
         R.rebuild();
         R.renderList();
@@ -401,8 +407,29 @@
         return true;
     }
 
-    function sendJob(job) {
+    // جسم طلب الاعتماد أو الرفض كما ينبعت (JSON)؛ الرفع ملف (FormData) ما إله جسم هون
+    function jobPayload(job) {
+        if (job.type === 'upload') return null;
+        if (job.type === 'reject') return job.body;
+        const guard = { expected_state: job.expected || null };
+        if (job.replace) guard.replace = true;
+        if (job.publishAnyway) guard.publish_anyway = true;
+        return Object.assign({}, job.body, guard);
+    }
+
+    // حجم الجسم بالبايت (لميزانية keepalive لما الصفحة تختفي)، أو null للرفع (ملف ما بينبعت keepalive)
+    function jobBodySize(job) {
+        const body = jobPayload(job);
+        if (!body) return null;
+        const text = JSON.stringify(body);
+        if (typeof TextEncoder === 'function') return new TextEncoder().encode(text).length;
+        return text.length * 3;
+    }
+
+    // opts.keepalive: الصفحة عم تختفي، والمتصفح بيكمّل الطلب ولو انسكّرت (jobs.js flush)
+    function sendJob(job, opts) {
         const S = st();
+        const keepalive = !!(opts && opts.keepalive);
         if (job.type === 'upload') {
             const form = new FormData();
             const file = job.candidate.file;
@@ -414,11 +441,8 @@
             if (job.publishAnyway) form.append('publish_anyway', '1');
             return R.requestJson(S.urls.upload, { method: 'POST', body: form });
         }
-        if (job.type === 'reject') return R.requestJson(S.urls.reject, { method: 'POST', body: job.body });
-        const guard = { expected_state: job.expected || null };
-        if (job.replace) guard.replace = true;
-        if (job.publishAnyway) guard.publish_anyway = true;
-        return R.requestJson(S.urls.select, { method: 'POST', body: Object.assign({}, job.body, guard) });
+        return R.requestJson(job.type === 'reject' ? S.urls.reject : S.urls.select,
+                             { method: 'POST', body: jobPayload(job), keepalive: keepalive });
     }
 
     // استبدال صورة معتمدة تغيّرت بعد فتح الصفحة (C1): تأكيد صريح يعرض الصورة المعتمدة الآن (ولمن اعتُمدت) بجانب صورة
@@ -452,15 +476,17 @@
         return S.jobs.retry(job.id, { replace: true, expected: expected, stale: null });
     }
 
-    // نشر صورة فيها علامات عرض من فحص القص (publish_anyway): تأكيد صريح يقول ما تعنيه كل علامة في الصورة المنشورة،
+    // اعتماد صورة فيها علامات عرض من فحص القص (publish_anyway): تأكيد صريح يقول ما تعنيه كل علامة في الصورة المعتمدة،
     // ثم الطلب نفسه. لا يقول إن الخلفية معزولة: العلامات وحدها تقول ما في الصورة (opaque_fill لا تُعرض هنا أبداً)
-    function confirmPublishAnyway(job) {
+    async function confirmPublishAnyway(job) {
         const S = st();
         if (!job || !job.quality || !job.quality.allowed) return false;
         const what = (job.quality.anywayTexts || []).length ? job.quality.anywayTexts.join('، ')
             : (job.quality.texts.length ? job.quality.texts.join('، ') : 'ملاحظات من فحص القص');
-        const msg = `فحص القص وجد في صورة «${job.label}»: ${what}. إذا نشرتها تُرفع هكذا ويُكتب رابطها في الشيت، وتبقى عليها ملاحظة في صفحة المنتج. هل تريد نشرها كما هي؟`;
-        if (!root.confirm(msg)) return false;
+        const ok = await R.ask({ title: `فحص القص لقى بصورة «${job.label}»: ${what}.`,
+                                 text: 'إذا اعتمدتها بتنحط بالشيت متل ما هي، وبتضل عليها ملاحظة بصفحة المنتج. بدك تعتمدها هيك؟',
+                                 confirmText: 'اعتمدها هيك', danger: true });
+        if (!ok) return false;
         return S.jobs.retry(job.id, { publishAnyway: true, quality: null });
     }
 
@@ -471,7 +497,7 @@
         const S = st();
         const bg = S.cfg.bg && typeof S.cfg.bg === 'object' ? S.cfg.bg : {};
         if (!bg.method || bg.method === 'none' || S.bgSaving || !S.urls.bgMethod) return false;
-        if (!root.confirm(bg.confirm || 'تجاوز عزل الخلفية؟')) return false;
+        if (!(await R.ask({ title: 'تجاوز عزل الخلفية؟', text: bg.confirm || '', confirmText: 'تجاوز', danger: true }))) return false;
         S.bgSaving = true;
         R.renderJobs(S.jobs.state());
         const res = await R.requestJson(S.urls.bgMethod, { method: 'POST', body: { method: 'none' } });
@@ -494,6 +520,7 @@
         const S = st();
         const data = (job.result && job.result.data) || {};
         if (job.state === 'done') {
+            if (S.today) S.today[job.type === 'reject' ? 'rejected' : 'approved'] += 1;
             // ما قاله الخادم عن المنتج بعد هذا الإجراء يصير ما «رآه» المراجع (القراءة التالية لا تُعد تغييراً)
             R.settleSeen(job.key, data.current || (data.rejection && data.rejection.current) || null);
             if (job.type === 'reject') {
@@ -663,6 +690,7 @@
             if (S.openKey === item.key) renderWorkspace();
             return;
         }
+        if (S.today) S.today.rejected += 1;
         sess.rejected.add(candidate.url);
         sess.rejectedWhy.set(candidate.url, reasonCode);
         if (sess.pick === candidate.url) sess.pick = null;
@@ -722,7 +750,7 @@
         const S = st();
         const sess = sessionOf(item.key);
         if (!item || !url || sess.undoing || !S.urls.undoReject) return false;
-        if (!root.confirm(R.UNDO_REJECT_CONFIRM)) return false;
+        if (!(await R.ask({ title: R.UNDO_REJECT_CONFIRM, confirmText: 'رجّعها' }))) return false;
         sess.undoing = url;
         if (S.openKey === item.key) renderWorkspace();
         const res = await R.requestJson(S.urls.undoReject, { method: 'POST', body: R.undoRejectBody(boundContext(item), url) });
@@ -843,7 +871,9 @@
         items = (items || []).filter(it => it && it.product && !it.orphan);
         if (!items.length) return;
         const n = items.length;
-        if (n > 1 && !root.confirm(`رح نرجّع ${R.plural(n, 'منتج واحد', 'منتجات')} للطابور ونشيلها من الأعطال. ما رح يبلش أي تشغيل من هون: بتنعالج لما تشغّل التشغيل. الصور المعتمدة ما بتنلمس.`)) {
+        if (n > 1 && !(await R.ask({ title: `رح نرجّع ${R.plural(n, 'منتج واحد', 'منتجات')} للطابور؟`,
+                                     text: 'بنشيلها من الأعطال. ما رح يبلش أي تشغيل من هون: بتنعالج لما تشغّل التشغيل. الصور المعتمدة ما بتنلمس.',
+                                     confirmText: 'رجّعها للطابور' }))) {
             return;
         }
         const res = await R.requestJson(S.urls.retry, { method: 'POST', body: { barcodes: items.map(it => R.failureKey(it.product)) } });
@@ -920,7 +950,7 @@
         const sheetLink = (approved && approved.link) || R.shownApprovedUrl(p);
         const box = sheetLink
             ? el('div', { className: 'rv-sheetimg__box' }, [R.img(sheetLink, 'الصورة الحالية بالشيت', S.urls.imageProxy)])
-            : el('div', { className: 'rv-sheetimg__box is-empty' }, [icon('image', 20), el('span', { text: 'لا توجد صورة بالشيت' })]);
+            : el('div', { className: 'rv-sheetimg__box is-empty' }, [icon('image', 20), el('span', { text: 'ما في صورة بالشيت' })]);
         return el('header', { className: 'rv-panel rv-product' }, [
             el('div', { className: 'rv-product__main' }, [
                 crumbs,
@@ -972,7 +1002,8 @@
                 source ? el('a', { className: 'rv-pick__source', href: source, target: '_blank', rel: 'noopener noreferrer' },
                             [el('span', { text: 'صفحة المصدر' }), icon('external', 14)]) : null
             ]),
-            el('div', { className: 'rv-pick__stage' }, [
+            // ضغطة على الصورة (أو Z) بتكبّرها جنب صورة الشيت
+            el('div', { className: 'rv-pick__stage', dataset: { zoom: item.key }, title: 'كبّر الصورة (Z)' }, [
                 pickImage(item, pick),
                 res ? el('span', { className: 'rv-pick__res', dir: 'ltr', text: res }) : null,
                 overlay || null
@@ -1081,7 +1112,7 @@
             R.galleryNote(c) ? el('span', { className: 'rv-gallery', text: R.galleryNote(c) }) : null,
             showNote ? el('span', { className: `rv-alt__note rv-tone--${note.tone}`, text: note.text }) : null,
             why ? el('span', { className: `rv-alt__why rv-tone--${why.tone}`, title: why.code }, [
-                el('span', { className: 'rv-alt__why-k', text: 'لماذا لم تُختر: ' }), el('span', { text: why.text })]) : null,
+                el('span', { className: 'rv-alt__why-k', text: 'ليش ما انختارت: ' }), el('span', { text: why.text })]) : null,
             // كل تحذيرات الصورة البديلة (الأول في السطر السابق)، وأدلتها
             !isExtra(c) && c.warnings.length > 1 && !['rejected', 'excluded'].includes(c.status)
                 ? el('span', { className: 'rv-alt__warns' }, c.warnings.slice(1).map(w => el('span', { className: 'rv-alt__warn', text: R.warningText(w) })))
@@ -1165,7 +1196,7 @@
         return el('section', { className: 'rv-panel rv-nf', id: 'rvNotFound', 'aria-label': 'ما لقيت الصورة الصحيحة؟' }, [
             el('h3', { className: 'rv-h3 rv-nf__title', text: 'ما لقيت الصورة الصحيحة؟' }),
             el('div', { className: 'rv-nf__grid' }, [searchForm, urlForm, uploadField]),
-            el('p', { className: 'rv-nf__hint', text: 'الصورة من الرابط أو من جهازك بتصير هي المختارة، وبتنعتمد بـ «اعتماد ونشر» متل أي صورة.' })
+            el('p', { className: 'rv-nf__hint', text: 'الصورة من الرابط أو من جهازك بتصير هي المختارة، وبتنعتمد بـ «اعتماد» متل أي صورة.' })
         ]);
     }
 
@@ -1349,14 +1380,15 @@
                     el('h2', { className: 'lq-empty__title', text: 'هالمنتج ما عاد موجود بالقائمة' }),
                     el('p', { className: 'lq-empty__text', text: 'يمكن تغيّر الشيت. اختار منتج من القائمة.' })
                 ]));
+            } else if (S.counts.waiting === 0 && S.load.state === 'ready') {
+                // خلصت المراجعة: شو انعمل اليوم وشو الخطوة الجاية، مش صفحة فاضية
+                body.appendChild(R.doneRecap());
             } else {
-                const nothing = S.counts.waiting === 0 && S.load.state === 'ready';
+                // القائمة عمود على اليسار (RTL)، أو تحت مساحة العمل بالشاشة الضيقة
                 body.appendChild(el('div', { className: 'lq-empty rv-empty' }, [
                     el('span', { className: 'lq-empty__icon' }, [icon('review', 24)]),
-                    el('h2', { className: 'lq-empty__title', text: nothing ? 'ما في شي بانتظار مراجعتك' : 'اختار منتج من القائمة' }),
-                    el('p', { className: 'lq-empty__text', text: nothing ? 'كل الصور الجاهزة انراجعت. شغّل تشغيل جديد ليجيب نتائج جديدة.'
-                                                                         : 'القائمة على اليسار؛ ↑ ↓ للتنقل.' }),
-                    nothing ? el('div', { className: 'lq-empty__actions' }, [el('a', { className: 'lq-btn lq-btn--secondary', href: S.urls.run, text: 'صفحة التشغيل' })]) : null
+                    el('h2', { className: 'lq-empty__title', text: 'اختار منتج من القائمة' }),
+                    el('p', { className: 'lq-empty__text', text: R.listStacked() ? 'القائمة تحت؛ اختار منتج منها.' : 'القائمة على اليسار؛ ↑ ↓ للتنقل.' })
                 ]));
             }
             updateBar();
@@ -1373,7 +1405,15 @@
             S.ws.state = 'approving';
             const job = S.jobs ? S.jobs.activeFor(item.key) : null;
             const cand = job ? job.candidate : currentPick(item);
-            body.appendChild(alertBox('info', 'عم تنعتمد بالخلفية:', 'بتقدر تكمل شغلك؛ الصورة بتنرفع وبينكتب رابطها بالشيت.'));
+            if (job && job.state === 'held') {
+                // لسا ما انبعت: «تراجع» بيرجّعه متل ما كان
+                body.appendChild(alertBox('info', 'رح تنعتمد بعد لحظات:', 'بتقدر تتراجع قبل ما تنبعت.', [
+                    el('button', { type: 'button', className: 'lq-btn lq-btn--secondary lq-btn--sm rv-undo__btn', text: 'تراجع',
+                                   onclick: () => S.jobs.cancel(job.group) })
+                ]));
+            } else {
+                body.appendChild(alertBox('info', 'عم تنعتمد بالخلفية:', 'بتقدر تكمل شغلك؛ الصورة بتنرفع وبينكتب رابطها بالشيت.'));
+            }
             body.appendChild(el('div', { className: 'rv-compare' }, [
                 pickCard(item, cand, '', 0, el('span', { className: 'rv-pick__overlay' }, [el('span', { className: 'lq-spinner', 'aria-hidden': 'true' }),
                                                                                          el('span', { text: 'جاري الاعتماد…' })])),
@@ -1502,6 +1542,7 @@
         if (rejected) body.appendChild(rejected);
         if (!item.orphan && (sess.nfOpen || S.ws.state === 'empty')) body.appendChild(notFoundPanel(item));
         updateBar();
+        preloadAround(item);
     }
 
     function renderReasons() {
@@ -1531,6 +1572,78 @@
             // الأسباب التجميلية لا تستبعد المصدر من البحث (local_cache_db.get_rejections)
             box.appendChild(el('span', { className: 'rv-reasons__note',
                                          text: 'هالة وبقايا الخلفية والقص أسباب تخص المعالجة: تُلغي هذا الاعتماد ويرجع المنتج للطابور، وقد يُقترح المصدر نفسه مرة أخرى.' }));
+        }
+    }
+
+    // التكبير (ضغطة على الصورة أو Z): صور المنتج المفتوح بالترتيب اللي بتعرضه الشاشة، و← → بينهم، وجنبها صورة الشيت
+    // الحالية. «اختارها» بيختار الصورة الظاهرة بس (متل 1–9)، والاعتماد بعدها من الشريط
+    function openLightbox() {
+        const S = st();
+        const item = currentItem();
+        if (!item || S.mode !== 'single') return false;
+        const p = item.product;
+        const approved = S.approved.get(item.key);
+        const sheetUrl = (approved && approved.link) || R.shownApprovedUrl(p) || '';
+        const compare = { url: sheetUrl, caption: 'الصورة الحالية بالشيت' };
+        const describe = c => {
+            const where = isExtra(c) ? null : R.storeOf(c);
+            return { url: c.url, caption: c.title || '', note: where ? [where.store, where.market].filter(Boolean).join(' · ') : '' };
+        };
+        if (S.ws.state === 'results') {
+            const cands = currentCandidates(item);
+            const pick = currentPick(item);
+            if (!cands.length) return false;
+            const index = pick ? Math.max(0, cands.findIndex(c => c.url === pick.url)) : 0;
+            return R.openLightbox({
+                items: cands.map(describe), index: index, title: productLabel(item), compare: compare,
+                chosen: i => !!pick && cands[i].url === pick.url,
+                onChoose: i => {
+                    if (st().openKey !== item.key || !cands[i]) return;
+                    sessionOf(item.key).pick = cands[i].url;
+                    renderWorkspace();
+                }
+            });
+        }
+        const job = S.jobs ? S.jobs.activeFor(item.key) : null;
+        const url = S.ws.state === 'approving' ? ((job && job.candidate.url) || '')
+            : S.ws.state === 'approved' && approved ? (approved.link || approved.url)
+            : S.ws.state === 'final' ? String(p.existing_image_link || p.cached_image || '') : '';
+        if (!url) return false;
+        return R.openLightbox({ items: [{ url: url, caption: productLabel(item) }], index: 0, title: productLabel(item),
+                                compare: S.ws.state === 'final' ? null : compare });
+    }
+
+    // السرعة: صور المنتجين الجايين و أول 4 صور بديلة للمنتج المفتوح بتتحمّل بالخلفية (new Image)، فلما تنفتح بتطلع فوراً
+    // من كاش المتصفح (/api/image-proxy: Cache-Control private, max-age=3600)
+    const preloaded = new Set();
+
+    function preload(url) {
+        const S = st();
+        if (!url || preloaded.has(url) || typeof root.Image !== 'function') return;
+        const src = R.imageUrl(url, S.urls.imageProxy);
+        if (!src || src.startsWith('blob:')) return;
+        if (preloaded.size > 500) preloaded.clear();
+        preloaded.add(url);
+        const im = new root.Image();
+        im.decoding = 'async';
+        im.referrerPolicy = 'no-referrer';
+        im.src = src;
+    }
+    R.preloadImage = preload;
+
+    function preloadAround(item) {
+        if (!item) return;
+        const sysUrl = systemPickUrl(item);
+        const pick = currentPick(item);
+        currentCandidates(item).filter(c => !isExtra(c) && c.url !== (pick && pick.url) && c.url !== sysUrl)
+            .slice(0, 4).forEach(c => preload(c.url));
+        let key = item.key;
+        for (let i = 0; i < 2; i++) {
+            const next = neighbour(key, 1, true);
+            if (!next) break;
+            const sel = R.storedSelected(next.product) || R.storedCandidates(next.product)[0];
+            if (sel) preload(sel.url);
+            key = next.key;
         }
     }
 
@@ -1575,6 +1688,7 @@
         resetMoved, approveBlock,
         cancelPendingSearch, applySearchResponse, canApprove, canReject, selectByNumber, approveCurrent, sendJob,
         settleJob, confirmReplace, confirmPublishAnyway, confirmBgSkip, undoReject, rejectedPanel, openReasons, closeReasons, currentReasons, rejectCurrent, skip, move, toggleNotFound,
-        previewUrl, chooseFile, retryFailures, renderWorkspace, updateBar, updateJobsOffset, isOpen, updatePosition
+        previewUrl, chooseFile, retryFailures, renderWorkspace, updateBar, updateJobsOffset, isOpen, updatePosition,
+        openLightbox, jobBodySize, preloadAround
     };
 })(typeof window !== 'undefined' ? window : globalThis);

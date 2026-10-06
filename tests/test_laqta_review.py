@@ -329,7 +329,8 @@ def test_empty_queue_says_nothing_is_waiting(tmp_path):
 out.text = wsText();
 out.list = document.getElementById('rvList').textContent;
 """, tmp_path, fixture(products=[DONE], rows=[]), config={"filter": "proposed"})
-    assert "ما في شي بانتظار مراجعتك" in out["text"]
+    # nothing waiting: the recap of the day and the next steps, not a dead end
+    assert "خلصت المراجعة" in out["text"] and "اليوم: اعتمدت 0، رفضت 0" in out["text"] and "تشغيل جديد" in out["text"]
     assert "ما في صور مقترحة بانتظارك" in out["list"]
 
 
@@ -422,15 +423,15 @@ out.total = requests('/api/select_image').length;
     # in order of confidence: rows 19, 20 pre-selected without a warning (selected); 23 the reviewer's earlier pick;
     # 21 with a warning; 22 nothing proposed
     assert out["cards"] == [["eligible", True], ["eligible", True], ["proposed", False], ["warning", False], ["none", False]]
-    assert out["label"] == "اعتماد 2 صور مقترحة بلا تحذير" and out["count"] == "2 محددة من 5"
-    assert out["label_after"] == "اعتماد 2 صور مقترحة بلا تحذير"
+    assert out["label"] == "اعتماد صورتين بلا تحذير" and out["count"] == "2 محددة من 5"
+    assert out["label_after"] == "اعتماد صورتين بلا تحذير"
     assert out["note"] == "2 من المحددة ما بتنعتمد من هون (فيها تحذير أو مش من اقتراح النظام)"
-    assert len(out["confirm"]) == 1 and "رح ننشر 2 صور مقترحة بلا تحذير" in out["confirm"][0]
-    assert "الصور اللي فيها تحذير أو بلا اقتراح ما رح تنلمس" in out["confirm"][0]
-    assert out["sent"] == ["19"]                                  # one request at a time
+    assert len(out["confirm"]) == 1 and out["confirm"][0].startswith("اعتماد صورتين؟ بتنحط بالشيت وبتقدر تكمل شغلك.")
+    assert "اللي فيها تحذير أو بلا اقتراح ما رح تنلمس" in out["confirm"][0]
+    assert out["sent"] == ["19", "20"]                            # two requests at a time (different products)
     assert out["sent_after_first"] == [["19", "https://www.luluhypermarket.com/p19.jpg", "REVIEW_PRESELECTED", "preselected"],
                                        ["20", "https://www.luluhypermarket.com/p20.jpg", "REVIEW_PRESELECTED", "preselected"]]
-    assert out["max_in_flight"] == 1 and out["total"] == 2
+    assert out["max_in_flight"] == 2 and out["total"] == 2
 
 
 @NEEDS_NODE
@@ -485,7 +486,9 @@ out.jobs = jobsText();
     assert "بيضل بانتظار مراجعتك فيها" in out["dialog"] and "ما ضل إله صور بيرجع للطابور" in out["dialog"]
     assert "الصور المعتمدة قبل ما بتنلمس" in out["dialog"]
     assert out["confirm_disabled"] is True and out["confirm_enabled"] is True
-    assert out["first"] == [["19", "WRONG_SIZE", False, "key-19", "https://www.luluhypermarket.com/p19.jpg"]]
+    # two products at a time (the server locks each product while it writes)
+    assert out["first"] == [["19", "WRONG_SIZE", False, "key-19", "https://www.luluhypermarket.com/p19.jpg"],
+                            ["20", "WRONG_SIZE", False, "key-20", "https://www.luluhypermarket.com/p20.jpg"]]
     assert out["all"] == 2
     assert out["overlays"] == ["رجعت للطابور", "رجعت للطابور"]
     assert "جاهزة. بتقدر تكمل شغلك." in out["jobs"]
@@ -542,7 +545,7 @@ answer(retry, { status: 'success', image_link: 'https://res.cloudinary.com/y.png
 await flush();
 out.done = jobsText();
 """, tmp_path, fixture(products=READY, rows=queue_rows()))
-    assert "جاري اعتماد 2 صور بالخلفية · 0 من 2 جاهزة. بتقدر تكمل شغلك." == out["running"]
+    assert "جاري اعتماد صورتين بالخلفية · 0 من 2 جاهزة. بتقدر تكمل شغلك." == out["running"]
     assert out["leave_prompt"][0] is True and "بالخلفية" in out["leave_prompt"][1]
     assert "1 من 2" in out["progress"]
     assert "ما انعتمدت: " in out["failed"] and P2["product_name"] in out["failed"]
@@ -796,9 +799,9 @@ out.confirm = confirms[confirms.length - 1];
 """, tmp_path, fixture(products=many, rows=queue_rows(many)))
     assert out["cards"] == 48
     assert out["count"] == "48 محددة من 52"
-    assert out["label"] == "اعتماد 48 صور مقترحة بلا تحذير"
+    assert out["label"] == "اعتماد 48 صورة بلا تحذير"
     assert out["jobs"] == 48 and out["hidden_jobs"] == []
-    assert "48 صور مقترحة" in out["confirm"]
+    assert out["confirm"].startswith("اعتماد 48 صورة؟")
 
 
 @NEEDS_NODE

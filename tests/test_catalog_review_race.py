@@ -398,7 +398,7 @@ answer(requests('/api/search').find(c => c.body.row_number === '12'), __D__);
 await flush();
 out.d_alts = altUrls();
 out.d_approvable = !approveBtn().disabled;
-press('Enter');                                      // D waits in the queue behind B
+press('Enter');                                      // D goes out next to B (two products at a time)
 await flush();
 out.sent_while_b_runs = requests('/api/select_image').length;
 answer(requests('/api/select_image')[0], __OK__);
@@ -411,10 +411,10 @@ await flush();
 out.max_in_flight = maxInFlight.select;
 """.replace("__D__", js(D_ANSWER)).replace("__OK__", js(OK)), tmp_path)
     assert out["d_alts"] == [D_URL] and out["d_approvable"] is True
-    assert out["sent_while_b_runs"] == 1 and out["sent_after_b"] == 2
+    assert out["sent_while_b_runs"] == 2 and out["sent_after_b"] == 2
     assert out["second"]["row_number"] == "12" and out["second"]["sku_key"] == "key-d"
     assert out["second_url"] == D_URL
-    assert out["max_in_flight"] == 1
+    assert out["max_in_flight"] == 2                       # B and D together: two products at a time
 
 
 # ---------------------------------------------------------------------------
