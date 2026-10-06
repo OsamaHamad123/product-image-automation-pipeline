@@ -1153,6 +1153,7 @@ def test_unavailable_database_is_said(app_env):
                         ["GET", "/system-diagnostics", {}],
                         ["POST", "/settings", {"section": "serper", "serper_api_key": "X-KEY-1234567"}]])
     assert out[0]["status"] == 200 and "ما قدرنا نقرأ الإعدادات" in out[0]["body"] and "غير محفوظ" not in out[0]["body"]
+    assert "بلّغ المطوّر، وحدّث الصفحة بعد ما تنصلح." in out[0]["body"] and "MariaDB شغّالة" not in out[0]["body"]
     assert out[1]["status"] == 200 and "data-sheet-form" in out[1]["body"]
     assert out[2]["status"] == 200 and "data-health-page" in out[2]["body"]
     assert out[3]["status"] == 302 and "قاعدة البيانات" in out[3]["flash"]["error"]

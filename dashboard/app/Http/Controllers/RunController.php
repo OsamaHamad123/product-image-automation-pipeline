@@ -139,7 +139,7 @@ class RunController extends Controller
             return [
                 'status' => 'error',
                 'error' => 'database_unavailable',
-                'message' => 'قاعدة البيانات مش متاحة هلق، فما منقدر نعرف حالة التشغيل. تأكد إنو MariaDB شغّالة.',
+                'message' => 'قاعدة البيانات مش متاحة هلق، فما منقدر نعرف حالة التشغيل. بلّغ المطوّر.',
                 'generated_at' => time(),
             ];
         }

@@ -46,7 +46,7 @@
 
         <div class="lq-settings__panel">
             @if ($dbError && $tab !== 'sheet')
-                <x-lq.empty-state icon="alert" title="ما قدرنا نقرأ الإعدادات" :text="$dbError . ' تأكد إن MariaDB شغّالة وحدّث الصفحة. ما تغيّر ولا إعداد.'">
+                <x-lq.empty-state icon="alert" title="ما قدرنا نقرأ الإعدادات" :text="$dbError . ' بلّغ المطوّر، وحدّث الصفحة بعد ما تنصلح. ما تغيّر ولا إعداد.'">
                     <x-lq.button variant="secondary" icon="refresh" :href="route('dashboard.settings') . '?tab=' . $tab">حدّث الصفحة</x-lq.button>
                 </x-lq.empty-state>
             @else

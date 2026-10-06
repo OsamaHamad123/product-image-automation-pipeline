@@ -1131,6 +1131,7 @@ def test_unavailable_sources_are_said_never_zero(app_env):
     island = re.search(r'id="lq-home-initial">(.*?)</script>', out["/"]["body"], re.DOTALL).group(1)
     assert json.loads(island)["error"] == "database_unavailable"            # the embedded snapshot says why
     assert "قاعدة البيانات مش متاحة" in json.loads(island)["message"]
+    assert "بلّغ المطوّر" in json.loads(island)["message"] and "MariaDB" not in json.loads(island)["message"]
     assert re.search(r'data-home="review-count">—<', out["/"]["body"])      # «—», not 0
 
 
