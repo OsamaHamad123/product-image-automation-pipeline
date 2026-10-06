@@ -173,6 +173,14 @@ class SettingsController extends Controller
         'output_base' => ['gemini' => 400, 'claude' => 600, 'claude-haiku' => 100],
     ];
 
+    /**
+     * قارئ أسماء الشيت المختصرة (catalog_match/normalizer.py، QUERY_NORMALIZER): gemini أو off، الافتراضي gemini، وأي قيمة
+     * غيرهم بتنقرا off. تقدير tokens لكل منتج نفس normalizer.estimate_tokens لسطر مرجعي (اختبار بايثون بيقارن الاثنين).
+     */
+    public const QUERY_NORMALIZER_MODES = ['gemini', 'off'];
+    public const QUERY_NORMALIZER_DEFAULT = 'gemini';
+    public const NORMALIZER_ESTIMATE = ['model' => 'gemini:gemini-3.1-flash-lite', 'input_tokens' => 368, 'output_tokens' => 120];
+
     /** مفتاح كل مزود نماذج: الإعداد في system_settings ومتغير البيئة المقابل. */
     public const VERIFIER_KEYS = [
         'gemini' => ['setting' => 'gemini_api_key', 'env' => 'GEMINI_API_KEY', 'name' => 'Gemini'],
@@ -198,7 +206,7 @@ class SettingsController extends Controller
         'OUTPUT_CANVAS_SIZE', 'OUTPUT_BACKGROUND', 'GEMINI_MODEL', 'SEARCH_ENGINE',
         'VERIFIER_PRIMARY', 'VERIFIER_STRONG', 'VERIFIER_MONTHLY_BUDGET_USD', 'MODEL_PRICES',
         'EXPANSION_ENABLED', 'EXPANSION_MAX_CALLS', 'VISUAL_SEARCH', 'SERPAPI_LENS_PRICE_USD', 'GTIN_POLICY',
-        'LOCAL_INDEX_ENABLED', 'LOCAL_INDEX_MAX_PAGES', 'WORKER_CONCURRENCY',
+        'LOCAL_INDEX_ENABLED', 'LOCAL_INDEX_MAX_PAGES', 'WORKER_CONCURRENCY', 'QUERY_NORMALIZER',
     ];
 
     public function show(Request $request)
@@ -1142,13 +1150,14 @@ class SettingsController extends Controller
 
     /**
      * تبويب «نماذج التحقق»: الاختيار المحفوظ (أو .env أو الافتراضي كما يقرؤه config.py)، صف لكل نموذج مدعوم بسعره
-     * وتقدير تكلفته لكل 100 منتج، صرف الشهر من verifier_spend، وتحذيرات المفاتيح الناقصة. لا مفتاح يُقرأ هنا: بس محفوظ أو لا.
+     * وتقدير تكلفته لكل 100 منتج، صرف الشهر من verifier_spend، وتحذيرات المفاتيح الناقصة، وقارئ أسماء الشيت المختصرة
+     * (query_normalizer) مع تكلفته التقديرية. لا مفتاح يُقرأ هنا: بس محفوظ أو لا.
      */
     public static function modelsData(array $stored, ?array $spend): array
     {
         $value = fn (string $k) => trim((string) ($stored[$k]['value'] ?? ''));
         $env = self::envValues(['GEMINI_MODEL', 'VERIFIER_PRIMARY', 'VERIFIER_STRONG', 'VERIFIER_MONTHLY_BUDGET_USD',
-                                'MODEL_PRICES']);
+                                'MODEL_PRICES', 'QUERY_NORMALIZER']);
         $gemini = $value('gemini_model') !== '' ? $value('gemini_model')
             : (trim((string) ($env['GEMINI_MODEL'] ?? '')) ?: self::VERIFIER_DEFAULT_PRIMARY_MODEL);
         $primary = strtolower($value('verifier_primary') ?: trim((string) ($env['VERIFIER_PRIMARY'] ?? '')));
@@ -1201,7 +1210,16 @@ class SettingsController extends Controller
         }
 
         $strongSpent = is_array($spend) ? (float) ($spend['strong_usd'] ?? 0) : null;
+        $normalizer = strtolower($value('query_normalizer') ?: trim((string) ($env['QUERY_NORMALIZER'] ?? '')));
+        $normalizer = $normalizer === '' ? self::QUERY_NORMALIZER_DEFAULT
+            : (in_array($normalizer, self::QUERY_NORMALIZER_MODES, true) ? $normalizer : 'off');
+        $normalizer100 = self::normalizerPer100($prices);
         return [
+            'normalizer' => $normalizer,
+            'normalizer_on' => $normalizer === 'gemini',
+            'normalizer_key_saved' => $keySaved['gemini'] ?? false,
+            'normalizer_per100' => $normalizer100,
+            'normalizer_per100_text' => self::money($normalizer100),
             'primary' => $primary,
             'primary_supported' => isset(self::VERIFIER_MODELS[$primary]),
             'strong' => $strong,
@@ -1271,6 +1289,15 @@ class SettingsController extends Controller
         return round(100 * $call, 2);
     }
 
+    /** دولار لكل 100 منتج لقارئ أسماء الشيت (نفس 100 * normalizer.estimate_usd): قراءة وحدة لكل منتج جديد، والمحفوظة ببلاش. */
+    public static function normalizerPer100(array $prices): float
+    {
+        $e = self::NORMALIZER_ESTIMATE;
+        $price = $prices[$e['model']] ?? ['input' => 0.0, 'output' => 0.0];
+        $call = round(($e['input_tokens'] * $price['input'] + $e['output_tokens'] * $price['output']) / 1e6, 6);
+        return round(100 * $call, 3);
+    }
+
     /** اسم حقل السعر لكل نموذج (المعرّف فيه ':' و'.'). */
     public static function modelSlug(string $id): string
     {
@@ -1314,7 +1341,8 @@ class SettingsController extends Controller
     }
 
     /**
-     * حفظ «نماذج التحقق»: النموذج الأساسي والقوي (أو 'off') من القائمة المدعومة فقط، الميزانية الشهرية، والأسعار.
+     * حفظ «نماذج التحقق»: النموذج الأساسي والقوي (أو 'off') من القائمة المدعومة فقط، الميزانية الشهرية، والأسعار،
+     * وقارئ أسماء الشيت المختصرة (gemini أو off).
      * اختيار غير مدعوم أو رقم غير صالح ما بيتغير (مع تحذير)، والباقي بينحفظ. الأساسي Gemini بيحدّث gemini_model كمان
      * حتى فحص بدء العامل وصفحة الصحة يشوفوا نفس النموذج.
      */
@@ -1336,6 +1364,16 @@ class SettingsController extends Controller
             $changes['verifier_strong'] = $strong;
         } else {
             $warnings[] = 'النموذج القوي اللي اخترته مش من القائمة المدعومة؛ ما تغيّر.';
+        }
+        // قارئ أسماء الشيت: gemini أو off بس؛ نموذج قديم بلا هالحقل ما بيغيّره
+        $normalizer = $request->input('query_normalizer');
+        if ($normalizer !== null) {
+            $normalizer = is_scalar($normalizer) ? strtolower(trim((string) $normalizer)) : '';
+            if (in_array($normalizer, self::QUERY_NORMALIZER_MODES, true)) {
+                $changes['query_normalizer'] = $normalizer;
+            } else {
+                $warnings[] = 'اختيار قراءة الأسماء المختصرة مش مفهوم؛ ما تغيّر.';
+            }
         }
         $budget = self::field($request, 'verifier_monthly_budget_usd');
         if (preg_match('/^\d{1,4}(\.\d{1,2})?$/', $budget) && (float) $budget <= self::VERIFIER_BUDGET_MAX) {
