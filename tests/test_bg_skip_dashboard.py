@@ -407,11 +407,11 @@ out.retried = requests('/api/select_image').length;
                config={"row": 30, "bg": {"method": "photoroom", "previous": "photoroom", "confirm": "CONFIRM-SKIP"}})
     assert PROVIDER_TEXT[code] in out["text"] and code not in out["text"]
     assert "تجاوز عزل الخلفية…" in out["buttons"] and "أعد المحاولة" in out["buttons"]
-    assert out["confirms"] == ["CONFIRM-SKIP"] and out["saved"] == [{"method": "none"}]
-    assert ["success", "عزل الخلفية متوقف: اضغط «أعد المحاولة» على الصور اللي ما مشيت لتنتشر متل ما هي على لوحة بيضا."] \
+    assert out["confirms"] == ["تجاوز عزل الخلفية؟ CONFIRM-SKIP"] and out["saved"] == [{"method": "none"}]
+    assert ["success", "عزل الخلفية متوقف: اضغط «أعد المحاولة» على الصور اللي فشلت لتنعتمد متل ما هي على لوحة بيضا."] \
         in out["toasts"]
     assert "تجاوز عزل الخلفية…" not in out["afterButtons"]
-    assert "عزل الخلفية متوقف هلق: «أعد المحاولة» بينشرها متل ما هي." in out["after"]
+    assert "عزل الخلفية متوقف هلق: «أعد المحاولة» بيعتمدها متل ما هي." in out["after"]
     assert out["retried"] == 2                                            # «أعد المحاولة» sends the approval again
 
 
@@ -471,9 +471,9 @@ openRow(30);
 out.text = wsText();
 """, tmp_path, fixture([picked(30, "Almarai Milk 1L"), picked(31, "Almarai Laban 1L")]), config={"row": 30})
     said = [t for v, t in out["toasts"] if "بدون عزل الخلفية" in t]
-    assert len(said) == 1 and said[0].startswith("انتشرت صورة «")             # once per session, as information
+    assert len(said) == 1 and said[0].startswith("انعتمدت صورة «")             # once per session, as information
     assert [v for v, t in out["toasts"] if "بدون عزل الخلفية" in t] == ["info"]
-    assert "تم الاعتماد." in out["text"] and "انتشرت بدون عزل الخلفية:" in out["text"]
+    assert "تم الاعتماد." in out["text"] and "انعتمدت بدون عزل الخلفية:" in out["text"]
     assert "الخلفية لم تُعزل" not in out["text"]
 
 

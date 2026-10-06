@@ -27,10 +27,13 @@ const css = fs.readFileSync(`${D}/css/laqta.css`, 'utf8') + '\n' + fs.readFileSy
 const FX = __FIXTURE__;
 const PNG = Buffer.from(__PNG__, 'base64');
 const SHOTS = __SHOTS__;
-const cfg = { mode: 'single', filter: 'all', row: 50, canvas: 800, db: 'online', autoSearchDelayMs: 0, urls: {} };
+const cfg = { mode: 'single', filter: 'all', row: 50, canvas: 800, db: 'online', autoSearchDelayMs: 0, approveUndoMs: 0, urls: {} };
 const html = `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="csrf-token" content="t"><style>${css}</style></head>
 <body class="page-review"><main class="lq-main lq-main--flush"><div id="rvApp" class="rv-app" data-config='${JSON.stringify(cfg)}'></div></main>
-<script>window.confirm=()=>true;window.Laqta={toast(){return {close(){},update(){}}},onRunStatus(){}};</script>
+<script>window.Laqta={toast(){return {close(){},update(){}}},onRunStatus(){}};
+// the review screen asks in the page (R.ask): «متأكد» is clicked, like confirm() returning true
+new MutationObserver(() => { const b = document.getElementById('rvAskConfirm'); if (b && !b.__auto) { b.__auto = 1; setTimeout(() => b.click(), 0); } })
+  .observe(document.documentElement, { childList: true, subtree: true });</script>
 ${scripts.map(s => `<script>${s}</script>`).join('\n')}</body></html>`;
 const out = {};
 (async () => {
@@ -124,7 +127,7 @@ def test_a_product_without_a_pick_in_a_browser(tmp_path):
     assert len(out["grid"]) == 6 and len(first_row) == 5, out["grid"]
     assert all(c["thumbSeen"] and c["whySeen"] for c in first_row), out["grid"]
     assert all(c["pressed"] == "false" for c in out["grid"])                                 # nothing pre-selected
-    assert out["grid"][0]["why"] == "لماذا لم تُختر: قارئ الملصق ما تأكد، والشيت ما فيه حجم"
+    assert out["grid"][0]["why"] == "ليش ما انختارت: قارئ الملصق ما تأكد، والشيت ما فيه حجم"
     assert out["approveBefore"] is True and out["sentBefore"] == 0
     assert out["picked"] == ["https://www.carrefouruae.com/np-1.png", False]
     assert out["sent"] == ["https://www.carrefouruae.com/np-1.png"]

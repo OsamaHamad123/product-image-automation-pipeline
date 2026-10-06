@@ -178,7 +178,7 @@ def test_the_routes_and_the_card_are_registered():
     for hook in ("brands", "brands-title", "brands-lead", "brands-list", "brands-foot", "brands-add-all", "brands-refresh",
                  "brands-error", "brands-done"):
         assert f'data-run="{hook}"' in view
-    assert "أضف الكل بدون مواقع" in view and "ماركات ناقصة من Brands Mapping" in view
+    assert "أضف الكل بدون مواقع" in view and "ماركات ناقصة من جدول الماركات" in view
     assert ".lq-run-brand__actions" in (DASH / "public" / "css" / "pages" / "run.css").read_text(encoding="utf-8")
 
 
@@ -226,8 +226,9 @@ def test_the_card_lists_each_missing_brand_with_its_fields_and_buttons():
     process.exit(0);
 })();
 """)
-    assert out["title"] == "ماركات ناقصة من Brands Mapping (2)" and out["state"] == "ready"
-    assert out["lead"].startswith("هالماركات بالطابور وما إلها صف بـ Brands Mapping") and out["rows"] == 2
+    assert out["title"] == "ماركات ناقصة من جدول الماركات (2)" and out["state"] == "ready"
+    # «جدول الماركات», explained once as the sheet's «Brands Mapping» tab
+    assert out["lead"].startswith("هالماركات بالطابور وما إلها صف بجدول الماركات (ورقة «Brands Mapping» بالشيت)") and out["rows"] == 2
     assert out["footHidden"] is False
     # the Arabic name first, then the store spellings, without the repeat «meliha» or an empty item
     assert out["a"] == {"name": "MELIHA", "rows": "5 صفوف", "syn": "مليحة، Mleiha، Maliha", "site": "", "cost": "بتكلّف بحث واحد",
@@ -299,7 +300,7 @@ reply['/api/run/brand-add'] = { status: 200, body: { status: 'success', added: [
 """)
     assert out["post"] == [{"url": "/api/run/brand-add", "method": "POST", "body": {
         "brand": "MELIHA", "synonyms": ["مليحة", "Mleiha", "Maliha"], "official_domains": ["www.meliha.ae"]}}]
-    assert out["left"] == ["SABA SANABEL"] and out["title"] == "ماركات ناقصة من Brands Mapping (1)"
+    assert out["left"] == ["SABA SANABEL"] and out["title"] == "ماركات ناقصة من جدول الماركات (1)"
     assert out["done"] == "انضافت الماركة. التشغيل الجاي بيعرفها." and out["doneHidden"] is False
     assert out["toast"][-1] == ["انضافت الماركة. التشغيل الجاي بيعرفها.", "success"] and out["foot"] is False
 
@@ -352,8 +353,8 @@ reply['/api/run/brand-add-all'] = { status: 200, body: { status: 'success', adde
     assert "أضف الكل بدون مواقع" in out["asked"] and "(2)" in out["asked"] and out["asked"].endswith("بدك تضيفها؟")
     assert out["post"] == [{"url": "/api/run/brand-add-all", "method": "POST", "body": {"items": [
         {"brand": "MELIHA", "synonyms": ["مليحة", "Mleiha"]}, {"brand": "SABA SANABEL", "synonyms": []}]}}]
-    assert out["rows"] == 0 and out["title"] == "ماركات ناقصة من Brands Mapping (0)" and out["foot"] is True
-    assert out["lead"] == "كل ماركات الطابور موجودة بـ Brands Mapping." and out["state"] == "clean"
+    assert out["rows"] == 0 and out["title"] == "ماركات ناقصة من جدول الماركات (0)" and out["foot"] is True
+    assert out["lead"] == "كل ماركات الطابور موجودة بجدول الماركات." and out["state"] == "clean"
     assert out["done"] == "انضافت ماركتين. التشغيل الجاي بيعرفهم."
 
 
@@ -373,8 +374,8 @@ def test_the_card_says_when_nothing_is_missing_or_the_list_cannot_be_read():
     process.exit(0);
 })();
 """)
-    assert out["clean"] == {"state": "clean", "count": 0, "title": "ماركات ناقصة من Brands Mapping (0)", "brands": [],
-                            "lead": "كل ماركات الطابور موجودة بـ Brands Mapping."}
+    assert out["clean"] == {"state": "clean", "count": 0, "title": "ماركات ناقصة من جدول الماركات (0)", "brands": [],
+                            "lead": "كل ماركات الطابور موجودة بجدول الماركات."}
     assert out["error"]["state"] == "error" and out["error"]["lead"] == "ما قدرنا نقرأ الماركات الناقصة هلق. جرّب بعد شوي."
     assert out["none"] == "ما قدرنا نقرأ الماركات الناقصة هلق."
     assert out["body"] == {"brand": "X", "synonyms": ["a", "b"], "official_domains": []}

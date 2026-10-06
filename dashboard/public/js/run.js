@@ -17,17 +17,17 @@
 
     // No silent destructive button: each confirmation says what happens and what is kept.
     var STOP_CONFIRM_TEXT = 'إيقاف التشغيل:\n' +
-        '• يكمّل العامل المنتجات الجارية ثم يتوقف ويكتب تقرير التشغيل (إذا ما توقف خلال دقيقة ونص بيُنهى)، وإن كان التشغيل ما زال يقرأ الشيت فيتوقف قبل البحث عن أي منتج.\n' +
-        '• تعود الصفوف التي كانت قيد المعالجة إلى الانتظار لتُعالج في التشغيل القادم.\n' +
-        '• لا يُحذف أي صف: المنتجات الجاهزة للمراجعة والمعتمدة والفاشلة تبقى كما هي.\n\n' +
+        '• العامل بيكمّل المنتجات اللي بإيده وبعدين بيوقف وبيكتب تقرير التشغيل (إذا ما وقف خلال دقيقة ونص منوقفه). وإذا لسا عم يقرأ الشيت، بيوقف قبل ما يدوّر على أي منتج.\n' +
+        '• الصفوف اللي كانت عم تتعالج بترجع تستنى، وبتتعالج بالتشغيل الجاي.\n' +
+        '• ما في ولا صف بينمسح: الجاهز للمراجعة والمعتمد والفاشل بيضلّوا متل ما هنّي.\n\n' +
         'بدك توقف التشغيل؟';
 
     var RESET_CONFIRM_TEXT = 'إصلاح تشغيل عالق (استعمله بس إذا التشغيل عالق أو ضلّ عطل قديم ظاهر):\n' +
-        '• يُوقف أي عامل ما زال يعمل في الخلفية بعد المنتجات الجارية (إذا ما توقف خلال دقيقة ونص بيُنهى).\n' +
-        '• يحذف ملف القفل وعدادات التقدم والتنبيه، ويلغي الإيقاف المؤقت.\n' +
-        '• تعود الصفوف العالقة في «قيد المعالجة» إلى الانتظار.\n' +
-        '• يُعاد تحميل قائمة المنتجات من الشيت.\n' +
-        '• لا يُحذف أي منتج جاهز للمراجعة أو معتمد أو فاشل، ولا أي مرشح أو قرار مراجعة.\n\n' +
+        '• بيوقف أي عامل لسا شغّال بالخلفية بعد ما يكمّل المنتجات اللي بإيده (إذا ما وقف خلال دقيقة ونص منوقفه).\n' +
+        '• بيمسح ملف القفل وعدادات التقدم والتنبيه، وبيلغي الإيقاف المؤقت.\n' +
+        '• الصفوف العالقة بـ «عم تتعالج» بترجع تستنى.\n' +
+        '• بنقرأ قائمة المنتجات من الشيت من جديد.\n' +
+        '• ما في ولا منتج جاهز للمراجعة أو معتمد أو فاشل بينمسح، ولا أي اقتراح أو قرار مراجعة.\n\n' +
         'بدك تكمّل؟';
 
     var FORCE_CONFIRM_TEXT = 'إعادة البحث حتى للمنتجات اللي إلها صورة:\n' +
@@ -36,6 +36,9 @@
         '• الصور المنشورة بالشيت بتضل مكانها لحد ما تعتمد غيرها (أو ينشر النشر الآلي صورة مؤكدة لماركتها)، ' +
         'وما بينكتب أبداً فوق صورة اعتمدها مراجع.\n\n' +
         'بدك تبدأ؟';
+
+    // «راجع النتائج» و«راجع الجاهز هلق»: قائمة المراجعة بوضع الجملة (الصور الجاهزة مع بعض)
+    var REVIEW_HREF = '/catalog?mode=bulk';
 
     var CHIPS = {
         loading: { label: 'لحظة…', status: 'none' },
@@ -131,7 +134,10 @@
             }
             processedCounts.requeued = 0;
             var tiles = C.resultTiles(processedCounts);
+            var readyNow = C.num(b.ready_for_review) || 0;
             view.progress = {
+                // ما خلص التشغيل بعد، بس في صور جاهزة: بتقدر تبلّش تراجعها هلق (وضع الجملة)
+                reviewNow: readyNow > 0 ? { label: 'راجع الجاهز هلق (' + readyNow + ')', href: REVIEW_HREF } : null,
                 starting: starting,
                 done: starting ? null : done,
                 total: starting ? null : total,
@@ -176,7 +182,8 @@
                 explain: String(run.explain || ''),
                 reviewCount: ready,
                 reviewVisible: ready > 0,
-                reviewLabel: ready > 0 ? 'راجع النتائج (' + ready + ')' : ''
+                reviewLabel: ready > 0 ? 'راجع النتائج (' + ready + ')' : '',
+                reviewHref: REVIEW_HREF
             };
             view.meta = previous ? '' : C.runMeta(run, (nowSec || Date.now() / 1000) * 1000);
             if (view.startFailed) view.message = 'التشغيل الجديد وقف قبل ما يبحث عن ولا منتج. السبب بالشريط فوق.';
@@ -304,22 +311,22 @@
                      lead: 'كل صفوف الشيت (' + C.countText(total, 'منتج', 'منتجين', 'منتجات') + ') فيها حجم وباركود وماركة معروفة، وما لقينا غلطة إملائية.' };
         }
         return { state: 'ready', groups: groups,
-                 lead: 'هالصفوف بتمنع اختيار واثق أو بتخلي البحث يغلط. صلّحها بالشيت (أو بـ Brands Mapping) وأعد البحث عنها.' };
+                 lead: 'هالصفوف بتمنع اختيار واثق أو بتخلي البحث يغلط. صلّحها بالشيت (أو بجدول الماركات) وأعد البحث عنها.' };
     }
 
-    // «ماركات ناقصة من Brands Mapping» (GET /api/run/brand-suggestions): the brands the queue names that the sheet has no
+    // «ماركات ناقصة من جدول الماركات» (GET /api/run/brand-suggestions): the brands the queue names that the sheet has no
     // row for. Writes happen only through the two buttons of each brand («أضف») and «أضف الكل بدون مواقع».
     var BRAND_SYNONYM_MAX = 10;
-    var BRANDS_LEAD = 'هالماركات بالطابور وما إلها صف بـ Brands Mapping، فالبحث بيعتبرها «ماركة غير معروفة» وما بينشر صورها لحاله. ' +
+    var BRANDS_LEAD = 'هالماركات بالطابور وما إلها صف بجدول الماركات (ورقة «Brands Mapping» بالشيت)، فالبحث بيعتبرها «ماركة غير معروفة» وما بينشر صورها لحاله. ' +
         'راجع المرادفات (الاسم العربي وكتابات المتاجر اللي لقاها البحث) وأضفها: التشغيل الجاي بيعرفها.';
-    var BRANDS_CLEAN = 'كل ماركات الطابور موجودة بـ Brands Mapping.';
+    var BRANDS_CLEAN = 'كل ماركات الطابور موجودة بجدول الماركات.';
     var BRANDS_ERROR = 'ما قدرنا نقرأ الماركات الناقصة هلق.';
     var BRAND_ADDED_TEXT = 'انضافت الماركة. التشغيل الجاي بيعرفها.';
     var SITE_COST_NOTE = 'بتكلّف بحث واحد';
     var BRAND_REQUEST_ERROR = 'ما قدرنا نوصل للخادم. ما انكتب شي.';
 
     function brandsTitle(count) {
-        return 'ماركات ناقصة من Brands Mapping (' + count + ')';
+        return 'ماركات ناقصة من جدول الماركات (' + count + ')';
     }
 
     function brandRowsText(n) {
@@ -576,7 +583,14 @@
                 deps.renderStart({ error: state.plan.invalid });
                 return Promise.resolve(false);
             }
-            if (body.forceOverwrite && !deps.confirm(FORCE_CONFIRM_TEXT)) return Promise.resolve(false);
+            // deps.confirm: true / false، أو Promise (سؤال الصفحة Laqta.ask)
+            return Promise.resolve(body.forceOverwrite ? deps.confirm(FORCE_CONFIRM_TEXT) : true).then(function (ok) {
+                if (!ok) return false;
+                return send(body);
+            });
+        }
+
+        function send(body) {
             state.busy = true;
             deps.renderStart({ busy: true });
             return deps.fetchJson('/api/run-all', { method: 'POST', body: body }).then(function (res) {
@@ -619,14 +633,18 @@
         }
 
         function stop() {
-            if (!deps.confirm(STOP_CONFIRM_TEXT)) return Promise.resolve(false);
-            deps.toast('عم نوقف التشغيل: العامل بيكمّل المنتجات الجارية (حتى دقيقة ونص).', 'info');
-            return control('/api/stop-batch', 'انوقف التشغيل، وما انحذف ولا صف.', 'ما قدرنا نوقف التشغيل.');
+            return Promise.resolve(deps.confirm(STOP_CONFIRM_TEXT)).then(function (ok) {
+                if (!ok) return false;
+                deps.toast('عم نوقف التشغيل: العامل بيكمّل المنتجات اللي بإيده (حتى دقيقة ونص).', 'info');
+                return control('/api/stop-batch', 'انوقف التشغيل، وما انحذف ولا صف.', 'ما قدرنا نوقف التشغيل.');
+            });
         }
 
         function reset() {
-            if (!deps.confirm(RESET_CONFIRM_TEXT)) return Promise.resolve(false);
-            return control('/api/batch/reset', 'انصلح التشغيل العالق، وما انحذف ولا منتج.', 'ما قدرنا نصلّح التشغيل.');
+            return Promise.resolve(deps.confirm(RESET_CONFIRM_TEXT)).then(function (ok) {
+                if (!ok) return false;
+                return control('/api/batch/reset', 'انصلح التشغيل العالق، وما انحذف ولا منتج.', 'ما قدرنا نصلّح التشغيل.');
+            });
         }
 
         return {
@@ -689,6 +707,14 @@
             });
         }
 
+        // «نبّهني لما يخلص»: بس لما المتصفح بيدعم الإشعارات ولسا ما انسأل (الإذن بينطلب من ضغطة المالك بس)
+        function renderNotify() {
+            var btn = $('notify');
+            if (!btn) return;
+            var notice = root.Laqta && root.Laqta.runNotice;
+            C.setHidden(btn, !(notice && notice.supported() && notice.permission() === 'default'));
+        }
+
         function renderLive(view) {
             var card = $('current');
             card.setAttribute('data-state', view.state);
@@ -744,6 +770,17 @@
                 C.setHidden($('pause-icon-play'), p.pause.icon !== 'play');
                 $('stop').disabled = p.stop.disabled;
                 C.setText($('stop-text'), p.stop.label);
+                var now = $('review-now');
+                if (now) {
+                    C.setHidden(now, !p.reviewNow);
+                    if (p.reviewNow) {
+                        now.setAttribute('href', p.reviewNow.href);
+                        C.setText($('review-now-text'), p.reviewNow.label);
+                    }
+                }
+                renderNotify();
+            } else {
+                C.setHidden($('notify'), true);
             }
 
             var f = view.finished;
@@ -755,6 +792,7 @@
                 C.setHidden($('explain'), !f.explain);
                 C.setHidden($('review'), !f.reviewVisible);
                 C.setText($('review-text'), f.reviewLabel);
+                if (f.reviewHref) $('review').setAttribute('href', f.reviewHref);
             }
 
             C.setHidden($('stuck'), !view.stuck.visible);
@@ -1003,7 +1041,12 @@
 
         function addAllBrands() {
             if (!brandRows.length) return Promise.resolve();
-            if (!root.confirm(addAllConfirmText(brandRows.length))) return Promise.resolve();
+            return C.ask(addAllConfirmText(brandRows.length)).then(function (ok) {
+                if (ok) return addAllConfirmed();
+            });
+        }
+
+        function addAllConfirmed() {
             brandNote('');
             var btn = $('brands-add-all');
             var rows = brandRows.slice();
@@ -1192,7 +1235,12 @@
         function writeBarcodes() {
             var body = barcodeWriteBody(barcodeRows);
             if (!body.items.length) return Promise.resolve();
-            if (!root.confirm(BARCODE_CONFIRM_TEXT)) return Promise.resolve();
+            return C.ask(BARCODE_CONFIRM_TEXT).then(function (ok) {
+                if (ok) return writeConfirmed(body);
+            });
+        }
+
+        function writeConfirmed(body) {
             barcodeNote('');
             var btn = $('barcodes-write');
             btn.disabled = true;
@@ -1258,7 +1306,7 @@
             renderLive: renderLive,
             renderPlan: renderPlan,
             renderStart: renderStart,
-            confirm: function (text) { return root.confirm(text); },
+            confirm: function (text) { return C.ask(text); },
             toast: C.toast,
             now: function () { return Date.now() / 1000; },
             schedule: function (fn, ms) { return root.setTimeout(fn, ms); }
@@ -1297,6 +1345,17 @@
             else controller.pause();
         });
         $('stop').addEventListener('click', function () { controller.stop(); });
+        if ($('notify')) {
+            $('notify').addEventListener('click', function () {
+                var notice = root.Laqta && root.Laqta.runNotice;
+                if (!notice) return;
+                notice.request().then(function (p) {
+                    renderNotify();
+                    C.toast(p === 'granted' ? 'تمام: بنبّهك لما يخلص التشغيل، حتى لو كنت بصفحة ثانية.'
+                        : 'المتصفح ما سمح بالتنبيهات. بتقدر تسمح فيها من إعدادات الموقع بالمتصفح.', p === 'granted' ? 'success' : 'warning');
+                });
+            });
+        }
         $('reset').addEventListener('click', function () { controller.reset(); });
         $('quality-refresh').addEventListener('click', function () { loadQuality(true); });
         $('brands-refresh').addEventListener('click', function () { loadMissing(); });

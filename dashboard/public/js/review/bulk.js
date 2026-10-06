@@ -1,13 +1,17 @@
 /*
  * لقطة · المراجعة — bulk mode (?mode=bulk): the products waiting for review as cards, filtered by brand and status.
  *
- * "اعتماد N صور مقترحة بلا تحذير" only ever takes images the system pre-selected WITHOUT a warning; a card with a
- * warning shows it and is approved on its own (after the warning is confirmed) or opened in single mode. Approvals
- * and rejections go through the same background queue as single mode: one request at a time.
+ * "اعتماد N صور بلا تحذير" only ever takes images the system pre-selected WITHOUT a warning; a card with a warning
+ * shows it and is approved on its own (after the warning is confirmed) or opened in single mode. Approvals and
+ * rejections go through the same background queue as single mode (approvals held a few seconds for «تراجع»).
+ *
+ * The status chips are the one filter set of the review screen (R.FILTERS, S.filter): switching mode keeps them. The
+ * chips of products that need work one by one (ما انلقت، أعطال، الخلفية) open single mode.
  *
  * The cards come in order of confidence (pre-selected without a warning, the reviewer's earlier pick, with a warning,
  * nothing proposed), each brand's cards together. Keys: arrows move between cards, Space ticks the focused card,
- * A approves it (after its warnings, like its button), Shift+A is the bulk button (the ticked ones without warning).
+ * Shift+click ticks a range, A approves the focused card (after its warnings, like its button), Shift+A is the bulk
+ * button (the ticked ones without warning), R / X rejects the focused card (then 1–7 for the reason), Z zooms.
  *
  * The reviewer never approves a picture they did not see: a card counts as seen once its picture has loaded while the
  * card was in the viewport (IntersectionObserver). Only seen cards are pre-ticked, approved by A or included in
@@ -25,15 +29,9 @@
         return R.S;
     }
 
-    const BULK_FILTERS = [
-        { key: 'all', label: 'الكل' },
-        { key: 'eligible', label: 'مقترحة بلا تحذير' },
-        { key: 'strict', label: 'مؤكدة تماماً' },
-        { key: 'warning', label: 'فيها تحذير' },
-        { key: 'none', label: 'بلا اقتراح' }
-    ];
-
     const PAGE = 48;
+    // أقل عدد قرارات قبل ما نقدّر الوقت الباقي («باقي ~12 دقيقة»)
+    const PACE_MIN = 3;
 
     function norm(v) {
         return String(v || '').toLowerCase().replace(/\s+/g, ' ').trim();
@@ -142,14 +140,24 @@
         return m.lane;
     }
 
-    function byFilter(list, f) {
-        if (f === 'all') return list;
-        if (f === 'strict') return list.filter(it => laneOfCard(it) === 'strict');
-        return list.filter(it => kindOf(it) === f);
+    // رقاقات المجموعة المشتركة (R.FILTERS) على حالة البطاقة الأصلية: البطاقة اللي انعتمدت هلق بتضل بمكانها بعلامتها
+    function byFilter(list, key) {
+        const f = R.filterOf ? R.filterOf(key) : (R.FILTERS.find(x => x.key === key) || R.FILTERS[0]);
+        if (!f.waiting) return [];
+        if (f.key === 'all') return list;
+        if (f.key === 'eligible') return list.filter(it => kindOf(it) === 'eligible');
+        if (f.key === 'strict') return list.filter(it => laneOfCard(it) === 'strict');
+        if (f.key === 'proposed') return list.filter(it => kindOf(it) !== 'none');
+        return list.filter(it => kindOf(it) === f.key);
+    }
+
+    function currentFilter() {
+        const f = R.filterOf ? R.filterOf(st().filter) : null;
+        return f && f.waiting ? f.key : 'all';
     }
 
     function visibleCards() {
-        return byFilter(byBrand(source()), st().bulk.filter);
+        return byFilter(byBrand(source()), currentFilter());
     }
 
     // البطاقات المرسومة فعلاً (أول B.limit). التحديد والاعتماد والرفض بالجملة لا يلمسون صورة ما شافها المراجع
@@ -184,8 +192,25 @@
         }
     }
 
+    // Shift + ضغطة: كل البطاقات القابلة للتحديد بين آخر بطاقة ضغطها المراجع وهاي بتاخد نفس الحالة
+    function tickRange(fromKey, toKey, on) {
+        const list = shownCards();
+        const a = list.findIndex(it => it.key === fromKey);
+        const b = list.findIndex(it => it.key === toKey);
+        if (a < 0 || b < 0) return 0;
+        let n = 0;
+        list.slice(Math.min(a, b), Math.max(a, b) + 1).forEach(it => {
+            if (!selectable(it)) return;
+            toggleTick(it, on);
+            n += 1;
+        });
+        return n;
+    }
+
     // -------------------------------------------------------------------------------------------------
-    // Structure
+    // Structure: the head (title, mode toggle, progress, lane meter), the tools (brand, chips, export), then the bar
+    // (count + approve + reject) as a direct child of the section so it stays in view over the grid: sticky at the top
+    // on a desktop, at the bottom on a phone (review.css)
     // -------------------------------------------------------------------------------------------------
 
     function build() {
@@ -195,16 +220,10 @@
         if (!box) return;
         clear(box);
         d.bulkCount = el('span', { className: 'rv-bulk__count', text: '' });
-        const single = el('a', { className: 'lq-segmented__item', href: '?', dataset: { mode: 'single' }, text: 'منتج واحد' });
-        single.addEventListener('click', e => {
-            e.preventDefault();
-            R.setMode('single');
-        });
+        d.bulkProgress = el('span', { className: 'rv-bulk__progress', id: 'rvBulkProgress', 'aria-live': 'polite', hidden: true });
         d.bulkHead = el('header', { className: 'rv-bulk__head' }, [
-            el('div', { className: 'rv-bulk__titles' }, [el('h1', { className: 'rv-bulk__h1', text: 'قائمة المراجعة' }), d.bulkCount]),
-            el('div', { className: 'lq-segmented rv-bulk__modes', role: 'group', 'aria-label': 'طريقة العرض' }, [
-                single, el('span', { className: 'lq-segmented__item is-active', 'aria-current': 'page', text: 'بالجملة' })
-            ])
+            el('div', { className: 'rv-bulk__titles' }, [el('h1', { className: 'rv-bulk__h1', text: 'قائمة المراجعة' }), d.bulkCount, d.bulkProgress]),
+            R.modeToggle('bulk')
         ]);
         d.bulkBrand = el('select', { className: 'rv-brand__select', 'aria-label': 'الماركة' });
         d.bulkBrand.addEventListener('change', () => {
@@ -216,11 +235,7 @@
         d.bulkFilters = el('div', { className: 'rv-bulk__filters', role: 'group', 'aria-label': 'تصفية حسب الحالة' });
         d.bulkFilters.addEventListener('click', e => {
             const b = e.target && e.target.closest ? e.target.closest('[data-bulk-filter]') : null;
-            if (!b) return;
-            S.bulk.filter = b.getAttribute('data-bulk-filter');
-            S.bulk.limit = PAGE;
-            seedSelection();
-            render();
+            if (b) R.setFilter(b.getAttribute('data-bulk-filter'));
         });
         // الملف يحمل كل حل محفوظ مع حالته (اعتماد مراجع، اختيار آلي، أو مستبدل)، فاسمه يقول ذلك
         d.bulkExport = el('a', { className: 'lq-btn lq-btn--ghost lq-btn--sm rv-bulk__export', href: S.urls.export,
@@ -231,9 +246,11 @@
             d.bulkFilters,
             d.bulkExport
         ]);
-        d.bulkKeys = el('p', { className: 'rv-bulk__keys' }, [
-            R.kbd('← → ↑ ↓'), el('span', { text: ' للتنقل بين البطاقات · ' }), R.kbd('مسافة'), el('span', { text: ' للتحديد · ' }),
-            R.kbd('A'), el('span', { text: ' لاعتماد البطاقة · ' }), R.kbd('Shift+A'), el('span', { text: ' لاعتماد المحددة بلا تحذير' })
+        // سطر المفاتيح: بيختفي على شاشات اللمس (review.css @media (hover: none))
+        d.bulkKeys = el('p', { className: 'rv-bulk__keys rv-keyhint' }, [
+            R.kbd('← → ↑ ↓'), el('span', { text: ' للتنقل · ' }), R.kbd('مسافة'), el('span', { text: ' للتحديد (Shift+ضغطة لمجموعة) · ' }),
+            R.kbd('A'), el('span', { text: ' اعتماد · ' }), R.kbd('R'), el('span', { text: ' رفض · ' }),
+            R.kbd('Z'), el('span', { text: ' تكبير · ' }), R.kbd('?'), el('span', { text: ' كل الاختصارات' })
         ]);
 
         d.bulkPickEligible = el('input', { type: 'checkbox', id: 'rvBulkEligible' });
@@ -246,13 +263,14 @@
             render();
         });
         d.bulkSelected = el('span', { className: 'rv-bulkbar__count', text: '' });
-        d.bulkApprove = el('button', { type: 'button', className: 'rv-bulkbar__approve', id: 'rvBulkApprove', disabled: true, text: '' });
+        d.bulkApprove = el('button', { type: 'button', className: 'rv-bulkbar__approve', id: 'rvBulkApprove', disabled: true, text: '',
+                                       'aria-keyshortcuts': 'Shift+A' });
         d.bulkApprove.addEventListener('click', approveSelected);
         d.bulkReject = el('button', { type: 'button', className: 'rv-bulkbar__reject', id: 'rvBulkReject', disabled: true, text: 'رفض المحدد…' });
-        d.bulkReject.addEventListener('click', openRejectDialog);
+        d.bulkReject.addEventListener('click', () => openRejectDialog());
         d.bulkNote = el('span', { className: 'rv-bulkbar__note', text: '' });
-        d.bulkBar = el('div', { className: 'rv-bulkbar' }, [
-            el('label', { className: 'rv-bulkbar__pick' }, [d.bulkPickEligible, el('span', { text: 'تحديد المقترحة بلا تحذير فقط' })]),
+        d.bulkBar = el('div', { className: 'rv-bulkbar', id: 'rvBulkBar' }, [
+            el('label', { className: 'rv-bulkbar__pick' }, [d.bulkPickEligible, el('span', { text: 'تحديد المقترحة بلا تحذير بس' })]),
             d.bulkSelected,
             d.bulkNote,
             d.bulkApprove,
@@ -262,8 +280,9 @@
         d.bulkGrid.addEventListener('click', onGridClick);
         d.bulkGrid.addEventListener('change', onGridChange);
         d.bulkMore = el('div', { className: 'rv-bulk__more' });
-        d.bulkLane = el('p', { className: 'rv-bulk__lane', role: 'status', hidden: true });
-        box.appendChild(el('div', { className: 'rv-bulk__top' }, [d.bulkHead, d.bulkLane, d.bulkTools, d.bulkBar, d.bulkKeys]));
+        d.bulkLane = el('div', { className: 'rv-bulk__lane', role: 'status', hidden: true });
+        box.appendChild(el('div', { className: 'rv-bulk__top' }, [d.bulkHead, d.bulkLane, d.bulkTools, d.bulkKeys]));
+        box.appendChild(d.bulkBar);
         box.appendChild(d.bulkGrid);
         box.appendChild(d.bulkMore);
     }
@@ -272,19 +291,32 @@
     // Rendering
     // -------------------------------------------------------------------------------------------------
 
-    // سطر التقدم نحو «النشر التلقائي لكل الماركات المؤكدة»: أرقام فئة strict من /api/system/review-lanes (نفس نداء بطاقة
-    // الصحة، مخزّن في الخادم): المعتمد من المراجع، وكم اعتماداً متتالياً بلا رفض بقي (more_needed، حسبه بايثون بصيغة ويلسون).
-    // null بلا أرقام: السطر يختفي بدل ما يقول رقماً ما عرفناه
-    function laneLine(strict) {
+    // عدّاد التقدم نحو «النشر الآلي لكل الماركات المؤكدة»: أرقام فئة strict من /api/system/review-lanes (نفس نداء بطاقة
+    // الصحة، مخزّن في الخادم): المعتمد من المراجع من المراجَع، وكم اعتماداً متتالياً بلا رفض بقي (more_needed، حسبه
+    // بايثون بصيغة ويلسون). «38 / 41 · باقي 12 اعتماد». null بلا أرقام: العداد يختفي بدل ما يقول رقماً ما عرفناه
+    function laneView(strict) {
         if (!strict || typeof strict !== 'object') return null;
-        if (strict.ready === true) return 'النشر التلقائي جاهز للتشغيل من الإعدادات ← النشر الآلي';
+        if (strict.ready === true) {
+            return { ready: true, pct: 100, text: 'جاهز: شغّله من الإعدادات ← النشر الآلي',
+                     title: 'الاقتراحات المؤكدة تماماً وصلت للدقة المطلوبة' };
+        }
         const accepted = parseInt(strict.accepted, 10);
         const reviewed = parseInt(strict.prechecked, 10);
         if (!isFinite(accepted) || !isFinite(reviewed)) return null;
         const more = parseInt(strict.more_needed, 10);
-        const head = `لحتى ينفتح النشر التلقائي لكل الماركات المؤكدة: اعتمدت ${accepted} من ${reviewed} اقتراح مؤكد تماماً`;
-        return isFinite(more) ? `${head}، وبعد ${more} اعتماد متتالي بلا رفض`
-            : `${head}، بس دقتها هلق أقل من الحد المطلوب`;
+        const known = isFinite(more);
+        return {
+            ready: false,
+            pct: known && accepted + more > 0 ? Math.round(100 * accepted / (accepted + more)) : 0,
+            text: `${accepted} / ${reviewed} · ` + (known ? `باقي ${more} اعتماد` : 'الدقة هلق أقل من المطلوب'),
+            title: `اعتمدت ${accepted} من ${reviewed} اقتراح مؤكد تماماً` + (known ? `، وبعد ${more} اعتماد متتالي بلا رفض بينفتح النشر الآلي`
+                : '، بس دقتها هلق أقل من الحد المطلوب')
+        };
+    }
+
+    function laneLine(strict) {
+        const v = laneView(strict);
+        return v ? v.text : null;
     }
 
     const LANES_STALE_MS = 60000;
@@ -293,10 +325,19 @@
     function paintLane() {
         const d = st().dom;
         if (!d.bulkLane) return;
-        const text = lanesState.state === 'ready' ? laneLine(lanesState.strict) : null;
-        d.bulkLane.textContent = text || '';
-        d.bulkLane.hidden = !text;
-        d.bulkLane.classList.toggle('is-ready', !!text && !!(lanesState.strict && lanesState.strict.ready));
+        const v = lanesState.state === 'ready' ? laneView(lanesState.strict) : null;
+        clear(d.bulkLane);
+        d.bulkLane.hidden = !v;
+        d.bulkLane.classList.toggle('is-ready', !!(v && v.ready));
+        if (!v) return;
+        d.bulkLane.setAttribute('title', v.title);
+        d.bulkLane.appendChild(el('span', { className: 'rv-lane-meter__k', text: 'النشر الآلي للماركات المؤكدة' }));
+        d.bulkLane.appendChild(el('span', { className: 'lq-progress lq-progress--sm rv-lane-meter__bar', role: 'progressbar',
+                                            'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': String(v.pct),
+                                            'aria-label': v.title }, [
+            el('span', { className: `lq-progress__bar lq-tone--${v.ready ? 'success' : 'teal'}`, style: `width: ${v.pct}%` })
+        ]));
+        d.bulkLane.appendChild(el('span', { className: 'rv-lane-meter__v', text: v.text }));
     }
 
     // مرة عند فتح الوضع وبعدها كل دقيقة على الأكثر مع إعادة الرسم (الخادم يخزّن الجواب 60 ثانية: لا نداء جديد ثقيل)
@@ -313,6 +354,41 @@
             lanesState = Object.assign({}, lanesState, { state: 'error', at: Date.now() });
             paintLane();
         });
+    }
+
+    // «37 من 120 · باقي ~12 دقيقة»: قرارات هالجلسة بوضع الجملة (اعتماد أو رفض، بيضلّوا محسوبين بعد ما القراءة الجاية
+    // تشيلهم من المنتظرة) من كل اللي كان بانتظارك، والوقت الباقي من سرعتك من أول ما فتحت الوضع (بعد PACE_MIN قرارات)
+    function minutesText(n) {
+        if (n === 1) return 'دقيقة';
+        if (n === 2) return 'دقيقتين';
+        return n <= 10 ? `${n} دقايق` : `${n} دقيقة`;
+    }
+
+    function progressView() {
+        const B = st().bulk;
+        const done = B.reviewed.size;
+        if (!done) return null;
+        const left = source().filter(it => !busyOrDone(it) && !B.reviewed.has(it.key)).length;
+        let eta = '';
+        if (done >= PACE_MIN && left > 0 && B.startedAt) {
+            const perItem = Math.max(0, Date.now() - B.startedAt) / done;
+            eta = ` · باقي ~${minutesText(Math.max(1, Math.round(perItem * left / 60000)))}`;
+        }
+        return { done: done, total: done + left, text: `${done} من ${done + left}${eta}` };
+    }
+
+    function paintProgress() {
+        const d = st().dom;
+        if (!d.bulkProgress) return;
+        const v = progressView();
+        d.bulkProgress.hidden = !v;
+        d.bulkProgress.textContent = v ? v.text : '';
+    }
+
+    function noteReviewed(keys) {
+        const B = st().bulk;
+        if (!B.startedAt) B.startedAt = Date.now();
+        (keys || []).forEach(k => B.reviewed.add(k));
     }
 
     function statusChip(it) {
@@ -367,10 +443,13 @@
         const state = it.bucket;
         let overlay = null;
         if (state === 'approving' || state === 'rejecting') {
-            overlay = el('span', { className: 'rv-card__overlay' }, [el('span', { className: 'lq-spinner', 'aria-hidden': 'true' }),
-                                                                   el('span', { text: state === 'approving' ? 'جاري الاعتماد…' : 'جاري الرفض…' })]);
+            const job = S.jobs ? S.jobs.activeFor(it.key) : null;
+            overlay = job && job.state === 'held'
+                ? el('span', { className: 'rv-card__overlay is-held' }, [icon('check', 18, 2.2), el('span', { text: 'رح تنعتمد…' })])
+                : el('span', { className: 'rv-card__overlay' }, [el('span', { className: 'lq-spinner', 'aria-hidden': 'true' }),
+                                                                 el('span', { text: state === 'approving' ? 'جاري الاعتماد…' : 'جاري الرفض…' })]);
         } else if (state === 'approved') {
-            overlay = el('span', { className: 'rv-card__overlay is-done' }, [icon('check', 18, 2.2), el('span', { text: 'تم الاعتماد' })]);
+            overlay = el('span', { className: 'rv-card__overlay is-done' }, [icon('check', 18, 2.2), el('span', { text: 'انعتمدت' })]);
         } else if (state === 'rejected') {
             overlay = el('span', { className: 'rv-card__overlay is-muted' }, [el('span', { text: 'رجعت للطابور' })]);
         }
@@ -380,10 +459,11 @@
             tabindex: '-1',
             'aria-current': focused ? 'true' : null
         }, [
-            el('div', { className: 'rv-card__img' + (sel ? '' : ' is-unproposed'), dataset: { tick: shown ? `${it.key}\n${shown.url}` : '' },
-                        title: sel ? null : 'ما في صورة مقترحة: هاي أول صورة لقاها البحث' }, [
+            el('div', { className: 'rv-card__img' + (sel ? '' : ' is-unproposed'),
+                        dataset: Object.assign({ tick: shown ? `${it.key}\n${shown.url}` : '' }, shown ? { zoom: it.key } : {}),
+                        title: sel ? 'كبّر الصورة (Z)' : 'ما في صورة مقترحة: هاي أول صورة لقاها البحث' }, [
                 shown ? cardImage(it, shown, name) : el('span', { className: 'rv-card__none' }, [icon('image', 26, 1.6), el('span', { text: 'بلا اقتراح' })]),
-                el('label', { className: 'rv-card__check', title: can ? 'تحديد' : (sel ? 'ما بينحدد هلق' : 'بلا اقتراح: افتحه لتختار صورة') }, [
+                el('label', { className: 'rv-card__check', title: can ? 'تحديد (Shift لمجموعة)' : (sel ? 'ما بينحدد هلق' : 'بلا اقتراح: افتحه لتختار صورة') }, [
                     el('input', { type: 'checkbox', dataset: { select: it.key }, checked: checked, disabled: !can, 'aria-label': `تحديد ${name}` })
                 ]),
                 el('span', { className: 'rv-card__chip' }, [statusChip(it)]),
@@ -415,6 +495,25 @@
                 ])
             ])
         ]);
+    }
+
+    // الرقاقات: نفس مجموعة وضع منتج واحد (R.FILTERS). اللي مش من المنتظرة بتفتح وضع منتج واحد عليها
+    function drawChips(inBrand, loading, unread) {
+        const S = st();
+        const d = S.dom;
+        const current = currentFilter();
+        clear(d.bulkFilters);
+        R.FILTERS.forEach(f => {
+            const waiting = !!f.waiting;
+            const n = waiting ? byFilter(inBrand, f.key).length : (S.counts[f.key] || 0);
+            if (!waiting && !n) return;          // ما في منتجات بهالرقاقة: ما في داعي تبيّن هون
+            d.bulkFilters.appendChild(el('button', {
+                type: 'button', className: 'lq-filter rv-filter--box' + (waiting ? '' : ' rv-filter--elsewhere'),
+                dataset: { bulkFilter: f.key }, 'aria-pressed': waiting && current === f.key ? 'true' : 'false',
+                title: waiting ? null : 'بتنفتح بوضع منتج واحد'
+            }, [el('span', { text: f.label }),
+                el('span', { className: 'lq-filter__count', text: loading ? '…' : unread ? '—' : String(n) })]));
+        });
     }
 
     function render() {
@@ -450,27 +549,23 @@
         d.bulkBrand.value = B.brand;
 
         const inBrand = byBrand(all);
-        clear(d.bulkFilters);
-        BULK_FILTERS.forEach(f => {
-            const n = byFilter(inBrand, f.key).length;
-            d.bulkFilters.appendChild(el('button', { type: 'button', className: 'lq-filter rv-filter--box', dataset: { bulkFilter: f.key },
-                                                     'aria-pressed': B.filter === f.key ? 'true' : 'false' },
-                                         [el('span', { text: f.label }),
-                                          el('span', { className: 'lq-filter__count', text: loading ? '…' : unread ? '—' : String(n) })]));
-        });
+        drawChips(inBrand, loading, unread);
+        paintProgress();
 
-        const visible = byFilter(inBrand, B.filter);
+        const visible = byFilter(inBrand, currentFilter());
         const shown = visible.slice(0, B.limit);
         if (!B.seeded && S.load.state === 'ready') {
             B.seeded = true;
             seedSelection();
         }
+        if (!B.startedAt && S.load.state === 'ready') B.startedAt = Date.now();
         pruneSelection(shown);
         renderBar(visible, shown);
 
         clear(d.bulkGrid);
         clear(d.bulkMore);
         d.bulkGrid.setAttribute('aria-busy', loading ? 'true' : 'false');
+        d.bulkBar.hidden = !loading && !unread && !all.length;
         if (loading) {
             for (let i = 0; i < 8; i++) {
                 d.bulkGrid.appendChild(el('div', { className: 'rv-card rv-card--skeleton', 'aria-hidden': 'true' }, [
@@ -491,12 +586,15 @@
             return;
         }
         if (!visible.length) {
-            const nothing = !all.length;
+            if (!all.length) {
+                // خلصت المراجعة: شو انعمل اليوم والخطوة الجاية
+                d.bulkGrid.appendChild(el('div', { className: 'rv-bulk__state' }, [R.doneRecap()]));
+                return;
+            }
             d.bulkGrid.appendChild(el('div', { className: 'lq-empty rv-bulk__state' }, [
                 el('span', { className: 'lq-empty__icon' }, [icon('review', 24)]),
-                el('h2', { className: 'lq-empty__title', text: nothing ? 'ما في شي بانتظار مراجعتك' : 'ما في منتجات بهالفلتر' }),
-                el('p', { className: 'lq-empty__text', text: nothing ? 'كل الصور الجاهزة انراجعت. شغّل تشغيل جديد ليجيب نتائج جديدة.'
-                                                                     : 'جرّب ماركة ثانية أو فلتر «الكل».' })
+                el('h2', { className: 'lq-empty__title', text: 'ما في منتجات بهالفلتر' }),
+                el('p', { className: 'lq-empty__text', text: 'جرّب ماركة ثانية أو فلتر «الكل».' })
             ]));
             return;
         }
@@ -521,6 +619,14 @@
         }
     }
 
+    // رقاقة تغيّرت (R.setFilter): الصفحة من أولها والتحديد من جديد
+    function onFilter() {
+        const S = st();
+        S.bulk.limit = PAGE;
+        seedSelection();
+        render();
+    }
+
     function renderBar(visible, shown) {
         const S = st();
         const d = S.dom;
@@ -538,8 +644,7 @@
             && eligibleVisible.filter(seenNow).every(ticked);
         d.bulkPickEligible.disabled = !eligibleVisible.length;
         const k = ready.length;
-        d.bulkApprove.textContent = k === 0 ? 'اعتماد المقترحة بلا تحذير'
-            : k === 1 ? 'اعتماد صورة وحدة مقترحة بلا تحذير' : `اعتماد ${k} صور مقترحة بلا تحذير`;
+        d.bulkApprove.textContent = k === 0 ? 'اعتماد المقترحة بلا تحذير' : `اعتماد ${R.imagesText(k)} بلا تحذير`;
         d.bulkApprove.disabled = k === 0;
         d.bulkReject.disabled = selected.length === 0;
         const notes = [];
@@ -652,52 +757,66 @@
         return ctx;
     }
 
-    function enqueueApprove(it) {
+    // اعتماد مجموعة بطاقات بطلب لكل وحدة: محجوزة سوا approveUndoMs («تراجع» بيرجّعها كلها)، بعدها بالدور
+    function enqueueApprovals(list) {
         const S = st();
-        const sel = selectedOf(it);
-        if (!sel || !approvable(it)) return false;
-        S.keep.delete(it.key);
-        const job = S.jobs.enqueue(R.buildApproveJob(it, contextFor(it), sel));
-        if (!job) return false;
-        S.local.set(it.key, 'approving');
-        S.bulk.selected.delete(tickKey(it));
-        return true;
+        const ready = list.filter(it => selectedOf(it) && approvable(it));
+        if (!ready.length) return 0;
+        const specs = ready.map(it => Object.assign(R.buildApproveJob(it, contextFor(it), selectedOf(it)),
+                                                    { tick: ticked(it) ? tickKey(it) : null }));
+        const jobs = S.jobs.enqueueMany(specs, { holdMs: S.cfg.approveUndoMs });
+        jobs.forEach(job => {
+            S.keep.delete(job.key);
+            S.local.set(job.key, 'approving');
+            const it = S.byKey.get(job.key);
+            if (it) S.bulk.selected.delete(tickKey(it));
+        });
+        noteReviewed(jobs.map(j => j.key));
+        return jobs.length;
     }
 
-    // اعتماد المحدد: فقط المقترحة من النظام وبلا تحذير، التي ظهرت صورتها للمراجع، بطلب واحد في كل مرة بالخلفية
+    // اعتماد المحدد: فقط المقترحة من النظام وبلا تحذير، التي ظهرت صورتها للمراجع، بالخلفية
     function approveSelected() {
         const S = st();
         const shown = shownCards();
         const list = shown.filter(ticked).filter(eligibleNow).filter(seenNow);
-        if (!list.length) return;
+        if (!list.length) return false;
         const n = list.length;
         // المقترحة بلا تحذير التي لم تظهر للمراجع (محددة أو لا) تُترك، ويُقال عددها
         const skipped = shown.filter(it => eligibleNow(it) && !seenNow(it)).length;
-        const what = n === 1 ? 'صورة وحدة مقترحة' : `${n} صور مقترحة`;
         const skip = skipped > 0 ? ` ${skipped === 1 ? 'وحدة مقترحة' : `${skipped} مقترحة`} ما ظهرت صورتها لك بعد، فما رح تنعتمد هلق.` : '';
-        if (!root.confirm(`رح ننشر ${what} بلا تحذير: بتنعزل خلفيتها وبتنرفع على Cloudinary وبينكتب رابطها بالشيت. `
-            + 'الصور اللي فيها تحذير أو بلا اقتراح ما رح تنلمس.' + skip + ' بتقدر تكمل شغلك وهي عم تنعتمد بالخلفية.')) {
-            return;
-        }
-        list.forEach(enqueueApprove);
-        R.rebuild();
-        R.renderList();
-        render();
+        return R.ask({ title: `اعتماد ${R.imagesText(n)}؟`,
+                       text: 'بتنحط بالشيت وبتقدر تكمل شغلك. اللي فيها تحذير أو بلا اقتراح ما رح تنلمس.' + skip,
+                       confirmText: 'اعتمدها' }).then(ok => {
+            if (!ok) return false;
+            // انحسبت من جديد بعد السؤال: بطاقة صارت مش قابلة للاعتماد وقت السؤال بتنترك
+            const done = enqueueApprovals(list.filter(it => S.byKey.get(it.key) && ticked(it) && eligibleNow(it) && seenNow(it)));
+            R.rebuild();
+            R.renderList();
+            render();
+            return done > 0;
+        });
     }
 
+    // بطاقة وحدة (زرها أو A): true / false فوراً، أو Promise لما في تحذير بده تأكيد
     function approveOne(key) {
         const S = st();
         const it = S.byKey.get(key);
         if (!it || !approvable(it)) return false;
         const sel = selectedOf(it);
         const cautions = R.cautionsFor(sel);
-        if (cautions.length && !root.confirm(`«${cardName(it)}»: تأكد قبل الاعتماد: ${cautions.join('، ')}. بدك تعتمدها وتنشرها؟`)) return false;
-        if (!approvable(S.byKey.get(key) || it)) return false;
-        enqueueApprove(it);
-        R.rebuild();
-        R.renderList();
-        render();
-        return true;
+        const go = () => {
+            const now = S.byKey.get(key) || it;
+            if (!approvable(now) || S.jobs.has(key)) return false;
+            const n = enqueueApprovals([now]);
+            R.rebuild();
+            R.renderList();
+            render();
+            return n > 0;
+        };
+        if (!cautions.length) return go();
+        return R.ask({ title: `«${cardName(it)}»: تأكد قبل الاعتماد`, text: `${cautions.join('، ')}. بدك تعتمدها؟`,
+                       confirmText: 'اعتمدها', cancelText: 'لا، رجوع' }).then(ok => ok && go());
     }
 
     // -------------------------------------------------------------------------------------------------
@@ -749,7 +868,9 @@
         const it = list[idx];
         if (key === ' ') {
             if (selectable(it)) {
-                toggleTick(it, !ticked(it));
+                if (e && e.shiftKey && B.anchor) tickRange(B.anchor, it.key, !ticked(it));
+                else toggleTick(it, !ticked(it));
+                B.anchor = it.key;
                 B.focusDom = true;
                 render();
             }
@@ -758,10 +879,21 @@
         if (key === 'a') {
             // بعد اعتماد بـ A والانتقال للبطاقة التالية: ضغطة ثانية سريعة لا تعتمدها قبل أن يراها المراجع
             if (Date.now() - (B.advancedAt || 0) < settleMs()) return true;
-            if (approveOne(it.key)) {
+            const advance = () => {
                 B.advancedAt = Date.now();
                 focusCard(nextOpen(shownCards(), idx) || it.key);
-            }
+            };
+            const res = approveOne(it.key);
+            if (res === true) advance();
+            else if (res && typeof res.then === 'function') res.then(ok => { if (ok) advance(); });
+            return true;
+        }
+        if (key === 'r' || key === 'x') {
+            if (selectable(it)) openRejectDialog([it], { quick: true });
+            return true;
+        }
+        if (key === 'z') {
+            openLightbox(it.key);
             return true;
         }
         return false;
@@ -779,9 +911,20 @@
         return changed;
     }
 
+    // Shift على آخر نقرة على مربع تحديد (حدث change ما بيحمل shiftKey)
+    let shiftClick = false;
+
     function onGridClick(e) {
         const t = e.target;
         if (!t || !t.closest) return;
+        if (t.closest('[data-select]')) shiftClick = !!e.shiftKey;
+        const zoom = t.closest('[data-zoom]');
+        if (zoom && !t.closest('label, button, a, input')) {
+            focusFromEvent(t);
+            e.preventDefault();
+            openLightbox(zoom.getAttribute('data-zoom'));
+            return;
+        }
         const moved = focusFromEvent(t);
         const reopen = t.closest('[data-reopen]');
         if (reopen) {
@@ -792,8 +935,8 @@
         }
         const approve = t.closest('[data-approve]');
         if (approve && !approve.disabled) {
-            approveOne(approve.getAttribute('data-approve'));
-            render();
+            const res = approveOne(approve.getAttribute('data-approve'));
+            if (!(res && typeof res.then === 'function')) render();
             return;
         }
         const open = t.closest('[data-open]');
@@ -810,6 +953,7 @@
         const t = e.target;
         if (!t || !t.getAttribute || !t.getAttribute('data-select')) return;
         const S = st();
+        const B = S.bulk;
         const key = t.getAttribute('data-select');
         focusFromEvent(t);
         const it = S.byKey.get(key);
@@ -818,61 +962,128 @@
             render();
             return;
         }
-        toggleTick(it, !!t.checked);
+        if (shiftClick && B.anchor && B.anchor !== key) tickRange(B.anchor, key, !!t.checked);
+        else toggleTick(it, !!t.checked);
+        shiftClick = false;
+        B.anchor = key;
         render();
     }
 
-    // -------------------------------------------------------------------------------------------------
-    // Reject dialog: asks for the reason and says what happens
-    // -------------------------------------------------------------------------------------------------
-
-    let dialogOpen = false;
-    let dialogReason = '';
-
-    function openRejectDialog() {
+    // التكبير على البطاقات: صور البطاقات المرسومة بالترتيب، ← → بينها، وجنبها صورة الشيت الحالية لكل بطاقة
+    function openLightbox(key) {
         const S = st();
-        const list = shownCards().filter(it => ticked(it) && selectable(it));
+        const cards = shownCards().map(it => ({ it: it, pick: selectedOf(it) || R.storedCandidates(it.product)[0] || null }))
+            .filter(c => c.pick && c.pick.url);
+        const index = cards.findIndex(c => c.it.key === key);
+        if (index < 0) return false;
+        return R.openLightbox({
+            items: cards.map(c => {
+                const where = R.storeOf(c.pick);
+                return { url: c.pick.url, caption: cardName(c.it), note: [`صف ${c.it.product.row_number}`, where.store].filter(Boolean).join(' · ') };
+            }),
+            index: index,
+            title: 'تكبير الصورة',
+            compare: i => ({ url: R.shownApprovedUrl(cards[i].it.product) || '', caption: 'الصورة الحالية بالشيت' })
+        });
+    }
+
+    // -------------------------------------------------------------------------------------------------
+    // Reject dialog: asks for the reason (1–7 on the keyboard) and says what happens. opts.quick (R / X on a card):
+    // a number key rejects at once with that reason
+    // -------------------------------------------------------------------------------------------------
+
+    let dialog = null;
+
+    function openRejectDialog(cards, opts) {
+        const S = st();
+        opts = opts || {};
+        const list = (cards || shownCards().filter(it => ticked(it))).filter(selectable);
         if (!list.length) return;
-        dialogOpen = true;
-        dialogReason = '';
         const d = S.dom;
         const n = list.length;
+        const opener = document.activeElement;
+        dialog = { list: list, reason: '', quick: !!opts.quick, opener: opener };
         const confirmBtn = el('button', { type: 'button', className: 'lq-btn lq-btn--danger-solid', id: 'rvRejectConfirm', disabled: true,
-                                          text: n === 1 ? 'رفض صورة وحدة' : `رفض ${n} صور` });
+                                          text: n === 1 ? 'رفض الصورة' : `رفض ${R.imagesText(n)}` });
         const reasons = el('div', { className: 'rv-dialog__reasons', role: 'radiogroup', 'aria-labelledby': 'rvRejectTitle' },
             R.REJECT_REASONS.map((r, i) => {
                 const input = el('input', { type: 'radio', name: 'rv_bulk_reason', value: r.code });
                 input.addEventListener('change', () => {
-                    dialogReason = r.code;
+                    if (!dialog) return;
+                    dialog.reason = r.code;
                     confirmBtn.disabled = false;
                 });
                 return el('label', { className: 'rv-dialog__reason' }, [input, el('span', { className: 'rv-reason__n', text: String(i + 1) }), el('span', { text: r.label })]);
             }));
         confirmBtn.addEventListener('click', () => {
-            if (!dialogReason) return;
-            const code = dialogReason;
+            if (!dialog || !dialog.reason) return;
+            const code = dialog.reason;
+            const chosen = dialog.list;
             closeDialog();
-            rejectList(list, code);
+            rejectList(chosen, code);
         });
+        const what = n === 1 ? `«${cardName(list[0])}»` : `${n} منتجات`;
         clear(d.dialog);
-        d.dialog.appendChild(el('div', { className: 'rv-dialog', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'rvRejectTitle' }, [
+        dialog.box = el('div', { className: 'rv-dialog', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'rvRejectTitle' }, [
             el('h2', { className: 'rv-dialog__title', id: 'rvRejectTitle', text: 'ليش ترفضها؟' }),
-            el('p', { className: 'rv-dialog__text', text: `رح نرفض الصورة المقترحة لـ ${n === 1 ? 'منتج واحد' : `${n} منتجات`} ونسجّل السبب. `
-                + 'المنتج اللي إله صور ثانية بيضل بانتظار مراجعتك فيها، واللي ما ضل إله صور بيرجع للطابور ليندوّر عليه من جديد بالتشغيل الجاي. '
+            el('p', { className: 'rv-dialog__text', text: `رح نرفض الصورة المقترحة لـ ${what}${opts.quick ? ' (اضغط رقم السبب 1–7)' : ''}. `
+                + 'بنسجّل السبب. المنتج اللي إله صور ثانية بيضل بانتظار مراجعتك فيها، واللي ما ضل إله صور بيرجع للطابور ليندوّر عليه من جديد بالتشغيل الجاي. '
                 + 'الصور المعتمدة قبل ما بتنلمس.' }),
             reasons,
             el('div', { className: 'rv-dialog__actions' }, [
                 confirmBtn,
                 el('button', { type: 'button', className: 'lq-btn lq-btn--secondary', text: 'إلغاء', onclick: () => closeDialog() })
             ])
-        ]));
+        ]);
+        d.dialog.appendChild(dialog.box);
         d.dialog.hidden = false;
         const first = d.dialog.querySelector('input');
         if (first && typeof first.focus === 'function') first.focus();
     }
 
+    // مفاتيح نافذة الرفض: 1–7 السبب (quick: ويرفض فوراً)، Enter يأكد سبباً مختاراً، Esc يسكّر، Tab يضل جوّا
+    function dialogKey(e, key) {
+        if (!dialog) return false;
+        if (key === 'Escape') {
+            e.preventDefault();
+            closeDialog();
+            return true;
+        }
+        if (key === 'Tab') {
+            R.trapTab(e, dialog.box);
+            return true;
+        }
+        if (/^[1-9]$/.test(key) && !e.repeat) {
+            const reason = R.REJECT_REASONS[parseInt(key, 10) - 1];
+            if (!reason) return true;
+            e.preventDefault();
+            const radio = Array.from(dialog.box.querySelectorAll('input[type="radio"]')).find(r => r.value === reason.code);
+            if (radio && !radio.checked) radio.click();
+            if (dialog.quick) {
+                const chosen = dialog.list;
+                closeDialog();
+                rejectList(chosen, reason.code);
+            }
+            return true;
+        }
+        if (key === 'Enter') {
+            const t = document.activeElement;
+            if (t && t.tagName && /^(BUTTON|A)$/i.test(String(t.tagName))) return false;       // الزر نفسه
+            e.preventDefault();
+            if (dialog.reason && !e.repeat) {
+                const chosen = dialog.list;
+                const code = dialog.reason;
+                closeDialog();
+                rejectList(chosen, code);
+            }
+            return true;
+        }
+        return false;
+    }
+
     function rejectList(list, code) {
         const S = st();
+        const keys = [];
         list.forEach(it => {
             const sel = selectedOf(it);
             if (!sel || !selectable(it)) return;
@@ -881,10 +1092,12 @@
                                          row: ctx.row_number, ctx: ctx, candidate: sel,
                                          body: R.rejectBody(ctx, sel, code, false, '') });
             if (job) {
+                keys.push(it.key);
                 S.local.set(it.key, 'rejecting');
                 S.bulk.selected.delete(tickKey(it));
             }
         });
+        noteReviewed(keys);
         R.rebuild();
         R.renderList();
         render();
@@ -892,17 +1105,20 @@
 
     function closeDialog() {
         const d = st().dom;
-        if (!dialogOpen) return false;
-        dialogOpen = false;
+        if (!dialog) return false;
+        const opener = dialog.opener;
+        dialog = null;
         clear(d.dialog);
         d.dialog.hidden = true;
-        if (d.bulkReject && typeof d.bulkReject.focus === 'function') d.bulkReject.focus();
+        if (opener && opener.isConnected !== false && typeof opener.focus === 'function') opener.focus();
+        else if (d.bulkReject && typeof d.bulkReject.focus === 'function') d.bulkReject.focus();
         return true;
     }
 
     R.bulk = {
-        build, render, approveSelected, approveOne, openRejectDialog, closeDialog, dialogOpen: () => dialogOpen,
-        visibleCards, shownCards, kindOf, laneOfCard, laneLine, seedSelection, rejectList, onKey, refreshCards,
+        build, render, onFilter, approveSelected, approveOne, openRejectDialog, closeDialog, dialogOpen: () => !!dialog, dialogKey,
+        visibleCards, shownCards, kindOf, laneOfCard, laneLine, laneView, progressView, seedSelection, rejectList, onKey,
+        refreshCards, openLightbox, tickRange,
         // مفاتيح المنتجات المحددة الآن (لصورها الحالية)
         tickedKeys: () => shownCards().filter(ticked).map(it => it.key)
     };

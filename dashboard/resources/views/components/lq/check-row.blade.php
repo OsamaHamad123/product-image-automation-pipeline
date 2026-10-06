@@ -18,7 +18,7 @@
         'match' => ['lq-check-row__status--match', 'check', 'مطابق'],
         'unsure' => ['lq-check-row__status--unsure', 'exclamation', 'تأكد بنفسك'],
         'mismatch' => ['lq-check-row__status--mismatch', 'x', 'غير مطابق'],
-        'unknown' => ['lq-check-row__status--unknown', 'minus', 'لا توجد معلومة'],
+        'unknown' => ['lq-check-row__status--unknown', 'minus', 'ما في معلومة'],
     ];
     $lqStatus = $lqStatuses[$status] ?? $lqStatuses['unknown'];
     $lqStatusLabel = $statusLabel !== null && $statusLabel !== '' ? $statusLabel : $lqStatus[2];

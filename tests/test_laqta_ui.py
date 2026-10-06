@@ -301,7 +301,7 @@ def test_run_card_copy_matches_the_layout_script():
         r"(\w+): \{ label: '([^']*)', text: '([^']*)', link: '([^']*)' \}", _script_blocks(LAYOUT)[0])}
     assert set(php) == {"loading", "idle", "running", "paused", "stopping", "error", "stuck", "unknown"}
     assert php == js
-    assert php["idle"][1] == "لا يوجد تشغيل الآن"
+    assert php["idle"][1] == "ما في تشغيل هلق" and php["idle"][2] == "ابدأ تشغيل جديد ←"
 
 
 def test_layout_script_is_plain_and_safe():
@@ -389,7 +389,7 @@ def test_run_card_idle_states(run_status):
     for name in ("idle", "curation_pending", "future_idle", "null", "list", "string"):
         view = run_status[name]["view"]
         assert view["state"] == "idle", name
-        assert view["text"] == "لا يوجد تشغيل الآن", name
+        assert view["text"] == "ما في تشغيل هلق", name
         assert view["pct"] is None and view["count"] == "", name
 
 

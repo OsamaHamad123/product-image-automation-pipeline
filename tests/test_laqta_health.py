@@ -451,9 +451,9 @@ def test_strict_lane_section_reads_the_lane_stats(offline):
                "$out['down'] = SettingsController::strictLaneBlocker(['status' => 'failed']);")
     lane = out["lane"]
     assert lane["text"] == "من 12 اقتراح بهالفئة، اعتمدت 12."
-    assert lane["unsure_text"].startswith("القارئ مش متأكد بس العنوان بيأكد: اعتمدت 4 من 5.")
+    assert lane["unsure_text"].startswith("الملصق مش واضح بس الاسم مطابق: اعتمدت 4 من 5.")
     assert (lane["ready"], lane["can_enable"], lane["enabled"]) == (False, False, False)
-    assert lane["chip"] == "تحتاج 177 مراجعة" and "الحد المضمون" in lane["detail"]
+    assert lane["chip"] == "تحتاج 177 مراجعة" and "أقل دقة متوقعة" in lane["detail"]
     assert "لسا مش جاهزة" in out["why"] and "ما قدرنا نتأكد" in out["down"]
     assert out["can_enable"] is False                       # no ready brand, the lane is not ready either
 
@@ -495,9 +495,9 @@ console.log(JSON.stringify({ok: ok, down: H.lanesView(null)}));
 """)
     rows = {r["key"]: r for r in out["ok"]["rows"]}
     assert [r["key"] for r in out["ok"]["rows"]] == ["strict", "unsure", "other"]
-    assert (rows["strict"]["text"], rows["strict"]["bound"]) == ("اعتمدت 12 من 12", "الحد المضمون 75.8%")
+    assert (rows["strict"]["text"], rows["strict"]["bound"]) == ("اعتمدت 12 من 12", "أقل دقة متوقعة 75.8%")
     assert (rows["unsure"]["text"], rows["unsure"]["bound"]) == ("لسا ما في مراجعات", "")
-    assert rows["unsure"]["label"] == "القارئ مش متأكد بس العنوان بيأكد"
+    assert rows["unsure"]["label"] == "الملصق مش واضح بس الاسم مطابق"
     assert out["down"]["kind"] == "error" and out["down"]["rows"] == []
 
 
@@ -1028,7 +1028,7 @@ def test_strict_lane_switch_is_refused_until_the_lane_is_ready(app_env):
     assert _settings(db)["auto_publish_strict_lane"] == "false"
     page = out[1]["body"]
     assert "النشر الآلي لكل الماركات المؤكدة" in page and "لسا ما راجعت ولا اقتراح بهالفئة." in page
-    assert "القارئ مش متأكد بس العنوان بيأكد" in page
+    assert "الملصق مش واضح بس الاسم مطابق" in page
     assert re.search(r'name="auto_publish_strict_lane"[^>]*disabled', page)
 
     down = _kernel(dict(env, LQ_STUB_MODE="down"), [
@@ -1153,6 +1153,7 @@ def test_unavailable_database_is_said(app_env):
                         ["GET", "/system-diagnostics", {}],
                         ["POST", "/settings", {"section": "serper", "serper_api_key": "X-KEY-1234567"}]])
     assert out[0]["status"] == 200 and "ما قدرنا نقرأ الإعدادات" in out[0]["body"] and "غير محفوظ" not in out[0]["body"]
+    assert "بلّغ المطوّر، وحدّث الصفحة بعد ما تنصلح." in out[0]["body"] and "MariaDB شغّالة" not in out[0]["body"]
     assert out[1]["status"] == 200 and "data-sheet-form" in out[1]["body"]
     assert out[2]["status"] == 200 and "data-health-page" in out[2]["body"]
     assert out[3]["status"] == 302 and "قاعدة البيانات" in out[3]["flash"]["error"]

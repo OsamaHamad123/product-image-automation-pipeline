@@ -139,7 +139,7 @@ class RunController extends Controller
             return [
                 'status' => 'error',
                 'error' => 'database_unavailable',
-                'message' => 'قاعدة البيانات مش متاحة هلق، فما منقدر نعرف حالة التشغيل. تأكد إنو MariaDB شغّالة.',
+                'message' => 'قاعدة البيانات مش متاحة هلق، فما منقدر نعرف حالة التشغيل. بلّغ المطوّر.',
                 'generated_at' => time(),
             ];
         }
@@ -438,7 +438,7 @@ class RunController extends Controller
         'no_size' => 'حجم ناقص',
         'size_unit_typo' => 'وحدة الحجم غلط (MM بدل GM)',
         'no_barcode' => 'باركود ناقص أو مش صالح',
-        'brand_unknown' => 'ماركة مش موجودة في Brands Mapping',
+        'brand_unknown' => 'ماركة مش موجودة بجدول الماركات',
         'brand_has_product_word' => 'كلمة من اسم المنتج بعمود الماركة',
         'typo' => 'غلطة إملائية محتملة بالاسم',
         'duplicate_barcode' => 'باركود مكرر لمنتجات مختلفة',
@@ -561,7 +561,7 @@ class RunController extends Controller
         'invalid_domain' => 'الموقع لازم يكون اسم نطاق بس (متل almarai.com) بدون http ولا مسار.',
         'blocked_domain' => 'هاد متجر أو موقع تواصل، مش موقع الماركة الرسمي.',
         'too_many_brands' => 'عدد الماركات مش صحيح: من وحدة لحد 200 بالمرة.',
-        'duplicate' => 'هالماركة موجودة أصلاً بـ Brands Mapping.',
+        'duplicate' => 'هالماركة موجودة أصلاً بجدول الماركات.',
     ];
 
     /**
@@ -1057,7 +1057,7 @@ class RunController extends Controller
         }
         if ($strictLane && !in_array('*', $brands, true)) {
             // «النشر الآلي لكل الماركات المؤكدة» (decide.py, lane strict): أي ماركة موجودة بـ Brands Mapping
-            return 'النشر الآلي شغّال لكل الماركات المؤكدة بـ Brands Mapping: الاقتراح المؤكد تماماً وبلا أي تحذير بينزل '
+            return 'النشر الآلي شغّال لكل الماركات المؤكدة بجدول الماركات: الاقتراح المؤكد تماماً وبلا أي تحذير بينزل '
                 . 'عالشيت لحاله، والباقي بيستنى مراجعتك.';
         }
         if (!$brands) {
