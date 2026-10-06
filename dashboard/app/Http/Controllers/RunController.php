@@ -771,6 +771,209 @@ class RunController extends Controller
     }
 
     // ------------------------------------------------------------------
+    // «عبّي جدول الماركات»: one proposal for every missing brand, from evidence only (cli_bridge brand_bulk_*)
+    // ------------------------------------------------------------------
+
+    public const BRAND_BULK_MAX = 500;
+    public const BRAND_CONFIDENCES = ['high', 'low', 'none'];
+    public const BRAND_NO_EVIDENCE_TEXT = 'ما لقينا دليل كافي';
+    /** Why a ticked brand was not written (cli_bridge brand_bulk_add skipped[].reason), in plain Levantine. */
+    public const BRAND_BULK_SKIP_TEXTS = [
+        'no_evidence' => 'ما إلها دليل كافي',
+        'gone' => 'صارت موجودة بـ Brands Mapping أو ما عادت بالشيت',
+        'duplicate' => 'موجودة أصلاً بـ Brands Mapping',
+        'invalid' => 'اقتراحها مش صالح للكتابة',
+        'repeated' => 'مكررة بالطلب',
+    ];
+    public const BRAND_UNDO_ERRORS = [
+        'not_ours' => 'هالماركة ما ضافها المساعد، فما منشيلها. شيلها بإيدك من الشيت إذا بدك.',
+        'changed' => 'صف الماركة تغيّر بالشيت بعد ما كتبناه، فما شلناه. شيله بإيدك إذا بدك.',
+        'missing' => 'الماركة مش موجودة بـ Brands Mapping أصلاً.',
+        'invalid_brand' => 'اسم الماركة مش صالح.',
+    ];
+
+    /**
+     * GET /api/run/brand-bulk: «عبّي جدول الماركات». {status, count, counts: {high, low, none}, sites_left, site_cap,
+     * index, brands: [{brand, rows, brand_ar, synonyms, official_domain, confidence, evidence: [{kind, text}],
+     * selectable, checked}]}. Read only (cli_bridge brand_bulk_suggestions): no search, no cost, no write; the official
+     * site comes from the cache of an earlier search only.
+     */
+    public function brandBulk(): \Illuminate\Http\JsonResponse
+    {
+        if (!self::databaseOnline()) {
+            return response()->json(['status' => 'unavailable', 'message' => 'قاعدة البيانات مش شغّالة هلق.'], 503)
+                ->header('Cache-Control', 'no-store');
+        }
+        $result = PythonBridge::run('brand_bulk_suggestions');
+        if (($result['status'] ?? '') !== 'success' || !is_array($result['brands'] ?? null)) {
+            return response()->json(['status' => 'error', 'message' => 'ما قدرنا نجهّز اقتراحات الماركات هلق. جرّب بعد شوي.'], 502)
+                ->header('Cache-Control', 'no-store');
+        }
+        $brands = array_values(array_filter(array_map([self::class, 'bulkBrand'], $result['brands'])));
+        $counts = ['high' => 0, 'low' => 0, 'none' => 0];
+        foreach ($brands as $b) {
+            $counts[$b['confidence']]++;
+        }
+        return response()->json([
+            'status' => 'success',
+            'count' => count($brands),
+            'counts' => $counts,
+            'sites_left' => max(0, (int) ($result['sites_left'] ?? 0)),
+            'site_cap' => max(0, (int) ($result['site_cap'] ?? 0)),
+            'index' => (bool) ($result['index'] ?? false),
+            'brands' => $brands,
+        ])->header('Cache-Control', 'no-store');
+    }
+
+    /** One proposal as the page may show it, or null; a brand without evidence is never selectable nor ticked. */
+    public static function bulkBrand($b): ?array
+    {
+        $name = is_array($b) ? self::cleanBrandName($b['brand'] ?? null) : null;
+        if ($name === null) {
+            return null;
+        }
+        $confidence = in_array($b['confidence'] ?? null, self::BRAND_CONFIDENCES, true) ? $b['confidence'] : 'none';
+        $synonyms = array_values(array_filter(array_map(
+            fn ($x) => is_string($x) ? mb_substr(trim($x), 0, self::BRAND_SYNONYM_CHARS) : '',
+            is_array($b['synonyms'] ?? null) ? $b['synonyms'] : []
+        ), fn ($x) => $x !== ''));
+        $domain = is_string($b['official_domain'] ?? null) ? strtolower(trim($b['official_domain'])) : '';
+        $evidence = [];
+        foreach (is_array($b['evidence'] ?? null) ? $b['evidence'] : [] as $e) {
+            $text = is_array($e) && is_string($e['text'] ?? null) ? mb_substr(trim($e['text']), 0, 300) : '';
+            if ($text !== '') {
+                $evidence[] = ['kind' => is_string($e['kind'] ?? null) ? $e['kind'] : '', 'text' => $text];
+            }
+        }
+        if ($confidence === 'none' || $evidence === []) {
+            $confidence = 'none';
+            $evidence = [['kind' => 'none', 'text' => self::BRAND_NO_EVIDENCE_TEXT]];
+        }
+        return [
+            'brand' => $name,
+            'rows' => max(0, (int) ($b['rows'] ?? 0)),
+            'brand_ar' => is_string($b['brand_ar'] ?? null) ? trim($b['brand_ar']) : '',
+            'synonyms' => array_slice($synonyms, 0, self::BRAND_SYNONYM_MAX),
+            'official_domain' => preg_match(self::BRAND_DOMAIN_PATTERN, $domain) ? $domain : '',
+            'confidence' => $confidence,
+            'evidence' => $evidence,
+            'selectable' => $confidence !== 'none',
+            'checked' => $confidence === 'high',
+        ];
+    }
+
+    /**
+     * POST /api/run/brand-bulk-sites: «دوّر عالمواقع الرسمية». Up to site_cap brands never searched before, ONE Serper
+     * query each (cli_bridge brand_bulk_sites, recorded in the spend ledger), cached; writes nothing to the sheet.
+     */
+    public function brandBulkSites(): \Illuminate\Http\JsonResponse
+    {
+        $result = PythonBridge::run('brand_bulk_sites');
+        $status = (string) ($result['status'] ?? '');
+        if ($status === 'unavailable') {
+            return response()->json(['status' => 'unavailable', 'message' => 'ما في مفتاح بحث (Serper) مضبوط بالإعدادات.'], 503)
+                ->header('Cache-Control', 'no-store');
+        }
+        if ($status !== 'success') {
+            return response()->json(['status' => 'error', 'message' => 'ما قدرنا نبحث هلق. جرّب بعد شوي.'], 502)
+                ->header('Cache-Control', 'no-store');
+        }
+        $searched = max(0, (int) ($result['searched'] ?? 0));
+        $found = max(0, (int) ($result['found'] ?? 0));
+        $left = max(0, (int) ($result['left'] ?? 0));
+        $message = $searched === 0
+            ? 'ما في ماركات لسا ما دوّرنا على موقعها.'
+            : 'دوّرنا على موقع ' . $searched . ' ماركة (' . $searched . ' بحث)، ولقينا موقع واضح لـ ' . $found . '.'
+                . ($left > 0 ? ' ضل ' . $left . ': اضغط مرة تانية إذا بدك.' : '');
+        return response()->json(['status' => 'success', 'searched' => $searched, 'found' => $found, 'left' => $left,
+                                 'message' => $message])->header('Cache-Control', 'no-store');
+    }
+
+    /**
+     * POST /api/run/brand-bulk-add {brands: [name]}: «اعتمد المحدد». Only the names go to the bridge
+     * (brand_bulk_add), which writes each one's own proposal (never a brand without evidence) in batches, skips what
+     * is already there and logs what it wrote for «تراجع». Writes the owner's sheet: only from the click. CSRF.
+     */
+    public function brandBulkAdd(Request $request): \Illuminate\Http\JsonResponse
+    {
+        $brands = $request->input('brands');
+        if (!is_array($brands) || count($brands) < 1 || count($brands) > self::BRAND_BULK_MAX) {
+            return response()->json(['status' => 'error', 'code' => 'too_many_brands',
+                                     'message' => 'اختار ماركة وحدة عالأقل، ولحد ' . self::BRAND_BULK_MAX . ' بالمرة.'], 422)
+                ->header('Cache-Control', 'no-store');
+        }
+        $clean = [];
+        foreach ($brands as $b) {
+            $name = self::cleanBrandName($b);
+            if ($name === null) {
+                return self::brandError('invalid_brand', 422);
+            }
+            $clean[mb_strtolower($name)] ??= $name;
+        }
+        $result = PythonBridge::run('brand_bulk_add', ['brands' => array_values($clean)]);
+        $status = (string) ($result['status'] ?? '');
+        $added = is_array($result['added'] ?? null) ? array_values(array_filter($result['added'], 'is_string')) : [];
+        if ($added !== []) {
+            ProductController::forgetProductCaches();
+        }
+        if ($status === 'invalid') {
+            return self::brandError((string) ($result['code'] ?? ''), 422);
+        }
+        if ($status !== 'success') {
+            $message = 'ما قدرنا نكتب بورقة Brands Mapping هلق. جرّب بعد شوي.';
+            if ($added !== []) {
+                $message .= ' انكتبت ' . count($added) . ' قبل ما يوقف، والباقي ما انكتب.';
+            }
+            return response()->json(['status' => 'error', 'added' => $added, 'message' => $message], 502)
+                ->header('Cache-Control', 'no-store');
+        }
+        $skipped = [];
+        foreach (is_array($result['skipped'] ?? null) ? $result['skipped'] : [] as $s) {
+            $reason = is_array($s) && is_string($s['reason'] ?? null) ? $s['reason'] : '';
+            $name = is_array($s) && is_string($s['brand'] ?? null) ? trim($s['brand']) : '';
+            if ($name !== '') {
+                $skipped[] = ['brand' => $name, 'reason' => self::BRAND_BULK_SKIP_TEXTS[$reason] ?? 'ما انكتبت'];
+            }
+        }
+        $message = $added === [] ? 'ما انكتب شي جديد.' : 'انضافت ' . count($added) . ' ماركة لـ Brands Mapping. التشغيل الجاي بيعرفها.';
+        if ($skipped !== []) {
+            $message .= ' وما انكتبت ' . count($skipped) . '.';
+        }
+        return response()->json(['status' => 'success', 'added' => $added, 'skipped' => $skipped,
+                                 'harvest_queued' => is_array($result['harvest_queued'] ?? null) ? count($result['harvest_queued']) : 0,
+                                 'message' => $message])->header('Cache-Control', 'no-store');
+    }
+
+    /**
+     * POST /api/run/brand-undo {brand}: «تراجع» for a brand «عبّي جدول الماركات» wrote: its row leaves Brands Mapping
+     * only while it is exactly what the assistant wrote (cli_bridge brand_undo). CSRF.
+     */
+    public function brandUndo(Request $request): \Illuminate\Http\JsonResponse
+    {
+        $brand = self::cleanBrandName($request->input('brand'));
+        if ($brand === null) {
+            return response()->json(['status' => 'error', 'code' => 'invalid_brand',
+                                     'message' => self::BRAND_UNDO_ERRORS['invalid_brand']], 422)->header('Cache-Control', 'no-store');
+        }
+        $result = PythonBridge::run('brand_undo', ['brand' => $brand]);
+        $status = (string) ($result['status'] ?? '');
+        if ($status === 'success') {
+            ProductController::forgetProductCaches();
+            return response()->json(['status' => 'success', 'brand' => $brand,
+                                     'message' => 'شلنا «' . $brand . '» من Brands Mapping. التشغيل الجاي ما بيعرفها.'])
+                ->header('Cache-Control', 'no-store');
+        }
+        if ($status === 'invalid') {
+            $code = (string) ($result['code'] ?? '');
+            return response()->json(['status' => 'error', 'code' => $code,
+                                     'message' => self::BRAND_UNDO_ERRORS[$code] ?? 'ما قدرنا نتراجع عنها.'], 409)
+                ->header('Cache-Control', 'no-store');
+        }
+        return response()->json(['status' => 'error', 'message' => 'ما قدرنا نغيّر ورقة Brands Mapping هلق. ما تغيّر شي. جرّب بعد شوي.'], 502)
+            ->header('Cache-Control', 'no-store');
+    }
+
+    // ------------------------------------------------------------------
     // «باركودات من صفحات المتاجر»: the barcode a store page stated for an approved row whose barcode cell is empty
     // ------------------------------------------------------------------
 

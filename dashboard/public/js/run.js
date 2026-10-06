@@ -396,6 +396,88 @@
         return data && arabic(data.message) ? data.message : (res && res.status ? 'ما قدرنا نكمّل هلق. ما انكتب شي. جرّب بعد شوي.' : BRAND_REQUEST_ERROR);
     }
 
+    // «عبّي جدول الماركات» (GET /api/run/brand-bulk): one proposal for every missing brand, from evidence only. A strong
+    // proposal is ticked, a weak one waits for the owner's tick, one without evidence cannot be ticked. «اعتمد المحدد»
+    // sends only the ticked names (POST /api/run/brand-bulk-add): the server writes each one's own proposal.
+    var BULK_CLEAN = 'كل ماركات الشيت موجودة بـ Brands Mapping.';
+    var BULK_ERROR = 'ما قدرنا نجهّز اقتراحات الماركات هلق.';
+    var BULK_NO_EVIDENCE = 'ما لقينا دليل كافي';
+    var BULK_CONFIDENCE_TEXT = { high: 'دليل قوي', low: 'دليل ضعيف', none: 'ما في دليل' };
+    var BULK_CONFIDENCE_TONE = { high: 'approved', low: 'warning', none: 'none' };
+    var BULK_SITES_CONFIRM_TEXT = 'دوّر عالمواقع الرسمية:\n' +
+        '• منبحث عن الموقع الرسمي لكل ماركة ما دوّرنا على موقعها قبل، بحث واحد لكل ماركة، ولحد 10 بحث بالمرة.\n' +
+        '• كل بحث بينحسب متل أي بحث، والنتيجة بتنحفظ فما منعيده.\n' +
+        '• ما بينكتب شي بالشيت.\n\nبدك تكمّل؟';
+
+    function bulkConfirmText(count) {
+        return 'اعتمد المحدد:\n' +
+            '• بينكتب صف لكل ماركة محددة (' + count + ') بورقة Brands Mapping: اسمها ومرادفاتها وموقعها الرسمي إذا لقيناه، متل ما ظاهرين هون.\n' +
+            '• اللي صارت موجودة أصلاً بتنتخطى، وما بيتغير أي صف تاني بالشيت.\n' +
+            '• بتقدر تتراجع عن أي ماركة لحالها بعدين.\n\nبدك تكمّل؟';
+    }
+
+    function bulkLead(counts, total) {
+        var parts = [];
+        if (counts.high) parts.push(counts.high + ' إلها دليل قوي (محددة)');
+        if (counts.low) parts.push(counts.low + ' دليلها ضعيف (حددها بإيدك إذا متأكد)');
+        if (counts.none) parts.push(counts.none + ' ما لقينا إلها دليل كافي');
+        return 'لقينا ' + total + ' ماركة ناقصة: ' + parts.join('، ') + '. ما منكتب ماركة بلا دليل.';
+    }
+
+    function bulkCountText(n) {
+        if (!n) return 'ما اخترت ولا ماركة';
+        if (n === 1) return 'اخترت ماركة وحدة';
+        if (n === 2) return 'اخترت ماركتين';
+        return 'اخترت ' + n + (n <= 10 ? ' ماركات' : ' ماركة');
+    }
+
+    // view {state: ready | clean | error, lead, counts, sitesLeft, siteCap, rows: [{brand, rowsText, confidence,
+    // confidenceText, tone, synonymsText, domain, evidence: [text], selectable, checked}]}
+    function describeBulk(res) {
+        var data = res && res.data;
+        if (!res || !data || !res.ok || data.status !== 'success' || !Array.isArray(data.brands)) {
+            return { state: 'error', rows: [], counts: { high: 0, low: 0, none: 0 }, sitesLeft: 0, siteCap: 0,
+                     lead: data && arabic(data.message) ? data.message : BULK_ERROR };
+        }
+        var counts = { high: 0, low: 0, none: 0 };
+        var rows = data.brands.filter(function (b) { return b && typeof b.brand === 'string' && b.brand.trim(); }).map(function (b) {
+            var confidence = BULK_CONFIDENCE_TEXT[b.confidence] ? b.confidence : 'none';
+            var evidence = (Array.isArray(b.evidence) ? b.evidence : []).map(function (e) {
+                return e && typeof e.text === 'string' ? e.text : '';
+            }).filter(Boolean);
+            if (confidence === 'none' || !evidence.length) {
+                confidence = 'none';
+                evidence = [BULK_NO_EVIDENCE];
+            }
+            counts[confidence]++;
+            var rows = C.num(b.rows) || 0;
+            return { brand: b.brand.trim(), rowsText: brandRowsText(rows), confidence: confidence,
+                     confidenceText: BULK_CONFIDENCE_TEXT[confidence], tone: BULK_CONFIDENCE_TONE[confidence],
+                     synonymsText: brandSynonymsText(b), domain: typeof b.official_domain === 'string' ? b.official_domain : '',
+                     evidence: evidence, selectable: confidence !== 'none', checked: confidence === 'high' };
+        });
+        return { state: rows.length ? 'ready' : 'clean', rows: rows, counts: counts,
+                 sitesLeft: C.num(data.sites_left) || 0, siteCap: C.num(data.site_cap) || 0,
+                 lead: rows.length ? bulkLead(counts, rows.length) : BULK_CLEAN };
+    }
+
+    // POST /api/run/brand-bulk-add body: the names of the ticked rows that can be ticked; nothing else is sent.
+    function bulkApproveBody(rows) {
+        return { brands: rows.filter(function (r) { return r.selectable && r.checked; }).map(function (r) { return r.brand; }) };
+    }
+
+    // The answer to «اعتمد المحدد»: {ok, text, added: [brand], skipped: [{brand, reason}]}.
+    function bulkResult(res) {
+        var data = res && res.data;
+        var added = data && Array.isArray(data.added) ? data.added.filter(function (b) { return typeof b === 'string'; }) : [];
+        if (res && res.ok && data && data.status === 'success') {
+            return { ok: added.length > 0, text: arabic(data.message) ? data.message : (added.length ? addedText(added.length) : 'ما انكتب شي جديد.'),
+                     added: added, skipped: Array.isArray(data.skipped) ? data.skipped : [] };
+        }
+        return { ok: false, added: added, skipped: [], text: data && arabic(data.message) ? data.message
+            : (res && res.status ? 'ما قدرنا نكتب بالشيت هلق. جرّب بعد شوي.' : BRAND_REQUEST_ERROR) };
+    }
+
     // «باركودات لقيناها من صفحات المتاجر» (GET /api/run/barcode-suggestions): approved rows whose store page stated a
     // barcode while the sheet's barcode cell is empty. Writes happen only through «اكتب الباركودات المختارة بالشيت».
     var BARCODES_LEAD = 'صفحة المتجر للصورة المعتمدة ذكرت باركود صالح، وخلية الباركود بالشيت فاضية. علّم الصفوف اللي بدك ياها ' +
@@ -1110,6 +1192,167 @@
             });
         }
 
+        // «عبّي جدول الماركات»: one row per missing brand with its checkbox (a brand without evidence has none that works);
+        // the rows live in bulkRows so «اعتمد المحدد» reads what is ticked now.
+        var bulkRows = [];
+
+        function bulkNote(text, kind) {
+            var done = kind === 'done';
+            C.setText($('bulk-error'), done ? '' : text);
+            C.setHidden($('bulk-error'), done || !text);
+            C.setText($('bulk-done'), done ? text : '');
+            C.setHidden($('bulk-done'), !done || !text);
+        }
+
+        function refreshBulkButton() {
+            var ticked = bulkApproveBody(bulkRows).brands.length;
+            $('bulk-approve').disabled = !ticked;
+            C.setText($('bulk-count'), bulkCountText(ticked));
+        }
+
+        function bulkRow(r) {
+            var el = C.el(doc, 'label', 'lq-run-barcode' + (r.selectable ? '' : ' lq-run-barcode--apart'));
+            el.setAttribute('data-brand', r.brand);
+            el.setAttribute('data-confidence', r.confidence);
+            var box = C.el(doc, 'input', 'lq-run-barcode__check');
+            box.setAttribute('type', 'checkbox');
+            box.checked = r.checked;
+            box.disabled = !r.selectable;
+            el.appendChild(box);
+            var body = C.el(doc, 'span', 'lq-run-barcode__body');
+            var head = C.el(doc, 'span', 'lq-run-bulk__head');
+            var name = C.el(doc, 'bdi', 'lq-run-barcode__name', r.brand);
+            name.setAttribute('dir', 'auto');
+            head.appendChild(name);
+            var chip = C.el(doc, 'span', 'lq-run-bulk__chip lq-run-bulk__chip--' + r.confidence, r.confidenceText);
+            head.appendChild(chip);
+            body.appendChild(head);
+            var meta = C.el(doc, 'span', 'lq-run-barcode__meta');
+            meta.appendChild(C.el(doc, 'span', 'lq-run-barcode__row lq-num', r.rowsText));
+            if (r.synonymsText) meta.appendChild(C.el(doc, 'bdi', 'lq-run-bulk__syn', 'مرادفات: ' + r.synonymsText));
+            if (r.domain) meta.appendChild(C.el(doc, 'bdi', 'lq-run-bulk__site', 'الموقع: ' + r.domain));
+            body.appendChild(meta);
+            var list = C.el(doc, 'ul', 'lq-run-bulk__evidence');
+            r.evidence.forEach(function (t) { list.appendChild(C.el(doc, 'li', '', t)); });
+            body.appendChild(list);
+            el.appendChild(body);
+            var row = { brand: r.brand, selectable: r.selectable, checked: r.checked, el: el, box: box };
+            box.addEventListener('change', function () {
+                row.checked = row.selectable && !!box.checked;
+                refreshBulkButton();
+            });
+            return row;
+        }
+
+        function renderBulk(view) {
+            var box = $('bulk-list');
+            C.clear(box);
+            bulkRows = [];
+            view.rows.forEach(function (r) {
+                var row = bulkRow(r);
+                bulkRows.push(row);
+                box.appendChild(row.el);
+            });
+            C.setHidden($('bulk-panel'), false);
+            $('bulk').setAttribute('data-state', view.state);
+            C.setText($('bulk-lead'), view.lead || '');
+            C.setHidden($('bulk-foot'), !bulkRows.length);
+            C.setHidden($('bulk-tools'), !view.sitesLeft);
+            C.setText($('bulk-sites-note'), view.sitesLeft
+                ? 'ضل ' + view.sitesLeft + ' ماركة ما دوّرنا على موقعها. لحد ' + view.siteCap + ' بحث بالمرة، بحث واحد لكل ماركة.' : '');
+            refreshBulkButton();
+        }
+
+        function loadBulk() {
+            var btn = $('bulk-open');
+            btn.disabled = true;
+            btn.setAttribute('aria-busy', 'true');
+            C.setHidden($('bulk-panel'), false);
+            C.setText($('bulk-lead'), 'لحظة، عم نجمع الأدلة لكل ماركة…');
+            return C.fetchJson('/api/run/brand-bulk').then(function (res) {
+                btn.disabled = false;
+                btn.setAttribute('aria-busy', 'false');
+                renderBulk(describeBulk(res));
+            });
+        }
+
+        function searchBulkSites() {
+            if (!root.confirm(BULK_SITES_CONFIRM_TEXT)) return Promise.resolve();
+            bulkNote('');
+            var btn = $('bulk-sites');
+            btn.disabled = true;
+            btn.setAttribute('aria-busy', 'true');
+            return C.fetchJson('/api/run/brand-bulk-sites', { method: 'POST', body: {} }).then(function (res) {
+                btn.disabled = false;
+                btn.setAttribute('aria-busy', 'false');
+                var data = res.data || {};
+                if (!res.ok || data.status !== 'success') {
+                    bulkNote(brandFailure(res));
+                    return;
+                }
+                return loadBulk().then(function () { bulkNote(arabic(data.message) ? data.message : '', 'done'); });
+            });
+        }
+
+        function showUndo(added) {
+            var box = $('bulk-added');
+            C.clear(box);
+            added.forEach(function (brand) {
+                var line = C.el(doc, 'div', 'lq-run-bulk__added');
+                var name = C.el(doc, 'bdi', 'lq-run-bulk__added-name', brand);
+                name.setAttribute('dir', 'auto');
+                line.appendChild(name);
+                var undo = C.el(doc, 'button', 'lq-btn lq-btn--ghost lq-btn--sm', 'تراجع');
+                undo.setAttribute('type', 'button');
+                undo.addEventListener('click', function () { undoBrand(brand, line, undo); });
+                line.appendChild(undo);
+                box.appendChild(line);
+            });
+            C.setHidden(box, !added.length);
+        }
+
+        function undoBrand(brand, line, btn) {
+            if (!root.confirm('رح نشيل «' + brand + '» من Brands Mapping، بس إذا صفها لسا متل ما كتبناه. بدك تكمّل؟')) {
+                return Promise.resolve();
+            }
+            btn.disabled = true;
+            bulkNote('');
+            return C.fetchJson('/api/run/brand-undo', { method: 'POST', body: { brand: brand } }).then(function (res) {
+                var data = res.data || {};
+                if (res.ok && data.status === 'success') {
+                    if (line.parentNode) line.parentNode.removeChild(line);
+                    C.setHidden($('bulk-added'), !$('bulk-added').children.length);
+                    bulkNote(arabic(data.message) ? data.message : 'شلناها.', 'done');
+                    return loadMissing().then(function () { return loadBulk(); });
+                }
+                btn.disabled = false;
+                bulkNote(brandFailure(res));
+            });
+        }
+
+        function approveBulk() {
+            var body = bulkApproveBody(bulkRows);
+            if (!body.brands.length) return Promise.resolve();
+            if (!root.confirm(bulkConfirmText(body.brands.length))) return Promise.resolve();
+            bulkNote('');
+            var btn = $('bulk-approve');
+            btn.disabled = true;
+            btn.setAttribute('aria-busy', 'true');
+            return C.fetchJson('/api/run/brand-bulk-add', { method: 'POST', body: body }).then(function (res) {
+                btn.setAttribute('aria-busy', 'false');
+                var result = bulkResult(res);
+                showUndo(result.added);
+                if (!res.ok) {
+                    refreshBulkButton();
+                    bulkNote(result.text);
+                    return result.added.length ? loadMissing() : undefined;
+                }
+                if (result.ok) C.toast(result.text, 'success');
+                return loadMissing().then(function () { return loadBulk(); })
+                    .then(function () { bulkNote(result.text, result.ok ? 'done' : ''); });
+            });
+        }
+
         // «باركودات من صفحات المتاجر»: one row per sheet row with its checkbox; the rows live in barcodeRows so the write
         // button reads what is ticked now. Rows listed apart (a shared barcode, a filled cell) have no live checkbox.
         var barcodeRows = [];
@@ -1301,6 +1544,9 @@
         $('quality-refresh').addEventListener('click', function () { loadQuality(true); });
         $('brands-refresh').addEventListener('click', function () { loadMissing(); });
         $('brands-add-all').addEventListener('click', function () { addAllBrands(); });
+        $('bulk-open').addEventListener('click', function () { bulkNote(''); loadBulk(); });
+        $('bulk-sites').addEventListener('click', function () { searchBulkSites(); });
+        $('bulk-approve').addEventListener('click', function () { approveBulk(); });
         $('barcodes-refresh').addEventListener('click', function () { barcodeNote(''); loadBarcodes(); });
         $('barcodes-write').addEventListener('click', function () { writeBarcodes(); });
         $('export').addEventListener('click', function () { exportRun(); });
@@ -1339,6 +1585,12 @@
         addedText: addedText,
         addAllConfirmText: addAllConfirmText,
         BRAND_ADDED_TEXT: BRAND_ADDED_TEXT,
+        describeBulk: describeBulk,
+        bulkApproveBody: bulkApproveBody,
+        bulkResult: bulkResult,
+        bulkConfirmText: bulkConfirmText,
+        bulkCountText: bulkCountText,
+        BULK_SITES_CONFIRM_TEXT: BULK_SITES_CONFIRM_TEXT,
         describeBarcodes: describeBarcodes,
         barcodeWriteBody: barcodeWriteBody,
         barcodeResult: barcodeResult,

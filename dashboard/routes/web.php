@@ -88,6 +88,11 @@ Route::get('/api/run/brand-suggestions', [RunController::class, 'brandSuggestion
 Route::post('/api/run/brand-official-site', [RunController::class, 'brandOfficialSite']);
 Route::post('/api/run/brand-add', [RunController::class, 'brandAdd']);
 Route::post('/api/run/brand-add-all', [RunController::class, 'brandAddAll']);
+// «عبّي جدول الماركات»: القائمة قراءة فقط؛ «دوّر عالمواقع الرسمية» لحد 10 بحث؛ «اعتمد المحدد» و«تراجع» يكتبوا شيت المالك (CSRF)
+Route::get('/api/run/brand-bulk', [RunController::class, 'brandBulk']);
+Route::post('/api/run/brand-bulk-sites', [RunController::class, 'brandBulkSites']);
+Route::post('/api/run/brand-bulk-add', [RunController::class, 'brandBulkAdd']);
+Route::post('/api/run/brand-undo', [RunController::class, 'brandUndo']);
 // «باركودات من صفحات المتاجر»: القائمة قراءة فقط؛ «اكتب الباركودات المختارة» يجدول كتابة مُتحقق منها بعمود الباركود (CSRF)
 Route::get('/api/run/barcode-suggestions', [RunController::class, 'barcodeSuggestions']);
 Route::post('/api/run/barcode-write', [RunController::class, 'barcodeWrite']);
