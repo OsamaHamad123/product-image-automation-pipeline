@@ -75,13 +75,18 @@ def _peak_of_parallel_rows(main_mod, monkeypatch, concurrency, rows=12):
     monkeypatch.setattr(config, "WORKER_CONCURRENCY", str(concurrency), raising=False)
     _worker_env(main_mod, monkeypatch, [{"stop_requested": 0, "pause_requested": 0, "run_id": "r1"}])
     queue = [{"row_number": i, "product_name": f"p{i}"} for i in range(1, rows + 1)]
-    lock = threading.Lock()
+    lock = threading.Condition()
     now = {"n": 0, "peak": 0, "done": 0}
 
     def search(task, worksheet, link_column_index, brand_mappings, report=None):
         with lock:
             now["n"] += 1
             now["peak"] = max(now["peak"], now["n"])
+            lock.notify_all()
+            # The first wave waits until it is complete (or 2 s): on a busy machine the 8th search can start after
+            # the 1st one ended, so the peak must not measure machine speed. A worker that runs fewer than the
+            # setting still peaks below it after the timeout; one that runs more still overshoots during the sleep.
+            lock.wait_for(lambda: now["peak"] >= concurrency, timeout=2.0)
         time.sleep(0.15)
         with lock:
             now["n"] -= 1
