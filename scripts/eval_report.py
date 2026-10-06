@@ -33,6 +33,7 @@ import json
 import logging
 import os
 import sys
+from pathlib import Path
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 EVAL_DIR = os.path.join(REPO_ROOT, "tests", "eval")
@@ -52,8 +53,8 @@ def _pct(value):
 
 def print_report(report, golden, baseline=None):
     m = report["metrics"]
-    print(f"\nEngine {report['engine']} | scenario {report['scenario']} | providers {report.get('provider_set') or '-'} | "
-          f"{report['n_skus']} SKUs | "
+    print(f"\nEngine {report['engine']} | set {report.get('set', 'golden')} | scenario {report['scenario']} | "
+          f"providers {report.get('provider_set') or '-'} | {report['n_skus']} SKUs | "
           f"{report['seconds']:.1f}s | network attempts: {len(report['network_attempts'])}")
     print()
     print(harness.stratum_table(m))
@@ -79,7 +80,7 @@ def print_report(report, golden, baseline=None):
         leaks = metrics.holdout_leaks(golden.get("skus", []))
         if leaks:
             print(f"  {len(leaks)} rows of the held-out share are named by a regression test and count as dev")
-    if baseline and report["engine"] != "v1":
+    if baseline and report["engine"] != "v1" and report.get("set", "golden") == "golden":
         base = baseline["metrics"]
         print(f"\nv1 baseline: correct pick {_pct(base['correct_pick_rate'])}, wrong auto "
               f"{_pct(base['wrong_auto_rate'])}, auto precision {_pct(base['auto_accept_precision'])}")
@@ -153,6 +154,9 @@ def main(argv=None):
                         help="with --write-baseline: overwrite even though the legacy code has changed")
     parser.add_argument("--provider-set", choices=harness.PROVIDER_SETS, default="serper",
                         help="v2 provider set: serper (Serper + OFF + Bing fallback) or bing_only (no sanctioned key)")
+    parser.add_argument("--set", default="golden",
+                        help="the set to replay: golden (the committed 63 SKUs, default), realistic (modelled on the "
+                             "live rows: fixtures/realistic), or a recorded folder")
     parser.add_argument("--golden", help="golden_skus.json to replay (default: the committed fixture)")
     parser.add_argument("--cassette", help="vlm_cassette.json to replay (default: the one next to --golden, "
                                            "else the committed fixture)")
@@ -186,20 +190,39 @@ def main(argv=None):
                          "baseline would overwrite the 'before' record with hot-fixed numbers. Re-record from a "
                          "checkout of the baseline's legacy_commit, or pass --force if that is really intended.")
 
+    set_name = "golden"
+    if args.set != "golden":
+        if args.golden:
+            parser.error("give --set or --golden, not both")
+        if args.write_baseline or args.write_hotfixed_baseline:
+            parser.error("the v1 baselines are written from the committed golden set only")
+        target = harness.SETS.get(args.set) or args.set
+        if os.path.isdir(target):
+            target = os.path.join(target, "golden_skus.json")
+        if not os.path.isfile(target):
+            parser.error(f"--set {args.set}: no such set (golden, realistic, or a folder with golden_skus.json)")
+        args.golden = str(target)
+        set_name = args.set if args.set in harness.SETS else os.path.basename(os.path.dirname(os.path.abspath(target)))
+    elif args.golden:
+        set_name = os.path.basename(os.path.dirname(os.path.abspath(args.golden)))
     cassette_path, mappings_path = companion_paths(args.golden, args.cassette, args.mappings)
     golden = harness.load_golden(args.golden)
     cassette = harness.load_cassette(cassette_path)
     mappings = harness.load_mappings(mappings_path)
+    noisy_path = harness.set_paths(Path(args.golden))["noisy"] if args.golden else None
     if args.golden:
         print(f"replaying {args.golden} with cassette {cassette_path or harness.CASSETTE_PATH} and brand mappings "
               f"{mappings_path or harness.MAPPINGS_PATH}")
+        if args.scenario == "vlm_noisy" and noisy_path is None:
+            print("this set records no misreads (no vlm_noisy.json next to it): vlm_noisy replays like normal")
 
     def progress(i, n, outcome):
         if args.verbose:
             log.info("%d/%d %s -> %s %s", i, n, outcome.sku_id, outcome.decision, outcome.chosen_id or "")
 
     report = harness.run_all(args.engine, args.scenario, golden=golden, cassette=cassette, mappings=mappings,
-                             sku_ids=args.sku, progress=progress, provider_set=args.provider_set)
+                             sku_ids=args.sku, progress=progress, provider_set=args.provider_set,
+                             set_name=set_name, noisy_path=noisy_path)
     path = harness.write_report(report, args.out)
 
     try:

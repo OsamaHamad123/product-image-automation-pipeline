@@ -48,6 +48,7 @@ from typing import Any, Callable, Dict, Iterator, List, Mapping, Optional, Seque
 from unittest import mock
 
 import imagegen
+import imagegen_extra
 import metrics
 from metrics import Outcome
 
@@ -81,11 +82,18 @@ def candidate_seed(sku_id: str, cand_id: str) -> int:
 
 @functools.lru_cache(maxsize=None)
 def _render(recipe_json: str, seed: int) -> bytes:
-    return imagegen.generate(json.loads(recipe_json), seed)
+    recipe = json.loads(recipe_json)
+    if recipe.get("kind") in imagegen_extra.EXTRA_RECIPES:
+        return imagegen_extra.generate(recipe, seed)        # the other sets' recipes; imagegen itself never changes
+    return imagegen.generate(recipe, seed)
 
 
 def candidate_image(sku: Mapping[str, Any], cand: Mapping[str, Any]) -> bytes:
-    """Image bytes for a candidate: a recorded blob when present, else the synthetic recipe."""
+    """Image bytes for a candidate: a recorded blob when present, else the synthetic recipe.
+
+    seed_of names another candidate of the SKU whose seed the recipe is drawn with: the same picture again (the
+    same recipe gives the same bytes; another JPEG quality a near-duplicate), as stores copy one packshot.
+    """
     blob = cand.get("image_file")
     if blob:
         base = Path(sku.get("_base_dir") or FIXTURES)
@@ -93,13 +101,13 @@ def candidate_image(sku: Mapping[str, Any], cand: Mapping[str, Any]) -> bytes:
     recipe = cand.get("image_recipe")
     if not recipe:
         raise ValueError(f"{sku['id']}/{cand['id']}: no image_recipe or image_file")
-    return _render(json.dumps(recipe, sort_keys=True), candidate_seed(sku["id"], cand["id"]))
+    return _render(json.dumps(recipe, sort_keys=True), candidate_seed(sku["id"], cand.get("seed_of") or cand["id"]))
 
 
 def candidate_mime(cand: Mapping[str, Any]) -> str:
     if cand.get("mime"):
         return str(cand["mime"])
-    return imagegen.mime_type(cand.get("image_recipe") or {"kind": "packshot_white"})
+    return imagegen_extra.mime_type(cand.get("image_recipe") or {"kind": "packshot_white"})
 
 
 def norm_url(url: str) -> str:

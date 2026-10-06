@@ -51,6 +51,11 @@ SCENARIOS = ("normal", "gemini_down", "vlm_noisy")
 PROVIDER_SETS = runners.PROVIDER_SETS
 VLM_NOISY_PATH = FIXTURES / "vlm_noisy.json"
 ADVERSARIAL_PATH = FIXTURES / "adversarial_skus.json"
+# Named sets (eval_report --set): each folder holds golden_skus.json with its own vlm_cassette.json and
+# brand_mappings.json (and vlm_noisy.json when it records misreads). 'golden' is the committed 63-SKU set whose
+# numbers the merge gate pins; 'realistic' is modelled on the owner's live rows (fixtures/realistic).
+REALISTIC_PATH = FIXTURES / "realistic" / "golden_skus.json"
+SETS = {"golden": GOLDEN_PATH, "realistic": REALISTIC_PATH}
 
 # Source files whose behaviour the v1 baseline records. When any of them
 # changes (for example the v1 rollback hot-fixes), the live v1 run is no
@@ -90,6 +95,20 @@ def overlay_readings(cassette: Mapping[str, Any], readings: Mapping[str, Mapping
 def noisy_cassette(cassette: Mapping[str, Any], path: Optional[os.PathLike] = None) -> Dict[str, Any]:
     """The 'vlm_noisy' scenario: the recorded readings with the misreads of vlm_noisy.json laid over them."""
     return overlay_readings(cassette, _read_json(Path(path or VLM_NOISY_PATH))["misreads"])
+
+
+def set_paths(name_or_path: Any) -> Dict[str, Optional[Path]]:
+    """{golden, cassette, mappings, noisy} of a named set (SETS) or of a golden_skus.json path; None = not there."""
+    golden = SETS.get(str(name_or_path), None) if not isinstance(name_or_path, Path) else None
+    golden = Path(golden or name_or_path)
+    folder = golden.parent
+
+    def near(name: str) -> Optional[Path]:
+        path = folder / name
+        return path if path.exists() else None
+
+    return {"golden": golden, "cassette": near("vlm_cassette.json"), "mappings": near("brand_mappings.json"),
+            "noisy": near("vlm_noisy.json")}
 
 
 def correct_absent(golden: Mapping[str, Any], cassette: Mapping[str, Any]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
@@ -204,12 +223,14 @@ def run_all(engine: str = "v1", scenario: str = "normal", *, golden: Optional[Ma
             cassette: Optional[Mapping[str, Any]] = None, mappings: Optional[Dict[str, Any]] = None,
             sku_ids: Optional[Iterable[str]] = None,
             progress: Optional[Callable[[int, int, metrics.Outcome], None]] = None,
-            provider_set: str = "serper") -> Dict[str, Any]:
+            provider_set: str = "serper", set_name: str = "golden",
+            noisy_path: Optional[os.PathLike] = None) -> Dict[str, Any]:
     """Replay every golden SKU through one engine with the network blocked; return a report dict.
 
     provider_set ("serper" | "bing_only") picks the production provider set v2 runs with.
-    The 'vlm_noisy' scenario lays vlm_noisy.json over the cassette (the committed one
-    unless a cassette is passed) and then replays like 'normal'.
+    The 'vlm_noisy' scenario lays vlm_noisy.json (noisy_path, default the committed one) over the
+    cassette (the committed one unless a cassette is passed) and then replays like 'normal'.
+    set_name only labels the report (SETS: 'golden', 'realistic', or a recorded folder's name).
     """
     if engine not in ENGINES:
         raise ValueError(f"engine must be one of {ENGINES}")
@@ -220,7 +241,7 @@ def run_all(engine: str = "v1", scenario: str = "normal", *, golden: Optional[Ma
     golden = golden or load_golden()
     cassette = cassette or load_cassette()
     if scenario == "vlm_noisy":
-        cassette = noisy_cassette(cassette)
+        cassette = noisy_cassette(cassette, noisy_path)
     mappings = mappings if mappings is not None else load_mappings()
     wanted = set(sku_ids) if sku_ids else None
     skus = [s for s in golden["skus"] if wanted is None or s["id"] in wanted]
@@ -248,6 +269,7 @@ def run_all(engine: str = "v1", scenario: str = "normal", *, golden: Optional[Ma
     labels = metrics.labels_from_golden({"skus": skus})
     report = {
         "engine": engine,
+        "set": set_name,
         "scenario": scenario,
         "provider_set": provider_set if engine == "v2" else None,
         "generated_at": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"),
@@ -271,7 +293,8 @@ def report_dir() -> Path:
 
 def write_report(report: Mapping[str, Any], path: Optional[os.PathLike] = None) -> Path:
     stamp = _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
-    target = Path(path) if path else report_dir() / f"{report['engine']}-{report['scenario']}-{stamp}.json"
+    label = report["scenario"] if report.get("set", "golden") == "golden" else f"{report['set']}-{report['scenario']}"
+    target = Path(path) if path else report_dir() / f"{report['engine']}-{label}-{stamp}.json"
     target.parent.mkdir(parents=True, exist_ok=True)
     with open(target, "w", encoding="utf-8", newline="\n") as fh:
         json.dump(report, fh, ensure_ascii=False, indent=1)

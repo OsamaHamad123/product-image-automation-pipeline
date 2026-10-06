@@ -1,0 +1,71 @@
+{
+ "version": 1,
+ "description": "Scenario 'vlm_noisy' of the realistic set: confident misreads of the kinds the live runs showed, laid over vlm_cassette.json. A sibling read as the target (variant or size 'yes'), a listing's other-brand picture read as the sheet's brand (the reader saw the title's brand, not the pack's), and the right pack read as a variant 'no' (live 2026-10-04: 'Zwan Chicken Luncheon Meat 340 g' read as 'LUNCHEON', variant 'no'). The bars still hold: no wrong auto-publish.",
+ "misreads": {
+  "real-01-mccain-french-fries-shoestring-750gm": {
+   "c3": {
+    "variant_text": "Shoestring Fries",
+    "variant_match": "yes"
+   }
+  },
+  "real-08-virginia-w-meat-tuna-in-brine-170gm": {
+   "c1": {
+    "brand_text": "Virginia",
+    "brand_match": "yes"
+   }
+  },
+  "real-11-shan-tikka-bbq-mix-50gm": {
+   "c1": {
+    "brand_text": "Shan",
+    "brand_match": "yes"
+   }
+  },
+  "real-16-zwan-chkn-luncheon-meat-w-olives-340gm": {
+   "c1": {
+    "variant_text": "LUNCHEON",
+    "variant_match": "no"
+   }
+  },
+  "real-21-fairy-dish-liq-lemon-1l": {
+   "c3": {
+    "size_text": "1L",
+    "size_match": "yes"
+   }
+  },
+  "real-24-aseel-butter-ghee-1-6kg": {
+   "c2": {
+    "size_text": "1.6kg",
+    "size_match": "yes"
+   }
+  },
+  "real-31-al-osra-basmati-rice-5kg": {
+   "c1": {
+    "brand_text": "Al Osra",
+    "brand_match": "yes"
+   }
+  }
+ },
+ "notes": {
+  "real-01-mccain-french-fries-shoestring-750gm": {
+   "c3": "Golden Long sibling read as the target"
+  },
+  "real-08-virginia-w-meat-tuna-in-brine-170gm": {
+   "c1": "the Golden Prize can on Virginia's listing read as Virginia"
+  },
+  "real-11-shan-tikka-bbq-mix-50gm": {
+   "c1": "the National box on Shan's listing read as Shan"
+  },
+  "real-16-zwan-chkn-luncheon-meat-w-olives-340gm": {
+   "c1": "the right can read as another variant (live 2026-10-04)"
+  },
+  "real-21-fairy-dish-liq-lemon-1l": {
+   "c3": "the 500 ml bottle read as 1 L"
+  },
+  "real-24-aseel-butter-ghee-1-6kg": {
+   "c2": "the 800 g tin read as 1.6 kg"
+  },
+  "real-31-al-osra-basmati-rice-5kg": {
+   "c1": "the Aziza bag on Al Osra's listing read as Al Osra"
+  }
+ }
+}
