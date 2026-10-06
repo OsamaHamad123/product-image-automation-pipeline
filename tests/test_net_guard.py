@@ -7,13 +7,22 @@ fake of tests/net_fakes.py (installed by conftest.py): no test looks a name up f
 
 import io
 import socket
+import sys
+from pathlib import Path
 
 import numpy as np
 import pytest
 from PIL import Image
 
-import net_guard
-from net_fakes import PUBLIC_TEST_ADDRESS, fake_getaddrinfo
+ROOT = Path(__file__).resolve().parents[1]
+# tests/catalog_match/test_cm_sitemaps.py (and others) put scripts/ first on sys.path, and scripts/publish_check.py is
+# the terminal script of the same name: the repository's own publish_check comes first (as tests/test_bg_skip_dashboard.py)
+if sys.path[0] != str(ROOT):
+    sys.path.insert(0, str(ROOT))
+
+import net_guard  # noqa: E402
+import publish_check  # noqa: E402
+from net_fakes import PUBLIC_TEST_ADDRESS, fake_getaddrinfo  # noqa: E402
 
 PRIVATE = {"intranet.example": "10.0.0.5", "metadata.example": "169.254.169.254", "cgnat.example": "100.64.1.2",
            "ula.example": "fd12::1", "mixed.example": ["93.184.216.34", "192.168.1.10"],
@@ -377,8 +386,6 @@ def test_an_approved_url_on_an_internal_address_is_never_downloaded_even_with_a_
 
 def test_a_refused_url_is_told_to_the_owner_in_plain_arabic_on_both_screens():
     import pathlib
-
-    import publish_check
 
     text = publish_check.download_error_text("download_blocked_url")
     assert text and "آمن" in text and "blocked" not in text
