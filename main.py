@@ -41,6 +41,7 @@ import cloudinary_storage
 import cutout_finish
 import local_cache_db
 import processing_profile
+import stop_signals
 
 MAX_SEARCH_ATTEMPTS = 3
 RETRY_BASE_DELAY = 2.0
@@ -786,6 +787,10 @@ def _finish_task(task, status, error_message=None, failure_code=None, trace=None
     صفوف المنتج نفسه التي تنتظر تأخذ النتيجة نفسها (local_cache_db.update_task_status)؛ siblings عند النشر:
     معرفات الصفوف التي كُتب رابطها.
     """
+    if task.get("_given_up"):
+        # تُرك بعد حده الزمني (أو عند الإيقاف) وأُعيد صفه للانتظار: نتيجته المتأخرة لا تُكتب
+        print(f"[Worker] الصف {task.get('row_number')}: انتهى بعد أن تُرك؛ لم تُكتب نتيجته ({status}).")
+        return False
     extra = {"siblings": siblings} if siblings else {}
     return local_cache_db.update_task_status(task["id"], status, error_message, failure_code=failure_code,
                                              trace=trace, claim_id=task.get("worker_id") or None, **extra)
@@ -2371,6 +2376,129 @@ def _start_local_index_refresh(trigger):
         print(f"تنبيه: تعذر بدء تحديث الفهرس المحلي: {e}")
 
 
+# المنتجات الجارية على السيرفر (run_worker_mode):
+# - حجز الصف (LEASE_MINUTES) يتجدد كل LEASE_RENEW_SECONDS ما دام المنتج يعمل، فلا يسحبه عامل آخر ولا تُهمل نتيجته.
+# - منتج تجاوز PRODUCT_DEADLINE_MINUTES (8 دقائق افتراضياً) يُترك: صفه يعود للانتظار كانقطاع مزوّد (PROVIDER_DOWN:
+#   بعد 10 ثم 20 دقيقة، ويُركن بعد 3 بالتشغيل)، والعامل يكمل. نتيجته المتأخرة لا تُكتب (حجزه لم يعد له).
+# - الخروج لا ينتظر خيطاً عالقاً (exit_process).
+LEASE_RENEW_SECONDS = 60
+_LEFT_RUNNING = []          # منتجات تُركت في خيوطها (الحد الزمني أو مهلة الإيقاف)
+
+
+class _ProductPool:
+    """
+    المنتجات الجارية بالتوازي فوق ThreadPoolExecutor. الحد الزمني يُحسب من بدء المنتج فعلاً في خيطه.
+    منتج تُرك (overdue / abandon_all) لا يُعد بين الجارية، والمنفذ يُستبدل بآخر جديد كي لا يحجز خيطه العالق مكان
+    منتج جديد. close() لا ينتظر أي خيط.
+    """
+
+    def __init__(self, executor_factory, max_workers, deadline_s):
+        self._factory = executor_factory
+        self.max_workers = max_workers
+        self.deadline_s = deadline_s
+        self._executor = executor_factory(max_workers=max_workers)
+        self._running = {}
+
+    def submit(self, fn, task):
+        entry = {"task": task, "started": None}
+
+        def run():
+            entry["started"] = time.monotonic()
+            return fn(task)
+
+        future = self._executor.submit(run)
+        self._running[future] = entry
+        return future
+
+    def live(self):
+        self._running = {f: e for f, e in self._running.items() if not f.done()}
+        return list(self._running)
+
+    def tasks(self):
+        return [e["task"] for f, e in list(self._running.items()) if not f.done()]
+
+    def overdue(self, now=None):
+        """المنتجات التي تجاوزت حدها: تُترك وتُعاد مهامها."""
+        now = time.monotonic() if now is None else now
+        late = [(f, e) for f, e in list(self._running.items())
+                if not f.done() and e["started"] is not None and now - e["started"] >= self.deadline_s]
+        for future, entry in late:
+            self._abandon(future, entry)
+        if late:
+            self._executor.shutdown(wait=False)
+            self._executor = self._factory(max_workers=self.max_workers)
+        return [e["task"] for _, e in late]
+
+    def abandon_all(self):
+        left = [(f, e) for f, e in list(self._running.items()) if not f.done()]
+        for future, entry in left:
+            self._abandon(future, entry)
+        return [e["task"] for _, e in left]
+
+    def _abandon(self, future, entry):
+        entry["task"]["_given_up"] = True
+        _LEFT_RUNNING.append(future)
+        self._running.pop(future, None)
+
+    def close(self):
+        self._executor.shutdown(wait=False)
+
+
+def _give_up_product(task, deadline_s):
+    """منتج تجاوز حده الزمني: صفه يعود للانتظار كانقطاع مزوّد (يُعاد بعد 10 ثم 20 دقيقة)."""
+    minutes = round(deadline_s / 60.0, 1)
+    print(f"[Worker] الصف {task.get('row_number')}: المنتج تجاوز {minutes:g} دقيقة (PRODUCT_DEADLINE_MINUTES)؛ "
+          "عاد للانتظار كانقطاع مزوّد، والعامل يكمل بالصف التالي.")
+    local_cache_db.update_task_status(task["id"], "pending",
+                                      f"PRODUCT_TIMEOUT: still running after {minutes:g} minutes; retried later",
+                                      failure_code="PROVIDER_DOWN", claim_id=task.get("worker_id") or None)
+
+
+def _drain_products(pool, grace_s=None, watch=None):
+    """
+    انتظار المنتجات الجارية بعد آخر سحب. بلا grace_s: كل منتج حتى ينتهي أو يبلغ حده الزمني (watch يتركه).
+    grace_s (إشارة إيقاف): grace_s ثانية على الأكثر. تعيد مهام المنتجات التي بقيت جارية (تُترك في خيوطها).
+    """
+    from concurrent.futures import wait as wait_futures
+
+    end = None if grace_s is None else time.monotonic() + max(0.0, float(grace_s))
+    while True:
+        if watch is not None:
+            watch()
+        live = pool.live()
+        if not live:
+            break
+        left = None if end is None else end - time.monotonic()
+        if left is not None and left <= 0:
+            break
+        wait_futures(live, timeout=1.0 if left is None else min(1.0, left))
+    left_tasks = pool.abandon_all()
+    pool.close()
+    return left_tasks
+
+
+def exit_process(code):
+    """
+    نهاية العملية برمز code. بايثون ينتظر عند الخروج كل خيوط المنفذ، فمنتج بقي عالقاً في خيطه (تُرك بعد حده الزمني
+    أو بعد مهلة الإيقاف) يعلّق الخروج للأبد: تُكتب المخرجات ثم os._exit. بلا خيط عالق: sys.exit كالمعتاد.
+    """
+    hung = [f for f in _LEFT_RUNNING if not f.done()]
+    if not hung:
+        sys.exit(code)
+    print(f"[Worker] {len(hung)} منتج ما زال عالقاً في خيطه؛ الخروج لا ينتظره.")
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.flush()
+        except Exception:
+            pass
+    try:
+        import logging
+        logging.shutdown()
+    except Exception:
+        pass
+    os._exit(code)
+
+
 def run_worker_mode(trigger="manual", report=True, deadline_ts=None):
     """
     عامل الخلفية: يسحب المهام ذرياً ويعالجها بالتوازي (WORKER_CONCURRENCY منتجاً بنفس الوقت، 5 افتراضياً).
@@ -2496,9 +2624,13 @@ def run_worker_mode(trigger="manual", report=True, deadline_ts=None):
                 local_cache_db.update_automation_state(status="pre_caching", current_product=t["product_name"])
                 result = pre_cache_product_candidates(t, worksheet, link_column_index, brand_mappings, report=report)
             except Exception as e:
+                if t.get("_given_up"):
+                    return
                 _finish_task(t, "failed", f"Unexpected worker error: {e}", failure_code="WORKER_ERROR")
                 print(f"[Worker Thread Error] الصف {t['row_number']}: {e}")
                 result = "failed"
+            if t.get("_given_up"):
+                return               # تُرك بعد حده الزمني: صفه أُعيد للانتظار، ونتيجته لا تُحسب
             with lock:
                 counters["provider_down_streak"] = counters["provider_down_streak"] + 1 if result == "provider_down" else 0
                 counters["credit_streak"] = _next_credit_streak(counters["credit_streak"], report)
@@ -2509,10 +2641,28 @@ def run_worker_mode(trigger="manual", report=True, deadline_ts=None):
         active = []
         db_outage_since = None
         last_beat = time.monotonic()
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        from catalog_match import settings as cm_settings
+        pool = _ProductPool(ThreadPoolExecutor, max_workers, cm_settings.product_deadline_s())
+        lease_beat = [time.monotonic()]
+
+        def watch_products():
+            # الحد الزمني لكل منتج، ونبض حجز الصفوف الجارية (منتج طويل لا يُسحب ثانية ولا تُهمل نتيجته)
+            for late in pool.overdue():
+                _give_up_product(late, pool.deadline_s)
+                with lock:
+                    counters["provider_down_streak"] += 1
+            if time.monotonic() - lease_beat[0] >= LEASE_RENEW_SECONDS:
+                lease_beat[0] = time.monotonic()
+                claims = [t.get("worker_id") for t in pool.tasks() if t.get("worker_id")]
+                if claims and local_cache_db.renew_leases(claims) is None:
+                    print("[Worker] تعذر تجديد حجز الصفوف الجارية؛ يُعاد بعد دقيقة.")
+
+        interrupted = False
+        try:
             while True:
                 lock_heartbeat()
-                active = [f for f in active if not f.done()]
+                watch_products()
+                active = pool.live()
                 with lock:
                     streak = counters["provider_down_streak"]
                     credit_streak = counters["credit_streak"]
@@ -2564,7 +2714,7 @@ def run_worker_mode(trigger="manual", report=True, deadline_ts=None):
                         task = local_cache_db.fetch_next_task(worker_id)
                         if task:
                             print(f"[Queue] سحب مهمة الصف {task['row_number']}.")
-                            active.append(executor.submit(runner, task))
+                            active.append(pool.submit(runner, task))
                             db_outage_since = None
                             last_beat = time.monotonic()
                             continue
@@ -2587,84 +2737,114 @@ def run_worker_mode(trigger="manual", report=True, deadline_ts=None):
                     time.sleep(5)
                     continue
                 time.sleep(1)
+        except KeyboardInterrupt:
+            interrupted = True
+            raise
+        finally:
+            # لا مهمة جديدة. المنتجات الجارية تكمل (كل منها حتى حده الزمني)، وعند إشارة إيقاف SHUTDOWN_GRACE_S ثانية
+            # على الأكثر؛ صفوف ما بقي جارياً تعود للانتظار فوراً (يأخذها التشغيل التالي) ولا ينتظرها الخروج.
+            grace = cm_settings.shutdown_grace_s()
+            left = []
+            try:
+                try:
+                    if interrupted and pool.live():
+                        print(f"[Worker] إيقاف: المنتجات الجارية أمامها {grace} ثانية لتنتهي (SHUTDOWN_GRACE_S).")
+                    left = _drain_products(pool, grace_s=grace if interrupted else None, watch=watch_products)
+                except KeyboardInterrupt:
+                    if interrupted:
+                        raise
+                    # إشارة إيقاف أثناء انتظار المنتجات الجارية: مهلة الإيقاف فقط
+                    interrupted = True
+                    print(f"[Worker] إيقاف: المنتجات الجارية أمامها {grace} ثانية لتنتهي (SHUTDOWN_GRACE_S).")
+                    left = _drain_products(pool, grace_s=grace, watch=watch_products)
+                    raise
+            finally:
+                left = left or pool.abandon_all()
+                pool.close()
+                if left:
+                    released = local_cache_db.release_claims([t.get("worker_id") for t in left])
+                    print(f"[Worker] {len(left)} منتج لم ينتهِ قبل الإيقاف؛ {released or 0} صف عاد للانتظار.")
     except BaseException as e:
-        # عامل انهار ليس «اكتمل»: خطأ غير متوقع = worker_error (رمز 1)، و Ctrl+C = stopped (رمز 3)
+        # عامل انهار ليس «اكتمل»: خطأ غير متوقع = worker_error (رمز 1)، و Ctrl+C = stopped (رمز 3)؛ SIGTERM / SIGHUP
+        # (stop_signals: systemctl stop، إعادة تشغيل السيرفر) = shutdown (رمز 3)
         if isinstance(e, KeyboardInterrupt):
-            stop_reason = stop_reason or "stopped"
+            stop_reason = stop_reason or ("shutdown" if stop_signals.requested() else "stopped")
         elif not (isinstance(e, SystemExit) and e.code in (0, None)):
             stop_reason = stop_reason or "worker_error"
             crash = _redacted(f"{type(e).__name__}: {e}")[:200]
             print(f"[Worker] خطأ غير متوقع أنهى العامل: {crash}")
         raise
     finally:
-        # سبب الانقطاع (رصيد Serper / Gemini) من صفوف هذا العامل فقط (worker_id)؛ None يترك التنبيه كما هو.
-        # نهاية التشغيل تلغي طلب إيقاف وصل مع نهايته (stop_requested=0) كي لا يوقف عاملاً لاحقاً قبل أي منتج.
-        run_seconds = time.monotonic() - started + 60
-        health = _run_health(worker_id, run_seconds)
-        final_notice = None
-        if rechecks_requeued:
-            # صفوف إعادة تحقق لم يصل إليها هذا التشغيل (توقف مبكراً، أو أُجلت بعد انقطاع المزودين) تعود للمراجعة
-            # بمرشحاتها قبل كتابة الحالة النهائية، فلا تختفي من المراجعة حتى التشغيل التالي
-            parked = local_cache_db.park_verifier_rechecks()
-            if parked:
-                print(f"[Worker] {parked} صف إعادة تحقق لم يصل إليه التشغيل؛ عاد للمراجعة.")
-        try:
-            if stop_reason == "stopped":
-                # يعيد أي صف بقي 'processing' إلى الانتظار، ويلغي طلب الإيقاف، ويضبط الحالة (مراجعة أو خامل)
-                local_cache_db.stop_run(worker_active=False)
-            elif stop_reason == "provider_down":
-                final_notice = _outage_notice(worker_id, run_seconds,
-                                              "PROVIDER_DOWN: search providers unavailable; remaining rows stay pending",
-                                              health=health)
-                local_cache_db.update_automation_state(status="provider_down", current_product="", stop_requested=0,
-                                                       notice=final_notice)
-            elif stop_reason == "db_unavailable":
-                # غالباً يفشل هذا التحديث أيضاً؛ التقرير (run_report) وملف last_report.json يقولان ذلك صراحة
-                final_notice = DB_UNAVAILABLE_NOTICE
-                local_cache_db.update_automation_state(status="error", current_product="", stop_requested=0,
-                                                       notice=final_notice)
-            elif stop_reason in ("sheets_unavailable", "sheet_config", "sheet_not_found"):
-                pass
-            elif stop_reason == "worker_error":
-                final_notice = _merge_notices(
-                    f"WORKER_ERROR: خطأ غير متوقع أوقف العامل ({crash or '-'})؛ بقيت الصفوف المتبقية في الانتظار", notice)
-                local_cache_db.update_automation_state(status="error", current_product="", stop_requested=0,
-                                                       notice=final_notice)
-            else:
-                # الطابور انتهى، أو سبب توقف آخر (مثل حد الميزانية) يظهر نصه كما هو في التنبيه والتقرير
-                base = notice
-                if stop_reason and not str(notice or "").startswith(f"{str(stop_reason).upper()}:"):
-                    # SERPER_CREDIT يُذكر سببه دائماً: تنبيه ops_health يحتاج عمليتي بحث على الأقل، والإيقاف قد يكون
-                    # بعد واحدة (SERPER_CREDIT_STOP_SEARCHES=1)؛ تنبيه ops_health بالرمز نفسه لا يتكرر
-                    base = _merge_notices(_stop_notice(stop_reason), notice)
-                final_notice = _outage_notice(worker_id, run_seconds, base, health=health)
-                ready = local_cache_db.get_ready_for_review_count()
-                if ready is None:
-                    # خطأ قاعدة البيانات ليس «لا شيء للمراجعة»: الحالة تبقى، ولوحة التحكم تضبطها عند عودة القاعدة
-                    print("[Worker] تعذر قراءة عدد الصفوف الجاهزة للمراجعة؛ لم تُكتب الحالة النهائية.")
-                else:
-                    local_cache_db.update_automation_state(status="curation_pending" if ready > 0 else "idle",
-                                                           current_product="", stop_requested=0, notice=final_notice)
-        except Exception as e:
-            print(f"[Worker] تعذر تحديث الحالة النهائية: {e}")
-        if queue_started:
-            google_sheets.stop_async_queue()
-        release_own_lock(lock_file)
-        try:
-            if os.path.exists("temp/batch_progress.json"):
-                os.remove("temp/batch_progress.json")
-        except Exception:
-            pass
-        LAST_WORKER.update(stop_reason=stop_reason, run_id=report_run_id, worker_id=worker_id,
-                           started_ts=started_ts, ended_ts=time.time(),
-                           notice=final_notice or start_notice or notice or None, health=health,
-                           bg_skipped=bg_skipped_count(), bg_fallback=bg_fallback_count())
-        if report:
+        # التنظيف يكتمل: إشارة إيقاف تصل الآن (SIGTERM أثناء كتابة الحالة أو التقرير) تُسجل ولا تقطعه
+        with stop_signals.deferred():
+            # سبب الانقطاع (رصيد Serper / Gemini) من صفوف هذا العامل فقط (worker_id)؛ None يترك التنبيه كما هو.
+            # نهاية التشغيل تلغي طلب إيقاف وصل مع نهايته (stop_requested=0) كي لا يوقف عاملاً لاحقاً قبل أي منتج.
+            run_seconds = time.monotonic() - started + 60
+            health = _run_health(worker_id, run_seconds)
+            final_notice = None
+            if rechecks_requeued:
+                # صفوف إعادة تحقق لم يصل إليها هذا التشغيل (توقف مبكراً، أو أُجلت بعد انقطاع المزودين) تعود للمراجعة
+                # بمرشحاتها قبل كتابة الحالة النهائية، فلا تختفي من المراجعة حتى التشغيل التالي
+                parked = local_cache_db.park_verifier_rechecks()
+                if parked:
+                    print(f"[Worker] {parked} صف إعادة تحقق لم يصل إليه التشغيل؛ عاد للمراجعة.")
             try:
-                import run_report
-                run_report.report_worker_run(dict(LAST_WORKER), trigger=trigger)
+                if stop_reason in ("stopped", "shutdown"):
+                    # يعيد أي صف بقي 'processing' إلى الانتظار، ويلغي طلب الإيقاف، ويضبط الحالة (مراجعة أو خامل)
+                    local_cache_db.stop_run(worker_active=False)
+                elif stop_reason == "provider_down":
+                    final_notice = _outage_notice(worker_id, run_seconds,
+                                                  "PROVIDER_DOWN: search providers unavailable; remaining rows stay pending",
+                                                  health=health)
+                    local_cache_db.update_automation_state(status="provider_down", current_product="", stop_requested=0,
+                                                           notice=final_notice)
+                elif stop_reason == "db_unavailable":
+                    # غالباً يفشل هذا التحديث أيضاً؛ التقرير (run_report) وملف last_report.json يقولان ذلك صراحة
+                    final_notice = DB_UNAVAILABLE_NOTICE
+                    local_cache_db.update_automation_state(status="error", current_product="", stop_requested=0,
+                                                           notice=final_notice)
+                elif stop_reason in ("sheets_unavailable", "sheet_config", "sheet_not_found"):
+                    pass
+                elif stop_reason == "worker_error":
+                    final_notice = _merge_notices(
+                        f"WORKER_ERROR: خطأ غير متوقع أوقف العامل ({crash or '-'})؛ بقيت الصفوف المتبقية في الانتظار", notice)
+                    local_cache_db.update_automation_state(status="error", current_product="", stop_requested=0,
+                                                           notice=final_notice)
+                else:
+                    # الطابور انتهى، أو سبب توقف آخر (مثل حد الميزانية) يظهر نصه كما هو في التنبيه والتقرير
+                    base = notice
+                    if stop_reason and not str(notice or "").startswith(f"{str(stop_reason).upper()}:"):
+                        # SERPER_CREDIT يُذكر سببه دائماً: تنبيه ops_health يحتاج عمليتي بحث على الأقل، والإيقاف قد يكون
+                        # بعد واحدة (SERPER_CREDIT_STOP_SEARCHES=1)؛ تنبيه ops_health بالرمز نفسه لا يتكرر
+                        base = _merge_notices(_stop_notice(stop_reason), notice)
+                    final_notice = _outage_notice(worker_id, run_seconds, base, health=health)
+                    ready = local_cache_db.get_ready_for_review_count()
+                    if ready is None:
+                        # خطأ قاعدة البيانات ليس «لا شيء للمراجعة»: الحالة تبقى، ولوحة التحكم تضبطها عند عودة القاعدة
+                        print("[Worker] تعذر قراءة عدد الصفوف الجاهزة للمراجعة؛ لم تُكتب الحالة النهائية.")
+                    else:
+                        local_cache_db.update_automation_state(status="curation_pending" if ready > 0 else "idle",
+                                                               current_product="", stop_requested=0, notice=final_notice)
             except Exception as e:
-                print(f"[Worker] تعذر كتابة تقرير التشغيل: {e}")
+                print(f"[Worker] تعذر تحديث الحالة النهائية: {e}")
+            if queue_started:
+                google_sheets.stop_async_queue()
+            release_own_lock(lock_file)
+            try:
+                if os.path.exists("temp/batch_progress.json"):
+                    os.remove("temp/batch_progress.json")
+            except Exception:
+                pass
+            LAST_WORKER.update(stop_reason=stop_reason, run_id=report_run_id, worker_id=worker_id,
+                               started_ts=started_ts, ended_ts=time.time(),
+                               notice=final_notice or start_notice or notice or None, health=health,
+                               bg_skipped=bg_skipped_count(), bg_fallback=bg_fallback_count())
+            if report:
+                try:
+                    import run_report
+                    run_report.report_worker_run(dict(LAST_WORKER), trigger=trigger)
+                except Exception as e:
+                    print(f"[Worker] تعذر كتابة تقرير التشغيل: {e}")
 
 
 def run_automation_pipeline():
@@ -2728,12 +2908,26 @@ def run_automation_pipeline():
                 pass
 
 
-if __name__ == "__main__":
-    if "--enqueue" in sys.argv:
+def cli(argv=None):
+    """
+    سطر الأوامر: --enqueue، --worker، أو التشغيل التسلسلي القديم. SIGTERM / SIGHUP (systemctl stop، إعادة تشغيل
+    السيرفر) تعامل مثل Ctrl+C (stop_signals): العامل يوقف السحب، يعطي المنتجات الجارية SHUTDOWN_GRACE_S ثانية، يعيد
+    صفوف ما لم ينتهِ للانتظار، يحرر القفل ويكتب التقرير، ثم يخرج برمز 3 (توقف قبل نهاية الطابور).
+    """
+    argv = sys.argv if argv is None else argv
+    stop_signals.install()
+    if "--enqueue" in argv:
         run_enqueue_mode()
-    elif "--worker" in sys.argv:
-        run_worker_mode(trigger=_cli_trigger(sys.argv))
+    elif "--worker" in argv:
+        try:
+            run_worker_mode(trigger=_cli_trigger(argv))
+        except KeyboardInterrupt:
+            print("[Worker] توقف العامل (إشارة إيقاف أو Ctrl+C).")
         import run_report
-        sys.exit(run_report.exit_code(LAST_WORKER.get("stop_reason")))
+        exit_process(run_report.exit_code(LAST_WORKER.get("stop_reason")))
     else:
         run_automation_pipeline()
+
+
+if __name__ == "__main__":
+    cli()
