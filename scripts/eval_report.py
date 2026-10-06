@@ -11,6 +11,14 @@ Usage (from the repository root):
     python scripts/eval_report.py --engine v1 --write-hotfixed-baseline   # refresh baseline_v1_hotfixed.json
     python scripts/eval_report.py --stored original                # print a stored baseline (original|hotfixed)
     python scripts/eval_report.py --engine v2 --golden tests/eval/fixtures/recorded/2026-10-02/golden_skus.json
+    python scripts/eval_report.py --engine v2 --set realistic                  # the set modelled on the live rows
+    python scripts/eval_report.py --engine v2 --expansion --local-index       # + the costly sources, measured
+
+--expansion runs the expansion round (X0-X5) and the P0 page reads, --local-index a local catalog index, through
+the injected fakes of tests/eval/sources.py and the set's sources overlay (fixtures/sources_golden.json,
+fixtures/realistic/sources.json). The set is replayed with and without them, and the report prints their effect
+(correct and wrong picks before -> after), their cost (paid calls, USD per 100 SKUs) and the live time they add.
+Without these flags neither runs, exactly as before.
 
 A --golden set is replayed with the vlm_cassette.json and brand_mappings.json stored next to
 it (the recorder writes both: the Brands Mapping tab at recording time), unless --cassette /
@@ -103,6 +111,61 @@ def print_report(report, golden, baseline=None):
             print(f"  {o['sku_id']}: {o['error']}")
 
 
+def _wrong_picks(m):
+    return (m["n_auto"] - m["n_auto_correct"]) + (m["n_preselected"] - m["n_preselected_correct"])
+
+
+def print_sources(report, golden):
+    """What the expansion round / local index changed against the same set without them, what it cost, how long."""
+    on = report["metrics"]
+    off = report["without_sources"]["metrics"]
+    s = report.get("sources_summary") or {}
+    what = " + ".join(n for n, k in (("expansion round (X0-X5) + P0 page reads", "expansion"),
+                                     ("local index", "index")) if report["sources"].get(k))
+    print(f"\nsources: {what} (fakes: tests/eval/sources.py, same set and labels with and without)")
+    print(f"  effect   correct pick {off['n_correct_pick']}/{off['n_with_correct']} -> "
+          f"{on['n_correct_pick']}/{on['n_with_correct']} ({on['n_correct_pick'] - off['n_correct_pick']:+d}); "
+          f"wrong picks {_wrong_picks(off)} -> {_wrong_picks(on)}; wrong auto-publish {off['n_auto_wrong']} -> "
+          f"{on['n_auto_wrong']}; auto {off['n_auto']} -> {on['n_auto']}; review {_pct(off['review_rate'])} -> "
+          f"{_pct(on['review_rate'])}")
+    if not s:
+        print("  nothing ran")
+        return
+    import sources as sources_mod
+
+    before = {o["sku_id"]: o for o in report["without_sources"]["outcomes"]}
+    extra_vlm = sum(max(0, int(o["vlm_calls"]) - int(before[o["sku_id"]]["vlm_calls"]))
+                    for o in report["outcomes"] if o["sku_id"] in before)
+    vlm_usd = extra_vlm * sources_mod.DEFAULT_VLM_COST
+    calls = ", ".join(f"{p} {n}" for p, n in s["paid_calls"].items()) or "none"
+    n = max(1, s["skus"])
+    print(f"  cost     {s['n_paid_calls']} paid search calls ({calls}) on {s['skus_with_paid_calls']} of {s['skus']} "
+          f"SKUs: ${s['usd']:.4f}; {extra_vlm} more label-reader calls: about ${vlm_usd:.4f}; together "
+          f"${100.0 * (s['usd'] + vlm_usd) / n:.3f} per 100 SKUs. {s['index_lookups']} local index lookups (free)")
+    reads = s.get("page_reads_by") or {}
+    print(f"  time     about {s['est_live_s'] + extra_vlm * sources_mod.VERIFY_CALL_S:.1f} s more live in all "
+          f"(each paid call at its median latency in the 2026-10 run exports, {sources_mod.PAGE_READ_S} s per wave "
+          f"of page reads, {sources_mod.VERIFY_CALL_S} s per reader call); page reads: P0 {reads.get('p0', 0)} "
+          f"(while the pictures download), index {reads.get('index', 0)}, expansion {reads.get('expansion', 0)}; "
+          f"the replay's expansion stage took {s['replay_expansion_ms']} ms")
+    labels = metrics.labels_from_golden(golden)
+    rows = []
+    for o in report["outcomes"]:
+        b = before.get(o["sku_id"])
+        src = o.get("sources") or {}
+        if b is None or not (src.get("n_paid_calls")
+                             or (b["decision"], b["chosen_id"]) != (o["decision"], o["chosen_id"])):
+            continue
+        cands = labels[o["sku_id"]]["candidates"]
+        rows.append(f"    {o['sku_id'][:46]:46s} {b['decision']} {b['chosen_id'] or '-'} "
+                    f"({cands.get(b['chosen_id'], '-')}) -> {o['decision']} {o['chosen_id'] or '-'} "
+                    f"({cands.get(o['chosen_id'], '-')}) | calls {src.get('n_paid_calls', 0)}, reads "
+                    f"{src.get('page_reads', 0)}")
+    if rows:
+        print("  per SKU where a source ran or the result changed:")
+        print("\n".join(rows))
+
+
 def print_stored(stored, which):
     """Metric table of a committed v1 baseline (no engine run)."""
     m = stored["metrics"]
@@ -162,6 +225,11 @@ def main(argv=None):
                                            "else the committed fixture)")
     parser.add_argument("--mappings", help="brand_mappings.json (default: the one next to --golden, else the "
                                            "committed fixture)")
+    parser.add_argument("--expansion", action="store_true",
+                        help="also run the expansion round (X0-X5) and the P0 page reads, through the fakes of "
+                             "tests/eval/sources.py and the set's sources overlay; prints their effect, cost and time")
+    parser.add_argument("--local-index", action="store_true",
+                        help="also ask a local catalog index (MemoryCatalogStore of the sources overlay's rows)")
     parser.add_argument("--sku", action="append", help="only this SKU id (repeatable)")
     parser.add_argument("--out", help="where to write the JSON report (default: temp folder)")
     parser.add_argument("--json", action="store_true", help="print the metrics as JSON instead of tables")
@@ -220,9 +288,26 @@ def main(argv=None):
         if args.verbose:
             log.info("%d/%d %s -> %s %s", i, n, outcome.sku_id, outcome.decision, outcome.chosen_id or "")
 
+    sources_opts = None
+    base_report = None
+    if args.expansion or args.local_index:
+        if args.engine != "v2":
+            parser.error("--expansion / --local-index measure the v2 engine")
+        import sources as sources_mod
+        sources_opts = {"expansion": bool(args.expansion), "index": bool(args.local_index)}
+        overlay_file = sources_mod.overlay_path(Path(args.golden) if args.golden else None)
+        golden, cassette = sources_mod.apply_overlay(golden, cassette, sources_mod.load_overlay(overlay_file))
+        print(f"sources overlay: {overlay_file or 'none (the sources find nothing new in this set)'}")
+        # the same set and labels without the sources: the effect is the difference
+        base_report = harness.run_all(args.engine, args.scenario, golden=golden, cassette=cassette,
+                                      mappings=mappings, sku_ids=args.sku, provider_set=args.provider_set,
+                                      set_name=set_name, noisy_path=noisy_path)
     report = harness.run_all(args.engine, args.scenario, golden=golden, cassette=cassette, mappings=mappings,
                              sku_ids=args.sku, progress=progress, provider_set=args.provider_set,
-                             set_name=set_name, noisy_path=noisy_path)
+                             set_name=set_name, noisy_path=noisy_path, sources=sources_opts)
+    if base_report is not None:
+        report["without_sources"] = {"metrics": base_report["metrics"], "seconds": base_report["seconds"],
+                                     "outcomes": base_report["outcomes"]}
     path = harness.write_report(report, args.out)
 
     try:
@@ -233,6 +318,8 @@ def main(argv=None):
         print(json.dumps(report["metrics"], ensure_ascii=False, indent=1))
     else:
         print_report(report, golden, baseline)
+        if sources_opts:
+            print_sources(report, golden)
     print(f"\nfull report: {path}")
 
     if args.write_baseline:

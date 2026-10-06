@@ -1,0 +1,279 @@
+{
+ "skus": {
+  "uae-006-al-rawabi-fresh-milk-full-fat-2l": {
+   "candidates": [
+    {
+     "id": "x1",
+     "provider": "serper_web",
+     "rank": 1,
+     "image_url": "https://gcc.luluhypermarket.com/medias/90021-al-rawabi-full-fat-2l.jpg",
+     "page_url": "https://gcc.luluhypermarket.com/en-ae/al-rawabi-fresh-milk-full-fat-2l/p/90021",
+     "title": "Al Rawabi Fresh Milk Full Fat 2L Online at Best Price | Lulu UAE",
+     "page_title": "Al Rawabi Fresh Milk Full Fat 2L Online at Best Price | Lulu UAE",
+     "domain": "gcc.luluhypermarket.com",
+     "width": 1200,
+     "height": 1200,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "X1"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1200,
+       1200
+      ],
+      "shape": "bottle",
+      "label_text": "AL RAWABI|FRESH MILK FULL FAT|2L",
+      "accent_color": "#0d47a1",
+      "body_color": "#ffffff"
+     },
+     "download": "ok",
+     "label": "correct_exact",
+     "note": "X1: the store page's own main image is the exact bottle."
+    },
+    {
+     "id": "x2",
+     "provider": "serper_shopping",
+     "rank": 1,
+     "image_url": "https://f.nooncdn.com/p/pnsku/N3301V/45/_/1700000000/3301_1.jpg",
+     "page_url": "https://www.noon.com/uae-en/al-rawabi-full-fat-milk-1l/N3301V/p/",
+     "title": "Al Rawabi Fresh Milk Full Fat 1L",
+     "page_title": "Al Rawabi Fresh Milk Full Fat 1L",
+     "domain": "noon.com",
+     "width": 1000,
+     "height": 1000,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "X2"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1000,
+       1000
+      ],
+      "shape": "bottle",
+      "label_text": "AL RAWABI|FRESH MILK FULL FAT|1L",
+      "accent_color": "#0d47a1",
+      "body_color": "#ffffff"
+     },
+     "download": "ok",
+     "label": "wrong_size",
+     "note": "X2: the 1 L bottle."
+    }
+   ]
+  },
+  "uae-051-no-correct-al-jadeed-arabic-bread": {
+   "candidates": [
+    {
+     "id": "x1",
+     "provider": "serper_web",
+     "rank": 1,
+     "image_url": "https://www.kibsons.com/media/products/aljadeed-arabic-bread-large-6.jpg",
+     "page_url": "https://www.kibsons.com/product/al-jadeed-bakery-arabic-bread-large-6-pcs",
+     "title": "Al Jadeed Bakery Arabic Bread Large 6 pcs | Kibsons",
+     "page_title": "Al Jadeed Bakery Arabic Bread Large 6 pcs | Kibsons",
+     "domain": "kibsons.com",
+     "width": 1000,
+     "height": 1000,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "X5"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1000,
+       1000
+      ],
+      "shape": "bag",
+      "label_text": "AL JADEED|ARABIC BREAD LARGE|6 PCS",
+      "accent_color": "#e65100",
+      "body_color": "#fff8e1"
+     },
+     "download": "ok",
+     "label": "correct_exact",
+     "note": "X5: a retailer of the second group lists the exact bag."
+    }
+   ]
+  },
+  "uae-052-no-results-healthy-farms-eggs-30": {
+   "candidates": [
+    {
+     "id": "x1",
+     "provider": "serper_shopping",
+     "rank": 1,
+     "image_url": "https://www.spinneys.com/media/products/healthy-farms-eggs-30.jpg",
+     "page_url": "https://www.spinneys.com/en-ae/catalogue/healthy-farms-fresh-eggs-30_5512/",
+     "title": "Healthy Farms Fresh Eggs 30 pcs",
+     "page_title": "Healthy Farms Fresh Eggs 30 pcs",
+     "domain": "spinneys.com",
+     "width": 1200,
+     "height": 1200,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "X2"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1200,
+       1200
+      ],
+      "shape": "box",
+      "label_text": "HEALTHY FARMS|FRESH EGGS|30 PCS",
+      "accent_color": "#f9a825",
+      "body_color": "#fff3e0"
+     },
+     "download": "ok",
+     "label": "correct_exact",
+     "note": "X2: a shopping listing with the exact tray."
+    }
+   ]
+  },
+  "uae-053-no-correct-emirates-bio-farm-kale": {
+   "candidates": [
+    {
+     "id": "i1",
+     "provider": "local_index",
+     "rank": 1,
+     "image_url": "https://www.kibsons.com/media/products/ebf-organic-kale-250g.jpg",
+     "page_url": "https://www.kibsons.com/product/emirates-bio-farm-organic-kale-250g",
+     "title": "Emirates Bio Farm Organic Kale 250g",
+     "page_title": "Emirates Bio Farm Organic Kale 250g",
+     "domain": "kibsons.com",
+     "width": 1000,
+     "height": 1000,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "IDX"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1000,
+       1000
+      ],
+      "shape": "pouch",
+      "label_text": "EMIRATES BIO FARM|ORGANIC KALE|250G",
+      "accent_color": "#2e7d32",
+      "body_color": "#e8f5e9"
+     },
+     "download": "ok",
+     "label": "correct_exact",
+     "note": "Local index: the store's own product page, read for its main image."
+    }
+   ]
+  },
+  "uae-054-no-usable-koita-organic-laban-1l": {
+   "candidates": [
+    {
+     "id": "v1",
+     "provider": "lens_serper",
+     "rank": 1,
+     "image_url": "https://greenheartorganicfarms.com/cdn/shop/products/koita-laban-ff-1l-large.jpg",
+     "page_url": "https://greenheartorganicfarms.com/products/koita-organic-laban-full-fat-1l",
+     "title": "Koita Organic Laban Full Fat 1L",
+     "page_title": "Koita Organic Laban Full Fat 1L",
+     "domain": "greenheartorganicfarms.com",
+     "width": 1200,
+     "height": 1200,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "X3",
+      "X4"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1200,
+       1200
+      ],
+      "shape": "carton",
+      "label_text": "KOITA|ORGANIC LABAN FULL FAT|1L",
+      "accent_color": "#1b5e20",
+      "body_color": "#ffffff"
+     },
+     "download": "ok",
+     "label": "correct_exact",
+     "note": "Visual search: a larger copy of the right carton."
+    }
+   ]
+  }
+ },
+ "readings": {
+  "uae-006-al-rawabi-fresh-milk-full-fat-2l": {
+   "x1": {
+    "brand_text": "Al Rawabi",
+    "variant_text": "Fresh Milk Full Fat",
+    "size_text": "2l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "x2": {
+    "brand_text": "Al Rawabi",
+    "variant_text": "Fresh Milk Full Fat",
+    "size_text": "1l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   }
+  },
+  "uae-051-no-correct-al-jadeed-arabic-bread": {
+   "x1": {
+    "brand_text": "Al Jadeed Bakery",
+    "variant_text": "Arabic Bread Large",
+    "size_text": "6 pcs",
+    "pack_count": 6,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   }
+  },
+  "uae-052-no-results-healthy-farms-eggs-30": {
+   "x1": {
+    "brand_text": "Healthy Farms",
+    "variant_text": "Fresh Eggs",
+    "size_text": "30 pcs",
+    "pack_count": 30,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   }
+  },
+  "uae-053-no-correct-emirates-bio-farm-kale": {
+   "i1": {
+    "brand_text": "Emirates Bio Farm",
+    "variant_text": "Organic Kale",
+    "size_text": "250g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   }
+  },
+  "uae-054-no-usable-koita-organic-laban-1l": {
+   "v1": {
+    "brand_text": "Koita",
+    "variant_text": "Organic Laban Full Fat",
+    "size_text": "1l",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   }
+  }
+ },
+ "version": 1,
+ "description": "Sources overlay of the committed golden set (tests/eval/sources.py): what the expansion round (X1 web page, X2 shopping, X3/X4 visual search, X5 second retailer group) and the local catalog index would find for the golden SKUs the normal flow leaves without a pick. Read only with eval_report --expansion / --local-index; golden_skus.json and the default scenarios are unchanged."
+}

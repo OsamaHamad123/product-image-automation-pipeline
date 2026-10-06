@@ -899,9 +899,10 @@ def build_providers(models: Any, sku: Mapping[str, Any], provider_set: str = "se
     "bing_only": Open Food Facts + Bing HTML as the sole search source (no sanctioned key, the
                  owner's setup per D7); Bing answers with the Bing and Serper listings of the
                  fixture, re-shaped as unsanctioned Bing results.
-    A candidate from a provider the replay does not know fails loudly instead of vanishing.
+    A candidate from a provider the replay does not know fails loudly instead of vanishing. Candidates of a sources
+    overlay (source_only, tests/eval/sources.py) are served by the expansion and local-index fakes, never here.
     """
-    names = {c.get("provider") for c in sku.get("candidates", [])}
+    names = {c.get("provider") for c in sku.get("candidates", []) if not c.get("source_only")}
     unknown = sorted(str(n) for n in names - set(SEARCH_PROVIDERS) - {LOOKUP_PROVIDER})
     if unknown:
         raise ValueError(f"{sku.get('id')}: candidates from unknown provider(s) {unknown}; "
@@ -921,15 +922,29 @@ def build_providers(models: Any, sku: Mapping[str, Any], provider_set: str = "se
 
 def run_v2(sku: Mapping[str, Any], cassette: Mapping[str, Any], scenario: str = "normal",
            mappings: Optional[Dict[str, Any]] = None, auto_publish: bool = True,
-           provider_set: str = "serper") -> Outcome:
-    """Run catalog_match for one fixture SKU with fixture providers, fetcher and cassette verifier."""
+           provider_set: str = "serper", sources: Optional[Mapping[str, Any]] = None,
+           verifier: Any = None) -> Outcome:
+    """Run catalog_match for one fixture SKU with fixture providers, fetcher and cassette verifier.
+
+    sources ({"expansion": bool, "index": bool}, tests/eval/sources.py): the expansion round with P0 page reads
+    and / or the local catalog index, through injected fakes; None or both False is the default replay (neither
+    runs, exactly as before). verifier: a verifier to use instead of the cassette (compare_verifiers, a live
+    reader); its calls / usage are read from the outcome.
+    """
     pipeline, identity, models = _v2_modules()
     mappings = mappings if mappings is not None else load_mappings()
     index = UrlIndex(sku)
     providers = build_providers(models, sku, provider_set)
     search_providers = [p for p in providers if getattr(p, "kind", "search") == "search"]
     fetcher = FixtureFetcher(models, sku)
-    verifier = CassetteVerifier(models, sku, cassette, scenario)
+    src = None
+    if sources and (sources.get("expansion") or sources.get("index")):
+        import sources as sources_mod
+        src = sources_mod.Sources(models, sku, expansion=bool(sources.get("expansion")),
+                                  index=bool(sources.get("index")))
+        providers = providers + src.providers()
+    replay_verifier = CassetteVerifier(models, sku, cassette, scenario)
+    verifier = verifier if verifier is not None else replay_verifier
     brand_index = None
     try:
         from catalog_match.brand_index import BrandIndex
@@ -944,16 +959,18 @@ def run_v2(sku: Mapping[str, Any], cassette: Mapping[str, Any], scenario: str = 
         try:
             spec = _call_with_supported(identity.build_sku_spec, sku_row(sku), mappings)
             outcome = _call_with_supported(pipeline.find_product_image, spec, providers=providers,
-                                           fetcher=fetcher, verifier=verifier, brand_index=brand_index)
+                                           fetcher=fetcher, verifier=verifier, brand_index=brand_index,
+                                           **(src.kwargs() if src is not None else {}))
         except Exception as exc:
             log.exception("v2 pipeline crashed for %s", sku["id"])
             error = f"{type(exc).__name__}: {exc}"
     seconds = time.perf_counter() - t0
 
     provider_calls = {p.name: len(p.calls) for p in search_providers}
+    verifier_calls = int(getattr(verifier, "calls", 0) or 0)
     if error is not None or outcome is None:
         return Outcome(sku_id=sku["id"], engine="v2", decision=metrics.ERROR, error=error, status="error",
-                       provider_calls=provider_calls, vlm_calls=verifier.calls, seconds=round(seconds, 3))
+                       provider_calls=provider_calls, vlm_calls=verifier_calls, seconds=round(seconds, 3))
 
     ranked = list(getattr(outcome, "ranked", []) or [])
     decision = str(outcome.decision)
@@ -980,13 +997,19 @@ def run_v2(sku: Mapping[str, Any], cassette: Mapping[str, Any], scenario: str = 
             if rules:
                 kills.setdefault(cid, []).extend(r for r in rules if r not in kills.get(cid, []))
     auto = decision == metrics.AUTO and chosen is not None
+    used = {}
+    if verifier is not replay_verifier:
+        used = {"usage": [dict(u) for u in getattr(outcome, "vlm_usage", None) or [] if isinstance(u, dict)],
+                "notices": list(getattr(outcome, "verifier_notices", None) or []),
+                "stats": dict(getattr(verifier, "stats", None) or {})}
     return Outcome(
         sku_id=sku["id"], engine="v2", decision=decision, chosen_id=chosen_id, chosen_url=chosen_url,
         needs_review=not auto, auto=auto, status=str(outcome.failure_code or ""),
         failure_code=outcome.failure_code, pool=pool, kills=kills, queries=list(outcome.queries or []),
-        provider_calls=provider_calls, vlm_calls=max(int(outcome.vlm_calls or 0), verifier.calls),
-        vlm_images_max=verifier.max_images, n_preselected=len(preselected), error=None,
-        seconds=round(seconds, 3), lane=pick_lane(chosen))
+        provider_calls=provider_calls, vlm_calls=max(int(outcome.vlm_calls or 0), verifier_calls),
+        vlm_images_max=int(getattr(verifier, "max_images", 0) or 0), n_preselected=len(preselected), error=None,
+        seconds=round(seconds, 3), lane=pick_lane(chosen),
+        sources=src.account(outcome) if src is not None else {}, verifier=used)
 
 
 def pick_lane(chosen: Any) -> Optional[str]:

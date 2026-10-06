@@ -12,6 +12,7 @@ scripts/eval_report.py --engine v1 --write-baseline.
 
 from __future__ import annotations
 
+import contextlib
 import datetime as _dt
 import hashlib
 import json
@@ -224,13 +225,19 @@ def run_all(engine: str = "v1", scenario: str = "normal", *, golden: Optional[Ma
             sku_ids: Optional[Iterable[str]] = None,
             progress: Optional[Callable[[int, int, metrics.Outcome], None]] = None,
             provider_set: str = "serper", set_name: str = "golden",
-            noisy_path: Optional[os.PathLike] = None) -> Dict[str, Any]:
+            noisy_path: Optional[os.PathLike] = None, sources: Optional[Mapping[str, Any]] = None,
+            verifier_factory: Optional[Callable[[Mapping[str, Any]], Any]] = None,
+            allow_network: bool = False) -> Dict[str, Any]:
     """Replay every golden SKU through one engine with the network blocked; return a report dict.
 
     provider_set ("serper" | "bing_only") picks the production provider set v2 runs with.
     The 'vlm_noisy' scenario lays vlm_noisy.json (noisy_path, default the committed one) over the
     cassette (the committed one unless a cassette is passed) and then replays like 'normal'.
     set_name only labels the report (SETS: 'golden', 'realistic', or a recorded folder's name).
+    sources ({"expansion": bool, "index": bool}): run the expansion round / the local index through the fakes of
+    tests/eval/sources.py (the set must already hold its sources overlay: sources.apply_overlay). None: neither,
+    the default replay. verifier_factory(sku) -> a verifier instead of the cassette (compare_verifiers);
+    allow_network only for a live reader the caller confirmed (the providers and downloads stay fixtures).
     """
     if engine not in ENGINES:
         raise ValueError(f"engine must be one of {ENGINES}")
@@ -249,7 +256,13 @@ def run_all(engine: str = "v1", scenario: str = "normal", *, golden: Optional[Ma
         run_one = runners.run_legacy
     else:
         def run_one(sku, cassette, scenario, mappings):  # type: ignore[no-untyped-def]
-            return runners.run_v2(sku, cassette, scenario=scenario, mappings=mappings, provider_set=provider_set)
+            extra: Dict[str, Any] = {}
+            if sources:
+                extra["sources"] = sources
+            if verifier_factory is not None:
+                extra["verifier"] = verifier_factory(sku)
+            return runners.run_v2(sku, cassette, scenario=scenario, mappings=mappings, provider_set=provider_set,
+                                  **extra)
 
     outcomes: List[metrics.Outcome] = []
     attempts: List[str] = []
@@ -258,7 +271,7 @@ def run_all(engine: str = "v1", scenario: str = "normal", *, golden: Optional[Ma
         # no store spelling another run proved: the scorecard depends on this run's rows only
         from catalog_match import brand_discovery
         brand_discovery.forget_all()
-    with runners.network_blocked(attempts):
+    with (contextlib.nullcontext(attempts) if allow_network else runners.network_blocked(attempts)):
         for i, sku in enumerate(skus, 1):
             outcome = run_one(sku, cassette, scenario=scenario, mappings=mappings)
             outcomes.append(outcome)
@@ -279,6 +292,12 @@ def run_all(engine: str = "v1", scenario: str = "normal", *, golden: Optional[Ma
         "metrics": metrics.compute(outcomes, labels),
         "outcomes": [o.to_dict() for o in outcomes],
     }
+    if sources:
+        import sources as sources_mod
+        report["sources"] = dict(sources)
+        report["sources_summary"] = sources_mod.summarize(report["outcomes"])
+    if allow_network:
+        report["network_allowed"] = True
     if engine == "v1":
         report["legacy_fingerprint"] = legacy_fingerprint()
     report["fixture_fingerprint"] = fixture_fingerprint()
