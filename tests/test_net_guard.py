@@ -2,7 +2,7 @@
 
 A URL from a search result, a product page, a sitemap or a reviewer's pick may name this server, the local network
 or the cloud metadata service, directly or through a public name or a redirect. Nothing may fetch it. DNS is the
-fake of tests/conftest.py (fake_getaddrinfo): no test looks a name up for real or opens a connection.
+fake of tests/net_fakes.py (installed by conftest.py): no test looks a name up for real or opens a connection.
 """
 
 import io
@@ -13,7 +13,7 @@ import pytest
 from PIL import Image
 
 import net_guard
-from conftest import PUBLIC_TEST_ADDRESS, fake_getaddrinfo
+from net_fakes import PUBLIC_TEST_ADDRESS, fake_getaddrinfo
 
 PRIVATE = {"intranet.example": "10.0.0.5", "metadata.example": "169.254.169.254", "cgnat.example": "100.64.1.2",
            "ula.example": "fd12::1", "mixed.example": ["93.184.216.34", "192.168.1.10"],
