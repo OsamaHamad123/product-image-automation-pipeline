@@ -6,7 +6,7 @@ repository root:
     .venv\\Scripts\\python.exe -X utf8 scripts\\run_nightly.py [--max-hours 8]
 
 It reuses main.py's entry points in one process and in the same order as the dashboard's "run all" button:
-main.run_enqueue_mode(), then main.run_worker_mode() when the enqueue succeeded. Four settings are pinned right
+main.run_enqueue_mode(), then main.run_worker_mode() when the enqueue succeeded. Five settings are pinned right
 after main.load_run_config(), so neither .env, the settings page nor the last dashboard run's
 temp/run_config.json can change them:
 
@@ -14,6 +14,8 @@ temp/run_config.json can change them:
     BRAND_FILTER = ''                every brand
     FORCE_OVERWRITE_IMAGES = False   a row that already has a final image link is never queued
     AUTO_PUBLISH_ENABLED = False     never publishes: results wait for review in the dashboard
+    AUTO_PUBLISH_STRICT_LANE = False nor through the strict lane (on by default for the dashboard's runs, and it
+                                     publishes without AUTO_PUBLISH_ENABLED once its reviews prove it)
 
 The run writes nothing to the sheet beyond what those entry points already write (the enqueue adds the image-link
 column header when it is missing); with auto-publish off the worker writes no image link at all. It is skipped
@@ -80,6 +82,7 @@ NIGHTLY_SETTINGS = {
     "BRAND_FILTER": "",
     "FORCE_OVERWRITE_IMAGES": False,
     "AUTO_PUBLISH_ENABLED": False,
+    "AUTO_PUBLISH_STRICT_LANE": False,
 }
 
 

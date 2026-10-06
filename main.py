@@ -2371,6 +2371,20 @@ def _start_local_index_refresh(trigger):
         print(f"تنبيه: تعذر بدء تحديث الفهرس المحلي: {e}")
 
 
+def wire_strict_lane_readiness(on):
+    """
+    «النشر الآلي لكل الماركات المؤكدة» (AUTO_PUBLISH_STRICT_LANE) بينشر بس لما تكون فئة strict جاهزة بمراجعات المالك
+    (local_cache_db.strict_lane_status: 30 مراجعة عالأقل وحد ويلسون الأدنى >= 98%). العامل وحده بيربط قارئ الجاهزية
+    (catalog_match.decide.set_strict_lane_reader) طول تشغيله ويفكّه بآخره: البحث من شاشة المراجعة والاختبارات وأي
+    سكربت ما بيربطه، فالفئة ما بتنشر منها شي، وقاعدة بيانات ما بترد = الفئة ما بتنشر.
+    """
+    try:
+        from catalog_match import decide
+        decide.set_strict_lane_reader(local_cache_db.strict_lane_status if on else None)
+    except Exception as e:  # الربط ما بيوقف التشغيل أبداً: بدونه الفئة ما بتنشر شي
+        print(f"[Worker] ما قدرنا نربط جاهزية النشر الآلي لكل الماركات المؤكدة: {e}")
+
+
 def run_worker_mode(trigger="manual", report=True, deadline_ts=None):
     """
     عامل الخلفية: يسحب المهام ذرياً ويعالجها بالتوازي (WORKER_CONCURRENCY منتجاً بنفس الوقت، 5 افتراضياً).
@@ -2418,6 +2432,7 @@ def run_worker_mode(trigger="manual", report=True, deadline_ts=None):
     print("=" * 60)
 
     load_run_config()
+    wire_strict_lane_readiness(True)
     local_cache_db.resume_automation()   # علم الإيقاف المؤقت القديم لا يمنع تشغيلاً جديداً
     started = time.monotonic()
     started_ts = time.time()
@@ -2597,6 +2612,7 @@ def run_worker_mode(trigger="manual", report=True, deadline_ts=None):
             print(f"[Worker] خطأ غير متوقع أنهى العامل: {crash}")
         raise
     finally:
+        wire_strict_lane_readiness(False)
         # سبب الانقطاع (رصيد Serper / Gemini) من صفوف هذا العامل فقط (worker_id)؛ None يترك التنبيه كما هو.
         # نهاية التشغيل تلغي طلب إيقاف وصل مع نهايته (stop_requested=0) كي لا يوقف عاملاً لاحقاً قبل أي منتج.
         run_seconds = time.monotonic() - started + 60

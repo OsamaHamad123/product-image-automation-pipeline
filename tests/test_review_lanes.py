@@ -2,8 +2,10 @@
 
 - catalog_match.decide.pick_lane / lane_of: 'strict' when the only auto blockers are the settings and brand_conf_*,
   'unsure' for a tier-1 UNSURE pick, 'other' for the rest; route() writes 'lane:<name>' on every pick.
-- AUTO_PUBLISH_STRICT_LANE: a strict pick of a mapped brand auto-publishes without AUTO_PUBLISH_BRANDS, only with
-  auto-publish on; every other blocker, and an unmapped brand, still holds it back. Off by default.
+- AUTO_PUBLISH_STRICT_LANE: a strict pick of a mapped brand auto-publishes without AUTO_PUBLISH_BRANDS (and without
+  AUTO_PUBLISH_ENABLED, the brand list's switch) only while the lane's reviews prove it (decide.strict_lane_readiness
+  'ready'); before that the pick waits with 'auto_blocked:strict_lane_not_ready'. Every other blocker, a review
+  warning and an unmapped brand still hold it back; a reader that is not wired or fails never publishes.
 - local_cache_db.review_stats: per-lane reviewed pre-checks, accepted / replaced / rejected, precision, Wilson lower
   bound and readiness on the brand thresholds; scripts/review_stats.py prints them.
 
@@ -39,6 +41,21 @@ def _settings(monkeypatch):
     monkeypatch.setattr(settings, "_config", None)
     for name in ("AUTO_PUBLISH_ENABLED", "AUTO_PUBLISH_BRANDS", "AUTO_PUBLISH_STRICT_LANE"):
         monkeypatch.delenv(name, raising=False)
+    decide.set_strict_lane_reader(None)
+    yield
+    decide.set_strict_lane_reader(None)
+
+
+def _ready(status="ready", calls=None):
+    """Wire a readiness reader that answers `status` (and counts its calls in `calls`)."""
+    def reader():
+        if calls is not None:
+            calls.append(status)
+        if isinstance(status, Exception):
+            raise status
+        return status
+    decide.set_strict_lane_reader(reader)
+    return reader
 
 
 def _set(monkeypatch, enabled=False, brands="", lane=False):
@@ -142,18 +159,95 @@ def test_a_strict_pick_of_a_mapped_brand_auto_publishes_only_with_the_lane_on(mo
     assert "auto_blocked:auto_publish_off_for_brand" in win.reasons
 
     _set(monkeypatch, enabled=True, brands="", lane=True)
+    _ready()
     win = _rc(_cand(1))
     out = decide.route(SPEC, [win], OK, HEALTHY, set())
     assert out.decision == "AUTO_PUBLISH" and out.winner is win
     assert {"auto_publish", decide.LANE_PUBLISH_REASON, "lane:strict"} <= set(win.reasons)
     assert not [r for r in win.reasons if r.startswith("auto_blocked:")]
 
-
-def test_the_lane_needs_auto_publish_switched_on(monkeypatch):
-    _set(monkeypatch, enabled=False, lane=True)
+    _set(monkeypatch, enabled=True, brands="", lane=False)          # the owner switched the lane off: it waits
     win = _rc(_cand(1))
     assert decide.route(SPEC, [win], OK, HEALTHY, set()).decision == "REVIEW_PRESELECTED"
-    assert "auto_blocked:auto_publish_disabled" in win.reasons and _lanes(win) == ["lane:strict"]
+    assert "auto_blocked:auto_publish_off_for_brand" in win.reasons
+    assert "auto_blocked:" + decide.LANE_NOT_READY not in win.reasons
+
+
+def test_the_lane_publishes_without_the_brand_list_switch_once_ready(monkeypatch):
+    # AUTO_PUBLISH_ENABLED is the switch of the brand list (AUTO_PUBLISH_BRANDS); the lane has its own switch
+    _set(monkeypatch, enabled=False, lane=True)
+    _ready()
+    win = _rc(_cand(1))
+    out = decide.route(SPEC, [win], OK, HEALTHY, set())
+    assert out.decision == "AUTO_PUBLISH" and decide.LANE_PUBLISH_REASON in win.reasons
+    assert _lanes(win) == ["lane:strict"] and not [r for r in win.reasons if r.startswith("auto_blocked:")]
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+@pytest.mark.parametrize("status", ["needs_reviews", "low_precision", "unknown", "", None, "READY", "ready ",
+                                    RuntimeError("database down")])
+def test_the_lane_never_publishes_before_its_reviews_prove_it(monkeypatch, enabled, status):
+    _set(monkeypatch, enabled=enabled, brands="", lane=True)
+    calls = []
+    _ready(status, calls)
+    win = _rc(_cand(1))
+    out = decide.route(SPEC, [win], OK, HEALTHY, set())
+    assert out.decision == "REVIEW_PRESELECTED" and out.winner is win
+    assert "auto_blocked:" + decide.LANE_NOT_READY in win.reasons
+    assert "auto_publish" not in win.reasons and decide.LANE_PUBLISH_REASON not in win.reasons
+    assert _lanes(win) == ["lane:strict"]            # still a strict pick: its review counts toward readiness
+    assert len(calls) == 1
+
+
+def test_a_lane_with_no_reader_wired_never_publishes_and_reads_nothing(monkeypatch):
+    _set(monkeypatch, enabled=True, brands="", lane=True)
+    import local_cache_db
+    monkeypatch.setattr(local_cache_db, "get_review_decisions", lambda: pytest.fail("the reviews were read"))
+    assert decide.strict_lane_readiness() == "unknown"
+    win = _rc(_cand(1))
+    assert decide.route(SPEC, [win], OK, HEALTHY, set()).decision == "REVIEW_PRESELECTED"
+    assert "auto_blocked:" + decide.LANE_NOT_READY in win.reasons
+
+
+def test_the_readiness_is_read_only_for_a_pick_the_lane_would_publish(monkeypatch):
+    calls = []
+    _ready("ready", calls)
+    _set(monkeypatch, enabled=True, brands="Almarai", lane=True)          # a listed brand publishes as before
+    assert decide.route(SPEC, [_rc(_cand(1))], OK, HEALTHY, set()).decision == "AUTO_PUBLISH"
+    _set(monkeypatch, enabled=True, brands="", lane=False)                # the lane is switched off
+    decide.route(SPEC, [_rc(_cand(1))], OK, HEALTHY, set())
+    _set(monkeypatch, enabled=True, brands="", lane=True)
+    decide.route(SPEC, [_rc(_cand(1), "UNSURE")], OK, HEALTHY, set())    # not strict
+    decide.route(SPEC, [_rc(_cand(1))], OK, HEALTHY, set(), cache_hit=True)
+    unmapped = dataclasses.replace(SPEC, brand_conf="sheet_raw")
+    decide.route(unmapped, [_rc(_cand(1), spec=unmapped)], OK, HEALTHY, set())
+    assert calls == []
+    assert decide.route(SPEC, [_rc(_cand(1))], OK, HEALTHY, set()).decision == "AUTO_PUBLISH"
+    assert calls == ["ready"]
+
+
+def test_the_readiness_is_cached_for_a_while_then_read_again():
+    calls = []
+    _ready("needs_reviews", calls)
+    now = [1000.0]
+    clock = lambda: now[0]                                                      # noqa: E731
+    assert decide.strict_lane_readiness(clock) == "needs_reviews"
+    now[0] += decide.STRICT_LANE_READINESS_TTL_S - 1
+    assert decide.strict_lane_readiness(clock) == "needs_reviews" and len(calls) == 1
+    now[0] += 2
+    assert decide.strict_lane_readiness(clock) == "needs_reviews" and len(calls) == 2
+    _ready("ready", calls)                                                      # a new reader drops the cache
+    assert decide.strict_lane_readiness(clock) == "ready" and len(calls) == 3
+    decide.set_strict_lane_reader(None)
+    assert decide.strict_lane_readiness(clock) == "unknown"
+
+
+def test_a_failing_reader_is_not_asked_again_at_every_row():
+    calls = []
+    _ready(RuntimeError("down"), calls)
+    now = [5.0]
+    assert decide.strict_lane_readiness(lambda: now[0]) == "unknown"
+    assert decide.strict_lane_readiness(lambda: now[0]) == "unknown" and len(calls) == 1
 
 
 def test_a_listed_brand_publishes_as_before_without_the_lane_reason(monkeypatch):
@@ -166,6 +260,7 @@ def test_a_listed_brand_publishes_as_before_without_the_lane_reason(monkeypatch)
 @pytest.mark.parametrize("brand_conf", ["learned", "sheet_raw", "none"])
 def test_an_unmapped_brand_never_auto_publishes_through_the_lane(monkeypatch, brand_conf):
     _set(monkeypatch, enabled=True, brands="", lane=True)
+    _ready()
     spec = dataclasses.replace(SPEC, brand_conf=brand_conf)
     win = _rc(_cand(1), spec=spec)
     out = decide.route(spec, [win], OK, HEALTHY, set())
@@ -183,6 +278,7 @@ def test_an_unmapped_brand_never_auto_publishes_through_the_lane(monkeypatch, br
 ])
 def test_every_other_blocker_still_holds_with_the_lane_on(monkeypatch, case, blocker):
     _set(monkeypatch, enabled=True, brands="", lane=True)
+    _ready()
     win = _rc(_cand(1, sanctioned=case != "unsanctioned", query_id="R1" if case == "relaxed" else "Q1",
                     tier1=case != "tier2"), "UNSURE" if case == "unsure" else "MATCH")
     ranked = [win]
@@ -305,6 +401,7 @@ def test_script_prints_the_lanes(ldb):
 def test_a_pick_with_a_review_warning_is_lane_other_and_never_published_by_the_lane(monkeypatch):
     monkeypatch.setattr(decide, "review_warnings", lambda spec, rc, reading_of=None: ["low_resolution"])
     _set(monkeypatch, enabled=True, brands="", lane=True)
+    _ready()
     win = _rc(_cand(1))
     out = decide.route(SPEC, [win], OK, HEALTHY, set())
     assert out.decision == "REVIEW_PRESELECTED" and out.winner is win
@@ -323,3 +420,46 @@ def test_a_warned_pick_with_the_lane_off_is_recorded_as_other(monkeypatch):
 def test_lane_of_a_stored_pick_with_a_warning_is_other():
     assert decide.lane_of(["preselected:vlm_match", "auto_blocked:auto_publish_disabled",
                            "warn:sheet_silent:flavour=chili"]) == "other"
+
+
+# ---------------------------------------------------------------------------
+# The worker wires the readiness reader for its run only (main.wire_strict_lane_readiness)
+# ---------------------------------------------------------------------------
+
+def test_the_worker_reads_the_lane_readiness_during_its_run_only(monkeypatch, tmp_path):
+    import os
+
+    import google_sheets
+    import local_cache_db
+    import main
+
+    monkeypatch.chdir(tmp_path)
+    os.makedirs("temp", exist_ok=True)
+    seen = {}
+    monkeypatch.setattr(main, "load_run_config", lambda: None)
+    monkeypatch.setattr(main, "check_verifier", lambda: "")
+    monkeypatch.setattr(local_cache_db, "resume_automation", lambda: True)
+    monkeypatch.setattr(local_cache_db, "get_automation_state", lambda: {"stop_requested": 0, "run_id": None})
+    monkeypatch.setattr(local_cache_db, "update_automation_state", lambda *a, **k: True)
+    monkeypatch.setattr(local_cache_db, "strict_lane_status", lambda: "ready")
+
+    def no_sheets():
+        seen["reader"] = decide._lane_reader
+        seen["readiness"] = decide.strict_lane_readiness()
+        return None
+
+    monkeypatch.setattr(google_sheets, "get_sheets_client", no_sheets)
+    main.run_worker_mode(report=False)
+    assert seen["readiness"] == "ready" and seen["reader"] is not None
+    assert decide._lane_reader is None and decide.strict_lane_readiness() == "unknown"     # unwired at the end
+
+
+def test_the_strict_lane_status_is_the_review_stats_lane(monkeypatch):
+    import local_cache_db
+    rows = Rows()
+    for i in range(189):
+        rows.add("approved", f"s-{i}", "strict")
+    monkeypatch.setattr(local_cache_db, "get_review_decisions", lambda: rows.rows)
+    assert local_cache_db.strict_lane_status() == "ready"
+    rows.add("rejected", "s-bad", "strict")
+    assert local_cache_db.strict_lane_status() == "needs_reviews"

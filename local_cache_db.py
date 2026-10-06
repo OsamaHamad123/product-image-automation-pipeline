@@ -1802,6 +1802,16 @@ def review_stats(rows):
     }
 
 
+def strict_lane_status():
+    """
+    جاهزية فئة strict (review_stats.lanes.strict.status: ready | low_precision | needs_reviews) من قرارات المراجعين،
+    بنفس عتبات البراند. catalog_match.decide بيقرأها (العامل بيربطها، main.wire_strict_lane_readiness) قبل ما ينشر
+    اقتراح هالفئة آلياً: «النشر الآلي لكل الماركات المؤكدة» بينشر بس لما تكون ready. أخطاء قاعدة البيانات تُرفع
+    (decide بيعتبرها «مش معروفة» وما بينشر).
+    """
+    return review_stats(get_review_decisions())["lanes"]["strict"]["status"]
+
+
 # ---------------------------------------------------------------------------
 # طابور المهام (automation_queue)
 # ---------------------------------------------------------------------------
