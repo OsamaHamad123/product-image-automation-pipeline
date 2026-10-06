@@ -365,3 +365,22 @@ def stratum_table(m: Mapping[str, Any]) -> str:
     lines.append("-" * len(head))
     lines.append(row("ALL", m))
     return "\n".join(lines)
+
+
+def lane_table(m: Mapping[str, Any]) -> str:
+    """Plain-text per-lane table (metrics.lane_table) for ALL and each held-out split half."""
+    head = (f"{'rows':15s}{'lane':9s}{'picks':>7s}{'coverage':>10s}{'precision':>11s}{'Wilson 95% low':>16s}"
+            f"{'auto':>6s}{'wrong auto':>12s}")
+    lines = [head, "-" * len(head)]
+    groups = [("ALL", m.get("n_skus"), m.get("per_lane", {}))]
+    for split, data in (m.get("per_split") or {}).items():
+        groups.append((split, data.get("n_skus"), data.get("per_lane", {})))
+    for name, n, lanes in groups:
+        for lane, row in lanes.items():
+            if lane == metrics.NO_LANE and not row.get("n_picks"):
+                continue
+            lines.append(f"{(name + f' ({n})') if lane == 'strict' else '':15s}{lane:9s}{row['n_picks']:7d}"
+                         f"{fmt_rate(row['coverage']):>10s}{fmt_rate(row['precision']):>11s}"
+                         f"{fmt_rate(row['precision_wilson_lower']):>16s}{row['n_auto']:6d}"
+                         f"{row['n_auto_wrong']:6d} {fmt_rate(row['wrong_auto_rate']):>5s}")
+    return "\n".join(lines)

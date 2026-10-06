@@ -21,6 +21,11 @@ No network, API key or database is used: providers answer from the fixture,
 images are generated (or read from recorded blobs) and the vision model answers
 from the recorded cassette. The full JSON report is written to the temp folder
 (or --out) so runs can be compared.
+
+Per lane of the pick (strict / unsure / other, catalog_match.decide.pick_lane) the report prints the precision
+with its Wilson 95% lower bound, the coverage (picks / SKUs) and the wrong auto-publishes, for the whole set and
+for both halves of the fixed held-out split (tests/eval/metrics.split_of; scripts/eval_split.py shows it): the
+'held_out' rows are rows no rule was tuned on.
 """
 
 import argparse
@@ -68,6 +73,12 @@ def print_report(report, golden, baseline=None):
     for rule, count in sorted(m["kill_attribution"].items(), key=lambda kv: -kv[1]):
         flag = "  <- image-quality rule" if metrics.is_quality_rule(rule) else ""
         print(f"    {count:4d}  {rule}{flag}")
+    if m.get("per_lane"):
+        print("\nper lane of the pick (coverage = picks / SKUs; held_out = the fixed split no rule was tuned on):")
+        print(harness.lane_table(m))
+        leaks = metrics.holdout_leaks(golden.get("skus", []))
+        if leaks:
+            print(f"  {len(leaks)} rows of the held-out share are named by a regression test and count as dev")
     if baseline and report["engine"] != "v1":
         base = baseline["metrics"]
         print(f"\nv1 baseline: correct pick {_pct(base['correct_pick_rate'])}, wrong auto "

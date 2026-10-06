@@ -978,4 +978,12 @@ def run_v2(sku: Mapping[str, Any], cassette: Mapping[str, Any], scenario: str = 
         failure_code=outcome.failure_code, pool=pool, kills=kills, queries=list(outcome.queries or []),
         provider_calls=provider_calls, vlm_calls=max(int(outcome.vlm_calls or 0), verifier.calls),
         vlm_images_max=verifier.max_images, n_preselected=len(preselected), error=None,
-        seconds=round(seconds, 3))
+        seconds=round(seconds, 3), lane=pick_lane(chosen))
+
+
+def pick_lane(chosen: Any) -> Optional[str]:
+    """The lane the engine gave its pick (catalog_match.decide.lane_of on the pick's reasons), None without a pick."""
+    if chosen is None:
+        return None
+    from catalog_match.decide import lane_of
+    return lane_of(getattr(chosen, "reasons", None) or [])
