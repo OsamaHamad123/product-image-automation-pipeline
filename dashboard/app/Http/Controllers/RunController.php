@@ -1044,30 +1044,36 @@ class RunController extends Controller
         $enabled = in_array(strtolower(trim((string) ($rows['auto_publish_enabled'] ?? ''))), ['1', 'true', 'yes', 'on'], true);
         $brands = array_values(array_filter(array_map('trim', explode(',', (string) ($rows['auto_publish_brands'] ?? ''))),
             fn ($b) => $b !== ''));
-        $lane = in_array(strtolower(trim((string) ($rows[SettingsController::STRICT_LANE_KEY] ?? ''))),
-            ['1', 'true', 'yes', 'on'], true);
+        // the saved value, else the default (on), as config.load_db_config reads it
+        $lane = SettingsController::strictLaneOn($rows[SettingsController::STRICT_LANE_KEY] ?? null);
         return ['known' => true, 'enabled' => $enabled, 'brands' => $brands, 'strict_lane' => $lane,
                 'text' => self::autoPublishText($enabled, $brands, $lane)];
     }
 
     public static function autoPublishText(bool $enabled, array $brands, bool $strictLane = false): string
     {
+        $star = $enabled && in_array('*', $brands, true);
+        if ($strictLane && !$star && (!$enabled || !$brands)) {
+            // «النشر الآلي لكل الماركات المؤكدة» (decide.py, lane strict): أي ماركة موجودة بـ Brands Mapping، بس بعد ما
+            // تثبت مراجعات الفئة دقتها (decide.strict_lane_readiness)، وبلا ما يحتاج مفتاح جدول الماركات
+            return 'النشر الآلي لكل الماركات المؤكدة شغّال: بعد ما تثبت دقته بمراجعاتك، الاقتراح المؤكد تماماً وبلا أي '
+                . 'تحذير لماركة موجودة بـ Brands Mapping بينزل عالشيت لحاله. لحد هداك الوقت، وكل الباقي، بيستنى مراجعتك.';
+        }
         if (!$enabled) {
             return 'النشر الآلي مطفأ: كل النتائج بتستنى مراجعتك قبل ما توصل الشيت.';
-        }
-        if ($strictLane && !in_array('*', $brands, true)) {
-            // «النشر الآلي لكل الماركات المؤكدة» (decide.py, lane strict): أي ماركة موجودة بـ Brands Mapping
-            return 'النشر الآلي شغّال لكل الماركات المؤكدة بـ Brands Mapping: الاقتراح المؤكد تماماً وبلا أي تحذير بينزل '
-                . 'عالشيت لحاله، والباقي بيستنى مراجعتك.';
         }
         if (!$brands) {
             return 'النشر الآلي مفعّل بس ما في ولا ماركة مسموحة، فكل النتائج بتستنى مراجعتك.';
         }
-        if (in_array('*', $brands, true)) {
+        if ($star) {
             return 'النشر الآلي شغّال لكل الماركات: الاقتراح المؤكد تماماً بينزل عالشيت لحاله، والباقي بيستنى مراجعتك.';
         }
         $names = array_map(fn ($b) => stripos($b, 'category:') === 0 ? 'فئة ' . trim(substr($b, 9)) : $b, $brands);
         $shown = implode('، ', array_slice($names, 0, 3)) . (count($names) > 3 ? ' و' . (count($names) - 3) . ' غيرها' : '');
+        if ($strictLane) {
+            return 'النشر الآلي شغّال لـ ' . $shown . ': الاقتراح المؤكد تماماً لهدول بينزل عالشيت لحاله. والنشر الآلي لكل '
+                . 'الماركات المؤكدة شغّال كمان، بس بعد ما تثبت دقته بمراجعاتك. الباقي بيستنى مراجعتك.';
+        }
         return 'النشر الآلي شغّال لـ ' . $shown . ': الاقتراح المؤكد تماماً لهدول بينزل عالشيت لحاله، والباقي بيستنى مراجعتك.';
     }
 }

@@ -439,7 +439,8 @@ def _lane_rows(plan):
 
 @NEEDS_PHP
 def test_strict_lane_section_reads_the_lane_stats(offline):
-    """«النشر الآلي لكل الماركات المؤكدة»: lane strict in plain words, its switch only when ready, unsure as info."""
+    """«النشر الآلي لكل الماركات المؤكدة»: lane strict in plain words (on by default; it says after how many more
+    approvals it publishes by itself and how to switch it off), its switch free either way, unsure as info."""
     import local_cache_db
 
     stats = dict({"status": "success"}, **local_cache_db.review_stats(
@@ -452,10 +453,19 @@ def test_strict_lane_section_reads_the_lane_stats(offline):
     lane = out["lane"]
     assert lane["text"] == "من 12 اقتراح بهالفئة، اعتمدت 12."
     assert lane["unsure_text"].startswith("القارئ مش متأكد بس العنوان بيأكد: اعتمدت 4 من 5.")
-    assert (lane["ready"], lane["can_enable"], lane["enabled"]) == (False, False, False)
+    assert (lane["ready"], lane["can_enable"], lane["enabled"], lane["publishing"]) == (False, True, False, False)
     assert lane["chip"] == "تحتاج 177 مراجعة" and "الحد المضمون" in lane["detail"]
+    assert lane["state"].startswith("مطفي") and "علّم المفتاح" in lane["how"]
     assert "لسا مش جاهزة" in out["why"] and "ما قدرنا نتأكد" in out["down"]
     assert out["can_enable"] is False                       # no ready brand, the lane is not ready either
+    # on (saved, or nothing saved: the default) but not ready: it says so, with the approvals still needed
+    for value in ("true", "", None):
+        stored["auto_publish_strict_lane"] = {"value": value}
+        on = _php(f"$out = SettingsController::laneData({php_value(stored)}, {php_value(stats)});"
+                  f"$out['msg'] = SettingsController::strictLaneOnMessage({php_value(stats)});")
+        assert (on["enabled"], on["publishing"], on["more_needed"]) == (True, False, 177)
+        assert on["state"].startswith("شغّال، بس لسا ما بينشر لحاله") and "177 اقتراح مؤكد كمان" in on["state"]
+        assert "لتطفيه" in on["how"] and "177" in on["msg"] and on["msg"].startswith("النشر الآلي لكل الماركات المؤكدة شغّال")
 
     ready = dict({"status": "success"}, **local_cache_db.review_stats(
         _lane_rows([("ALMARAI", 189, 0, "strict")])))
@@ -466,9 +476,11 @@ def test_strict_lane_section_reads_the_lane_stats(offline):
                f"$out['main_off'] = SettingsController::autoPublishBlocker([], {php_value(ready)}, false);")
     assert out["why"] is None and out["main"] is None and "ماركة جاهزة" in out["main_off"]
     assert (out["lane"]["ready"], out["lane"]["chip"], out["can_enable"]) == (True, "شغّال", True)
+    assert out["lane"]["publishing"] is True and out["lane"]["state"].startswith("شغّال وعم ينشر")
     assert out["lane"]["text"] == "من 189 اقتراح بهالفئة، اعتمدت 189."
     out = _php(f"$out = SettingsController::autoPublishData({php_value(stored)}, ['status' => 'error']);")
-    assert out["lane"]["status"] == "error" and out["lane"]["can_enable"] is False
+    assert out["lane"]["status"] == "error" and out["lane"]["can_enable"] is True and out["lane"]["publishing"] is False
+    assert "ما بينشر شي لحاله" in out["lane"]["state"]
 
 
 @NEEDS_PHP
@@ -483,6 +495,29 @@ def test_health_lanes_payload(offline):
         "strict": (11, 11), "unsure": (3, 4), "other": (0, 0)}
     assert out["lanes"]["other"]["lower_bound"] is None and out["lanes"]["strict"]["ready"] is False
     assert "brands" not in out and "domains" not in out                  # only the card's numbers leave the server
+    # the review header's progress meter: status and reviews_needed (the total at which the lane is ready when every
+    # coming one is accepted; more_needed is what is left of it), the switch and whether it publishes by itself
+    strict = out["lanes"]["strict"]
+    assert (strict["status"], strict["reviews_needed"], strict["more_needed"]) == ("needs_reviews", 189, 178)
+    assert strict["lower_bound"] == pytest.approx(local_cache_db.wilson_lower_bound(11, 11))
+    assert (strict["enabled"], strict["publishing"]) == (None, False)    # the bridge did not say: unknown
+    assert out["lanes"]["unsure"]["status"] == "needs_reviews" and "enabled" not in out["lanes"]["unsure"]
+    assert set(strict) == {"prechecked", "accepted", "lower_bound", "status", "ready", "reviews_needed",
+                           "more_needed", "enabled", "publishing"}
+
+    ready = dict({"status": "success", "strict_lane_enabled": True}, **local_cache_db.review_stats(
+        _lane_rows([("A", 189, 0, "strict"), ("B", 30, 1, "unsure")])))
+    out = _php(f"$out = HealthController::lanesPayload({php_value(ready)});")
+    strict = out["lanes"]["strict"]
+    assert (strict["status"], strict["ready"], strict["reviews_needed"], strict["more_needed"]) == ("ready", True, 189, 0)
+    assert (strict["enabled"], strict["publishing"]) == (True, True)
+    assert out["lanes"]["unsure"]["status"] == "low_precision"
+    off = dict(ready, strict_lane_enabled=False)
+    out = _php(f"$out = HealthController::lanesPayload({php_value(off)});")
+    assert (out["lanes"]["strict"]["enabled"], out["lanes"]["strict"]["publishing"]) == (False, False)
+    odd = {"status": "success", "lanes": {"strict": {"status": "bogus", "reviews_needed": "x"}}}
+    out = _php(f"$out = HealthController::lanesPayload({php_value(odd)});")
+    assert (out["lanes"]["strict"]["status"], out["lanes"]["strict"]["reviews_needed"]) == ("needs_reviews", None)
 
 
 @NEEDS_NODE
@@ -1016,31 +1051,42 @@ def test_auto_publish_rules_on_the_server(app_env):
     assert _settings(db)["auto_publish_enabled"] == "false"
 
 
-def test_strict_lane_switch_is_refused_until_the_lane_is_ready(app_env):
-    """«النشر الآلي لكل الماركات المؤكدة»: the server refuses the switch while lane strict is not ready (like an
-    unready brand); once ready it turns on, and the main switch may then open without a listed brand."""
+def test_strict_lane_switch_is_free_and_the_page_says_when_it_publishes(app_env):
+    """«النشر الآلي لكل الماركات المؤكدة» (on by default, the owner's approval): the switch turns on before the lane is
+    ready (the worker publishes nothing from it until then, catalog_match.decide.strict_lane_readiness) and the page
+    says it is on, after how many more approvals it publishes by itself and how to switch it off; off always works.
+    Once ready, the main switch may open without a listed brand (as before)."""
     db, env = app_env["db"], app_env["env"]
     out = _kernel(env, [
+        ["GET", "/settings?tab=auto-publish", {}],
         ["POST", "/settings", {"section": "strict-lane", "auto_publish_strict_lane": "true"}],
         ["GET", "/settings?tab=auto-publish", {}],
     ])
-    assert "لسا مش جاهزة" in out[0]["flash"]["error"]
-    assert _settings(db)["auto_publish_strict_lane"] == "false"
-    page = out[1]["body"]
+    page = out[0]["body"]                                   # app_env saved 'false': the owner's value wins
     assert "النشر الآلي لكل الماركات المؤكدة" in page and "لسا ما راجعت ولا اقتراح بهالفئة." in page
-    assert "القارئ مش متأكد بس العنوان بيأكد" in page
-    assert re.search(r'name="auto_publish_strict_lane"[^>]*disabled', page)
+    assert "القارئ مش متأكد بس العنوان بيأكد" in page and "مطفي: كل الاقتراحات المؤكدة بتستنى مراجعتك" in page
+    assert not re.search(r'name="auto_publish_strict_lane"[^>]*checked', page)
+    assert not re.search(r'name="auto_publish_strict_lane"[^>]*disabled', page)
+    assert out[1]["flash"]["error"] is None and "189 اقتراح مؤكد كمان" in out[1]["flash"]["success"]
+    assert _settings(db)["auto_publish_strict_lane"] == "true"
+    page = out[2]["body"]
+    assert re.search(r'name="auto_publish_strict_lane"[^>]*checked', page)
+    assert "شغّال، بس لسا ما بينشر لحاله: بيبلّش ينشر بعد ما تعتمد 189 اقتراح مؤكد كمان" in page and "لتطفيه" in page
+
+    _sql(db, "DELETE FROM system_settings WHERE `key` = 'auto_publish_strict_lane'")         # nothing saved: on
+    page = _kernel(env, [["GET", "/settings?tab=auto-publish", {}]])[0]["body"]
+    assert re.search(r'name="auto_publish_strict_lane"[^>]*checked', page)
 
     down = _kernel(dict(env, LQ_STUB_MODE="down"), [
         ["POST", "/settings", {"section": "strict-lane", "auto_publish_strict_lane": "true"}]])
-    assert "ما قدرنا نتأكد" in down[0]["flash"]["error"] and _settings(db)["auto_publish_strict_lane"] == "false"
+    assert "ما بينشر شي لحاله" in down[0]["flash"]["success"] and _settings(db)["auto_publish_strict_lane"] == "true"
 
     ready = _kernel(dict(env, LQ_STUB_MODE="lane_ready"), [
         ["POST", "/settings", {"section": "strict-lane", "auto_publish_strict_lane": "true"}],
         ["POST", "/settings", {"section": "auto-publish", "auto_publish_enabled": "true"}],     # no brand listed
         ["GET", "/settings?tab=auto-publish", {}],
     ])
-    assert "شغّلنا النشر الآلي لكل الماركات المؤكدة" in ready[0]["flash"]["success"]
+    assert "فئته جاهزة" in ready[0]["flash"]["success"]
     assert ready[1]["flash"]["warnings"] in (None, [])
     after = _settings(db)
     assert (after["auto_publish_strict_lane"], after["auto_publish_enabled"], after["auto_publish_brands"]) == (
@@ -1060,6 +1106,7 @@ def test_health_lanes_endpoint_reads_the_bridge_once_and_caches(app_env):
     assert app_env["calls"].read_text().split().count("review_stats") == 1
     # the bulk review screen reads its «لحتى ينفتح النشر التلقائي» line from this same cached call
     assert first["lanes"]["strict"]["more_needed"] == 189 and first["lanes"]["strict"]["ready"] is False
+    assert (first["lanes"]["strict"]["status"], first["lanes"]["strict"]["reviews_needed"]) == ("needs_reviews", 189)
     down = _kernel(dict(app_env["env"], LQ_STUB_MODE="down"), [["GET", "/api/system/review-lanes?refresh=1", {}]])
     assert down[0]["status"] == 500 and json.loads(down[0]["body"])["status"] == "error"
 
@@ -1068,6 +1115,7 @@ def test_health_lanes_endpoint_says_a_ready_lane_needs_no_more_reviews(app_env):
     out = _kernel(dict(app_env["env"], LQ_STUB_MODE="lane_ready"), [["GET", "/api/system/review-lanes", {}]])
     strict = json.loads(out[0]["body"])["lanes"]["strict"]
     assert (strict["prechecked"], strict["accepted"], strict["ready"], strict["more_needed"]) == (189, 189, True, 0)
+    assert (strict["status"], strict["reviews_needed"]) == ("ready", 189)
 
 
 def test_extra_sources_form_saves_checks_and_shows_its_section(app_env):

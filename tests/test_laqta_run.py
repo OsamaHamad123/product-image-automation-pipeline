@@ -489,13 +489,17 @@ def test_estimates_and_auto_publish_text():
                " RunController::medianRate([])];\n"
                "$out['auto'] = [RunController::autoPublishText(false, []), RunController::autoPublishText(true, []),"
                " RunController::autoPublishText(true, ['*']), RunController::autoPublishText(true, ['Almarai', 'category:Dairy']),"
-               " RunController::autoPublishText(true, [], true), RunController::autoPublishText(false, [], true)];\n"
+               " RunController::autoPublishText(true, [], true), RunController::autoPublishText(false, [], true),"
+               " RunController::autoPublishText(true, ['Almarai'], true)];\n"
                "$out['defaults'] = [RunController::DEFAULT_SECONDS_PER_PRODUCT, RunController::DEFAULT_COST_PER_PRODUCT];")
     assert out["cost"] == [0.005, None, None]
     assert out["rate"] == [15.0, None]                     # median of 20 and 10; flat and short runs ignored
-    off, empty, star, some, lane, lane_off = out["auto"]
+    off, empty, star, some, lane, lane_off, both = out["auto"]
+    assert both.startswith("النشر الآلي شغّال لـ Almarai") and "لكل الماركات المؤكدة شغّال كمان" in both
     assert "لكل الماركات المؤكدة" in lane and "ما في ولا ماركة" not in lane     # the strict lane publishes unlisted brands
-    assert lane_off == off                                                      # the lane needs auto-publish on
+    # the lane has its own switch (on by default) and publishes only once its reviews prove it: it does not need the
+    # brand list's switch, and the sentence says it waits for the reviews
+    assert lane_off == lane and "بعد ما تثبت دقته بمراجعاتك" in lane and "بيستنى مراجعتك" in lane
     assert off.startswith("النشر الآلي مطفأ") and "مراجعتك" in off
     assert "ما في ولا ماركة مسموحة" in empty and "لكل الماركات" in star
     assert "Almarai" in some and "فئة Dairy" in some
