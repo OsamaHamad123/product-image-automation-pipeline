@@ -249,7 +249,7 @@ def test_health_page_shows_one_cost_line_per_model():
                   verifier_month={"month": "2026-10", "budget_usd": 5.0, "strong_usd": 0.42, "total_usd": 0.5})
     harness = ("globalThis.window = globalThis;\n" + HEALTH_JS.read_text(encoding="utf-8")
                + f"\nconsole.log(JSON.stringify(window.LaqtaHealth.opsView({json.dumps(report)}, '24h').cost));")
-    out = subprocess.run([NODE, "-e", harness], capture_output=True, text=True, timeout=60, encoding="utf-8")
+    out = subprocess.run([NODE, "-"], input=harness, capture_output=True, text=True, timeout=60, encoding="utf-8")
     assert out.returncode == 0, out.stderr
     cost = json.loads(out.stdout.strip().splitlines()[-1])
     labels = [line["label"] for line in cost["lines"]]
@@ -273,7 +273,7 @@ def test_health_page_names_the_expansion_sources_and_prices_serpapi_on_its_own_l
     assert window["serper_queries"] == 4 and window["sources"]["lens_serpapi"]["calls"] == 1
     harness = ("globalThis.window = globalThis;\n" + HEALTH_JS.read_text(encoding="utf-8")
                + f"\nconsole.log(JSON.stringify(window.LaqtaHealth.opsView({json.dumps(report)}, '24h')));")
-    out = subprocess.run([NODE, "-e", harness], capture_output=True, text=True, timeout=60, encoding="utf-8")
+    out = subprocess.run([NODE, "-"], input=harness, capture_output=True, text=True, timeout=60, encoding="utf-8")
     assert out.returncode == 0, out.stderr
     view = json.loads(out.stdout.strip().splitlines()[-1])
     names = [p["name"] for p in view["providers"]]

@@ -202,7 +202,7 @@ def test_the_nightly_tab_says_which_night_and_what_to_do_without_a_log():
               " ok: H.logView({ status: 'success', exists: true, lines: ['a'], date: '2026-10-03',"
               " updated_at: now / 1000 }, 'nightly', now)\n"
               "}));")
-    result = subprocess.run([NODE, "-e", script], capture_output=True, text=True, timeout=60, encoding="utf-8")
+    result = subprocess.run([NODE, "-"], input=script, capture_output=True, text=True, timeout=60, encoding="utf-8")
     assert result.returncode == 0, result.stderr
     out = json.loads(result.stdout.strip().splitlines()[-1])
     assert out["missing"]["text"].startswith("لسا ما في سجل.") and "schedule_nightly.ps1" in out["missing"]["text"]

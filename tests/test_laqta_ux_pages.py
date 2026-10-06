@@ -21,7 +21,7 @@ pytestmark = pytest.mark.skipif(NODE is None, reason="node is not installed")
 
 def _node(script, tz="UTC"):
     env = dict(os.environ, TZ=tz)
-    result = subprocess.run([NODE, "-e", script], capture_output=True, text=True, timeout=60, encoding="utf-8", env=env)
+    result = subprocess.run([NODE, "-"], input=script, capture_output=True, text=True, timeout=60, encoding="utf-8", env=env)
     assert result.returncode == 0, result.stderr
     return json.loads(result.stdout.strip().splitlines()[-1])
 
