@@ -34,7 +34,8 @@ summary.review: counts of the rows' latest decisions (approved / rejected / manu
 review without one; no_decision = the rest; undone = rejections taken back), and for the rows whose engine pick was
 pre-checked (AUTO_PUBLISH / REVIEW_PRESELECTED) whether the reviewer accepted it, replaced it (another image or an
 upload), rejected it or not yet, also split by the pick's warning set (no_warning, vlm_unsure only, other, unknown
-when the export no longer has the pick's warnings). A database without review rows gives an empty block.
+when the export no longer has the pick's warnings) and counted for the picks with the reason size_corroborated
+(preselected_size_corroborated). A database without review rows gives an empty block.
 
 The run's metadata: the code version (git commit), every catalog_match
 setting without any key (catalog_match.cassette.settings_snapshot: secret settings only as set / not set) and the
@@ -370,6 +371,9 @@ REVIEW_COLUMNS = ("id, created_at, action, sku_key, `row_number`, image_url, pag
 REVIEW_ACTIONS = ("approved", "rejected", "manual_upload")
 PICK_VERDICTS = ("accepted", "replaced", "rejected", "pending")
 WARNING_SETS = ("no_warning", "vlm_unsure", "other", "unknown")
+# a pick whose label left the size open while two trusted stores state it (catalog_match.retrieve.annotate_copies):
+# recorded only, its approval rate is measured here before it may count for anything
+SIZE_CORROBORATED = "size_corroborated"
 
 
 def review_decisions():
@@ -473,6 +477,7 @@ def review_summary(out_rows, by_row_decisions, undone=0):
     counts = Counter({k: 0 for k in REVIEW_ACTIONS + ("pending", "no_decision")})
     pre = Counter({k: 0 for k in PICK_VERDICTS})
     by_warning = {w: Counter({k: 0 for k in PICK_VERDICTS}) for w in WARNING_SETS}
+    corroborated = Counter({k: 0 for k in PICK_VERDICTS})
     for out_row in out_rows:
         decisions = by_row_decisions.get(id(out_row)) or []
         if decisions:
@@ -485,8 +490,11 @@ def review_summary(out_rows, by_row_decisions, undone=0):
             verdict = pick_verdict(decisions, out_row.get("winner"))
             pre[verdict] += 1
             by_warning[warning_set(out_row, decisions)][verdict] += 1
+            if SIZE_CORROBORATED in ((out_row.get("winner_detail") or {}).get("reasons") or ()):
+                corroborated[verdict] += 1
     return {"counts": dict(counts), "undone": int(undone), "preselected": dict(pre),
-            "preselected_by_warning": {w: dict(c) for w, c in by_warning.items()}}
+            "preselected_by_warning": {w: dict(c) for w, c in by_warning.items()},
+            "preselected_size_corroborated": dict(corroborated)}
 
 
 def add_review(out_rows, by_sku=None, by_row=None, undone=None, approvals=None):

@@ -124,3 +124,18 @@ def test_the_verdict_of_a_pick_and_its_warning_set():
     assert export_run.warning_set(dict(detail, warnings=["vlm_unsure", "size_close:170g/185g"]), []) == "other"
     assert export_run.warning_set({}, [{"vlm_decision": "UNSURE", "was_preselected": 1}]) == "vlm_unsure"
     assert export_run.warning_set({}, [approve]) == "unknown"
+
+
+def test_the_picks_with_a_corroborated_size_are_counted_on_their_own(reviewed):
+    """size_corroborated is recorded only (catalog_match.retrieve.annotate_copies): its approval rate is measured
+    in summary.review before it may count for anything."""
+    import export_run
+
+    assert reviewed.save_curation_candidates(ROW + 5, "W2E GOLDEN PRIZE TUNA 185G", "GOLDEN PRIZE", [
+        {"url": PICK, "status": "preselected", "domain": "x.ae", "evidence": {"tier": 2},
+         "reasons": ["vlm:UNSURE", "preselected:tier2_corroborated", "size_corroborated", "warn:vlm_unsure"],
+         "vlm": {"decision": "UNSURE", "size_match": "unsure"}}], sku_key=f"{SKU}5")
+    doc, _ = export_run.build_export("latest", mappings=MAPPINGS)
+    review = doc["summary"]["review"]
+    assert review["preselected_size_corroborated"] == {"accepted": 0, "replaced": 0, "rejected": 1, "pending": 0}
+    assert sum(review["preselected"].values()) == 2                     # every pick is still counted as before

@@ -121,7 +121,7 @@ from .providers.serper_shopping import SerperShoppingProvider
 from .providers.serper_web import SerperWebProvider, site_query
 from .quality import LOW_RES_SHORT_SIDE
 from .query_plan import build_queries
-from .retrieve import norm_image_url
+from .retrieve import norm_image_url, reader_queue
 from .score import IDENTITY_KEYS, rank, rank_key, score_candidate, trusted_domains
 from .text_norm import domain_matches, tokens, url_host
 
@@ -774,8 +774,9 @@ def _verify_new(inp: RoundInput, everything: List[RankedCandidate],
                 max_calls: int = MAX_VERIFY_CALLS, first_ids: Set[int] = frozenset()) -> List[VerificationResult]:
     """Read the unread usable tier-1/2 images, best first (the candidates in first_ids before the others)."""
     p = _stages()
-    todo = [rc for rc in everything if p._usable(rc) and rc.verdict is None and rc.score.tier in (1, 2)
-            and STORE_IMAGE_WRONG not in rc.reasons]
+    # one copy per picture (retrieve.reader_queue): a near-copy of an image read MATCH or MISMATCH is not read again
+    todo = [rc for rc in reader_queue([rc for rc in everything if p._usable(rc)])
+            if rc.verdict is None and rc.score.tier in (1, 2) and STORE_IMAGE_WRONG not in rc.reasons]
     if first_ids:
         todo.sort(key=lambda rc: id(rc) not in first_ids)       # stable: rank order within each group
     out: List[VerificationResult] = []

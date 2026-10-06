@@ -901,3 +901,20 @@ out.text = wsText();
     assert "ملاحظة من فحص القص:" in out["text"] and "الصورة المصدر صغيرة فكُبّرت لتملأ اللوحة" in out["text"]
     assert "الخلفية لم تُعزل" not in out["text"]
     assert not [t for v, t in out["toasts"] if "كُبّرت" in t]     # a note is not a warning toast
+
+
+@NEEDS_NODE
+def test_explain_pick_shows_the_same_picture_sites_and_a_corroborated_size(tmp_path):
+    """The same picture under other URLs on other sites counts as sources (retrieve.reader_queue), and a pick whose
+    label left the size open while two trusted stores state it says so (reason size_corroborated, record only)."""
+    out = run(r"""
+out.sites = R.explainPick(R.normalizeCandidate({ url: 'https://x/1.jpg', evidence: {
+    consensus_count: 1, same_picture_domains: ['carrefouruae.com', 'luluhypermarket.com', 'noon.com'] } }));
+out.one = R.explainPick(R.normalizeCandidate({ url: 'https://x/2.jpg', evidence: {
+    consensus_count: 1, same_picture_domains: ['noon.com'] } }));
+out.size = R.explainPick(R.normalizeCandidate({ url: 'https://x/3.jpg', reasons: ['vlm:UNSURE', 'size_corroborated'],
+    evidence: {} }));
+""", tmp_path, fixture([]))
+    assert out["sites"] == [{"key": "consensus", "text": "الصورة نفسها في 3 مصادر"}]
+    assert out["one"] == []
+    assert out["size"] == [{"key": "size_corroborated", "text": "الحجم مأكد من موقعين"}]

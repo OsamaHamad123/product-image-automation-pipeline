@@ -30,6 +30,10 @@ retrieve(spec, providers, custom_query=None, exclude_urls=(), max_queries=4,
 * Relaxations R1/R2 run only when the caller asks: relax_when(pool) is True, or
   Retriever.relax() is called (the pipeline does this when the scored pool has no
   T1/T2 candidate). Never with a custom query.
+* After the download, the same picture under other URLs (pHash distance <= 6, colours alike) is
+  grouped: reader_queue() puts one copy of each picture before the others in the reader's batches,
+  annotate_copies() records the domains that show each picture and the 'size_corroborated' reason.
+  Evidence only (see the section at the end).
 """
 
 from __future__ import annotations
@@ -519,3 +523,186 @@ def no_t1_or_t2(spec: SkuSpec, negatives=None) -> EarlyStop:
         return not any(score_candidate(spec, c, negatives).tier in (1, 2) for c in pool)
 
     return _want
+
+
+# ---------------------------------------------------------------------------
+# The same picture under other URLs (after the download): one reading per picture
+# ---------------------------------------------------------------------------
+#
+# The pool dedupes on the image URL only, so the same packshot on three stores (or one store's three renditions
+# under different file names) took three of the reader's image slots: in the live exports of 2026-10-04/05, 183 of
+# 1,400 top candidates were near-copies and about 12 % of the reader's image reads went to them. After the download
+# the candidates are grouped by picture: pHash distance <= PHASH_COPY_DISTANCE to the group's representative, and
+# colours alike (image_dedup_bktree.colors_differ: a grey-scale pHash cannot tell a red label from a blue one).
+#
+# Evidence only. A copy never inherits a reading: the same design in another size prints another weight, which a
+# pHash cannot see. The page domains that show a picture are kept on its candidates (same_picture_domains, shown
+# to the reviewer); they never change a tier, a rank or a decision. The URL-level consensus_count is unchanged.
+
+PHASH_COPY_DISTANCE = 6
+SIZE_CORROBORATED = "size_corroborated"     # reason: the label left the size open, two trusted stores state it
+SIZE_CORROBORATION_DOMAINS = 2
+_COLOUR_CACHE: Dict[str, Optional[str]] = {}
+_COLOUR_CACHE_MAX = 4096
+
+
+def _picture_ok(rc) -> bool:
+    return (rc.status != "excluded" and rc.score is not None and rc.score.tier is not None
+            and not rc.score.hard_reject and rc.fetched is not None and rc.fetched.ok and bool(rc.fetched.phash))
+
+
+def _short_side(rc) -> int:
+    f = rc.fetched
+    return int(min(f.width or 0, f.height or 0)) if f is not None and f.ok else 0
+
+
+def _identity_key(rc) -> Tuple:
+    from .score import IDENTITY_KEYS, rank_key
+    return rank_key(rc.candidate, rc.score)[:IDENTITY_KEYS]
+
+
+def picture_domain(rc) -> str:
+    """The page domain a candidate shows its picture on (the image host when it has no page)."""
+    from .text_norm import url_host
+    matched = (rc.score.matched or {}) if rc.score is not None else {}
+    return matched.get("page_domain") or url_host(rc.candidate.page_url) or url_host(rc.candidate.image_url)
+
+
+def _colour(rc) -> Optional[str]:
+    """image_dedup_bktree.color_signature of a fetched image, once per image bytes (content_sha256)."""
+    key = rc.fetched.content_sha256 or f"id:{id(rc.fetched)}"
+    if key in _COLOUR_CACHE:
+        return _COLOUR_CACHE[key]
+    sig = None
+    try:
+        import image_dedup_bktree                      # repo-root module (numpy / PIL)
+        from .fetch import load_image
+        img = load_image(rc.fetched)
+        sig = image_dedup_bktree.color_signature(img) if img is not None else None
+    except Exception:                                  # no signature: the colours are not told apart
+        sig = None
+    if len(_COLOUR_CACHE) >= _COLOUR_CACHE_MAX:
+        _COLOUR_CACHE.clear()
+    _COLOUR_CACHE[key] = sig
+    return sig
+
+
+def _colours_differ(a, b) -> bool:
+    try:
+        import image_dedup_bktree
+        return bool(image_dedup_bktree.colors_differ(_colour(a), _colour(b)))
+    except Exception:  # pragma: no cover - defensive
+        return False
+
+
+def picture_groups(rcs: Sequence) -> List[List]:
+    """The fetched, identity-ok candidates grouped by picture; each group's first member is its representative.
+
+    The representative is the copy the reader should see: the strongest listing evidence (score.rank_key's
+    identity part: tier, size, variants, class coverage, no soft conflict, page trust: a tier-1 or trusted page
+    first), then a sanctioned source, then the larger picture, then rank order. A candidate joins the first group
+    whose representative is within PHASH_COPY_DISTANCE and of alike colours.
+    """
+    from .fetch import phash_distance
+
+    members = [(i, rc) for i, rc in enumerate(rcs) if _picture_ok(rc)]
+    members.sort(key=lambda p: (_identity_key(p[1]), not p[1].candidate.sanctioned, -_short_side(p[1]), p[0]))
+    groups: List[List] = []
+    for _, rc in members:
+        for group in groups:
+            dist = phash_distance(rc.fetched.phash, group[0].fetched.phash)
+            if dist is not None and dist <= PHASH_COPY_DISTANCE and not _colours_differ(group[0], rc):
+                group.append(rc)
+                break
+        else:
+            groups.append([rc])
+    return groups
+
+
+def _adds_evidence(copy, rep) -> bool:
+    """The copy's own listing proves something its representative's does not (a size, a variant, a better page)."""
+    return any(c < r for c, r in zip(_identity_key(copy), _identity_key(rep)))
+
+
+def _domains(group: Sequence) -> List[str]:
+    return sorted({d for d in (picture_domain(rc) for rc in group) if d})
+
+
+def reader_queue(usable: Sequence) -> List:
+    """The usable candidates in the order the reader should read them: one copy of each picture first.
+
+    A copy whose listing adds no identity evidence to its representative's waits while the representative is
+    unread: the representative takes the best rank of its group, and the copies go after every other picture (they
+    still fill a batch that has room, so no call is ever added for them). Once the representative was read MATCH its
+    copies are not queued at all (the picture is found). Read anything else (MISMATCH, UNSURE, UNKNOWN), they are
+    queued at their own rank again: a pHash cannot see a printed size or a sub-line ('Laban' and 'Laban Up' share one
+    design), so the reader's 'no' on one copy never speaks for another, and another store's copy may corroborate an
+    UNSURE reading (decide.tier2_corroborated). copy_of holds the representative's image URL on every such copy not
+    read (yet), for the reviewer. Every member keeps the group's page domains (same_picture_domains).
+    """
+    usable = list(usable)
+    position = {id(rc): i for i, rc in enumerate(usable)}
+    waiting: Set[int] = set()
+    dropped: Set[int] = set()
+    for group in picture_groups(usable):
+        rep = group[0]
+        domains = _domains(group)
+        rep_read = rep.verdict.decision if rep.verdict is not None else None
+        for rc in group:
+            rc.same_picture_domains = list(domains)
+        for rc in group[1:]:
+            rc.copy_of = None
+            if rc.verdict is not None or _adds_evidence(rc, rep):
+                continue
+            rc.copy_of = rep.candidate.image_url
+            if rep_read == "MATCH":
+                dropped.add(id(rc))
+            elif rep_read is None:
+                waiting.add(id(rc))
+                position[id(rep)] = min(position[id(rep)], position[id(rc)])
+    first = sorted((rc for rc in usable if id(rc) not in waiting and id(rc) not in dropped),
+                   key=lambda rc: position[id(rc)])            # stable: rank order otherwise
+    return first + [rc for rc in usable if id(rc) in waiting]
+
+
+def _label_left_size_open(spec: SkuSpec, verdict) -> bool:
+    """The reader confirmed the brand and the variant but could not read the size."""
+    if verdict is None or spec.size is None or verdict.decision == "MISMATCH":
+        return False
+    variant_ok = verdict.variant_match == "yes" or (not spec.variants and verdict.variant_match != "no")
+    return verdict.brand_match == "yes" and variant_ok and verdict.size_match == "unsure"
+
+
+def _title_states_size(spec: SkuSpec, rc) -> bool:
+    """A trusted page (brand site, UAE retailer, structured source) whose title or page title states the row's size
+    (and pack, for a multipack row), with no other size or pack in its URL."""
+    from .score import TRUST_STRUCTURED
+
+    score = rc.score
+    matched = score.matched or {}
+    if int(matched.get("source_trust") or 0) < TRUST_STRUCTURED or score.size_status != "match":
+        return False
+    if score.url_only_size_conflict or ((spec.pack_count or 1) > 1 and matched.get("pack") != "match"):
+        return False
+    fields = matched.get("size_fields") or {}
+    return any(fields.get(name) == "match" for name in ("title", "page_title"))
+
+
+def annotate_copies(spec: SkuSpec, ranked: Sequence) -> int:
+    """After the decision (display and evidence only; routing never reads it): every fetched candidate keeps the
+    page domains that show its picture, and a candidate whose label the reader confirmed for brand and variant but
+    could not read the size gets the reason SIZE_CORROBORATED when at least SIZE_CORROBORATION_DOMAINS distinct
+    trusted domains in its picture group state the row's size in their titles. It never changes the decision,
+    the auto-publish rules or the lane (they were settled before). Returns how many candidates got the reason."""
+    n = 0
+    for group in picture_groups(list(ranked)):
+        domains = _domains(group)
+        stating = {picture_domain(rc) for rc in group if _title_states_size(spec, rc)}
+        stating.discard("")
+        for rc in group:
+            rc.same_picture_domains = list(domains)
+            if (len(stating) >= SIZE_CORROBORATION_DOMAINS and _label_left_size_open(spec, rc.verdict)
+                    and SIZE_CORROBORATED not in rc.reasons):
+                rc.reasons.append(SIZE_CORROBORATED)
+                n += 1
+    return n

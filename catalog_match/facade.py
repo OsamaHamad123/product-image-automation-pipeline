@@ -168,6 +168,10 @@ def evidence(rc: RankedCandidate, spec: Optional[SkuSpec] = None) -> Dict[str, A
         "page_gtin": display_gtin(rc.candidate.gtin_on_page) if is_global_gtin(rc.candidate.gtin_on_page) else None,
         # X0: another image of the page's own gallery, offered because its main image failed (the review says so)
         "page_gallery": bool(getattr(rc.candidate, "page_gallery", False)),
+        # the page domains that show the same picture (retrieve.reader_queue / annotate_copies: evidence only), and
+        # for a copy the reader did not read, the image read in its place
+        "same_picture_domains": list(getattr(rc, "same_picture_domains", None) or []),
+        "copy_of": getattr(rc, "copy_of", None),
     })
 
 
