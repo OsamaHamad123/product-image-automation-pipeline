@@ -82,6 +82,7 @@ SERVICES = (  # (unit, what it is)
 TIMERS = (
     ("laqta-nightly.timer", "التشغيل الليلي"),
     ("laqta-backup.timer", "النسخ الاحتياطي"),
+    ("laqta-outbox-flush.timer", "تفريغ طابور الشيت بين التشغيلات"),
 )
 NGINX_DIR = "/etc/nginx"
 
@@ -112,6 +113,25 @@ def example_keys(path):
                 if m:
                     keys.append(m.group(1))
     return keys
+
+
+def cached_config(root):
+    """What `artisan config:cache` froze (dashboard/bootstrap/cache/config.php): {env, debug, secure}. That file, not
+    dashboard/.env, is what the running dashboard uses; every value is None when there is no cache (or no such line)."""
+    out = {"env": None, "debug": None, "secure": None}
+    path = os.path.join(root, "dashboard", "bootstrap", "cache", "config.php")
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            text = handle.read()
+    except OSError:
+        return out
+    m = re.search(r"'env' => '([^']*)',\s*'debug' => (true|false),", text)
+    if m:
+        out["env"], out["debug"] = m.group(1), m.group(2) == "true"
+    m = re.search(r"^\s*'secure' => (true|false|NULL),", text, re.M)
+    if m:
+        out["secure"] = m.group(1) == "true"
+    return out
 
 
 def is_unset(value):
@@ -215,7 +235,11 @@ def check_env(root=REPO_ROOT, environ=None, settings=None):
         if str(dash.get("APP_DEBUG", "")).strip().lower() in ("true", "1", "yes", "on"):
             out.append(Result(FAIL, "APP_DEBUG مفعّل بـ dashboard/.env: لازم false على السيرفر "
                                     "(صفحة الخطأ بتعرض الإعدادات والمفاتيح)"))
-        if str(dash.get("APP_ENV", "")).strip().lower() != "production":
+        frozen = cached_config(root)
+        if frozen["debug"] is True:
+            out.append(Result(FAIL, "الإعدادات المخزّنة (config:cache) فيها APP_DEBUG=true: صفحة الخطأ بتعرض المفاتيح. "
+                                    "صلّح dashboard/.env وشغّل install.sh (أو artisan config:cache)"))
+        if str(frozen["env"] or dash.get("APP_ENV", "")).strip().lower() != "production":
             out.append(Result(WARN, "APP_ENV بـ dashboard/.env مو production"))
         differing = [k for k in DASHBOARD_DB_KEYS if root_file and dash.get(k, "") != root_file.get(k, "")]
         if differing:
@@ -435,6 +459,14 @@ def check_units(run=None):
                    else Result(FAIL, "عامل مزامنة الشيت مفعّل بس مو شغّال (%s): journalctl -u %s" % (state or "?", worker)))
     else:
         out.append(Result(INFO, "عامل مزامنة الشيت (Redis) مو مفعّل: طبيعي إذا ما بتستعمل Redis"))
+    launcher = "laqta-run.path"
+    if _systemctl(run, "is-enabled", launcher) == "enabled":
+        out.append(Result(OK, "مشغّل تشغيل اللوحة شغّال (%s): التشغيل من اللوحة بيضل شغّال لو أعدت تشغيل php-fpm" % launcher)
+                   if _systemctl(run, "is-active", launcher) == "active"
+                   else Result(WARN, "مشغّل تشغيل اللوحة مفعّل بس مو شغّال (%s): التشغيل من اللوحة بيتأخر 10 ثواني وبيموت "
+                                     "لو أعدت تشغيل php-fpm. شغّل: systemctl start %s" % (launcher, launcher)))
+    else:
+        out.append(Result(INFO, "مشغّل تشغيل اللوحة (%s) مو مفعّل: شغّل install.sh (اللوحة بتشغّل العامل بالطريقة القديمة)" % launcher))
     listing = _systemctl(run, "list-unit-files", "php*-fpm.service", "--no-legend")
     fpm = next((line.split()[0] for line in listing.splitlines() if line.split()), "")
     services = list(SERVICES) + ([(fpm, "PHP-FPM")] if fpm else [])
@@ -447,8 +479,9 @@ def check_units(run=None):
     return out
 
 
-def check_web(nginx_dir=NGINX_DIR):
-    """The dashboard has no login of its own: the nginx site must have basic auth and a password file."""
+def check_web(nginx_dir=NGINX_DIR, root=None):
+    """The dashboard has no login of its own: the nginx site must have basic auth and a password file.
+    With `root` (the project folder) the HTTPS site must also hand out a Secure session cookie."""
     site = os.path.join(nginx_dir, "sites-enabled", "laqta.conf")
     if not os.path.exists(site):
         return [Result(FAIL, "موقع nginx (laqta.conf) مو مفعّل: شغّل install.sh")]
@@ -473,6 +506,14 @@ def check_web(nginx_dir=NGINX_DIR):
         out.append(Result(OK, "الموقع على localhost بس (نفق SSH أو Tailscale)"))
     elif re.search(r"ssl_certificate\b|listen\s+[^;]*\b443\b", text):
         out.append(Result(OK, "الموقع على HTTPS"))
+        if root is not None:
+            secure = cached_config(root)["secure"]
+            if secure is None:
+                dash = read_env_file(os.path.join(root, "dashboard", ".env")) or {}
+                secure = str(dash.get("SESSION_SECURE_COOKIE", "")).strip().lower() in ("true", "1", "yes", "on")
+            if not secure:
+                out.append(Result(WARN, "الموقع على HTTPS بس كوكي الجلسة مو Secure: ضيف SESSION_SECURE_COOKIE=true "
+                                        "بـ dashboard/.env وشغّل install.sh"))
     else:
         out.append(Result(WARN, "الموقع على HTTP بدون تشفير: كلمة السر بتنبعت مكشوفة. شغّل certbot (docs/deploy_ubuntu.md)"))
     return out
@@ -506,7 +547,7 @@ def run_checks(selected, root, environ, args, deps=None):
         results["disk"] = check_disk(root, min_free_gb=args.min_free_gb, disk_usage=deps.get("disk_usage"))
     on_server = (not args.no_systemd) and systemd_available(deps.get("which"), deps.get("isdir"))
     for name, fn in (("units", lambda: check_units(run=deps.get("run"))),
-                     ("web", lambda: check_web(nginx_dir=deps.get("nginx_dir", NGINX_DIR)))):
+                     ("web", lambda: check_web(nginx_dir=deps.get("nginx_dir", NGINX_DIR), root=root))):
         if name in selected:
             results[name] = fn() if on_server else [Result(INFO, "تخطيت هالفحص: هاد الجهاز مو سيرفر systemd")]
     return [(name, results[name]) for name in SECTIONS if name in results]

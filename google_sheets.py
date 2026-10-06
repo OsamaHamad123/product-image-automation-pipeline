@@ -938,6 +938,24 @@ def outbox_summary(since_ts=None):
     return out
 
 
+def outbox_due_count(now=None):
+    """
+    كم كتابة تنتظر التفريغ الآن: PENDING، و FAILED حلّ موعد إعادة محاولتها (نفس شرط _flush_locked). صفر = لا داعي
+    لفتح الشيت: مؤقت التفريغ بين التشغيلات (laqta-outbox-flush.timer) يتخطى Google حينها فلا يستهلك حصته.
+    أخطاء قاعدة البيانات تُرفع.
+    """
+    conn = (_queue._connect if _queue is not None else _db_connect)()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT COUNT(*) AS n FROM sheet_updates WHERE sync_status = 'PENDING' "
+            "OR (sync_status = 'FAILED' AND (next_attempt_at IS NULL OR next_attempt_at <= %s))",
+            (int(_now() if now is None else now),))
+        return int((cursor.fetchone() or {}).get("n") or 0)
+    finally:
+        conn.close()
+
+
 class GoogleSheetsBatchWorker(threading.Thread):
     def __init__(self, queue, credentials_json_path, spreadsheet_name_or_url, sync_interval=5):
         super().__init__()
