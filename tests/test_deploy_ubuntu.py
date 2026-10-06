@@ -336,10 +336,17 @@ def test_nginx_site_listen_variants():
     assert "@" not in re.sub(r"(?m)^\s*#.*$", "", site())
 
 
+
+def _unprivileged_ports(text):
+    """`nginx -t` binds every listen address; a CI runner that is not root cannot bind 80 / 443 (EACCES), so the test
+    copy listens on high ports instead. The rendered file itself (asserted elsewhere) keeps 80 and 443."""
+    high = {"80": "28080", "443": "28443"}
+    return re.sub(r"(?m)^(\s*listen\s+(?:\[::\]:|[\d.]+:)?)(80|443)\b", lambda m: m.group(1) + high[m.group(2)], text)
+
 @pytest.mark.skipif(shutil.which("nginx") is None, reason="nginx is not installed")
 @pytest.mark.parametrize("listen,name", [("listen 80;", "dash.example.com"), ("listen 127.0.0.1:8080;", "_")])
 def test_nginx_accepts_the_rendered_site(tmp_path, listen, name):
-    text = site(listen=listen, server_name=name)
+    text = _unprivileged_ports(site(listen=listen, server_name=name))
     text = re.sub(r"(access_log|error_log)\s+\S+;", lambda m: f"{m.group(1)} {tmp_path}/{m.group(1)}.log;", text)
     text = text.replace("root /var/www/letsencrypt;", f"root {tmp_path};")
     (tmp_path / "laqta.conf").write_text(text)
@@ -429,6 +436,7 @@ def test_nginx_accepts_the_https_site(tmp_path):
     assert done.returncode in (0, 2), done.stderr
     text = (tmp_path / "laqta.conf").read_text(encoding="utf-8")
     text = re.sub(r"(?m)^\s*listen \[::\]:\d+[^;]*;\n", "", text)     # test boxes without IPv6 cannot bind [::]
+    text = _unprivileged_ports(text)
     text = re.sub(r"(access_log|error_log)\s+\S+;", lambda m: f"{m.group(1)} {tmp_path}/{m.group(1)}.log;", text)
     text = text.replace("root /var/www/letsencrypt;", f"root {tmp_path};")
     (tmp_path / "site.conf").write_text(text)
