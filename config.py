@@ -632,6 +632,15 @@ def load_db_config():
                 else:
                     logger.warning("قيمة gtin_policy غير مدعومة: %r", db_keys["gtin_policy"])
 
+            # --- embeddings package: نموذج المتجهات (catalog_match.embeddings)؛ يكتبه
+            # scripts/backfill_embeddings.py --setup (install.sh --with-embeddings) ---
+            if db_keys.get("embeddings"):
+                mode = str(db_keys["embeddings"]).strip().lower()
+                if mode in ("off", "dinov2", "siglip2"):
+                    globals()["EMBEDDINGS"] = mode
+                else:
+                    logger.warning("قيمة embeddings غير مدعومة: %r", db_keys["embeddings"])
+
 
             _load_sources_settings(db_keys)   # sources package (P3)
             _load_queue_settings(db_keys)     # queue package (P4a)
