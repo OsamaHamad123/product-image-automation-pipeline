@@ -11,6 +11,64 @@ causes: the quality gate threw away white-background packshots, an unverified "l
 success, siblings of the right product outranked it, and reviewers' rejections were never remembered. The search
 core was rebuilt and wired into the queue, the dashboard actions and the sheet writes. Every claim below has a test.
 
+### Wave 3 of the professional upgrade: transparent re-cuts, cut-out QA, setup wizard, simpler Health, lighter code
+
+**«أعد معالجتها شفافة»: the old white images become transparent (scripts/reprocess_transparent.py, Health card)**
+- Every approval now records its master's background and what the cut check said
+  (`resolved_products.master_background`, `cutout_json`). An older approval is measured once from its stored master.
+- `recut.py` re-cuts from the best stored source:
+  - the approval's cached candidate bytes;
+  - else its original URL, once shown to be the same picture;
+  - the white master only as a last resort.
+  It then publishes a new versioned asset, moves the approval to it and queues the new link in the outbox.
+- The outbox writes it only while the Sheet cell still holds the old link. A cell changed by hand becomes CONFLICT
+  and is not written.
+- A dry run is the default: it shows counts and the PhotoRoom cost (`PHOTOROOM_PRICE_USD`).
+- `--apply --max N --max-usd X`:
+  - stops at the cap and at the first error, and resumes from `temp/reprocess_state.json`;
+  - refuses during a run, or while the output is set to white.
+- A cut that comes back with review flags waits for the owner in «فحص القص».
+
+**«فحص القص» (/cutout-check)**
+- Published pictures appear on dark, light and checker side by side, with filters (white master, light halo on
+  dark, PhotoRoom unsure, glass, dark rim on white, low resolution).
+- «أعد القص بـPhotoRoom» / «جرّب القص المحلي» make a cut that waits. «اعتمد الجديد» publishes it through the same
+  guarded path, or «خلّي القديم» discards it. «آخر التبديلات» undoes any replacement.
+- Nothing is replaced without the owner's click.
+- BiRefNet at 2048 was checked and is not usable yet: rembg resizes every BiRefNet to 1024, and the HR model has no
+  official ONNX.
+
+**«جهّز لقطة»: first-run setup wizard (/setup)**
+- Five steps, each with a live check behind a button and a plain fix:
+  1. the Sheet;
+  2. the keys (present or missing only, never shown);
+  3. the brands table;
+  4. the publish rehearsal;
+  5. a first run of 5 rows.
+- Progress is kept in system_settings, and the wizard never blocks a configured install.
+
+**A simpler Health page**
+- The top says «كلشي تمام» or lists «شو بدو منك», each item with a button to its fix
+  (`HealthAttentionController`). It reads ops alerts, failed services, DEAD Sheet writes, disk, a stale nightly
+  run, the last run, the publish rehearsal, background removal and the local index's age.
+- Every detailed card moves, unchanged, under «تفاصيل متقدمة», collapsed by default.
+
+**Lighter code and a faster, order-independent suite**
+- The v1 search engine is gone: catalog_match is the only engine.
+  - Removed: aesthetics_engine.py, image_quality_gatekeeper.py, query_refiner.py, fastapi_server.py, the v1 helpers
+    and the `SEARCH_ENGINE` switch.
+  - fastapi, uvicorn, pydantic and aiohttp leave requirements.txt.
+  - About 4,800 lines removed.
+- `--legacy-sequential` stays: its search already ran through catalog_match.
+- Review page tests no longer wait for the 6-second auto-hide.
+- Scripts are loaded without shadowing the root modules, so any subset of test files passes in any order.
+- The installer tests read a clean clone, not a developer's own dashboard/.env.
+
+**MariaDB 11**
+- CI runs MariaDB 11, where VECTOR is reserved: `approved_embeddings.vector` is now `embedding`, and the alias is
+  quoted.
+- The full suite was run against 11.8 as well as 10.11.
+
 ### Wave 2 of the professional upgrade: brands, local index, real measurement, normaliser, image fingerprints
 
 **Fill the brands table in one go («عبّي جدول الماركات», Run page)**
