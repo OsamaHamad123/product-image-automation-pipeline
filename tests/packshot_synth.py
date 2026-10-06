@@ -449,7 +449,7 @@ class Services:
     """Installs the fakes on image_processor `ip` through `mp` (a pytest MonkeyPatch)."""
 
     def __init__(self, mp, ip, config, shot: Shot, photoroom=None, remove_bg=None, box: bool = True,
-                 crop: bool = False, white_mode: str = "log", gemini_box=None):
+                 crop: bool = False, white_mode: str = "log", gemini_box=None, background: str = "white"):
         self.ip, self.shot = ip, shot
         self.calls: List[Tuple[str, Tuple[int, int], Tuple[int, int, int, int]]] = []
         self.box_calls = 0
@@ -473,6 +473,7 @@ class Services:
         if hasattr(config, "OUTPUT_CANVAS_SIZE"):
             mp.delattr(config, "OUTPUT_CANVAS_SIZE")
         mp.delenv("OUTPUT_CANVAS_SIZE", raising=False)
+        mp.setattr(config, "OUTPUT_BACKGROUND", background, raising=False)   # white unless a test asks
         mp.setattr(ip, "_locate_product_box", self.locate)
         mp.setattr(ip, "_isolate_grabcut", lambda img: (_ for _ in ()).throw(AssertionError("GrabCut used")))
         mp.setattr(ip, "_isolate_rembg", lambda img: (_ for _ in ()).throw(AssertionError("rembg used")))
@@ -520,7 +521,7 @@ class Services:
 
 
 def run_shot(ip, config, shot: Shot, directory, photoroom="truth", remove_bg=None, box=True, crop=False,
-             white_mode="log", gemini_box=None, canvas=(800, 800)):
+             white_mode="log", gemini_box=None, canvas=(800, 800), background="white"):
     """Process one shot offline. Returns (ProcessResult, Services)."""
     import pytest
 
@@ -530,7 +531,7 @@ def run_shot(ip, config, shot: Shot, directory, photoroom="truth", remove_bg=Non
         remove_bg = truth_provider(shot)
     with pytest.MonkeyPatch.context() as mp:
         services = Services(mp, ip, config, shot, photoroom=photoroom, remove_bg=remove_bg, box=box, crop=crop,
-                            white_mode=white_mode, gemini_box=gemini_box)
+                            white_mode=white_mode, gemini_box=gemini_box, background=background)
         mp.setattr(ip.tempfile, "tempdir", str(directory))
         src = shot.save(directory)
         result = ip.process_product_image_result(src, "Product", "Brand", canvas[0], canvas[1],

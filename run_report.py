@@ -201,6 +201,7 @@ def _count(value):
 
 # صور نُشرت تلقائياً «بدون عزل الخلفية» (المالك أوقف عزل الخلفية بالإعدادات): سطر بالتقرير وبطاقة «آخر تشغيل»
 BG_SKIPPED_TEXT = "انتشر بدون عزل الخلفية"
+BG_FALLBACK_TEXT = "انعزل بطريقة محلية لأن رصيد مزوّد العزل خلص"
 
 
 def _iso(ts):
@@ -211,8 +212,9 @@ def build_report(trigger, attempts, started_ts, ended_ts, health=None, db=None, 
     """
     التقرير من محاولات التشغيل (قائمة {stop_reason, run_id, worker_id, notice, bg_skipped}، الأخيرة هي النتيجة):
     {trigger, started_at, ended_at, duration_s, outcome, stop_reason, reason_text, exit_code, attempts,
-     attempt_reasons, run_id, run_ids, counts, outbox, spend, notices, database, bg_skipped}.
+     attempt_reasons, run_id, run_ids, counts, outbox, spend, notices, database, bg_skipped, bg_fallback}.
     bg_skipped: صور نشرها العامل تلقائياً «بدون عزل الخلفية» باختيار المالك (main.bg_skipped_count)، مجموع المحاولات.
+    bg_fallback: صور نشرها العامل بعزل محلي (rembg بموديل BiRefNet) لأن رصيد PhotoRoom أو remove.bg خلص (main.bg_fallback_count).
     «تشغيل آخر يعمل» بعد محاولة عملت فعلاً ليس «لم يبدأ»: النتيجة handed_over بأرقام المحاولات السابقة.
     """
     if db is None:
@@ -252,6 +254,8 @@ def build_report(trigger, attempts, started_ts, ended_ts, health=None, db=None, 
         "notices": notices,
         "database": "unavailable" if _key(stop_reason) == "db_unavailable" else "ok",
         "bg_skipped": sum(_count(a.get("bg_skipped")) for a in attempts),
+        "bg_fallback": sum(_count(a.get("bg_fallback")) for a in attempts),
+        "local_index": None,
     }
     if report["outcome"] == "skipped":
         return report
@@ -265,6 +269,13 @@ def build_report(trigger, attempts, started_ts, ended_ts, health=None, db=None, 
         report["notices"].append("تعذر قراءة نتائج التشغيل من قاعدة البيانات")
         if not db.db_available():
             report["database"] = "unavailable"
+    try:
+        if run_ids or worker_id:
+            since = (ended_ts or time.time()) - (started_ts or time.time()) + 60
+            # كم منتج جاوب عليه الفهرس المحلي (مجاني): بطاقة «فهرس المتاجر المحلي» بصفحة الصحة
+            report["local_index"] = db.run_local_index_answers(run_ids=run_ids, worker_id=worker_id, since_seconds=since)
+    except Exception as e:
+        logger.warning("run_report: local index answers unreadable: %s", e)
     try:
         report["outbox"] = outbox_counts(sheets, started_ts)
     except Exception as e:
@@ -359,6 +370,8 @@ def telegram_text(report):
         if counts.get("pending_left"):
             lines.append(f"بقي في الانتظار {counts['pending_left']}"
                          + (f" (منها {counts['provider_down']} لأن محركات البحث لم ترد)" if counts.get("provider_down") else ""))
+    if report.get("bg_fallback"):
+        lines.append(f"{BG_FALLBACK_TEXT} {_count(report['bg_fallback'])} (اشحن الرصيد لجودة أحسن)")
     if report.get("bg_skipped"):
         lines.append(f"{BG_SKIPPED_TEXT} {_count(report['bg_skipped'])} (عزل الخلفية متوقف بالإعدادات)")
     elif report.get("database") == "unavailable":

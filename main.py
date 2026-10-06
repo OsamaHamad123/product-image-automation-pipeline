@@ -38,6 +38,7 @@ import google_sheets
 import image_search
 import image_processor
 import cloudinary_storage
+import cutout_finish
 import local_cache_db
 import processing_profile
 
@@ -415,6 +416,9 @@ def publish_image(image_url, name, brand, row_number, worksheet, link_column_ind
     needs_review: ولا quality_refused، والعامل ينشر تلقائياً كالمعتاد) و bg_skipped=True في النتيجة، لتقول استجابة
     الاعتماد وتقرير التشغيل «انتشرت بدون عزل الخلفية». فشل عزل حقيقي بأي طريقة أخرى (photoroom_402، أو لوحة بعلامات)
     يبقى كما هو أعلاه.
+    bg_fallback: {provider, from, code} لما خلص رصيد المزوّد السحابي (PhotoRoom / remove.bg: رصيد أو مفتاح أو حصة) فعزلتها
+    rembg بموديل BiRefNet (BG_FALLBACK=local، image_processor) واجتازت بوابة القص نفسها؛ وإلا None.
+    ليس فشلاً ولا «بدون عزل»: اللوحة معزولة ومنشورة نظيفة، والاعتماد وتقرير التشغيل يقولان إنها عزلت محلياً.
     لا تكبير لاحق: اللوحة من image_processor نهائية. البيانات الوصفية تُكتب في الشيت فقط بعد نجاح الرفع.
     الحالة: 'published' (معزولة وليست للمراجعة، أو نُشرت رغم علامات العرض، أو بدون عزل باختيار المالك) |
     'needs_review' (رابط ببادئة needs_review:) | 'quality_refused' | 'superseded' (لم يُكتب شيء) | 'failed'.
@@ -423,6 +427,8 @@ def publish_image(image_url, name, brand, row_number, worksheet, link_column_ind
     w, h = profile.target
     extra = {"page_url": page_url} if page_url and _accepts(image_processor.process_product_image_result,
                                                           "page_url") else {}
+    if getattr(profile, "background", None) and _accepts(image_processor.process_product_image_result, "background"):
+        extra["background"] = profile.background
     result = image_processor.process_product_image_result(
         image_url, name, brand, target_width=w, target_height=h,
         bg_method=profile.bg_method, candidate_sha256=candidate_sha256, enhance=profile.enhance, **extra,
@@ -436,6 +442,7 @@ def publish_image(image_url, name, brand, row_number, worksheet, link_column_ind
     notes = [str(n) for n in (getattr(result, "quality_notes", None) or [])]
     # المالك اختار «بدون عزل الخلفية»: لوحة provider 'none' هي ما طلبه، لا «الخلفية لم تُعزل»
     bg_skipped = _bg_skipped(profile, result)
+    bg_fallback = _bg_fallback(result)
     unisolated = not result.isolated and not bg_skipped
     anyway_allowed = unisolated and bool(flags) and set(flags) <= PRESENTATION_FLAGS
     anyway = bool(publish_anyway) and anyway_allowed
@@ -444,7 +451,8 @@ def publish_image(image_url, name, brand, row_number, worksheet, link_column_ind
         print(f"[Publish] لوحة الصف {row_number} لم تجتز فحص القص ({', '.join(flags) or 'no isolation'})؛ لم يُنشر شيء.")
         return {"status": "quality_refused", "error": "quality_flags" if anyway_allowed else "background_failed",
                 "isolated": False, "provider": result.provider, "profile": profile.as_dict(),
-                "quality_flags": flags, "quality_notes": notes, "publish_anyway_allowed": anyway_allowed}
+                "quality_flags": flags, "quality_notes": notes, "publish_anyway_allowed": anyway_allowed,
+                "bg_fallback": bg_fallback}
 
     metadata = {}
     try:
@@ -473,9 +481,12 @@ def publish_image(image_url, name, brand, row_number, worksheet, link_column_ind
     base = {"isolated": bool(result.isolated), "provider": result.provider, "metadata": metadata,
             "width": result.width, "height": result.height, "profile": profile.as_dict(), "phash": phash,
             "color_signature": color, "quality_flags": flags, "quality_notes": notes, "published_anyway": anyway,
-            "bg_skipped": bg_skipped}
+            "bg_skipped": bg_skipped, "bg_fallback": bg_fallback,
+            "finish": dict(getattr(result, "finish", None) or {})}
     if not link:
         return dict(base, status="failed", error="upload_failed")
+    # النسخة البيضا المعتمة من نفس الأصل (b_white,f_jpg): التطبيق بيطلبها متى بده مربع أبيض
+    base["white_url"] = cloudinary_storage.white_version_url(link)
 
     # نفس الصورة منشورة لمنتج آخر؟ الرفع الموجود مسبقاً (existing من Cloudinary) دليل إضافي فقط
     owners = local_cache_db.find_image_owners(link, phash, sku_key=sku_key, product_name=name,
@@ -533,10 +544,24 @@ def _bg_skipped(profile, result):
             and not getattr(result, "isolated", False) and str(getattr(result, "provider", "") or "") == "none")
 
 
+def _bg_fallback(result):
+    """
+    {provider: 'rembg', from, code} لما عزلت rembg المحلية (موديل BiRefNet) الصورة لأن المزوّد السحابي فشل برصيد أو مفتاح أو
+    حصة (ProcessResult.fallback_from، image_processor)، وإلا None. provider: rembg، from: السحابية، code: رمز فشلها.
+    """
+    fell = getattr(result, "fallback_from", None)
+    if not isinstance(fell, dict) or not fell.get("method"):
+        return None
+    return {"provider": str(getattr(result, "provider", "") or ""), "from": str(fell["method"]),
+            "code": str(fell.get("code") or "")}
+
+
 # علامات بوابة القص التي تخص العرض فقط (الخلفية معزولة): المراجع يستطيع نشر اللوحة رغمها بعد أن يراها
 # (publish_anyway). edge_clipped و opaque_backdrop و opaque_fill (لم يُزل شيء من الخلفية: image_processor) وأي علامة
 # أخرى، وعزل فشل بلا علامات، لا يُنشر نظيفاً أبداً: هي «الخلفية لم تُعزل» (background_failed).
-PRESENTATION_FLAGS = frozenset({"upscaled", "too_small_on_canvas", "second_object", "alpha_haze", "kept_shadow"})
+# dark_halo (اللوحة الشفافة، cutout_finish): حواف فاتحة بتبين على الوضع الغامق بالتطبيق.
+PRESENTATION_FLAGS = frozenset({"upscaled", "too_small_on_canvas", "second_object", "alpha_haze", "kept_shadow",
+                                "dark_halo"})
 
 
 def _accepts(func, name):
@@ -565,16 +590,25 @@ def _canvas_phash(path):
         from catalog_match.fetch import phash_hex
         with Image.open(path) as img:
             img.load()
-            return phash_hex(img.convert("RGB"))
+            # اللوحة الشفافة كما تبان على الأبيض: نفس بصمة اللوحات البيضا المنشورة من قبل
+            return phash_hex(cutout_finish.flatten_on_white(img))
     except Exception as e:
         print(f"تنبيه: تعذر حساب pHash للوحة النهائية: {e}")
         return None
 
 
 def _canvas_color_signature(path):
-    """بصمة ألوان اللوحة النهائية (image_dedup_bktree.color_signature)، أو None."""
+    """بصمة ألوان اللوحة النهائية (image_dedup_bktree.color_signature) كما تبان على الأبيض، أو None."""
     import image_dedup_bktree
-    return image_dedup_bktree.color_signature(path)
+    try:
+        from PIL import Image
+        with Image.open(path) as img:
+            img.load()
+            flat = cutout_finish.flatten_on_white(img)
+    except Exception as e:
+        print(f"تنبيه: تعذر فتح اللوحة لبصمة الألوان: {e}")
+        return None
+    return image_dedup_bktree.color_signature(flat)
 
 
 def _write_still_allowed(before_write):
@@ -652,6 +686,10 @@ def auto_approve_product(task, best_image, worksheet, link_column_index, sku_key
         if res.get("bg_skipped"):
             _count_bg_skipped()
             print(f"[Auto-Publish] الصف {task['row_number']}: انتشرت بدون عزل الخلفية (عزل الخلفية متوقف بالإعدادات).")
+        if res.get("bg_fallback"):
+            _count_bg_fallback()
+            print(f"[Auto-Publish] الصف {task['row_number']}: انعزلت الخلفية بـ {res['bg_fallback'].get('provider')} "
+                  f"لأن {res['bg_fallback'].get('from')} فشل برمز {res['bg_fallback'].get('code')} (رصيد أو مفتاح أو حصة).")
     elif res["status"] == "failed":
         print(f"[Auto-Publish] تعذر النشر لـ [{name}] ({res.get('error')}); يحال للمراجعة.")
     return res["status"]
@@ -673,6 +711,25 @@ def bg_skipped_count(reset=False):
         n = _BG_SKIPPED["count"]
         if reset:
             _BG_SKIPPED["count"] = 0
+        return n
+
+
+# صور نشرها هذا العامل تلقائياً بعد أن عزلتها طريقة محلية مجانية لأن رصيد المزوّد السحابي خلص (تقرير التشغيل: bg_fallback)
+_BG_FALLBACK = {"count": 0}
+_BG_FALLBACK_LOCK = threading.Lock()
+
+
+def _count_bg_fallback():
+    with _BG_FALLBACK_LOCK:
+        _BG_FALLBACK["count"] += 1
+
+
+def bg_fallback_count(reset=False):
+    """عدد الصور التي نشرها العامل بعزل محلي بديل منذ آخر تصفير (reset=True يصفّر بعد القراءة)."""
+    with _BG_FALLBACK_LOCK:
+        n = _BG_FALLBACK["count"]
+        if reset:
+            _BG_FALLBACK["count"] = 0
         return n
 
 
@@ -1190,6 +1247,7 @@ LOCK_FILE = "temp/pipeline.lock"
 # نتيجة آخر عامل في هذه العملية (يقرؤها التشغيل الليلي و`python main.py --worker` لرمز الخروج):
 # {stop_reason, run_id, worker_id, started_ts, ended_ts, notice, health, bg_skipped}. stop_reason None = الطابور انتهى.
 # bg_skipped: صور نُشرت تلقائياً بدون عزل الخلفية باختيار المالك في هذا التشغيل.
+# bg_fallback: صور نُشرت بعزل محلي (rembg بموديل BiRefNet) لأن رصيد المزوّد السحابي خلص في هذا التشغيل.
 LAST_WORKER = {}
 # سبب فشل آخر إدراج في هذه العملية (_enqueue_failed): {reason, message}
 LAST_ENQUEUE = {}
@@ -1435,7 +1493,7 @@ def plan_enqueue(products, reprocess=False, brand_mappings=None):
 
     index = build_index(brand_mappings) if brand_mappings else None   # يُبنى مرة واحدة لكل الصفوف
     stats = {"skipped_final": 0, "relink": 0, "edited": 0, "cleared": 0, "missing": 0, "in_flight": 0,
-             "index_changed": 0}
+             "index_changed": 0, "rekey": []}
     snapshot = local_cache_db.resolution_snapshot()
     queue = local_cache_db.queue_snapshot()
     gtin_sizes = _sizes_by_gtin(products)
@@ -1454,6 +1512,11 @@ def plan_enqueue(products, reprocess=False, brand_mappings=None):
             if not _row_was_edited(prod, sku_key, alt_key,
                                    snapshot["by_url"].get(local_cache_db.url_norm(link)) or []):
                 stats["skipped_final"] += 1
+                # صار للصف باركود صالح (كُتب من «باركودات من صفحات المتاجر» أو بالإيد): صف الطابور يأخذ مفتاحه
+                # الجديد والقديم يصير البديل (local_cache_db.rekey_queue_rows)، فتجده المراجعة بمفتاح الشيت
+                old = queue.get(prod["row_number"]) or {}
+                if old.get("sku_key") and old.get("sku_key") != sku_key and old.get("sku_key") == alt_key:
+                    stats["rekey"].append((prod["row_number"], alt_key, sku_key, barcode))
                 continue
             stats["edited"] += 1
             entry["reason"] = "ROW_EDITED"
@@ -1571,6 +1634,11 @@ def run_enqueue_mode():
     try:
         rows, stats = plan_enqueue(selected, reprocess=reprocess, brand_mappings=brand_mappings)
         local_cache_db.add_many_to_queue(rows, reprocess=reprocess, totals=done)
+        if stats.get("rekey"):
+            try:
+                local_cache_db.rekey_queue_rows(stats["rekey"])
+            except Exception as e:
+                print(f"تنبيه: تعذر تحديث مفتاح {len(stats['rekey'])} صف صار له باركود: {e}")
         print(f"[Enqueue] {len(rows)} صف في الطابور (جديد {done['insert']}، يعود للانتظار {done['reset']}، "
               f"باقٍ كما هو {done['keep']})؛ {stats['skipped_final']} صف تم تخطيه لأن رابطه نهائي.")
         if stats["relink"] or stats["in_flight"]:
@@ -2289,6 +2357,20 @@ def _harvest_pending_brand_sites():
         print(f"تنبيه: تعذر فهرسة مواقع الماركات المضافة: {e}")
 
 
+def _start_local_index_refresh(trigger):
+    """
+    تحديث الفهرس المحلي بالخلفية (catalog_match.index_refresh): المتاجر اللي آخر جمع كامل لها أقدم من
+    LOCAL_INDEX_REFRESH_DAYS (7 افتراضياً) أو ما انجمعت أبداً بتنقرا خرايطها من جديد بخيط خلفي بحد LOCAL_INDEX_REFRESH_MAX_S
+    ثانية (300). البحث ما بيستنى شي ولا بيتأخر: بيستعمل اللي بالفهرس وقتها. متجر رد «ممنوع» بيتخطى 7 أيام. بلا أي كتابة
+    بالشيت. LOCAL_INDEX_ENABLED مطفي أو الحد 0: ما بيصير شي. لا يرفع أبداً.
+    """
+    try:
+        from catalog_match import index_refresh
+        index_refresh.start_background("nightly" if trigger == "nightly" else "worker")
+    except Exception as e:
+        print(f"تنبيه: تعذر بدء تحديث الفهرس المحلي: {e}")
+
+
 def run_worker_mode(trigger="manual", report=True, deadline_ts=None):
     """
     عامل الخلفية: يسحب المهام ذرياً ويعالجها بالتوازي (WORKER_CONCURRENCY منتجاً بنفس الوقت، 5 افتراضياً).
@@ -2305,6 +2387,9 @@ def run_worker_mode(trigger="manual", report=True, deadline_ts=None):
 
     LAST_WORKER.clear()
     bg_skipped_count(reset=True)
+    bg_fallback_count(reset=True)
+    image_processor.reset_cloud_breaker()    # رصيد المزوّد ربما شُحن: التشغيل الجديد يجرّب الطريقة السحابية من جديد
+    image_processor.reset_rembg_sessions()   # وموديل rembg ربما نُزّل: جلسة فشلت تُجرَّب من جديد
     lock_file = LOCK_FILE
     os.makedirs("temp", exist_ok=True)
     if _another_worker_running(lock_file):
@@ -2389,6 +2474,7 @@ def run_worker_mode(trigger="manual", report=True, deadline_ts=None):
             local_cache_db.update_automation_state(status="error", notice=start_notice)
             return
         brand_mappings = google_sheets.get_brand_mappings(sheets_client, config.SPREADSHEET_NAME_OR_URL)
+        _start_local_index_refresh(trigger)      # in the background: the search never waits for it
         _forget_brand_spellings()
         _forget_slow_hosts()
         _harvest_pending_brand_sites()
@@ -2572,7 +2658,7 @@ def run_worker_mode(trigger="manual", report=True, deadline_ts=None):
         LAST_WORKER.update(stop_reason=stop_reason, run_id=report_run_id, worker_id=worker_id,
                            started_ts=started_ts, ended_ts=time.time(),
                            notice=final_notice or start_notice or notice or None, health=health,
-                           bg_skipped=bg_skipped_count())
+                           bg_skipped=bg_skipped_count(), bg_fallback=bg_fallback_count())
         if report:
             try:
                 import run_report

@@ -432,6 +432,7 @@ def init_db():
             "auto_publish_brands": "",
             "auto_publish_strict_lane": "false",
             "output_canvas_size": str(getattr(config, "OUTPUT_CANVAS_SIZE", 800)),
+            "output_background": str(getattr(config, "OUTPUT_BACKGROUND", "transparent")),
             "strict_brand_match": "true",
         }
         for k, v in default_settings.items():
@@ -1368,17 +1369,22 @@ def add_review_decision(action, sku_key=None, row_number=None, brand=None, produ
 def get_page_barcodes():
     """
     الاعتمادات الحالية (human_approved / auto_verified) التي حُفظ معها باركود صفحة المتجر (page_gtin، لصف بلا باركود
-    في الشيت)، مع رقم صف الطابور الأحدث لنفس sku_key: [{row_number, sku_key, product_name, brand, page_gtin,
-    page_gtin_url, verification_status, resolved_at}] (scripts/export_barcodes.py). أخطاء قاعدة البيانات تُرفع.
+    في الشيت)، مع صف الطابور الأحدث لنفس المنتج (مفتاحه sku_key، أو مفتاحه البديل بعد كتابة باركود للصف):
+    [{row_number, sku_key, product_name, brand, page_gtin, page_gtin_url, verification_status, resolved_at,
+    queue_barcode, queue_name, queue_brand, queue_payload}] (scripts/export_barcodes.py، cli_bridge.barcode_suggestions:
+    queue_* هوية الصف كما أُدرج في الطابور). أخطاء قاعدة البيانات تُرفع.
     """
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT (SELECT q.`row_number` FROM automation_queue q WHERE q.sku_key = r.sku_key
-                    ORDER BY q.id DESC LIMIT 1) AS `row_number`,
+            SELECT q.`row_number`, q.barcode AS queue_barcode, q.product_name AS queue_name, q.brand AS queue_brand,
+                   q.payload_json AS queue_payload,
                    r.sku_key, r.product_name, r.brand, r.page_gtin, r.page_gtin_url, r.verification_status, r.resolved_at
             FROM resolved_products r
+            LEFT JOIN automation_queue q ON q.id = (
+                SELECT q2.id FROM automation_queue q2 WHERE q2.sku_key = r.sku_key OR q2.alt_sku_key = r.sku_key
+                ORDER BY q2.id DESC LIMIT 1)
             WHERE r.page_gtin IS NOT NULL AND r.page_gtin <> ''
               AND r.verification_status IN ('human_approved', 'auto_verified')
             ORDER BY r.id
@@ -1386,6 +1392,31 @@ def get_page_barcodes():
         return [dict(r) for r in cursor.fetchall() or []]
     finally:
         _close(conn)
+
+
+def rekey_queue_rows(changes):
+    """
+    صفوف طابور لمنتج صار له باركود صالح في الشيت: [(row_number, old_key, new_key, barcode)]. sku_key يصبح مفتاح
+    الباركود و alt_sku_key المفتاح القديم (ما يحسبه الإدراج التالي، main.compute_alt_sku_key)، فتجد المراجعة والطابور
+    المنتج بمفتاحه الجديد، والاعتماد والرفض وقرارات المراجعة المحفوظة بالقديم تبقى سارية (لا يُغيَّر أي مفتاح محفوظ
+    فيها). صف تغيّر مفتاحه منذ القراءة لا يُمس. يعيد عدد الصفوف المحدثة. أخطاء قاعدة البيانات تُرفع.
+    """
+    changes = [c for c in changes or () if c and c[1] and c[2] and c[1] != c[2]]
+    if not changes:
+        return 0
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        updated = 0
+        for row_number, old_key, new_key, barcode in changes:
+            cursor.execute("UPDATE automation_queue SET sku_key = %s, alt_sku_key = %s, barcode = %s "
+                           "WHERE `row_number` = %s AND sku_key = %s",
+                           (new_key, old_key, str(barcode or "")[:255] or None, int(row_number), old_key))
+            updated += cursor.rowcount or 0
+        conn.commit()
+    finally:
+        _close(conn)
+    return updated
 
 
 def undo_rejection(sku_key, image_url, row_number=None):
@@ -1652,9 +1683,18 @@ def _lower_bound(accepted, prechecked):
     return None if lower is None else max(0.0, lower)
 
 
+def more_needed(prechecked, accepted):
+    """
+    كم اعتماداً متتالياً بلا رفض يلزم بعد الأرقام الحالية ليبلغ الحد الأدنى لويلسون عتبة النشر الآلي (0 إذا بلغها،
+    None إذا لا يبلغها بحد معقول، أي الدقة الحالية أقل من العتبة). reviews_needed ناقص ما روجع.
+    """
+    total = reviews_needed(prechecked, accepted)
+    return None if total is None else max(0, total - prechecked)
+
+
 def _lane_row(counts):
     """أرقام فئة واحدة: الاختيارات المسبقة المراجعة، والمقبول والمستبدل والمرفوض، والدقة وحد ويلسون والجاهزية (نفس
-    brand_status وعتباته)."""
+    brand_status وعتباته)، وكم اعتماداً متتالياً بقي (more_needed)."""
     prechecked, accepted = counts["prechecked"], counts["accepted"]
     return {
         "prechecked": prechecked,
@@ -1666,6 +1706,7 @@ def _lane_row(counts):
         "status": brand_status(prechecked, accepted),
         "ready": brand_status(prechecked, accepted) == "ready",
         "reviews_needed": reviews_needed(prechecked, accepted),
+        "more_needed": more_needed(prechecked, accepted),
     }
 
 
@@ -3435,6 +3476,45 @@ def run_outcome_counts(run_ids=None, worker_id=None, since_seconds=None):
                 counts["provider_down"] += n
                 counts["searched"] += n
     return counts
+
+
+def run_local_index_answers(run_ids=None, worker_id=None, since_seconds=None):
+    """
+    كم منتج جاوب عليه الفهرس المحلي (catalog_match.local_index) بتشغيل: {answered, asked}. asked: صفوف التشغيل اللي سأل عنها
+    الفهرس (provider_health فيه local_index)، answered: منها اللي رجّع مرشحين (status ok). نفس نطاق صفوف
+    run_outcome_counts (run_ids، أو worker_id بدون run_id خلال since_seconds). أخطاء قاعدة البيانات تُرفع.
+    """
+    ids = [str(r) for r in (run_ids or []) if r]
+    if ids:
+        where, params = f"run_id IN ({', '.join(['%s'] * len(ids))})", tuple(ids)
+    elif worker_id:
+        prefix = str(worker_id).replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "#%"
+        where = "worker_id LIKE %s AND updated_at >= NOW() - INTERVAL %s SECOND"
+        params = (prefix, int(since_seconds or 24 * 3600))
+    else:
+        return {"answered": 0, "asked": 0}
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT JSON_EXTRACT(trace_json, '$.outcome.provider_health') AS health FROM automation_queue "
+            f"WHERE {where} AND trace_json IS NOT NULL AND "
+            "JSON_SEARCH(trace_json, 'one', 'local_index', NULL, '$.outcome.provider_health[*].provider') IS NOT NULL",
+            params)
+        rows = cursor.fetchall()
+    finally:
+        _close(conn)
+    asked = answered = 0
+    for row in rows:
+        try:
+            health = json.loads(row["health"]) if isinstance(row["health"], (str, bytes)) else row["health"]
+        except (TypeError, ValueError):
+            continue
+        calls = [h for h in (health or []) if isinstance(h, dict) and h.get("provider") == "local_index"]
+        if calls:
+            asked += 1
+            answered += 1 if any(str(h.get("status") or "").lower() == "ok" for h in calls) else 0
+    return {"answered": answered, "asked": asked}
 
 
 _RUN_HISTORY_FIELDS = ("run_id", "run_trigger", "started_at", "ended_at", "outcome", "stop_reason", "exit_code",

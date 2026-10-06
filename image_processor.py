@@ -22,17 +22,20 @@ import os
 import re
 import shutil
 import tempfile
+import threading
+import time
 import types
 import uuid
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 import requests
 from PIL import Image, ImageEnhance, ImageOps
 
 import categories
 import config
-from catalog_match import settings
+import cutout_finish
+from catalog_match import cassette, settings
 from edge_shadow_engine import (
     CANVAS_FILL_RATIO,
     HAZE_ALPHA_MAX,
@@ -176,10 +179,15 @@ class ProcessResult:
     width/height: أبعاد اللوحة النهائية (0 عند الفشل).
     quality_flags: علامات بوابة الجودة للوحة المعادة ([] = نظيفة). عند وجودها تكون isolated=False
         مع path موجود: نفس حالة "الخلفية لم تُعزل" (رابط needs_review: ولا نشر تلقائي).
+        dark_halo (اللوحة الشفافة فقط، cutout_finish): حواف فاتحة بتبين على الوضع الغامق، للمراجعة.
     quality_notes: ملاحظات لا تمنع النشر (NON_BLOCKING_NOTES)، مثل 'upscaled': المنتج كُبّر بين ضعفين و3 أضعاف
         على اللوحة (مصدر ويب صغير). اللوحة تُنشر كالمعتاد والملاحظة للمراجع والتقرير فقط.
     white_source: ما فعله/كان سيفعله كشف الخلفية البيضاء: None (معطل أو لم يُفحص) | 'used' |
         'eligible' (وضع log: كان سيُستخدم) | 'ineligible:<سبب>' | 'flagged:<علامات>'.
+    fallback_from: None، أو {"method": الطريقة السحابية، "code": رمز فشلها} لما خلص رصيدها أو مفتاحها أو حصتها فعزلت
+        طريقة محلية مجانية (BG_FALLBACK=local) بدلاً منها: provider عندها rembg أو grabcut، واللوحة اجتازت بوابة القص نفسها.
+    finish: تشطيب اللوحة الشفافة (cutout_finish.finish): background، holes_filled، holes_left، defringed، halo،
+        halo_retry. فارغ للوحة البيضا (OUTPUT_BACKGROUND = white).
     """
 
     path: Optional[str]
@@ -191,6 +199,8 @@ class ProcessResult:
     quality_flags: List[str] = field(default_factory=list)
     white_source: Optional[str] = None
     quality_notes: List[str] = field(default_factory=list)
+    fallback_from: Optional[Dict[str, str]] = None
+    finish: dict = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -698,14 +708,40 @@ def _isolate_grabcut(img: Image.Image):
         return None, "grabcut_failed"
 
 
-def _isolate_rembg(img: Image.Image):
+MANUAL_REMBG_MODEL = "birefnet-general"       # الافتراضي فقط: rembg (يدوياً أو بديلاً تلقائياً) يستعمل REMBG_MODEL (BiRefNet)
+_REMBG_SESSIONS: Dict[str, object] = {}         # الجلسة تُنشأ مرة بالعملية لكل موديل وتُعاد استعمالها (تحميل الموديل ثقيل)
+_REMBG_FAILED: set = set()                      # موديل فشل إنشاء جلسته (غير منزّل، لا إنترنت): لا نعيد المحاولة كل منتج
+_REMBG_LOCK = threading.Lock()
+
+
+def _rembg_session(model: str):
+    """جلسة rembg للموديل، تُنشأ مرة بالعملية؛ None إذا فشل إنشاؤها (reset_cloud_breaker يسمح بمحاولة جديدة)."""
+    with _REMBG_LOCK:
+        session = _REMBG_SESSIONS.get(model)
+        if session is not None or model in _REMBG_FAILED:
+            return session
+        try:
+            from rembg import new_session
+            session = new_session(model)
+        except Exception as exc:  # noqa: BLE001 - ImportError، موديل غير منزّل، تعذر التنزيل
+            logger.warning("تعذر تجهيز موديل rembg %s: %s", model, exc)
+            _REMBG_FAILED.add(model)
+            return None
+        _REMBG_SESSIONS[model] = session
+        return session
+
+
+def _isolate_rembg(img: Image.Image, model: str = MANUAL_REMBG_MODEL):
     try:
-        from rembg import new_session, remove
+        from rembg import remove
     except ImportError:
         return None, "rembg_not_installed"
     try:
+        session = _rembg_session(model)
+        if session is None:
+            return None, "rembg_failed"
         data, _, _ = _encode_for_upload(img)
-        output = remove(data, session=new_session("isnet-general-use"))
+        output = remove(data, session=session)
         cutout = _decode_cutout(output if isinstance(output, (bytes, bytearray)) else b"")
         if cutout is None and isinstance(output, Image.Image):
             cutout = output.convert("RGBA")
@@ -743,11 +779,128 @@ def _isolate(img: Image.Image, method: str):
     if method == "grabcut":
         return _isolate_grabcut(img)
     if method == "rembg":
-        return _isolate_rembg(img)
+        # نفس موديل البديل التلقائي (REMBG_MODEL، BiRefNet): الموديلات الصغيرة (u2net، isnet) بتاكل العلب البيضا
+        return _isolate_rembg(img, settings.rembg_model())
     if method == "bria_rmbg":
         # نموذج Bria يتطلب torch وترخيصه غير تجاري؛ غير مدعوم في هذا المسار
         return None, "bria_rmbg_unsupported"
     return None, "unknown_bg_method"
+
+
+# ---------------------------------------------------------------------------
+# بديل محلي مجاني لما يخلص رصيد المزوّد السحابي (BG_FALLBACK=local، الافتراضي)
+# ---------------------------------------------------------------------------
+
+# رصيد أو مفتاح أو حصة PhotoRoom / remove.bg: نفس القاعدة بـ publish_check.BG_SKIP_CODE_RE وبالصحة وشاشة المراجعة. مهلة
+# الشبكة وأخطاء الخادم والمخرج التالف ليست منها: لا بديل لها، وتبقى فشلاً كما كانت.
+BILLING_CODE_RE = r"^(photoroom|removebg)_(no_key|401|402|403|429)$"
+# البديل التلقائي rembg بموديل REMBG_MODEL (BiRefNet) فقط: GrabCut و rembg بموديله الصغير (u2net) بياكلوا العلب البيضا (كرتونة
+# الحليب)، فهم اختيار المالك اليدوي بالإعدادات ولا يُجرَّبون تلقائياً أبداً
+CLOUD_BREAKER_PAUSE_S = 30 * 60
+
+
+def is_billing_code(code) -> bool:
+    """هل رمز فشل العزل رصيد أو مفتاح أو حصة مزوّد سحابي (لا مهلة ولا شبكة ولا خطأ خادم)؟"""
+    return bool(re.match(BILLING_CODE_RE, str(code or "")))
+
+
+class CloudBreaker:
+    """
+    لكل طريقة سحابية: بعد فشلها برصيد أو مفتاح أو حصة نتجاوزها 30 دقيقة (CLOUD_BREAKER_PAUSE_S) في هذه العملية ونذهب
+    للبديل المحلي مباشرة، فتشغيل بمئة منتج يدفع طلب PhotoRoom الفاشل مرة وليس مئة. paused_code(method) يعيد رمز
+    الفشل أثناء الإيقاف (وإلا None، وبعد المهلة تبدأ الطريقة بسجل نظيف). آمن بين الخيوط، والساعة قابلة للحقن فلا تنام
+    الاختبارات. reset() يصفّر كل شيء (بداية تشغيل جديد، والاختبارات).
+    """
+
+    def __init__(self, clock: Callable[[], float] = time.monotonic, pause_s: float = CLOUD_BREAKER_PAUSE_S) -> None:
+        self._clock = clock
+        self._pause_s = pause_s
+        self._lock = threading.Lock()
+        self._paused: Dict[str, Tuple[float, str]] = {}
+
+    def paused_code(self, method: str) -> Optional[str]:
+        with self._lock:
+            entry = self._paused.get(method)
+            if entry is None:
+                return None
+            until, code = entry
+            if self._clock() >= until:
+                del self._paused[method]
+                return None
+            return code
+
+    def trip(self, method: str, code: str) -> bool:
+        """Pause the method after a billing failure; True when this call started the pause."""
+        with self._lock:
+            now = self._clock()
+            entry = self._paused.get(method)
+            if entry is not None and now < entry[0]:
+                return False                     # a call that was already in flight when another thread tripped it
+            self._paused[method] = (now + self._pause_s, str(code))
+        logger.warning("عزل الخلفية: %s فشل برمز %s (رصيد أو مفتاح أو حصة)؛ نتجاوزه %d دقيقة ونعزل بطريقة محلية",
+                       method, code, int(self._pause_s // 60))
+        return True
+
+    def reset(self) -> None:
+        with self._lock:
+            self._paused.clear()
+
+
+_CLOUD_BREAKER = CloudBreaker()
+
+
+def cloud_breaker() -> CloudBreaker:
+    """القاطع الواحد لهذه العملية."""
+    return _CLOUD_BREAKER
+
+
+def reset_cloud_breaker() -> None:
+    """ينسى كل إيقاف (بداية تشغيل جديد للعامل: الرصيد ربما شُحن، والاختبارات)."""
+    _CLOUD_BREAKER.reset()
+
+
+def _local_fallback_ready() -> bool:
+    """هل البديل التلقائي شغّال: BG_FALLBACK=local ومكتبة rembg منزّلة (بدونها لا يتغير شيء). GrabCut لا يدخل أبداً."""
+    return settings.bg_fallback() == "local" and bool(local_methods_available().get("rembg"))
+
+
+def reset_rembg_sessions(everything: bool = False) -> None:
+    """ينسى إنشاء جلسة فشل (بداية تشغيل جديد: ربما نُزّل الموديل)؛ الجلسات الجاهزة تبقى محمّلة إلا مع everything (الاختبارات)."""
+    with _REMBG_LOCK:
+        _REMBG_FAILED.clear()
+        if everything:
+            _REMBG_SESSIONS.clear()
+
+
+def _isolate_with_fallback(img: Image.Image, method: str):
+    """
+    _isolate مع البديل المحلي: يعيد (صورة RGBA أو None، رمز الخطأ، الطريقة التي أنتجتها، fallback_from أو None).
+    الطريقة السحابية (PhotoRoom / remove.bg) إذا فشلت برمز رصيد أو مفتاح أو حصة (is_billing_code) نعزل نفس الصورة بـ rembg
+    بموديل REMBG_MODEL (BiRefNet، جلسة واحدة بالعملية)، والمخرج يمرّ على بوابة القص مثل أي عزل. أي فشل آخر (مهلة، شبكة،
+    خطأ خادم، مخرج تالف) يعود كما هو بلا بديل. بدون rembg منزّلة، أو BG_FALLBACK=off، أو لو فشل rembg نفسه، لا يتغير شيء:
+    الرمز الأصلي يعود. GrabCut و«بدون عزل» ليسا بديلاً أبداً (الأول اختيار يدوي، والثاني زر المالك).
+    بعد فشل برصيد (401 و402 و403 و429، لا no_key) تُتجاوز الطريقة السحابية 30 دقيقة (CloudBreaker)، وتحت cassette
+    لا قاطع (التسجيل والإعادة يرون كل طلب).
+    """
+    paid = method in _PAID_METHODS
+    breaker = _CLOUD_BREAKER if paid and cassette.active() is None else None
+    code = breaker.paused_code(method) if breaker is not None else None
+    if code is not None and not _local_fallback_ready():
+        code = None                      # أُطفئ الخيار أو لم تعد rembg منزّلة بعد الإيقاف: السلوك القديم
+    if code is None:
+        cutout, error = _isolate(img, method)
+        if cutout is not None or not paid or not is_billing_code(error) or not _local_fallback_ready():
+            return cutout, error, method, None
+        code = error
+        if breaker is not None and not str(code).endswith("_no_key"):
+            breaker.trip(method, code)
+    model = settings.rembg_model()
+    cutout, local_error = _isolate_rembg(img, model)
+    if cutout is None:
+        logger.warning("البديل المحلي rembg (%s) لم يعزل الصورة: %s", model, local_error)
+        return None, code, method, None
+    logger.info("عزل الخلفية: %s فشل برمز %s؛ انعزلت الصورة بـ rembg (%s)", method, code, model)
+    return cutout, None, "rembg", {"method": method, "code": str(code)}
 
 
 def _enhance_rgb(rgba: Image.Image) -> Image.Image:
@@ -1175,6 +1328,7 @@ class _Attempt:
     notes: List[str] = field(default_factory=list)
     frame_size: Optional[Tuple[int, int]] = None              # الإطار المرسل وموضعه في صورة العمل
     frame_rect: Optional[Tuple[int, int, int, int]] = None
+    fallback_from: Optional[Dict[str, str]] = None            # الطريقة السحابية التي خلص رصيدها وهذه بديلتها المحلية
 
 
 def _flags_final(flags) -> bool:
@@ -1274,16 +1428,23 @@ def _gated(cutout, provider, frame_size, crop_sides, canvas_size, label, frame_r
 
 def _provider_attempt(frame, method, crop_sides, frame_rect, canvas_size, source_mask=None,
                       product_rect=None) -> _Attempt:
-    label = method + ("+box" if any(crop_sides) else "")
-    cutout, error = _isolate(frame, method)
+    cutout, error, provider, fallback_from = _isolate_with_fallback(frame, method)
+    label = provider + ("+box" if any(crop_sides) else "")
     if cutout is None:
         return _Attempt(None, method, [], error, label)
-    if method == "photoroom" and _photoroom_crop():
+    if provider == "photoroom" and _photoroom_crop():
         # طلبنا من PhotoRoom القص: لمس الحواف والإطار المعتم طبيعيان، ونسبة الأبعاد لا تكشف ذلك (مع صندوق Gemini
         # يكون للإطار نسبة أبعاد المنتج نفسها)، فلا فحوص إطار ولا مقارنة بالمواضع
-        return _gated(cutout, method, None, _NO_CROP, canvas_size, label, None, None, product_rect,
+        return _gated(cutout, provider, None, _NO_CROP, canvas_size, label, None, None, product_rect,
                       frame_checks=False)
-    return _gated(cutout, method, frame.size, crop_sides, canvas_size, label, frame_rect, source_mask, product_rect)
+    attempt = _gated(cutout, provider, frame.size, crop_sides, canvas_size, label, frame_rect, source_mask,
+                     product_rect)
+    if fallback_from is not None:
+        if attempt.cutout is None:
+            # البديل المحلي لم ينتج قصاً (قناع فارغ): يبقى الفشل الأصلي برصيد المزوّد، ومعه زر «تجاوز عزل الخلفية»
+            return _Attempt(None, method, [], fallback_from["code"], label)
+        attempt.fallback_from = fallback_from
+    return attempt
 
 
 def _method_has_key(method: str) -> bool:
@@ -1441,10 +1602,13 @@ def _isolate_checked(img: Image.Image, method: str, product_name, brand, canvas_
 # ---------------------------------------------------------------------------
 
 def process_product_image_result(image_url_or_path, product_name, brand, target_width=0, target_height=0,
-                                 bg_method=None, candidate_sha256=None, enhance=False, page_url=None) -> ProcessResult:
+                                 bg_method=None, candidate_sha256=None, enhance=False, page_url=None,
+                                 background=None) -> ProcessResult:
     """
-    يحوّل صورة المنتج المعتمدة إلى لوحة نشر نهائية: PNG بخلفية بيضاء معتمة RGB بالأبعاد المطلوبة
-    (0 أو 'dynamic' = OUTPUT_CANVAS_SIZE، افتراضياً 800x800) والمنتج يملأ 88% وموسّط.
+    يحوّل صورة المنتج المعتمدة إلى لوحة نشر نهائية بالأبعاد المطلوبة (0 أو 'dynamic' = OUTPUT_CANVAS_SIZE، افتراضياً
+    800x800). background (None = OUTPUT_BACKGROUND): 'transparent' = PNG شفافة RGBA بلا ظل، المنتج مقصوص ومشطّب
+    (cutout_finish) ويملأ OUTPUT_PRODUCT_FILL وموسّط؛ صورة بلا عزل (none) بتضل معتمة على الأبيض. 'white' = PNG بخلفية
+    بيضاء معتمة RGB والمنتج يملأ 88% وموسّط (متل قبل).
     لا يرفع استثناءات: كل فشل يعود كـ ProcessResult(path=None, isolated=False, error=<رمز>).
     قص لم يجتز بوابة الجودة بعد كل البدائل يعود بلوحة (path) مع isolated=False و quality_flags.
     عند تمرير الأبعاد و enhance و bg_method صراحةً تكون اللوحة دالة لها وللمصدر فقط (ملف معالجة موحد).
@@ -1466,31 +1630,45 @@ def process_product_image_result(image_url_or_path, product_name, brand, target_
             return ProcessResult(None, False, method, code)
         img = _limit_work_size(img)
 
-        flags, notes, white_note = [], [], None
+        flags, notes, white_note, fallback_from = [], [], None, None
         if method == "none":
             # 'none' تعني فعلاً بدون عزل: الصورة كما هي (بعد تصحيح الاتجاه) على اللوحة، ولا ندّعي العزل أبداً
             cutout, provider, isolated = EdgeShadowEngine.process_mask(img.convert("RGBA")), "none", False
             if alpha_bbox(cutout) is None:
                 return ProcessResult(None, False, provider, f"{provider}_empty_cutout")
+            attempt = None
         else:
             attempt, isolated, white_note = _isolate_checked(img, method, product_name, brand, canvas_size)
             if attempt.cutout is None:
                 logger.warning("فشل عزل الخلفية بطريقة %s: %s", attempt.provider, attempt.error)
                 return ProcessResult(None, False, attempt.provider, attempt.error, white_source=white_note)
             cutout, provider, flags, notes = attempt.cutout, attempt.provider, list(attempt.flags), list(attempt.notes)
-        if _as_bool(enhance):
-            cutout = _enhance_rgb(cutout)
-
-        if getattr(config, "ENABLE_STUDIO_SHADOWS", False):
-            canvas = EdgeShadowEngine.apply_studio_shadows(cutout, canvas_size)
+            fallback_from = attempt.fallback_from
+        finish = {}
+        if cutout_finish.output_background(background) == cutout_finish.TRANSPARENT:
+            # PNG شفافة بلا ظل: سد الثقوب، إزالة التسرب، فحص الهالة (وعزل واحد بـ PhotoRoom لها) ثم اللوحة
+            isolated_by = provider
+            done = cutout_finish.finish(img, cutout, attempt, provider, isolated, flags, notes, canvas_size,
+                                        enhance=_as_bool(enhance), method=method)
+            canvas, provider, isolated, flags, notes, finish = (done.canvas, done.provider, done.isolated,
+                                                                done.flags, done.notes, done.info)
+            if provider != isolated_by:
+                fallback_from = None     # إعادة العزل للهالة (PhotoRoom) استبدلت عزل البديل المحلي
         else:
-            canvas = compose_on_white_canvas(cutout, canvas_size, CANVAS_FILL_RATIO)
+            if _as_bool(enhance):
+                cutout = _enhance_rgb(cutout)
+
+            if getattr(config, "ENABLE_STUDIO_SHADOWS", False):
+                canvas = EdgeShadowEngine.apply_studio_shadows(cutout, canvas_size)
+            else:
+                canvas = compose_on_white_canvas(cutout, canvas_size, CANVAS_FILL_RATIO)
 
         job_dir = tempfile.mkdtemp(prefix="imgproc_")
         out_path = os.path.join(job_dir, f"{uuid.uuid4().hex}.png")
         canvas.save(out_path, format="PNG")
         return ProcessResult(out_path, isolated, provider, None, canvas.width, canvas.height,
-                             quality_flags=flags, white_source=white_note, quality_notes=notes)
+                             quality_flags=flags, white_source=white_note, quality_notes=notes,
+                             fallback_from=fallback_from, finish=finish)
     except Exception as exc:  # noqa: BLE001 - لا نسمح لأي خطأ غير متوقع بأن يصبح نشراً صامتاً
         logger.exception("خطأ غير متوقع أثناء معالجة الصورة: %s", exc)
         return ProcessResult(None, False, method, "processing_failed")

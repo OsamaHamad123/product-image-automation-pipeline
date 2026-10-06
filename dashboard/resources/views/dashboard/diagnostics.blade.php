@@ -5,6 +5,8 @@
       $optional         configured optional services (proxy, legacy Custom Search), one muted line
       $checkedAt        epoch of the last check or null;  $allOk  false when a critical service failed
       $lastRun          HealthController::lastRunCard(): the last run (temp/nightly/last_report.json), or null
+      $localIndex       LocalIndexController::card(): the «فهرس المتاجر المحلي» card (per-store pages / last harvest / status,
+                        the refresh progress line, how many products the index answered in the last run)
       $lastPublishCheck the saved result of the last «فحص النشر» (temp/publish_check_last.json, redacted) or null
       $publish          HealthController::publishCheckView(): that result as the card's summary and four step rows
       $bg, $bgView      SettingsController::currentBgState() (null without the database) and HealthController::bgSkipView():
@@ -141,6 +143,35 @@
         <p class="lq-card__meta">من مراجعاتك للصور اللي اقترحها البحث، حسب نوع الاقتراح.</p>
         <div class="lq-health-lanes" data-health="lanes" aria-busy="true" aria-live="polite">
             <span class="lq-skeleton lq-health__skel-inline" aria-hidden="true"></span>
+        </div>
+    </section>
+
+    {{-- «فهرس المتاجر المحلي» (LocalIndexController::card; the page script's createLocalIndex): per store the pages in the
+         index, when its sitemaps were last read and its status (تمام / ممنوع / ما انجمع أبداً). «حدّث الفهرس هلق» starts the
+         background refresh through the bridge and returns at once; the status line shows the progress on reload. --}}
+    <section class="lq-card lq-card--compact" aria-label="فهرس المتاجر المحلي" data-health="index-card">
+        <div class="lq-card__header">
+            <h2 class="lq-card__title">فهرس المتاجر المحلي</h2>
+            <span class="lq-card__meta">{{ $localIndex['total_text'] }}</span>
+        </div>
+        <p class="lq-card__meta">بيدوّر على صفحات المنتجات من خرايط المتاجر نفسها بمجاني، قبل أي بحث مدفوع. بيتحدّث لحاله بالخلفية أول التشغيل إذا صار أقدم من أسبوع.</p>
+        @if (!$localIndex['db'])
+            <p class="lq-health__footnote">ما قدرنا نقرأ الفهرس: قاعدة البيانات مش متاحة هلق.</p>
+        @endif
+        <div class="lq-health-lanes" data-health="index-rows">
+            @foreach ($localIndex['rows'] as $row)
+                <div class="lq-health-lane" data-store="{{ $row['key'] }}" data-state="{{ $row['state'] }}">
+                    <span class="lq-dot {{ $healthDots[$row['tone']] ?? 'lq-dot--muted' }}" aria-hidden="true"></span>
+                    <span class="lq-health-lane__label">{{ $row['name'] }}</span>
+                    <strong>{{ $row['pages_text'] }}</strong>
+                    <span class="lq-health-lane__bound">{{ $row['state_text'] }}@if ($row['when'] !== '') · آخر جمع ناجح {{ $row['when'] }}@endif @if ($row['note'] !== '') · {{ $row['note'] }}@endif @if ($row['visit'] !== '') · {{ $row['visit'] }}@endif</span>
+                </div>
+            @endforeach
+        </div>
+        <p class="lq-health__footnote" data-health="index-last-run" @if ($localIndex['last_run'] === null) hidden @endif>{{ $localIndex['last_run'] }}</p>
+        <div class="lq-card__header">
+            <p class="lq-health__footnote" data-health="index-status" role="status" aria-live="polite">{{ $localIndex['refresh']['text'] }}</p>
+            <x-lq.button variant="secondary" size="sm" icon="refresh" data-health="index-refresh" :disabled="$localIndex['refresh']['running']"><span data-health="index-refresh-label">{{ $localIndex['refresh']['running'] ? 'عم يحدّث…' : 'حدّث الفهرس هلق' }}</span></x-lq.button>
         </div>
     </section>
 

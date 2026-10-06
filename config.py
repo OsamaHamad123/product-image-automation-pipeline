@@ -74,6 +74,10 @@ SERPAPI_LENS_PRICE_USD = os.getenv("SERPAPI_LENS_PRICE_USD", "0.015").strip() or
 LOCAL_INDEX_ENABLED = os.getenv("LOCAL_INDEX_ENABLED", "true").strip().lower() in ("1", "true", "yes", "on")
 LOCAL_INDEX_MAX_PAGES = os.getenv("LOCAL_INDEX_MAX_PAGES", "3").strip() or "3"
 LOCAL_INDEX_PAGE_TTL_DAYS = os.getenv("LOCAL_INDEX_PAGE_TTL_DAYS", "30").strip() or "30"
+# LOCAL_INDEX_REFRESH_DAYS: متجر آخر جمع كامل له أقدم من هيك بينجمع من جديد بالخلفية أول التشغيل الليلي أو تشغيل العامل
+# (catalog_match/index_refresh.py). LOCAL_INDEX_REFRESH_MAX_S: أقصى ثواني للتحديث الواحد، 0 = بلا تحديث تلقائي
+LOCAL_INDEX_REFRESH_DAYS = os.getenv("LOCAL_INDEX_REFRESH_DAYS", "7").strip() or "7"
+LOCAL_INDEX_REFRESH_MAX_S = os.getenv("LOCAL_INDEX_REFRESH_MAX_S", "300").strip() or "300"
 # --- end sources package ---
 
 # --- queue package (P4a): حدود الصرف للعامل ---
@@ -112,6 +116,13 @@ try:
 except ValueError:
     OUTPUT_CANVAS_SIZE = 800
 
+# خلفية لوحة النشر: 'transparent' (الافتراضي: PNG شفافة، التطبيق بيعرضها على الوضع الغامق والفاتح) أو 'white'
+# (اللوحة البيضا المعتمة القديمة). تتجاوزها صفحة الإعدادات (system_settings.output_background).
+OUTPUT_BACKGROUNDS = ("transparent", "white")
+OUTPUT_BACKGROUND = (os.getenv("OUTPUT_BACKGROUND", "transparent") or "").strip().lower()
+if OUTPUT_BACKGROUND not in OUTPUT_BACKGROUNDS:
+    OUTPUT_BACKGROUND = "transparent"
+
 # خيار إزالة خلفية الصورة. الخيارات المتاحة:
 # "none" -> تخطي إزالة الخلفية والقيام بالتحجيم فقط (مفيد للاختبار السريع)
 # "bria_rmbg" -> استخدام نموذج Bria RMBG 1.4 المحلي المجاني وفائق الدقة (مستحسن)
@@ -121,6 +132,15 @@ except ValueError:
 BG_REMOVAL_METHOD = os.getenv("BG_REMOVAL_METHOD", "photoroom")
 # الطرق التي تقبلها صفحة الإعدادات من system_settings.bg_removal_method (نفس main.SUPPORTED_BG_METHODS)
 BG_REMOVAL_METHODS = ("photoroom", "remove_bg_api", "grabcut", "rembg", "none")
+# لما تفشل طريقة العزل السحابية بسبب الرصيد أو المفتاح أو الحصة (image_processor، publish_check.BG_SKIP_CODE_RE):
+# "local" (الافتراضي) تعزل نفس الصورة بـ rembg المنزّلة (موديل REMBG_MODEL، بدون GrabCut أبداً) وتمرّرها على بوابة القص
+# نفسها، و"off" السلوك القديم (الفشل يبقى فشلاً). «بدون عزل الخلفية» لا تُختار تلقائياً أبداً: هي زر المالك.
+BG_FALLBACK = os.getenv("BG_FALLBACK", "local")
+BG_FALLBACKS = ("local", "off")   # نفس system_settings.bg_fallback
+# موديل rembg للبديل المحلي التلقائي (image_processor): BiRefNet يحافظ على العلب البيضا (كرتونة الحليب) بعكس u2net/isnet.
+# "birefnet-general" (الافتراضي) أو "birefnet-general-lite" (أخف وأسرع)؛ لازم يكون منزّلاً على الجهاز (rembg d <الموديل>)
+REMBG_MODEL = os.getenv("REMBG_MODEL", "birefnet-general")
+REMBG_MODELS = ("birefnet-general", "birefnet-general-lite")   # نفس system_settings.rembg_model
 
 # مفتاح API الخاص بخدمة remove.bg (مطلوب فقط إذا اخترت "remove_bg_api")
 REMOVE_BG_API_KEY = os.getenv("REMOVE_BG_API_KEY", "")
@@ -509,8 +529,9 @@ def load_db_config():
             global GOOGLE_SEARCH_API_KEYS, GOOGLE_SEARCH_CX_LIST, GOOGLE_SEARCH_API_KEY, GOOGLE_SEARCH_CX
             global CLIP_RELEVANCE_THRESHOLD, CLIP_GREY_ZONE_THRESHOLD, STRICT_BRAND_MATCH, ENABLE_GEMINI_PRE_VALIDATION, FILTER_COMPETITORS, BYPASS_WHITE_BACKGROUND_CHECK, PROXY_URL
             global SEARCH_ENGINE, SERPER_API_KEY, AUTO_PUBLISH_ENABLED, AUTO_PUBLISH_BRANDS, OUTPUT_CANVAS_SIZE
+            global OUTPUT_BACKGROUND
             global AUTO_PUBLISH_STRICT_LANE
-            global BG_REMOVAL_METHOD, ENABLE_IMAGE_ENHANCEMENT
+            global BG_REMOVAL_METHOD, ENABLE_IMAGE_ENHANCEMENT, BG_FALLBACK, REMBG_MODEL
 
             if "photoroom_api_key" in db_keys and db_keys["photoroom_api_key"]:
                 PHOTOROOM_API_KEY = db_keys["photoroom_api_key"]
@@ -566,6 +587,12 @@ def load_db_config():
                     OUTPUT_CANVAS_SIZE = int(db_keys["output_canvas_size"])
                 except (TypeError, ValueError):
                     logger.warning("قيمة output_canvas_size غير صالحة: %r", db_keys["output_canvas_size"])
+            if db_keys.get("output_background"):
+                background = str(db_keys["output_background"]).strip().lower()
+                if background in OUTPUT_BACKGROUNDS:
+                    OUTPUT_BACKGROUND = background
+                else:
+                    logger.warning("قيمة output_background غير مدعومة: %r", db_keys["output_background"])
             # معالجة الصور من صفحة الإعدادات (تبويب «معالجة الصور»)؛ run_config.json للتشغيل يبقى أعلى أولوية
             if db_keys.get("bg_removal_method"):
                 method = str(db_keys["bg_removal_method"]).strip().lower()
@@ -573,6 +600,18 @@ def load_db_config():
                     BG_REMOVAL_METHOD = method
                 else:
                     logger.warning("قيمة bg_removal_method غير مدعومة: %r", db_keys["bg_removal_method"])
+            if db_keys.get("bg_fallback"):
+                fallback = str(db_keys["bg_fallback"]).strip().lower()
+                if fallback in BG_FALLBACKS:
+                    BG_FALLBACK = fallback
+                else:
+                    logger.warning("قيمة bg_fallback غير مدعومة: %r", db_keys["bg_fallback"])
+            if db_keys.get("rembg_model"):
+                rembg_model = str(db_keys["rembg_model"]).strip().lower()
+                if rembg_model in REMBG_MODELS:
+                    REMBG_MODEL = rembg_model
+                else:
+                    logger.warning("قيمة rembg_model غير مدعومة: %r", db_keys["rembg_model"])
             if "enable_image_enhancement" in db_keys and db_keys["enable_image_enhancement"] is not None:
                 ENABLE_IMAGE_ENHANCEMENT = str(db_keys["enable_image_enhancement"]).strip().lower() in (
                     "1", "true", "yes", "on")

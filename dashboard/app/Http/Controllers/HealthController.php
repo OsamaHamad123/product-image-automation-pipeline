@@ -21,7 +21,7 @@ class HealthController extends Controller
     public const CACHE_KEY = 'ops_health_v1';
     public const CACHE_SECONDS = 60;
     /** «دقة الاقتراحات الحقيقية»: review_stats.lanes، بنفس تخزين ops_health المؤقت. */
-    public const LANES_CACHE_KEY = 'review_lanes_v1';
+    public const LANES_CACHE_KEY = 'review_lanes_v2';
     public const LANES = ['strict', 'unsure', 'other'];
 
     /** آخر أسطر السجل التي تُرسل للصفحة، وأقصى ما يُقرأ من نهاية الملف. */
@@ -55,6 +55,7 @@ class HealthController extends Controller
             'checkedAt' => self::checkedAt($last),
             'allOk' => is_array($last) ? ($last['all_ok'] ?? null) : null,
             'lastRun' => self::lastRunCard(self::lastRunRow()),
+            'localIndex' => LocalIndexController::card(),
             'lastPublishCheck' => $publish,
             'publish' => self::publishCheckView($publish),
             'bg' => $bg,
@@ -397,6 +398,10 @@ class HealthController extends Controller
                 $parts[] = $text . ' ' . (int) $row[$key];
             }
         }
+        // صور انعزلت بطريقة محلية (rembg) لأن رصيد مزوّد العزل خلص: run_report.BG_FALLBACK_TEXT
+        if (is_numeric($report['bg_fallback'] ?? null) && (int) $report['bg_fallback'] > 0) {
+            $parts[] = 'انعزل بطريقة محلية لأن رصيد مزوّد العزل خلص ' . (int) $report['bg_fallback'];
+        }
         // صور نُشرت تلقائياً بدون عزل الخلفية (المالك أوقفه بالإعدادات): run_report.BG_SKIPPED_TEXT
         if (is_numeric($report['bg_skipped'] ?? null) && (int) $report['bg_skipped'] > 0) {
             $parts[] = 'انتشر بدون عزل الخلفية ' . (int) $report['bg_skipped'];
@@ -438,7 +443,8 @@ class HealthController extends Controller
 
     /**
      * GET /api/system/review-lanes: لكل فئة اختيار (catalog_match.decide.pick_lane) الاقتراحات المراجعة والمعتمد منها
-     * والحد المضمون، من review_stats (نفس أرقام تبويب «النشر الآلي»)، مخزّنة CACHE_SECONDS متل ops-health.
+     * والحد المضمون وكم اعتماداً بقي لتجهز (more_needed)، من review_stats (نفس أرقام تبويب «النشر الآلي»)، مخزّنة
+     * CACHE_SECONDS متل ops-health. شاشة المراجعة بالجملة تقرأ منها سطر التقدم نحو النشر الآلي (بلا نداء جديد).
      */
     public function reviewLanes(Request $request)
     {
@@ -469,6 +475,8 @@ class HealthController extends Controller
                 'accepted' => (int) ($row['accepted'] ?? 0),
                 'lower_bound' => is_numeric($row['lower_bound'] ?? null) ? (float) $row['lower_bound'] : null,
                 'ready' => ($row['status'] ?? '') === 'ready',
+                // كم اعتماداً متتالياً بلا رفض بعد لتجهز الفئة (local_cache_db.more_needed)؛ null = الدقة أقل من العتبة
+                'more_needed' => is_numeric($row['more_needed'] ?? null) ? max(0, (int) $row['more_needed']) : null,
             ];
         }
         return ['status' => 'success', 'lanes' => $lanes,

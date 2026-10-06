@@ -352,7 +352,8 @@ def harvest_pending(max_domains: int = HARVEST_MAX_DOMAINS, budget_s: float = HA
             began = db.begin_harvest(store.key)
             report = harvester.harvest(store, on_urls=lambda batch, key=store.key: db.upsert(key, batch),
                                        max_urls=HARVEST_MAX_URLS, max_sitemaps=HARVEST_MAX_SITEMAPS)
-            db.finish_harvest(store.key, began, report.as_dict())
+            if report.status != "outside_visit_time":      # robots.txt Visit-time: not read now, stays queued
+                db.finish_harvest(store.key, began, report.as_dict())
             status, urls = report.status, report.product_urls
         except Exception as exc:  # noqa: BLE001 - one site's failure must not stop the next one
             logger.warning("brand sites: %s could not be indexed (%s)", domain, type(exc).__name__)

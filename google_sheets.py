@@ -59,6 +59,10 @@ OUTBOX_BATCH = 200
 # المفاتيح المنطقية لأعمدة الكتابة: 'link' (عمود رابط الصورة بمرادفاته) و'meta:<key>' (أعمدة البيانات الوصفية)
 LINK_KEY = "link"
 META_PREFIX = "meta:"
+# عمود الباركود ('barcode' بمرادفاته): يُكتب فقط من «اكتب الباركودات المختارة» (queue_barcode_writes)، وفقط في خلية
+# فارغة يُعاد فحصها وقت التفريغ (FILL_ONLY_KEYS): باركود موجود في الشيت لا يُكتب فوقه أبداً
+BARCODE_KEY = "barcode"
+FILL_ONLY_KEYS = frozenset({BARCODE_KEY})
 
 # أخطاء مؤقتة تُعاد محاولتها: تجاوز الحصة وأخطاء الخادم
 _TRANSIENT_CODES = (429, 500, 502, 503, 504)
@@ -220,6 +224,16 @@ def _read_cache(name, ttl, version):
     except Exception as ce:
         logger.warning("[Google Sheets Cache] تعذر قراءة %s: %s", name, ce)
     return None
+
+
+def cached_products():
+    """
+    صفوف المنتجات من كاش آخر قراءة للشيت (products_cache.json، كما يعيدها get_products) بلا أي طلب لـ Google ومهما
+    كان عمرها، أو None بلا كاش. للقراءة فقط (اقتراحات الباركود): كل كتابة تُتحقق من الصف الحي وقت التفريغ.
+    """
+    cached = _read_cache("products_cache.json", float("inf"), PRODUCTS_CACHE_VERSION)
+    products = cached.get("products") if cached else None
+    return [p for p in products if isinstance(p, dict)] if isinstance(products, list) else None
 
 
 def _write_cache(name, payload, version):
@@ -1113,6 +1127,22 @@ class GoogleSheetsBatchWorker(threading.Thread):
                     self._relocate(cursor, r, moved[r["id"]][0])
             ready = [(r, col) for r, col in ready if r["id"] not in conflicts]
 
+        # 6. عمود يُملأ فقط (الباركود): خلية الهدف تُقرأ الآن، وأي قيمة فيها لا يُكتب فوقها (CONFLICT). نفس القيمة
+        #    مكتوبة أصلاً: SYNCED بلا إرسال
+        fill = [(r, col) for r, col in ready if r.get("col_key") in FILL_ONLY_KEYS]
+        if fill:
+            held = _read_cells(worksheet, [(r["row_number"], col) for r, col in fill])
+            already = []
+            for r, col in fill:
+                current = held.get((r["row_number"], col), "")
+                if current and current == str(r["value"]).strip():
+                    already.append(r["id"])
+                elif current:
+                    conflicts[r["id"]] = (f"cell_not_empty: the {r['col_key']} cell of row {r['row_number']} already "
+                                          f"holds {current[:60]!r}; not overwritten")
+            _set_status(cursor, already, "SYNCED")
+            ready = [(r, col) for r, col in ready if r["id"] not in conflicts and r["id"] not in already]
+
         unwritten = []
         by_id = {r["id"]: r for r in rows}
         for rid, reason in conflicts.items():
@@ -1441,6 +1471,22 @@ def update_image_link(worksheet, row_number, link_column_index, image_link, barc
             raise
         logger.error("فشل تحديث الرابط في الصف %s: %s", row_number, e)
         return False
+
+
+def queue_barcode_writes(items):
+    """
+    يجدول كتابة باركود لكل صف في طابور MariaDB (outbox) مباشرة، بلا Redis وبلا كتابة مباشرة في الشيت: items
+    [{row_number, value, barcode, product_name, size, brand}]؛ barcode/product_name/size/brand هوية الصف كما في
+    الشيت (خلية الباركود الحالية فارغة أو غير صالحة، فالتحقق بالاسم والحجم والبراند كما في كتابات الصور). التفريغ
+    يتخطى الصف الذي تغيّر منتجه (CONFLICT) ولا يكتب فوق خلية باركود غير فارغة (FILL_ONLY_KEYS). يعيد {row: معرّف}.
+    """
+    queue = _queue or SQLiteTransactionQueue()
+    out = {}
+    for item in items or ():
+        expect = _expectation(item.get("barcode"), item.get("product_name"), item.get("size"), item.get("brand"))
+        out[int(item["row_number"])] = queue.append_update(int(item["row_number"]), None, str(item["value"]),
+                                                           col_key=BARCODE_KEY, **_outbox_keys(expect))
+    return out
 
 
 _METADATA_COLUMNS = {

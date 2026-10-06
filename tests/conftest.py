@@ -21,6 +21,13 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 os.environ["DB_DATABASE"] = os.environ.get("TEST_DB_DATABASE", "automation_test")
+# The local background-removal fallback (BG_FALLBACK, default 'local') depends on what is installed on the machine
+# (cv2 / rembg); the suite must not. Tests that exercise it set config.BG_FALLBACK = 'local' and stub
+# image_processor.local_methods_available themselves (tests/test_bg_fallback.py).
+os.environ["BG_FALLBACK"] = "off"
+# The nightly run and the worker refresh the local catalog index in a background thread (catalog_match.index_refresh);
+# no test may start one by accident (it would read real sites). The tests of the refresh turn it on by themselves.
+os.environ["LOCAL_INDEX_REFRESH_MAX_S"] = "0"
 
 
 @pytest.fixture(autouse=True)
@@ -35,6 +42,21 @@ def _fresh_host_breaker():
     fetch.reset_host_breaker()
     yield
     fetch.reset_host_breaker()
+
+
+@pytest.fixture(autouse=True)
+def _fresh_cloud_breaker():
+    """image_processor pauses a cloud isolation method for 30 minutes after a credit / key / quota failure; a test must
+    not inherit (or leave) another test's pause. Nothing to reset while the module was never imported."""
+    module = sys.modules.get("image_processor")
+    if module is not None:
+        module.reset_cloud_breaker()
+        module.reset_rembg_sessions(everything=True)
+    yield
+    module = sys.modules.get("image_processor")
+    if module is not None:
+        module.reset_cloud_breaker()
+        module.reset_rembg_sessions(everything=True)
 
 
 @pytest.fixture

@@ -36,7 +36,8 @@ outcome_to_legacy(outcome, trace=None, spec=None) -> dict | None
     trace['outcome'] in automation_queue.trace_json, where the review screen reads it.
     evidence.page_gtin is the barcode the candidate's page stated (gtin_on_page) when it is a valid, globally
     unique GTIN (display form, gtin.display_gtin), else None: an approval of that image keeps it for a sheet row
-    without a barcode (resolved_products.page_gtin), shown on the review card and exported, never written to the sheet.
+    without a barcode (resolved_products.page_gtin), shown on the review card and exported; the sheet
+    gets it only from the Run page card (cli_bridge barcode_write).
     evidence.page_gallery is True for X0's extra image of a page's own gallery (expand.py), which the review marks.
 """
 

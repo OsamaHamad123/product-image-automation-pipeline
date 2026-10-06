@@ -82,6 +82,8 @@ class ReviewController extends Controller
                 'publishCheck' => route('dashboard.diagnostics') . '#publish-check',
                 // «تجاوز عزل الخلفية» بنفس اللوحة (رصيد أو مفتاح أو حصة PhotoRoom / remove.bg): SettingsController::setBgMethod
                 'bgMethod' => url('/api/settings/bg-method'),
+                // سطر «النشر التلقائي لكل الماركات المؤكدة» بوضع الجملة: أرقام فئة strict من بطاقة الصحة (HealthController::reviewLanes)
+                'reviewLanes' => url('/api/system/review-lanes'),
             ],
             // طريقة عزل الخلفية الحالية ونص تأكيد التجاوز؛ null بلا قاعدة بيانات (ما في زر لأن الحفظ رح يفشل)
             'bg' => $dbOnline ? self::bgConfig() : null,

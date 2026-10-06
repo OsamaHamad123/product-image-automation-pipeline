@@ -114,6 +114,7 @@ LIVE_PRODUCT_PAGES = [   # product pages the live runs of 2026-10-03 found
     ("noon_uae", "https://www.noon.com/uae-en/fancy-meat-tuna-in-water-85grams/N12277957A/p/"),
     ("noon_uae", "https://supermall.noon.com/uae-en/fancy-meat-tuna-in-water-170grams/N12277975A/p/"),
     ("unioncoop", "https://www.unioncoop.ae/skipjack-tuna-chunks-in-brine-13600527.html"),
+    ("sharjahcoop", "https://www.sharjahcoop.ae/en/dahabi-slicesd-bread-brown-700g/p/9501100306746"),
 ]
 NOT_PRODUCT_PAGES = [
     ("lulu", "https://gcc.luluhypermarket.com/en-ae/frozen-food/c/1001"),
@@ -121,6 +122,8 @@ NOT_PRODUCT_PAGES = [
     ("carrefour_uae", "https://www.carrefouruae.com/mafuae/ar/beef-luncheon/zwan/p/10937"),
     ("talabat_mart_uae", "https://www.talabat.com/bahrain/talabat-mart/product/goody-tuna-185g/s/908043"),
     ("unioncoop", "https://www.unioncoop.ae/about-us.html"),
+    ("sharjahcoop", "https://www.sharjahcoop.ae/ar/dahabi-slicesd-bread-brown-700g/p/9501100306746"),
+    ("sharjahcoop", "https://www.sharjahcoop.ae/en/dairy/c/1001"),
 ]
 
 
@@ -138,7 +141,8 @@ def test_categories_other_countries_and_other_languages_are_not_product_pages(ke
 
 def test_stores_whose_slugs_leave_out_the_brand_are_off_unless_asked_for():
     stores = load_stores()
-    assert [s.key for s in enabled_stores(stores)] == ["lulu", "carrefour_uae", "spinneys", "talabat_mart_uae"]
+    assert [s.key for s in enabled_stores(stores)] == ["lulu", "carrefour_uae", "spinneys", "talabat_mart_uae",
+                                                       "sharjahcoop"]
     assert [s.key for s in enabled_stores(stores, ["noon_uae"])] == ["noon_uae"]
     with pytest.raises(KeyError):
         enabled_stores(stores, ["lulu", "nope"])

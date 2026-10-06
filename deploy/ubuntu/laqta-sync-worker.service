@@ -1,0 +1,27 @@
+# Redis -> MariaDB -> Google Sheets outbox flusher (sync_worker.py).
+# Needed ONLY when Redis is used (install.sh --with-redis). Without Redis the worker exits at once
+# ("no Redis, nothing to do") and sheet writes go straight through the MariaDB outbox from the bridge process,
+# so leave this unit disabled in that case (the Windows start_all.bat starts it only when Redis answers).
+# The @NAME@ words are filled in by install.sh.
+[Unit]
+Description=Laqta sheet outbox worker (sync_worker.py)
+After=network-online.target mariadb.service redis-server.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@APP_USER@
+Group=@APP_USER@
+WorkingDirectory=@APP_DIR@
+Environment=PYTHONUTF8=1
+Environment=PYTHONIOENCODING=utf-8
+Environment=U2NET_HOME=@MODELS_DIR@
+ExecStart=@APP_DIR@/.venv/bin/python -u @APP_DIR@/sync_worker.py
+Restart=always
+RestartSec=15
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target

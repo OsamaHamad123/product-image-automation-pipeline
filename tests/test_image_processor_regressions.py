@@ -60,6 +60,8 @@ def offline(monkeypatch, tmp_path):
     if hasattr(config, "OUTPUT_CANVAS_SIZE"):
         monkeypatch.delattr(config, "OUTPUT_CANVAS_SIZE")
     monkeypatch.delenv("OUTPUT_CANVAS_SIZE", raising=False)
+    # these tests pin the white canvas (OUTPUT_BACKGROUND=white); the transparent one: test_transparent_canvas.py
+    monkeypatch.setattr(config, "OUTPUT_BACKGROUND", "white", raising=False)
 
     work = tmp_path / "tmp"
     work.mkdir()

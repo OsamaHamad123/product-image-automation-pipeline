@@ -8,6 +8,8 @@ Usage (from the repository root):
     python scripts/build_catalog_index.py --stores lulu,spinneys      # some stores only (disabled ones too)
     python scripts/build_catalog_index.py --prune                     # also drop pages a store no longer lists
     python scripts/build_catalog_index.py --stats                     # what the index holds
+    python scripts/build_catalog_index.py --refresh                   # read again only the stores that are stale
+    python scripts/build_catalog_index.py --refresh --force           # ... every enabled store, fresh or not
     python scripts/build_catalog_index.py --discover --json runs/catalog_discover.json
 
 The stores, their product page patterns and (once known) their sitemap URLs are in
@@ -15,6 +17,9 @@ catalog_match/data/catalog_stores.json. Only what a store publishes for crawlers
 robots.txt rules and its Crawl-delay are kept, and a store that answers 401 / 403 / 429 or a bot
 check is reported BLOCKED and skipped (catalog_match/sitemaps.py). Product pages themselves are read
 later, a few per product, while the pipeline searches (catalog_match/local_index.py).
+
+--refresh is what the nightly run and the worker start in the background by themselves (catalog_match/index_refresh.py,
+LOCAL_INDEX_REFRESH_DAYS / LOCAL_INDEX_REFRESH_MAX_S) and what the dashboard's «حدّث الفهرس هلق» button runs.
 
 Writes go to the local MariaDB only (tables catalog_products, catalog_tokens, catalog_harvests);
 nothing is written to the sheet or to Cloudinary.
@@ -75,6 +80,11 @@ def main(argv=None) -> int:
                       help="read robots.txt, the sitemap indexes and a few URL lists; print what they hold")
     mode.add_argument("--dry-run", action="store_true", help="read every sitemap and count; write nothing")
     mode.add_argument("--stats", action="store_true", help="print what the index holds and exit")
+    mode.add_argument("--refresh", action="store_true",
+                      help="read again the stores that are stale (see LOCAL_INDEX_REFRESH_DAYS), within "
+                           "LOCAL_INDEX_REFRESH_MAX_S seconds; --stores / --max-urls do not apply")
+    parser.add_argument("--force", action="store_true", help="with --refresh: every enabled store, stale or not")
+    parser.add_argument("--trigger", default="manual", help="with --refresh: who asked (recorded in the progress file)")
     parser.add_argument("--max-urls", type=int, help="stop a store after this many product pages")
     parser.add_argument("--max-sitemaps", type=int, help="stop a store after reading this many sitemap files")
     parser.add_argument("--prune", action="store_true",
@@ -94,6 +104,9 @@ def main(argv=None) -> int:
             return 2
         print_stats(store)
         return 0
+
+    if args.refresh:
+        return _refresh(args)
 
     try:
         all_stores = sitemaps.load_stores(args.config)
@@ -124,6 +137,7 @@ def main(argv=None) -> int:
                 json.dump([r.as_dict() for r in reports], fh, ensure_ascii=False, indent=2)
 
     blocked = [r.store for r in reports if r.status in ("blocked", "error")]
+    waiting = [r.store for r in reports if r.status == "outside_visit_time"]
     if args.discover:
         print("Discovery only: nothing was written. Send this output (or the --json file) to adjust the store patterns.")
     elif args.dry_run:
@@ -133,9 +147,26 @@ def main(argv=None) -> int:
         print_stats(db)
     if blocked:
         print(f"Skipped (blocked, unreachable or failed; never worked around): {', '.join(blocked)}")
+    if waiting:
+        print(f"Not read now (outside the Visit-time window of their robots.txt; not a failure): {', '.join(waiting)}")
     if args.json:
         print(f"reports written to {args.json}")
-    return 0 if len(blocked) < len(reports) else 1
+    return 1 if blocked and len(blocked) == len(reports) - len(waiting) else 0     # every store that was read failed
+
+
+def _refresh(args) -> int:
+    """The automatic refresh, in the foreground (catalog_match/index_refresh.py): 0 when it ran or had nothing to do."""
+    from catalog_match import index_refresh
+
+    db, why = _db_store()
+    if db is None:
+        print(why, file=sys.stderr)
+        if args.trigger == "dashboard":
+            index_refresh.record_end("unavailable")       # the dashboard's button job: say it is over
+        return 2
+    result = index_refresh.refresh(db=db, trigger=args.trigger, force=args.force)
+    print(index_refresh.format_result(result))
+    return 0 if result.get("reason") in ("done", "budget", "nothing_due") else 1
 
 
 def _harvest_one(harvester, store, db, args):
@@ -149,7 +180,7 @@ def _harvest_one(harvester, store, db, args):
     except Exception as exc:
         logging.getLogger(__name__).exception("harvest of %s failed", store.key)
         rep = sitemaps.HarvestReport(store=store.key, status="error", error=f"{type(exc).__name__}: {exc}"[:300])
-    if db is not None:
+    if db is not None and rep.status != "outside_visit_time":     # not a harvest: nothing to record, asked again later
         try:
             if args.prune and rep.status == "ok" and not rep.truncated:
                 rep.pruned = db.prune(store.key, started)

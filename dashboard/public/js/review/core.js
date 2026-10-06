@@ -874,7 +874,8 @@
         second_object: 'ظهر جسم آخر بجانب المنتج',
         upscaled: 'الصورة المصدر صغيرة فكُبّرت',
         too_small_on_canvas: 'المنتج صغير على اللوحة',
-        kept_shadow: 'بقي ظل ظاهر مع المنتج'
+        kept_shadow: 'بقي ظل ظاهر مع المنتج',
+        dark_halo: 'حواف فاتحة بتبين على الوضع الغامق'
     };
     // علامات تخص شكل الصورة المنشورة فقط والخلفية معزولة (main.PRESENTATION_FLAGS): ما تعنيه لمن ينشرها رغمها.
     // opaque_fill و opaque_backdrop و edge_clipped ليست منها: الخلفية لم تُعزل، ولا تُنشر «رغم ذلك» أبداً
@@ -883,11 +884,14 @@
         too_small_on_canvas: 'المنتج سيظهر صغيراً على اللوحة البيضاء',
         second_object: 'جسم آخر بجانب المنتج سيُنشر معه',
         alpha_haze: 'هالة أو ضباب خفيف حول حواف المنتج سيظهر في الصورة',
-        kept_shadow: 'ظل المنتج سيبقى ظاهراً في الصورة'
+        kept_shadow: 'ظل المنتج سيبقى ظاهراً في الصورة',
+        dark_halo: 'حواف فاتحة حول المنتج رح تبين بالتطبيق على الوضع الغامق'
     };
     // ملاحظات الفحص غير المانعة (quality_notes): تُعرض ملاحظةً لا تحذيراً، والصورة نُشرت نظيفة
     const QUALITY_NOTE_LABELS = {
-        upscaled: 'الصورة المصدر صغيرة فكُبّرت لتملأ اللوحة'
+        upscaled: 'الصورة المصدر صغيرة فكُبّرت لتملأ اللوحة',
+        // انتشرت بلا عزل والخلفية الشفافة مطلوبة (cutout_finish.NOTE_NOT_CUT_OUT): بتضل معتمة بخلفيتها
+        not_cut_out: 'الصورة مش مقصوصة: رح تبين بخلفيتها بالتطبيق'
     };
 
     function qualityFlagText(code) {
@@ -940,8 +944,26 @@
             flagTexts: Array.from(new Set(flags.map(qualityFlagText))),
             noteTexts: Array.from(new Set(notes.map(qualityNoteText))),
             // انتشرت بدون عزل الخلفية لأن المالك أوقفه بالإعدادات (main.publish_image bg_skipped): ملاحظة، لا تحذير
-            bgSkipped: data.bg_skipped === true
+            bgSkipped: data.bg_skipped === true,
+            // خلص رصيد مزوّد العزل السحابي فعزلتها طريقة محلية مجانية (main.publish_image bg_fallback): ملاحظة، لا تحذير
+            bgFallback: bgFallbackNote(data.bg_fallback)
         };
+    }
+
+    // اسم مزوّد العزل السحابي وطريقة العزل المحلية كما يقرؤهما المالك (نفس METHOD_NAMES في publish_check.py)
+    const BG_FALLBACK_NAMES = { photoroom: 'PhotoRoom', remove_bg_api: 'remove.bg', removebg: 'remove.bg',
+                                rembg: 'rembg', grabcut: 'GrabCut' };
+
+    // bg_fallback من الخادم {provider, from, code} إلى {text, cloud, local}؛ شكل ثاني أو غايب = null
+    function bgFallbackNote(value) {
+        if (!value || typeof value !== 'object') return null;
+        const from = String(value.from || '').trim();
+        if (!from) return null;
+        const cloud = BG_FALLBACK_NAMES[from] || from;
+        const provider = String(value.provider || '').trim();
+        const local = BG_FALLBACK_NAMES[provider] || provider;
+        return { cloud: cloud, local: local, code: String(value.code || ''),
+                 text: `انعزلت الخلفية بطريقة محلية لأن رصيد ${cloud} خلص` };
     }
 
     // نتيجة الرفض كما قالها الخادم (عقد C2: rejection.queue_status و candidates_left). queue_status: 'pending' =
@@ -1343,12 +1365,42 @@
         itemReasonKeys, reasonCounts, sheetNotes, whyNotPicked
     });
 
+    // فئة اختيار المحرك (catalog_match.decide.lane_of): strict | unsure | other، من سبب lane:<name> المحفوظ مع الاختيار،
+    // ولاختيار حُفظ قبل الفئات من preselected: و auto_blocked: (نفس قاعدة بايثون). strict لا تجتمع مع تحذير مراجعة.
+    // null لما ليس اختيار المحرك: مرشح عادي، أو اعتماد سابق من الكاش
+    const LANE_TEXT = { strict: 'مؤكدة تماماً', unsure: 'القارئ مش متأكد' };
+    const LANE_TITLE = {
+        strict: 'اقتراح عدّى كل قواعد النشر الآلي بلا أي تحذير',
+        unsure: 'القارئ مش متأكد من الصورة، بس عنوان الصفحة بيأكد المنتج'
+    };
+    const LANE_SETTING_BLOCKERS = ['auto_publish_disabled', 'auto_publish_off_for_brand'];
+
+    function laneOf(c) {
+        if (!c || c.status !== 'preselected' || c.is_selected === 0 || c.source === 'cache') return null;
+        const reasons = (c.reasons || []).map(r => String(r));
+        if (reasons.includes('cache_hit')) return null;
+        let lane = null;
+        const named = reasons.find(r => r.startsWith('lane:') && ['strict', 'unsure', 'other'].includes(r.slice(5)));
+        if (named) {
+            lane = named.slice(5);
+        } else {
+            const why = reasons.find(r => r.startsWith('preselected:'));
+            if (!why) return null;
+            const blockers = reasons.filter(r => r.startsWith('auto_blocked:')).map(r => r.slice(13));
+            lane = blockers.every(b => LANE_SETTING_BLOCKERS.includes(b) || b.startsWith('brand_conf_')) ? 'strict'
+                : (why.slice(12) === 'tier1_unsure' ? 'unsure' : 'other');
+        }
+        return lane === 'strict' && c.warnings && c.warnings.length ? 'other' : lane;
+    }
+
+    Object.assign(R, { LANE_TEXT, LANE_TITLE, laneOf });
+
     Object.assign(R, {
         REVIEW_WARNING_LABELS, VARIANT_AXIS_LABELS, REJECT_REASONS, COSMETIC_REASONS, FAILURE_TEXT, NOT_FOUND_CODES,
         VIEW_LABELS, BUCKET_LABELS, FILTERS, WAITING, PRODUCT_CHANGED, STALE_CODES,
         warningText, reasonLabel, rejectReasonsFor, UNDO_REJECT_LABEL, UNDO_REJECT_CONFIRM, rejectedImages, undoRejectBody,
         forgetRejection, PAGE_GTIN_LABEL, sheetLacksBarcode, pageGtinOf, GALLERY_NOTE, galleryNote, failureInfo, plainError, hostOf, marketOf, storeMarket, storeOf,
-        sheetStates, unverifiedWarnings, PRESENTATION_FLAG_TEXT, BG_SKIP_RE, bgSkipCode,
+        sheetStates, unverifiedWarnings, PRESENTATION_FLAG_TEXT, BG_SKIP_RE, bgSkipCode, bgFallbackNote,
         normalizeCandidate, collectCandidates, storedCandidates, storedSelected, bulkEligible, candidateNote, explainPick,
         productIdentity, sameProduct, itemKey, failureKey, reviewedCandidateView,
         searchBody, selectBody, rejectBody, uploadFields,

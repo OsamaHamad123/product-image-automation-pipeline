@@ -28,6 +28,7 @@
     const BULK_FILTERS = [
         { key: 'all', label: 'الكل' },
         { key: 'eligible', label: 'مقترحة بلا تحذير' },
+        { key: 'strict', label: 'مؤكدة تماماً' },
         { key: 'warning', label: 'فيها تحذير' },
         { key: 'none', label: 'بلا اقتراح' }
     ];
@@ -134,8 +135,16 @@
         return b ? list.filter(it => norm(brandOf(it)) === b) : list;
     }
 
+    // فئة اقتراح المحرك للبطاقة (R.laneOf)، تُحفظ مع العنصر مثل نوع البطاقة: اعتماد البطاقة ما يخرجها من فلترها
+    function laneOfCard(it) {
+        const m = memoOf(it);
+        if (!('lane' in m)) m.lane = R.laneOf(selectedOf(it));
+        return m.lane;
+    }
+
     function byFilter(list, f) {
         if (f === 'all') return list;
+        if (f === 'strict') return list.filter(it => laneOfCard(it) === 'strict');
         return list.filter(it => kindOf(it) === f);
     }
 
@@ -253,7 +262,8 @@
         d.bulkGrid.addEventListener('click', onGridClick);
         d.bulkGrid.addEventListener('change', onGridChange);
         d.bulkMore = el('div', { className: 'rv-bulk__more' });
-        box.appendChild(el('div', { className: 'rv-bulk__top' }, [d.bulkHead, d.bulkTools, d.bulkBar, d.bulkKeys]));
+        d.bulkLane = el('p', { className: 'rv-bulk__lane', role: 'status', hidden: true });
+        box.appendChild(el('div', { className: 'rv-bulk__top' }, [d.bulkHead, d.bulkLane, d.bulkTools, d.bulkBar, d.bulkKeys]));
         box.appendChild(d.bulkGrid);
         box.appendChild(d.bulkMore);
     }
@@ -261,6 +271,49 @@
     // -------------------------------------------------------------------------------------------------
     // Rendering
     // -------------------------------------------------------------------------------------------------
+
+    // سطر التقدم نحو «النشر التلقائي لكل الماركات المؤكدة»: أرقام فئة strict من /api/system/review-lanes (نفس نداء بطاقة
+    // الصحة، مخزّن في الخادم): المعتمد من المراجع، وكم اعتماداً متتالياً بلا رفض بقي (more_needed، حسبه بايثون بصيغة ويلسون).
+    // null بلا أرقام: السطر يختفي بدل ما يقول رقماً ما عرفناه
+    function laneLine(strict) {
+        if (!strict || typeof strict !== 'object') return null;
+        if (strict.ready === true) return 'النشر التلقائي جاهز للتشغيل من الإعدادات ← النشر الآلي';
+        const accepted = parseInt(strict.accepted, 10);
+        const reviewed = parseInt(strict.prechecked, 10);
+        if (!isFinite(accepted) || !isFinite(reviewed)) return null;
+        const more = parseInt(strict.more_needed, 10);
+        const head = `لحتى ينفتح النشر التلقائي لكل الماركات المؤكدة: اعتمدت ${accepted} من ${reviewed} اقتراح مؤكد تماماً`;
+        return isFinite(more) ? `${head}، وبعد ${more} اعتماد متتالي بلا رفض`
+            : `${head}، بس دقتها هلق أقل من الحد المطلوب`;
+    }
+
+    const LANES_STALE_MS = 60000;
+    let lanesState = { state: 'idle', strict: null, at: 0 };
+
+    function paintLane() {
+        const d = st().dom;
+        if (!d.bulkLane) return;
+        const text = lanesState.state === 'ready' ? laneLine(lanesState.strict) : null;
+        d.bulkLane.textContent = text || '';
+        d.bulkLane.hidden = !text;
+        d.bulkLane.classList.toggle('is-ready', !!text && !!(lanesState.strict && lanesState.strict.ready));
+    }
+
+    // مرة عند فتح الوضع وبعدها كل دقيقة على الأكثر مع إعادة الرسم (الخادم يخزّن الجواب 60 ثانية: لا نداء جديد ثقيل)
+    function loadLanes() {
+        const S = st();
+        if (S.mode !== 'bulk' || !S.urls.reviewLanes || lanesState.state === 'loading') return;
+        if (lanesState.state !== 'idle' && Date.now() - lanesState.at < LANES_STALE_MS) return;
+        lanesState = Object.assign({}, lanesState, { state: 'loading' });
+        R.requestJson(S.urls.reviewLanes).then(res => {
+            const lanes = res && res.ok && res.data && res.data.status === 'success' ? res.data.lanes : null;
+            lanesState = { state: lanes && lanes.strict ? 'ready' : 'error', strict: lanes ? lanes.strict || null : null, at: Date.now() };
+            paintLane();
+        }, () => {
+            lanesState = Object.assign({}, lanesState, { state: 'error', at: Date.now() });
+            paintLane();
+        });
+    }
 
     function statusChip(it) {
         if (busyOrDone(it)) return R.chipFor(it.bucket, true);
@@ -339,6 +392,7 @@
             el('div', { className: 'rv-card__body' }, [
                 bdi(name, 'rv-card__name', p.product_name ? 'ltr' : 'auto'),
                 el('span', { className: 'rv-card__meta', text: meta }),
+                sel ? R.laneBadge(sel) : null,
                 !sel && !busyOrDone(it) ? el('p', { className: 'rv-card__why', title: why ? why.key : null,
                                                     dataset: { nopick: why ? why.key : '' }, text: why ? why.text : R.NO_PICK_FALLBACK }) : null,
                 it.orphan ? el('span', { className: 'rv-card__warn' }, [icon('info', 14, 2), el('span', { text: 'مش موجود بالشيت الحالي' })]) : null,
@@ -374,6 +428,8 @@
         const queueKnown = S.queue && S.queue.status !== 'unavailable';
         const all = source();
 
+        loadLanes();
+        paintLane();
         d.bulkCount.textContent = loading ? 'لحظة…' : unread ? '—'
             : `${S.counts.waiting} بانتظار المراجعة${queueKnown ? '' : ' (تقدير)'}`;
 
@@ -846,7 +902,7 @@
 
     R.bulk = {
         build, render, approveSelected, approveOne, openRejectDialog, closeDialog, dialogOpen: () => dialogOpen,
-        visibleCards, shownCards, kindOf, seedSelection, rejectList, onKey, refreshCards,
+        visibleCards, shownCards, kindOf, laneOfCard, laneLine, seedSelection, rejectList, onKey, refreshCards,
         // مفاتيح المنتجات المحددة الآن (لصورها الحالية)
         tickedKeys: () => shownCards().filter(ticked).map(it => it.key)
     };

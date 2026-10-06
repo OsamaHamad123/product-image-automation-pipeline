@@ -147,7 +147,7 @@ def select_env(bridge, monkeypatch, tmp_path):
     state = {"isolated": True}
 
     def fake_process(image_url_or_path, product_name, brand, target_width=0, target_height=0, bg_method=None,
-                     candidate_sha256=None, enhance=False):
+                     candidate_sha256=None, enhance=False, background=None):
         events.append(("process", image_url_or_path, candidate_sha256))
         path = _canvas(tmp_path / "canvas.png")
         return image_processor.ProcessResult(path, state["isolated"], "photoroom" if state["isolated"] else "none",
