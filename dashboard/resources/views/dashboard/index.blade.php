@@ -32,6 +32,11 @@
         </div>
     </header>
 
+    {{-- «جهّز لقطة»: بس لما التجهيز ناقص (SetupController::homeCard، null لتركيبة مجهّزة أو خالصة) --}}
+    @if ($setupCard ?? null)
+        @include('setup.home_card')
+    @endif
+
     {{-- «شو الخطوة الجاية؟»: وحدة بس، محسوبة بـ home.js (nextStep): جاهزة للمراجعة ← ماركات ناقصة ← ما انلقت ← تشغيل جديد --}}
     <div class="lq-alert lq-alert--info lq-home-next" data-home="next" role="status" hidden>
         <x-lq.icon name="arrow-left" :size="20" class="lq-alert__icon" />

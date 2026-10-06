@@ -67,6 +67,8 @@ class OverviewController extends Controller
             'greeting' => self::greeting((int) $now->format('G'), $owner),
             'dateLine' => self::dateLine((int) $now->format('w'), (int) $now->format('j'), (int) $now->format('n')),
             'lqReviewCount' => $live['batch']['ready_for_review'] ?? null,
+            // «جهّز لقطة» بس لما التجهيز ناقص (null لتركيبة مجهّزة أو لما قاعدة البيانات ما بترد)
+            'setupCard' => SetupController::homeCard(),
         ]);
     }
 

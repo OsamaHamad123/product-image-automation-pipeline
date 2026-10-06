@@ -101,4 +101,10 @@ Route::post('/api/run/brand-undo', [RunController::class, 'brandUndo']);
 Route::get('/api/run/barcode-suggestions', [RunController::class, 'barcodeSuggestions']);
 Route::post('/api/run/barcode-write', [RunController::class, 'barcodeWrite']);
 
+// «جهّز لقطة»: معالج التجهيز لأول مرة (SetupController). فتح الصفحة ما بيشغّل أي فحص: كل فحص بزر صريح، والتقدّم بـ system_settings
+Route::get('/setup', [\App\Http\Controllers\SetupController::class, 'page'])->name('dashboard.setup');
+Route::get('/api/setup/state', [\App\Http\Controllers\SetupController::class, 'state']);
+Route::post('/api/setup/check', [\App\Http\Controllers\SetupController::class, 'check']);
+Route::post('/api/setup/progress', [\App\Http\Controllers\SetupController::class, 'progress']);
+
 Route::view('/ui-kit', 'dashboard.ui_kit')->name('dashboard.ui_kit'); // مرجع مكوّنات هوية لقطة

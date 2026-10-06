@@ -267,3 +267,60 @@
     flex-shrink: 0;
     margin-inline-start: auto;
 }
+
+/* «جهّز لقطة» (resources/views/setup/home_card.blade.php): only while setup is incomplete */
+.lq-home-setup {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--lq-space-4);
+    border-color: var(--lq-teal-300);
+    background: var(--lq-teal-50);
+}
+
+.lq-home-setup__text {
+    display: flex;
+    flex: 1 1 22em;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+}
+
+.lq-home-setup__lead {
+    margin: 0;
+    line-height: 1.6;
+    color: var(--lq-text-2);
+}
+
+.lq-home-setup__steps {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px var(--lq-space-4);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    font-size: 13px;
+    color: var(--lq-text-2);
+}
+
+.lq-home-setup__step {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.lq-home-setup__step[data-status="ok"] {
+    color: var(--lq-success);
+}
+
+.lq-home-setup__go {
+    flex-shrink: 0;
+    margin-inline-start: auto;
+}
+
+@media (max-width: 560px) {
+    .lq-home-setup__go {
+        width: 100%;
+    }
+}
