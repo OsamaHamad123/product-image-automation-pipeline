@@ -7,7 +7,9 @@ parallel with the first web query:
 
   1. rows whose slug (or page title, once the page was read) holds every word of one of the SKU's
      brand phrases come out of the index, most product words first (at most CANDIDATE_ROWS per
-     phrase); with a valid GTIN, rows whose page stated that GTIN come too;
+     phrase); with a valid GTIN, rows whose page stated that GTIN come too, and so do rows whose own
+     URL is that barcode (url_gtin, read from the URL at harvest time: catalog_match.url_gtin), even
+     before their page was ever read;
   2. each row is scored like a search result that has only its URL (score.score_candidate on the
      page slug and the page title): a hard reject (another brand, a size, pack or variant conflict)
      or a size / pack conflict in the URL alone is dropped, so is a row without brand evidence or
@@ -30,6 +32,10 @@ A store host that refused or timed out BLOCKED_HOST_LIMIT reads in a row is not 
 this process.
 The index never stops the web search early (retrieve.t1_early_stop) and its answers never make a
 web-search outage look healthy (decide.LOOKUP_PROVIDERS): it only adds candidates.
+
+lookup_gtins(spec, gtins, known_pages) asks the index for the barcodes other stores wrote in their URLs for a
+row without a valid sheet barcode (url_gtin.agreeing_gtins: only listings whose title agrees with the row), under
+query_id IDXG: the same row choice and page reads, the barcode never counts as evidence for a candidate.
 """
 
 from __future__ import annotations
@@ -53,6 +59,7 @@ logger = logging.getLogger(__name__)
 
 PROVIDER = "local_index"
 QUERY_ID = "IDX"
+GTIN_QUERY_ID = "IDXG"         # lookup_gtins: the barcodes other stores' URLs gave
 CANDIDATE_ROWS = 200           # rows pulled from the index per brand phrase, most product words first
 MIN_COVERAGE = 0.5             # share of the SKU's product-type words a row's slug / title must hold
 FAILED_PAGE_TTL_H = 24         # a timeout, 5xx or refusal is retried the next day
@@ -156,6 +163,7 @@ class CatalogRow:
     page_status: str = ""              # '' never read | 'ok' | 'redirected' | 'no_image' | a fetch error
     page_age_h: Optional[int] = None   # hours since the page was read; None = never read
     hits: int = 0                      # index words of the query the row holds (index order)
+    url_gtin: Optional[str] = None     # the barcode the store wrote in the product URL itself (catalog_match.url_gtin)
 
 
 @dataclass
@@ -207,7 +215,8 @@ class MemoryCatalogStore:
                 row_id = len(self.rows) + 1
                 while row_id in self.rows:
                     row_id += 1
-                self.rows[row_id] = CatalogRow(id=row_id, store=store, url=url, slug_text=slug_text(url))
+                self.rows[row_id] = CatalogRow(id=row_id, store=store, url=url, slug_text=slug_text(url),
+                                               url_gtin=_url_gtin_of(url))
                 self._by_hash[key] = row_id
                 self._add_tokens(row_id, self.rows[row_id].slug_text)
                 new += 1
@@ -242,7 +251,7 @@ class MemoryCatalogStore:
         return [replace(self._aged(self.rows[i]), hits=hits[i]) for i in order]
 
     def by_gtin(self, gtin: str, limit: int = 20) -> List[CatalogRow]:
-        rows = [r for r in self.rows.values() if gtin and r.gtin == gtin]
+        rows = [r for r in self.rows.values() if gtin and gtin in (r.gtin, r.url_gtin)]
         return [self._aged(r) for r in sorted(rows, key=lambda r: r.id)[:limit]]
 
     def _aged(self, row: CatalogRow) -> CatalogRow:
@@ -353,7 +362,7 @@ class DbCatalogStore:
         for url, lastmod in batch:
             url = clean_url(url)
             if url:
-                rows[url_hash(url)] = (url, slug_text(url), (lastmod or None) and str(lastmod)[:32])
+                rows[url_hash(url)] = (url, slug_text(url), (lastmod or None) and str(lastmod)[:32], _url_gtin_of(url))
         if not rows:
             return 0
         hashes = list(rows)
@@ -364,10 +373,11 @@ class DbCatalogStore:
                 cur.execute(f"SELECT url_hash FROM catalog_products WHERE url_hash IN ({marks})", hashes)
                 known = {r["url_hash"] for r in cur.fetchall()}
                 cur.executemany(
-                    "INSERT INTO catalog_products (store, url, url_hash, slug_text, lastmod, first_seen, last_seen) "
-                    "VALUES (%s, %s, %s, %s, %s, NOW(), NOW()) "
-                    "ON DUPLICATE KEY UPDATE store = VALUES(store), lastmod = VALUES(lastmod), last_seen = NOW()",
-                    [(store, u, h, s[:512], m) for h, (u, s, m) in rows.items()])
+                    "INSERT INTO catalog_products (store, url, url_hash, slug_text, lastmod, url_gtin, first_seen, "
+                    "last_seen) VALUES (%s, %s, %s, %s, %s, %s, NOW(), NOW()) "
+                    "ON DUPLICATE KEY UPDATE store = VALUES(store), lastmod = VALUES(lastmod), "
+                    "url_gtin = VALUES(url_gtin), last_seen = NOW()",
+                    [(store, u, h, s[:512], m, g) for h, (u, s, m, g) in rows.items()])
                 fresh = [h for h in hashes if h not in known]
                 if fresh:
                     marks = ",".join(["%s"] * len(fresh))
@@ -437,7 +447,7 @@ class DbCatalogStore:
 
     # -- search -------------------------------------------------------------
     _ROW_COLUMNS = ("p.id, p.store, p.url, p.slug_text, p.page_title, p.image_url, p.image_width, p.image_height, "
-                    "p.gtin, p.page_status, TIMESTAMPDIFF(HOUR, p.page_checked_at, NOW()) AS page_age_h")
+                    "p.gtin, p.url_gtin, p.page_status, TIMESTAMPDIFF(HOUR, p.page_checked_at, NOW()) AS page_age_h")
 
     def find(self, required: Sequence[str], extra: Sequence[str], limit: int = CANDIDATE_ROWS) -> List[CatalogRow]:
         req = list(dict.fromkeys(k[:MAX_TOKEN_LEN] for k in required if k))
@@ -458,8 +468,11 @@ class DbCatalogStore:
     def by_gtin(self, gtin: str, limit: int = 20) -> List[CatalogRow]:
         if not gtin:
             return []
-        sql = f"SELECT {self._ROW_COLUMNS}, 0 AS hits FROM catalog_products p WHERE p.gtin = %s ORDER BY p.id LIMIT %s"
-        return self._rows(sql, [gtin, int(limit)])
+        # the barcode the page stated, or the one the store wrote in the product URL (two indexed lookups)
+        sql = (f"SELECT {self._ROW_COLUMNS}, 0 AS hits FROM catalog_products p WHERE p.gtin = %s "
+               f"UNION SELECT {self._ROW_COLUMNS}, 0 AS hits FROM catalog_products p WHERE p.url_gtin = %s "
+               "ORDER BY id LIMIT %s")
+        return self._rows(sql, [gtin, gtin, int(limit)])
 
     def _rows(self, sql: str, params: Sequence[Any]) -> List[CatalogRow]:
         conn = self._conn()
@@ -472,6 +485,7 @@ class DbCatalogStore:
         return [CatalogRow(id=int(r["id"]), store=r["store"] or "", url=r["url"] or "", slug_text=r["slug_text"] or "",
                            page_title=r["page_title"] or "", image_url=r["image_url"] or "",
                            image_width=r["image_width"], image_height=r["image_height"], gtin=r["gtin"] or None,
+                           url_gtin=r.get("url_gtin") or None,
                            page_status=r["page_status"] or "",
                            page_age_h=None if r["page_age_h"] is None else int(r["page_age_h"]),
                            hits=int(r.get("hits") or 0))
@@ -548,6 +562,15 @@ def search_keys(spec: SkuSpec) -> Tuple[List[List[str]], List[str]]:
     return groups, extra[:MAX_NAME_KEYS]
 
 
+def _url_gtin_of(url: str) -> Optional[str]:
+    """The barcode a known store wrote in this product URL (catalog_match.url_gtin), or None."""
+    from .url_gtin import from_url
+    try:
+        return from_url(url, "page")
+    except Exception:  # pragma: no cover - a pattern never raises; the harvest must not stop for it
+        return None
+
+
 def row_candidate(row: CatalogRow, rank: int = 0) -> Candidate:
     """The row as a candidate: its URL, the page title and image once the page was read."""
     return Candidate(
@@ -556,11 +579,12 @@ def row_candidate(row: CatalogRow, rank: int = 0) -> Candidate:
         provider=PROVIDER, query_id=QUERY_ID, rank=rank, gtin_on_page=row.gtin, sanctioned=False)
 
 
-def rank_rows(spec: SkuSpec, rows: Sequence[CatalogRow], max_pages: Optional[int] = None
-              ) -> List[Tuple[CatalogRow, CandidateScore]]:
+def rank_rows(spec: SkuSpec, rows: Sequence[CatalogRow], max_pages: Optional[int] = None,
+              gtins: Sequence[str] = ()) -> List[Tuple[CatalogRow, CandidateScore]]:
     """The rows worth reading, best first: no hard reject, brand evidence, enough product words;
     the best row of each store before a second row of any store. All of them unless max_pages is
-    given (the provider walks the list and skips the rows it cannot use)."""
+    given (the provider walks the list and skips the rows it cannot use). A row whose own URL is the sheet's barcode,
+    or one of `gtins` (lookup_gtins), is worth a read without brand evidence in its slug."""
     from .score import rank_key, score_candidate
 
     scored: List[Tuple[Tuple, CatalogRow, CandidateScore]] = []
@@ -578,7 +602,9 @@ def rank_rows(spec: SkuSpec, rows: Sequence[CatalogRow], max_pages: Optional[int
         if (score.size_status == "conflict" or matched.get("pack") == "conflict"
                 or any(c.startswith(("url_size_conflict", "url_pack_conflict")) for c in score.conflicts)):
             continue
-        gtin_match = matched.get("gtin") == "match"
+        # the store's own URL is the sheet's barcode: worth one free read (the URL is never evidence itself)
+        wanted = (spec.gtin,) + tuple(gtins)
+        gtin_match = matched.get("gtin") == "match" or bool(row.url_gtin and row.url_gtin in wanted)
         if not matched.get("brand") and not gtin_match:
             continue
         if not gtin_match and float(matched.get("coverage") or 0.0) < MIN_COVERAGE:
@@ -627,6 +653,7 @@ class LocalIndexProvider(BaseProvider):
     kind = "lookup"
     needs_gtin = False
     lookup_query_id = QUERY_ID
+    gtin_query_id = GTIN_QUERY_ID
     rate_per_min = 6000.0      # a local database: the page reads have their own per-host buckets
     burst = 100
 
@@ -677,12 +704,38 @@ class LocalIndexProvider(BaseProvider):
         ttl = self.page_ttl_h if row.page_status in PERMANENT_PAGE_STATUSES else FAILED_PAGE_TTL_H
         return row.page_age_h < ttl
 
+    def lookup_gtins(self, spec: SkuSpec, gtins: Sequence[str], known_pages: Sequence[str] = ()) -> Any:
+        """The indexed pages of these barcodes (other stores' URL barcodes for a row without one; see the module
+        docstring), as a ProviderResult under GTIN_QUERY_ID. Pages already in the pool are not read again. Never
+        raises (BaseProvider.search)."""
+        self._gtin_request = (tuple(g for g in gtins if g), tuple(known_pages or ()))
+        try:
+            return self.search(GTIN_QUERY_ID, "", spec)
+        finally:
+            self._gtin_request = None
+
+    def _gtin_rows(self, spec: SkuSpec) -> List[CatalogRow]:
+        gtins, known_pages = getattr(self, "_gtin_request", None) or ((), ())
+        known = {url_hash(u) for u in known_pages if u}
+        rows: List[CatalogRow] = []
+        for g in gtins:
+            # one snapshot per barcode (a cassette keys index rows by the spec's barcode and brand words)
+            probe = replace(spec, gtin=g, match_brands=())
+            rows.extend(r for r in cassette.local_index_rows(probe, lambda g=g: self.store.by_gtin(g))
+                        if url_hash(r.url) not in known)
+        return rows
+
     def _search(self, query: str, hl: str, spec: SkuSpec) -> List[Candidate]:
         if self.max_pages <= 0:
             return []
-        ranked = rank_rows(spec, cassette.local_index_rows(spec, lambda: self._rows(spec)))   # snapshot / replay
-        if not ranked:
-            raise ProviderEmpty("no indexed page of this brand and product")
+        if query == GTIN_QUERY_ID:
+            ranked = rank_rows(spec, self._gtin_rows(spec), gtins=self._gtin_request[0])
+            if not ranked:
+                raise ProviderEmpty("no indexed page of these barcodes")
+        else:
+            ranked = rank_rows(spec, cassette.local_index_rows(spec, lambda: self._rows(spec)))   # snapshot / replay
+            if not ranked:
+                raise ProviderEmpty("no indexed page of this brand and product")
         found: Dict[int, List[Candidate]] = {}
         todo: List[Tuple[int, CatalogRow]] = []
         used = skipped = 0

@@ -260,11 +260,14 @@ class Retriever:
 
     # ----------------------------------------------------------------- calls
 
-    def _call(self, provider, query: PlannedQuery, lookup: bool = False) -> ProviderResult:
+    def _call(self, provider, query: PlannedQuery, lookup: bool = False,
+              gtins: Optional[Sequence[str]] = None) -> ProviderResult:
         name = str(getattr(provider, "name", "") or type(provider).__name__)
         start = time.monotonic()
         try:
-            if lookup and hasattr(provider, "lookup"):
+            if gtins is not None:
+                res = provider.lookup_gtins(self.spec, list(gtins), [c.page_url for c in self.pool.candidates()])
+            elif lookup and hasattr(provider, "lookup"):
                 res = provider.lookup(self.spec)
             else:
                 res = provider.search(query.text, query.hl, self.spec)
@@ -439,6 +442,23 @@ class Retriever:
         if ran is not None:
             self._merge(ran)
         self._log_summary(f"lookups again{' + ' + query.query_id if query is not None else ''}")
+        return self.result
+
+    def lookup_gtins(self, gtins: Sequence[str]) -> RetrievalResult:
+        """Ask the lookups that find pages by barcode (local_index.LocalIndexProvider.lookup_gtins) for these barcodes:
+        the ones other stores wrote in their URLs for a row without a valid sheet barcode (url_gtin.agreeing_gtins,
+        only listings whose own title agrees with the row). Free: a local lookup and at most LOCAL_INDEX_MAX_PAGES
+        page reads; the pages already in the pool are not read again. Not after an early stop. Health under
+        query_id IDXG; the barcode is never evidence for a candidate (it does not become its gtin_on_page).
+        """
+        gtins = [g for g in gtins or () if g]
+        providers = [p for p in self.providers if callable(getattr(p, "lookup_gtins", None))]
+        if self.stopped or not gtins or not providers:
+            return self.result
+        query = PlannedQuery(query_id=str(getattr(providers[0], "gtin_query_id", "") or "IDXG"), text="", hl="")
+        results = [self._call(p, query, gtins=gtins) for p in providers]
+        self._merge(results)
+        self._log_summary(f"barcode lookups {','.join(gtins)}")
         return self.result
 
     def relax(self) -> RetrievalResult:

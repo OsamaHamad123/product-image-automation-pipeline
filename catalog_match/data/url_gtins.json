@@ -1,0 +1,76 @@
+{
+  "version": 1,
+  "_doc": "Where UAE stores write a product's barcode in their own URLs (catalog_match.url_gtin). Each store lists its hosts (a host or any subdomain of it) and regular expressions for the PAGE url ('page') and the IMAGE url ('image'); each pattern has one named group 'gtin' and is searched in the URL's path only (no query string), case-insensitive. Only stores whose own product id or image file name IS the barcode are listed: Carrefour's media ids (cdn.mafrservices.com/.../50736324968478/...) and Lulu's '/p/4504613' are store-internal numbers that can pass a check digit by chance, so they are not. A number matched here still has to be a valid GTIN-8/12/13/14 (check digit), globally unique (not an in-store 02x/04x/2xx code) and a consumer unit (indicator 0) with a GS1 prefix that numbers trade items (no coupon, refund or demo range): catalog_match.url_gtin.plausible. Foreign stores (Qatar, Kuwait, Saudi) are not listed: their pack may carry another barcode. What a URL says is evidence only (url_gtin): it never lifts a tier and never auto-publishes.",
+  "stores": [
+    {
+      "key": "sharjahcoop",
+      "hosts": ["sharjahcoop.ae"],
+      "page": ["/p/(?P<gtin>\\d{8,14})/?$"],
+      "image": ["/medias/(?:\\d+wx\\d+h-0+-)?(?P<gtin>\\d{8,14})-", "/medias/(?P<gtin>\\d{8,14})-\\d+wx\\d+h"],
+      "example": "/en/al-taghziah-chicken-luncheon-meat-850g/p/5283002830089, /medias/1200Wx1200H-00000-6084000090241-001.jpg"
+    },
+    {
+      "key": "unioncoop",
+      "hosts": ["unioncoop.ae"],
+      "page": ["^/(?:english/)?(?P<gtin>\\d{8,14})-\\d+\\.html$"],
+      "image": ["/media/catalog/product/(?:cache/[0-9a-f]+/)?\\w/\\w/(?P<gtin>\\d{8,14})(?:_\\d+)?\\.(?:jpe?g|png|webp)$"],
+      "example": "/5033712451018-6394287.html, /media/catalog/product/6/2/6294010703134_1.jpg"
+    },
+    {
+      "key": "spinneys_waitrose",
+      "hosts": ["prod-spinneys-cdn-new.azureedge.net", "prod-waitrose.azureedge.net"],
+      "page": [],
+      "image": ["/media/images/products/\\d{4}/\\d{2}/(?P<gtin>\\d{8,14})(?:_v\\d+)?\\.(?:jpe?g|png|webp)$"],
+      "example": "/media/images/products/2023/12/6291003607486.jpg"
+    },
+    {
+      "key": "talabat_mart",
+      "hosts": ["talabat.dhmedia.io"],
+      "page": [],
+      "image": ["/regional_images/[^/]+/(?P<gtin>\\d{8,14})_\\d+\\.(?:jpe?g|png|webp)$"],
+      "example": "/image/talabat-nv/Regional_Images/Al_Rawabi_Tmart/6291030109564_1.jpg"
+    },
+    {
+      "key": "grandiose",
+      "hosts": ["grandiose.ae"],
+      "page": ["-(?P<gtin>\\d{8,14})/?$"],
+      "image": ["/media/catalog/product/(?:cache/[0-9a-f]+/)?\\w/\\w/(?P<gtin>\\d{8,14})(?:_\\d+)?\\.(?:jpe?g|png|webp)$"],
+      "example": "/rio-mare-light-meat-tuna-in-sfo-3x70g-8004030592247"
+    },
+    {
+      "key": "grandhyper_uae",
+      "hosts": ["uae-image-bucket.s3.ap-south-1.amazonaws.com"],
+      "page": [],
+      "image": ["^/products/(?P<gtin>\\d{8,14})_\\d+\\.(?:jpe?g|png|webp)$"],
+      "example": "/products/8714555000034_2.webp"
+    },
+    {
+      "key": "ducem",
+      "hosts": ["ducem.ae"],
+      "page": [],
+      "image": ["/(?P<gtin>\\d{8,14})-\\d+x\\d+w?\\.(?:jpe?g|png|webp)"],
+      "example": "/image/cache/catalog/2023/alrawabi/6291030109588-1200x1200.jpg.webp"
+    },
+    {
+      "key": "thefreshmarket",
+      "hosts": ["thefreshmarketdubai.com"],
+      "page": ["^/products/[^/]*-(?P<gtin>\\d{8,14})/?$"],
+      "image": ["/files/(?P<gtin>\\d{8,14})_"],
+      "example": "/products/zwan-luncheon-meat-beef-hot-spicy-340g-8714555001239"
+    },
+    {
+      "key": "carrefour_uae",
+      "hosts": ["carrefouruae.com"],
+      "page": ["^/mafuae/en/(?:[^/]+/)*[^/]+/p/(?P<gtin>\\d{12,14})/?$"],
+      "image": [],
+      "example": "/mafuae/en/utensils-gadgets/delcasa-stainless-steel-ice-cream-scoop-with-trp-handle-dc2426/p/6294016314273 (a 12-14 digit product id only; the short ids are internal)"
+    },
+    {
+      "key": "amazon_ae",
+      "hosts": ["amazon.ae"],
+      "page": ["^/(?:[^/]*[-_])?(?P<gtin>\\d{12,13})(?:[-_][^/]*)?/dp/"],
+      "image": [],
+      "example": "/Kimball-9556191030742_6-KIMBALL-Spaghetti-400/dp/B07PN2TM9C"
+    }
+  ]
+}

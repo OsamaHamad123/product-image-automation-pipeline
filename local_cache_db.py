@@ -135,6 +135,10 @@ _SCHEMA_MIGRATIONS = [
     "ALTER TABLE curation_candidates ADD COLUMN IF NOT EXISTS provider VARCHAR(32) NULL",
     "ALTER TABLE curation_candidates ADD COLUMN IF NOT EXISTS query_id VARCHAR(16) NULL",
     "ALTER TABLE curation_candidates ADD COLUMN IF NOT EXISTS phash VARCHAR(32) NULL",
+    # الباركود الذي يكتبه المتجر في رابط المنتج نفسه (catalog_match.url_gtin: الشارقة التعاونية '/p/<GTIN>'):
+    # يُقرأ عند جمع الخرائط بلا أي طلب، فيجد local_index.by_gtin صفحة الباركود قبل قراءتها
+    "ALTER TABLE catalog_products ADD COLUMN IF NOT EXISTS url_gtin VARCHAR(14) NULL",
+    "ALTER TABLE catalog_products ADD INDEX IF NOT EXISTS idx_catalog_url_gtin (url_gtin)",
     "ALTER TABLE curation_candidates ADD INDEX IF NOT EXISTS idx_curation_sku (sku_key)",
     # automation_state: رسالة تنبيه مرئية للوحة التحكم (مثل عدم توفر نموذج Gemini)
     "ALTER TABLE automation_state ADD COLUMN IF NOT EXISTS notice VARCHAR(255) NULL",

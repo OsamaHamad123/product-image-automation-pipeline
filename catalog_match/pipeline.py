@@ -43,8 +43,9 @@ import logging
 import time
 from typing import Any, Iterable, List, Mapping, Optional, Sequence, Set, Tuple, Union
 
-from . import brand_discovery, decide, expand as expand_mod, quality as quality_mod
+from . import brand_discovery, decide, expand as expand_mod, quality as quality_mod, url_gtin
 from .fetch import load_image, phash_distance
+from .gtin import is_global_gtin
 from .models import (
     Candidate, CandidateScore, FetchedImage, RankedCandidate, SearchOutcome, SkuSpec,
     VerificationResult, VlmImageVerdict,
@@ -323,6 +324,13 @@ def find_product_image(spec: Union[SkuSpec, Mapping[str, Any]], *, providers: Op
             if not custom and not retriever.early_stop(list(retrieval.pool)) else None
         # the local catalog index is asked again with the store spelling (free), alongside the corrected query
         retrieval = retriever.rerun_lookups(extra)
+
+    # 1c. a row without a valid barcode: the barcodes stores wrote in their own URLs (only listings whose title agrees
+    #     with the row: url_gtin) find the local index's pages of the same barcode (free; never evidence by itself)
+    if not (spec.gtin and is_global_gtin(spec.gtin)) and not retriever.stopped:
+        hints = url_gtin.agreeing_gtins(rank(_score_pool(spec, retrieval.pool, negatives)))
+        if hints:
+            retrieval = retriever.lookup_gtins(hints)
 
     # 2. score
     scored = _score_pool(spec, retrieval.pool, negatives)
