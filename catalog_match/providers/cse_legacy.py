@@ -6,6 +6,12 @@ Constructed only when a key and a cx are configured and today <= CSE_SUNSET_DATE
 legacy imgSize=xxlarge and fileType filters are gone. Every non-200 response is
 logged with its body. On 429/403/400 the next configured key is tried.
 
+Out of the default provider chain unless CSE_LEGACY_ENABLED is on (providers.default_providers). When every
+configured key is refused with 401 or 403 (the Custom Search JSON API is closed to the project, or the key is
+restricted or revoked), the adapter turns itself off for the rest of the run: one warning line, then create()
+returns None, disabled_for_run() is True (retrieve.Retriever never asks it again, even an instance already in
+a provider list) and a call still made answers at once without a request.
+
 Mapping: link -> image_url, image.contextLink -> page_url, title -> title and
 page_title, snippet -> snippet, displayLink -> domain, image.width/height.
 """
@@ -15,6 +21,7 @@ from __future__ import annotations
 import datetime as _dt
 import logging
 import re
+import threading
 from typing import Any, List, Optional, Sequence
 from urllib.parse import quote
 
@@ -27,7 +34,8 @@ from .base import BaseProvider, ProviderHTTPError, page_domain, response_text, t
 logger = logging.getLogger(__name__)
 
 CSE_URL = "https://www.googleapis.com/customsearch/v1"
-_ROTATE_ON = (400, 403, 429)
+_ROTATE_ON = (400, 401, 403, 429)
+_REFUSED = (401, 403)            # the key itself is refused: every later call would be refused the same way
 _KEY_PARAM_RE = re.compile(r"(?i)\b((?:api_?)?key|cx)=[^&\s'\"]+")
 
 
@@ -66,9 +74,11 @@ class CseLegacyProvider(BaseProvider):
     rate_per_min = 60.0
     burst = 3
     timeout = 10.0
-    # Set once per process when every key is refused with 403 (Custom Search API not enabled for the
-    # project, or the key restricted): create() then returns None, so later SKUs stop paying the round trip.
+    # Set once per run (process) when every key is refused with 401 / 403 (Custom Search API not enabled for the
+    # project, the key restricted or revoked): create() then returns None and disabled_for_run() is True, so
+    # later SKUs stop paying the round trip. reset_run_state() clears it.
     disabled_reason: Optional[str] = None
+    _disable_lock = threading.Lock()
 
     def __init__(self, api_keys: Sequence[str], cx_list: Sequence[str], today: Optional[_dt.date] = None,
                  sunset: Optional[_dt.date] = None, session: Any = None, bucket: Any = None,
@@ -92,6 +102,27 @@ class CseLegacyProvider(BaseProvider):
             return None
         return cls(keys, cxs, today=today, sunset=sunset, **kwargs)
 
+    @classmethod
+    def disable_for_run(cls, reason: str) -> bool:
+        """Turn CSE off for the rest of the run; True for the call that did it (it logs the one line)."""
+        with cls._disable_lock:
+            if cls.disabled_reason:
+                return False
+            cls.disabled_reason = reason
+        logger.warning("cse_legacy: every key was refused (%s: Custom Search API not enabled for the project, or the "
+                       "key is restricted or revoked); Google CSE is skipped for the rest of this run", reason)
+        return True
+
+    @classmethod
+    def reset_run_state(cls) -> None:
+        """A new run asks CSE again (tests, a long-lived process starting a fresh run)."""
+        with cls._disable_lock:
+            cls.disabled_reason = None
+
+    def disabled_for_run(self) -> bool:
+        """True once a refusal turned CSE off for this run: retrieve.Retriever skips the provider."""
+        return bool(type(self).disabled_reason)
+
     def params_for(self, query: str, hl: str, key: str, cx: str) -> dict:
         return {
             "q": query,
@@ -107,6 +138,9 @@ class CseLegacyProvider(BaseProvider):
     def _search(self, query: str, hl: str, spec: SkuSpec) -> List[Candidate]:
         if (self._today or _dt.date.today()) > self.sunset:  # a long-running worker crossed the date
             raise RuntimeError("Google CSE is past CSE_SUNSET_DATE")
+        if self.disabled_for_run():          # refused earlier in this run: no request, the same answer
+            code = str(self.disabled_reason or "").rpartition("_")[2]
+            raise ProviderHTTPError(int(code) if code.isdigit() else 403, f"disabled for this run ({code})")
         http = self._session or requests
         last: Optional[ProviderHTTPError] = None
         statuses: List[int] = []
@@ -128,10 +162,8 @@ class CseLegacyProvider(BaseProvider):
             statuses.append(resp.status_code)
             if resp.status_code not in _ROTATE_ON:
                 break
-        if statuses and len(statuses) == len(self.api_keys) and all(s == 403 for s in statuses):
-            CseLegacyProvider.disabled_reason = "http_403"
-            logger.warning("cse_legacy: every key was refused with 403 (Custom Search API not enabled for the "
-                           "project, or the key is restricted); Google CSE is skipped for the rest of this run")
+        if statuses and len(statuses) == len(self.api_keys) and all(s in _REFUSED for s in statuses):
+            CseLegacyProvider.disable_for_run(f"http_{statuses[-1]}")
         raise last or ProviderHTTPError(0, "no key tried")
 
 

@@ -2339,6 +2339,12 @@ def _forget_slow_hosts():
         fetch.reset_host_breaker()
     except Exception as e:
         print(f"تنبيه: تعذر تفريغ ذاكرة المواقع البطيئة: {e}")
+    try:
+        # مزود رفض المفتاح (Google CSE: 401/403) أُطفئ لبقية التشغيل السابق فقط؛ التشغيل الجديد يجربه مرة أخرى
+        from catalog_match.providers.cse_legacy import CseLegacyProvider
+        CseLegacyProvider.reset_run_state()
+    except Exception as e:
+        print(f"تنبيه: تعذر تفريغ ذاكرة المزودين المرفوضين: {e}")
 
 
 def _harvest_pending_brand_sites():

@@ -220,6 +220,15 @@ class CandidatePool:
 # Retriever
 # ---------------------------------------------------------------------------
 
+def _disabled_for_run(provider) -> bool:
+    """A provider that turned itself off for the rest of the run (cse_legacy after a 401/403 on every key)."""
+    check = getattr(provider, "disabled_for_run", None)
+    try:
+        return bool(check()) if callable(check) else False
+    except Exception:  # pragma: no cover - defensive
+        return False
+
+
 def _valid_gtin(spec: SkuSpec) -> bool:
     return bool(spec.gtin) and is_global_gtin(spec.gtin)
 
@@ -283,7 +292,7 @@ class Retriever:
         out = []
         for p in self.providers:
             name = str(getattr(p, "name", ""))
-            if getattr(p, "kind", "search") != "search" or name in self._disabled:
+            if getattr(p, "kind", "search") != "search" or name in self._disabled or _disabled_for_run(p):
                 continue
             if query.providers_hint and name not in query.providers_hint:
                 continue

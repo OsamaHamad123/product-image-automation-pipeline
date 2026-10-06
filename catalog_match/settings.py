@@ -27,6 +27,9 @@ DEFAULTS = {
     "GOOGLE_SEARCH_API_KEYS": [],
     "GOOGLE_SEARCH_CX_LIST": [],
     "CSE_SUNSET_DATE": "2026-12-31",
+    # the legacy Google CSE adapter joins the provider chain only when switched on here (and a key and a cx exist):
+    # every live run since 2026-10-04 got HTTP 403 on every call (Custom Search JSON API closed to the project)
+    "CSE_LEGACY_ENABLED": False,
     "AUTO_PUBLISH_ENABLED": False,
     "AUTO_PUBLISH_BRANDS": [],
     # a pick of lane 'strict' (catalog_match.decide.pick_lane) of a mapped brand auto-publishes whatever
@@ -196,6 +199,11 @@ def google_search_api_keys() -> List[str]:
 
 def google_search_cx_list() -> List[str]:
     return get("GOOGLE_SEARCH_CX_LIST") or as_list(os.getenv("GOOGLE_SEARCH_CX"))
+
+
+def cse_legacy_enabled() -> bool:
+    """True only when CSE_LEGACY_ENABLED is set: the legacy Google CSE adapter is out of the default chain."""
+    return bool(get("CSE_LEGACY_ENABLED"))
 
 
 def cse_sunset_date() -> _dt.date:
