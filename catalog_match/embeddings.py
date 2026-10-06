@@ -592,6 +592,160 @@ def references(model_id: str, clock=time.monotonic) -> ReferenceSet:
 
 
 # ---------------------------------------------------------------------------
+# The brand look check (evidence only: a review warning, never a decision)
+# ---------------------------------------------------------------------------
+
+# the check runs only for a brand with at least this many approved pictures (fewer cannot say how the brand looks)
+MIN_BRAND_REFERENCES = 3
+LOOK_MISMATCH = "brand_look_mismatch"
+
+
+def _compact(key: str) -> str:
+    return key.replace(" ", "")
+
+
+def related_keys(a: str, b: str) -> bool:
+    """Two brand keys that may name the same brand: equal without spaces, or one inside the other (4+ letters)
+    ('al alali' / 'alali', 'sup t' / 'supt'). Such a brand is never 'another brand' for the check."""
+    ca, cb = _compact(a), _compact(b)
+    if not ca or not cb:
+        return False
+    if ca == cb:
+        return True
+    short, long_ = sorted((ca, cb), key=len)
+    return len(short) >= 4 and short in long_
+
+
+def spec_brand_keys(spec) -> Tuple[List[str], List[str]]:
+    """(the SKU's own brand keys, the related keys that are never 'another brand'): own = the sheet brand, its
+    mapped and discovered spellings; related adds the brand's phrases, required and sibling sub-brands."""
+    own = {brand_key(b) for b in (getattr(spec, "brand_raw", ""), getattr(spec, "brand_canonical", ""),
+                                  *(getattr(spec, "discovered_brands", ()) or ()))}
+    related = set(own)
+    for b in (*(getattr(spec, "match_brands", ()) or ()), *(getattr(spec, "required_brands", ()) or ()),
+              *(getattr(spec, "sibling_brands", ()) or ())):
+        related.add(brand_key(b))
+    own.discard("")
+    related.discard("")
+    return sorted(own), sorted(related)
+
+
+@dataclass
+class LookVerdict:
+    """What the vectors say about one candidate: its closest approved picture of its own brand (same, from n_same
+    pictures) and of another brand (other, other_brand); mismatch per the model's Thresholds."""
+    same: float
+    other: Optional[float]
+    other_brand: str
+    n_same: int
+    mismatch: bool
+    model: str = ""
+
+    def as_dict(self) -> dict:
+        return {"same": round(self.same, 3), "other": None if self.other is None else round(self.other, 3),
+                "other_brand": self.other_brand, "n_same": self.n_same, "mismatch": self.mismatch,
+                "model": self.model}
+
+
+def judge(vector, refs: ReferenceSet, own: Sequence[str], related: Sequence[str], thresholds: Thresholds,
+          min_refs: int = MIN_BRAND_REFERENCES, model: str = "") -> Optional[LookVerdict]:
+    """The brand look verdict of one picture, or None when it cannot be judged (no vector, too few approved
+    pictures of the brand).
+
+    mismatch: far from EVERY approved picture of its brand (same < same_max) AND close to an approved picture of
+    another brand (other >= other_min) AND that brand clearly closer (other - same >= margin).
+    """
+    if vector is None:
+        return None
+    own_keys = [k for k in refs.keys() if any(related_keys(k, o) for o in own)]
+    n_same = refs.count(own_keys)
+    if n_same < min_refs:
+        return None
+    same, _ = refs.best(vector, own_keys)
+    if same is None:
+        return None
+    others = [k for k in refs.keys() if k not in own_keys and not any(related_keys(k, r) for r in related)]
+    other, other_brand = refs.best(vector, others)
+    mismatch = (other is not None and same < thresholds.same_max and other >= thresholds.other_min
+                and other - same >= thresholds.margin)
+    return LookVerdict(same=same, other=other, other_brand=other_brand, n_same=n_same, mismatch=bool(mismatch),
+                       model=model)
+
+
+class BrandLook:
+    """The brand look check of one SKU (for_spec): reads the approved pictures once, embeds candidates in batches."""
+
+    def __init__(self, spec, embedder, refs: ReferenceSet, thresholds: Thresholds):
+        self.spec = spec
+        self.embedder = embedder
+        self.refs = refs
+        self.thresholds = thresholds
+        self.own, self.related = spec_brand_keys(spec)
+
+    @classmethod
+    def for_spec(cls, spec) -> Optional["BrandLook"]:
+        """None (no check, nothing embedded) when EMBEDDINGS is off, the SKU has no brand, or its brand has fewer
+        than MIN_BRAND_REFERENCES approved pictures: the model is not even loaded for such a brand."""
+        embedder = get_embedder()
+        if embedder is None:
+            return None
+        look = cls(spec, embedder, references(embedder.model_id), _thresholds_of(embedder))
+        if not look.own:
+            return None
+        own_keys = [k for k in look.refs.keys() if any(related_keys(k, o) for o in look.own)]
+        if look.refs.count(own_keys) < MIN_BRAND_REFERENCES:
+            return None
+        return look
+
+    def annotate(self, ranked) -> int:
+        """Embed every downloaded candidate that has no vector yet (one batch) and write its verdict to
+        fetched.look; returns how many pictures were embedded. Never changes a status, a reason or the order."""
+        from .fetch import load_image
+
+        todo = [rc.fetched for rc in ranked or ()
+                if rc.fetched is not None and rc.fetched.ok and getattr(rc.fetched, "embedding", None) is None]
+        if todo:
+            vectors = self.embedder.embed([load_image(f) for f in todo])
+            for fetched, vector in zip(todo, vectors):
+                fetched.embedding = vector
+        for rc in ranked or ():
+            fetched = rc.fetched
+            if fetched is None or not fetched.ok or getattr(fetched, "embedding", None) is None:
+                continue
+            verdict = judge(fetched.embedding, self.refs, self.own, self.related, self.thresholds,
+                            model=self.embedder.model_id)
+            fetched.look = verdict.as_dict() if verdict is not None else None
+        return len(todo)
+
+
+def _thresholds_of(embedder) -> Thresholds:
+    key = str(getattr(embedder, "model_id", "") or "").split(":", 1)[0]
+    return THRESHOLDS.get(key) or THRESHOLDS[settings.embeddings_mode() if enabled() else "dinov2"]
+
+
+def annotate(spec, ranked) -> int:
+    """The brand look evidence on a SKU's downloaded candidates (pipeline): how many pictures were embedded.
+
+    0 and nothing touched when EMBEDDINGS is off or the brand has too few approved pictures. Never raises: a failure
+    is logged and the candidates simply carry no verdict (no warning).
+    """
+    if not enabled():
+        return 0
+    try:
+        look = BrandLook.for_spec(spec)
+        return look.annotate(ranked) if look is not None else 0
+    except Exception:
+        logger.exception("embeddings: the brand look check failed for %s", getattr(spec, "sku_key", ""))
+        return 0
+
+
+def look_mismatch(fetched) -> bool:
+    """The candidate's picture looks like another brand's approved pack (fetched.look, set by annotate)."""
+    look = getattr(fetched, "look", None) if fetched is not None else None
+    return bool(isinstance(look, dict) and look.get("mismatch"))
+
+
+# ---------------------------------------------------------------------------
 # Storing an approval's vector
 # ---------------------------------------------------------------------------
 

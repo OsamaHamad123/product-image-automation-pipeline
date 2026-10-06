@@ -185,6 +185,10 @@ class FetchedImage:
     height: Optional[int] = None
     path_or_bytes: Any = None        # path in the candidate store, or raw bytes in tests
     phash: Optional[str] = None      # hex string from image_dedup_bktree.calculate_phash
+    # catalog_match.embeddings (EMBEDDINGS on), evidence only: the picture's unit vector and its brand look verdict
+    # ({same, other, other_brand, n_same, mismatch, model}); None when off or not judged
+    embedding: Any = field(default=None, repr=False, compare=False)
+    look: Optional[Dict[str, Any]] = None
 
 
 @dataclass

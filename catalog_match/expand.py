@@ -891,7 +891,7 @@ def _grow(inp: RoundInput, report: RoundReport, new: List[Candidate],
     gone = {id(rc) for rc in fetch_list} - {id(rc) for rc in kept}
     everything = [rc for rc in everything if id(rc) not in gone]
     report.phash_dropped += n_dropped
-    p._assess(kept)
+    p._assess(kept, spec)
     everything = p._rerank(everything)
     _inherit_readings(everything, kept)
     if failed_shas:
@@ -1196,7 +1196,7 @@ def _upgrade(inp: RoundInput, report: RoundReport) -> RoundReport:
         p = _stages()
         kept, n_dropped = p._fetch(spec, inp.fetcher, rank_rcs(fresh)[:UPGRADE_MAX_FETCH], inp.phash_negatives)
         report.phash_dropped += n_dropped
-        p._assess(kept)
+        p._assess(kept, spec)
         for rc in kept:
             if not p._usable(rc):
                 continue

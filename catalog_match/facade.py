@@ -164,6 +164,8 @@ def evidence(rc: RankedCandidate, spec: Optional[SkuSpec] = None) -> Dict[str, A
         "page_gtin": display_gtin(rc.candidate.gtin_on_page) if is_global_gtin(rc.candidate.gtin_on_page) else None,
         # X0: another image of the page's own gallery, offered because its main image failed (the review says so)
         "page_gallery": bool(getattr(rc.candidate, "page_gallery", False)),
+        # catalog_match.embeddings (EMBEDDINGS on): the brand look cosines, kept with the review for re-tuning
+        **({"look": dict(rc.fetched.look)} if rc.fetched is not None and getattr(rc.fetched, "look", None) else {}),
     })
 
 

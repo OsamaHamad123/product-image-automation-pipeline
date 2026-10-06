@@ -46,7 +46,7 @@ import logging
 import time
 from typing import Any, Iterable, List, Mapping, Optional, Sequence, Set, Tuple, Union
 
-from . import brand_discovery, decide, expand as expand_mod, quality as quality_mod
+from . import brand_discovery, decide, embeddings, expand as expand_mod, quality as quality_mod
 from .fetch import load_image, phash_distance
 from .models import (
     Candidate, CandidateScore, FetchedImage, RankedCandidate, SearchOutcome, SkuSpec,
@@ -215,7 +215,15 @@ def _fetch(spec: SkuSpec, fetcher, ranked: List[RankedCandidate], phash_negative
     return kept, len(dropped)
 
 
-def _assess(ranked: Sequence[RankedCandidate]) -> None:
+def _assess(ranked: Sequence[RankedCandidate], spec: Optional[SkuSpec] = None) -> None:
+    """Soft quality of every downloaded candidate; with the spec (expand's new candidates), also their brand look
+    evidence (embeddings.annotate: nothing with EMBEDDINGS off)."""
+    _quality(ranked)
+    if spec is not None:
+        embeddings.annotate(spec, ranked)
+
+
+def _quality(ranked: Sequence[RankedCandidate]) -> None:
     for rc in ranked:
         if rc.fetched is None or not rc.fetched.ok:
             continue
@@ -354,6 +362,10 @@ def find_product_image(spec: Union[SkuSpec, Mapping[str, Any]], *, providers: Op
     _assess(ranked)
     ranked = _rerank(ranked)
     timer.lap("quality")
+    # 5b. brand look evidence (EMBEDDINGS on, a brand with approved pictures): a review warning only, the order and
+    #     every status stay as they are
+    if embeddings.annotate(spec, ranked):
+        timer.lap("embeddings")
 
     # 6. first verifier call on the top 4 usable candidates
     results: List[VerificationResult] = []
