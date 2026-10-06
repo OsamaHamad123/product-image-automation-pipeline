@@ -72,6 +72,11 @@ def test_the_rescue_query_writes_the_guess_and_never_the_brand_alone():
     assert query_plan.rescue_query(GOLD, _hint(GOLD), ()) is None                       # the guess is the sheet's
     assert query_plan.rescue_query(SUPT, QueryHint(expanded_name="Super Tasty", brand="Super Tasty"), ()) is None
     assert query_plan.rescue_query(SUPT, QueryHint(expanded_name="Tuna", brand=""), ()) is None
+    # no brand cell, and the name already writes the guess: Q1 searched it, nothing to rescue
+    brandless = build_sku_spec({"name": "AMERICANA NUGGETS 400G", "brand": ""}, {})
+    assert query_plan.rescue_query(brandless, QueryHint("Americana Chicken Nuggets 400g", "Americana"), ()) is None
+    guessed = query_plan.rescue_query(brandless, QueryHint("Al Kabeer Chicken Nuggets 400g", "Al Kabeer"), ())
+    assert guessed.text == "Al Kabeer Chicken Nuggets 400g"
 
 
 # ---------------------------------------------------------------------------

@@ -492,6 +492,9 @@ def rescue_query(spec: SkuSpec, hint: Optional[QueryHint], already: Sequence[str
              + tuple(spec.discovered_brands) if p}
     if _compact(guess) in known:
         return None
+    if not known and in_sheet(spec, guess):
+        return None            # no brand cell, and the name already writes the guess: Q1 searched it
+
     parts = _hint_parts(spec, hint, guess, [guess, hint.brand])
     if parts is None:
         return None
