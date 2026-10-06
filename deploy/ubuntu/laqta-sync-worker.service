@@ -22,6 +22,13 @@ Environment=U2NET_HOME=@MODELS_DIR@
 ExecStart=@APP_DIR@/.venv/bin/python -u @APP_DIR@/sync_worker.py
 Restart=always
 RestartSec=15
+# A stop (systemctl stop, a reboot, the dashboard) sends SIGTERM and the process shuts down gracefully: it finishes the
+# product in hand (up to its 45 s grace, SHUTDOWN_GRACE_S), writes the report and the Telegram message, and exits with
+# code 3 ("stopped on purpose"). TimeoutStopSec is the wait before systemd sends SIGKILL: well above the grace.
+KillSignal=SIGTERM
+TimeoutStopSec=120
+# Exit 3 is "stopped on purpose" here too: a clean stop never raises the OnFailure alert.
+SuccessExitStatus=3
 MemoryMax=@MEMORY_MAX@
 OOMPolicy=kill
 OOMScoreAdjust=300

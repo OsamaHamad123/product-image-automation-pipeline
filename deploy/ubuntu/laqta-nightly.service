@@ -30,6 +30,11 @@ ExecStart=@APP_DIR@/.venv/bin/python -X utf8 @APP_DIR@/scripts/run_nightly.py --
 SuccessExitStatus=3
 # Hard backstop above NIGHTLY_MAX_HOURS: a hung run must not block every later night.
 TimeoutStartSec=10h
+# A stop (systemctl stop, a reboot, the dashboard) sends SIGTERM and the process shuts down gracefully: it finishes the
+# product in hand (up to its 45 s grace, SHUTDOWN_GRACE_S), writes the report and the Telegram message, and exits with
+# code 3 ("stopped on purpose"). TimeoutStopSec is the wait before systemd sends SIGKILL: well above the grace.
+KillSignal=SIGTERM
+TimeoutStopSec=120
 Nice=10
 MemoryMax=@MEMORY_MAX@
 OOMPolicy=kill

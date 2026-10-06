@@ -25,9 +25,15 @@ Environment=PYTHONUTF8=1
 Environment=PYTHONIOENCODING=utf-8
 Environment=U2NET_HOME=@MODELS_DIR@
 ExecStart=/bin/bash @APP_DIR@/deploy/ubuntu/run-launcher.sh @APP_DIR@
-SuccessExitStatus=KILL TERM
+# 3 = stopped on purpose (graceful stop); KILL = the dashboard's stop button after its own wait; TERM = a plain stop.
+SuccessExitStatus=3 KILL TERM
 # Hard backstop (a run is hours at most): a hung run must not block the launcher for ever.
 TimeoutStartSec=12h
+# A stop (systemctl stop, a reboot, the dashboard) sends SIGTERM and the process shuts down gracefully: it finishes the
+# product in hand (up to its 45 s grace, SHUTDOWN_GRACE_S), writes the report and the Telegram message, and exits with
+# code 3 ("stopped on purpose"). TimeoutStopSec is the wait before systemd sends SIGKILL: well above the grace.
+KillSignal=SIGTERM
+TimeoutStopSec=120
 Nice=5
 MemoryMax=@MEMORY_MAX@
 OOMPolicy=kill

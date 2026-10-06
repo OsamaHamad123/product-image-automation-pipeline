@@ -1038,6 +1038,33 @@ def test_failure_alert_is_attached_to_the_nightly_run_the_worker_and_the_backup_
         assert not values(rendered_unit(name), "Unit", "OnFailure"), name     # no alert about an alert, none every 2 minutes
 
 
+SHUTDOWN_GRACE_S = 45        # the graceful-stop wait of the worker and run_nightly (their SIGTERM handler), seconds
+
+
+def seconds(value):
+    """systemd time such as 120, 120s or 2min -> seconds."""
+    m = re.fullmatch(r"(\d+)\s*(s|sec|min|m|h)?", value.strip())
+    return int(m.group(1)) * {None: 1, "s": 1, "sec": 1, "min": 60, "m": 60, "h": 3600}[m.group(2)]
+
+
+@pytest.mark.parametrize("name", ["laqta-nightly.service", "laqta-sync-worker.service", "laqta-run.service"])
+def test_long_running_units_get_time_to_stop_gracefully_and_a_clean_stop_is_not_a_failure(name):
+    """SIGTERM starts a graceful shutdown (up to SHUTDOWN_GRACE_S, then the report and the Telegram message) and the
+    process exits with code 3, 'stopped on purpose': systemd must wait longer than the grace before SIGKILL, and exit
+    3 must count as success so that OnFailure= (laqta-alert@) does not fire on a stop."""
+    unit = rendered_unit(name)
+    assert values(unit, "Service", "KillSignal") == ["SIGTERM"]
+    stop_wait = seconds(values(unit, "Service", "TimeoutStopSec")[0])
+    assert stop_wait >= 90 and stop_wait > 2 * SHUTDOWN_GRACE_S
+    assert "3" in values(unit, "Service", "SuccessExitStatus")[0].split()
+    assert not values(unit, "Service", "KillMode") or values(unit, "Service", "KillMode") == ["control-group"]   # stop reaches every process
+
+
+def test_the_dashboard_run_unit_still_accepts_the_stop_buttons_kill_and_a_plain_stop():
+    codes = values(rendered_unit("laqta-run.service"), "Service", "SuccessExitStatus")[0].split()
+    assert {"3", "KILL", "TERM"} <= set(codes)
+
+
 def test_alert_unit_runs_the_alert_script_for_the_failed_unit_as_the_app_user():
     unit = rendered_unit("laqta-alert@.service")
     assert values(unit, "Service", "Type") == ["oneshot"] and values(unit, "Service", "User") == ["laqta"]
