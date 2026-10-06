@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from catalog_match.sitemaps import SitemapHarvester, load_stores, parse_robots, parse_sitemap
+from catalog_match.sitemaps import SitemapHarvester, load_stores, parse_robots, parse_sitemap, suggest_config
 from test_cm_sitemaps import FakeHttp, harvester, index_of, urlset
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "stores"
@@ -99,6 +99,23 @@ def test_each_stores_disallow_rules_and_crawl_delay_are_kept(key, child, disallo
     assert (s.base_url + disallowed, "disallowed by robots.txt") in rep.skipped
     assert s.base_url + disallowed not in h.http.calls
     assert waits == [delay, delay]                      # the store's Crawl-delay (at least 1 s) between requests
+
+
+def test_discover_finds_the_include_sharjah_coop_ships_with():
+    # its index lists the English and Arabic product lists and others; discover reads three lists and prints the rest
+    s = store("sharjahcoop")
+    base = s.base_url
+    children = ([base + f"/sitemaps/Product-en-AED-{i}.xml" for i in range(1, 6)]
+                + [base + f"/sitemaps/Product-ar-AED-{i}.xml" for i in (1, 2)]
+                + [base + "/sitemaps/Category-en-AED-1.xml", base + "/sitemaps/Content-en-AED-1.xml"])
+    pages = {base + "/robots.txt": (200, fixture(ROBOTS["sharjahcoop"])), s.sitemaps[0]: (200, index_of(*children))}
+    for i, url in enumerate(children[:5], 1):
+        pages[url] = (200, urlset(SAMPLES["sharjahcoop"]["product"][i - 1]))
+    h = SitemapHarvester(http=FakeHttp(pages), sleep=lambda _: None, clock=lambda: 0.0, utc_now=lambda: INSIDE)
+    rep = h.harvest(replace(s, include=None), discover=True)
+    found = suggest_config(rep)
+    assert found["sitemaps"] == list(s.sitemaps) and found["sitemap_include"] == s.include.pattern
+    assert (found["listed"], found["kept"]) == (9, 5)
 
 
 def test_sharjah_coop_is_not_read_outside_its_visit_time():

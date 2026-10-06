@@ -10,7 +10,8 @@ SitemapHarvester().harvest(store, on_urls=None, max_urls=None, max_sitemaps=None
     in batches (on_urls returns how many were new). With discover=True the sitemap indexes are read
     first (children named '...index...' before the others, and past the cap) but at most
     DISCOVER_URLSETS lists of URLs, and samples of matching and non-matching URLs are kept, so the
-    store's patterns can be checked before a full harvest.
+    store's patterns can be checked before a full harvest. Its report ends with the store's 'sitemaps' and
+    'sitemap_include' lines ready to paste into the stores file (suggest_config, paste_lines).
 
 Only what a store publishes for crawlers is read, and nothing is worked around:
 * robots.txt first (RFC 9309: the group naming ROBOTS_AGENT, else '*'; the longest matching rule
@@ -511,6 +512,7 @@ class SitemapHarvester:
         rep.started_from = list(starts)
         queue = deque((url, 0) for url in starts)
         seen = set()
+        parent_of: Dict[str, str] = {}       # a child sitemap -> the index that listed it (the tree's 'parent')
         emitted = urlsets = failed = 0
         start_answers: List[str] = []        # why each starting point gave nothing, while nothing was read
         while queue or (guesses and rep.sitemaps_read == 0 and len(rep.started_from) < len(guesses)
@@ -556,8 +558,11 @@ class SitemapHarvester:
                 continue
             rep.sitemaps_read += 1
             if kind == "index":
-                rep.tree.append({"depth": depth, "url": url, "kind": "index", "entries": len(entries)})
+                rep.tree.append({"depth": depth, "url": url, "kind": "index", "entries": len(entries),
+                                 "parent": parent_of.get(url)})
                 children = [loc for loc, _ in entries]
+                for child in children:
+                    parent_of.setdefault(child, url)
                 if discover:     # the indexes first (the store's structure), then the product lists
                     children.sort(key=lambda u: 0 if "index" in u.lower() else 1 if "product" in u.lower() else 2)
                 if depth + 1 > MAX_DEPTH:
@@ -568,7 +573,7 @@ class SitemapHarvester:
             urlsets += 1
             products = [(loc, lastmod) for loc, lastmod in entries if store.is_product(loc)]
             rep.tree.append({"depth": depth, "url": url, "kind": "urlset", "entries": len(entries),
-                             "products": len(products)})
+                             "products": len(products), "parent": parent_of.get(url)})
             rep.urls_seen += len(entries)
             rep.product_urls += len(products)
             for loc, _ in products[:SAMPLES - len(rep.product_samples)]:
@@ -650,7 +655,83 @@ def format_report(rep: HarvestReport, store: Optional[StoreConfig] = None, disco
     if discover:
         lines.extend(["   other url samples (not product pages by the pattern):"]
                      + [f"     - {u}" for u in rep.other_samples[:SAMPLES]])
+        lines.extend(paste_lines(rep))
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# What a --discover run found, ready to paste into the stores file
+# ---------------------------------------------------------------------------
+
+_REGEX_SPECIAL = frozenset(".^$*+?{}[]\\|()")
+
+
+def _path_pattern(url: str) -> str:
+    """A sitemap URL's path as a regular expression with its numbers generalised, so the other files of the same
+    series match it too: '/sitemaps/Product-en-AED-12.xml' -> '/sitemaps/Product-en-AED-\\d+\\.xml$'."""
+    out = []
+    for part in re.split(r"(\d+)", urlsplit(url).path or "/"):
+        out.append(r"\d+" if part.isdigit() else "".join("\\" + ch if ch in _REGEX_SPECIAL else ch for ch in part))
+    return "".join(out) + "$"
+
+
+def suggest_config(rep: HarvestReport) -> Optional[Dict[str, Any]]:
+    """The stores-file values a discovery found: {sitemaps, sitemap_include, listed, kept, also_empty}; None when no
+    URL list that was read held a product page.
+
+    sitemaps: the starting points the product pages were found under (not the other countries' or languages').
+    sitemap_include: the files on the way from them to the URL lists that held product pages, numbers generalised
+    (the unread files of the same series match too); '' when it would keep every file the indexes list anyway.
+    listed / kept: the files the indexes list and how many of them the include keeps; also_empty: URL lists that were
+    read, held no product page and still match it (the file names cannot tell them apart)."""
+    nodes = {n["url"]: n for n in rep.tree}
+    roots: List[str] = []
+    chain: List[str] = []
+    for node in rep.tree:
+        if node["kind"] != "urlset" or not node.get("products"):
+            continue
+        hops = 0
+        while node.get("parent") in nodes and hops <= MAX_DEPTH:      # up to the starting point
+            if node["url"] not in chain:
+                chain.append(node["url"])
+            node, hops = nodes[node["parent"]], hops + 1
+        if node["url"] not in roots:
+            roots.append(node["url"])
+    if not roots:
+        return None
+    listed = list(dict.fromkeys([n["url"] for n in rep.tree if n.get("parent")]
+                                + [u for u, why in rep.skipped if why == "not read (discover)"]))
+    patterns = list(dict.fromkeys(_path_pattern(u) for u in chain))
+    include = (patterns[0] if len(patterns) == 1 else "(?:" + "|".join(p[:-1] for p in patterns) + ")$") \
+        if patterns else ""
+    regex = re.compile(include) if include else None
+    kept = [u for u in listed if regex is None or regex.search(u)]
+    if len(kept) == len(listed):
+        include = ""                         # every listed file is read anyway: nothing to filter
+    also_empty = sum(1 for n in rep.tree if n.get("parent") and n["kind"] == "urlset" and not n.get("products")
+                     and (not include or (regex is not None and regex.search(n["url"]))))
+    return {"sitemaps": roots, "sitemap_include": include, "listed": len(listed), "kept": len(kept),
+            "also_empty": also_empty}
+
+
+def paste_lines(rep: HarvestReport) -> List[str]:
+    """The console lines of suggest_config: exactly what to paste into the store's entry of catalog_stores.json."""
+    found = suggest_config(rep)
+    if found is None:
+        why = ("the store did not give its sitemaps" if rep.status in ("blocked", "error", "outside_visit_time")
+               else "no page of the URL lists read matched product_path: compare the samples above with it")
+        return [f"   nothing to paste ({why})"]
+    lines = [f'   paste these lines into the store "{rep.store}" of catalog_match/data/catalog_stores.json:',
+             f'     "sitemaps": {json.dumps(found["sitemaps"])},',
+             f'     "sitemap_include": {json.dumps(found["sitemap_include"])},',
+             '     "enabled": true,']
+    if found["listed"]:
+        lines.append(f"   (the include keeps {found['kept']} of the {found['listed']} sitemaps the indexes list)")
+    if found["also_empty"]:
+        lines.append(f"   note: {found['also_empty']} sitemap(s) read without a product page are kept as well")
+    if rep.status in ("blocked", "error"):
+        lines.append(f"   note: the store stopped answering part way ({rep.status}): run --discover again before pasting")
+    return lines
 
 
 def enabled_stores(stores: Sequence[StoreConfig], keys: Optional[Sequence[str]] = None) -> List[StoreConfig]:
