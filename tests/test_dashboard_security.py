@@ -254,3 +254,45 @@ def test_python_and_php_share_the_sheet_rules():
     # the PHP single-quoted literal: \' is a quote and \\\\ two backslashes (one escaped backslash in the regex)
     assert php.replace("\\'", "'").replace("\\\\\\\\", "\\\\").replace("$", r"\Z") == cli_bridge.SHEET_URL_RE.pattern \
         .replace('\\"', '"')
+
+
+# ---------------------------------------------------------------------------
+# The session cookie and the dependency audit in CI
+# ---------------------------------------------------------------------------
+
+def _session_secure(app_url, secure_setting=None):
+    env = {k: v for k, v in os.environ.items() if k not in ("SESSION_SECURE_COOKIE", "APP_URL")}
+    env.update({"APP_ENV": "testing", "APP_KEY": "base64:" + "A" * 43 + "=", "APP_URL": app_url})
+    if secure_setting is not None:
+        env["SESSION_SECURE_COOKIE"] = secure_setting
+    dash = str(DASH).replace("\\", "/")
+    code = (f"require '{dash}/vendor/autoload.php'; $app = require '{dash}/bootstrap/app.php';"
+            "$app->make(Illuminate\\Contracts\\Console\\Kernel::class)->bootstrap();"
+            "echo json_encode(config('session.secure'));")
+    result = subprocess.run([PHP, "-r", code], cwd=DASH, env=env, capture_output=True, text=True, timeout=120,
+                            encoding="utf-8")
+    assert result.returncode == 0, result.stdout[-2000:] + result.stderr[-2000:]
+    return json.loads(result.stdout)
+
+
+@NEEDS_LARAVEL
+def test_the_session_cookie_is_secure_by_default_over_https():
+    assert _session_secure("https://laqta.example.com") is True
+    assert _session_secure("HTTPS://laqta.example.com") is True
+    assert _session_secure("http://127.0.0.1:8000") is False          # a local install over http still logs in
+    assert _session_secure("https://laqta.example.com", "false") is False   # an explicit setting decides
+    assert _session_secure("http://127.0.0.1:8000", "true") is True
+
+
+def test_ci_audits_dependencies_without_blocking():
+    import yaml
+
+    ci = yaml.safe_load((DASH.parent / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"))
+    audit = ci["jobs"]["audit"]
+    runs = {step.get("name", ""): step for step in audit["steps"]}
+    pip_step = next(s for n, s in runs.items() if n.startswith("pip-audit"))
+    composer_step = next(s for n, s in runs.items() if n.startswith("composer audit"))
+    assert audit["continue-on-error"] is True and pip_step["continue-on-error"] is True
+    assert composer_step["continue-on-error"] is True and composer_step["working-directory"] == "dashboard"
+    assert "pip-audit -r requirements.txt" in pip_step["run"] and "composer audit --locked" in composer_step["run"]
+    assert "continue-on-error" not in ci["jobs"]["test"]                   # the tests themselves still block

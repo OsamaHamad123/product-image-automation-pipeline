@@ -169,7 +169,9 @@ return [
     |
     */
 
-    'secure' => env('SESSION_SECURE_COOKIE'),
+    // Secure by default when the dashboard is served over https (APP_URL); SESSION_SECURE_COOKIE=true/false
+    // still decides when it is set (a plain-http local install keeps working with no setting at all).
+    'secure' => env('SESSION_SECURE_COOKIE', str_starts_with(strtolower(trim((string) env('APP_URL', ''))), 'https://')),
 
     /*
     |--------------------------------------------------------------------------
