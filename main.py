@@ -32,6 +32,7 @@ def _reconfigure_stdout():
 
 _reconfigure_stdout()
 
+import atomic_file
 import config
 print = config.log_runner
 import google_sheets
@@ -125,10 +126,10 @@ def load_run_config():
 
 def save_progress(current, total, success, failed, current_product=""):
     try:
-        os.makedirs("temp", exist_ok=True)
-        with open("temp/batch_progress.json", "w", encoding="utf-8") as f:
-            json.dump({"current": current, "total": total, "success": success, "failed": failed,
-                       "current_product": current_product}, f, ensure_ascii=False)
+        # ذرياً: لوحة التحكم تقرأ التقدم أثناء كتابته
+        atomic_file.write_json(os.path.join("temp", "batch_progress.json"),
+                               {"current": current, "total": total, "success": success, "failed": failed,
+                                "current_product": current_product}, ensure_ascii=False)
     except Exception:
         pass
 

@@ -32,6 +32,7 @@ import gspread
 import pymysql
 from gspread.exceptions import APIError
 
+import atomic_file
 import config
 import db_connect
 from catalog_match.gtin import normalize_gtin
@@ -240,8 +241,8 @@ def cached_products():
 def _write_cache(name, payload, version):
     try:
         payload = dict(payload, timestamp=time.time(), version=version)
-        with open(_cache_path(name), "w", encoding="utf-8") as f:
-            json.dump(payload, f, ensure_ascii=False, indent=2)
+        # ذرياً: الجسر واللوحة يقرآن الكاش أثناء كتابته، وانقطاع الكهرباء لا يترك ملفاً نصف مكتوب
+        atomic_file.write_json(_cache_path(name), payload, ensure_ascii=False, indent=2)
     except Exception as ce:
         logger.warning("[Google Sheets Cache] تعذر كتابة %s: %s", name, ce)
 
