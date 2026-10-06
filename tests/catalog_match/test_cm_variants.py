@@ -203,3 +203,34 @@ def test_frozen_is_the_normal_state_of_fries_paratha_and_nuggets():
     assert unstated_marked({}, extract_variants("Almarai Frozen Milk"), "ALMARAI MILK 1L") == ["form"]
     assert unstated_marked({}, extract_variants("Aida Frozen French Fries 1kg")) == ["form"]   # no SKU context
     assert "frozen" in unmarked_values("form", fries) and "frozen" not in unmarked_values("form", "milk")
+
+
+def test_a_length_is_the_variant_of_a_cut_or_a_width():
+    """eval realistic set, real-04: 'TOMEX FRENCH FRIES 6MM 1 KG' preselected the 9 mm sibling in lane strict, since
+    'mm' was only a unit word. A length is now an axis (millimetres), compared like any other."""
+    from catalog_match.variants import LENGTH_AXIS, lengths
+
+    assert lengths("TOMEX FRENCH FRIES 6MM 1 KG") == {"6mm"} and lengths("tomex-french-fries-9mm-1kg") == {"9mm"}
+    assert lengths("Cling film 0.6 cm") == {"6mm"} and lengths("napkins 20cmx20cm") == {"200mm"}
+    assert lengths("Foil 30cm x 75m") == {"300mm"}                    # metres are a roll's length, not its width
+    assert lengths("Almarai Milk 1L") == set() and lengths("100mmol") == set() and lengths("MM brand") == set()
+    six, nine = extract_variants("TOMEX FRENCH FRIES 6MM 1 KG"), extract_variants("Tomex French Fries 9mm 1kg")
+    assert six == {LENGTH_AXIS: "6mm"} and conflicts(six, nine) == [LENGTH_AXIS]
+    assert conflicts(six, extract_variants("Tomex Fries 0.6cm 1kg")) == []
+    assert matched_axes(six, extract_variants("Tomex French Fries 6 mm 1kg")) == [LENGTH_AXIS]
+    # a SKU that states no length accepts any: never a conflict, never an unstated 'marked' value
+    assert conflicts({}, nine) == [] and unstated_marked({}, nine, "MR JOHN FRENCH FRIES 2.5KG") == []
+
+
+def test_the_other_cut_of_a_sku_is_rejected_by_its_own_listing():
+    from catalog_match.identity import build_sku_spec
+    from catalog_match.models import Candidate
+    from catalog_match.score import score_candidate
+
+    spec = build_sku_spec({"name": "TOMEX FRENCH FRIES 6MM 1 KG", "brand": "TOMEX"}, {})
+    listing = "Tomex French Fries 9mm 1kg"
+    cand = Candidate(image_url="https://cdn.mafrservices.com/pim-content/tomex-9mm.jpg",
+                     page_url="https://www.carrefouruae.com/mafuae/en/tomex-french-fries-9mm-1kg/p/41407",
+                     page_title=listing, title=listing, domain="carrefouruae.com", provider="serper", sanctioned=True)
+    score = score_candidate(spec, cand)
+    assert score.tier is None and any(r.startswith("variant_conflict:cut") for r in score.hard_reject)

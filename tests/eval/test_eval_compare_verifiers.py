@@ -66,8 +66,9 @@ def test_a_recorded_reader_answers_with_its_own_models_readings_and_counts_the_r
     lite = vc.RecordedReader(vc.recorded_model(cassette), vc.readings_for(cassette, vc.recorded_model(cassette)), sku)
     strong = vc.RecordedReader(STRONG, vc.readings_for(cassette, STRONG), sku)
     a, b = lite.verify(spec, fetched), strong.verify(spec, fetched)
-    # the 9 mm bag: the primary's reading is a MATCH, the strong model's (variant 'no') is not
-    assert a.verdicts[0].decision == "MATCH" and b.verdicts[0].decision != "MATCH"
+    # the 9 mm bag: the strong model reads '9mm' (MISMATCH); the primary reads no cut, and since the length is a
+    # variant the SKU states ('6MM', variants.LENGTH_AXIS) a reading that leaves it unconfirmed is not a MATCH either
+    assert a.verdicts[0].decision == "UNSURE" and b.verdicts[0].decision == "MISMATCH"
     assert a.usage[0]["images"] == 3 and a.usage[0]["model"] == "gemini-3.1-flash-lite"
     empty = vc.RecordedReader(STRONG, {}, sku)
     res = empty.verify(spec, fetched)
@@ -145,7 +146,8 @@ def test_compare_verifiers_prints_accuracy_lanes_cost_and_coverage(capsys, tmp_p
     for word in ("correct pick", "$/100", "answers recorded", "strict", "current", "strong_primary", "strong_max2"):
         assert word in out, word
     rows = {r["config"]: r for r in json.loads((tmp_path / "ab.json").read_text(encoding="utf-8"))["configs"]}
-    assert rows["strong_primary"]["correct_pick"] > rows["current"]["correct_pick"]     # the 9 mm sibling
+    # the 9 mm sibling no longer needs the strong model: its listing states the other cut (variants.LENGTH_AXIS)
+    assert rows["strong_primary"]["correct_pick"] == rows["current"]["correct_pick"] == len(skus)
     assert rows["current"]["usd_per_100"] > 0 and rows["strong_primary"]["strong_calls"] == 0
     assert all(r["answers_recorded"] == 1.0 for r in rows.values())
     assert set(rows["current"]["per_lane"]) >= set(metrics.LANES)
