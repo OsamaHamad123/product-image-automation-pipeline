@@ -350,6 +350,8 @@ def export_row(row, candidates, mappings=None, vocab=None, prices=None, secret_v
         "cost_usd": round(search_cost + verifier_cost, 4), "cost_known": bool(calls or usage or vlm_calls),
         "no_pick": no_pick,
         "sheet_issues": explain.sheet_issues(sheet, spec=spec, vocab=vocab, discovered=discovered),
+        # the worker's auto-publish of this row (main.publish_report): provider, flags, PhotoRoom's uncertainty score
+        "publish": trace.get("publish") if isinstance(trace.get("publish"), dict) else None,
     }
     out["expansion"] = smoke_live.expansion_info(out)
     out["outage"] = smoke_live.outage_reason(out)

@@ -110,6 +110,10 @@ FLAG_UPSCALED = "upscaled"
 FLAG_TOO_SMALL = "too_small_on_canvas"
 FLAG_OPAQUE_BACKDROP = "opaque_backdrop"
 FLAG_KEPT_SHADOW = "kept_shadow"
+# PhotoRoom قال إنو مش متأكد من حدود المنتج (ترويسة x-uncertainty-score فوق PHOTOROOM_UNCERTAINTY_MAX): للمراجعة، بلا
+# أي إعادة عزل مدفوعة. 0 = متأكد، 1 = مش متأكد، -1 = ما في تقدير
+FLAG_PHOTOROOM_UNSURE = "photoroom_unsure"
+UNCERTAINTY_HEADER = "x-uncertainty-score"
 # ملاحظات لا تمنع النشر (ProcessResult.quality_notes): نفس رمز العلامة، لكن في القائمة غير الحاجبة
 NOTE_UPSCALED = FLAG_UPSCALED
 NON_BLOCKING_NOTES = frozenset({NOTE_UPSCALED})
@@ -186,6 +190,8 @@ class ProcessResult:
         'eligible' (وضع log: كان سيُستخدم) | 'ineligible:<سبب>' | 'flagged:<علامات>'.
     fallback_from: None، أو {"method": الطريقة السحابية، "code": رمز فشلها} لما خلص رصيدها أو مفتاحها أو حصتها فعزلت
         طريقة محلية مجانية (BG_FALLBACK=local) بدلاً منها: provider عندها rembg أو grabcut، واللوحة اجتازت بوابة القص نفسها.
+    uncertainty_score: تقدير PhotoRoom لعدم تأكده من القص المنشور (ترويسة x-uncertainty-score، 0..1)، أو None (مزوّد
+        تاني، أو ما في تقدير). فوق PHOTOROOM_UNCERTAINTY_MAX: العلامة photoroom_unsure و isolated=False (للمراجعة).
     finish: تشطيب اللوحة الشفافة (cutout_finish.finish): background، holes_filled، holes_left، defringed، halo،
         halo_retry. فارغ للوحة البيضا (OUTPUT_BACKGROUND = white).
     """
@@ -201,6 +207,7 @@ class ProcessResult:
     quality_notes: List[str] = field(default_factory=list)
     fallback_from: Optional[Dict[str, str]] = None
     finish: dict = field(default_factory=dict)
+    uncertainty_score: Optional[float] = None
 
 
 # ---------------------------------------------------------------------------
@@ -636,6 +643,22 @@ def _save_lossless(img: Image.Image, output_path: str) -> None:
 # مزوّدو عزل الخلفية: كل دالة تعيد (صورة RGBA، None) أو (None، رمز خطأ)
 # ---------------------------------------------------------------------------
 
+def _uncertainty_score(response) -> Optional[float]:
+    """ترويسة x-uncertainty-score من رد PhotoRoom كرقم بين 0 و 1، أو None (-1 = ما في تقدير، أو غايبة أو مش رقم)."""
+    headers = getattr(response, "headers", None) or {}
+    raw = None
+    try:
+        raw = headers.get(UNCERTAINTY_HEADER)
+        if raw is None and isinstance(headers, dict):
+            raw = next((v for k, v in headers.items() if str(k).lower() == UNCERTAINTY_HEADER), None)
+        value = float(str(raw).strip())
+    except (TypeError, ValueError, AttributeError):
+        return None
+    if value != value or value < 0 or value > 1:
+        return None
+    return value
+
+
 def _isolate_photoroom(img: Image.Image):
     api_key = str(getattr(config, "PHOTOROOM_API_KEY", "") or "").strip()
     if not api_key:
@@ -667,6 +690,9 @@ def _isolate_photoroom(img: Image.Image):
     cutout = _decode_cutout(response.content)
     if cutout is None:
         return None, "photoroom_bad_output"
+    score = _uncertainty_score(response)
+    if score is not None:
+        cutout.info["uncertainty_score"] = score      # يمشي مع القص لحد المحاولة (_provider_attempt)
     return cutout, None
 
 
@@ -1348,6 +1374,7 @@ class _Attempt:
     frame_size: Optional[Tuple[int, int]] = None              # الإطار المرسل وموضعه في صورة العمل
     frame_rect: Optional[Tuple[int, int, int, int]] = None
     fallback_from: Optional[Dict[str, str]] = None            # الطريقة السحابية التي خلص رصيدها وهذه بديلتها المحلية
+    uncertainty: Optional[float] = None                       # x-uncertainty-score لقص PhotoRoom (_uncertainty_score)
 
 
 def _flags_final(flags) -> bool:
@@ -1451,13 +1478,17 @@ def _provider_attempt(frame, method, crop_sides, frame_rect, canvas_size, source
     label = provider + ("+box" if any(crop_sides) else "")
     if cutout is None:
         return _Attempt(None, method, [], error, label)
+    score = cutout.info.get("uncertainty_score") if provider == "photoroom" else None
     if provider == "photoroom" and _photoroom_crop():
         # طلبنا من PhotoRoom القص: لمس الحواف والإطار المعتم طبيعيان، ونسبة الأبعاد لا تكشف ذلك (مع صندوق Gemini
         # يكون للإطار نسبة أبعاد المنتج نفسها)، فلا فحوص إطار ولا مقارنة بالمواضع
-        return _gated(cutout, provider, None, _NO_CROP, canvas_size, label, None, None, product_rect,
-                      frame_checks=False)
+        attempt = _gated(cutout, provider, None, _NO_CROP, canvas_size, label, None, None, product_rect,
+                         frame_checks=False)
+        attempt.uncertainty = score
+        return attempt
     attempt = _gated(cutout, provider, frame.size, crop_sides, canvas_size, label, frame_rect, source_mask,
                      product_rect)
+    attempt.uncertainty = score
     if fallback_from is not None:
         if attempt.cutout is None:
             # البديل المحلي لم ينتج قصاً (قناع فارغ): يبقى الفشل الأصلي برصيد المزوّد، ومعه زر «تجاوز عزل الخلفية»
@@ -1650,7 +1681,7 @@ def process_product_image_result(image_url_or_path, product_name, brand, target_
             return ProcessResult(None, False, method, code)
         img = _limit_work_size(img)
 
-        flags, notes, white_note, fallback_from = [], [], None, None
+        flags, notes, white_note, fallback_from, uncertainty = [], [], None, None, None
         if method == "none":
             # 'none' تعني فعلاً بدون عزل: الصورة كما هي (بعد تصحيح الاتجاه) على اللوحة، ولا ندّعي العزل أبداً
             cutout, provider, isolated = EdgeShadowEngine.process_mask(img.convert("RGBA")), "none", False
@@ -1663,7 +1694,7 @@ def process_product_image_result(image_url_or_path, product_name, brand, target_
                 logger.warning("فشل عزل الخلفية بطريقة %s: %s", attempt.provider, attempt.error)
                 return ProcessResult(None, False, attempt.provider, attempt.error, white_source=white_note)
             cutout, provider, flags, notes = attempt.cutout, attempt.provider, list(attempt.flags), list(attempt.notes)
-            fallback_from = attempt.fallback_from
+            fallback_from, uncertainty = attempt.fallback_from, getattr(attempt, "uncertainty", None)
         finish = {}
         transparent = cutout_finish.output_background(background) == cutout_finish.TRANSPARENT
         # بوابة القص فحصت بالضلع الأدنى (العلامات متل قبل)؛ اللوحة نفسها بدقة المنتج (_adaptive_canvas)
@@ -1679,6 +1710,7 @@ def process_product_image_result(image_url_or_path, product_name, brand, target_
                                                                 done.flags, done.notes, done.info)
             if provider != isolated_by:
                 fallback_from = None     # إعادة العزل للهالة (PhotoRoom) استبدلت عزل البديل المحلي
+                uncertainty = finish.get("uncertainty")
         else:
             if _as_bool(enhance):
                 cutout = _enhance_rgb(cutout)
@@ -1688,12 +1720,18 @@ def process_product_image_result(image_url_or_path, product_name, brand, target_
             else:
                 canvas = compose_on_white_canvas(cutout, canvas_size, CANVAS_FILL_RATIO)
 
+        if uncertainty is not None:
+            finish = dict(finish, uncertainty=uncertainty)
+            if uncertainty > settings.photoroom_uncertainty_max() and FLAG_PHOTOROOM_UNSURE not in flags:
+                # PhotoRoom نفسه مش متأكد: للمراجعة (علامة عرض: المراجع بيقدر ينشرها بعد ما يشوفها)، بلا إعادة عزل
+                flags.append(FLAG_PHOTOROOM_UNSURE)
+                isolated = False
         job_dir = tempfile.mkdtemp(prefix="imgproc_")
         out_path = os.path.join(job_dir, f"{uuid.uuid4().hex}.png")
         canvas.save(out_path, format="PNG")
         return ProcessResult(out_path, isolated, provider, None, canvas.width, canvas.height,
                              quality_flags=flags, white_source=white_note, quality_notes=notes,
-                             fallback_from=fallback_from, finish=finish)
+                             fallback_from=fallback_from, finish=finish, uncertainty_score=uncertainty)
     except Exception as exc:  # noqa: BLE001 - لا نسمح لأي خطأ غير متوقع بأن يصبح نشراً صامتاً
         logger.exception("خطأ غير متوقع أثناء معالجة الصورة: %s", exc)
         return ProcessResult(None, False, method, "processing_failed")

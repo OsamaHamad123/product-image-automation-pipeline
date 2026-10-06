@@ -240,3 +240,19 @@ def test_the_bridge_writes_the_export_for_the_dashboard(run_rows, bridge, monkey
     assert written.is_file() and not stale.exists()                 # an export left behind is cleared after an hour
     assert _fake("SERPER") not in written.read_text(encoding="utf-8")
     assert bridge.action_export_run({"scope": "run", "run_id": "../../etc"})["status"] == "error"
+
+
+def test_the_worker_publish_details_and_photoroom_uncertainty_are_exported(run_rows):
+    """main.publish_report lands in the row's trace ('publish'): provider, flags and PhotoRoom's x-uncertainty-score."""
+    import export_run
+
+    published = {"outcome": {"decision": "AUTO_PUBLISH", "failure_code": None, "winner_url": "https://cdn.x.ae/milk.jpg"},
+                 "publish": {"status": "needs_review", "error": "background_not_removed", "provider": "photoroom",
+                             "isolated": False, "quality_flags": ["photoroom_unsure"], "quality_notes": [],
+                             "uncertainty": 0.62, "canvas": [1228, 1228], "finish": {"background": "transparent"}}}
+    _sql(run_rows, "UPDATE automation_queue SET trace_json = %s WHERE `row_number` = %s",
+         (json.dumps(published), ROW + 2))
+    doc, _hidden = export_run.build_export("run", RUN_ID, mappings=MAPPINGS)
+    rows = {r["row"] - ROW: r for r in doc["rows"]}
+    assert rows[2]["publish"]["uncertainty"] == 0.62 and rows[2]["publish"]["quality_flags"] == ["photoroom_unsure"]
+    assert rows[0]["publish"] is None and rows[1]["publish"] is None

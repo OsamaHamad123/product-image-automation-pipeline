@@ -577,8 +577,9 @@ def _bg_fallback(result):
 # (publish_anyway). edge_clipped و opaque_backdrop و opaque_fill (لم يُزل شيء من الخلفية: image_processor) وأي علامة
 # أخرى، وعزل فشل بلا علامات، لا يُنشر نظيفاً أبداً: هي «الخلفية لم تُعزل» (background_failed).
 # dark_halo (اللوحة الشفافة، cutout_finish): حواف فاتحة بتبين على الوضع الغامق بالتطبيق.
+# photoroom_unsure: PhotoRoom نفسه مش متأكد من حدود المنتج (x-uncertainty-score، image_processor).
 PRESENTATION_FLAGS = frozenset({"upscaled", "too_small_on_canvas", "second_object", "alpha_haze", "kept_shadow",
-                                "dark_halo"})
+                                "dark_halo", "photoroom_unsure"})
 
 
 def _accepts(func, name):
@@ -641,7 +642,18 @@ def _write_still_allowed(before_write):
 # الاعتماد التلقائي والبحث المسبق
 # ---------------------------------------------------------------------------
 
-def auto_approve_product(task, best_image, worksheet, link_column_index, sku_key=None):
+def publish_report(res):
+    """ما يُحفظ من نتيجة النشر في trace صف الطابور (publish) لتقرير التحليل (scripts/export_run.py)."""
+    finish = dict(res.get("finish") or {})
+    return {"status": res.get("status"), "error": res.get("error"), "provider": res.get("provider"),
+            "isolated": res.get("isolated"), "quality_flags": list(res.get("quality_flags") or []),
+            "quality_notes": list(res.get("quality_notes") or []), "uncertainty": finish.get("uncertainty"),
+            "canvas": [res.get("width"), res.get("height")] if res.get("width") else None,
+            "finish": {k: v for k, v in finish.items() if k in ("background", "halo", "halo_retry", "dark_rim",
+                                                              "holes_filled", "holes_left", "hole_fill")}}
+
+
+def auto_approve_product(task, best_image, worksheet, link_column_index, sku_key=None, report=None):
     """
     نشر نتيجة AUTO_PUBLISH مباشرة. تعيد 'published' أو 'needs_review' (الخلفية لم تُعزل أو الصورة مكررة: لم يُكتب شيء
     بالشيت، والمرشحات للمراجعة عند المستدعي) أو 'superseded'
@@ -649,6 +661,7 @@ def auto_approve_product(task, best_image, worksheet, link_column_index, sku_key
     (مراجع رفض هذه الصورة لهذا المنتج أثناء المعالجة: لم يُكتب شيء) أو 'busy' (قفل النشر بقي عند غيرنا حتى المهلة)
     أو 'failed'. الحل يُخزن auto_verified فقط عند النشر الفعلي: بلوحة معزولة، أو «بدون عزل الخلفية» باختيار المالك
     (bg_skipped، تُعد لتقرير التشغيل: bg_skipped_count).
+    report (dict اختياري): يأخذ publish_report للنتيجة (المزوّد والعلامات و x-uncertainty-score) لـ trace الصف.
     """
     name = task["product_name"]
     brand = task.get("brand") or ""
@@ -688,6 +701,8 @@ def auto_approve_product(task, best_image, worksheet, link_column_index, sku_key
     except Exception as e:
         print(f"[Auto-Publish Error] فشل النشر التلقائي لـ [{name}]: {e}")
         return "failed"
+    if report is not None:
+        report.update(publish_report(res))
     if res["status"] == "superseded":
         if res.get("error") == "publish_busy":
             return "busy"
@@ -1112,13 +1127,18 @@ def pre_cache_product_candidates(task, worksheet=None, link_column_index=None, b
               "لا نشر تلقائي.")
         decision = "REVIEW_PRESELECTED"
     status = None
+    publish_trace = {}       # publish_report للنشر التلقائي (حتى لو انحال للمراجعة): تقرير التحليل بيقرأه من trace
     if (decision == "AUTO_PUBLISH" and best.get("source") != "sqlite_cache"
             and worksheet is not None and link_column_index is not None):
-        status = auto_approve_product(task, best, worksheet, link_column_index, sku_key=sku_key)
+        published = {}
+        extra = {"report": published} if _accepts(auto_approve_product, "report") else {}
+        status = auto_approve_product(task, best, worksheet, link_column_index, sku_key=sku_key, **extra)
+        if published:
+            publish_trace["publish"] = published
         if status == "published":
             written = _publish_to_siblings(task, sku_key, worksheet, link_column_index)
             _finish_task(task, "completed", failure_code=None,
-                         trace={"outcome": _outcome(trace)}, siblings=written)
+                         trace=dict(publish_trace, outcome=_outcome(trace)), siblings=written)
             print(f"[Auto-Publish] تم نشر الصف {row_number} تلقائياً (قرار AUTO_PUBLISH).")
             return "success"
         held = local_cache_db.is_claim_held(task["id"], task.get("worker_id"))
@@ -1158,7 +1178,7 @@ def pre_cache_product_candidates(task, worksheet=None, link_column_index=None, b
                      failure_code="CANDIDATE_SAVE_FAILED", trace=trace)
         return "failed"
     _finish_task(task, "ready_for_review", None,
-                 failure_code=best.get("failure_code"), trace={"outcome": _outcome(trace)})
+                 failure_code=best.get("failure_code"), trace=dict(publish_trace, outcome=_outcome(trace)))
     print(f"[Pre-Cache] {len(candidates)} مرشح للصف {row_number} (القرار: {decision or 'v1'}).")
     return "success"
 

@@ -49,6 +49,9 @@ DEFAULTS = {
     # side fills on the transparent canvas (the white canvas keeps edge_shadow_engine.CANVAS_FILL_RATIO).
     "OUTPUT_BACKGROUND": "transparent",
     "OUTPUT_PRODUCT_FILL": "0.88",
+    # PhotoRoom's x-uncertainty-score header (0 = confident, 1 = unsure): above this the cutout gets the review flag
+    # 'photoroom_unsure' (image_processor); no paid retry
+    "PHOTOROOM_UNCERTAINTY_MAX": "0.5",
 }
 REMBG_MODELS = ("birefnet-general", "birefnet-general-lite")
 OUTPUT_BACKGROUNDS = ("transparent", "white")
@@ -167,6 +170,17 @@ def output_canvas_max() -> int:
     if not value or value <= 0:
         value = DEFAULTS["OUTPUT_CANVAS_MAX"]
     return max(output_canvas_size(), min(4000, int(value)))
+
+
+def photoroom_uncertainty_max() -> float:
+    """PHOTOROOM_UNCERTAINTY_MAX clamped to 0..1 (default 0.5); an unreadable value reads as the default."""
+    try:
+        value = float(str(get("PHOTOROOM_UNCERTAINTY_MAX")).strip())
+    except (TypeError, ValueError):
+        value = float(DEFAULTS["PHOTOROOM_UNCERTAINTY_MAX"])
+    if value != value:  # NaN
+        value = float(DEFAULTS["PHOTOROOM_UNCERTAINTY_MAX"])
+    return max(0.0, min(1.0, value))
 
 
 def bg_fallback() -> str:

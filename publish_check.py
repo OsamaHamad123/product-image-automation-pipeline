@@ -106,6 +106,7 @@ QUALITY_FLAG_TEXT = {
     "too_small_on_canvas": "المنتج صغير على اللوحة",
     "kept_shadow": "بقي ظل ظاهر مع المنتج",
     "dark_halo": "حواف فاتحة بتبين على الوضع الغامق",
+    "photoroom_unsure": "PhotoRoom مش متأكد من حدود المنتج",
 }
 METHOD_NAMES = {"photoroom": "PhotoRoom", "remove_bg_api": "remove.bg", "grabcut": "GrabCut (محلي)",
                 "rembg": "rembg (محلي)", "bria_rmbg": "Bria (محلي)", "none": "بدون عزل"}

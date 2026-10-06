@@ -313,6 +313,7 @@ def _photoroom_retry(work: Image.Image, canvas_size):
         return None, str(attempt.error or "photoroom_empty_cutout")
     if attempt.flags:
         return None, "flags:" + ",".join(attempt.flags)
+    attempt.uncertainty = cutout.info.get("uncertainty_score")
     return attempt, None
 
 
@@ -363,6 +364,8 @@ def finish(img: Image.Image, cutout: Image.Image, attempt, provider: str, isolat
                             r_info["halo"])
                 r_info.update(background=TRANSPARENT, halo_retry="photoroom", halo_before=info["halo"],
                               provider_before=provider)
+                if getattr(retry, "uncertainty", None) is not None:
+                    r_info["uncertainty"] = retry.uncertainty      # تقدير PhotoRoom للعزل الجديد (image_processor)
                 return Finished(r_canvas, r_finished, "photoroom", True, list(retry.flags),
                                 list(retry.notes), r_info)
             error = f"halo:{r_info['halo']}"
