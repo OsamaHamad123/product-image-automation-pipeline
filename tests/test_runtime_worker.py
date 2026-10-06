@@ -358,7 +358,7 @@ HARNESS = textwrap.dedent(r'''
 
     main.pre_cache_product_candidates = precache
     event("ready")
-    main.cli(["main.py", "--worker"])
+    main.exit_process(main.cli(["main.py", "--worker"]))
 ''')
 
 

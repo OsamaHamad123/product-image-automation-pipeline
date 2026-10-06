@@ -177,6 +177,9 @@ namespace App\Services {
     class QueueStats {
         public static function counters() { return ['by_status' => [], 'by_failure_code' => []]; }
     }
+    class ImageProxy {
+        public static function rememberHosts($urls) {}     // the image proxy's host list (tests/test_dashboard_security.py)
+    }
 }
 
 namespace {

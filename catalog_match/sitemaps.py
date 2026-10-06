@@ -32,6 +32,8 @@ Only what a store publishes for crawlers is read, and nothing is worked around:
   expansion), and only <loc> / <lastmod> are read. A broken file is one failed sitemap, never the
   end of the run.
 * Only URLs on the store's hosts whose path matches its product pattern are kept.
+* SSRF guard (net_guard): redirects are not left to the client; every request and every redirect hop goes only to
+  an http(s) host whose addresses are all public. A refused URL is the error 'blocked_url'.
 """
 
 from __future__ import annotations
@@ -50,6 +52,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 from urllib.parse import urljoin, urlsplit
+
+import net_guard
 
 logger = logging.getLogger(__name__)
 
@@ -430,7 +434,11 @@ class SitemapHarvester:
         self._wait()
         headers = {"User-Agent": USER_AGENT, "Accept": "application/xml,text/xml,text/plain;q=0.9,*/*;q=0.5"}
         try:
-            resp = self.http.get(url, headers=headers, timeout=self.timeout, stream=True, allow_redirects=True)
+            resp = net_guard.follow(url, lambda hop, _target: self.http.get(
+                hop, headers=headers, timeout=self.timeout, stream=True, allow_redirects=False))
+        except net_guard.BlockedURL as exc:
+            logger.warning("sitemaps: refused, %s", exc)
+            return None, None, net_guard.BLOCKED
         except Exception as exc:
             return None, None, "timeout" if "timeout" in type(exc).__name__.lower() else "connection_error"
         try:

@@ -94,6 +94,45 @@ def redact(text):
     return text
 
 
+class RedactingFilter(logging.Filter):
+    """
+    كل سطر سجل بلا أسرار (redact): الرسالة بعد دمج وسائطها، ونص الاستثناء (traceback) ونص المكدس. لا يحجب سطراً ولا
+    يرفع أبداً. install_log_redaction يضعه على المسجل الجذر وعلى كل معالجاته.
+    """
+
+    def filter(self, record):
+        try:
+            message = record.getMessage()
+            clean = redact(message)
+            if clean != message:
+                record.msg, record.args = clean, ()
+            if record.exc_info and not record.exc_text:
+                record.exc_text = logging.Formatter().formatException(record.exc_info)
+            if record.exc_text:
+                record.exc_text = redact(record.exc_text)
+            if record.stack_info:
+                record.stack_info = redact(record.stack_info)
+        except Exception:  # noqa: BLE001 - a log line is never lost because of the filter
+            pass
+        return True
+
+
+_REDACTING_FILTER = RedactingFilter()
+
+
+def install_log_redaction():
+    """
+    يضع RedactingFilter على المسجل الجذر وعلى كل معالجاته الحالية وعلى logging.lastResort (ما يُطبع حين لا يوجد
+    معالج). فلتر المسجل الجذر وحده لا يرى أسطر المسجلات الأبناء، لذلك يوضع على المعالجات أيضاً؛ يُستدعى بعد إضافة
+    المعالجات (cli_bridge._configure_logging، scripts/run_nightly.py، main.py). آمن للاستدعاء أكثر من مرة.
+    """
+    root = logging.getLogger()
+    for target in [root, *root.handlers, logging.lastResort]:
+        if target is not None and not any(isinstance(f, RedactingFilter) for f in target.filters):
+            target.addFilter(_REDACTING_FILTER)
+    return _REDACTING_FILTER
+
+
 # ---------------------------------------------------------------------------
 # سبب التوقف -> النتيجة ورمز الخروج
 # ---------------------------------------------------------------------------

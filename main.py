@@ -2936,7 +2936,7 @@ def run_worker_mode(trigger="manual", report=True, deadline_ts=None):
 
 
 def run_automation_pipeline():
-    """التشغيل التسلسلي القديم (بدون طابور)."""
+    """التشغيل التسلسلي القديم (بدون طابور): `python main.py --legacy-sequential` فقط (للتراجع)."""
     lock_file = "temp/pipeline.lock"
     try:
         load_run_config()
@@ -2996,26 +2996,40 @@ def run_automation_pipeline():
                 pass
 
 
+# بلا وسيط: الاستخدام فقط. التشغيل التسلسلي القديم (يكتب الشيت مباشرة بلا طابور ولا مراجعة) كان يبدأ من مجرد
+# `python main.py`؛ صار يحتاج وسيطاً صريحاً.
+USAGE = """usage: python main.py --enqueue | --worker [--trigger=dashboard|nightly|manual] | --legacy-sequential
+  --enqueue            read the Sheet into the task queue (automation_queue)
+  --worker             search and publish the queued rows (what the dashboard's run button starts after --enqueue)
+  --legacy-sequential  the old sequential run without the queue; it writes the Sheet directly (rollback only)"""
+
+
 def cli(argv=None):
     """
-    سطر الأوامر: --enqueue، --worker، أو التشغيل التسلسلي القديم. SIGTERM / SIGHUP (systemctl stop، إعادة تشغيل
-    السيرفر) تعامل مثل Ctrl+C (stop_signals): العامل يوقف السحب، يعطي المنتجات الجارية SHUTDOWN_GRACE_S ثانية، يعيد
-    صفوف ما لم ينتهِ للانتظار، يحرر القفل ويكتب التقرير، ثم يخرج برمز 3 (توقف قبل نهاية الطابور).
+    رمز الخروج لتشغيل main.py بهذه الوسائط: --enqueue، --worker، أو --legacy-sequential؛ بلا وسيط الاستخدام ورمز 2.
+    SIGTERM / SIGHUP (systemctl stop، إعادة تشغيل السيرفر) تعامل مثل Ctrl+C (stop_signals): العامل يوقف السحب، يعطي
+    المنتجات الجارية SHUTDOWN_GRACE_S ثانية، يعيد صفوف ما لم ينتهِ للانتظار، يحرر القفل ويكتب التقرير، ثم رمز 3
+    (توقف قبل نهاية الطابور). الخروج نفسه على exit_process، فمنتج عالق في خيطه لا يعلّقه.
     """
+    import run_report
     argv = sys.argv if argv is None else argv
+    run_report.install_log_redaction()       # لا مفتاح ولا كلمة مرور في سجل التشغيل (temp/pipeline.log)
     stop_signals.install()
     if "--enqueue" in argv:
         run_enqueue_mode()
-    elif "--worker" in argv:
+        return 0
+    if "--worker" in argv:
         try:
             run_worker_mode(trigger=_cli_trigger(argv))
         except KeyboardInterrupt:
             print("[Worker] توقف العامل (إشارة إيقاف أو Ctrl+C).")
-        import run_report
-        exit_process(run_report.exit_code(LAST_WORKER.get("stop_reason")))
-    else:
+        return run_report.exit_code(LAST_WORKER.get("stop_reason"))
+    if "--legacy-sequential" in argv:
         run_automation_pipeline()
+        return 0
+    print(USAGE)
+    return 2
 
 
 if __name__ == "__main__":
-    cli()
+    exit_process(cli())

@@ -434,6 +434,8 @@ def main(argv=None):
     handler = logging.StreamHandler(log_stream)
     handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
     logging.getLogger().addHandler(handler)
+    import run_report
+    run_report.install_log_redaction()       # no key or password reaches the night's log
     try:
         say(f"nightly run started in {REPO_ROOT} with {sys.executable}; log {path}")
         installed = stop_signals.install()
