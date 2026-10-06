@@ -8,7 +8,7 @@ code default stays 'off'.
 
 import pytest
 
-from test_deploy_ubuntu import REPO, needs_bash, needs_plain_path, run_install
+from test_deploy_ubuntu import APP, needs_bash, needs_plain_path, run_install
 
 
 @needs_bash
@@ -20,14 +20,14 @@ def test_the_flag_is_in_the_help():
 @needs_bash
 @needs_plain_path
 def test_without_the_flag_nothing_of_it_runs():
-    out = run_install("--dry-run", str(REPO), "--local-only").stdout
+    out = run_install("--dry-run", str(APP), "--local-only").stdout
     assert "onnxruntime" not in out and "backfill_embeddings" not in out
 
 
 @needs_bash
 @needs_plain_path
 def test_the_flag_installs_onnxruntime_and_sets_the_model_up_after_the_schema():
-    done = run_install("--dry-run", str(REPO), "--local-only", "--with-embeddings")
+    done = run_install("--dry-run", str(APP), "--local-only", "--with-embeddings")
     out = done.stdout
     assert "6b/10 onnxruntime + DINOv2-small model" in out, done.stderr       # (exit 2: a checkout has no .env)
     assert "pip install --quiet --disable-pip-version-check onnxruntime\\>=1.17\\,\\<2" in out
