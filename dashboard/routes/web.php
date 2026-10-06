@@ -93,3 +93,14 @@ Route::get('/api/run/barcode-suggestions', [RunController::class, 'barcodeSugges
 Route::post('/api/run/barcode-write', [RunController::class, 'barcodeWrite']);
 
 Route::view('/ui-kit', 'dashboard.ui_kit')->name('dashboard.ui_kit'); // مرجع مكوّنات هوية لقطة
+
+// فحص الصحة للمراقبة الخارجية (UptimeRobot / Uptime Kuma): JSON بلا أسرار، 200 سليم و503 غير سليم. nginx يسمح له فقط
+// لـ 127.0.0.1 وعناوين --monitor-ip (deploy/ubuntu/laqta.conf). بلا جلسة ولا كوكيز: مراقب كل دقيقة لا يملأ ملفات الجلسات.
+Route::get('/healthz', [\App\Http\Controllers\HealthzController::class, 'show'])->name('healthz')
+    ->withoutMiddleware([
+        \Illuminate\Cookie\Middleware\EncryptCookies::class,
+        \Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse::class,
+        \Illuminate\Session\Middleware\StartSession::class,
+        \Illuminate\View\Middleware\ShareErrorsFromSession::class,
+        \Illuminate\Foundation\Http\Middleware\ValidateCsrfToken::class,
+    ]);
