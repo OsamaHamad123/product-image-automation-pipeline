@@ -11,6 +11,104 @@ causes: the quality gate threw away white-background packshots, an unverified "l
 success, siblings of the right product outranked it, and reviewers' rejections were never remembered. The search
 core was rebuilt and wired into the queue, the dashboard actions and the sheet writes. Every claim below has a test.
 
+### Wave 1 of the professional upgrade (from the search, image, architecture and UX audits)
+
+**Delivery for the mobile app, which reads the image link straight from the Sheet**
+- Delivery links use `c_limit,w_1200,f_webp,q_auto` (transparent WebP, never upscaled) instead of `f_auto`. `f_auto` could hand native
+  Android/iOS/Flutter loaders a white-background JPEG, which shows white boxes in dark mode. `scripts/migrate_delivery_urls.py`
+  previews the Sheet link changes and writes only when the owner confirms.
+- The Sheet cell only ever gets a clean link. `needs_review:https://…` is no longer written there: the review state lives
+  in the queue and the cell is left unchanged until approval.
+- The canvas adapts to the source quality, up to 2048 px (it was a fixed 800 px).
+- Cut-out quality:
+  - PhotoRoom's `x-uncertainty-score` is read and exported.
+  - remove.bg is told the image is a product (`type=product`).
+  - rembg runs with `decontaminate` (pinned 2.0.85).
+  - Sources with an embedded ICC profile are converted to sRGB before isolation.
+  - A dark rim on white gets a review flag.
+  - Glass and clear packaging skip hole-fill.
+
+**Verification accuracy**
+- The border-band quality gate no longer drops real packshots from UAE retailers before the reader sees them.
+- A strong-model re-judge runs when the only mismatch is the variant or the size.
+- A page's own main image becomes a candidate next to a trusted listing whose thumbnail shows another brand's pack.
+
+**Runtime stability**
+- SIGTERM and SIGHUP stop the worker cleanly (`stop_signals.py`). It stops taking rows, gives running products
+  `SHUTDOWN_GRACE_S` (45 s), puts unfinished rows back to pending, writes the report and exits with code 3. Cleanup
+  never gets cut.
+- Each product has a deadline (`PRODUCT_DEADLINE_MINUTES`, 8 minutes), so a hung provider no longer stalls the run or
+  repeats paid searches.
+- DB connections have a timeout, and saving a result retries 3 times.
+- A semaphore lets only one local rembg run at a time.
+- Storage is pruned periodically. Pruning never touches reviews or Sheet writes that are still pending.
+- The nightly run can ping an external health check.
+- `python main.py` with no mode prints its usage and exits 2. The old sequential run needs `--legacy-sequential`.
+
+**Security**
+- `net_guard.py` refuses private, loopback, link-local and mapped addresses on every outbound fetch and on every
+  redirect hop, including product pages, image downloads, sitemaps and brand sites.
+- The dashboard's image proxy is new (`ImageProxy.php`):
+  - it only fetches known hosts, with TLS verified;
+  - every hop is checked;
+  - responses are capped at 15 MB;
+  - error messages are generic.
+- `select_image` accepts http(s) only, uploads must live in `temp/`, and the Sheet settings are validated. `.env` is
+  written atomically with its mode and owner kept.
+- Keys and passwords are redacted from every log path: the root logger, the run log and Telegram.
+- Updated PHP dependencies: guzzle 7.15.5, commonmark 2.10.3, flysystem 3.36.0. There is a non-blocking dependency
+  audit job in CI.
+- The session cookie is Secure by default when `APP_URL` is https.
+
+**Ubuntu server**
+- `install.sh` needs `--domain` or `--local-only`, so the dashboard is never served over plain HTTP on a public address.
+- Abuse protection:
+  - nginx rate limits;
+  - optional fail2ban for repeated wrong passwords (`--with-fail2ban`);
+  - a PHP upload cap.
+- Sheet writes and alerts:
+  - A `laqta-outbox-flush` timer pushes pending Sheet writes every 2 minutes.
+  - It sends one Telegram alert when the count of dead writes grows.
+  - Failed units alert through `laqta-alert@`.
+- `/healthz` serves uptime monitors. It is open to loopback and `--monitor-ip` only, sets no session cookie and
+  exposes no secrets.
+- Logs and limits:
+  - Logs rotate with `laqta-logrotate`, and the dashboard log viewer follows the daily files.
+  - `MemoryMax` is set from the detected RAM.
+- Backups and production config:
+  - Backups are encrypted with age, with an optional offsite copy through rclone.
+  - Production config is checked: no `APP_DEBUG`, no insecure cookie on HTTPS.
+  - `config:cache` works again (a Closure in `config/database.php` broke it).
+- The long-running units stop gracefully: `KillSignal=SIGTERM`, `TimeoutStopSec=120`, and exit 3 counts as success.
+
+**Retrieval cost and evidence**
+- Legacy Google CSE is out of the default chain (`CSE_LEGACY_ENABLED`). In the real exports it answered 403 on every
+  call (18 of 18, 23 s per run). When it is enabled, a refused key turns it off for the rest of the run.
+- Near-duplicate pictures (pHash ≤ 6 with similar colours) go to the reader once. The representative is chosen by
+  identity evidence. After a MISMATCH or UNSURE reading, the copies return to the queue.
+- `size_corroborated` is recorded, never decisive, when two trusted domains with the same picture state the size.
+- Barcodes in UAE store URLs (`url_gtin.py`, `data/url_gtins.json`) count as evidence only:
+  - the check digit must be valid and the GS1 prefix must be a trade prefix;
+  - they become the approval barcode only when the title agrees with the row.
+- Candidates keep their provider, query id and pHash (new columns), so exports attribute every pick.
+- `EXPANSION_SCOPE_GATE`, on by default:
+  - bouquets skip X1–X5;
+  - an unmapped brand that no listing names gets one Shopping probe first.
+  - Measured on the exports: 13% fewer expansion calls, and 0 of 6 expansion wins lost.
+
+**Dashboard UX**
+- Bulk review is the default:
+  - The bulk bar stays in view, and two products are approved at a time.
+  - Every approval can be undone for 8 seconds; a pending undo is sent even when the page closes.
+- Dialogs and shortcuts:
+  - In-page confirm dialogs replace the browser's.
+  - A lightbox compares the pick with the Sheet's current image.
+  - `?` lists the keyboard shortcuts.
+- The run page offers «راجع الجاهز هلق» while it runs, and Home suggests the next step.
+- Times show in the shop's zone (Dubai), and the layout works on phones.
+- One Levantine voice everywhere: one approve verb («اعتماد»), errors that say «… بلّغ المطوّر», and no product names
+  of internal services.
+
 ### Added: lane badge, «مؤكدة تماماً» filter and progress line in the review screen
 
 The lane of every engine pick (`lane:strict|unsure|other`, `catalog_match.decide.lane_of`) is now visible to the reviewer:
