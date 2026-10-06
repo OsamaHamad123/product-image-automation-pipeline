@@ -362,7 +362,7 @@ def test_p1_opaque_segmentation_is_never_published_as_isolated(monkeypatch, tmp_
 
     result = run(src)
 
-    assert result.path and (result.width, result.height) == (800, 800)
+    assert result.path and result.width == result.height >= 800     # 800 is the smallest canvas (adaptive)
     assert result.isolated is False
     assert result.error is None
     assert result.provider == "photoroom"

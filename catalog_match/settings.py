@@ -34,7 +34,12 @@ DEFAULTS = {
     "AUTO_PUBLISH_STRICT_LANE": False,
     "CANDIDATE_STORE_DIR": os.path.join("temp", "candidates"),
     "PROXY_URL": "",
+    # the canvas side is adaptive (image_processor._adaptive_canvas): round(product long side / fill) clamped to
+    # [OUTPUT_CANVAS_SIZE, OUTPUT_CANVAS_MAX], so a detailed source keeps its pixels for a 3x phone screen
+    # (~1170 px) and a small source gets exactly the canvas it got before. OUTPUT_CANVAS_MAX <= OUTPUT_CANVAS_SIZE
+    # turns it off (a fixed canvas).
     "OUTPUT_CANVAS_SIZE": 800,
+    "OUTPUT_CANVAS_MAX": 2048,
     # image_processor: when a cloud isolation method fails on credit / key / quota, 'local' isolates with rembg
     "BG_FALLBACK": "local",
     # the rembg model of that fallback: BiRefNet keeps white packaging that u2net / isnet eat
@@ -154,6 +159,14 @@ def proxy_url() -> str:
 def output_canvas_size() -> int:
     size = get("OUTPUT_CANVAS_SIZE")
     return size if size and size > 0 else DEFAULTS["OUTPUT_CANVAS_SIZE"]
+
+
+def output_canvas_max() -> int:
+    """The largest adaptive canvas side: OUTPUT_CANVAS_MAX (default 2048), at least output_canvas_size(), at most 4000."""
+    value = get("OUTPUT_CANVAS_MAX")
+    if not value or value <= 0:
+        value = DEFAULTS["OUTPUT_CANVAS_MAX"]
+    return max(output_canvas_size(), min(4000, int(value)))
 
 
 def bg_fallback() -> str:

@@ -37,7 +37,7 @@
                 <option value="{{ $size }}" @selected($size === $pr['size'])>{{ $size }} × {{ $size }} بكسل{{ $size === 800 ? ' (الافتراضي)' : '' }}</option>
             @endforeach
         </select>
-        <span class="lq-field__hint">لوحة مربعة، والمنتج كامل بيعبّي 88% منها بالنص.</span>
+        <span class="lq-field__hint">لوحة مربعة، والمنتج كامل بيعبّي 88% منها بالنص. هاد أصغر مقاس: إذا الصورة الأصلية كبيرة ومفصّلة بتنتشر أكبر (لحد 2048 بكسل) لتبين حادة على شاشة الموبايل.</span>
     </label>
 
     <label class="lq-field">

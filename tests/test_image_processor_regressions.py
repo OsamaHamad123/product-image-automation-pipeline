@@ -401,7 +401,7 @@ def test_no_blurry_gate_and_not_image(monkeypatch, tmp_path):
     assert result != "blurry"
     assert result.isolated is True and result.error is None
     with Image.open(result.path) as out:
-        assert out.size == (800, 800)
+        assert out.size[0] == out.size[1] >= 800          # 800 is the smallest canvas (adaptive above it)
 
     # An HTML soft-404 served with status 200 is a download error, not a "blurry" image.
     html = b"<!doctype html><html><body>Image not found</body></html>"

@@ -90,7 +90,7 @@ The dashboard shows every candidate's `status`, `reasons` and `evidence`, and wh
 
 ## Publishing
 
-`image_processor.process_product_image_result()` returns `ProcessResult(path, isolated, provider, error, width, height)`. The published file is always an opaque white RGB PNG, 800×800 by default (`OUTPUT_CANVAS_SIZE`), with the product filling 88% of it. The image is turned upright from its EXIF data and is never cropped square or upscaled.
+`image_processor.process_product_image_result()` returns `ProcessResult(path, isolated, provider, error, width, height)`. The published file is a square PNG with the product filling 88% of it (`OUTPUT_PRODUCT_FILL`). Its side follows the product's own pixels: round(product long side / 0.88), at least `OUTPUT_CANVAS_SIZE` (800 by default, the Settings page's size) and at most `OUTPUT_CANVAS_MAX` (2048 by default; set it to the minimum for a fixed canvas). A small source gets exactly the 800 px canvas it got before; a detailed one keeps its detail for a 3x phone screen (~1170 px wide). The quality gate still judges the cutout at the minimum size, so its flags do not change. The image is turned upright from its EXIF data and is never cropped square or upscaled.
 
 If background removal fails, the result is `isolated=False`. The raw photo is never published as if it were clean: nothing is uploaded, the image cell keeps its previous value (the app reads that cell directly, so it only ever holds a clean link) and the row waits for review in the queue with its candidates. A cell that still holds an old `needs_review:<url>` value reads as a pending review; approving or rejecting it writes a clean link or empties it.
 

@@ -267,6 +267,25 @@ def _resolve_canvas_size(target_width, target_height) -> Tuple[int, int]:
     return w, h
 
 
+def _adaptive_canvas(cutout: Image.Image, canvas_size: Tuple[int, int], fill: float) -> Tuple[int, int]:
+    """
+    ضلع اللوحة حسب دقة المنتج نفسه: round(الضلع الأطول للمنتج بالبكسل / fill) محصوراً بين الضلع المطلوب (OUTPUT_CANVAS_SIZE،
+    افتراضياً 800) و OUTPUT_CANVAS_MAX (افتراضياً 2048). مصدر كبير بيحتفظ بتفاصيله لشاشة موبايل 3x (~1170 بكسل)، ومصدر صغير
+    بياخد نفس اللوحة متل قبل بالضبط (ما في تكبير زيادة). لوحة مش مربعة (أبعاد صريحة قديمة) بتضل متل ما هي.
+    """
+    w, h = int(canvas_size[0]), int(canvas_size[1])
+    top = settings.output_canvas_max()
+    if w != h or top <= w:
+        return w, h
+    box = alpha_bbox(cutout)
+    if box is None:
+        return w, h
+    long_side = max(box[2] - box[0], box[3] - box[1])
+    side = int(round(long_side / max(float(fill), 1e-6)))
+    side = max(w, min(top, MAX_CANVAS_SIDE, side))
+    return side, side
+
+
 def _to_rgb_or_rgba(img: Image.Image) -> Image.Image:
     has_alpha = img.mode in ("RGBA", "LA", "PA", "RGBa", "La") or "transparency" in img.info
     return img.convert("RGBA") if has_alpha else img.convert("RGB")
@@ -1606,7 +1625,8 @@ def process_product_image_result(image_url_or_path, product_name, brand, target_
                                  background=None) -> ProcessResult:
     """
     يحوّل صورة المنتج المعتمدة إلى لوحة نشر نهائية بالأبعاد المطلوبة (0 أو 'dynamic' = OUTPUT_CANVAS_SIZE، افتراضياً
-    800x800). background (None = OUTPUT_BACKGROUND): 'transparent' = PNG شفافة RGBA بلا ظل، المنتج مقصوص ومشطّب
+    800x800). اللوحة المربعة بتكبر مع دقة المنتج لحد OUTPUT_CANVAS_MAX (_adaptive_canvas): الضلع المطلوب هو الأدنى، ومصدر
+    صغير بياخده متل قبل. background (None = OUTPUT_BACKGROUND): 'transparent' = PNG شفافة RGBA بلا ظل، المنتج مقصوص ومشطّب
     (cutout_finish) ويملأ OUTPUT_PRODUCT_FILL وموسّط؛ صورة بلا عزل (none) بتضل معتمة على الأبيض. 'white' = PNG بخلفية
     بيضاء معتمة RGB والمنتج يملأ 88% وموسّط (متل قبل).
     لا يرفع استثناءات: كل فشل يعود كـ ProcessResult(path=None, isolated=False, error=<رمز>).
@@ -1645,7 +1665,12 @@ def process_product_image_result(image_url_or_path, product_name, brand, target_
             cutout, provider, flags, notes = attempt.cutout, attempt.provider, list(attempt.flags), list(attempt.notes)
             fallback_from = attempt.fallback_from
         finish = {}
-        if cutout_finish.output_background(background) == cutout_finish.TRANSPARENT:
+        transparent = cutout_finish.output_background(background) == cutout_finish.TRANSPARENT
+        # بوابة القص فحصت بالضلع الأدنى (العلامات متل قبل)؛ اللوحة نفسها بدقة المنتج (_adaptive_canvas)
+        fill = settings.output_product_fill() if transparent and method != "none" and provider != "none" \
+            else CANVAS_FILL_RATIO
+        canvas_size = _adaptive_canvas(cutout, canvas_size, fill)
+        if transparent:
             # PNG شفافة بلا ظل: سد الثقوب، إزالة التسرب، فحص الهالة (وعزل واحد بـ PhotoRoom لها) ثم اللوحة
             isolated_by = provider
             done = cutout_finish.finish(img, cutout, attempt, provider, isolated, flags, notes, canvas_size,
