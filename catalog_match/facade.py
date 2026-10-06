@@ -35,10 +35,17 @@ outcome_to_legacy(outcome, trace=None, spec=None) -> dict | None
     with the sheet row's gaps (no size, no barcode, unknown brand, a likely typo). The worker keeps
     trace['outcome'] in automation_queue.trace_json, where the review screen reads it.
     evidence.page_gtin is the barcode the candidate's page stated (gtin_on_page) when it is a valid, globally
-    unique GTIN (display form, gtin.display_gtin), else None: an approval of that image keeps it for a sheet row
-    without a barcode (resolved_products.page_gtin), shown on the review card and exported; the sheet
-    gets it only from the Run page card (cli_bridge barcode_write).
+    unique GTIN (display form, gtin.display_gtin), else the barcode the store wrote in the page or image URL
+    (evidence.url_gtin, catalog_match.url_gtin) when the listing's own title agrees with the row
+    (url_gtin.identity_agrees), else None; evidence.page_gtin_source says which ('page' | 'url'). An approval of
+    that image keeps it for a sheet row without a barcode (resolved_products.page_gtin), shown on the review card
+    and exported; the sheet gets it only from the Run page card (cli_bridge barcode_write). A URL barcode is never
+    scoring evidence: it never lifts a tier, never auto-publishes.
     evidence.page_gallery is True for X0's extra image of a page's own gallery (expand.py), which the review marks.
+    trace['outcome']['top'] keeps the top LEGACY_TOP_N reviewable candidates (the pick first when it ranks lower)
+    without their quality and score blocks: the worker stores only trace['outcome'] for a published or reviewed row
+    and its review candidates go once a reviewer approves, so the run export (scripts/export_run.py) reads the
+    pick's provider, query id and evidence there.
 """
 
 from __future__ import annotations
@@ -51,6 +58,7 @@ from typing import Any, Dict, List, Mapping, Optional
 from .decide import RESOLUTION_PREFIX, candidate_warnings, warning_codes
 from .gtin import display_gtin, is_global_gtin
 from .models import RankedCandidate, SearchOutcome, SkuSpec
+from .url_gtin import identity_agrees, url_gtin
 
 logger = logging.getLogger(__name__)
 
@@ -132,6 +140,11 @@ def evidence(rc: RankedCandidate, spec: Optional[SkuSpec] = None) -> Dict[str, A
     variant_conflict = score is not None and any(
         str(r).startswith("variant_conflict") for r in tuple(score.hard_reject) + tuple(score.conflicts))
     stated = set((spec.variants or {}) if spec is not None else ())
+    in_url = url_gtin(rc.candidate)
+    page_gtin = display_gtin(rc.candidate.gtin_on_page) if is_global_gtin(rc.candidate.gtin_on_page) else None
+    page_gtin_source = "page" if page_gtin else None
+    if page_gtin is None and in_url and identity_agrees(score):
+        page_gtin, page_gtin_source = display_gtin(in_url), "url"
     if variant_conflict:
         variant_status = "conflict"
     elif variants_matched and stated and not stated <= set(variants_matched):
@@ -161,9 +174,16 @@ def evidence(rc: RankedCandidate, spec: Optional[SkuSpec] = None) -> Dict[str, A
         "consensus_count": rc.candidate.consensus_count,
         "sanctioned": rc.candidate.sanctioned,
         # the barcode the page stated (valid and globally unique only): kept with an approval when the sheet has none
-        "page_gtin": display_gtin(rc.candidate.gtin_on_page) if is_global_gtin(rc.candidate.gtin_on_page) else None,
+        "page_gtin": page_gtin,
+        "page_gtin_source": page_gtin_source,
+        # the barcode the store wrote in its own page or image URL (catalog_match.url_gtin): evidence only
+        "url_gtin": display_gtin(in_url) if in_url else None,
         # X0: another image of the page's own gallery, offered because its main image failed (the review says so)
         "page_gallery": bool(getattr(rc.candidate, "page_gallery", False)),
+        # the page domains that show the same picture (retrieve.reader_queue / annotate_copies: evidence only), and
+        # for a copy the reader did not read, the image read in its place
+        "same_picture_domains": list(getattr(rc, "same_picture_domains", None) or []),
+        "copy_of": getattr(rc, "copy_of", None),
     })
 
 
@@ -267,6 +287,23 @@ def explain_no_pick(outcome: SearchOutcome, spec: Optional[SkuSpec]) -> Optional
 # Output side
 # ---------------------------------------------------------------------------
 
+_TRACE_DROPPED = ("quality", "scores")
+
+
+def _compact(entry: Dict[str, Any]) -> Dict[str, Any]:
+    """A serialised candidate for trace['outcome']['top']: without the quality and score blocks."""
+    return {k: v for k, v in entry.items() if k not in _TRACE_DROPPED}
+
+
+def _top_with_winner(outcome: SearchOutcome, ranked: List[RankedCandidate]) -> List[RankedCandidate]:
+    """The first LEGACY_TOP_N reviewable candidates, with the pick in front when it ranks below them."""
+    top = [rc for rc in ranked if _reviewable(rc)][:LEGACY_TOP_N]
+    winner = outcome.winner if outcome.decision in PICK_DECISIONS else None
+    if winner is not None and winner not in top and _reviewable(winner):
+        top = [winner] + top[:LEGACY_TOP_N - 1]
+    return top
+
+
 def outcome_to_legacy(outcome: SearchOutcome, trace: Optional[dict] = None,
                       spec: Optional[SkuSpec] = None) -> Optional[Dict[str, Any]]:
     """Legacy result dict for a SearchOutcome (see the module docstring)."""
@@ -280,6 +317,7 @@ def outcome_to_legacy(outcome: SearchOutcome, trace: Optional[dict] = None,
 
     if trace is not None:
         trace["outcome"] = outcome_summary(outcome)
+        trace["outcome"]["top"] = [_compact(serialise(rc)) for rc in _top_with_winner(outcome, ranked)]
         no_pick = explain_no_pick(outcome, spec)
         if no_pick is not None:
             trace["outcome"]["explain"] = no_pick

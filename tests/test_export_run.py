@@ -256,3 +256,41 @@ def test_the_worker_publish_details_and_photoroom_uncertainty_are_exported(run_r
     rows = {r["row"] - ROW: r for r in doc["rows"]}
     assert rows[2]["publish"]["uncertainty"] == 0.62 and rows[2]["publish"]["quality_flags"] == ["photoroom_unsure"]
     assert rows[0]["publish"] is None and rows[1]["publish"] is None
+
+
+def test_the_pick_keeps_its_provider_query_and_phash_even_after_its_candidates_are_gone(run_rows):
+    """Live exports of 2026-10-04/05 gave winner_providers {'?': N} and no expansion attribution: curation_candidates
+    kept no provider, query id or pHash, and a published or approved row lost its top list and winner_detail."""
+    import export_run
+
+    # a review row: the candidate columns carry the provenance
+    shop = dict(UNSURE_TIER2, status="preselected", provider="serper_shopping", query_id="X2",
+                phash="c3c3a5a55a5a3c3c", reasons=["vlm:MATCH", "preselected:vlm_match"])
+    _save_candidates(run_rows, 0, [shop])
+    stored = run_rows.get_curation_candidates(ROW + 0, f"{SKU}0")
+    assert (stored[0]["provider"], stored[0]["query_id"], stored[0]["phash"]) == \
+        ("serper_shopping", "X2", "c3c3a5a55a5a3c3c")
+    picked = dict(OLD_OUTCOME, decision="REVIEW_PRESELECTED", winner_url=UNSURE_TIER2["url"])
+    _sql(run_rows, "UPDATE automation_queue SET trace_json = %s WHERE `row_number` = %s",
+         (json.dumps({"outcome": picked}), ROW + 0))
+    # a published row: no review candidate left, the outcome's own top list (facade) still has the pick
+    _sql(run_rows, "DELETE FROM curation_candidates WHERE sku_key = %s", (f"{SKU}2",))
+    auto = {"outcome": {"decision": "AUTO_PUBLISH", "failure_code": None, "winner_url": "https://cdn.x.ae/milk.jpg",
+                        "provider_health": [{"provider": "serper", "status": "ok", "query_id": "Q1"}],
+                        "top": [{"url": "https://cdn.x.ae/milk.jpg", "status": "preselected", "domain": "x.ae",
+                                 "provider": "serper", "query_id": "Q1", "phash": "0f0f0f0f0f0f0f0f",
+                                 "reasons": ["vlm:MATCH", "auto_publish"],
+                                 "evidence": {"tier": 1, "size": "match", "url_gtin": "6281007035309",
+                                              "same_picture_domains": ["noon.com", "x.ae"]},
+                                 "vlm": {"decision": "MATCH", "brand_match": "yes"}}]}}
+    _sql(run_rows, "UPDATE automation_queue SET trace_json = %s WHERE `row_number` = %s", (json.dumps(auto), ROW + 2))
+    doc, _hidden = export_run.build_export("run", RUN_ID, mappings=MAPPINGS)
+    rows = {r["row"] - ROW: r for r in doc["rows"]}
+    assert (rows[0]["winner_provider"], rows[0]["winner_detail"]["query_id"], rows[0]["top"][0]["phash"]) == \
+        ("serper_shopping", "X2", "c3c3a5a55a5a3c3c")
+    assert rows[2]["top"] and rows[2]["winner_detail"]["tier"] == 1
+    assert (rows[2]["winner_provider"], rows[2]["winner_detail"]["query_id"]) == ("serper", "Q1")
+    assert rows[2]["winner_detail"]["url_gtin"] == "6281007035309"
+    assert rows[2]["winner_detail"]["same_picture_domains"] == ["noon.com", "x.ae"]
+    assert doc["summary"]["winner_providers"] == {"serper_shopping": 1, "serper": 1}
+    assert doc["summary"]["expansion"]["winners"] == 1          # the shopping pick is the round's

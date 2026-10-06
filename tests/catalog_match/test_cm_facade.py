@@ -305,3 +305,29 @@ def test_outcome_summary_keeps_the_social_posts_for_the_reviewer():
     out = SearchOutcome(decision="REVIEW_UNSELECTED", failure_code="SOCIAL_ONLY", social_links=list(links))
     assert outcome_summary(out)["social_links"] == links
     assert outcome_summary(SearchOutcome(decision="NOT_FOUND"))["social_links"] == []
+
+
+def test_the_stored_outcome_keeps_its_own_top_list_with_provenance():
+    """The worker stores only trace['outcome'] for a published or reviewed row, and a reviewer's approval deletes the
+    review candidates: the outcome keeps the top reviewable candidates (provider, query id, pHash, evidence) so the run
+    export can still say where the pick came from. Hard-rejected listings are not reviewable and stay out."""
+    trace = {}
+    facade.outcome_to_legacy(preselected_outcome(), trace=trace, spec=SPEC)
+    top = trace["outcome"]["top"]
+    assert [c["url"] for c in top] == [PACKSHOT.image_url, BLOG.image_url]
+    first = top[0]
+    assert (first["provider"], first["query_id"], first["phash"], first["status"]) == \
+        ("serper", "Q1", "0f0f0f0f0f0f0f0f", "preselected")
+    assert first["evidence"]["tier"] == 1 and first["vlm"]["decision"] == "MATCH"
+    assert "quality" not in first and "scores" not in first          # the heavy blocks stay in the full trace only
+    json.dumps(trace["outcome"])                                     # plain JSON for trace_json
+    # a pick ranked below the first eight is put in front
+    out = preselected_outcome()
+    fillers = [ranked_row(Candidate(image_url=f"https://cdn.x.ae/{i}.jpg", page_url=f"https://x.ae/p/{i}",
+                                    title="Almarai Full Fat Fresh Milk 1L", provider="serper", query_id="Q3"),
+                          "eligible") for i in range(9)]
+    out.ranked = fillers + out.ranked
+    trace = {}
+    facade.outcome_to_legacy(out, trace=trace, spec=SPEC)
+    assert len(trace["outcome"]["top"]) == facade.LEGACY_TOP_N
+    assert trace["outcome"]["top"][0]["url"] == PACKSHOT.image_url

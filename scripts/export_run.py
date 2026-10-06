@@ -14,12 +14,13 @@ What a row holds (read from automation_queue, its stored trace and its stored re
 searched again): the sheet row number, product name, brand, size, the barcode (and whether it is a valid GTIN),
 the decision and failure code, why there is no pick (catalog_match.explain: the reason key and the Arabic
 sentence) and the sheet's gaps, the top 8 candidates (image and page URL, domain, title, identity tier, status,
-reasons and warnings, the label reader's reading, the size / variant evidence), the stores' spelling of the
-brand the search used (discovered_brands: the trace's outcome, or an older pick's 'brand_spelling' warning), the
-provider calls and the estimated cost when the trace says it, and the search's wall time per stage ('timings',
-milliseconds: retrieval, fetch, quality, verify, expansion when the round ran, total; a row saved before the
-timings were recorded has an empty one). The summary adds 'timings': p50 / p90 / total seconds per stage over the
-rows that have them.
+reasons and warnings, the label reader's reading, the size / variant evidence, the provider and query id that found
+it and its pHash; read from curation_candidates, or for a published or approved row whose review candidates are
+gone, from the stored outcome's own top list), the stores' spelling of the brand the search used
+(discovered_brands: the trace's outcome, or an older pick's 'brand_spelling' warning), the provider calls and the
+estimated cost when the trace says it, and the search's wall time per stage ('timings', milliseconds: retrieval,
+fetch, quality, verify, expansion when the round ran, total; a row saved before the timings were recorded has an
+empty one). The summary adds 'timings': p50 / p90 / total seconds per stage over the rows that have them.
 
 What the reviewers did (review_decisions, a rejection taken back with «تراجع عن الرفض» left out): per row 'review',
 the latest decision for the row's sku_key (else its row number): decision (approved | rejected | manual_upload), the
@@ -33,7 +34,8 @@ summary.review: counts of the rows' latest decisions (approved / rejected / manu
 review without one; no_decision = the rest; undone = rejections taken back), and for the rows whose engine pick was
 pre-checked (AUTO_PUBLISH / REVIEW_PRESELECTED) whether the reviewer accepted it, replaced it (another image or an
 upload), rejected it or not yet, also split by the pick's warning set (no_warning, vlm_unsure only, other, unknown
-when the export no longer has the pick's warnings). A database without review rows gives an empty block.
+when the export no longer has the pick's warnings) and counted for the picks with the reason size_corroborated
+(preselected_size_corroborated). A database without review rows gives an empty block.
 
 The run's metadata: the code version (git commit), every catalog_match
 setting without any key (catalog_match.cassette.settings_snapshot: secret settings only as set / not set) and the
@@ -221,7 +223,10 @@ def describe(c, rank):
         "variant_evidence": {"status": ev.get("variant_status"), "matched": ev.get("variants_matched") or [],
                              "found": ev.get("variants_found") or {}},
         "source_class": ev.get("source_class"), "conflicts": ev.get("conflicts") or [],
-        "download_error": c.get("download_error"),
+        "download_error": c.get("download_error"), "phash": c.get("phash") or None,
+        # the same picture under other URLs (retrieve.reader_queue) and the barcode the store wrote in a URL (url_gtin)
+        "same_picture_domains": list(ev.get("same_picture_domains") or []), "copy_of": ev.get("copy_of"),
+        "url_gtin": ev.get("url_gtin"),
         "width": c.get("width"), "height": c.get("height"),
     }
 
@@ -311,7 +316,9 @@ def export_row(row, candidates, mappings=None, vocab=None, prices=None, secret_v
     decision = record["decision"]
     steps = [c for step in trace.get("steps") or [] if isinstance(step, dict)
              for c in step.get("candidates") or [] if isinstance(c, dict)]
-    source = (steps or list(candidates or ()))[:TOP_N]
+    # a published or approved row has no review candidates left: the outcome's own top list (facade) keeps them
+    kept = [c for c in outcome.get("top") or [] if isinstance(c, dict)]
+    source = (steps or list(candidates or ()) or kept)[:TOP_N]
     top = [describe(c, i) for i, c in enumerate(source, 1)]
     winner_url = outcome.get("winner_url") if decision in smoke_live.PICK_DECISIONS else None
     if decision in smoke_live.PICK_DECISIONS and not winner_url:
@@ -369,6 +376,9 @@ REVIEW_COLUMNS = ("id, created_at, action, sku_key, `row_number`, image_url, pag
 REVIEW_ACTIONS = ("approved", "rejected", "manual_upload")
 PICK_VERDICTS = ("accepted", "replaced", "rejected", "pending")
 WARNING_SETS = ("no_warning", "vlm_unsure", "other", "unknown")
+# a pick whose label left the size open while two trusted stores state it (catalog_match.retrieve.annotate_copies):
+# recorded only, its approval rate is measured here before it may count for anything
+SIZE_CORROBORATED = "size_corroborated"
 
 
 def review_decisions():
@@ -472,6 +482,7 @@ def review_summary(out_rows, by_row_decisions, undone=0):
     counts = Counter({k: 0 for k in REVIEW_ACTIONS + ("pending", "no_decision")})
     pre = Counter({k: 0 for k in PICK_VERDICTS})
     by_warning = {w: Counter({k: 0 for k in PICK_VERDICTS}) for w in WARNING_SETS}
+    corroborated = Counter({k: 0 for k in PICK_VERDICTS})
     for out_row in out_rows:
         decisions = by_row_decisions.get(id(out_row)) or []
         if decisions:
@@ -484,8 +495,11 @@ def review_summary(out_rows, by_row_decisions, undone=0):
             verdict = pick_verdict(decisions, out_row.get("winner"))
             pre[verdict] += 1
             by_warning[warning_set(out_row, decisions)][verdict] += 1
+            if SIZE_CORROBORATED in ((out_row.get("winner_detail") or {}).get("reasons") or ()):
+                corroborated[verdict] += 1
     return {"counts": dict(counts), "undone": int(undone), "preselected": dict(pre),
-            "preselected_by_warning": {w: dict(c) for w, c in by_warning.items()}}
+            "preselected_by_warning": {w: dict(c) for w, c in by_warning.items()},
+            "preselected_size_corroborated": dict(corroborated)}
 
 
 def add_review(out_rows, by_sku=None, by_row=None, undone=None, approvals=None):

@@ -550,6 +550,8 @@
         return v !== undefined && v !== null && v !== '' && v !== false;
     }
 
+    const SIZE_CORROBORATED_TEXT = 'الحجم مأكد من موقعين';
+
     // «لماذا هذه الصورة؟»: سطور قصيرة من الأدلة التي حسبها المحرك فعلاً (facade.evidence وقراءة الملصق)، بلا تخمين.
     // لا يُقال شيء إذا لم يوجد دليل
     function explainPick(c) {
@@ -562,8 +564,14 @@
             out.push({ key: 'cache', text: 'اعتُمدت لهذا المنتج سابقاً' });
         }
         if (ev.gtin === 'match') out.push({ key: 'gtin', text: 'باركود الصفحة يطابق الشيت' });
-        const n = parseInt(ev.consensus_count, 10);
+        // نفس الرابط من أكثر من موقع (consensus_count)، أو نفس الصورة بروابط ثانية على مواقع مختلفة (same_picture_domains)
+        const sameSites = Array.isArray(ev.same_picture_domains) ? ev.same_picture_domains.length : 0;
+        const n = Math.max(parseInt(ev.consensus_count, 10) || 0, sameSites);
         if (n >= 2) out.push({ key: 'consensus', text: n === 2 ? 'الصورة نفسها في مصدرين' : `الصورة نفسها في ${n} مصادر` });
+        // الملصق ما بيّن الحجم، بس موقعين موثوقين بيذكروه بعنوان نفس الصورة (للعرض فقط: ما بيغيّر الاقتراح)
+        if ((c.reasons || []).includes('size_corroborated')) {
+            out.push({ key: 'size_corroborated', text: SIZE_CORROBORATED_TEXT });
+        }
         if (SOURCE_CLASS_TEXT[ev.source_class]) out.push({ key: 'source', text: SOURCE_CLASS_TEXT[ev.source_class] });
         const page = [];
         if (truthy(ev.brand)) page.push('الماركة');

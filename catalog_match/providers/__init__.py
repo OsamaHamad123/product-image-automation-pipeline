@@ -5,7 +5,9 @@ default_providers() builds the list from settings:
                 LOCAL_INDEX_ENABLED and the index has rows (scripts/build_catalog_index.py)
     serper      Serper.dev Google Images, when SERPER_API_KEY is set (primary, sanctioned)
     off         Open Food Facts GTIN lookup (always listed; it only calls out for a valid GTIN)
-    cse_legacy  Google CSE, only with an existing key and cx, until CSE_SUNSET_DATE
+    cse_legacy  Google CSE: only when CSE_LEGACY_ENABLED is switched on (off by default: every live run
+                since 2026-10-04 got HTTP 403 on all of its calls), with an existing key and cx, until
+                CSE_SUNSET_DATE. A key refused with 401/403 turns it off for the rest of the run (cse_legacy.py)
     bing_html   Bing HTML scraper (unsanctioned):
                 - the primary text source when no sanctioned search API is configured;
                 - otherwise a per-query fallback, only when ENABLE_BING_HTML_FALLBACK is on,
@@ -56,7 +58,7 @@ def default_providers(today: Optional[_dt.date] = None) -> List[BaseProvider]:
     if serper_key:
         providers.append(SerperImagesProvider(api_key=serper_key))
     providers.append(OffProvider())
-    cse = CseLegacyProvider.create(today=today)
+    cse = CseLegacyProvider.create(today=today) if settings.cse_legacy_enabled() else None
     if cse is not None:
         providers.append(cse)
     has_sanctioned_search = bool(serper_key) or cse is not None

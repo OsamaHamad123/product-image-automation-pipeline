@@ -18,7 +18,11 @@ When it runs
       brand found in the name): without a brand nothing can reach tier 1 or 2, so no page or listing the round
       finds could ever be picked, and its paid calls would only be spent (RoundReport.skipped = 'no_brand');
     * never when the caller injected providers or a verifier (tests, the offline eval),
-      unless it also passed an Expansion explicitly (pipeline.find_product_image).
+      unless it also passed an Expansion explicitly (pipeline.find_product_image);
+    * the paid steps X1-X5 (not X0) only where they can find a pick (scope_gate, EXPANSION_SCOPE_GATE, on by
+      default): none for an out-of-scope product (a florist's bouquet, data/expansion_gate.json), one Google
+      Shopping probe for an unmapped brand no listing names on a store or brand site, the rest of the round only
+      when the probe names it (live runs 2026-10-04/05: 9 bouquet and typo-brand rows spent 27 calls, no pick).
 
 The round ('expand') starts with a free step:
     X0  page recovery: the normal flow's listings whose page names the right product (tier
@@ -106,9 +110,13 @@ listings while their pictures download and offers each page's own main image nex
 
 from __future__ import annotations
 
+import json
 import logging
+import re
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
+from functools import lru_cache
+from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 from . import decide, settings
@@ -121,14 +129,18 @@ from .providers.serper_shopping import SerperShoppingProvider
 from .providers.serper_web import SerperWebProvider, site_query
 from .quality import LOW_RES_SHORT_SIDE
 from .query_plan import build_queries
-from .retrieve import norm_image_url
+from .retrieve import norm_image_url, reader_queue
 from .score import IDENTITY_KEYS, rank, rank_key, score_candidate, trusted_domains
-from .text_norm import domain_matches, url_host
+from .text_norm import domain_matches, tokens, url_host
 
 logger = logging.getLogger(__name__)
 
 PICK_DECISIONS = ("REVIEW_PRESELECTED", "AUTO_PUBLISH")
 NO_BRAND = "no_brand"          # RoundReport.skipped for a SKU with no usable brand
+# scope_gate (EXPANSION_SCOPE_GATE): RoundReport.skipped when the paid steps X1-X5 were not (all) made
+BRAND_NOT_FOUND = "brand_not_found"     # no listing names the brand on a store or brand site: one shopping probe only
+OUT_OF_SCOPE_PREFIX = "out_of_scope:"   # 'out_of_scope:flowers' (data/expansion_gate.json)
+EXPANSION_GATE_PATH = Path(__file__).resolve().parent / "data" / "expansion_gate.json"
 WEB_GROUP_1 = ("luluhypermarket.com", "carrefouruae.com", "amazon.ae", "noon.com", "talabat.com")
 MAX_OFFICIAL_SITES = 2
 MAX_PAGES = {"web": 5, "shopping": 4, "lens": 4}
@@ -285,6 +297,105 @@ def no_usable_brand(spec: SkuSpec) -> bool:
     if spec.match_brands or spec.discovered_brands or spec.brand_raw or spec.brand_canonical:
         return False
     return not (spec.gtin and settings.gtin_policy() == "strict")
+
+
+# ---------------------------------------------------------------------------
+# Scope gate (EXPANSION_SCOPE_GATE): the paid steps X1-X5 only where they can find a pick
+# ---------------------------------------------------------------------------
+
+@lru_cache(maxsize=1)
+def _out_of_scope_rules() -> Tuple[Tuple[str, frozenset, frozenset], ...]:
+    try:
+        with open(EXPANSION_GATE_PATH, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):             # pragma: no cover - the file ships with the code
+        logger.exception("expand: %s unreadable; no product is out of scope", EXPANSION_GATE_PATH.name)
+        return ()
+    rules = []
+    for entry in data.get("out_of_scope") or []:
+        words = frozenset(t for w in entry.get("words") or [] for t in tokens(w))
+        unless = frozenset(t for w in entry.get("unless") or [] for t in tokens(w))
+        if entry.get("key") and words:
+            rules.append((str(entry["key"]), words, unless))
+    return tuple(rules)
+
+
+def out_of_scope(spec: SkuSpec) -> str:
+    """The data/expansion_gate.json kind the product is ('flowers'), or '' (a grocery the round may help)."""
+    words = set(tokens(spec.raw_name)) | set(tokens(spec.name_ar))
+    for key, hits, unless in _out_of_scope_rules():
+        if words & hits and not words & unless:
+            return key
+    return ""
+
+
+def _compact(text: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", (text or "").lower())
+
+
+def host_names_brand(spec: SkuSpec, host: str) -> bool:
+    """The site is named after the brand ('bisbell.ae', 'nellara.com', 'shop.nellarafoods.com'): a host label holds
+    one of the SKU's brand phrases written without spaces (4+ letters, Latin script)."""
+    labels = [_compact(label) for label in (host or "").lower().split(".") if label]
+    phrases = [c for c in (_compact(p) for p in spec.match_brands) if len(c) >= 4]
+    return any(p in label for p in phrases for label in labels)
+
+
+def names_brand(spec: SkuSpec, cand: Candidate, score: Optional[Any] = None) -> bool:
+    """The listing names the SKU's brand anywhere: an identity field or the snippet (score.matched brand_fields, a
+    hard-rejected listing too), or the page / image host is the brand's own site."""
+    score = score if score is not None else score_candidate(spec, cand)
+    if (score.matched or {}).get("brand_fields"):
+        return True
+    return any(host_names_brand(spec, url_host(u)) for u in (cand.page_url, cand.image_url) if u)
+
+
+def _store_or_brand_site(spec: SkuSpec, cand: Candidate) -> bool:
+    """A UAE retailer, a known retailer, the brand's own (or a learned) site, any .ae host, or a site named after the
+    brand: where the paid steps (site: web search, shopping) would look for the product."""
+    for url in (cand.page_url, cand.image_url):
+        host = url_host(url)
+        if host and (_fetchable(spec, url) or domain_matches(host, spec.learned_domains)
+                     or host_names_brand(spec, host)):
+            return True
+    return False
+
+
+def brand_on_a_store(spec: SkuSpec, ranked: Sequence[RankedCandidate]) -> bool:
+    """A listing of the pool (hard-rejected ones too) names the brand on a store or brand site."""
+    return any(rc.status != "excluded" and names_brand(spec, rc.candidate, rc.score)
+               and _store_or_brand_site(spec, rc.candidate) for rc in ranked)
+
+
+def _brand_found(ranked: Sequence[RankedCandidate]) -> bool:
+    """A listing names the brand and survives the identity rules (tier 1 or 2): explain's brand_not_found reversed."""
+    return any(rc.status != "excluded" and rc.score is not None and rc.score.tier in (1, 2)
+               and not rc.score.hard_reject for rc in ranked)
+
+
+def scope_gate(spec: SkuSpec, ranked: Sequence[RankedCandidate]) -> str:
+    """Why the paid steps X1-X5 should not run as usual for this product, or '' (they run). Read after X0.
+
+    'out_of_scope:<kind>'  a product no store lists as one pack (a florist's bouquet; data/expansion_gate.json): no
+                           paid step.
+    'brand_not_found'      a brand the Brands Mapping does not know (brand_conf 'sheet_raw', no official site) that
+                           no listing names: none survives with it (tier 1/2) and no listing of the pool, hard-
+                           rejected ones included, names it on a store or brand site. The brand cell is most likely
+                           a typo or an abbreviation the same query text would not find either ('BARTS TRADITON',
+                           'SUP/T', 'SQ SALITED'; live runs 2026-10-04/05: no pick in any such row). One Google
+                           Shopping probe (X2) still runs: it alone found the brand's own store for 'BISBELL BB2208
+                           ...' (row 91), and the rest of the round follows only when it brings a listing that names
+                           the brand. A mapped or learned brand is never gated this way: it exists, and a store
+                           page Google Images did not rank is what the round is for.
+    A product with no usable brand at all never gets here (run_round skips the round: no_usable_brand).
+    """
+    kind = out_of_scope(spec)
+    if kind:
+        return OUT_OF_SCOPE_PREFIX + kind
+    known = spec.brand_conf in ("mapped", "learned") or bool(spec.official_domains)
+    if not known and not _brand_found(ranked) and not brand_on_a_store(spec, ranked):
+        return BRAND_NOT_FOUND
+    return ""
 
 
 def trigger(outcome: SearchOutcome, exp: Optional[Expansion]) -> str:
@@ -835,8 +946,10 @@ def _verify_new(inp: RoundInput, everything: List[RankedCandidate],
                 max_calls: int = MAX_VERIFY_CALLS, first_ids: Set[int] = frozenset()) -> List[VerificationResult]:
     """Read the unread usable tier-1/2 images, best first (the candidates in first_ids before the others)."""
     p = _stages()
-    todo = [rc for rc in everything if p._usable(rc) and rc.verdict is None and rc.score.tier in (1, 2)
-            and STORE_IMAGE_WRONG not in rc.reasons]
+    # one copy per picture first (retrieve.reader_queue): a near-copy waits behind the other pictures, and one of an
+    # image read MATCH is not read at all
+    todo = [rc for rc in reader_queue([rc for rc in everything if p._usable(rc)])
+            if rc.verdict is None and rc.score.tier in (1, 2) and STORE_IMAGE_WRONG not in rc.reasons]
     if first_ids:
         todo.sort(key=lambda rc: id(rc) not in first_ids)       # stable: rank order within each group
     out: List[VerificationResult] = []
@@ -1014,19 +1127,33 @@ def _expand(inp: RoundInput, report: RoundReport) -> RoundReport:
             return report
         inp = replace(inp, ranked=recovered)
 
+    # the paid steps only where they can find a pick (EXPANSION_SCOPE_GATE; X0 above is free and always ran)
+    gate = scope_gate(spec, inp.ranked) if settings.expansion_scope_gate() else ""
+    if gate.startswith(OUT_OF_SCOPE_PREFIX):
+        report.skipped = gate
+        logger.info("expand sku=%s: paid steps skipped (%s)", spec.sku_key, gate)
+        _append_health(report)
+        return report
+    probe = gate == BRAND_NOT_FOUND
+
     budget = _Budget(exp.max_calls)
     serper_ok = not _serper_refused(inp.health)
     text, hl = text_query(spec, inp.custom_query)
     groups = site_groups(spec)
     new: List[Candidate] = []
 
-    # X1 + X2 in parallel
+    # X1 + X2 in parallel (a brand no store names: the X2 probe alone first, X1 only once it names the brand)
     jobs: List[Tuple[str, Any, str, str]] = []
     if text and serper_ok:
-        if exp.web is not None and groups[0] and budget.take():
+        if exp.web is not None and groups[0] and not probe and budget.take():
             jobs.append(("X1", exp.web, site_query(text, groups[0]), "web"))
         if exp.shopping is not None and budget.take():
             jobs.append(("X2", exp.shopping, text, "shopping"))
+    if probe and not jobs:
+        report.skipped = gate
+        logger.info("expand sku=%s: paid steps skipped (%s, no shopping probe)", spec.sku_key, gate)
+        _append_health(report)
+        return report
     if jobs:
         with ThreadPoolExecutor(max_workers=len(jobs)) as ex:
             futs = [(qid, query, kind, ex.submit(_call, prov, query, hl, spec, qid)) for qid, prov, query, kind in jobs]
@@ -1034,6 +1161,19 @@ def _expand(inp: RoundInput, report: RoundReport) -> RoundReport:
         for qid, query, kind, res in done:
             _record(report, res, query)
             new.extend(collector.collect([res], kind))
+    if probe:
+        hits = [c for res in report.health for c in res.candidates]
+        if not any(names_brand(spec, c) for c in hits + new):
+            report.skipped = gate
+            logger.info("expand sku=%s: the shopping probe names the brand nowhere either; the other paid steps "
+                        "skipped (%s)", spec.sku_key, gate)
+            _append_health(report)
+            return report
+        if exp.web is not None and groups[0] and budget.take():
+            query = site_query(text, groups[0])
+            res = _call(exp.web, query, hl, spec, "X1")
+            _record(report, res, query)
+            new.extend(collector.collect([res], "web"))
 
     # X3, X4: visual search from the normal flow's near-matches
     seeds = _distinct(near_matches(spec, inp.ranked), MAX_LENS_SEEDS) if _visual_ready(exp) else []

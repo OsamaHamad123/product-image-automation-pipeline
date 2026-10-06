@@ -129,6 +129,15 @@ _SCHEMA_MIGRATIONS = [
     "ALTER TABLE curation_candidates ADD COLUMN IF NOT EXISTS identity_tier VARCHAR(8) NULL",
     "ALTER TABLE curation_candidates ADD COLUMN IF NOT EXISTS page_url TEXT NULL",
     "ALTER TABLE curation_candidates ADD INDEX IF NOT EXISTS idx_curation_row (`row_number`)",
+    # مصدر المرشح (المزود، الاستعلام Q1..X5 / IDX) وبصمة pHash لصورته: تقارير التشغيل تنسب الاختيار لمصدره
+    # (winner_providers وجولة التوسيع) وتعدّ النسخ المتقاربة، حتى بعد حذف خطوات البحث من trace_json
+    "ALTER TABLE curation_candidates ADD COLUMN IF NOT EXISTS provider VARCHAR(32) NULL",
+    "ALTER TABLE curation_candidates ADD COLUMN IF NOT EXISTS query_id VARCHAR(16) NULL",
+    "ALTER TABLE curation_candidates ADD COLUMN IF NOT EXISTS phash VARCHAR(32) NULL",
+    # الباركود الذي يكتبه المتجر في رابط المنتج نفسه (catalog_match.url_gtin: الشارقة التعاونية '/p/<GTIN>'):
+    # يُقرأ عند جمع الخرائط بلا أي طلب، فيجد local_index.by_gtin صفحة الباركود قبل قراءتها
+    "ALTER TABLE catalog_products ADD COLUMN IF NOT EXISTS url_gtin VARCHAR(14) NULL",
+    "ALTER TABLE catalog_products ADD INDEX IF NOT EXISTS idx_catalog_url_gtin (url_gtin)",
     "ALTER TABLE curation_candidates ADD INDEX IF NOT EXISTS idx_curation_sku (sku_key)",
     # automation_state: رسالة تنبيه مرئية للوحة التحكم (مثل عدم توفر نموذج Gemini)
     "ALTER TABLE automation_state ADD COLUMN IF NOT EXISTS notice VARCHAR(255) NULL",
@@ -2931,6 +2940,12 @@ def _candidate_score(c):
     return None
 
 
+def _short_text(value, limit):
+    """نص قصير لعمود VARCHAR (المزود، الاستعلام، pHash) أو None."""
+    text = str(value).strip() if value is not None else ""
+    return text[:limit] or None
+
+
 def _as_int(value):
     try:
         return int(value) if value not in (None, "") else None
@@ -2986,14 +3001,16 @@ def save_curation_candidates(row_number, product_name, brand, candidates, best_u
                 INSERT INTO curation_candidates (
                     `row_number`, product_name, brand, image_url, title, width, height, clip_score, source_domain,
                     is_selected, status, sku_key, run_id, reasons_json, evidence_json, vlm_json, content_sha256,
-                    identity_tier, page_url
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    identity_tier, page_url, provider, query_id, phash
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (
                 row_number, product_name, brand, url, title, _as_int(c.get("width")), _as_int(c.get("height")),
                 _candidate_score(c), str(domain)[:255], 1 if status == "preselected" else 0, status[:255],
                 sku_key, run_id, _json_or_none(c.get("reasons")), _json_or_none(evidence),
                 _json_or_none(c.get("vlm")), c.get("content_sha256") or None,
                 (str(tier)[:8] if tier is not None else None), page_url,
+                _short_text(c.get("provider") or c.get("source"), 32), _short_text(c.get("query_id"), 16),
+                _short_text(c.get("phash"), 32),
             ))
         conn.commit()
         return True
@@ -3058,6 +3075,9 @@ def get_curation_candidates(row_number, sku_key=None, identity=None):
                 "content_sha256": r.get("content_sha256"),
                 "identity_tier": r.get("identity_tier"),
                 "page_url": r.get("page_url"),
+                "provider": r.get("provider"),
+                "query_id": r.get("query_id"),
+                "phash": r.get("phash"),
             })
         return out
     except Exception as e:

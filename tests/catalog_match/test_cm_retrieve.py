@@ -353,7 +353,7 @@ def test_norm_image_url():
 def clean_settings(monkeypatch):
     monkeypatch.setattr(settings, "_config", None)
     for name in ("SERPER_API_KEY", "ENABLE_BING_HTML_FALLBACK", "GOOGLE_SEARCH_API_KEYS", "GOOGLE_SEARCH_API_KEY",
-                 "GOOGLE_SEARCH_CX_LIST", "GOOGLE_SEARCH_CX", "CSE_SUNSET_DATE"):
+                 "GOOGLE_SEARCH_CX_LIST", "GOOGLE_SEARCH_CX", "CSE_SUNSET_DATE", "CSE_LEGACY_ENABLED"):
         monkeypatch.delenv(name, raising=False)
     return monkeypatch
 
@@ -373,9 +373,28 @@ def test_default_providers_with_serper(clean_settings):
     assert describe(default_providers()) == [("serper", False), ("off", False)]
 
 
+def test_default_providers_leave_cse_out_unless_switched_on(clean_settings):
+    """Every live run since 2026-10-04 got HTTP 403 from Google CSE on every call: a configured key alone no longer
+    puts it in the chain, only CSE_LEGACY_ENABLED does."""
+    clean_settings.setenv("SERPER_API_KEY", "k")
+    clean_settings.setenv("GOOGLE_SEARCH_API_KEY", "legacy-key")
+    clean_settings.setenv("GOOGLE_SEARCH_CX", "legacy-cx")
+    assert describe(default_providers(today=dt.date(2026, 9, 30))) == [("serper", False), ("off", False),
+                                                                      ("bing_html", True)]
+    clean_settings.setenv("CSE_LEGACY_ENABLED", "true")
+    assert "cse_legacy" in [p.name for p in default_providers(today=dt.date(2026, 9, 30))]
+
+
+def test_a_cse_key_alone_is_no_sanctioned_search(clean_settings):
+    clean_settings.setenv("GOOGLE_SEARCH_API_KEY", "legacy-key")
+    clean_settings.setenv("GOOGLE_SEARCH_CX", "legacy-cx")
+    assert describe(default_providers(today=dt.date(2026, 9, 30))) == [("off", False), ("bing_html", False)]
+
+
 def test_default_providers_cse_until_sunset(clean_settings):
     clean_settings.setenv("GOOGLE_SEARCH_API_KEY", "legacy-key")
     clean_settings.setenv("GOOGLE_SEARCH_CX", "legacy-cx")
+    clean_settings.setenv("CSE_LEGACY_ENABLED", "true")
     names = [p.name for p in default_providers(today=dt.date(2026, 9, 30))]
     assert "cse_legacy" in names
     assert ("bing_html", True) in describe(default_providers(today=dt.date(2026, 9, 30)))

@@ -257,6 +257,11 @@ class RankedCandidate:
     verdict: Optional[VlmImageVerdict] = None
     status: str = "eligible"         # 'preselected' | 'eligible' | 'rejected' | 'excluded'
     reasons: List[str] = field(default_factory=list)
+    # retrieve.reader_queue / annotate_copies (evidence only: never a reading, a tier or a rank): the distinct page
+    # domains that show the same picture (pHash distance <= 6, colours alike), and for a copy the reader did not
+    # read because a stronger copy of the same picture was read instead, that copy's image URL
+    same_picture_domains: List[str] = field(default_factory=list)
+    copy_of: Optional[str] = None
 
 
 @dataclass
