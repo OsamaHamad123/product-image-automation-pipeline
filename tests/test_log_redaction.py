@@ -5,7 +5,6 @@
   it (install_log_redaction).
 * config.log_error_to_laravel and config.log_and_fail (log, failure table, Telegram) redact; the Telegram message
   (parse_mode HTML) escapes its values.
-* query_refiner sends the Gemini key in the x-goog-api-key header (it was ?key= in the URL) and redacts its error.
 * a bare `python main.py` prints its usage: the old sequential mode that writes the Sheet directly needs
   --legacy-sequential.
 """
@@ -150,37 +149,6 @@ def test_a_failure_is_redacted_everywhere_and_telegram_html_is_escaped(secret, m
     assert "Milk &lt;b&gt;1L&lt;/b&gt; &amp; Co" in message and "A&amp;W" in message
     assert "<code>401 unauthorized &lt;key&gt; [REDACTED]</code>" in message
     assert message.count("<b>") == message.count("</b>")         # only the alert's own tags
-
-
-# ---------------------------------------------------------------------------
-# query_refiner: the Gemini key in a header
-# ---------------------------------------------------------------------------
-
-class _Answer:
-    status_code = 200
-
-    @staticmethod
-    def json():
-        return {"candidates": [{"content": {"parts": [{"text": '{"canonical_brand_en": "Almarai"}'}]}}]}
-
-
-def test_the_gemini_key_goes_in_a_header_never_the_url(secret, monkeypatch, capsys):
-    import query_refiner
-
-    seen = []
-    monkeypatch.setattr(query_refiner.requests, "post", lambda url, **kw: seen.append((url, kw)) or _Answer())
-    assert query_refiner.QueryRefiner.refine_product_metadata("Milk 1L", "Almarai")["canonical_brand_en"] == "Almarai"
-    [(url, kwargs)] = seen
-    assert secret not in url and "key=" not in url and kwargs["headers"]["x-goog-api-key"] == secret
-
-    def boom(url, **kw):
-        raise ConnectionError(f"HTTPSConnectionPool: Max retries exceeded with url: {url}?key={secret}")
-
-    monkeypatch.setattr(query_refiner.requests, "post", boom)
-    fallback = query_refiner.QueryRefiner.refine_product_metadata("Milk 1L", "Almarai")
-    assert fallback["raw_brand"] == "Almarai"
-    out = capsys.readouterr().out
-    assert secret not in out and "[REDACTED]" in out
 
 
 # ---------------------------------------------------------------------------

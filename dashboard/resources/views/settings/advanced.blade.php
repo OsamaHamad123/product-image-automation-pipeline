@@ -1,6 +1,6 @@
 {{--
-    Settings · متقدم. $advanced = SettingsController::advancedData(): the search engine (v2, or v1 as a temporary
-    rollback), strict brand matching, the v1-only switches and the legacy Custom Search / proxy settings. The label
+    Settings · متقدم. $advanced = SettingsController::advancedData(): strict brand matching and the legacy Custom
+    Search / proxy settings (catalog_match is the only search engine: there is no engine switch). The label
     reading models moved to the «نماذج التحقق» tab (settings/models.blade.php).
     Secret fields are write-only (empty = keep the stored value) and never show a stored value.
     A second form (section=sources, $advanced['sources'] = SettingsController::sourcesData()) controls the expansion
@@ -117,7 +117,7 @@
     </div>
 </form>
 
-<form method="POST" action="{{ route('dashboard.save_settings') }}" class="lq-card lq-settings-card" aria-labelledby="lq-settings-advanced-title" autocomplete="off" data-advanced-form data-engine="{{ $adv['engine'] }}">
+<form method="POST" action="{{ route('dashboard.save_settings') }}" class="lq-card lq-settings-card" aria-labelledby="lq-settings-advanced-title" autocomplete="off" data-advanced-form>
     @csrf
     <input type="hidden" name="section" value="advanced">
     <div class="lq-settings-card__head">
@@ -125,36 +125,12 @@
         <p class="lq-settings-card__intro">إعدادات نادراً ما بتحتاجها. غيّرها بس إذا بتعرف شو بتعمل.</p>
     </div>
 
-    @if ($adv['engine'] === 'v1')
-        <x-lq.alert variant="danger" title="النظام القديم شغّال هلق:">الصور ما عم تنفحص متل النظام الجديد. رجّع «النظام الجديد» أول ما تخلص.</x-lq.alert>
-    @endif
-
-    <fieldset class="lq-settings-fieldset" @disabled((bool) $dbError)>
-        <legend class="lq-field__label">نظام البحث</legend>
-        <label class="lq-check lq-settings-choice">
-            <input type="radio" name="search_engine" value="v2" @checked($adv['engine'] === 'v2')>
-            <span>النظام الجديد: بيقرأ الملصق وبيتأكد من الماركة والحجم والنوع (موصى به)</span>
-        </label>
-        <label class="lq-check lq-settings-choice">
-            <input type="radio" name="search_engine" value="v1" @checked($adv['engine'] === 'v1') data-engine-v1>
-            <span>النظام القديم: للرجوع المؤقت بس</span>
-        </label>
-        <x-lq.alert variant="warning" title="قبل ما ترجع للنظام القديم:">ما بيقرأ الملصق ولا بيتأكد من الحجم والنوع متل الجديد، فبتكتر الاقتراحات الغلط. استعمله بس إذا النظام الجديد عم يعلق، ورجّع أول ما ينحل.</x-lq.alert>
-    </fieldset>
-
     <p class="lq-settings-card__note">نموذج قراءة الملصق (Gemini أو Claude) والنموذج القوي وميزانيته صاروا بتبويب <a class="lq-link" href="{{ route('dashboard.settings') }}?tab=models">نماذج التحقق</a>.</p>
 
     <div class="lq-settings-switch-row">
         <x-lq.switch name="strict_brand_match" value="true" label="مطابقة الماركة الصارمة" show-label :checked="$adv['strict']" :disabled="(bool) $dbError" />
         <span class="lq-field__hint">بيرفض الصورة إذا بيّن عليها ماركة منافسة بدون الماركة المطلوبة.</span>
     </div>
-
-    <fieldset class="lq-settings-fieldset lq-settings-fieldset--boxed" @disabled((bool) $dbError)>
-        <legend class="lq-field__label">خيارات النظام القديم (بتشتغل بس معه)</legend>
-        <x-lq.switch name="enable_gemini_pre_validation" value="true" label="فحص Gemini المسبق" show-label :checked="$adv['v1']['enable_gemini_pre_validation']" />
-        <x-lq.switch name="filter_competitors" value="true" label="فلترة الماركات المنافسة" show-label :checked="$adv['v1']['filter_competitors']" />
-        <x-lq.switch name="bypass_white_background_check" value="true" label="تخطي فحص الخلفية البيضا" show-label :checked="$adv['v1']['bypass_white_background_check']" />
-    </fieldset>
 
     <fieldset class="lq-settings-fieldset lq-settings-fieldset--boxed" @disabled((bool) $dbError)>
         <legend class="lq-field__label">مصادر قديمة واختيارية</legend>

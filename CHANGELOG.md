@@ -11,6 +11,128 @@ causes: the quality gate threw away white-background packshots, an unverified "l
 success, siblings of the right product outranked it, and reviewers' rejections were never remembered. The search
 core was rebuilt and wired into the queue, the dashboard actions and the sheet writes. Every claim below has a test.
 
+### Wave 3 of the professional upgrade: transparent re-cuts, cut-out QA, setup wizard, simpler Health, lighter code
+
+**«أعد معالجتها شفافة»: the old white images become transparent (scripts/reprocess_transparent.py, Health card)**
+- Every approval now records its master's background and what the cut check said
+  (`resolved_products.master_background`, `cutout_json`). An older approval is measured once from its stored master.
+- `recut.py` re-cuts from the best stored source:
+  - the approval's cached candidate bytes;
+  - else its original URL, once shown to be the same picture;
+  - the white master only as a last resort.
+  It then publishes a new versioned asset, moves the approval to it and queues the new link in the outbox.
+- The outbox writes it only while the Sheet cell still holds the old link. A cell changed by hand becomes CONFLICT
+  and is not written.
+- A dry run is the default: it shows counts and the PhotoRoom cost (`PHOTOROOM_PRICE_USD`).
+- `--apply --max N --max-usd X`:
+  - stops at the cap and at the first error, and resumes from `temp/reprocess_state.json`;
+  - refuses during a run, or while the output is set to white.
+- A cut that comes back with review flags waits for the owner in «فحص القص».
+
+**«فحص القص» (/cutout-check)**
+- Published pictures appear on dark, light and checker side by side, with filters (white master, light halo on
+  dark, PhotoRoom unsure, glass, dark rim on white, low resolution).
+- «أعد القص بـPhotoRoom» / «جرّب القص المحلي» make a cut that waits. «اعتمد الجديد» publishes it through the same
+  guarded path, or «خلّي القديم» discards it. «آخر التبديلات» undoes any replacement.
+- Nothing is replaced without the owner's click.
+- BiRefNet at 2048 was checked and is not usable yet: rembg resizes every BiRefNet to 1024, and the HR model has no
+  official ONNX.
+
+**«جهّز لقطة»: first-run setup wizard (/setup)**
+- Five steps, each with a live check behind a button and a plain fix:
+  1. the Sheet;
+  2. the keys (present or missing only, never shown);
+  3. the brands table;
+  4. the publish rehearsal;
+  5. a first run of 5 rows.
+- Progress is kept in system_settings, and the wizard never blocks a configured install.
+
+**A simpler Health page**
+- The top says «كلشي تمام» or lists «شو بدو منك», each item with a button to its fix
+  (`HealthAttentionController`). It reads ops alerts, failed services, DEAD Sheet writes, disk, a stale nightly
+  run, the last run, the publish rehearsal, background removal and the local index's age.
+- Every detailed card moves, unchanged, under «تفاصيل متقدمة», collapsed by default.
+
+**Lighter code and a faster, order-independent suite**
+- The v1 search engine is gone: catalog_match is the only engine.
+  - Removed: aesthetics_engine.py, image_quality_gatekeeper.py, query_refiner.py, fastapi_server.py, the v1 helpers
+    and the `SEARCH_ENGINE` switch.
+  - fastapi, uvicorn, pydantic and aiohttp leave requirements.txt.
+  - About 4,800 lines removed.
+- `--legacy-sequential` stays: its search already ran through catalog_match.
+- Review page tests no longer wait for the 6-second auto-hide.
+- Scripts are loaded without shadowing the root modules, so any subset of test files passes in any order.
+- The installer tests read a clean clone, not a developer's own dashboard/.env.
+
+**MariaDB 11**
+- CI runs MariaDB 11, where VECTOR is reserved: `approved_embeddings.vector` is now `embedding`, and the alias is
+  quoted.
+- The full suite was run against 11.8 as well as 10.11.
+
+### Wave 2 of the professional upgrade: brands, local index, real measurement, normaliser, image fingerprints
+
+**Fill the brands table in one go («عبّي جدول الماركات», Run page)**
+- One proposal per missing brand, with its evidence (approvals, learned spellings, local index pages, a cached
+  official site, store spellings). The confidence decides the box:
+  - high (two kinds of evidence): ticked;
+  - low: unticked;
+  - none: «ما لقينا دليل كافي», cannot be ticked.
+- The page sends names only; the bridge writes each brand's own proposal in batches. Every write is logged in
+  `brand_writes`, and «تراجع» removes a row only while it is exactly what the assistant wrote.
+- «دوّر عالمواقع الرسمية» runs at most 10 searches per click, cached in `brand_sites`.
+
+**Auto-publish for every confirmed brand (lane strict) is on by default, and gated on its own readiness**
+- `AUTO_PUBLISH_STRICT_LANE` defaults to on and no longer needs the brand-list switch.
+- `decide.py` publishes a strict pick only when `strict_lane_readiness()` is `ready`, meaning the lane's own reviews
+  reach a Wilson lower bound of at least 98% (about 189 approvals). Before this, only the Settings switch's refusal
+  stood in the way. Otherwise the pick waits with `auto_blocked:strict_lane_not_ready`.
+- Only the worker wires the readiness reader. The dashboard's re-search, scripts and the nightly run never publish
+  through the lane.
+- A one-time migration turns a stored 'false' on; after that the owner's saved value always wins.
+- Settings, the Run page and the review meter say whether the lane is on, how many approvals remain, or that it is
+  publishing by itself.
+
+**Local index: Spinneys and Lulu**
+- Spinneys' sitemap gives 51,214 product URLs, and 91% of their slugs carry the brand.
+- Lulu is enabled, but its sitemap answers 403 from the build sandbox; the refresh records BLOCKED and retries in 7
+  days.
+- Talabat (no product pages in its sitemaps) and Carrefour (an empty page from here) stay disabled.
+  `--discover` prints the exact lines to paste once it runs on the server.
+- Stores take turns in the refresh budget, a big store resumes where it stopped, and a worker run stops the refresh
+  cleanly.
+- The stores' own image CDNs count as UAE retailer hosts for the slow-host breaker.
+
+**Measuring on real data**
+- `scripts/eval_record.py --from-db` builds a labelled set from the owner's reviews, with small images and secrets
+  stripped. «صدّر مجموعة اختبار» on the Health page exports it as a zip.
+- A realistic synthetic set (`--set realistic`, 31 SKUs) has abbreviated names, no barcode, size or category, and the
+  real failure patterns.
+- `--expansion` and `--local-index` measure the costly parts through fakes.
+- Per-lane precision with its Wilson bound, and a held-out split of the rows the regression tests were tuned on.
+- `scripts/compare_verifiers.py` compares the current reader with the strong model, on recorded answers.
+
+**Query normaliser for abbreviated sheet names (`QUERY_NORMALIZER`, default gemini)**
+- One cached Gemini Flash-Lite call per SKU, about $0.0002, capped per run. It is skipped silently on a timeout, an
+  error, the budget or an open breaker.
+- It only builds queries: N1 takes Q3's place, and the plan never gets longer. Scoring, the label reader and routing
+  never see it.
+- When the brand is unknown or not found, its brand guess is searched once. Such a pick gets
+  `warn:brand_from_normaliser` and goes to review, never auto-publish.
+- `scripts/preview_normalizer.py --rows N` shows before/after queries with the cost.
+
+**Image fingerprints as evidence (`EMBEDDINGS`, off by default; `install.sh --with-embeddings`)**
+- DINOv2-small int8 on the CPU, about 0.3 s per SKU.
+- Approved pictures are kept in `approved_embeddings`.
+- A candidate that is far from every approved picture of its brand and close to another brand's gets
+  «شكل العبوة أقرب لماركة تانية» (`warn:brand_look_mismatch`). It is never auto-published, whatever the brand list
+  says. The winner never changes, and the check needs at least 3 approved pictures of the brand.
+- `scripts/backfill_embeddings.py` (dry run by default) fills the table from approvals made before.
+
+**A length on the product is a variant**
+- `6MM` / `30CM` are read as millimetres (`variants.LENGTH_AXIS`): the 9 mm bag is never a 6 mm row's pick. A row
+  that states no length accepts any.
+- Realistic set: 26/26, 23/26, 16/26, up from 25/26, 22/26, 16/26.
+
 ### Wave 1 of the professional upgrade (from the search, image, architecture and UX audits)
 
 **Delivery for the mobile app, which reads the image link straight from the Sheet**

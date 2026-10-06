@@ -1,4 +1,4 @@
-"""Deterministic query plan (decision D8): no LLM free-text queries.
+"""Deterministic query plan (decision D8): no LLM free-text queries; LLM words only through the normaliser's hint.
 
 build_queries(spec, custom_query=None) -> list[PlannedQuery], at most 4:
     Q1 (hl=en)  '{brand_en} {name words} {size}' (hl=ar with the Arabic brand when the
@@ -6,11 +6,20 @@ build_queries(spec, custom_query=None) -> list[PlannedQuery], at most 4:
     Q2 (hl=ar)  '{brand_ar} {Arabic name words} {size_ar}', only when name_ar has Arabic text
     Q3 (hl=en)  Q1 scoped with site: OR over the brand's official domains and the UAE
                 retailers; Serper only (providers_hint=('serper',))
+    N1          in Q3's place when the spec carries a query hint (catalog_match.normalizer: the model's
+                reading of an abbreviated sheet name, on the retriever's planning copy only) whose words
+                differ from Q1's: '{brand_en} {expanded name words} {size}' with Q3's site: clause. The
+                brand is the SHEET's (mapped / discovered) brand, never the model's guess; the guess is
+                stripped from the words unless the sheet name itself writes it. The plan keeps its length.
     Q4 (hl=en)  '"{brand_en}" {gtin}', only when the GTIN is valid and global (and
                 GTIN_POLICY is not 'off')
 A staff custom_query REPLACES the plan: it is the only query, with query_id 'custom'.
 
 relaxations(spec) -> [R1 (variant words dropped), R2 (size dropped)], flagged relaxed.
+
+rescue_query(spec, hint, already) -> NB, the brand-not-found rescue: '{the model's brand guess} {expanded name
+words} {size}' (the pipeline sends it in the place of the last relaxation; its picks go to review).
+Neither N1 nor NB is ever a brand alone, and both always end with the sheet's own size token.
 
 Name words are the sheet name's own words, in order, as the stores write them (a size glued
 to a word split off and known sheet compounds and typos fixed: catalog_match.sheet_names), with every spelling of the
@@ -33,7 +42,7 @@ from __future__ import annotations
 import logging
 import re
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Iterable, List, Optional, Sequence, Set, Tuple
 
 from . import abbreviations
@@ -41,13 +50,15 @@ from . import settings
 from . import sheet_names
 from . import variants as variants_mod
 from .gtin import is_restricted, normalize_gtin
-from .models import PlannedQuery, Size, SkuSpec
+from .models import PlannedQuery, QueryHint, Size, SkuSpec
 from .sizes import parse_sizes
 from .text_norm import alnum_len, tokens
 
 logger = logging.getLogger(__name__)
 
 MAX_PLANNED_QUERIES = 4
+NORMALIZED_QUERY_ID = "N1"     # Q3's place, written from the normaliser's expanded name
+RESCUE_QUERY_ID = "NB"         # the brand-not-found rescue: the normaliser's brand guess
 RETAILER_SITES = ("carrefouruae.com", "noon.com", "luluhypermarket.com", "amazon.ae", "talabat.com")
 MAX_OFFICIAL_SITES = 2
 MAX_LEARNED_SITES = 2      # sites the reviewers keep approving the brand's images from (catalog_match.learning)
@@ -344,7 +355,10 @@ def _expand_shorthand(words: List[_Word], removed: Set[int], context: str) -> Tu
     return out, out_removed
 
 
-def _analyse(spec: SkuSpec, name: str, brand: str, spellings: Sequence[str], lang: str) -> _NameParts:
+def _analyse(spec: SkuSpec, name: str, brand: str, spellings: Sequence[str], lang: str,
+             strip_sizes: bool = False) -> _NameParts:
+    """strip_sizes: drop every size / pack expression of the name even when the SKU states no size (a model's
+    reading: only the sheet's own size token is ever written)."""
     words = _words(name)
     for phrase in spellings:
         words = _split_at_phrase(words, phrase)
@@ -352,7 +366,7 @@ def _analyse(spec: SkuSpec, name: str, brand: str, spellings: Sequence[str], lan
     for phrase in spellings:
         _mark_phrase(words, phrase, removed)
         _mark_joined(words, phrase, removed)
-    if spec.size is not None:
+    if spec.size is not None or strip_sizes:
         for found in parse_sizes(name, "query"):
             _mark_phrase(words, found.unit_text, removed)
         _mark_packs(words, removed)
@@ -399,6 +413,99 @@ def _site_clause(spec: SkuSpec) -> str:
 
 
 # ---------------------------------------------------------------------------
+# The normaliser's hint (catalog_match.normalizer): search words only
+# ---------------------------------------------------------------------------
+
+def with_hint(spec: SkuSpec, hint: Optional[QueryHint]) -> SkuSpec:
+    """The retriever's planning copy of the spec, carrying the normaliser's reading (the spec itself is unchanged)."""
+    return replace(spec, query_hint=hint) if hint is not None and hint.expanded_name else spec
+
+
+def _sheet_texts(spec: SkuSpec) -> List[str]:
+    return [t for t in (spec.raw_name, sheet_names.spec_name(spec), spec.name_ar, spec.brand_raw, spec.brand_canonical)
+            + tuple(spec.match_brands) + tuple(spec.discovered_brands) if t]
+
+
+def in_sheet(spec: SkuSpec, phrase: str) -> bool:
+    """The phrase is written in the sheet row itself (its name or a brand of it), in any word breaks."""
+    key = _compact(phrase)
+    return bool(key) and any(key in _compact(text) for text in _sheet_texts(spec))
+
+
+def _content_words(text: str) -> List[str]:
+    """The words that name the product: no function, packaging or unit word ('Tuna in Salt Water' is 'TUNA SALT
+    WATER', 'COCA COLA CAN' is 'Coca Cola'), no number."""
+    from .identity import FILLER_WORDS
+    return [t for t in tokens(text, strip_clitics=True) if t not in FILLER_WORDS and not t[0].isdigit()]
+
+
+def _rewrites(new: str, old: str) -> bool:
+    """The new text writes out at least one word of the old one ('LGT' -> 'Light', 'FISF' -> 'Fish'); a reading that
+    only ADDS words ('ALMARAI FULL FAT MILK' + 'Fresh') expands nothing and is never worth a query of its own."""
+    kept = set(_content_words(new))
+    return any(t not in kept for t in _content_words(old))
+
+
+def _hint_parts(spec: SkuSpec, hint: QueryHint, brand: str, extra_spellings: Sequence[str]) -> Optional[_NameParts]:
+    """The expanded name analysed like the sheet name: the brand written once as a prefix (every spelling of the
+    sheet brand, and extra_spellings, stripped from the words), sizes and packs dropped, the sheet's size appended.
+    None when no word but the brand would be left."""
+    brand_en, brand_ar = english_brand(spec), arabic_brand(spec)
+    spellings = list(_brand_spellings(spec, brand_en, brand_ar))
+    spellings += [p for p in extra_spellings if p and _compact(p) and p not in spellings]
+    spellings.sort(key=lambda p: -len(tokens(p)))
+    parts = _analyse(spec, hint.expanded_name, brand, spellings, "en", strip_sizes=True)
+    return parts if parts.has_words() else None
+
+
+def normalized_query(spec: SkuSpec) -> Optional[str]:
+    """N1's words (without the site: clause): the hint's expanded name with the sheet's brand and size, or None
+    without a hint, for an Arabic sheet name, or when it writes out none of Q1's words (_rewrites)."""
+    hint = spec.query_hint
+    if hint is None or not hint.expanded_name or not _has_latin(hint.expanded_name):
+        return None
+    main = _primary_parts(spec)
+    if main.lang != "en" or not main.has_content():
+        return None
+    # the model's brand is a guess unless the sheet row writes it: a guess never rides along in N1, and a sheet word
+    # the prefix already holds ('SQ' of the brand cell 'SQ SALITED') is not written twice
+    strip = hint.brand and (not in_sheet(spec, hint.brand)
+                            or (main.brand and _compact(hint.brand) in _compact(main.brand)))
+    parts = _hint_parts(spec, hint, main.brand, [hint.brand] if strip else [])
+    if parts is None:
+        return None
+    text = parts.text()
+    if not text or alnum_len(text) < 2 or not _rewrites(text, main.text()):
+        return None
+    return text
+
+
+def rescue_query(spec: SkuSpec, hint: Optional[QueryHint], already: Sequence[str] = ()) -> Optional[PlannedQuery]:
+    """NB: the normaliser's brand guess with the expanded name and the sheet's size, or None when there is no guess,
+    the guess is a spelling the sheet row already has, only the brand would be left, or the text already ran."""
+    if hint is None or not hint.brand or not hint.expanded_name:
+        return None
+    guess = " ".join(_BRAND_SLASH_RE.sub(" ", hint.brand).split()).strip(_BRAND_EDGE_PUNCT + " ")
+    if not guess or not _has_latin(guess) or alnum_len(guess) < 2:
+        return None
+    known = {_compact(p) for p in (spec.brand_raw, spec.brand_canonical) + tuple(spec.match_brands)
+             + tuple(spec.discovered_brands) if p}
+    if _compact(guess) in known:
+        return None
+    if not known and in_sheet(spec, guess):
+        return None            # no brand cell, and the name already writes the guess: Q1 searched it
+
+    parts = _hint_parts(spec, hint, guess, [guess, hint.brand])
+    if parts is None:
+        return None
+    text = parts.text()
+    seen = {" ".join(q.split()).casefold() for q in already or ()}
+    if not text or " ".join(text.split()).casefold() in seen or _is_bare_number(text):
+        return None
+    return PlannedQuery(query_id=RESCUE_QUERY_ID, text=text, hl="en")
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
@@ -439,8 +546,10 @@ def build_queries(spec: SkuSpec, custom_query: Optional[str] = None) -> List[Pla
             plan.append(PlannedQuery(query_id="Q2", text=q2, hl="ar"))
 
     if q1:
-        plan.append(PlannedQuery(query_id="Q3", text=f"{q1} {_site_clause(spec)}", hl=main.lang,
-                                 providers_hint=("serper",)))
+        # N1 (catalog_match.normalizer) takes Q3's place: the same UAE retailers, the abbreviations written out
+        n1 = normalized_query(spec) if spec.query_hint is not None else None
+        plan.append(PlannedQuery(query_id=NORMALIZED_QUERY_ID if n1 else "Q3", text=f"{n1 or q1} {_site_clause(spec)}",
+                                 hl=main.lang, providers_hint=("serper",)))
 
     # Q4 (GTIN query, identity package): only a valid, global barcode, always with the brand, and
     # never under GTIN_POLICY 'off'. Its answers are scored like any other: a listing of another

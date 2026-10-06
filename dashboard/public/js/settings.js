@@ -6,7 +6,6 @@
  * - المفاتيح: «تغيير» reveals an empty, write-only form; clearing a stored key asks first.
  * - النشر الآلي: the switch says what it will do before it saves (AUTO_PUBLISH_ENABLED).
  * - معالجة الصور: with background removal off, «رجّع عزل الخلفية (…)» POSTs /api/settings/bg-method {method}.
- * - متقدم: rolling back to the old search engine asks first.
  * View helpers are pure (window.LaqtaSettings, used by the node tests); the DOM code sets text only.
  */
 (function () {
@@ -112,9 +111,6 @@
             + 'من ملف .env إذا في، وإلا الخدمة بتوقف لحتى تحط مفتاح جديد. متأكد؟';
     }
 
-    var ROLLBACK_TEXT = 'رح يرجع البحث للنظام القديم: ما بيقرأ الملصق ولا بيتأكد من الحجم والنوع، فبتكتر الاقتراحات '
-        + 'الغلط. الإعدادات التانية والمراجعات ما بتتغير. نكمّل؟';
-
     /* A refused POST /api/settings/bg-method in plain Arabic (the server's own Arabic text when it has one). */
     function bgMethodError(res) {
         if (res && res.status === 419) return 'انتهت صلاحية الصفحة. حدّثها وجرّب مرة تانية.';
@@ -123,7 +119,7 @@
     }
 
     var api = { columnsView: columnsView, previewView: previewView, sheetError: sheetError,
-        saveConfirmText: saveConfirmText, clearConfirmText: clearConfirmText, ROLLBACK_TEXT: ROLLBACK_TEXT,
+        saveConfirmText: saveConfirmText, clearConfirmText: clearConfirmText,
         bgMethodError: bgMethodError, COLUMNS: COLUMNS };
     if (typeof window !== 'undefined') window.LaqtaSettings = api;
 
@@ -356,10 +352,6 @@
             }
             var questions = [];
             if (form.querySelector('[data-key-clear]:checked')) questions.push(clearConfirmText(form.getAttribute('data-key-name') || ''));
-            if (form.hasAttribute('data-advanced-form') && form.getAttribute('data-engine') !== 'v1') {
-                var v1 = form.querySelector('[data-engine-v1]');
-                if (v1 && v1.checked) questions.push(ROLLBACK_TEXT);
-            }
             if (!questions.length) return;
             var now = askNow();
             if (!now) e.preventDefault();            // the dialog answers later: the submit goes again after «أكيد»

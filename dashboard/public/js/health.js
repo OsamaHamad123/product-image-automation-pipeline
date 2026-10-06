@@ -15,6 +15,11 @@
  * - «فهرس المتاجر المحلي»: the rows are rendered by the server (LocalIndexController); «حدّث الفهرس هلق» POSTs
  *   /api/system/local-index/refresh (a background job started through the bridge, it answers at once) and, while it
  *   runs, GET /api/system/local-index feeds the status line until the page reloads with the new numbers.
+ * - The top of the page («كلشي تمام» / «شو بدو منك», HealthAttentionController) starts from #lq-health-attention-initial
+ *   and is read again from GET /api/system/attention once «عمليات البحث» answered (provider outages come from it) and
+ *   after a check, a rehearsal or a background-removal change. An item's button is a link, or data-health-goto: it
+ *   opens «تفاصيل متقدمة» (collapsed by default) on the card that holds the fix and puts the focus on its button.
+ *   A link to a card inside it (/system-diagnostics#publish-check) opens it too; the log is not polled while it is shut.
  * The view functions are pure (node tests call them through window.LaqtaHealth); the DOM code below only sets
  * textContent and attributes, never HTML.
  */
@@ -894,7 +899,266 @@
         return { run: run, poll: poll, start: watch, state: state };
     }
 
+    // ------------------------------------------------------------------
+    // متقدم: «صدّر مجموعة اختبار» (HealthController::exportEvalSet): one POST, then where the file is and its link
+    // ------------------------------------------------------------------
+
+    var EVAL_EXPORT_URL = '/api/system/eval-export';
+    var EVAL_EXPORT_LABEL = 'صدّر مجموعة اختبار';
+
+    /* The status line, the button and the download link from the endpoint's answer (null: no answer yet). */
+    function evalExportView(res) {
+        var data = res && isObject(res.data) ? res.data : null;
+        if (data && res.ok && data.status === 'success') {
+            var link = data.products > 0 && typeof data.download === 'string' ? data.download : '';
+            return { text: String(data.message || ''), link: link, label: EVAL_EXPORT_LABEL, disabled: false,
+                tone: link ? 'success' : 'warning' };
+        }
+        var why = data && typeof data.error === 'string' && data.error ? data.error
+            : 'ما قدرنا نجهّز مجموعة الاختبار: ' + requestError(res, 'الخادم ما ردّ.');
+        return { text: why, link: '', label: EVAL_EXPORT_LABEL, disabled: false, tone: 'danger' };
+    }
+
+    /* run() (the button) POSTs once (a second click while it works does nothing) and renders the answer. Deps:
+       fetchJson, render, toast. */
+    function createEvalExport(deps) {
+        var state = { busy: false };
+
+        function run() {
+            if (state.busy) return Promise.resolve(null);
+            state.busy = true;
+            deps.render({ text: 'عم نجهّز الملف… ممكن ياخد دقيقة.', link: '', label: 'عم يجهّز…', disabled: true,
+                tone: 'muted' });
+            return deps.fetchJson(EVAL_EXPORT_URL, { method: 'POST', body: {} }).then(function (res) {
+                return evalExportView(res);
+            }, function () {
+                return evalExportView(null);
+            }).then(function (view) {
+                state.busy = false;
+                deps.render(view);
+                deps.toast(view.tone === 'success' ? 'مجموعة الاختبار جاهزة.' : view.text,
+                    view.tone === 'success' ? 'success' : (view.tone === 'warning' ? 'warning' : 'danger'));
+                return view;
+            });
+        }
+
+        return { run: run, state: state };
+    }
+
+    // ------------------------------------------------------------------
+    // متقدم: «صور قديمة بخلفية بيضا» (RecutController): «احسب» POSTs the dry run (it changes nothing), «ابدأ» POSTs a
+    // capped batch that runs in the background, and GET /api/system/reprocess follows it every few seconds while it runs
+    // ------------------------------------------------------------------
+
+    var REPROCESS_PLAN_URL = '/api/system/reprocess/plan';
+    var REPROCESS_START_URL = '/api/system/reprocess/start';
+    var REPROCESS_STATUS_URL = '/api/system/reprocess';
+    var REPROCESS_POLL_MS = 5000;
+    var REPROCESS_DEFAULT_MAX = 20;
+    var REPROCESS_ENDED = {
+        done: 'آخر دفعة خلصت',
+        max: 'آخر دفعة وقفت عند عدد الصور اللي حددته',
+        budget: 'آخر دفعة وقفت عند أقصى تكلفة حددتها',
+        stopped: 'آخر دفعة وقفت بخطأ',
+        stale: 'آخر دفعة انقطعت بالنص'
+    };
+    var REPROCESS_ERRORS = [
+        [/^photoroom_402$/, 'رصيد PhotoRoom خلص أو الاشتراك موقوف'],
+        [/^photoroom_(401|403|no_key)$/, 'مفتاح PhotoRoom مش شغّال'],
+        [/^photoroom_429$/, 'PhotoRoom رافض طلبات كتير هلق'],
+        [/timeout|connection_error|_5\d\d$/, 'الخدمة ما ردّت (انقطاع أو بطء)'],
+        [/^upload_/, 'الرفع على Cloudinary ما زبط'],
+        [/^(download_|source_|candidate_)/, 'ما قدرنا ننزّل الصورة المنشورة'],
+        [/^outbox_unreadable$/, 'ما قدرنا نقرا طابور الكتابة بالشيت']
+    ];
+
+    function pictures(n) {
+        return plural(count(n), 'صورة', 'صورتين', 'صور', 'صورة وحدة');
+    }
+
+    function reprocessError(code) {
+        code = String(code || '');
+        for (var i = 0; i < REPROCESS_ERRORS.length; i++) {
+            if (REPROCESS_ERRORS[i][0].test(code)) return REPROCESS_ERRORS[i][1];
+        }
+        return 'صار خطأ (التفاصيل بسجل الأتمتة)';
+    }
+
+    /* The status line of the last batch (RecutController::batchState), '' when there was none. */
+    function reprocessBatchText(batch) {
+        if (!isObject(batch) || !batch.state || batch.state === 'none') return '';
+        var done = count(batch.done);
+        var money = usd(batch.spent_usd);
+        if (batch.running && batch.state === 'starting') return 'عم تبلّش الدفعة…';
+        if (batch.running) {
+            return 'عم نعيد القص: خلص ' + done + ' من ' + count(batch.planned > 0 ? Math.min(batch.planned, batch.max || batch.planned) : batch.max)
+                + '، والتكلفة لهلق ' + money + '.' + (batch.current ? ' هلق: «' + batch.current + '».' : '');
+        }
+        var text = (REPROCESS_ENDED[batch.state] || 'آخر دفعة خلصت') + ': انعادت ' + pictures(done) + ' شفافة، والتكلفة ' + money + '.';
+        if (count(batch.needs_look) > 0) {
+            text += ' ' + pictures(batch.needs_look) + ' طلع قصها بملاحظات وبدها عينك بـ«فحص القص».';
+        }
+        if (batch.state === 'stopped') {
+            text += ' وقفت لأنو ' + reprocessError(batch.last_error) + (batch.last_item ? ' (عند «' + batch.last_item + '»)' : '')
+                + '. اضغط «ابدأ» مرة تانية بعد ما ينحل لتكمّل من وين وقفت.';
+        } else if (batch.state === 'stale') {
+            text += ' اضغط «ابدأ» لتكمّل من وين وقفت.';
+        }
+        return text;
+    }
+
+    /* «احسب»'s answer: {text, tone, form (show «ابدأ»), max (the suggested batch size)}. */
+    function reprocessPlanView(res) {
+        var data = res && isObject(res.data) ? res.data : null;
+        if (!data || !res.ok || data.status !== 'success' || !isObject(data.plan)) {
+            return { text: requestError(res, 'ما قدرنا نعدّ الصور: الخادم ما ردّ.'), tone: 'danger', form: false, max: 0 };
+        }
+        var plan = data.plan;
+        if (data.bg_off) {
+            return { text: 'عزل الخلفية متوقف بالإعدادات، فما منقدر نعيد قص الصور هلق. رجّعه أول من تبويب «معالجة الصور».',
+                tone: 'warning', form: false, max: 0 };
+        }
+        if (data.white_output) {
+            return { text: 'الإعدادات بتنشر الصور على خلفية بيضا، فالصور البيضا مش غلط وما في شي نعيده.',
+                tone: 'muted', form: false, max: 0 };
+        }
+        var todo = count(plan.todo);
+        var parts = [];
+        if (todo === 0) {
+            parts.push('ما في صور بيضا لازم تنعاد: كل الصور اللي بالشيت شفافة.');
+        } else {
+            parts.push('في ' + pictures(todo) + ' بخلفية بيضا لازم تنعاد.');
+            if (num(plan.price) > 0) {
+                parts.push('التكلفة التقريبية ' + usd(plan.usd) + ' (' + plan.calls + ' طلب عزل × ' + usdPrecise(plan.price)
+                    + ')، ولو بعض الصور احتاجت إعادة ممكن توصل لـ ' + usd(plan.worst_usd) + '.');
+            } else {
+                parts.push('ما في تكلفة: القص بطريقة محلية مجانية.');
+            }
+        }
+        if (count(plan.transparent) > 0) parts.push(pictures(plan.transparent) + ' شفافة أصلاً.');
+        if (count(plan.not_in_sheet) > 0) parts.push(pictures(plan.not_in_sheet) + ' ما عادت بالشيت أو غيّرتها بإيدك، فما رح نلمسها.');
+        if (count(plan.skipped_before) > 0) parts.push(pictures(plan.skipped_before) + ' وقفت عندها دفعة قبل وبدها عينك بـ«فحص القص».');
+        if (count(plan.probe_failed) > 0) parts.push('ما قدرنا نفحص ' + pictures(plan.probe_failed) + ' هلق.');
+        return { text: parts.join(' '), tone: todo > 0 ? 'warning' : 'success', form: todo > 0,
+            max: Math.max(1, Math.min(todo, REPROCESS_DEFAULT_MAX, count(data.batch_max) || REPROCESS_DEFAULT_MAX)) };
+    }
+
+    /* plan() and start(max, usd) POST once each (a second click while one works does nothing); while a batch runs the
+       status line follows GET /api/system/reprocess. Deps: fetchJson, render({text, busy, form, max}), toast, confirm,
+       schedule. */
+    function createReprocess(deps) {
+        var state = { busy: false, running: false, timer: null, planText: '' };
+
+        function show(view) {
+            deps.render(view);
+        }
+
+        function watch() {
+            if (state.timer === null && state.running) state.timer = deps.schedule(poll, REPROCESS_POLL_MS);
+        }
+
+        function follow(batch) {
+            state.running = isObject(batch) && batch.running === true;
+            var line = reprocessBatchText(batch);
+            show({ text: [state.planText, line].filter(Boolean).join(' '), busy: state.running, form: !state.running && state.form });
+            watch();
+        }
+
+        function poll() {
+            state.timer = null;
+            return deps.fetchJson(REPROCESS_STATUS_URL, { method: 'GET' }).then(function (res) {
+                if (res && res.ok && isObject(res.data)) follow(res.data.batch);
+                else watch();
+            }, function () {
+                watch();
+            });
+        }
+
+        function plan() {
+            if (state.busy || state.running) return Promise.resolve(null);
+            state.busy = true;
+            show({ text: 'عم نعدّ الصور… ممكن ياخد دقيقة.', busy: true, form: false });
+            return deps.fetchJson(REPROCESS_PLAN_URL, { method: 'POST', body: {} }).then(function (res) {
+                return [reprocessPlanView(res), res && res.data];
+            }, function () {
+                return [reprocessPlanView(null), null];
+            }).then(function (pair) {
+                var view = pair[0];
+                state.busy = false;
+                state.form = view.form;
+                state.planText = view.text;
+                show({ text: view.text, busy: false, form: view.form, max: view.max, tone: view.tone });
+                if (isObject(pair[1]) && isObject(pair[1].batch) && pair[1].batch.running) follow(pair[1].batch);
+                return view;
+            });
+        }
+
+        function start(max, money) {
+            if (state.busy || state.running) return Promise.resolve(false);
+            var n = count(max);
+            var cap = num(money);
+            if (n < 1 || cap === null || cap <= 0) {
+                deps.toast('اكتب كم صورة وأقصى تكلفة أكبر من صفر.', 'warning');
+                return Promise.resolve(false);
+            }
+            return Promise.resolve(deps.confirm('رح نعيد قص لحد ' + pictures(n) + ' شفافة، وما منتعدّى ' + usd(cap)
+                + '. الصورة الجديدة بتنكتب بالشيت بس إذا لسا الرابط القديم بخليتها. متأكد؟')).then(function (ok) {
+                if (!ok) return false;
+                state.busy = true;
+                show({ text: 'عم تبلّش الدفعة…', busy: true, form: false });
+                return deps.fetchJson(REPROCESS_START_URL, { method: 'POST', body: { max: n, max_usd: cap } }).then(function (res) {
+                    var data = res && res.ok && isObject(res.data) && res.data.status === 'success' ? res.data : null;
+                    state.busy = false;
+                    if (data && data.started) {
+                        deps.toast(String(data.message || 'بلّشت الدفعة بالخلفية.'), 'success');
+                        follow(isObject(data.batch) ? data.batch : { state: 'starting', running: true });
+                        return true;
+                    }
+                    var text = data ? String(data.message || 'ما بلّشت الدفعة.') : requestError(res, 'ما بلّشت الدفعة: الخادم ما ردّ.');
+                    show({ text: text, busy: false, form: state.form });
+                    deps.toast(text, data ? 'warning' : 'danger');
+                    return false;
+                }, function () {
+                    state.busy = false;
+                    show({ text: 'ما قدرنا نوصل للخادم لنبدأ الدفعة.', busy: false, form: state.form });
+                    return false;
+                });
+            });
+        }
+
+        return { plan: plan, start: start, poll: poll, state: state };
+    }
+
+    // ------------------------------------------------------------------
+    // «كلشي تمام» / «شو بدو منك» (HealthAttentionController): the server says it; the page renders it
+    // ------------------------------------------------------------------
+
+    var ATTENTION_URL = '/api/system/attention';
+    var ATTENTION_STATES = ['ok', 'attention', 'checking'];
+    /* data-health-goto -> [the card to open on, the button to focus] inside «تفاصيل متقدمة» */
+    var GOTO = {
+        services: ['#services', '[data-health="run-check"]'],
+        'publish-check': ['#publish-check', '[data-health="publish-run"]'],
+        'bg-restore': ['#publish-check', '[data-health="bg-restore"]'],
+        'index-card': ['[data-health="index-card"]', '[data-health="index-refresh"]'],
+        'log-nightly': ['#lq-health-log-title', '#tab-nightly']
+    };
+
+    /* The top of the page from the endpoint's answer (or the embedded one), or null when it is not one. */
+    function attentionView(data) {
+        if (!isObject(data) || ATTENTION_STATES.indexOf(data.state) === -1) return null;
+        var items = (Array.isArray(data.items) ? data.items : []).filter(isObject).map(function (item) {
+            var action = isObject(item.action) ? item.action : {};
+            return { key: String(item.key || ''), tone: String(item.tone || 'muted'), title: String(item.title || ''),
+                text: String(item.text || ''), action: { label: String(action.label || ''), href: String(action.href || ''),
+                    goto: String(action.goto || '') } };
+        });
+        return { state: data.state, title: String(data.title || ''), text: String(data.text || ''), items: items,
+            note: String(data.note || ''), pending: data.pending === true };
+    }
+
     var api = {
+        attentionView: attentionView, GOTO: GOTO, ATTENTION_URL: ATTENTION_URL,
         lanesView: lanesView, LANES: LANES,
         publishView: publishView, publishRunningView: publishRunningView, createPublishCheck: createPublishCheck,
         bgView: bgView, bgProblem: bgProblem, BG_SKIP_RE: BG_SKIP_RE, BG_METHOD_LABELS: BG_METHOD_LABELS,
@@ -907,6 +1171,11 @@
     if (typeof window !== 'undefined') window.LaqtaHealth = api;
     api.localIndexView = localIndexView;
     api.createLocalIndex = createLocalIndex;
+    api.evalExportView = evalExportView;
+    api.createEvalExport = createEvalExport;
+    api.reprocessPlanView = reprocessPlanView;
+    api.reprocessBatchText = reprocessBatchText;
+    api.createReprocess = createReprocess;
 
     // ------------------------------------------------------------------
     // DOM
@@ -975,6 +1244,123 @@
         }
     }
 
+    // --- «كلشي تمام» / «شو بدو منك» and «تفاصيل متقدمة» ---------------------------
+    var advanced = $('advanced');
+    var nowCard = $('now');
+    /* The same paths as resources/views/components/lq/icon.blade.php (check, alert, refresh) */
+    var NOW_ICON_PATHS = { ok: 'M5 12.5 10 17.5 19 7', attention: 'M12 4 2.5 20h19zM12 10v4.5M12 17.5v.5',
+        checking: 'M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6' };
+
+    function openAdvanced() {
+        if (advanced && !advanced.open) advanced.open = true;
+    }
+
+    // a link to a card inside «تفاصيل متقدمة» (#publish-check from the review screen) opens it first
+    (function () {
+        var hash = window.location && window.location.hash ? window.location.hash.slice(1) : '';
+        var target = hash ? document.getElementById(hash) : null;
+        if (target && advanced && advanced.contains(target)) openAdvanced();
+    })();
+
+    /* An item's button: open the section on the card that holds the fix and put the focus on its button. */
+    function goTo(where) {
+        if (where === 'reload') {
+            window.location.reload();
+            return;
+        }
+        var spec = GOTO[where];
+        if (!spec) return;
+        openAdvanced();
+        var card = page.querySelector(spec[0]);
+        var button = page.querySelector(spec[1]);
+        if (where === 'log-nightly' && button) button.click();
+        if (where === 'bg-restore' && (!button || button.hasAttribute('hidden'))) button = page.querySelector(GOTO['publish-check'][1]);
+        if (card && card.scrollIntoView) card.scrollIntoView({ block: 'start', behavior: 'smooth' });
+        if (button) button.focus({ preventScroll: true });
+    }
+
+    function nowIcon(state) {
+        var ns = 'http://www.w3.org/2000/svg';
+        var svg = document.createElementNS(ns, 'svg');
+        var attrs = { 'class': 'lq-icon', width: '22', height: '22', viewBox: '0 0 24 24', fill: 'none',
+            stroke: 'currentColor', 'stroke-width': '2.2', 'stroke-linecap': 'round', 'stroke-linejoin': 'round',
+            focusable: 'false', 'aria-hidden': 'true' };
+        Object.keys(attrs).forEach(function (k) { svg.setAttribute(k, attrs[k]); });
+        var path = document.createElementNS(ns, 'path');
+        path.setAttribute('d', NOW_ICON_PATHS[state] || NOW_ICON_PATHS.checking);
+        svg.appendChild(path);
+        return svg;
+    }
+
+    function renderAttention(view) {
+        if (!nowCard || !view) return;
+        nowCard.setAttribute('data-state', view.state);
+        var icon = nowCard.querySelector('.lq-health-now__icon');
+        if (icon) {
+            clear(icon);
+            icon.appendChild(nowIcon(view.state));
+        }
+        $('now-title').textContent = view.title;
+        $('now-text').textContent = view.text;
+        var list = $('now-items');
+        clear(list);
+        view.items.forEach(function (item) {
+            var li = make('li', 'lq-health-todo');
+            li.setAttribute('data-item', item.key);
+            li.setAttribute('data-tone', item.tone);
+            var dot = make('span', 'lq-dot lq-dot--lg ' + (DOTS[item.tone] || DOTS.muted));
+            dot.setAttribute('aria-hidden', 'true');
+            li.appendChild(dot);
+            var body = make('div', 'lq-health-todo__body');
+            var title = make('strong', 'lq-health-todo__title', item.title);
+            title.setAttribute('dir', 'auto');
+            body.appendChild(title);
+            var text = make('p', 'lq-health-todo__text', item.text);
+            text.setAttribute('dir', 'auto');
+            body.appendChild(text);
+            li.appendChild(body);
+            var fix;
+            if (item.action.href) {
+                fix = make('a', 'lq-btn lq-btn--secondary lq-btn--sm lq-health-todo__fix', item.action.label);
+                fix.setAttribute('href', item.action.href);
+            } else {
+                fix = make('button', 'lq-btn lq-btn--secondary lq-btn--sm lq-health-todo__fix', item.action.label);
+                fix.setAttribute('type', 'button');
+                fix.setAttribute('data-health-goto', item.action.goto);
+            }
+            li.appendChild(fix);
+            list.appendChild(li);
+        });
+        setHidden(list, view.items.length === 0);
+        $('now-note').textContent = view.note;
+    }
+
+    var attentionSeq = 0;
+    /* The top again, after «عمليات البحث» answered (?after=1: a missing ops-health is now a failure, not «عم نتأكد»). */
+    function loadAttention() {
+        var seq = ++attentionSeq;
+        return fetchJson(ATTENTION_URL + '?after=1', { method: 'GET' }).then(function (res) {
+            if (seq !== attentionSeq) return;
+            var view = res && res.ok ? attentionView(res.data) : null;
+            if (view) renderAttention(view);
+            else if (nowCard && nowCard.getAttribute('data-state') === 'checking') {
+                renderAttention({ state: 'checking', title: 'ما قدرنا نتأكد', text: 'ما قدرنا نوصل للخادم. حدّث الصفحة بعد شوي.',
+                    items: [], note: '', pending: false });
+            }
+        }, function () {});
+    }
+
+    page.addEventListener('click', function (e) {
+        var button = e.target && e.target.closest ? e.target.closest('[data-health-goto]') : null;
+        if (button) goTo(button.getAttribute('data-health-goto'));
+    });
+    if (advanced) {
+        // the log is read only while the section is open (deps.isHidden); opening it reads it at once
+        advanced.addEventListener('toggle', function () {
+            if (advanced.open) controller.loadLog();
+        });
+    }
+
     function renderServices(views) {
         Object.keys(views).forEach(function (key) {
             var card = page.querySelector('[data-service="' + key + '"]');
@@ -1023,6 +1409,7 @@
         if (busy) runButton.setAttribute('aria-busy', 'true');
         else runButton.removeAttribute('aria-busy');
         if (runLabel) runLabel.textContent = busy ? 'عم نفحص…' : 'فحص الاتصالات الآن';
+        if (!busy) loadAttention();
     }
 
     function skeletonRows(holder, n, extra) {
@@ -1203,6 +1590,7 @@
         if (nearBottom || wasHidden) logBody.scrollTop = logBody.scrollHeight;
     }
 
+    var opsAnswered = false;
     var controller = createController({
         initial: readInitial(),
         fetchJson: fetchJson,
@@ -1210,14 +1598,21 @@
         renderChecked: renderChecked,
         renderOptional: renderOptional,
         setChecking: setChecking,
-        renderOps: renderOps,
+        // the first answer of «عمليات البحث» (or its failure) lets the top say what ops-health says
+        renderOps: function (view) {
+            renderOps(view);
+            if (view.kind !== 'loading' && !opsAnswered) {
+                opsAnswered = true;
+                loadAttention();
+            }
+        },
         renderLog: renderLog,
         toast: function (text, variant) {
             if (window.Laqta && window.Laqta.toast) window.Laqta.toast(text, { variant: variant });
         },
         now: function () { return Date.now(); },
         schedule: function (fn, ms) { return setTimeout(fn, ms); },
-        isHidden: function () { return document.hidden; }
+        isHidden: function () { return document.hidden || (advanced !== null && !advanced.open); }
     });
 
     if (runButton) {
@@ -1230,7 +1625,12 @@
         });
     }
     var retry = $('ops-retry');
-    if (retry) retry.addEventListener('click', function () { controller.loadOps(true); });
+    if (retry) {
+        retry.addEventListener('click', function () {
+            opsAnswered = false;
+            controller.loadOps(true);
+        });
+    }
 
     var tabs = page.querySelectorAll('[data-log-tab]');
     function selectTab(tab) {
@@ -1345,6 +1745,7 @@
         if (busy) publishButton.setAttribute('aria-busy', 'true');
         else publishButton.removeAttribute('aria-busy');
         if (publishLabel) publishLabel.textContent = busy ? 'جاري الفحص…' : 'افحص النشر';
+        if (!busy) loadAttention();
     }
 
     // «تجاوز عزل الخلفية» / «رجّع عزل الخلفية (…)»: the method as the page was rendered (data-method, '' without the
@@ -1376,6 +1777,7 @@
             if (busy) button.setAttribute('aria-busy', 'true');
             else button.removeAttribute('aria-busy');
         });
+        if (!busy) loadAttention();
     }
 
     // «دقة الاقتراحات الحقيقية»: one read when the page opens (cached on the server like ops-health)
@@ -1433,7 +1835,13 @@
             publishButton.addEventListener('click', function () { publish.run(); });
             // from the review screen's failed approvals (/system-diagnostics#publish-check): the button is ready,
             // never pressed for the owner (the check may cost a background-removal call)
-            if (window.location && window.location.hash === '#publish-check') publishButton.focus();
+            // (after the load: the browser's own jump to #publish-check drops a focus given earlier)
+            var afterLoad = function (fn) {
+                var go = function () { window.setTimeout(fn, 0); };
+                if (document.readyState === 'complete') go();
+                else window.addEventListener('load', go);
+            };
+            if (window.location && window.location.hash === '#publish-check') afterLoad(function () { publishButton.focus(); });
         }
     }
 
@@ -1464,5 +1872,80 @@
         });
         indexButton.addEventListener('click', function () { localIndex.run(); });
         localIndex.start();
+    }
+
+    // متقدم: «صدّر مجموعة اختبار» writes the set and says where the file is, with its download link
+    var evalButton = $('eval-export');
+    var evalStatus = $('eval-export-status');
+    var evalLabel = $('eval-export-label');
+    var evalLink = $('eval-export-link');
+
+    function renderEvalExport(view) {
+        if (evalStatus) evalStatus.textContent = view.text;
+        if (evalLabel) evalLabel.textContent = view.label;
+        if (evalLink) {
+            if (view.link) evalLink.setAttribute('href', view.link);
+            setHidden(evalLink, !view.link);
+        }
+        if (!evalButton) return;
+        evalButton.disabled = view.disabled;
+        if (view.disabled) evalButton.setAttribute('aria-busy', 'true');
+        else evalButton.removeAttribute('aria-busy');
+    }
+
+    if (evalButton) {
+        var evalExport = createEvalExport({
+            fetchJson: fetchJson,
+            render: renderEvalExport,
+            toast: function (text, variant) {
+                if (window.Laqta && window.Laqta.toast) window.Laqta.toast(text, { variant: variant });
+            }
+        });
+        evalButton.addEventListener('click', function () { evalExport.run(); });
+    }
+
+    // متقدم: «صور قديمة بخلفية بيضا»: «احسب» counts and prices, «ابدأ» starts a capped batch, the line follows it
+    var reprocessButton = $('reprocess-plan');
+    var reprocessStatus = $('reprocess-status');
+    var reprocessLabel = $('reprocess-plan-label');
+    var reprocessForm = $('reprocess-form');
+    var reprocessMax = $('reprocess-max');
+    var reprocessUsd = $('reprocess-usd');
+    var reprocessStart = $('reprocess-start');
+
+    function renderReprocess(view) {
+        if (reprocessStatus) reprocessStatus.textContent = view.text || '';
+        if (reprocessLabel) reprocessLabel.textContent = view.busy ? 'عم يشتغل…' : 'احسب';
+        if (reprocessButton) {
+            reprocessButton.disabled = !!view.busy;
+            if (view.busy) reprocessButton.setAttribute('aria-busy', 'true');
+            else reprocessButton.removeAttribute('aria-busy');
+        }
+        if (reprocessStart) reprocessStart.disabled = !!view.busy;
+        setHidden(reprocessForm, !view.form);
+        if (reprocessMax && view.max) reprocessMax.value = String(view.max);
+    }
+
+    if (reprocessButton) {
+        var reprocess = createReprocess({
+            fetchJson: fetchJson,
+            render: renderReprocess,
+            toast: function (text, variant) {
+                if (window.Laqta && window.Laqta.toast) window.Laqta.toast(text, { variant: variant });
+            },
+            confirm: function (text) {
+                return window.Laqta && window.Laqta.ask ? window.Laqta.ask({ title: 'نبلّش الدفعة؟', text: text, confirmText: 'ابدأ' })
+                    : window.confirm(text);
+            },
+            schedule: function (fn, ms) { return window.setTimeout(fn, ms); }
+        });
+        reprocessButton.addEventListener('click', function () { reprocess.plan(); });
+        if (reprocessForm) {
+            reprocessForm.addEventListener('submit', function (event) {
+                event.preventDefault();
+                reprocess.start(reprocessMax ? reprocessMax.value : 0, reprocessUsd ? reprocessUsd.value : 0);
+            });
+        }
+        reprocess.poll();
     }
 })();

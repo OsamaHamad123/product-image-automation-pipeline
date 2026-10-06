@@ -1,4 +1,4 @@
-"""Import smoke tests: the entry points import cleanly, verification_layer is gone,
+"""Import smoke tests: the entry points import cleanly, verification_layer and the v1 search engine are gone,
 cli_bridge survives a legacy Windows console encoding, and the suite collects without errors."""
 
 import json
@@ -21,15 +21,10 @@ def _offline_env(**extra):
 
 
 def test_entry_points_import(offline):
-    import fastapi_server
     import main
     import cli_bridge
     import image_search
 
-    paths = {getattr(r, "path", "") for r in fastapi_server.app.routes}
-    assert "/api/select-image" in paths and "/api/reject-image" in paths
-    assert "/api/dashboard-enterprise-metrics" not in paths
-    assert not any("verification" in p for p in paths)
     assert callable(main.run_worker_mode) and callable(cli_bridge.action_reject_image)
     assert callable(image_search.search_best_product_image)
 
@@ -40,6 +35,22 @@ def test_verification_layer_is_gone():
     assert not vl.exists() or not any(vl.rglob("*.py")), "verification_layer must be deleted"
     for retired in ("celery_config.py", "distributed_lock.py", "catalog_dedup.py", "self_healing.py", "google_drive.py"):
         assert not (ROOT / retired).exists(), retired
+
+
+def test_the_v1_search_engine_is_gone():
+    """catalog_match is the only engine: the v1 modules, the dev-only HTTP wrapper and the engine switch are deleted."""
+    import config
+    import image_search
+
+    for retired in ("aesthetics_engine.py", "image_quality_gatekeeper.py", "query_refiner.py", "fastapi_server.py"):
+        assert not (ROOT / retired).exists(), retired
+    for name in ("search_best_product_image_v1", "search_best_product_image_v2", "ParallelConsensusScraper",
+                 "evaluate_and_choose_best_image", "validate_image_via_gemini_vision"):
+        assert not hasattr(image_search, name), name
+    assert not hasattr(config, "SEARCH_ENGINE")
+    requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8").split()
+    for package in ("fastapi", "uvicorn[standard]", "aiohttp"):
+        assert package not in requirements, package
 
 
 def test_cli_bridge_imports_under_cp1256():

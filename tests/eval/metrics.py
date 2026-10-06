@@ -15,13 +15,27 @@ labels into the numbers the merge gate (D2) is written against:
     auto_precision_wilson_lower   95% Wilson lower bound of auto_accept_precision
 
 Everything is also broken down per stratum.
+
+per_lane (lane_table) breaks the picks down by the lane the engine gave them (catalog_match.decide.pick_lane:
+'strict' | 'unsure' | 'other'; an AUTO_PUBLISH pick is 'strict'), each with:
+
+    n_picks / coverage      picks in the lane / all SKUs
+    precision               correct_exact among the lane's picks, with its 95% Wilson lower bound
+    n_auto_wrong / wrong_auto_rate   auto picks of the lane that are not correct_exact (/ all SKUs)
+
+per_split repeats the headline numbers and the lanes on the fixed held-out split (split_of): rules tuned on live rows
+are checked on rows nobody tuned them on.
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
 import math
+import re
 from collections import Counter
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional
 
 AUTO = "AUTO_PUBLISH"
@@ -35,7 +49,8 @@ REVIEW_DECISIONS = frozenset({PRESELECTED, UNSELECTED, VERIFIER_DOWN})
 
 CORRECT = "correct_exact"
 
-# Legacy (v1) image-quality gate reasons, as ImageQualityGatekeeper words them.
+# Legacy (v1) image-quality gate reasons, as its (removed) ImageQualityGatekeeper worded them: baseline_v1.json
+# records kills under these names.
 QUALITY_RULES_V1 = (
     "Image overexposed",
     "Image underexposed",
@@ -76,6 +91,9 @@ class Outcome:
     n_preselected: int = 0
     error: Optional[str] = None
     seconds: float = 0.0
+    lane: Optional[str] = None                      # lane of the pick (decide.lane_of), None without a pick
+    sources: Dict[str, Any] = field(default_factory=dict)   # the expansion round / local index (runners, sources.py)
+    verifier: Dict[str, Any] = field(default_factory=dict)  # verifier usage of a run with a verifier config
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -86,9 +104,11 @@ class Outcome:
         return cls(**{k: v for k, v in data.items() if k in known})
 
 
-def labels_from_golden(golden: Mapping[str, Any]) -> Dict[str, Dict[str, Any]]:
+def labels_from_golden(golden: Mapping[str, Any], tuned: Optional[Iterable[str]] = None
+                       ) -> Dict[str, Dict[str, Any]]:
     """sku_id -> ground truth: stratum, no_correct_candidate, named_case, expected_v2, auto_publish_allowed,
-    and per candidate id its label, download result and provider."""
+    the held-out split (split_of), and per candidate id its label, download result and provider."""
+    tuned_keys = tuned_rows() if tuned is None else {row_key(t) for t in tuned}
     out: Dict[str, Dict[str, Any]] = {}
     for sku in golden["skus"]:
         cands = sku.get("candidates", [])
@@ -98,10 +118,81 @@ def labels_from_golden(golden: Mapping[str, Any]) -> Dict[str, Dict[str, Any]]:
             "named_case": sku.get("named_case"),
             "expected_v2": sku.get("expected_v2"),
             "auto_publish_allowed": sku.get("auto_publish_allowed", True),
+            "split": split_of(sku, tuned_keys),
             "candidates": {c["id"]: c["label"] for c in cands},
             "download": {c["id"]: c.get("download", "ok") for c in cands},
             "provider": {c["id"]: c.get("provider", "") for c in cands},
         }
+    return out
+
+
+# ---------------------------------------------------------------------------
+# The fixed held-out split
+# ---------------------------------------------------------------------------
+
+# A row is held out when the sha256 of HOLDOUT_SALT + its normalised sheet name (row_key) falls in the first
+# HOLDOUT_SHARE of the hash space, and no regression test is named after it (fixtures/tuned_rows.json). The salt and
+# the share never change: the same row is held out in every set, every export and every run. A held-out row that a
+# test later names moves to 'dev' and is reported (holdout_leaks), so a rule can never be tuned and checked on it.
+HOLDOUT_SALT = "laqta-holdout-v1:"
+HOLDOUT_SHARE = 0.3
+SPLITS = ("dev", "held_out")
+TUNED_ROWS_PATH = Path(__file__).resolve().parent / "fixtures" / "tuned_rows.json"
+
+
+def row_key(name: Any) -> str:
+    """The sheet name as the split reads it: upper case, one space between words, no punctuation."""
+    text = re.sub(r"[^\w]+", " ", str(name or ""), flags=re.UNICODE)
+    return " ".join(text.upper().split())
+
+
+def sku_row_key(sku: Mapping[str, Any]) -> str:
+    return row_key(sku.get("name_en") or sku.get("name") or sku.get("name_ar") or sku.get("id"))
+
+
+def in_holdout_share(key: str) -> bool:
+    digest = hashlib.sha256((HOLDOUT_SALT + key).encode("utf-8")).digest()
+    return int.from_bytes(digest[:4], "big") / float(1 << 32) < HOLDOUT_SHARE
+
+
+_tuned_cache: Dict[str, frozenset] = {}
+
+
+def tuned_rows(path: Optional[Path] = None) -> frozenset:
+    """row_key of every live row a regression test is named after (fixtures/tuned_rows.json; empty when missing)."""
+    path = Path(path or TUNED_ROWS_PATH)
+    key = str(path)
+    if key not in _tuned_cache:
+        try:
+            doc = json.loads(path.read_text(encoding="utf-8"))
+            names = doc.get("rows", []) if isinstance(doc, dict) else []
+        except (OSError, ValueError):
+            names = []
+        _tuned_cache[key] = frozenset(row_key(n.get("name") if isinstance(n, dict) else n) for n in names)
+    return _tuned_cache[key]
+
+
+def split_of(sku: Mapping[str, Any], tuned: Optional[Iterable[str]] = None) -> str:
+    """'held_out' or 'dev' (see HOLDOUT_SALT). A set may pin a row with "split" (a recorded export keeps the split
+    it was exported with)."""
+    pinned = sku.get("split")
+    if pinned in SPLITS:
+        return str(pinned)
+    key = sku_row_key(sku)
+    tuned_keys = tuned_rows() if tuned is None else tuned
+    if key in tuned_keys:
+        return "dev"
+    return "held_out" if in_holdout_share(key) else "dev"
+
+
+def holdout_leaks(skus: Iterable[Mapping[str, Any]], tuned: Optional[Iterable[str]] = None) -> List[str]:
+    """Names in the held-out share that a regression test is named after (they count as 'dev')."""
+    tuned_keys = tuned_rows() if tuned is None else set(tuned)
+    out = []
+    for sku in skus:
+        key = sku_row_key(sku)
+        if key in tuned_keys and in_holdout_share(key) and sku.get("split") not in SPLITS:
+            out.append(key)
     return out
 
 
@@ -205,8 +296,40 @@ def kill_attribution(outcomes: Iterable[Outcome], labels: Mapping[str, Mapping[s
     return dict(sorted(counts.items()))
 
 
+LANES = ("strict", "unsure", "other")
+NO_LANE = "unknown"            # a pick whose lane the engine did not record (a v1 run, an old recording)
+
+
+def lane_table(outcomes: Iterable[Outcome], labels: Mapping[str, Mapping[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    """Per lane of the pick: picks, coverage (picks / all SKUs), precision with its 95% Wilson lower bound and the
+    wrong auto-publishes. Every lane is listed, an empty one with n_picks 0 and precision None; 'unknown' only
+    when a pick carries no lane."""
+    outs = list(outcomes)
+    n = len(outs)
+    rows: Dict[str, Dict[str, int]] = {lane: {"n_picks": 0, "n_correct": 0, "n_auto": 0, "n_auto_wrong": 0}
+                                       for lane in LANES}
+    for o in outs:
+        label = _chosen_label(o, labels[o.sku_id])
+        if label is None:
+            continue
+        lane = o.lane if o.lane in LANES else NO_LANE
+        row = rows.setdefault(lane, {"n_picks": 0, "n_correct": 0, "n_auto": 0, "n_auto_wrong": 0})
+        row["n_picks"] += 1
+        row["n_correct"] += label == CORRECT
+        if o.auto:
+            row["n_auto"] += 1
+            row["n_auto_wrong"] += label != CORRECT
+    out: Dict[str, Dict[str, Any]] = {}
+    for lane, row in rows.items():
+        out[lane] = dict(row, coverage=_round(_ratio(row["n_picks"], n)),
+                         precision=_round(_ratio(row["n_correct"], row["n_picks"])),
+                         precision_wilson_lower=_round(wilson_lower_bound(row["n_correct"], row["n_picks"])),
+                         wrong_auto_rate=_round(_ratio(row["n_auto_wrong"], n)))
+    return out
+
+
 def compute(outcomes: Iterable[Any], labels: Mapping[str, Mapping[str, Any]]) -> Dict[str, Any]:
-    """All metrics, overall and per stratum. Accepts Outcome objects or their dicts."""
+    """All metrics, overall, per stratum, per lane and per held-out split. Accepts Outcome objects or their dicts."""
     outs = [o if isinstance(o, Outcome) else Outcome.from_dict(o) for o in outcomes]
     missing = [o.sku_id for o in outs if o.sku_id not in labels]
     if missing:
@@ -237,6 +360,17 @@ def compute(outcomes: Iterable[Any], labels: Mapping[str, Mapping[str, Any]]) ->
             "correct_pick_rate", "preselect_precision", "review_rate", "not_found_rate", "false_not_found_rate",
             "pool_recall")}
     result["per_stratum"] = per_stratum
+    result["per_lane"] = lane_table(outs, labels)
+    per_split: Dict[str, Dict[str, Any]] = {}
+    for split in SPLITS:
+        group = [o for o in outs if labels[o.sku_id].get("split", "dev") == split]
+        core = _core(group, labels)
+        per_split[split] = {k: core[k] for k in (
+            "n_skus", "n_with_correct", "n_auto", "n_auto_wrong", "n_correct_pick", "auto_accept_precision",
+            "auto_precision_wilson_lower", "wrong_auto_rate", "correct_pick_rate", "preselect_precision",
+            "review_rate", "not_found_rate")}
+        per_split[split]["per_lane"] = lane_table(group, labels)
+    result["per_split"] = per_split
     return result
 
 

@@ -684,6 +684,232 @@
     display: none;
 }
 
+/* «كلشي تمام» / «شو بدو منك»: one plain status, then the items with a button each */
+.lq-health-now {
+    display: flex;
+    flex-direction: column;
+    gap: var(--lq-space-4);
+    padding: 22px;
+}
+
+.lq-health-now[data-state="ok"] {
+    border-color: var(--lq-success-border);
+}
+
+.lq-health-now[data-state="attention"] {
+    border-color: var(--lq-warning-border);
+}
+
+.lq-health-now__head {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+}
+
+.lq-health-now__icon {
+    display: inline-flex;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    background: var(--lq-neutral-bg);
+    color: var(--lq-text-2);
+}
+
+.lq-health-now[data-state="ok"] .lq-health-now__icon {
+    background: var(--lq-success-bg);
+    color: var(--lq-success);
+}
+
+.lq-health-now[data-state="attention"] .lq-health-now__icon {
+    background: var(--lq-warning-bg);
+    color: var(--lq-warning);
+}
+
+.lq-health-now__text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.lq-health .lq-health-now__title {
+    margin: 0;
+    font-family: var(--lq-font-display);
+    font-size: var(--lq-fs-xl);
+    font-weight: 600;
+}
+
+.lq-health-now__lead {
+    margin: 0;
+    line-height: 1.6;
+    color: var(--lq-text-2);
+}
+
+.lq-health-now__items {
+    display: flex;
+    flex-direction: column;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.lq-health-now__items[hidden] {
+    display: none;
+}
+
+.lq-health-todo {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 6px 12px;
+    padding: 12px 0;
+    border-top: 1px solid var(--lq-border-soft);
+}
+
+.lq-health-todo__body {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.lq-health-todo__title {
+    font-weight: 600;
+}
+
+.lq-health-todo[data-tone="danger"] .lq-health-todo__title { color: var(--lq-danger-text); }
+
+.lq-health-todo__text {
+    margin: 0;
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--lq-text-2);
+    overflow-wrap: anywhere;
+}
+
+.lq-health-todo__fix {
+    flex-shrink: 0;
+}
+
+/* «تفاصيل متقدمة»: every detailed card, collapsed by default */
+.lq-health-advanced {
+    display: block;
+}
+
+.lq-health-advanced__summary {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px var(--lq-space-3);
+    padding: 14px 18px;
+    border: 1px solid var(--lq-border);
+    border-radius: var(--lq-radius-lg);
+    background: var(--lq-surface);
+    list-style: none;
+    cursor: pointer;
+}
+
+.lq-health-advanced__summary::-webkit-details-marker {
+    display: none;
+}
+
+/* a chevron: points down while shut, up while open */
+.lq-health-advanced__summary::after {
+    content: "";
+    align-self: center;
+    width: 8px;
+    height: 8px;
+    margin-inline-start: auto;
+    border-block-end: 2px solid var(--lq-text-3);
+    border-inline-end: 2px solid var(--lq-text-3);
+    transform: rotate(45deg);
+}
+
+.lq-health-advanced[open] > .lq-health-advanced__summary {
+    border-color: var(--lq-border-strong);
+}
+
+.lq-health-advanced[open] > .lq-health-advanced__summary::after {
+    transform: rotate(-135deg);
+}
+
+.lq-health-advanced__label {
+    font-size: var(--lq-fs-md);
+    font-weight: 600;
+}
+
+.lq-health-advanced__hint {
+    font-size: 13px;
+    color: var(--lq-text-3);
+}
+
+.lq-health-advanced__body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--lq-space-5);
+    margin-top: var(--lq-space-5);
+}
+
+/* the connection check, first in the advanced section */
+.lq-health__checkbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: var(--lq-space-3);
+}
+
+.lq-health__checkline {
+    flex: 1 1 18em;
+    margin: 0;
+    color: var(--lq-text-2);
+}
+
+.lq-health-eval {
+    display: flex;
+    flex-direction: column;
+    gap: var(--lq-space-2);
+}
+
+.lq-health-advanced__body .lq-health__footnote {
+    overflow-wrap: anywhere;
+}
+
+/* متقدم: «صور قديمة بخلفية بيضا» (health.js createReprocess) */
+.lq-health-reprocess {
+    display: flex;
+    flex-direction: column;
+    gap: var(--lq-space-3);
+    padding-block-start: var(--lq-space-3);
+    border-block-start: 1px solid var(--lq-border);
+}
+
+.lq-health-reprocess__form {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: var(--lq-space-3);
+}
+
+.lq-health-reprocess__form[hidden] {
+    display: none;
+}
+
+.lq-health-reprocess__form .lq-field {
+    flex: 0 1 180px;
+}
+
+@media (max-width: 560px) {
+    .lq-health-reprocess__form .lq-field,
+    .lq-health-reprocess__form .lq-btn {
+        flex: 1 1 100%;
+        width: 100%;
+    }
+}
+
 @media (max-width: 1240px) {
     .lq-health__services {
         grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -754,6 +980,19 @@
     .lq-health-publish__action,
     .lq-health-publish__action .lq-btn {
         width: 100%;
+    }
+
+    .lq-health-now {
+        padding: var(--lq-space-4);
+    }
+
+    .lq-health-todo {
+        grid-template-columns: auto minmax(0, 1fr);
+    }
+
+    .lq-health-todo__fix {
+        grid-column: 2;
+        justify-self: start;
     }
 
     .lq-health-step__time {

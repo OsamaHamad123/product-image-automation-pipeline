@@ -1,0 +1,1811 @@
+{
+ "version": 1,
+ "description": "Recorded-style readings of the realistic set, in the D6 schema (what the label reader read on the pack and its yes / no / unsure calls). Code turns them into MATCH / MISMATCH / UNSURE. A size printed only on the back is read as '' with size 'unsure'. readings_by_model holds the strong model's readings (modelled for the A/B of scripts/compare_verifiers.py: the same, except the 9 mm cut and the whisk's size it reads where the primary did not).",
+ "schema": [
+  "brand_text",
+  "variant_text",
+  "size_text",
+  "pack_count",
+  "view",
+  "brand_match",
+  "variant_match",
+  "size_match"
+ ],
+ "model": "gemini:gemini-3.1-flash-lite",
+ "scenarios": {
+  "gemini_down": {
+   "decision": "UNKNOWN",
+   "reason": "verifier unavailable (quota, 5xx or no key)"
+  }
+ },
+ "verdicts": {
+  "real-01-mccain-french-fries-shoestring-750gm": {
+   "c1": {
+    "brand_text": "McCain",
+    "variant_text": "Shoestring Fries",
+    "size_text": "750g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "McCain",
+    "variant_text": "Shoestring Fries",
+    "size_text": "750g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c3": {
+    "brand_text": "McCain",
+    "variant_text": "Golden Long",
+    "size_text": "750g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   },
+   "c4": {
+    "brand_text": "McCain",
+    "variant_text": "Shoestring Fries",
+    "size_text": "1.5kg",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   }
+  },
+  "real-02-yumway-crinkle-cut-fries-2-5-kg": {
+   "c1": {
+    "brand_text": "Mondelle",
+    "variant_text": "Crinkle Fries",
+    "size_text": "2.5kg",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "no",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Yumway",
+    "variant_text": "Crinkle Cut Fries",
+    "size_text": "",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "unsure"
+   },
+   "c3": {
+    "brand_text": "Yumway",
+    "variant_text": "Crinkle",
+    "size_text": "",
+    "pack_count": 1,
+    "view": "lifestyle",
+    "brand_match": "yes",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   }
+  },
+  "real-03-hup-hup-fries-steakhouse-cut-1-kg": {
+   "c1": {
+    "brand_text": "Hup Hup",
+    "variant_text": "Steakhouse Cut",
+    "size_text": "1kg",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Hup Hup",
+    "variant_text": "Steakhouse Cut",
+    "size_text": "2.5kg",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c3": {
+    "brand_text": "Hup Hup",
+    "variant_text": "Steakhouse",
+    "size_text": "1kg",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "unsure",
+    "size_match": "yes"
+   }
+  },
+  "real-04-tomex-french-fries-6mm-1-kg": {
+   "c1": {
+    "brand_text": "Tomex",
+    "variant_text": "French Fries",
+    "size_text": "1kg",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "unsure",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Tomex",
+    "variant_text": "French Fries 6mm",
+    "size_text": "1kg",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c3": {
+    "brand_text": "Tomex",
+    "variant_text": "French Fries 6mm",
+    "size_text": "1kg",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   }
+  },
+  "real-05-al-kabeer-veg-samosa-240g": {
+   "c1": {
+    "brand_text": "Al Kabeer",
+    "variant_text": "Vegetable Samosa",
+    "size_text": "240g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Al Kabeer",
+    "variant_text": "Cheese Samosa",
+    "size_text": "240g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   },
+   "c3": {
+    "brand_text": "Al Kabeer",
+    "variant_text": "Punjabi Samosa",
+    "size_text": "900g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "no"
+   }
+  },
+  "real-06-cal-garden-w-meat-tuna-s-f-oil-185gm": {
+   "c1": {
+    "brand_text": "California Garden",
+    "variant_text": "White Meat Tuna in Sunflower Oil",
+    "size_text": "185g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "California Garden",
+    "variant_text": "Light Meat Tuna in Sunflower Oil",
+    "size_text": "185g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   },
+   "c3": {
+    "brand_text": "California Garden",
+    "variant_text": "White Meat Tuna in Olive Oil",
+    "size_text": "185g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   }
+  },
+  "real-07-sup-t-l-meat-tuna-brine-3x170gm": {
+   "c1": {
+    "brand_text": "Super Tasty",
+    "variant_text": "Light Meat Tuna in Brine",
+    "size_text": "3x170g",
+    "pack_count": 3,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Super Tasty",
+    "variant_text": "Light Meat Tuna in Brine",
+    "size_text": "170g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c3": {
+    "brand_text": "Super Tasty",
+    "variant_text": "Light Meat Tuna in Brine",
+    "size_text": "3x170g",
+    "pack_count": 3,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   }
+  },
+  "real-08-virginia-w-meat-tuna-in-brine-170gm": {
+   "c1": {
+    "brand_text": "Golden Prize",
+    "variant_text": "White Meat Tuna in Brine",
+    "size_text": "170g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "no",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Virginia",
+    "variant_text": "White Meat Tuna in Brine",
+    "size_text": "170g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c3": {
+    "brand_text": "Virginia",
+    "variant_text": "Light Meat Tuna in Brine",
+    "size_text": "170g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   }
+  },
+  "real-09-al-alali-chunk-light-tuna-spring-water-170gm": {
+   "c1": {
+    "brand_text": "Al Alali",
+    "variant_text": "Chunk Light Tuna in Spring Water",
+    "size_text": "170g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Al Alali",
+    "variant_text": "Fancy Meat Tuna in Spring Water",
+    "size_text": "170g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   },
+   "c3": {
+    "brand_text": "Al Alali",
+    "variant_text": "Chunk Light Tuna in Spring Water",
+    "size_text": "85g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   }
+  },
+  "real-10-golden-prize-l-meat-tuna-chilli-185gm": {
+   "c1": {
+    "brand_text": "Golden Prize",
+    "variant_text": "Light Meat Tuna with Chilli",
+    "size_text": "2x185g",
+    "pack_count": 2,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c2": {
+    "brand_text": "Golden Prize",
+    "variant_text": "Light Meat Tuna with Chilli",
+    "size_text": "185g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c3": {
+    "brand_text": "Golden Prize",
+    "variant_text": "Light Meat Tuna in Vegetable Oil",
+    "size_text": "185g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   }
+  },
+  "real-11-shan-tikka-bbq-mix-50gm": {
+   "c1": {
+    "brand_text": "National",
+    "variant_text": "Tikka BBQ Masala",
+    "size_text": "50g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "no",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Shan",
+    "variant_text": "Tikka BBQ Mix",
+    "size_text": "50g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c3": {
+    "brand_text": "Shan",
+    "variant_text": "Tandoori BBQ Mix",
+    "size_text": "50g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   }
+  },
+  "real-12-eastern-sambar-powder-160g": {
+   "c1": {
+    "brand_text": "Eastern",
+    "variant_text": "Sambar Powder",
+    "size_text": "",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "unsure"
+   },
+   "c2": {
+    "brand_text": "Eastern",
+    "variant_text": "Chilli Powder",
+    "size_text": "160g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   }
+  },
+  "real-13-kabani-chicken-masala-160-gm": {
+   "c1": {
+    "brand_text": "Kabani",
+    "variant_text": "Chicken Masala",
+    "size_text": "160g",
+    "pack_count": 1,
+    "view": "lifestyle",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Kabani",
+    "variant_text": "Chicken Masala",
+    "size_text": "",
+    "pack_count": 1,
+    "view": "banner",
+    "brand_match": "yes",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   }
+  },
+  "real-14-nellara-fish-masala-165gm": {
+   "c1": {
+    "brand_text": "Nellara",
+    "variant_text": "Fish Masala",
+    "size_text": "165g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Nellara",
+    "variant_text": "Meat Masala",
+    "size_text": "165g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   }
+  },
+  "real-15-mdh-kitchen-king-masala-100g": {
+   "c1": {
+    "brand_text": "MDH",
+    "variant_text": "Kitchen King",
+    "size_text": "100g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "MDH",
+    "variant_text": "Kitchen King",
+    "size_text": "100g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c3": {
+    "brand_text": "MDH",
+    "variant_text": "Kitchen King",
+    "size_text": "500g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   }
+  },
+  "real-16-zwan-chkn-luncheon-meat-w-olives-340gm": {
+   "c1": {
+    "brand_text": "Zwan",
+    "variant_text": "Chicken Luncheon Meat with Olives",
+    "size_text": "340g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Zwan",
+    "variant_text": "Chicken Luncheon Meat",
+    "size_text": "340g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   },
+   "c3": {
+    "brand_text": "Zwan",
+    "variant_text": "Chicken Luncheon Meat with Olives",
+    "size_text": "200g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   }
+  },
+  "real-17-americana-crispy-chkn-strips-750g": {
+   "c1": {
+    "brand_text": "Americana",
+    "variant_text": "Crispy Chicken Strips",
+    "size_text": "750g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Americana",
+    "variant_text": "Spicy Chicken Strips",
+    "size_text": "750g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   },
+   "c3": {
+    "brand_text": "Americana",
+    "variant_text": "Chicken Nuggets",
+    "size_text": "750g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   }
+  },
+  "real-18-sadia-chicken-franks-340g": {
+   "c1": {
+    "brand_text": "Sadia",
+    "variant_text": "Chicken Franks",
+    "size_text": "340g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Sadia",
+    "variant_text": "Beef Franks",
+    "size_text": "340g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   }
+  },
+  "real-19-freshly-beef-burger-8s-448gm": {
+   "c1": {
+    "brand_text": "Freshly",
+    "variant_text": "Beef Burger",
+    "size_text": "448g",
+    "pack_count": 8,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Freshly",
+    "variant_text": "Chicken Burger",
+    "size_text": "448g",
+    "pack_count": 8,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   },
+   "c3": {
+    "brand_text": "Freshly",
+    "variant_text": "Beef Burger",
+    "size_text": "224g",
+    "pack_count": 4,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   }
+  },
+  "real-20-fine-facial-tissue-soft-5x150pcs": {
+   "c1": {
+    "brand_text": "Fine",
+    "variant_text": "Facial Tissue Soft",
+    "size_text": "5x150",
+    "pack_count": 5,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Fine",
+    "variant_text": "Facial Tissue Classic",
+    "size_text": "5x170",
+    "pack_count": 5,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "no"
+   },
+   "c3": {
+    "brand_text": "Fine",
+    "variant_text": "Facial Tissue Soft",
+    "size_text": "150",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   }
+  },
+  "real-21-fairy-dish-liq-lemon-1l": {
+   "c1": {
+    "brand_text": "Fairy",
+    "variant_text": "Lemon",
+    "size_text": "1L",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Fairy",
+    "variant_text": "Original",
+    "size_text": "1L",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   },
+   "c3": {
+    "brand_text": "Fairy",
+    "variant_text": "Lemon",
+    "size_text": "500ml",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c4": {
+    "brand_text": "Fairy",
+    "variant_text": "Lemon",
+    "size_text": "1L",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   }
+  },
+  "real-22-pril-dw-liq-apple-1-5l": {
+   "c1": {
+    "brand_text": "Pril",
+    "variant_text": "Apple",
+    "size_text": "1.5L",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Pril",
+    "variant_text": "Lemon",
+    "size_text": "1.5L",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   }
+  },
+  "real-23-loyal-laundry-liq-lavender-3l": {
+   "c1": {
+    "brand_text": "Loyal",
+    "variant_text": "Laundry Liquid Lavender",
+    "size_text": "3L",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Loyal",
+    "variant_text": "Laundry Liquid Lavender",
+    "size_text": "1.8L",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   }
+  },
+  "real-24-aseel-butter-ghee-1-6kg": {
+   "c1": {
+    "brand_text": "Aseel",
+    "variant_text": "Pure Butter Ghee",
+    "size_text": "1.6kg",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Aseel",
+    "variant_text": "Pure Butter Ghee",
+    "size_text": "800g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   },
+   "c3": {
+    "brand_text": "Aseel",
+    "variant_text": "Vegetable Ghee",
+    "size_text": "1.6kg",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   }
+  },
+  "real-25-mehran-whole-wheat-paratha-5s-400gm": {
+   "c1": {
+    "brand_text": "Mehran",
+    "variant_text": "Whole Wheat Paratha",
+    "size_text": "400g",
+    "pack_count": 5,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Mehran",
+    "variant_text": "Plain Paratha",
+    "size_text": "400g",
+    "pack_count": 5,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "no",
+    "size_match": "yes"
+   },
+   "c3": {
+    "brand_text": "Mehran",
+    "variant_text": "Whole Wheat Paratha",
+    "size_text": "2x400g",
+    "pack_count": 2,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   }
+  },
+  "real-31-al-osra-basmati-rice-5kg": {
+   "c1": {
+    "brand_text": "Aziza",
+    "variant_text": "Super Basmati",
+    "size_text": "5kg",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "no",
+    "variant_match": "unsure",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Al Osra",
+    "variant_text": "Basmati Rice",
+    "size_text": "5kg",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c3": {
+    "brand_text": "Al Osra",
+    "variant_text": "Basmati Rice",
+    "size_text": "10kg",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "no"
+   }
+  },
+  "real-26-ice-cream-cone-strawberry-25gm": {
+   "c1": {
+    "brand_text": "Kiddy",
+    "variant_text": "Strawberry Cone",
+    "size_text": "25g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "unsure",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Sweetland",
+    "variant_text": "Candy Cone",
+    "size_text": "25g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "unsure",
+    "variant_match": "unsure",
+    "size_match": "yes"
+   }
+  },
+  "real-27-jelly-beans-assorted-100gm": {
+   "c1": {
+    "brand_text": "Jelly Belly",
+    "variant_text": "Assorted Jelly Beans",
+    "size_text": "100g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "unsure",
+    "variant_match": "yes",
+    "size_match": "yes"
+   },
+   "c2": {
+    "brand_text": "Haribo",
+    "variant_text": "Jelly Beans",
+    "size_text": "100g",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "unsure",
+    "variant_match": "yes",
+    "size_match": "yes"
+   }
+  },
+  "real-28-ferns-n-petals-pink-roses-bouquet-12pcs": {
+   "c1": {
+    "brand_text": "",
+    "variant_text": "Pink Roses Bouquet",
+    "size_text": "12",
+    "pack_count": 1,
+    "view": "lifestyle",
+    "brand_match": "unsure",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   },
+   "c2": {
+    "brand_text": "Ferns N Petals",
+    "variant_text": "Roses",
+    "size_text": "",
+    "pack_count": 1,
+    "view": "banner",
+    "brand_match": "yes",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   }
+  },
+  "real-29-bb2210-bisbell-s-steel-whisk-10in": {
+   "c1": {
+    "brand_text": "Bisbell",
+    "variant_text": "Whisk",
+    "size_text": "10in",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "yes",
+    "variant_match": "yes",
+    "size_match": "unsure"
+   },
+   "c2": {
+    "brand_text": "Delcasa",
+    "variant_text": "Whisk",
+    "size_text": "25cm",
+    "pack_count": 1,
+    "view": "front_packshot",
+    "brand_match": "no",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   }
+  },
+  "real-30-dubai-flower-delivery-red-roses-24pcs": {
+   "c1": {
+    "brand_text": "",
+    "variant_text": "Red Roses",
+    "size_text": "24",
+    "pack_count": 1,
+    "view": "lifestyle",
+    "brand_match": "unsure",
+    "variant_match": "unsure",
+    "size_match": "unsure"
+   }
+  }
+ },
+ "readings_by_model": {
+  "gemini:gemini-3.5-flash": {
+   "real-01-mccain-french-fries-shoestring-750gm": {
+    "c1": {
+     "brand_text": "McCain",
+     "variant_text": "Shoestring Fries",
+     "size_text": "750g",
+     "pack_count": 1,
+     "view": "front_packshot",
+     "brand_match": "yes",
+     "variant_match": "yes",
+     "size_match": "yes"
+    },
+    "c2": {
+     "brand_text": "McCain",
+     "variant_text": "Shoestring Fries",
+     "size_text": "750g",
+     "pack_count": 1,
+     "view": "front_packshot",
+     "brand_match": "yes",
+     "variant_match": "yes",
+     "size_match": "yes"
+    },
+    "c3": {
+     "brand_text": "McCain",
+     "variant_text": "Golden Long",
+     "size_text": "750g",
+     "pack_count": 1,
+     "view": "front_packshot",
+     "brand_match": "yes",
+     "variant_match": "no",
+     "size_match": "yes"
+    },
+    "c4": {
+     "brand_text": "McCain",
+     "variant_text": "Shoestring Fries",
+     "size_text": "1.5kg",
+     "pack_count": 1,
+     "view": "front_packshot",
+     "brand_match": "yes",
+     "variant_match": "yes",
+     "size_match": "no"
+    }
+   },
+   "real-02-yumway-crinkle-cut-fries-2-5-kg": {
+    "c1": {
+     "brand_text": "Mondelle",
+     "variant_text": "Crinkle Fries",
+     "size_text": "2.5kg",
+     "pack_count": 1,
+     "view": "front_packshot",
+     "brand_match": "no",
+     "variant_match": "yes",
+     "size_match": "yes"
+    },
+    "c2": {
+     "brand_text": "Yumway",
+     "variant_text": "Crinkle Cut Fries",
+     "size_text": "",
+     "pack_count": 1,
+     "view": "front_packshot",
+     "brand_match": "yes",
+     "variant_match": "yes",
+     "size_match": "unsure"
+    },
+    "c3": {
+     "brand_text": "Yumway",
+     "variant_text": "Crinkle",
+     "size_text": "",
+     "pack_count": 1,
+     "view": "lifestyle",
+     "brand_match": "yes",
+     "variant_match": "unsure",
+     "size_match": "unsure"
+    }
+   },
+   "real-03-hup-hup-fries-steakhouse-cut-1-kg": {
+    "c1": {
+     "brand_text": "Hup Hup",
+     "variant_text": "Steakhouse Cut",
+     "size_text": "1kg",
+     "pack_count": 1,
+     "view": "front_packshot",
+     "brand_match": "yes",
+     "variant_match": "yes",
+     "size_match": "yes"
+    },
+    "c2": {
+     "brand_text": "Hup Hup",
+     "variant_text": "Steakhouse Cut",
+     "size_text": "2.5kg",
+     "pack_count": 1,
+     "view": "front_packshot",
+     "brand_match": "yes",
+     "variant_match": "yes",
+     "size_match": "no"
+    },
+    "c3": {
+     "brand_text": "Hup Hup",
+     "variant_text": "Steakhouse",
+     "size_text": "1kg",
+     "pack_count": 1,
+     "view": "front_packshot",
+     "brand_match": "yes",
+     "variant_match": "unsure",
+     "size_match": "yes"
+    }
+   },
+   "real-04-tomex-french-fries-6mm-1-kg": {
+    "c1": {
+     "brand_text": "Tomex",
+     "variant_text": "French Fries 9mm",
+     "size_text": "1kg",
+     "pack_count": 1,
+     "view": "front_packshot",
+     "brand_match": "yes",
+     "variant_match": "no",
+     "size_match": "yes"
+    },
+    "c2": {
+     "brand_text": "Tomex",
+     "variant_text": "French Fries 6mm",
+     "size_text": "1kg",
+     "pack_count": 1,
+     "view": "front_packshot",
+     "brand_match": "yes",
+     "variant_match": "yes",
+     "size_match": "yes"
+    },
+    "c3": {
+     "brand_text": "Tomex",
+     "variant_text": "French Fries 6mm",
+     "size_text": "1kg",
+     "pack_count": 1,
+     "view": "front_packshot",
+     "brand_match": "yes",
+     "variant_match": "yes",
+     "size_match": "yes"
+    }
+   },
+   "real-05-al-kabeer-veg-samosa-240g": {
+    "c1": {
+     "brand_text": "Al Kabeer",
+     "variant_text": "Vegetable Samosa",
+     "size_text": "240g",
+     "pack_count": 1,
+     "view": "front_packshot",
+     "brand_match": "yes",
+     "variant_match": "yes",
+     "size_match": "yes"
+    },
+    "c2": {
+     "brand_text": "Al Kabeer",
+     "variant_text": "Cheese Samosa",
+     "size_text": "240g",
+     "pack_count": 1,
+     "view": "front_packshot",
+     "brand_match": "yes",
+     "variant_match": "no",
+     "size_match": "yes"
+    },
+    "c3": {
+     "brand_text": "Al Kabeer",
+     "variant_text": "Punjabi Samosa",
+     "size_text": "900g",
+     "pack_count": 1,
+     "view": "front_packshot",
+     "brand_match": "yes",
+     "variant_match": "no",
+     "size_match": "no"
+    }
+   },
+   "real-06-cal-garden-w-meat-tuna-s-f-oil-185gm": {
+    "c1": {
+     "brand_text": "California Garden",
+     "variant_text": "White Meat Tuna in Sunflower Oil",
+     "size_text": "185g",
+     "pack_count": 1,
+     "view": "front_packshot",
+     "brand_match": "yes",
+     "variant_match": "yes",
+     "size_match": "yes"
+    },
+    "c2": {
+     "brand_text": "California Garden",
+     "variant_text": "Light Meat Tuna in Sunflower Oil",
+     "size_text": "185g",
+     "pack_count": 1,
+     "view": "front_packshot",
+     "brand_match": "yes",
+     "variant_match": "no",
+     "size_match": "yes"
+    },
+    "c3": {
+     "brand_text": "California Garden",
+     "variant_text": "White Meat Tuna in Olive Oil",
+     "size_text": "185g",
+     "pack_count": 1,
+     "view": "front_packshot",
+     "brand_match": "yes",
+     "variant_match": "no",
+     "size_match": "yes"
+    }
+   },
+   "real-07-sup-t-l-meat-tuna-brine-3x170gm": {
+    "c1": {
+     "brand_text": "Super Tasty",
+     "variant_text": "Light Meat Tuna in Brine",
+     "size_text": "3x170g",
+     "pack_count": 3,
+     "view": "front_packshot",
+     "brand_match": "yes",
+     "variant_match": "yes",
+     "size_match": "yes"
+    },
+    "c2": {
+     "brand_text": "Super Tasty",
+     "variant_text": "Light Meat Tuna in Brine",
+     "size_text": "170g",
+     "pack_count": 1,
+     "view": "front_packshot",
+     "brand_match": "yes",
+     "variant_match": "yes",
+     "size_match": "no"
+    },
+    "c3": {
+     "brand_text": "Super Tasty",
+     "variant_text": "Light Meat Tuna in Brine",
+     "size_text": "3x170g",
+     "pack_count": 3,
+     "view": "front_packshot",
+     "brand_match": "yes",
+     "variant_match": "yes",
+     "size_match": "yes"
+    }
+   },
+   "real-08-virginia-w-meat-tuna-in-brine-170gm": {
+    "c1": {
+     "brand_text": "Golden Prize",
+     "variant_text": "White Meat Tuna in Brine",
+     "size_text": "170g",
+     "pack_count": 1,
+     "view": "front_packshot",
+     "brand_match": "no",
+     "variant_match": "yes",
+     "size_match": "yes"
+    },
+    "c2": {
+     "brand_text": "Virginia",
+     "variant_text": "White Meat Tuna in Brine",
+     "size_text": "170g",
+     "pack_count": 1,
+     "view": "front_packshot",
+     "brand_match": "yes",
+     "variant_match": "yes",
+     "size_match": "yes"
+    },
+    "c3": {
+     "brand_text": "Virginia",
+     "variant_text": "Light Meat Tuna in Brine",
+     "size_text": "170g",
+     "pack_count": 1,
+     "view": "front_packshot",
+     "brand_match": "yes",
+     "variant_match": "no",
+     "size_match": "yes"
+    }
+   },
+   "real-09-al-alali-chunk-light-tuna-spring-water-170gm": {
+    "c1": {
+     "brand_text": "Al Alali",
+     "variant_text": "Chunk Light Tuna in Spring Water",
+     "size_text": "170g",
+     "pack_count": 1,
+     "view": "front_packshot",
+     "brand_match": "yes",
+     "variant_match": "yes",
+     "size_match": "yes"
+    },
+    "c2": {
+     "brand_text": "Al Alali",
+     "variant_text": "Fancy Meat Tuna in Spring Water",
+     "size_text": "170g",
+     "pack_count": 1,
+     "view": "front_packshot",
+     "brand_match": "yes",
+     "variant_match": "no",
+     "size_match": "yes"
+    },
+    "c3": {
+     "brand_text": "Al Alali",
+     "variant_text": "Chunk Light Tuna in Spring Water",
+     "size_text": "85g",
+     "pack_count": 1,
+     "view": "front_packshot",
+     "brand_match": "yes",
+     "variant_match": "yes",
+     "size_match": "no"
+    }
+   },
+   "real-10-golden-prize-l-meat-tuna-chilli-185gm": {
+    "c1": {
+     "brand_text": "Golden Prize",
+     "variant_text": "Light Meat Tuna with Chilli",
+     "size_text": "2x185g",
+     "pack_count": 2,
+     "view": "front_packshot",
+     "brand_match": "yes",
+     "variant_match": "yes",
+     "size_match": "no"
+    },
+    "c2": {
+     "brand_text": "Golden Prize",
+     "variant_text": "Light Meat Tuna with Chilli",
+     "size_text": "185g",
+     "pack_count": 1,
+     "view": "front_packshot",
+     "brand_match": "yes",
+     "variant_match": "yes",
+     "size_match": "yes"
+    },
+    "c3": {
+     "brand_text": "Golden Prize",
+     "variant_text": "Light Meat Tuna in Vegetable Oil",
+     "size_text": "185g",
+     "pack_count": 1,
+     "view": "front_packshot",
+     "brand_match": "yes",
+     "variant_match": "no",
+     "size_match": "yes"
+    }
+   },
+   "real-11-shan-tikka-bbq-mix-50gm": {
+    "c1": {
+     "brand_text": "National",
+     "variant_text": "Tikka BBQ Masala",
+     "size_text": "50g",
+     "pack_count": 1,
+     "view": "front_packshot",
+     "brand_match": "no",
+     "variant_match": "yes",
+     "size_match": "yes"
+    },
+    "c2": {
+     "brand_text": "Shan",
+     "variant_text": "Tikka BBQ Mix",
+     "size_text": "50g",
+     "pack_count": 1,
+     "view": "front_packshot",
+     "brand_match": "yes",
+     "variant_match": "yes",
+     "size_match": "yes"
+    },
+    "c3": {
+     "brand_text": "Shan",
+     "variant_text": "Tandoori BBQ Mix",
+     "size_text": "50g",
+     "pack_count": 1,
+     "view": "front_packshot",
+     "brand_match": "yes",
+     "variant_match": "no",
+     "size_match": "yes"
+    }
+   },
+   "real-12-eastern-sambar-powder-160g": {
+    "c1": {
+     "brand_text": "Eastern",
+     "variant_text": "Sambar Powder",
+     "size_text": "",
+     "pack_count": 1,
+     "view": "front_packshot",
+     "brand_match": "yes",
+     "variant_match": "yes",
+     "size_match": "unsure"
+    },
+    "c2": {
+     "brand_text": "Eastern",
+     "variant_text": "Chilli Powder",
+     "size_text": "160g",
+     "pack_count": 1,
+     "view": "front_packshot",
+     "brand_match": "yes",
+     "variant_match": "no",
+     "size_match": "yes"
+    }
+   },
+   "real-13-kabani-chicken-masala-160-gm": {
+    "c1": {
+     "brand_text": "Kabani",
+     "variant_text": "Chicken Masala",
+     "size_text": "160g",
+     "pack_count": 1,
+     "view": "lifestyle",
+     "brand_match": "yes",
+     "variant_match": "yes",
+     "size_match": "yes"
+    },
+    "c2": {
+     "brand_text": "Kabani",
+     "variant_text": "Chicken Masala",
+     "size_text": "",
+     "pack_count": 1,
+     "view": "banner",
+     "brand_match": "yes",
+     "variant_match": "unsure",
+     "size_match": "unsure"
+    }
+   },
+   "real-14-nellara-fish-masala-165gm": {
+    "c1": {
+     "brand_text": "Nellara",
+     "variant_text": "Fish Masala",
+     "size_text": "165g",
+     "pack_count": 1,
+     "view": "front_packshot",
+     "brand_match": "yes",
+     "variant_match": "yes",
+     "size_match": "yes"
+    },
+    "c2": {
+     "brand_text": "Nellara",
+     "variant_text": "Meat Masala",
+     "size_text": "165g",
+     "pack_count": 1,
+     "view": "front_packshot",
+     "brand_match": "yes",
+     "variant_match": "no",
+     "size_match": "yes"
+    }
+   },
+   "real-15-mdh-kitchen-king-masala-100g": {
+    "c1": {
+     "brand_text": "MDH",
+     "variant_text": "Kitchen King",
+     "size_text": "100g",
+     "pack_count": 1,
+     "view": "front_packshot",
+     "brand_match": "yes",
+     "variant_match": "yes",
+     "size_match": "yes"
+    },
+    "c2": {
+     "brand_text": "MDH",
+     "variant_text": "Kitchen King",
+     "size_text": "100g",
+     "pack_count": 1,
+     "view": "front_packshot",
+     "brand_match": "yes",
+     "variant_match": "yes",
+     "size_match": "yes"
+    },
+    "c3": {
+     "brand_text": "MDH",
+     "variant_text": "Kitchen King",
+     "size_text": "500g",
+     "pack_count": 1,
+     "view": "front_packshot",
+     "brand_match": "yes",
+     "variant_match": "yes",
+     "size_match": "no"
+    }
+   },
+   "real-16-zwan-chkn-luncheon-meat-w-olives-340gm": {
+    "c1": {
+     "brand_text": "Zwan",
+     "variant_text": "Chicken Luncheon Meat with Olives",
+     "size_text": "340g",
+     "pack_count": 1,
+     "view": "front_packshot",
+     "brand_match": "yes",
+     "variant_match": "yes",
+     "size_match": "yes"
+    },
+    "c2": {
+     "brand_text": "Zwan",
+     "variant_text": "Chicken Luncheon Meat",
+     "size_text": "340g",
+     "pack_count": 1,
+     "view": "front_packshot",
+     "brand_match": "yes",
+     "variant_match": "no",
+     "size_match": "yes"
+    },
+    "c3": {
+     "brand_text": "Zwan",
+     "variant_text": "Chicken Luncheon Meat with Olives",
+     "size_text": "200g",
+     "pack_count": 1,
+     "view": "front_packshot",
+     "brand_match": "yes",
+     "variant_match": "yes",
+     "size_match": "no"
+    }
+   },
+   "real-17-americana-crispy-chkn-strips-750g": {
+    "c1": {
+     "brand_text": "Americana",
+     "variant_text": "Crispy Chicken Strips",
+     "size_text": "750g",
+     "pack_count": 1,
+     "view": "front_packshot",
+     "brand_match": "yes",
+     "variant_match": "yes",
+     "size_match": "yes"
+    },
+    "c2": {
+     "brand_text": "Americana",
+     "variant_text": "Spicy Chicken Strips",
+     "size_text": "750g",
+     "pack_count": 1,
+     "view": "front_packshot",
+     "brand_match": "yes",
+     "variant_match": "no",
+     "size_match": "yes"
+    },
+    "c3": {
+     "brand_text": "Americana",
+     "variant_text": "Chicken Nuggets",
+     "size_text": "750g",
+     "pack_count": 1,
+     "view": "front_packshot",
+     "brand_match": "yes",
+     "variant_match": "no",
+     "size_match": "yes"
+    }
+   },
+   "real-18-sadia-chicken-franks-340g": {
+    "c1": {
+     "brand_text": "Sadia",
+     "variant_text": "Chicken Franks",
+     "size_text": "340g",
+     "pack_count": 1,
+     "view": "front_packshot",
+     "brand_match": "yes",
+     "variant_match": "yes",
+     "size_match": "yes"
+    },
+    "c2": {
+     "brand_text": "Sadia",
+     "variant_text": "Beef Franks",
+     "size_text": "340g",
+     "pack_count": 1,
+     "view": "front_packshot",
+     "brand_match": "yes",
+     "variant_match": "no",
+     "size_match": "yes"
+    }
+   },
+   "real-19-freshly-beef-burger-8s-448gm": {
+    "c1": {
+     "brand_text": "Freshly",
+     "variant_text": "Beef Burger",
+     "size_text": "448g",
+     "pack_count": 8,
+     "view": "front_packshot",
+     "brand_match": "yes",
+     "variant_match": "yes",
+     "size_match": "yes"
+    },
+    "c2": {
+     "brand_text": "Freshly",
+     "variant_text": "Chicken Burger",
+     "size_text": "448g",
+     "pack_count": 8,
+     "view": "front_packshot",
+     "brand_match": "yes",
+     "variant_match": "no",
+     "size_match": "yes"
+    },
+    "c3": {
+     "brand_text": "Freshly",
+     "variant_text": "Beef Burger",
+     "size_text": "224g",
+     "pack_count": 4,
+     "view": "front_packshot",
+     "brand_match": "yes",
+     "variant_match": "yes",
+     "size_match": "no"
+    }
+   },
+   "real-20-fine-facial-tissue-soft-5x150pcs": {
+    "c1": {
+     "brand_text": "Fine",
+     "variant_text": "Facial Tissue Soft",
+     "size_text": "5x150",
+     "pack_count": 5,
+     "view": "front_packshot",
+     "brand_match": "yes",
+     "variant_match": "yes",
+     "size_match": "yes"
+    },
+    "c2": {
+     "brand_text": "Fine",
+     "variant_text": "Facial Tissue Classic",
+     "size_text": "5x170",
+     "pack_count": 5,
+     "view": "front_packshot",
+     "brand_match": "yes",
+     "variant_match": "no",
+     "size_match": "no"
+    },
+    "c3": {
+     "brand_text": "Fine",
+     "variant_text": "Facial Tissue Soft",
+     "size_text": "150",
+     "pack_count": 1,
+     "view": "front_packshot",
+     "brand_match": "yes",
+     "variant_match": "yes",
+     "size_match": "no"
+    }
+   },
+   "real-21-fairy-dish-liq-lemon-1l": {
+    "c1": {
+     "brand_text": "Fairy",
+     "variant_text": "Lemon",
+     "size_text": "1L",
+     "pack_count": 1,
+     "view": "front_packshot",
+     "brand_match": "yes",
+     "variant_match": "yes",
+     "size_match": "yes"
+    },
+    "c2": {
+     "brand_text": "Fairy",
+     "variant_text": "Original",
+     "size_text": "1L",
+     "pack_count": 1,
+     "view": "front_packshot",
+     "brand_match": "yes",
+     "variant_match": "no",
+     "size_match": "yes"
+    },
+    "c3": {
+     "brand_text": "Fairy",
+     "variant_text": "Lemon",
+     "size_text": "500ml",
+     "pack_count": 1,
+     "view": "front_packshot",
+     "brand_match": "yes",
+     "variant_match": "yes",
+     "size_match": "no"
+    },
+    "c4": {
+     "brand_text": "Fairy",
+     "variant_text": "Lemon",
+     "size_text": "1L",
+     "pack_count": 1,
+     "view": "front_packshot",
+     "brand_match": "yes",
+     "variant_match": "yes",
+     "size_match": "yes"
+    }
+   },
+   "real-22-pril-dw-liq-apple-1-5l": {
+    "c1": {
+     "brand_text": "Pril",
+     "variant_text": "Apple",
+     "size_text": "1.5L",
+     "pack_count": 1,
+     "view": "front_packshot",
+     "brand_match": "yes",
+     "variant_match": "yes",
+     "size_match": "yes"
+    },
+    "c2": {
+     "brand_text": "Pril",
+     "variant_text": "Lemon",
+     "size_text": "1.5L",
+     "pack_count": 1,
+     "view": "front_packshot",
+     "brand_match": "yes",
+     "variant_match": "no",
+     "size_match": "yes"
+    }
+   },
+   "real-23-loyal-laundry-liq-lavender-3l": {
+    "c1": {
+     "brand_text": "Loyal",
+     "variant_text": "Laundry Liquid Lavender",
+     "size_text": "3L",
+     "pack_count": 1,
+     "view": "front_packshot",
+     "brand_match": "yes",
+     "variant_match": "yes",
+     "size_match": "yes"
+    },
+    "c2": {
+     "brand_text": "Loyal",
+     "variant_text": "Laundry Liquid Lavender",
+     "size_text": "1.8L",
+     "pack_count": 1,
+     "view": "front_packshot",
+     "brand_match": "yes",
+     "variant_match": "yes",
+     "size_match": "no"
+    }
+   },
+   "real-24-aseel-butter-ghee-1-6kg": {
+    "c1": {
+     "brand_text": "Aseel",
+     "variant_text": "Pure Butter Ghee",
+     "size_text": "1.6kg",
+     "pack_count": 1,
+     "view": "front_packshot",
+     "brand_match": "yes",
+     "variant_match": "yes",
+     "size_match": "yes"
+    },
+    "c2": {
+     "brand_text": "Aseel",
+     "variant_text": "Pure Butter Ghee",
+     "size_text": "800g",
+     "pack_count": 1,
+     "view": "front_packshot",
+     "brand_match": "yes",
+     "variant_match": "yes",
+     "size_match": "no"
+    },
+    "c3": {
+     "brand_text": "Aseel",
+     "variant_text": "Vegetable Ghee",
+     "size_text": "1.6kg",
+     "pack_count": 1,
+     "view": "front_packshot",
+     "brand_match": "yes",
+     "variant_match": "no",
+     "size_match": "yes"
+    }
+   },
+   "real-25-mehran-whole-wheat-paratha-5s-400gm": {
+    "c1": {
+     "brand_text": "Mehran",
+     "variant_text": "Whole Wheat Paratha",
+     "size_text": "400g",
+     "pack_count": 5,
+     "view": "front_packshot",
+     "brand_match": "yes",
+     "variant_match": "yes",
+     "size_match": "yes"
+    },
+    "c2": {
+     "brand_text": "Mehran",
+     "variant_text": "Plain Paratha",
+     "size_text": "400g",
+     "pack_count": 5,
+     "view": "front_packshot",
+     "brand_match": "yes",
+     "variant_match": "no",
+     "size_match": "yes"
+    },
+    "c3": {
+     "brand_text": "Mehran",
+     "variant_text": "Whole Wheat Paratha",
+     "size_text": "2x400g",
+     "pack_count": 2,
+     "view": "front_packshot",
+     "brand_match": "yes",
+     "variant_match": "yes",
+     "size_match": "no"
+    }
+   },
+   "real-31-al-osra-basmati-rice-5kg": {
+    "c1": {
+     "brand_text": "Aziza",
+     "variant_text": "Super Basmati",
+     "size_text": "5kg",
+     "pack_count": 1,
+     "view": "front_packshot",
+     "brand_match": "no",
+     "variant_match": "unsure",
+     "size_match": "yes"
+    },
+    "c2": {
+     "brand_text": "Al Osra",
+     "variant_text": "Basmati Rice",
+     "size_text": "5kg",
+     "pack_count": 1,
+     "view": "front_packshot",
+     "brand_match": "yes",
+     "variant_match": "yes",
+     "size_match": "yes"
+    },
+    "c3": {
+     "brand_text": "Al Osra",
+     "variant_text": "Basmati Rice",
+     "size_text": "10kg",
+     "pack_count": 1,
+     "view": "front_packshot",
+     "brand_match": "yes",
+     "variant_match": "yes",
+     "size_match": "no"
+    }
+   },
+   "real-26-ice-cream-cone-strawberry-25gm": {
+    "c1": {
+     "brand_text": "Kiddy",
+     "variant_text": "Strawberry Cone",
+     "size_text": "25g",
+     "pack_count": 1,
+     "view": "front_packshot",
+     "brand_match": "unsure",
+     "variant_match": "yes",
+     "size_match": "yes"
+    },
+    "c2": {
+     "brand_text": "Sweetland",
+     "variant_text": "Candy Cone",
+     "size_text": "25g",
+     "pack_count": 1,
+     "view": "front_packshot",
+     "brand_match": "unsure",
+     "variant_match": "unsure",
+     "size_match": "yes"
+    }
+   },
+   "real-27-jelly-beans-assorted-100gm": {
+    "c1": {
+     "brand_text": "Jelly Belly",
+     "variant_text": "Assorted Jelly Beans",
+     "size_text": "100g",
+     "pack_count": 1,
+     "view": "front_packshot",
+     "brand_match": "unsure",
+     "variant_match": "yes",
+     "size_match": "yes"
+    },
+    "c2": {
+     "brand_text": "Haribo",
+     "variant_text": "Jelly Beans",
+     "size_text": "100g",
+     "pack_count": 1,
+     "view": "front_packshot",
+     "brand_match": "unsure",
+     "variant_match": "yes",
+     "size_match": "yes"
+    }
+   },
+   "real-28-ferns-n-petals-pink-roses-bouquet-12pcs": {
+    "c1": {
+     "brand_text": "",
+     "variant_text": "Pink Roses Bouquet",
+     "size_text": "12",
+     "pack_count": 1,
+     "view": "lifestyle",
+     "brand_match": "unsure",
+     "variant_match": "unsure",
+     "size_match": "unsure"
+    },
+    "c2": {
+     "brand_text": "Ferns N Petals",
+     "variant_text": "Roses",
+     "size_text": "",
+     "pack_count": 1,
+     "view": "banner",
+     "brand_match": "yes",
+     "variant_match": "unsure",
+     "size_match": "unsure"
+    }
+   },
+   "real-29-bb2210-bisbell-s-steel-whisk-10in": {
+    "c1": {
+     "brand_text": "Bisbell",
+     "variant_text": "Whisk",
+     "size_text": "10in",
+     "pack_count": 1,
+     "view": "front_packshot",
+     "brand_match": "yes",
+     "variant_match": "yes",
+     "size_match": "yes"
+    },
+    "c2": {
+     "brand_text": "Delcasa",
+     "variant_text": "Whisk",
+     "size_text": "25cm",
+     "pack_count": 1,
+     "view": "front_packshot",
+     "brand_match": "no",
+     "variant_match": "unsure",
+     "size_match": "unsure"
+    }
+   },
+   "real-30-dubai-flower-delivery-red-roses-24pcs": {
+    "c1": {
+     "brand_text": "",
+     "variant_text": "Red Roses",
+     "size_text": "24",
+     "pack_count": 1,
+     "view": "lifestyle",
+     "brand_match": "unsure",
+     "variant_match": "unsure",
+     "size_match": "unsure"
+    }
+   }
+  }
+ }
+}

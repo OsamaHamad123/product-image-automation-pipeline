@@ -249,3 +249,31 @@ def test_noisy_and_adversarial_fixtures_point_at_real_candidates(golden, cassett
     assert cassette["verdicts"]["uae-027-nido-fortified-2-25kg"]["c4"]["size_text"] == "900g", "the overlay copies"
     adv, adv_cassette = harness.load_adversarial()
     assert len(adv["skus"]) >= 10 and all(s["id"] in adv_cassette["verdicts"] for s in adv["skus"])
+
+
+# ---------------------------------------------------------------------------
+# The v1 engine is gone: asking for it is a clear error, never a silent v2 run
+# ---------------------------------------------------------------------------
+
+def test_engine_v1_is_refused_with_the_reason(monkeypatch, capsys):
+    eval_report = _script("eval_report")
+    real_run_all = harness.run_all
+    monkeypatch.setattr(eval_report.harness, "run_all", lambda *a, **k: pytest.fail("no engine may run"))
+    with pytest.raises(SystemExit) as stop:
+        eval_report.main(["--engine", "v1"])
+    assert stop.value.code == 2
+    err = capsys.readouterr().err
+    assert "--engine v1" in err and "removed" in err and "baseline_v1.json" in err
+    with pytest.raises(SystemExit):
+        eval_report.main(["--engine", "v3"])
+    assert "unknown engine" in capsys.readouterr().err
+    with pytest.raises(ValueError, match="removed"):
+        real_run_all("v1")
+    assert harness.ENGINES == ("v2",)
+
+
+def test_the_stored_v1_baselines_still_print(capsys):
+    eval_report = _script("eval_report")
+    for which in ("original", "hotfixed"):
+        assert eval_report.main(["--stored", which]) == 0
+        assert f"Stored v1 baseline ({which})" in capsys.readouterr().out

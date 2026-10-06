@@ -142,6 +142,17 @@ double-check before approving. They never change the winner or the decision.
                                  approving the pick teaches it (catalog_match.learning).
                                  It stays on once the spelling is learned, so a
                                  WRONG_BRAND rejection can still count against it
+    brand_from_normaliser        the search tried the query normaliser's brand guess (the sheet
+                                 brand was unknown or no listing named it): written by
+                                 catalog_match.normalizer.mark_rescued after routing, with
+                                 'auto_blocked:brand_from_normaliser'; never strict, never auto
+    brand_look_mismatch          the picture is far from every approved picture of the SKU's
+                                 brand and close to another brand's approved picture
+                                 (catalog_match.embeddings, EMBEDDINGS on and at least 3 approved
+                                 pictures of the brand): a listing that names the brand but shows
+                                 another brand's pack. Evidence only: it never changes the winner,
+                                 and it also blocks auto-publish ('auto_blocked:brand_look_mismatch',
+                                 so the pick is never lane 'strict'), whatever AUTO_PUBLISH_BRANDS says
 
 Overruled flags ('vlm:flag_overruled:size' / 'vlm:flag_overruled:variant' reasons, not warnings): on every
 candidate whose reading is UNSURE only because verify.overruled_flags set aside a 'no' its own verbatim text
@@ -188,6 +199,7 @@ from .models import (
     Candidate, ProviderHealth, ProviderResult, RankedCandidate, SearchOutcome, Size, SkuSpec,
     VerificationResult,
 )
+from .embeddings import look_mismatch
 from .fetch import phash_distance
 from .score import IDENTITY_KEYS, TRUST_STRUCTURED, page_host, rank_key, trusted_domains
 from .sizes import compare, parse_sizes, product_size
@@ -208,7 +220,7 @@ DISPLAY_ONLY_WARNING_CODES = ("size_unverified", "variant_unverified")
 # Every review warning code (the dashboard maps each one to an Arabic sentence).
 WARNING_CODES = ("sheet_silent", "listing_silent", "vlm_unsure", "multipack_unit_image", "size_close", "low_resolution",
                  "chat_or_screenshot", "social_media", "foreign_store", "barcode_conflict",
-                 "brand_spelling") + DISPLAY_ONLY_WARNING_CODES
+                 "brand_spelling", "brand_from_normaliser", "brand_look_mismatch") + DISPLAY_ONLY_WARNING_CODES
 # Reason on a candidate whose label reading said 'no' to a flag its own verbatim text cannot support
 # (verify.overruled_flags): 'vlm:flag_overruled:size' / 'vlm:flag_overruled:variant'.
 FLAG_OVERRULED = "vlm:flag_overruled"
@@ -764,6 +776,8 @@ def review_warnings(spec: SkuSpec, rc: RankedCandidate, reading_of: Optional[Ran
     spelling = _store_spelling(spec)
     if spelling and _brand_spelling_only(spec, rc):
         out.append(f"brand_spelling:{spelling}")
+    if look_mismatch(rc.fetched):
+        out.append("brand_look_mismatch")
     return out
 
 
@@ -1042,6 +1056,9 @@ def route(spec: SkuSpec, ranked: Sequence[RankedCandidate],
         blockers.append("cache_hit")
     if gtin_conflict(winner):
         blockers.append("barcode_conflict")
+    if look_mismatch(winner.fetched):
+        # embeddings evidence (another brand's pack): a person looks first, whatever AUTO_PUBLISH_BRANDS says
+        blockers.append("brand_look_mismatch")
     if outcome.failure_code:
         blockers.append(outcome.failure_code.lower())
     elif verify_state == "partial":

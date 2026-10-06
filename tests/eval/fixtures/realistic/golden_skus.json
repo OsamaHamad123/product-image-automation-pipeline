@@ -1,0 +1,3191 @@
+{
+ "version": 1,
+ "description": "Realistic synthetic set, modelled on the owner's live sheet rows: abbreviated names and brand cells, no barcode, size, category or Arabic name, and mostly non-dairy categories (fries, tuna, spices, luncheon meat, household, tissues, flowers, generic rows). Each SKU lists the live failure patterns it carries (patterns): brand_page_wrong_pack (a listing that names the brand while its picture is another brand's pack), size_not_on_front, near_duplicate (one picture on several domains: seed_of reuses another candidate's seed), non_white_backdrop (recipe packshot_backdrop, tests/eval/imagegen_extra.py), generic and out_of_scope rows, social, multipack, foreign_store, abbreviated. Labels describe the listing and the picture, never an engine result. Replay: python scripts/eval_report.py --engine v2 --set realistic.",
+ "labels": [
+  "correct_exact",
+  "wrong_variant",
+  "wrong_size",
+  "wrong_pack",
+  "wrong_brand",
+  "wrong_product",
+  "not_packshot",
+  "unusable"
+ ],
+ "named_cases": {},
+ "skus": [
+  {
+   "id": "real-01-mccain-french-fries-shoestring-750gm",
+   "stratum": "frozen_fries",
+   "named_case": null,
+   "named_case_title": null,
+   "name_en": "MCCAIN FRENCH FRIES SHOESTRING 750GM",
+   "name_ar": "",
+   "brand": "MCCAIN",
+   "brand_ar": "",
+   "barcode": "",
+   "category": "",
+   "size": "",
+   "no_correct_candidate": false,
+   "expected_v2": "correct_pick",
+   "patterns": [
+    "near_duplicate",
+    "abbreviated"
+   ],
+   "notes": "Mapped brand; Carrefour and Amazon carry the same packshot.",
+   "candidates": [
+    {
+     "id": "c1",
+     "provider": "serper",
+     "rank": 2,
+     "image_url": "https://cdn.mafrservices.com/sys-master-root/h1/41037_main.jpg?im=Resize=1200",
+     "page_url": "https://www.carrefouruae.com/mafuae/en/mccain-shoestring-french-fries-750g/p/41037",
+     "title": "McCain Shoestring French Fries 750g",
+     "page_title": "Buy McCain Shoestring French Fries 750g Online - Shop on Carrefour UAE",
+     "domain": "carrefouruae.com",
+     "width": 1200,
+     "height": 1200,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1200,
+       1200
+      ],
+      "shape": "bag",
+      "label_text": "MCCAIN|SHOESTRING FRIES|750G",
+      "accent_color": "#f9a825",
+      "body_color": "#c62828"
+     },
+     "download": "ok",
+     "label": "correct_exact",
+     "note": "Carrefour packshot on white; the exact SKU."
+    },
+    {
+     "id": "c2",
+     "provider": "serper",
+     "rank": 3,
+     "image_url": "https://m.media-amazon.com/images/I/741074L._AC_SL1500_.jpg",
+     "page_url": "https://www.amazon.ae/mccain-shoestring-fries-750-g-frozen/dp/B041074",
+     "title": "McCain Shoestring Fries 750 g (Frozen)",
+     "page_title": "McCain Shoestring Fries 750 g (Frozen) : Amazon.ae: Grocery",
+     "domain": "amazon.ae",
+     "width": 1200,
+     "height": 1200,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1200,
+       1200
+      ],
+      "shape": "bag",
+      "label_text": "MCCAIN|SHOESTRING FRIES|750G",
+      "accent_color": "#f9a825",
+      "body_color": "#c62828",
+      "quality": 78
+     },
+     "download": "ok",
+     "label": "correct_exact",
+     "note": "Amazon re-encode of Carrefour's packshot (same picture, other bytes).",
+     "seed_of": "c1"
+    },
+    {
+     "id": "c3",
+     "provider": "serper",
+     "rank": 1,
+     "image_url": "https://gcc.luluhypermarket.com/medias/41111-01.jpg",
+     "page_url": "https://gcc.luluhypermarket.com/en-ae/mccain-golden-long-french-fries-750g/p/41111",
+     "title": "McCain Golden Long French Fries 750g",
+     "page_title": "McCain Golden Long French Fries 750g | Lulu UAE",
+     "domain": "gcc.luluhypermarket.com",
+     "width": 1200,
+     "height": 1200,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1200,
+       1200
+      ],
+      "shape": "bag",
+      "label_text": "MCCAIN|GOLDEN LONG|750G",
+      "accent_color": "#f9a825",
+      "body_color": "#c62828"
+     },
+     "download": "ok",
+     "label": "wrong_variant",
+     "note": "Sibling line (Golden Long) ranked first."
+    },
+    {
+     "id": "c4",
+     "provider": "serper",
+     "rank": 4,
+     "image_url": "https://f.nooncdn.com/p/pnsku/N41148V/45/_/1700000000/41148_1.jpg",
+     "page_url": "https://www.noon.com/uae-en/mccain-shoestring-french-fries-1-5kg/N41148V/p/",
+     "title": "McCain Shoestring French Fries 1.5kg",
+     "page_title": "Shop McCain Shoestring French Fries 1.5kg online in Dubai | noon",
+     "domain": "noon.com",
+     "width": 1200,
+     "height": 1200,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1200,
+       1200
+      ],
+      "shape": "bag",
+      "label_text": "MCCAIN|SHOESTRING FRIES|1.5KG",
+      "accent_color": "#f9a825",
+      "body_color": "#c62828"
+     },
+     "download": "ok",
+     "label": "wrong_size",
+     "note": "The 1.5 kg bag."
+    }
+   ]
+  },
+  {
+   "id": "real-02-yumway-crinkle-cut-fries-2-5-kg",
+   "stratum": "frozen_fries",
+   "named_case": null,
+   "named_case_title": null,
+   "name_en": "YUMWAY CRINKLE CUT FRIES 2.5 KG",
+   "name_ar": "",
+   "brand": "YUMWAY",
+   "brand_ar": "",
+   "barcode": "",
+   "category": "",
+   "size": "",
+   "no_correct_candidate": false,
+   "expected_v2": "no_wrong_pick",
+   "patterns": [
+    "brand_page_wrong_pack",
+    "size_not_on_front",
+    "social"
+   ],
+   "notes": "Unmapped brand. Ansar's page shows another brand's pack; the right picture has no size on the front.",
+   "candidates": [
+    {
+     "id": "c1",
+     "provider": "serper",
+     "rank": 1,
+     "image_url": "https://www.ansargallery.com/media/catalog/product/41185.jpg",
+     "page_url": "https://www.ansargallery.com/en/yumway-crinkle-cut-fries-2-5kg-41185",
+     "title": "Yumway Crinkle Cut Fries 2.5kg",
+     "page_title": "Yumway Crinkle Cut Fries 2.5kg | Ansar Gallery",
+     "domain": "ansargallery.com",
+     "width": 1000,
+     "height": 1000,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1000,
+       1000
+      ],
+      "shape": "bag",
+      "label_text": "MONDELLE|CRINKLE FRIES|2.5KG",
+      "accent_color": "#0d47a1",
+      "body_color": "#1565c0"
+     },
+     "download": "ok",
+     "label": "wrong_brand",
+     "note": "The page names Yumway but its picture is a Mondelle bag (a 'related products' image)."
+    },
+    {
+     "id": "c2",
+     "provider": "serper",
+     "rank": 2,
+     "image_url": "https://f.nooncdn.com/p/pnsku/N41222V/45/_/1700000000/41222_1.jpg",
+     "page_url": "https://www.noon.com/uae-en/yumway-crinkle-cut-french-fries-2-5-kg/N41222V/p/",
+     "title": "Yumway Crinkle Cut French Fries 2.5 Kg",
+     "page_title": "Shop Yumway Crinkle Cut French Fries 2.5 Kg online in Dubai | noon",
+     "domain": "noon.com",
+     "width": 1200,
+     "height": 1200,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1200,
+       1200
+      ],
+      "shape": "bag",
+      "label_text": "YUMWAY|CRINKLE CUT|FRIES",
+      "accent_color": "#2e7d32",
+      "body_color": "#fbc02d"
+     },
+     "download": "ok",
+     "label": "correct_exact",
+     "note": "The right bag; the weight is printed on the back only."
+    },
+    {
+     "id": "c3",
+     "provider": "serper",
+     "rank": 3,
+     "image_url": "https://scontent.cdninstagram.com/v/t51.29350-15/41259_n.jpg",
+     "page_url": "https://www.instagram.com/p/C41259x/",
+     "title": "yumwayfoods crinkle fries now in stores",
+     "page_title": "yumwayfoods crinkle fries now in stores on Instagram",
+     "domain": "instagram.com",
+     "width": 1080,
+     "height": 1080,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "lifestyle_clutter",
+      "size": [
+       1080,
+       1080
+      ],
+      "shape": "bag",
+      "label_text": "YUMWAY|CRINKLE",
+      "accent_color": "#2e7d32",
+      "body_color": "#fbc02d"
+     },
+     "download": "ok",
+     "label": "not_packshot",
+     "note": "Promo post: the bag among other items."
+    }
+   ]
+  },
+  {
+   "id": "real-03-hup-hup-fries-steakhouse-cut-1-kg",
+   "stratum": "frozen_fries",
+   "named_case": null,
+   "named_case_title": null,
+   "name_en": "HUP HUP FRIES STEAKHOUSE CUT 1 KG",
+   "name_ar": "",
+   "brand": "HUP HUP",
+   "brand_ar": "",
+   "barcode": "",
+   "category": "",
+   "size": "",
+   "no_correct_candidate": false,
+   "expected_v2": "correct_pick",
+   "patterns": [
+    "non_white_backdrop"
+   ],
+   "notes": "Unmapped brand; the only usable right picture is on a coloured backdrop.",
+   "candidates": [
+    {
+     "id": "c1",
+     "provider": "serper",
+     "rank": 1,
+     "image_url": "https://gcc.luluhypermarket.com/medias/41296-01.jpg",
+     "page_url": "https://gcc.luluhypermarket.com/en-ae/hup-hup-steakhouse-cut-fries-1kg/p/41296",
+     "title": "Hup Hup Steakhouse Cut Fries 1kg",
+     "page_title": "Hup Hup Steakhouse Cut Fries 1kg | Lulu UAE",
+     "domain": "gcc.luluhypermarket.com",
+     "width": 1200,
+     "height": 1200,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_backdrop",
+      "size": [
+       1200,
+       1200
+      ],
+      "shape": "bag",
+      "label_text": "HUP HUP|STEAKHOUSE CUT|1KG",
+      "accent_color": "#ffeb3b",
+      "body_color": "#d84315",
+      "background_color": "#1f4e79"
+     },
+     "download": "ok",
+     "label": "correct_exact",
+     "note": "Lulu shoots this range on a blue sweep: the right bag on a uniform non-white background."
+    },
+    {
+     "id": "c2",
+     "provider": "serper",
+     "rank": 2,
+     "image_url": "https://cdn.mafrservices.com/sys-master-root/h1/41333_main.jpg?im=Resize=1200",
+     "page_url": "https://www.carrefouruae.com/mafuae/en/hup-hup-steakhouse-cut-fries-2-5kg/p/41333",
+     "title": "Hup Hup Steakhouse Cut Fries 2.5kg",
+     "page_title": "Buy Hup Hup Steakhouse Cut Fries 2.5kg Online - Shop on Carrefour UAE",
+     "domain": "carrefouruae.com",
+     "width": 1200,
+     "height": 1200,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1200,
+       1200
+      ],
+      "shape": "bag",
+      "label_text": "HUP HUP|STEAKHOUSE CUT|2.5KG",
+      "accent_color": "#ffeb3b",
+      "body_color": "#d84315"
+     },
+     "download": "ok",
+     "label": "wrong_size",
+     "note": "The 2.5 kg bag."
+    },
+    {
+     "id": "c3",
+     "provider": "serper",
+     "rank": 3,
+     "image_url": "https://images.deliveryhero.io/image/talabat-nv/41370.jpg",
+     "page_url": "https://www.talabat.com/uae/grocery/41370/hup-hup-steakhouse-fries-1-kg",
+     "title": "Hup Hup Steakhouse Fries 1 Kg",
+     "page_title": "Hup Hup Steakhouse Fries 1 Kg | talabat mart",
+     "domain": "talabat.com",
+     "width": 120,
+     "height": 120,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "tiny_120",
+      "size": [
+       120,
+       120
+      ],
+      "shape": "bag",
+      "label_text": "HUP HUP|STEAKHOUSE|1KG",
+      "accent_color": "#ffeb3b",
+      "body_color": "#d84315"
+     },
+     "download": "ok",
+     "label": "unusable",
+     "note": "The right bag as a 120 px thumbnail."
+    }
+   ]
+  },
+  {
+   "id": "real-04-tomex-french-fries-6mm-1-kg",
+   "stratum": "frozen_fries",
+   "named_case": null,
+   "named_case_title": null,
+   "name_en": "TOMEX FRENCH FRIES 6MM 1 KG",
+   "name_ar": "",
+   "brand": "TOMEX",
+   "brand_ar": "",
+   "barcode": "",
+   "category": "",
+   "size": "",
+   "no_correct_candidate": false,
+   "expected_v2": "correct_pick",
+   "patterns": [
+    "non_white_backdrop",
+    "near_duplicate",
+    "foreign_store"
+   ],
+   "notes": "The cut (6 mm vs 9 mm) is the variant; the model cannot tell 9 mm from the title alone (unsure).",
+   "candidates": [
+    {
+     "id": "c1",
+     "provider": "serper",
+     "rank": 1,
+     "image_url": "https://cdn.mafrservices.com/sys-master-root/h1/41407_main.jpg?im=Resize=1200",
+     "page_url": "https://www.carrefouruae.com/mafuae/en/tomex-french-fries-9mm-1kg/p/41407",
+     "title": "Tomex French Fries 9mm 1kg",
+     "page_title": "Buy Tomex French Fries 9mm 1kg Online - Shop on Carrefour UAE",
+     "domain": "carrefouruae.com",
+     "width": 1200,
+     "height": 1200,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1200,
+       1200
+      ],
+      "shape": "bag",
+      "label_text": "TOMEX|FRENCH FRIES 9MM|1KG",
+      "accent_color": "#e65100",
+      "body_color": "#ffffff"
+     },
+     "download": "ok",
+     "label": "wrong_variant",
+     "note": "The 9 mm cut."
+    },
+    {
+     "id": "c2",
+     "provider": "serper",
+     "rank": 2,
+     "image_url": "https://farzana.ae/wp-content/uploads/2025/09/41444.jpg",
+     "page_url": "https://farzana.ae/product/tomex-french-fries-6mm-1kg/",
+     "title": "Tomex French Fries 6mm 1kg",
+     "page_title": "Tomex French Fries 6mm 1kg - Farzana",
+     "domain": "farzana.ae",
+     "width": 1000,
+     "height": 1000,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_backdrop",
+      "size": [
+       1000,
+       1000
+      ],
+      "shape": "bag",
+      "label_text": "TOMEX|FRENCH FRIES 6MM|1KG",
+      "accent_color": "#e65100",
+      "body_color": "#ffffff",
+      "background_color": "#ececec"
+     },
+     "download": "ok",
+     "label": "correct_exact",
+     "note": "The 6 mm bag on a light grey sweep."
+    },
+    {
+     "id": "c3",
+     "provider": "serper",
+     "rank": 3,
+     "image_url": "https://m.media-amazon.com/images/I/841481L._SX679_.jpg",
+     "page_url": "https://www.amazon.in/tomex-frozen-french-fries-6-mm-1-kg/dp/B041481",
+     "title": "Tomex Frozen French Fries 6 mm, 1 kg",
+     "page_title": "Tomex Frozen French Fries 6 mm, 1 kg : Amazon.in: Grocery & Gourmet Foods",
+     "domain": "amazon.in",
+     "width": 1000,
+     "height": 1000,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_backdrop",
+      "size": [
+       1000,
+       1000
+      ],
+      "shape": "bag",
+      "label_text": "TOMEX|FRENCH FRIES 6MM|1KG",
+      "accent_color": "#e65100",
+      "body_color": "#ffffff",
+      "background_color": "#ececec",
+      "quality": 80
+     },
+     "download": "ok",
+     "label": "correct_exact",
+     "note": "amazon.in copy of the same picture.",
+     "seed_of": "c2"
+    }
+   ]
+  },
+  {
+   "id": "real-05-al-kabeer-veg-samosa-240g",
+   "stratum": "frozen_snacks",
+   "named_case": null,
+   "named_case_title": null,
+   "name_en": "AL KABEER VEG SAMOSA 240G",
+   "name_ar": "",
+   "brand": "AL KABEER",
+   "brand_ar": "",
+   "barcode": "",
+   "category": "",
+   "size": "",
+   "no_correct_candidate": false,
+   "expected_v2": "correct_pick",
+   "patterns": [
+    "abbreviated"
+   ],
+   "notes": "'VEG' is the sheet's abbreviation of Vegetable.",
+   "candidates": [
+    {
+     "id": "c1",
+     "provider": "serper",
+     "rank": 2,
+     "image_url": "https://m.media-amazon.com/images/I/741518L._AC_SL1500_.jpg",
+     "page_url": "https://www.amazon.ae/al-kabeer-vegetable-samosa-240g/dp/B041518",
+     "title": "Al Kabeer Vegetable Samosa 240g",
+     "page_title": "Al Kabeer Vegetable Samosa 240g : Amazon.ae: Grocery",
+     "domain": "amazon.ae",
+     "width": 1500,
+     "height": 1500,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1500,
+       1500
+      ],
+      "shape": "box",
+      "label_text": "AL KABEER|VEGETABLE SAMOSA|240G",
+      "accent_color": "#2e7d32",
+      "body_color": "#fff8e1"
+     },
+     "download": "ok",
+     "label": "correct_exact",
+     "note": "The exact box."
+    },
+    {
+     "id": "c2",
+     "provider": "serper",
+     "rank": 1,
+     "image_url": "https://gcc.luluhypermarket.com/medias/41555-01.jpg",
+     "page_url": "https://gcc.luluhypermarket.com/en-ae/al-kabeer-cheese-samosa-240g/p/41555",
+     "title": "Al Kabeer Cheese Samosa 240g",
+     "page_title": "Al Kabeer Cheese Samosa 240g | Lulu UAE",
+     "domain": "gcc.luluhypermarket.com",
+     "width": 1200,
+     "height": 1200,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1200,
+       1200
+      ],
+      "shape": "box",
+      "label_text": "AL KABEER|CHEESE SAMOSA|240G",
+      "accent_color": "#f9a825",
+      "body_color": "#fff8e1"
+     },
+     "download": "ok",
+     "label": "wrong_variant",
+     "note": "Cheese sibling."
+    },
+    {
+     "id": "c3",
+     "provider": "serper",
+     "rank": 3,
+     "image_url": "https://cdn.mafrservices.com/sys-master-root/h1/41592_main.jpg?im=Resize=1200",
+     "page_url": "https://www.carrefouruae.com/mafuae/en/al-kabeer-punjabi-samosa-900g/p/41592",
+     "title": "Al Kabeer Punjabi Samosa 900g",
+     "page_title": "Buy Al Kabeer Punjabi Samosa 900g Online - Shop on Carrefour UAE",
+     "domain": "carrefouruae.com",
+     "width": 1200,
+     "height": 1200,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1200,
+       1200
+      ],
+      "shape": "box",
+      "label_text": "AL KABEER|PUNJABI SAMOSA|900G",
+      "accent_color": "#6a1b9a",
+      "body_color": "#fff8e1"
+     },
+     "download": "ok",
+     "label": "wrong_variant",
+     "note": "Another line and size."
+    }
+   ]
+  },
+  {
+   "id": "real-06-cal-garden-w-meat-tuna-s-f-oil-185gm",
+   "stratum": "canned_tuna",
+   "named_case": null,
+   "named_case_title": null,
+   "name_en": "CAL GARDEN W/MEAT TUNA S/F OIL 185GM",
+   "name_ar": "",
+   "brand": "CALIFORNIA GARDEN",
+   "brand_ar": "",
+   "barcode": "",
+   "category": "",
+   "size": "",
+   "no_correct_candidate": false,
+   "expected_v2": "correct_pick",
+   "patterns": [
+    "abbreviated"
+   ],
+   "notes": "W/MEAT and S/F are the sheet's abbreviations.",
+   "candidates": [
+    {
+     "id": "c1",
+     "provider": "serper",
+     "rank": 2,
+     "image_url": "https://gcc.luluhypermarket.com/medias/41629-01.jpg",
+     "page_url": "https://gcc.luluhypermarket.com/en-ae/california-garden-white-meat-tuna-in-sunflower-oil-185g/p/41629",
+     "title": "California Garden White Meat Tuna in Sunflower Oil 185g",
+     "page_title": "California Garden White Meat Tuna in Sunflower Oil 185g | Lulu UAE",
+     "domain": "gcc.luluhypermarket.com",
+     "width": 1200,
+     "height": 1200,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1200,
+       1200
+      ],
+      "shape": "can",
+      "label_text": "CALIFORNIA GARDEN|WHITE MEAT TUNA|SUNFLOWER OIL|185G",
+      "accent_color": "#c62828",
+      "body_color": "#ffffff"
+     },
+     "download": "ok",
+     "label": "correct_exact",
+     "note": "The exact can."
+    },
+    {
+     "id": "c2",
+     "provider": "serper",
+     "rank": 1,
+     "image_url": "https://cdn.mafrservices.com/sys-master-root/h1/41666_main.jpg?im=Resize=1200",
+     "page_url": "https://www.carrefouruae.com/mafuae/en/california-garden-light-meat-tuna-in-sunflower-oil-185g/p/41666",
+     "title": "California Garden Light Meat Tuna in Sunflower Oil 185g",
+     "page_title": "Buy California Garden Light Meat Tuna in Sunflower Oil 185g Online - Shop on Carrefour UAE",
+     "domain": "carrefouruae.com",
+     "width": 1200,
+     "height": 1200,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1200,
+       1200
+      ],
+      "shape": "can",
+      "label_text": "CALIFORNIA GARDEN|LIGHT MEAT TUNA|SUNFLOWER OIL|185G",
+      "accent_color": "#1565c0",
+      "body_color": "#ffffff"
+     },
+     "download": "ok",
+     "label": "wrong_variant",
+     "note": "Light meat sibling."
+    },
+    {
+     "id": "c3",
+     "provider": "serper",
+     "rank": 3,
+     "image_url": "https://m.media-amazon.com/images/I/741703L._AC_SL1500_.jpg",
+     "page_url": "https://www.amazon.ae/california-garden-white-meat-tuna-in-olive-oil-185-g/dp/B041703",
+     "title": "California Garden White Meat Tuna in Olive Oil 185 g",
+     "page_title": "California Garden White Meat Tuna in Olive Oil 185 g : Amazon.ae: Grocery",
+     "domain": "amazon.ae",
+     "width": 1500,
+     "height": 1500,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1500,
+       1500
+      ],
+      "shape": "can",
+      "label_text": "CALIFORNIA GARDEN|WHITE MEAT TUNA|OLIVE OIL|185G",
+      "accent_color": "#33691e",
+      "body_color": "#ffffff"
+     },
+     "download": "ok",
+     "label": "wrong_variant",
+     "note": "Olive oil sibling."
+    }
+   ]
+  },
+  {
+   "id": "real-07-sup-t-l-meat-tuna-brine-3x170gm",
+   "stratum": "canned_tuna",
+   "named_case": null,
+   "named_case_title": null,
+   "name_en": "SUP/T L/MEAT TUNA BRINE 3X170GM",
+   "name_ar": "",
+   "brand": "SUP/T",
+   "brand_ar": "",
+   "barcode": "",
+   "category": "",
+   "size": "",
+   "no_correct_candidate": false,
+   "expected_v2": "no_wrong_pick",
+   "patterns": [
+    "abbreviated",
+    "near_duplicate",
+    "multipack"
+   ],
+   "notes": "The sheet's brand cell is an abbreviation no listing writes; the stores write 'Super Tasty'.",
+   "candidates": [
+    {
+     "id": "c1",
+     "provider": "serper",
+     "rank": 1,
+     "image_url": "https://cdn.mafrservices.com/sys-master-root/h1/41740_main.jpg?im=Resize=1200",
+     "page_url": "https://www.carrefouruae.com/mafuae/en/super-tasty-light-meat-tuna-in-brine-3-x-170g/p/41740",
+     "title": "Super Tasty Light Meat Tuna in Brine 3 x 170g",
+     "page_title": "Buy Super Tasty Light Meat Tuna in Brine 3 x 170g Online - Shop on Carrefour UAE",
+     "domain": "carrefouruae.com",
+     "width": 1200,
+     "height": 1200,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1200,
+       1200
+      ],
+      "shape": "box",
+      "label_text": "SUPER TASTY|LIGHT MEAT TUNA|BRINE|3X170G",
+      "accent_color": "#0277bd",
+      "body_color": "#ffffff"
+     },
+     "download": "ok",
+     "label": "correct_exact",
+     "note": "The 3-can pack."
+    },
+    {
+     "id": "c2",
+     "provider": "serper",
+     "rank": 2,
+     "image_url": "https://gcc.luluhypermarket.com/medias/41777-01.jpg",
+     "page_url": "https://gcc.luluhypermarket.com/en-ae/super-tasty-light-meat-tuna-in-brine-170g/p/41777",
+     "title": "Super Tasty Light Meat Tuna in Brine 170g",
+     "page_title": "Super Tasty Light Meat Tuna in Brine 170g | Lulu UAE",
+     "domain": "gcc.luluhypermarket.com",
+     "width": 1200,
+     "height": 1200,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1200,
+       1200
+      ],
+      "shape": "can",
+      "label_text": "SUPER TASTY|LIGHT MEAT TUNA|BRINE|170G",
+      "accent_color": "#0277bd",
+      "body_color": "#ffffff"
+     },
+     "download": "ok",
+     "label": "wrong_pack",
+     "note": "One can of the same tuna."
+    },
+    {
+     "id": "c3",
+     "provider": "serper",
+     "rank": 3,
+     "image_url": "https://www.sharjahcoop.ae/media/catalog/product/41814.jpg",
+     "page_url": "https://www.sharjahcoop.ae/en/product/super-tasty-light-meat-tuna-brine-3x170gm-41814",
+     "title": "Super Tasty Light Meat Tuna Brine 3x170gm",
+     "page_title": "Super Tasty Light Meat Tuna Brine 3x170gm - Sharjah Coop",
+     "domain": "sharjahcoop.ae",
+     "width": 1200,
+     "height": 1200,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1200,
+       1200
+      ],
+      "shape": "box",
+      "label_text": "SUPER TASTY|LIGHT MEAT TUNA|BRINE|3X170G",
+      "accent_color": "#0277bd",
+      "body_color": "#ffffff",
+      "quality": 82
+     },
+     "download": "ok",
+     "label": "correct_exact",
+     "note": "Sharjah Coop copy of Carrefour's packshot.",
+     "seed_of": "c1"
+    }
+   ]
+  },
+  {
+   "id": "real-08-virginia-w-meat-tuna-in-brine-170gm",
+   "stratum": "canned_tuna",
+   "named_case": null,
+   "named_case_title": null,
+   "name_en": "VIRGINIA W/MEAT TUNA IN BRINE 170GM",
+   "name_ar": "",
+   "brand": "VIRGINIA",
+   "brand_ar": "",
+   "barcode": "",
+   "category": "",
+   "size": "",
+   "no_correct_candidate": false,
+   "expected_v2": "no_wrong_pick",
+   "patterns": [
+    "brand_page_wrong_pack",
+    "non_white_backdrop"
+   ],
+   "notes": "Unmapped brand: the right picture can be pre-checked, never auto-published.",
+   "candidates": [
+    {
+     "id": "c1",
+     "provider": "serper",
+     "rank": 1,
+     "image_url": "https://m.media-amazon.com/images/I/741851L._AC_SL1500_.jpg",
+     "page_url": "https://www.amazon.ae/virginia-white-meat-tuna-in-brine-170g/dp/B041851",
+     "title": "Virginia White Meat Tuna in Brine 170g",
+     "page_title": "Virginia White Meat Tuna in Brine 170g : Amazon.ae: Grocery",
+     "domain": "amazon.ae",
+     "width": 1500,
+     "height": 1500,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1500,
+       1500
+      ],
+      "shape": "can",
+      "label_text": "GOLDEN PRIZE|WHITE MEAT TUNA|BRINE|170G",
+      "accent_color": "#f57f17",
+      "body_color": "#ffffff"
+     },
+     "download": "ok",
+     "label": "wrong_brand",
+     "note": "Amazon's listing names Virginia; its picture is a Golden Prize can."
+    },
+    {
+     "id": "c2",
+     "provider": "serper",
+     "rank": 2,
+     "image_url": "https://gcc.luluhypermarket.com/medias/41888-01.jpg",
+     "page_url": "https://gcc.luluhypermarket.com/en-ae/virginia-white-meat-tuna-in-brine-170g/p/41888",
+     "title": "Virginia White Meat Tuna In Brine 170g",
+     "page_title": "Virginia White Meat Tuna In Brine 170g | Lulu UAE",
+     "domain": "gcc.luluhypermarket.com",
+     "width": 1200,
+     "height": 1200,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_backdrop",
+      "size": [
+       1200,
+       1200
+      ],
+      "shape": "can",
+      "label_text": "VIRGINIA|WHITE MEAT TUNA|BRINE|170G",
+      "accent_color": "#1a237e",
+      "body_color": "#ffffff",
+      "background_color": "#e9e4d8"
+     },
+     "download": "ok",
+     "label": "correct_exact",
+     "note": "The right can on a beige sweep."
+    },
+    {
+     "id": "c3",
+     "provider": "serper",
+     "rank": 3,
+     "image_url": "https://cdn.mafrservices.com/sys-master-root/h1/41925_main.jpg?im=Resize=1200",
+     "page_url": "https://www.carrefouruae.com/mafuae/en/virginia-light-meat-tuna-in-brine-170g/p/41925",
+     "title": "Virginia Light Meat Tuna in Brine 170g",
+     "page_title": "Buy Virginia Light Meat Tuna in Brine 170g Online - Shop on Carrefour UAE",
+     "domain": "carrefouruae.com",
+     "width": 1200,
+     "height": 1200,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1200,
+       1200
+      ],
+      "shape": "can",
+      "label_text": "VIRGINIA|LIGHT MEAT TUNA|BRINE|170G",
+      "accent_color": "#1a237e",
+      "body_color": "#ffffff"
+     },
+     "download": "ok",
+     "label": "wrong_variant",
+     "note": "Light meat sibling."
+    }
+   ]
+  },
+  {
+   "id": "real-09-al-alali-chunk-light-tuna-spring-water-170gm",
+   "stratum": "canned_tuna",
+   "named_case": null,
+   "named_case_title": null,
+   "name_en": "AL ALALI CHUNK LIGHT TUNA SPRING WATER 170GM",
+   "name_ar": "",
+   "brand": "AL ALALI",
+   "brand_ar": "",
+   "barcode": "",
+   "category": "",
+   "size": "",
+   "no_correct_candidate": false,
+   "expected_v2": "correct_pick",
+   "patterns": [],
+   "notes": "Mapped brand (Alalali is a synonym).",
+   "candidates": [
+    {
+     "id": "c1",
+     "provider": "serper",
+     "rank": 1,
+     "image_url": "https://cdn.mafrservices.com/sys-master-root/h1/41962_main.jpg?im=Resize=1200",
+     "page_url": "https://www.carrefouruae.com/mafuae/en/al-alali-chunk-light-tuna-in-spring-water-170g/p/41962",
+     "title": "Al Alali Chunk Light Tuna in Spring Water 170g",
+     "page_title": "Buy Al Alali Chunk Light Tuna in Spring Water 170g Online - Shop on Carrefour UAE",
+     "domain": "carrefouruae.com",
+     "width": 1200,
+     "height": 1200,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1200,
+       1200
+      ],
+      "shape": "can",
+      "label_text": "AL ALALI|CHUNK LIGHT TUNA|SPRING WATER|170G",
+      "accent_color": "#00838f",
+      "body_color": "#ffffff"
+     },
+     "download": "ok",
+     "label": "correct_exact",
+     "note": "The exact can."
+    },
+    {
+     "id": "c2",
+     "provider": "serper",
+     "rank": 2,
+     "image_url": "https://f.nooncdn.com/p/pnsku/N41999V/45/_/1700000000/41999_1.jpg",
+     "page_url": "https://www.noon.com/uae-en/al-alali-fancy-meat-tuna-in-spring-water-170g/N41999V/p/",
+     "title": "Al Alali Fancy Meat Tuna in Spring Water 170g",
+     "page_title": "Shop Al Alali Fancy Meat Tuna in Spring Water 170g online in Dubai | noon",
+     "domain": "noon.com",
+     "width": 1200,
+     "height": 1200,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1200,
+       1200
+      ],
+      "shape": "can",
+      "label_text": "AL ALALI|FANCY MEAT TUNA|SPRING WATER|170G",
+      "accent_color": "#00838f",
+      "body_color": "#ffffff"
+     },
+     "download": "ok",
+     "label": "wrong_variant",
+     "note": "Fancy meat sibling."
+    },
+    {
+     "id": "c3",
+     "provider": "serper",
+     "rank": 3,
+     "image_url": "https://gcc.luluhypermarket.com/medias/42036-01.jpg",
+     "page_url": "https://gcc.luluhypermarket.com/en-ae/al-alali-chunk-light-tuna-spring-water-85g/p/42036",
+     "title": "Al Alali Chunk Light Tuna Spring Water 85g",
+     "page_title": "Al Alali Chunk Light Tuna Spring Water 85g | Lulu UAE",
+     "domain": "gcc.luluhypermarket.com",
+     "width": 1200,
+     "height": 1200,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1200,
+       1200
+      ],
+      "shape": "can",
+      "label_text": "AL ALALI|CHUNK LIGHT TUNA|SPRING WATER|85G",
+      "accent_color": "#00838f",
+      "body_color": "#ffffff"
+     },
+     "download": "ok",
+     "label": "wrong_size",
+     "note": "The 85 g can."
+    }
+   ]
+  },
+  {
+   "id": "real-10-golden-prize-l-meat-tuna-chilli-185gm",
+   "stratum": "canned_tuna",
+   "named_case": null,
+   "named_case_title": null,
+   "name_en": "GOLDEN PRIZE L/MEAT TUNA CHILLI 185GM",
+   "name_ar": "",
+   "brand": "GOLDEN PRIZE",
+   "brand_ar": "",
+   "barcode": "",
+   "category": "",
+   "size": "",
+   "no_correct_candidate": false,
+   "expected_v2": "correct_pick",
+   "patterns": [
+    "multipack"
+   ],
+   "notes": "The store's own main picture is the wrong pack.",
+   "candidates": [
+    {
+     "id": "c1",
+     "provider": "serper",
+     "rank": 1,
+     "image_url": "https://cdn.mafrservices.com/sys-master-root/h1/42073_main.jpg?im=Resize=1200",
+     "page_url": "https://www.carrefouruae.com/mafuae/en/golden-prize-light-meat-tuna-with-chilli-185g/p/42073",
+     "title": "Golden Prize Light Meat Tuna with Chilli 185g",
+     "page_title": "Buy Golden Prize Light Meat Tuna with Chilli 185g Online - Shop on Carrefour UAE",
+     "domain": "carrefouruae.com",
+     "width": 1200,
+     "height": 1200,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1200,
+       1200
+      ],
+      "shape": "box",
+      "label_text": "GOLDEN PRIZE|LIGHT MEAT TUNA CHILLI|2X185G",
+      "accent_color": "#f57f17",
+      "body_color": "#ffffff"
+     },
+     "download": "ok",
+     "label": "wrong_pack",
+     "note": "Carrefour's main picture is the twin pack while the title says 185g."
+    },
+    {
+     "id": "c2",
+     "provider": "serper",
+     "rank": 2,
+     "image_url": "https://gcc.luluhypermarket.com/medias/42110-01.jpg",
+     "page_url": "https://gcc.luluhypermarket.com/en-ae/golden-prize-light-meat-tuna-with-chilli-185g/p/42110",
+     "title": "Golden Prize Light Meat Tuna With Chilli 185g",
+     "page_title": "Golden Prize Light Meat Tuna With Chilli 185g | Lulu UAE",
+     "domain": "gcc.luluhypermarket.com",
+     "width": 1200,
+     "height": 1200,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1200,
+       1200
+      ],
+      "shape": "can",
+      "label_text": "GOLDEN PRIZE|LIGHT MEAT TUNA CHILLI|185G",
+      "accent_color": "#f57f17",
+      "body_color": "#ffffff"
+     },
+     "download": "ok",
+     "label": "correct_exact",
+     "note": "The single can."
+    },
+    {
+     "id": "c3",
+     "provider": "serper",
+     "rank": 3,
+     "image_url": "https://m.media-amazon.com/images/I/742147L._AC_SL1500_.jpg",
+     "page_url": "https://www.amazon.ae/golden-prize-light-meat-tuna-in-vegetable-oil-185g/dp/B042147",
+     "title": "Golden Prize Light Meat Tuna in Vegetable Oil 185g",
+     "page_title": "Golden Prize Light Meat Tuna in Vegetable Oil 185g : Amazon.ae: Grocery",
+     "domain": "amazon.ae",
+     "width": 1500,
+     "height": 1500,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1500,
+       1500
+      ],
+      "shape": "can",
+      "label_text": "GOLDEN PRIZE|LIGHT MEAT TUNA|VEGETABLE OIL|185G",
+      "accent_color": "#f57f17",
+      "body_color": "#ffffff"
+     },
+     "download": "ok",
+     "label": "wrong_variant",
+     "note": "Vegetable oil sibling."
+    }
+   ]
+  },
+  {
+   "id": "real-11-shan-tikka-bbq-mix-50gm",
+   "stratum": "spices",
+   "named_case": null,
+   "named_case_title": null,
+   "name_en": "SHAN TIKKA BBQ MIX 50GM",
+   "name_ar": "",
+   "brand": "SHAN",
+   "brand_ar": "",
+   "barcode": "",
+   "category": "",
+   "size": "",
+   "no_correct_candidate": false,
+   "expected_v2": "correct_pick",
+   "patterns": [
+    "brand_page_wrong_pack"
+   ],
+   "notes": "Mapped brand; the first listing shows a competitor's box.",
+   "candidates": [
+    {
+     "id": "c1",
+     "provider": "serper",
+     "rank": 1,
+     "image_url": "https://cdn.tradeling.com/products/42184/main.jpg",
+     "page_url": "https://www.tradeling.com/en/product/shan-tikka-bbq-mix-50g-42184",
+     "title": "Shan Tikka BBQ Mix 50g",
+     "page_title": "Shan Tikka BBQ Mix 50g - Tradeling",
+     "domain": "tradeling.com",
+     "width": 1000,
+     "height": 1000,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1000,
+       1000
+      ],
+      "shape": "box",
+      "label_text": "NATIONAL|TIKKA BBQ MASALA|50G",
+      "accent_color": "#b71c1c",
+      "body_color": "#ffcc80"
+     },
+     "download": "ok",
+     "label": "wrong_brand",
+     "note": "Tradeling's page names Shan; its picture is a National box."
+    },
+    {
+     "id": "c2",
+     "provider": "serper",
+     "rank": 2,
+     "image_url": "https://m.media-amazon.com/images/I/742221L._AC_SL1500_.jpg",
+     "page_url": "https://www.amazon.ae/shan-tikka-seasoning-mix-for-bbq-50g/dp/B042221",
+     "title": "Shan Tikka Seasoning Mix for BBQ 50g",
+     "page_title": "Shan Tikka Seasoning Mix for BBQ 50g : Amazon.ae: Grocery",
+     "domain": "amazon.ae",
+     "width": 1500,
+     "height": 1500,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1500,
+       1500
+      ],
+      "shape": "box",
+      "label_text": "SHAN|TIKKA BBQ MIX|50G",
+      "accent_color": "#e65100",
+      "body_color": "#fff3e0"
+     },
+     "download": "ok",
+     "label": "correct_exact",
+     "note": "The exact box."
+    },
+    {
+     "id": "c3",
+     "provider": "serper",
+     "rank": 3,
+     "image_url": "https://gcc.luluhypermarket.com/medias/42258-01.jpg",
+     "page_url": "https://gcc.luluhypermarket.com/en-ae/shan-tandoori-masala-bbq-mix-50g/p/42258",
+     "title": "Shan Tandoori Masala BBQ Mix 50g",
+     "page_title": "Shan Tandoori Masala BBQ Mix 50g | Lulu UAE",
+     "domain": "gcc.luluhypermarket.com",
+     "width": 1200,
+     "height": 1200,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1200,
+       1200
+      ],
+      "shape": "box",
+      "label_text": "SHAN|TANDOORI BBQ MIX|50G",
+      "accent_color": "#c62828",
+      "body_color": "#fff3e0"
+     },
+     "download": "ok",
+     "label": "wrong_variant",
+     "note": "Tandoori sibling."
+    }
+   ]
+  },
+  {
+   "id": "real-12-eastern-sambar-powder-160g",
+   "stratum": "spices",
+   "named_case": null,
+   "named_case_title": null,
+   "name_en": "EASTERN SAMBAR POWDER 160G",
+   "name_ar": "",
+   "brand": "EASTERN",
+   "brand_ar": "",
+   "barcode": "",
+   "category": "",
+   "size": "",
+   "no_correct_candidate": false,
+   "expected_v2": "no_wrong_pick",
+   "patterns": [
+    "size_not_on_front"
+   ],
+   "notes": "A size not printed on the front: the model cannot confirm it.",
+   "candidates": [
+    {
+     "id": "c1",
+     "provider": "serper",
+     "rank": 1,
+     "image_url": "https://gcc.luluhypermarket.com/medias/42295-01.jpg",
+     "page_url": "https://gcc.luluhypermarket.com/en-ae/eastern-sambar-powder-160g/p/42295",
+     "title": "Eastern Sambar Powder 160g",
+     "page_title": "Eastern Sambar Powder 160g | Lulu UAE",
+     "domain": "gcc.luluhypermarket.com",
+     "width": 1200,
+     "height": 1200,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1200,
+       1200
+      ],
+      "shape": "pouch",
+      "label_text": "EASTERN|SAMBAR POWDER",
+      "accent_color": "#ad1457",
+      "body_color": "#fff8e1"
+     },
+     "download": "ok",
+     "label": "correct_exact",
+     "note": "The right pouch; the weight is on the back."
+    },
+    {
+     "id": "c2",
+     "provider": "serper",
+     "rank": 2,
+     "image_url": "https://cdn.mafrservices.com/sys-master-root/h1/42332_main.jpg?im=Resize=1200",
+     "page_url": "https://www.carrefouruae.com/mafuae/en/eastern-chilli-powder-160g/p/42332",
+     "title": "Eastern Chilli Powder 160g",
+     "page_title": "Buy Eastern Chilli Powder 160g Online - Shop on Carrefour UAE",
+     "domain": "carrefouruae.com",
+     "width": 1200,
+     "height": 1200,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1200,
+       1200
+      ],
+      "shape": "pouch",
+      "label_text": "EASTERN|CHILLI POWDER|160G",
+      "accent_color": "#c62828",
+      "body_color": "#fff8e1"
+     },
+     "download": "ok",
+     "label": "wrong_variant",
+     "note": "Chilli sibling."
+    }
+   ]
+  },
+  {
+   "id": "real-13-kabani-chicken-masala-160-gm",
+   "stratum": "spices",
+   "named_case": null,
+   "named_case_title": null,
+   "name_en": "KABANI CHICKEN MASALA 160 GM",
+   "name_ar": "",
+   "brand": "KABANI",
+   "brand_ar": "",
+   "barcode": "",
+   "category": "",
+   "size": "",
+   "no_correct_candidate": true,
+   "expected_v2": "no_pick",
+   "patterns": [
+    "social"
+   ],
+   "notes": "Only social posts show this pouch.",
+   "candidates": [
+    {
+     "id": "c1",
+     "provider": "serper",
+     "rank": 1,
+     "image_url": "https://scontent.xx.fbcdn.net/v/t39.30808-6/42369_n.jpg",
+     "page_url": "https://www.facebook.com/photo/?fbid=42369",
+     "title": "Kabani Chicken Masala - now 160 gm",
+     "page_title": "Kabani Chicken Masala - now 160 gm | Facebook",
+     "domain": "facebook.com",
+     "width": 1200,
+     "height": 900,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "lifestyle_clutter",
+      "size": [
+       1200,
+       900
+      ],
+      "shape": "pouch",
+      "label_text": "KABANI|CHICKEN MASALA|160G",
+      "accent_color": "#2e7d32",
+      "body_color": "#ffeb3b"
+     },
+     "download": "ok",
+     "label": "not_packshot",
+     "note": "A shop shelf photo posted by the brand."
+    },
+    {
+     "id": "c2",
+     "provider": "serper",
+     "rank": 2,
+     "image_url": "https://scontent.cdninstagram.com/v/t51.29350-15/42406_n.jpg",
+     "page_url": "https://www.instagram.com/p/C42406x/",
+     "title": "kabani_foods chicken masala",
+     "page_title": "kabani_foods chicken masala on Instagram",
+     "domain": "instagram.com",
+     "width": 1200,
+     "height": 630,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "banner",
+      "size": [
+       1200,
+       630
+      ],
+      "label_text": "KABANI|CHICKEN MASALA",
+      "accent_color": "#2e7d32",
+      "body_color": "#2e7d32",
+      "count": 3,
+      "headline": "KABANI MASALAS"
+     },
+     "download": "ok",
+     "label": "not_packshot",
+     "note": "A promo banner of the range."
+    }
+   ]
+  },
+  {
+   "id": "real-14-nellara-fish-masala-165gm",
+   "stratum": "spices",
+   "named_case": null,
+   "named_case_title": null,
+   "name_en": "NELLARA FISH MASALA 165GM",
+   "name_ar": "",
+   "brand": "NELLARA",
+   "brand_ar": "",
+   "barcode": "",
+   "category": "",
+   "size": "",
+   "no_correct_candidate": false,
+   "expected_v2": "correct_pick",
+   "patterns": [
+    "non_white_backdrop"
+   ],
+   "notes": "The official site's packshot is on a coloured backdrop.",
+   "candidates": [
+    {
+     "id": "c1",
+     "provider": "serper",
+     "rank": 1,
+     "image_url": "https://www.nellara.com/images/products/42443.png",
+     "page_url": "https://www.nellara.com/products/nellara-fish-masala-165g",
+     "title": "Nellara Fish Masala 165g",
+     "page_title": "Nellara Fish Masala 165g | Nellara",
+     "domain": "nellara.com",
+     "width": 1000,
+     "height": 1000,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_backdrop",
+      "size": [
+       1000,
+       1000
+      ],
+      "shape": "pouch",
+      "label_text": "NELLARA|FISH MASALA|165G",
+      "accent_color": "#bf360c",
+      "body_color": "#ffecb3",
+      "background_color": "#f5efe6"
+     },
+     "download": "ok",
+     "label": "correct_exact",
+     "note": "The brand's own site, on a cream backdrop."
+    },
+    {
+     "id": "c2",
+     "provider": "serper",
+     "rank": 2,
+     "image_url": "https://gcc.luluhypermarket.com/medias/42480-01.jpg",
+     "page_url": "https://gcc.luluhypermarket.com/en-ae/nellara-meat-masala-165g/p/42480",
+     "title": "Nellara Meat Masala 165g",
+     "page_title": "Nellara Meat Masala 165g | Lulu UAE",
+     "domain": "gcc.luluhypermarket.com",
+     "width": 1200,
+     "height": 1200,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1200,
+       1200
+      ],
+      "shape": "pouch",
+      "label_text": "NELLARA|MEAT MASALA|165G",
+      "accent_color": "#4e342e",
+      "body_color": "#ffecb3"
+     },
+     "download": "ok",
+     "label": "wrong_variant",
+     "note": "Meat masala sibling."
+    }
+   ]
+  },
+  {
+   "id": "real-15-mdh-kitchen-king-masala-100g",
+   "stratum": "spices",
+   "named_case": null,
+   "named_case_title": null,
+   "name_en": "MDH KITCHEN KING MASALA 100G",
+   "name_ar": "",
+   "brand": "MDH",
+   "brand_ar": "",
+   "barcode": "",
+   "category": "",
+   "size": "",
+   "no_correct_candidate": false,
+   "expected_v2": "correct_pick",
+   "patterns": [
+    "near_duplicate",
+    "foreign_store"
+   ],
+   "notes": "Mapped brand; the same picture on amazon.ae and amazon.in.",
+   "candidates": [
+    {
+     "id": "c1",
+     "provider": "serper",
+     "rank": 1,
+     "image_url": "https://m.media-amazon.com/images/I/742517L._AC_SL1500_.jpg",
+     "page_url": "https://www.amazon.ae/mdh-kitchen-king-masala-100g/dp/B042517",
+     "title": "MDH Kitchen King Masala 100g",
+     "page_title": "MDH Kitchen King Masala 100g : Amazon.ae: Grocery",
+     "domain": "amazon.ae",
+     "width": 1500,
+     "height": 1500,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1500,
+       1500
+      ],
+      "shape": "box",
+      "label_text": "MDH|KITCHEN KING|100G",
+      "accent_color": "#d50000",
+      "body_color": "#fff176"
+     },
+     "download": "ok",
+     "label": "correct_exact",
+     "note": "The exact box."
+    },
+    {
+     "id": "c2",
+     "provider": "serper",
+     "rank": 2,
+     "image_url": "https://m.media-amazon.com/images/I/842554L._SX679_.jpg",
+     "page_url": "https://www.amazon.in/mdh-kitchen-king-masala-100-g-carton/dp/B042554",
+     "title": "MDH Kitchen King Masala, 100 g Carton",
+     "page_title": "MDH Kitchen King Masala, 100 g Carton : Amazon.in: Grocery & Gourmet Foods",
+     "domain": "amazon.in",
+     "width": 1500,
+     "height": 1500,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1500,
+       1500
+      ],
+      "shape": "box",
+      "label_text": "MDH|KITCHEN KING|100G",
+      "accent_color": "#d50000",
+      "body_color": "#fff176",
+      "quality": 72
+     },
+     "download": "ok",
+     "label": "correct_exact",
+     "note": "amazon.in copy of the same packshot.",
+     "seed_of": "c1"
+    },
+    {
+     "id": "c3",
+     "provider": "serper",
+     "rank": 3,
+     "image_url": "https://gcc.luluhypermarket.com/medias/42591-01.jpg",
+     "page_url": "https://gcc.luluhypermarket.com/en-ae/mdh-kitchen-king-masala-500g/p/42591",
+     "title": "MDH Kitchen King Masala 500g",
+     "page_title": "MDH Kitchen King Masala 500g | Lulu UAE",
+     "domain": "gcc.luluhypermarket.com",
+     "width": 1200,
+     "height": 1200,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1200,
+       1200
+      ],
+      "shape": "box",
+      "label_text": "MDH|KITCHEN KING|500G",
+      "accent_color": "#d50000",
+      "body_color": "#fff176"
+     },
+     "download": "ok",
+     "label": "wrong_size",
+     "note": "The 500 g box."
+    }
+   ]
+  },
+  {
+   "id": "real-16-zwan-chkn-luncheon-meat-w-olives-340gm",
+   "stratum": "luncheon_meat",
+   "named_case": null,
+   "named_case_title": null,
+   "name_en": "ZWAN CHKN LUNCHEON MEAT W/OLIVES 340GM",
+   "name_ar": "",
+   "brand": "ZWAN",
+   "brand_ar": "",
+   "barcode": "",
+   "category": "",
+   "size": "",
+   "no_correct_candidate": false,
+   "expected_v2": "correct_pick",
+   "patterns": [
+    "abbreviated"
+   ],
+   "notes": "CHKN and W/ are the sheet's abbreviations.",
+   "candidates": [
+    {
+     "id": "c1",
+     "provider": "serper",
+     "rank": 2,
+     "image_url": "https://cdn.mafrservices.com/sys-master-root/h1/42628_main.jpg?im=Resize=1200",
+     "page_url": "https://www.carrefouruae.com/mafuae/en/zwan-chicken-luncheon-meat-with-olives-340g/p/42628",
+     "title": "Zwan Chicken Luncheon Meat with Olives 340g",
+     "page_title": "Buy Zwan Chicken Luncheon Meat with Olives 340g Online - Shop on Carrefour UAE",
+     "domain": "carrefouruae.com",
+     "width": 1200,
+     "height": 1200,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1200,
+       1200
+      ],
+      "shape": "can",
+      "label_text": "ZWAN|CHICKEN LUNCHEON|WITH OLIVES|340G",
+      "accent_color": "#2e7d32",
+      "body_color": "#ffffff"
+     },
+     "download": "ok",
+     "label": "correct_exact",
+     "note": "The exact can."
+    },
+    {
+     "id": "c2",
+     "provider": "serper",
+     "rank": 1,
+     "image_url": "https://gcc.luluhypermarket.com/medias/42665-01.jpg",
+     "page_url": "https://gcc.luluhypermarket.com/en-ae/zwan-chicken-luncheon-meat-340g/p/42665",
+     "title": "Zwan Chicken Luncheon Meat 340g",
+     "page_title": "Zwan Chicken Luncheon Meat 340g | Lulu UAE",
+     "domain": "gcc.luluhypermarket.com",
+     "width": 1200,
+     "height": 1200,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1200,
+       1200
+      ],
+      "shape": "can",
+      "label_text": "ZWAN|CHICKEN LUNCHEON|340G",
+      "accent_color": "#c62828",
+      "body_color": "#ffffff"
+     },
+     "download": "ok",
+     "label": "wrong_variant",
+     "note": "Plain sibling."
+    },
+    {
+     "id": "c3",
+     "provider": "serper",
+     "rank": 3,
+     "image_url": "https://m.media-amazon.com/images/I/742702L._AC_SL1500_.jpg",
+     "page_url": "https://www.amazon.ae/zwan-chicken-luncheon-meat-with-olives-200g/dp/B042702",
+     "title": "Zwan Chicken Luncheon Meat with Olives 200g",
+     "page_title": "Zwan Chicken Luncheon Meat with Olives 200g : Amazon.ae: Grocery",
+     "domain": "amazon.ae",
+     "width": 1500,
+     "height": 1500,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1500,
+       1500
+      ],
+      "shape": "can",
+      "label_text": "ZWAN|CHICKEN LUNCHEON|WITH OLIVES|200G",
+      "accent_color": "#2e7d32",
+      "body_color": "#ffffff"
+     },
+     "download": "ok",
+     "label": "wrong_size",
+     "note": "The 200 g can."
+    }
+   ]
+  },
+  {
+   "id": "real-17-americana-crispy-chkn-strips-750g",
+   "stratum": "frozen_meat",
+   "named_case": null,
+   "named_case_title": null,
+   "name_en": "AMERICANA CRISPY CHKN STRIPS 750G",
+   "name_ar": "",
+   "brand": "AMERICANA",
+   "brand_ar": "",
+   "barcode": "",
+   "category": "",
+   "size": "",
+   "no_correct_candidate": false,
+   "expected_v2": "correct_pick",
+   "patterns": [
+    "abbreviated"
+   ],
+   "notes": "Mapped brand.",
+   "candidates": [
+    {
+     "id": "c1",
+     "provider": "serper",
+     "rank": 1,
+     "image_url": "https://gcc.luluhypermarket.com/medias/42739-01.jpg",
+     "page_url": "https://gcc.luluhypermarket.com/en-ae/americana-crispy-chicken-strips-750g/p/42739",
+     "title": "Americana Crispy Chicken Strips 750g",
+     "page_title": "Americana Crispy Chicken Strips 750g | Lulu UAE",
+     "domain": "gcc.luluhypermarket.com",
+     "width": 1200,
+     "height": 1200,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1200,
+       1200
+      ],
+      "shape": "bag",
+      "label_text": "AMERICANA|CRISPY CHICKEN STRIPS|750G",
+      "accent_color": "#d32f2f",
+      "body_color": "#ffffff"
+     },
+     "download": "ok",
+     "label": "correct_exact",
+     "note": "The exact bag."
+    },
+    {
+     "id": "c2",
+     "provider": "serper",
+     "rank": 2,
+     "image_url": "https://cdn.mafrservices.com/sys-master-root/h1/42776_main.jpg?im=Resize=1200",
+     "page_url": "https://www.carrefouruae.com/mafuae/en/americana-spicy-chicken-strips-750g/p/42776",
+     "title": "Americana Spicy Chicken Strips 750g",
+     "page_title": "Buy Americana Spicy Chicken Strips 750g Online - Shop on Carrefour UAE",
+     "domain": "carrefouruae.com",
+     "width": 1200,
+     "height": 1200,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1200,
+       1200
+      ],
+      "shape": "bag",
+      "label_text": "AMERICANA|SPICY CHICKEN STRIPS|750G",
+      "accent_color": "#bf360c",
+      "body_color": "#ffffff"
+     },
+     "download": "ok",
+     "label": "wrong_variant",
+     "note": "Spicy sibling."
+    },
+    {
+     "id": "c3",
+     "provider": "serper",
+     "rank": 3,
+     "image_url": "https://f.nooncdn.com/p/pnsku/N42813V/45/_/1700000000/42813_1.jpg",
+     "page_url": "https://www.noon.com/uae-en/americana-chicken-nuggets-750g/N42813V/p/",
+     "title": "Americana Chicken Nuggets 750g",
+     "page_title": "Shop Americana Chicken Nuggets 750g online in Dubai | noon",
+     "domain": "noon.com",
+     "width": 1200,
+     "height": 1200,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1200,
+       1200
+      ],
+      "shape": "bag",
+      "label_text": "AMERICANA|CHICKEN NUGGETS|750G",
+      "accent_color": "#d32f2f",
+      "body_color": "#ffffff"
+     },
+     "download": "ok",
+     "label": "wrong_product",
+     "note": "Nuggets."
+    }
+   ]
+  },
+  {
+   "id": "real-18-sadia-chicken-franks-340g",
+   "stratum": "frozen_meat",
+   "named_case": null,
+   "named_case_title": null,
+   "name_en": "SADIA CHICKEN FRANKS 340G",
+   "name_ar": "",
+   "brand": "SADIA",
+   "brand_ar": "",
+   "barcode": "",
+   "category": "",
+   "size": "",
+   "no_correct_candidate": false,
+   "expected_v2": "correct_pick",
+   "patterns": [
+    "non_white_backdrop"
+   ],
+   "notes": "Unmapped brand; dark backdrop.",
+   "candidates": [
+    {
+     "id": "c1",
+     "provider": "serper",
+     "rank": 1,
+     "image_url": "https://m.media-amazon.com/images/I/742850L._AC_SL1500_.jpg",
+     "page_url": "https://www.amazon.ae/sadia-chicken-franks-340g/dp/B042850",
+     "title": "Sadia Chicken Franks 340g",
+     "page_title": "Sadia Chicken Franks 340g : Amazon.ae: Grocery",
+     "domain": "amazon.ae",
+     "width": 1500,
+     "height": 1500,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_backdrop",
+      "size": [
+       1500,
+       1500
+      ],
+      "shape": "box",
+      "label_text": "SADIA|CHICKEN FRANKS|340G",
+      "accent_color": "#c62828",
+      "body_color": "#ffffff",
+      "background_color": "#2b2b2b"
+     },
+     "download": "ok",
+     "label": "correct_exact",
+     "note": "The right pack on a dark studio backdrop."
+    },
+    {
+     "id": "c2",
+     "provider": "serper",
+     "rank": 2,
+     "image_url": "https://gcc.luluhypermarket.com/medias/42887-01.jpg",
+     "page_url": "https://gcc.luluhypermarket.com/en-ae/sadia-beef-franks-340g/p/42887",
+     "title": "Sadia Beef Franks 340g",
+     "page_title": "Sadia Beef Franks 340g | Lulu UAE",
+     "domain": "gcc.luluhypermarket.com",
+     "width": 1200,
+     "height": 1200,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1200,
+       1200
+      ],
+      "shape": "box",
+      "label_text": "SADIA|BEEF FRANKS|340G",
+      "accent_color": "#4e342e",
+      "body_color": "#ffffff"
+     },
+     "download": "ok",
+     "label": "wrong_variant",
+     "note": "Beef sibling."
+    }
+   ]
+  },
+  {
+   "id": "real-19-freshly-beef-burger-8s-448gm",
+   "stratum": "frozen_meat",
+   "named_case": null,
+   "named_case_title": null,
+   "name_en": "FRESHLY BEEF BURGER 8S 448GM",
+   "name_ar": "",
+   "brand": "FRESHLY",
+   "brand_ar": "",
+   "barcode": "",
+   "category": "",
+   "size": "",
+   "no_correct_candidate": false,
+   "expected_v2": "no_wrong_pick",
+   "patterns": [
+    "abbreviated",
+    "multipack"
+   ],
+   "notes": "'Freshly' is also a common word; '8S' is the sheet's piece count.",
+   "candidates": [
+    {
+     "id": "c1",
+     "provider": "serper",
+     "rank": 1,
+     "image_url": "https://cdn.mafrservices.com/sys-master-root/h1/42924_main.jpg?im=Resize=1200",
+     "page_url": "https://www.carrefouruae.com/mafuae/en/freshly-beef-burger-8-pieces-448g/p/42924",
+     "title": "Freshly Beef Burger 8 Pieces 448g",
+     "page_title": "Buy Freshly Beef Burger 8 Pieces 448g Online - Shop on Carrefour UAE",
+     "domain": "carrefouruae.com",
+     "width": 1200,
+     "height": 1200,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1200,
+       1200
+      ],
+      "shape": "box",
+      "label_text": "FRESHLY|BEEF BURGER|8 PCS 448G",
+      "accent_color": "#b71c1c",
+      "body_color": "#ffffff"
+     },
+     "download": "ok",
+     "label": "correct_exact",
+     "note": "The 8-piece box."
+    },
+    {
+     "id": "c2",
+     "provider": "serper",
+     "rank": 2,
+     "image_url": "https://gcc.luluhypermarket.com/medias/42961-01.jpg",
+     "page_url": "https://gcc.luluhypermarket.com/en-ae/freshly-chicken-burger-8-pieces-448g/p/42961",
+     "title": "Freshly Chicken Burger 8 Pieces 448g",
+     "page_title": "Freshly Chicken Burger 8 Pieces 448g | Lulu UAE",
+     "domain": "gcc.luluhypermarket.com",
+     "width": 1200,
+     "height": 1200,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1200,
+       1200
+      ],
+      "shape": "box",
+      "label_text": "FRESHLY|CHICKEN BURGER|8 PCS 448G",
+      "accent_color": "#f9a825",
+      "body_color": "#ffffff"
+     },
+     "download": "ok",
+     "label": "wrong_variant",
+     "note": "Chicken sibling."
+    },
+    {
+     "id": "c3",
+     "provider": "serper",
+     "rank": 3,
+     "image_url": "https://f.nooncdn.com/p/pnsku/N42998V/45/_/1700000000/42998_1.jpg",
+     "page_url": "https://www.noon.com/uae-en/freshly-beef-burger-4-pieces-224g/N42998V/p/",
+     "title": "Freshly Beef Burger 4 Pieces 224g",
+     "page_title": "Shop Freshly Beef Burger 4 Pieces 224g online in Dubai | noon",
+     "domain": "noon.com",
+     "width": 1200,
+     "height": 1200,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1200,
+       1200
+      ],
+      "shape": "box",
+      "label_text": "FRESHLY|BEEF BURGER|4 PCS 224G",
+      "accent_color": "#b71c1c",
+      "body_color": "#ffffff"
+     },
+     "download": "ok",
+     "label": "wrong_pack",
+     "note": "The 4-piece box."
+    }
+   ]
+  },
+  {
+   "id": "real-20-fine-facial-tissue-soft-5x150pcs",
+   "stratum": "tissues",
+   "named_case": null,
+   "named_case_title": null,
+   "name_en": "FINE FACIAL TISSUE SOFT 5X150PCS",
+   "name_ar": "",
+   "brand": "FINE",
+   "brand_ar": "",
+   "barcode": "",
+   "category": "",
+   "size": "",
+   "no_correct_candidate": false,
+   "expected_v2": "no_wrong_pick",
+   "patterns": [
+    "multipack"
+   ],
+   "notes": "A common-word brand and a count, not a weight.",
+   "candidates": [
+    {
+     "id": "c1",
+     "provider": "serper",
+     "rank": 1,
+     "image_url": "https://cdn.mafrservices.com/sys-master-root/h1/43035_main.jpg?im=Resize=1200",
+     "page_url": "https://www.carrefouruae.com/mafuae/en/fine-facial-tissues-soft-150-sheets-x-5/p/43035",
+     "title": "Fine Facial Tissues Soft 150 Sheets x 5",
+     "page_title": "Buy Fine Facial Tissues Soft 150 Sheets x 5 Online - Shop on Carrefour UAE",
+     "domain": "carrefouruae.com",
+     "width": 1200,
+     "height": 1200,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1200,
+       1200
+      ],
+      "shape": "box",
+      "label_text": "FINE|FACIAL TISSUE SOFT|5X150",
+      "accent_color": "#1565c0",
+      "body_color": "#e3f2fd"
+     },
+     "download": "ok",
+     "label": "correct_exact",
+     "note": "The 5-box pack."
+    },
+    {
+     "id": "c2",
+     "provider": "serper",
+     "rank": 2,
+     "image_url": "https://gcc.luluhypermarket.com/medias/43072-01.jpg",
+     "page_url": "https://gcc.luluhypermarket.com/en-ae/fine-facial-tissues-classic-170-sheets-x-5/p/43072",
+     "title": "Fine Facial Tissues Classic 170 Sheets x 5",
+     "page_title": "Fine Facial Tissues Classic 170 Sheets x 5 | Lulu UAE",
+     "domain": "gcc.luluhypermarket.com",
+     "width": 1200,
+     "height": 1200,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1200,
+       1200
+      ],
+      "shape": "box",
+      "label_text": "FINE|FACIAL TISSUE CLASSIC|5X170",
+      "accent_color": "#2e7d32",
+      "body_color": "#e8f5e9"
+     },
+     "download": "ok",
+     "label": "wrong_variant",
+     "note": "Classic 170-sheet sibling."
+    },
+    {
+     "id": "c3",
+     "provider": "serper",
+     "rank": 3,
+     "image_url": "https://f.nooncdn.com/p/pnsku/N43109V/45/_/1700000000/43109_1.jpg",
+     "page_url": "https://www.noon.com/uae-en/fine-facial-tissues-soft-150-sheets/N43109V/p/",
+     "title": "Fine Facial Tissues Soft 150 Sheets",
+     "page_title": "Shop Fine Facial Tissues Soft 150 Sheets online in Dubai | noon",
+     "domain": "noon.com",
+     "width": 1200,
+     "height": 1200,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1200,
+       1200
+      ],
+      "shape": "box",
+      "label_text": "FINE|FACIAL TISSUE SOFT|150",
+      "accent_color": "#1565c0",
+      "body_color": "#e3f2fd"
+     },
+     "download": "ok",
+     "label": "wrong_pack",
+     "note": "One box."
+    }
+   ]
+  },
+  {
+   "id": "real-21-fairy-dish-liq-lemon-1l",
+   "stratum": "household",
+   "named_case": null,
+   "named_case_title": null,
+   "name_en": "FAIRY DISH LIQ LEMON 1L",
+   "name_ar": "",
+   "brand": "FAIRY",
+   "brand_ar": "",
+   "barcode": "",
+   "category": "",
+   "size": "",
+   "no_correct_candidate": false,
+   "expected_v2": "correct_pick",
+   "patterns": [
+    "abbreviated",
+    "near_duplicate"
+   ],
+   "notes": "Mapped brand; DISH LIQ is the sheet's abbreviation.",
+   "candidates": [
+    {
+     "id": "c1",
+     "provider": "serper",
+     "rank": 2,
+     "image_url": "https://m.media-amazon.com/images/I/743146L._AC_SL1500_.jpg",
+     "page_url": "https://www.amazon.ae/fairy-lemon-dishwashing-liquid-1l/dp/B043146",
+     "title": "Fairy Lemon Dishwashing Liquid 1L",
+     "page_title": "Fairy Lemon Dishwashing Liquid 1L : Amazon.ae: Grocery",
+     "domain": "amazon.ae",
+     "width": 1500,
+     "height": 1500,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1500,
+       1500
+      ],
+      "shape": "bottle",
+      "label_text": "FAIRY|LEMON|1L",
+      "accent_color": "#fdd835",
+      "body_color": "#fff59d",
+      "cap_color": "#2e7d32"
+     },
+     "download": "ok",
+     "label": "correct_exact",
+     "note": "The exact bottle."
+    },
+    {
+     "id": "c2",
+     "provider": "serper",
+     "rank": 1,
+     "image_url": "https://cdn.mafrservices.com/sys-master-root/h1/43183_main.jpg?im=Resize=1200",
+     "page_url": "https://www.carrefouruae.com/mafuae/en/fairy-original-dishwashing-liquid-1l/p/43183",
+     "title": "Fairy Original Dishwashing Liquid 1L",
+     "page_title": "Buy Fairy Original Dishwashing Liquid 1L Online - Shop on Carrefour UAE",
+     "domain": "carrefouruae.com",
+     "width": 1200,
+     "height": 1200,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1200,
+       1200
+      ],
+      "shape": "bottle",
+      "label_text": "FAIRY|ORIGINAL|1L",
+      "accent_color": "#2e7d32",
+      "body_color": "#c8e6c9",
+      "cap_color": "#2e7d32"
+     },
+     "download": "ok",
+     "label": "wrong_variant",
+     "note": "Original sibling."
+    },
+    {
+     "id": "c3",
+     "provider": "serper",
+     "rank": 3,
+     "image_url": "https://gcc.luluhypermarket.com/medias/43220-01.jpg",
+     "page_url": "https://gcc.luluhypermarket.com/en-ae/fairy-lemon-dishwashing-liquid-500ml/p/43220",
+     "title": "Fairy Lemon Dishwashing Liquid 500ml",
+     "page_title": "Fairy Lemon Dishwashing Liquid 500ml | Lulu UAE",
+     "domain": "gcc.luluhypermarket.com",
+     "width": 1200,
+     "height": 1200,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1200,
+       1200
+      ],
+      "shape": "bottle",
+      "label_text": "FAIRY|LEMON|500ML",
+      "accent_color": "#fdd835",
+      "body_color": "#fff59d",
+      "cap_color": "#2e7d32"
+     },
+     "download": "ok",
+     "label": "wrong_size",
+     "note": "The 500 ml bottle."
+    },
+    {
+     "id": "c4",
+     "provider": "serper",
+     "rank": 4,
+     "image_url": "https://f.nooncdn.com/p/pnsku/N43257V/45/_/1700000000/43257_1.jpg",
+     "page_url": "https://www.noon.com/uae-en/fairy-lemon-washing-up-liquid-1-litre/N43257V/p/",
+     "title": "Fairy Lemon Washing Up Liquid 1 Litre",
+     "page_title": "Shop Fairy Lemon Washing Up Liquid 1 Litre online in Dubai | noon",
+     "domain": "noon.com",
+     "width": 1500,
+     "height": 1500,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1500,
+       1500
+      ],
+      "shape": "bottle",
+      "label_text": "FAIRY|LEMON|1L",
+      "accent_color": "#fdd835",
+      "body_color": "#fff59d",
+      "cap_color": "#2e7d32",
+      "quality": 80
+     },
+     "download": "ok",
+     "label": "correct_exact",
+     "note": "noon copy of Amazon's packshot.",
+     "seed_of": "c1"
+    }
+   ]
+  },
+  {
+   "id": "real-22-pril-dw-liq-apple-1-5l",
+   "stratum": "household",
+   "named_case": null,
+   "named_case_title": null,
+   "name_en": "PRIL DW LIQ APPLE 1.5L",
+   "name_ar": "",
+   "brand": "PRIL",
+   "brand_ar": "",
+   "barcode": "",
+   "category": "",
+   "size": "",
+   "no_correct_candidate": false,
+   "expected_v2": "correct_pick",
+   "patterns": [
+    "abbreviated",
+    "non_white_backdrop"
+   ],
+   "notes": "DW LIQ is the sheet's abbreviation of dishwashing liquid.",
+   "candidates": [
+    {
+     "id": "c1",
+     "provider": "serper",
+     "rank": 1,
+     "image_url": "https://f.nooncdn.com/p/pnsku/N43294V/45/_/1700000000/43294_1.jpg",
+     "page_url": "https://www.noon.com/uae-en/pril-apple-dishwashing-liquid-1-5l/N43294V/p/",
+     "title": "Pril Apple Dishwashing Liquid 1.5L",
+     "page_title": "Shop Pril Apple Dishwashing Liquid 1.5L online in Dubai | noon",
+     "domain": "noon.com",
+     "width": 1200,
+     "height": 1200,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_backdrop",
+      "size": [
+       1200,
+       1200
+      ],
+      "shape": "bottle",
+      "label_text": "PRIL|APPLE|1.5L",
+      "accent_color": "#43a047",
+      "body_color": "#c5e1a5",
+      "background_color": "#e3f1df"
+     },
+     "download": "ok",
+     "label": "correct_exact",
+     "note": "The right bottle on a light green sweep."
+    },
+    {
+     "id": "c2",
+     "provider": "serper",
+     "rank": 2,
+     "image_url": "https://cdn.mafrservices.com/sys-master-root/h1/43331_main.jpg?im=Resize=1200",
+     "page_url": "https://www.carrefouruae.com/mafuae/en/pril-lemon-dishwashing-liquid-1-5l/p/43331",
+     "title": "Pril Lemon Dishwashing Liquid 1.5L",
+     "page_title": "Buy Pril Lemon Dishwashing Liquid 1.5L Online - Shop on Carrefour UAE",
+     "domain": "carrefouruae.com",
+     "width": 1200,
+     "height": 1200,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1200,
+       1200
+      ],
+      "shape": "bottle",
+      "label_text": "PRIL|LEMON|1.5L",
+      "accent_color": "#fbc02d",
+      "body_color": "#fff9c4"
+     },
+     "download": "ok",
+     "label": "wrong_variant",
+     "note": "Lemon sibling."
+    }
+   ]
+  },
+  {
+   "id": "real-23-loyal-laundry-liq-lavender-3l",
+   "stratum": "household",
+   "named_case": null,
+   "named_case_title": null,
+   "name_en": "LOYAL LAUNDRY LIQ LAVENDER 3L",
+   "name_ar": "",
+   "brand": "LOYAL",
+   "brand_ar": "",
+   "barcode": "",
+   "category": "",
+   "size": "",
+   "no_correct_candidate": false,
+   "expected_v2": "correct_pick",
+   "patterns": [
+    "abbreviated"
+   ],
+   "notes": "A common-word brand.",
+   "candidates": [
+    {
+     "id": "c1",
+     "provider": "serper",
+     "rank": 1,
+     "image_url": "https://m.media-amazon.com/images/I/743368L._AC_SL1500_.jpg",
+     "page_url": "https://www.amazon.ae/loyal-liquid-laundry-detergent-lavender-3l/dp/B043368",
+     "title": "Loyal Liquid Laundry Detergent Lavender 3L",
+     "page_title": "Loyal Liquid Laundry Detergent Lavender 3L : Amazon.ae: Grocery",
+     "domain": "amazon.ae",
+     "width": 1500,
+     "height": 1500,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1500,
+       1500
+      ],
+      "shape": "bottle",
+      "label_text": "LOYAL|LAUNDRY LIQUID|LAVENDER|3L",
+      "accent_color": "#6a1b9a",
+      "body_color": "#e1bee7"
+     },
+     "download": "ok",
+     "label": "correct_exact",
+     "note": "The exact bottle."
+    },
+    {
+     "id": "c2",
+     "provider": "serper",
+     "rank": 2,
+     "image_url": "https://gcc.luluhypermarket.com/medias/43405-01.jpg",
+     "page_url": "https://gcc.luluhypermarket.com/en-ae/loyal-liquid-laundry-detergent-lavender-1-8l/p/43405",
+     "title": "Loyal Liquid Laundry Detergent Lavender 1.8L",
+     "page_title": "Loyal Liquid Laundry Detergent Lavender 1.8L | Lulu UAE",
+     "domain": "gcc.luluhypermarket.com",
+     "width": 1200,
+     "height": 1200,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1200,
+       1200
+      ],
+      "shape": "bottle",
+      "label_text": "LOYAL|LAUNDRY LIQUID|LAVENDER|1.8L",
+      "accent_color": "#6a1b9a",
+      "body_color": "#e1bee7"
+     },
+     "download": "ok",
+     "label": "wrong_size",
+     "note": "The 1.8 L bottle."
+    }
+   ]
+  },
+  {
+   "id": "real-24-aseel-butter-ghee-1-6kg",
+   "stratum": "pantry",
+   "named_case": null,
+   "named_case_title": null,
+   "name_en": "ASEEL BUTTER GHEE 1.6KG",
+   "name_ar": "",
+   "brand": "ASEEL",
+   "brand_ar": "",
+   "barcode": "",
+   "category": "",
+   "size": "",
+   "no_correct_candidate": false,
+   "expected_v2": "correct_pick",
+   "patterns": [],
+   "notes": "Unmapped brand.",
+   "candidates": [
+    {
+     "id": "c1",
+     "provider": "serper",
+     "rank": 1,
+     "image_url": "https://www.unioncoop.ae/media/catalog/product/u/43442.jpg",
+     "page_url": "https://www.unioncoop.ae/aseel-pure-butter-ghee-1-6kg-43442.html",
+     "title": "Aseel Pure Butter Ghee 1.6kg",
+     "page_title": "Aseel Pure Butter Ghee 1.6kg | Union Coop",
+     "domain": "unioncoop.ae",
+     "width": 1200,
+     "height": 1200,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1200,
+       1200
+      ],
+      "shape": "jar",
+      "label_text": "ASEEL|PURE BUTTER GHEE|1.6KG",
+      "accent_color": "#f9a825",
+      "body_color": "#fff8e1"
+     },
+     "download": "ok",
+     "label": "correct_exact",
+     "note": "The exact tin."
+    },
+    {
+     "id": "c2",
+     "provider": "serper",
+     "rank": 2,
+     "image_url": "https://m.media-amazon.com/images/I/743479L._AC_SL1500_.jpg",
+     "page_url": "https://www.amazon.ae/aseel-pure-butter-ghee-800g/dp/B043479",
+     "title": "Aseel Pure Butter Ghee 800g",
+     "page_title": "Aseel Pure Butter Ghee 800g : Amazon.ae: Grocery",
+     "domain": "amazon.ae",
+     "width": 1500,
+     "height": 1500,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1500,
+       1500
+      ],
+      "shape": "jar",
+      "label_text": "ASEEL|PURE BUTTER GHEE|800G",
+      "accent_color": "#f9a825",
+      "body_color": "#fff8e1"
+     },
+     "download": "ok",
+     "label": "wrong_size",
+     "note": "The 800 g tin."
+    },
+    {
+     "id": "c3",
+     "provider": "serper",
+     "rank": 3,
+     "image_url": "https://cdn.mafrservices.com/sys-master-root/h1/43516_main.jpg?im=Resize=1200",
+     "page_url": "https://www.carrefouruae.com/mafuae/en/aseel-vegetable-ghee-1-6kg/p/43516",
+     "title": "Aseel Vegetable Ghee 1.6kg",
+     "page_title": "Buy Aseel Vegetable Ghee 1.6kg Online - Shop on Carrefour UAE",
+     "domain": "carrefouruae.com",
+     "width": 1200,
+     "height": 1200,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1200,
+       1200
+      ],
+      "shape": "jar",
+      "label_text": "ASEEL|VEGETABLE GHEE|1.6KG",
+      "accent_color": "#2e7d32",
+      "body_color": "#fff8e1"
+     },
+     "download": "ok",
+     "label": "wrong_variant",
+     "note": "Vegetable ghee."
+    }
+   ]
+  },
+  {
+   "id": "real-25-mehran-whole-wheat-paratha-5s-400gm",
+   "stratum": "frozen_bakery",
+   "named_case": null,
+   "named_case_title": null,
+   "name_en": "MEHRAN WHOLE WHEAT PARATHA 5S 400GM",
+   "name_ar": "",
+   "brand": "MEHRAN",
+   "brand_ar": "",
+   "barcode": "",
+   "category": "",
+   "size": "",
+   "no_correct_candidate": false,
+   "expected_v2": "no_wrong_pick",
+   "patterns": [
+    "multipack"
+   ],
+   "notes": "'5S' is the sheet's piece count.",
+   "candidates": [
+    {
+     "id": "c1",
+     "provider": "serper",
+     "rank": 1,
+     "image_url": "https://yasminstore.com/cdn/shop/products/43553.jpg",
+     "page_url": "https://yasminstore.com/products/mehran-whole-wheat-paratha-5-pcs-400g",
+     "title": "Mehran Whole Wheat Paratha 5 Pcs 400g",
+     "page_title": "Mehran Whole Wheat Paratha 5 Pcs 400g - Yasmin Store",
+     "domain": "yasminstore.com",
+     "width": 1000,
+     "height": 1000,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1000,
+       1000
+      ],
+      "shape": "bag",
+      "label_text": "MEHRAN|WHOLE WHEAT PARATHA|5 PCS 400G",
+      "accent_color": "#795548",
+      "body_color": "#ffffff"
+     },
+     "download": "ok",
+     "label": "correct_exact",
+     "note": "The exact pack on a small online shop."
+    },
+    {
+     "id": "c2",
+     "provider": "serper",
+     "rank": 2,
+     "image_url": "https://gcc.luluhypermarket.com/medias/43590-01.jpg",
+     "page_url": "https://gcc.luluhypermarket.com/en-ae/mehran-plain-paratha-5-pcs-400g/p/43590",
+     "title": "Mehran Plain Paratha 5 Pcs 400g",
+     "page_title": "Mehran Plain Paratha 5 Pcs 400g | Lulu UAE",
+     "domain": "gcc.luluhypermarket.com",
+     "width": 1200,
+     "height": 1200,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1200,
+       1200
+      ],
+      "shape": "bag",
+      "label_text": "MEHRAN|PLAIN PARATHA|5 PCS 400G",
+      "accent_color": "#ff8f00",
+      "body_color": "#ffffff"
+     },
+     "download": "ok",
+     "label": "wrong_variant",
+     "note": "Plain sibling."
+    },
+    {
+     "id": "c3",
+     "provider": "serper",
+     "rank": 3,
+     "image_url": "https://cdn.mafrservices.com/sys-master-root/h1/43627_main.jpg?im=Resize=1200",
+     "page_url": "https://www.carrefouruae.com/mafuae/en/mehran-whole-wheat-paratha-2-x-400g/p/43627",
+     "title": "Mehran Whole Wheat Paratha 2 x 400g",
+     "page_title": "Buy Mehran Whole Wheat Paratha 2 x 400g Online - Shop on Carrefour UAE",
+     "domain": "carrefouruae.com",
+     "width": 1200,
+     "height": 1200,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1200,
+       1200
+      ],
+      "shape": "bag",
+      "label_text": "MEHRAN|WHOLE WHEAT PARATHA|2X400G",
+      "accent_color": "#795548",
+      "body_color": "#ffffff"
+     },
+     "download": "ok",
+     "label": "wrong_pack",
+     "note": "Twin pack."
+    }
+   ]
+  },
+  {
+   "id": "real-26-ice-cream-cone-strawberry-25gm",
+   "stratum": "generic",
+   "named_case": null,
+   "named_case_title": null,
+   "name_en": "ICE CREAM CONE STRAWBERRY 25GM",
+   "name_ar": "",
+   "brand": "GENERIC / NO BRAND",
+   "brand_ar": "",
+   "barcode": "",
+   "category": "",
+   "size": "",
+   "no_correct_candidate": true,
+   "expected_v2": "no_pick",
+   "patterns": [
+    "generic"
+   ],
+   "notes": "A 'GENERIC / NO BRAND' row: no listing can be shown to be the owner's item.",
+   "candidates": [
+    {
+     "id": "c1",
+     "provider": "serper",
+     "rank": 1,
+     "image_url": "https://m.media-amazon.com/images/I/743775L._AC_SL1500_.jpg",
+     "page_url": "https://www.amazon.ae/kiddy-strawberry-ice-cream-cone-candy-25g/dp/B043775",
+     "title": "Kiddy Strawberry Ice Cream Cone Candy 25g",
+     "page_title": "Kiddy Strawberry Ice Cream Cone Candy 25g : Amazon.ae: Grocery",
+     "domain": "amazon.ae",
+     "width": 1000,
+     "height": 1000,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1000,
+       1000
+      ],
+      "shape": "pouch",
+      "label_text": "KIDDY|STRAWBERRY CONE|25G",
+      "accent_color": "#e91e63",
+      "body_color": "#fce4ec"
+     },
+     "download": "ok",
+     "label": "wrong_product",
+     "note": "One brand's candy cone; the row names no brand, so nothing proves it is the owner's item."
+    },
+    {
+     "id": "c2",
+     "provider": "serper",
+     "rank": 2,
+     "image_url": "https://f.nooncdn.com/p/pnsku/N43812V/45/_/1700000000/43812_1.jpg",
+     "page_url": "https://www.noon.com/uae-en/candy-cone-strawberry-25-g/N43812V/p/",
+     "title": "Candy Cone Strawberry 25 g",
+     "page_title": "Shop Candy Cone Strawberry 25 g online in Dubai | noon",
+     "domain": "noon.com",
+     "width": 1000,
+     "height": 1000,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1000,
+       1000
+      ],
+      "shape": "pouch",
+      "label_text": "SWEETLAND|CANDY CONE|25G",
+      "accent_color": "#ad1457",
+      "body_color": "#fce4ec"
+     },
+     "download": "ok",
+     "label": "wrong_product",
+     "note": "Another brand."
+    }
+   ]
+  },
+  {
+   "id": "real-27-jelly-beans-assorted-100gm",
+   "stratum": "generic",
+   "named_case": null,
+   "named_case_title": null,
+   "name_en": "JELLY BEANS ASSORTED 100GM",
+   "name_ar": "",
+   "brand": "GENERIC / NO BRAND",
+   "brand_ar": "",
+   "barcode": "",
+   "category": "",
+   "size": "",
+   "no_correct_candidate": true,
+   "expected_v2": "no_pick",
+   "patterns": [
+    "generic"
+   ],
+   "notes": "A 'GENERIC / NO BRAND' row.",
+   "candidates": [
+    {
+     "id": "c1",
+     "provider": "serper",
+     "rank": 1,
+     "image_url": "https://m.media-amazon.com/images/I/743849L._AC_SL1500_.jpg",
+     "page_url": "https://www.amazon.ae/jelly-belly-assorted-jelly-beans-100g/dp/B043849",
+     "title": "Jelly Belly Assorted Jelly Beans 100g",
+     "page_title": "Jelly Belly Assorted Jelly Beans 100g : Amazon.ae: Grocery",
+     "domain": "amazon.ae",
+     "width": 1500,
+     "height": 1500,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1500,
+       1500
+      ],
+      "shape": "box",
+      "label_text": "JELLY BELLY|ASSORTED BEANS|100G",
+      "accent_color": "#c62828",
+      "body_color": "#ffffff"
+     },
+     "download": "ok",
+     "label": "wrong_product",
+     "note": "Branded beans."
+    },
+    {
+     "id": "c2",
+     "provider": "serper",
+     "rank": 2,
+     "image_url": "https://gcc.luluhypermarket.com/medias/43886-01.jpg",
+     "page_url": "https://gcc.luluhypermarket.com/en-ae/haribo-jelly-beans-100g/p/43886",
+     "title": "Haribo Jelly Beans 100g",
+     "page_title": "Haribo Jelly Beans 100g | Lulu UAE",
+     "domain": "gcc.luluhypermarket.com",
+     "width": 1200,
+     "height": 1200,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1200,
+       1200
+      ],
+      "shape": "pouch",
+      "label_text": "HARIBO|JELLY BEANS|100G",
+      "accent_color": "#fdd835",
+      "body_color": "#1565c0"
+     },
+     "download": "ok",
+     "label": "wrong_product",
+     "note": "Another brand."
+    }
+   ]
+  },
+  {
+   "id": "real-28-ferns-n-petals-pink-roses-bouquet-12pcs",
+   "stratum": "out_of_scope",
+   "named_case": null,
+   "named_case_title": null,
+   "name_en": "FERNS N PETALS PINK ROSES BOUQUET 12PCS",
+   "name_ar": "",
+   "brand": "FERNS N PETALS",
+   "brand_ar": "",
+   "barcode": "",
+   "category": "",
+   "size": "",
+   "no_correct_candidate": true,
+   "expected_v2": "no_auto",
+   "patterns": [
+    "out_of_scope"
+   ],
+   "notes": "A flower delivery row: there is no packshot to find.",
+   "candidates": [
+    {
+     "id": "c1",
+     "provider": "serper",
+     "rank": 1,
+     "image_url": "https://www.fnp.ae/images/pr/l/43923.jpg",
+     "page_url": "https://www.fnp.ae/gift/pink-roses-bouquet-12-stems",
+     "title": "Pink Roses Bouquet 12 Stems",
+     "page_title": "Pink Roses Bouquet 12 Stems | FNP UAE",
+     "domain": "fnp.ae",
+     "width": 1200,
+     "height": 900,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "lifestyle_clutter",
+      "size": [
+       1200,
+       900
+      ],
+      "shape": "bottle",
+      "label_text": "PINK ROSES",
+      "accent_color": "#e91e63",
+      "body_color": "#f8bbd0"
+     },
+     "download": "ok",
+     "label": "not_packshot",
+     "note": "A styled bouquet photo, not a product packshot."
+    },
+    {
+     "id": "c2",
+     "provider": "serper",
+     "rank": 2,
+     "image_url": "https://scontent.cdninstagram.com/v/t51.29350-15/43960_n.jpg",
+     "page_url": "https://www.instagram.com/p/C43960x/",
+     "title": "fernsnpetals_uae roses for her",
+     "page_title": "fernsnpetals_uae roses for her on Instagram",
+     "domain": "instagram.com",
+     "width": 1200,
+     "height": 630,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "banner",
+      "size": [
+       1200,
+       630
+      ],
+      "label_text": "FERNS N PETALS|ROSES",
+      "accent_color": "#e91e63",
+      "body_color": "#ad1457",
+      "count": 2,
+      "headline": "FLOWERS"
+     },
+     "download": "ok",
+     "label": "not_packshot",
+     "note": "A promo banner."
+    }
+   ]
+  },
+  {
+   "id": "real-29-bb2210-bisbell-s-steel-whisk-10in",
+   "stratum": "out_of_scope",
+   "named_case": null,
+   "named_case_title": null,
+   "name_en": "BB2210 BISBELL S/STEEL WHISK 10IN",
+   "name_ar": "",
+   "brand": "BISBELL",
+   "brand_ar": "",
+   "barcode": "",
+   "category": "",
+   "size": "",
+   "no_correct_candidate": false,
+   "expected_v2": "no_wrong_pick",
+   "patterns": [
+    "out_of_scope",
+    "abbreviated"
+   ],
+   "notes": "A kitchen tool, not a grocery product: an article code and S/STEEL in the name.",
+   "candidates": [
+    {
+     "id": "c1",
+     "provider": "serper",
+     "rank": 1,
+     "image_url": "https://www.bisbell.ae/images/products/43997.png",
+     "page_url": "https://www.bisbell.ae/products/bisbell-stainless-steel-whisk-10-inch-bb2210",
+     "title": "Bisbell Stainless Steel Whisk 10 inch BB2210",
+     "page_title": "Bisbell Stainless Steel Whisk 10 inch BB2210 | Bisbell",
+     "domain": "bisbell.ae",
+     "width": 1000,
+     "height": 1000,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1000,
+       1000
+      ],
+      "shape": "bottle",
+      "label_text": "BISBELL|WHISK|10IN",
+      "accent_color": "#455a64",
+      "body_color": "#cfd8dc"
+     },
+     "download": "ok",
+     "label": "correct_exact",
+     "note": "The brand's own product photo."
+    },
+    {
+     "id": "c2",
+     "provider": "serper",
+     "rank": 2,
+     "image_url": "https://media.danubehome.com/i/danube/44034",
+     "page_url": "https://www.danubehome.com/ae/en/p/stainless-steel-balloon-whisk-25cm-44034",
+     "title": "Stainless Steel Balloon Whisk 25cm",
+     "page_title": "Stainless Steel Balloon Whisk 25cm | Danube Home",
+     "domain": "danubehome.com",
+     "width": 1000,
+     "height": 1000,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1000,
+       1000
+      ],
+      "shape": "bottle",
+      "label_text": "DELCASA|WHISK|25CM",
+      "accent_color": "#37474f",
+      "body_color": "#eceff1"
+     },
+     "download": "ok",
+     "label": "wrong_product",
+     "note": "Another brand's whisk."
+    }
+   ]
+  },
+  {
+   "id": "real-30-dubai-flower-delivery-red-roses-24pcs",
+   "stratum": "out_of_scope",
+   "named_case": null,
+   "named_case_title": null,
+   "name_en": "DUBAI FLOWER DELIVERY RED ROSES 24PCS",
+   "name_ar": "",
+   "brand": "DUBAI FLOWER DELIV",
+   "brand_ar": "",
+   "barcode": "",
+   "category": "",
+   "size": "",
+   "no_correct_candidate": true,
+   "expected_v2": "no_auto",
+   "patterns": [
+    "out_of_scope",
+    "abbreviated"
+   ],
+   "notes": "The brand cell is cut short ('DUBAI FLOWER DELIV').",
+   "candidates": [
+    {
+     "id": "c1",
+     "provider": "serper",
+     "rank": 1,
+     "image_url": "https://www.fnp.ae/images/pr/l/44071.jpg",
+     "page_url": "https://www.fnp.ae/gift/24-red-roses-bouquet-dubai-flower-delivery",
+     "title": "24 Red Roses Bouquet - Dubai Flower Delivery",
+     "page_title": "24 Red Roses Bouquet - Dubai Flower Delivery | FNP UAE",
+     "domain": "fnp.ae",
+     "width": 1200,
+     "height": 900,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "lifestyle_clutter",
+      "size": [
+       1200,
+       900
+      ],
+      "shape": "bottle",
+      "label_text": "RED ROSES",
+      "accent_color": "#c62828",
+      "body_color": "#ef9a9a"
+     },
+     "download": "ok",
+     "label": "not_packshot",
+     "note": "A bouquet photo."
+    }
+   ]
+  },
+  {
+   "id": "real-31-al-osra-basmati-rice-5kg",
+   "stratum": "pantry",
+   "named_case": null,
+   "named_case_title": null,
+   "name_en": "AL OSRA BASMATI RICE 5KG",
+   "name_ar": "",
+   "brand": "AL OSRA",
+   "brand_ar": "",
+   "barcode": "",
+   "category": "",
+   "size": "",
+   "no_correct_candidate": false,
+   "expected_v2": "correct_pick",
+   "patterns": [
+    "brand_page_wrong_pack"
+   ],
+   "notes": "Unmapped brand; the top listing shows another brand's bag.",
+   "candidates": [
+    {
+     "id": "c1",
+     "provider": "serper",
+     "rank": 1,
+     "image_url": "https://gcc.luluhypermarket.com/medias/43664-01.jpg",
+     "page_url": "https://gcc.luluhypermarket.com/en-ae/al-osra-basmati-rice-5kg/p/43664",
+     "title": "Al Osra Basmati Rice 5kg",
+     "page_title": "Al Osra Basmati Rice 5kg | Lulu UAE",
+     "domain": "gcc.luluhypermarket.com",
+     "width": 1200,
+     "height": 1200,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1200,
+       1200
+      ],
+      "shape": "bag",
+      "label_text": "AZIZA|SUPER BASMATI|5KG",
+      "accent_color": "#1b5e20",
+      "body_color": "#fff8e1"
+     },
+     "download": "ok",
+     "label": "wrong_brand",
+     "note": "Lulu's page names Al Osra; the picture is an Aziza bag."
+    },
+    {
+     "id": "c2",
+     "provider": "serper",
+     "rank": 2,
+     "image_url": "https://cdn.mafrservices.com/sys-master-root/h1/43701_main.jpg?im=Resize=1200",
+     "page_url": "https://www.carrefouruae.com/mafuae/en/al-osra-basmati-rice-5-kg/p/43701",
+     "title": "Al Osra Basmati Rice 5 Kg",
+     "page_title": "Buy Al Osra Basmati Rice 5 Kg Online - Shop on Carrefour UAE",
+     "domain": "carrefouruae.com",
+     "width": 1200,
+     "height": 1200,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1200,
+       1200
+      ],
+      "shape": "bag",
+      "label_text": "AL OSRA|BASMATI RICE|5KG",
+      "accent_color": "#0d47a1",
+      "body_color": "#fff8e1"
+     },
+     "download": "ok",
+     "label": "correct_exact",
+     "note": "The exact bag."
+    },
+    {
+     "id": "c3",
+     "provider": "serper",
+     "rank": 3,
+     "image_url": "https://m.media-amazon.com/images/I/743738L._AC_SL1500_.jpg",
+     "page_url": "https://www.amazon.ae/al-osra-basmati-rice-10kg/dp/B043738",
+     "title": "Al Osra Basmati Rice 10kg",
+     "page_title": "Al Osra Basmati Rice 10kg : Amazon.ae: Grocery",
+     "domain": "amazon.ae",
+     "width": 1500,
+     "height": 1500,
+     "gtin_on_page": null,
+     "surfaced_by": [
+      "text"
+     ],
+     "image_recipe": {
+      "kind": "packshot_white",
+      "size": [
+       1500,
+       1500
+      ],
+      "shape": "bag",
+      "label_text": "AL OSRA|BASMATI RICE|10KG",
+      "accent_color": "#0d47a1",
+      "body_color": "#fff8e1"
+     },
+     "download": "ok",
+     "label": "wrong_size",
+     "note": "The 10 kg bag."
+    }
+   ]
+  }
+ ]
+}

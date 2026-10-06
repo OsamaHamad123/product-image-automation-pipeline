@@ -39,6 +39,8 @@ Options
                        (needs much more RAM: about 6 GB, or about 4 GB with --lite; docs section 4)
       --lite           ...the smaller birefnet-general-lite model instead
       --gpu            ...rembg[gpu] (needs an NVIDIA GPU with CUDA libraries)
+  --with-embeddings    pip install onnxruntime, download the DINOv2-small model (25 MB) and turn EMBEDDINGS on: the
+                       brand look check, a review warning only (catalog_match/embeddings.py)
   --with-redis         also install redis-server (only if you use Redis); --enable-units then starts the sync worker
   --enable-units       enable and start the nightly, backup and sheet-flush timers (and the sync worker with --with-redis)
   --reset-auth         type a new password for the dashboard login (nginx basic auth)
@@ -75,6 +77,7 @@ WITH_RCLONE=0
 WITH_BIREFNET=0
 LITE=0
 GPU=0
+WITH_EMBEDDINGS=0
 WITH_REDIS=0
 ENABLE_UNITS=0
 RESET_AUTH=0
@@ -95,6 +98,7 @@ while (($#)); do
         --with-birefnet) WITH_BIREFNET=1 ;;
         --lite) LITE=1 ;;
         --gpu) GPU=1 ;;
+        --with-embeddings) WITH_EMBEDDINGS=1 ;;
         --with-redis) WITH_REDIS=1 ;;
         --enable-units) ENABLE_UNITS=1 ;;
         --reset-auth) RESET_AUTH=1 ;;
@@ -502,6 +506,18 @@ SQL
     if ((!ok)); then problem "schema init failed: check DB_HOST / DB_DATABASE / DB_USERNAME / DB_PASSWORD in .env, then run install.sh again"; fi
 }
 
+# ---------------------------------------------------------------- 6b. image embeddings (optional)
+step_embeddings() {
+    if ((!WITH_EMBEDDINGS)); then return 0; fi
+    log "6b/10 onnxruntime + DINOv2-small model (EMBEDDINGS=dinov2)"
+    run as_app "$VENV/bin/python" -m pip install --quiet --disable-pip-version-check "onnxruntime>=1.17,<2"
+    # The pinned model goes to the shared models folder (U2NET_HOME of the units and the dashboard, /embeddings);
+    # --setup checks its sha256, proves it loads and saves embeddings=dinov2 in the dashboard settings (not .env).
+    run as_app env "U2NET_HOME=$MODELS_DIR" "$VENV/bin/python" "$APP_DIR/scripts/backfill_embeddings.py" --setup dinov2 \
+        || problem "embeddings setup failed: run scripts/backfill_embeddings.py --setup dinov2 again (as $APP_USER)"
+    echo "    vectors for the approvals made before: sudo -u $APP_USER $VENV/bin/python $APP_DIR/scripts/backfill_embeddings.py --apply"
+}
+
 # ---------------------------------------------------------------- 7. systemd units
 step_units() {
     log "7/10 systemd units, logrotate and backup script"
@@ -609,6 +625,7 @@ step_python
 step_birefnet
 step_dashboard
 step_database
+step_embeddings
 step_units
 step_php_pool
 step_nginx

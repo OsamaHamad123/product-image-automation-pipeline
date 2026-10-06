@@ -110,11 +110,11 @@ def test_v2_search_checks_the_size_column(db, monkeypatch):
 
     monkeypatch.setattr(pipeline, "find_product_image", fake_find)
     monkeypatch.setattr(image_search, "_load_brand_mappings_for_search", lambda: {})
-    out = image_search.search_best_product_image_v2("q", "Almarai Fresh Milk", "Almarai", barcode=SHARED,
-                                                    size_text="2L")
+    out = image_search.search_best_product_image("q", "Almarai Fresh Milk", "Almarai", barcode=SHARED,
+                                                 size_text="2L")
     assert out is None and len(searched) == 1
-    out = image_search.search_best_product_image_v2("q", "Almarai Fresh Milk", "Almarai", barcode=SHARED,
-                                                    size_text="1L")
+    out = image_search.search_best_product_image("q", "Almarai Fresh Milk", "Almarai", barcode=SHARED,
+                                                 size_text="1L")
     assert out is not None and out["url"] == "https://res/size-in-name.png" and len(searched) == 1
 
 
@@ -143,12 +143,12 @@ def test_v2_search_ignores_another_products_cached_image(db, monkeypatch):
 
     monkeypatch.setattr(pipeline, "find_product_image", fake_find)
     monkeypatch.setattr(image_search, "_load_brand_mappings_for_search", lambda: {})
-    out = image_search.search_best_product_image_v2("q", "BARTS STRAWBERRY JAM 450G", "BARTS", barcode=SHARED)
+    out = image_search.search_best_product_image("q", "BARTS STRAWBERRY JAM 450G", "BARTS", barcode=SHARED)
     assert out is None and searched == ["BARTS STRAWBERRY JAM 450G"]
     # the approved product itself is still a cache hit (no search)
     trace = {}
-    out = image_search.search_best_product_image_v2("q", "BARTS PEANUT BUTTER SMOOTH 340G", "BARTS", barcode=SHARED,
-                                                    trace=trace)
+    out = image_search.search_best_product_image("q", "BARTS PEANUT BUTTER SMOOTH 340G", "BARTS", barcode=SHARED,
+                                                 trace=trace)
     assert out is not None and out["url"] == "https://res/barts-pb.png" and out["source"] == "sqlite_cache"
     assert searched == ["BARTS STRAWBERRY JAM 450G"] and trace["outcome"]["cache_hit"] is True
 
@@ -168,11 +168,11 @@ def test_v2_search_passes_the_brand_mappings_to_the_cache_check(db, monkeypatch)
 
     monkeypatch.setattr(pipeline, "find_product_image", fake_find)
     monkeypatch.setattr(image_search, "_load_brand_mappings_for_search", lambda: {})
-    out = image_search.search_best_product_image_v2("q", "Almarai Full Fat Milk 1L", "المراعي", barcode=SHARED,
-                                                    brand_mappings=MAPPINGS)
+    out = image_search.search_best_product_image("q", "Almarai Full Fat Milk 1L", "المراعي", barcode=SHARED,
+                                                 brand_mappings=MAPPINGS)
     assert out is not None and out["url"] == "https://res/almarai-ff.png" and searched == []
     # without the mappings the two brand cells cannot be shown to agree: searched, never served
-    out = image_search.search_best_product_image_v2("q", "Almarai Full Fat Milk 1L", "المراعي", barcode=SHARED)
+    out = image_search.search_best_product_image("q", "Almarai Full Fat Milk 1L", "المراعي", barcode=SHARED)
     assert out is None and searched == ["Almarai Full Fat Milk 1L"]
 
 

@@ -612,6 +612,19 @@ def _write_metadata(worksheet, row_number, metadata, identity):
         print(f"تنبيه: تعذر كتابة البيانات الوصفية للصف {row_number}: {e}")
 
 
+def master_facts(res):
+    """
+    خلفية الأصل المرفوع وما قاله فحص القص عنه (recut.master_facts: master_background و cutout) لـ
+    save_product_resolution: «أعد معالجتها شفافة» و«فحص القص» بيعرفوا منها الصور البيضا والقصات المشكوك فيها.
+    """
+    try:
+        import recut
+        return recut.master_facts(res)
+    except Exception as e:  # noqa: BLE001 - معلومة إضافية، ما بتوقف الاعتماد
+        print(f"تنبيه: تعذر تلخيص فحص القص للحل المعتمد: {e}")
+        return {}
+
+
 def _canvas_phash(path):
     """pHash اللوحة النهائية (16 خانة hex مثل catalog_match.fetch.phash_hex)، أو None."""
     try:
@@ -652,6 +665,22 @@ def _write_still_allowed(before_write):
 # ---------------------------------------------------------------------------
 # الاعتماد التلقائي والبحث المسبق
 # ---------------------------------------------------------------------------
+
+def _remember_look(sku_key, brand, res, best):
+    """
+    متجه الصورة المنشورة تلقائياً لفحص شكل العبوة (catalog_match.embeddings، الإعداد EMBEDDINGS): من بايتات المرشح
+    المحفوظ. EMBEDDINGS=off لا يفعل شيئاً، ولا يُرفع أي خطأ ولا يغيّر النشر.
+    """
+    try:
+        from catalog_match import embeddings
+
+        if res.get("status") == "published" and embeddings.enabled():
+            embeddings.remember_approval(sku_key=sku_key, brand=brand, cloudinary_url=res.get("link"),
+                                         sha256=best.get("content_sha256"), url=best.get("url"),
+                                         page_url=best.get("page_url"), allow_model_download=True)
+    except Exception as e:
+        print(f"[Embeddings] تعذر حفظ متجه الصورة المنشورة للمنتج {sku_key}: {e}")
+
 
 def publish_report(res):
     """ما يُحفظ من نتيجة النشر في trace صف الطابور (publish) لتقرير التحليل (scripts/export_run.py)."""
@@ -698,7 +727,7 @@ def auto_approve_product(task, best_image, worksheet, link_column_index, sku_key
             local_cache_db.save_product_resolution(
                 barcode, name, brand, best_image["url"], res["link"], None, res.get("metadata"),
                 perceptual_hash=res.get("phash"), verification_status="auto_verified",
-                approved_by="auto", sku_key=sku_key, color_signature=res.get("color_signature"),
+                approved_by="auto", sku_key=sku_key, color_signature=res.get("color_signature"), **master_facts(res),
                 **({"page_gtin": page_gtin, "page_gtin_url": page_gtin_url} if page_gtin else {}),
             )
 
@@ -727,6 +756,7 @@ def auto_approve_product(task, best_image, worksheet, link_column_index, sku_key
     if res.get("error") == "duplicate_image":
         _warn_duplicate(best_image)
     if res["status"] == "published":
+        _remember_look(sku_key, brand, res, best_image)
         local_cache_db.delete_product_failure(barcode)
         if res.get("bg_skipped"):
             _count_bg_skipped()
@@ -1195,7 +1225,7 @@ def pre_cache_product_candidates(task, worksheet=None, link_column_index=None, b
         return "failed"
     _finish_task(task, "ready_for_review", None,
                  failure_code=best.get("failure_code"), trace=dict(publish_trace, outcome=_outcome(trace)))
-    print(f"[Pre-Cache] {len(candidates)} مرشح للصف {row_number} (القرار: {decision or 'v1'}).")
+    print(f"[Pre-Cache] {len(candidates)} مرشح للصف {row_number} (القرار: {decision or '-'}).")
     return "success"
 
 
@@ -1217,8 +1247,9 @@ def _review_pending(row_number, sku_key):
 
 def process_single_product(prod, worksheet, link_column_index, brand_mappings=None):
     """
-    معالجة منتج واحد مباشرة (الوضع القديم). الاسم والبراند يُمرران كما هما في الشيت؛
-    QueryRefiner يُستخدم فقط لكتابة الاسم/البراند العربي الناقص في الشيت.
+    معالجة منتج واحد مباشرة (الوضع القديم). الاسم والبراند يُمرران كما هما في الشيت، والبحث نفسه بحث العامل
+    (image_search.search_best_product_image، أي catalog_match). ما في تعريب بنموذج لغوي: الاسم والبراند العربي من
+    الشيت بس، وما بينكتب فيهم شي.
     نتيجة للمراجعة (اختيار غير AUTO_PUBLISH، خلفية ما انعزلت، صورة منتج تاني، كاش رمادي) ما بتنكتب بالشيت: المرشحات
     بتنحفظ للمراجعة وخلية الصورة بتضل على قيمتها. صف بانتظار مراجعة (مرشحات محفوظة، أو خلية قديمة needs_review:)
     ما بينبحث عنه من جديد (لا صرف) إلا مع FORCE_OVERWRITE_IMAGES.
@@ -1235,8 +1266,8 @@ def process_single_product(prod, worksheet, link_column_index, brand_mappings=No
         print(f"تخطي الصف {row_num}: بانتظار مراجعة (خلية قديمة needs_review:)؛ الاعتماد بلوحة التحكم بيكتب الرابط النظيف.")
         return "skipped"
 
-    # الاسم/البراند العربي للبحث يأتيان من الشيت فقط. ناتج QueryRefiner (تخمين نموذج لغوي) يُكتب في الشيت
-    # للتعريب ولا يدخل هوية البحث أبداً (D8/D9): وإلا صار تخمين البراند العربي 'mapped' وقابلاً للنشر التلقائي.
+    # الاسم/البراند العربي للبحث يأتيان من الشيت فقط (D8/D9): تخمين نموذج لغوي لا يدخل هوية البحث أبداً، وإلا صار
+    # تخمين البراند العربي 'mapped' وقابلاً للنشر التلقائي.
     product_name_ar = prod.get("product_name_ar", "")
     brand_ar = prod.get("brand_ar", "")
     payload = {"name_ar": product_name_ar, "brand_ar": brand_ar, "category": prod.get("category", ""),
@@ -1246,13 +1277,6 @@ def process_single_product(prod, worksheet, link_column_index, brand_mappings=No
     if not force and _review_pending(row_num, sku_key):
         print(f"تخطي الصف {row_num}: بانتظار مراجعة (مرشحاته محفوظة)؛ ما في بحث مدفوع من جديد.")
         return "skipped"
-    try:
-        from query_refiner import QueryRefiner
-        refined = QueryRefiner.refine_product_metadata(name, brand, prod.get("category", ""))
-        google_sheets.update_product_localization(worksheet, row_num, refined.get("cleaned_title_ar", ""),
-                                                  refined.get("canonical_brand_ar", ""))
-    except Exception as e:
-        print(f"تنبيه: فشل التعريب المسبق عبر Gemini: {e}")
 
     exclude_urls, exclude_phashes = local_cache_db.get_rejections(sku_key)
     query = default_query(name, brand)
@@ -1313,8 +1337,9 @@ def process_single_product(prod, worksheet, link_column_index, brand_mappings=No
         page_gtin, page_gtin_url = page_barcode(best, barcode)
         local_cache_db.save_product_resolution(
             barcode, name, brand, best["url"], res["link"], None, res.get("metadata"),
-            verification_status="auto_verified", approved_by="auto", sku_key=sku_key,
+            verification_status="auto_verified", approved_by="auto", sku_key=sku_key, **master_facts(res),
             **({"page_gtin": page_gtin, "page_gtin_url": page_gtin_url} if page_gtin else {}))
+        _remember_look(sku_key, brand, res, best)
     return "success"
 
 
@@ -2440,6 +2465,18 @@ def _forget_slow_hosts():
         print(f"تنبيه: تعذر تفريغ ذاكرة المزودين المرفوضين: {e}")
 
 
+def _start_normalizer_run():
+    """
+    كل تشغيل يبدأ بميزانية قارئ أسماء الشيت كاملة (QUERY_NORMALIZER_RUN_BUDGET_USD) وبلا مانع فشل من تشغيل سابق
+    (catalog_match.normalizer): العامل يعيش طويلاً. القراءات المحفوظة تبقى، فكل منتج يُدفع عنه مرة وحدة.
+    """
+    try:
+        from catalog_match import normalizer
+        normalizer.start_run()
+    except Exception as e:
+        print(f"تنبيه: تعذر تصفير ميزانية قارئ أسماء الشيت: {e}")
+
+
 def _harvest_pending_brand_sites():
     """
     مواقع ماركات أضافها المالك بزر «أضف» في «ماركات ناقصة» (system_settings.pending_harvest_domains) تُفهرس أول التشغيل
@@ -2712,6 +2749,7 @@ def run_worker_mode(trigger="manual", report=True, deadline_ts=None):
             return
         brand_mappings = google_sheets.get_brand_mappings(sheets_client, config.SPREADSHEET_NAME_OR_URL)
         _start_local_index_refresh(trigger)      # in the background: the search never waits for it
+        _start_normalizer_run()
         _forget_brand_spellings()
         _forget_slow_hosts()
         _harvest_pending_brand_sites()
@@ -2988,6 +3026,7 @@ def run_automation_pipeline():
             print("لم يتم العثور على أي منتجات صالحة للمعالجة.")
             return
         brand_mappings = google_sheets.get_brand_mappings(sheets_client, config.SPREADSHEET_NAME_OR_URL)
+        _start_normalizer_run()
         _forget_brand_spellings()
         _forget_slow_hosts()
 

@@ -5,7 +5,7 @@ to_sku_row(product_name, brand, kwargs) -> dict
     image_search.search_best_product_image(query, product_name, brand, **kwargs).
 
 outcome_to_legacy(outcome, trace=None, spec=None) -> dict | None
-    The dict main.py / cli_bridge.py / fastapi_server.py consume:
+    The dict main.py / cli_bridge.py consume:
         url, title, width, height, source (provider), page_url, content_sha256,
         needs_review   decision != 'AUTO_PUBLISH'
         preselect      True only for a REVIEW_PRESELECTED / AUTO_PUBLISH winner
@@ -184,6 +184,8 @@ def evidence(rc: RankedCandidate, spec: Optional[SkuSpec] = None) -> Dict[str, A
         # for a copy the reader did not read, the image read in its place
         "same_picture_domains": list(getattr(rc, "same_picture_domains", None) or []),
         "copy_of": getattr(rc, "copy_of", None),
+        # catalog_match.embeddings (EMBEDDINGS on): the brand look cosines, kept with the review for re-tuning
+        **({"look": dict(rc.fetched.look)} if rc.fetched is not None and getattr(rc.fetched, "look", None) else {}),
     })
 
 
@@ -266,6 +268,9 @@ def outcome_summary(outcome: SearchOutcome) -> Dict[str, Any]:
         "discovered_brands": list(getattr(outcome, "discovered_brands", None) or []),
         # wall time of the search per stage in milliseconds (pipeline.find_product_image); older traces have none
         "timings": {str(k): int(v) for k, v in (getattr(outcome, "timings", None) or {}).items()},
+        # catalog_match.normalizer: the model's reading of the sheet name, the queries it wrote, its billed call
+        # (the day's search spend counts it); {} when it did not run. Search words only, never evidence
+        "query_normalizer": _json_safe(dict(getattr(outcome, "query_normalizer", None) or {})),
     }
 
 

@@ -61,6 +61,8 @@ class HealthController extends Controller
             'bg' => $bg,
             'bgView' => self::bgSkipView($publish, $bg),
             'bgConfirm' => SettingsController::BG_SKIP_CONFIRM,
+            // «كلشي تمام» / «شو بدو منك» فوق الصفحة (بلا بايثون: ops-health من الكاش بس)
+            'attention' => HealthAttentionController::current(),
         ]);
     }
 
@@ -478,6 +480,73 @@ class HealthController extends Controller
         $body = self::lanesPayload($result);
         Cache::put(self::LANES_CACHE_KEY, $body, self::CACHE_SECONDS);
         return response()->json($body)->header('Cache-Control', 'no-store');
+    }
+
+    // ------------------------------------------------------------------
+    // «صدّر مجموعة اختبار» (القسم المتقدم): المنتجات اللي راجعها المالك كملف واحد يبعته للفريق
+    // ------------------------------------------------------------------
+
+    /** ملف المجموعة كما يسمّيه الجسر (cli_bridge.EVAL_SET_PREFIX) بـ temp/exports؛ أي اسم غيره مرفوض. */
+    public const EVAL_SET_FILE = '/^laqta_eval_set_[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{4}\.zip$/';
+
+    /** جملة النتيجة للمالك: كم منتج وصورة، ووين الملف. */
+    public static function evalExportText(array $result): string
+    {
+        $products = (int) ($result['products'] ?? 0);
+        if ($products === 0) {
+            return 'ما في منتجات راجعتها لسا: اعتمد أو ارفض صور من شاشة المراجعة، وبعدين صدّر المجموعة.';
+        }
+        $text = 'جاهز: ' . $products . ' منتج راجعتهم، فيهم ' . (int) ($result['candidates'] ?? 0) . ' صورة ('
+            . (int) ($result['labelled'] ?? 0) . ' منها معروف إذا صح أو غلط).';
+        $path = (string) ($result['zip_path'] ?? '');
+        if ($path !== '') {
+            $text .= ' الملف محفوظ بـ ' . $path . '، نزّله من الرابط وابعته للفريق.';
+        }
+        return $text;
+    }
+
+    /**
+     * POST /api/system/eval-export: يكتب المنتجات المراجَعة كمجموعة اختبار (cli_bridge eval_export ->
+     * scripts/eval_record.py --from-db) ويرجع وين الملف. قراءة فقط: لا بحث ولا تكلفة ولا كتابة بالشيت، وكل قيمة سرية
+     * مضبوطة بتنشال من الملف.
+     */
+    public function exportEvalSet()
+    {
+        $headers = ['Cache-Control' => 'no-store'];
+        $flags = JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE;
+        try {
+            $result = PythonBridge::run('eval_export', []);
+        } catch (\Throwable $e) {
+            $result = ['status' => 'error'];
+        }
+        $name = (string) ($result['file'] ?? '');
+        if (($result['status'] ?? '') !== 'success' || !preg_match(self::EVAL_SET_FILE, $name)) {
+            return response()->json(['status' => 'failed',
+                'error' => 'ما قدرنا نجهّز مجموعة الاختبار: تأكد إنو قاعدة البيانات شغّالة وجرّب مرة تانية.'],
+                500, $headers, $flags);
+        }
+        return response()->json([
+            'status' => 'success',
+            'file' => $name,
+            'zip_path' => (string) ($result['zip_path'] ?? ''),
+            'folder' => (string) ($result['folder'] ?? ''),
+            'products' => (int) ($result['products'] ?? 0),
+            'candidates' => (int) ($result['candidates'] ?? 0),
+            'labelled' => (int) ($result['labelled'] ?? 0),
+            'download' => '/api/system/eval-export/' . $name,
+            'message' => self::evalExportText($result),
+        ], 200, $headers, $flags);
+    }
+
+    /** GET /api/system/eval-export/{file}: ينزّل ملف المجموعة (يبقى محفوظ بـ temp/exports لحتى ينبعت). */
+    public function downloadEvalSet(string $file)
+    {
+        $path = base_path('../temp/exports/' . $file);
+        if (!preg_match(self::EVAL_SET_FILE, $file) || !is_file($path)) {
+            return response()->json(['status' => 'error', 'message' => 'الملف مش موجود: صدّر المجموعة من جديد.'], 404,
+                ['Cache-Control' => 'no-store'], JSON_UNESCAPED_UNICODE);
+        }
+        return response()->download($path, $file, ['Content-Type' => 'application/zip', 'Cache-Control' => 'no-store']);
     }
 
     /** حالات جاهزية الفئة (local_cache_db.brand_status)؛ أي شي تاني من الجسر بينقرأ needs_reviews. */

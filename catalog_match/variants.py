@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -53,6 +54,14 @@ logger = logging.getLogger(__name__)
 
 LEXICON_PATH = Path(__file__).resolve().parent / "data" / "variants_lexicon.json"
 SEP = "+"
+
+# A length written with the product ('TOMEX FRENCH FRIES 6MM', foil '30CM'): the cut or the width is the variant, and a
+# 9 mm pack is another product than the 6 mm one (eval realistic set, real-04: the 9 mm sibling was preselected in lane
+# strict). Read from the text itself, not the lexicon, as millimetres ('0.6 cm' and '6mm' are one value), and compared
+# like any axis: a conflict only when both sides state a length and they differ. Never a 'marked' value: a SKU that
+# states no length accepts any (unstated_marked skips it).
+LENGTH_AXIS = "cut"
+_LENGTH_RE = re.compile(r"(?<![\w.,])(\d+(?:[.,]\d+)?)\s*(mm|cm)(?![a-wyz])", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -239,12 +248,26 @@ def _specific(axis: str, values: Set[str]) -> Set[str]:
     return values - drop
 
 
+def lengths(text: Optional[str]) -> Set[str]:
+    """The lengths the text states, in millimetres ('6MM' -> '6mm', '0.6 cm' -> '6mm', '20cmx20cm' -> '200mm')."""
+    out: Set[str] = set()
+    for number, unit in _LENGTH_RE.findall(text or ""):
+        mm = float(number.replace(",", ".")) * (10.0 if unit.lower() == "cm" else 1.0)
+        if 0 < mm <= 5000:
+            out.add(f"{mm:g}mm")
+    return out
+
+
 def extract_variants(text: Optional[str], context: Optional[str] = None,
                      brands: Iterable[str] = ()) -> Dict[str, str]:
-    """{axis: value} for every variant axis stated in the text (a generic value is kept as stated)."""
+    """{axis: value} for every variant axis stated in the text (a generic value is kept as stated), the length
+    (LENGTH_AXIS) included."""
     per_axis: Dict[str, Set[str]] = {}
     for axis, value, _ in _scan(text, context, brands):
         per_axis.setdefault(axis, set()).add(value)
+    stated = lengths(text)
+    if stated:
+        per_axis.setdefault(LENGTH_AXIS, set()).update(stated)
     return {axis: _join(vals) for axis, vals in per_axis.items()}
 
 
@@ -390,7 +413,7 @@ def unstated_marked(target: Mapping[str, str], found: Mapping[str, str], context
     """
     out = []
     for axis, fval in (found or {}).items():
-        if (target or {}).get(axis):
+        if (target or {}).get(axis) or axis == LENGTH_AXIS:
             continue
         if values_of(fval) - unmarked_values(axis, context):
             out.append(axis)

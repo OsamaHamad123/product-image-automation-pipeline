@@ -123,7 +123,8 @@ def _css_classes(*paths):
 
 def test_classes_and_tokens_exist():
     defined = _css_classes(LAQTA_CSS, HEALTH_CSS, SETTINGS_CSS)
-    ids = {"lq-health-initial", "lq-health-search-title", "lq-health-results-title", "lq-health-cost-title",
+    ids = {"lq-health-initial", "lq-health-attention-initial", "lq-health-now-title", "lq-health-eval-title",
+           "lq-health-search-title", "lq-health-results-title", "lq-health-cost-title",
            "lq-health-reasons-title", "lq-health-log-title", "lq-health-log-body", "lq-settings-sheet-title",
            "lq-settings-keys-title", "lq-settings-ap-title", "lq-settings-processing-title",
            "lq-settings-advanced-title", "lq-settings-models-title", "lq-settings-sources-title", "lq-settings-speed-title", "lq-key-form", "lq-page-health", "lq-page-settings", "lq-health-spin"}
@@ -549,7 +550,7 @@ def test_config_reads_processing_settings(monkeypatch, fake_connection):
     import pymysql
 
     for name in ("BG_REMOVAL_METHOD", "ENABLE_IMAGE_ENHANCEMENT", "OUTPUT_CANVAS_SIZE", "AUTO_PUBLISH_ENABLED",
-                 "AUTO_PUBLISH_BRANDS", "STRICT_BRAND_MATCH", "SEARCH_ENGINE"):
+                 "AUTO_PUBLISH_BRANDS", "STRICT_BRAND_MATCH"):
         monkeypatch.setattr(config, name, getattr(config, name))
     rows = [{"key": "bg_removal_method", "value": "NONE"}, {"key": "enable_image_enhancement", "value": "true"},
             {"key": "output_canvas_size", "value": "1200"}]
@@ -683,7 +684,7 @@ def test_settings_script_helpers():
                 " S.sheetError({ status: 500, data: { error: 'Spreadsheet URL or name is required' } }, true),"
                 " S.sheetError({ status: 419 }, true)],\n"
                 " save: S.saveConfirmText('https://docs.google.com/x', ''), clear: S.clearConfirmText('Serper'),\n"
-                " rollback: S.ROLLBACK_TEXT }));")
+                " rollback: 'ROLLBACK_TEXT' in S }));")
     cols = {c["key"]: c for c in out["full"]["columns"]}
     assert cols["barcode"]["text"] == "Barcode" and cols["barcode"]["tone"] == "success"
     assert cols["link"] == {"key": "link", "label": "رابط الصورة", "found": False, "tone": "info",
@@ -699,7 +700,7 @@ def test_settings_script_helpers():
     # no silent destructive action: each confirmation says what changes and what is kept
     assert "المراجعات والصور المعتمدة" in out["save"] and "ما بتتأثر" in out["save"] and "أول تبويب" in out["save"]
     assert "Serper" in out["clear"] and ".env" in out["clear"]
-    assert "للنظام القديم" in out["rollback"] and "والمراجعات ما بتتغير" in out["rollback"]
+    assert out["rollback"] is False                      # no engine to roll back to: the v1 engine is gone
 
 
 # A few elements with attributes and listeners: enough for the confirmations settings.js wires to the page.
@@ -724,8 +725,7 @@ function makeEl(attrs, children) {
 }
 const clearBox = makeEl({ 'data-key-clear': '' });
 const keyForm = makeEl({ 'data-key-form': 'photoroom', 'data-key-name': 'PhotoRoom' }, { '[data-key-clear]': clearBox });
-const v1Radio = makeEl({ 'data-engine-v1': '' });
-const advForm = makeEl({ 'data-advanced-form': '', 'data-engine': 'v2' }, { '[data-engine-v1]': v1Radio });
+const advForm = makeEl({ 'data-advanced-form': '' });
 const apSwitch = makeEl({ 'data-autopub-switch': '', 'data-confirm-on': 'ON-TEXT', 'data-confirm-off': 'OFF-TEXT' });
 const apSave = makeEl({ 'data-autopub-save': '' });
 const apForm = makeEl({ 'data-autopub-form': '' }, { '[data-autopub-switch]': apSwitch, '[data-autopub-save]': apSave });
@@ -739,7 +739,7 @@ globalThis.confirm = text => { asked.push(text); return answer; };
 
 
 @NEEDS_NODE
-def test_settings_page_asks_before_clearing_a_key_rolling_back_or_switching_auto_publish():
+def test_settings_page_asks_before_clearing_a_key_or_switching_auto_publish():
     """No silent destructive action: the wiring in settings.js, not only the texts, under node with a few fake elements."""
     script = FAKE_SETTINGS_DOM + read(SETTINGS_JS) + r"""
 const out = {};
@@ -750,10 +750,7 @@ out.clearNo = [keyForm.fire('submit'), asked.pop()];
 answer = true;
 out.clearYes = [keyForm.fire('submit'), asked.length];
 answer = false;
-v1Radio.checked = true;
-out.rollbackNo = [advForm.fire('submit'), asked.pop() === window.LaqtaSettings.ROLLBACK_TEXT];
-advForm.attrs['data-engine'] = 'v1';                       // already on v1: saving again does not ask
-out.v1Again = [advForm.fire('submit'), asked.length];
+out.advanced = [advForm.fire('submit'), asked.length];   // «متقدم» without a key to clear: no question
 out.saveHidden = apSave.hasAttribute('hidden');
 apSwitch.checked = true;                                    // the click turned it on
 apSwitch.fire('change');
@@ -771,8 +768,7 @@ console.log(JSON.stringify(out));
     assert out["plain"] == [False, 0]
     assert out["clearNo"][0] is True and "PhotoRoom" in out["clearNo"][1] and ".env" in out["clearNo"][1]
     assert out["clearYes"] == [False, 1]
-    assert out["rollbackNo"] == [True, True]
-    assert out["v1Again"] == [False, 1]
+    assert out["advanced"] == [False, 1]
     assert out["saveHidden"] is True                            # with the script, the switch itself saves
     assert out["onNo"] == ["ON-TEXT", False, 0]                 # declined: switched back, nothing sent
     assert out["onYes"] == ["ON-TEXT", True, 1]
@@ -994,15 +990,19 @@ def test_each_form_saves_only_its_own_section(app_env):
 
 def test_the_phase1_full_form_keeps_its_rules(app_env):
     db = app_env["db"]
+    before = _settings(db)
     out = _kernel(app_env["env"], [["POST", "/settings", {
         "search_engine": "v9", "gemini_model": "gemini-2.0-flash-lite", "auto_publish_brands": " Almarai, ,Masafi,Almarai ",
         "google_search_cx": "cx-1", "cloudinary_cloud_name": "c", "strict_brand_match": "true", "serper_api_key": "",
         "auto_publish_enabled": "true"}]])
     after = _settings(db)
-    assert after["search_engine"] == "v2" and after["gemini_model"] == "gemini-3.1-flash-lite"
+    # the engine switch and the v1-only switches are gone: a posted value is never stored
+    for key in ("search_engine", "filter_competitors", "enable_gemini_pre_validation", "bypass_white_background_check"):
+        assert after.get(key) == before.get(key), key
+    assert after["gemini_model"] == "gemini-3.1-flash-lite"
     assert after["auto_publish_brands"] == "Almarai, Masafi" and after["google_search_cx"] == "cx-1"
     assert after["serper_api_key"] == SECRETS["serper_api_key"]
-    assert after["filter_competitors"] == "false" and after["strict_brand_match"] == "true"
+    assert after["strict_brand_match"] == "true"
     # turning auto-publish on still needs a ready brand: ALMARAI is ready in review_stats
     assert after["auto_publish_enabled"] == "true"
     assert any("غير مدعوم" in w for w in out[0]["flash"]["warnings"])

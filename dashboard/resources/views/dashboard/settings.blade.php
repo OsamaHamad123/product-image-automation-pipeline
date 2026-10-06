@@ -8,7 +8,7 @@
     Stored keys are never printed, not even in part: the keys tab shows «محفوظ / غير محفوظ» and an empty,
     write-only field; an empty field keeps the stored key. Each form saves only its own section.
     public/js/settings.js: the sheet preview/save (POST /api/sheet/preview, /api/sheet/save), the key forms,
-    and the confirmations of the auto-publish switch and the search-engine rollback.
+    and the confirmation of the auto-publish switch.
 --}}
 @extends('layouts.laqta')
 
@@ -22,7 +22,9 @@
 
 @section('content')
 <div class="lq-settings" data-settings-page data-tab="{{ $tab }}">
-    <x-lq.page-header title="الإعدادات" />
+    <x-lq.page-header title="الإعدادات">
+        <x-slot:actions><x-lq.button variant="secondary" icon="sparkle" :href="route('dashboard.setup')">جهّز لقطة خطوة بخطوة</x-lq.button></x-slot:actions>
+    </x-lq.page-header>
 
     @if (!empty($flash['success']))
         <x-lq.alert variant="success" role="status">{{ $flash['success'] }}</x-lq.alert>

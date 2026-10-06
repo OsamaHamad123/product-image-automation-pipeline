@@ -19,7 +19,6 @@ except Exception:  # pragma: no cover - depends on the environment
 
 
 DEFAULTS = {
-    "SEARCH_ENGINE": "v2",
     "SERPER_API_KEY": "",
     "GEMINI_API_KEY": "",
     "GEMINI_MODEL": "gemini-3.1-flash-lite",
@@ -140,10 +139,6 @@ def as_list(value: Any) -> List[str]:
     if isinstance(value, (list, tuple, set)):
         return [str(v).strip() for v in value if str(v).strip()]
     return [v.strip() for v in str(value).split(",") if v.strip()]
-
-
-def search_engine() -> str:
-    return str(get("SEARCH_ENGINE")).strip().lower() or "v2"
 
 
 def serper_api_key() -> str:
@@ -329,6 +324,28 @@ def verifier_rejudge_max_calls() -> int:
 def model_prices_text() -> str:
     value = get("MODEL_PRICES")
     return value if isinstance(value, str) else ("" if value is None else str(value))
+
+
+# --- query normaliser: a cheap model reads an abbreviated sheet name for the search queries only ------------
+# QUERY_NORMALIZER                  'gemini' (default): one small Gemini Flash-Lite call per product (cached in the
+#                                   database), whose reading writes better search words (catalog_match.normalizer);
+#                                   'off': today's queries only. Never evidence, never identity.
+# QUERY_NORMALIZER_RUN_BUDGET_USD   what those calls may cost in one run (estimated USD); past it they are skipped
+DEFAULTS.update({
+    "QUERY_NORMALIZER": "gemini",
+    "QUERY_NORMALIZER_RUN_BUDGET_USD": "0.5",
+})
+QUERY_NORMALIZER_MODES = ("gemini", "off")
+
+
+def query_normalizer() -> str:
+    """'gemini' (default) or 'off'; an unknown value is 'off' (never a surprise paid call)."""
+    value = str(get("QUERY_NORMALIZER") or "").strip().lower() or DEFAULTS["QUERY_NORMALIZER"]
+    return value if value in QUERY_NORMALIZER_MODES else "off"
+
+
+def query_normalizer_run_budget_usd() -> float:
+    return _number("QUERY_NORMALIZER_RUN_BUDGET_USD", 0.0, 1000.0)
 
 
 # --- sources package (P3): accessors ---
@@ -533,3 +550,61 @@ def healthcheck_url() -> str:
     value = str(get("HEALTHCHECK_URL") or "").strip().rstrip("/")
     return value if value.lower().startswith(("https://", "http://")) and " " not in value else ""
 # --- end runtime package ---
+
+
+# --- embeddings package: CPU image embeddings, evidence only (catalog_match.embeddings) ---
+# EMBEDDINGS            'off' (default) | 'dinov2' | 'siglip2': the model that reads the downloaded pictures for the
+#                       brand look check (a review warning, never a decision) and the near-duplicate cosine. 'off'
+#                       never imports onnxruntime, never loads a model and never reads the approved_embeddings table.
+#                       deploy/ubuntu/install.sh --with-embeddings installs onnxruntime, downloads the model and turns
+#                       it on ('dinov2'); an unknown value reads as 'off'.
+# EMBEDDINGS_MODEL_DIR  folder of the pinned model files; '' = <U2NET_HOME>/embeddings when U2NET_HOME is set (the
+#                       shared models folder of the server's units and dashboard), else temp/models in the repository
+DEFAULTS.update({
+    "EMBEDDINGS": "off",
+    "EMBEDDINGS_MODEL_DIR": "",
+})
+EMBEDDINGS_MODES = ("off", "dinov2", "siglip2")
+
+
+def embeddings_mode() -> str:
+    """'off' (default), 'dinov2' or 'siglip2'; anything else reads as 'off' (never a surprise model download)."""
+    value = str(get("EMBEDDINGS") or "").strip().lower()
+    return value if value in EMBEDDINGS_MODES else "off"
+
+
+def embeddings_model_dir() -> str:
+    """Absolute folder of the embedding model files (EMBEDDINGS_MODEL_DIR, see above)."""
+    value = str(get("EMBEDDINGS_MODEL_DIR") or "").strip()
+    if not value:
+        shared = os.getenv("U2NET_HOME", "").strip()
+        value = os.path.join(shared, "embeddings") if shared else os.path.join("temp", "models")
+    if not os.path.isabs(value):
+        value = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), value)
+    return value
+# --- end embeddings package ---
+
+
+# --- recut package: «أعد معالجتها شفافة» and «فحص القص» (recut.py, scripts/reprocess_transparent.py) ---
+# PHOTOROOM_PRICE_USD   what one PhotoRoom segment call costs on the owner's plan: the reprocess estimate (calls x price)
+#                       and its --max-usd cap count with it
+# REMOVEBG_PRICE_USD    the same for remove.bg (when it is the configured method)
+# RECUT_BATCH_MAX       the most pictures one dashboard batch («ابدأ» on the Health card) may redo
+DEFAULTS.update({
+    "PHOTOROOM_PRICE_USD": "0.02",
+    "REMOVEBG_PRICE_USD": "0.2",
+    "RECUT_BATCH_MAX": 200,
+})
+
+
+def isolation_price_usd(method: str) -> float:
+    """Estimated USD of one background-removal call of `method` (0 for the free local methods and 'none')."""
+    name = {"photoroom": "PHOTOROOM_PRICE_USD", "remove_bg_api": "REMOVEBG_PRICE_USD"}.get(str(method or ""))
+    return _number(name, 0.0, 10.0) if name else 0.0
+
+
+def recut_batch_max() -> int:
+    """The most pictures one dashboard reprocess batch may redo (RECUT_BATCH_MAX, 1..5000)."""
+    value = get("RECUT_BATCH_MAX")
+    return max(1, min(5000, value if isinstance(value, int) else int(DEFAULTS["RECUT_BATCH_MAX"])))
+# --- end recut package ---

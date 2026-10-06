@@ -198,7 +198,7 @@ def test_the_search_entry_point_passes_the_spec_so_alternatives_carry_their_warn
         return decide.route(spec, pool, OK, HEALTHY, set())
 
     monkeypatch.setattr(pipeline, "find_product_image", find)
-    result = image_search.search_best_product_image_v2(
+    result = image_search.search_best_product_image(
         "Almarai Full Fat Milk 1L", "Almarai Full Fat Milk 1L", "Almarai", barcode="6281007000024", category="Dairy",
         skip_cache=True, brand_mappings=MAPPINGS)
     assert seen == [MILK.sku_key]

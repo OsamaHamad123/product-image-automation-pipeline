@@ -28,7 +28,7 @@ class SettingsController extends Controller
         'models' => ['label' => 'نماذج التحقق', 'hint' => 'مين بيقرأ الملصق وبكم'],
         'auto-publish' => ['label' => 'النشر الآلي', 'hint' => 'الماركات الجاهزة'],
         'processing' => ['label' => 'معالجة الصور', 'hint' => 'المقاس وعزل الخلفية'],
-        'advanced' => ['label' => 'متقدم', 'hint' => 'الرجوع للنظام القديم'],
+        'advanced' => ['label' => 'متقدم', 'hint' => 'مصادر البحث والسرعة'],
     ];
 
     /** النشر الآلي لكل الماركات المؤكدة (AUTO_PUBLISH_STRICT_LANE): نموذجه الخاص (section=strict-lane). */
@@ -43,13 +43,11 @@ class SettingsController extends Controller
     ];
 
     public const TEXT_KEYS = [
-        'gemini_model', 'cloudinary_cloud_name', 'google_search_cx', 'search_engine', 'auto_publish_brands',
+        'gemini_model', 'cloudinary_cloud_name', 'google_search_cx', 'auto_publish_brands',
     ];
 
     public const CHECKBOX_KEYS = [
         'strict_brand_match', 'auto_publish_enabled',
-        // مفاتيح محرك البحث القديم v1 فقط (للتراجع المؤقت)
-        'enable_gemini_pre_validation', 'filter_competitors', 'bypass_white_background_check',
     ];
 
     /** إعدادات معالجة الصور التي يقرؤها config.load_db_config من system_settings. */
@@ -125,9 +123,8 @@ class SettingsController extends Controller
         'speed' => ['tab' => 'advanced', 'text' => ['worker_concurrency']],
         // نموذج Gemini صار بتبويب «نماذج التحقق» (saveModels): «متقدم» ما بيكتبه
         'advanced' => ['tab' => 'advanced', 'secret' => ['google_search_api_key', 'proxy_url'],
-                       'text' => ['search_engine', 'google_search_cx'],
-                       'checkbox' => ['strict_brand_match', 'enable_gemini_pre_validation', 'filter_competitors',
-                                      'bypass_white_background_check']],
+                       'text' => ['google_search_cx'],
+                       'checkbox' => ['strict_brand_match']],
     ];
 
     /** مزودو تبويب المفاتيح: مفاتيح الإعداد، ومتغيرات البيئة المقابلة في config.py، وخدمة فحص الاتصالات. */
@@ -176,6 +173,14 @@ class SettingsController extends Controller
         'output_base' => ['gemini' => 400, 'claude' => 600, 'claude-haiku' => 100],
     ];
 
+    /**
+     * قارئ أسماء الشيت المختصرة (catalog_match/normalizer.py، QUERY_NORMALIZER): gemini أو off، الافتراضي gemini، وأي قيمة
+     * غيرهم بتنقرا off. تقدير tokens لكل منتج نفس normalizer.estimate_tokens لسطر مرجعي (اختبار بايثون بيقارن الاثنين).
+     */
+    public const QUERY_NORMALIZER_MODES = ['gemini', 'off'];
+    public const QUERY_NORMALIZER_DEFAULT = 'gemini';
+    public const NORMALIZER_ESTIMATE = ['model' => 'gemini:gemini-3.1-flash-lite', 'input_tokens' => 368, 'output_tokens' => 120];
+
     /** مفتاح كل مزود نماذج: الإعداد في system_settings ومتغير البيئة المقابل. */
     public const VERIFIER_KEYS = [
         'gemini' => ['setting' => 'gemini_api_key', 'env' => 'GEMINI_API_KEY', 'name' => 'Gemini'],
@@ -198,10 +203,10 @@ class SettingsController extends Controller
     /** متغيرات .env الجذر غير السرية التي يجوز للصفحة قراءة قيمتها. */
     private const READABLE_ENV = [
         'SPREADSHEET_NAME_OR_URL', 'SPREADSHEET_TAB_NAME', 'CREDENTIALS_FILE', 'BG_REMOVAL_METHOD', 'BG_FALLBACK',
-        'OUTPUT_CANVAS_SIZE', 'OUTPUT_BACKGROUND', 'GEMINI_MODEL', 'SEARCH_ENGINE',
+        'OUTPUT_CANVAS_SIZE', 'OUTPUT_BACKGROUND', 'GEMINI_MODEL',
         'VERIFIER_PRIMARY', 'VERIFIER_STRONG', 'VERIFIER_MONTHLY_BUDGET_USD', 'MODEL_PRICES',
         'EXPANSION_ENABLED', 'EXPANSION_MAX_CALLS', 'VISUAL_SEARCH', 'SERPAPI_LENS_PRICE_USD', 'GTIN_POLICY',
-        'LOCAL_INDEX_ENABLED', 'LOCAL_INDEX_MAX_PAGES', 'WORKER_CONCURRENCY',
+        'LOCAL_INDEX_ENABLED', 'LOCAL_INDEX_MAX_PAGES', 'WORKER_CONCURRENCY', 'QUERY_NORMALIZER',
     ];
 
     public function show(Request $request)
@@ -294,9 +299,6 @@ class SettingsController extends Controller
 
             foreach ($spec['text'] ?? [] as $k) {
                 $val = self::field($request, $k);
-                if ($k === 'search_engine' && !in_array($val, ['v2', 'v1'], true)) {
-                    $val = 'v2';
-                }
                 if ($k === 'gemini_model' && !array_key_exists($val, ProductController::SUPPORTED_GEMINI_MODELS)) {
                     $warnings[] = "نموذج Gemini '{$val}' غير مدعوم؛ لم يتم تغيير النموذج المحفوظ.";
                     continue;
@@ -1092,7 +1094,6 @@ class SettingsController extends Controller
     public static function advancedData(array $stored): array
     {
         $value = fn (string $k) => trim((string) ($stored[$k]['value'] ?? ''));
-        $engine = $value('search_engine') === 'v1' ? 'v1' : 'v2';
         $model = $value('gemini_model') !== '' ? $value('gemini_model') : 'gemini-3.1-flash-lite';
         $secrets = [];
         foreach (self::LEGACY_SECRETS as $k => $meta) {
@@ -1100,17 +1101,11 @@ class SettingsController extends Controller
         }
         $strict = $value('strict_brand_match');
         return [
-            'engine' => $engine,
             'model' => $model,
             'models' => ProductController::SUPPORTED_GEMINI_MODELS,
             'model_supported' => array_key_exists($model, ProductController::SUPPORTED_GEMINI_MODELS),
             'cx' => $value('google_search_cx'),
             'strict' => $strict === '' ? true : $strict === 'true',
-            'v1' => [
-                'enable_gemini_pre_validation' => $value('enable_gemini_pre_validation') === 'true',
-                'filter_competitors' => $value('filter_competitors') === 'true',
-                'bypass_white_background_check' => $value('bypass_white_background_check') === 'true',
-            ],
             'secrets' => $secrets,
             'sources' => self::sourcesData($stored),
             'speed' => self::speedData($stored),
@@ -1195,13 +1190,14 @@ class SettingsController extends Controller
 
     /**
      * تبويب «نماذج التحقق»: الاختيار المحفوظ (أو .env أو الافتراضي كما يقرؤه config.py)، صف لكل نموذج مدعوم بسعره
-     * وتقدير تكلفته لكل 100 منتج، صرف الشهر من verifier_spend، وتحذيرات المفاتيح الناقصة. لا مفتاح يُقرأ هنا: بس محفوظ أو لا.
+     * وتقدير تكلفته لكل 100 منتج، صرف الشهر من verifier_spend، وتحذيرات المفاتيح الناقصة، وقارئ أسماء الشيت المختصرة
+     * (query_normalizer) مع تكلفته التقديرية. لا مفتاح يُقرأ هنا: بس محفوظ أو لا.
      */
     public static function modelsData(array $stored, ?array $spend): array
     {
         $value = fn (string $k) => trim((string) ($stored[$k]['value'] ?? ''));
         $env = self::envValues(['GEMINI_MODEL', 'VERIFIER_PRIMARY', 'VERIFIER_STRONG', 'VERIFIER_MONTHLY_BUDGET_USD',
-                                'MODEL_PRICES']);
+                                'MODEL_PRICES', 'QUERY_NORMALIZER']);
         $gemini = $value('gemini_model') !== '' ? $value('gemini_model')
             : (trim((string) ($env['GEMINI_MODEL'] ?? '')) ?: self::VERIFIER_DEFAULT_PRIMARY_MODEL);
         $primary = strtolower($value('verifier_primary') ?: trim((string) ($env['VERIFIER_PRIMARY'] ?? '')));
@@ -1254,7 +1250,16 @@ class SettingsController extends Controller
         }
 
         $strongSpent = is_array($spend) ? (float) ($spend['strong_usd'] ?? 0) : null;
+        $normalizer = strtolower($value('query_normalizer') ?: trim((string) ($env['QUERY_NORMALIZER'] ?? '')));
+        $normalizer = $normalizer === '' ? self::QUERY_NORMALIZER_DEFAULT
+            : (in_array($normalizer, self::QUERY_NORMALIZER_MODES, true) ? $normalizer : 'off');
+        $normalizer100 = self::normalizerPer100($prices);
         return [
+            'normalizer' => $normalizer,
+            'normalizer_on' => $normalizer === 'gemini',
+            'normalizer_key_saved' => $keySaved['gemini'] ?? false,
+            'normalizer_per100' => $normalizer100,
+            'normalizer_per100_text' => self::money($normalizer100),
             'primary' => $primary,
             'primary_supported' => isset(self::VERIFIER_MODELS[$primary]),
             'strong' => $strong,
@@ -1324,6 +1329,15 @@ class SettingsController extends Controller
         return round(100 * $call, 2);
     }
 
+    /** دولار لكل 100 منتج لقارئ أسماء الشيت (نفس 100 * normalizer.estimate_usd): قراءة وحدة لكل منتج جديد، والمحفوظة ببلاش. */
+    public static function normalizerPer100(array $prices): float
+    {
+        $e = self::NORMALIZER_ESTIMATE;
+        $price = $prices[$e['model']] ?? ['input' => 0.0, 'output' => 0.0];
+        $call = round(($e['input_tokens'] * $price['input'] + $e['output_tokens'] * $price['output']) / 1e6, 6);
+        return round(100 * $call, 3);
+    }
+
     /** اسم حقل السعر لكل نموذج (المعرّف فيه ':' و'.'). */
     public static function modelSlug(string $id): string
     {
@@ -1367,7 +1381,8 @@ class SettingsController extends Controller
     }
 
     /**
-     * حفظ «نماذج التحقق»: النموذج الأساسي والقوي (أو 'off') من القائمة المدعومة فقط، الميزانية الشهرية، والأسعار.
+     * حفظ «نماذج التحقق»: النموذج الأساسي والقوي (أو 'off') من القائمة المدعومة فقط، الميزانية الشهرية، والأسعار،
+     * وقارئ أسماء الشيت المختصرة (gemini أو off).
      * اختيار غير مدعوم أو رقم غير صالح ما بيتغير (مع تحذير)، والباقي بينحفظ. الأساسي Gemini بيحدّث gemini_model كمان
      * حتى فحص بدء العامل وصفحة الصحة يشوفوا نفس النموذج.
      */
@@ -1389,6 +1404,16 @@ class SettingsController extends Controller
             $changes['verifier_strong'] = $strong;
         } else {
             $warnings[] = 'النموذج القوي اللي اخترته مش من القائمة المدعومة؛ ما تغيّر.';
+        }
+        // قارئ أسماء الشيت: gemini أو off بس؛ نموذج قديم بلا هالحقل ما بيغيّره
+        $normalizer = $request->input('query_normalizer');
+        if ($normalizer !== null) {
+            $normalizer = is_scalar($normalizer) ? strtolower(trim((string) $normalizer)) : '';
+            if (in_array($normalizer, self::QUERY_NORMALIZER_MODES, true)) {
+                $changes['query_normalizer'] = $normalizer;
+            } else {
+                $warnings[] = 'اختيار قراءة الأسماء المختصرة مش مفهوم؛ ما تغيّر.';
+            }
         }
         $budget = self::field($request, 'verifier_monthly_budget_usd');
         if (preg_match('/^\d{1,4}(\.\d{1,2})?$/', $budget) && (float) $budget <= self::VERIFIER_BUDGET_MAX) {
