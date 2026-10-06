@@ -364,6 +364,27 @@ globalThis.fetch = (url, init = {}) => {
 };
 const answer = (call, data, status = 200) => call.resolve(response(data, status));
 const flush = async () => { for (let i = 0; i < 30; i++) await new Promise(r => setImmediate(r)); };
+// Timers run for real while the scenario runs. Once it has printed `out`, finishTimers() fires the ones still pending
+// at once, in due order: the page's 6 s auto-hide of the approvals panel used to keep node alive 6 s after every such
+// scenario. A late callback still runs, and still fails the test when it throws.
+const realSetTimeout = setTimeout, realClearTimeout = clearTimeout;
+const pendingTimers = new Map();
+let timerSeq = 0;
+globalThis.setTimeout = (fn, ms, ...args) => {
+    const handle = realSetTimeout(() => { pendingTimers.delete(handle); fn(...args); }, ms);
+    pendingTimers.set(handle, { fn, args, due: Date.now() + (Number(ms) || 0), seq: timerSeq++ });
+    return handle;
+};
+globalThis.clearTimeout = handle => { pendingTimers.delete(handle); realClearTimeout(handle); };
+async function finishTimers(limit = 1000) {
+    for (let n = 0; pendingTimers.size && n < limit; n++) {
+        const [handle, timer] = [...pendingTimers.entries()].sort((a, b) => a[1].due - b[1].due || a[1].seq - b[1].seq)[0];
+        pendingTimers.delete(handle);
+        realClearTimeout(handle);
+        timer.fn(...timer.args);
+        await flush();
+    }
+}
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const requests = path => calls.filter(c => c.url.split('?')[0] === path);
 """
@@ -435,7 +456,8 @@ def run(scenario: str, tmp_path, fixture: dict) -> dict:
     """Run one scenario (async JS body) against the page scripts; returns the `out` object it filled."""
     shim = SHIM.replace("__FIXTURE__", json.dumps(fixture, ensure_ascii=False))
     source = shim + "\n" + scripts_source() + "\n" + HELPERS + "\n(async () => {\n" + scenario + \
-        "\nconsole.log('__OUT__' + JSON.stringify(out));\n})().catch(e => { console.error(e && e.stack || e); process.exit(3); });\n"
+        "\nconsole.log('__OUT__' + JSON.stringify(out));\nawait finishTimers();\n" \
+        "})().catch(e => { console.error(e && e.stack || e); process.exit(3); });\n"
     path = tmp_path / "review_page.js"
     path.write_text(source, encoding="utf-8")
     result = subprocess.run([NODE, str(path)], capture_output=True, text=True, timeout=90, encoding="utf-8")
