@@ -37,6 +37,10 @@ Route::get('/api/system/publish-check', [\App\Http\Controllers\HealthController:
 // «فهرس المتاجر المحلي»: التحديث كمهمة خلفية بزر صريح (cli_bridge.local_index_refresh)؛ GET يرجع حالة البطاقة فقط
 Route::get('/api/system/local-index', [\App\Http\Controllers\LocalIndexController::class, 'status']);
 Route::post('/api/system/local-index/refresh', [\App\Http\Controllers\LocalIndexController::class, 'refresh']);
+// «صدّر مجموعة اختبار» (القسم المتقدم بصفحة الصحة): المنتجات المراجَعة كملف واحد (cli_bridge.eval_export) بزر صريح
+Route::post('/api/system/eval-export', [\App\Http\Controllers\HealthController::class, 'exportEvalSet']);
+Route::get('/api/system/eval-export/{file}', [\App\Http\Controllers\HealthController::class, 'downloadEvalSet'])
+    ->where('file', 'laqta_eval_set_[0-9_-]+\.zip');
 
 // جسر بايثون (cli_bridge.py مباشرة، بدون خادم FastAPI)
 Route::post('/api/search', [ApiController::class, 'search']);

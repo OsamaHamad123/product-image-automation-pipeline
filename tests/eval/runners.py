@@ -711,10 +711,64 @@ class FixtureOffProvider(FixtureProvider):
         return self._result(spec)
 
 
+class FixtureLookupProvider(FixtureProvider):
+    """A recorded set's candidates the engine found without a search (eval_record --from-db): its own page reads
+    ('page') and the local catalog index ('local_index'). A lookup like the real LocalIndexProvider: asked once per
+    SKU, unsanctioned (never auto-published), it never stops the search on its own."""
+
+    kind = "lookup"
+    needs_gtin = False
+
+    def __init__(self, models: Any, sku: Mapping[str, Any], name: str):
+        super().__init__(models, sku, name, False)
+        self.lookup_query_id = "IDX" if name == "local_index" else "PAGE"
+        self.lookups = 0
+
+    def lookup(self, spec: Any) -> Any:
+        self.lookups += 1
+        cands = [_to_candidate(self.models, c) for c in self.sku.get("candidates", [])
+                 if c.get("provider") == self.name and not c.get("source_only")]
+        return self.models.ProviderResult(provider=self.name, status="ok" if cands else "empty", http_status=200,
+                                          latency_ms=0, candidates=cands)
+
+    def search(self, query: str, hl: str, spec: Any) -> Any:
+        self.calls.append((query, hl))
+        return self.lookup(spec)
+
+
+RECORDED_LOOKUPS = ("page", "local_index")
+MAX_SERVED_SIDE = 2048
+
+
+def _served_bytes(data: bytes, cand: Mapping[str, Any]) -> bytes:
+    """A recorded blob stored smaller than the image the engine downloaded (eval_record --from-db keeps <= 384 px
+    copies) is served back at its recorded size (capped at MAX_SERVED_SIDE), so the size rules see the original's
+    size; the image-quality scores of such a set read an upscaled copy."""
+    size = cand.get("recorded_size")
+    if not size or not cand.get("image_file"):
+        return data
+    from PIL import Image
+
+    with Image.open(io.BytesIO(data)) as im:
+        im.load()
+        w, h = int(size[0]), int(size[1])
+        scale = min(1.0, MAX_SERVED_SIDE / float(max(w, h, 1)))
+        w, h = max(1, round(w * scale)), max(1, round(h * scale))
+        if (w, h) == im.size or w <= im.size[0]:
+            return data
+        out = im.convert("RGBA" if im.mode in ("RGBA", "LA", "P") else "RGB").resize((w, h), Image.Resampling.LANCZOS)
+    buf = io.BytesIO()
+    if out.mode == "RGBA":
+        out.save(buf, format="PNG")
+    else:
+        out.save(buf, format="JPEG", quality=92)
+    return buf.getvalue()
+
+
 class FixtureFetcher:
     """models.Fetcher returning imagegen bytes; failed downloads mirror the fixture's download field."""
 
-    ERRORS = {"403": "http_403", "html": "not_image", "svg": "not_image"}
+    ERRORS = {"403": "http_403", "html": "not_image", "svg": "not_image", "not_recorded": "not_recorded"}
 
     def __init__(self, models: Any, sku: Mapping[str, Any]):
         self.models, self.sku = models, sku
@@ -738,7 +792,7 @@ class FixtureFetcher:
                 out.append(self.models.FetchedImage(candidate=cand, ok=False,
                                                     error=self.ERRORS.get(download, f"http_{download}")))
                 continue
-            data = candidate_image(self.sku, fc)
+            data = _served_bytes(candidate_image(self.sku, fc), fc)
             with Image.open(io.BytesIO(data)) as im:
                 im.load()
                 width, height = im.size
@@ -811,6 +865,7 @@ class CassetteVerifier:
         self.index = UrlIndex(sku)
         self.calls = 0
         self.max_images = 0
+        self.missing = 0                 # images asked about that the cassette holds no reading of
 
     def verify(self, spec: Any, images: List[Any]) -> Any:
         self.calls += 1
@@ -823,11 +878,19 @@ class CassetteVerifier:
         verdicts = []
         # The real rules need a SkuSpec; protocol checks that pass spec=None use decide_verdict().
         make_verdict = _real_make_verdict() if isinstance(spec, m.SkuSpec) else None
+        # A recorded set (eval_record --from-db) says what a candidate nobody read live gets: "missing": "UNKNOWN"
+        # (never accepted). The committed cassettes say nothing: such a candidate is UNSURE, as it always was.
+        missing = str(self.cassette.get("missing") or "UNSURE")
         for i, fetched in enumerate(images):
             cid = self.index.cid(getattr(getattr(fetched, "candidate", None), "image_url", None))
             entry = cassette_entry(self.cassette, self.sku["id"], cid) if cid else None
             if entry is None:
-                verdicts.append(m.VlmImageVerdict(index=i, decision="UNSURE"))
+                self.missing += 1
+                verdicts.append(m.VlmImageVerdict(index=i, decision=missing))
+                continue
+            if not any(k in entry for k in self.FIELDS) and entry.get("recorded_decision"):
+                # only the decision was recorded (a reviewed image the database no longer keeps the reading of)
+                verdicts.append(m.VlmImageVerdict(index=i, decision=str(entry["recorded_decision"])))
                 continue
             if make_verdict is not None:
                 verdicts.append(make_verdict(spec, i, entry))
@@ -903,20 +966,24 @@ def build_providers(models: Any, sku: Mapping[str, Any], provider_set: str = "se
     overlay (source_only, tests/eval/sources.py) are served by the expansion and local-index fakes, never here.
     """
     names = {c.get("provider") for c in sku.get("candidates", []) if not c.get("source_only")}
-    unknown = sorted(str(n) for n in names - set(SEARCH_PROVIDERS) - {LOOKUP_PROVIDER})
+    unknown = sorted(str(n) for n in names - set(SEARCH_PROVIDERS) - {LOOKUP_PROVIDER} - set(RECORDED_LOOKUPS))
     if unknown:
         raise ValueError(f"{sku.get('id')}: candidates from unknown provider(s) {unknown}; "
-                         f"the replay knows {sorted(SEARCH_PROVIDERS)} and {LOOKUP_PROVIDER!r}")
+                         f"the replay knows {sorted(SEARCH_PROVIDERS)}, {LOOKUP_PROVIDER!r} and the recorded "
+                         f"lookups {list(RECORDED_LOOKUPS)}")
     off = FixtureOffProvider(models, sku)
+    # a recorded set's own page reads / index rows (eval_record --from-db): lookups, only when the set has them
+    recorded = [FixtureLookupProvider(models, sku, n) for n in RECORDED_LOOKUPS if n in names]
     if provider_set == "serper":
         providers: List[Any] = [FixtureProvider(models, sku, "serper", True), off]
         if "cse_legacy" in names:
             providers.append(FixtureProvider(models, sku, "cse_legacy", True))
         providers.append(FixtureProvider(models, sku, "bing_html", False, fallback=True))
-        return providers
+        return providers + recorded
     if provider_set == "bing_only":
         return [off, FixtureProvider(models, sku, "bing_html", False,
-                                     serve=("bing_html",) + tuple(n for n in SEARCH_PROVIDERS if n != "bing_html"))]
+                                     serve=("bing_html",) + tuple(n for n in SEARCH_PROVIDERS if n != "bing_html"))
+                ] + recorded
     raise ValueError(f"provider_set must be one of {PROVIDER_SETS}, not {provider_set!r}")
 
 
@@ -997,7 +1064,7 @@ def run_v2(sku: Mapping[str, Any], cassette: Mapping[str, Any], scenario: str = 
             if rules:
                 kills.setdefault(cid, []).extend(r for r in rules if r not in kills.get(cid, []))
     auto = decision == metrics.AUTO and chosen is not None
-    used = {}
+    used: Dict[str, Any] = {"missing_readings": replay_verifier.missing} if replay_verifier.missing else {}
     if verifier is not replay_verifier:
         used = {"usage": [dict(u) for u in getattr(outcome, "vlm_usage", None) or [] if isinstance(u, dict)],
                 "notices": list(getattr(outcome, "verifier_notices", None) or []),

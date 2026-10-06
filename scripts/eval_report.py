@@ -88,6 +88,7 @@ def print_report(report, golden, baseline=None):
         leaks = metrics.holdout_leaks(golden.get("skus", []))
         if leaks:
             print(f"  {len(leaks)} rows of the held-out share are named by a regression test and count as dev")
+    print_recorded(report, golden)
     if baseline and report["engine"] != "v1" and report.get("set", "golden") == "golden":
         base = baseline["metrics"]
         print(f"\nv1 baseline: correct pick {_pct(base['correct_pick_rate'])}, wrong auto "
@@ -109,6 +110,50 @@ def print_report(report, golden, baseline=None):
         print("\nengine errors:")
         for o in errors:
             print(f"  {o['sku_id']}: {o['error']}")
+
+
+def recorded_outcomes(golden):
+    """What the engine did live for a recorded set (sku['recorded'], eval_record --from-db): the pick it showed then,
+    as metrics.Outcome, so the reviewers' labels score it like a replay."""
+    out = []
+    for sku in golden.get("skus", []):
+        rec = sku.get("recorded")
+        if not isinstance(rec, dict):
+            continue
+        decision = str(rec.get("decision") or metrics.UNSELECTED)
+        pick = rec.get("pick")
+        auto = decision == metrics.AUTO and bool(pick)
+        out.append(metrics.Outcome(sku_id=sku["id"], engine="live", decision=decision, chosen_id=pick,
+                                   chosen_url=f"recorded:{pick}" if pick else None, auto=auto, needs_review=not auto,
+                                   lane=rec.get("lane") if pick else None))
+    return out
+
+
+def print_recorded(report, golden):
+    """For a recorded set: the live engine's picks scored per lane, how often the replay agrees, the readings it
+    lacked and the picks that landed on candidates nobody labelled."""
+    live = recorded_outcomes(golden)
+    outcomes = report["outcomes"]
+    labels = metrics.labels_from_golden(golden)
+    unlabelled = sum(1 for o in outcomes if o["chosen_id"] and labels[o["sku_id"]]["candidates"].get(o["chosen_id"])
+                     == "")
+    missing = sum(int((o.get("verifier") or {}).get("missing_readings") or 0) for o in outcomes)
+    if unlabelled or missing:
+        print(f"\n{unlabelled} picks landed on unlabelled candidates (counted as not correct: label them in "
+              f"labels.csv, then --import-labels); {missing} images had no recorded reading (read as the cassette's "
+              f"'missing' decision)")
+    if not live:
+        return
+    ids = {o["sku_id"] for o in outcomes}
+    live = [o for o in live if o.sku_id in ids]
+    m = metrics.compute(live, labels)
+    by_id = {o["sku_id"]: o for o in outcomes}
+    same = sum(1 for o in live if (by_id[o.sku_id]["chosen_id"], by_id[o.sku_id]["decision"]) == (o.chosen_id,
+                                                                                                   o.decision))
+    print(f"\nas recorded live (the engine's pick then, scored by the reviews): correct pick "
+          f"{m['n_correct_pick']}/{m['n_with_correct']}, wrong picks {_wrong_picks(m)}; the replay makes the same "
+          f"decision and pick for {same} of {len(live)} products")
+    print(harness.lane_table(m))
 
 
 def _wrong_picks(m):
@@ -230,6 +275,11 @@ def main(argv=None):
                              "tests/eval/sources.py and the set's sources overlay; prints their effect, cost and time")
     parser.add_argument("--local-index", action="store_true",
                         help="also ask a local catalog index (MemoryCatalogStore of the sources overlay's rows)")
+    parser.add_argument("--live-verifier", action="store_true",
+                        help="read the images with the REAL label reader of the current settings (paid calls): the "
+                             "cost estimate is printed first and nothing is called without a yes. Default: the "
+                             "recorded readings, no model call")
+    parser.add_argument("--yes", action="store_true", help="with --live-verifier: answer the cost question with yes")
     parser.add_argument("--sku", action="append", help="only this SKU id (repeatable)")
     parser.add_argument("--out", help="where to write the JSON report (default: temp folder)")
     parser.add_argument("--json", action="store_true", help="print the metrics as JSON instead of tables")
@@ -302,9 +352,25 @@ def main(argv=None):
         base_report = harness.run_all(args.engine, args.scenario, golden=golden, cassette=cassette,
                                       mappings=mappings, sku_ids=args.sku, provider_set=args.provider_set,
                                       set_name=set_name, noisy_path=noisy_path)
+    live = {}
+    if args.live_verifier:
+        if args.engine != "v2" or args.scenario != "normal":
+            parser.error("--live-verifier reads with the real model: --engine v2 and the normal scenario only")
+        import verifier_configs
+        cfg = verifier_configs.current_config()
+        n = len([s for s in golden["skus"] if not args.sku or s["id"] in args.sku])
+        est = verifier_configs.estimate_usd(cfg, n)
+        print(f"live label reader: {cfg.describe()}")
+        print(f"{n} products: at most ${est:.4f} (two 4-image readings each plus every allowed strong look; "
+              "the model prices of the settings page)")
+        if not verifier_configs.confirm("read them with the real model and pay for it? [yes/no]",
+                                        "yes" if args.yes else None):
+            print("nothing was called")
+            return 1
+        live = {"verifier_factory": lambda sku: verifier_configs.live_verifier(cfg), "allow_network": True}
     report = harness.run_all(args.engine, args.scenario, golden=golden, cassette=cassette, mappings=mappings,
                              sku_ids=args.sku, progress=progress, provider_set=args.provider_set,
-                             set_name=set_name, noisy_path=noisy_path, sources=sources_opts)
+                             set_name=set_name, noisy_path=noisy_path, sources=sources_opts, **live)
     if base_report is not None:
         report["without_sources"] = {"metrics": base_report["metrics"], "seconds": base_report["seconds"],
                                      "outcomes": base_report["outcomes"]}

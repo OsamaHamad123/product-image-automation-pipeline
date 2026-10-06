@@ -1887,6 +1887,39 @@ def action_export_run(params):
 
 
 # ---------------------------------------------------------------------------
+# eval_export («صدّر مجموعة اختبار» بالقسم المتقدم بصفحة الصحة): المنتجات المراجَعة كمجموعة اختبار مصنّفة
+# ---------------------------------------------------------------------------
+
+EVAL_SET_PREFIX = "laqta_eval_set_"
+
+
+def action_eval_export(params):
+    """
+    يكتب المنتجات اللي راجعها المالك (review_decisions، والمرشحات المحفوظة مع نسخ صغيرة من صورها وقراءات قارئ
+    الملصقات) كمجموعة اختبار مصنّفة (scripts/eval_record.py --from-db) بمجلد tests/eval/fixtures/recorded/<التاريخ>
+    وملف zip واحد بـ temp/exports ليبعته المالك للفريق. قراءة فقط: لا بحث ولا تكلفة ولا كتابة بالشيت، وكل قيمة سرية
+    مضبوطة تُستبدل بـ [hidden]. يرجع {status, file, zip_path, folder, products, candidates, labelled, images}.
+    """
+    scripts_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts")
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+    import eval_record
+
+    os.makedirs(EXPORT_DIR, exist_ok=True)
+    name = f"{EVAL_SET_PREFIX}{time.strftime('%Y-%m-%d_%H%M')}.zip"
+    try:
+        manifest = eval_record.export_from_db(zip_path=os.path.join(EXPORT_DIR, name))
+    except Exception:
+        return _failure('failed', "Could not export the test set (details in temp/search.log).", "eval_export failed")
+    root = os.path.dirname(os.path.abspath(__file__))
+    folder = os.path.relpath(manifest["folder"], root)
+    return {'status': 'success', 'file': name, 'zip_path': os.path.abspath(manifest.get("zip") or ""),
+            'folder': folder.replace(os.sep, "/"), 'products': int(manifest.get("products") or 0),
+            'candidates': int(manifest.get("candidates") or 0), 'labelled': int(manifest.get("labelled") or 0),
+            'images': int(manifest.get("images") or 0)}
+
+
+# ---------------------------------------------------------------------------
 # ops_health (قراءة فقط: صحة البحث وتكلفته لصفحة التشخيصات)
 # ---------------------------------------------------------------------------
 
@@ -2465,6 +2498,7 @@ ACTIONS = {
     'barcode_suggestions': action_barcode_suggestions,
     'barcode_write': action_barcode_write,
     'export_run': action_export_run,
+    'eval_export': action_eval_export,
     'lock_state': action_lock_state,
     'publish_check': action_publish_check,
     'bg_methods': action_bg_methods,
