@@ -49,7 +49,8 @@ REVIEW_DECISIONS = frozenset({PRESELECTED, UNSELECTED, VERIFIER_DOWN})
 
 CORRECT = "correct_exact"
 
-# Legacy (v1) image-quality gate reasons, as ImageQualityGatekeeper words them.
+# Legacy (v1) image-quality gate reasons, as its (removed) ImageQualityGatekeeper worded them: baseline_v1.json
+# records kills under these names.
 QUALITY_RULES_V1 = (
     "Image overexposed",
     "Image underexposed",

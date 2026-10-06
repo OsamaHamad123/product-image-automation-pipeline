@@ -18,8 +18,6 @@ def bridge(offline, monkeypatch, tmp_path):
     monkeypatch.setattr(cli_bridge, "LOG_PATH", str(tmp_path / "search.log"))
     monkeypatch.setattr(google_sheets, "get_sheets_client", lambda: object())
     monkeypatch.setattr(google_sheets, "get_brand_mappings", lambda *a, **k: {})
-    monkeypatch.setattr(google_sheets, "align_brand_via_gemini",
-                        lambda *a, **k: pytest.fail("align_brand_via_gemini must not be called"))
     monkeypatch.setattr(local_cache_db, "get_task_by_row", lambda row: None)
     monkeypatch.setattr(local_cache_db, "get_rejections", lambda sku: (["https://old.ae/rejected.jpg"], ["0f0f0f0f0f0f0f0f"]))
     return cli_bridge
@@ -688,7 +686,7 @@ def test_the_upload_reports_the_sheet_outcome(select_env, monkeypatch, tmp_path)
 
 
 # ---------------------------------------------------------------------------
-# Error payloads never carry exception text (fastapi_server returns them over HTTP)
+# Error payloads never carry exception text (the dashboard passes them to the browser)
 # ---------------------------------------------------------------------------
 
 SECRET = "db-password-in-a-traceback"

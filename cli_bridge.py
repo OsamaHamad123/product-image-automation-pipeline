@@ -103,7 +103,7 @@ def _as_bool(value):
 def _failure(status, message, context):
     """
     حمولة خطأ برسالة ثابتة فقط: نص الاستثناء والـ traceback يذهبان إلى السجل (temp/search.log)
-    ولا يُعادان أبداً في الاستجابة، لأن fastapi_server يمرر هذه الحمولة لعملاء HTTP.
+    ولا يُعادان أبداً في الاستجابة، لأن لوحة التحكم تمرر هذه الحمولة للمتصفح.
     يجب استدعاؤها من داخل كتلة except.
     """
     logger.exception("%s", context)
@@ -390,7 +390,7 @@ def action_search(params, brand_mappings=None, found=None):
     outcome = trace.get('outcome') if isinstance(trace.get('outcome'), dict) else {}
     decision = (best or {}).get('decision') or outcome.get('decision')
     if best and not decision:
-        decision = "REVIEW_PRESELECTED"   # مسار v1: لا يُنشر تلقائياً أبداً
+        decision = "REVIEW_PRESELECTED"   # نتيجة بلا قرار: لا تُنشر تلقائياً أبداً
     failure_code = (best or {}).get('failure_code') or outcome.get('failure_code')
     candidates = _candidates_for_response(best, trace)
     return {

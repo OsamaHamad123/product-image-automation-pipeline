@@ -1,7 +1,6 @@
 # image_dedup_bktree.py
 # كشف التكرارات البصرية عبر التشفير الإدراكي وشجرة BK (Perceptual Hashing & BK-Trees)
 import os
-import threading
 from PIL import Image
 import numpy as np
 import scipy.fftpack
@@ -158,73 +157,6 @@ class PerceptualDeduplicationTree:
     def insert(self, phash_value: int, image_id: str = "", metadata: dict = None):
         """Alias for insert_node for backward compatibility."""
         self.insert_node(phash_value=phash_value, image_id=image_id, metadata=metadata)
-
-
-def build_bktree_from_db():
-    """
-    Builds the tree from every resolved product that has a stored hash, so a new
-    candidate is compared against the whole catalogue, not only against images
-    seen since the process started. If the database cannot be read, the tree
-    starts empty and fills as products are saved.
-    """
-    tree = PerceptualDeduplicationTree()
-    try:
-        import local_cache_db
-
-        conn = local_cache_db.get_db_connection()
-        try:
-            cursor = conn.cursor()
-            cursor.execute(
-                "SELECT id, product_name, cloudinary_url, perceptual_hash FROM resolved_products "
-                "WHERE perceptual_hash IS NOT NULL AND perceptual_hash <> ''"
-            )
-            rows = cursor.fetchall()
-        finally:
-            conn.close()
-    except Exception as e:
-        print(f"⚠️ [BKTree] Could not load hashes from MariaDB, starting empty: {e}")
-        return tree
-
-    for row in rows:
-        phash_value = parse_phash(row["perceptual_hash"])
-        if phash_value is None:
-            continue
-        tree.insert_node(
-            phash_value,
-            str(row["id"]),
-            {"cloudinary_url": row["cloudinary_url"], "product_name": row["product_name"]},
-        )
-    return tree
-
-
-_shared_tree = None
-_shared_tree_lock = threading.Lock()
-
-
-def get_shared_tree() -> PerceptualDeduplicationTree:
-    """The process-wide tree, built from MariaDB on first use."""
-    global _shared_tree
-    with _shared_tree_lock:
-        if _shared_tree is None:
-            _shared_tree = build_bktree_from_db()
-        return _shared_tree
-
-
-def remember_image(phash_value, image_id: str, cloudinary_url: str, product_name: str):
-    """
-    Adds a newly saved image to the shared tree, so the next product in the same
-    run is checked against it. Does nothing until the tree has been built: the
-    first build reads this row from the database anyway.
-    """
-    phash_int = parse_phash(phash_value)
-    if phash_int is None:
-        return
-    with _shared_tree_lock:
-        if _shared_tree is not None:
-            _shared_tree.insert_node(
-                phash_int, image_id, {"cloudinary_url": cloudinary_url, "product_name": product_name}
-            )
-
 
 
 # ---------------------------------------------------------------------------

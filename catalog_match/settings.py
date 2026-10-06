@@ -19,7 +19,6 @@ except Exception:  # pragma: no cover - depends on the environment
 
 
 DEFAULTS = {
-    "SEARCH_ENGINE": "v2",
     "SERPER_API_KEY": "",
     "GEMINI_API_KEY": "",
     "GEMINI_MODEL": "gemini-3.1-flash-lite",
@@ -140,10 +139,6 @@ def as_list(value: Any) -> List[str]:
     if isinstance(value, (list, tuple, set)):
         return [str(v).strip() for v in value if str(v).strip()]
     return [v.strip() for v in str(value).split(",") if v.strip()]
-
-
-def search_engine() -> str:
-    return str(get("SEARCH_ENGINE")).strip().lower() or "v2"
 
 
 def serper_api_key() -> str:

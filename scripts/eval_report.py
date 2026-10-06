@@ -1,18 +1,19 @@
-"""Replay the golden SKU set through one search engine, offline, and print the scorecard.
+"""Replay the golden SKU set through the search engine, offline, and print the scorecard.
 
 Usage (from the repository root):
 
-    python scripts/eval_report.py --engine v1
     python scripts/eval_report.py --engine v2
     python scripts/eval_report.py --engine v2 --scenario gemini_down
     python scripts/eval_report.py --engine v2 --scenario vlm_noisy      # recorded model misreads of siblings
     python scripts/eval_report.py --engine v2 --provider-set bing_only  # no sanctioned search key (Bing only)
-    python scripts/eval_report.py --engine v1 --write-baseline      # refresh tests/eval/fixtures/baseline_v1.json
-    python scripts/eval_report.py --engine v1 --write-hotfixed-baseline   # refresh baseline_v1_hotfixed.json
-    python scripts/eval_report.py --stored original                # print a stored baseline (original|hotfixed)
+    python scripts/eval_report.py --stored original                # print a stored v1 baseline (original|hotfixed)
     python scripts/eval_report.py --engine v2 --golden tests/eval/fixtures/recorded/2026-10-02/golden_skus.json
     python scripts/eval_report.py --engine v2 --set realistic                  # the set modelled on the live rows
     python scripts/eval_report.py --engine v2 --expansion --local-index       # + the costly sources, measured
+
+catalog_match (v2) is the only engine: the v1 engine was removed, so --engine v1 stops with an error. What v1 did on
+the golden set stays on record in tests/eval/fixtures/baseline_v1.json (--stored original) and baseline_v1_hotfixed.json
+(--stored hotfixed); the scorecard prints the original next to the v2 numbers.
 
 --expansion runs the expansion round (X0-X5) and the P0 page reads, --local-index a local catalog index, through
 the injected fakes of tests/eval/sources.py and the set's sources overlay (fixtures/sources_golden.json,
@@ -89,7 +90,7 @@ def print_report(report, golden, baseline=None):
         if leaks:
             print(f"  {len(leaks)} rows of the held-out share are named by a regression test and count as dev")
     print_recorded(report, golden)
-    if baseline and report["engine"] != "v1" and report.get("set", "golden") == "golden":
+    if baseline and report.get("set", "golden") == "golden":
         base = baseline["metrics"]
         print(f"\nv1 baseline: correct pick {_pct(base['correct_pick_rate'])}, wrong auto "
               f"{_pct(base['wrong_auto_rate'])}, auto precision {_pct(base['auto_accept_precision'])}")
@@ -249,17 +250,11 @@ def companion_paths(golden, cassette=None, mappings=None):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--engine", choices=harness.ENGINES, default="v2")
+    parser.add_argument("--engine", default="v2",
+                        help="v2 (catalog_match, the only engine; v1 was removed and is refused)")
     parser.add_argument("--scenario", choices=harness.SCENARIOS, default="normal")
-    parser.add_argument("--write-baseline", action="store_true",
-                        help="store this v1 run as tests/eval/fixtures/baseline_v1.json")
-    parser.add_argument("--write-hotfixed-baseline", action="store_true",
-                        help="store this v1 run as tests/eval/fixtures/baseline_v1_hotfixed.json (v1 after the "
-                             "rollback hot-fixes); baseline_v1.json keeps the original v1")
     parser.add_argument("--stored", choices=("original", "hotfixed"),
                         help="print a stored v1 baseline's metric table instead of running an engine")
-    parser.add_argument("--force", action="store_true",
-                        help="with --write-baseline: overwrite even though the legacy code has changed")
     parser.add_argument("--provider-set", choices=harness.PROVIDER_SETS, default="serper",
                         help="v2 provider set: serper (Serper + OFF + Bing fallback) or bing_only (no sanctioned key)")
     parser.add_argument("--set", default="golden",
@@ -292,28 +287,15 @@ def main(argv=None):
         stored = harness.load_baseline() if args.stored == "original" else harness.load_hotfixed_baseline()
         print_stored(stored, args.stored)
         return 0
-    if args.write_hotfixed_baseline and (args.engine != "v1" or args.scenario != "normal" or args.sku
-                                         or args.golden or args.write_baseline):
-        parser.error("--write-hotfixed-baseline needs --engine v1, the normal scenario and the full committed "
-                     "golden set (and not --write-baseline)")
-    if args.write_baseline and (args.engine != "v1" or args.scenario != "normal" or args.sku or args.golden):
-        parser.error("--write-baseline needs --engine v1, the normal scenario and the full committed golden set")
-    if args.write_baseline and not args.force:
-        try:
-            stored = harness.load_baseline()["legacy_fingerprint"]["sha256"]
-        except (FileNotFoundError, KeyError):
-            stored = None
-        if stored and stored != harness.legacy_fingerprint()["sha256"]:
-            parser.error("the legacy v1 code differs from the code baseline_v1.json was recorded from, so a new "
-                         "baseline would overwrite the 'before' record with hot-fixed numbers. Re-record from a "
-                         "checkout of the baseline's legacy_commit, or pass --force if that is really intended.")
+    if args.engine in harness.REMOVED_ENGINES:
+        parser.error(f"--engine {args.engine}: {harness.REMOVED_ENGINES[args.engine]}")
+    if args.engine not in harness.ENGINES:
+        parser.error(f"--engine {args.engine}: unknown engine (choose from {', '.join(harness.ENGINES)})")
 
     set_name = "golden"
     if args.set != "golden":
         if args.golden:
             parser.error("give --set or --golden, not both")
-        if args.write_baseline or args.write_hotfixed_baseline:
-            parser.error("the v1 baselines are written from the committed golden set only")
         target = harness.SETS.get(args.set) or args.set
         if os.path.isdir(target):
             target = os.path.join(target, "golden_skus.json")
@@ -387,13 +369,6 @@ def main(argv=None):
         if sources_opts:
             print_sources(report, golden)
     print(f"\nfull report: {path}")
-
-    if args.write_baseline:
-        target = harness.write_baseline(report)
-        print(f"baseline written: {target}")
-    if args.write_hotfixed_baseline:
-        target = harness.write_hotfixed_baseline(report)
-        print(f"hot-fixed v1 baseline written: {target}")
     return 1 if report["network_attempts"] else 0
 
 

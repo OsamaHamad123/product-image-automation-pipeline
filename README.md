@@ -11,7 +11,7 @@ Anything the pipeline cannot prove goes to a person. Auto-publishing is **off** 
 
 ## How a search works
 
-`image_search.search_best_product_image()` is the single entry point. Its signature has not changed. `SEARCH_ENGINE=v2` (the default) runs the `catalog_match/` decision core. `SEARCH_ENGINE=v1` runs the old code, kept only as a rollback for 30 days after v2 became the default.
+`image_search.search_best_product_image()` is the single entry point. Its signature has not changed. It runs the `catalog_match/` decision core, the only search engine: the old v1 engine and its `SEARCH_ENGINE` switch have been removed.
 
 ```mermaid
 flowchart LR
@@ -116,18 +116,17 @@ Cloudinary delivers the canvas with `c_limit,w_1200,f_webp,q_auto` only: WebP ke
 | CLI bridge | `cli_bridge.py <action> <base64 json>` | `search`, `select_image`, `reject_image`, `upload_manual_image`, `get_products`, `sheet-preview`, `sheet-save`. It prints one JSON document to stdout; logs go to `temp/search.log`. |
 | Queue | `main.py --enqueue`, then `main.py --worker` | Enqueue is an upsert. It keeps rows that are in review or completed, and stores the full row (Arabic name and brand, category, size) plus `sku_key`. The worker claims tasks atomically with a 15-minute lease, and retries only when providers are down or an exception is raised. |
 | Sync worker (optional) | `sync_worker.py` | Redis write-behind, started only when Redis runs. |
-| Development API | `fastapi_server.py` | A thin wrapper over the same `cli_bridge` functions. No launcher starts it. |
 
-There are no Celery workers, no Google Drive upload and no local vision models (CLIP, SigLIP, BLIP, DINOv2). The `verification_layer/` package has been removed.
+There are no Celery workers, no Google Drive upload and no local vision models (CLIP, SigLIP, BLIP, DINOv2). The `verification_layer/` package has been removed, and so have the v1 search engine (`aesthetics_engine`, `image_quality_gatekeeper`, `query_refiner`) and the unused development API (`fastapi_server.py`).
 
 ## Evaluation
 
 Changes to image choice are measured, not assumed.
 
 - **Offline harness** (`pytest tests/eval`). Runs in CI with no network, keys or database.
-  - 63 realistic UAE SKUs (370 candidates) are replayed through both engines. Candidate images are synthetic, and the vision-model answers come from a recorded cassette.
+  - 63 realistic UAE SKUs (370 candidates) are replayed through the engine. Candidate images are synthetic, and the vision-model answers come from a recorded cassette.
   - Metrics: auto-publish precision and wrong-auto rate, correct-pick rate, preselect precision, review rate, false NOT_FOUND rate, pool recall, and how often each rule rejected a correct image.
-  - The v1 baseline (`tests/eval/fixtures/baseline_v1.json`) picks the right image for 39.7% of SKUs and auto-publishes a wrong one for 55.6%.
+  - The v1 baseline (`tests/eval/fixtures/baseline_v1.json`, kept as data after the v1 engine was removed) picked the right image for 39.7% of SKUs and auto-published a wrong one for 55.6%.
   - The v2 gate (`tests/eval/test_eval_v2_gate.py`) requires:
     - zero wrong auto-publishes;
     - auto-publish precision of at least 0.98;
@@ -136,7 +135,7 @@ Changes to image choice are measured, not assumed.
     - false NOT_FOUND of at most 5%;
     - no auto picks while Gemini is down;
     - at most 4 queries and 2 VLM calls per SKU.
-- **Scorecard:** `python scripts/eval_report.py --engine v2` (or `--engine v1`, `--scenario gemini_down`).
+- **Scorecard:** `python scripts/eval_report.py --engine v2` (or `--scenario gemini_down`; `--stored original` prints the recorded v1 baseline, and `--engine v1` stops with an error).
 - **Real golden set** (owner's machine, with keys):
   1. `python scripts/eval_record.py --rows 2-201` records providers, image blobs and Gemini verdicts. It never writes to the sheet.
   2. Staff fill the `label` column of the exported `labels.csv` with one of: `correct_exact`, `wrong_variant`, `wrong_size`, `wrong_pack`, `wrong_brand`, `wrong_product`, `not_packshot` or `unusable`.
@@ -167,7 +166,6 @@ Secrets come from environment variables or `.env`, and the dashboard's `system_s
 
 | Variable | Purpose |
 |:--|:--|
-| `SEARCH_ENGINE` | `v2` (default) or `v1` (rollback) |
 | `SERPER_API_KEY` | Main image search provider |
 | `GEMINI_API_KEY`, `GEMINI_MODEL` | Label-reading verifier |
 | `AUTO_PUBLISH_ENABLED`, `AUTO_PUBLISH_BRANDS` | Off and empty by default. Comma-separated brand allow-list. |
@@ -206,4 +204,3 @@ The tests never use the network or API keys; live-provider tests carry the `netw
 
 - The dashboard has no login and must stay on localhost.
 - A dashboard search blocks the single-threaded PHP server while it runs. The per-SKU caps bound how long.
-- The v1 search code and `aesthetics_engine` are kept only for the rollback. They are deleted 30 days after v2 becomes the default.

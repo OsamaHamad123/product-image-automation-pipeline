@@ -1,14 +1,14 @@
-"""Replay one golden SKU through an engine, fully offline.
+"""Replay one golden SKU through the engine, fully offline.
 
-run_legacy(sku, cassette)  drives the unmodified v1 code, image_search.search_best_product_image.
 run_v2(sku, cassette)      drives catalog_match.pipeline.find_product_image with the production provider set.
 
-Both return a metrics.Outcome. Nothing here touches the network, a database
+It returns a metrics.Outcome. Nothing here touches the network, a database
 or an API key: providers answer from the fixture, downloads come from
-imagegen and the vision model answers from the recorded cassette.
+imagegen and the vision model answers from the recorded cassette. (The v1
+engine and its replay are gone; baseline_v1.json keeps what it did.)
 
-Replay rules shared by both engines
------------------------------------
+Replay rules
+------------
 * A provider returns the SKU's candidates whose surfaced_by includes the kind
   of the query: "gtin" when the query carries the SKU's barcode, else "text".
   A site: query only returns candidates from the listed domains.
@@ -19,15 +19,10 @@ Replay rules shared by both engines
   every query.
 * v2 fixture providers only answer a text query that is about the SKU (it shares
   a brand or name word with the sheet row); an unrelated query returns nothing.
-* The same pool therefore reaches v1 and v2; Open Food Facts ("off")
-  candidates only reach v2, because v1 has no such source.
 * v2 runs with the provider set production builds (provider_set): "serper" is
   Serper primary + Open Food Facts + Bing HTML as fallback-only (plus the legacy
   CSE adapter when the SKU has cse_legacy candidates); "bing_only" is the no-key
   setup, Bing HTML as the sole (unsanctioned) search source + Open Food Facts.
-* Serper candidates are fed to v1 as its Google engine (title and real size),
-  Bing candidates through v1's own Bing mapping: title = m["desc"] or the
-  query when "desc" is missing, and a reported size of 800x800.
 """
 
 from __future__ import annotations
@@ -188,7 +183,7 @@ def surfaced(sku: Mapping[str, Any], provider: str, query: str, query_id: Option
              relevant_only: bool = False) -> List[Mapping[str, Any]]:
     """Candidates a provider returns for a query, in the provider's rank order.
 
-    query_id is the v2 plan id of the query (None for the v1 replay). A candidate whose
+    query_id is the v2 plan id of the query (None: no plan id). A candidate whose
     surfaced_by names query ids is returned only for those ids; without an id the ids
     stand for their kind (Q4 is the GTIN query, the others are text). relevant_only
     drops every candidate for a text query that is not about the SKU.
@@ -311,305 +306,6 @@ def network_blocked(attempts: Optional[List[str]] = None, block_db: bool = True)
 def outbound_attempts(attempts: Sequence[str]) -> List[str]:
     """Attempts that tried to leave the machine (DB refusals are not network)."""
     return [a for a in attempts if not a.startswith("pymysql")]
-
-
-# ---------------------------------------------------------------------------
-# Legacy (v1) replay
-# ---------------------------------------------------------------------------
-
-# Arabic legacy reason text -> short rule name. Order matters: first match wins.
-_LEGACY_RULES: Tuple[Tuple[str, str], ...] = (
-    ("الصورة صغيرة جداً", "too_small_reported"),
-    ("كلمة مستبعدة", "cartoon_keyword"),
-    ("نطاق مستبعد", "excluded_domain"),
-    ("منافس مستبعد", "competitor_substring"),
-    ("تعارض في الحجم", "size_clash"),
-    ("تعارض في عدد العبوات", "pack_clash"),
-    ("عدم مطابقة البراند", "brand_mismatch"),
-    ("فشل التحميل", "download_failed"),
-    ("درجة المطابقة الدلالية", "semantic_score_low"),
-    ("BLIP", "blip_brand_conflict"),
-    ("Moondream", "moondream_rejected"),
-    ("تكرار بصري", "visual_duplicate"),
-    ("Gemini Vision", "gemini_rejected"),
-    ("فشل تحليل الصورة", "image_analysis_error"),
-)
-
-
-def legacy_rules(reasons: Sequence[str]) -> List[str]:
-    """Rule names for a legacy candidate's reason strings (quality gates keep their English label)."""
-    rules: List[str] = []
-    for reason in reasons:
-        text = str(reason)
-        if text.startswith("مقبولة"):
-            continue                                   # acceptance notes, not rejections
-        if "فشل التحقق الهندسي" in text:
-            found = [q for q in metrics.QUALITY_RULES_V1 if q in text]
-            rules.extend(found or ["quality_gate_other"])
-            continue
-        for needle, rule in _LEGACY_RULES:
-            if needle in text:
-                rules.append(rule)
-                break
-        else:
-            rules.append("other:" + text[:40])
-    return rules
-
-
-# Legacy config values the replay pins to the shipped defaults, so a local .env
-# or dashboard settings row cannot change the baseline.
-LEGACY_CONFIG = {
-    "FILTER_COMPETITORS": True,
-    "STRICT_BRAND_MATCH": True,
-    "DISABLE_LOCAL_AI_MODELS": True,
-    "USE_SIGLIP_SEMANTIC_CHECK": True,
-    "USE_BLIP_CAPTION_CHECK": True,
-    "USE_MOONDREAM_CHECK": False,
-    "ENABLE_GEMINI_PRE_VALIDATION": True,
-    "CLIP_RELEVANCE_THRESHOLD": 0.22,
-    "CLIP_GREY_ZONE_THRESHOLD": 0.18,
-    "MIN_IMAGE_WIDTH": 100,
-    "MIN_IMAGE_HEIGHT": 100,
-    "GOOGLE_SEARCH_API_KEY": "",
-    "GOOGLE_SEARCH_API_KEYS": [],
-    "GOOGLE_SEARCH_CX": "",
-    "GOOGLE_SEARCH_CX_LIST": [],
-    "PROXY_URL": "",
-}
-
-
-def legacy_modules() -> Dict[str, Any]:
-    """Import the legacy modules (their import-time DB probes fail harmlessly when offline)."""
-    import google_sheets
-    import image_dedup_bktree
-    import image_quality_gatekeeper
-    import image_search
-    import local_cache_db
-    import config
-    return {
-        "config": config,
-        "google_sheets": google_sheets,
-        "image_dedup_bktree": image_dedup_bktree,
-        "image_quality_gatekeeper": image_quality_gatekeeper,
-        "image_search": image_search,
-        "local_cache_db": local_cache_db,
-    }
-
-
-def legacy_gemini_accepts(entry: Optional[Mapping[str, Any]]) -> bool:
-    """The legacy binary Gemini check, answered from the structured verdict.
-
-    Mirrors the legacy prompt: the brand must match, a variant or size that is
-    visibly different rejects, and an unreadable size may still be accepted.
-    """
-    if not entry:
-        return False
-    return (entry.get("brand_match") == "yes" and entry.get("variant_match") != "no"
-            and entry.get("size_match") != "no")
-
-
-def legacy_queries(product_name: str, brand: str) -> List[str]:
-    """Stand-in for expand_query_via_gemini: '{brand} {name}', as its own no-Gemini fallback words it.
-
-    The fallback also lists a '... packaging' variant, but every text query
-    surfaces the same fixture pool and the loop stops at the first hit, so
-    one query gives the same result.
-    """
-    name, brand = (product_name or "").strip(), (brand or "").strip()
-    if brand and name.lower().startswith(brand.lower()):
-        return [name]
-    return [f"{brand} {name}".strip()]
-
-
-def _legacy_item(cand: Mapping[str, Any], engine: str, query: str) -> Dict[str, Any]:
-    if engine == "bing":
-        m = cand.get("bing_m") or {}
-        return {"url": cand["image_url"], "title": m.get("desc", query), "width": 800, "height": 800}
-    return {"url": cand["image_url"], "title": cand.get("title", ""), "width": int(cand.get("width") or 800),
-            "height": int(cand.get("height") or 800)}
-
-
-def _legacy_download(sku: Mapping[str, Any], cand: Optional[Mapping[str, Any]], image_search: Any):
-    """What legacy stream_and_validate_target + execute_batch_processing would yield for one URL."""
-    from PIL import Image
-
-    if cand is None:
-        return None, "FAILED_DOWNLOAD"
-    download = cand.get("download", DOWNLOAD_OK)
-    if download == "403":
-        return None, "REJECTED_STATUS_403"
-    if download == "html":
-        return None, "UNSUPPORTED_MIME_TYPE_text/html; charset=utf-8"
-    if download == "svg":
-        return None, "UNSUPPORTED_MIME_TYPE_image/svg+xml"
-    if download != DOWNLOAD_OK:
-        return None, f"REJECTED_STATUS_{download}"
-    mime = candidate_mime(cand)
-    if not any(m in mime for m in getattr(image_search, "SUPPORTED_MIME_TYPES", (mime,))):
-        return None, f"UNSUPPORTED_MIME_TYPE_{mime}"
-    data = candidate_image(sku, cand)
-    max_size = getattr(image_search, "MAX_FILE_SIZE", 4 * 1024 * 1024)
-    min_size = getattr(image_search, "MIN_FILE_SIZE", 10 * 1024)
-    if len(data) > max_size:
-        return None, "DYNAMIC_STREAM_ABORT_OVERSIZE"
-    if len(data) < min_size:
-        return None, f"FINAL_DOWNLOAD_SIZE_TOO_SMALL_{len(data)}"
-    try:
-        with Image.open(io.BytesIO(data)) as im:
-            im.verify()
-    except Exception as exc:  # pragma: no cover - fixture images always decode
-        return None, f"IMAGE_CORRUPT_OR_UNREADABLE_{exc}"
-    return data, "VERIFICATION_SUCCESS"
-
-
-def run_legacy(sku: Mapping[str, Any], cassette: Mapping[str, Any], scenario: str = "normal",
-               mappings: Optional[Dict[str, Any]] = None) -> Outcome:
-    """Run the legacy v1 search for one fixture SKU and normalise its result."""
-    mods = legacy_modules()
-    image_search = mods["image_search"]
-    gatekeeper = mods["image_quality_gatekeeper"]
-    config = mods["config"]
-    mappings = mappings if mappings is not None else load_mappings()
-    index = UrlIndex(sku)
-    by_sha: Dict[str, str] = {}
-    calls = {"google": 0, "bing": 0, "vlm": 0, "downloads": 0}
-    queries: List[str] = []
-
-    async def fetch_google(self, session, query):  # type: ignore[no-untyped-def]
-        calls["google"] += 1
-        queries.append(query)
-        return [_legacy_item(c, "google", query) for c in surfaced(sku, "serper", query)]
-
-    async def fetch_bing(self, session, query):  # type: ignore[no-untyped-def]
-        calls["bing"] += 1
-        return [_legacy_item(c, "bing", query) for c in surfaced(sku, "bing_html", query)]
-
-    async def fetch_nothing(self, query):  # type: ignore[no-untyped-def]
-        return []
-
-    async def batch(url_collection):  # type: ignore[no-untyped-def]
-        results = {}
-        for url in url_collection:
-            calls["downloads"] += 1
-            data, status = _legacy_download(sku, index.get(url), image_search)
-            if data is not None:
-                by_sha[hashlib.sha256(data).hexdigest()] = index.cid(url) or ""
-            results[url] = (data, status)
-        return results
-
-    def gemini(image_path, product_name, brand):  # type: ignore[no-untyped-def]
-        calls["vlm"] += 1
-        with open(image_path, "rb") as fh:
-            cid = by_sha.get(hashlib.sha256(fh.read()).hexdigest())
-        return legacy_gemini_accepts(cassette_entry(cassette, sku["id"], cid) if cid else None)
-
-    real_gemini = image_search.validate_image_via_gemini_vision
-
-    def gemini_down(image_path, product_name, brand):  # type: ignore[no-untyped-def]
-        calls["vlm"] += 1
-        return real_gemini(image_path, product_name, brand)   # the real code with no key configured
-
-    def no_segmentation(self, bgr_image):  # type: ignore[no-untyped-def]
-        raise RuntimeError("GrabCut skipped in replay; legacy discards its result via a NameError")
-
-    scraper = image_search.ParallelConsensusScraper
-    # The legacy entry points the replay cannot work without.
-    patches = [
-        mock.patch.object(scraper, "_fetch_google", fetch_google),
-        mock.patch.object(scraper, "_fetch_bing", fetch_bing),
-        mock.patch.object(image_search, "execute_batch_processing", batch),
-        mock.patch.object(time, "sleep", lambda *a, **k: None),
-        # once the v2 facade is merged, SEARCH_ENGINE selects v1 or v2 behind the same function
-        mock.patch.dict(os.environ, {"SEARCH_ENGINE": "v1"}),
-    ]
-    # Helpers that later clean-ups may delete: stub them only while they exist.
-    optional = [
-        (scraper, "_fetch_yandex", fetch_nothing),
-        (scraper, "_fetch_duckduckgo", fetch_nothing),
-        (image_search, "expand_query_via_gemini", legacy_queries),
-        (image_search, "get_bktree", lambda: mods["image_dedup_bktree"].PerceptualDeduplicationTree()),
-        (image_search, "print", lambda *a, **k: None),
-        (mods["google_sheets"], "align_brand_via_gemini", lambda product_name, sheet_brand: sheet_brand),
-        (mods["google_sheets"], "get_sheets_client", lambda *a, **k: object()),
-        (mods["google_sheets"], "get_brand_mappings", lambda *a, **k: mappings),
-        (mods["local_cache_db"], "get_cached_product", lambda *a, **k: None),
-        (mods["local_cache_db"], "find_visual_duplicate", lambda *a, **k: None),
-        (mods["local_cache_db"], "get_active_learning_clutter_flag", lambda *a, **k: False),
-        (getattr(gatekeeper, "BoundaryComplianceSegmenter", None), "segment_foreground", no_segmentation),
-    ]
-    patches += [mock.patch.object(obj, name, value) for obj, name, value in optional
-                if obj is not None and hasattr(obj, name)]
-    if isinstance(getattr(image_search, "_dynamic_brand_mappings", None), dict):
-        patches.append(mock.patch.dict(image_search._dynamic_brand_mappings, clear=True))
-    pins = dict(LEGACY_CONFIG, SEARCH_ENGINE="v1")
-    if scenario == "gemini_down":
-        pins["GEMINI_API_KEY"] = ""
-        patches.append(mock.patch.object(image_search, "validate_image_via_gemini_vision", gemini_down))
-    else:
-        pins["GEMINI_API_KEY"] = "offline-cassette"
-        patches.append(mock.patch.object(image_search, "validate_image_via_gemini_vision", gemini))
-    for key, value in pins.items():
-        patches.append(mock.patch.object(config, key, value, create=True))
-
-    row = sku_row(sku)
-    trace: Dict[str, Any] = {}
-    t0 = time.perf_counter()
-    result: Any = None
-    error: Optional[str] = None
-    with contextlib.ExitStack() as stack:
-        for p in patches:
-            stack.enter_context(p)
-        try:
-            result = image_search.search_best_product_image(
-                f"{row['name']} {row['brand']}".strip(), row["name"], row["brand"],
-                product_name_ar=row["name_ar"], brand_ar=row["brand_ar"], barcode=row["barcode"],
-                category=row["category"], trace=trace, brand_mappings=mappings)
-        except Exception as exc:  # the replay records crashes instead of hiding them
-            log.exception("legacy search crashed for %s", sku["id"])
-            error = f"{type(exc).__name__}: {exc}"
-    seconds = time.perf_counter() - t0
-    return _legacy_outcome(sku, index, result, trace, error, queries, calls, seconds)
-
-
-def _legacy_outcome(sku, index, result, trace, error, queries, calls, seconds) -> Outcome:  # type: ignore[no-untyped-def]
-    pool: List[str] = []
-    kills: Dict[str, List[str]] = {}
-    chosen_url = result.get("url") if isinstance(result, dict) else None
-    chosen_id = index.cid(chosen_url)
-    last_resort = False
-    for step in trace.get("steps", []):
-        for cand in step.get("candidates", []):
-            cid = index.cid(cand.get("url"))
-            if cid is None:
-                continue
-            if cid not in pool:
-                pool.append(cid)
-            reasons = [str(r) for r in cand.get("reasons", [])]
-            if cid == chosen_id and any("كخيار بديل أخير" in r for r in reasons):
-                last_resort = True
-            if cand.get("status") != "accepted":
-                rules = legacy_rules(reasons)
-                if rules:
-                    merged = kills.setdefault(cid, [])
-                    merged.extend(r for r in rules if r not in merged)
-    kills.pop(chosen_id, None)
-
-    if error is not None:
-        decision, status = metrics.ERROR, "error"
-    elif not chosen_url:
-        decision, status = metrics.NOT_FOUND, "none"
-    else:
-        needs_review = bool(result.get("needs_review"))
-        decision = metrics.PRESELECTED if needs_review else metrics.AUTO
-        status = str(result.get("status") or ("last_resort" if last_resort else "accepted"))
-    needs_review = bool(isinstance(result, dict) and result.get("needs_review")) or not chosen_url
-    return Outcome(
-        sku_id=sku["id"], engine="v1", decision=decision, chosen_id=chosen_id, chosen_url=chosen_url,
-        needs_review=needs_review, auto=bool(chosen_url) and not needs_review and error is None, status=status,
-        failure_code=None, pool=pool, kills=kills, queries=list(queries),
-        provider_calls={"google": calls["google"], "bing": calls["bing"]}, vlm_calls=calls["vlm"],
-        vlm_images_max=1 if calls["vlm"] else 0, n_preselected=1 if decision == metrics.PRESELECTED else 0,
-        error=error, seconds=round(seconds, 3))
 
 
 # ---------------------------------------------------------------------------

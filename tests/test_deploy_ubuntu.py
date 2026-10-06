@@ -4,6 +4,7 @@ Nothing here installs anything or touches the network: scripts are syntax-checke
 --dry-run, backup.sh runs against a stub dump command, units and the nginx site are rendered into a temp folder.
 """
 
+import atexit
 import base64
 import configparser
 import contextlib
@@ -19,6 +20,7 @@ import socket
 import stat
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -37,6 +39,22 @@ needs_bash = pytest.mark.skipif(BASH is None, reason="bash is not installed")
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="Linux deployment kit")
 
 SAMPLE_APP = "/opt/laqta"
+
+
+def _clean_clone() -> Path:
+    """The app folder install.sh's dry runs point at: what it reads from a fresh clone (requirements.txt and
+    dashboard/artisan), with no .env and no dashboard/.env, as in CI. Never the working tree itself: a developer's own
+    dashboard/.env (gitignored, APP_DEBUG=true while developing) or .env would decide what install.sh's production
+    check and DB name say, so the tests would pass or fail with the machine they run on."""
+    app = Path(tempfile.mkdtemp(prefix="laqta_clone_"))
+    (app / "dashboard").mkdir()
+    shutil.copy2(REPO / "requirements.txt", app / "requirements.txt")
+    shutil.copy2(REPO / "dashboard" / "artisan", app / "dashboard" / "artisan")
+    atexit.register(shutil.rmtree, str(app), True)
+    return app
+
+
+APP = _clean_clone()
 
 
 # ------------------------------------------------------------------ helpers
@@ -125,7 +143,7 @@ def run_install(*args, env=None, cwd=REPO):
                           env=full_env, timeout=60)
 
 
-needs_plain_path = pytest.mark.skipif(not re.match(r"^/[A-Za-z0-9._/-]+$", str(REPO)),
+needs_plain_path = pytest.mark.skipif(not re.match(r"^/[A-Za-z0-9._/-]+$", str(APP)),
                                       reason="install.sh only accepts plain app paths")
 
 
@@ -142,7 +160,7 @@ def test_install_help_lists_the_flags():
 @needs_plain_path
 def test_install_dry_run_default_plan():
     value = _throwaway("plan")
-    done = run_install("--dry-run", str(REPO), "--domain", "dash.example.com", env={DB_CRED_VAR: value})
+    done = run_install("--dry-run", str(APP), "--domain", "dash.example.com", env={DB_CRED_VAR: value})
     out = done.stdout + done.stderr
     assert value not in out
     for fragment in ("apt-get install", "python3-venv", "php8.3-fpm", "mariadb-server", "nginx", "libgl1",
@@ -159,27 +177,27 @@ def test_install_dry_run_default_plan():
 @needs_bash
 @needs_plain_path
 def test_install_dry_run_birefnet_variants():
-    cpu = run_install("--dry-run", str(REPO), "--local-only", "--with-birefnet").stdout
+    cpu = run_install("--dry-run", str(APP), "--local-only", "--with-birefnet").stdout
     assert "rembg\\[cpu\\]" in cpu and "birefnet-general" in cpu and "birefnet-general-lite" not in cpu
     assert "rembg\\[cpu\\]==2.0.85" in cpu          # pinned: remove(decontaminate=True) needs rembg 2.0.79+
     assert "U2NET_HOME=/var/lib/laqta/models" in cpu
-    lite = run_install("--dry-run", str(REPO), "--local-only", "--with-birefnet", "--lite").stdout
+    lite = run_install("--dry-run", str(APP), "--local-only", "--with-birefnet", "--lite").stdout
     assert "birefnet-general-lite" in lite
-    gpu = run_install("--dry-run", str(REPO), "--local-only", "--with-birefnet", "--gpu").stdout
+    gpu = run_install("--dry-run", str(APP), "--local-only", "--with-birefnet", "--gpu").stdout
     assert "rembg\\[gpu\\]" in gpu and "rembg\\[cpu\\]" not in gpu
 
 
 @needs_bash
 @needs_plain_path
 def test_install_flags_that_need_birefnet_are_refused_alone():
-    done = run_install("--dry-run", str(REPO), "--lite")
+    done = run_install("--dry-run", str(APP), "--lite")
     assert done.returncode != 0 and "--with-birefnet" in done.stderr
 
 
 @needs_bash
 @needs_plain_path
 def test_install_dry_run_local_only_and_redis():
-    out = run_install("--dry-run", str(REPO), "--local-only", "--with-redis", "--enable-units").stdout
+    out = run_install("--dry-run", str(APP), "--local-only", "--with-redis", "--enable-units").stdout
     assert "ssh -L 8080:127.0.0.1:8080" in out
     assert "redis-server" in out and "laqta-sync-worker.service" in out
     assert "removing nginx's default welcome site" not in out
@@ -194,7 +212,7 @@ def test_install_rejects_a_folder_that_is_not_the_repo(tmp_path):
 @needs_bash
 @needs_plain_path
 def test_install_rejects_a_short_database_password():
-    done = run_install("--dry-run", str(REPO), "--local-only", env={DB_CRED_VAR: "x" * 5})
+    done = run_install("--dry-run", str(APP), "--local-only", env={DB_CRED_VAR: "x" * 5})
     assert done.returncode != 0 and "at least 12 characters" in done.stderr
 
 
@@ -402,7 +420,7 @@ def install_render(tmp_path, *args, cert=False, env=None):
         folder.mkdir(parents=True)
         (folder / "fullchain.pem").write_text("cert")
         (folder / "privkey.pem").write_text("key")
-    done = run_install("--dry-run", str(REPO), *args,
+    done = run_install("--dry-run", str(APP), *args,
                        env={"LAQTA_RENDER_DIR": str(out), "LAQTA_CERT_ROOT": str(live), **(env or {})})
     assert done.returncode in (0, 2), done.stderr
     return out
@@ -419,7 +437,7 @@ def test_install_renders_every_unit_and_config_without_placeholders(tmp_path):
         text = re.sub(r"(?m)^\s*[#;].*$", "", path.read_text(encoding="utf-8"))
         assert not PLACEHOLDER.search(text), path.name
     nightly = (out / "laqta-nightly.service").read_text(encoding="utf-8")
-    assert f"ExecStart={REPO}/.venv/bin/python" in nightly and f"WorkingDirectory={REPO}" in nightly
+    assert f"ExecStart={APP}/.venv/bin/python" in nightly and f"WorkingDirectory={APP}" in nightly
     assert "U2NET_HOME=/var/lib/laqta/models" in nightly
 
 
@@ -473,7 +491,7 @@ def test_nginx_accepts_the_https_site(tmp_path):
     subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1", "-subj", "/CN=dash.example.com",
                     "-keyout", str(folder / "privkey.pem"), "-out", str(folder / "fullchain.pem")],
                    check=True, capture_output=True)
-    done = run_install("--dry-run", str(REPO), "--server-name", "dash.example.com",
+    done = run_install("--dry-run", str(APP), "--server-name", "dash.example.com",
                        env={"LAQTA_RENDER_DIR": str(tmp_path), "LAQTA_CERT_ROOT": str(tmp_path / "live")})
     assert done.returncode in (0, 2), done.stderr
     text = (tmp_path / "laqta.conf").read_text(encoding="utf-8")
@@ -832,13 +850,13 @@ def test_backup_settings_file_template_documents_the_new_keys():
 @needs_plain_path
 def test_install_refuses_to_run_without_a_domain_or_local_only():
     """Audit item 1: the error says exactly what to do, and nothing was planned or changed."""
-    done = run_install("--dry-run", str(REPO))
+    done = run_install("--dry-run", str(APP))
     assert done.returncode == 1 and done.stdout == ""
     err = done.stderr
     assert "refusing to install" in err and "ONE shared login" in err
-    assert f"install.sh {REPO} --domain dash.example.com" in err
+    assert f"install.sh {APP} --domain dash.example.com" in err
     assert "certbot certonly --webroot -w /var/www/letsencrypt -d dash.example.com" in err
-    assert f"install.sh {REPO} --local-only" in err and "ssh -L 8080:127.0.0.1:8080" in err
+    assert f"install.sh {APP} --local-only" in err and "ssh -L 8080:127.0.0.1:8080" in err
     assert "docs/deploy_ubuntu.md" in err
 
 
@@ -846,7 +864,7 @@ def test_install_refuses_to_run_without_a_domain_or_local_only():
 @needs_plain_path
 @pytest.mark.parametrize("bad", ["1.2.3.4", "dash", "_", "-bad.example.com", "dash.example.com;reboot", "a b.example.com"])
 def test_install_domain_must_be_a_real_host_name(bad):
-    done = run_install("--dry-run", str(REPO), "--domain", bad)
+    done = run_install("--dry-run", str(APP), "--domain", bad)
     # a name with a character nginx must never see is refused by the general check, an IP or a bare word by this one
     assert done.returncode != 0 and done.stdout == ""
     assert "--domain needs a real host name" in done.stderr or "invalid --server-name" in done.stderr
@@ -857,18 +875,18 @@ def test_install_domain_must_be_a_real_host_name(bad):
 def test_install_accepts_a_domain_the_old_server_name_option_and_local_only_together():
     for args in (["--domain", "Dash-1.example.co.uk"], ["--server-name", "dash.example.com"],
                  ["--local-only", "--domain", "dash.example.com"], ["--local-only"]):
-        done = run_install("--dry-run", str(REPO), *args)
+        done = run_install("--dry-run", str(APP), *args)
         assert done.returncode in (0, 2), (args, done.stderr)
 
 
 @needs_bash
 @needs_plain_path
 def test_install_adds_age_and_logrotate_always_and_fail2ban_and_rclone_only_when_asked():
-    plain = run_install("--dry-run", str(REPO), "--local-only").stdout
+    plain = run_install("--dry-run", str(APP), "--local-only").stdout
     install_line = next(line for line in plain.splitlines() if line.startswith("+ apt-get install"))
     assert " age " in install_line + " " and "logrotate" in install_line
     assert "fail2ban" not in plain and "rclone" not in plain
-    both = run_install("--dry-run", str(REPO), "--domain", "dash.example.com", "--with-fail2ban", "--with-rclone").stdout
+    both = run_install("--dry-run", str(APP), "--domain", "dash.example.com", "--with-fail2ban", "--with-rclone").stdout
     install_line = next(line for line in both.splitlines() if line.startswith("+ apt-get install"))
     assert "fail2ban" in install_line and "rclone" in install_line
     assert "render laqta-fail2ban.conf -> /etc/fail2ban/jail.d/laqta.conf" in both
@@ -878,21 +896,21 @@ def test_install_adds_age_and_logrotate_always_and_fail2ban_and_rclone_only_when
 @needs_bash
 @needs_plain_path
 def test_install_fail2ban_makes_no_sense_with_local_only():
-    done = run_install("--dry-run", str(REPO), "--local-only", "--with-fail2ban")
+    done = run_install("--dry-run", str(APP), "--local-only", "--with-fail2ban")
     assert done.returncode != 0 and "--with-fail2ban" in done.stderr and "127.0.0.1" in done.stderr
 
 
 @needs_bash
 @needs_plain_path
 def test_install_says_what_is_missing_before_a_certificate_exists_and_nothing_once_it_does(tmp_path):
-    before = run_install("--dry-run", str(REPO), "--domain", "dash.example.com").stdout
+    before = run_install("--dry-run", str(APP), "--domain", "dash.example.com").stdout
     assert "NO certificate yet" in before and "127.0.0.1:8080 only" in before
     assert "certbot certonly --webroot -w /var/www/letsencrypt -d dash.example.com" in before
     folder = tmp_path / "live" / "dash.example.com"
     folder.mkdir(parents=True)
     (folder / "fullchain.pem").write_text("cert")
     (folder / "privkey.pem").write_text("key")
-    after = run_install("--dry-run", str(REPO), "--domain", "dash.example.com",
+    after = run_install("--dry-run", str(APP), "--domain", "dash.example.com",
                         env={"LAQTA_CERT_ROOT": str(tmp_path / "live")}).stdout
     assert "NO certificate yet" not in after and "HTTPS is on for dash.example.com" in after
 
@@ -1007,20 +1025,20 @@ def test_install_memory_limit_can_be_overridden_and_is_validated(tmp_path):
     out = install_render(tmp_path, "--local-only", env={"LAQTA_RAM_MB": "4096", "LAQTA_MEMORY_MAX": "3G"})
     assert "MemoryMax=3G\n" in (out / "laqta-nightly.service").read_text(encoding="utf-8")
     for bad in ("lots", "3 G", "3G; reboot", "150%%%"):
-        done = run_install("--dry-run", str(REPO), "--local-only", env={"LAQTA_MEMORY_MAX": bad})
+        done = run_install("--dry-run", str(APP), "--local-only", env={"LAQTA_MEMORY_MAX": bad})
         assert done.returncode != 0 and "LAQTA_MEMORY_MAX" in done.stderr, bad
 
 
 @needs_bash
 @needs_plain_path
 def test_install_warns_when_birefnet_will_not_fit_and_when_the_ram_is_unknown():
-    small = run_install("--dry-run", str(REPO), "--local-only", "--with-birefnet", env={"LAQTA_RAM_MB": "2048"})
+    small = run_install("--dry-run", str(APP), "--local-only", "--with-birefnet", env={"LAQTA_RAM_MB": "2048"})
     assert "BiRefNet needs about 6 GB" in small.stderr and "--lite" in small.stderr
-    lite = run_install("--dry-run", str(REPO), "--local-only", "--with-birefnet", "--lite", env={"LAQTA_RAM_MB": "3072"})
+    lite = run_install("--dry-run", str(APP), "--local-only", "--with-birefnet", "--lite", env={"LAQTA_RAM_MB": "3072"})
     assert "BiRefNet needs about 4 GB" in lite.stderr
-    roomy = run_install("--dry-run", str(REPO), "--local-only", "--with-birefnet", env={"LAQTA_RAM_MB": "8192"})
+    roomy = run_install("--dry-run", str(APP), "--local-only", "--with-birefnet", env={"LAQTA_RAM_MB": "8192"})
     assert "BiRefNet needs" not in roomy.stderr
-    unknown = run_install("--dry-run", str(REPO), "--local-only", env={"LAQTA_RAM_MB": "plenty"})
+    unknown = run_install("--dry-run", str(APP), "--local-only", env={"LAQTA_RAM_MB": "plenty"})
     assert "could not detect the RAM size" in unknown.stderr and unknown.returncode in (0, 2)
 
 
@@ -1106,10 +1124,10 @@ def test_run_launcher_units_watch_the_file_the_dashboard_writes():
 @needs_bash
 @needs_plain_path
 def test_install_always_switches_the_run_launcher_on_and_the_flush_timer_with_the_other_timers():
-    plain = run_install("--dry-run", str(REPO), "--local-only").stdout
+    plain = run_install("--dry-run", str(APP), "--local-only").stdout
     assert "systemctl enable --now laqta-run.path" in plain
     assert "systemctl enable --now laqta-nightly.timer laqta-backup.timer laqta-outbox-flush.timer" in plain   # the NOT enabled hint
-    enabled = run_install("--dry-run", str(REPO), "--local-only", "--enable-units").stdout
+    enabled = run_install("--dry-run", str(APP), "--local-only", "--enable-units").stdout
     assert "+ systemctl enable --now laqta-backup.timer laqta-nightly.timer laqta-outbox-flush.timer" in enabled
     assert "render laqta-logrotate -> /etc/logrotate.d/laqta" in enabled and "laqta-alert@.service" in enabled
 
@@ -1296,7 +1314,7 @@ def test_install_renders_the_monitor_addresses_from_the_flag_and_from_the_enviro
 @pytest.mark.parametrize("bad", ["300.1.1.1", "1.2.3", "1.2.3.4/33", "evil", "1.2.3.4; deny all", "::g", "2001:db8::/129",
                                  "1.2.3.4/", "$(id)"])
 def test_install_rejects_a_monitor_address_that_could_change_the_nginx_config(bad):
-    done = run_install("--dry-run", str(REPO), "--local-only", "--monitor-ip", bad)
+    done = run_install("--dry-run", str(APP), "--local-only", "--monitor-ip", bad)
     assert done.returncode != 0 and "invalid monitor address" in done.stderr and done.stdout == ""
 
 

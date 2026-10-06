@@ -1225,7 +1225,7 @@ def pre_cache_product_candidates(task, worksheet=None, link_column_index=None, b
         return "failed"
     _finish_task(task, "ready_for_review", None,
                  failure_code=best.get("failure_code"), trace=dict(publish_trace, outcome=_outcome(trace)))
-    print(f"[Pre-Cache] {len(candidates)} مرشح للصف {row_number} (القرار: {decision or 'v1'}).")
+    print(f"[Pre-Cache] {len(candidates)} مرشح للصف {row_number} (القرار: {decision or '-'}).")
     return "success"
 
 
@@ -1247,8 +1247,9 @@ def _review_pending(row_number, sku_key):
 
 def process_single_product(prod, worksheet, link_column_index, brand_mappings=None):
     """
-    معالجة منتج واحد مباشرة (الوضع القديم). الاسم والبراند يُمرران كما هما في الشيت؛
-    QueryRefiner يُستخدم فقط لكتابة الاسم/البراند العربي الناقص في الشيت.
+    معالجة منتج واحد مباشرة (الوضع القديم). الاسم والبراند يُمرران كما هما في الشيت، والبحث نفسه بحث العامل
+    (image_search.search_best_product_image، أي catalog_match). ما في تعريب بنموذج لغوي: الاسم والبراند العربي من
+    الشيت بس، وما بينكتب فيهم شي.
     نتيجة للمراجعة (اختيار غير AUTO_PUBLISH، خلفية ما انعزلت، صورة منتج تاني، كاش رمادي) ما بتنكتب بالشيت: المرشحات
     بتنحفظ للمراجعة وخلية الصورة بتضل على قيمتها. صف بانتظار مراجعة (مرشحات محفوظة، أو خلية قديمة needs_review:)
     ما بينبحث عنه من جديد (لا صرف) إلا مع FORCE_OVERWRITE_IMAGES.
@@ -1265,8 +1266,8 @@ def process_single_product(prod, worksheet, link_column_index, brand_mappings=No
         print(f"تخطي الصف {row_num}: بانتظار مراجعة (خلية قديمة needs_review:)؛ الاعتماد بلوحة التحكم بيكتب الرابط النظيف.")
         return "skipped"
 
-    # الاسم/البراند العربي للبحث يأتيان من الشيت فقط. ناتج QueryRefiner (تخمين نموذج لغوي) يُكتب في الشيت
-    # للتعريب ولا يدخل هوية البحث أبداً (D8/D9): وإلا صار تخمين البراند العربي 'mapped' وقابلاً للنشر التلقائي.
+    # الاسم/البراند العربي للبحث يأتيان من الشيت فقط (D8/D9): تخمين نموذج لغوي لا يدخل هوية البحث أبداً، وإلا صار
+    # تخمين البراند العربي 'mapped' وقابلاً للنشر التلقائي.
     product_name_ar = prod.get("product_name_ar", "")
     brand_ar = prod.get("brand_ar", "")
     payload = {"name_ar": product_name_ar, "brand_ar": brand_ar, "category": prod.get("category", ""),
@@ -1276,13 +1277,6 @@ def process_single_product(prod, worksheet, link_column_index, brand_mappings=No
     if not force and _review_pending(row_num, sku_key):
         print(f"تخطي الصف {row_num}: بانتظار مراجعة (مرشحاته محفوظة)؛ ما في بحث مدفوع من جديد.")
         return "skipped"
-    try:
-        from query_refiner import QueryRefiner
-        refined = QueryRefiner.refine_product_metadata(name, brand, prod.get("category", ""))
-        google_sheets.update_product_localization(worksheet, row_num, refined.get("cleaned_title_ar", ""),
-                                                  refined.get("canonical_brand_ar", ""))
-    except Exception as e:
-        print(f"تنبيه: فشل التعريب المسبق عبر Gemini: {e}")
 
     exclude_urls, exclude_phashes = local_cache_db.get_rejections(sku_key)
     query = default_query(name, brand)

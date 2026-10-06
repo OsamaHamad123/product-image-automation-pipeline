@@ -459,7 +459,6 @@ def init_db():
             "google_search_api_key": os.getenv("GOOGLE_SEARCH_API_KEY", ""),
             "google_search_cx": os.getenv("GOOGLE_SEARCH_CX", ""),
             "serper_api_key": getattr(config, "SERPER_API_KEY", ""),
-            "search_engine": getattr(config, "SEARCH_ENGINE", "v2"),
             "auto_publish_enabled": "false",
             "auto_publish_brands": "",
             "auto_publish_strict_lane": "true",
@@ -784,17 +783,6 @@ def same_product(a, b, brand_mappings=None):
         return False
 
 
-def _remember_phash(hash_str, row_id, cloudinary_url, product_name):
-    """Adds a saved image to the in-memory duplicate index, if it has a hash."""
-    if not hash_str or row_id is None:
-        return
-    try:
-        import image_dedup_bktree
-        image_dedup_bktree.remember_image(hash_str, str(row_id), cloudinary_url, product_name)
-    except Exception as e:
-        logger.warning("[BKTree] Could not add the saved image to the duplicate index: %s", e)
-
-
 def save_product_resolution(barcode, product_name, brand, original_url, cloudinary_url, clip_score=None,
                             metadata=None, clip_embedding=None, perceptual_hash=None,
                             verification_status="legacy", approved_by=None, sku_key=None, color_signature=None,
@@ -891,7 +879,6 @@ def save_product_resolution(barcode, product_name, brand, original_url, cloudina
         return False
     if saved_id is None:
         return False
-    _remember_phash(hash_str, saved_id, cloudinary_url, product_name)
     if verification_status in SERVABLE_STATUSES:
         delete_product_failure(barcode_raw or f"ERR_{product_name}_{brand}".replace(" ", "_"),
                                sku_key=sku_clean or None, product_name=product_name, brand=brand)
@@ -1061,41 +1048,6 @@ def sku_publish_lock(sku_key, timeout=PUBLISH_LOCK_SECONDS):
                 except Exception:
                     pass
             _close(conn)
-
-
-def find_visual_duplicate(target_embedding, threshold=0.96):
-    """
-    (مسار v1 فقط) البحث عن منتج مسجل بمتجه بصري مشابه جداً. لا يُستخدم في v2.
-    """
-    if target_embedding is None or not isinstance(target_embedding, list) or len(target_embedding) == 0:
-        return None
-    try:
-        conn = get_db_connection()
-        try:
-            cursor = conn.cursor()
-            cursor.execute(
-                "SELECT product_name, brand, clip_embedding_json, cloudinary_url FROM resolved_products "
-                "WHERE clip_embedding_json IS NOT NULL AND clip_embedding_json != '' AND " + _SERVABLE_SQL
-            )
-            rows = cursor.fetchall()
-        finally:
-            _close(conn)
-        for row in rows:
-            try:
-                emb = json.loads(row["clip_embedding_json"])
-                if isinstance(emb, list) and len(emb) == len(target_embedding):
-                    dot = sum(x * y for x, y in zip(target_embedding, emb))
-                    n1 = sum(x ** 2 for x in target_embedding) ** 0.5
-                    n2 = sum(x ** 2 for x in emb) ** 0.5
-                    sim = dot / (n1 * n2) if (n1 * n2) > 0 else 0.0
-                    if sim >= threshold:
-                        return {"product_name": row["product_name"], "brand": row["brand"],
-                                "cloudinary_url": row["cloudinary_url"], "similarity": sim}
-            except Exception:
-                pass
-    except Exception as e:
-        logger.warning("[MariaDB Cache] خطأ أثناء كشف التكرار البصري: %s", e)
-    return None
 
 
 # ---------------------------------------------------------------------------
@@ -1425,33 +1377,6 @@ def save_feedback(feedback_id, asset_id, row_number, product_name, brand, image_
         return True
     except Exception as e:
         logger.warning("[MariaDB] فشل حفظ سجل الملاحظات: %s", e)
-        return False
-
-
-def get_active_learning_clutter_flag(brand):
-    """
-    (مسار v1 فقط) هل رُفضت صور هذا البراند مرتين على الأقل بسبب تداخل الخلفية؟
-    """
-    if not brand:
-        return False
-    try:
-        conn = get_db_connection()
-        try:
-            cursor = conn.cursor()
-            cursor.execute("SELECT rejection_reasons FROM active_learning_feedback WHERE LOWER(brand) = %s",
-                           (brand.strip().lower(),))
-            rows = cursor.fetchall()
-        finally:
-            _close(conn)
-        count = 0
-        for r in rows:
-            reasons = _loads(r.get("rejection_reasons"), [])
-            if any("clutter" in str(x).lower() or "background" in str(x).lower() or "تداخل" in str(x)
-                   or "خلفية" in str(x) for x in reasons):
-                count += 1
-        return count >= 2
-    except Exception as e:
-        logger.warning("[Active Learning] فشل حساب تداخل الخلفية للبراند: %s", e)
         return False
 
 

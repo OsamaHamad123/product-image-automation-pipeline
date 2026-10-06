@@ -356,25 +356,26 @@ def test_lost_claim_discards_worker_result(wiring, monkeypatch):
     assert rec["auto"] == [] and rec["saved"] == [] and rec["status"] == []
 
 
-def test_llm_localisation_never_feeds_search_identity(wiring, monkeypatch):
-    """QueryRefiner output is written back to the sheet only; search gets the sheet's own Arabic fields."""
+def test_the_sequential_mode_searches_with_the_sheets_own_arabic_fields_only(wiring, monkeypatch):
+    """The old mode's model-written Arabic name / brand (QueryRefiner, removed with the v1 engine) is gone: no model
+    guess is written to the sheet, and search gets the sheet's own Arabic fields (empty here), never a guess."""
     main, _, rec = wiring
     import config
     import google_sheets
     import image_search
-    import query_refiner
-    written = []
-    monkeypatch.setattr(query_refiner.QueryRefiner, "refine_product_metadata",
-                        staticmethod(lambda *a, **k: {"cleaned_title_ar": "حليب المراعي", "canonical_brand_ar": "المراعي"}))
-    monkeypatch.setattr(google_sheets, "update_product_localization", lambda *a, **k: written.append(a) or True)
     monkeypatch.setattr(config, "log_and_fail", lambda *a, **k: None, raising=False)
     calls = []
     monkeypatch.setattr(image_search, "search_best_product_image",
                         _search_returning([(None, {"decision": "NOT_FOUND", "failure_code": "NO_RESULTS"})], calls))
+
+    class Sheet:
+        def __getattr__(self, name):
+            raise AssertionError(f"the sheet was touched: {name}")
+
     prod = {"row_number": 9, "product_name": "Fresh Laban 1L", "brand": "Unmapped Dairy", "barcode": ""}
-    main.process_single_product(prod, object(), 5)
-    assert written and written[0][2] == "حليب المراعي"                 # localisation still written back
+    assert main.process_single_product(prod, Sheet(), 5) == "failed"
     assert calls and calls[0]["product_name_ar"] == "" and calls[0]["brand_ar"] == ""
+    assert not hasattr(google_sheets, "update_product_localization")
 
 
 # ---------------------------------------------------------------------------
@@ -531,14 +532,10 @@ def test_a_failed_auto_publish_after_an_approval_saves_no_candidates(race, monke
 ])
 def test_legacy_mode_marks_another_products_image_for_review(race, monkeypatch, owners, written, cached):
     import config
-    import google_sheets
     import image_search
     import local_cache_db
-    import query_refiner
     main, rec = race
     monkeypatch.setattr(local_cache_db, "find_image_owners", lambda *a, **k: owners)
-    monkeypatch.setattr(query_refiner.QueryRefiner, "refine_product_metadata", staticmethod(lambda *a, **k: {}))
-    monkeypatch.setattr(google_sheets, "update_product_localization", lambda *a, **k: True)
     monkeypatch.setattr(config, "CURATION_MODE", False, raising=False)
     monkeypatch.setattr(config, "FORCE_OVERWRITE_IMAGES", False, raising=False)
     monkeypatch.setattr(image_search, "search_best_product_image",
@@ -579,13 +576,10 @@ def _sequential(monkeypatch, best, pending=False):
     import image_search
     import local_cache_db
     import main
-    import query_refiner
     rec = {"sheet": [], "saved": [], "searched": [], "publish": []}
     monkeypatch.setattr(config, "CURATION_MODE", False, raising=False)
     monkeypatch.setattr(config, "FORCE_OVERWRITE_IMAGES", False, raising=False)
     monkeypatch.setattr(config, "log_and_fail", lambda *a, **k: None, raising=False)
-    monkeypatch.setattr(query_refiner.QueryRefiner, "refine_product_metadata", staticmethod(lambda *a, **k: {}))
-    monkeypatch.setattr(google_sheets, "update_product_localization", lambda *a, **k: True)
     monkeypatch.setattr(google_sheets, "update_image_link",
                         lambda ws, row, col, value, **k: rec["sheet"].append(value) or True)
     monkeypatch.setattr(local_cache_db, "get_rejections", lambda sku: ([], []))

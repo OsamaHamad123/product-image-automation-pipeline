@@ -1,13 +1,13 @@
-"""Run a whole golden set through one engine and write a JSON report.
+"""Run a whole golden set through the engine and write a JSON report.
 
-    report = run_all("v1")                  # legacy search, offline
+    report = run_all("v2")                  # catalog_match, offline
     report = run_all("v2", "gemini_down")   # catalog_match with the verifier down
     path = write_report(report)             # <tmp>/image_search_eval/<engine>-<scenario>-<stamp>.json
 
 A report holds the per-SKU outcomes, the metrics from metrics.compute and the
 network attempts the run made (it must make none). baseline_v1.json is a
-trimmed report of the legacy engine, written once by
-scripts/eval_report.py --engine v1 --write-baseline.
+trimmed report of the removed v1 engine, recorded before it was deleted: data
+only, the 'before' state the v2 gate compares against. No code can rewrite it.
 """
 
 from __future__ import annotations
@@ -18,7 +18,6 @@ import hashlib
 import json
 import logging
 import os
-import subprocess
 import sys
 import tempfile
 import time
@@ -41,12 +40,17 @@ GOLDEN_PATH = FIXTURES / "golden_skus.json"
 CASSETTE_PATH = FIXTURES / "vlm_cassette.json"
 MAPPINGS_PATH = FIXTURES / "brand_mappings.json"
 BASELINE_PATH = FIXTURES / "baseline_v1.json"
-# The ORIGINAL v1 (before any fix) stays in baseline_v1.json and is never regenerated; the
-# v2 gate compares against it. The legacy replay after the v1 rollback hot-fixes (WP-4a)
-# is recorded separately, so a live v1 replay can still be pinned exactly.
+# The ORIGINAL v1 (before any fix) stays in baseline_v1.json; the v2 gate compares against it.
+# baseline_v1_hotfixed.json is v1 after its rollback hot-fixes (WP-4a). The v1 engine itself is
+# deleted: both files are records (eval_report --stored), never regenerated.
 HOTFIXED_BASELINE_PATH = FIXTURES / "baseline_v1_hotfixed.json"
 
-ENGINES = ("v1", "v2")
+ENGINES = ("v2",)
+# Engines that existed once: run_all and eval_report refuse them with this reason.
+REMOVED_ENGINES = {
+    "v1": "the v1 search engine was removed: catalog_match (v2) is the only engine. What v1 did on the golden "
+          "set stays on record in tests/eval/fixtures/baseline_v1.json (scripts/eval_report.py --stored original).",
+}
 # vlm_noisy: the cassette with the recorded misreads of VLM_NOISY_PATH laid over it (see load_cassette)
 SCENARIOS = ("normal", "gemini_down", "vlm_noisy")
 PROVIDER_SETS = runners.PROVIDER_SETS
@@ -58,10 +62,6 @@ ADVERSARIAL_PATH = FIXTURES / "adversarial_skus.json"
 REALISTIC_PATH = FIXTURES / "realistic" / "golden_skus.json"
 SETS = {"golden": GOLDEN_PATH, "realistic": REALISTIC_PATH}
 
-# Source files whose behaviour the v1 baseline records. When any of them
-# changes (for example the v1 rollback hot-fixes), the live v1 run is no
-# longer expected to reproduce the stored numbers exactly.
-LEGACY_SOURCES = ("image_search.py", "image_quality_gatekeeper.py", "aesthetics_engine.py", "image_dedup_bktree.py")
 FIXTURE_FILES = ("golden_skus.json", "vlm_cassette.json", "brand_mappings.json")
 
 
@@ -200,27 +200,13 @@ def _combined(digests: Mapping[str, str]) -> str:
     return hashlib.sha256(json.dumps(dict(sorted(digests.items()))).encode("utf-8")).hexdigest()
 
 
-def legacy_fingerprint() -> Dict[str, Any]:
-    files = _normalised_sha256(REPO_ROOT / name for name in LEGACY_SOURCES)
-    return {"sha256": _combined(files), "files": files}
-
-
 def fixture_fingerprint() -> Dict[str, Any]:
     files = _normalised_sha256(FIXTURES / name for name in FIXTURE_FILES)
     files["imagegen.py"] = _normalised_sha256([EVAL_DIR / "imagegen.py"])["imagegen.py"]
     return {"sha256": _combined(files), "files": files}
 
 
-def git_commit() -> Optional[str]:
-    try:
-        out = subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(REPO_ROOT), capture_output=True, text=True,
-                             timeout=10, check=False)
-        return out.stdout.strip() or None
-    except Exception:
-        return None
-
-
-def run_all(engine: str = "v1", scenario: str = "normal", *, golden: Optional[Mapping[str, Any]] = None,
+def run_all(engine: str = "v2", scenario: str = "normal", *, golden: Optional[Mapping[str, Any]] = None,
             cassette: Optional[Mapping[str, Any]] = None, mappings: Optional[Dict[str, Any]] = None,
             sku_ids: Optional[Iterable[str]] = None,
             progress: Optional[Callable[[int, int, metrics.Outcome], None]] = None,
@@ -239,6 +225,8 @@ def run_all(engine: str = "v1", scenario: str = "normal", *, golden: Optional[Ma
     the default replay. verifier_factory(sku) -> a verifier instead of the cassette (compare_verifiers);
     allow_network only for a live reader the caller confirmed (the providers and downloads stay fixtures).
     """
+    if engine in REMOVED_ENGINES:
+        raise ValueError(REMOVED_ENGINES[engine])
     if engine not in ENGINES:
         raise ValueError(f"engine must be one of {ENGINES}")
     if scenario not in SCENARIOS:
@@ -252,25 +240,22 @@ def run_all(engine: str = "v1", scenario: str = "normal", *, golden: Optional[Ma
     mappings = mappings if mappings is not None else load_mappings()
     wanted = set(sku_ids) if sku_ids else None
     skus = [s for s in golden["skus"] if wanted is None or s["id"] in wanted]
-    if engine == "v1":
-        run_one = runners.run_legacy
-    else:
-        def run_one(sku, cassette, scenario, mappings):  # type: ignore[no-untyped-def]
-            extra: Dict[str, Any] = {}
-            if sources:
-                extra["sources"] = sources
-            if verifier_factory is not None:
-                extra["verifier"] = verifier_factory(sku)
-            return runners.run_v2(sku, cassette, scenario=scenario, mappings=mappings, provider_set=provider_set,
-                                  **extra)
+
+    def run_one(sku, cassette, scenario, mappings):  # type: ignore[no-untyped-def]
+        extra: Dict[str, Any] = {}
+        if sources:
+            extra["sources"] = sources
+        if verifier_factory is not None:
+            extra["verifier"] = verifier_factory(sku)
+        return runners.run_v2(sku, cassette, scenario=scenario, mappings=mappings, provider_set=provider_set,
+                              **extra)
 
     outcomes: List[metrics.Outcome] = []
     attempts: List[str] = []
     t0 = time.perf_counter()
-    if engine == "v2":
-        # no store spelling another run proved: the scorecard depends on this run's rows only
-        from catalog_match import brand_discovery
-        brand_discovery.forget_all()
+    # no store spelling another run proved: the scorecard depends on this run's rows only
+    from catalog_match import brand_discovery
+    brand_discovery.forget_all()
     with (contextlib.nullcontext(attempts) if allow_network else runners.network_blocked(attempts)):
         for i, sku in enumerate(skus, 1):
             outcome = run_one(sku, cassette, scenario=scenario, mappings=mappings)
@@ -284,7 +269,7 @@ def run_all(engine: str = "v1", scenario: str = "normal", *, golden: Optional[Ma
         "engine": engine,
         "set": set_name,
         "scenario": scenario,
-        "provider_set": provider_set if engine == "v2" else None,
+        "provider_set": provider_set,
         "generated_at": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"),
         "seconds": round(seconds, 2),
         "n_skus": len(skus),
@@ -298,8 +283,6 @@ def run_all(engine: str = "v1", scenario: str = "normal", *, golden: Optional[Ma
         report["sources_summary"] = sources_mod.summarize(report["outcomes"])
     if allow_network:
         report["network_allowed"] = True
-    if engine == "v1":
-        report["legacy_fingerprint"] = legacy_fingerprint()
     report["fixture_fingerprint"] = fixture_fingerprint()
     return report
 
@@ -319,66 +302,6 @@ def write_report(report: Mapping[str, Any], path: Optional[os.PathLike] = None) 
         json.dump(report, fh, ensure_ascii=False, indent=1)
         fh.write("\n")
     return target
-
-
-HOTFIXED_DESCRIPTION = (
-    "Legacy v1 (image_search.search_best_product_image with SEARCH_ENGINE=v1) replayed offline on the golden "
-    "fixtures AFTER the v1 rollback hot-fixes (no unverified pick counted as success, fail-closed Gemini, no "
-    "hard exposure/blur gates). The live legacy replay must reproduce it while the legacy sources keep this "
-    "fingerprint. Regenerate only with: python scripts/eval_report.py --engine v1 --write-hotfixed-baseline. "
-    "The ORIGINAL pre-fix v1 stays in baseline_v1.json.")
-
-
-def baseline_payload(report: Mapping[str, Any], golden: Optional[Mapping[str, Any]] = None,
-                     description: Optional[str] = None) -> Dict[str, Any]:
-    """The committed v1 baseline: aggregate metrics plus a per-SKU record of what v1 did."""
-    if report.get("engine") != "v1" or report.get("scenario") != "normal":
-        raise ValueError("the baseline is the legacy engine on the normal scenario")
-    golden = golden or load_golden()
-    labels = metrics.labels_from_golden(golden)
-    per_sku = {}
-    for o in report["outcomes"]:
-        lab = labels[o["sku_id"]]
-        per_sku[o["sku_id"]] = {
-            "decision": o["decision"],
-            "status": o["status"],
-            "chosen_id": o["chosen_id"],
-            "chosen_label": lab["candidates"].get(o["chosen_id"]) if o["chosen_id"] else None,
-            "auto": o["auto"],
-            "needs_review": o["needs_review"],
-            "kills": o["kills"],
-            "queries": o["queries"],
-        }
-    return {
-        "description": description or (
-            "Legacy v1 (image_search.search_best_product_image) replayed offline on the golden fixtures before any "
-            "fix. Aggregate metrics and what v1 did per SKU, kept as data so the 'before' state stays on record "
-            "after v1 is hot-fixed. Regenerate only with: python scripts/eval_report.py --engine v1 "
-            "--write-baseline (from a checkout of legacy_commit when v1 has changed since)."),
-        "engine": "v1",
-        "scenario": "normal",
-        "generated_at": report["generated_at"],
-        "legacy_commit": git_commit(),
-        "legacy_fingerprint": report["legacy_fingerprint"],
-        "fixture_fingerprint": report["fixture_fingerprint"],
-        "n_skus": report["n_skus"],
-        "metrics": report["metrics"],
-        "per_sku": per_sku,
-    }
-
-
-def write_baseline(report: Mapping[str, Any], path: Optional[os.PathLike] = None,
-                   description: Optional[str] = None) -> Path:
-    payload = baseline_payload(report, description=description)
-    target = Path(path or BASELINE_PATH)
-    with open(target, "w", encoding="utf-8", newline="\n") as fh:
-        json.dump(payload, fh, ensure_ascii=False, indent=1)
-        fh.write("\n")
-    return target
-
-
-def write_hotfixed_baseline(report: Mapping[str, Any], path: Optional[os.PathLike] = None) -> Path:
-    return write_baseline(report, path or HOTFIXED_BASELINE_PATH, description=HOTFIXED_DESCRIPTION)
 
 
 def fmt_rate(value: Any) -> str:

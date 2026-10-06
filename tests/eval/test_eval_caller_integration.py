@@ -77,7 +77,6 @@ def wired(monkeypatch, golden_by_id, cassette, mappings):
         return real_find(spec, **state["doubles"], **kwargs)
 
     monkeypatch.setattr(cm_pipeline, "find_product_image", find)
-    monkeypatch.setattr(config, "SEARCH_ENGINE", "v2", raising=False)
     monkeypatch.setattr(image_search, "_load_brand_mappings_for_search", lambda: mappings)
     monkeypatch.setattr(local_cache_db, "get_cached_product", lambda *a, **k: None)
     monkeypatch.setattr(local_cache_db, "get_rejections", lambda sku_key: ([], []))
@@ -210,11 +209,8 @@ def test_legacy_sequential_mode_never_publishes_unselected(wired, mappings, monk
     monkeypatch.setattr(config, "FORCE_OVERWRITE_IMAGES", False, raising=False)
     monkeypatch.setattr(main, "publish_image", lambda *a, **k: touched["publish"].append(a) or {"status": "failed"})
     monkeypatch.setattr(main.google_sheets, "update_image_link", lambda *a, **k: touched["sheet"].append(a) or True)
-    monkeypatch.setattr(main.google_sheets, "update_product_localization", lambda *a, **k: True)
     monkeypatch.setattr(local_cache_db, "save_curation_candidates",
                         lambda row, name, brand, cands, best_url=None, **k: touched["saved"].append(cands) or True)
-    import query_refiner
-    monkeypatch.setattr(query_refiner.QueryRefiner, "refine_product_metadata", staticmethod(lambda *a, **k: {}))
 
     with runners._v2_settings(True), runners.network_blocked():
         result = main.process_single_product(prod, worksheet=object(), link_column_index=3,

@@ -225,7 +225,7 @@ def test_settings_never_echo_secrets():
         # every secret is still reachable: a literal field («متقدم») or one per provider key (keys tab loop)
         assert f'name="{key}"' in settings or f"'{key}' =>" in providers, key
     assert 'name="{{ $field }}"' in settings and 'type="password"' in settings
-    assert 'name="search_engine"' in settings
+    assert 'name="search_engine"' not in settings and "data-engine" not in settings   # no v1 engine to pick
 
     # Not even the last characters of a stored key are printed any more (no mask on the page).
     assert "maskSecret" not in controller and "$masked" not in settings and "maskSecret" not in settings

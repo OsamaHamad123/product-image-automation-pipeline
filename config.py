@@ -40,9 +40,6 @@ GOOGLE_SEARCH_CX_LIST = [c.strip() for c in os.getenv("GOOGLE_SEARCH_CX", "").sp
 GOOGLE_SEARCH_API_KEY = GOOGLE_SEARCH_API_KEYS[0] if GOOGLE_SEARCH_API_KEYS else ""
 GOOGLE_SEARCH_CX = GOOGLE_SEARCH_CX_LIST[0] if GOOGLE_SEARCH_CX_LIST else ""
 
-# محرك البحث: 'v2' (catalog_match، الافتراضي) أو 'v1' (المسار القديم للتراجع فقط لمدة 30 يوماً)
-SEARCH_ENGINE = os.getenv("SEARCH_ENGINE", "v2").strip().lower() or "v2"
-
 # مفتاح Serper.dev (Google Images عبر API، المصدر الأساسي للبحث في v2)
 SERPER_API_KEY = os.getenv("SERPER_API_KEY", "")
 
@@ -176,13 +173,6 @@ CLOUDINARY_BG_REMOVAL = False
 # الأبعاد المستهدفة سحابياً لإعادة الاحتواء وتوحيد الأبعاد (recontainment)
 CLOUDINARY_TARGET_SIZE = (800, 800)
 
-# الحد الأدنى لأبعاد الصورة المقبولة (لتجنب المصغرات والصور منخفضة الجودة)
-MIN_IMAGE_WIDTH = 100
-MIN_IMAGE_HEIGHT = 100
-ENABLE_ASPECT_RATIO_CHECK = True
-MIN_ASPECT_RATIO = 0.4
-MAX_ASPECT_RATIO = 2.5
-
 
 # إعدادات تحسين الجودة سحابياً عبر Cloudinary
 CLOUDINARY_QUALITY = "auto:best" # درجة جودة الضغط سحابياً (مثل auto أو auto:best أو auto:good للمحافظة على أقصى دقة)
@@ -194,7 +184,6 @@ CLOUDINARY_TRIM_TOLERANCE = 5  # سماحية الاقتصاص لـ Cloudinary �
 
 # إعدادات الظلال والتجاوز الذكي للخلفيات البيضاء المجهزة مسبقاً
 ENABLE_STUDIO_SHADOWS = False    # تعطيل ظلال الاستوديو لتلبية طلب العميل بعدم وجود ظلال
-BYPASS_WHITE_BACKGROUND_CHECK = os.getenv("BYPASS_WHITE_BACKGROUND_CHECK", "False").lower() == "true"  # تخطي إزالة الخلفية والقص إذا كانت الصورة الأصلية بالفعل بخلفية بيضاء نقية وجودة عالية
 WHITE_BACKGROUND_THRESHOLD = 0.96      # النسبة المقبولة للبكسلات البيضاء على إطار الصورة (96%) للاعتبار كخلفية بيضاء
 ENABLE_IMAGE_ENHANCEMENT = False       # تعطيل تحسين/تنعيم الألوان والصور الذكائي الافتراضي لمنع بهتان الألوان وجعلها اختيارية
 
@@ -215,28 +204,10 @@ CURATION_MODE = os.getenv("CURATION_MODE", "True").lower() == "true"
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")
 
-# النماذج المحلية (CLIP, SigLIP, BLIP, Moondream2, DINOv2) أزيلت من كل مسارات القرار (D6).
-# هذا الثابت يبقى فقط لأن مسار التراجع v1 في image_search.py ما زال يقرؤه؛ لم يعد قابلاً للضبط.
-DISABLE_LOCAL_AI_MODELS = True
-
 ENABLE_GEMINI_VISION = True
 ENABLE_LOCAL_OCR = False
 # مطابقة البراند الصارمة (D9): المرشح الذي يحمل براند منافس معروف دون البراند المطلوب يُرفض
 STRICT_BRAND_MATCH = os.getenv("STRICT_BRAND_MATCH", "True").lower() == "true"
-
-# إعدادات التطوير الجديدة لزيادة الدقة
-CLIP_RELEVANCE_THRESHOLD = float(os.getenv("CLIP_RELEVANCE_THRESHOLD", "0.22"))
-CLIP_GREY_ZONE_THRESHOLD = float(os.getenv("CLIP_GREY_ZONE_THRESHOLD", "0.18"))
-ENABLE_GEMINI_PRE_VALIDATION = os.getenv("ENABLE_GEMINI_PRE_VALIDATION", "True").lower() == "true"
-FILTER_COMPETITORS = os.getenv("FILTER_COMPETITORS", "True").lower() == "true"
-# إعدادات النماذج المحلية للتحقق البصري المطور (Hugging Face Models)
-SIGLIP_MODEL_ID = "google/siglip-base-patch16-224"
-BLIP_MODEL_ID = "Salesforce/blip-image-captioning-base"
-MOONDREAM_MODEL_ID = "vikhyatk/moondream2"
-
-USE_SIGLIP_SEMANTIC_CHECK = True  # يقرؤه مسار v1 فقط؛ بدون نموذج محلي تعود الدرجة None
-USE_BLIP_CAPTION_CHECK = True
-USE_MOONDREAM_CHECK = False  # يمكن تفعيله يدوياً لتشغيل Moondream2 في الفرز الحتمي النهائي
 
 # نطاقات المواقع الإماراتية الموثوقة للتجارة الإلكترونية لتحديد نطاق البحث المبدئي
 TRUSTED_UAE_DOMAINS = ["kibsons.com", "carrefouruae.com", "luluhypermarket.com", "noon.com", "amazon.ae"]
@@ -541,8 +512,8 @@ def load_db_config():
             global PHOTOROOM_API_KEY, GEMINI_API_KEY, GEMINI_MODEL, PHOTOROOM_CROP
             global CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET
             global GOOGLE_SEARCH_API_KEYS, GOOGLE_SEARCH_CX_LIST, GOOGLE_SEARCH_API_KEY, GOOGLE_SEARCH_CX
-            global CLIP_RELEVANCE_THRESHOLD, CLIP_GREY_ZONE_THRESHOLD, STRICT_BRAND_MATCH, ENABLE_GEMINI_PRE_VALIDATION, FILTER_COMPETITORS, BYPASS_WHITE_BACKGROUND_CHECK, PROXY_URL
-            global SEARCH_ENGINE, SERPER_API_KEY, AUTO_PUBLISH_ENABLED, AUTO_PUBLISH_BRANDS, OUTPUT_CANVAS_SIZE
+            global STRICT_BRAND_MATCH, PROXY_URL
+            global SERPER_API_KEY, AUTO_PUBLISH_ENABLED, AUTO_PUBLISH_BRANDS, OUTPUT_CANVAS_SIZE
             global OUTPUT_BACKGROUND
             global AUTO_PUBLISH_STRICT_LANE
             global BG_REMOVAL_METHOD, ENABLE_IMAGE_ENHANCEMENT, BG_FALLBACK, REMBG_MODEL
@@ -571,23 +542,11 @@ def load_db_config():
                 if cxs:
                     GOOGLE_SEARCH_CX_LIST = cxs
                     GOOGLE_SEARCH_CX = cxs[0]
-            if "clip_relevance_threshold" in db_keys and db_keys["clip_relevance_threshold"]:
-                CLIP_RELEVANCE_THRESHOLD = float(db_keys["clip_relevance_threshold"])
-            if "clip_grey_zone_threshold" in db_keys and db_keys["clip_grey_zone_threshold"]:
-                CLIP_GREY_ZONE_THRESHOLD = float(db_keys["clip_grey_zone_threshold"])
             if "strict_brand_match" in db_keys:
                 STRICT_BRAND_MATCH = db_keys["strict_brand_match"].lower() == "true"
-            if "enable_gemini_pre_validation" in db_keys:
-                ENABLE_GEMINI_PRE_VALIDATION = db_keys["enable_gemini_pre_validation"].lower() == "true"
-            if "filter_competitors" in db_keys:
-                FILTER_COMPETITORS = db_keys["filter_competitors"].lower() == "true"
-            if "bypass_white_background_check" in db_keys:
-                BYPASS_WHITE_BACKGROUND_CHECK = db_keys["bypass_white_background_check"].lower() == "true"
             if "proxy_url" in db_keys and db_keys["proxy_url"]:
                 PROXY_URL = db_keys["proxy_url"]
-            # إعدادات محرك البحث v2 والنشر التلقائي (D1/D7/D10/D14)
-            if db_keys.get("search_engine"):
-                SEARCH_ENGINE = str(db_keys["search_engine"]).strip().lower()
+            # إعدادات البحث والنشر التلقائي (D1/D7/D10/D14)
             if db_keys.get("serper_api_key"):
                 SERPER_API_KEY = str(db_keys["serper_api_key"]).strip()
             if "auto_publish_enabled" in db_keys and db_keys["auto_publish_enabled"] is not None:
