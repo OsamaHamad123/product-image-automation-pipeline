@@ -1478,6 +1478,22 @@ def update_image_link(worksheet, row_number, link_column_index, image_link, barc
         return False
 
 
+def queue_link_writes(items):
+    """
+    يجدول كتابة رابط صورة لكل صف في طابور MariaDB (outbox) مباشرة، بلا Redis وبلا كتابة مباشرة في الشيت (ترحيل روابط
+    التسليم: scripts/migrate_delivery_urls.py): items [{row_number, value, barcode, product_name, size, brand}]؛ الهوية
+    كما في الشيت، والتفريغ يتخطى الصف الذي تغيّر منتجه (CONFLICT) أو كتابة أقدم من كتابة أحدث لنفس الخلية. يعيد
+    {row: معرّف}.
+    """
+    queue = _queue or SQLiteTransactionQueue()
+    out = {}
+    for item in items or ():
+        expect = _expectation(item.get("barcode"), item.get("product_name"), item.get("size"), item.get("brand"))
+        out[int(item["row_number"])] = queue.append_update(int(item["row_number"]), None, str(item["value"]),
+                                                           col_key=LINK_KEY, **_outbox_keys(expect))
+    return out
+
+
 def queue_barcode_writes(items):
     """
     يجدول كتابة باركود لكل صف في طابور MariaDB (outbox) مباشرة، بلا Redis وبلا كتابة مباشرة في الشيت: items
