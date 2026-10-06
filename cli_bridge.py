@@ -2547,6 +2547,8 @@ def _configure_logging(stream):
     root.addHandler(handler)
     if root.level > logging.INFO or root.level == logging.NOTSET:
         root.setLevel(logging.INFO)
+    import run_report
+    run_report.install_log_redaction()       # لا مفتاح ولا كلمة مرور في temp/search.log
     return handler
 
 

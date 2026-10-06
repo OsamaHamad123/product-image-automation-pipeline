@@ -2668,7 +2668,7 @@ def run_worker_mode(trigger="manual", report=True, deadline_ts=None):
 
 
 def run_automation_pipeline():
-    """التشغيل التسلسلي القديم (بدون طابور)."""
+    """التشغيل التسلسلي القديم (بدون طابور): `python main.py --legacy-sequential` فقط (للتراجع)."""
     lock_file = "temp/pipeline.lock"
     try:
         load_run_config()
@@ -2728,12 +2728,30 @@ def run_automation_pipeline():
                 pass
 
 
-if __name__ == "__main__":
-    if "--enqueue" in sys.argv:
+# بلا وسيط: الاستخدام فقط. التشغيل التسلسلي القديم (يكتب الشيت مباشرة بلا طابور ولا مراجعة) كان يبدأ من مجرد
+# `python main.py`؛ صار يحتاج وسيطاً صريحاً.
+USAGE = """usage: python main.py --enqueue | --worker [--trigger=dashboard|nightly|manual] | --legacy-sequential
+  --enqueue            read the Sheet into the task queue (automation_queue)
+  --worker             search and publish the queued rows (what the dashboard's run button starts after --enqueue)
+  --legacy-sequential  the old sequential run without the queue; it writes the Sheet directly (rollback only)"""
+
+
+def cli(argv):
+    """رمز الخروج لتشغيل main.py بهذه الوسائط."""
+    import run_report
+    run_report.install_log_redaction()       # لا مفتاح ولا كلمة مرور في سجل التشغيل (temp/pipeline.log)
+    if "--enqueue" in argv:
         run_enqueue_mode()
-    elif "--worker" in sys.argv:
-        run_worker_mode(trigger=_cli_trigger(sys.argv))
-        import run_report
-        sys.exit(run_report.exit_code(LAST_WORKER.get("stop_reason")))
-    else:
+        return 0
+    if "--worker" in argv:
+        run_worker_mode(trigger=_cli_trigger(argv))
+        return run_report.exit_code(LAST_WORKER.get("stop_reason"))
+    if "--legacy-sequential" in argv:
         run_automation_pipeline()
+        return 0
+    print(USAGE)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(cli(sys.argv))

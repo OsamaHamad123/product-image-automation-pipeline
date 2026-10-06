@@ -47,7 +47,8 @@ class QueryRefiner:
             return fallback
             
         try:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{config.GEMINI_MODEL}:generateContent?key={config.GEMINI_API_KEY}"
+            # المفتاح في ترويسة x-goog-api-key لا في الرابط: الرابط يظهر في نصوص الأخطاء والسجلات
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{config.GEMINI_MODEL}:generateContent"
             
             prompt = (
                 f"You are an expert e-Commerce Search & AI Architect. Analyze this messy product entry:\n"
@@ -81,7 +82,7 @@ class QueryRefiner:
                 "contents": [{"parts": [{"text": prompt}]}],
                 "generationConfig": {"responseMimeType": "application/json"}
             }
-            headers = {"Content-Type": "application/json"}
+            headers = {"Content-Type": "application/json", "x-goog-api-key": config.GEMINI_API_KEY}
             
             if hasattr(config, "METRICS") and "gemini_api_calls" in config.METRICS:
                 config.METRICS["gemini_api_calls"] += 1
@@ -102,7 +103,8 @@ class QueryRefiner:
                 if isinstance(data, dict):
                     return data
         except Exception as e:
-            print(f"⚠️ Error parsing product metadata via Gemini: {e}")
+            import run_report
+            print(f"⚠️ Error parsing product metadata via Gemini: {run_report.redact(e)}")
             
         return fallback
 
