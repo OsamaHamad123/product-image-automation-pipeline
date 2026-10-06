@@ -296,8 +296,14 @@
     // بايثون بصيغة ويلسون). «38 / 41 · باقي 12 اعتماد». null بلا أرقام: العداد يختفي بدل ما يقول رقماً ما عرفناه
     function laneView(strict) {
         if (!strict || typeof strict !== 'object') return null;
+        // enabled / publishing (review-lanes v3): الفئة شغّالة افتراضياً وبتنشر لحالها أول ما تجهز؛ null = الجسر ما قال
         if (strict.ready === true) {
-            return { ready: true, pct: 100, text: 'جاهز: شغّله من الإعدادات ← النشر الآلي',
+            if (strict.publishing === true) {
+                return { ready: true, pct: 100, text: 'شغّال: المؤكد تماماً بينزل عالشيت لحاله',
+                         title: 'الاقتراحات المؤكدة تماماً وصلت للدقة المطلوبة، وعم تنزل عالشيت بلا مراجعة' };
+            }
+            return { ready: true, pct: 100, text: strict.enabled === false ? 'جاهز بس مطفي: شغّله من الإعدادات ← النشر الآلي'
+                                                                           : 'جاهز: شغّله من الإعدادات ← النشر الآلي',
                      title: 'الاقتراحات المؤكدة تماماً وصلت للدقة المطلوبة' };
         }
         const accepted = parseInt(strict.accepted, 10);
@@ -309,7 +315,9 @@
             ready: false,
             pct: known && accepted + more > 0 ? Math.round(100 * accepted / (accepted + more)) : 0,
             text: `${accepted} / ${reviewed} · ` + (known ? `باقي ${more} اعتماد` : 'الدقة هلق أقل من المطلوب'),
-            title: `اعتمدت ${accepted} من ${reviewed} اقتراح مؤكد تماماً` + (known ? `، وبعد ${more} اعتماد متتالي بلا رفض بينفتح النشر الآلي`
+            title: `اعتمدت ${accepted} من ${reviewed} اقتراح مؤكد تماماً` + (known ? `، وبعد ${more} اعتماد متتالي بلا رفض ` +
+                (strict.enabled === true ? 'بيبلّش ينشر لحاله'
+                    : strict.enabled === false ? 'بينفتح النشر الآلي (مطفي هلق من الإعدادات)' : 'بينفتح النشر الآلي')
                 : '، بس دقتها هلق أقل من الحد المطلوب')
         };
     }

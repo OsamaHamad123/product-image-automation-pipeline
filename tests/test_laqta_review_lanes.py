@@ -210,9 +210,17 @@ out.text = document.querySelector('.rv-bulk__lane').textContent;
     out = run(r"""
 out.cases = [R.bulk.laneLine({ prechecked: 0, accepted: 0, ready: false, more_needed: 189 }),
              R.bulk.laneLine({ prechecked: 100, accepted: 50, ready: false, more_needed: null }),
-             R.bulk.laneLine(null), R.bulk.laneLine({})];
+             R.bulk.laneLine(null), R.bulk.laneLine({}),
+             // review-lanes v3 adds enabled / publishing: the lane is on by default and publishes by itself once ready
+             R.bulk.laneLine({ prechecked: 189, accepted: 189, ready: true, enabled: true, publishing: true }),
+             R.bulk.laneLine({ prechecked: 189, accepted: 189, ready: true, enabled: false, publishing: false })];
+out.titles = [true, false].map(enabled => R.bulk.laneView({ prechecked: 1, accepted: 1, ready: false, more_needed: 188,
+                                                            enabled }).title);
 """, tmp_path, fixture(products=[]))
-    assert out["cases"] == ["0 / 0 · باقي 189 اعتماد", "50 / 100 · الدقة هلق أقل من المطلوب", None, None]
+    assert out["cases"] == ["0 / 0 · باقي 189 اعتماد", "50 / 100 · الدقة هلق أقل من المطلوب", None, None,
+                            "شغّال: المؤكد تماماً بينزل عالشيت لحاله", "جاهز بس مطفي: شغّله من الإعدادات ← النشر الآلي"]
+    assert out["titles"][0].endswith("وبعد 188 اعتماد متتالي بلا رفض بيبلّش ينشر لحاله")
+    assert out["titles"][1].endswith("وبعد 188 اعتماد متتالي بلا رفض بينفتح النشر الآلي (مطفي هلق من الإعدادات)")
 
 
 @NEEDS_NODE
