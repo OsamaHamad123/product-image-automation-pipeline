@@ -1,0 +1,14 @@
+User-agent: *
+Allow: /
+
+Disallow: /*search/*
+Disallow: /*accounts/*
+Disallow: /*basket/*
+Disallow: /dashboard/*
+Disallow: /admin/*
+Disallow: /*selected_facets=*
+Disallow: /*sort_by=*
+Disallow: /*1/indexes/*
+
+Sitemap: https://www.spinneys.com/ar-ae/sitemap.xml
+Sitemap: https://www.spinneys.com/en-ae/sitemap.xml

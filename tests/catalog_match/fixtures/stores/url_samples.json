@@ -1,0 +1,91 @@
+{
+ "_about": "Real URLs only (no page bodies): product pages and other pages of each store, from its sitemap (2026-10-06) and from the live runs' exports (2026-10-03 to 2026-10-05).",
+ "stores": {
+  "lulu": {
+   "product": [
+    "https://gcc.luluhypermarket.com/en-ae/afia-pure-sunflower-oil-enriched-with-vitamins-a-d-zinc-15-litres/p/1671736",
+    "https://gcc.luluhypermarket.com/en-ae/al-osra-fine-sugar-value-pack-2-x-2-kg/p/1251820",
+    "https://gcc.luluhypermarket.com/en-ae/dari-frozen-mixed-vegetables-400-g/p/1027395",
+    "https://gcc.luluhypermarket.com/en-ae/halwani-maamoul-date-filled-cookies-16-pcs-288-g/p/649441/",
+    "https://gcc.luluhypermarket.com/en-ae/nellara-fish-fry-masala-100-g/p/2276712",
+    "https://gcc.luluhypermarket.com/en-ae/shan-meat-masala-100-g/p/22596"
+   ],
+   "not_product": [
+    "https://gcc.luluhypermarket.com/ar-ae/dandy-premium-cotton-candy-ice-cream-1-litre/p/1851903",
+    "https://gcc.luluhypermarket.com/ar-bh/unium-luncheon-meat-mixed-800-g/p/865143",
+    "https://gcc.luluhypermarket.com/en-bh/virginia-light-meat-tuna-in-sunflower-oil-170-g/p/1879199",
+    "https://gcc.luluhypermarket.com/en-kw/california-garden-white-tuna-in-sunflower-oil-185-g/p/295369",
+    "https://gcc.luluhypermarket.com/en-kw/goody-light-meat-tuna-in-sunflower-oil-160-g/p/1603206",
+    "https://gcc.luluhypermarket.com/en-kw/kitchen-treasures-meat-masala-160-g/p/1429444"
+   ]
+  },
+  "spinneys": {
+   "product": [
+    "https://www.spinneys.com/en-ae/catalogue/al-alali-fancy-meat-tuna-solid-pack-in-water-170g_84093/",
+    "https://www.spinneys.com/en-ae/catalogue/california-garden-white-tuna-in-olive-oil-185g_1380/",
+    "https://www.spinneys.com/en-ae/catalogue/john-west-light-meat-tuna-solid-in-sunflower-oil-170g_1389/",
+    "https://www.spinneys.com/en-ae/catalogue/london-dairy-keto-ice-cream-butter-pecan-473ml_61183/",
+    "https://www.spinneys.com/en-ae/catalogue/spinneys-food-skipjack-tuna-chunks-in-brine-185g_2688/",
+    "https://www.spinneys.com/en-ae/catalogue/zwan-chicken-luncheon-200g_5651/",
+    "https://www.spinneys.com/en-ae/catalogue/waitrose-the-choc-box-650g_92919/",
+    "https://www.spinneys.com/en-ae/catalogue/fonte-tortilla-fresh-plain-390g_78283/",
+    "https://www.spinneys.com/en-ae/catalogue/mentos-pure-fresh-bubble-fresh-chewing-gum-20g_61076/",
+    "https://www.spinneys.com/en-ae/catalogue/moong-dal-kg_31828/"
+   ],
+   "not_product": [
+    "https://www.spinneys.com/ar-ae/catalogue/emborg-organic-mixed-vegetables-400g_49840/",
+    "https://www.spinneys.com/en-sa/catalogue/sunbulah-frozen-french-fries-1kg_89748/",
+    "https://www.spinneys.com/en-ae/",
+    "https://www.spinneys.com/en-ae/recipes/",
+    "https://www.spinneys.com/en-ae/recipes/raspberry-and-banana-smoothie/"
+   ]
+  },
+  "talabat_mart_uae": {
+   "product": [
+    "https://www.talabat.com/uae/talabat-mart/product/al-kabeer-frozen-chicken-samosa-240g/s/500256",
+    "https://www.talabat.com/uae/talabat-mart/product/al-kabeer-frozen-kiri-cheese-samosas-240g/s/922285",
+    "https://www.talabat.com/uae/talabat-mart/product/al-kabeer-frozen-punjabi-samosa-900g/s/500273",
+    "https://www.talabat.com/uae/talabat-mart/product/al-malaky-royal-ice-cream-waffle-cones-12-pieces/s/917649",
+    "https://www.talabat.com/uae/talabat-mart/product/al-rawabi-shredded-mozzarella-cheese-200-g/s/904393",
+    "https://www.talabat.com/uae/talabat-mart/product/aseel-pure-ghee-800-ml/s/902804"
+   ],
+   "not_product": [
+    "https://www.talabat.com/bahrain/talabat-mart/product/americana-heroz-happy-chicken-nuggets-400g/s/901972",
+    "https://www.talabat.com/kuwait/talabat-mart/product/mccain-tradition-straight-cut-french-fries-750g/s/901162",
+    "https://www.talabat.com/kuwait/talabat-mart/product/unium-chicken-luncheon-meat-800-g/s/935359",
+    "https://www.talabat.com/kuwait/talabat-mart/product/zwan-chicken-luncheon-meat-340g/s/924930",
+    "https://www.talabat.com/oman/talabat-mart/product/americana-heroz-happy-chicken-nuggets-400g/s/UN1AEJ",
+    "https://www.talabat.com/uae/ferns-n-petals"
+   ]
+  },
+  "carrefour_uae": {
+   "product": [
+    "https://www.carrefouruae.com/mafuae/en/beef-luncheon/zwan-beef-luncheon-meat-850gr/p/10937",
+    "https://www.carrefouruae.com/mafuae/en/family-pack-ice-cream/igloo-ice-cream-butterscotch-1l/p/66887",
+    "https://www.carrefouruae.com/mafuae/en/ice-cream-pint/haagen-dazs-vanila-460ml/p/1652083",
+    "https://www.carrefouruae.com/mafuae/en/masala-and-mix/mehran-meat-masala-100g/p/1533388",
+    "https://www.carrefouruae.com/mafuae/en/poultry-luncheon/robert-clm-mild-in-s-tin-340g/p/2213177",
+    "https://www.carrefouruae.com/mafuae/en/samousa-meat/al-kabeer-samosa-chicken-240g/p/12562"
+   ],
+   "not_product": [
+    "https://www.carrefouruae.com/mafuae/ar/facial-tissues/fine-tissues-steripro-100/p/1792",
+    "https://www.carrefouruae.com/mafuae/ar/masala-and-mix/bayara-arabic-mix-masala-200gr/p/1082051",
+    "https://www.carrefouruae.com/mafuae/en/p/1167184"
+   ]
+  },
+  "sharjahcoop": {
+   "product": [
+    "https://www.sharjahcoop.ae/en/al-ameer-mix-bahraini-masala-300g/p/6084000090241",
+    "https://www.sharjahcoop.ae/en/al-taghziah-beef-luncheon-meat-200g/p/5283002830010",
+    "https://www.sharjahcoop.ae/en/eastern-kabsa-masala-200g/p/8901440206897",
+    "https://www.sharjahcoop.ae/en/kwality-mixed-vegetable-400g/p/6291053781440",
+    "https://www.sharjahcoop.ae/en/shama-arabic-chicken-masala-225g/p/6291100790760",
+    "https://www.sharjahcoop.ae/en/virginia-tuna-in-sf-oil-w-chilli-2x185gm/p/6297000958187",
+    "https://www.sharjahcoop.ae/en/nellara-chicken-fry-masala-100-g-duplex/p/V00236_6291104180277NLR"
+   ],
+   "not_product": [
+    "https://www.sharjahcoop.ae/al-kabeer-punjabi-samosa-900g/p/5033712451018"
+   ]
+  }
+ }
+}

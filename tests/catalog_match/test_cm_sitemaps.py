@@ -9,6 +9,7 @@ import json
 import os
 import socket
 import sys
+from dataclasses import replace
 
 import pytest
 
@@ -74,8 +75,21 @@ class FakeHttp:
         return Resp(status, body, final[0] if final else url)
 
 
+def robots_listed(stores):
+    """The stores without their configured starting sitemaps: these tests serve stores whose robots.txt lists them
+    (the shipped starting points are checked against the stores' real robots.txt in test_cm_store_sitemaps.py)."""
+    return [replace(s, sitemaps=()) for s in stores]
+
+
+@pytest.fixture
+def robots_listed_stores(monkeypatch):
+    """scripts/build_catalog_index.py reads robots_listed() stores (load_stores, wrapped)."""
+    shipped = sitemaps.load_stores
+    monkeypatch.setattr(sitemaps, "load_stores", lambda path=None: robots_listed(shipped(path)))
+
+
 def lulu():
-    return next(s for s in load_stores() if s.key == "lulu")
+    return next(s for s in robots_listed(load_stores()) if s.key == "lulu")
 
 
 def harvester(pages, waits=None):
@@ -139,11 +153,13 @@ def test_categories_other_countries_and_other_languages_are_not_product_pages(ke
     assert not store.is_product(url)
 
 
-def test_stores_whose_slugs_leave_out_the_brand_are_off_unless_asked_for():
+def test_stores_that_cannot_be_used_are_off_unless_asked_for():
+    # noon / Union Coop: slugs leave out the brand; talabat: no product sitemap; Carrefour: sitemaps not known yet
     stores = load_stores()
-    assert [s.key for s in enabled_stores(stores)] == ["lulu", "carrefour_uae", "spinneys", "talabat_mart_uae",
-                                                       "sharjahcoop"]
+    assert [s.key for s in enabled_stores(stores)] == ["lulu", "spinneys", "sharjahcoop"]
     assert [s.key for s in enabled_stores(stores, ["noon_uae"])] == ["noon_uae"]
+    assert [s.key for s in enabled_stores(stores, ["carrefour_uae", "talabat_mart_uae"])] == ["carrefour_uae",
+                                                                                            "talabat_mart_uae"]
     with pytest.raises(KeyError):
         enabled_stores(stores, ["lulu", "nope"])
 
@@ -320,7 +336,7 @@ def test_nested_indexes_stop_at_max_depth(monkeypatch):
 # ---------------------------------------------------------------------------
 
 @pytest.fixture
-def fake_web(monkeypatch):
+def fake_web(monkeypatch, robots_listed_stores):
     http = FakeHttp(full_store())
 
     class Harvester(SitemapHarvester):
@@ -486,7 +502,8 @@ def test_a_bad_pattern_or_a_byte_order_mark_in_the_stores_file(tmp_path):
     assert build_catalog_index.main(["--discover", "--config", str(bad)]) == 2
 
 
-def test_cli_one_store_failing_never_stops_the_others_and_the_json_is_written(monkeypatch, capsys, tmp_path):
+def test_cli_one_store_failing_never_stops_the_others_and_the_json_is_written(monkeypatch, capsys, tmp_path,
+                                                                             robots_listed_stores):
     pages = full_store()
     spinneys = next(s for s in load_stores() if s.key == "spinneys")
     pages[spinneys.base_url + "/robots.txt"] = (404, b"")
