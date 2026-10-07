@@ -17,7 +17,8 @@
         .lq-login { min-height: 100vh; display: grid; place-items: center; padding: 24px 16px; background: var(--lq-bg); }
         .lq-login__box { width: 100%; max-width: 380px; }
         .lq-login__brand { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 20px; color: var(--lq-text); }
-        .lq-login__brand .lq-brand__name { font-family: Alexandria, sans-serif; font-size: 1.5rem; font-weight: 700; }
+        /* the sidebar paints the name white (dark background); here the page is light */
+        .lq-login .lq-login__brand .lq-brand__name { font-family: Alexandria, sans-serif; font-size: 1.5rem; font-weight: 700; color: var(--lq-text); }
         .lq-login form { display: grid; gap: 16px; }
         .lq-login__remember { display: flex; align-items: center; gap: 8px; font-size: .9rem; }
     </style>
