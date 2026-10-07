@@ -6,10 +6,12 @@ HttpFetcher.fetch(cands, spec) -> list[FetchedImage]
     * the client is curl_cffi with a Chrome TLS fingerprint when it is installed (retailer CDNs
       behind Akamai/Cloudflare, e.g. Lulu, stall plain Python clients until they time out),
       else `requests`;
-    * the first attempt is always direct. At most one more attempt: after a timeout, a 5xx or a
-      connection error, and also after a 403/429 when a proxy is configured. That second attempt
-      goes through PROXY_URL when one is set (it is a fallback, never the only route: a slow
-      proxy must not fail every download);
+    * the first attempt is always direct. One more attempt after a timeout, a 5xx or a connection
+      error, through PROXY_URL when one is set (it is a fallback, never the only route: a slow
+      proxy must not fail every download). A refusal (403/429, or a page instead of an image: the
+      empty HTML Carrefour's Akamai sends any non-browser) goes through the proxy when one is set,
+      up to PROXY_ATTEMPTS times: the proxy gives a new exit address per connection and some of its
+      addresses are blocked too;
     * timeout 10 s per attempt;
     * body size window 3 KB .. 15 MB;
     * Accept 'image/avif,image/webp,image/png,image/jpeg;q=0.9,*/*;q=0.5' and
@@ -127,9 +129,23 @@ def _retryable(error: Optional[str]) -> bool:
     return error in ("timeout", "connection_error") or bool(error and error.startswith("http_5"))
 
 
+# The source refused this client (a 403/429, or a page instead of an image): only a different route (the proxy) can
+# help, and a refused proxy address is worth another try on a new one (up to PROXY_ATTEMPTS).
+BLOCKED_ERRORS = ("http_403", "http_429", "not_image")
+PROXY_ATTEMPTS = 3
+
+
 def _blocked(error: Optional[str]) -> bool:
     """The source refused this client; only a different route (the proxy) can help."""
-    return error in ("http_403", "http_429")
+    return error in BLOCKED_ERRORS
+
+
+def _markup(body: Optional[bytes], ctype: str) -> bool:
+    """An HTML / SVG answer where an image was asked for (a bot challenge or an error page)."""
+    if not body:
+        return False
+    head = body[:256].lstrip(b"\xef\xbb\xbf \t\r\n").lower()
+    return "html" in (ctype or "") or "svg" in (ctype or "") or head.startswith(_MARKUP_PREFIXES)
 
 
 def _trusted_retailer(host: str) -> bool:
@@ -350,11 +366,14 @@ class HttpFetcher:
             return FetchedImage(candidate=cand, ok=False, error=HOST_SLOW)
         headers = self._headers(cand)
         proxy = settings.proxy_url() or None
-        body, error, ctype = self._download(url, headers)
+        body, error, ctype = self._attempt(url, headers)
         if body is None and (_retryable(error) or (proxy and _blocked(error))) \
                 and not (skippable and error in HOST_FAILURES and breaker.blocked(host)):
             logger.debug("fetch %s: %s, retrying%s", url, error, " via proxy" if proxy else "")
-            body, error, ctype = self._download(url, headers, proxy)
+            for _ in range(PROXY_ATTEMPTS if proxy and _blocked(error) else 1):
+                body, error, ctype = self._attempt(url, headers, proxy)
+                if body is not None or not (proxy and _blocked(error)):
+                    break
         if body is None:
             if breaker is not None and error in HOST_FAILURES:
                 breaker.record_failure(host)
@@ -362,6 +381,13 @@ class HttpFetcher:
         if breaker is not None:
             breaker.record_success(host)
         return self._decode_and_store(cand, body, ctype)
+
+    def _attempt(self, url: str, headers: dict, proxy: Optional[str] = None) -> Tuple[Optional[bytes], Optional[str], str]:
+        """One download; a page instead of an image counts as a refusal (not_image) so the proxy can try it."""
+        body, error, ctype = self._download(url, headers, proxy)
+        if body is not None and _markup(body, ctype):
+            return None, "not_image", ctype
+        return body, error, ctype
 
     def _decode_and_store(self, cand: Candidate, body: bytes, ctype: str) -> FetchedImage:
         if len(body) < self.min_bytes:

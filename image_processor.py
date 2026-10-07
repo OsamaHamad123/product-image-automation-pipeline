@@ -436,8 +436,9 @@ def _load_from_candidate_store(candidate_sha256) -> Optional[bytes]:
     return None
 
 
-# أخطاء تنزيل قد ينجح بعدها طريق آخر (البروكسي): انقطاع، مهلة، 5xx، أو رفض المصدر لهذا العميل (403 / 429)
-_PROXY_MAY_HELP = ("timeout", "connection_error", "http_403", "http_429")
+# أخطاء تنزيل قد ينجح بعدها طريق آخر (البروكسي): انقطاع، مهلة، 5xx، أو رفض المصدر لهذا العميل (403 / 429، أو صفحة
+# فاضية بدل الصورة not_image: Akamai عند كارفور بيرد هيك على أي عميل مش متصفح)
+_PROXY_MAY_HELP = ("timeout", "connection_error", "http_403", "http_429", "not_image")
 
 
 def _proxy_may_help(error: Optional[str]) -> bool:
@@ -453,7 +454,7 @@ def _download_bytes(url: str, page_url=None, info=None) -> Tuple[Optional[bytes]
     info: قاموس اختياري يملؤه التنزيل بالطريق الذي جرّبه (فحص النشر، publish_check): route (direct | proxy | None)،
     direct_error، proxy_tried، proxy_error. القيمة المعادة لا تتغير.
     """
-    from catalog_match.fetch import request_headers
+    from catalog_match.fetch import BLOCKED_ERRORS, PROXY_ATTEMPTS, request_headers
     from http_client import ImpersonateClient
 
     trace = info if isinstance(info, dict) else {}
@@ -467,8 +468,13 @@ def _download_bytes(url: str, page_url=None, info=None) -> Tuple[Optional[bytes]
     if fetched.content is None and proxy and _proxy_may_help(fetched.error):
         logger.info("تنزيل الصورة المعتمدة فشل مباشرة (%s)؛ محاولة عبر البروكسي", fetched.error)
         trace["proxy_tried"], route = True, "proxy"
-        fetched = ImpersonateClient(use_proxy=True, proxy_url=proxy).fetch_image(
-            url, timeout=15, max_bytes=MAX_DOWNLOAD_BYTES, headers=headers)
+        # رفض (403 / 429 / صفحة فاضية) بيعيد المحاولة لحد PROXY_ATTEMPTS: البروكسي بيعطي عنوان جديد لكل اتصال وبعض
+        # عناوينه محظورة؛ انقطاع أو مهلة عبر البروكسي ما بيتعاد (بروكسي بطيء ما لازم يطوّل كل اعتماد)
+        for _attempt in range(PROXY_ATTEMPTS):
+            fetched = ImpersonateClient(use_proxy=True, proxy_url=proxy).fetch_image(
+                url, timeout=15, max_bytes=MAX_DOWNLOAD_BYTES, headers=headers)
+            if fetched.content is not None or fetched.error not in BLOCKED_ERRORS:
+                break
         trace["proxy_error"] = None if fetched.content is not None else (fetched.error or "failed")
     if fetched.content is None:
         return None, f"download_{fetched.error or 'failed'}"

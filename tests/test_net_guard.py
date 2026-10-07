@@ -394,3 +394,51 @@ def test_a_refused_url_is_told_to_the_owner_in_plain_arabic_on_both_screens():
     source = core.read_text(encoding="utf-8")
     assert f"[/^download_blocked_url$/i, '{text}']" in source            # the same sentence as publish_check
     assert "/^download:blocked_url$/" in source
+
+
+def test_an_akamai_challenge_page_goes_through_the_proxy_until_an_address_gets_the_image(dns, monkeypatch, tmp_path):
+    # Carrefour's CDN answers a non-browser with a 200 empty HTML page and blocks some proxy exit addresses (403)
+    from catalog_match import fetch as fetch_mod
+
+    body = _jpeg()
+    script = [Resp(200, b"<!DOCTYPE html><html><body><p></p></body></html>", "text/html"),   # direct: challenge
+              Resp(403, b"Access Denied", "text/html"),                                       # proxy address 1
+              Resp(200, body)]                                                                # proxy address 2
+
+    class Akamai(Web):
+        def get(self, url, **kwargs):
+            self.calls.append((url, kwargs))
+            return script.pop(0)
+
+    web = Akamai({})
+    monkeypatch.setattr(fetch_mod, "_curl_requests", web)
+    monkeypatch.setattr(fetch_mod.settings, "proxy_url", lambda: "http://proxy.example:3128")
+    [res] = fetch_mod.HttpFetcher(store_dir=str(tmp_path)).fetch([_cand("https://cdn.mafr.example/p.jpg")])
+    assert res.ok and res.width == 400
+    assert [bool(kw.get("proxies")) for _, kw in web.calls] == [False, True, True]
+
+
+def test_a_challenge_page_without_a_proxy_is_not_an_image(dns, monkeypatch, tmp_path):
+    from catalog_match import fetch as fetch_mod
+
+    web = Web({"https://cdn.mafr.example/p.jpg": Resp(200, b"<!DOCTYPE html><html></html>", "text/html")})
+    monkeypatch.setattr(fetch_mod, "_curl_requests", web)
+    monkeypatch.setattr(fetch_mod.settings, "proxy_url", lambda: "")
+    [res] = fetch_mod.HttpFetcher(store_dir=str(tmp_path)).fetch([_cand("https://cdn.mafr.example/p.jpg")])
+    assert (res.ok, res.error) == (False, "not_image") and len(web.calls) == 1
+
+
+def test_the_proxy_gets_at_most_three_tries_for_a_refusal(dns, monkeypatch, tmp_path):
+    from catalog_match import fetch as fetch_mod
+
+    class Refuses(Web):
+        def get(self, url, **kwargs):
+            self.calls.append((url, kwargs))
+            return Resp(403, b"Access Denied", "text/html")
+
+    web = Refuses({})
+    monkeypatch.setattr(fetch_mod, "_curl_requests", web)
+    monkeypatch.setattr(fetch_mod.settings, "proxy_url", lambda: "http://proxy.example:3128")
+    [res] = fetch_mod.HttpFetcher(store_dir=str(tmp_path)).fetch([_cand("https://cdn.mafr.example/p.jpg")])
+    assert (res.ok, res.error) == (False, "http_403")
+    assert len(web.calls) == 1 + fetch_mod.PROXY_ATTEMPTS

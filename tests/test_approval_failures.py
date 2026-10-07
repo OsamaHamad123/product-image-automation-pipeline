@@ -38,7 +38,8 @@ class FakeClient:
 
     def fetch_image(self, url, timeout=15, max_bytes=0, referer=None, headers=None):
         FakeClient.calls.append(self.route)
-        return FakeClient.results[self.route]
+        answer = FakeClient.results[self.route]
+        return answer.pop(0) if isinstance(answer, list) else answer    # a list: one answer per attempt
 
 
 @pytest.fixture
@@ -61,7 +62,7 @@ def test_the_first_download_is_direct_even_with_a_proxy_set(client, monkeypatch)
     assert client.calls == ["direct"]
 
 
-@pytest.mark.parametrize("error", ["timeout", "connection_error", "http_403", "http_429", "http_503"])
+@pytest.mark.parametrize("error", ["timeout", "connection_error", "http_403", "http_429", "http_503", "not_image"])
 def test_a_failed_or_refused_direct_download_retries_through_the_proxy(client, monkeypatch, error):
     _proxy(monkeypatch, "http://proxy.example:8080")
     client.results = {"direct": FetchResult(error=error),
@@ -70,7 +71,7 @@ def test_a_failed_or_refused_direct_download_retries_through_the_proxy(client, m
     assert client.calls == ["direct", "proxy"]
 
 
-@pytest.mark.parametrize("error", ["http_404", "not_image", "too_large"])
+@pytest.mark.parametrize("error", ["http_404", "too_large"])
 def test_an_answer_the_proxy_cannot_change_is_not_retried(client, monkeypatch, error):
     _proxy(monkeypatch, "http://proxy.example:8080")
     client.results = {"direct": FetchResult(error=error)}
@@ -89,6 +90,30 @@ def test_both_routes_failing_report_the_proxy_attempts_error(client, monkeypatch
     _proxy(monkeypatch, "http://proxy.example:8080")
     client.results = {"direct": FetchResult(error="http_403"), "proxy": FetchResult(error="connection_error")}
     assert image_processor._download_bytes("https://cdn.example/a.png") == (None, "download_connection_error")
+    assert client.calls == ["direct", "proxy"]
+
+
+@pytest.mark.parametrize("refusal", ["http_403", "not_image"])
+def test_a_refused_proxy_address_is_tried_again_on_a_new_one(client, monkeypatch, refusal):
+    # Carrefour's Akamai blocks some of the residential proxy's exit addresses: the next connection gets a new one
+    _proxy(monkeypatch, "http://proxy.example:8080")
+    client.results = {"direct": FetchResult(error="http_403"),
+                      "proxy": [FetchResult(error=refusal), FetchResult(content=PNG, status=200, content_type="image/png")]}
+    assert image_processor._download_bytes("https://cdn.example/a.png") == (PNG, None)
+    assert client.calls == ["direct", "proxy", "proxy"]
+
+
+def test_the_proxy_is_tried_at_most_three_times(client, monkeypatch):
+    _proxy(monkeypatch, "http://proxy.example:8080")
+    client.results = {"direct": FetchResult(error="not_image"), "proxy": FetchResult(error="http_403")}
+    assert image_processor._download_bytes("https://cdn.example/a.png") == (None, "download_http_403")
+    assert client.calls == ["direct", "proxy", "proxy", "proxy"]
+
+
+def test_a_slow_proxy_is_not_tried_again(client, monkeypatch):
+    _proxy(monkeypatch, "http://proxy.example:8080")
+    client.results = {"direct": FetchResult(error="http_403"), "proxy": FetchResult(error="timeout")}
+    assert image_processor._download_bytes("https://cdn.example/a.png") == (None, "download_timeout")
     assert client.calls == ["direct", "proxy"]
 
 
