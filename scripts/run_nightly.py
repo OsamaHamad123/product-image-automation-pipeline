@@ -31,8 +31,7 @@ The night stays inside Task Scheduler's time limit (schedule_nightly.ps1 -MaxHou
 default 8): the worker takes no new row 15 minutes before it and stops at a row boundary (stop reason time_limit,
 exit 3), and a retry that would start less than 45 minutes before it is skipped, so the night's report is always
 written before Task Scheduler ends the task. Then one report is
-written for the night (run_report.py): a row in the run_history table, temp/nightly/last_report.json, and a short
-Arabic Telegram message when TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID are set.
+written for the night (run_report.py): a row in the run_history table and temp/nightly/last_report.json.
 
 Output goes to temp/nightly/nightly_YYYY-MM-DD.log (the newest 30 logs are kept; the dashboard shows them on the
 health page). Exit code (Task Scheduler's "Last Run Result"):
@@ -360,13 +359,13 @@ def start_index_refresh():
         return None
 
 
-def run(sleep=time.sleep, now=time.time, sender=None, max_hours=DEFAULT_MAX_HOURS):
+def run(sleep=time.sleep, now=time.time, max_hours=DEFAULT_MAX_HOURS):
     """
     Enqueue, then work the queue until it is empty; the whole run again after an outage (RETRY_WAITS_S).
     Everything happens inside Task Scheduler's limit (max_hours from the start): the worker stops taking rows
     FINISH_MARGIN_S before it, and a retry that would start less than RETRY_MARGIN_S before it is skipped.
     Writes the night's report (run_report.publish) and returns the process exit code (run_report.EXIT_CODES).
-    sleep / now / sender (the Telegram sender) are injected by the tests.
+    sleep / now are injected by the tests.
     """
     import config
     import local_cache_db
@@ -423,7 +422,7 @@ def run(sleep=time.sleep, now=time.time, sender=None, max_hours=DEFAULT_MAX_HOUR
         health = run_report.worker_health(worker_id, ended - started + 60)
         report = run_report.build_report("nightly", attempts, started, ended, health=health)
         report["notices"].extend(notes)
-        run_report.publish(report, sender=sender)
+        run_report.publish(report)
     prune_storage(seconds_left=limit - now())
     return report["exit_code"]
 

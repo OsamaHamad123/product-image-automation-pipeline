@@ -116,7 +116,7 @@ from catalog_match.explain import host as _host  # noqa: E402
 # (the CSE engine ids are no key, but they identify the account and are hidden with the keys)
 SECRET_SETTINGS = ("SERPER_API_KEY", "GEMINI_API_KEY", "SERPAPI_API_KEY", "ANTHROPIC_API_KEY", "PHOTOROOM_API_KEY",
                    "CLOUDINARY_API_KEY", "CLOUDINARY_API_SECRET", "GOOGLE_SEARCH_API_KEYS", "GOOGLE_SEARCH_API_KEY",
-                   "GOOGLE_SEARCH_CX_LIST", "GOOGLE_SEARCH_CX", "REMOVE_BG_API_KEY", "TELEGRAM_BOT_TOKEN", "PROXY_URL")
+                   "GOOGLE_SEARCH_CX_LIST", "GOOGLE_SEARCH_CX", "REMOVE_BG_API_KEY", "PROXY_URL")
 _QUERY_KEY_RE = re.compile(r"(?i)((?:(?:api_?)?key|(?<![a-z0-9])cx)(?:=|%3D))[^&\s'\"]+")
 
 WRITE_METHODS = ("update", "update_cell", "update_cells", "batch_update", "append_row", "append_rows", "insert_row",

@@ -6,9 +6,7 @@
 #   itself takes the same MariaDB lock as the nightly run and the dashboard (a second flusher skips the round).
 # - It only calls Google when a write is due (PENDING, or FAILED and past its retry time), so an idle server costs
 #   no Google quota.
-# - It sends one Telegram message each time the count of DEAD writes (never reached the sheet) goes up.
-# - A Google outage is a normal exit (the writes stay queued and are retried), not a unit failure, so there is no
-#   OnFailure alert here: that would be a message every 2 minutes.
+# - A Google outage is a normal exit (the writes stay queued and are retried), not a unit failure.
 # The @NAME@ words are filled in by install.sh.
 [Unit]
 Description=Laqta sheet outbox flush (scripts/flush_sheets_sync.py)

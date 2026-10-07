@@ -648,7 +648,7 @@ def test_the_worker_counts_locally_isolated_publishes_into_the_run(select_env, m
     assert main.bg_fallback_count() == 0
 
 
-def test_the_run_report_and_the_telegram_line_count_the_fallbacks():
+def test_the_run_report_counts_the_fallbacks():
     import run_report
 
     class DB:
@@ -664,11 +664,8 @@ def test_the_run_report_and_the_telegram_line_count_the_fallbacks():
                                                  {"stop_reason": None, "run_id": "r2", "bg_fallback": 4}],
                                      1000.0, 1600.0, db=DB, sheets=None)
     assert report["bg_fallback"] == 6 and report["bg_skipped"] == 0
-    text = run_report.telegram_text(report)
-    assert f"{run_report.BG_FALLBACK_TEXT} 6" in text and "انعزل بطريقة محلية لأن رصيد مزوّد العزل خلص 6" in text
-    assert "عزل الخلفية متوقف" not in text
     quiet = run_report.build_report("manual", [{"stop_reason": None, "run_id": "r3"}], 1000.0, 1600.0, db=DB)
-    assert quiet["bg_fallback"] == 0 and run_report.BG_FALLBACK_TEXT not in run_report.telegram_text(quiet)
+    assert quiet["bg_fallback"] == 0
 
 
 # ---------------------------------------------------------------------------

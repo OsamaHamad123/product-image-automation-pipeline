@@ -47,7 +47,7 @@ def nightly(offline, monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     runner = _load_runner()
     rec = {"calls": [], "state": {"status": "curation_pending", "notice": ""}, "workers": [], "sleeps": [],
-           "reports": [], "prepared": True, "db": True, "telegram": []}
+           "reports": [], "prepared": True, "db": True}
     # restored after the test: pin_nightly_settings replaces main.load_run_config
     monkeypatch.setattr(main, "load_run_config", main.load_run_config)
     for name in ("ROW_FILTER", "BRAND_FILTER", "FORCE_OVERWRITE_IMAGES", "AUTO_PUBLISH_ENABLED", "AUTO_PUBLISH_BRANDS",
@@ -190,20 +190,16 @@ def test_an_outage_retries_the_whole_run_after_15_and_60_minutes(nightly):
     assert report["run_ids"] == ["run-1", "run-2", "run-3"] and report["outcome"] == "done"
 
 
-def test_an_outage_that_outlasts_the_retries_is_reported_as_a_failure(nightly, monkeypatch):
+def test_an_outage_that_outlasts_the_retries_is_reported_as_a_failure(nightly):
     runner, main, _, rec = nightly
-    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123:test")
-    monkeypatch.setenv("TELEGRAM_CHAT_ID", "42")
-    import config
-    monkeypatch.setattr(config, "send_telegram_alert", lambda text: rec["telegram"].append(text) or True)
     rec["workers"] = [{"stop_reason": "provider_down", "run_id": f"run-{i}"} for i in range(3)]
 
     assert runner.run() == 2
     assert rec["sleeps"] == [15 * 60, 60 * 60] and len(rec["calls"]) == 6
     report = _last_report()
     assert report["outcome"] == "outage" and report["exit_code"] == 2 and report["attempts"] == 3
-    (message,) = rec["telegram"]                      # one message for the night, not one per attempt
-    assert "انقطاع" in message and "محركات البحث غير متاحة" in message and "المحاولات: 3" in message
+    assert len(rec["reports"]) == 1                   # one report for the night, not one per attempt
+    assert report["reason_text"] == "محركات البحث غير متاحة"
 
 
 def test_a_database_that_does_not_answer_is_never_a_finished_night(nightly):
@@ -308,7 +304,7 @@ def _timed_workers(main, runner, clock, plan):
 
 def test_the_night_stays_inside_task_schedulers_time_limit(nightly, monkeypatch):
     """Review fix C4: attempt 1 worked 6.5 h and stopped on provider_down; the runner slept 15 min and started attempt
-    2, which Task Scheduler killed at its 8-hour ExecutionTimeLimit: no run_history row, no Telegram, last_report.json
+    2, which Task Scheduler killed at its 8-hour ExecutionTimeLimit: no run_history row, no last_report.json
     and the card showed the previous night, the lock and processing rows left behind. The worker now gets a deadline
     15 minutes before the limit, and a retry that cannot start 45 minutes before it is skipped."""
     runner, main, _, rec = nightly
@@ -422,7 +418,6 @@ def test_the_night_report_lands_in_run_history_and_last_report(nightly):
     assert entry["notices"] == "GEMINI_DOWN: Gemini لا يستجيب"
     report = _last_report()
     assert report["history_id"] == 7 and report["counts"]["ready_for_review"] == 2
-    assert report["telegram_sent"] is False             # Telegram is not configured in the tests
 
 
 def test_main_logs_to_temp_nightly_and_restores_the_console(nightly, monkeypatch, tmp_path):

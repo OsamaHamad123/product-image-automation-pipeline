@@ -2,7 +2,7 @@
 # إيقاف نظيف عند SIGTERM / SIGHUP (systemctl stop، مهلة systemd، إعادة تشغيل الجهاز، إغلاق الطرفية).
 #
 # - بدون معالج، بايثون يموت فوراً عند SIGTERM: لا تعمل كتل finally، فيبقى القفل temp/pipeline.lock والصفوف
-#   'processing' وحالة automation_state عالقة، ولا يُكتب تقرير ولا تُرسل رسالة Telegram.
+#   'processing' وحالة automation_state عالقة، ولا يُكتب تقرير.
 # - المعالج يُثبت في الخيط الرئيسي فقط (install)، ويرفع KeyboardInterrupt مرة واحدة: نفس مسار Ctrl+C «توقف»
 #   (stopped، رمز الخروج 3) الموجود أصلاً في main.run_worker_mode والتشغيل الليلي.
 # - الإشارة الثانية لا ترفع شيئاً: التنظيف الجاري (كتابة الحالة، تحرير القفل، التقرير) يكمل.

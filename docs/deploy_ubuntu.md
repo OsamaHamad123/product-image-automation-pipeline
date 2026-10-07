@@ -13,7 +13,6 @@
   - `laqta-backup.timer`: نسخة احتياطية يومية (مشفّرة إذا ضبطت المفتاح).
   - `laqta-outbox-flush.timer`: كل دقيقتين بيفرّغ طابور الكتابة للشيت (القسم 8).
   - `laqta-run.path`: بيخلّي التشغيل اللي بتبدأه من اللوحة يضل شغّال حتى لو أعدت تشغيل php-fpm (القسم 8).
-  - `laqta-alert@.service`: بيبعتلك رسالة Telegram إذا فشلت خدمة (القسم 8).
   - `laqta-sync-worker.service`: فقط إذا بتستعمل Redis (نفس منطق `start_all.bat`).
 - **سجلات**: `logrotate` بيدوّر السجلات لحاله (القسم 12). **مراقبة**: عنوان `/healthz` لبرنامج مراقبة خارجي (القسم 11).
 - كل شي بيشتغل بمستخدم نظام اسمه `laqta` (مو root). إزالة الخلفية بـ BiRefNet اختيارية (CPU افتراضياً، وGPU لو متوفر).
@@ -94,7 +93,7 @@ git -C /opt/laqta log --all --full-history --oneline -- .env credentials.json
 ```
 
 إذا طلع شي: أنشئ مفتاح جديد لحساب خدمة Google (وامسح القديم من Google Cloud) وبدّل `credentials.json`، وغيّر كمان Cloudinary API secret
-ومفاتيح Serper وGemini وPhotoRoom وAnthropic وتوكن Telegram. ما تبعت المفاتيح بإيميل أو شات.
+ومفاتيح Serper وGemini وPhotoRoom وAnthropic. ما تبعت المفاتيح بإيميل أو شات.
 **install.sh ما بيعمل `.env` ولا بيعدّله** (الاستثناء الوحيد: `artisan key:generate` بيكتب `APP_KEY` بـ `dashboard/.env` إذا كان فاضي).
 
 ## 4. شغّل install.sh
@@ -208,10 +207,10 @@ systemctl list-timers 'laqta-*'
 - عدد ساعات الليلة (مثل `-MaxHours`): `sudo systemctl edit laqta-nightly` وأضف `[Service]` ثم `Environment=NIGHTLY_MAX_HOURS=6`.
   فوق 9 ساعات ارفع `TimeoutStartSec` كمان. (قيمة `NIGHTLY_MAX_HOURS` بملف `.env` ما بتأثر هون: الوحدة بتمرّر `--max-hours` صريحة.) وقت التشغيل: `sudo systemctl edit laqta-nightly.timer`.
 - تشغيل ليلة يدوياً (بيصرف على مزودات مدفوعة، والنشر التلقائي مطفي دايماً): `sudo systemctl start laqta-nightly.service`.
-  السجل: `journalctl -u laqta-nightly -e` ومجلد `/opt/laqta/temp/nightly`. التقرير بيطلع بصفحة الصحة وبـ Telegram إذا مضبوط.
+  السجل: `journalctl -u laqta-nightly -e` ومجلد `/opt/laqta/temp/nightly`. التقرير بيطلع بصفحة الصحة.
 
 **سقف الذاكرة:** كل وحدة بايثون (`laqta-nightly` و`laqta-run` و`laqta-outbox-flush` و`laqta-sync-worker`) إلها `MemoryMax` بيحسبه install.sh من رام السيرفر.
-إذا الوحدة تعدّته بتنقتل **هي لحالها** (`OOMPolicy=kill`) ومش MariaDB ولا nginx، وبتوصلك رسالة Telegram. شوفه وغيّره:
+إذا الوحدة تعدّته بتنقتل **هي لحالها** (`OOMPolicy=kill`) ومش MariaDB ولا nginx (بيبان بـ `systemctl status`). شوفه وغيّره:
 
 ```bash
 systemctl show laqta-nightly -p MemoryMax
@@ -226,13 +225,13 @@ export LAQTA_MEMORY_MAX=3G
 sudo --preserve-env=LAQTA_MEMORY_MAX bash /opt/laqta/deploy/ubuntu/install.sh /opt/laqta --domain dash.example.com
 ```
 
-**الإيقاف بلطف:** `systemctl stop` (أو إعادة تشغيل السيرفر) بيبعت SIGTERM، والتشغيل بيخلّص المنتج اللي بإيده (لحد 45 ثانية) وبيكتب التقرير ورسالة Telegram وبيطلع برمز 3 («وقف عن قصد»).
-systemd بيستنى 120 ثانية (`TimeoutStopSec=120`) قبل ما يقتله، ورمز 3 ما بيُحسب فشل فما بتوصلك رسالة «خدمة فشلت» على إيقاف عادي.
+**الإيقاف بلطف:** `systemctl stop` (أو إعادة تشغيل السيرفر) بيبعت SIGTERM، والتشغيل بيخلّص المنتج اللي بإيده (لحد 45 ثانية) وبيكتب التقرير وبيطلع برمز 3 («وقف عن قصد»).
+systemd بيستنى 120 ثانية (`TimeoutStopSec=120`) قبل ما يقتله، ورمز 3 ما بيُحسب فشل للوحدة.
 
 **تفريغ طابور الشيت بين التشغيلات (`laqta-outbox-flush.timer`):** بدون Redis ما في شي بيفرّغ طابور الكتابة للشيت بين تشغيلتين، فاعتماد صورة وقت انقطاع Google كان بيستنى للّيلة الجاية.
 هلق كل دقيقتين بيشتغل `scripts/flush_sheets_sync.py`: ما بيفتح Google إلا إذا في كتابة مستحقة، وما بيتداخل مع نفسه ولا مع التشغيل الليلي (نفس القفل).
-وإذا زاد عدد الكتابات اللي فشلت نهائياً (`DEAD`، يعني الرابط ما وصل للشيت بعد كل المحاولات) بيبعتلك **رسالة Telegram وحدة لكل زيادة** (أرقام بس، بدون أسماء منتجات). السجل: `journalctl -u laqta-outbox-flush -e`.
-تشغيلة جديدة بتعيد كتابة رابط الصف الميت. لتعيد عدّ التنبيهات من الصفر: `sudo rm /opt/laqta/temp/outbox_dead_state.json`.
+الكتابات اللي فشلت نهائياً (`DEAD`، يعني الرابط ما وصل للشيت بعد كل المحاولات) بتبان بصفحة الصحة وبفحص `outbox` بـ `/healthz` (القسم 11). السجل: `journalctl -u laqta-outbox-flush -e`.
+تشغيلة جديدة بتعيد كتابة رابط الصف الميت.
 
 **التشغيل من اللوحة بيضل شغّال (`laqta-run.path`):** لما بتضغط «شغّل» اللوحة بتكتب ملف طلب `temp/run_request.json` وبتشغّله خدمة systemd `laqta-run.service` بمستخدم `laqta` (نفس الأمرين: `--enqueue` ثم `--worker`).
 قبل هيك php-fpm كان بيشغّله جواته، فإعادة تشغيل أو ترقية php-fpm بدون إشراف كانت تقتل التشغيل. هلق ما بتأثر. زر الإيقاف والحالة بيشتغلوا متل قبل.
@@ -243,9 +242,6 @@ systemctl status laqta-run.path             # لازم active (waiting)
 journalctl -u laqta-run -e                  # آخر تشغيل من اللوحة
 sudo systemctl stop laqta-run               # إيقاف تشغيل اللوحة من الشل (بديل زر الإيقاف)
 ```
-
-**تنبيهات الفشل (`laqta-alert@.service`):** إذا فشلت وحدة التشغيل الليلي أو عامل المزامنة أو النسخة الاحتياطية بتوصلك رسالة Telegram قصيرة فيها اسم الوحدة واسم السيرفر وسبب systemd (مثل «انقتلت لأن الذاكرة خلصت»)، بدون أي مفتاح.
-لازم `TELEGRAM_BOT_TOKEN` و`TELEGRAM_CHAT_ID` بـ `.env`. جرّبها: `sudo systemctl start laqta-alert@laqta-backup.service`.
 
 - عامل المزامنة (فقط مع Redis): `install.sh ... --with-redis --enable-units` أو `sudo systemctl enable --now laqta-sync-worker`.
   بدون Redis ما تفعّله: كتابة الشيت بتمرّ عبر طابور MariaDB، وتفريغها كل دقيقتين من `laqta-outbox-flush`.
@@ -306,7 +302,7 @@ sudo /usr/local/sbin/laqta-backup                  # جرّب
 
 - الاعدادات بتنحفظ بإعدادات root (`/root/.config/rclone/rclone.conf`) لأن النسخة بتشتغل بـ root.
 - **ما بيرفع نسخة غير مشفّرة**: إذا `BACKUP_AGE_RECIPIENT` مو مضبوط بيرفض الرفع (وبيرجع خطأ) وبتضل النسخة المحلية. (بس لو بدك فعلاً: `BACKUP_RCLONE_ALLOW_PLAINTEXT=1`، مو منصوح.)
-- إذا فشل الرفع بتفشل الوحدة وبتوصلك رسالة Telegram، بس النسخة المحلية وتنظيف القديم بيتمّوا قبل.
+- إذا فشل الرفع بتفشل الوحدة (`systemctl status laqta-backup`)، بس النسخة المحلية وتنظيف القديم بيتمّوا قبل.
 - الحذف القديم عالبعيد: حط قاعدة انتهاء (lifecycle) على الـ bucket نفسه. السكربت بيحذف بس من مجلد السيرفر.
 
 ## 10. فحص السيرفر
@@ -352,13 +348,13 @@ curl -s http://127.0.0.1:8080/healthz                                           
 
 أي مراقب بيجي من عنوان مو بالقائمة بيرجعله `403`. هي القاعدة: ما في كلمة سر على هالمسار، فالعنوان هو الحماية.
 
-**ملخص التنبيهات اللي بتوصلك على Telegram:**
+**وين بتشوف المشاكل:**
 
-| الحدث | من وين |
+| الحدث | وين |
 |---|---|
-| فشلت وحدة (ليلة، عامل مزامنة، نسخة احتياطية، رفع بعيد) | `laqta-alert@` |
-| زادت كتابات الشيت الميتة `DEAD` | `laqta-outbox-flush` (مرة لكل زيادة) |
-| تقرير كل تشغيل (خلص، توقف، انقطاع) | `run_report` (متل قبل) |
+| فشلت وحدة (ليلة، عامل مزامنة، نسخة احتياطية، رفع بعيد) | `systemctl --failed` و`journalctl -u <الوحدة> -e` |
+| كتابات الشيت الميتة `DEAD` | صفحة الصحة، وفحص `outbox` بـ `/healthz` |
+| تقرير كل تشغيل (خلص، توقف، انقطاع) | صفحة الصحة (بطاقة «آخر تشغيل» وسجل التشغيلات) |
 | السيرفر أو الليلة أو القرص مو سليم | برنامج المراقبة اللي حطيته على `/healthz` |
 
 ## 12. السجلات

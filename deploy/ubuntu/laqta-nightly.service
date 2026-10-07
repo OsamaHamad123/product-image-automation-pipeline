@@ -5,15 +5,13 @@
 # and add  [Service] / Environment=NIGHTLY_MAX_HOURS=6  (raise TimeoutStartSec too when going above 9).
 # Memory: MemoryMax is sized by install.sh from the RAM it finds (70% of it, 80% with --with-birefnet; override it
 # with LAQTA_MEMORY_MAX=3G when running install.sh, or later with  systemctl edit laqta-nightly  and
-# [Service] / MemoryMax=3G). A run that passes it is killed ALONE (OOMPolicy=kill) - the database and nginx stay up -
-# and OnFailure sends a Telegram message (laqta-alert@.service). OOMScoreAdjust makes this run the kernel's first
-# victim on a full machine, never MariaDB.
+# [Service] / MemoryMax=3G). A run that passes it is killed ALONE (OOMPolicy=kill) - the database and nginx stay up.
+# OOMScoreAdjust makes this run the kernel's first victim on a full machine, never MariaDB.
 # The @NAME@ words are filled in by install.sh.
 [Unit]
 Description=Laqta nightly image run (scripts/run_nightly.py)
 After=network-online.target mariadb.service
 Wants=network-online.target
-OnFailure=laqta-alert@%n.service
 
 [Service]
 Type=oneshot
@@ -31,7 +29,7 @@ SuccessExitStatus=3
 # Hard backstop above NIGHTLY_MAX_HOURS: a hung run must not block every later night.
 TimeoutStartSec=10h
 # A stop (systemctl stop, a reboot, the dashboard) sends SIGTERM and the process shuts down gracefully: it finishes the
-# product in hand (up to its 45 s grace, SHUTDOWN_GRACE_S), writes the report and the Telegram message, and exits with
+# product in hand (up to its 45 s grace, SHUTDOWN_GRACE_S), writes the report, and exits with
 # code 3 ("stopped on purpose"). TimeoutStopSec is the wait before systemd sends SIGKILL: well above the grace.
 KillSignal=SIGTERM
 TimeoutStopSec=120

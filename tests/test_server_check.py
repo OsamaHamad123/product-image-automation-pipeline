@@ -51,7 +51,7 @@ def make_root(tmp_path, env=None, dash=None, creds=True, venv=True):
         'cur.execute("CREATE TABLE IF NOT EXISTS resolved_products (id INT)")\n'
         'cur.execute("CREATE TABLE IF NOT EXISTS system_settings (k INT)")\n'
         'cur.execute("CREATE TABLE IF NOT EXISTS automation_queue (id INT)")\n', encoding="utf-8")
-    (tmp_path / ".env.example").write_text("SERPER_API_KEY=\nGEMINI_API_KEY=your-gemini-api-key\nTELEGRAM_CHAT_ID=\n"
+    (tmp_path / ".env.example").write_text("SERPER_API_KEY=\nGEMINI_API_KEY=your-gemini-api-key\nPROXY_URL=\n"
                                            "DB_HOST=127.0.0.1\n# COMMENTED=1\n", encoding="utf-8")
     write_env(tmp_path / ".env", GOOD_ENV if env is None else env)
     write_env(tmp_path / "dashboard" / ".env", dash if dash is not None else {
@@ -119,7 +119,7 @@ def test_env_check_names_the_missing_and_placeholder_keys(tmp_path):
     assert "CLOUDINARY_API_KEY" not in fail.text
     assert "your-gemini-api-key" not in texts(out)
     warn = next(r for r in out if r.status == sc.WARN and "من .env.example" in r.text)
-    assert "TELEGRAM_CHAT_ID" in warn.text and "COMMENTED" not in warn.text
+    assert "PROXY_URL" in warn.text and "COMMENTED" not in warn.text
 
 
 def test_dashboard_settings_page_values_count_as_present(tmp_path):
