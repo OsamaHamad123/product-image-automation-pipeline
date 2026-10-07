@@ -19,6 +19,7 @@ from collections import Counter
 import pymysql
 
 import db_connect
+import schema_mark
 
 logger = logging.getLogger(__name__)
 
@@ -4221,5 +4222,21 @@ def recut_entries(statuses=None, origin=None, old_urls=None, limit=50):
         _close(conn)
 
 
-# تهيئة قاعدة البيانات تلقائياً عند استيراد الموديول للمرة الأولى
-init_db()
+def ensure_schema():
+    """
+    init_db() مرة وحدة لكل نسخة من هالملف (schema_mark): كل طلب من لوحة التحكم بيستورد هالموديول، وعشرات أوامر
+    CREATE/ALTER بكل كبسة كانت تاخد وقت وأقفال على الجداول. بصمة الملف نفسها = الجداول جاهزة.
+    """
+    mark = schema_mark.fingerprint(__file__)
+    if schema_mark.is_current(_SCHEMA_MARK_NAME, mark):
+        return True
+    ok = init_db()
+    if ok:
+        schema_mark.save(_SCHEMA_MARK_NAME, mark)
+    return ok
+
+
+_SCHEMA_MARK_NAME = "local_cache_db"
+
+# تهيئة قاعدة البيانات عند الاستيراد، بس إذا تغيّر الكود من آخر مرة (ensure_schema)
+ensure_schema()

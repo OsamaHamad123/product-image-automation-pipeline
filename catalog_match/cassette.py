@@ -83,7 +83,6 @@ import uuid
 import zipfile
 import zlib
 from typing import Any, Callable, Dict, Iterable, Iterator, List, Mapping, Optional, Sequence, Tuple
-from unittest import mock
 from urllib.parse import parse_qsl, quote, unquote, urlencode, urlsplit, urlunsplit
 
 logger = logging.getLogger(__name__)
@@ -1187,6 +1186,8 @@ class Cassette:
             return int(cas._event("index_count", lambda: real_count(store, fresh),
                                   lambda: cas._last_event("index_count", 0), INDEX_FILE))
 
+        from unittest import mock   # only while a cassette is installed: not on every import of the pipeline
+
         for owner, attr, value in ((spend_mod.MariaDbSpendStore, "role_spend", role_spend),
                                    (spend_mod.MariaDbSpendStore, "add", add),
                                    (local_index.DbCatalogStore, "count", count)):
@@ -1872,6 +1873,8 @@ def offline(attempts: Optional[List[str]] = None, allow_ports: Iterable[int] = (
     def sendall(sock, data, *args):  # type: ignore[no-untyped-def]
         through_proxy(data)
         return real_sendall(sock, data, *args)
+
+    from unittest import mock   # only for a replay: not on every import of the pipeline
 
     patches = [mock.patch.object(socket.socket, "connect", connect),
                mock.patch.object(socket.socket, "connect_ex", connect_ex),

@@ -28,14 +28,36 @@ import threading
 import time
 import unicodedata
 
-import gspread
+import importlib
+import sys
+
 import pymysql
-from gspread.exceptions import APIError
 
 import atomic_file
 import config
 import db_connect
+import schema_mark
 from catalog_match.gtin import normalize_gtin
+
+
+class _LazyModule:
+    """gspread (ومعه مكتبات Google للصلاحيات) بينحمّل أول ما ينطلب منه شي، مش مع استيراد هالملف: أغلب طلبات لوحة
+    التحكم ما بتفتح الشيت، وتحميله كان ياخد حوالي 0.12 ثانية من كل طلب."""
+
+    def __init__(self, name):
+        self._name = name
+
+    def __getattr__(self, attr):
+        return getattr(importlib.import_module(self._name), attr)
+
+
+gspread = _LazyModule("gspread")
+
+
+def _is_api_error(exc):
+    """isinstance(exc, gspread.exceptions.APIError) بدون ما يحمّل gspread: إذا ما انحمّل، الخطأ مش منه."""
+    errors = sys.modules.get("gspread.exceptions")
+    return errors is not None and isinstance(exc, errors.APIError)
 
 logger = logging.getLogger(__name__)
 
@@ -256,7 +278,7 @@ def _is_transient(exc):
     خطأ مؤقت يستحق إعادة المحاولة: APIError برمز 429/500/502/503/504 (أو 403 لتجاوز معدل Drive)،
     أو انقطاع/مهلة اتصال. 'غير موجود' و'لا صلاحية' (404/403/SpreadsheetNotFound) ليست مؤقتة.
     """
-    if isinstance(exc, APIError):
+    if _is_api_error(exc):
         status = getattr(getattr(exc, "response", None), "status_code", None)
         code = getattr(exc, "code", None)
         if code in _TRANSIENT_CODES or status in _TRANSIENT_CODES:
@@ -717,7 +739,11 @@ class SQLiteTransactionQueue:
     """طابور الكتابة (outbox) في جدول sheet_updates على MariaDB (الاسم تاريخي)."""
 
     def __init__(self, db_path=None):
-        self._setup_schema()
+        # الجدول بيتجهّز مرة لكل نسخة من هالملف (schema_mark)، مش مع كل طابور جديد
+        mark = schema_mark.fingerprint(__file__)
+        if not schema_mark.is_current("sheet_updates", mark):
+            self._setup_schema()
+            schema_mark.save("sheet_updates", mark)
 
     def _connect(self):
         return _db_connect()
@@ -1524,7 +1550,7 @@ def update_image_link(worksheet, row_number, link_column_index, image_link, barc
         clear_cache()
         return True
     except Exception as e:
-        if isinstance(e, APIError) or _is_transient(e):
+        if _is_api_error(e) or _is_transient(e):
             raise
         logger.error("فشل تحديث الرابط في الصف %s: %s", row_number, e)
         return False
@@ -1633,7 +1659,7 @@ def update_product_metadata(worksheet, row_number, metadata, barcode=None, produ
         ], value_input_option="RAW")
         return True
     except Exception as e:
-        if isinstance(e, APIError) or _is_transient(e):
+        if _is_api_error(e) or _is_transient(e):
             raise
         logger.error("فشل تحديث البيانات الوصفية في الصف %s: %s", row_number, e)
         return False
