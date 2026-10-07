@@ -23,6 +23,12 @@ use Illuminate\Support\Facades\Http;
  *   ULA / link-local or an IPv4-mapped / 6to4 / NAT64 form of these; curl is pinned to the checked addresses;
  * - at most MAX_BYTES, read in chunks (a larger body is refused without being held in memory).
  *
+ * Some store CDNs (Carrefour's Akamai, cdn.mafrservices.com) refuse every data-centre address with a 403 and answer
+ * non-browsers with an empty HTML page. When the direct fetch is refused that way (403 / 429 / 5xx, unreachable, or a
+ * body that is not a raster image) and a residential proxy is set (settings page «proxy_url», or PROXY_URL), the same
+ * URL is fetched through it, up to PROXY_ATTEMPTS times: the proxy gives a new exit address per connection and some of
+ * its addresses are blocked too. The host checks above still apply; only curl's address pinning is left to the proxy.
+ *
  * The same rules as the pipeline's net_guard.py. Errors carry a code, never an exception's text.
  */
 class ImageProxy
@@ -30,6 +36,7 @@ class ImageProxy
     public const MAX_BYTES = 15 * 1024 * 1024;
     public const MAX_REDIRECTS = 5;
     public const TIMEOUT_S = 10;
+    public const PROXY_ATTEMPTS = 3;
     public const HOSTS_CACHE_KEY = 'image_proxy_hosts';
     public const HOSTS_TTL_S = 14 * 86400;
     private const HOSTS_MAX = 5000;
@@ -262,6 +269,60 @@ class ImageProxy
      */
     public static function fetch(string $url): array
     {
+        $direct = self::fetchRoute($url, null);
+        if ((isset($direct['body']) && self::isRaster($direct['body'])) || !self::proxyMayHelp($direct)) {
+            return $direct;
+        }
+        $proxy = self::proxyUrl();
+        if ($proxy === null) {
+            return $direct;
+        }
+        for ($attempt = 0; $attempt < self::PROXY_ATTEMPTS; $attempt++) {
+            $viaProxy = self::fetchRoute($url, $proxy);
+            if (isset($viaProxy['body']) && self::isRaster($viaProxy['body'])) {
+                return $viaProxy;
+            }
+        }
+        return $direct;   // the proxy did not help either: the direct answer and its code, as before
+    }
+
+    /** A refusal that another route may get past: blocked, rate-limited, a server error, unreachable, or not an image. */
+    private static function proxyMayHelp(array $result): bool
+    {
+        if (isset($result['body'])) {
+            return true;                                  // 200 but not a raster image (a bot-challenge page)
+        }
+        $status = (int) ($result['status'] ?? 0);
+        $error = (string) ($result['error'] ?? '');
+        return $error === 'unreachable' || ($error === 'upstream' && ($status === 403 || $status === 429 || $status >= 500));
+    }
+
+    public static function isRaster(string $body): bool
+    {
+        $info = @getimagesizefromstring($body);
+        $mime = is_array($info) ? (string) ($info['mime'] ?? '') : '';
+        return $mime !== '' && str_starts_with($mime, 'image/') && stripos($mime, 'svg') === false;
+    }
+
+    /** The residential proxy from the settings page (system_settings.proxy_url), else PROXY_URL; null when none. */
+    public static function proxyUrl(): ?string
+    {
+        $value = '';
+        try {
+            $value = trim((string) DB::table('system_settings')->where('key', 'proxy_url')->value('value'));
+        } catch (\Throwable $e) {
+            $value = '';
+        }
+        if ($value === '') {
+            $value = trim((string) env('PROXY_URL', ''));
+        }
+        $scheme = strtolower((string) parse_url($value, PHP_URL_SCHEME));
+        return in_array($scheme, ['http', 'https', 'socks5', 'socks5h'], true) ? $value : null;
+    }
+
+    /** One fetch of $url (and its redirects), directly or through $proxy. */
+    private static function fetchRoute(string $url, ?string $proxy): array
+    {
         $current = trim($url);
         try {
             for ($hop = 0; $hop <= self::MAX_REDIRECTS; $hop++) {
@@ -278,7 +339,7 @@ class ImageProxy
                     return ['status' => 403, 'error' => 'blocked'];
                 }
                 $response = self::request($current, $host, (int) ($parts['port'] ?? ($scheme === 'https' ? 443 : 80)),
-                                          $addresses);
+                                          $addresses, $proxy);
                 $status = $response->status();
                 $location = $response->header('Location');
                 if ($status >= 300 && $status < 400 && $location !== '') {
@@ -303,18 +364,26 @@ class ImageProxy
         }
     }
 
-    private static function request(string $url, string $host, int $port, array $addresses): Response
+    private static function request(string $url, string $host, int $port, array $addresses, ?string $proxy = null): Response
     {
         $options = ['allow_redirects' => false, 'stream' => true];
+        if ($proxy !== null) {
+            $options['proxy'] = $proxy;               // the proxy resolves the (already checked, public) host itself
+        }
         $bare = trim($host, '[]');
-        if (!filter_var($bare, FILTER_VALIDATE_IP) && defined('CURLOPT_RESOLVE')) {
+        if ($proxy === null && !filter_var($bare, FILTER_VALIDATE_IP) && defined('CURLOPT_RESOLVE')) {
             // curl connects to the addresses just checked: no second DNS answer (rebinding) can point it inside
             $pinned = implode(',', array_map(fn ($ip) => str_contains($ip, ':') ? "[{$ip}]" : $ip, $addresses));
             $options['curl'] = [CURLOPT_RESOLVE => ["{$bare}:{$port}:{$pinned}"]];
         }
+        // what a browser sends for an <img>: bot protections (Akamai) answer anything less with an empty page
         return Http::withHeaders([
             'User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             'Accept' => 'image/webp,image/png,image/jpeg,image/*;q=0.8',
+            'Accept-Language' => 'en-US,en;q=0.9,ar;q=0.8',
+            'Sec-Fetch-Dest' => 'image',
+            'Sec-Fetch-Mode' => 'no-cors',
+            'Sec-Fetch-Site' => 'cross-site',
         ])->timeout(self::TIMEOUT_S)->withOptions($options)->get($url);
     }
 
