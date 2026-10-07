@@ -21,9 +21,11 @@
 # only when their lock files changed -> migrate -> Python tables (schema_mark) -> caches -> maintenance off ->
 # health check. A failure after the code moved puts the old commit back (the database is not restored: the
 # migrations only add, and the old code runs on them; restore a dump by hand if ever needed, docs section 14).
-set -Eeuo pipefail
+set -euo pipefail
+set -o errtrace   # the ERR trap (rollback) also fires inside functions
 umask 022
 
+# shellcheck source=/dev/null
 [[ -f /etc/default/laqta-update ]] && source /etc/default/laqta-update
 
 BUNDLE=""

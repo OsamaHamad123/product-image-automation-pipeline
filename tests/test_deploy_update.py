@@ -48,7 +48,7 @@ def test_it_goes_forward_only_and_refuses_local_edits():
 
 
 def test_a_failure_after_the_code_moved_puts_the_old_commit_back():
-    assert "set -Eeuo pipefail" in CODE                                   # the ERR trap also fires inside functions
+    assert "set -euo pipefail" in CODE and "set -o errtrace" in CODE     # the ERR trap also fires inside functions
     assert re.search(r"trap rollback ERR\n", CODE)
     assert 'reset -q --hard "$OLD"' in CODE
     trap_at, merge_at, health_at = CODE.index("trap rollback ERR"), CODE.index("--ff-only \"$NEW\""), CODE.index("/healthz answered")
