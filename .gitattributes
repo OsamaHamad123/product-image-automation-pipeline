@@ -1,0 +1,2 @@
+# Shell scripts run on Linux servers: always LF, also in a Windows checkout (a CRLF script fails with «pipefail: invalid option»)
+*.sh text eol=lf
