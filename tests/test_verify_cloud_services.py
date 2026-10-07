@@ -137,3 +137,72 @@ def test_phase3_keys_are_masked_in_the_connection_check_output(monkeypatch, name
     assert name in vcs._SECRET_SETTINGS
     out = vcs._redact(f"request failed for {fake} at https://api.example/v1?api_key={fake}")
     assert fake not in out
+
+
+# --- the check says which key it tried, so a key saved on the settings page is never confused with the .env one ---
+
+def test_check_names_the_key_source_and_tail_never_the_key(monkeypatch, capsys):
+    monkeypatch.setattr(config, "SERPER_API_KEY", "serper-from-settings-9f3a", raising=False)
+    monkeypatch.setattr(config, "KEY_SOURCES", {"SERPER_API_KEY": "settings"}, raising=False)
+    monkeypatch.setattr(requests, "post", lambda *a, **k: _Resp(200, {"images": [{"imageUrl": "https://x.ae/a.jpg"}]}))
+    assert vcs.verify_serper() is True
+    out = capsys.readouterr().out
+    assert "صفحة الإعدادات" in out and "…9f3a" in out
+    assert "serper-from-settings-9f3a" not in out
+
+
+def test_key_from_env_is_named_as_env(monkeypatch):
+    monkeypatch.setattr(config, "KEY_SOURCES", {}, raising=False)
+    assert "ملف .env" in vcs.key_origin("PHOTOROOM_API_KEY", "photoroom-env-key-1234")
+    assert vcs.key_origin("PHOTOROOM_API_KEY", "") == ""
+
+
+def test_serper_out_of_credits_says_so(monkeypatch, serper_key, capsys):
+    # Serper answers 400 {"message": "Not enough credits"} for a key with no credit left (seen in production)
+    monkeypatch.setattr(requests, "post", lambda *a, **k: _Resp(400, {"message": "Not enough credits", "statusCode": 400}))
+    assert vcs.verify_serper() is False
+    out = capsys.readouterr().out
+    assert "Not enough credits" in out and "رصيد" in out
+
+
+def test_photoroom_check_goes_direct_like_the_real_run(monkeypatch):
+    # the real call (image_processor) uses no proxy; a slow residential proxy made the check time out with a good key
+    monkeypatch.setattr(config, "PHOTOROOM_API_KEY", "photoroom-test-key", raising=False)
+    monkeypatch.setattr(config, "PROXY_URL", "http://user:pass@proxy.example:7000", raising=False)
+    seen = []
+
+    def get(url, headers=None, proxies=None, timeout=None):
+        seen.append(proxies)
+        return _Resp(200, {"images": {"available": 5, "subscription": 100}})
+
+    monkeypatch.setattr(requests, "get", get)
+    assert vcs.verify_photoroom() is True
+    assert seen == [None]
+
+
+def test_settings_values_are_stripped_and_their_source_recorded(monkeypatch):
+    class _Cursor:
+        def execute(self, sql, *a):
+            self.sql = sql
+
+        def fetchone(self):
+            return ("system_settings",)
+
+        def fetchall(self):
+            return [{"key": "photoroom_api_key", "value": "  photoroom-pasted-key\n"}, {"key": "serper_api_key", "value": ""}]
+
+    class _Conn:
+        def cursor(self):
+            return _Cursor()
+
+        def close(self):
+            pass
+
+    import db_connect
+    monkeypatch.setattr(db_connect, "connect", lambda *a, **k: _Conn())
+    monkeypatch.setattr(config, "PHOTOROOM_API_KEY", "old-env-key", raising=False)
+    monkeypatch.setattr(config, "KEY_SOURCES", {}, raising=False)
+    config.load_db_config()
+    assert config.PHOTOROOM_API_KEY == "photoroom-pasted-key"
+    assert config.KEY_SOURCES["PHOTOROOM_API_KEY"] == "settings"
+    assert config.KEY_SOURCES["SERPER_API_KEY"] == "env"

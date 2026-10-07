@@ -67,6 +67,16 @@ def print_separator(title):
     print(f"🔍 {title}")
     print("=" * 50)
 
+
+def key_origin(name, value):
+    """سطر بيقول أي مفتاح انجرّب: من صفحة الإعدادات أو من .env، وآخر 4 حروف منه (مش سر، وبتكفي للمقارنة)."""
+    value = str(value or "").strip()
+    if not value:
+        return ""
+    where = "صفحة الإعدادات" if getattr(config, "KEY_SOURCES", {}).get(name) == "settings" else "ملف .env"
+    tail = f"، آخره …{value[-4:]}" if len(value) >= 12 else ""
+    return f"🔑 المفتاح المستعمل من {where}{tail}."
+
 def verify_google_sheets():
     print_separator("فحص الاتصال بـ Google Sheets API")
     creds_file = config.CREDENTIALS_FILE
@@ -118,6 +128,7 @@ def verify_cloudinary():
             secure = True
         )
         
+        print(key_origin("CLOUDINARY_API_KEY", config.CLOUDINARY_API_KEY))
         print(f"🔄 محاولة إرسال اختبار Ping إلى Cloudinary ({config.CLOUDINARY_CLOUD_NAME})...")
         res = cloudinary.api.ping()
         if res.get("status") == "ok":
@@ -142,6 +153,7 @@ def verify_gemini():
     # نفس الفحص الذي يجريه العامل عند البدء: models.get بالمفتاح في الترويسة (لا يظهر في الروابط أو السجلات)
     from catalog_match.verify import check_model_available
     model = getattr(config, "GEMINI_MODEL", "gemini-3.1-flash-lite")
+    print(key_origin("GEMINI_API_KEY", api_key))
     print(f"🔄 التحقق من توفر الموديل {model} ...")
     check = check_model_available(api_key=api_key, model=model, timeout=15)
     if check.ok:
@@ -168,6 +180,7 @@ def verify_serper():
     if not api_key:
         print("❌ لم يتم تعيين SERPER_API_KEY: سيُستخدم Bing كبديل، ونتائجه تذهب للمراجعة دائماً ولا تُنشر تلقائياً.")
         return False
+    print(key_origin("SERPER_API_KEY", api_key))
     try:
         print("🔄 إرسال بحث صور تجريبي واحد (يستهلك رصيد استعلام واحد)...")
         response = requests.post(
@@ -189,12 +202,17 @@ def verify_serper():
             return True
         print("❌ Serper رد بنجاح لكن بدون صور: تحقق من الحساب أو جرّب لاحقاً.")
         return False
+    try:
+        reason = str((response.json() or {}).get("message") or "").strip()
+    except (ValueError, AttributeError):
+        reason = ""
     if response.status_code in (401, 403):
         print(f"❌ مفتاح SERPER_API_KEY غير صالح (Error {response.status_code}).")
-    elif response.status_code == 429:
-        print("❌ انتهى رصيد Serper أو تم تجاوز الحد (429): اشحن الرصيد من لوحة serper.dev.")
+    elif response.status_code == 429 or "credit" in reason.lower():
+        print(f"❌ رصيد هالمفتاح خلص ({response.status_code}{f': {reason}' if reason else ''}): اشحن الرصيد من serper.dev، "
+              "أو حط مفتاح فيه رصيد من صفحة الإعدادات.")
     else:
-        print(f"❌ استجابة غير متوقعة من Serper (كود {response.status_code}).")
+        print(f"❌ استجابة غير متوقعة من Serper (كود {response.status_code}{f': {reason}' if reason else ''}).")
     return False
 
 
@@ -204,9 +222,10 @@ def verify_photoroom():
     if not api_key:
         print("❌ خطأ: لم يتم تعيين مفتاح PHOTOROOM_API_KEY في ملف .env")
         return False
-        
-    proxies = {"http": config.PROXY_URL, "https": config.PROXY_URL} if config.PROXY_URL else None
-    
+    print(key_origin("PHOTOROOM_API_KEY", api_key))
+    # بدون بروكسي متل التشغيل الحقيقي (image_processor): بطء البروكسي كان يطلّع «ما بيرد» والمفتاح سليم
+    proxies = None
+
     # 1. التحقق مما إذا كان مفتاح تجريبي Sandbox
     is_sandbox = api_key.strip().lower().startswith("sandbox_")
     if is_sandbox:
@@ -285,6 +304,7 @@ def verify_google_search():
         "gl": "ae"
     }
     
+    print(key_origin("GOOGLE_SEARCH_API_KEY", key))
     try:
         print("🔄 محاولة إرسال طلب بحث تجريبي لـ Google Search...")
         response = requests.get(url, params=params, timeout=10)

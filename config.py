@@ -492,6 +492,19 @@ def _load_queue_settings(db_keys):
 # --- end queue package ---
 
 
+# مفاتيح الخدمات اللي بتنحفظ من صفحة الإعدادات -> اسمها هون. KEY_SOURCES بيقول من وين إجت القيمة اللي عم تنستعمل
+# ("settings" أو "env")، لحتى فحص الاتصالات يحكي للمالك أي مفتاح جرّب بدل ما يضيع بين .env والصفحة.
+SETTINGS_KEY_NAMES = {
+    "serper_api_key": "SERPER_API_KEY",
+    "photoroom_api_key": "PHOTOROOM_API_KEY",
+    "gemini_api_key": "GEMINI_API_KEY",
+    "cloudinary_api_key": "CLOUDINARY_API_KEY",
+    "google_search_api_key": "GOOGLE_SEARCH_API_KEY",
+    "proxy_url": "PROXY_URL",
+}
+KEY_SOURCES = {}
+
+
 def load_db_config():
     """
     تحميل الإعدادات ديناميكياً من قاعدة البيانات لتجنب تعديل ملفات البيئة يدوياً.
@@ -507,8 +520,12 @@ def load_db_config():
             rows = cursor.fetchall()
             db_keys = {}
             for r in rows:
-                db_keys[r['key']] = r['value']
-            
+                # مفتاح منسوخ مع فراغ أو سطر جديد لازم يشتغل متل ما هو
+                value = r['value']
+                db_keys[r['key']] = value.strip() if isinstance(value, str) else value
+            for db_key, name in SETTINGS_KEY_NAMES.items():
+                KEY_SOURCES[name] = "settings" if db_keys.get(db_key) else "env"
+
             global PHOTOROOM_API_KEY, GEMINI_API_KEY, GEMINI_MODEL, PHOTOROOM_CROP
             global CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET
             global GOOGLE_SEARCH_API_KEYS, GOOGLE_SEARCH_CX_LIST, GOOGLE_SEARCH_API_KEY, GOOGLE_SEARCH_CX
