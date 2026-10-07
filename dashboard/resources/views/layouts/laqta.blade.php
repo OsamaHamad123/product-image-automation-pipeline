@@ -82,6 +82,14 @@
                 <div class="lq-sidebar__spacer"></div>
 
                 <x-lq.run-card live state="loading" />
+
+                @auth
+                    <form class="lq-sidebar__user" method="POST" action="{{ route('logout') }}">
+                        @csrf
+                        <span class="lq-sidebar__user-name" dir="ltr">{{ auth()->user()->name }}</span>
+                        <button class="lq-btn lq-btn--ghost lq-btn--sm" type="submit">خروج</button>
+                    </form>
+                @endauth
             </div>
         </aside>
 

@@ -8,6 +8,11 @@ use App\Http\Controllers\OverviewController;
 use App\Http\Controllers\ReviewController;
 use App\Http\Controllers\RunController;
 
+// تسجيل الدخول (RequireLogin بيحوّل لهون كل زائر بلا جلسة)
+Route::get('/login', [\App\Http\Controllers\LoginController::class, 'show'])->name('login');
+Route::post('/login', [\App\Http\Controllers\LoginController::class, 'attempt'])->name('login.attempt');
+Route::post('/logout', [\App\Http\Controllers\LoginController::class, 'logout'])->name('logout');
+
 // صفحات لوحة التحكم
 Route::get('/', [OverviewController::class, 'index'])->name('dashboard.index'); // p2-run: الرئيسية
 Route::get('/catalog', [ReviewController::class, 'page'])->name('dashboard.catalog');
