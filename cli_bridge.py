@@ -2019,7 +2019,10 @@ def action_eval_export(params):
     except Exception:
         return _failure('failed', "Could not export the test set (details in temp/search.log).", "eval_export failed")
     root = os.path.dirname(os.path.abspath(__file__))
-    folder = os.path.relpath(manifest["folder"], root)
+    try:
+        folder = os.path.relpath(manifest["folder"], root)
+    except ValueError:                      # Windows: the folder is on another drive than the app, no relative path
+        folder = os.path.abspath(manifest["folder"])
     return {'status': 'success', 'file': name, 'zip_path': os.path.abspath(manifest.get("zip") or ""),
             'folder': folder.replace(os.sep, "/"), 'products': int(manifest.get("products") or 0),
             'candidates': int(manifest.get("candidates") or 0), 'labelled': int(manifest.get("labelled") or 0),

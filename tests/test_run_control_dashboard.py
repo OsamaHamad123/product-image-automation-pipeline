@@ -590,7 +590,13 @@ def _press(tmp_path, button="stop", ignore_stop=False, verified=True, wait=5):
     (root / "temp").mkdir()
     worker_py = tmp_path / "fake_worker.py"
     worker_py.write_text(FAKE_WORKER, encoding="utf-8")
-    worker = subprocess.Popen([sys.executable, str(worker_py), str(root), "1" if ignore_stop else "0"])
+    # On Windows a venv's python.exe is a launcher that runs the real interpreter as a child process, so the Popen PID
+    # would not be the PID the worker writes to its lock (the one production reads and stops): start the stand-in
+    # worker (stdlib only) with the base interpreter there, so both are the same process, as on Linux
+    python = sys.executable
+    if sys.platform == "win32":
+        python = getattr(sys, "_base_executable", None) or sys.executable
+    worker = subprocess.Popen([python, str(worker_py), str(root), "1" if ignore_stop else "0"])
     try:
         lock = root / "temp" / "pipeline.lock"
         for _ in range(200):

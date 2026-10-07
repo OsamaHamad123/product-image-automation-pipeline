@@ -23,8 +23,10 @@ PHP = shutil.which("php")
 
 def _php(code):
     health = str(HEALTH_PHP).replace("\\", "/")
+    # Laravel boots with date_default_timezone_set(config app.timezone) = APP_TIMEZONE=UTC, the zone the stored times
+    # are in; the bare PHP CLI would use php.ini's date.timezone instead (XAMPP ships Europe/Berlin), so set it here
     script = ("<?php\nnamespace App\\Http\\Controllers { abstract class Controller {} }\nnamespace {\n"
-              f"require '{health}';\nuse App\\Http\\Controllers\\HealthController;\n$out = null;\n{code}\n"
+              f"date_default_timezone_set('UTC');\nrequire '{health}';\nuse App\\Http\\Controllers\\HealthController;\n$out = null;\n{code}\n"
               "echo json_encode($out, JSON_UNESCAPED_UNICODE);\n}\n")
     with tempfile.NamedTemporaryFile("w", suffix=".php", delete=False, encoding="utf-8") as fh:
         fh.write(script)

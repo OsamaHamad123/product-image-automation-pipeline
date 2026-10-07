@@ -8,6 +8,8 @@ code default stays 'off'.
 
 import pytest
 
+pytest.importorskip("grp", reason="grp is POSIX-only; the Ubuntu deployment kit is tested on Linux")
+
 from test_deploy_ubuntu import APP, needs_bash, needs_plain_path, run_install
 
 

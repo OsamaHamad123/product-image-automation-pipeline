@@ -664,10 +664,22 @@ def test_the_brands_check_and_a_bridge_that_does_not_answer(setup_app):
     assert [c[0] for c in _calls(setup_app)] == ["setup_brands", "setup_brands"]
 
 
+def _interpreter_stub(path, stdout_text):
+    """A stand-in for the Python interpreter (PYTHON_PATH) that prints stdout_text whatever it is asked to run."""
+    if sys.platform == "win32":
+        # no /bin/sh: a batch file, which proc_open runs through cmd; the text comes from a file (no cmd escaping)
+        out = path.with_suffix(".txt")
+        out.write_text(stdout_text + "\n", encoding="utf-8")
+        stub = path.with_suffix(".cmd")
+        stub.write_text(f'@type "{out}"\r\n', encoding="utf-8")
+        return stub
+    path.write_text("#!/bin/sh\ncat <<'EOF'\n" + stdout_text + "\nEOF\n", encoding="utf-8")
+    path.chmod(0o755)
+    return path
+
+
 def test_the_keys_test_is_the_connection_check_and_shows_no_key(setup_app):
-    stub = setup_app["tmp"] / "python_stub.sh"
-    stub.write_text("#!/bin/sh\ncat <<'EOF'\n" + json.dumps(DIAGNOSTICS) + "\nEOF\n", encoding="utf-8")
-    stub.chmod(0o755)
+    stub = _interpreter_stub(setup_app["tmp"] / "python_stub.sh", json.dumps(DIAGNOSTICS))
     (before,) = _kernel(setup_app["env"], [["POST", "/api/setup/check", {"step": "keys"}]])
     assert _step(json.loads(before["body"]), "keys")["status"] == "todo"
     (tested,) = _kernel(dict(setup_app["env"], PYTHON_PATH=str(stub)), [["POST", "/api/setup/check", {"step": "keys", "test": "1"}]])
@@ -676,9 +688,7 @@ def test_the_keys_test_is_the_connection_check_and_shows_no_key(setup_app):
     assert [r["state"] for r in keys["rows"]] == ["محفوظ · يعمل"] * 4
     for value in setup_app["secrets"].values():
         assert value not in before["body"] and value not in tested["body"]
-    broken = setup_app["tmp"] / "python_broken.sh"
-    broken.write_text("#!/bin/sh\necho not json\n", encoding="utf-8")
-    broken.chmod(0o755)
+    broken = _interpreter_stub(setup_app["tmp"] / "python_broken.sh", "not json")
     (failed,) = _kernel(dict(setup_app["env"], PYTHON_PATH=str(broken)), [["POST", "/api/setup/check", {"step": "keys", "test": "1"}]])
     assert failed["status"] == 500 and re.search(r"[؀-ۿ]", json.loads(failed["body"])["error"])
 

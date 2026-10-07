@@ -197,7 +197,10 @@ def _php(code: str, root: Path = None):
         fh.write(script)
         path = fh.name
     env = dict(os.environ, LQ_TEST_DASH=str(root or (Path(tempfile.gettempdir()) / "lq-none" / "dashboard")))
-    for name in ("SERPER_API_KEY", "GEMINI_API_KEY", "PHOTOROOM_API_KEY", "CLOUDINARY_API_KEY",
+    # every key SettingsController::envHas may find in the process environment (a developer's shell may export
+    # ANTHROPIC_API_KEY, e.g. for Claude Code), so the "no key saved" cases see no key
+    for name in ("SERPER_API_KEY", "GEMINI_API_KEY", "ANTHROPIC_API_KEY", "SERPAPI_API_KEY", "REMOVE_BG_API_KEY",
+                 "GOOGLE_SEARCH_API_KEY", "PHOTOROOM_API_KEY", "CLOUDINARY_API_KEY",
                  "CLOUDINARY_API_SECRET", "CLOUDINARY_CLOUD_NAME", "SPREADSHEET_NAME_OR_URL", "SPREADSHEET_TAB_NAME",
                  "CREDENTIALS_FILE", "BG_REMOVAL_METHOD", "OUTPUT_CANVAS_SIZE"):
         env.pop(name, None)

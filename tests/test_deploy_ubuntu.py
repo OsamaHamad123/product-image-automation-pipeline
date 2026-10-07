@@ -10,7 +10,6 @@ import configparser
 import contextlib
 import datetime
 import getpass
-import grp
 import gzip
 import http.client
 import os
@@ -25,6 +24,9 @@ import time
 from pathlib import Path
 
 import pytest
+
+# grp is POSIX-only: on Windows the whole Linux deployment kit module is skipped instead of failing collection
+grp = pytest.importorskip("grp", reason="grp is POSIX-only; the Ubuntu deployment kit is tested on Linux")
 
 REPO = Path(__file__).resolve().parents[1]
 DEPLOY = REPO / "deploy" / "ubuntu"
