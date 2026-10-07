@@ -2,7 +2,7 @@
 Http::fake; no real network): Carrefour's Akamai answers a data-centre address with 403 and any non-browser with an
 empty HTML page, and blocks some of the residential proxy's exit addresses too.
 
-* a refusal (403 / a page instead of an image) is fetched again through the proxy, up to PROXY_ATTEMPTS times;
+* a refusal (403 / a page instead of an image) is fetched again through the proxy, up to PROXY_ATTEMPTS (4) times;
 * without a proxy, or when every proxy try fails, the direct answer stands (same status and body as before);
 * an answer the proxy cannot change (404) is not retried.
 """
@@ -53,7 +53,9 @@ Http::fake(['*' => $sequence]);
 $out = App\\Services\\ImageProxy::fetch('{URL}');
 echo json_encode(['status' => $out['status'], 'error' => $out['error'] ?? null,
                   'body64' => isset($out['body']) ? base64_encode($out['body']) : null,
-                  'requests' => count(Http::recorded())]);
+                  'requests' => count(Http::recorded()),
+                  'accept_encoding' => array_map(fn ($pair) => $pair[0]->header('Accept-Encoding')[0] ?? null,
+                                                 Http::recorded()->all())]);
 """
     spec = [[s, base64.b64encode(b).decode("ascii"), t] for s, b, t in answers]
     with tempfile.TemporaryDirectory() as folder:
@@ -95,13 +97,15 @@ def test_a_challenge_page_then_a_blocked_address_then_the_image(env):
 def test_a_direct_403_goes_through_the_proxy(env):
     out = fetch(with_proxy(env), [(403, b"Access Denied", "text/html"), (200, PNG, "image/png")])
     assert (out["status"], out["body"], out["requests"]) == (200, PNG, 2)
+    # Akamai serves its empty page to a request without Accept-Encoding, even from a clean address
+    assert out["accept_encoding"] == ["gzip, deflate", "gzip, deflate"]
 
 
 def test_the_proxy_is_tried_at_most_three_times_then_the_direct_answer_stands(env):
     refused = (403, b"Access Denied", "text/html")
-    out = fetch(with_proxy(env), [refused] * 6)
+    out = fetch(with_proxy(env), [refused] * 8)
     assert (out["status"], out["error"]) == (403, "upstream")
-    assert out["requests"] == 1 + 3
+    assert out["requests"] == 1 + 4
 
 
 def test_without_a_proxy_nothing_changes(env):

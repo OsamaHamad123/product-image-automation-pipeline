@@ -36,7 +36,7 @@ class ImageProxy
     public const MAX_BYTES = 15 * 1024 * 1024;
     public const MAX_REDIRECTS = 5;
     public const TIMEOUT_S = 10;
-    public const PROXY_ATTEMPTS = 3;
+    public const PROXY_ATTEMPTS = 4;   // about half of the proxy's exit addresses reach Carrefour's CDN: 4 tries ≈ 94%
     public const HOSTS_CACHE_KEY = 'image_proxy_hosts';
     public const HOSTS_TTL_S = 14 * 86400;
     private const HOSTS_MAX = 5000;
@@ -368,7 +368,15 @@ class ImageProxy
     {
         $options = ['allow_redirects' => false, 'stream' => true];
         if ($proxy !== null) {
-            $options['proxy'] = $proxy;               // the proxy resolves the (already checked, public) host itself
+            // through the proxy: curl, not stream mode. Guzzle streams with PHP's own http wrapper, whose TLS fingerprint
+            // Akamai answers with its empty page on every address (measured: 0/6 streamed, 6/6 with curl). The size cap
+            // stays: the transfer is cut once it passes MAX_BYTES.
+            $options = ['allow_redirects' => false, 'proxy' => $proxy,
+                        'progress' => function ($total, $downloaded) {
+                            if ($total > self::MAX_BYTES || $downloaded > self::MAX_BYTES) {
+                                throw new \RuntimeException('too_large');
+                            }
+                        }];
         }
         $bare = trim($host, '[]');
         if ($proxy === null && !filter_var($bare, FILTER_VALIDATE_IP) && defined('CURLOPT_RESOLVE')) {
@@ -381,6 +389,8 @@ class ImageProxy
             'User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             'Accept' => 'image/webp,image/png,image/jpeg,image/*;q=0.8',
             'Accept-Language' => 'en-US,en;q=0.9,ar;q=0.8',
+            // without it Akamai answers even a clean proxy address with its empty page (measured on the server)
+            'Accept-Encoding' => 'gzip, deflate',
             'Sec-Fetch-Dest' => 'image',
             'Sec-Fetch-Mode' => 'no-cors',
             'Sec-Fetch-Site' => 'cross-site',
