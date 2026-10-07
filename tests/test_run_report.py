@@ -685,7 +685,8 @@ def test_the_health_page_shows_the_run_history_cost():
               "runs_cost": {"24h": {"usd": 0.004, "runs": 2, "priced_runs": 2, "estimated_runs": 2}}}
     script = ("globalThis.window = globalThis;\n" + js + "\nconst H = window.LaqtaHealth;\n"
               f"console.log(JSON.stringify(H.opsView({json.dumps(report)}, '24h').cost));")
-    result = subprocess.run(["node", "-e", script], capture_output=True, text=True, timeout=60, encoding="utf-8")
+    # the script goes in on stdin: health.js is longer than Windows' 32767-character command line ([WinError 206])
+    result = subprocess.run(["node", "-"], input=script, capture_output=True, text=True, timeout=60, encoding="utf-8")
     assert result.returncode == 0, result.stderr
     cost = json.loads(result.stdout.strip().splitlines()[-1])
     assert "حسب سجل التشغيلات" in cost["note"] and "تشغيلين" in cost["note"]

@@ -6,6 +6,7 @@ sheet name; no control character, quote or backslash) and .env is replaced atomi
 
 import os
 import stat
+import sys
 
 import pytest
 
@@ -83,7 +84,8 @@ def test_an_empty_link_is_still_reported_as_missing(bridge):
 def test_env_is_replaced_atomically_with_its_mode_and_no_leftover(bridge, tmp_path):
     cli_bridge, env, _cleared = bridge
     assert cli_bridge.action_sheet_save({"spreadsheet_url": SHEET, "tab_name": "Products"})["status"] == "success"
-    assert stat.S_IMODE(os.stat(env).st_mode) == 0o640
+    if sys.platform != "win32":             # Windows has no POSIX modes (chmod sets only the read-only bit)
+        assert stat.S_IMODE(os.stat(env).st_mode) == 0o640
     assert sorted(p.name for p in tmp_path.iterdir() if p.name.startswith(".env")) == [".env"]
     lines = env.read_text(encoding="utf-8").splitlines()
     assert lines[:3] == ENV_TEXT.splitlines()[:3] and lines[-1] == "GEMINI_MODEL=gemini"   # everything else kept

@@ -19,8 +19,13 @@ class PythonBridge
     /** Statuses that describe a completed action (not a transport or code error). */
     public const OUTCOME_STATUSES = ['success', 'review', 'not_found'];
 
+    /** The interpreter: an explicitly set PYTHON_PATH, else the app's .venv (Windows or Linux layout), else python. */
     public static function pythonPath(): string
     {
+        $explicit = trim((string) env('PYTHON_PATH', ''));
+        if ($explicit !== '') {
+            return $explicit;
+        }
         $winVenv = base_path('../.venv/Scripts/python.exe');
         if (file_exists($winVenv)) {
             return $winVenv;
@@ -29,7 +34,7 @@ class PythonBridge
         if (file_exists($linuxVenv)) {
             return $linuxVenv;
         }
-        return env('PYTHON_PATH', 'python');
+        return 'python';
     }
 
     public static function bridgePath(): string
