@@ -441,6 +441,29 @@ html:has(.lq-body) {
     flex-grow: 1;
 }
 
+/* Signed-in user + sign-out (sidebar foot) */
+.lq-sidebar__user {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.lq-sidebar__user-name {
+    color: var(--lq-ink-muted);
+    font-size: 0.85rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.lq-sidebar__user .lq-btn--ghost {
+    color: var(--lq-ink-fg);
+}
+
 /* Run-status mini card (sidebar) */
 .lq-runcard {
     display: flex;
@@ -2072,6 +2095,7 @@ a.lq-btn[aria-disabled="true"] {
 
     .lq-sidebar .lq-brand,
     .lq-sidebar__spacer,
+    .lq-sidebar__user,
     .lq-sidebar .lq-runcard {
         display: none;
     }
