@@ -196,7 +196,7 @@ class SettingsController extends Controller
     /** متغيرات البيئة السرية (نفس verify_cloud_services._SECRET_SETTINGS): تُقرأ للحجب من السجلات فقط. */
     private const SECRET_ENV = [
         'GEMINI_API_KEY', 'SERPER_API_KEY', 'GOOGLE_SEARCH_API_KEYS', 'GOOGLE_SEARCH_API_KEY', 'CLOUDINARY_API_KEY',
-        'CLOUDINARY_API_SECRET', 'PHOTOROOM_API_KEY', 'REMOVE_BG_API_KEY', 'TELEGRAM_BOT_TOKEN', 'PROXY_URL',
+        'CLOUDINARY_API_SECRET', 'PHOTOROOM_API_KEY', 'REMOVE_BG_API_KEY', 'PROXY_URL',
         'ANTHROPIC_API_KEY', 'SERPAPI_API_KEY',
     ];
 

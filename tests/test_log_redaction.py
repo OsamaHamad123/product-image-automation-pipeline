@@ -3,8 +3,7 @@
 * run_report.RedactingFilter (run_report.redact on every log line, its arguments and its traceback) sits on the root
   logger, on every root handler and on logging.lastResort; cli_bridge, the nightly runner and `python main.py` install
   it (install_log_redaction).
-* config.log_error_to_laravel and config.log_and_fail (log, failure table, Telegram) redact; the Telegram message
-  (parse_mode HTML) escapes its values.
+* config.log_error_to_laravel and config.log_and_fail (log, failure table) redact.
 * a bare `python main.py` prints its usage: the old sequential mode that writes the Sheet directly needs
   --legacy-sequential.
 """
@@ -119,7 +118,7 @@ def test_the_nightly_runner_logs_without_secrets(secret, clean_logging, monkeypa
 
 
 # ---------------------------------------------------------------------------
-# config: the Laravel log, the failure table and Telegram
+# config: the Laravel log and the failure table
 # ---------------------------------------------------------------------------
 
 def test_the_laravel_log_line_is_redacted(secret, monkeypatch, tmp_path):
@@ -133,22 +132,18 @@ def test_the_laravel_log_line_is_redacted(secret, monkeypatch, tmp_path):
     assert secret not in line and "local.ERROR: Python Pipeline - [Product: Milk" in line and line.endswith("\n")
 
 
-def test_a_failure_is_redacted_everywhere_and_telegram_html_is_escaped(secret, monkeypatch, tmp_path):
+def test_a_failure_is_redacted_everywhere(secret, monkeypatch, tmp_path):
     import config
     import local_cache_db
 
     monkeypatch.setattr(config, "LARAVEL_LOG_PATH", str(tmp_path / "laravel.log"))
-    runner_lines, stored, sent = [], [], []
+    runner_lines, stored = [], []
     monkeypatch.setattr(config, "log_runner", runner_lines.append)
     monkeypatch.setattr(local_cache_db, "save_product_failure", lambda *a: stored.append(a))
-    monkeypatch.setattr(config, "send_telegram_alert", sent.append)
     config.log_and_fail("6281007000024", "Milk <b>1L</b> & Co", "A&W", f"401 unauthorized <key> {secret}")
-    everything = " ".join(runner_lines) + str(stored) + " ".join(sent) + (tmp_path / "laravel.log").read_text("utf-8")
+    everything = " ".join(runner_lines) + str(stored) + (tmp_path / "laravel.log").read_text("utf-8")
     assert secret not in everything
-    [message] = sent
-    assert "Milk &lt;b&gt;1L&lt;/b&gt; &amp; Co" in message and "A&amp;W" in message
-    assert "<code>401 unauthorized &lt;key&gt; [REDACTED]</code>" in message
-    assert message.count("<b>") == message.count("</b>")         # only the alert's own tags
+    assert stored and "401 unauthorized <key> [REDACTED]" in str(stored)
 
 
 # ---------------------------------------------------------------------------

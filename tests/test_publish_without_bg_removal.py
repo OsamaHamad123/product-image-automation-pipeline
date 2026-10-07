@@ -239,7 +239,6 @@ def test_the_run_report_says_how_many_were_published_without_removal():
     report = run_report.build_report("nightly", [{"stop_reason": "provider_down", "run_id": "r1", "bg_skipped": 2},
                                                  {"stop_reason": None, "run_id": "r2", "bg_skipped": 1}],
                                      1000.0, 1600.0, db=DB, sheets=None)
-    assert report["bg_skipped"] == 3
-    assert "انتشر بدون عزل الخلفية 3 (عزل الخلفية متوقف بالإعدادات)" in run_report.telegram_text(report)
+    assert report["bg_skipped"] == 3 and report["bg_fallback"] == 0
     quiet = run_report.build_report("manual", [{"stop_reason": None, "run_id": "r3"}], 1000.0, 1600.0, db=DB)
-    assert quiet["bg_skipped"] == 0 and "عزل الخلفية" not in run_report.telegram_text(quiet)
+    assert quiet["bg_skipped"] == 0

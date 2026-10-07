@@ -2651,7 +2651,7 @@ def run_worker_mode(trigger="manual", report=True, deadline_ts=None):
     أو عند طلب إيقاف من لوحة التحكم (stop_requested): لا يسحب مهمة جديدة، ينهي المنتجات الجارية، ثم يعيد
     local_cache_db.stop_run الصفوف العالقة للانتظار. طلب إيقاف سُجل أثناء الإدراج يُنفذ قبل معالجة أي منتج.
     قاعدة بيانات لا ترد عند البدء: يتوقف فوراً (db_unavailable) بدل اعتبار التشغيل منتهياً.
-    النتيجة في LAST_WORKER؛ report=True يكتب تقرير التشغيل (run_report: سجل التشغيلات، last_report.json، Telegram).
+    النتيجة في LAST_WORKER؛ report=True يكتب تقرير التشغيل (run_report: سجل التشغيلات، last_report.json).
     التشغيل الليلي يمرر report=False ويكتب تقريراً واحداً لليلة بعد إعادة المحاولات، و deadline_ts (حد جدولة المهام
     ناقص هامش): بعده لا يسحب العامل مهمة جديدة وينتهي بعد المنتجات الجارية (time_limit) قبل أن تُنهي جدولة المهام العملية.
     """

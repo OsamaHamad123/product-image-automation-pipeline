@@ -1,8 +1,7 @@
 # run_report.py
 # تقرير ما حدث في كل تشغيل، ليعرف المالك دائماً نتيجة الليلة:
 #   - صف في جدول run_history (local_cache_db.save_run_history)،
-#   - الملف temp/nightly/last_report.json (يُكتب حتى عندما لا ترد قاعدة البيانات)،
-#   - رسالة Telegram عربية قصيرة عندما يكون TELEGRAM_BOT_TOKEN و TELEGRAM_CHAT_ID مضبوطين.
+#   - الملف temp/nightly/last_report.json (يُكتب حتى عندما لا ترد قاعدة البيانات).
 # يكتبه العامل (main.run_worker_mode) في نهاية كل تشغيل من لوحة التحكم أو يدوي، والتشغيل الليلي
 # (scripts/run_nightly.py) مرة واحدة لكل ليلة بعد إعادة المحاولات. لا شيء هنا يوقف التشغيل: كل خطأ يُسجل فقط.
 #
@@ -24,7 +23,6 @@
 # تحديثات الشيت المعلقة من google_sheets.outbox_outcomes() إن وُجدت.
 
 import datetime
-import html
 import json
 import logging
 import os
@@ -34,7 +32,6 @@ import time
 logger = logging.getLogger(__name__)
 
 LAST_REPORT_PATH = os.path.join("temp", "nightly", "last_report.json")
-TELEGRAM_MAX_CHARS = 3500
 
 EXIT_CODES = {"done": 0, "skipped": 0, "handed_over": 0, "failed": 1, "outage": 2, "stopped": 3}
 DONE_REASONS = ("", "queue_empty")
@@ -74,7 +71,7 @@ HANDED_OVER_TEXT = "توقف على انقطاع، وأثناء انتظار إ�
 
 
 # ---------------------------------------------------------------------------
-# إخفاء الأسرار: التنبيهات ونصوص الاستثناءات تذهب إلى Telegram و run_history و last_report.json
+# إخفاء الأسرار: التنبيهات ونصوص الاستثناءات تذهب إلى run_history و last_report.json
 # ---------------------------------------------------------------------------
 
 def redact(text):
@@ -240,7 +237,7 @@ def _count(value):
         return 0
 
 
-# صور نُشرت تلقائياً «بدون عزل الخلفية» (المالك أوقف عزل الخلفية بالإعدادات): سطر بالتقرير وبطاقة «آخر تشغيل»
+# صور نُشرت تلقائياً «بدون عزل الخلفية» (المالك أوقف عزل الخلفية بالإعدادات): نفس النص في بطاقة «آخر تشغيل» (HealthController)
 BG_SKIPPED_TEXT = "انتشر بدون عزل الخلفية"
 BG_FALLBACK_TEXT = "انعزل بطريقة محلية لأن رصيد مزوّد العزل خلص"
 
@@ -335,7 +332,7 @@ def build_report(trigger, attempts, started_ts, ended_ts, health=None, db=None, 
 
 
 # ---------------------------------------------------------------------------
-# النشر: run_history، last_report.json، Telegram
+# النشر: run_history، last_report.json
 # ---------------------------------------------------------------------------
 
 def history_entry(report):
@@ -380,70 +377,8 @@ def write_last_report(report, path=LAST_REPORT_PATH):
         return False
 
 
-def _duration(seconds):
-    if seconds is None:
-        return ""
-    minutes = int(seconds) // 60
-    return f"{minutes // 60} س {minutes % 60} د" if minutes >= 60 else f"{minutes} د"
-
-
-def telegram_text(report):
-    """رسالة Telegram عربية قصيرة (HTML) من التقرير؛ كل نص متغير مُهرّب."""
-    esc = lambda value: html.escape(str(value), quote=False)  # noqa: E731
-    outcome = report.get("outcome") or "failed"
-    title = f"{OUTCOME_TEXT.get(outcome, outcome)} — {TRIGGER_TEXT.get(report.get('trigger'), 'تشغيل')}"
-    lines = [f"<b>{esc(title)}</b>"]
-    when = (report.get("started_at") or "").replace("T", " ")[:16]
-    duration = _duration(report.get("duration_s"))
-    if when:
-        lines.append(esc(when) + (f" · المدة {esc(duration)}" if duration else ""))
-    if report.get("reason_text"):
-        lines.append(f"السبب: {esc(report['reason_text'])}")
-    # آخر «محاولة» في handed_over هي التشغيل الآخر الذي تولى الطابور، لا إعادة تشغيل
-    runs = (report.get("attempts") or 1) - (1 if outcome == "handed_over" else 0)
-    if runs > 1:
-        lines.append(f"المحاولات: {runs} (أُعيد التشغيل بعد انقطاع)")
-    counts = report.get("counts")
-    if counts:
-        lines.append(f"أُضيف للطابور {counts.get('enqueued', 0)} · بُحث {counts.get('searched', 0)}")
-        lines.append(f"بانتظار المراجعة {counts.get('ready_for_review', 0)} · نُشر تلقائياً {counts.get('auto_published', 0)}")
-        lines.append(f"لم يُعثر على صورة {counts.get('not_found', 0)} · فشل {counts.get('failed', 0)}")
-        if counts.get("pending_left"):
-            lines.append(f"بقي في الانتظار {counts['pending_left']}"
-                         + (f" (منها {counts['provider_down']} لأن محركات البحث لم ترد)" if counts.get("provider_down") else ""))
-    if report.get("bg_fallback"):
-        lines.append(f"{BG_FALLBACK_TEXT} {_count(report['bg_fallback'])} (اشحن الرصيد لجودة أحسن)")
-    if report.get("bg_skipped"):
-        lines.append(f"{BG_SKIPPED_TEXT} {_count(report['bg_skipped'])} (عزل الخلفية متوقف بالإعدادات)")
-    elif report.get("database") == "unavailable":
-        lines.append("الأرقام غير متاحة (قاعدة البيانات لا ترد).")
-    outbox = report.get("outbox")
-    if outbox and any(outbox.values()):
-        lines.append(f"تحديثات الشيت: معلقة {outbox.get('pending', 0)} · تعارض {outbox.get('conflict', 0)}"
-                     f" · فشلت نهائياً {outbox.get('dead', 0)}")
-    spend = report.get("spend")
-    if spend and spend.get("usd") is not None:
-        lines.append(f"التكلفة: {spend['usd']:.2f}$" + (" (تقديرية)" if spend.get("source") == "estimate" else ""))
-    for notice in (report.get("notices") or [])[:3]:
-        lines.append(f"⚠️ {esc(redact(notice)[:200])}")
-    return "\n".join(lines)[:TELEGRAM_MAX_CHARS]
-
-
-def notify(report, sender=None, config_module=None):
-    """رسالة Telegram فقط عندما يكون مضبوطاً؛ sender(text) -> bool (افتراضياً config.send_telegram_alert)."""
-    if config_module is None:
-        import config as config_module
-    if not config_module.telegram_configured():
-        return False
-    try:
-        return bool((sender or config_module.send_telegram_alert)(telegram_text(report)))
-    except Exception as e:
-        logger.warning("run_report: telegram failed (%s)", type(e).__name__)
-        return False
-
-
-def publish(report, db=None, path=LAST_REPORT_PATH, sender=None, config_module=None):
-    """يحفظ التقرير في run_history ثم يرسله عبر Telegram ثم يكتب last_report.json؛ يطبع ملخصه في السجل."""
+def publish(report, db=None, path=LAST_REPORT_PATH):
+    """يحفظ التقرير في run_history ثم يكتب last_report.json؛ يطبع ملخصه في السجل."""
     if db is None:
         import local_cache_db as db
     history_id = None
@@ -453,7 +388,6 @@ def publish(report, db=None, path=LAST_REPORT_PATH, sender=None, config_module=N
         logger.warning("run_report: run_history not saved: %s", e)
     report["history_id"] = history_id
     report["notices"] = [redact(n) for n in report.get("notices") or []]       # ما أضافه المستدعي بعد build_report
-    report["telegram_sent"] = notify(report, sender=sender, config_module=config_module)
     write_last_report(report, path)
     counts = report.get("counts") or {}
     print(f"[Run Report] {report['outcome']} (exit {report['exit_code']})"
@@ -464,8 +398,8 @@ def publish(report, db=None, path=LAST_REPORT_PATH, sender=None, config_module=N
     return report
 
 
-def report_worker_run(info, trigger="manual", db=None, sender=None, path=LAST_REPORT_PATH):
+def report_worker_run(info, trigger="manual", db=None, path=LAST_REPORT_PATH):
     """تقرير عامل واحد (لوحة التحكم أو يدوي) من main.LAST_WORKER."""
     report = build_report(trigger, [info], info.get("started_ts"), info.get("ended_ts") or time.time(),
                           health=info.get("health"), db=db)
-    return publish(report, db=db, path=path, sender=sender)
+    return publish(report, db=db, path=path)

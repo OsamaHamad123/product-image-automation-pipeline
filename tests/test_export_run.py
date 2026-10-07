@@ -102,7 +102,7 @@ def _fake(tag):
 SECRET_CONFIG = {"SERPER_API_KEY": _fake("SERPER"), "GEMINI_API_KEY": _fake("GEMINI"),
                  "ANTHROPIC_API_KEY": _fake("ANTHROPIC"), "SERPAPI_API_KEY": _fake("SERPAPI"),
                  "PHOTOROOM_API_KEY": _fake("PHOTOROOM"), "CLOUDINARY_API_KEY": _fake("CLOUDKEY"),
-                 "CLOUDINARY_API_SECRET": _fake("CLOUDSECRET"), "TELEGRAM_BOT_TOKEN": _fake("TELEGRAM"),
+                 "CLOUDINARY_API_SECRET": _fake("CLOUDSECRET"), "REMOVE_BG_API_KEY": _fake("REMOVEBG"),
                  "PROXY_URL": f"http://shopuser:{_fake('PROXYPASS')}@proxy.example:8080"}
 
 

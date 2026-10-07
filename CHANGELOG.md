@@ -11,6 +11,17 @@ causes: the quality gate threw away white-background packshots, an unverified "l
 success, siblings of the right product outranked it, and reviewers' rejections were never remembered. The search
 core was rebuilt and wired into the queue, the dashboard actions and the sheet writes. Every claim below has a test.
 
+### Removed: Telegram alerts
+
+The Telegram bot was only ever used for testing and is gone. Run reports, failures and DEAD sheet writes stay
+where they already showed: the Health page (last-run card, run history), `/healthz`, the logs and the journal.
+- No Telegram message after a run (`run_report.telegram_text`/`notify` and the `telegram_sent` field are gone),
+  on a quota or API error (`config.send_telegram_alert`, `telegram_configured`), or when DEAD writes go up
+  (`scripts/flush_sheets_sync.py` only flushes now; `temp/outbox_dead_state.json` is no longer written).
+- The systemd failure alert is removed: `laqta-alert@.service`, `scripts/unit_alert.py` and the
+  `OnFailure=laqta-alert@%n.service` lines. install.sh deletes the old unit file from a server that has it.
+- `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are no longer read; delete them from `.env`.
+
 ### Wave 3 of the professional upgrade: transparent re-cuts, cut-out QA, setup wizard, simpler Health, lighter code
 
 **«أعد معالجتها شفافة»: the old white images become transparent (scripts/reprocess_transparent.py, Health card)**

@@ -9,7 +9,7 @@
 # The nightly run (laqta-nightly.service) is not affected: both use the same temp/pipeline.lock, only one can work.
 # MemoryMax is filled in by install.sh like in laqta-nightly.service; a run killed for memory is the only failure and
 # the dashboard shows it in the run state. Exit codes: killed by the stop button (KILL) or stopped on purpose (TERM)
-# are normal. No OnFailure alert here: a stop would raise a false alarm, and the run report goes out by itself.
+# are normal; the run writes its own report.
 # The @NAME@ words are filled in by install.sh.
 [Unit]
 Description=Laqta run started from the dashboard (main.py --enqueue, then --worker)
@@ -30,7 +30,7 @@ SuccessExitStatus=3 KILL TERM
 # Hard backstop (a run is hours at most): a hung run must not block the launcher for ever.
 TimeoutStartSec=12h
 # A stop (systemctl stop, a reboot, the dashboard) sends SIGTERM and the process shuts down gracefully: it finishes the
-# product in hand (up to its 45 s grace, SHUTDOWN_GRACE_S), writes the report and the Telegram message, and exits with
+# product in hand (up to its 45 s grace, SHUTDOWN_GRACE_S), writes the report, and exits with
 # code 3 ("stopped on purpose"). TimeoutStopSec is the wait before systemd sends SIGKILL: well above the grace.
 KillSignal=SIGTERM
 TimeoutStopSec=120

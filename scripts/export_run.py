@@ -87,7 +87,7 @@ def secrets():
         values.update(cassette.configured_hidden_values())
     except Exception:
         pass
-    for name in ("DB_PASSWORD", "TELEGRAM_BOT_TOKEN", "CLOUDINARY_API_SECRET", "CLOUDINARY_API_KEY"):
+    for name in ("DB_PASSWORD", "CLOUDINARY_API_SECRET", "CLOUDINARY_API_KEY"):
         value = str(os.getenv(name) or "").strip()
         if len(value) >= 4:
             values.add(value)

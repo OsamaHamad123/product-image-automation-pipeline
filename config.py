@@ -212,9 +212,7 @@ STRICT_BRAND_MATCH = os.getenv("STRICT_BRAND_MATCH", "True").lower() == "true"
 # نطاقات المواقع الإماراتية الموثوقة للتجارة الإلكترونية لتحديد نطاق البحث المبدئي
 TRUSTED_UAE_DOMAINS = ["kibsons.com", "carrefouruae.com", "luluhypermarket.com", "noon.com", "amazon.ae"]
 
-# 9. إعدادات الترقيات المتقدمة (البروكسي والتنبيهات)
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
+# 9. إعدادات الترقيات المتقدمة (البروكسي)
 PROXY_URL = os.getenv("PROXY_URL", "")
 
 # تتبع استهلاك الـ API محلياً في الذاكرة
@@ -320,48 +318,10 @@ def log_error_to_laravel(error_message, barcode=None, product_name=None, brand=N
         except Exception as e:
             logger.warning("فشل الكتابة في ملف سجلات لارافيل: %s", e)
 
-def _telegram_credentials():
-    return (os.getenv("TELEGRAM_BOT_TOKEN", TELEGRAM_BOT_TOKEN) or "").strip(), \
-        (os.getenv("TELEGRAM_CHAT_ID", TELEGRAM_CHAT_ID) or "").strip()
-
-
-def telegram_configured():
-    """هل ضُبط بوت Telegram (TELEGRAM_BOT_TOKEN و TELEGRAM_CHAT_ID)؟ تقرير كل تشغيل يُرسل فقط عندها."""
-    token, chat_id = _telegram_credentials()
-    return bool(token and chat_id)
-
-
-def send_telegram_alert(message):
-    """
-    إرسال إشعار فوري عبر بوت Telegram للمشرف. تعيد True فقط إذا قبل Telegram الرسالة (HTTP 2xx)؛
-    لا يُطبع المفتاح أبداً (الرابط يحتويه).
-    """
-    token, chat_id = _telegram_credentials()
-    if not token or not chat_id:
-        return False
-    url = f"https://api.telegram.org/bot{token}/sendMessage"
-    payload = {
-        "chat_id": chat_id,
-        "text": message,
-        "parse_mode": "HTML"
-    }
-    try:
-        import requests
-        response = requests.post(url, json=payload, timeout=10)
-        if 200 <= int(getattr(response, "status_code", 0) or 0) < 300:
-            return True
-        logger.warning("Telegram رفض الرسالة (HTTP %s).", getattr(response, "status_code", "?"))
-        return False
-    except Exception as e:
-        logger.warning("تعذر إرسال رسالة Telegram (%s).", type(e).__name__)
-        return False
-
 def log_and_fail(barcode, product_name, brand, error_message):
     """
-    تدوين الخطأ في الكونسول وتخزينه في جدول أخطاء SQLite. النص يمر على redact قبل أي مكان (السجل، الجدول، Telegram)،
-    ورسالة Telegram (parse_mode HTML) تُهرَّب قيمها: اسم منتج أو خطأ فيه < أو & كان يكسر الرسالة أو يغيّر تنسيقها.
+    تدوين الخطأ في الكونسول وتخزينه في جدول أخطاء SQLite. النص يمر على redact قبل أي مكان (السجل، الجدول).
     """
-    import html
     error_message = redact(error_message)
     log_runner(f"❌ فشل أتمتة المنتج '{product_name}': {error_message}")
     
@@ -373,20 +333,6 @@ def log_and_fail(barcode, product_name, brand, error_message):
         local_cache_db.save_product_failure(barcode, product_name, brand, error_message)
     except Exception as e:
         logger.warning("خطأ أثناء حفظ سجل الفشل: %s", e)
-
-    # إرسال إشعار تليجرام في حال وجود أخطاء متعلقة بالاشتراكات أو الحصص أو الـ APIs
-    lower_err = error_message.lower()
-    quota_keywords = ["quota", "limit", "402", "429", "unauthorized", "api_key", "expired", "exhausted", "billing", "payment", "credentials", "connection failed"]
-    if any(k in lower_err for k in quota_keywords):
-        alert_msg = (
-            f"🚨 <b>تنبيه خطأ أتمتة حرج (Subscription/API Error)</b>\n\n"
-            f"📦 <b>المنتج:</b> {html.escape(str(product_name or ''))}\n"
-            f"🏷️ <b>الماركة:</b> {html.escape(str(brand or ''))}\n"
-            f"🔢 <b>الباركود:</b> {html.escape(str(barcode or 'N/A'))}\n"
-            f"❌ <b>الخطأ المكتشف:</b> <code>{html.escape(error_message)}</code>\n\n"
-            f"💡 <i>يرجى مراجعة إعدادات الاشتراك أو مفاتيح الـ API في ملف .env لحل المشكلة.</i>"
-        )
-        send_telegram_alert(alert_msg)
 
 
 # 11. إعدادات خادم Redis

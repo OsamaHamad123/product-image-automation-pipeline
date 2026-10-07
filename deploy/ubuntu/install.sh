@@ -523,9 +523,11 @@ step_units() {
     log "7/10 systemd units, logrotate and backup script"
     local u
     for u in laqta-nightly.service laqta-nightly.timer laqta-sync-worker.service laqta-backup.service laqta-backup.timer \
-             laqta-outbox-flush.service laqta-outbox-flush.timer laqta-run.service laqta-run.path laqta-alert@.service; do
+             laqta-outbox-flush.service laqta-outbox-flush.timer laqta-run.service laqta-run.path; do
         render "$SCRIPT_DIR/$u" "/etc/systemd/system/$u" 644
     done
+    # The failure alert unit (laqta-alert@) was removed; a server installed before still has its file.
+    run rm -f /etc/systemd/system/laqta-alert@.service
     render "$SCRIPT_DIR/laqta-logrotate" /etc/logrotate.d/laqta 644
     run install -m 755 -o root -g root "$SCRIPT_DIR/backup.sh" /usr/local/sbin/laqta-backup
     if [[ ! -f /etc/default/laqta-backup ]]; then

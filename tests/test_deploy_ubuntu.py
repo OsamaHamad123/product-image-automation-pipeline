@@ -31,7 +31,7 @@ DEPLOY = REPO / "deploy" / "ubuntu"
 SCRIPTS = sorted(DEPLOY.glob("*.sh"))
 UNITS = ["laqta-sync-worker.service", "laqta-nightly.service", "laqta-nightly.timer",
          "laqta-backup.service", "laqta-backup.timer", "laqta-outbox-flush.service", "laqta-outbox-flush.timer",
-         "laqta-run.service", "laqta-run.path", "laqta-alert@.service"]
+         "laqta-run.service", "laqta-run.path"]
 PYTHON_SERVICES = ["laqta-nightly.service", "laqta-sync-worker.service", "laqta-outbox-flush.service",
                    "laqta-run.service"]
 BASH = shutil.which("bash")
@@ -68,7 +68,7 @@ def render(text, app_dir=SAMPLE_APP, user="laqta", listen="listen 80;", server_n
     return text
 
 
-# an unreplaced install.sh word looks like @APP_DIR@; a template unit's name (laqta-alert@%n.service) is not one
+# an unreplaced install.sh word looks like @APP_DIR@; a template unit's name (name@%n.service) is not one
 PLACEHOLDER = re.compile(r"@[A-Z][A-Z_]*@")
 
 
@@ -835,11 +835,6 @@ def test_backup_prefix_database_name_does_not_delete_a_longer_named_database(tmp
     assert longer.exists(), "DB_NAME=automation must not match automation_db_*"
 
 
-def test_backup_service_alerts_on_failure():
-    unit = rendered_unit("laqta-backup.service")
-    assert values(unit, "Unit", "OnFailure") == ["laqta-alert@%n.service"]
-
-
 def test_backup_settings_file_template_documents_the_new_keys():
     text = (DEPLOY / "install.sh").read_text(encoding="utf-8")
     assert "#BACKUP_AGE_RECIPIENT=age1" in text and "#BACKUP_RCLONE_REMOTE=" in text
@@ -1003,7 +998,7 @@ def test_dashboard_env_template_is_production_safe_and_holds_no_secret():
     assert not re.search(r"(?i)(sk-[A-Za-z0-9]{20,}|AIza[0-9A-Za-z_-]{30,}|BEGIN PRIVATE KEY|base64:[A-Za-z0-9+/]{30,})", text)
 
 
-# ------------------------------------------------------------------ memory limits, the alert unit, the flush timer
+# ------------------------------------------------------------------ memory limits, the flush timer
 @needs_bash
 @needs_plain_path
 @pytest.mark.parametrize("ram,extra,expected", [
@@ -1050,11 +1045,11 @@ def test_python_services_have_a_memory_cap_and_die_alone_when_they_pass_it(name)
     assert int(values(unit, "Service", "OOMScoreAdjust")[0]) > 0        # the first victim of the kernel, never MariaDB
 
 
-def test_failure_alert_is_attached_to_the_nightly_run_the_worker_and_the_backup_only():
-    for name in ("laqta-nightly.service", "laqta-sync-worker.service", "laqta-backup.service"):
-        assert values(rendered_unit(name), "Unit", "OnFailure") == ["laqta-alert@%n.service"], name
-    for name in ("laqta-alert@.service", "laqta-outbox-flush.service", "laqta-run.service"):
-        assert not values(rendered_unit(name), "Unit", "OnFailure"), name     # no alert about an alert, none every 2 minutes
+def test_no_unit_points_to_the_removed_failure_alert_unit():
+    for name in UNITS:
+        if name.endswith(".service"):
+            assert not values(rendered_unit(name), "Unit", "OnFailure"), name
+    assert not (DEPLOY / "laqta-alert@.service").exists() and not (REPO / "scripts" / "unit_alert.py").exists()
 
 
 SHUTDOWN_GRACE_S = 45        # the graceful-stop wait of the worker and run_nightly (their SIGTERM handler), seconds
@@ -1068,9 +1063,9 @@ def seconds(value):
 
 @pytest.mark.parametrize("name", ["laqta-nightly.service", "laqta-sync-worker.service", "laqta-run.service"])
 def test_long_running_units_get_time_to_stop_gracefully_and_a_clean_stop_is_not_a_failure(name):
-    """SIGTERM starts a graceful shutdown (up to SHUTDOWN_GRACE_S, then the report and the Telegram message) and the
-    process exits with code 3, 'stopped on purpose': systemd must wait longer than the grace before SIGKILL, and exit
-    3 must count as success so that OnFailure= (laqta-alert@) does not fire on a stop."""
+    """SIGTERM starts a graceful shutdown (up to SHUTDOWN_GRACE_S, then the report) and the process exits with code 3,
+    'stopped on purpose': systemd must wait longer than the grace before SIGKILL, and exit 3 must count as success so
+    that a stop is not a unit failure."""
     unit = rendered_unit(name)
     assert values(unit, "Service", "KillSignal") == ["SIGTERM"]
     stop_wait = seconds(values(unit, "Service", "TimeoutStopSec")[0])
@@ -1082,14 +1077,6 @@ def test_long_running_units_get_time_to_stop_gracefully_and_a_clean_stop_is_not_
 def test_the_dashboard_run_unit_still_accepts_the_stop_buttons_kill_and_a_plain_stop():
     codes = values(rendered_unit("laqta-run.service"), "Service", "SuccessExitStatus")[0].split()
     assert {"3", "KILL", "TERM"} <= set(codes)
-
-
-def test_alert_unit_runs_the_alert_script_for_the_failed_unit_as_the_app_user():
-    unit = rendered_unit("laqta-alert@.service")
-    assert values(unit, "Service", "Type") == ["oneshot"] and values(unit, "Service", "User") == ["laqta"]
-    assert values(unit, "Service", "ExecStart") == [f"{SAMPLE_APP}/.venv/bin/python -X utf8 {SAMPLE_APP}/scripts/unit_alert.py %i"]
-    assert (REPO / "scripts" / "unit_alert.py").is_file()
-    assert values(unit, "Unit", "Description") == ["Laqta failure alert for %i"]
 
 
 def test_outbox_flush_runs_the_flush_script_every_two_minutes_without_overlapping():
@@ -1129,7 +1116,8 @@ def test_install_always_switches_the_run_launcher_on_and_the_flush_timer_with_th
     assert "systemctl enable --now laqta-nightly.timer laqta-backup.timer laqta-outbox-flush.timer" in plain   # the NOT enabled hint
     enabled = run_install("--dry-run", str(APP), "--local-only", "--enable-units").stdout
     assert "+ systemctl enable --now laqta-backup.timer laqta-nightly.timer laqta-outbox-flush.timer" in enabled
-    assert "render laqta-logrotate -> /etc/logrotate.d/laqta" in enabled and "laqta-alert@.service" in enabled
+    assert "render laqta-logrotate -> /etc/logrotate.d/laqta" in enabled and "render laqta-alert@" not in enabled
+    assert "+ rm -f /etc/systemd/system/laqta-alert@.service" in enabled       # a server installed before drops the old unit
 
 
 # ------------------------------------------------------------------ the dashboard run launcher script
@@ -1615,14 +1603,12 @@ def test_deploy_guide_covers_the_new_pieces_with_exact_commands():
             # item 1: how the dashboard is reached, limits, fail2ban
             "--domain dash.example.com", "--local-only", "--with-fail2ban", "fail2ban-client status laqta-nginx-auth",
             "fail2ban-client set laqta-nginx-auth unbanip", "429",
-            # item 2: the outbox flush and its alert
-            "laqta-outbox-flush.timer", "journalctl -u laqta-outbox-flush -e", "DEAD", "outbox_dead_state.json",
+            # item 2: the outbox flush
+            "laqta-outbox-flush.timer", "journalctl -u laqta-outbox-flush -e", "DEAD",
             # item 3 and 4: logs, uploads
             "logrotate -d /etc/logrotate.d/laqta", "LOG_STACK=daily", "pipeline.log.1", "upload_max_filesize=20M", "post_max_size=25M",
             # item 5: memory
             "MemoryMax", "systemctl edit laqta-nightly", "LAQTA_MEMORY_MAX", "LAQTA_RAM_MB", "--lite",
-            # item 6: alerts
-            "laqta-alert@", "systemctl start laqta-alert@laqta-backup.service",
             # item 7: /healthz and the two monitors
             "/healthz", "--monitor-ip", "UptimeRobot", "Uptime Kuma", "503", "curl -s --resolve dash.example.com:443:127.0.0.1",
             # item 8: the launcher
