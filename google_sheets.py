@@ -1818,11 +1818,17 @@ def add_brand_mappings(client, sheet_name_or_url, items):
     for entry in parse_brand_mapping_rows(rows).values():
         known.update(k for k in (_brand_key(x) for x in [entry["brand"]] + list(entry["synonyms"])) if k)
     width = max(len(headers), 5)
-    if cols["official_domains"] == -1:
+    new_domains_column = cols["official_domains"] == -1
+    if new_domains_column:
         cols["official_domains"] = len(headers)
         width = max(width, len(headers) + 1)
-        if rows and any(i.get("official_domains") for i in items):
-            _retrying(worksheet.update_cell, 1, len(headers) + 1, BRANDS_SHEET_HEADERS[4])
+    # Google refuses a cell past the tab's grid («exceeds grid limits»): a tab made with only Brand / Synonyms /
+    # Competitors has 3 columns, so the domains header and the 5-column rows need the grid widened first
+    grid = getattr(worksheet, "col_count", None)
+    if rows and items and isinstance(grid, int) and grid < width:
+        _retrying(worksheet.add_cols, width - grid)
+    if new_domains_column and rows and any(i.get("official_domains") for i in items):
+        _retrying(worksheet.update_cell, 1, len(headers) + 1, BRANDS_SHEET_HEADERS[4])
     added, skipped, values, written = [], [], [], {}
     for item in items:
         brand = str(item["brand"]).strip()

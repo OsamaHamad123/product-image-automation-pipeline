@@ -152,12 +152,18 @@ def test_suggestions_cap_the_spellings_and_use_a_mapped_brand_a_name_starts_with
 class FakeSheet:
     """A Brands Mapping worksheet that records what is written to it."""
 
-    def __init__(self, rows=None):
+    def __init__(self, rows=None, col_count=26):
         self.rows = [list(HEADERS)] + [list(r) for r in (rows or [])]
         self.reads = 0
         self.appended = []
         self.cells = []
         self.title = "Brands Mapping"
+        self.col_count = col_count          # the grid, as Google Sheets enforces it (a new sheet tab has 26)
+        self.added_cols = 0
+
+    def add_cols(self, n):
+        self.col_count += n
+        self.added_cols += n
 
     def worksheet(self, title):
         assert title == "Brands Mapping"
@@ -168,10 +174,12 @@ class FakeSheet:
         return [list(r) for r in self.rows]
 
     def append_rows(self, values, value_input_option=None, **kw):
+        assert all(len(v) <= self.col_count for v in values), "exceeds grid limits"
         self.appended.append((values, value_input_option))
         self.rows.extend(values)
 
     def update_cell(self, row, col, value):
+        assert col <= self.col_count, "exceeds grid limits"
         self.cells.append((row, col, value))
 
 
@@ -260,6 +268,18 @@ def test_brand_add_follows_the_sheets_own_column_order_and_adds_a_missing_domain
     assert out["status"] == "success"
     assert bridge.sheet.cells == [(1, 3, "Official domains")]
     assert bridge.sheet.appended[0][0] == [["Mleiha", "Meliha", "meliha.ae", "", ""]]       # padded to five columns
+
+
+def test_brand_add_widens_a_three_column_brands_tab_before_writing(bridge):
+    # the owner's tab (2026-10-08): Brand, Synonyms, Competitors on a 3-column grid; Google refused D1 with
+    # «Range ('Brands Mapping'!D1) exceeds grid limits. Max rows: 100, max columns: 3»
+    bridge.sheet.rows = [["Brand", "Synonyms", "Excluded competitors"], ["Meliha", "Mleiha", "Almarai"]]
+    bridge.sheet.col_count = 3
+    out = _call(bridge, "brand_add", {"brand": "FLOWERS.AE", "synonyms": ["Flowers Dubai"], "official_domains": ["flowers.ae"]})
+    assert out["status"] == "success" and out["added"] == ["FLOWERS.AE"]
+    assert bridge.sheet.added_cols == 2                                   # five columns: a domains header and row fit
+    assert bridge.sheet.cells == [(1, 4, "Official domains")]
+    assert bridge.sheet.appended[0][0] == [["FLOWERS.AE", "Flowers Dubai", "", "flowers.ae", ""]]
 
 
 def test_brand_add_reports_a_sheet_it_could_not_write_without_details(bridge, monkeypatch):
