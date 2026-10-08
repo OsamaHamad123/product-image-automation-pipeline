@@ -107,8 +107,19 @@
         return (proxy || '/api/image-proxy') + '?url=' + encodeURIComponent(safe);
     }
 
+    // روابط lookaside عند فيسبوك وإنستغرام (/crawler/) بتعطي الصورة لبوتات محركات البحث بس، ولأي حدا تاني صفحة HTML:
+    // ما منطلبها أبداً (ولا عبر البروكسي، عالفاضي)، ومنحكي للمراجع ليش. ما منلتف على حظر الشبكات (decide.social_only_links)
+    const CRAWLER_ONLY = /^lookaside\.(fbsbx|instagram)\.com$/;
+    function crawlerOnly(url) {
+        try { return CRAWLER_ONLY.test(new URL(String(url || '')).hostname.toLowerCase()); } catch (e) { return false; }
+    }
+
     // صورة مع حالة فشل صادقة: إذا ما انعرضت تظهر جملة بدل أيقونة مكسورة
     function img(url, alt, proxy, className) {
+        if (crawlerOnly(url)) {
+            return el('span', { className: 'rv-img-missing',
+                                text: 'صورة من منشور فيسبوك أو إنستغرام: ما بتنعرض برّا التطبيق. افتح صفحة المصدر لتشوفها' });
+        }
         const src = imageUrl(url, proxy);
         if (!src) return el('span', { className: 'rv-img-missing', text: 'ما في صورة' });
         const node = el('img', { src: src, alt: alt || '', loading: 'lazy', referrerpolicy: 'no-referrer', className: className || null });

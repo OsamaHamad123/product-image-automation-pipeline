@@ -653,3 +653,27 @@ out.note = document.querySelector('.rv-reasons__note').textContent;
     # C2: still waiting for review when images remain, back to the queue only when none is left
     assert "إذا ضل له صور ثانية بيضل بانتظار مراجعتك فيها، وإلا بيرجع للطابور" in out["note"]
     assert "المنتج بيرجع للطابور؛" not in out["note"]
+
+
+# ---------------------------------------------------------------------------
+# Facebook / Instagram «crawler» links: never requested, explained, never approvable
+# ---------------------------------------------------------------------------
+
+@NEEDS_NODE
+def test_a_facebook_crawler_link_is_not_requested_and_cannot_be_approved(tmp_path):
+    # lookaside.*/crawler/ answers only search-engine bots: the page must not fetch it (not even through the proxy)
+    social = "https://lookaside.fbsbx.com/lookaside/crawler/media/?media_id=512510027658509"
+    out = page(r"""
+openRow(80);
+await flush();
+const pick = ws().querySelector('.rv-pick');
+out.note = pick.querySelector('.rv-img-missing').textContent;
+out.imgs = [...pick.querySelectorAll('img')].map(i => i.attrs.src).filter(s => s && s.includes('lookaside'));
+out.can = R.single.canApprove();
+press('Enter');
+await flush();
+out.sent = requests('/api/select_image').length;
+""", tmp_path, fixture([picked(80, "Chaliyar Rice 5kg", url=social)]), config={"row": 80})
+    assert "فيسبوك أو إنستغرام" in out["note"]
+    assert out["imgs"] == []
+    assert out["can"] is False and out["sent"] == 0
