@@ -3091,10 +3091,35 @@ def action_recut_undo(params):
     return {"status": "success", "sheet": sheet}
 
 
+# ---------------------------------------------------------------------------
+# approval_enqueue: the approval runs on the server (approval_jobs), the page follows it and can be left
+# ---------------------------------------------------------------------------
+
+def action_approval_enqueue(params):
+    """
+    Queue an approval (the same parameters action_select_image takes) and start a worker; answers at once with
+    {status: 'queued', job_id, existing}. A product (sku_key) with a queued or running approval gets that job back.
+    created_by: the dashboard user (only recorded). The job runs action_select_image itself (approval_worker.py).
+    """
+    import approval_jobs
+
+    params = dict(params or {})
+    created_by = str(params.pop("created_by", "") or "")[:100] or None
+    if not str(params.get("image_url") or "").strip() or params.get("row_number") in (None, ""):
+        return {"status": "failed", "error": "The approval needs an image and a row."}
+    try:
+        job = approval_jobs.enqueue("select", params, created_by=created_by)
+    except Exception:
+        return _failure("failed", "The approval could not be queued (database). Try again.", "approval_enqueue failed")
+    approval_jobs.start_worker()
+    return {"status": "queued", "job_id": job["job_id"], "existing": job["existing"]}
+
+
 ACTIONS = {
     'get_products': action_get_products,
     'search': action_search,
     'select_image': action_select_image,
+    'approval_enqueue': action_approval_enqueue,
     'upload_manual_image': action_upload_manual_image,
     'reject_image': action_reject_image,
     'undo_reject': action_undo_reject,

@@ -279,6 +279,29 @@
             if (link) link.textContent = view.link;
         }
 
+        // اعتمادات بتشتغل عالخادم (approval_jobs، batch-status.approvals): بتبيّن بكل صفحة، لأنه المراجع بيقدر يطلع من
+        // صفحة المراجعة وهي لسا ماشية. فشل بآخر ساعة بيضل ظاهر لحتى يعرف إنه في شي لازم ينعاد
+        function renderApprovals(a) {
+            var card = $('[data-lq-runcard]');
+            if (!card || !isObject(a)) return;
+            var line = $('[data-lq-approvals]', card);
+            if (!line) {
+                line = document.createElement('div');
+                line.className = 'lq-runcard__approvals';
+                line.setAttribute('data-lq-approvals', '');
+                line.setAttribute('aria-live', 'polite');
+                card.appendChild(line);
+            }
+            var active = toCount(a.queued) + toCount(a.running);
+            var failed = toCount(a.failed_recent);
+            var parts = [];
+            if (active) parts.push(active === 1 ? 'اعتماد واحد عم يشتغل عالخادم' : active + ' اعتمادات عم تشتغل عالخادم');
+            if (failed) parts.push(failed === 1 ? 'اعتماد فشل' : failed + ' اعتمادات فشلت');
+            line.textContent = parts.join(' · ');
+            line.classList.toggle('has-failures', failed > 0);
+            setHidden(line, !parts.length);
+        }
+
         function renderReviewCount(count) {
             if (count === null || count === undefined) return;
             var badges = document.querySelectorAll('[data-lq-review-count]');
@@ -362,6 +385,7 @@
                 })
                 .then(function (data) {
                     publish(normalizeRunStatus(data));
+                    renderApprovals(data && data.approvals);
                 })
                 .catch(function () {
                     if (!lastStatus) renderRunCard(describeRunStatus({ state: 'unknown' }));

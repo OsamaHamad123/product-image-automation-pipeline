@@ -92,6 +92,13 @@ class ApiController extends Controller
         if ($request->has('publish_anyway')) {
             $params['publish_anyway'] = $request->boolean('publish_anyway');
         }
+        // async: الاعتماد بيشتغل عالخادم (approval_jobs): الجسر بيسجّله وبيرد فوراً، والصفحة بتتابعه بـ /api/approval-jobs
+        // وبتقدر تنسكّر أو تتنقّل. نفس الحقول ونفس action_select_image، بس بعملية بالخلفية
+        if ($request->boolean('async')) {
+            $queued = $this->runPython('approval_enqueue', $params + ['created_by' => (string) (auth()->user()->name ?? '')]);
+            $ok = ($queued['status'] ?? '') === 'queued';
+            return response()->json($queued, $ok ? 202 : 500);
+        }
         $result = $this->runPython('select_image', $params);
 
         if (($result['status'] ?? '') === 'success') {
@@ -99,6 +106,61 @@ class ApiController extends Controller
             ProductController::forgetProductCaches();
         }
         return response()->json($result, ($result['status'] ?? '') === 'success' ? 200 : 500);
+    }
+
+    /**
+     * GET /api/approval-jobs?ids=1,2 : حالة اعتمادات الخادم (approval_jobs) من الجدول مباشرة، بلا بايثون (الصفحة بتسأل كل
+     * ثانية ونص). لكل اعتماد خلص: نتيجته متل ما كان select_image بيردها (result + http_status) لتسوّيه الصفحة متل قبل.
+     * ?active=1 : اعتمادات لسا بالدور أو شغّالة (لصفحة انفتحت من جديد). كاش المنتجات بينمسح مرة لكل اعتماد نجح.
+     */
+    public function approvalJobs(Request $request)
+    {
+        try {
+            $query = DB::table('approval_jobs')->select('id', 'sku_key', 'row_number', 'label', 'status', 'result_json',
+                                                         'http_status', 'cache_cleared', 'created_by', 'created_at');
+            if ($request->boolean('active')) {
+                $query->whereIn('status', ['queued', 'running'])->orderBy('id');
+            } else {
+                $ids = array_values(array_filter(array_map('intval', explode(',', (string) $request->query('ids', '')))));
+                if (!$ids) {
+                    return response()->json(['status' => 'success', 'jobs' => []]);
+                }
+                $query->whereIn('id', array_slice($ids, 0, 50));
+            }
+            $rows = $query->limit(200)->get();
+        } catch (\Throwable $e) {
+            return response()->json(['status' => 'success', 'jobs' => []]);    // ما في جدول بعد: ما في اعتمادات خادم
+        }
+        $cleared = [];
+        $jobs = [];
+        foreach ($rows as $r) {
+            $finished = in_array($r->status, ['done', 'failed'], true);
+            if ($r->status === 'done' && !(int) $r->cache_cleared) {
+                $cleared[] = (int) $r->id;
+            }
+            $jobs[] = ['id' => (int) $r->id, 'sku_key' => $r->sku_key, 'row_number' => $r->row_number !== null ? (int) $r->row_number : null,
+                       'label' => $r->label, 'status' => $r->status,
+                       'http_status' => $finished ? (int) ($r->http_status ?: 500) : null,
+                       'result' => $finished ? (json_decode((string) $r->result_json, true) ?: ['status' => 'error']) : null];
+        }
+        if ($cleared) {
+            ProductController::forgetProductCaches();
+            DB::table('approval_jobs')->whereIn('id', $cleared)->update(['cache_cleared' => 1]);
+        }
+        return response()->json(['status' => 'success', 'jobs' => $jobs])->header('Cache-Control', 'no-store');
+    }
+
+    /** عدّادات اعتمادات الخادم لكل الصفحات (batch-status): بالدور / شغّالة / فشلت بآخر ساعة. */
+    public static function approvalCounts(): array
+    {
+        try {
+            $row = DB::selectOne("SELECT SUM(status = 'queued') AS queued, SUM(status = 'running') AS running, "
+                . "SUM(status = 'failed' AND finished_at > NOW() - INTERVAL 1 HOUR) AS failed_recent FROM approval_jobs");
+        } catch (\Throwable $e) {
+            return ['queued' => 0, 'running' => 0, 'failed_recent' => 0];
+        }
+        return ['queued' => (int) ($row->queued ?? 0), 'running' => (int) ($row->running ?? 0),
+                'failed_recent' => (int) ($row->failed_recent ?? 0)];
     }
 
     /**
@@ -553,6 +615,8 @@ class ApiController extends Controller
             'state_age_s' => isset($state->lq_age_s) ? (int) $state->lq_age_s : null,
             'stuck' => QueueStats::stuckReason($phase, $process['state'], $status, $processingRows,
                 isset($state->lq_age_s) ? (int) $state->lq_age_s : null, $pauseRequested, $retryWaitS),
+            // اعتمادات بتشتغل عالخادم (approval_jobs): الشريط الجانبي بكل صفحة بيعرضها
+            'approvals' => self::approvalCounts(),
         ];
 
         return response()->json($response)->header('Cache-Control', 'no-store');
