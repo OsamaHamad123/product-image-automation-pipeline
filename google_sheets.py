@@ -87,6 +87,14 @@ META_PREFIX = "meta:"
 # فارغة يُعاد فحصها وقت التفريغ (FILL_ONLY_KEYS): باركود موجود في الشيت لا يُكتب فوقه أبداً
 BARCODE_KEY = "barcode"
 FILL_ONLY_KEYS = frozenset({BARCODE_KEY})
+# أعمدة تصنيف المتجر نفسه (Category / Sub Category / Sub Sub Category وعربيها): بتتعبى من تصنيف الاعتماد
+# (category_l1..l3) بس إذا الخلية فاضية وقت التفريغ، وقيمة حطها المالك بتضل متل ما هي بلا CONFLICT (هو اللي بيقرر)
+STORE_CATEGORY_KEYS = {
+    "category_l1_en": "category", "category_l1_ar": "category_ar",
+    "category_l2_en": "sub_category", "category_l2_ar": "sub_category_ar",
+    "category_l3_en": "sub_sub_category", "category_l3_ar": "sub_sub_category_ar",
+}
+FILL_IF_EMPTY_KEYS = frozenset(STORE_CATEGORY_KEYS.values())
 
 # أخطاء مؤقتة تُعاد محاولتها: تجاوز الحصة وأخطاء الخادم
 _TRANSIENT_CODES = (429, 500, 502, 503, 504)
@@ -133,7 +141,9 @@ COLUMN_SYNONYMS = {
                 "اسم المنتج بالعربي", "اسم المنتج عربي"],
     "brand_ar": ["brand arabic", "brand ar", "البراند بالعربي", "البراند عربي"],
     "category": ["category", "الفئة", "التصنيف"],
+    "category_ar": ["category arabic"],
     "sub_category": ["sub category", "subcategory"],
+    "sub_category_ar": ["sub category arabic"],
     "sub_sub_category": ["sub sub category"],
     "sub_sub_category_ar": ["sub sub category arabic"],
     "origin": ["origin", "بلد المنشأ", "المنشأ"],
@@ -1176,14 +1186,14 @@ class GoogleSheetsBatchWorker(threading.Thread):
 
         # 6. عمود يُملأ فقط (الباركود): خلية الهدف تُقرأ الآن، وأي قيمة فيها لا يُكتب فوقها (CONFLICT). نفس القيمة
         #    مكتوبة أصلاً: SYNCED بلا إرسال
-        fill = [(r, col) for r, col in ready if r.get("col_key") in FILL_ONLY_KEYS]
+        fill = [(r, col) for r, col in ready if r.get("col_key") in FILL_ONLY_KEYS | FILL_IF_EMPTY_KEYS]
         if fill:
             held = _read_cells(worksheet, [(r["row_number"], col) for r, col in fill])
             already = []
             for r, col in fill:
                 current = held.get((r["row_number"], col), "")
-                if current and current == str(r["value"]).strip():
-                    already.append(r["id"])
+                if current and (current == str(r["value"]).strip() or r.get("col_key") in FILL_IF_EMPTY_KEYS):
+                    already.append(r["id"])           # نفس القيمة، أو تصنيف حطه المالك: ما في شي ينكتب ولا تعارض
                 elif current:
                     conflicts[r["id"]] = (f"cell_not_empty: the {r['col_key']} cell of row {r['row_number']} already "
                                           f"holds {current[:60]!r}; not overwritten")
@@ -1635,16 +1645,24 @@ def update_product_metadata(worksheet, row_number, metadata, barcode=None, produ
             col_indices[key] = new_idx
             logger.info("تم إنشاء عمود '%s' في العمود رقم %s", name, new_idx + 1)
         _worksheet_headers(worksheet, fresh=True)
-        if not col_indices:
+        # أعمدة تصنيف المتجر الموجودة أصلاً بالشيت (ما بننشئها): بتتعبى بس إذا فاضية (FILL_IF_EMPTY_KEYS)
+        store_cols = resolve_columns(headers)
+        store = {STORE_CATEGORY_KEYS[k]: (store_cols[STORE_CATEGORY_KEYS[k]], str(metadata[k]))
+                 for k in STORE_CATEGORY_KEYS if (metadata or {}).get(k) and store_cols.get(STORE_CATEGORY_KEYS[k], -1) >= 0}
+        if not col_indices and not store:
             return True
 
-        if _redis_write_behind(row_number, {f"{META_PREFIX}{k}": str(metadata[k]) for k in col_indices}, expect):
+        writes = {f"{META_PREFIX}{k}": str(metadata[k]) for k in col_indices}
+        writes.update({key: value for key, (_col, value) in store.items()})
+        if _redis_write_behind(row_number, writes, expect):
             return True
 
         if _queue is not None and _worker is not None:
             for key, col in col_indices.items():
                 _queue.append_update(row_number, col, str(metadata[key]), col_name=headers[col],
                                      col_key=f"{META_PREFIX}{key}", **_outbox_keys(expect))
+            for key, (col, value) in store.items():
+                _queue.append_update(row_number, col, value, col_name=headers[col], col_key=key, **_outbox_keys(expect))
             return True
 
         if expect:
@@ -1653,10 +1671,14 @@ def update_product_metadata(worksheet, row_number, metadata, barcode=None, produ
                 logger.warning("[Google Sheets] رفض كتابة البيانات الوصفية في الصف %s: %s",
                                row_number, conflicts[row_number])
                 return False
-        worksheet.batch_update([
-            {"range": gspread.utils.rowcol_to_a1(row_number, col + 1), "values": [[str(metadata[key])]]}
-            for key, col in col_indices.items()
-        ], value_input_option="RAW")
+        data = [{"range": gspread.utils.rowcol_to_a1(row_number, col + 1), "values": [[str(metadata[key])]]}
+                for key, col in col_indices.items()]
+        if store:
+            held = _read_cells(worksheet, [(row_number, col) for col, _value in store.values()])
+            data += [{"range": gspread.utils.rowcol_to_a1(row_number, col + 1), "values": [[value]]}
+                     for col, value in store.values() if not held.get((row_number, col), "")]
+        if data:
+            worksheet.batch_update(data, value_input_option="RAW")
         return True
     except Exception as e:
         if _is_api_error(e) or _is_transient(e):

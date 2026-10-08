@@ -280,3 +280,59 @@ def test_the_nightly_enqueue_rekeys_a_finished_row_that_got_a_barcode(world):
     assert stats["rekey"] == [(7, old_key, "0" + GTIN_D, GTIN_D)]
     assert db.rekey_queue_rows(stats["rekey"]) == 1 and db.rekey_queue_rows(stats["rekey"]) == 0
     assert db.get_task_by_row(7)["alt_sku_key"] == old_key
+
+
+# ---------------------------------------------------------------------------
+# The store's own category columns: filled from the approval's category, only when empty (owner decision 2026-10-08)
+# ---------------------------------------------------------------------------
+
+CAT_HEAD = ["Barcode", "Product Name", "Brand", "Size", "Category", "Category Arabic", "Sub Category",
+            "Sub Category Arabic", "Sub Sub Category", "Sub Sub Category Arabic", "Drive Image Link"]
+
+
+def test_the_flush_fills_an_empty_store_category_and_keeps_the_owners_value_without_a_conflict(gs, fake_connection):
+    ws = FakeWorksheet([CAT_HEAD, ["", "Fresh Milk", "Almarai", "1L", "", "", "", "", "", "", ""],
+                        ["", "Laban", "Almarai", "1L", "Dairy (owner)", "", "", "", "", "", ""]])
+    pending = [_outbox_row(1, 2, "Eggs & Dairy", name="Fresh Milk", size="1L", brand="Almarai", col_key="category"),
+               _outbox_row(2, 2, "حليب", name="Fresh Milk", size="1L", brand="Almarai", col_key="sub_category_ar"),
+               _outbox_row(3, 3, "Eggs & Dairy", name="Laban", size="1L", brand="Almarai", col_key="category")]
+    status = _final_status(_flush(gs, ws, pending, fake_connection))
+    assert status == {1: "SYNCED", 2: "SYNCED", 3: "SYNCED"}                    # 3: the owner's value stays, no conflict
+    assert sorted(d["range"] for body in ws.sent_bodies for d in body["data"]) == ["'Products'!E2", "'Products'!H2"]
+
+
+def test_approval_metadata_queues_the_store_category_columns_that_exist(gs, monkeypatch):
+    ws = FakeWorksheet([CAT_HEAD, ["", "Fresh Milk", "Almarai", "1L", "", "", "", "", "", "", ""]])
+    queued = []
+
+    class Queue:
+        def append_update(self, row, col, value, col_name=None, col_key=None, **_identity):
+            queued.append((col_key, col_name, value))
+
+    monkeypatch.setattr(gs, "_queue", Queue())
+    monkeypatch.setattr(gs, "_worker", object())
+    monkeypatch.setattr(gs, "_redis_write_behind", lambda *a, **k: False)
+    meta = {"category_l1_en": "Eggs & Dairy", "category_l1_ar": "الألبان والبيض", "category_l2_en": "milk",
+            "category_l2_ar": "حليب", "category_l3_en": "Fresh", "category_l3_ar": "طازج"}
+    assert gs.update_product_metadata(ws, 2, meta, product_name="Fresh Milk", size="1L", brand="Almarai")
+    store = {k: (n, v) for k, n, v in queued if not k.startswith(gs.META_PREFIX)}
+    assert store == {"category": ("Category", "Eggs & Dairy"), "category_ar": ("Category Arabic", "الألبان والبيض"),
+                     "sub_category": ("Sub Category", "milk"), "sub_category_ar": ("Sub Category Arabic", "حليب"),
+                     "sub_sub_category": ("Sub Sub Category", "Fresh"),
+                     "sub_sub_category_ar": ("Sub Sub Category Arabic", "طازج")}
+
+
+def test_a_sheet_without_store_category_columns_gets_none_added(gs, monkeypatch):
+    ws = FakeWorksheet([HEAD, ["", "Fresh Milk", "Almarai", "1L", ""]])
+    queued = []
+
+    class Queue:
+        def append_update(self, row, col, value, col_name=None, col_key=None, **_identity):
+            queued.append(col_key)
+
+    monkeypatch.setattr(gs, "_queue", Queue())
+    monkeypatch.setattr(gs, "_worker", object())
+    monkeypatch.setattr(gs, "_redis_write_behind", lambda *a, **k: False)
+    assert gs.update_product_metadata(ws, 2, {"category_l1_en": "Eggs & Dairy"}, product_name="Fresh Milk")
+    assert all(k.startswith(gs.META_PREFIX) for k in queued)                    # only «Category L1 EN» (created)
+    assert "Category" not in ws.row_values(1)                                   # the store column is never created
