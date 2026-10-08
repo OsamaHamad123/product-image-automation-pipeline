@@ -677,3 +677,60 @@ out.sent = requests('/api/select_image').length;
     assert "فيسبوك أو إنستغرام" in out["note"]
     assert out["imgs"] == []
     assert out["can"] is False and out["sent"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Approvals on the server (approval_jobs): queued at once, the page can be left, the result settles as before
+# ---------------------------------------------------------------------------
+
+@NEEDS_NODE
+def test_an_approval_queued_on_the_server_frees_the_page_and_settles_when_the_job_finishes(tmp_path):
+    out = page(r"""
+openRow(70);
+await flush();
+press('Enter');
+await flush();
+const sel = requests('/api/select_image')[0];
+out.async = sel.body.async;
+out.busyBefore = S().jobs.busy();
+answer(sel, { status: 'queued', job_id: 7, existing: false }, 202);
+await flush();
+out.busyAfter = S().jobs.busy();                              // beforeunload no longer asks: the server has it
+out.text = document.querySelector('.rv-jobs__text') ? document.querySelector('.rv-jobs__text').textContent : '';
+approvalJobs = { status: 'success', jobs: [{ id: 7, status: 'running', http_status: null, result: null }] };
+await sleep(40);
+await flush();
+out.stillRunning = S().local.get(itemOf(70).key);
+approvalJobs = url => ({ status: 'success', jobs: url.includes('ids=7') ? [{ id: 7, status: 'done', http_status: 200,
+    result: { status: 'success', image_link: 'https://res.cloudinary.com/demo/70.png', isolated: true, rows_written: [70] } }] : [] });
+await sleep(60);
+await flush();
+out.settled = S().local.get(itemOf(70).key);
+out.polls = requests('/api/approval-jobs').filter(c => c.url.includes('ids=7')).length;
+""", tmp_path, fixture([picked(70, "Almarai Milk 1L"), picked(71, "Almarai Laban 1L")]),
+               config={"row": 70, "approvalPollMs": 10})
+    assert out["async"] == 1
+    assert out["busyBefore"] is True and out["busyAfter"] is False
+    assert "فيك تتنقّل أو تسكّر الصفحة" in out["text"]
+    assert out["stillRunning"] == "approving"
+    assert out["settled"] == "approved" and out["polls"] >= 2
+
+
+@NEEDS_NODE
+def test_a_page_opened_again_shows_the_server_s_running_approvals_as_approving(tmp_path):
+    out = page(r"""
+openRow(71);
+await flush();
+out.before = S().local.get(itemOf(70).key) || null;
+approvalJobs = { status: 'success', jobs: [{ id: 9, sku_key: 'key-70', row_number: 70, label: 'Almarai Milk 1L', status: 'running' }] };
+await R.loadData({ quiet: true });
+await flush();
+out.during = S().local.get(itemOf(70).key) || null;
+approvalJobs = { status: 'success', jobs: [] };
+await sleep(3200);
+await flush();
+out.after = S().local.get(itemOf(70).key) || null;
+""", tmp_path, fixture([picked(70, "Almarai Milk 1L"), picked(71, "Almarai Laban 1L")]), config={"row": 71})
+    assert out["before"] is None
+    assert out["during"] == "approving"                         # not offered for a second approval meanwhile
+    assert out["after"] is None

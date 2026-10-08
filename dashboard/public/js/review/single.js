@@ -426,8 +426,24 @@
         return text.length * 3;
     }
 
+    // اعتماد عالخادم (approval_jobs): الصفحة بتسأل عن نتيجته كل approvalPollMs لحد ما يخلص، والنتيجة نفسها اللي كان
+    // select_image بيردها ({ok, status, data}) فبيتسوّى متل قبل. انقطاع الشبكة بالنص ما بيوقفه: بيضل يسأل، والاعتماد ماشي
+    async function followApproval(id) {
+        const S = st();
+        for (;;) {
+            await new Promise(resolve => root.setTimeout(resolve, (S.cfg && S.cfg.approvalPollMs) || 1500));
+            const res = await R.requestJson(`${S.urls.approvalJobs}?ids=${encodeURIComponent(id)}`);
+            const jobs = res.ok && res.data && Array.isArray(res.data.jobs) ? res.data.jobs : [];
+            const found = jobs.find(j => Number(j.id) === Number(id));
+            if (found && (found.status === 'done' || found.status === 'failed')) {
+                const status = Number(found.http_status) || 500;
+                return { ok: status >= 200 && status < 300, status: status, data: found.result || {} };
+            }
+        }
+    }
+
     // opts.keepalive: الصفحة عم تختفي، والمتصفح بيكمّل الطلب ولو انسكّرت (jobs.js flush)
-    function sendJob(job, opts) {
+    async function sendJob(job, opts) {
         const S = st();
         const keepalive = !!(opts && opts.keepalive);
         if (job.type === 'upload') {
@@ -441,8 +457,17 @@
             if (job.publishAnyway) form.append('publish_anyway', '1');
             return R.requestJson(S.urls.upload, { method: 'POST', body: form });
         }
-        return R.requestJson(job.type === 'reject' ? S.urls.reject : S.urls.select,
-                             { method: 'POST', body: jobPayload(job), keepalive: keepalive });
+        if (job.type === 'reject') {
+            return R.requestJson(S.urls.reject, { method: 'POST', body: jobPayload(job), keepalive: keepalive });
+        }
+        // الاعتماد بيتسجّل عالخادم (202 + job_id) وبيشتغل هناك: من هون الصفحة بتنسكّر أو بتتنقّل وما بيضيع شي.
+        // خادم أقدم بيرد النتيجة مباشرة (200): بتتسوّى متل قبل
+        const res = await R.requestJson(S.urls.select, { method: 'POST', body: Object.assign(jobPayload(job), { async: 1 }),
+                                                         keepalive: keepalive });
+        if (keepalive || res.status !== 202 || !res.data || !res.data.job_id) return res;
+        job.serverJob = res.data.job_id;
+        if (S.jobs && typeof S.jobs.accept === 'function') S.jobs.accept(job);
+        return followApproval(res.data.job_id);
     }
 
     // استبدال صورة معتمدة تغيّرت بعد فتح الصفحة (C1): تأكيد صريح يعرض الصورة المعتمدة الآن (ولمن اعتُمدت) بجانب صورة

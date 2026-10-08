@@ -52,6 +52,8 @@ Route::get('/api/system/eval-export/{file}', [\App\Http\Controllers\HealthContro
 // جسر بايثون (cli_bridge.py مباشرة، بدون خادم FastAPI)
 Route::post('/api/search', [ApiController::class, 'search']);
 Route::post('/api/select_image', [ApiController::class, 'selectImage']);
+// اعتمادات بتشتغل عالخادم (select_image مع async=1): حالتها من جدول approval_jobs
+Route::get('/api/approval-jobs', [ApiController::class, 'approvalJobs']);
 Route::post('/api/reject_image', [ApiController::class, 'rejectImage']);
 Route::post('/api/upload_manual_image', [ApiController::class, 'uploadManualImage']);
 Route::get('/api/image-proxy', [ApiController::class, 'imageProxy']);

@@ -65,8 +65,19 @@
         }
 
         // شي لسا ما خلص: محجوز للتراجع، أو بالدور، أو عم ينبعت
+        // اعتماد قبله الخادم (approval_jobs) بيكمّل ولو انسكّرت الصفحة: ما بيمنع الطلوع منها
         function busy() {
-            return jobs.some(j => j.state === 'held' || sentOrQueued(j));
+            return jobs.some(j => j.state === 'held' || (sentOrQueued(j) && !j.accepted));
+        }
+
+        // الخادم سجّل الاعتماد (single.sendJob): بيضل «جاري» بالصفحة لحد ما توصل نتيجته، بس صار آمن تطلع
+        // وبيفضّي مكانه بالدور: الاعتماد الجاي بينبعت فوراً (الخادم بيرتّبهم وبيحمي كل منتج بقفل نشره)
+        function accept(job) {
+            if (!job || job.accepted) return;
+            job.accepted = true;
+            running.delete(job);
+            notify();
+            pump();
         }
 
         function errorOf(result, job) {
@@ -292,12 +303,14 @@
                 settled: count('done') + count('failed'),
                 failedAll: shown.filter(j => j.state === 'failed').length,
                 busy: shown.some(sentOrQueued),
+                // جاري عالخادم: الصفحة بتستنى نتيجته بس صار آمن تسكّرها
+                onServer: shown.filter(j => j.state === 'running' && j.accepted).length,
                 held: Array.from(groups.values()).sort((a, b) => a.group - b.group),
                 heldCount: jobs.filter(j => j.state === 'held').length
             };
         }
 
-        return { enqueue, enqueueMany, release, cancel, flush, retry, dismiss, state, busy, activeFor,
+        return { enqueue, enqueueMany, release, cancel, flush, retry, dismiss, state, busy, accept, activeFor,
                  has: key => !!activeFor(key), sending: () => jobs.some(sentOrQueued) };
     }
 

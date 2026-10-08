@@ -441,6 +441,17 @@ html:has(.lq-body) {
     flex-grow: 1;
 }
 
+/* Approvals running on the server (batch-status.approvals) */
+.lq-runcard__approvals {
+    margin-top: 8px;
+    font-size: 0.8rem;
+    color: var(--lq-ink-fg);
+}
+
+.lq-runcard__approvals.has-failures {
+    color: var(--lq-warning-dot);
+}
+
 /* Signed-in user + sign-out (sidebar foot) */
 .lq-sidebar__user {
     display: flex;

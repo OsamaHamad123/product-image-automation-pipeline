@@ -358,11 +358,14 @@ globalThis.fetch = (url, init = {}) => {
         else if (path === '/api/system/review-lanes') data = FIXTURE.lanes || { status: 'success' };
         else if (path === '/api/review/explain-backfill') data = FIXTURE.backfill || { status: 'success', filled: 0, checked: 0 };
         else if (path === '/api/settings/bg-method') data = FIXTURE.bgMethod || { status: 'success', method: (call.body || {}).method, previous: 'photoroom' };
+        // اعتمادات عالخادم: الاختبار بيحط الجواب بـ approvalJobs (دالة للـ url أو قيمة)، وإلا ما في اعتمادات
+        else if (path === '/api/approval-jobs') data = typeof approvalJobs === 'function' ? approvalJobs(call.url) : (approvalJobs || { status: 'success', jobs: [] });
         call.resolve(response(data, FIXTURE.status && FIXTURE.status[path] || 200));
     }
     return call.promise;
 };
 const answer = (call, data, status = 200) => call.resolve(response(data, status));
+let approvalJobs = null;
 const flush = async () => { for (let i = 0; i < 30; i++) await new Promise(r => setImmediate(r)); };
 // Timers run for real while the scenario runs. Once it has printed `out`, finishTimers() fires the ones still pending
 // at once, in due order: the page's 6 s auto-hide of the approvals panel used to keep node alive 6 s after every such

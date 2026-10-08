@@ -20,6 +20,7 @@
         select: '/api/select_image',
         reject: '/api/reject_image',
         upload: '/api/upload_manual_image',
+        approvalJobs: '/api/approval-jobs',
         saveCandidates: '/api/v1/curation/save-candidates',
         selectCandidate: '/api/v1/curation/select-candidate',
         retry: '/api/failures/retry',
@@ -329,6 +330,40 @@
             chooseInitial();
         }
         renderAll();
+        syncServerApprovals();
+    }
+
+    // اعتمادات لسا عم تشتغل عالخادم من صفحة قبل (انسكّرت أو انتقل منها المراجع): منتجاتها «جاري الاعتماد» هون كمان،
+    // فما بترجع لقائمة الانتظار ولا بتنعتمد مرتين، ولما تخلص بتنقرا القائمة من جديد بهدوء
+    const SERVER_APPROVALS_POLL_MS = 3000;
+    let serverPoll = null;
+    async function syncServerApprovals() {
+        if (!S.urls.approvalJobs || serverPoll) return;
+        const res = await R.requestJson(`${S.urls.approvalJobs}?active=1`);
+        if (!res.ok || !res.data || !Array.isArray(res.data.jobs)) return;
+        S.serverOwned = S.serverOwned || new Set();
+        const active = new Set(res.data.jobs.map(j => R.itemKey({ row_number: j.row_number, product_name: j.label || '' })));
+        let changed = false;
+        active.forEach(key => {
+            if (!S.local.get(key) && !(S.jobs && S.jobs.has(key))) {
+                S.local.set(key, 'approving');
+                S.serverOwned.add(key);
+                changed = true;
+            }
+        });
+        let finished = false;
+        Array.from(S.serverOwned).forEach(key => {
+            if (!active.has(key)) {
+                S.serverOwned.delete(key);
+                if (S.local.get(key) === 'approving') S.local.delete(key);
+                finished = true;
+            }
+        });
+        if (changed) { rebuild(); renderAll(); }
+        if (S.serverOwned.size) {
+            serverPoll = root.setTimeout(() => { serverPoll = null; syncServerApprovals(); }, SERVER_APPROVALS_POLL_MS);
+        }
+        if (finished) loadData({ quiet: true });
     }
 
     // صفوف حُفظت قبل أن يحسب العامل سبب «بلا اقتراح» (queue-state: explain_missing): يُطلب حسابه مرة في الجلسة مما
@@ -869,7 +904,10 @@
             box.appendChild(el('div', { className: 'rv-jobs__head' }, [
                 el('span', { className: 'lq-spinner', 'aria-hidden': 'true' }),
                 el('span', { className: 'rv-jobs__text' }, [
-                    `${what} · `, el('strong', { text: `${st.settled} من ${n}` }), ' جاهزة. بتقدر تكمل شغلك.',
+                    `${what} · `, el('strong', { text: `${st.settled} من ${n}` }),
+                    // كلها عالخادم: الطلوع من الصفحة ما بيوقفها (approval_jobs)
+                    st.onServer && st.onServer >= n - st.settled ? ' جاهزة. عم تنعتمد عالخادم: فيك تتنقّل أو تسكّر الصفحة.'
+                        : ' جاهزة. بتقدر تكمل شغلك.',
                     st.failed ? el('span', { className: 'rv-jobs__bad', text: ` · ${st.failed} فشلت` }) : null
                 ])
             ]));
@@ -1640,6 +1678,8 @@
         S.cfg.canvas = parseInt(cfg.canvas, 10) || 800;
         // الاعتماد بيستنى هالمدة قبل ما ينبعت، و«تراجع» بيرجّعه (0 = بينبعت فوراً)
         S.cfg.approveUndoMs = cfg.approveUndoMs === undefined ? 8000 : Math.max(0, parseInt(cfg.approveUndoMs, 10) || 0);
+        // كل قديش بتسأل الصفحة عن اعتماد عالخادم (approval_jobs)
+        S.cfg.approvalPollMs = cfg.approvalPollMs === undefined ? 1500 : Math.max(10, parseInt(cfg.approvalPollMs, 10) || 1500);
         S.cfg.autoSearchDelayMs = cfg.autoSearchDelayMs === undefined ? 700 : Math.max(0, parseInt(cfg.autoSearchDelayMs, 10) || 0);
         // الاعتماد بعد ظهور الصورة بهذه المدة على الأقل (ضغطة ثانية سريعة بعد الاعتماد لا تعتمد المنتج التالي قبل رؤيته)
         S.cfg.approveSettleMs = cfg.approveSettleMs === undefined ? 400 : Math.max(0, parseInt(cfg.approveSettleMs, 10) || 0);

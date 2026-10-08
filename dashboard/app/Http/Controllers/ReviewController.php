@@ -92,6 +92,7 @@ class ReviewController extends Controller
                 'select' => url('/api/select_image'),
                 'reject' => url('/api/reject_image'),
                 'upload' => url('/api/upload_manual_image'),
+                'approvalJobs' => url('/api/approval-jobs'),
                 'saveCandidates' => url('/api/v1/curation/save-candidates'),
                 'selectCandidate' => url('/api/v1/curation/select-candidate'),
                 'retry' => url('/api/failures/retry'),
