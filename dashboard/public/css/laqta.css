@@ -437,6 +437,38 @@ html:has(.lq-body) {
     display: none;
 }
 
+/* The tab bar's «حسابي» and the run dot (980px and below); the sidebar has the user row and the run card instead */
+.lq-body .lq-nav__account,
+.lq-nav__dot,
+.lq-account-sheet {
+    display: none;
+}
+
+.lq-nav__account {
+    border: 0;
+    background: transparent;
+    font-family: inherit;
+    cursor: pointer;
+}
+
+.lq-nav__dot {
+    position: absolute;
+    inset-block-start: 8px;
+    inset-inline-start: calc(50% + 8px);
+    width: 9px;
+    height: 9px;
+    border: 2px solid var(--lq-ink-900);
+    border-radius: 50%;
+    background: var(--lq-ink-muted);
+    box-sizing: content-box;
+}
+
+.lq-nav__dot[data-state="running"] { background: var(--lq-running-dot); }
+.lq-nav__dot[data-state="paused"],
+.lq-nav__dot[data-state="stopping"] { background: var(--lq-saffron-500); }
+.lq-nav__dot[data-state="error"],
+.lq-nav__dot[data-state="stuck"] { background: var(--lq-danger-dot); }
+
 .lq-sidebar__spacer {
     flex-grow: 1;
 }
@@ -1919,6 +1951,22 @@ a.lq-btn[aria-disabled="true"] {
     color: var(--lq-text);
 }
 
+.lq-toast__action {
+    flex-shrink: 0;
+    padding: 4px 10px;
+    border: 1px solid var(--lq-border);
+    border-radius: var(--lq-radius-sm);
+    background: var(--lq-surface);
+    color: var(--lq-text);
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.lq-toast__action:hover {
+    background: var(--lq-bg);
+}
+
 .lq-toast--success .lq-toast__icon { color: var(--lq-success); }
 .lq-toast--warning .lq-toast__icon { color: var(--lq-warning); }
 .lq-toast--danger { border-color: var(--lq-danger-border); }
@@ -2195,6 +2243,54 @@ a.lq-btn[aria-disabled="true"] {
         inset-inline-start: calc(50% + 6px);
         min-width: 20px;
         padding: 0 5px;
+    }
+
+    .lq-body .lq-nav__account {
+        display: flex;
+    }
+
+    .lq-body .lq-nav__account[aria-expanded="true"] {
+        color: var(--lq-running-on-dark);
+    }
+
+    /* the run dot: what the sidebar card says, for the owner (loading / unknown: no dot) */
+    .lq-nav__dot:not([data-state="loading"]):not([data-state="unknown"]) {
+        display: block;
+    }
+
+    /* «حسابي»: a small card above the tab bar, on the side of its button */
+    .lq-account-sheet:not([hidden]) {
+        position: fixed;
+        inset-inline-end: var(--lq-space-3);
+        inset-block-end: calc(var(--lq-tabbar-h) + var(--lq-space-2));
+        z-index: 61;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        width: min(280px, calc(100vw - 24px));
+        padding: var(--lq-space-4);
+        border: 1px solid var(--lq-border);
+        border-radius: var(--lq-radius-lg);
+        background: var(--lq-surface);
+        box-shadow: var(--lq-shadow-toast);
+    }
+
+    .lq-account-sheet__label,
+    .lq-account-sheet__role {
+        color: var(--lq-text-2);
+        font-size: var(--lq-fs-sm);
+    }
+
+    .lq-account-sheet__name {
+        overflow: hidden;
+        font-weight: 600;
+        text-align: start;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .lq-account-sheet__logout {
+        margin-top: var(--lq-space-2);
     }
 
     .lq-main {

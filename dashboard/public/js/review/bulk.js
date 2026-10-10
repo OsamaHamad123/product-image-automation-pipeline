@@ -423,6 +423,7 @@
             if (B.inView.has(k)) markSeen(k);
         });
         node.addEventListener('error', () => {
+            if (R.imgRetrying(node)) return;          // R.img عم يعيد طلبها: لسا عم تتحمّل
             B.failed.add(k);
             B.loaded.delete(k);
             B.seen.delete(k);
@@ -800,7 +801,7 @@
             // انحسبت من جديد بعد السؤال: بطاقة صارت مش قابلة للاعتماد وقت السؤال بتنترك
             const done = enqueueApprovals(list.filter(it => S.byKey.get(it.key) && ticked(it) && eligibleNow(it) && seenNow(it)));
             R.rebuild();
-            R.renderList();
+            R.patchList(list.map(it => it.key));
             render();
             return done > 0;
         });
@@ -818,7 +819,7 @@
             if (!approvable(now) || S.jobs.has(key)) return false;
             const n = enqueueApprovals([now]);
             R.rebuild();
-            R.renderList();
+            R.patchList([key]);
             render();
             return n > 0;
         };
@@ -840,11 +841,37 @@
         return Math.max(1, n);
     }
 
+    // التنقل والتحديد ما بيغيّروا البيانات: البطاقات المرسومة بتضل نفسها (صورها ما بتنطلب من جديد)، والحالة بتتغيّر
+    // بمكانها (paintFocus، refreshCards). render() الكامل للبيانات والفلتر والماركة
     function focusCard(key) {
         const B = st().bulk;
         B.focus = key;
         B.focusDom = true;
-        render();
+        paintFocus();
+    }
+
+    // البطاقة المركّزة (is-focused، aria-current)، وتركيز المتصفح عليها لما B.focusDom
+    function paintFocus() {
+        const S = st();
+        const B = S.bulk;
+        const d = S.dom;
+        if (!d.bulkGrid) return;
+        let target = null;
+        d.bulkGrid.querySelectorAll('.rv-card').forEach(node => {
+            const on = !!B.focus && node.getAttribute('data-key') === B.focus;
+            node.classList.toggle('is-focused', on);
+            if (on) {
+                node.setAttribute('aria-current', 'true');
+                target = node;
+            } else {
+                node.removeAttribute('aria-current');
+            }
+        });
+        if (B.focusDom && target) {
+            if (typeof target.focus === 'function') target.focus();
+            if (typeof target.scrollIntoView === 'function') target.scrollIntoView({ block: 'nearest' });
+        }
+        B.focusDom = false;
     }
 
     // البطاقة التالية بعد المركّزة التي لم تُعتمد أو تُرفض بعد (مثل «بعد الاعتماد ننتقل للمنتج التالي»)
@@ -880,7 +907,8 @@
                 else toggleTick(it, !ticked(it));
                 B.anchor = it.key;
                 B.focusDom = true;
-                render();
+                refreshCards();
+                paintFocus();
             }
             return true;
         }
@@ -943,8 +971,12 @@
         }
         const approve = t.closest('[data-approve]');
         if (approve && !approve.disabled) {
+            // اعتماد انبعت: approveOne رسم الشبكة؛ ما انبعت: الأزرار والتركيز بس
             const res = approveOne(approve.getAttribute('data-approve'));
-            if (!(res && typeof res.then === 'function')) render();
+            if (res === false) {
+                refreshCards();
+                paintFocus();
+            }
             return;
         }
         const open = t.closest('[data-open]');
@@ -953,8 +985,8 @@
             R.setMode('single', { key: open.getAttribute('data-open') });
             return;
         }
-        // مربع التحديد يرسم الشبكة في change؛ نقرة على البطاقة نفسها تُظهر تركيزها
-        if (moved && !t.closest('[data-select]') && !t.closest('label')) render();
+        // مربع التحديد يحدّث البطاقة في change؛ نقرة على البطاقة نفسها تُظهر تركيزها
+        if (moved && !t.closest('[data-select]') && !t.closest('label')) paintFocus();
     }
 
     function onGridChange(e) {
@@ -967,14 +999,16 @@
         const it = S.byKey.get(key);
         if (!it || !selectable(it)) {
             t.checked = false;
-            render();
+            refreshCards();
+            paintFocus();
             return;
         }
         if (shiftClick && B.anchor && B.anchor !== key) tickRange(B.anchor, key, !!t.checked);
         else toggleTick(it, !!t.checked);
         shiftClick = false;
         B.anchor = key;
-        render();
+        refreshCards();
+        paintFocus();
     }
 
     // التكبير على البطاقات: صور البطاقات المرسومة بالترتيب، ← → بينها، وجنبها صورة الشيت الحالية لكل بطاقة
@@ -1107,7 +1141,7 @@
         });
         noteReviewed(keys);
         R.rebuild();
-        R.renderList();
+        R.patchList(keys);
         render();
     }
 

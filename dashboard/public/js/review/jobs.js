@@ -1,5 +1,5 @@
 /*
- * لقطة · المراجعة — background queue for approvals (and bulk rejections).
+ * لقطة · المراجعة — background queue for approvals and rejections (bulk ones, and single-mode ones without a new search).
  *
  * The reviewer keeps working while approvals run: each approve / upload / bulk reject becomes a job, and the queue
  * sends at most `concurrency` requests at a time (2 for approvals: the server serialises each product under its own
@@ -273,6 +273,15 @@
             return true;
         }
 
+        // طلب خلص أو فشل بينشال من اللوحة لحاله (رفض انضغط «تراجع» عليه وفشل: ما في شي يتراجع عنه)
+        function drop(id) {
+            const i = jobs.findIndex(j => j.id === id && (j.state === 'done' || j.state === 'failed'));
+            if (i < 0) return false;
+            jobs.splice(i, 1);
+            notify();
+            return true;
+        }
+
         function dismiss() {
             for (let i = jobs.length - 1; i >= 0; i--) {
                 if (jobs[i].state === 'done' || jobs[i].state === 'failed') jobs.splice(i, 1);
@@ -310,7 +319,7 @@
             };
         }
 
-        return { enqueue, enqueueMany, release, cancel, flush, retry, dismiss, state, busy, accept, activeFor,
+        return { enqueue, enqueueMany, release, cancel, flush, retry, drop, dismiss, state, busy, accept, activeFor,
                  has: key => !!activeFor(key), sending: () => jobs.some(sentOrQueued) };
     }
 

@@ -307,6 +307,10 @@
                 <p class="lq-health__footnote" data-health="eval-export-status" role="status" aria-live="polite" dir="auto"></p>
                 <x-lq.button variant="secondary" size="sm" icon="upload" data-health="eval-export"><span data-health="eval-export-label">صدّر مجموعة اختبار</span></x-lq.button>
             </div>
+            <details class="lq-health-service__details" data-health="eval-export-details" hidden>
+                <summary>التفاصيل التقنية</summary>
+                <p dir="ltr" data-health="eval-export-detail"></p>
+            </details>
             <a class="lq-link" data-health="eval-export-link" href="#" download hidden>نزّل الملف</a>
     </section>
 

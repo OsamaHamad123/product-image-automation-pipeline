@@ -21,7 +21,7 @@
     $laneOnText = 'الاقتراحات اللي بتعدّي كل قواعد النشر الآلي (قارئ الملصق أكّده، متجر موثوق، بلا أي تعارض) لأي ماركة مربوطة رح تنرفع وتنكتب بالشيت بدون مراجعتك، حتى لو الماركة مش مفعّلة بالجدول، بس بعد ما تثبت دقة هالفئة بمراجعاتك. لحد هداك الوقت كل شي بيستنى مراجعتك.';
     $laneOffText = 'كل الاقتراحات المؤكدة رح ترجع تستنى مراجعتك. بس الماركات المفعّلة بالجدول بتضل تنرفع بدون مراجعة.';
 @endphp
-<section class="lq-card lq-settings-card" aria-labelledby="lq-settings-ap-title">
+<section id="lq-settings-auto-publish" class="lq-card lq-settings-card" aria-labelledby="lq-settings-ap-title">
     <div class="lq-autopub__head">
         <div class="lq-settings-card__head">
             <h2 class="lq-section-title" id="lq-settings-ap-title">النشر الآلي</h2>
@@ -107,7 +107,7 @@
     <p class="lq-autopub__criterion">{{ $ap['criterion'] }}</p>
 </section>
 
-<section class="lq-card lq-settings-card" aria-label="النشر الآلي لكل الماركات المؤكدة" data-autopub-lane>
+<section id="lq-settings-strict-lane" class="lq-card lq-settings-card" aria-label="النشر الآلي لكل الماركات المؤكدة" data-autopub-lane>
     <div class="lq-autopub__head">
         <div class="lq-settings-card__head">
             <h2 class="lq-section-title">النشر الآلي لكل الماركات المؤكدة</h2>

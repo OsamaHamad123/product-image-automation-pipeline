@@ -49,7 +49,7 @@
         ['ولا زر بيمسح شغلك بصمت', 'الإيقاف بيوقف بس. أي شي بيحذف بيقول بالضبط شو رح ينحذف وبيطلب تأكيد.'],
         ['عربي واضح بدل الرموز', 'بدل الرموز التقنية: جملة قصيرة بتقول شو صار وشو تعمل.'],
     ];
-    $kitIcons = ['home', 'review', 'run', 'health', 'settings', 'search', 'check', 'x', 'alert', 'external',
+    $kitIcons = ['home', 'review', 'run', 'health', 'settings', 'user', 'search', 'check', 'x', 'alert', 'external',
         'refresh', 'play', 'pause', 'stop', 'grid', 'upload', 'link', 'shield', 'barcode', 'sparkle',
         'store', 'weight', 'text', 'image', 'info', 'exclamation', 'minus', 'trash', 'arrow-left'];
     $kitBrands = [

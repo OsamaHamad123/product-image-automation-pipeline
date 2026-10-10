@@ -127,7 +127,10 @@ def test_classes_and_tokens_exist():
            "lq-health-search-title", "lq-health-results-title", "lq-health-cost-title",
            "lq-health-reasons-title", "lq-health-log-title", "lq-health-log-body", "lq-settings-sheet-title",
            "lq-settings-keys-title", "lq-settings-ap-title", "lq-settings-processing-title",
-           "lq-settings-advanced-title", "lq-settings-models-title", "lq-settings-sources-title", "lq-settings-speed-title", "lq-key-form", "lq-page-health", "lq-page-settings", "lq-health-spin"}
+           "lq-settings-advanced-title", "lq-settings-models-title", "lq-settings-sources-title", "lq-settings-speed-title", "lq-key-form", "lq-page-health", "lq-page-settings", "lq-health-spin",
+           # the cards a save lands on (?tab=…#id, SettingsController::anchorFor)
+           "lq-settings-speed", "lq-settings-sources", "lq-settings-advanced", "lq-settings-models",
+           "lq-settings-processing", "lq-settings-auto-publish", "lq-settings-strict-lane", "lq-key"}
     # classes built at runtime: 'lq-tone--' + tone, 'lq-dot--' + tone, '...--' + tone
     runtime = {"lq-tone", "lq-dot", "lq-keys__state", "lq-settings-columns__item", "lq-settings-form__status",
                "lq-health-provider__problems", "lq-alert", "lq-toast", "lq-dot lq-dot", "lq-skeleton"}
@@ -985,7 +988,10 @@ def test_each_form_saves_only_its_own_section(app_env):
     for key in ("auto_publish_brands", "auto_publish_enabled", "filter_competitors", "strict_brand_match",
                 "search_engine", "gemini_model"):
         assert after[key] == before[key], key
-    assert [r["location"].split("?tab=")[-1] for r in out] == ["keys"] * 4 + ["processing"] * 2 + ["keys"]
+    # each save lands on its own card (?tab=…#id, SettingsController::anchorFor); an unknown section on the tab only
+    assert [r["location"].split("?tab=")[-1] for r in out] == [
+        "keys#lq-key-serper", "keys#lq-key-gemini", "keys#lq-key-photoroom", "keys#lq-key-cloudinary",
+        "processing#lq-settings-processing", "processing#lq-settings-processing", "keys"]
     assert len(out[5]["flash"]["warnings"]) == 2 and out[6]["flash"]["error"]
     for response in out:
         assert "NEW-SERPER-KEY-1" not in json.dumps(response, ensure_ascii=False)
@@ -1137,7 +1143,7 @@ def test_extra_sources_form_saves_checks_and_shows_its_section(app_env):
                                "serpapi_lens_price_usd": "abc", "gtin_policy": "hard"}],
     ])
     saved, page, refused = out
-    assert saved["location"].endswith("?tab=advanced") and "الجولة الإضافية بتشتغل" in saved["flash"]["success"]
+    assert saved["location"].endswith("?tab=advanced#lq-settings-sources") and "الجولة الإضافية بتشتغل" in saved["flash"]["success"]
     assert page["status"] == 200, page["body"][:2000]
     body = page["body"]
     assert 'name="section" value="sources"' in body and "مصادر البحث الإضافية" in body

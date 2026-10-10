@@ -21,6 +21,7 @@ DASH = ROOT / "dashboard"
 VIEWS = DASH / "resources" / "views"
 COMPONENTS = VIEWS / "components" / "lq"
 LAYOUT = VIEWS / "layouts" / "laqta.blade.php"
+LAYOUT_JS = DASH / "public" / "js" / "layout.js"       # the shell's script, loaded by the layout (cached: ?v=)
 UI_KIT = VIEWS / "dashboard" / "ui_kit.blade.php"
 CSS = DASH / "public" / "css" / "laqta.css"
 ROUTES = DASH / "routes" / "web.php"
@@ -260,12 +261,16 @@ def test_layout_loads_only_google_fonts_and_local_css():
     layout = read(LAYOUT)
     hosts = set(re.findall(r"(?:href|src)=\"(?:https?:)?//([^/\"]+)", layout))
     assert hosts == {"fonts.googleapis.com", "fonts.gstatic.com"}, hosts
-    assert not re.search(r"<script[^>]+src=", layout), "no external or local script files: inline only"
+    # one script: the shell's own file, versioned so the browser caches it; no inline block
+    assert re.findall(r"<script\b[^>]*>", layout, flags=re.IGNORECASE) == [
+        "<script src=\"{{ asset('js/layout.js') }}?v={{ @filemtime(public_path('js/layout.js')) ?: '1' }}\">"]
+    assert not inline_scripts(layout)
+    assert layout.index("js/layout.js") < layout.index("@yield('scripts')") < layout.index("@stack('scripts')")
     stylesheets = re.findall(r"<link rel=\"stylesheet\" href=\"([^\"]+)\"", layout)
     assert len(stylesheets) == 2, stylesheets
     fonts, local = stylesheets
     assert fonts.startswith("https://fonts.googleapis.com/css2?")
-    assert "family=Alexandria:wght@500;600;700" in fonts and "family=Readex+Pro:wght@300;400;500;600;700" in fonts
+    assert "family=Alexandria:wght@500;600;700" in fonts and "family=Readex+Pro:wght@400;500;600;700" in fonts
     assert local.startswith("{{ asset('css/laqta.css') }}")
 
     css = read(CSS)
@@ -283,9 +288,9 @@ def _script_blocks(path: Path):
 
 
 @pytest.mark.skipif(NODE is None, reason="node is not installed")
-@pytest.mark.parametrize("path", [LAYOUT, UI_KIT], ids=lambda p: p.name)
+@pytest.mark.parametrize("path", [LAYOUT_JS, UI_KIT], ids=lambda p: p.name)
 def test_inline_js_parses(path, tmp_path):
-    for i, block in enumerate(_script_blocks(path)):
+    for i, block in enumerate([read(path)] if path.suffix == ".js" else _script_blocks(path)):
         js = tmp_path / f"{path.stem}_{i}.js"
         js.write_text(block, encoding="utf-8")
         result = subprocess.run([NODE, "--check", str(js)], capture_output=True, text=True, timeout=60)
@@ -298,14 +303,14 @@ def test_run_card_copy_matches_the_layout_script():
         r"'(\w+)' => \['label' => '([^']*)', 'text' => '([^']*)', 'link' => '([^']*)'\]",
         read(COMPONENTS / "run-card.blade.php"))}
     js = {state: rest for state, *rest in re.findall(
-        r"(\w+): \{ label: '([^']*)', text: '([^']*)', link: '([^']*)' \}", _script_blocks(LAYOUT)[0])}
+        r"(\w+): \{ label: '([^']*)', text: '([^']*)', link: '([^']*)' \}", read(LAYOUT_JS))}
     assert set(php) == {"loading", "idle", "running", "paused", "stopping", "error", "stuck", "unknown"}
     assert php == js
     assert php["idle"][1] == "ما في تشغيل هلق" and php["idle"][2] == "ابدأ تشغيل جديد ←"
 
 
 def test_layout_script_is_plain_and_safe():
-    script = _script_blocks(LAYOUT)[0]
+    script = read(LAYOUT_JS)
     assert "'/api/batch-status'" in script and "POLL_MS = 5000" in script
     assert "innerHTML" not in script, "status text is written with textContent only"
     assert "eval(" not in script and "new Function" not in script
@@ -365,7 +370,7 @@ globalThis.document = {
     querySelector: () => null, querySelectorAll: () => [],
     addEventListener: () => {}, dispatchEvent: () => true,
 };
-""" + _script_blocks(LAYOUT)[0] + f"""
+""" + read(LAYOUT_JS) + f"""
 const cases = {json.dumps(RUN_STATUS_CASES, ensure_ascii=False)};
 const out = {{}};
 for (const [name, data] of Object.entries(cases)) {{

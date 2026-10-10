@@ -48,12 +48,39 @@
 
 .rv-img-missing {
     display: inline-flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
+    gap: var(--lq-space-2);
     padding: var(--lq-space-2);
     color: var(--lq-text-3);
     font-size: var(--lq-fs-xs);
     text-align: center;
+}
+
+.rv-img-missing__text {
+    max-width: 100%;
+}
+
+/* «جرّب مرة تانية» تحت «ما قدرنا نعرض الصورة» (ui.js R.img) */
+.rv-img-retry {
+    color: var(--lq-text);
+}
+
+/* ليش Enter ما اعتمد، أو «رح تنعتمد أول ما تظهر الصورة» (single.js flashApproveNote) */
+.rv-approve-note {
+    max-width: 280px;
+    color: var(--lq-text-2);
+    font-size: var(--lq-fs-xs);
+    line-height: 1.4;
+}
+
+.rv-approve-note[hidden] {
+    display: none;
+}
+
+.rv-ws__body:focus {
+    outline: none;
 }
 
 .rv-kbd {

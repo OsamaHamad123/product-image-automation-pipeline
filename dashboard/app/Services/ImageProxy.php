@@ -425,6 +425,55 @@ class ImageProxy
         }
     }
 
+    // ------------------------------------------------------------------
+    // Thumbnails (?w=): the review list shows 96 px thumbnails, not the full store image
+    // ------------------------------------------------------------------
+
+    public const THUMB_MIN_W = 32;
+    public const THUMB_MAX_W = 400;
+    /** Larger pictures are served as they are: decoding one would hold width × height × 4 bytes in memory. */
+    private const THUMB_MAX_PIXELS = 40_000_000;
+
+    /**
+     * [bytes, mime] of the raster $body scaled down (aspect ratio kept) to $width px wide: WebP when GD can write it,
+     * else JPEG on white. null when nothing is to be done (already that narrow, too large to decode, GD missing or the
+     * format unreadable): the caller serves the original.
+     */
+    public static function resize(string $body, int $width): ?array
+    {
+        $width = max(self::THUMB_MIN_W, min(self::THUMB_MAX_W, $width));
+        if (!function_exists('imagecreatefromstring')) {
+            return null;
+        }
+        $info = @getimagesizefromstring($body);
+        if (!is_array($info) || ($info[0] ?? 0) < 1 || ($info[1] ?? 0) < 1) {
+            return null;
+        }
+        [$w, $h] = [(int) $info[0], (int) $info[1]];
+        if ($w <= $width || $w * $h > self::THUMB_MAX_PIXELS) {
+            return null;
+        }
+        $source = @imagecreatefromstring($body);
+        if ($source === false) {
+            return null;
+        }
+        $height = max(1, (int) round($h * $width / $w));
+        $thumb = imagecreatetruecolor($width, $height);
+        $webp = function_exists('imagewebp');
+        if ($webp) {
+            imagealphablending($thumb, false);
+            imagesavealpha($thumb, true);
+            imagefill($thumb, 0, 0, imagecolorallocatealpha($thumb, 255, 255, 255, 127));
+        } else {
+            imagefill($thumb, 0, 0, imagecolorallocate($thumb, 255, 255, 255));
+        }
+        imagecopyresampled($thumb, $source, 0, 0, 0, 0, $width, $height, $w, $h);
+        ob_start();
+        $ok = $webp ? imagewebp($thumb, null, 80) : imagejpeg($thumb, null, 82);
+        $out = (string) ob_get_clean();
+        return $ok && $out !== '' ? [$out, $webp ? 'image/webp' : 'image/jpeg'] : null;
+    }
+
     /** private, a day; immutable for a content-addressed URL (a Cloudinary version or a sha1 / sha256 in its path). */
     public static function cacheControl(string $url): string
     {
