@@ -6,9 +6,10 @@ repository root:
     .venv\\Scripts\\python.exe -X utf8 scripts\\run_nightly.py [--max-hours 8]
 
 It reuses main.py's entry points in one process and in the same order as the dashboard's "run all" button:
-main.run_enqueue_mode(), then main.run_worker_mode() when the enqueue succeeded. Five settings are pinned right
-after main.load_run_config(), so neither .env, the settings page nor the last dashboard run's
-temp/run_config.json can change them:
+main.run_enqueue_mode(), then main.run_worker_mode() when the enqueue succeeded. The night never reads
+temp/run_config.json, the options of the last run started from the dashboard (its row range, reprocess, skip cache,
+...: a test run on one row must not shape the next night); it takes the settings page's values. Five settings are
+pinned right after main.load_run_config(), so neither .env nor the settings page can change them:
 
     ROW_FILTER = ''                  every sheet row, not the last run's row range
     BRAND_FILTER = ''                every brand
@@ -140,11 +141,12 @@ def open_log(log_dir=LOG_DIR, today=None, keep=KEEP_LOGS):
 
 
 def pin_nightly_settings(main_module, config_module, settings=NIGHTLY_SETTINGS):
-    """Wrap main.load_run_config so the nightly settings win over .env, the DB settings and run_config.json."""
+    """Wrap main.load_run_config: no temp/run_config.json (the dashboard's per-run options), and the nightly settings
+    win over .env and the DB settings."""
     original = main_module.load_run_config
 
-    def load_run_config():
-        original()
+    def load_run_config(run_file=None):
+        original(run_file=None)
         for name, value in settings.items():
             setattr(config_module, name, value)
         say("settings pinned: every row without a final link, no reprocessing, auto-publish OFF")
@@ -447,7 +449,7 @@ def main(argv=None):
         ping_healthcheck("start")
         try:
             hours = max_hours_from(argv)
-            say(f"time limit: {hours:g} hours (Task Scheduler's -MaxHours); no new row after "
+            say(f"time limit: {hours:g} hours (NIGHTLY_MAX_HOURS / --max-hours); no new row after "
                 f"{hours * 60 - FINISH_MARGIN_S // 60:g} minutes")
             code = run(max_hours=hours)
         except KeyboardInterrupt:

@@ -401,7 +401,7 @@ class HttpFetcher:
                 probe.verify()
             img = Image.open(io.BytesIO(body))
             img.load()
-            img = ImageOps.exif_transpose(img)
+            img = rgba_if_palette_alpha(ImageOps.exif_transpose(img))
         except UnidentifiedImageError:
             return FetchedImage(candidate=cand, ok=False, error="not_image")
         except Image.DecompressionBombError:
@@ -449,6 +449,18 @@ class HttpFetcher:
 # Helpers shared with later stages
 # ---------------------------------------------------------------------------
 
+def rgba_if_palette_alpha(img: Image.Image) -> Image.Image:
+    """
+    A palette image with transparency (a GIF / PNG-8 product shot) as RGBA, other images as they are. Converting it
+    straight to RGB or L (pHash, colour signature, JPEG for the label reader) drops the transparency and makes PIL
+    warn "Palette images with Transparency expressed in bytes should be converted to RGBA images" (in the nightly
+    log); RGBA keeps the same colours and the alpha every later step already handles.
+    """
+    if img.mode in ("P", "PA") and (img.mode == "PA" or "transparency" in img.info):
+        return img.convert("RGBA")
+    return img
+
+
 def phash_hex(img: Image.Image) -> Optional[str]:
     """pHash of image_dedup_bktree.calculate_phash as 16 hex digits, None when unavailable."""
     try:
@@ -483,7 +495,7 @@ def load_image(fetched: FetchedImage) -> Optional[Image.Image]:
             data = bytes(src) if isinstance(src, (bytes, bytearray)) else Path(str(src)).read_bytes()
             img = Image.open(io.BytesIO(data))
         img.load()
-        return ImageOps.exif_transpose(img)
+        return rgba_if_palette_alpha(ImageOps.exif_transpose(img))
     except Exception as exc:
         logger.warning("cannot re-open fetched image %s: %s", fetched.content_sha256, exc)
         return None

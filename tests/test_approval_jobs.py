@@ -193,3 +193,103 @@ def test_on_the_server_the_bridge_only_asks_systemd(monkeypatch, tmp_path):
     calls = []
     assert approval_jobs.start_worker(python="py", popen=lambda cmd, **kw: calls.append(cmd)) is True
     assert kick.exists() and calls == []                               # laqta-approvals.path starts the worker
+
+
+def test_every_timestamp_comes_from_the_database_clock_whatever_the_session_time_zone(jobs, monkeypatch):
+    """The bridge (php-fpm) adds a job and the worker (systemd) finishes it, maybe with other session time zones: job 1
+    on the server showed finished_at two hours before created_at. Every timestamp is the database's NOW(), so the
+    instants stay ordered and close together whatever each connection's time_zone is."""
+    from laqta_kernel import sql
+
+    real_connect = approval_jobs.db_connect.connect
+    zone = {"now": "+00:00"}
+
+    def connect(*a, **k):
+        conn = real_connect(*a, **k)
+        conn.cursor().execute("SET time_zone = %s", (zone["now"],))
+        return conn
+
+    monkeypatch.setattr(approval_jobs.db_connect, "connect", connect)
+    job_id = approval_jobs.enqueue("select", PARAMS)["job_id"]
+    zone["now"] = "+04:00"                          # the worker's session: Dubai
+    job = approval_jobs.claim("d" * 32)
+    zone["now"] = "-02:00"
+    assert approval_jobs.finish(job, {"status": "success"}, 200) == "done"
+    row = sql(jobs, "SELECT UNIX_TIMESTAMP(created_at) AS c, UNIX_TIMESTAMP(started_at) AS s, "
+                    "UNIX_TIMESTAMP(finished_at) AS f, UNIX_TIMESTAMP(updated_at) AS u, "
+                    "UNIX_TIMESTAMP(NOW()) AS now FROM approval_jobs WHERE id = %s", (job_id,))[0]
+    assert row["c"] <= row["s"] <= row["f"] <= row["u"] <= row["now"]
+    assert row["now"] - row["c"] < 60
+    # the dashboard's «failed in the last 24 hours» window (ApiController FAILED_OPEN_SQL) compares with NOW() too
+    assert sql(jobs, "SELECT COUNT(*) AS n FROM approval_jobs WHERE finished_at > NOW() - INTERVAL 24 HOUR "
+                     "AND finished_at >= created_at")[0]["n"] == 1
+
+
+def test_no_timestamp_is_written_from_a_python_clock():
+    from pathlib import Path
+
+    source = Path(approval_jobs.__file__).read_text(encoding="utf-8")
+    assert "import datetime" not in source and "from datetime" not in source and "time.time" not in source
+    assert "created_at, updated_at) VALUES (%s, %s, %s, %s, %s, %s, NOW(), NOW())" in source
+    assert "started_at = NOW(), updated_at = NOW()" in source and "finished_at = NOW(), " in source
+
+
+class _LockConn:
+    def __init__(self, got):
+        self.got = got
+
+    def cursor(self):
+        conn = self
+
+        class _Cur:
+            def execute(self, *a):
+                pass
+
+            def fetchone(self):
+                return {"got": 1 if conn.got else 0}
+
+        return _Cur()
+
+    def close(self):
+        pass
+
+
+@pytest.mark.parametrize("slot_free", [True, False])
+def test_an_idle_worker_writes_nothing_to_its_log(monkeypatch, capsys, slot_free):
+    """laqta-approvals.timer starts a worker every minute: «queue empty» / «slots busy» are not logged."""
+    from scripts import approval_worker
+
+    monkeypatch.setattr(approval_jobs, "ensure_schema", lambda: True)
+    monkeypatch.setattr(approval_jobs, "give_up_stale", lambda: None)
+    monkeypatch.setattr(approval_jobs, "claim", lambda token: None)
+    monkeypatch.setattr(approval_worker, "_drop_kick", lambda: None)
+    monkeypatch.setattr(approval_worker.db_connect, "connect", lambda *a, **k: _LockConn(slot_free))
+    assert approval_worker.main() == 0
+    assert capsys.readouterr().out == ""
+
+
+def test_a_worker_that_ran_jobs_logs_them(monkeypatch, capsys):
+    from scripts import approval_worker
+
+    queue = [{"id": 5, "row_number": 12, "params": {}, "claim_token": "t"}]
+    monkeypatch.setattr(approval_jobs, "ensure_schema", lambda: True)
+    monkeypatch.setattr(approval_jobs, "give_up_stale", lambda: None)
+    monkeypatch.setattr(approval_jobs, "claim", lambda token: queue.pop() if queue else None)
+    monkeypatch.setattr(approval_worker, "_drop_kick", lambda: None)
+    monkeypatch.setattr(approval_worker.db_connect, "connect", lambda *a, **k: _LockConn(True))
+    monkeypatch.setattr(approval_worker, "run_with_heartbeat", lambda job: ({"status": "success"}, 200))
+    monkeypatch.setattr(approval_worker, "finish_with_retry", lambda job, result, http: "done")
+    assert approval_worker.main() == 0
+    out = capsys.readouterr().out
+    assert "job 5 row 12 -> done" in out and "1 job(s), queue empty" in out
+
+
+def test_the_approval_worker_log_is_rotated():
+    """laqta-approvals.service appends to temp/approval_worker.log; logrotate's temp/*.log block covers it."""
+    from pathlib import Path
+
+    deploy = Path(approval_jobs.__file__).resolve().parent / "deploy" / "ubuntu"
+    assert ">> @APP_DIR@/temp/approval_worker.log" in (deploy / "laqta-approvals.service").read_text(encoding="utf-8")
+    rotate = (deploy / "laqta-logrotate").read_text(encoding="utf-8")
+    block = rotate.split("@APP_DIR@/temp/*.log", 1)[1].split("}", 1)[0]
+    assert "copytruncate" in block and "maxsize" in block

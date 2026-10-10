@@ -1422,10 +1422,10 @@ def _phash_of_stored(sha):
     try:
         import io
         from PIL import Image
-        from catalog_match.fetch import phash_hex
+        from catalog_match.fetch import phash_hex, rgba_if_palette_alpha
         with Image.open(io.BytesIO(data)) as img:
             img.load()
-            return phash_hex(img.convert("RGB"))
+            return phash_hex(rgba_if_palette_alpha(img).convert("RGB"))
     except Exception as e:
         logger.warning("تعذر حساب pHash للمرشح المرفوض: %s", e)
         return None

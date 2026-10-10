@@ -10,6 +10,8 @@ cli_bridge.action_select_image call the page used to make, with the same paramet
 status the dashboard would have answered (200 on success, else 500, as ApiController::selectImage) are stored for the
 page. A job that raises is stored as failed with a generic reason (the details go to this worker's log only).
 While a job runs its row gets a heartbeat every HEARTBEAT_SECONDS, so a long approval is never taken again as stale.
+The log (temp/approval_worker.log) gets lines only when a worker ran at least one job or hit an error: the timer starts
+a worker every minute, and «nothing to do» or «every slot busy» a thousand times a day would bury the real lines.
 """
 
 import os
@@ -111,8 +113,7 @@ def main():
     try:
         slot = _slot(lock_conn)
         if slot is None:
-            print("[approval] every worker slot is busy; the running workers take the queue", flush=True)
-            return 0
+            return 0           # the running workers take the queue; nothing to log (the timer comes every minute)
         approval_jobs.give_up_stale()
         token = uuid.uuid4().hex
         done = 0
@@ -124,7 +125,8 @@ def main():
             status = finish_with_retry(job, result, http)
             done += 1
             print(f"[approval] slot {slot}: job {job['id']} row {job.get('row_number')} -> {status}", flush=True)
-        print(f"[approval] slot {slot}: {done} job(s), queue empty", flush=True)
+        if done:
+            print(f"[approval] slot {slot}: {done} job(s), queue empty", flush=True)
         return 0
     finally:
         lock_conn.close()      # releases the slot

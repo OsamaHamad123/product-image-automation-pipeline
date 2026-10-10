@@ -124,8 +124,30 @@ def test_pinned_settings_win_over_db_settings_and_the_last_run_config(nightly, m
     # nor through the strict lane, which publishes without AUTO_PUBLISH_ENABLED once its reviews prove it
     assert config.AUTO_PUBLISH_STRICT_LANE is False and settings.auto_publish_strict_lane() is False
     assert config.ROW_FILTER == "" and config.BRAND_FILTER == "" and config.FORCE_OVERWRITE_IMAGES is False
-    # the owner's other run preferences still apply
-    assert config.BG_REMOVAL_METHOD == "grabcut" and config.CURATION_MODE is True
+
+
+def test_the_night_never_reads_the_last_dashboard_run_s_options(nightly, monkeypatch):
+    """A dashboard test run on one row (row_filter, forceOverwrite, skipCache) left temp/run_config.json behind: the
+    night takes the settings page's values, not that run's options, and leaves the file to the dashboard."""
+    runner, main, config, _ = nightly
+    os.makedirs("temp", exist_ok=True)
+    with open(os.path.join("temp", "run_config.json"), "w", encoding="utf-8") as fh:
+        json.dump({"row_filter": "11", "forceOverwrite": True, "skipCache": True, "bgRemovalMethod": "grabcut",
+                   "curation_mode": True, "aiEnhance": True}, fh)
+
+    def load_db_config():
+        config.BG_REMOVAL_METHOD = "photoroom"           # the settings page's processing tab
+
+    monkeypatch.setattr(config, "load_db_config", load_db_config)
+    for name, value in (("SKIP_LOCAL_CACHE", False), ("CURATION_MODE", False), ("ENABLE_IMAGE_ENHANCEMENT", False)):
+        monkeypatch.setattr(config, name, value, raising=False)
+
+    runner.pin_nightly_settings(main, config)
+    main.load_run_config()
+    assert config.ROW_FILTER == "" and config.FORCE_OVERWRITE_IMAGES is False and config.SKIP_LOCAL_CACHE is False
+    assert config.BG_REMOVAL_METHOD == "photoroom" and config.CURATION_MODE is False
+    assert config.ENABLE_IMAGE_ENHANCEMENT is False
+    assert os.path.exists(os.path.join("temp", "run_config.json"))
 
 
 def test_run_enqueues_then_works_the_queue_with_auto_publish_off(nightly, monkeypatch):
@@ -436,6 +458,8 @@ def test_main_logs_to_temp_nightly_and_restores_the_console(nightly, monkeypatch
     log = tmp_path / "temp" / "nightly" / f"nightly_{datetime.date.today().isoformat()}.log"
     text = log.read_text(encoding="utf-8")
     assert "nightly run started" in text and "worker output line" in text and "(exit 0)" in text
+    # the same words on Linux (systemd) and Windows: the limit is NIGHTLY_MAX_HOURS / --max-hours
+    assert "time limit: 8 hours (NIGHTLY_MAX_HOURS / --max-hours)" in text and "-MaxHours" not in text
 
 
 def test_old_logs_are_pruned(tmp_path):

@@ -62,17 +62,22 @@ def _supported_bg_method(value):
     return name if name in SUPPORTED_BG_METHODS else None
 
 
-def load_run_config():
+RUN_CONFIG_FILE = "temp/run_config.json"
+
+
+def load_run_config(run_file=RUN_CONFIG_FILE):
     """
-    تحميل إعدادات التشغيل الجماعي من temp/run_config.json إن وجد لتجاوز إعدادات config.py.
+    تحميل إعدادات التشغيل الجماعي: إعدادات قاعدة البيانات (صفحة الإعدادات)، ثم تجاوزات temp/run_config.json إن وجد
+    (تكتبه اللوحة لكل تشغيل من زر «تشغيل الكل»: ApiController::runAll). run_file=None: بلا ملف التشغيل (التشغيل الليلي
+    scripts/run_nightly.py لا يأخذ خيارات آخر تشغيل من اللوحة).
     """
     try:
         config.load_db_config()
     except Exception as e:
         print(f"تنبيه: فشل تحديث الإعدادات من قاعدة البيانات: {e}")
 
-    config_file = "temp/run_config.json"
-    if not os.path.exists(config_file):
+    config_file = run_file
+    if not config_file or not os.path.exists(config_file):
         return
     try:
         with open(config_file, "r", encoding="utf-8") as f:
@@ -1806,6 +1811,8 @@ def run_enqueue_mode():
     قبل لمس الطابور، ولا تُمسح صفوف المراجعة أبداً. كل إدراج يبدأ تشغيلاً جديداً (run_id) يحمله كل صف
     سيعالجه العامل (local_cache_db.begin_run)، فيُحسب التقدم من صفوف هذا التشغيل فقط.
     المطابقة مع الكاش وطابور الكتابة (plan_enqueue) تسبق الإدراج، والإدراج دفعات (add_many_to_queue).
+    إدراج كل الشيت (بلا فلتر) يؤرشف بعده صفوف الطابور القديمة بلا مفتاح منتج التي خرجت من الشيت
+    (local_cache_db.archive_stale_queue_rows: تبقى في الجدول، لا تُحذف).
     """
     try:
         load_run_config()
@@ -1843,9 +1850,10 @@ def run_enqueue_mode():
                 if (allowed_rows is None or prod["row_number"] in allowed_rows)
                 and (not brand_filter or brand_filter in (prod.get("brand") or "").lower())]
     done = {"insert": 0, "keep": 0, "reset": 0}
+    whole_sheet = allowed_rows is None and not brand_filter
     try:
         rows, stats = plan_enqueue(selected, reprocess=reprocess, brand_mappings=brand_mappings,
-                                   whole_sheet=allowed_rows is None and not brand_filter)
+                                   whole_sheet=whole_sheet)
         if stats.get("moves"):
             # منتجات انتقلت صفوفها (أُدرج أو حُذف صف فوقها): تأخذ حالتها ومرشحاتها معها بدل بحث جديد.
             # فشل النقل يترك السلوك القديم (الإدراج يعيدها للانتظار) ولا يوقف الإدراج
@@ -1860,6 +1868,16 @@ def run_enqueue_mode():
                 local_cache_db.rekey_queue_rows(stats["rekey"])
             except Exception as e:
                 print(f"تنبيه: تعذر تحديث مفتاح {len(stats['rekey'])} صف صار له باركود: {e}")
+        if whole_sheet:
+            # صفوف قديمة بلا مفتاح منتج خرجت من الشيت (بعد آخر صف أو منتج آخر في رقمها): تُؤرشف ولا تُعد في اللوحة
+            try:
+                archived = local_cache_db.archive_stale_queue_rows(
+                    {prod["row_number"]: prod["product_name"] for prod in products})
+                if archived:
+                    print(f"[Enqueue] {archived} صف قديم في الطابور لم يعد في الشيت: أُرشف "
+                          "(لا يُبحث عنه ولا يُعرض للمراجعة).")
+            except Exception as e:
+                print(f"تنبيه: تعذرت أرشفة صفوف الطابور التي خرجت من الشيت: {e}")
         print(f"[Enqueue] {len(rows)} صف في الطابور (جديد {done['insert']}، يعود للانتظار {done['reset']}، "
               f"باقٍ كما هو {done['keep']})؛ {stats['skipped_final']} صف تم تخطيه لأن رابطه نهائي.")
         if stats["relink"] or stats["in_flight"]:

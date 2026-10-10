@@ -32,7 +32,8 @@ class QueueStats
                 $codes = DB::table('automation_queue')
                     ->whereNotNull('failure_code')
                     ->where('failure_code', '<>', '')
-                    ->where('status', '<>', 'completed')
+                    // archived: a row that left the sheet (local_cache_db.archive_stale_queue_rows): kept, not counted
+                    ->whereNotIn('status', ['completed', 'archived'])
                     ->select('failure_code', DB::raw('COUNT(*) AS n'))
                     ->groupBy('failure_code')
                     ->get();

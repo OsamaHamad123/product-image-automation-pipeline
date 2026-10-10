@@ -14,6 +14,9 @@
 #   UPDATE (no SKIP LOCKED: the owner's PC runs MariaDB 10.4) and exits when nothing is left. A job whose worker died
 #   (running, untouched for STALE_MINUTES) is taken again, at most MAX_ATTEMPTS times in all.
 # - Finished jobs are kept KEEP_DAYS days (the dashboard shows the recent failures), then deleted.
+# - Every timestamp (created_at, started_at, updated_at, finished_at; dismissed_at in ApiController) is the database's
+#   NOW(), written explicitly, never a Python or PHP clock: the bridge (php-fpm) adds a job and the worker (systemd)
+#   finishes it, and the dashboard compares them with NOW() (FAILED_OPEN_SQL), so one clock orders them all.
 
 import json
 import logging
@@ -118,8 +121,8 @@ def enqueue(kind, params, created_by=None):
                     # another image of this product is being approved (another tab / reviewer): not this one's result
                     return {"job_id": int(found["id"]), "existing": True, "busy": True}
                 return {"job_id": int(found["id"]), "existing": True}
-        cur.execute("INSERT INTO approval_jobs (kind, sku_key, `row_number`, label, params_json, created_by) "
-                    "VALUES (%s, %s, %s, %s, %s, %s)",
+        cur.execute("INSERT INTO approval_jobs (kind, sku_key, `row_number`, label, params_json, created_by, "
+                    "created_at, updated_at) VALUES (%s, %s, %s, %s, %s, %s, NOW(), NOW())",
                     (kind, sku, row, label, json.dumps(params, ensure_ascii=False), (created_by or None)))
         conn.commit()
         return {"job_id": int(cur.lastrowid), "existing": False}
@@ -144,8 +147,9 @@ def claim(token=None):
             if not row:
                 return None
             cur.execute("UPDATE approval_jobs SET status = 'running', claim_token = %s, attempts = attempts + 1, "
-                        "started_at = NOW() WHERE id = %s AND (status = 'queued' OR (status = 'running' AND "
-                        "updated_at < NOW() - INTERVAL %s MINUTE))", (token, row["id"], STALE_MINUTES))
+                        "started_at = NOW(), updated_at = NOW() WHERE id = %s AND (status = 'queued' OR "
+                        "(status = 'running' AND updated_at < NOW() - INTERVAL %s MINUTE))",
+                        (token, row["id"], STALE_MINUTES))
             conn.commit()
             if cur.rowcount == 1:
                 cur.execute("SELECT * FROM approval_jobs WHERE id = %s", (row["id"],))
@@ -183,8 +187,8 @@ def finish(job, result, http_status):
     try:
         cur = conn.cursor()
         cur.execute(
-            "UPDATE approval_jobs SET status = %s, result_json = %s, http_status = %s, finished_at = NOW() "
-            "WHERE id = %s AND claim_token = %s",
+            "UPDATE approval_jobs SET status = %s, result_json = %s, http_status = %s, finished_at = NOW(), "
+            "updated_at = NOW() WHERE id = %s AND claim_token = %s",
             (status, json.dumps(result or {}, ensure_ascii=False, default=str), int(http_status), job["id"],
              job["claim_token"]))
         conn.commit()
@@ -198,7 +202,8 @@ def give_up_stale():
     conn = _conn()
     try:
         conn.cursor().execute(
-            "UPDATE approval_jobs SET status = 'failed', http_status = 500, finished_at = NOW(), result_json = %s "
+            "UPDATE approval_jobs SET status = 'failed', http_status = 500, finished_at = NOW(), updated_at = NOW(), "
+            "result_json = %s "
             "WHERE status = 'running' AND attempts >= %s AND updated_at < NOW() - INTERVAL %s MINUTE",
             (json.dumps({"status": "error", "error": "The approval stopped in the middle several times; try again."}),
              MAX_ATTEMPTS, STALE_MINUTES))
