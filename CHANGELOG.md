@@ -42,6 +42,30 @@ new was added as a page; each change shortens the way to what is already there.
   use the page's dialog, like every other question.
 - **Touch.** Small buttons, the reject reasons, the theme toggle and the jobs close button are 44px tall on touch
   screens.
+- **Bulk review.**
+  - Rejects are held for the undo window, like approvals, and the undo box says «رفضت … (السبب)».
+  - No question before approving ticked cards when all are warning-free and undo is on.
+  - Tab enters the grid once (roving tabindex).
+  - The settle guard covers A, Enter, R and X.
+- **Review list.**
+  - A failed server approval has «أعد المحاولة» in place, with the same image and identity and no product to
+    open. The server still refuses a product that changed.
+  - Focus moves into the reject reasons, and Esc goes back to «رفض».
+  - A polite announcement names the next product.
+  - Alternatives and rejected thumbnails have alt text.
+  - Scrolling honours reduced motion.
+- **Settings and login.**
+  - A rejected value is marked on its own field (`aria-invalid`, `aria-describedby`, message under it), and the
+    first one is focused. The top flash stays.
+  - A failed login marks both inputs.
+  - Advanced points to Health's «حدّث الفهرس هلق» instead of a command line.
+  - The phone tab row fades the edge that has more tabs.
+- **Shell, Health and Run.**
+  - The phone «حسابي» sheet is modal and keeps focus inside it.
+  - Health log tabs take Home/End, and Left/Right follow the screen direction.
+  - The stop, reset and force questions are a short title and one or two sentences.
+  - The home funnel's label carries its numbers, and the next step re-announces only when it changes.
+  - «روح لـ…» uses valid combobox, listbox and group roles, and stands down under an open dialog.
 
 ### Removed: Telegram alerts
 
