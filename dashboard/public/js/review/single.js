@@ -1124,12 +1124,28 @@ ${candidate.url}` : item.key, productKey: item.key, stay: stay,
         renderWorkspace();
     }
 
-    async function retryFailures(items) {
+    // صفوف «رجّع وشغّل» لرابط صفحة التشغيل: 5,6,7,9 بتصير 5-7,9
+    function rowsText(items) {
+        const rows = [...new Set(items.map(it => parseInt(it.product.row_number, 10)).filter(n => n > 0))].sort((a, b) => a - b);
+        const parts = [];
+        for (let i = 0; i < rows.length; i++) {
+            let j = i;
+            while (j + 1 < rows.length && rows[j + 1] === rows[j] + 1) j++;
+            parts.push(j > i ? `${rows[i]}-${rows[j]}` : String(rows[i]));
+            i = j;
+        }
+        return parts.join(',');
+    }
+
+    // opts.thenRun: بعد ما ترجع للطابور، صفحة التشغيل بتنفتح على هالصفوف بس (التقدير قدامك، و«ابدأ» كبسة وحدة).
+    // ما في سؤال قبلها: زر «ابدأ» هناك هو التأكيد، والطابور لحاله ما بيصرف شي
+    async function retryFailures(items, opts) {
         const S = st();
         items = (items || []).filter(it => it && it.product && !it.orphan);
         if (!items.length) return;
         const n = items.length;
-        if (n > 1 && !(await R.ask({ title: `رح نرجّع ${R.plural(n, 'منتج واحد', 'منتجات')} للطابور؟`,
+        const thenRun = !!(opts && opts.thenRun && S.urls.run);
+        if (n > 1 && !thenRun && !(await R.ask({ title: `رح نرجّع ${R.plural(n, 'منتج واحد', 'منتجات')} للطابور؟`,
                                      text: 'بنشيلها من الأعطال. ما رح يبلش أي تشغيل من هون: بتنعالج لما تشغّل التشغيل. الصور المعتمدة ما بتنلمس.',
                                      confirmText: 'رجّعها للطابور' }))) {
             return;
@@ -1142,6 +1158,10 @@ ${candidate.url}` : item.key, productKey: item.key, stay: stay,
                 R.settleSeen(it.key, null);      // إجراء المراجع نفسه: القراءة التالية لا تُعد «تغيّر بعد فتحه»
             });
             const done = parseInt(data.requeued, 10) || n;
+            if (thenRun) {
+                R.navigate(`${S.urls.run}?scope=rows&rows=${encodeURIComponent(rowsText(items))}`);
+                return;
+            }
             let msg = `رجعت ${R.plural(done, 'منتج واحد', 'منتجات')} للطابور. ما بتبلش معالجتها لحالها: شغّل التشغيل من صفحة «التشغيل».`;
             if (parseInt(data.not_found, 10) > 0) msg += ` ${data.not_found} ما لقيناها بالشيت فبقيت بالأعطال.`;
             R.toast(msg, 'success', 9000);

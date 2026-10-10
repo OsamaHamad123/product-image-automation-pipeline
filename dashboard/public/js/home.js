@@ -159,14 +159,33 @@
      * «شو الخطوة الجاية؟»: one step, the first that applies. waiting: the review count (the sidebar badge's number);
      * brands: the count of brands missing from «جدول الماركات» (/api/run/brand-suggestions, read only when nothing waits),
      * null while unknown; notFound: the KPI. Returns null while it cannot tell yet.
+     * opts.failed: the «أعطال مؤقتة» KPI (the review list's «رجّع وشغّل» re-runs them); opts.reviewer: no step that
+     * leads to the owner's pages (run, brands, retry), only review work.
      */
-    function nextStep(waiting, brands, notFound, phase) {
+    function nextStep(waiting, brands, notFound, phase, opts) {
+        opts = opts || {};
         var w = C.num(waiting);
         if (w !== null && w > 0) {
             return { key: 'review', title: C.countText(w, 'صورة', 'صورتين', 'صور') + ' جاهزة للمراجعة.',
                      text: 'راجعها بالجملة: المقترحة بلا تحذير بتنعتمد بضغطة.', action: 'راجعها هلق', href: '/catalog?mode=bulk' };
         }
         if (w === null) return null;
+        if (opts.reviewer) {
+            var rnf = C.num(notFound);
+            if (rnf !== null && rnf > 0) {
+                return { key: 'not_found', title: C.countText(rnf) + ' ما انلقت إلها صورة.',
+                         text: 'دوّر عليها بكلمات ثانية، أو حط رابط صورة، أو ارفع وحدة.', action: 'شوف اللي ما انلقت',
+                         href: '/catalog?filter=not_found' };
+            }
+            return { key: 'done', title: 'كل شي مراجَع.', text: 'الصور الجديدة بتوصل لقائمتك لما يشتغل التشغيل الجاي.',
+                     action: 'افتح المراجعة', href: '/catalog' };
+        }
+        var f = C.num(opts.failed);
+        if (f !== null && f > 0) {
+            return { key: 'failed', title: C.countText(f) + ' وقفت بعطل مؤقت.',
+                     text: 'رجّعها وشغّلها من القائمة بكبسة: التشغيل بينفتح على صفوفها بس.', action: 'رجّعها وشغّلها',
+                     href: '/catalog?filter=failed' };
+        }
         var b = C.num(brands);
         if (b === null && brands !== false) return null;
         if (b > 0) {
@@ -234,7 +253,9 @@
             var waiting = state.live && C.num(state.live.waiting) !== null ? state.live.waiting
                 : (state.overview ? (state.overview.kpis.filter(function (k) { return k.key === 'waiting'; })[0] || {}).value : null);
             var notFound = state.overview ? (state.overview.kpis.filter(function (k) { return k.key === 'not_found'; })[0] || {}).value : null;
-            if (C.num(waiting) === 0 && !state.brandsAsked && deps.fetchJson) {
+            var failed = state.overview ? (state.overview.kpis.filter(function (k) { return k.key === 'failed'; })[0] || {}).value : null;
+            var reviewer = !!deps.reviewer;
+            if (C.num(waiting) === 0 && !reviewer && !(C.num(failed) > 0) && !state.brandsAsked && deps.fetchJson) {
                 state.brandsAsked = true;
                 deps.fetchJson('/api/run/brand-suggestions').then(function (res) {
                     var data = res && res.ok && res.data && res.data.status === 'success' ? res.data : null;
@@ -242,7 +263,8 @@
                     step();
                 });
             }
-            deps.renderNext(nextStep(waiting, state.brands, notFound, state.live ? state.live.phase : null));
+            deps.renderNext(nextStep(waiting, state.brands, notFound, state.live ? state.live.phase : null,
+                                     { failed: failed, reviewer: reviewer }));
         }
 
         function loadOverview(fresh) {
@@ -478,6 +500,8 @@
             renderLive: renderLive,
             renderBanner: renderBanner,
             renderNext: renderNext,
+            // المراجع (layout: <body data-lq-role="reviewer">): خطوات المراجعة بس
+            reviewer: !!(doc.body && doc.body.getAttribute && doc.body.getAttribute('data-lq-role') === 'reviewer'),
             toast: C.toast,
             now: function () { return Date.now() / 1000; },
             schedule: function (fn, ms) { return root.setTimeout(fn, ms); },

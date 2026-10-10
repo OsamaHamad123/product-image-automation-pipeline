@@ -29,14 +29,14 @@ class HealthAttentionController extends Controller
     /** تنبيهات ops_health -> [اللون، العنوان، النص، التصليح]. الرموز ما بتبين للمالك. */
     public const OPS_ALERTS = [
         'SERPER_CREDIT' => ['danger', 'رصيد Serper خلص أو المفتاح مرفوض',
-            'البحث عن الصور واقف لحد ما تشحن رصيد Serper أو تصلّح المفتاح.', ['label' => 'المفاتيح', 'href' => '/settings?tab=keys']],
+            'البحث عن الصور واقف لحد ما تشحن رصيد Serper أو تصلّح المفتاح.', ['label' => 'مفتاح Serper', 'href' => '/settings?tab=keys#lq-key-serper']],
         'GEMINI_DOWN' => ['warning', 'Gemini ما عم يردّ',
-            'كل النتائج رايحة لمراجعتك بدون قراءة الملصق. تأكد من مفتاح Gemini.', ['label' => 'المفاتيح', 'href' => '/settings?tab=keys']],
+            'كل النتائج رايحة لمراجعتك بدون قراءة الملصق. تأكد من مفتاح Gemini.', ['label' => 'مفتاح Gemini', 'href' => '/settings?tab=keys#lq-key-gemini']],
         'VERIFIER_BUDGET' => ['warning', 'ميزانية النموذج القوي لهالشهر خلصت',
             'المنتجات المش مؤكدة بتستنى مراجعتك بدون نظرة تانية. ارفع الميزانية أو استنى الشهر الجاي.',
             ['label' => 'نماذج التحقق', 'href' => '/settings?tab=models']],
         'VERIFIER_KEY' => ['warning', 'مفتاح نموذج التحقق الإضافي مرفوض أو مش محفوظ',
-            'النموذج القوي ما عم يقرأ. ضيف مفتاحه أو وقّفه من «نماذج التحقق».', ['label' => 'المفاتيح', 'href' => '/settings?tab=keys']],
+            'النموذج القوي ما عم يقرأ. ضيف مفتاحه أو وقّفه من «نماذج التحقق».', ['label' => 'المفتاح', 'href' => '/settings?tab=keys#lq-key-anthropic']],
     ];
 
     /** GET /api/system/attention (?after=1: الصفحة سألت ops-health قبلها، فكاش ناقص يعني ما انقرا). */
@@ -119,7 +119,7 @@ class HealthAttentionController extends Controller
                     : ($dead === 2 ? 'رابطين' : $dead . ($dead <= 10 ? ' روابط' : ' رابط')) . ' ما وصلوا للشيت',
                 'الكتابة بالشيت ما زبطت بعد كل المحاولات بآخر ' . HealthzController::DEAD_WINDOW_DAYS . ' أيام. '
                 . 'تشغيل جديد بيرجع يكتب روابط الصور المعتمدة بدون ما يدوّر من جديد.',
-                ['label' => 'صفحة التشغيل', 'href' => '/batch-automation']);
+                ['label' => 'تشغيل جديد', 'href' => '/batch-automation#run-new']);
         }
 
         // كتابات رفضها الشيت لأنه الصف أو العمود تغيّر بعد ما انجدولت (صفوف انزاحت، تبويب انرجع من نسخة، عمود انمسح):
@@ -131,7 +131,7 @@ class HealthAttentionController extends Controller
                 'الصف أو العمود ما عاد متل ما كان وقت الاعتماد (صفوف انزاحت، تبويب انرجع من نسخة، أو عمود انمسح)، '
                 . 'فما كتبنا فوق شي ما منعرفه. التشغيل الجاي بيرجع يكتب روابط الصور المعتمدة لحاله؛ الأوصاف والتصنيفات '
                 . 'بتنكتب لما تنعتمد الصورة من جديد.',
-                ['label' => 'صفحة التشغيل', 'href' => '/batch-automation']);
+                ['label' => 'تشغيل جديد', 'href' => '/batch-automation#run-new']);
         }
 
         $free = $healthz['free_gb'] ?? null;
@@ -148,11 +148,11 @@ class HealthAttentionController extends Controller
             $card = HealthController::lastRunCard($run);
             $items[] = self::item('last_run', 'danger', 'آخر تشغيل ما خلص منيح',
                 $card['title'] . ($card['when'] !== '' ? ' (' . $card['when'] . ')' : '') . '. شوف شو صار وشغّل من جديد.',
-                ['label' => 'صفحة التشغيل', 'href' => '/batch-automation']);
+                ['label' => 'شوف آخر تشغيل', 'href' => '/batch-automation#run-current']);
         } elseif ($outcome === 'stopped' && ($run['stop_reason'] ?? '') === 'budget_reached') {
             $items[] = self::item('spend', 'warning', 'آخر تشغيل وقف لأنو صرف اليوم وصل للميزانية اليومية',
                 'المنتجات الباقية بتستنى بالطابور وبتكمّل بتشغيل بكرا لحالها.',
-                ['label' => 'صفحة التشغيل', 'href' => '/batch-automation']);
+                ['label' => 'شوف آخر تشغيل', 'href' => '/batch-automation#run-current']);
         }
 
         if (($healthz['nightly_known'] ?? false) && is_int($healthz['nightly_age_s'] ?? null)

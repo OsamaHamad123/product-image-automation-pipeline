@@ -580,7 +580,9 @@
         },
         toast: toast,
         ask: ask,
-        runNotice: runNotice
+        runNotice: runNotice,
+        // «روح لـ…» (jump.js) من قائمة «حسابي»: القائمة بتتسكّر قبل ما تنفتح النافذة
+        closeAccount: function () { if (accountSheet && !accountSheet.hasAttribute('hidden')) setAccountOpen(false, false); }
     };
 
     // No silent destructive action: anything with data-lq-confirm asks first (capture phase, so it runs

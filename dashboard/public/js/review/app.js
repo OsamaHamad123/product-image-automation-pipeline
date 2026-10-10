@@ -78,7 +78,7 @@
         listLimit: LIST_PAGE,
         // bulk: selected / seen / loaded / failed / inView / unticked hold '<key>\n<pick url>' (a tick belongs to the picture).
         // The status filter is S.filter, shared with single mode (a mode switch keeps it)
-        bulk: { brand: '', selected: new Set(), limit: 48, seeded: false, focus: null, autoTick: true,
+        bulk: { brand: '', query: '', selected: new Set(), limit: 48, seeded: false, focus: null, autoTick: true,
                 unticked: new Set(), seen: new Set(), loaded: new Set(), failed: new Set(), inView: new Set(), advancedAt: 0,
                 everSeen: new Set(), anchor: null, startedAt: 0, reviewed: new Set() },
         // the mode came from the URL (?mode=) or the reviewer's own toggle: no automatic choice over it
@@ -177,7 +177,7 @@
         d.queue = el('aside', { className: 'rv-queue', 'aria-label': 'قائمة المراجعة' }, [
             el('div', { className: 'rv-queue__head' }, [
                 el('div', { className: 'rv-queue__title' }, [
-                    el('h1', { className: 'rv-queue__h1', text: 'قائمة المراجعة' }), d.waiting, d.refreshBtn
+                    el('h1', { className: 'rv-queue__h1', text: 'قائمة المراجعة' }), d.waiting, d.refreshBtn, keysButton()
                 ]),
                 modeToggle('single'),
                 el('label', { className: 'lq-search rv-search' }, [icon('search', 18), el('span', { className: 'lq-sr-only', text: 'بحث بالقائمة' }), d.search]),
@@ -632,6 +632,13 @@
             S.reason = String(S.cfg.reason);
             if (!filter) filter = 'all';
         }
+        // ?q=: البحث جاهز بمربع البحث (مرة وحدة، من «روح لـ…»)، على «الكل» إلا إذا حُددت رقاقة
+        if (S.cfg.q && !S.queryApplied) {
+            S.queryApplied = true;
+            S.query = String(S.cfg.q);
+            if (S.dom && S.dom.search) S.dom.search.value = S.query;
+            if (!filter) filter = 'all';
+        }
         // الوضع: الرابط (?mode= أو ?row=) أولاً، بعده آخر وضع اختاره المراجع بنفسه، وإلا «بالجملة» لما يكون في 10 صور مقترحة
         // بلا تحذير أو أكثر (شغل الـ 100+ منتج)
         if (!S.modeExplicit && !S.modeChosen && S.load.state === 'ready') {
@@ -947,10 +954,15 @@
         if (['failed', 'not_found'].includes(S.filter) && S.load.state === 'ready') {
             const failing = visibleItems().filter(it => it.product.has_error && !it.orphan && !S.local.get(it.key));
             if (failing.length > 1 && S.urls.retry) {
+                // «رجّع وشغّل»: للطابور وبعدين صفحة التشغيل على هالصفوف بس، بدل ما تروح وتكتب الصفوف بإيدك
                 d.queueNote.appendChild(el('div', { className: 'rv-retry-all' }, [
-                    el('span', { text: 'إعادة المحاولة بترجّعها للطابور، وما بتبلش معالجتها لحالها.' }),
+                    el('span', { text: S.urls.run ? '«رجّع وشغّل» بيفتح التشغيل على هالصفوف بس، والتقدير قدامك قبل ما تبدأ.'
+                        : 'إعادة المحاولة بترجّعها للطابور، وما بتبلش معالجتها لحالها.' }),
+                    S.urls.run ? el('button', { type: 'button', className: 'lq-btn lq-btn--primary lq-btn--sm', id: 'rvRetryRun',
+                                                text: `رجّع وشغّل (${failing.length})`,
+                                                onclick: () => R.single.retryFailures(failing, { thenRun: true }) }) : null,
                     el('button', { type: 'button', className: 'lq-btn lq-btn--secondary lq-btn--sm',
-                                   text: `رجّع ${plural(failing.length, 'منتج واحد', 'منتجات')} للطابور`,
+                                   text: S.urls.run ? 'للطابور بس' : `رجّع ${plural(failing.length, 'منتج واحد', 'منتجات')} للطابور`,
                                    onclick: () => R.single.retryFailures(failing) })
                 ]));
             }
@@ -1013,8 +1025,9 @@
         const actions = [];
         if (retryable.length && S.urls.retry) {
             actions.push(el('button', { type: 'button', className: 'lq-btn lq-btn--primary', id: 'rvRetryNotFound',
-                                        text: `رجّع اللي ما انلقت للطابور (${retryable.length})`,
-                                        onclick: () => R.single.retryFailures(retryable) }));
+                                        text: S.urls.run ? `رجّع اللي ما انلقت وشغّلها (${retryable.length})`
+                                            : `رجّع اللي ما انلقت للطابور (${retryable.length})`,
+                                        onclick: () => R.single.retryFailures(retryable, { thenRun: true }) }));
         } else if (notFound.length) {
             actions.push(el('button', { type: 'button', className: 'lq-btn lq-btn--secondary', text: `شوف اللي ما انلقت (${notFound.length})`,
                                         onclick: () => setFilter('not_found') }));
@@ -1545,14 +1558,25 @@
         single: [
             ['Enter', 'اعتماد الصورة المختارة'], ['X', 'رفض (وبعدها 1–9 للسبب)'], ['S', 'تخطي للمنتج التالي'],
             ['↑ ↓', 'المنتج اللي قبل / بعد'], ['1–9', 'اختيار صورة من تحت (بدون اعتماد)'], ['Z', 'تكبير الصورة ومقارنتها بالشيت'],
-            ['Esc', 'سكّر أي نافذة'], ['?', 'هالقائمة']
+            ['+ − 0', 'بالتكبير: كبّر، صغّر، رجّع'], ['Esc', 'سكّر أي نافذة'], ['Ctrl+K أو /', 'روح لـ… (أي صفحة أو منتج)'],
+            ['?', 'هالقائمة']
         ],
         bulk: [
             ['← → ↑ ↓', 'التنقل بين البطاقات'], ['مسافة', 'تحديد البطاقة'], ['Shift + ضغطة', 'تحديد كل اللي بيناتهم'],
-            ['A', 'اعتماد البطاقة'], ['Shift+A', 'اعتماد المحددة بلا تحذير'], ['R أو X', 'رفض البطاقة (وبعدها 1–7 للسبب)'],
-            ['Z', 'تكبير الصورة ومقارنتها بالشيت'], ['Esc', 'سكّر أي نافذة'], ['?', 'هالقائمة']
+            ['Enter أو A', 'اعتماد البطاقة'], ['Shift+A', 'اعتماد المحددة بلا تحذير'], ['X أو R', 'رفض البطاقة (وبعدها 1–7 للسبب)'],
+            ['Z', 'تكبير الصورة ومقارنتها بالشيت'], ['+ − 0', 'بالتكبير: كبّر، صغّر، رجّع'], ['Esc', 'سكّر أي نافذة'],
+            ['Ctrl+K أو /', 'روح لـ… (أي صفحة أو منتج)'], ['?', 'هالقائمة']
         ]
     };
+
+    // زر «?» ظاهر جنب العنوان (بالوضعين): قائمة الاختصارات بدون ما تعرف إنه في مفتاح «?». بيختفي على شاشات اللمس
+    // متل باقي تلميحات المفاتيح (.rv-keyhint)
+    function keysButton() {
+        return el('button', { type: 'button', className: 'lq-btn lq-btn--ghost lq-btn--sm lq-btn--icon rv-keys-btn rv-keyhint',
+                              'aria-label': 'اختصارات لوحة المفاتيح', title: 'اختصارات لوحة المفاتيح (?)', 'aria-keyshortcuts': '?',
+                              text: '?', onclick: () => showShortcuts() });
+    }
+    R.keysButton = keysButton;
 
     function showShortcuts() {
         const rows = SHORTCUTS[S.mode] || SHORTCUTS.single;
@@ -1830,7 +1854,7 @@
             if ((key === ' ' || key === 'Enter') && ['button', 'a', 'summary', 'label', 'input'].includes(tag)) return;
             // التكرار يُقبل للأسهم فقط: A المضغوط باستمرار لا يعتمد البطاقة التالية قبل أن يراها المراجع
             if (e.repeat && !/^Arrow/.test(key)) {
-                if (key === ' ' || key === 'a') e.preventDefault();
+                if (key === ' ' || key === 'a' || key === 'Enter') e.preventDefault();
                 return;
             }
             if (R.bulk.onKey(key, e)) e.preventDefault();

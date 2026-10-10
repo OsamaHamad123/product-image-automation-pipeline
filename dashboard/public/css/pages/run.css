@@ -790,3 +790,8 @@
 .lq-run-handoff:not(:has(> :not([hidden]))) {
     display: none;
 }
+
+/* «روح على»: the sheet tools under the run cards, one click away */
+.lq-run__jump {
+    margin-block-end: var(--lq-space-1);
+}

@@ -11,6 +11,38 @@ causes: the quality gate threw away white-background packshots, an unverified "l
 success, siblings of the right product outranked it, and reviewers' rejections were never remembered. The search
 core was rebuilt and wired into the queue, the dashboard actions and the sheet writes. Every claim below has a test.
 
+### Fewer steps, no new pages: «روح لـ…», «روح على», «رجّع وشغّل»
+
+The dashboard had every tool, but several sat behind a nav click, a tab, a collapsed section and a scroll. Nothing
+new was added as a page; each change shortens the way to what is already there.
+- **«روح لـ…» (Ctrl+K, or «/» when not typing; `public/js/jump.js`, `App\Services\GotoIndex`).** One box on every
+  page lists every page, card, settings tab, API key and review filter. A number opens that sheet row, and any text
+  searches the review list (`/catalog?q=…`). A reviewer's list has none of the owner's pages. It is in the sidebar,
+  and in «حسابي» on the phone. `/cutout-check` and `/setup`, which had no menu entry, are now one search away.
+- **«روح على»: card links on Health and Run (`components/lq/jump-links`).** Health opens «تفاصيل متقدمة» for any
+  card's `#id`, from a link or a hash change. Every card on both pages has an id: services, publish check, last
+  run, lanes, local index, search ops, logs, eval export, recut, plus the new run, current run, brands, barcodes,
+  quality and export cards.
+- **«رجّع وشغّل» in the review list's failed/not-found view and the done recap.** The button puts the rows back in
+  the queue, then opens the Run page on those rows only (`?scope=rows&rows=5-7,9`). «قبل ما تبدأ» shows the
+  estimate there, and «ابدأ» is the one click left. The old «للطابور بس» stays next to it. The Run page reads
+  `?scope=rows&rows=` and `?scope=brand&brand=`.
+- **Health items land on the fix.**
+  - «رصيد Serper خلص» and «Gemini ما عم يردّ» open the key's row with its field open (`/settings?tab=keys#lq-key-serper`).
+  - The run items open the run card they are about.
+- **Review screen.**
+  - `?q=` fills the list search.
+  - Search also matches a SKU prefix of 4 or more characters.
+  - Bulk mode has its own search box.
+  - Enter approves the focused bulk card, as in single mode.
+  - A visible «?» button opens the shortcuts list. The list now includes the zoom keys and Ctrl+K.
+- **Home's next step.** Temporary failures are a step («رجّعها وشغّلها»). A reviewer never gets a step that leads to the
+  owner's pages.
+- **One kind of question.** The brand tools on the Run page asked through the browser's own `confirm()`; they now
+  use the page's dialog, like every other question.
+- **Touch.** Small buttons, the reject reasons, the theme toggle and the jobs close button are 44px tall on touch
+  screens.
+
 ### Removed: Telegram alerts
 
 The Telegram bot was only ever used for testing and is gone. Run reports, failures and DEAD sheet writes stay

@@ -385,6 +385,14 @@
             openKeyForm(id, e.currentTarget.getAttribute('aria-expanded') !== 'true');
         });
     }
+    // ?tab=keys#lq-key-‹id› (من «شو بدو منك» بالصحة أو «روح لـ…»): خانة هالمفتاح مفتوحة وجاهزة للصق
+    function openKeyFromHash() {
+        var m = /^#lq-key-([a-z_]+)$/.exec(window.location && window.location.hash || '');
+        var toggle = m ? page.querySelector('[data-key-toggle="' + m[1] + '"]') : null;
+        if (toggle && !toggle.disabled && toggle.getAttribute('aria-expanded') !== 'true') openKeyForm(m[1], true);
+    }
+    openKeyFromHash();
+    if (typeof window.addEventListener === 'function') window.addEventListener('hashchange', openKeyFromHash);
     var cancels = page.querySelectorAll('[data-key-cancel]');
     for (var c = 0; c < cancels.length; c++) {
         cancels[c].addEventListener('click', function (e) {

@@ -324,6 +324,11 @@
         return el('span', { className: `rv-lane rv-lane--${lane}`, dataset: { lane: lane }, title: R.LANE_TITLE[lane], text: R.LANE_TEXT[lane] });
     }
 
+    // انتقال لصفحة ثانية (رابط «رجّع وشغّل» لصفحة التشغيل)؛ اختبارات node بتستبدله
+    function navigate(url) {
+        if (root.location && typeof root.location.assign === 'function') root.location.assign(url);
+    }
+
     Object.assign(R, { ICONS, icon, el, bdi, clear, safeHttpUrl, imageUrl, img, imgRetrying, csrfToken, requestJson, toast, laneBadge,
-                       sessionExpired, onSessionExpired, showSessionBanner });
+                       sessionExpired, onSessionExpired, showSessionBanner, navigate });
 })(typeof window !== 'undefined' ? window : globalThis);

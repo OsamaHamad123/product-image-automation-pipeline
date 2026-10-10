@@ -1260,12 +1260,25 @@
         if (advanced && !advanced.open) advanced.open = true;
     }
 
-    // a link to a card inside «تفاصيل متقدمة» (#publish-check from the review screen) opens it first
-    (function () {
-        var hash = window.location && window.location.hash ? window.location.hash.slice(1) : '';
-        var target = hash ? document.getElementById(hash) : null;
-        if (target && advanced && advanced.contains(target)) openAdvanced();
-    })();
+    // a link to a card inside «تفاصيل متقدمة» (#publish-check from the review screen, «روح على», «روح لـ…») opens it
+    // first, then the card comes into view: on load, on a hash change, and on a «روح على» link clicked twice
+    function revealHash(hash, scroll) {
+        var id = String(hash || '').replace(/^#/, '');
+        var target = id ? document.getElementById(id) : null;
+        if (!target || !advanced || !advanced.contains(target)) return false;
+        openAdvanced();
+        if (scroll && target.scrollIntoView) {
+            var still = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+            target.scrollIntoView({ block: 'start', behavior: still ? 'auto' : 'smooth' });
+        }
+        return true;
+    }
+    revealHash(window.location && window.location.hash, true);
+    if (typeof window.addEventListener === 'function') window.addEventListener('hashchange', function () { revealHash(window.location.hash, true); });
+    page.addEventListener('click', function (e) {
+        var link = e.target && e.target.closest ? e.target.closest('.lq-jump__link') : null;
+        if (link && window.location && link.getAttribute('href') === window.location.hash) revealHash(window.location.hash, true);
+    });
 
     /* An item's button: open the section on the card that holds the fix and put the focus on its button. */
     function goTo(where) {

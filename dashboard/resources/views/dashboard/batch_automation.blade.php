@@ -26,9 +26,15 @@
         <a class="lq-alert__action" href="{{ route('dashboard.diagnostics') }}">التفاصيل</a>
     </div>
 
+    {{-- «روح على»: أدوات الشيت تحت التشغيل بكبسة وحدة بدل التمرير --}}
+    <x-lq.jump-links class="lq-run__jump" :links="[
+        ['#run-new', 'تشغيل جديد'], ['#run-current', 'التشغيل الحالي'], ['#run-brands', 'ماركات ناقصة'],
+        ['#run-barcodes', 'باركودات'], ['#run-quality', 'جودة بيانات الشيت'], ['#run-export', 'تقرير للتحليل'],
+    ]" />
+
     <div class="lq-run__grid">
         {{-- New run --}}
-        <section class="lq-card lq-run-new" aria-labelledby="lq-run-new-title">
+        <section class="lq-card lq-run-new" id="run-new" aria-labelledby="lq-run-new-title">
             <h2 class="lq-card__title" id="lq-run-new-title">تشغيل جديد</h2>
 
             <x-lq.segmented label="النطاق" :options="['all' => 'كل الشيت', 'brand' => 'ماركة', 'rows' => 'صفوف محددة']" value="all" fill data-run="scope" />
@@ -86,7 +92,7 @@
         </section>
 
         {{-- Current run --}}
-        <section class="lq-card lq-run-current" aria-labelledby="lq-run-current-title" data-run="current" data-state="loading">
+        <section class="lq-card lq-run-current" id="run-current" aria-labelledby="lq-run-current-title" data-run="current" data-state="loading">
             <div class="lq-run-current__head">
                 <div class="lq-run-current__title">
                     <h2 class="lq-card__title" id="lq-run-current-title">التشغيل الحالي</h2>
@@ -216,7 +222,7 @@
         {{-- Barcodes the store pages stated for approved rows with an empty barcode cell: read from the approvals and the
              cached sheet rows (GET /api/run/barcode-suggestions); written only by the button, after a confirm, through the
              identity-checked sheet outbox (POST /api/run/barcode-write), never over a cell that holds a barcode --}}
-        <section class="lq-card lq-run-barcodes" aria-labelledby="run-barcodes-title" data-run="barcodes" data-state="loading">
+        <section class="lq-card lq-run-barcodes" id="run-barcodes" aria-labelledby="run-barcodes-title" data-run="barcodes" data-state="loading">
             <div class="lq-run-brands__head">
                 <h2 class="lq-card__title" id="run-barcodes-title" data-run="barcodes-title">باركودات لقيناها من صفحات المتاجر</h2>
                 <button type="button" class="lq-btn lq-btn--ghost lq-btn--sm" data-run="barcodes-refresh">
@@ -236,7 +242,7 @@
         </section>
 
         {{-- Sheet data quality: from the sheet rows already cached (GET /api/run/sheet-quality) --}}
-        <section class="lq-card lq-run-quality" aria-labelledby="run-quality-title" data-run="quality" data-state="loading">
+        <section class="lq-card lq-run-quality" id="run-quality" aria-labelledby="run-quality-title" data-run="quality" data-state="loading">
             <div class="lq-run-quality__head">
                 <h2 class="lq-card__title" id="run-quality-title">جودة بيانات الشيت</h2>
                 <button type="button" class="lq-btn lq-btn--ghost lq-btn--sm" data-run="quality-refresh">
@@ -249,7 +255,7 @@
         </section>
 
         {{-- One JSON file of a run for analysis (GET /api/run/export): no new search, no cost, no key --}}
-        <section class="lq-card lq-run-export" aria-labelledby="run-export-title">
+        <section class="lq-card lq-run-export" id="run-export" aria-labelledby="run-export-title">
             <h2 class="lq-card__title" id="run-export-title">تقرير للتحليل</h2>
             <p class="lq-run-export__text">ملف واحد فيه كل صفوف التشغيل: القرار، وليش ما في اقتراح، وأفضل 8 صور مع أدلتها، والتكلفة إذا معروفة. ما بيعمل بحث جديد وما بيكلّف شي، وما فيه أي مفتاح أو كلمة سر. ابعته للمطوّر بدل ما تبعت ملفات.</p>
             <label class="lq-field">

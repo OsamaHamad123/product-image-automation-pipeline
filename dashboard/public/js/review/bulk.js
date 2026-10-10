@@ -156,8 +156,10 @@
         return f && f.waiting ? f.key : 'all';
     }
 
+    // البحث بوضع الجملة: نفس بحث قائمة المنتج الواحد (الاسم، الماركة، الباركود، رقم الصف، SKU)
     function visibleCards() {
-        return byFilter(byBrand(source()), currentFilter());
+        const q = st().bulk.query || '';
+        return byFilter(byBrand(source()), currentFilter()).filter(it => R.matchesQuery(it, q));
     }
 
     // البطاقات المرسومة فعلاً (أول B.limit). التحديد والاعتماد والرفض بالجملة لا يلمسون صورة ما شافها المراجع
@@ -222,7 +224,8 @@
         d.bulkCount = el('span', { className: 'rv-bulk__count', text: '' });
         d.bulkProgress = el('span', { className: 'rv-bulk__progress', id: 'rvBulkProgress', 'aria-live': 'polite', hidden: true });
         d.bulkHead = el('header', { className: 'rv-bulk__head' }, [
-            el('div', { className: 'rv-bulk__titles' }, [el('h1', { className: 'rv-bulk__h1', text: 'قائمة المراجعة' }), d.bulkCount, d.bulkProgress]),
+            el('div', { className: 'rv-bulk__titles' }, [el('h1', { className: 'rv-bulk__h1', text: 'قائمة المراجعة' }), d.bulkCount, d.bulkProgress,
+                                                          R.keysButton()]),
             R.modeToggle('bulk')
         ]);
         d.bulkBrand = el('select', { className: 'rv-brand__select', 'aria-label': 'الماركة' });
@@ -241,7 +244,21 @@
         d.bulkExport = el('a', { className: 'lq-btn lq-btn--ghost lq-btn--sm rv-bulk__export', href: S.urls.export,
                                  title: 'ملف CSV بكل صورة انحفظت ورابطها وحالتها: معتمدة من مراجع، أو آلية، أو مستبدلة' },
                           [icon('upload', 16), el('span', { text: 'تصدير سجل الصور (CSV)' })]);
+        d.bulkSearch = el('input', { type: 'search', className: 'lq-search__input', id: 'rvBulkSearch',
+                                     placeholder: 'اسم، باركود، أو رقم صف', autocomplete: 'off', spellcheck: 'false' });
+        let searchTimer = null;
+        d.bulkSearch.addEventListener('input', () => {
+            clearTimeout(searchTimer);
+            searchTimer = setTimeout(() => {
+                S.bulk.query = d.bulkSearch.value;
+                S.bulk.limit = PAGE;
+                seedSelection();
+                render();
+            }, 120);
+        });
         d.bulkTools = el('div', { className: 'rv-bulk__tools' }, [
+            el('label', { className: 'lq-search rv-search rv-bulk__search' }, [icon('search', 18),
+                el('span', { className: 'lq-sr-only', text: 'بحث بالبطاقات' }), d.bulkSearch]),
             el('label', { className: 'rv-brand' }, [el('span', { className: 'rv-brand__k', text: 'الماركة' }), d.bulkBrand]),
             d.bulkFilters,
             d.bulkExport
@@ -561,7 +578,7 @@
         drawChips(inBrand, loading, unread);
         paintProgress();
 
-        const visible = byFilter(inBrand, currentFilter());
+        const visible = visibleCards();
         const shown = visible.slice(0, B.limit);
         if (!B.seeded && S.load.state === 'ready') {
             B.seeded = true;
@@ -912,7 +929,7 @@
             }
             return true;
         }
-        if (key === 'a') {
+        if (key === 'a' || (key === 'Enter' && !(e && e.shiftKey))) {          // Enter متل وضع المنتج الواحد
             // بعد اعتماد بـ A والانتقال للبطاقة التالية: ضغطة ثانية سريعة لا تعتمدها قبل أن يراها المراجع
             if (Date.now() - (B.advancedAt || 0) < settleMs()) return true;
             const advance = () => {

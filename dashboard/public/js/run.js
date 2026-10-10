@@ -216,6 +216,22 @@
         return parts.join('&');
     }
 
+    /* The form a link asks for (?scope=rows&rows=… or ?scope=brand&brand=…), or null for the usual «كل الشيت». */
+    function linkedForm(search) {
+        var params;
+        try {
+            params = new URLSearchParams(String(search || ''));
+        } catch (e) {
+            return null;
+        }
+        var scope = params.get('scope');
+        var rows = C.normalizeRows(params.get('rows') || '').slice(0, 2000);
+        var brand = String(params.get('brand') || '').trim().slice(0, 120);
+        if (scope === 'rows' && /^[0-9][0-9 ,-]*$/.test(rows)) return { scope: 'rows', rows: rows, brand: '' };
+        if (scope === 'brand' && brand) return { scope: 'brand', rows: '', brand: brand };
+        return null;
+    }
+
     function has(n) {
         return (C.num(n) || 0) > 0;
     }
@@ -1327,7 +1343,10 @@
         }
 
         function searchBulkSites() {
-            if (!root.confirm(BULK_SITES_CONFIRM_TEXT)) return Promise.resolve();
+            return C.ask(BULK_SITES_CONFIRM_TEXT).then(function (ok) { if (ok) return runBulkSites(); });
+        }
+
+        function runBulkSites() {
             bulkNote('');
             var btn = $('bulk-sites');
             btn.disabled = true;
@@ -1362,9 +1381,11 @@
         }
 
         function undoBrand(brand, line, btn) {
-            if (!root.confirm('رح نشيل «' + brand + '» من Brands Mapping، بس إذا صفها لسا متل ما كتبناه. بدك تكمّل؟')) {
-                return Promise.resolve();
-            }
+            return C.ask('رح نشيل «' + brand + '» من جدول الماركات، بس إذا صفها لسا متل ما كتبناه. بدك تكمّل؟')
+                .then(function (ok) { if (ok) return removeBrand(brand, line, btn); });
+        }
+
+        function removeBrand(brand, line, btn) {
             btn.disabled = true;
             bulkNote('');
             return C.fetchJson('/api/run/brand-undo', { method: 'POST', body: { brand: brand } }).then(function (res) {
@@ -1383,7 +1404,10 @@
         function approveBulk() {
             var body = bulkApproveBody(bulkRows);
             if (!body.brands.length) return Promise.resolve();
-            if (!root.confirm(bulkConfirmText(body.brands.length))) return Promise.resolve();
+            return C.ask(bulkConfirmText(body.brands.length)).then(function (ok) { if (ok) return addBulk(body); });
+        }
+
+        function addBulk(body) {
             bulkNote('');
             var btn = $('bulk-approve');
             btn.disabled = true;
@@ -1618,6 +1642,28 @@
         $('barcodes-write').addEventListener('click', function () { writeBarcodes(); });
         $('export').addEventListener('click', function () { exportRun(); });
 
+        // ?scope=rows&rows=12,15 (or ?scope=brand&brand=X): a link from elsewhere («رجّع وشغّل» in the review list) opens
+        // the form on that scope, so «قبل ما تبدأ» prices exactly those rows and one click starts them
+        var linked = linkedForm(root.location && root.location.search);
+        if (linked) {
+            controller.state.form.scope = linked.scope;
+            controller.state.form.rows = linked.rows;
+            controller.state.form.brand = linked.brand;
+            var items = page.querySelectorAll('[data-run="scope"] .lq-segmented__item');
+            for (var si = 0; si < items.length; si++) {
+                items[si].setAttribute('aria-pressed', items[si].getAttribute('data-value') === linked.scope ? 'true' : 'false');
+            }
+            C.setHidden($('brand-field'), linked.scope !== 'brand');
+            C.setHidden($('rows-field'), linked.scope !== 'rows');
+            if (linked.scope === 'rows') $('rows').value = linked.rows;
+            if (linked.scope === 'brand') {
+                var pick = C.el(doc, 'option', null, linked.brand);
+                pick.value = linked.brand;
+                $('brand').appendChild(pick);
+                $('brand').value = linked.brand;
+            }
+        }
+
         var initial = null;
         var island = doc.getElementById('lq-run-initial');
         try {
@@ -1667,6 +1713,7 @@
         exportQuery: exportQuery,
         exportFileName: exportFileName,
         planQuery: planQuery,
+        linkedForm: linkedForm,
         runBody: runBody,
         createController: createController,
         mount: mount

@@ -1148,7 +1148,7 @@
         return c;
     }
 
-    // بحث القائمة: الاسم (إنجليزي أو عربي) أو البراند أو الباركود أو رقم الصف
+    // بحث القائمة: الاسم (إنجليزي أو عربي) أو البراند أو الباركود أو رقم الصف أو SKU (sku_key كامل أو بدايته)
     function matchesQuery(item, query) {
         const q = norm(digits(query));
         if (!q) return true;
@@ -1157,6 +1157,7 @@
             if (String(parseInt(p.row_number, 10)) === q) return true;
             if (String(p.barcode || '').replace(/\D/g, '').includes(q)) return true;
         }
+        if (q.length >= 4 && norm(p.sku_key).startsWith(q)) return true;
         return [p.product_name, p.product_name_ar, p.brand, p.brand_ar, p.barcode].some(v => norm(v).includes(q));
     }
 
