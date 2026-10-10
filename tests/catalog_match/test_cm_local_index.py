@@ -493,3 +493,90 @@ def test_a_transient_failure_keeps_what_an_earlier_read_found():
     assert (row.page_status, row.image_url, row.image_width, row.gtin) == ("connection_error", "https://x/i.jpg", 900,
                                                                            "08906008560022")
     assert [r.id for r in store.by_gtin("08906008560022")] == [1]
+
+
+# ---------------------------------------------------------------------------
+# Sitemap images: a candidate without a page read
+# ---------------------------------------------------------------------------
+
+SITEMAP_IMAGE = "https://cdn.luluhypermarket.com/medias/ashoka-plain-paratha-400g.jpg"
+
+
+def test_a_row_whose_sitemap_named_its_image_gives_a_candidate_without_a_page_read():
+    paratha = LULU.format("ashoka-plain-paratha-400-g", 2)
+    store = MemoryCatalogStore()
+    store.upsert("lulu", [(paratha, None, SITEMAP_IMAGE)])
+    fetcher = FakeFetcher({paratha: {"name": "Ashoka Plain Paratha 400 g"}})
+    res = provider(store, fetcher).lookup(spec_for())
+    assert res.status == "ok" and fetcher.calls == []                    # no live read
+    (c,) = res.candidates
+    assert (c.image_url, c.page_url, c.domain) == (SITEMAP_IMAGE, paratha, "gcc.luluhypermarket.com")
+    assert (c.provider, c.query_id, c.sanctioned) == ("local_index", "IDX", False)   # verified like any candidate
+    assert (c.width, c.height) == (None, None)                           # the size is measured on download
+
+
+def test_a_sitemap_image_still_comes_when_the_stores_host_refuses_page_reads():
+    paratha = CARREFOUR.format("ashoka-plain-paratha-400g", 7)
+    refused = [CARREFOUR.format(f"ashoka-plain-paratha-400g-{i}", i) for i in range(1, 4)]
+    fetcher = FakeFetcher(errors={u: "http_403" for u in refused})
+    for u in refused:
+        provider(index(("carrefour_uae", u)), fetcher, max_pages=1).lookup(spec_for())
+    assert local_index.host_blocked("carrefouruae.com")
+    store = MemoryCatalogStore()
+    store.upsert("carrefour_uae", [(paratha, None, SITEMAP_IMAGE)])
+    res = provider(store, fetcher).lookup(spec_for())
+    assert [c.image_url for c in res.candidates] == [SITEMAP_IMAGE] and paratha not in fetcher.calls
+
+
+def test_a_page_read_that_ended_for_good_owns_the_image_and_a_sitemap_does_not_overwrite_it():
+    paratha = LULU.format("ashoka-plain-paratha-400-g", 2)
+    store = MemoryCatalogStore()
+    store.upsert("lulu", [(paratha, None)])
+    store.save_page(1, PageRecord(status="no_image"))                    # the page has no product image
+    store.upsert("lulu", [(paratha, None, SITEMAP_IMAGE)])
+    assert store.rows[1].image_url == ""
+    res = provider(store, FakeFetcher()).lookup(spec_for())
+    assert res.status == "empty"                                         # known dead: neither read nor offered
+    store.save_page(1, PageRecord(status="ok", image_url="https://cdn.example.com/read.jpg", width=900, height=900))
+    store.upsert("lulu", [(paratha, None, SITEMAP_IMAGE)])
+    assert (store.rows[1].image_url, store.rows[1].image_width) == ("https://cdn.example.com/read.jpg", 900)
+
+
+def test_a_sitemap_image_replaces_nothing_after_a_failed_read_but_fills_a_row_never_read():
+    paratha = LULU.format("ashoka-plain-paratha-400-g", 2)
+    store = MemoryCatalogStore()
+    store.upsert("lulu", [(paratha, None)])
+    store.save_page(1, PageRecord(status="timeout"))                     # a transient failure: no image known
+    store.upsert("lulu", [(paratha, None, SITEMAP_IMAGE)])
+    assert store.rows[1].image_url == SITEMAP_IMAGE
+    fetcher = FakeFetcher()
+    assert [c.image_url for c in provider(store, fetcher).lookup(spec_for()).candidates] == [SITEMAP_IMAGE]
+    assert fetcher.calls == []
+    store.upsert("lulu", [(paratha, None, "javascript:alert(1)")])       # only http(s) images are kept
+    assert store.rows[1].image_url == SITEMAP_IMAGE
+
+
+# ---------------------------------------------------------------------------
+# A host that refuses page reads: left alone for the run, logged once, queued reads not sent
+# ---------------------------------------------------------------------------
+
+def test_reads_queued_before_a_host_reached_its_limit_are_not_sent_and_keep_their_record(monkeypatch):
+    monkeypatch.setattr(local_index, "FETCH_WORKERS", 1)                 # one read after the other: deterministic
+    urls = [CARREFOUR.format(f"ashoka-plain-paratha-400g-{i}", i) for i in range(1, 6)]
+    store = index(*(("carrefour_uae", u) for u in urls))
+    fetcher = FakeFetcher(errors={u: "http_403" for u in urls})
+    provider(store, fetcher, max_pages=5).lookup(spec_for())
+    assert len(fetcher.calls) == local_index.BLOCKED_HOST_LIMIT          # the other two were queued, never sent
+    statuses = sorted(r.page_status for r in store.rows.values())
+    assert statuses == ["", ""] + ["http_403"] * local_index.BLOCKED_HOST_LIMIT   # nothing asked: nothing recorded
+
+
+def test_a_blocked_host_is_logged_once_per_run(caplog):
+    urls = [CARREFOUR.format(f"ashoka-plain-paratha-400g-{i}", i) for i in range(1, 7)]
+    fetcher = FakeFetcher(errors={u: "http_403" for u in urls})
+    with caplog.at_level("INFO", logger="catalog_match.local_index"):
+        for u in urls:
+            provider(index(("carrefour_uae", u)), fetcher, max_pages=1).lookup(spec_for())
+    notes = [r for r in caplog.records if "refused" in r.getMessage()]
+    assert len(notes) == 1 and notes[0].levelname == "WARNING" and "carrefouruae.com" in notes[0].getMessage()
+    assert len(fetcher.calls) == local_index.BLOCKED_HOST_LIMIT

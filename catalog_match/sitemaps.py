@@ -6,7 +6,8 @@ load_stores(path=None) -> [StoreConfig]
 
 SitemapHarvester().harvest(store, on_urls=None, max_urls=None, max_sitemaps=None, discover=False)
     -> HarvestReport
-    Reads the store's published sitemaps and hands every product URL to on_urls([(url, lastmod)])
+    Reads the store's published sitemaps and hands every product URL to on_urls([(url, lastmod)], or
+    (url, lastmod, image_url) when the sitemap names the page's image)
     in batches (on_urls returns how many were new). With discover=True the sitemap indexes are read
     first (children named '...index...' before the others, and past the cap) but at most
     DISCOVER_URLSETS lists of URLs, and samples of matching and non-matching URLs are kept, so the
@@ -34,7 +35,9 @@ Only what a store publishes for crawlers is read, and nothing is worked around:
   browser fingerprint, no other headers: the client says who it is (USER_AGENT).
 * Sitemap indexes are followed to MAX_DEPTH. A .gz sitemap is decompressed to at most MAX_XML_BYTES.
   A document with a DOCTYPE, or not UTF-8 (the sitemap protocol's encoding), is refused (no entity
-  expansion), and only <loc> / <lastmod> are read. A broken file is one failed sitemap, never the
+  expansion), and only <loc> / <lastmod> are read, plus a product <url>'s first <image:image><image:loc> (Google's
+  image extension: handed over as (url, lastmod, image_url) and kept in catalog_products.image_url, so the local
+  index can offer that image without reading the page). A broken file is one failed sitemap, never the
   end of the run; MAX_UNANSWERED files in a row without any answer (timeouts) end that store's turn ('error').
 * Only URLs on the store's hosts whose path matches its product pattern are kept.
 * SSRF guard (net_guard): redirects are not left to the client; every request and every redirect hop goes only to
@@ -200,8 +203,10 @@ def decompress(body: bytes, limit: int = MAX_XML_BYTES) -> bytes:
     return data
 
 
-def parse_sitemap(data: bytes) -> Tuple[str, List[Tuple[str, Optional[str]]]]:
-    """('index' | 'urlset', [(loc, lastmod)]) of one sitemap document."""
+def parse_sitemap(data: bytes, images: Optional[Dict[str, str]] = None
+                  ) -> Tuple[str, List[Tuple[str, Optional[str]]]]:
+    """('index' | 'urlset', [(loc, lastmod)]) of one sitemap document. images: filled with {loc: the first
+    <image:image><image:loc> of that <url>} (Google's image sitemap extension) when the sitemap names one."""
     if data[:2] in (b"\xff\xfe", b"\xfe\xff") or b"\x00" in data[:512]:
         raise SitemapError("not utf-8")          # the protocol's encoding; a UTF-16 file would hide a DOCTYPE
     if looks_like_html(data):
@@ -218,15 +223,22 @@ def parse_sitemap(data: bytes) -> Tuple[str, List[Tuple[str, Optional[str]]]]:
                     kind = {"sitemapindex": "index", "urlset": "urlset"}.get(tag, tag or "?")
                 continue
             if tag in ("url", "sitemap"):
-                loc = lastmod = None
+                loc = lastmod = image = None
                 for child in elem:
                     ctag = _local(child.tag)
                     if ctag == "loc":
                         loc = (child.text or "").strip()
                     elif ctag == "lastmod":
                         lastmod = (child.text or "").strip() or None
+                    elif ctag == "image" and image is None and tag == "url":
+                        for part in child:
+                            if _local(part.tag) == "loc" and (part.text or "").strip():
+                                image = (part.text or "").strip()
+                                break
                 if loc:
                     out.append((loc, lastmod))
+                    if image and images is not None:
+                        images.setdefault(loc, image)
                 elem.clear()
     except (ET.ParseError, ValueError, LookupError) as exc:      # also an unknown or multi-byte encoding
         raise SitemapError(f"bad xml: {exc}") from exc
@@ -419,6 +431,7 @@ class HarvestReport:
     tree: List[Dict[str, Any]] = field(default_factory=list)       # one entry per sitemap read
     urls_seen: int = 0
     product_urls: int = 0
+    product_images: int = 0           # product URLs whose <url> named their image (<image:loc>)
     new_urls: int = 0
     pruned: int = 0
     truncated: bool = False
@@ -606,10 +619,11 @@ class SitemapHarvester:
                 rep.skipped.append((url, error))
                 rep.status, rep.error = "error", f"{unanswered} sitemap files in a row got no answer ({error}): stopped"
                 break
+            images: Dict[str, str] = {}
             try:
                 if body is None:
                     raise SitemapError(error or "error")
-                kind, entries = parse_sitemap(decompress(body))
+                kind, entries = parse_sitemap(decompress(body), images)
             except SitemapError as exc:
                 rep.skipped.append((url, str(exc)))
                 if depth == 0 and rep.sitemaps_read == 0:
@@ -632,13 +646,16 @@ class SitemapHarvester:
                     queue.extend((c, depth + 1) for c in children)
                 continue
             urlsets += 1
-            products = [(loc, lastmod) for loc, lastmod in entries if store.is_product(loc)]
+            # a product page whose <url> names its image hands it over too: (loc, lastmod, image_url)
+            products = [(loc, lastmod, images[loc]) if images.get(loc) else (loc, lastmod)
+                        for loc, lastmod in entries if store.is_product(loc)]
             rep.tree.append({"depth": depth, "url": url, "kind": "urlset", "entries": len(entries),
                              "products": len(products), "parent": parent_of.get(url)})
             rep.urls_seen += len(entries)
             rep.product_urls += len(products)
-            for loc, _ in products[:SAMPLES - len(rep.product_samples)]:
-                rep.product_samples.append(loc)
+            rep.product_images += sum(1 for p in products if len(p) > 2)
+            for p in products[:SAMPLES - len(rep.product_samples)]:
+                rep.product_samples.append(p[0])
             for loc, _ in entries:
                 if len(rep.other_samples) >= SAMPLES:
                     break
@@ -718,6 +735,7 @@ def format_report(rep: HarvestReport, store: Optional[StoreConfig] = None, disco
             for url, reason in rep.skipped[:30]:
                 lines.append(f"     - {url} ({reason})")
     lines.append(f"   {rep.sitemaps_read} sitemaps read, {rep.urls_seen} urls, {rep.product_urls} product pages"
+                 + (f" ({rep.product_images} with their image)" if rep.product_images else "")
                  + (f", {rep.new_urls} new" if not discover else "") + (" (stopped at a limit)" if rep.truncated else ""))
     if rep.pruned:
         lines.append(f"   {rep.pruned} pages no longer listed were removed")

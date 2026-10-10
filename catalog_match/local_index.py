@@ -16,7 +16,10 @@ parallel with the first web query:
      below MIN_COVERAGE of the product-type words;
      the rest are ranked with score.rank_key, one row per store first;
   3. walking the ranked rows, the first LOCAL_INDEX_MAX_PAGES usable ones give candidates: a row
-     read within LOCAL_INDEX_PAGE_TTL_DAYS gives what its page said then, an unread or stale row is
+     read within LOCAL_INDEX_PAGE_TTL_DAYS gives what its page said then; a row whose store's sitemap
+     named the page's image (<image:loc>, stored at harvest time: catalog_match.sitemaps) gives that
+     image without a page read, unless a page read that ended for good says otherwise (the image is
+     still downloaded, quality-checked and verified like every candidate); an unread or stale row is
      read now (pages.PageFetcher, in parallel) for its main image, product name and GTIN. A row
      known to be dead (redirected, no image, 404 / 410), one that failed in the last
      FAILED_PAGE_TTL_H and one on a host left alone is skipped and takes no slot. What a page
@@ -29,7 +32,7 @@ parallel with the first web query:
 
 A page that now redirects elsewhere (sold out, delisted) gives nothing and is remembered as such.
 A store host that refused or timed out BLOCKED_HOST_LIMIT reads in a row is not asked again in
-this process.
+this process (logged once; reads already queued for it are not sent either).
 The index never stops the web search early (retrieve.t1_early_stop) and its answers never make a
 web-search outage look healthy (decide.LOOKUP_PROVIDERS): it only adds candidates.
 
@@ -64,6 +67,9 @@ CANDIDATE_ROWS = 200           # rows pulled from the index per brand phrase, mo
 MIN_COVERAGE = 0.5             # share of the SKU's product-type words a row's slug / title must hold
 FAILED_PAGE_TTL_H = 24         # a timeout, 5xx or refusal is retried the next day
 PERMANENT_PAGE_STATUSES = ("ok", "redirected", "no_image", "http_404", "http_410")
+# upsert: the row's image stays when the sitemap names none or a page read that ended for good owns it
+_KEEP_IMAGE_SQL = ("VALUES(image_url) IS NULL OR page_status IN ("
+                   + ", ".join(f"'{s}'" for s in PERMANENT_PAGE_STATUSES) + ")")
 BLOCKED_HOST_LIMIT = 3         # refusals in a row before a host is left alone for this process
 MAX_TOKEN_LEN = 64
 MAX_NAME_KEYS = 12
@@ -205,9 +211,10 @@ class MemoryCatalogStore:
         self._generation += 1
         return self._generation
 
-    def upsert(self, store: str, entries: Iterable[Tuple[str, Optional[str]]]) -> int:
+    def upsert(self, store: str, entries: Iterable[Sequence[Any]]) -> int:
         new = 0
-        for url, _lastmod in entries:
+        for entry in entries:
+            url, _lastmod, image = _entry(entry)
             url = clean_url(url)
             key = url_hash(url)
             row_id = self._by_hash.get(key)
@@ -220,6 +227,9 @@ class MemoryCatalogStore:
                 self._by_hash[key] = row_id
                 self._add_tokens(row_id, self.rows[row_id].slug_text)
                 new += 1
+            row = self.rows[row_id]
+            if image and row.page_status not in PERMANENT_PAGE_STATUSES:    # a finished page read owns the image
+                self.rows[row_id] = replace(row, image_url=image, image_width=None, image_height=None)
             self._seen[row_id] = self._generation
         return new
 
@@ -282,7 +292,7 @@ class MemoryCatalogStore:
             s = by_store.setdefault(r.store, {"store": r.store, "products": 0, "pages_read": 0, "with_image": 0})
             s["products"] += 1
             s["pages_read"] += int(bool(r.page_status))
-            s["with_image"] += int(r.page_status == "ok" and bool(r.image_url))
+            s["with_image"] += int(bool(r.image_url))
         return [by_store[k] for k in sorted(by_store)]
 
 
@@ -342,10 +352,12 @@ class DbCatalogStore:
         finally:
             conn.close()
 
-    def upsert(self, store: str, entries: Iterable[Tuple[str, Optional[str]]]) -> int:
-        """Insert new product URLs (with their slug words) and mark known ones seen; returns how many were new."""
+    def upsert(self, store: str, entries: Iterable[Sequence[Any]]) -> int:
+        """Insert new product URLs (with their slug words) and mark known ones seen; returns how many were new.
+        entries: (url, lastmod), or (url, lastmod, image_url) when the sitemap names the page's image (<image:loc>):
+        kept in image_url unless a page read that ended for good (ok, no_image, redirected, gone) owns it."""
         new = 0
-        batch: List[Tuple[str, Optional[str]]] = []
+        batch: List[Sequence[Any]] = []
         for entry in entries:
             batch.append(entry)
             if len(batch) >= self.BATCH:
@@ -357,12 +369,14 @@ class DbCatalogStore:
             self._count_cache.clear()
         return new
 
-    def _upsert_batch(self, store: str, batch: List[Tuple[str, Optional[str]]]) -> int:
-        rows: Dict[str, Tuple[str, str, Optional[str]]] = {}
-        for url, lastmod in batch:
+    def _upsert_batch(self, store: str, batch: List[Sequence[Any]]) -> int:
+        rows: Dict[str, Tuple[str, str, Optional[str], Optional[str], Optional[str]]] = {}
+        for entry in batch:
+            url, lastmod, image = _entry(entry)
             url = clean_url(url)
             if url:
-                rows[url_hash(url)] = (url, slug_text(url), (lastmod or None) and str(lastmod)[:32], _url_gtin_of(url))
+                rows[url_hash(url)] = (url, slug_text(url), (lastmod or None) and str(lastmod)[:32], _url_gtin_of(url),
+                                       image or None)
         if not rows:
             return 0
         hashes = list(rows)
@@ -372,12 +386,16 @@ class DbCatalogStore:
             with conn.cursor() as cur:
                 cur.execute(f"SELECT url_hash FROM catalog_products WHERE url_hash IN ({marks})", hashes)
                 known = {r["url_hash"] for r in cur.fetchall()}
+                # a sitemap image replaces only what no finished page read owns; the size columns are the page's
                 cur.executemany(
-                    "INSERT INTO catalog_products (store, url, url_hash, slug_text, lastmod, url_gtin, first_seen, "
-                    "last_seen) VALUES (%s, %s, %s, %s, %s, %s, NOW(), NOW()) "
+                    "INSERT INTO catalog_products (store, url, url_hash, slug_text, lastmod, url_gtin, image_url, "
+                    "first_seen, last_seen) VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), NOW()) "
                     "ON DUPLICATE KEY UPDATE store = VALUES(store), lastmod = VALUES(lastmod), "
-                    "url_gtin = VALUES(url_gtin), last_seen = NOW()",
-                    [(store, u, h, s[:512], m, g) for h, (u, s, m, g) in rows.items()])
+                    "url_gtin = VALUES(url_gtin), last_seen = NOW(), "
+                    f"image_width = IF({_KEEP_IMAGE_SQL}, image_width, NULL), "
+                    f"image_height = IF({_KEEP_IMAGE_SQL}, image_height, NULL), "
+                    f"image_url = IF({_KEEP_IMAGE_SQL}, image_url, VALUES(image_url))",
+                    [(store, u, h, s[:512], m, g, img) for h, (u, s, m, g, img) in rows.items()])
                 fresh = [h for h in hashes if h not in known]
                 if fresh:
                     marks = ",".join(["%s"] * len(fresh))
@@ -523,7 +541,7 @@ class DbCatalogStore:
             with conn.cursor() as cur:
                 cur.execute(
                     "SELECT store, COUNT(*) AS products, SUM(page_checked_at IS NOT NULL) AS pages_read, "
-                    "SUM(page_status = 'ok' AND image_url IS NOT NULL) AS with_image "
+                    "SUM(image_url IS NOT NULL) AS with_image "
                     "FROM catalog_products GROUP BY store ORDER BY store")
                 out = [{"store": r["store"], "products": int(r["products"] or 0),
                         "pages_read": int(r["pages_read"] or 0), "with_image": int(r["with_image"] or 0)}
@@ -560,6 +578,14 @@ def search_keys(spec: SkuSpec) -> Tuple[List[List[str]], List[str]]:
             if key not in brand_keys and key not in UNIT_WORDS and key not in extra:
                 extra.append(key)
     return groups, extra[:MAX_NAME_KEYS]
+
+
+def _entry(entry: Sequence[Any]) -> Tuple[str, Optional[str], str]:
+    """(url, lastmod, image_url) of one harvested entry, given as (url, lastmod) or (url, lastmod, image_url)."""
+    url = str(entry[0] or "")
+    lastmod = entry[1] if len(entry) > 1 else None
+    image = str(entry[2] or "").strip() if len(entry) > 2 else ""
+    return url, lastmod, (image[:2048] if image.lower().startswith(("http://", "https://")) else "")
 
 
 def _url_gtin_of(url: str) -> Optional[str]:
@@ -624,15 +650,26 @@ def rank_rows(spec: SkuSpec, rows: Sequence[CatalogRow], max_pages: Optional[int
 # ---------------------------------------------------------------------------
 
 _blocked_hosts: Dict[str, int] = {}
+_blocked_logged: Set[str] = set()
 _blocked_lock = threading.Lock()
 
 
 def _note_host(host: str, status: str) -> None:
+    """Counts a host's refusals in a row (HOST_FAILURE_STATUSES: a 403, 429, timeout or lost connection); a real
+    answer starts the count again. The read that reaches BLOCKED_HOST_LIMIT is logged, once per host and process."""
+    newly = False
     with _blocked_lock:
         if status in HOST_FAILURE_STATUSES:
             _blocked_hosts[host] = _blocked_hosts.get(host, 0) + 1
+            newly = _blocked_hosts[host] >= BLOCKED_HOST_LIMIT and host not in _blocked_logged
+            if newly:
+                _blocked_logged.add(host)
         elif status in PERMANENT_PAGE_STATUSES:
             _blocked_hosts.pop(host, None)
+            _blocked_logged.discard(host)
+    if newly:
+        logger.warning("local index: %s refused %d page reads in a row (last: %s); its pages are not read again in "
+                       "this run", host, BLOCKED_HOST_LIMIT, status)
 
 
 def host_blocked(host: str) -> bool:
@@ -643,6 +680,7 @@ def host_blocked(host: str) -> bool:
 def reset_blocked_hosts() -> None:
     with _blocked_lock:
         _blocked_hosts.clear()
+        _blocked_logged.clear()
 
 
 class LocalIndexProvider(BaseProvider):
@@ -704,6 +742,12 @@ class LocalIndexProvider(BaseProvider):
         ttl = self.page_ttl_h if row.page_status in PERMANENT_PAGE_STATUSES else FAILED_PAGE_TTL_H
         return row.page_age_h < ttl
 
+    @staticmethod
+    def _sitemap_image(row: CatalogRow) -> bool:
+        """The row holds the image its store's sitemap names (<image:loc>, stored at harvest time) and no page read
+        ended for good since (that read owns the image): a candidate without reading the page."""
+        return bool(row.image_url) and row.page_status not in PERMANENT_PAGE_STATUSES
+
     def lookup_gtins(self, spec: SkuSpec, gtins: Sequence[str], known_pages: Sequence[str] = ()) -> Any:
         """The indexed pages of these barcodes (other stores' URL barcodes for a row without one; see the module
         docstring), as a ProviderResult under GTIN_QUERY_ID. Pages already in the pool are not read again. Never
@@ -738,19 +782,24 @@ class LocalIndexProvider(BaseProvider):
                 raise ProviderEmpty("no indexed page of this brand and product")
         found: Dict[int, List[Candidate]] = {}
         todo: List[Tuple[int, CatalogRow]] = []
-        used = skipped = 0
+        used = skipped = from_sitemap = 0
         for i, (row, _score) in enumerate(ranked):
             if used >= self.max_pages:
                 break
-            if self._fresh(row):
+            if self._fresh(row) and row.page_status in PERMANENT_PAGE_STATUSES:
                 if row.page_status == "ok" and row.image_url:
                     found[i] = [row_candidate(row, rank=i + 1)]
                     used += 1
                 else:
-                    skipped += 1     # known dead, or failed lately: no slot
-            elif host_blocked(url_host(row.url)):
-                skipped += 1
-                logger.info("local index: %s refused earlier reads; not asked again in this run", url_host(row.url))
+                    skipped += 1     # known dead: no slot
+            elif self._sitemap_image(row):
+                # the store's sitemap named the page's image: no page read, also on a host that refuses them (the
+                # image is still downloaded, quality-checked and verified like any candidate)
+                found[i] = [row_candidate(row, rank=i + 1)]
+                used += 1
+                from_sitemap += 1
+            elif self._fresh(row) or host_blocked(url_host(row.url)):
+                skipped += 1         # failed lately, or its host refused page reads in this run: no slot
             else:
                 todo.append((i, row))
                 used += 1
@@ -759,8 +808,8 @@ class LocalIndexProvider(BaseProvider):
                 if cands:
                     found[i] = cands
         out = [c for i in sorted(found) for c in found[i]]
-        logger.info("local index sku=%s: %d rows ranked, %d skipped, %d pages read now, %d candidates",
-                    spec.sku_key, len(ranked), skipped, len(todo), len(out))
+        logger.info("local index sku=%s: %d rows ranked, %d skipped, %d sitemap images, %d pages read now, "
+                    "%d candidates", spec.sku_key, len(ranked), skipped, from_sitemap, len(todo), len(out))
         if not out:
             raise ProviderEmpty("indexed pages gave no product image")
         return out
@@ -788,6 +837,10 @@ class LocalIndexProvider(BaseProvider):
         """Read one indexed page, remember what it said, and return its candidate."""
         from .pages import page_candidates, page_gtin, page_title_of
 
+        if host_blocked(url_host(row.url)):
+            # queued in parallel (this product's reads, other products') before the host reached its limit: not
+            # sent, and the row keeps its record (nothing was asked)
+            return []
         info = self.fetcher().fetch_page(row.url)
         cands: List[Candidate] = []
         if not info.ok:

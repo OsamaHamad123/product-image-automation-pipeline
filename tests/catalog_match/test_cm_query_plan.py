@@ -377,3 +377,22 @@ def test_live_rows_give_search_text_without_shorthand():
             assert len(stated) == 1, where
             assert (stated[0].dimension, stated[0].base_value, stated[0].pack_count) == (
                 spec.size.dimension, spec.size.base_value, spec.size.pack_count), where
+
+
+def test_q3_is_left_out_while_the_serper_account_refuses_site_operators():
+    """A free Serper plan refuses site: (remembered for a week, providers/serper.py): Q3 sent in its plain form
+    would be Q1 again, one paid call for nothing. N1 has words of its own, so it stays (sent plain by the provider)."""
+    from catalog_match.models import QueryHint
+    from catalog_match.providers import serper
+    from catalog_match.query_plan import with_hint
+
+    spec = spec_for(name="Almarai Fresh Milk Full Fat 1L", name_ar="حليب المراعي كامل الدسم 1 لتر",
+                    brand="Almarai", barcode=VALID_EAN)
+    serper.remember_site_operators_blocked()
+    serper.SerperImagesProvider.operators_blocked = False           # another process: only the file says so
+    assert [q.query_id for q in build_queries(spec)] == ["Q1", "Q2", "Q4"]
+    hinted = with_hint(spec, QueryHint(expanded_name="Almarai Fresh Full Cream Milk 1L", brand="Almarai"))
+    assert "N1" in [q.query_id for q in build_queries(hinted)]
+    serper.OPERATORS_BLOCKED_PATH.unlink()
+    serper.SerperImagesProvider.operators_blocked = False
+    assert [q.query_id for q in build_queries(spec)] == ["Q1", "Q2", "Q3", "Q4"]

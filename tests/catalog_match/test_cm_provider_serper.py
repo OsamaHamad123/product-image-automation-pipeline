@@ -224,3 +224,62 @@ def test_amazon_overlay_modifiers_are_stripped_from_image_urls():
     res = provider(SequenceSession(FakeResponse(200, body))).search("q", "en", SPEC)
     assert [c.image_url for c in res.candidates] == ["https://m.media-amazon.com/images/I/71Q2ZbQf6xL.jpg",
                                                      "https://f.nooncdn.com/p/pnsku/N1/45/_/1/abc.jpg"]
+
+
+# ---------------------------------------------------------------------------
+# The site: refusal is remembered across processes (temp/serper_site_operators_blocked.json, a week)
+# ---------------------------------------------------------------------------
+
+def _new_process():
+    """What the next process starts with: the class flag is learned again, the file is still there."""
+    SerperImagesProvider.operators_blocked = False
+
+
+def test_a_site_refusal_is_remembered_by_the_next_process_without_a_wasted_call():
+    provider(SequenceSession(NOT_ALLOWED, FakeResponse(200, load("serper_images_ok.json")))).search(SITE_QUERY, "en",
+                                                                                                    SPEC)
+    assert serper_mod.OPERATORS_BLOCKED_PATH.is_file()
+    _new_process()
+    later = SequenceSession(FakeResponse(200, load("serper_images_ok.json")))
+    provider(later).search(SITE_QUERY, "en", SPEC)
+    assert later.queries == ["Almarai Fresh Milk Full Fat 1L UAE"]        # no refused call first
+
+
+def test_the_remembered_refusal_expires_so_an_upgraded_plan_is_used_again():
+    now = [1_000_000.0]
+    serper_mod.remember_site_operators_blocked(now=lambda: now[0])
+    _new_process()
+    now[0] += serper_mod.OPERATORS_BLOCKED_TTL_S - 60
+    assert serper_mod.site_operators_blocked(now=lambda: now[0]) is True
+    _new_process()
+    now[0] += 120                                                         # a week and a minute later
+    assert serper_mod.site_operators_blocked(now=lambda: now[0]) is False
+    upgraded = SequenceSession(FakeResponse(200, load("serper_images_ok.json")))
+    provider(upgraded).search(SITE_QUERY, "en", SPEC)
+    assert upgraded.queries == [SITE_QUERY]
+
+
+def test_an_unreadable_or_missing_file_means_not_blocked():
+    assert serper_mod.site_operators_blocked() is False
+    serper_mod.OPERATORS_BLOCKED_PATH.write_text("not json", encoding="utf-8")
+    assert serper_mod.site_operators_blocked() is False
+
+
+def test_a_recorded_or_replayed_run_neither_reads_nor_writes_the_file(monkeypatch):
+    serper_mod.remember_site_operators_blocked()
+    _new_process()
+    monkeypatch.setattr(serper_mod.cassette, "active", lambda: object())
+    assert serper_mod.site_operators_blocked() is False                   # learns from its own answers only
+    serper_mod.OPERATORS_BLOCKED_PATH.unlink()
+    serper_mod.remember_site_operators_blocked()
+    assert SerperImagesProvider.operators_blocked is True and not serper_mod.OPERATORS_BLOCKED_PATH.exists()
+
+
+def test_the_web_search_provider_shares_the_remembered_refusal():
+    from catalog_match.providers.serper_web import SerperWebProvider
+
+    serper_mod.remember_site_operators_blocked()
+    _new_process()
+    session = SequenceSession(FakeResponse(200, {"organic": []}))
+    SerperWebProvider(api_key="k", session=session, bucket=ratelimit.UNLIMITED).search(SITE_QUERY, "en", SPEC)
+    assert session.queries == ["Almarai Fresh Milk Full Fat 1L UAE"]

@@ -20,7 +20,9 @@ check is reported BLOCKED and skipped (catalog_match/sitemaps.py). Product pages
 later, a few per product, while the pipeline searches (catalog_match/local_index.py).
 
 --refresh is what the nightly run and the worker start in the background by themselves (catalog_match/index_refresh.py,
-LOCAL_INDEX_REFRESH_DAYS / LOCAL_INDEX_REFRESH_MAX_S) and what the dashboard's «حدّث الفهرس هلق» button runs.
+LOCAL_INDEX_REFRESH_DAYS / LOCAL_INDEX_REFRESH_MAX_S) and what the dashboard's «حدّث الفهرس هلق» button runs. On the
+Ubuntu server laqta-index-refresh.timer also runs it every day at 04:30 UTC (--refresh --budget-s 3600), inside
+Sharjah Co-op's crawl window (04:00-08:45 UTC, SHARJAHCOOP_CRAWL_WINDOW): the 02:00 nightly is outside it.
 
 Writes go to the local MariaDB only (tables catalog_products, catalog_tokens, catalog_harvests);
 nothing is written to the sheet or to Cloudinary.
@@ -86,6 +88,9 @@ def main(argv=None) -> int:
                            "LOCAL_INDEX_REFRESH_MAX_S seconds; --stores / --max-urls do not apply")
     parser.add_argument("--force", action="store_true", help="with --refresh: every enabled store, stale or not")
     parser.add_argument("--trigger", default="manual", help="with --refresh: who asked (recorded in the progress file)")
+    parser.add_argument("--budget-s", type=float,
+                        help="with --refresh: seconds this refresh may run (default LOCAL_INDEX_REFRESH_MAX_S); the "
+                             "laqta-index-refresh timer gives it longer, inside Sharjah Co-op's crawl window")
     parser.add_argument("--max-urls", type=int, help="stop a store after this many product pages")
     parser.add_argument("--max-sitemaps", type=int, help="stop a store after reading this many sitemap files")
     parser.add_argument("--prune", action="store_true",
@@ -157,7 +162,9 @@ def main(argv=None) -> int:
 
 
 def _refresh(args) -> int:
-    """The automatic refresh, in the foreground (catalog_match/index_refresh.py): 0 when it ran or had nothing to do."""
+    """The automatic refresh, in the foreground (catalog_match/index_refresh.py): 0 when it ran or had nothing to do,
+    3 when it did not start because it is off or another refresh is running (not a failure: the systemd unit
+    laqta-index-refresh.service counts 3 as a success), 1 when it failed, 2 without a database."""
     from catalog_match import index_refresh
 
     db, why = _db_store()
@@ -166,9 +173,10 @@ def _refresh(args) -> int:
         if args.trigger == "dashboard":
             index_refresh.record_end("unavailable")       # the dashboard's button job: say it is over
         return 2
-    result = index_refresh.refresh(db=db, trigger=args.trigger, force=args.force)
+    result = index_refresh.refresh(db=db, trigger=args.trigger, force=args.force, budget_s=args.budget_s)
     print(index_refresh.format_result(result))
-    return 0 if result.get("reason") in ("done", "budget", "nothing_due") else 1
+    reason = result.get("reason")
+    return 0 if reason in ("done", "budget", "nothing_due") else 3 if reason in ("off", "running") else 1
 
 
 def _harvest_one(harvester, store, db, args):

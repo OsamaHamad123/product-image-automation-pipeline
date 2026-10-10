@@ -594,3 +594,40 @@ def test_cli_one_store_failing_never_stops_the_others_and_the_json_is_written(mo
     assert code == 0 and [r["status"] for r in reports] == ["error", "ok"]
     assert "database went away" in reports[0]["error"]
     assert [h["store"] for h in store.harvests] == ["lulu", "spinneys"]   # both recorded
+
+
+# ---------------------------------------------------------------------------
+# Image sitemaps: <image:image><image:loc> is kept, so the index can offer the image without reading the page
+# ---------------------------------------------------------------------------
+
+IMAGE_NS = 'xmlns:image="http://www.google.com/schemas/sitemap-image/1.1"'
+IMAGE_1 = "https://cdn.luluhypermarket.com/medias/2072326-01.jpg"
+
+
+def image_urlset(*items):
+    """items: (loc, image or None)."""
+    body = "".join(f"<url><loc>{loc}</loc>"
+                   + (f"<image:image><image:loc>{img}</image:loc><image:title>x</image:title></image:image>"
+                      f"<image:image><image:loc>{img}-back.jpg</image:loc></image:image>" if img else "")
+                   + "</url>" for loc, img in items)
+    return f'<?xml version="1.0" encoding="UTF-8"?><urlset {NS} {IMAGE_NS}>{body}</urlset>'.encode()
+
+
+def test_parse_sitemap_keeps_the_first_image_of_each_url_but_never_takes_it_for_the_page():
+    images = {}
+    kind, entries = parse_sitemap(image_urlset((PRODUCT_1, IMAGE_1), (PRODUCT_2, None)), images)
+    assert kind == "urlset" and entries == [(PRODUCT_1, None), (PRODUCT_2, None)]   # the page's own <loc> only
+    assert images == {PRODUCT_1: IMAGE_1}                                          # the first image, not the back
+    assert parse_sitemap(image_urlset((PRODUCT_1, IMAGE_1)))[1] == [(PRODUCT_1, None)]   # without the dict: as before
+
+
+def test_harvest_hands_over_the_sitemap_image_with_its_product_page_and_the_index_keeps_it():
+    pages = full_store()
+    pages[BASE + "/sitemaps/products-1.xml.gz"] = (200, gzip.compress(image_urlset((PRODUCT_1, IMAGE_1),
+                                                                                   (PRODUCT_2, None))))
+    got, store = [], MemoryCatalogStore()
+    rep = harvester(pages).harvest(lulu(), on_urls=lambda batch: (got.extend(batch), store.upsert("lulu", batch))[1])
+    assert rep.status == "ok" and rep.product_images == 1
+    assert got == [(PRODUCT_1, None, IMAGE_1), (PRODUCT_2, None)]
+    assert {r.url: r.image_url for r in store.rows.values()} == {PRODUCT_1: IMAGE_1, PRODUCT_2: ""}
+    assert "(1 with their image)" in sitemaps.format_report(rep)
