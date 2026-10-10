@@ -48,6 +48,11 @@ class HealthzController extends Controller
         "SELECT COUNT(*) AS total, COALESCE(SUM(registered_at >= NOW() - INTERVAL " . self::DEAD_WINDOW_DAYS
         . " DAY), 0) AS recent FROM sheet_updates WHERE sync_status = 'DEAD'";
 
+    /** كتابات رفضها الشيت آخر DEAD_WINDOW_DAYS أيام لأنه الصف أو العمود تغيّر (CONFLICT): للمعلومة، ما بتوقف الفحص. */
+    public const SQL_CONFLICT =
+        "SELECT COALESCE(SUM(registered_at >= NOW() - INTERVAL " . self::DEAD_WINDOW_DAYS
+        . " DAY), 0) AS recent FROM sheet_updates WHERE sync_status IN ('CONFLICT', 'SKIPPED_OUT_OF_BOUNDS')";
+
     public function show()
     {
         [$code, $body] = self::evaluate(self::collect());
@@ -63,7 +68,7 @@ class HealthzController extends Controller
     public static function collect(): array
     {
         $facts = ['db' => false, 'nightly_age_s' => null, 'nightly_known' => false, 'dead_total' => null,
-                  'dead_recent' => null, 'free_gb' => null];
+                  'dead_recent' => null, 'conflict_recent' => null, 'free_gb' => null];
         try {
             DB::select('SELECT 1');
             $facts['db'] = true;
@@ -82,6 +87,7 @@ class HealthzController extends Controller
                 $row = DB::selectOne(self::SQL_DEAD);
                 $facts['dead_total'] = (int) ($row->total ?? 0);
                 $facts['dead_recent'] = (int) ($row->recent ?? 0);
+                $facts['conflict_recent'] = (int) (DB::selectOne(self::SQL_CONFLICT)->recent ?? 0);
             } catch (\Throwable $e) {
                 Log::warning('healthz: sheet_updates unreadable (' . get_class($e) . ')');
             }

@@ -208,7 +208,7 @@ def test_a_hung_product_is_given_up_and_the_worker_goes_on(statuses, monkeypatch
     assert time.monotonic() - started < 10, "the worker waited for the hung product"
     assert sorted(rec["worked"]) == [100, 102, 103]
     given_up = [f for f in rec["finished"] if f[0] == 1]
-    assert given_up == [(1, "pending", "PROVIDER_DOWN", given_up[0][3])]
+    assert given_up == [(1, "failed", "PRODUCT_TIMEOUT", given_up[0][3])]   # its own code and day schedule, not PROVIDER_DOWN
     assert given_up[0][3].startswith("PRODUCT_TIMEOUT: still running after")
     assert main.LAST_WORKER["stop_reason"] is None and rec["released"] == []
     released_threads.set()

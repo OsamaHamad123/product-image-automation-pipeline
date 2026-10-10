@@ -342,7 +342,8 @@
         const res = await R.requestJson(`${S.urls.approvalJobs}?active=1`);
         if (!res.ok || !res.data || !Array.isArray(res.data.jobs)) return;
         S.serverOwned = S.serverOwned || new Set();
-        const active = new Set(res.data.jobs.map(j => R.itemKey({ row_number: j.row_number, product_name: j.label || '' })));
+        const active = new Set(res.data.jobs.filter(j => j.status === 'queued' || j.status === 'running')
+            .map(j => R.itemKey({ row_number: j.row_number, product_name: j.label || '' })));
         let changed = false;
         active.forEach(key => {
             if (!S.local.get(key) && !(S.jobs && S.jobs.has(key))) {

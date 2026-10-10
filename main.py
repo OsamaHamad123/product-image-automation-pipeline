@@ -1594,7 +1594,46 @@ def _brand_index_phrases(spec):
     return out
 
 
-def plan_enqueue(products, reprocess=False, brand_mappings=None):
+def plan_queue_moves(sheet_keys, queue, whole_sheet=False):
+    """
+    منتجات انتقلت إلى رقم صف آخر (أُدرج أو حُذف أو بُدّل صف فوقها في الشيت): [(الصف القديم، الصف الجديد، sku_key)].
+    الطابور مفتاحه row_number، فبدون النقل يُعامل كل منتج تحت التعديل كمنتج جديد (بحث مدفوع من جديد، وتضيع
+    حالة المراجعة ومرشحاتها وجدول «لا نتيجة»). sheet_keys: {row_number: sku_key} لصفوف الشيت المقروءة،
+    queue: queue_snapshot(). يُنقل الصف فقط عندما لا لبس:
+    - للمنتج sku_key، ويظهر مرة واحدة في الشيت المقروء ومرة واحدة في الطابور (منتج مكرر على صفين: السلوك القديم).
+    - صف الطابور في رقمه الجديد ليس له (منتج آخر أو لا شيء)، وليس صفاً قديماً بلا sku_key.
+    - صفه القديم في الشيت صار لمنتج آخر؛ أو خرج من الشيت، وهذا يُعرف فقط عند قراءة الشيت كله (whole_sheet:
+      بلا فلتر صفوف أو براند).
+    التبديل (منتجان تبادلا صفيهما) نقلان؛ local_cache_db.relocate_queue_rows ينفذهما معاً ويعيد التحقق تحت القفل.
+    """
+    counts = {}
+    for key in sheet_keys.values():
+        if key:
+            counts[key] = counts.get(key, 0) + 1
+    queued = {}
+    for number, q in queue.items():
+        if q.get("sku_key"):
+            queued.setdefault(q["sku_key"], []).append(number)
+    moves = []
+    for number, key in sheet_keys.items():
+        if not key or counts.get(key) != 1 or len(queued.get(key) or ()) != 1:
+            continue
+        here = queue.get(number)
+        if here and (here.get("sku_key") is None or here.get("sku_key") == key):
+            continue
+        source = queued[key][0]
+        if source == number:
+            continue
+        if source in sheet_keys:
+            if sheet_keys[source] == key:
+                continue
+        elif not whole_sheet:
+            continue                     # صفه القديم خارج ما قُرئ (فلتر): قد يكون المنتج ما زال هناك
+        moves.append((source, number, key))
+    return moves
+
+
+def plan_enqueue(products, reprocess=False, brand_mappings=None, whole_sheet=False):
     """
     صفوف الشيت (بعد الفلاتر) -> (صفوف local_cache_db.add_many_to_queue، عدادات). المطابقة عند الإدراج:
     (a) صف بلا رابط نهائي ولمنتجه (sku_key أو المفتاح البديل) صورة معتمدة: مهمة كتابة الرابط (relink) بدل بحث جديد.
@@ -1605,24 +1644,37 @@ def plan_enqueue(products, reprocess=False, brand_mappings=None):
     (c) صف مكتمل لم يصل رابطه للشيت (CONFLICT / DEAD) يُعاد كتابته (a)، وبلا حل معتمد: بحث للمراجعة (LINK_MISSING).
     صف «لا نتيجة» ظهرت لبراند منتجه صفحات جديدة في الفهرس المحلي منذ آخر بحث: LOCAL_INDEX_CHANGED.
     صفوف المنتج نفسه تتبع صفاً للمراجعة فقط منها (بحث واحد لكل منتج، فلا ينشر أحدها تلقائياً).
+    منتج انتقل إلى رقم صف آخر (plan_queue_moves): stats['moves']، ينقلها local_cache_db.relocate_queue_rows قبل
+    الإدراج فيحتفظ المنتج بحالته ومرشحاته بلا بحث جديد؛ وقرارات هذه الدالة تقرأ صف الطابور القديم للمنتج.
+    whole_sheet: products هي كل صفوف الشيت (بلا فلتر)، فصف غير موجود فيها خرج من الشيت.
     """
     from catalog_match.brand_index import build_index
     from catalog_match.identity import build_sku_spec
 
     index = build_index(brand_mappings) if brand_mappings else None   # يُبنى مرة واحدة لكل الصفوف
     stats = {"skipped_final": 0, "relink": 0, "edited": 0, "cleared": 0, "missing": 0, "in_flight": 0,
-             "index_changed": 0, "rekey": []}
+             "index_changed": 0, "rekey": [], "moves": []}
     snapshot = local_cache_db.resolution_snapshot()
     queue = local_cache_db.queue_snapshot()
     gtin_sizes = _sizes_by_gtin(products)
-    entries = []
+    keyed = []
     for prod in products:
-        name, brand = prod["product_name"], prod.get("brand") or ""
-        barcode = prod.get("barcode", "")
         payload = _enqueue_payload(prod)
-        row = sku_row(name, brand, barcode, payload)
+        row = sku_row(prod["product_name"], prod.get("brand") or "", prod.get("barcode", ""), payload)
         spec = build_sku_spec(row, index)
-        sku_key, alt_key = spec.sku_key, compute_alt_sku_key(row, spec)
+        keyed.append((prod, payload, spec, spec.sku_key, compute_alt_sku_key(row, spec)))
+    if not reprocess:
+        stats["moves"] = plan_queue_moves({prod["row_number"]: key for prod, _, _, key, _ in keyed}, queue,
+                                          whole_sheet=whole_sheet)
+    moved_from = {new: old for old, new, _ in stats["moves"]}
+
+    def prior(number):
+        """صف الطابور الحالي لمنتج هذا الصف: صفه القديم إن انتقل (يُنقل قبل الإدراج)."""
+        return queue.get(moved_from[number]) if number in moved_from else queue.get(number)
+
+    entries = []
+    for prod, payload, spec, sku_key, alt_key in keyed:
+        barcode = prod.get("barcode", "")
         entry = {"prod": prod, "payload": payload, "spec": spec, "sku_key": sku_key, "alt_key": alt_key,
                  "brand_fp": brand_fingerprint(spec), "task_kind": None, "review_only": False, "reason": None}
         link = prod.get("existing_image_link")
@@ -1632,7 +1684,7 @@ def plan_enqueue(products, reprocess=False, brand_mappings=None):
                 stats["skipped_final"] += 1
                 # صار للصف باركود صالح (كُتب من «باركودات من صفحات المتاجر» أو بالإيد): صف الطابور يأخذ مفتاحه
                 # الجديد والقديم يصير البديل (local_cache_db.rekey_queue_rows)، فتجده المراجعة بمفتاح الشيت
-                old = queue.get(prod["row_number"]) or {}
+                old = prior(prod["row_number"]) or {}
                 if old.get("sku_key") and old.get("sku_key") != sku_key and old.get("sku_key") == alt_key:
                     stats["rekey"].append((prod["row_number"], alt_key, sku_key, barcode))
                 continue
@@ -1646,7 +1698,7 @@ def plan_enqueue(products, reprocess=False, brand_mappings=None):
         elif not reprocess:
             res = _snapshot_resolution(snapshot, prod, payload, sku_key, alt_key, index,
                                        human_only=bool(prod.get("needs_review")), sizes=gtin_sizes.get(sku_key))
-            old = queue.get(prod["row_number"])
+            old = prior(prod["row_number"])
             if res:
                 entry["resolution"] = res
             elif old and old.get("status") == "completed" and old.get("sku_key") == sku_key:
@@ -1672,7 +1724,7 @@ def plan_enqueue(products, reprocess=False, brand_mappings=None):
     # (3 / 7 / 30 يوماً) لا يعود بها كل ليلة: يبقى فاشلاً حتى يتغير مدخل البراند أو يُطلب من جديد
     sleeping = []
     for e in entries:
-        old = queue.get(e["prod"]["row_number"])
+        old = prior(e["prod"]["row_number"])
         if (not e.get("skip") and e["task_kind"] is None and not e["reason"] and old
                 and old.get("status") == "failed" and old.get("failure_code") in local_cache_db.NOT_FOUND_CODES
                 and old.get("sku_key") == e["sku_key"] and old.get("searched_at")
@@ -1750,7 +1802,16 @@ def run_enqueue_mode():
                 and (not brand_filter or brand_filter in (prod.get("brand") or "").lower())]
     done = {"insert": 0, "keep": 0, "reset": 0}
     try:
-        rows, stats = plan_enqueue(selected, reprocess=reprocess, brand_mappings=brand_mappings)
+        rows, stats = plan_enqueue(selected, reprocess=reprocess, brand_mappings=brand_mappings,
+                                   whole_sheet=allowed_rows is None and not brand_filter)
+        if stats.get("moves"):
+            # منتجات انتقلت صفوفها (أُدرج أو حُذف صف فوقها): تأخذ حالتها ومرشحاتها معها بدل بحث جديد.
+            # فشل النقل يترك السلوك القديم (الإدراج يعيدها للانتظار) ولا يوقف الإدراج
+            try:
+                moved = local_cache_db.relocate_queue_rows(stats["moves"])
+                print(f"[Enqueue] {moved} منتج انتقل صفه في الشيت: نُقلت حالته ومرشحاته معه بلا بحث جديد.")
+            except Exception as e:
+                print(f"تنبيه: تعذر نقل {len(stats['moves'])} منتج انتقل صفه في الشيت: {e}")
         local_cache_db.add_many_to_queue(rows, reprocess=reprocess, totals=done)
         if stats.get("rekey"):
             try:
@@ -2509,8 +2570,8 @@ def _start_local_index_refresh(trigger):
 
 # المنتجات الجارية على السيرفر (run_worker_mode):
 # - حجز الصف (LEASE_MINUTES) يتجدد كل LEASE_RENEW_SECONDS ما دام المنتج يعمل، فلا يسحبه عامل آخر ولا تُهمل نتيجته.
-# - منتج تجاوز PRODUCT_DEADLINE_MINUTES (8 دقائق افتراضياً) يُترك: صفه يعود للانتظار كانقطاع مزوّد (PROVIDER_DOWN:
-#   بعد 10 ثم 20 دقيقة، ويُركن بعد 3 بالتشغيل)، والعامل يكمل. نتيجته المتأخرة لا تُكتب (حجزه لم يعد له).
+# - منتج تجاوز PRODUCT_DEADLINE_MINUTES (8 دقائق افتراضياً) يُترك: صفه فاشل برمز PRODUCT_TIMEOUT ويُعاد بعد 1 ثم 3
+#   ثم 7 أيام، والعامل يكمل. نتيجته المتأخرة لا تُكتب (حجزه لم يعد له).
 # - الخروج لا ينتظر خيطاً عالقاً (exit_process).
 LEASE_RENEW_SECONDS = 60
 _LEFT_RUNNING = []          # منتجات تُركت في خيوطها (الحد الزمني أو مهلة الإيقاف)
@@ -2576,13 +2637,16 @@ class _ProductPool:
 
 
 def _give_up_product(task, deadline_s):
-    """منتج تجاوز حده الزمني: صفه يعود للانتظار كانقطاع مزوّد (يُعاد بعد 10 ثم 20 دقيقة)."""
+    """
+    منتج تجاوز حده الزمني: صفه فاشل برمز PRODUCT_TIMEOUT ويُعاد بعد 1 ثم 3 ثم 7 أيام (local_cache_db.outcome_schedule).
+    كان يعود للانتظار كانقطاع مزوّد، والإدراج التالي يصفّر عدّاده: منتج بطيء دايماً كان يندفع ثمنه كل تشغيل.
+    """
     minutes = round(deadline_s / 60.0, 1)
     print(f"[Worker] الصف {task.get('row_number')}: المنتج تجاوز {minutes:g} دقيقة (PRODUCT_DEADLINE_MINUTES)؛ "
-          "عاد للانتظار كانقطاع مزوّد، والعامل يكمل بالصف التالي.")
-    local_cache_db.update_task_status(task["id"], "pending",
-                                      f"PRODUCT_TIMEOUT: still running after {minutes:g} minutes; retried later",
-                                      failure_code="PROVIDER_DOWN", claim_id=task.get("worker_id") or None)
+          "انعلّم فاشل لحد موعده الجاي، والعامل يكمل بالصف التالي.")
+    local_cache_db.update_task_status(task["id"], "failed",
+                                      f"PRODUCT_TIMEOUT: still running after {minutes:g} minutes; retried in days",
+                                      failure_code=local_cache_db.TIMEOUT_CODE, claim_id=task.get("worker_id") or None)
 
 
 def _drain_products(pool, grace_s=None, watch=None):

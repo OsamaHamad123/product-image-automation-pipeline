@@ -1894,6 +1894,11 @@ PRIORITY_NEW, PRIORITY_REVERIFY, PRIORITY_RETRY = 0, 1, 2
 # مدخل البراند في Brands Mapping أو ظهرت صفحات جديدة للبراند في الفهرس المحلي)
 NOT_FOUND_CODES = ("NO_RESULTS", "ALL_CONFLICTED")
 NOT_FOUND_RETRY_DAYS = (3, 7, 30)
+# منتج تجاوز حده الزمني (main._give_up_product): فاشل بموعد 1 ثم 3 ثم 7 أيام، ثم يبقى فاشلاً. كان يعود للانتظار
+# كانقطاع مزوّد (PROVIDER_DOWN)، والإدراج يصفّر عدّاده، فمنتج بطيء دايماً كان يندفع ثمن بحثه كل تشغيل للأبد
+TIMEOUT_CODE = "PRODUCT_TIMEOUT"
+TIMEOUT_RETRY_DAYS = (1, 3, 7)
+_SCHEDULED_FAIL_DAYS = {**{code: NOT_FOUND_RETRY_DAYS for code in NOT_FOUND_CODES}, TIMEOUT_CODE: TIMEOUT_RETRY_DAYS}
 # انقطاع المزودين لصف واحد: انتظار 10 دقائق يتضاعف، وبعد 3 محاولات في التشغيل نفسه يُركن الصف للتشغيل التالي
 PROVIDER_DOWN_BACKOFF_MINUTES = 10
 MAX_PROVIDER_DOWN_PER_RUN = 3
@@ -1974,9 +1979,9 @@ def plan_queue_row(old, new, reprocess=False):
     if status == "completed":
         return ("reset", carry) if reason in REOPEN_REASONS else ("keep", None)
     if status == "failed":
-        if old.get("failure_code") in NOT_FOUND_CODES and reason not in REOPEN_REASONS:
+        if old.get("failure_code") in _SCHEDULED_FAIL_DAYS and reason not in REOPEN_REASONS:
             brand_changed = bool(old.get("brand_fp") and new.get("brand_fp") and old["brand_fp"] != new["brand_fp"])
-            exhausted = carry["fail_count"] > len(NOT_FOUND_RETRY_DAYS)
+            exhausted = carry["fail_count"] > len(_SCHEDULED_FAIL_DAYS[old.get("failure_code")])
             due = not exhausted and (not old.get("has_next") or bool(old.get("due")))
             if brand_changed:
                 reason = "BRAND_MAPPING_CHANGED"
@@ -2097,7 +2102,84 @@ def add_to_queue(row_number, barcode, name, brand, query, payload=None, sku_key=
     return True
 
 
-CLAIMABLE_SQL = "(status='pending' OR (status='processing' AND (lease_until IS NULL OR lease_until<NOW())))"
+def _valid_moves(moves, rows_at):
+    """
+    النقلات التي ما زالت صالحة تحت القفل (relocate_queue_rows)، حتى الثبات: الصف القديم ما زال لهذا المنتج
+    (sku_key) وبلا حجز ساري؛ والرقم الجديد فارغ، أو صفه ينتقل هو أيضاً (تبديل/إزاحة)، أو صف منتج آخر بلا حجز
+    ساري وله sku_key (يُحذف، كما كان الإدراج سيعيد ضبطه لمنتج الصف الجديد). سقوط نقلة قد يُسقط نقلة تعتمد عليها.
+    """
+    moves = [m for m in moves
+             if (rows_at.get(m[0]) or {}).get("sku_key") == m[2] and not rows_at[m[0]].get("live")]
+    while True:
+        sources = {old for old, _, _ in moves}
+        kept = []
+        for old, new, key in moves:
+            here = rows_at.get(new)
+            if here is None or new in sources or (here.get("sku_key") and here.get("sku_key") != key
+                                                  and not here.get("live")):
+                kept.append((old, new, key))
+        if len(kept) == len(moves):
+            return kept
+        moves = kept
+
+
+def relocate_queue_rows(moves):
+    """
+    نقل صفوف طابور لمنتجات انتقلت في الشيت (main.plan_queue_moves): [(الصف القديم، الصف الجديد، sku_key)].
+    الصف ينتقل بحالته كلها (status، failure_code، fail_count، reverify_count، searched_at، next_attempt_at، trace)
+    إلى رقمه الجديد، ومرشحات المراجعة لهذا الـ sku_key في الصف القديم معه، فالإدراج بعده يجد المنتج نفسه
+    (plan_queue_row: يبقى أو ينتظر موعده) بدل بحث جديد. معاملة واحدة بقفل الصفوف، ويُعاد التحقق من كل نقلة
+    (_valid_moves): ما تغير منذ اللقطة يُترك للسلوك القديم. التبديل عبر أرقام مؤقتة سالبة (row_number فريد).
+    تعيد عدد الصفوف المنقولة، وترفع أخطاء قاعدة البيانات (بلا أي تغيير).
+    """
+    moves = [(int(old), int(new), str(key)) for old, new, key in moves or () if key and int(old) != int(new)]
+    if not moves:
+        return 0
+    numbers = sorted({n for old, new, _ in moves for n in (old, new)})
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        for n in range(1, LOCK_RETRIES + 1):
+            try:
+                cursor.execute(
+                    "SELECT id, `row_number`, sku_key, (lease_until IS NOT NULL AND lease_until >= NOW() "
+                    "AND status = 'processing') AS live "
+                    f"FROM automation_queue WHERE `row_number` IN ({','.join(['%s'] * len(numbers))}) FOR UPDATE",
+                    tuple(numbers))
+                rows_at = {r["row_number"]: r for r in cursor.fetchall() or []}
+                valid = _valid_moves(moves, rows_at)
+                if not valid:
+                    conn.rollback()
+                    return 0
+                sources = {old for old, _, _ in valid}
+                stale = [rows_at[new]["id"] for _, new, _ in valid if new in rows_at and new not in sources]
+                if stale:
+                    cursor.execute(f"DELETE FROM automation_queue WHERE id IN ({','.join(['%s'] * len(stale))})",
+                                   tuple(stale))
+                ids = [rows_at[old]["id"] for old, _, _ in valid]
+                cursor.execute("UPDATE automation_queue SET `row_number` = -id, updated_at = updated_at "
+                               f"WHERE id IN ({','.join(['%s'] * len(ids))})", tuple(ids))
+                cursor.executemany("UPDATE automation_queue SET `row_number` = %s, updated_at = updated_at "
+                                   "WHERE id = %s", [(new, rows_at[old]["id"]) for old, new, _ in valid])
+                cursor.executemany("UPDATE curation_candidates SET `row_number` = %s "
+                                   "WHERE sku_key = %s AND `row_number` = %s",
+                                   [(new, key, old) for old, new, key in valid])
+                conn.commit()
+                return len(valid)
+            except pymysql.err.OperationalError as e:
+                conn.rollback()
+                if not e.args or e.args[0] not in LOCK_CONFLICT_CODES or n == LOCK_RETRIES:
+                    raise
+                logger.warning("[MariaDB Queue] تعارض أقفال أثناء نقل الصفوف (%s)؛ إعادة المحاولة.", e.args[0])
+            except Exception:
+                conn.rollback()
+                raise
+    finally:
+        _close(conn)
+    return 0
+
+
+CLAIMABLE_SQL ="(status='pending' OR (status='processing' AND (lease_until IS NULL OR lease_until<NOW())))"
 
 
 def _backoff_until(prefix, moment):
@@ -2269,6 +2351,7 @@ def outcome_schedule(row, status, failure_code, group_fail_count=0):
     - PROVIDER_DOWN (يعود للانتظار): 10 دقائق ثم 20 ...؛ المحاولة الثالثة في التشغيل نفسه تركن الصف 12 ساعة
       (الإدراج التالي يعيده فوراً). down_count يُصفّر عند كل إدراج، فهو عدد محاولات هذا التشغيل.
     - «لا نتيجة» (NO_RESULTS / ALL_CONFLICTED): 3 ثم 7 ثم 30 يوماً، ثم بلا موعد (يبقى فاشلاً).
+    - تجاوز الحد الزمني (PRODUCT_TIMEOUT): 1 ثم 3 ثم 7 أيام، ثم بلا موعد.
       group_fail_count: أعلى عداد بين صفوف المنتج نفسه، فلا يبدأ الجدول من جديد لصف مكرر.
     - نتيجة للمراجعة أو نشر: تُصفّر العدادات.
     """
@@ -2280,9 +2363,10 @@ def outcome_schedule(row, status, failure_code, group_fail_count=0):
         minutes = (PROVIDER_DOWN_PARK_MINUTES if down >= MAX_PROVIDER_DOWN_PER_RUN
                    else min(PROVIDER_DOWN_BACKOFF_MINUTES * 2 ** (down - 1), PROVIDER_DOWN_PARK_MINUTES))
         return {"next_minutes": minutes, "fail_count": fail, "down_count": down, "priority": PRIORITY_RETRY}
-    if status == "failed" and failure_code in NOT_FOUND_CODES:
+    if status == "failed" and failure_code in _SCHEDULED_FAIL_DAYS:
+        schedule = _SCHEDULED_FAIL_DAYS[failure_code]
         fail = max(fail, int(group_fail_count or 0)) + 1
-        days = NOT_FOUND_RETRY_DAYS[fail - 1] if fail <= len(NOT_FOUND_RETRY_DAYS) else None
+        days = schedule[fail - 1] if fail <= len(schedule) else None
         return {"next_minutes": days * 24 * 60 if days else None, "fail_count": fail, "down_count": 0,
                 "priority": PRIORITY_RETRY}
     if status in ("ready_for_review", "completed"):

@@ -204,7 +204,8 @@ from .fetch import phash_distance
 from .score import IDENTITY_KEYS, TRUST_STRUCTURED, page_host, rank_key, trusted_domains
 from .sizes import compare, parse_sizes, product_size
 from .text_norm import brand_in, domain_matches, match_key, match_string, normalize, store_market, url_host, url_path_text
-from .verify import brand_confirmed, multipack_unit_image, overruled_flags, size_agreement, size_close
+from .verify import (brand_confirmed, multipack_unit_image, overruled_flags, size_agreement, size_close,
+                     size_flag)
 
 logger = logging.getLogger(__name__)
 
@@ -513,7 +514,7 @@ def full_match(spec: SkuSpec, rc: RankedCandidate) -> bool:
     v = rc.verdict
     if v is None or v.decision != MATCH:
         return False
-    if v.brand_match != "yes" or v.size_match != "yes":
+    if v.brand_match != "yes" or size_flag(spec, v) != "yes":   # the whole multipack: verify.size_flag
         return False
     return v.variant_match == "yes" if spec.variants else v.variant_match != "no"
 
@@ -562,8 +563,8 @@ def label_carries_identity(spec: SkuSpec, rc: RankedCandidate) -> bool:
     """The label reading states the SKU's identity as far as the label is legible (the tier-2 fallback).
 
     Every one of: the brand confirmed on the label (verify.brand_confirmed), a front packshot, size_match not
-    'no' (one unit of a multipack SKU excepted: verify.multipack_unit_image) and a printed size, when one was
-    read, that agrees with the SKU; no printed variant that conflicts (or nearly conflicts) with the SKU;
+    'no' (one unit of a multipack SKU excepted: verify.multipack_unit_image; the whole multipack reads 'yes':
+    verify.size_flag) and a printed size, when one was read, that agrees with the SKU; no printed variant that conflicts (or nearly conflicts) with the SKU;
     variant_match 'yes' when the SKU states a variant or the label prints a marked one the SKU does not state,
     else not 'no'; and no other pack counted on the picture (the SKU's pack, the pieces one unit holds, or
     unknown). Only a size the label does not show legibly is left open.
@@ -572,7 +573,7 @@ def label_carries_identity(spec: SkuSpec, rc: RankedCandidate) -> bool:
     if v is None or v.view != "front_packshot" or not brand_confirmed(spec, v):
         return False
     unit_of_multipack = multipack_unit_image(spec, v)
-    if v.size_match == "no" and not unit_of_multipack:
+    if size_flag(spec, v) == "no" and not unit_of_multipack:      # the whole multipack reads 'yes'
         return False
     if size_agreement(spec, v.size_text) not in ("match", "unknown"):
         return False
@@ -846,7 +847,8 @@ def unverified_warnings(spec: SkuSpec, rc: RankedCandidate) -> List[str]:
         return []
     v = rc.verdict
     out: List[str] = []
-    size_confirmed = (score is not None and score.size_status == "match") or (v is not None and v.size_match == "yes")
+    size_confirmed = (score is not None and score.size_status == "match") or (v is not None
+                                                                     and size_flag(spec, v) == "yes")
     # the verifier reads the unit count apart from the net content (verify.build_prompt): its pack_count
     pack_confirmed = matched.get("pack") == "match" or (v is not None and v.pack_count == spec.pack_count)
     if (spec.size is not None and not size_confirmed) or (spec.pack_count and spec.pack_count > 1

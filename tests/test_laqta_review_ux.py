@@ -117,6 +117,35 @@ out.after_pagehide = requests('/api/select_image').length;
     assert out["after_pagehide"] == 1
 
 
+def test_a_keepalive_approval_the_server_queued_is_followed_not_shown_as_failed(tmp_path):
+    # the page hides during the undo hold: the approval goes out with keepalive and the server answers 202 (queued).
+    # It is the server's now: never «ما انعتمدت» with a retry button, and it settles when the job finishes
+    out = page(r"""
+press('Enter');
+await flush();
+document.visibilityState = 'hidden';
+dispatch(document, { type: 'visibilitychange' });
+await flush();
+const sel = requests('/api/select_image')[0];
+out.keepalive = !!sel.init.keepalive;
+answer(sel, { status: 'queued', job_id: 21, existing: false }, 202);
+await flush();
+out.busy = S().jobs.busy();
+out.failedNow = S().jobs.state().failedAll;
+document.visibilityState = 'visible';
+dispatch(document, { type: 'visibilitychange' });
+approvalJobs = url => ({ status: 'success', jobs: url.includes('ids=21') ? [{ id: 21, status: 'done', http_status: 200,
+    result: { status: 'success', image_link: 'https://res.cloudinary.com/demo/10.png', isolated: true } }] : [] });
+await sleep(60);
+await flush();
+out.failedAfter = S().jobs.state().failedAll;
+out.done = S().jobs.state().done;
+""", tmp_path, fixture(FOUR), config={"row": 10, "approveUndoMs": 8000, "approvalPollMs": 10})
+    assert out["keepalive"] is True
+    assert out["busy"] is False and out["failedNow"] == 0
+    assert out["failedAfter"] == 0 and out["done"] == 1
+
+
 def test_bulk_approvals_are_held_together_and_one_undo_takes_them_all_back(tmp_path):
     out = page(r"""
 R.setMode('bulk');

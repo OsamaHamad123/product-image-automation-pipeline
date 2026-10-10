@@ -147,6 +147,27 @@ def test_not_found_is_retried_after_3_7_and_30_days_then_stays_failed(db):
     assert row["status"] == "pending" and row["fail_count"] == 0
 
 
+def test_a_product_past_its_time_limit_is_retried_after_1_3_and_7_days_then_stays_failed(db):
+    # it used to go back as PROVIDER_DOWN, whose count every enqueue reset: a product that is always slow was paid
+    # for again every run, for ever
+    _add(db, 0)
+    for n, days in enumerate((1, 3, 7), start=1):
+        _claim_finish(db, "failed", "PRODUCT_TIMEOUT")
+        row = _row(db, 0)
+        assert row["status"] == "failed" and row["fail_count"] == n
+        assert days * 1440 - 2 <= row["due_in_min"] <= days * 1440
+        _add(db, 0)                                # the next nightly enqueue: not due yet, not searched
+        assert _row(db, 0)["status"] == "failed"
+        _make_due(db, 0)
+        _add(db, 0)
+        assert (_row(db, 0)["status"], _row(db, 0)["requeue_reason"]) == ("pending", "SCHEDULED_RETRY")
+    _claim_finish(db, "failed", "PRODUCT_TIMEOUT")
+    row = _row(db, 0)
+    assert row["fail_count"] == 4 and row["next_attempt_at"] is None
+    _add(db, 0)
+    assert _row(db, 0)["status"] == "failed"        # stays failed with its reason
+
+
 def test_not_found_is_retried_early_when_the_brand_mapping_changes(db):
     _add(db, 0, brand_fp="fp-a")
     _claim_finish(db, "failed", "NO_RESULTS")
