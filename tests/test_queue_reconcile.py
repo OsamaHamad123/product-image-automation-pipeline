@@ -1,8 +1,10 @@
 """Reconcile at enqueue, stable keys and failure records (work package P4a).
 
 (a) a row without a final link whose product has an approved / auto-verified image gets that link written
-    (a 'relink' task, no search); a write still in the sheet outbox is left alone; a link that landed and was
-    then cleared by someone is searched again for review only.
+    (a 'relink' task, no search); a write still in the sheet outbox is left alone; a human-approved link that
+    landed and then vanished from the sheet is written back (LINK_VANISHED, no search, not back to review), while
+    a link a reviewer cleared (rejection: approval superseded, an empty write queued after it) or an auto-verified
+    link that was cleared is searched again for review only.
 (b) a row whose link was published for another product (the row was edited) is searched again for review
     only, never auto-published over; with a human approval for the new product its link is written.
 (c) a completed row whose sheet write ended CONFLICT / DEAD gets the write again; without an approval it is
@@ -144,7 +146,7 @@ def test_a_relink_whose_approval_was_withdrawn_searches_instead(db, sheet):
 @pytest.mark.parametrize("state, expected", [
     ("PENDING", None),                                       # still in the outbox: left alone
     ("FAILED", None),
-    ("SYNCED", ("search", 1, "LINK_CLEARED")),               # landed, then someone cleared the cell
+    ("SYNCED", ("relink", 0, "LINK_VANISHED")),              # landed, then vanished: the approval is written back
     ("CONFLICT", ("relink", 0, "SHEET_WRITE_RETRY")),
     ("DEAD", ("relink", 0, "SHEET_WRITE_RETRY")),
 ])
@@ -160,6 +162,68 @@ def test_outbox_outcome_decides_what_happens_to_a_missing_link(db, state, expect
         return
     (row,) = rows
     assert (row["task_kind"] or "search", row["review_only"], row["requeue_reason"]) == expected
+    assert stats["restored"] == (1 if state == "SYNCED" else 0) and stats["cleared"] == 0
+
+
+# ---------------------------------------------------------------------------
+# a human-approved link that vanished from the sheet vs a link someone meant to clear
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("after, expected", [
+    ([], ("relink", 0, "LINK_VANISHED")),                                       # nothing explains the empty cell
+    ([("", "SYNCED")], ("search", 1, "LINK_CLEARED")),                         # a reviewer's rejection emptied it
+    ([("", "PENDING")], ("search", 1, "LINK_CLEARED")),                        # ... and its write is still queued
+    ([("", "SUPERSEDED")], ("relink", 0, "LINK_VANISHED")),                    # that clear never reached the cell
+    ([("", "CONFLICT")], ("relink", 0, "LINK_VANISHED")),
+    ([("https://res.cloudinary.com/p4q/other.png", "SYNCED"), ("", "SYNCED")],  # the clear emptied another link
+     ("relink", 0, "LINK_VANISHED")),
+])
+def test_a_vanished_approved_link_is_written_back_but_a_deliberate_clear_is_not(db, after, expected):
+    import main
+    prod = _prod(0, "P4Q Fresh Laban 1L")
+    _approve(db, prod)
+    db.test_outbox[ROW] = [{"value": LINK, "sync_status": "SYNCED", "id": 1}] + [
+        {"value": value, "sync_status": status, "id": 2 + i} for i, (value, status) in enumerate(after)]
+    (row,), stats = main.plan_enqueue([prod])
+    assert (row["task_kind"] or "search", row["review_only"], row["requeue_reason"]) == expected
+    assert (stats["restored"], stats["cleared"]) == ((1, 0) if expected[0] == "relink" else (0, 1))
+
+
+def test_a_vanished_auto_verified_link_is_searched_for_review(db):
+    import main
+    prod = _prod(0, "P4Q Fresh Laban 1L")
+    _approve(db, prod, status="auto_verified")
+    db.test_outbox[ROW] = [{"value": LINK, "sync_status": "SYNCED", "id": 1}]
+    (row,), stats = main.plan_enqueue([prod])
+    assert (row["task_kind"], row["review_only"], row["requeue_reason"]) == (None, 1, "LINK_CLEARED")
+    assert (stats["restored"], stats["cleared"]) == (0, 1)
+
+
+def test_a_vanished_link_whose_approval_a_reviewer_withdrew_is_searched(db):
+    import main
+    prod = _prod(0, "P4Q Fresh Laban 1L")
+    _approve(db, prod)
+    db.test_outbox[ROW] = [{"value": LINK, "sync_status": "SYNCED", "id": 1}]
+    db.supersede_resolution(_keys(prod)[0])                                    # rejected the approved image
+    (row,), stats = main.plan_enqueue([prod])
+    assert row["task_kind"] is None and row["requeue_reason"] != "LINK_VANISHED" and stats["restored"] == 0
+
+
+def test_a_vanished_approved_link_is_written_back_without_a_search_and_stays_completed(db, sheet):
+    import main
+    prod = _prod(0, "P4Q Fresh Laban 1L", size="1L")
+    _approve(db, prod)
+    db.add_many_to_queue(main.plan_enqueue([prod])[0])
+    _sql(db, "UPDATE automation_queue SET status = 'completed' WHERE `row_number` = %s", (ROW,))
+    db.test_outbox[ROW] = [{"value": LINK, "sync_status": "SYNCED", "id": 1}]   # landed, then the cell went empty
+    rows, stats = main.plan_enqueue([prod])
+    assert stats["restored"] == 1
+    db.add_many_to_queue(rows)
+    task = db.fetch_next_task("host:1")
+    assert main.pre_cache_product_candidates(task, worksheet=object(), link_column_index=4,
+                                             sleep=lambda s: None) == "success"
+    assert sheet["searches"] == [] and [link for _, link, _ in sheet["links"]] == [LINK]
+    assert _queue_row(db, 0)["status"] == "completed"                           # never «ready_for_review» again
 
 
 def test_outbox_outcomes_in_other_shapes_and_the_table_fallback(db, monkeypatch):
