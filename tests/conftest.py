@@ -206,6 +206,17 @@ def fake_connection():
 
 
 @pytest.fixture(autouse=True)
+def _private_serper_site_refusal(tmp_path, monkeypatch):
+    """The free-plan site: refusal is remembered across processes in temp/ (providers/serper.py): a test reads and
+    writes its own file, never the checkout's."""
+    try:
+        from catalog_match.providers import serper
+    except Exception:  # pragma: no cover - catalog_match not importable
+        return
+    monkeypatch.setattr(serper, "OPERATORS_BLOCKED_PATH", tmp_path / "serper_site_operators_blocked.json")
+
+
+@pytest.fixture(autouse=True)
 def _reset_learned_provider_state():
     """Providers learn per-process facts from live answers (a free Serper plan refuses site:, a CSE key gets
     403). Tests must not leak that learning into each other."""

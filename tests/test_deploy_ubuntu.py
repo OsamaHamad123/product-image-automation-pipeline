@@ -34,9 +34,9 @@ SCRIPTS = sorted(DEPLOY.glob("*.sh"))
 UNITS = ["laqta-sync-worker.service", "laqta-nightly.service", "laqta-nightly.timer",
          "laqta-backup.service", "laqta-backup.timer", "laqta-outbox-flush.service", "laqta-outbox-flush.timer",
          "laqta-run.service", "laqta-run.path", "laqta-approvals.service", "laqta-approvals.path",
-         "laqta-approvals.timer"]
+         "laqta-approvals.timer", "laqta-index-refresh.service", "laqta-index-refresh.timer"]
 PYTHON_SERVICES = ["laqta-nightly.service", "laqta-sync-worker.service", "laqta-outbox-flush.service",
-                   "laqta-run.service", "laqta-approvals.service"]
+                   "laqta-run.service", "laqta-approvals.service", "laqta-index-refresh.service"]
 BASH = shutil.which("bash")
 needs_bash = pytest.mark.skipif(BASH is None, reason="bash is not installed")
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="Linux deployment kit")
@@ -1096,6 +1096,39 @@ def test_outbox_flush_runs_the_flush_script_every_two_minutes_without_overlappin
     assert values(timer, "Install", "WantedBy") == ["timers.target"]
 
 
+def test_index_refresh_runs_inside_sharjah_coops_crawl_window_every_day():
+    """Sharjah Co-op's sitemaps may be read only from 04:00 to 08:45 UTC (robots.txt Visit-time and
+    SHARJAHCOOP_CRAWL_WINDOW); the nightly is outside it, so a timer of its own starts the index refresh inside it."""
+    unit = rendered_unit("laqta-index-refresh.service")
+    assert values(unit, "Service", "Type") == ["oneshot"]
+    assert values(unit, "Service", "User") == ["laqta"] and values(unit, "Service", "WorkingDirectory") == [SAMPLE_APP]
+    exec_start = values(unit, "Service", "ExecStart")[0]
+    assert exec_start.startswith(f"{SAMPLE_APP}/.venv/bin/python -X utf8 {SAMPLE_APP}/scripts/build_catalog_index.py ")
+    args = exec_start.split()
+    assert "--refresh" in args and "--force" not in args               # only the stores that are due
+    budget = float(args[args.index("--budget-s") + 1])
+    assert 0 < budget < seconds(values(unit, "Service", "TimeoutStartSec")[0])   # the backstop is above the budget
+    assert "3" in values(unit, "Service", "SuccessExitStatus")[0].split()        # another refresh running: no failure
+    assert int(values(unit, "Service", "Nice")[0]) > 0
+    script = (REPO / "scripts" / "build_catalog_index.py").read_text(encoding="utf-8")
+    assert "--budget-s" in script and "--trigger" in script
+    assert "[Install]" not in render((DEPLOY / "laqta-index-refresh.service").read_text(encoding="utf-8"))
+
+    timer = rendered_unit("laqta-index-refresh.timer")
+    assert values(timer, "Timer", "Unit") == ["laqta-index-refresh.service"]
+    assert values(timer, "Timer", "Persistent") == ["true"]
+    assert values(timer, "Install", "WantedBy") == ["timers.target"]
+    (calendar,) = values(timer, "Timer", "OnCalendar")
+    m = re.fullmatch(r"\*-\*-\* (\d\d):(\d\d):00 UTC", calendar)    # every day, in UTC whatever the server's zone
+    assert m, calendar
+    start = int(m.group(1)) * 60 + int(m.group(2))
+    delay = seconds(values(timer, "Timer", "RandomizedDelaySec")[0]) // 60 if values(timer, "Timer", "RandomizedDelaySec") else 0
+    window = (4 * 60, 8 * 60 + 45)                                      # catalog_match/settings.py's default window
+    assert window[0] <= start and start + delay + budget / 60 <= window[1]
+    settings_text = (REPO / "catalog_match" / "settings.py").read_text(encoding="utf-8")
+    assert 'DEFAULTS["SHARJAHCOOP_CRAWL_WINDOW"] = "0400-0845"' in settings_text
+
+
 def test_run_launcher_units_watch_the_file_the_dashboard_writes():
     path_unit = rendered_unit("laqta-run.path")
     assert values(path_unit, "Path", "PathExists") == [f"{SAMPLE_APP}/temp/run_request.json"]
@@ -1117,8 +1150,13 @@ def test_install_always_switches_the_run_launcher_on_and_the_flush_timer_with_th
     plain = run_install("--dry-run", str(APP), "--local-only").stdout
     assert "systemctl enable --now laqta-run.path" in plain
     assert "systemctl enable --now laqta-nightly.timer laqta-backup.timer laqta-outbox-flush.timer" in plain   # the NOT enabled hint
+    assert "laqta-index-refresh.timer" in plain.split("NOT enabled", 1)[1].splitlines()[0]
     enabled = run_install("--dry-run", str(APP), "--local-only", "--enable-units").stdout
     assert "+ systemctl enable --now laqta-backup.timer laqta-nightly.timer laqta-outbox-flush.timer" in enabled
+    assert ("+ systemctl enable --now laqta-backup.timer laqta-nightly.timer laqta-outbox-flush.timer "
+            "laqta-index-refresh.timer") in enabled
+    for name in ("laqta-index-refresh.service", "laqta-index-refresh.timer"):
+        assert f"render {name} -> /etc/systemd/system/{name}" in enabled
     assert "render laqta-logrotate -> /etc/logrotate.d/laqta" in enabled and "render laqta-alert@" not in enabled
     assert "+ rm -f /etc/systemd/system/laqta-alert@.service" in enabled       # a server installed before drops the old unit
 

@@ -1,0 +1,17 @@
+# Starts laqta-index-refresh.service every day at 04:30 UTC, inside Sharjah Co-op's crawl window (04:00-08:45 UTC,
+# robots.txt Visit-time and SHARJAHCOOP_CRAWL_WINDOW). The time is written in UTC on purpose: the server's own time
+# zone (Asia/Dubai, see laqta-nightly.timer) must not move it out of the window.
+# Persistent=true: a day missed while the server was off runs once at the next boot (outside the window the store is
+# skipped without any request and asked again the next day).
+# Change the hour with: systemctl edit laqta-index-refresh.timer  (keep it inside the window)
+[Unit]
+Description=Laqta local catalog index refresh, every day at 04:30 UTC
+
+[Timer]
+OnCalendar=*-*-* 04:30:00 UTC
+Persistent=true
+RandomizedDelaySec=5min
+Unit=laqta-index-refresh.service
+
+[Install]
+WantedBy=timers.target

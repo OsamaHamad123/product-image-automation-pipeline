@@ -5,7 +5,9 @@ build_queries(spec, custom_query=None) -> list[PlannedQuery], at most 4:
                 sheet name itself is written in Arabic)
     Q2 (hl=ar)  '{brand_ar} {Arabic name words} {size_ar}', only when name_ar has Arabic text
     Q3 (hl=en)  Q1 scoped with site: OR over the brand's official domains and the UAE
-                retailers; Serper only (providers_hint=('serper',))
+                retailers; Serper only (providers_hint=('serper',)). Left out while the Serper account
+                refuses site: operators (providers/serper.py site_operators_blocked: a free plan): its plain
+                form would be Q1 again
     N1          in Q3's place when the spec carries a query hint (catalog_match.normalizer: the model's
                 reading of an abbreviated sheet name, on the retriever's planning copy only) whose words
                 differ from Q1's: '{brand_en} {expanded name words} {size}' with Q3's site: clause. The
@@ -402,6 +404,15 @@ def _is_bare_number(text: str) -> bool:
     return bool(_DIGITS_ONLY_RE.fullmatch(text or "")) and any(ch.isdigit() for ch in text)
 
 
+def _site_operators_blocked() -> bool:
+    """The Serper account refuses site: operators (providers/serper.py remembers it for a week); never raises."""
+    try:
+        from .providers.serper import site_operators_blocked
+        return site_operators_blocked()
+    except Exception:  # pragma: no cover - the plan never fails for it
+        return False
+
+
 def _site_clause(spec: SkuSpec) -> str:
     sites: List[str] = []
     for d in (tuple(spec.official_domains)[:MAX_OFFICIAL_SITES] + tuple(spec.learned_domains)[:MAX_LEARNED_SITES]
@@ -548,8 +559,10 @@ def build_queries(spec: SkuSpec, custom_query: Optional[str] = None) -> List[Pla
     if q1:
         # N1 (catalog_match.normalizer) takes Q3's place: the same UAE retailers, the abbreviations written out
         n1 = normalized_query(spec) if spec.query_hint is not None else None
-        plan.append(PlannedQuery(query_id=NORMALIZED_QUERY_ID if n1 else "Q3", text=f"{n1 or q1} {_site_clause(spec)}",
-                                 hl=main.lang, providers_hint=("serper",)))
+        if n1 or not _site_operators_blocked():
+            # an account that refuses site: (free Serper plan) would get Q3 as Q1 again: one paid call for nothing
+            plan.append(PlannedQuery(query_id=NORMALIZED_QUERY_ID if n1 else "Q3",
+                                     text=f"{n1 or q1} {_site_clause(spec)}", hl=main.lang, providers_hint=("serper",)))
 
     # Q4 (GTIN query, identity package): only a valid, global barcode, always with the brand, and
     # never under GTIN_POLICY 'off'. Its answers are scored like any other: a listing of another

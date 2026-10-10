@@ -6,14 +6,25 @@ Every image keeps the page evidence Google returned with it:
     imageUrl -> image_url, link -> page_url, title -> title and page_title,
     domain (or the link host) -> domain, imageWidth/imageHeight -> width/height,
     position -> rank.
+
+A free Serper plan refuses site: operators (400 "Query pattern not allowed"). The refusal is learned once and
+remembered across processes in temp/serper_site_operators_blocked.json for OPERATORS_BLOCKED_TTL_S (7 days; after
+that one site: query is tried again, so an upgraded plan is picked up on its own). While it holds, site: queries
+are sent in their plain form without the wasted call, and the query plan leaves out Q3 (catalog_match.query_plan:
+without its site: clause it would be Q1 again). A recorded or replayed run (catalog_match.cassette) neither reads
+nor writes the file: it learns the refusal from its own answers only.
 """
 
 from __future__ import annotations
 
+import json
 import logging
+import os
 import queue
 import re
 import threading
+import time
+from pathlib import Path
 from typing import Any, Callable, List, Optional
 
 import requests
@@ -42,6 +53,55 @@ def without_site_operators(query: str) -> str:
 
 def _pattern_not_allowed(status: int, body: str) -> bool:
     return status == 400 and "not allowed" in (body or "").lower()
+
+
+# ---------------------------------------------------------------------------
+# The site: refusal, remembered across processes
+# ---------------------------------------------------------------------------
+
+OPERATORS_BLOCKED_PATH = Path(__file__).resolve().parents[2] / "temp" / "serper_site_operators_blocked.json"
+OPERATORS_BLOCKED_TTL_S = 7 * 24 * 3600
+
+
+def _blocked_since(path: Path) -> Optional[float]:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return float(data["blocked_at"]) if isinstance(data, dict) else None
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+def site_operators_blocked(now: Callable[[], float] = time.time) -> bool:
+    """True when this account is known to refuse site: operators: learned in this process, or remembered by another
+    process within OPERATORS_BLOCKED_TTL_S (temp/serper_site_operators_blocked.json). Never raises."""
+    if SerperImagesProvider.operators_blocked:
+        return True
+    if cassette.active() is not None:          # a recorded / replayed run learns from its own answers only
+        return False
+    path = OPERATORS_BLOCKED_PATH
+    if not path.exists():
+        return False
+    since = _blocked_since(path)
+    if since is None or not 0 <= now() - since < OPERATORS_BLOCKED_TTL_S:
+        return False                           # expired (or unreadable): one site: query is tried again
+    SerperImagesProvider.operators_blocked = True
+    return True
+
+
+def remember_site_operators_blocked(now: Callable[[], float] = time.time) -> None:
+    """The account refused a site: query: this process sends the plain form from now on, and so do the next ones for
+    OPERATORS_BLOCKED_TTL_S. Never raises."""
+    SerperImagesProvider.operators_blocked = True
+    if cassette.active() is not None:
+        return
+    path = OPERATORS_BLOCKED_PATH
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(path.name + f".{os.getpid()}.tmp")
+        tmp.write_text(json.dumps({"blocked_at": now()}), encoding="utf-8")
+        os.replace(tmp, path)
+    except OSError as exc:
+        logger.info("serper: the site: refusal could not be remembered (%s)", type(exc).__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -129,7 +189,8 @@ class SerperImagesProvider(BaseProvider):
     rate_per_min = 120.0
     burst = 5
     timeout = 10.0
-    # Learned once per process: this account refuses site: operators, so send the plain form directly.
+    # This account refuses site: operators, so the plain form is sent directly. Learned once and remembered across
+    # processes for a week (site_operators_blocked).
     operators_blocked = False
 
     def __init__(self, api_key: Optional[str] = None, session: Any = None, bucket: Any = None,
@@ -164,12 +225,12 @@ class SerperImagesProvider(BaseProvider):
         key = self.api_key()
         if not key:
             raise RuntimeError("no SERPER_API_KEY configured")
-        if SerperImagesProvider.operators_blocked and has_site_operators(query):
+        if has_site_operators(query) and site_operators_blocked():
             query = without_site_operators(query)
         resp = self._post(key, query, hl)
         if resp.status_code != 200 and has_site_operators(query) \
                 and _pattern_not_allowed(resp.status_code, response_text(resp)):
-            SerperImagesProvider.operators_blocked = True
+            remember_site_operators_blocked()
             logger.warning("serper: this account does not allow site: operators (free plan); "
                            "retailer-scoped queries are sent without them from now on")
             query = without_site_operators(query)

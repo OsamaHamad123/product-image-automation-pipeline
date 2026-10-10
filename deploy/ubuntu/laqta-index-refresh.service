@@ -1,0 +1,41 @@
+# Local catalog index refresh (scripts/build_catalog_index.py --refresh), started every day at 04:30 UTC by
+# laqta-index-refresh.timer.
+#
+# Why this exists: Sharjah Co-op's robots.txt (Visit-time 0400-0845) and our own SHARJAHCOOP_CRAWL_WINDOW allow its
+# sitemaps to be read only from 04:00 to 08:45 UTC. The nightly run (02:00) also starts a refresh, but outside that
+# window the store is skipped ('outside_visit_time'), so without this unit it is never indexed.
+# - The same refresh as the nightly's and the dashboard button's (catalog_match/index_refresh.py): only the stores
+#   that are due (never read, or older than LOCAL_INDEX_REFRESH_DAYS) are read, so most days it ends in seconds.
+#   The stores without a window are fine to read here too.
+# - --budget-s 3600: no store starts after an hour, and the store being read stops at its next file (partial: the
+#   next refresh goes on from there). Sharjah Co-op's harvest also stops by itself at 08:45 UTC.
+# - One refresh at a time across processes (temp/local_index_refresh.lock): if another one is running this one
+#   exits with code 3, which is not a failure.
+# The @NAME@ words are filled in by install.sh.
+[Unit]
+Description=Laqta local catalog index refresh (scripts/build_catalog_index.py --refresh)
+After=network-online.target mariadb.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=@APP_USER@
+Group=@APP_USER@
+WorkingDirectory=@APP_DIR@
+Environment=PYTHONUTF8=1
+Environment=PYTHONIOENCODING=utf-8
+ExecStart=@APP_DIR@/.venv/bin/python -X utf8 @APP_DIR@/scripts/build_catalog_index.py --refresh --trigger timer --budget-s 3600
+# Exit codes follow build_catalog_index.py --refresh: 0 done (or nothing due), 3 not started (off, or another
+# refresh is running), 1 failed, 2 no database.
+SuccessExitStatus=3
+# Hard backstop above the one-hour budget: a hung sitemap read must not block the next day.
+TimeoutStartSec=90min
+KillSignal=SIGTERM
+TimeoutStopSec=60
+Nice=10
+MemoryMax=@MEMORY_MAX@
+OOMPolicy=kill
+OOMScoreAdjust=300
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full

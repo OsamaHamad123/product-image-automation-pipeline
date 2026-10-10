@@ -42,7 +42,8 @@ Options
   --with-embeddings    pip install onnxruntime, download the DINOv2-small model (25 MB) and turn EMBEDDINGS on: the
                        brand look check, a review warning only (catalog_match/embeddings.py)
   --with-redis         also install redis-server (only if you use Redis); --enable-units then starts the sync worker
-  --enable-units       enable and start the nightly, backup and sheet-flush timers (and the sync worker with --with-redis)
+  --enable-units       enable and start the nightly, backup, sheet-flush and index-refresh timers (and the sync
+                       worker with --with-redis)
   --reset-auth         type a new password for the dashboard login (nginx basic auth)
   --auth-user NAME     login name for the dashboard (default: admin)
   --php-version X.Y    PHP version to install (default: 8.3; on 22.04 it comes from ppa:ondrej/php)
@@ -523,7 +524,8 @@ step_units() {
     log "7/10 systemd units, logrotate and backup script"
     local u
     for u in laqta-nightly.service laqta-nightly.timer laqta-sync-worker.service laqta-backup.service laqta-backup.timer \
-             laqta-outbox-flush.service laqta-outbox-flush.timer laqta-run.service laqta-run.path              laqta-approvals.service laqta-approvals.path laqta-approvals.timer; do
+             laqta-outbox-flush.service laqta-outbox-flush.timer laqta-index-refresh.service laqta-index-refresh.timer \
+             laqta-run.service laqta-run.path laqta-approvals.service laqta-approvals.path laqta-approvals.timer; do
         render "$SCRIPT_DIR/$u" "/etc/systemd/system/$u" 644
     done
     # The failure alert unit (laqta-alert@) was removed; a server installed before still has its file.
@@ -544,10 +546,10 @@ step_units() {
     # Review approvals: started on request, and swept every minute (costs nothing on an empty queue).
     run systemctl enable --now laqta-approvals.path laqta-approvals.timer
     if ((ENABLE_UNITS)); then
-        run systemctl enable --now laqta-backup.timer laqta-nightly.timer laqta-outbox-flush.timer
+        run systemctl enable --now laqta-backup.timer laqta-nightly.timer laqta-outbox-flush.timer laqta-index-refresh.timer
         if ((WITH_REDIS)); then run systemctl enable --now redis-server laqta-sync-worker.service; fi
     else
-        echo "    timers are installed but NOT enabled (run server_check.py first, then: systemctl enable --now laqta-nightly.timer laqta-backup.timer laqta-outbox-flush.timer)"
+        echo "    timers are installed but NOT enabled (run server_check.py first, then: systemctl enable --now laqta-nightly.timer laqta-backup.timer laqta-outbox-flush.timer laqta-index-refresh.timer)"
     fi
     # A running sync worker keeps old code in memory: restart it. The nightly run is never restarted here
     # (a restart would kill a night in progress); the next night simply uses the new code.
@@ -618,7 +620,7 @@ step_report() {
     fi
     echo "Next: fix the keys above in .env (scp it, never commit it), then:"
     echo "  sudo -u $APP_USER $VENV/bin/python $APP_DIR/scripts/server_check.py"
-    echo "  sudo systemctl enable --now laqta-nightly.timer laqta-backup.timer laqta-outbox-flush.timer      (if not done with --enable-units)"
+    echo "  sudo systemctl enable --now laqta-nightly.timer laqta-backup.timer laqta-outbox-flush.timer laqta-index-refresh.timer      (if not done with --enable-units)"
     echo "After changing dashboard/.env: sudo -u $APP_USER php$PHP_VERSION $DASH/artisan config:cache"
     echo "Backups are NOT encrypted until BACKUP_AGE_RECIPIENT is set in /etc/default/laqta-backup (docs/deploy_ubuntu.md section 9)."
 }

@@ -150,3 +150,25 @@ def test_a_product_url_that_is_its_barcode_is_found_by_the_barcode_before_any_re
     # a page that states the same barcode is one row, not two
     store.save_page(row.id, PageRecord(status="ok", page_title="x", image_url="https://x/i.jpg", gtin="05283002830089"))
     assert [r.id for r in store.by_gtin("05283002830089")] == [row.id]
+
+
+def test_a_sitemap_image_is_stored_but_never_over_what_a_finished_page_read_found(store):
+    """A sitemap's <image:loc> lands in image_url at harvest time (the local index offers it without a page read);
+    a later harvest updates it, but a page read that ended for good (ok, no_image, redirected, gone) owns the image."""
+    sitemap_img = "https://cdn.luluhypermarket.com/medias/1.jpg"
+    paratha, naan = LULU.format("ashoka-plain-paratha-400-g", 1), LULU.format("ashoka-garlic-naan-400-g", 2)
+    store.upsert("lulu", [(paratha, None, sitemap_img), (naan, "2026-09-01")])
+    by_url = {r.url: r for r in store.find(["ashoka"], [])}
+    assert (by_url[paratha].image_url, by_url[paratha].page_status, by_url[paratha].image_width) == (sitemap_img, "",
+                                                                                                    None)
+    assert by_url[naan].image_url == ""
+    store.upsert("lulu", [(paratha, None)])                                   # a harvest without the image keeps it
+    assert {r.url: r.image_url for r in store.find(["ashoka"], [])}[paratha] == sitemap_img
+    store.save_page(by_url[paratha].id, PageRecord(status="timeout"))         # transient: the sitemap may update it
+    store.upsert("lulu", [(paratha, None, sitemap_img + "?v=2")])
+    assert {r.url: r.image_url for r in store.find(["ashoka"], [])}[paratha] == sitemap_img + "?v=2"
+    store.save_page(by_url[paratha].id, PageRecord(status="ok", image_url="https://x/read.jpg", width=900, height=900))
+    store.upsert("lulu", [(paratha, None, sitemap_img)])
+    row = {r.url: r for r in store.find(["ashoka"], [])}[paratha]
+    assert (row.image_url, row.image_width, row.page_status) == ("https://x/read.jpg", 900, "ok")
+    assert {s["store"]: s["with_image"] for s in store.stats()} == {"lulu": 1}

@@ -12,6 +12,7 @@
   - `laqta-nightly.timer`: التشغيل الليلي (مثل `schedule_nightly.ps1`).
   - `laqta-backup.timer`: نسخة احتياطية يومية (مشفّرة إذا ضبطت المفتاح).
   - `laqta-outbox-flush.timer`: كل دقيقتين بيفرّغ طابور الكتابة للشيت (القسم 8).
+  - `laqta-index-refresh.timer`: كل يوم 04:30 UTC بيحدّث فهرس المتاجر المحلي (القسم 8).
   - `laqta-run.path`: بيخلّي التشغيل اللي بتبدأه من اللوحة يضل شغّال حتى لو أعدت تشغيل php-fpm (القسم 8).
   - `laqta-sync-worker.service`: فقط إذا بتستعمل Redis (نفس منطق `start_all.bat`).
 - **سجلات**: `logrotate` بيدوّر السجلات لحاله (القسم 12). **مراقبة**: عنوان `/healthz` لبرنامج مراقبة خارجي (القسم 11).
@@ -197,7 +198,7 @@ sudo fail2ban-client set laqta-nginx-auth unbanip 203.0.113.9  # فكّ حظر �
 install.sh بيركّب التايمرات بس **ما بيفعّلها** (إلا مع `--enable-units`). افحص أولاً (القسم 10) وبعدين:
 
 ```bash
-sudo systemctl enable --now laqta-nightly.timer laqta-backup.timer laqta-outbox-flush.timer
+sudo systemctl enable --now laqta-nightly.timer laqta-backup.timer laqta-outbox-flush.timer laqta-index-refresh.timer
 systemctl list-timers 'laqta-*'
 ```
 
@@ -209,7 +210,7 @@ systemctl list-timers 'laqta-*'
 - تشغيل ليلة يدوياً (بيصرف على مزودات مدفوعة، والنشر التلقائي مطفي دايماً): `sudo systemctl start laqta-nightly.service`.
   السجل: `journalctl -u laqta-nightly -e` ومجلد `/opt/laqta/temp/nightly`. التقرير بيطلع بصفحة الصحة.
 
-**سقف الذاكرة:** كل وحدة بايثون (`laqta-nightly` و`laqta-run` و`laqta-outbox-flush` و`laqta-sync-worker`) إلها `MemoryMax` بيحسبه install.sh من رام السيرفر.
+**سقف الذاكرة:** كل وحدة بايثون (`laqta-nightly` و`laqta-run` و`laqta-outbox-flush` و`laqta-index-refresh` و`laqta-sync-worker`) إلها `MemoryMax` بيحسبه install.sh من رام السيرفر.
 إذا الوحدة تعدّته بتنقتل **هي لحالها** (`OOMPolicy=kill`) ومش MariaDB ولا nginx (بيبان بـ `systemctl status`). شوفه وغيّره:
 
 ```bash
@@ -232,6 +233,10 @@ systemd بيستنى 120 ثانية (`TimeoutStopSec=120`) قبل ما يقتل�
 هلق كل دقيقتين بيشتغل `scripts/flush_sheets_sync.py`: ما بيفتح Google إلا إذا في كتابة مستحقة، وما بيتداخل مع نفسه ولا مع التشغيل الليلي (نفس القفل).
 الكتابات اللي فشلت نهائياً (`DEAD`، يعني الرابط ما وصل للشيت بعد كل المحاولات) بتبان بصفحة الصحة وبفحص `outbox` بـ `/healthz` (القسم 11). السجل: `journalctl -u laqta-outbox-flush -e`.
 تشغيلة جديدة بتعيد كتابة رابط الصف الميت.
+
+**تحديث فهرس المتاجر المحلي (`laqta-index-refresh.timer`):** تعاونية الشارقة بتسمح بقراءة خرائط موقعها بس من 04:00 لـ 08:45 UTC (`Visit-time` بـ robots.txt، والإعداد `SHARJAHCOOP_CRAWL_WINDOW`)، والتشغيل الليلي برّا هالنافذة فكان المتجر بيتخطّى كل ليلة وما انفهرس أبداً.
+هلق كل يوم الساعة 04:30 UTC (مكتوبة UTC بالتايمر، فمنطقة وقت السيرفر ما بتغيّرها) بيشتغل `scripts/build_catalog_index.py --refresh --budget-s 3600`: نفس تحديث التشغيل الليلي وزر «حدّث الفهرس هلق»، بيقرا بس المتاجر المستحقة (ولا مرة انقرت أو أقدم من `LOCAL_INDEX_REFRESH_DAYS`)، فأغلب الأيام بيخلص بثواني. أقصى شي ساعة، وجمع الشارقة بيوقف لحاله الساعة 08:45 والتحديث الجاي بيكمّل من وين وقف.
+إذا في تحديث تاني شغّال بيطلع برمز 3 (مش فشل). السجل: `journalctl -u laqta-index-refresh -e`. على سيرفر مركّب من قبل: `sudo systemctl enable --now laqta-index-refresh.timer` بعد ما ينسخ install.sh الوحدتين.
 
 **التشغيل من اللوحة بيضل شغّال (`laqta-run.path`):** لما بتضغط «شغّل» اللوحة بتكتب ملف طلب `temp/run_request.json` وبتشغّله خدمة systemd `laqta-run.service` بمستخدم `laqta` (نفس الأمرين: `--enqueue` ثم `--worker`).
 قبل هيك php-fpm كان بيشغّله جواته، فإعادة تشغيل أو ترقية php-fpm بدون إشراف كانت تقتل التشغيل. هلق ما بتأثر. زر الإيقاف والحالة بيشتغلوا متل قبل.
