@@ -18,7 +18,8 @@ The CODE decides, never the model:
     MISMATCH  any 'no', or a parsed size_text that conflicts with spec.size; except, UNSURE: one unit
               of a multipack SKU (multipack_unit_image: the size 'no' is only the pack), a printed size
               within the size tolerance but not exactly the SKU's (size_close: '840ge' for 850 g), and
-              a 'no' the reading's own text cannot support (overruled_flags; never a brand 'no')
+              a 'no' the reading's own text cannot support (overruled_flags; never a brand 'no'). A size 'no' on
+              the WHOLE multipack ('2 x 2 kg' for 2X2KG: multipack_whole_image) is no 'no' at all (size_flag)
     UNSURE    anything else
 Every failure path (no key, transport error, non-200 after the retry, a response
 that is not the schema, a safety block) returns status 'unknown' with every
@@ -274,6 +275,45 @@ def multipack_unit_image(spec: SkuSpec, verdict: VlmImageVerdict) -> bool:
     return verdict.pack_count in (None, 1) or verdict.pack_count == spec.size.pieces
 
 
+def multipack_whole_image(spec: SkuSpec, verdict: VlmImageVerdict) -> bool:
+    """True when the picture is the WHOLE multipack of the SKU and the reader's size 'no' is only its habit of
+    comparing the printed per-unit size with the SKU's pack size.
+
+    Production row 31 'AL OSRA FINE SUGAR 2X2KG': a Lulu picture read 'Value Pack 2 x 2 kg' (pack 2) and a
+    SharjahCoop one '2 x 2Kg' (pack 2), brand and variant 'yes', size_match 'no' -> MISMATCH, while one 2 kg bag
+    (multipack_unit_image, UNSURE) was preselected instead. All of these hold:
+      * the SKU is a multipack (pack_count > 1) of a measured size, not a counted one;
+      * size_match is the ONLY 'no' (brand and variant are not read as different);
+      * the printed size re-parses to the SKU's per-unit size with no pack conflict (size_agreement 'match');
+      * the printed pack IS the SKU's pack: every printed 'N x Q' has N == spec.pack_count, the counted
+        pack_count is the SKU's or unknown, and at least one of them states it ('2 x 2 kg', or '2KG' with a
+        counted pack of 2);
+      * it is not one unit (multipack_unit_image keeps that case, e.g. a counted pack equal to the pieces).
+    classify() reads the size 'no' of such a picture as size 'yes' (the right product: MATCH when everything else
+    qualifies); decide reads it the same way (label_carries_identity, full_match, unverified_warnings).
+    """
+    target_pack = spec.pack_count or 1
+    if target_pack <= 1 or spec.size is None or spec.size.dimension == "count":
+        return False
+    if verdict.size_match != "no" or "no" in (verdict.brand_match, verdict.variant_match):
+        return False
+    if size_agreement(spec, verdict.size_text) != "match":
+        return False
+    printed = [s for s in parse_sizes(verdict.size_text, "vlm") if s.dimension == spec.size.dimension]
+    if not printed or any((s.pack_count or 1) not in (1, target_pack) for s in printed):
+        return False
+    if verdict.pack_count not in (None, target_pack):
+        return False
+    stated = verdict.pack_count == target_pack or any(s.pack_count == target_pack for s in printed)
+    return stated and not multipack_unit_image(spec, verdict)
+
+
+def size_flag(spec: SkuSpec, verdict: VlmImageVerdict) -> str:
+    """The reader's size_match as the code reads it: 'yes' for a 'no' on the whole multipack
+    (multipack_whole_image: '2 x 2 kg' read for a 2X2KG SKU), the reader's own flag otherwise."""
+    return "yes" if multipack_whole_image(spec, verdict) else verdict.size_match
+
+
 def _stem(word: str) -> str:
     """A plain English plural read as its singular ('oils' -> 'oil'), as score.class_coverage reads words."""
     if not is_arabic(word) and len(word) > 3 and word.endswith("s") and not word.endswith("ss"):
@@ -379,6 +419,9 @@ def classify(spec: SkuSpec, verdict: VlmImageVerdict) -> str:
             the SKU's within sizes.DEFAULT_TOL but not exactly, '840ge' for 850 g, and the pack agrees);
           - 'no' flags the reading itself cannot support (overruled_flags: a size 'no' with nothing printed
             read, a variant 'no' whose printed text is exactly the words describing the SKU); never a brand 'no';
+      * not a 'no' at all: the WHOLE multipack (multipack_whole_image: size_match is the only 'no', the printed
+        size is the SKU's per-unit size and the printed pack is the SKU's, '2 x 2 kg' for 2X2KG) reads as size
+        'yes' (size_flag), so it is MATCH when everything below qualifies;
       * MATCH needs a front packshot, brand_match 'yes' with the brand (and the sub-brand
         the SKU names) readable in brand_text, a printed size that re-parses to the SKU
         size (and pack) when the SKU states one, and variant_match 'yes' with no
@@ -387,7 +430,8 @@ def classify(spec: SkuSpec, verdict: VlmImageVerdict) -> str:
     """
     unit_of_multipack = multipack_unit_image(spec, verdict)
     excused = unit_of_multipack or size_close(spec, verdict) is not None or bool(overruled_flags(spec, verdict))
-    if "no" in (verdict.brand_match, verdict.variant_match, verdict.size_match) and not excused:
+    # the whole multipack ('2 x 2 kg' for 2X2KG): its size 'no' is the per-unit/pack habit, read as size 'yes'
+    if "no" in (verdict.brand_match, verdict.variant_match, size_flag(spec, verdict)) and not excused:
         return MISMATCH
     size_state = size_agreement(spec, verdict.size_text)
     if size_state == "conflict":

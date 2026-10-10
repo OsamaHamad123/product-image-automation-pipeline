@@ -21,7 +21,10 @@ from catalog_match.models import (
     Candidate, FetchedImage, ProviderHealth, QualityReport, RankedCandidate, VerificationResult,
 )
 from catalog_match.score import score_candidate
-from catalog_match.verify import MATCH, MISMATCH, UNSURE, classify, make_verdict, multipack_unit_image
+from catalog_match.verify import (
+    MATCH, MISMATCH, UNSURE, classify, make_verdict, multipack_unit_image, multipack_whole_image, size_agreement,
+    size_flag,
+)
 
 OK = VerificationResult(status="ok", calls=1)
 HEALTHY = [ProviderHealth("serper", "ok", 200, query_id="Q1")]
@@ -569,3 +572,93 @@ def test_the_tier2_fallback_prefers_a_sharp_picture_when_trust_ties():
     out = route(s, rcs)
     assert out.decision == "REVIEW_PRESELECTED" and out.winner is rcs[1]
     assert "preselected:tier2_corroborated" in out.winner.reasons
+
+
+# ---------------------------------------------------------------------------
+# The WHOLE multipack read size 'no' (production row 31 'AL OSRA FINE SUGAR 2X2KG')
+# ---------------------------------------------------------------------------
+
+AL_OSRA_2X = spec_of("AL OSRA FINE SUGAR 2X2KG", "AL OSRA")
+LULU_SUGAR = ("Al Osra Fine Sugar Value Pack 2 x 2 kg Online at Best Price | Sugar | Lulu UAE",
+              "https://gcc.luluhypermarket.com/en-ae/al-osra-fine-sugar-value-pack-2-x-2-kg/p/1234567",
+              "https://gcc.luluhypermarket.com/medias/1234567-01.jpg")
+SHARJAH_SUGAR = ("Al Osra Fine Sugar 2 x 2Kg | Sharjah Coop",
+                 "https://www.sharjahcoop.ae/en/al-osra-fine-sugar-2-x-2kg",
+                 "https://www.sharjahcoop.ae/media/catalog/product/al-osra-fine-sugar-2x2kg.jpg")
+ONE_BAG_SUGAR = ("Al Osra Fine Sugar 2kg | Grocery Store",
+                 "https://grocery.example.ae/products/al-osra-fine-sugar-2kg",
+                 "https://grocery.example.ae/cdn/al-osra-fine-sugar-2kg.jpg")
+
+
+def sugar(size_text, pack, **flags):
+    """The row-31 reading: brand and variant 'yes', size 'no' (the reader compares the unit with the pack)."""
+    return dict(read("Al Osra", "Fine Sugar", size_text, size_match="no", pack=pack), **flags)
+
+
+@pytest.mark.parametrize("size_text,pack", [
+    ("Value Pack 2 x 2 kg", 2),      # Lulu, as read in production
+    ("2 x 2Kg", 2),                  # SharjahCoop, as read in production
+    ("2KG", 2),                      # the per-unit size printed, two bags counted
+    ("2X2KG", None),                 # the pack printed, nothing counted
+])
+def test_row31_the_whole_2x2kg_pack_read_size_no_is_a_match(size_text, pack):
+    assert (AL_OSRA_2X.size.base_value, AL_OSRA_2X.pack_count) == (2000.0, 2)
+    assert size_agreement(AL_OSRA_2X, size_text) == "match"
+    v = make_verdict(AL_OSRA_2X, 0, sugar(size_text, pack))
+    assert multipack_whole_image(AL_OSRA_2X, v) and not multipack_unit_image(AL_OSRA_2X, v)
+    assert size_flag(AL_OSRA_2X, v) == "yes" and v.size_match == "no"    # the reader's own flag is kept
+    assert v.decision == MATCH                                           # was MISMATCH
+
+
+@pytest.mark.parametrize("change", [{"view": "other_side"}, {"brand_match": "unsure"}])
+def test_row31_the_whole_pack_still_needs_everything_else_for_a_match(change):
+    assert make_verdict(AL_OSRA_2X, 0, sugar("2 x 2 kg", 2, **change)).decision == UNSURE
+
+
+def test_row31_one_2kg_bag_stays_unsure_with_the_warning():
+    rc = listing(AL_OSRA_2X, 1, *ONE_BAG_SUGAR, sugar("2KG", 1))
+    assert rc.verdict.decision == UNSURE
+    assert multipack_unit_image(AL_OSRA_2X, rc.verdict) and not multipack_whole_image(AL_OSRA_2X, rc.verdict)
+    assert "multipack_unit_image" in decide.candidate_warnings(AL_OSRA_2X, rc)
+
+
+@pytest.mark.parametrize("size_text,pack", [
+    ("3 x 2kg", 3),                  # another pack printed
+    ("3 x 2kg", None),
+    ("2KG", 3),                      # three bags counted
+    ("2 x 2kg", 3),                  # the count contradicts the printed pack
+    ("2 x 1kg", 2),                  # another unit size
+])
+def test_row31_another_pack_of_the_sugar_stays_mismatch(size_text, pack):
+    v = make_verdict(AL_OSRA_2X, 0, sugar(size_text, pack))
+    assert v.decision == MISMATCH and not multipack_whole_image(AL_OSRA_2X, v)
+
+
+@pytest.mark.parametrize("change", [{"variant_match": "no"}, {"brand_match": "no"}])
+def test_row31_the_whole_pack_never_excuses_another_no(change):
+    v = make_verdict(AL_OSRA_2X, 0, sugar("Value Pack 2 x 2 kg", 2, **change))
+    assert v.decision == MISMATCH and not multipack_whole_image(AL_OSRA_2X, v)
+
+
+def test_row31_the_whole_pack_as_a_banner_stays_mismatch():
+    assert make_verdict(AL_OSRA_2X, 0, sugar("Value Pack 2 x 2 kg", 2, view="banner")).decision == MISMATCH
+
+
+def test_row31_a_2x2kg_pack_for_a_single_bag_sku_stays_mismatch():
+    single = spec_of("AL OSRA FINE SUGAR 2KG", "AL OSRA")
+    v = make_verdict(single, 0, sugar("2 x 2 kg", 2))
+    assert v.decision == MISMATCH and not multipack_whole_image(single, v)
+
+
+def test_row31_the_whole_pack_picture_wins_over_one_bag():
+    s = AL_OSRA_2X
+    rcs = [
+        listing(s, 1, *ONE_BAG_SUGAR, sugar("2KG", 1)),
+        listing(s, 2, *LULU_SUGAR, sugar("Value Pack 2 x 2 kg", 2)),
+        listing(s, 3, *SHARJAH_SUGAR, sugar("2 x 2Kg", 2)),
+    ]
+    assert [rc.verdict.decision for rc in rcs] == [UNSURE, MATCH, MATCH]
+    assert all(decide.label_carries_identity(s, rc) for rc in rcs)
+    out = route(s, rcs)
+    assert out.winner in rcs[1:], (out.decision, [rc.score.tier for rc in rcs], out.winner and out.winner.reasons)
+    assert not {"multipack_unit_image", "vlm_unsure"} & set(warns(out.winner))
