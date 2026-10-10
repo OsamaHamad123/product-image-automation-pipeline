@@ -262,7 +262,7 @@ def test_layout_loads_only_google_fonts_and_local_css():
     hosts = set(re.findall(r"(?:href|src)=\"(?:https?:)?//([^/\"]+)", layout))
     assert hosts == {"fonts.googleapis.com", "fonts.gstatic.com"}, hosts
     # one script: the shell's own file, versioned so the browser caches it; no inline block
-    assert re.findall(r"<script[^>]*>", layout) == [
+    assert re.findall(r"<script[^>]*>", layout, flags=re.IGNORECASE) == [
         "<script src=\"{{ asset('js/layout.js') }}?v={{ @filemtime(public_path('js/layout.js')) ?: '1' }}\">"]
     assert not inline_scripts(layout)
     assert layout.index("js/layout.js") < layout.index("@yield('scripts')") < layout.index("@stack('scripts')")
