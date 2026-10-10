@@ -12,7 +12,10 @@ The host is used only for source trust (and the stock/clipart rule).
 Hard rejects (tier None):
     competitor_brand        a known other brand in title / page_title / page_slug /
                             image_file while no target brand phrase is present anywhere
-    size_conflict           title or page_title states another size (> 3 %)
+    size_conflict           title or page_title states another size (> 3 %); the SKU's total in the
+                            other form ('360g' for 12 x 30g, or the reverse: sizes.total_match) is
+                            a size match with the pack left unproven (conflict 'size_total_form';
+                            a single-unit SKU listed as such a multipack caps at tier 2)
     pack_conflict           title or page_title states another pack count
     variant_conflict:<axis> title / page_title / page_slug states an exclusive other variant
     gtin_mismatch           gtin_on_page is a valid GTIN different from the SKU's valid GTIN AND
@@ -27,7 +30,8 @@ Hard rejects (tier None):
     stock_or_clipart        stock/clipart domain or keyword
     reviewer_negative       the image URL was rejected by a reviewer before
 
-Soft conflicts cap the tier at 2: a size or pack conflict found only in a URL
+Soft conflicts cap the tier at 2: a page on a demoted store (trusted_domains.json 'demoted', unioncoop.ae:
+source trust 'demoted', below generic), a size or pack conflict found only in a URL
 (url_only_size_conflict), a variant conflict found only in the image filename, a
 'marked' variant the SKU does not state (low fat / diet / decaf / a flavour / a
 form such as fresh or long-life), a closely related variant line (Diet vs Zero
@@ -83,7 +87,7 @@ from . import variants as variants_mod
 from .brand_index import is_common_word, is_generic_brand
 from .gtin import is_restricted, normalize_gtin
 from .models import Candidate, CandidateScore, SkuSpec
-from .sizes import compare, compare_pack, parse_sizes
+from .sizes import AMBIGUOUS, compare, compare_pack, parse_sizes, total_match
 from .text_norm import (
     any_brand_in, any_phrase_in, brand_pattern, domain_matches, is_arabic, match_string, store_market, tokens,
     url_host, url_path_text,
@@ -95,7 +99,9 @@ TRUSTED_DOMAINS_PATH = Path(__file__).resolve().parent / "data" / "trusted_domai
 
 COVERAGE_T1 = 0.5
 TRUST_OFFICIAL, TRUST_UAE_RETAILER, TRUST_STRUCTURED, TRUST_OTHER_RETAIL, TRUST_GENERIC = 4, 3, 2, 1, 0
-TRUST_NAMES = {4: "official", 3: "uae_retailer", 2: "structured", 1: "other_retail", 0: "generic"}
+# a store whose pictures and pages are often poor or wrong (trusted_domains.json 'demoted': unioncoop.ae)
+TRUST_DEMOTED = -1
+TRUST_NAMES = {4: "official", 3: "uae_retailer", 2: "structured", 1: "other_retail", 0: "generic", -1: "demoted"}
 
 TEXT_FIELDS = ("title", "page_title")                      # hard size / pack evidence
 VARIANT_HARD_FIELDS = ("title", "page_title", "page_slug")  # hard variant evidence
@@ -361,11 +367,15 @@ def page_host(cand: Candidate) -> str:
 
 
 def source_trust(spec: SkuSpec, cand: Candidate) -> Tuple[int, str]:
-    """(trust level, name) of the candidate's page: official > UAE retailer > structured > other retail > generic."""
+    """(trust level, name) of the candidate's page: official > UAE retailer > structured > other retail > generic
+    > demoted."""
     data = trusted_domains()
     host = page_host(cand)
     if host and domain_matches(host, spec.official_domains):
         return TRUST_OFFICIAL, TRUST_NAMES[TRUST_OFFICIAL]
+    if host and domain_matches(host, data.get("demoted", [])):
+        # listed as a UAE retailer too (searched and fetched like one), but its pages rank below everything else
+        return TRUST_DEMOTED, TRUST_NAMES[TRUST_DEMOTED]
     if host and domain_matches(host, data.get("uae_retailers", [])):
         # The same store's other-country section ('/saudi-en/', '/en-kw/') sells the foreign pack.
         if store_market(cand.page_url) == "foreign":
@@ -540,6 +550,16 @@ def score_candidate(spec: SkuSpec, cand: Candidate, negatives=None) -> Candidate
             if check_pack:
                 pack_by_field[name] = compare_pack(spec.pack_count, found,
                                                    spec.size.pieces if spec.size is not None else None)
+            # The total in the other form ('Biscuits 360g' for 12 x 30g, '12 x 30g' for 360g) is the same
+            # content, not another size: the size matches and the pack is left unproven (never a conflict). A
+            # single-unit SKU listed as a multipack never makes tier 1 on it (a multipack SKU needs its pack anyway).
+            if size_by_field.get(name) in ("conflict", AMBIGUOUS) and total_match(spec.size, found, spec.pack_count):
+                size_by_field[name] = "match"
+                if pack_by_field.get(name) in ("conflict", AMBIGUOUS):
+                    pack_by_field[name] = "unknown"
+                conflicts.append(f"size_total_form:{name}")
+                if not spec.pack_count or spec.pack_count <= 1:
+                    soft_cap = True
     text_sizes = [size_by_field.get(f) for f in TEXT_FIELDS if f in size_by_field]
     url_sizes = [size_by_field.get(f) for f in URL_FIELDS if f in size_by_field]
     text_packs = [pack_by_field.get(f) for f in TEXT_FIELDS if f in pack_by_field]
@@ -647,6 +667,10 @@ def score_candidate(spec: SkuSpec, cand: Candidate, negatives=None) -> Candidate
 
     # --- source, stock, negatives ---------------------------------------
     trust, trust_name = source_trust(spec, cand)
+    if trust == TRUST_DEMOTED:
+        # its listing may name the right product over a wrong picture: never tier 1, even on a GTIN match
+        conflicts.append("demoted_source")
+        soft_cap = True
     stock_hit = _is_stock(cand, fields)
     if stock_hit:
         hard.append("stock_or_clipart")
@@ -748,7 +772,7 @@ def _identity_score(tier, brand_ok, gtin_ok, size_status, n_matched, n_variants,
     score += 0.25 if size_status == "match" else (0.08 if size_status in ("unknown", "ambiguous") else 0.0)
     score += 0.20 * (n_matched / n_variants if n_variants else 1.0)
     score += 0.15 * coverage
-    score += 0.10 * (trust / TRUST_OFFICIAL)
+    score += 0.10 * (max(trust, 0) / TRUST_OFFICIAL)
     return round(min(score, 0.99), 4)
 
 

@@ -30,6 +30,8 @@ parse_sizes(text, source_field) -> list[Size]
 product_size(sizes) -> Size | None | 'ambiguous'
 compare(target, found, tol=0.03) -> 'match' | 'conflict' | 'ambiguous' | 'unknown'
 compare_pack(target_pack, found) -> 'match' | 'conflict' | 'ambiguous' | 'unknown'
+total_match(target, found, target_pack=None) -> bool
+    the field states the target's total in the other form ('360g' for 12 x 30g, or the reverse)
 
 Each evidence field (title, page title, page URL, image URL) must be parsed on
 its own: concatenating them invents sizes ('/p/1' + 'g.jpg' reads as '1 g').
@@ -374,6 +376,48 @@ def compare(target: Optional[Size], found: Sequence[Size], tol: float = DEFAULT_
     if len(groups) > 1:
         return AMBIGUOUS
     return "match" if _same_value(groups[0].base_value, target.base_value, tol) else "conflict"
+
+
+def total_match(target: Optional[Size], found: Sequence[Size], target_pack: Optional[int] = None,
+                tol: float = DEFAULT_TOL) -> bool:
+    """True when ONE field states the target's total net content in the other form: a multipack target
+    ('Biscuits 12 x 30g') against its total ('360g', '0.36 kg'), or a single-unit target ('360g') against a
+    multipack of that total ('12 x 30g'). compare() reads such a field as a size conflict (30 g against 360 g).
+
+    Every size of the target's dimension in the field must be either the target's own wording (same per-unit
+    size and pack) or that total, at least one must be the total, and exactly one side of each total is a
+    multipack: '6 x 1L' against '12 x 1L' is no total (compare_pack conflicts), and neither is '2 x 3L' against
+    '6 x 1L'. Totals are compared in base units (g, ml) within tol, so '0.36 kg' is 360 g; a pack count stated on
+    its own ('12 pcs') must be the multipack's. '12 x 30g' against '300g' stays a conflict.
+    """
+    if target is None or target.dimension not in ("mass", "volume"):
+        return False
+    tn = next((n for n in (target_pack, target.pack_count) if n and n > 1), 1)
+    same = [s for s in found if s.dimension == target.dimension]
+    if not same:
+        return False
+    total = target.base_value * tn
+    packs = {tn} if tn > 1 else set()
+    saw_total = False
+    for s in same:
+        sn = s.pack_count if s.pack_count and s.pack_count > 1 else 1
+        if sn == tn and _same_value(s.base_value, target.base_value, tol):
+            continue                                    # the target's own wording ('12 x 30g (360g)')
+        if (sn > 1) == (tn > 1) or not _same_value(s.base_value * sn, total, tol):
+            return False
+        if sn > 1:
+            packs.add(sn)
+        saw_total = True
+    if len(packs) > 1:
+        return False                                    # '12 x 30g' and '6 x 60g' in one field
+    for s in found:
+        if s.dimension != "count":
+            continue
+        n = s.pack_count if s.pack_count and s.pack_count > 1 else (
+            int(s.base_value) if is_pack_count(s) and s.base_value >= 1 else None)
+        if n is not None and n != 1 and n not in packs:
+            return False
+    return saw_total
 
 
 def compare_pack(target_pack: Optional[int], found: Sequence[Size], target_pieces: Optional[int] = None) -> str:
