@@ -23,6 +23,11 @@ class ApiController extends Controller
     /** ما رأته الصفحة (عقد C1): حالة صف الطابور ووقت تحديثه ورقمه، والصورة المعتمدة. */
     private const EXPECTED_STATE_FIELDS = ['queue_status', 'queue_updated_at', 'approved_url', 'queue_row'];
 
+    /** الصور اللي بتنقبل برفع صورة يدوي: نوع المحتوى => امتداد الملف المحفوظ، وحجمها لحد 20MB. */
+    private const UPLOAD_TYPES = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/webp' => 'webp'];
+    private const UPLOAD_MAX_KB = 20480;
+    private const UPLOAD_INVALID = 'الملف لازم يكون صورة JPG أو PNG أو WEBP، وحجمه أقل من 20MB.';
+
     private function getPythonPath()
     {
         return PythonBridge::pythonPath();
@@ -115,6 +120,9 @@ class ApiController extends Controller
      */
     public function approvalJobs(Request $request)
     {
+        if ($request->boolean('failed')) {
+            return $this->failedApprovalJobs();
+        }
         try {
             $query = DB::table('approval_jobs')->select('id', 'sku_key', 'row_number', 'label', 'status', 'result_json',
                                                          'http_status', 'cache_cleared', 'created_by', 'created_at');
@@ -150,17 +158,78 @@ class ApiController extends Controller
         return response()->json(['status' => 'success', 'jobs' => $jobs])->header('Cache-Control', 'no-store');
     }
 
-    /** عدّادات اعتمادات الخادم لكل الصفحات (batch-status): بالدور / شغّالة / فشلت بآخر ساعة. */
-    public static function approvalCounts(): array
+    /** اعتمادات فشلت (لوحة «اعتمادات ما زبطت» والشريط الجانبي): آخر 24 ساعة، وما حدا ضغط «تجاهل» عليها. */
+    private const FAILED_OPEN_SQL = "status = 'failed' AND finished_at > NOW() - INTERVAL 24 HOUR AND dismissed_at IS NULL";
+
+    /**
+     * GET /api/approval-jobs?failed=1 : اعتمادات فشلت بالخادم وصاحبها يمكن طلع من الصفحة: اسم المنتج والسبب (error و
+     * error_code من نتيجتها، و quality_flags لفحص القص)، الأحدث أولاً، 50 بالكتير.
+     */
+    private function failedApprovalJobs()
     {
         try {
-            $row = DB::selectOne("SELECT SUM(status = 'queued') AS queued, SUM(status = 'running') AS running, "
-                . "SUM(status = 'failed' AND finished_at > NOW() - INTERVAL 1 HOUR) AS failed_recent FROM approval_jobs");
+            $rows = DB::table('approval_jobs')
+                ->select('id', 'sku_key', 'row_number', 'label', 'created_by', 'finished_at', 'result_json', 'http_status')
+                ->whereRaw(self::FAILED_OPEN_SQL)
+                ->orderByDesc('finished_at')->orderByDesc('id')
+                ->limit(50)->get();
         } catch (\Throwable $e) {
-            return ['queued' => 0, 'running' => 0, 'failed_recent' => 0];
+            return response()->json(['status' => 'success', 'jobs' => []]);    // ما في جدول (أو عمود dismissed_at) بعد
+        }
+        $jobs = [];
+        foreach ($rows as $r) {
+            $result = json_decode((string) $r->result_json, true);
+            $result = is_array($result) ? $result : [];
+            $flags = $result['quality_flags'] ?? null;
+            $jobs[] = ['id' => (int) $r->id, 'sku_key' => $r->sku_key,
+                       'row_number' => $r->row_number !== null ? (int) $r->row_number : null,
+                       'label' => $r->label, 'created_by' => $r->created_by, 'finished_at' => $r->finished_at,
+                       'http_status' => (int) ($r->http_status ?: 500),
+                       'error' => isset($result['error']) && is_scalar($result['error']) ? (string) $result['error'] : null,
+                       'error_code' => isset($result['error_code']) && is_scalar($result['error_code']) ? (string) $result['error_code'] : null,
+                       'quality_flags' => is_array($flags) ? array_values(array_filter($flags, 'is_string')) : []];
+        }
+        return response()->json(['status' => 'success', 'jobs' => $jobs])->header('Cache-Control', 'no-store');
+    }
+
+    /** POST /api/approval-jobs/{id}/dismiss : «تجاهل» اعتماد فشل. */
+    public function dismissApprovalJob(int $id)
+    {
+        try {
+            $job = DB::table('approval_jobs')->where('id', $id)->first(['id', 'dismissed_at']);
+        } catch (\Throwable $e) {
+            $job = null;
+        }
+        if (!$job) {
+            return response()->json(['status' => 'error', 'error' => 'ما لقينا هالاعتماد.'], 404);
+        }
+        if ($job->dismissed_at === null) {
+            DB::table('approval_jobs')->where('id', $id)->update(['dismissed_at' => DB::raw('NOW()')]);
+        }
+        return response()->json(['status' => 'success', 'id' => $id]);
+    }
+
+    /**
+     * عدّادات اعتمادات الخادم لكل الصفحات (batch-status): بالدور / شغّالة / فشلت. failed_open: فشلت بآخر 24 ساعة وما
+     * انتجاهلت (اللي بتعرضها صفحة المراجعة)؛ failed_recent: فشلت بآخر ساعة (للصفحات القديمة المفتوحة).
+     */
+    public static function approvalCounts(): array
+    {
+        $recent = "SUM(status = 'failed' AND finished_at > NOW() - INTERVAL 1 HOUR) AS failed_recent";
+        try {
+            try {
+                $row = DB::selectOne("SELECT SUM(status = 'queued') AS queued, SUM(status = 'running') AS running, $recent, "
+                    . 'SUM(' . self::FAILED_OPEN_SQL . ') AS failed_open FROM approval_jobs');
+            } catch (\Throwable $e) {
+                // جدول أقدم بلا dismissed_at (لسا ما اشتغل ensure_schema الجديد): كل فشل بآخر 24 ساعة مفتوح
+                $row = DB::selectOne("SELECT SUM(status = 'queued') AS queued, SUM(status = 'running') AS running, $recent, "
+                    . "SUM(status = 'failed' AND finished_at > NOW() - INTERVAL 24 HOUR) AS failed_open FROM approval_jobs");
+            }
+        } catch (\Throwable $e) {
+            return ['queued' => 0, 'running' => 0, 'failed_recent' => 0, 'failed_open' => 0];
         }
         return ['queued' => (int) ($row->queued ?? 0), 'running' => (int) ($row->running ?? 0),
-                'failed_recent' => (int) ($row->failed_recent ?? 0)];
+                'failed_recent' => (int) ($row->failed_recent ?? 0), 'failed_open' => (int) ($row->failed_open ?? 0)];
     }
 
     /**
@@ -185,16 +254,24 @@ class ApiController extends Controller
             return response()->json(['error' => 'No file uploaded'], 400);
         }
 
+        // الملف لازم يكون صورة فعلاً (نوعه من محتواه، مش من اسمه) وحجمه معقول، قبل ما يوصل لبايثون
         $file = $request->file('file');
-        
+        $mime = $file && $file->isValid() ? (string) $file->getMimeType() : '';
+        $validator = \Illuminate\Support\Facades\Validator::make($request->all(), [
+            'file' => 'required|file|max:' . self::UPLOAD_MAX_KB . '|mimetypes:' . implode(',', array_keys(self::UPLOAD_TYPES)),
+        ]);
+        if ($validator->fails() || !isset(self::UPLOAD_TYPES[$mime])) {
+            return response()->json(['status' => 'error', 'error_code' => 'invalid_upload', 'error' => self::UPLOAD_INVALID], 422);
+        }
+
         // حفظ مؤقت للملف المرفوع في مجلد temp التابع للأوتوميشن ليتعامل معه البايثون
         $tempDir = $this->automationPath('temp');
         if (!file_exists($tempDir)) {
             mkdir($tempDir, 0777, true);
         }
         
-        // اسم ملف آمن بحروف ASCII فقط (لا نستخدم اسم الملف الأصلي في المسار)
-        $extension = strtolower(preg_replace('/[^A-Za-z0-9]/', '', (string) $file->getClientOriginalExtension())) ?: 'png';
+        // اسم ملف آمن بحروف ASCII فقط (لا نستخدم اسم الملف الأصلي في المسار)، وامتداده من نوع المحتوى اللي انفحص
+        $extension = self::UPLOAD_TYPES[$mime];
         $safeName = 'manual_' . time() . '_' . bin2hex(random_bytes(6)) . '.' . $extension;
         $targetPath = $tempDir . DIRECTORY_SEPARATOR . $safeName;
         $file->move($tempDir, $safeName);

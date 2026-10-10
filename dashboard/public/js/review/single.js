@@ -428,16 +428,27 @@
 
     // اعتماد عالخادم (approval_jobs): الصفحة بتسأل عن نتيجته كل approvalPollMs لحد ما يخلص، والنتيجة نفسها اللي كان
     // select_image بيردها ({ok, status, data}) فبيتسوّى متل قبل. انقطاع الشبكة بالنص ما بيوقفه: بيضل يسأل، والاعتماد ماشي
+    // الجلسة انتهت (R.sessionExpired): الاعتماد ماشي عالخادم بس الصفحة ما بتقدر تشوفه، فبتسأل كل expiredPollMs بس
+    // (لحد ما ينفتح دخول من تبويب ثاني). MISSING_LIMIT جواب صحيح ورا بعض بلا هالاعتماد (انمسح أو ما انسجّل): فشل بإعادة
+    const MISSING_LIMIT = 10;
     async function followApproval(id) {
         const S = st();
+        let missing = 0;
         for (;;) {
-            await new Promise(resolve => root.setTimeout(resolve, (S.cfg && S.cfg.approvalPollMs) || 1500));
+            const wait = R.sessionExpired && R.sessionExpired() ? ((S.cfg && S.cfg.expiredPollMs) || 30000)
+                : ((S.cfg && S.cfg.approvalPollMs) || 1500);
+            await new Promise(resolve => root.setTimeout(resolve, wait));
             const res = await R.requestJson(`${S.urls.approvalJobs}?ids=${encodeURIComponent(id)}`);
-            const jobs = res.ok && res.data && Array.isArray(res.data.jobs) ? res.data.jobs : [];
-            const found = jobs.find(j => Number(j.id) === Number(id));
+            const listed = res.ok && res.data && Array.isArray(res.data.jobs);
+            const found = listed ? res.data.jobs.find(j => Number(j.id) === Number(id)) : null;
             if (found && (found.status === 'done' || found.status === 'failed')) {
                 const status = Number(found.http_status) || 500;
                 return { ok: status >= 200 && status < 300, status: status, data: found.result || {} };
+            }
+            missing = found ? 0 : (listed ? missing + 1 : missing);
+            if (missing >= MISSING_LIMIT) {
+                return { ok: false, status: 404,
+                         data: { status: 'failed', error: 'ما لقينا هالاعتماد على الخادم؛ افتح المنتج وجرّب كمان مرة.' } };
             }
         }
     }

@@ -224,6 +224,81 @@
     display: none;
 }
 
+/* «اعتمادات ما زبطت»: approvals that failed on the server (app.js renderFailed), compact, hidden when none */
+.rv-failed {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin: 10px 12px 0;
+    padding: 10px 12px;
+    border-radius: var(--lq-radius-lg);
+    background: var(--lq-warning-bg);
+    color: var(--lq-warning-ink);
+    font-size: 13px;
+}
+
+.rv-failed[hidden] {
+    display: none;
+}
+
+.rv-failed__head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.rv-failed__title {
+    font-weight: 600;
+}
+
+.rv-failed__open,
+.rv-failed__dismiss {
+    white-space: nowrap;
+}
+
+.rv-failed__list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 220px;
+    margin: 0;
+    padding: 0;
+    overflow-y: auto;
+    list-style: none;
+}
+
+.rv-failed__item {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px 10px;
+}
+
+.rv-failed__text {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    flex: 1 1 160px;
+}
+
+.rv-failed__name {
+    overflow: hidden;
+    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.rv-failed__reason {
+    line-height: 1.5;
+}
+
+.rv-failed__actions {
+    display: flex;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
 .rv-note {
     padding: 8px 10px;
     font-size: 13px;
