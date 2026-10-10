@@ -266,6 +266,24 @@ def test_link_lands_in_the_link_column_after_columns_move_mid_run(gs, outbox):
     assert set(statuses(gs).values()) == {"SYNCED"}
 
 
+def test_a_sheet_read_between_queueing_and_flushing_does_not_outlive_the_write(gs, outbox):
+    """Queueing a link deletes products_cache.json, but a read before the flush (the review list reloading, the
+    worker) writes it again with the old cell. The batch flush used to leave that copy in place, so the review list
+    showed the row's old link (and needs_review state) for up to an hour."""
+    ws = sheet()
+    link_idx = gs.find_link_column(ws)
+    cache = os.path.join(gs.CACHE_DIR, "products_cache.json")
+    assert gs.update_image_link(ws, 2, link_idx, "needs_review:https://img/milk.png", barcode=MILK) is True
+    assert not os.path.exists(cache)                           # queueing deletes it (as before)
+    products, _ = gs.get_products(ws)                          # read before the flush: the old, empty cell
+    assert products[0]["needs_review"] is False and os.path.exists(cache)
+    flush(gs, ws, outbox)
+    assert set(statuses(gs).values()) == {"SYNCED"}
+    assert not os.path.exists(cache)                           # the stale copy is gone with the write
+    products, _ = gs.get_products(ws)
+    assert products[0]["needs_review"] is True and products[0]["needs_review_url"] == "https://img/milk.png"
+
+
 def test_metadata_columns_are_resolved_at_write_time(gs, outbox):
     ws = sheet()
     assert gs.update_product_metadata(ws, 2, {"description_en": "Fresh milk"}, barcode=MILK) is True

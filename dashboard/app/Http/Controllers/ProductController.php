@@ -28,6 +28,12 @@ class ProductController extends Controller
     /** كاش منتجات المراجعة: صفوف الشيت مدمجة بالمرشحات المخزنة والاعتمادات (الكتالوج، المراجعة الجماعية، الرئيسية). */
     public const REVIEW_PRODUCTS_CACHE_KEY = 'review_products_v2';
 
+    /**
+     * بصمة استجابة /api/products-json (ETag) مع بصمتي قاعدة البيانات والشيت اللي انحسبت عليهن، بمفتاح صغير لحاله:
+     * جواب 304 لصفحة المراجعة ما بيفك كاش المنتجات كله (~250 KB) ولا بيعيد الدمج.
+     */
+    public const REVIEW_PRODUCTS_TAG_KEY = 'review_products_tag_v1';
+
     private const PRODUCTS_CACHE_SECONDS = 3600;
 
     /**
@@ -35,6 +41,8 @@ class ProductController extends Controller
      * بلارافيل، فأي إدراج أو حذف أو تغيير اختيار أو اعتماد أو إلغاء اعتماد يغيّر البصمة (كل تعديل على
      * resolved_products يحدّث resolved_at)، ويُعاد الدمج من قاعدة البيانات في الطلب التالي بدون إعادة قراءة الشيت.
      * أخطاء المنتجات (product_failures) منها أيضاً: العامل يسجل الفشل دون أي كتابة في الشيت.
+     * والصور المرفوضة (rejected_images، «تراجع عن الرفض» بشاشة المراجعة): الرفض والتراجع بيفضّوا الكاش من لوحة التحكم،
+     * بس دمج بلّش قبل الرفض وخلص بعده كان يرجّع يحفظ نسخة قديمة بنفس البصمة (وبنفس الـ ETag).
      */
     public const REVIEW_VERSION_SQL = "SELECT "
         . "(SELECT CONCAT_WS(':', COUNT(*), COALESCE(MAX(id), 0), COALESCE(SUM(id * is_selected), 0)) "
@@ -42,7 +50,8 @@ class ProductController extends Controller
         . "(SELECT CONCAT_WS(':', COUNT(*), COALESCE(MAX(id), 0), COALESCE(SUM(UNIX_TIMESTAMP(resolved_at)), 0), "
         . "COALESCE(SUM(verification_status = 'superseded'), 0)) FROM resolved_products) AS resolved, "
         . "(SELECT CONCAT_WS(':', COUNT(*), COALESCE(SUM(CRC32(barcode)), 0), COALESCE(SUM(UNIX_TIMESTAMP(failed_at)), 0)) "
-        . "FROM product_failures) AS failures";
+        . "FROM product_failures) AS failures, "
+        . "(SELECT CONCAT_WS(':', COUNT(*), COALESCE(MAX(id), 0), COALESCE(SUM(id), 0)) FROM rejected_images) AS rejected";
 
     /** آخر نتيجة لفحص الاتصالات يحفظها verify_cloud_services.py --json. */
     private const DIAGNOSTICS_RESULT_FILE = '../temp/diagnostics_last.json';
@@ -59,6 +68,7 @@ class ProductController extends Controller
     {
         \Cache::forget(self::SHEET_ROWS_CACHE_KEY);
         \Cache::forget(self::REVIEW_PRODUCTS_CACHE_KEY);
+        \Cache::forget(self::REVIEW_PRODUCTS_TAG_KEY);
     }
 
     /**
@@ -106,7 +116,8 @@ class ProductController extends Controller
     {
         try {
             $row = DB::selectOne(self::REVIEW_VERSION_SQL);
-            return $row ? ((string) $row->candidates . '|' . (string) $row->resolved . '|' . (string) $row->failures) : null;
+            return $row ? ((string) $row->candidates . '|' . (string) $row->resolved . '|' . (string) $row->failures
+                . '|' . (string) ($row->rejected ?? '')) : null;
         } catch (\Throwable $e) {
             return null;
         }
@@ -115,11 +126,13 @@ class ProductController extends Controller
     /**
      * منتجات المراجعة: صفوف الشيت مدمجة بالمرشحات المخزنة وحالة الاعتماد. تُخدم من الكاش ما دامت بصمة قاعدة
      * البيانات وبصمة الشيت لم تتغيرا، وإلا يُعاد الدمج (وصفوف الشيت نفسها من كاشها الخاص).
-     * تعيد null عند فشل قراءة الشيت، وسبب الفشل في $error.
+     * تعيد null عند فشل قراءة الشيت، وسبب الفشل في $error. $etag: بصمة المحتوى (productsTag) للـ ETag.
      */
-    public static function reviewProducts(bool $refresh = false, ?string &$error = null, ?bool &$fromCache = null): ?array
+    public static function reviewProducts(bool $refresh = false, ?string &$error = null, ?bool &$fromCache = null,
+                                          ?string &$etag = null): ?array
     {
         $fromCache = false;
+        $etag = null;
         // البصمة تُحسب قبل قراءة البيانات: كتابة أثناء الدمج تجعل الطلب التالي يعيد الدمج ولا تُفقد
         $version = self::reviewDataVersion();
         $stamp = self::sheetStamp();
@@ -128,6 +141,7 @@ class ProductController extends Controller
             if (is_array($cached) && ($cached['version'] ?? null) === $version
                 && ($cached['stamp'] ?? null) === $stamp && is_array($cached['products'] ?? null)) {
                 $fromCache = true;
+                $etag = is_string($cached['etag'] ?? null) ? $cached['etag'] : self::productsTag($cached['products']);
                 return $cached['products'];
             }
         }
@@ -238,10 +252,62 @@ class ProductController extends Controller
         // الصورة الحالية بالشيت تُعرض عبر /api/image-proxy: مضيفها (أي رابط كتبه المالك بالشيت) مسموح للوكيل
         \App\Services\ImageProxy::rememberHosts(array_column($products, 'existing_image_link'));
 
+        $etag = self::productsTag($products);
+        $stampAfter = self::sheetStamp();
         \Cache::put(self::REVIEW_PRODUCTS_CACHE_KEY,
-            ['version' => $version, 'stamp' => self::sheetStamp(), 'products' => $products],
+            ['version' => $version, 'stamp' => $stampAfter, 'products' => $products, 'etag' => $etag],
+            self::PRODUCTS_CACHE_SECONDS);
+        \Cache::put(self::REVIEW_PRODUCTS_TAG_KEY, ['version' => $version, 'stamp' => $stampAfter, 'etag' => $etag],
             self::PRODUCTS_CACHE_SECONDS);
         return $products;
+    }
+
+    /**
+     * ETag ضعيف لمنتجات المراجعة: بصمة المحتوى نفسه (مش بصمتي قاعدة البيانات والشيت بس)، فدمج جديد بنفس النتيجة
+     * بيضل يجاوب 304، وأي فرق بالمحتوى بيغيّره حتى لو ما غيّر البصمتين. ضعيف (W/) لأن nginx بيضغط الجواب (gzip)
+     * وبيحوّل الـ ETag القوي لضعيف أصلاً.
+     */
+    private static function productsTag(array $products): string
+    {
+        return 'W/"' . md5((string) json_encode($products, JSON_PARTIAL_OUTPUT_ON_ERROR)) . '"';
+    }
+
+    /**
+     * الـ ETag المحفوظ إذا لسا بيطابق بصمتي قاعدة البيانات والشيت الحاليتين، وإلا null: فحص سؤال 304 قبل أي دمج
+     * (استعلام البصمة وstat لملف الشيت ومفتاح صغير من الكاش).
+     */
+    private static function cachedProductsTag(): ?string
+    {
+        $version = self::reviewDataVersion();
+        $stamp = self::sheetStamp();
+        if ($version === null || $stamp === null) {
+            return null;
+        }
+        $tag = \Cache::get(self::REVIEW_PRODUCTS_TAG_KEY);
+        return is_array($tag) && ($tag['version'] ?? null) === $version && ($tag['stamp'] ?? null) === $stamp
+            && is_string($tag['etag'] ?? null) ? $tag['etag'] : null;
+    }
+
+    /** If-None-Match يطابق $etag (مقارنة ضعيفة: W/ ما بتفرق، و* بتطابق أي نسخة). */
+    private static function etagMatches(Request $request, string $etag): bool
+    {
+        $header = (string) $request->header('If-None-Match', '');
+        if ($header === '') {
+            return false;
+        }
+        $bare = fn (string $tag) => preg_replace('#^W/#', '', trim($tag));
+        foreach (explode(',', $header) as $candidate) {
+            if (trim($candidate) === '*' || $bare($candidate) === $bare($etag)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** جواب 304 بلا جسم، بنفس رؤوس الكاش تبع جواب 200. */
+    private static function notModified(string $etag)
+    {
+        return response('', 304)->header('ETag', $etag)->header('Cache-Control', 'private, no-cache');
     }
 
 
@@ -256,18 +322,35 @@ class ProductController extends Controller
             // لا يُتجاوز الكاش أثناء التشغيل أو المراجعة: مرشحات العامل الجديدة تغيّر بصمة قاعدة البيانات
             // (يُعاد الدمج من قاعدة البيانات فقط)، وكتابته في الشيت تحذف products_cache.json (تُعاد قراءة الشيت).
             // التجاوز القديم كان يعيد قراءة الشيت كاملاً عبر بايثون مع كل تحميل للكتالوج وقت عمل المراجعين.
+            // صفحة المراجعة بتعيد تحميل القائمة بعد كل رفض وتراجع ودفعة اعتمادات: المتصفح بيبعت الـ ETag اللي معه،
+            // وإذا ما تغيّر شي بيرجع 304 بلا جسم قبل أي دمج (المتصفح بيعطي fetch النسخة اللي عنده كجواب 200)
+            if (!$forceRefresh) {
+                $known = self::cachedProductsTag();
+                if ($known !== null && self::etagMatches($request, $known)) {
+                    return self::notModified($known);
+                }
+            }
+
             $error = null;
             $fromCache = false;
-            $products = self::reviewProducts($forceRefresh, $error, $fromCache);
+            $etag = null;
+            $products = self::reviewProducts($forceRefresh, $error, $fromCache, $etag);
             if ($products === null) {
                 return response()->json(['error' => 'Failed to load products from Google Sheets via CLI: ' . ($error ?? 'Unknown error')], 500);
             }
+            // دمج جديد طلع بنفس المحتوى (مثلاً بعد تفريغ الكاش بلا تغيير فعلي): كمان 304
+            if ($etag !== null && self::etagMatches($request, $etag)) {
+                return self::notModified($etag);
+            }
 
+            // private, no-cache: المتصفح بيخزن الجواب بس بيسأل الخادم كل مرة (If-None-Match) قبل ما يستعمله
             return response()->json([
                 'status'   => 'success',
                 'products' => $products,
                 'cached'   => $fromCache
-            ])->header('X-Cache', $fromCache ? 'HIT' : 'MISS');
+            ])->header('X-Cache', $fromCache ? 'HIT' : 'MISS')
+              ->header('ETag', $etag)
+              ->header('Cache-Control', 'private, no-cache');
         } catch (\Exception $e) {
             return response()->json(['error' => $e->getMessage()], 500);
         }

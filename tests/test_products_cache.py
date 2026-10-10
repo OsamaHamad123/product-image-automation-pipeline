@@ -20,6 +20,8 @@ from pathlib import Path
 
 import pytest
 
+from laqta_kernel import NEEDS_LARAVEL, stub_env
+
 ROOT = Path(__file__).resolve().parents[1]
 DASH = ROOT / "dashboard"
 CONTROLLERS = DASH / "app" / "Http" / "Controllers"
@@ -59,7 +61,8 @@ def test_raw_rows_and_review_products_have_separate_versioned_keys():
 
     # the only cache writes: raw rows in sheetRows(), enriched products in reviewProducts()
     puts = re.findall(r"Cache::put\(\s*([^,]+),", text)
-    assert sorted(p.strip() for p in puts) == ["self::REVIEW_PRODUCTS_CACHE_KEY", "self::SHEET_ROWS_CACHE_KEY"]
+    assert sorted(p.strip() for p in puts) == ["self::REVIEW_PRODUCTS_CACHE_KEY", "self::REVIEW_PRODUCTS_TAG_KEY",
+                                               "self::SHEET_ROWS_CACHE_KEY"]
     assert "SHEET_ROWS_CACHE_KEY" in method_body(text, "sheetRows")
     assert "REVIEW_PRODUCTS_CACHE_KEY" not in method_body(text, "sheetRows")
     assert "REVIEW_PRODUCTS_CACHE_KEY" in method_body(text, "reviewProducts")
@@ -97,6 +100,7 @@ def test_helper_forgets_both_keys():
     body = method_body(read(PRODUCT), "forgetProductCaches")
     assert "Cache::forget(self::SHEET_ROWS_CACHE_KEY)" in body
     assert "Cache::forget(self::REVIEW_PRODUCTS_CACHE_KEY)" in body
+    assert "Cache::forget(self::REVIEW_PRODUCTS_TAG_KEY)" in body       # the 304 check never outlives the products
 
 
 @pytest.mark.parametrize("path,name", [
@@ -124,9 +128,10 @@ def test_every_write_path_calls_the_invalidation_helper(path, name):
 HARNESS = r"""<?php
 namespace Illuminate\Http {
     class Request {
-        private $q;
-        public function __construct(array $q = []) { $this->q = $q; }
+        private $q; private $h;
+        public function __construct(array $q = [], array $h = []) { $this->q = $q; $this->h = $h; }
         public function query($k, $d = null) { return $this->q[$k] ?? $d; }
+        public function header($k, $d = null) { return $this->h[$k] ?? $d; }
     }
 }
 
@@ -136,9 +141,11 @@ namespace Illuminate\Support\Facades {
         public static $candidates = [];
         public static $failures = [];   // product_failures: barcode (or ERR_<name>_<brand>) => error_message
         public static $status = 'idle';
+        public static $tables = 0;      // DB::table() calls: the merge reads its tables, a 304 reads none
         public static function selectOne($sql) { return (object) self::$version; }
         public static function select($sql) { return [(object) ['status' => self::$status]]; }
         public static function table($t) {
+            self::$tables++;
             if ($t === 'product_failures') {
                 return new \FakeQuery(array_map(fn ($k, $v) => ['barcode' => $k, 'error_message' => $v],
                     array_keys(self::$failures), self::$failures));
@@ -213,7 +220,9 @@ namespace {
         public function json($data, $status = 200) { return new FakeResponse($data, $status); }
     }
     class_alias('Illuminate\\Support\\Facades\\DB', 'DB');   // Laravel's global facade alias
-    function response() { return new FakeResponseFactory(); }
+    function response($content = null, $status = 200) {
+        return func_num_args() ? new FakeResponse($content, $status) : new FakeResponseFactory();
+    }
     function view($name, $data = []) { return ['view' => $name, 'data' => $data]; }
     function base_path($p = '') { return $GLOBALS['ROOT_DIR'] . '/dashboard' . ($p !== '' ? '/' . $p : ''); }
 
@@ -301,6 +310,39 @@ namespace {
     $out['keys_after_forget'] = array_keys(Cache::$store);
     $out['review_after_all'] = count(array_filter($catalog()['rows'], fn ($r) => $r['needs_review']));
 
+    // 6. ETag / 304 (the review page reloads the list after rejects, undo-rejects and approval batches)
+    $get = function ($tag = null) use ($controller) {
+        $before = DB::$tables;
+        $r = $controller->getProductsJson(new Illuminate\Http\Request([], $tag === null ? [] : ['If-None-Match' => $tag]));
+        return ['status' => $r->status, 'etag' => $r->headers['ETag'] ?? null,
+                'cache_control' => $r->headers['Cache-Control'] ?? null,
+                'empty' => $r->status === 304 ? ($r->data === '' || $r->data === null) : null,
+                'merged' => DB::$tables > $before, 'python_calls' => PythonBridge::$calls];
+    };
+    $tags = [];
+    $tags['first'] = $get();
+    $e1 = $tags['first']['etag'];
+    $tags['same'] = $get($e1);
+    $tags['strong_form'] = $get(substr($e1, 2));                     // nginx gzip may hand back either form
+    $tags['in_a_list'] = $get('W/"other", ' . $e1);
+    $tags['other'] = $get('W/"other"');
+    // the worker records a failure (database only): a new fingerprint and new content
+    DB::$failures['ERR_Juice_Almarai'] = 'NO_RESULTS: No acceptable image found (NO_RESULTS)';
+    DB::$version['failures'] = '2:124:999';
+    $tags['after_db_change'] = $get($e1);
+    $e2 = $tags['after_db_change']['etag'];
+    $tags['after_db_change_same'] = $get($e2);
+    // a sheet write: products_cache.json is deleted and the sheet read again with row 3's new link
+    PythonBridge::$rows[1]['existing_image_link'] = 'https://res.cloudinary.com/x/juice.png';
+    @unlink($GLOBALS['ROOT_DIR'] . '/products_cache.json');
+    $tags['after_sheet_write'] = $get($e2);
+    $e3 = $tags['after_sheet_write']['etag'];
+    // the sheet stamp changes but the rows read back are the same: merged again, and the same content answers 304
+    file_put_contents($GLOBALS['ROOT_DIR'] . '/products_cache.json', '{"products": []}' . str_repeat(' ', 64));
+    $tags['stamp_only'] = $get($e3);
+    $tags['e'] = [$e1, $e2, $e3];
+    $out['etag'] = $tags;
+
     echo json_encode($out);
 }
 """
@@ -364,10 +406,59 @@ def test_worker_failures_reach_the_errors_tab_without_a_sheet_write(tmp_path):
 @pytest.mark.skipif(PHP is None, reason="php is not installed")
 def test_raw_rows_and_review_products_live_under_different_keys(tmp_path):
     out = run_harness(tmp_path)
-    assert sorted(out["keys_before_forget"]) == ["review_products_v2", "sheet_rows_v2"]
+    assert sorted(out["keys_before_forget"]) == ["review_products_tag_v1", "review_products_v2", "sheet_rows_v2"]
     assert out["raw_rows_enriched"] is False               # the raw-rows cache never holds enriched products
     assert out["keys_after_forget"] == []
     assert out["review_after_all"] == 2                    # rebuilt: rows 2 and 3 both have stored candidates
+
+
+@pytest.mark.skipif(PHP is None, reason="php is not installed")
+def test_products_json_answers_304_while_nothing_changed(tmp_path):
+    t = run_harness(tmp_path)["etag"]
+    first = t["first"]
+    assert first["status"] == 200 and first["cache_control"] == "private, no-cache"
+    assert re.fullmatch(r'W/"[0-9a-f]{32}"', first["etag"])
+    for name in ("same", "strong_form", "in_a_list"):
+        res = t[name]
+        assert res["status"] == 304 and res["empty"] is True, name
+        assert res["etag"] == first["etag"] and res["cache_control"] == "private, no-cache", name
+        assert res["merged"] is False, name                     # answered before any merge work
+        assert res["python_calls"] == first["python_calls"], name
+    assert t["other"]["status"] == 200 and t["other"]["etag"] == first["etag"]
+
+
+@pytest.mark.skipif(PHP is None, reason="php is not installed")
+def test_products_json_etag_changes_with_the_database_and_the_sheet(tmp_path):
+    t = run_harness(tmp_path)["etag"]
+    e1, e2, e3 = t["e"]
+    assert len({e1, e2, e3}) == 3
+
+    db = t["after_db_change"]                                   # the old tag no longer matches
+    assert db["status"] == 200 and db["etag"] == e2 and db["merged"] is True
+    assert db["python_calls"] == t["first"]["python_calls"]     # rebuilt from the database only
+    assert t["after_db_change_same"]["status"] == 304
+
+    sheet = t["after_sheet_write"]
+    assert sheet["status"] == 200 and sheet["etag"] == e3
+    assert sheet["python_calls"] == db["python_calls"] + 1      # the sheet was read again
+
+    stamp = t["stamp_only"]                                     # a new stamp is checked, not trusted
+    assert stamp["merged"] is True and stamp["python_calls"] == sheet["python_calls"] + 1
+    assert stamp["status"] == 304 and stamp["etag"] == e3       # same rows back: same content, same tag
+
+
+@NEEDS_LARAVEL
+def test_products_json_304_through_the_laravel_kernel(mariadb_or_skip, tmp_path):
+    from test_dashboard_security import dashboard
+
+    env, _calls = stub_env(tmp_path)
+    (first,), _ = dashboard(env, [["/api/products-json", "GET"]])
+    assert first["status"] == 200 and json.loads(first["body"])["status"] == "success"
+    assert first["etag"].startswith('W/"') and "no-cache" in first["cache"] and "private" in first["cache"]
+    again, _ = dashboard(env, [["/api/products-json", "GET", {}, {"HTTP_IF_NONE_MATCH": first["etag"]}],
+                               ["/api/products-json", "GET", {}, {"HTTP_IF_NONE_MATCH": 'W/"stale"'}]])
+    assert again[0]["status"] == 304 and again[0]["body"] == b"" and again[0]["etag"] == first["etag"]
+    assert again[1]["status"] == 200 and json.loads(again[1]["body"])["products"]
 
 
 # ---------------------------------------------------------------------------

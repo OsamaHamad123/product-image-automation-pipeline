@@ -1285,6 +1285,9 @@ class GoogleSheetsBatchWorker(threading.Thread):
             _set_status(cursor, [r["id"] for r, _ in ready], "SYNCED")
             conn.commit()
             logger.info("[Sheets Outbox] تمت مزامنة %s خلية.", len(ready))
+            # الجدولة حذفت الكاش، بس قراءة بين الجدولة والتفريغ (تحميل لقائمة المراجعة أو العامل) كتبته من جديد بالقيم
+            # القديمة: بدون الحذف هون كانت القائمة تعرض الرابط القديم لهالصفوف لساعة. عادةً الملف مش موجود أصلاً
+            clear_cache()
             return
         except Exception as e:
             if _is_transient(e):

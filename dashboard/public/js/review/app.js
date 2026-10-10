@@ -303,7 +303,9 @@
             await R.requestJson(S.urls.clearCache, { method: 'POST', body: {} });
         }
         const productsUrl = S.urls.products + (opts.refresh ? '?refresh=true' : '');
-        const [prodRes, queueRes] = await Promise.all([R.requestJson(productsUrl), R.requestJson(S.urls.queueState)]);
+        // no-cache مش no-store: إعادة التحميل بعد رفض أو دفعة اعتمادات ما تغيّر فيها شي بترجع 304 بلا جسم (ETag)
+        const [prodRes, queueRes] = await Promise.all([R.requestJson(productsUrl, { cache: 'no-cache' }),
+                                                       R.requestJson(S.urls.queueState)]);
         if (seq !== loadSeq) return;
 
         const productsOk = prodRes.ok && prodRes.data.status === 'success' && Array.isArray(prodRes.data.products);
