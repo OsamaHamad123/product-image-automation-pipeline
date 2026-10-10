@@ -96,15 +96,26 @@
         }
     }
 
-    // صور المصادر عبر /api/image-proxy (http/https فقط)؛ صور Cloudinary والصفحة نفسها مباشرة، ومعاينة الملف المحلي كما هي
-    function imageUrl(url, proxy) {
+    // صورة Cloudinary مصغّرة: c_limit,w_N,f_auto بعد /image/upload/ مباشرة، بس لما بعدها رقم النسخة (v123/) يعني ما في
+    // تحويلات قبل؛ رابط فيه تحويلات (أو شكل تاني) بيضل متل ما هو، لأن تحويل زيادة قبلها بيغيّر نتيجتها
+    const CLOUDINARY_PLAIN = /^(https:\/\/res\.cloudinary\.com\/[^/?#]+\/image\/upload\/)(v\d+\/[^?#]+)$/;
+    function cloudinaryThumb(url, width) {
+        const m = CLOUDINARY_PLAIN.exec(url);
+        return m ? `${m[1]}c_limit,w_${width},f_auto/${m[2]}` : url;
+    }
+
+    // صور المصادر عبر /api/image-proxy (http/https فقط)؛ صور Cloudinary والصفحة نفسها مباشرة، ومعاينة الملف المحلي كما هي.
+    // width: صورة مصغّرة (القائمة): البروكسي بيصغّرها (w)، و Cloudinary بتحويلها
+    function imageUrl(url, proxy, width) {
         const raw = String(url || '');
         if (raw.startsWith('blob:')) return raw;
         const safe = safeHttpUrl(raw);
         if (!safe) return '';
+        const w = parseInt(width, 10) > 0 ? parseInt(width, 10) : 0;
         const origin = root.location ? root.location.origin : '';
-        if ((origin && safe.startsWith(origin + '/')) || /^https:\/\/res\.cloudinary\.com\//.test(safe)) return safe;
-        return (proxy || '/api/image-proxy') + '?url=' + encodeURIComponent(safe);
+        if (origin && safe.startsWith(origin + '/')) return safe;
+        if (/^https:\/\/res\.cloudinary\.com\//.test(safe)) return w ? cloudinaryThumb(safe, w) : safe;
+        return (proxy || '/api/image-proxy') + '?url=' + encodeURIComponent(safe) + (w ? `&w=${w}` : '');
     }
 
     // روابط lookaside عند فيسبوك وإنستغرام (/crawler/) بتعطي الصورة لبوتات محركات البحث بس، ولأي حدا تاني صفحة HTML:
@@ -114,20 +125,65 @@
         try { return CRAWLER_ONLY.test(new URL(String(url || '')).hostname.toLowerCase()); } catch (e) { return false; }
     }
 
-    // صورة مع حالة فشل صادقة: إذا ما انعرضت تظهر جملة بدل أيقونة مكسورة
-    function img(url, alt, proxy, className) {
+    // صورة ما انعرضت (شبكة متقطعة، أو المتجر رفض لحظتها): منعيد طلبها بعد هالمدد، كل مرة برابط جديد (r=n) فما بيرجع
+    // فشل محفوظ بكاش المتصفح. بعدها بس منقول إنها ما انعرضت
+    R.imgRetryMs = [1000, 3000];
+
+    function retrySrc(src, n) {
+        return `${src}${src.indexOf('?') >= 0 ? '&' : '?'}r=${n}`;
+    }
+
+    // صورة مع حالة فشل صادقة: إذا ما انعرضت حتى بعد إعادة المحاولة تظهر جملة بدل أيقونة مكسورة، ومعها «جرّب مرة تانية»
+    // (إلا جوّا زر، متل صفوف القائمة: زر جوّا زر ما بيصير). data-img-state: retrying وقت الإعادة (اللي بيسمع error
+    // للصورة بيعتبرها لسا عم تتحمّل)، failed بعد آخر محاولة. opts.width: صورة مصغّرة (imageUrl)
+    function img(url, alt, proxy, className, opts) {
         if (crawlerOnly(url)) {
             return el('span', { className: 'rv-img-missing',
                                 text: 'صورة من منشور فيسبوك أو إنستغرام: ما بتنعرض برّا التطبيق. افتح صفحة المصدر لتشوفها' });
         }
-        const src = imageUrl(url, proxy);
+        const src = imageUrl(url, proxy, opts && opts.width);
         if (!src) return el('span', { className: 'rv-img-missing', text: 'ما في صورة' });
         const node = el('img', { src: src, alt: alt || '', loading: 'lazy', referrerpolicy: 'no-referrer', className: className || null });
+        let tries = 0;
+        let round = 0;
+        node.addEventListener('load', () => node.removeAttribute('data-img-state'));
         node.addEventListener('error', () => {
-            const note = el('span', { className: 'rv-img-missing', text: 'ما قدرنا نعرض الصورة' });
-            if (node.parentNode) node.parentNode.replaceChild(note, node);
+            const waits = Array.isArray(R.imgRetryMs) ? R.imgRetryMs : [];
+            if (!src.startsWith('blob:') && tries < waits.length) {
+                const wait = Math.max(0, parseInt(waits[tries], 10) || 0);
+                tries += 1;
+                round += 1;
+                const n = round;
+                node.setAttribute('data-img-state', 'retrying');
+                // انشالت من الصفحة (منتج تاني انفتح): ما في داعي نطلبها
+                setTimeout(() => { if (node.isConnected !== false) node.setAttribute('src', retrySrc(src, n)); }, wait);
+                return;
+            }
+            node.setAttribute('data-img-state', 'failed');
+            const host = node.parentNode;
+            if (!host) return;
+            const inButton = typeof host.closest === 'function' && !!host.closest('button, a');
+            const note = el('span', { className: 'rv-img-missing' }, [el('span', { className: 'rv-img-missing__text', text: 'ما قدرنا نعرض الصورة' })]);
+            if (!inButton && !src.startsWith('blob:')) {
+                note.appendChild(el('button', { type: 'button', className: 'lq-btn lq-btn--ghost lq-btn--sm rv-img-retry', text: 'جرّب مرة تانية',
+                                                onclick: e => {
+                                                    e.preventDefault();
+                                                    e.stopPropagation();
+                                                    tries = 0;
+                                                    round += 1;
+                                                    node.setAttribute('data-img-state', 'retrying');
+                                                    if (note.parentNode) note.parentNode.replaceChild(node, note);
+                                                    node.setAttribute('src', retrySrc(src, round));
+                                                } }));
+            }
+            host.replaceChild(note, node);
         });
         return node;
+    }
+
+    // الصورة عم تنعاد (بعد فشل): لسا مش فاشلة
+    function imgRetrying(node) {
+        return !!(node && typeof node.getAttribute === 'function' && node.getAttribute('data-img-state') === 'retrying');
     }
 
     function csrfToken() {
@@ -249,9 +305,12 @@
         return box;
     }
 
-    function toast(message, variant, timeout) {
+    // action: زر بالإشعار { label, onClick } (متل «تراجع» بعد الرفض)
+    function toast(message, variant, timeout, action) {
         if (root.Laqta && typeof root.Laqta.toast === 'function') {
-            return root.Laqta.toast(message, { variant: variant || 'info', timeout: timeout });
+            const opts = { variant: variant || 'info', timeout: timeout };
+            if (action && typeof action.onClick === 'function') opts.action = action;
+            return root.Laqta.toast(message, opts);
         }
         return null;
     }
@@ -263,6 +322,6 @@
         return el('span', { className: `rv-lane rv-lane--${lane}`, dataset: { lane: lane }, title: R.LANE_TITLE[lane], text: R.LANE_TEXT[lane] });
     }
 
-    Object.assign(R, { ICONS, icon, el, bdi, clear, safeHttpUrl, imageUrl, img, csrfToken, requestJson, toast, laneBadge,
+    Object.assign(R, { ICONS, icon, el, bdi, clear, safeHttpUrl, imageUrl, img, imgRetrying, csrfToken, requestJson, toast, laneBadge,
                        sessionExpired, onSessionExpired, showSessionBanner });
 })(typeof window !== 'undefined' ? window : globalThis);
