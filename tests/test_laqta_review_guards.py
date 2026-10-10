@@ -223,7 +223,7 @@ def test_single_mode_never_approves_a_pick_whose_picture_did_not_render(tmp_path
 imageFails.add('https://www.carrefouruae.com/p70.jpg');
 openRow(70);
 await flush();
-out.note = ws().querySelector('.rv-pick .rv-img-missing').textContent;
+out.note = ws().querySelector('.rv-pick .rv-img-missing__text').textContent;
 out.state = [R.single.canApprove(), approveBtn().title];
 press('Enter');
 await flush();
@@ -237,7 +237,8 @@ out.loaded = R.single.canApprove();
 press('Enter');
 await flush();
 out.sent_after = requests('/api/select_image').map(c => c.body.row_number);
-""", tmp_path, fixture([picked(70, "Almarai Milk 1L"), picked(71, "Almarai Laban 1L")]), config={"row": 70})
+""", tmp_path, fixture([picked(70, "Almarai Milk 1L"), picked(71, "Almarai Laban 1L")]),
+       config={"row": 70, "imageRetryMs": []})                    # no retries: the failure shows at once
     assert out["note"] == "ما قدرنا نعرض الصورة"
     assert out["state"][0] is False and "ما قدرنا نعرض هالصورة" in out["state"][1]
     assert out["sent"] == 0
@@ -290,7 +291,7 @@ press('a', { shiftKey: true });
 await flush();
 out.confirm = confirms.slice(-1)[0];
 out.jobs = S().jobs.state().jobs.map(j => j.ctx.row_number);
-""", tmp_path, fixture(prods), config={"mode": "bulk"})
+""", tmp_path, fixture(prods), config={"mode": "bulk", "imageRetryMs": []})
     assert out["missing"] == 2
     assert out["ticked"] == [10, 13] and out["disabled"] == [True, True]
     assert out["label"] == "اعتماد صورتين بلا تحذير"

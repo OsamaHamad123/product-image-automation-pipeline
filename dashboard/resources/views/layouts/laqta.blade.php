@@ -508,6 +508,15 @@
             close.appendChild(svgIcon('M6 6l12 12M18 6 6 18', 16));
             el.appendChild(icon);
             el.appendChild(text);
+            // options.action: { label, onClick } → زر بالإشعار (متل «تراجع»)؛ الضغط عليه بيسكّر الإشعار
+            var action = null;
+            if (options.action && typeof options.action.onClick === 'function') {
+                action = document.createElement('button');
+                action.type = 'button';
+                action.className = 'lq-toast__action';
+                action.textContent = String(options.action.label || '');
+                el.appendChild(action);
+            }
             el.appendChild(close);
             region.appendChild(el);
             var closeTimer = null;
@@ -516,6 +525,12 @@
                 if (el.parentNode) el.parentNode.removeChild(el);
             }
             close.addEventListener('click', dismiss);
+            if (action) {
+                action.addEventListener('click', function () {
+                    dismiss();
+                    options.action.onClick();
+                });
+            }
             var timeout = typeof options.timeout === 'number' ? options.timeout : (variant === 'loading' ? 0 : 6000);
             if (timeout > 0) closeTimer = setTimeout(dismiss, timeout);
             return {

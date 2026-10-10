@@ -803,6 +803,15 @@ class ApiController extends Controller
         if (!in_array($scheme, ['http', 'https'], true)) {
             return response('Unsupported URL scheme', 400);
         }
+        // w: صورة مصغّرة بهالعرض (صور قائمة المراجعة)، بين THUMB_MIN_W و THUMB_MAX_W؛ رقم برّا الحدود بيتقرّب لأقربها
+        $width = null;
+        $rawWidth = trim((string) $request->query('w', ''));
+        if ($rawWidth !== '') {
+            if (!preg_match('/^\d{1,5}$/D', $rawWidth)) {
+                return response('Bad width', 400)->header('Cache-Control', 'no-store');
+            }
+            $width = max(ImageProxy::THUMB_MIN_W, min(ImageProxy::THUMB_MAX_W, (int) $rawWidth));
+        }
         if (!ImageProxy::allowedHost((string) parse_url($url, PHP_URL_HOST))) {
             return response('Image host not allowed', 403)->header('Cache-Control', 'no-store');
         }
@@ -816,6 +825,13 @@ class ApiController extends Controller
         $mime = is_array($info) ? ($info['mime'] ?? '') : '';
         if ($mime === '' || strpos($mime, 'image/') !== 0 || stripos($mime, 'svg') !== false) {
             return response('Upstream content is not a raster image', 415)->header('Cache-Control', 'no-store');
+        }
+        if ($width !== null) {
+            // تصغير ما زبط (صيغة ما بيفتحها GD، أو صورة أصغر أصلاً): الصورة متل ما هي
+            $small = ImageProxy::resize($body, $width);
+            if ($small !== null) {
+                [$body, $mime] = $small;
+            }
         }
         return response($body, 200)
             ->header('Content-Type', $mime)

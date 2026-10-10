@@ -1919,6 +1919,22 @@ a.lq-btn[aria-disabled="true"] {
     color: var(--lq-text);
 }
 
+.lq-toast__action {
+    flex-shrink: 0;
+    padding: 4px 10px;
+    border: 1px solid var(--lq-border);
+    border-radius: var(--lq-radius-sm);
+    background: var(--lq-surface);
+    color: var(--lq-text);
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.lq-toast__action:hover {
+    background: var(--lq-bg);
+}
+
 .lq-toast--success .lq-toast__icon { color: var(--lq-success); }
 .lq-toast--warning .lq-toast__icon { color: var(--lq-warning); }
 .lq-toast--danger { border-color: var(--lq-danger-border); }

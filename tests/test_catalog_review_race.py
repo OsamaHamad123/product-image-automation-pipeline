@@ -258,6 +258,7 @@ out.reject_view = [reject.body.search_decision, reject.body.candidate_status];
 out.reject_bytes = [reject.body.candidate_sha256, reject.body.page_url];
 answer(reject, { status: 'success', sku_key: 'key-a', approval_kept: false });
 await flush();
+openRow(5);                                          // a reject without research moved on, like an approval: back to A
 out.alts_after_reject = altUrls();
 out.text_after_reject = wsText();
 press('Enter');                                      // A's pick is still shown: approve it
