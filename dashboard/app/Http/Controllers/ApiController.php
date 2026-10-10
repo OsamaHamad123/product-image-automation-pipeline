@@ -96,8 +96,9 @@ class ApiController extends Controller
         // وبتقدر تنسكّر أو تتنقّل. نفس الحقول ونفس action_select_image، بس بعملية بالخلفية
         if ($request->boolean('async')) {
             $queued = $this->runPython('approval_enqueue', $params + ['created_by' => (string) (auth()->user()->name ?? '')]);
-            $ok = ($queued['status'] ?? '') === 'queued';
-            return response()->json($queued, $ok ? 202 : 500);
+            $state = $queued['status'] ?? '';
+            // busy: اعتماد صورة تانية لنفس المنتج شغّال (تبويب تاني): 409 والصفحة بتعرض السبب
+            return response()->json($queued, $state === 'queued' ? 202 : ($state === 'busy' ? 409 : 500));
         }
         $result = $this->runPython('select_image', $params);
 

@@ -1,0 +1,34 @@
+# Review-page approvals (scripts/approval_worker.py): runs the approvals queued in approval_jobs, then exits.
+# Started by laqta-approvals.path when the dashboard queues one (it touches temp/approval_request), and every minute by
+# laqta-approvals.timer, which takes any job left queued or whose worker died (stale after 15 minutes without a
+# heartbeat). Never started by hand.
+#
+# Why this exists: php-fpm used to start the worker itself, inside php-fpm's own cgroup, so a php-fpm restart killed an
+# approval in progress and nothing started it again until the next approval. Here it lives in this unit's cgroup.
+# A oneshot unit that is still running ignores the next start, so the path and the timer never pile workers up; a
+# request that comes while it runs is still there when it ends, and the path starts it again.
+# The @NAME@ words are filled in by install.sh.
+[Unit]
+Description=Laqta review approvals (scripts/approval_worker.py)
+After=network-online.target mariadb.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=@APP_USER@
+Group=@APP_USER@
+WorkingDirectory=@APP_DIR@
+Environment=PYTHONUTF8=1
+Environment=PYTHONIOENCODING=utf-8
+Environment=U2NET_HOME=@MODELS_DIR@
+ExecStart=/bin/sh -c 'exec @APP_DIR@/.venv/bin/python -X utf8 @APP_DIR@/scripts/approval_worker.py >> @APP_DIR@/temp/approval_worker.log 2>&1'
+# A queue of approvals is minutes; a hung one must not block every later approval.
+TimeoutStartSec=1h
+KillSignal=SIGTERM
+TimeoutStopSec=60
+MemoryMax=@MEMORY_MAX@
+OOMPolicy=kill
+OOMScoreAdjust=300
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full

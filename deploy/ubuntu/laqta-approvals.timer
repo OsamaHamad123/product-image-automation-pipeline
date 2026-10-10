@@ -1,0 +1,13 @@
+# Sweeps the approval queue every minute (see laqta-approvals.service): a job left queued (a lost request) or whose
+# worker died is taken without waiting for the next approval. An empty queue costs one small query.
+[Unit]
+Description=Laqta approval queue sweep, every minute
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=1min
+AccuracySec=5s
+Unit=laqta-approvals.service
+
+[Install]
+WantedBy=timers.target

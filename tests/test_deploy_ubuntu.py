@@ -33,9 +33,10 @@ DEPLOY = REPO / "deploy" / "ubuntu"
 SCRIPTS = sorted(DEPLOY.glob("*.sh"))
 UNITS = ["laqta-sync-worker.service", "laqta-nightly.service", "laqta-nightly.timer",
          "laqta-backup.service", "laqta-backup.timer", "laqta-outbox-flush.service", "laqta-outbox-flush.timer",
-         "laqta-run.service", "laqta-run.path"]
+         "laqta-run.service", "laqta-run.path", "laqta-approvals.service", "laqta-approvals.path",
+         "laqta-approvals.timer"]
 PYTHON_SERVICES = ["laqta-nightly.service", "laqta-sync-worker.service", "laqta-outbox-flush.service",
-                   "laqta-run.service"]
+                   "laqta-run.service", "laqta-approvals.service"]
 BASH = shutil.which("bash")
 needs_bash = pytest.mark.skipif(BASH is None, reason="bash is not installed")
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="Linux deployment kit")
@@ -1636,3 +1637,18 @@ def test_every_docs_section_the_scripts_point_to_exists_and_is_about_that_topic(
             referenced.add(int(m.group(1)))
     assert referenced and referenced <= set(headings), referenced
     assert {4, 6, 7, 8, 9} <= referenced
+
+
+def test_approvals_are_started_on_request_and_swept_every_minute():
+    """The review page's approvals run in laqta-approvals.service (not inside php-fpm): the bridge touches
+    temp/approval_request (approval_jobs.start_worker), and a timer takes anything left queued every minute."""
+    path_unit = rendered_unit("laqta-approvals.path")
+    assert values(path_unit, "Path", "PathExists") == [f"{SAMPLE_APP}/temp/approval_request"]
+    assert values(path_unit, "Path", "Unit") == ["laqta-approvals.service"]
+    timer = rendered_unit("laqta-approvals.timer")
+    assert values(timer, "Timer", "Unit") == ["laqta-approvals.service"] and seconds(values(timer, "Timer", "OnUnitActiveSec")[0]) == 60
+    service = rendered_unit("laqta-approvals.service")
+    assert values(service, "Service", "Type") == ["oneshot"]           # a running worker ignores the next start
+    assert "scripts/approval_worker.py" in values(service, "Service", "ExecStart")[0]
+    plain = (DEPLOY / "install.sh").read_text(encoding="utf-8")
+    assert "systemctl enable --now laqta-approvals.path laqta-approvals.timer" in plain

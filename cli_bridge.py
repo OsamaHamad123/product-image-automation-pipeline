@@ -3098,7 +3098,8 @@ def action_recut_undo(params):
 def action_approval_enqueue(params):
     """
     Queue an approval (the same parameters action_select_image takes) and start a worker; answers at once with
-    {status: 'queued', job_id, existing}. A product (sku_key) with a queued or running approval gets that job back.
+    {status: 'queued', job_id, existing}. A product (sku_key) with a queued or running approval of the same image gets
+    that job back; of another image (a second tab or reviewer) {status: 'busy'}: one approval per product at a time.
     created_by: the dashboard user (only recorded). The job runs action_select_image itself (approval_worker.py).
     """
     import approval_jobs
@@ -3111,6 +3112,10 @@ def action_approval_enqueue(params):
         job = approval_jobs.enqueue("select", params, created_by=created_by)
     except Exception:
         return _failure("failed", "The approval could not be queued (database). Try again.", "approval_enqueue failed")
+    if job.get("busy"):
+        approval_jobs.start_worker()      # the running one may be a dead worker's: the sweep takes it again
+        return {"status": "busy", "job_id": job["job_id"],
+                "error": "في اعتماد تاني عم يشتغل لهالمنتج (صورة غير هاي). استنّى يخلص وبعدين جرّب."}
     approval_jobs.start_worker()
     return {"status": "queued", "job_id": job["job_id"], "existing": job["existing"]}
 

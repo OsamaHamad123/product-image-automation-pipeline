@@ -243,6 +243,13 @@ journalctl -u laqta-run -e                  # آخر تشغيل من اللوح�
 sudo systemctl stop laqta-run               # إيقاف تشغيل اللوحة من الشل (بديل زر الإيقاف)
 ```
 
+**اعتمادات صفحة المراجعة (`laqta-approvals.path` + `laqta-approvals.timer`):** لما المراجع بيعتمد صورة، الاعتماد بينحفظ بجدول `approval_jobs` واللوحة بتلمس ملف `temp/approval_request`، فبتشغّل `laqta-approvals.service` العامل `scripts/approval_worker.py` بمستخدم `laqta` (عامل واحد بالمرة). التايمر بيشغّله كمان كل دقيقة، فاعتماد ضاع طلبه أو مات عامله بينعمل لحاله. العامل بيبعت نبض كل دقيقة وهو شغّال، فاعتماد طويل ما بيتعاد. السجل: `temp/approval_worker.log`.
+
+```bash
+systemctl status laqta-approvals.path laqta-approvals.timer   # لازم active
+journalctl -u laqta-approvals -e
+```
+
 - عامل المزامنة (فقط مع Redis): `install.sh ... --with-redis --enable-units` أو `sudo systemctl enable --now laqta-sync-worker`.
   بدون Redis ما تفعّله: كتابة الشيت بتمرّ عبر طابور MariaDB، وتفريغها كل دقيقتين من `laqta-outbox-flush`.
 
