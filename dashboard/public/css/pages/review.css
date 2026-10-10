@@ -2935,3 +2935,18 @@ body.rv-lb-open {
 .rv-keys-btn {
     font-weight: 700;
 }
+
+/* -------------------------------------------------------------------------------------------------
+ * Bulk mode: held rejects (bulk.js rejectList / relabelUndo)
+ * Appended block: kept together at the end of the file to ease merging.
+ * ------------------------------------------------------------------------------------------------- */
+
+/* «رفضت …» in the undo box: the x instead of the check */
+.rv-undo__row.is-reject .rv-undo__ok {
+    color: var(--lq-danger-on-dark);
+}
+
+/* a card whose reject is held for «تراجع» */
+.rv-card__overlay.is-held.is-reject {
+    color: var(--lq-danger-text);
+}
