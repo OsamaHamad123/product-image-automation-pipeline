@@ -278,6 +278,7 @@
     font-weight: 600;
 }
 
+.rv-failed__retry,
 .rv-failed__open,
 .rv-failed__dismiss {
     white-space: nowrap;
@@ -322,6 +323,7 @@
 
 .rv-failed__actions {
     display: flex;
+    flex-wrap: wrap;
     gap: 4px;
     flex-shrink: 0;
 }

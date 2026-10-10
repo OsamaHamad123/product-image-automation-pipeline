@@ -200,11 +200,14 @@
         d.undo = el('div', { className: 'rv-undo', id: 'rvUndo', role: 'status', 'aria-live': 'polite', hidden: true });
         d.float = el('div', { className: 'rv-float' }, [d.undo, d.jobs]);
         d.dialog = el('div', { className: 'rv-dialog-backdrop', id: 'rvDialog', hidden: true });
+        // قارئ الشاشة: أي منتج انفتح بعد الانتقال التلقائي أو ↑ ↓ (announce). بس بيحكي، والتركيز بيضل عشريط الأزرار
+        d.announce = el('div', { className: 'lq-sr-only', id: 'rvAnnounce', role: 'status', 'aria-live': 'polite', 'aria-atomic': 'true' });
 
         rootEl.appendChild(d.single);
         rootEl.appendChild(d.bulk);
         rootEl.appendChild(d.float);
         rootEl.appendChild(d.dialog);
+        rootEl.appendChild(d.announce);
 
         d.list.addEventListener('click', e => {
             const btn = e.target && e.target.closest ? e.target.closest('[data-key]') : null;
@@ -391,8 +394,9 @@
 
     // -------------------------------------------------------------------------------------------------
     // «اعتمادات ما زبطت»: اعتمادات فشلت عالخادم بآخر 24 ساعة وما حدا تجاهلها (GET approval-jobs?failed=1)، غالباً بعد
-    // ما طلع المراجع من الصفحة. لكل وحدة: اسم المنتج والسبب بالعربي، «افتح المنتج» (بيفتحه بوضع «منتج واحد» بحالته
-    // هلق، فبيعتمده من جديد) و«تجاهل». بتنقرا وقت تفتح الصفحة، ولما عدّاد الشريط الجانبي (failed_open) يتغيّر.
+    // ما طلع المراجع من الصفحة. لكل وحدة: اسم المنتج والسبب بالعربي، «أعد المحاولة» (نفس الاعتماد بينبعت من جديد من
+    // هون، بلا ما ينفتح المنتج)، «افتح المنتج» (بيفتحه بوضع «منتج واحد» بحالته هلق) و«تجاهل». بتنقرا وقت تفتح الصفحة،
+    // ولما عدّاد الشريط الجانبي (failed_open) يتغيّر.
     // اعتمادات هالصفحة نفسها ما بتنعاد هون: لوحة الاعتمادات بتعرضها مع زر إعادتها
     // -------------------------------------------------------------------------------------------------
 
@@ -437,22 +441,84 @@
         return R.plainError(job.error, R.plainError(job.error_code, 'ما انعتمدت، والخادم ما قال ليش.'));
     }
 
+    const FAILED_GONE = 'ما لقينا هالمنتج بالقائمة هلق: يمكن انعتمد من مكان ثاني أو انشال من الشيت. حدّث القائمة وجرّب كمان شوي.';
+
+    function failedName(job) {
+        return job.label || (job.row_number ? `صف ${job.row_number}` : 'منتج');
+    }
+
     function openFailed(job) {
         const it = failedItem(job);
         if (!it) {
-            R.toast('ما لقينا هالمنتج بالقائمة هلق: يمكن انعتمد من مكان ثاني أو انشال من الشيت. حدّث القائمة وجرّب كمان شوي.', 'warning');
+            R.toast(FAILED_GONE, 'warning');
             return;
         }
         if (S.mode !== 'single') setMode('single', { key: it.key });
         else R.single.openItem(it.key, { from: 'list' });
     }
 
+    // «أعد المحاولة» بينفع إذا الخادم رجّع الطلب كما انبعت (retry: نفس الصورة ونفس هوية المنتج وما شافه المراجع
+    // وقتها)، وما كان السبب إنه مراجع ثاني رفض هالصورة لهالمنتج (إعادتها بترجع تنرفض: لازم يختار غيرها)
+    function failedRetryable(job) {
+        if (!S.jobs || !job.retry || typeof job.retry !== 'object' || !job.retry.image_url) return false;
+        const stale = R.staleInfo({ error_code: job.error_code, reason: job.reason }, null);
+        return !(stale && stale.replaceable === false);
+    }
+
+    // «أعد المحاولة» بلا ما ينفتح المنتج: نفس الاعتماد بينبعت من جديد بطابور الخلفية (select_image مع async=1، متل زر
+    // لوحة الاعتمادات)، مع expected_state اللي انبعت أول مرة. المنتج تغيّر بعدها (اعتماد ثاني، أو الصف صار لمنتج تاني):
+    // الخادم بيرفضه، واللوحة بتقول ليش بالعربي (ومعها «استبدال» بعد تأكيد صريح). الفشل القديم بينشال من هون، لأن
+    // المحاولة الجديدة صارت باللوحة
+    function retryFailed(job) {
+        const it = failedItem(job);
+        if (!it) {
+            R.toast(FAILED_GONE, 'warning');
+            return false;
+        }
+        if (!failedRetryable(job)) {
+            openFailed(job);
+            return false;
+        }
+        if (S.jobs.has(it.key) || ['approving', 'approved'].includes(S.local.get(it.key))) {
+            R.toast(`«${failedName(job)}» انعتمد أو عم ينعتمد من هالصفحة هلق، فما في داعي تعيده.`, 'info');
+            return false;
+        }
+        const body = Object.assign({}, job.retry);
+        const expected = body.expected_state && typeof body.expected_state === 'object' ? body.expected_state : null;
+        delete body.expected_state;
+        const queued = S.jobs.enqueue({ key: it.key, type: 'approve', label: failedName(job), row: body.row_number,
+                                        ctx: { sku_key: body.sku_key || null, row_number: body.row_number },
+                                        candidate: { url: String(body.image_url) }, expected: expected,
+                                        replace: false, publishAnyway: false, body: body });
+        if (!queued) return false;
+        markSending(queued);
+        forgetFailed(job);
+        // ما بيهمنا جوابه: إذا ما انتجاهل، القراءة الجاية بتشيله لأنه اعتماد هالصفحة (أو بيرجع، وبينعاد مرة تانية)
+        R.requestJson(`${S.urls.approvalJobs}/${encodeURIComponent(job.id)}/dismiss`, { method: 'POST', body: {} }).catch(() => {});
+        return true;
+    }
+
+    // اعتماد فاشل بينشال من القائمة. الزر اللي انضغط اختفى معه: التركيز بيروح للاعتماد اللي بعده (أو اللي قبله)،
+    // وإذا ما ضل شي، لمساحة العمل؛ ما بيضيع عـ body
+    function forgetFailed(job) {
+        const d = S.dom;
+        const focused = !!(d.failed && document.activeElement && d.failed.contains(document.activeElement));
+        const before = (S.failed || []).findIndex(j => Number(j.id) === Number(job.id));
+        S.failed = (S.failed || []).filter(j => Number(j.id) !== Number(job.id));
+        renderFailed();
+        if (!focused) return;
+        const items = d.failed.hidden ? [] : d.failed.querySelectorAll('.rv-failed__item');
+        const next = items.length ? items[Math.min(Math.max(before, 0), items.length - 1)] : null;
+        const btn = next ? next.querySelector('button') : null;
+        if (btn) btn.focus();
+        else focusWorkspace();
+    }
+
     async function dismissFailed(job, btn) {
         if (btn) btn.disabled = true;
         const res = await R.requestJson(`${S.urls.approvalJobs}/${encodeURIComponent(job.id)}/dismiss`, { method: 'POST', body: {} });
         if (res.ok || res.status === 404) {
-            S.failed = (S.failed || []).filter(j => Number(j.id) !== Number(job.id));
-            renderFailed();
+            forgetFailed(job);
             return;
         }
         if (btn) btn.disabled = false;
@@ -475,19 +541,25 @@
             icon('alert', 16, 2), el('strong', { className: 'rv-failed__title', text: `اعتمادات ما زبطت (${list.length})` })
         ]));
         d.failed.appendChild(el('ul', { className: 'rv-failed__list' }, list.map(job => {
-            const name = job.label || (job.row_number ? `صف ${job.row_number}` : 'منتج');
+            const name = failedName(job);
+            // الأزرار بتتكرر لكل منتج: اسمها لقارئ الشاشة فيه اسم المنتج
             const dismiss = el('button', { type: 'button', className: 'lq-btn lq-btn--ghost lq-btn--sm rv-failed__dismiss',
-                                           dataset: { failedDismiss: job.id }, text: 'تجاهل' });
+                                           dataset: { failedDismiss: job.id }, 'aria-label': `تجاهل «${name}»`, text: 'تجاهل' });
             dismiss.addEventListener('click', () => dismissFailed(job, dismiss));
             const open = el('button', { type: 'button', className: 'lq-btn lq-btn--secondary lq-btn--sm rv-failed__open',
-                                        dataset: { failedOpen: job.id }, text: 'افتح المنتج' });
+                                        dataset: { failedOpen: job.id }, 'aria-label': `افتح «${name}»`, text: 'افتح المنتج' });
             open.addEventListener('click', () => openFailed(job));
+            const retry = failedRetryable(job)
+                ? el('button', { type: 'button', className: 'lq-btn lq-btn--primary lq-btn--sm rv-failed__retry',
+                                 dataset: { failedRetry: job.id }, 'aria-label': `أعد اعتماد «${name}» بنفس الصورة`,
+                                 text: 'أعد المحاولة', onclick: () => retryFailed(job) })
+                : null;
             return el('li', { className: 'rv-failed__item', dataset: { failedId: job.id } }, [
                 el('div', { className: 'rv-failed__text' }, [
                     bdi(name, 'rv-failed__name'),
                     el('span', { className: 'rv-failed__reason', text: failedReason(job) })
                 ]),
-                el('div', { className: 'rv-failed__actions' }, [open, dismiss])
+                el('div', { className: 'rv-failed__actions' }, [retry, open, dismiss])
             ]);
         })));
     }
@@ -772,7 +844,8 @@
         const active = item.key === S.openKey;
         const btn = el('button', { type: 'button', className: 'rv-item' + (active ? ' is-active' : ''),
                                    dataset: { key: item.key, bucket: item.bucket }, 'aria-current': active ? 'true' : null }, [
-            el('span', { className: 'rv-thumb', dataset: { thumb: thumbUrl(item) } }, [thumbFor(item)]),
+            // الصورة المصغّرة زينة: اسم المنتج وصفّه جنبها بنفس الزر، فقارئ الشاشة ما بيحكيها (alt فاضي و aria-hidden)
+            el('span', { className: 'rv-thumb', 'aria-hidden': 'true', dataset: { thumb: thumbUrl(item) } }, [thumbFor(item)]),
             el('span', { className: 'rv-item__text' }, [
                 bdi(p.product_name || p.product_name_ar || 'بلا اسم', 'rv-item__name'),
                 el('span', { className: 'rv-item__meta' }, [
@@ -1079,13 +1152,22 @@
             node.classList.toggle('is-active', on);
             if (on) {
                 node.setAttribute('aria-current', 'true');
-                if (scroll && typeof node.scrollIntoView === 'function') node.scrollIntoView({ block: 'nearest' });
+                if (scroll) R.scrollIntoView(node, { block: 'nearest' });
             } else {
                 node.removeAttribute('aria-current');
             }
         });
     }
     R.markActive = markActive;
+
+    // جملة لقارئ الشاشة بالمنطقة المؤدبة (rvAnnounce): بتتفضّى قبل، فنفس الجملة مرتين (رجعت لنفس المنتج) بتنحكى كمان
+    function announce(text) {
+        const node = S.dom.announce;
+        if (!node) return;
+        node.textContent = '';
+        node.textContent = String(text || '');
+    }
+    R.announce = announce;
 
     // -------------------------------------------------------------------------------------------------
     // Background approvals panel, and «تراجع» while an approval is held (jobs.js holdMs)
@@ -1255,6 +1337,23 @@
         R.toast(jobs.length === 1 ? 'تراجعت: ما انعتمدت.' : `تراجعت: ما انعتمد ولا وحدة من ${imagesText(jobs.length)}.`, 'info');
     }
 
+    // طلب انبعت من جديد (زر لوحة الاعتمادات، أو «أعد المحاولة» بـ«اعتمادات ما زبطت»): منتجه «جاري الاعتماد» (أو «جاري
+    // الرفض») بالقائمة ومساحة العمل. رفض صورة بديلة والمراجع ضل عالمنتج (job.stay): المنتج نفسه بيضل بانتظار المراجعة
+    function markSending(job) {
+        const key = R.productKeyOf(job);
+        if (!job.stay) S.local.set(key, job.type === 'reject' ? 'rejecting' : 'approving');
+        rebuild();
+        if (S.mode === 'single') {
+            patchList([key]);
+            if (S.openKey === key) R.single.renderWorkspace();
+            else R.single.updateBar();
+            markActive();
+        } else {
+            renderList();
+            R.bulk.render();
+        }
+    }
+
     function setupJobs() {
         S.jobs = R.createJobQueue({
             concurrency: APPROVE_CONCURRENCY,
@@ -1273,19 +1372,8 @@
             // طلب يُعاد: منتجه «جاري الاعتماد» (أو «جاري الرفض») من جديد، فلا يظهر بانتظار المراجعة وهو عم ينعتمد
             // رفض صورة بديلة والمراجع ضل عالمنتج (job.stay): المنتج نفسه بيضل بانتظار المراجعة
             onRetry: job => {
-                const key = R.productKeyOf(job);
-                if (!job.stay) S.local.set(key, job.type === 'reject' ? 'rejecting' : 'approving');
                 R.single.jobRetried(job);
-                rebuild();
-                if (S.mode === 'single') {
-                    patchList([key]);
-                    if (S.openKey === key) R.single.renderWorkspace();
-                    else R.single.updateBar();
-                    markActive();
-                } else {
-                    renderList();
-                    R.bulk.render();
-                }
+                markSending(job);
             },
             onUpdate: st => {
                 renderJobs(st);
@@ -1495,7 +1583,9 @@
             const images = (opts.images || []).filter(im => im && im.url);
             clear(d.dialog);
             dlg.box = el('div', { className: 'rv-dialog' + (opts.wide ? ' rv-dialog--wide' : ''), role: opts.noCancel ? 'dialog' : 'alertdialog',
-                                  'aria-modal': 'true', 'aria-labelledby': 'rvAskTitle', 'aria-describedby': 'rvAskText' }, [
+                                  'aria-modal': 'true', 'aria-labelledby': 'rvAskTitle',
+                                  // نافذة بلا نص (الاختصارات): ما في rvAskText، فما في aria-describedby يأشّر على عنصر مش موجود
+                                  'aria-describedby': opts.text ? 'rvAskText' : null }, [
                 el('h2', { className: 'rv-dialog__title', id: 'rvAskTitle', text: opts.title || '' }),
                 images.length ? el('div', { className: 'rv-dialog__images' }, images.map(im => el('figure', { className: 'rv-dialog__figure' }, [
                     el('div', { className: 'rv-dialog__img' }, [R.img(im.url, im.caption || '', S.urls.imageProxy)]),
@@ -1838,7 +1928,8 @@
             if (toggleMoreMenu(false)) return;
             if (R.bulk.closeDialog()) return;
             if (S.reasonsOpen) {
-                R.single.closeReasons();
+                // التركيز كان بأسباب الرفض: بيرجع لزر «رفض» اللي فتحها
+                R.single.closeReasons(false, true);
                 return;
             }
             return;

@@ -317,6 +317,23 @@
         return null;
     }
 
+    // المراجع طالب حركة أقل من إعدادات جهازه (prefers-reduced-motion): ما في تمرير سلس
+    function reducedMotion() {
+        try {
+            return !!(root.matchMedia && root.matchMedia('(prefers-reduced-motion: reduce)').matches);
+        } catch (e) {
+            return false;
+        }
+    }
+
+    // كل تمرير لعنصر بشاشة المراجعة بيمرق من هون: smooth بيصير auto (فوري) لما الجهاز طالب حركة أقل
+    function scrollIntoView(node, opts) {
+        if (!node || typeof node.scrollIntoView !== 'function') return;
+        const o = Object.assign({}, opts || {});
+        if (o.behavior === 'smooth' && reducedMotion()) o.behavior = 'auto';
+        node.scrollIntoView(o);
+    }
+
     // شارة فئة اختيار المحرك (R.laneOf): «مؤكدة تماماً» أخضر، «الملصق مش واضح» عنبري، ولا شي لباقي الاقتراحات
     function laneBadge(c) {
         const lane = R.laneOf(c);
@@ -330,5 +347,6 @@
     }
 
     Object.assign(R, { ICONS, icon, el, bdi, clear, safeHttpUrl, imageUrl, img, imgRetrying, csrfToken, requestJson, toast, laneBadge,
+                       reducedMotion, scrollIntoView,
                        sessionExpired, onSessionExpired, showSessionBanner, navigate });
 })(typeof window !== 'undefined' ? window : globalThis);
