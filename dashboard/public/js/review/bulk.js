@@ -1188,7 +1188,6 @@
         const B = S.bulk;
         opts = opts || {};
         const focusedAt = shownCards().findIndex(it => it.key === B.focus);
-        if (typeof S.jobs.watch === 'function') S.jobs.watch(relabelUndo);
         const specs = [];
         list.forEach(it => {
             const sel = selectedOf(it);
@@ -1238,33 +1237,6 @@
         R.renderList();
         render();
         R.toast(jobs.length === 1 ? 'تراجعت: ما انرفضت.' : `تراجعت: ما انرفض ولا وحدة من ${R.imagesText(jobs.length)}.`, 'info');
-    }
-
-    // صندوق «تراجع» (app.js renderUndo) بيكتب «اعتمدت»: لمجموعة رفض بيصير «رفضت … («السبب»)» بإشارة x
-    function relabelUndo(state) {
-        const box = st().dom.undo;
-        if (!box || !state || !state.held) return;
-        state.held.forEach(g => {
-            if (!g.jobs.length || !g.jobs.every(j => j.type === 'reject')) return;
-            const row = Array.from(box.querySelectorAll('.rv-undo__row')).find(r => r.getAttribute('data-group') === String(g.group));
-            if (!row || row.classList.contains('is-reject')) return;
-            row.classList.add('is-reject');
-            const ok = row.querySelector('.rv-undo__ok');
-            if (ok) {
-                clear(ok);
-                ok.appendChild(icon('x', 18, 2.2));
-            }
-            const text = row.querySelector('.rv-undo__text');
-            if (!text) return;
-            const left = row.querySelector('.rv-undo__left');
-            const n = g.jobs.length;
-            const j = g.jobs[0];
-            const why = j.reason && R.reasonLabel ? ` («${R.reasonLabel(j.reason)}»)` : '';
-            clear(text);
-            (n === 1 ? ['رفضت ', bdi(j.label || `صف ${j.row}`, 'rv-undo__name', 'auto'), why] : [`رفضت ${R.imagesText(n)}${why}`])
-                .forEach(x => text.appendChild(typeof x === 'string' ? document.createTextNode(x) : x));
-            if (left) text.appendChild(left);
-        });
     }
 
     function closeDialog() {

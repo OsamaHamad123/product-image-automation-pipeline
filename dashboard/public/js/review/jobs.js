@@ -9,7 +9,7 @@
  *
  * Undo: an approval (or a bulk reject) can be held for a few seconds (enqueue(spec, { holdMs })) before it is sent, so
  * «تراجع» takes it back (cancel(group)); enqueueMany(specs, { holdMs, onCancel }) gives the group its own undo handler
- * (bulk rejects: the card goes back as it was), otherwise options.onCancel. watch(fn) is told after every onUpdate. A held approval is never lost silently: when the page is hidden or closed (flush(), wired to
+ * (bulk rejects: the card goes back as it was), otherwise options.onCancel. A held approval is never lost silently: when the page is hidden or closed (flush(), wired to
  * visibilitychange / pagehide by app.js) every held or waiting job is sent at once with fetch keepalive, which the
  * browser completes even after the page is gone, as far as the keepalive budget allows; the rest stay queued and the
  * page's beforeunload prompt covers them.
@@ -38,7 +38,6 @@
         let keepaliveBytes = 0;
         const timers = new Map();      // group -> release timer
         const cancelers = new Map();   // group -> its own «تراجع» handler (enqueueMany opts.onCancel)
-        const watchers = [];
 
         function concurrency() {
             const raw = typeof options.concurrency === 'function' ? options.concurrency() : options.concurrency;
@@ -62,18 +61,6 @@
         function notify() {
             const s = state();
             if (typeof options.onUpdate === 'function') options.onUpdate(s);
-            // بعد ما ترسم الصفحة (renderJobs): مثلاً وضع الجملة بيكتب «رفضت» بصندوق «تراجع» بدل «اعتمدت»
-            watchers.slice().forEach(fn => {
-                try {
-                    fn(s);
-                } catch (err) {
-                    if (root.console) root.console.error(err);
-                }
-            });
-        }
-
-        function watch(fn) {
-            if (typeof fn === 'function' && !watchers.includes(fn)) watchers.push(fn);
         }
 
         function heldGroupDone(group) {
@@ -343,7 +330,7 @@
             };
         }
 
-        return { enqueue, enqueueMany, release, cancel, flush, retry, drop, dismiss, state, busy, accept, activeFor, watch,
+        return { enqueue, enqueueMany, release, cancel, flush, retry, drop, dismiss, state, busy, accept, activeFor,
                  has: key => !!activeFor(key), sending: () => jobs.some(sentOrQueued) };
     }
 

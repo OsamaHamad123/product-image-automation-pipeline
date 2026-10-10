@@ -1196,10 +1196,15 @@
         groups.forEach(g => {
             const n = g.jobs.length;
             const left = Math.max(0, Math.ceil((g.releaseAt - Date.now()) / 1000));
-            const what = n === 1 ? ['اعتمدت ', bdi(g.jobs[0].label || `صف ${g.jobs[0].row}`, 'rv-undo__name', 'auto')]
-                : [`اعتمدت ${imagesText(n)}`];
-            box.appendChild(el('div', { className: 'rv-undo__row', dataset: { group: String(g.group) } }, [
-                el('span', { className: 'rv-undo__ok' }, [icon('check', 18, 2.2)]),
+            // رفض محجوز (وضع الجملة، bulk.js rejectList): «رفضت … («السبب»)» بإشارة x بدل «اعتمدت»
+            const j = g.jobs[0];
+            const reject = g.jobs.every(x => x.type === 'reject');
+            const verb = reject ? 'رفضت' : 'اعتمدت';
+            const why = reject && j.reason && R.reasonLabel ? ` («${R.reasonLabel(j.reason)}»)` : '';
+            const what = n === 1 ? [`${verb} `, bdi(j.label || `صف ${j.row}`, 'rv-undo__name', 'auto'), why]
+                : [`${verb} ${imagesText(n)}${why}`];
+            box.appendChild(el('div', { className: `rv-undo__row${reject ? ' is-reject' : ''}`, dataset: { group: String(g.group) } }, [
+                el('span', { className: 'rv-undo__ok' }, [icon(reject ? 'x' : 'check', 18, 2.2)]),
                 el('span', { className: 'rv-undo__text' }, what.concat([
                     // العدّ بيتغيّر كل نص ثانية: قارئ الشاشة ما بيقراه كل مرة
                     el('span', { className: 'rv-undo__left', 'aria-hidden': 'true', text: ` · بتنبعت بعد ${left} ث` })
