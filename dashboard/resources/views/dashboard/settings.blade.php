@@ -6,7 +6,8 @@
       one of $sheet | $keys | $models | $autoPublish | $processing | $advanced for the active tab
       (resources/views/settings/*)
     Stored keys are never printed, not even in part: the keys tab shows «محفوظ / غير محفوظ» and an empty,
-    write-only field; an empty field keeps the stored key. Each form saves only its own section.
+    write-only field; an empty field keeps the stored key. Each form saves only its own section, and its redirect
+    lands on its card (?tab=…#id, SettingsController::anchorFor; the flash shows at the top and as a toast).
     public/js/settings.js: the sheet preview/save (POST /api/sheet/preview, /api/sheet/save), the key forms,
     and the confirmation of the auto-publish switch.
 --}}
@@ -27,13 +28,13 @@
     </x-lq.page-header>
 
     @if (!empty($flash['success']))
-        <x-lq.alert variant="success" role="status">{{ $flash['success'] }}</x-lq.alert>
+        <x-lq.alert variant="success" role="status" data-settings-flash="success">{{ $flash['success'] }}</x-lq.alert>
     @endif
     @if (!empty($flash['error']))
-        <x-lq.alert variant="danger">{{ $flash['error'] }}</x-lq.alert>
+        <x-lq.alert variant="danger" data-settings-flash="danger">{{ $flash['error'] }}</x-lq.alert>
     @endif
     @foreach ($flash['warnings'] ?? [] as $warning)
-        <x-lq.alert variant="warning" role="status">{{ $warning }}</x-lq.alert>
+        <x-lq.alert variant="warning" role="status" data-settings-flash="warning">{{ $warning }}</x-lq.alert>
     @endforeach
 
     <div class="lq-settings__body">

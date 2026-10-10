@@ -9,7 +9,7 @@
     on the form, so a save without it leaves the stored value alone.
 --}}
 @php $pr = $processing; @endphp
-<form method="POST" action="{{ route('dashboard.save_settings') }}" class="lq-card lq-settings-card" aria-labelledby="lq-settings-processing-title">
+<form method="POST" action="{{ route('dashboard.save_settings') }}" id="lq-settings-processing" class="lq-card lq-settings-card" aria-labelledby="lq-settings-processing-title">
     @csrf
     <input type="hidden" name="section" value="processing">
     <div class="lq-settings-card__head">

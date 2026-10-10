@@ -555,9 +555,7 @@ $out['alert'] = QueueStats::alertText('idle', {json.dumps('BUDGET_REACHED: daily
 def test_the_layout_card_reads_the_budget_and_database_notices_in_arabic():
     """The sidebar run card's own map (used when /api/batch-status carries no Arabic alert) had no text for
     BUDGET_REACHED or DB_UNAVAILABLE."""
-    from blade_scripts import inline_scripts
-    layout = (DASH / "resources" / "views" / "layouts" / "laqta.blade.php").read_text(encoding="utf-8")
-    script = re.sub(r"\{\{.*?\}\}", "''", inline_scripts(layout)[0])
+    script = (DASH / "public" / "js" / "layout.js").read_text(encoding="utf-8")
     harness = ("globalThis.window = globalThis;\nglobalThis.document = { body: null, hidden: false, "
                "querySelector: () => null, querySelectorAll: () => [], addEventListener: () => {}, "
                "dispatchEvent: () => true };\n" + script + "\nconsole.log(JSON.stringify({"

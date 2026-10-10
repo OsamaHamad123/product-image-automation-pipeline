@@ -169,7 +169,7 @@ def test_the_dashboard_saves_validates_and_shows_the_field(app_env):
     assert before["status"] == 200 and 'name="section" value="speed"' in body
     assert "كم منتج بيشتغل بنفس الوقت" in body and "بيستهلك رصيد البحث أسرع" in body
     assert re.search(r'name="worker_concurrency"[^>]*min="1"[^>]*max="8"[^>]*value="5"', body)
-    assert saved["location"].endswith("?tab=advanced") and "انحفظ" in saved["flash"]["success"]
+    assert saved["location"].endswith("?tab=advanced#lq-settings-speed") and "انحفظ" in saved["flash"]["success"]
     assert re.search(r'name="worker_concurrency"[^>]*value="7"', page["body"])
     for refused in (too_many, zero, text, decimal):
         assert len(refused["flash"]["warnings"]) == 1 and "من 1 لـ 8" in refused["flash"]["warnings"][0], refused["flash"]

@@ -28,6 +28,7 @@ QUEUE_STATS = DASH / "app" / "Services" / "QueueStats.php"
 BATCH = VIEWS / "dashboard" / "batch_automation.blade.php"
 INDEX = VIEWS / "dashboard" / "index.blade.php"
 LAYOUT = VIEWS / "layouts" / "laqta.blade.php"
+LAYOUT_JS = DASH / "public" / "js" / "layout.js"       # the layout's script (sidebar card, review badge)
 JS = DASH / "public" / "js"
 RUN_JS = [JS / "run-common.js", JS / "run.js"]         # the Run page (batch_automation.blade.php)
 HOME_JS = [JS / "run-common.js", JS / "home.js"]       # the Home page (index.blade.php)
@@ -468,7 +469,7 @@ def test_old_review_tab_link_opens_the_bulk_review():
 def test_sidebar_run_card_speaks_the_run_states():
     """The Laqta sidebar card (layouts/laqta) reads the same phase, alert and stuck fields as the Run page.
     Its behaviour is run under node in tests/test_laqta_ui.py::test_run_card_follows_the_run_pages_phase_alert_and_stuck."""
-    layout = read(LAYOUT)
+    layout = read(LAYOUT) + read(LAYOUT_JS)
     for field in ("'phase'", "'stuck'", "'alert'"):
         assert field in layout, field
     assert "جاهز وخامل" not in layout and "خامل" not in layout

@@ -6,6 +6,8 @@
  * - المفاتيح: «تغيير» reveals an empty, write-only form; clearing a stored key asks first.
  * - النشر الآلي: the switch says what it will do before it saves (AUTO_PUBLISH_ENABLED).
  * - معالجة الصور: with background removal off, «رجّع عزل الخلفية (…)» POSTs /api/settings/bg-method {method}.
+ * - Unsaved changes: a changed card shows «ما انحفظ»; saving another card or leaving the page asks first. A save
+ *   lands back on its card (the redirect's #id) or where the page was (the JSON saves keep the scroll position).
  * View helpers are pure (window.LaqtaSettings, used by the node tests); the DOM code sets text only.
  */
 (function () {
@@ -118,9 +120,25 @@
         return text && /[؀-ۿ]/.test(text) ? text : 'ما انحفظ: جرّب مرة تانية.';
     }
 
+    /* A form's fields as one text (hidden inputs and buttons left out): «ما انحفظ» when it differs from the page load. */
+    function formState(form) {
+        var els = form && form.elements ? form.elements : [];
+        var out = [];
+        for (var i = 0; i < els.length; i++) {
+            var el = els[i];
+            if (!el || !el.name || el.type === 'hidden' || el.type === 'submit' || el.type === 'button') continue;
+            out.push(el.name + '=' + (el.type === 'checkbox' || el.type === 'radio' ? (el.checked ? '1' : '0') : String(el.value)));
+        }
+        return out.join('&');
+    }
+
+    function dirtyText(titles) {
+        return 'في تغييرات ما انحفظت بـ"' + titles.join('" و"') + '"';
+    }
+
     var api = { columnsView: columnsView, previewView: previewView, sheetError: sheetError,
         saveConfirmText: saveConfirmText, clearConfirmText: clearConfirmText,
-        bgMethodError: bgMethodError, COLUMNS: COLUMNS };
+        bgMethodError: bgMethodError, formState: formState, dirtyText: dirtyText, COLUMNS: COLUMNS };
     if (typeof window !== 'undefined') window.LaqtaSettings = api;
 
     // ------------------------------------------------------------------
@@ -186,6 +204,37 @@
         button.disabled = busy;
         if (busy) button.setAttribute('aria-busy', 'true');
         else button.removeAttribute('aria-busy');
+    }
+
+    // --- وين كنت بالصفحة ---------------------------------------------------
+    /* After a save the page loads again where it was: a form's redirect lands on its card (?tab=…#id,
+       SettingsController::anchorFor) and the JSON saves (sheet, bg-method) keep the scroll position. */
+    var SCROLL_KEY = 'laqtaSettingsScroll';
+    var leaving = false;            // a save or a confirmed link is leaving the page: no «ما انحفظ» question
+
+    function here() {
+        return window.location.pathname + window.location.search;
+    }
+
+    function reloadKeepingPlace() {
+        leaving = true;
+        try {
+            window.sessionStorage.setItem(SCROLL_KEY, JSON.stringify({ url: here(), y: window.scrollY || window.pageYOffset || 0 }));
+        } catch (e) { /* no storage (private mode): the browser's own scroll restore */ }
+        window.location.reload();
+    }
+
+    try {
+        var kept = window.sessionStorage ? JSON.parse(window.sessionStorage.getItem(SCROLL_KEY) || 'null') : null;
+        if (kept) window.sessionStorage.removeItem(SCROLL_KEY);
+        if (kept && kept.url === here() && typeof kept.y === 'number' && window.scrollTo) window.scrollTo(0, kept.y);
+    } catch (e) { /* nothing kept */ }
+
+    // landed on the saved card: the result (at the top of the page, out of view now) comes as a toast too
+    if (window.location && window.location.hash && document.getElementById && document.getElementById(window.location.hash.slice(1))) {
+        Array.prototype.forEach.call(page.querySelectorAll('[data-settings-flash]'), function (alert) {
+            toast(alert.textContent.replace(/\s+/g, ' ').trim(), alert.getAttribute('data-settings-flash'));
+        });
     }
 
     // --- ربط الشيت ---------------------------------------------------------
@@ -281,7 +330,7 @@
                 if (res.ok && res.data && res.data.status === 'success') {
                     showStatus('انحفظ الربط. التشغيل الجاي بيقرأ من الشيت الجديد.', 'success');
                     toast('انحفظ ربط الشيت.', 'success');
-                    setTimeout(function () { window.location.reload(); }, 900);
+                    setTimeout(reloadKeepingPlace, 900);
                     return;
                 }
                 var err = sheetError(res, true);
@@ -324,6 +373,9 @@
         } else {
             var inputs = form.querySelectorAll('input[type="password"]');
             for (var i = 0; i < inputs.length; i++) inputs[i].value = '';
+            var clears = form.querySelectorAll('[data-key-clear]');
+            for (var k = 0; k < clears.length; k++) clears[k].checked = false;
+            refreshDirty(form);                       // «إلغاء» رجّع الحقول متل ما كانت: ما في شي ما انحفظ
             toggle.focus();
         }
     }
@@ -343,6 +395,131 @@
     /* No silent destructive save: clearing a stored key asks first (key forms and «متقدم»). With the page's dialog the
        submit waits for the answer, then goes again once «أكيد». */
     var forms = page.querySelectorAll('form');
+
+    // --- تغييرات ما انحفظت ----------------------------------------------------
+    /* Each form saves its own card only, and the page loads again after it: a change left in another card would be
+       lost without a word. A changed card shows «ما انحفظ»; saving another card, a link out of the page and leaving
+       the page ask first («في تغييرات ما انحفظت بـ"…"»). The auto-publish switches save themselves: not tracked. */
+    var tracked = [];
+
+    function cardOf(form) {
+        return (form.closest && (form.closest('[data-key-row]') || form.closest('.lq-settings-card'))) || form;
+    }
+
+    function titleElOf(form) {
+        return cardOf(form).querySelector('.lq-keys__title') || cardOf(form).querySelector('.lq-section-title');
+    }
+
+    function entryOf(form) {
+        for (var i = 0; i < tracked.length; i++) if (tracked[i].form === form) return tracked[i];
+        return null;
+    }
+
+    function refreshDirty(form) {
+        var entry = entryOf(form);
+        if (!entry) return;
+        var dirty = formState(form) !== entry.initial;
+        if (dirty === entry.dirty) return;
+        entry.dirty = dirty;
+        if (!entry.badge && dirty) {
+            var titleEl = titleElOf(form);
+            if (titleEl && titleEl.appendChild) {
+                entry.badge = make('span', 'lq-settings-dirty', 'ما انحفظ');
+                entry.badge.setAttribute('data-settings-dirty', '');
+                titleEl.appendChild(entry.badge);
+            }
+        }
+        setHidden(entry.badge, !dirty);
+    }
+
+    function dirtyTitles(except) {
+        return tracked.filter(function (e) { return e.dirty && e.form !== except; }).map(function (e) { return e.title; });
+    }
+
+    /* «في تغييرات ما انحفظت بـ"…"»: then(true) to go on without them, then(false) to stay. */
+    function askLeave(titles, then) {
+        if (askNow()) {
+            then(window.confirm(dirtyText(titles) + '.\nإذا كمّلت بتروح هالتغييرات. نكمّل؟'));
+            return;
+        }
+        window.Laqta.ask({ title: dirtyText(titles), text: 'إذا كمّلت بتروح هالتغييرات. لتحفظها، ارجع واضغط «حفظ» بكرتها.',
+            confirmText: 'كمّل بلا حفظ', cancelText: 'لا، رجوع' }).then(then);
+    }
+
+    Array.prototype.forEach.call(forms, function (form) {
+        if (form.hasAttribute && form.hasAttribute('data-autopub-form')) return;
+        var titleEl = titleElOf(form);
+        tracked.push({ form: form, title: titleEl ? titleEl.textContent.trim() : '', initial: formState(form), dirty: false, badge: null });
+        var check = function () { refreshDirty(form); };
+        form.addEventListener('input', check);
+        form.addEventListener('change', check);
+    });
+
+    // saving one card while another has changes (capture: before the card's own submit handlers)
+    page.addEventListener('submit', function (e) {
+        var form = e.target;
+        if (!form || form.__lqDirtyOk) return;
+        var others = dirtyTitles(form);
+        if (!others.length) return;
+        var now = askNow();
+        if (!now) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+        askLeave(others, function (ok) {
+            if (!ok) {
+                if (now) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                }
+                // an auto-publish switch submits itself on change: put it back as it is saved
+                var sw = form.querySelector('[data-autopub-switch]');
+                if (sw) sw.checked = !sw.checked;
+                return;
+            }
+            form.__lqDirtyOk = true;                 // stays: the key-clear question may submit it again
+            if (now) return;
+            if (form.requestSubmit) {
+                form.requestSubmit();
+            } else {
+                leaving = true;                      // form.submit() fires no submit event
+                form.submit();
+            }
+        });
+    }, true);
+
+    if (typeof document.addEventListener === 'function') {
+        // a submit that goes through (nobody stopped it) leaves the page: no question on the way out
+        document.addEventListener('submit', function (e) {
+            if (!e.defaultPrevented) leaving = true;
+        });
+        // a link out of the page (the tabs, the side bar) asks in the page's own dialog
+        document.addEventListener('click', function (e) {
+            if (e.defaultPrevented || e.button || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+            var link = e.target && e.target.closest ? e.target.closest('a[href]') : null;
+            if (!link || link.target === '_blank' || link.hasAttribute('download')) return;
+            var href = link.getAttribute('href') || '';
+            if (href === '' || href.charAt(0) === '#') return;
+            var titles = dirtyTitles(null);
+            if (!titles.length) return;
+            e.preventDefault();
+            askLeave(titles, function (ok) {
+                if (!ok) return;
+                leaving = true;
+                window.location.href = link.href;
+            });
+        });
+    }
+    if (typeof window.addEventListener === 'function') {
+        // reload, close, back: the browser's own question (it shows its own text)
+        window.addEventListener('beforeunload', function (e) {
+            if (leaving || !dirtyTitles(null).length) return undefined;
+            e.preventDefault();
+            e.returnValue = dirtyText(dirtyTitles(null));
+            return e.returnValue;
+        });
+    }
+
     for (var f = 0; f < forms.length; f++) {
         forms[f].addEventListener('submit', function (e) {
             var form = e.currentTarget;
@@ -376,7 +553,7 @@
             postJson(BG_METHOD_URL, { method: bgRestore.getAttribute('data-bg-restore') }).then(function (res) {
                 if (res && res.ok && isObject(res.data) && res.data.status === 'success') {
                     toast(String(res.data.message || 'رجع عزل الخلفية.'), 'success');
-                    setTimeout(function () { window.location.reload(); }, 900);
+                    setTimeout(reloadKeepingPlace, 900);
                     return;
                 }
                 toast(bgMethodError(res), 'danger');

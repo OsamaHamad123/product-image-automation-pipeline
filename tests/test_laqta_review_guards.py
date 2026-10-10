@@ -223,7 +223,7 @@ def test_single_mode_never_approves_a_pick_whose_picture_did_not_render(tmp_path
 imageFails.add('https://www.carrefouruae.com/p70.jpg');
 openRow(70);
 await flush();
-out.note = ws().querySelector('.rv-pick .rv-img-missing').textContent;
+out.note = ws().querySelector('.rv-pick .rv-img-missing__text').textContent;
 out.state = [R.single.canApprove(), approveBtn().title];
 press('Enter');
 await flush();
@@ -237,7 +237,8 @@ out.loaded = R.single.canApprove();
 press('Enter');
 await flush();
 out.sent_after = requests('/api/select_image').map(c => c.body.row_number);
-""", tmp_path, fixture([picked(70, "Almarai Milk 1L"), picked(71, "Almarai Laban 1L")]), config={"row": 70})
+""", tmp_path, fixture([picked(70, "Almarai Milk 1L"), picked(71, "Almarai Laban 1L")]),
+       config={"row": 70, "imageRetryMs": []})                    # no retries: the failure shows at once
     assert out["note"] == "ما قدرنا نعرض الصورة"
     assert out["state"][0] is False and "ما قدرنا نعرض هالصورة" in out["state"][1]
     assert out["sent"] == 0
@@ -290,7 +291,7 @@ press('a', { shiftKey: true });
 await flush();
 out.confirm = confirms.slice(-1)[0];
 out.jobs = S().jobs.state().jobs.map(j => j.ctx.row_number);
-""", tmp_path, fixture(prods), config={"mode": "bulk"})
+""", tmp_path, fixture(prods), config={"mode": "bulk", "imageRetryMs": []})
     assert out["missing"] == 2
     assert out["ticked"] == [10, 13] and out["disabled"] == [True, True]
     assert out["label"] == "اعتماد صورتين بلا تحذير"
@@ -641,6 +642,87 @@ def test_an_approval_of_a_product_without_a_barcode_is_found_by_its_key(tmp_path
     res = subprocess.run([_shutil.which("php"), str(script)], capture_output=True, text=True, timeout=60, env=env)
     assert res.returncode == 0, res.stdout + res.stderr
     assert json.loads(res.stdout) == [[2, "https://res.cloudinary.com/x/milk.png"], [3, None]]
+
+
+def test_an_approval_is_found_by_the_products_key_before_its_barcode(tmp_path):
+    """The approval in products-json is the one the server checks (cli_bridge._current_state reads it by sku_key):
+    a barcode-first lookup missed an approval saved under another barcode text, or gave the row the approval of
+    another product sharing its barcode cell, so the page sent an approved_url the server did not see as the
+    approval and the reviewer's approval failed with already_approved."""
+    import shutil as _shutil
+    import test_products_cache as pc
+
+    if _shutil.which("php") is None:
+        pytest.skip("php is not installed")
+    harness = pc.HARNESS
+    harness = harness.replace(
+        "public static function query() { return new \\FakeQuery([]); }",
+        "public static function query() { return new \\FakeQuery($GLOBALS['RESOLVED'] ?? []); }")
+    # the barcode lookup (keyBy('barcode')) as Laravel's: the last record of each barcode
+    harness = harness.replace(
+        "public function keyBy($k) { return []; }",
+        "public function keyBy($k) { $o = []; foreach ($this->items as $i) { $o[$i->$k] = $i; } return $o; }")
+    scenario_at = harness.index("    $out = [];")
+    harness = harness[:scenario_at] + r"""
+    $GLOBALS['RESOLVED'] = [
+        (object) ['barcode' => '', 'sku_key' => 'sku-2', 'product_name' => 'Milk', 'cloudinary_url' => 'https://res.cloudinary.com/x/milk.png',
+                  'verification_status' => 'human_approved', 'resolved_at' => null],
+        (object) ['barcode' => 'N/A', 'sku_key' => 'sku-4', 'product_name' => 'Laban', 'cloudinary_url' => 'https://res.cloudinary.com/x/laban.png',
+                  'verification_status' => 'human_approved', 'resolved_at' => null],
+        (object) ['barcode' => '6281007031213', 'sku_key' => '', 'product_name' => 'Old', 'cloudinary_url' => 'https://res.cloudinary.com/x/old.png',
+                  'verification_status' => 'legacy', 'resolved_at' => null],
+    ];
+    PythonBridge::$rows = [
+        // the sheet has a barcode the approval was not saved with: found by its key
+        ['row_number' => 2, 'product_name' => 'Milk', 'brand' => 'Almarai', 'barcode' => '6281007000011', 'sku_key' => 'sku-2',
+         'existing_image_link' => '', 'needs_review' => false, 'has_error' => false, 'error_message' => ''],
+        // another product with the same junk barcode cell: not Laban's approval
+        ['row_number' => 3, 'product_name' => 'Juice', 'brand' => 'Almarai', 'barcode' => 'N/A', 'sku_key' => 'sku-3',
+         'existing_image_link' => '', 'needs_review' => false, 'has_error' => false, 'error_message' => ''],
+        ['row_number' => 4, 'product_name' => 'Laban', 'brand' => 'Almarai', 'barcode' => 'N/A', 'sku_key' => 'sku-4',
+         'existing_image_link' => '', 'needs_review' => false, 'has_error' => false, 'error_message' => ''],
+        // a legacy approval without a key is still found by its barcode
+        ['row_number' => 5, 'product_name' => 'Old', 'brand' => 'Almarai', 'barcode' => '6281007031213', 'sku_key' => 'sku-5',
+         'existing_image_link' => '', 'needs_review' => false, 'has_error' => false, 'error_message' => ''],
+    ];
+    $r = (new ProductController())->getProductsJson(new Illuminate\Http\Request([]));
+    echo json_encode(array_map(fn ($p) => [$p['row_number'], $p['cached_image'] ?? null, $p['verification_status'] ?? null],
+                               $r->data['products']));
+}
+"""
+    root = tmp_path / "root"
+    (root / "dashboard").mkdir(parents=True)
+    script = tmp_path / "harness.php"
+    script.write_text(harness, encoding="utf-8")
+    import os
+    env = dict(os.environ, HARNESS_ROOT=str(root), CONTROLLER_BASE=str(pc.CONTROLLERS / "Controller.php"),
+               MATCHER_FILE=str(pc.MATCHER), PRODUCT_CONTROLLER=str(pc.PRODUCT))
+    res = subprocess.run([_shutil.which("php"), str(script)], capture_output=True, text=True, timeout=60, env=env)
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert json.loads(res.stdout) == [[2, "https://res.cloudinary.com/x/milk.png", "human_approved"],
+                                      [3, None, None],
+                                      [4, "https://res.cloudinary.com/x/laban.png", "human_approved"],
+                                      [5, "https://res.cloudinary.com/x/old.png", "legacy"]]
+
+
+@NEEDS_NODE
+def test_an_approved_product_back_in_review_sends_its_approval_as_seen(tmp_path):
+    """A product with a human approval whose sheet cell went empty (it was searched again and waits for review)
+    shows its approval, and an approval of another picture sends that approval as expected_state.approved_url:
+    the server sees a deliberate replacement, not an approval the reviewer never saw (already_approved)."""
+    approved = "https://res.cloudinary.com/demo/image/upload/approved_63.png"
+    prod = picked(63, "Almarai Milk 1L")
+    prod.update(needs_review=False, cached_image=approved, verification_status="human_approved")
+    out = page(r"""
+openRow(63);
+press('Enter');
+await flush();
+const c = requests('/api/select_image')[0].body;
+out.sent = [c.image_url, c.expected_state, !!c.replace];
+""", tmp_path, fixture([prod]), config={"row": 63})
+    assert out["sent"] == ["https://www.carrefouruae.com/p63.jpg",
+                           {"queue_status": "ready_for_review", "queue_updated_at": "2026-10-03 10:00:00",
+                            "approved_url": approved, "queue_row": 63}, False]
 
 
 @NEEDS_NODE

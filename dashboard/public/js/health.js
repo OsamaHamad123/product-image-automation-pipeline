@@ -906,7 +906,9 @@
     var EVAL_EXPORT_URL = '/api/system/eval-export';
     var EVAL_EXPORT_LABEL = 'صدّر مجموعة اختبار';
 
-    /* The status line, the button and the download link from the endpoint's answer (null: no answer yet). */
+    /* The status line, the button and the download link from the endpoint's answer (null: no answer yet). A refusal
+       shows its Arabic text as it is; anything else (an English error, a PHP trace) reads as one plain Arabic line and
+       the raw text goes to «التفاصيل التقنية» (detail). */
     function evalExportView(res) {
         var data = res && isObject(res.data) ? res.data : null;
         if (data && res.ok && data.status === 'success') {
@@ -914,9 +916,12 @@
             return { text: String(data.message || ''), link: link, label: EVAL_EXPORT_LABEL, disabled: false,
                 tone: link ? 'success' : 'warning' };
         }
-        var why = data && typeof data.error === 'string' && data.error ? data.error
-            : 'ما قدرنا نجهّز مجموعة الاختبار: ' + requestError(res, 'الخادم ما ردّ.');
-        return { text: why, link: '', label: EVAL_EXPORT_LABEL, disabled: false, tone: 'danger' };
+        var raw = data && typeof data.error === 'string' ? data.error.trim() : '';
+        var arabic = !!raw && /[؀-ۿ]/.test(raw);
+        var why = arabic ? raw
+            : 'ما قدرنا نجهّز مجموعة الاختبار: ' + requestError(res, raw ? 'صار خطأ بالخادم.' : 'الخادم ما ردّ.');
+        return { text: why, link: '', label: EVAL_EXPORT_LABEL, disabled: false, tone: 'danger',
+            detail: arabic ? '' : raw.slice(0, 2000) };
     }
 
     /* run() (the button) POSTs once (a second click while it works does nothing) and renders the answer. Deps:
@@ -1879,10 +1884,14 @@
     var evalStatus = $('eval-export-status');
     var evalLabel = $('eval-export-label');
     var evalLink = $('eval-export-link');
+    var evalDetails = $('eval-export-details');
+    var evalDetailText = $('eval-export-detail');
 
     function renderEvalExport(view) {
         if (evalStatus) evalStatus.textContent = view.text;
         if (evalLabel) evalLabel.textContent = view.label;
+        if (evalDetailText) evalDetailText.textContent = view.detail || '';
+        setHidden(evalDetails, !view.detail);
         if (evalLink) {
             if (view.link) evalLink.setAttribute('href', view.link);
             setHidden(evalLink, !view.link);

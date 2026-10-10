@@ -6,7 +6,9 @@ FIXTURE, and search / approve / reject / upload wait until the test answers them
 tests/test_catalog_review_race.py (the review safety rules) and tests/test_laqta_review.py.
 
 Pictures: an <img> fires `load` as soon as it is attached to the document (a cached picture), or `error` when its src
-is in `imageFails`; with `imageMode = 'hold'` it fires nothing until the test calls `releaseImages()`. An
+is in `imageFails`, and again whenever its src changes while attached (R.img's retries); with `imageMode = 'hold'` it
+fires nothing until the test calls `releaseImages()`. Toasts are recorded in `toasts` ({ text, variant }, and
+`action` when the toast has a button such as «تراجع»). An
 IntersectionObserver reports every observed node as visible (`ioVisible(node)` decides; `ioRefresh()` reports again).
 The page boots with approveSettleMs 0 and approveUndoMs 0 (an approval is sent at once, no «تراجع» hold) unless the
 test asks for the real delays, and with the mode it is given (modeExplicit) unless the test asks for the automatic choice.
@@ -116,6 +118,10 @@ class ShimElement {
         if (k === 'disabled') this.disabled = true;
         if (k === 'checked') this.checked = true;
         if (k === 'value') this._value = v;
+        if (k === 'src' && this.tagName === 'IMG') {
+            this._imgFired = false;
+            if (this.isConnected) fireImage(this);
+        }
     }
     removeAttribute(k) { delete this.attrs[k]; if (k === 'disabled') this.disabled = false; }
     hasAttribute(k) { return k in this.attrs; }
@@ -299,7 +305,12 @@ globalThis.alert = msg => { throw new Error('alert() is not used by the review s
 const toasts = [];
 const runStatusListeners = [];
 globalThis.Laqta = {
-    toast: (msg, opts) => { toasts.push({ text: String(msg), variant: (opts || {}).variant }); return { close() {}, update() {} }; },
+    toast: (msg, opts) => {
+        const t = { text: String(msg), variant: (opts || {}).variant };
+        if (opts && opts.action) t.action = opts.action;
+        toasts.push(t);
+        return { close() {}, update() {} };
+    },
     onRunStatus: fn => { runStatusListeners.push(fn); }
 };
 globalThis.LAQTA_REVIEW_MANUAL_BOOT = true;

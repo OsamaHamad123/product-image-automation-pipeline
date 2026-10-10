@@ -1396,20 +1396,25 @@ def _enqueue_failed(message, reason="enqueue_failed"):
 RUN_HANDOFF_FILE = "temp/run_handoff.json"
 
 
-def _write_run_handoff(run_id, path=None):
+def _write_run_handoff(run_id, path=None, links_restored=0):
+    """links_restored: الروابط المعتمدة التي اختفت من الشيت وأعادها هذا الإدراج، لتقرير العامل الذي يأخذ التشغيل."""
     path = path or RUN_HANDOFF_FILE
     try:
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
         tmp = f"{path}.{os.getpid()}.tmp"
         with open(tmp, "w", encoding="utf-8") as f:
-            json.dump({"run_id": run_id, "pid": os.getpid(), "ts": round(time.time(), 3)}, f)
+            json.dump({"run_id": run_id, "pid": os.getpid(), "ts": round(time.time(), 3),
+                       "links_restored": int(links_restored or 0)}, f)
         os.replace(tmp, path)
     except OSError as e:
         print(f"[Enqueue] تنبيه: تعذر تسليم التشغيل {run_id} للعامل: {e}")
 
 
-def _claim_run_handoff(run_id, path=None):
-    """هل أنشأ إدراجٌ التشغيل run_id ولم يأخذه عامل بعد؟ يستهلك التسليم (يُحذف) في كل الأحوال."""
+def _claim_run_handoff(run_id, path=None, out=None):
+    """
+    هل أنشأ إدراجٌ التشغيل run_id ولم يأخذه عامل بعد؟ يستهلك التسليم (يُحذف) في كل الأحوال.
+    out (dict اختياري): يأخذ ما سلّمه الإدراج مع التشغيل (links_restored) عندما يكون التسليم لهذا التشغيل.
+    """
     path = path or RUN_HANDOFF_FILE
     try:
         with open(path, "r", encoding="utf-8") as f:
@@ -1420,7 +1425,13 @@ def _claim_run_handoff(run_id, path=None):
         os.remove(path)
     except OSError:
         pass
-    return bool(run_id) and isinstance(data, dict) and data.get("run_id") == run_id
+    mine = bool(run_id) and isinstance(data, dict) and data.get("run_id") == run_id
+    if mine and out is not None:
+        try:
+            out["links_restored"] = max(0, int(data.get("links_restored") or 0))
+        except (TypeError, ValueError):
+            out["links_restored"] = 0
+    return mine
 
 
 def _enqueue_payload(prod):
@@ -1585,6 +1596,28 @@ def _link_write_state(records, link):
     return matching[-1]["status"] if matching else None
 
 
+# كتابات لم تصل للخلية ولن تصل: لا تغيّر ما فيها
+_UNLANDED_WRITES = ("SUPERSEDED", "CONFLICT", "DEAD", "SKIPPED_OUT_OF_BOUNDS")
+
+
+def _link_cleared_by_us(records, link):
+    """
+    هل فرّغ النظام نفسه الخلية بعد كتابة هذا الرابط (رفض مراجع للصورة المنشورة: cli_bridge._clear_rejected_cells
+    يجدول قيمة فارغة)؟ أول كتابة وصلت (أو ستصل) بعد آخر كتابة للرابط فارغة = مسح مقصود. كتابة رابط آخر بعده تعني
+    أن الخلية لم تعد تحمله أصلاً، فمسحها لاحقاً ليس مسحاً لهذا الرابط.
+    """
+    records = list(records or [])
+    last = max((i for i, r in enumerate(records) if _link_write_state([r], link) is not None), default=None)
+    if last is None:
+        return False
+    for r in records[last + 1:]:
+        if r.get("status") in _UNLANDED_WRITES:
+            continue
+        value = r.get("value")
+        return value is not None and str(value).strip() == ""
+    return False
+
+
 def _brand_index_phrases(spec):
     """
     كل عبارة براند (اسم الشيت ومرادفاته) ككلماتها في الفهرس المحلي (3 أحرف فأكثر، tuple مرتبة)، للكشف عن صفحات
@@ -1643,7 +1676,9 @@ def plan_enqueue(products, reprocess=False, brand_mappings=None, whole_sheet=Fal
     صفوف الشيت (بعد الفلاتر) -> (صفوف local_cache_db.add_many_to_queue، عدادات). المطابقة عند الإدراج:
     (a) صف بلا رابط نهائي ولمنتجه (sku_key أو المفتاح البديل) صورة معتمدة: مهمة كتابة الرابط (relink) بدل بحث جديد.
         خلية فيها needs_review: تُكتب فقط من اعتماد بشري. كتابة سابقة ما زالت في الطابور (PENDING / FAILED) تُترك؛
-        كتابة نجحت ثم مُسح الرابط من الشيت (SYNCED) لا تُعاد كتابتها: بحث للمراجعة فقط (LINK_CLEARED).
+        كتابة نجحت ثم اختفى الرابط من الشيت (SYNCED): اعتماد بشري ساري يُعاد رابطه بلا بحث (LINK_VANISHED،
+        stats['restored'])؛ والمسح المقصود لا يُرجع: اعتماد ألغاه مراجع (superseded، فلا يظهر هنا)، أو تفريغ جدوله
+        النظام بعد الرابط (_link_cleared_by_us)، أو حل غير بشري (auto_verified): بحث للمراجعة فقط (LINK_CLEARED).
     (b) صف رابطه منشور لمنتج آخر (عُدل الصف بعد النشر): بحث للمراجعة فقط (ROW_EDITED)، لا نشر تلقائي فوقه؛
         وإن كان للمنتج الجديد اعتماد بشري يُكتب رابطه.
     (c) صف مكتمل لم يصل رابطه للشيت (CONFLICT / DEAD) يُعاد كتابته (a)، وبلا حل معتمد: بحث للمراجعة (LINK_MISSING).
@@ -1657,8 +1692,8 @@ def plan_enqueue(products, reprocess=False, brand_mappings=None, whole_sheet=Fal
     from catalog_match.identity import build_sku_spec
 
     index = build_index(brand_mappings) if brand_mappings else None   # يُبنى مرة واحدة لكل الصفوف
-    stats = {"skipped_final": 0, "relink": 0, "edited": 0, "cleared": 0, "missing": 0, "in_flight": 0,
-             "index_changed": 0, "rekey": [], "moves": []}
+    stats = {"skipped_final": 0, "relink": 0, "edited": 0, "cleared": 0, "restored": 0, "missing": 0,
+             "in_flight": 0, "index_changed": 0, "rekey": [], "moves": []}
     snapshot = local_cache_db.resolution_snapshot()
     queue = local_cache_db.queue_snapshot()
     gtin_sizes = _sizes_by_gtin(products)
@@ -1714,10 +1749,17 @@ def plan_enqueue(products, reprocess=False, brand_mappings=None, whole_sheet=Fal
     waiting = [e for e in entries if e.get("resolution")]
     outbox = _outbox_records([e["prod"]["row_number"] for e in waiting]) if waiting else {}
     for e in waiting:
-        state = _link_write_state(outbox.get(e["prod"]["row_number"]), e["resolution"]["cloudinary_url"])
+        records, link = outbox.get(e["prod"]["row_number"]), e["resolution"]["cloudinary_url"]
+        state = _link_write_state(records, link)
         if state in ("PENDING", "FAILED"):
             e["skip"] = True
             stats["in_flight"] += 1
+        elif (state == "SYNCED" and e["resolution"].get("verification_status") == "human_approved"
+              and not _link_cleared_by_us(records, link)):
+            # الرابط المعتمد وصل للشيت ثم اختفى ولم يمسحه مراجع: يُعاد كما هو. البحث هنا كان مدفوعاً، ويعيد منتجاً
+            # معتمداً «بانتظار المراجعة» فيُرفض اعتماده من جديد بـ already_approved
+            e["task_kind"], e["reason"] = local_cache_db.TASK_RELINK, "LINK_VANISHED"
+            stats["restored"] += 1
         elif state == "SYNCED":
             e["review_only"], e["reason"] = True, "LINK_CLEARED"
             stats["cleared"] += 1
@@ -1841,6 +1883,9 @@ def run_enqueue_mode():
         if stats["relink"] or stats["in_flight"]:
             print(f"[Enqueue] {stats['relink']} صف لمنتج له صورة معتمدة: يُكتب رابطها بلا بحث؛ "
                   f"{stats['in_flight']} كتابة ما زالت في طابور الشيت.")
+        if stats.get("restored"):
+            import run_report
+            print(f"[Enqueue] {run_report.links_restored_text(stats['restored'])} (بلا بحث).")
         if stats["edited"] or stats["cleared"] or stats["missing"]:
             print(f"[Enqueue] للمراجعة فقط: {stats['edited']} صف عُدل بعد نشر صورته، {stats['cleared']} صف مُسح رابطه، "
                   f"{stats['missing']} صف مكتمل بلا رابط.")
@@ -1857,7 +1902,7 @@ def run_enqueue_mode():
         print("[Enqueue] تنبيه: تعذر تسجيل التشغيل الجديد؛ ستعرض اللوحة تقدم الطابور كله.")
     else:
         print(f"[Enqueue] التشغيل {run_id} سيعالج {run_rows} صف (الصفوف في الانتظار بما فيها ما بقي من تشغيل سابق).")
-        _write_run_handoff(run_id)
+        _write_run_handoff(run_id, links_restored=stats.get("restored") or 0)
 
 
 # ---------------------------------------------------------------------------
@@ -2781,7 +2826,8 @@ def run_worker_mode(trigger="manual", report=True, deadline_ts=None):
     run_id = state.get("run_id") or None
     # التقرير يعد صفوف run_id فقط إن أنشأه إدراج هذا التشغيل؛ عامل يدوي بلا إدراج يُعد بصفوف worker_id (لا أرقام
     # التشغيل السابق الذي بقي run_id في automation_state)
-    report_run_id = run_id if _claim_run_handoff(run_id) else None
+    handoff = {}         # ما سلّمه الإدراج مع التشغيل (links_restored) لتقريره
+    report_run_id = run_id if _claim_run_handoff(run_id, out=handoff) else None
     # طلب إيقاف وصل أثناء الإدراج (قبل وجود العامل): لا يُعالج أي منتج
     stop_reason = "stopped" if state.get("stop_requested") == 1 else None
     if state.get("status") == "db_unavailable":
@@ -3068,7 +3114,8 @@ def run_worker_mode(trigger="manual", report=True, deadline_ts=None):
             LAST_WORKER.update(stop_reason=stop_reason, run_id=report_run_id, worker_id=worker_id,
                                started_ts=started_ts, ended_ts=time.time(),
                                notice=final_notice or start_notice or notice or None, health=health,
-                               bg_skipped=bg_skipped_count(), bg_fallback=bg_fallback_count())
+                               bg_skipped=bg_skipped_count(), bg_fallback=bg_fallback_count(),
+                               links_restored=handoff.get("links_restored") or 0)
             if report:
                 try:
                     import run_report
