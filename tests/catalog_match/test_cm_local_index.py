@@ -578,5 +578,5 @@ def test_a_blocked_host_is_logged_once_per_run(caplog):
         for u in urls:
             provider(index(("carrefour_uae", u)), fetcher, max_pages=1).lookup(spec_for())
     notes = [r for r in caplog.records if "refused" in r.getMessage()]
-    assert len(notes) == 1 and notes[0].levelname == "WARNING" and "carrefouruae.com" in notes[0].getMessage()
+    assert len(notes) == 1 and notes[0].levelname == "WARNING" and notes[0].args[0] == "carrefouruae.com"
     assert len(fetcher.calls) == local_index.BLOCKED_HOST_LIMIT
