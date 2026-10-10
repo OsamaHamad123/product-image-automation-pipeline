@@ -271,6 +271,54 @@ def test_the_enqueue_hands_its_run_over(offline, monkeypatch, tmp_path):
     main.run_enqueue_mode()
     assert main._claim_run_handoff("p4ops-run-h") is True and main._claim_run_handoff("p4ops-run-h") is False
 
+def test_the_enqueue_hands_the_vanished_approved_links_to_the_runs_report(offline, monkeypatch, tmp_path):
+    """Approved links that landed in the sheet and then vanished are written back by the enqueue (no search); how
+    many is said in the enqueue log and travels with the run to its report («N روابط معتمدة اختفت من الشيت ورجعت»)."""
+    import google_sheets
+    import local_cache_db
+    import main
+    import run_report
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(main, "load_run_config", lambda: None)
+    monkeypatch.setattr(google_sheets, "clear_cache", lambda: None)
+    monkeypatch.setattr(google_sheets, "get_sheets_client", lambda: object())
+    monkeypatch.setattr(google_sheets, "open_worksheet", lambda c, n: object())
+    monkeypatch.setattr(google_sheets, "get_products", lambda ws: ([], 9))
+    monkeypatch.setattr(main, "plan_enqueue", lambda *a, **k: ([], {"skipped_final": 0, "relink": 8, "in_flight": 0,
+                                                                    "edited": 0, "cleared": 0, "restored": 8,
+                                                                    "missing": 0, "index_changed": 0}))
+    monkeypatch.setattr(local_cache_db, "add_many_to_queue", lambda rows, **k: None)
+    monkeypatch.setattr(local_cache_db, "get_queue_statistics", lambda: None)
+    monkeypatch.setattr(local_cache_db, "new_run_id", lambda: "p4ops-run-v")
+    monkeypatch.setattr(local_cache_db, "begin_run", lambda run_id: 8)
+    logged = []
+    monkeypatch.setattr(main, "print", lambda *a, **k: logged.append(" ".join(map(str, a))))
+    main.run_enqueue_mode()
+    assert any("8 روابط معتمدة اختفت من الشيت ورجعت" in line for line in logged)
+    handoff = {}
+    assert main._claim_run_handoff("p4ops-run-v", out=handoff) is True and handoff == {"links_restored": 8}
+    # another run's hand-off says nothing about this run
+    main._write_run_handoff("p4ops-other", links_restored=3)
+    other = {}
+    assert main._claim_run_handoff("p4ops-run-v", out=other) is False and other == {}
+
+    report = run_report.build_report("nightly", [{"stop_reason": None, "run_id": "p4ops-run-v", "links_restored": 8}],
+                                     1_790_000_000, 1_790_000_900, db=FakeDb(COUNTS))
+    assert report["links_restored"] == 8 and "8 روابط معتمدة اختفت من الشيت ورجعت" in report["notices"]
+    quiet = run_report.build_report("nightly", [{"stop_reason": None, "run_id": "r"}], 1, 2, db=FakeDb(COUNTS))
+    assert quiet["links_restored"] == 0 and quiet["notices"] == []
+
+
+def test_the_worker_puts_the_handed_over_count_in_its_report(old_run, monkeypatch, tmp_path):
+    main = _idle_worker(monkeypatch, tmp_path, "p4ops-new")
+    main._write_run_handoff("p4ops-new", links_restored=2)
+    main.run_worker_mode(trigger="dashboard")
+    assert main.LAST_WORKER["links_restored"] == 2
+    report = json.loads((tmp_path / "temp" / "nightly" / "last_report.json").read_text(encoding="utf-8"))
+    assert report["links_restored"] == 2 and "2 روابط معتمدة اختفت من الشيت ورجعت" in report["notices"]
+
+
 # ---------------------------------------------------------------------------
 # Offline reports: outcomes, redaction, a database that does not answer
 # ---------------------------------------------------------------------------

@@ -124,6 +124,19 @@ class ProductController extends Controller
     }
 
     /**
+     * اعتماد وُجد بباركود الصف وحده: هو لهذا المنتج إن كان اعتماداً قديماً بلا sku_key أو باسم المنتج نفسه. خلية باركود
+     * مشتركة (N/A، 0، باركود خاطئ) لا تعطي الصف اعتماد منتج آخر.
+     */
+    private static function sameApprovedProduct($hit, array $prod): bool
+    {
+        if (trim((string) ($hit->sku_key ?? '')) === '') {
+            return true;
+        }
+        $norm = fn ($v) => preg_replace('/\s+/u', ' ', mb_strtolower(trim((string) $v)));
+        return $norm($hit->product_name ?? '') === $norm($prod['product_name'] ?? '');
+    }
+
+    /**
      * منتجات المراجعة: صفوف الشيت مدمجة بالمرشحات المخزنة وحالة الاعتماد. تُخدم من الكاش ما دامت بصمة قاعدة
      * البيانات وبصمة الشيت لم تتغيرا، وإلا يُعاد الدمج (وصفوف الشيت نفسها من كاشها الخاص).
      * تعيد null عند فشل قراءة الشيت، وسبب الفشل في $error. $etag: بصمة المحتوى (productsTag) للـ ETag.
@@ -222,13 +235,17 @@ class ProductController extends Controller
             // المتاجر» أو بالإيد) يبقى اعتماده ورفضه محفوظين بمفتاحه القديم
             $alt = trim((string) ($prod['alt_sku_key'] ?? ''));
             $alt = $alt !== $sku ? $alt : '';
+            // الاعتماد بهوية المنتج (sku_key ثم البديل) أولاً، كما يقرؤه الخادم (cli_bridge._current_state)؛ الباركود
+            // بعدهما فقط (اعتمادات قديمة بلا sku_key). البحث بالباركود أولاً كان يفوّت اعتماداً حُفظ بباركود آخر (أو بلا
+            // باركود) أو يعطي الصف اعتماد منتج آخر بنفس خلية الباركود، فترسل المراجعة approved_url غير الاعتماد الذي
+            // يراه الخادم، ويُرفض اعتماد المراجع بـ already_approved
             $hit = null;
-            if ($barcode && isset($resolved[$barcode])) {
-                $hit = $resolved[$barcode];
-            } elseif ($barcode === '' && $sku !== '' && isset($resolvedBySku[$sku])) {
+            if ($sku !== '' && isset($resolvedBySku[$sku])) {
                 $hit = $resolvedBySku[$sku];
             } elseif ($alt !== '' && isset($resolvedBySku[$alt])) {
                 $hit = $resolvedBySku[$alt];
+            } elseif ($barcode && isset($resolved[$barcode]) && self::sameApprovedProduct($resolved[$barcode], $prod)) {
+                $hit = $resolved[$barcode];
             }
             $prod['rejected_images'] = $sku !== ''
                 ? array_values(array_merge($rejectedBySku[$alt] ?? [], $rejectedBySku[$sku] ?? [])) : [];

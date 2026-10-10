@@ -108,7 +108,7 @@ def test_models_tab_renders_and_saves_only_supported_choices(app_env):
     for leftover in ("{{", "{!!", "<x-lq", "@include"):
         assert leftover not in page
 
-    assert out[1]["location"].endswith("?tab=models") and not out[1]["flash"]["warnings"]
+    assert out[1]["location"].endswith("?tab=models#lq-settings-models") and not out[1]["flash"]["warnings"]
     after = _settings(db)
     assert after["verifier_primary"] == "gemini:gemini-3.5-flash" and after["gemini_model"] == "gemini-3.5-flash"
     assert after["verifier_strong"] == "claude:claude-sonnet-5-5" and after["verifier_monthly_budget_usd"] == "7.5"

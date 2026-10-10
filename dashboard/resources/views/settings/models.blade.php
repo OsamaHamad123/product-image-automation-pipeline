@@ -8,7 +8,7 @@
     a missing Gemini / Anthropic key for a chosen model is only said.
 --}}
 @php $md = $models; @endphp
-<form method="POST" action="{{ route('dashboard.save_settings') }}" class="lq-card lq-settings-card" aria-labelledby="lq-settings-models-title" autocomplete="off" data-models-form>
+<form method="POST" action="{{ route('dashboard.save_settings') }}" id="lq-settings-models" class="lq-card lq-settings-card" aria-labelledby="lq-settings-models-title" autocomplete="off" data-models-form>
     @csrf
     <input type="hidden" name="section" value="models">
     <div class="lq-settings-card__head">

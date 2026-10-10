@@ -214,7 +214,7 @@
 
     /*
      * deps: fetchJson, renderOverview(view), renderLive(view), renderBanner(view), toast(text, variant),
-     * now() -> epoch seconds, schedule(fn, ms).
+     * now() -> epoch seconds, schedule(fn, ms), hidden() -> true while the tab is hidden (optional).
      */
     function createController(deps) {
         var state = { lastPhase: null, overview: null, live: null, liveBanner: null, brands: null, brandsAsked: false };
@@ -286,9 +286,15 @@
             });
         }
 
+        // تبويب مخفي: ما في طلب، الدورة بتضل ماشية بلا شبكة؛ لما يرجع ظاهر mount بيسأل فوراً (visibilitychange)
         function loop() {
+            if (deps.hidden && deps.hidden()) {
+                deps.schedule(loop, state.pollMs || POLL_IDLE_MS);
+                return;
+            }
             poll().then(function (view) {
-                deps.schedule(loop, view && C.isActive(view.phase) ? POLL_ACTIVE_MS : POLL_IDLE_MS);
+                state.pollMs = view && C.isActive(view.phase) ? POLL_ACTIVE_MS : POLL_IDLE_MS;
+                deps.schedule(loop, state.pollMs);
             });
         }
 
@@ -474,7 +480,8 @@
             renderNext: renderNext,
             toast: C.toast,
             now: function () { return Date.now() / 1000; },
-            schedule: function (fn, ms) { return root.setTimeout(fn, ms); }
+            schedule: function (fn, ms) { return root.setTimeout(fn, ms); },
+            hidden: function () { return !!doc.hidden; }
         });
 
         var initial = null;

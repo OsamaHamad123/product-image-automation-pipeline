@@ -128,11 +128,14 @@
         const d = S.dom;
         d.root = rootEl;
 
-        d.wsBody = el('div', { className: 'rv-ws__body', id: 'rvWsBody' });
+        // tabindex -1: بعد فتح منتج من القائمة بالماوس التركيز بينتقل لهون، فـ Enter بيعتمد (مش بيضغط صف القائمة مرة تانية)
+        d.wsBody = el('div', { className: 'rv-ws__body', id: 'rvWsBody', tabindex: '-1' });
         d.reasons = el('div', { className: 'rv-reasons', role: 'group', 'aria-label': 'سبب الرفض', hidden: true });
         d.approveBtn = el('button', { type: 'button', className: 'lq-btn lq-btn--primary lq-btn--lg rv-approve', id: 'rvApprove',
                                       'aria-keyshortcuts': 'Enter', disabled: true },
                           [icon('check', 18, 2.2), el('span', { text: 'اعتماد' }), kbd('Enter')]);
+        // ليش Enter ما اعتمد (أو إنه رح يعتمد أول ما تظهر الصورة): جملة لحظات جنب الزر (single.js flashApproveNote)
+        d.approveNote = el('span', { className: 'rv-approve-note', id: 'rvApproveNote', role: 'status', 'aria-live': 'polite', hidden: true });
         d.rejectBtn = el('button', { type: 'button', className: 'lq-btn lq-btn--danger lq-btn--lg rv-reject', id: 'rvReject',
                                      'aria-keyshortcuts': 'X', 'aria-expanded': 'false', 'aria-label': 'رفض', disabled: true },
                          [icon('x', 18, 2.2), el('span', { className: 'rv-reject__text', text: 'رفض' }), kbd('X')]);
@@ -153,7 +156,7 @@
         d.bar = el('div', { className: 'lq-actionbar rv-actionbar', id: 'rvActionbar' }, [
             d.reasons,
             el('div', { className: 'rv-actionbar__row' }, [
-                d.approveBtn, d.rejectBtn, d.skipBtn, d.nfBtn,
+                d.approveBtn, d.approveNote, d.rejectBtn, d.skipBtn, d.nfBtn,
                 el('span', { className: 'rv-more__wrap' }, [d.moreBtn, d.moreMenu]),
                 el('span', { className: 'lq-actionbar__aside rv-next' }, [d.nextHint, d.nextName])
             ])
@@ -205,7 +208,11 @@
 
         d.list.addEventListener('click', e => {
             const btn = e.target && e.target.closest ? e.target.closest('[data-key]') : null;
-            if (btn && !btn.disabled) R.single.openItem(btn.getAttribute('data-key'), { from: 'list' });
+            if (btn && !btn.disabled) {
+                R.single.openItem(btn.getAttribute('data-key'), { from: 'list' });
+                // بالماوس (detail 0 = Enter أو مسافة على الصف نفسه): التركيز لمساحة العمل، فـ Enter بعدها يعني «اعتماد»
+                if (e.detail !== 0) focusWorkspace();
+            }
             const more = e.target && e.target.closest ? e.target.closest('[data-more]') : null;
             if (more) {
                 S.listLimit += LIST_PAGE;
@@ -249,6 +256,16 @@
             if (t && t.closest && (t.closest('#rvMoreMenu') || t.closest('#rvMore'))) return;
             toggleMoreMenu(false);
         });
+    }
+
+    function focusWorkspace() {
+        const ws = S.dom.wsBody;
+        if (!ws || typeof ws.focus !== 'function') return;
+        try {
+            ws.focus({ preventScroll: true });
+        } catch (e) {
+            ws.focus();
+        }
     }
 
     // قائمة «⋯» بشريط الموبايل: «تخطي» و«ما لقيت الصورة الصحيحة؟»
@@ -713,14 +730,21 @@
     }
     R.setReason = setReason;
 
-    function thumbFor(item) {
+    // عرض صور القائمة المصغّرة: البروكسي بيصغّرها (/api/image-proxy?w=)، و Cloudinary بتحويلها (R.imageUrl)
+    const THUMB_W = 96;
+
+    function thumbUrl(item) {
         const p = item.product;
         const approved = S.approved.get(item.key);
         const sel = R.storedSelected(p);
         const first = R.storedCandidates(p)[0];
-        const url = (approved && approved.link) || (sel && sel.url) || (first && first.url)
-            || (R.hasFinalImage(p) ? (p.existing_image_link || p.cached_image) : '');
-        return url ? R.img(url, '', S.urls.imageProxy) : icon('image', 22, 1.6, 'rv-thumb__icon');
+        return (approved && approved.link) || (sel && sel.url) || (first && first.url)
+            || (R.hasFinalImage(p) ? (p.existing_image_link || p.cached_image) : '') || '';
+    }
+
+    function thumbFor(item) {
+        const url = thumbUrl(item);
+        return url ? R.img(url, '', S.urls.imageProxy, null, { width: THUMB_W }) : icon('image', 22, 1.6, 'rv-thumb__icon');
     }
 
     function chipFor(bucket, small) {
@@ -729,15 +753,19 @@
     }
     R.chipFor = chipFor;
 
+    // سبب «بلا اقتراح» بكلمتين تحت الاسم (الجملة كاملة في مساحة العمل، وبالتلميح)
+    function itemWhy(item) {
+        const why = R.NO_PICK_BUCKETS.includes(item.bucket) ? R.noPickReason(item) : null;
+        return why ? el('span', { className: 'rv-item__why', title: why.text || null, text: why.label }) : null;
+    }
+
     function listItem(item) {
         const p = item.product;
         const size = R.sizeText(p.size);
-        // سبب «بلا اقتراح» بكلمتين تحت الاسم (الجملة كاملة في مساحة العمل)
-        const why = R.NO_PICK_BUCKETS.includes(item.bucket) ? R.noPickReason(item) : null;
         const active = item.key === S.openKey;
-        const btn = el('button', { type: 'button', className: 'rv-item' + (active ? ' is-active' : ''), dataset: { key: item.key },
-                                   'aria-current': active ? 'true' : null }, [
-            el('span', { className: 'rv-thumb' }, [thumbFor(item)]),
+        const btn = el('button', { type: 'button', className: 'rv-item' + (active ? ' is-active' : ''),
+                                   dataset: { key: item.key, bucket: item.bucket }, 'aria-current': active ? 'true' : null }, [
+            el('span', { className: 'rv-thumb', dataset: { thumb: thumbUrl(item) } }, [thumbFor(item)]),
             el('span', { className: 'rv-item__text' }, [
                 bdi(p.product_name || p.product_name_ar || 'بلا اسم', 'rv-item__name'),
                 el('span', { className: 'rv-item__meta' }, [
@@ -745,12 +773,74 @@
                     size ? el('span', { className: 'rv-item__dot', 'aria-hidden': 'true', text: '•' }) : null,
                     size ? el('span', { text: size }) : null
                 ]),
-                why ? el('span', { className: 'rv-item__why', title: why.key, text: why.label }) : null
+                itemWhy(item)
             ]),
             chipFor(item.bucket, true)
         ]);
         return el('li', {}, [btn]);
     }
+
+    // صف منتج مرسوم بالقائمة: حالته (data-bucket ورقاقته)، سبب «بلا اقتراح»، وصورته إذا تغيّرت (اعتماد خلص). الصف نفسه
+    // بيضل بمكانه، فالتركيز والتمرير ما بيتحركوا
+    function patchRow(btn, item) {
+        btn.setAttribute('data-bucket', item.bucket);
+        const chip = btn.querySelector('.rv-chip');
+        if (chip) btn.replaceChild(chipFor(item.bucket, true), chip);
+        const text = btn.querySelector('.rv-item__text');
+        if (text) {
+            const old = text.querySelector('.rv-item__why');
+            const why = itemWhy(item);
+            if (old && why) text.replaceChild(why, old);
+            else if (old) text.removeChild(old);
+            else if (why) text.appendChild(why);
+        }
+        const thumb = btn.querySelector('.rv-thumb');
+        const url = thumbUrl(item);
+        if (thumb && thumb.getAttribute('data-thumb') !== url) {
+            thumb.setAttribute('data-thumb', url);
+            clear(thumb);
+            thumb.appendChild(thumbFor(item));
+        }
+    }
+
+    function listRows() {
+        const d = S.dom;
+        return d.list ? Array.from(d.list.querySelectorAll('.rv-item')).filter(b => b.getAttribute('data-key')) : [];
+    }
+
+    // بعد اعتماد أو رفض (أو نتيجته): صفوف هالمنتجات بس بتتحدّث بمكانها، أو بتنشال إذا طلعت من الفلتر، والأعداد فوق.
+    // الرسم الكامل (renderList) للفلتر والبحث وقراءة البيانات، ولما لازم ينضاف صف (منتج رجع للفلتر) أو القائمة فضيت
+    function patchList(keys) {
+        const d = S.dom;
+        if (!d.list || S.load.state !== 'ready') {
+            renderList();
+            return;
+        }
+        const list = visibleItems();
+        const index = new Map(list.map((it, i) => [it.key, i]));
+        const rows = new Map(listRows().map(b => [b.getAttribute('data-key'), b]));
+        let full = false;
+        (keys || []).forEach(key => {
+            const btn = rows.get(key);
+            const i = index.has(key) ? index.get(key) : -1;
+            if (i < 0) {
+                if (btn && btn.parentNode && btn.parentNode.parentNode) btn.parentNode.parentNode.removeChild(btn.parentNode);
+            } else if (btn) {
+                patchRow(btn, S.byKey.get(key));
+            } else if (i < S.listLimit) {
+                full = true;
+            }
+        });
+        if (full || !listRows().length) {
+            renderList();
+            return;
+        }
+        drawCounts();
+        drawMore(list);
+        if (R.single && typeof R.single.updatePosition === 'function') R.single.updatePosition();
+        updateTitle();
+    }
+    R.patchList = patchList;
 
     // رقاقات «السبب» تحت رقاقات القائمة: أسباب «بلا اقتراح» (وما ينقص الشيت) لمنتجات الرقاقة الحالية بعددها، حتى
     // يصلح المالك مجموعة كاملة مرة واحدة (مثلاً كل «حجم ناقص بالشيت»)
@@ -766,7 +856,7 @@
         d.reasonChips.appendChild(el('button', { type: 'button', className: 'lq-filter rv-filter rv-reason-chip', dataset: { nopickReason: '' },
                                                   'aria-pressed': S.reason ? 'false' : 'true' }, [el('span', { text: 'كل الأسباب' })]));
         counts.forEach(c => d.reasonChips.appendChild(el('button', {
-            type: 'button', className: 'lq-filter rv-filter rv-reason-chip', dataset: { nopickReason: c.key }, title: c.key,
+            type: 'button', className: 'lq-filter rv-filter rv-reason-chip', dataset: { nopickReason: c.key },
             'aria-pressed': S.reason === c.key ? 'true' : 'false'
         }, [el('span', { text: c.label }), el('span', { className: 'lq-filter__count', text: String(c.count) })])));
     }
@@ -788,7 +878,8 @@
         updateTitle();
     }
 
-    function drawList() {
+    // «N بانتظار المراجعة» ورقاقات الفلتر بأعدادها، ورقاقات «السبب»
+    function drawCounts() {
         const d = S.dom;
         if (!d.list) return;
         const c = S.counts;
@@ -813,6 +904,26 @@
         });
 
         drawReasonChips(loading || unread);
+    }
+
+    // «اعرض N كمان (من M)» آخر القائمة
+    function drawMore(list) {
+        const d = S.dom;
+        const old = d.list.querySelector('.rv-list__more');
+        if (old && old.parentNode) old.parentNode.removeChild(old);
+        if (list.length <= S.listLimit) return;
+        d.list.appendChild(el('li', { className: 'rv-list__more' }, [
+            el('button', { type: 'button', className: 'lq-btn lq-btn--ghost lq-btn--sm', dataset: { more: '1' },
+                           text: `اعرض ${Math.min(LIST_PAGE, list.length - S.listLimit)} كمان (من ${list.length})` })
+        ]));
+    }
+
+    function drawList() {
+        const d = S.dom;
+        if (!d.list) return;
+        const loading = S.load.state === 'loading';
+        const unread = S.load.state === 'error' && !S.products.length;
+        drawCounts();
 
         clear(d.queueNote);
         if (S.load.queueError) {
@@ -885,12 +996,7 @@
             return;
         }
         list.slice(0, S.listLimit).forEach(it => d.list.appendChild(listItem(it)));
-        if (list.length > S.listLimit) {
-            d.list.appendChild(el('li', { className: 'rv-list__more' }, [
-                el('button', { type: 'button', className: 'lq-btn lq-btn--ghost lq-btn--sm', dataset: { more: '1' },
-                               text: `اعرض ${Math.min(LIST_PAGE, list.length - S.listLimit)} كمان (من ${list.length})` })
-            ]));
-        }
+        drawMore(list);
     }
     R.renderList = renderList;
 
@@ -1000,7 +1106,8 @@
             box.appendChild(el('div', { className: 'rv-undo__row', dataset: { group: String(g.group) } }, [
                 el('span', { className: 'rv-undo__ok' }, [icon('check', 18, 2.2)]),
                 el('span', { className: 'rv-undo__text' }, what.concat([
-                    el('span', { className: 'rv-undo__left', text: ` · بتنبعت بعد ${left} ث` })
+                    // العدّ بيتغيّر كل نص ثانية: قارئ الشاشة ما بيقراه كل مرة
+                    el('span', { className: 'rv-undo__left', 'aria-hidden': 'true', text: ` · بتنبعت بعد ${left} ث` })
                 ])),
                 el('button', { type: 'button', className: 'lq-btn lq-btn--secondary lq-btn--sm rv-undo__btn', dataset: { undo: String(g.group) },
                                text: 'تراجع', onclick: () => S.jobs.cancel(g.group) })
@@ -1085,7 +1192,7 @@
                 el('span', { className: 'rv-jobs__what' }, [
                     el('span', { text: j.type === 'reject' ? 'ما انرفضت: ' : 'ما انعتمدت: ' }),
                     bdi(j.label || `صف ${j.row}`, 'rv-jobs__name'),
-                    el('span', { className: 'rv-jobs__why', title: j.detail || null, text: ` — ${j.error}` })
+                    el('span', { className: 'rv-jobs__why', text: ` — ${j.error}` })
                 ]),
                 // تغيّر المنتج بعد فتح الصفحة (C1): الإعادة كما هي تُرفض مرة أخرى؛ الاستبدال بتأكيد صريح فقط. صورة رفضها
                 // مراجع آخر لا تُستبدل ولا تُعاد (الخادم يرفضها دائماً): لا زر
@@ -1144,16 +1251,22 @@
             bodySize: job => R.single.jobBodySize(job),
             hidden: pageHidden,
             onSettle: job => R.single.settleJob(job),
-            onDrain: () => loadData({ quiet: true }),
+            // رفض بالخلفية بوضع منتج واحد (localOnly) بيحدّث منتجه بما قاله الخادم: ما بيقرا القائمة كلها من جديد
+            onDrain: st => {
+                if (!st.batchJobs.length || !st.batchJobs.every(j => j.type === 'reject' && j.localOnly)) loadData({ quiet: true });
+            },
             onCancel: undoApprovals,
             canRetry: job => S.local.get(job.key) !== 'approved',
             // طلب يُعاد: منتجه «جاري الاعتماد» (أو «جاري الرفض») من جديد، فلا يظهر بانتظار المراجعة وهو عم ينعتمد
+            // رفض صورة بديلة والمراجع ضل عالمنتج (job.stay): المنتج نفسه بيضل بانتظار المراجعة
             onRetry: job => {
-                S.local.set(job.key, job.type === 'reject' ? 'rejecting' : 'approving');
+                const key = R.productKeyOf(job);
+                if (!job.stay) S.local.set(key, job.type === 'reject' ? 'rejecting' : 'approving');
+                R.single.jobRetried(job);
                 rebuild();
                 if (S.mode === 'single') {
-                    renderList();
-                    if (S.openKey === job.key) R.single.renderWorkspace();
+                    patchList([key]);
+                    if (S.openKey === key) R.single.renderWorkspace();
                     else R.single.updateBar();
                     markActive();
                 } else {
@@ -1749,6 +1862,9 @@
             if (R.single.canApprove()) {
                 e.preventDefault();
                 R.single.approveCurrent();
+            } else if (R.single.enterWhileBlocked()) {
+                // الصورة لسا عم تتحمّل: رح تنعتمد أول ما تظهر؛ أو السبب جنب الزر
+                e.preventDefault();
             }
         } else if (/^[1-9]$/.test(key)) {
             if (R.single.selectByNumber(parseInt(key, 10))) e.preventDefault();
@@ -1829,6 +1945,8 @@
         S.cfg.autoSearchDelayMs = cfg.autoSearchDelayMs === undefined ? 700 : Math.max(0, parseInt(cfg.autoSearchDelayMs, 10) || 0);
         // الاعتماد بعد ظهور الصورة بهذه المدة على الأقل (ضغطة ثانية سريعة بعد الاعتماد لا تعتمد المنتج التالي قبل رؤيته)
         S.cfg.approveSettleMs = cfg.approveSettleMs === undefined ? 400 : Math.max(0, parseInt(cfg.approveSettleMs, 10) || 0);
+        // صورة ما انعرضت: إعادة المحاولة بعد هالمدد (R.img)
+        if (Array.isArray(cfg.imageRetryMs)) R.imgRetryMs = cfg.imageRetryMs.map(v => Math.max(0, parseInt(v, 10) || 0));
     }
 
     function boot() {

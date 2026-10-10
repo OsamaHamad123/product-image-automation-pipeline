@@ -25,7 +25,7 @@
 
     <ul class="lq-keys">
         @foreach ($keys as $row)
-            <li class="lq-keys__row" data-key-row="{{ $row['id'] }}">
+            <li class="lq-keys__row" id="lq-key-{{ $row['id'] }}" data-key-row="{{ $row['id'] }}">
                 <span class="lq-keys__name">
                     <span class="lq-keys__title">{{ $row['name'] }}</span>
                     <span class="lq-keys__use">{{ $row['use'] }}</span>

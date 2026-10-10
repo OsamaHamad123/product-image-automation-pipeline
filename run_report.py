@@ -246,13 +246,21 @@ def _iso(ts):
     return datetime.datetime.fromtimestamp(ts).isoformat(timespec="seconds") if ts else None
 
 
+def links_restored_text(count):
+    """سطر السجل وتقرير التشغيل: روابط معتمدة اختفت من الشيت وأعاد الإدراج كتابتها بلا بحث (main.plan_enqueue)."""
+    return f"{int(count)} روابط معتمدة اختفت من الشيت ورجعت"
+
+
 def build_report(trigger, attempts, started_ts, ended_ts, health=None, db=None, sheets=None):
     """
     التقرير من محاولات التشغيل (قائمة {stop_reason, run_id, worker_id, notice, bg_skipped}، الأخيرة هي النتيجة):
     {trigger, started_at, ended_at, duration_s, outcome, stop_reason, reason_text, exit_code, attempts,
-     attempt_reasons, run_id, run_ids, counts, outbox, spend, notices, database, bg_skipped, bg_fallback}.
+     attempt_reasons, run_id, run_ids, counts, outbox, spend, notices, database, bg_skipped, bg_fallback,
+     links_restored}.
     bg_skipped: صور نشرها العامل تلقائياً «بدون عزل الخلفية» باختيار المالك (main.bg_skipped_count)، مجموع المحاولات.
     bg_fallback: صور نشرها العامل بعزل محلي (rembg بموديل BiRefNet) لأن رصيد PhotoRoom أو remove.bg خلص (main.bg_fallback_count).
+    links_restored: روابط معتمدة اختفت من الشيت وأعاد الإدراج كتابتها بلا بحث (main.plan_enqueue: LINK_VANISHED)؛
+    تُذكر أيضاً في notices بنص links_restored_text.
     «تشغيل آخر يعمل» بعد محاولة عملت فعلاً ليس «لم يبدأ»: النتيجة handed_over بأرقام المحاولات السابقة.
     """
     if db is None:
@@ -293,8 +301,11 @@ def build_report(trigger, attempts, started_ts, ended_ts, health=None, db=None, 
         "database": "unavailable" if _key(stop_reason) == "db_unavailable" else "ok",
         "bg_skipped": sum(_count(a.get("bg_skipped")) for a in attempts),
         "bg_fallback": sum(_count(a.get("bg_fallback")) for a in attempts),
+        "links_restored": sum(_count(a.get("links_restored")) for a in attempts),
         "local_index": None,
     }
+    if report["links_restored"]:
+        report["notices"].append(links_restored_text(report["links_restored"]))
     if report["outcome"] == "skipped":
         return report
     worker_id = next((a.get("worker_id") for a in reversed(attempts) if a.get("worker_id")), None)
