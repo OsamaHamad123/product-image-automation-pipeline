@@ -6,18 +6,13 @@
 .lq-setup {
     display: flex;
     flex-direction: column;
-    gap: var(--lq-space-5);
+    gap: var(--lq-page-gap);
     min-width: 0;
     max-width: 980px;
 }
 
-/* a hidden alert, button or box stays hidden whatever display its component gives it */
-.lq-setup [hidden] {
-    display: none !important;
-}
-
 .lq-setup__progress {
-    font-size: var(--lq-fs-sm);
+    font-size: var(--lq-fs-xs);
     color: var(--lq-text-2);
 }
 
@@ -28,7 +23,7 @@
 
 .lq-setup__later {
     margin: 0;
-    font-size: var(--lq-fs-sm);
+    font-size: var(--lq-fs-xs);
     color: var(--lq-text-3);
 }
 
@@ -68,7 +63,7 @@
 }
 
 .lq-setup-steps__link[aria-current="step"] {
-    border-color: var(--lq-teal-700);
+    border-color: var(--lq-accent);
     box-shadow: var(--lq-shadow-card);
 }
 
@@ -82,23 +77,23 @@
     border-radius: 50%;
     background: var(--lq-neutral-bg);
     color: var(--lq-text-2);
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
     font-weight: 600;
 }
 
 .lq-setup-steps__link[aria-current="step"] .lq-setup-steps__n {
-    background: var(--lq-teal-700);
-    color: var(--lq-text-on-dark);
+    background: var(--lq-accent);
+    color: var(--lq-on-accent);
 }
 
 .lq-setup-steps__link[data-status="ok"] .lq-setup-steps__n {
     background: var(--lq-success-bg);
-    color: var(--lq-success);
+    color: var(--lq-text-success);
 }
 
 .lq-setup-steps__link[data-status="fail"] .lq-setup-steps__n {
     background: var(--lq-danger-bg);
-    color: var(--lq-danger-text);
+    color: var(--lq-text-danger);
 }
 
 .lq-setup-steps__text {
@@ -109,20 +104,20 @@
 
 .lq-setup-steps__title {
     overflow: hidden;
-    font-size: var(--lq-fs-sm);
+    font-size: var(--lq-fs-xs);
     font-weight: 600;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
 .lq-setup-steps__state {
-    font-size: 12px;
+    font-size: var(--lq-fs-2xs);
     color: var(--lq-text-3);
 }
 
-.lq-setup-steps__link[data-status="ok"] .lq-setup-steps__state { color: var(--lq-success); }
-.lq-setup-steps__link[data-status="fail"] .lq-setup-steps__state { color: var(--lq-danger-text); }
-.lq-setup-steps__link[data-status="running"] .lq-setup-steps__state { color: var(--lq-info-text); }
+.lq-setup-steps__link[data-status="ok"] .lq-setup-steps__state { color: var(--lq-text-success); }
+.lq-setup-steps__link[data-status="fail"] .lq-setup-steps__state { color: var(--lq-text-danger); }
+.lq-setup-steps__link[data-status="running"] .lq-setup-steps__state { color: var(--lq-text-info); }
 
 /* One step */
 .lq-setup-step,
@@ -130,7 +125,6 @@
     display: flex;
     flex-direction: column;
     gap: var(--lq-space-4);
-    padding: 22px;
 }
 
 .lq-setup-step[hidden],
@@ -145,7 +139,7 @@
 }
 
 .lq-setup-step__count {
-    font-size: 12px;
+    font-size: var(--lq-fs-2xs);
     font-weight: 600;
     color: var(--lq-text-3);
 }
@@ -162,9 +156,10 @@
 }
 
 .lq-setup-step__lead {
+    max-width: var(--lq-measure);
     margin: 0;
     font-size: var(--lq-fs-base);
-    line-height: 1.6;
+    line-height: var(--lq-lh-base);
     color: var(--lq-text-2);
 }
 
@@ -195,7 +190,7 @@
 }
 
 .lq-setup-status__label {
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
     font-weight: 600;
     color: var(--lq-text-2);
 }
@@ -241,20 +236,20 @@
     overflow-wrap: anywhere;
 }
 
-.lq-setup-check[data-tone="success"] .lq-setup-check__state { color: var(--lq-success); }
-.lq-setup-check[data-tone="danger"] .lq-setup-check__state { color: var(--lq-danger-text); }
-.lq-setup-check[data-tone="warning"] .lq-setup-check__state { color: var(--lq-warning); }
+.lq-setup-check[data-tone="success"] .lq-setup-check__state { color: var(--lq-text-success); }
+.lq-setup-check[data-tone="danger"] .lq-setup-check__state { color: var(--lq-text-danger); }
+.lq-setup-check[data-tone="warning"] .lq-setup-check__state { color: var(--lq-text-warning); }
 
 .lq-setup-check__fix {
     grid-column: 2 / -1;
     margin: 0;
-    font-size: 13px;
-    line-height: 1.6;
+    font-size: var(--lq-fs-xs);
+    line-height: var(--lq-lh-base);
     color: var(--lq-text-2);
     overflow-wrap: anywhere;
 }
 
-.lq-setup-check[data-tone="danger"] .lq-setup-check__fix { color: var(--lq-danger-text); }
+.lq-setup-check[data-tone="danger"] .lq-setup-check__fix { color: var(--lq-text-danger); }
 
 .lq-setup-step__body {
     display: flex;
@@ -271,8 +266,8 @@
 
 .lq-setup-note {
     margin: 0;
-    font-size: 13px;
-    line-height: 1.6;
+    font-size: var(--lq-fs-xs);
+    line-height: var(--lq-lh-base);
     color: var(--lq-text-3);
 }
 
@@ -280,8 +275,8 @@
     display: none;
 }
 
-.lq-setup-note[data-tone="danger"] { color: var(--lq-danger-text); }
-.lq-setup-note[data-tone="success"] { color: var(--lq-success); }
+.lq-setup-note[data-tone="danger"] { color: var(--lq-text-danger); }
+.lq-setup-note[data-tone="success"] { color: var(--lq-text-success); }
 
 /* Step 1: the service account and the link form */
 .lq-setup-share {
@@ -292,7 +287,7 @@
     border: 1px solid var(--lq-border);
     border-radius: var(--lq-radius-lg);
     background: var(--lq-surface-2);
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
     color: var(--lq-text-2);
 }
 
@@ -301,7 +296,7 @@
 }
 
 .lq-setup-share__text {
-    line-height: 1.6;
+    line-height: var(--lq-lh-base);
 }
 
 .lq-setup-share__row {
@@ -320,7 +315,7 @@
     background: var(--lq-surface);
     color: var(--lq-text);
     font-family: var(--lq-font-mono);
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
     overflow-wrap: anywhere;
 }
 
@@ -355,7 +350,7 @@
 .lq-setup-plan__text {
     flex: 1 1 18em;
     margin: 0;
-    line-height: 1.6;
+    line-height: var(--lq-lh-base);
 }
 
 .lq-setup-step__nav {
@@ -385,7 +380,7 @@
     height: 44px;
     border-radius: 50%;
     background: var(--lq-success-bg);
-    color: var(--lq-success);
+    color: var(--lq-text-success);
 }
 
 @media (max-width: 980px) {
@@ -404,7 +399,7 @@
 
     .lq-setup-steps__title {
         max-width: 100%;
-        font-size: 12px;
+        font-size: var(--lq-fs-2xs);
     }
 
     .lq-setup-steps__state {
@@ -413,11 +408,6 @@
 }
 
 @media (max-width: 560px) {
-    .lq-setup-step,
-    .lq-setup-ready {
-        padding: var(--lq-space-4);
-    }
-
     .lq-setup-steps__title {
         display: none;
     }

@@ -4,7 +4,8 @@
         <x-slot:actions><a class="lq-link" href="#">التفاصيل</a></x-slot:actions>
         ...
     </x-lq.card>
-    variant: default | muted | dark    padding: md | compact | flush    as: section | div | article | aside
+    variant: default (raised: a block you act in) | flat (a block you read: reference, explanation) | muted | dark
+    padding: md | compact | flush    as: section | div | article | aside
 --}}
 @props([
     'title' => null,
@@ -17,7 +18,7 @@
 @php
     $lqTag = in_array($as, ['section', 'div', 'article', 'aside'], true) ? $as : 'section';
     $lqLevel = in_array((int) $level, [2, 3, 4], true) ? (int) $level : 2;
-    $lqVariants = ['default' => '', 'muted' => 'lq-card--muted', 'dark' => 'lq-card--dark'];
+    $lqVariants = ['default' => '', 'flat' => 'lq-card--flat', 'muted' => 'lq-card--muted', 'dark' => 'lq-card--dark'];
     $lqPaddings = ['md' => '', 'compact' => 'lq-card--compact', 'flush' => 'lq-card--flush'];
     $lqHasTitle = $title !== null && $title !== '';
     $lqHasMeta = $meta !== null && $meta !== '';

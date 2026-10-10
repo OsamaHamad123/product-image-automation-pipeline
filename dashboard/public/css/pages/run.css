@@ -3,15 +3,10 @@
  * Loaded by resources/views/dashboard/batch_automation.blade.php through @push('styles').
  */
 
-/* The page toggles sections with the hidden attribute; lq components set their own display. */
-.lq-page-run [hidden] {
-    display: none !important;
-}
-
 .lq-run {
     display: flex;
     flex-direction: column;
-    gap: var(--lq-space-5);
+    gap: var(--lq-page-gap);
     min-width: 0;
 }
 
@@ -38,7 +33,7 @@
     gap: var(--lq-space-2);
     padding: 14px var(--lq-space-4);
     border-radius: var(--lq-radius-lg);
-    background: var(--lq-teal-soft);
+    background: var(--lq-accent-soft);
 }
 
 .lq-run-plan[data-state="error"],
@@ -47,18 +42,18 @@
 }
 
 .lq-run-plan__eyebrow {
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
     color: var(--lq-text-2);
 }
 
 .lq-run-plan__headline {
-    font-size: 15px;
+    font-size: var(--lq-fs-md);
     font-weight: 600;
 }
 
 .lq-run-plan__detail {
-    font-size: 13px;
-    line-height: 1.7;
+    font-size: var(--lq-fs-xs);
+    line-height: var(--lq-lh-relaxed);
     color: var(--lq-text-2);
 }
 
@@ -75,7 +70,7 @@
 }
 
 .lq-run-advanced summary {
-    font-size: var(--lq-fs-md);
+    font-size: var(--lq-fs-sm);
     font-weight: 500;
     cursor: pointer;
 }
@@ -90,8 +85,8 @@
 .lq-run-advanced__hint {
     margin-bottom: 6px;
     padding-inline-start: 28px;
-    font-size: 13px;
-    line-height: 1.6;
+    font-size: var(--lq-fs-xs);
+    line-height: var(--lq-lh-base);
     color: var(--lq-text-3);
 }
 
@@ -102,8 +97,8 @@
     border: 1px solid var(--lq-border);
     border-radius: var(--lq-radius-lg);
     background: var(--lq-surface-2);
-    font-size: var(--lq-fs-sm);
-    line-height: 1.6;
+    font-size: var(--lq-fs-xs);
+    line-height: var(--lq-lh-base);
     color: var(--lq-text-2);
 }
 
@@ -112,15 +107,15 @@
 }
 
 .lq-run-autopub[data-enabled="true"] .lq-run-autopub__icon {
-    color: var(--lq-teal-700);
+    color: var(--lq-accent);
 }
 
 /* «التشغيل بيقرأ من تبويب «X»»: one short line; a proposals / backup looking tab is a warning */
 .lq-run-tab {
     display: flex;
     gap: var(--lq-space-2);
-    font-size: var(--lq-fs-sm);
-    line-height: 1.6;
+    font-size: var(--lq-fs-xs);
+    line-height: var(--lq-lh-base);
     color: var(--lq-text-2);
 }
 
@@ -135,7 +130,7 @@
 }
 
 .lq-run-tab[data-suspicious="true"] .lq-run-tab__icon {
-    color: var(--lq-warning);
+    color: var(--lq-text-warning);
 }
 
 .lq-run-new__start {
@@ -145,7 +140,7 @@
 }
 
 .lq-run-new__note {
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
     color: var(--lq-text-3);
 }
 
@@ -183,9 +178,9 @@
 }
 
 .lq-run-progress__big {
-    font-size: 30px;
+    font-size: var(--lq-fs-3xl);
     font-weight: 600;
-    line-height: 1.2;
+    line-height: var(--lq-lh-tight);
 }
 
 .lq-run-progress__of {
@@ -195,12 +190,12 @@
 }
 
 .lq-run-progress__remaining {
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
     color: var(--lq-text-2);
 }
 
 .lq-run-progress__phase {
-    font-size: var(--lq-fs-sm);
+    font-size: var(--lq-fs-xs);
     color: var(--lq-text-2);
     overflow-wrap: anywhere;
 }
@@ -213,16 +208,9 @@
     margin-top: var(--lq-space-2);
 }
 
-.lq-run-controls .lq-btn {
-    height: 42px;
-    padding-inline: var(--lq-space-4);
-    border-radius: 11px;
-    font-size: var(--lq-fs-base);
-}
-
 .lq-run-controls__note {
-    font-size: var(--lq-fs-sm);
-    line-height: 1.6;
+    font-size: var(--lq-fs-xs);
+    line-height: var(--lq-lh-base);
     color: var(--lq-text-2);
 }
 
@@ -233,13 +221,13 @@
 }
 
 .lq-run-finished__title {
-    font-size: var(--lq-fs-md);
+    font-size: var(--lq-fs-sm);
     font-weight: 600;
 }
 
 .lq-run-finished__explain {
-    font-size: 13px;
-    line-height: 1.7;
+    font-size: var(--lq-fs-xs);
+    line-height: var(--lq-lh-relaxed);
     color: var(--lq-text-2);
 }
 
@@ -255,7 +243,7 @@
 
 .lq-run-stuck__what {
     margin: 6px 0 10px;
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
 }
 
 /* Latest results */
@@ -279,7 +267,7 @@
 }
 
 .lq-run-recent__head .lq-link {
-    font-size: var(--lq-fs-sm);
+    font-size: var(--lq-fs-xs);
 }
 
 .lq-run-recent__list {
@@ -299,7 +287,7 @@
     gap: var(--lq-space-3);
     padding: 10px 0;
     color: var(--lq-text);
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
     text-decoration: none;
 }
 
@@ -324,7 +312,7 @@
 }
 
 .lq-run-recent__ago {
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
     color: var(--lq-text-3);
     white-space: nowrap;
 }
@@ -332,7 +320,7 @@
 .lq-run-recent__empty {
     padding: 10px 0;
     border-block-start: 1px solid var(--lq-border-soft);
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
     color: var(--lq-text-3);
 }
 
@@ -356,9 +344,10 @@
 
 .lq-run-quality__lead,
 .lq-run-export__text {
+    max-width: var(--lq-measure);
     margin: 0;
-    font-size: 13px;
-    line-height: 1.7;
+    font-size: var(--lq-fs-xs);
+    line-height: var(--lq-lh-relaxed);
     color: var(--lq-text-2);
 }
 
@@ -380,7 +369,7 @@
     justify-content: space-between;
     gap: var(--lq-space-3);
     padding: 10px var(--lq-space-3);
-    font-size: 14px;
+    font-size: var(--lq-fs-sm);
     font-weight: 600;
     cursor: pointer;
 }
@@ -395,14 +384,14 @@
     border-radius: var(--lq-radius-pill);
     background: var(--lq-warning-bg);
     color: var(--lq-warning-ink);
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
     text-align: center;
 }
 
 .lq-run-quality__brands {
     margin: 0;
     padding: 0 var(--lq-space-3) var(--lq-space-2);
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
     color: var(--lq-text-2);
 }
 
@@ -422,7 +411,7 @@
     gap: 4px var(--lq-space-2);
     padding: 6px 0;
     border-block-start: 1px solid var(--lq-border-soft);
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
 }
 
 .lq-run-quality__name {
@@ -432,7 +421,7 @@
 .lq-run-quality__text,
 .lq-run-quality__more {
     color: var(--lq-text-2);
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
 }
 
 .lq-run-export__actions {
@@ -443,7 +432,7 @@
 
 .lq-run-export__done {
     margin: 0;
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
     color: var(--lq-success-ink);
 }
 
@@ -462,9 +451,10 @@
 }
 
 .lq-run-brands__lead {
+    max-width: var(--lq-measure);
     margin: 0;
-    font-size: 13px;
-    line-height: 1.7;
+    font-size: var(--lq-fs-xs);
+    line-height: var(--lq-lh-relaxed);
     color: var(--lq-text-2);
 }
 
@@ -489,7 +479,7 @@
 
 .lq-run-brands__done {
     margin: 0;
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
     color: var(--lq-success-ink);
 }
 
@@ -512,7 +502,7 @@
 
 .lq-run-brand__name {
     min-width: 0;
-    font-size: 15px;
+    font-size: var(--lq-fs-md);
     font-weight: 600;
     overflow-wrap: anywhere;
 }
@@ -523,7 +513,7 @@
     border-radius: var(--lq-radius-pill);
     background: var(--lq-warning-bg);
     color: var(--lq-warning-ink);
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
 }
 
 .lq-run-brand__candidates {
@@ -543,7 +533,7 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     color: var(--lq-text-2);
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
 }
 
 .lq-run-brand__actions {
@@ -602,7 +592,7 @@
     flex: none;
     padding: 1px 8px;
     border-radius: var(--lq-radius-pill);
-    font-size: 12px;
+    font-size: var(--lq-fs-2xs);
     background: var(--lq-surface-2);
     color: var(--lq-text-2);
 }
@@ -626,8 +616,8 @@
 .lq-run-bulk__evidence {
     margin: 0;
     padding-inline-start: 18px;
-    font-size: 12px;
-    line-height: 1.7;
+    font-size: var(--lq-fs-2xs);
+    line-height: var(--lq-lh-relaxed);
     color: var(--lq-text-2);
 }
 
@@ -645,7 +635,7 @@
     border: 1px solid var(--lq-border-soft);
     border-radius: var(--lq-radius-pill);
     background: var(--lq-surface);
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
 }
 
 .lq-run-bulk__added-name {
@@ -679,7 +669,7 @@
 .lq-run-barcodes__apart-title {
     grid-column: 1 / -1;
     margin: 0;
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
     font-weight: 600;
     color: var(--lq-text-2);
 }
@@ -721,7 +711,7 @@
     display: flex;
     flex-wrap: wrap;
     gap: var(--lq-space-2);
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
     color: var(--lq-text-2);
 }
 
@@ -737,7 +727,7 @@
 }
 
 .lq-run-barcode__note {
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
     color: var(--lq-warning-ink);
 }
 
@@ -767,7 +757,7 @@
     }
 
     .lq-run-progress__big {
-        font-size: 26px;
+        font-size: var(--lq-fs-2xl);
     }
 
     .lq-run-tiles {

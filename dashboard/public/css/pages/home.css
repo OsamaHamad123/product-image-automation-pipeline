@@ -3,28 +3,16 @@
  * Loaded by resources/views/dashboard/index.blade.php through @push('styles').
  */
 
-/* The page toggles sections with the hidden attribute; lq components set their own display. */
-.lq-page-home [hidden] {
-    display: none !important;
-}
-
 .lq-home {
     display: flex;
     flex-direction: column;
-    gap: 22px;
+    gap: var(--lq-page-gap);
     min-width: 0;
 }
 
-.lq-body .lq-home__title {
-    font-size: 28px;
-}
-
-.lq-home__actions .lq-btn {
-    height: 46px;
-}
-
-.lq-home__actions .lq-btn--secondary {
-    padding-inline: 18px;
+/* the greeting is the page title at its shared size; a long owner name wraps instead of overflowing */
+.lq-home__title {
+    overflow-wrap: anywhere;
 }
 
 /* Skeleton sizes for the slow sections */
@@ -53,8 +41,8 @@
 }
 
 .lq-home__message {
-    font-size: 13px;
-    line-height: 1.7;
+    font-size: var(--lq-fs-xs);
+    line-height: var(--lq-lh-relaxed);
     color: var(--lq-text-2);
 }
 
@@ -67,7 +55,7 @@
 
 .lq-home-funnel__legend {
     gap: var(--lq-space-2) 18px;
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
 }
 
 .lq-home-funnel__legend .lq-legend__swatch {
@@ -76,8 +64,8 @@
 }
 
 .lq-home-funnel__notes {
-    font-size: var(--lq-fs-sm);
-    line-height: 1.6;
+    font-size: var(--lq-fs-xs);
+    line-height: var(--lq-lh-base);
     color: var(--lq-text-2);
 }
 
@@ -104,14 +92,14 @@
 
 .lq-home-lastrun__explain,
 .lq-home-lastrun__phase {
-    font-size: 13px;
-    line-height: 1.7;
+    font-size: var(--lq-fs-xs);
+    line-height: var(--lq-lh-relaxed);
     color: var(--lq-text-2);
 }
 
 .lq-home-lastrun__live .lq-link {
     align-self: flex-start;
-    font-size: var(--lq-fs-sm);
+    font-size: var(--lq-fs-xs);
 }
 
 .lq-home-ready {
@@ -119,12 +107,12 @@
 }
 
 .lq-home-ready__link {
-    font-size: var(--lq-fs-sm);
+    font-size: var(--lq-fs-xs);
 }
 
 .lq-home-ready__intro {
-    font-size: var(--lq-fs-sm);
-    line-height: 1.6;
+    font-size: var(--lq-fs-xs);
+    line-height: var(--lq-lh-base);
     color: var(--lq-text-2);
 }
 
@@ -148,7 +136,7 @@
     flex-wrap: wrap;
     justify-content: space-between;
     gap: 2px var(--lq-space-3);
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
 }
 
 .lq-home-ready__brand {
@@ -169,11 +157,11 @@
     flex-wrap: wrap;
     align-items: center;
     gap: var(--lq-space-3) 22px;
-    padding: var(--lq-space-4) var(--lq-space-5);
+    padding: var(--lq-card-pad-compact) var(--lq-card-pad);
 }
 
 .lq-body .lq-home-services__title {
-    font-size: 14.5px;
+    font-size: var(--lq-fs-sm);
     font-weight: 600;
 }
 
@@ -191,19 +179,19 @@
 }
 
 .lq-body .lq-home-services__checked {
-    font-size: var(--lq-fs-sm);
+    font-size: var(--lq-fs-xs);
     color: var(--lq-text-3);
     text-decoration: none;
 }
 
 .lq-body .lq-home-services__checked:hover {
-    color: var(--lq-teal-700);
+    color: var(--lq-accent);
     text-decoration: underline;
 }
 
 .lq-home-services__cost {
     margin-inline-start: auto;
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
     color: var(--lq-text-2);
 }
 
@@ -219,10 +207,6 @@
 }
 
 @media (max-width: 560px) {
-    .lq-body .lq-home__title {
-        font-size: 24px;
-    }
-
     .lq-home__actions {
         width: 100%;
     }
@@ -238,10 +222,6 @@
 
     .lq-home__kpis .lq-kpi {
         padding: 14px;
-    }
-
-    .lq-body .lq-home__kpis .lq-kpi__value {
-        font-size: 28px;
     }
 
     .lq-home-tiles {
@@ -262,7 +242,6 @@
     display: none;
 }
 
-/bin/bash: line 1: unalias: unsetenv: not found
 .lq-home-next__go {
     flex-shrink: 0;
     margin-inline-start: auto;
@@ -275,8 +254,8 @@
     flex-wrap: wrap;
     align-items: center;
     gap: var(--lq-space-4);
-    border-color: var(--lq-teal-300);
-    background: var(--lq-teal-50);
+    border-color: var(--lq-accent-ring);
+    background: var(--lq-accent-wash);
 }
 
 .lq-home-setup__text {
@@ -288,8 +267,9 @@
 }
 
 .lq-home-setup__lead {
+    max-width: var(--lq-measure);
     margin: 0;
-    line-height: 1.6;
+    line-height: var(--lq-lh-base);
     color: var(--lq-text-2);
 }
 
@@ -300,7 +280,7 @@
     margin: 0;
     padding: 0;
     list-style: none;
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
     color: var(--lq-text-2);
 }
 
@@ -311,7 +291,7 @@
 }
 
 .lq-home-setup__step[data-status="ok"] {
-    color: var(--lq-success);
+    color: var(--lq-text-success);
 }
 
 .lq-home-setup__go {
