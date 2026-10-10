@@ -375,10 +375,43 @@ def _one_line(value):
     return str(value).replace("\r\n", " ").replace("\n", " ").replace("\r", " ")
 
 
+SHEET_IDS_CACHE = "spreadsheet_ids_cache.json"
+SHEET_IDS_VERSION = 1
+# فتح الشيت باسمه بحث في Drive (≈4.5 ثانية على الخادم، أغلب وقت قائمة المراجعة بعد كل اعتماد)؛ بالمعرّف أقل من ثانية.
+# المعرّف بيتذكّر نص ساعة: ملف انحذف أو انعمل بنفس الاسم بيرجع ينلقى بالاسم بعدها، وفشل الفتح بالمعرّف بيرجع للاسم فوراً
+SHEET_IDS_TTL = 1800
+
+
+def _remembered_sheet_id(name):
+    cached = _read_cache(SHEET_IDS_CACHE, SHEET_IDS_TTL, SHEET_IDS_VERSION)
+    ids = (cached or {}).get("ids")
+    found = ids.get(name) if isinstance(ids, dict) else None
+    return found if isinstance(found, str) and found else None
+
+
+def _remember_sheet_id(name, sheet_id):
+    if isinstance(sheet_id, str) and sheet_id:
+        _write_cache(SHEET_IDS_CACHE, {"ids": {name: sheet_id}}, SHEET_IDS_VERSION)
+
+
 def _open_spreadsheet(client, sheet_name_or_url):
     if str(sheet_name_or_url).startswith("https://"):
         return client.open_by_url(sheet_name_or_url)
-    return client.open(sheet_name_or_url)
+    name = str(sheet_name_or_url)
+    # عميل gspread الحقيقي بس (عملاء الاختبارات المزيّفة ما بيكتبوا ملف معرّفات)
+    real = type(client).__module__.startswith("gspread")
+    sheet_id = _remembered_sheet_id(name) if real else None
+    if sheet_id:
+        try:
+            return client.open_by_key(sheet_id)
+        except Exception as e:  # noqa: BLE001 - مؤقت: يُعاد كله؛ غير هيك (انحذف، انسحبت المشاركة): نرجع للاسم
+            if _is_transient(e):
+                raise
+            logger.info("[Google Sheets] المعرّف المحفوظ للشيت ما فتح (%s)؛ رح نفتحه بالاسم", type(e).__name__)
+    sh = client.open(name)
+    if real:
+        _remember_sheet_id(name, getattr(sh, "id", None))
+    return sh
 
 
 def open_worksheet(client, sheet_name_or_url, worksheet_index=0):
