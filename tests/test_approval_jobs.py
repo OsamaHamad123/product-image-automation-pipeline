@@ -1,7 +1,8 @@
 """approval_jobs + scripts/approval_worker.py + bridge approval_enqueue: approvals run on the server, so the reviewer
 can leave the page (owner, 2026-10-08).
 
-* a job keeps the page's parameters; one product (sku_key) has at most one queued or running job;
+* a job keeps the page's parameters; one product (sku_key) has at most one queued or running job: the same image gets
+  that job back, another image (a second tab) is refused as busy;
 * a worker takes the oldest job atomically, runs the very same action_select_image and stores its result document and
   the http status the dashboard would have answered (200 / 500);
 * a job whose worker died is taken again, at most MAX_ATTEMPTS times, then failed with a reason;
@@ -38,7 +39,9 @@ def test_one_product_has_one_active_job(jobs):
     first = approval_jobs.enqueue("select", PARAMS, created_by="reviewer")
     again = approval_jobs.enqueue("select", dict(PARAMS, image_url="https://other.example/x.jpg"))
     other = approval_jobs.enqueue("select", dict(PARAMS, sku_key="aj-key-13", row_number=13))
-    assert again == {"job_id": first["job_id"], "existing": True}
+    same = approval_jobs.enqueue("select", dict(PARAMS))
+    assert again == {"job_id": first["job_id"], "existing": True, "busy": True}
+    assert same == {"job_id": first["job_id"], "existing": True}
     assert other["existing"] is False and other["job_id"] != first["job_id"]
     row = _row(jobs, first["job_id"])
     assert (row["status"], row["created_by"], row["row_number"], row["label"]) == ("queued", "reviewer", 12, "Almarai Milk 1L")
@@ -107,9 +110,86 @@ def test_approval_enqueue_answers_at_once_and_starts_a_worker(jobs, monkeypatch)
 
 
 def test_the_worker_starts_detached_with_this_python(monkeypatch, tmp_path):
+    monkeypatch.delenv("LAQTA_RUN_LAUNCHER", raising=False)
     calls = []
     monkeypatch.setattr(approval_jobs, "LOG_PATH", tmp_path / "approval_worker.log")
     assert approval_jobs.start_worker(python="py", popen=lambda cmd, **kw: calls.append((cmd, kw))) is True
     cmd, kw = calls[0]
     assert cmd[0] == "py" and cmd[-1].endswith("approval_worker.py")
     assert kw.get("start_new_session") or kw.get("creationflags")
+
+
+def test_a_second_tab_approving_another_image_is_told_busy(jobs, monkeypatch):
+    import cli_bridge
+
+    monkeypatch.setattr(approval_jobs, "start_worker", lambda *a, **k: True)
+    first = cli_bridge.action_approval_enqueue(dict(PARAMS))
+    other = cli_bridge.action_approval_enqueue(dict(PARAMS, image_url="https://other.example/x.jpg"))
+    assert other["status"] == "busy" and other["job_id"] == first["job_id"] and other["error"]
+    assert len(sql_rows(jobs)) == 1
+
+
+def sql_rows(db):
+    from laqta_kernel import sql
+
+    return sql(db, "SELECT id FROM approval_jobs")
+
+
+def test_a_running_job_s_heartbeat_keeps_it_from_being_taken_again(jobs):
+    from laqta_kernel import sql
+
+    approval_jobs.enqueue("select", PARAMS)
+    job = approval_jobs.claim("h" * 32)
+    sql(jobs, "UPDATE approval_jobs SET updated_at = NOW() - INTERVAL 20 MINUTE WHERE id = %s", (job["id"],))
+    assert approval_jobs.heartbeat(job) is True
+    assert approval_jobs.claim("i" * 32) is None                        # alive: not stale any more
+    assert approval_jobs.heartbeat(dict(job, claim_token="x" * 32)) is False
+
+
+def test_the_worker_beats_while_the_job_runs_and_stops_after():
+    import threading
+
+    from scripts import approval_worker
+
+    beats, release = [], threading.Event()
+
+    def run(job):
+        for _ in range(200):
+            if len(beats) >= 2:
+                break
+            release.wait(0.01)
+        return {"status": "success"}, 200
+
+    out = approval_worker.run_with_heartbeat({"id": 7}, run=run, beat=lambda j: beats.append(j["id"]), every=0.01)
+    assert out == ({"status": "success"}, 200) and beats[:2] == [7, 7]
+    after = len(beats)
+    release.wait(0.05)
+    assert len(beats) == after                                         # the thread stopped with the job
+
+
+def test_a_result_is_stored_even_when_the_database_hiccups_once():
+    from scripts import approval_worker
+
+    calls = []
+
+    def flaky(job, result, http):
+        calls.append(1)
+        if len(calls) == 1:
+            raise ConnectionError("gone away")
+        return "done"
+
+    assert approval_worker.finish_with_retry({"id": 1}, {}, 200, finish=flaky, pause=0) == "done"
+
+    def down(job, result, http):
+        raise ConnectionError("gone away")
+
+    assert approval_worker.finish_with_retry({"id": 1}, {}, 200, finish=down, tries=2, pause=0) is None
+
+
+def test_on_the_server_the_bridge_only_asks_systemd(monkeypatch, tmp_path):
+    kick = tmp_path / "temp" / "approval_request"
+    monkeypatch.setattr(approval_jobs, "KICK_PATH", kick)
+    monkeypatch.setenv("LAQTA_RUN_LAUNCHER", "systemd")
+    calls = []
+    assert approval_jobs.start_worker(python="py", popen=lambda cmd, **kw: calls.append(cmd)) is True
+    assert kick.exists() and calls == []                               # laqta-approvals.path starts the worker

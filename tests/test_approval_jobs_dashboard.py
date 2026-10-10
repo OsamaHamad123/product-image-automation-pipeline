@@ -67,10 +67,67 @@ def test_a_finished_job_carries_the_result_and_clears_the_cache_once(env):
     assert sql(db, "SELECT cache_cleared FROM approval_jobs WHERE id = 501")[0]["cache_cleared"] == 1
     assert json.loads(second["body"])["jobs"][0]["status"] == "done"
     assert [j["id"] for j in json.loads(active["body"])["jobs"]] == [502]
-    assert json.loads(counts["body"])["approvals"] == {"queued": 0, "running": 1, "failed_recent": 1}
+    assert json.loads(counts["body"])["approvals"] == {"queued": 0, "running": 1, "failed_recent": 1, "failed_open": 1}
 
 
 def test_no_ids_and_no_table_answer_an_empty_list(env):
     environ, _calls, db = env
     empty, = run(environ, [["GET", "/api/approval-jobs?ids="]])
     assert json.loads(empty["body"]) == {"status": "success", "jobs": []}
+
+
+# ---------------------------------------------------------------------------
+# Failed approvals the reviewer may not have seen: ?failed=1, «تجاهل» (dismiss), the sidebar's failed_open count
+# ---------------------------------------------------------------------------
+
+def _failed_rows(db):
+    quality = {"status": "failed", "error_code": "quality_flags", "error": "quality_flags", "quality_flags": ["halo"]}
+    sql(db, "INSERT INTO approval_jobs (id, kind, sku_key, `row_number`, label, params_json, status, result_json, "
+            "http_status, created_by, finished_at) VALUES "
+            "(601, 'select', 'k1', 12, 'Milk', '{}', 'failed', %s, 500, 'owner', NOW() - INTERVAL 2 HOUR), "
+            "(602, 'select', 'k2', 13, 'Laban', '{}', 'failed', %s, 409, 'owner', NOW() - INTERVAL 10 MINUTE), "
+            "(603, 'select', 'k3', 14, 'Juice', '{}', 'failed', %s, 500, 'owner', NOW() - INTERVAL 30 HOUR), "
+            "(604, 'select', 'k4', 15, 'Water', '{}', 'done', %s, 200, 'owner', NOW()), "
+            "(605, 'select', 'k5', 16, 'Tea', '{}', 'running', NULL, NULL, 'owner', NULL)",
+        (json.dumps({"status": "failed", "error": "photoroom_402", "error_code": "photoroom_402"}), json.dumps(quality),
+         json.dumps({"status": "failed", "error": "old"}), json.dumps({"status": "success"})))
+
+
+def test_failed_lists_the_last_day_s_open_failures_newest_first_with_their_reason(env):
+    environ, _calls, db = env
+    _failed_rows(db)
+    failed, counts = run(environ, [["GET", "/api/approval-jobs?failed=1"], ["GET", "/api/batch-status"]])
+    assert failed["status"] == 200
+    jobs = json.loads(failed["body"])["jobs"]
+    assert [j["id"] for j in jobs] == [602, 601]                    # 603 is older than a day; 604 / 605 did not fail
+    assert (jobs[0]["label"], jobs[0]["row_number"], jobs[0]["sku_key"]) == ("Laban", 13, "k2")
+    assert (jobs[0]["error_code"], jobs[0]["quality_flags"], jobs[0]["created_by"]) == ("quality_flags", ["halo"], "owner")
+    assert (jobs[1]["error"], jobs[1]["error_code"]) == ("photoroom_402", "photoroom_402")
+    assert jobs[1]["finished_at"]
+    approvals = json.loads(counts["body"])["approvals"]
+    assert (approvals["failed_open"], approvals["failed_recent"], approvals["running"]) == (2, 1, 1)
+
+
+def test_a_dismissed_failure_leaves_the_list_and_the_count_and_an_unknown_id_is_404(env):
+    environ, _calls, db = env
+    _failed_rows(db)
+    dismissed, missing, failed, counts = run(environ, [["POST", "/api/approval-jobs/602/dismiss"],
+                                                       ["POST", "/api/approval-jobs/999999/dismiss"],
+                                                       ["GET", "/api/approval-jobs?failed=1"],
+                                                       ["GET", "/api/batch-status"]])
+    assert dismissed["status"] == 200 and json.loads(dismissed["body"])["status"] == "success"
+    assert missing["status"] == 404 and json.loads(missing["body"])["status"] == "error"
+    assert [j["id"] for j in json.loads(failed["body"])["jobs"]] == [601]
+    assert json.loads(counts["body"])["approvals"]["failed_open"] == 1
+    assert sql(db, "SELECT dismissed_at FROM approval_jobs WHERE id = 602")[0]["dismissed_at"] is not None
+
+
+def test_ensure_schema_adds_dismissed_at_to_an_existing_table(env):
+    import approval_jobs
+    import schema_mark
+
+    _environ, _calls, db = env
+    sql(db, "ALTER TABLE approval_jobs DROP COLUMN IF EXISTS dismissed_at")
+    schema_mark.save("approval_jobs", "older-version")
+    approval_jobs.ensure_schema()
+    assert "dismissed_at" in [r["Field"] for r in sql(db, "SHOW COLUMNS FROM approval_jobs")]

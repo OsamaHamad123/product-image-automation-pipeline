@@ -523,7 +523,7 @@ step_units() {
     log "7/10 systemd units, logrotate and backup script"
     local u
     for u in laqta-nightly.service laqta-nightly.timer laqta-sync-worker.service laqta-backup.service laqta-backup.timer \
-             laqta-outbox-flush.service laqta-outbox-flush.timer laqta-run.service laqta-run.path; do
+             laqta-outbox-flush.service laqta-outbox-flush.timer laqta-run.service laqta-run.path              laqta-approvals.service laqta-approvals.path laqta-approvals.timer; do
         render "$SCRIPT_DIR/$u" "/etc/systemd/system/$u" 644
     done
     # The failure alert unit (laqta-alert@) was removed; a server installed before still has its file.
@@ -541,6 +541,8 @@ step_units() {
     run systemctl daemon-reload
     # The run launcher only reacts to a request file written by the dashboard, so it is always switched on.
     run systemctl enable --now laqta-run.path
+    # Review approvals: started on request, and swept every minute (costs nothing on an empty queue).
+    run systemctl enable --now laqta-approvals.path laqta-approvals.timer
     if ((ENABLE_UNITS)); then
         run systemctl enable --now laqta-backup.timer laqta-nightly.timer laqta-outbox-flush.timer
         if ((WITH_REDIS)); then run systemctl enable --now redis-server laqta-sync-worker.service; fi

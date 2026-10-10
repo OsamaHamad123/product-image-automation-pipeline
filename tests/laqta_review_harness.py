@@ -360,7 +360,14 @@ globalThis.fetch = (url, init = {}) => {
         else if (path === '/api/settings/bg-method') data = FIXTURE.bgMethod || { status: 'success', method: (call.body || {}).method, previous: 'photoroom' };
         // اعتمادات عالخادم: الاختبار بيحط الجواب بـ approvalJobs (دالة للـ url أو قيمة)، وإلا ما في اعتمادات
         else if (path === '/api/approval-jobs') data = typeof approvalJobs === 'function' ? approvalJobs(call.url) : (approvalJobs || { status: 'success', jobs: [] });
-        call.resolve(response(data, FIXTURE.status && FIXTURE.status[path] || 200));
+        // a scenario answer may carry its own http status: { __status: 401, ... } (session expired)
+        let status = FIXTURE.status && FIXTURE.status[path] || 200;
+        if (data && data.__status) {
+            status = data.__status;
+            data = Object.assign({}, data);
+            delete data.__status;
+        }
+        call.resolve(response(data, status));
     }
     return call.promise;
 };

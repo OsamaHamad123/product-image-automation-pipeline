@@ -1,0 +1,13 @@
+# Starts laqta-approvals.service when the dashboard queues an approval: the bridge (approval_jobs.start_worker, with
+# LAQTA_RUN_LAUNCHER=systemd from the laqta php-fpm pool) touches temp/approval_request. The worker removes the file
+# when it starts. The file is only a trigger: nothing in it is ever read. Enabled by install.sh.
+# The @NAME@ words are filled in by install.sh.
+[Unit]
+Description=Laqta approval request from the dashboard (temp/approval_request)
+
+[Path]
+PathExists=@APP_DIR@/temp/approval_request
+Unit=laqta-approvals.service
+
+[Install]
+WantedBy=multi-user.target

@@ -169,6 +169,8 @@
         d.reasonChips = el('div', { className: 'rv-reasons-filter', role: 'group', 'aria-label': 'تصفية حسب سبب «بلا اقتراح»', hidden: true });
         d.queueNote = el('div', { className: 'rv-queue__note' });
         d.list = el('ul', { className: 'rv-list', id: 'rvList', 'aria-label': 'المنتجات' });
+        // «اعتمادات ما زبطت» (renderFailed): فاضية ومخفية لحد ما يكون في شي
+        d.failed = el('section', { className: 'rv-failed', id: 'rvFailed', role: 'region', 'aria-label': 'اعتمادات ما زبطت', hidden: true });
         d.queue = el('aside', { className: 'rv-queue', 'aria-label': 'قائمة المراجعة' }, [
             el('div', { className: 'rv-queue__head' }, [
                 el('div', { className: 'rv-queue__title' }, [
@@ -183,6 +185,7 @@
                 S.urls.cutoutCheck ? el('a', { className: 'lq-link', href: S.urls.cutoutCheck,
                                                text: 'فحص القص: الصور المنشورة على الغامق والفاتح' }) : null
             ]),
+            d.failed,
             d.list,
             el('div', { className: 'rv-queue__foot rv-keyhint' }, [el('span', { text: '↑ ↓ للتنقل بين المنتجات · Z لتكبير الصورة · ? للاختصارات' })])
         ]);
@@ -338,7 +341,7 @@
     const SERVER_APPROVALS_POLL_MS = 3000;
     let serverPoll = null;
     async function syncServerApprovals() {
-        if (!S.urls.approvalJobs || serverPoll) return;
+        if (!S.urls.approvalJobs || serverPoll || R.sessionExpired()) return;
         const res = await R.requestJson(`${S.urls.approvalJobs}?active=1`);
         if (!res.ok || !res.data || !Array.isArray(res.data.jobs)) return;
         S.serverOwned = S.serverOwned || new Set();
@@ -365,6 +368,130 @@
             serverPoll = root.setTimeout(() => { serverPoll = null; syncServerApprovals(); }, SERVER_APPROVALS_POLL_MS);
         }
         if (finished) loadData({ quiet: true });
+    }
+
+    // -------------------------------------------------------------------------------------------------
+    // «اعتمادات ما زبطت»: اعتمادات فشلت عالخادم بآخر 24 ساعة وما حدا تجاهلها (GET approval-jobs?failed=1)، غالباً بعد
+    // ما طلع المراجع من الصفحة. لكل وحدة: اسم المنتج والسبب بالعربي، «افتح المنتج» (بيفتحه بوضع «منتج واحد» بحالته
+    // هلق، فبيعتمده من جديد) و«تجاهل». بتنقرا وقت تفتح الصفحة، ولما عدّاد الشريط الجانبي (failed_open) يتغيّر.
+    // اعتمادات هالصفحة نفسها ما بتنعاد هون: لوحة الاعتمادات بتعرضها مع زر إعادتها
+    // -------------------------------------------------------------------------------------------------
+
+    let failedLoading = false;
+    async function loadFailedApprovals() {
+        if (!S.urls.approvalJobs || failedLoading || R.sessionExpired()) return;
+        failedLoading = true;
+        try {
+            const res = await R.requestJson(`${S.urls.approvalJobs}?failed=1`);
+            if (res.ok && res.data && Array.isArray(res.data.jobs)) {
+                S.failed = res.data.jobs;
+                renderFailed();
+            }
+        } finally {
+            failedLoading = false;
+        }
+    }
+
+    function pageServerJobs() {
+        const ids = new Set();
+        if (S.jobs) S.jobs.state().jobs.forEach(j => { if (j.serverJob) ids.add(Number(j.serverJob)); });
+        return ids;
+    }
+
+    function failedItem(job) {
+        const live = S.items.filter(it => !it.orphan);
+        const row = String(job.row_number === null || job.row_number === undefined ? '' : job.row_number);
+        return (job.sku_key && (live.find(it => it.product.sku_key === job.sku_key && String(it.product.row_number) === row)
+                                || live.find(it => it.product.sku_key === job.sku_key)))
+            || (row && live.find(it => String(it.product.row_number) === row
+                                       && (!job.label || it.product.product_name === job.label)))
+            || null;
+    }
+
+    // سبب الفشل بالعربي: نفس نصوص لوحة الاعتمادات (staleInfo / qualityInfo / plainError)
+    function failedReason(job) {
+        const data = { error: job.error, error_code: job.error_code, quality_flags: job.quality_flags || [] };
+        const stale = R.staleInfo(data, null);
+        if (stale) return stale.text;
+        const quality = R.qualityInfo(data);
+        if (quality) return quality.text;
+        return R.plainError(job.error, R.plainError(job.error_code, 'ما انعتمدت، والخادم ما قال ليش.'));
+    }
+
+    function openFailed(job) {
+        const it = failedItem(job);
+        if (!it) {
+            R.toast('ما لقينا هالمنتج بالقائمة هلق: يمكن انعتمد من مكان ثاني أو انشال من الشيت. حدّث القائمة وجرّب كمان شوي.', 'warning');
+            return;
+        }
+        if (S.mode !== 'single') setMode('single', { key: it.key });
+        else R.single.openItem(it.key, { from: 'list' });
+    }
+
+    async function dismissFailed(job, btn) {
+        if (btn) btn.disabled = true;
+        const res = await R.requestJson(`${S.urls.approvalJobs}/${encodeURIComponent(job.id)}/dismiss`, { method: 'POST', body: {} });
+        if (res.ok || res.status === 404) {
+            S.failed = (S.failed || []).filter(j => Number(j.id) !== Number(job.id));
+            renderFailed();
+            return;
+        }
+        if (btn) btn.disabled = false;
+        if (!res.expired) R.toast(R.plainError(res.data && res.data.error, 'ما قدرنا نتجاهله هلق. جرّب كمان شوي.'), 'danger');
+    }
+
+    function renderFailed() {
+        const d = S.dom;
+        if (!d.failed) return;
+        const own = pageServerJobs();
+        const list = (S.failed || []).filter(j => !own.has(Number(j.id)));
+        clear(d.failed);
+        d.failed.hidden = !list.length;
+        // بوضع «منتج واحد» فوق قائمة المراجعة، وبـ«بالجملة» تحت راس الصفحة فوق شريط التحديد
+        const bulk = S.mode === 'bulk' && d.bulkBar && d.bulkBar.parentNode === d.bulk;
+        const host = bulk ? d.bulk : d.queue;
+        if (host && d.failed.parentNode !== host) host.insertBefore(d.failed, bulk ? d.bulkBar : d.list);
+        if (!list.length) return;
+        d.failed.appendChild(el('div', { className: 'rv-failed__head' }, [
+            icon('alert', 16, 2), el('strong', { className: 'rv-failed__title', text: `اعتمادات ما زبطت (${list.length})` })
+        ]));
+        d.failed.appendChild(el('ul', { className: 'rv-failed__list' }, list.map(job => {
+            const name = job.label || (job.row_number ? `صف ${job.row_number}` : 'منتج');
+            const dismiss = el('button', { type: 'button', className: 'lq-btn lq-btn--ghost lq-btn--sm rv-failed__dismiss',
+                                           dataset: { failedDismiss: job.id }, text: 'تجاهل' });
+            dismiss.addEventListener('click', () => dismissFailed(job, dismiss));
+            const open = el('button', { type: 'button', className: 'lq-btn lq-btn--secondary lq-btn--sm rv-failed__open',
+                                        dataset: { failedOpen: job.id }, text: 'افتح المنتج' });
+            open.addEventListener('click', () => openFailed(job));
+            return el('li', { className: 'rv-failed__item', dataset: { failedId: job.id } }, [
+                el('div', { className: 'rv-failed__text' }, [
+                    bdi(name, 'rv-failed__name'),
+                    el('span', { className: 'rv-failed__reason', text: failedReason(job) })
+                ]),
+                el('div', { className: 'rv-failed__actions' }, [open, dismiss])
+            ]);
+        })));
+    }
+
+    // -------------------------------------------------------------------------------------------------
+    // انتهت الجلسة (ui.js requestJson، 401 / 419): لافتة وحدة فيها المنتجات اللي ما انبعتت أو فشلت بهالصفحة، وسؤال
+    // الاعتمادات الشغّالة بالخلفية بيوقف (followApproval بيهدّي لحاله)
+    // -------------------------------------------------------------------------------------------------
+
+    function unsentLabels() {
+        if (!S.jobs) return [];
+        const st = S.jobs.state();
+        const open = st.jobs.filter(j => j.state === 'failed' || j.state === 'waiting' || (j.state === 'running' && !j.accepted));
+        st.held.forEach(g => g.jobs.forEach(j => open.push(j)));
+        return open.map(j => j.label);
+    }
+
+    function onSessionExpired() {
+        if (serverPoll) {
+            root.clearTimeout(serverPoll);
+            serverPoll = null;
+        }
+        R.showSessionBanner(unsentLabels());
     }
 
     // صفوف حُفظت قبل أن يحسب العامل سبب «بلا اقتراح» (queue-state: explain_missing): يُطلب حسابه مرة في الجلسة مما
@@ -1030,7 +1157,11 @@
                     R.bulk.render();
                 }
             },
-            onUpdate: renderJobs
+            onUpdate: st => {
+                renderJobs(st);
+                // الجلسة منتهية: اللافتة بتعدّ اللي ما انبعت أو فشل لحد هلق
+                if (R.sessionExpired()) R.showSessionBanner(unsentLabels());
+            }
         });
         // اعتماد محجوز للتراجع ما بيضيع أبداً: لما الصفحة تختفي (تبويب ثاني، قفل الموبايل، أو عم تتسكّر) كل محجوز بينبعت
         // هلق بـ fetch keepalive لنفس الـ endpoint، والمتصفح بيكمّل الطلب ولو انسكّرت الصفحة. visibilitychange بيوصل قبل
@@ -1134,6 +1265,7 @@
             renderList();
             R.bulk.render();
         }
+        renderFailed();
         if (!opts.fromPop) updateUrl(!opts.auto);
         R.single.updateJobsOffset();
         if (!opts.auto && typeof root.scrollTo === 'function') root.scrollTo(0, 0);
@@ -1632,6 +1764,13 @@
 
     // الشارة في الشريط الجانبي تُقرأ كل 5 ثوانٍ: إذا زاد عدد الجاهز للمراجعة عن قائمتنا مرتين متتاليتين، نعرض «حدّث»
     function onRunStatus(n) {
+        // عدّاد «اعتمادات فشلت» بالشريط الجانبي تغيّر: «اعتمادات ما زبطت» بتنقرا من جديد
+        const failedOpen = n && n.approvals ? parseInt(n.approvals.failed_open, 10) : NaN;
+        if (isFinite(failedOpen) && failedOpen !== S.failedOpenSeen) {
+            const first = S.failedOpenSeen === undefined;
+            S.failedOpenSeen = failedOpen;
+            if (!first) loadFailedApprovals();          // أول عدّاد: الصفحة قرأتها وقت فتحت (boot)
+        }
         if (!n || n.reviewCount === null || n.reviewCount === undefined || S.load.state !== 'ready') return;
         if (S.jobs && S.jobs.busy()) {
             S.runDiff = 0;
@@ -1681,6 +1820,8 @@
         S.cfg.approveUndoMs = cfg.approveUndoMs === undefined ? 8000 : Math.max(0, parseInt(cfg.approveUndoMs, 10) || 0);
         // كل قديش بتسأل الصفحة عن اعتماد عالخادم (approval_jobs)
         S.cfg.approvalPollMs = cfg.approvalPollMs === undefined ? 1500 : Math.max(10, parseInt(cfg.approvalPollMs, 10) || 1500);
+        // وبعد ما تنتهي الجلسة: كل قديش بس (لحد ما ينفتح دخول من تبويب ثاني)
+        S.cfg.expiredPollMs = cfg.expiredPollMs === undefined ? 30000 : Math.max(10, parseInt(cfg.expiredPollMs, 10) || 30000);
         S.cfg.autoSearchDelayMs = cfg.autoSearchDelayMs === undefined ? 700 : Math.max(0, parseInt(cfg.autoSearchDelayMs, 10) || 0);
         // الاعتماد بعد ظهور الصورة بهذه المدة على الأقل (ضغطة ثانية سريعة بعد الاعتماد لا تعتمد المنتج التالي قبل رؤيته)
         S.cfg.approveSettleMs = cfg.approveSettleMs === undefined ? 400 : Math.max(0, parseInt(cfg.approveSettleMs, 10) || 0);
@@ -1707,7 +1848,9 @@
             if (R.single.openLightbox()) e.preventDefault();
         });
         if (root.Laqta && typeof root.Laqta.onRunStatus === 'function') root.Laqta.onRunStatus(onRunStatus);
+        R.onSessionExpired(onSessionExpired);
         loadData({});
+        loadFailedApprovals();
         return true;
     }
 

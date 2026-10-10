@@ -71,7 +71,11 @@ def ensure_schema():
         return True
     conn = db_connect.connect(dict_cursor=False)
     try:
-        conn.cursor().execute(_SCHEMA)
+        cur = conn.cursor()
+        cur.execute(_SCHEMA)
+        # «تجاهل» اعتماد فشل (لوحة «اعتمادات ما زبطت» بصفحة المراجعة، ApiController::dismissApprovalJob). جدول الخادم
+        # الموجود من قبل بياخد العمود هون (MariaDB 10.4+: IF NOT EXISTS)
+        cur.execute("ALTER TABLE approval_jobs ADD COLUMN IF NOT EXISTS dismissed_at TIMESTAMP NULL")
         conn.commit()
     finally:
         conn.close()
@@ -98,13 +102,21 @@ def enqueue(kind, params, created_by=None):
         row = None
     label = str(params.get("product_name") or "").strip()[:255] or None
     conn = _conn()
+    lock = f"lq_approval_enqueue:{os.getenv('DB_DATABASE', 'automation_db')}:{sku or ''}"[:64]
     try:
         cur = conn.cursor()
+        # check-then-insert under a lock per product: two tabs approving at the same instant get one job, not two
+        cur.execute("SELECT GET_LOCK(%s, 10) AS got", (lock,))
         if sku:
-            cur.execute("SELECT id FROM approval_jobs WHERE sku_key = %s AND status IN ('queued', 'running') "
+            cur.execute("SELECT id, params_json FROM approval_jobs WHERE sku_key = %s AND status IN ('queued', 'running') "
                         "ORDER BY id LIMIT 1", (sku,))
             found = cur.fetchone()
             if found:
+                theirs = str((json.loads(found["params_json"] or "{}") or {}).get("image_url") or "").strip()
+                mine = str(params.get("image_url") or "").strip()
+                if theirs and mine and theirs != mine:
+                    # another image of this product is being approved (another tab / reviewer): not this one's result
+                    return {"job_id": int(found["id"]), "existing": True, "busy": True}
                 return {"job_id": int(found["id"]), "existing": True}
         cur.execute("INSERT INTO approval_jobs (kind, sku_key, `row_number`, label, params_json, created_by) "
                     "VALUES (%s, %s, %s, %s, %s, %s)",
@@ -112,7 +124,10 @@ def enqueue(kind, params, created_by=None):
         conn.commit()
         return {"job_id": int(cur.lastrowid), "existing": False}
     finally:
-        conn.close()
+        try:
+            conn.cursor().execute("SELECT RELEASE_LOCK(%s)", (lock,))
+        finally:
+            conn.close()
 
 
 def claim(token=None):
@@ -138,6 +153,22 @@ def claim(token=None):
                 job["params"] = json.loads(job.pop("params_json") or "{}")
                 return job
         return None
+    finally:
+        conn.close()
+
+
+def heartbeat(job):
+    """
+    The running job is alive: its updated_at moves, so claim() never takes it again as a dead worker's job while it
+    runs (a long approval past STALE_MINUTES used to run twice). False when this worker no longer holds it.
+    """
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("UPDATE approval_jobs SET updated_at = NOW() WHERE id = %s AND claim_token = %s AND status = 'running'",
+                    (job["id"], job["claim_token"]))
+        conn.commit()
+        return cur.rowcount == 1
     finally:
         conn.close()
 
@@ -178,8 +209,25 @@ def give_up_stale():
         conn.close()
 
 
+KICK_PATH = ROOT / "temp" / "approval_request"
+
+
 def start_worker(python=None, popen=subprocess.Popen):
-    """A worker in a process of its own (the same way as the local-index refresh), so the bridge answers at once."""
+    """
+    A worker in a process of its own, so the bridge answers at once.
+    - On the Ubuntu server (LAQTA_RUN_LAUNCHER=systemd, set by the laqta php-fpm pool, the same switch as
+      RunLauncher): the bridge only touches temp/approval_request and laqta-approvals.path starts the worker in its
+      own cgroup. A worker started from php-fpm died with it on a php-fpm restart and nothing started it again;
+      laqta-approvals.timer also runs one every minute, which takes any job left queued or stale.
+    - Elsewhere (the owner's PC): detached, the same way as the local-index refresh.
+    """
+    if os.getenv("LAQTA_RUN_LAUNCHER", "") == "systemd":
+        try:
+            KICK_PATH.parent.mkdir(parents=True, exist_ok=True)
+            KICK_PATH.touch()
+            return True
+        except OSError as exc:
+            logger.warning("approval worker request could not be written (%s); starting it directly", type(exc).__name__)
     try:
         LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
         env = dict(os.environ, PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
