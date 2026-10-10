@@ -649,29 +649,38 @@
         return done;
     }
 
+    // المنتج اللي إله الطلب: رفض صورة بديلة والمراجع ضل عالمنتج (stay) إله مفتاح بالطابور غير مفتاح المنتج، فاعتماد
+    // الصورة المقترحة لنفس المنتج بينبعت وهو ماشي
+    function productKeyOf(job) {
+        return (job && job.productKey) || (job && job.key);
+    }
+    R.productKeyOf = productKeyOf;
+
     function settleJob(job) {
         const S = st();
+        const key = productKeyOf(job);
         const data = (job.result && job.result.data) || {};
         if (job.state === 'done') {
             if (S.today) S.today[job.type === 'reject' ? 'rejected' : 'approved'] += 1;
             // ما قاله الخادم عن المنتج بعد هذا الإجراء يصير ما «رآه» المراجع (القراءة التالية لا تُعد تغييراً)
-            R.settleSeen(job.key, data.current || (data.rejection && data.rejection.current) || null);
+            R.settleSeen(key, data.current || (data.rejection && data.rejection.current) || null);
             if (job.type === 'reject') {
                 // C2: رفض الصورة المقترحة وغيرها باقٍ يُبقي المنتج بانتظار المراجعة بصوره الباقية
                 const outcome = R.rejectionOutcome(data, !!job.alternative);
-                if (S.local.get(job.key) === 'rejecting') S.local.delete(job.key);
-                if (S.local.get(job.key) !== 'approved' && !outcome.kept) {
-                    if (outcome.requeued) S.local.set(job.key, 'rejected');
-                    else job.dropped = dropCandidate(job.key, job.candidate.url);
+                if (S.local.get(key) === 'rejecting') S.local.delete(key);
+                // اعتماد للمنتج نفسه انبعت بعد رفض صورة بديلة: ما بيتغطّى بـ«رجعت للطابور»
+                if (!['approved', 'approving'].includes(S.local.get(key)) && !outcome.kept) {
+                    if (outcome.requeued) S.local.set(key, 'rejected');
+                    else job.dropped = dropCandidate(key, job.candidate.url);
                 }
                 if (job.localOnly) rejectedNote(job, outcome);
             } else {
-                S.local.set(job.key, 'approved');
+                S.local.set(key, 'approved');
                 const rawLink = String(data.image_link || '');
                 const notes = R.approvalNotes(data);
                 // C3: ما حدث في الشيت كما قاله الخادم؛ «كُتب في الشيت» فقط عند written
                 const sheet = R.sheetNote(data.sheet);
-                S.approved.set(job.key, { link: rawLink.replace(/^needs_review:/, ''), warning: notes.bgFailed ? 'background_not_removed' : '',
+                S.approved.set(key, { link: rawLink.replace(/^needs_review:/, ''), warning: notes.bgFailed ? 'background_not_removed' : '',
                                           url: job.candidate.url, sheet: sheet.state, notes: notes,
                                           pageGtin: String(data.page_gtin || ''),
                                           current: data.current && typeof data.current === 'object' ? data.current : null });
@@ -702,10 +711,10 @@
                 }
             }
         } else {
-            if (['approving', 'rejecting'].includes(S.local.get(job.key))) S.local.delete(job.key);
+            if (!job.stay && ['approving', 'rejecting'].includes(S.local.get(key))) S.local.delete(key);
             if (job.type === 'reject' && job.localOnly) {
                 // الرفض ما انسجّل: الصورة بترجع للمنتج، والطلب بلوحة الاعتمادات بزر «أعد المحاولة»
-                const sess = sessionOf(job.key);
+                const sess = sessionOf(key);
                 sess.rejected.delete(job.candidate.url);
                 sess.rejectedWhy.delete(job.candidate.url);
             }
@@ -721,9 +730,9 @@
             }
         }
         R.rebuild();
-        R.patchList([job.key]);
+        R.patchList([key]);
         if (S.mode === 'single') {
-            if (S.openKey === job.key) renderWorkspace();
+            if (S.openKey === key) renderWorkspace();
             else updateBar();
             R.markActive();
         } else {
@@ -811,22 +820,38 @@
     // رفض بلا «دوّر على بدائل»: متل الاعتماد. المنتج بيتعلّم «جاري الرفض» وبننتقل للتالي فوراً، والطلب بيروح بطابور
     // الخلفية (jobs.js: keepalive لما الصفحة تختفي، وفشله بلوحة الاعتمادات بزر «أعد المحاولة»). القائمة ما بتنقرا من
     // جديد: settleJob بيحدّث المنتج بما قاله الخادم. «تراجع» بالإشعار بيشيل الرفض (undo-reject) بلا سؤال
+    // صورة مش اختيار النظام وللمنتج صور تانية (stay): المراجع بيضل عالمنتج (غالباً بيعتمد المقترحة بعدها)، الصورة
+    // بتختفي والعرض بينتقل للمقترحة أو للصورة الجاية. رفض المقترحة أو آخر صورة: منتقل للمنتج التالي
     function rejectInBackground(item, candidate, ctx, reasonCode, query, alternative) {
         const S = st();
         const sess = sessionOf(item.key);
-        const next = neighbour(item.key, 1, true);
-        const job = S.jobs.enqueue({ key: item.key, type: 'reject', label: productLabel(item), row: ctx.row_number, ctx: ctx,
+        const sysUrl = systemPickUrl(item);
+        const cands = currentCandidates(item).filter(c => !isExtra(c));
+        const stay = candidate.url !== sysUrl && cands.some(c => c.url !== candidate.url);
+        const next = stay ? null : neighbour(item.key, 1, true);
+        const job = S.jobs.enqueue({ key: stay ? `${item.key}
+reject
+${candidate.url}` : item.key, productKey: item.key, stay: stay,
+                                     type: 'reject', label: productLabel(item), row: ctx.row_number, ctx: ctx,
                                      candidate: candidate, reason: reasonCode, alternative: alternative, localOnly: true,
                                      body: R.rejectBody(ctx, candidate, reasonCode, false, query) });
         if (!job) {
             renderWorkspace();
             return false;
         }
-        cancelPendingSearch();
-        S.local.set(item.key, 'rejecting');
+        if (!stay) {
+            cancelPendingSearch();
+            S.local.set(item.key, 'rejecting');
+        }
         sess.rejected.add(candidate.url);
         sess.rejectedWhy.set(candidate.url, reasonCode);
-        if (sess.pick === candidate.url) sess.pick = null;
+        if (sess.pick === candidate.url) {
+            // المقترحة إذا في، وإلا الصورة اللي بعدها بالترتيب (أو اللي قبلها إذا كانت الأخيرة)
+            const at = cands.findIndex(c => c.url === candidate.url);
+            const after = cands.slice(at + 1).concat(cands.slice(0, at).reverse());
+            sess.pick = sysUrl ? null : (after[0] ? after[0].url : null);
+        }
+        S.pendingEnter = null;
         R.rebuild();
         R.patchList([item.key]);
         if (next) openItem(next.key, { from: 'reject' });
@@ -842,14 +867,14 @@
     // رفض بالخلفية انعاد من لوحة الاعتمادات: الصورة بتنشال من المنتج من جديد لحد ما يوصل الجواب
     function jobRetried(job) {
         if (!job || job.type !== 'reject' || !job.localOnly) return;
-        const sess = sessionOf(job.key);
+        const sess = sessionOf(productKeyOf(job));
         sess.rejected.add(job.candidate.url);
         sess.rejectedWhy.set(job.candidate.url, job.reason);
     }
 
     // ما قاله الخادم عن رفض بالخلفية، بمساحة العمل لما يرجع المراجع للمنتج (نفس جمل الرفض المباشر)
     function rejectedNote(job, outcome) {
-        const sess = sessionOf(job.key);
+        const sess = sessionOf(productKeyOf(job));
         const why = R.reasonLabel(job.reason);
         const left = outcome.left ? ` (${outcome.left})` : '';
         sess.rejected.add(job.candidate.url);
@@ -871,24 +896,25 @@
 
     async function undoRejected(job) {
         const S = st();
-        const item = S.byKey.get(job.key);
+        const key = productKeyOf(job);
+        const item = S.byKey.get(key);
         if (!item) return false;
         const done = await undoReject(item, job.candidate.url, { ask: false });
         if (!done) return false;
         // الصورة اللي انشالت من صور المنتج هون بترجع لمكانها، والمنتج بيرجع متل ما كان قبل الرفض
-        const now = S.byKey.get(job.key) || item;
+        const now = S.byKey.get(key) || item;
         const list = (now.product.curation_candidates || []).slice();
         (job.dropped || []).forEach(d => {
             if (!list.some(c => String(c.url || c.image_url || '') === job.candidate.url)) list.splice(Math.min(d.index, list.length), 0, d.c);
         });
         now.product.curation_candidates = list;
         job.dropped = null;
-        if (S.local.get(job.key) === 'rejected') S.local.delete(job.key);
-        sessionOf(job.key).note = '';
+        if (S.local.get(key) === 'rejected') S.local.delete(key);
+        sessionOf(key).note = '';
         R.rebuild();
         if (S.mode === 'single') {
             R.renderList();
-            openItem(job.key, { from: 'undo' });
+            openItem(key, { from: 'undo' });
         } else {
             R.renderList();
             R.bulk.render();

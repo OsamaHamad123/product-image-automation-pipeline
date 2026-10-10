@@ -1256,13 +1256,15 @@
             onCancel: undoApprovals,
             canRetry: job => S.local.get(job.key) !== 'approved',
             // طلب يُعاد: منتجه «جاري الاعتماد» (أو «جاري الرفض») من جديد، فلا يظهر بانتظار المراجعة وهو عم ينعتمد
+            // رفض صورة بديلة والمراجع ضل عالمنتج (job.stay): المنتج نفسه بيضل بانتظار المراجعة
             onRetry: job => {
-                S.local.set(job.key, job.type === 'reject' ? 'rejecting' : 'approving');
+                const key = R.productKeyOf(job);
+                if (!job.stay) S.local.set(key, job.type === 'reject' ? 'rejecting' : 'approving');
                 R.single.jobRetried(job);
                 rebuild();
                 if (S.mode === 'single') {
-                    patchList([job.key]);
-                    if (S.openKey === job.key) R.single.renderWorkspace();
+                    patchList([key]);
+                    if (S.openKey === key) R.single.renderWorkspace();
                     else R.single.updateBar();
                     markActive();
                 } else {

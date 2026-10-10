@@ -234,6 +234,78 @@ out.state = [productName(), S().ws.state, requests('/api/reject_image')[0].body.
     assert out["state"] == ["Almarai Milk 1L", "rejecting", True, 0]
 
 
+def with_alts(row, name, pick=True, n=3):
+    """A product with n candidates: the first is the system's pick (pick=True), or none is."""
+    urls = [f"https://www.lulu.com/{row}-{i}.jpg" for i in range(1, n + 1)]
+    p = picked(row, name)
+    p["preselected"] = pick
+    p["curation_candidates"] = [cand(u, "preselected" if pick and i == 0 else "eligible", 1 if pick and i == 0 else 0, vlm=VLM)
+                                for i, u in enumerate(urls)]
+    return p, urls
+
+
+ALT_PRODUCT, ALT_URLS = with_alts(70, "Almarai Milk 1L")
+NOPICK_PRODUCT, NOPICK_URLS = with_alts(70, "Almarai Milk 1L", pick=False)
+LAST_PRODUCT, LAST_URLS = with_alts(70, "Almarai Milk 1L", pick=False, n=1)
+
+REJECT_SHOWN = r"""
+press('x');
+document.getElementById('rvRejectResearch').checked = false;
+press('1');
+await flush();
+"""
+
+
+@NEEDS_NODE
+def test_rejecting_an_alternative_stays_on_the_product_and_the_pick_can_be_approved_at_once(tmp_path):
+    out = page(r"""
+press('2');                                                 // the reviewer looks at an alternative: wrong
+""" + REJECT_SHOWN + r"""
+const reject = requests('/api/reject_image')[0];
+out.state = [productName(), pickUrl(), altUrls(), itemOf(70).bucket, reject.body.image_url, reject.body.research];
+out.toast = toasts.find(x => x.action).action.label;
+press('Enter');                                             // then approves the pick while the reject is still running
+await flush();
+// queued at once; sent after the reject (one request at a time per product, jobs.js conflictKey)
+out.queued = [itemOf(70).bucket, productName(), requests('/api/select_image').length];
+answer(reject, { status: 'success', approval_kept: false, candidates_left: 2, queue_status: 'pending' });
+await flush();
+out.approve = requests('/api/select_image').map(c => [c.body.row_number, c.body.image_url]);
+out.after = [itemOf(70).bucket, S().jobs.state().jobs.filter(j => j.state === 'failed').length];
+""", tmp_path, fixture([ALT_PRODUCT, picked(71, "Almarai Laban 1L")]), config={"row": 70})
+    assert out["state"] == ["Almarai Milk 1L", ALT_URLS[0], [ALT_URLS[0], ALT_URLS[2]], "proposed", ALT_URLS[1], False]
+    assert out["toast"] == "تراجع"
+    assert out["queued"] == ["approving", "Almarai Laban 1L", 0]
+    assert out["approve"] == [["70", ALT_URLS[0]]]
+    # the reject's answer does not cover the approval in flight with «back to the queue»
+    assert out["after"] == ["approving", 0]
+
+
+@NEEDS_NODE
+def test_rejecting_one_of_several_images_without_a_pick_shows_the_next_one(tmp_path):
+    out = page(r"""
+press('1');
+""" + REJECT_SHOWN + r"""
+out.state = [productName(), pickUrl(), altUrls()];
+""", tmp_path, fixture([NOPICK_PRODUCT, picked(71, "Almarai Laban 1L")]), config={"row": 70})
+    assert out["state"] == ["Almarai Milk 1L", NOPICK_URLS[1], NOPICK_URLS[1:]]
+
+
+@NEEDS_NODE
+def test_rejecting_the_pick_or_the_last_image_moves_on(tmp_path):
+    pick = page(REJECT_SHOWN + r"""
+out.name = productName();
+""", tmp_path, fixture([ALT_PRODUCT, picked(71, "Almarai Laban 1L")]), config={"row": 70})
+    last = page(r"""
+press('1');
+""" + REJECT_SHOWN + r"""
+out.name = productName();
+out.bucket = itemOf(70).bucket;
+""", tmp_path, fixture([LAST_PRODUCT, with_alts(71, "Almarai Laban 1L", pick=False)[0]]), config={"row": 70})
+    assert pick["name"] == "Almarai Laban 1L"
+    assert last == {"name": "Almarai Laban 1L", "bucket": "rejecting"}
+
+
 # ---------------------------------------------------------------------------
 # 3. Enter while the picture is loading, and why Enter did nothing
 # ---------------------------------------------------------------------------
