@@ -15,27 +15,29 @@
     var POLL_ACTIVE_MS = 4000;
     var POLL_IDLE_MS = 8000;
 
-    // No silent destructive button: each confirmation says what happens and what is kept.
-    var STOP_CONFIRM_TEXT = 'إيقاف التشغيل:\n' +
-        '• العامل بيكمّل المنتجات اللي بإيده وبعدين بيوقف وبيكتب تقرير التشغيل (إذا ما وقف خلال دقيقة ونص منوقفه). وإذا لسا عم يقرأ الشيت، بيوقف قبل ما يدوّر على أي منتج.\n' +
-        '• الصفوف اللي كانت عم تتعالج بترجع تستنى، وبتتعالج بالتشغيل الجاي.\n' +
-        '• ما في ولا صف بينمسح: الجاهز للمراجعة والمعتمد والفاشل بيضلّوا متل ما هنّي.\n\n' +
-        'بدك توقف التشغيل؟';
+    // No silent destructive button: each question (Laqta.ask) says in a sentence or two what happens and what is kept.
+    var STOP_CONFIRM_TEXT = {
+        title: 'نوقف التشغيل؟',
+        text: 'العامل بيخلّص اللي بإيده وبيوقف، والصفوف اللي كانت عم تتعالج بترجع تستنى للتشغيل الجاي. ' +
+            'ما في ولا صف بينمسح، والمنشور ما بينلمس.',
+        confirmText: 'وقّف',
+        danger: true
+    };
 
-    var RESET_CONFIRM_TEXT = 'إصلاح تشغيل عالق (استعمله بس إذا التشغيل عالق أو ضلّ عطل قديم ظاهر):\n' +
-        '• بيوقف أي عامل لسا شغّال بالخلفية بعد ما يكمّل المنتجات اللي بإيده (إذا ما وقف خلال دقيقة ونص منوقفه).\n' +
-        '• بيمسح ملف القفل وعدادات التقدم والتنبيه، وبيلغي الإيقاف المؤقت.\n' +
-        '• الصفوف العالقة بـ «عم تتعالج» بترجع تستنى.\n' +
-        '• بنقرأ قائمة المنتجات من الشيت من جديد.\n' +
-        '• ما في ولا منتج جاهز للمراجعة أو معتمد أو فاشل بينمسح، ولا أي اقتراح أو قرار مراجعة.\n\n' +
-        'بدك تكمّل؟';
+    var RESET_CONFIRM_TEXT = {
+        title: 'نصلّح التشغيل العالق؟',
+        text: 'منوقف أي عامل عالق ومنمسح القفل والعدادات، والصفوف العالقة بترجع تستنى. ' +
+            'ما في ولا منتج جاهز للمراجعة أو معتمد أو فاشل بينمسح، ولا أي اقتراح أو قرار مراجعة.',
+        confirmText: 'صلّح',
+        danger: true
+    };
 
-    var FORCE_CONFIRM_TEXT = 'إعادة البحث حتى للمنتجات اللي إلها صورة:\n' +
-        '• منبحث من جديد عن كل منتجات النطاق، حتى اللي إلها صورة نهائية أو بانتظار مراجعتك.\n' +
-        '• اقتراحات المنتجات اللي بانتظار المراجعة بتتبدّل بنتائج البحث الجديد.\n' +
-        '• الصور المنشورة بالشيت بتضل مكانها لحد ما تعتمد غيرها (أو ينشر النشر الآلي صورة مؤكدة لماركتها)، ' +
-        'وما بينكتب أبداً فوق صورة اعتمدها مراجع.\n\n' +
-        'بدك تبدأ؟';
+    var FORCE_CONFIRM_TEXT = {
+        title: 'نبحث من جديد حتى للي إلها صورة؟',
+        text: 'اقتراحات اللي بانتظار المراجعة بتتبدّل بالنتائج الجديدة. ' +
+            'الصور المنشورة بتضل مكانها لحد ما تنعتمد غيرها، وما بينكتب أبداً فوق صورة اعتمدها مراجع.',
+        confirmText: 'ابدأ'
+    };
 
     // «راجع النتائج» و«راجع الجاهز هلق»: قائمة المراجعة بوضع الجملة (الصور الجاهزة مع بعض)
     var REVIEW_HREF = '/catalog?mode=bulk';
@@ -575,7 +577,7 @@
 
     /*
      * deps: fetchJson(url, opts) -> Promise<{ok,status,data}>, renderLive(view), renderPlan(view), renderStart(view),
-     * confirm(text) -> bool, toast(text, variant), now() -> epoch seconds, schedule(fn, ms) -> handle,
+     * confirm(question) -> bool, toast(text, variant), now() -> epoch seconds, schedule(fn, ms) -> handle,
      * hidden() -> true while the tab is hidden (optional).
      */
     function createController(deps) {
@@ -1580,7 +1582,11 @@
             renderLive: renderLive,
             renderPlan: renderPlan,
             renderStart: renderStart,
-            confirm: function (text) { return C.ask(text); },
+            // a question {title, text, …}: without the layout's Laqta.ask, window.confirm gets it as plain text
+            confirm: function (q) {
+                var asks = root.Laqta && typeof root.Laqta.ask === 'function';
+                return C.ask(asks || typeof q === 'string' ? q : q.title + '\n' + q.text);
+            },
             toast: C.toast,
             now: function () { return Date.now() / 1000; },
             schedule: function (fn, ms) { return root.setTimeout(fn, ms); },

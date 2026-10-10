@@ -53,14 +53,19 @@
         if (sheet.status === 'ok') {
             var total = C.num(sheet.total) || 0;
             var stages = Array.isArray(sheet.stages) ? sheet.stages : [];
+            var legend = stages.map(function (s) { return { label: s.label, value: C.num(s.value) || 0, tone: s.tone }; });
             funnel = {
                 state: total > 0 ? 'ok' : 'empty',
                 meta: C.countText(total),
                 total: total,
+                // the bar is one picture (role="img"): its name says every stage with its number
+                label: 'وين وصلت منتجات الشيت (' + C.countText(total) + '): ' + legend.map(function (l) {
+                    return l.label + ' ' + l.value;
+                }).join('، '),
                 segments: stages.filter(function (s) { return C.num(s.value) > 0; }).map(function (s) {
                     return { tone: s.tone, value: s.value, pct: total > 0 ? Math.round(s.value / total * 1000) / 10 : 0 };
                 }),
-                legend: stages.map(function (s) { return { label: s.label, value: C.num(s.value) || 0, tone: s.tone }; }),
+                legend: legend,
                 notes: Array.isArray(sheet.notes) ? sheet.notes : [],
                 message: total > 0 ? '' : 'الشيت فاضي: ما في منتجات نعرضها.'
             };
@@ -236,7 +241,8 @@
      * now() -> epoch seconds, schedule(fn, ms), hidden() -> true while the tab is hidden (optional).
      */
     function createController(deps) {
-        var state = { lastPhase: null, overview: null, live: null, liveBanner: null, brands: null, brandsAsked: false };
+        var state = { lastPhase: null, overview: null, live: null, liveBanner: null, brands: null, brandsAsked: false,
+                      nextSaid: undefined };
 
         function now() {
             return deps.now ? deps.now() : Date.now() / 1000;
@@ -263,8 +269,13 @@
                     step();
                 });
             }
-            deps.renderNext(nextStep(waiting, state.brands, notFound, state.live ? state.live.phase : null,
-                                     { failed: failed, reviewer: reviewer }));
+            var view = nextStep(waiting, state.brands, notFound, state.live ? state.live.phase : null,
+                                { failed: failed, reviewer: reviewer });
+            // the box is a status (read out when it changes): every poll lands here, only a new step is drawn
+            var said = JSON.stringify(view);
+            if (said === state.nextSaid) return;
+            state.nextSaid = said;
+            deps.renderNext(view);
         }
 
         function loadOverview(fresh) {
@@ -369,9 +380,7 @@
                     seg.style.width = s.pct + '%';
                     bar.appendChild(seg);
                 });
-                bar.setAttribute('aria-label', 'وين وصلت منتجات الشيت: ' + f.legend.map(function (l) {
-                    return l.label + ' ' + l.value;
-                }).join('، '));
+                bar.setAttribute('aria-label', f.label);
                 var legend = $('funnel-legend');
                 C.clear(legend);
                 f.legend.forEach(function (l) {

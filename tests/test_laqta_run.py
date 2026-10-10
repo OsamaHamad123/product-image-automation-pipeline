@@ -796,9 +796,9 @@ const ctl = LaqtaRunPage.createController(deps);
     assert out["posts"] == ["/api/run-all", "/api/run-all", "/api/stop-batch", "/api/batch/reset", "/api/batch/pause",
                             "/api/batch/resume"]
     force, _, stop, reset, stop2, reset2 = out["confirms"]
-    assert "الصور المنشورة بالشيت بتضل مكانها" in force and "ما بينكتب أبداً فوق صورة اعتمدها مراجع" in force
-    assert "ما في ولا صف بينمسح" in stop and stop == stop2
-    assert "ما في ولا منتج جاهز للمراجعة أو معتمد أو فاشل بينمسح" in reset and reset == reset2
+    assert "الصور المنشورة بتضل مكانها" in force["text"] and "ما بينكتب أبداً فوق صورة اعتمدها مراجع" in force["text"]
+    assert "ما في ولا صف بينمسح" in stop["text"] and stop == stop2 and stop["danger"] is True
+    assert "ما في ولا منتج جاهز للمراجعة أو معتمد أو فاشل بينمسح" in reset["text"] and reset == reset2
     assert any(t[0] == "رسالة الخادم" for t in out["toasts"])        # the server's own Arabic message is shown
 
 

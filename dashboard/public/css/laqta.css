@@ -2487,7 +2487,14 @@ a.lq-btn[aria-disabled="true"] {
     list-style: none;
 }
 
+.lq-goto__options {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
 .lq-goto__group {
+    display: block;
     padding: var(--lq-space-2) var(--lq-space-3) var(--lq-space-1);
     color: var(--lq-text-3);
     font-size: 12px;

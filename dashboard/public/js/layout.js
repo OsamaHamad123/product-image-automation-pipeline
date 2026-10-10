@@ -581,8 +581,11 @@
         toast: toast,
         ask: ask,
         runNotice: runNotice,
-        // «روح لـ…» (jump.js) من قائمة «حسابي»: القائمة بتتسكّر قبل ما تنفتح النافذة
-        closeAccount: function () { if (accountSheet && !accountSheet.hasAttribute('hidden')) setAccountOpen(false, false); }
+        // «روح لـ…» (jump.js) من قائمة «حسابي»: القائمة بتتسكّر قبل ما تنفتح النافذة، والتركيز اللي كان جوّاها
+        // بيرجع لزر «حسابي» (هيك لما تتسكّر «روح لـ…» بـ Esc بيرجع لمكان ظاهر)
+        closeAccount: function () {
+            if (accountSheet && !accountSheet.hasAttribute('hidden')) setAccountOpen(false, inAccount(document.activeElement));
+        }
     };
 
     // No silent destructive action: anything with data-lq-confirm asks first (capture phase, so it runs
@@ -616,9 +619,19 @@
         group.dispatchEvent(new CustomEvent('lq:change', { bubbles: true, detail: { value: item.getAttribute('data-value') } }));
     });
 
-    // «حسابي» بشريط الموبايل: بيفتح ويسكّر القائمة الصغيرة (الاسم و«خروج»)؛ Esc أو كبسة برّاها بتسكّرها
+    // «حسابي» بشريط الموبايل: بيفتح ويسكّر القائمة الصغيرة (الاسم و«روح لـ…» و«خروج»)؛ Esc أو كبسة برّاها بتسكّرها.
+    // هي aria-modal: Tab بيلف بين زرارها، وEsc بيرجّع التركيز لزر «حسابي»
     var accountToggle = $('[data-lq-account-toggle]');
     var accountSheet = $('[data-lq-account-sheet]');
+    function inAccount(node) {
+        return !!(node && node.closest && node.closest('[data-lq-account-sheet]'));
+    }
+    function accountButtons() {
+        var all = accountSheet.querySelectorAll ? accountSheet.querySelectorAll('button') : [];
+        var out = [];
+        for (var i = 0; i < all.length; i++) if (!all[i].disabled && !all[i].hasAttribute('hidden')) out.push(all[i]);
+        return out;
+    }
     function setAccountOpen(open, refocus) {
         accountToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
         setHidden(accountSheet, !open);
@@ -639,7 +652,26 @@
             setAccountOpen(false, false);
         });
         document.addEventListener('keydown', function (e) {
-            if (e.key === 'Escape' && !accountSheet.hasAttribute('hidden')) setAccountOpen(false, true);
+            if (accountSheet.hasAttribute('hidden')) return;
+            if (e.key === 'Escape') {
+                setAccountOpen(false, true);
+            } else if (e.key === 'Tab') {
+                var buttons = accountButtons();
+                if (!buttons.length) return;
+                var first = buttons[0];
+                var last = buttons[buttons.length - 1];
+                var at = document.activeElement;
+                if (!inAccount(at)) {
+                    first.focus();
+                } else if (e.shiftKey && at === first) {
+                    last.focus();
+                } else if (!e.shiftKey && at === last) {
+                    first.focus();
+                } else {
+                    return;
+                }
+                e.preventDefault();
+            }
         });
     }
 

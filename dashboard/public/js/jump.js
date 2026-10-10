@@ -4,7 +4,8 @@
  * Opens with Ctrl+K (⌘K), «/» when nothing is being typed, the sidebar's «روح لـ…» button or the phone's «حسابي» sheet.
  * The places come from App\Services\GotoIndex (the layout's #lqGotoIndex island, already without the owner's pages
  * for a reviewer). From what is typed it adds «افتح الصف N» (digits) and «دوّر بالمراجعة على …» (/catalog?q=…).
- * ↑↓ move, Enter goes, Esc closes; the focus goes back to where it was. Keys are read from e.code too, so an Arabic
+ * ↑↓ move, Enter goes, Esc closes; the focus goes back to where it was. While another open dialog (aria-modal, not
+ * hidden) is up, no key is taken from it. Keys are read from e.code too, so an Arabic
  * keyboard layout works (Ctrl+K is KeyK, «/» is Slash).
  *
  * window.LaqtaGoto: { open, close, search(entries, text) } — search is pure (the node tests call it).
@@ -53,6 +54,9 @@
     var box = null;
     var input = null;
     var list = null;
+    var empty = null;
+    var status = null;
+    var dlg = null;
     var results = [];
     var selected = 0;
     var opener = null;
@@ -90,21 +94,39 @@
         root.location.assign(href);
     }
 
+    function countText(n) {
+        return n === 1 ? 'نتيجة وحدة' : n === 2 ? 'نتيجتين' : n <= 10 ? n + ' نتائج' : n + ' نتيجة';
+    }
+
+    // The listbox holds options only: each group is a role="group" named after it (its heading is only seen), and
+    // «ما في شي» sits outside it. The count is said (status) only when it changes, not on every key.
     function render() {
         results = search(entries, input.value);
         if (selected >= results.length) selected = Math.max(0, results.length - 1);
         while (list.firstChild) list.removeChild(list.firstChild);
+        var said = results.length ? countText(results.length) : 'ما في شي بهالاسم.';
+        if (status.textContent !== said) status.textContent = said;
+        empty.hidden = !!results.length;
+        list.hidden = !results.length;
+        input.setAttribute('aria-expanded', results.length ? 'true' : 'false');
         if (!results.length) {
-            list.appendChild(el('li', 'lq-goto__empty', 'ما في شي بهالاسم.'));
             input.removeAttribute('aria-activedescendant');
             return;
         }
+        var options = null;
         var lastGroup = null;
         results.forEach(function (r, i) {
-            if (r.group !== lastGroup) {
-                var head = el('li', 'lq-goto__group', r.group);
-                head.setAttribute('role', 'presentation');
-                list.appendChild(head);
+            if (!options || r.group !== lastGroup) {
+                var section = el('li', 'lq-goto__section');
+                section.setAttribute('role', 'group');
+                section.setAttribute('aria-label', r.group);
+                var head = el('span', 'lq-goto__group', r.group);
+                head.setAttribute('aria-hidden', 'true');
+                options = el('ul', 'lq-goto__options');
+                options.setAttribute('role', 'none');
+                section.appendChild(head);
+                section.appendChild(options);
+                list.appendChild(section);
                 lastGroup = r.group;
             }
             var item = el('li', 'lq-goto__item');
@@ -121,7 +143,7 @@
                     mark();
                 }
             });
-            list.appendChild(item);
+            options.appendChild(item);
         });
         mark();
     }
@@ -136,8 +158,19 @@
         }
     }
 
+    // Another dialog that is open (a question over the box, the zoom, the phone's «حسابي»): its keys stay its own.
+    // A hidden one (the «حسابي» sheet while it is closed) does not count.
+    function openModal() {
+        var found = typeof doc.querySelectorAll === 'function' ? doc.querySelectorAll('[aria-modal="true"]') : [];
+        for (var i = 0; i < found.length; i++) {
+            if (found[i] === dlg || (found[i].closest && found[i].closest('[hidden]'))) continue;
+            return found[i];
+        }
+        return null;
+    }
+
     function onKey(e) {
-        if (!box) return;
+        if (!box || openModal()) return;
         if (e.key === 'Escape') {
             close(true);
         } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
@@ -165,7 +198,7 @@
         opener = doc.activeElement;
         selected = 0;
         box = el('div', 'lq-goto-backdrop');
-        var dlg = el('div', 'lq-goto');
+        dlg = el('div', 'lq-goto');
         dlg.setAttribute('role', 'dialog');
         dlg.setAttribute('aria-modal', 'true');
         dlg.setAttribute('aria-label', 'روح لـ…');
@@ -187,6 +220,10 @@
         list.id = 'lqGotoList';
         list.setAttribute('role', 'listbox');
         list.setAttribute('aria-label', 'النتائج');
+        empty = el('p', 'lq-goto__empty', 'ما في شي بهالاسم.');
+        empty.hidden = true;
+        status = el('div', 'lq-sr-only');
+        status.setAttribute('role', 'status');
         var hint = el('div', 'lq-goto__hint');
         [['↑ ↓', 'تنقّل'], ['Enter', 'روح'], ['Esc', 'سكّر']].forEach(function (h) {
             var s = el('span');
@@ -196,6 +233,8 @@
         });
         dlg.appendChild(field);
         dlg.appendChild(list);
+        dlg.appendChild(empty);
+        dlg.appendChild(status);
         dlg.appendChild(hint);
         box.appendChild(dlg);
         box.addEventListener('mousedown', function (e) { if (e.target === box) close(true); });
@@ -214,7 +253,10 @@
         doc.removeEventListener('keydown', onKey, true);
         if (box.parentNode) box.parentNode.removeChild(box);
         box = null;
-        if (refocus && opener && typeof opener.focus === 'function' && doc.contains(opener)) opener.focus();
+        dlg = null;
+        // back where it was, unless that is gone or hidden meanwhile (the «حسابي» sheet hands its focus to its toggle)
+        if (refocus && opener && typeof opener.focus === 'function' && doc.contains(opener)
+            && !(opener.closest && opener.closest('[hidden]'))) opener.focus();
     }
 
     function typing(target) {
@@ -227,7 +269,7 @@
     if (!doc || typeof doc.addEventListener !== 'function') return;
     doc.addEventListener('keydown', function (e) {
         // a question or the zoom is open: its own keys (Enter = «أكيد») stay its own
-        if (box || e.defaultPrevented || e.repeat || doc.querySelector('[aria-modal="true"]')) return;
+        if (box || e.defaultPrevented || e.repeat || openModal()) return;
         var k = e.code === 'KeyK' || String(e.key).toLowerCase() === 'k';
         if (k && (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey) {
             e.preventDefault();

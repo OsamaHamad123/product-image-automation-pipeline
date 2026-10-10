@@ -124,8 +124,9 @@
         </aside>
 
         @auth
-            {{-- قائمة «حسابي» (الموبايل): «خروج» بيبعت نموذج الخروج اللي فوق (form=، POST مع CSRF) حتى وهو مخفي --}}
-            <div class="lq-account-sheet" id="lq-account-sheet" role="dialog" aria-label="حسابي" data-lq-account-sheet hidden>
+            {{-- قائمة «حسابي» (الموبايل): «خروج» بيبعت نموذج الخروج اللي فوق (form=، POST مع CSRF) حتى وهو مخفي.
+                 aria-modal: layout.js بيلف Tab بين زرّيها وEsc بيرجّع لزر «حسابي»؛ وهي مسكّرة (hidden) jump.js ما بيحسبها --}}
+            <div class="lq-account-sheet" id="lq-account-sheet" role="dialog" aria-modal="true" aria-label="حسابي" data-lq-account-sheet hidden>
                 <span class="lq-account-sheet__label">داخل باسم</span>
                 <span class="lq-account-sheet__name" dir="ltr">{{ auth()->user()->name }}</span>
                 <span class="lq-account-sheet__role">{{ $lqReviewer ? 'مراجع' : 'مدير' }}</span>
