@@ -122,6 +122,18 @@ class HealthAttentionController extends Controller
                 ['label' => 'صفحة التشغيل', 'href' => '/batch-automation']);
         }
 
+        // كتابات رفضها الشيت لأنه الصف أو العمود تغيّر بعد ما انجدولت (صفوف انزاحت، تبويب انرجع من نسخة، عمود انمسح):
+        // ما بتنكتب لحالها فوق شي ما بنعرفه، فكانت تضل ساكتة. روابط الصور المعتمدة بيرجع يكتبها التشغيل الجاي
+        $conflicts = $healthz['conflict_recent'] ?? null;
+        if (is_int($conflicts) && $conflicts > 0) {
+            $items[] = self::item('outbox-conflict', 'warning',
+                ($conflicts === 1 ? 'كتابة وحدة' : $conflicts . ' كتابات') . ' بالشيت ما انكتبت لأنه الشيت تغيّر',
+                'الصف أو العمود ما عاد متل ما كان وقت الاعتماد (صفوف انزاحت، تبويب انرجع من نسخة، أو عمود انمسح)، '
+                . 'فما كتبنا فوق شي ما منعرفه. التشغيل الجاي بيرجع يكتب روابط الصور المعتمدة لحاله؛ الأوصاف والتصنيفات '
+                . 'بتنكتب لما تنعتمد الصورة من جديد.',
+                ['label' => 'صفحة التشغيل', 'href' => '/batch-automation']);
+        }
+
         $free = $healthz['free_gb'] ?? null;
         if (is_numeric($free) && (float) $free < HealthzController::MIN_FREE_GB) {
             $items[] = self::item('disk', 'danger', 'المساحة الفاضية عالجهاز قليلة (' . self::gb((float) $free) . ')',

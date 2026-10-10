@@ -2509,8 +2509,8 @@ def _start_local_index_refresh(trigger):
 
 # المنتجات الجارية على السيرفر (run_worker_mode):
 # - حجز الصف (LEASE_MINUTES) يتجدد كل LEASE_RENEW_SECONDS ما دام المنتج يعمل، فلا يسحبه عامل آخر ولا تُهمل نتيجته.
-# - منتج تجاوز PRODUCT_DEADLINE_MINUTES (8 دقائق افتراضياً) يُترك: صفه يعود للانتظار كانقطاع مزوّد (PROVIDER_DOWN:
-#   بعد 10 ثم 20 دقيقة، ويُركن بعد 3 بالتشغيل)، والعامل يكمل. نتيجته المتأخرة لا تُكتب (حجزه لم يعد له).
+# - منتج تجاوز PRODUCT_DEADLINE_MINUTES (8 دقائق افتراضياً) يُترك: صفه فاشل برمز PRODUCT_TIMEOUT ويُعاد بعد 1 ثم 3
+#   ثم 7 أيام، والعامل يكمل. نتيجته المتأخرة لا تُكتب (حجزه لم يعد له).
 # - الخروج لا ينتظر خيطاً عالقاً (exit_process).
 LEASE_RENEW_SECONDS = 60
 _LEFT_RUNNING = []          # منتجات تُركت في خيوطها (الحد الزمني أو مهلة الإيقاف)
@@ -2576,13 +2576,16 @@ class _ProductPool:
 
 
 def _give_up_product(task, deadline_s):
-    """منتج تجاوز حده الزمني: صفه يعود للانتظار كانقطاع مزوّد (يُعاد بعد 10 ثم 20 دقيقة)."""
+    """
+    منتج تجاوز حده الزمني: صفه فاشل برمز PRODUCT_TIMEOUT ويُعاد بعد 1 ثم 3 ثم 7 أيام (local_cache_db.outcome_schedule).
+    كان يعود للانتظار كانقطاع مزوّد، والإدراج التالي يصفّر عدّاده: منتج بطيء دايماً كان يندفع ثمنه كل تشغيل.
+    """
     minutes = round(deadline_s / 60.0, 1)
     print(f"[Worker] الصف {task.get('row_number')}: المنتج تجاوز {minutes:g} دقيقة (PRODUCT_DEADLINE_MINUTES)؛ "
-          "عاد للانتظار كانقطاع مزوّد، والعامل يكمل بالصف التالي.")
-    local_cache_db.update_task_status(task["id"], "pending",
-                                      f"PRODUCT_TIMEOUT: still running after {minutes:g} minutes; retried later",
-                                      failure_code="PROVIDER_DOWN", claim_id=task.get("worker_id") or None)
+          "انعلّم فاشل لحد موعده الجاي، والعامل يكمل بالصف التالي.")
+    local_cache_db.update_task_status(task["id"], "failed",
+                                      f"PRODUCT_TIMEOUT: still running after {minutes:g} minutes; retried in days",
+                                      failure_code=local_cache_db.TIMEOUT_CODE, claim_id=task.get("worker_id") or None)
 
 
 def _drain_products(pool, grace_s=None, watch=None):

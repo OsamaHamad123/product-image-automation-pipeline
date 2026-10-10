@@ -1894,6 +1894,11 @@ PRIORITY_NEW, PRIORITY_REVERIFY, PRIORITY_RETRY = 0, 1, 2
 # مدخل البراند في Brands Mapping أو ظهرت صفحات جديدة للبراند في الفهرس المحلي)
 NOT_FOUND_CODES = ("NO_RESULTS", "ALL_CONFLICTED")
 NOT_FOUND_RETRY_DAYS = (3, 7, 30)
+# منتج تجاوز حده الزمني (main._give_up_product): فاشل بموعد 1 ثم 3 ثم 7 أيام، ثم يبقى فاشلاً. كان يعود للانتظار
+# كانقطاع مزوّد (PROVIDER_DOWN)، والإدراج يصفّر عدّاده، فمنتج بطيء دايماً كان يندفع ثمن بحثه كل تشغيل للأبد
+TIMEOUT_CODE = "PRODUCT_TIMEOUT"
+TIMEOUT_RETRY_DAYS = (1, 3, 7)
+_SCHEDULED_FAIL_DAYS = {**{code: NOT_FOUND_RETRY_DAYS for code in NOT_FOUND_CODES}, TIMEOUT_CODE: TIMEOUT_RETRY_DAYS}
 # انقطاع المزودين لصف واحد: انتظار 10 دقائق يتضاعف، وبعد 3 محاولات في التشغيل نفسه يُركن الصف للتشغيل التالي
 PROVIDER_DOWN_BACKOFF_MINUTES = 10
 MAX_PROVIDER_DOWN_PER_RUN = 3
@@ -1974,9 +1979,9 @@ def plan_queue_row(old, new, reprocess=False):
     if status == "completed":
         return ("reset", carry) if reason in REOPEN_REASONS else ("keep", None)
     if status == "failed":
-        if old.get("failure_code") in NOT_FOUND_CODES and reason not in REOPEN_REASONS:
+        if old.get("failure_code") in _SCHEDULED_FAIL_DAYS and reason not in REOPEN_REASONS:
             brand_changed = bool(old.get("brand_fp") and new.get("brand_fp") and old["brand_fp"] != new["brand_fp"])
-            exhausted = carry["fail_count"] > len(NOT_FOUND_RETRY_DAYS)
+            exhausted = carry["fail_count"] > len(_SCHEDULED_FAIL_DAYS[old.get("failure_code")])
             due = not exhausted and (not old.get("has_next") or bool(old.get("due")))
             if brand_changed:
                 reason = "BRAND_MAPPING_CHANGED"
@@ -2269,6 +2274,7 @@ def outcome_schedule(row, status, failure_code, group_fail_count=0):
     - PROVIDER_DOWN (يعود للانتظار): 10 دقائق ثم 20 ...؛ المحاولة الثالثة في التشغيل نفسه تركن الصف 12 ساعة
       (الإدراج التالي يعيده فوراً). down_count يُصفّر عند كل إدراج، فهو عدد محاولات هذا التشغيل.
     - «لا نتيجة» (NO_RESULTS / ALL_CONFLICTED): 3 ثم 7 ثم 30 يوماً، ثم بلا موعد (يبقى فاشلاً).
+    - تجاوز الحد الزمني (PRODUCT_TIMEOUT): 1 ثم 3 ثم 7 أيام، ثم بلا موعد.
       group_fail_count: أعلى عداد بين صفوف المنتج نفسه، فلا يبدأ الجدول من جديد لصف مكرر.
     - نتيجة للمراجعة أو نشر: تُصفّر العدادات.
     """
@@ -2280,9 +2286,10 @@ def outcome_schedule(row, status, failure_code, group_fail_count=0):
         minutes = (PROVIDER_DOWN_PARK_MINUTES if down >= MAX_PROVIDER_DOWN_PER_RUN
                    else min(PROVIDER_DOWN_BACKOFF_MINUTES * 2 ** (down - 1), PROVIDER_DOWN_PARK_MINUTES))
         return {"next_minutes": minutes, "fail_count": fail, "down_count": down, "priority": PRIORITY_RETRY}
-    if status == "failed" and failure_code in NOT_FOUND_CODES:
+    if status == "failed" and failure_code in _SCHEDULED_FAIL_DAYS:
+        schedule = _SCHEDULED_FAIL_DAYS[failure_code]
         fail = max(fail, int(group_fail_count or 0)) + 1
-        days = NOT_FOUND_RETRY_DAYS[fail - 1] if fail <= len(NOT_FOUND_RETRY_DAYS) else None
+        days = schedule[fail - 1] if fail <= len(schedule) else None
         return {"next_minutes": days * 24 * 60 if days else None, "fail_count": fail, "down_count": 0,
                 "priority": PRIORITY_RETRY}
     if status in ("ready_for_review", "completed"):

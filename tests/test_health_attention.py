@@ -195,6 +195,8 @@ def test_each_source_gives_an_item_with_its_fix():
         "services": _facts(diagnostics=down),
         "dead": _facts(healthz=dict(HEALTHY, dead_total=9, dead_recent=3)),
         "dead_old": _facts(healthz=dict(HEALTHY, dead_total=9, dead_recent=0)),
+        "conflict": _facts(healthz=dict(HEALTHY, conflict_recent=23)),
+        "conflict_none": _facts(healthz=dict(HEALTHY, conflict_recent=0)),
         "disk": _facts(healthz=dict(HEALTHY, free_gb=1.4)),
         "disk_unknown": _facts(healthz=dict(HEALTHY, free_gb=None)),
         "run_failed": _facts(last_run={"run_trigger": "nightly", "outcome": "outage", "started_at": "2026-10-06T00:30:00+00:00",
@@ -219,6 +221,11 @@ def test_each_source_gives_an_item_with_its_fix():
     dead = out["dead"]["items"][0]
     assert dead["title"] == "3 روابط ما وصلوا للشيت" and dead["action"]["href"] == "/batch-automation"
     assert out["dead_old"]["items"] == [] and out["disk_unknown"]["items"] == [] and out["never"]["items"] == []
+    # writes the sheet refused because a row or a column changed: a warning with what happens next, never silent
+    conflict = out["conflict"]["items"][0]
+    assert (conflict["key"], conflict["tone"]) == ("outbox-conflict", "warning")
+    assert conflict["title"] == "23 كتابات بالشيت ما انكتبت لأنه الشيت تغيّر" and "التشغيل الجاي" in conflict["text"]
+    assert out["conflict_none"]["items"] == []
     disk = out["disk"]["items"][0]
     assert disk["title"] == "المساحة الفاضية عالجهاز قليلة (1.4 GB)" and "2 GB" in disk["text"]
     run = out["run_failed"]["items"][0]

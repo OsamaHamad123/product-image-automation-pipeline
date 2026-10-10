@@ -464,7 +464,8 @@
         // خادم أقدم بيرد النتيجة مباشرة (200): بتتسوّى متل قبل
         const res = await R.requestJson(S.urls.select, { method: 'POST', body: Object.assign(jobPayload(job), { async: 1 }),
                                                          keepalive: keepalive });
-        if (keepalive || res.status !== 202 || !res.data || !res.data.job_id) return res;
+        // مع keepalive كمان (الصفحة اختفت وقت المهلة): 202 يعني الخادم استلمه، مش فشل. الصفحة بتتابعه لما ترجع
+        if (res.status !== 202 || !res.data || !res.data.job_id) return res;
         job.serverJob = res.data.job_id;
         if (S.jobs && typeof S.jobs.accept === 'function') S.jobs.accept(job);
         return followApproval(res.data.job_id);
