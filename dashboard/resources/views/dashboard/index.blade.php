@@ -27,7 +27,7 @@
             <h1 class="lq-page-title lq-home__title" data-home="greeting" data-owner="{{ $ownerName }}">{{ $greeting }}</h1>
         </div>
         <div class="lq-page-header__actions lq-home__actions">
-            <x-lq.button variant="secondary" icon="play" href="{{ route('dashboard.batch_automation') }}">تشغيل جديد</x-lq.button>
+            <x-lq.button variant="secondary" icon="play" href="{{ route('dashboard.batch_automation') }}" data-lq-admin>تشغيل جديد</x-lq.button>
             <a class="lq-btn lq-btn--primary" href="{{ route('dashboard.catalog') }}?mode=bulk" data-home="review-link">افتح قائمة المراجعة<span class="lq-btn__count lq-num" data-home="review-count">{{ $homeWaiting ?? '—' }}</span></a>
         </div>
     </header>
@@ -98,7 +98,7 @@
                 </div>
                 <div class="lq-progress lq-progress--lg" role="progressbar" aria-label="تقدّم التشغيل الحالي" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" data-home="live-bar"><div class="lq-progress__bar" data-home="live-fill"></div></div>
                 <p class="lq-home-lastrun__phase" data-home="live-phase"></p>
-                <a class="lq-link" href="{{ route('dashboard.batch_automation') }}">تفاصيل التشغيل ←</a>
+                <a class="lq-link" href="{{ route('dashboard.batch_automation') }}" data-lq-admin>تفاصيل التشغيل ←</a>
             </div>
             <div class="lq-home-lastrun__summary" data-home="lastrun-summary" hidden>
                 <div class="lq-home-tiles" data-home="lastrun-tiles"></div>
@@ -110,7 +110,7 @@
         <section class="lq-card lq-home-ready" aria-labelledby="lq-home-ready-title">
             <div class="lq-card__header">
                 <h2 class="lq-card__title" id="lq-home-ready-title">جاهزية النشر الآلي</h2>
-                <a class="lq-link lq-home-ready__link" href="{{ route('dashboard.settings') }}?tab=auto-publish">الإعدادات</a>
+                <a class="lq-link lq-home-ready__link" href="{{ route('dashboard.settings') }}?tab=auto-publish" data-lq-admin>الإعدادات</a>
             </div>
             <p class="lq-home-ready__intro" data-home="ready-intro" hidden></p>
             <div class="lq-stack lq-stack--sm" data-home="ready-loading" aria-hidden="true">

@@ -13,6 +13,9 @@
         @push('scripts') … @endpush                     page JS in a script tag (the old @section('scripts') still works)
     Optional view data: $lqReviewCount (int) seeds the review badge before the first poll.
 
+    Roles (users.role, ReviewerLimits): a reviewer gets no admin nav item ('admin' => true) and no run-card link;
+    <body data-lq-role="reviewer"> hides any element marked data-lq-admin (pages tag their admin-only buttons with it).
+
     The sidebar run card and the review badge poll GET /api/batch-status every 5 s. Pages can reuse that one
     poll instead of starting their own: window.Laqta.onRunStatus(fn) or the `lq:run-status` document event.
 --}}
@@ -20,10 +23,15 @@
     $lqNavItems = [
         ['key' => 'home', 'route' => 'dashboard.index', 'label' => 'الرئيسية', 'icon' => 'home'],
         ['key' => 'review', 'route' => 'dashboard.catalog', 'label' => 'المراجعة', 'icon' => 'review', 'badge' => true],
-        ['key' => 'run', 'route' => 'dashboard.batch_automation', 'label' => 'التشغيل', 'icon' => 'run'],
+        ['key' => 'run', 'route' => 'dashboard.batch_automation', 'label' => 'التشغيل', 'icon' => 'run', 'admin' => true],
         ['key' => 'health', 'route' => 'dashboard.diagnostics', 'label' => 'الصحة والتكلفة', 'short' => 'الصحة', 'icon' => 'health'],
-        ['key' => 'settings', 'route' => 'dashboard.settings', 'label' => 'الإعدادات', 'icon' => 'settings'],
+        ['key' => 'settings', 'route' => 'dashboard.settings', 'label' => 'الإعدادات', 'icon' => 'settings', 'admin' => true],
     ];
+    // المراجع ما بيشوف روابط صفحات المدير (ReviewerLimits::ADMIN_PAGES بيمنعها عالسيرفر كمان)
+    $lqReviewer = (bool) auth()->user()?->isReviewer();
+    if ($lqReviewer) {
+        $lqNavItems = array_values(array_filter($lqNavItems, fn ($item) => empty($item['admin'])));
+    }
     $lqActive = trim($__env->yieldContent('lq_nav'));
     if ($lqActive === '') {
         foreach ($lqNavItems as $lqItem) {
@@ -49,10 +57,11 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Alexandria:wght@500;600;700&family=Readex+Pro:wght@300;400;500;600;700&display=swap">
     <link rel="stylesheet" href="{{ asset('css/laqta.css') }}?v={{ $lqCssVersion }}">
+    <style>body[data-lq-role="reviewer"] [data-lq-admin] { display: none !important; }</style>
     @yield('styles')
     @stack('styles')
 </head>
-<body class="lq-body @yield('body_class')" data-lq-status-url="{{ url('/api/batch-status') }}" data-lq-review-url="{{ route('dashboard.catalog') }}" data-lq-tz="{{ \App\Http\Controllers\ReviewController::displayTimezone() }}">
+<body class="lq-body @yield('body_class')" data-lq-role="{{ $lqReviewer ? 'reviewer' : 'admin' }}" data-lq-status-url="{{ url('/api/batch-status') }}" data-lq-review-url="{{ route('dashboard.catalog') }}" data-lq-tz="{{ \App\Http\Controllers\ReviewController::displayTimezone() }}">
     <a class="lq-skip-link" href="#lq-main">تخطَّ إلى المحتوى</a>
 
     <div class="lq-shell">
@@ -81,7 +90,7 @@
 
                 <div class="lq-sidebar__spacer"></div>
 
-                <x-lq.run-card live state="loading" />
+                <x-lq.run-card live state="loading" :link="! $lqReviewer" />
 
                 @auth
                     <form class="lq-sidebar__user" method="POST" action="{{ route('logout') }}">

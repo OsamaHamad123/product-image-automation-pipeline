@@ -90,7 +90,7 @@
             الفحص ما بيشتغل لحاله لما تفتح الصفحة.
         </p>
         <div class="lq-health__check">
-            <x-lq.button variant="secondary" size="lg" icon="refresh" data-health="run-check"><span data-health="run-check-label">فحص الاتصالات الآن</span></x-lq.button>
+            <x-lq.button variant="secondary" size="lg" icon="refresh" data-health="run-check" data-lq-admin><span data-health="run-check-label">فحص الاتصالات الآن</span></x-lq.button>
             <span class="lq-health__check-note" id="diagCheckNote">بيستخدم استعلام Serper واحد وطلب PhotoRoom واحد، وما بياخد أكتر من 45 ثانية.</span>
         </div>
     </section>
@@ -130,7 +130,7 @@
                 <p class="lq-health-publish__desc">بيجرّب النشر كامل على صورة تجريبية بدون ما يلمس منتجاتك: التنزيل، عزل الخلفية، الرفع، والكتابة بالشيت.</p>
             </div>
             <div class="lq-health-publish__action">
-                <x-lq.button variant="primary" icon="play" data-health="publish-run"><span data-health="publish-run-label">افحص النشر</span></x-lq.button>
+                <x-lq.button variant="primary" icon="play" data-health="publish-run" data-lq-admin><span data-health="publish-run-label">افحص النشر</span></x-lq.button>
                 <span class="lq-health-publish__cost" id="publishCheckNote">ممكن يكلّف طلب عزل خلفية واحد (ونادراً أكتر إذا ما زبط العزل من أول مرة) وقراءة Gemini وحدة إذا مفتاحها محفوظ. الصورة التجريبية بتنرفع على Cloudinary وبتنمسح، وبالشيت منكتب عنوان عمود الرابط نفسه فوق حاله. عادةً بيخلص بأقل من دقيقة، وما بيطول أكتر من 7 دقايق.</span>
             </div>
         </div>
@@ -168,7 +168,7 @@
              restores the previous method. Both POST /api/settings/bg-method; nothing is re-checked automatically. --}}
         <div class="lq-health-bg" data-health="bg-box" data-state="{{ $bgView['state'] }}" data-method="{{ $bg['method'] ?? '' }}" data-previous="{{ $bg['previous'] ?? '' }}" @if ($bgView['state'] === 'hidden') hidden @endif>
             <p class="lq-health-bg__text" dir="auto" data-health="bg-text">{{ $bgView['text'] }}</p>
-            <div class="lq-health-bg__actions">
+            <div class="lq-health-bg__actions" data-lq-admin>
                 <button type="button" class="lq-btn lq-btn--danger lq-btn--sm" data-health="bg-skip" data-confirm="{{ $bgConfirm }}" @if ($bgView['state'] !== 'offer') hidden @endif>تجاوز عزل الخلفية</button>
                 <button type="button" class="lq-btn lq-btn--secondary lq-btn--sm" data-health="bg-restore" data-method="{{ $bgView['restore'] }}" @if ($bgView['state'] !== 'off') hidden @endif><span data-health="bg-restore-label">{{ $bgView['restore_label'] }}</span></button>
             </div>
@@ -220,7 +220,7 @@
         <p class="lq-health__footnote" data-health="index-last-run" @if ($localIndex['last_run'] === null) hidden @endif>{{ $localIndex['last_run'] }}</p>
         <div class="lq-card__header">
             <p class="lq-health__footnote" data-health="index-status" role="status" aria-live="polite">{{ $localIndex['refresh']['text'] }}</p>
-            <x-lq.button variant="secondary" size="sm" icon="refresh" data-health="index-refresh" :disabled="$localIndex['refresh']['running']"><span data-health="index-refresh-label">{{ $localIndex['refresh']['running'] ? 'عم يحدّث…' : 'حدّث الفهرس هلق' }}</span></x-lq.button>
+            <x-lq.button variant="secondary" size="sm" icon="refresh" data-health="index-refresh" data-lq-admin :disabled="$localIndex['refresh']['running']"><span data-health="index-refresh-label">{{ $localIndex['refresh']['running'] ? 'عم يحدّث…' : 'حدّث الفهرس هلق' }}</span></x-lq.button>
         </div>
     </section>
 
@@ -270,7 +270,7 @@
         <x-lq.empty-state class="lq-health__ops-empty" data-health="ops-empty" hidden icon="search"
             title="ما في عمليات بحث بآخر 7 أيام"
             text="أول ما تشغّل بحث من صفحة التشغيل، بتبيّن هون النتائج وردود المصادر والتكلفة.">
-            <x-lq.button variant="secondary" icon="play" :href="route('dashboard.batch_automation')">صفحة التشغيل</x-lq.button>
+            <x-lq.button variant="secondary" icon="play" :href="route('dashboard.batch_automation')" data-lq-admin>صفحة التشغيل</x-lq.button>
         </x-lq.empty-state>
 
         <div class="lq-alert lq-alert--danger" role="alert" data-health="ops-error" hidden>
@@ -300,7 +300,7 @@
 
     {{-- «صدّر مجموعة اختبار» (HealthController::exportEvalSet -> cli_bridge eval_export -> scripts/eval_record.py
          --from-db). الزر وحده يشغّله؛ بيرجع وين الملف ورابط تنزيله (health.js createEvalExport). --}}
-    <section class="lq-card lq-card--compact lq-health-eval" aria-labelledby="lq-health-eval-title" data-health="eval-card">
+    <section class="lq-card lq-card--compact lq-health-eval" aria-labelledby="lq-health-eval-title" data-health="eval-card" data-lq-admin>
             <h2 class="lq-card__title" id="lq-health-eval-title">مجموعة اختبار من مراجعاتك</h2>
             <p class="lq-card__meta">بتجمع المنتجات اللي راجعتها (اللي اعتمدتها واللي رفضتها) مع الصور اللي عرضها البحث، بنسخ صغيرة، بملف واحد بتبعته للفريق ليقيسوا دقة البحث على منتجاتك الحقيقية. ما بتعمل أي بحث ولا بتكلّف شي، وما بيطلع فيها أي مفتاح أو بيانات دخول.</p>
             <div class="lq-card__header">
@@ -312,7 +312,7 @@
 
     {{-- «صور قديمة بخلفية بيضا» (RecutController -> cli_bridge reprocess_plan / reprocess_start ->
          scripts/reprocess_transparent.py; health.js createReprocess). «احسب» ما بيغيّر شي؛ «ابدأ» دفعة بسقف. --}}
-    <section class="lq-card lq-card--compact lq-health-reprocess" aria-labelledby="reprocess-title" data-health="reprocess">
+    <section class="lq-card lq-card--compact lq-health-reprocess" aria-labelledby="reprocess-title" data-health="reprocess" data-lq-admin>
         <h2 class="lq-card__title" id="reprocess-title">صور قديمة بخلفية بيضا</h2>
         <p class="lq-card__meta">الصور اللي انتشرت قبل الخلفية الشفافة بتبين مربع أبيض بالوضع الغامق بالتطبيق. «احسب» بيعدّها وبيقلك قديش بتكلّف نعيد قصها شفافة، بدون ما يغيّر شي. الصف اللي غيّرت صورته بإيدك ما منلمسه، وكل صورة بتنعاد بتنسجّل وفيك ترجّعها من «فحص القص».</p>
         <div class="lq-card__header">

@@ -11,6 +11,11 @@ class User extends Authenticatable
 {
     use HasFactory, Notifiable;
 
+    // users.role: المدير بيعمل كلشي؛ المراجع بيراجع بس (ReviewerLimits). غير هالقيمتين ما بينحفظ (laqta:user --role)
+    public const ADMIN = 'admin';
+    public const REVIEWER = 'reviewer';
+    public const ROLES = [self::ADMIN, self::REVIEWER];
+
     /**
      * The attributes that are mass assignable.
      *
@@ -20,6 +25,7 @@ class User extends Authenticatable
         'name',
         'email',
         'password',
+        'role',
     ];
 
     /**
@@ -43,5 +49,11 @@ class User extends Authenticatable
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
         ];
+    }
+
+    /** صف بلا role (قبل الـ migration) متل المدير: هيك كانت صلاحيته قبل الأدوار */
+    public function isReviewer(): bool
+    {
+        return $this->role === self::REVIEWER;
     }
 }

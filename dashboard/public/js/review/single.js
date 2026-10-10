@@ -1289,7 +1289,8 @@
             const why = bucket === 'not_found' ? R.noPickReason(item) : null;
             const box = alertBox(bucket === 'failed' ? 'danger' : 'info', bucket === 'failed' ? 'عطل:' : 'ما انلقت:', why ? why.text : info.text, [
                 el('span', { className: 'rv-alert__more', text: 'إعادة المحاولة بترجّعه للطابور، وبينبحث عنه بالتشغيل الجاي.' }),
-                p.has_error ? el('button', { type: 'button', className: 'lq-btn lq-btn--secondary lq-btn--sm rv-retry', text: 'إعادة المحاولة',
+                // urls.retry فاضي للمراجع (ReviewController::page): «رجّع للطابور» للمدير بس
+                p.has_error && S.urls.retry ? el('button', { type: 'button', className: 'lq-btn lq-btn--secondary lq-btn--sm rv-retry', text: 'إعادة المحاولة',
                                              onclick: () => retryFailures([item]) }) : null,
                 info.detail ? el('details', { className: 'rv-details' }, [el('summary', { text: 'التفاصيل التقنية' }), el('code', { dir: 'ltr', text: info.detail })]) : null
             ]);

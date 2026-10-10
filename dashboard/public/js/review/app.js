@@ -833,7 +833,7 @@
         }
         if (['failed', 'not_found'].includes(S.filter) && S.load.state === 'ready') {
             const failing = visibleItems().filter(it => it.product.has_error && !it.orphan && !S.local.get(it.key));
-            if (failing.length > 1) {
+            if (failing.length > 1 && S.urls.retry) {
                 d.queueNote.appendChild(el('div', { className: 'rv-retry-all' }, [
                     el('span', { text: 'إعادة المحاولة بترجّعها للطابور، وما بتبلش معالجتها لحالها.' }),
                     el('button', { type: 'button', className: 'lq-btn lq-btn--secondary lq-btn--sm',
@@ -903,7 +903,7 @@
         if (notFound.length) parts.push(`${notFound.length} ما انلقت`);
         const retryable = notFound.filter(it => it.product.has_error);
         const actions = [];
-        if (retryable.length) {
+        if (retryable.length && S.urls.retry) {
             actions.push(el('button', { type: 'button', className: 'lq-btn lq-btn--primary', id: 'rvRetryNotFound',
                                         text: `رجّع اللي ما انلقت للطابور (${retryable.length})`,
                                         onclick: () => R.single.retryFailures(retryable) }));
@@ -911,8 +911,10 @@
             actions.push(el('button', { type: 'button', className: 'lq-btn lq-btn--secondary', text: `شوف اللي ما انلقت (${notFound.length})`,
                                         onclick: () => setFilter('not_found') }));
         }
-        actions.push(el('a', { className: 'lq-btn lq-btn--secondary', href: `${S.urls.run}#run-brands`, text: 'صلّح الماركات الناقصة' }));
-        actions.push(el('a', { className: 'lq-btn lq-btn--secondary', href: S.urls.run, text: 'تشغيل جديد' }));
+        if (S.urls.run) {        // فاضي للمراجع: صفحة التشغيل للمدير بس
+            actions.push(el('a', { className: 'lq-btn lq-btn--secondary', href: `${S.urls.run}#run-brands`, text: 'صلّح الماركات الناقصة' }));
+            actions.push(el('a', { className: 'lq-btn lq-btn--secondary', href: S.urls.run, text: 'تشغيل جديد' }));
+        }
         return el('div', { className: 'lq-empty rv-empty rv-done', id: 'rvDone' }, [
             el('span', { className: 'lq-empty__icon rv-done__icon' }, [icon('check', 24, 2.2)]),
             el('h2', { className: 'lq-empty__title', text: 'خلصت المراجعة' }),
