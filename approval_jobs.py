@@ -71,7 +71,11 @@ def ensure_schema():
         return True
     conn = db_connect.connect(dict_cursor=False)
     try:
-        conn.cursor().execute(_SCHEMA)
+        cur = conn.cursor()
+        cur.execute(_SCHEMA)
+        # «تجاهل» اعتماد فشل (لوحة «اعتمادات ما زبطت» بصفحة المراجعة، ApiController::dismissApprovalJob). جدول الخادم
+        # الموجود من قبل بياخد العمود هون (MariaDB 10.4+: IF NOT EXISTS)
+        cur.execute("ALTER TABLE approval_jobs ADD COLUMN IF NOT EXISTS dismissed_at TIMESTAMP NULL")
         conn.commit()
     finally:
         conn.close()

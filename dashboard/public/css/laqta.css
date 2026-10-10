@@ -452,6 +452,31 @@ html:has(.lq-body) {
     color: var(--lq-warning-dot);
 }
 
+.lq-runcard__approvals-link {
+    color: inherit;
+    font-weight: 600;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+}
+
+/* Session expired (401 / 419): one banner on top of the page, stays until the reviewer signs in again */
+.lq-session-expired {
+    position: sticky;
+    top: 0;
+    z-index: 60;
+    margin: var(--lq-space-3);
+}
+
+.lq-session-expired__pending {
+    margin-top: 2px;
+    font-size: 13px;
+    font-weight: 400;
+}
+
+.lq-session-expired__name {
+    font-weight: 600;
+}
+
 /* Signed-in user + sign-out (sidebar foot) */
 .lq-sidebar__user {
     display: flex;

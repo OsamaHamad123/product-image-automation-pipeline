@@ -293,13 +293,59 @@
                 card.appendChild(line);
             }
             var active = toCount(a.queued) + toCount(a.running);
-            var failed = toCount(a.failed_recent);
-            var parts = [];
-            if (active) parts.push(active === 1 ? 'اعتماد واحد عم يشتغل عالخادم' : active + ' اعتمادات عم تشتغل عالخادم');
-            if (failed) parts.push(failed === 1 ? 'اعتماد فشل' : failed + ' اعتمادات فشلت');
-            line.textContent = parts.join(' · ');
+            // failed_open: فشلت بآخر 24 ساعة وما انتجاهلت (لوحة «اعتمادات ما زبطت» بصفحة المراجعة)؛ خادم أقدم: failed_recent
+            var failed = toCount(a.failed_open !== undefined ? a.failed_open : a.failed_recent);
+            line.textContent = '';
+            if (active) {
+                line.appendChild(document.createTextNode(active === 1 ? 'اعتماد واحد عم يشتغل عالخادم' : active + ' اعتمادات عم تشتغل عالخادم'));
+            }
+            if (failed) {
+                if (active) line.appendChild(document.createTextNode(' · '));
+                // رابط لصفحة المراجعة: هناك الأسماء والسبب و«افتح المنتج» و«تجاهل»
+                var link = document.createElement('a');
+                link.className = 'lq-runcard__approvals-link';
+                link.href = document.body.getAttribute('data-lq-review-url') || '/catalog';
+                link.textContent = failed === 1 ? 'اعتماد ما زبط: شوفه' : failed + ' اعتمادات ما زبطت: شوفها';
+                line.appendChild(link);
+            }
             line.classList.toggle('has-failures', failed > 0);
-            setHidden(line, !parts.length);
+            setHidden(line, !(active || failed));
+        }
+
+        // انتهت الجلسة (401 من RequireLogin أو 419 CSRF): لافتة وحدة ثابتة فوق الصفحة بدل ما يفشل كل شي بصمت، والسؤال
+        // كل 5 ثواني بيوقف. صفحة المراجعة (review/ui.js showSessionBanner) بتعمل نفس اللافتة (#lqSessionExpired) وبتزيد
+        // عليها المنتجات اللي ما انبعتت. الرابط للصفحة نفسها: RequireLogin بيحوّل للدخول وبيرجع لهون بعده
+        var sessionExpired = false;
+        function showSessionExpired() {
+            sessionExpired = true;
+            clearTimeout(timer);
+            if (document.getElementById('lqSessionExpired')) return;
+            var box = document.createElement('div');
+            box.className = 'lq-alert lq-alert--danger lq-alert--banner lq-session-expired';
+            box.id = 'lqSessionExpired';
+            box.setAttribute('role', 'alert');
+            var icon = svgIcon(TOAST_ICONS.danger, 20);
+            icon.setAttribute('class', 'lq-alert__icon');
+            var body = document.createElement('div');
+            body.className = 'lq-alert__body';
+            var title = document.createElement('div');
+            title.className = 'lq-alert__title';
+            title.textContent = 'انتهت الجلسة. سجّل دخول من جديد لتكمّل';
+            var pending = document.createElement('div');
+            pending.className = 'lq-session-expired__pending';
+            pending.setAttribute('data-lq-session-pending', '');
+            pending.hidden = true;
+            body.appendChild(title);
+            body.appendChild(pending);
+            var link = document.createElement('a');
+            link.className = 'lq-alert__action';
+            link.href = window.location.pathname + window.location.search;
+            link.textContent = 'سجّل دخول';
+            box.appendChild(icon);
+            box.appendChild(body);
+            box.appendChild(link);
+            var host = document.getElementById('lq-main') || document.body;
+            host.insertBefore(box, host.firstChild);
         }
 
         function renderReviewCount(count) {
@@ -376,15 +422,19 @@
         }
 
         function poll() {
-            if (document.hidden || inFlight) return;
+            if (document.hidden || inFlight || sessionExpired) return;
             inFlight = true;
             fetch(statusUrl(), { headers: { Accept: 'application/json' }, cache: 'no-store', credentials: 'same-origin' })
                 .then(function (res) {
+                    if (res.status === 401 || res.status === 419) showSessionExpired();
                     if (!res.ok) throw new Error('HTTP ' + res.status);
                     return res.json();
                 })
                 .then(function (data) {
-                    publish(normalizeRunStatus(data));
+                    var n = normalizeRunStatus(data);
+                    // صفحة المراجعة بتقرا «اعتمادات ما زبطت» من جديد لما يتغيّر العدّاد
+                    n.approvals = isObject(data && data.approvals) ? data.approvals : null;
+                    publish(n);
                     renderApprovals(data && data.approvals);
                 })
                 .catch(function () {
@@ -392,7 +442,7 @@
                 })
                 .then(function () {
                     inFlight = false;
-                    schedule(POLL_MS);
+                    if (!sessionExpired) schedule(POLL_MS);
                 });
         }
 
@@ -559,6 +609,15 @@
             describeRunStatus: describeRunStatus,
             plainNotice: plainNotice,
             refreshRunStatus: function () { schedule(0); },
+            sessionExpired: showSessionExpired,
+            // صفحة المراجعة لقت طلب نجح بعد ما انتهت الجلسة (دخول من تبويب ثاني): الشريط الجانبي بيرجع يسأل
+            sessionRestored: function () {
+                if (!sessionExpired) return;
+                sessionExpired = false;
+                var box = document.getElementById('lqSessionExpired');
+                if (box && box.parentNode) box.parentNode.removeChild(box);
+                schedule(0);
+            },
             lastRunStatus: function () { return lastStatus; },
             onRunStatus: function (fn) {
                 document.addEventListener('lq:run-status', function (e) { fn(e.detail); });

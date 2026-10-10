@@ -162,7 +162,91 @@
             data = { status: 'error', error: `HTTP ${res.status}` };
         }
         if (!data || typeof data !== 'object' || Array.isArray(data)) data = { status: 'error', error: `HTTP ${res.status}` };
+        // 401 (RequireLogin) أو 419 (CSRF): الجلسة انتهت. لافتة وحدة ثابتة، والحلقات اللي بتسأل بالخلفية بتوقف أو بتهدّي
+        if (res.status === 401 || res.status === 419) {
+            markSessionExpired();
+            return { ok: false, status: res.status, data: data, expired: true };
+        }
+        if (res.ok && session.expired) markSessionRestored();
         return { ok: res.ok, status: res.status, data: data };
+    }
+
+    // -------------------------------------------------------------------------------------------------
+    // انتهت الجلسة: لافتة وحدة (#lqSessionExpired، نفسها اللي بيعملها الشريط الجانبي بـ layouts/laqta.blade.php لما
+    // يلاقي 401 بسؤاله) فوق الصفحة، فيها رابط الدخول والمنتجات اللي ما انبعتت لتنعاد بعده
+    // -------------------------------------------------------------------------------------------------
+
+    const session = { expired: false, listeners: [] };
+
+    function sessionExpired() {
+        return session.expired;
+    }
+
+    function onSessionExpired(fn) {
+        if (typeof fn === 'function') session.listeners.push(fn);
+    }
+
+    function markSessionExpired() {
+        session.expired = true;
+        showSessionBanner();
+        // الشريط الجانبي (layouts/laqta.blade.php) بيوقف سؤاله كل 5 ثواني
+        if (root.Laqta && typeof root.Laqta.sessionExpired === 'function') {
+            try { root.Laqta.sessionExpired(); } catch (e) { /* the layout's own banner is optional here */ }
+        }
+        session.listeners.forEach(fn => {
+            try { fn(); } catch (err) { if (root.console) root.console.error(err); }
+        });
+    }
+
+    // طلب نجح بعد ما انتهت الجلسة: المراجع دخل من تبويب ثاني. اللافتة بتروح والسؤال بالخلفية بيرجع لطبيعته
+    function markSessionRestored() {
+        session.expired = false;
+        const box = document.getElementById('lqSessionExpired');
+        if (box && box.parentNode) box.parentNode.removeChild(box);
+        if (root.Laqta && typeof root.Laqta.sessionRestored === 'function') {
+            try { root.Laqta.sessionRestored(); } catch (e) { /* optional */ }
+        }
+    }
+
+    // الدخول من رابط الصفحة نفسها: RequireLogin بيحوّل لصفحة الدخول وبيتذكّرها (intended)، فبعد الدخول بيرجع لهون
+    function loginHref() {
+        const loc = root.location || {};
+        return loc.pathname ? loc.pathname + (loc.search || '') : '/login';
+    }
+
+    // pending: أسماء منتجات ما انبعت اعتمادها (أو فشل) بهالصفحة، لتنعاد بعد الدخول
+    function showSessionBanner(pending) {
+        let box = document.getElementById('lqSessionExpired');
+        if (!box) {
+            box = el('div', { className: 'lq-alert lq-alert--danger lq-alert--banner lq-session-expired', id: 'lqSessionExpired',
+                              role: 'alert' }, [
+                icon('alert', 20, 2, 'lq-alert__icon'),
+                el('div', { className: 'lq-alert__body' }, [
+                    el('div', { className: 'lq-alert__title', text: 'انتهت الجلسة. سجّل دخول من جديد لتكمّل' }),
+                    el('div', { className: 'lq-session-expired__pending', 'data-lq-session-pending': '', hidden: true })
+                ]),
+                el('a', { className: 'lq-alert__action', href: loginHref(), text: 'سجّل دخول' })
+            ]);
+            const host = document.getElementById('lq-main') || document.body;
+            host.insertBefore(box, host.firstChild || null);
+        }
+        if (Array.isArray(pending)) {
+            const line = box.querySelector('[data-lq-session-pending]');
+            if (line) {
+                const names = Array.from(new Set(pending.map(n => String(n || '').trim()).filter(Boolean)));
+                clear(line);
+                if (names.length) {
+                    line.appendChild(el('span', { text: names.length === 1 ? 'هالمنتج ما انعتمد، اعتمده من جديد بعد الدخول: '
+                        : `هدول ${names.length} منتجات ما انعتمدوا، اعتمدهم من جديد بعد الدخول: ` }));
+                    names.forEach((n, i) => {
+                        if (i) line.appendChild(document.createTextNode('، '));
+                        line.appendChild(bdi(n, 'lq-session-expired__name'));
+                    });
+                }
+                line.hidden = !names.length;
+            }
+        }
+        return box;
     }
 
     function toast(message, variant, timeout) {
@@ -179,5 +263,6 @@
         return el('span', { className: `rv-lane rv-lane--${lane}`, dataset: { lane: lane }, title: R.LANE_TITLE[lane], text: R.LANE_TEXT[lane] });
     }
 
-    Object.assign(R, { ICONS, icon, el, bdi, clear, safeHttpUrl, imageUrl, img, csrfToken, requestJson, toast, laneBadge });
+    Object.assign(R, { ICONS, icon, el, bdi, clear, safeHttpUrl, imageUrl, img, csrfToken, requestJson, toast, laneBadge,
+                       sessionExpired, onSessionExpired, showSessionBanner });
 })(typeof window !== 'undefined' ? window : globalThis);
