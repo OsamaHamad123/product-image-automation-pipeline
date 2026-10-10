@@ -39,6 +39,10 @@
     const STACK_PX = 980;
     // آخر وضع اختاره المراجع بزر «منتج واحد | بالجملة» (localStorage، لهالمتصفح بس)
     const MODE_STORE = 'laqta.review.mode';
+    // الشاشة اللي تحتها شريط الأزرار سطر واحد و«تخطي» و«ما لقيت الصورة الصحيحة؟» بقائمة «⋯» (review.css @media (max-width: 560px))
+    const PHONE_PX = 560;
+    // القائمة مفتوحة أو مسكّرة على الموبايل (sessionStorage: لهالجلسة بس). أول مرة: مسكّرة، والمنتج هو اللي بيبيّن
+    const LIST_OPEN_STORE = 'laqta.review.listOpen';
     // طلبات الاعتماد اللي بتنبعت سوا: الخادم بيقفل كل منتج لحاله وقت الكتابة بالشيت (local_cache_db.sku_publish_lock)
     // وكل كتابة بالشيت بتتأكد من هوية صفها، فاعتمادين لمنتجين مختلفين ما بيتداخلوا
     const APPROVE_CONCURRENCY = 2;
@@ -150,14 +154,18 @@
                                    text: '⋯' });
         d.moreSkip = el('button', { type: 'button', className: 'rv-menu__item', role: 'menuitem', text: 'تخطي هالمنتج' });
         d.moreNf = el('button', { type: 'button', className: 'rv-menu__item', role: 'menuitem', text: 'ما لقيت الصورة الصحيحة؟' });
-        d.moreMenu = el('div', { className: 'rv-menu', id: 'rvMoreMenu', role: 'menu', hidden: true }, [d.moreSkip, d.moreNf]);
+        // «فحص القص» (للمدير بس: S.urls.cutoutCheck فاضي للمراجع): الصور المنشورة على الغامق والفاتح والمربعات
+        // (RecutController). بالقائمة بدل رأس القائمة، وعلى الشاشة العريضة هو سبب ظهور «⋯»
+        d.moreCutout = S.urls.cutoutCheck ? el('a', { className: 'rv-menu__item rv-menu__item--link', role: 'menuitem', href: S.urls.cutoutCheck,
+                                                      text: 'فحص القص: الصور المنشورة على الغامق والفاتح' }) : null;
+        d.moreMenu = el('div', { className: 'rv-menu', id: 'rvMoreMenu', role: 'menu', hidden: true }, [d.moreSkip, d.moreNf, d.moreCutout]);
         d.nextName = bdi('', 'rv-next__name');
         d.nextHint = el('span', { className: 'rv-next__hint rv-keyhint', text: 'بعد الاعتماد بننتقل تلقائياً للمنتج التالي' });
         d.bar = el('div', { className: 'lq-actionbar rv-actionbar', id: 'rvActionbar' }, [
             d.reasons,
             el('div', { className: 'rv-actionbar__row' }, [
                 d.approveBtn, d.approveNote, d.rejectBtn, d.skipBtn, d.nfBtn,
-                el('span', { className: 'rv-more__wrap' }, [d.moreBtn, d.moreMenu]),
+                el('span', { className: 'rv-more__wrap' + (d.moreCutout ? ' has-extra' : '') }, [d.moreBtn, d.moreMenu]),
                 el('span', { className: 'lq-actionbar__aside rv-next' }, [d.nextHint, d.nextName])
             ])
         ]);
@@ -174,25 +182,35 @@
         d.list = el('ul', { className: 'rv-list', id: 'rvList', 'aria-label': 'المنتجات' });
         // «اعتمادات ما زبطت» (renderFailed): فاضية ومخفية لحد ما يكون في شي
         d.failed = el('section', { className: 'rv-failed', id: 'rvFailed', role: 'region', 'aria-label': 'اعتمادات ما زبطت', hidden: true });
-        d.queue = el('aside', { className: 'rv-queue', 'aria-label': 'قائمة المراجعة' }, [
-            el('div', { className: 'rv-queue__head' }, [
-                el('div', { className: 'rv-queue__title' }, [
-                    el('h1', { className: 'rv-queue__h1', text: 'قائمة المراجعة' }), d.waiting, d.refreshBtn, keysButton()
-                ]),
-                modeToggle('single'),
-                el('label', { className: 'lq-search rv-search' }, [icon('search', 18), el('span', { className: 'lq-sr-only', text: 'بحث بالقائمة' }), d.search]),
-                d.filters,
-                d.reasonChips,
-                d.queueNote,
-                // «فحص القص»: الصور المنشورة على الغامق والفاتح والمربعات (RecutController)
-                S.urls.cutoutCheck ? el('a', { className: 'lq-link', href: S.urls.cutoutCheck,
-                                               text: 'فحص القص: الصور المنشورة على الغامق والفاتح' }) : null
+        d.queueHead = el('div', { className: 'rv-queue__head' }, [
+            el('div', { className: 'rv-queue__title' }, [
+                el('h1', { className: 'rv-queue__h1', text: 'قائمة المراجعة' }), d.waiting, d.refreshBtn, keysButton()
             ]),
-            d.failed,
+            modeToggle('single'),
+            el('label', { className: 'lq-search rv-search' }, [icon('search', 18), el('span', { className: 'lq-sr-only', text: 'بحث بالقائمة' }), d.search]),
+            d.filters,
+            d.reasonChips,
+            d.queueNote
+        ]);
+        // على الموبايل القائمة تحت مساحة العمل، مسكّرة لحالها: «القائمة (N)» بيفتحها وبيسكّرها (عالشاشة العريضة مخفي)
+        d.listCount = el('span', { className: 'rv-listtoggle__count', text: '' });
+        d.listToggle = el('button', { type: 'button', className: 'rv-listtoggle', id: 'rvListToggle',
+                                      'aria-expanded': 'false', 'aria-controls': 'rvListBox' },
+                          [el('span', { text: 'القائمة ' }), d.listCount, icon('chevron-down', 18, 2, 'rv-listtoggle__icon')]);
+        d.listBox = el('div', { className: 'rv-queue__listbox', id: 'rvListBox' }, [
             d.list,
             el('div', { className: 'rv-queue__foot rv-keyhint' }, [el('span', { text: '↑ ↓ للتنقل بين المنتجات · Z لتكبير الصورة · ? للاختصارات' })])
         ]);
-        d.single = el('div', { className: 'rv-single' }, [d.ws, d.queue]);
+        d.queue = el('aside', { className: 'rv-queue', 'aria-label': 'قائمة المراجعة' }, [
+            d.queueHead,
+            d.failed,
+            d.listToggle,
+            d.listBox
+        ]);
+        // الموبايل (≤ 980px): رأس القائمة (العنوان والعدد والوضع والبحث والرقاقات) بينتقل لهون، قبل مساحة العمل، فترتيب
+        // الصفحة وترتيب Tab وقارئ الشاشة واحد: الرأس، ثم المنتج، ثم القائمة (placeQueueHead)
+        d.headSlot = el('div', { className: 'rv-single__head', hidden: true });
+        d.single = el('div', { className: 'rv-single' }, [d.headSlot, d.ws, d.queue]);
 
         d.bulk = el('section', { className: 'rv-bulk', 'aria-label': 'المراجعة بالجملة', hidden: true });
         d.jobs = el('div', { className: 'rv-jobs', id: 'rvJobs', role: 'status', 'aria-live': 'polite', hidden: true });
@@ -214,7 +232,11 @@
             if (btn && !btn.disabled) {
                 R.single.openItem(btn.getAttribute('data-key'), { from: 'list' });
                 // بالماوس (detail 0 = Enter أو مسافة على الصف نفسه): التركيز لمساحة العمل، فـ Enter بعدها يعني «اعتماد»
-                if (e.detail !== 0) focusWorkspace();
+                if (e.detail !== 0) {
+                    focusWorkspace();
+                    // الموبايل: القائمة تحت المنتج، فبنطلع لفوق لنشوف المنتج اللي انفتح
+                    if (listStacked()) R.scrollIntoView(d.ws, { block: 'start', behavior: 'smooth' });
+                }
             }
             const more = e.target && e.target.closest ? e.target.closest('[data-more]') : null;
             if (more) {
@@ -239,6 +261,17 @@
                 renderList();
             }, 120);
         });
+        // الموبايل: بحث بالقائمة المسكّرة بيفتحها، وEnter بالبحث بينزل لنتايجه
+        d.search.addEventListener('input', () => {
+            if (listStacked() && d.search.value.trim()) setListOpen(true);
+        });
+        d.search.addEventListener('keydown', e => {
+            if (!e || e.key !== 'Enter' || !listStacked()) return;
+            e.preventDefault();
+            setListOpen(true);
+            R.scrollIntoView(d.listToggle, { block: 'start', behavior: 'smooth' });
+        });
+        d.listToggle.addEventListener('click', () => setListOpen(!S.listOpen, { remember: true }));
         d.refreshBtn.addEventListener('click', () => loadData({ refresh: true }));
         d.approveBtn.addEventListener('click', () => R.single.approveCurrent());
         d.rejectBtn.addEventListener('click', () => (S.reasonsOpen ? R.single.closeReasons() : R.single.openReasons()));
@@ -259,6 +292,92 @@
             if (t && t.closest && (t.closest('#rvMoreMenu') || t.closest('#rvMore'))) return;
             toggleMoreMenu(false);
         });
+        if (d.moreCutout) d.moreCutout.addEventListener('click', () => toggleMoreMenu(false));
+
+        S.listOpen = readListOpen();
+        setListOpen(S.listOpen);
+        placeQueueHead();
+        watchStack();
+    }
+
+    // -------------------------------------------------------------------------------------------------
+    // الموبايل (≤ 980px): رأس القائمة فوق مساحة العمل، والقائمة نفسها تحت المنتج بقسم «القائمة (N)» بينفتح وبيتسكّر،
+    // بارتفاع محدود وتمرير لحاله. عالشاشة العريضة ما بيتغيّر شي: الرأس والقائمة بالعمود الجانبي
+    // -------------------------------------------------------------------------------------------------
+
+    function readListOpen() {
+        try {
+            return !!(root.sessionStorage && root.sessionStorage.getItem(LIST_OPEN_STORE) === '1');
+        } catch (e) {
+            return false;      // تخزين ممنوع: مسكّرة، والزر بيضل شغّال لهالصفحة
+        }
+    }
+
+    // opts.remember: المراجع ضغط الزر بنفسه، فالحالة بتنحفظ لهالجلسة
+    function setListOpen(open, opts) {
+        const d = S.dom;
+        S.listOpen = !!open;
+        if (!d.listToggle) return;
+        // التركيز كان جوّا القائمة اللي رح تختفي: بيرجع للزر اللي بيفتحها، ما بيضيع عـ body
+        const lost = !S.listOpen && d.listBox && document.activeElement && d.listBox.contains(document.activeElement);
+        d.single.classList.toggle('is-list-closed', !S.listOpen);
+        d.listToggle.setAttribute('aria-expanded', S.listOpen ? 'true' : 'false');
+        if (lost && typeof d.listToggle.focus === 'function') d.listToggle.focus();
+        if (S.listOpen) markActive();
+        if (opts && opts.remember) {
+            try {
+                if (root.sessionStorage) root.sessionStorage.setItem(LIST_OPEN_STORE, S.listOpen ? '1' : '0');
+            } catch (e) {
+                // تخزين ممنوع: الحالة لهالصفحة بس
+            }
+        }
+    }
+    R.setListOpen = setListOpen;
+
+    // الرأس بمكانه حسب عرض الشاشة. التركيز اللي كان جوّاه (البحث مثلاً) بيضل عليه بعد النقل
+    function placeQueueHead() {
+        const d = S.dom;
+        if (!d.queueHead || !d.headSlot) return;
+        const stacked = listStacked();
+        const target = stacked ? d.headSlot : d.queue;
+        if (d.queueHead.parentNode === target) return;
+        const active = document.activeElement;
+        const keep = active && d.queueHead.contains(active) ? active : null;
+        if (stacked) d.headSlot.appendChild(d.queueHead);
+        else d.queue.insertBefore(d.queueHead, d.queue.firstChild);
+        d.headSlot.hidden = !stacked;
+        if (keep && typeof keep.focus === 'function') {
+            try {
+                keep.focus({ preventScroll: true });
+            } catch (e) {
+                keep.focus();
+            }
+        }
+    }
+    R.placeQueueHead = placeQueueHead;
+
+    function watchStack() {
+        let mq = null;
+        try {
+            mq = root.matchMedia ? root.matchMedia(`(max-width: ${STACK_PX}px)`) : null;
+        } catch (e) {
+            mq = null;
+        }
+        if (!mq) return;
+        const onChange = () => {
+            placeQueueHead();
+            markActive();
+        };
+        if (typeof mq.addEventListener === 'function') mq.addEventListener('change', onChange);
+        else if (typeof mq.addListener === 'function') mq.addListener(onChange);
+    }
+
+    function phoneBar() {
+        try {
+            return !!(root.matchMedia && root.matchMedia(`(max-width: ${PHONE_PX}px)`).matches);
+        } catch (e) {
+            return false;
+        }
     }
 
     function focusWorkspace() {
@@ -271,7 +390,7 @@
         }
     }
 
-    // قائمة «⋯» بشريط الموبايل: «تخطي» و«ما لقيت الصورة الصحيحة؟»
+    // قائمة «⋯» بشريط الموبايل: «تخطي» و«ما لقيت الصورة الصحيحة؟»، و«فحص القص» للمدير (بكل الشاشات)
     function toggleMoreMenu(open) {
         const d = S.dom;
         if (!d.moreMenu) return false;
@@ -280,11 +399,15 @@
         d.moreMenu.hidden = !want;
         d.moreBtn.setAttribute('aria-expanded', want ? 'true' : 'false');
         if (want) {
+            // عالشاشة الأعرض «تخطي» و«ما لقيت الصورة الصحيحة؟» ظاهرين بالشريط، فالقائمة فيها «فحص القص» بس
+            const wide = !phoneBar() && !!d.moreCutout;
+            d.moreSkip.hidden = wide;
+            d.moreNf.hidden = wide;
             d.moreSkip.disabled = !!d.skipBtn.disabled;
             d.moreNf.disabled = !!d.nfBtn.disabled;
             d.moreNf.textContent = d.nfBtn.getAttribute('aria-expanded') === 'true' ? 'سكّر «ما لقيت الصورة الصحيحة؟»'
                 : 'ما لقيت الصورة الصحيحة؟';
-            const first = [d.moreSkip, d.moreNf].find(b => !b.disabled);
+            const first = [d.moreSkip, d.moreNf, d.moreCutout].find(b => b && !b.hidden && !b.disabled);
             if (first && typeof first.focus === 'function') first.focus();
         } else if (typeof d.moreBtn.focus === 'function' && d.moreMenu.contains(document.activeElement)) {
             d.moreBtn.focus();
@@ -970,6 +1093,8 @@
         d.waiting.textContent = loading ? 'لحظة…' : (unread ? '—'
             : `${c.waiting} بانتظار المراجعة${queueKnown ? '' : ' (تقدير)'}`);
         d.refreshBtn.disabled = loading || S.load.state === 'reloading';
+        // «القائمة (N)» على الموبايل: قديش منتج بالقائمة بالفلتر والبحث هلق
+        if (d.listCount) d.listCount.textContent = loading ? '(…)' : unread ? '(—)' : `(${visibleItems().length})`;
 
         clear(d.filters);
         R.FILTERS.forEach(f => {
@@ -1146,19 +1271,31 @@
         const d = S.dom;
         if (!d.list) return;
         // القائمة مكدّسة تحت مساحة العمل: scrollIntoView كان يمرّر الصفحة كلها لتحت (الصفحة تفتح على القائمة مش المنتج)
-        const scroll = !listStacked();
+        const stacked = listStacked();
         d.list.querySelectorAll('.rv-item').forEach(node => {
             const on = node.getAttribute('data-key') === S.openKey;
             node.classList.toggle('is-active', on);
             if (on) {
                 node.setAttribute('aria-current', 'true');
-                if (scroll) R.scrollIntoView(node, { block: 'nearest' });
+                if (!stacked) R.scrollIntoView(node, { block: 'nearest' });
+                else if (S.listOpen) scrollListTo(node);
             } else {
                 node.removeAttribute('aria-current');
             }
         });
     }
     R.markActive = markActive;
+
+    // الموبايل: القائمة إلها تمرير لحالها (ارتفاع محدود)، فالصف المفتوح بينجاب لنصها بتمريرها هي بس، والصفحة ما بتتحرك
+    // (.rv-list position: relative، فـ offsetTop من راس القائمة)
+    function scrollListTo(node) {
+        const box = S.dom.list;
+        const top = node ? Number(node.offsetTop) : NaN;
+        const h = node ? Number(node.offsetHeight) : NaN;
+        if (!box || !isFinite(top) || !isFinite(h) || !(box.scrollHeight > box.clientHeight)) return;
+        if (top >= box.scrollTop && top + h <= box.scrollTop + box.clientHeight) return;
+        box.scrollTop = Math.max(0, top - (box.clientHeight - h) / 2);
+    }
 
     // جملة لقارئ الشاشة بالمنطقة المؤدبة (rvAnnounce): بتتفضّى قبل، فنفس الجملة مرتين (رجعت لنفس المنتج) بتنحكى كمان
     function announce(text) {
@@ -1473,6 +1610,7 @@
         });
         R.single.closeReasons();
         toggleMoreMenu(false);
+        if (R.bulk.toggleMenu) R.bulk.toggleMenu(false);
         // وضع الجملة بيعرض المنتظرة بس
         if (mode === 'bulk' && !filterOf(S.filter).waiting) {
             S.filter = 'all';
@@ -1931,6 +2069,7 @@
             || tag === 'textarea' || tag === 'select' || !!(active && active.isContentEditable);
         if (key === 'Escape') {
             if (toggleMoreMenu(false)) return;
+            if (R.bulk.toggleMenu && R.bulk.toggleMenu(false)) return;
             if (R.bulk.closeDialog()) return;
             if (S.reasonsOpen) {
                 // التركيز كان بأسباب الرفض: بيرجع لزر «رفض» اللي فتحها

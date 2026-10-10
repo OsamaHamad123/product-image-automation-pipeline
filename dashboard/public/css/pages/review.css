@@ -97,7 +97,7 @@
 
 .rv-details {
     margin-top: 6px;
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
 }
 
 .rv-details summary {
@@ -110,7 +110,7 @@
     display: block;
     margin-top: 4px;
     font-family: var(--lq-font-mono);
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
     white-space: pre-wrap;
     overflow-wrap: anywhere;
     text-align: left;
@@ -130,7 +130,7 @@
 
 .rv-alert__more {
     flex-basis: 100%;
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
     opacity: 0.9;
 }
 
@@ -202,15 +202,33 @@
 
 .rv-queue__title {
     display: flex;
+    flex-wrap: wrap;
     align-items: baseline;
     gap: var(--lq-space-2);
+}
+
+/* the list and its keys line (app.js d.listBox): the part of the column that scrolls, and that folds on a phone */
+.rv-queue__listbox {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
+/* «القائمة (N)»: opens and closes the list on a phone (≤ 980px); nothing on a wider screen */
+.rv-listtoggle {
+    display: none;
+}
+
+.rv-single__head[hidden] {
+    display: none;
 }
 
 .lq-body .rv-queue__h1,
 .rv-queue__h1 {
     margin: 0;
     font-family: var(--lq-font-display);
-    font-size: var(--lq-fs-xl);
+    font-size: var(--lq-fs-2xl);
     font-weight: 600;
     line-height: 1.3;
 }
@@ -218,7 +236,7 @@
 .rv-queue__count {
     margin-inline-start: auto;
     color: var(--lq-text-2);
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
     white-space: nowrap;
 }
 
@@ -261,7 +279,7 @@
     border-radius: var(--lq-radius-lg);
     background: var(--lq-warning-bg);
     color: var(--lq-warning-ink);
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
 }
 
 .rv-failed[hidden] {
@@ -330,7 +348,7 @@
 
 .rv-note {
     padding: 8px 10px;
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
 }
 
 .rv-retry-all {
@@ -339,7 +357,7 @@
     align-items: center;
     gap: 8px;
     color: var(--lq-text-2);
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
     line-height: 1.6;
 }
 
@@ -365,7 +383,7 @@
 .rv-list__empty {
     margin: 0;
     color: var(--lq-text-2);
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
     text-align: center;
 }
 
@@ -431,7 +449,7 @@
 
 .rv-thumb .rv-img-missing {
     padding: 0;
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
     line-height: 1.2;
 }
 
@@ -446,7 +464,7 @@
 .rv-item__name {
     display: -webkit-box;
     overflow: hidden;
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
     font-weight: 600;
     line-height: 1.35;
     text-align: right;
@@ -462,7 +480,7 @@
     align-items: center;
     gap: var(--lq-space-2);
     color: var(--lq-text-2);
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
 }
 
 .rv-item__dot {
@@ -477,7 +495,7 @@
     padding: var(--lq-space-3) 18px;
     border-block-start: 1px solid var(--lq-border);
     color: var(--lq-text-2);
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
 }
 
 .lq-body .rv-queue__bulk,
@@ -521,14 +539,14 @@
 .rv-product__pos {
     margin-inline-start: auto;
     color: var(--lq-text-3);
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
 }
 
 .lq-body .rv-product__name,
 .rv-product__name {
     margin: 0;
     font-family: var(--lq-font-display);
-    font-size: 22px;
+    font-size: var(--lq-fs-xl);
     font-weight: 600;
     line-height: 1.3;
     overflow-wrap: anywhere;
@@ -613,7 +631,7 @@
     gap: 4px;
     border: 1.5px dashed var(--lq-border-strong);
     color: var(--lq-text-3);
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
     text-align: center;
 }
 
@@ -673,7 +691,7 @@
     border-radius: var(--lq-radius-pill);
     background: var(--lq-teal-soft);
     color: var(--lq-teal-700);
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
     font-weight: 600;
     white-space: nowrap;
 }
@@ -685,7 +703,7 @@
 
 .rv-pick__store {
     color: var(--lq-text-2);
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
 }
 
 .lq-body .rv-pick__source,
@@ -737,13 +755,13 @@
     gap: 10px;
     background: rgba(255, 255, 255, 0.72);
     color: var(--lq-teal-800);
-    font-size: 14px;
+    font-size: var(--lq-fs-md);
     font-weight: 600;
 }
 
 .rv-pick__title {
     color: var(--lq-text-2);
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
     text-align: right;
     overflow-wrap: anywhere;
 }
@@ -755,14 +773,14 @@
     gap: 6px;
     max-width: 320px;
     color: var(--lq-text-2);
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
     line-height: 1.6;
     text-align: center;
 }
 
 .rv-pick__none strong {
     color: var(--lq-text);
-    font-size: 14px;
+    font-size: var(--lq-fs-md);
 }
 
 .rv-preview {
@@ -823,7 +841,7 @@
     align-items: center;
     gap: 5px;
     color: var(--lq-text-2);
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
 }
 
 .rv-checks__cols {
@@ -832,7 +850,7 @@
     gap: 10px;
     padding-block-end: 2px;
     color: var(--lq-text-3);
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
 }
 
 .rv-caution {
@@ -879,7 +897,7 @@
 
 .rv-alts__hint {
     color: var(--lq-text-3);
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
 }
 
 .rv-alts__grid {
@@ -919,7 +937,7 @@
 /* «صورة ثانية من معرض صفحة المتجر» (X0: الصورة الرئيسية للصفحة غلط) */
 .rv-gallery {
     color: var(--lq-text-3);
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
 }
 
 /* «الباركود من صفحة المتجر: …» مع زر نسخ */
@@ -928,7 +946,7 @@
     flex-wrap: wrap;
     align-items: center;
     gap: var(--lq-space-2);
-    font-size: 0.875rem;
+    font-size: var(--lq-fs-md);
     color: var(--lq-text-2);
 }
 
@@ -1015,12 +1033,12 @@
     border-radius: 6px;
     background: var(--lq-ink-900);
     color: #FFFFFF;
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
     font-weight: 600;
 }
 
 .rv-alt__store {
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
     font-weight: 500;
     overflow-wrap: anywhere;
 }
@@ -1071,7 +1089,7 @@
 /* the reason of a product without a pick in the review list (two words; the sentence is in the workspace) */
 .rv-item__why {
     color: var(--lq-warning-ink);
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
     line-height: 1.4;
     text-align: start;
 }
@@ -1092,12 +1110,12 @@
 
 .rv-reasons-filter__label {
     color: var(--lq-text-2);
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
 }
 
 .lq-body .rv-reason-chip,
 .rv-reason-chip {
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
 }
 
 /* «لماذا هذه الصورة؟»: small evidence chips under the pick, each alternative and each bulk card */
@@ -1133,7 +1151,7 @@
 
 .rv-explain--compact .rv-explain__chip {
     padding: 1px 6px;
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
 }
 
 /* "ما لقيت الصورة الصحيحة؟" */
@@ -1174,11 +1192,7 @@
 .rv-nf__input {
     flex-grow: 1;
     min-width: 0;
-    height: 40px;
-}
-
-.rv-nf__row .lq-btn {
-    height: 40px;
+    height: 44px;            /* the standard .lq-btn height, like the row's buttons */
 }
 
 .lq-body .rv-drop,
@@ -1187,13 +1201,13 @@
     align-items: center;
     justify-content: center;
     gap: 8px;
-    height: 40px;
+    height: 44px;
     border: 1.5px dashed var(--lq-border-strong);
     border-radius: var(--lq-radius-md);
     background: var(--lq-surface-2);
     color: var(--lq-text);
     font: inherit;
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
     cursor: pointer;
 }
 
@@ -1205,7 +1219,7 @@
 .rv-nf__hint {
     margin: 0;
     color: var(--lq-text-3);
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
 }
 
 /* Waiting, final and empty states */
@@ -1226,12 +1240,12 @@
     flex-direction: column;
     gap: 4px;
     color: var(--lq-text-2);
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
 }
 
 .rv-wait__text strong {
     color: var(--lq-text);
-    font-size: 15px;
+    font-size: var(--lq-fs-base);
 }
 
 .rv-wait__text .lq-btn {
@@ -1295,7 +1309,7 @@
     background: transparent;
     color: var(--lq-text-2);
     font: inherit;
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
     cursor: pointer;
 }
 
@@ -1311,7 +1325,7 @@
     gap: 10px;
     justify-content: center;
     color: var(--lq-text-2);
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
     line-height: 1.7;
 }
 
@@ -1389,7 +1403,7 @@
     height: 48px;
     max-width: 124px;
     padding-inline: 4px;
-    font-size: 14px;
+    font-size: var(--lq-fs-md);
     line-height: 1.3;
     white-space: normal;
 }
@@ -1426,7 +1440,7 @@
 .rv-reasons__q {
     margin-inline-end: 4px;
     color: var(--lq-text-2);
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
 }
 
 .lq-body .rv-reason,
@@ -1455,13 +1469,13 @@
 
 .rv-reasons__research {
     margin-inline-start: var(--lq-space-2);
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
 }
 
 .rv-reasons__note {
     flex-basis: 100%;
     color: var(--lq-text-3);
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
     line-height: 1.5;
 }
 
@@ -1505,7 +1519,7 @@
     background: var(--lq-ink-900);
     color: var(--lq-text-on-dark);
     box-shadow: var(--lq-shadow-toast);
-    font-size: 14px;
+    font-size: var(--lq-fs-md);
     line-height: 1.5;
 }
 
@@ -1543,7 +1557,7 @@
     border-radius: var(--lq-radius-lg);
     background: var(--lq-surface);
     box-shadow: var(--lq-shadow-toast);
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
     line-height: 1.6;
 }
 
@@ -1626,7 +1640,7 @@
 .rv-jobs__what {
     flex-grow: 1;
     min-width: 0;
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
 }
 
 .rv-jobs__name {
@@ -1736,14 +1750,14 @@
 .rv-bulk__h1 {
     margin: 0;
     font-family: var(--lq-font-display);
-    font-size: 24px;
+    font-size: var(--lq-fs-2xl);
     font-weight: 600;
     line-height: 1.3;
 }
 
 .rv-bulk__count {
     color: var(--lq-text-2);
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
 }
 
 .rv-bulk__modes {
@@ -1763,8 +1777,31 @@
     gap: 10px;
 }
 
-.rv-bulk__export {
+/* «⋯» after the chips: «تصدير سجل الصور (CSV)» (bulk.js toggleMenu), at the far end of the row */
+.rv-more__wrap.rv-bulk__menu {
+    display: block;
     margin-inline-start: auto;
+}
+
+.rv-bulk__menubtn {
+    font-size: var(--lq-fs-xl);
+    line-height: 1;
+}
+
+.rv-menu.rv-menu--down {
+    inset-block-start: calc(100% + 8px);
+    inset-block-end: auto;
+}
+
+.rv-menu__item--link {
+    display: flex;
+    align-items: center;
+    gap: var(--lq-space-2);
+    text-decoration: none;
+}
+
+.rv-bulk__export {
+    white-space: nowrap;
 }
 
 /* the lane of the engine's pick (R.laneBadge): «مؤكدة تماماً» green, «الملصق مش واضح» amber, nothing for the rest */
@@ -1802,7 +1839,7 @@
     border-radius: var(--lq-radius-md, 8px);
     background: var(--lq-neutral-bg);
     color: var(--lq-text-2);
-    font-size: var(--lq-fs-sm, 13px);
+    font-size: var(--lq-fs-sm);
     line-height: 1.7;
 }
 
@@ -1816,19 +1853,11 @@
     display: none;
 }
 
-/* the bulk keys, said once under the bar */
-.rv-bulk__keys {
-    margin: 0;
-    color: var(--lq-text-2);
-    font-size: var(--lq-fs-xs);
-    line-height: 1.8;
-}
-
 .rv-brand {
     display: inline-flex;
     align-items: center;
     gap: var(--lq-space-2);
-    height: 40px;
+    height: 36px;            /* .lq-btn--sm, like the chips and the «⋯» beside it */
     padding: 0 var(--lq-space-3);
     border: 1px solid var(--lq-border-strong);
     border-radius: var(--lq-radius-md);
@@ -1853,10 +1882,10 @@
 
 .lq-body .rv-filter--box,
 .rv-filter--box {
-    height: 40px;
+    height: 36px;
     padding: 0 14px;
     border-radius: var(--lq-radius-md);
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
 }
 
 .rv-bulkbar {
@@ -1892,7 +1921,7 @@
 
 .rv-bulkbar__note {
     color: #FCD34D;
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
 }
 
 .rv-bulkbar__note[hidden] {
@@ -2015,7 +2044,7 @@
     align-items: center;
     gap: 6px;
     color: var(--lq-text-3);
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
 }
 
 .rv-card__check {
@@ -2060,7 +2089,7 @@
     gap: 8px;
     background: rgba(255, 255, 255, 0.74);
     color: var(--lq-teal-800);
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
     font-weight: 600;
 }
 
@@ -2089,7 +2118,7 @@
 }
 
 .rv-card__name {
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
     font-weight: 600;
     line-height: 1.4;
     text-align: right;
@@ -2098,7 +2127,7 @@
 
 .rv-card__meta {
     color: var(--lq-text-2);
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
 }
 
 .rv-card__warn {
@@ -2109,7 +2138,7 @@
     border-radius: var(--lq-radius-sm);
     background: var(--lq-warning-bg);
     color: var(--lq-warning-ink);
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
     line-height: 1.5;
 }
 
@@ -2125,7 +2154,7 @@
     border-radius: var(--lq-radius-sm);
     background: var(--lq-info-bg);
     color: var(--lq-info-text);
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
     line-height: 1.55;
 }
 
@@ -2137,6 +2166,32 @@
     margin: 0;
     padding: 0;
     list-style: none;
+}
+
+/* «+N تفاصيل»: touch screens and phones only (below); with a mouse the card shows everything */
+.lq-body .rv-card__details,
+.rv-card__details {
+    display: none;
+    align-self: flex-start;
+    min-height: 44px;
+    color: var(--lq-teal-700);
+    font-size: var(--lq-fs-xs);
+    font-weight: 600;
+}
+
+/* touch and phones: the first warning only, the rest and «ليش هالصورة» behind «+N تفاصيل» (bulk.js toggleDetails).
+   The lightbox (a tap on the picture) still shows the picture large */
+@media (hover: none), (max-width: 560px) {
+    .rv-card:not(.is-details) .rv-card__warn--extra,
+    .rv-card:not(.is-details) .rv-explain {
+        display: none;
+    }
+
+    .lq-body .rv-card__details,
+    .rv-card__details {
+        display: inline-flex;
+        align-items: center;
+    }
 }
 
 /* the card the arrow keys moved to */
@@ -2174,7 +2229,7 @@
 }
 
 .rv-card__reopen {
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
 }
 
 /* single mode: the same banner's button */
@@ -2222,7 +2277,7 @@
 .rv-dialog__text {
     margin: 0;
     color: var(--lq-text-2);
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
     line-height: 1.7;
 }
 
@@ -2239,7 +2294,7 @@
     padding: 10px var(--lq-space-3);
     border: 1px solid var(--lq-border);
     border-radius: var(--lq-radius-md);
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
     cursor: pointer;
 }
 
@@ -2293,7 +2348,7 @@
 
 .rv-dialog__cap {
     color: var(--lq-text-2);
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
     line-height: 1.5;
     overflow-wrap: anywhere;
 }
@@ -2320,17 +2375,21 @@
     box-shadow: var(--lq-shadow-raised);
 }
 
-/* «⋯» (phones only): «تخطي» and «ما لقيت الصورة الصحيحة؟» */
+/* «⋯»: on a phone «تخطي» and «ما لقيت الصورة الصحيحة؟»; for an admin, on every screen, «فحص القص» (has-extra) */
 .rv-more__wrap {
     position: relative;
     display: none;
+}
+
+.rv-more__wrap.has-extra {
+    display: block;
 }
 
 .lq-body .rv-more,
 .rv-more {
     width: 48px;
     padding: 0;
-    font-size: 22px;
+    font-size: var(--lq-fs-xl);
     line-height: 1;
 }
 
@@ -2656,6 +2715,33 @@ body.rv-lb-open {
         min-height: 0;
     }
 
+    /* the page reads head → product → list, in the DOM too (app.js placeQueueHead moves the head here) */
+    .rv-single__head {
+        border-block-end: 1px solid var(--lq-border);
+        background: var(--lq-surface);
+    }
+
+    .rv-single__head .rv-queue__head {
+        gap: var(--lq-space-3);
+        padding: var(--lq-space-4) var(--lq-space-4) var(--lq-space-3);
+        border-block-end: 0;
+    }
+
+    /* the chips in one row that scrolls sideways (inside the row, never the page) */
+    .rv-single__head .rv-filters,
+    .rv-single__head .rv-reasons-filter {
+        flex-wrap: nowrap;
+        margin-inline: calc(var(--lq-space-4) * -1);
+        padding-inline: var(--lq-space-4);
+        overflow-x: auto;
+        scrollbar-width: none;
+    }
+
+    .rv-single__head .rv-filters > *,
+    .rv-single__head .rv-reasons-filter > * {
+        flex-shrink: 0;
+    }
+
     .rv-queue {
         position: static;
         width: auto;
@@ -2664,9 +2750,49 @@ body.rv-lb-open {
         border-block-start: 1px solid var(--lq-border);
     }
 
+    .lq-body .rv-listtoggle,
+    .rv-listtoggle {
+        display: flex;
+        align-items: center;
+        gap: var(--lq-space-2);
+        width: 100%;
+        min-height: 48px;
+        padding: 0 var(--lq-space-4);
+        border: 0;
+        background: transparent;
+        color: var(--lq-text);
+        font: inherit;
+        font-size: var(--lq-fs-base);
+        font-weight: 600;
+        text-align: start;
+        cursor: pointer;
+    }
+
+    .rv-listtoggle__count {
+        color: var(--lq-text-2);
+        font-weight: 400;
+    }
+
+    .rv-listtoggle__icon {
+        margin-inline-start: auto;
+        transition: transform 0.15s ease;
+    }
+
+    .rv-listtoggle[aria-expanded="true"] .rv-listtoggle__icon {
+        transform: rotate(180deg);
+    }
+
+    .rv-single.is-list-closed .rv-queue__listbox {
+        display: none;
+    }
+
+    /* its own scroll, capped, so the page never runs the whole list (app.js scrollListTo) */
     .rv-list {
-        max-height: none;
-        overflow: visible;
+        position: relative;
+        max-height: min(60vh, 520px);
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        border-block-start: 1px solid var(--lq-border);
     }
 
     .rv-ws__body {
@@ -2701,10 +2827,6 @@ body.rv-lb-open {
         padding: 0 var(--lq-space-4) var(--lq-space-6);
     }
 
-    .rv-bulk__export {
-        margin-inline-start: 0;
-    }
-
     .rv-nf__grid {
         grid-template-columns: minmax(0, 1fr);
     }
@@ -2729,7 +2851,7 @@ body.rv-lb-open {
 
     .lq-body .rv-product__name,
     .rv-product__name {
-        font-size: 18px;
+        font-size: var(--lq-fs-lg);
     }
 
     .rv-product__pos {
@@ -2772,7 +2894,7 @@ body.rv-lb-open {
     .rv-actionbar .lq-btn--lg {
         height: 48px;
         padding-inline: 14px;
-        font-size: 15px;
+        font-size: var(--lq-fs-base);
     }
 
     .rv-actionbar .rv-approve {
@@ -2883,8 +3005,36 @@ body.rv-lb-open {
         display: none;
     }
 
+    /* two cards a row (one under ~330px), a shorter picture: 48 cards were ~19,000px of scroll in one column */
     .rv-cards {
-        grid-template-columns: minmax(0, 1fr);
+        grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+        gap: var(--lq-space-2);
+        padding: var(--lq-space-3);
+    }
+
+    .rv-card__img,
+    .rv-card__skel {
+        height: 140px;
+    }
+
+    .rv-card__img {
+        padding: var(--lq-space-2);
+    }
+
+    .rv-card__body {
+        padding: var(--lq-space-2) 10px 10px;
+    }
+
+    .rv-card__actions {
+        flex-wrap: wrap;
+    }
+
+    /* the compact head: the page title's phone size */
+    .lq-body .rv-queue__h1,
+    .rv-queue__h1,
+    .lq-body .rv-bulk__h1,
+    .rv-bulk__h1 {
+        font-size: var(--lq-fs-xl);
     }
 
     .rv-dialog__reasons {
@@ -2904,7 +3054,8 @@ body.rv-lb-open {
 @media print {
     .rv-actionbar,
     .rv-jobs,
-    .rv-queue {
+    .rv-queue,
+    .rv-single__head {
         display: none;
     }
 }
