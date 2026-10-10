@@ -1433,16 +1433,13 @@ def _phash_of_stored(sha):
 
 def _candidate_phash(row_number, image_url, params=None, sku_key=None, identity=None):
     """
-    pHash للمرشح المرفوض ورابط صفحته. يعيد (phash, page_url).
-    المصادر بالترتيب: phash المرسل، ثم بصمة البايتات المرسلة (candidate_sha256/content_sha256) من مخزن
-    المرشحات مباشرة (شاشة الكتالوج لا تحفظ نتائجها في curation_candidates)، ثم مرشحات المنتج المحفوظة.
+    pHash للمرشح المرفوض ورابط صفحته. يعيد (phash, page_url). البصمة تُحسب دائماً من بايتات محفوظة بالخادم، ولا
+    تُؤخذ من الطلب: من مخزن المرشحات ببصمة candidate_sha256 المرسلة (شاشة الكتالوج لا تحفظ نتائجها في
+    curation_candidates)، وإلا من مرشحات المنتج المحفوظة.
     """
     params = params or {}
     page_url = _text(params, 'page_url') or None
-    sent_phash = _text(params, 'phash')
-    if sent_phash:
-        return sent_phash, page_url
-    phash = _phash_of_stored(_text(params, 'candidate_sha256') or _text(params, 'content_sha256'))
+    phash = _phash_of_stored(_text(params, 'candidate_sha256'))
     if phash:
         return phash, page_url
     for c in local_cache_db.get_curation_candidates(row_number, sku_key=sku_key or None, identity=identity):
@@ -1602,7 +1599,19 @@ def _set_review_queue_status(row_number, sku_key, product_name, status, reason_c
                                                  sku_key=sku_key, rows=rows)
 
 
+# حقول الرفض كما ترسلها شاشة المراجعة (review/core.js rejectBody، و CurationController::rejectAndReSearch مع skip_cache)؛
+# أي مفتاح غيرها يُهمل (نفس ApiController::REJECT_FIELDS). لا phash من الطلب: بصمة الصورة المرفوضة من بايتاتها المحفوظة
+REJECT_FIELDS = frozenset({
+    'row_number', 'image_url', 'page_url', 'candidate_sha256', 'product_name', 'brand', 'barcode', 'sku_key',
+    'reason_code', 'rejection_reasons', 'research', 'custom_query', 'skip_cache',
+    'product_name_ar', 'brand_ar', 'category', 'size', 'sub_category', 'origin',
+    'search_decision', 'search_lane', 'candidate_status', 'candidate_cache_hit', 'identity_tier', 'vlm_decision',
+    'candidate_warnings',
+})
+
+
 def action_reject_image(params):
+    params = {k: v for k, v in (params or {}).items() if k in REJECT_FIELDS}
     image_url = _text(params, 'image_url')
     product_name = _text(params, 'product_name')
     brand = _text(params, 'brand')

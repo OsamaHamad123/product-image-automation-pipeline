@@ -561,7 +561,7 @@ def test_approving_an_image_another_reviewer_rejected_after_the_page_opened_is_r
         {"url": pick, "status": "preselected"}, {"url": other, "status": "eligible"}], sku_key=sku)
     seen = _page_view(db, row)                                  # both pages open
     rejected = cli_bridge.action_reject_image(dict(_approve_params(row, MILK, pick, sku, GTIN),
-                                                   reason_code="WRONG_VARIANT", phash="0f0ff0f03c3ca5a5"))
+                                                   reason_code="WRONG_VARIANT"))
     assert rejected["status"] == "success" and rejected["queue_status"] == "ready_for_review"
     assert _page_view(db, row) == seen                          # the rejection leaves the row as the pages saw it
 

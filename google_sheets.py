@@ -94,7 +94,12 @@ STORE_CATEGORY_KEYS = {
     "category_l2_en": "sub_category", "category_l2_ar": "sub_category_ar",
     "category_l3_en": "sub_sub_category", "category_l3_ar": "sub_sub_category_ar",
 }
-FILL_IF_EMPTY_KEYS = frozenset(STORE_CATEGORY_KEYS.values())
+# نصوص البيانات الوصفية اللي ممكن حدا يكتبها بإيده بالشيت (الوصف، المكونات، القيم الغذائية، الوسوم): الاعتماد بيعبيها
+# بس إذا فاضية، وقيمة كتبها إنسان ما بتنكتب فوقها لا وقت الاعتماد ولا وقت تفريغ الطابور. أعمدة «Category L1..L3 EN/AR»
+# تصنيف خط المعالجة نفسه (ومنها اختيار المراجع وقت الاعتماد) فبتنكتب فوقها، متلها متل رابط الصورة
+FILL_IF_EMPTY_META = ("nutrition", "ingredients", "description_en", "description_ar", "tags_en", "tags_ar")
+FILL_IF_EMPTY_KEYS = (frozenset(STORE_CATEGORY_KEYS.values())
+                      | frozenset(f"{META_PREFIX}{k}" for k in FILL_IF_EMPTY_META))
 
 # أخطاء مؤقتة تُعاد محاولتها: تجاوز الحصة وأخطاء الخادم
 _TRANSIENT_CODES = (429, 500, 502, 503, 504)
@@ -1185,7 +1190,7 @@ class GoogleSheetsBatchWorker(threading.Thread):
             ready = [(r, col) for r, col in ready if r["id"] not in conflicts]
 
         # 6. عمود يُملأ فقط (الباركود): خلية الهدف تُقرأ الآن، وأي قيمة فيها لا يُكتب فوقها (CONFLICT). نفس القيمة
-        #    مكتوبة أصلاً: SYNCED بلا إرسال
+        #    مكتوبة أصلاً: SYNCED بلا إرسال. FILL_IF_EMPTY_KEYS (تصنيف المتجر ونصوص الوصف): قيمة موجودة بتضل، SYNCED
         fill = [(r, col) for r, col in ready if r.get("col_key") in FILL_ONLY_KEYS | FILL_IF_EMPTY_KEYS]
         if fill:
             held = _read_cells(worksheet, [(r["row_number"], col) for r, col in fill])
@@ -1671,12 +1676,13 @@ def update_product_metadata(worksheet, row_number, metadata, barcode=None, produ
                 logger.warning("[Google Sheets] رفض كتابة البيانات الوصفية في الصف %s: %s",
                                row_number, conflicts[row_number])
                 return False
-        data = [{"range": gspread.utils.rowcol_to_a1(row_number, col + 1), "values": [[str(metadata[key])]]}
-                for key, col in col_indices.items()]
-        if store:
-            held = _read_cells(worksheet, [(row_number, col) for col, _value in store.values()])
-            data += [{"range": gspread.utils.rowcol_to_a1(row_number, col + 1), "values": [[value]]}
-                     for col, value in store.values() if not held.get((row_number, col), "")]
+        # نفس قاعدة التفريغ (FILL_IF_EMPTY_KEYS): أعمدة تصنيف المتجر ونصوص الوصف بتنكتب بس إذا فاضية
+        cells = [(f"{META_PREFIX}{key}", col, str(metadata[key])) for key, col in col_indices.items()]
+        cells += [(key, col, value) for key, (col, value) in store.items()]
+        fill = [(row_number, col) for key, col, _value in cells if key in FILL_IF_EMPTY_KEYS]
+        held = _read_cells(worksheet, fill) if fill else {}
+        data = [{"range": gspread.utils.rowcol_to_a1(row_number, col + 1), "values": [[value]]}
+                for key, col, value in cells if key not in FILL_IF_EMPTY_KEYS or not held.get((row_number, col), "")]
         if data:
             worksheet.batch_update(data, value_input_option="RAW")
         return True

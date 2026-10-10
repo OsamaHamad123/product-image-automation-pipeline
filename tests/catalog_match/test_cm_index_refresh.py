@@ -727,6 +727,35 @@ def test_a_store_outside_its_visit_window_is_skipped_unpenalised_and_read_at_the
     assert [k for k, _ in db.finished] == ["lulu"] and len(db.rows) == 2
 
 
+def test_the_refresh_leaves_sharjah_coop_alone_outside_its_crawl_window_and_stops_at_its_end(tmp_path):
+    # Sharjah Co-op's own window (sitemaps.CRAWL_WINDOWS, 04:00-08:45 UTC) holds with a robots.txt that has none
+    from dataclasses import replace
+    from test_cm_sitemaps import lulu
+    store = replace(lulu(), key="sharjahcoop", hosts=lulu().hosts + ("sharjahcoop.ae",))
+    clock = {"now": utc(12)}
+    http, harvester = visit_harvester(None, utc(12))
+    harvester._utc_now = lambda: clock["now"]
+    db = FakeDb()
+    first = index_refresh.refresh(db=db, harvester=harvester, stores=[store], budget_s=300, clock=Clock(),
+                                  robots_path=tmp_path / "robots.json", **paths(tmp_path))
+    assert [(r["store"], r["status"]) for r in first["results"]] == [("sharjahcoop", index_refresh.OUTSIDE_VISIT_TIME)]
+    assert http.calls == [] and db.finished == []                                    # no request, nothing recorded
+    # the window ends while it is read: what was read is kept, the harvest is partial and goes on next time
+    reads = {"n": 0}
+
+    def ticking():
+        reads["n"] += 1
+        return utc(8, 44) if reads["n"] <= 3 else utc(8, 45)
+
+    harvester._utc_now = ticking
+    second = index_refresh.refresh(db=db, harvester=harvester, stores=[store], budget_s=300, clock=Clock(),
+                                   robots_path=tmp_path / "robots.json", **paths(tmp_path))
+    (result,) = second["results"]
+    assert result["status"] == "partial" and result["truncated"] and "crawl window" in result["error"]
+    assert [k for k, _ in db.finished] == ["sharjahcoop"]
+
+
+
 def test_a_store_without_a_visit_time_clears_the_remembered_window(tmp_path):
     robots_path = tmp_path / "robots.json"
     index_refresh.remember_visit_windows("lulu", [[240, 525]], robots_path)

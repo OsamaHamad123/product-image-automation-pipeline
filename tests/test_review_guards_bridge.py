@@ -185,7 +185,8 @@ def test_a_phash_or_sha256_sent_with_the_approval_never_skips_the_rejected_image
     assert db.save_curation_candidates(row, MILK["product_name"], MILK["brand"], [
         {"url": mirror, "status": "preselected", "content_sha256": store["rejected"]["sha"]}], sku_key=sku)
     rejected = cli_bridge.action_reject_image(dict(_approve_params(row, MILK, "https://shop/pick.jpg", sku),
-                                                   reason_code="WRONG_VARIANT", phash=store["rejected"]["phash"]))
+                                                   reason_code="WRONG_VARIANT",
+                                                   candidate_sha256=store["rejected"]["sha"]))
     assert rejected["status"] == "success"
     seen = _page_view(db, row)
     # the same picture at another address, sent with another picture's phash and sha256: still the rejected image

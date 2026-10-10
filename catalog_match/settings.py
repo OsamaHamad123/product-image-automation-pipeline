@@ -441,6 +441,18 @@ def local_index_refresh_max_s() -> int:
     value = get("LOCAL_INDEX_REFRESH_MAX_S")
     value = value if isinstance(value, int) else int(DEFAULTS["LOCAL_INDEX_REFRESH_MAX_S"])
     return min(3600, max(0, value))
+
+
+# SHARJAHCOOP_CRAWL_WINDOW   the UTC window (HHMM-HHMM, e.g. 0400-0845) in which Sharjah Co-op's sitemaps may be
+#                            crawled: their off-peak hours (outside them requests are blocked or throttled). The
+#                            harvest does not start outside it, sends no request, and stops when it ends
+#                            (catalog_match.sitemaps.crawl_window). Only the sitemap crawl: the local index's reads of
+#                            single product pages are not affected. An unreadable value keeps the default.
+DEFAULTS["SHARJAHCOOP_CRAWL_WINDOW"] = "0400-0845"
+
+
+def sharjahcoop_crawl_window() -> str:
+    return str(get("SHARJAHCOOP_CRAWL_WINDOW") or "").strip()
 # --- end local catalog index ---
 
 
