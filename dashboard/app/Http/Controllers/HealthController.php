@@ -424,6 +424,10 @@ class HealthController extends Controller
         if (is_numeric($report['bg_skipped'] ?? null) && (int) $report['bg_skipped'] > 0) {
             $parts[] = 'انتشر بدون عزل الخلفية ' . (int) $report['bg_skipped'];
         }
+        // روابط معتمدة اختفت من الشيت وأعادها الإدراج بلا بحث: run_report.links_restored_text
+        if (is_numeric($report['links_restored'] ?? null) && (int) $report['links_restored'] > 0) {
+            $parts[] = (int) $report['links_restored'] . ' روابط معتمدة اختفت من الشيت ورجعت';
+        }
         // آخر «محاولة» في handed_over هي التشغيل الآخر الذي تولى الطابور، لا إعادة تشغيل
         $retries = (int) ($row['attempts'] ?? 1) - 1 - (($row['outcome'] ?? '') === 'handed_over' ? 1 : 0);
         if ($retries > 0) {
