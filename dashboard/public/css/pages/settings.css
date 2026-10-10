@@ -680,3 +680,27 @@
         width: 100%;
     }
 }
+
+/* «ما انحفظ»: a card with changes that were not saved yet (settings.js) */
+.lq-settings-dirty {
+    display: inline-block;
+    margin-inline-start: var(--lq-space-2);
+    padding: 1px var(--lq-space-2);
+    border-radius: var(--lq-radius-pill);
+    background: var(--lq-warning-bg);
+    color: var(--lq-warning);
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1.6;
+    vertical-align: middle;
+}
+
+.lq-settings-dirty[hidden] {
+    display: none;
+}
+
+/* a save lands on its card (#id): keep a little room above it */
+.lq-settings-card,
+.lq-keys__row {
+    scroll-margin-block-start: var(--lq-space-5);
+}

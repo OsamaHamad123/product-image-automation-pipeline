@@ -11,7 +11,7 @@
 --}}
 @php $adv = $advanced; $src = $advanced['sources']; $spd = $advanced['speed']; $idx = $advanced['local_index'] ?? null; @endphp
 {{-- «السرعة»: section=speed, $advanced['speed'] = SettingsController::speedData(). WORKER_CONCURRENCY, 1..8 (also checked server side). --}}
-<form method="POST" action="{{ route('dashboard.save_settings') }}" class="lq-card lq-settings-card" aria-labelledby="lq-settings-speed-title" autocomplete="off" data-speed-form>
+<form method="POST" action="{{ route('dashboard.save_settings') }}" id="lq-settings-speed" class="lq-card lq-settings-card" aria-labelledby="lq-settings-speed-title" autocomplete="off" data-speed-form>
     @csrf
     <input type="hidden" name="section" value="speed">
     <div class="lq-settings-card__head">
@@ -30,7 +30,7 @@
     </div>
 </form>
 
-<form method="POST" action="{{ route('dashboard.save_settings') }}" class="lq-card lq-settings-card" aria-labelledby="lq-settings-sources-title" autocomplete="off" data-sources-form>
+<form method="POST" action="{{ route('dashboard.save_settings') }}" id="lq-settings-sources" class="lq-card lq-settings-card" aria-labelledby="lq-settings-sources-title" autocomplete="off" data-sources-form>
     @csrf
     <input type="hidden" name="section" value="sources">
     <div class="lq-settings-card__head">
@@ -117,7 +117,7 @@
     </div>
 </form>
 
-<form method="POST" action="{{ route('dashboard.save_settings') }}" class="lq-card lq-settings-card" aria-labelledby="lq-settings-advanced-title" autocomplete="off" data-advanced-form>
+<form method="POST" action="{{ route('dashboard.save_settings') }}" id="lq-settings-advanced" class="lq-card lq-settings-card" aria-labelledby="lq-settings-advanced-title" autocomplete="off" data-advanced-form>
     @csrf
     <input type="hidden" name="section" value="advanced">
     <div class="lq-settings-card__head">

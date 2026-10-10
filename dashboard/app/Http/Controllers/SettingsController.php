@@ -1536,9 +1536,24 @@ class SettingsController extends Controller
         }
     }
 
+    /** الكرت اللي انحفظ (#id بـ resources/views/settings/*): الرجعة بتنزل عليه بدل أول الصفحة. */
+    public static function anchorFor(string $section): string
+    {
+        if (isset(self::SECTIONS[$section]) && self::SECTIONS[$section]['tab'] === 'keys') {
+            return 'lq-key-' . $section;
+        }
+        return match ($section) {
+            'speed', 'sources', 'advanced', 'models', 'processing', 'auto-publish', 'strict-lane' => 'lq-settings-' . $section,
+            'brand' => 'lq-settings-auto-publish',
+            default => '',
+        };
+    }
+
     private static function back(string $tab, array $flash)
     {
-        $response = redirect()->to(route('dashboard.settings') . '?tab=' . urlencode(self::tabFrom($tab)));
+        $anchor = self::anchorFor(self::field(request(), 'section'));
+        $response = redirect()->to(route('dashboard.settings') . '?tab=' . urlencode(self::tabFrom($tab))
+            . ($anchor !== '' ? '#' . $anchor : ''));
         foreach ($flash as $key => $value) {
             if ($value !== null && $value !== [] && $value !== '') {
                 $response = $response->with($key, $value);
