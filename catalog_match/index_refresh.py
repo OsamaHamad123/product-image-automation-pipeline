@@ -26,7 +26,9 @@ Rules (all of them are tested without a network, with a fake harvester):
     the sheet or to Cloudinary. A store read outside its Visit-time window is skipped with status 'outside_visit_time':
     not recorded in catalog_harvests (it is neither blocked nor failed, so nothing waits and nothing is penalised) and
     asked again at the next refresh, the button's included. The windows seen are kept in temp/local_index_robots.json
-    for the dashboard card.
+    for the dashboard card. Sharjah Co-op has a window of our own (sitemaps.CRAWL_WINDOWS, 04:00-08:45 UTC, setting
+    SHARJAHCOOP_CRAWL_WINDOW): outside it the store is skipped the same way without any request, and a harvest still
+    running when it ends stops there (partial: the next refresh in the window goes on from there).
   - LOCAL_INDEX_ENABLED off, or LOCAL_INDEX_REFRESH_MAX_S = 0: nothing starts.
 
 The dashboard's «حدّث الفهرس هلق» button runs the same refresh as a detached job (start_detached, through the bridge
