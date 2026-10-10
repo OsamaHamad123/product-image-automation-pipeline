@@ -360,8 +360,10 @@ def test_row73_the_tier2_fallback_prefers_the_trusted_store_to_the_small_picture
     rcs = row73(read("ZWAN", "CHICKEN LUNCHEON MEAT TANDOORI"))
     out = route(ZWAN_TANDOORI, rcs)
     # magic-sl.com ranks first but is a generic site with a 619x368 picture: among the pictures the fallback may
-    # pre-check, Union Coop's (a UAE retailer) comes first
-    assert out.decision == "REVIEW_PRESELECTED" and out.winner is rcs[1]
+    # pre-check, a UAE retailer's comes first. Union Coop's pages are demoted (the lowest source trust, below even
+    # magic-sl.com): Amazon.ae's comes first
+    assert rcs[1].score.matched["source_class"] == "demoted"
+    assert out.decision == "REVIEW_PRESELECTED" and out.winner is rcs[3]
     assert "preselected:tier2_corroborated" in out.winner.reasons
     assert {"vlm_unsure", "sheet_silent:protein=chicken"} <= set(warns(out.winner))
     assert "low_resolution" not in warns(out.winner)
