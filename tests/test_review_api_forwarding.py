@@ -37,6 +37,11 @@ namespace Illuminate\Http {
         public function all() { return $this->data; }
     }
 }
+namespace Illuminate\Support\Facades {
+    class Validator {
+        public static function make($data, $rules) { return new class { public function fails() { return false; } }; }
+    }
+}
 namespace App\Services {
     class PythonBridge {
         public static $calls = [];
@@ -51,6 +56,8 @@ namespace App\Http\Controllers {
 namespace {
     class FakeFile {
         public function getClientOriginalExtension() { return 'png'; }
+        public function isValid() { return true; }
+        public function getMimeType() { return 'image/png'; }
         public function move($dir, $name) { file_put_contents($dir . '/' . $name, 'x'); }
     }
     class FakeResponse { public $data; public $status; public function __construct($d, $s) { $this->data = $d; $this->status = $s; } }
