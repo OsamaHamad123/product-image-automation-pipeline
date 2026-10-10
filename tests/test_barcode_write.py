@@ -336,3 +336,57 @@ def test_a_sheet_without_store_category_columns_gets_none_added(gs, monkeypatch)
     assert gs.update_product_metadata(ws, 2, {"category_l1_en": "Eggs & Dairy"}, product_name="Fresh Milk")
     assert all(k.startswith(gs.META_PREFIX) for k in queued)                    # only «Category L1 EN» (created)
     assert "Category" not in ws.row_values(1)                                   # the store column is never created
+
+
+# ---------------------------------------------------------------------------
+# Description-like metadata is fill-if-empty: an approval never writes over text a person typed into the sheet
+# ---------------------------------------------------------------------------
+
+META_HEAD = ["Barcode", "Product Name", "Brand", "Size", "Drive Image Link", "Description EN", "Description AR",
+             "Ingredients", "Category L1 EN"]
+HAND_DESC = "Our best seller - typed by the catalog team"
+
+
+def test_the_flush_keeps_a_hand_written_description_and_fills_an_empty_one(gs, fake_connection):
+    ws = FakeWorksheet([META_HEAD, ["", "Fresh Milk", "Almarai", "1L", "", HAND_DESC, "", "", "Old"]])
+    who = {"name": "Fresh Milk", "size": "1L", "brand": "Almarai"}
+    pending = [_outbox_row(1, 2, "Fresh full-fat milk.", col_key="meta:description_en", **who),
+               _outbox_row(2, 2, "حليب طازج كامل الدسم.", col_key="meta:description_ar", **who),
+               _outbox_row(3, 2, "Milk", col_key="meta:ingredients", **who),
+               _outbox_row(4, 2, "Eggs & Dairy", col_key="meta:category_l1_en", **who)]
+    status = _final_status(_flush(gs, ws, pending, fake_connection))
+    assert status == {1: "SYNCED", 2: "SYNCED", 3: "SYNCED", 4: "SYNCED"}       # 1: kept, no CONFLICT either
+    sent = {d["range"]: d["values"][0][0] for body in ws.sent_bodies for d in body["data"]}
+    assert sent == {"'Products'!G2": "حليب طازج كامل الدسم.", "'Products'!H2": "Milk",
+                    "'Products'!I2": "Eggs & Dairy"}                            # the pipeline's own category: rewritten
+    assert gs.reported == []
+
+
+class _DirectSheet(FakeWorksheet):
+    """No outbox running: update_product_metadata writes the row itself with batch_update."""
+
+    def __init__(self, rows):
+        super().__init__(rows)
+        self.direct = []
+
+    def batch_update(self, data, value_input_option=None):
+        self.direct.extend(data)
+
+
+def test_an_approval_without_the_outbox_keeps_a_hand_written_description_too(gs, monkeypatch):
+    ws = _DirectSheet([META_HEAD, ["", "Fresh Milk", "Almarai", "1L", "", HAND_DESC, "", "", "Old"]])
+    monkeypatch.setattr(gs, "_queue", None)
+    monkeypatch.setattr(gs, "_worker", None)
+    monkeypatch.setattr(gs, "_redis_write_behind", lambda *a, **k: False)
+    meta = {"description_en": "Fresh full-fat milk.", "description_ar": "حليب طازج كامل الدسم.",
+            "category_l1_en": "Eggs & Dairy"}
+    assert gs.update_product_metadata(ws, 2, meta, product_name="Fresh Milk", size="1L", brand="Almarai")
+    assert {d["range"]: d["values"][0][0] for d in ws.direct} == {"G2": "حليب طازج كامل الدسم.",
+                                                                  "I2": "Eggs & Dairy"}
+
+
+def test_the_hand_editable_metadata_keys_are_fill_if_empty_and_the_link_is_not(gs):
+    for key in ("description_en", "description_ar", "ingredients", "nutrition", "tags_en", "tags_ar"):
+        assert gs.META_PREFIX + key in gs.FILL_IF_EMPTY_KEYS
+    assert gs.LINK_KEY not in gs.FILL_IF_EMPTY_KEYS
+    assert not any(gs.META_PREFIX + k in gs.FILL_IF_EMPTY_KEYS for k in gs._METADATA_COLUMNS if k.startswith("category"))

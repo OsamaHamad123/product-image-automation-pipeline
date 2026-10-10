@@ -42,6 +42,11 @@ outcome_to_legacy(outcome, trace=None, spec=None) -> dict | None
     and exported; the sheet gets it only from the Run page card (cli_bridge barcode_write). A URL barcode is never
     scoring evidence: it never lifts a tier, never auto-publishes.
     evidence.page_gallery is True for X0's extra image of a page's own gallery (expand.py), which the review marks.
+    trace['outcome']['hard_rejected'] lists the candidates the search turned down outright, in rank order, one short
+    entry each: {'domain', 'url' (the image file name, cut to SHORT_URL_CHARS), 'reason'} with the reason code of a
+    hard identity rule ('size_conflict', 'competitor_brand', 'stock_or_clipart', ...), a failed download
+    ('download:not_image') or a hard quality failure ('quality:...'). At most HARD_REJECTS_MAX entries: the rest are
+    only counted (trace['outcome']['hard_rejected_more']); reject_counts keeps the totals per rule.
     trace['outcome']['top'] keeps the top LEGACY_TOP_N reviewable candidates (the pick first when it ranks lower)
     without their quality and score blocks: the worker stores only trace['outcome'] for a published or reviewed row
     and its review candidates go once a reviewer approves, so the run export (scripts/export_run.py) reads the
@@ -58,11 +63,14 @@ from typing import Any, Dict, List, Mapping, Optional
 from .decide import RESOLUTION_PREFIX, candidate_warnings, warning_codes
 from .gtin import display_gtin, is_global_gtin
 from .models import RankedCandidate, SearchOutcome, SkuSpec
+from .text_norm import url_host
 from .url_gtin import identity_agrees, url_gtin
 
 logger = logging.getLogger(__name__)
 
 LEGACY_TOP_N = 8
+HARD_REJECTS_MAX = 20       # trace['outcome']['hard_rejected'] entries kept per product
+SHORT_URL_CHARS = 60
 STEP_NAME = "catalog_match v2"
 NO_RESULT_DECISIONS = frozenset({"NOT_FOUND", "PROVIDER_DOWN"})
 PICK_DECISIONS = frozenset({"AUTO_PUBLISH", "REVIEW_PRESELECTED"})
@@ -274,6 +282,54 @@ def outcome_summary(outcome: SearchOutcome) -> Dict[str, Any]:
     }
 
 
+_HARD_REASON_PREFIXES = ("hard:", "download:", "quality:")
+
+
+def _short_url(url: str) -> str:
+    """The image file name of a URL ('.../1234_front.jpg?w=800' -> '1234_front.jpg'), cut to SHORT_URL_CHARS."""
+    path = str(url or "").split("#", 1)[0].split("?", 1)[0].rstrip("/")
+    tail = path.rsplit("/", 1)[-1] if "/" in path else path
+    return (tail or path)[:SHORT_URL_CHARS]
+
+
+def _hard_reason(rc: RankedCandidate) -> Optional[str]:
+    """The code a candidate was turned down on outright, or None: a hard identity rule first, then a failed
+    download or a hard quality failure (decide.route's reasons). A label reading MISMATCH is no hard reject."""
+    if _identity_rejected(rc):
+        rules = rc.score.hard_reject if rc.score is not None else ()
+        return str(rules[0]) if rules else "unscored"
+    for reason in rc.reasons or ():
+        if str(reason).startswith(_HARD_REASON_PREFIXES):
+            return str(reason)
+    return None
+
+
+def hard_rejects(outcome: SearchOutcome) -> Dict[str, Any]:
+    """{'hard_rejected': [{domain, url, reason}, ...]} for trace['outcome'] (see the module docstring), plus
+    'hard_rejected_more' when more than HARD_REJECTS_MAX were turned down."""
+    entries: List[Dict[str, str]] = []
+    more = 0
+    for rc in outcome.ranked or ():
+        if rc.status == "excluded":
+            continue                    # a reviewer negative: counted in reject_counts, never shown
+        reason = _hard_reason(rc)
+        if reason is None:
+            continue
+        if len(entries) >= HARD_REJECTS_MAX:
+            more += 1
+            continue
+        cand = rc.candidate
+        entries.append({
+            "domain": cand.domain or url_host(cand.page_url) or url_host(cand.image_url),
+            "url": _short_url(cand.image_url),
+            "reason": reason,
+        })
+    out: Dict[str, Any] = {"hard_rejected": entries}
+    if more:
+        out["hard_rejected_more"] = more
+    return out
+
+
 def explain_no_pick(outcome: SearchOutcome, spec: Optional[SkuSpec]) -> Optional[Dict[str, Any]]:
     """Why the product has no pick (catalog_match.explain), for trace['outcome']['explain']; None with a pick or
     without the spec. Display only: computed after routing from what the search found, never read by it, and a
@@ -322,6 +378,7 @@ def outcome_to_legacy(outcome: SearchOutcome, trace: Optional[dict] = None,
 
     if trace is not None:
         trace["outcome"] = outcome_summary(outcome)
+        trace["outcome"].update(hard_rejects(outcome))
         trace["outcome"]["top"] = [_compact(serialise(rc)) for rc in _top_with_winner(outcome, ranked)]
         no_pick = explain_no_pick(outcome, spec)
         if no_pick is not None:

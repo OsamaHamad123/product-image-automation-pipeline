@@ -20,6 +20,19 @@ class ApiController extends Controller
         'candidate_warnings', 'target_width', 'target_height', 'page_gtin',
     ];
 
+    /**
+     * حقول رفض صورة كما ترسلها شاشة المراجعة (review/core.js rejectBody و reviewedCandidateView)، ولا غيرها: لا phash
+     * ولا content_sha256 ولا exclude_urls ولا أي حقل آخر يمر إلى الجسر (بصمة الصورة المرفوضة من البايتات المحفوظة).
+     * نفس القائمة بالجسر (cli_bridge.REJECT_FIELDS).
+     */
+    private const REJECT_FIELDS = [
+        'row_number', 'image_url', 'page_url', 'candidate_sha256', 'product_name', 'brand', 'barcode', 'sku_key',
+        'reason_code', 'rejection_reasons', 'research', 'custom_query',
+        'product_name_ar', 'brand_ar', 'category', 'size', 'sub_category', 'origin',
+        'search_decision', 'search_lane', 'candidate_status', 'candidate_cache_hit', 'identity_tier', 'vlm_decision',
+        'candidate_warnings',
+    ];
+
     /** ما رأته الصفحة (عقد C1): حالة صف الطابور ووقت تحديثه ورقمه، والصورة المعتمدة. */
     private const EXPECTED_STATE_FIELDS = ['queue_status', 'queue_updated_at', 'approved_url', 'queue_row'];
 
@@ -238,7 +251,13 @@ class ApiController extends Controller
      */
     public function rejectImage(Request $request)
     {
-        $result = $this->runPython('reject_image', $request->all());
+        // قائمة صريحة بما ترسله شاشة المراجعة (review/core.js rejectBody) مثل الاعتماد ورفع الصورة؛ research تأكيد
+        // منطقي ("0" نص بيكون صح ببايثون)
+        $params = $request->only(self::REJECT_FIELDS);
+        if ($request->has('research')) {
+            $params['research'] = $request->boolean('research');
+        }
+        $result = $this->runPython('reject_image', $params);
 
         if (!PythonBridge::isError($result)) {
             ProductController::forgetProductCaches();

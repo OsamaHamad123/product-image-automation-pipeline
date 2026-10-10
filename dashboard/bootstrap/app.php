@@ -12,8 +12,12 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware) {
-        // كل صفحة وواجهة بتطلب تسجيل دخول (صفحة الدخول و/healthz مستثنيات: RequireLogin::OPEN_ROUTES)
-        $middleware->web(append: \App\Http\Middleware\RequireLogin::class);
+        // كل صفحة وواجهة بتطلب تسجيل دخول (صفحة الدخول و/healthz مستثنيات: RequireLogin::OPEN_ROUTES)،
+        // وبعدها المراجع (users.role) بيوصل للمراجعة بس (ReviewerLimits)
+        $middleware->web(append: [
+            \App\Http\Middleware\RequireLogin::class,
+            \App\Http\Middleware\ReviewerLimits::class,
+        ]);
     })
     ->withExceptions(function (Exceptions $exceptions) {
         //

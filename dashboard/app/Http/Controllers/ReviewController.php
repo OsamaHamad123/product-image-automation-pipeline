@@ -111,6 +111,12 @@ class ReviewController extends Controller
             // طريقة عزل الخلفية الحالية ونص تأكيد التجاوز؛ null بلا قاعدة بيانات (ما في زر لأن الحفظ رح يفشل)
             'bg' => $dbOnline ? self::bgConfig() : null,
         ];
+        // المراجع (ReviewerLimits): بلا روابط وأزرار المدير. رابط فاضي = الشاشة ما بترسم زرّه
+        if ($request->user()?->isReviewer()) {
+            foreach (['retry', 'run', 'bgMethod', 'cutoutCheck'] as $adminOnly) {
+                $config['urls'][$adminOnly] = '';
+            }
+        }
 
         return view('dashboard.catalog', [
             'reviewConfig' => $config,

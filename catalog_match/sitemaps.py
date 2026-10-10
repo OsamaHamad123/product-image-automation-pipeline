@@ -24,6 +24,10 @@ Only what a store publishes for crawlers is read, and nothing is worked around:
   faster than it asks. A robots.txt that answers 5xx stops the store (RFC 9309: assume disallowed).
   Its Visit-time (a UTC window such as 0400-0845, also across midnight) is kept too: outside it the store is not
   read at all (status 'outside_visit_time', neither blocked nor failed: the next refresh asks again).
+* A store with a crawl window of our own (CRAWL_WINDOWS: Sharjah Co-op, 04:00-08:45 UTC, their off-peak hours, the
+  setting SHARJAHCOOP_CRAWL_WINDOW) gets no request at all outside it, not even robots.txt (status
+  'outside_visit_time', as above), and a harvest still running when it ends stops there (status partial, the next
+  refresh goes on from there). Only this crawl: single product pages read by the local index are not affected.
 * An answer of 401, 403 or 429 stops the store: it is reported 'blocked' and skipped. So is an HTML
   page at every starting point before any sitemap was read (a bot check); later, an HTML page, a
   redirect to the home page or off the store's hosts is one sitemap that failed. No proxy, no
@@ -73,6 +77,10 @@ DISCOVER_URLSETS = 3
 SAMPLES = 5
 BATCH = 1000
 MAX_UNANSWERED = 3           # sitemap files in a row that timed out or lost the connection: the store stopped answering
+
+# stores crawled only inside a UTC window of their own, whatever robots.txt says: outside it their site blocks or
+# throttles requests. host -> the setting holding the window (catalog_match.settings; its default is the window)
+CRAWL_WINDOWS = {"sharjahcoop.ae": "SHARJAHCOOP_CRAWL_WINDOW"}
 
 _DOCTYPE_RE = re.compile(rb"<!DOCTYPE", re.I)
 _HTML_START_RE = re.compile(rb"<(?:!doctype\s+html|html)\b", re.I)
@@ -246,16 +254,34 @@ class Robots:
     def visit_allowed(self, now: datetime) -> bool:
         """True without a Visit-time, else when `now` (UTC; a naive time is taken as UTC) is inside a window:
         start <= now < end, and a window whose start is after its end crosses midnight."""
-        if not self.visit_times:
+        return in_windows(self.visit_times, now)
+
+
+def in_windows(windows: Sequence[Sequence[int]], now: datetime) -> bool:
+    """True without windows, else when `now` (UTC; a naive time is taken as UTC) is inside one of them (UTC minutes):
+    start <= now < end, and a window whose start is after its end crosses midnight."""
+    if not windows:
+        return True
+    now = now.astimezone(timezone.utc) if now.tzinfo else now
+    minute = now.hour * 60 + now.minute
+    for start, end in windows:
+        if start == end:
+            return True                     # an empty or full-day window: no restriction
+        if (start <= minute < end) if start < end else (minute >= start or minute < end):
             return True
-        now = now.astimezone(timezone.utc) if now.tzinfo else now
-        minute = now.hour * 60 + now.minute
-        for start, end in self.visit_times:
-            if start == end:
-                return True                     # an empty or full-day window: no restriction
-            if (start <= minute < end) if start < end else (minute >= start or minute < end):
-                return True
-        return False
+    return False
+
+
+def crawl_window(store: "StoreConfig") -> Optional[Tuple[int, int]]:
+    """The store's own crawl window (CRAWL_WINDOWS, by any of its hosts) in UTC minutes, or None. The setting is read
+    at call time; a value that is not a window keeps the setting's default."""
+    for host in store.hosts:
+        for domain, name in CRAWL_WINDOWS.items():
+            if host == domain or host.endswith("." + domain):
+                from . import settings
+                value = str(settings.get(name) or "").strip()
+                return parse_visit_time(value) or parse_visit_time(str(settings.DEFAULTS[name]))
+    return None
 
 
 _VISIT_TIME_RE = re.compile(r"(\d{1,2}):?(\d{2})\s*-\s*(\d{1,2}):?(\d{2})")
@@ -494,6 +520,20 @@ class SitemapHarvester:
         (index_refresh's resume): they are not read again, the indexes still are.
         MAX_UNANSWERED sitemap files in a row without an answer (timeout, lost connection) end the store as 'error'."""
         rep = HarvestReport(store=store.key)
+        window = crawl_window(store)
+        if window is not None:
+            if not in_windows([window], self._utc_now()):
+                rep.status, rep.visit_window = "outside_visit_time", [list(window)]
+                rep.error = (f"this store is crawled only at {visit_text([window])}: store not read now (no request), "
+                             "asked again at the next refresh")
+                return rep
+            budget_stop = should_stop
+
+            def should_stop() -> bool:
+                if not in_windows([window], self._utc_now()):
+                    rep.error = rep.error or f"stopped at the end of the store's crawl window ({visit_text([window])})"
+                    return True
+                return budget_stop() if budget_stop is not None else False
         robots = self.robots(store)
         rep.robots = robots.status if robots.http_status is None else f"{robots.status} (http {robots.http_status})"
         if robots.status in ("blocked", "error"):

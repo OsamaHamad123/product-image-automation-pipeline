@@ -19,7 +19,8 @@ The CODE decides, never the model:
               of a multipack SKU (multipack_unit_image: the size 'no' is only the pack), a printed size
               within the size tolerance but not exactly the SKU's (size_close: '840ge' for 850 g), and
               a 'no' the reading's own text cannot support (overruled_flags; never a brand 'no'). A size 'no' on
-              the WHOLE multipack ('2 x 2 kg' for 2X2KG: multipack_whole_image) is no 'no' at all (size_flag)
+              the WHOLE multipack ('2 x 2 kg' for 2X2KG: multipack_whole_image) is no 'no' at all (size_flag),
+              and neither is the multipack's printed total ('360g' for 12 x 30g: sizes.total_match)
     UNSURE    anything else
 Every failure path (no key, transport error, non-200 after the retry, a response
 that is not the schema, a safety block) returns status 'unknown' with every
@@ -60,7 +61,7 @@ from .gtin import gtin13
 from .identity import description_words
 from .models import FetchedImage, Size, SkuSpec, VerificationResult, VlmImageVerdict
 from . import variants as variants_mod
-from .sizes import compare, compare_pack, parse_sizes
+from .sizes import compare, compare_pack, parse_sizes, total_match
 from .text_norm import any_brand_in, is_arabic
 
 logger = logging.getLogger(__name__)
@@ -207,7 +208,8 @@ def size_agreement(spec: SkuSpec, size_text: str) -> str:
         # Something parsed, but not in the SKU's dimension (e.g. '1 L' for a 500 g SKU).
         return "other_dimension"
     if state != "match":
-        return state
+        # the SKU's total in the other form ('360g' for 12 x 30g, '12 x 30g' for 360g): the same content
+        return "match" if total_match(spec.size, found, spec.pack_count) else state
     if spec.size.dimension != "count" and compare_pack(spec.pack_count, found, spec.size.pieces) == "conflict":
         return "conflict"
     return "match"
@@ -249,6 +251,15 @@ def other_brand_printed(spec: SkuSpec, verdict: Optional[VlmImageVerdict]) -> bo
     return verdict is not None and _brand_reading(spec, verdict.brand_text) == "other"
 
 
+def total_form(spec: SkuSpec, size_text: str) -> bool:
+    """The printed size is the SKU's total in the other form, not its own wording: '360g' (or '0.36 kg') read for
+    'Biscuits 12 x 30g', '12 x 30g' read for 'Biscuits 360g' (sizes.total_match). size_agreement reads it 'match'."""
+    if spec.size is None or not size_text:
+        return False
+    found = parse_sizes(size_text, "vlm")
+    return compare(spec.size, found) != "match" and total_match(spec.size, found, spec.pack_count)
+
+
 def multipack_unit_image(spec: SkuSpec, verdict: VlmImageVerdict) -> bool:
     """True when the picture is ONE unit of a multipack SKU and only that made the reader answer size 'no'.
 
@@ -268,8 +279,8 @@ def multipack_unit_image(spec: SkuSpec, verdict: VlmImageVerdict) -> bool:
     if verdict.size_match != "no" or "no" in (verdict.brand_match, verdict.variant_match):
         return False
     printed = [s for s in parse_sizes(verdict.size_text, "vlm") if s.dimension == spec.size.dimension]
-    if not printed or size_agreement(spec, verdict.size_text) != "match":
-        return False
+    if not printed or size_agreement(spec, verdict.size_text) != "match" or total_form(spec, verdict.size_text):
+        return False                    # the printed total ('360g' for 12 x 30g) is the whole pack, not one unit
     if any((s.pack_count or 1) > 1 for s in printed):
         return False
     return verdict.pack_count in (None, 1) or verdict.pack_count == spec.size.pieces
@@ -289,6 +300,8 @@ def multipack_whole_image(spec: SkuSpec, verdict: VlmImageVerdict) -> bool:
         pack_count is the SKU's or unknown, and at least one of them states it ('2 x 2 kg', or '2KG' with a
         counted pack of 2);
       * it is not one unit (multipack_unit_image keeps that case, e.g. a counted pack equal to the pieces).
+    The multipack's printed TOTAL ('360g' or '0.36 kg' for 'Biscuits 12 x 30g': total_form) is the whole pack as
+    well, the pack count read or not: one unit would print 30 g. classify() still needs the pack evidence for MATCH.
     classify() reads the size 'no' of such a picture as size 'yes' (the right product: MATCH when everything else
     qualifies); decide reads it the same way (label_carries_identity, full_match, unverified_warnings).
     """
@@ -304,6 +317,8 @@ def multipack_whole_image(spec: SkuSpec, verdict: VlmImageVerdict) -> bool:
         return False
     if verdict.pack_count not in (None, target_pack):
         return False
+    if total_form(spec, verdict.size_text):
+        return True
     stated = verdict.pack_count == target_pack or any(s.pack_count == target_pack for s in printed)
     return stated and not multipack_unit_image(spec, verdict)
 
@@ -419,6 +434,8 @@ def classify(spec: SkuSpec, verdict: VlmImageVerdict) -> str:
             the SKU's within sizes.DEFAULT_TOL but not exactly, '840ge' for 850 g, and the pack agrees);
           - 'no' flags the reading itself cannot support (overruled_flags: a size 'no' with nothing printed
             read, a variant 'no' whose printed text is exactly the words describing the SKU); never a brand 'no';
+          - a single-unit SKU read as a multipack of its total ('12 x 30g' for 'Biscuits 360g': total_form), which
+            is never MATCH either, the size flag 'no' or not;
       * not a 'no' at all: the WHOLE multipack (multipack_whole_image: size_match is the only 'no', the printed
         size is the SKU's per-unit size and the printed pack is the SKU's, '2 x 2 kg' for 2X2KG) reads as size
         'yes' (size_flag), so it is MATCH when everything below qualifies;
@@ -429,7 +446,10 @@ def classify(spec: SkuSpec, verdict: VlmImageVerdict) -> str:
         is UNSURE (review, never auto-publish).
     """
     unit_of_multipack = multipack_unit_image(spec, verdict)
-    excused = unit_of_multipack or size_close(spec, verdict) is not None or bool(overruled_flags(spec, verdict))
+    # a single-unit SKU read as a multipack of its total: the same content in another pack, review only
+    total_of_single = (spec.pack_count or 1) <= 1 and total_form(spec, verdict.size_text)
+    excused = (unit_of_multipack or size_close(spec, verdict) is not None or bool(overruled_flags(spec, verdict))
+               or (total_of_single and "no" not in (verdict.brand_match, verdict.variant_match)))
     # the whole multipack ('2 x 2 kg' for 2X2KG): its size 'no' is the per-unit/pack habit, read as size 'yes'
     if "no" in (verdict.brand_match, verdict.variant_match, size_flag(spec, verdict)) and not excused:
         return MISMATCH
@@ -451,7 +471,8 @@ def classify(spec: SkuSpec, verdict: VlmImageVerdict) -> str:
         multipack = (spec.pack_count or 1) > 1
         return UNSURE if (multipack and verdict.view == "multi_product") else MISMATCH
     if excused:
-        # one unit of the pack, a size within the tolerance, or a 'no' the reading cannot support: review, never MATCH
+        # one unit of the pack, a size within the tolerance, a 'no' the reading cannot support, or a single unit
+        # read as a multipack of its total: review, never MATCH
         return UNSURE
     if verdict.brand_match != "yes" or verdict.view != "front_packshot":
         return UNSURE

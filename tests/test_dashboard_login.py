@@ -23,9 +23,10 @@ pytestmark = NEEDS_LARAVEL
 USER = "pytest-owner"
 
 
-def run(env, requests_list):
+def run(env, requests_list, body=4000):
     """[{status, location, body}] for [[method, uri, params, ip]], cookies kept between the requests. Each call is a
-    new client address: the login lockout lives in Laravel's shared file cache and must not reach the next test."""
+    new client address: the login lockout lives in Laravel's shared file cache and must not reach the next test.
+    body: how much of each response body to keep."""
     client = f"203.0.113.{random.randint(1, 254)}"
     requests_list = [r if len(r) > 3 else [*r, *([{}] if len(r) < 3 else []), client] for r in requests_list]
     dash = str(DASH).replace("\\", "/")
@@ -42,7 +43,7 @@ foreach (json_decode(file_get_contents($argv[1]), true) as $r) {{
     $response = $kernel->handle($request);
     foreach ($response->headers->getCookies() as $c) {{ $jar[$c->getName()] = $c->getValue(); }}
     $out[] = ['status' => $response->getStatusCode(), 'location' => $response->headers->get('Location'),
-              'body' => substr((string) $response->getContent(), 0, 4000)];
+              'body' => substr((string) $response->getContent(), 0, {body})];
     $kernel->terminate($request, $response);
 }}
 echo json_encode($out, JSON_UNESCAPED_UNICODE);

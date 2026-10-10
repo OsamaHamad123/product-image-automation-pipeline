@@ -119,11 +119,60 @@ def test_discover_finds_the_include_sharjah_coop_ships_with():
 
 
 def test_sharjah_coop_is_not_read_outside_its_visit_time():
+    # its own crawl window (sitemaps.CRAWL_WINDOWS): not even robots.txt is asked outside it
     s = store("sharjahcoop")
     h = SitemapHarvester(http=FakeHttp({s.base_url + "/robots.txt": (200, fixture(ROBOTS["sharjahcoop"]))}),
                          sleep=lambda _: None, clock=lambda: 0.0, utc_now=lambda: OUTSIDE)
     rep = h.harvest(s)
-    assert rep.status == "outside_visit_time" and h.http.calls == [s.base_url + "/robots.txt"]
+    assert rep.status == "outside_visit_time" and h.http.calls == []
+    assert rep.visit_window == [[240, 525]] and "04:00-08:45 UTC" in rep.error
+
+
+# ---------------------------------------------------------------------------
+# Sharjah Co-op's crawl window (04:00-08:45 UTC, their off-peak hours), whatever its robots.txt says
+# ---------------------------------------------------------------------------
+
+def _sharjah_pages(lists=3):
+    s = store("sharjahcoop")
+    children = [s.base_url + f"/sitemaps/Product-en-AED-{i}.xml" for i in range(1, lists + 1)]
+    pages = {s.base_url + "/robots.txt": (200, b"User-agent: *\nDisallow: /en/checkout/\n"),   # no Visit-time line
+             s.sitemaps[0]: (200, index_of(*children))}
+    for i, url in enumerate(children):
+        pages[url] = (200, urlset(SAMPLES["sharjahcoop"]["product"][i]))
+    return s, children, pages
+
+
+@pytest.mark.parametrize("hour,minute,read", [(3, 59, False), (4, 0, True), (8, 44, True), (8, 45, False),
+                                              (12, 0, False), (23, 30, False)])
+def test_sharjah_coop_is_crawled_only_inside_its_window_even_when_robots_txt_has_none(hour, minute, read):
+    s, _children, pages = _sharjah_pages()
+    now = datetime(2026, 10, 6, hour, minute, tzinfo=timezone.utc)
+    h = SitemapHarvester(http=FakeHttp(pages), sleep=lambda _: None, clock=lambda: 0.0, utc_now=lambda: now)
+    rep = h.harvest(s, on_urls=len)
+    assert (rep.status == "ok", bool(h.http.calls)) == (read, read), rep.status
+
+
+def test_a_sharjah_coop_crawl_stops_when_its_window_ends():
+    s, children, pages = _sharjah_pages()
+    times = iter([datetime(2026, 10, 6, 8, 44, tzinfo=timezone.utc)] * 4)   # start, robots, the index, list 1
+    h = SitemapHarvester(http=FakeHttp(pages), sleep=lambda _: None, clock=lambda: 0.0,
+                         utc_now=lambda: next(times, datetime(2026, 10, 6, 8, 45, tzinfo=timezone.utc)))
+    rep = h.harvest(s, on_urls=len)
+    assert rep.status == "partial" and rep.truncated and "crawl window" in rep.error
+    assert h.http.calls == [s.base_url + "/robots.txt", s.sitemaps[0], children[0]]   # nothing after 08:45
+
+
+def test_the_crawl_window_is_a_setting_and_only_sharjah_coop_has_one(monkeypatch):
+    from catalog_match import sitemaps
+    assert sitemaps.crawl_window(store("sharjahcoop")) == (240, 525)
+    assert all(sitemaps.crawl_window(store(k)) is None for k in ("lulu", "spinneys", "talabat_mart_uae"))
+    monkeypatch.setenv("SHARJAHCOOP_CRAWL_WINDOW", "1200-1300")
+    assert sitemaps.crawl_window(store("sharjahcoop")) == (720, 780)
+    s, _children, pages = _sharjah_pages()
+    h = SitemapHarvester(http=FakeHttp(pages), sleep=lambda _: None, clock=lambda: 0.0, utc_now=lambda: OUTSIDE)
+    assert h.harvest(s, on_urls=len).status == "ok"                                  # 12:00 is inside now
+    monkeypatch.setenv("SHARJAHCOOP_CRAWL_WINDOW", "whenever")
+    assert sitemaps.crawl_window(store("sharjahcoop")) == (240, 525)                # unreadable: the default
 
 
 # ---------------------------------------------------------------------------

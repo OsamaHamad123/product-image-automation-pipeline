@@ -5,6 +5,7 @@
     <x-lq.run-card live />
     <x-lq.run-card state="running" text="الصفوف 62–101" count="24 / 40" :progress="60" />
     state: loading | idle | running | paused | error | unknown
+    :link="false" leaves out the link to the Run page (a reviewer can't open it: ReviewerLimits)
 --}}
 @props([
     'live' => false,
@@ -13,6 +14,7 @@
     'count' => null,
     'progress' => null,
     'href' => null,
+    'link' => true,
 ])
 @php
     $lqStates = [
@@ -39,5 +41,7 @@
     </div>
     <div class="lq-runcard__text"><span data-lq-run-text>{{ $lqText }}</span><span data-lq-run-sep aria-hidden="true" @if ($lqCount === null) hidden @endif> · </span><strong data-lq-run-count @if ($lqCount === null) hidden @endif>{{ $lqCount }}</strong></div>
     <div class="lq-runcard__bar" data-lq-run-bar role="progressbar" aria-label="تقدّم التشغيل" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ $lqPct ?? 0 }}" @if ($lqPct === null) hidden @endif><div class="lq-runcard__fill" data-lq-run-fill style="width: {{ $lqPct ?? 0 }}%"></div></div>
-    <a class="lq-runcard__link" href="{{ $lqHref }}" data-lq-run-link>{{ $lqCopy['link'] }}</a>
+    @if ($link)
+        <a class="lq-runcard__link" href="{{ $lqHref }}" data-lq-run-link>{{ $lqCopy['link'] }}</a>
+    @endif
 </section>
