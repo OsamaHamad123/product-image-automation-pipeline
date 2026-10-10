@@ -63,7 +63,7 @@ def calculate_phash(image_input) -> int:
         else:
             img = image_input
 
-        img = img.convert('L').resize((32, 32), Image.Resampling.LANCZOS)
+        img = _rgba_if_palette_alpha(img).convert('L').resize((32, 32), Image.Resampling.LANCZOS)
         img_array = np.array(img, dtype=np.float32)
 
         # 2D Discrete Cosine Transform (DCT)
@@ -172,6 +172,17 @@ COLOR_HIST_FAR = 1.0          # مسافة L1 بين المدرجين (0..2) ف�
 _COLOR_LENGTH = len(COLOR_SIGNATURE_VERSION) + 2 + 2 * COLOR_BINS
 
 
+def _rgba_if_palette_alpha(img):
+    """
+    صورة لوحة ألوان (P) فيها شفافية تصير RGBA قبل تحويلها لـ L أو RGB: التحويل المباشر يكتب تحذير PIL
+    «Palette images with Transparency expressed in bytes should be converted to RGBA images» بسجل الليلة.
+    الألوان نفسها (الشفافية كانت تُهمل في الحالتين)، فالبصمة لا تتغير.
+    """
+    if img.mode in ("P", "PA") and (img.mode == "PA" or "transparency" in img.info):
+        return img.convert("RGBA")
+    return img
+
+
 def color_signature(image_input):
     """
     بصمة ألوان اللوحة النهائية (نص 'h1' + نسبة البكسلات الملوّنة + مدرج تدرجات اللون، hex)، أو None عند الخطأ.
@@ -179,7 +190,8 @@ def color_signature(image_input):
     """
     try:
         img = Image.open(image_input) if isinstance(image_input, str) else image_input
-        hsv = np.asarray(img.convert("RGB").resize((64, 64), Image.Resampling.BOX).convert("HSV"), dtype=np.float64)
+        rgb = _rgba_if_palette_alpha(img).convert("RGB")
+        hsv = np.asarray(rgb.resize((64, 64), Image.Resampling.BOX).convert("HSV"), dtype=np.float64)
         h, s, v = hsv[..., 0], hsv[..., 1], hsv[..., 2]
         product = ~((s < 16) & (v > 240))                    # كل ما ليس خلفية بيضاء
         colourful = (s >= COLOR_SATURATION_MIN) & (v >= COLOR_VALUE_MIN)

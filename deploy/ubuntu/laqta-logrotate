@@ -1,7 +1,7 @@
 # logrotate drop-in for the Laqta logs. install.sh copies it to /etc/logrotate.d/laqta; logrotate runs it daily.
 #
 #   dashboard/storage/logs/laravel.log  written by Laravel (single channel) and by the Python pipeline (config.log_error_to_laravel)
-#   temp/*.log                          pipeline.log (dashboard run), local index refresh, ...
+#   temp/*.log                          pipeline.log (dashboard run), approval_worker.log, local index refresh, ...
 #   temp/nightly/*.log                  one nightly_YYYY-MM-DD.log per night
 #
 # First block: a log is rotated when it is a week old or bigger than 50 MB, whichever comes first; 8 old copies stay.

@@ -291,3 +291,44 @@ def test_curl_cffi_timeout_is_classified(monkeypatch, tmp_path):
     monkeypatch.setattr(fetch_mod.settings, "proxy_url", lambda: "")
     [res] = HttpFetcher(store_dir=str(tmp_path)).fetch([_cand("https://a.ae/t.jpg")], None)
     assert res.ok is False and res.error == "timeout"
+
+
+def _palette_png_with_alpha_bytes(size=200, seed=3):
+    """A PNG-8 product shot: palette image whose transparency is a bytes table (tRNS chunk)."""
+    rng = np.random.default_rng(seed)
+    img = Image.fromarray(rng.integers(0, 256, (size, size), dtype=np.uint8), "P")
+    img.putpalette([int(v) for v in rng.integers(0, 256, 768)])
+    img.info["transparency"] = bytes([0] * 8 + [255] * 248)
+    buf = io.BytesIO()
+    img.save(buf, "PNG")
+    return buf.getvalue()
+
+
+def test_a_palette_image_with_transparency_raises_no_pil_warning(fake, tmp_path):
+    """The nightly log showed PIL's «Palette images with Transparency expressed in bytes should be converted to RGBA
+    images»: such an image is RGBA from the download on, and its pHash and colour signature are the same as before."""
+    import warnings
+
+    import image_dedup_bktree
+
+    body = _palette_png_with_alpha_bytes()
+    with Image.open(io.BytesIO(body)) as probe:
+        probe.load()
+        assert probe.mode == "P" and isinstance(probe.info["transparency"], bytes)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            before = (f"{image_dedup_bktree.calculate_phash(probe):016x}", image_dedup_bktree.color_signature(probe))
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            # the shared helpers take the palette image as it is, too
+            assert (f"{image_dedup_bktree.calculate_phash(probe):016x}",
+                    image_dedup_bktree.color_signature(probe)) == before
+    fake({"https://a.ae/p8.png": [FakeResponse(200, body, "image/png")]})
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        [res] = HttpFetcher(store_dir=str(tmp_path)).fetch([_cand("https://a.ae/p8.png")], None)
+        assert res.ok is True, res.error
+        img = load_image(res)
+        assert img.mode == "RGBA" and img.size == (200, 200)
+        assert res.phash == before[0] and image_dedup_bktree.color_signature(img) == before[1]
+        img.convert("RGB")

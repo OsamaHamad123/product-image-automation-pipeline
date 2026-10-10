@@ -2179,6 +2179,59 @@ def relocate_queue_rows(moves):
     return 0
 
 
+# صف طابور خرج من الشيت (الإدراج الكامل: archive_stale_queue_rows) يبقى في الجدول بهذه الحالة بدل حذفه: لا يُسحب ولا
+# يُعرض في المراجعة ولا يُعد في عدادات اللوحة. منتج يعود لرقم صفه لاحقاً يعيده الإدراج للانتظار (plan_queue_row)
+STATUS_ARCHIVED = "archived"
+# حالات لا تُؤرشف أبداً: «مكتمل» قرار نهائي (اعتماد بشري أو نشر)؛ والأرشفة نفسها
+_NOT_ARCHIVABLE = ("completed", STATUS_ARCHIVED)
+
+
+def archive_stale_queue_rows(sheet_rows):
+    """
+    أرشفة صفوف طابور قديمة لم تعد في الشيت، بعد إدراج كل الشيت (بلا فلتر صفوف أو براند). sheet_rows:
+    {row_number: product_name} لكل صفوف الشيت التي فيها اسم منتج. يُؤرشف (status='archived'، بلا حذف) كل صف:
+    بلا sku_key (صفوف من قبل مفتاح المنتج: الإدراج يعطي كل صف من الشيت مفتاحه)، ورقمه بعد آخر صف في الشيت أو
+    منتجه غير منتج ذلك الصف (الاسم)، وليس مكتملاً ولا قيد المعالجة بحجز ساري، ولا له اعتماد بشري في review_decisions.
+    شيت فارغ (قراءة فشلت؟) لا يؤرشف شيئاً. تعيد عدد الصفوف المؤرشفة، وترفع أخطاء قاعدة البيانات.
+    """
+    sheet = {int(n): name for n, name in (sheet_rows or {}).items()}
+    if not sheet:
+        return 0
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        marks = ",".join(["%s"] * len(_NOT_ARCHIVABLE))
+        cursor.execute(
+            "SELECT q.id, q.`row_number`, q.product_name FROM automation_queue q "
+            f"WHERE (q.sku_key IS NULL OR q.sku_key = '') AND q.status NOT IN ({marks}) "
+            "AND NOT (q.status = 'processing' AND q.lease_until IS NOT NULL AND q.lease_until >= NOW()) "
+            "AND NOT EXISTS (SELECT 1 FROM review_decisions d WHERE d.`row_number` = q.`row_number` "
+            "AND d.action IN ('approved', 'manual_upload'))",
+            _NOT_ARCHIVABLE)
+        stale = [r["id"] for r in cursor.fetchall() or []
+                 if r["row_number"] not in sheet or not _same_text(r["product_name"], sheet[r["row_number"]])]
+        if not stale:
+            conn.rollback()
+            return 0
+        archived = 0
+        for start in range(0, len(stale), QUEUE_BATCH):
+            ids = stale[start:start + QUEUE_BATCH]
+            # الشرط يُعاد تحت التحديث: صف أخذه عامل أو أعطاه إدراج مفتاحاً منذ القراءة يُترك
+            archived += cursor.execute(
+                "UPDATE automation_queue SET status = %s, lease_until = NULL "
+                f"WHERE id IN ({','.join(['%s'] * len(ids))}) "
+                f"AND (sku_key IS NULL OR sku_key = '') AND status NOT IN ({marks}) "
+                "AND NOT (status = 'processing' AND lease_until IS NOT NULL AND lease_until >= NOW())",
+                (STATUS_ARCHIVED, *ids, *_NOT_ARCHIVABLE))
+        conn.commit()
+        return archived
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        _close(conn)
+
+
 CLAIMABLE_SQL ="(status='pending' OR (status='processing' AND (lease_until IS NULL OR lease_until<NOW())))"
 
 
