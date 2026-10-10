@@ -36,7 +36,8 @@ PNG = _png()
 
 
 def dashboard(env, requests_list, web=None, dns=None):
-    """[{status, body, headers}] for [(method, uri, params)], and the URLs the app requested from the (fake) web.
+    """[{status, body, cache, type, etag}] for [(uri, method, params, server)] (server: $_SERVER entries such as
+    HTTP_IF_NONE_MATCH), and the URLs the app requested from the (fake) web.
     web: url -> {status, body (bytes), headers, size (a body of that many bytes), throw (a message)}; any other URL
     answers 404. dns: host -> addresses (else a public address)."""
     spec = {"requests": requests_list, "dns": dns or {}, "web": {}}
@@ -68,10 +69,12 @@ $fakes['*'] = Http::response('not found', 404);
 Http::fake($fakes);
 $out = [];
 foreach ($spec['requests'] as $r) {{
-    $request = Illuminate\\Http\\Request::create($r[0], $r[1], $r[2] ?? [], [], [], ['HTTP_ACCEPT' => 'application/json']);
+    $server = array_merge(['HTTP_ACCEPT' => 'application/json'], $r[3] ?? []);
+    $request = Illuminate\\Http\\Request::create($r[0], $r[1], $r[2] ?? [], [], [], $server);
     $response = $kernel->handle($request);
     $out[] = ['status' => $response->getStatusCode(), 'body64' => base64_encode((string) $response->getContent()),
-              'cache' => $response->headers->get('Cache-Control'), 'type' => $response->headers->get('Content-Type')];
+              'cache' => $response->headers->get('Cache-Control'), 'type' => $response->headers->get('Content-Type'),
+              'etag' => $response->headers->get('ETag')];
     $kernel->terminate($request, $response);
 }}
 $requested = [];

@@ -193,6 +193,8 @@
 
     // طلب JSON بمهلة وبنتيجة موحدة: { ok, status, data } — لا يرمي إلا عند الإلغاء (AbortError).
     // options.keepalive: الطلب بيكمل ولو انسكّرت الصفحة (اعتماد محجوز للتراجع وقت الصفحة تختفي)
+    // options.cache: وضع كاش المتصفح (الافتراضي no-store). قائمة المنتجات بتبعت 'no-cache': المتصفح بيسأل الخادم
+    // بالـ ETag اللي معه، وجواب 304 بيوصل لهون كأنه 200 بنفس الجسم المخزن
     async function requestJson(url, options) {
         options = options || {};
         const headers = Object.assign({ Accept: 'application/json', 'X-CSRF-TOKEN': csrfToken() }, options.headers || {});
@@ -204,7 +206,7 @@
         let res;
         try {
             const init = { method: options.method || (body ? 'POST' : 'GET'), headers: headers, body: body,
-                           signal: options.signal, credentials: 'same-origin', cache: 'no-store' };
+                           signal: options.signal, credentials: 'same-origin', cache: options.cache || 'no-store' };
             if (options.keepalive) init.keepalive = true;
             res = await fetch(url, init);
         } catch (err) {
