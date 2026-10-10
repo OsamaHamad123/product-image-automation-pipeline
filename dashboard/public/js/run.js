@@ -559,7 +559,8 @@
 
     /*
      * deps: fetchJson(url, opts) -> Promise<{ok,status,data}>, renderLive(view), renderPlan(view), renderStart(view),
-     * confirm(text) -> bool, toast(text, variant), now() -> epoch seconds, schedule(fn, ms) -> handle.
+     * confirm(text) -> bool, toast(text, variant), now() -> epoch seconds, schedule(fn, ms) -> handle,
+     * hidden() -> true while the tab is hidden (optional).
      */
     function createController(deps) {
         var state = {
@@ -612,9 +613,15 @@
             });
         }
 
+        // تبويب مخفي: ما في طلب، الدورة بتضل ماشية بلا شبكة؛ لما يرجع ظاهر mount بيسأل فوراً (visibilitychange)
         function loop() {
+            if (deps.hidden && deps.hidden()) {
+                state.timer = deps.schedule(loop, state.pollMs || POLL_IDLE_MS);
+                return;
+            }
             poll().then(function (view) {
                 var ms = view && C.isActive(view.phase) ? POLL_ACTIVE_MS : POLL_IDLE_MS;
+                state.pollMs = ms;
                 state.timer = deps.schedule(loop, ms);
             });
         }
@@ -1552,7 +1559,8 @@
             confirm: function (text) { return C.ask(text); },
             toast: C.toast,
             now: function () { return Date.now() / 1000; },
-            schedule: function (fn, ms) { return root.setTimeout(fn, ms); }
+            schedule: function (fn, ms) { return root.setTimeout(fn, ms); },
+            hidden: function () { return !!doc.hidden; }
         });
 
         // Scope, brand, rows and the two options feed the plan.

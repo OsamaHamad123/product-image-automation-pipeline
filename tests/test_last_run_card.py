@@ -104,6 +104,17 @@ def test_the_card_reads_the_report_python_writes(tmp_path):
     assert _php(f"$out = HealthController::lastRunRow({json.dumps(str(tmp_path / 'bad.json'))});") is None
 
 
+@pytest.mark.skipif(PHP is None, reason="php is not installed")
+def test_the_card_counts_the_approved_links_that_vanished_and_came_back(tmp_path):
+    path = tmp_path / "last_report.json"
+    import run_report
+
+    run_report.write_last_report(_night_report(attempts=[{"stop_reason": None, "run_id": "r1", "links_restored": 8}]),
+                                 str(path))
+    card = _php(f"$out = HealthController::lastRunCard(HealthController::lastRunRow({json.dumps(str(path))}));")
+    assert card["summary"] == "بانتظار المراجعة 90 · ما انلقت 20 · فشل 8 · 8 روابط معتمدة اختفت من الشيت ورجعت"
+
+
 def test_the_health_controller_reads_no_table():
     text = HEALTH_PHP.read_text(encoding="utf-8")
     assert "DB::" not in text and "select(" not in text.lower()

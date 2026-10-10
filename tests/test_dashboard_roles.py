@@ -136,6 +136,27 @@ def test_a_reviewer_sees_no_admin_links(env):
     assert "&quot;retry&quot;:&quot;&quot;" in as_reviewer["body"] and "/api/failures/retry" in as_admin["body"]
 
 
+@pytest.mark.parametrize("role", ["admin", "reviewer"])
+def test_both_roles_log_out_from_the_phone_tab_bar(env, role):
+    """«حسابي» on the phone tab bar: its «خروج» submits the sidebar's logout form (a POST to the form's action with its
+    CSRF field), which logs either role out; the run status dot is the owner's only."""
+    environ, _calls, _db = env
+    name = ADMIN if role == "admin" else REVIEWER
+    password = password_of(artisan(environ, "laqta:user", name, f"--role={role}"))
+    _login, home = run(environ, [login(name, password), ["GET", "/"]], body=400000)
+    page = home["body"]
+    assert home["status"] == 200 and "حسابي" in page and "data-lq-account-toggle" in page
+    form = re.search(r'<form class="lq-sidebar__user" id="lqLogoutForm" method="POST" action="([^"]+)">\s*'
+                     r'<input type="hidden" name="_token" value="([^"]+)"', page)
+    assert form and 'type="submit" form="lqLogoutForm">خروج</button>' in page
+    assert ("data-lq-run-dot" in page) is (role == "admin")
+    action, token = form.groups()
+    path = "/" + action.split("://", 1)[-1].split("/", 1)[1]
+    _login, _home, logout, after = run(environ, [login(name, password), ["GET", "/"], ["POST", path, {"_token": token}],
+                                               ["GET", "/catalog"]])
+    assert logout["status"] == 302 and after["status"] == 302 and "/login" in (after["location"] or "")
+
+
 def test_the_role_flags_of_laqta_user(env):
     environ, _calls, db = env
     out = artisan(environ, "laqta:user", REVIEWER, "--role=reviewer")
