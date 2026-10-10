@@ -33,8 +33,10 @@
             <div class="lq-card">
                 <div class="lq-card__body">
                     <h1 class="lq-card__title" style="margin-bottom: 16px;">تسجيل الدخول</h1>
-                    @if ($errors->any())
-                        <div class="lq-alert lq-alert--danger" role="alert" style="margin-bottom: 16px;">
+                    {{-- a failed login: both fields point at the alert (aria-describedby) and the username field gets the focus (autofocus) --}}
+                    @php($loginFailed = $errors->any())
+                    @if ($loginFailed)
+                        <div class="lq-alert lq-alert--danger" role="alert" id="lq-login-error" style="margin-bottom: 16px;">
                             <div class="lq-alert__body">{{ $errors->first() }}</div>
                         </div>
                     @endif
@@ -43,11 +45,13 @@
                         <label class="lq-field">
                             <span class="lq-field__label">اسم المستخدم</span>
                             <input class="lq-input" type="text" name="username" value="{{ old('username') }}"
-                                   autocomplete="username" autocapitalize="none" spellcheck="false" required autofocus dir="ltr">
+                                   autocomplete="username" autocapitalize="none" spellcheck="false" required autofocus dir="ltr"
+                                   @if ($loginFailed) aria-invalid="true" aria-describedby="lq-login-error" @endif>
                         </label>
                         <label class="lq-field">
                             <span class="lq-field__label">كلمة السر</span>
-                            <input class="lq-input" type="password" name="password" autocomplete="current-password" required dir="ltr">
+                            <input class="lq-input" type="password" name="password" autocomplete="current-password" required dir="ltr"
+                                   @if ($loginFailed) aria-invalid="true" aria-describedby="lq-login-error" @endif>
                         </label>
                         <label class="lq-login__remember">
                             <input type="checkbox" name="remember" value="1">

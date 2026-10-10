@@ -32,10 +32,13 @@
             <input type="hidden" name="section" value="auto-publish">
             <x-lq.switch name="auto_publish_enabled" value="true" label="تفعيل النشر الآلي" :checked="$ap['enabled']"
                 :disabled="(bool) $dbError || (!$ap['enabled'] && !$ap['can_enable'])"
-                data-autopub-switch :data-confirm-on="$switchOnText" :data-confirm-off="$switchOffText" />
+                data-autopub-switch :data-confirm-on="$switchOnText" :data-confirm-off="$switchOffText"
+                :aria-invalid="isset($fieldErrors['auto_publish_enabled']) ? 'true' : null"
+                :aria-describedby="isset($fieldErrors['auto_publish_enabled']) ? $fieldErrorId('auto_publish_enabled') : null" />
             <button type="submit" class="lq-btn lq-btn--secondary lq-btn--sm lq-autopub__save" data-autopub-save>حفظ</button>
         </form>
     </div>
+    {{ $fieldError('auto_publish_enabled') }}
 
     @if ($ap['status'] === 'error')
         <x-lq.alert variant="danger" title="ما قدرنا نحسب دقة الماركات:" :action-href="route('dashboard.settings') . '?tab=auto-publish'" action-label="جرّب مرة تانية">ما قدرنا نوصل لبيانات النظام، فالتفعيل موقّف لحتى نقدر نتأكد. جرّب بعد شوي، وإذا ضل بلّغ المطوّر.</x-lq.alert>

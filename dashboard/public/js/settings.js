@@ -8,6 +8,8 @@
  * - معالجة الصور: with background removal off, «رجّع عزل الخلفية (…)» POSTs /api/settings/bg-method {method}.
  * - Unsaved changes: a changed card shows «ما انحفظ»; saving another card or leaving the page asks first. A save
  *   lands back on its card (the redirect's #id) or where the page was (the JSON saves keep the scroll position).
+ * - A refused value: the first field the server marked (aria-invalid, its message under it) gets the focus.
+ * - On a phone the tab row keeps the open tab in view and fades the edge that hides more tabs.
  * View helpers are pure (window.LaqtaSettings, used by the node tests); the DOM code sets text only.
  */
 (function () {
@@ -151,10 +153,35 @@
 
     var page = document.querySelector('[data-settings-page]');
 
-    /* On a phone the tabs are one scrolling row: keep the open tab in view. */
+    var reduceMotion = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+
+    /* On a phone the tabs are one scrolling row: the open tab is scrolled into the middle of the row (the row only, so
+       a landing on #card keeps its place), and the edge with more tabs behind it fades (data-more = start | end | both,
+       settings.css). In RTL scrollLeft runs from 0 at the start to negative at the end: its size is the distance. */
+    var tabsNav = page.querySelector('.lq-settings__tabs');
     var activeTab = page.querySelector('.lq-settings__tab.is-active');
-    if (activeTab && activeTab.scrollIntoView && window.matchMedia && window.matchMedia('(max-width: 980px)').matches) {
-        activeTab.scrollIntoView({ block: 'nearest', inline: 'center' });
+
+    function markTabsOverflow() {
+        if (!tabsNav) return;
+        var max = (tabsNav.scrollWidth || 0) - (tabsNav.clientWidth || 0);
+        var from = Math.abs(tabsNav.scrollLeft || 0);
+        var start = max > 1 && from > 1;
+        var end = max > 1 && from < max - 1;
+        var more = start && end ? 'both' : (start ? 'start' : (end ? 'end' : ''));
+        if (more) tabsNav.setAttribute('data-more', more);
+        else tabsNav.removeAttribute('data-more');
+    }
+
+    if (tabsNav && activeTab && activeTab.getBoundingClientRect && window.matchMedia
+        && window.matchMedia('(max-width: 980px)').matches) {
+        var navBox = tabsNav.getBoundingClientRect();
+        var tabBox = activeTab.getBoundingClientRect();
+        tabsNav.scrollLeft += (tabBox.left + tabBox.width / 2) - (navBox.left + navBox.width / 2);
+    }
+    if (tabsNav && typeof tabsNav.addEventListener === 'function') {
+        markTabsOverflow();
+        tabsNav.addEventListener('scroll', markTabsOverflow, { passive: true });
+        if (typeof window.addEventListener === 'function') window.addEventListener('resize', markTabsOverflow);
     }
 
     function toast(text, variant) {
@@ -235,6 +262,23 @@
         Array.prototype.forEach.call(page.querySelectorAll('[data-settings-flash]'), function (alert) {
             toast(alert.textContent.replace(/\s+/g, ' ').trim(), alert.getAttribute('data-settings-flash'));
         });
+    }
+
+    // a refused value: its message sits under the field (data-settings-field-error, the field's aria-describedby);
+    // the first such field gets the focus and comes into view (no smooth scroll with reduced motion)
+    var firstError = page.querySelector('[data-settings-field-error]');
+    if (firstError) {
+        var errorFields = firstError.id ? page.querySelectorAll('[aria-describedby~="' + firstError.id + '"]') : [];
+        var errorField = null;
+        for (var ef = 0; ef < errorFields.length && !errorField; ef++) {
+            if (!errorFields[ef].disabled && (errorFields[ef].type !== 'radio' || errorFields[ef].checked)) errorField = errorFields[ef];
+        }
+        if (!errorField && errorFields.length && !errorFields[0].disabled) errorField = errorFields[0];
+        if (errorField && typeof errorField.focus === 'function') {
+            try { errorField.focus({ preventScroll: true }); } catch (e) { errorField.focus(); }
+        }
+        var errorTarget = errorField || firstError;
+        if (errorTarget.scrollIntoView) errorTarget.scrollIntoView({ block: 'center', behavior: reduceMotion ? 'auto' : 'smooth' });
     }
 
     // --- ربط الشيت ---------------------------------------------------------

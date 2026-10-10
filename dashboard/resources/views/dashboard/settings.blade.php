@@ -3,6 +3,9 @@
       $tab, $tabs     the active tab (?tab=sheet|keys|models|auto-publish|processing|advanced) and the tab list
       $dbError        set when system_settings cannot be read: the page says so and nothing can be saved
       $flash          success / error / warnings of the last save
+      $fieldErrors    the same refused values next to their field (setting name => message, session field_errors):
+                      the partials put $fieldAttrs('name') on the control (aria-invalid + aria-describedby) and
+                      $fieldError('name') right under it; settings.js focuses the first one on load
       one of $sheet | $keys | $models | $autoPublish | $processing | $advanced for the active tab
       (resources/views/settings/*)
     Stored keys are never printed, not even in part: the keys tab shows «محفوظ / غير محفوظ» and an empty,
@@ -22,6 +25,27 @@
 @endpush
 
 @section('content')
+@php
+    // a refused value next to its field; the @include'd partials see these closures
+    $fieldErrors = $fieldErrors ?? [];
+    $fieldErrorId = fn (string $key) => 'lq-settings-error-' . preg_replace('/[^A-Za-z0-9_-]+/', '-', $key);
+    // on the control: aria-invalid + aria-describedby (the message of $errorKey, default its own) when refused;
+    // $describedBy (space-separated ids) always
+    $fieldAttrs = function (string $key, string $describedBy = '', ?string $errorKey = null) use ($fieldErrors, $fieldErrorId) {
+        $ids = trim($describedBy);
+        $invalid = isset($fieldErrors[$key]);
+        if ($invalid) {
+            $ids = trim($fieldErrorId($errorKey ?? $key) . ' ' . $ids);
+        }
+        $html = ($invalid ? 'aria-invalid="true" ' : '') . ($ids !== '' ? 'aria-describedby="' . e($ids) . '"' : '');
+        return new \Illuminate\Support\HtmlString(trim($html));
+    };
+    // right under the control: the message (nothing when the value was not refused)
+    $fieldError = fn (string $key) => new \Illuminate\Support\HtmlString(isset($fieldErrors[$key])
+        ? '<span class="lq-field__error lq-settings-error" id="' . e($fieldErrorId($key)) . '" data-settings-field-error>'
+            . e($fieldErrors[$key]) . '</span>'
+        : '');
+@endphp
 <div class="lq-settings" data-settings-page data-tab="{{ $tab }}">
     <x-lq.page-header title="الإعدادات">
         <x-slot:actions><x-lq.button variant="secondary" icon="sparkle" :href="route('dashboard.setup')">جهّز لقطة خطوة بخطوة</x-lq.button></x-slot:actions>
