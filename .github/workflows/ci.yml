@@ -1,9 +1,9 @@
 name: CI
 
+# Pull requests only: the run after a merge to main repeated the PR's own run. «Run workflow» runs it by hand.
 on:
-  push:
-    branches: [main]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read

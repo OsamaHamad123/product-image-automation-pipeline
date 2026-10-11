@@ -1,13 +1,10 @@
 name: CodeQL
 
+# Pull requests to main only (no run after the merge, no weekly run). «Run workflow» runs it by hand.
 on:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
-  schedule:
-    # Weekly, so new queries run against code that has not changed.
-    - cron: "41 3 * * 1"
+  workflow_dispatch:
 
 permissions:
   contents: read
