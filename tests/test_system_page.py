@@ -305,7 +305,8 @@ def reviewer_env(system_env):
 @NEEDS_LARAVEL
 def test_a_reviewer_sees_only_the_status_group_and_is_bounced_from_admin_tabs(reviewer_env):
     environ, calls, password = reviewer_env
-    requests = [["POST", "/login", {"username": REVIEWER, "password": password}]]
+    from test_dashboard_roles import login
+    requests = [login(REVIEWER, password)]
     requests += [["GET", f"/system?tab={tab}"] for tab in ALL_TABS]
     requests += [["GET", "/settings?tab=keys"], ["GET", "/setup?step=keys"], ["GET", "/system-diagnostics"],
                  ["GET", "/api/setup/state"], ["POST", "/api/setup/progress", {"action": "done"}],
