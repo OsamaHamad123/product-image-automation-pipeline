@@ -2627,6 +2627,23 @@ a.lq-btn[aria-disabled="true"] {
     }
 }
 
+/* A phone on its side (about 390px tall): the tab bar puts each icon beside its label, 48px instead of 64px */
+@media (max-width: 980px) and (orientation: landscape) and (max-height: 500px) {
+    :root {
+        --lq-tabbar-h: calc(48px + env(safe-area-inset-bottom, 0px));
+    }
+
+    .lq-body .lq-nav__item,
+    .lq-nav__item {
+        flex-direction: row;
+        gap: var(--lq-space-2);
+    }
+
+    .lq-nav__badge {
+        inset-block-start: 2px;
+    }
+}
+
 @media (max-width: 560px) {
     :root {
         --lq-card-pad: var(--lq-space-4);
@@ -2860,6 +2877,42 @@ a.lq-btn[aria-disabled="true"] {
 
     .lq-goto__hint {
         display: none;
+    }
+
+    /* iOS zooms the page on focus when a field's text is under 16px: every field is --lq-fs-lg (16px) on touch */
+    .lq-body .lq-input,
+    .lq-body .lq-select,
+    .lq-body .lq-textarea,
+    .lq-body .lq-search__input,
+    .lq-body .lq-goto__input,
+    .lq-input,
+    .lq-select,
+    .lq-textarea {
+        font-size: var(--lq-fs-lg);
+    }
+
+    /* a checkbox, radio or switch row is tapped by its whole label: 44px tall, not the 18–26px of the text line */
+    .lq-check,
+    .lq-switch,
+    label.lq-login__remember {
+        min-height: 44px;
+    }
+
+    /* links and «تفاصيل» toggles that stand on their own line: a 44px tap row (24px at least for the ones in a sentence) */
+    .lq-body .lq-alert__action,
+    .lq-body a.lq-notices__text {
+        display: inline-flex;
+        align-items: center;
+        min-height: 44px;
+    }
+
+    .lq-body .lq-link {
+        padding-block: var(--lq-space-1);
+    }
+
+    .lq-body details > summary:not([class]),
+    .lq-body details > summary.lq-link {
+        padding-block: var(--lq-space-3);
     }
 }
 
