@@ -474,7 +474,7 @@ out.text = wsText();
     assert len(said) == 1 and said[0].startswith("انعتمدت صورة «")             # once per session, as information
     assert [v for v, t in out["toasts"] if "بدون عزل الخلفية" in t] == ["info"]
     assert "تم الاعتماد." in out["text"] and "انعتمدت بدون عزل الخلفية:" in out["text"]
-    assert "الخلفية لم تُعزل" not in out["text"]
+    assert "الخلفية ما انعزلت" not in out["text"]
 
 
 # ---------------------------------------------------------------------------

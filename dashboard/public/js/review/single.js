@@ -708,11 +708,11 @@
                     R.toast(`انعتمدت صورة «${job.label}» رغم ملاحظات فحص القص: ${notes.flagTexts.join('، ') || 'ملاحظات العرض'}.`
                             + (sheet.state && sheet.state !== 'written' ? ` ${sheet.text}` : ''), 'warning', 9000);
                 } else if (notes.bgFailed) {
-                    const sheetPart = sheet.state === 'written' ? 'وكُتب رابطها في الشيت بعلامة «بحاجة مراجعة».' : sheet.text;
-                    R.toast(`اعتُمدت صورة «${job.label}» ولم تُعزل خلفيتها${sheetPart ? '، ' + sheetPart : '.'}${flagsPart} تجدها في رقاقة «الخلفية لم تُعزل».`,
+                    const sheetPart = sheet.state === 'written' ? 'وانكتب رابطها بالشيت بعلامة «بحاجة مراجعة».' : sheet.text;
+                    R.toast(`انعتمدت صورة «${job.label}» بس خلفيتها ما انعزلت${sheetPart ? '، ' + sheetPart : '.'}${flagsPart} بتلاقيها برقاقة «الخلفية ما انعزلت».`,
                             'warning', 9000);
                 } else if (sheet.state && sheet.state !== 'written') {
-                    R.toast(`اعتُمدت صورة «${job.label}» ${sheet.text}`, sheet.tone, 12000);
+                    R.toast(`انعتمدت صورة «${job.label}» ${sheet.text}`, sheet.tone, 12000);
                 }
                 if (notes.bgSkipped && !S.bgSkippedSaid) {
                     // مرة بالجلسة: كل اعتماد بعده بينتشر متل ما هو، واللوحة النهائية بتقولها لكل منتج
@@ -726,7 +726,7 @@
                 }
                 if (notes.duplicate) {
                     const who = notes.duplicateOf.length ? `: ${notes.duplicateOf.map(n => `«${n}»`).join('، ')}` : '';
-                    R.toast(`صورة «${job.label}» نفسها منشورة لمنتج آخر${who}. تأكد أنها ليست صورة منتج مختلف.`, 'warning', 12000);
+                    R.toast(`صورة «${job.label}» نفسها منشورة لمنتج آخر${who}. تأكد إنها مش صورة منتج مختلف.`, 'warning', 12000);
                 }
             }
         } else {
@@ -741,9 +741,9 @@
                 R.toast(`ما انعتمدت صورة «${job.label}»: ${job.quality.text}`
                         + (job.quality.allowed ? ' بتقدر تعتمدها رغم هيك من لوحة الاعتمادات بعد ما تراجعها.' : ''), 'danger', 12000);
             } else if (job.stale && job.stale.replaceable === false) {
-                R.toast(`لم تُعتمد صورة «${job.label}»: ${job.stale.text}`, 'danger', 12000);
+                R.toast(`ما انعتمدت صورة «${job.label}»: ${job.stale.text}`, 'danger', 12000);
             } else if (job.stale) {
-                R.toast(`لم تُعتمد صورة «${job.label}»: ${job.stale.text} تستطيع استبدالها من لوحة الاعتمادات بعد التأكد.`, 'danger', 12000);
+                R.toast(`ما انعتمدت صورة «${job.label}»: ${job.stale.text} فيك تستبدلها من لوحة الاعتمادات بعد ما تتأكد.`, 'danger', 12000);
             } else if (String(job.detail || '').indexOf(R.PRODUCT_CHANGED) >= 0) {
                 R.toast(`${R.PRODUCT_CHANGED}: «${job.label}»`, 'danger', 9000);
             }
@@ -922,8 +922,8 @@ ${candidate.url}` : item.key, productKey: item.key, stay: stay,
         sess.rejected.add(job.candidate.url);
         sess.rejectedWhy.set(job.candidate.url, job.reason);
         if (outcome.kept) sess.note = `رفضتها («${why}») وسجّلنا السبب. الصورة المعتمدة قبل بتضل زي ما هي.`;
-        else if (!outcome.requeued) sess.note = `رفضتها («${why}») وسجّلنا السبب، ولن نقترحها لهذا المنتج مرة أخرى. باقي الصور ما زالت للمراجعة${left}.`;
-        else sess.note = `رفضتها («${why}») وسجّلنا السبب. المنتج رجع للطابور ورح ينبحث عنه من جديد بالتشغيل الجاي؛ وإذا في صورة صحيحة تحت، اختارها واعتمدها هلق.`;
+        else if (!outcome.requeued) sess.note = `رفضتها («${why}») وسجّلنا السبب، وما رح نقترحها لهالمنتج مرة ثانية. باقي الصور لسا للمراجعة${left}.`;
+        else sess.note = `رفضتها («${why}») وسجّلنا السبب. رجع للطابور ليندوّر عليه بالتشغيل الجاي، أو اختار صورة صحيحة من تحت واعتمدها هلق.`;
     }
 
     // «تراجع» من إشعار الرفض بالخلفية: بلا سؤال. الطلب لسا بالدور أو عم ينبعت: بينشال الرفض لما يخلص (settleJob)؛
@@ -1037,7 +1037,7 @@ ${candidate.url}` : item.key, productKey: item.key, stay: stay,
                 S.local.set(key, 'rejected');
             } else {
                 job.dropped = dropCandidate(key, url);
-                message = `انرفضت الصورة وسجّلنا السبب. باقي الصور ما زالت للمراجعة${left}.`;
+                message = `انرفضت الصورة وسجّلنا السبب. باقي الصور لسا للمراجعة${left}.`;
             }
         }
         // «تراجع» انضغط والطلب ماشي: ما في داعي نحكي عن نتيجة رفض رح ينشال
@@ -1233,6 +1233,12 @@ ${candidate.url}` : item.key, productKey: item.key, stay: stay,
         unknown: ['lq-check-row__status--unknown', 'minus', 'ما في معلومة']
     };
 
+    // التفصيل تحت سطر قصير: <details class="rv-details"> بـ«تفاصيل» (متل صفحات الإعدادات)، ما بيطوّل الشاشة
+    function moreDetails(text, extraClass) {
+        return el('details', { className: 'rv-details' + (extraClass ? ` ${extraClass}` : '') },
+                  [el('summary', { text: 'تفاصيل' }), el('span', { text: text })]);
+    }
+
     function alertBox(variant, title, text, extra) {
         const icons = { info: 'info', warning: 'alert', danger: 'alert', success: 'check', neutral: 'info' };
         return el('div', { className: `lq-alert lq-alert--${variant} rv-alert`, role: variant === 'danger' ? 'alert' : null }, [
@@ -1291,7 +1297,7 @@ ${candidate.url}` : item.key, productKey: item.key, stay: stay,
     function explainList(c, compact) {
         const lines = R.explainPick(c);
         if (!lines.length) return null;
-        return el('ul', { className: 'rv-explain' + (compact ? ' rv-explain--compact' : ''), 'aria-label': 'لماذا هذه الصورة' },
+        return el('ul', { className: 'rv-explain' + (compact ? ' rv-explain--compact' : ''), 'aria-label': 'ليش هالصورة' },
                   lines.map(x => el('li', { className: 'rv-explain__chip', dataset: { explain: x.key } },
                                     [icon('check', 12, 2.4), el('span', { text: x.text })])));
     }
@@ -1312,7 +1318,7 @@ ${candidate.url}` : item.key, productKey: item.key, stay: stay,
         const isSystem = !!sysUrl && pick.url === sysUrl && !isExtra(pick);
         const where = R.storeOf(pick);
         const bgFailed = item.base === 'bg_failed' && pick.url === R.bgFailedLink(item.product);
-        const badgeText = bgFailed ? 'معتمدة · الخلفية لم تُعزل' : isSystem ? 'مقترحة من النظام' : pick.source === 'manual' ? 'رابط من عندك'
+        const badgeText = bgFailed ? 'معتمدة · الخلفية ما انعزلت' : isSystem ? 'مقترحة من النظام' : pick.source === 'manual' ? 'رابط من عندك'
             : pick.source === 'upload' ? 'صورة من جهازك' : 'اختيارك';
         const source = R.safeHttpUrl(pick.page_url);
         const res = pick.width && pick.height ? `${pick.width} × ${pick.height}` : '';
@@ -1378,7 +1384,8 @@ ${candidate.url}` : item.key, productKey: item.key, stay: stay,
                                                                 : icon('image', 22, 1.6)]),
             el('div', { className: 'rv-preview__text' }, [
                 el('strong', { className: 'rv-h3', text: 'المصدر قبل عزل الخلفية' }),
-                el('span', { text: `هذه الصورة كما هي في مصدرها، وليست النتيجة النهائية. عند الاعتماد تُعزل خلفيتها وتوضع على لوحة بيضاء ${S.cfg.canvas}×${S.cfg.canvas} ثم تُرفع إلى Cloudinary.` })
+                el('span', { text: 'هيك هي بمصدرها، مش النتيجة النهائية.' }),
+                moreDetails(`عند الاعتماد بتنعزل خلفيتها وبتنحط على لوحة بيضا ${S.cfg.canvas}×${S.cfg.canvas}، وبعدين بتنرفع (Cloudinary).`)
             ])
         ]);
     }
@@ -1399,7 +1406,7 @@ ${candidate.url}` : item.key, productKey: item.key, stay: stay,
         return el('section', { className: 'rv-panel rv-checks', 'aria-label': 'الشيت مقابل الصورة' }, [
             el('div', { className: 'rv-checks__head' }, [
                 el('h3', { className: 'rv-h3', text: 'الشيت مقابل الصورة' }),
-                el('span', { className: 'rv-checks__src' }, [icon('sparkle', 14), el('span', { text: res.read ? 'قراءة الملصق' : 'نموذج القراءة ما قرأ هالصورة' })])
+                el('span', { className: 'rv-checks__src' }, [icon('sparkle', 14), el('span', { text: res.read ? 'قارئ الملصق' : 'قارئ الملصق ما قرأ هالصورة' })])
             ]),
             el('div', { className: 'rv-checks__cols', 'aria-hidden': 'true' }, [el('span'), el('span', { text: 'بالشيت' }), el('span', { text: 'بالصورة' }), el('span')]),
             el('div', { className: 'lq-checks' }, res.rows.map(checkRow)),
@@ -1440,7 +1447,7 @@ ${candidate.url}` : item.key, productKey: item.key, stay: stay,
             el('span', { className: 'rv-alt__store', text: isExtra(c) ? note.text : [where.store, where.market].filter(Boolean).join(' · ') }),
             R.galleryNote(c) ? el('span', { className: 'rv-gallery', text: R.galleryNote(c) }) : null,
             showNote ? el('span', { className: `rv-alt__note rv-tone--${note.tone}`, text: note.text }) : null,
-            why ? el('span', { className: `rv-alt__why rv-tone--${why.tone}`, title: why.code }, [
+            why ? el('span', { className: `rv-alt__why rv-tone--${why.tone}`, title: [why.more, why.code].filter(Boolean).join(' · ') }, [
                 el('span', { className: 'rv-alt__why-k', text: 'ليش ما انختارت: ' }), el('span', { text: why.text })]) : null,
             // كل تحذيرات الصورة البديلة (الأول في السطر السابق)، وأدلتها
             !isExtra(c) && c.warnings.length > 1 && !['rejected', 'excluded'].includes(c.status)
@@ -1458,9 +1465,9 @@ ${candidate.url}` : item.key, productKey: item.key, stay: stay,
         const n = Math.min(cands.length, 9);
         const keys = n > 1 ? `1–${n}` : '1';
         return el('section', { className: 'rv-panel rv-alts' + (noPick ? ' rv-alts--nopick' : ''), id: noPick ? 'rvNoPickGrid' : null,
-                               'aria-label': noPick ? 'الصور اللي لقاها البحث' : 'صور أخرى وجدها البحث' }, [
+                               'aria-label': noPick ? 'الصور اللي لقاها البحث' : 'صور ثانية لقاها البحث' }, [
             el('div', { className: 'rv-alts__head' }, [
-                el('h3', { className: 'rv-h3', text: noPick ? 'الصور اللي لقاها البحث' : 'صور أخرى وجدها البحث' }),
+                el('h3', { className: 'rv-h3', text: noPick ? 'الصور اللي لقاها البحث' : 'صور ثانية لقاها البحث' }),
                 el('span', { className: 'rv-alts__hint', text: noPick ? `ما في صورة مختارة: اختار وحدة (${keys} أو اضغط عليها)، وبعدين Enter لاعتمادها`
                     : n > 1 ? `اضغط 1–${n} لعرض صورة، و Enter لاعتمادها` : 'اضغط 1 لعرضها، و Enter لاعتمادها' })
             ]),
@@ -1564,7 +1571,7 @@ ${candidate.url}` : item.key, productKey: item.key, stay: stay,
             } else if (!search.selectedUrl && why) {
                 out.push(noPickBanner(why));
             } else if (search.decision === 'VERIFIER_DOWN') {
-                out.push(alertBox('warning', 'نموذج القراءة مش متاح هلق:', 'ما في فحص بصري لهالنتائج، راجع الصور بنفسك قبل الاعتماد.'));
+                out.push(alertBox('warning', 'قارئ الملصق مش متاح هلق:', 'ما في فحص بصري لهالنتائج، راجع الصور بنفسك قبل الاعتماد.'));
             } else if (search.decision === 'AUTO_PUBLISH') {
                 out.push(alertBox('success', 'مطابقة مؤكدة بالكامل.', 'راجعها واعتمدها.'));
             } else if (!search.selectedUrl) {
@@ -1599,8 +1606,9 @@ ${candidate.url}` : item.key, productKey: item.key, stay: stay,
         } else if (bucket === 'searching') {
             out.push(alertBox('neutral', 'قيد البحث:', 'التشغيل عم يدوّر على صور لهالمنتج هلق.'));
         } else if (bucket === 'bg_failed') {
-            out.push(alertBox('warning', 'الخلفية لم تُعزل:', 'اعتُمدت هذه الصورة ورُفعت، لكن عزل خلفيتها فشل، فرابطها في الشيت معلَّم «بحاجة مراجعة». '
-                + 'إن كانت الصورة سليمة فاعتمدها مرة أخرى لتُعاد محاولة عزل الخلفية؛ وإن كان فيها هالة أو بقايا خلفية أو قص فارفضها بالسبب المناسب.'));
+            out.push(alertBox('warning', 'الخلفية ما انعزلت:', 'انعتمدت وانرفعت بس عزل خلفيتها فشل، فرابطها بالشيت معلَّم «بحاجة مراجعة».', [
+                moreDetails('إذا الصورة سليمة اعتمدها مرة ثانية لنعيد عزل الخلفية؛ وإذا فيها هالة أو بقايا خلفية أو قص، ارفضها بالسبب المناسب.')
+            ]));
         } else if (bucket === 'stale' && hasCands) {
             out.push(alertBox('neutral', 'نتائج بحث سابق:', 'هالمنتج مش بانتظار المراجعة بالطابور، بس فيك تعتمد صورة منها.'));
         } else if (bucket === 'none' && hasCands && !systemPickUrl(item)) {
@@ -1761,8 +1769,8 @@ ${candidate.url}` : item.key, productKey: item.key, stay: stay,
             const notes = done.notes || { flagTexts: [], noteTexts: [], duplicate: false, duplicateOf: [], flags: [] };
             if (done.warning) {
                 const why = notes.flagTexts.length ? ` فحص القص: ${notes.flagTexts.join('، ')}.` : '';
-                const box = alertBox('warning', 'الخلفية لم تُعزل:', (sheet.state === 'written'
-                    ? 'كُتب الرابط في الشيت بعلامة «بحاجة مراجعة».' : 'الصورة بحاجة مراجعة: تجدها في رقاقة «الخلفية لم تُعزل».') + why);
+                const box = alertBox('warning', 'الخلفية ما انعزلت:', (sheet.state === 'written'
+                    ? 'انكتب الرابط بالشيت بعلامة «بحاجة مراجعة».' : 'الصورة بحاجة مراجعة: بتلاقيها برقاقة «الخلفية ما انعزلت».') + why);
                 if (notes.flags.length) box.setAttribute('title', notes.flags.join(' · '));
                 body.appendChild(box);
             }
@@ -1786,7 +1794,7 @@ ${candidate.url}` : item.key, productKey: item.key, stay: stay,
             }
             if (notes.duplicate) {
                 const who = notes.duplicateOf.length ? `: ${notes.duplicateOf.map(n => `«${n}»`).join('، ')}` : '';
-                body.appendChild(alertBox('warning', 'الصورة نفسها لمنتج آخر:', `هذه الصورة منشورة أيضاً لمنتج آخر${who}. تأكد أنها ليست صورة منتج مختلف.`));
+                body.appendChild(alertBox('warning', 'الصورة نفسها لمنتج آخر:', `هالصورة منشورة كمان لمنتج آخر${who}. تأكد إنها مش صورة منتج مختلف.`));
             }
             const doneStage = el('div', { className: 'rv-final__stage' }, [R.img(done.link || done.url, 'الصورة المعتمدة', S.urls.imageProxy)]);
             body.appendChild(el('section', { className: 'rv-panel rv-final', dataset: { url: done.link } }, [
@@ -1898,12 +1906,13 @@ ${candidate.url}` : item.key, productKey: item.key, stay: stay,
         // ما يفعله الرفض وما يبقيه (cli_bridge.action_reject_image، عقد C2): السبب يُسجل والصورة لا تُقترح لهالمنتج مرة
         // ثانية؛ إذا بقي له صور ثانية يبقى بانتظار المراجعة فيها، وإلا يرجع للطابور؛ والصورة المعتمدة غيرها تبقى كما هي
         box.appendChild(el('span', { className: 'rv-reasons__note',
-                                     text: 'بنسجّل السبب وما بنرجع نقترح هالصورة لهالمنتج. إذا ضل له صور ثانية بيضل بانتظار مراجعتك فيها، وإلا بيرجع للطابور؛ والصورة المعتمدة قبل (إذا في) ما بتنلمس.' }));
+                                     text: 'بنسجّل السبب وما منرجع نقترحها لهالمنتج. الصورة المعتمدة قبل (إذا في) ما بتنلمس.' }));
+        box.appendChild(moreDetails('إذا ضل إله صور ثانية بيضل بانتظار مراجعتك فيها، وإلا بيرجع للطابور.', 'rv-reasons__note'));
         const item = currentItem();
         if (item && item.base === 'bg_failed') {
             // الأسباب التجميلية لا تستبعد المصدر من البحث (local_cache_db.get_rejections)
             box.appendChild(el('span', { className: 'rv-reasons__note',
-                                         text: 'هالة وبقايا الخلفية والقص أسباب تخص المعالجة: تُلغي هذا الاعتماد ويرجع المنتج للطابور، وقد يُقترح المصدر نفسه مرة أخرى.' }));
+                                         text: 'هالة وبقايا الخلفية والقص غلطات بالمعالجة: بتلغي هالاعتماد وبيرجع المنتج للطابور، وممكن ينقترح نفس المصدر مرة ثانية.' }));
         }
     }
 

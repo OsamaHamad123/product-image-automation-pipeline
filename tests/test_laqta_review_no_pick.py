@@ -142,14 +142,14 @@ out.approved = sel.map(c => [c.body.image_url, c.body.search_decision, c.body.ca
     assert "rv-product" in first.split() and "rv-nopick" in banner.split() and "rv-alts--nopick" in grid.split()
     assert out["order"] == [URLS[0], URLS[1], URLS[2]]                  # best-ranked first, the set-aside one last
     assert out["pressed"] == [False, False, False]                      # nothing pre-selected
-    assert out["why"] == ["ليش ما انختارت: قارئ الملصق ما تأكد، والشيت ما فيه حجم",
+    assert out["why"] == ["ليش ما انختارت: قارئ الملصق ما تأكد",
                           "ليش ما انختارت: الصفحة ما بتذكر الماركة",
                           None]                                 # the set-aside image's own line says why
-    assert out["notes"] == [None, "الصورة من متجر خارج الإمارات (قد تختلف العبوة)", "نموذج القراءة شاف منتج مختلف"]
+    assert out["notes"] == [None, "الصورة من متجر خارج الإمارات (قد تختلف العبوة)", "قارئ الملصق شاف منتج مختلف"]
     assert out["approveDisabled"] is True and out["selectsAfterEnter"] == 0
     # an explicit pick (2) shows that image as the choice; only then Enter approves it, as any approval
     assert out["picked"] == [URLS[1], False, [False, True, False]]
-    assert out["whyAfterPick"][0] == "ليش ما انختارت: قارئ الملصق ما تأكد، والشيت ما فيه حجم"
+    assert out["whyAfterPick"][0] == "ليش ما انختارت: قارئ الملصق ما تأكد"
     assert out["approved"] == [[URLS[1], "REVIEW_UNSELECTED", "eligible"]]
 
 
@@ -291,7 +291,7 @@ out.lines = [
 ];
 out.manual = R.whyNotPicked({ source: 'manual', url: 'x' }, prod);
 """, tmp_path)
-    assert out["lines"] == ["قارئ الملصق ما تأكد", "قارئ الملصق ما تأكد، والحجم غير مكتوب في الصفحة",
+    assert out["lines"] == ["قارئ الملصق ما تأكد", "قارئ الملصق ما تأكد",
                             "قارئ الملصق ما قرأها", "متجر خارج الإمارات", "باركود الصفحة مختلف عن الشيت",
                             "ما وصلت للثقة اللي بتخلينا نختارها لحالنا", "ما قدرنا نحمّلها"]
     assert out["manual"] is None

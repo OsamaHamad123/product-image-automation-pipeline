@@ -173,6 +173,26 @@
             return taken;
         }
 
+        // «تراجع» لطلب واحد من مجموعة محجوزة («آخر قراراتك»: بطاقة وحدة من اعتماد أو رفض بالجملة): هو بس بينشال، والباقي
+        // بيضل محجوز لآخر مهلته → الطلب اللي انشال أو null
+        function cancelJob(job) {
+            const i = job ? jobs.indexOf(job) : -1;
+            if (i < 0 || job.state !== 'held') return null;
+            const group = job.group;
+            const handler = cancelers.get(group) || options.onCancel;
+            jobs.splice(i, 1);
+            if (!jobs.some(j => j.state === 'held' && j.group === group)) heldGroupDone(group);
+            if (typeof handler === 'function') {
+                try {
+                    handler([job]);
+                } catch (err) {
+                    if (root.console) root.console.error(err);
+                }
+            }
+            notify();
+            return job;
+        }
+
         function bodySize(job) {
             if (typeof options.bodySize !== 'function') return null;
             const n = options.bodySize(job);
@@ -346,7 +366,7 @@
             };
         }
 
-        return { enqueue, enqueueMany, release, cancel, flush, retry, drop, dismiss, state, busy, accept, activeFor,
+        return { enqueue, enqueueMany, release, cancel, cancelJob, flush, retry, drop, dismiss, state, busy, accept, activeFor,
                  has: key => !!activeFor(key), sending: () => jobs.some(sentOrQueued),
                  // طلب برقمه لسا باللوحة أو محجوز («آخر قراراتك»)، أو null
                  get: id => jobs.find(j => j.id === id) || null };

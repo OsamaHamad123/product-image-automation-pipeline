@@ -23,7 +23,7 @@
     const FLAGS = [
         ['white', 'خلفية بيضا'],
         ['dark_halo', 'حواف فاتحة على الغامق'],
-        ['photoroom_unsure', 'PhotoRoom مش متأكد'],
+        ['photoroom_unsure', 'العزل مش متأكد'],
         ['glass', 'زجاج أو عبوة شفافة'],
         ['dark_rim', 'حواف غامقة على الفاتح'],
         ['low_res', 'دقة قليلة']
@@ -41,7 +41,9 @@
         opaque_backdrop: 'ضلت خلفية حول المنتج'
     });
     const THEMES = [['dark', 'غامق'], ['light', 'فاتح'], ['checker', 'مربعات']];
-    const PROVIDERS = { photoroom: 'PhotoRoom', rembg: 'القص المحلي (BiRefNet)', remove_bg_api: 'remove.bg', grabcut: 'GrabCut' };
+    // مين عمل القص: بكلمة الدور على الشاشة، واسم الخدمة بالتلميح بس
+    const PROVIDERS = { photoroom: 'بعزل الخلفية', rembg: 'بالقص المحلي', remove_bg_api: 'بعزل الخلفية', grabcut: 'بالقص المحلي البسيط' };
+    const PROVIDER_NAMES = { photoroom: 'PhotoRoom', rembg: 'rembg · BiRefNet', remove_bg_api: 'remove.bg', grabcut: 'GrabCut' };
     const SOURCES = { candidate: 'الصورة الأصلية المحفوظة', original: 'رابط الصورة الأصلي', master: 'الصورة المنشورة نفسها' };
     const ORIGINS = { gallery: 'من «فحص القص»', reprocess: 'من «صور قديمة بخلفية بيضا»' };
 
@@ -95,7 +97,7 @@
 
     /* The note under a new cut: who made it, from which source, its flags and what it cost. */
     function tryText(res) {
-        const parts = ['قص ' + (PROVIDERS[res.provider] || res.provider || 'جديد') + ' من ' + (SOURCES[res.source] || 'المصدر') + '.'];
+        const parts = ['قص جديد ' + (PROVIDERS[res.provider] ? PROVIDERS[res.provider] + ' ' : '') + 'من ' + (SOURCES[res.source] || 'المصدر') + '.'];
         if (res.flags && res.flags.length) parts.push('ملاحظات: ' + res.flags.map(flagText).join('، ') + '.');
         else parts.push('بلا ملاحظات.');
         if (count(res.paid_calls)) parts.push('كلّف ' + (count(res.paid_calls) === 1 ? 'طلب عزل واحد' : count(res.paid_calls) + ' طلبات عزل') + '.');
@@ -113,9 +115,9 @@
     function photoroomNote(methods) {
         if (!methods || methods.photoroom) return '';
         const why = String(methods.photoroom_reason || '');
-        if (why === 'no_key') return 'مفتاح PhotoRoom مش محفوظ.';
-        if (why.indexOf('paused') === 0) return 'PhotoRoom موقوف شوي لأنو رفض آخر طلب (رصيد أو حصة).';
-        return 'PhotoRoom مش جاهز هلق.';
+        if (why === 'no_key') return 'مفتاح عزل الخلفية (PhotoRoom) مش محفوظ.';
+        if (why.indexOf('paused') === 0) return 'عزل الخلفية موقوف شوي لأنو انرفض آخر طلب (رصيد أو حصة).';
+        return 'عزل الخلفية مش جاهز هلق.';
     }
 
     // ------------------------------------------------------------------
@@ -240,13 +242,13 @@
             const prNote = photoroomNote(methods);
             const actions = el('div', { className: 'cq-card__actions' }, [
                 el('button', { type: 'button', className: 'lq-btn lq-btn--secondary lq-btn--sm', disabled: busy || !methods.photoroom,
-                    title: prNote || null, dataset: { action: 'photoroom' }, onclick: () => tryCut(item, 'photoroom', card) },
-                [R.icon('refresh', 16, 2), 'أعد القص بـPhotoRoom']),
+                    title: prNote || 'بـPhotoRoom', dataset: { action: 'photoroom' }, onclick: () => tryCut(item, 'photoroom', card) },
+                [R.icon('refresh', 16, 2), 'أعد عزل الخلفية']),
                 el('button', { type: 'button', className: 'lq-btn lq-btn--ghost lq-btn--sm', disabled: busy || !methods.local,
                     title: methods.local ? null : 'القص المحلي مش منزّل على هالجهاز.', dataset: { action: 'local' },
                     onclick: () => tryCut(item, 'local', card) }, [R.icon('sparkle', 16, 2), 'جرّب القص المحلي'])
             ]);
-            const hints = ['PhotoRoom بيكلّف طلب عزل واحد بالعادة.'];
+            const hints = ['إعادة العزل بتكلّف طلب عزل واحد بالعادة.'];
             hints.push(methods.local ? 'القص المحلي مجاني بس أبطأ.' : 'القص المحلي مش منزّل على هالجهاز.');
             if (prNote) hints.unshift(prNote);
             return [actions, el('p', { className: 'cq-card__hint', text: hints.join(' ') })];
@@ -257,7 +259,7 @@
             return el('div', { className: 'cq-card__new', dataset: { token: attempt.token } }, [
                 el('p', { className: 'cq-card__label', text: 'القص الجديد' }),
                 shots(attempt.preview, 'القص الجديد لـ ' + (item.product_name || '')),
-                el('p', { className: 'cq-card__msg', text: tryText(attempt) }),
+                el('p', { className: 'cq-card__msg', text: tryText(attempt), title: PROVIDER_NAMES[attempt.provider] || null }),
                 el('div', { className: 'cq-card__actions' }, [
                     el('button', { type: 'button', className: 'lq-btn lq-btn--primary lq-btn--sm', disabled: busy || !attempt.can_apply,
                         dataset: { action: 'apply' }, onclick: () => applyCut(item, attempt, card) }, [R.icon('check', 16, 2), 'اعتمد الجديد']),
@@ -303,7 +305,7 @@
         async function tryCut(item, method, card) {
             if (S.busy.has(item.id)) return;
             S.busy.add(item.id);
-            refreshCard(card, item, { text: method === 'photoroom' ? 'عم نقص بـPhotoRoom…' : 'عم نقص محلياً… ممكن ياخد دقيقة.' });
+            refreshCard(card, item, { text: method === 'photoroom' ? 'عم نعزل الخلفية…' : 'عم نقص محلياً… ممكن ياخد دقيقة.' });
             const res = await R.requestJson(urls.try, { method: 'POST', body: { id: item.id, method: method } });
             S.busy.delete(item.id);
             if (res.ok && res.data && res.data.status === 'success') {

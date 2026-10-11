@@ -25,7 +25,7 @@
         sheet_silent: 'الشيت ما حدد النوع',
         // listing_silent:<axis>=<value>: الشيت يذكر نوعاً لا تُظهره صفحة المتجر ولا قراءة الملصق
         listing_silent: 'الشيت بيذكر نوع ما بيبيّنه المتجر ولا الملصق: تأكد إنها نفس النوع',
-        vlm_unsure: 'نموذج القراءة غير متأكد من المطابقة',
+        vlm_unsure: 'قارئ الملصق مش متأكد من المطابقة',
         multipack_unit_image: 'الصورة لعبوة وحدة، والمنتج باكيت من أكثر من حبة: تأكد إنها مناسبة',
         // size_close:<الحجم على العلبة>/<حجم الشيت>: الحجمان متقاربان (ضمن السماحية) بس مش نفس الرقم
         size_close: 'الحجم على العلبة قريب من الشيت بس مش نفسه: تأكد وصحّح الشيت',
@@ -40,8 +40,8 @@
         // catalog_match.embeddings: الصورة بعيدة عن كل الصور المعتمدة للماركة وقريبة من صورة معتمدة لماركة ثانية
         brand_look_mismatch: 'شكل العبوة أقرب لماركة تانية: تأكد إنها نفس الماركة قبل الاعتماد',
         // للعرض فقط (decide.candidate_warnings): الشيت يذكر الحجم أو النوع ولم يؤكده دليل
-        size_unverified: 'الحجم غير مؤكد: لم تؤكده صفحة المتجر ولا قراءة الملصق',
-        variant_unverified: 'النوع غير مؤكد: لم تؤكده صفحة المتجر ولا قراءة الملصق',
+        size_unverified: 'الحجم مش مأكّد: لا صفحة المتجر ولا قارئ الملصق أكّدوه',
+        variant_unverified: 'النوع مش مأكّد: لا صفحة المتجر ولا قارئ الملصق أكّدوه',
         // main.DUPLICATE_WARNING: الصورة نفسها منشورة لمنتج آخر
         duplicate_image: 'الصورة نفسها منشورة لمنتج آخر: تأكد إنها مش صورة منتج مختلف'
     };
@@ -195,8 +195,8 @@
         WORKER_ERROR: 'صار خطأ غير متوقع أثناء التشغيل.',
         DOWNLOAD_FAILED: 'ما قدرنا نحمّل الصور من مواقعها.',
         SOCIAL_ONLY: 'المنتج ظاهر فقط بمنشورات تواصل اجتماعي ما بتنزل صورها.',
-        VERIFIER_DOWN: 'نموذج قراءة الملصق ما كان متاح وقت الفحص.',
-        RECHECK_NOT_FOUND: 'رجعنا فحصنا بنموذج قراءة الملصق وما لقينا صورة أحسن؛ الاقتراحات القديمة بتستنى عينك.',
+        VERIFIER_DOWN: 'قارئ الملصق ما كان متاح وقت الفحص.',
+        RECHECK_NOT_FOUND: 'رجعنا فحصنا بقارئ الملصق وما لقينا صورة أحسن؛ الاقتراحات القديمة بتستنى عينك.',
         SHEET_WRITE_FAILED: 'الصورة معتمدة، بس ما انكتب رابطها بالشيت؛ بينكتب بالتشغيل الجاي.',
         PROVIDER_DOWN: 'مصادر البحث ما كانت متاحة.',
         PRODUCT_TIMEOUT: 'البحث عن هالمنتج طوّل كتير، فوقّفناه. بنرجع نجرّب بعد يوم.',
@@ -222,7 +222,7 @@
     const SERVER_ERROR_TEXT = [
         [/Publishing the image failed/i, 'فشل النشر (عزل الخلفية أو الرفع أو الكتابة بالشيت).'],
         [/Uploading the image failed/i, 'فشل رفع الصورة من جهازك.'],
-        [/^upload_failed$/i, 'فشل رفع الصورة على Cloudinary.'],
+        [/^upload_failed$/i, 'ما زبط رفع الصورة: أعد المحاولة.'],
         [/^sheet_write_failed$/i, 'انرفعت الصورة، بس ما انكتب رابطها بالشيت.'],
         [/^processing_failed$/i, 'فشلت معالجة الصورة (عزل الخلفية).'],
         // مزوّد عزل الخلفية (image_processor: photoroom_* و removebg_*): ما انعزلت الخلفية فما نُشر شيء. الرصيد والمفتاح
@@ -520,7 +520,7 @@
         if (c.status === 'rejected') {
             const r = c.reasons;
             let text = 'استبعدها النظام';
-            if (r.some(x => /^vlm:MISMATCH/.test(x))) text = 'نموذج القراءة شاف منتج مختلف';
+            if (r.some(x => /^vlm:MISMATCH/.test(x))) text = 'قارئ الملصق شاف منتج مختلف';
             else if (r.some(x => /^download:host_slow$/.test(x))) text = 'موقع المتجر بطيء: تخطّيناها';
             else if (r.some(x => /^download:blocked_url$/.test(x))) text = 'رابطها مش آمن: ما نزّلناها';
             else if (r.some(x => /^download:/.test(x))) text = 'ما قدرنا نحمّلها';
@@ -539,8 +539,8 @@
         }
         if (c.source === 'manual') return { text: 'رابط من عندك', tone: 'info', detail: detail };
         if (c.source === 'upload') return { text: 'صورة من جهازك', tone: 'info', detail: detail };
-        if (c.vlm && c.vlm.decision === 'UNSURE') return { text: 'نموذج القراءة مش متأكد', tone: 'muted', detail: detail };
-        if (c.vlm && c.vlm.decision === 'MATCH') return { text: 'نموذج القراءة شافها مطابقة', tone: 'success', detail: detail };
+        if (c.vlm && c.vlm.decision === 'UNSURE') return { text: 'قارئ الملصق مش متأكد', tone: 'muted', detail: detail };
+        if (c.vlm && c.vlm.decision === 'MATCH') return { text: 'قارئ الملصق شافها مطابقة', tone: 'success', detail: detail };
         return { text: 'مطابقة محتملة', tone: 'muted', detail: detail };
     }
 
@@ -903,7 +903,7 @@
         alpha_haze: 'هالة أو ضباب خفيف حول حواف المنتج سيظهر في الصورة',
         kept_shadow: 'ظل المنتج سيبقى ظاهراً في الصورة',
         dark_halo: 'حواف فاتحة حول المنتج رح تبين بالتطبيق على الوضع الغامق',
-        photoroom_unsure: 'PhotoRoom ما كان متأكد من حدود المنتج: تأكد إنو ما في جزء ناقص أو زيادة',
+        photoroom_unsure: 'عزل الخلفية ما كان متأكد من حدود المنتج: تأكد إنو ما في جزء ناقص أو زيادة',
         dark_rim: 'حواف غامقة حول المنتج رح تبين بالتطبيق على الوضع الفاتح'
     };
     // ملاحظات الفحص غير المانعة (quality_notes): تُعرض ملاحظةً لا تحذيراً، والصورة نُشرت نظيفة
@@ -933,7 +933,7 @@
         const allowed = code === 'quality_flags' && data.publish_anyway_allowed === true && flags.length > 0
             && flags.every(f => Object.prototype.hasOwnProperty.call(PRESENTATION_FLAG_TEXT, f));
         const anywayTexts = allowed ? Array.from(new Set(flags.map(f => PRESENTATION_FLAG_TEXT[f]))) : [];
-        const what = texts.length ? texts.join('، ') : 'لم تُعزل الخلفية';
+        const what = texts.length ? texts.join('، ') : 'ما انعزلت الخلفية';
         const text = allowed
             ? `فحص القص لقى بالصورة: ${what}. ما انعتمدت بعد.`
             : code === 'quality_flags'
@@ -1028,7 +1028,7 @@
         none: { text: 'بلا اقتراح', chip: 'none' },
         not_found: { text: 'ما انلقت', chip: 'not-found' },
         failed: { text: 'عطل', chip: 'error' },
-        bg_failed: { text: 'الخلفية لم تُعزل', chip: 'warning' },
+        bg_failed: { text: 'الخلفية ما انعزلت', chip: 'warning' },
         approved: { text: 'معتمدة', chip: 'approved' },
         approving: { text: 'جاري الاعتماد', chip: 'approved' },
         rejecting: { text: 'جاري الرفض', chip: 'none' },
@@ -1059,7 +1059,7 @@
         { key: 'none', label: 'بلا اقتراح', buckets: ['none'], waiting: true },
         { key: 'not_found', label: 'ما انلقت', buckets: ['not_found'] },
         { key: 'failed', label: 'أعطال', buckets: ['failed'] },
-        { key: 'bg_failed', label: 'الخلفية لم تُعزل', buckets: ['bg_failed'] }
+        { key: 'bg_failed', label: 'الخلفية ما انعزلت', buckets: ['bg_failed'] }
     ];
 
     function filterMatches(f, it) {
@@ -1275,7 +1275,7 @@
         const out = c.warnings.map(w => warningText(w));
         if (c.status === 'rejected' || c.status === 'excluded') out.unshift(candidateNote(c, false).text);
         const vlm = c.vlm || {};
-        if (vlm.decision === 'MISMATCH' && !out.includes('نموذج القراءة شاف منتج مختلف')) out.unshift('نموذج القراءة شاف منتج مختلف');
+        if (vlm.decision === 'MISMATCH' && !out.includes('قارئ الملصق شاف منتج مختلف')) out.unshift('قارئ الملصق شاف منتج مختلف');
         if (vlm.decision === 'UNSURE' && !c.warnings.some(w => String(w).split(':')[0] === 'vlm_unsure')) {
             out.push(REVIEW_WARNING_LABELS.vlm_unsure);
         }
@@ -1385,12 +1385,12 @@
         const warnings = (c.warnings || []).map(w => String(w).split(':')[0]);
         const sizeOnPage = ev.size === 'match' || ev.size === true || ev.gtin === 'match';
         const sheetSize = sheetStates(prod).size;
-        const sizeNote = !sheetSize ? 'والشيت ما فيه حجم' : (sizeOnPage ? '' : 'والحجم غير مكتوب في الصفحة');
-        const withSize = text => (sizeNote ? `${text}، ${sizeNote}` : text);
+        const sizeNote = !sheetSize ? 'الشيت ما فيه حجم' : (sizeOnPage ? '' : 'الحجم مش مكتوب بالصفحة');
+        const withSize = text => (sizeNote ? { text: text, more: sizeNote } : { text: text });
         if (decision === 'MISMATCH') return { code: 'vlm_mismatch', text: 'قارئ الملصق شاف منتج ثاني', tone: 'danger' };
         if (tier === 3 || ev.brand === false) return { code: 'no_brand', text: 'الصفحة ما بتذكر الماركة', tone: 'warning' };
-        if (decision === 'UNSURE') return { code: 'vlm_unsure', text: withSize('قارئ الملصق ما تأكد'), tone: 'warning' };
-        if (!decision || decision === 'UNKNOWN') return { code: 'vlm_unread', text: withSize('قارئ الملصق ما قرأها'), tone: 'warning' };
+        if (decision === 'UNSURE') return Object.assign({ code: 'vlm_unsure', tone: 'warning' }, withSize('قارئ الملصق ما تأكد'));
+        if (!decision || decision === 'UNKNOWN') return Object.assign({ code: 'vlm_unread', tone: 'warning' }, withSize('قارئ الملصق ما قرأها'));
         if (warnings.includes('barcode_conflict')) return { code: 'barcode_conflict', text: 'باركود الصفحة مختلف عن الشيت', tone: 'warning' };
         if (warnings.includes('foreign_store')) return { code: 'foreign_store', text: 'متجر خارج الإمارات', tone: 'warning' };
         if (warnings.includes('social_media')) return { code: 'social_media', text: 'صورة من مواقع التواصل', tone: 'warning' };

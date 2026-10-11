@@ -138,10 +138,10 @@ console.log(JSON.stringify(out));
     assert out["written"] == "انتشرت النسخة الجديدة. انكتبت بـالصفوف 4، 9."
     assert "رح تنكتب بالشيت بعد شوي" in out["pending"] and "غيّرت صورته بإيدك" in out["pending"]
     assert "ما انكتب شي بالشيت" in out["none"]
-    assert out["cut"] == "قص PhotoRoom من الصورة الأصلية المحفوظة. بلا ملاحظات. كلّف طلب عزل واحد."
+    assert out["cut"] == "قص جديد بعزل الخلفية من الصورة الأصلية المحفوظة. بلا ملاحظات. كلّف طلب عزل واحد."
     assert "حواف فاتحة على الغامق، الخلفية ما انشالت" in out["flagged"] and "ما منقدر ننشره" in out["flagged"]
     assert out["unknown"] == "ملاحظة بالقص"
-    assert out["pr"] == ["مفتاح PhotoRoom مش محفوظ.", ""]
+    assert out["pr"] == ["مفتاح عزل الخلفية (PhotoRoom) مش محفوظ.", ""]
     assert out["plural"] == ["صورة وحدة", "صورتين", "5 صور", "40 صورة"]
     assert "انتهت صلاحية الصفحة" in out["expired"] and out["english"] == "ما زبط"
 

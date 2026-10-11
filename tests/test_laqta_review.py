@@ -369,8 +369,8 @@ out.texts = texts;
         found = RAW_CODES.findall(text)
         assert not found, (found, text[:400])
     joined = " ".join(out["texts"])
-    for arabic in ("مقترحة من النظام", "الشيت مقابل الصورة", "قراءة الملصق", "ما انلقت:", "عطل:", "رجعت للطابور",
-                   "الصورة الحالية بالشيت", "نموذج القراءة شاف منتج مختلف", "مقترحة · ماركة وحجم مطابقين"):
+    for arabic in ("مقترحة من النظام", "الشيت مقابل الصورة", "قارئ الملصق", "ما انلقت:", "عطل:", "رجعت للطابور",
+                   "الصورة الحالية بالشيت", "قارئ الملصق شاف منتج مختلف", "مقترحة · ماركة وحجم مطابقين"):
         assert arabic in joined, arabic
 
 
@@ -383,7 +383,7 @@ out.caution = ws().querySelector('.rv-caution').textContent;
 out.checks = ws().querySelectorAll('.rv-check').map(r => [r.getAttribute('data-check'), r.getAttribute('data-status')]);
 out.requests = requests('/api/select_image').length;
 """, tmp_path)
-    assert out["caution"].startswith("تأكد قبل الاعتماد: ") and "نموذج القراءة غير متأكد من المطابقة" in out["caution"]
+    assert out["caution"].startswith("تأكد قبل الاعتماد: ") and "قارئ الملصق مش متأكد من المطابقة" in out["caution"]
     assert ["size", "unsure"] in out["checks"]
     assert out["requests"] == 0
 
@@ -451,9 +451,9 @@ out.confirms = confirms.slice();
 out.sent = requests('/api/select_image').map(c => c.body.row_number);
 out.none_button = document.querySelectorAll('.rv-card').find(c => c.getAttribute('data-kind') === 'none').querySelector('.rv-card__approve').disabled;
 """, tmp_path, fixture(products=READY, rows=queue_rows()))
-    assert out["card_warning"] == "نموذج القراءة غير متأكد من المطابقة"
+    assert out["card_warning"] == "قارئ الملصق مش متأكد من المطابقة"
     assert out["refused"] == 0
-    assert all("تأكد قبل الاعتماد: نموذج القراءة غير متأكد من المطابقة" in c for c in out["confirms"])
+    assert all("تأكد قبل الاعتماد: قارئ الملصق مش متأكد من المطابقة" in c for c in out["confirms"])
     assert out["sent"] == ["21"]
     assert out["none_button"] is True                             # nothing proposed: open it instead
 
@@ -753,7 +753,7 @@ out.own = caution();
     assert out["system"] == ""                                   # the system pick: Gemini matched a front packshot
     assert out["pick"] == "https://images.openfoodfacts.org/milk-life.jpg"
     assert "تأكد قبل الاعتماد" in out["own"]
-    assert "نموذج القراءة غير متأكد من المطابقة" in out["own"] and "صورة استخدام" in out["own"]
+    assert "قارئ الملصق مش متأكد من المطابقة" in out["own"] and "صورة استخدام" in out["own"]
     assert not RAW_CODES.search(out["own"])
 
 
@@ -862,9 +862,12 @@ def test_the_reject_reasons_say_what_happens_and_what_is_kept(tmp_path):
 openRow(19);
 press('x');
 out.text = visibleText(document.querySelector('.rv-reasons'));
+out.details = document.querySelector('.rv-reasons details').textContent;
 """, tmp_path, fixture(products=READY, rows=queue_rows()))
     assert "ليش ترفضها؟" in out["text"]
-    assert "بيرجع للطابور" in out["text"] and "الصورة المعتمدة" in out["text"] and "ما بتنلمس" in out["text"]
+    # what is kept is on the line itself; what happens to the product is one click away («تفاصيل»)
+    assert "الصورة المعتمدة" in out["text"] and "ما بتنلمس" in out["text"]
+    assert "بيرجع للطابور" in out["details"]
 
 
 @NEEDS_NODE

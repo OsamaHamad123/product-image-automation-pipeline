@@ -171,8 +171,8 @@ document.getElementById('rvBulkApprove').click();
 await flush();
 out.sent = requests('/api/select_image').map(c => c.body.row_number);
 """, tmp_path, fixture([clean, size, variant, old]))
-    assert out["labels"] == ["الحجم غير مؤكد: لم تؤكده صفحة المتجر ولا قراءة الملصق",
-                             "النوع غير مؤكد: لم تؤكده صفحة المتجر ولا قراءة الملصق"]
+    assert out["labels"] == ["الحجم مش مأكّد: لا صفحة المتجر ولا قارئ الملصق أكّدوه",
+                             "النوع مش مأكّد: لا صفحة المتجر ولا قارئ الملصق أكّدوه"]
     assert out["eligible"] == [True, False, False, False]
     assert out["buckets"] == ["proposed", "warning", "warning", "warning"]
     assert out["cards"][0] == ["eligible", True] and all(k == ["warning", False] for k in out["cards"][1:])
@@ -239,7 +239,7 @@ out.label = p.getAttribute('aria-label');
 out.alt = p.querySelector('img').getAttribute('alt');
 """, tmp_path, fixture([MILK]))
     assert out["label"] == "المصدر قبل عزل الخلفية" and "المصدر قبل عزل الخلفية" in out["text"]
-    assert "وليست النتيجة النهائية" in out["text"]
+    assert "مش النتيجة النهائية" in out["text"]
     assert "المعاينة النهائية" not in out["text"] and "هيك رح تنرفع" not in out["text"]
     assert out["alt"] == "الصورة المصدر قبل عزل الخلفية"
 
@@ -277,15 +277,15 @@ const reject = requests('/api/reject_image')[0];
 out.reject = [reject.body.reason_code, reject.body.image_url, reject.body.search_decision];
 """, tmp_path, fixture([BG, LEGACY], rows=[]), config={"filter": "all"})
     assert out["buckets"] == ["bg_failed", "stale"]               # a legacy needs_review source link is not one
-    assert out["chip"] == ["الخلفية لم تُعزل1", "1"]
+    assert out["chip"] == ["الخلفية ما انعزلت1", "1"]
     assert out["list"] == [30] and out["name"] == BG["product_name"]
-    assert "الخلفية لم تُعزل:" in out["text"] and "بحاجة مراجعة" in out["text"]
-    assert out["badge"] == "معتمدة · الخلفية لم تُعزل"
+    assert "الخلفية ما انعزلت:" in out["text"] and "بحاجة مراجعة" in out["text"]
+    assert out["badge"] == "معتمدة · الخلفية ما انعزلت"
     assert out["sheet_box"] == [CLOUD]                            # the sheet does hold this image
     assert out["reasons"][:3] == ["HALO_ARTIFACT", "BACKGROUND_BLEED", "CROP_MARGIN_CLIPPING"]
     assert out["reasons"][3:] == ["WRONG_PRODUCT", "WRONG_BRAND", "WRONG_VARIANT", "WRONG_SIZE", "WRONG_PACK",
                                   "NOT_PACKSHOT", "LOW_QUALITY"]
-    assert "تخص المعالجة" in out["note"]
+    assert "غلطات بالمعالجة" in out["note"] and "بتلغي هالاعتماد" in out["note"]
     assert out["reject"] == ["HALO_ARTIFACT", CLOUD, ""]
 
 
@@ -393,7 +393,7 @@ out.all_sent = requests('/api/select_image').map(c => c.body.row_number);
     assert out["unticked"] == [40, 45] and out["reticked"] == [40, 42, 45]
     assert out["on_warning"] == 41
     # the confirmation names the product it is about
-    assert out["refused"][0] == 0 and out["refused"][1].startswith("«Alpha Laban»: تأكد قبل الاعتماد: نموذج القراءة غير متأكد")
+    assert out["refused"][0] == 0 and out["refused"][1].startswith("«Alpha Laban»: تأكد قبل الاعتماد: قارئ الملصق مش متأكد")
     assert out["repeat"] == 0
     assert out["approved"] == [["42"], 40]                     # the next card is focused after an approval
     assert out["bulk_confirm"].startswith("اعتماد صورتين؟")
@@ -471,7 +471,7 @@ out.pick_bucket = itemOf(9).bucket;
 out.pick_text = wsText();
 """, tmp_path, fixture([B, OTHER]), config={"filter": "proposed"})
     assert out["bucket"] == "proposed"
-    assert "باقي الصور ما زالت للمراجعة" in out["text"]
+    assert "باقي الصور لسا للمراجعة" in out["text"]
     assert out["alts"] == [B_URLS[0]] and out["pick"] == B_URLS[0]
     assert out["pick_bucket"] == "rejected" and "رجع للطابور" in out["pick_text"]
 
@@ -613,7 +613,7 @@ answer(requests('/api/select_image')[0], { status: 'success', image_link: 'needs
 await flush();
 out.toast = toasts.slice(-1)[0].text;
 """, tmp_path, fixture([B, OTHER]))
-    assert "لم تُعزل خلفيتها" in out["toast"] and "بالانتظار" in out["toast"]
+    assert "خلفيتها ما انعزلت" in out["toast"] and "بالانتظار" in out["toast"]
     assert "وكُتب رابطها" not in out["toast"]
 
 
@@ -651,7 +651,7 @@ await flush();
 out.requeued = itemOf(9).bucket;
 """, tmp_path, fixture([three, OTHER]), config={"filter": "proposed"})
     assert out["waiting"] == ["none", [8, 9]]                  # no pick left, still waiting and still in its chip
-    assert "باقي الصور ما زالت للمراجعة (2)" in out["text"] and "رجع للطابور" not in out["text"]
+    assert "باقي الصور لسا للمراجعة (2)" in out["text"] and "رجع للطابور" not in out["text"]
     assert out["alts"] == [B_URLS[1], "https://www.lulu.com/b3.jpg"]
     assert out["requeued"] in ("rejected", "requeued")         # the server put it back to the queue
 
@@ -726,9 +726,9 @@ openRow(8);
 out.bg_text = wsText();
 out.bg_title = ws().querySelectorAll('.rv-alert').map(a => a.getAttribute('title')).filter(Boolean);
 """, tmp_path, fixture([B, OTHER]))
-    assert not any("لم تُعزل خلفيتها" in t for t in out["dup_toasts"])
+    assert not any("خلفيتها ما انعزلت" in t for t in out["dup_toasts"])
     assert any("نفسها منشورة لمنتج آخر: «Almarai Milk 2L Twin Pack»" in t for t in out["dup_toasts"])
-    assert "الصورة نفسها لمنتج آخر:" in out["dup_text"] and "الخلفية لم تُعزل:" not in out["dup_text"]
+    assert "الصورة نفسها لمنتج آخر:" in out["dup_text"] and "الخلفية ما انعزلت:" not in out["dup_text"]
     assert "المنتج مقصوص عند حافة الصورة" in out["bg_toast"] and "هالة أو ضباب حول حواف المنتج" in out["bg_toast"]
     assert "ملاحظة أخرى من فحص القص" in out["bg_toast"]
     assert "edge_clipped" not in out["bg_toast"] + out["bg_text"] and "brand_new_flag" not in out["bg_text"]
@@ -831,7 +831,7 @@ out.done = [itemOf(9).bucket, toasts.slice(-1)[0].text];
     assert out["after_no"][0] == 1 and "الصورة المصدر صغيرة فكُبّرت" in out["after_no"][1]
     assert out["second"] == [True, True, B_URLS[0]]
     assert out["done"][0] == "approved" and "رغم ملاحظات فحص القص: الصورة المصدر صغيرة فكُبّرت" in out["done"][1]
-    assert "لم تُعزل خلفيتها" not in out["done"][1]
+    assert "خلفيتها ما انعزلت" not in out["done"][1]
 
 
 @NEEDS_NODE
@@ -899,7 +899,7 @@ out.text = wsText();
     assert "بقي ظل ظاهر مع المنتج" in out["panel"] and "kept_shadow" not in out["panel"]
     assert "اعتمدها رغم هيك…" in out["buttons"]
     assert "ملاحظة من فحص القص:" in out["text"] and "الصورة المصدر صغيرة فكُبّرت لتملأ اللوحة" in out["text"]
-    assert "الخلفية لم تُعزل" not in out["text"]
+    assert "الخلفية ما انعزلت" not in out["text"]
     assert not [t for v, t in out["toasts"] if "كُبّرت" in t]     # a note is not a warning toast
 
 
