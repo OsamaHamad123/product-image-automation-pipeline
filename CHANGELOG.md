@@ -11,6 +11,40 @@ causes: the quality gate threw away white-background packshots, an unverified "l
 success, siblings of the right product outranked it, and reviewers' rejections were never remembered. The search
 core was rebuilt and wired into the queue, the dashboard actions and the sheet writes. Every claim below has a test.
 
+### UI redesign, phases 0 and 1: one design system, shorter copy, the review screen on a phone, one page fewer
+
+**Design system (laqta.css, components)**
+- One type scale: 2xs 12, xs 13, sm 14, md 15, lg 16, xl 20, 2xl 26, 3xl 30 and kpi 34. Line-height tokens come
+  with it. No raw `font-size` or `line-height` is left in the page CSS. One heading system: page, section and card
+  titles.
+- Tone-named chips (`lq-chip--success/warning/danger/info/neutral/teal`); the old state names stay as aliases.
+  Text tones are `lq-text--*`.
+- Three button sizes only (36, 44 and 48), with no page overrides. Cards are raised or `lq-card--flat`, with one
+  padding token.
+- Content width is capped at 1280px, and lead paragraphs at 68ch. The page gap is one token. `[hidden]` is one
+  rule.
+- Semantic accent, scrim and shadow tokens prepare the dark mode. The unused classes are removed. The UI kit shows
+  the scale, the tones, the cards and the dialog.
+
+**Copy and headers**
+- Every hint, intro and note over 25 words is now one line plus «تفاصيل». No safety detail was dropped: costs,
+  what is overwritten and what is never touched.
+- Titles and leads name the role (البحث عن الصور، عزل الخلفية، قارئ الملصق). The vendor name comes second.
+- One primary action per screen on Home and Run. Health and Setup use the shared page header. «التقدّم محفوظ»
+  says it once.
+
+**Review screen on a phone**
+- At 980px and below, the queue head comes first: title, count, mode toggle, search and filters. The product
+  follows, then a folding «القائمة (N)» list with its own scroll. The list's open state is kept for the session.
+- Bulk cards are two columns at 560px and below, with a 140px image. On touch, a card shows its first warning and
+  a «+N تفاصيل» button for the rest.
+- The bulk CSV export moved into a «⋯» menu. The keyboard-hint line is gone, because the «?» button covers it.
+
+**«فحص القص» is the review screen's third mode (`/catalog?mode=cutout`, owner only)**
+- `cutout.js` mounts inside the review screen. A cut waiting to be approved survives a mode switch.
+- `/cutout-check` redirects there, and its view is gone.
+- The cutout gallery and preview APIs join the owner's pages. Every cutout click was already owner-only.
+
 ### Fewer steps, no new pages: «روح لـ…», «روح على», «رجّع وشغّل»
 
 The dashboard had every tool, but several sat behind a nav click, a tab, a collapsed section and a scroll. Nothing
